@@ -11,6 +11,7 @@
 mod compile_cmds;
 mod search_cmds;
 mod server_cmds;
+mod svn_cmds;
 mod system;
 mod update;
 mod workspace_cmds;
@@ -18,6 +19,7 @@ mod workspace_cmds;
 pub use compile_cmds::*;
 pub use search_cmds::*;
 pub use server_cmds::*;
+pub use svn_cmds::*;
 pub use system::*;
 pub use update::*;
 pub use workspace_cmds::*;

@@ -1,0 +1,833 @@
+/* 版本控制页样式（vc-*）。单独一份，不复用 workspace.css / services.css：
+   那两份是文件页与服务页的布局，混在一起只会更难读。 */
+
+.vc-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.vc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 14px;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.vc-head h1 {
+  font-size: 13.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.vc-rev {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--secondary));
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+.vc-url {
+  min-width: 0;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  font-family: "Cascadia Mono", Consolas, monospace;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vc-sp {
+  flex: 1;
+}
+
+/* 顶部按钮沿用服务页的 .btn 观感，但这里不引 services.css，自己给一份最小的 */
+.vc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease);
+}
+.vc-btn:hover:not(:disabled) {
+  background: hsl(var(--secondary));
+}
+.vc-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.vc-btn-sm {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
+.vc-btn-primary {
+  background: hsl(var(--primary));
+  border-color: transparent;
+  color: hsl(var(--primary-foreground));
+}
+.vc-btn-primary:hover:not(:disabled) {
+  background: hsl(var(--primary));
+  filter: brightness(1.06);
+}
+.vc-btn-danger {
+  color: hsl(var(--destructive-ink));
+  border-color: hsl(var(--destructive) / 0.4);
+  background: hsl(var(--destructive) / 0.08);
+}
+
+/* 左右分栏 */
+.vc-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── 左：改动列表 ── */
+.vc-chg {
+  width: 322px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  min-height: 0;
+}
+.vc-chg-top {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.vc-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  color: hsl(var(--muted-foreground));
+}
+.vc-search input {
+  border: 0;
+  background: none;
+  outline: none;
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+}
+.vc-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.vc-chip {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background var(--dur-fast) var(--ease);
+}
+.vc-chip:hover:not([data-on]) {
+  background: hsl(var(--secondary));
+}
+.vc-chip[data-on] {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+  font-weight: 600;
+}
+.vc-chip .n {
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  opacity: 0.8;
+}
+
+.vc-list {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0 8px;
+}
+.vc-grp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: hsl(var(--muted-foreground));
+  letter-spacing: 0.02em;
+}
+.vc-grp:hover {
+  color: hsl(var(--foreground));
+}
+.vc-grp .n {
+  font-variant-numeric: tabular-nums;
+  background: hsl(var(--secondary));
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 10.5px;
+}
+.vc-grp svg {
+  transition: transform var(--dur-fast) var(--ease);
+}
+.vc-grp[data-closed] svg {
+  transform: rotate(-90deg);
+}
+.vc-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 27px;
+  padding: 0 10px 0 18px;
+  font-size: 12px;
+  position: relative;
+  text-align: left;
+}
+.vc-row:hover {
+  background: hsl(var(--secondary));
+}
+.vc-row[data-on] {
+  background: hsl(var(--accent));
+}
+.vc-row[data-on]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  background: hsl(var(--primary));
+  border-radius: 2px;
+}
+.vc-row .vc-fn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vc-row[data-reviewed] .vc-fn {
+  color: hsl(var(--muted-foreground));
+}
+.vc-dir {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.vc-badge {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  font-size: 9.5px;
+  font-weight: 800;
+  flex-shrink: 0;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+.vc-badge[data-st="mod"] {
+  color: hsl(var(--warning-ink));
+  background: hsl(var(--warning) / 0.16);
+}
+.vc-badge[data-st="add"] {
+  color: hsl(var(--success-ink));
+  background: hsl(var(--success) / 0.16);
+}
+.vc-badge[data-st="del"] {
+  color: hsl(var(--destructive-ink));
+  background: hsl(var(--destructive) / 0.14);
+}
+.vc-badge[data-st="conflict"] {
+  color: hsl(var(--destructive-foreground));
+  background: hsl(var(--destructive));
+}
+.vc-badge[data-st="untracked"] {
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--secondary));
+}
+
+.vc-chg-foot {
+  border-top: 1px solid hsl(var(--border));
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.vc-chg-foot b {
+  color: hsl(var(--foreground));
+  font-variant-numeric: tabular-nums;
+}
+.vc-prog {
+  height: 4px;
+  border-radius: 2px;
+  background: hsl(var(--secondary));
+  overflow: hidden;
+}
+.vc-prog i {
+  display: block;
+  height: 100%;
+  background: hsl(var(--success));
+  border-radius: 2px;
+  transition: width var(--dur) var(--ease);
+}
+
+/* ── 右：内容区 ── */
+.vc-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.vc-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.vc-bar b {
+  font-size: 12.5px;
+}
+.vc-bar .vc-path {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vc-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 26px;
+  padding: 0 12px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.vc-meta .mono {
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+.vc-add {
+  color: hsl(var(--success-ink));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.vc-del {
+  color: hsl(var(--destructive-ink));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.vc-review-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+.vc-review-toggle[data-on] {
+  color: hsl(var(--success-ink));
+  border-color: hsl(var(--success) / 0.45);
+  background: hsl(var(--success) / 0.1);
+}
+
+.vc-diff-body {
+  flex: 1;
+  min-height: 0;
+  background: hsl(var(--card));
+}
+.vc-diff-foot {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-top: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+  background: hsl(var(--card));
+}
+
+/* ── 提交 ── */
+.vc-commit {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.vc-commit-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+.vc-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vc-label .vc-hint {
+  font-weight: 400;
+}
+.vc-msg {
+  width: 100%;
+  height: 104px;
+  resize: none;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+  color: hsl(var(--foreground));
+  outline: none;
+}
+.vc-msg:focus {
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.12);
+}
+.vc-pick {
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  overflow: hidden;
+}
+.vc-pick-hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: hsl(var(--secondary));
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.vc-pick-it {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  border-top: 1px solid hsl(var(--border));
+  text-align: left;
+}
+.vc-pick-it[data-off] {
+  color: hsl(var(--muted-foreground));
+}
+.vc-cbx {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  border: 1.5px solid hsl(var(--border));
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 9px;
+  color: transparent;
+}
+.vc-cbx[data-on] {
+  background: hsl(var(--primary));
+  border-color: transparent;
+  color: hsl(var(--primary-foreground));
+}
+.vc-commit-foot {
+  border-top: 1px solid hsl(var(--border));
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.vc-hint {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ── 历史 / blame ── */
+.vc-log {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.vc-log-it {
+  padding: 9px 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: default;
+}
+.vc-log-it:hover {
+  background: hsl(var(--secondary) / 0.5);
+}
+.vc-log-hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+.vc-log-rev {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-weight: 700;
+  color: hsl(var(--primary));
+  font-variant-numeric: tabular-nums;
+}
+.vc-log-msg {
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: hsl(var(--foreground));
+}
+.vc-blame-strip {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ── 空态 / 提示条 ── */
+.vc-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  padding: 24px;
+  text-align: center;
+  line-height: 1.7;
+}
+.vc-empty svg {
+  opacity: 0.5;
+}
+.vc-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.vc-alert[data-tone="warn"] {
+  background: hsl(var(--warning) / 0.1);
+  color: hsl(var(--warning-ink));
+}
+.vc-alert[data-tone="bad"] {
+  background: hsl(var(--destructive) / 0.09);
+  color: hsl(var(--destructive-ink));
+}
+.vc-alert[data-tone="info"] {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+.vc-alert code {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  background: hsl(var(--card));
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+/* ── 冲突 ── */
+.vc-conflict {
+  flex: 1;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+.vc-ver {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--card));
+  font-size: 11.5px;
+}
+.vc-ver .tag {
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.vc-ver .tag[data-k="mine"] {
+  color: hsl(var(--warning-ink));
+  background: hsl(var(--warning) / 0.14);
+}
+.vc-ver .tag[data-k="base"] {
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--secondary));
+}
+.vc-ver .tag[data-k="theirs"] {
+  color: hsl(var(--primary));
+  background: hsl(var(--accent));
+}
+
+/* ── 账号对话框 ── */
+.vc-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  display: grid;
+  place-items: center;
+  z-index: 60;
+}
+.vc-dialog {
+  width: 380px;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  box-shadow: var(--sh-pop);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.vc-dialog h3 {
+  font-size: 13px;
+  font-weight: 650;
+}
+.vc-dialog .vc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+}
+.vc-input {
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  padding: 0 9px;
+  font: inherit;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+  outline: none;
+}
+.vc-input:focus {
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.12);
+}
+.vc-dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ── 补充：组件落地后新增的细节态 ── */
+
+/* 转圈：Icon 里没有动画，靠类名挂 keyframes */
+@keyframes vc-spin-once {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.vc-spin {
+  animation: vc-spin-once 0.9s linear infinite;
+  transform-origin: center;
+}
+/* 窗口隐藏时停掉动画（和 index.css 的全站节流口径一致） */
+:root[data-app-hidden] .vc-spin {
+  animation: none;
+}
+
+/* kbd：设计稿里只在提示语中间出现 */
+.vc-hint kbd,
+.vc-empty kbd {
+  font-family: inherit;
+  font-size: 10px;
+  border: 1px solid hsl(var(--border));
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 4px;
+  color: hsl(var(--muted-foreground));
+}
+
+/* 提交清单里的文件名要能省略号截断（.vc-fn 原本只给左栏行定义过） */
+.vc-pick-it .vc-fn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vc-pick-it:disabled {
+  cursor: not-allowed;
+}
+.vc-pick-it:disabled:hover {
+  background: none;
+}
+.vc-cbx {
+  padding: 0;
+  cursor: pointer;
+}
+
+/* 提交视图需要 min-width:0，否则长文件名会把右栏顶宽 */
+.vc-commit {
+  min-width: 0;
+}
+
+/* 冲突：三个版本纵向排列 */
+.vc-ver-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vc-ver .p {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.vc-ver .vc-btn-sm[data-on] {
+  color: hsl(var(--success-ink));
+  border-color: hsl(var(--success) / 0.45);
+  background: hsl(var(--success) / 0.1);
+}
+
+/* blame：每行一段色条 + 版本/作者/行号/正文 */
+.vc-blame {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 11.5px;
+  line-height: 20px;
+}
+.vc-blame-row {
+  display: flex;
+  align-items: center;
+  height: 20px;
+  gap: 8px;
+  padding: 0 12px 0 0;
+  white-space: pre;
+}
+.vc-blame-row:hover {
+  background: hsl(var(--secondary) / 0.6);
+}
+.vc-blame-g {
+  width: 3px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.vc-blame-rev {
+  width: 58px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 10.5px;
+  color: hsl(var(--primary));
+}
+.vc-blame-who {
+  width: 64px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+}
+.vc-blame-ln {
+  width: 42px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+  opacity: 0.7;
+  user-select: none;
+}
+.vc-blame-tx {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── 窄窗口降级（最小窗口 560px；1280 以下就要开始收） ──
+   顶部一行塞了标题 + 版本 + URL + 扫描时间 + 4 个按钮，
+   不收的话标题会被挤成两行、URL 会顶掉按钮。 */
+.vc-head {
+  min-width: 0;
+}
+@media (max-width: 1180px) {
+  .vc-head .vc-hint {
+    display: none;
+  }
+  .vc-url {
+    max-width: 220px;
+  }
+}
+@media (max-width: 1000px) {
+  .vc-url {
+    display: none;
+  }
+  .vc-chg {
+    width: 268px;
+  }
+}
+
+/* 文件名再长也不许把右侧按钮挤走 */
+.vc-bar {
+  min-width: 0;
+}
+.vc-bar b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vc-bar .vc-btn,
+.vc-bar .vc-review-toggle {
+  flex-shrink: 0;
+  white-space: nowrap;
+}

@@ -38,6 +38,13 @@ pub struct AppConfig {
     /// 都认，认错就静默回落成默认值，用户以为改成功了。
     #[serde(default)]
     pub server_heap_mb: Option<u32>,
+    /// SVN 用户名。存在这里是为了「下次不用再输一遍」；密码见下一个字段。
+    #[serde(default)]
+    pub svn_user: Option<String>,
+    /// SVN 密码的 **DPAPI 密文**（base64）。只在本机、本用户下可解，
+    /// 换机器/换用户必然解不开——那时按「没存过」处理，让用户重输，不要报错吓人。
+    #[serde(default)]
+    pub svn_password_dpapi: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -52,6 +59,8 @@ impl Default for AppConfig {
             workspace_root: None,
             nc_home: None,
             server_heap_mb: None,
+            svn_user: None,
+            svn_password_dpapi: None,
         }
     }
 }

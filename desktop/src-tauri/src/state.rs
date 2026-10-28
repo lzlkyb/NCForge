@@ -30,6 +30,11 @@ pub struct AppState {
     /// 用 `std::sync::Mutex` 而不是 tokio 的：起停是阻塞操作（杀进程要等 200ms 级），
     /// 调用方都在 `spawn_blocking` 里持锁，不需要 await 语义。
     pub server: std::sync::Mutex<ServerRun>,
+    /// SVN 桥（常驻 JVM）。`None` = 还没用过；`Err` 由命令层转成可读错误。
+    ///
+    /// 存 `Arc` 是因为命令层要把它从锁里拿出来在 `spawn_blocking` 里用——桥内部自己
+    /// 串行化请求，锁只保护「有没有这个桥 / 用哪份 java」。
+    pub svn: std::sync::Mutex<Option<std::sync::Arc<crate::svn_bridge::Bridge>>>,
     /// 供 notifications feature 关闭时也能注入的 AppHandle 存根。
     /// 需要发桌面通知的代码统一走 main.rs 的 `notify_toast`（那里按 feature 门控），
     /// 不要直接持有 AppHandle 到处发。
@@ -43,6 +48,7 @@ impl AppState {
             config_write: tokio::sync::Mutex::new(()),
             config_dir,
             server: std::sync::Mutex::new(ServerRun::default()),
+            svn: std::sync::Mutex::new(None),
             app_handle: std::sync::Mutex::new(None),
         })
     }

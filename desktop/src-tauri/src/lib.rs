@@ -23,6 +23,10 @@ pub mod search;
 pub mod security;
 pub mod server;
 pub mod state;
+pub mod svn_bridge;
+pub mod svn_cred;
+pub mod svn_review;
+pub mod svn_view;
 pub mod workspace;
 
 // main.rs 用 `use nc_forge::*;` 一把引入；AppState 是最常被引用的托管状态，

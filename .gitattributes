@@ -15,3 +15,5 @@
 *.bin binary
 *.woff binary
 *.woff2 binary
+# 内置 Java 组件（SVNKit 桥与依赖），文本属性会让 git 试图做行尾转换
+*.jar binary

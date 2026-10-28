@@ -49,7 +49,12 @@
     ],
     "createUpdaterArtifacts": true,
     "resources": {
-      "resources/ecj/ecj-3.17.jar": "ecj/ecj-3.17.jar"
+      "resources/ecj/ecj-3.17.jar": "ecj/ecj-3.17.jar",
+      "resources/svnkit/ncsvn.jar": "svnkit/ncsvn.jar",
+      "resources/svnkit/svnkit.jar": "svnkit/svnkit.jar",
+      "resources/svnkit/trilead.jar": "svnkit/trilead.jar",
+      "resources/svnkit/sqljet.1.0.4.jar": "svnkit/sqljet.1.0.4.jar",
+      "resources/svnkit/antlr-runtime-3.1.3.jar": "svnkit/antlr-runtime-3.1.3.jar"
     },
     "macOS": {
       "signingIdentity": "-"

@@ -500,6 +500,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::server_heap_set,
             commands::nc_port_preview,
             commands::nc_port_apply,
+            commands::svn_info,
+            commands::svn_status,
+            commands::svn_diff,
+            commands::svn_log,
+            commands::svn_blame,
+            commands::svn_commit,
+            commands::svn_update,
+            commands::svn_revert,
+            commands::svn_resolve,
+            commands::svn_review_mark,
+            commands::svn_review_prune,
+            commands::svn_auth_set,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {

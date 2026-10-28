@@ -60,6 +60,8 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 windows = { version = "0.56", features = [
   "Win32_Foundation",
   "Win32_Graphics_Dwm",
+  # SVN 凭据：复用用户已缓存的密码需要 DPAPI 解密（CryptProtectData / CryptUnprotectData）
+  "Win32_Security_Cryptography",
 ] }
 
 [dev-dependencies]

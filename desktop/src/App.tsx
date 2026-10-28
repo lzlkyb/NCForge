@@ -35,6 +35,10 @@ const SearchTab = lazy(() =>
 const ServicesTab = lazy(() =>
   import("./components/tabs/ServicesTab").then((m) => ({ default: m.ServicesTab })),
 );
+// 版本控制页带一份独立的 svn.css 与 Monaco diff editor，同样懒加载。
+const SvnTab = lazy(() =>
+  import("./components/tabs/SvnTab").then((m) => ({ default: m.SvnTab })),
+);
 
 /**
  * 应用外壳（壳子版）。
@@ -155,7 +159,15 @@ function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: strin
         />
       );
     case "svn":
-      return <ComingSoonTab icon="gitBranch" title="版本控制（SVN）" milestone="M6" />;
+      // 「在文件中打开」：和搜索页同一条管道，先记请求再切页（SvnTab 是懒加载）。
+      return (
+        <SvnTab
+          onOpenFile={(path) => {
+            requestOpenFile({ path, line: 1 });
+            navigate("files");
+          }}
+        />
+      );
     case "services":
       return <ServicesTab onNavigate={navigate} />;
     case "patch":
