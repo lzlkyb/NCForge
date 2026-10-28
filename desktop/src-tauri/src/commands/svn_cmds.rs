@@ -18,7 +18,7 @@ use tauri::{AppHandle, Manager};
 use crate::config::AppConfig;
 use crate::security::path::{display_path, resolve_safe_path};
 use crate::state::AppState;
-use crate::svn_bridge::{self, Bridge, BridgeEnv};
+use crate::svn_bridge::{self, Bridge};
 use crate::svn_cred;
 use crate::svn_review::{self, ReviewMark, ReviewStore};
 use crate::svn_view::{self, ChangesView, RawEntry};
@@ -153,11 +153,7 @@ fn bridge_for(app: &AppHandle, state: &AppState, cfg: &AppConfig) -> Result<Arc<
         }
         existing.shutdown();
     }
-    let bridge = Arc::new(Bridge::new(BridgeEnv {
-        java,
-        jars,
-        config_dir: cfg_dir,
-    }));
+    let bridge = Arc::new(Bridge::new(svn_bridge::env(java, jars, cfg_dir)));
     *guard = Some(bridge.clone());
     Ok(bridge)
 }

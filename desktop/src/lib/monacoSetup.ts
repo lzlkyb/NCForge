@@ -13,6 +13,8 @@ import "monaco-editor/esm/vs/basic-languages/ini/ini.contribution";
 import "monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { getStoredTheme, type Theme } from "./theme";
+import { getTableLookup } from "./tableLookup";
+import { buildTableHover } from "./tableHover";
 
 self.MonacoEnvironment = {
   // 只有基础 worker（diff / 单词补全等），所有 label 共用。
@@ -76,6 +78,40 @@ export function applyMonacoTheme(theme: Theme): void {
 }
 
 let themeWired = false;
+let hoverWired = false;
+
+/**
+ * 在 Java 文件里悬停表名，显示这张表的字段。
+ *
+ * 几点取舍：
+ * - 只在**字符串字面量里**生效：`String pam_equip` 这种 Java 标识符不该弹表结构。
+ * - 只认「词本身是表名」：`e.pk_used_status` 里的别名 `e` 全工作区可能指一百张表，
+ *   解析它需要整段 SQL 的上下文，这里不做（会误报）。
+ * - 内容用 Markdown 表格：Monaco 的浮层只吃得下 Markdown/文本，做不出自定义卡片。
+ *   内容怎么拼由 `tableHover.buildTableHover` 负责（可单测），这里只做适配。
+ */
+function wireTableHover(): void {
+  if (hoverWired) return;
+  hoverWired = true;
+  monaco.languages.registerHoverProvider("java", {
+    provideHover: async (model, position) => {
+      const lookup = getTableLookup();
+      if (!lookup) return null;
+      const line = model.getLineContent(position.lineNumber);
+      const hit = await buildTableHover(line, position.column, lookup);
+      if (!hit) return null;
+      return {
+        range: new monaco.Range(
+          position.lineNumber,
+          hit.start + 1,
+          position.lineNumber,
+          Math.max(hit.end, hit.start + 1),
+        ),
+        contents: [{ value: hit.markdown }],
+      };
+    },
+  });
+}
 
 /** 首次使用前调用：建主题并跟随壳子的 `themechange` 事件。幂等。 */
 export function initMonaco(): typeof monaco {
@@ -85,6 +121,7 @@ export function initMonaco(): typeof monaco {
     // 事件在 applyTheme 里的 class 切换之后发出，此时 getComputedStyle 读到的已是新主题的变量。
     window.addEventListener("themechange", (e) => applyMonacoTheme((e as CustomEvent<Theme>).detail));
   }
+  wireTableHover();
   return monaco;
 }
 

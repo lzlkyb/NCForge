@@ -35,6 +35,11 @@ pub struct AppState {
     /// 存 `Arc` 是因为命令层要把它从锁里拿出来在 `spawn_blocking` 里用——桥内部自己
     /// 串行化请求，锁只保护「有没有这个桥 / 用哪份 java」。
     pub svn: std::sync::Mutex<Option<std::sync::Arc<crate::svn_bridge::Bridge>>>,
+    /// 数据库桥（常驻 JVM，与 SVN 桥同机制但不同主类）。
+    ///
+    /// 与 `svn` 分开存而不是共用一个桥：两者的 classpath、主类、堆上限都不同，
+    /// 且「换 SVN 账号」不应该把数据库会话也一起打断。
+    pub db: std::sync::Mutex<Option<std::sync::Arc<crate::db_bridge::Bridge>>>,
     /// 供 notifications feature 关闭时也能注入的 AppHandle 存根。
     /// 需要发桌面通知的代码统一走 main.rs 的 `notify_toast`（那里按 feature 门控），
     /// 不要直接持有 AppHandle 到处发。
@@ -49,6 +54,7 @@ impl AppState {
             config_dir,
             server: std::sync::Mutex::new(ServerRun::default()),
             svn: std::sync::Mutex::new(None),
+            db: std::sync::Mutex::new(None),
             app_handle: std::sync::Mutex::new(None),
         })
     }

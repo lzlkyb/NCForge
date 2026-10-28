@@ -28,6 +28,12 @@ export default tseslint.config(
       "src-tauri/**",
       // 生成物（由 scripts/gen-changelog.mjs 写入），不归人管。
       "src/lib/changelog.generated.ts",
+      // 临时探针脚本（`_` 前缀，.gitignore 里的 `_*.mjs` 与 `scripts/_*/` 同一条约定）。
+      // 它们是「跑一次就删」的一次性验证脚本，会在 page 上下文里用 document /
+      // getComputedStyle，交给浏览器规则只会刷屏——更重要的是**不能**因为它们
+      // 让门禁变红（那会逼着人把探针 commit 上去）。
+      "scripts/_*.mjs",
+      "scripts/_*/**",
     ],
   },
   js.configs.recommended,

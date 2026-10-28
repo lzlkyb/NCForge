@@ -1,0 +1,690 @@
+/* 数据库页样式（dq-*）。
+   与 patch.css 同样的理由单独一份。表格与结果区用的是「贴着边框的密集网格」，
+   和文件页那套宽松列表不是一种东西，混用只会互相打架。 */
+
+.dq-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── 顶栏 ── */
+.dq-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 14px;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.dq-top h1 {
+  font-size: 13.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.dq-sp {
+  flex: 1;
+}
+.dq-kv {
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+.dq-kv b {
+  color: hsl(var(--foreground));
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.dq-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: hsl(var(--secondary));
+  font-size: 11.5px;
+}
+.dq-conn[data-off] {
+  color: hsl(var(--muted-foreground));
+}
+.dq-conn .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+.dq-conn .dot[data-on] {
+  background: hsl(var(--success));
+}
+.dq-conn b {
+  font-weight: 600;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+}
+.dq-conn .u {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+.dq-ro {
+  font-size: 10px;
+  font-weight: 700;
+  color: hsl(var(--success-ink));
+  background: hsl(var(--success) / 0.14);
+  border-radius: 4px;
+  padding: 2px 6px;
+  letter-spacing: 0.03em;
+}
+
+/* ── 按钮 ── */
+.dq-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  color: hsl(var(--foreground));
+  transition: background var(--dur-fast) var(--ease);
+}
+.dq-btn:hover:not(:disabled) {
+  background: hsl(var(--secondary));
+}
+.dq-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.dq-btn-sm {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
+.dq-btn-primary {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+.dq-btn-primary:hover:not(:disabled) {
+  background: hsl(var(--primary) / 0.88);
+}
+.dq-link {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: hsl(var(--primary));
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.dq-link:hover {
+  text-decoration: underline;
+}
+
+/* ── 横幅 ── */
+.dq-banner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  font-size: 11.5px;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.dq-banner span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dq-banner code {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+}
+.dq-banner[data-tone="bad"] {
+  color: hsl(var(--destructive-ink));
+  background: hsl(var(--destructive) / 0.07);
+}
+.dq-banner[data-tone="warn"] {
+  color: hsl(var(--warning-ink));
+  background: hsl(var(--warning) / 0.09);
+}
+
+.dq-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── 工具条 ── */
+.dq-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  flex-shrink: 0;
+}
+.dq-num {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+}
+.dq-num input {
+  width: 58px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--foreground));
+  outline: none;
+}
+.dq-muted {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ── SQL 编辑区 ── */
+.dq-sqlbox {
+  display: flex;
+  height: 190px;
+  flex-shrink: 0;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+}
+.dq-gutter {
+  width: 42px;
+  flex-shrink: 0;
+  text-align: right;
+  padding: 10px 8px 10px 0;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 20px;
+  color: hsl(var(--muted-foreground));
+  opacity: 0.6;
+  user-select: none;
+  border-right: 1px solid hsl(var(--border));
+  overflow: hidden;
+}
+.dq-code {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 20px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: hsl(var(--foreground));
+  white-space: pre;
+  overflow: auto;
+  tab-size: 2;
+}
+
+/* ── 错误说明 ── */
+.dq-errbox {
+  margin: 10px 12px;
+  border: 1px solid hsl(var(--destructive) / 0.35);
+  background: hsl(var(--destructive) / 0.06);
+  border-radius: 9px;
+  padding: 11px 13px;
+  flex-shrink: 0;
+  max-height: 40%;
+  overflow: auto;
+}
+.dq-errbox[data-tone="warn"] {
+  border-color: hsl(var(--warning) / 0.4);
+  background: hsl(var(--warning) / 0.07);
+}
+.dq-errbox .k {
+  font-size: 11px;
+  font-weight: 700;
+  color: hsl(var(--destructive-ink));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dq-errbox[data-tone="warn"] .k {
+  color: hsl(var(--warning-ink));
+}
+.dq-errbox .msg {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  color: hsl(var(--foreground));
+  margin-top: 6px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.dq-errbox .hint {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  margin-top: 8px;
+  line-height: 1.65;
+}
+.dq-errbox .hint code {
+  background: hsl(var(--secondary));
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  margin: 0 2px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+/* ── 结果表 ── */
+.dq-result {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dq-res-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+  background: hsl(var(--card));
+}
+.dq-res-head b {
+  color: hsl(var(--foreground));
+  font-variant-numeric: tabular-nums;
+}
+.dq-grid-wrap {
+  flex: 1;
+  overflow: auto;
+}
+table.dq-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+table.dq-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: hsl(var(--secondary));
+  text-align: left;
+  padding: 5px 10px;
+  font-weight: 650;
+  font-size: 10.5px;
+  color: hsl(var(--foreground));
+  white-space: nowrap;
+  border-bottom: 1px solid hsl(var(--border));
+  border-right: 1px solid hsl(var(--border));
+}
+table.dq-grid th .t {
+  display: block;
+  font-weight: 400;
+  color: hsl(var(--muted-foreground));
+  font-size: 9px;
+}
+table.dq-grid th.rn,
+table.dq-grid td.rn {
+  width: 40px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 400;
+  text-align: right;
+}
+table.dq-grid td {
+  padding: 4px 10px;
+  border-bottom: 1px solid hsl(var(--border) / 0.55);
+  border-right: 1px solid hsl(var(--border) / 0.55);
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+table.dq-grid tr:hover td {
+  background: hsl(var(--accent));
+}
+table.dq-grid td[data-n] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+table.dq-grid td[data-null] {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.7;
+  font-style: italic;
+}
+.dq-empty-rows {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+.dq-foot {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-top: 1px solid hsl(var(--border));
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--card));
+  flex-shrink: 0;
+}
+.dq-foot b {
+  color: hsl(var(--foreground));
+  font-variant-numeric: tabular-nums;
+}
+.dq-warn {
+  color: hsl(var(--warning-ink));
+}
+.dq-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+  padding: 24px;
+}
+
+/* ── 连接对话框 ── */
+.dq-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: hsl(222 47% 11% / 0.42);
+  backdrop-filter: blur(2px);
+}
+.dq-dialog {
+  width: 480px;
+  max-width: calc(100vw - 40px);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  box-shadow: var(--sh-pop, 0 18px 48px hsl(222 47% 11% / 0.22));
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.dq-dialog h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.dq-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  background: hsl(var(--secondary) / 0.6);
+  border-radius: 8px;
+  padding: 9px 11px;
+}
+.dq-conn-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dq-conn-line .k {
+  width: 32px;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+.dq-conn-line code {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dq-hint-text {
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: hsl(var(--muted-foreground));
+}
+.dq-hint-text code {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  background: hsl(var(--secondary));
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.dq-hint-text b {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+.dq-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.dq-alert[data-tone="bad"] {
+  color: hsl(var(--destructive-ink));
+  background: hsl(var(--destructive) / 0.09);
+}
+.dq-field {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+}
+.dq-field .dq-input {
+  flex: 1;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  font: inherit;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+  outline: none;
+}
+.dq-field .dq-input:focus {
+  border-color: hsl(var(--ring));
+}
+.dq-dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* ══════════════ 表结构核对（补丁页第三个 tab） ══════════════
+   和数据库页共用 dq- 前缀：它读的是同一份表结构缓存，样式也该一脉相承。 */
+
+.dq-check {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dq-check-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.dq-check-bar .dq-kv b {
+  font-variant-numeric: tabular-nums;
+}
+.dq-check-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 10px;
+}
+.dq-check-sec {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 12px 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: hsl(var(--destructive-ink));
+}
+.dq-check-sec .cnt {
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  font-variant-numeric: tabular-nums;
+}
+.dq-check-sec .hint {
+  font-weight: 400;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.dq-check-sec[data-tone="warn"] {
+  color: hsl(var(--warning-ink));
+}
+.dq-check-sec[data-tone="ok"] {
+  color: hsl(var(--success-ink));
+  padding-bottom: 10px;
+}
+.dq-check-item {
+  padding: 5px 12px 6px 30px;
+  position: relative;
+  font-size: 12px;
+}
+.dq-check-item:hover {
+  background: hsl(var(--secondary) / 0.55);
+}
+.dq-check-item::before {
+  content: "";
+  position: absolute;
+  left: 18px;
+  top: 11px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: hsl(var(--destructive));
+}
+.dq-check-item[data-kind="column"]::before {
+  background: hsl(var(--warning));
+}
+.dq-check-item .l1 {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+.dq-check-item .tb {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-weight: 700;
+  color: hsl(var(--destructive-ink));
+  flex-shrink: 0;
+}
+.dq-check-item[data-kind="column"] .tb {
+  color: hsl(var(--warning-ink));
+}
+.dq-check-item .col {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  color: hsl(var(--warning-ink));
+}
+/* 路径紧跟表名，而不是甩到最右边：它和表名是「在哪里用到了这张表」的一整句，
+   中间隔一大片空白反而要人横着扫。 */
+.dq-check-item .where {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  margin-left: 2px;
+  flex-shrink: 1;
+  border-bottom: 1px dashed transparent;
+}
+.dq-check-item .where:hover {
+  color: hsl(var(--primary));
+  border-bottom-color: hsl(var(--primary) / 0.5);
+}
+.dq-check-item .l2 {
+  margin-top: 3px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.dq-check-item .l2 code {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--accent-foreground));
+}
+.dq-check-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+/* 空态图标（dq-empty 只管排版，图标块单独给） */
+.dq-empty-ic {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: hsl(var(--secondary));
+  display: grid;
+  place-items: center;
+  color: hsl(var(--muted-foreground));
+}
+.dq-empty-ic[data-tone="ok"] {
+  background: hsl(var(--success) / 0.14);
+  color: hsl(var(--success-ink));
+}
+.dq-empty h3 {
+  font-size: 13px;
+  font-weight: 650;
+  color: hsl(var(--foreground));
+}
+.dq-empty p {
+  font-size: 12px;
+  line-height: 1.65;
+  max-width: 340px;
+}
+.dq-empty-hint {
+  font-size: 11px;
+  opacity: 0.85;
+}

@@ -50,6 +50,7 @@
     "createUpdaterArtifacts": true,
     "resources": {
       "resources/ecj/ecj-3.17.jar": "ecj/ecj-3.17.jar",
+      "resources/ncdb/ncdb.jar": "ncdb/ncdb.jar",
       "resources/svnkit/ncsvn.jar": "svnkit/ncsvn.jar",
       "resources/svnkit/svnkit.jar": "svnkit/svnkit.jar",
       "resources/svnkit/trilead.jar": "svnkit/trilead.jar",

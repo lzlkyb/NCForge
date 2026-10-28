@@ -512,6 +512,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::svn_review_mark,
             commands::svn_review_prune,
             commands::svn_auth_set,
+            // 补丁（M7）
+            commands::patch_defaults,
+            commands::patch_scan,
+            commands::patch_build,
+            commands::patch_set_out_dir,
+            commands::patch_set_out_root,
+            commands::patch_reveal,
+            // 数据库只读查询（M7）
+            commands::db_defaults,
+            commands::db_connect,
+            commands::db_query,
+            commands::db_tables,
+            commands::db_disconnect,
+            // 表结构缓存 + 出包前核对（M7 第三条）
+            commands::db_schema_status,
+            commands::db_schema_sync,
+            commands::db_columns,
+            commands::db_cached_tables,
+            commands::db_check_sources,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {

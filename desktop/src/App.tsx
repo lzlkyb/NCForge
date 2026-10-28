@@ -14,9 +14,9 @@ import { SideNav, WORKSPACE_NAV } from "./components/layout/SideNav";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useAppHiddenFlag } from "./hooks/useAppHiddenFlag";
 import { useWindowSizePersistence } from "./hooks/useWindowSizePersistence";
+import { useTableLookup } from "./hooks/useTableLookup";
 import { useAppHidden } from "./lib/appVisibility";
 import { Skeleton } from "./components/ui/Skeleton";
-import { ComingSoonTab } from "./components/tabs/ComingSoonTab";
 
 // 非首屏 Tab 懒加载：减小首屏 JS，切到对应 Tab 时才加载（fallback 用骨架屏）。
 // 业务页照此模式追加：lazy(() => import("./components/tabs/XxxTab").then(m => ({ default: m.XxxTab })))
@@ -39,6 +39,11 @@ const ServicesTab = lazy(() =>
 const SvnTab = lazy(() =>
   import("./components/tabs/SvnTab").then((m) => ({ default: m.SvnTab })),
 );
+// 补丁页与数据库页各带一份独立样式（patch.css / db.css），同样懒加载。
+const PatchTab = lazy(() =>
+  import("./components/tabs/PatchTab").then((m) => ({ default: m.PatchTab })),
+);
+const DbTab = lazy(() => import("./components/tabs/DbTab").then((m) => ({ default: m.DbTab })));
 
 /**
  * 应用外壳（壳子版）。
@@ -58,6 +63,8 @@ function AppContent() {
   useAppHiddenFlag();
   // 窗口尺寸持久化：启动恢复上次尺寸 + resize 防抖落盘（纯前端方案）
   useWindowSizePersistence();
+  // 编辑器里悬停表名看表结构的数据源（没配数据库时静默不生效）
+  useTableLookup();
   // 窗口不可见时停掉全部定时轮询（壳子示例 5s；业务按需调）
   const appHidden = useAppHidden();
 
@@ -171,7 +178,9 @@ function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: strin
     case "services":
       return <ServicesTab onNavigate={navigate} />;
     case "patch":
-      return <ComingSoonTab icon="package" title="补丁打包" milestone="M7" />;
+      return <PatchTab onNavigate={navigate} />;
+    case "db":
+      return <DbTab />;
     case "settings":
       return <SettingsTab onChanged={refreshStatus} />;
     default:

@@ -9,6 +9,8 @@
 //!   `main.rs` 的 `invoke_handler!` 加一行。三处，缺一不可。
 
 mod compile_cmds;
+mod db_cmds;
+mod patch_cmds;
 mod search_cmds;
 mod server_cmds;
 mod svn_cmds;
@@ -17,6 +19,8 @@ mod update;
 mod workspace_cmds;
 
 pub use compile_cmds::*;
+pub use db_cmds::*;
+pub use patch_cmds::*;
 pub use search_cmds::*;
 pub use server_cmds::*;
 pub use svn_cmds::*;

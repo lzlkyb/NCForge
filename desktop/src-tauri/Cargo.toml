@@ -54,6 +54,10 @@ encoding_rs = "0.8"
 # 表达式拖死。代价是不支持 lookaround / 反向引用，与 VS Code 的 ripgrep 限制一致。
 regex = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# 补丁 CHANGES.md 要算「每个文件增删多少行、涉及哪些方法」：对比 SVN 基线
+# （.svn/text-base/*.svn-base）与磁盘文件。源码是 GBK/UTF-8 混合，必须能按字节
+# 切行做 diff，所以用 capture_diff_slices（接受任意 &[T]）而不是只吃 &str 的接口。
+similar = "2"
 
 # Windows 专属：DWM 圆角（Win11 窗口装饰）
 [target.'cfg(windows)'.dependencies]

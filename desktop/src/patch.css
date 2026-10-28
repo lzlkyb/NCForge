@@ -1,0 +1,891 @@
+/* 补丁打包页样式（pk-*）。
+   单独一份，理由同 svn.css：它是一屏两栏 + 底部动作条的专用布局，
+   混进 index.css 只会让全局样式表更难读。
+
+   颜色全部走 index.css 的 token（浅/深色主题自动跟随），
+   只有「hyext 层」用了一个局部变量：它没有对应的全局语义 token，
+   借 primary 的靛蓝表示「会覆盖 NC 自己的扩展层」。 */
+
+.pk-page {
+  --pk-hy: 243 75% 59%;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── 顶栏 ── */
+.pk-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 14px;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.pk-head h1 {
+  font-size: 13.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.pk-kv {
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+.pk-kv b {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+}
+.pk-sp {
+  flex: 1;
+}
+
+/* ── 按钮 ── */
+.pk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  color: hsl(var(--foreground));
+  transition: background var(--dur-fast) var(--ease);
+}
+.pk-btn:hover:not(:disabled) {
+  background: hsl(var(--secondary));
+}
+.pk-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.pk-btn-primary {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+.pk-btn-primary:hover:not(:disabled) {
+  background: hsl(var(--primary) / 0.88);
+}
+.pk-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--primary));
+  background: none;
+  border: 0;
+  padding: 0 2px;
+}
+.pk-link:hover {
+  text-decoration: underline;
+}
+.pk-spin {
+  animation: pk-spin 1s linear infinite;
+}
+@keyframes pk-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── 顶部横幅（扫描错误 / 整批问题 / 出包结果）── */
+.pk-banner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  font-size: 11.5px;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.pk-banner b {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+}
+.pk-banner[data-tone="bad"] {
+  color: hsl(var(--destructive-ink));
+  background: hsl(var(--destructive) / 0.07);
+}
+.pk-banner[data-tone="warn"] {
+  color: hsl(var(--warning-ink));
+  background: hsl(var(--warning) / 0.09);
+}
+.pk-banner[data-tone="ok"] {
+  color: hsl(var(--success-ink));
+  background: hsl(var(--success) / 0.09);
+}
+.pk-banner span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pk-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── 左：清单 ── */
+.pk-list {
+  width: 352px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  min-height: 0;
+}
+.pk-top {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.pk-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  color: hsl(var(--muted-foreground));
+}
+.pk-search input {
+  border: 0;
+  background: none;
+  outline: none;
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+}
+.pk-x {
+  display: grid;
+  place-items: center;
+  color: hsl(var(--muted-foreground));
+  background: none;
+  border: 0;
+}
+.pk-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.pk-chip {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 0;
+  background: none;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pk-chip .n {
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  opacity: 0.85;
+}
+.pk-chip[data-on] {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+  font-weight: 600;
+}
+.pk-chip:hover:not([data-on]) {
+  background: hsl(var(--secondary));
+}
+
+.pk-rows {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0 8px;
+}
+.pk-empty {
+  padding: 22px 16px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+}
+.pk-grp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: hsl(var(--muted-foreground));
+}
+.pk-grp + .pk-grp,
+.pk-row + .pk-grp {
+  margin-top: 7px;
+  border-top: 1px solid hsl(var(--border));
+  padding-top: 3px;
+}
+.pk-grp .n {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  background: hsl(var(--secondary));
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 10.5px;
+}
+.pk-grp-hint {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.pk-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px 0 12px;
+  font-size: 12px;
+  position: relative;
+}
+.pk-row:hover {
+  background: hsl(var(--secondary));
+}
+.pk-row[data-on] {
+  background: hsl(var(--accent));
+}
+.pk-row[data-active]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  background: hsl(var(--primary));
+  border-radius: 2px;
+}
+.pk-row[data-off] {
+  opacity: 0.72;
+}
+
+.pk-cbx {
+  width: 13px;
+  height: 13px;
+  border-radius: 3.5px;
+  border: 1.5px solid hsl(var(--border));
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: hsl(var(--card));
+  color: #fff;
+  padding: 0;
+}
+.pk-cbx[data-on] {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+}
+.pk-cbx[data-warn] {
+  border-color: hsl(var(--destructive));
+}
+.pk-cbx[data-off] {
+  opacity: 0.5;
+}
+.pk-cbx:disabled {
+  cursor: not-allowed;
+}
+
+.pk-badge {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  font-size: 9.5px;
+  font-weight: 800;
+  flex-shrink: 0;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+.pk-badge[data-st="M"] {
+  color: hsl(var(--warning-ink));
+  background: hsl(var(--warning) / 0.16);
+}
+.pk-badge[data-st="A"] {
+  color: hsl(var(--success-ink));
+  background: hsl(var(--success) / 0.16);
+}
+.pk-badge[data-st="D"] {
+  color: hsl(var(--destructive-ink));
+  background: hsl(var(--destructive) / 0.14);
+}
+.pk-badge[data-st="?"] {
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--secondary));
+}
+
+.pk-fn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: hsl(var(--foreground));
+}
+.pk-st {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pk-lay {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.pk-lay[data-l="hy"] {
+  color: hsl(var(--pk-hy));
+  background: hsl(var(--pk-hy) / 0.12);
+}
+.pk-lay[data-l="std"] {
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--secondary));
+}
+.pk-lay[data-l="del"] {
+  color: hsl(var(--destructive-ink));
+  background: hsl(var(--destructive) / 0.12);
+}
+.pk-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.pk-pair[data-k="ok"] {
+  color: hsl(var(--muted-foreground));
+}
+.pk-pair[data-k="miss"] {
+  color: hsl(var(--destructive-ink));
+  font-weight: 650;
+}
+.pk-pair[data-k="old"] {
+  color: hsl(var(--warning-ink));
+  font-weight: 650;
+}
+
+.pk-foot {
+  border-top: 1px solid hsl(var(--border));
+  padding: 9px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.pk-foot-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pk-foot b {
+  color: hsl(var(--foreground));
+  font-variant-numeric: tabular-nums;
+}
+.pk-bad {
+  color: hsl(var(--destructive-ink));
+  font-weight: 600;
+}
+.pk-warn {
+  color: hsl(var(--warning-ink));
+}
+.pk-prog {
+  height: 4px;
+  border-radius: 2px;
+  background: hsl(var(--secondary));
+  overflow: hidden;
+}
+.pk-prog i {
+  display: block;
+  height: 100%;
+  background: hsl(var(--success));
+  transition: width var(--dur) var(--ease);
+}
+
+/* ── 右栏 ── */
+.pk-right {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: hsl(var(--background));
+}
+.pk-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 38px;
+  padding: 0 10px;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+  background: hsl(var(--card));
+}
+.pk-tab {
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 6px;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pk-tab[data-on] {
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+.pk-desc {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+.pk-desc input {
+  height: 24px;
+  width: 220px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  font: inherit;
+  font-size: 11.5px;
+  color: hsl(var(--foreground));
+  outline: none;
+}
+.pk-desc input:focus {
+  border-color: hsl(var(--ring));
+}
+.pk-zipname {
+  font-size: 10.5px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  color: hsl(var(--muted-foreground));
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pk-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pk-tree-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.pk-tree-head code {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  color: hsl(var(--foreground));
+  background: hsl(var(--secondary));
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin: 0 2px;
+}
+.pk-tree {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 0 14px;
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 11.5px;
+  line-height: 19px;
+}
+.pk-tree-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  padding: 30px;
+  text-align: center;
+}
+.pk-tn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  white-space: pre;
+}
+.pk-tn:hover {
+  background: hsl(var(--secondary) / 0.7);
+}
+.pk-gh {
+  color: hsl(var(--border));
+  user-select: none;
+}
+.pk-tn-name {
+  color: hsl(var(--foreground));
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pk-tn-name[data-dir] {
+  color: hsl(var(--muted-foreground));
+  font-weight: 600;
+}
+.pk-tn-badge {
+  font-family: system-ui, sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.1);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.pk-tn-meta {
+  font-family: system-ui, sans-serif;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+  margin-left: auto;
+}
+
+/* ── 详情卡 ── */
+.pk-detail {
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  padding: 10px 12px;
+  flex-shrink: 0;
+  max-height: 232px;
+  overflow: auto;
+}
+.pk-detail-empty {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+}
+.pk-detail h4 {
+  font-size: 11.5px;
+  font-weight: 650;
+  margin-bottom: 7px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pk-detail-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+}
+.pk-map {
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  gap: 3px 8px;
+  font-size: 11px;
+}
+.pk-map dt {
+  color: hsl(var(--muted-foreground));
+}
+.pk-map dd {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pk-map dd[data-k="miss"] {
+  color: hsl(var(--destructive-ink));
+}
+.pk-map dd[data-k="old"] {
+  color: hsl(var(--warning-ink));
+}
+.pk-problems {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pk-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.pk-problem[data-level="error"] {
+  color: hsl(var(--destructive-ink));
+}
+.pk-problem[data-level="warn"] {
+  color: hsl(var(--warning-ink));
+}
+.pk-note {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  margin-top: 8px;
+  line-height: 1.55;
+}
+
+/* ── CHANGES.md ── */
+.pk-md {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pk-md-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+.pk-md-body {
+  flex: 1;
+  overflow: auto;
+  padding: 14px 18px;
+}
+.pk-sec {
+  margin-bottom: 14px;
+}
+.pk-sec-t {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 6px;
+}
+.pk-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: hsl(var(--success) / 0.14);
+  color: hsl(var(--success-ink));
+}
+.pk-tag[data-auto] {
+  background: hsl(var(--secondary));
+  color: hsl(var(--muted-foreground));
+}
+.pk-edit {
+  width: 100%;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--card));
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.7;
+  color: hsl(var(--foreground));
+  resize: vertical;
+  outline: none;
+}
+.pk-edit:focus {
+  border-color: hsl(var(--ring));
+}
+.pk-auto {
+  border: 1px dashed hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--secondary) / 0.5);
+  padding: 10px 12px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.75;
+  color: hsl(var(--muted-foreground));
+  word-break: break-all;
+}
+.pk-auto .h {
+  color: hsl(var(--foreground));
+  font-weight: 700;
+}
+.pk-auto .k {
+  color: hsl(var(--primary));
+}
+.pk-auto .muted {
+  font-style: italic;
+}
+
+/* ── 底部动作条 ── */
+.pk-actions {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.pk-out {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+}
+.pk-out input {
+  width: 240px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  font: inherit;
+  font-size: 11px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  color: hsl(var(--foreground));
+  outline: none;
+}
+.pk-out input:focus {
+  border-color: hsl(var(--ring));
+}
+/* 输出目录的来源。第一次用的时候必须说清这个路径哪来的——否则用户会以为
+   程序记住了他以前设过的目录，进而把一个补丁包发到一个陌生位置。 */
+.pk-origin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  white-space: nowrap;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--secondary));
+  border: 1px solid hsl(var(--border));
+}
+.pk-origin[data-tone="warn"] {
+  color: hsl(var(--warning-ink));
+  background: hsl(var(--warning) / 0.12);
+  border-color: hsl(var(--warning) / 0.4);
+}
+.pk-sql {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  border: 1px dashed hsl(var(--border));
+  border-radius: 7px;
+  padding: 3px 9px;
+  min-height: 30px;
+}
+.pk-sql[data-filled] {
+  border-style: solid;
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+}
+.pk-sql-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+}
+.pk-sql-item button {
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: hsl(var(--muted-foreground));
+  opacity: 0.7;
+}
+.pk-sql-item button:hover {
+  opacity: 1;
+  color: hsl(var(--destructive-ink));
+}
+.pk-sql-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pk-sql-add input {
+  width: 260px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  font-size: 11px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  color: hsl(var(--foreground));
+  outline: none;
+}
+.pk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+.pk-pill[data-tone="bad"] {
+  color: hsl(var(--destructive-ink));
+  background: hsl(var(--destructive) / 0.1);
+}
+.pk-pill[data-tone="warn"] {
+  color: hsl(var(--warning-ink));
+  background: hsl(var(--warning) / 0.13);
+}
+
+/* 「有表不存在」时的二次确认态：第一次点变橙，第二次才真出包。
+   不做弹窗——弹窗要人读一段话再点，这里只要人意识到「这次不一样」。 */
+.pk-btn-primary[data-armed] {
+  background: hsl(var(--warning));
+  border-color: transparent;
+  color: #fff;
+}

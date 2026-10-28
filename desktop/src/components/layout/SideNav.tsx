@@ -21,6 +21,7 @@ export const WORKSPACE_NAV: NavItem[] = [
   { key: "svn", label: "版本控制", icon: "gitBranch" },
   { key: "services", label: "NC 服务", icon: "server" },
   { key: "patch", label: "补丁", icon: "package" },
+  { key: "db", label: "数据库", icon: "database" },
 ];
 
 /**

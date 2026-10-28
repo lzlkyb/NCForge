@@ -45,6 +45,27 @@ pub struct AppConfig {
     /// 换机器/换用户必然解不开——那时按「没存过」处理，让用户重输，不要报错吓人。
     #[serde(default)]
     pub svn_password_dpapi: Option<String>,
+    /// 补丁输出目录（「待上线补丁」那个位置）。空 = 用 `patch_defaults` 推导的建议值。
+    #[serde(default)]
+    pub patch_out_dir: Option<String>,
+    /// 编译产物根。空 = 自动探测（`<工作区>/out`，再 `<模块>/classes`）。
+    ///
+    /// 存成可覆盖的显式字段，是因为这台机器上 Eclipse 编译到 `<根>/out`，而工作台自己的
+    /// 编译写到 `<模块>/classes`——两套产物会同时存在，必须能人工指定以哪套为准。
+    #[serde(default)]
+    pub patch_out_root: Option<String>,
+    /// nc-patch 脚本目录（可选）。只用来继承它缓存里的输出目录，省得用户再选一次。
+    #[serde(default)]
+    pub nc_patch_dir: Option<String>,
+    /// 数据库连接串覆盖（默认从 NC home 的 `ierp/bin/prop.xml` 读）。
+    #[serde(default)]
+    pub db_url: Option<String>,
+    /// 数据库用户名覆盖。
+    #[serde(default)]
+    pub db_user: Option<String>,
+    /// 数据库密码的 DPAPI 密文（prop.xml 里那串是 NC 自己的加密格式，解不开）。
+    #[serde(default)]
+    pub db_password_dpapi: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -61,6 +82,12 @@ impl Default for AppConfig {
             server_heap_mb: None,
             svn_user: None,
             svn_password_dpapi: None,
+            patch_out_dir: None,
+            patch_out_root: None,
+            nc_patch_dir: None,
+            db_url: None,
+            db_user: None,
+            db_password_dpapi: None,
         }
     }
 }
