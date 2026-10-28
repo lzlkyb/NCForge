@@ -1,0 +1,74 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "NCForge",
+  "mainBinaryName": "nc-forge",
+  "version": "0.1.0",
+  "identifier": "com.aier.ncforge",
+  "build": {
+    "beforeDevCommand": "npm run vite:dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run vite:build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "NCForge",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 560,
+        "minHeight": 600,
+        "decorations": false,
+        "visible": false,
+        "center": true,
+        "resizable": true,
+        "backgroundColor": "#F4F6F9"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://YOUR-USER.github.io/YOUR-REPO/updater.json",
+        "https://github.com/YOUR-USER/YOUR-REPO/releases/latest/download/updater.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI0MjIzNTEyNTFGOURCQzkKUldUSjIvbFJFalVpdE5kV0JMZkE2RUY1NmFBK3N4WTFTZHI0ZzV3T3Q1STRmRys4akIrVkoxZFIK",
+      "windows": {},
+      "dangerousInsecureTransportProtocol": true,
+      "active": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "createUpdaterArtifacts": true,
+    "resources": {
+      "resources/ecj/ecj-3.17.jar": "ecj/ecj-3.17.jar"
+    },
+    "macOS": {
+      "signingIdentity": "-"
+    },
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "headerImage": "icons/nsis-header.bmp",
+        "sidebarImage": "icons/nsis-sidebar.bmp",
+        "installerHooks": "./installer-hooks.nsh"
+      }
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

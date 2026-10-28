@@ -1,0 +1,591 @@
+name: Build
+
+on:
+  push:
+    # tag → 发版（build-macos / build-windows）；main → 只跑测试门禁。
+    #
+    # 为什么要加 main（沿用 cc-bridge 2026-09-02 的教训）：之前只有 `pull_request`
+    # 会触发，而发版流程里 `git push origin main` 是**直推**的（不走 PR）——于是
+    # 真正入主线的那一次推送反而没有任何 CI。各 job 的 `if:` 已按"非 tag"分流。
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+# 共享编译缓存：sccache 把每个 crate 的编译对象按 hash 存到 GitHub Actions Cache，
+# 跨发版 / 跨 PR 命中（依赖不变时基本秒级）；第一次或改了大段 Rust 仍要全编。
+env:
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
+
+jobs:
+  # 前端门禁。为何需要它：CI 若只跑 Rust，前端的类型错误 / lint / 单元测试
+  # 只存在于开发者本机，而本机钩子可以 --no-verify 绕过。壳子的 UI 资产
+  # （设计 token、30+ ui 组件、动效回归）恰恰是复制即用的核心，必须有门禁。
+  #
+  # 跑 ubuntu：纯 Node 工作，不需要 Rust/系统依赖，比 windows runner 快且便宜。
+  frontend:
+    name: Frontend (tsc + vitest + build)
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: desktop
+      - name: 组件体量门禁（行数 + 状态数）
+        run: node scripts/check-component-size.mjs
+        working-directory: desktop
+      # 存量违规记在 eslint-suppressions.json（棘轮，只许减少），新违规直接拦。
+      - name: eslint
+        run: npm run lint
+        working-directory: desktop
+      - name: tsc --noEmit
+        run: npx tsc --noEmit
+        working-directory: desktop
+      - name: vitest
+        run: npm test
+        working-directory: desktop
+      # vite:build 自带 tsc，上面单跑一次是为了让类型错误早一步、单独报出来。
+      - name: vite build
+        run: npm run vite:build
+        working-directory: desktop
+
+  # 轻量测试：仅 PR / 非 tag 的 push / 手动触发时跑，保护合入质量（用 dev 编译，快）。
+  # tag 发版时跳过本 job —— 由 build-windows 内的 `cargo test --release` 统一覆盖，
+  # 避免 dev + release 两遍全量依赖编译。
+  test:
+    name: Rust test suite (Windows)
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Sccache Setup (跨 PR 编译缓存)
+        uses: mozilla/sccache-action@v0.0.10
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: cargo test
+        run: cargo test --no-default-features
+        working-directory: desktop/src-tauri
+      # clippy 齐平：macOS 侧（check-macos）跑 `--all-targets -D warnings`，
+      # Windows 侧原先只有 test —— 注释却声称"两边齐平"。lint 漏一边等于没门禁
+      # （Windows 主力平台上的警告永远没人看见）。
+      - name: cargo clippy (与 macOS 侧同等严格)
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+        working-directory: desktop/src-tauri
+
+  # macOS 编译门禁。为何需要它：多数桌面项目主力平台是 Windows、开发机也是
+  # Windows，而平台差异（平台专属 crate feature、缺失的 cfg(not(windows)) 分支）
+  # **只会在 mac 编译时暴露**。没有这道门禁，Windows 侧的改动会静默破坏 mac 支持。
+  #
+  # `--all-targets` 会连测试代码一起编译——mac 上跑不了的测试必须带 cfg(windows)。
+  # 严格度与 Windows 侧齐平：两边都跑 `clippy --all-targets -D warnings`。
+  check-macos:
+    name: Rust check + test (macOS)
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Sccache Setup
+        uses: mozilla/sccache-action@v0.0.10
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: clippy (与 Windows 侧同等严格)
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+        working-directory: desktop/src-tauri
+      # 真实跑测试，而不只是编译。壳子的 Rust 侧（config 持久化、路径白名单、
+      # 更新错误分类）**不依赖 GUI**，完全能在 CI 的 mac 上验证。
+      # 仍验不到的只有 GUI：托盘外观与交互、窗口行为、Gatekeeper、自动更新。
+      - name: cargo test（真实执行，非仅编译）
+        run: cargo test --no-default-features
+        working-directory: desktop/src-tauri
+
+  # ── macOS 打包 / 发版 ────────────────────────────────────────────────────
+  # 产出 .app.tar.gz + .sig + 平台片段（updater-macos.json），
+  # 平台片段只作为 artifact 传给 build-windows 合并，不 attach 到 Release。
+  build-macos:
+    name: Build macOS app (arm64)
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 🔑 准备签名密钥（文件路径方式）
+        run: |
+          RAW='${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}'
+          if [ -z "$(printf '%s' "$RAW" | tr -d '[:space:]')" ]; then
+            echo "❌ TAURI_SIGNING_PRIVATE_KEY 未设置。mac 包必须签名，否则 updater 验签会报"
+            echo "   'The signature was created with a different key than the one provided'，"
+            echo "   用户下载得到包但永远装不上。"
+            echo "   生成密钥对：tauri signer generate -w ~/.tauri/my-app.key"
+            echo "   公钥写进 src-tauri/tauri.conf.json 的 plugins.updater.pubkey，"
+            echo "   私钥（整个文件内容）存为仓库 secret TAURI_SIGNING_PRIVATE_KEY。"
+            exit 1
+          fi
+          KEY_FILE="$RUNNER_TEMP/tauri-signing.key"
+          printf '%s' "$RAW" > "$KEY_FILE"
+          echo "TAURI_SIGNING_PRIVATE_KEY=$KEY_FILE" >> "$GITHUB_ENV"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Sccache Setup
+        uses: mozilla/sccache-action@v0.0.10
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install frontend deps
+        run: |
+          npm ci
+          npm install @tauri-apps/cli-darwin-arm64 --no-save || true
+        working-directory: desktop
+
+      # tag 发版时 check-macos 作业被跳过，而 main 的 push 也不在触发列表里，
+      # 所以如果这里不跑，mac 侧在发版时就**完全没有测试覆盖**。
+      # 用 release profile 跑，编译产物直接被下面 tauri build 复用。
+      - name: cargo test (release, 复用后续 build 的编译产物)
+        run: cargo test --release --no-default-features
+        working-directory: desktop/src-tauri
+
+      - name: Build macOS .app
+        run: |
+          npm run prebuild
+          # bundle.targets 固定为 nsis（Windows 发版用），mac 用 --bundles 覆盖。
+          npx tauri build --bundles app
+        working-directory: desktop
+
+      # 生成两份平台片段：GitHub 路径与 Gitee 镜像路径的 URL 形状不同，
+      # 各自都要一份，否则 mac 用户在 Gitee 那一组拿不到条目（updater 会返回
+      # TargetsNotFound 错误→自动回退到 GitHub 组，功能不断但白多一轮重试延迟）。
+      # 片段里的 version/notes 不重要：合并时只取 platforms，顶层字段由 Windows 侧提供。
+      - name: 生成 mac 平台片段（GitHub 路径）
+        run: |
+          set -e
+          UPDATER_OUTPUT_FILENAME=updater-macos.json npm run updater:generate
+        working-directory: desktop
+        env:
+          GITHUB_RELEASE_TAG: ${{ github.ref_name }}
+          UPDATER_DOWNLOAD_BASE: "https://gh-proxy.com/https://github.com/${{ github.repository }}/releases/download"
+
+      - name: 生成 Gitee 变体的 mac 片段（覆盖 URL 为 Gitee 直链）
+        run: |
+          set -e
+          UPDATER_OUTPUT_FILENAME=updater-macos-gitee.json npm run updater:generate
+        working-directory: desktop
+        env:
+          GITHUB_RELEASE_TAG: ${{ github.ref_name }}
+          UPDATER_URL_TEMPLATE: "https://gitee.com/${{ secrets.GITEE_REPOSITORY }}/raw/releases/latest/{filename}"
+
+      - name: 校验 darwin-aarch64 签名非空
+        run: |
+          node -e "
+            const j=require('./dist/updater-macos.json');
+            const p=j.platforms['darwin-aarch64'];
+            if(!p || !p.signature || !p.signature.trim()){
+              console.error('❌ updater-macos.json 的 darwin-aarch64.signature 为空。');
+              console.error('   mac 客户端会下载到包但验签失败、永远装不上。');
+              process.exit(1);
+            }
+            console.log('darwin-aarch64 签名校验通过，url=' + p.url);
+          "
+        working-directory: desktop
+
+      - name: 📦 打包给用户下载的 zip
+        run: |
+          set -e
+          VERSION=$(node -e "console.log(require('./src-tauri/tauri.conf.json').version)")
+          APP_DIR=src-tauri/target/release/bundle/macos
+          APP_NAME=$(node -e "console.log(require('./src-tauri/tauri.conf.json').productName)")
+          ZIP="nc-forge_${VERSION}_aarch64-apple-darwin.zip"
+          # 用 ditto 而不是 zip：它会保留 .app 的资源叉与符号链接，
+          # 普通 zip 会破坏 bundle 结构导致解压后打不开。
+          ditto -c -k --sequesterRsrc --keepParent "$APP_DIR/$APP_NAME.app" "$ZIP"
+          echo "✅ $ZIP  ($(du -h "$ZIP" | cut -f1))"
+
+      - name: Collect artifacts
+        run: |
+          set -e
+          mkdir -p dist-out
+          cp src-tauri/target/release/bundle/macos/*.app.tar.gz dist-out/ 2>/dev/null || true
+          cp src-tauri/target/release/bundle/macos/*.app.tar.gz.sig dist-out/ 2>/dev/null || true
+          cp nc-forge_*_aarch64-apple-darwin.zip dist-out/ 2>/dev/null || true
+          # 平台片段只作为 artifact 传给 build-windows 合并，**不** attach 到 Release
+          cp dist/updater-macos.json dist-out/ 2>/dev/null || true
+          cp dist/updater-macos-gitee.json dist-out/ 2>/dev/null || true
+          ls -l dist-out
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: nc-forge-macos
+          path: dist-out/*
+
+      # 只 attach 用户/updater 要下载的东西。updater.json 由 build-windows 合并后统一 attach，
+      # 在这里 attach 会与它冲突。
+      - name: Attach macOS 产物到 GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist-out/*.app.tar.gz
+            dist-out/*.app.tar.gz.sig
+            dist-out/*.zip
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 发版构建：仅 tag 触发。test(release) 与 build 同 job 内复用 release target，
+  # 依赖 crate 只编译一遍；sccache 让依赖不变时后续发版秒级命中。
+  build-windows:
+    name: Build Windows exe + installer
+    # needs 使它在 mac 之后跑（发版串行，多花约 10 分钟）——因为它要合并 mac 的
+    # 平台片段。`always()` 保证 **mac job 失败时 Windows 仍能发**（Windows 是主平台，
+    # 不应被 mac 拖累）；此时下载片段会失败，而 generate 脚本对缺失的
+    # UPDATER_MERGE_INTO 只 warn 不 fail，于是降级为只发 Windows 条目。
+    needs: [build-macos]
+    if: always() && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions:
+      contents: write   # 创建 GitHub Release 需要写权限（默认 token 只读）
+    steps:
+      - uses: actions/checkout@v5
+
+      # 拉 mac 的平台片段与产物。continue-on-error：mac job 挂了不能连带 Windows 发不了。
+      - name: 下载 mac 产物（用于合并 updater.json；缺失则降级为只发 Windows）
+        id: dl-mac
+        continue-on-error: true
+        uses: actions/download-artifact@v5
+        with:
+          name: nc-forge-macos
+          path: mac-artifact
+
+      - name: 🔑 准备签名密钥（文件路径方式）
+        shell: pwsh
+        run: |
+          $raw = '${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}'
+          if ([string]::IsNullOrWhiteSpace($raw)) {
+            Write-Host "⚠️ TAURI_SIGNING_PRIVATE_KEY 未设置，本次构建将不产生签名（.sig），updater 无法验证。"
+            "TAURI_KEY_FILE=" >> $env:GITHUB_ENV
+            exit 0
+          }
+          $keyFile = "${{ runner.temp }}\tauri-signing.key"
+          [System.IO.File]::WriteAllText($keyFile, $raw, [System.Text.Encoding]::ASCII)
+          "TAURI_KEY_FILE=$keyFile" >> $env:GITHUB_ENV
+          Write-Host "密钥文件已写入: $keyFile"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          # 缓存 npm 下载（~/.npm），npm ci 仍重装但省去网络下载。
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Sccache Setup (跨发版编译缓存)
+        uses: mozilla/sccache-action@v0.0.10
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: desktop
+
+      # 用 release profile 跑测试，编译出的 release 依赖产物直接被下面 tauri build 复用。
+      - name: cargo test (release, 复用后续 build 的编译产物)
+        run: cargo test --release --no-default-features
+        working-directory: desktop/src-tauri
+
+      - name: Build Tauri desktop app (NSIS installer)
+        shell: pwsh
+        run: |
+          # Workaround for https://github.com/npm/cli/issues/4828 — Tauri CLI 的 Windows native binding
+          # 是 optionalDependencies，在 fresh runner 上可能不被 npm 安装，导致 tauri build 报
+          # Cannot find native binding。显式再装一次（幂等），不写回 package.json（--no-save）。
+          npm install @tauri-apps/cli-win32-x64-msvc --no-save
+          # prebuild（版本同步 + 生成 changelog.generated.ts）独立执行，
+          # 避免在 npm run 的 pre→build 钩子链中改写 package.json 导致后续 tauri 路径丢失。
+          npm run prebuild
+          $env:TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_KEY_FILE
+          $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""   # 空密码，避免 CI 无 TTY 时交互式提示卡死
+          # npx 直接从 node_modules/.bin 解析 tauri，不依赖 npm run 的 PATH 上下文。
+          npx tauri build
+        working-directory: desktop
+
+      - name: 抽取更新说明 (CHANGELOG)
+        shell: pwsh
+        run: |
+          $changelog = Get-Content -Raw -Path CHANGELOG.md
+          # 抽取「用户向分类小节」（含顶部 ### 更新摘要，渲染为弹框高亮卡片），写入更新弹框。
+          # 每个小节下列 1~3 条人话要点（无代码符号、无根因），让用户一眼看懂升级了什么。
+          # 正则要求版本号形如 x.y.z，避免误抓 [Unreleased]；抓到下一个版本头为止。
+          # 剔除不进弹框的小节：### 用户摘要 / ### 技术细节 / ### 实现说明 / ### 开发者。
+          if ($changelog -match '(?s)##\s*\[\d+\.\d+\.\d+\][^\n]*\n(.*?)(?=\n##\s\[|$)') {
+            $notes = $matches[1].Trim()
+            $notes = $notes -replace '(?s)\n###\s*(用户摘要|技术细节|实现说明|开发者)[\s\S]*?(?=\n###\s|\n##\s|$)', ''
+            $notes = $notes.Trim()
+            "UPDATER_NOTES<<EOF" >> $env:GITHUB_ENV
+            $notes >> $env:GITHUB_ENV
+            "EOF" >> $env:GITHUB_ENV
+            Write-Host "已抽取用户向分类说明 ($($notes.Length) 字符)"
+          } else {
+            Write-Host "未在 CHANGELOG 中找到已发布版本段，使用默认说明"
+          }
+
+      - name: 生成 updater.json（合并 mac 平台条目）
+        shell: pwsh
+        run: npm run updater:generate
+        working-directory: desktop
+        env:
+          GITHUB_RELEASE_TAG: ${{ github.ref_name }}
+          # 合并 mac 片段：不接这一句的后果是 mac 条目根本不进 updater.json，
+          # mac 用户永远检测不到更新且不报错。指向不存在的文件时脚本只 warn，
+          # 所以 mac job 挂了也不会把 Windows 发版带倒。
+          UPDATER_MERGE_INTO: ${{ github.workspace }}\mac-artifact\updater-macos.json
+          # 二进制下载走 ghproxy 镜像，解决国内用户下载慢；元数据检查另有 tauri.conf.json 的 GitHub 端点兜底。
+          # 注意：updater.json 的 url 为单值、无二进制级兜底，故 ghproxy 域名需稳定；若失效改此 env + config 即可。
+          UPDATER_DOWNLOAD_BASE: "https://gh-proxy.com/https://github.com/${{ github.repository }}/releases/download"
+
+      - name: 校验 updater.json 签名非空
+        shell: pwsh
+        run: |
+          $json = Get-Content -Raw -Path desktop/dist/updater.json | ConvertFrom-Json
+          $sig = $json.platforms.'windows-x86_64'.signature
+          if ([string]::IsNullOrWhiteSpace($sig)) {
+            Write-Error "updater.json 的 windows-x86_64.signature 为空，自动更新将无法校验签名。请确认 TAURI_SIGNING_PRIVATE_KEY 已配置且构建产生 .sig。"
+            exit 1
+          }
+          Write-Host "updater.json windows-x86_64 签名校验通过"
+
+          # mac 条目的合并结果必须显式确认：它缺失时**不会报错**，mac 用户只是
+          # 永远检测不到更新——这种静默失效必须在发版时就看到。
+          $macFragment = "${{ github.workspace }}\mac-artifact\updater-macos.json"
+          $darwin = $json.platforms.'darwin-aarch64'
+          if (Test-Path $macFragment) {
+            if ($null -eq $darwin -or [string]::IsNullOrWhiteSpace($darwin.signature)) {
+              Write-Error "mac 片段存在但 darwin-aarch64 未合并进 updater.json（或签名为空）。这会让 mac 用户静默失去自动更新，终止发版。"
+              exit 1
+            }
+            Write-Host "updater.json darwin-aarch64 已合并，url=$($darwin.url)"
+          } else {
+            Write-Host "⚠️ 未拿到 mac 片段（mac job 可能失败或被跳过），本次 updater.json 只含 Windows。"
+            Write-Host "   后果：mac 用户本次检测不到更新（不报错）。若本次应该包含 mac，请查 build-macos 作业。"
+          }
+          Write-Host "最终平台条目：$($json.platforms.PSObject.Properties.Name -join ', ')"
+
+      - name: 📦 打包绿色便携版
+        shell: pwsh
+        run: |
+          $version = (Get-Content desktop/src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          $exePath = "desktop/src-tauri/target/release/nc-forge.exe"
+          $zipName = "nc-forge_$version`_x86_64-pc-windows-msvc.zip"
+
+          if (-not (Test-Path $exePath)) {
+            Write-Host "❌ 绿色版 exe 不存在: $exePath"
+            exit 1
+          }
+
+          $exeDir = Split-Path $exePath -Parent
+          $exeName = Split-Path $exePath -Leaf
+          $zipFullPath = Join-Path $env:GITHUB_WORKSPACE $zipName
+          Push-Location $exeDir
+          Compress-Archive -Path $exeName -DestinationPath $zipFullPath -Force
+          Pop-Location
+
+          Write-Host "✅ 绿色版打包完成: $zipName"
+          Write-Host "文件大小: $((Get-Item $zipFullPath).Length / 1MB) MB"
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          mkdir dist-out -ErrorAction SilentlyContinue
+          Copy-Item desktop\src-tauri\target\release\bundle\nsis\*.exe dist-out\ -ErrorAction SilentlyContinue
+          Copy-Item desktop\src-tauri\target\release\bundle\nsis\*.exe.sig dist-out\ -ErrorAction SilentlyContinue
+          Copy-Item desktop\dist\updater.json dist-out\ -ErrorAction SilentlyContinue
+          Copy-Item nc-forge_*.zip dist-out\ -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: nc-forge-windows
+          path: dist-out/*
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist-out/*
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Gitee 镜像（可选）──────────────────────────────────────────────
+      # 解决国内用户直连 GitHub 下载安装包不稳定/很慢：把产物同步一份到 Gitee。
+      # 两个 secret（GITEE_TOKEN/GITEE_REPOSITORY）未配置时整组跳过，不影响发版。
+      #
+      # 若要用 Gitee 镜像，客户端侧也需打开对应候选源：
+      #   src-tauri/src/commands/update.rs 的 gitee_repository() 读 APP_GITEE_REPOSITORY env，
+      #   在 tauri.conf.json 或本 workflow 里注入即可（未设置时 Gitee 候选组被跳过）。
+      #
+      # 关键教训（cc-bridge v2.4.0~v2.5.0 实测踩过）：镜像失败不能静默——
+      #   旧实现用 try/catch 包住 native git 命令，失败不抛异常，"✅ 已镜像"照样打印，
+      #   连着四个版本绿灯但 Gitee 上压根没有 releases 分支，客户端读的 raw 地址
+      #   一直是 404。现在：每个 git 调用后显式判 $LASTEXITCODE，且推送后必须
+      #   **回头验证客户端实际使用的地址**（比 version 字段，防旧 manifest 屏蔽新版本）。
+      - name: 生成 Gitee 版 updater-gitee.json（国内加速镜像，可选）
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace("${{ secrets.GITEE_REPOSITORY }}")) {
+            Write-Host "⚠️ 未配置 GITEE_REPOSITORY secret，跳过 Gitee 镜像 manifest 生成（自动更新走现有 GitHub/ghproxy 路径）。"
+            exit 0
+          }
+          npm run updater:generate
+        working-directory: desktop
+        env:
+          GITHUB_RELEASE_TAG: ${{ github.ref_name }}
+          # Gitee raw 文件直链与 GitHub Release 拼法形状不同（owner/repo/raw/ref/path，
+          # 非 base/tag/filename），用 UPDATER_URL_TEMPLATE 完全接管拼接。
+          # 固定走 releases 分支下的 latest/ 目录（每次发版覆盖，不按 tag 累加）：
+          # 客户端检查更新时事先不知道最新 tag 是什么，需要一个固定不变的 URL
+          # （对齐 GitHub 的 releases/latest/download 语义）。
+          UPDATER_URL_TEMPLATE: "https://gitee.com/${{ secrets.GITEE_REPOSITORY }}/raw/releases/latest/{filename}"
+          UPDATER_OUTPUT_FILENAME: "updater-gitee.json"
+          # 用 Gitee 变体的 mac 片段（URL 指向 Gitee 直链），不能用 GitHub 那份。
+          UPDATER_MERGE_INTO: ${{ github.workspace }}\mac-artifact\updater-macos-gitee.json
+
+      - name: 镜像发布产物到 Gitee（国内加速，可选）
+        shell: pwsh
+        # 不设 continue-on-error：本步骤内部的 Fail 已经区分了"没配 secret"（exit 0
+        # 跳过）与"真失败"（exit 1）。continue-on-error 会把后者也染成绿色——
+        # 正是 cc-bridge v2.4.0~v2.5.0"四个版本绿灯但镜像 404"的教训：
+        # 镜像失败时客户端首选源读到旧 manifest，国内用户静默看不到新版本。
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_REPOSITORY: ${{ secrets.GITEE_REPOSITORY }}
+        run: |
+          # 不用 Stop：让流程走到我们自己的检查点，而不是被某个 cmdlet 的异常抢跑。
+          $ErrorActionPreference = 'Continue'
+
+          function Fail([string]$why) {
+            Write-Host ""
+            Write-Host "❌ Gitee 镜像未完成：$why"
+            Write-Host "   GitHub Release 已正常发布，自动更新仍可走 ghproxy/GitHub 端点；"
+            Write-Host "   但注意：Gitee 上会留着**上一版**的 manifest，而客户端把 Gitee 排在首选，"
+            Write-Host "   读到旧版本号会认为'已是最新'而不再回退问 GitHub"
+            Write-Host "   → 国内用户会静默看不到新版本，这一步失败不能当成无关痛痒。"
+            exit 1
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:GITEE_TOKEN) -or [string]::IsNullOrWhiteSpace($env:GITEE_REPOSITORY)) {
+            Write-Host "⚠️ 未配置 GITEE_TOKEN/GITEE_REPOSITORY secret，跳过 Gitee 镜像发布。"
+            exit 0
+          }
+          $tag = "${{ github.ref_name }}"
+          # 仓库路径不是秘密，打出来：客户端 update.rs 里配置的 Gitee 仓库与这个
+          # secret 不一致时，镜像会"成功"到一个没人读的仓库，不打印根本无法发现。
+          Write-Host "目标 Gitee 仓库：$($env:GITEE_REPOSITORY)（分支 releases，目录 latest/）"
+
+          $giteeUrl = "https://oauth2:$($env:GITEE_TOKEN)@gitee.com/$($env:GITEE_REPOSITORY).git"
+          $mirrorDir = Join-Path $env:RUNNER_TEMP "gitee-mirror"
+
+          # 独立临时目录里操作 Gitee remote，不动主 checkout 的分支/工作区状态。
+          git clone --depth 1 --branch releases $giteeUrl $mirrorDir 2>&1 | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            # releases 分支还不存在（首次发布）：clone 默认分支后本地新建孤儿分支。
+            Write-Host "ℹ️ releases 分支不存在，改为 clone 默认分支后建孤儿分支"
+            git clone --depth 1 $giteeUrl $mirrorDir 2>&1 | Write-Host
+            if ($LASTEXITCODE -ne 0) { Fail "clone Gitee 仓库失败（查 GITEE_TOKEN 是否有写权限、GITEE_REPOSITORY 路径是否正确）" }
+            if (-not (Test-Path $mirrorDir)) { Fail "clone 返回 0 但目录不存在：$mirrorDir" }
+            Push-Location $mirrorDir
+            git checkout --orphan releases 2>&1 | Write-Host
+            if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "创建 releases 孤儿分支失败" }
+            # 必须查退出码：orphan 分支没有 HEAD commit，reset --hard 可能失败
+            # （Failed to resolve 'HEAD'）——失败时索引里留着 clone 下来的全部文件，
+            # 后面的 commit 会把它们一起提交（见 commit 处的 pathspec 注释）。
+            git reset --hard 2>&1 | Write-Host
+            if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "orphan 分支重置失败（git reset --hard）：索引未清空，终止以免提交意外内容" }
+            Pop-Location
+          }
+          if (-not (Test-Path $mirrorDir)) { Fail "镜像工作目录不存在：$mirrorDir" }
+
+          # 固定覆盖 latest/ 目录（不按 tag 累加）：先清空旧内容再写新的，
+          # 避免上一个版本不同文件名的 exe/sig 残留下来。
+          $destDir = Join-Path $mirrorDir "latest"
+          if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force }
+          New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+          Copy-Item dist-out/*.exe $destDir/ -ErrorAction SilentlyContinue
+          Copy-Item dist-out/*.exe.sig $destDir/ -ErrorAction SilentlyContinue
+          # mac 产物也得推上去：updater-gitee.json 里的 darwin 条目指向 Gitee 直链，
+          # 不推就是指向一个不存在的文件 → mac 用户在 Gitee 那组下载 404。
+          Copy-Item mac-artifact/*.app.tar.gz $destDir/ -ErrorAction SilentlyContinue
+          Copy-Item mac-artifact/*.app.tar.gz.sig $destDir/ -ErrorAction SilentlyContinue
+          Copy-Item desktop/dist/updater-gitee.json $destDir/ -ErrorAction SilentlyContinue
+
+          # 文件清单必须打印：体积是事后定性的关键依据。
+          $files = @(Get-ChildItem $destDir -Recurse -File)
+          if ($files.Count -eq 0) { Fail "latest/ 里一个文件都没有（产物路径变了？上面的 Copy-Item 全没匹配上）" }
+          $mb = ($files | Measure-Object -Property Length -Sum).Sum / 1MB
+          Write-Host ("待推送 latest/：{0} 个文件，合计 {1:N2} MB" -f $files.Count, $mb)
+          if (-not ($files | Where-Object { $_.Name -eq 'updater-gitee.json' })) {
+            Fail "latest/ 里没有 updater-gitee.json —— 客户端就是读它，缺了镜像等于白做"
+          }
+
+          Push-Location $mirrorDir
+          git add -A latest 2>&1 | Write-Host
+          if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "git add 失败" }
+          # commit 带 `-- latest` pathspec：只提交 latest/ 下的暂存内容。
+          # 没有它，索引里任何残留（如 orphan 重置没清干净时留下的旧文件）
+          # 都会被一起提交到 releases 分支——提交范围必须与 add 的范围显式一致。
+          git -c user.email="ci@shell.local" -c user.name="shell-ci" commit -m "release: mirror $tag to Gitee (latest)" -- latest 2>&1 | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            Pop-Location
+            # 无变更可提交（与上一版字节级相同）不是错误：Gitee 上已经是这份内容。
+            Write-Host "⚠️ git commit 返回非零：latest/ 与上一版完全相同（无新内容可提交），视为已同步"
+          }
+
+          Write-Host "====== git push ======"
+          git push --progress --verbose origin releases 2>&1 | Write-Host
+          $pushCode = $LASTEXITCODE
+          Pop-Location
+          if ($pushCode -ne 0) {
+            Fail "git push 失败（常见原因：GITEE_TOKEN 无写权限、包体过大被断连。可试 -c http.postBuffer=524288000 push --no-thin）"
+          }
+
+          # ── 真正的"发成功了吗"检测：push 返回 0 只说明 git 不报错，不说明客户端能用 ──
+          # 客户端（update.rs）读的就是下面这个地址。Gitee raw 会 302 跳到签名地址，
+          # 必须跟随重定向。只比 200 还不够：推失败时 Gitee 上会留着上一版的 manifest，
+          # 也是 200。所以还要比 version 字段是不是本次 tag——这才能拦住
+          # "旧 manifest 静默屏蔽新版本"那个坑。
+          $ver = $tag.TrimStart('v')
+          $raw = "https://gitee.com/$($env:GITEE_REPOSITORY)/raw/releases/latest/updater-gitee.json"
+          Write-Host "--- 验证客户端实际使用的地址：$raw ---"
+          try {
+            $resp = Invoke-WebRequest -Uri $raw -MaximumRedirection 5 -TimeoutSec 60 -UseBasicParsing
+            $manifest = $resp.Content | ConvertFrom-Json
+            Write-Host ("manifest.version = {0}（本次 tag = {1}）" -f $manifest.version, $ver)
+            Write-Host ("platforms = {0}" -f (($manifest.platforms.PSObject.Properties | ForEach-Object { $_.Name }) -join ', '))
+            if ($manifest.version -ne $ver) {
+              Fail "raw 读到的 manifest 版本是 $($manifest.version)，不是本次的 $ver —— 镜像内容是旧的"
+            }
+          } catch {
+            Fail "raw 地址请求/解析失败：$_（推上去了却读不到，客户端一样用不了）"
+          }
+
+          Write-Host ("::notice title=Gitee 镜像::已验证可用 version={0} pack={1:N2}MB files={2}" -f $ver, $mb, $files.Count)
+          Write-Host "✅ 已镜像到 Gitee 并验证客户端地址可读：$tag"

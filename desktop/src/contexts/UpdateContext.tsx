@@ -1,0 +1,568 @@
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "../lib/tauri";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { UpdateNotesDialog } from "../components/update/UpdateNotesDialog";
+import { RestartOverlay } from "../components/update/RestartOverlay";
+import { APP_SLUG } from "../lib/about";
+
+// ─── 类型定义 ────────────────────────────
+
+export type UpdateStatus = "idle" | "checking" | "available" | "downloading" | "ready" | "error" | "uptodate";
+
+/** 更新信息（由后端 check_update / start_update 通过事件推送，仅含展示所需字段，不再依赖插件 Update 对象） */
+export interface UpdateInfo {
+  version?: string;
+  body?: string | null;
+  /** 发布日期（ISO 8601 / RFC 3339），如 "2026-07-17T00:00:00Z" */
+  date?: string | null;
+  /** 当前运行版本，用于弹框里展示 "v旧 → v新" */
+  currentVersion?: string;
+}
+
+export interface UpdateState {
+  status: UpdateStatus;
+  update: UpdateInfo | null;
+  /** 下载进度 0-100 */
+  progress: number;
+  /** 进度未知（total=null，无法计算百分比）时为 true，UI 显示不确定态 */
+  progressIndeterminate: boolean;
+  /** 下载速率（字节/秒），~250ms 窗口重算一次；下载刚开始第一个窗口还没算完时为 0。 */
+  bytesPerSec: number;
+  /** 已下载字节数（后端每 chunk 都发 downloaded）；无总大小时用于展示"已下载 X MB" */
+  downloadedBytes: number;
+  /** 下载总量（字节）；后端拿不到 Content-Length 时为 null ⇒ UI 走不确定态 */
+  totalBytes: number | null;
+  /** 重启过渡层可见：点击重启后先播 1.1 秒仪式感过渡，再真正 relaunch */
+  restarting: boolean;
+  /** 距自动重启剩余秒数；null = 不在倒计时（手动态 / 用户已取消 / 正在重启）。
+   *  更新安装完成后给一个**可见、可撤销**的 8 秒窗口，而不是无限期停在「重启」。 */
+  autoRestartIn: number | null;
+  /** 取消本轮自动重启：徽章回到「重启」按钮，本轮不再自动触发（下次安装完成重置）。 */
+  cancelAutoRestart: () => void;
+  error: string | null;
+  /** 错误原因码（见 `UpdateErrorCode`）；旧后端或未知错误为 null */
+  errorCode: string | null;
+  /**
+   * 本次失败是否该弹 toast。
+   *
+   * 自动检查（启动自检 / 24 小时定时）失败时**只更新徽章与关于页状态**，不弹红 toast ——
+   * 用户什么都没点，不该在开机时收到「更新服务器连不上」的警报（尤其在公司网络封了
+   * Gitee/GitHub 的环境里，那会是每天都来一次的噪音）。用户主动点击的检查、以及
+   * 下载安装失败，仍然弹。
+   */
+  errorToastAllowed: boolean;
+  checkForUpdate: () => Promise<void>;
+  downloadAndInstall: () => Promise<void>;
+  restart: () => Promise<void>;
+  /** 打开「查看更新内容」弹窗 */
+  openUpdateNotes: () => void;
+  /** 记住当前可用版本为「稍后」：本版本不再弹框（按版本号记忆，换版本自动解除） */
+  dismissUpdate: () => void;
+  /** 判断某版本是否已被「稍后」抑制 */
+  isDismissed: (version?: string) => boolean;
+  /** 本次「已是最新」提示是否来自手动检查：自动检查（启动/定时）不弹框，只在版本号 pill 提示 */
+  manualCheck: boolean;
+  /** 手动检查「已是最新」toast 已消费后复位 manualCheck */
+  acknowledgeUptodate: () => void;
+  /** 手动触发检查更新（用户主动点击，命中 uptodate 时才弹「已是最新」提示框） */
+  manualCheckForUpdate: () => Promise<void>;
+}
+
+// ─── 友好错误翻译 ────────────────────────
+
+export interface FriendlyError {
+  /** 用户友好文案 */
+  friendly: string;
+  /** 原始错误信息（技术细节） */
+  raw: string;
+}
+
+/**
+ * 后端 `update:error` 的机器可读原因码（Rust 侧 `classify_update_error` 产出）。
+ *
+ * 为什么要有它：原先只有一段原始英文错误，前端靠 `includes("fetch")` 猜原因。
+ * 插件的 manifest 错误文案恰好含 "fetch"，于是「源上 404」被翻译成「你的网络有问题」，
+ * 而真正的 `error sending request` 反而落到兜底 —— 两个方向都错（2026-10-22 实测）。
+ * 有了 code 之后文案由后端定性、前端只负责措辞。
+ */
+export type UpdateErrorCode =
+  | "manifest"
+  | "network"
+  | "timeout"
+  | "signature"
+  | "install"
+  | "config"
+  | "stale"
+  | "unknown";
+
+/** code → 用户文案。键必须与 Rust 侧 `classify_update_error` 的返回值一一对应。 */
+const ERROR_TEXT: Record<string, string> = {
+  manifest: "更新服务器上暂时没有可用的更新信息，请稍后重试",
+  network: "无法连接更新服务器，请检查网络或代理设置",
+  timeout: "连接更新服务器超时，请稍后重试",
+  signature: "更新包校验失败，已阻止安装，请重试",
+  install: "更新包安装失败，请重试，或到 GitHub Releases 手动下载",
+  config: "更新源配置有误，请检查更新源设置",
+  stale: "这个版本刚有变动，请重新检查更新",
+};
+
+/**
+ * 将原始错误信息拆分为友好提示 + 原始错误。
+ *
+ * `code` 优先；缺失或为 `unknown` 时回退到字符串启发式（兼容旧后端与未覆盖的错误类型）。
+ * 🔴 回退分支的**判断顺序不能换**：具体判定必须排在泛化的 "fetch" 之前，否则插件那句
+ * `Could not fetch a valid release JSON from the remote` 又会被当成网络故障。
+ */
+export function friendlyError(raw: string, code?: string | null): FriendlyError {
+  const mapped = code ? ERROR_TEXT[code] : undefined;
+  if (mapped) return { friendly: mapped, raw };
+
+  const lower = raw.toLowerCase();
+  if (lower.includes("could not fetch a valid release json")) {
+    return { friendly: ERROR_TEXT.manifest, raw };
+  }
+  if (lower.includes("signature") || lower.includes("minisign")) {
+    return { friendly: ERROR_TEXT.signature, raw };
+  }
+  if (lower.includes("enotfound") || lower.includes("getaddrinfo") || lower.includes("dns")) {
+    return { friendly: "无法解析更新服务器地址，请检查网络连接", raw };
+  }
+  if (lower.includes("timeout") || lower.includes("timed out")) {
+    return { friendly: ERROR_TEXT.timeout, raw };
+  }
+  if (
+    lower.includes("networkerror") ||
+    lower.includes("failed to fetch") ||
+    lower.includes("error sending request") ||
+    lower.includes("connection")
+  ) {
+    return { friendly: ERROR_TEXT.network, raw };
+  }
+  if (lower.includes("403") || lower.includes("rate limit")) {
+    // 第一候选源是 Gitee，文案不再写死 GitHub。
+    return { friendly: "更新服务器拒绝访问（可能触发了限流），请稍后重试", raw };
+  }
+  return { friendly: "更新失败，请重试", raw };
+}
+
+const UpdateContext = createContext<UpdateState | null>(null);
+
+export function useUpdate() {
+  const ctx = useContext(UpdateContext);
+  if (!ctx) throw new Error("useUpdate 必须在 UpdateProvider 内使用");
+  return ctx;
+}
+
+// ─── 常量 ──────────────────────────────
+
+/** 自动检查间隔：24 小时 */
+const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// 存储键带 APP_SLUG 前缀（与 windowState/appearance 同一套机制）：多个 Tauri 应用
+// 可能共用同一个 webview origin，不带前缀会互相串台——A 应用记了"24 小时内查过"，
+// B 应用的启动自检就被悄悄吞掉。改名天然跟随，无需在此维护。
+const LAST_CHECK_KEY = `${APP_SLUG}.last_update_check`;
+/** 「稍后」抑制记忆：记录的版本号（本版本不再弹框，换版本自动解除） */
+const DISMISSED_KEY = `${APP_SLUG}.dismissed_update_version`;
+/** 重启过渡层停留时长：这段刻意的等待本身就是「正在应用更新」的载体（方案 C） */
+const RESTART_OVERLAY_MS = 1100;
+/**
+ * 安装完成后的自动重启延迟（秒）。
+ *
+ * 为什么要有这一段：更新弹窗的文案承诺「下载完成后自动安装并重启」，而实现一直
+ * 只做到「安装」，重启得用户自己回来点——用户去忙别的，回来发现还是旧版本。
+ * 这里补上最后一步，同时给一个**可见、可撤销**的窗口：倒计时显示在徽章上，
+ * 期间点一下就取消（退回手动「重启」按钮），避免用户正在跑终端命令时被打断。
+ *
+ * 8 秒的取值：短到用户离开前基本一定执行（不然等于没自动），长到够看到并反应。
+ */
+export const AUTO_RESTART_DELAY_SECS = 8;
+
+// ─── Provider ────────────────────────────
+
+export function UpdateProvider({ children }: { children: ReactNode }) {
+  const [status, setStatus] = useState<UpdateStatus>("idle");
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [progressIndeterminate, setProgressIndeterminate] = useState(false);
+  const [bytesPerSec, setBytesPerSec] = useState(0);
+  const [downloadedBytes, setDownloadedBytes] = useState(0);
+  const [totalBytes, setTotalBytes] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [errorToastAllowed, setErrorToastAllowed] = useState(true);
+  const [restarting, setRestarting] = useState(false);
+  /** 自动重启倒计时（null = 不在倒计时），见 AUTO_RESTART_DELAY_SECS 注释。 */
+  const [autoRestartIn, setAutoRestartIn] = useState<number | null>(null);
+  /** 本轮 ready 是否被用户取消过自动重启。只在下一次 `update:ready` 时复位。 */
+  const autoRestartCancelledRef = useRef(false);
+  const [showNotes, setShowNotes] = useState(false);
+  const [dismissedVersion, setDismissedVersion] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(DISMISSED_KEY);
+    } catch {
+      return null;
+    }
+  });
+  const checkingRef = useRef(false);
+  const downloadingRef = useRef(false);
+  /** 重启重入防护（与 downloadingRef 同理：state 在同帧内是旧值，挡不住连点） */
+  const restartingRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const uptodateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 标记当前这次检查是否为用户手动触发（区分自动/手动，决定是否弹「已是最新」框） */
+  const manualCheckRef = useRef(false);
+  /**
+   * 本轮更新动作是否由用户主动发起（手动检查 / 点「下载安装」）。
+   *
+   * 与 `manualCheckRef` 分开：后者只服务「已是最新」弹框，下载不经过它。
+   * 失败 toast 一律看这个 —— 自动检查失败只更新状态，不弹红条。
+   */
+  const userInitiatedRef = useRef(true);
+  const [manualCheck, setManualCheck] = useState(false);
+
+  // ─── 静默检查（不改变 UI 状态，仅内部记录）─────
+  // 统一走后端 check_update 命令，状态由事件驱动（update:available / update:uptodate）。
+
+  const silentCheck = useCallback(async () => {
+    // 与 runCheck 同样挡 downloading：下载进行中并发检查，后端的 update:checking /
+    // update:available 复查事件会被监听器的 downloadingRef 守卫吃掉，没有任何事件
+    // 能把状态救回来（runCheck 处的同款注释）。静默检查只是"顺手问问"，不值得冒险。
+    if (checkingRef.current || downloadingRef.current) return;
+    checkingRef.current = true;
+    userInitiatedRef.current = false; // 这一轮失败不弹 toast
+    try {
+      await invoke("check_update");
+    } catch {
+      // 静默检查失败不处理
+    } finally {
+      checkingRef.current = false;
+      try {
+        localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
+      } catch {
+        // 存储不可用只影响「24 小时内不重复自动检查」的抑制，不值得打断更新流程
+      }
+    }
+  }, []);
+
+  // ─── 检查更新 ───────────────────────────
+  // 统一走后端 check_update 命令；checking/available/uptodate/error 全部由后端事件驱动，
+  // 前端不再各自维护一份检查逻辑（避免与 Rust 双真相源）。
+
+  // ─── 检查更新（manual=false 自动/启动/定时；manual=true 用户主动点击）──
+  // 自动检查只更新版本号区域状态、不弹「已是最新」提示框；手动检查命中 uptodate 才弹框。
+  const runCheck = useCallback(async (manual: boolean) => {
+    // 下载进行中不接受检查：状态会被打成 checking，而 start_update 内部复查发的
+    // checking/available 事件又被监听器的 downloadingRef 守卫吃掉，没有任何事件
+    // 能把状态救回来 → 徽章永远停在「检查中」。下载完成后可再查。
+    if (checkingRef.current || downloadingRef.current) return;
+    checkingRef.current = true;
+    manualCheckRef.current = manual;
+    userInitiatedRef.current = manual;
+    setStatus("checking");
+    setError(null);
+    setErrorCode(null);
+
+    try {
+      await invoke("check_update");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[Update] 检查更新失败:", msg);
+      setError(msg);
+      setErrorCode(null); // invoke 直接 reject 时没有 code，走字符串启发式
+      // 只有用户主动点击才弹 toast；启动时「超过 24 小时」的那次自动检查也算自动。
+      setErrorToastAllowed(manual);
+      setStatus("error");
+    } finally {
+      checkingRef.current = false;
+      try {
+        localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
+      } catch {
+        // 同 silentCheck：写不进只丢「24 小时抑制」，不影响检查本身
+      }
+    }
+  }, []);
+  const checkForUpdate = useCallback(() => runCheck(false), [runCheck]);
+  const manualCheckForUpdate = useCallback(() => runCheck(true), [runCheck]);
+
+  // ─── 定时检查（启动自检见下方监听 effect）──────────
+
+  useEffect(() => {
+    // 定时检查不涉及竞态（首次触发在 CHECK_INTERVAL_MS 之后，监听器早已就绪），留在这里。
+    // 启动自检已移到下方「监听后台更新事件」的 effect 里、await 完所有 listen 之后，
+    // 原因见那里的注释。
+    timerRef.current = setInterval(() => {
+      checkForUpdate();
+    }, CHECK_INTERVAL_MS);
+
+    // cleanup 同时管两个定时器：24h 检查的 interval 在本 effect 里设，
+    // 「已是最新」4 秒回 idle 的 timeout 在下方监听 effect 里设（存进 uptodateTimerRef）。
+    // React 卸载时按声明**逆序**跑 cleanup——监听 effect 后声明先清，两个都归这里收尾，
+    // 顺序无关紧要，缺任何一个都会在卸载后留下一次 setStatus（ React 会静默忽略，
+    // 但 fake-timer 环境下会炸出 "not wrapped in act"）。
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (uptodateTimerRef.current) clearTimeout(uptodateTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── 下载并安装（Rust 侧后台线程，不阻塞 UI）────
+
+  // ─── 下载并安装（Rust 侧后台线程，不阻塞 UI）────
+  // 重入防护：连点不会触发 start_update 并发双下载；调用即乐观置 downloading，
+  // 由 update:ready / update:error 复位守卫。
+
+  const downloadAndInstall = useCallback(async () => {
+    if (!update || downloadingRef.current) return;
+    downloadingRef.current = true;
+    userInitiatedRef.current = true; // 下载是明确的手动动作，失败必须告知
+    setStatus("downloading");
+    setError(null);
+    setErrorCode(null);
+    try {
+      await invoke("start_update");
+    } catch (e) {
+      console.error("[Update] start_update invoke 失败:", e);
+      setError(String(e));
+      setErrorCode(null);
+      setErrorToastAllowed(true);
+      setStatus("error");
+      downloadingRef.current = false;
+    }
+  }, [update]);
+
+  // ─── 监听后台更新事件 ────────────────────
+
+  useEffect(() => {
+    let cancelled = false;
+    const unlisteners: UnlistenFn[] = [];
+    // async 注册期间若组件已卸载（StrictMode/快速重挂载，cleanup 会早于 await 完成），
+    // 立即注销刚注册的监听，避免监听器泄漏与重复注册。
+    const track = (fn: UnlistenFn) => {
+      if (cancelled) fn();
+      else unlisteners.push(fn);
+    };
+
+    const setupListeners = async () => {
+      track(
+        await listen("update:checking", () => {
+          // 下载进行中（start_update 内部复查也会发 checking），不回退状态
+          if (downloadingRef.current) return;
+          setStatus("checking");
+          setError(null);
+          setErrorCode(null);
+        }),
+      );
+      track(
+        await listen<{ version: string; body: string | null; date?: string | null; currentVersion?: string }>("update:available", (e) => {
+          // 下载进行中（start_update 内部复查会再发 available），保持 downloading 不被回退
+          if (downloadingRef.current) return;
+          setStatus("available");
+          setUpdate({ version: e.payload.version, body: e.payload.body, date: e.payload.date, currentVersion: e.payload.currentVersion });
+        }),
+      );
+      track(
+        await listen("update:downloading", () => {
+          setStatus("downloading");
+          setProgress(0);
+          setProgressIndeterminate(false);
+          setBytesPerSec(0);
+          setDownloadedBytes(0);
+          setTotalBytes(null);
+        }),
+      );
+      track(
+        await listen<{ downloaded: number; total: number | null; bytesPerSec?: number }>("update:progress", (e) => {
+          const { downloaded, total, bytesPerSec: bps } = e.payload;
+          setDownloadedBytes(downloaded);
+          // totalBytes 是顶栏读数算「已下载/总量」与「剩余时间」的唯一来源；
+          // total 为 null（源未返回 Content-Length）时保持 null ⇒ 读数走不确定态。
+          setTotalBytes(total);
+          if (total) {
+            setProgress(Math.round((downloaded / total) * 100));
+            setProgressIndeterminate(false);
+          } else {
+            // total 未知（如某些源不返回 Content-Length）：无法计算百分比，标记不确定态
+            setProgressIndeterminate(true);
+          }
+          setBytesPerSec(bps ?? 0);
+        }),
+      );
+      track(
+        await listen("update:ready", () => {
+          setProgress(100);
+          setStatus("ready");
+          downloadingRef.current = false;
+          // 新一轮安装完成：清掉上一轮的「已取消」标记，重新给自动重启窗口。
+          autoRestartCancelledRef.current = false;
+        }),
+      );
+      track(
+        await listen<{ message: string; code?: string }>("update:error", (e) => {
+          const { message, code } = e.payload;
+          console.error("[Update] 更新失败:", code ?? "unknown", message);
+          setError(message);
+          setErrorCode(code ?? null);
+          // 自动检查（启动自检 / 24h 定时）失败只更新状态，不弹红 toast；
+          // 用户主动发起的检查与下载失败仍然弹。
+          setErrorToastAllowed(userInitiatedRef.current);
+          // 复位手动标记：不清掉的话，下一次自动检查命中 uptodate 会误弹「已是最新」框。
+          manualCheckRef.current = false;
+          setStatus("error");
+          downloadingRef.current = false;
+        }),
+      );
+      track(
+        await listen("update:uptodate", () => {
+          // 与 checking / available 同款守卫：下载进行中不回退状态。后端 check_update
+          // 与 start_update 是两条独立命令（各自的单飞闸），前端调用侧虽已挡过一轮，
+          // 这里作为双保险——状态被打回 uptodate 会让进度读数与徽章全部错乱。
+          if (downloadingRef.current) return;
+          // 进入「已是最新」可见状态（版本号 pill 显示）；4 秒后自动回到 idle。
+          // 仅手动检查才弹「已是最新」提示框（manualCheck），自动检查（启动/定时）不弹框。
+          setStatus("uptodate");
+          setUpdate(null);
+          if (manualCheckRef.current) setManualCheck(true);
+          manualCheckRef.current = false;
+          if (uptodateTimerRef.current) clearTimeout(uptodateTimerRef.current);
+          uptodateTimerRef.current = setTimeout(() => {
+            setStatus((s) => (s === "uptodate" ? "idle" : s));
+          }, 4000);
+        }),
+      );
+    };
+
+    // 启动自检必须等到**监听器全部注册完**才能发。
+    //
+    // 原来它在上方一个单独的 useEffect 里，而那个 effect 声明在本 effect 之前——
+    // React 按声明顺序执行，于是「发起检查」早于「注册监听」。而 `listen()` 是异步的
+    // （上面 7 个监听器每个都要一次 IPC 往返），而 Rust 侧 `check_update` 是 spawn 后
+    // 很快就 emit。更新源响应够快时，`update:available` 会在监听注册完之前发出去、
+    // **永久丢失** → 后端已经发现新版本，界面却显示「无更新」。
+    //
+    // 这是 CI 在真实 macOS 上抓到的：runner 到 GitHub 是同机房级延迟，启动后约 1 秒
+    // 就拿到了新版本，稳定跑赢前端注册，于是重现了“有更新但不提示”。
+    // 国内用户走 ghproxy/Gitee 通常慢，所以不易触发——但内网/快网下会命中。
+    //
+    // 仅交换两个 effect 的顺序不够：两边的 async 部分都在微任务队列里排队，
+    // IPC 完成先后仍不保证。只有把它放在 `await` 完所有 listen 之后才真正无竞态。
+    const doStartupCheck = async () => {
+      // 读不到上次检查时间（隐私模式/存储被禁/配额满）不能中断启动自检链：
+      // getItem 抛错会让这个 async 函数 reject，而调用方是 setupListeners().then(...)，
+      // 异常被 then 链静默吞掉——表现是"永远不检查更新"。降级为"当作超过 24 小时"，
+      // 最坏多查一次，好过永远不查。
+      let lastCheck: string | null = null;
+      try {
+        lastCheck = localStorage.getItem(LAST_CHECK_KEY);
+      } catch {
+        lastCheck = null;
+      }
+      const now = Date.now();
+      if (lastCheck && now - Number(lastCheck) < CHECK_INTERVAL_MS) {
+        await silentCheck();
+        return;
+      }
+      await checkForUpdate();
+    };
+
+    setupListeners().then(() => {
+      // cancelled 时不再发起检查（组件已卸载，监听器也已注销）
+      if (!cancelled) doStartupCheck();
+    });
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((fn) => fn());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── 重启应用（方案 C 2026-10-16：先播 1.1s 过渡层，再真正 relaunch）────
+
+  const restart = useCallback(async () => {
+    // 重入防护用 ref 而非 state：state 在同一次渲染里恒为旧值，双击 / 连按 Enter
+    // 会在同一帧内拿到两次 `restarting === false` ⇒ 两次 relaunch（双杀进程）。
+    // 本文件对下载用的是同一个套路（downloadingRef），保持一致。
+    if (restartingRef.current) return;
+    restartingRef.current = true;
+    // 无论入口是「用户点重启」还是「倒计时到点」，都先撤下倒计时显示/定时器，
+    // 避免过渡层盖住界面后徽章还在背后倒数。
+    setAutoRestartIn(null);
+    setRestarting(true);
+    // 让过渡层播完再重启 —— 这段刻意的等待本身就是「仪式感」的载体。
+    await new Promise((r) => setTimeout(r, RESTART_OVERLAY_MS));
+    try {
+      await relaunch();
+    } catch (e) {
+      // 🔴 必须复位。忘了这一步，过渡层会永久盖住界面、用户只能杀进程 ——
+      // 那比现在「闪一下」更糟，也是本方案唯一需要专门验收的失败路径。
+      console.error("[Update] 重启失败:", e);
+      restartingRef.current = false;
+      setRestarting(false);
+      setError(String(e));
+      // 🔴 刻意**不**把 status 打成 "error"：更新已经下载并安装完成，最准确的语义
+      // 仍是「ready —— 再点一次重启」。打成 error 会让徽章变成「重试」，而那个
+      // 分支触发的是 check_update，用户被迫重走「检查 → 下载」一整轮，纯属多余。
+      // 失败反馈改由 UpdateBadge 监听 restarting 回落 + error 弹 toast。
+    }
+  }, []);
+
+  // ─── 安装完成后自动重启（AUTO_RESTART_DELAY_SECS 可见窗口，可取消）────
+  //
+  // 倒计时只由 status 驱动：进入 ready 时起一轮；用户取消后由 ref 拦住重来
+  // （只在下一次 update:ready 复位），所以取消后徽章停在「重启」按钮，必须手动点。
+  useEffect(() => {
+    if (status !== "ready" || autoRestartCancelledRef.current) return;
+    setAutoRestartIn(AUTO_RESTART_DELAY_SECS);
+    // 递减放在 updater 里（而不是用闭包里的 autoRestartIn），不受 StrictMode 双跑影响。
+    const id = window.setInterval(() => {
+      setAutoRestartIn((n) => (n === null ? null : n - 1));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [status]);
+
+  // 归零 → 真正重启。单独一个 effect 而不是在 interval 回调里调 restart：
+  // 在 setState 更新函数里跑异步副作用，StrictMode 下会被调用两次（双 relaunch）。
+  useEffect(() => {
+    if (autoRestartIn !== 0) return;
+    void restart();
+  }, [autoRestartIn, restart]);
+
+  const cancelAutoRestart = useCallback(() => {
+    autoRestartCancelledRef.current = true;
+    setAutoRestartIn(null);
+  }, []);
+
+  // ─── 更新内容弹窗 ────────────────────────
+
+  const openUpdateNotes = useCallback(() => setShowNotes(true), []);
+  const closeUpdateNotes = useCallback(() => setShowNotes(false), []);
+
+  // ─── 「稍后」抑制（按版本号记忆，换版本自动解除）────
+  const dismissUpdate = useCallback(() => {
+    const v = update?.version;
+    if (!v) return;
+    try {
+      localStorage.setItem(DISMISSED_KEY, v);
+    } catch {
+      // 存储失败忽略
+    }
+    setDismissedVersion(v);
+  }, [update?.version]);
+
+  const isDismissed = useCallback(
+    (version?: string) => {
+      if (!version) return false;
+      return dismissedVersion === version;
+    },
+    [dismissedVersion],
+  );
+
+  return (
+    <UpdateContext.Provider value={{ status, update, progress, progressIndeterminate, bytesPerSec, downloadedBytes, totalBytes, restarting, autoRestartIn, cancelAutoRestart, error, errorCode, errorToastAllowed, checkForUpdate, manualCheckForUpdate, downloadAndInstall, restart, openUpdateNotes, dismissUpdate, isDismissed, manualCheck, acknowledgeUptodate: () => setManualCheck(false) }}>
+      {children}
+      {restarting && <RestartOverlay current={update?.currentVersion} next={update?.version} />}
+      <UpdateNotesDialog open={showNotes} update={update} onClose={closeUpdateNotes} onDownload={downloadAndInstall} onDismiss={dismissUpdate} />
+    </UpdateContext.Provider>
+  );
+}

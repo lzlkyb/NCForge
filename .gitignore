@@ -1,0 +1,35 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# 运行期状态 / 密钥（每台机器一份，永不入库）
+config.json
+*.log
+
+# Build output
+dist/
+*.blob
+
+# Rust / Tauri
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/binaries/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# 本地设计稿 / 过程资产（不进模板仓库）
+/design/
+
+# 工具临时产物
+.codegraph/
+.impeccable/
+.workbuddy/
+
+# 测试用独立 target 目录：跑 cargo test 时用 CARGO_TARGET_DIR=target-test 绕开
+desktop/src-tauri/target-test/
+
+# 排障临时脚本（下划线前缀），不入库
+_*.ps1
+_*.mjs

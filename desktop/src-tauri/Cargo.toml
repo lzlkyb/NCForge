@@ -1,0 +1,80 @@
+[package]
+name = "nc-forge"
+version = "0.1.0"
+description = "NCForge —— NC65 / NCC 二开的轻量桌面工作台"
+edition = "2021"
+
+[features]
+default = ["notifications"]
+# notifications 功能包含桌面通知。用 cargo feature 而非 #[cfg(not(test))] 门控：
+# 后者对集成测试无效（lib 作为依赖编译时不带 test cfg）。
+# 注：2026-10-27 定位到的 0xc0000139 真正根因是 comctl32 v6 manifest 缺失
+# （见 build.rs），与 notification 插件无直接关系；但默认关闭它能让测试
+# 二进制少链一堆 GUI 原生代码，保持测试轻量。
+notifications = ["dep:tauri-plugin-notification"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+# 给 cargo test 目标补嵌 comctl32 v6 manifest（缘由见 build.rs 长注释）
+embed-resource = "3"
+
+[dependencies]
+# Tauri core
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-updater = "2"
+# 更新源 env 覆盖（APP_UPDATE_ENDPOINT）构造 Url 用，与插件共用同一份 url 2.x
+url = "2"
+tauri-plugin-process = "2"
+tauri-plugin-notification = { version = "2", optional = true }
+tauri-plugin-opener = "2"
+# 2026-10-27 删除 clipboard-manager / dialog 两个插件依赖：前端剪贴板全走
+# navigator.clipboard Web API，没有任何 invoke 调用它们；Rust 侧也零使用
+# （原本只是无脑注册）。少两个插件 = 少两份 IPC 命令面 + 二进制更小。
+
+# Async runtime（后台任务：可见性复核、任务自愈重启）
+tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
+
+# Serialization（配置 JSON 持久化 + 更新事件推送）
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 日志（env_logger 初始化在 main.rs）
+log = "0.4"
+env_logger = "0.11"
+
+# 托盘图标代码绘制（PNG 解码 + 缩放 + 状态圆点）
+png = "0.17"
+
+# 工作区文件读写：NC 源码是 GBK/UTF-8 混合（见 workspace.rs），需要 GBK 编解码
+encoding_rs = "0.8"
+# 搜索的正则模式。regex 本来就是传递依赖（在 Cargo.lock 里），提成直接依赖不新增
+# 下载量。选它而不是 fancy-regex：它保证线性时间，7000 个文件全量扫不会被回溯型
+# 表达式拖死。代价是不支持 lookaround / 反向引用，与 VS Code 的 ripgrep 限制一致。
+regex = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# Windows 专属：DWM 圆角（Win11 窗口装饰）
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.56", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+] }
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+# 仅为测试构造 UpdaterError::Semver 变体（插件错误的确定性分类断言）。
+# updater 插件已传递依赖 semver 1.x，这里不增加实际编译量。
+semver = "1"
+
+[profile.release]
+# codegen-units 用默认 16 而不是 1：跨单元优化已由 lto = "thin" 提供，
+# 两者收益重叠。压到 1 只是禁用 LLVM 并行代码生成——编译慢 2~3 倍，
+# 却换不来多少体积或性能收益。
+# ⚠️ 体积红线：改动后必须核对 installer 体积——壳子基线应 ≤ 10MB；
+# 若涨超预算就改回 1。
+codegen-units = 16
+lto = "thin"
+opt-level = "s"
+strip = "symbols"

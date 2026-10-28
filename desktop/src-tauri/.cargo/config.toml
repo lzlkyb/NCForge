@@ -1,0 +1,23 @@
+# 壳子的 cargo 配置模板。
+#
+# 默认（全部注释状态）下什么都不做：cargo 直连 crates.io，GitHub Actions 的
+# ubuntu/windows/macos runner 都走这条，无需任何配置。
+#
+# 国内开发机直连 crates.io 不稳定时，取消下面 [source.crates-io] 一段的注释，
+# 把稀疏索引换成 rsproxy 镜像（字节级镜像官方索引，无需账号）：
+#
+#   [source.crates-io]
+#   replace-with = 'rsproxy-sparse'
+#   [source.rsproxy-sparse]
+#   registry = "sparse+https://rsproxy.cn/index/"
+#   [registries.rsproxy]
+#   index = "https://rsproxy.cn/index/"
+#
+# 注意：
+# 1. 镜像只影响**下载**，校验和仍按 crates.io 官方值，供应链安全不变；
+# 2. 团队协作时若有人用了镜像、有人没配，Cargo.lock 依然一致（镜像不改版本解析）；
+# 3. 若本机配了 http 代理（Clash 等），代理没启动时 cargo 会报
+#    "Failed to connect ... via 127.0.0.1"——那是代理配置问题，不是本文件的事。
+
+[net]
+git-fetch-with-cli = true

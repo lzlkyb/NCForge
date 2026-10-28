@@ -1,0 +1,827 @@
+/**
+ * NC 服务页样式（`sv-*`）。
+ *
+ * 单独一个文件而不是塞进 workspace.css：那边是文件页/编辑器的一整套布局，
+ * 服务页与它没有共享结构，混在一起只会让 340 行变 500 行。
+ * 颜色全部走 index.css 里的 `--token`（深浅色自动跟随），不写字面色值。
+ */
+
+/* ── 页面骨架 ── */
+.sv-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: hsl(var(--background));
+}
+.sv-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 16px;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.sv-head h1 {
+  font-size: 13.5px;
+  font-weight: 650;
+}
+.sv-sub {
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+}
+.sv-sp {
+  flex: 1;
+}
+.sv-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+  padding: 12px 16px 0;
+}
+
+/* ── 按钮 ── */
+.sv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--r-control, 8px);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background var(--dur, 160ms) var(--ease, ease);
+}
+.sv-btn:hover:not(:disabled) {
+  background: hsl(var(--secondary));
+}
+.sv-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sv-btn-primary {
+  background: hsl(var(--primary));
+  border-color: transparent;
+  color: hsl(var(--primary-foreground));
+}
+.sv-btn-primary:hover:not(:disabled) {
+  background: hsl(var(--primary));
+  filter: brightness(1.06);
+}
+.sv-btn-danger {
+  color: hsl(var(--destructive-ink));
+  border-color: hsl(var(--destructive) / 0.4);
+  background: hsl(var(--destructive) / 0.08);
+}
+.sv-btn-danger:hover:not(:disabled) {
+  background: hsl(var(--destructive) / 0.14);
+}
+.sv-icon-btn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.sv-icon-btn:hover {
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+}
+.sv-icon-btn[data-on] {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+.sv-link {
+  font-size: 11.5px;
+  color: hsl(var(--accent-foreground));
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.sv-link:hover {
+  text-decoration: underline;
+}
+
+/* ── 状态卡 ── */
+.sv-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-card, 14px);
+  background: hsl(var(--card));
+  flex-shrink: 0;
+  overflow: hidden;
+}
+/* 左侧竖条 = 状态色，扫一眼就知道在跑没跑 */
+.sv-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: hsl(var(--success));
+}
+.sv-card[data-state="stopped"]::before {
+  background: hsl(var(--muted-foreground));
+}
+.sv-card[data-state="starting"]::before {
+  background: hsl(var(--warning));
+}
+.sv-state {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.sv-ring {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: hsl(var(--success) / 0.12);
+  color: hsl(var(--success-ink));
+  flex-shrink: 0;
+}
+.sv-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 5px hsl(var(--success) / 0.16);
+}
+.sv-card[data-state="stopped"] .sv-ring {
+  background: hsl(var(--muted-foreground) / 0.12);
+  color: hsl(var(--muted-foreground));
+}
+.sv-card[data-state="stopped"] .sv-dot {
+  box-shadow: 0 0 0 5px hsl(var(--muted-foreground) / 0.12);
+}
+.sv-card[data-state="starting"] .sv-ring {
+  background: hsl(var(--warning) / 0.14);
+  color: hsl(var(--warning-ink));
+}
+.sv-card[data-state="starting"] .sv-dot {
+  box-shadow: 0 0 0 5px hsl(var(--warning) / 0.14);
+  animation: sv-pulse 1.4s var(--ease, ease) infinite;
+}
+@keyframes sv-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.sv-title {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.sv-line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sv-name {
+  font-size: 14.5px;
+  font-weight: 650;
+}
+.sv-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: hsl(var(--success) / 0.14);
+  color: hsl(var(--success-ink));
+}
+.sv-card[data-state="stopped"] .sv-badge {
+  background: hsl(var(--muted-foreground) / 0.14);
+  color: hsl(var(--muted-foreground));
+}
+.sv-card[data-state="starting"] .sv-badge {
+  background: hsl(var(--warning) / 0.16);
+  color: hsl(var(--warning-ink));
+}
+.sv-desc {
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  max-width: 460px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sv-metrics {
+  display: flex;
+  gap: 22px;
+  margin-left: 10px;
+  flex-wrap: wrap;
+}
+.sv-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sv-k {
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  color: hsl(var(--muted-foreground));
+}
+.sv-v {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.sv-v small {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+}
+.sv-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ── 告警条 ── */
+.sv-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid hsl(var(--destructive) / 0.3);
+  background: hsl(var(--destructive) / 0.08);
+  color: hsl(var(--destructive-ink));
+  flex-shrink: 0;
+}
+.sv-alert[data-tone="warn"] {
+  border-color: hsl(var(--warning) / 0.34);
+  background: hsl(var(--warning) / 0.1);
+  color: hsl(var(--warning-ink));
+}
+.sv-alert-text {
+  flex: 1;
+  min-width: 0;
+}
+.sv-alert-text b {
+  font-weight: 700;
+}
+
+/* ── 配置行 ── */
+.sv-cfg {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 4px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--card));
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+.sv-cfg-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 0;
+}
+.sv-cfg-item-edit {
+  gap: 6px;
+}
+/* 堆上限这一项内容短、但一个字都不能截：1024 宽时三个配置项会互相挤，
+   路径截成 `D:\ncc\1909h…` 还有 title 可看，而「堆上限 6 GB」截成「堆上 6 …」
+   就完全不知道在说什么。所以它不参与收缩，让两个路径去缩。
+   编辑态同理：输入框被压窄就没法看清填的是 4096 还是 4。 */
+.sv-cfg-item.sv-cfg-heap {
+  flex-shrink: 0;
+}
+.sv-cfg-k {
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+.sv-cfg-v {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  color: hsl(var(--foreground));
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sv-cfg-empty {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.75;
+}
+.sv-cfg-hint {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.8;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+}
+.sv-cfg-input {
+  flex: 1;
+  min-width: 160px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid hsl(var(--ring));
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  outline: none;
+}
+.sv-cfg-sep {
+  width: 1px;
+  background: hsl(var(--border));
+  margin: 8px 0;
+  flex-shrink: 0;
+}
+/* 堆上限：数字输入框比路径短得多，不跟着 flex 撑满 */
+.sv-cfg-input.sv-cfg-num {
+  flex: 0 0 76px;
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.sv-cfg-unit {
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+
+/* ── 日志 ── */
+.sv-log {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  margin-bottom: 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-card, 14px);
+  background: hsl(var(--card));
+  overflow: hidden;
+}
+.sv-log-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+.sv-lv {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: hsl(var(--secondary));
+  flex-shrink: 0;
+}
+.sv-lv button {
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sv-lv button[data-on] {
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-weight: 650;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+}
+.sv-n {
+  font-size: 10px;
+  opacity: 0.7;
+  margin-left: 3px;
+}
+.sv-divider {
+  width: 1px;
+  height: 16px;
+  background: hsl(var(--border));
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+.sv-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  color: hsl(var(--muted-foreground));
+  width: 210px;
+  flex-shrink: 0;
+}
+.sv-search input {
+  border: 0;
+  background: none;
+  outline: none;
+  font: inherit;
+  font-size: 11.5px;
+  color: hsl(var(--foreground));
+  flex: 1;
+  min-width: 0;
+}
+.sv-kbd {
+  font-size: 9.5px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sv-log-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 0;
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 18px;
+}
+.sv-ln {
+  display: flex;
+  gap: 10px;
+  padding: 0 12px;
+  white-space: pre;
+  min-width: max-content;
+}
+.sv-log-body[data-wrap] .sv-ln {
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-width: 0;
+}
+.sv-ln:hover {
+  background: hsl(var(--secondary) / 0.55);
+}
+.sv-ts {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.72;
+  flex-shrink: 0;
+  width: 58px;
+}
+.sv-th {
+  color: hsl(var(--muted-foreground));
+  width: 74px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sv-lvl {
+  width: 42px;
+  flex-shrink: 0;
+  font-weight: 700;
+}
+.sv-ln[data-lv="info"] .sv-lvl {
+  color: hsl(var(--primary));
+}
+.sv-ln[data-lv="warn"] .sv-lvl {
+  color: hsl(var(--warning-ink));
+}
+.sv-ln[data-lv="error"] .sv-lvl {
+  color: hsl(var(--destructive-ink));
+}
+.sv-ln[data-lv="error"] {
+  background: hsl(var(--destructive) / 0.06);
+}
+.sv-ln[data-lv="error"] .sv-msg {
+  color: hsl(var(--destructive-ink));
+}
+/* logger 固定列宽：不固定的话每行消息的起始位置都不一样，纵向扫读很费劲 */
+.sv-obj {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.78;
+  flex-shrink: 0;
+  width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sv-msg {
+  flex: 1;
+  min-width: 0;
+}
+/* 异常栈：用一条竖线标出「属于上一条错误」，比单纯缩进更能看出从属关系 */
+.sv-ln[data-stack] {
+  /* 216px = 12(padding) + 58(时间) + 10 + 74(线程) + 10 + 42(级别) + 10：
+     竖线落在 logger 列左缘。不缩到消息列（那要多 210px），否则长栈帧右侧会被裁掉，
+     而裁剪掉的恰好是 `(Server.java:96)` 这种最关键的定位信息。 */
+  margin-left: 216px;
+  padding-left: 10px;
+  border-left: 2px solid hsl(var(--destructive) / 0.28);
+  color: hsl(var(--muted-foreground));
+}
+.sv-ln[data-stack] .sv-msg {
+  color: hsl(var(--muted-foreground));
+}
+.sv-log-empty {
+  padding: 10px 12px;
+  font-family: inherit;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+.sv-log-more {
+  padding: 2px 12px 6px;
+  font-family: inherit;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  opacity: 0.8;
+}
+.sv-log-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 12px;
+  border-top: 1px solid hsl(var(--border));
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+.sv-follow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.sv-follow-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: hsl(var(--success));
+}
+.sv-follow-dot[data-off] {
+  background: hsl(var(--muted-foreground));
+}
+
+/* ── 命令行预览弹窗 ── */
+.sv-cmdline {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 46vh;
+  overflow: auto;
+}
+.sv-cmd-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ── 端口指标（可点）── */
+/* 端口是这一页最可能要改的东西（80 常被 IIS/SSRS 占），做成按钮直接开弹窗。
+   外观必须和其它指标一模一样，只有悬停才露出下划线与齿轮，否则四个指标一眼看过去
+   会有一个「长得不一样」，反而显得像坏了。 */
+.sv-k-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  border-radius: 3px;
+}
+.sv-k-edit:hover {
+  color: hsl(var(--foreground));
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.sv-k-edit svg {
+  opacity: 0;
+  transition: opacity var(--dur, 160ms) var(--ease, ease);
+}
+.sv-k-edit:hover svg,
+.sv-k-edit:focus-visible svg {
+  opacity: 0.75;
+}
+
+/* ── 改端口弹窗 ── */
+.sv-port-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+.sv-port-input label {
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+}
+.sv-port-input input {
+  width: 92px;
+  padding: 5px 8px;
+  border-radius: var(--r-control, 8px);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.sv-port-input input:focus {
+  outline: none;
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25);
+}
+.sv-port-quick {
+  display: flex;
+  gap: 4px;
+}
+.sv-port-quick button {
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid hsl(var(--border));
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.sv-port-quick button:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--accent));
+}
+.sv-port-quick button[data-active="true"] {
+  border-color: hsl(var(--primary) / 0.5);
+  background: hsl(var(--primary) / 0.12);
+  color: hsl(var(--foreground));
+}
+.sv-port-err {
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: hsl(var(--destructive-ink));
+}
+
+/* 逐条列出「改哪个文件、从几改成几」——这是用户能签收的前提 */
+.sv-port-list {
+  margin-top: 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-card, 10px);
+  overflow: hidden;
+}
+.sv-port-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  background: hsl(var(--card));
+}
+.sv-port-item + .sv-port-item {
+  border-top: 1px solid hsl(var(--border));
+}
+.sv-port-item[data-skip="true"] {
+  opacity: 0.55;
+}
+.sv-port-what {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.sv-port-label {
+  font-size: 12px;
+  font-weight: 550;
+}
+.sv-port-path {
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sv-port-diff {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.sv-port-diff code {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.sv-port-old {
+  background: hsl(var(--muted-foreground) / 0.12);
+  color: hsl(var(--muted-foreground));
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.sv-port-new {
+  background: hsl(var(--success) / 0.16);
+  color: hsl(var(--success-ink));
+}
+.sv-port-arrow {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+.sv-port-miss {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+
+.sv-port-blocked {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: hsl(var(--destructive) / 0.08);
+  border: 1px solid hsl(var(--destructive) / 0.28);
+  color: hsl(var(--destructive-ink));
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.sv-port-blocked svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.sv-port-warn {
+  margin-top: 10px;
+  padding-left: 16px;
+  list-style: disc;
+  font-size: 11px;
+  line-height: 1.65;
+  color: hsl(var(--warning-ink));
+}
+.sv-port-manual {
+  margin-top: 12px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: hsl(var(--muted-foreground));
+}
+.sv-port-manual ul {
+  margin-top: 3px;
+  padding-left: 16px;
+  list-style: disc;
+}
+
+.sv-port-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid hsl(var(--border));
+}
+.sv-port-hint {
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+}
+.sv-port-hint code {
+  font-size: 10.5px;
+}

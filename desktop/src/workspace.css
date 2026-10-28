@@ -1,0 +1,340 @@
+/* 工作区（文件树 + 编辑器）样式。尺寸与颜色取自已确认的「一期主界面设计稿」，
+   全部使用 index.css 的 token（hsl(var(--xxx))），类名加 wb- 前缀避免和壳子样式冲突。 */
+
+.wb-root {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  background: hsl(var(--background));
+}
+
+/* ---- 文件树 ---- */
+.wb-tree {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: hsl(var(--card));
+  border-right: 1px solid hsl(var(--border));
+}
+.wb-pane-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0 8px 0 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: hsl(var(--muted-foreground));
+}
+.wb-pane-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+.wb-icon-btn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.wb-pane-acts { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.wb-root-edit {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px 8px;
+}
+.wb-tree-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 6px 8px;
+  font-size: 12.5px;
+}
+.wb-tree-list:focus-visible { outline: 2px solid hsl(var(--ring) / 0.5); outline-offset: -2px; }
+.wb-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding-right: 8px;
+  border-radius: 6px;
+  color: hsl(var(--foreground));
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wb-row:hover { background: hsl(var(--secondary)); }
+.wb-row[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
+/* 选中（右键 / F2 / Del 的作用对象）与「已打开」是两回事：
+   前者淡底，后者填充 + 主色文字，两种状态叠在同一行也分得清 */
+.wb-row[data-selected] { background: hsl(var(--ring) / 0.1); }
+.wb-row[data-active][data-selected] { box-shadow: inset 0 0 0 1px hsl(var(--ring) / 0.5); }
+
+/* ---- 树内联输入行（新建 / 重命名） ---- */
+.wb-tree-edit { display: flex; align-items: center; height: 26px; padding-right: 2px; }
+.wb-tree-edit-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0 3px 0 6px;
+  border: 1px solid hsl(var(--ring));
+  border-radius: 6px;
+  background: hsl(var(--card));
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.16);
+}
+.wb-tree-edit[data-bad] .wb-tree-edit-field {
+  border-color: hsl(var(--destructive));
+  box-shadow: 0 0 0 3px hsl(var(--destructive) / 0.14);
+}
+.wb-tree-edit-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: hsl(var(--foreground));
+  font: inherit;
+}
+.wb-tree-edit-input::placeholder { color: hsl(var(--muted-foreground)); opacity: 0.75; }
+.wb-tree-edit-btn {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+.wb-tree-edit-btn[data-tone="ok"]:hover { background: hsl(var(--success) / 0.18); color: hsl(var(--success-ink)); }
+.wb-tree-edit-btn[data-tone="no"]:hover { background: hsl(var(--destructive) / 0.14); color: hsl(var(--destructive-ink)); }
+.wb-tree-edit-err {
+  padding-bottom: 3px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: hsl(var(--destructive-ink));
+}
+
+/* ---- 右键菜单（portal 到 body，fixed 定在鼠标位置） ---- */
+.wb-ctx {
+  position: fixed;
+  z-index: 60;
+  width: 208px;
+  padding: 4px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--card));
+  box-shadow: 0 8px 30px hsl(220 40% 10% / 0.16), 0 2px 8px hsl(220 40% 10% / 0.08);
+}
+.wb-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: hsl(var(--foreground));
+  text-align: left;
+  cursor: pointer;
+}
+.wb-ctx-item:hover { background: hsl(var(--secondary)); }
+.wb-ctx-item:disabled { opacity: 0.4; cursor: not-allowed; }
+.wb-ctx-item:disabled:hover { background: none; }
+.wb-ctx-icon { flex-shrink: 0; color: hsl(var(--muted-foreground)); }
+.wb-ctx-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-ctx-hint { margin-left: auto; flex-shrink: 0; font-size: 11px; color: hsl(var(--muted-foreground)); }
+.wb-ctx-item[data-danger] { color: hsl(var(--destructive-ink)); }
+.wb-ctx-item[data-danger] .wb-ctx-icon { color: inherit; }
+.wb-ctx-item[data-danger]:hover { background: hsl(var(--destructive) / 0.1); }
+.wb-ctx-sep { height: 1px; margin: 4px 6px; background: hsl(var(--border)); }
+
+/* 删除确认里的「不可撤销」提示条 */
+.wb-danger-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* 没有 description 时也要和标题留出间距 */
+  margin: 4px 0 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: hsl(var(--destructive) / 0.1);
+  color: hsl(var(--destructive-ink));
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.wb-row-icon { flex-shrink: 0; color: hsl(var(--muted-foreground)); }
+.wb-row[data-active] .wb-row-icon { color: inherit; }
+.wb-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wb-row-note { padding-left: 28px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.wb-row-note[data-tone="bad"] { color: hsl(var(--destructive-ink)); }
+
+/*
+ * 编码标记：磁盘是 UTF-8，但 Eclipse 会按 GBK 读。
+ * 靠右固定住，名字先让位——树只有 240px，标记跟着名字走就会被挤没。
+ */
+.wb-enc-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  background: hsl(var(--warning) / 0.16);
+  color: hsl(var(--warning-ink));
+}
+.wb-row[data-active] .wb-enc-badge { background: hsl(var(--warning) / 0.26); }
+
+/* ---- 主列：标签页 + 提示条 + 编辑器 + 状态栏 ---- */
+.wb-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.wb-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 36px;
+  flex-shrink: 0;
+  padding-left: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: hsl(var(--background));
+  border-bottom: 1px solid hsl(var(--border));
+}
+.wb-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  flex-shrink: 0;
+  max-width: 240px;
+  padding: 0 8px 0 12px;
+  border-radius: 8px 8px 0 0;
+  font-size: 12.5px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+.wb-tab:hover { color: hsl(var(--foreground)); }
+.wb-tab[data-active] {
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-weight: 600;
+  box-shadow: inset 0 2px 0 hsl(var(--primary));
+}
+.wb-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-tab-x {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 5px;
+  opacity: 0.55;
+}
+.wb-tab-x:hover { opacity: 1; background: hsl(var(--secondary)); }
+.wb-dirty-dot { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--primary)); }
+
+.wb-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: hsl(var(--warning) / 0.16);
+  color: hsl(var(--warning-ink));
+  border-bottom: 1px solid hsl(var(--border));
+}
+.wb-banner[data-tone="bad"] { background: hsl(var(--destructive) / 0.12); color: hsl(var(--destructive-ink)); }
+.wb-banner-actions { display: flex; gap: 6px; margin-left: auto; }
+/* 提示条正文与右侧关闭按钮：正文让位，按钮固定 */
+.wb-banner-text { flex: 1 1 220px; min-width: 0; font-weight: 500; }
+.wb-banner-x {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 5px;
+  color: inherit;
+  opacity: 0.75;
+  cursor: pointer;
+}
+.wb-banner-x:hover { opacity: 1; background: hsl(var(--foreground) / 0.08); }
+
+.wb-editor { position: relative; flex: 1 1 auto; min-height: 0; background: hsl(var(--card)); }
+.wb-editor-host { position: absolute; inset: 0; }
+.wb-editor-empty { position: absolute; inset: 0; display: grid; place-items: center; }
+
+.wb-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 26px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--card));
+  border-top: 1px solid hsl(var(--border));
+  user-select: none;
+}
+.wb-status-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-status-sp { flex: 1; }
+.wb-status-warn { color: hsl(var(--warning-ink)); font-weight: 600; }
+/* 状态栏里的编码小签：打开被标记的文件时才出现，和树上的 UTF-8! 是同一件事 */
+.wb-status-enc {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  background: hsl(var(--warning) / 0.16);
+  color: hsl(var(--warning-ink));
+}
+
+/* ---- 底部面板（问题 / 编译输出），取自设计稿 .panel ---- */
+.wb-panel { height: 220px; flex-shrink: 0; display: flex; flex-direction: column; background: hsl(var(--card)); border-top: 1px solid hsl(var(--border)); }
+.wb-panel-tabs { display: flex; align-items: center; gap: 2px; height: 34px; flex-shrink: 0; padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); }
+.wb-ptab { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 6px; font-size: 12px; font-weight: 550; color: hsl(var(--muted-foreground)); }
+.wb-ptab[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
+.wb-ptab-n { min-width: 16px; height: 16px; border-radius: 8px; display: grid; place-items: center; font-size: 10px; font-weight: 700; background: hsl(var(--destructive) / 0.14); color: hsl(var(--destructive-ink)); }
+.wb-panel-body { flex: 1; min-height: 0; overflow: auto; padding: 6px 0; font-size: 12.5px; }
+.wb-panel-note { padding: 4px 14px; color: hsl(var(--muted-foreground)); }
+.wb-prow { display: flex; align-items: center; gap: 10px; width: 100%; height: 26px; padding: 0 14px; text-align: left; }
+.wb-prow:hover { background: hsl(var(--secondary)); }
+.wb-prow-err { color: hsl(var(--destructive)); flex-shrink: 0; }
+.wb-prow-warn { color: hsl(var(--warning-ink)); flex-shrink: 0; }
+.wb-prow-msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-prow-loc { margin-left: auto; flex-shrink: 0; color: hsl(var(--muted-foreground)); font-size: 11.5px; }
+.wb-log { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; line-height: 19px; padding: 6px 14px; white-space: pre-wrap; word-break: break-all; }
+.wb-log-ok { color: hsl(var(--success-ink)); }
+.wb-log-er { color: hsl(var(--destructive-ink)); }
+.wb-log-mu { color: hsl(var(--muted-foreground)); }
+.wb-tabs-sp { flex: 1; }
+.wb-compile-btn { align-self: center; margin: 0 8px; flex-shrink: 0; }
+.wb-status-btn { color: inherit; font-size: inherit; padding: 0 4px; border-radius: 4px; }
+.wb-status-btn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
