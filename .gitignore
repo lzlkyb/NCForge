@@ -39,3 +39,8 @@ desktop/scripts/_*/
 # Java 桥的编译中间产物（.class 由 javac 生成，成品是 resources/svnkit/ncsvn.jar）
 desktop/src-tauri/svn-bridge/out/
 desktop/src-tauri/db-bridge/out/
+
+# jdt.ls：构建前由 desktop/scripts/fetch-jdtls.mjs 下载、校验、裁剪生成，不入库（约 55MB）；只留占位 README
+desktop/src-tauri/resources/jdtls/*
+!desktop/src-tauri/resources/jdtls/README.md
+desktop/.cache/

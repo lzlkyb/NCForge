@@ -40,7 +40,12 @@ pub struct SchemaCache {
 
 impl SchemaCache {
     /// 从桥吐出的扁平行（表、列、类型）建缓存。
-    pub fn build(url: &str, user: &str, fetched_at: u64, rows: &[(String, String, String)]) -> Self {
+    pub fn build(
+        url: &str,
+        user: &str,
+        fetched_at: u64,
+        rows: &[(String, String, String)],
+    ) -> Self {
         let mut tables: BTreeMap<String, CachedTable> = BTreeMap::new();
         for (t, c, ty) in rows {
             let tl = t.to_lowercase();
@@ -208,7 +213,9 @@ mod tests {
         assert_eq!(c.tables.len(), 2);
         assert!(c.tables.contains_key("bd_material"));
         assert_eq!(c.column_count(), 3);
-        assert!(c.tables["bd_material"].columns.contains_key("material_code"));
+        assert!(c.tables["bd_material"]
+            .columns
+            .contains_key("material_code"));
     }
 
     #[test]

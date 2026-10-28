@@ -315,21 +315,25 @@ export function langRequest<T>(
 
 // ───────────────────── jar 内类源码与跳转 ─────────────────────
 
-const jdtLoading = new Map<string, Promise<string>>();
+const jdtText = new Map<string, Promise<string>>();
 
-/** 取 `jdt://` 类的源码（或反编译桩）并建好只读 model。同一地址只取一次。 */
-export function loadJdtSource(uri: string): Promise<string> {
-  let p = jdtLoading.get(uri);
+/**
+ * 取 `jdt://` 类的源码（或反编译桩）并确保只读 model 存在。
+ *
+ * 缓存的只是**文本**，model 每次都在这里确保（`openVirtualModel` 幂等）：标签关掉时 model 会被销毁，
+ * 若连 model 一起缓存，再次跳到同一个类就会命中缓存、不重建 model，编辑器显示空白。
+ */
+export async function loadJdtSource(uri: string): Promise<string> {
+  let p = jdtText.get(uri);
   if (!p) {
-    p = langRequest<string>("java/classFileContents", null, { uri }, 60_000).then((text) => {
-      openVirtualModel(uri, text);
-      return text;
-    });
-    jdtLoading.set(uri, p);
+    p = langRequest<string>("java/classFileContents", null, { uri }, 60_000);
+    jdtText.set(uri, p);
     // 失败不缓存，下次还能再试
-    p.catch(() => jdtLoading.delete(uri));
+    p.catch(() => jdtText.delete(uri));
   }
-  return p;
+  const text = await p;
+  openVirtualModel(uri, text);
+  return text;
 }
 
 export type NavTarget =

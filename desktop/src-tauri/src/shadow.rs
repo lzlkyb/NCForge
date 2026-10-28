@@ -445,7 +445,7 @@ mod tests {
 
         let nc_home = PathBuf::from(r"D:\ncc\1909home");
         let java = nc_home.join("ufjdk").join("bin").join("java.exe");
-        let ls = PathBuf::from(r"D:\AItool\aiwork\nc-workbench-m0\jdtls\ls");
+        let ls = crate::lsp::tests::test_ls_dir();
         let jar = nc_home.join("modules/uapfw/lib/pubuapfw_jdbcframeworkLevel-1.jar");
         if !java.is_file() || !ls.join("plugins").is_dir() || !jar.is_file() {
             return;
@@ -499,6 +499,7 @@ mod tests {
             java_exe: &java,
             ls_dir: &ls,
             data_dir: &data,
+            config_dir: &base.join("jdtls-config"),
             xmx_mb: 512,
         }
         .command()
@@ -618,7 +619,10 @@ mod tests {
     #[test]
     #[ignore = "真实 newar/gl，首次需数十秒建类索引，手动跑"]
     fn real_newar_gl_timing() {
-        use crate::lsp::{build_initialize_params, build_settings, path_to_uri, JdtlsLaunch, LspClient, LspHandler};
+        use crate::lsp::{
+            build_initialize_params, build_settings, path_to_uri, JdtlsLaunch, LspClient,
+            LspHandler,
+        };
         use crate::nc_index::classpath_jars;
         use serde_json::{json, Value};
         use std::collections::HashMap;
@@ -628,7 +632,7 @@ mod tests {
 
         let nc_home = PathBuf::from(r"D:\ncc\1909home");
         let ws = PathBuf::from(r"C:\work\aier\newar");
-        let ls = PathBuf::from(r"D:\AItool\aiwork\nc-workbench-m0\jdtls\ls");
+        let ls = crate::lsp::tests::test_ls_dir();
         if !ws.join("gl").is_dir() || !ls.join("plugins").is_dir() {
             return;
         }
@@ -640,11 +644,23 @@ mod tests {
         let t = Instant::now();
         let cache = base.parent().unwrap().join("real-index.bin");
         let index = ClassIndex::load_or_build(classpath_jars(&nc_home), Some(&cache), None);
-        println!("[量] 类索引 {} 个 jar / {} 个类，耗时 {:.1}s", index.jars.len(), index.class_count(), t.elapsed().as_secs_f32());
+        println!(
+            "[量] 类索引 {} 个 jar / {} 个类，耗时 {:.1}s",
+            index.jars.len(),
+            index.class_count(),
+            t.elapsed().as_secs_f32()
+        );
 
         let shadow = base.join("shadow");
         let t = Instant::now();
-        let spec = ShadowSpec { workspace_root: &ws, module: "gl", nc_home: &nc_home, shadow_dir: &shadow, index: &index, extra_jars: &[] };
+        let spec = ShadowSpec {
+            workspace_root: &ws,
+            module: "gl",
+            nc_home: &nc_home,
+            shadow_dir: &shadow,
+            index: &index,
+            extra_jars: &[],
+        };
         let p = generate(&spec).unwrap();
         println!(
             "[量] 生成影子工程 {:.2}s：源文件 {}，jar {}，UTF-8 文件 {}，.classpath {}KB",
@@ -669,7 +685,10 @@ mod tests {
                 }
                 if method == "textDocument/publishDiagnostics" {
                     let uri = params["uri"].as_str().unwrap_or_default().to_string();
-                    let list = params["diagnostics"].as_array().cloned().unwrap_or_default();
+                    let list = params["diagnostics"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default();
                     self.0.diags.lock().unwrap().insert(uri, list);
                     *self.0.last_diag.lock().unwrap() = Some(Instant::now());
                 }
@@ -678,18 +697,41 @@ mod tests {
         let rec = Arc::new(Rec::default());
         let data = base.join("jdtls-data");
         let t0 = Instant::now();
-        let cmd = JdtlsLaunch { java_exe: &nc_home.join("ufjdk/bin/java.exe"), ls_dir: &ls, data_dir: &data, xmx_mb: 1024 }.command().unwrap();
+        let cmd = JdtlsLaunch {
+            java_exe: &nc_home.join("ufjdk/bin/java.exe"),
+            ls_dir: &ls,
+            data_dir: &data,
+            config_dir: &base.join("jdtls-config"),
+            xmx_mb: 1024,
+        }
+        .command()
+        .unwrap();
         let client = LspClient::spawn(cmd, Arc::new(H(rec.clone()))).unwrap();
         let root = shadow.to_string_lossy().into_owned();
         let runtime = nc_home.join("ufjdk").to_string_lossy().into_owned();
-        client.request("initialize", build_initialize_params(&root, &runtime, std::process::id()), Duration::from_secs(120)).unwrap();
+        client
+            .request(
+                "initialize",
+                build_initialize_params(&root, &runtime, std::process::id()),
+                Duration::from_secs(120),
+            )
+            .unwrap();
         println!("[量] initialize 返回 {:.1}s", t0.elapsed().as_secs_f32());
         client.notify("initialized", json!({})).unwrap();
-        client.notify("workspace/didChangeConfiguration", json!({ "settings": build_settings(&runtime) })).unwrap();
+        client
+            .notify(
+                "workspace/didChangeConfiguration",
+                json!({ "settings": build_settings(&runtime) }),
+            )
+            .unwrap();
         while !rec.ready.load(Ordering::SeqCst) && t0.elapsed() < Duration::from_secs(900) {
             std::thread::sleep(Duration::from_millis(500));
         }
-        println!("[量] ServiceReady {:.1}s（就绪={}）", t0.elapsed().as_secs_f32(), rec.ready.load(Ordering::SeqCst));
+        println!(
+            "[量] ServiceReady {:.1}s（就绪={}）",
+            t0.elapsed().as_secs_f32(),
+            rec.ready.load(Ordering::SeqCst)
+        );
 
         // 打开两个已知结果的文件：VoucherResources 应无错，Step4View 应有 2 个真错（ecj 与 Eclipse 产物都如此）
         let open = |rel: &str| -> (String, String) {
@@ -705,36 +747,96 @@ mod tests {
         let t = Instant::now();
         loop {
             std::thread::sleep(Duration::from_secs(1));
-            let quiet = rec.last_diag.lock().unwrap().is_none_or(|l| l.elapsed() > Duration::from_secs(8));
-            if (quiet && t.elapsed() > Duration::from_secs(10)) || t.elapsed() > Duration::from_secs(120) {
+            let quiet = rec
+                .last_diag
+                .lock()
+                .unwrap()
+                .is_none_or(|l| l.elapsed() > Duration::from_secs(8));
+            if (quiet && t.elapsed() > Duration::from_secs(10))
+                || t.elapsed() > Duration::from_secs(120)
+            {
                 break;
             }
         }
         println!("[量] 诊断稳定用时 {:.1}s", t.elapsed().as_secs_f32());
         let errs = |uri: &str| -> Vec<String> {
-            rec.diags.lock().unwrap().get(uri).map(|l| l.iter().filter(|d| d["severity"] == 1).map(|d| d["message"].as_str().unwrap_or_default().chars().take(90).collect()).collect()).unwrap_or_default()
+            rec.diags
+                .lock()
+                .unwrap()
+                .get(uri)
+                .map(|l| {
+                    l.iter()
+                        .filter(|d| d["severity"] == 1)
+                        .map(|d| {
+                            d["message"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .chars()
+                                .take(90)
+                                .collect()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
         };
-        println!("[量] VoucherResources 错误 {} 个 {:?}", errs(&v_uri).len(), errs(&v_uri));
-        println!("[量] Step4View 错误 {} 个 {:?}", errs(&s_uri).len(), errs(&s_uri));
+        println!(
+            "[量] VoucherResources 错误 {} 个 {:?}",
+            errs(&v_uri).len(),
+            errs(&v_uri)
+        );
+        println!(
+            "[量] Step4View 错误 {} 个 {:?}",
+            errs(&s_uri).len(),
+            errs(&s_uri)
+        );
 
         // 跳到 NCLocator（NC 标准类）
-        let ln = s_text.lines().position(|l| l.contains("NCLocator.getInstance()")).unwrap();
+        let ln = s_text
+            .lines()
+            .position(|l| l.contains("NCLocator.getInstance()"))
+            .unwrap();
         let col = s_text.lines().nth(ln).unwrap().find("NCLocator").unwrap() + 1;
         let t = Instant::now();
         let hits = client.request("textDocument/definition", json!({ "textDocument": { "uri": s_uri }, "position": { "line": ln, "character": col } }), Duration::from_secs(60)).unwrap();
         let target = hits[0]["uri"].as_str().unwrap_or_default().to_string();
-        let body = client.request("java/classFileContents", json!({ "uri": target }), Duration::from_secs(60)).unwrap();
+        let body = client
+            .request(
+                "java/classFileContents",
+                json!({ "uri": target }),
+                Duration::from_secs(60),
+            )
+            .unwrap();
         let body = body.as_str().unwrap_or_default();
-        println!("[量] 跳 NCLocator {:.2}s → {} · 正文 {} 字节 · 有javadoc={} · 是桩={}", t.elapsed().as_secs_f32(), &target[..target.len().min(60)], body.len(), body.contains("/**"), body.contains("Failed to get sources"));
+        println!(
+            "[量] 跳 NCLocator {:.2}s → {} · 正文 {} 字节 · 有javadoc={} · 是桩={}",
+            t.elapsed().as_secs_f32(),
+            &target[..target.len().min(60)],
+            body.len(),
+            body.contains("/**"),
+            body.contains("Failed to get sources")
+        );
 
         // 补全：在 Step4View 里找一个成员访问点
-        let ln = s_text.lines().position(|l| l.contains("service.")).unwrap_or(ln);
-        let col = s_text.lines().nth(ln).unwrap().find("service.").map_or(1, |c| c + 8);
+        let ln = s_text
+            .lines()
+            .position(|l| l.contains("service."))
+            .unwrap_or(ln);
+        let col = s_text
+            .lines()
+            .nth(ln)
+            .unwrap()
+            .find("service.")
+            .map_or(1, |c| c + 8);
         let t = Instant::now();
         let comp = client.request("textDocument/completion", json!({ "textDocument": { "uri": s_uri }, "position": { "line": ln, "character": col } }), Duration::from_secs(60)).unwrap();
-        let n = comp["items"].as_array().map_or_else(|| comp.as_array().map_or(0, Vec::len), Vec::len);
+        let n = comp["items"]
+            .as_array()
+            .map_or_else(|| comp.as_array().map_or(0, Vec::len), Vec::len);
         println!("[量] 补全 {:.2}s → {} 项", t.elapsed().as_secs_f32(), n);
-        println!("[量] 总用时 {:.1}s（从拉起 jdt.ls 起）", t0.elapsed().as_secs_f32());
+        println!(
+            "[量] 总用时 {:.1}s（从拉起 jdt.ls 起）",
+            t0.elapsed().as_secs_f32()
+        );
         // 给外部采样内存留一点时间
         std::thread::sleep(Duration::from_secs(8));
 

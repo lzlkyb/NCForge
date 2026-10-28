@@ -63,9 +63,36 @@ struct Handler {
     module: String,
     real_prefix: String,
     shadow_prefix: String,
+    /// 拉起时的代数（见 `LangRun::generation`）。
+    generation: u64,
 }
 
 impl LspHandler for Handler {
+    /// jdt.ls 进程没了。主动停止 / 重启时会话已先被取走（`session` 为 None）或代数已变，都不算意外。
+    /// 意外退出（比如模块太大 OOM）要告诉用户，否则状态栏会一直显示「就绪」而所有请求都在默默失败。
+    fn on_exit(&self, reason: &str) {
+        let unexpected = {
+            let mut run = lock_lang(&self.state);
+            let current = run.generation == self.generation && run.session.is_some();
+            if current {
+                run.session = None;
+            }
+            current
+        };
+        if unexpected {
+            set_status(
+                &self.app,
+                &self.state,
+                LangStatus {
+                    state: "error".into(),
+                    module: Some(self.module.clone()),
+                    message: format!("代码智能进程意外退出（{reason}），可能是内存上限太小，点「重试」或在设置里调大"),
+                    ..LangStatus::stopped()
+                },
+            );
+        }
+    }
+
     fn on_notification(&self, method: &str, params: Value) {
         match method {
             "language/status" => {
@@ -208,11 +235,17 @@ fn launch(
         module: module.to_string(),
         real_prefix: path_to_uri(&real_dir.to_string_lossy()),
         shadow_prefix: path_to_uri(&shadow_module.to_string_lossy()),
+        generation: {
+            let mut run = lock_lang(state);
+            run.generation += 1;
+            run.generation
+        },
     };
     let cmd = JdtlsLaunch {
         java_exe: &java,
         ls_dir: &ls_dir,
         data_dir: &data_dir,
+        config_dir: &base.join("jdtls-config"),
         xmx_mb,
     }
     .command()?;
@@ -224,12 +257,10 @@ fn launch(
         build_initialize_params(&root_s, &runtime_s, std::process::id()),
         Duration::from_secs(120),
     )?;
-    client.notify("initialized", json!({}))?;
-    client.notify(
-        "workspace/didChangeConfiguration",
-        json!({ "settings": build_settings(&runtime_s) }),
-    )?;
 
+    // 先登记会话并置为 indexing，再发 `initialized`。顺序不能反：索引有缓存（重启同一模块）时
+    // `ServiceReady` 可能在 `initialized` 后几毫秒就到，那时状态还是 starting 的话处理器会把它丢掉，
+    // 状态栏就永远停在「正在建立索引」。
     let status = LangStatus {
         state: "indexing".into(),
         module: Some(module.to_string()),
@@ -237,13 +268,24 @@ fn launch(
         source_files: project.source_files,
         jar_count: project.jar_count,
     };
-    lock_lang(state).session = Some(Arc::new(LangSession::new(
-        client,
-        module,
-        &real_dir,
-        &shadow_module,
-    )));
+    let session = Arc::new(LangSession::new(client, module, &real_dir, &shadow_module));
+    lock_lang(state).session = Some(session.clone());
     set_status(app, state, status.clone());
+    let handshake = session
+        .client
+        .notify("initialized", json!({}))
+        .and_then(|_| {
+            session.client.notify(
+                "workspace/didChangeConfiguration",
+                json!({ "settings": build_settings(&runtime_s) }),
+            )
+        });
+    if let Err(e) = handshake {
+        // 握手一半失败：不能留下一个已登记但不可用的会话和一个孤儿进程
+        lock_lang(state).session = None;
+        session.client.kill();
+        return Err(e);
+    }
     Ok(status)
 }
 
@@ -416,8 +458,11 @@ pub async fn lang_request(
 }
 
 /// 透传一个 LSP 通知（didOpen / didChange / didClose 等）。
+///
+/// 写成 `async`：Tauri 的同步命令跑在主线程，jdt.ls 万一不再读管道（忙于索引、卡死），
+/// 写 stdin 会阻塞，整个界面跟着冻住。换成 async 就只卡一个工作线程。
 #[tauri::command]
-pub fn lang_notify(
+pub async fn lang_notify(
     state: tauri::State<'_, Arc<AppState>>,
     method: String,
     path: Option<String>,

@@ -85,7 +85,9 @@ pub fn parse(src: &str) -> FileRefs {
             if t.kind != Kind::Ident || !is_table_intro(&t.lower) {
                 continue;
             }
-            let Some(name_tok) = seg.get(i + 1) else { continue };
+            let Some(name_tok) = seg.get(i + 1) else {
+                continue;
+            };
             // `from (...)` 是子查询或函数调用，子查询会被切到下一段单独解析
             if name_tok.kind != Kind::Ident || !is_table_name(&name_tok.text) {
                 continue;
@@ -205,7 +207,10 @@ fn is_table_name(name: &str) -> bool {
     if name.len() < 2 || !name.starts_with(|c: char| c.is_ascii_alphabetic()) {
         return false;
     }
-    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$' || c == '#') {
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$' || c == '#')
+    {
         return false;
     }
     let l = name.to_lowercase();
@@ -243,11 +248,11 @@ fn alias_after(toks: &[Tok], table_at: usize) -> Option<String> {
 
 /// 会终止「别名/表名槽位」的关键字。少一个就会出现 `from t where` 把 `where` 当别名。
 const STOP_WORDS: &[&str] = &[
-    "where", "on", "group", "order", "having", "left", "right", "inner", "outer", "full",
-    "cross", "join", "union", "all", "and", "or", "set", "values", "select", "from", "into",
-    "update", "delete", "insert", "as", "using", "when", "then", "else", "end", "case", "by",
-    "limit", "start", "connect", "with", "not", "in", "exists", "like", "between", "is", "null",
-    "isnull", "nvl", "distinct", "rownum", "asc", "desc", "add", "modify",
+    "where", "on", "group", "order", "having", "left", "right", "inner", "outer", "full", "cross",
+    "join", "union", "all", "and", "or", "set", "values", "select", "from", "into", "update",
+    "delete", "insert", "as", "using", "when", "then", "else", "end", "case", "by", "limit",
+    "start", "connect", "with", "not", "in", "exists", "like", "between", "is", "null", "isnull",
+    "nvl", "distinct", "rownum", "asc", "desc", "add", "modify",
 ];
 
 // ───────────────────────── 词法：去注释 / 抽字符串 / 切词 ─────────────────────────
@@ -529,9 +534,12 @@ pub fn check_file(file: &str, refs: &FileRefs, schema: &SchemaIndex) -> Vec<Tabl
             continue;
         }
         let col = c.column.to_lowercase();
-        let hit = cands
-            .iter()
-            .any(|t| schema.tables.get(t).is_some_and(|s| s.columns.contains_key(&col)));
+        let hit = cands.iter().any(|t| {
+            schema
+                .tables
+                .get(t)
+                .is_some_and(|s| s.columns.contains_key(&col))
+        });
         if hit {
             continue;
         }
@@ -664,7 +672,8 @@ mod tests {
 
     #[test]
     fn 字符串里的双斜线不当注释() {
-        let src = r#"String u = "http://x/y from fake_table"; String v = "select * from real_one";"#;
+        let src =
+            r#"String u = "http://x/y from fake_table"; String v = "select * from real_one";"#;
         let r = parse(src);
         let names: Vec<&str> = r.tables.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"real_one"));
@@ -678,14 +687,20 @@ mod tests {
     fn 别名能对上表名() {
         let src = r#"String a = "select t.jobguid from bi_schd_taskqueue t where 1=1";"#;
         let r = parse(src);
-        assert_eq!(r.aliases.get("t").unwrap(), &vec!["bi_schd_taskqueue".to_string()]);
+        assert_eq!(
+            r.aliases.get("t").unwrap(),
+            &vec!["bi_schd_taskqueue".to_string()]
+        );
     }
 
     #[test]
     fn as_别名() {
         let src = r#"String a = "select x.code from bd_material as x";"#;
         let r = parse(src);
-        assert_eq!(r.aliases.get("x").unwrap(), &vec!["bd_material".to_string()]);
+        assert_eq!(
+            r.aliases.get("x").unwrap(),
+            &vec!["bd_material".to_string()]
+        );
     }
 
     #[test]
@@ -723,7 +738,10 @@ mod tests {
 
     #[test]
     fn 字段不存在会报() {
-        let s = idx(&[("fa_card", &[("pk_card", "CHAR(20)"), ("asset_code", "VARCHAR2(40)")])]);
+        let s = idx(&[(
+            "fa_card",
+            &[("pk_card", "CHAR(20)"), ("asset_code", "VARCHAR2(40)")],
+        )]);
         let src = r#"String a = "select asset_code, asset_nmae from fa_card";"#;
         let issues = check_file("A.java", &parse(src), &s);
         assert_eq!(issues.len(), 1);
@@ -733,7 +751,10 @@ mod tests {
 
     #[test]
     fn 别名解析后字段能对上就不报() {
-        let s = idx(&[("pam_equip", &[("pk_used_status", "CHAR(20)"), ("dr", "NUMBER")])]);
+        let s = idx(&[(
+            "pam_equip",
+            &[("pk_used_status", "CHAR(20)"), ("dr", "NUMBER")],
+        )]);
         let src = r#"String a = "select e.pk_used_status from pam_equip e where e.dr=0";"#;
         assert!(check_file("A.java", &parse(src), &s).is_empty());
     }
@@ -761,7 +782,10 @@ mod tests {
             String b = "select t.guid from bi_schd_jobqueue t";
         "#;
         let issues = check_file("A.java", &parse(src), &s);
-        assert!(issues.is_empty(), "两个列都在各自的表里，不该报：{issues:?}");
+        assert!(
+            issues.is_empty(),
+            "两个列都在各自的表里，不该报：{issues:?}"
+        );
     }
 
     #[test]

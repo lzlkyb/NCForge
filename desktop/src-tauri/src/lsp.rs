@@ -145,10 +145,44 @@ pub struct JdtlsLaunch<'a> {
     pub ls_dir: &'a Path,
     /// jdt.ls 的工作区数据目录（独立于用户的工作副本，见方案第 3 节）。
     pub data_dir: &'a Path,
+    /// jdt.ls 的 OSGi 配置目录（**必须可写**）。不能直接用安装目录里的 `config_win`：
+    /// jdt.ls 运行时会往配置目录写缓存，装在 Program Files 之类的位置时没有写权限。
+    pub config_dir: &'a Path,
     pub xmx_mb: u32,
 }
 
 impl JdtlsLaunch<'_> {
+    /// 把安装包自带的 `config.ini` 放进可写的配置目录，返回该目录。
+    ///
+    /// 用启动 jar 的文件名（含版本号）当标记：jdt.ls 升级后版本变了，旧的 OSGi 缓存不能沿用，
+    /// 整个目录清掉重来。该目录是工作台自己的数据目录，里面没有 junction，递归删除是安全的。
+    /// `config.ini` 每次都覆盖成原件，缓存之类的运行期文件留着。
+    fn prepare_config(&self, launcher_name: &str) -> Result<&Path, String> {
+        let src = self
+            .ls_dir
+            .join(if cfg!(windows) {
+                "config_win"
+            } else {
+                "config_linux"
+            })
+            .join("config.ini");
+        let marker = self.config_dir.join(".launcher");
+        if std::fs::read_to_string(&marker).ok().as_deref() != Some(launcher_name) {
+            let _ = std::fs::remove_dir_all(self.config_dir);
+        }
+        std::fs::create_dir_all(self.config_dir).map_err(|e| {
+            format!(
+                "无法创建 jdt.ls 配置目录（{}）: {e}",
+                self.config_dir.display()
+            )
+        })?;
+        std::fs::copy(&src, self.config_dir.join("config.ini"))
+            .map_err(|e| format!("复制 jdt.ls 的 config.ini 失败（{}）: {e}", src.display()))?;
+        std::fs::write(&marker, launcher_name)
+            .map_err(|e| format!("写 jdt.ls 配置标记失败: {e}"))?;
+        Ok(self.config_dir)
+    }
+
     pub fn command(&self) -> Result<Command, String> {
         let plugins = self.ls_dir.join("plugins");
         // 注意前缀带下划线：同目录还有 `org.eclipse.equinox.launcher.win32...`，不是启动 jar
@@ -168,11 +202,11 @@ impl JdtlsLaunch<'_> {
                 })
             })
             .ok_or_else(|| format!("{} 里没有 equinox launcher jar", plugins.display()))?;
-        let config = self.ls_dir.join(if cfg!(windows) {
-            "config_win"
-        } else {
-            "config_linux"
-        });
+        let launcher_name = launcher
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let config = self.prepare_config(&launcher_name)?;
         let mut cmd = Command::new(self.java_exe);
         cmd.args([
             "-Declipse.application=org.eclipse.jdt.ls.core.id1",
@@ -252,6 +286,9 @@ pub trait LspHandler: Send + Sync {
     fn on_request(&self, _method: &str, _params: &Value) -> Value {
         Value::Null
     }
+    /// 进程退出或协议出错后调用一次（主动 `shutdown` / `kill` 也会触发，由调用方自己区分「意外」）。
+    /// 不通知的话上层会一直显示「就绪」，而所有请求都在默默失败。
+    fn on_exit(&self, _reason: &str) {}
 }
 
 type Pending = Arc<Mutex<HashMap<i64, Sender<Result<Value, String>>>>>;
@@ -317,6 +354,7 @@ impl LspClient {
             for (_, tx) in lock(&r_pending).drain() {
                 let _ = tx.send(Err(reason.clone()));
             }
+            handler.on_exit(&reason);
         });
 
         Ok(Self {
@@ -439,7 +477,7 @@ fn dispatch(m: &Value, handler: &dyn LspHandler, pending: &Pending, stdin: &Mute
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -544,6 +582,36 @@ mod tests {
     }
 
     #[test]
+    fn handler_is_told_when_the_process_exits() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct Told(Arc<AtomicBool>);
+        impl LspHandler for Told {
+            fn on_notification(&self, _m: &str, _p: Value) {}
+            fn on_exit(&self, _reason: &str) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        // 一个马上退出的进程：读取线程读到 EOF 就应该通知处理方
+        let cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "exit", "0"]);
+            c
+        } else {
+            Command::new("true")
+        };
+        let told = Arc::new(AtomicBool::new(false));
+        let client = LspClient::spawn(cmd, Arc::new(Told(told.clone()))).unwrap();
+        for _ in 0..100 {
+            if told.load(Ordering::SeqCst) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(told.load(Ordering::SeqCst), "进程退出后必须调用 on_exit");
+        assert!(!client.is_alive());
+    }
+
+    #[test]
     fn launch_command_finds_launcher_jar() {
         let dir = std::env::temp_dir().join(format!("nc-forge-lsp-launch-{}", std::process::id()));
         let plugins = dir.join("plugins");
@@ -553,10 +621,14 @@ mod tests {
             b"",
         )
         .unwrap();
+        std::fs::create_dir_all(dir.join("config_win")).unwrap();
+        std::fs::write(dir.join("config_win").join("config.ini"), b"osgi.bundles=x").unwrap();
+        let cfg = dir.join("cfg");
         let spec = JdtlsLaunch {
             java_exe: Path::new("java"),
             ls_dir: &dir,
             data_dir: Path::new("data"),
+            config_dir: &cfg,
             xmx_mb: 1024,
         };
         assert!(
@@ -577,7 +649,35 @@ mod tests {
         assert!(args
             .iter()
             .any(|a| a.ends_with("org.eclipse.equinox.launcher_1.5.800.jar")));
+        // -configuration 指向可写的配置目录，而不是安装目录里的 config_win
+        let at = args.iter().position(|a| a == "-configuration").unwrap();
+        assert_eq!(Path::new(&args[at + 1]), cfg.as_path());
+        assert_eq!(
+            std::fs::read(cfg.join("config.ini")).unwrap(),
+            b"osgi.bundles=x"
+        );
+
+        // 同版本再启动：运行期缓存留着；升级（启动 jar 换了版本号）：整个目录清掉
+        std::fs::write(cfg.join("cache.bin"), b"1").unwrap();
+        spec.command().unwrap();
+        assert!(cfg.join("cache.bin").is_file(), "同版本不能清缓存");
+        std::fs::remove_file(plugins.join("org.eclipse.equinox.launcher_1.5.800.jar")).unwrap();
+        std::fs::write(
+            plugins.join("org.eclipse.equinox.launcher_1.5.900.jar"),
+            b"",
+        )
+        .unwrap();
+        spec.command().unwrap();
+        assert!(!cfg.join("cache.bin").exists(), "版本变了要清掉旧缓存");
+        assert!(cfg.join("config.ini").is_file());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 本机真实 jdt.ls 的目录。可用 `NCFORGE_JDTLS_DIR` 覆盖（比如指向打包用的裁剪版来验证它仍能起）。
+    pub(crate) fn test_ls_dir() -> PathBuf {
+        std::env::var("NCFORGE_JDTLS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(r"D:\AItool\aiwork\nc-workbench-m0\jdtls\ls"))
     }
 
     // ── 以下用本机真实的 jdt.ls 跑一遍进程层；机器上没有就跳过（CI 没有）。──
@@ -589,7 +689,7 @@ mod tests {
 
     fn real_launch(tag: &str) -> Option<(PathBuf, PathBuf, PathBuf)> {
         let java = PathBuf::from(r"D:\ncc\1909home\ufjdk\bin\java.exe");
-        let ls = PathBuf::from(r"D:\AItool\aiwork\nc-workbench-m0\jdtls\ls");
+        let ls = test_ls_dir();
         if !java.is_file() || !ls.join("plugins").is_dir() {
             return None;
         }
@@ -603,6 +703,7 @@ mod tests {
             java_exe: java,
             ls_dir: ls,
             data_dir: data,
+            config_dir: &data.with_extension("cfg"),
             xmx_mb: 512,
         }
         .command()

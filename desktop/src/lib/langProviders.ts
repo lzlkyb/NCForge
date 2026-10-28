@@ -2,7 +2,7 @@
 // 所有请求都带真实文件路径（由后端换成影子工程 URI）；服务未就绪或文件不属于当前模块时一律返回 null，
 // 让 Monaco 退回到自带的「当前文档单词补全」，不弹错。
 import { pathOfModel } from "./editorStore";
-import { searchWorkspace } from "./search";
+import { searchWorkspace, type SearchHit } from "./search";
 import { getSession } from "./workspaceSession";
 import { flushDoc, inLangModule, langReady, langRequest, loadJdtSource, navigate } from "./lang";
 import {
@@ -84,24 +84,39 @@ type Loc = { uri: ReturnType<typeof monaco.Uri.parse>; range: ReturnType<typeof 
  * 按光标下的类名在工作区里找 `类名.java` 的声明行。只找工作区里的源码（NC 标准类在 jar 里，跳不到），
  * 也不认方法和变量——这就是「有限跳转」的全部范围。
  */
+/**
+ * 按类名缓存搜索结果。Monaco 在按住 Ctrl 移动鼠标时会对经过的每个单词调 provideDefinition，
+ * 没有缓存就是每个单词一次全工作区扫描。工作区里的类声明短时间内不会变。
+ */
+const LIGHT_CACHE_MS = 30_000;
+const lightCache = new Map<string, { at: number; hits: Promise<SearchHit[] | null> }>();
+
+function searchDeclarations(word: string): Promise<SearchHit[] | null> {
+  const cached = lightCache.get(word);
+  if (cached && Date.now() - cached.at < LIGHT_CACHE_MS) return cached.hits;
+  const hits = searchWorkspace({
+    text: declarationPattern(word),
+    regex: true,
+    caseSensitive: true,
+    include: `${word}.java`,
+    maxResults: 5,
+  })
+    .then((r) => r.hits)
+    .catch(() => null);
+  lightCache.set(word, { at: Date.now(), hits });
+  return hits;
+}
+
 async function lightDefinition(model: Model, pos: Pos): Promise<Loc[] | null> {
   const path = pathOfModel(model);
   const root = getSession().root;
   if (!path || !root || !path.toLowerCase().endsWith(".java")) return null;
   const word = model.getWordAtPosition(pos)?.word;
-  if (!word || !isIdentifier(word)) return null;
-  let res;
-  try {
-    res = await searchWorkspace({
-      text: declarationPattern(word),
-      regex: true,
-      caseSensitive: true,
-      include: `${word}.java`,
-      maxResults: 5,
-    });
-  } catch {
-    return null;
-  }
+  // 类名按 Java 习惯大写开头；小写开头的是变量 / 方法，这个模式本来就跳不到，别白扫一遍盘
+  if (!word || !isIdentifier(word) || !/^[A-Z]/.test(word)) return null;
+  const found = await searchDeclarations(word);
+  if (!found) return null;
+  const res = { hits: found };
   const base = root.replace(/[\\/]+$/, "");
   return res.hits.map((h) => {
     const abs = `${base}\\${h.path.replace(/\//g, "\\")}`;

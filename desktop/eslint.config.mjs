@@ -71,6 +71,8 @@ export default tseslint.config(
         URL: "readonly",
         Buffer: "readonly",
         __dirname: "readonly",
+        // Node 18+ 内置全局（fetch-jdtls.mjs 下载 jdt.ls 用），不需要 import
+        fetch: "readonly",
       },
     },
   },

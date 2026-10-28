@@ -482,7 +482,9 @@ fn current_db(cfg: &AppConfig) -> Result<(String, String), String> {
         .db_url
         .clone()
         .or_else(|| prop.as_ref().map(|p| p.url.clone()))
-        .ok_or_else(|| "没有数据库连接串：NC home 下找不到 prop.xml，也没在配置里指定".to_string())?;
+        .ok_or_else(|| {
+            "没有数据库连接串：NC home 下找不到 prop.xml，也没在配置里指定".to_string()
+        })?;
     let user = cfg
         .db_user
         .clone()

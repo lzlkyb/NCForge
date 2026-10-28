@@ -81,9 +81,8 @@ impl LangSession {
 
     /// 真实文件路径 → 影子工程里的 URI。不在当前模块内返回 `Err`。
     pub fn shadow_uri_of(&self, real_path: &str) -> Result<String, String> {
-        let rel = Path::new(real_path)
-            .strip_prefix(&self.real_dir)
-            .map_err(|_| format!("文件不在当前代码智能模块（{}）内", self.module))?;
+        let rel = rel_under(&self.real_dir.to_string_lossy(), real_path)
+            .ok_or_else(|| format!("文件不在当前代码智能模块（{}）内", self.module))?;
         Ok(path_to_uri(&self.shadow_dir.join(rel).to_string_lossy()))
     }
 
@@ -102,6 +101,9 @@ impl LangSession {
 pub struct LangRun {
     pub session: Option<Arc<LangSession>>,
     pub status: LangStatus,
+    /// 每次拉起自增。进程退出回调据此判断「退出的是不是当前这一代」，
+    /// 避免旧进程收尾时把刚起来的新会话误判成崩溃。
+    pub generation: u64,
 }
 
 impl Default for LangRun {
@@ -109,8 +111,29 @@ impl Default for LangRun {
         Self {
             session: None,
             status: LangStatus::stopped(),
+            generation: 0,
         }
     }
+}
+
+/// `path` 在 `base` 目录下的相对部分；不在其下返回 `None`。
+///
+/// Windows 路径不区分大小写，而前端传来的路径大小写取决于用户填的工作区根，
+/// `base` 却是 canonicalize 后的真实大小写——用 `Path::strip_prefix` 会把大小写不同的同一目录当成不同目录，
+/// 于是整个模块的文件都会被判成「不在模块里」，补全全部静默失效。
+/// 只对 ASCII 折叠大小写（保持字节长度，返回的相对部分取自原路径）。
+pub fn rel_under(base: &str, path: &str) -> Option<String> {
+    let norm = |s: &str| s.trim_start_matches(r"\\?\").replace('/', "\\");
+    let (b, p) = (norm(base), norm(path));
+    let b = b.trim_end_matches('\\');
+    let head = p.get(..b.len())?;
+    if !head.eq_ignore_ascii_case(b) {
+        return None;
+    }
+    let rest = &p[b.len()..];
+    rest.strip_prefix('\\')
+        .filter(|r| !r.is_empty())
+        .map(str::to_string)
 }
 
 /// 把 JSON 里所有以 `from` 开头的 URI 字符串换成 `to` 开头。
@@ -139,6 +162,39 @@ pub fn swap_prefix(v: &Value, from: &str, to: &str) -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn rel_under_ignores_case_and_separator_style() {
+        let base = r"C:\work\aier\newar\gl";
+        assert_eq!(
+            rel_under(base, r"C:\work\aier\newar\gl\src\A.java").as_deref(),
+            Some(r"src\A.java")
+        );
+        // 盘符、目录大小写不同，正斜杠混用，都算同一个模块
+        assert_eq!(
+            rel_under(base, "c:/Work/AIER/Newar/GL/src/A.java").as_deref(),
+            Some(r"src\A.java")
+        );
+        // 带扩展长度前缀、base 带尾部斜杠
+        assert_eq!(
+            rel_under(
+                r"C:\work\aier\newar\gl\",
+                r"\\?\C:\work\aier\newar\gl\x\B.java"
+            )
+            .as_deref(),
+            Some(r"x\B.java")
+        );
+        // 同名前缀的另一个模块、模块目录本身、完全无关的路径，都不算
+        assert_eq!(rel_under(base, r"C:\work\aier\newar\gl2\src\A.java"), None);
+        assert_eq!(rel_under(base, r"C:\work\aier\newar\gl"), None);
+        assert_eq!(rel_under(base, r"D:\other\A.java"), None);
+        // 非 ASCII 路径不会在字符边界上切坏
+        assert_eq!(
+            rel_under(r"C:\工作", r"C:\工作\a.java").as_deref(),
+            Some("a.java")
+        );
+        assert_eq!(rel_under(r"C:\工作", r"C:\工"), None);
+    }
 
     #[test]
     fn xmx_range_is_enforced_at_both_ends() {
