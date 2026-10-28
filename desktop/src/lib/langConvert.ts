@@ -107,6 +107,16 @@ export function severityName(s: number | undefined): "Error" | "Warning" | "Info
   }
 }
 
+/** Java 标识符（含 `$`）。轻量模式的跳转把它拼进正则，必须先过这一关，免得输入里的元字符改变正则含义。 */
+export function isIdentifier(word: string): boolean {
+  return /^[A-Za-z_$][\w$]*$/.test(word);
+}
+
+/** 查类型声明的正则：`class|interface|enum|@interface Name`。`$` 在正则里要转义。 */
+export function declarationPattern(name: string): string {
+  return `\\b(?:class|interface|enum|@interface)\\s+${name.replace(/\$/g, "\\$")}\\b`;
+}
+
 type MarkedString = string | { language: string; value: string };
 
 /** hover / documentation 的内容（MarkupContent、MarkedString、数组）统一成 Markdown 段落列表。 */

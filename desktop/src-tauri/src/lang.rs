@@ -15,6 +15,23 @@ use serde_json::Value;
 
 use crate::lsp::{path_to_uri, LspClient};
 
+/// jdt.ls 默认堆上限（MB）。实测 gl 模块实际用 656MB。
+pub const DEFAULT_XMX_MB: u32 = 1024;
+/// 可设范围。下限：再小 jdt.ls 在 NC 工程上会频繁 OOM；上限：它不需要更多，设大了只会挤掉中间件的内存。
+pub const XMX_MIN_MB: u32 = 512;
+pub const XMX_MAX_MB: u32 = 4096;
+
+/// 校验用户填的内存上限。
+pub fn validate_xmx(mb: u32) -> Result<u32, String> {
+    if (XMX_MIN_MB..=XMX_MAX_MB).contains(&mb) {
+        Ok(mb)
+    } else {
+        Err(format!(
+            "代码智能的内存上限要在 {XMX_MIN_MB}~{XMX_MAX_MB} MB 之间，当前填的是 {mb}"
+        ))
+    }
+}
+
 /// 语言服务当前状态，前端用 `lang-status` 事件与 `lang_status` 命令读取。
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -122,6 +139,16 @@ pub fn swap_prefix(v: &Value, from: &str, to: &str) -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn xmx_range_is_enforced_at_both_ends() {
+        assert_eq!(validate_xmx(1024), Ok(1024));
+        assert_eq!(validate_xmx(XMX_MIN_MB), Ok(XMX_MIN_MB));
+        assert_eq!(validate_xmx(XMX_MAX_MB), Ok(XMX_MAX_MB));
+        assert!(validate_xmx(XMX_MIN_MB - 1).is_err());
+        assert!(validate_xmx(XMX_MAX_MB + 1).is_err());
+        assert!(validate_xmx(0).is_err());
+    }
 
     #[test]
     fn swap_prefix_only_touches_string_heads() {

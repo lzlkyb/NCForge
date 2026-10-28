@@ -6,6 +6,7 @@ import { useSyncExternalStore } from "react";
 import { forEachModel, onModelLifecycle, openVirtualModel } from "./editorStore";
 import { severityName, toMonacoRange, uriToPath, type LspRange } from "./langConvert";
 import { monaco } from "./monacoSetup";
+import { getConfig } from "./appConfig";
 import { invoke, listen } from "./tauri";
 import { getSession } from "./workspaceSession";
 
@@ -19,10 +20,22 @@ export interface LangStatus {
   jarCount: number;
 }
 
-/** 页面用的视图：状态 + 诊断是否已稳定。 */
-export interface LangView extends LangStatus {
+/** 状态 + 诊断是否已稳定。 */
+interface ViewCore extends LangStatus {
   /** 就绪后约 12 秒内 jdt.ls 还在补算索引，诊断里会有假的「找不到类」，不显示。 */
   settled: boolean;
+}
+
+/** 页面用的视图：状态 + 诊断是否稳定 + 设置里的两个开关（状态栏据此决定显示「启动」按钮还是不显示）。 */
+export interface LangView extends ViewCore {
+  enabled: boolean;
+  autoStart: boolean;
+}
+
+/** 设置页里的代码智能偏好（来自 AppConfig）。 */
+export interface LangPrefs {
+  lang_enabled: boolean;
+  lang_auto_start: boolean;
 }
 
 /** 就绪后等诊断稳定的时长（实测 gl 模块约 12 秒）。 */
@@ -36,13 +49,20 @@ const MARKER_OWNER = "jdt.ls";
 
 const STOPPED: LangStatus = { state: "stopped", module: null, message: "", sourceFiles: 0, jarCount: 0 };
 
-let view: LangView = { ...STOPPED, settled: false };
+let prefs = { enabled: true, autoStart: true };
+let view: LangView = { ...STOPPED, settled: false, ...prefs };
 let settleTimer: ReturnType<typeof setTimeout> | undefined;
 const listeners = new Set<() => void>();
 
-function setView(next: LangView): void {
-  view = next;
+function setView(next: ViewCore): void {
+  view = { ...next, ...prefs };
   listeners.forEach((l) => l());
+}
+
+/** 设置页改了开关后调用。关掉总开关时后端会自己停服务并发 stopped 事件。 */
+export function applyLangPrefs(p: LangPrefs): void {
+  prefs = { enabled: p.lang_enabled, autoStart: p.lang_auto_start };
+  setView(view);
 }
 
 export function getLangView(): LangView {
@@ -242,6 +262,7 @@ export async function initLang(): Promise<void> {
   );
   const cur = await invoke<LangStatus>("lang_status").catch(() => STOPPED);
   if (cur.state !== "stopped") onStatus(cur);
+  void getConfig().then(applyLangPrefs).catch(() => {});
 }
 
 // ───────────────────── 启动与请求 ─────────────────────
@@ -253,6 +274,7 @@ let startTimer: ReturnType<typeof setTimeout> | undefined;
  * 同一模块上次失败过不自动重试，避免循环弹错；用户可以手动重启。
  */
 export function ensureLang(path: string): void {
+  if (!prefs.enabled || !prefs.autoStart) return;
   if (!path.toLowerCase().endsWith(".java")) return;
   const module = moduleOfPath(path);
   if (!module) return;
@@ -263,6 +285,11 @@ export function ensureLang(path: string): void {
       // 失败原因已经由 lang-status(error) 事件带给状态栏
     });
   }, START_DEBOUNCE_MS);
+}
+
+/** 「自动启动」关掉时，状态栏的「启动」按钮走这里：不防抖、不看自动开关。 */
+export function startLangNow(path: string): void {
+  void invoke("lang_start", { path }).catch(() => {});
 }
 
 /** 关掉语言服务（换工作区时调用：旧模块的影子工程对新工作区没有意义）。 */

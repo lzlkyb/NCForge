@@ -66,6 +66,15 @@ pub struct AppConfig {
     /// 数据库密码的 DPAPI 密文（prop.xml 里那串是 NC 自己的加密格式，解不开）。
     #[serde(default)]
     pub db_password_dpapi: Option<String>,
+    /// 代码智能（jdt.ls）总开关。关掉后不起 Java 进程，编辑器退回轻量模式。
+    #[serde(default = "default_true")]
+    pub lang_enabled: bool,
+    /// 打开新模块的 .java 时自动拉起。关掉后要在状态栏手动点「启动」（内存紧张时用）。
+    #[serde(default = "default_true")]
+    pub lang_auto_start: bool,
+    /// jdt.ls 堆上限（MB）。`None` = 默认 1024（见 `lang::DEFAULT_XMX_MB`）。
+    #[serde(default)]
+    pub lang_xmx_mb: Option<u32>,
 }
 
 fn default_true() -> bool {
@@ -88,6 +97,9 @@ impl Default for AppConfig {
             db_url: None,
             db_user: None,
             db_password_dpapi: None,
+            lang_enabled: true,
+            lang_auto_start: true,
+            lang_xmx_mb: None,
         }
     }
 }

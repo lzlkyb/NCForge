@@ -13,16 +13,14 @@ use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 
 use super::compile_cmds::{cached_index, resolve_module};
-use crate::lang::{LangSession, LangStatus};
+use crate::config::AppConfig;
+use crate::lang::{validate_xmx, LangSession, LangStatus, DEFAULT_XMX_MB};
 use crate::lsp::{
     build_initialize_params, build_settings, path_to_uri, JdtlsLaunch, LspClient, LspHandler,
 };
 use crate::nc_home::{self, NcHome};
 use crate::shadow::{self, ShadowSpec};
 use crate::state::AppState;
-
-/// jdt.ls 默认堆上限（MB）。实测 gl 模块实际用 656MB。
-const DEFAULT_XMX_MB: u32 = 1024;
 
 fn lock_lang(state: &AppState) -> std::sync::MutexGuard<'_, crate::lang::LangRun> {
     state.lang.lock().unwrap_or_else(|e| e.into_inner())
@@ -106,6 +104,7 @@ fn start_blocking(
     root: PathBuf,
     module: String,
     home: NcHome,
+    xmx_mb: u32,
 ) -> Result<LangStatus, String> {
     // 同模块已在跑（或正在拉起）就不重复拉起
     let old = {
@@ -128,7 +127,7 @@ fn start_blocking(
     if let Some(s) = old {
         s.client.shutdown();
     }
-    match launch(&app, &state, &root, &module, &home) {
+    match launch(&app, &state, &root, &module, &home, xmx_mb) {
         Ok(st) => Ok(st),
         Err(e) => {
             set_status(
@@ -152,6 +151,7 @@ fn launch(
     root: &Path,
     module: &str,
     home: &NcHome,
+    xmx_mb: u32,
 ) -> Result<LangStatus, String> {
     let nc_home = PathBuf::from(&home.root);
     let java = PathBuf::from(&home.java);
@@ -213,7 +213,7 @@ fn launch(
         java_exe: &java,
         ls_dir: &ls_dir,
         data_dir: &data_dir,
-        xmx_mb: DEFAULT_XMX_MB,
+        xmx_mb,
     }
     .command()?;
     let client = LspClient::spawn(cmd, Arc::new(handler))?;
@@ -255,12 +255,28 @@ pub async fn lang_start(
     state: tauri::State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<LangStatus, String> {
+    let cfg = state.config.read().await.clone();
+    if !cfg.lang_enabled {
+        return Err("代码智能已在设置里关闭".to_string());
+    }
     let (root, module) = resolve_module(&state, &path).await?;
-    let home = nc_home::resolve(state.config.read().await.nc_home.as_deref())?;
+    let home = nc_home::resolve(cfg.nc_home.as_deref())?;
+    let xmx = cfg.lang_xmx_mb.unwrap_or(DEFAULT_XMX_MB);
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || start_blocking(app, state, root, module, home))
-        .await
-        .map_err(|e| format!("后台任务失败: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        start_blocking(app, state, root, module, home, xmx)
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 停掉当前会话并把状态置为已停止。
+fn stop_now(app: &tauri::AppHandle, state: &AppState) {
+    let old = lock_lang(state).session.take();
+    if let Some(s) = old {
+        s.client.shutdown();
+    }
+    set_status(app, state, LangStatus::stopped());
 }
 
 #[tauri::command]
@@ -269,15 +285,92 @@ pub async fn lang_stop(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || stop_now(&app, &state))
+        .await
+        .map_err(|e| format!("后台任务失败: {e}"))
+}
+
+/// 重新生成影子工程：停掉 → 清掉 jdt.ls 的工作区缓存 → 按当前模块重新拉起。
+/// 用于模块目录结构变了、或 jdt.ls 的索引看起来不对的时候。
+#[tauri::command]
+pub async fn lang_regenerate(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<LangStatus, String> {
+    let cfg = state.config.read().await.clone();
+    if !cfg.lang_enabled {
+        return Err("代码智能已在设置里关闭".to_string());
+    }
+    let module = lock_lang(&state)
+        .status
+        .module
+        .clone()
+        .ok_or_else(|| "还没有打开过 .java 文件，没有可重建的模块".to_string())?;
+    let ws = cfg
+        .workspace_root
+        .clone()
+        .ok_or_else(|| "尚未选择工作区目录".to_string())?;
+    let (root, module) =
+        resolve_module(&state, &PathBuf::from(ws).join(&module).to_string_lossy()).await?;
+    let home = nc_home::resolve(cfg.nc_home.as_deref())?;
+    let xmx = cfg.lang_xmx_mb.unwrap_or(DEFAULT_XMX_MB);
+    let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let old = lock_lang(&state).session.take();
-        if let Some(s) = old {
-            s.client.shutdown();
-        }
-        set_status(&app, &state, LangStatus::stopped());
+        stop_now(&app, &state);
+        // 删掉「上次模块」记录，launch 会据此连 jdt.ls 的工作区缓存一起清掉
+        let _ = std::fs::remove_file(state.config_dir.join("lang").join("last-module.txt"));
+        start_blocking(app, state, root, module, home, xmx)
     })
     .await
-    .map_err(|e| format!("后台任务失败: {e}"))
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 代码智能设置的局部更新。字段名与 `AppConfig` 一致（snake_case）。
+#[derive(Debug, serde::Deserialize)]
+pub struct LangConfigPatch {
+    #[serde(default)]
+    pub lang_enabled: Option<bool>,
+    #[serde(default)]
+    pub lang_auto_start: Option<bool>,
+    /// 内存上限（MB）。`0` = 恢复默认（用 0 表示「清空」，避免 JSON 里区分缺省与 null）。
+    #[serde(default)]
+    pub lang_xmx_mb: Option<u32>,
+}
+
+/// 改代码智能的设置。内存上限越界时明确报错；关掉总开关时顺手停掉正在跑的 jdt.ls。
+/// 改内存上限不会重启正在跑的进程，下次拉起（或点「重新生成」）时生效。
+#[tauri::command]
+pub async fn lang_config_set(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    patch: LangConfigPatch,
+) -> Result<AppConfig, String> {
+    let xmx = match patch.lang_xmx_mb {
+        Some(0) => Some(None),
+        Some(mb) => Some(Some(validate_xmx(mb)?)),
+        None => None,
+    };
+    let cfg = state
+        .update_config(move |cfg| {
+            if let Some(v) = patch.lang_enabled {
+                cfg.lang_enabled = v;
+            }
+            if let Some(v) = patch.lang_auto_start {
+                cfg.lang_auto_start = v;
+            }
+            if let Some(v) = xmx {
+                cfg.lang_xmx_mb = v;
+            }
+            Ok(())
+        })
+        .await?;
+    if !cfg.lang_enabled {
+        let state = state.inner().clone();
+        tauri::async_runtime::spawn_blocking(move || stop_now(&app, &state))
+            .await
+            .map_err(|e| format!("后台任务失败: {e}"))?;
+    }
+    Ok(cfg)
 }
 
 #[tauri::command]

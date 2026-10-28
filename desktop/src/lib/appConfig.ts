@@ -16,7 +16,24 @@ export interface AppConfig {
   nc_home: string | null;
   /** 中间件堆上限（MB）；null = 默认 4G。改它走 `server_heap_set`，不要走 patchConfig。 */
   server_heap_mb: number | null;
+  /** 代码智能总开关 / 打开新模块时自动启动 / jdt.ls 内存上限（MB，null = 默认 1024）。改它们走 `langConfigSet`。 */
+  lang_enabled: boolean;
+  lang_auto_start: boolean;
+  lang_xmx_mb: number | null;
 }
+
+/** 代码智能设置的局部更新。`lang_xmx_mb: 0` = 恢复默认；越界（512~4096 之外）后端会明确报错。 */
+export interface LangConfigPatch {
+  lang_enabled?: boolean;
+  lang_auto_start?: boolean;
+  lang_xmx_mb?: number;
+}
+
+export const langConfigSet = (patch: LangConfigPatch) =>
+  invoke<AppConfig>("lang_config_set", { patch });
+
+/** 重新生成影子工程（停掉 → 清缓存 → 重新拉起当前模块）。 */
+export const langRegenerate = () => invoke<unknown>("lang_regenerate");
 
 /**
  * 可局部更新的设置项（Rust `commands::system::ConfigPatch`）。

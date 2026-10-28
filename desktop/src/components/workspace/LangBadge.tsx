@@ -1,4 +1,4 @@
-import { restartLang, useLangView } from "../../lib/lang";
+import { restartLang, startLangNow, useLangView } from "../../lib/lang";
 
 /**
  * 状态栏里的代码智能状态（视觉取自设计稿的 `.ls`：绿点就绪、黄点脉冲忙磌）。
@@ -7,7 +7,20 @@ import { restartLang, useLangView } from "../../lib/lang";
  */
 export function LangBadge({ activePath }: { activePath: string | null }) {
   const v = useLangView();
-  if (v.state === "stopped") return null;
+  if (v.state === "stopped") {
+    // 自动启动关掉时要有个手动入口；总开关关掉则完全不显示（轻量模式）
+    if (!v.enabled || v.autoStart || !activePath?.toLowerCase().endsWith(".java")) return null;
+    return (
+      <button
+        type="button"
+        className="wb-status-btn"
+        title="自动启动已在设置里关闭：点击为当前模块启动代码智能（约 650MB 内存）"
+        onClick={() => startLangNow(activePath)}
+      >
+        启动代码智能
+      </button>
+    );
+  }
   const detail = [
     v.module ? `模块 ${v.module}` : "",
     v.sourceFiles ? `${v.sourceFiles} 个源文件、${v.jarCount} 个 jar` : "",

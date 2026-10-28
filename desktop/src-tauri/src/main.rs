@@ -488,6 +488,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::compile_module,
             commands::lang_start,
             commands::lang_stop,
+            commands::lang_regenerate,
+            commands::lang_config_set,
             commands::lang_status,
             commands::lang_request,
             commands::lang_notify,

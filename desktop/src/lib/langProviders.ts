@@ -2,10 +2,14 @@
 // 所有请求都带真实文件路径（由后端换成影子工程 URI）；服务未就绪或文件不属于当前模块时一律返回 null，
 // 让 Monaco 退回到自带的「当前文档单词补全」，不弹错。
 import { pathOfModel } from "./editorStore";
+import { searchWorkspace } from "./search";
+import { getSession } from "./workspaceSession";
 import { flushDoc, inLangModule, langReady, langRequest, loadJdtSource, navigate } from "./lang";
 import {
   completionKindName,
   contentsToMarkdown,
+  declarationPattern,
+  isIdentifier,
   toLspPosition,
   toMonacoRange,
   toTargets,
@@ -71,6 +75,48 @@ interface LspSignature {
 function markdown(doc: unknown): { value: string } | undefined {
   const parts = contentsToMarkdown(doc);
   return parts.length ? { value: parts.join("\n\n") } : undefined;
+}
+
+type Loc = { uri: ReturnType<typeof monaco.Uri.parse>; range: ReturnType<typeof toMonacoRange> };
+
+/**
+ * 轻量模式的跳转：jdt.ls 不可用（关闭 / 还没就绪 / 文件不在当前模块）时，
+ * 按光标下的类名在工作区里找 `类名.java` 的声明行。只找工作区里的源码（NC 标准类在 jar 里，跳不到），
+ * 也不认方法和变量——这就是「有限跳转」的全部范围。
+ */
+async function lightDefinition(model: Model, pos: Pos): Promise<Loc[] | null> {
+  const path = pathOfModel(model);
+  const root = getSession().root;
+  if (!path || !root || !path.toLowerCase().endsWith(".java")) return null;
+  const word = model.getWordAtPosition(pos)?.word;
+  if (!word || !isIdentifier(word)) return null;
+  let res;
+  try {
+    res = await searchWorkspace({
+      text: declarationPattern(word),
+      regex: true,
+      caseSensitive: true,
+      include: `${word}.java`,
+      maxResults: 5,
+    });
+  } catch {
+    return null;
+  }
+  const base = root.replace(/[\\/]+$/, "");
+  return res.hits.map((h) => {
+    const abs = `${base}\\${h.path.replace(/\//g, "\\")}`;
+    const lspUri = encodeURI(`file:///${abs.replace(/\\/g, "/")}`);
+    const uri = monaco.Uri.parse(lspUri);
+    originalUri.set(uri.toString(), lspUri);
+    const col = Math.max(0, h.text.indexOf(word, h.ranges[0]?.start ?? 0));
+    return {
+      uri,
+      range: toMonacoRange({
+        start: { line: h.line - 1, character: col },
+        end: { line: h.line - 1, character: col + word.length },
+      }),
+    };
+  });
 }
 
 let registered = false;
@@ -170,9 +216,9 @@ export function registerLangProviders(): void {
   monaco.languages.registerDefinitionProvider("java", {
     provideDefinition: async (model, position) => {
       const ctx = context(model, position);
-      if (!ctx) return null;
+      if (!ctx) return lightDefinition(model, position);
       const res = await ask<unknown>("textDocument/definition", ctx);
-      const out: { uri: ReturnType<typeof monaco.Uri.parse>; range: ReturnType<typeof toMonacoRange> }[] = [];
+      const out: Loc[] = [];
       for (const t of toTargets(res)) {
         // jar 内的类：先把源码取来建好只读 model，Monaco 才能解析这个目标
         if (t.uri.startsWith("jdt://")) {

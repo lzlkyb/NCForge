@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   completionKindName,
   contentsToMarkdown,
+  declarationPattern,
+  isIdentifier,
   isStubSource,
   jdtDisplayName,
   severityName,
@@ -53,6 +55,20 @@ describe("langConvert", () => {
     ]);
     expect(contentsToMarkdown(null)).toEqual([]);
     expect(contentsToMarkdown({ kind: "plaintext", value: "" })).toEqual([]);
+  });
+
+  it("轻量模式查声明的正则只接受标识符，并能命中真实声明行", () => {
+    expect(isIdentifier("BaseDAO")).toBe(true);
+    expect(isIdentifier("Inner$1")).toBe(true);
+    expect(isIdentifier("a.b")).toBe(false);
+    expect(isIdentifier("1abc")).toBe(false);
+    expect(isIdentifier("")).toBe(false);
+    const re = new RegExp(declarationPattern("BaseDAO"));
+    expect(re.test("public class BaseDAO extends PubDAO {")).toBe(true);
+    expect(re.test("public interface BaseDAO {")).toBe(true);
+    expect(re.test("class BaseDAOHelper {")).toBe(false); // 名字只是前缀
+    expect(re.test("new BaseDAO()")).toBe(false); // 只是使用
+    expect(new RegExp(declarationPattern("Inner$1")).test("class Inner$1 {")).toBe(true);
   });
 
   it("跳转目标兼容 Location 与 LocationLink", () => {
