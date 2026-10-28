@@ -241,17 +241,26 @@ jobs:
       - uses: actions/upload-artifact@v5
         with:
           name: nc-forge-macos
-          path: dist-out/*
+          # 🔴 uses: 步骤没有 working-directory（配了也被忽略），cwd 永远是
+          # 仓库根。上面 Collect artifacts 的 cwd 是 desktop（它的 cp 路径
+          # 按 desktop 相对写），所以这里必须带 desktop/ 前缀——写 dist-out/*
+          # 会在仓库根找不到目录，upload 只 warn "No files were found" 然后
+          # 静默跳过（warning 不 fail job），下游 Windows job 下载不到片段，
+          # updater.json 缺 mac 条目，而两个 job 全是绿的。
+          path: desktop/dist-out/*
 
       # 只 attach 用户/updater 要下载的东西。updater.json 由 build-windows 合并后统一 attach，
       # 在这里 attach 会与它冲突。
       - name: Attach macOS 产物到 GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          # 同 upload：uses: 步骤 cwd 是仓库根，产物在 desktop/dist-out/。
+          # 少了 desktop/ 前缀时 fail_on_unmatched_files: false 会让 attach
+          # 静默跳过，Release 上永远看不到 mac 产物而 job 全绿。
           files: |
-            dist-out/*.app.tar.gz
-            dist-out/*.app.tar.gz.sig
-            dist-out/*.zip
+            desktop/dist-out/*.app.tar.gz
+            desktop/dist-out/*.app.tar.gz.sig
+            desktop/dist-out/*.zip
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
