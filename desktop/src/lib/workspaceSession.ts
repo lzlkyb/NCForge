@@ -55,6 +55,11 @@ export interface TabMeta {
   readOnlyReason: "mixed" | "lossy" | null;
   /** 打开时的行数。超过阈值要提示「语义补全不可用」，不必为了它再读一次文件。 */
   lines: number;
+  /**
+   * 虚拟文件（不在磁盘上）：jar 内的类，`path` 是 jdt:// 地址。
+   * `source` = 有真实源码（配了 _src.jar），`stub` = 只有方法签名。不可编辑、不可保存、不可编译。
+   */
+  virtual?: "source" | "stub";
 }
 
 export interface WorkspaceSession {

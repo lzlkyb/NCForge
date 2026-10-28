@@ -336,5 +336,12 @@
 .wb-log-mu { color: hsl(var(--muted-foreground)); }
 .wb-tabs-sp { flex: 1; }
 .wb-compile-btn { align-self: center; margin: 0 8px; flex-shrink: 0; }
+/* 状态栏的代码智能状态（设计稿 .ls） */
+.wb-lang { display: inline-flex; align-items: center; gap: 5px; }
+.wb-lang-dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--success)); }
+.wb-lang[data-tone="busy"] .wb-lang-dot { background: hsl(var(--warning)); animation: wb-lang-pulse 1s infinite; }
+.wb-lang[data-tone="bad"] { color: hsl(var(--destructive-ink)); font-weight: 600; }
+@keyframes wb-lang-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .wb-lang[data-tone="busy"] .wb-lang-dot { animation: none; } }
 .wb-status-btn { color: inherit; font-size: inherit; padding: 0 4px; border-radius: 4px; }
 .wb-status-btn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }

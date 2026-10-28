@@ -30,6 +30,9 @@ vi.mock("../../lib/monacoSetup", () => ({
   },
 }));
 
+// 语言服务的 provider 注册与编辑器包装无关，且会拉进一整条依赖链
+vi.mock("../../lib/langProviders", () => ({ registerLangProviders: vi.fn() }));
+
 vi.mock("../../lib/editorStore", () => ({
   getModel: () => undefined,
   getViewState: () => null,

@@ -52,12 +52,17 @@ const MAX_HOOKS = 8;
  * FileTree 的行主要在多选/重命名/拖拽三套交互 + 虚拟滚动，可按交互拆；
  * FilesTab 是工具栏 + 表格 + 右键菜单 + 对话框的状态编排；
  * SearchTab 是结果分组 + 预览 + 替换。谁改谁拆，拆完把这里的数字调低。
+ *
+ * 2026-10-28（当天晚些）：三项**已拆完，登记表清空**。
+ * - FileTree 714 → 271：取数/展开 → `useTreeLoad`，新建重命名 → `useTreeEdit`，
+ *   删除 → `useTreeDelete`，行渲染 → `TreeRow` / `TreeEditRow`，菜单项 → `treeMenu`。
+ * - FilesTab 589 → 258：标签生命周期 → `hooks/useFileSession`，标题栏 / 标签条 /
+ *   提示条 / 状态栏 / 空引导 → `TreeHeader` `TabStrip` `EditorBanners`
+ *   `EditorStatus` `NoWorkspace`。
+ * - SearchTab 430 → 101：条件栏 → `search/SearchBar`，结果区 → `search/SearchResults`。
+ * 拆的全是搬运，没有改行为与 DOM 结构（CSS 选择器与文案逐字保持）。
  */
-const BASELINE = {
-  "src/components/workspace/FileTree.tsx": { lines: 714, hooks: 10 },
-  "src/components/tabs/FilesTab.tsx": { lines: 589, hooks: 10 },
-  "src/components/tabs/SearchTab.tsx": { lines: 430 },
-};
+const BASELINE = {};
 
 function walk(dir, out = []) {
   let items;

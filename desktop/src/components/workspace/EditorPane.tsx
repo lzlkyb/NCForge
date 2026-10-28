@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { getModel, getViewState, saveViewState } from "../../lib/editorStore";
+import { registerLangProviders } from "../../lib/langProviders";
 
 interface Props {
   /** 当前显示的文件；null = 没有打开的文件。 */
@@ -40,6 +41,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
   useEffect(() => {
     if (!hostRef.current) return;
     initMonaco();
+    registerLangProviders();
     const editor = monaco.editor.create(hostRef.current, {
       model: null,
       automaticLayout: true,
