@@ -114,6 +114,8 @@ pub fn port_pid(_port: u16) -> Option<u32> {
 /// 进程名缓存的有效期。状态是 1 秒一轮，10 秒意味着稳态下几乎不查 tasklist；
 /// 而 PID 在这段时间内被系统复用给另一个程序的可能性足够低——真要做安全判定时
 /// 调用方会绕过缓存重查（见 `server_kill_port_owner`）。
+// 只被 Windows 的 process_name_cached 用；非 Windows 平台连函数都没有，留着就是死代码
+#[cfg(windows)]
 const PROCESS_NAME_TTL: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// 带缓存的进程名查询。**只用于显示**；决定「能不能杀」必须用 `process_name`。
@@ -142,10 +144,8 @@ fn process_name_cached(pid: u32) -> Option<String> {
     Some(name)
 }
 
-#[cfg(not(windows))]
-fn process_name_cached(_pid: u32) -> Option<String> {
-    None
-}
+// 没有 `#[cfg(not(windows))]` 的桩：唯一调用方 port_owner 就是 Windows 专属，
+// 非 Windows 平台留桩反而触发 dead_code（2026-10-28 CI 实测）。
 
 /// 取进程名（不含路径）。查不到返回 None。
 #[cfg(windows)]
