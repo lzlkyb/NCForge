@@ -10,6 +10,7 @@
 
 mod compile_cmds;
 mod db_cmds;
+mod lang_cmds;
 mod patch_cmds;
 mod search_cmds;
 mod server_cmds;
@@ -20,6 +21,7 @@ mod workspace_cmds;
 
 pub use compile_cmds::*;
 pub use db_cmds::*;
+pub use lang_cmds::*;
 pub use patch_cmds::*;
 pub use search_cmds::*;
 pub use server_cmds::*;

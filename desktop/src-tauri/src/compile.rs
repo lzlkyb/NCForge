@@ -101,7 +101,7 @@ pub fn module_of(project_root: &Path, file: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
-fn collect_sources(module_dir: &Path) -> Vec<PathBuf> {
+pub fn collect_sources(module_dir: &Path) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(rd) = std::fs::read_dir(dir) else {
             return;
@@ -273,8 +273,17 @@ fn class_supers(jar: &Path, fqcn: &str) -> Vec<String> {
 
 /// 沿父类/接口链把需要的 jar 全部补上（有深度上限，防止环或异常数据）。
 fn add_super_chain(index: &ClassIndex, jars: &mut BTreeSet<u32>, start: &str) {
+    add_super_chain_seen(index, jars, start, &mut std::collections::HashSet::new());
+}
+
+/// 带「已访问」集合的版本：批量处理很多文件时共用同一个集合，同一个父类只读一次 class 头。
+fn add_super_chain_seen(
+    index: &ClassIndex,
+    jars: &mut BTreeSet<u32>,
+    start: &str,
+    seen: &mut std::collections::HashSet<String>,
+) {
     let mut queue = vec![(start.to_string(), 0u32)];
-    let mut seen = std::collections::HashSet::new();
     while let Some((name, depth)) = queue.pop() {
         if depth > 30 || !seen.insert(name.clone()) || name == "java.lang.Object" {
             continue;
@@ -395,6 +404,34 @@ fn parse_header(line: &str) -> Option<(String, String, u32)> {
     let (file, tail) = rest.rsplit_once(" (at line ")?;
     let ln = tail.strip_suffix(')')?.parse().ok()?;
     Some((sev.to_string(), file.to_string(), ln))
+}
+
+/// 不经过 ecj、只按源码本身挑出这批文件需要的 jar：import、同包、父类型链。
+///
+/// 语言服务（M4）没有「编译报错 → 补 jar」的反馈环，所以把 `discover_hierarchy` 事后才补的
+/// 继承链提前展开，否则会出现 `VoucherResources` 那种「继承层次不一致」的假红线。
+pub fn select_jars(index: &ClassIndex, files: &[PathBuf]) -> BTreeSet<u32> {
+    let mut jars = BTreeSet::new();
+    let mut seen = std::collections::HashSet::new();
+    for f in files {
+        let Ok(bytes) = std::fs::read(f) else {
+            continue;
+        };
+        let text = decode_lossy(&bytes);
+        if let Some(pkg) = extract_package(&text) {
+            add_import(index, &mut jars, &pkg, true);
+        }
+        for (name, wildcard) in extract_imports(&text) {
+            add_import(index, &mut jars, &name, wildcard);
+        }
+        let Some(stem) = f.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        for sup in declared_supertypes(&text, &stem) {
+            add_super_chain_seen(index, &mut jars, &sup, &mut seen);
+        }
+    }
+    jars
 }
 
 /// 「The hierarchy of the type X is inconsistent」：X 的某级父类缺失，ecj 不会点名是哪个。

@@ -486,6 +486,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::fs_count_files,
             commands::fs_encoding_marks,
             commands::compile_module,
+            commands::lang_start,
+            commands::lang_stop,
+            commands::lang_status,
+            commands::lang_request,
+            commands::lang_notify,
             commands::search_workspace,
             commands::server_status,
             commands::server_start,
@@ -603,8 +608,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             //
             // 只拦 `code: None`：那是“窗口全关”触发的退出。托盘菜单「退出」走的是
             // `tray_app.exit(0)`，会带 `code: Some(0)`，不在此列，因此真退出仍然正常。
-            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
+            if let tauri::RunEvent::ExitRequested { code: None, ref api, .. } = event {
                 api.prevent_exit();
+            }
+            // 真退出时杀掉 jdt.ls，不留孤儿 Java 进程
+            if let tauri::RunEvent::Exit = event {
+                if let Some(st) = app_handle.try_state::<std::sync::Arc<AppState>>() {
+                    let session = st.lang.lock().unwrap_or_else(|e| e.into_inner()).session.take();
+                    if let Some(s) = session {
+                        s.client.kill();
+                    }
+                }
             }
         });
 

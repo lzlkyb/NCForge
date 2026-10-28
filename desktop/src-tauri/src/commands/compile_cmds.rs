@@ -41,14 +41,42 @@ fn find_ecj(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .ok_or_else(|| "找不到内置的 ecj 编译器（ecj-3.17.jar）".to_string())
 }
 
-/// 编译 `path` 所在的模块。`path` 可以是模块目录，也可以是模块内任一文件；
-/// 进度以 `compile-log` 事件逐行推给前端，返回值是完整结果（含问题列表）。
-#[tauri::command]
-pub async fn compile_module(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, Arc<AppState>>,
-    path: String,
-) -> Result<CompileResult, String> {
+/// 取（或首次构建）类索引，并带出该模块上次编译用到的 jar；进程内复用。
+/// 首次冷扫约 10~100 秒，之后读磁盘缓存不到 1 秒。编译与语言服务共用这一份。
+pub(super) fn cached_index(
+    nc_home: &Path,
+    cache_path: &Path,
+    module: &str,
+    log: &(dyn Fn(&str) + Sync),
+) -> Result<(Arc<ClassIndex>, Vec<u32>), String> {
+    let mut guard = CACHE.lock().map_err(|_| "内部状态异常".to_string())?;
+    if guard.as_ref().map(|c| c.nc_home != nc_home).unwrap_or(true) {
+        log("正在建立 NC 类索引（首次较慢，之后会缓存）…");
+        let progress = |done: usize, total: usize| {
+            if total > 0 && (done.is_multiple_of(500) || done == total) {
+                log(&format!("扫描 jar {done}/{total}"));
+            }
+        };
+        let index =
+            ClassIndex::load_or_build(classpath_jars(nc_home), Some(cache_path), Some(&progress));
+        *guard = Some(Cached {
+            nc_home: nc_home.to_path_buf(),
+            index: Arc::new(index),
+            seeds: Default::default(),
+        });
+    }
+    let c = guard.as_ref().ok_or("内部状态异常")?;
+    Ok((
+        c.index.clone(),
+        c.seeds.get(module).cloned().unwrap_or_default(),
+    ))
+}
+
+/// 解析 `path` 所属的工作区根与模块名。`path` 可以是模块目录，也可以是模块内任一文件。
+pub(super) async fn resolve_module(
+    state: &AppState,
+    path: &str,
+) -> Result<(PathBuf, String), String> {
     let root = state
         .config
         .read()
@@ -56,7 +84,7 @@ pub async fn compile_module(
         .workspace_root
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
-    let target = resolve_safe_path(&path, std::slice::from_ref(&root), &[], true)?;
+    let target = resolve_safe_path(path, std::slice::from_ref(&root), &[], true)?;
     // resolve_safe_path 返回的是 canonicalize 后带 `\?\` 前缀的路径，工作区根是去掉前缀的，
     // 两边都规整成同一种写法，否则 strip_prefix 永远匹配不上
     let target = PathBuf::from(display_path(&target));
@@ -66,6 +94,18 @@ pub async fn compile_module(
     let module = compile::module_of(&root, &target).ok_or_else(|| {
         "所选路径不在工作区的某个模块里（工作区根应是 newar 这类包含各模块的目录）".to_string()
     })?;
+    Ok((root, module))
+}
+
+/// 编译 `path` 所在的模块。`path` 可以是模块目录，也可以是模块内任一文件；
+/// 进度以 `compile-log` 事件逐行推给前端，返回值是完整结果（含问题列表）。
+#[tauri::command]
+pub async fn compile_module(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<CompileResult, String> {
+    let (root, module) = resolve_module(&state, &path).await?;
     // NC home 由配置决定（见 nc_home::resolve），编译与启动服务共用同一份解析结果
     let home = nc_home::resolve(state.config.read().await.nc_home.as_deref())?;
     let nc_home = PathBuf::from(&home.root);
@@ -78,33 +118,7 @@ pub async fn compile_module(
         let log = |s: &str| {
             let _ = app.emit("compile-log", s.to_string());
         };
-        // 取（或首次构建）类索引；首次冷扫约 10~100 秒，之后读磁盘缓存不到 1 秒
-        let (index, seed) = {
-            let mut guard = CACHE.lock().map_err(|_| "内部状态异常".to_string())?;
-            if guard.as_ref().map(|c| c.nc_home != nc_home).unwrap_or(true) {
-                log("正在建立 NC 类索引（首次较慢，之后会缓存）…");
-                let progress = |done: usize, total: usize| {
-                    if total > 0 && (done.is_multiple_of(500) || done == total) {
-                        let _ = app.emit("compile-log", format!("扫描 jar {done}/{total}"));
-                    }
-                };
-                let index = ClassIndex::load_or_build(
-                    classpath_jars(&nc_home),
-                    Some(&cache_path),
-                    Some(&progress),
-                );
-                *guard = Some(Cached {
-                    nc_home: nc_home.clone(),
-                    index: Arc::new(index),
-                    seeds: Default::default(),
-                });
-            }
-            let c = guard.as_ref().ok_or("内部状态异常")?;
-            (
-                c.index.clone(),
-                c.seeds.get(&module).cloned().unwrap_or_default(),
-            )
-        };
+        let (index, seed) = cached_index(&nc_home, &cache_path, &module, &log)?;
         let env = CompileEnv {
             nc_home: &nc_home,
             java_exe: &java,

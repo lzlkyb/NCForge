@@ -40,6 +40,8 @@ pub struct AppState {
     /// 与 `svn` 分开存而不是共用一个桥：两者的 classpath、主类、堆上限都不同，
     /// 且「换 SVN 账号」不应该把数据库会话也一起打断。
     pub db: std::sync::Mutex<Option<std::sync::Arc<crate::db_bridge::Bridge>>>,
+    /// 代码智能（jdt.ls）会话与状态。同样在 `spawn_blocking` 里持锁，用 std Mutex。
+    pub lang: std::sync::Mutex<crate::lang::LangRun>,
     /// 供 notifications feature 关闭时也能注入的 AppHandle 存根。
     /// 需要发桌面通知的代码统一走 main.rs 的 `notify_toast`（那里按 feature 门控），
     /// 不要直接持有 AppHandle 到处发。
@@ -55,6 +57,7 @@ impl AppState {
             server: std::sync::Mutex::new(ServerRun::default()),
             svn: std::sync::Mutex::new(None),
             db: std::sync::Mutex::new(None),
+            lang: std::sync::Mutex::new(Default::default()),
             app_handle: std::sync::Mutex::new(None),
         })
     }
