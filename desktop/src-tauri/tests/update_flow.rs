@@ -106,16 +106,25 @@ fn local_http_source_drives_check_download_and_signature_failure() {
     // 假安装包：64KB 确定性字节（内容无所谓，反正验签必失败）。
     let artifact: Vec<u8> = (0..65_536u32).map(|i| (i % 251) as u8).collect();
 
+    // manifest 的平台键必须与当前编译目标一致：updater 未显式指定 target 时，
+    // 依次在 platforms 里找 `{os}-{arch}-{installer}` 和 `{os}-{arch}`
+    // （见插件 get_urls 的回退列表）。写死 windows-x86_64 会让 macOS 直接
+    // TargetsNotFound（2026-10-28 CI 实测）。target() 返回的正是 `{os}-{arch}`，
+    // 必然命中第二顺位；生产 updater.json 的 macOS 键也是 darwin-aarch64
+    // （generate-updater-json.mjs），与这里一致。
+    let platform_key = tauri_plugin_updater::target().expect("当前平台应能推出 updater target");
+
     let port = spawn_local_update_source(
         |port| {
             format!(
                 concat!(
                     r#"{{"version":"{v}","notes":"本地集成测试","pub_date":"2026-10-27T00:00:00Z","#,
-                    r#""platforms":{{"windows-x86_64":{{"signature":"{sig}","#,
+                    r#""platforms":{{"{pk}":{{"signature":"{sig}","#,
                     r#""url":"http://127.0.0.1:{port}{path}"}}}}}}"#
                 ),
                 v = next_version,
                 sig = fake_sig,
+                pk = platform_key,
                 port = port,
                 path = artifact_path,
             )
