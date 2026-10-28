@@ -625,8 +625,16 @@ pub(crate) mod tests {
             b"",
         )
         .unwrap();
-        std::fs::create_dir_all(dir.join("config_win")).unwrap();
-        std::fs::write(dir.join("config_win").join("config.ini"), b"osgi.bundles=x").unwrap();
+        // 非 Windows 平台的生产代码读 config_linux（见 prepare_config 的
+        // cfg!(windows) 分支）；只建 config_win 会让 command() 在复制
+        // config.ini 时失败、unwrap panic（2026-10-28 macOS CI 实测）。
+        let cfg_src = dir.join(if cfg!(windows) {
+            "config_win"
+        } else {
+            "config_linux"
+        });
+        std::fs::create_dir_all(&cfg_src).unwrap();
+        std::fs::write(cfg_src.join("config.ini"), b"osgi.bundles=x").unwrap();
         let cfg = dir.join("cfg");
         let spec = JdtlsLaunch {
             java_exe: Path::new("java"),

@@ -205,6 +205,7 @@ pub fn build_changes(root: &Path, raw: &[RawEntry]) -> ChangesView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn raw(path: &str, status: &str, dir: bool) -> RawEntry {
         RawEntry {
@@ -252,15 +253,42 @@ mod tests {
 
     #[test]
     fn 分组按条目数降序且构建产物只打标记不删除() {
-        let root = Path::new(r"C:\ws");
+        // 组件拼路径：Unix 上反斜杠不是分隔符，strip_prefix 对 Windows
+        // 字面量直接失败，rel 退化成整条绝对路径、模块名全乱
+        // （2026-10-28 macOS CI 实测）。
+        let root = PathBuf::from("C:").join("ws");
         let raw = vec![
-            raw(r"C:\ws\pu\A.java", "modified", false),
-            raw(r"C:\ws\pu\classes\A.class", "unversioned", false),
-            raw(r"C:\ws\ic\B.java", "added", false),
-            raw(r"C:\ws\ic\C.java", "modified", false),
-            raw(r"C:\ws\.module_prj", "modified", false),
+            raw(
+                &root.join("pu").join("A.java").to_string_lossy(),
+                "modified",
+                false,
+            ),
+            raw(
+                &root
+                    .join("pu")
+                    .join("classes")
+                    .join("A.class")
+                    .to_string_lossy(),
+                "unversioned",
+                false,
+            ),
+            raw(
+                &root.join("ic").join("B.java").to_string_lossy(),
+                "added",
+                false,
+            ),
+            raw(
+                &root.join("ic").join("C.java").to_string_lossy(),
+                "modified",
+                false,
+            ),
+            raw(
+                &root.join(".module_prj").to_string_lossy(),
+                "modified",
+                false,
+            ),
         ];
-        let v = build_changes(root, &raw);
+        let v = build_changes(&root, &raw);
         assert_eq!(v.total, 5);
         // 构建产物仍在分组里（界面按标记隐藏），但计数不含它
         assert_eq!(v.ignored, 1);
@@ -284,8 +312,10 @@ mod tests {
 
     #[test]
     fn 相对路径统一正斜杠() {
-        let root = Path::new(r"C:\ws");
-        let p = Path::new(r"C:\ws\pu\src\A.java");
-        assert_eq!(relative(root, p), "pu/src/A.java");
+        // 组件拼路径：Unix 上 strip_prefix 对 Windows 字面量失败，
+        // 拿到的是整条绝对路径（2026-10-28 macOS CI 实测）。
+        let root = PathBuf::from("C:").join("ws");
+        let p = root.join("pu").join("src").join("A.java");
+        assert_eq!(relative(&root, &p), "pu/src/A.java");
     }
 }

@@ -407,9 +407,13 @@ mod tests {
 
     #[test]
     fn 探测父目录先工作副本再父级() {
-        let p = probe_parents(Some(Path::new(r"D:\ws\newar")));
-        assert_eq!(p[0], PathBuf::from(r"D:\ws\newar"));
-        assert_eq!(p[1], PathBuf::from(r"D:\ws"));
+        // 组件拼路径而非 Windows 字面量：Unix 上反斜杠不是分隔符，
+        // 整串是单组件，parent() 拿到 Some("") 而不是真父目录
+        // （2026-10-28 macOS CI 实测）。
+        let ws = PathBuf::from("D:").join("ws");
+        let p = probe_parents(Some(&ws.join("newar")));
+        assert_eq!(p[0], ws.join("newar"));
+        assert_eq!(p[1], ws);
     }
 
     #[test]
@@ -460,11 +464,13 @@ mod tests {
     #[test]
     fn 建议目录落在工作副本同级而不是里面() {
         // 与 patch_defaults 里 suggest 分支同一套算法
-        let root = Path::new(r"D:\NC技术\newar");
-        let base = root.parent().unwrap_or(root);
+        // 组件拼路径：Unix 上 r"D:\NC技术\newar" 是单组件，
+        // parent() 是 Some("")，同级断言必挂（2026-10-28 macOS CI 实测）。
+        let root = PathBuf::from("D:").join("NC技术").join("newar");
+        let base = root.parent().unwrap_or(&root);
         assert_eq!(
             base.join(PATCH_DIR_NAMES[0]),
-            PathBuf::from(r"D:\NC技术\待上线补丁")
+            PathBuf::from("D:").join("NC技术").join(PATCH_DIR_NAMES[0])
         );
     }
 }
