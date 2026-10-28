@@ -208,7 +208,9 @@ fn read_cache(path: &Path) -> Option<HashMap<PathBuf, CachedJar>> {
         } else {
             let raw = take(&mut pos, n as usize * 16)?;
             Some(
-                raw.chunks_exact(16)
+                raw.as_chunks::<16>()
+                    .0
+                    .iter()
                     .map(|c| (u64_at(&c[..8]), u64_at(&c[8..])))
                     .collect(),
             )

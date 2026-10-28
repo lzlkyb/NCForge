@@ -16,6 +16,8 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+// 只有 Windows 的 create_link（mklink /J）用得到；非 Windows 平台导入会报 unused。
+#[cfg(windows)]
 use std::process::Command;
 
 use crate::compile;

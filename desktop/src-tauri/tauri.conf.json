@@ -33,10 +33,10 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://YOUR-USER.github.io/YOUR-REPO/updater.json",
-        "https://github.com/YOUR-USER/YOUR-REPO/releases/latest/download/updater.json"
+        "https://lzlkyb.github.io/NCForge/updater.json",
+        "https://github.com/lzlkyb/NCForge/releases/latest/download/updater.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI0MjIzNTEyNTFGOURCQzkKUldUSjIvbFJFalVpdE5kV0JMZkE2RUY1NmFBK3N4WTFTZHI0ZzV3T3Q1STRmRys4akIrVkoxZFIK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRDRkM3MjgzMzdEQjQwNTUKUldSVlFOczNnM0w4VEJYTHZtWnhITy9hcVRsMi9iKzRyQWVtRWxoQjcrM1A3eE40bXJOUHNWcEIK",
       "windows": {},
       "dangerousInsecureTransportProtocol": true,
       "active": true

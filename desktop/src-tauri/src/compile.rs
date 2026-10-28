@@ -396,10 +396,9 @@ fn parse_header(line: &str) -> Option<(String, String, u32)> {
     }
     let (sev, rest) = if let Some(r) = rest.strip_prefix("ERROR in ") {
         ("error", r)
-    } else if let Some(r) = rest.strip_prefix("WARNING in ") {
-        ("warning", r)
     } else {
-        return None;
+        let r = rest.strip_prefix("WARNING in ")?;
+        ("warning", r)
     };
     let (file, tail) = rest.rsplit_once(" (at line ")?;
     let ln = tail.strip_suffix(')')?.parse().ok()?;

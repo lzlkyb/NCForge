@@ -431,6 +431,10 @@ impl LspClient {
     }
 
     pub fn kill(&self) {
+        // 先同步置位再杀进程：读取线程的 EOF 观察是异步的，而 kill 之后
+        // is_alive() 必须立刻为假。否则会出现「进程已死、请求已因写管道失败
+        // 快速返回，is_alive() 却还是 true」的窗口（崩溃测试实测踩到过）。
+        self.alive.store(false, Ordering::SeqCst);
         let mut child = lock(&self.child);
         let _ = child.kill();
         let _ = child.wait();

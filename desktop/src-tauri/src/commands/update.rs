@@ -153,8 +153,12 @@ fn error_class(err: &tauri_plugin_updater::Error) -> ErrorClass {
         | UpdaterError::BinaryNotFoundInArchive
         | UpdaterError::InvalidUpdaterFormat
         | UpdaterError::FailedToDetermineExtractPath
-        | UpdaterError::Extract(_)
         | UpdaterError::Tauri(_) => ErrorClass::Install,
+        // `Extract` 是插件的 Windows 专属变体（插件侧 `#[cfg(all(target_os = "windows",
+        // feature = "zip"))]`，zip 是默认 feature 且本项目没关默认特性），并进上面的
+        // or-pattern 会让 macOS 编译不过（E0599，2026-10-28 首次 CI 实测）。
+        #[cfg(target_os = "windows")]
+        UpdaterError::Extract(_) => ErrorClass::Install,
         _ => ErrorClass::Unknown,
     }
 }
