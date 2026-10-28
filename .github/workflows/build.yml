@@ -209,6 +209,7 @@ jobs:
         working-directory: desktop
 
       - name: 📦 打包给用户下载的 zip
+        working-directory: desktop
         run: |
           set -e
           VERSION=$(node -e "console.log(require('./src-tauri/tauri.conf.json').version)")
@@ -221,6 +222,11 @@ jobs:
           echo "✅ $ZIP  ($(du -h "$ZIP" | cut -f1))"
 
       - name: Collect artifacts
+        # cwd 必须落在 desktop：下面 cp 的 src-tauri/... 与 dist/... 都是相对
+        # desktop 的路径。漏了这行的后果不是报错而是**静默收集空**——
+        # cp 带 2>/dev/null || true，ls 只列 dist-out，attach 又是
+        # fail_on_unmatched_files: false，一路绿灯但产物一个都没上去。
+        working-directory: desktop
         run: |
           set -e
           mkdir -p dist-out
