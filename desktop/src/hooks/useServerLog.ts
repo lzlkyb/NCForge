@@ -16,7 +16,7 @@ import { appendChunk, emptyLogState, type LogLine, type LogState } from "../lib/
  * 而上一代的拉取请求可能还在路上。它回来时若直接落笔，旧内容会插进新一代，
  * offset 还会被旧文件的长度带偏——新一代的头几行就永远对不上了。
  */
-export function useServerLog(active: boolean, generation: number) {
+export function useServerLog(active: boolean, generation: number, appHidden = false) {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [error, setError] = useState<string | null>(null);
   const offsetRef = useRef(0);
@@ -51,9 +51,14 @@ export function useServerLog(active: boolean, generation: number) {
     }
   }, []);
 
-  /** 从零重读（换一代日志、或用户清空日志之后）。 */
-  const reset = useCallback(() => {
-    offsetRef.current = 0;
+  /**
+   * 从 `from` 重读（换一代日志从 0；运行中清空日志时从当前文件末尾）。
+   *
+   * `from` 不能写死 0：服务运行时清空日志不动磁盘文件（java 的 append 句柄会继续写
+   * 旧 inode），偏移归零会把整份旧日志又读回来，看起来像「清空没生效」。
+   */
+  const reset = useCallback((from = 0) => {
+    offsetRef.current = from;
     stateRef.current = emptyLogState();
     epochRef.current += 1;
     setLines([]);
@@ -65,11 +70,15 @@ export function useServerLog(active: boolean, generation: number) {
     void tick();
   }, [generation, reset, tick]);
 
+  // 窗口隐藏时也停轮询：本页的统一约定是「隐藏即停」（状态轮询已经这么做了）。
+  // 以前这里只看 active（=running），隐藏后状态停在 running，日志照旧每 0.5 秒
+  // invoke + 读盘——而它恰恰是最贵的那一个。恢复可见时立刻补一拍，不留在屏的是旧内容。
   useEffect(() => {
-    if (!active) return;
+    if (!active || appHidden) return;
     const id = window.setInterval(() => void tick(), 500);
+    void tick();
     return () => window.clearInterval(id);
-  }, [active, tick]);
+  }, [active, appHidden, tick]);
 
   // 停止后补拉尾部。服务崩掉时，最后的堆栈往往写在「最后一次轮询」到「进程消失」
   // 之间——active 一关就停轮询，那段永远看不见，而排查崩溃偏偏只看那段。

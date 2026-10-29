@@ -5,12 +5,8 @@ import { ResultGrid } from "../db/ResultGrid";
 import { DbErrorBox } from "../db/DbErrorBox";
 import { ConnectDialog } from "../db/ConnectDialog";
 import { useDbSession } from "../../hooks/useDbSession";
-import { friendlyDbError, parseDbError, splitJdbcUrl, thousands } from "../../lib/db";
-
-const SAMPLE = `select m.code, m.name, m.materialmny as 单价
-from bd_material m
-where m.code like 'CL04%'
-order by m.code`;
+import { dbSession, useDbForm } from "../../lib/dbSession";
+import { friendlyDbError, parseDbError, splitJdbcUrl, thousands, autonomousCallHint } from "../../lib/db";
 
 /**
  * 数据库页（只读 SQL）。
@@ -23,13 +19,15 @@ order by m.code`;
  */
 export function DbTab() {
   const s = useDbSession();
-  const [sql, setSql] = useState(SAMPLE);
-  const [maxRows, setMaxRows] = useState(500);
-  const [timeoutSec, setTimeoutSec] = useState(30);
+  // P2-9：SQL 草稿 / 行数上限 / 超时进模块级仓库——切页去文件页看代码、
+  // 回来继续写，是核心动线，不能再面对示例 SQL 重写一遍。
+  const { sql, maxRows, timeoutSec } = useDbForm();
   const [manualOpen, setManualOpen] = useState(false);
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
   const lines = useMemo(() => sql.split("\n").length, [sql]);
+  // 调了自定义包函数就给一句提醒：自治事务的写操作绕得过只读事务（见 autonomousCallHint）
+  const callHint = useMemo(() => autonomousCallHint(sql), [sql]);
   const knownTables = useMemo(() => (s.tables.data ?? []).map((t) => t.name), [s.tables.data]);
   const url = s.defaults.data?.url ?? "";
   const user = s.defaults.data?.user ?? "";
@@ -75,7 +73,19 @@ export function DbTab() {
             未连接
           </span>
         )}
-        {s.conn && <span className="dq-ro">只读会话</span>}
+        {s.conn && (
+          <span
+            className="dq-ro"
+            data-tone={s.conn.readOnly ? "ok" : "warn"}
+            title={
+              s.conn.readOnly
+                ? "连接已置为只读：写操作会在数据库层被拒绝"
+                : "这条连接没有置成只读——只读只剩语句白名单一道，慎重点执行"
+            }
+          >
+            {s.conn.readOnly ? "只读会话" : "可写连接"}
+          </span>
+        )}
         <span className="dq-sp" />
         {s.conn && (
           <span className="dq-kv">
@@ -121,6 +131,13 @@ export function DbTab() {
         </div>
       )}
 
+      {s.conn && callHint && (
+        <div className="dq-banner" data-tone="warn">
+          <Icon name="alertTriangle" size={13} />
+          <span>{callHint}</span>
+        </div>
+      )}
+
       <div className="dq-body">
         <div className="dq-tools">
           <label className="dq-num">
@@ -130,7 +147,9 @@ export function DbTab() {
               min={10}
               max={2000}
               value={maxRows}
-              onChange={(e) => setMaxRows(Math.max(10, Math.min(2000, Number(e.target.value) || 500)))}
+              onChange={(e) =>
+                dbSession.set({ maxRows: Math.max(10, Math.min(2000, Number(e.target.value) || 500)) })
+              }
             />
           </label>
           <label className="dq-num">
@@ -140,7 +159,9 @@ export function DbTab() {
               min={5}
               max={120}
               value={timeoutSec}
-              onChange={(e) => setTimeoutSec(Math.max(5, Math.min(120, Number(e.target.value) || 30)))}
+              onChange={(e) =>
+                dbSession.set({ timeoutSec: Math.max(5, Math.min(120, Number(e.target.value) || 30)) })
+              }
             />
             s
           </label>
@@ -169,7 +190,7 @@ export function DbTab() {
             className="dq-code"
             value={sql}
             spellCheck={false}
-            onChange={(e) => setSql(e.target.value)}
+            onChange={(e) => dbSession.set({ sql: e.target.value })}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
@@ -188,7 +209,7 @@ export function DbTab() {
             <Icon name="database" size={22} />
             <span>
               {s.conn
-                ? "写好 SQL 按 Ctrl+Enter 执行。结果最多 500 行，超了只显示前 500 行"
+                ? `写好 SQL 按 Ctrl+Enter 执行。结果最多 ${maxRows} 行，超了只显示前 ${maxRows} 行`
                 : "先点右上角「连接」"}
             </span>
           </div>

@@ -72,7 +72,7 @@ describe("搜索页", () => {
       if (cmd === "search_workspace")
         return {
           hits: [
-            { path: "modules/ic/src/A.java", line: 12, text: "billSave(v);", ranges: [{ start: 0, end: 8 }] },
+            { path: "modules/ic/src/A.java", line: 12, text: "billSave(v);", ranges: [{ start: 2, end: 8 }] },
             { path: "modules/ic/src/A.java", line: 30, text: "x = billSave;", ranges: [{ start: 4, end: 12 }] },
           ],
           filesMatched: 1,
@@ -106,7 +106,9 @@ describe("搜索页", () => {
       b.textContent?.includes("billSave(v);"),
     )!;
     await act(async () => hit.click());
-    expect(onOpenFile).toHaveBeenCalledWith(`${ROOT}\\modules\\ic\\src\\A.java`, 12);
+    // 第三个参数是列号：ranges[0].start 是行内 UTF-16 偏移（0 基 2），+1 得 1 基列号 3。
+    // 只跳到行首的话长行里还得肉眼找。
+    expect(onOpenFile).toHaveBeenCalledWith(`${ROOT}\\modules\\ic\\src\\A.java`, 12, 3);
   });
 
   it("正则出错时清掉旧结果并就地报错（不弹 toast）", async () => {

@@ -81,6 +81,26 @@ fn default_true() -> bool {
     true
 }
 
+impl AppConfig {
+    /// 抹掉口令密文，供 `get_config` / `patch_config` 回给前端。
+    ///
+    /// DPAPI 密文虽然换机器/换用户就解不开，但把它一并发给前端没有任何好处：
+    /// 前端没有任何地方消费这两个字段，而 IPC 桥对面是整个 webview——多一跳
+    /// 就多一分泄露面（devtools、崩溃转储、被投毒的依赖库都能看见）。
+    /// 有值 ⇒ `Some(REDACTED)`，没值 ⇒ `None`：「设没设过」的信息不丢，
+    /// 密文本身不过桥。Rust 内部一律走 `state.config` 直读，不经这条出口。
+    pub fn redacted(mut self) -> Self {
+        const REDACTED: &str = "«dpapi-密文不过桥»";
+        if self.svn_password_dpapi.is_some() {
+            self.svn_password_dpapi = Some(REDACTED.to_string());
+        }
+        if self.db_password_dpapi.is_some() {
+            self.db_password_dpapi = Some(REDACTED.to_string());
+        }
+        self
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -156,4 +176,30 @@ pub fn save_config(config_dir: &std::path::Path, cfg: &AppConfig) -> Result<(), 
         return Err(format!("替换配置失败: {e}"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 口令密文不过 IPC 桥：有值抹成占位符（「设没设过」的信息不丢），没值保持 None。
+    #[test]
+    fn redacted_masks_dpapi_but_keeps_presence() {
+        let mut cfg = AppConfig::default();
+        assert!(cfg.clone().redacted().svn_password_dpapi.is_none());
+        assert!(cfg.clone().redacted().db_password_dpapi.is_none());
+
+        cfg.svn_password_dpapi = Some("AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAA".to_string());
+        cfg.db_password_dpapi = Some("AQAAANCMnd8BFdERjHoAwE/Cl+sB9999".to_string());
+        let r = cfg.clone().redacted();
+        // 占位符不是密文：任何一段真密文都不该出现在出口
+        for field in [&r.svn_password_dpapi, &r.db_password_dpapi] {
+            let v = field.as_ref().expect("有值应保留 Some");
+            assert!(!v.starts_with("AQAA"), "密文不该过桥: {v}");
+            assert!(v.len() < 32, "占位符不该像密文那么长: {v}");
+        }
+        // 其余字段原样（redacted 只碰两个口令字段）
+        assert_eq!(r.svn_user, cfg.svn_user);
+        assert_eq!(r.workspace_root, cfg.workspace_root);
+    }
 }

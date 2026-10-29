@@ -42,6 +42,12 @@ pub struct AppState {
     pub db: std::sync::Mutex<Option<std::sync::Arc<crate::db_bridge::Bridge>>>,
     /// 代码智能（jdt.ls）会话与状态。同样在 `spawn_blocking` 里持锁，用 std Mutex。
     pub lang: std::sync::Mutex<crate::lang::LangRun>,
+    /// 编译的取消标志。
+    ///
+    /// 一次编译最坏是「300 秒超时 × 6 轮」≈ 30 分钟，中间没有任何中断手段，用户只能
+    /// 杀进程。放在 AppState 上而不是模块级 static：它跟一个应用实例同生命周期，
+    /// 测试里也不会互相污染（本文件头注释的同一条纪律）。
+    pub compile_cancel: std::sync::atomic::AtomicBool,
     /// 供 notifications feature 关闭时也能注入的 AppHandle 存根。
     /// 需要发桌面通知的代码统一走 main.rs 的 `notify_toast`（那里按 feature 门控），
     /// 不要直接持有 AppHandle 到处发。
@@ -58,6 +64,7 @@ impl AppState {
             svn: std::sync::Mutex::new(None),
             db: std::sync::Mutex::new(None),
             lang: std::sync::Mutex::new(Default::default()),
+            compile_cancel: std::sync::atomic::AtomicBool::new(false),
             app_handle: std::sync::Mutex::new(None),
         })
     }

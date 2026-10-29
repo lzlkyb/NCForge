@@ -90,7 +90,10 @@ const COMPLETION_KINDS = [
 export type CompletionKindName = (typeof COMPLETION_KINDS)[number];
 
 export function completionKindName(kind: number | undefined): CompletionKindName {
-  return COMPLETION_KINDS[(kind ?? 1) - 1] ?? "Text";
+  // LSP 的 CompletionItemKind 从 1 开始，0 是 invalid。`(kind ?? 1) - 1` 对 0 会得到
+  // -1——数组负下标返回 undefined（这里靠 ?? 兜住了），但夹一下更明确，也不会在下标
+  // 被别处复用时埋雷。
+  return COMPLETION_KINDS[Math.max(0, (kind ?? 1) - 1)] ?? "Text";
 }
 
 /** LSP DiagnosticSeverity（1 错误 / 2 警告 / 3 提示 / 4 轻提示）→ Monaco `MarkerSeverity` 的成员名。 */

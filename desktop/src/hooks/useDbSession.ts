@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   dbConnect,
@@ -39,6 +39,12 @@ export function useDbSession() {
   const [result, setResult] = useState<QueryResult | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  /**
+   * run 的在途标记。`running` state 驱动按钮文字，这个 ref 挡连按——
+   * Ctrl+Enter 连按两次时，两个事件处理器可能拿着同一次渲染的闭包，
+   * 里面的 `running` 都还是 false，只有 ref 是同步置位的。
+   */
+  const runningRef = useRef(false);
 
   // 表名列表只为两件事：表结构计数、以及「表名写错」时给相近建议
   const tables = useQuery({
@@ -71,12 +77,17 @@ export function useDbSession() {
   };
 
   const run = async (sql: string, maxRows: number, timeoutSec: number) => {
+    // 在途期间后续调用直接放行掉：两个 dbQuery 并发时，finally 会把先结束的
+    // 那个的 running 置 false（另一个还在飞），结果页还会被先发后回的响应
+    // 覆盖成旧数据。按钮 disabled 挡得住鼠标，Ctrl+Enter 不过按钮。
+    if (runningRef.current) return;
     const bad = precheckSql(sql);
     if (bad) {
       setQueryError(`sql|${bad}`);
       setResult(null);
       return;
     }
+    runningRef.current = true;
     setRunning(true);
     setQueryError(null);
     try {
@@ -89,6 +100,7 @@ export function useDbSession() {
       const { code } = parseDbError(e);
       if (code === "unreachable" || code === "auth") setConn(null);
     } finally {
+      runningRef.current = false;
       setRunning(false);
     }
   };

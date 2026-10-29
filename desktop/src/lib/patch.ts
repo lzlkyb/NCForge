@@ -113,6 +113,36 @@ export const patchReveal = (path: string) => invoke<void>("patch_reveal", { path
 
 // ───────────────────────── 纯函数 ─────────────────────────
 
+/**
+ * 手动改判层（hyext / 标准层）。后端 `force_hyext` / `force_std` 两个数组就是它拆开的。
+ *
+ * 后端一直有这个能力（一路传到 `locate_layer`），界面以前恒传空数组，
+ * 于是层判错时用户没有自救手段——而报错文案还写着「或手动选层」。
+ */
+export interface LayerForce {
+  hy: string[];
+  std: string[];
+}
+
+export const NO_FORCE: LayerForce = { hy: [], std: [] };
+
+/** `path → 层` 的表拆成后端要的两个数组（顺序稳定，便于做 queryKey）。 */
+export function forceOf(layers: Map<string, "hy" | "std">): LayerForce {
+  const hy: string[] = [];
+  const std: string[] = [];
+  for (const [path, v] of layers) (v === "hy" ? hy : std).push(path);
+  return { hy, std };
+}
+
+/**
+ * 像不像绝对路径：`D:\x`、`D:/x`、`\\server\share`、`/x`。
+ * 输出目录与挂的 SQL 共用这一条——两处各写一遍正则迟早会跑偏。
+ */
+export function isAbsolutePath(p: string): boolean {
+  const t = p.trim();
+  return /^[A-Za-z]:[\\/]/.test(t) || t.startsWith("\\\\") || t.startsWith("/");
+}
+
 /** 本机日期的 `YYYYMMDD`。文件名用的就是它，所以必须取本地时区而不是 UTC。 */
 export function ymd(d: Date = new Date()): string {
   const p = (n: number) => String(n).padStart(2, "0");

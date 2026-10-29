@@ -5,6 +5,13 @@
 
 use std::time::Duration;
 
+/// 第 `attempt` 次重试前的退避秒数（attempt 从 1 起：首次失败等 1s，第二次 2s……）。
+/// 位移夹到 6（64s 平台期）：attempt 再大也只是到这里为止，且防 max_retries≥65 时
+/// `1u64 << 64` 移位溢出——debug 构建直接 panic，release 也会产出垃圾延迟。
+pub fn backoff_delay_secs(attempt: u32) -> u64 {
+    1u64 << attempt.saturating_sub(1).min(6)
+}
+
 /// 指数退避重试。
 ///
 /// `should_retry` 决定某个错误是否值得再试一次。**不能无条件重试**：确定性结论
@@ -35,7 +42,10 @@ where
                 if attempt > max_retries {
                     return Err(e);
                 }
-                let delay_secs = 1u64 << (attempt - 1);
+                // 位移夹到 6（64s 平台期）：attempt 再大也只是到这里为止。
+                // 不夹的话 max_retries≥65 时 `1u64 << 64` 移位溢出——debug 构建
+                // 直接 panic，release 也会产出垃圾延迟。
+                let delay_secs = backoff_delay_secs(attempt);
                 // +0–511ms 抖动：无抖动时，一次服务端抖动恢复会让所有客户端在
                 // 同一刻齐刷刷回源（惊群），刚缓过来的源又被自己打回去。
                 let jitter_ms = std::time::SystemTime::now()
@@ -67,15 +77,19 @@ mod tests {
     async fn non_retryable_error_is_attempted_once() {
         let calls = Arc::new(AtomicUsize::new(0));
         let counter = calls.clone();
-        let result: Result<(), String> =
-            retry_with_backoff(2, "测试", |e: &String| !e.contains("fatal"), || {
+        let result: Result<(), String> = retry_with_backoff(
+            2,
+            "测试",
+            |e: &String| !e.contains("fatal"),
+            || {
                 let counter = counter.clone();
                 async move {
                     counter.fetch_add(1, Ordering::SeqCst);
                     Err("fatal error".to_string())
                 }
-            })
-            .await;
+            },
+        )
+        .await;
 
         assert!(result.is_err());
         assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -86,13 +100,18 @@ mod tests {
     async fn retryable_error_is_attempted_again() {
         let calls = Arc::new(AtomicUsize::new(0));
         let counter = calls.clone();
-        let result: Result<(), String> = retry_with_backoff(1, "测试", |_| true, || {
-            let counter = counter.clone();
-            async move {
-                counter.fetch_add(1, Ordering::SeqCst);
-                Err("transient".to_string())
-            }
-        })
+        let result: Result<(), String> = retry_with_backoff(
+            1,
+            "测试",
+            |_| true,
+            || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Err("transient".to_string())
+                }
+            },
+        )
         .await;
 
         assert!(result.is_err());
@@ -103,12 +122,28 @@ mod tests {
     #[tokio::test]
     async fn backoff_delay_is_bounded() {
         let start = std::time::Instant::now();
-        let result: Result<(), String> = retry_with_backoff(1, "测试", |_| true, || async {
-            Err("transient".to_string())
-        })
+        let result: Result<(), String> = retry_with_backoff(
+            1,
+            "测试",
+            |_| true,
+            || async { Err("transient".to_string()) },
+        )
         .await;
         assert!(result.is_err());
         // 1s 基础退避 + ≤511ms 抖动；给 2s 上界防测试挂死
         assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    /// 指数增长到 64s 平台期后不再增长，且大 attempt 不移位溢出
+    /// （`1u64 << 64` 在 debug 下 panic——这就是本测试存在的理由）。
+    #[test]
+    fn backoff_delay_secs_grows_then_plateaus() {
+        assert_eq!(backoff_delay_secs(1), 1);
+        assert_eq!(backoff_delay_secs(2), 2);
+        assert_eq!(backoff_delay_secs(3), 4);
+        assert_eq!(backoff_delay_secs(7), 64); // 平台期
+        assert_eq!(backoff_delay_secs(65), 64); // 改动前这里 panic
+        assert_eq!(backoff_delay_secs(u32::MAX), 64);
+        assert_eq!(backoff_delay_secs(0), 1); // 防御性：0 也当首次
     }
 }

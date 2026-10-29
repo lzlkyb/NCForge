@@ -53,7 +53,10 @@ pub struct PackStatus {
 /// 本地状态快照（不联网）。前端挂载时调一次，之后靠事件驱动。
 /// `_app` 占位：命令签名保持 (app, state) 与其它命令一致，本实现只用 state。
 #[tauri::command]
-pub fn resources_status(_app: tauri::AppHandle, state: State<'_, Arc<AppState>>) -> Vec<PackStatus> {
+pub fn resources_status(
+    _app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Vec<PackStatus> {
     let config_dir = state.config_dir.clone();
     let packs_state = resource_pack::PacksState::load(&config_dir);
     resource_pack::ALL_PACKS
@@ -102,13 +105,14 @@ pub fn ensure_resources_async<R: tauri::Runtime>(app: tauri::AppHandle<R>, force
     // APP_RESOURCES_ENDPOINT（联调真实下载流程 / 集成测试的本地假源）。
     // 跳过时必须回发 uptodate：前端启动自检在等事件收尾，不发会卡在 checking。
     #[cfg(debug_assertions)]
-    let dev_auto_skip = !force
-        && std::env::var("APP_RESOURCES_ENDPOINT")
-            .map_or(true, |v| v.trim().is_empty());
+    let dev_auto_skip =
+        !force && std::env::var("APP_RESOURCES_ENDPOINT").map_or(true, |v| v.trim().is_empty());
     #[cfg(not(debug_assertions))]
     let dev_auto_skip = false;
     if dev_auto_skip {
-        log::info!("[Resource] dev 构建跳过启动自检（设 APP_RESOURCES_ENDPOINT 或手动重新下载可启用）");
+        log::info!(
+            "[Resource] dev 构建跳过启动自检（设 APP_RESOURCES_ENDPOINT 或手动重新下载可启用）"
+        );
         let _ = app.emit("resource:uptodate", serde_json::json!({}));
         return;
     }
@@ -166,7 +170,8 @@ pub fn ensure_resources_async<R: tauri::Runtime>(app: tauri::AppHandle<R>, force
             ),
         };
 
-        match resource_pack::ensure_packs(&config_dir, legacy_dir.as_deref(), force, on_event).await {
+        match resource_pack::ensure_packs(&config_dir, legacy_dir.as_deref(), force, on_event).await
+        {
             Ok(outcome) => {
                 emit(
                     "resource:ready",
@@ -207,18 +212,27 @@ fn classify(msg: &str) -> &'static str {
     if lower.contains("sha-256") || lower.contains("不完整") {
         // 包被篡改或下载损坏——与「网络不好」必须区分
         "signature"
-    } else if lower.contains("zip-slip") || lower.contains("路径不合法") || lower.contains("内容不完整") {
+    } else if lower.contains("zip-slip")
+        || lower.contains("路径不合法")
+        || lower.contains("内容不完整")
+    {
         // 包本身有问题（或源被投毒）
         "corrupt"
     } else if lower.contains("停滞") || lower.contains("超时") || lower.contains("timeout") {
         "timeout"
-    } else if lower.contains("http 4") || lower.contains("解析失败") || lower.contains("url 不合法") {
+    } else if lower.contains("http 4") || lower.contains("解析失败") || lower.contains("url 不合法")
+    {
         // 源内容确定性坏：换个源也一样，重试无意义
         "manifest"
-    } else if lower.contains("必须是 https") || lower.contains("endpoints 为空") || lower.contains("协议不支持")
+    } else if lower.contains("必须是 https")
+        || lower.contains("endpoints 为空")
+        || lower.contains("协议不支持")
     {
         "config"
-    } else if lower.contains("全部资源源均失败") || lower.contains("连接") || lower.contains("下载失败") {
+    } else if lower.contains("全部资源源均失败")
+        || lower.contains("连接")
+        || lower.contains("下载失败")
+    {
         "network"
     } else {
         "unknown"
@@ -232,13 +246,28 @@ mod tests {
     #[test]
     fn classify_separates_integrity_from_network() {
         assert_eq!(classify("SHA-256 校验失败（期望 a，实得 b）"), "signature");
-        assert_eq!(classify("下载不完整（声明 100 字节，实收 50 字节）"), "signature");
-        assert_eq!(classify("拒绝解压：第 3 个条目的路径不合法（含 ../ 或绝对路径，疑似 zip-slip）"), "corrupt");
-        assert_eq!(classify("下载停滞超过 60 秒，已中断（可重试或换源）"), "timeout");
+        assert_eq!(
+            classify("下载不完整（声明 100 字节，实收 50 字节）"),
+            "signature"
+        );
+        assert_eq!(
+            classify("拒绝解压：第 3 个条目的路径不合法（含 ../ 或绝对路径，疑似 zip-slip）"),
+            "corrupt"
+        );
+        assert_eq!(
+            classify("下载停滞超过 60 秒，已中断（可重试或换源）"),
+            "timeout"
+        );
         assert_eq!(classify("资源清单返回 HTTP 404"), "manifest");
         assert_eq!(classify("resources.json 解析失败: xxx"), "manifest");
-        assert_eq!(classify("资源源必须是 https（http://evil.com/x）；http 仅允许本机联调"), "config");
-        assert_eq!(classify("全部资源源均失败（已依次尝试）: 下载 ecj 失败: connection reset"), "network");
+        assert_eq!(
+            classify("资源源必须是 https（http://evil.com/x）；http 仅允许本机联调"),
+            "config"
+        );
+        assert_eq!(
+            classify("全部资源源均失败（已依次尝试）: 下载 ecj 失败: connection reset"),
+            "network"
+        );
         assert_eq!(classify("某个没见过的错误"), "unknown");
     }
 }

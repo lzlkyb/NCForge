@@ -1,4 +1,5 @@
 import { Icon } from "../ui/icon";
+import { keyOf } from "../../lib/svn";
 import {
   countFilters,
   filterItems,
@@ -36,7 +37,13 @@ export function PatchList({
 }: {
   items: PatchItem[];
   deleted: { rel: string }[];
-  /** 绝对路径 → SVN 状态字母（M/A/?）。补丁项本身不带这个信息。 */
+  /**
+   * 归一化（`keyOf`）后的绝对路径 → SVN 状态字母（M/A/?）。补丁项本身不带这个信息。
+   *
+   * 两边路径来源不同，键必须统一：letters 的原始 path 是 Java `File.getPath()` 原样
+   * （Windows 反斜杠 + 原大小写），而 `PatchItem.path` 已被 Rust `pv::norm` 改成正斜杠。
+   * 直接用原 path 查表在 Windows 上必败，新增文件（A）会一并落到 `?? "M"`。
+   */
   letters: Map<string, string>;
   scanning: boolean;
   picked: Set<string>;
@@ -130,7 +137,7 @@ export function PatchList({
                 <Row
                   key={it.path}
                   item={it}
-                  letter={letters.get(it.path) ?? "M"}
+                  letter={letters.get(keyOf(it.path)) ?? "M"}
                   on={picked.has(it.path)}
                   active={selected === it.path}
                   onToggle={() => onToggle(it.path)}

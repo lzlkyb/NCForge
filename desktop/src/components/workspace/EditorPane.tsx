@@ -8,10 +8,10 @@ interface Props {
   activePath: string | null;
   readOnly: boolean;
   /**
-   * 跳转到指定行（点问题列表用）。`nonce` 每次请求都换一个新值，
+   * 跳转到指定位置（点问题列表、搜索命中用）。`nonce` 每次请求都换一个新值，
    * 这样连点同一行的两条问题也能重新定位；为 null 表示不跳。
    */
-  reveal?: { line: number; nonce: number } | null;
+  reveal?: { line: number; column?: number; nonce: number } | null;
   /**
    * 超大文件：关掉几项「每次输入都要全文件重算」的功能。
    * NC 二开里几千行的 BO/BP 很常见，这些计算会让打字明显掉帧。
@@ -111,10 +111,14 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     const editor = editorRef.current;
     const model = editor?.getModel();
     if (!editor || !model || !reveal) return;
-    // 行号来自编译产物，理论上不会越界；仍然夹一下，避免插件里的畸形行号抛错。
+    // 行号来自编译产物/搜索结果，理论上不会越界；仍然夹一下，避免插件里的畸形值抛错。
     const line = Math.min(Math.max(1, reveal.line), model.getLineCount());
+    // 列号只有搜索命中会给（那才知道是行里的哪个位置）；编译问题只到行，
+    // 落在行首是对的——错误列在 ecj 输出里不够可靠。
+    const maxCol = model.getLineMaxColumn(line);
+    const column = Math.min(Math.max(1, reveal.column ?? 1), maxCol);
     editor.revealLineInCenter(line);
-    editor.setPosition({ lineNumber: line, column: 1 });
+    editor.setPosition({ lineNumber: line, column });
     editor.focus();
   }, [reveal]);
 

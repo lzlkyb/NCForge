@@ -26,21 +26,29 @@
          自然把它清掉，不需要任何手动拆除代码。
 
          样式全部内联、不依赖 Tailwind 那份 CSS（它也是外部资源）。
-         参考尺寸取自真实布局：Header 的 px-5 py-3.5 + 40×40 图标，TabsList 的
-         px-5 pt-4 pb-3 / rounded-xl bg-secondary p-1。只画到卡片轮廓为止：真实内容
-         高度随状态变，画得越细越快过时。 */
+
+         P2-8：布局重画。原稿画的还是旧「顶部 4 个等宽 Tab」布局，而真实布局早在
+         侧栏化改造后就是「左 200px 窄导航 + 52px Header + 内容区」——每次开窗先
+         看到一套不存在的布局再跳变。现在参考尺寸全部取自真实布局：
+         - .app-side 200px / card 底 / 右边框；.app-side-head 52px + logo 28px；
+           导航项 padding 8px 10px + gap 10px + 图标 16px（index.css:1763-1861）
+         - .app-topbar 52px，Header 渐变 card→bg 与 --header-start/end 一致
+         - 暗色四色对齐 app token：bg #121620 / card #191F2C / block #2C2D32 /
+           border #35363B（index.css:188-215），原 #09090b 是上一代暗色底，
+           开窗瞬间会看到一道色带跳变。
+         只画到卡片轮廓为止：真实内容高度随状态变，画得越细越快过时。 */
       :root {
         --sk-bg: #f4f6f9;
         --sk-card: #ffffff;
-        --sk-border: #e3e7ed;
-        --sk-block: #edf0f4;
+        --sk-border: #e2e6ec;
+        --sk-block: #eef1f5;
         --sk-sheen: rgba(255, 255, 255, 0.55);
       }
       :root.dark {
-        --sk-bg: #09090b;
-        --sk-card: #1e1e21;
-        --sk-border: #37373c;
-        --sk-block: #2e2e33;
+        --sk-bg: #121620;
+        --sk-card: #191f2c;
+        --sk-border: #35363b;
+        --sk-block: #2c2d32;
         --sk-sheen: rgba(255, 255, 255, 0.1);
       }
       html,
@@ -55,40 +63,79 @@
       .boot {
         height: 100%;
         display: flex;
-        flex-direction: column;
+        flex-direction: row;
         overflow: hidden;
         font: 13px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+      /* 左侧窄导航（对齐 .app-side） */
+      .boot-side {
+        flex: none;
+        width: 200px;
+        display: flex;
+        flex-direction: column;
+        background: var(--sk-card);
+        border-right: 1px solid var(--sk-border);
+      }
+      .boot-side-head {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 52px;
+        padding: 0 12px;
+        overflow: hidden;
+      }
+      .boot-side-nav {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px;
+      }
+      .boot-nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: 8px;
+      }
+      .boot-nav-item.on {
+        background: var(--sk-block);
+      }
+      .boot-side-foot {
+        flex: none;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px;
+        border-top: 1px solid var(--sk-border);
+      }
+      /* 右侧主区：Header（对齐 .app-topbar 52px，渐变 card→bg 与真实一致）+ 内容 */
+      .boot-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
       }
       .boot-hd {
         flex: none;
         display: flex;
         align-items: center;
         gap: 10px;
-        padding: 14px 20px;
+        height: 52px;
+        padding: 0 12px;
         border-bottom: 1px solid var(--sk-border);
-      }
-      .boot-tabs {
-        flex: none;
-        display: flex;
-        gap: 2px;
-        margin: 16px 20px 12px;
-        padding: 4px;
-        height: 40px;
-        border-radius: 12px;
-        background: var(--sk-block);
-      }
-      .boot-tab {
-        flex: 1;
-        border-radius: 8px;
-      }
-      .boot-tab.on {
-        background: var(--sk-card);
+        background: linear-gradient(180deg, var(--sk-card), var(--sk-bg));
       }
       .boot-body {
-        padding: 0 20px;
+        flex: 1;
+        min-height: 0;
+        padding: 20px;
         display: flex;
         flex-direction: column;
         gap: 10px;
+        overflow: hidden;
       }
       .boot-card {
         border: 1px solid var(--sk-border);
@@ -134,35 +181,75 @@
     <div id="root">
       <!-- React 挂载后这整块会被自动替掉，无需手动清理 -->
       <div class="boot" aria-hidden="true">
-        <div class="boot-hd">
-          <!-- logo 用真图而不是骨架块：它是 public/ 下的静态文件，浏览器解析到这行就能发请求，
-               不用等 JS bundle——能画的就不该拿灰块代替，看着像「应用已经在了」而不是「还在加载」。
-               外层保留 .sk 作底（注意不带 live，不流光）：万一图没加载出来，看到的还是个灰方块，
-               不会变成浏览器的破图标。旁边的应用名仍用骨架块：那是文字，字体未就绪时画出来会跳。 -->
-          <div class="sk" style="width: 40px; height: 40px; border-radius: 8px; flex: none">
-            <img src="/icon.png" alt="" width="40" height="40" style="display: block; border-radius: 8px" />
+        <div class="boot-side">
+          <div class="boot-side-head">
+            <!-- logo 用真图而不是骨架块：它是 public/ 下的静态文件，浏览器解析到这行就能发请求，
+                 不用等 JS bundle——能画的就不该拿灰块代替，看着像「应用已经在了」而不是「还在加载」。
+                 外层保留 .sk 作底（注意不带 live，不流光）：万一图没加载出来，看到的还是个灰方块，
+                 不会变成浏览器的破图标。旁边的应用名仍用骨架块：那是文字，字体未就绪时画出来会跳。 -->
+            <div class="sk" style="width: 28px; height: 28px; border-radius: 7px; flex: none">
+              <img src="/icon.png" alt="" width="28" height="28" style="display: block; border-radius: 7px" />
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0">
+              <div class="sk live" style="width: 96px; height: 14px"></div>
+              <div class="sk live" style="width: 120px; height: 10px"></div>
+            </div>
           </div>
-          <div style="flex: 1; display: flex; flex-direction: column; gap: 6px">
-            <div class="sk live" style="width: 96px; height: 13px"></div>
-            <div class="sk live" style="width: 150px; height: 9px"></div>
+          <div class="boot-side-nav">
+            <!-- 6 个导航项对应 WORKSPACE_NAV：文件/搜索/版本控制/NC 服务/补丁/数据库。
+                 首项画选中态（淡底 + 不流光的实块），其余照常。 -->
+            <div class="boot-nav-item on">
+              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
+              <div class="sk" style="flex: 1; height: 10px"></div>
+            </div>
+            <div class="boot-nav-item">
+              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
+              <div class="sk live" style="flex: 1; height: 10px"></div>
+            </div>
+            <div class="boot-nav-item">
+              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
+              <div class="sk live" style="flex: 1; height: 10px"></div>
+            </div>
+            <div class="boot-nav-item">
+              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
+              <div class="sk live" style="flex: 1; height: 10px"></div>
+            </div>
+            <div class="boot-nav-item">
+              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
+              <div class="sk live" style="flex: 1; height: 10px"></div>
+            </div>
+            <div class="boot-nav-item">
+              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
+              <div class="sk live" style="flex: 1; height: 10px"></div>
+            </div>
           </div>
-          <div class="sk live" style="width: 64px; height: 24px; border-radius: 12px; flex: none"></div>
+          <div class="boot-side-foot">
+            <!-- 侧栏 foot 的设置行（带更新红点的那个位置） -->
+            <div class="boot-nav-item">
+              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
+              <div class="sk live" style="flex: 1; height: 10px"></div>
+            </div>
+          </div>
         </div>
-        <div class="boot-tabs">
-          <div class="boot-tab on"></div>
-          <div class="boot-tab"></div>
-          <div class="boot-tab"></div>
-          <div class="boot-tab"></div>
-        </div>
-        <div class="boot-body">
-          <div class="boot-card">
-            <div class="sk live" style="width: 40%; height: 10px; margin-bottom: 10px"></div>
-            <div class="sk live" style="width: 72%; height: 8px; margin-bottom: 6px"></div>
-            <div class="sk live" style="width: 55%; height: 8px"></div>
+        <div class="boot-main">
+          <div class="boot-hd">
+            <!-- 侧栏开关钮 + 中段拖拽空白 + 主题/最小化/最大化/关闭（TitleBarControls） -->
+            <div class="sk" style="width: 32px; height: 32px; border-radius: 8px; flex: none"></div>
+            <div style="flex: 1"></div>
+            <div class="sk live" style="width: 32px; height: 32px; border-radius: 8px; flex: none"></div>
+            <div class="sk live" style="width: 32px; height: 32px; border-radius: 8px; flex: none"></div>
+            <div class="sk live" style="width: 32px; height: 32px; border-radius: 8px; flex: none"></div>
           </div>
-          <div class="boot-card">
-            <div class="sk live" style="width: 32%; height: 10px; margin-bottom: 10px"></div>
-            <div class="sk live" style="width: 64%; height: 8px"></div>
+          <div class="boot-body">
+            <div class="boot-card">
+              <div class="sk live" style="width: 40%; height: 10px; margin-bottom: 10px"></div>
+              <div class="sk live" style="width: 72%; height: 8px; margin-bottom: 6px"></div>
+              <div class="sk live" style="width: 55%; height: 8px"></div>
+            </div>
+            <div class="boot-card">
+              <div class="sk live" style="width: 32%; height: 10px; margin-bottom: 10px"></div>
+              <div class="sk live" style="width: 64%; height: 8px"></div>
+            </div>
           </div>
         </div>
       </div>

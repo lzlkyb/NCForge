@@ -39,7 +39,7 @@ export function TreeHeader({
           <button
             type="button"
             className="wb-icon-btn"
-            title="新建文件（在当前选中的目录下）"
+            title="新建文件（建在选中的文件夹下；没选中就建在根目录）"
             aria-label="新建文件"
             onClick={onCreateFile}
           >
@@ -48,7 +48,7 @@ export function TreeHeader({
           <button
             type="button"
             className="wb-icon-btn"
-            title="新建文件夹（在当前选中的目录下）"
+            title="新建文件夹（建在选中的文件夹下；没选中就建在根目录）"
             aria-label="新建文件夹"
             onClick={onCreateDir}
           >

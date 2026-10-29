@@ -17,7 +17,8 @@ export function PathField({
   value: string;
   placeholder: string;
   hint?: string;
-  onSave: (v: string) => Promise<void>;
+  /** 返回 `"cancelled"` 表示保存被前置守卫拦下（如运行中切换需确认而用户取消）。 */
+  onSave: (v: string) => Promise<void | "cancelled">;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -26,7 +27,10 @@ export function PathField({
   const save = async () => {
     setSaving(true);
     try {
-      await onSave(draft.trim());
+      const outcome = await onSave(draft.trim());
+      // 取消（比如运行中切换要确认、用户点了取消）：保持编辑态，让用户接着改，
+      // 关掉输入框会让人以为保存成功了。
+      if (outcome === "cancelled") return;
       setEditing(false);
     } catch (e) {
       // 保存失败必须可见：路径错一个字母就会起不来服务，而错误文案往往能直接指出缺什么

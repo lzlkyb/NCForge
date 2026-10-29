@@ -104,6 +104,14 @@ pub struct LangRun {
     /// 每次拉起自增。进程退出回调据此判断「退出的是不是当前这一代」，
     /// 避免旧进程收尾时把刚起来的新会话误判成崩溃。
     pub generation: u64,
+    /// 每次**停止请求**自增（不只成功停掉时才加，见 `cancel_epoch` 的注释）。
+    ///
+    /// `launch` 从生成影子工程到登记 session 有几秒窗口，这期间 `session` 还是 `None`：
+    /// `stop_now` 摘不到东西、直接把状态置成 stopped 就返回了，而 launch 收尾时不复检
+    /// 停止意图，照常登记 session 并把状态改成 indexing。结果是用户明确关了开关或换了
+    /// 工作区，一个约 700MB 的 jdt.ls 还在跑，状态栏还说「正在建立索引」。
+    /// 拉起时记下这个计数，登记前比一次，对不上就把刚起的 client 杀掉、不登记。
+    pub cancel_epoch: u64,
 }
 
 impl Default for LangRun {
@@ -112,6 +120,7 @@ impl Default for LangRun {
             session: None,
             status: LangStatus::stopped(),
             generation: 0,
+            cancel_epoch: 0,
         }
     }
 }

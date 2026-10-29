@@ -30,7 +30,7 @@ export function buildTreeMenu({
     items.push({
       label: "新建文件",
       icon: "filePlus",
-      hint: "Ctrl+N",
+      // 不标 Ctrl+N：全局没有这个快捷键，标了就是承诺一个不存在的操作
       onSelect: () => onBeginCreate(target, "file"),
     });
     items.push({
@@ -64,7 +64,9 @@ export function buildTreeMenu({
     onSelect: () => onCopyPath(target.path),
   });
   items.push({
-    label: "刷新",
+    // 写清「刷的是哪个目录」：右键文件时刷的是它所在目录，
+    // 否则用户会以为刷完文件内容就重新读了（其实读的是目录列表）
+    label: target.isDir ? "刷新此目录" : "刷新所在目录",
     icon: "refresh",
     onSelect: () => onRefresh(target),
   });

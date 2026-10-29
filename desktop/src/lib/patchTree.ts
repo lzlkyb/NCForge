@@ -119,12 +119,27 @@ function compress(nodes: TreeNode[], depth: number): void {
 /**
  * 生成整棵树。`CHANGES.md` 永远在 zip 根，SQL 文件也在根（脚本约定）。
  * `replacement/` 下按模块 → 落位目录层层展开，单链路径合并成一行。
+ *
+ * SQL 按文件名平铺在 zip 根，重名不会合并、只会互相覆盖（解压只剩一个），
+ * 叫 CHANGES.md 的 SQL 还会把自动生成的变更说明顶掉。后端出包前会拦，
+ * 这里先把冲突标在树上——预览是唯一的真相展示，不能静悄悄少一行。
  */
 export function buildStageTree(items: PatchItem[], sqls: string[]): TreeNode[] {
-  const root: TreeNode[] = [{ name: "CHANGES.md", dir: false, meta: "自动生成", children: [] }];
+  const names = sqls.map(baseName);
+  const dupNames = new Set(names.filter((n, i) => names.indexOf(n) !== i));
+  const root: TreeNode[] = [
+    {
+      name: "CHANGES.md",
+      dir: false,
+      meta: names.includes("CHANGES.md") ? "自动生成 · 会被同名 SQL 覆盖" : "自动生成",
+      children: [],
+    },
+  ];
   // SQL 放 zip 根：运维执行前会先看根目录，埋进 replacement 里就找不到了
   for (const s of sqls) {
-    root.push({ name: baseName(s), dir: false, meta: "需人工执行", children: [] });
+    const n = baseName(s);
+    const clash = n === "CHANGES.md" || dupNames.has(n);
+    root.push({ name: n, dir: false, meta: clash ? "需人工执行 · 重名" : "需人工执行", children: [] });
   }
   for (const it of items) {
     const dirSegs = segments(it.target);

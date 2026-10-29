@@ -3,11 +3,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "../components/ui/toast";
 import {
   EMPTY_DRAFT,
+  NO_FORCE,
   composeNote,
   patchBuild,
   patchSetOutDir,
   previewZipName,
   ymd,
+  type LayerForce,
   type MdDraft,
   type PatchBuildResult,
 } from "../lib/patch";
@@ -18,8 +20,11 @@ import {
  * 独立成 hook 的理由很实际：这些字段彼此独立、全都只在本页用，但**必须一起**
  * 提交给后端（少一个就是一次白跑几十秒的出包）。放在页组件里会把 PatchTab
  * 顶过 300 行门禁，而且「填了一半就点生成」的校验散在 JSX 里更容易漏。
+ *
+ * `force` 必须和扫描用同一份：后端出包时会**重新扫一遍**，改判层不带下去的话，
+ * 界面上显示 hyext、包里落到的却是标准层。
  */
-export function usePatchBuild(defaultOutDir: string | null) {
+export function usePatchBuild(defaultOutDir: string | null, force: LayerForce = NO_FORCE) {
   const qc = useQueryClient();
   const [outDir, setOutDir] = useState<string | null>(null);
   const [desc, setDesc] = useState("");
@@ -64,9 +69,13 @@ export function usePatchBuild(defaultOutDir: string | null) {
         note: composeNote(draft),
         sqls,
         date: ymd(),
+        forceHyext: force.hy,
+        forceStd: force.std,
       });
       setResult(r);
-      toast(`已生成 ${r.entries} 个条目`, "success");
+      // 「zip 条目」含目录条目（与 `zip -r` 的历史包一致）——预览树那边数的是
+      // 文件，两个数不是一回事，文案里说清，别让用户以为预览少数了
+      toast(`已生成补丁包，共 ${r.entries} 个 zip 条目（含目录）`, "success");
     } catch (e) {
       toast(String(e), "error");
     } finally {

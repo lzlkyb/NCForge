@@ -13,16 +13,20 @@ interface Props {
   result: CompileResult | null;
   log: string[];
   onOpenProblem: (p: Problem) => void;
+  /** 取消正在跑的编译（一轮最坏 30 分钟，没有这个按钮用户只能杀进程）。 */
+  onCancel: () => void;
   onClose: () => void;
 }
 
 /** 底部面板：问题列表与编译输出。其余标签（NC 日志/SQL/补丁）随对应里程碑加入。 */
-export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProblem, onClose }: Props) {
+export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProblem, onCancel, onClose }: Props) {
   const logRef = useRef<HTMLDivElement>(null);
+  // 只在用户本来就贴着底部时才跟随最新一行：首次建类索引会连续输出几十行，
+  // 无条件贴底等于把正往上翻看的人一脚踹回底部。
+  const follow = useRef(true);
   useEffect(() => {
-    // 编译输出跟随最新一行
     const el = logRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && follow.current) el.scrollTop = el.scrollHeight;
   }, [log, tab]);
 
   const problems = result?.problems ?? [];
@@ -39,6 +43,16 @@ export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProb
           编译输出
         </button>
         <span className="wb-status-sp" />
+        {running && (
+          <button
+            type="button"
+            className="wb-status-btn"
+            title="终止本轮编译（ecj 子进程会被立刻杀掉）"
+            onClick={onCancel}
+          >
+            取消编译
+          </button>
+        )}
         <button type="button" className="wb-icon-btn" title="关闭面板" aria-label="关闭面板" onClick={onClose}>
           <Icon name="close" size={14} />
         </button>
@@ -60,7 +74,15 @@ export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProb
           ))}
         </div>
       ) : (
-        <div className="wb-panel-body wb-log" ref={logRef}>
+        <div
+          className="wb-panel-body wb-log"
+          ref={logRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            // 距底 24px 内算「在看最新」，否则视为用户在往上翻
+            follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+          }}
+        >
           {log.length === 0 && <span className="wb-log-mu">还没有编译输出</span>}
           {log.map((l, i) => (
             <div key={i}>{l}</div>

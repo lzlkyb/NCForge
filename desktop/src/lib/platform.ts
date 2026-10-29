@@ -1,11 +1,11 @@
 /**
  * 平台差异的单一判断处。
  *
- * 平台值来自后端 `get_status` 的 `platform` 字段（Rust `std::env::consts::OS`，
+ * 平台值来自后端 `get_app_info` 的 `platform` 字段（Rust `std::env::consts::OS`，
  * 编译期常量）——比嗅探 `navigator.userAgent` 可靠，也不需要引入
  * `@tauri-apps/plugin-os` 依赖。
  *
- * 为何全部参数都是 `string | undefined`：`status` 在首帧（首次 get_status 返回前）
+ * 为何全部参数都是 `string | undefined`：`status` 在首帧（首次 `get_app_info` 返回前）
  * 为 undefined。此时的取舍是**宁可当成非 mac**：
  * - `isWindows(undefined)` 返回 false → Windows 专属 UI 首帧不闪现（拿到状态后再出现）；
  * - `isMac(undefined)` 返回 false → 快捷键标签首帧先显示 Ctrl，mac 上拿到状态后变 ⌘。

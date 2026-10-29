@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Icon } from "../ui/icon";
+import { EmptyState } from "../ui/EmptyState";
 import { formatRevTime, type BlameLine } from "../../lib/svn";
 
 /** 作者色相：同一个人固定同一个颜色，靠名字哈希，不依赖后端。 */
@@ -15,7 +16,13 @@ const MAX_LINES = 4000;
  * Blame：每行谁在哪个版本改的。
  *
  * 正文不重复从后端传（`svn_blame` 只回每行的 revision/author/date），
- * 直接复用已经加载的工作副本正文——省一次 IO，也保证和差异面板看到的是同一份内容。
+ * 直接复用已经加载的工作副本正文——省一次 IO，也和差异面板看到的是同一份内容。
+ *
+ * ⚠️ 但「同一份内容」只对正文成立，**行信息对不上**：annotate 按 SVN 的口径永远
+ * 基于 HEAD 版本，而正文是磁盘上的工作副本。文件有本地增删行时，第一处改动之后
+ * `src[i] ↔ lines[i]` 全部错位，作者/版本/日期集体张冠李戴且没有任何征兆。
+ * 因此这里在行数不一致或文件有本地改动时都要明确警告——用户拿 blame 定责，
+ * 错一行就是错一个人。
  */
 export function BlameView({
   title,
@@ -40,6 +47,9 @@ export function BlameView({
     for (let i = 0; i < n; i += 1) out.push({ ln: i + 1, code: src[i], info: lines[i] });
     return out;
   }, [text, lines]);
+
+  /** 行数不一致 = 已确定错位（不是「可能」）：HEAD 与工作副本不是同一份文件。 */
+  const drift = !!lines && lines.length > 0 && text.split("\n").length !== lines.length;
 
   const summary = useMemo(() => {
     if (!lines || lines.length === 0) return null;
@@ -66,6 +76,24 @@ export function BlameView({
         </button>
       </div>
 
+      {!loading && !error && (
+        <div style={{ padding: "10px 12px 0" }}>
+          {drift ? (
+            <div className="vc-alert" data-tone="warn">
+              <Icon name="alert" size={13} />
+              <span>
+                行号已错位：HEAD 的这份文件 {lines?.length ?? 0} 行，工作副本{" "}
+                {text.split("\n").length} 行。从第一处增删行开始，下面的作者与版本都不再属于这一行。
+              </span>
+            </div>
+          ) : (
+            <div className="vc-hint">
+              行信息来自 HEAD 版本，正文是工作副本。这个文件有本地改动——行数一旦变化就会整体错位。
+            </div>
+          )}
+        </div>
+      )}
+
       {summary && (
         <div className="vc-blame-strip">
           <span>{rows.length} 行</span>
@@ -79,7 +107,7 @@ export function BlameView({
       <div className="vc-log">
         {loading && (
           <div className="vc-empty">
-            <Icon name="spinner" size={20} className="vc-spin" />
+            <Icon name="spinner" size={20} className="animate-spin" />
             <div>正在算 blame…（大文件要几秒）</div>
           </div>
         )}
@@ -118,10 +146,13 @@ export function BlameView({
         )}
 
         {!loading && !error && rows.length === 0 && (
-          <div className="vc-empty">
-            <Icon name="user" size={22} />
-            <div>没有 blame 数据：新文件或还没提交过</div>
-          </div>
+          <EmptyState
+            icon="user"
+            description="这个路径还没有 blame 数据（新文件或还没提交过）"
+            bigIconSize={44}
+            iconSize={20}
+            className="py-6"
+          />
         )}
       </div>
     </section>

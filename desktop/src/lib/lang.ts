@@ -38,8 +38,21 @@ export interface LangPrefs {
   lang_auto_start: boolean;
 }
 
-/** 就绪后等诊断稳定的时长（实测 gl 模块约 12 秒）。 */
-const SETTLE_MS = 12_000;
+/**
+ * 诊断「稳定」的判定，不用固定等待。
+ *
+ * 原来是一个写死的 12 秒：一到点就把这期间收到的**未纠正**诊断全刷到编辑器上。
+ * 而实测 gl 模块的稳定期是 20~40 秒，12 秒时 jdt.ls 还在补算索引，编辑器里
+ * 满屏红线和「找不到 XXX 类」的幻影错误——用户会真的去改那些根本没问题的代码。
+ *
+ * 改为三个条件一起看：总时长够久（下限）、距上次诊断推送够久（说明它安静了）、
+ * 以及一个无论如何都要放开的上限（服务彻底不推诊断时不能永远不显示）。
+ */
+const SETTLE_MIN_MS = 8_000;
+const SETTLE_IDLE_MS = 5_000;
+const SETTLE_MAX_MS = 60_000;
+/** 稳定检测的轮询粒度。 */
+const SETTLE_POLL_MS = 1_000;
 /** 连续切标签时不要频繁重启语言服务。 */
 const START_DEBOUNCE_MS = 1_500;
 /** 文档变更同步的防抖。 */
@@ -52,6 +65,10 @@ const STOPPED: LangStatus = { state: "stopped", module: null, message: "", sourc
 let prefs = { enabled: true, autoStart: true };
 let view: LangView = { ...STOPPED, settled: false, ...prefs };
 let settleTimer: ReturnType<typeof setTimeout> | undefined;
+/** 服务进入 ready 的时刻。 */
+let readyAt = 0;
+/** 最后一次收到诊断推送的时刻（0 = 还没收到过任何诊断）。 */
+let lastDiagAt = 0;
 const listeners = new Set<() => void>();
 
 function setView(next: ViewCore): void {
@@ -116,8 +133,10 @@ interface Doc {
 
 const docs = new Map<string, Doc>();
 
-function notify(method: string, path: string, params: Record<string, unknown>): void {
-  void invoke("lang_notify", { method, path, params }).catch(() => {});
+function notify(method: string, path: string, params: Record<string, unknown>): Promise<void> {
+  return invoke<unknown>("lang_notify", { method, path, params })
+    .then(() => undefined)
+    .catch(() => undefined);
 }
 
 function openDoc(path: string, model: Model): void {
@@ -129,11 +148,11 @@ function openDoc(path: string, model: Model): void {
     sub: model.onDidChangeContent(() => {
       doc.version += 1;
       clearTimeout(doc.timer);
-      doc.timer = setTimeout(() => flushDoc(path), CHANGE_DEBOUNCE_MS);
+      doc.timer = setTimeout(() => void flushDoc(path), CHANGE_DEBOUNCE_MS);
     }),
   };
   docs.set(path, doc);
-  notify("textDocument/didOpen", path, {
+  void notify("textDocument/didOpen", path, {
     textDocument: { languageId: "java", version: 1, text: model.getValue() },
   });
 }
@@ -144,16 +163,23 @@ function closeDoc(path: string): void {
   clearTimeout(doc.timer);
   doc.sub.dispose();
   docs.delete(path);
-  if (view.state === "ready") notify("textDocument/didClose", path, { textDocument: {} });
+  if (view.state === "ready") void notify("textDocument/didClose", path, { textDocument: {} });
 }
 
-/** 把还没发出去的修改立即发给 jdt.ls。补全、跳转前必须先调，否则算的是旧文本。 */
-export function flushDoc(path: string): void {
+/**
+ * 把还没发出去的修改立即发给 jdt.ls。补全、跳转前必须先 await，否则算的是旧文本。
+ *
+ * 为什么必须 await：`didChange` 与随后的 `request` 是两次独立 IPC，两次
+ * spawn_blocking 之间没有任何顺序保证。请求帧先到时，jdt.ls 按**改动前**的文本
+ * 算补全位置——表现是补全结果整体错位几行，而且只在打字快时偶发，极难复现。
+ * await 的是「Rust 已把通知写完 stdin」，这才真正建立了先后。
+ */
+export async function flushDoc(path: string): Promise<void> {
   const doc = docs.get(path);
   if (!doc || doc.timer === undefined) return;
   clearTimeout(doc.timer);
   doc.timer = undefined;
-  notify("textDocument/didChange", path, {
+  await notify("textDocument/didChange", path, {
     textDocument: { version: doc.version },
     contentChanges: [{ text: doc.model.getValue() }],
   });
@@ -212,20 +238,42 @@ function onDiagnostics(params: { uri: string; diagnostics: LspDiagnostic[] }): v
   const path = uriToPath(params.uri);
   if (!path) return;
   const key = path.toLowerCase();
+  lastDiagAt = Date.now();
   latestDiags.set(key, params.diagnostics ?? []);
   if (view.settled) applyMarkers(key);
 }
 
 // ───────────────────── 状态变化 ─────────────────────
 
+/**
+ * 起一轮「等诊断安静下来」的轮询。
+ *
+ * 不用一次性定时器：jdt.ls 在建索引期间会持续推诊断，固定时长一到就刷标记，
+ * 等于把还在变的结果当最终结论。这里每隔一秒看一眼「它安静了没有」。
+ */
+function armSettle(): void {
+  clearTimeout(settleTimer);
+  const tick = () => {
+    if (view.state !== "ready") return; // 状态已经变了，这一轮作废
+    const now = Date.now();
+    const since = now - readyAt;
+    const idle = now - (lastDiagAt || readyAt);
+    if (since >= SETTLE_MAX_MS || (since >= SETTLE_MIN_MS && idle >= SETTLE_IDLE_MS)) {
+      setView({ ...view, settled: true });
+      latestDiags.forEach((_, key) => applyMarkers(key));
+      return;
+    }
+    settleTimer = setTimeout(tick, SETTLE_POLL_MS);
+  };
+  settleTimer = setTimeout(tick, SETTLE_POLL_MS);
+}
+
 function onStatus(next: LangStatus): void {
   const prev = view.state;
   if (next.state === "ready" && prev !== "ready") {
-    clearTimeout(settleTimer);
-    settleTimer = setTimeout(() => {
-      setView({ ...view, settled: true });
-      latestDiags.forEach((_, key) => applyMarkers(key));
-    }, SETTLE_MS);
+    readyAt = Date.now();
+    lastDiagAt = 0;
+    armSettle();
     setView({ ...next, settled: false });
     syncAll();
     return;

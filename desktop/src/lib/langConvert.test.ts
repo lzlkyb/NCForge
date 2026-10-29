@@ -42,6 +42,9 @@ describe("langConvert", () => {
     expect(completionKindName(7)).toBe("Class");
     expect(completionKindName(undefined)).toBe("Text");
     expect(completionKindName(999)).toBe("Text");
+    // M4-7：kind=0（LSP invalid）曾被 `(kind ?? 1) - 1` 算成 -1，wasm release 下
+    // 负下标回绕成巨大下标越界 panic，整个补全 provider 抛错
+    expect(completionKindName(0)).toBe("Text");
     expect(severityName(1)).toBe("Error");
     expect(severityName(2)).toBe("Warning");
     expect(severityName(undefined)).toBe("Error");

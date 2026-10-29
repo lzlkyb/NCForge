@@ -62,9 +62,13 @@ export function useTreeLoad(root: string) {
 
   // 工作区根变化（首次打开 / 更换目录）时重置整棵树，只展开根。
   // 根没变（= 只是切页面回来）就直接复用缓存，不再打一次 IPC。
+  //
+  // 只有 ok / loading 才算「可复用」：上次加载失败（比如盘还没挂上）也算有缓存的话，
+  // 切页回来永远不会重试，用户只能一直看着那行错误。
   useEffect(() => {
     const cached = getSession().tree;
-    if (cached.root === root && cached.dirs[root]) return;
+    const dir = cached.dirs[root];
+    if (cached.root === root && (dir?.status === "ok" || dir?.status === "loading")) return;
     setSession({ tree: { root, expanded: new Set([root]), dirs: {}, marks: {} } });
     void load(root);
   }, [root, load]);

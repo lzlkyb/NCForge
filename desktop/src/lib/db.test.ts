@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  autonomousCallHint,
   cellText,
   friendlyDbError,
   isNumericType,
@@ -119,6 +120,48 @@ describe("precheckSql", () => {
     // 前端刻意不拦：字符串常量里出现 for update 会造成误伤，
     // 后端的 stripLiterals 版本才是准的。
     expect(precheckSql("select * from bd_material for update")).toBeNull();
+  });
+
+  it("字符串字面量里的分号不算多语句（与后端 stripLiterals 同口径）", () => {
+    // 以前前端只剥注释就数分号，`where name = 'a;b'` 被误杀成「只放行单条语句」
+    expect(precheckSql("select * from bd_material where name = 'a;b'")).toBeNull();
+    expect(precheckSql("select * from bd_material where name = 'a;b';")).toBeNull();
+    expect(precheckSql("select ';' as s, 'x''y;z' as t from dual")).toBeNull();
+  });
+});
+
+describe("autonomousCallHint", () => {
+  it("自定义包的函数调用要提醒（三层只读拦不住自治事务）", () => {
+    const hint = autonomousCallHint("select my_pkg.do_write() from dual");
+    expect(hint).toContain("my_pkg.do_write()");
+    expect(hint).toContain("AUTONOMOUS_TRANSACTION");
+    // 三段式（模式.包.函数）也要认得出
+    expect(autonomousCallHint("select nc56.my_pkg.do_write(1) from dual")).toContain("my_pkg.do_write()");
+  });
+
+  it("Oracle 自带工具包不提醒（dbms_/utl_ 是排查查询常客）", () => {
+    expect(autonomousCallHint("select dbms_metadata.get_ddl('TABLE','BD_MATERIAL') from dual")).toBeNull();
+    expect(autonomousCallHint("select dbms_random.value(1, 100) from dual")).toBeNull();
+    expect(autonomousCallHint("select utl_raw.cast_to_raw('abc') from dual")).toBeNull();
+    expect(autonomousCallHint("select sys.dbms_random.value() from dual")).toBeNull();
+  });
+
+  it("第一处匹配是系统包时不能就此放过（要扫完全部候选）", () => {
+    // 以前只看第一处 `exec` 的结果：第一个命中是 dbms_random 就直接 return null，
+    // 后面真正会写库的自定义包被整条忽略。
+    const hint = autonomousCallHint(
+      "select sys.dbms_random.value(), my_pkg.do_write() from dual",
+    );
+    expect(hint).toContain("my_pkg.do_write()");
+  });
+
+  it("普通查询、外连接 (+) 与字符串里的 pattern 都不该误报", () => {
+    expect(autonomousCallHint("select * from bd_material m where m.code = 'x'")).toBeNull();
+    // Oracle 老式外连接：t.col(+) 不是函数调用
+    expect(autonomousCallHint("select a.name from bd_material a, org_dept b where a.pk_deptdoc = b.pk_deptdoc(+)")).toBeNull();
+    // 字符串字面量与注释里的 pattern 先剥掉再判
+    expect(autonomousCallHint("select 'my_pkg.do_write()' as s from dual")).toBeNull();
+    expect(autonomousCallHint("select 1 from dual -- 以前用 my_pkg.do_write() 刷过数据")).toBeNull();
   });
 });
 

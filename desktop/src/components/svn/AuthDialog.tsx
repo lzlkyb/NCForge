@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Icon } from "../ui/icon";
+import { Modal } from "../ui/Modal";
 
 /**
  * 账号对话框：只在「Eclipse 缓存里也拿不到」时才出现。
@@ -8,6 +8,10 @@ import { Icon } from "../ui/icon";
  * 正常路径是零配置的——从 %APPDATA%\Subversion\auth 读 realm+用户，
  * 密码用 DPAPI 解密直接喂桥。走到这里说明缓存没有或密码错了。
  * 输入的密码经 DPAPI 加密后存本机配置，不写明文、不进日志。
+ *
+ * 外壳用统一 <Modal> 原语（P2-1）：Esc / 点遮罩 / 焦点陷阱与其它弹窗一致
+ * （以前自建 vc-mask，有 Esc 但没有焦点陷阱，Tab 可逃逸；Esc 监听也删了，
+ * Modal 的 useFocusTrap 在节点级处理 Esc 并停止冒泡，嵌套弹窗优先关自己）。
  */
 export function AuthDialog({
   open,
@@ -37,23 +41,11 @@ export function AuthDialog({
     userRef.current?.focus();
   }, [open, defaultUser]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
   const canSubmit = !busy && user.trim().length > 0 && password.length > 0;
 
-  return createPortal(
-    <div className="vc-mask" role="dialog" aria-modal="true" aria-label="SVN 账号">
+  return (
+    <Modal open={open} onClose={onClose} ariaLabel="SVN 账号" className="vc-dialog">
       <form
-        className="vc-dialog"
         onSubmit={(e) => {
           e.preventDefault();
           if (canSubmit) onSubmit(user.trim(), password);
@@ -101,7 +93,6 @@ export function AuthDialog({
           </button>
         </div>
       </form>
-    </div>,
-    document.body,
+    </Modal>
   );
 }

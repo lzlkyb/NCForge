@@ -82,6 +82,20 @@ export interface WorkspaceSession {
    * 关了又回来还弹一次，等于没关。
    */
   largeHintDismissed: string[];
+  /**
+   * 保存遇到异地修改（磁盘上的文件被别的进程改了），等用户选「覆盖 / 重新加载」。
+   * 放仓库里：这是「有未保存改动」的第二种形态，切页回来必须还在，
+   * 否则用户会以为提示已经消失、改动已经保存好了。
+   */
+  conflictPath: string | null;
+  /** 关标签时遇到未保存改动，等用户确认。同样不能随卸载消失。 */
+  closingPath: string | null;
+  /**
+   * 保存被**编码**挡住：GBK 文件里写进了它表示不了的字符，只能转 UTF-8。
+   * 以前这里只弹一条 toast「请改用 UTF-8 保存」，而全界面没有切换编码的入口——
+   * 死路，Ctrl+S 永远失败。现在挂起成一个带按钮的提示条。
+   */
+  encodingIssue: { path: string; message: string } | null;
 }
 
 let state: WorkspaceSession = {
@@ -95,6 +109,9 @@ let state: WorkspaceSession = {
   compileResult: null,
   compileLog: [],
   largeHintDismissed: [],
+  conflictPath: null,
+  closingPath: null,
+  encodingIssue: null,
 };
 
 const listeners = new Set<() => void>();

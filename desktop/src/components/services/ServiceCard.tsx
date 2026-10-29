@@ -20,6 +20,14 @@ const STATE_TEXT: Record<string, string> = {
   stopped: "已停止",
 };
 
+/** busy 各值的人话（P2-12：按钮被锁时要悬停说得清在等什么）。 */
+const BUSY_TEXT: Record<Exclude<Busy, null>, string> = {
+  start: "启动",
+  stop: "停止",
+  restart: "重启",
+  kill: "结束占用进程",
+};
+
 /**
  * 服务状态卡：状态、三个关键指标、启停。
  *
@@ -33,6 +41,9 @@ export function ServiceCard({ status, busy, onStart, onStop, onRestart, onEditPo
   const starting = state === "starting";
   const portConflict = !!status?.portOwner && !status.portOwnedBySelf;
   const disabled = busy !== null || starting;
+  // 端口只能启动时决定：在跑的 JVM 不会重读 prop.xml。运行中让按钮可点，
+  // 用户填完、等 300ms 预览回来才被告知「先停止」——约束应该在入口就说明。
+  const portLocked = running || starting;
 
   const desc = (() => {
     if (!status) return "正在读取状态…";
@@ -87,8 +98,9 @@ export function ServiceCard({ status, busy, onStart, onStop, onRestart, onEditPo
           <button
             type="button"
             className="sv-k sv-k-edit"
-            title={portHint}
+            title={portLocked ? "服务正在运行，端口只能启动时决定：先停止再改" : portHint}
             aria-label="修改监听端口"
+            disabled={portLocked}
             onClick={onEditPort}
           >
             端口 {status?.port ?? 80}
@@ -122,19 +134,39 @@ export function ServiceCard({ status, busy, onStart, onStop, onRestart, onEditPo
 
       <div className="sv-actions">
         {running && (
-          <button type="button" className="sv-btn" disabled={busy !== null} onClick={onRestart}>
-            <Icon name="refresh" size={13} />
+          <button
+            type="button"
+            className="sv-btn"
+            disabled={busy !== null}
+            title={busy ? `${BUSY_TEXT[busy]}命令进行中，请稍候` : undefined}
+            onClick={onRestart}
+          >
+            {/* busy 时图标换 spinner：与 Button isLoading 同款「进行中视觉」，
+                不再只靠文字变「XX中…」（P2-13）。 */}
+            {busy === "restart" ? <Icon name="spinner" size={13} className="animate-spin" /> : <Icon name="refresh" size={13} />}
             {busy === "restart" ? "重启中…" : "重启"}
           </button>
         )}
         {running || starting ? (
-          <button type="button" className="sv-btn sv-btn-danger" disabled={busy !== null} onClick={onStop}>
-            <Icon name="power" size={13} />
+          <button
+            type="button"
+            className="sv-btn sv-btn-danger"
+            disabled={busy !== null}
+            title={busy ? `${BUSY_TEXT[busy]}命令进行中，请稍候` : undefined}
+            onClick={onStop}
+          >
+            {busy === "stop" ? <Icon name="spinner" size={13} className="animate-spin" /> : <Icon name="power" size={13} />}
             {busy === "stop" ? "停止中…" : "停止"}
           </button>
         ) : (
-          <button type="button" className="sv-btn sv-btn-primary" disabled={disabled} onClick={onStart}>
-            <Icon name="play" size={13} />
+          <button
+            type="button"
+            className="sv-btn sv-btn-primary"
+            disabled={disabled}
+            title={starting ? "正在启动，等待监听端口…" : busy ? `${BUSY_TEXT[busy]}命令进行中，请稍候` : undefined}
+            onClick={onStart}
+          >
+            {busy === "start" ? <Icon name="spinner" size={13} className="animate-spin" /> : <Icon name="play" size={13} />}
             {busy === "start" ? "启动中…" : "启动"}
           </button>
         )}

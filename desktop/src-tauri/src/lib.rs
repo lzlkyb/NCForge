@@ -34,6 +34,7 @@ pub mod server;
 pub mod shadow;
 pub mod sql_refs;
 pub mod state;
+pub mod svn_backup;
 pub mod svn_bridge;
 pub mod svn_cred;
 pub mod svn_review;

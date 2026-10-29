@@ -1,4 +1,4 @@
-import { invoke } from "./tauri";
+import { invoke, listen } from "./tauri";
 
 /**
  * 版本控制（SVN）的命令封装与纯函数。
@@ -87,12 +87,49 @@ export interface CommitResult {
 
 export interface UpdateResult {
   revision: number;
-  conflicts: string[];
+}
+
+export interface ResolveResult {
+  /** 冲突临时文件（.mine / .rN）的备份目录；没有可备份的文件时为 null。 */
+  backupDir: string | null;
 }
 
 export interface RevertResult {
   count: number;
   backupDir: string;
+}
+
+/** 撤销 / 冲突二选一留下的备份目录（工作副本旁边的 `.ncforge-<kind>-<毫秒>`）。 */
+export interface BackupDir {
+  name: string;
+  path: string;
+  kind: "revert" | "resolve";
+  files: number;
+  bytes: number;
+  /** 目录名里的时间戳（毫秒）。 */
+  atMs: number;
+}
+
+export interface HousekeepingInfo {
+  /** 备份目录所在的目录（工作副本上一级）。 */
+  baseDir: string;
+  backups: BackupDir[];
+  totalBytes: number;
+  reviewTotal: number;
+  reviewValid: number;
+  reviewStale: number;
+}
+
+export interface PurgeFailure {
+  name: string;
+  message: string;
+}
+
+export interface BackupPurgeResult {
+  deleted: number;
+  bytes: number;
+  /** 逐个删时失败的条目：`deleted` 只统计成功的那些。 */
+  failed: PurgeFailure[];
 }
 
 export const svnInfo = () => invoke<SvnInfo>("svn_info");
@@ -111,12 +148,26 @@ export const svnUpdate = () => invoke<UpdateResult>("svn_update");
 export const svnRevert = (paths: string[], recursive: boolean) =>
   invoke<RevertResult>("svn_revert", { paths, recursive });
 export const svnResolve = (path: string, choice: "mine" | "theirs" | "base") =>
-  invoke<void>("svn_resolve", { path, choice });
+  invoke<ResolveResult>("svn_resolve", { path, choice });
 export const svnReviewMark = (path: string, revision: number, reviewed: boolean) =>
   invoke<void>("svn_review_mark", { path, revision, reviewed });
 export const svnReviewPrune = () => invoke<number>("svn_review_prune");
+/** 维护面板的只读数据：备份目录盘点 + 审查标记统计。 */
+export const svnHousekeeping = () => invoke<HousekeepingInfo>("svn_housekeeping");
+/** 按**目录名**删备份（后端校验名字与父目录，前端不传路径）。 */
+export const svnBackupDelete = (names: string[]) =>
+  invoke<BackupPurgeResult>("svn_backup_delete", { names });
 export const svnAuthSet = (user: string, password: string) =>
   invoke<void>("svn_auth_set", { user, password });
+
+/**
+ * 扫描进度（桥每 300 条推一次）。
+ *
+ * 一次全量 status 要 7.6 秒，界面上只有一个转圈的图标时用户分不清「在跑」和「卡死」。
+ * 进度只是提示，丢了不影响结果，所以订阅失败也不必处理。
+ */
+export const onSvnScanProgress = (handler: (scanned: number) => void) =>
+  listen<{ scanned: number }>("svn-scan-progress", (p) => handler(p.scanned));
 
 // ───────────────────────── 纯函数 ─────────────────────────
 
@@ -161,7 +212,21 @@ export function letterTone(letter: string): "mod" | "add" | "del" | "conflict" |
   }
 }
 
-/** 审查进度：只算文件（目录不参与），未纳管的文件也要审——提交前同样得看。 */
+/**
+ * 这个条目能不能标「已审」。
+ *
+ * 三种不能：目录（没有文件内容）、冲突 C（要先解决才有内容可审）、已删除/缺失 D、!
+ * （文件已经不在盘上，后端取 metadata 必然失败）。它们也确实没有入口——
+ * 分母里算上它们，进度永远到不了 100%，用户没法判断是真没审完还是分母算错。
+ */
+export function isMarkable(it: ChangeItem): boolean {
+  return !it.isDir && it.letter !== "C" && it.letter !== "D" && it.letter !== "!";
+}
+
+/**
+ * 审查进度：只算「能标记已审」的文件（见 `isMarkable`）。
+ * 未纳管的文件也要审——提交前同样得看。
+ */
 export function reviewProgress(
   view: ChangesView,
   reviewed: Set<string>,
@@ -170,7 +235,7 @@ export function reviewProgress(
   let done = 0;
   for (const g of view.groups) {
     for (const it of g.items) {
-      if (it.isDir) continue;
+      if (!isMarkable(it)) continue;
       total += 1;
       if (reviewed.has(keyOf(it.path))) done += 1;
     }

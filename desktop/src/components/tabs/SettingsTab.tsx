@@ -151,7 +151,7 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
               </ul>
             </div>
           ))}
-          {CHANGELOG.length === 0 && <p className="text-sm text-muted-foreground">暂无版本记录。</p>}
+          {CHANGELOG.length === 0 && <p className="text-sm text-muted-foreground">还没有版本记录。</p>}
         </div>
       </Modal>
     </div>

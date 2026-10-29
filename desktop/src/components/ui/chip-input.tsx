@@ -6,7 +6,6 @@ const CATEGORIES = [
   {
     key: "front",
     label: "前端",
-    dot: "#4F46E5",
     chipClass: "c-front",
     tagClass: "tag-front",
     btnClass: "cat-front",
@@ -15,7 +14,6 @@ const CATEGORIES = [
   {
     key: "back",
     label: "后端",
-    dot: "#D55B0C",
     chipClass: "c-back",
     tagClass: "tag-back",
     btnClass: "cat-back",
@@ -24,7 +22,6 @@ const CATEGORIES = [
   {
     key: "conf",
     label: "配置",
-    dot: "#078051",
     chipClass: "c-conf",
     tagClass: "tag-conf",
     btnClass: "cat-conf",
@@ -33,7 +30,6 @@ const CATEGORIES = [
   {
     key: "doc",
     label: "文档",
-    dot: "#07889B",
     chipClass: "c-doc",
     tagClass: "tag-doc",
     btnClass: "cat-doc",
@@ -144,7 +140,8 @@ export function ChipInput({
             className={`cat-btn inline-flex items-center gap-1.5 rounded-lg border-1.5 border-border bg-card px-3 py-1.5 text-xs font-semibold tracking-wide text-muted-foreground transition-[color,background-color,border-color,transform,box-shadow,opacity] hover:bg-muted hover:text-foreground ${cat.btnClass} ${openCat === cat.key ? "open" : ""}`}
             onClick={() => toggleCat(cat.key)}
           >
-            <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: cat.dot }} />
+            {/* 分类色点：颜色走 CSS 类（cat-dot-*，双主题同源），不写内联 hex */}
+            <span className={`h-[7px] w-[7px] shrink-0 rounded-full cat-dot-${cat.key}`} />
             {cat.label}
             <span className="text-[11px] font-bold opacity-80">
               {value.filter((v) => cat.exts.includes(v)).length}

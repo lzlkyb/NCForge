@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Icon } from "../ui/icon";
+import { Modal } from "../ui/Modal";
 import { splitJdbcUrl } from "../../lib/db";
 
 /**
@@ -10,6 +10,9 @@ import { splitJdbcUrl } from "../../lib/db";
  * （8 字节 DES 块，密钥在核心技术 jar 里，这台机器的 NC home 找不到对应类）——
  * 连接串和用户名可以零配置读出来，口令不行。输一次后用 Windows DPAPI 加密存本机，
  * 换机器 / 换 Windows 用户都要重输。
+ *
+ * 外壳用统一 <Modal> 原语（P2-1）：Esc / 点遮罩 / 焦点陷阱与其它弹窗一致。
+ * 以前自建 portal + dq-mask——键盘用户打开后无法用键盘关闭，Tab 可以逃逸到背景。
  */
 export function ConnectDialog({
   open,
@@ -41,14 +44,11 @@ export function ConnectDialog({
     pwRef.current?.focus();
   }, [open]);
 
-  if (!open) return null;
-
   const canSubmit = !busy && password.length > 0;
 
-  return createPortal(
-    <div className="dq-mask" role="dialog" aria-modal="true" aria-label="数据库连接">
+  return (
+    <Modal open={open} onClose={onClose} ariaLabel="数据库连接" className="dq-dialog">
       <form
-        className="dq-dialog"
         onSubmit={(e) => {
           e.preventDefault();
           if (canSubmit) onSubmit(password);
@@ -106,7 +106,6 @@ export function ConnectDialog({
           </button>
         </div>
       </form>
-    </div>,
-    document.body,
+    </Modal>
   );
 }

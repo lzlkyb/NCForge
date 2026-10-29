@@ -1,5 +1,6 @@
 import { languageOf, type EncodingMark } from "../../lib/workspace";
 import type { TabMeta } from "../../lib/workspaceSession";
+import { useCursor } from "../../lib/cursorStore";
 import { LangBadge } from "./LangBadge";
 
 /**
@@ -12,17 +13,21 @@ export function EditorStatus({
   root,
   active,
   mark,
-  cursor,
+  saving,
   panelOpen,
   onTogglePanel,
 }: {
   root: string;
   active: TabMeta | null;
   mark: EncodingMark | undefined;
-  cursor: { line: number; column: number };
+  /** 正在写盘。大文件保存要几秒，没有进行态就像「按了没反应」。 */
+  saving: boolean;
   panelOpen: boolean;
   onTogglePanel: () => void;
 }) {
+  // 光标自己订阅（lib/cursorStore）：它每秒可能变几十次，
+  // 挂在父组件上会拖着整棵文件树一起重渲染。
+  const cursor = useCursor();
   return (
     <footer className="wb-status">
       <span className="wb-status-path" title={active?.path}>
@@ -30,6 +35,7 @@ export function EditorStatus({
       </span>
       <LangBadge activePath={active && !active.virtual ? active.path : null} />
       <span className="wb-status-sp" />
+      {saving && <span className="wb-status-warn">保存中…</span>}
       <button type="button" className="wb-status-btn" onClick={onTogglePanel}>
         {panelOpen ? "隐藏面板" : "显示面板"}
       </button>

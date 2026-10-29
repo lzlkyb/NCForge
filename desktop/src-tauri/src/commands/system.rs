@@ -3,7 +3,7 @@
 //! 这些命令演示了三种典型模式，新命令照抄即可：
 //! 1. **托管状态读写**（`get_config` / `save_config`）：`State<Arc<AppState>>` + RwLock；
 //! 2. **插件调用**（`set_autostart`）：tauri 插件在 Rust 侧的用法；
-//! 3. **只读环境信息**（`install_dir`）：路径解析。
+//! 3. **只读环境信息**（`get_app_info`）：纯函数式返回，不碰状态。
 
 use std::sync::Arc;
 
@@ -11,9 +11,12 @@ use crate::config::AppConfig;
 use crate::state::AppState;
 
 /// 读当前配置（启动后可能已被其它命令改过，以内存为准）。
+///
+/// 口令密文（`svn_password_dpapi` / `db_password_dpapi`）在此出口抹成占位符：
+/// 前端不消费它们，IPC 桥对面是整个 webview，密文不过桥（见 `AppConfig::redacted`）。
 #[tauri::command]
 pub async fn get_config(state: tauri::State<'_, Arc<AppState>>) -> Result<AppConfig, String> {
-    Ok(state.config.read().await.clone())
+    Ok(state.config.read().await.clone().redacted())
 }
 
 /// 设置项的局部更新：只改传进来的字段，其余保持当前值。
@@ -37,6 +40,7 @@ pub struct ConfigPatch {
 }
 
 /// 落盘并返回改完的**完整配置**：调用方据此回填表单，不用再 get 一次。
+/// 与 `get_config` 同一出口口径：口令密文抹成占位符（`redacted`）。
 #[tauri::command]
 pub async fn patch_config(
     state: tauri::State<'_, Arc<AppState>>,
@@ -53,6 +57,7 @@ pub async fn patch_config(
             Ok(())
         })
         .await
+        .map(AppConfig::redacted)
 }
 
 /// 开机自启状态。
@@ -80,14 +85,6 @@ pub fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<bool, Strin
     // 以插件自己的状态为准，前端拿它校正 UI。
     al.is_enabled()
         .map_err(|e| format!("读取自启状态失败: {e}"))
-}
-
-/// 安装目录（NSIS 安装版即 exe 所在目录；dev 下为目标目录）。
-#[tauri::command]
-pub fn install_dir() -> Result<String, String> {
-    let exe = std::env::current_exe().map_err(|e| format!("定位可执行文件失败: {e}"))?;
-    let dir = exe.parent().ok_or_else(|| "无法解析安装目录".to_string())?;
-    Ok(dir.to_string_lossy().to_string())
 }
 
 /// 应用信息（版本 / 平台）。版本取 Cargo.toml 真源（env! 编译期常量）。

@@ -38,7 +38,9 @@ export function StageTree({ nodes, hint }: { nodes: TreeNode[]; hint: string }) 
           zip 根有 <code>CHANGES.md</code> 与 <code>replacement/</code>
         </span>
         <span className="pk-sp" />
-        <span>共 {countEntries(nodes)} 个条目</span>
+        {/* 说「文件」不说「条目」：出包横幅里的条目数含 zip 目录，两个数不是
+            一回事，共用一个词会让用户以为预览少数了东西 */}
+        <span>共 {countEntries(nodes)} 个文件</span>
         <button type="button" className="pk-link" onClick={() => setFolded(new Set())}>
           全部展开
         </button>
@@ -47,9 +49,11 @@ export function StageTree({ nodes, hint }: { nodes: TreeNode[]; hint: string }) 
         </button>
       </div>
       <div className="pk-tree">
+        {/* key 用下标不用名字：两个同名 SQL（或叫 CHANGES.md 的 SQL）会在根层
+            撞名，name 做 key 会被 React 静默去重——预览恰好少数一行 */}
         {nodes.map((n, i) => (
           <Row
-            key={n.name}
+            key={i}
             node={n}
             id={n.name}
             prefix=""
@@ -119,7 +123,7 @@ function Row({
       {!isFolded &&
         node.children.map((c, i) => (
           <Row
-            key={c.name}
+            key={i}
             node={c}
             id={`${id}/${c.name}`}
             prefix={childPrefix}

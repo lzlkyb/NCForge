@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
+import { EmptyState } from "../ui/EmptyState";
 import { firstLine, friendlySvnError, formatRevTime, svnLog, type LogEntry } from "../../lib/svn";
 
 const PAGE = 30;
@@ -94,16 +95,19 @@ export function HistoryView({
 
         {!error && entries.length === 0 && loading && (
           <div className="vc-empty">
-            <Icon name="spinner" size={20} className="vc-spin" />
+            <Icon name="spinner" size={20} className="animate-spin" />
             <div>正在取历史…</div>
           </div>
         )}
 
         {!error && entries.length === 0 && !loading && (
-          <div className="vc-empty">
-            <Icon name="history" size={22} />
-            <div>这个路径还没有提交记录（新文件或未纳管目录）</div>
-          </div>
+          <EmptyState
+            icon="history"
+            description="这个路径还没有提交记录（新文件或未纳管目录）"
+            bigIconSize={44}
+            iconSize={20}
+            className="py-6"
+          />
         )}
 
         {entries.map((e) => (

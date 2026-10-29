@@ -10,6 +10,7 @@ import {
   reviewProgress,
   reviewedSet,
   type ChangesView,
+  type StatusLetter,
 } from "./svn";
 
 /**
@@ -66,7 +67,9 @@ describe("letterTone", () => {
 });
 
 describe("reviewProgress", () => {
-  const view = (items: Array<{ path: string; isDir?: boolean }>): ChangesView => ({
+  const view = (
+    items: Array<{ path: string; isDir?: boolean; letter?: StatusLetter }>,
+  ): ChangesView => ({
     groups: [
       {
         module: "pu",
@@ -74,7 +77,7 @@ describe("reviewProgress", () => {
           path: i.path,
           rel: i.path.split("/").slice(-1)[0],
           module: "pu",
-          letter: "M",
+          letter: i.letter ?? "M",
           status: "modified",
           revision: 100,
           isDir: i.isDir ?? false,
@@ -90,6 +93,20 @@ describe("reviewProgress", () => {
   it("只算文件，目录不参与分母", () => {
     const p = reviewProgress(view([{ path: "/a.java" }, { path: "/dir", isDir: true }]), new Set());
     expect(p).toEqual({ done: 0, total: 1, percent: 0 });
+  });
+
+  it("冲突与已删除不进球分母：它们没有「标记已审」入口", () => {
+    // 算进去的话进度永远到不了 100%，用户没法判断是真没审完还是分母算错
+    const p = reviewProgress(
+      view([
+        { path: "/a.java" },
+        { path: "/b.java", letter: "C" },
+        { path: "/c.java", letter: "D" },
+        { path: "/d.java", letter: "!" },
+      ]),
+      new Set([keyOf("/a.java")]),
+    );
+    expect(p).toEqual({ done: 1, total: 1, percent: 100 });
   });
 
   it("按 keyOf 规则命中已审集合（大小写/斜杠不敏感）", () => {

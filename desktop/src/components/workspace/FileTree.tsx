@@ -250,7 +250,9 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
         description={
           pendingDelete
             ? pendingDelete.isDir
-              ? `共 ${pendingDelete.files} 个文件${pendingDelete.labels > 0 ? `，其中 ${pendingDelete.labels} 个已在标签中打开` : ""}。`
+              ? // 后端数到 20000 就不再数了，会回 20001 表示「还要多」——
+                // 直接显示 20001 会让人以为是个精确值
+                `共 ${pendingDelete.files > 20000 ? "20000+" : pendingDelete.files} 个文件${pendingDelete.labels > 0 ? `，其中 ${pendingDelete.labels} 个已在标签中打开` : ""}。`
               : pendingDelete.labels > 0
                 ? "这个文件正在标签里打开，删除后标签会一并关闭。"
                 : undefined

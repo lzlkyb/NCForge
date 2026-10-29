@@ -195,7 +195,13 @@ export function DiffPane({
           下一处
         </button>
         <span className="vc-sp" />
-        {!data.editable && <span className="vc-hint">此文件为混合换行或含不可无损往返的字符，编辑器只读</span>}
+        {/* 差异面板自始至终是只读的，所以常态就要说清「想改去哪里改」；
+            以前只在不可编辑时提一句「编辑器只读」，反而让人以为别的文件能在这里改 */}
+        <span className="vc-hint">
+          {data.editable
+            ? "差异面板只读，要改内容点「在文件中打开」"
+            : "这个文件是混合换行或含无法无损往返的字符，只能在文件页只读查看"}
+        </span>
         <span className="vc-hint">
           <kbd>Alt</kbd>+<kbd>↓</kbd> 标记已审并下一个
         </span>

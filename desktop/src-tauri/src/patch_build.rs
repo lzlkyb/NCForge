@@ -388,7 +388,10 @@ fn locate_layer(
     }
     let entry = pv::class_entry(pkg_rel).unwrap_or_else(|| pkg_rel.to_string());
     for item in HY_DIRS {
-        let (d, _sec) = item.split_once(':').unwrap_or((item, ""));
+        let (d, seg) = item.split_once(':').unwrap_or((item, ""));
+        // 跨段命中要请用户核对：脚本在「段不一致却命中」时会警告，Rust 侧以前把
+        // 段丢掉了（绑成 `_sec` 没人用），层判跨段时界面一声不吭。
+        let cross = !seg.is_empty() && seg != section.as_str();
         // 同层散类目录：以前的补丁装进来的类是散文件，不在 jar 里
         let loose_dir = mod_dir.join(d.replace("/lib", "/classes"));
         if loose_dir
@@ -397,7 +400,7 @@ fn locate_layer(
         {
             return Ok(LayerInfo {
                 hyext: true,
-                why: format!("hyext（同层散类 {d}）"),
+                why: cross_note(&format!("hyext（同层散类 {d}）"), cross, section),
             });
         }
         let dir = mod_dir.join(d);
@@ -408,7 +411,7 @@ fn locate_layer(
             let shown = jar.strip_prefix(home).unwrap_or(&jar).display().to_string();
             return Ok(LayerInfo {
                 hyext: true,
-                why: format!("hyext（命中 {shown}）"),
+                why: cross_note(&format!("hyext（命中 {shown}）"), cross, section),
             });
         }
     }
@@ -416,6 +419,18 @@ fn locate_layer(
         hyext: false,
         why: "标准层（hyext jar 里没有同名类）".to_string(),
     })
+}
+
+/// 跨段命中时在 why 末尾追一句「请核对」。
+///
+/// 「本项是 private 段、命中的却是 public 的 hyext 目录」不是错误——补丁照样落位，
+/// 但它往往意味着「这个类的实际部署与源码段不一致」，正是用户要盯确认的那句话。
+fn cross_note(why: &str, cross: bool, section: pv::Section) -> String {
+    if cross {
+        format!("{why}；跨段命中：本项是 {} 段，请核对", section.as_str())
+    } else {
+        why.to_string()
+    }
 }
 
 // ───────────────────────────── 扫描 ─────────────────────────────
@@ -520,8 +535,13 @@ pub fn scan(options: &BuildOptions, files: &[String]) -> Result<ScanResult, Stri
         let pkg_dir = pv::pkg_dir_of(&parsed.pkg_rel);
         let target = pv::target_dir(&parsed.module, parsed.section, hyext, &pkg_dir);
 
-        // 源码段必须有编译产物，且不能比 java 旧（否则打进去的是旧行为）
-        if parsed.section.needs_class() && path.is_file() {
+        // 源码段里的 **.java** 必须有编译产物，且不能比 java 旧（否则打进去的是旧行为）。
+        //
+        // 只对 .java 要求 class：src/public 下面还有 .xml / .properties / .js 这类资源文件，
+        // 它们按脚本规则「只搬文件本身」（下面的写 zip 部分一律写 `target/pkg_rel`），
+        // 以前这里不区分扩展名，资源文件被当成类去要 .class，整个包直接阻断。
+        let is_java = parsed.pkg_rel.ends_with(".java");
+        if parsed.section.needs_class() && is_java && path.is_file() {
             let stem = pv::stem_of(&parsed.pkg_rel);
             let cands = out_root_candidates(&root, &parsed.module, configured_out.as_deref());
             match find_class(&cands, &parsed.module, &pkg_dir, &stem) {
@@ -601,7 +621,11 @@ pub fn scan(options: &BuildOptions, files: &[String]) -> Result<ScanResult, Stri
         });
     }
 
-    let java_count = items.iter().filter(|i| i.section.needs_class()).count();
+    // 「N java」只数真 java：源码段里的 .xml/.properties 不算（见上面 is_java 的注释）
+    let java_count = items
+        .iter()
+        .filter(|i| i.section.needs_class() && i.pkg_rel.ends_with(".java"))
+        .count();
     let class_count = items.iter().map(|i| i.classes.len()).sum();
     let blocked_count = items.iter().filter(|i| i.has_error()).count();
 
@@ -756,15 +780,49 @@ pub fn build(req: &BuildRequest) -> Result<BuildResult, String> {
             .map_err(|e| format!("建不了输出目录 {}：{e}", out_dir.display()))?;
     }
     let zip_path = out_dir.join(pv::zip_file_name(&req.desc, &date));
-    let backup = backup_existing(&zip_path);
-    let mut notes: Vec<String> = Vec::new();
 
-    // CHANGES.md 先拼好，再连同文件一起写进 zip
+    // 所有校验都在「备份旧包 / 动磁盘」之前做完。
+    //
+    // 以前是先 backup_existing 再查 SQL：SQL 路径写错时旧包已经被改名成 .bak、新包
+    // 却没生成——输出目录里那个正式包凭空消失了，用户只知道「出包失败」。
+    let mut notes: Vec<String> = Vec::new();
+    let mut sql_names = Vec::new();
+    // SQL 按文件名平铺在 zip 根：两个同名 SQL 解压时互相覆盖（只剩一个），
+    // 叫 CHANGES.md 的 SQL 会把自动生成的变更说明顶掉。都在动磁盘前拦下来。
+    let mut sql_by_name: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for s in &req.sqls {
+        let p = Path::new(s);
+        if !p.is_file() {
+            return Err(format!("SQL 文件不存在：{s}"));
+        }
+        let name = p
+            .file_name()
+            .map(|x| x.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if !name.is_ascii() {
+            notes.push(format!(
+                "SQL 文件名含非 ASCII（{name}），在 GBK 中间件服务器上解压时可能乱码，建议改英文名"
+            ));
+        }
+        if name == "CHANGES.md" {
+            return Err(format!(
+                "SQL 不能叫 CHANGES.md（{s}）：zip 根的变更说明也是这个名字，解压时会被这个 SQL 顶掉"
+            ));
+        }
+        if let Some(prev) = sql_by_name.insert(name.clone(), s.clone()) {
+            return Err(format!(
+                "SQL 文件重名（{name}）：{prev} 与 {s} 平铺在 zip 根会互相覆盖，解压只剩一个。请改个文件名再出包"
+            ));
+        }
+        sql_names.push(name);
+    }
+
+    // CHANGES.md 先拼好，再连同文件一起写进 zip。
+    // 这里读不到就直接失败（`?`）：留到写 zip 中途才失败，等于已备份 + 半截包。
     let mut md_entries: Vec<pv::MdEntry> = Vec::new();
     for item in &scan.items {
-        let Ok(working) = read_bytes(Path::new(&item.path)) else {
-            continue;
-        };
+        let working = read_bytes(Path::new(&item.path))?;
         let base = svn_base(Path::new(&item.path));
         let kind = match item.section {
             pv::Section::Upm => pv::MdKind::Upm,
@@ -783,28 +841,40 @@ pub fn build(req: &BuildRequest) -> Result<BuildResult, String> {
             working,
         });
     }
-    let mut sql_names = Vec::new();
-    for s in &req.sqls {
-        let p = Path::new(s);
-        if !p.is_file() {
-            return Err(format!("SQL 文件不存在：{s}"));
-        }
-        let name = p
-            .file_name()
-            .map(|x| x.to_string_lossy().to_string())
-            .unwrap_or_default();
-        if !name.is_ascii() {
-            notes.push(format!(
-                "SQL 文件名含非 ASCII（{name}），解压时可能乱码，建议改英文名"
-            ));
-        }
-        sql_names.push(name);
-    }
     let iso_date = format!("{}-{}-{}", &date[0..4], &date[4..6], &date[6..8]);
     let md = pv::build_changes_md(&req.note, &iso_date, &md_entries, &sql_names);
 
-    // 写 zip
-    let file = std::fs::File::create(&zip_path).map_err(|e| format!("建不了补丁包：{e}"))?;
+    // 校验全过了才备份旧包
+    let backup = backup_existing(&zip_path);
+
+    // 写 zip：中途任何一步失败都要把半截文件删掉——残缺的 zip 留在输出目录里，
+    // 售后会当真包拿去上线。
+    let (entries, class_count) = match write_package(&zip_path, &scan.items, &md, &req.sqls) {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = std::fs::remove_file(&zip_path);
+            return Err(e);
+        }
+    };
+
+    Ok(BuildResult {
+        zip_path: zip_path.display().to_string(),
+        entries,
+        java_count: scan.java_count,
+        class_count,
+        backup,
+        notes,
+    })
+}
+
+/// 写 zip 本体：返回（条目数，编译产物数）。失败时不负责清理半截文件（见调用方）。
+fn write_package(
+    zip_path: &Path,
+    items: &[PatchItem],
+    md: &str,
+    sqls: &[String],
+) -> Result<(usize, usize), String> {
+    let file = std::fs::File::create(zip_path).map_err(|e| format!("建不了补丁包：{e}"))?;
     let mut zw = zip::ZipWriter::new(std::io::BufWriter::new(file));
     let opts = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
@@ -812,7 +882,7 @@ pub fn build(req: &BuildRequest) -> Result<BuildResult, String> {
 
     // 目录条目：`zip -r` 会带上，保持与历史包一致
     let mut dirs: BTreeSet<String> = BTreeSet::new();
-    for item in &scan.items {
+    for item in items {
         let mut acc = String::new();
         for part in item.target.split('/') {
             if !acc.is_empty() {
@@ -844,7 +914,7 @@ pub fn build(req: &BuildRequest) -> Result<BuildResult, String> {
     entries += 1;
 
     let mut class_count = 0usize;
-    for item in &scan.items {
+    for item in items {
         let base = item
             .pkg_rel
             .rsplit('/')
@@ -865,7 +935,7 @@ pub fn build(req: &BuildRequest) -> Result<BuildResult, String> {
         }
     }
 
-    for s in &req.sqls {
+    for s in sqls {
         let p = Path::new(s);
         let name = p
             .file_name()
@@ -881,14 +951,7 @@ pub fn build(req: &BuildRequest) -> Result<BuildResult, String> {
         .flush()
         .map_err(|e| format!("写盘失败：{e}"))?;
 
-    Ok(BuildResult {
-        zip_path: zip_path.display().to_string(),
-        entries,
-        java_count: scan.java_count,
-        class_count,
-        backup,
-        notes,
-    })
+    Ok((entries, class_count))
 }
 
 /// 继承 nc-patch 脚本缓存的补丁输出目录。
@@ -1026,6 +1089,52 @@ mod tests {
         assert_eq!(c.len(), 2);
         let c = out_root_candidates(root, "ic", Some(Path::new(r"D:\other\out")));
         assert_eq!(c.len(), 3);
+    }
+
+    #[test]
+    fn hyext_跨段命中带请核对_同段不带() {
+        // uapbd 不是默认 hyext 模块，必须走 NC home 判层这条路
+        let tmp = std::env::temp_dir().join(format!("ncforge-xsec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let mod_dir = tmp.join("modules").join("uapbd");
+        std::fs::create_dir_all(mod_dir.join("hyext/classes/nc/bs")).unwrap();
+        std::fs::write(mod_dir.join("hyext/classes/nc/bs/Foo.class"), b"x").unwrap();
+        std::fs::create_dir_all(mod_dir.join("META-INF/hyext/classes/nc/bs")).unwrap();
+        std::fs::write(mod_dir.join("META-INF/hyext/classes/nc/bs/Bar.class"), b"x").unwrap();
+        let mut idx = JarIndex::default();
+
+        // private 段的类，散文件却在 public 的 hyext/classes 下 → 跨段，要提示核对
+        let l = locate_layer(
+            "uapbd",
+            pv::Section::Private,
+            "nc/bs/Foo.java",
+            Some(&tmp),
+            &mut idx,
+            None,
+        )
+        .unwrap();
+        assert!(l.hyext);
+        assert!(l.why.contains("同层散类"), "{}", l.why);
+        assert!(l.why.contains("请核对"), "跨段命中必须提示核对：{}", l.why);
+
+        // 同段（private 的散类目录）不该带请核对
+        let l2 = locate_layer(
+            "uapbd",
+            pv::Section::Private,
+            "nc/bs/Bar.java",
+            Some(&tmp),
+            &mut idx,
+            None,
+        )
+        .unwrap();
+        assert!(l2.why.contains("同层散类"), "{}", l2.why);
+        assert!(
+            !l2.why.contains("请核对"),
+            "同段命中不该提示核对：{}",
+            l2.why
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

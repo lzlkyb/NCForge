@@ -341,6 +341,9 @@
 .wb-lang-dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--success)); }
 .wb-lang[data-tone="busy"] .wb-lang-dot { background: hsl(var(--warning)); animation: wb-lang-pulse 1s infinite; }
 .wb-lang[data-tone="bad"] { color: hsl(var(--destructive-ink)); font-weight: 600; }
+/* 轻量模式：灰点 + 弱化文字，不抢注意力但看得见 */
+.wb-lang[data-tone="off"] { color: hsl(var(--muted-foreground)); }
+.wb-lang[data-tone="off"] .wb-lang-dot { background: hsl(var(--muted-foreground)); }
 @keyframes wb-lang-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .wb-lang[data-tone="busy"] .wb-lang-dot { animation: none; } }
 .wb-status-btn { color: inherit; font-size: inherit; padding: 0 4px; border-radius: 4px; }

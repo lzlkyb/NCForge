@@ -250,7 +250,13 @@ pub fn count_files(dir: &Path) -> u64 {
     }
     let mut acc = 0;
     walk(dir, &mut acc);
-    acc
+    // 触顶时多给 1：让界面能区分「正好两万个」和「远远不止」——
+    // 否则删除确认里那句「共 20000 个文件」在超大目录上是句假话。
+    if acc >= COUNT_FILES_CAP {
+        COUNT_FILES_CAP + 1
+    } else {
+        acc
+    }
 }
 
 fn mtime_ms(path: &Path) -> Result<u64, String> {
@@ -329,7 +335,16 @@ fn encode(text: &str, encoding: TextEncoding, has_bom: bool) -> Result<Vec<u8>, 
         TextEncoding::Gbk => {
             let (cow, _, had_errors) = GBK.encode(text);
             if had_errors {
-                return Err("内容含 GBK 无法表示的字符，请改用 UTF-8 保存".to_string());
+                // 指出第一个写不出的字符：只说「请改用 UTF-8」用户无从下手，
+                // 而字符级线索（常常是 emoji、生僻字、全角符号）能一眼定位。
+                let bad = text.chars().find(|c| GBK.encode(&c.to_string()).2);
+                let what = match bad {
+                    Some(c) => format!("「{c}」"),
+                    None => "部分字符".to_string(),
+                };
+                return Err(format!(
+                    "UNENCODABLE:内容含 GBK 表示不了的字符 {what}，只能转成 UTF-8 保存"
+                ));
             }
             Ok(cow.into_owned())
         }

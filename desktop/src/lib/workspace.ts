@@ -76,6 +76,37 @@ export const encodingMarks = (paths: string[]) =>
 /** 后端保存冲突的错误前缀（磁盘文件已被其他程序修改）。 */
 export const isConflictError = (e: unknown) => String(e).startsWith("CONFLICT");
 
+/**
+ * 后端「当前编码写不出这些字符」的错误前缀（只有 GBK 会走到）。
+ *
+ * 带前缀是为了让界面能挂出「转成 UTF-8 保存」按钮——只弹一句 toast 说
+ * 「请改用 UTF-8」是死路：全界面没有切换编码的入口。
+ */
+export const isUnencodableError = (e: unknown) => String(e).startsWith("UNENCODABLE:");
+
+/** 去掉给界面看的内部前缀（`CONFLICT:…` / `UNENCODABLE:…`）。 */
+export const cleanError = (e: unknown) =>
+  String(e).replace(/^(?:UNENCODABLE|CONFLICT):/, "");
+
+/**
+ * 按编辑器的口径数行：`\r\n`、`\r`、`\n` 各算一次换行。
+ *
+ * `text.split("\n").length` 会把孤立 `\r`（老 Mac 行尾、部分工具生成的文件）
+ * 当成同一行，和 Monaco 归一化后的行号差一截——大文件提示、问题行跳转都会对不齐。
+ */
+export function countLines(text: string): number {
+  let n = 1;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text.charCodeAt(i);
+    if (c === 10) n += 1;
+    else if (c === 13) {
+      n += 1;
+      if (text.charCodeAt(i + 1) === 10) i += 1;
+    }
+  }
+  return n;
+}
+
 /** 工作区路径是 Windows 风格，给后端的路径统一用反斜杠拼接。 */
 export function joinPath(parent: string, name: string): string {
   return parent.endsWith("\\") ? parent + name : `${parent}\\${name}`;

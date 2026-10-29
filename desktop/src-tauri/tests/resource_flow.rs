@@ -10,7 +10,9 @@
 //! update_flow 用 APP_UPDATE_ENDPOINT（另一个变量），与本文件无交叉。
 
 use nc_forge::commands::ensure_resources_async;
-use nc_forge::resource_pack::{external_root, pack_dir, PacksState, PACK_ECJ};
+use nc_forge::resource_pack::{
+    external_root, pack_dir, InstalledPack, PacksState, PACK_ECJ, PACK_JDTLS, PACK_SVNKIT,
+};
 use nc_forge::state::AppState;
 use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
@@ -45,7 +47,11 @@ fn spawn_local_source(manifest: String, packs: Vec<(String, Vec<u8>)>) -> u16 {
                     Err(_) => break,
                 }
             }
-            let path = request_line.split_whitespace().nth(1).unwrap_or("").to_string();
+            let path = request_line
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or("")
+                .to_string();
             let body: Vec<u8> = if path == "/resources.json" {
                 manifest.clone().into_bytes()
             } else if let Some(name) = path.strip_prefix("/packs/") {
@@ -114,7 +120,8 @@ fn manifest_json(port: u16, version: &str, sha: &str, size: u64) -> String {
 
 /// 起一个带 AppState 的 mock 应用，返回 (app, config_dir)。
 fn mock_app(tag: &str) -> (tauri::App<tauri::test::MockRuntime>, std::path::PathBuf) {
-    let config_dir = std::env::temp_dir().join(format!("ncforge-rp-it-{tag}-{}", std::process::id()));
+    let config_dir =
+        std::env::temp_dir().join(format!("ncforge-rp-it-{tag}-{}", std::process::id()));
     std::fs::create_dir_all(&config_dir).unwrap();
     let app = mock_builder()
         .build(tauri::generate_context!())
@@ -149,7 +156,11 @@ fn watch(app: &tauri::App<tauri::test::MockRuntime>) -> Receiver<(String, String
 }
 
 /// 等到 `until` 事件或超时，返回按序收集到的全部事件。
-fn wait_until(rx: &Receiver<(String, String)>, until: &str, timeout: Duration) -> Vec<(String, String)> {
+fn wait_until(
+    rx: &Receiver<(String, String)>,
+    until: &str,
+    timeout: Duration,
+) -> Vec<(String, String)> {
     let deadline = Instant::now() + timeout;
     let mut seen = Vec::new();
     while Instant::now() < deadline {
@@ -205,12 +216,26 @@ fn local_source_drives_install_failures_and_failover() {
         "resource:installed",
         "resource:ready",
     ] {
-        assert!(seen.contains(&expected), "事件序列缺少 {expected}: {seen:?}");
+        assert!(
+            seen.contains(&expected),
+            "事件序列缺少 {expected}: {seen:?}"
+        );
     }
     // available 应带包清单与总大小
-    let available = events.iter().find(|(n, _)| n == "resource:available").unwrap();
-    assert!(available.1.contains("\"id\":\"ecj\""), "available 应带 ecj: {}", available.1);
-    assert!(available.1.contains("\"totalBytes\""), "available 应带总字节: {}", available.1);
+    let available = events
+        .iter()
+        .find(|(n, _)| n == "resource:available")
+        .unwrap();
+    assert!(
+        available.1.contains("\"id\":\"ecj\""),
+        "available 应带 ecj: {}",
+        available.1
+    );
+    assert!(
+        available.1.contains("\"totalBytes\""),
+        "available 应带总字节: {}",
+        available.1
+    );
 
     // 落盘核对：版本目录 + 内容 + state
     let dir = pack_dir(&config_dir, PACK_ECJ, &version);
@@ -339,23 +364,33 @@ fn local_source_drives_install_failures_and_failover() {
     );
     std::env::set_var(
         "APP_RESOURCES_ENDPOINT",
-        format!("http://127.0.0.1:{bad_p2}/resources.json,http://127.0.0.1:{good_p2}/resources.json"),
+        format!(
+            "http://127.0.0.1:{bad_p2}/resources.json,http://127.0.0.1:{good_p2}/resources.json"
+        ),
     );
     let rx4 = watch(&app4);
     ensure_resources_async(app4.handle().clone(), false);
     // 源 1 下载失败重试 2 次（1s+2s 退避）+ 源 2 下载安装，给足超时
     let events4 = wait_until(&rx4, "resource:ready", Duration::from_secs(45));
     let seen4 = names(&events4);
-    assert!(seen4.contains(&"resource:ready"), "换源后应能装完: {seen4:?}");
+    assert!(
+        seen4.contains(&"resource:ready"),
+        "换源后应能装完: {seen4:?}"
+    );
     assert!(
         !seen4.contains(&"resource:error"),
         "有可用源就不该报全局失败: {seen4:?}"
     );
     // 装上的必须是源 2 的版本（内容寻址），不是源 1 清单里的坏版本
     let dir4 = pack_dir(&config_dir4, PACK_ECJ, &good_version);
-    assert!(dir4.join("ecj-3.17.jar").is_file(), "应从源 2 装好: {dir4:?}");
     assert!(
-        !external_root(&config_dir4).join("ecj@badver000001").exists(),
+        dir4.join("ecj-3.17.jar").is_file(),
+        "应从源 2 装好: {dir4:?}"
+    );
+    assert!(
+        !external_root(&config_dir4)
+            .join("ecj@badver000001")
+            .exists(),
         "坏版本的目录不该存在"
     );
     let st4 = PacksState::load(&config_dir4);
@@ -366,8 +401,75 @@ fn local_source_drives_install_failures_and_failover() {
         st4.packs
     );
 
+    // ─── 场景 5：源全不可达 + 本地三包已就绪 ⇒ uptodate/ready，不报错 ───
+    // 离线笔记本冷启动的真实形态：清单一个源都拉不到，但资源一个都不缺。
+    // 以前这里直接 resource:error——每次冷启动触发数分钟后台网络重试，
+    // 而资源其实一直是齐的（M8-5 离线短路）。
+    let (app5, config_dir5) = mock_app("offline");
+    // 预置三包：不走下载，直接按「安装后」的布局落盘并记 state
+    let prepopulate = |id: &str, version: &str| {
+        let dir = pack_dir(&config_dir5, id, version);
+        match id {
+            PACK_JDTLS => {
+                std::fs::create_dir_all(dir.join("plugins")).unwrap();
+                std::fs::create_dir_all(dir.join("config_win")).unwrap();
+            }
+            PACK_ECJ => {
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("ecj-3.17.jar"), b"x").unwrap();
+            }
+            PACK_SVNKIT => {
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("svnkit.jar"), b"x").unwrap();
+            }
+            _ => unreachable!(),
+        }
+    };
+    let mut st5 = PacksState::default();
+    for id in [PACK_JDTLS, PACK_ECJ, PACK_SVNKIT] {
+        let ver = format!("pre-{id}");
+        prepopulate(id, &ver);
+        st5.packs.insert(
+            id.to_string(),
+            InstalledPack {
+                version: ver,
+                legacy: false,
+                size: Some(1),
+            },
+        );
+    }
+    st5.save(&config_dir5).unwrap();
+    // 指向一个必然联不上的端口：绑了就关，联它必被拒
+    let dead_port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    };
+    std::env::set_var(
+        "APP_RESOURCES_ENDPOINT",
+        format!("http://127.0.0.1:{dead_port}/resources.json"),
+    );
+    let rx5 = watch(&app5);
+    ensure_resources_async(app5.handle().clone(), false);
+    // 清单拉取失败重试 2 次（1s+2s 退避）后才走到离线短路，给足超时
+    let events5 = wait_until(&rx5, "resource:ready", Duration::from_secs(30));
+    let seen5 = names(&events5);
+    assert!(
+        seen5.contains(&"resource:uptodate"),
+        "本地已就绪应按 uptodate 放行: {seen5:?}"
+    );
+    assert!(
+        !seen5.contains(&"resource:error"),
+        "离线但本地齐不该报错: {seen5:?}"
+    );
+
     std::env::remove_var("APP_RESOURCES_ENDPOINT");
-    for d in [&config_dir, &config_dir2, &config_dir3, &config_dir4] {
+    for d in [
+        &config_dir,
+        &config_dir2,
+        &config_dir3,
+        &config_dir4,
+        &config_dir5,
+    ] {
         std::fs::remove_dir_all(d).ok();
     }
 }

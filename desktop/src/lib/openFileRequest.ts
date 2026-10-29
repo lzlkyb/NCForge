@@ -13,6 +13,8 @@ export interface OpenFileRequest {
   path: string;
   /** 要定位到的行号；不给就只打开。 */
   line?: number;
+  /** 要定位到的列号（1 基）。只有搜索命中这类知道行内位置的调用方会给。 */
+  column?: number;
 }
 
 let pending: OpenFileRequest | null = null;

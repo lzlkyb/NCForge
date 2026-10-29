@@ -35,6 +35,7 @@ export function ChangeList({
   reviewed,
   selected,
   loading,
+  error,
   onSelect,
   showIgnored,
   onToggleIgnored,
@@ -43,6 +44,8 @@ export function ChangeList({
   reviewed: Set<string>;
   selected: string | null;
   loading: boolean;
+  /** 扫描失败的原因。有值时绝不能显示「干净」——用户会以为改动丢了。 */
+  error: string | null;
   onSelect: (item: ChangeItem) => void;
   showIgnored: boolean;
   onToggleIgnored: () => void;
@@ -142,7 +145,7 @@ export function ChangeList({
             用户会以为改动丢了、转头去 Eclipse 里找。 */}
         {loading && view.total === 0 && (
           <div className="vc-empty">
-            <Icon name="spinner" size={22} className="vc-spin" />
+            <Icon name="spinner" size={22} className="animate-spin" />
             <div>
               正在扫描工作副本…
               <br />
@@ -150,7 +153,17 @@ export function ChangeList({
             </div>
           </div>
         )}
-        {groups.length === 0 && !(loading && view.total === 0) && (
+        {error && !loading && (
+          <div className="vc-empty" data-tone="bad">
+            <Icon name="alert" size={22} />
+            <div>
+              扫描失败，见上方提示
+              <br />
+              这<b>不表示</b>工作副本是干净的——先修好错误再刷新
+            </div>
+          </div>
+        )}
+        {!error && groups.length === 0 && !(loading && view.total === 0) && (
           <div className="vc-empty">
             <Icon name="check" size={22} />
             <div>

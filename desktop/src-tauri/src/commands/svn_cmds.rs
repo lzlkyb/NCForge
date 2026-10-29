@@ -6,18 +6,21 @@
 //! 2. **不缓存状态**。改动列表每次真扫——SVN 的「改动」随时会被 Eclipse、命令行改掉，
 //!    缓存只会给出过期结论；界面靠轮询节流（窗口隐藏时停）而不是靠缓存。
 //! 3. **写操作前先备份**。revert 是唯一无法从 SVN 恢复的操作，先把文件拷到
-//!    `<工作区>/.ncforge-revert-<时间戳>/` 再动手。
+//!    `<工作副本上一级>/.ncforge-revert-<时间戳>/` 再动手（落点见 `backup_root`，
+//!    这些目录的盘点与清理见 `svn_backup` 与 `svn_housekeeping`）。
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::config::AppConfig;
 use crate::security::path::{display_path, resolve_safe_path};
 use crate::state::AppState;
+use crate::svn_backup;
 use crate::svn_bridge::{self, Bridge};
 use crate::svn_cred;
 use crate::svn_review::{self, ReviewMark, ReviewStore};
@@ -112,8 +115,13 @@ pub struct CommitResult {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateResult {
     pub revision: i64,
-    /// 更新后仍有冲突的文件（更新本身不解决冲突）。
-    pub conflicts: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveResult {
+    /// 冲突临时文件（`.mine` / `.rN`）的备份目录；没有可备份的文件时为 None。
+    pub backup_dir: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -130,7 +138,9 @@ pub struct RevertResult {
 /// 旧安装兜底）随后，开发树的 `src-tauri/resources` 最后。
 fn resource_dirs(app: &AppHandle, config_dir: &Path) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    if let Some(dir) = crate::resource_pack::active_dir(config_dir, crate::resource_pack::PACK_SVNKIT) {
+    if let Some(dir) =
+        crate::resource_pack::active_dir(config_dir, crate::resource_pack::PACK_SVNKIT)
+    {
         dirs.push(dir);
     }
     if let Ok(dir) = app.path().resource_dir() {
@@ -140,7 +150,11 @@ fn resource_dirs(app: &AppHandle, config_dir: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-/// 取（或建）桥。java 路径变了（换了 NC home）就重建，避免拿着旧 JVM 干活。
+/// 取（或建）桥。java 路径变了（换了 NC home）**或组件版本变了**就重建。
+///
+/// 只比 java 路径是不够的：桥进程全程握着自己的 classpath，jar 升级（组件下载换包）
+/// 后旧 JVM 仍然跑旧 class，必须重启应用才生效——而升级正是「刚点完更新组件」的时刻，
+/// 用户会以为新版本没起作用。所以连 jar 列表一起比。
 fn bridge_for(app: &AppHandle, state: &AppState, cfg: &AppConfig) -> Result<Arc<Bridge>, String> {
     let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
     let java = PathBuf::from(&home.java);
@@ -152,7 +166,7 @@ fn bridge_for(app: &AppHandle, state: &AppState, cfg: &AppConfig) -> Result<Arc<
 
     let mut guard = state.svn.lock().map_err(|_| "SVN 桥状态异常".to_string())?;
     if let Some(existing) = guard.as_ref() {
-        if existing.env().java == java {
+        if existing.env().java == java && existing.env().jars == jars {
             return Ok(existing.clone());
         }
         existing.shutdown();
@@ -289,20 +303,19 @@ fn mtime_ms(path: &Path) -> Option<u64> {
     Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64)
 }
 
-/// 已审标记里仍然有效的路径集合（文件还在、mtime/size 没变）。
-/// revision 的比较交给前端：它手里才有刚扫出来的 status 条目。
-fn valid_marks(store: &ReviewStore) -> Vec<String> {
-    let mut out = Vec::new();
-    for (key, mark) in &store.marks {
-        let p = Path::new(key);
-        let (Some(mt), Ok(md)) = (mtime_ms(p), std::fs::metadata(p)) else {
-            continue;
-        };
-        if mark.mtime_ms == mt && mark.size == md.len() {
-            out.push(key.clone());
+/// 备份目录：`<工作副本上一级>/.ncforge-<tag>-<ts>`；工作副本根是盘符根时落到配置目录。
+///
+/// 故意不放在工作副本里面：那是 SVN 和 Eclipse 都盯着的目录，凭空多一个
+/// 未纳管目录会进改动列表，也可能被别的客户端「提交全部」顺手带上。
+/// 放上一级既在工程旁边好找，又不进仓库。
+fn backup_root(root: &Path, config_dir: &Path, tag: &str, ts: u64) -> PathBuf {
+    let root_clean = crate::nc_home::strip_verbatim(root);
+    match root_clean.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => {
+            parent.join(format!(".ncforge-{tag}-{ts}"))
         }
+        _ => config_dir.join(format!("{tag}-{ts}")),
     }
-    out
 }
 
 // ───────────────────────── 命令 ─────────────────────────
@@ -340,6 +353,10 @@ pub async fn svn_info(
 
 /// 扫描改动。构建产物也一并返回（带 `ignored` 标记），由界面决定显不显示——
 /// 让后端按界面开关重扫一遍，等于点一下「显示全部」等 7.6 秒。
+///
+/// 扫描要 7.6 秒，这段时间界面只转个 spinner 用户分不清「在跑」还是「卡死」，
+/// 所以走 `call_with_progress` 把桥每 300 条的进度用事件推给前端
+/// （桥一直在推，以前被 `call()` 当心跳丢掉）。
 #[tauri::command]
 pub async fn svn_status(
     app: AppHandle,
@@ -351,8 +368,14 @@ pub async fn svn_status(
         let root = root_of(&cfg)?;
         let bridge = bridge_for(&app, &st, &cfg)?;
         let root_s = crate::nc_home::strip_verbatim(&root).display().to_string();
+        let emitter = app.clone();
         let v = bridge
-            .call("status", &[&root_s], T_STATUS)
+            .call_with_progress("status", &[&root_s], T_STATUS, move |p| {
+                if let Some(n) = p.get("scanned").and_then(|x| x.as_i64()) {
+                    // 进度只是提示：发不出去（窗口已关）不影响扫描结果
+                    let _ = emitter.emit("svn-scan-progress", serde_json::json!({ "scanned": n }));
+                }
+            })
             .map_err(|e| split_code_label(e.code, e.message))?;
         let scanned = v["scanned"].as_i64().unwrap_or(0);
         let raw: Vec<RawEntry> = serde_json::from_value(v["entries"].clone())
@@ -363,13 +386,20 @@ pub async fn svn_status(
             .iter()
             .flat_map(|g| g.items.iter())
             .any(|i| i.letter == "C");
+        // 每个条目的 BASE 版本号：已审标记的 revision 维度就靠它（见 `valid_marks`）
+        let mut revisions = HashMap::new();
+        for g in &changes.groups {
+            for it in &g.items {
+                revisions.insert(svn_review::key_of(Path::new(&it.path)), it.revision);
+            }
+        }
         let store = ReviewStore::load(&st.config_dir);
         Ok(StatusResult {
             changes,
             scanned,
             generated_at_ms: now_ms(),
             has_conflict,
-            reviewed: valid_marks(&store),
+            reviewed: svn_review::valid_marks(&store, &revisions),
         })
     })
     .await
@@ -554,6 +584,11 @@ pub async fn svn_commit(
 }
 
 /// 更新整个工作副本。
+///
+/// 只做更新，**不在这里再扫一遍 status**：更新后前端一定会 `refresh()`（界面上的改动数、
+/// 审查进度全靠那次扫描），里面再扫一次等于同一件事做两遍、多等 7.6 秒；更要紧的是
+/// 二次扫描一旦失败，整条命令会报错——而更新其实已经成功了，用户可能再点一次更新。
+/// 冲突信息由前端在那次刷新结果里自己读（C 条目就是冲突）。
 #[tauri::command]
 pub async fn svn_update(
     app: AppHandle,
@@ -569,19 +604,8 @@ pub async fn svn_update(
         let v = bridge
             .call("update", &[&display_path(&root)], T_WRITE)
             .map_err(|e| split_code_label(e.code, e.message))?;
-        // 更新不解决冲突，但会把冲突标出来，顺手扫一遍告诉界面
-        let v2 = bridge
-            .call("status", &[&display_path(&root)], T_STATUS)
-            .map_err(|e| split_code_label(e.code, e.message))?;
-        let raw: Vec<RawEntry> = serde_json::from_value(v2["entries"].clone()).unwrap_or_default();
-        let conflicts = raw
-            .iter()
-            .filter(|e| e.status == "conflicted")
-            .map(|e| e.path.clone())
-            .collect();
         Ok(UpdateResult {
             revision: v["revision"].as_i64().unwrap_or(-1),
-            conflicts,
         })
     })
     .await
@@ -608,20 +632,9 @@ pub async fn svn_revert(
         for p in &paths {
             targets.push(PathBuf::from(display_path(&safe_path(&cfg, p)?)));
         }
-        // 备份：<工作副本上一级>/.ncforge-revert-<ts>/<相对路径>
-        //
-        // 故意不放在工作副本里面：那是 SVN 和 Eclipse 都盯着的目录，凭空多一个
-        // 未纳管目录会进改动列表，也可能被别的客户端「提交全部」顺手带上。
-        // 放上一级既在工程旁边好找，又不进仓库。
+        // 备份：<工作副本上一级>/.ncforge-revert-<ts>/<相对路径>（见 backup_root）
         let ts = now_ms();
-        let root_clean = crate::nc_home::strip_verbatim(&root);
-        let backup_dir = match root_clean.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => {
-                parent.join(format!(".ncforge-revert-{ts}"))
-            }
-            // 工作副本根就是盘符根（D:\）时没有上一级，落到应用数据目录
-            _ => st.config_dir.join(format!("revert-{ts}")),
-        };
+        let backup_dir = backup_root(&root, &st.config_dir, "revert", ts);
         for t in &targets {
             if !t.is_file() {
                 continue;
@@ -648,29 +661,87 @@ pub async fn svn_revert(
     .map_err(|e| format!("撤销失败: {e}"))?
 }
 
-/// 冲突二选一：`mine` / `theirs` / `base`。这一步会丢掉 .mine/.rN 临时文件。
+/// 冲突二选一：`mine` / `theirs` / `base`。
+///
+/// **先备份再落盘**，与撤销同一套标准：`doResolve` 会顺手删掉 `.mine` / `.rN`
+/// 三个临时文件，删了就再没有「另一版」可看，而选错版本在冲突处理里太常见了。
+/// 以前这里一点即落盘、连确认都没有，是全仓唯一没有回头路的写操作。
 #[tauri::command]
 pub async fn svn_resolve(
     app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     path: String,
     choice: String,
-) -> Result<(), String> {
+) -> Result<ResolveResult, String> {
     if !matches!(choice.as_str(), "mine" | "theirs" | "base") {
         return Err("未知的解决方式".to_string());
     }
     let cfg = state.config.read().await.clone();
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let root = root_of(&cfg)?;
         let target = safe_path(&cfg, &path)?;
         let bridge = bridge_for(&app, &st, &cfg)?;
+        let backup_dir = backup_conflict_files(&root, &target, &st.config_dir, &path)?;
         bridge
             .call("resolve", &[&choice, &display_path(&target)], T_NET)
             .map_err(|e| split_code_label(e.code, e.message))?;
-        Ok(())
+        Ok(ResolveResult {
+            backup_dir: backup_dir.map(|d| d.display().to_string()),
+        })
     })
     .await
     .map_err(|e| format!("解决冲突失败: {e}"))?
+}
+
+/// 把 `<文件>.mine` / `<文件>.r<数字>` 拷到备份目录，返回（有东西可拷时的）目录。
+///
+/// 版本号事先不知道（服务器把冲突版本写成 `.r1234`，本地那一版是 `.mine`），
+/// 所以按文件名前缀扫一遍目录，而不是拼死一个名字。
+fn backup_conflict_files(
+    root: &Path,
+    target: &Path,
+    config_dir: &Path,
+    requested: &str,
+) -> Result<Option<PathBuf>, String> {
+    let (Some(parent), Some(name)) = (target.parent(), target.file_name().and_then(|n| n.to_str()))
+    else {
+        return Ok(None);
+    };
+    let prefix = format!("{name}.");
+    let mut found = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            let Some(fname) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            let Some(suffix) = fname.strip_prefix(&prefix) else {
+                continue;
+            };
+            let is_conflict = suffix == "mine"
+                || (suffix.starts_with('r') && suffix[1..].chars().all(|c| c.is_ascii_digit()));
+            if is_conflict && entry.path().is_file() {
+                found.push(entry.path());
+            }
+        }
+    }
+    if found.is_empty() {
+        return Ok(None);
+    }
+    let dir = backup_root(root, config_dir, "resolve", now_ms());
+    let rel_dir = target
+        .parent()
+        .and_then(|p| p.strip_prefix(root).ok())
+        .unwrap_or(Path::new(""));
+    let dest_dir = dir.join(rel_dir);
+    std::fs::create_dir_all(&dest_dir).map_err(|e| format!("建备份目录失败: {e}"))?;
+    for src in found {
+        let Some(n) = src.file_name() else { continue };
+        let dest = dest_dir.join(n);
+        std::fs::copy(&src, &dest)
+            .map_err(|e| format!("备份 {} 失败: {e}（{requested}）", src.display()))?;
+    }
+    Ok(Some(dest_dir))
 }
 
 /// 标记/取消「已审」。`reviewed = false` 时删掉标记。
@@ -696,6 +767,9 @@ pub async fn svn_review_mark(
                 key,
                 ReviewMark {
                     revision,
+                    // 原样路径另存一份：key 是小写化的，拿去 stat 在大小写敏感的
+                    // 系统上永远失败（见 `ReviewMark::path`）
+                    path: target.display().to_string(),
                     mtime_ms: mtime_ms(&target).unwrap_or(0),
                     size: md.len(),
                     at_ms: now_ms(),
@@ -717,8 +791,8 @@ pub async fn svn_review_prune(state: tauri::State<'_, Arc<AppState>>) -> Result<
     let cfg_dir = st.config_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut store = ReviewStore::load(&cfg_dir);
-        let left = store.retain_valid(|key| {
-            let p = Path::new(key);
+        let left = store.retain_valid(|key, mark| {
+            let p = mark.fs_path(key);
             let mt = mtime_ms(p)?;
             let md = std::fs::metadata(p).ok()?;
             Some((mt, md.len()))
@@ -730,9 +804,146 @@ pub async fn svn_review_prune(state: tauri::State<'_, Arc<AppState>>) -> Result<
     .map_err(|e| format!("清理审查标记失败: {e}"))?
 }
 
+/// 备份目录的候选基线目录。
+///
+/// 与 `backup_root` 同口径：正常是工作副本的上一级；工作副本根是盘符根时那里没有
+/// 父目录，备份会落到配置目录，所以两个都要扫，否则最需要清理的那台机器反而看不到。
+fn backup_bases(root: &Path, config_dir: &Path) -> Vec<PathBuf> {
+    let mut bases: Vec<PathBuf> = Vec::new();
+    if let Some(parent) = crate::nc_home::strip_verbatim(root).parent() {
+        if !parent.as_os_str().is_empty() {
+            bases.push(parent.to_path_buf());
+        }
+    }
+    if !bases.iter().any(|b| b == config_dir) {
+        bases.push(config_dir.to_path_buf());
+    }
+    bases
+}
+
+/// 维护面板的数据：备份目录盘点 + 审查标记统计。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HousekeepingInfo {
+    /// 备份目录所在的目录（工作副本上一级），界面上告诉用户去哪儿找。
+    pub base_dir: String,
+    pub backups: Vec<svn_backup::BackupDir>,
+    pub total_bytes: u64,
+    /// 审查标记总数 / 仍然有效 / 已失效。
+    ///
+    /// 这里的「有效」只按**文件本身**判（还在、mtime 与长度没变）：版本号有没有变要
+    /// 扫一遍工作副本才知道（7.6 秒），而维护面板不该为了三个数字付这个代价。
+    /// 所以 revision 维度失效的标记会算在「有效」里，但它在改动列表里已经不生效了。
+    pub review_total: usize,
+    pub review_valid: usize,
+    pub review_stale: usize,
+}
+
+/// 维护面板：列出备份目录与审查标记统计。只读，不碰磁盘内容。
+#[tauri::command]
+pub async fn svn_housekeeping(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<HousekeepingInfo, String> {
+    let cfg = state.config.read().await.clone();
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = root_of(&cfg)?;
+        let bases = backup_bases(&root, &st.config_dir);
+        let backups = svn_backup::scan_all(&bases);
+        let total_bytes = backups.iter().map(|b| b.bytes).sum();
+        let store = ReviewStore::load(&st.config_dir);
+        let review_total = store.marks.len();
+        let mut review_valid = 0;
+        for (key, mark) in &store.marks {
+            let p = mark.fs_path(key);
+            let (Some(mt), Ok(md)) = (mtime_ms(p), std::fs::metadata(p)) else {
+                continue;
+            };
+            if mark.mtime_ms == mt && mark.size == md.len() {
+                review_valid += 1;
+            }
+        }
+        Ok(HousekeepingInfo {
+            base_dir: bases
+                .first()
+                .map(|b| b.display().to_string())
+                .unwrap_or_default(),
+            backups,
+            total_bytes,
+            review_total,
+            review_valid,
+            review_stale: review_total.saturating_sub(review_valid),
+        })
+    })
+    .await
+    .map_err(|e| format!("盘点备份目录失败: {e}"))?
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupPurgeResult {
+    pub deleted: usize,
+    pub bytes: u64,
+    /// 逐个删时失败的条目。一次失败不该把前面已删的数字吞掉——不可回滚，
+    /// 用户需要知道「删了几个、释放多少、哪几个没删掉」。
+    pub failed: Vec<PurgeFailure>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PurgeFailure {
+    pub name: String,
+    pub message: String,
+}
+
+/// 删除指定的备份目录（按**目录名**，不按路径）。
+///
+/// 名字与父目录的校验在 `svn_backup::confirm_target` 里，这里只负责取基线目录。
+/// 单个失败不中断整批：继续删剩下的，失败的条目连原因一起回给前端。
+#[tauri::command]
+pub async fn svn_backup_delete(
+    state: tauri::State<'_, Arc<AppState>>,
+    names: Vec<String>,
+) -> Result<BackupPurgeResult, String> {
+    if names.is_empty() {
+        return Err("没有选中要删除的备份".to_string());
+    }
+    let cfg = state.config.read().await.clone();
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = root_of(&cfg)?;
+        let bases = backup_bases(&root, &st.config_dir);
+        let mut out = BackupPurgeResult {
+            deleted: 0,
+            bytes: 0,
+            failed: Vec::new(),
+        };
+        for name in &names {
+            match svn_backup::delete(&bases, name) {
+                Ok(n) => {
+                    out.bytes += n;
+                    out.deleted += 1;
+                }
+                Err(e) => out.failed.push(PurgeFailure {
+                    name: name.clone(),
+                    message: e,
+                }),
+            }
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| format!("删除备份失败: {e}"))?
+}
+
 /// 保存用户输入的账号密码（密码 DPAPI 加密后落盘）。
+///
+/// **先联网验证再落盘**：以前这里只写配置、什么都不校验，界面写「验证中…」而实际
+/// 错误密码也回「账号已保存」——错误要等下一次 commit/update 才爆，用户还记得
+/// 「刚才明明验证过了」。校验用一次 `log`（limit=1）：它是真正走服务器鉴权的轻量调用。
+/// 验证失败时连桥也不能留（里面已经装上了这份错凭据），重启它再报错。
 #[tauri::command]
 pub async fn svn_auth_set(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     user: String,
     password: String,
@@ -740,25 +951,66 @@ pub async fn svn_auth_set(
     if user.trim().is_empty() || password.is_empty() {
         return Err("账号和密码都不能为空".to_string());
     }
+    let user = user.trim().to_string();
+    let cfg = state.config.read().await.clone();
+    let st = state.inner().clone();
+    let (bridge, root) = {
+        let home_cfg = cfg.clone();
+        let st2 = st.clone();
+        let app2 = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let root = root_of(&home_cfg)?;
+            let bridge = bridge_for(&app2, &st2, &home_cfg)?;
+            Ok::<_, String>((bridge, root))
+        })
+        .await
+        .map_err(|e| format!("取 SVN 桥失败: {e}"))??
+    };
+
+    let probe = {
+        let user = user.clone();
+        // 密码要留在外面落盘（DPAPI），闭包里只能用一份副本
+        let pass = password.clone();
+        let root = root.display().to_string();
+        let bridge = bridge.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            bridge
+                .call("auth", &[&user, &pass], T_NET)
+                .map_err(|e| split_code_label(e.code, e.message))?;
+            // limit=1：只要「服务器认这个账号」这一条信息，不关心历史内容
+            bridge
+                .call("log", &[&root, "1", "0"], T_NET)
+                .map_err(|e| split_code_label(e.code, e.message))
+        })
+        .await
+        .map_err(|e| format!("验证账号失败: {e}"))?
+    };
+    if let Err(e) = probe {
+        // 桥里现在是这份错凭据，留着会让后续所有调用都以为已登录
+        bridge.restart();
+        return Err(if parse_code(&e) == "auth" {
+            "auth|密码不正确（或这个账号没有该仓库的读权限），没有保存".to_string()
+        } else {
+            e
+        });
+    }
+
     let enc = svn_cred::dpapi_protect(password.as_bytes())?;
     let encoded = svn_cred::b64_encode(&enc);
     state
         .update_config(|c| {
-            c.svn_user = Some(user.trim().to_string());
+            c.svn_user = Some(user.clone());
             c.svn_password_dpapi = Some(encoded.clone());
             Ok(())
         })
         .await?;
-    // 凭据变了，桥里的 client manager 要换：直接重启最省事（下次调用自动拉起）
-    let st = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Ok(guard) = st.svn.lock() {
-            if let Some(b) = guard.as_ref() {
-                b.restart();
-            }
-        }
-    })
-    .await
-    .map_err(|e| format!("重启 SVN 桥失败: {e}"))?;
     Ok(())
+}
+
+/// 从 `code|message` 里取 code（与 `split_code_label` 对称）。
+fn parse_code(e: &str) -> &str {
+    match e.find('|') {
+        Some(i) => &e[..i],
+        None => "",
+    }
 }

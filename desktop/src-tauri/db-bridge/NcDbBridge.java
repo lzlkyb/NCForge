@@ -34,6 +34,12 @@ import java.util.Properties;
  * </ol>
  * 不靠关键字黑名单——那玩意永远有缝。
  *
+ * <p><b>已知边界</b>：PL/SQL 包的 {@code PRAGMA AUTONOMOUS_TRANSACTION} 函数在
+ * 自己的事务里提交，三道都拦不住——{@code select my_pkg.do_write() from dual}
+ * 看着是查询，函数里的写操作照样落库。这里不拦（拦不住可靠地区分「自带工具包」
+ * 与「自定义包」，误杀正常排查查询的代价更高），改由前端在调用自定义包函数时
+ * 给一句提醒（见 {@code desktop/src/lib/db.ts} 的 {@code autonomousCallHint}）。
+ *
  * <p>协议与 NcSvnBridge 完全一致：stdin 每行一条请求，TAB 分隔；stdout 每行一条 JSON。
  * <pre>
  *   1	hello
@@ -51,6 +57,18 @@ public class NcDbBridge {
 
     /** 只允许这些开头的单条语句。`with` 用于 CTE 查询。 */
     private static final String[] ALLOWED = { "select", "with" };
+
+    /**
+     * `with x as (select …) insert into …`：CTE 后面接写操作（Oracle 里合法）。
+     * 所以「开头是 with」不等于整句只读，还要扫一遍主语句关键字。
+     * `\b` 保证 `update_time` 这类列名不会被误命中（下划线是词字符）。
+     */
+    private static final java.util.regex.Pattern DML =
+            java.util.regex.Pattern.compile("\\b(insert|update|delete|merge)\\b");
+
+    /** `for\nupdate` 这种换行写法也要拦住（以前只匹配中间一个空格）。 */
+    private static final java.util.regex.Pattern FOR_UPDATE =
+            java.util.regex.Pattern.compile("\\bfor\\s+update\\b");
 
     private static PrintStream out;
     private static Connection conn;
@@ -242,10 +260,12 @@ public class NcDbBridge {
     }
 
     /**
-     * 三道保险里的第一道：只认单条 select / with。
+     * 三道保险里的第一道（启发式）：只认单条 select / with。
      *
      * <p>这里刻意做得「笨」：去掉注释与字符串常量后，只要出现非末尾的分号就拒。
-     * PL/SQL 块、`select ... for update` 一律不放行。
+     * 它挡不住的东西是**故意**留给后面的——真正的兜底是第二道（连接设为只读事务，
+     * 写操作会被数据库以 ORA-01456 拒绝），以及第三道（执行后 rollback）。
+     * 取舍标准是「宁可少判一点风险，也别误杀正常查询」：一次误报就没人再用这个面板了。
      */
     private static void checkReadOnly(String sql) throws SQLException {
         String s = stripLiterals(sql).trim();
@@ -270,7 +290,11 @@ public class NcDbBridge {
         if (!okStart) {
             throw new SQLException("只读面板只放行 select / with 开头的查询；改数据请走正式 SQL 脚本");
         }
-        if (lower.contains(" for update")) {
+        // `with` 只是开头合法，主语句仍可能是写操作：`with x as (select …) insert into t …`
+        if (lower.startsWith("with") && DML.matcher(lower).find()) {
+            throw new SQLException("with 后面跟的是写操作（insert / update / delete / merge），只读面板不放行");
+        }
+        if (FOR_UPDATE.matcher(lower).find()) {
             throw new SQLException("for update 会加锁，只读面板不放行");
         }
     }

@@ -43,6 +43,12 @@ export function CommandLineDialog({
         </button>
       </div>
       <pre className="sv-cmdline">{preview?.commandLine}</pre>
+      {preview?.reused && (
+        <p className="sv-cmd-hint" data-tone="warn">
+          这里复用的是<b>上次启动</b>写好的 classpath 清单，没有重新扫盘——改了工程目录或 NC
+          home 之后需要启动一次才会更新（预览若重新写清单，会和正在进行的启动抢同一个临时文件）。
+        </p>
+      )}
       <p className="sv-cmd-hint">
         端口读自 <code>{preview?.endpoints.configPath || "ierp/bin/prop.xml"}</code>
         （NC 自己的服务器配置，<code>bin/sysConfig.bat</code> 改的也是它）。要换端口就点状态卡上的端口号——

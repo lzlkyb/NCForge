@@ -5,7 +5,14 @@ import { DiffPane } from "./DiffPane";
 import { HistoryView } from "./HistoryView";
 import { BlameView } from "./BlameView";
 import { ConflictPane } from "./ConflictPane";
-import { friendlySvnError, keyOf, svnBlame, svnDiff, type ChangeItem } from "../../lib/svn";
+import {
+  friendlySvnError,
+  isMarkable,
+  keyOf,
+  svnBlame,
+  svnDiff,
+  type ChangeItem,
+} from "../../lib/svn";
 
 export type RightMode = "diff" | "log" | "blame";
 
@@ -40,7 +47,9 @@ export function RightPane({
 }) {
   const path = file?.path ?? "";
   const isConflict = file?.letter === "C";
-  const needDiff = !!file && !isConflict && !file.isDir && file.letter !== "D";
+  /** 已删除（D）/ 缺失（!）：盘上没有内容可对比，也不该去拉 BASE。 */
+  const isGone = file?.letter === "D" || file?.letter === "!";
+  const needDiff = !!file && !isConflict && !file.isDir && !isGone;
 
   const diff = useQuery({
     queryKey: ["svn-diff", path],
@@ -59,15 +68,18 @@ export function RightPane({
   // Alt+↓：标记已审并跳到下一个。放在这里而不是 DiffPane 里，是因为
   // DiffPane 的 hook 数已经贴着门禁上限（8），再塞一个监听就要拆组件了。
   useEffect(() => {
-    if (!file || isConflict) return;
+    // 目录、已删除、缺失、冲突都标记不了（见 `isMarkable`），不接这个快捷键
+    if (!file || !isMarkable(file)) return;
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey || e.key !== "ArrowDown") return;
+      // 账号框这类模态打开时不抢：标记会连带把选中项跳走，而用户正忙着填密码
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       e.preventDefault();
       onMarkAndNext();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [file, isConflict, onMarkAndNext]);
+  }, [file, onMarkAndNext]);
 
   if (!file) {
     return (
@@ -121,6 +133,35 @@ export function RightPane({
     );
   }
 
+  // 已删除 / 缺失有自己的空态：以前它们会掉到下面「拿不到这个文件的内容」的
+  // 错误警报里，看起来像工具出故障，实际是正常状态（用户自己删的）。
+  if (isGone) {
+    return (
+      <section className="vc-main">
+        <div className="vc-bar">
+          <span className="vc-badge" data-st="del">
+            {file.letter}
+          </span>
+          <b>{file.rel.slice(file.rel.lastIndexOf("/") + 1)}</b>
+          <span className="vc-sp" />
+          <button type="button" className="vc-btn vc-btn-sm" onClick={() => onMode("log")}>
+            看历史
+          </button>
+        </div>
+        <div className="vc-empty">
+          <Icon name="trash" size={22} />
+          <div>
+            {file.letter === "D" ? "这个文件已在本地删除，没有可对比的内容" : "这个文件不在盘上了（SVN 标记为缺失）"}
+            <br />
+            {file.letter === "D"
+              ? "提交后服务器上也会删掉；不想删就用右上角「撤销」把它恢复回来"
+              : "在文件夹里把它放回来，或者提交这次删除"}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   if (mode === "log") {
     return <HistoryView path={file.path} title={file.rel} onBack={() => onMode("diff")} />;
   }
@@ -142,7 +183,7 @@ export function RightPane({
     return (
       <section className="vc-main">
         <div className="vc-empty">
-          <Icon name="spinner" size={20} className="vc-spin" />
+          <Icon name="spinner" size={20} className="animate-spin" />
           <div>正在取 BASE 版本对比…</div>
         </div>
       </section>

@@ -36,11 +36,10 @@ export function ConflictPane({
       </span>
       <span className="p">{desc}</span>
       <span className="vc-sp" />
-      {k === "base" ? (
-        <button type="button" className="vc-btn vc-btn-sm" onClick={onOpenFile}>
-          在文件页打开
-        </button>
-      ) : (
+      {/* 「基线」这一行不给打开按钮：点它以前打开的是**冲突中的工作副本**
+          （满屏 <<<<<<< 标记），而行描述写的是基线版本，两回事。
+          想看基线的入口在仓里并不存在，与其给个名不副实的按钮，不如不给。 */}
+      {k !== "base" && (
         <button
           type="button"
           className="vc-btn vc-btn-sm"
@@ -64,6 +63,14 @@ export function ConflictPane({
         <span className="vc-hint">
           {file.revision > 0 ? `本地基于 r${file.revision}` : "本地改动"} 与服务器版本冲突
         </span>
+        <button
+          type="button"
+          className="vc-btn vc-btn-sm"
+          onClick={onOpenFile}
+          title="打开的是工作副本里这个文件——里面混着冲突标记，不是基线版本"
+        >
+          打开工作副本
+        </button>
       </div>
 
       <div className="vc-conflict">
@@ -85,7 +92,8 @@ export function ConflictPane({
           <Icon name="info" size={13} />
           <span>
             点「已解决」才会用选中的版本覆盖工作副本、删掉 <code>.mine</code> / <code>.rN</code> 临时文件并解除冲突标记。
-            选错可以从版本库重新取回基线版，但你本地那份没备份。
+            落盘前会把这三个临时文件备份到工作副本旁边的 <code>.ncforge-resolve-&lt;时间戳&gt;</code> 目录，
+            选错了能从这里找回来。
           </span>
         </div>
       </div>

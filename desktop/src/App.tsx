@@ -46,6 +46,14 @@ const PatchTab = lazy(() =>
 const DbTab = lazy(() => import("./components/tabs/DbTab").then((m) => ({ default: m.DbTab })));
 
 /**
+ * Ctrl+1~N 快捷键的完整序列：WORKSPACE_NAV 六项 + 设置（第 7 个）。
+ *
+ * settings 不在 WORKSPACE_NAV 里——它在侧栏 foot 单独渲染（带更新未读红点），
+ * 但键盘用户同样需要一键直达，故快捷键序列在 App 层追加，不动侧栏数据源。
+ */
+const HOTKEY_TABS: string[] = [...WORKSPACE_NAV.map((n) => n.key), "settings"];
+
+/**
  * 应用外壳（壳子版）。
  *
  * 保留的范式（业务直接沿用）：
@@ -75,7 +83,7 @@ function AppContent() {
   // 业务把 queryKey/queryFn 换成自家命令，如 invoke<StatusResponse>("get_status")
   const { data: status } = useQuery({
     queryKey: ["app-status"],
-    queryFn: () => invoke<{ version?: string; running?: boolean }>("get_app_info"),
+    queryFn: () => invoke<{ version?: string; running?: boolean; platform?: string }>("get_app_info"),
     refetchInterval: appHidden ? false : 5000,
     retry: false,
   });
@@ -104,14 +112,29 @@ function AppContent() {
     transitionPage(() => setActiveTab(tab), activeTab !== tab);
   }, [activeTab]);
 
-  // ── Ctrl+1~N 快捷键：顺序来自 WORKSPACE_NAV 单一来源 ──
+  // ── Ctrl+1~7 / Ctrl+K 快捷键：前 6 位来自 WORKSPACE_NAV，第 7 位是设置 ──
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.altKey || e.metaKey) return;
+      // 输入框 / 编辑区内不抢键：Monaco 的 textarea、各页搜索框在焦点中时，
+      // Ctrl+1~N 与 Ctrl+K 都可能是编辑器/浏览器惯例（书签跳转、快速命令）。
+      // 放行条件用 tagName + isContentEditable 双保险，不猜具体组件。
+      const el = document.activeElement;
+      if (
+        el instanceof HTMLElement &&
+        (el.isContentEditable || el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT")
+      ) {
+        return;
+      }
       const idx = Number(e.key);
-      if (Number.isInteger(idx) && idx >= 1 && idx <= WORKSPACE_NAV.length) {
+      if (Number.isInteger(idx) && idx >= 1 && idx <= HOTKEY_TABS.length) {
         e.preventDefault();
-        navigate(WORKSPACE_NAV[idx - 1].key);
+        navigate(HOTKEY_TABS[idx - 1]);
+        return;
+      }
+      if (e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        navigate("search");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -135,6 +158,8 @@ function AppContent() {
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((c) => !c)}
           onNavigate={navigate}
+          platform={status?.platform}
+          onOpenSearch={() => navigate("search")}
         />
         <main className="app-main page-transition flex min-h-0 flex-1 flex-col">
           <ErrorBoundary key={activeTab}>
@@ -159,8 +184,8 @@ function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: strin
       // 靠 openFileRequest 的 pending 兜住这一拍。
       return (
         <SearchTab
-          onOpenFile={(path, line) => {
-            requestOpenFile({ path, line });
+          onOpenFile={(path, line, column) => {
+            requestOpenFile({ path, line, column });
             navigate("files");
           }}
         />

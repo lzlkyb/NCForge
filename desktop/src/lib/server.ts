@@ -9,6 +9,14 @@ export interface PortOwner {
   name: string;
 }
 
+/**
+ * 后端读不到进程名时 `PortOwner.name` 的占位值（Rust `server::UNKNOWN_PROCESS`）。
+ *
+ * 跨语言没法共享常量，所以这里必须与 Rust 那份保持同一字面量——两处都写了注释
+ * 互相指认。用它而不是各组件里手写字符串：一旦后端改文案，只有这里要跟着改。
+ */
+export const UNKNOWN_PROCESS_NAME = "未知进程";
+
 export interface ServerStatus {
   state: ServerState;
   pid: number | null;
@@ -65,6 +73,8 @@ export interface LaunchPreview {
   endpoints: ServerEndpoints;
   /** 这次会用的堆上限（MB）。 */
   heapMb: number;
+  /** classpath 清单是复用上次启动写好的 jar（true）还是这次新算的。 */
+  reused: boolean;
 }
 
 export interface NcHome {
@@ -87,7 +97,14 @@ export const serverStatus = () => invoke<ServerStatus>("server_status");
 export const serverStart = () => invoke<void>("server_start");
 export const serverStop = () => invoke<StopOutcome>("server_stop");
 export const serverLog = (offset: number) => invoke<LogChunk>("server_log", { offset });
-export const serverClearLog = () => invoke<void>("server_clear_log");
+
+/** 清空日志的结果。运行中清空不动磁盘文件，只把读取偏移快进到当前末尾。 */
+export interface LogClearResult {
+  offset: number;
+  /** true = 旧日志已改名成 .log.1（服务没在跑）；false = 文件没动（服务在跑）。 */
+  rotated: boolean;
+}
+export const serverClearLog = () => invoke<LogClearResult>("server_clear_log");
 export const serverCommandLine = () => invoke<LaunchPreview>("server_command_line");
 export const serverRevealLog = () => invoke<void>("server_reveal_log");
 /** 结束占用中间件端口的 java 进程（端口取自 NC 配置），返回被结束的 PID。 */

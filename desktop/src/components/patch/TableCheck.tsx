@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 // 核对面板用的 dq- 样式在 db.css 里（它读同一份表结构缓存，和数据库页是一套东西）。
 // 不引这份样式，面板在补丁页里会是完全没有排版的纯文字。
 import "../../db.css";
@@ -31,10 +31,21 @@ export function TableCheck({
 }) {
   const { schema, result, running, syncing, error, run, sync } = useTableCheck(files);
 
-  // 结果上报给父级：它要拿「表不存在」的个数给出包按钮加标记
+  // 结果上报给父级：它要拿「表不存在」的个数给出包按钮加标记。
+  // 回调存 ref：父级每次渲染都换一个 setCheck 引用，直接进依赖会让 effect 每拍都跑。
+  const onResultRef = useRef(onResult);
+  onResultRef.current = onResult;
   useEffect(() => {
-    onResult?.(result);
-  }, [result, onResult]);
+    onResultRef.current?.(result);
+  }, [result]);
+  /**
+   * 切走（tab !== "check" 时本组件被卸载）要把父级那份结果清掉。
+   *
+   * 父级的 `check` / `tablesMissing` 与 armed 态都跟着这份结果走。以前不清：
+   * 切回来看到「还没核对」，顶部按钮却仍写着「仍然生成（3 表不存在）」、
+   * tab 上还挂着「3 表」的 pill，三处互相矛盾。
+   */
+  useEffect(() => () => onResultRef.current?.(null), []);
 
   const jump = (it: CheckIssue) => {
     requestOpenFile({ path: it.abs, line: it.line });
@@ -60,7 +71,7 @@ export function TableCheck({
             disabled={syncing}
             onClick={() => void sync()}
           >
-            <Icon name="refresh" size={13} className={syncing ? "pk-spin" : undefined} />
+            <Icon name="refresh" size={13} className={syncing ? "animate-spin" : undefined} />
             {syncing ? "正在拉取…" : "连库并拉表结构"}
           </button>
           <p className="dq-empty-hint">
@@ -114,7 +125,7 @@ export function TableCheck({
           </span>
         )}
         <button type="button" className="dq-btn" disabled={syncing} onClick={() => void sync()}>
-          <Icon name="refresh" size={12} className={syncing ? "pk-spin" : undefined} />
+          <Icon name="refresh" size={12} className={syncing ? "animate-spin" : undefined} />
           {syncing ? "拉取中…" : "刷新缓存"}
         </button>
         <button

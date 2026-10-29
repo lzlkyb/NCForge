@@ -65,7 +65,7 @@
   background: hsl(var(--secondary));
 }
 .vc-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 .vc-btn-sm {
@@ -79,8 +79,8 @@
   color: hsl(var(--primary-foreground));
 }
 .vc-btn-primary:hover:not(:disabled) {
-  background: hsl(var(--primary));
-  filter: brightness(1.06);
+  /* P2-4：与 ui/button.tsx 的 hover:bg-primary/90 统一口径（原 brightness(1.06)） */
+  background: hsl(var(--primary) / 0.9);
 }
 .vc-btn-danger {
   color: hsl(var(--destructive-ink));
@@ -616,15 +616,9 @@
   background: hsl(var(--accent));
 }
 
-/* ── 账号对话框 ── */
-.vc-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.4);
-  display: grid;
-  place-items: center;
-  z-index: 60;
-}
+/* ── 账号对话框 ──
+   遮罩交给统一的 ui/Modal（portal + 焦点陷阱 + Esc）；这里只留卡片本体。
+   （原来的自建 `.vc-mask` 已随 P2-1 改造删除，全仓无引用。） */
 .vc-dialog {
   width: 380px;
   background: hsl(var(--card));
@@ -669,21 +663,6 @@
 }
 
 /* ── 补充：组件落地后新增的细节态 ── */
-
-/* 转圈：Icon 里没有动画，靠类名挂 keyframes */
-@keyframes vc-spin-once {
-  to {
-    transform: rotate(360deg);
-  }
-}
-.vc-spin {
-  animation: vc-spin-once 0.9s linear infinite;
-  transform-origin: center;
-}
-/* 窗口隐藏时停掉动画（和 index.css 的全站节流口径一致） */
-:root[data-app-hidden] .vc-spin {
-  animation: none;
-}
 
 /* kbd：设计稿里只在提示语中间出现 */
 .vc-hint kbd,
@@ -782,8 +761,8 @@
   flex-shrink: 0;
   text-align: right;
   font-size: 10.5px;
+  /* P2-7：删 opacity 0.7——blame 行号与 .sv-ts/.vc-blame-who 同口径 */
   color: hsl(var(--muted-foreground));
-  opacity: 0.7;
   user-select: none;
 }
 .vc-blame-tx {
@@ -830,4 +809,188 @@
 .vc-bar .vc-review-toggle {
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+/* ── 维护入口（纯图标）──
+   顶部一行已有 4 个文字按钮，再加一个文字按钮在 1024px 下会把「提交」挤掉；
+   28×28 图标按钮在任何宽度下都只是一个图标的位置。 */
+.vc-btn-icon {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.vc-btn[data-on] {
+  color: hsl(var(--accent-foreground));
+  background: hsl(var(--accent));
+  border-color: hsl(var(--primary) / 0.35);
+}
+
+/* ── 维护面板（HousekeepingDialog）──
+   两段：备份目录（可删）与审查标记（可清）。删除是唯一不可逆动作，
+   所以单个删除与全部删除都走 ConfirmDialog（destructive + zIndex 1100）。 */
+.vc-dialog-hk {
+  width: 520px;
+  max-width: calc(100vw - 48px);
+}
+.vc-dialog-hk h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vc-hk-sub {
+  margin-left: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: hsl(var(--muted-foreground));
+}
+.vc-hk-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid hsl(var(--border));
+}
+.vc-hk-sec:first-of-type {
+  padding-top: 0;
+  border-top: 0;
+}
+.vc-hk-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.vc-hk-title span {
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  font-variant-numeric: tabular-nums;
+}
+.vc-hk-note {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: hsl(var(--muted-foreground));
+}
+.vc-hk-note code {
+  font-size: 11px;
+  background: hsl(var(--secondary));
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.vc-hk-path {
+  display: block;
+  margin-top: 2px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px;
+  word-break: break-all;
+}
+.vc-hk-empty {
+  padding: 14px 10px;
+  text-align: center;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  border: 1px dashed hsl(var(--border));
+  border-radius: 10px;
+}
+.vc-hk-list {
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+.vc-hk-row {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) 62px 58px 26px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  font-size: 11.5px;
+}
+.vc-hk-row + .vc-hk-row {
+  border-top: 1px solid hsl(var(--border));
+}
+.vc-hk-tag {
+  justify-self: start;
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: hsl(var(--secondary));
+  color: hsl(var(--muted-foreground));
+}
+.vc-hk-tag[data-k="revert"] {
+  background: hsl(var(--warning) / 0.14);
+  color: hsl(var(--warning-ink));
+}
+.vc-hk-tag[data-k="resolve"] {
+  background: hsl(var(--destructive) / 0.12);
+  color: hsl(var(--destructive-ink));
+}
+.vc-hk-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+}
+.vc-hk-when {
+  margin-left: 6px;
+  font-family: inherit;
+  color: hsl(var(--muted-foreground));
+}
+.vc-hk-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--muted-foreground));
+}
+.vc-hk-del {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: hsl(var(--muted-foreground));
+}
+.vc-hk-del:hover:not(:disabled) {
+  color: hsl(var(--destructive-ink));
+  background: hsl(var(--destructive) / 0.1);
+}
+.vc-hk-del:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.vc-hk-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+.vc-hk-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.vc-hk-mk {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.vc-hk-mk-cell {
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  padding: 7px 10px;
+}
+.vc-hk-mk-cell b {
+  display: block;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.vc-hk-mk-cell span {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.vc-hk-mk-cell[data-tone="stale"] b {
+  color: hsl(var(--warning-ink));
 }

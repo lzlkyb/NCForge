@@ -132,8 +132,13 @@ export function useTreeEdit({
         expand(parent);
         await load(parent);
         setSelected({ path: created, isDir });
-        if (isDir) expand(created);
-        else onCreated(created);
+        if (isDir) {
+          // 只展开不拉取：dirs[created] 缓存永远不存在，FileTree 把 !state 也画成
+          // 「加载中…」，而 toggle 只在「未展开且未加载」时才请求——用户必须手动
+          // 折叠再展开才能看到内容。
+          expand(created);
+          void load(created);
+        } else onCreated(created);
       }
     } catch (e) {
       // 后端的文案（重名、非法字符、权限）直接显示在输入行下面

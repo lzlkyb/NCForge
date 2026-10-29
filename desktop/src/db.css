@@ -79,6 +79,13 @@
   letter-spacing: 0.03em;
 }
 
+/* P2-18-A：徽标跟着 DbConnectResult.readOnly 走。可写连接是「承诺只剩一道」的
+   告警态，不能继续用 success 色——那会让用户以为还和以前一样安全。 */
+.dq-ro[data-tone="warn"] {
+  color: hsl(var(--warning-ink));
+  background: hsl(var(--warning) / 0.16);
+}
+
 /* ── 按钮 ── */
 .dq-btn {
   display: inline-flex;
@@ -99,7 +106,7 @@
   background: hsl(var(--secondary));
 }
 .dq-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 .dq-btn-sm {
@@ -113,7 +120,8 @@
   color: hsl(var(--primary-foreground));
 }
 .dq-btn-primary:hover:not(:disabled) {
-  background: hsl(var(--primary) / 0.88);
+  /* P2-4：与 ui/button.tsx 的 hover:bg-primary/90 统一口径（原 /0.88） */
+  background: hsl(var(--primary) / 0.9);
 }
 .dq-link {
   font-size: 11.5px;
@@ -199,6 +207,23 @@
   color: hsl(var(--muted-foreground));
 }
 
+/* ── 窄窗口降级（P2-14，档位与 svn.css 对齐）──
+   让位顺序：只读徽标 → 工具条解释文字 → 连接胶囊里的用户名。
+   连接/执行按钮与 host/db 名始终保留——它们承载「连的哪」这个核心信息。 */
+@media (max-width: 1180px) {
+  .dq-top .dq-ro {
+    display: none;
+  }
+  .dq-tools .dq-muted {
+    display: none;
+  }
+}
+@media (max-width: 1000px) {
+  .dq-top .dq-conn .u {
+    display: none;
+  }
+}
+
 /* ── SQL 编辑区 ── */
 .dq-sqlbox {
   display: flex;
@@ -215,8 +240,9 @@
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 11.5px;
   line-height: 20px;
+  /* P2-7：删 opacity 0.6（叠加后约 2.8:1，全站最低）——行号靠 muted 色与
+     等宽字体与正文区分即可，对比度回到 AA 的 4.5:1。 */
   color: hsl(var(--muted-foreground));
-  opacity: 0.6;
   user-select: none;
   border-right: 1px solid hsl(var(--border));
   overflow: hidden;
@@ -364,8 +390,8 @@ table.dq-grid td[data-n] {
   font-variant-numeric: tabular-nums;
 }
 table.dq-grid td[data-null] {
+  /* P2-7：删 opacity 0.7——NULL 值是关键信息，不能是全场最难读的文字 */
   color: hsl(var(--muted-foreground));
-  opacity: 0.7;
   font-style: italic;
 }
 .dq-empty-rows {

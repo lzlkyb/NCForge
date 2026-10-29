@@ -1,9 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { SearchBar } from "../search/SearchBar";
 import { SearchResults } from "../search/SearchResults";
 import { searchWorkspace, type SearchHit } from "../../lib/search";
 import { getWorkspace, joinPath } from "../../lib/workspace";
-import { getSearchForm, loadHistory, pushHistory, setSearchForm, type SearchForm } from "../../lib/searchStore";
+import { toast } from "../ui/toast";
+import {
+  currentSearchSeq,
+  getSearchForm,
+  loadHistory,
+  nextSearchSeq,
+  pushHistory,
+  setSearchForm,
+  type SearchForm,
+} from "../../lib/searchStore";
 
 /**
  * 全工程搜索页（M2）。
@@ -18,14 +27,17 @@ import { getSearchForm, loadHistory, pushHistory, setSearchForm, type SearchForm
  *
  * 条件栏在 `search/SearchBar`，结果区在 `search/SearchResults`；本文件只做取数与接线。
  */
-export function SearchTab({ onOpenFile }: { onOpenFile: (path: string, line: number) => void }) {
+export function SearchTab({
+  onOpenFile,
+}: {
+  onOpenFile: (path: string, line: number, column?: number) => void;
+}) {
   // 从模块仓库初始化：切走再回来，结果、折叠、滚动位置都还在
   const [form, setForm] = useState<SearchForm>(getSearchForm);
   const [root, setRoot] = useState<string | null>(null);
   const [history, setHistory] = useState<string[]>(loadHistory);
-  const [loading, setLoading] = useState(false);
-  // 每次搜索自增：慢请求回来时如果已有更新的请求，结果直接丢掉
-  const seq = useRef(0);
+  // 「在跑」也读仓库：组件卸载不代表后端那次全盘扫描停了
+  const loading = form.running;
 
   const update = useCallback((patch: Partial<SearchForm>) => {
     setForm((f) => {
@@ -43,10 +55,9 @@ export function SearchTab({ onOpenFile }: { onOpenFile: (path: string, line: num
 
   const run = async () => {
     const q = form.query.trim();
-    if (!q || loading) return;
-    const mine = ++seq.current;
-    setLoading(true);
-    update({ error: null });
+    if (!q || form.running) return;
+    const mine = nextSearchSeq();
+    update({ running: true, error: null });
     try {
       const outcome = await searchWorkspace({
         // 正则模式按原样传（前后空格有意义），纯文本模式传 trim 过的
@@ -57,22 +68,32 @@ export function SearchTab({ onOpenFile }: { onOpenFile: (path: string, line: num
         regex: form.regex,
         include: form.include.trim(),
       });
-      if (mine !== seq.current) return;
+      if (mine !== currentSearchSeq()) return;
       setHistory(pushHistory(q));
-      update({ outcome, collapsed: [], scrollTop: 0 });
+      // 结果里存的是相对路径，必须记下它属于哪个工作区
+      update({ outcome, outcomeRoot: root, collapsed: [], scrollTop: 0 });
     } catch (e) {
-      if (mine !== seq.current) return;
+      if (mine !== currentSearchSeq()) return;
       // 正则语法错之类：清掉旧结果，否则「报错了但结果还在」会让人以为搜成功了
-      update({ outcome: null, error: String(e) });
+      update({ outcome: null, outcomeRoot: null, error: String(e) });
     } finally {
-      if (mine === seq.current) setLoading(false);
+      if (mine === currentSearchSeq()) update({ running: false });
     }
   };
 
   const open = (hit: SearchHit) => {
-    if (!root) return;
-    // 后端回的是相对路径 + `/`，读写文件要绝对路径 + Windows 分隔符
-    onOpenFile(joinPath(root, hit.path.replace(/\//g, "\\")), hit.line);
+    if (!root) {
+      toast("尚未打开工作区：先在文件页选一个目录再搜", "warning");
+      return;
+    }
+    // 结果来自别的工作区：拿旧相对路径拼新 root 只会被白名单拒掉，报一串英文
+    if (form.outcomeRoot !== null && form.outcomeRoot !== root) {
+      toast("工作区已变更，请重新搜索", "warning");
+      return;
+    }
+    // 后端回的是相对路径 + `/`，读写文件要绝对路径 + Windows 分隔符。
+    // ranges 是行内 UTF-16 偏移，+1 换成 1 基列号——只跳到行首的话长行还要肉眼找。
+    onOpenFile(joinPath(root, hit.path.replace(/\//g, "\\")), hit.line, (hit.ranges[0]?.start ?? 0) + 1);
   };
 
   const onSearchKey = (e: React.KeyboardEvent) => {

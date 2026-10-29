@@ -29,6 +29,16 @@ export function SearchResults({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 换了一份结果（重新搜索）就回到顶部。恢复逻辑只跑一次，光把仓库里的 scrollTop
+  // 设成 0 不会让 DOM 自己滚回去——新结果会从上一份的偏移处开始显示。
+  const shownOutcome = useRef(form.outcome);
+  useEffect(() => {
+    if (shownOutcome.current === form.outcome) return;
+    shownOutcome.current = form.outcome;
+    const el = listRef.current;
+    if (el) el.scrollTop = 0;
+  }, [form.outcome]);
+
   const groups = useMemo(() => {
     const map = new Map<string, SearchHit[]>();
     for (const hit of form.outcome?.hits ?? []) {

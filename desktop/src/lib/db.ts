@@ -266,13 +266,23 @@ function proximity(given: string, known: string, knownSet: Set<string>): number 
   return 0;
 }
 
+/** 去掉字符串字面量与注释（与后端 `stripLiterals` 同口径）：判断前先剥，注释里的 pattern 不算。 */
+function stripSql(sql: string): string {
+  return sql
+    .replace(/--[^\n]*/g, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/'(?:[^']|'')*'/g, "''");
+}
+
 /**
  * 前端这一道只挡「一眼就知道不是查询」的输入：空、多语句、明确以写操作开头。
- * 与后端 `checkReadOnly` 不同的地方：后端还要去掉字符串常量再判断，
- * 这里挡不住也**不应该**因此放行——挡不住就交给后端，绝不放宽。
+ * 与后端 `checkReadOnly` 用的是同一套剥离口径：注释 + 字符串字面量都剥掉再判断。
+ * 以前这里只剥注释——`where name = 'a;b'` 里的分号会被当成多语句误杀，
+ * 而后端 `stripLiterals` 本来就能正确处理，是前端这一道瞎拦。
+ * 挡不住的（认不出的开头、with 后面接 DML）留给后端，绝不在这里瞎拦。
  */
 export function precheckSql(sql: string): string | null {
-  const t = sql.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").trim();
+  const t = stripSql(sql).trim();
   if (!t) return "SQL 是空的";
   // 分号只允许出现在末尾（一个分号结尾是习惯，多个就是多语句）
   const semis = (t.match(/;/g) ?? []).length;
@@ -285,6 +295,43 @@ export function precheckSql(sql: string): string | null {
     return `「${first}」是写操作：这个面板只放行 select / with，改数据请走正式脚本`;
   }
   return null; // 认不出开头就交给后端判，不在这里瞎拦
+}
+
+/**
+ * Oracle 自带工具包的前缀。这些包的函数（`dbms_metadata.get_ddl`、`utl_raw.cast_to_raw`…）
+ * 是排查查询的常客，且都不写库——见到不带「自定义包」标签。
+ */
+const ORACLE_OWN = [
+  "dbms", "utl", "sys", "standard", "sysdiag", "apex", "wwv", "ctx", "ord",
+  "mdsys", "xdb", "ku$", "logmnr", "outln", "system", "ctxsys", "ordsys",
+  "orddata", "ordplugins", "dbsnmp", "wmsys",
+];
+
+/** `schema.pkg.func(` 形式的调用。`(?!\+)` 放过 Oracle 老式外连接 `t.col(+)`。
+ *  `g` 是给 `matchAll` 用的——**别拿它做 `.test` / `.exec`**，带状态的正则会在两次
+ *  调用之间留下 `lastIndex`。 */
+const QUALIFIED_CALL = /\b([a-z_][a-z0-9_$#]*)\.([a-z0-9_$#]+)\s*\((?!\+)/gi;
+
+/**
+ * `select my_pkg.do_write() from dual` 执行前的一句提醒（P2-18 ⑦）。
+ *
+ * 三层只读（白名单 → `SET TRANSACTION READ ONLY` → rollback）挡的是「工作台直接发
+ * DML」，挡不住 PL/SQL 包里的 **PRAGMA AUTONOMOUS_TRANSACTION**：那种函数在自己的
+ * 事务里提交，外层 select 看起来人畜无害，函数里的 insert/update 照样落库。
+ *
+ * 只提醒、不拦：Oracle 自带工具包是合法常用法，而「这个函数写不写库」只有写查询的
+ * 人知道——工作台替他判不了，也不该为一条可能误杀的规则背锅。不带的函数名
+ * （`do_write()` 无前缀）与双引号包住的标识符同样识别不了，边界就说到这里。
+ */
+export function autonomousCallHint(sql: string): string | null {
+  // 必须扫完全部匹配再下结论：`select sys.dbms_random.value(), my_pkg.do_write() from dual`
+  // 的第一处是系统包，只看第一处会直接判「没风险」，把后面真正该提醒的自定义包漏掉。
+  for (const m of stripSql(sql).toLowerCase().matchAll(QUALIFIED_CALL)) {
+    const owner = m[1];
+    if (ORACLE_OWN.some((p) => owner === p || owner.startsWith(`${p}_`))) continue;
+    return `这条 SQL 调用了自定义包的函数 ${owner}.${m[2]}()：PL/SQL 包的自治事务（PRAGMA AUTONOMOUS_TRANSACTION）在自己的事务里提交，绕得过只读事务与 rollback——确认这个函数不写库再执行`;
+  }
+  return null;
 }
 
 /** 单元格显示文本。NULL 单独标出来——空串和 NULL 在排障时完全是两回事。 */

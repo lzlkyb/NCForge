@@ -66,7 +66,26 @@ pub struct CompileEnv<'a> {
     pub index: &'a ClassIndex,
     /// 存放参数文件的临时目录。
     pub work_dir: &'a Path,
+    /// 取消标志；`None` = 不可取消（测试与一次性调用）。
+    ///
+    /// 一次编译最坏是「300 秒 × 6 轮」≈ 30 分钟，没有任何中断手段时用户只能杀进程。
+    /// 检查点放在轮间与 ecj 等待循环里（40ms 一次），保证点了取消能很快生效。
+    pub cancel: Option<&'a std::sync::atomic::AtomicBool>,
 }
+
+impl CompileEnv<'_> {
+    fn cancelled(&self) -> bool {
+        self.cancel
+            .map(|c| c.load(std::sync::atomic::Ordering::Relaxed))
+            .unwrap_or(false)
+    }
+}
+
+/// 取消时返回的错误前缀：前端据此弹「已取消」而不是报错。
+pub const CANCELLED: &str = "CANCELLED:编译已取消";
+
+/// 参数文件名里的序号（避免同进程并发编译撞同一个文件）。
+static ARGS_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 pub struct CompileJob {
     pub module: String,
@@ -364,6 +383,8 @@ pub fn parse_problems(output: &str) -> Vec<Problem> {
             continue;
         };
         let mut seen_caret = false;
+        // 头行之后的第一行是源码回显，不能当消息正文
+        let mut first = true;
         let mut message = Vec::new();
         while let Some(&next) = lines.peek() {
             if next.starts_with("----------") {
@@ -376,6 +397,13 @@ pub fn parse_problems(output: &str) -> Vec<Problem> {
                 }
             } else if next.trim_start().starts_with('^') {
                 seen_caret = true;
+            } else if first {
+                first = false; // 源码回显
+            } else if !next.trim().is_empty() {
+                // 没有脚标行的报错：ecj 有些版本（以及某些错误类型）不给 `^` 标记。
+                // 以前只认脚标之后的行，这些报错解析出来是空串——问题列表里就是一条
+                // 没有内容的错误，点进去也不知道错在哪。
+                message.push(next.trim().to_string());
             }
         }
         problems.push(Problem {
@@ -494,6 +522,11 @@ fn run_ecj(env: &CompileEnv, args: &Path) -> Result<(bool, String), String> {
             .map_err(|e| format!("等待 ecj 失败: {e}"))?
         {
             Some(st) => break st,
+            None if env.cancelled() => {
+                // 用户点了取消：杀掉本轮，收尾交给上层（返回值带 CANCELLED 前缀）
+                let _ = child.kill();
+                return Err(CANCELLED.to_string());
+            }
             None if start.elapsed() > TIMEOUT => {
                 let _ = child.kill();
                 return Err(format!("编译超时（超过 {} 秒），已终止", TIMEOUT.as_secs()));
@@ -587,12 +620,21 @@ pub fn compile(
     // 否则会出现「编译过了、启动服务时加载的还是 jar 里的旧类」。
     let class_dirs = crate::launch::project_class_dirs(env.project_root, env.nc_home);
 
-    let args_path = env
-        .work_dir
-        .join(format!("ecj-{}.args", std::process::id()));
+    // 参数文件名带唯一后缀：以前是 `ecj-<pid>.args`，同进程两次并发编译会写同一份文件、
+    // 互相覆盖（后写的那轮可能读到前半段是自己的、后半段是别人的参数）。
+    // 后端因此另有一道互斥（compile_cmds 的 COMPILING 闸），这里是第二道防线。
+    let args_path = env.work_dir.join(format!(
+        "ecj-{}-{}.args",
+        std::process::id(),
+        ARGS_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     let mut rounds = 0;
     let (mut ok, mut output);
     loop {
+        if env.cancelled() {
+            let _ = std::fs::remove_file(&args_path);
+            return Err(CANCELLED.to_string());
+        }
         rounds += 1;
         let jar_paths: Vec<PathBuf> = jars
             .iter()

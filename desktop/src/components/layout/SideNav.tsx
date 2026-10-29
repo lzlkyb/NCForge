@@ -11,8 +11,9 @@ export type NavItem = { key: string; label: string; icon: IconName };
 /**
  * 壳子示例导航项。业务把这里换成自家页面即可。
  *
- * 🔴 数组顺序即 Ctrl+1~N 的映射顺序 —— App.tsx 直接复用本数组生成快捷键表，
- *    改顺序/增删项只改这一处，避免「侧栏顺序」与「快捷键顺序」两处漂移。
+ * 🔴 数组顺序即 Ctrl+1~6 的映射顺序 —— App.tsx 以本数组为前 6 位、追加
+ *    settings 生成 Ctrl+1~7 快捷键表，改顺序/增删项只改这一处，避免
+ *    「侧栏顺序」与「快捷键顺序」两处漂移。
  * 🔴 新项只能追加在末尾：插到中间会把既有 Ctrl+2/3/4 全改一遍，是破坏性变更。
  */
 export const WORKSPACE_NAV: NavItem[] = [
@@ -42,7 +43,7 @@ function SideNavImpl({
   statusPill,
 }: {
   activeTab: string;
-  onNavigate: (tab: string, anchor?: string) => void;
+  onNavigate: (tab: string) => void;
   /** 更新未读版本数（CHANGELOG 未看过几版），0 不显示红点。 */
   unreadCount: number;
   status?: StaticStatus;

@@ -1162,22 +1162,6 @@ body {
   transition-timing-function: var(--ease);
 }
 
-/* ===================================================================
-   Header 安全徽章点击 → 设置页功能开关定位高亮（P0-2 回退增强）
-   用主题 primary 色做 box-shadow 脉冲，深浅主题均协调；2 秒后由
-   SettingsTab 的 useEffect 移除 class 还原（拆卡后 `toggle-*` 分散在安全 /
-   高级 / 通知三张卡，定位逻辑故提到页面级）。
-   =================================================================== */
-.anchor-highlight {
-  border-radius: 0.5rem;
-  animation: anchor-pulse 2s ease-out;
-}
-@keyframes anchor-pulse {
-  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, hsl(var(--primary)) 60%, transparent); }
-  70%  { box-shadow: 0 0 0 7px color-mix(in srgb, hsl(var(--primary)) 0%, transparent); }
-  100% { box-shadow: 0 0 0 0 color-mix(in srgb, hsl(var(--primary)) 0%, transparent); }
-}
-
 /* ═════════════════════════════════════════════════════════════════
    会话内搜索的命中高亮（设计稿《对话页-会话内搜索》）：
    非当前命中 wash 底、当前命中实底反色。<mark> 由 MarkedText 产出，
@@ -1310,6 +1294,20 @@ body {
 .dark .cat-back.open  { background: #3B1406; }
 .dark .cat-conf.open  { background: #042B14; }
 .dark .cat-doc.open   { background: #0A2630; }
+
+/* 分类按钮的 7px 色点（P2-10）：原是 chip-input.tsx 里四个硬编码 hex 内联，
+   脱离 token 与双主题体系，且没跟上此前 .c-back/.c-doc 的 WCAG 压暗修正
+   （#D55B0C→#B54F0B、#07889B→#07798B）——色点与芯片实际色已经不一致。
+   现在色值与 .c-* / .cat-*.open 的文字色同源同主题。色点不承载文字，
+   无需单独做小字对比度核算。 */
+.cat-dot-front { background: #4F46E5; }
+.cat-dot-back  { background: #B54F0B; }
+.cat-dot-conf  { background: #078051; }
+.cat-dot-doc   { background: #07798B; }
+.dark .cat-dot-front { background: #A5B4FC; }
+.dark .cat-dot-back  { background: #FDBA74; }
+.dark .cat-dot-conf  { background: #6EE7B7; }
+.dark .cat-dot-doc   { background: #67E8F9; }
 
 /* 展开标签 */
 .ext-tag { transition: all var(--dur-fast); }
@@ -1695,7 +1693,12 @@ select:focus-visible,
 :root[data-app-hidden] .ro-bar > i,
 :root[data-app-hidden] .update-slot .header-badge-update::after,
 :root[data-app-hidden] .update-slot .header-badge-ready::after,
-:root[data-app-hidden] .animate-spin {
+:root[data-app-hidden] .animate-spin,
+/* 2026-10-29 P2-3 补漏：通知呼吸圈 / 服务启动脉冲点 / 代码智能 busy 点。
+   （补丁页转圈 .pk-spin 已于 P2-13 并入 animate-spin，归上面「所有 spinner」管。） */
+:root[data-app-hidden] .notice-pulse,
+:root[data-app-hidden] .sv-card[data-state="starting"] .sv-dot,
+:root[data-app-hidden] .wb-lang[data-tone="busy"] .wb-lang-dot {
   animation-play-state: paused;
 }
 
@@ -1819,12 +1822,12 @@ select:focus-visible,
   white-space: nowrap;
 }
 /* 品牌标语（2026-10-17）：muted 色小字，超宽省略；折叠态随 .app-side-brand 整体隐藏。
-   10px + 字距 .045em + 透明度 .8——与名称拉开字号差与明度差两级，做「注」不做「行」。 */
+   11px + 字距 .045em——与名称拉开字号差与明度差两级，做「注」不做「行」。
+   P2-7：10px→11px（中文下限），删 opacity 0.8（叠后约 3.5:1 跌破 AA）。 */
 .app-side-tagline {
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1;
   letter-spacing: 0.045em;
-  opacity: 0.8;
   color: hsl(var(--muted-foreground));
   white-space: nowrap;
   overflow: hidden;

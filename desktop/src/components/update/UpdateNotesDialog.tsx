@@ -87,7 +87,7 @@ function parseReleaseNotes(body: string): { blocks: NoteBlock[]; counts: Record<
  *  各内容块带 notes-rise 错落入场动效（delay 递增），prefers-reduced-motion 时自动降级（见 index.css）。 */
 export function ReleaseNotes({ body }: { body: string | null | undefined }) {
   if (!body || !body.trim()) {
-    return <div className="px-1 py-2 text-xs text-muted-foreground">本次更新暂无说明</div>;
+    return <div className="px-1 py-2 text-xs text-muted-foreground">本次更新还没有说明</div>;
   }
 
   const { blocks, counts } = parseReleaseNotes(body);

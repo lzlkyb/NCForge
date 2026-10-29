@@ -9,7 +9,6 @@ export interface SecurityBadge {
   icon: IconName;
   danger: boolean;
   tab: string;
-  anchor?: string;
   title: string;
 }
 
@@ -19,11 +18,10 @@ export interface SecurityBadge {
  * WHY 聚合：徽章群紧邻侧栏开关与服务启停两个高危邻居，窄窗下弹性空白被压没后
  * 徽章直接顶上「停止服务」，误触代价重；聚合后顶栏可点目标从 5 变 1，窄窗也
  * 不再溢出。面板内每项保留完整语义（图标 + 文案 + 点击直达处置页），跳转逻辑
- * 复用原徽章的 tab/anchor。
+ * 复用原徽章的 tab。
  *
  * 配色取组内最高危级：有 danger 项 → destructive 系；仅 warn 级（如只读）→
  * warning 系。
- *
  * 槽位化（2026-10-17，与更新徽章同款病灶同款修法）：无提醒时不再 `return null`——
  * 整枚徽章硬切出现/消失会把顶栏中段一瞬间推挤。改住 `.sec-slot` 槽位列
  * （grid 0fr→1fr，280ms 平滑展开/收起，样式在 interaction-refinements.css）。
@@ -38,7 +36,7 @@ export function SecurityBadgeGroup({
   compact = false,
 }: {
   badges: SecurityBadge[];
-  onNavigate?: (tab: string, anchor?: string) => void;
+  onNavigate?: (tab: string) => void;
   compact?: boolean;
 }) {
   const visible = useMemo(() => badges.filter((b) => b.show), [badges]);
@@ -120,7 +118,7 @@ export function SecurityBadgeGroup({
                     }
                     trailing={<Icon name="chevronLeft" size={13} className="rotate-180 text-muted-foreground" />}
                     onClick={() => {
-                      onNavigate?.(b.tab, b.anchor);
+                      onNavigate?.(b.tab);
                       close();
                     }}
                   />

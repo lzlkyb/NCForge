@@ -86,7 +86,7 @@ export function HomeTab({ onChanged }: { onChanged?: () => void }) {
         />
         <SettingsRow
           label="当前版本"
-          sub={latest ? `最近更新：${latest.date}` : "暂无版本记录"}
+          sub={latest ? `最近更新：${latest.date}` : "还没有版本记录"}
           control={<span className="text-sm tabular-nums text-muted-foreground">v{latest?.version ?? "0.0.0"}</span>}
         />
         <SettingsRow

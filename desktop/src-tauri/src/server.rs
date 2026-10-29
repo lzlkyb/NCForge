@@ -55,6 +55,18 @@ pub fn is_java_name(name: &str) -> bool {
     name.to_ascii_lowercase().starts_with("java")
 }
 
+/// 读不到进程名时 `PortOwner.name` 的占位值。
+///
+/// 前端按字面量认这个值（`desktop/src/lib/server.ts` 的 `UNKNOWN_PROCESS_NAME`，
+/// `ServicesTab` 消费），所以它是一份对外契约：改文案必须同步改那边。
+/// 「读不到名字」不等于「不是 java」，任何一侧都别把它当结论用。
+pub const UNKNOWN_PROCESS: &str = "未知进程";
+
+/// 读不到名字时能不能断定「不是我们的 java」。单独一个函数，免得各处自己比字符串。
+pub fn name_unknown(name: &str) -> bool {
+    name == UNKNOWN_PROCESS
+}
+
 /// 查谁在 LISTEN 这个端口。查不到返回 None（端口空闲，或 netstat 不可用）。
 ///
 /// 为什么不用「connect 成功即占用」：连接成功只能说明有人接，拿不到 PID，
@@ -69,7 +81,7 @@ pub fn port_owner(port: u16) -> Option<PortOwner> {
     let pid = port_pid(port)?;
     Some(PortOwner {
         pid,
-        name: process_name_cached(pid).unwrap_or_else(|| "未知进程".to_string()),
+        name: process_name_cached(pid).unwrap_or_else(|| UNKNOWN_PROCESS.to_string()),
     })
 }
 
@@ -174,12 +186,20 @@ pub fn process_name(_pid: u32) -> Option<String> {
 
 /// 端口上是否有人在 listen（连得上就算）。
 ///
+/// `address` 是中间件配置里声明的监听地址（prop.xml 的 `<http><address>`）。
+/// 配了具体局域网 IP 时 Tomcat **只绑那个地址**，连 127.0.0.1 永远不通：状态会永久
+/// 停在「启动中」，而「重启」按钮只在 running 时渲染——用户连重启都点不了。
+///
 /// 超时给 200ms：本机回环要么立刻通要么立刻拒，等更久只会拖慢状态轮询。
-pub fn port_reachable(port: u16) -> bool {
-    use std::net::{SocketAddr, TcpStream};
+pub fn port_reachable(port: u16, address: Option<&str>) -> bool {
+    use std::net::{IpAddr, SocketAddr, TcpStream};
     use std::time::Duration;
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
+    let ip = address
+        .and_then(|a| a.trim().parse::<IpAddr>().ok())
+        // `0.0.0.0` / `::` 表示绑所有网卡，这时连回环一样能通
+        .filter(|ip| !ip.is_unspecified())
+        .unwrap_or(IpAddr::from([127, 0, 0, 1]));
+    TcpStream::connect_timeout(&SocketAddr::new(ip, port), Duration::from_millis(200)).is_ok()
 }
 
 /// 正在跑（或刚跑过）的中间件进程。
@@ -623,9 +643,21 @@ mod tests {
         // 绑 0 让系统分一个空闲端口：测试不能碰真实的 80，机器上可能正跑着 NC
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        assert!(port_reachable(port), "正在 listen 的端口应当可连");
+        assert!(port_reachable(port, None), "正在 listen 的端口应当可连");
         drop(listener);
-        assert!(!port_reachable(port), "端口关闭后不该可连");
+        assert!(!port_reachable(port, None), "端口关闭后不该可连");
+    }
+
+    #[test]
+    fn 监听地址是通配时按回环探测() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // 0.0.0.0 / :: 表示绑所有网卡：此时连回环是能通的，不能被当成「非回环地址」漏掉
+        assert!(port_reachable(port, Some("0.0.0.0")));
+        assert!(port_reachable(port, Some("::")));
+        // 解析不了的值退回回环，不 panic
+        assert!(port_reachable(port, Some("不是 IP")));
     }
 
     #[test]

@@ -7,9 +7,24 @@ import { restartLang, startLangNow, useLangView } from "../../lib/lang";
  */
 export function LangBadge({ activePath }: { activePath: string | null }) {
   const v = useLangView();
+  // 总开关关掉时不能什么都不显示：用户会以为「跳转/补全坏了」而找不到原因。
+  // 显式标成轻量模式并说明去哪儿打开（这里不做成按钮——本组件拿不到导航能力，
+  // 放个点不动的入口比没有入口更糟）。
+  if (!v.enabled) {
+    return (
+      <span
+        className="wb-lang"
+        data-tone="off"
+        title="代码智能已在设置里关闭，当前是轻量模式：有语法高亮、搜索、编译，没有跳转与补全。可在「设置 → 代码智能」重新打开"
+      >
+        <span className="wb-lang-dot" />
+        轻量模式
+      </span>
+    );
+  }
   if (v.state === "stopped") {
-    // 自动启动关掉时要有个手动入口；总开关关掉则完全不显示（轻量模式）
-    if (!v.enabled || v.autoStart || !activePath?.toLowerCase().endsWith(".java")) return null;
+    // 自动启动关掉时要有个手动入口
+    if (v.autoStart || !activePath?.toLowerCase().endsWith(".java")) return null;
     return (
       <button
         type="button"

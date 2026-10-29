@@ -12,15 +12,13 @@ import type { KeyboardEvent, ReactNode } from "react";
 export function NavTarget({
   onNavigate,
   tab,
-  anchor,
   title,
   className = "",
   children,
 }: {
   /** 不传则退化为纯展示（不可点、无指针、不进 Tab 焦点序列）。 */
-  onNavigate?: (tab: string, anchor?: string) => void;
+  onNavigate?: (tab: string) => void;
   tab: string;
-  anchor?: string;
   /** 悬停提示。写成“去……”，让用户点前就知道会跳到哪。 */
   title?: string;
   className?: string;
@@ -28,7 +26,7 @@ export function NavTarget({
 }) {
   if (!onNavigate) return <div className={className}>{children}</div>;
 
-  const go = () => onNavigate(tab, anchor);
+  const go = () => onNavigate(tab);
   const onKeyDown = (e: KeyboardEvent) => {
     // 只拦 Enter / Space，且要 preventDefault——Space 默认会滚页。
     if (e.key !== "Enter" && e.key !== " ") return;

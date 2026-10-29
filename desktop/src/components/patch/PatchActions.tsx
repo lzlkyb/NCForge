@@ -1,6 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
+
+/** 像绝对路径就行——真正的落盘校验在后端 `patch_set_out_dir`。 */
+function looksAbsolute(v: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(v) || v.startsWith("/");
+}
 
 /**
  * 底部动作条：输出目录 / 挂 SQL / 阻断提示 / 生成按钮。
@@ -35,23 +40,53 @@ export function PatchActions({
   canBuild: boolean;
   onBuild: () => void;
 }) {
+  // 输出目录用受控草稿：失焦只校验格式，落盘必须显式保存。
+  // 以前 onBlur 直接调 onSaveDir——误敲一个路径、点到别处，配置就被改写、
+  // 磁盘还多出一个目录，无确认无撤销。
+  const [draft, setDraft] = useState(dir);
+  useEffect(() => setDraft(dir), [dir]);
+  const dirty = draft.trim() !== dir;
+
+  const commitDir = () => {
+    const v = draft.trim();
+    if (!v || v === dir) return;
+    if (!looksAbsolute(v)) {
+      toast("这不像绝对路径（如 D:\\NC技术\\待上线补丁），不会保存", "error");
+      return;
+    }
+    void onSaveDir(v).catch((x) => toast(String(x), "error"));
+  };
+
   return (
     <div className="pk-actions">
       <div className="pk-out">
         <span>输出目录</span>
         <input
-          key={dir}
-          defaultValue={dir}
+          value={draft}
           placeholder="D:\\NC技术\\待上线补丁"
           spellCheck={false}
+          onChange={(e) => setDraft(e.target.value)}
           onBlur={(e) => {
             const v = e.target.value.trim();
-            if (v && v !== dir) void onSaveDir(v).catch((x) => toast(String(x), "error"));
+            if (v && !looksAbsolute(v)) {
+              toast("这不像绝对路径（如 D:\\NC技术\\待上线补丁）——格式不对，不会保存", "error");
+            }
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Enter") commitDir();
+            if (e.key === "Escape") setDraft(dir);
           }}
         />
+        {dirty && (
+          <>
+            <button type="button" className="pk-link" onClick={commitDir}>
+              保存
+            </button>
+            <button type="button" className="pk-link" onClick={() => setDraft(dir)}>
+              撤销
+            </button>
+          </>
+        )}
         <OriginBadge origin={origin} />
       </div>
 

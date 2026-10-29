@@ -78,7 +78,10 @@ export function PortDialog({
   }, [open, text]);
 
   const port = Number(text.trim());
-  const pending = !!plan && plan.edits.some((e) => e.exists && e.current !== e.next);
+  // 只有「读到了现值且与目标不同」才算真要写。`current === null` 表示文件在、
+  // 但找不到那条配置项——后端那时 todo 为空、apply 必然失败。前端以前按
+  // 「exists 就算有待写入」判，于是「应用」亮着、点了必错。
+  const pending = !!plan && plan.edits.some((e) => e.current !== null && e.current !== e.next);
   const canApply = pending && !plan?.blocked && !applying;
 
   const apply = async () => {
@@ -159,18 +162,21 @@ export function PortDialog({
                     {e.path}
                   </span>
                 </div>
-                {e.exists ? (
+                {!e.exists ? (
+                  <span className="sv-port-miss">文件不存在，跳过</span>
+                ) : e.current === null ? (
+                  // 文件在但配置项不在：这条不会被改，不能让「— → 8081」暗示会改
+                  <span className="sv-port-miss">读不到现有端口配置，这条不会修改</span>
+                ) : (
                   <div className="sv-port-diff">
                     <code className="sv-port-old" title="改前">
-                      {e.current ?? "—"}
+                      {e.current}
                     </code>
                     <span className="sv-port-arrow">→</span>
                     <code className="sv-port-new" title="改后">
                       {e.next}
                     </code>
                   </div>
-                ) : (
-                  <span className="sv-port-miss">文件不存在，跳过</span>
                 )}
               </div>
             ))}

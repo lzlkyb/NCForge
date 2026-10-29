@@ -23,6 +23,15 @@ export interface CompileResult {
 /** 编译 `path` 所在的模块（模块目录或模块内任一文件）。 */
 export const compileModule = (path: string) => invoke<CompileResult>("compile_module", { path });
 
+/**
+ * 取消正在跑的编译。后端只置一个标志，ecj 子进程会在 40ms 内被杀掉。
+ * 取消后 `compileModule` 以 `CANCELLED:` 前缀的错误返回。
+ */
+export const compileCancel = () => invoke<void>("compile_cancel");
+
+/** 这次失败是不是「用户自己点的取消」。 */
+export const isCompileCancelled = (e: unknown) => String(e).startsWith("CANCELLED:");
+
 /** 订阅编译过程中的逐行进度，返回取消订阅函数。 */
 export const onCompileLog = (handler: (line: string) => void) => listen<string>("compile-log", handler);
 

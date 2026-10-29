@@ -113,6 +113,20 @@ describe("buildStageTree", () => {
     const tree = buildStageTree([], []);
     expect(tree.map((n) => n.name)).toEqual(["CHANGES.md"]);
   });
+
+  it("两个同名 SQL 都留在树上并标重名（静默去重会让预览说谎）", () => {
+    const tree = buildStageTree([], ["D:/nc/a/x.sql", "D:/nc/b/x.sql"]);
+    expect(tree.map((n) => n.name)).toEqual(["CHANGES.md", "x.sql", "x.sql"]);
+    expect(tree[1].meta).toBe("需人工执行 · 重名");
+    expect(tree[2].meta).toBe("需人工执行 · 重名");
+  });
+
+  it("SQL 叫 CHANGES.md 时两行都标出来（解压会互相覆盖）", () => {
+    const tree = buildStageTree([], ["D:/nc/CHANGES.md"]);
+    expect(tree.map((n) => n.name)).toEqual(["CHANGES.md", "CHANGES.md"]);
+    expect(tree[0].meta).toBe("自动生成 · 会被同名 SQL 覆盖");
+    expect(tree[1].meta).toBe("需人工执行 · 重名");
+  });
 });
 
 describe("countEntries / countClasses", () => {

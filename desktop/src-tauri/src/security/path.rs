@@ -7,9 +7,8 @@ pub fn display_path(p: &Path) -> String {
     s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
 }
 
-/// 把一组 root 字符串 canonicalize 为 PathBuf 集合（缓存构建与原始函数共用，逻辑唯一来源）。
-/// 对每个 root：能解析就用 canonicalize 后的真实路径，失败（根不存在等）则 fallback 原路径，
-/// 与原 `resolve_safe_path` 内联逻辑完全一致。
+/// 把一组 root 字符串 canonicalize 为 PathBuf 集合。
+/// 对每个 root：能解析就用 canonicalize 后的真实路径，失败（根不存在等）则 fallback 原路径。
 pub(crate) fn canonicalize_roots(roots: &[String]) -> Vec<PathBuf> {
     roots
         .iter()
@@ -17,35 +16,22 @@ pub(crate) fn canonicalize_roots(roots: &[String]) -> Vec<PathBuf> {
         .collect()
 }
 
+/// 解析并校验一个路径：canonicalize（解符号链接 / `..`）→ 白名单 → 排除规则。
+///
+/// `exclude_patterns`：白名单排除规则（.mcpignore 式）。**只在白名单校验开启时生效**
+/// （排除是白名单的子特性：相对命中的根做匹配，关闭白名单后无根可相对，语义失效）。
+/// 命中 = 拒绝，只收紧、不放宽；根外路径维持白名单拒绝不变。
 pub fn resolve_safe_path(
     requested: &str,
     allowed_roots: &[String],
     exclude_patterns: &[String],
     enforce_whitelist: bool,
 ) -> Result<PathBuf, String> {
-    // 原始入口保持 `&[String]` 签名（测试与个别 override 调用点不动），
-    // 内部先 canonicalize 再走缓存版逻辑——canonicalize 逻辑唯一来源在 canonicalize_roots。
-    resolve_safe_path_cached(
-        requested,
-        &canonicalize_roots(allowed_roots),
-        exclude_patterns,
-        enforce_whitelist,
-    )
-}
-
-/// 缓存版：allowed_roots 已是预 canonicalize 的集合（来自 AppState 缓存），
-/// 避免每个工具调用都对所有 root 各做一次 stat 级 canonicalize。
-/// 语义与 `resolve_safe_path` 完全一致（roots 的 canonicalize/fallback 在缓存构建时已应用）。
-///
-/// `exclude_patterns`：白名单排除规则（.mcpignore 式）。**只在白名单校验开启时生效**
-/// （排除是白名单的子特性：相对命中的根做匹配，关闭白名单后无根可相对，语义失效）。
-/// 命中 = 拒绝，只收紧、不放宽；根外路径维持白名单拒绝不变。
-pub fn resolve_safe_path_cached(
-    requested: &str,
-    allowed_roots: &[PathBuf],
-    exclude_patterns: &[String],
-    enforce_whitelist: bool,
-) -> Result<PathBuf, String> {
+    // roots 每次现 canonicalize（stat 级开销；本函数的调用方都是用户动作级低频）。
+    // 曾经另有一个 `resolve_safe_path_cached`，声称吃「AppState 预 canonicalize 的
+    //  roots 缓存」——那个缓存从未存在，零调用方，注释与代码有两套说法。
+    // 已合并回本函数：canonicalize 逻辑唯一来源在 canonicalize_roots。
+    let allowed_roots = canonicalize_roots(allowed_roots);
     let requested_path = PathBuf::from(requested);
 
     // For existing paths, use canonicalize to resolve symlinks

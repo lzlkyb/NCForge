@@ -327,7 +327,8 @@ pub fn search(root: &Path, opts: &SearchOptions) -> Result<SearchOutcome, String
     // ── 第二段：并行读取 + 匹配 ──
     let cursor = AtomicUsize::new(0);
     let scanned = AtomicUsize::new(0);
-    let matched = AtomicUsize::new(0);
+    // 「匹配文件数」不在这里数：截断之后要按真正留下的命中重算（见结果组装处），
+    // 扫描期计数会把被上限整份砍掉的文件也算进去。
     let collected = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
 
@@ -370,11 +371,8 @@ pub fn search(root: &Path, opts: &SearchOptions) -> Result<SearchOutcome, String
                         scanned.fetch_add(1, Ordering::Relaxed);
                     }
                     let added = local.len() - before;
-                    if added > 0 {
-                        matched.fetch_add(1, Ordering::Relaxed);
-                        if collected.fetch_add(added, Ordering::Relaxed) + added >= limit {
-                            stop.store(true, Ordering::Relaxed);
-                        }
+                    if added > 0 && collected.fetch_add(added, Ordering::Relaxed) + added >= limit {
+                        stop.store(true, Ordering::Relaxed);
                     }
                 }
                 local
@@ -396,11 +394,20 @@ pub fn search(root: &Path, opts: &SearchOptions) -> Result<SearchOutcome, String
 
     let capped = hits.len() > limit;
     hits.truncate(limit);
+    // 截断后按实际留下的命中重算「匹配文件数」：扫描时统计的 matched 包含被 500 条
+    // 上限整份砍掉的文件，汇总行那个「M 个文件」就会和下面能点开的分组对不上。
+    let files_matched = {
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for h in &hits {
+            seen.insert(h.path.as_str());
+        }
+        seen.len()
+    };
 
     Ok(SearchOutcome {
         hits,
         files_scanned: scanned.load(Ordering::Relaxed),
-        files_matched: matched.load(Ordering::Relaxed),
+        files_matched,
         truncated: capped || stop.load(Ordering::Relaxed) || walk_truncated,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })

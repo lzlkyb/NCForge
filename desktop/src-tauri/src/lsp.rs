@@ -38,27 +38,71 @@ pub fn encode_message(msg: &Value) -> Vec<u8> {
 #[derive(Default)]
 pub struct FrameDecoder {
     buf: Vec<u8>,
+    /// 被判定为「不是 LSP 帧」而丢掉的片段（只留最近几条）。
+    /// 进程异常退出时带进 reason，好判断是不是服务端往 stdout 打了日志。
+    noise: Vec<String>,
 }
 
 impl FrameDecoder {
     /// 喂入新读到的字节，返回其中凑齐的所有消息。
-    /// 头部格式不对或正文不是合法 JSON 时返回 Err——协议已经错位，继续读只会越错越远，
-    /// 调用方应当丢弃这个进程重来。
+    ///
+    /// **对 stdout 噪声容忍**：jdt.ls / equinox 启动初期往 stdout 打印一行非 LSP 文本
+    /// 并不罕见。以前这里直接返回 Err，读取线程 break，整条语言链路当场猝死——
+    /// 用户看到的是「补全和跳转突然全没了」，日志里只有一句「消息头里没有 Content-Length」。
+    /// 现在把这类片段当噪声丢掉，从下一个 `\r\n\r\n` 继续找。
+    ///
+    /// 安全性：真正的帧头必然含 `Content-Length` 行。`parse_content_length` 是逐行扫的，
+    /// 所以「噪声行 + 换行 + 真帧头」这种粘连也能正确解析，不会误丢整条消息。
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Value>, String> {
         self.buf.extend_from_slice(bytes);
         let mut out = Vec::new();
         while let Some(head_end) = find_subslice(&self.buf, b"\r\n\r\n") {
-            let len = parse_content_length(&self.buf[..head_end])?;
+            let len = match parse_content_length(&self.buf[..head_end]) {
+                Ok(n) => n,
+                Err(why) => {
+                    let text = String::from_utf8_lossy(&self.buf[..head_end]).into_owned();
+                    self.note_noise(&text, &why);
+                    self.buf.drain(..head_end + 4);
+                    continue;
+                }
+            };
             let start = head_end + 4;
             if self.buf.len() < start + len {
                 break; // 正文还没收齐
             }
-            let value: Value = serde_json::from_slice(&self.buf[start..start + len])
-                .map_err(|e| format!("语言服务返回了无法解析的消息: {e}"))?;
-            out.push(value);
+            let body = self.buf[start..start + len].to_vec();
             self.buf.drain(..start + len);
+            match serde_json::from_slice::<Value>(&body) {
+                Ok(v) => out.push(v),
+                Err(e) => {
+                    // 头能解析但正文不是 JSON：同样是噪声（或 Content-Length 被日志行骗了）
+                    let text = String::from_utf8_lossy(&body).into_owned();
+                    self.note_noise(&text, &format!("正文不是 JSON: {e}"));
+                }
+            }
         }
         Ok(out)
+    }
+
+    fn note_noise(&mut self, text: &str, why: &str) {
+        const KEEP: usize = 3;
+        let line = text.trim().lines().last().unwrap_or("").trim();
+        let line = if line.is_empty() { why } else { line };
+        // 截断：日志行可能很长，reason 里塞几百 KB 没有意义
+        let short: String = line.chars().take(160).collect();
+        self.noise.push(short);
+        if self.noise.len() > KEEP {
+            self.noise.remove(0);
+        }
+    }
+
+    /// 取走最近记下的噪声（有就返回并清空）。
+    pub fn take_noise(&mut self) -> Option<String> {
+        if self.noise.is_empty() {
+            None
+        } else {
+            Some(self.noise.join(" | "))
+        }
     }
 }
 
@@ -335,6 +379,7 @@ impl LspClient {
         std::thread::spawn(move || {
             let mut decoder = FrameDecoder::default();
             let mut buf = [0u8; 16 * 1024];
+            let mut last_noise: Option<String> = None;
             let reason = loop {
                 match stdout.read(&mut buf) {
                     Ok(0) => break "语言服务进程已退出".to_string(),
@@ -342,12 +387,21 @@ impl LspClient {
                     Ok(n) => match decoder.push(&buf[..n]) {
                         Err(e) => break e,
                         Ok(messages) => {
+                            if let Some(noise) = decoder.take_noise() {
+                                last_noise = Some(noise);
+                            }
                             for m in messages {
                                 dispatch(&m, &*handler, &r_pending, &r_stdin);
                             }
                         }
                     },
                 }
+            };
+            // 退出原因带上最后一次 stdout 噪声：出现「进程突然退出」时，
+            // 最先要判断的就是「它是不是往 stdout 打了不该打的东西」。
+            let reason = match last_noise {
+                Some(n) => format!("{reason}（stdout 上有非 LSP 输出：{n}）"),
+                None => reason,
             };
             // 先标记不可用再清空等待者：否则新请求可能在清空之后才登记，永远等不到回复
             r_alive.store(false, Ordering::SeqCst);
@@ -532,14 +586,35 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn decoder_rejects_broken_protocol() {
-        assert!(FrameDecoder::default().push(b"Foo: 1\r\n\r\n{}").is_err());
-        assert!(FrameDecoder::default()
-            .push(b"Content-Length: abc\r\n\r\n{}")
-            .is_err());
-        assert!(FrameDecoder::default()
-            .push(b"Content-Length: 3\r\n\r\n{x}")
-            .is_err());
+    fn 非_lsp_输出当噪声丢掉而不是让链路猝死() {
+        // 三种曾经会 Err 的输入，现在都必须被吞掉并留着候选：
+        // 「头和正文格式不对」→ 丢；「正文不是 JSON」→ 丢。
+        // 以前这些直接 Err，读取线程 break，整条语言链路当场死掉——
+        // 而 jdt.ls / equinox 启动初期往 stdout 打一行日志并不罕见。
+        let mut d = FrameDecoder::default();
+        assert!(d.push(b"Foo: 1\r\n\r\n{}").unwrap().is_empty());
+        assert!(d.take_noise().is_some(), "噪声要留痕，好在退出原因里带出来");
+
+        let mut d = FrameDecoder::default();
+        assert!(d.push(b"Content-Length: abc\r\n\r\n{}").unwrap().is_empty());
+
+        let mut d = FrameDecoder::default();
+        assert!(d.push(b"Content-Length: 3\r\n\r\n{x}").unwrap().is_empty());
+    }
+
+    #[test]
+    fn 噪声之后的正常帧照样能解析() {
+        // 关键场景：stdout 先吐一行日志，紧跟一个真正的 LSP 帧。
+        // 噪声行会与真帧头粘连成同一个「头」，而 parse_content_length 是逐行扫的，
+        // 所以仍然能找到 Content-Length，不能把整条消息误丢。
+        let body = br#"{"jsonrpc":"2.0","id":1}"#;
+        let mut raw = b"[INFO] starting jdt.ls\r\n  \r\nContent-Length: ".to_vec();
+        raw.extend_from_slice(body.len().to_string().as_bytes());
+        raw.extend_from_slice(b"\r\n\r\n");
+        raw.extend_from_slice(body);
+        let mut d = FrameDecoder::default();
+        let got = d.push(&raw).unwrap();
+        assert_eq!(got, vec![json!({ "jsonrpc": "2.0", "id": 1 })]);
     }
 
     #[test]

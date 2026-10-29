@@ -18,12 +18,11 @@ interface ConfirmDialogProps {
   cancelLabel?: string;
   confirmDisabled?: boolean;
   /**
-   * 层级，默认 50。
+   * 层级，默认 1000（与 Modal 默认一致，P2-5 统一阶梯）。
    *
-   * **嵌在另一个弹框里时必须传更大的值**：`Modal` 的默认层级是 1000
-   * （版本历史 / 更新说明那几个就是 1000），两者都 portal 到 body、是兄弟节点，
+   * **嵌在另一个弹框里时必须传更大的值**：两者都 portal 到 body、是兄弟节点，
    * 不抬层级的话确认框会被盖在父弹框的遮罩下面：看不见也点不到，
-   * 而点击会落到父弹框遮罩上把父弹框关掉。`ConfirmModal` 同理（它默认也是 50）。
+   * 而点击会落到父弹框遮罩上把父弹框关掉。`ConfirmModal` 同理。
    */
   zIndex?: number;
   onCancel: () => void;
@@ -44,23 +43,26 @@ export function ConfirmDialog({
   confirmLabel,
   cancelLabel = "取消",
   confirmDisabled = false,
-  zIndex = 50,
+  zIndex = 1000,
   onCancel,
   onConfirm,
 }: ConfirmDialogProps) {
   const { closing, dismiss } = useDialogDismiss(onCancel, open);
   return (
-    <Modal open={open && !closing} ariaLabel={title} onClose={() => dismiss()} zIndex={zIndex} className="w-full max-w-md rounded-xl modal-surface p-5 dlg">
+    <Modal open={open && !closing} ariaLabel={title} onClose={() => dismiss()} zIndex={zIndex} className="w-full max-w-md rounded-[var(--r-card)] modal-surface p-5 dlg">
         <h4
           className={`mb-2 flex items-center gap-2 text-base font-semibold ${
             variant === "destructive" ? "text-destructive-ink" : ""
           }`}
         >
-          <Icon
-            name="alertTriangle"
-            size={18}
-            className={variant === "default" ? "text-warning-ink" : undefined}
-          />
+          {/* 图标跟着 variant 走（P2-6）：只有 destructive 才顶警告标。
+              以前中性确认也顶 alertTriangle（只换色）——每个确认框都顶警告图标
+              等于没有警告，用户对真正危险的操作失去视觉警觉。 */}
+          {variant === "destructive" ? (
+            <Icon name="alertTriangle" size={18} />
+          ) : (
+            <Icon name="info" size={18} className="text-muted-foreground" />
+          )}
           {title}
         </h4>
         {description && <p className="mb-3 text-sm text-muted-foreground">{description}</p>}

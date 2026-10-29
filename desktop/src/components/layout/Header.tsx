@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, memo } from "react";
 import { getStoredTheme, toggleTheme } from "../../lib/theme";
 import { headerSecurityBadges, type SecurityFlags } from "../../lib/headerSecurityBadges";
+import { shortcutLabel } from "../../lib/platform";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { TitleBarControls } from "./TitleBarControls";
@@ -20,14 +21,17 @@ function HeaderImpl({
   onOpenSearch,
   collapsed,
   onToggleCollapse,
+  platform,
 }: {
   /** 安全风险标志（业务自定义，见 lib/headerSecurityBadges）。 */
   flags?: SecurityFlags;
-  onNavigate?: (tab: string, anchor?: string) => void;
-  /** 打开命令面板：给 Ctrl+K 一个可见入口。 */
+  onNavigate?: (tab: string) => void;
+  /** 跳到搜索页：给 Ctrl+K 一个可见入口（App.tsx 接线）。 */
   onOpenSearch?: () => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  /** 后端平台串（`std::env::consts::OS`），用于快捷键标签 mac/Windows 分叉。 */
+  platform?: string;
 }) {
   const [dark, setDark] = useState(() => getStoredTheme() === "dark");
 
@@ -76,8 +80,8 @@ function HeaderImpl({
             variant="ghost"
             size="sm"
             onClick={onOpenSearch}
-            title="搜索页面与设置（Ctrl+K）"
-            aria-label="搜索（Ctrl+K）"
+            title={`搜索页面与设置（${shortcutLabel(platform, "K")}）`}
+            aria-label={`搜索（${shortcutLabel(platform, "K")}）`}
             className="gap-1.5 text-muted-foreground"
           >
             <Icon name="search" size={18} />
@@ -87,6 +91,7 @@ function HeaderImpl({
           variant="ghost"
           size="icon"
           onClick={() => toggleTheme()}
+          title={dark ? "切换浅色主题" : "切换深色主题"}
           aria-label={dark ? "切换浅色" : "切换深色"}
         >
           <Icon name={dark ? "sun" : "moon"} size={18} />

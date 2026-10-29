@@ -7,7 +7,13 @@ interface ConfirmModalProps {
   children: ReactNode;
   /** 内容卡片最大宽度，默认 md（与原自建确认弹窗一致） */
   maxWidth?: "sm" | "md" | "lg";
-  /** 层级，默认 50（与原自建弹窗 z-50 一致）；RestoreBackupDialog 原用 z-[1001] */
+  /**
+   * 层级，默认 1000（与 Modal 默认一致，P2-5 统一阶梯）。
+   *
+   * **嵌在另一个弹框里时必须传更大的值**：两者都 portal 到 body、是兄弟节点，
+   * 不抬层级的话确认框会被盖在父弹框的遮罩下面：看不见也点不到，
+   * 而点击会落到父弹框遮罩上把父弹框关掉。
+   */
   zIndex?: number;
 }
 
@@ -21,12 +27,12 @@ export function ConfirmModal({
   onClose,
   children,
   maxWidth = "md",
-  zIndex = 50,
+  zIndex = 1000,
 }: ConfirmModalProps) {
   const maxW =
     maxWidth === "sm" ? "max-w-sm" : maxWidth === "lg" ? "max-w-lg" : "max-w-md";
   return (
-    <Modal open={open} onClose={onClose} zIndex={zIndex} className={`mx-4 w-full ${maxW} rounded-xl modal-surface p-5`}>
+    <Modal open={open} onClose={onClose} zIndex={zIndex} className={`mx-4 w-full ${maxW} rounded-[var(--r-card)] modal-surface p-5`}>
       {children}
     </Modal>
   );

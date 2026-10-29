@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { ensureLang, initLang, setNavHandler } from "../lib/lang";
 
 /**
@@ -24,11 +24,18 @@ export function useLangWiring({
     if (activePath) ensureLang(activePath);
   }, [activePath]);
 
+  // 回调存 ref、handler 只登记一次：这两个回调每次渲染都是新身份，
+  // 挂在 effect 依赖上等于每渲染一次就「注销 → 重设」，异步的跳转回调落在
+  // 注销那一拍里就会被静默丢掉（表现是点了 F12 什么都没发生）。
+  const jumpRef = useRef({ openAt, openJdt });
+  jumpRef.current = { openAt, openJdt };
+
   useEffect(() => {
     setNavHandler((t) => {
-      if (t.kind === "file") void openAt(t.path, t.line);
-      else void openJdt(t.uri, t.line);
+      const { openAt: at, openJdt: toJdt } = jumpRef.current;
+      if (t.kind === "file") void at(t.path, t.line);
+      else void toJdt(t.uri, t.line);
     });
     return () => setNavHandler(null);
-  }, [openAt, openJdt]);
+  }, []);
 }

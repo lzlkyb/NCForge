@@ -260,6 +260,9 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
         let mut last_message: Option<String> = None;
         // 最近一次失败的机器可读原因，随 update:error 一起发（见 classify_update_error）。
         let mut last_code: &'static str = "unknown";
+        // 所有候选源都明确报告「没有更新」时为 true：用户点了下载却无更新可下，
+        // 循环外要发 stale 而不是「全部源失败：未知错误」。
+        let mut stale = false;
         for endpoints in groups {
             let updater = match build_updater(&app, endpoints) {
                 Ok(u) => u,
@@ -287,18 +290,15 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
             let update = match check_result {
                 Some(u) => u,
                 None => {
-                    // 下载链路不负责"已是最新"判定（那是 check_update 的事）。
-                    // 这里返回 None 说明下载前复查没拿到可用更新，发 error 而非 uptodate，
-                    // 避免把用户手上已有的可用更新静默清空；不再尝试下一个候选（各源应给出一致结论，
-                    // 换源重试只会徒增耗时）。
-                    let _ = app.emit(
-                        "update:error",
-                        serde_json::json!({
-                            "message": "下载前复查未找到可用更新，可能已发布新版本，请重新检查",
-                            "code": "stale"
-                        }),
-                    );
-                    return;
+                    // None = 这个源明确报告没有更新。**不在这里 return 发 error**：
+                    // 多源场景下（如 Gitee 镜像同步延迟），第一个源的 None 会把后续源上
+                    // 真正可用的更新静默吞掉——用户永远收不到 GitHub 上的新版本。
+                    // check_update 已修过同一类问题（见其 Ok(None) 分支注释），孪生函数
+                    // 这里漏修。记录 stale 并继续问后续源；全部源都 None 时循环外
+                    // 统一发 stale 错误（那时确实是「点了下载却没更新可下」）。
+                    log::info!("[Update] 候选源报告已是最新，继续问后续源");
+                    stale = true;
+                    continue;
                 }
             };
 
@@ -383,6 +383,20 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
                     continue; // 换下一个候选源重试
                 }
             }
+        }
+
+        if last_message.is_none() && stale {
+            // 所有源都明确说没有更新：用户点了下载却无更新可下。
+            // 发 error 而非 uptodate——uptodate 会把用户手上已有的可用更新状态
+            // 静默清空（徽章消失、对话框关闭）。
+            let _ = app.emit(
+                "update:error",
+                serde_json::json!({
+                    "message": "下载前复查未找到可用更新，可能已发布新版本，请重新检查",
+                    "code": "stale"
+                }),
+            );
+            return;
         }
 
         let _ = app.emit(

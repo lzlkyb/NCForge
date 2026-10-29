@@ -87,6 +87,9 @@ pub struct LaunchPreview {
     pub endpoints: ServerEndpoints,
     /// 这次会用的堆上限（MB），对话框里标出来「在服务页可改」。
     pub heap_mb: u32,
+    /// 命令行里的 classpath 清单是**复用上次启动**写好的 jar（true）还是这次新算的。
+    /// 复用时改了工程/NC home 还没重启过，清单就是旧的——对话框要说明这一点。
+    pub reused: bool,
 }
 
 fn log_path(config_dir: &Path) -> PathBuf {
@@ -142,7 +145,8 @@ fn build_status(cfg: &AppConfig, config_dir: &Path, s: Snap, ep: &ServerEndpoint
     // 端口通了才算真的起来了：进程起来到 Tomcat 开始监听之间有一大段（NC 加载模块很慢），
     // 这段时间界面该显示「启动中」，而不是让用户以为已经能用。
     let state = if s.alive {
-        if owned_by_self && server::port_reachable(port) {
+        // 探测地址要跟着配置走：配了局域网 IP 时 Tomcat 只绑那个地址
+        if owned_by_self && server::port_reachable(port, ep.http_address.as_deref()) {
             "running"
         } else {
             "starting"
@@ -363,34 +367,85 @@ pub async fn server_log(
     .map_err(|e| format!("后台任务失败: {e}"))?
 }
 
-/// 清空日志（把当前文件改名成 `.log.1` 再新建空的）。
+/// 清空日志的结果。
+#[derive(serde::Serialize)]
+pub struct ClearResult {
+    /// 前端应把读取偏移设到这里。
+    pub offset: u64,
+    /// true = 旧日志已改名成 `.log.1`，前端从 0 重读；
+    /// false = 磁盘文件没动（服务在跑），前端只把视图清掉、偏移快进到末尾。
+    pub rotated: bool,
+}
+
+/// 清空日志。
 ///
-/// 为什么不直接 truncate：中间件还持有 append 句柄，truncate 后写入位置在个别
-/// 文件系统上会错乱；改名再新建最稳，且旧日志还能查。
+/// 停止时把当前文件改名成 `.log.1` 再新建空的：中间件还持有 append 句柄时直接
+/// truncate 在个别文件系统上会错乱，改名再新建最稳，且旧日志还能查。
+///
+/// **运行中只能「从此刻开始看」，不能动文件**：java 进程持有的是 spawn 时传入的
+/// append 句柄，rename 之后它的输出继续写进 `.log.1`，新建的 `middleware.log` 永远是
+/// 0 字节。前端 offset 归零后读到空，面板从此定格「暂无输出」——而服务还在刷日志，
+/// 用户在服务异常后最想做的就是清空重看，必然踩中。
 #[tauri::command]
-pub async fn server_clear_log(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
+pub async fn server_clear_log(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<ClearResult, String> {
     let path = log_path(&state.config_dir);
+    let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let running = {
+            let mut run = st.server.lock().map_err(|_| "服务状态异常".to_string())?;
+            run.is_alive() || run.starting
+        };
+        if running {
+            let offset = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            return Ok(ClearResult {
+                offset,
+                rotated: false,
+            });
+        }
         if path.exists() {
             let _ = std::fs::rename(&path, path.with_extension("log.1"));
         }
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("建日志目录失败: {e}"))?;
         }
-        std::fs::write(&path, b"").map_err(|e| format!("清空日志失败: {e}"))
+        std::fs::write(&path, b"").map_err(|e| format!("清空日志失败: {e}"))?;
+        Ok(ClearResult {
+            offset: 0,
+            rotated: true,
+        })
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
 }
 
-/// 预览将要执行的命令行（会写 pathing jar，但不起进程）。
+/// 预览将要执行的命令行（不起进程）。
+///
+/// **不重写 pathing jar**：预览曾经和启动走同一条 `middleware_spec`，两条路径共用
+/// `middleware-cp.jar.tmp` 这个临时名。启动准备期（开始写 jar 之前已置 `starting`）
+/// 点「命令行」，两个 spawn_blocking 交错写同一个 tmp，rename 出来的是混合垃圾，
+/// 下次启动 JVM 只会报「找不到或无法加载主类」。现在：启动中直接挡回；其余情况
+/// 复用上次启动写好的清单只读展示，从没启动过才写这一次（那时不可能有并发的启动）。
 #[tauri::command]
 pub async fn server_command_line(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<LaunchPreview, String> {
     let cfg = state.config.read().await.clone();
     let config_dir = state.config_dir.clone();
+    let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let work_dir = config_dir.join("tmp");
+        let reuse = {
+            let run = st.server.lock().map_err(|_| "服务状态异常".to_string())?;
+            if run.starting {
+                return Err(
+                    "上一次启动还在准备 classpath 清单（约 1 秒），等它完成再看命令行".to_string(),
+                );
+            }
+            work_dir.join("middleware-cp.jar").is_file()
+        };
+
         let home: NcHome = nc_home::resolve(cfg.nc_home.as_deref())?;
         let nc_home = PathBuf::from(&home.root);
         let java = PathBuf::from(&home.java);
@@ -400,13 +455,12 @@ pub async fn server_command_line(
             .map(PathBuf::from)
             .unwrap_or_else(|| nc_home.clone());
         let heap_mb = launch::effective_heap_mb(cfg.server_heap_mb);
-        let (spec, entry_count) = launch::middleware_spec(
-            &nc_home,
-            &java,
-            &project_root,
-            &config_dir.join("tmp"),
-            heap_mb,
-        )?;
+        let prepared = if reuse {
+            launch::middleware_spec_preview(&nc_home, &java, &project_root, &work_dir, heap_mb)
+        } else {
+            launch::middleware_spec(&nc_home, &java, &project_root, &work_dir, heap_mb)
+        };
+        let (spec, entry_count) = prepared?;
         Ok(LaunchPreview {
             command_line: server::describe(&spec),
             classpath_jar: spec.classpath_jar.to_string_lossy().to_string(),
@@ -415,6 +469,7 @@ pub async fn server_command_line(
             java: spec.java.to_string_lossy().to_string(),
             endpoints: nc_home::read_endpoints(&nc_home),
             heap_mb,
+            reused: reuse,
         })
     })
     .await
@@ -460,8 +515,15 @@ pub async fn server_kill_port_owner(state: tauri::State<'_, Arc<AppState>>) -> R
         // 拿 10 秒前的判断去杀人是不可接受的。
         let name = server::process_name(owner.pid).unwrap_or(owner.name);
         if !server::is_java_name(&name) {
+            // 读不到进程名时不能断言「不是 java」——那是个我们并不知道的结论，
+            // 而用户看到的却是「本工具判定它不是」。
+            let verdict = if server::name_unknown(&name) {
+                "读不到它的进程名，无法确认它是不是 java 进程"
+            } else {
+                "它不是 java 进程"
+            };
             return Err(format!(
-                "占用 {port} 端口的是 {name} (PID {})，不是 java 进程，出于安全考虑不代你结束它",
+                "占用 {port} 端口的是 {name} (PID {})，{verdict}，出于安全考虑不代你结束它",
                 owner.pid
             ));
         }

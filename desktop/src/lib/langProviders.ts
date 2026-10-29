@@ -18,6 +18,7 @@ import {
   type LspRange,
 } from "./langConvert";
 import { monaco } from "./monacoSetup";
+import { toast } from "../components/ui/toast";
 
 type Model = ReturnType<typeof monaco.editor.createModel>;
 type Pos = { lineNumber: number; column: number };
@@ -25,19 +26,47 @@ type Pos = { lineNumber: number; column: number };
 /** 补全过慢就放弃，不让弹窗一直转。 */
 const COMPLETION_TIMEOUT_MS = 15_000;
 
+/**
+ * 超过这个行数就不再请求语义补全。
+ *
+ * 阈值与文件页「大文件降级」一致（2000 行）：这个量级下 jdt.ls 的补全实测恒为 0，
+ * 请求本身白等 15 秒。降级提示条已经说明了这件事。
+ */
+const HEAVY_LINES = 2000;
+
 /** Monaco 的 uri 字符串 → jdt.ls 给出的原始地址。打开跳转目标时要用原始地址查。 */
 const originalUri = new Map<string, string>();
+/** 这个映射只增不减会线性泄漏；跳转目标地址没有长期价值，超上限直接清空。 */
+const ORIGINAL_URI_MAX = 500;
+
+function rememberUri(monacoUri: string, original: string): void {
+  originalUri.set(monacoUri, original);
+  if (originalUri.size > ORIGINAL_URI_MAX) originalUri.clear();
+}
+
+/**
+ * 最近一次「服务就绪但请求失败」的原因。只留最后一条——这里不需要历史，
+ * 留历史就是内存泄漏。
+ */
+let lastFailure: { method: string; message: string } | null = null;
+/** 提示节流：同一类问题 60 秒内只打扰一次。 */
+let lastNotifyAt = 0;
 
 interface Ctx {
   path: string;
   position: LspPosition;
 }
 
-/** 能不能走语言服务；能就先把没发出去的修改发过去，否则算的是旧文本。 */
-function context(model: Model, pos: Pos): Ctx | null {
+/**
+ * 能不能走语言服务；能就先把没发出去的修改发过去再返回（必须 await）。
+ *
+ * `await flushDoc` 不是可选的：didChange 与随后的 request 是两次独立 IPC，
+ * 不建立先后的话补全会按改动前的文本算位置。
+ */
+async function context(model: Model, pos: Pos): Promise<Ctx | null> {
   const path = pathOfModel(model);
   if (!path || !langReady() || !inLangModule(path)) return null;
-  flushDoc(path);
+  await flushDoc(path);
   return { path, position: toLspPosition(pos.lineNumber, pos.column) };
 }
 
@@ -47,11 +76,29 @@ async function ask<T>(
   timeoutMs?: number,
 ): Promise<T | null> {
   try {
-    return await langRequest<T>(method, ctx.path, { position: ctx.position }, timeoutMs);
-  } catch {
-    // 超时、服务重启中等：静默退回，不打断输入
+    const res = await langRequest<T>(method, ctx.path, { position: ctx.position }, timeoutMs);
+    lastFailure = null;
+    return res;
+  } catch (e) {
+    // 超时、服务重启中等：先静默退回，不打断输入；要不要提示由调用方决定
+    lastFailure = { method, message: String(e) };
     return null;
   }
+}
+
+/**
+ * 「服务明明就绪，却没有响应」要说出来。
+ *
+ * 以前所有失败都被 catch 成 null，Monaco 静默退化成「当前文档单词补全」：
+ * 用户看到的是「补全只剩本文件里的词」，没有任何说明；某个 6433 行的文件
+ * 补全恒为 0 也正是这样被藏了大半年。
+ */
+function notifyStalled(what: string): void {
+  if (!lastFailure) return;
+  const now = Date.now();
+  if (now - lastNotifyAt < 60_000) return;
+  lastNotifyAt = now;
+  toast(`语义${what}没有响应，已退回本地提示（${lastFailure.message}）`, "warning");
 }
 
 interface LspCompletionItem {
@@ -89,6 +136,8 @@ type Loc = { uri: ReturnType<typeof monaco.Uri.parse>; range: ReturnType<typeof 
  * 没有缓存就是每个单词一次全工作区扫描。工作区里的类声明短时间内不会变。
  */
 const LIGHT_CACHE_MS = 30_000;
+/** 缓存条目上限：Ctrl+悬停会扫过大量单词，不设上限就是长会话里的线性泄漏。 */
+const LIGHT_CACHE_MAX = 200;
 const lightCache = new Map<string, { at: number; hits: Promise<SearchHit[] | null> }>();
 
 function searchDeclarations(word: string): Promise<SearchHit[] | null> {
@@ -104,6 +153,11 @@ function searchDeclarations(word: string): Promise<SearchHit[] | null> {
     .then((r) => r.hits)
     .catch(() => null);
   lightCache.set(word, { at: Date.now(), hits });
+  // Map 保持插入顺序：超上限就淘汰最早插入的那条
+  if (lightCache.size > LIGHT_CACHE_MAX) {
+    const oldest = lightCache.keys().next().value;
+    if (oldest !== undefined) lightCache.delete(oldest);
+  }
   return hits;
 }
 
@@ -122,7 +176,7 @@ async function lightDefinition(model: Model, pos: Pos): Promise<Loc[] | null> {
     const abs = `${base}\\${h.path.replace(/\//g, "\\")}`;
     const lspUri = encodeURI(`file:///${abs.replace(/\\/g, "/")}`);
     const uri = monaco.Uri.parse(lspUri);
-    originalUri.set(uri.toString(), lspUri);
+    rememberUri(uri.toString(), lspUri);
     const col = Math.max(0, h.text.indexOf(word, h.ranges[0]?.start ?? 0));
     return {
       uri,
@@ -144,14 +198,19 @@ export function registerLangProviders(): void {
   monaco.languages.registerCompletionItemProvider("java", {
     triggerCharacters: ["."],
     provideCompletionItems: async (model, position) => {
-      const ctx = context(model, position);
+      // 大文件不请求：这个量级下 jdt.ls 补全恒为 0，白等 15 秒还会顶掉输入手感
+      if (model.getLineCount() > HEAVY_LINES) return null;
+      const ctx = await context(model, position);
       if (!ctx) return null;
       const res = await ask<{ items?: LspCompletionItem[]; isIncomplete?: boolean } | LspCompletionItem[]>(
         "textDocument/completion",
         ctx,
         COMPLETION_TIMEOUT_MS,
       );
-      if (!res) return null;
+      if (!res) {
+        notifyStalled("补全");
+        return null;
+      }
       const items = Array.isArray(res) ? res : (res.items ?? []);
       const word = model.getWordUntilPosition(position);
       const fallback = {
@@ -187,7 +246,7 @@ export function registerLangProviders(): void {
 
   monaco.languages.registerHoverProvider("java", {
     provideHover: async (model, position) => {
-      const ctx = context(model, position);
+      const ctx = await context(model, position);
       if (!ctx) return null;
       const res = await ask<{ contents?: unknown; range?: LspRange }>("textDocument/hover", ctx);
       const parts = contentsToMarkdown(res?.contents);
@@ -202,7 +261,7 @@ export function registerLangProviders(): void {
   monaco.languages.registerSignatureHelpProvider("java", {
     signatureHelpTriggerCharacters: ["(", ","],
     provideSignatureHelp: async (model, position) => {
-      const ctx = context(model, position);
+      const ctx = await context(model, position);
       if (!ctx) return null;
       const res = await ask<{
         signatures?: LspSignature[];
@@ -230,7 +289,7 @@ export function registerLangProviders(): void {
 
   monaco.languages.registerDefinitionProvider("java", {
     provideDefinition: async (model, position) => {
-      const ctx = context(model, position);
+      const ctx = await context(model, position);
       if (!ctx) return lightDefinition(model, position);
       const res = await ask<unknown>("textDocument/definition", ctx);
       const out: Loc[] = [];
@@ -244,7 +303,7 @@ export function registerLangProviders(): void {
           }
         }
         const uri = monaco.Uri.parse(t.uri);
-        originalUri.set(uri.toString(), t.uri);
+        rememberUri(uri.toString(), t.uri);
         out.push({ uri, range: toMonacoRange(t.range) });
       }
       return out;

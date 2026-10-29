@@ -13,10 +13,11 @@ import { TabStrip } from "../workspace/TabStrip";
 import { TreeHeader } from "../workspace/TreeHeader";
 import { closeModel } from "../../lib/editorStore";
 import { baseName, getWorkspace, setWorkspace } from "../../lib/workspace";
-import { compileModule, onCompileLog } from "../../lib/compile";
+import { compileCancel, compileModule, isCompileCancelled, onCompileLog } from "../../lib/compile";
 import { useFileSession } from "../../hooks/useFileSession";
 import { useLangWiring } from "../../hooks/useLangWiring";
 import { stopLang } from "../../lib/lang";
+import { setCursor } from "../../lib/cursorStore";
 import { setSession, useWorkspaceSession, type TabMeta, type Updater } from "../../lib/workspaceSession";
 
 /**
@@ -49,6 +50,7 @@ export function FilesTab() {
     compileLog,
     tree,
     largeHintDismissed,
+    encodingIssue,
   } = useWorkspaceSession();
   const setRoot = (v: Updater<string | null | undefined>) => setSession({ root: v });
   const setPanelOpen = (v: Updater<boolean>) => setSession({ panelOpen: v });
@@ -57,16 +59,17 @@ export function FilesTab() {
   const setCompileResult = (v: Updater<typeof compileResult>) => setSession({ compileResult: v });
   const setCompileLog = (v: Updater<string[]>) => setSession({ compileLog: v });
 
-  const [cursor, setCursor] = useState({ line: 1, column: 1 });
   // 标题栏的「新建文件 / 新建文件夹」按钮：交给文件树，由它决定建在哪个目录下
   const treeRef = useRef<FileTreeHandle>(null);
 
   const {
     conflictPath,
     closingPath,
+    saving,
     reveal,
     openFile,
     saveFile,
+    saveAsUtf8,
     reloadFile,
     closeTab,
     handleRenamed,
@@ -89,8 +92,17 @@ export function FilesTab() {
   // 切页期间这个订阅会断，期间的日志行收不到，但最终结果写回仓库，回来仍然可见。
   useEffect(() => {
     let off: (() => void) | undefined;
-    void onCompileLog((line) => setCompileLog((l) => [...l, line])).then((f) => (off = f));
-    return () => off?.();
+    let cancelled = false;
+    void onCompileLog((line) => setCompileLog((l) => [...l, line])).then((f) => {
+      // listen 握手是异步的：resolve 前就卸载的话，拿到的取消函数没人调，
+      // 每挂载一次就多留一个监听，编译日志行会成倍重复。
+      if (cancelled) f();
+      else off = f;
+    });
+    return () => {
+      cancelled = true;
+      off?.();
+    };
   }, []);
 
   const applyRoot = async (path: string) => {
@@ -128,8 +140,14 @@ export function FilesTab() {
       setCompileResult(r);
       setPanelTab(r.errorCount > 0 ? "problems" : "build");
     } catch (e) {
-      setCompileLog((l) => [...l, `编译失败：${e}`]);
-      toast(`编译失败：${e}`, "error");
+      // 取消不是失败：不要用红色错误把用户自己的操作说成「编译失败」
+      if (isCompileCancelled(e)) {
+        setCompileLog((l) => [...l, "编译已取消"]);
+        toast("已取消编译", "info");
+      } else {
+        setCompileLog((l) => [...l, `编译失败：${e}`]);
+        toast(`编译失败：${e}`, "error");
+      }
     } finally {
       setCompiling(false);
     }
@@ -175,6 +193,9 @@ export function FilesTab() {
           onCreateDir={() => treeRef.current?.startCreate("dir")}
         />
         <FileTree
+          // 换工作区时整棵树重建：选中项、正在输入的编辑行、深层展开态都按旧路径记账，
+          // 留着会让「新建文件」以旧目录为 parent 静默失败、F2/Delete 发到旧路径上。
+          key={root}
           ref={treeRef}
           root={root}
           activePath={activePath}
@@ -201,10 +222,12 @@ export function FilesTab() {
           active={active}
           activePath={activePath}
           conflictPath={conflictPath}
+          encodingIssue={encodingIssue}
           showLargeHint={showLargeHint}
           onUnifyEol={unifyEol}
           onReload={(p) => void reloadFile(p)}
           onOverwriteSave={(p) => void saveFile(p, true)}
+          onSaveUtf8={(p) => void saveAsUtf8(p)}
           onDismissLargeHint={(p) => setSession({ largeHintDismissed: (v) => [...v, p] })}
         />
 
@@ -214,7 +237,7 @@ export function FilesTab() {
             readOnly={active?.readOnly ?? false}
             reveal={reveal}
             heavy={heavyFile}
-            onCursor={(line, column) => setCursor({ line, column })}
+            onCursor={setCursor}
             onSave={() => activePath && void saveFile(activePath)}
           />
           {!active && (
@@ -233,6 +256,7 @@ export function FilesTab() {
             result={compileResult}
             log={compileLog}
             onOpenProblem={openProblem}
+            onCancel={() => void compileCancel()}
             onClose={() => setPanelOpen(false)}
           />
         )}
@@ -241,7 +265,7 @@ export function FilesTab() {
           root={root}
           active={active}
           mark={activeMark}
-          cursor={cursor}
+          saving={saving}
           panelOpen={panelOpen}
           onTogglePanel={() => setPanelOpen((v) => !v)}
         />

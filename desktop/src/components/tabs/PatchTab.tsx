@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import "../../patch.css";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
@@ -7,17 +7,19 @@ import { StageTree } from "../patch/StageTree";
 import { ItemDetail } from "../patch/ItemDetail";
 import { ChangesMd } from "../patch/PatchChangesMd";
 import { PatchActions } from "../patch/PatchActions";
+import { BuildBanner } from "../patch/BuildBanner";
 import { TableCheck } from "../patch/TableCheck";
 import { usePatchScan } from "../../hooks/usePatchScan";
 import { usePatchBuild } from "../../hooks/usePatchBuild";
+import { useCheckGuard } from "../../hooks/useCheckGuard";
 import { baseName, buildStageTree } from "../../lib/patchTree";
 import {
-  patchReveal,
+  forceOf,
   selectablePaths,
   type FilterKey,
   type PatchItem,
 } from "../../lib/patch";
-import type { SourceCheck } from "../../lib/db";
+import { keyOf } from "../../lib/svn";
 
 /**
  * 补丁打包页。
@@ -31,8 +33,11 @@ import type { SourceCheck } from "../../lib/db";
  * 这个文件只做布局、勾选与调后端。
  */
 export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) {
-  const { defaults, changes, candidates, deleted, scan, refresh } = usePatchScan();
-  const build = usePatchBuild(defaults.data?.outDir ?? null);
+  /** 手动改判层：path → hyext / 标准层。层判错的唯一自救手段（见 ItemDetail）。 */
+  const [layers, setLayers] = useState<Map<string, "hy" | "std">>(new Map());
+  const force = useMemo(() => forceOf(layers), [layers]);
+  const { defaults, changes, candidates, deleted, scan, refresh } = usePatchScan(force);
+  const build = usePatchBuild(defaults.data?.outDir ?? null, force);
 
   // null = 「跟着扫描结果走，默认全勾可打的」。用户一动就变成显式集合，
   // 这样重扫后新增的文件不会把他手动取消的勾又勾回来。
@@ -41,27 +46,49 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
   const [filter, setFilter] = useState<FilterKey>("all");
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<"stage" | "md" | "check">("stage");
-  /** 核对的最近一次结果。拿它给生成按钮加标记、决定要不要二次确认。 */
-  const [check, setCheck] = useState<SourceCheck | null>(null);
-  /** 「有表不存在」时点第一次只把按钮变成确认态，第二次才真出包。 */
-  const [armed, setArmed] = useState(false);
 
   // 扫描结果本身是 react-query 的引用稳定值，但 `?? []` 每次渲染都是新数组——
   // 不包一层 useMemo，下面两个依赖 items 的 useMemo 每拍都会重算、并触发 hooks 规则告警。
   const items: PatchItem[] = useMemo(() => scan.data?.items ?? [], [scan.data]);
-  const pickedSet = useMemo(
-    () => picked ?? new Set(selectablePaths(items)),
-    [picked, items],
-  );
+  /**
+   * 勾选集。`picked` 为 null 时跟着扫描结果走（默认全勾可打的）。
+   *
+   * 重扫后某一项可能从「可打」变成 blocked（class 过期、文件被删）：必须在这里
+   * 把它剔出去。只靠复选框 disabled 不够——它早就被勾上了，禁用之后用户点不动、
+   * 取消不掉，出包必然失败，唯一复位途径是切到别的页再回来。
+   */
+  const pickedSet = useMemo(() => {
+    const base = new Set(picked ?? selectablePaths(items));
+    for (const it of items) if (it.blocked) base.delete(it.path);
+    return base;
+  }, [picked, items]);
 
-  /** 绝对路径 → SVN 字母。扫描 DTO 里没有这个字段（它不属于补丁规则）。 */
+  /** 改判某一层的判定（再点一次 = 回到自动）。 */
+  const setLayer = (path: string, next: "hy" | "std" | null) => {
+    setLayers((prev) => {
+      const m = new Map(prev);
+      if (next === null) m.delete(path);
+      else m.set(path, next);
+      return m;
+    });
+  };
+
+  /**
+   * 绝对路径 → SVN 字母。扫描 DTO 里没有这个字段（它不属于补丁规则）。
+   * 键必须走 `keyOf` 归一化：candidates 的 path 是 Java `File.getPath()` 原样
+   * （Windows 反斜杠），而 PatchItem.path 已被 Rust `pv::norm` 改成正斜杠。
+   */
   const letters = useMemo(() => {
     const m = new Map<string, string>();
-    for (const c of candidates) m.set(c.path, c.letter);
+    for (const c of candidates) m.set(keyOf(c.path), c.letter);
     return m;
   }, [candidates]);
 
   const chosen = useMemo(() => items.filter((it) => pickedSet.has(it.path)), [items, pickedSet]);
+  // 勾选指纹（路径拼串）一变，核对结果与二次确认态整台重置——state 机在 hook 里
+  const { setCheck, armed, setArmed, tablesMissing } = useCheckGuard(
+    chosen.map((c) => c.path).join("|"),
+  );
   const tree = useMemo(() => buildStageTree(chosen, build.sqls), [chosen, build.sqls]);
   const current = items.find((it) => it.path === selected) ?? null;
 
@@ -90,14 +117,6 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
   const err = scan.error ?? changes.error ?? null;
   const dirty = build.desc.trim().length > 0;
 
-  // 勾选一变，上次的核对结果就不作数了——不能拿旧结果给新的一批文件背书
-  const chosenKey = chosen.map((c) => c.path).join("|");
-  useEffect(() => {
-    setCheck(null);
-    setArmed(false);
-  }, [chosenKey]);
-
-  const tablesMissing = check?.missingTables ?? 0;
   const buildNow = () => {
     if (tablesMissing > 0 && !armed) {
       setArmed(true);
@@ -115,12 +134,12 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
         <span className="pk-kv">
           产物根 <b>{scan.data?.outRoots.join("、") || "未探测"}</b>
         </span>
-        <span className="pk-kv" title={build.dir || "还没选输出目录"}>
+        <span className="pk-kv pk-kv--dir" title={build.dir || "还没选输出目录"}>
           输出到 <b>{build.dir ? baseName(build.dir) : "未设置"}</b>
         </span>
         <span className="pk-sp" />
         <button type="button" className="pk-btn" disabled={scan.isFetching} onClick={refresh}>
-          <Icon name="refresh" size={13} className={scan.isFetching ? "pk-spin" : undefined} />
+          <Icon name="refresh" size={13} className={scan.isFetching ? "animate-spin" : undefined} />
           {scan.isFetching ? "扫描中…" : "重扫改动"}
         </button>
         <button
@@ -156,24 +175,7 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
           <span>{scan.data.problems.map((p) => p.text).join("；")}</span>
         </div>
       )}
-      {build.result && (
-        <div className="pk-banner" data-tone="ok">
-          <Icon name="check" size={13} />
-          <span>
-            已生成 <b>{build.result.zipPath}</b>（{build.result.entries} 条目 · {build.result.javaCount} java ·{" "}
-            {build.result.classCount} class）
-            {build.result.backup && ` · 旧包已备份为 ${build.result.backup.split(/[\\/]/).pop()}`}
-          </span>
-          <span className="pk-sp" />
-          <button
-            type="button"
-            className="pk-link"
-            onClick={() => void patchReveal(build.result!.zipPath).catch((e) => toast(String(e), "error"))}
-          >
-            打开位置
-          </button>
-        </div>
-      )}
+      {build.result && <BuildBanner result={build.result} />}
 
       <div className="pk-split">
         <PatchList
@@ -242,7 +244,11 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
                 }
               />
               {current ? (
-                <ItemDetail item={current} />
+                <ItemDetail
+                  item={current}
+                  override={layers.get(current.path) ?? null}
+                  onForce={(v) => setLayer(current.path, v)}
+                />
               ) : (
                 <div className="pk-detail pk-detail-empty">
                   <Icon name="info" size={12} />
@@ -274,7 +280,9 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
         building={build.building}
         count={chosen.length}
         canBuild={chosen.length > 0 && dirty && !!build.dir}
-        onBuild={() => void build.doBuild(chosen.map((c) => c.path))}
+        // 底部这颗也要走 buildNow：以前它直接 doBuild，把「表不存在」的二次确认
+        // 整个绕过去了——顶部按钮点第一次只是变成确认态，底部一次就出包。
+        onBuild={buildNow}
       />
     </div>
   );

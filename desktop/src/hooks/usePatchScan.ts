@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { svnStatus, type ChangeItem } from "../lib/svn";
-import { patchDefaults, patchScan } from "../lib/patch";
+import { NO_FORCE, patchDefaults, patchScan, type LayerForce } from "../lib/patch";
 
 /**
  * 补丁页的数据源：SVN 改动 → 补丁清单。
@@ -10,8 +10,10 @@ import { patchDefaults, patchScan } from "../lib/patch";
  * 第二步才让后端去探产物根、查 hyext jar、比对 .java/.class 时间。
  * 第二步很贵（首次要建 jar 索引），所以它的 `enabled` 挂在「有候选文件」上——
  * 没有改动的工作副本不该付这笔钱。
+ *
+ * `force` 是「手动改判层」：它进 queryKey，改了就会重扫（层判定在扫描里做）。
  */
-export function usePatchScan() {
+export function usePatchScan(force: LayerForce = NO_FORCE) {
   const qc = useQueryClient();
 
   const defaults = useQuery({
@@ -46,8 +48,9 @@ export function usePatchScan() {
   const paths = useMemo(() => candidates.map((it) => it.path), [candidates]);
 
   const scan = useQuery({
-    queryKey: ["patch-scan", paths],
-    queryFn: () => patchScan(paths, [], []),
+    // 改判层也进 key：改了就重扫，否则清单还留着上次的层判定和问题
+    queryKey: ["patch-scan", paths, force.hy, force.std],
+    queryFn: () => patchScan(paths, force.hy, force.std),
     enabled: paths.length > 0,
     // 清单不缓存：class 的 mtime 随时会变（IDE 一编译），缓存只会给出
     // 「刚才还能打、现在不能打」的假结论。每次进页 / 点重扫都真扫。

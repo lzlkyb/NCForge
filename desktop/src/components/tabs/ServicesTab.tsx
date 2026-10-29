@@ -5,24 +5,22 @@ import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ServiceCard } from "../services/ServiceCard";
 import { LogPanel } from "../services/LogPanel";
-import { PathField } from "../services/PathField";
+import { ServiceConfig } from "../services/ServiceConfig";
 import { CommandLineDialog } from "../services/CommandLineDialog";
 import { PortDialog } from "../services/PortDialog";
-import { HeapField } from "../services/HeapField";
 import { ServiceConfirms } from "../services/ServiceConfirms";
 import { useAppHidden } from "../../lib/appVisibility";
-import { setWorkspace } from "../../lib/workspace";
 import {
-  ncHomeProbe,
-  ncHomeSet,
   serverCommandLine,
   serverKillPortOwner,
   serverRevealLog,
-  serverHeapSet,
   serverStart,
   serverStatus,
   serverStop,
   type LaunchPreview,
+  type ServerState,
+  type ServerStatus,
+  UNKNOWN_PROCESS_NAME,
 } from "../../lib/server";
 
 type Busy = "start" | "stop" | "restart" | "kill" | null;
@@ -35,10 +33,10 @@ type Busy = "start" | "stop" | "restart" | "kill" | null;
  * 端口读自 NC 自己的 `ierp/bin/prop.xml`（见 `ServerStatus.port`），不写死 80。
  */
 export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void }) {
-  const queryClient = useQueryClient();
   const appHidden = useAppHidden();
+  const queryClient = useQueryClient();
   const [busy, setBusy] = useState<Busy>(null);
-  const [confirm, setConfirm] = useState<null | "stop" | "kill">(null);
+  const [confirm, setConfirm] = useState<null | "stop" | "kill" | "restart">(null);
   /** 每次启动 +1：让日志面板换一代（后端启动时把旧日志轮转成 .1）。 */
   const [generation, setGeneration] = useState(0);
   const [preview, setPreview] = useState<LaunchPreview | null>(null);
@@ -52,27 +50,38 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
     retry: false,
   });
 
-  // NC home 只探测一次就够（换目录时用 setQueryData 覆盖）
-  const probe = useQuery({
-    queryKey: ["nc-home"],
-    queryFn: () => ncHomeProbe(),
-    staleTime: 30_000,
-    retry: false,
-  });
+  /**
+   * 成功之后先把状态按预期写进缓存，别等下一次 1 秒轮询。
+   *
+   * 两个地方会骗人：轮询间隔那一秒里按钮还是旧状态（显示「已停止」+ 可点的「启动」，
+   * 点下去被后端拒）；首屏 status 没回来时默认「已停止」还会闪一帧。
+   */
+  const patchState = useCallback(
+    (next: ServerState) => {
+      queryClient.setQueryData<ServerStatus>(["server-status"], (old) =>
+        old ? { ...old, state: next } : old,
+      );
+    },
+    [queryClient],
+  );
 
   const start = useCallback(async () => {
     setBusy("start");
     try {
       await serverStart();
       setGeneration((g) => g + 1);
+      patchState("starting");
       toast("已启动，正在加载模块（通常 10 秒左右）", "success");
     } catch (e) {
       toast(String(e), "error");
+      // 后端把「启动失败：…」写进了日志文件，面板还停在上一代：不换一代的话，
+      // 失败详情既看不到、下次成功启动又被轮转成 .1 更难找
+      setGeneration((g) => g + 1);
     } finally {
       setBusy(null);
       void refetch();
     }
-  }, [refetch]);
+  }, [refetch, patchState]);
 
   const stop = useCallback(async () => {
     setConfirm(null);
@@ -81,8 +90,10 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
       // 三态而不是布尔：准备启动那一秒里点停止，进程还不存在，只能说「正在取消」。
       // 一律报「已停止」是最坑的——服务随后照旧起来，用户以为自己停了。
       const outcome = await serverStop();
-      if (outcome === "stopped") toast("已停止", "success");
-      else if (outcome === "cancelling") toast("正在取消启动…", "info");
+      if (outcome === "stopped") {
+        patchState("stopped");
+        toast("已停止", "success");
+      } else if (outcome === "cancelling") toast("正在取消启动…", "info");
       else toast("服务没有在运行", "info");
     } catch (e) {
       toast(String(e), "error");
@@ -90,9 +101,10 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
       setBusy(null);
       void refetch();
     }
-  }, [refetch]);
+  }, [refetch, patchState]);
 
   const restart = useCallback(async () => {
+    setConfirm(null);
     setBusy("restart");
     try {
       const outcome = await serverStop();
@@ -103,14 +115,20 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
       }
       await serverStart();
       setGeneration((g) => g + 1);
-      toast("已重启，正在加载模块", "success");
+      patchState("starting");
+      // 停止时服务已经自己崩了（idle）：这次其实是全新启动，说清比笼统的「已重启」有用
+      toast(
+        outcome === "idle" ? "服务先前已退出，本次是全新启动" : "已重启，正在加载模块",
+        "success",
+      );
     } catch (e) {
       toast(String(e), "error");
+      setGeneration((g) => g + 1);
     } finally {
       setBusy(null);
       void refetch();
     }
-  }, [refetch]);
+  }, [refetch, patchState]);
 
   const killOwner = useCallback(async () => {
     setConfirm(null);
@@ -145,6 +163,10 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const owner = status?.portOwner ?? null;
   const conflict = !!owner && !status?.portOwnedBySelf;
   const ownerIsJava = !!owner && owner.name.toLowerCase().startsWith("java");
+  // 读不到进程名时后端给的是占位值（Rust `server::UNKNOWN_PROCESS`，前端同名常量）。
+  // 那不等于「不是 java」：早先这里一律落到「它不是 java 进程」，等于替用户
+  // 下了一个我们并不知道的结论——而用户会据此去任务管理器里找一个「非 java」的进程。
+  const ownerUnknown = !!owner && owner.name === UNKNOWN_PROCESS_NAME;
 
   return (
     <div className="sv-page">
@@ -168,7 +190,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
           busy={busy}
           onStart={() => void start()}
           onStop={() => setConfirm("stop")}
-          onRestart={() => void restart()}
+          onRestart={() => setConfirm("restart")}
           onEditPort={() => setPortOpen(true)}
         />
 
@@ -179,9 +201,11 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
               端口 {status?.port} 被 <b>{owner.name}</b>（PID {owner.pid}）占用
               {ownerIsJava
                 ? "，可能是上次没停干净的 NC 中间件。"
-                : "，它不是 java 进程，本工具不会替你结束它。"}
+                : ownerUnknown
+                  ? "，但读不到它的进程名——这不等于它不是 java。可以按 PID 在任务管理器里确认。"
+                  : "，它不是 java 进程，本工具不会替你结束它。"}
             </span>
-            {ownerIsJava && (
+            {(ownerIsJava || ownerUnknown) && (
               <button
                 type="button"
                 className="sv-btn sv-btn-danger"
@@ -191,13 +215,6 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
                 结束该进程
               </button>
             )}
-          </div>
-        )}
-
-        {probe.error && (
-          <div className="sv-alert" data-tone="warn">
-            <Icon name="info" size={14} />
-            <span className="sv-alert-text">找不到 NC 安装目录：{String(probe.error)}</span>
           </div>
         )}
 
@@ -213,51 +230,11 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
           </div>
         )}
 
-        <div className="sv-cfg">
-          <PathField
-            label="NC home"
-            value={probe.data?.root ?? status?.ncHome ?? ""}
-            placeholder="D:\ncc\1909home"
-            hint={probe.data ? `${probe.data.moduleCount} 个模块` : undefined}
-            onSave={async (v) => {
-              const home = await ncHomeSet(v);
-              queryClient.setQueryData(["nc-home"], home);
-              void refetch();
-            }}
-          />
-          <span className="sv-cfg-sep" />
-          <PathField
-            label="工程"
-            value={status?.projectRoot ?? ""}
-            placeholder="C:\work\aier\newar"
-            hint={status?.projectRoot ? "改完代码编译后重启即生效" : "未选择"}
-            onSave={async (v) => {
-              const shown = await setWorkspace(v);
-              toast(`工程已切换为 ${shown}`, "success");
-              void refetch();
-            }}
-          />
-          {/* 堆上限：状态里带的是「后端收口后真正会写进命令行」的值，
-              界面上显示生效值而不是配置原值——手改过 config.json 的人才不会被骗 */}
-          {status && (
-            <>
-              <span className="sv-cfg-sep" />
-              <HeapField
-                heapMb={status.heapMb}
-                defaultHeapMb={status.defaultHeapMb}
-                running={state !== "stopped"}
-                onSave={async (mb) => {
-                  const applied = await serverHeapSet(mb);
-                  await refetch();
-                  return applied;
-                }}
-              />
-            </>
-          )}
-        </div>
+        <ServiceConfig status={status ?? null} running={state !== "stopped"} onRefetch={() => void refetch()} />
 
         <LogPanel
           active={state === "running" || state === "starting"}
+          appHidden={appHidden}
           generation={generation}
           logPath={status?.logPath ?? ""}
           logSize={status?.logSize ?? 0}
@@ -273,6 +250,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
         ownerPid={owner?.pid}
         onCancel={() => setConfirm(null)}
         onConfirmStop={() => void stop()}
+        onConfirmRestart={() => void restart()}
         onConfirmKill={() => void killOwner()}
       />
 

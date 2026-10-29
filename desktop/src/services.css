@@ -34,6 +34,14 @@
 .sv-sp {
   flex: 1;
 }
+
+/* ── 窄窗口降级（P2-14，档位与 svn.css 对齐）──
+   sv-sub 是说明性副标题，第一个让位；两个功能按钮始终保留。 */
+@media (max-width: 1180px) {
+  .sv-head .sv-sub {
+    display: none;
+  }
+}
 .sv-body {
   display: flex;
   flex-direction: column;
@@ -66,7 +74,7 @@
 }
 .sv-btn:disabled {
   opacity: 0.5;
-  cursor: default;
+  cursor: not-allowed;
 }
 .sv-btn-primary {
   background: hsl(var(--primary));
@@ -74,8 +82,8 @@
   color: hsl(var(--primary-foreground));
 }
 .sv-btn-primary:hover:not(:disabled) {
-  background: hsl(var(--primary));
-  filter: brightness(1.06);
+  /* P2-4：与 ui/button.tsx 的 hover:bg-primary/90 统一口径（原 brightness(1.06)） */
+  background: hsl(var(--primary) / 0.9);
 }
 .sv-btn-danger {
   color: hsl(var(--destructive-ink));
@@ -494,8 +502,9 @@
   background: hsl(var(--secondary) / 0.55);
 }
 .sv-ts {
+  /* P2-7：不再叠 opacity——--muted-foreground 已按 WCAG 实算守住 4.5:1，
+     叠 0.72 会把时间戳压到 3.4:1 跌破 AA。 */
   color: hsl(var(--muted-foreground));
-  opacity: 0.72;
   flex-shrink: 0;
   width: 58px;
 }

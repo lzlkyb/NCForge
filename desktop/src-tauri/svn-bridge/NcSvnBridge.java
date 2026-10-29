@@ -269,6 +269,17 @@ public class NcSvnBridge {
 		if (msg.isEmpty()) {
 			throw new IllegalArgumentException("提交说明为空");
 		}
+		// 先整体查一遍冲突，再做任何写动作。以前冲突检查混在「逐文件 doAdd」的循环里：
+		// 第 3 个文件有冲突时，前两个已经被 add 成 scheduled 状态——提交失败了，工作副本
+		// 却被改了，用户下次提交会莫名带上它们。冲突是可以在动手之前就知道的。
+		java.util.Map<String, SVNStatus> statuses = new java.util.HashMap<String, SVNStatus>();
+		for (String p : paths) {
+			SVNStatus st = manager().getStatusClient().doStatus(new File(p), false);
+			statuses.put(p, st);
+			if (st != null && st.getContentsStatus() == SVNStatusType.STATUS_CONFLICTED) {
+				throw new IllegalStateException("文件仍有冲突，不能提交: " + p);
+			}
+		}
 		List<String> added = new ArrayList<String>();
 		List<File> targets = new ArrayList<File>();
 		// 新文件所在目录若未纳管（没有 .svn），从上往下逐级 add 目录本身（不递归，不带目录里的其它文件）
@@ -289,13 +300,10 @@ public class NcSvnBridge {
 		}
 		for (String p : paths) {
 			File f = new File(p);
-			SVNStatus st = manager().getStatusClient().doStatus(f, false);
+			SVNStatus st = statuses.get(p);
 			if (st == null || st.getContentsStatus() == SVNStatusType.STATUS_UNVERSIONED) {
 				manager().getWCClient().doAdd(f, false, false, true, SVNDepth.EMPTY, false, false);
 				added.add(f.getPath());
-			}
-			if (st != null && st.getContentsStatus() == SVNStatusType.STATUS_CONFLICTED) {
-				throw new IllegalStateException("文件仍有冲突，不能提交: " + f.getPath());
 			}
 			targets.add(f);
 		}

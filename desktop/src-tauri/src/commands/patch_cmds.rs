@@ -150,6 +150,33 @@ fn check_files(cfg: &AppConfig, files: &[String]) -> Result<Vec<String>, String>
     Ok(out)
 }
 
+/// 挂上的 SQL 文件：**不套工作区白名单**。
+///
+/// SQL 通常放在工作区之外（`D:\NC技术\ddl.sql` 这种），以前它和源码走同一个
+/// `check_files`，于是在出包最后一步被挡回来，报的还是一句英文 "Access denied"——
+/// 用户在前面几步都看到「已挂上」，完全不知道为什么失败。
+///
+/// 放宽的只是「必须在工作区内」这一条：仍然要求绝对路径 + 文件真实存在，
+/// 而且这个路径只会被读进 zip（`read_bytes`），不会被写、不会被当路径拼接出去。
+fn check_sqls(sqls: &[String]) -> Result<Vec<String>, String> {
+    let mut out = Vec::with_capacity(sqls.len());
+    for s in sqls {
+        let t = s.trim();
+        if t.is_empty() {
+            continue;
+        }
+        let p = Path::new(t);
+        if !p.is_absolute() {
+            return Err(format!("SQL 文件要给绝对路径：{t}"));
+        }
+        if !p.is_file() {
+            return Err(format!("SQL 文件不存在：{t}"));
+        }
+        out.push(display_path(&crate::nc_home::strip_verbatim(p)));
+    }
+    Ok(out)
+}
+
 /// 组装出包选项（产物根、NC home、jar 索引缓存）。
 fn options_of(
     state: &AppState,
@@ -223,7 +250,7 @@ pub async fn patch_build(
     }
 
     let files = check_files(&cfg, &args.files)?;
-    let sqls = check_files(&cfg, &args.sqls)?;
+    let sqls = check_sqls(&args.sqls)?;
     let opts = options_of(&st, &cfg, args.force_hyext, args.force_std)?;
 
     let req = BuildRequest {
@@ -472,5 +499,29 @@ mod tests {
             base.join(PATCH_DIR_NAMES[0]),
             PathBuf::from("D:").join("NC技术").join(PATCH_DIR_NAMES[0])
         );
+    }
+
+    #[test]
+    fn sql_文件不套工作区白名单() {
+        // 回归：SQL 常放在工作区外（D:\NC技术\ddl.sql），以前和源码走同一个
+        // check_files，到出包最后一步才报英文 "Access denied"。
+        let dir = std::env::temp_dir().join(format!("ncforge-sql-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("ddl.sql");
+        std::fs::write(&f, "select 1 from dual").unwrap();
+
+        let got = check_sqls(&[f.display().to_string()]).unwrap();
+        assert_eq!(got.len(), 1, "工作区外的绝对路径也要收下");
+
+        assert!(
+            check_sqls(&["relative/ddl.sql".to_string()]).is_err(),
+            "相对路径必须拒"
+        );
+        assert!(
+            check_sqls(&[dir.join("nope.sql").display().to_string()]).is_err(),
+            "不存在的文件必须拒"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -44,7 +44,9 @@ fn find_jdtls(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, Stri
     if let Ok(env_dir) = std::env::var("NCFORGE_JDTLS_DIR") {
         cands.push(PathBuf::from(env_dir));
     }
-    if let Some(dir) = crate::resource_pack::active_dir(config_dir, crate::resource_pack::PACK_JDTLS) {
+    if let Some(dir) =
+        crate::resource_pack::active_dir(config_dir, crate::resource_pack::PACK_JDTLS)
+    {
         cands.push(dir);
     }
     if let Ok(dir) = app.path().resource_dir() {
@@ -73,9 +75,32 @@ struct Handler {
     shadow_prefix: String,
     /// 拉起时的代数（见 `LangRun::generation`）。
     generation: u64,
+    /// NC 自带 JDK 的根目录：`workspace/configuration` 请求要按它回 runtimes。
+    runtime_home: String,
 }
 
 impl LspHandler for Handler {
+    /// 服务端主动来问配置。
+    ///
+    /// `workspace/configuration` 必须真答：我们在 initialize 里声明了这个能力，jdt.ls
+    /// 就会按需来拉，默认空实现回 `null` 的话，某些版本的 jdt.ls 会用**默认值覆盖**
+    /// 我们用 `didChangeConfiguration` 推过去的设置（runtimes / 编译选项），
+    /// 表现是「明明配了 JDK 却提示找不到 JavaSE-1.8」，而且没有任何报错。
+    ///
+    /// 协议要求返回与 `items` 等长的数组，每项是该 section 的配置；这里统一回整份 settings
+    /// （jdt.ls 只读自己那部分，多余字段会被忽略）。
+    fn on_request(&self, method: &str, params: &Value) -> Value {
+        if method == "workspace/configuration" {
+            let n = params["items"]
+                .as_array()
+                .map(|a| a.len())
+                .unwrap_or(0)
+                .max(1);
+            let settings = build_settings(&self.runtime_home);
+            return Value::Array(vec![settings; n]);
+        }
+        Value::Null
+    }
     /// jdt.ls 进程没了。主动停止 / 重启时会话已先被取走（`session` 为 None）或代数已变，都不算意外。
     /// 意外退出（比如模块太大 OOM）要告诉用户，否则状态栏会一直显示「就绪」而所有请求都在默默失败。
     fn on_exit(&self, reason: &str) {
@@ -164,6 +189,7 @@ fn start_blocking(
     }
     match launch(&app, &state, &root, &module, &home, xmx_mb) {
         Ok(st) => Ok(st),
+        Err(e) if e == CANCELLED => Err(e), // 取消不是失败：状态已由 stop_now 置成 stopped
         Err(e) => {
             set_status(
                 &app,
@@ -180,6 +206,10 @@ fn start_blocking(
     }
 }
 
+/// 准备期间被停止/切工作区时的统一错误文案。`start_blocking` 据此**不覆盖**状态：
+/// 这不是失败，`stop_now` 已经把状态置成 stopped 了。
+const CANCELLED: &str = "启动已取消：准备期间停止或切换了工作区";
+
 fn launch(
     app: &tauri::AppHandle,
     state: &Arc<AppState>,
@@ -188,6 +218,9 @@ fn launch(
     home: &NcHome,
     xmx_mb: u32,
 ) -> Result<LangStatus, String> {
+    // 从这一刻起就算「本次拉起的意图」。下面每一步都可能耗时数秒（扫模块、生成影子工程、
+    // 起进程、initialize 握手），期间用户完全可能关掉开关或切工作区。
+    let cancel_epoch = lock_lang(state).cancel_epoch;
     let nc_home = PathBuf::from(&home.root);
     let java = PathBuf::from(&home.java);
     // java = <home>/ufjdk/bin/java.exe，运行时根 = 它的上上级
@@ -237,12 +270,14 @@ fn launch(
 
     let real_dir = root.join(module);
     let shadow_module = shadow_dir.join(module);
+    let runtime_s = runtime.to_string_lossy().into_owned();
     let handler = Handler {
         app: app.clone(),
         state: state.clone(),
         module: module.to_string(),
         real_prefix: path_to_uri(&real_dir.to_string_lossy()),
         shadow_prefix: path_to_uri(&shadow_module.to_string_lossy()),
+        runtime_home: runtime_s.clone(),
         generation: {
             let mut run = lock_lang(state);
             run.generation += 1;
@@ -258,7 +293,6 @@ fn launch(
     }
     .command()?;
     let client = LspClient::spawn(cmd, Arc::new(handler))?;
-    let runtime_s = runtime.to_string_lossy().into_owned();
     let root_s = shadow_dir.to_string_lossy().into_owned();
     client.request(
         "initialize",
@@ -277,7 +311,18 @@ fn launch(
         jar_count: project.jar_count,
     };
     let session = Arc::new(LangSession::new(client, module, &real_dir, &shadow_module));
-    lock_lang(state).session = Some(session.clone());
+    {
+        let mut run = lock_lang(state);
+        // 登记前复检停止意图：这几秒里 session 还是 None，stop_now 摘不到东西、
+        // 只把状态置成 stopped 就返回了。不复检的话这里会把它改回 indexing，
+        // 留一个 700MB 的孤儿进程，而状态栏还宣称「正在建立索引」。
+        if run.cancel_epoch != cancel_epoch {
+            drop(run);
+            session.client.kill();
+            return Err(CANCELLED.to_string());
+        }
+        run.session = Some(session.clone());
+    }
     set_status(app, state, status.clone());
     let handshake = session
         .client
@@ -322,7 +367,13 @@ pub async fn lang_start(
 
 /// 停掉当前会话并把状态置为已停止。
 fn stop_now(app: &tauri::AppHandle, state: &AppState) {
-    let old = lock_lang(state).session.take();
+    let old = {
+        let mut run = lock_lang(state);
+        // 先记「这一代作废」再摘 session：正在 launch 的那条线程会拿不到旧的
+        // `cancel_epoch`，登记前复检时就会自己退场（见 launch 里的复检）。
+        run.cancel_epoch += 1;
+        run.session.take()
+    };
     if let Some(s) = old {
         s.client.shutdown();
     }

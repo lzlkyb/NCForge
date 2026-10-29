@@ -229,6 +229,34 @@ pub fn middleware_spec(
     work_dir: &Path,
     heap_mb: u32,
 ) -> Result<(ServerSpec, usize), String> {
+    middleware_spec_inner(nc_home, java, project_root, work_dir, heap_mb, true)
+}
+
+/// 只算清单、**不写** pathing jar 的版本，给「命令行」预览用。
+///
+/// 预览曾经和启动走同一条写 jar 的路径，而两条路径用的临时文件名是同一个
+/// （`middleware-cp.jar.tmp`）：启动准备期（约 0.6 秒）点一下「命令行」，两个
+/// spawn_blocking 交错写同一个 tmp，rename 出来的是混合垃圾，JVM 只会报
+/// 「找不到或无法加载主类」这种查不下去的错。预览因此改为复用上次启动已经写好的
+/// jar（调用方负责判断文件在不在、以及启动中不许看）。
+pub fn middleware_spec_preview(
+    nc_home: &Path,
+    java: &Path,
+    project_root: &Path,
+    work_dir: &Path,
+    heap_mb: u32,
+) -> Result<(ServerSpec, usize), String> {
+    middleware_spec_inner(nc_home, java, project_root, work_dir, heap_mb, false)
+}
+
+fn middleware_spec_inner(
+    nc_home: &Path,
+    java: &Path,
+    project_root: &Path,
+    work_dir: &Path,
+    heap_mb: u32,
+    write_jar: bool,
+) -> Result<(ServerSpec, usize), String> {
     if !java.is_file() {
         return Err(format!("找不到 NC 自带的 java：{}", java.display()));
     }
@@ -242,7 +270,9 @@ pub fn middleware_spec(
     }
     // 每次启动重写清单：用户可能在两次启动之间装了补丁、加了模块
     let classpath_jar = work_dir.join("middleware-cp.jar");
-    write_pathing_jar(&classpath_jar, &entries)?;
+    if write_jar {
+        write_pathing_jar(&classpath_jar, &entries)?;
+    }
     let spec = ServerSpec {
         java: java.to_path_buf(),
         main_class: MIDDLEWARE_MAIN_CLASS.to_string(),
