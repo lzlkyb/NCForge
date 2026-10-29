@@ -9,6 +9,7 @@ import { ToggleRow } from "../ui/ToggleRow";
 import { SettingsRow } from "../ui/SettingsRow";
 import { Button } from "../ui/button";
 import { LangSettings } from "../settings/LangSettings";
+import { ResourceSettings } from "../settings/ResourceSettings";
 
 /**
  * 示例设置页（壳子版）。演示「读配置 → 表单 → 写配置」闭环，
@@ -91,6 +92,8 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
       </Card>
 
       <LangSettings />
+
+      <ResourceSettings />
 
       <Card className="flex flex-col gap-1 p-2">
         <SettingsRow

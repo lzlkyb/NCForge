@@ -40,6 +40,14 @@
       "windows": {},
       "dangerousInsecureTransportProtocol": true,
       "active": true
+    },
+    "resourcePacks": {
+      "_comment": "顺序即故障转移顺序：Release 资产优先，Gitee raw 镜像次之（国内直连 GitHub 慢），gh-pages 垫底（站点当前未启用，404 只是多耗一轮；updater 侧同款端点也是这个状态）。资源 zip 的实际下载 URL 在各自清单里（GitHub 侧走 gh-proxy 镜像，Gitee 侧是 raw 直链）。",
+      "endpoints": [
+        "https://github.com/lzlkyb/NCForge/releases/latest/download/resources.json",
+        "https://gitee.com/lzlkyb/NCForge/raw/releases/latest/resources-gitee.json",
+        "https://lzlkyb.github.io/NCForge/resources.json"
+      ]
     }
   },
   "bundle": {
@@ -49,14 +57,7 @@
     ],
     "createUpdaterArtifacts": true,
     "resources": {
-      "resources/ecj/ecj-3.17.jar": "ecj/ecj-3.17.jar",
-      "resources/jdtls": "jdtls",
-      "resources/ncdb/ncdb.jar": "ncdb/ncdb.jar",
-      "resources/svnkit/ncsvn.jar": "svnkit/ncsvn.jar",
-      "resources/svnkit/svnkit.jar": "svnkit/svnkit.jar",
-      "resources/svnkit/trilead.jar": "svnkit/trilead.jar",
-      "resources/svnkit/sqljet.1.0.4.jar": "svnkit/sqljet.1.0.4.jar",
-      "resources/svnkit/antlr-runtime-3.1.3.jar": "svnkit/antlr-runtime-3.1.3.jar"
+      "resources/ncdb/ncdb.jar": "ncdb/ncdb.jar"
     },
     "macOS": {
       "signingIdentity": "-"

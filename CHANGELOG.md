@@ -31,6 +31,9 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 ## [Unreleased]
 
 ### 变更
+- 安装包从 63.8MB 瘦到约 5MB：编译与代码智能要用的大组件（Java 语言服务、Java 编译器、SVN 客户端，合计约 63MB）不再塞进安装包，首次启动时按需下载到本机，只下一次；老版本已经装过的组件会自动认领，不重复下载
+- 首次启动缺组件时弹出引导对话框：列清要下载什么、总共多大、进度与速度，失败可以重试；不下载也能照常使用，用到相关功能时才会再提示
+- 设置页新增「组件」卡：三个组件的安装状态、版本与占用空间一目了然，需要时点「重新下载组件」手动重装
 - 换应用图标：从「铁砧占位图」换成 NCForge 自己的「榫接 N」——两段构件拼出 N、中间留斜切口，赤陶色圆角方块配奶白色图形，Windows / macOS / 托盘 / 安装包（含 NSIS 横幅与侧边栏）全套一起换掉
 - 版本控制页从「M6 敬请期待」占位换成真页面：侧栏入口不再是灰的，进去就能审改动、提交、看历史
 - 侧栏新增「数据库」入口，放只读 SQL 面板；「补丁」从占位换成真页面
@@ -138,6 +141,20 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
   - 清理死代码 `CLIENT_MAIN_CLASS` / `default_client_vm_args`（端口写死 80 的客户端启动路径，从未接线）
   - 组件体量门禁：`ServicesTab` 的两个确认弹窗抽成 `ServiceConfirms.tsx`（289 行回到 300 上限内）；`FileTree` / `FilesTab` / `SearchTab` 三个 M4 存量文件按棘轮登记基线（只许变小）
   - 新增回归单测：`useServerLog`（换代丢弃 / 停止补拉）、`HeapField`（双保存守卫 / 恢复默认 / 越界拦截）、`launch::validate_heap_mb`、`port_edit_blocked`；后端 145 个、前端 100 个测试全过
+- 2026-10-28 组件外置（方案 B，安装包 63.8MB → 实测 5,298,001 字节）：jdtls / ecj / svnkit 三个资源移出 `bundle.resources`，改为首次启动按需下载到 `config_dir/resources/`
+  - Rust：`resource_pack.rs`（`ALL_PACKS` 清单 / 状态机 / SHA-256 校验 / 原子解压 / zip-slip 两遍式防护）+ `commands/resource_cmds.rs`（`resources_status` / `resources_ensure`，启动自检在 `main.rs` setup 内异步 spawn 不阻塞启动，8 个 `resource:*` 事件推进度）；jdtls / ecj / svnkit 三个 finder 先查外部资源根（`active_dir`），未命中再回退旧安装目录与源码树
+  - 可重现 zip：`scripts/lib/zip-store.mjs` 零依赖 writer（store 模式 + `node:zlib` 的 `crc32`，zip 内写死 DOS 1980 时间戳）⇒ 同输入同字节 ⇒ version 取 sha256 前 12 位内容寻址；`pack-resources.mjs` 产 manifest（version / size / sha256 / platforms / title / notes，与 `ALL_PACKS` 一一对应），`generate-resources-json.mjs` 渲染多源 `resources.json`（url 模板 `{tag}/{filename}`，env 可覆盖）；zip 可读性经 Rust `zip` crate 真实解包逐字节验证
+  - 安全：下载后逐字节比对 SHA-256、解压前全量校验条目名（`enclosed_name()`，`../` 与绝对路径当场拒绝）、临时目录解压完成后才 rename；`tests/resource_flow.rs` 覆盖正常全链路 / 坏 sha / zip-slip 三场景
+  - CI 解耦：predev / prebuild 不再拉 54MB（应用构建与资源彻底分离），发版时才打包 + 生成清单，zip 与 `resources.json` attach 到 Release；Gitee 镜像同步 `resources-gitee.json`，raw 校验 url 必须为 `https://gitee.com/*`（gh-pages 源当前未启用、实测 404，保留只为哪天启用了 Pages 就自动活）
+  - 前端：`ResourceContext`（镜像 UpdateContext：先注册 8 个监听再拉快照，规避 listen 异步竞态）+ `ResourceSetupDialog`（首启引导，Esc / 遮罩可关、会话级抑制）+ 设置页「组件」卡（状态徽章 / 版本 / 大小 / 重新下载）；纯逻辑层 `lib/resource.ts` 有单测
+- 2026-10-29 资源链路审查修复（中危 2 + 低危 5，均有测试兜底）：
+  - dev 构建默认跳过启动自检（M1）：`debug_assertions` 下不自动置备——开发期资源走源码树（`npm run jdtls:fetch` + finder 回退），首次 `tauri dev` 不再真下 63MB 也不再强制联网；设 `APP_RESOURCES_ENDPOINT` 或手动「重新下载组件」可强制启用
+  - 多源修正（M2）：`resourcePacks.endpoints` 补 Gitee raw 镜像为第二源（此前实际只有 Release 一个可达——gh-pages 站点实测 404，国内直连 GitHub 慢时退化成单源）；测试断言「≥3 源、Release 打头、必须含 Gitee」防回归（2026-10-29 审查事故：Gitee 镜像推了但客户端 endpoints 里没有）
+  - 错误路径带已完成部分（L2）：`ensure_packs` 失败返回 `EnsureFailure{outcome, message}` 而非裸字符串，`resource:error` 事件带 `installed` / `adoptedLegacy`，对话框显示「已就绪 N/3，重试将跳过已完成的包」
+  - 设置页显示真实体积（L1）：`InstalledPack` 新增 `size`（下载成功 = 实收字节；legacy 认领 = 旧目录实测合计；`serde(default)` 兼容老状态文件，读成 None 不阻断）
+  - 下载预分配上限 1GB → 64MB（L3）：防源声明超大 Content-Length 时一次性吃满内存；当前最大的 jdtls 约 54MB，超出上限后 Vec 自然增长，不影响下载
+  - 对话框文案纠偏（L5）：「正在连接组件源…」→「正在准备组件…」（available 之后连接早已建立，旧文案在列表出现后失真）
+  - 补测试（L4）：`resource_flow.rs` 场景 4 换源续传（源 1 坏 sha → 重试 2 次 → 换源 2 装对版本）；`resource_pack.rs` legacy 认领单测（认领生效、不下载、state 记实测大小、发 uptodate 不发 available）
 
 ### 改端口（`nc_port.rs`）
 - 按**字节**替换，不重新编码：`prop.xml` 是 gb2312、`system.properties` 是 UTF-8，解码再编码会把中文注释搞成乱码；被改的标签与端口号都是 ASCII，字节级替换两头都不碰

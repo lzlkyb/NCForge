@@ -126,9 +126,13 @@ pub struct RevertResult {
 
 // ───────────────────────── 内部工具 ─────────────────────────
 
-/// 资源目录候选：安装包资源在前，开发树的 `src-tauri/resources` 兜底。
-fn resource_dirs(app: &AppHandle) -> Vec<PathBuf> {
+/// 资源目录候选：外部资源包（按需下载安装）在前，安装包资源（v0.1.0 及以前的
+/// 旧安装兜底）随后，开发树的 `src-tauri/resources` 最后。
+fn resource_dirs(app: &AppHandle, config_dir: &Path) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
+    if let Some(dir) = crate::resource_pack::active_dir(config_dir, crate::resource_pack::PACK_SVNKIT) {
+        dirs.push(dir);
+    }
     if let Ok(dir) = app.path().resource_dir() {
         dirs.push(dir.join("svnkit"));
     }
@@ -140,8 +144,8 @@ fn resource_dirs(app: &AppHandle) -> Vec<PathBuf> {
 fn bridge_for(app: &AppHandle, state: &AppState, cfg: &AppConfig) -> Result<Arc<Bridge>, String> {
     let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
     let java = PathBuf::from(&home.java);
-    let (jars, _) = svn_bridge::find_jars(&resource_dirs(app)).ok_or_else(|| {
-        "找不到内置的 SVN 组件（ncsvn.jar / svnkit.jar），安装包可能不完整".to_string()
+    let (jars, _) = svn_bridge::find_jars(&resource_dirs(app, &state.config_dir)).ok_or_else(|| {
+        "找不到 SVN 组件（ncsvn.jar / svnkit.jar）。若刚安装/更新过，请到设置 → 组件里下载；否则检查网络后重试".to_string()
     })?;
     let cfg_dir = state.config_dir.join("svn");
     svn_bridge::ensure_dir(&cfg_dir)?;

@@ -327,8 +327,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map_err(|e| std::io::Error::other(format!("无法创建应用配置目录：{e}")))?;
 
             let app_config = config::load_config(&config_dir);
-            let app_state = AppState::new(app_config, config_dir);
+            let app_state = AppState::new(app_config, config_dir.clone());
             app.manage(app_state.clone());
+
+            // 资源包启动自检：缺包时置备（下载 jdtls / ecj / svnkit 到 config_dir/resources）。
+            // 异步 spawn，不阻塞启动；进度经 resource:* 事件推给前端。已在跑就忽略
+            // （命令层的单飞闸兜底，这里提前挡一次少发一个无用任务）。
+            // dev 构建默认跳过（resource_cmds.rs 的 dev_auto_skip）：开发期资源由
+            // `npm run jdtls:fetch` 拉进源码树，finder 回退用它；设
+            // APP_RESOURCES_ENDPOINT 可强制跑自检（联调下载流程）。
+            {
+                let bg = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    commands::ensure_resources_async(bg, false);
+                });
+            }
 
             // 注入 AppHandle 供需要发桌面通知的代码用（feature 关闭时不注入）。
             // 中毒恢复而非 unwrap：同 refresh_tray 的理由——一次 panic 不该让后续
@@ -475,6 +488,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::get_app_info,
             commands::start_update,
             commands::check_update,
+            commands::resources_status,
+            commands::resources_ensure,
             commands::get_workspace,
             commands::set_workspace,
             commands::fs_list_dir,

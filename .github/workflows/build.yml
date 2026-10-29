@@ -345,6 +345,24 @@ jobs:
           npx tauri build
         working-directory: desktop
 
+      # 资源外置（方案 B）：jdtls/ecj/svnkit 不再进安装包（安装包 ~8MB），
+      # 发版时打成 zip + 生成 resources.json，客户端首启按需下载。
+      # jdtls 首次拉取 54MB，放这里并行等待；zip 内容与构建产物无关。
+      - name: 打包资源包（zip + SHA-256）
+        shell: pwsh
+        run: node scripts/pack-resources.mjs
+        working-directory: desktop
+
+      - name: 生成 resources.json（ghproxy 镜像 URL）
+        shell: pwsh
+        run: npm run resources:json
+        working-directory: desktop
+        env:
+          GITHUB_RELEASE_TAG: ${{ github.ref_name }}
+          # 与 updater.json 同口径：zip 下载走 ghproxy 镜像；元数据检查另有
+          # tauri.conf.json 的 GitHub Release 端点兜底（两个端点，见 resource_pack.rs）。
+          RESOURCES_DOWNLOAD_BASE: "https://gh-proxy.com/https://github.com/${{ github.repository }}/releases/download"
+
       - name: 抽取更新说明 (CHANGELOG)
         shell: pwsh
         run: |
@@ -436,6 +454,11 @@ jobs:
           Copy-Item desktop\src-tauri\target\release\bundle\nsis\*.exe.sig dist-out\ -ErrorAction SilentlyContinue
           Copy-Item desktop\dist\updater.json dist-out\ -ErrorAction SilentlyContinue
           Copy-Item nc-forge_*.zip dist-out\ -ErrorAction SilentlyContinue
+          # 资源包（方案 B）：三个 zip + 客户端首启读的 resources.json。
+          # 漏了 zip 的后果不是报错而是静默：resources.json 在 Release 上，
+          # 客户端按 url 下载 404 → 首启组件下载全部失败（event error）。
+          Copy-Item desktop\dist\resource-packs\*.zip dist-out\ -ErrorAction SilentlyContinue
+          Copy-Item desktop\dist\resources.json dist-out\ -ErrorAction SilentlyContinue
 
       - uses: actions/upload-artifact@v5
         with:
@@ -471,11 +494,17 @@ jobs:
             exit 0
           }
           npm run updater:generate
+          # 资源清单的 Gitee 变体（方案 B）：三个资源 zip 也会推到 latest/，
+          # URL 指向 Gitee raw。客户端侧 tauri.conf.json 的 resourcePacks.endpoints
+          # 第三顺位就是这个地址（第二顺位是 GitHub Release，gh-pages 垫底当前 404），
+          # 国内用户直连 GitHub 慢时走这条。没有这份变体的后果：客户端只剩
+          # Release 一个源，它挂了首启组件下载就全挂。
+          npm run resources:json
         working-directory: desktop
         env:
           GITHUB_RELEASE_TAG: ${{ github.ref_name }}
           # Gitee raw 文件直链与 GitHub Release 拼法形状不同（owner/repo/raw/ref/path，
-          # 非 base/tag/filename），用 UPDATER_URL_TEMPLATE 完全接管拼接。
+          # 非 base/tag/filename），用 *_URL_TEMPLATE 完全接管拼接。
           # 固定走 releases 分支下的 latest/ 目录（每次发版覆盖，不按 tag 累加）：
           # 客户端检查更新时事先不知道最新 tag 是什么，需要一个固定不变的 URL
           # （对齐 GitHub 的 releases/latest/download 语义）。
@@ -483,6 +512,8 @@ jobs:
           UPDATER_OUTPUT_FILENAME: "updater-gitee.json"
           # 用 Gitee 变体的 mac 片段（URL 指向 Gitee 直链），不能用 GitHub 那份。
           UPDATER_MERGE_INTO: ${{ github.workspace }}\mac-artifact\updater-macos-gitee.json
+          RESOURCES_URL_TEMPLATE: "https://gitee.com/${{ secrets.GITEE_REPOSITORY }}/raw/releases/latest/{filename}"
+          RESOURCES_OUTPUT_FILENAME: "resources-gitee.json"
 
       - name: 镜像发布产物到 Gitee（国内加速，可选）
         shell: pwsh
@@ -551,6 +582,10 @@ jobs:
           Copy-Item mac-artifact/*.app.tar.gz $destDir/ -ErrorAction SilentlyContinue
           Copy-Item mac-artifact/*.app.tar.gz.sig $destDir/ -ErrorAction SilentlyContinue
           Copy-Item desktop/dist/updater-gitee.json $destDir/ -ErrorAction SilentlyContinue
+          # 资源包（方案 B）：三个 zip + resources-gitee.json。jdtls 单个 53.7MB，
+          # 在 Gitee 单文件上限内；缺任何一个 zip，客户端首启下载就 404。
+          Copy-Item desktop/dist/resource-packs/*.zip $destDir/ -ErrorAction SilentlyContinue
+          Copy-Item desktop/dist/resources-gitee.json $destDir/ -ErrorAction SilentlyContinue
 
           # 文件清单必须打印：体积是事后定性的关键依据。
           $files = @(Get-ChildItem $destDir -Recurse -File)
@@ -559,6 +594,9 @@ jobs:
           Write-Host ("待推送 latest/：{0} 个文件，合计 {1:N2} MB" -f $files.Count, $mb)
           if (-not ($files | Where-Object { $_.Name -eq 'updater-gitee.json' })) {
             Fail "latest/ 里没有 updater-gitee.json —— 客户端就是读它，缺了镜像等于白做"
+          }
+          if (-not ($files | Where-Object { $_.Name -eq 'resources-gitee.json' })) {
+            Fail "latest/ 里没有 resources-gitee.json —— 客户端首启组件下载靠它，缺了镜像等于白做"
           }
 
           Push-Location $mirrorDir
@@ -600,6 +638,26 @@ jobs:
             }
           } catch {
             Fail "raw 地址请求/解析失败：$_（推上去了却读不到，客户端一样用不了）"
+          }
+
+          # 资源清单（方案 B）的客户端地址验证：三件事——读得到、包数够、
+          # **url 必须指向 Gitee**。url 指 GitHub 的镜像清单等于没镜像：
+          # 国内客户端从 Gitee 读清单、再从 GitHub 下 zip，慢/断的根源没解决。
+          $resRaw = "https://gitee.com/$($env:GITEE_REPOSITORY)/raw/releases/latest/resources-gitee.json"
+          Write-Host "--- 验证资源清单地址：$resRaw ---"
+          try {
+            $resp2 = Invoke-WebRequest -Uri $resRaw -MaximumRedirection 5 -TimeoutSec 60 -UseBasicParsing
+            $resManifest = $resp2.Content | ConvertFrom-Json
+            if ($resManifest.packs.Count -lt 3) {
+              Fail "resources-gitee.json 只有 $($resManifest.packs.Count) 个包（应 >= 3：jdtls/ecj/svnkit）"
+            }
+            $notGitee = $resManifest.packs | Where-Object { $_.url -notlike "https://gitee.com/*" }
+            if ($notGitee) {
+              Fail "resources-gitee.json 里有非 Gitee 的下载 url（$($notGitee.url)）——镜像白做"
+            }
+            Write-Host ("resources-gitee.json 校验通过：{0} 个包，url 均指向 Gitee" -f $resManifest.packs.Count)
+          } catch {
+            Fail "resources-gitee.json raw 地址请求/解析失败：$_"
           }
 
           Write-Host ("::notice title=Gitee 镜像::已验证可用 version={0} pack={1:N2}MB files={2}" -f $ver, $mb, $files.Count)

@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 use crate::compile::{self, CompileEnv, CompileJob, CompileResult};
 use crate::nc_home;
@@ -23,11 +23,12 @@ struct Cached {
 
 static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 
-/// ecj 先找安装包资源目录，找不到（开发模式）再退回源码树里的资源。
-fn find_ecj(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+/// ecj 候选顺序：外部资源包（按需下载安装）→ 安装包资源目录（v0.1.0 及以前的
+/// 旧安装兜底）→ 源码树资源（开发模式）。
+fn find_ecj(config_dir: &Path) -> Result<PathBuf, String> {
     let mut cands = Vec::new();
-    if let Ok(dir) = app.path().resource_dir() {
-        cands.push(dir.join("ecj").join("ecj-3.17.jar"));
+    if let Some(dir) = crate::resource_pack::active_dir(config_dir, crate::resource_pack::PACK_ECJ) {
+        cands.push(dir.join("ecj-3.17.jar"));
     }
     cands.push(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -38,7 +39,10 @@ fn find_ecj(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     cands
         .into_iter()
         .find(|p| p.is_file())
-        .ok_or_else(|| "找不到内置的 ecj 编译器（ecj-3.17.jar）".to_string())
+        .ok_or_else(|| {
+            "找不到 Java 编译器组件（ecj）。若刚安装/更新过，请到设置 → 组件里下载；否则检查网络后重试"
+                .to_string()
+        })
 }
 
 /// 取（或首次构建）类索引，并带出该模块上次编译用到的 jar；进程内复用。
@@ -110,7 +114,7 @@ pub async fn compile_module(
     let home = nc_home::resolve(state.config.read().await.nc_home.as_deref())?;
     let nc_home = PathBuf::from(&home.root);
     let java = PathBuf::from(&home.java);
-    let ecj = find_ecj(&app)?;
+    let ecj = find_ecj(&state.config_dir)?;
     let cache_path = state.config_dir.join("class-index.bin");
     let work_dir = state.config_dir.join("tmp");
 

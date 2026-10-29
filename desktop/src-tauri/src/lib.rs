@@ -26,6 +26,8 @@ pub mod nc_index;
 pub mod nc_port;
 pub mod patch_build;
 pub mod patch_view;
+pub mod resource_pack;
+pub mod retry;
 pub mod search;
 pub mod security;
 pub mod server;

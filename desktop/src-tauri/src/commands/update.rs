@@ -12,6 +12,9 @@
 
 use tauri::Emitter;
 
+// 指数退避重试与资源包下载共用（见 retry.rs）；本文件只传 should_retry 策略。
+use crate::retry::retry_with_backoff;
+
 // ===== 自动更新（后台线程，不阻塞 UI），採自 PastePanda 实现 =====
 
 /// 单飞闸：同一时刻只允许一个更新 / 检查任务在跑。
@@ -38,62 +41,6 @@ impl SingleFlight {
 impl Drop for SingleFlight {
     fn drop(&mut self) {
         self.0.store(false, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-/// 指数退避重试辅助函数。
-///
-/// `should_retry` 决定某个错误是否值得再试一次。**不能无条件重试**：更新源返回
-/// "没有可用 manifest" 这类确定性结论时，重试 N 次只会让用户多等 N 次退避
-/// （2026-10-22 实测：Gitee 源的 releases 分支失效后 404，旧逻辑每次检查白等
-/// 1s+2s 共 3.5 秒才回退到 ghproxy，用户感知就是"点更新要转半天"）。
-async fn retry_with_backoff<F, Fut, T, E>(
-    max_retries: u32,
-    operation_name: &str,
-    should_retry: impl Fn(&E) -> bool,
-    f: F,
-) -> Result<T, E>
-where
-    F: Fn() -> Fut,
-    Fut: std::future::Future<Output = Result<T, E>>,
-    E: std::fmt::Display,
-{
-    let mut attempt = 0u32;
-    loop {
-        match f().await {
-            Ok(val) => return Ok(val),
-            Err(e) => {
-                if !should_retry(&e) {
-                    log::info!("[Update] {operation_name} 遇到不可重试错误，立即换源: {e}");
-                    return Err(e);
-                }
-                attempt += 1;
-                if attempt > max_retries {
-                    return Err(e);
-                }
-                let delay_secs = 1u64 << (attempt - 1);
-                // +0–511ms 抖动：无抖动时，一次服务端抖动恢复会让所有客户端在
-                // 同一刻齐刷刷回源（惊群），刚缓过来的源又被自己打回去。抖动量
-                // 取系统时钟纳秒取模而非 rand crate——更新链路不引新依赖
-                // （二进制体积是核心卖点），且这里要的只是"错开"，不是密码学随机。
-                let jitter_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| (d.subsec_nanos() % 512) as u64);
-                log::warn!(
-                    "[Update] {} 失败（第 {}/{} 次），{}s+{}ms 后重试: {}",
-                    operation_name,
-                    attempt,
-                    max_retries,
-                    delay_secs,
-                    jitter_ms,
-                    e
-                );
-                tokio::time::sleep(std::time::Duration::from_millis(
-                    delay_secs * 1000 + jitter_ms,
-                ))
-                .await;
-            }
-        }
     }
 }
 

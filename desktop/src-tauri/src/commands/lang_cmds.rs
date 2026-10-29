@@ -32,11 +32,20 @@ fn set_status(app: &tauri::AppHandle, state: &AppState, status: LangStatus) {
     let _ = app.emit("lang-status", status);
 }
 
-/// jdt.ls 目录：安装包资源 → 源码树资源 → 配置目录 → 环境变量 `NCFORGE_JDTLS_DIR`。
+/// jdt.ls 目录候选顺序：环境变量 `NCFORGE_JDTLS_DIR`（手动指定，最高优先）→
+/// 外部资源包（按需下载安装，`config_dir/resources/jdtls@<version>`）→
+/// 安装包资源目录（v0.1.0 及以前的旧安装兜底）→ 源码树资源（开发模式）。
+///
+/// 历史上这里还有第四个候选 `config_dir/jdtls`（给手工放置的用户留的门）。
+/// 资源包外置后统一为 `config_dir/resources/` 一套约定——两个 config 目录布局
+/// 并存只会漂移，手工放置的用户改走环境变量（错误信息里指明了）。
 fn find_jdtls(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, String> {
     let mut cands: Vec<PathBuf> = Vec::new();
     if let Ok(env_dir) = std::env::var("NCFORGE_JDTLS_DIR") {
         cands.push(PathBuf::from(env_dir));
+    }
+    if let Some(dir) = crate::resource_pack::active_dir(config_dir, crate::resource_pack::PACK_JDTLS) {
+        cands.push(dir);
     }
     if let Ok(dir) = app.path().resource_dir() {
         cands.push(dir.join("jdtls"));
@@ -46,12 +55,11 @@ fn find_jdtls(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, Stri
             .join("resources")
             .join("jdtls"),
     );
-    cands.push(config_dir.join("jdtls"));
     cands
         .into_iter()
         .find(|p| p.join("plugins").is_dir())
         .ok_or_else(|| {
-            "找不到内置的 jdt.ls（需要 resources/jdtls，或设置环境变量 NCFORGE_JDTLS_DIR）"
+            "找不到 Java 语言服务组件（jdt.ls）。若刚安装/更新过，请到设置 → 组件里下载；或设置环境变量 NCFORGE_JDTLS_DIR 指定已有目录"
                 .to_string()
         })
 }

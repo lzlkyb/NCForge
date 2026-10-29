@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 /**
- * 准备打进安装包的 jdt.ls（`src-tauri/resources/jdtls/`）。
+ * 准备开发期 / 发版打包用的 jdt.ls（`src-tauri/resources/jdtls/`）。
  *
  * 为什么不直接把它提交进仓库：裁剪后仍约 55MB，每次升版都要在 git 历史里留一份。
  * 改为构建前按固定版本 + SHA-256 拉取并解压，仓库里只留一个占位 README（让 tauri 的 resources 映射在没拉取时也不报错）。
  *
  * 版本锁在 0.57.0：它是最后一个支持 Java 8 运行的版本（NC 自带的是 ufjdk 1.8），升版会直接起不来。
+ *
+ * 用途变更（方案 B，资源外置）：jdtls **不再打进安装包**（bundle.resources 已移除，
+ * 安装包从 63.8MB 砍到 ~8MB），改为发版时由 pack-resources.mjs 打成资源 zip 按需分发。
+ * 所以本脚本从 prebuild 钩子移除，只剩两个入口：
+ *   - 开发期手动：`npm run jdtls:fetch`（代码智能需要本地有这份目录）
+ *   - 发版打包：pack-resources.mjs 在检测到目录缺失时自动调用
  *
  * 用法：
  *   node scripts/fetch-jdtls.mjs            已就绪则跳过

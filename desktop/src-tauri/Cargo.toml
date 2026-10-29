@@ -26,6 +26,12 @@ tauri-plugin-autostart = "2"
 tauri-plugin-updater = "2"
 # 更新源 env 覆盖（APP_UPDATE_ENDPOINT）构造 Url 用，与插件共用同一份 url 2.x
 url = "2"
+# 资源包下载（jdtls / ecj / svnkit 外置为按需下载的资源包，见 resource_pack.rs）。
+# updater 插件已传递依赖同一份 reqwest 0.13 与 futures-util，sha2 也经 minisign
+# 在依赖树里——提成直接依赖不增加实际编译量，只是让我们能显式使用。
+reqwest = "0.13"
+futures-util = "0.3"
+sha2 = "0.10"
 tauri-plugin-process = "2"
 tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-opener = "2"
