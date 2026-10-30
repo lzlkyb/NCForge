@@ -1,8 +1,9 @@
 //! 数据库命令层：多连接、执行任意语句、事务、元数据；以及表结构缓存与出包核对。
 //!
 //! 约定：
-//! 1. **一个连接一个桥进程**（`state.db` 按连接 id 存）：一个库上的慢查询不会把另一个库的
-//!    操作堵在后面，桥里也不用处理并发。JVM 常驻约几十 MB，同时开两三个库可以接受。
+//! 1. **一个连接一个引擎句柄**（`state.db` 按连接 id 存），句柄底下是一条独立的数据库会话。
+//!    A 方案后多条会话共用一个 JVM（内存从「每连接 50~70MB」降到「每连接几 MB」），
+//!    每条会话在桥里各有一个工作线程，所以一个库上的慢查询仍然不会把另一个库堵住。
 //! 2. **读写不在软件里限制**：能不能写由数据库账号权限决定。桥只报告事务状态
 //!    （手动提交模式下几条写语句、影响多少行），界面据此提醒。
 //! 3. **口令**：prop.xml 来源由桥里的 NC `PropXMLReader` 现解，不经过 Rust、不落盘；
@@ -17,7 +18,8 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
 use crate::config::{AppConfig, DbConnConfig};
-use crate::db_bridge::{self, Bridge};
+use crate::db_bridge;
+use crate::db_engine::EngineHandle;
 use crate::db_schema;
 use crate::sql_refs;
 use crate::state::AppState;
@@ -153,31 +155,76 @@ fn bridge_env(
     ))
 }
 
-/// 取（没有就建）某个连接的桥。`key` 是连接 id；`__probe` / `__test` 给列数据源、测试连接用。
+/// 取（没有就建）某个连接的引擎句柄。`key` 是连接 id，同时用作桥里的会话名；
+/// `__probe` / `__test` 给列数据源、测试连接用。
+///
+/// 同一套 java + classpath 下的所有连接共用**一个** JVM（见 [`shared_bridge`]），
+/// 每条连接只是里面一条会话——这是内存从「每连接 50~70MB」降到「底价 + 每会话几 MB」的关键。
 pub(crate) fn bridge_for(
     app: &AppHandle,
     state: &AppState,
     cfg: &AppConfig,
     key: &str,
-) -> Result<Arc<Bridge>, String> {
+) -> Result<Arc<EngineHandle>, String> {
     let env = bridge_env(app, state, cfg)?;
-    let mut map = state
+    let old = {
+        let mut map = state
+            .db
+            .lock()
+            .map_err(|_| "数据库桥状态异常".to_string())?;
+        if let Some(existing) = map.get(key) {
+            // java 路径与 classpath 都没变 = 还是同一套驱动，可以直接复用
+            if existing.matches_env(&env) {
+                return Ok(existing.clone());
+            }
+        }
+        // 换了 NC home 或补装了驱动：旧的会话要断掉再重建（锁外做，别持锁做 IO）
+        map.remove(key)
+    };
+    if let Some(old) = old {
+        old.shutdown();
+    }
+    let bridge = shared_bridge(state, &env)?;
+    let handle = Arc::new(EngineHandle::java(bridge, key));
+    state
         .db
         .lock()
-        .map_err(|_| "数据库桥状态异常".to_string())?;
-    if let Some(existing) = map.get(key) {
-        if existing.env().java == env.java && existing.env().jars == env.jars {
-            return Ok(existing.clone());
-        }
-        existing.shutdown();
+        .map_err(|_| "数据库桥状态异常".to_string())?
+        .insert(key.to_string(), handle.clone());
+    Ok(handle)
+}
+
+/// 取（没有就起）共享的桥进程。同一套 java + classpath 只会有一个 JVM。
+fn shared_bridge(
+    state: &AppState,
+    env: &db_bridge::BridgeEnv,
+) -> Result<Arc<db_bridge::Bridge>, String> {
+    let sig = format!(
+        "{}|{}",
+        env.java.display(),
+        env.jars
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(";")
+    );
+    let mut pool = state
+        .db_procs
+        .lock()
+        .map_err(|_| "数据库进程池状态异常".to_string())?;
+    if let Some(alive) = pool.get(&sig).and_then(|w| w.upgrade()) {
+        return Ok(alive);
     }
-    let bridge = Arc::new(Bridge::new(env));
-    map.insert(key.to_string(), bridge.clone());
+    let bridge = Arc::new(db_bridge::Bridge::new(env.clone()));
+    pool.insert(sig, Arc::downgrade(&bridge));
     Ok(bridge)
 }
 
-/// 已经存在的桥（不新建）：没连过的连接上做元数据操作要报「先连接」，而不是偷偷起进程。
-pub(crate) fn existing_bridge(state: &AppState, key: &str) -> Result<Arc<Bridge>, String> {
+/// 已经存在的引擎句柄（不新建）：没连过的连接上做元数据操作要报「先连接」，而不是偷偷起进程。
+pub(crate) fn existing_bridge(
+    state: &AppState,
+    key: &str,
+) -> Result<Arc<EngineHandle>, String> {
     let map = state
         .db
         .lock()
@@ -187,7 +234,7 @@ pub(crate) fn existing_bridge(state: &AppState, key: &str) -> Result<Arc<Bridge>
         .ok_or_else(|| code_label("not-connected", "这个连接还没连上"))
 }
 
-/// 关掉并移除某个桥（断开、删除连接时用）。
+/// 关掉并移除某个句柄（断开、删除连接时用）。
 pub(crate) fn drop_bridge(state: &AppState, key: &str) {
     let b = state.db.lock().ok().and_then(|mut m| m.remove(key));
     if let Some(b) = b {
@@ -195,16 +242,16 @@ pub(crate) fn drop_bridge(state: &AppState, key: &str) {
     }
 }
 
-/// 在阻塞线程里调一次桥，错误转成 `code|message`。
+/// 在阻塞线程里调一次引擎，错误转成 `code|message`。
 pub(crate) async fn call(
-    bridge: Arc<Bridge>,
+    engine: Arc<EngineHandle>,
     cmd: &'static str,
     args: Vec<String>,
     timeout: Duration,
 ) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        bridge.call(cmd, &refs, timeout)
+        engine.call(cmd, &refs, timeout)
     })
     .await
     .map_err(|e| format!("调用数据库桥失败：{e}"))?
@@ -355,6 +402,23 @@ pub async fn db_connect(
             .and_then(Value::as_bool)
             .unwrap_or(false),
     })
+}
+
+/// 取消这个连接上正在执行的语句。
+///
+/// 与其它命令的关键差别：它**不等调用锁**——正在跑的那条查询占着这条会话，
+/// 取消要是排在它后面就毫无意义。桥侧在独立线程上收这条命令并调 `Statement.cancel()`，
+/// 被取消的查询会带着 ORA-01013 从原来那个请求上返回，前端照常显示为一次失败的执行。
+#[tauri::command]
+pub async fn db_cancel(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<(), String> {
+    let engine = existing_bridge(&state, &id)?;
+    tauri::async_runtime::spawn_blocking(move || engine.cancel())
+        .await
+        .map_err(|e| format!("发送取消失败：{e}"))?
+        .map_err(|e| code_label("bridge", &e.message))
 }
 
 /// 断开（未提交的改动由桥回滚——界面已经先问过用户）。

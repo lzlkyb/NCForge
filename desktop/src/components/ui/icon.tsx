@@ -48,6 +48,7 @@ const paths = {
   power: "M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10",
   play: "M5 3l14 9-14 9V3z",
   pause: "M6 4h4v16H6zM14 4h4v16h-4z",
+  stop: "M6 6h12v12H6z",
   sliders: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   alertTriangle:
     "M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01",

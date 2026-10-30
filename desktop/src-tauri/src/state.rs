@@ -35,11 +35,19 @@ pub struct AppState {
     /// 存 `Arc` 是因为命令层要把它从锁里拿出来在 `spawn_blocking` 里用——桥内部自己
     /// 串行化请求，锁只保护「有没有这个桥 / 用哪份 java」。
     pub svn: std::sync::Mutex<Option<std::sync::Arc<crate::svn_bridge::Bridge>>>,
-    /// 数据库桥：**每个连接一个**常驻 JVM（键是连接 id），与 SVN 桥同机制但不同主类。
+    /// 数据库引擎：**每个连接一个句柄**（键是连接 id）。
     ///
-    /// 按连接分进程：一个库上的慢查询不会把另一个库的操作堵在后面（桥内部串行）。
+    /// 存的是 [`crate::db_engine::EngineHandle`] 而不是具体桥，好处是「换驱动」不用动命令层。
+    /// 多个句柄共用同一个 JVM，只有会话不同（内存从「每连接一条进程」变成常量底价 + 每会话几 MB）。
     pub db: std::sync::Mutex<
-        std::collections::HashMap<String, std::sync::Arc<crate::db_bridge::Bridge>>,
+        std::collections::HashMap<String, std::sync::Arc<crate::db_engine::EngineHandle>>,
+    >,
+    /// 共享的数据库桥进程池：按「java 路径 + classpath」索引，存**弱引用**。
+    ///
+    /// 用 `Weak` 而不是 `Arc`：最后一条会话释放时 `Arc<Bridge>` 归零，桥自己 `Drop` 掉进程，
+    /// 池里那条记录随之失效（下次 upgrade 失败就重建）。省掉一套「谁该关进程」的记账。
+    pub db_procs: std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Weak<crate::java_bridge::Bridge>>,
     >,
     /// 代码智能（jdt.ls）会话与状态。同样在 `spawn_blocking` 里持锁，用 std Mutex。
     pub lang: std::sync::Mutex<crate::lang::LangRun>,
@@ -64,6 +72,7 @@ impl AppState {
             server: std::sync::Mutex::new(ServerRun::default()),
             svn: std::sync::Mutex::new(None),
             db: std::sync::Mutex::new(Default::default()),
+            db_procs: std::sync::Mutex::new(Default::default()),
             lang: std::sync::Mutex::new(Default::default()),
             compile_cancel: std::sync::atomic::AtomicBool::new(false),
             app_handle: std::sync::Mutex::new(None),

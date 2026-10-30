@@ -1,0 +1,11 @@
+[package]
+name = "oraprobe"
+version = "0.1.0"
+edition = "2021"
+description = "B 方案判定探针：验证 Oracle 官方纯 Rust 驱动能否替代 JDBC 桥"
+
+[dependencies]
+oracledb = "26.0.0-beta.5"
+
+[profile.release]
+strip = true

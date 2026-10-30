@@ -174,6 +174,8 @@ export const dbApi = {
   disconnect: (id: string) => invoke<void>("db_disconnect", { id }),
   exec: (id: string, sql: string, maxRows: number, timeoutSec: number) =>
     invoke<ExecResult>("db_exec", { id, sql, maxRows, timeoutSec }),
+  /** 取消这个连接上正在执行的语句（不等执行返回，立即生效）。 */
+  cancel: (id: string) => invoke<void>("db_cancel", { id }),
   more: (id: string, maxRows: number) => invoke<MoreResult>("db_more", { id, maxRows }),
   tx: (id: string, action: "commit" | "rollback" | "autocommit-on" | "autocommit-off" | "status") =>
     invoke<{ tx: TxInfo; alive?: boolean }>("db_tx", { id, action }),

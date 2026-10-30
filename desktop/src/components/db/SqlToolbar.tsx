@@ -6,9 +6,10 @@ import { switchConn } from "../../lib/dbActions";
 import { connOf, rtOf, txAction, useDb, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台工具条：连接胶囊 · 执行 / 脚本 / 计划 / 格式化 · 事务模式 · 历史。生产库整条淡红。 */
-export function SqlToolbar({ tab, onRun, onExplain, onFormat, historyOpen, onHistory }: {
+export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, historyOpen, onHistory }: {
   tab: SqlTab;
   onRun: (mode: "current" | "script") => void;
+  onStop: () => void;
   onExplain: () => void;
   onFormat: () => void;
   historyOpen: boolean;
@@ -35,10 +36,18 @@ export function SqlToolbar({ tab, onRun, onExplain, onFormat, historyOpen, onHis
   return (
     <div className="dbx-sqlbar" data-prod={conn?.env === "prod" || undefined}>
       <ConnPicker connId={tab.connId} onPick={(id) => void switchConn(tab.id, id)} />
-      <button type="button" className="dbx-btn pri" disabled={tab.running || !conn} onClick={() => onRun("current")} title="执行光标所在的语句（有选中则执行选中部分）">
-        <Icon name={tab.running ? "spinner" : "play"} size={12} />
-        执行 <span className="k">Ctrl+Enter</span>
-      </button>
+      {tab.running ? (
+        // 执行中把「执行」换成「停止」：以前只能干等 30 秒超时，或者杀掉整个应用
+        <button type="button" className="dbx-btn bad" onClick={onStop} title="取消正在执行的语句（数据库侧会收到 ORA-01013）">
+          <Icon name="stop" size={12} />
+          停止
+        </button>
+      ) : (
+        <button type="button" className="dbx-btn pri" disabled={!conn} onClick={() => onRun("current")} title="执行光标所在的语句（有选中则执行选中部分）">
+          <Icon name="play" size={12} />
+          执行 <span className="k">Ctrl+Enter</span>
+        </button>
+      )}
       <button type="button" className="dbx-btn" disabled={tab.running || !conn} onClick={() => onRun("script")} title="按顺序执行整个脚本，出错即停">
         <Icon name="terminal" size={12} />
         执行脚本 <span className="k">Alt+X</span>

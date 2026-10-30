@@ -6,6 +6,8 @@ import { TxBar } from "./TxBar";
 import { ResultPanel } from "./ResultPanel";
 import { HistoryDrawer } from "./HistoryDrawer";
 import { explain, runStatements } from "../../lib/dbActions";
+import { dbApi } from "../../lib/dbApi";
+import { friendlyDbError } from "../../lib/db";
 import { sqlTabOf, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台：工具条 / 事务条 / 编辑器 / 可拖高度的结果区 / 历史抽屉。 */
@@ -34,6 +36,16 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
     if (s) void explain(tabId, s.text);
   };
 
+  /**
+   * 停止：只发取消，不改 running——被取消的语句会带着 ORA-01013 从原来那个请求返回，
+   * 由 runStatements 正常收尾把 running 置回 false。这里抢先置 false 会让结果区
+   * 在真正的响应到达前先闪一下「没有错误」。
+   */
+  const onStop = useCallback(() => {
+    if (!tab.connId) return;
+    void dbApi.cancel(tab.connId).catch((e) => toast(`取消失败：${friendlyDbError(e)}`, "error"));
+  }, [tab.connId]);
+
   const dragRes = (startY: number) => {
     const start = resH;
     const max = (bodyRef.current?.clientHeight ?? 600) - 80;
@@ -51,6 +63,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
       <SqlToolbar
         tab={tab}
         onRun={(m) => void run(m)}
+        onStop={onStop}
         onExplain={onExplain}
         onFormat={() => api.current?.format()}
         historyOpen={history}

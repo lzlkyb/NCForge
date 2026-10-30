@@ -39,6 +39,10 @@ _*.py
 desktop/scripts/_*/
 # Java 桥的编译中间产物（.class 由 javac 生成，成品是 resources/svnkit/ncsvn.jar）
 desktop/src-tauri/svn-bridge/out/
+# 同上，`scripts/build-bridge-jar.mjs` 的临时编译目录
+desktop/src-tauri/.bridge-build/
+# B 方案调研探针的构建产物（源码留在 tools/oraprobe，target 不入库）
+tools/oraprobe/target/
 desktop/src-tauri/db-bridge/out/
 
 # jdt.ls：构建前由 desktop/scripts/fetch-jdtls.mjs 下载、校验、裁剪生成，不入库（约 55MB）；只留占位 README
