@@ -65,6 +65,20 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # 切行做 diff，所以用 capture_diff_slices（接受任意 &[T]）而不是只吃 &str 的接口。
 similar = "2"
 
+# 纯 Rust 的 Oracle 驱动（Oracle 官方，thin 模式）：数据库的第二种执行引擎。
+#
+# 为什么留两套：常驻 JVM 那套内存底价 60~70MB 但它能力最全（支持 REF CURSOR）；
+# 这个纯 Rust 驱动一条连接只占几 MB，取消与 prop.xml 口令两件事已经在 vendor 里补上
+# （见下），只剩 REF CURSOR 不支持（`PLS-00707`）。两个引擎的能力差异由
+# `db_engine::Caps` 显式声明，前端按它决定哪些按钮可用。
+#
+# 锁 beta 版本而不是 `26`：beta 之间 API 会变（本仓库按 beta.5 的接口写的），
+# 且它只在用户显式选了「纯 Rust 驱动」的连接上跑，升级要跟着实测走。
+#
+# 用 vendor 源码 + [patch.crates-io] 而不是直接吃 crates.io：上游两处硬伤我们打了补丁，
+# 见 `desktop/vendor/oracledb/FORK.md`（11G 密码验证器 issue #63、语句中断 issue #24）。
+oracledb = "=26.0.0-beta.5"
+
 # Windows 专属：DWM 圆角（Win11 窗口装饰）
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.56", features = [
@@ -73,6 +87,11 @@ windows = { version = "0.56", features = [
   # SVN 凭据：复用用户已缓存的密码需要 DPAPI 解密（CryptProtectData / CryptUnprotectData）
   "Win32_Security_Cryptography",
 ] }
+
+# 把手动改过的驱动源码挂上去：版本号与 crates.io 上的 beta.5 相同，所以这条 patch
+# 对所有解析到 `oracledb 26.0.0-beta.5` 的依赖生效。升级驱动时同步更新 vendor 目录。
+[patch.crates-io]
+oracledb = { path = "../vendor/oracledb" }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
