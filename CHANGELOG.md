@@ -31,6 +31,9 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 ## [Unreleased]
 
 ### 变更
+- 点 × 退出前会先看一眼有没有还没保存的东西：编辑器里改过没存的文件、数据库里没提交的事务。有就列出来让你选「保存全部并退出 / 不保存并退出 / 取消」，什么都没有就直接退，不多问一句；保存失败（文件被别的程序改过、编码写不出）会当场列出是哪个文件、为什么，不会假装存好了再退出
+- 补丁页填的东西现在会记住：改动说明、勾选的文件、手动改的层、随包挂的 SQL，关掉软件再打开还在；按工程分开存，换个工程不会串
+- 点右上角的 × 就是退出应用：以前点了只是把窗口收起来、程序还留在托盘里，要真正退出得去托盘右键「退出」；现在没有托盘、也不留在后台，关掉就是关掉。设置页「开机自启」的说明同步改成「登录时自动启动」
 - 数据库页全面升级：从「只连一个库的只读查询面板」变成多连接 SQL 客户端；读写权限交给数据库账号控制，软件不再拦写语句，只负责让你看清连的是哪个库
 - 同时开多个数据库连接更省内存：多个连接现在共用一个 Java 进程（实测 5 个连接从约 250MB 降到约 77MB），打开再多库也只涨几 MB；各自仍是独立会话，一个库上的慢查询不会拖慢另一个库
 - 界面重构：导航栏收窄为 64px（文字标签保留），顶部合并成 36px 标题栏，编辑区更宽更高；点工具页不再整页替换编辑器，改为中央的工具标签；底部面板统一放问题、编译输出、NC 服务
@@ -47,6 +50,8 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 - 补丁不再靠命令行脚本打：清单由未提交改动自动生成，落位、配对、CHANGES.md 全在窗口里核对完再出包
 
 ### 新增
+- 退出前提醒没提交的事务：点 × 时如果还有改到一半没提交的数据，会列清是哪个库、几条语句、影响几行、已经挂了多久，让你一次选全部提交 / 全部回滚 / 取消退出；没有未提交的改动就直接退，不会多问一句
+- 悬停表名弹出的字段卡片底部多了「在数据库中打开」：点一下跳到数据库页、自动连上那张表所在的库并打开它的数据（没存口令才需要输一次）
 - 数据库连接可以选择执行引擎：「JVM 桥」（默认，能力最全）或「纯 Rust 驱动」（不占 Java 进程，一条连接只几 MB，同时开很多库时更省）。两种引擎都能中途停止、都能连 NC prop.xml 里的数据源；纯 Rust 驱动唯一缺的是 PL/SQL 返回结果集（REF CURSOR），那类语句要用 JVM 桥
 - 查询可以中途停止：执行时「执行」按钮变成「停止」，点一下数据库侧就取消那条语句（以前只能干等 30 秒超时或杀掉应用）
 - 数据库多连接：NC prop.xml 里的数据源自动列出、点一下就连（口令由 NC 自带解密现解，不用再输）；也能手动填写或导入 .properties 新增连接，标开发 / 测试 / 生产 / 其他四种环境色，可编辑、复制、删除、拖动排序
@@ -132,6 +137,19 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 - 修复启动骨架屏、侧栏品牌、更新弹框里的应用图标一直加载不出来（`/icon.png` 缺 public 目录）
 
 ### 技术细节
+- 2026-10-31 退出前检查未保存文件：`lib/saveAllDirty.ts`（从 `workspaceSession` 取标签，
+  挑 `dirty || eolChanged`、跳过 `readOnly` 与 `jdt://` 虚拟标签）+ `lib/fileSave.ts`
+  （写盘逻辑从 `useFileSave` 抽成模块级 `saveOne`，退出流程复用同一份，不会两边漂移）。
+  保存失败不自动 force 覆盖：冲突就中止退出、切到文件页并定位到第一个失败文件
+- 2026-10-31 退出检查走 `quitGuard` 的顺序：先文件后事务（本地写盘几十毫秒，事务探测要过网络）；
+  `saveAllDirty` 用**动态 import** 引入——`fileSave → editorStore → monacoSetup` 会把整个
+  Monaco 拉进来，静态引入会让 node 环境的单测在加载时报 `window is not defined`
+- 2026-10-31 补丁草稿：`lib/patchDraft.ts` 按工作区存 localStorage（勾选与改判层都是绝对路径，
+  共用一份会串），`hooks/usePatchDraftPersist` 防抖 400ms 落盘。依赖必须传原始 `Set`/`Map`，
+  传现场构造的数组会让 effect 每拍重跑、计时器永远重置，草稿一次都写不下去
+- 2026-10-31 关窗即退出：删掉托盘常驻（`main.rs` 的 `TrayIconBuilder` / 菜单 / 状态圆点 / `branding::tray_tip_*`，以及随之无用的 `png` 依赖）、删掉「关窗时释放界面内存」的两模式开关（`AppConfig.release_webview_on_close` 与 `patch_config` 对应字段）、删掉 `RunEvent::ExitRequested{code:None}` 的 `prevent_exit()`（留着就成了关不掉的幽灵进程）与 macOS 点 Dock 重建窗口分支；`show_or_create_main_window` 退化成 single-instance 里的 `show + unminimize + focus`。旧的 `config.json` 里残留的 `release_webview_on_close` 会被 serde 忽略，不用迁移
+- 2026-10-31 退出前事务确认：`commands/quit_cmds.rs` 三个原子位（`quit_approved` / `quit_acked` / `quit_checking`）+ 四个命令（`db_pending_tx` / `quit_check_acked` / `quit_cancel` / `app_quit`）。`CloseRequested` 同步回调不能 await，所以 `prevent_close()` 后发 `app:quit-request`，前端 ack 后才查；**5 秒没 ack 视为界面卡死直接放行**（否则 `prevent_close` 会让应用永远关不掉）。`db_pending_tx` 逐个连接发 `ping`（2 秒超时），`alive:false` 与超时一律标 `unknown` 而不是「干净」——后者会静默丢数据。前端 `lib/quitGuard.ts` 把后端（权威）与 `dbStore.rt.tx`（更及时）按连接取并集、语句数取大、开始时间取早；确认框宿主 `DbConfirmHost` 从 `DbTab` 上移到 `App`（否则在文件页点 × 看不见框），并自己 `import "../../db-console.css"`（它比数据库页先加载）
+- 2026-10-31 悬停卡片「在数据库中打开」：`tableHover.openTableLink` 生成 `command:ncforge.openTable?<encodeURIComponent(JSON.stringify([表]))>`（Monaco 的 `CommandOpener` 把 query `decodeURIComponent` 后按 JSON 解析，且必须是数组）；`isTrusted` 用**白名单** `{ enabledCommands: [...] }` 而不是 `true`（`toAllowCommandsOption` 支持数组形式），命令用 `monaco.editor.addCommand` 注册——`run` 的第一个参数是服务访问器，命令参数从第二个开始（写成 `(table) => …` 会拿到对象、表现为"点了没反应"）。连接用 `db_schema_status` 回的 `connId`（悬停显示的就是那个库的字段），没连上走 `ensureConnected`（要口令弹全局框），切页复用已有的 `ncforge-navigate` 事件
 - 2026-10-30 双执行引擎：`db_engine.rs` 抽成「命令 + 参数 → JSON」的引擎接口（`EngineKind` + `Caps{cancel,refcursor,prop_decrypt,multi_session}`），命令层不感知底下是 JVM 还是驱动；`db_rust.rs` 用 Oracle 官方纯 Rust 驱动 `oracledb =26.0.0-beta.5`（thin）实现同一套命令（connect / exec / more / 事务 / tables / ncNames / columns / indexes / ddl / explain / schema / DBMS_OUTPUT），结果 JSON 与 JVM 桥逐字段对齐（日期 `yyyy-MM-dd HH:mm:ss`、**NUMBER 一律给字符串**——JDBC 那边是 BigDecimal，转 double 会掉精度；CLOB 截 1M、RAW 转十六进制）。引擎是**连接级**配置（`DbConnConfig.engine`，缺省 `java`）。取消：上游驱动没有 `break/cancel`（oracle/rust-oracledb#24），我们在 `desktop/vendor/oracledb`（`[patch.crates-io]` 挂到 26.0.0-beta.5，改动原因写在 `FORK.md`）里补了 `BreakHandle`——`AtomicBool` 标志 + 把阻塞读切成 100ms 片 + 持锁线程收到置位后发 `MARKER_TYPE_INTERRUPT` 再 `reset()`，`Caps.cancel` 因此为 `true`；另用 `set_call_timeout` 兜「语句在服务端排队」的情况。**#63** 也在同一份 vendor 里修：按 python-oracledb thin 的算法补齐 11G 密码验证器（`SHA1(password‖vfr)` 补 4 个零当 AES-192 key，会话密钥 MD5 拼 24 字节），12C 走 PBKDF2-SHA512 + `AUTH_PBKDF2_SPEEDY_KEY`；未知验证器类型与认证参数缺失不再 `unwrap()`，改为返回 `Error`（`catch_unwind` 保留作兜底）。prop.xml 来源不再强制 JVM：首次连接由 `NcDbBridge` 的 `propCred` 解一次口令 → `DPAPI` 加密落进连接配置（`db_cmds::prop_password_ready`），之后该连接可纯 Rust 直连。同引擎多连接合并、换引擎时旧句柄自动重建
 - 2026-10-30 真库验收（19c @ 10.200.22.144）：新增 `tests/db_rust_live.rs`（纯 Rust 引擎全命令）与 `tests/db_engine_equiv.rs`（**同一批 SQL 两个引擎逐行对照**，含分页连取三页）。对照抓出并修掉 4 处与 JVM 桥不一致：NUMBER 取了数字（JDBC 给字符串）、`BINARY_FLOAT/DOUBLE` 读不出来、字符列精度没按 COLUMN_SIZE 给、驱动把 CLOB 列描述成 `LONG`；另有 2 处 SQL 写错（`explain` 的 `:1` 用两次只绑一次；`as size` 撞 19c 保留字）
 - 2026-10-30 取消与 prop.xml 真库实测（同一台 19c）：`begin dbms_lock.sleep(30); end;` 执行中调 `cancel()`，**2.01 秒**返回错误、整条 3.01 秒结束，之后 `select 1 from dual` 正常——是语句中断不是把连接弄死；`propCred` 解出 url/user/口令后 `RustEngine` 直连成功（0.55 秒），即「解一次 → 之后不依赖 JVM」成立。11G 验证器只有单测（三组常量与 JCE 逐字节比对：`key24` / AES-192 密文 / MD5），本机建不出只有 11G 验证器的账号，真机暂未验
