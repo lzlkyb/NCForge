@@ -9,6 +9,7 @@ config.json
 # Build output
 dist/
 *.blob
+*.tsbuildinfo
 
 # Rust / Tauri
 desktop/src-tauri/target/

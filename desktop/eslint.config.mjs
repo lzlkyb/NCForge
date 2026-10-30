@@ -34,6 +34,8 @@ export default tseslint.config(
       // 让门禁变红（那会逼着人把探针 commit 上去）。
       "scripts/_*.mjs",
       "scripts/_*/**",
+      // 截图/冒烟探针的落盘目录（`.gitignore` 里也忽略），里面是同一类一次性脚本。
+      ".cache/**",
     ],
   },
   js.configs.recommended,
