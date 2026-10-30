@@ -47,6 +47,7 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 - 补丁不再靠命令行脚本打：清单由未提交改动自动生成，落位、配对、CHANGES.md 全在窗口里核对完再出包
 
 ### 新增
+- 数据库连接可以选择执行引擎：「JVM 桥」（默认，能力最全）或「纯 Rust 驱动」（不占 Java 进程，一条连接只几 MB，同时开很多库时更省）。两种引擎都能中途停止、都能连 NC prop.xml 里的数据源；纯 Rust 驱动唯一缺的是 PL/SQL 返回结果集（REF CURSOR），那类语句要用 JVM 桥
 - 查询可以中途停止：执行时「执行」按钮变成「停止」，点一下数据库侧就取消那条语句（以前只能干等 30 秒超时或杀掉应用）
 - 数据库多连接：NC prop.xml 里的数据源自动列出、点一下就连（口令由 NC 自带解密现解，不用再输）；也能手动填写或导入 .properties 新增连接，标开发 / 测试 / 生产 / 其他四种环境色，可编辑、复制、删除、拖动排序
 - SQL 控制台：多标签、草稿自动保存；Monaco 编辑器带表名 / 字段补全（含 NC 中文名）；Ctrl+Enter 执行光标所在语句、Alt+X 执行整个脚本（出错即停并定位）、Ctrl+Shift+F 格式化；执行计划、执行历史（单击填回、双击执行）、DBMS_OUTPUT
@@ -131,6 +132,9 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 - 修复启动骨架屏、侧栏品牌、更新弹框里的应用图标一直加载不出来（`/icon.png` 缺 public 目录）
 
 ### 技术细节
+- 2026-10-30 双执行引擎：`db_engine.rs` 抽成「命令 + 参数 → JSON」的引擎接口（`EngineKind` + `Caps{cancel,refcursor,prop_decrypt,multi_session}`），命令层不感知底下是 JVM 还是驱动；`db_rust.rs` 用 Oracle 官方纯 Rust 驱动 `oracledb =26.0.0-beta.5`（thin）实现同一套命令（connect / exec / more / 事务 / tables / ncNames / columns / indexes / ddl / explain / schema / DBMS_OUTPUT），结果 JSON 与 JVM 桥逐字段对齐（日期 `yyyy-MM-dd HH:mm:ss`、**NUMBER 一律给字符串**——JDBC 那边是 BigDecimal，转 double 会掉精度；CLOB 截 1M、RAW 转十六进制）。引擎是**连接级**配置（`DbConnConfig.engine`，缺省 `java`）。取消：上游驱动没有 `break/cancel`（oracle/rust-oracledb#24），我们在 `desktop/vendor/oracledb`（`[patch.crates-io]` 挂到 26.0.0-beta.5，改动原因写在 `FORK.md`）里补了 `BreakHandle`——`AtomicBool` 标志 + 把阻塞读切成 100ms 片 + 持锁线程收到置位后发 `MARKER_TYPE_INTERRUPT` 再 `reset()`，`Caps.cancel` 因此为 `true`；另用 `set_call_timeout` 兜「语句在服务端排队」的情况。**#63** 也在同一份 vendor 里修：按 python-oracledb thin 的算法补齐 11G 密码验证器（`SHA1(password‖vfr)` 补 4 个零当 AES-192 key，会话密钥 MD5 拼 24 字节），12C 走 PBKDF2-SHA512 + `AUTH_PBKDF2_SPEEDY_KEY`；未知验证器类型与认证参数缺失不再 `unwrap()`，改为返回 `Error`（`catch_unwind` 保留作兜底）。prop.xml 来源不再强制 JVM：首次连接由 `NcDbBridge` 的 `propCred` 解一次口令 → `DPAPI` 加密落进连接配置（`db_cmds::prop_password_ready`），之后该连接可纯 Rust 直连。同引擎多连接合并、换引擎时旧句柄自动重建
+- 2026-10-30 真库验收（19c @ 10.200.22.144）：新增 `tests/db_rust_live.rs`（纯 Rust 引擎全命令）与 `tests/db_engine_equiv.rs`（**同一批 SQL 两个引擎逐行对照**，含分页连取三页）。对照抓出并修掉 4 处与 JVM 桥不一致：NUMBER 取了数字（JDBC 给字符串）、`BINARY_FLOAT/DOUBLE` 读不出来、字符列精度没按 COLUMN_SIZE 给、驱动把 CLOB 列描述成 `LONG`；另有 2 处 SQL 写错（`explain` 的 `:1` 用两次只绑一次；`as size` 撞 19c 保留字）
+- 2026-10-30 取消与 prop.xml 真库实测（同一台 19c）：`begin dbms_lock.sleep(30); end;` 执行中调 `cancel()`，**2.01 秒**返回错误、整条 3.01 秒结束，之后 `select 1 from dual` 正常——是语句中断不是把连接弄死；`propCred` 解出 url/user/口令后 `RustEngine` 直连成功（0.55 秒），即「解一次 → 之后不依赖 JVM」成立。11G 验证器只有单测（三组常量与 JCE 逐字节比对：`key24` / AES-192 密文 / MD5），本机建不出只有 11G 验证器的账号，真机暂未验
 - 2026-10-30 数据库升级：`NcDbBridge` 重写（connect / connectProp / exec / more / commit / rollback / autocommit / 元数据 / explain，DBMS_OUTPUT、事务计数）；Rust 侧每个连接一个常驻 JVM（`AppState.db` 按连接 id 存桥），连接配置 `db_conns`（口令 DPAPI，前端只拿 `hasPassword`），首次启动把旧的单连接配置与 prop.xml 数据源迁移进来；prop.xml 口令改用 NC 的 `PropXMLReader` 解密（需 `basic.jar` + `fwcheck.jar` 上类路径），只在 Java 桥里出现明文。前端 `dbStore`（模块级状态）/ `dbActions`（流程）/ `dbConfirm`（提交回滚、生产确认、口令统一成 Promise），结果表手写虚拟滚动；桥里每连接只有一个游标，用 `claimCursor` 记归属，防止「加载更多」接错查询。移除旧的三层只读（语句白名单 / 只读事务 / 执行后回滚）与自治事务提醒
 - 服务启停：`server.rs` 只做起进程 / 判活 / 杀进程树 / 增量读日志；classpath 与 VM 参数在 `launch.rs`；命令层 `commands/server_cmds.rs` 负责取配置、组装状态
 - 停止用 `taskkill /T /F`：不带 `/F` 对控制台进程发的是 WM_CLOSE，java 没有窗口去收，会白等 3 秒
