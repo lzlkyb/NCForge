@@ -115,6 +115,15 @@ pub struct DbConnConfig {
     /// 默认事务模式：`false` = 手动提交。
     #[serde(default)]
     pub auto_commit: bool,
+    /// 执行引擎：`java`（默认，常驻 JVM + JDBC）或 `rust`（纯 Rust 驱动）。
+    ///
+    /// 存字符串而不是枚举：老配置里没有这个字段，反序列化出空串即按 `java` 处理，
+    /// 不用写迁移代码。识别见 `db_engine::EngineKind::parse`。
+    ///
+    /// **这是连接级属性**，不是全局开关：同一台机器上可能一个库要解 prop.xml 口令
+    /// （只能 JVM）、另一个库在慢网段上要省内存（选 Rust）。
+    #[serde(default)]
+    pub engine: String,
     /// 来源说明（界面显示「导入 xxx.properties」之类）。
     #[serde(default)]
     pub note: String,

@@ -558,6 +558,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::db_disconnect,
             commands::db_exec,
             commands::db_cancel,
+            commands::db_caps,
             commands::db_more,
             commands::db_tx,
             commands::db_meta,

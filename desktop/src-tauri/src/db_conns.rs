@@ -133,6 +133,7 @@ pub fn migrate_legacy(cfg: &mut AppConfig) -> bool {
         prop_ds: None,
         password_dpapi: cfg.db_password_dpapi.clone(),
         auto_commit: false,
+        engine: String::new(),
         note: "旧版配置迁移".to_string(),
     });
     true

@@ -19,7 +19,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::config::{AppConfig, DbConnConfig};
 use crate::db_bridge;
-use crate::db_engine::EngineHandle;
+use crate::db_engine::{EngineHandle, EngineKind};
 use crate::db_schema;
 use crate::sql_refs;
 use crate::state::AppState;
@@ -29,6 +29,8 @@ use crate::svn_cred;
 const T_CONNECT: Duration = Duration::from_secs(60);
 /// 元数据（表清单、DDL、执行计划）。
 const T_META: Duration = Duration::from_secs(120);
+/// 临时会话名：列数据源、测试连接、解 prop.xml 口令共用，不占用任何真实连接的会话。
+pub(crate) const PROBE: &str = "__probe";
 
 // ───────────────────────── prop.xml（只读解析，不含口令） ─────────────────────────
 
@@ -158,14 +160,43 @@ fn bridge_env(
 /// 取（没有就建）某个连接的引擎句柄。`key` 是连接 id，同时用作桥里的会话名；
 /// `__probe` / `__test` 给列数据源、测试连接用。
 ///
-/// 同一套 java + classpath 下的所有连接共用**一个** JVM（见 [`shared_bridge`]），
-/// 每条连接只是里面一条会话——这是内存从「每连接 50~70MB」降到「底价 + 每会话几 MB」的关键。
+/// `engine` 由连接配置决定（见 `DbConnConfig::engine`）。两条路的资源代价完全不同：
+/// - JVM 桥：同一套 java + classpath 下的所有连接共用**一个** JVM（见 [`shared_bridge`]），
+///   每条连接只是里面一条会话——这是内存从「每连接 50~70MB」降到「底价 + 每会话几 MB」的关键。
+/// - 纯 Rust：一条连接一个驱动会话，不碰 NC 的 jar，所以也不需要 `bridge_env`。
 pub(crate) fn bridge_for(
     app: &AppHandle,
     state: &AppState,
     cfg: &AppConfig,
     key: &str,
+    engine: EngineKind,
 ) -> Result<Arc<EngineHandle>, String> {
+    if engine == EngineKind::Rust {
+        // 纯 Rust 引擎连 config_dir 都不用建：它不读 NC 的任何文件
+        let old = {
+            let mut map = state
+                .db
+                .lock()
+                .map_err(|_| "数据库桥状态异常".to_string())?;
+            if let Some(existing) = map.get(key) {
+                if existing.kind() == EngineKind::Rust {
+                    return Ok(existing.clone());
+                }
+            }
+            map.remove(key)
+        };
+        if let Some(old) = old {
+            old.shutdown();
+        }
+        let handle = Arc::new(EngineHandle::rust());
+        state
+            .db
+            .lock()
+            .map_err(|_| "数据库桥状态异常".to_string())?
+            .insert(key.to_string(), handle.clone());
+        return Ok(handle);
+    }
+
     let env = bridge_env(app, state, cfg)?;
     let old = {
         let mut map = state
@@ -173,12 +204,13 @@ pub(crate) fn bridge_for(
             .lock()
             .map_err(|_| "数据库桥状态异常".to_string())?;
         if let Some(existing) = map.get(key) {
-            // java 路径与 classpath 都没变 = 还是同一套驱动，可以直接复用
-            if existing.matches_env(&env) {
+            // java 路径与 classpath 都没变 = 还是同一套驱动，可以直接复用。
+            // 引擎种类也要对上：同一个连接被改过引擎时，旧句柄不能拿来用。
+            if existing.kind() == EngineKind::Java && existing.matches_env(&env) {
                 return Ok(existing.clone());
             }
         }
-        // 换了 NC home 或补装了驱动：旧的会话要断掉再重建（锁外做，别持锁做 IO）
+        // 换了 NC home、补装了驱动、或换了引擎：旧的会话要断掉再重建（锁外做，别持锁做 IO）
         map.remove(key)
     };
     if let Some(old) = old {
@@ -221,10 +253,7 @@ fn shared_bridge(
 }
 
 /// 已经存在的引擎句柄（不新建）：没连过的连接上做元数据操作要报「先连接」，而不是偷偷起进程。
-pub(crate) fn existing_bridge(
-    state: &AppState,
-    key: &str,
-) -> Result<Arc<EngineHandle>, String> {
+pub(crate) fn existing_bridge(state: &AppState, key: &str) -> Result<Arc<EngineHandle>, String> {
     let map = state
         .db
         .lock()
@@ -320,15 +349,18 @@ pub(crate) fn protect(password: &str) -> Result<String, String> {
     )?))
 }
 
-/// 连接参数（不含手动口令）：prop 来源走 `connectProp`，手动来源走 `connect`。
+/// 连接参数：prop 来源 + JVM 桥走 `connectProp`（口令在 JVM 里现解），
+/// 其余一律走 `connect`（Rust 引擎拿不到 NC 的 Java 类，口令必须先由
+/// [`prop_password_ready`] 解好存进 DPAPI）。
 pub(crate) fn connect_args(
     cfg: &AppConfig,
     conn: &DbConnConfig,
     password: Option<&str>,
     auto_commit: bool,
+    engine: EngineKind,
 ) -> Result<(&'static str, Vec<String>), String> {
     let auto = auto_commit.to_string();
-    if conn.source == "prop" {
+    if conn.source == "prop" && engine == EngineKind::Java {
         let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
         let ds = conn
             .prop_ds
@@ -341,6 +373,79 @@ pub(crate) fn connect_args(
         "connect",
         vec![conn.url.clone(), conn.user.clone(), pass, auto],
     ))
+}
+
+/// 让 `conn` 具备一个能用的口令，供非 JVM 引擎使用。
+///
+/// prop 来源的连接原本不存口令（每次由 JVM 现解）。纯 Rust 驱动没有 classpath 解不了，
+/// 所以这里做一次「解一次、存起来」：JVM 桥按 prop.xml 解出明文口令 → DPAPI 加密写入配置，
+/// 之后这条连接就等同普通手动连接。代价是 prop 的口令从此在本机落了一份 DPAPI 密文
+/// （和手动连接同一套保护，换机器/换用户解不开）。
+///
+/// 只在**这个连接真的要用 Rust 引擎**时才调；JVM 桥的连接保持「口令不落盘」的老行为。
+pub(crate) async fn prop_password_ready(
+    app: &AppHandle,
+    st: &Arc<AppState>,
+    cfg: &AppConfig,
+    conn: &mut DbConnConfig,
+    typed: Option<&str>,
+    probe: &str,
+) -> Result<(), String> {
+    // 本次手输的口令优先（用户可能在表单里覆盖了 prop.xml 里的）
+    if let Some(p) = typed.filter(|p| !p.is_empty()) {
+        conn.password_dpapi = Some(protect(p)?);
+        return Ok(());
+    }
+    if resolve_password(conn, None).is_ok() {
+        return Ok(());
+    }
+    let ds = conn
+        .prop_ds
+        .clone()
+        .ok_or_else(|| "这个连接缺数据源名".to_string())?;
+    let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
+    let b = bridge_for(app, st, cfg, probe, EngineKind::Java)?;
+    let v = call(b, "propCred", vec![home.root, ds], T_CONNECT).await?;
+    let pwd = v.get("password").and_then(Value::as_str).unwrap_or("");
+    if pwd.is_empty() {
+        return Err(code_label(
+            "need-password",
+            "prop.xml 里这个数据源没写口令，请在连接里手动输入一次",
+        ));
+    }
+    // url / user 也以 prop.xml 为准：连接可能是手改过的，口令却对不上
+    if let Some(u) = v
+        .get("url")
+        .and_then(Value::as_str)
+        .filter(|u| !u.is_empty())
+    {
+        conn.url = u.to_string();
+    }
+    if let Some(u) = v
+        .get("user")
+        .and_then(Value::as_str)
+        .filter(|u| !u.is_empty())
+    {
+        conn.user = u.to_string();
+    }
+    conn.password_dpapi = Some(protect(pwd)?);
+
+    // 落盘：下次连这个连接不用再叫 JVM。写失败不算致命（只是下次再解一遍）
+    let id = conn.id.clone();
+    let url = conn.url.clone();
+    let user = conn.user.clone();
+    let enc = conn.password_dpapi.clone();
+    let _ = st
+        .update_config(move |c| {
+            if let Some(x) = c.db_conns.iter_mut().find(|x| x.id == id) {
+                x.url = url;
+                x.user = user;
+                x.password_dpapi = enc;
+            }
+            Ok(())
+        })
+        .await;
+    Ok(())
 }
 
 // ───────────────────────── 连接 / 执行 / 事务 ─────────────────────────
@@ -367,9 +472,14 @@ pub async fn db_connect(
 ) -> Result<DbConnectResult, String> {
     let st = state.inner().clone();
     let cfg = st.config.read().await.clone();
-    let conn = find_conn(&cfg, &id)?;
-    let (cmd, args) = connect_args(&cfg, &conn, password.as_deref(), conn.auto_commit)?;
-    let bridge = bridge_for(&app, &st, &cfg, &id)?;
+    let mut conn = find_conn(&cfg, &id)?;
+    let engine = EngineKind::parse(&conn.engine);
+    // prop 来源要用 Rust 驱动：先把口令解出来落盘（JVM 桥那边是每次现解，不必存）
+    if engine != EngineKind::Java && conn.source == "prop" {
+        prop_password_ready(&app, &st, &cfg, &mut conn, password.as_deref(), PROBE).await?;
+    }
+    let (cmd, args) = connect_args(&cfg, &conn, password.as_deref(), conn.auto_commit, engine)?;
+    let bridge = bridge_for(&app, &st, &cfg, &id, engine)?;
     let out = call(bridge, cmd, args, T_CONNECT).await?;
 
     let typed = password.filter(|p| !p.is_empty());
@@ -404,16 +514,69 @@ pub async fn db_connect(
     })
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineCaps {
+    /// `java` / `rust`。
+    pub engine: String,
+    /// 给人看的名字。
+    pub label: String,
+    /// 已经连上了（此时能力来自真实句柄，而不是按配置猜的）。
+    pub connected: bool,
+    pub cancel: bool,
+    pub refcursor: bool,
+    pub prop_decrypt: bool,
+    pub multi_session: bool,
+}
+
+/// 这个连接用哪个引擎、那个引擎能做什么。界面上「停止」按钮可用性、引擎选择器的灰项
+/// 都按它来——不要在前端硬编码「rust 不能停」，那会和后端的实现改动脱节。
+#[tauri::command]
+pub async fn db_caps(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<EngineCaps, String> {
+    let cfg = state.config.read().await.clone();
+    let conn = find_conn(&cfg, &id)?;
+    // 连上以后以真实句柄为准：配置文件里写的是「想用哪个」，句柄才是「实际在跑哪个」
+    if let Ok(h) = existing_bridge(&state, &id) {
+        let kind = h.kind();
+        let c = h.caps();
+        return Ok(EngineCaps {
+            engine: kind.as_str().to_string(),
+            label: kind.label().to_string(),
+            connected: true,
+            cancel: c.cancel,
+            refcursor: c.refcursor,
+            prop_decrypt: c.prop_decrypt,
+            multi_session: c.multi_session,
+        });
+    }
+    let kind = EngineKind::parse(&conn.engine);
+    let c = crate::db_engine::Caps::of(kind);
+    Ok(EngineCaps {
+        engine: kind.as_str().to_string(),
+        label: kind.label().to_string(),
+        connected: false,
+        cancel: c.cancel,
+        refcursor: c.refcursor,
+        prop_decrypt: c.prop_decrypt,
+        multi_session: c.multi_session,
+    })
+}
+
 /// 取消这个连接上正在执行的语句。
 ///
 /// 与其它命令的关键差别：它**不等调用锁**——正在跑的那条查询占着这条会话，
-/// 取消要是排在它后面就毫无意义。桥侧在独立线程上收这条命令并调 `Statement.cancel()`，
-/// 被取消的查询会带着 ORA-01013 从原来那个请求上返回，前端照常显示为一次失败的执行。
+/// 取消要是排在它后面就毫无意义。两个引擎各走各的路：
+/// - JVM 桥：桥侧在独立线程上收这条命令并调 `Statement.cancel()`，
+///   被取消的查询会带着 ORA-01013 从原来那个请求上返回；
+/// - 纯 Rust：`RustEngine::cancel()` 只置驱动里的 `BreakHandle` 标志（不拿会话锁），
+///   持锁线程在下一个 100ms 切片上读到标志、发 INTERRUPT 标记后 `reset()`。
+///
+/// 两条路都表现为「原来那个请求返回一次错误」，前端照常显示为一次失败的执行。
 #[tauri::command]
-pub async fn db_cancel(
-    state: tauri::State<'_, Arc<AppState>>,
-    id: String,
-) -> Result<(), String> {
+pub async fn db_cancel(state: tauri::State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     let engine = existing_bridge(&state, &id)?;
     tauri::async_runtime::spawn_blocking(move || engine.cancel())
         .await
@@ -984,6 +1147,7 @@ mod tests {
             prop_ds: None,
             password_dpapi: None,
             auto_commit: false,
+            engine: String::new(),
             note: String::new(),
         }
     }

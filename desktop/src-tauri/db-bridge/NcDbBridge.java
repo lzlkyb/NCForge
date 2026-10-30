@@ -91,7 +91,7 @@ public class NcDbBridge {
     /** stdout 只留给协议。多个会话线程都会往这里写，PrintStream 的 println 是原子的。 */
     private static PrintStream out;
 
-    /** 无会话命令（hello / propList / quit）的会话名占位。 */
+    /** 无会话命令（hello / propList / propCred / quit）的会话名占位。 */
     private static final String NO_SESSION = "-";
 
     /** 活着的会话。主线程负责增删，工作线程只读自己的那一条。 */
@@ -99,7 +99,7 @@ public class NcDbBridge {
 
     /** 已知命令名：用来区分「新格式的第二段是会话名」还是「旧格式的第二段就是命令」。 */
     private static final Set<String> CMDS = new HashSet<String>(Arrays.asList(
-            "hello", "propList", "connect", "connectProp", "exec", "more", "commit",
+            "hello", "propList", "propCred", "connect", "connectProp", "exec", "more", "commit",
             "rollback", "autocommit", "tables", "ncNames", "columns", "indexes", "ddl",
             "explain", "schema", "ping", "disconnect", "quit", "cancel"));
 
@@ -167,6 +167,10 @@ public class NcDbBridge {
         }
         if ("propList".equals(cmd)) {
             ok(id, propList(a.get(0)));
+            return;
+        }
+        if ("propCred".equals(cmd)) {
+            ok(id, propCred(a.get(0), a.get(1)));
             return;
         }
         if ("cancel".equals(cmd)) {
@@ -964,6 +968,24 @@ public class NcDbBridge {
         }
         sb.append(']');
         return "{\"source\":\"" + esc(prop.getPath()) + "\",\"sources\":" + sb + "}";
+    }
+
+    /**
+     * 取某个数据源的连接三要素（**含明文口令**）。
+     *
+     * <p>给纯 Rust 驱动用：那边没有 classpath，解不了 prop.xml 的口令。做法是这里解一次，
+     * Rust 侧立刻 DPAPI 加密存起来，之后这个连接就等同普通手动连接，不必每次再叫 JVM。
+     * 口令只在 stdin/stdout 这条管道上走一次，不落日志、不回前端。
+     */
+    private static String propCred(String home, String dsName) throws Exception {
+        Hashtable<?, ?> ds = readDataSource(home, dsName);
+        String url = str(ds.get("databaseUrl"));
+        if (url == null || url.isEmpty()) {
+            throw new SQLException("prop.xml 里没有数据源 " + dsName);
+        }
+        return "{\"url\":\"" + esc(url)
+                + "\",\"user\":\"" + esc(str(ds.get("user")))
+                + "\",\"password\":\"" + esc(str(ds.get("password"))) + "\"}";
     }
 
     /**

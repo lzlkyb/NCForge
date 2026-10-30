@@ -10,13 +10,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::AppHandle;
 
-use super::db_cmds::{bridge_for, call, code_label, connect_args, drop_bridge, find_conn, protect};
+use super::db_cmds::{
+    bridge_for, call, code_label, connect_args, drop_bridge, find_conn, prop_password_ready,
+    protect, PROBE,
+};
 use crate::config::{AppConfig, DbConnConfig};
 use crate::db_conns;
 use crate::state::AppState;
-
-/// 列数据源、测试连接用的临时桥（不占用任何真实连接的会话）。
-const PROBE: &str = "__probe";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +33,8 @@ pub struct DbConnView {
     pub note: String,
     /// 手动来源是否存了口令（prop 来源恒为 true：口令由 NC 现解）。
     pub has_password: bool,
+    /// `java` / `rust`，这个连接用哪个执行引擎。
+    pub engine: String,
 }
 
 impl From<&DbConnConfig> for DbConnView {
@@ -48,6 +50,9 @@ impl From<&DbConnConfig> for DbConnView {
             auto_commit: c.auto_commit,
             note: c.note.clone(),
             has_password: c.source == "prop" || c.password_dpapi.is_some(),
+            engine: crate::db_engine::EngineKind::parse(&c.engine)
+                .as_str()
+                .to_string(),
         }
     }
 }
@@ -67,6 +72,9 @@ pub struct DbConnInput {
     pub auto_commit: bool,
     #[serde(default)]
     pub note: Option<String>,
+    /// 不传就是 JVM 桥（老前端 / 老配置都走这条）。
+    #[serde(default)]
+    pub engine: Option<String>,
 }
 
 impl DbConnInput {
@@ -91,6 +99,11 @@ impl DbConnInput {
             prop_ds: self.prop_ds.clone(),
             password_dpapi,
             auto_commit: self.auto_commit,
+            // prop 来源也可以选 Rust 引擎：连之前会用 JVM 桥把口令解一次存进 DPAPI
+            // （见 `db_cmds::prop_password_ready`）。老配置缺 `engine` 时仍是 JVM 桥。
+            engine: crate::db_engine::EngineKind::parse(self.engine.as_deref().unwrap_or(""))
+                .as_str()
+                .to_string(),
             note: self.note.clone().unwrap_or_default(),
         }
     }
@@ -107,7 +120,7 @@ async fn prop_sources(
     cfg: &AppConfig,
 ) -> Result<Value, String> {
     let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
-    let b = bridge_for(app, st, cfg, PROBE)?;
+    let b = bridge_for(app, st, cfg, PROBE, crate::db_engine::EngineKind::Java)?;
     call(b, "propList", vec![home.root], Duration::from_secs(60)).await
 }
 
@@ -173,6 +186,7 @@ fn add_prop_sources(cfg: &mut AppConfig, v: &Value, only: Option<&[String]>) -> 
             prop_ds: Some(name.to_string()),
             password_dpapi: None,
             auto_commit: false,
+            engine: crate::db_engine::EngineKind::Java.as_str().to_string(),
             note: format!("NC prop.xml · {name}"),
         });
         n += 1;
@@ -330,9 +344,14 @@ pub async fn db_conn_test(
         .as_deref()
         .and_then(|id| find_conn(&cfg, id).ok())
         .and_then(|c| c.password_dpapi);
-    let draft = conn.to_config("__test".into(), stored);
-    let (cmd, args) = connect_args(&cfg, &draft, password.as_deref(), true)?;
-    let b = bridge_for(&app, &st, &cfg, PROBE)?;
+    let mut draft = conn.to_config("__test".into(), stored);
+    let engine = crate::db_engine::EngineKind::parse(&draft.engine);
+    // 测试也要按用户选的引擎来：选 Rust 却用 JVM 测，测通了真连也可能失败
+    if engine != crate::db_engine::EngineKind::Java && draft.source == "prop" {
+        prop_password_ready(&app, &st, &cfg, &mut draft, password.as_deref(), PROBE).await?;
+    }
+    let (cmd, args) = connect_args(&cfg, &draft, password.as_deref(), true, engine)?;
+    let b = bridge_for(&app, &st, &cfg, PROBE, engine)?;
     let t0 = Instant::now();
     let out = call(b.clone(), cmd, args, Duration::from_secs(60)).await?;
     let ms = t0.elapsed().as_millis() as u64;
@@ -355,6 +374,8 @@ pub async fn db_conn_test(
             .or(v["rows"][0][0].as_u64())
     });
     let _ = call(b, "disconnect", vec![], Duration::from_secs(10)).await;
+    // 测试用的句柄用完就撤：换了引擎或换了账号还留着它，下次测试会复用错的东西
+    drop_bridge(&st, PROBE);
     let s = |k: &str| out.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     Ok(TestResult {
         product: s("product"),
@@ -393,6 +414,7 @@ pub async fn db_conn_import_props(
         prop_ds: None,
         auto_commit: false,
         note: Some(format!("导入 {file}")),
+        engine: None,
     };
     let cfg = state
         .update_config(|c| {
@@ -445,6 +467,7 @@ mod tests {
             prop_ds: None,
             password_dpapi: Some("AQAA密文".into()),
             auto_commit: false,
+            engine: String::new(),
             note: String::new(),
         };
         let v = serde_json::to_string(&DbConnView::from(&c)).unwrap();
@@ -465,6 +488,7 @@ mod tests {
             prop_ds: None,
             auto_commit: true,
             note: None,
+            engine: None,
         };
         let c = i.to_config("id".into(), None);
         assert_eq!(c.name, "ncdev");
