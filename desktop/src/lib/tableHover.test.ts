@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { agoText, buildTableHover, columnForTable, inStringLiteral, wordAt } from "./tableHover";
+import {
+  agoText,
+  buildTableHover,
+  columnForTable,
+  inStringLiteral,
+  openTableLink,
+  OPEN_TABLE_COMMAND,
+  wordAt,
+} from "./tableHover";
 import type { TableLookup } from "./tableLookup";
 
 describe("wordAt", () => {
@@ -144,5 +152,25 @@ describe("buildTableHover", () => {
   it("没有缓存时间就不写那一行", async () => {
     const r = await buildTableHover(line, at, mk([{ name: "dr", type: "NUMBER" }], ""));
     expect(r!.markdown).not.toContain("表结构缓存");
+  });
+
+  it("末尾带「在数据库中打开」的命令链接", async () => {
+    const r = await buildTableHover(line, at, mk([{ name: "dr", type: "NUMBER" }]));
+    // 参数是 JSON 数组再编码：Monaco 的 CommandOpener 会 decodeURIComponent 后按 JSON 解析
+    expect(r!.markdown).toContain(
+      "[在数据库中打开](command:ncforge.openTable?%5B%22pam_equip%22%5D)",
+    );
+  });
+});
+
+describe("openTableLink", () => {
+  it("参数是可被 JSON 解析回来的数组", () => {
+    const link = openTableLink("pam_equip");
+    const query = link.slice(link.indexOf("?") + 1, link.lastIndexOf(")"));
+    expect(JSON.parse(decodeURIComponent(query))).toEqual(["pam_equip"]);
+  });
+
+  it("命令 id 与白名单一致", () => {
+    expect(openTableLink("t").startsWith(`[在数据库中打开](command:${OPEN_TABLE_COMMAND}?`)).toBe(true);
   });
 });

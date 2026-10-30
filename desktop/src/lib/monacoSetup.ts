@@ -14,7 +14,8 @@ import "monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { getStoredTheme, type Theme } from "./theme";
 import { getTableLookup } from "./tableLookup";
-import { buildTableHover } from "./tableHover";
+import { OPEN_TABLE_COMMAND, buildTableHover } from "./tableHover";
+import { openTableInDb } from "./openTableFromHover";
 
 self.MonacoEnvironment = {
   // 只有基础 worker（diff / 单词补全等），所有 label 共用。
@@ -79,6 +80,33 @@ export function applyMonacoTheme(theme: Theme): void {
 
 let themeWired = false;
 let hoverWired = false;
+let cmdWired = false;
+
+/**
+ * 悬停卡片里那个「在数据库中打开」链接的信任白名单。
+ *
+ * **不要写成 `isTrusted: true`**：那等于允许卡片里的任意 `command:` 链接执行任意
+ * 命令（内容一旦被拼脏就是一条提权路径）。给数组时 Monaco 只放行列出的命令
+ * （`markdownRenderer.js` 的 `toAllowCommandsOption`）。
+ */
+const HOVER_TRUSTED = { enabledCommands: [OPEN_TABLE_COMMAND] };
+
+/**
+ * 注册「在数据库中打开」命令。
+ *
+ * 坑：`run` 的签名是 `(accessor, ...args)`，**第一个参数是服务访问器**，命令参数
+ * 从第二个开始。写成 `run: (table) => …` 会拿到一个对象，表现就是"点了没反应"。
+ */
+function wireTableCommand(): void {
+  if (cmdWired) return;
+  cmdWired = true;
+  monaco.editor.addCommand({
+    id: OPEN_TABLE_COMMAND,
+    run: (_accessor, table?: unknown) => {
+      if (typeof table === "string" && table) void openTableInDb(table);
+    },
+  });
+}
 
 /**
  * 在 Java 文件里悬停表名，显示这张表的字段。
@@ -107,7 +135,9 @@ function wireTableHover(): void {
           position.lineNumber,
           Math.max(hit.end, hit.start + 1),
         ),
-        contents: [{ value: hit.markdown }],
+        // isTrusted 只放行我们自己的命令：卡片正文是拼出来的 Markdown，
+        // 给 true 就等于让里面任何 `command:` 链接都能执行
+        contents: [{ value: hit.markdown, isTrusted: HOVER_TRUSTED }],
       };
     },
   });
@@ -122,6 +152,7 @@ export function initMonaco(): typeof monaco {
     window.addEventListener("themechange", (e) => applyMonacoTheme((e as CustomEvent<Theme>).detail));
   }
   wireTableHover();
+  wireTableCommand();
   return monaco;
 }
 

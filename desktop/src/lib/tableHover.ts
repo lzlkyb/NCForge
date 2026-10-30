@@ -89,6 +89,27 @@ export function agoText(secs: number): string {
 /** 浮层里最多列几个字段——再多就超出 Monaco 的高度，看着像被切了。 */
 export const HOVER_MAX_FIELDS = 12;
 
+/**
+ * 「在数据库中打开」用的命令 id。
+ *
+ * 三处必须一致：这里生成的链接、`monacoSetup` 的 `addCommand`、以及
+ * `isTrusted.enabledCommands` 白名单。写错任何一处都表现为「点了没反应」。
+ */
+export const OPEN_TABLE_COMMAND = "ncforge.openTable";
+
+/**
+ * 生成「在数据库中打开」的 command 链接。
+ *
+ * Monaco 的解析规则（`browser/services/openerService.js` 的 CommandOpener）：
+ * `command:<命令 id>?<query>`，query 会 `decodeURIComponent` 后按 JSON 解析，
+ * 结果必须是数组（命令参数按位置展开）。所以表名走 `JSON.stringify([表名])` 再编码。
+ *
+ * 抽成函数是为了能单测——链接格式错一个字，界面上只是"点了没反应"。
+ */
+export function openTableLink(table: string): string {
+  return `[在数据库中打开](command:${OPEN_TABLE_COMMAND}?${encodeURIComponent(JSON.stringify([table]))})`;
+}
+
 export interface HoverPayload {
   /** 命中的词在行内的起止（0 基，左闭右开）。 */
   start: number;
@@ -131,6 +152,7 @@ export async function buildTableHover(
     markdown:
       `**${word}** · 表 · ${cols.length} 个字段\n\n` +
       `| 字段 | 类型 |\n| --- | --- |\n${body}${more}` +
-      (age ? `\n\n---\n表结构缓存 · ${age}` : ""),
+      (age ? `\n\n---\n表结构缓存 · ${age}` : "") +
+      `\n\n${openTableLink(word)}`,
   };
 }
