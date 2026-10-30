@@ -304,6 +304,7 @@ pub fn build_initialize_params(root_path: &str, runtime_home: &str, process_id: 
                 "hover": { "contentFormat": ["markdown", "plaintext"] },
                 "definition": { "linkSupport": false },
                 "signatureHelp": {},
+                "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
                 "publishDiagnostics": {}
             },
             "workspace": {
@@ -358,10 +359,39 @@ fn write_frame(stdin: &Mutex<ChildStdin>, msg: &Value) -> Result<(), String> {
 
 impl LspClient {
     /// 拉起进程并开始读取。进程的 stderr 丢弃（jdt.ls 的日志量很大且对用户无用）。
-    pub fn spawn(mut cmd: Command, handler: Arc<dyn LspHandler>) -> Result<Self, String> {
+    pub fn spawn(cmd: Command, handler: Arc<dyn LspHandler>) -> Result<Self, String> {
+        Self::spawn_inner(cmd, handler, None)
+    }
+
+    /// 同 `spawn`，但把子进程的 stderr 落到 `log`。
+    ///
+    /// 为什么需要：jdt.ls 的真实死因（OSGi 配置区解析失败、JVM 参数不认、堆溢出）
+    /// 全写在 stderr 和 configuration 目录的 `*.log` 里。丢进 NUL 的结果是
+    /// 界面上只剩一句「语言服务进程已退出」，用户和我们都无从下手
+    /// （2026-10-30 踩过：jdtls-config 里躺着 4 份 `UnknownHostException: configuration`，
+    /// 而应用侧一无所知）。
+    pub fn spawn_with_stderr(
+        cmd: Command,
+        handler: Arc<dyn LspHandler>,
+        log: &Path,
+    ) -> Result<Self, String> {
+        Self::spawn_inner(cmd, handler, Some(log))
+    }
+
+    fn spawn_inner(
+        mut cmd: Command,
+        handler: Arc<dyn LspHandler>,
+        log: Option<&Path>,
+    ) -> Result<Self, String> {
+        let stderr = match log {
+            Some(p) => Stdio::from(std::fs::File::create(p).map_err(|e| {
+                format!("无法创建语言服务的错误日志（{}）: {e}", p.display())
+            })?),
+            None => Stdio::null(),
+        };
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(stderr);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

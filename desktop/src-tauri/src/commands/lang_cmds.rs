@@ -39,6 +39,49 @@ fn set_status(app: &tauri::AppHandle, state: &AppState, status: LangStatus) {
 /// 历史上这里还有第四个候选 `config_dir/jdtls`（给手工放置的用户留的门）。
 /// 资源包外置后统一为 `config_dir/resources/` 一套约定——两个 config 目录布局
 /// 并存只会漂移，手工放置的用户改走环境变量（错误信息里指明了）。
+/// 一个 jdt.ls 目录是否**真的能跑起来**。
+///
+/// 只看 `plugins/` 存在不够：复制中断、`cargo clean` 后重跑 `jdtls:fetch` 只做了一半，
+/// 都会留下「有 plugins 目录但缺 bundle」的半残目录。这种目录被选中后 equinox 会在
+/// 启动早期崩掉（实测留下 `UnknownHostException: configuration` +
+/// `EclipseStarter.searchForBundle` 的 NPE），而状态栏只会说「代码智能不可用」。
+/// 所以这里按启动必需项逐个查，缺哪个就说哪个。
+fn usable_jdtls(dir: &Path) -> Result<(), String> {
+    let plugins = dir.join("plugins");
+    if !plugins.is_dir() {
+        return Err("没有 plugins 目录".to_string());
+    }
+    let config_ini = dir
+        .join(if cfg!(windows) {
+            "config_win"
+        } else {
+            "config_linux"
+        })
+        .join("config.ini");
+    if !config_ini.is_file() {
+        return Err(format!("没有 {}", config_ini.display()));
+    }
+    let names: Vec<String> = std::fs::read_dir(&plugins)
+        .map_err(|e| format!("读不了 {}: {e}", plugins.display()))?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    let missing = |pred: &dyn Fn(&str) -> bool, what: &str| -> Result<(), String> {
+        if names.iter().any(|n| pred(n)) {
+            Ok(())
+        } else {
+            Err(format!("缺 {what}"))
+        }
+    };
+    missing(
+        &|n| n.starts_with("org.eclipse.equinox.launcher_") && n.ends_with(".jar"),
+        "equinox 启动 jar",
+    )?;
+    missing(&|n| n.starts_with("org.eclipse.jdt.ls.core_"), "jdt.ls 核心 bundle")?;
+    missing(&|n| n.starts_with("org.eclipse.osgi_"), "OSGi framework bundle")?;
+    Ok(())
+}
+
 fn find_jdtls(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, String> {
     let mut cands: Vec<PathBuf> = Vec::new();
     if let Ok(env_dir) = std::env::var("NCFORGE_JDTLS_DIR") {
@@ -57,13 +100,74 @@ fn find_jdtls(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, Stri
             .join("resources")
             .join("jdtls"),
     );
-    cands
-        .into_iter()
-        .find(|p| p.join("plugins").is_dir())
-        .ok_or_else(|| {
-            "找不到 Java 语言服务组件（jdt.ls）。若刚安装/更新过，请到设置 → 组件里下载；或设置环境变量 NCFORGE_JDTLS_DIR 指定已有目录"
-                .to_string()
-        })
+    // 逐个查，把「跳过它的原因」攒起来：全都不行时，错误信息要能说清每个候选
+    // 差在哪，而不是笼统一句「找不到组件」——否则用户只会去重装。
+    let mut skipped: Vec<String> = Vec::new();
+    for dir in cands {
+        match usable_jdtls(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(why) => skipped.push(format!("{}：{why}", dir.display())),
+        }
+    }
+    Err(format!(
+        "找不到可用的 Java 语言服务组件（jdt.ls）。若刚安装/更新过，请到设置 → 组件里下载；\
+         或设置环境变量 NCFORGE_JDTLS_DIR 指定已有目录。已检查：{}",
+        skipped.join("；")
+    ))
+}
+
+/// jdt.ls 死因的现场：stderr 尾部 + configuration 目录里最新的 OSGi 日志尾部。
+///
+/// 只说「进程意外退出」对排查毫无帮助：真正的错误（OSGi 配置区解析失败、堆溢出、
+/// 启动参数不认识）全在这两处文本里。带上它们，用户 hover 状态栏就能看到原因，
+/// 也省掉一轮「远程猜」。
+fn crash_hint(stderr_log: &Path, osgi_dir: &Path) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(t) = tail_lines(stderr_log, 6) {
+        parts.push(format!("stderr：{t}"));
+    }
+    if let Some(p) = newest_log(osgi_dir) {
+        if let Some(t) = tail_lines(&p, 8) {
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            parts.push(format!("{name}：{t}"));
+        }
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n现场：{}", parts.join(" ｜ "))
+    }
+}
+
+/// 读文件最后 `n` 行非空文本。日志可能很大，只取末尾 16KB。
+fn tail_lines(path: &Path, n: usize) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let start = bytes.len().saturating_sub(16 * 1024);
+    let text = String::from_utf8_lossy(&bytes[start..]).into_owned();
+    let mut lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let skip = lines.len().saturating_sub(n);
+    let picked: Vec<&str> = lines.drain(skip..).collect();
+    Some(picked.join(" ⏎ ").chars().take(700).collect())
+}
+
+/// configuration 目录里最新的 OSGi `.log`（equinox 只在启动出错时写它）。
+fn newest_log(dir: &Path) -> Option<PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "log"))
+        .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
 }
 
 /// 处理 jdt.ls 主动发来的通知：记录状态、把诊断转给前端。
@@ -77,6 +181,9 @@ struct Handler {
     generation: u64,
     /// NC 自带 JDK 的根目录：`workspace/configuration` 请求要按它回 runtimes。
     runtime_home: String,
+    /// jdt.ls 的 stderr 落盘位置与 OSGi 日志目录，进程意外退出时用来带出现场。
+    stderr_log: PathBuf,
+    osgi_dir: PathBuf,
 }
 
 impl LspHandler for Handler {
@@ -113,13 +220,16 @@ impl LspHandler for Handler {
             current
         };
         if unexpected {
+            let hint = crash_hint(&self.stderr_log, &self.osgi_dir);
             set_status(
                 &self.app,
                 &self.state,
                 LangStatus {
                     state: "error".into(),
                     module: Some(self.module.clone()),
-                    message: format!("代码智能进程意外退出（{reason}），可能是内存上限太小，点「重试」或在设置里调大"),
+                    message: format!(
+                        "代码智能进程意外退出（{reason}），可能是内存上限太小，点「重试」或在设置里调大{hint}"
+                    ),
                     ..LangStatus::stopped()
                 },
             );
@@ -271,6 +381,9 @@ fn launch(
     let real_dir = root.join(module);
     let shadow_module = shadow_dir.join(module);
     let runtime_s = runtime.to_string_lossy().into_owned();
+    // stderr 落到固定的一个文件（不追加：只关心最近一次拉起为什么没起来）。
+    let stderr_log = base.join("jdtls-stderr.log");
+    let osgi_dir = base.join("jdtls-config");
     let handler = Handler {
         app: app.clone(),
         state: state.clone(),
@@ -278,6 +391,8 @@ fn launch(
         real_prefix: path_to_uri(&real_dir.to_string_lossy()),
         shadow_prefix: path_to_uri(&shadow_module.to_string_lossy()),
         runtime_home: runtime_s.clone(),
+        stderr_log: stderr_log.clone(),
+        osgi_dir: osgi_dir.clone(),
         generation: {
             let mut run = lock_lang(state);
             run.generation += 1;
@@ -288,17 +403,22 @@ fn launch(
         java_exe: &java,
         ls_dir: &ls_dir,
         data_dir: &data_dir,
-        config_dir: &base.join("jdtls-config"),
+        config_dir: &osgi_dir,
         xmx_mb,
     }
     .command()?;
-    let client = LspClient::spawn(cmd, Arc::new(handler))?;
+    let client = LspClient::spawn_with_stderr(cmd, Arc::new(handler), &stderr_log)?;
     let root_s = shadow_dir.to_string_lossy().into_owned();
-    client.request(
+    if let Err(e) = client.request(
         "initialize",
         build_initialize_params(&root_s, &runtime_s, std::process::id()),
         Duration::from_secs(120),
-    )?;
+    ) {
+        // 失败现场立刻取：进程可能马上被 kill 掉，日志还没写完就只能看到空文件
+        let hint = crash_hint(&stderr_log, &osgi_dir);
+        client.kill();
+        return Err(format!("{e}{hint}"));
+    }
 
     // 先登记会话并置为 indexing，再发 `initialized`。顺序不能反：索引有缓存（重启同一模块）时
     // `ServiceReady` 可能在 `initialized` 后几毫秒就到，那时状态还是 starting 的话处理器会把它丢掉，
@@ -336,8 +456,9 @@ fn launch(
     if let Err(e) = handshake {
         // 握手一半失败：不能留下一个已登记但不可用的会话和一个孤儿进程
         lock_lang(state).session = None;
+        let hint = crash_hint(&stderr_log, &osgi_dir);
         session.client.kill();
-        return Err(e);
+        return Err(format!("{e}{hint}"));
     }
     Ok(status)
 }
@@ -529,4 +650,116 @@ pub async fn lang_notify(
 ) -> Result<(), String> {
     let (session, p) = prepare(&state, path.as_deref(), &params)?;
     session.client.notify(&method, p)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ncforge-lang-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// 造一个「该有的都有」的 jdt.ls 目录，只建判定要用的空文件。
+    fn fake_jdtls(dir: &Path) {
+        let plugins = dir.join("plugins");
+        fs::create_dir_all(&plugins).unwrap();
+        for n in [
+            "org.eclipse.equinox.launcher_1.5.700.v20200207-2156.jar",
+            "org.eclipse.jdt.ls.core_0.57.0.202006172108.jar",
+            "org.eclipse.osgi_3.15.300.v20200520-1959.jar",
+            "org.eclipse.equinox.launcher.win32.win32.x86_64_1.1.1200.v20200508-1552.jar",
+        ] {
+            fs::write(plugins.join(n), b"").unwrap();
+        }
+        let cfg = dir.join(if cfg!(windows) { "config_win" } else { "config_linux" });
+        fs::create_dir_all(&cfg).unwrap();
+        fs::write(cfg.join("config.ini"), b"osgi.bundles=x").unwrap();
+    }
+
+    #[test]
+    fn 完整目录才算可用() {
+        let d = temp("ok");
+        fake_jdtls(&d);
+        assert!(usable_jdtls(&d).is_ok());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// 半残目录（复制中断 / cargo clean 后只跑了一半 jdtls:fetch）必须被判定不可用。
+    /// 选中它启动的表现是 equinox 在配置区就崩，界面上只有「代码智能不可用」——
+    /// 2026-10-30 就是这么排查了半天的。
+    #[test]
+    fn 半残目录逐项报缺什么() {
+        let d = temp("partial");
+        let err = usable_jdtls(&d).unwrap_err();
+        assert!(err.contains("plugins"), "空目录要指出缺 plugins：{err}");
+
+        fake_jdtls(&d);
+        fs::remove_file(d.join("plugins").join("org.eclipse.equinox.launcher_1.5.700.v20200207-2156.jar"))
+            .unwrap();
+        let err = usable_jdtls(&d).unwrap_err();
+        assert!(err.contains("equinox 启动 jar"), "{err}");
+
+        fake_jdtls(&d);
+        fs::remove_file(d.join("plugins").join("org.eclipse.jdt.ls.core_0.57.0.202006172108.jar")).unwrap();
+        let err = usable_jdtls(&d).unwrap_err();
+        assert!(err.contains("jdt.ls 核心"), "{err}");
+
+        fake_jdtls(&d);
+        fs::remove_file(d.join("plugins").join("org.eclipse.osgi_3.15.300.v20200520-1959.jar")).unwrap();
+        let err = usable_jdtls(&d).unwrap_err();
+        assert!(err.contains("OSGi framework"), "{err}");
+
+        fake_jdtls(&d);
+        let cfg = d.join(if cfg!(windows) { "config_win" } else { "config_linux" });
+        fs::remove_file(cfg.join("config.ini")).unwrap();
+        let err = usable_jdtls(&d).unwrap_err();
+        assert!(err.contains("config.ini"), "{err}");
+
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// 只有片段 jar（`...launcher.win32...`）不能被当成启动 jar。
+    #[test]
+    fn 片段_jar_不算启动_jar() {
+        let d = temp("fragment");
+        fake_jdtls(&d);
+        fs::remove_file(d.join("plugins").join("org.eclipse.equinox.launcher_1.5.700.v20200207-2156.jar"))
+            .unwrap();
+        assert!(usable_jdtls(&d).is_err(), "只剩 win32 片段时必须拒绝");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn 尾部日志只取最后几行且截断() {
+        let d = temp("tail");
+        let f = d.join("x.log");
+        let body: String = (1..=50).map(|i| format!("行{i}\n")).collect();
+        fs::write(&f, body).unwrap();
+        let got = tail_lines(&f, 3).unwrap();
+        assert!(got.contains("行48") && got.contains("行50"), "{got}");
+        assert!(!got.contains("行1\n") && !got.contains("行47"), "{got}");
+
+        assert!(tail_lines(&d.join("nope.log"), 3).is_none());
+        fs::write(&f, b"").unwrap();
+        assert!(tail_lines(&f, 3).is_none(), "空文件没有现场可报");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// 两条线索都没有时不能给个空壳「现场：」，那还不如没有。
+    #[test]
+    fn 没有现场时_hint_为空() {
+        let d = temp("hint");
+        assert_eq!(crash_hint(&d.join("a.log"), &d), "");
+        fs::write(d.join("1793338302103.log"), b"!SESSION x\njava.net.UnknownHostException: configuration\n")
+            .unwrap();
+        let hint = crash_hint(&d.join("a.log"), &d);
+        assert!(hint.contains("UnknownHostException"), "{hint}");
+        assert!(hint.contains("1793338302103.log"), "要指出是哪份日志：{hint}");
+        let _ = fs::remove_dir_all(&d);
+    }
 }
