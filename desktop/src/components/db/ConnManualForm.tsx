@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Icon } from "../ui/icon";
 import { EnvChips } from "./EnvChips";
 import { friendlyDbError, thousands } from "../../lib/db";
-import { buildOracleUrl, dbApi, parseOracleUrl, type DbConn, type DbConnInput, type DbEnv, type TestResult } from "../../lib/dbApi";
+import { buildOracleUrl, dbApi, parseOracleUrl, type DbConn, type DbConnInput, type DbEngine, type DbEnv, type TestResult } from "../../lib/dbApi";
 import { closeConnDialog, disconnect, loadConns, rtOf } from "../../lib/dbStore";
 
 interface Form {
@@ -18,6 +18,7 @@ interface Form {
   remember: boolean;
   autoCommit: boolean;
   note: string;
+  engine: DbEngine;
 }
 
 function initial(conn: DbConn | null): Form {
@@ -35,13 +36,15 @@ function initial(conn: DbConn | null): Form {
     remember: true,
     autoCommit: conn?.autoCommit ?? false,
     note: conn?.note ?? "",
+    engine: conn?.engine ?? "java",
   };
 }
 
 /**
  * 手动填写（新建或编辑）。主机 / 端口 / 服务名与 JDBC URL 两种写法互相同步。
  *
- * 来自 prop.xml 的连接只能改名称 / 环境 / 事务模式：连接串与口令跟着 prop.xml 走。
+ * 来自 prop.xml 的连接只能改名称 / 环境 / 事务模式 / 引擎：连接串与口令跟着 prop.xml 走。
+ * 选纯 Rust 驱动时，口令会在第一次连接时由 JVM 桥解一次并加密存本机（之后不再需要 JVM）。
  */
 export function ConnManualForm({ conn }: { conn: DbConn | null }) {
   const [f, setF] = useState<Form>(() => initial(conn));
@@ -71,6 +74,7 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
     propDs: conn?.propDs ?? null,
     autoCommit: f.autoCommit,
     note: f.note.trim() || null,
+    engine: f.engine,
   });
 
   const missing = !f.url.trim() ? "连接串" : !f.user.trim() ? "用户名" : null;
@@ -87,9 +91,9 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
   const save = async () => {
     setSaving(true);
     try {
-      const target = conn && (conn.url !== f.url.trim() || conn.user !== f.user.trim());
+      const target = conn && (conn.url !== f.url.trim() || conn.user !== f.user.trim() || conn.engine !== input().engine);
       await dbApi.save(input(), f.password || undefined, f.remember);
-      // 连接串或用户变了：旧会话已经不是这个连接了，断掉重连
+      // 连接串、用户或引擎变了：旧会话已经不是这个连接了，断掉重连
       if (target && conn && rtOf(conn.id).status === "connected") await disconnect(conn.id);
       await loadConns();
       closeConnDialog();
@@ -113,7 +117,7 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
             <span className="dbx-mono">{f.url}</span>
             <label>用户</label>
             <span className="dbx-mono">{f.user}</span>
-            <p className="dbx-hint">来自 NC prop.xml 的数据源 {conn?.propDs}：连接串与口令跟着 prop.xml 走，口令由 NC 自带的解密现解。</p>
+            <p className="dbx-hint">来自 NC prop.xml 的数据源 {conn?.propDs}：连接串与口令跟着 prop.xml 走，每次连接时由 NC 自带的类解密。</p>
           </>
         ) : (
           <>
@@ -150,6 +154,24 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
             </div>
           </>
         )}
+        <label>引擎</label>
+        <div className="dbx-txmode" style={{ justifySelf: "start" }}>
+          <button type="button" data-on={f.engine === "java" || undefined} onClick={() => put({ engine: "java" })}>
+            JVM 桥
+          </button>
+          <button type="button" data-on={f.engine === "rust" || undefined} onClick={() => put({ engine: "rust" })}>
+            纯 Rust 驱动
+          </button>
+        </div>
+        <p className="dbx-hint">
+          {f.engine === "rust"
+            ? fromProp
+              ? "纯 Rust 驱动：每条连接只占几 MB。prop.xml 里的口令会在第一次连接时由 JVM 桥解一次、加密存在本机，之后不再依赖 JVM。代价是没有 REF CURSOR。"
+              : "纯 Rust 驱动：每条连接只占几 MB（JVM 桥光底价就 60MB 以上）。代价是没有 REF CURSOR。"
+            : fromProp
+              ? "JVM 桥：prop.xml 的口令每次现解、不落盘，这是默认选项。"
+              : "JVM 桥：能力最全（支持 REF CURSOR、能解 prop.xml 口令），多条连接共用一个 JVM。"}
+        </p>
         <label>事务</label>
         <div className="dbx-txmode" style={{ justifySelf: "start" }}>
           <button type="button" data-on={!f.autoCommit || undefined} onClick={() => put({ autoCommit: false })}>

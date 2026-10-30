@@ -37,8 +37,20 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, historyOpe
     <div className="dbx-sqlbar" data-prod={conn?.env === "prod" || undefined}>
       <ConnPicker connId={tab.connId} onPick={(id) => void switchConn(tab.id, id)} />
       {tab.running ? (
-        // 执行中把「执行」换成「停止」：以前只能干等 30 秒超时，或者杀掉整个应用
-        <button type="button" className="dbx-btn bad" onClick={onStop} title="取消正在执行的语句（数据库侧会收到 ORA-01013）">
+        // 执行中把「执行」换成「停止」：以前只能干等 30 秒超时，或者杀掉整个应用。
+        // 能不能停按 `Caps.cancel` 决定（两个引擎现在都支持，但要留出按能力降级的路）：
+        // 让它可点再报错，用户会以为语句已经在库里停了。
+        <button
+          type="button"
+          className="dbx-btn bad"
+          disabled={rt.caps ? !rt.caps.cancel : false}
+          onClick={onStop}
+          title={
+            rt.caps && !rt.caps.cancel
+              ? "这个连接用不了语句中断，只能等它自己跑完或超时"
+              : "取消正在执行的语句（数据库侧会收到 ORA-01013）"
+          }
+        >
           <Icon name="stop" size={12} />
           停止
         </button>

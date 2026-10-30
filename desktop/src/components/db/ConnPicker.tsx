@@ -40,6 +40,7 @@ export function ConnPicker({ connId, onPick }: { connId: string | null; onPick: 
         {x.user}@{dbNameOf(x.url)}
       </span>
       <span className="r">
+        {x.engine === "rust" && <span className="dbx-echip" title="纯 Rust 驱动：省内存（不常驻 JVM）">Rust</span>}
         <span className="dbx-echip">{ENV_LABEL[x.env]}</span>
       </span>
     </button>
@@ -51,7 +52,7 @@ export function ConnPicker({ connId, onPick }: { connId: string | null; onPick: 
         ref={btnRef}
         type="button"
         className={`dbx-connpick${c ? ` e-${c.env}` : ""}`}
-        title={c ? `${c.user}@${c.url}` : "选择连接"}
+        title={c ? `${c.user}@${c.url}${c.engine === "rust" ? "（纯 Rust 驱动）" : ""}` : "选择连接"}
         onClick={() => {
           if (Date.now() - closedAt.current < 300) return;
           const r = btnRef.current!.getBoundingClientRect();

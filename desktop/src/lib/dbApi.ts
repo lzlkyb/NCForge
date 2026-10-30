@@ -26,7 +26,17 @@ export interface DbConn {
   autoCommit: boolean;
   note: string;
   hasPassword: boolean;
+  /** 执行引擎：`java` = 常驻 JVM + JDBC（默认），`rust` = 纯 Rust 驱动（省内存、不常驻 JVM）。 */
+  engine: DbEngine;
 }
+
+/**
+ * 执行引擎。**这是连接级属性**，不是全局开关：同一个库同一份 SQL，两条路的资源代价与
+ * 能力不一样（见 {@link EngineCaps}），而「要不要解 prop.xml 口令」本身就是连接带来的。
+ */
+export type DbEngine = "java" | "rust";
+
+export const ENGINE_LABEL: Record<DbEngine, string> = { java: "JVM 桥", rust: "纯 Rust 驱动" };
 
 export interface DbConnInput {
   id?: string | null;
@@ -38,6 +48,23 @@ export interface DbConnInput {
   propDs?: string | null;
   autoCommit: boolean;
   note?: string | null;
+  /** 不传就是 JVM 桥。
+   * prop 来源的连接也能选纯 Rust：第一次连接时后端会用 JVM 解一次口令并加密存本机。 */
+  engine?: DbEngine;
+}
+
+/** 这个连接用哪个引擎、那个引擎能做什么。界面按它决定按钮能不能用。 */
+export interface EngineCaps {
+  engine: DbEngine;
+  label: string;
+  /** 已经连上了（能力来自真实句柄，不是按配置猜的）。 */
+  connected: boolean;
+  /** 语句执行中能取消。为 false 时「停止」按钮是灰的——不能骗用户说停了。 */
+  cancel: boolean;
+  refcursor: boolean;
+  /** 能解 NC prop.xml 里加密的口令。 */
+  propDecrypt: boolean;
+  multiSession: boolean;
 }
 
 /** 手动提交模式下的未提交事务。`statements = 0` 表示没有。 */
@@ -174,8 +201,10 @@ export const dbApi = {
   disconnect: (id: string) => invoke<void>("db_disconnect", { id }),
   exec: (id: string, sql: string, maxRows: number, timeoutSec: number) =>
     invoke<ExecResult>("db_exec", { id, sql, maxRows, timeoutSec }),
-  /** 取消这个连接上正在执行的语句（不等执行返回，立即生效）。 */
+  /** 取消这个连接上正在执行的语句（不等执行返回，立即生效）。能不能用先看 `caps.cancel`。 */
   cancel: (id: string) => invoke<void>("db_cancel", { id }),
+  /** 这个连接用哪个引擎、那个引擎能做什么。 */
+  caps: (id: string) => invoke<EngineCaps>("db_caps", { id }),
   more: (id: string, maxRows: number) => invoke<MoreResult>("db_more", { id, maxRows }),
   tx: (id: string, action: "commit" | "rollback" | "autocommit-on" | "autocommit-off" | "status") =>
     invoke<{ tx: TxInfo; alive?: boolean }>("db_tx", { id, action }),

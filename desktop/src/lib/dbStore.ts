@@ -7,6 +7,7 @@ import {
   type ColumnMeta,
   type ConnectInfo,
   type DbConn,
+  type EngineCaps,
   type PlanRow,
   type SchemaCacheData,
   type TableInfo,
@@ -32,6 +33,13 @@ export interface ConnRuntime {
   /** NC 表中文名：小写表名 → 显示名。 */
   ncNames?: Record<string, string>;
   schema?: SchemaCacheData | null;
+  /**
+   * 这个连接实际用的引擎能力（连上后由后端报回来）。
+   *
+   * 界面上「停止」按钮能不能点、有没有 refcursor 相关入口，都按它决定——
+   * 不在前端硬编码「rust 不能停」，那会和后端的实现改动脱节。
+   */
+  caps?: EngineCaps;
 }
 
 export interface ResultEntry {
@@ -203,6 +211,8 @@ export async function connect(id: string, password?: string, remember?: boolean)
   try {
     const info = await dbApi.connect(id, password, remember);
     setRt(id, { status: "connected", info, tx: { autoCommit: info.autoCommit, statements: 0, rows: 0, since: 0 } });
+    // 能力位问一次就够（连接期间不会变）；失败不影响已连上的状态，只是按钮按保守处理
+    void dbApi.caps(id).then((caps) => setRt(id, { caps })).catch(() => undefined);
     void loadMeta(id);
     if (password && remember !== false) void loadConns();
     return "ok";
