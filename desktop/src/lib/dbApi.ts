@@ -183,6 +183,18 @@ export interface SchemaCacheData {
   tables: Record<string, [string, string][]>;
 }
 
+/** `db_pending_tx` 的一行：某个连接退出时的事务情况。 */
+export interface PendingTxRow {
+  id: string;
+  /** `pending` 有未提交写入；`clean` 干净；`unknown` 探测超时/连接已断。 */
+  state: "pending" | "clean" | "unknown";
+  engine?: string;
+  statements?: number;
+  rows?: number;
+  since?: number;
+  message?: string;
+}
+
 export const dbApi = {
   list: () => invoke<DbConn[]>("db_conn_list"),
   save: (conn: DbConnInput, password?: string, remember = true) =>
@@ -220,6 +232,14 @@ export const dbApi = {
 
   schemaCache: (id: string) => invoke<SchemaCacheData | null>("db_schema_cache", { id }),
   schemaSync: (id: string) => invoke<SchemaStatus>("db_schema_sync", { id }),
+
+  /**
+   * 退出前问一遍：哪些连接上还有未提交的写入。
+   *
+   * 只回 `id` 与事务数据，连接名/环境由前端从 `dbStore` 取——后端再抄一份
+   * 只会两边不同步。`state: "unknown"` 表示探测超时或连接已断（**不是**干净）。
+   */
+  pendingTx: async () => (await invoke<{ conns: PendingTxRow[] }>("db_pending_tx")).conns ?? [],
 };
 
 /** 连接串拆成「主机:端口」与「服务名 / SID」，以及是否 SID 写法（`@host:port:sid`）。 */

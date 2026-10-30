@@ -19,6 +19,7 @@ import { closeModel } from "../../lib/editorStore";
 import { baseName, getWorkspace, setWorkspace } from "../../lib/workspace";
 import { compileCancel, compileModule, isCompileCancelled, onCompileLog } from "../../lib/compile";
 import { useFileSession } from "../../hooks/useFileSession";
+import { isUnsaved } from "../../lib/saveAllDirty";
 import { useLangWiring } from "../../hooks/useLangWiring";
 import { stopLang } from "../../lib/lang";
 import { registerCommands } from "../../lib/commandRegistry";
@@ -198,7 +199,9 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
   }
 
   const active: TabMeta | null = tabs.find((t) => t.path === activePath) ?? null;
-  const hasUnsaved = tabs.some((t) => t.dirty || t.eolChanged);
+  // 与退出前的「保存全部」用同一个判定（lib/saveAllDirty.isUnsaved）：
+  // 两处口径一旦不一致，就会出现「换目录时警告说会丢、退出时却没弹框」这类怪事
+  const hasUnsaved = tabs.some(isUnsaved);
   /** 当前文件在树上被标了 UTF-8! 时，状态栏也说一句。 */
   const activeMark = active ? tree.marks[active.path] : undefined;
   const showLargeHint =

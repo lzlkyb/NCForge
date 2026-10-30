@@ -4,13 +4,12 @@ import { invoke } from "./tauri";
  * 应用配置（与 Rust `config::AppConfig` 一一对应）。
  *
  * **字段名是 Rust 的 snake_case，不是 camelCase**：`AppConfig` 没有
- * `#[serde(rename_all)]`，序列化出来就是 `release_webview_on_close`。
- * 以前这里用 `releaseWebviewOnClose` 读，读到的永远是 undefined —— 开关
- * 每次打开设置页都显示关闭；写回时又漏掉真正的字段，改了等于没改。
+ * `#[serde(rename_all)]`，序列化出来就是 `autostart_enabled`。
+ * 以前这里用 camelCase 读，读到的永远是 undefined —— 开关每次打开设置页都显示
+ * 关闭；写回时又漏掉真正的字段，改了等于没改。
  * 新增字段时两边一起改，并且**写配置只用 `patchConfig` 提交要改的字段**（见下）。
  */
 export interface AppConfig {
-  release_webview_on_close: boolean;
   autostart_enabled: boolean;
   workspace_root: string | null;
   nc_home: string | null;
@@ -42,7 +41,6 @@ export const langRegenerate = () => invoke<unknown>("lang_regenerate");
  * 命令（要探测目录、要在越界时明确报错），别往这里加。
  */
 export interface ConfigPatch {
-  release_webview_on_close?: boolean;
   autostart_enabled?: boolean;
 }
 

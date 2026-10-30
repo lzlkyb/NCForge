@@ -197,6 +197,16 @@ export function setConns(conns: DbConn[]) {
   set({ conns, loaded: true, loadError: null });
 }
 
+/**
+ * 仅测试用：把整份 store 复位成空状态。
+ *
+ * 为什么需要：`conns` / `rt` 都是模块级，前一个用例留下的 `rt[id].tx` 会被下一个
+ * 用例读到（表现为"莫名多出一条事务"）。`setConns([])` 只清连接表，清不掉 rt。
+ */
+export function __resetDbForTest() {
+  set({ conns: [], loaded: false, loadError: null, rt: {}, tabs: [], active: null, dialog: null });
+}
+
 export async function loadConns(): Promise<void> {
   try {
     setConns(await dbApi.list());

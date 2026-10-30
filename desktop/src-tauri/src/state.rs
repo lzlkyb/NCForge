@@ -57,6 +57,20 @@ pub struct AppState {
     /// 杀进程。放在 AppState 上而不是模块级 static：它跟一个应用实例同生命周期，
     /// 测试里也不会互相污染（本文件头注释的同一条纪律）。
     pub compile_cancel: std::sync::atomic::AtomicBool,
+    /// 退出已获放行：`CloseRequested` 看到它就真的让窗口关（进程随后退出）。
+    ///
+    /// 为什么需要这个标志：关窗时前端要先问一遍「有未提交的事务吗」，同步的窗口
+    /// 回调里没法等结果，只能 `prevent_close()` 拦一次；前端答完（提交/回滚完，
+    /// 或确认干净）再置这个位，由 `app_quit` 重新关窗放行。
+    pub quit_approved: std::sync::atomic::AtomicBool,
+    /// 前端已经开始处理这一次退出请求。
+    ///
+    /// 用于兜底强退：`prevent_close()` 之后如果 webview 已经卡死/崩了，没人会回话，
+    /// 应用就永远关不掉。起一个 5 秒计时，没等到这个位就说明界面起不来了，直接退
+    /// （这种状态下也弹不出确认框，未提交事务只能由 Oracle 回滚）。
+    pub quit_acked: std::sync::atomic::AtomicBool,
+    /// 正在走一次退出确认。挡住用户连点 X 时重复发事件、重复起计时器。
+    pub quit_checking: std::sync::atomic::AtomicBool,
     /// 供 notifications feature 关闭时也能注入的 AppHandle 存根。
     /// 需要发桌面通知的代码统一走 main.rs 的 `notify_toast`（那里按 feature 门控），
     /// 不要直接持有 AppHandle 到处发。
@@ -75,6 +89,9 @@ impl AppState {
             db_procs: std::sync::Mutex::new(Default::default()),
             lang: std::sync::Mutex::new(Default::default()),
             compile_cancel: std::sync::atomic::AtomicBool::new(false),
+            quit_approved: std::sync::atomic::AtomicBool::new(false),
+            quit_acked: std::sync::atomic::AtomicBool::new(false),
+            quit_checking: std::sync::atomic::AtomicBool::new(false),
             app_handle: std::sync::Mutex::new(None),
         })
     }

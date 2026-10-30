@@ -104,23 +104,6 @@ export function shellTypeCopy(platform: string | undefined): ShellTypeCopy {
 }
 
 /**
- * 「关窗时释放界面内存」的说明文案。
- *
- * 两个平台的数字差得很远，而且**测量口径不同**，不能共用一句话：
- * - Windows：WebView2 是多进程（BROWSER/gpu/renderer/…），它们与主进程合计
- *   约 85MB，销毁后只剩 Rust 侧约 6MB；
- * - macOS：WKWebView 跑在独立的 `com.apple.WebKit.WebContent` 进程里，实测显示窗口后
- *   该进程约 121MB，关窗后进程直接消失；而**主进程几乎不变**（约 22MB）。
- *   所以 mac 上只看主进程会得出“webview 不要钱”的错误结论。
- */
-export function releaseWebviewHint(platform: string | undefined): string {
-  const saving = isMac(platform)
-    ? "关窗后界面进程整体退出，释放约 120MB（主进程约 22MB 常驻）"
-    : "托盘常驻内存约 85MB → 6MB";
-  return `开启：关窗时销毁界面进程，${saving}，再次打开需重新加载（1~2 秒）；关闭：仅隐藏窗口，再次打开瞬时显示，但界面进程持续占用内存。MCP 服务、托盘与桌面通知均不受影响。默认开启`;
-}
-
-/**
  * 「后台命令完成通知」一行的说明。
  *
  * 原文案写死了「Windows toast」，mac 上它是通知中心横幅。
@@ -156,7 +139,7 @@ export interface AboutCopy {
  * - 「3.4MB 安装包」是 Windows NSIS 安装包的体积，mac 侧压根没有安装程序
  *   （发布物是 `.app.tar.gz`，装法是拖进 /Applications），照搬就是编数字；
  * - 「启动内存 < 20MB」同样是 Windows 口径，mac 主进程实测约 22MB
- *   （参见 releaseWebviewHint 的注释，两平台测量口径本就不同）；
+ *   （Windows 是 WebView2 多进程合计、mac 是主进程单独口径，不能直接对比）；
  * - 「Job Object 进程隔离」是 Windows 专属 API，mac 上是 POSIX 进程组
  *   （见 stop_command.rs：start_kill 在两个平台上底层完全不同）。
  *
@@ -171,7 +154,7 @@ export function aboutCopy(platform: string | undefined): AboutCopy {
         { val: "约 22 MB", label: "常驻内存" },
         { val: "17 个", label: "MCP 工具" },
       ],
-      lightweight: "无需安装程序，拖进「应用程序」即用；托盘常驻内存约 22MB",
+      lightweight: "无需安装程序，拖进「应用程序」即用；运行时内存约 22MB",
       sandbox: "路径白名单 + 危险命令拦截 + 进程组隔离",
     };
   }

@@ -2,7 +2,7 @@ import { SettingsLayout } from "../settings/SettingsLayout";
 import { DockRegion } from "../workspace/WorkbenchDock";
 import { useEffect, useState } from "react";
 import { invokeOrToast } from "../../lib/tauri";
-import { getConfig, patchConfig, type ConfigPatch } from "../../lib/appConfig";
+import { patchConfig, type ConfigPatch } from "../../lib/appConfig";
 import { toast } from "../ui/toast";
 import { APP_INFO, CHANGELOG, CATEGORY_LABELS } from "../../lib/about";
 import { Card } from "../ui/card";
@@ -22,22 +22,13 @@ import { KeymapSettings } from "../settings/KeymapSettings";
  */
 export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
   const [autostart, setAutostart] = useState(false);
-  const [releaseOnClose, setReleaseOnClose] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  // 挂载拉一次真实配置（get_config 命令，见 commands/system.rs）。
-  // 字段名是 snake_case（Rust 没做 rename_all），见 lib/appConfig.ts。
+  // 自启开关显示**系统真源**（get_autostart 读注册表/LaunchAgent）：
+  // 配置里的 autostart_enabled 只是镜像值——用户在系统设置或安装器里改过自启，
+  // 镜像不会同步，UI 会显示一个与事实不符的状态。
   useEffect(() => {
     void (async () => {
-      try {
-        const cfg = await getConfig();
-        setReleaseOnClose(cfg.release_webview_on_close);
-      } catch {
-        // 读失败保持默认值即可，不阻断页面
-      }
-      // 自启开关必须显示**系统真源**（get_autostart 读注册表/LaunchAgent）：
-      // 配置里的 autostartEnabled 只是镜像值——用户在系统设置或安装器里改过自启，
-      // 镜像不会同步，UI 会显示一个与事实不符的状态。
       const enabled = await invokeOrToast<boolean>("get_autostart", undefined, "读取开机自启状态失败");
       if (typeof enabled === "boolean") setAutostart(enabled);
     })();
@@ -62,7 +53,7 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
       <SettingsLayout sections={[{ label: "常规", content: <Card className="flex flex-col gap-1 p-2">
         <ToggleRow
           label="开机自启"
-          sub="登录系统时自动启动（托盘常驻）"
+          sub="登录系统时自动启动（点 X 即退出，不会留在后台）"
           checked={autostart}
           onChange={async (v) => {
             // 乐观置值 + 失败回滚：set_autostart 返回最终生效状态（Result<bool>），
@@ -79,15 +70,6 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
             }
             setAutostart(finalState);
             await save({ autostart_enabled: finalState });
-          }}
-        />
-        <ToggleRow
-          label="关窗时释放界面内存"
-          sub="关闭窗口时销毁 WebView，省约 80MB 内存"
-          checked={releaseOnClose}
-          onChange={(v) => {
-            setReleaseOnClose(v);
-            void save({ release_webview_on_close: v });
           }}
         />
       </Card> },

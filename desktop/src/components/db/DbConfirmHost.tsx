@@ -1,23 +1,47 @@
 import { useEffect, useState } from "react";
+import "../../db-console.css";
 import { Modal } from "../ui/Modal";
 import { Icon } from "../ui/icon";
 import { settle, usePending, type Pending } from "../../lib/dbConfirm";
 import { connOf } from "../../lib/dbStore";
 import { dbNameOf, ENV_LABEL } from "../../lib/dbApi";
+import { FilesBody } from "./QuitFilesBody";
 
-/** 数据库页共用的确认弹框：未提交事务 / 生产库写语句 / 补输口令（见 lib/dbConfirm）。 */
+/**
+ * 确认弹框宿主：退出前未保存文件 / 未提交事务 / 生产库写语句 / 补输口令
+ * （见 lib/dbConfirm）。
+ *
+ * **挂在 `App` 上而不是数据库页里**：退出确认要在任何页面都能弹——用户在文件页
+ * 点 X 也得看见它。顺带让「悬停卡片里打开表」缺口令时的弹框也变成全局的。
+ *
+ * **样式自己引**：`db-console.css` 原来只在 `DbTab` 里 import，而本组件现在挂在
+ * App 上、比数据库页先加载。不自己引的话，文件页弹退出框会是一堆裸元素。
+ */
 export function DbConfirmHost() {
   const p = usePending();
   const close = () =>
     settle((x) => {
       if (x.kind === "tx") x.resolve("cancel");
+      else if (x.kind === "quit") x.resolve("cancel");
+      else if (x.kind === "unsavedFiles") x.resolve("cancel");
       else if (x.kind === "prod") x.resolve(false, false);
       else if (x.kind === "ask") x.resolve(false);
       else x.resolve(null);
     });
   return (
-    <Modal open={p !== null} onClose={close} className="modal-surface dbx-dlg sm" ariaLabel="数据库确认" zIndex={1100}>
+    <Modal
+      open={p !== null}
+      onClose={close}
+      className="modal-surface dbx-dlg sm"
+      ariaLabel="数据库确认"
+      zIndex={1100}
+      // 退出确认不靠点遮罩关：用户想点「保存」却点到旁边，框没了、应用还在，
+      // 他多半会以为「取消成功了」而不知道刚才那一下什么都没决定。ESC 仍然可以取消。
+      closeOnOverlay={p?.kind !== "unsavedFiles"}
+    >
       {p?.kind === "tx" && <TxBody p={p} />}
+      {p?.kind === "quit" && <QuitBody p={p} />}
+      {p?.kind === "unsavedFiles" && <FilesBody p={p} />}
       {p?.kind === "prod" && <ProdBody p={p} />}
       {p?.kind === "password" && <PasswordBody p={p} onCancel={close} />}
       {p?.kind === "ask" && (
@@ -80,6 +104,63 @@ function TxBody({ p }: { p: Extract<Pending, { kind: "tx" }> }) {
         </button>
         <button type="button" className="dbx-btn pri" onClick={() => settle((x) => x.kind === "tx" && x.resolve("commit"))}>
           提交
+        </button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * 退出前的未提交事务确认。
+ *
+ * 连接名/环境来自 `quitGuard` 合并好的行（不查 store）：连接可能刚从配置里删掉，
+ * 那时 `connOf` 查不到，列表会凭空少一行——恰恰是最该提醒的那种。
+ */
+function QuitBody({ p }: { p: Extract<Pending, { kind: "quit" }> }) {
+  return (
+    <>
+      <div className="hd">
+        <Icon name="alertTriangle" size={16} />
+        退出前还有未提交的事务
+      </div>
+      <div className="bd one">
+        <p style={{ marginBottom: 6 }}>现在退出，下面这些改动会被数据库回滚，跟没执行过一样。</p>
+        <ul style={{ margin: "0 0 8px", paddingLeft: 18, display: "grid", gap: 6 }}>
+          {p.rows.map((r) => {
+            const mins = r.since ? Math.max(1, Math.round((Date.now() - r.since) / 60_000)) : 0;
+            return (
+              <li key={r.connId}>
+                <span className={`e-${r.env}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span className="dbx-edot" />
+                  <b>{r.name}</b>
+                  <span className="dbx-echip">{ENV_LABEL[r.env]}</span>
+                </span>
+                <div className="dbx-muted" style={{ marginTop: 2 }}>
+                  {r.kind === "unknown" ? (
+                    <>状态未知（{r.message ?? "探测超时"}），退出后由数据库回滚</>
+                  ) : (
+                    <>
+                      {r.statements} 条写语句 / 影响 {r.rows} 行
+                      {mins > 0 && <> · 已持续约 {mins} 分钟</>}
+                    </>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="dbx-muted">「全部提交」只对状态已知的连接生效；状态未知的那些退出后仍会回滚。</p>
+      </div>
+      <div className="ft">
+        <span className="dbx-sp" />
+        <button type="button" className="dbx-btn" onClick={() => settle((x) => x.kind === "quit" && x.resolve("cancel"))}>
+          取消
+        </button>
+        <button type="button" className="dbx-btn" onClick={() => settle((x) => x.kind === "quit" && x.resolve("rollback"))}>
+          全部回滚
+        </button>
+        <button type="button" className="dbx-btn pri" onClick={() => settle((x) => x.kind === "quit" && x.resolve("commit"))}>
+          全部提交
         </button>
       </div>
     </>

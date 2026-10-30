@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { getText, markSaved, replaceContent } from "../lib/editorStore";
+import { replaceContent } from "../lib/editorStore";
+import { saveOne } from "../lib/fileSave";
 import {
   cleanError,
   isConflictError,
   isUnencodableError,
   readFile,
-  writeFile,
   type TextEncoding,
 } from "../lib/workspace";
 import { applySaved } from "../lib/tabSession";
@@ -31,31 +31,18 @@ export function useFileSave(tabs: TabMeta[], activePath: string | null) {
   /**
    * 保存。`encodingOverride` 用于「转成 UTF-8 保存」——GBK 文件写进了它表示不了的
    * 字符时，后端会拒（`UNENCODABLE`），这条路径把编码换掉再存一次。
+   *
+   * 写盘本身在 `lib/fileSave.ts`（模块级），退出流程复用同一份；这里只负责
+   * 并发保护、标签回写与错误分类。
    */
   const saveFile = async (path: string, force = false, encodingOverride?: TextEncoding) => {
     const tab = tabs.find((t) => t.path === path);
     if (!tab || tab.readOnly || savingRef.current) return;
-    const text = getText(path);
-    if (text === undefined) return;
-    const encoding = encodingOverride ?? tab.encoding;
-    // 转 UTF-8 时不写 BOM：BOM 是「原来是 UTF-8 带 BOM」这个事实的延续，
-    // 转换后的文件不该凭空多出三个字节。
-    const hasBom = encodingOverride === "UTF-8" ? false : tab.hasBom;
     savingRef.current = true;
     setSaving(true);
     try {
-      const mtime = await writeFile({
-        path,
-        text,
-        encoding,
-        hasBom,
-        eol: tab.eol,
-        expectedMtimeMs: force ? null : tab.mtimeMs,
-      });
-      markSaved(path);
-      setTabs((ts) =>
-        applySaved(ts, path, { mtimeMs: mtime, encoding, hasBom, converted: !!encodingOverride }),
-      );
+      const r = await saveOne(tab, { force, encodingOverride });
+      setTabs((ts) => applySaved(ts, path, r));
       setConflictPath(null);
       setEncodingIssue(null);
       toast(encodingOverride ? `已转为 UTF-8 并保存 ${tab.name}` : `已保存 ${tab.name}`, "success");

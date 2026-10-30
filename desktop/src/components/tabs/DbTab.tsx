@@ -4,7 +4,6 @@ import { DockRegion } from "../workspace/WorkbenchDock";
 import { Icon } from "../ui/icon";
 import { ConnTree } from "../db/ConnTree";
 import { ConnDialog } from "../db/ConnDialog";
-import { DbConfirmHost } from "../db/DbConfirmHost";
 import { DbDocTabs } from "../db/DbDocTabs";
 import { SqlConsole } from "../db/SqlConsole";
 import { TablePage } from "../db/TablePage";
@@ -63,7 +62,6 @@ export function DbTab() {
         </div>
       </DockRegion>
       <ConnDialog />
-      <DbConfirmHost />
     </>
   );
 }

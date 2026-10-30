@@ -34,8 +34,6 @@ pub async fn get_config(state: tauri::State<'_, Arc<AppState>>) -> Result<AppCon
 #[derive(Debug, serde::Deserialize)]
 pub struct ConfigPatch {
     #[serde(default)]
-    pub release_webview_on_close: Option<bool>,
-    #[serde(default)]
     pub autostart_enabled: Option<bool>,
 }
 
@@ -48,9 +46,6 @@ pub async fn patch_config(
 ) -> Result<AppConfig, String> {
     state
         .update_config(move |cfg| {
-            if let Some(v) = patch.release_webview_on_close {
-                cfg.release_webview_on_close = v;
-            }
             if let Some(v) = patch.autostart_enabled {
                 cfg.autostart_enabled = v;
             }

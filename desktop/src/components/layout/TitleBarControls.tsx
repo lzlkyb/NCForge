@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Icon } from "../ui/icon";
 
 /**
- * 自定义窗口控件：最小化、最大化/还原、关闭（隐藏到托盘）。
+ * 自定义窗口控件：最小化、最大化/还原、关闭（**关闭 = 退出应用**）。
  * 无系统标题栏（decorations: false）时替代原生按钮。
  */
 
@@ -51,14 +51,12 @@ export function TitleBarControls() {
   }, []);
 
   const close = useCallback(() => {
-    // 必须是 close() 而不是 hide()。
+    // 必须是 close() 而不是 hide()：
     //
-    // 「关窗时释放界面内存」的「销毁还是仅隐藏」判断只写在后端的
-    // `CloseRequested` 里（main.rs）。hide() 不会触发那个事件，于是无论开关怎么设
-    // webview 永远不被销毁——而这个按钮是用户关窗的**主要入口**，所以那个开关
-    // 实际上是形同虚设（只有托盘左键「收起」走 w.close()，那条才真销毁）。
+    // 点 X = 退出应用（2026-10-31 起没有托盘、不常驻后台）。而「退出前先问未提交
+    // 事务」的逻辑全在后端的 `CloseRequested` 里（main.rs + commands/quit_cmds.rs），
+    // hide() 根本不触发那个事件，等于绕过守卫直接把事务丢掉。
     //
-    // 改成 close() 后，销毁/隐藏的判断回归到 CloseRequested 单一处，与托盘入口统一。
     // 注意：这靠 `capabilities/default.json` 里的 `core:window:allow-close`，
     // 没那条权限的话 IPC 会被 ACL 拦掉、按钮变成完全没反应。
     tryWin()?.close().catch(() => {});
@@ -88,12 +86,12 @@ export function TitleBarControls() {
         <Icon name={maximized ? "restore" : "maximize"} size={16} />
       </button>
 
-      {/* 关闭（隐藏到托盘） */}
+      {/* 关闭（= 退出应用；有未提交的事务会先弹确认） */}
       <button
         className={`${btnCls} hover:bg-destructive hover:text-destructive-foreground`}
         onClick={close}
-        title="关闭窗口（后台运行）"
-        aria-label="关闭窗口"
+        title="退出"
+        aria-label="退出"
       >
         <Icon name="close" size={16} />
       </button>

@@ -50,9 +50,6 @@ serde_json = "1"
 log = "0.4"
 env_logger = "0.11"
 
-# 托盘图标代码绘制（PNG 解码 + 缩放 + 状态圆点）
-png = "0.17"
-
 # 工作区文件读写：NC 源码是 GBK/UTF-8 混合（见 workspace.rs），需要 GBK 编解码
 encoding_rs = "0.8"
 # 搜索的正则模式。regex 本来就是传递依赖（在 Cargo.lock 里），提成直接依赖不新增

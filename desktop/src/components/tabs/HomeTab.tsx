@@ -1,12 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { APP_INFO, CHANGELOG } from "../../lib/about";
 import { invokeOrToast } from "../../lib/tauri";
-import type { AppConfig } from "../../lib/appConfig";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { EmptyState } from "../ui/EmptyState";
 import { InlineNotice } from "../ui/notice";
-import { ToggleRow } from "../ui/ToggleRow";
 import { SettingsRow } from "../ui/SettingsRow";
 import { useUpdate } from "../../contexts/UpdateContext";
 
@@ -14,37 +12,16 @@ import { useUpdate } from "../../contexts/UpdateContext";
  * 示例业务页（壳子唯一的内置页面）。**新应用照这个文件的样子加页。**
  *
  * 演示的范式：
- * - 读配置 / 写配置（invokeOrToast 包装，失败自动 toast）
- * - 用 ui/ 基础件搭页面（Card / Button / EmptyState / InlineNotice / ToggleRow / SettingsRow）
+ * - 用 ui/ 基础件搭页面（Card / Button / EmptyState / InlineNotice / SettingsRow）
  * - 更新能力接线：useUpdate() 拿更新状态机，触发检查/安装/重启
+ * - 写配置的范式看 `SettingsTab` / `LangSettings`（`patchConfig` 只提交要改的字段）
  * - 体量红线：单文件 ≤300 行、useState+useEffect ≤8（check-component-size.mjs 把关），
  *   超了拆 hooks/useXxx.ts + 子组件，不要往本文件堆
+ *
+ * 2026-10-31：原来这里有一个「关窗时释放界面内存」开关，随托盘模式一起删了。
  */
-export function HomeTab({ onChanged }: { onChanged?: () => void }) {
+export function HomeTab() {
   const update = useUpdate();
-  const [releaseOnClose, setReleaseOnClose] = useState(true);
-
-  // 演示：真实业务在 useEffect 里 invoke<AppConfig>("get_config") 拉一次回填。
-  // 此处只演示写路径（patch_config 局部更新 + 落盘，失败会 toast）。
-  //
-  // 以前是 save_config 传整份对象，而且字段名是 camelCase（`releaseWebviewOnClose`）——
-  // serde 忽略未知字段后得到的是一份「全默认」配置，于是在首页拨一下这个开关，
-  // 就会把工作区、NC home、堆上限一起清空，还提示保存成功。
-  const saveRelease = async (next: boolean) => {
-    setReleaseOnClose(next);
-    const saved = await invokeOrToast<AppConfig>(
-      "patch_config",
-      { patch: { release_webview_on_close: next } },
-      "保存配置失败",
-    );
-    if (!saved) {
-      // 失败返回 undefined：把开关拨回去，界面不能显示一个没落盘的状态
-      setReleaseOnClose(!next);
-      return;
-    }
-    setReleaseOnClose(saved.release_webview_on_close);
-    onChanged?.();
-  };
 
   const latest = useMemo(() => CHANGELOG[0], []);
 
@@ -78,12 +55,6 @@ export function HomeTab({ onChanged }: { onChanged?: () => void }) {
       )}
 
       <Card className="flex flex-col gap-1 p-2">
-        <ToggleRow
-          label="关窗时释放界面内存"
-          sub="关闭窗口时销毁 WebView，省约 80MB 内存；重开需 1~2 秒重新加载"
-          checked={releaseOnClose}
-          onChange={(v) => void saveRelease(v)}
-        />
         <SettingsRow
           label="当前版本"
           sub={latest ? `最近更新：${latest.date}` : "还没有版本记录"}

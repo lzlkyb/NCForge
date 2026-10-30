@@ -16,10 +16,6 @@ use std::path::PathBuf;
 /// 应用配置。字段即「跨重启需要记住的设置」；一次性状态不要放这里。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    /// 关窗时释放界面内存（销毁 webview 进程组，实测省约 80MB 专用工作集；
-    /// 代价是重开窗口要重新加载前端 1~2 秒）。由托盘/双击图标重建窗口。
-    #[serde(default = "default_true")]
-    pub release_webview_on_close: bool,
     /// 开机自启（与 tauri-plugin-autostart 同步的镜像值，供前端读取）。
     #[serde(default)]
     pub autostart_enabled: bool,
@@ -157,7 +153,6 @@ impl AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            release_webview_on_close: true,
             autostart_enabled: false,
             workspace_root: None,
             nc_home: None,

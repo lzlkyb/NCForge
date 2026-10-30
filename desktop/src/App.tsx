@@ -26,6 +26,8 @@ import { useWindowSizePersistence } from "./hooks/useWindowSizePersistence";
 import { useTableLookup } from "./hooks/useTableLookup";
 import { useAppHidden } from "./lib/appVisibility";
 import { Skeleton } from "./components/ui/Skeleton";
+import { DbConfirmHost } from "./components/db/DbConfirmHost";
+import { wireQuitGuard } from "./lib/quitGuard";
 
 // 非首屏 Tab 懒加载：减小首屏 JS，切到对应 Tab 时才加载（fallback 用骨架屏）。
 // 业务页照此模式追加：lazy(() => import("./components/tabs/XxxTab").then(m => ({ default: m.XxxTab })))
@@ -79,9 +81,12 @@ const HOTKEY_TABS: string[] = [...WORKSPACE_NAV.map((n) => n.key), "settings"];
  * 业务替换点：WORKSPACE_NAV（导航）、renderTab（页面表）、statusQuery（状态源）。
  */
 function AppContent() {
-  // 窗口收进托盘/最小化时给 <html> 打 data-app-hidden，暂停全部 CSS 动画。
+  // 窗口最小化时给 <html> 打 data-app-hidden，暂停全部 CSS 动画。
   // WebView2 不会自己为隐藏窗口节流动画，实测不做这事会白烧约 0.6 个 CPU 核。
   useAppHiddenFlag();
+  // 退出守卫：点 X 后先查一遍未提交的事务，再决定退不退（见 lib/quitGuard）。
+  // 全局只挂一次，卸载时解绑。
+  useEffect(() => wireQuitGuard(), []);
   // 窗口尺寸持久化：启动恢复上次尺寸 + resize 防抖落盘（纯前端方案）
   useWindowSizePersistence();
   // 编辑器里悬停表名看表结构的数据源（没配数据库时静默不生效）
@@ -248,6 +253,8 @@ function AppContent() {
           <QuickPalette activeTab={activeTab} onNavigate={navigate} />
         </Suspense>
       )}
+      {/* 数据库/退出确认的弹框挂在最外层：任何页面（含文件页）点 X 都要能弹出来 */}
+      <DbConfirmHost />
     </div>
   );
 }

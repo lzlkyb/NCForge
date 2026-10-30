@@ -2632,7 +2632,6 @@ dependencies = [
  "futures-util",
  "log",
  "oracledb",
- "png 0.17.16",
  "regex",
  "reqwest",
  "semver",
