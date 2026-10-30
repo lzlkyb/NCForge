@@ -3,12 +3,14 @@ import { createContext, useContext, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { IconName } from "../ui/icon";
 
-export type DockRegionName = "toolbar" | "sidebar" | "document" | "bottom" | "actions";
+export type DockRegionName = "toolbar" | "sidebar" | "document" | "bottom" | "actions" | "tabs";
 
 /** 当前工具的「文档页」入口：作为一个标签排在文件标签后面。 */
 export interface DockToolTab {
   label: string;
   icon: IconName;
+  /** 工具自己画多个文档标签（停靠到 `tabs` 区），不用这一个固定标签。 */
+  custom?: boolean;
 }
 
 export interface DockSlots {

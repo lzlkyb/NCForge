@@ -63,9 +63,19 @@ pub struct AppConfig {
     /// 数据库用户名覆盖。
     #[serde(default)]
     pub db_user: Option<String>,
-    /// 数据库密码的 DPAPI 密文（prop.xml 里那串是 NC 自己的加密格式，解不开）。
+    /// 数据库密码的 DPAPI 密文。旧版单连接配置，首次打开新数据库页时迁进 `db_conns`；
+    /// 字段保留不删（降级回老版本还能用）。
     #[serde(default)]
     pub db_password_dpapi: Option<String>,
+    /// 数据库页的连接列表（见 `db_conns.rs`）。
+    #[serde(default)]
+    pub db_conns: Vec<DbConnConfig>,
+    /// 最近一次在数据库页用过的连接：表结构缓存、悬停卡片、出包核对都用它。
+    #[serde(default)]
+    pub db_active: Option<String>,
+    /// 连接列表初始化过（迁移旧配置 + 自动导入 prop.xml 只做一次，用户删掉的不再自动加回）。
+    #[serde(default)]
+    pub db_conns_init: bool,
     /// 代码智能（jdt.ls）总开关。关掉后不起 Java 进程，编辑器退回轻量模式。
     #[serde(default = "default_true")]
     pub lang_enabled: bool,
@@ -79,6 +89,35 @@ pub struct AppConfig {
 
 fn default_true() -> bool {
     true
+}
+
+/// 一条数据库连接。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DbConnConfig {
+    pub id: String,
+    pub name: String,
+    /// `dev` / `test` / `prod` / `other`：只决定颜色与「生产库写前确认」，不限制权限。
+    #[serde(default)]
+    pub env: String,
+    /// `manual`（手动填写 / 导入 .properties）或 `prop`（NC prop.xml 的数据源）。
+    pub source: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub user: String,
+    /// `prop` 来源的数据源名（口令每次由 NC 的 PropXMLReader 现解，不存）。
+    #[serde(default)]
+    pub prop_ds: Option<String>,
+    /// 手动来源的口令 DPAPI 密文（base64）。
+    #[serde(default)]
+    pub password_dpapi: Option<String>,
+    /// 默认事务模式：`false` = 手动提交。
+    #[serde(default)]
+    pub auto_commit: bool,
+    /// 来源说明（界面显示「导入 xxx.properties」之类）。
+    #[serde(default)]
+    pub note: String,
 }
 
 impl AppConfig {
@@ -96,6 +135,11 @@ impl AppConfig {
         }
         if self.db_password_dpapi.is_some() {
             self.db_password_dpapi = Some(REDACTED.to_string());
+        }
+        for c in &mut self.db_conns {
+            if c.password_dpapi.is_some() {
+                c.password_dpapi = Some(REDACTED.to_string());
+            }
         }
         self
     }
@@ -117,6 +161,9 @@ impl Default for AppConfig {
             db_url: None,
             db_user: None,
             db_password_dpapi: None,
+            db_conns: Vec::new(),
+            db_active: None,
+            db_conns_init: false,
             lang_enabled: true,
             lang_auto_start: true,
             lang_xmx_mb: None,

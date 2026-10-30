@@ -3,80 +3,94 @@ import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.io.PrintStream;
-import java.io.Writer;
+import java.io.Reader;
+import java.lang.reflect.Constructor;
 import java.math.BigDecimal;
+import java.sql.CallableStatement;
 import java.sql.Clob;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
+import java.sql.Types;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Hashtable;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * NCForge 的数据库桥（JDBC，驱动用 NC home 自带的 ojdbc6.jar）。
  *
- * <p>为什么用 JDBC 而不是 Rust 直连：Oracle 驱动就在 NC home 的 driver/oracle_11g 里，
- * JDBC 一行就通；Rust 侧要么带 Instant Client（几十 MB）、要么自己实现 TNS，都不划算。
- * JVM 由工作台常驻托管（见 java_bridge.rs），连一次握手之后每次查询都是毫秒级。
+ * <p>一个桥进程只管<b>一条</b>连接：工作台按连接各起一个桥（见 db_cmds.rs），
+ * 一个库上的慢查询不会把另一个库的操作堵在后面，这里也就不用处理并发。
  *
- * <p><b>只读是硬约束</b>，三道保险：
- * <ol>
- *   <li>语句白名单：只认单条 select / with（挡住手滑和粘贴错）</li>
- *   <li>Oracle {@code SET TRANSACTION READ ONLY}：会话级拒绝 DML/DDL（挡住真写）</li>
- *   <li>每次执行后 rollback（兜底）</li>
- * </ol>
- * 不靠关键字黑名单——那玩意永远有缝。
+ * <p><b>读写不在这里限制</b>：能不能写由数据库账号的权限决定。这里只负责把事务状态
+ * 讲清楚——手动提交模式下记下「几条写语句、影响多少行、从什么时候开始」，
+ * 每次执行都回给界面，界面据此显示事务条、在关标签/断开前提醒。
  *
- * <p><b>已知边界</b>：PL/SQL 包的 {@code PRAGMA AUTONOMOUS_TRANSACTION} 函数在
- * 自己的事务里提交，三道都拦不住——{@code select my_pkg.do_write() from dual}
- * 看着是查询，函数里的写操作照样落库。这里不拦（拦不住可靠地区分「自带工具包」
- * 与「自定义包」，误杀正常排查查询的代价更高），改由前端在调用自定义包函数时
- * 给一句提醒（见 {@code desktop/src/lib/db.ts} 的 {@code autonomousCallHint}）。
+ * <p>prop.xml 的口令用 NC 自带的 {@code nc.bs.framework.datatool.PropXMLReader} 解
+ * （classpath 里要有 NC home 的 external/lib/basic.jar 与 lib/fwcheck.jar）。
+ * 解出的口令只在本进程内存里用于连库，不回传、不落盘。
  *
- * <p>协议与 NcSvnBridge 完全一致：stdin 每行一条请求，TAB 分隔；stdout 每行一条 JSON。
+ * <p>协议与 NcSvnBridge 一致：stdin 每行一条请求，TAB 分隔；stdout 每行一条 JSON。
  * <pre>
- *   1	hello
- *   2	connect	jdbc:oracle:thin:@10.200.22.144:1521/aier260824	aier633	密码
- *   3	query	select * from bd_material	500	30
- *   4	tables
- *   5	columns	bd_material
- *   6	schema	0	200
- *   7	ping
- *   8	quit
+ *   1\thello
+ *   2\tpropList\tD:\ncc\1909home
+ *   3\tconnect\tjdbc:oracle:thin:@host:1521/svc\tuser\t口令\tfalse
+ *   4\tconnectProp\tD:\ncc\1909home\tdesign\tfalse
+ *   5\texec\tselect * from bd_material\t500\t30
+ *   6\tmore\t500
+ *   7\tcommit / rollback / autocommit\ttrue
+ *   8\ttables / ncNames / columns\tbd_material / indexes\tbd_material / ddl\tbd_material
+ *   9\texplain\tselect …
+ *  10\tschema\t0\t200 / ping / disconnect / quit
  * </pre>
  * 响应：{"id":"3","ok":true,"data":{...}} / {"id":"3","ok":false,"error":"...","code":"sql"}
  */
 public class NcDbBridge {
 
-    /** 只允许这些开头的单条语句。`with` 用于 CTE 查询。 */
-    private static final String[] ALLOWED = { "select", "with" };
+    /** PL/SQL 块：整体发给数据库，末尾的分号是语法的一部分，不能去掉。 */
+    private static final Pattern PLSQL = Pattern.compile(
+            "^(begin|declare|create\\s+(or\\s+replace\\s+)?(procedure|function|package|trigger|type))\\b");
 
-    /**
-     * `with x as (select …) insert into …`：CTE 后面接写操作（Oracle 里合法）。
-     * 所以「开头是 with」不等于整句只读，还要扫一遍主语句关键字。
-     * `\b` 保证 `update_time` 这类列名不会被误命中（下划线是词字符）。
-     */
-    private static final java.util.regex.Pattern DML =
-            java.util.regex.Pattern.compile("\\b(insert|update|delete|merge)\\b");
+    /** DDL 在 Oracle 里会隐式提交：执行完把事务计数清零。 */
+    private static final Pattern DDL = Pattern.compile(
+            "^(create|alter|drop|truncate|grant|revoke|rename|comment|purge|flashback)\\b");
 
-    /** `for\nupdate` 这种换行写法也要拦住（以前只匹配中间一个空格）。 */
-    private static final java.util.regex.Pattern FOR_UPDATE =
-            java.util.regex.Pattern.compile("\\bfor\\s+update\\b");
+    /** 会留下未提交改动（或行锁）的语句。PL/SQL 块里可能写库，一并算上。 */
+    private static final Pattern WRITES = Pattern.compile(
+            "^(insert|update|delete|merge|lock|begin|declare|call)\\b");
+
+    private static final Pattern FOR_UPDATE = Pattern.compile("\\bfor\\s+update\\b");
+
+    private static final int CLOB_MAX = 1024 * 1024;
 
     private static PrintStream out;
     private static Connection conn;
-    private static String connectedUrl = "";
+
+    /** 上一次 exec 留下的游标：结果超过行上限时保留，供「加载更多」接着取。 */
+    private static Statement cursorStmt;
+    private static ResultSet cursor;
+    private static int cursorCols;
+
+    /** 手动提交模式下的未提交事务：写语句条数、影响行数、开始时刻。 */
+    private static int txStatements;
+    private static long txRows;
+    private static long txSince;
 
     public static void main(String[] args) throws Exception {
-        // stdout 只留给协议；任何第三方库的 System.out 一律改道 stderr，
-        // 否则一行日志就把 JSON 流冲乱了（SVN 桥踩过这个坑）。
+        // stdout 只留给协议；第三方库的 System.out 一律改道 stderr，否则一行日志就把 JSON 流冲乱
         out = new PrintStream(new FileOutputStream(FileDescriptor.out), true, "UTF-8");
         System.setOut(new PrintStream(new FileOutputStream(FileDescriptor.err), true, "UTF-8"));
 
@@ -97,8 +111,9 @@ public class NcDbBridge {
                 dispatch(id, cmd, a);
             } catch (SQLException e) {
                 err(id, "sql", sqlMessage(e));
-            } catch (Exception e) {
-                err(id, "other", e.getClass().getSimpleName() + ": " + e.getMessage());
+            } catch (Throwable e) {
+                Throwable c = e.getCause() != null ? e.getCause() : e;
+                err(id, "other", c.getClass().getSimpleName() + ": " + c.getMessage());
             }
             if ("quit".equals(cmd)) {
                 break;
@@ -109,20 +124,56 @@ public class NcDbBridge {
 
     private static void dispatch(String id, String cmd, List<String> a) throws Exception {
         if ("hello".equals(cmd)) {
-            ok(id, "{\"version\":\"1\",\"java\":\"" + esc(System.getProperty("java.version")) + "\"}");
+            ok(id, "{\"version\":\"2\",\"java\":\"" + esc(System.getProperty("java.version")) + "\"}");
+        } else if ("propList".equals(cmd)) {
+            ok(id, propList(a.get(0)));
         } else if ("connect".equals(cmd)) {
-            ok(id, connect(a));
-        } else if ("query".equals(cmd)) {
-            ok(id, query(a));
+            ok(id, connect(a.get(0), a.get(1), a.size() > 2 ? a.get(2) : "", flag(a, 3)));
+        } else if ("connectProp".equals(cmd)) {
+            Hashtable<?, ?> ds = readDataSource(a.get(0), a.get(1));
+            String url = str(ds.get("databaseUrl"));
+            if (url == null) {
+                throw new SQLException("prop.xml 里没有数据源 " + a.get(1));
+            }
+            ok(id, connect(url, str(ds.get("user")), str(ds.get("password")), flag(a, 2)));
+        } else if ("exec".equals(cmd)) {
+            ok(id, exec(a.get(0), intArg(a, 1, 500), intArg(a, 2, 30)));
+        } else if ("more".equals(cmd)) {
+            ok(id, more(intArg(a, 0, 500)));
+        } else if ("commit".equals(cmd)) {
+            requireConn();
+            conn.commit();
+            resetTx();
+            ok(id, "{\"tx\":" + txJson() + "}");
+        } else if ("rollback".equals(cmd)) {
+            requireConn();
+            conn.rollback();
+            resetTx();
+            ok(id, "{\"tx\":" + txJson() + "}");
+        } else if ("autocommit".equals(cmd)) {
+            requireConn();
+            boolean on = flag(a, 0);
+            // 切到自动提交时 JDBC 会把在途事务提交掉——界面在有未提交事务时不允许直接切
+            conn.setAutoCommit(on);
+            resetTx();
+            ok(id, "{\"tx\":" + txJson() + "}");
         } else if ("tables".equals(cmd)) {
             ok(id, tables());
+        } else if ("ncNames".equals(cmd)) {
+            ok(id, ncNames());
         } else if ("columns".equals(cmd)) {
             ok(id, columns(a.get(0)));
+        } else if ("indexes".equals(cmd)) {
+            ok(id, indexes(a.get(0)));
+        } else if ("ddl".equals(cmd)) {
+            ok(id, ddl(a.get(0)));
+        } else if ("explain".equals(cmd)) {
+            ok(id, explain(a.get(0)));
         } else if ("schema".equals(cmd)) {
             ok(id, schema(Integer.parseInt(a.get(0)), Integer.parseInt(a.get(1))));
         } else if ("ping".equals(cmd)) {
             boolean alive = conn != null && !conn.isClosed();
-            ok(id, "{\"alive\":" + alive + "}");
+            ok(id, "{\"alive\":" + alive + ",\"tx\":" + txJson() + "}");
         } else if ("disconnect".equals(cmd)) {
             closeQuietly();
             ok(id, "{}");
@@ -133,123 +184,150 @@ public class NcDbBridge {
         }
     }
 
-    // ───────────────────────── 连接 ─────────────────────────
+    // ───────────────────────── prop.xml ─────────────────────────
 
-    private static String connect(List<String> a) throws Exception {
-        String url = a.get(0);
-        String user = a.get(1);
-        String pass = a.size() > 2 ? a.get(2) : "";
-        if (conn != null && !conn.isClosed() && url.equals(connectedUrl)) {
-            // 同一个库且连接还活着：直接复用，省掉一次握手
-            return connInfo();
+    /** 列出 prop.xml 里的数据源（不含口令）。 */
+    private static String propList(String home) throws Exception {
+        File prop = new File(home, "ierp/bin/prop.xml");
+        if (!prop.isFile()) {
+            throw new IllegalStateException("找不到 " + prop.getPath());
         }
+        StringBuilder sb = new StringBuilder("[");
+        int n = 0;
+        for (String name : dataSourceNames(prop)) {
+            Hashtable<?, ?> h = readDataSource(home, name);
+            if (n++ > 0) {
+                sb.append(',');
+            }
+            sb.append("{\"name\":\"").append(esc(name))
+                    .append("\",\"url\":\"").append(esc(str(h.get("databaseUrl"))))
+                    .append("\",\"user\":\"").append(esc(str(h.get("user"))))
+                    .append("\",\"type\":\"").append(esc(str(h.get("databaseType"))))
+                    .append("\",\"isBase\":").append("true".equalsIgnoreCase(str(h.get("isBase"))))
+                    .append(",\"hasPassword\":").append(str(h.get("password")) != null)
+                    .append('}');
+        }
+        sb.append(']');
+        return "{\"source\":\"" + esc(prop.getPath()) + "\",\"sources\":" + sb + "}";
+    }
+
+    /**
+     * 构造参数是 NC home 目录（不是 prop.xml 路径），构造器包级私有要 setAccessible。
+     * 必须走 parseDataSource()：单独调 decode() 拿到的口令连不上（nc-db 工具踩过）。
+     */
+    private static Hashtable<?, ?> readDataSource(String home, String dsName) throws Exception {
+        Class<?> c;
+        try {
+            c = Class.forName("nc.bs.framework.datatool.PropXMLReader");
+        } catch (ClassNotFoundException e) {
+            throw new IllegalStateException("解不了 prop.xml 口令：NC home 下缺 external/lib/basic.jar 或 lib/fwcheck.jar");
+        }
+        Constructor<?> ct = c.getDeclaredConstructor(String.class);
+        ct.setAccessible(true);
+        Object reader = ct.newInstance(home);
+        Hashtable<?, ?>[] hs = (Hashtable<?, ?>[]) c.getMethod("parseDataSource", String.class).invoke(reader, dsName);
+        if (hs == null || hs.length == 0) {
+            return new Hashtable<Object, Object>();
+        }
+        return hs[0];
+    }
+
+    /** 数据源名都是 ASCII：按 ISO-8859-1 读，避开 gb2312 解码问题。 */
+    private static List<String> dataSourceNames(File prop) throws Exception {
+        byte[] buf = java.nio.file.Files.readAllBytes(prop.toPath());
+        String xml = new String(buf, "ISO-8859-1");
+        List<String> names = new ArrayList<String>();
+        Matcher m = Pattern.compile("<dataSourceName>\\s*([^<\\s]+)\\s*</dataSourceName>").matcher(xml);
+        while (m.find()) {
+            if (!names.contains(m.group(1))) {
+                names.add(m.group(1));
+            }
+        }
+        return names;
+    }
+
+    // ───────────────────────── 连接与事务 ─────────────────────────
+
+    private static String connect(String url, String user, String pass, boolean autoCommit) throws Exception {
         closeQuietly();
-        // ojdbc6（2010 年）没带 META-INF/services/java.sql.Driver，JDBC 4 的自动加载认不到它，
-        // 必须显式注册一次；不注册的话报的是「No suitable driver」，很容易被当成连不上库。
+        // ojdbc6 没带 META-INF/services/java.sql.Driver，JDBC 4 的自动加载认不到它，必须显式注册
         try {
             Class.forName("oracle.jdbc.OracleDriver");
         } catch (ClassNotFoundException e) {
             throw new SQLException("找不到 Oracle 驱动（ojdbc6.jar）：检查 NC home 的 driver/oracle_11g 是否完整");
         }
         Properties p = new Properties();
-        p.setProperty("user", user);
-        p.setProperty("password", pass);
-        // 连接超时：库挂了不要让界面干等默认的无限期
+        p.setProperty("user", user == null ? "" : user);
+        p.setProperty("password", pass == null ? "" : pass);
         p.setProperty("oracle.net.CONNECT_TIMEOUT", "15000");
         DriverManager.setLoginTimeout(15);
         conn = DriverManager.getConnection(url, p);
-        connectedUrl = url;
-        conn.setAutoCommit(false);
-        conn.setReadOnly(true);
-        return connInfo();
-    }
-
-    private static String connInfo() throws SQLException {
+        conn.setAutoCommit(autoCommit);
+        resetTx();
+        // DBMS_OUTPUT 默认关着：打开后 PL/SQL 里的 put_line 才能在「输出」标签里看到
+        try {
+            Statement st = conn.createStatement();
+            st.execute("begin dbms_output.enable(1000000); end;");
+            st.close();
+        } catch (SQLException ignore) {
+            // 没有权限也不影响连库
+        }
         DatabaseMetaData md = conn.getMetaData();
-        return "{\"product\":\"" + esc(md.getDatabaseProductName())
+        return "{\"url\":\"" + esc(url)
+                + "\",\"product\":\"" + esc(md.getDatabaseProductName())
                 + "\",\"version\":\"" + esc(md.getDatabaseProductVersion())
                 + "\",\"user\":\"" + esc(md.getUserName())
-                + "\",\"readOnly\":" + conn.isReadOnly() + "}";
+                + "\",\"autoCommit\":" + conn.getAutoCommit() + "}";
     }
 
-    // ───────────────────────── 查询 ─────────────────────────
+    private static void resetTx() {
+        txStatements = 0;
+        txRows = 0;
+        txSince = 0;
+    }
 
-    private static String query(List<String> a) throws SQLException {
+    private static String txJson() throws SQLException {
+        boolean auto = conn == null || conn.isClosed() || conn.getAutoCommit();
+        return "{\"autoCommit\":" + auto + ",\"statements\":" + txStatements
+                + ",\"rows\":" + txRows + ",\"since\":" + txSince + "}";
+    }
+
+    // ───────────────────────── 执行 ─────────────────────────
+
+    private static String exec(String raw, int maxRows, int timeout) throws Exception {
         requireConn();
-        String sql = a.get(0);
-        int maxRows = a.size() > 1 ? Integer.parseInt(a.get(1)) : 500;
-        int timeout = a.size() > 2 ? Integer.parseInt(a.get(2)) : 30;
-        checkReadOnly(sql);
-
+        closeCursor();
+        String sql = normalize(raw);
+        String head = leadingKeywords(sql);
+        if (sql.isEmpty()) {
+            throw new SQLException("空语句");
+        }
         long t0 = System.currentTimeMillis();
-        Statement st = null;
+        Statement st = conn.createStatement();
+        boolean keep = false;
         try {
-            // 每个查询都是独立事务：先回滚上一个，再开只读事务。
-            // SET TRANSACTION READ ONLY 是事务级语义，rollback 之后不设就又变回可写了。
-            conn.rollback();
-            st = conn.createStatement();
             st.setQueryTimeout(timeout);
-            st.setMaxRows(maxRows + 1); // 多取一行用来判断「还有没有」
-            st.execute("SET TRANSACTION READ ONLY");
-
             boolean hasRs = st.execute(sql);
-            if (!hasRs) {
-                throw new SQLException("这条语句没有结果集（只读面板只放查询）");
+            String body;
+            if (hasRs) {
+                ResultSet rs = st.getResultSet();
+                body = readRows(rs, maxRows);
+                keep = cursor == rs;
+                if (keep) {
+                    cursorStmt = st;
+                }
+            } else {
+                int uc = st.getUpdateCount();
+                body = "\"kind\":\"update\",\"updateCount\":" + uc;
+                trackTx(head, uc);
             }
-            ResultSet rs = st.getResultSet();
-            ResultSetMetaData md = rs.getMetaData();
-            int n = md.getColumnCount();
-
-            StringBuilder cols = new StringBuilder("[");
-            for (int i = 1; i <= n; i++) {
-                if (i > 1) {
-                    cols.append(',');
-                }
-                cols.append("{\"name\":\"").append(esc(md.getColumnLabel(i)))
-                        .append("\",\"type\":\"").append(esc(typeName(md, i)))
-                        .append("\",\"precision\":").append(safeInt(md.getPrecision(i)))
-                        .append(",\"scale\":").append(safeInt(md.getScale(i)))
-                        .append('}');
+            if (hasRs && FOR_UPDATE.matcher(stripLiterals(sql).toLowerCase()).find()) {
+                trackTx("lock", 0);
             }
-            cols.append(']');
-
-            StringBuilder rows = new StringBuilder("[");
-            int count = 0;
-            boolean truncated = false;
-            while (rs.next()) {
-                if (count >= maxRows) {
-                    truncated = true;
-                    break;
-                }
-                if (count > 0) {
-                    rows.append(',');
-                }
-                rows.append('[');
-                for (int i = 1; i <= n; i++) {
-                    if (i > 1) {
-                        rows.append(',');
-                    }
-                    rows.append(value(rs, i));
-                }
-                rows.append(']');
-                count++;
-            }
-            rs.close();
-            rows.append(']');
-
             long ms = System.currentTimeMillis() - t0;
-            return "{\"columns\":" + cols + ",\"rows\":" + rows
-                    + ",\"rowCount\":" + count
-                    + ",\"truncated\":" + truncated
-                    + ",\"ms\":" + ms + "}";
+            return "{" + body + ",\"ms\":" + ms + ",\"output\":" + dbmsOutput() + ",\"tx\":" + txJson() + "}";
         } finally {
-            // 兜底：即使前面抛了，也不让这个事务留到下一次
-            try {
-                conn.rollback();
-            } catch (SQLException ignore) {
-                // 连接已死的情况，下一次 connect 会重建
-            }
-            if (st != null) {
+            if (!keep) {
                 try {
                     st.close();
                 } catch (SQLException ignore) {
@@ -259,48 +337,573 @@ public class NcDbBridge {
         }
     }
 
-    /**
-     * 三道保险里的第一道（启发式）：只认单条 select / with。
-     *
-     * <p>这里刻意做得「笨」：去掉注释与字符串常量后，只要出现非末尾的分号就拒。
-     * 它挡不住的东西是**故意**留给后面的——真正的兜底是第二道（连接设为只读事务，
-     * 写操作会被数据库以 ORA-01456 拒绝），以及第三道（执行后 rollback）。
-     * 取舍标准是「宁可少判一点风险，也别误杀正常查询」：一次误报就没人再用这个面板了。
-     */
-    private static void checkReadOnly(String sql) throws SQLException {
-        String s = stripLiterals(sql).trim();
-        while (s.endsWith(";")) {
-            s = s.substring(0, s.length() - 1).trim();
+    private static void trackTx(String head, int updateCount) throws SQLException {
+        if (conn.getAutoCommit()) {
+            return;
         }
-        if (s.isEmpty()) {
-            throw new SQLException("空语句");
+        if (DDL.matcher(head).find()) {
+            resetTx(); // Oracle 的 DDL 前后各隐式提交一次
+            return;
         }
-        if (s.indexOf(';') >= 0) {
-            throw new SQLException("只允许单条语句（检测到多个分号）");
-        }
-        String lower = s.toLowerCase();
-        boolean okStart = false;
-        for (String k : ALLOWED) {
-            if (lower.startsWith(k + " ") || lower.startsWith(k + "\n") || lower.startsWith(k + "\t")
-                    || lower.startsWith(k + "(")) {
-                okStart = true;
-                break;
+        if (WRITES.matcher(head).find()) {
+            if (txStatements == 0) {
+                txSince = System.currentTimeMillis();
             }
-        }
-        if (!okStart) {
-            throw new SQLException("只读面板只放行 select / with 开头的查询；改数据请走正式 SQL 脚本");
-        }
-        // `with` 只是开头合法，主语句仍可能是写操作：`with x as (select …) insert into t …`
-        if (lower.startsWith("with") && DML.matcher(lower).find()) {
-            throw new SQLException("with 后面跟的是写操作（insert / update / delete / merge），只读面板不放行");
-        }
-        if (FOR_UPDATE.matcher(lower).find()) {
-            throw new SQLException("for update 会加锁，只读面板不放行");
+            txStatements++;
+            if (updateCount > 0) {
+                txRows += updateCount;
+            }
         }
     }
 
-    /** 去掉字符串常量与注释，避免 `-- 注释里的分号` 被误判。 */
-    private static String stripLiterals(String sql) {
+    /** 去掉首尾空白；非 PL/SQL 去掉末尾分号（Oracle JDBC 遇到会报 ORA-00911）。 */
+    static String normalize(String raw) {
+        String s = raw.trim();
+        if (s.endsWith("/")) {
+            s = s.substring(0, s.length() - 1).trim();
+        }
+        if (!PLSQL.matcher(leadingKeywords(s)).find()) {
+            while (s.endsWith(";")) {
+                s = s.substring(0, s.length() - 1).trim();
+            }
+        }
+        return s;
+    }
+
+    /** 去掉开头注释后的小写文本（只用于判断语句类别）。 */
+    static String leadingKeywords(String sql) {
+        String s = stripLiterals(sql).trim().toLowerCase();
+        return s.length() > 200 ? s.substring(0, 200) : s;
+    }
+
+    private static String readRows(ResultSet rs, int maxRows) throws SQLException {
+        ResultSetMetaData md = rs.getMetaData();
+        int n = md.getColumnCount();
+        StringBuilder cols = new StringBuilder("[");
+        for (int i = 1; i <= n; i++) {
+            if (i > 1) {
+                cols.append(',');
+            }
+            cols.append("{\"name\":\"").append(esc(md.getColumnLabel(i)))
+                    .append("\",\"type\":\"").append(esc(typeName(md, i)))
+                    .append("\",\"precision\":").append(safeInt(md.getPrecision(i)))
+                    .append(",\"scale\":").append(safeInt(md.getScale(i)))
+                    .append('}');
+        }
+        cols.append(']');
+        cursor = rs;
+        cursorCols = n;
+        String page = page(maxRows);
+        return "\"kind\":\"rows\",\"columns\":" + cols + "," + page;
+    }
+
+    /** 从当前游标再取最多 maxRows 行；取完就关游标。 */
+    private static String page(int maxRows) throws SQLException {
+        StringBuilder rows = new StringBuilder("[");
+        int count = 0;
+        boolean hasMore = false;
+        while (true) {
+            if (!cursor.next()) {
+                break;
+            }
+            if (count > 0) {
+                rows.append(',');
+            }
+            rows.append('[');
+            for (int i = 1; i <= cursorCols; i++) {
+                if (i > 1) {
+                    rows.append(',');
+                }
+                rows.append(value(cursor, i));
+            }
+            rows.append(']');
+            count++;
+            if (count >= maxRows) {
+                // 不预读下一行：Oracle 游标不能回退，预读会把一行吞掉
+                hasMore = true;
+                break;
+            }
+        }
+        rows.append(']');
+        if (!hasMore) {
+            closeCursor();
+        }
+        return "\"rows\":" + rows + ",\"rowCount\":" + count + ",\"hasMore\":" + hasMore;
+    }
+
+    private static String more(int maxRows) throws SQLException {
+        if (cursor == null) {
+            throw new SQLException("没有可以继续读取的结果（游标已关闭，重新执行一次）");
+        }
+        long t0 = System.currentTimeMillis();
+        String page = page(maxRows);
+        return "{" + page + ",\"ms\":" + (System.currentTimeMillis() - t0) + "}";
+    }
+
+    private static void closeCursor() {
+        if (cursor != null) {
+            try {
+                cursor.close();
+            } catch (SQLException ignore) {
+                // 忽略
+            }
+            cursor = null;
+        }
+        if (cursorStmt != null) {
+            try {
+                cursorStmt.close();
+            } catch (SQLException ignore) {
+                // 忽略
+            }
+            cursorStmt = null;
+        }
+    }
+
+    /** 取出 DBMS_OUTPUT 缓冲（没开或没有权限就是空数组）。 */
+    private static String dbmsOutput() {
+        StringBuilder sb = new StringBuilder("[");
+        CallableStatement cs = null;
+        try {
+            cs = conn.prepareCall("begin dbms_output.get_line(?, ?); end;");
+            cs.registerOutParameter(1, Types.VARCHAR);
+            cs.registerOutParameter(2, Types.INTEGER);
+            int n = 0;
+            while (n < 5000) {
+                cs.execute();
+                if (cs.getInt(2) != 0) {
+                    break;
+                }
+                if (n++ > 0) {
+                    sb.append(',');
+                }
+                String l = cs.getString(1);
+                sb.append('"').append(esc(l == null ? "" : l)).append('"');
+            }
+        } catch (SQLException ignore) {
+            // 忽略
+        } finally {
+            if (cs != null) {
+                try {
+                    cs.close();
+                } catch (SQLException ignore) {
+                    // 忽略
+                }
+            }
+        }
+        return sb.append(']').toString();
+    }
+
+    // ───────────────────────── 元数据 ─────────────────────────
+
+    private static String tables() throws SQLException {
+        requireConn();
+        String q = "select table_name, 'TABLE' from user_tables where table_name not like 'BIN$%'"
+                + " union all select view_name, 'VIEW' from user_views order by 1";
+        Statement st = conn.createStatement();
+        StringBuilder sb = new StringBuilder("[");
+        int n = 0;
+        try {
+            ResultSet rs = st.executeQuery(q);
+            while (rs.next()) {
+                if (n++ > 0) {
+                    sb.append(',');
+                }
+                sb.append("{\"name\":\"").append(esc(rs.getString(1)))
+                        .append("\",\"kind\":\"").append(rs.getString(2)).append("\"}");
+            }
+            rs.close();
+        } finally {
+            st.close();
+        }
+        return "{\"tables\":" + sb.append(']') + ",\"count\":" + n + "}";
+    }
+
+    /** NC 元数据里的表中文名（md_table.displayname）。不是 NC 库就返回空。 */
+    private static String ncNames() throws SQLException {
+        requireConn();
+        StringBuilder sb = new StringBuilder("{");
+        int n = 0;
+        Statement st = conn.createStatement();
+        try {
+            ResultSet rs = st.executeQuery("select lower(name), displayname from md_table where displayname is not null");
+            while (rs.next()) {
+                if (n++ > 0) {
+                    sb.append(',');
+                }
+                sb.append('"').append(esc(rs.getString(1))).append("\":\"").append(esc(rs.getString(2))).append('"');
+            }
+            rs.close();
+        } catch (SQLException e) {
+            // 没有 md_table：普通库
+        } finally {
+            st.close();
+        }
+        return "{\"names\":" + sb.append('}') + ",\"count\":" + n + "}";
+    }
+
+    private static String columns(String table) throws SQLException {
+        requireConn();
+        String t = table.toUpperCase();
+        Map<String, String> zh = ncColumnNames(table);
+        List<String> pk = pkColumns(t);
+        String q = "select c.column_name, c.data_type, c.char_length, c.data_precision, c.data_scale,"
+                + " c.nullable, c.data_default, cc.comments"
+                + " from user_tab_columns c left join user_col_comments cc"
+                + " on cc.table_name = c.table_name and cc.column_name = c.column_name"
+                + " where c.table_name = ? order by c.column_id";
+        PreparedStatement ps = conn.prepareStatement(q);
+        StringBuilder sb = new StringBuilder("[");
+        int n = 0;
+        try {
+            ps.setString(1, t);
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                String name = rs.getString(1);
+                String type = rs.getString(2);
+                int len = rs.getInt(3);
+                int prec = rs.getInt(4);
+                boolean precNull = rs.wasNull();
+                int scale = rs.getInt(5);
+                boolean nullable = "Y".equals(rs.getString(6));
+                String def = rs.getString(7); // LONG 列必须按顺序读
+                String comment = rs.getString(8);
+                if (n++ > 0) {
+                    sb.append(',');
+                }
+                sb.append("{\"name\":\"").append(esc(name))
+                        .append("\",\"type\":\"").append(esc(type))
+                        .append("\",\"size\":").append(len > 0 ? len : (precNull ? 0 : prec))
+                        .append(",\"full\":\"").append(esc(fullType(type, len, prec, precNull, scale)))
+                        .append("\",\"nullable\":").append(nullable)
+                        .append(",\"pk\":").append(pk.contains(name))
+                        .append(",\"default\":").append(def == null ? "null" : "\"" + esc(def.trim()) + "\"")
+                        .append(",\"comment\":").append(comment == null ? "null" : "\"" + esc(comment) + "\"")
+                        .append(",\"zh\":").append(zh.containsKey(name.toLowerCase()) ? "\"" + esc(zh.get(name.toLowerCase())) + "\"" : "null")
+                        .append('}');
+            }
+            rs.close();
+        } finally {
+            ps.close();
+        }
+        return "{\"table\":\"" + esc(table) + "\",\"columns\":" + sb.append(']') + "}";
+    }
+
+    static String fullType(String type, int len, int prec, boolean precNull, int scale) {
+        if (type == null) {
+            return "";
+        }
+        if (type.endsWith("CHAR") || type.endsWith("CHAR2") || "RAW".equals(type)) {
+            return len > 0 ? type + "(" + len + ")" : type;
+        }
+        if ("NUMBER".equals(type) && !precNull) {
+            return scale > 0 ? type + "(" + prec + "," + scale + ")" : type + "(" + prec + ")";
+        }
+        return type;
+    }
+
+    private static Map<String, String> ncColumnNames(String table) {
+        Map<String, String> m = new LinkedHashMap<String, String>();
+        PreparedStatement ps = null;
+        try {
+            ps = conn.prepareStatement("select lower(c.name), c.displayname from md_column c"
+                    + " where lower(c.tableid) = lower(?) and c.displayname is not null");
+            ps.setString(1, table);
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                m.put(rs.getString(1), rs.getString(2));
+            }
+            rs.close();
+        } catch (SQLException e) {
+            // 不是 NC 库
+        } finally {
+            if (ps != null) {
+                try {
+                    ps.close();
+                } catch (SQLException ignore) {
+                    // 忽略
+                }
+            }
+        }
+        return m;
+    }
+
+    private static List<String> pkColumns(String table) throws SQLException {
+        List<String> out = new ArrayList<String>();
+        PreparedStatement ps = conn.prepareStatement("select cc.column_name from user_constraints c"
+                + " join user_cons_columns cc on cc.constraint_name = c.constraint_name"
+                + " where c.table_name = ? and c.constraint_type = 'P' order by cc.position");
+        try {
+            ps.setString(1, table);
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                out.add(rs.getString(1));
+            }
+            rs.close();
+        } finally {
+            ps.close();
+        }
+        return out;
+    }
+
+    private static String indexes(String table) throws SQLException {
+        requireConn();
+        String q = "select i.index_name, i.uniqueness, i.status, ic.column_name"
+                + " from user_indexes i join user_ind_columns ic on ic.index_name = i.index_name"
+                + " where i.table_name = ? order by i.index_name, ic.column_position";
+        PreparedStatement ps = conn.prepareStatement(q);
+        Map<String, String[]> idx = new LinkedHashMap<String, String[]>();
+        try {
+            ps.setString(1, table.toUpperCase());
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                String name = rs.getString(1);
+                String[] v = idx.get(name);
+                if (v == null) {
+                    idx.put(name, new String[] { rs.getString(2), rs.getString(3), rs.getString(4) });
+                } else {
+                    v[2] = v[2] + ", " + rs.getString(4);
+                }
+            }
+            rs.close();
+        } finally {
+            ps.close();
+        }
+        StringBuilder sb = new StringBuilder("[");
+        int n = 0;
+        for (Map.Entry<String, String[]> e : idx.entrySet()) {
+            if (n++ > 0) {
+                sb.append(',');
+            }
+            sb.append("{\"name\":\"").append(esc(e.getKey()))
+                    .append("\",\"unique\":").append("UNIQUE".equals(e.getValue()[0]))
+                    .append(",\"status\":\"").append(esc(e.getValue()[1]))
+                    .append("\",\"columns\":\"").append(esc(e.getValue()[2])).append("\"}");
+        }
+        return "{\"indexes\":" + sb.append(']') + "}";
+    }
+
+    private static String ddl(String table) throws SQLException {
+        requireConn();
+        Statement st = conn.createStatement();
+        try {
+            st.execute("begin"
+                    + " dbms_metadata.set_transform_param(dbms_metadata.session_transform, 'SEGMENT_ATTRIBUTES', false);"
+                    + " dbms_metadata.set_transform_param(dbms_metadata.session_transform, 'STORAGE', false);"
+                    + " dbms_metadata.set_transform_param(dbms_metadata.session_transform, 'SQLTERMINATOR', true);"
+                    + " end;");
+        } finally {
+            st.close();
+        }
+        String t = table.toUpperCase();
+        String main;
+        try {
+            main = metadata("select dbms_metadata.get_ddl('TABLE', ?) from dual", t);
+        } catch (SQLException e) {
+            main = metadata("select dbms_metadata.get_ddl('VIEW', ?) from dual", t);
+        }
+        String idx = "";
+        try {
+            idx = metadata("select dbms_metadata.get_dependent_ddl('INDEX', ?) from dual", t);
+        } catch (SQLException e) {
+            // ORA-31608：没有索引
+        }
+        return "{\"ddl\":\"" + esc((main.trim() + "\n\n" + idx.trim()).trim()) + "\"}";
+    }
+
+    private static String metadata(String q, String name) throws SQLException {
+        PreparedStatement ps = conn.prepareStatement(q);
+        try {
+            ps.setString(1, name);
+            ResultSet rs = ps.executeQuery();
+            String s = rs.next() ? clobText(rs.getClob(1)) : "";
+            rs.close();
+            return s == null ? "" : s;
+        } finally {
+            ps.close();
+        }
+    }
+
+    /**
+     * 执行计划：EXPLAIN PLAN 只解析不执行。PLAN_TABLE 在 11g 是会话级临时表，
+     * 用完删掉自己那几行，不影响当前事务里的其它改动。
+     */
+    private static String explain(String raw) throws SQLException {
+        requireConn();
+        String sid = "NCF" + System.nanoTime() % 100000000L;
+        Statement st = conn.createStatement();
+        try {
+            st.execute("explain plan set statement_id = '" + sid + "' for " + normalize(raw));
+        } finally {
+            st.close();
+        }
+        String q = "select level - 1, operation || nvl2(options, ' ' || options, ''), object_name,"
+                + " access_predicates, filter_predicates, cost, cardinality from plan_table"
+                + " start with id = 0 and statement_id = ?"
+                + " connect by prior id = parent_id and statement_id = ? order siblings by position";
+        PreparedStatement ps = conn.prepareStatement(q);
+        StringBuilder sb = new StringBuilder("[");
+        int n = 0;
+        try {
+            ps.setString(1, sid);
+            ps.setString(2, sid);
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                if (n++ > 0) {
+                    sb.append(',');
+                }
+                long cost = rs.getLong(6);
+                boolean costNull = rs.wasNull();
+                long card = rs.getLong(7);
+                boolean cardNull = rs.wasNull();
+                sb.append("{\"depth\":").append(rs.getInt(1))
+                        .append(",\"operation\":\"").append(esc(rs.getString(2)))
+                        .append("\",\"object\":\"").append(esc(rs.getString(3)))
+                        .append("\",\"access\":\"").append(esc(rs.getString(4)))
+                        .append("\",\"filter\":\"").append(esc(rs.getString(5)))
+                        .append("\",\"cost\":").append(costNull ? "null" : String.valueOf(cost))
+                        .append(",\"rows\":").append(cardNull ? "null" : String.valueOf(card))
+                        .append('}');
+            }
+            rs.close();
+        } finally {
+            ps.close();
+        }
+        PreparedStatement del = conn.prepareStatement("delete from plan_table where statement_id = ?");
+        try {
+            del.setString(1, sid);
+            del.executeUpdate();
+        } finally {
+            del.close();
+        }
+        return "{\"plan\":" + sb.append(']') + "}";
+    }
+
+    /** 批量导出表结构（工作台缓存到本地，出包前核对字段与补全用）。 */
+    private static String schema(int offset, int limit) throws SQLException {
+        requireConn();
+        DatabaseMetaData md = conn.getMetaData();
+        StringBuilder sb = new StringBuilder("[");
+        int n = 0;
+        int skipped = 0;
+        ResultSet rs = md.getColumns(null, md.getUserName(), "%", "%");
+        try {
+            while (rs.next() && n < limit) {
+                if (skipped < offset) {
+                    skipped++;
+                    continue;
+                }
+                if (n > 0) {
+                    sb.append(',');
+                }
+                sb.append("{\"table\":\"").append(esc(rs.getString("TABLE_NAME")))
+                        .append("\",\"column\":\"").append(esc(rs.getString("COLUMN_NAME")))
+                        .append("\",\"type\":\"").append(esc(rs.getString("TYPE_NAME")))
+                        .append("\",\"size\":").append(rs.getInt("COLUMN_SIZE"))
+                        .append(",\"nullable\":").append(rs.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls)
+                        .append('}');
+                n++;
+            }
+        } finally {
+            rs.close();
+        }
+        sb.append(']');
+        return "{\"rows\":" + sb + ",\"count\":" + n + ",\"nextOffset\":" + (offset + n) + "}";
+    }
+
+    // ───────────────────────── 取值与 JSON ─────────────────────────
+
+    private static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+
+    private static String value(ResultSet rs, int i) throws SQLException {
+        int type = rs.getMetaData().getColumnType(i);
+        if (type == Types.DATE || type == Types.TIMESTAMP || type == -101 || type == -102) {
+            Timestamp ts = rs.getTimestamp(i);
+            if (ts == null) {
+                return "null";
+            }
+            String s = DATE_FMT.format(ts);
+            if (type != Types.DATE && ts.getNanos() != 0) {
+                s += "." + String.format("%09d", ts.getNanos()).replaceAll("0+$", "");
+            }
+            return "\"" + s + "\"";
+        }
+        Object o = rs.getObject(i);
+        if (o == null || rs.wasNull()) {
+            return "null";
+        }
+        if (o instanceof BigDecimal) {
+            // 金额字段转 double 会掉精度：一律给字符串
+            return "\"" + ((BigDecimal) o).toPlainString() + "\"";
+        }
+        if (o instanceof Number) {
+            return String.valueOf(o);
+        }
+        if (o instanceof Clob) {
+            return "\"" + esc(clobText((Clob) o)) + "\"";
+        }
+        if (o instanceof byte[]) {
+            byte[] b = (byte[]) o;
+            if (type == Types.VARBINARY || type == Types.BINARY) {
+                return "\"" + hex(b, 64) + "\""; // RAW：十六进制，GUID 主键常用
+            }
+            return "\"<BLOB " + b.length + "B>\"";
+        }
+        if (o instanceof java.sql.Blob) {
+            return "\"<BLOB " + ((java.sql.Blob) o).length() + "B>\"";
+        }
+        return "\"" + esc(String.valueOf(o)) + "\"";
+    }
+
+    private static String clobText(Clob c) throws SQLException {
+        if (c == null) {
+            return null;
+        }
+        long len = c.length();
+        try {
+            Reader r = c.getCharacterStream();
+            StringBuilder sb = new StringBuilder((int) Math.min(len, CLOB_MAX));
+            char[] buf = new char[8192];
+            int k;
+            while ((k = r.read(buf)) > 0 && sb.length() < CLOB_MAX) {
+                sb.append(buf, 0, k);
+            }
+            r.close();
+            if (len > CLOB_MAX) {
+                sb.setLength(CLOB_MAX);
+                sb.append("…（共 ").append(len).append(" 字符，只取前 1M）");
+            }
+            return sb.toString();
+        } catch (java.io.IOException e) {
+            throw new SQLException("读 CLOB 失败：" + e.getMessage());
+        }
+    }
+
+    private static String hex(byte[] b, int max) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < b.length && i < max; i++) {
+            sb.append(String.format("%02X", b[i]));
+        }
+        if (b.length > max) {
+            sb.append("…");
+        }
+        return sb.toString();
+    }
+
+    private static String typeName(ResultSetMetaData md, int i) throws SQLException {
+        String t = md.getColumnTypeName(i);
+        int size = md.getPrecision(i);
+        if (size > 0 && ("VARCHAR2".equals(t) || "CHAR".equals(t) || "NVARCHAR2".equals(t) || "NCHAR".equals(t))) {
+            return t + "(" + size + ")";
+        }
+        if ("NUMBER".equals(t) && size > 0) {
+            int scale = md.getScale(i);
+            return scale > 0 ? t + "(" + size + "," + scale + ")" : t + "(" + size + ")";
+        }
+        return t;
+    }
+
+    /** 去掉字符串常量与注释，避免注释或字面量里的关键字被误判。 */
+    static String stripLiterals(String sql) {
         StringBuilder b = new StringBuilder(sql.length());
         int i = 0;
         int n = sql.length();
@@ -351,130 +954,20 @@ public class NcDbBridge {
         }
     }
 
-    // ───────────────────────── 元数据 ─────────────────────────
+    private static boolean flag(List<String> a, int i) {
+        return a.size() > i && "true".equalsIgnoreCase(a.get(i));
+    }
 
-    private static String tables() throws SQLException {
-        requireConn();
-        DatabaseMetaData md = conn.getMetaData();
-        StringBuilder sb = new StringBuilder("[");
-        int n = 0;
-        ResultSet rs = md.getTables(null, md.getUserName(), "%", new String[] { "TABLE", "VIEW" });
+    private static int intArg(List<String> a, int i, int def) {
         try {
-            while (rs.next()) {
-                String name = rs.getString("TABLE_NAME");
-                if (name == null || name.startsWith("BIN$")) {
-                    continue; // 回收站里的表
-                }
-                if (n > 0) {
-                    sb.append(',');
-                }
-                sb.append("{\"name\":\"").append(esc(name))
-                        .append("\",\"kind\":\"").append(esc(rs.getString("TABLE_TYPE")))
-                        .append("\"}");
-                n++;
-            }
-        } finally {
-            rs.close();
+            return a.size() > i ? Integer.parseInt(a.get(i).trim()) : def;
+        } catch (NumberFormatException e) {
+            return def;
         }
-        sb.append(']');
-        return "{\"tables\":" + sb + ",\"count\":" + n + "}";
     }
 
-    private static String columns(String table) throws SQLException {
-        requireConn();
-        DatabaseMetaData md = conn.getMetaData();
-        StringBuilder sb = new StringBuilder("[");
-        int n = 0;
-        ResultSet rs = md.getColumns(null, md.getUserName(), table.toUpperCase(), "%");
-        try {
-            while (rs.next()) {
-                if (n > 0) {
-                    sb.append(',');
-                }
-                sb.append("{\"name\":\"").append(esc(rs.getString("COLUMN_NAME")))
-                        .append("\",\"type\":\"").append(esc(rs.getString("TYPE_NAME")))
-                        .append("\",\"size\":").append(rs.getInt("COLUMN_SIZE"))
-                        .append(",\"nullable\":").append(rs.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls)
-                        .append('}');
-                n++;
-            }
-        } finally {
-            rs.close();
-        }
-        sb.append(']');
-        return "{\"table\":\"" + esc(table) + "\",\"columns\":" + sb + "}";
-    }
-
-    /**
-     * 批量导出表结构（供工作台缓存到本地，出包前核对字段用）。
-     *
-     * <p>用 offset/limit 分页：这台库有两千多张表、几万个字段，一次吐完 JSON 会是几 MB，
-     * 桥的行缓冲与界面的解析都吃不消。
-     */
-    private static String schema(int offset, int limit) throws SQLException {
-        requireConn();
-        DatabaseMetaData md = conn.getMetaData();
-        StringBuilder sb = new StringBuilder("[");
-        int n = 0;
-        int skipped = 0;
-        ResultSet rs = md.getColumns(null, md.getUserName(), "%", "%");
-        try {
-            while (rs.next() && n < limit) {
-                if (skipped < offset) {
-                    skipped++;
-                    continue;
-                }
-                if (n > 0) {
-                    sb.append(',');
-                }
-                sb.append("{\"table\":\"").append(esc(rs.getString("TABLE_NAME")))
-                        .append("\",\"column\":\"").append(esc(rs.getString("COLUMN_NAME")))
-                        .append("\",\"type\":\"").append(esc(rs.getString("TYPE_NAME")))
-                        .append("\",\"size\":").append(rs.getInt("COLUMN_SIZE"))
-                        .append(",\"nullable\":").append(rs.getInt("NULLABLE") != DatabaseMetaData.columnNoNulls)
-                        .append('}');
-                n++;
-            }
-        } finally {
-            rs.close();
-        }
-        sb.append(']');
-        return "{\"rows\":" + sb + ",\"count\":" + n + ",\"nextOffset\":" + (offset + n) + "}";
-    }
-
-    // ───────────────────────── 取值与 JSON ─────────────────────────
-
-    private static String value(ResultSet rs, int i) throws SQLException {
-        Object o = rs.getObject(i);
-        if (o == null || rs.wasNull()) {
-            return "null";
-        }
-        if (o instanceof Number) {
-            // BigDecimal 走字符串：转 double 会掉精度（金额字段就是这个坑）
-            if (o instanceof BigDecimal) {
-                return ((BigDecimal) o).toPlainString();
-            }
-            return String.valueOf(o);
-        }
-        if (o instanceof Clob) {
-            return "\"<CLOB>\"";
-        }
-        if (o instanceof byte[]) {
-            return "\"<BLOB " + ((byte[]) o).length + "B>\"";
-        }
-        if (o instanceof java.sql.Timestamp) {
-            return "\"" + o.toString().replace(' ', 'T') + "\"";
-        }
-        return "\"" + esc(String.valueOf(o)) + "\"";
-    }
-
-    private static String typeName(ResultSetMetaData md, int i) throws SQLException {
-        String t = md.getColumnTypeName(i);
-        int size = md.getPrecision(i);
-        if (size > 0 && ("VARCHAR2".equals(t) || "CHAR".equals(t) || "NVARCHAR2".equals(t))) {
-            return t + "(" + size + ")";
-        }
-        return t;
+    private static String str(Object o) {
+        return o == null ? null : String.valueOf(o);
     }
 
     private static int safeInt(int v) {
@@ -486,7 +979,7 @@ public class NcDbBridge {
         if (m == null) {
             m = e.getClass().getSimpleName();
         }
-        return "ORA " + e.getErrorCode() + "：" + m;
+        return "ORA " + e.getErrorCode() + "：" + m.trim();
     }
 
     private static String esc(String s) {
@@ -534,10 +1027,17 @@ public class NcDbBridge {
         out.flush();
     }
 
+    /**
+     * 断开：未提交的改动一律回滚。界面在有未提交事务时会先问用户（提交 / 回滚 / 取消），
+     * 走到这里时用户已经选过了；进程被直接杀掉时 Oracle 也会回滚。
+     */
     private static void closeQuietly() {
+        closeCursor();
         if (conn != null) {
             try {
-                conn.rollback();
+                if (!conn.getAutoCommit()) {
+                    conn.rollback();
+                }
             } catch (Exception ignore) {
                 // 已断
             }
@@ -547,8 +1047,8 @@ public class NcDbBridge {
                 // 已断
             }
             conn = null;
-            connectedUrl = "";
         }
+        resetTx();
     }
 
     /** 与 Rust 侧 `escape` 互逆：`\\` `\t` `\n` `\r`。 */

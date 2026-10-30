@@ -1,93 +1,211 @@
-import { useMemo } from "react";
-import { Icon } from "../ui/icon";
-import { toast } from "../ui/toast";
-import { cellText, isNumericType, toTsv, type QueryResult } from "../../lib/db";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { cellText } from "../../lib/db";
+import type { Cell, ColumnMeta } from "../../lib/dbApi";
+import { isNumericType } from "../../lib/resultExport";
+import { initialWidths, type SortState } from "../../lib/resultView";
+
+const ROW_H = 24;
+const HEAD_H = 36;
+/** 可视区上下多渲染的行数，滚得快时不露白。 */
+const OVERSCAN = 12;
+
+export interface CellPos {
+  /** 原始行号（rows 下标），不是显示顺序。 */
+  r: number;
+  c: number;
+}
+
+export interface GridEdit {
+  canEdit: (col: number) => boolean;
+  /** 改过的格子：`行:列` → 新值。 */
+  changed: Map<string, Cell>;
+  onEdit: (row: number, col: number, value: Cell) => void;
+}
 
 /**
- * 查询结果表。
+ * 结果表：手写虚拟滚动（只渲染可视行）、表头排序、拖列宽、单元格选择与编辑。
  *
- * 三个细节都是有理由的：
- * - 类型挂在表头第二行（`VARCHAR2(40)`）——排障时值本身看不出类型，而「这一列是不是 NULL」
- *   往往就是答案；
- * - NULL 斜体灰字、与空串分开：空串和 NULL 在 NC 的数据里是完全不同的两种状态；
- * - 行号自己加一列：用户会拿行号跟 DBA 对话（「第 37 行那条」），不能靠滚动数。
+ * 排序 / 筛选的结果由父组件以 `order` 传入（复制 / 导出要用同一个顺序）。
+ * NULL 斜体灰字与空串区分；数字右对齐。
  */
-export function ResultGrid({ data }: { data: QueryResult }) {
-  const numeric = useMemo(() => data.columns.map((c) => isNumericType(c.type)), [data.columns]);
+export function ResultGrid({ columns, rows, order, sort, onSort, sel, onSel, onOpen, edit, zh }: {
+  columns: ColumnMeta[];
+  rows: Cell[][];
+  order: number[];
+  sort: SortState | null;
+  onSort: (col: number) => void;
+  sel: CellPos | null;
+  onSel: (p: CellPos) => void;
+  /** 双击不可编辑的格子：打开详情。 */
+  onOpen?: () => void;
+  edit?: GridEdit;
+  /** 列名（小写）→ NC 中文名，表头悬停显示。 */
+  zh?: Record<string, string>;
+}) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [widths, setWidths] = useState<number[]>(() => initialWidths(columns, rows));
+  const [scroll, setScroll] = useState({ top: 0, h: 400 });
+  const [editing, setEditing] = useState<{ pos: CellPos; value: string } | null>(null);
 
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(toTsv(data.columns, data.rows));
-      toast("已复制为 TSV", "success");
-    } catch (e) {
-      toast(`复制失败：${e}`, "error");
+  // 列变了（新的一次查询）才重算列宽；加载更多行不动用户拖过的宽度
+  const colKey = columns.map((c) => c.name).join("|");
+  useEffect(() => {
+    setWidths(initialWidths(columns, rows));
+    setEditing(null);
+    boxRef.current?.scrollTo({ top: 0 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colKey]);
+
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setScroll((s) => ({ ...s, h: el.clientHeight })));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // 新结果的第一帧里 effect 还没重算列宽：先按新列现算一份，避免宽度对不上
+  const ws = widths.length === columns.length ? widths : initialWidths(columns, rows);
+  const numeric = columns.map((c) => isNumericType(c.type));
+  const rnW = Math.max(40, String(rows.length).length * 8 + 18);
+  const total = rnW + ws.reduce((a, b) => a + b, 0);
+  const first = Math.max(0, Math.floor(scroll.top / ROW_H) - OVERSCAN);
+  const last = Math.min(order.length, Math.ceil((scroll.top + scroll.h) / ROW_H) + OVERSCAN);
+  const selIndex = sel ? order.indexOf(sel.r) : -1;
+
+  const resize = (k: number, startX: number) => {
+    const start = widths[k];
+    const move = (e: PointerEvent) =>
+      setWidths((w) => w.map((x, i) => (i === k ? Math.max(40, Math.min(900, start + e.clientX - startX)) : x)));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const valueAt = (r: number, c: number): Cell => {
+    const key = `${r}:${c}`;
+    return edit?.changed.has(key) ? edit.changed.get(key)! : rows[r][c];
+  };
+
+  const startEdit = (pos: CellPos) => {
+    if (!edit?.canEdit(pos.c)) return onOpen?.();
+    const v = valueAt(pos.r, pos.c);
+    setEditing({ pos, value: v === null ? "" : String(v) });
+  };
+
+  const commitEdit = () => {
+    if (!editing || !edit) return;
+    const { r, c } = editing.pos;
+    // Oracle 里空串就是 NULL，直接记成 NULL，预览 SQL 才不会误导
+    const v: Cell = editing.value === "" ? null : editing.value;
+    if (v !== rows[r][c] || edit.changed.has(`${r}:${c}`)) edit.onEdit(r, c, v);
+    setEditing(null);
+    boxRef.current?.focus();
+  };
+
+  const move = (dr: number, dc: number) => {
+    if (order.length === 0 || columns.length === 0) return;
+    const i = Math.max(0, Math.min(order.length - 1, (selIndex < 0 ? 0 : selIndex) + dr));
+    const c = Math.max(0, Math.min(columns.length - 1, (sel?.c ?? 0) + dc));
+    onSel({ r: order[i], c });
+    const el = boxRef.current;
+    if (el) {
+      const y = i * ROW_H;
+      if (y < el.scrollTop) el.scrollTop = y;
+      else if (y + ROW_H > el.scrollTop + el.clientHeight - HEAD_H) el.scrollTop = y + ROW_H - el.clientHeight + HEAD_H;
+    }
+  };
+
+  const onKey = (e: KeyboardEvent) => {
+    if (editing) return;
+    const step: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], PageUp: [-20, 0], PageDown: [20, 0] };
+    if (step[e.key]) {
+      e.preventDefault();
+      move(...step[e.key]);
+    } else if (sel && (e.key === "Enter" || e.key === "F2")) {
+      e.preventDefault();
+      startEdit(sel);
+    } else if (sel && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && !window.getSelection()?.toString()) {
+      e.preventDefault();
+      const v = valueAt(sel.r, sel.c);
+      void navigator.clipboard.writeText(v === null ? "" : String(v));
     }
   };
 
   return (
-    <div className="dq-result">
-      <div className="dq-res-head">
-        <span>结果</span>
-        <b>
-          {data.rowCount === 0 ? "0 行" : `1–${data.rowCount} 行`}
-          {data.truncated ? "（已截断）" : ""}
-        </b>
-        <span>· {data.ms} ms</span>
-        <span className="dq-sp" />
-        <span className="dq-muted">单条 SELECT · Ctrl+Enter 执行</span>
-        <button type="button" className="dq-btn dq-btn-sm" onClick={() => void copy()}>
-          <Icon name="copy" size={12} />
-          复制为 TSV
-        </button>
-      </div>
-
-      {data.rowCount === 0 ? (
-        <div className="dq-empty-rows">这条语句没有返回数据</div>
-      ) : (
-        <div className="dq-grid-wrap">
-          <table className="dq-grid">
-            <thead>
-              <tr>
-                <th className="rn">#</th>
-                {data.columns.map((c, i) => (
-                  <th key={`${c.name}-${i}`}>
-                    {c.name}
-                    <span className="t">{c.type}</span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.rows.map((row, ri) => (
-                <tr key={ri}>
-                  <td className="rn">{ri + 1}</td>
-                  {row.map((v, ci) => (
-                    <td
-                      key={ci}
-                      data-n={numeric[ci] ? "" : undefined}
-                      data-null={v === null || v === undefined ? "" : undefined}
-                      title={v === null || v === undefined ? "NULL" : String(v)}
-                    >
-                      {cellText(v)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div
+      ref={boxRef}
+      className="dbx-grid"
+      tabIndex={0}
+      onKeyDown={onKey}
+      onScroll={(e) => setScroll({ top: e.currentTarget.scrollTop, h: e.currentTarget.clientHeight })}
+    >
+      <div className="dbx-grid-inner" style={{ width: total, height: HEAD_H + order.length * ROW_H }}>
+        <div className="dbx-ghead" style={{ width: total }}>
+          <div className="dbx-gh rn" style={{ width: rnW }} />
+          {columns.map((c, k) => (
+            <div
+              key={k}
+              className="dbx-gh"
+              style={{ width: ws[k] }}
+              title={[c.name.toLowerCase(), zh?.[c.name.toLowerCase()], c.type].filter(Boolean).join(" · ")}
+              onClick={() => onSort(k)}
+            >
+              <span className="nm">{c.name.toLowerCase()}</span>
+              {sort?.col === k && <span className="so">{sort.dir === "asc" ? "▲" : "▼"}</span>}
+              <span className="t">{zh?.[c.name.toLowerCase()] ?? c.type}</span>
+              <span className="rz" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); resize(k, e.clientX); }} />
+            </div>
+          ))}
         </div>
-      )}
-
-      <div className="dq-foot">
-        <span>
-          只读事务 <b>SET TRANSACTION READ ONLY</b>
-        </span>
-        <span>·</span>
-        <span>
-          执行后 <b>rollback</b>（语句里藏了 DML 也落不了盘）
-        </span>
-        <span className="dq-sp" />
-        {data.truncated && <span className="dq-warn">结果超过行上限，只显示了前 {data.rowCount} 行</span>}
+        {order.slice(first, last).map((r, j) => {
+          const i = first + j;
+          return (
+            <div key={r} className="dbx-grow" style={{ top: HEAD_H + i * ROW_H, width: total }} data-sel={sel?.r === r || undefined}>
+              <div className="dbx-gc rn" style={{ width: rnW }}>{r + 1}</div>
+              {columns.map((_, k) => {
+                const v = valueAt(r, k);
+                const isSel = sel?.r === r && sel.c === k;
+                if (isSel && editing && editing.pos.r === r && editing.pos.c === k) {
+                  return (
+                    <div key={k} className="dbx-gc" data-cell style={{ width: ws[k], padding: 0 }}>
+                      <input
+                        className="dbx-gedit"
+                        autoFocus
+                        value={editing.value}
+                        onChange={(e) => setEditing({ ...editing, value: e.target.value })}
+                        onBlur={commitEdit}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitEdit();
+                          if (e.key === "Escape") {
+                            setEditing(null);
+                            boxRef.current?.focus();
+                          }
+                        }}
+                      />
+                    </div>
+                  );
+                }
+                const cls = ["dbx-gc", numeric[k] && "n", v === null && "null", edit?.changed.has(`${r}:${k}`) && "chg"].filter(Boolean).join(" ");
+                return (
+                  <div
+                    key={k}
+                    className={cls}
+                    style={{ width: ws[k] }}
+                    data-cell={isSel || undefined}
+                    onMouseDown={() => onSel({ r, c: k })}
+                    onDoubleClick={() => startEdit({ r, c: k })}
+                  >
+                    {cellText(v, 300)}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

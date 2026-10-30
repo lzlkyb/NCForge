@@ -544,15 +544,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::patch_set_out_dir,
             commands::patch_set_out_root,
             commands::patch_reveal,
-            // 数据库只读查询（M7）
-            commands::db_defaults,
+            // 数据库：连接管理
+            commands::db_conn_list,
+            commands::db_conn_save,
+            commands::db_conn_delete,
+            commands::db_conn_reorder,
+            commands::db_conn_test,
+            commands::db_conn_import_props,
+            commands::db_prop_sources,
+            commands::db_prop_import,
+            // 数据库：会话、执行、事务、元数据
             commands::db_connect,
-            commands::db_query,
-            commands::db_tables,
             commands::db_disconnect,
-            // 表结构缓存 + 出包前核对（M7 第三条）
+            commands::db_exec,
+            commands::db_more,
+            commands::db_tx,
+            commands::db_meta,
+            // 表结构缓存 + 出包前核对
             commands::db_schema_status,
             commands::db_schema_sync,
+            commands::db_schema_cache,
             commands::db_columns,
             commands::db_cached_tables,
             commands::db_check_sources,
@@ -637,6 +648,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let session = st.lang.lock().unwrap_or_else(|e| e.into_inner()).session.take();
                     if let Some(s) = session {
                         s.client.kill();
+                    }
+                    // 数据库桥同理：每个连接一个 JVM，未提交的事务随进程结束由 Oracle 回滚
+                    let bridges: Vec<_> = st
+                        .db
+                        .lock()
+                        .map(|mut m| m.drain().map(|(_, b)| b).collect())
+                        .unwrap_or_default();
+                    for b in bridges {
+                        b.shutdown();
                     }
                 }
             }

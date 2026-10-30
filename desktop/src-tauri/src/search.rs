@@ -913,7 +913,10 @@ mod tests {
         std::fs::write(dir.join("build.xml"), "x").unwrap();
 
         let (files, truncated) = list_files(&dir);
-        assert_eq!(files, vec!["build.xml", "gl/src/p/A.java", "gl/src/p/B.java"]);
+        assert_eq!(
+            files,
+            vec!["build.xml", "gl/src/p/A.java", "gl/src/p/B.java"]
+        );
         assert!(!truncated);
         let _ = std::fs::remove_dir_all(&dir);
     }

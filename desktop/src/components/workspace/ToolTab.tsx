@@ -11,6 +11,8 @@ export function ToolTab() {
   const dock = useWorkbenchDock();
   const tab = dock?.toolTab;
   if (!dock || !tab) return null;
+  // 数据库这类多文档工具：标签由工具停靠进来，这里只留宿主
+  if (tab.custom) return <div ref={dock.bindHost("tabs")} className="wb-tool-tabs-host" />;
   return (
     <div
       role="tab"

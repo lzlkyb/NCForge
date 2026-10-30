@@ -55,11 +55,31 @@ pub fn find_driver(nc_home: &Path) -> Option<PathBuf> {
     hits.into_iter().next()
 }
 
+/// 解 prop.xml 口令要的 NC jar（`PropXMLReader` 及其依赖）。缺了不报错：手动连接照样能用，
+/// 只是 prop.xml 来源的连接会在桥里报「缺 basic.jar」。
+pub fn nc_decrypt_jars(nc_home: &Path) -> Vec<PathBuf> {
+    [
+        nc_home.join("external").join("lib").join("basic.jar"),
+        nc_home.join("lib").join("fwcheck.jar"),
+    ]
+    .into_iter()
+    .filter(|p| p.is_file())
+    .collect()
+}
+
 /// 组装数据库桥的环境。
-pub fn env(java: PathBuf, jar: PathBuf, driver: PathBuf, config_dir: PathBuf) -> BridgeEnv {
+pub fn env(
+    java: PathBuf,
+    jar: PathBuf,
+    driver: PathBuf,
+    extra: Vec<PathBuf>,
+    config_dir: PathBuf,
+) -> BridgeEnv {
+    let mut jars = vec![jar, driver];
+    jars.extend(extra);
     BridgeEnv {
         java,
-        jars: vec![jar, driver],
+        jars,
         config_dir,
         main_class: "NcDbBridge".to_string(),
         label: "数据库".to_string(),

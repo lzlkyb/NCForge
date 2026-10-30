@@ -1,0 +1,230 @@
+/*
+ * 数据库页（多连接 SQL 控制台 / 表页 / 连接管理）。
+ * 照 design/NCForge-数据库升级-设计稿-2026-10-30.html；旧的 dq-* 样式在 db.css，只剩补丁页核对表结构在用。
+ */
+
+/* ── 环境色 ── */
+.e-dev { --env: var(--success); --env-ink: var(--success-ink); }
+.e-test { --env: var(--warning); --env-ink: var(--warning-ink); }
+.e-prod { --env: var(--destructive); --env-ink: var(--destructive-ink); }
+.e-other { --env: var(--muted-foreground); --env-ink: var(--muted-foreground); }
+.dbx-edot { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--env)); flex-shrink: 0; }
+.dbx-echip { font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 8px; background: hsl(var(--env) / .15); color: hsl(var(--env-ink)); font-weight: 600; flex-shrink: 0; }
+.dbx-mono { font-family: "Cascadia Mono", Consolas, monospace; }
+.dbx-muted { color: hsl(var(--muted-foreground)); }
+.dbx-sp { flex: 1; }
+
+/* ── 主标签条里的文档标签 ── */
+.wb-tool-tabs-host { display: flex; min-width: 0; }
+.wb-tool-tabs-host > .wb-dock-region:not([hidden]) { display: contents; }
+.dbx-doctab { position: relative; }
+.dbx-doctab[class*="e-"]::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: hsl(var(--env)); opacity: .9; }
+.dbx-doctab .dbx-edot { width: 7px; height: 7px; }
+.dbx-tabadd { width: 30px; height: 36px; display: grid; place-items: center; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+.dbx-tabadd:hover { color: hsl(var(--foreground)); background: hsl(var(--secondary) / .6); }
+
+/* ── 通用按钮 / 输入 ── */
+.dbx-btn { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 7px; border: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: 12px; white-space: nowrap; flex-shrink: 0; }
+.dbx-btn:hover:not(:disabled) { background: hsl(var(--secondary)); }
+.dbx-btn:disabled { opacity: .5; cursor: default; }
+.dbx-btn.pri { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); border-color: transparent; }
+.dbx-btn.pri:hover:not(:disabled) { background: hsl(var(--primary) / .9); }
+.dbx-btn.ok { background: hsl(var(--success) / .15); color: hsl(var(--success-ink)); border-color: transparent; font-weight: 600; }
+.dbx-btn.bad { background: hsl(var(--destructive)); color: #fff; border-color: transparent; }
+.dbx-btn.ghost { border-color: transparent; background: none; color: hsl(var(--muted-foreground)); }
+.dbx-btn.ghost:hover:not(:disabled), .dbx-btn.ghost[data-on] { color: hsl(var(--foreground)); background: hsl(var(--secondary)); }
+.dbx-btn .k { opacity: .65; font-size: 11px; }
+.dbx-ibtn { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+.dbx-ibtn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.dbx-vsep { width: 1px; height: 18px; background: hsl(var(--border)); margin: 0 2px; flex-shrink: 0; }
+.dbx-inp { height: 28px; width: 100%; min-width: 0; padding: 0 9px; border-radius: 7px; border: 1px solid hsl(var(--border)); background: hsl(var(--background)); font-size: 12.5px; color: hsl(var(--foreground)); outline: none; }
+.dbx-inp:focus { border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / .18); }
+.dbx-inp.mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+.dbx-inp.sm { height: 24px; font-size: 12px; }
+
+/* ── 页面骨架 ── */
+.dbx-page { display: flex; flex-direction: column; height: 100%; min-height: 0; background: hsl(var(--card)); }
+.dbx-console { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.dbx-console-body { display: flex; flex: 1; min-height: 0; }
+.dbx-console-main { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.dbx-editor { flex: 1; min-height: 80px; position: relative; }
+.dbx-editor .wb-editor-host { position: absolute; inset: 0; }
+.dbx-stmt-hl { background: hsl(var(--primary) / .07); }
+.dbx-stmt-gl { border-left: 2px solid hsl(var(--primary)); margin-left: 3px; }
+.dbx-splitbar { height: 5px; background: hsl(var(--border) / .6); cursor: row-resize; flex-shrink: 0; }
+.dbx-splitbar:hover { background: hsl(var(--primary) / .4); }
+.dbx-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: hsl(var(--muted-foreground)); font-size: 12.5px; padding: 24px; text-align: center; }
+
+/* ── SQL 工具条 ── */
+.dbx-sqlbar { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--card)); flex-shrink: 0; font-size: 12px; overflow: hidden; }
+.dbx-sqlbar[data-prod] { background: hsl(var(--destructive) / .07); box-shadow: inset 0 2px 0 hsl(var(--destructive)); }
+.dbx-connpick { white-space: nowrap; flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 7px; border: 1px solid hsl(var(--border)); background: hsl(var(--background)); font-size: 12px; max-width: 280px; }
+.dbx-connpick b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.dbx-connpick .u { color: hsl(var(--muted-foreground)); overflow: hidden; text-overflow: ellipsis; }
+.dbx-txmode { display: inline-flex; border: 1px solid hsl(var(--border)); border-radius: 7px; overflow: hidden; height: 26px; flex-shrink: 0; }
+.dbx-txmode button { white-space: nowrap; padding: 0 8px; font-size: 11.5px; color: hsl(var(--muted-foreground)); }
+.dbx-txmode button[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
+.dbx-txmode button:disabled { cursor: default; }
+
+/* ── 下拉（连接选择） ── */
+.dbx-dd { position: fixed; z-index: 1200; width: 380px; max-height: 60vh; overflow: auto; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 10px; box-shadow: var(--sh-pop, 0 8px 30px rgba(15,23,42,.14)); font-size: 12.5px; padding: 5px; }
+.dbx-dd .sec { padding: 6px 8px 3px; font-size: 11px; font-weight: 600; color: hsl(var(--muted-foreground)); }
+.dbx-dd .li { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 8px; border-radius: 7px; text-align: left; }
+.dbx-dd .li:hover, .dbx-dd .li[data-sel] { background: hsl(var(--accent)); }
+.dbx-dd .li .u { color: hsl(var(--muted-foreground)); font-size: 11.5px; font-family: "Cascadia Mono", Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-dd .li .r { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; }
+.dbx-dd hr { border: 0; border-top: 1px solid hsl(var(--border)); margin: 4px 2px; }
+
+/* ── 事务条 ── */
+.dbx-txbar { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; background: hsl(var(--warning) / .14); border-bottom: 1px solid hsl(var(--warning) / .35); color: hsl(var(--warning-ink)); font-size: 12px; flex-shrink: 0; }
+.dbx-txbar b { font-weight: 700; }
+.dbx-banner { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; border-bottom: 1px solid hsl(var(--border)); flex-shrink: 0; }
+.dbx-banner[data-tone="bad"] { background: hsl(var(--destructive) / .08); color: hsl(var(--destructive-ink)); }
+.dbx-banner[data-tone="warn"] { background: hsl(var(--warning) / .12); color: hsl(var(--warning-ink)); }
+
+/* ── 侧栏：连接树 ── */
+.dbx-side { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.dbx-side-head { display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 6px 0 12px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+.dbx-side-filter { margin: 0 8px 6px; flex-shrink: 0; }
+.dbx-tree { flex: 1; overflow: auto; padding: 0 6px 8px; font-size: 12.5px; }
+.dbx-crow { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding: 0 8px 0 4px; border-radius: 6px; white-space: nowrap; text-align: left; }
+.dbx-crow:hover { background: hsl(var(--secondary) / .7); }
+.dbx-crow[data-active] { background: hsl(var(--accent)); }
+.dbx-crow b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; max-width: 55%; }
+.dbx-crow .u { color: hsl(var(--muted-foreground)); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dbx-crow .st { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: hsl(var(--success-ink)); flex-shrink: 0; }
+.dbx-crow .st.off { color: hsl(var(--muted-foreground)); }
+.dbx-crow .st.bad { color: hsl(var(--destructive-ink)); }
+.dbx-crow[data-drop] { box-shadow: inset 0 2px 0 hsl(var(--primary)); }
+.dbx-sgroup { font-size: 11px; font-weight: 600; color: hsl(var(--muted-foreground)); padding: 8px 6px 2px; display: flex; align-items: center; gap: 4px; width: 100%; text-align: left; }
+.dbx-trow { display: flex; align-items: center; gap: 6px; width: 100%; height: 24px; border-radius: 6px; padding-right: 6px; white-space: nowrap; text-align: left; }
+.dbx-trow:hover { background: hsl(var(--secondary) / .7); }
+.dbx-trow[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
+.dbx-trow .nm { overflow: hidden; text-overflow: ellipsis; }
+.dbx-trow .zh { color: hsl(var(--muted-foreground)); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dbx-trow .ty { margin-left: auto; color: hsl(var(--muted-foreground)); font: 11px "Cascadia Mono", Consolas, monospace; flex-shrink: 0; }
+.dbx-trow .star { color: #eab308; flex-shrink: 0; }
+.dbx-tree-note { padding: 4px 8px; font-size: 11.5px; color: hsl(var(--muted-foreground)); }
+
+/* ── 结果区 ── */
+.dbx-res { display: flex; flex-direction: column; border-top: 1px solid hsl(var(--border)); background: hsl(var(--card)); flex-shrink: 0; min-height: 0; }
+.dbx-rtabs { display: flex; align-items: center; height: 30px; padding: 0 6px; gap: 2px; border-bottom: 1px solid hsl(var(--border)); flex-shrink: 0; overflow-x: auto; overflow-y: hidden; }
+.dbx-rtab { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; font-size: 12px; color: hsl(var(--muted-foreground)); position: relative; white-space: nowrap; flex-shrink: 0; }
+.dbx-rtab[data-on] { color: hsl(var(--foreground)); font-weight: 600; }
+.dbx-rtab[data-on]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; background: hsl(var(--primary)); }
+.dbx-rtab .bad { color: hsl(var(--destructive-ink)); }
+.dbx-cnt { font-size: 10.5px; padding: 0 5px; border-radius: 8px; background: hsl(var(--secondary)); color: hsl(var(--muted-foreground)); font-weight: 600; }
+.dbx-rtool { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; flex-shrink: 0; }
+.dbx-rtool .meta { color: hsl(var(--muted-foreground)); white-space: nowrap; }
+.dbx-rtool .meta b { color: hsl(var(--foreground)); font-weight: 600; }
+.dbx-rtool .dbx-inp { width: 200px; }
+.dbx-rbody { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.dbx-rfoot { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 10px; border-top: 1px solid hsl(var(--border)); font-size: 11.5px; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+.dbx-lk { color: hsl(var(--primary)); font-weight: 600; }
+.dbx-lk:disabled { opacity: .5; }
+.dbx-rfoot input { width: 64px; height: 20px; padding: 0 4px; border: 1px solid hsl(var(--border)); border-radius: 4px; background: hsl(var(--background)); font-size: 11.5px; color: hsl(var(--foreground)); }
+
+/* ── 结果表（手写虚拟滚动） ── */
+.dbx-grid { flex: 1; min-width: 0; overflow: auto; position: relative; font: 12px "Cascadia Mono", Consolas, monospace; outline: none; }
+.dbx-grid-inner { position: relative; }
+.dbx-grow { display: flex; position: absolute; left: 0; height: 24px; }
+.dbx-ghead { display: flex; position: sticky; top: 0; z-index: 2; height: 36px; background: hsl(var(--secondary)); }
+.dbx-gc { flex-shrink: 0; height: 24px; line-height: 23px; padding: 0 8px; border-right: 1px solid hsl(var(--border) / .8); border-bottom: 1px solid hsl(var(--border) / .8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: hsl(var(--card)); cursor: default; }
+.dbx-gc.n { text-align: right; }
+.dbx-gc.null { color: hsl(var(--muted-foreground) / .8); font-style: italic; }
+.dbx-gc.rn { text-align: right; color: hsl(var(--muted-foreground) / .8); background: hsl(var(--secondary) / .5); position: sticky; left: 0; z-index: 1; }
+.dbx-grow[data-sel] .dbx-gc { background: hsl(var(--accent) / .7); }
+.dbx-gc[data-cell] { outline: 2px solid hsl(var(--primary)); outline-offset: -2px; background: hsl(var(--accent)) !important; }
+.dbx-gc.chg { background: hsl(var(--warning) / .18); }
+.dbx-gh { flex-shrink: 0; position: relative; height: 36px; padding: 3px 8px 0; border-right: 1px solid hsl(var(--border) / .8); border-bottom: 1px solid hsl(var(--border)); font: 600 12px system-ui, "Segoe UI", sans-serif; white-space: nowrap; overflow: hidden; text-align: left; background: hsl(var(--secondary)); }
+.dbx-gh .t { display: block; font: 10.5px "Cascadia Mono", Consolas, monospace; color: hsl(var(--muted-foreground)); font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+.dbx-gh .nm { overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: calc(100% - 14px); vertical-align: top; }
+.dbx-gh .so { float: right; color: hsl(var(--primary)); }
+.dbx-gh.rn { position: sticky; left: 0; z-index: 3; }
+.dbx-gh .rz { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 1; }
+.dbx-gedit { width: 100%; height: 22px; border: 0; outline: none; padding: 0 2px; font: inherit; background: hsl(var(--background)); color: hsl(var(--foreground)); }
+.dbx-detail { width: 270px; border-left: 1px solid hsl(var(--border)); display: flex; flex-direction: column; flex-shrink: 0; font-size: 12px; min-height: 0; }
+.dbx-detail .hd { display: flex; align-items: flex-start; gap: 6px; padding: 8px 10px; border-bottom: 1px solid hsl(var(--border)); }
+.dbx-detail .hd b { font-family: "Cascadia Mono", Consolas, monospace; }
+.dbx-detail .hd .s { color: hsl(var(--muted-foreground)); font-size: 11.5px; margin-top: 2px; }
+.dbx-detail pre { flex: 1; margin: 0; padding: 8px 10px; font: 12px/18px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; word-break: break-all; overflow: auto; }
+.dbx-detail .ft { display: flex; gap: 6px; padding: 6px 8px; border-top: 1px solid hsl(var(--border)); }
+
+/* ── 输出 / 计划 / 错误 ── */
+.dbx-output { flex: 1; overflow: auto; padding: 6px 12px; font: 12px/19px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; }
+.dbx-output .ok { color: hsl(var(--success-ink)); }
+.dbx-output .bad { color: hsl(var(--destructive-ink)); }
+.dbx-output .dbms { color: hsl(var(--foreground)); }
+.dbx-output .info { color: hsl(var(--muted-foreground)); }
+.dbx-plan { flex: 1; overflow: auto; }
+.dbx-plan table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.dbx-plan th, .dbx-plan td { padding: 3px 10px; text-align: left; border-bottom: 1px solid hsl(var(--border)); white-space: nowrap; }
+.dbx-plan th { background: hsl(var(--secondary) / .6); font-weight: 600; position: sticky; top: 0; }
+.dbx-plan td.op { white-space: pre; font-family: "Cascadia Mono", Consolas, monospace; }
+.dbx-plan td.pred { font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; color: hsl(var(--muted-foreground)); white-space: normal; max-width: 420px; }
+.dbx-plan tr[data-full] td.op { color: hsl(var(--warning-ink)); font-weight: 600; }
+.dbx-plan .bar { display: inline-block; height: 8px; border-radius: 4px; background: hsl(var(--warning)); vertical-align: middle; margin-right: 6px; }
+.dbx-update { flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; font-size: 12.5px; }
+.dbx-update .big { font-size: 15px; font-weight: 600; }
+.dbx-err { margin: 12px; padding: 10px 12px; border-radius: 8px; background: hsl(var(--destructive) / .08); border: 1px solid hsl(var(--destructive) / .25); color: hsl(var(--destructive-ink)); font-size: 12.5px; line-height: 1.6; }
+.dbx-err code { font-family: "Cascadia Mono", Consolas, monospace; background: hsl(var(--card)); padding: 0 4px; border-radius: 4px; margin: 0 3px; cursor: pointer; }
+.dbx-err pre { margin-top: 6px; font: 11.5px/17px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; color: hsl(var(--foreground) / .8); }
+
+/* ── 历史抽屉 ── */
+.dbx-drawer { width: 330px; border-left: 1px solid hsl(var(--border)); background: hsl(var(--card)); display: flex; flex-direction: column; flex-shrink: 0; min-height: 0; }
+.dbx-drawer .hd { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 6px 0 12px; border-bottom: 1px solid hsl(var(--border)); font-weight: 600; font-size: 12.5px; flex-shrink: 0; }
+.dbx-drawer .flt { padding: 6px 8px; border-bottom: 1px solid hsl(var(--border)); flex-shrink: 0; }
+.dbx-drawer .list { flex: 1; overflow: auto; }
+.dbx-hitem { display: block; width: 100%; text-align: left; padding: 8px 12px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; }
+.dbx-hitem:hover { background: hsl(var(--accent) / .6); }
+.dbx-hitem .m { display: flex; align-items: center; gap: 6px; color: hsl(var(--muted-foreground)); font-size: 11px; margin-bottom: 3px; }
+.dbx-hitem .m .r { margin-left: auto; }
+.dbx-hitem code { display: block; font: 11.5px/17px "Cascadia Mono", Consolas, monospace; white-space: pre; overflow: hidden; text-overflow: ellipsis; max-height: 51px; }
+.dbx-hitem .fail { color: hsl(var(--destructive-ink)); }
+
+/* ── 表页 ── */
+.dbx-subtabs { display: flex; align-items: center; gap: 2px; height: 34px; padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--card)); flex-shrink: 0; font-size: 12.5px; }
+.dbx-subtabs .t { padding: 0 10px; height: 34px; display: grid; place-items: center; color: hsl(var(--muted-foreground)); position: relative; }
+.dbx-subtabs .t[data-on] { color: hsl(var(--foreground)); font-weight: 600; }
+.dbx-subtabs .t[data-on]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; background: hsl(var(--primary)); }
+.dbx-subtabs .title { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; font-weight: 600; }
+.dbx-where { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: 12px; flex-shrink: 0; }
+.dbx-where .kw { font: 600 12px "Cascadia Mono", Consolas, monospace; color: hsl(var(--primary)); flex-shrink: 0; }
+.dbx-where .dbx-inp { height: 26px; }
+.dbx-ddl { flex: 1; overflow: auto; margin: 0; padding: 10px 14px; font: 12.5px/20px "Cascadia Mono", Consolas, monospace; white-space: pre; }
+.dbx-meta { flex: 1; overflow: auto; }
+.dbx-meta table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.dbx-meta th, .dbx-meta td { padding: 4px 10px; text-align: left; border-bottom: 1px solid hsl(var(--border)); white-space: nowrap; }
+.dbx-meta th { background: hsl(var(--secondary) / .6); font-weight: 600; position: sticky; top: 0; }
+.dbx-meta td.mono { font-family: "Cascadia Mono", Consolas, monospace; }
+.dbx-meta .pk { color: #d97706; font-weight: 700; }
+
+/* ── 对话框 ── */
+.dbx-dlg { width: 620px; max-width: calc(100vw - 32px); max-height: calc(100vh - 48px); display: flex; flex-direction: column; border-radius: 12px; font-size: 12.5px; overflow: hidden; }
+.dbx-dlg.sm { width: 460px; }
+.dbx-dlg .hd { display: flex; align-items: center; gap: 8px; padding: 14px 16px 0; font-size: 14px; font-weight: 600; }
+.dbx-dlg .tabs { display: flex; gap: 2px; padding: 10px 16px 0; border-bottom: 1px solid hsl(var(--border)); }
+.dbx-dlg .tabs button { padding: 6px 10px; font-size: 12.5px; color: hsl(var(--muted-foreground)); position: relative; }
+.dbx-dlg .tabs button[data-on] { color: hsl(var(--foreground)); font-weight: 600; }
+.dbx-dlg .tabs button[data-on]::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: -1px; height: 2px; background: hsl(var(--primary)); }
+.dbx-dlg .bd { padding: 14px 16px; display: grid; grid-template-columns: 76px 1fr; gap: 10px 12px; align-items: center; overflow: auto; }
+.dbx-dlg .bd > label { color: hsl(var(--muted-foreground)); text-align: right; }
+.dbx-dlg .bd.one { display: block; }
+.dbx-dlg .ft { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--secondary) / .4); }
+.dbx-dlg pre.sql { margin: 0; padding: 8px 10px; border-radius: 8px; background: hsl(var(--secondary) / .6); font: 11.5px/18px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; max-height: 220px; overflow: auto; }
+.dbx-envs { display: flex; gap: 6px; flex-wrap: wrap; }
+.dbx-envs > button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid hsl(var(--border)); font-size: 12px; }
+.dbx-envs > button[data-on] { border-color: hsl(var(--env)); background: hsl(var(--env) / .12); color: hsl(var(--env-ink)); font-weight: 600; }
+.dbx-row2 { display: grid; grid-template-columns: 1fr 90px; gap: 8px; }
+.dbx-row3 { display: grid; grid-template-columns: 1fr 70px 1fr; gap: 8px; align-items: center; }
+.dbx-hint { grid-column: 2; color: hsl(var(--muted-foreground)); font-size: 11.5px; line-height: 1.6; margin-top: -4px; }
+.dbx-okline { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: hsl(var(--success) / .12); color: hsl(var(--success-ink)); font-size: 12px; }
+.dbx-badline { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: hsl(var(--destructive) / .1); color: hsl(var(--destructive-ink)); font-size: 12px; line-height: 1.6; word-break: break-all; }
+.dbx-chk { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.dbx-dslist { grid-column: 1 / -1; border: 1px solid hsl(var(--border)); border-radius: 8px; overflow: hidden; }
+.dbx-dslist .r { display: grid; grid-template-columns: 22px 110px 1fr 90px 70px; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; }
+.dbx-dslist .r:last-child { border-bottom: 0; }
+.dbx-dslist .r.h { min-height: 26px; background: hsl(var(--secondary) / .6); font-weight: 600; color: hsl(var(--muted-foreground)); font-size: 11.5px; }
+.dbx-dslist .mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-vars { display: grid; grid-template-columns: 140px 1fr; gap: 6px 8px; align-items: center; margin-top: 10px; }
+.dbx-vars code { font: 12px "Cascadia Mono", Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

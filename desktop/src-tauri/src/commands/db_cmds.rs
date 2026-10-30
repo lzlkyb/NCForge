@@ -1,32 +1,34 @@
-//! 数据库命令层：连接、只读查询、表名列表。
+//! 数据库命令层：多连接、执行任意语句、事务、元数据；以及表结构缓存与出包核对。
 //!
-//! 三条约定：
-//! 1. **密码不落明文**：`prop.xml` 里那串是 NC 自己的加密格式（8 字节 DES 块，密钥在核心
-//!    技术 jar 里，这台 NC home 找不到对应类），解不出来；所以首次由用户输一次，之后用
-//!    DPAPI 存在本机配置里（与 SVN 凭据同一套）。
-//! 2. **只读由桥保证**（语句白名单 + `SET TRANSACTION READ ONLY` + rollback 三道光），
-//!    命令层只做参数校验，不再自己拼 SQL。
-//! 3. **连接串以 prop.xml 为准**，配置里可以覆盖（换库调试时不用改 NC 的配置文件）。
+//! 约定：
+//! 1. **一个连接一个桥进程**（`state.db` 按连接 id 存）：一个库上的慢查询不会把另一个库的
+//!    操作堵在后面，桥里也不用处理并发。JVM 常驻约几十 MB，同时开两三个库可以接受。
+//! 2. **读写不在软件里限制**：能不能写由数据库账号权限决定。桥只报告事务状态
+//!    （手动提交模式下几条写语句、影响多少行），界面据此提醒。
+//! 3. **口令**：prop.xml 来源由桥里的 NC `PropXMLReader` 现解，不经过 Rust、不落盘；
+//!    手动来源由用户输一次，DPAPI 加密存本机（与 SVN 凭据同一套）。
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
+use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, DbConnConfig};
 use crate::db_bridge::{self, Bridge};
 use crate::db_schema;
 use crate::sql_refs;
 use crate::state::AppState;
 use crate::svn_cred;
 
-/// 连库（含握手）留足余量；查询的超时由 JDBC 的 queryTimeout 管。
+/// 连库（含握手）留足余量。
 const T_CONNECT: Duration = Duration::from_secs(60);
-const T_QUERY: Duration = Duration::from_secs(120);
+/// 元数据（表清单、DDL、执行计划）。
+const T_META: Duration = Duration::from_secs(120);
 
-// ───────────────────────── DTO ─────────────────────────
+// ───────────────────────── prop.xml（只读解析，不含口令） ─────────────────────────
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -34,114 +36,44 @@ pub struct PropDb {
     pub url: String,
     pub user: String,
     pub database_type: String,
-    /// prop.xml 里 `isEncode=true`：口令是 NC 加密格式，我们解不开。
+    /// prop.xml 里 `isEncode=true`：口令是 NC 加密格式（要靠桥里的 PropXMLReader 解）。
     pub password_encoded: bool,
-    /// 从哪个文件读到的（界面显示「配置来源」）。
+    /// 从哪个文件读到的。
     pub source: String,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DbDefaults {
-    pub url: Option<String>,
-    pub user: Option<String>,
-    pub database_type: Option<String>,
-    pub source: String,
-    /// 配置里存过密码（DPAPI 密文），界面可以只显示「已记住」。
-    pub has_password: bool,
-    /// 密码是否来自 prop.xml 且为 NC 加密格式（需要用户手输一次）。
-    pub password_needs_input: bool,
-    /// 有没有找到 ojdbc 驱动。
-    pub driver_found: bool,
-    pub driver_path: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DbColumn {
-    pub name: String,
-    /// 带长度的类型名：`VARCHAR2(40)`。
-    #[serde(rename = "type")]
-    pub type_name: String,
-    #[serde(default)]
-    pub precision: i64,
-    #[serde(default)]
-    pub scale: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DbTable {
-    pub name: String,
-    /// `TABLE` / `VIEW`。
-    pub kind: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DbConnectResult {
-    pub url: String,
-    pub user: String,
-    pub product: String,
-    pub version: String,
-    pub read_only: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QueryResult {
-    pub columns: Vec<DbColumn>,
-    /// 单元格原样给前端：数字是 number、文本是 string、空值是 null。
-    pub rows: Vec<Vec<serde_json::Value>>,
-    pub row_count: usize,
-    pub truncated: bool,
-    pub ms: u64,
-    /// 命中的表名其实不存在时，前端可以给「相近的表名」提示。
-    pub sql: String,
-}
-
-// ───────────────────────── prop.xml ─────────────────────────
-
-/// 解析 NC 的 `ierp/bin/prop.xml`，取基础数据源。
+/// 解析 NC 的 `ierp/bin/prop.xml`，取基础数据源（`isBase=true`，没有就取第一个）。
 ///
-/// 只做「按标签取值」级别的解析，不上 XML 库：文件结构固定（一个 root 下若干
-/// `dataSource`），而多引一个 XML 依赖只为读四个字段不划算。
-/// 多个 dataSource 时优先 `isBase=true` 那个（NC 自己也是用它连库）。
+/// 只在「还没有任何连接配置」时给表结构缓存 / 出包核对兜底用；数据库页的连接列表
+/// 走桥里的 `propList`（能列出全部数据源）。
 pub fn parse_prop(bytes: &[u8], source: &str) -> Result<PropDb, String> {
-    // prop.xml 声明 gb2312；中文只出现在注释里，但解码错了会让后续切片偏移，统一先转 UTF-8
     let xml = String::from_utf8_lossy(bytes).to_string();
     let blocks = split_data_sources(&xml);
     if blocks.is_empty() {
         return Err("prop.xml 里没有 <dataSource>，可能读错了文件".to_string());
     }
-    let mut picked: Option<&str> = None;
-    for b in &blocks {
-        if tag(b, "isBase")
-            .map(|v| v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
-        {
-            picked = Some(b);
-            break;
-        }
-    }
-    let block = picked.unwrap_or(blocks[0]);
+    let block = blocks
+        .iter()
+        .find(|b| {
+            tag(b, "isBase")
+                .map(|v| v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false)
+        })
+        .copied()
+        .unwrap_or(blocks[0]);
     let url = tag(block, "databaseUrl")
         .ok_or_else(|| "prop.xml 的 dataSource 里没有 databaseUrl".to_string())?;
-    let user = tag(block, "user").unwrap_or_default();
-    let database_type = tag(block, "databaseType").unwrap_or_default();
-    let encoded = tag(&xml, "isEncode")
-        .map(|v| v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
     Ok(PropDb {
         url,
-        user,
-        database_type,
-        password_encoded: encoded,
+        user: tag(block, "user").unwrap_or_default(),
+        database_type: tag(block, "databaseType").unwrap_or_default(),
+        password_encoded: tag(&xml, "isEncode")
+            .map(|v| v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false),
         source: source.to_string(),
     })
 }
 
-/// 切出每个 `<dataSource>…</dataSource>` 的内容（可能有多个）。
 fn split_data_sources(xml: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut rest = xml;
@@ -169,18 +101,16 @@ fn tag(block: &str, name: &str) -> Option<String> {
     }
 }
 
-/// 找 NC home 下的 prop.xml。
-fn prop_path(nc_home: &Path) -> Option<PathBuf> {
-    let cands = [
-        nc_home.join("ierp").join("bin").join("prop.xml"),
-        nc_home.join("bin").join("prop.xml"),
-    ];
-    cands.into_iter().find(|p| p.is_file())
-}
-
 fn read_prop(cfg: &AppConfig) -> Option<PropDb> {
     let home = crate::nc_home::resolve(cfg.nc_home.as_deref()).ok()?;
-    let p = prop_path(Path::new(&home.root))?;
+    let cands = [
+        Path::new(&home.root)
+            .join("ierp")
+            .join("bin")
+            .join("prop.xml"),
+        Path::new(&home.root).join("bin").join("prop.xml"),
+    ];
+    let p = cands.into_iter().find(|p| p.is_file())?;
     let bytes = std::fs::read(&p).ok()?;
     parse_prop(&bytes, &p.display().to_string()).ok()
 }
@@ -196,12 +126,17 @@ fn resource_dirs(app: &AppHandle) -> Vec<PathBuf> {
     dirs
 }
 
-fn bridge_for(app: &AppHandle, state: &AppState, cfg: &AppConfig) -> Result<Arc<Bridge>, String> {
+/// 桥的环境：自带 ncdb.jar + NC home 的 Oracle 驱动 + 解 prop.xml 口令要的两个 NC jar。
+fn bridge_env(
+    app: &AppHandle,
+    state: &AppState,
+    cfg: &AppConfig,
+) -> Result<db_bridge::BridgeEnv, String> {
     let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
-    let java = PathBuf::from(&home.java);
     let (jar, _) = db_bridge::find_jar(&resource_dirs(app))
         .ok_or_else(|| "找不到内置的 ncdb.jar，安装包可能不完整".to_string())?;
-    let driver = db_bridge::find_driver(Path::new(&home.root)).ok_or_else(|| {
+    let root = Path::new(&home.root);
+    let driver = db_bridge::find_driver(root).ok_or_else(|| {
         format!(
             "{} 下没有 Oracle 驱动（driver/oracle_11g/ojdbc6.jar）",
             home.root
@@ -209,289 +144,345 @@ fn bridge_for(app: &AppHandle, state: &AppState, cfg: &AppConfig) -> Result<Arc<
     })?;
     let cfg_dir = state.config_dir.join("db");
     std::fs::create_dir_all(&cfg_dir).map_err(|e| format!("建目录失败 {cfg_dir:?}: {e}"))?;
+    Ok(db_bridge::env(
+        PathBuf::from(&home.java),
+        jar,
+        driver,
+        db_bridge::nc_decrypt_jars(root),
+        cfg_dir,
+    ))
+}
 
-    let mut guard = state
+/// 取（没有就建）某个连接的桥。`key` 是连接 id；`__probe` / `__test` 给列数据源、测试连接用。
+pub(crate) fn bridge_for(
+    app: &AppHandle,
+    state: &AppState,
+    cfg: &AppConfig,
+    key: &str,
+) -> Result<Arc<Bridge>, String> {
+    let env = bridge_env(app, state, cfg)?;
+    let mut map = state
         .db
         .lock()
         .map_err(|_| "数据库桥状态异常".to_string())?;
-    if let Some(existing) = guard.as_ref() {
-        if existing.env().java == java {
+    if let Some(existing) = map.get(key) {
+        if existing.env().java == env.java && existing.env().jars == env.jars {
             return Ok(existing.clone());
         }
         existing.shutdown();
     }
-    let bridge = Arc::new(Bridge::new(db_bridge::env(java, jar, driver, cfg_dir)));
-    *guard = Some(bridge.clone());
+    let bridge = Arc::new(Bridge::new(env));
+    map.insert(key.to_string(), bridge.clone());
     Ok(bridge)
 }
 
-fn code_label(code: &str, message: &str) -> String {
+/// 已经存在的桥（不新建）：没连过的连接上做元数据操作要报「先连接」，而不是偷偷起进程。
+pub(crate) fn existing_bridge(state: &AppState, key: &str) -> Result<Arc<Bridge>, String> {
+    let map = state
+        .db
+        .lock()
+        .map_err(|_| "数据库桥状态异常".to_string())?;
+    map.get(key)
+        .cloned()
+        .ok_or_else(|| code_label("not-connected", "这个连接还没连上"))
+}
+
+/// 关掉并移除某个桥（断开、删除连接时用）。
+pub(crate) fn drop_bridge(state: &AppState, key: &str) {
+    let b = state.db.lock().ok().and_then(|mut m| m.remove(key));
+    if let Some(b) = b {
+        b.shutdown();
+    }
+}
+
+/// 在阻塞线程里调一次桥，错误转成 `code|message`。
+pub(crate) async fn call(
+    bridge: Arc<Bridge>,
+    cmd: &'static str,
+    args: Vec<String>,
+    timeout: Duration,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        bridge.call(cmd, &refs, timeout)
+    })
+    .await
+    .map_err(|e| format!("调用数据库桥失败：{e}"))?
+    .map_err(|e| {
+        if e.code == "timeout" || e.code == "spawn" {
+            code_label("bridge", &e.message)
+        } else {
+            map_sql_error(&e.message)
+        }
+    })
+}
+
+pub(crate) fn code_label(code: &str, message: &str) -> String {
     format!("{code}|{message}")
 }
 
-/// 把桥的 SQL 错误翻译成前端好用的码：认证失败要弹输密码框，别的只显示。
-fn map_sql_error(message: &str) -> String {
+/// 桥的 SQL 错误翻译成前端好用的码：认证失败要弹输口令框，网络不通单独提示。
+pub(crate) fn map_sql_error(message: &str) -> String {
     let m = message.to_lowercase();
     if m.contains("ora-01017") || m.contains("invalid username/password") || m.contains("登录被拒")
     {
         return code_label("auth", message);
     }
-    if m.contains("ora-12541") || m.contains("ora-12514") || m.contains("no listener") {
+    if m.contains("ora-12541")
+        || m.contains("ora-12514")
+        || m.contains("ora-12505")
+        || m.contains("no listener")
+        || m.contains("io 错误")
+        || m.contains("io error")
+    {
         return code_label("unreachable", message);
     }
     code_label("sql", message)
 }
 
-// ───────────────────────── 命令 ─────────────────────────
-
-/// 连库前要知道的事：从哪读的连接串、有没有驱动、有没有存过密码。
-#[tauri::command]
-pub async fn db_defaults(state: tauri::State<'_, Arc<AppState>>) -> Result<DbDefaults, String> {
-    let cfg = state.config.read().await.clone();
-    let prop = read_prop(&cfg);
-    let driver = crate::nc_home::resolve(cfg.nc_home.as_deref())
-        .ok()
-        .and_then(|h| db_bridge::find_driver(Path::new(&h.root)));
-    let url = cfg
-        .db_url
-        .clone()
-        .or_else(|| prop.as_ref().map(|p| p.url.clone()));
-    let user = cfg
-        .db_user
-        .clone()
-        .or_else(|| prop.as_ref().map(|p| p.user.clone()));
-    let source = if cfg.db_url.is_some() {
-        "配置".to_string()
-    } else {
-        prop.as_ref().map(|p| p.source.clone()).unwrap_or_default()
-    };
-    Ok(DbDefaults {
-        url,
-        user,
-        database_type: prop
-            .as_ref()
-            .map(|p| p.database_type.clone())
-            .filter(|s| !s.is_empty()),
-        source,
-        has_password: cfg.db_password_dpapi.is_some(),
-        password_needs_input: cfg.db_password_dpapi.is_none(),
-        driver_found: driver.is_some(),
-        driver_path: driver.map(|p| p.display().to_string()),
-    })
+pub(crate) fn find_conn(cfg: &AppConfig, id: &str) -> Result<DbConnConfig, String> {
+    cfg.db_conns
+        .iter()
+        .find(|c| c.id == id)
+        .cloned()
+        .ok_or_else(|| "这个连接已经不存在（可能刚被删除）".to_string())
 }
 
-/// 连库。`password` 为空时用配置里存的（DPAPI 解出来的）。
+/// 手动来源的口令：本次输入优先，否则解 DPAPI；都没有就要求输入。
+pub(crate) fn resolve_password(conn: &DbConnConfig, typed: Option<&str>) -> Result<String, String> {
+    if let Some(t) = typed.filter(|t| !t.is_empty()) {
+        return Ok(t.to_string());
+    }
+    let Some(enc) = conn.password_dpapi.as_deref() else {
+        return Err(code_label("need-password", "还没输入这个连接的口令"));
+    };
+    let raw = svn_cred::b64_decode(enc)
+        .ok_or_else(|| code_label("need-password", "存着的口令已损坏，请重输"))?;
+    let plain = svn_cred::dpapi_unprotect(&raw).map_err(|e| {
+        code_label(
+            "need-password",
+            &format!("存着的口令解不开（换机器/换用户会这样）：{e}"),
+        )
+    })?;
+    String::from_utf8(plain).map_err(|e| format!("口令解码失败：{e}"))
+}
+
+pub(crate) fn protect(password: &str) -> Result<String, String> {
+    Ok(svn_cred::b64_encode(&svn_cred::dpapi_protect(
+        password.as_bytes(),
+    )?))
+}
+
+/// 连接参数（不含手动口令）：prop 来源走 `connectProp`，手动来源走 `connect`。
+pub(crate) fn connect_args(
+    cfg: &AppConfig,
+    conn: &DbConnConfig,
+    password: Option<&str>,
+    auto_commit: bool,
+) -> Result<(&'static str, Vec<String>), String> {
+    let auto = auto_commit.to_string();
+    if conn.source == "prop" {
+        let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
+        let ds = conn
+            .prop_ds
+            .clone()
+            .ok_or_else(|| "这个连接缺数据源名".to_string())?;
+        return Ok(("connectProp", vec![home.root, ds, auto]));
+    }
+    let pass = resolve_password(conn, password)?;
+    Ok((
+        "connect",
+        vec![conn.url.clone(), conn.user.clone(), pass, auto],
+    ))
+}
+
+// ───────────────────────── 连接 / 执行 / 事务 ─────────────────────────
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbConnectResult {
+    pub id: String,
+    pub url: String,
+    pub user: String,
+    pub product: String,
+    pub version: String,
+    pub auto_commit: bool,
+}
+
+/// 连库。手动来源 `password` 为空时用存过的；`remember` 为真时把这次输入的口令存起来。
 #[tauri::command]
 pub async fn db_connect(
     app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
+    id: String,
     password: Option<String>,
+    remember: Option<bool>,
 ) -> Result<DbConnectResult, String> {
     let st = state.inner().clone();
     let cfg = st.config.read().await.clone();
+    let conn = find_conn(&cfg, &id)?;
+    let (cmd, args) = connect_args(&cfg, &conn, password.as_deref(), conn.auto_commit)?;
+    let bridge = bridge_for(&app, &st, &cfg, &id)?;
+    let out = call(bridge, cmd, args, T_CONNECT).await?;
 
-    let prop = read_prop(&cfg);
-    let url = cfg
-        .db_url
-        .clone()
-        .or_else(|| prop.as_ref().map(|p| p.url.clone()))
-        .ok_or_else(|| {
-            "没有数据库连接串：NC home 下找不到 ierp/bin/prop.xml，也没在配置里指定".to_string()
-        })?;
-    let user = cfg
-        .db_user
-        .clone()
-        .or_else(|| prop.as_ref().map(|p| p.user.clone()))
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "没有数据库用户名（prop.xml 的 dataSource 里没有 <user>）".to_string())?;
-
-    let typed = password.unwrap_or_default();
-    let pass = if !typed.is_empty() {
-        typed.clone()
-    } else {
-        match cfg.db_password_dpapi.as_deref() {
-            Some(enc) => {
-                let raw = svn_cred::b64_decode(enc)
-                    .ok_or_else(|| "存着的数据库口令不是合法的 base64".to_string())?;
-                let plain = svn_cred::dpapi_unprotect(&raw)
-                    .map_err(|e| format!("存着的数据库口令解不开（换机器/换用户会这样）：{e}"))?;
-                String::from_utf8(plain).map_err(|e| format!("口令解码失败：{e}"))?
-            }
-            None => return Err(code_label("need-password", "还没输入数据库密码")),
-        }
+    let typed = password.filter(|p| !p.is_empty());
+    let keep = remember.unwrap_or(true);
+    let enc = match (&typed, keep) {
+        (Some(p), true) => Some(protect(p)?),
+        _ => None,
     };
+    let _ = st
+        .update_config(|c| {
+            c.db_active = Some(id.clone());
+            if let Some(e) = enc {
+                if let Some(x) = c.db_conns.iter_mut().find(|x| x.id == id) {
+                    x.password_dpapi = Some(e);
+                }
+            }
+            Ok(())
+        })
+        .await;
 
-    let bridge = bridge_for(&app, &st, &cfg)?;
-    // url / user 后面还要回给前端（连接胶囊上显示「连的是哪个库」），闭包里只借副本
-    let (url_arg, user_arg) = (url.clone(), user.clone());
-    let out = tauri::async_runtime::spawn_blocking(move || {
-        bridge.call("connect", &[&url_arg, &user_arg, &pass], T_CONNECT)
-    })
-    .await
-    .map_err(|e| format!("连库失败：{e}"))?
-    .map_err(|e| map_sql_error(&e.message))?;
-
-    // 连接成功且是新输入的密码 → 记住（DPAPI，只在本机本用户可解）
-    if !typed.is_empty() {
-        let enc = svn_cred::dpapi_protect(typed.as_bytes())?;
-        let encoded = svn_cred::b64_encode(&enc);
-        let _ = st
-            .update_config(|c| {
-                c.db_password_dpapi = Some(encoded);
-                Ok(())
-            })
-            .await;
-    }
-
+    let s = |k: &str| out.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     Ok(DbConnectResult {
-        url,
-        user,
-        product: out
-            .get("product")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        version: out
-            .get("version")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        read_only: out
-            .get("readOnly")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true),
+        id,
+        url: s("url"),
+        user: s("user"),
+        product: s("product"),
+        version: s("version"),
+        auto_commit: out
+            .get("autoCommit")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
-/// 跑一条只读查询。
+/// 断开（未提交的改动由桥回滚——界面已经先问过用户）。
 #[tauri::command]
-pub async fn db_query(
-    app: AppHandle,
+pub async fn db_disconnect(
     state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<(), String> {
+    let Ok(b) = existing_bridge(&state, &id) else {
+        return Ok(());
+    };
+    let _ = call(b, "disconnect", vec![], Duration::from_secs(10)).await;
+    drop_bridge(&state, &id);
+    Ok(())
+}
+
+/// 执行一条语句（查询 / DML / DDL / PL/SQL 块都行）。返回桥的原样 JSON：
+/// `{kind:"rows",columns,rows,rowCount,hasMore,ms,output,tx}` 或 `{kind:"update",updateCount,…}`。
+#[tauri::command]
+pub async fn db_exec(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
     sql: String,
     max_rows: Option<u32>,
     timeout_sec: Option<u32>,
-) -> Result<QueryResult, String> {
+) -> Result<Value, String> {
     if sql.trim().is_empty() {
-        return Err("SQL 是空的".to_string());
+        return Err(code_label("sql", "SQL 是空的"));
     }
-    let st = state.inner().clone();
-    let cfg = st.config.read().await.clone();
-    let bridge = bridge_for(&app, &st, &cfg)?;
-    let max_rows = max_rows.unwrap_or(500).min(2000).to_string();
-    let timeout = timeout_sec.unwrap_or(30).min(120).to_string();
-
-    let sql_arg = sql.clone();
-    let out = tauri::async_runtime::spawn_blocking(move || {
-        bridge.call("query", &[&sql_arg, &max_rows, &timeout], T_QUERY)
-    })
+    let b = existing_bridge(&state, &id)?;
+    let rows = max_rows.unwrap_or(500).clamp(1, 10_000);
+    let timeout = timeout_sec.unwrap_or(30).clamp(1, 3600);
+    call(
+        b,
+        "exec",
+        vec![sql, rows.to_string(), timeout.to_string()],
+        Duration::from_secs(u64::from(timeout) + 30),
+    )
     .await
-    .map_err(|e| format!("查询失败：{e}"))?
-    .map_err(|e| map_sql_error(&e.message))?;
-
-    let columns = out
-        .get("columns")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .map(|c| DbColumn {
-                    name: c
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    type_name: c
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    precision: c.get("precision").and_then(|v| v.as_i64()).unwrap_or(0),
-                    scale: c.get("scale").and_then(|v| v.as_i64()).unwrap_or(0),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let rows: Vec<Vec<serde_json::Value>> = out
-        .get("rows")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .map(|r| r.as_array().cloned().unwrap_or_default())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Ok(QueryResult {
-        columns,
-        row_count: rows.len(),
-        rows,
-        truncated: out
-            .get("truncated")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
-        ms: out.get("ms").and_then(|v| v.as_u64()).unwrap_or(0),
-        sql,
-    })
 }
 
-/// 表名列表（下拉提示 + 「表名写错」时的相近名称建议）。
+/// 「加载更多」：从上一次查询的游标接着取。
 #[tauri::command]
-pub async fn db_tables(
-    app: AppHandle,
+pub async fn db_more(
     state: tauri::State<'_, Arc<AppState>>,
-) -> Result<Vec<DbTable>, String> {
-    let st = state.inner().clone();
-    let cfg = st.config.read().await.clone();
-    let bridge = bridge_for(&app, &st, &cfg)?;
-    let out = tauri::async_runtime::spawn_blocking(move || {
-        bridge.call("tables", &[], Duration::from_secs(120))
-    })
-    .await
-    .map_err(|e| format!("取表名失败：{e}"))?
-    .map_err(|e| map_sql_error(&e.message))?;
+    id: String,
+    max_rows: Option<u32>,
+) -> Result<Value, String> {
+    let b = existing_bridge(&state, &id)?;
+    let rows = max_rows.unwrap_or(500).clamp(1, 10_000);
+    call(b, "more", vec![rows.to_string()], T_META).await
+}
 
-    Ok(out
-        .get("tables")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .map(|t| DbTable {
-                    name: t
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    kind: t
-                        .get("kind")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                })
-                .collect()
-        })
-        .unwrap_or_default())
+/// 事务操作：`commit` / `rollback` / `autocommit-on` / `autocommit-off` / `status`。
+#[tauri::command]
+pub async fn db_tx(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+    action: String,
+) -> Result<Value, String> {
+    let b = existing_bridge(&state, &id)?;
+    let (cmd, args): (&'static str, Vec<String>) = match action.as_str() {
+        "commit" => ("commit", vec![]),
+        "rollback" => ("rollback", vec![]),
+        "autocommit-on" => ("autocommit", vec!["true".into()]),
+        "autocommit-off" => ("autocommit", vec!["false".into()]),
+        "status" => ("ping", vec![]),
+        other => return Err(format!("未知事务操作：{other}")),
+    };
+    call(b, cmd, args, Duration::from_secs(60)).await
+}
+
+/// 元数据：`tables` / `ncNames` / `columns` / `indexes` / `ddl` / `explain`。
+/// `arg` 是表名（explain 时是 SQL）。返回桥的原样 JSON。
+#[tauri::command]
+pub async fn db_meta(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+    kind: String,
+    arg: Option<String>,
+) -> Result<Value, String> {
+    let b = existing_bridge(&state, &id)?;
+    let cmd: &'static str = match kind.as_str() {
+        "tables" => "tables",
+        "ncNames" => "ncNames",
+        "columns" => "columns",
+        "indexes" => "indexes",
+        "ddl" => "ddl",
+        "explain" => "explain",
+        other => return Err(format!("未知元数据类型：{other}")),
+    };
+    let args = arg.map(|a| vec![a]).unwrap_or_default();
+    if cmd != "tables" && cmd != "ncNames" && args.is_empty() {
+        return Err(format!("{cmd} 需要参数"));
+    }
+    call(b, cmd, args, T_META).await
 }
 
 // ───────────────────────── 表结构缓存与出包核对 ─────────────────────────
 
-/// 当前要连哪个库：配置优先，其次 `prop.xml` 的基础数据源。
-fn current_db(cfg: &AppConfig) -> Result<(String, String), String> {
+/// 表结构缓存、悬停、出包核对用哪个库：最近一次在数据库页用过的连接，
+/// 其次第一条连接，再其次 prop.xml 的基础数据源（老用户还没打开过新数据库页时）。
+fn current_db(cfg: &AppConfig) -> Result<(Option<String>, String, String), String> {
+    let pick = cfg
+        .db_active
+        .as_deref()
+        .and_then(|id| cfg.db_conns.iter().find(|c| c.id == id))
+        .or_else(|| cfg.db_conns.first());
+    if let Some(c) = pick {
+        return Ok((Some(c.id.clone()), c.url.clone(), c.user.clone()));
+    }
     let prop = read_prop(cfg);
     let url = cfg
         .db_url
         .clone()
         .or_else(|| prop.as_ref().map(|p| p.url.clone()))
-        .ok_or_else(|| {
-            "没有数据库连接串：NC home 下找不到 prop.xml，也没在配置里指定".to_string()
-        })?;
+        .ok_or_else(|| "还没有数据库连接：到数据库页添加一个".to_string())?;
     let user = cfg
         .db_user
         .clone()
         .or_else(|| prop.as_ref().map(|p| p.user.clone()))
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "没有数据库用户名（prop.xml 的 dataSource 里没有 <user>）".to_string())?;
-    Ok((url, user))
+        .unwrap_or_default();
+    Ok((None, url, user))
+}
+
+/// 缓存键里的用户名统一小写：prop.xml 写 `aier633`，库里回来的是 `AIER633`。
+fn cache_file(dir: &Path, url: &str, user: &str) -> PathBuf {
+    db_schema::cache_path(dir, url, &user.to_lowercase())
 }
 
 #[derive(Debug, Serialize)]
@@ -505,30 +496,41 @@ pub struct SchemaStatus {
     pub age_secs: u64,
     pub tables: usize,
     pub columns: usize,
+    /// 对应的连接 id（没有连接配置时为空）。
+    pub conn_id: Option<String>,
 }
 
-fn status_of(cache: Option<&db_schema::SchemaCache>, url: &str, user: &str) -> SchemaStatus {
+fn status_of(
+    cache: Option<&db_schema::SchemaCache>,
+    conn_id: Option<String>,
+    url: &str,
+    user: &str,
+) -> SchemaStatus {
     let now = db_schema::now_secs();
-    match cache {
-        Some(c) => SchemaStatus {
-            has: true,
-            url: url.to_string(),
-            user: user.to_string(),
-            fetched_at: c.fetched_at,
-            age_secs: now.saturating_sub(c.fetched_at),
-            tables: c.tables.len(),
-            columns: c.column_count(),
+    let (has, fetched_at, tables, columns) = match cache {
+        Some(c) => (true, c.fetched_at, c.tables.len(), c.column_count()),
+        None => (false, 0, 0, 0),
+    };
+    SchemaStatus {
+        has,
+        url: url.to_string(),
+        user: user.to_string(),
+        fetched_at,
+        age_secs: if has {
+            now.saturating_sub(fetched_at)
+        } else {
+            0
         },
-        None => SchemaStatus {
-            has: false,
-            url: url.to_string(),
-            user: user.to_string(),
-            fetched_at: 0,
-            age_secs: 0,
-            tables: 0,
-            columns: 0,
-        },
+        tables,
+        columns,
+        conn_id,
     }
+}
+
+fn load_cache(dir: &Path, url: &str, user: &str) -> Option<db_schema::SchemaCache> {
+    let lower = user.to_lowercase();
+    db_schema::load(&cache_file(dir, url, user), url, &lower)
+        .or_else(|| db_schema::load(&db_schema::cache_path(dir, url, user), url, user))
 }
 
 /// 表结构缓存的状态（不连库，只读本地文件）。
@@ -537,62 +539,76 @@ pub async fn db_schema_status(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<SchemaStatus, String> {
     let cfg = state.config.read().await.clone();
-    let (url, user) = current_db(&cfg)?;
-    let path = db_schema::cache_path(&state.config_dir, &url, &user);
-    let cache = db_schema::load(&path, &url, &user);
-    Ok(status_of(cache.as_ref(), &url, &user))
+    let (id, url, user) = current_db(&cfg)?;
+    let cache = load_cache(&state.config_dir, &url, &user);
+    Ok(status_of(cache.as_ref(), id, &url, &user))
 }
 
-/// 从库里把表结构整个拉一遍，落盘。
+/// 从库里把表结构整个拉一遍落盘。要求当前连接已经连上（不偷偷连库）。
 ///
-/// 一次拉完而不是分页：库里两千多张表约几万列，JSON 几 MB，桥的行协议没有长度限制。
-/// 分页反而更慢——Java 侧每页都要把 `getColumns` 的结果从头 skip 一遍（O(n²)）。
+/// 一次拉完而不是分页：Java 侧每页都要把 `getColumns` 的结果从头 skip 一遍（O(n²)）。
 #[tauri::command]
 pub async fn db_schema_sync(
-    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
+    id: Option<String>,
 ) -> Result<SchemaStatus, String> {
     let st = state.inner().clone();
     let cfg = st.config.read().await.clone();
-    let (url, user) = current_db(&cfg)?;
-    let bridge = bridge_for(&app, &st, &cfg)?;
-
-    let out = tauri::async_runtime::spawn_blocking(move || {
-        bridge.call("schema", &["0", "2000000"], Duration::from_secs(180))
-    })
-    .await
-    .map_err(|e| format!("拉表结构失败：{e}"))?
-    .map_err(|e| map_sql_error(&e.message))?;
+    let (active, url, user) = match id.as_deref() {
+        Some(i) => {
+            let c = find_conn(&cfg, i)?;
+            (Some(c.id), c.url, c.user)
+        }
+        None => current_db(&cfg)?,
+    };
+    let key = active
+        .clone()
+        .ok_or_else(|| code_label("not-connected", "先在数据库页添加并连上一个连接"))?;
+    let bridge = existing_bridge(&st, &key)
+        .map_err(|_| code_label("not-connected", "先在数据库页连上这个库，再拉表结构"))?;
+    let out = call(
+        bridge,
+        "schema",
+        vec!["0".into(), "2000000".into()],
+        Duration::from_secs(300),
+    )
+    .await?;
 
     let rows: Vec<(String, String, String)> = out
         .get("rows")
-        .and_then(|v| v.as_array())
+        .and_then(Value::as_array)
         .map(|arr| {
             arr.iter()
                 .filter_map(|r| {
                     let t = r.get("table")?.as_str()?.to_string();
                     let c = r.get("column")?.as_str()?.to_string();
                     let ty = db_schema::fmt_type(
-                        r.get("type").and_then(|v| v.as_str()).unwrap_or(""),
-                        r.get("size").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                        r.get("type").and_then(Value::as_str).unwrap_or(""),
+                        r.get("size").and_then(Value::as_i64).unwrap_or(0) as i32,
                     );
                     Some((t, c, ty))
                 })
                 .collect()
         })
         .unwrap_or_default();
-
     if rows.is_empty() {
         return Err(code_label(
             "sql",
             "库里没读到任何列定义——账号可能没有数据字典权限，或者连错了库",
         ));
     }
+    let lower = user.to_lowercase();
+    let cache = db_schema::SchemaCache::build(&url, &lower, db_schema::now_secs(), &rows);
+    db_schema::save(&cache_file(&st.config_dir, &url, &user), &cache)?;
+    Ok(status_of(Some(&cache), active, &url, &user))
+}
 
-    let cache = db_schema::SchemaCache::build(&url, &user, db_schema::now_secs(), &rows);
-    let path = db_schema::cache_path(&st.config_dir, &url, &user);
-    db_schema::save(&path, &cache)?;
-    Ok(status_of(Some(&cache), &url, &user))
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbColumn {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub type_name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -604,21 +620,15 @@ pub struct DbTableColumns {
     pub from_cache: bool,
 }
 
-/// 单表字段。有缓存走缓存（悬停要快），没缓存就现查一次。
+/// 单表字段（Java 悬停卡片用）。有缓存走缓存；没缓存且当前连接已连上就现查一次。
 #[tauri::command]
 pub async fn db_columns(
-    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     table: String,
 ) -> Result<DbTableColumns, String> {
-    let st = state.inner().clone();
-    let cfg = st.config.read().await.clone();
-    let (url, user) = current_db(&cfg)?;
-    if let Some(c) = db_schema::load(
-        &db_schema::cache_path(&st.config_dir, &url, &user),
-        &url,
-        &user,
-    ) {
+    let cfg = state.config.read().await.clone();
+    let (id, url, user) = current_db(&cfg)?;
+    if let Some(c) = load_cache(&state.config_dir, &url, &user) {
         if let Some(t) = c.tables.get(&table.to_lowercase()) {
             return Ok(DbTableColumns {
                 table,
@@ -628,46 +638,35 @@ pub async fn db_columns(
                     .map(|(n, ty)| DbColumn {
                         name: n.clone(),
                         type_name: ty.clone(),
-                        precision: 0,
-                        scale: 0,
                     })
                     .collect(),
                 from_cache: true,
             });
         }
     }
-
-    let bridge = bridge_for(&app, &st, &cfg)?;
-    let arg = table.clone();
-    let out = tauri::async_runtime::spawn_blocking(move || {
-        bridge.call("columns", &[&arg], Duration::from_secs(60))
-    })
-    .await
-    .map_err(|e| format!("取字段失败：{e}"))?
-    .map_err(|e| map_sql_error(&e.message))?;
-
+    let key = id.ok_or_else(|| code_label("not-connected", "还没有数据库连接"))?;
+    let b = existing_bridge(&state, &key)?;
+    let out = call(b, "columns", vec![table.clone()], Duration::from_secs(60)).await?;
     let columns = out
         .get("columns")
-        .and_then(|v| v.as_array())
+        .and_then(Value::as_array)
         .map(|arr| {
             arr.iter()
                 .map(|c| DbColumn {
                     name: c
                         .get("name")
-                        .and_then(|v| v.as_str())
+                        .and_then(Value::as_str)
                         .unwrap_or("")
                         .to_string(),
-                    type_name: db_schema::fmt_type(
-                        c.get("type").and_then(|v| v.as_str()).unwrap_or(""),
-                        c.get("size").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                    ),
-                    precision: 0,
-                    scale: 0,
+                    type_name: c
+                        .get("full")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
                 })
                 .collect()
         })
         .unwrap_or_default();
-
     Ok(DbTableColumns {
         table,
         columns,
@@ -677,12 +676,69 @@ pub async fn db_columns(
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CachedTables {
+    pub tables: Vec<String>,
+    pub fetched_at: u64,
+    pub url: String,
+    pub user: String,
+}
+
+/// 缓存里的全部表名（不连库）。没缓存时返回空列表（不是错误）。
+#[tauri::command]
+pub async fn db_cached_tables(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<CachedTables, String> {
+    let cfg = state.config.read().await.clone();
+    let (_, url, user) = current_db(&cfg)?;
+    let cache = load_cache(&state.config_dir, &url, &user);
+    Ok(match cache {
+        Some(c) => CachedTables {
+            tables: c.tables.keys().cloned().collect(),
+            fetched_at: c.fetched_at,
+            url,
+            user,
+        },
+        None => CachedTables {
+            tables: Vec::new(),
+            fetched_at: 0,
+            url,
+            user,
+        },
+    })
+}
+
+/// 指定连接的表结构缓存（SQL 补全用：表名 → 字段名与类型）。没缓存返回 null。
+#[tauri::command]
+pub async fn db_schema_cache(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<Option<Value>, String> {
+    let cfg = state.config.read().await.clone();
+    let c = find_conn(&cfg, &id)?;
+    let Some(cache) = load_cache(&state.config_dir, &c.url, &c.user) else {
+        return Ok(None);
+    };
+    let mut tables = serde_json::Map::new();
+    for (name, t) in &cache.tables {
+        let cols: Vec<Value> = t
+            .columns
+            .iter()
+            .map(|(n, ty)| serde_json::json!([n, ty]))
+            .collect();
+        tables.insert(name.clone(), Value::Array(cols));
+    }
+    Ok(Some(
+        serde_json::json!({ "fetchedAt": cache.fetched_at, "tables": tables }),
+    ))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CheckIssue {
     /// `table`（表不存在）或 `column`（字段不存在）。
     pub kind: String,
     pub table: String,
     pub column: Option<String>,
-    /// 相对工作区根的路径（给界面显示）。
     pub rel: String,
     pub abs: String,
     pub line: usize,
@@ -692,11 +748,8 @@ pub struct CheckIssue {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceCheck {
-    /// 实际读到的文件数。
     pub files: usize,
-    /// 读不了的文件数（二进制/过大），不参与核对。
     pub skipped: usize,
-    /// 这些文件里引用到的表数（去重）。
     pub tables: usize,
     pub columns: usize,
     pub missing_tables: usize,
@@ -709,7 +762,7 @@ pub struct SourceCheck {
 /// 出包前核对：源码里引用的表和字段，在库里是不是真的存在。
 ///
 /// 只报「确定对不上」的：表名不在库里就算不存在；字段只有在别名能解析到表、
-/// 且该表（们）里都没有这个列时才报。宁可漏报不误报——一次误报就没人再看这个功能了。
+/// 且该表（们）里都没有这个列时才报。宁可漏报不误报。
 #[tauri::command]
 pub async fn db_check_sources(
     state: tauri::State<'_, Arc<AppState>>,
@@ -717,13 +770,9 @@ pub async fn db_check_sources(
 ) -> Result<SourceCheck, String> {
     let st = state.inner().clone();
     let cfg = st.config.read().await.clone();
-    let (url, user) = current_db(&cfg)?;
-    let cache = db_schema::load(
-        &db_schema::cache_path(&st.config_dir, &url, &user),
-        &url,
-        &user,
-    )
-    .ok_or_else(|| code_label("need-schema", "还没有表结构缓存，先连库拉一次"))?;
+    let (_, url, user) = current_db(&cfg)?;
+    let cache = load_cache(&st.config_dir, &url, &user)
+        .ok_or_else(|| code_label("need-schema", "还没有表结构缓存，先连库拉一次"))?;
     let root = cfg
         .workspace_root
         .clone()
@@ -776,7 +825,6 @@ pub async fn db_check_sources(
 
         let missing_tables = issues.iter().filter(|i| i.kind == "table").count();
         let missing_columns = issues.iter().filter(|i| i.kind == "column").count();
-        // 按文件+行号排，界面上是「跟着代码从上往下看」的顺序
         issues.sort_by(|a, b| a.rel.cmp(&b.rel).then_with(|| a.line.cmp(&b.line)));
 
         SourceCheck {
@@ -803,72 +851,6 @@ fn rel_of(abs: &str, root: &str) -> String {
     a.strip_prefix(r)
         .map(|s| s.trim_start_matches('/').to_string())
         .unwrap_or(a)
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CachedTables {
-    pub tables: Vec<String>,
-    pub fetched_at: u64,
-    pub url: String,
-    pub user: String,
-}
-
-/// 缓存里的全部表名（不连库）。
-///
-/// 悬停要靠它判断「光标下的这个词是不是表名」——每移动一次鼠标问一次后端不现实，
-/// 前端拉到这份列表后自己判断，只有确认是表名才回来要字段。
-/// 没缓存时返回空列表（不是错误）：界面据此显示「先去拉一次」。
-#[tauri::command]
-pub async fn db_cached_tables(
-    state: tauri::State<'_, Arc<AppState>>,
-) -> Result<CachedTables, String> {
-    let cfg = state.config.read().await.clone();
-    let (url, user) = current_db(&cfg)?;
-    let cache = db_schema::load(
-        &db_schema::cache_path(&state.config_dir, &url, &user),
-        &url,
-        &user,
-    );
-    Ok(match cache {
-        Some(c) => CachedTables {
-            tables: c.tables.keys().cloned().collect(),
-            fetched_at: c.fetched_at,
-            url,
-            user,
-        },
-        None => CachedTables {
-            tables: Vec::new(),
-            fetched_at: 0,
-            url,
-            user,
-        },
-    })
-}
-
-/// 断开连接（换库、或连接卡死时用）。
-#[tauri::command]
-pub async fn db_disconnect(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
-    // 只在取 Arc 时持锁：`disconnect` 要等桥回话（最长 10s），持锁等会把整个命令层
-    // 卡住——包括这一屏的其它查询请求。
-    let bridge = {
-        let guard = state
-            .db
-            .lock()
-            .map_err(|_| "数据库桥状态异常".to_string())?;
-        guard.as_ref().cloned()
-    };
-    let Some(b) = bridge else {
-        return Ok(());
-    };
-    tauri::async_runtime::spawn_blocking(move || {
-        // 先让桥自己收干净（rollback + close），再杀掉进程
-        let _ = b.call("disconnect", &[], Duration::from_secs(10));
-        b.restart();
-    })
-    .await
-    .map_err(|e| format!("断开连接失败：{e}"))?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -900,8 +882,7 @@ mod tests {
         let p = parse_prop(SAMPLE.as_bytes(), "t").expect("应能解析");
         assert_eq!(p.url, "jdbc:oracle:thin:@10.200.22.145:1521/aier");
         assert_eq!(p.user, "aier");
-        assert_eq!(p.database_type, "ORACLE11G");
-        assert!(p.password_encoded, "isEncode=true 要标出来");
+        assert!(p.password_encoded);
     }
 
     #[test]
@@ -918,13 +899,52 @@ mod tests {
     }
 
     #[test]
-    fn oracle_认证失败要转成_auth() {
+    fn oracle_错误分类() {
         assert!(map_sql_error("ORA 1017：ORA-01017: 用户名/口令无效").starts_with("auth|"));
         assert_eq!(
             map_sql_error("ORA 942：表或视图不存在"),
             "sql|ORA 942：表或视图不存在"
         );
-        // 网络不通要单独给码，前端才能提示「检查 VPN / 库是否起了」
         assert!(map_sql_error("ORA-12541: TNS:no listener").starts_with("unreachable|"));
+        assert!(map_sql_error("ORA 17002：IO 错误: Connection refused").starts_with("unreachable|"));
+    }
+
+    fn conn(id: &str, url: &str) -> DbConnConfig {
+        DbConnConfig {
+            id: id.into(),
+            name: id.into(),
+            env: "test".into(),
+            source: "manual".into(),
+            url: url.into(),
+            user: "U".into(),
+            prop_ds: None,
+            password_dpapi: None,
+            auto_commit: false,
+            note: String::new(),
+        }
+    }
+
+    #[test]
+    fn 当前库优先取最近用过的连接() {
+        let mut cfg = AppConfig {
+            db_conns: vec![conn("a", "ua"), conn("b", "ub")],
+            ..Default::default()
+        };
+        assert_eq!(current_db(&cfg).unwrap().1, "ua", "没用过时取第一条");
+        cfg.db_active = Some("b".into());
+        assert_eq!(current_db(&cfg).unwrap().0.as_deref(), Some("b"));
+        cfg.db_active = Some("已删除".into());
+        assert_eq!(
+            current_db(&cfg).unwrap().1,
+            "ua",
+            "最近用过的被删了退回第一条"
+        );
+    }
+
+    #[test]
+    fn 手动连接没口令要求输入() {
+        let e = resolve_password(&conn("a", "u"), None).unwrap_err();
+        assert!(e.starts_with("need-password|"), "{e}");
+        assert_eq!(resolve_password(&conn("a", "u"), Some("p")).unwrap(), "p");
     }
 }

@@ -155,6 +155,12 @@ function AppContent() {
       { id: "svc.stop", title: "停止 NC 服务", run: svc(serverStop, "已发出停止指令") },
     ]);
   }, []);
+  // 其它页（如 Java 编辑器里「在数据库中执行此 SQL」）要切页时发这个事件，detail 是页 key
+  useEffect(() => {
+    const go = (e: Event) => navRef.current((e as CustomEvent<string>).detail);
+    window.addEventListener("ncforge-navigate", go);
+    return () => window.removeEventListener("ncforge-navigate", go);
+  }, []);
   const { open: paletteOpen } = usePalette();
   // 浮层的代码块在首次使用前就拉好：第一次按快捷键时才去加载，开头敲的几个字符会落进编辑器里
   useEffect(() => {

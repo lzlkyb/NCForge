@@ -33,6 +33,9 @@ vi.mock("../../lib/monacoSetup", () => ({
 
 // 语言服务的 provider 注册与编辑器包装无关，且会拉进一整条依赖链
 vi.mock("../../lib/langProviders", () => ({ registerLangProviders: vi.fn() }));
+// Java 右键的 SQL 动作与它的对话框同理：拉进数据库页整条依赖链
+vi.mock("../../lib/javaSqlActions", () => ({ registerJavaSqlActions: () => [] }));
+vi.mock("../db/ExtractSqlDialog", () => ({ ExtractSqlDialog: () => null }));
 
 vi.mock("../../lib/editorStore", () => ({
   getModel: () => undefined,

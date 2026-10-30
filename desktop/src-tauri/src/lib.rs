@@ -15,6 +15,7 @@ pub mod commands;
 pub mod compile;
 pub mod config;
 pub mod db_bridge;
+pub mod db_conns;
 pub mod db_schema;
 pub mod encoding_reg;
 pub mod java_bridge;

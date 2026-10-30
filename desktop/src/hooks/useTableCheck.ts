@@ -3,6 +3,7 @@ import {
   dbCheckSources,
   dbSchemaStatus,
   dbSchemaSync,
+  friendlyDbError,
   type SchemaStatus,
   type SourceCheck,
 } from "../lib/db";
@@ -24,7 +25,7 @@ export function useTableCheck(files: string[]) {
     try {
       setSchema(await dbSchemaStatus());
     } catch (e) {
-      setError(String(e));
+      setError(friendlyDbError(e));
     }
   }, []);
 
@@ -44,7 +45,7 @@ export function useTableCheck(files: string[]) {
     try {
       setResult(await dbCheckSources(files));
     } catch (e) {
-      setError(String(e));
+      setError(friendlyDbError(e));
     } finally {
       setRunning(false);
     }
@@ -60,7 +61,7 @@ export function useTableCheck(files: string[]) {
       // 工作区里表名悬停也靠这份缓存，通知它重取
       window.dispatchEvent(new Event("schemachange"));
     } catch (e) {
-      setError(String(e));
+      setError(friendlyDbError(e));
     } finally {
       setSyncing(false);
     }

@@ -3,6 +3,8 @@ import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { getModel, getViewState, saveViewState } from "../../lib/editorStore";
 import { registerLangProviders } from "../../lib/langProviders";
 import { editorCommand, getKeymap } from "../../lib/keymap";
+import { registerJavaSqlActions } from "../../lib/javaSqlActions";
+import { ExtractSqlDialog } from "../db/ExtractSqlDialog";
 
 interface Props {
   /** 当前显示的文件；null = 没有打开的文件。 */
@@ -68,8 +70,10 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       editor.trigger("ncforge-keymap", action, undefined);
     });
     editor.onDidChangeCursorPosition((e) => onCursorRef.current(e.position.lineNumber, e.position.column));
+    const sqlActions = registerJavaSqlActions(editor);
     editorRef.current = editor;
     return () => {
+      sqlActions.forEach((d) => d.dispose());
       // 注意只销毁编辑器实例，model 留在 editorStore（切到别的页签再回来还在）。
       if (shownRef.current) saveViewState(shownRef.current, editor.saveViewState());
       keyboard.dispose();
@@ -132,5 +136,10 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     editor.focus();
   }, [reveal]);
 
-  return <div ref={hostRef} className="wb-editor-host" />;
+  return (
+    <>
+      <div ref={hostRef} className="wb-editor-host" />
+      <ExtractSqlDialog />
+    </>
+  );
 }

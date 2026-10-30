@@ -4,14 +4,14 @@ import { ToolTab } from "./ToolTab";
 import { useSideOpen } from "../../lib/layoutStore";
 
 /** 这些工具把自己的操作条停靠进顶部工具条；其余工具不占这一行。 */
-const TOOLBAR_TOOLS = ["svn", "patch", "db", "services"];
+const TOOLBAR_TOOLS = ["svn", "patch", "services"];
 /** 这些工具的入口放在共享侧栏；其余工具侧栏仍是文件树。 */
 const SIDE_TOOLS = ["search", "svn", "patch", "db", "settings"];
 /** 这些工具有文档页，因此标签条里多一个工具标签。 */
 const DOCUMENT_TOOLS: Record<string, DockToolTab> = {
   svn: { label: "版本控制 · 差异", icon: "gitBranch" },
   patch: { label: "补丁", icon: "package" },
-  db: { label: "数据库 · 查询", icon: "database" },
+  db: { label: "数据库", icon: "database", custom: true },
   settings: { label: "设置", icon: "settings" },
 };
 /**
@@ -23,13 +23,13 @@ const DOCUMENT_TOOLS: Record<string, DockToolTab> = {
 const DOCUMENT_DEFAULT_OPEN = ["patch", "db", "settings"];
 /** NC 服务的卡片 + 日志放在底部面板里，切过去时把面板撑高到够看。 */
 const SERVICES_PANEL_MIN = 360;
-const HOST_NAMES: DockRegionName[] = ["toolbar", "sidebar", "document", "bottom", "actions"];
+const HOST_NAMES: DockRegionName[] = ["toolbar", "sidebar", "document", "bottom", "actions", "tabs"];
 
 export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, status }: {
   activeTool: string; tool?: ReactNode; tree: ReactNode; tabs: ReactNode;
   editor: ReactNode; output: ReactNode; status: ReactNode;
 }) {
-  const [hosts, setHosts] = useState<Record<DockRegionName, HTMLElement | null>>({ toolbar: null, sidebar: null, document: null, bottom: null, actions: null });
+  const [hosts, setHosts] = useState<Record<DockRegionName, HTMLElement | null>>({ toolbar: null, sidebar: null, document: null, bottom: null, actions: null, tabs: null });
   const [documentOpen, setDocumentOpen] = useState(false);
   const sideOpen = useSideOpen();
   const [sideWidth, setSideWidth] = useState(240);
