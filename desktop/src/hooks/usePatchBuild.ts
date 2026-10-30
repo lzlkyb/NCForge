@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "../components/ui/toast";
+import type { PatchDraft } from "../lib/patchDraft";
 import {
   EMPTY_DRAFT,
   NO_FORCE,
@@ -23,13 +24,20 @@ import {
  *
  * `force` 必须和扫描用同一份：后端出包时会**重新扫一遍**，改判层不带下去的话，
  * 界面上显示 hyext、包里落到的却是标准层。
+ *
+ * `initial` 是上次没打完的草稿（见 `lib/patchDraft`）：进页时直接回填，
+ * 不用先渲染空表单再塞数据——那会先闪一帧空白，还会把用户的第一次输入打断。
  */
-export function usePatchBuild(defaultOutDir: string | null, force: LayerForce = NO_FORCE) {
+export function usePatchBuild(
+  defaultOutDir: string | null,
+  force: LayerForce = NO_FORCE,
+  initial: PatchDraft | null = null,
+) {
   const qc = useQueryClient();
   const [outDir, setOutDir] = useState<string | null>(null);
-  const [desc, setDesc] = useState("");
-  const [draft, setDraft] = useState<MdDraft>(EMPTY_DRAFT);
-  const [sqls, setSqls] = useState<string[]>([]);
+  const [desc, setDesc] = useState(initial?.desc ?? "");
+  const [draft, setDraft] = useState<MdDraft>(initial?.draft ?? EMPTY_DRAFT);
+  const [sqls, setSqls] = useState<string[]>(initial?.sqls ?? []);
   const [building, setBuilding] = useState(false);
   const [result, setResult] = useState<PatchBuildResult | null>(null);
 

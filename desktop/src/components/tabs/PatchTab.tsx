@@ -13,6 +13,9 @@ import { TableCheck } from "../patch/TableCheck";
 import { usePatchScan } from "../../hooks/usePatchScan";
 import { usePatchBuild } from "../../hooks/usePatchBuild";
 import { useCheckGuard } from "../../hooks/useCheckGuard";
+import { usePatchDraftPersist } from "../../hooks/usePatchDraftPersist";
+import { loadPatchDraft } from "../../lib/patchDraft";
+import { getSession } from "../../lib/workspaceSession";
 import { baseName, buildStageTree } from "../../lib/patchTree";
 import {
   forceOf,
@@ -34,15 +37,22 @@ import { keyOf } from "../../lib/svn";
  * 这个文件只做布局、勾选与调后端。
  */
 export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) {
+  // 上次没打完的草稿（按工作区隔离，见 lib/patchDraft）。惰性初始化：
+  // 进页就是填好的样子，不用先渲染一帧空表单再塞数据。
+  const root = getSession().root ?? null;
+  const [initial] = useState(() => loadPatchDraft(root));
   /** 手动改判层：path → hyext / 标准层。层判错的唯一自救手段（见 ItemDetail）。 */
-  const [layers, setLayers] = useState<Map<string, "hy" | "std">>(new Map());
+  const [layers, setLayers] = useState<Map<string, "hy" | "std">>(() => new Map(initial?.layers ?? []));
   const force = useMemo(() => forceOf(layers), [layers]);
   const { defaults, changes, candidates, deleted, scan, refresh } = usePatchScan(force);
-  const build = usePatchBuild(defaults.data?.outDir ?? null, force);
+  const build = usePatchBuild(defaults.data?.outDir ?? null, force, initial);
 
   // null = 「跟着扫描结果走，默认全勾可打的」。用户一动就变成显式集合，
   // 这样重扫后新增的文件不会把他手动取消的勾又勾回来。
-  const [picked, setPicked] = useState<Set<string> | null>(null);
+  // 草稿里存过勾选就还原成显式集合（`[]` = 当时明确全不勾，也要保留）。
+  const [picked, setPicked] = useState<Set<string> | null>(() =>
+    initial?.picked ? new Set(initial.picked) : null,
+  );
   const [keyword, setKeyword] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [selected, setSelected] = useState<string | null>(null);
@@ -114,6 +124,8 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
     }
     setPicked(next);
   };
+
+  usePatchDraftPersist(root, build.desc, build.draft, build.sqls, picked, layers);
 
   const err = scan.error ?? changes.error ?? null;
   const dirty = build.desc.trim().length > 0;
