@@ -466,6 +466,43 @@ fn collect_candidates(
     (out, false)
 }
 
+/// 「转到文件」用的文件名清单上限。newar 全量约一万六，留足余量；超了说明选错了目录。
+const LIST_FILES_CAP: usize = 200_000;
+
+/// 列出工作区里所有「可能想打开」的文件：相对根、`/` 分隔、按字典序。
+///
+/// 目录与扩展名的跳过规则和全文搜索一致（`.svn` / `.git` / `node_modules`、必然是二进制的扩展名），
+/// 只看目录项不读内容。返回的第二项表示是否因为时间预算 / 条数上限中途放弃。
+pub fn list_files(root: &Path) -> (Vec<String>, bool) {
+    let started = Instant::now();
+    let mut out: Vec<String> = Vec::new();
+    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    let mut truncated = false;
+    while let Some(dir) = stack.pop() {
+        if started.elapsed().as_millis() > TIME_BUDGET_MS || out.len() >= LIST_FILES_CAP {
+            truncated = true;
+            break;
+        }
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            // 不跟随符号链接，理由同 collect_candidates
+            let Ok(ft) = entry.file_type() else { continue };
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if ft.is_dir() {
+                if !SKIP_DIRS.contains(&name.as_str()) {
+                    stack.push(entry.path());
+                }
+            } else if ft.is_file() && !has_binary_ext(&name) {
+                out.push(relative_slash(root, &entry.path()));
+            }
+        }
+    }
+    out.sort_unstable();
+    (out, truncated)
+}
+
 /// 扩展名是否属于「必然是二进制」的那一类。
 fn has_binary_ext(name: &str) -> bool {
     match name.rsplit_once('.') {
@@ -859,6 +896,25 @@ mod tests {
         assert_eq!(out.hits[0].path, "src/A.java", "路径统一用 / 分隔");
         assert_eq!(out.files_matched, 1);
         assert_eq!(out.hits[0].ranges.len(), 1, "命中位置要回给前端高亮");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 文件清单跳过目录与二进制并按字典序() {
+        let dir = std::env::temp_dir().join("ncforge_list_files_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("gl/src/p")).unwrap();
+        std::fs::create_dir_all(dir.join(".svn")).unwrap();
+        std::fs::create_dir_all(dir.join("gl/classes")).unwrap();
+        std::fs::write(dir.join("gl/src/p/B.java"), "x").unwrap();
+        std::fs::write(dir.join("gl/src/p/A.java"), "x").unwrap();
+        std::fs::write(dir.join(".svn/entries"), "x").unwrap();
+        std::fs::write(dir.join("gl/classes/A.class"), "x").unwrap();
+        std::fs::write(dir.join("build.xml"), "x").unwrap();
+
+        let (files, truncated) = list_files(&dir);
+        assert_eq!(files, vec!["build.xml", "gl/src/p/A.java", "gl/src/p/B.java"]);
+        assert!(!truncated);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

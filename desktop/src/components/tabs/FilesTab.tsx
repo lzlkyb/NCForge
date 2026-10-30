@@ -1,13 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { TreeSvnProvider } from "../workspace/TreeSvnProvider";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import "../../workspace.css";
+import { WorkbenchFrame } from "../workspace/WorkbenchFrame";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import { EmptyState } from "../ui/EmptyState";
+import { EmptyEditor } from "../workspace/EmptyEditor";
 import { toast } from "../ui/toast";
 import { EditorPane } from "../workspace/EditorPane";
 import { FileTree, type FileTreeHandle } from "../workspace/FileTree";
 import { BottomPanel } from "../workspace/BottomPanel";
 import { EditorBanners } from "../workspace/EditorBanners";
 import { EditorStatus } from "../workspace/EditorStatus";
+import { Breadcrumb } from "../workspace/Breadcrumb";
 import { NoWorkspace } from "../workspace/NoWorkspace";
 import { TabStrip } from "../workspace/TabStrip";
 import { TreeHeader } from "../workspace/TreeHeader";
@@ -17,6 +21,9 @@ import { compileCancel, compileModule, isCompileCancelled, onCompileLog } from "
 import { useFileSession } from "../../hooks/useFileSession";
 import { useLangWiring } from "../../hooks/useLangWiring";
 import { stopLang } from "../../lib/lang";
+import { registerCommands } from "../../lib/commandRegistry";
+import { invalidateFileIndex } from "../../lib/fileIndex";
+import { langRegenerate } from "../../lib/appConfig";
 import { setCursor } from "../../lib/cursorStore";
 import { setSession, useWorkspaceSession, type TabMeta, type Updater } from "../../lib/workspaceSession";
 
@@ -35,7 +42,8 @@ const LARGE_FILE_LINES = 2000;
  * 的编排在 `hooks/useFileSession`；标题栏、标签条、提示条、状态栏各自是
  * `workspace/` 下的独立组件。本文件只做接线与布局。
  */
-export function FilesTab() {
+export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; tool?: ReactNode } = {}) {
+  const queryClient = useQueryClient();
   const [rootInput, setRootInput] = useState("");
   const [editingRoot, setEditingRoot] = useState(false);
   // 标签、激活项、面板与编译结果都存在模块级仓库里：切页卸载再回来不该丢。
@@ -72,6 +80,8 @@ export function FilesTab() {
     saveAsUtf8,
     reloadFile,
     closeTab,
+    closeMany,
+    pin,
     handleRenamed,
     handleDeleted,
     openProblem,
@@ -81,6 +91,11 @@ export function FilesTab() {
     cancelClose,
   } = useFileSession();
   useLangWiring({ activePath, openAt, openJdt });
+
+  // 切到 NC 服务：面板打开并停在「NC 服务」标签，服务的卡片与日志就住在那里
+  useEffect(() => {
+    if (activeTool === "services") setSession({ panelOpen: true, panelTab: "svc" });
+  }, [activeTool]);
 
   useEffect(() => {
     getWorkspace()
@@ -118,6 +133,8 @@ export function FilesTab() {
       setCompileResult(null);
       setCompileLog([]);
       setRoot(shown);
+      void queryClient.invalidateQueries({ queryKey: ["svn-info"] });
+      void queryClient.invalidateQueries({ queryKey: ["svn-status"] });
       setEditingRoot(false);
     } catch (e) {
       toast(`无法打开目录：${e}`, "error");
@@ -153,17 +170,31 @@ export function FilesTab() {
     }
   };
 
+  // 命令面板里的文件页命令。闭包每次渲染都是新的，用 ref 拿最新值，登记只做一次
+  const live = useRef({ activePath, compiling, compileActive, closeTab });
+  live.current = { activePath, compiling, compileActive, closeTab };
+  useEffect(() => registerCommands([
+    { id: "build.compile", title: "编译当前模块", run: () => void live.current.compileActive(), enabled: () => !!live.current.activePath && !live.current.compiling },
+    { id: "build.cancel", title: "取消编译", run: () => void compileCancel(), enabled: () => live.current.compiling },
+    { id: "tab.close", title: "关闭当前标签", run: () => live.current.activePath && live.current.closeTab(live.current.activePath), enabled: () => !!live.current.activePath },
+    {
+      id: "lang.regenerate",
+      title: "重新生成代码智能工程（补全 / 跳转异常时用）",
+      run: () => void langRegenerate().then(() => toast("已重新生成并重启代码智能", "success"), (e) => toast(`重新生成失败：${e}`, "error")),
+    },
+  ]), []);
+
   if (root === undefined) return null;
 
-  // 尚未选择工作区：明确引导，不让用户盲猜
+  const panel = <BottomPanel root={root ?? ""} tab={panelTab} onTab={setPanelTab}
+    running={compiling} result={compileResult} log={compileLog} onOpenProblem={openProblem}
+    onCancel={() => void compileCancel()} onClose={() => setPanelOpen(false)} />;
+
+  // 尚未选择工作区：明确引导，不让用户盲猜（NC 服务不依赖工程，它的面板仍要在）
   if (root === null) {
-    return (
-      <NoWorkspace
-        value={rootInput}
-        onChange={setRootInput}
-        onOpen={() => void applyRoot(rootInput)}
-      />
-    );
+    return <WorkbenchFrame activeTool={activeTool} tool={tool} tree={<div className="wb-no-project">尚未打开工程</div>} tabs={null}
+      editor={<NoWorkspace value={rootInput} onChange={setRootInput} onOpen={() => void applyRoot(rootInput)} />}
+      output={activeTool === "services" ? panel : null} status={<div className="wb-status wb-no-project">尚未打开工程</div>} />;
   }
 
   const active: TabMeta | null = tabs.find((t) => t.path === activePath) ?? null;
@@ -176,100 +207,40 @@ export function FilesTab() {
   const heavyFile = active !== null && active.lines > LARGE_FILE_LINES;
 
   return (
-    <div className="wb-root">
-      <section className="wb-tree">
-        <TreeHeader
-          root={root}
-          editing={editingRoot}
-          draft={rootInput}
-          unsaved={hasUnsaved}
-          onDraftChange={setRootInput}
-          onOpen={() => void applyRoot(rootInput)}
-          onToggleEditing={() => {
-            setRootInput(root);
-            setEditingRoot((v) => !v);
-          }}
+    <>
+    <WorkbenchFrame
+      activeTool={activeTool}
+      tool={tool}
+      tree={<TreeSvnProvider root={root}>
+        <TreeHeader root={root} editing={editingRoot} draft={rootInput} unsaved={hasUnsaved}
+          onDraftChange={setRootInput} onOpen={() => void applyRoot(rootInput)}
+          onToggleEditing={() => { setRootInput(root); setEditingRoot(v => !v); }}
           onCreateFile={() => treeRef.current?.startCreate("file")}
-          onCreateDir={() => treeRef.current?.startCreate("dir")}
-        />
-        <FileTree
-          // 换工作区时整棵树重建：选中项、正在输入的编辑行、深层展开态都按旧路径记账，
-          // 留着会让「新建文件」以旧目录为 parent 静默失败、F2/Delete 发到旧路径上。
-          key={root}
-          ref={treeRef}
-          root={root}
-          activePath={activePath}
-          onOpen={(p) => void openFile(p)}
-          onCreated={(p) => void openFile(p)}
-          onRenamed={handleRenamed}
-          onDeleted={handleDeleted}
-          openPaths={tabs.map((t) => t.path)}
-        />
-      </section>
-
-      <section className="wb-main">
-        <TabStrip
-          tabs={tabs}
-          activePath={activePath}
-          compiling={compiling}
-          canCompile={active !== null && !active.virtual}
-          onSelect={(p) => setSession({ activePath: p })}
-          onClose={closeTab}
-          onCompile={() => void compileActive()}
-        />
-
-        <EditorBanners
-          active={active}
-          activePath={activePath}
-          conflictPath={conflictPath}
-          encodingIssue={encodingIssue}
-          showLargeHint={showLargeHint}
-          onUnifyEol={unifyEol}
-          onReload={(p) => void reloadFile(p)}
-          onOverwriteSave={(p) => void saveFile(p, true)}
-          onSaveUtf8={(p) => void saveAsUtf8(p)}
-          onDismissLargeHint={(p) => setSession({ largeHintDismissed: (v) => [...v, p] })}
-        />
-
+          onCreateDir={() => treeRef.current?.startCreate("dir")} />
+        <FileTree key={root} ref={treeRef} root={root} activePath={activePath}
+          onOpen={p => void openFile(p, { preview: true })} onPin={pin} onCreated={p => { invalidateFileIndex(); void openFile(p); }}
+          onRenamed={(a, b) => { invalidateFileIndex(); handleRenamed(a, b); }} onDeleted={ps => { invalidateFileIndex(); handleDeleted(ps); }} openPaths={tabs.map(t => t.path)} />
+      </TreeSvnProvider>}
+      tabs={<TabStrip root={root} tabs={tabs} activePath={activePath} compiling={compiling}
+        canCompile={active !== null && !active.virtual} onSelect={p => setSession({ activePath: p })}
+        onClose={closeTab} onCloseMany={closeMany} onPin={pin} onCompile={() => void compileActive()} />}
+      editor={<>
+        <EditorBanners active={active} activePath={activePath} conflictPath={conflictPath}
+          encodingIssue={encodingIssue} showLargeHint={showLargeHint} onUnifyEol={unifyEol}
+          onReload={p => void reloadFile(p)} onOverwriteSave={p => void saveFile(p, true)}
+          onSaveUtf8={p => void saveAsUtf8(p)}
+          onDismissLargeHint={p => setSession({ largeHintDismissed: v => [...v, p] })} />
+        {active && <Breadcrumb root={root} active={active} />}
         <div className="wb-editor">
-          <EditorPane
-            activePath={activePath}
-            readOnly={active?.readOnly ?? false}
-            reveal={reveal}
-            heavy={heavyFile}
-            onCursor={setCursor}
-            onSave={() => activePath && void saveFile(activePath)}
-          />
-          {!active && (
-            <div className="wb-editor-empty" style={{ pointerEvents: "none" }}>
-              <EmptyState icon="file" description="从左侧文件树打开一个文件" />
-            </div>
-          )}
+          <EditorPane activePath={activePath} readOnly={active?.readOnly ?? false} reveal={reveal}
+            heavy={heavyFile} onCursor={setCursor} onSave={() => activePath && void saveFile(activePath)} />
+          {!active && <EmptyEditor root={root} onOpen={p => void openFile(p)} />}
         </div>
-
-        {panelOpen && (
-          <BottomPanel
-            root={root}
-            tab={panelTab}
-            onTab={setPanelTab}
-            running={compiling}
-            result={compileResult}
-            log={compileLog}
-            onOpenProblem={openProblem}
-            onCancel={() => void compileCancel()}
-            onClose={() => setPanelOpen(false)}
-          />
-        )}
-
-        <EditorStatus
-          root={root}
-          active={active}
-          mark={activeMark}
-          saving={saving}
-          panelOpen={panelOpen}
-          onTogglePanel={() => setPanelOpen((v) => !v)}
-        />
-      </section>
+      </>}
+      output={panelOpen && panel}
+      status={<EditorStatus root={root} active={active} mark={activeMark} saving={saving}
+        panelOpen={panelOpen} onTogglePanel={() => setPanelOpen(v => !v)} />}
+    />
 
       <ConfirmDialog
         open={closingPath !== null}
@@ -283,6 +254,6 @@ export function FilesTab() {
           cancelClose();
         }}
       />
-    </div>
+    </>
   );
 }

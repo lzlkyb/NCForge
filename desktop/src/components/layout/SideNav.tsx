@@ -2,7 +2,6 @@ import { useLayoutEffect, useState, memo } from "react";
 import type { StaticStatus } from "../../lib/types";
 import { Icon, type IconName } from "../ui/icon";
 import { Collapse } from "../ui/Collapse";
-import { APP_INFO } from "../../lib/about";
 import { UpdateBadge } from "./UpdateBadge";
 import { UpdateCollapsedDot } from "./UpdateCollapsedDot";
 
@@ -92,23 +91,6 @@ function SideNavImpl({
 
   return (
     <aside className="app-side" data-collapsed={collapsed || undefined}>
-      {/* 品牌区：整块可拖窗口（decorations:false，无系统标题栏，必须留出拖拽区域） */}
-      <div data-tauri-drag-region className="app-side-head">
-        <img
-          data-tauri-drag-region
-          src="/icon.png"
-          alt={APP_INFO.name}
-          width={28}
-          height={28}
-          className="app-side-logo"
-          draggable={false}
-        />
-        <div data-tauri-drag-region className="app-side-brand">
-          <span className="app-side-name">{APP_INFO.name}</span>
-          <span className="app-side-tagline">{APP_INFO.tagline}</span>
-        </div>
-      </div>
-
       <nav className="app-side-nav" aria-label="主导航">
         {items.map((item) => (
           <button

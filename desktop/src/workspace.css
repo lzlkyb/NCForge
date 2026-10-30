@@ -348,3 +348,23 @@
 @media (prefers-reduced-motion: reduce) { .wb-lang[data-tone="busy"] .wb-lang-dot { animation: none; } }
 .wb-status-btn { color: inherit; font-size: inherit; padding: 0 4px; border-radius: 4px; }
 .wb-status-btn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+
+/* 面包屑：路径 › 类 › 方法 */
+.wb-crumb { display: flex; align-items: center; gap: 2px; height: 24px; padding: 0 12px; flex-shrink: 0; overflow: hidden; font-size: 12px; color: hsl(var(--muted-foreground)); background: hsl(var(--card)); white-space: nowrap; }
+.wb-crumb-sep { flex-shrink: 0; opacity: 0.6; }
+.wb-crumb-seg { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wb-crumb-file { color: hsl(var(--foreground)); flex-shrink: 0; }
+.wb-crumb-sym { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; border-radius: 4px; color: hsl(var(--foreground)); }
+.wb-crumb-sym:hover { background: hsl(var(--secondary)); }
+.wb-crumb-k { font-size: 10px; font-weight: 700; color: hsl(var(--primary)); }
+
+/* 空编辑器页：最近打开 + 快捷键 */
+.wb-empty-box { width: min(420px, calc(100% - 32px)); }
+.wb-empty-box h2 { font-size: 15px; font-weight: 600; }
+.wb-empty-sub { margin: 2px 0 14px; font-size: 12px; color: hsl(var(--muted-foreground)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-empty-h { margin: 12px 0 4px; font-size: 11px; font-weight: 600; color: hsl(var(--muted-foreground)); }
+.wb-empty-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 8px; border-radius: 6px; font-size: 12.5px; text-align: left; }
+button.wb-empty-row:hover { background: hsl(var(--secondary)); }
+.wb-empty-mu { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.wb-empty-key kbd { margin-left: auto; font: 11px Consolas, monospace; padding: 1px 5px; border: 1px solid hsl(var(--border)); border-radius: 4px; color: hsl(var(--muted-foreground)); }
+.wb-empty-go { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; height: 28px; padding: 0 12px; border-radius: 7px; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); font-size: 12px; }

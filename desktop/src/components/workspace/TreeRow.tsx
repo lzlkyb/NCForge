@@ -1,4 +1,6 @@
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { useContext, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { TreeSvnContext } from "./TreeSvnContext";
+import { pathKey } from "../../lib/treeSvn";
 import { Icon } from "../ui/icon";
 import type { EncodingMark } from "../../lib/workspace";
 
@@ -24,6 +26,7 @@ export function TreeDirRow({
   onToggle: (path: string) => void;
   onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) => void;
 }) {
+  const count = useContext(TreeSvnContext).directories.get(pathKey(path));
   return (
     <button
       type="button"
@@ -38,6 +41,7 @@ export function TreeDirRow({
       <Icon name="chevronDown" size={14} className={`wb-row-icon ${open ? "" : "-rotate-90"}`} />
       <Icon name="folder" size={14} className="wb-row-icon" />
       <span className="wb-row-name">{name}</span>
+      {!!count && <span className="wb-svn-count" title={`${count} 个文件有 SVN 变更`}>{count}</span>}
     </button>
   );
 }
@@ -50,6 +54,7 @@ export function TreeFileRow({
   mark,
   padLeft,
   onOpen,
+  onPin,
   onContextMenu,
 }: {
   name: string;
@@ -59,8 +64,11 @@ export function TreeFileRow({
   mark: EncodingMark | undefined;
   padLeft: number;
   onOpen: (path: string) => void;
+  /** 双击：把预览标签固定下来。 */
+  onPin?: (path: string) => void;
   onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) => void;
 }) {
+  const svn = useContext(TreeSvnContext).files.get(pathKey(path));
   return (
     <button
       type="button"
@@ -69,11 +77,13 @@ export function TreeFileRow({
       data-active={active || undefined}
       data-selected={selected || undefined}
       onClick={() => onOpen(path)}
+      onDoubleClick={() => onPin?.(path)}
       onContextMenu={(e) => onContextMenu(e, path, false)}
       title={mark ? `${name}\n${encodingHint(mark)}` : name}
     >
       <Icon name="file" size={14} className="wb-row-icon" />
       <span className="wb-row-name">{name}</span>
+      {svn && <span className="wb-svn-mark" data-st={svn} title={`SVN：${({ M: "已修改", A: "新增", D: "已删除", "?": "未纳管", C: "冲突", "!": "缺失", R: "替换", G: "已合并", "~": "类型冲突" })[svn]}`}>{svn}</span>}
       {mark && (
         // 「UTF-8!」四个字要占 40 多像素，在六层目录下会把文件名挤成「Vouc…」。
         // 缩成 U8，完整说明放在行的 title 里。

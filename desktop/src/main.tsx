@@ -14,6 +14,7 @@ import "./index.css";
 // 独立模块导入保证 Vite 开发注入与生产构建都包含补充样式。
 import "./interaction-refinements.css";
 import "./appearance.css";
+import "./workbench-layout.css";
 
 // 启动即应用已保存的主题，避免首帧闪烁。
 document.documentElement.classList.toggle("dark", getStoredTheme() === "dark");

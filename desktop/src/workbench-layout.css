@@ -1,0 +1,155 @@
+/* Layout contract shared with the approved workbench prototype. */
+.app-shell { --r-control:6px; --r-card:8px; background:hsl(var(--background)); }
+.app-shell [hidden] { display:none !important; }
+.app-side { width:148px; background:hsl(var(--background)); }
+.app-topbar { height:36px; min-height:36px; }
+.app-side-tagline { display:none; }
+.app-side-logo { width:23px; height:23px; border-radius:5px; }
+.app-side-name { font-size:14px; }
+.app-side-item { padding:8px 10px; gap:10px; min-height:36px; font-size:13px; }
+.app-side-nav { padding-top:17px; }
+.app-header { background:hsl(var(--background)); box-shadow:none; }
+.app-shell .wb-root { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; background:hsl(var(--card)); }
+.wb-toolbar { height:49px; min-height:49px; display:flex; align-items:center; gap:10px; padding:0 16px; border-bottom:1px solid hsl(var(--border)); }
+.wb-toolbar h1 { font-size:15px; font-weight:600; }
+.wb-toolbar-host { min-width:0; flex:1; display:flex; align-items:center; overflow:hidden; }
+.wb-toolbar-actions { margin-left:auto; flex-shrink:0; display:flex; gap:8px; }
+.wb-toolbar-actions .wb-compile-btn { height:30px; margin:0; border:0; background:hsl(var(--primary)); color:hsl(var(--primary-foreground)); }
+.wb-toolbar-host :is(.vc-head,.pk-head,.sv-head,.dq-top) { width:100%; padding:0; height:48px; border:0; gap:9px; background:transparent; }
+.wb-toolbar-host :is(.vc-url,.vc-hint,.pk-kv,.sv-sub,.dq-kv) { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wb-toolbar-host :is(.vc-url,.vc-hint) { max-width:180px; }
+.wb-layout { display:grid; position:relative; flex:1; min-width:0; min-height:0; }
+.app-shell .wb-tree { min-width:0; overflow:hidden; border:0; background:hsl(var(--background)); }
+.app-shell .wb-tree[data-closed] { visibility:hidden; }
+.wb-tree-native,.wb-sidebar-host { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; overflow:hidden; }
+.wb-sidebar-host :is(.vc-list,.pk-list) { width:100%; min-width:0; max-width:none; flex:1; border:0; }
+/* .vc-chg 自带 322px 固定宽度（原双栏布局用），停靠进共享侧栏后必须让位给容器宽度，
+   否则右侧被 overflow:hidden 裁掉一截；右侧竖线由 .wb-resize-x 承担，这里去掉重复边框。 */
+.wb-sidebar-host .vc-chg { width:100%; min-width:0; flex:1 1 auto; border-right:0; }
+.wb-main { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.wb-code-surface,.wb-document-surface { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; overflow:hidden; background:hsl(var(--card)); }
+.wb-document-surface .vc-docked-document { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; }
+.wb-document-surface .pk-right { flex:1; min-height:0; min-width:0; }
+.wb-document-surface .dq-body { flex:1; min-height:0; }
+.wb-tool-tab { cursor:pointer; gap:6px; }
+.wb-tab[data-preview] .wb-tab-name { font-style:italic; }
+.app-shell .wb-tabs { height:36px; min-height:36px; background:hsl(var(--background)); }
+.app-shell .wb-tab { border-radius:0; background:transparent; height:36px; }
+.wb-tab[data-active] { background:hsl(var(--card)); }
+.wb-bottom { display:flex; flex-direction:column; min-height:140px; max-height:65%; overflow:hidden; flex-shrink:0; }
+.wb-bottom .wb-panel { height:100%; border-top:0; }
+.wb-svc-host { display:flex; flex-direction:column; padding:0; }
+.wb-resize-x { cursor:col-resize; border-left:1px solid hsl(var(--border)); }
+.wb-resize-y { cursor:row-resize; height:4px; flex-shrink:0; border-top:1px solid hsl(var(--border)); }
+.wb-resize-x:hover,.wb-resize-y:hover { background:hsl(var(--primary)); }
+/* 停靠包装层不能自己产生盒子：工具页、ActivityPanel、DockRegion 都是透明的一层，
+   真实布局由各自的宿主决定。非活动时 [hidden] 的 !important 会盖掉这里的 contents。 */
+.wb-tool-runtime,.wb-tool-runtime > div,.wb-dock-region,.wb-tool-runtime :is(.vc-page,.pk-page,.dq-page,.sv-page) { display:contents; }
+.wb-sidebar-host .pk-top,.wb-sidebar-host .vc-top { padding:12px; }
+.wb-sidebar-host :is(.pk-chips,.vc-chips) { display:flex; flex-wrap:wrap; gap:4px; }
+.wb-sidebar-host :is(.pk-grp,.vc-grp) { padding:7px 12px; }
+.wb-sidebar-host :is(.pk-row,.vc-row) { padding-inline:12px; }
+.wb-sidebar-host :is(.pk-st,.vc-path) { max-width:80px; overflow:hidden; text-overflow:ellipsis; }
+.wb-document-surface :is(.pk-tabs,.pk-actions,.dq-tools,.vc-file-head) { flex-wrap:wrap; height:auto; min-height:40px; gap:6px; }
+.wb-document-surface :is(.pk-tab,.pk-btn,.vc-btn,.dq-btn) { white-space:nowrap; flex-shrink:0; }
+.wb-document-surface .pk-desc { min-width:140px; }
+.wb-document-surface .pk-stage { min-height:0; }
+.wb-document-surface .pk-actions { padding:10px 14px; }
+.wb-document-surface .pk-actions input { min-width:100px; max-width:280px; }
+.wb-document-surface .pk-banner { flex-shrink:0; max-height:70px; overflow:auto; }
+.wb-search-tool > div:first-child { padding:12px; }
+.wb-search-tool input { max-width:100%; }
+.wb-search-tool > div:first-child > div:nth-child(2) { align-items:flex-start; }
+.wb-search-tool .ml-auto { margin-left:0; }
+.wb-search-tool > .flex { flex-wrap:wrap; }
+.wb-search-tool [title] { max-width:100%; }
+/* 一万多张表不能一次铺成按钮（DOM 直接卡死），筛选框固定在上方，列表自己滚动。 */
+.wb-db-objects { display:flex; flex-direction:column; min-height:0; overflow:hidden; padding:12px; gap:5px; }
+.wb-db-objects h2 { font-size:12px; margin-bottom:8px; flex-shrink:0; }
+.wb-db-objects p { font-size:12px; color:hsl(var(--muted-foreground)); line-height:1.8; }
+.wb-db-filter { flex-shrink:0; height:26px; padding:0 8px; border:1px solid hsl(var(--border)); border-radius:5px; background:hsl(var(--card)); color:hsl(var(--foreground)); font-size:12px; }
+.wb-db-list { display:flex; flex-direction:column; gap:5px; flex:1; min-height:0; overflow:auto; }
+.wb-db-list button { display:flex; gap:8px; align-items:center; text-align:left; font-size:12px; padding:6px; border-radius:4px; overflow-wrap:anywhere; }
+.wb-db-list button:hover { background:hsl(var(--accent)); }
+.wb-service-tool { padding:8px 16px 0; gap:7px; height:100%; }
+.wb-service-tool .sv-card { border:0; border-radius:0; padding:0 0 8px; gap:12px; border-bottom:1px solid hsl(var(--border)); }
+.wb-service-tool .sv-card::before,.wb-service-tool .sv-ring { display:none; }
+.wb-service-tool .sv-desc { max-width:200px; }
+.wb-service-tool .sv-metrics { gap:15px; }
+.wb-service-tool .sv-config { flex-shrink:0; }
+.wb-service-tool .sv-log { border:0; border-radius:0; }
+.wb-service-tool .sv-alert { flex-shrink:0; }
+.wb-settings-page { height:100%; overflow:auto; }
+.wb-status { flex-shrink:0; border-top:1px solid hsl(var(--border)); }
+@media(max-width:1100px) { .wb-toolbar-host :is(.vc-url,.vc-hint,.pk-kv,.dq-kv) { display:none; } }
+@media(max-width:900px) { .app-side { width:52px; } .app-side-brand,.app-side-label { display:none; } .app-side-item { justify-content:center; padding:8px 0; } .app-side-head { padding:0; justify-content:center; } .wb-toolbar { padding-inline:10px; } .wb-toolbar-host .sv-head .sv-sub { display:none; } .wb-service-tool .sv-metrics { display:none; } }
+@media(max-width:650px) { .wb-layout { grid-template-columns:0 0 minmax(0,1fr)!important; } .app-shell .wb-tree { position:absolute; inset:0 auto 0 0; width:min(300px,calc(100vw - 80px)); z-index:15; box-shadow:8px 0 24px #0002; border-right:1px solid hsl(var(--border)); } .wb-resize-x { visibility:hidden; } .wb-toolbar { gap:5px; } .wb-toolbar-host :is(.vc-head,.pk-head,.sv-head,.dq-top) { overflow-x:auto; } .wb-toolbar-actions .wb-compile-btn { font-size:11px; padding:0 7px; } .wb-document-surface .vc-file-name { max-width:140px; } .wb-document-surface .pk-tabs { padding:5px; } .wb-document-surface .pk-desc { flex-basis:100%; } .wb-document-surface .pk-zipname { display:none; } }
+
+.wb-svn-summary { display:flex; align-items:center; justify-content:space-between; padding:9px 12px; gap:8px; border-top:1px solid hsl(var(--border)); font-size:11px; color:hsl(var(--muted-foreground)); }
+.wb-svn-summary button { color:hsl(var(--primary)); }
+.wb-svn-count { margin-left:auto; font-size:11px; color:hsl(var(--muted-foreground)); }
+.wb-svn-mark { flex-shrink:0; font:11px Consolas,monospace; color:hsl(var(--warning-ink)); }
+.wb-svn-mark[data-st=A],.wb-svn-mark[data-st=G] { color:hsl(var(--success-ink)); }
+.wb-svn-mark[data-st=C],.wb-svn-mark[data-st=D],.wb-svn-mark[data-st="!"] { color:hsl(var(--destructive-ink)); }
+.wb-svn-mark[data-st="?"] { color:hsl(var(--muted-foreground)); }
+
+.wb-tabbar { display:flex; min-height:36px; height:36px; flex-shrink:0; background:hsl(var(--background)); border-bottom:1px solid hsl(var(--border)); }
+.wb-tabbar .wb-tabs { flex:1; min-width:0; border:0; }
+.wb-tabbar .wb-tabs:not(:has(.wb-tab)) { display:none; }
+/* 尚未打开工程时既没有源码标签也没有工具页签，整条标签栏不该占 36px 空白。 */
+.wb-tabbar:not(:has(.wb-tab)) { display:none; }
+.wb-global-search { display:flex; align-items:center; gap:8px; width:clamp(180px,30vw,400px); min-height:28px; margin-inline:auto; padding:3px 10px; border:1px solid hsl(var(--border)); border-radius:6px; background:hsl(var(--card)); color:hsl(var(--muted-foreground)); font-size:12px; }
+.wb-global-search kbd { margin-left:auto; font-size:10px; border:1px solid hsl(var(--border)); border-radius:3px; padding:0 4px; }
+.wb-settings-layout { display:flex; min-height:0; height:100%; }
+.wb-settings-menu { display:flex; flex-direction:column; gap:5px; padding:20px 12px; width:100%; flex-shrink:0; background:hsl(var(--background)); border-right:1px solid hsl(var(--border)); }
+.wb-settings-menu button { padding:7px 12px; font-size:12px; text-align:left; border-radius:5px; }
+.wb-settings-menu button[aria-current] { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); }
+.wb-settings-body { flex:1; min-width:0; overflow:auto; padding:28px 32px; }
+.wb-settings-body > section { max-width:760px; display:flex; flex-direction:column; gap:18px; }
+.wb-settings-body h1 { font-size:17px; font-weight:600; }
+.wb-settings-body .ui-card { box-shadow:none; border-radius:0; border:0; padding:0; }
+@media(max-width:650px) { .wb-global-search { width:auto; min-width:28px; } .wb-global-search span,.wb-global-search kbd { display:none; } .wb-settings-layout { flex-direction:column; } .wb-settings-menu { width:100%; flex-direction:column; overflow:auto; padding:12px; border:0; } .wb-settings-menu button { white-space:nowrap; } .wb-settings-body { padding:18px; } .wb-tabbar { overflow-x:auto; } }
+
+html[data-ui-style] .app-shell .app-side-item { box-shadow:none; transform:none; }
+html[data-ui-style] .app-shell .app-side-item[data-active] { background:hsl(var(--accent)); box-shadow:none; }
+html[data-ui-style] .app-shell .app-side-item::before,html[data-ui-style] .app-shell .app-side-item::after { display:none; }
+.wb-no-project { padding:18px 12px; font-size:12px; color:hsl(var(--muted-foreground)); }
+
+.wb-keymap-choices { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:8px 0; }
+.wb-keymap-choices label { padding:16px 12px; border:1px solid hsl(var(--border)); border-radius:6px; font-size:13px; cursor:pointer; }
+.wb-keymap-choices label:has(input:checked) { border-color:hsl(var(--primary)); background:hsl(var(--accent)); }
+.wb-keymap-choices input { accent-color:hsl(var(--primary)); }
+.wb-keymap-table { width:100%; font-size:12px; border-collapse:collapse; }
+.wb-keymap-table th { text-align:left; font-weight:500; color:hsl(var(--muted-foreground)); }
+.wb-keymap-table th,.wb-keymap-table td { padding:10px 0; border-bottom:1px solid hsl(var(--border)); }
+.wb-keymap-table kbd { font:12px Consolas,monospace; }
+
+.wb-search-tool > div:first-child > div:first-child { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; }
+.wb-search-tool > div:first-child > div:first-child > .relative { grid-column:1 / -1; }
+.wb-search-tool > div:first-child > div:first-child > button { min-width:0; padding-inline:4px; height:28px; font-size:11px; }
+
+.wb-service-tool { overflow:auto; }
+.wb-service-tool .sv-log { flex-shrink:0; min-height:120px; }
+.wb-document-surface .pk-actions { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; }
+.pk-action-meta { display:flex; min-width:0; align-items:center; flex-wrap:wrap; gap:7px; }
+.pk-action-meta .pk-out { min-width:0; flex:1 1 270px; }
+.pk-action-meta .pk-out input { min-width:0; flex:1; }
+.pk-action-meta .pk-sp { display:none; }
+@media(max-width:650px) { .wb-keymap-choices { grid-template-columns:1fr; } .wb-document-surface .pk-actions { grid-template-columns:minmax(0,1fr); } .wb-document-surface .pk-actions > button { justify-self:end; } }
+
+/* ═══ 界面重构（2026-10-30）：标题栏横跨整窗 36px + 64px 竖栏（图标在上、文字在下）═══ */
+html .app-shell { display:flex; flex-direction:column; }
+.app-body { display:grid; grid-template-columns:auto minmax(0,1fr); grid-template-rows:minmax(0,1fr); flex:1 1 auto; min-width:0; min-height:0; }
+.app-brand { display:flex; align-items:center; gap:7px; align-self:stretch; flex-shrink:0; user-select:none; }
+.app-brand-logo { width:20px; height:20px; border-radius:6px; }
+.app-brand-name { font-size:13px; font-weight:600; }
+.app-topbar .wb-global-search { min-height:24px; padding-block:1px; }
+html .app-side[data-collapsed] { width:64px; }
+.app-side[data-collapsed] .app-side-nav { padding:6px 6px 0; gap:2px; }
+/* interaction-refinements.css 给图标栏态的导航项定了 padding:8px 12px + overflow:hidden（只放图标），文字要靠更高的特异性撑开 */
+html .app-shell .app-side[data-collapsed] .app-side-item { flex-direction:column; justify-content:center; gap:3px; width:100%; min-height:0; padding:8px 2px 7px; overflow:visible; font-size:11px; font-weight:500; line-height:1.1; }
+.app-side[data-collapsed] .app-side-item[data-active] { font-weight:600; }
+/* interaction-refinements.css 把图标栏态的文字压成 max-width:0 / opacity:0，这里必须靠 html 前缀压过它 */
+html .app-side[data-collapsed] .app-side-label { display:block !important; max-width:100%; opacity:1; font-size:11px; }
+.app-side[data-collapsed] .app-side-badge { top:3px; right:10px; }
+.app-side[data-collapsed] .app-side-foot { padding:6px; }

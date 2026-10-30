@@ -1,3 +1,4 @@
+import { DockRegion } from "../workspace/WorkbenchDock";
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -6,6 +7,8 @@ import { FilesTab } from "./FilesTab";
 import { setSession } from "../../lib/workspaceSession";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), toast: vi.fn() }));
+vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
+vi.mock("../workspace/TreeSvnProvider", () => ({ TreeSvnProvider: ({ children }: { children: import("react").ReactNode }) => <>{children}</> }));
 vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
 vi.mock("../../components/ui/toast", () => ({ toast: mocks.toast }));
 vi.mock("../../hooks/usePrefersReducedMotion", () => ({ usePrefersReducedMotion: () => true }));
@@ -28,6 +31,8 @@ vi.mock("../../lib/lang", () => ({
   ensureLang: vi.fn(),
   stopLang: vi.fn(async () => {}),
   setNavHandler: vi.fn(),
+  navigate: vi.fn(),
+  inLangModule: () => false,
   loadJdtSource: vi.fn(),
   restartLang: vi.fn(),
   useLangView: () => ({
@@ -80,10 +85,11 @@ afterEach(async () => {
 });
 
 describe("文件页", () => {
-  it("没有工作区时只给一句引导和一个输入框，不画空的树和编辑器", async () => {
+  it("没有工作区时保留工作台框架与打开引导，不创建编辑器", async () => {
     await render();
     expect(container.textContent).toContain("还没有打开工程目录");
-    expect(container.querySelector(".wb-root")).toBeNull();
+    expect(container.querySelector('[data-testid="editor-pane"]')).toBeNull();
+    expect(container.querySelector(".wb-root")).toBeTruthy();
     // 没填路径时「打开」是禁用的
     expect(buttonByText("打开")?.disabled).toBe(true);
   });
@@ -101,6 +107,24 @@ describe("文件页", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("set_workspace", { path: ROOT });
     expect(container.querySelector(".wb-root")).toBeTruthy();
     expect(container.textContent).toContain("资源管理器");
+  });
+
+  it("工具面板切换保持同一个编辑器节点", async () => {
+    mocks.invoke.mockImplementation(async (cmd: string) => cmd === "get_workspace" ? ROOT : []);
+    await render();
+    const editor = container.querySelector('[data-testid="editor-pane"]');
+    expect(editor).toBeTruthy();
+    await act(async () => root.render(<FilesTab activeTool="search" tool={<DockRegion region="sidebar"><div>搜索结果</div></DockRegion>} />));
+    expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
+    expect(container.querySelector(".wb-tree")?.textContent).toContain("搜索结果");
+    await act(async () => root.render(<FilesTab activeTool="db" tool={<DockRegion region="document"><div>SQL 查询</div></DockRegion>} />));
+    expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
+    expect((container.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(true);
+    await act(async () => root.render(<FilesTab activeTool="services" tool={<DockRegion region="bottom"><div>服务日志</div></DockRegion>} />));
+    expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
+    // 服务日志停靠在底部面板「NC 服务」标签的宿主里
+    expect(container.querySelector(".wb-svc-host")?.textContent).toContain("服务日志");
+    expect((container.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(false);
   });
 
   it("有工作区时渲染标题栏动作、标签条、编译按钮与状态栏", async () => {

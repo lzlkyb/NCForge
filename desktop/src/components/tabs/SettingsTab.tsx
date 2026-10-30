@@ -1,3 +1,5 @@
+import { SettingsLayout } from "../settings/SettingsLayout";
+import { DockRegion } from "../workspace/WorkbenchDock";
 import { useEffect, useState } from "react";
 import { invokeOrToast } from "../../lib/tauri";
 import { getConfig, patchConfig, type ConfigPatch } from "../../lib/appConfig";
@@ -10,6 +12,7 @@ import { SettingsRow } from "../ui/SettingsRow";
 import { Button } from "../ui/button";
 import { LangSettings } from "../settings/LangSettings";
 import { ResourceSettings } from "../settings/ResourceSettings";
+import { KeymapSettings } from "../settings/KeymapSettings";
 
 /**
  * 示例设置页（壳子版）。演示「读配置 → 表单 → 写配置」闭环，
@@ -55,10 +58,8 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-6">
-      <h1 className="text-lg font-medium">设置</h1>
-
-      <Card className="flex flex-col gap-1 p-2">
+    <DockRegion region="document"><div className="wb-settings-page">
+      <SettingsLayout sections={[{ label: "常规", content: <Card className="flex flex-col gap-1 p-2">
         <ToggleRow
           label="开机自启"
           sub="登录系统时自动启动（托盘常驻）"
@@ -89,13 +90,11 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
             void save({ release_webview_on_close: v });
           }}
         />
-      </Card>
-
-      <LangSettings />
-
-      <ResourceSettings />
-
-      <Card className="flex flex-col gap-1 p-2">
+      </Card> },
+      { label: "快捷键", content: <KeymapSettings /> },
+      { label: "开发环境", content: <LangSettings /> },
+      { label: "资源与更新", content: <ResourceSettings /> },
+      { label: "关于", content: <><Card className="flex flex-col gap-1 p-2">
         <SettingsRow
           label="关于"
           sub={`${APP_INFO.name} · ${APP_INFO.license}`}
@@ -131,7 +130,7 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
 
       <p className="px-1 text-xs text-muted-foreground">
         分类图例：{Object.values(CATEGORY_LABELS).join(" / ")}
-      </p>
+      </p></> }]} />
 
       <Modal open={historyOpen} onClose={() => setHistoryOpen(false)} ariaLabel="更新历史" className="modal-surface">
         <div className="flex max-h-[60vh] w-[min(560px,90vw)] flex-col gap-3 overflow-y-auto p-5">
@@ -154,7 +153,7 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
           {CHANGELOG.length === 0 && <p className="text-sm text-muted-foreground">还没有版本记录。</p>}
         </div>
       </Modal>
-    </div>
+    </div></DockRegion>
   );
 }
 

@@ -59,7 +59,7 @@ export function PatchActions({
 
   return (
     <div className="pk-actions">
-      <div className="pk-out">
+      <div className="pk-action-meta"><div className="pk-out">
         <span>输出目录</span>
         <input
           value={draft}
@@ -125,7 +125,7 @@ export function PatchActions({
           {deletedCount} 个删除文件不进包
         </span>
       )}
-      <button
+      </div><button
         type="button"
         className="pk-btn pk-btn-primary"
         disabled={building || !canBuild}

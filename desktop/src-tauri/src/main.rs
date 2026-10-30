@@ -509,6 +509,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::lang_request,
             commands::lang_notify,
             commands::search_workspace,
+            commands::search_list_files,
             commands::server_status,
             commands::server_start,
             commands::server_stop,

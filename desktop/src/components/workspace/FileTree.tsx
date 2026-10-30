@@ -22,6 +22,8 @@ interface Props {
   root: string;
   activePath: string | null;
   onOpen: (path: string) => void;
+  /** 双击文件：固定预览标签。 */
+  onPin?: (path: string) => void;
   /** 新建文件成功，调用方负责打开它。 */
   onCreated: (path: string) => void;
   /** 重命名成功，调用方负责把已打开的标签挪到新路径。 */
@@ -51,7 +53,7 @@ export interface FileTreeHandle {
  * `useTreeDelete` 是删除流程；行渲染在 `TreeRow` / `TreeEditRow` 里。
  */
 export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
-  { root, activePath, onOpen, onCreated, onRenamed, onDeleted, openPaths },
+  { root, activePath, onOpen, onPin, onCreated, onRenamed, onDeleted, openPaths },
   ref,
 ) {
   const [selected, setSelected] = useState<{ path: string; isDir: boolean } | null>(null);
@@ -213,6 +215,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
               setSelected({ path: p, isDir: false });
               onOpen(p);
             }}
+            onPin={onPin}
             onContextMenu={openMenu}
           />,
         );

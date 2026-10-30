@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react";
 import { Icon } from "../ui/icon";
 import { baseName } from "../../lib/workspace";
+import { useWorkbenchDock } from "./WorkbenchDock";
 import { relativeTo, type CompileResult, type Problem } from "../../lib/compile";
 
-export type PanelTab = "problems" | "build";
+export type PanelTab = "problems" | "build" | "svc";
 
 interface Props {
   root: string;
@@ -18,8 +19,12 @@ interface Props {
   onClose: () => void;
 }
 
-/** 底部面板：问题列表与编译输出。其余标签（NC 日志/SQL/补丁）随对应里程碑加入。 */
+/**
+ * 底部面板：问题列表、编译输出、NC 服务（服务页把自己的卡片与日志停靠到「NC 服务」标签的宿主里）。
+ * 搜索结果留在侧栏、SQL 结果留在 SQL 标签页——它们和各自的输入表单是一体的，拆出来反而来回跳。
+ */
 export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProblem, onCancel, onClose }: Props) {
+  const dock = useWorkbenchDock();
   const logRef = useRef<HTMLDivElement>(null);
   // 只在用户本来就贴着底部时才跟随最新一行：首次建类索引会连续输出几十行，
   // 无条件贴底等于把正往上翻看的人一脚踹回底部。
@@ -42,6 +47,9 @@ export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProb
         <button type="button" className="wb-ptab" data-active={tab === "build" || undefined} onClick={() => onTab("build")}>
           编译输出
         </button>
+        <button type="button" className="wb-ptab" data-active={tab === "svc" || undefined} onClick={() => onTab("svc")}>
+          NC 服务
+        </button>
         <span className="wb-status-sp" />
         {running && (
           <button
@@ -58,7 +66,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProb
         </button>
       </div>
 
-      {tab === "problems" ? (
+      {tab === "problems" && (
         <div className="wb-panel-body">
           {running && <div className="wb-panel-note">正在编译…</div>}
           {!running && !result && <div className="wb-panel-note">还没有编译过。点「编译」后这里列出问题。</div>}
@@ -73,7 +81,8 @@ export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProb
             </button>
           ))}
         </div>
-      ) : (
+      )}
+      {tab === "build" && (
         <div
           className="wb-panel-body wb-log"
           ref={logRef}
@@ -107,6 +116,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProb
           )}
         </div>
       )}
+      <div ref={dock?.bindHost("bottom")} className="wb-panel-body wb-svc-host" hidden={tab !== "svc"} />
     </section>
   );
 }

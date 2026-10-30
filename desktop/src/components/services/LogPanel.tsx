@@ -1,3 +1,4 @@
+import { useViewActive } from "../../lib/viewActivity";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
@@ -30,6 +31,7 @@ interface Props {
  * 漏一拍只是晚 0.5 秒；事件方式丢一条就永久缺行，而排查问题时少的偏偏是那条。
  */
 export function LogPanel({ active, generation, logPath, logSize, appHidden, onReveal, onCleared }: Props) {
+  const viewActive = useViewActive();
   const { lines, error, reset } = useServerLog(active, generation, appHidden);
   // P2-9：级别/关键字过滤与跟随/换行进模块级仓库——「服务页看日志 → 文件页
   // 改代码 → 回来看新日志」是排查动线，过滤器不能随切页重置。
@@ -47,6 +49,7 @@ export function LogPanel({ active, generation, logPath, logSize, appHidden, onRe
   // Ctrl+F 聚焦过滤框（服务页独占，不影响其他页）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (!viewActive || e.defaultPrevented || document.activeElement?.closest(".monaco-editor")) return;
       if (!e.ctrlKey || e.altKey || e.key.toLowerCase() !== "f") return;
       // 有弹窗打开时不抢：焦点会被从遮罩后面拽进过滤框，和弹窗的焦点陷阱互相拉扯，
       // 用户看到的是一按 Ctrl+F 弹窗就"卡住"了（其实焦点跑到看不见的输入框里）。
@@ -57,7 +60,7 @@ export function LogPanel({ active, generation, logPath, logSize, appHidden, onRe
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [viewActive]);
 
   const counts = useMemo(() => countLevels(lines), [lines]);
   const filtered = useMemo(() => filterLines(lines, level, keyword), [lines, level, keyword]);

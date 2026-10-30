@@ -1,3 +1,4 @@
+import { DockRegion } from "../workspace/WorkbenchDock";
 import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import "../../services.css";
@@ -42,6 +43,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const [preview, setPreview] = useState<LaunchPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [portOpen, setPortOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
 
   const { data: status, refetch } = useQuery({
     queryKey: ["server-status"],
@@ -170,10 +172,11 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
 
   return (
     <div className="sv-page">
-      <div className="sv-head">
+      <DockRegion region="toolbar"><div className="sv-head">
         <h1>NC 服务</h1>
         <span className="sv-sub">开发态中间件 · 改完代码重启即可生效</span>
         <span className="sv-sp" />
+        <button type="button" className="sv-btn" onClick={() => setConfigOpen(v => !v)}>配置</button>
         <button type="button" className="sv-btn" disabled={previewing} onClick={() => void showCommandLine()}>
           <Icon name="terminal" size={13} />
           {previewing ? "生成中…" : "命令行"}
@@ -182,9 +185,9 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
           <Icon name="folder" size={13} />
           日志位置
         </button>
-      </div>
+      </div></DockRegion>
 
-      <div className="sv-body">
+      <DockRegion region="bottom"><div className="sv-body wb-service-tool">
         <ServiceCard
           status={status ?? null}
           busy={busy}
@@ -230,7 +233,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
           </div>
         )}
 
-        <ServiceConfig status={status ?? null} running={state !== "stopped"} onRefetch={() => void refetch()} />
+        {configOpen && <ServiceConfig status={status ?? null} running={state !== "stopped"} onRefetch={() => void refetch()} />}
 
         <LogPanel
           active={state === "running" || state === "starting"}
@@ -241,7 +244,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
           onReveal={revealLog}
           onCleared={() => void refetch()}
         />
-      </div>
+      </div></DockRegion>
 
       <ServiceConfirms
         confirm={confirm}

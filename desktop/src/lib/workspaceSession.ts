@@ -60,6 +60,11 @@ export interface TabMeta {
    * `source` = 有真实源码（配了 _src.jar），`stub` = 只有方法签名。不可编辑、不可保存、不可编译。
    */
   virtual?: "source" | "stub";
+  /**
+   * 预览标签：文件树单击打开，斜体显示，会被下一次单击预览替换；
+   * 双击标签 / 双击树里的文件 / 开始编辑后固定。
+   */
+  preview?: boolean;
 }
 
 export interface WorkspaceSession {
@@ -186,5 +191,9 @@ export function useWorkspaceSession(): WorkspaceSession {
 // dirty 仍会变化（比如编译前的保存提醒），回来后圆点必须是准的。
 onDirtyChange((path, dirty) => {
   if (!state.tabs.some((t) => t.path === path && t.dirty !== dirty)) return;
-  setSession({ tabs: (prev) => prev.map((t) => (t.path === path ? { ...t, dirty } : t)) });
+  // 开始编辑 = 用户认定这个文件要留着，预览标签顺势固定
+  setSession({
+    tabs: (prev) =>
+      prev.map((t) => (t.path === path ? { ...t, dirty, ...(dirty ? { preview: false } : {}) } : t)),
+  });
 });

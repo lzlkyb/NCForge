@@ -1,3 +1,4 @@
+import { DockRegion } from "../workspace/WorkbenchDock";
 import { useMemo, useState } from "react";
 import "../../patch.css";
 import { Icon } from "../ui/icon";
@@ -129,7 +130,7 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
 
   return (
     <div className="pk-page">
-      <div className="pk-head">
+      <DockRegion region="toolbar"><div className="pk-head">
         <h1>补丁打包</h1>
         <span className="pk-kv">
           产物根 <b>{scan.data?.outRoots.join("、") || "未探测"}</b>
@@ -142,28 +143,9 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
           <Icon name="refresh" size={13} className={scan.isFetching ? "animate-spin" : undefined} />
           {scan.isFetching ? "扫描中…" : "重扫改动"}
         </button>
-        <button
-          type="button"
-          className="pk-btn pk-btn-primary"
-          data-armed={armed || undefined}
-          disabled={build.building || chosen.length === 0 || !dirty || !build.dir}
-          title={
-            !dirty
-              ? "先写一句改动内容描述（它就是包名）"
-              : !build.dir
-                ? "还没选补丁输出目录"
-                : tablesMissing > 0
-                  ? `${tablesMissing} 张表在库里找不到（见「表结构核对」），点两次才出包`
-                  : `生成 ${build.zipName}`
-          }
-          onClick={buildNow}
-        >
-          <Icon name="package" size={13} />
-          {build.building ? "出包中…" : armed ? `仍然生成（${tablesMissing} 表不存在）` : "生成补丁包"}
-        </button>
-      </div>
+      </div></DockRegion>
 
-      {err && (
+      <DockRegion region="document">{err && (
         <div className="pk-banner" data-tone="bad">
           <Icon name="alert" size={13} />
           <span>{String(err)}</span>
@@ -177,7 +159,8 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
       )}
       {build.result && <BuildBanner result={build.result} />}
 
-      <div className="pk-split">
+      </DockRegion>
+      <DockRegion region="sidebar">
         <PatchList
           items={items}
           deleted={deleted}
@@ -194,6 +177,8 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
           onSelect={setSelected}
         />
 
+      </DockRegion>
+      <DockRegion region="document">
         <div className="pk-right">
           <div className="pk-tabs">
             <button type="button" className="pk-tab" data-on={tab === "stage" || undefined} onClick={() => setTab("stage")}>
@@ -267,7 +252,6 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
             <TableCheck files={chosen.map((c) => c.path)} onResult={setCheck} onNavigate={onNavigate} />
           )}
         </div>
-      </div>
 
       <PatchActions
         dir={build.dir}
@@ -283,7 +267,7 @@ export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) 
         // 底部这颗也要走 buildNow：以前它直接 doBuild，把「表不存在」的二次确认
         // 整个绕过去了——顶部按钮点第一次只是变成确认态，底部一次就出包。
         onBuild={buildNow}
-      />
+      /></DockRegion>
     </div>
   );
 }

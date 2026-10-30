@@ -17,6 +17,39 @@ import type { TabMeta } from "./workspaceSession";
  * 搬出来还顺带能单测：`coversPath` 判错的后果是「目录改名后标签没跟着走」。
  */
 
+/**
+ * 加一个标签。`preview` 时顶替掉现有的预览标签（没改动才替换）。
+ * 返回新数组与被顶替的路径（调用方要关掉它的 model）。
+ */
+export function addTab(
+  tabs: TabMeta[],
+  meta: TabMeta,
+  preview: boolean,
+): { tabs: TabMeta[]; dropped: string | null } {
+  if (!preview) return { tabs: [...tabs, meta], dropped: null };
+  const next = { ...meta, preview: true };
+  const i = tabs.findIndex((t) => t.preview && !t.dirty && !t.eolChanged);
+  if (i < 0) return { tabs: [...tabs, next], dropped: null };
+  const out = tabs.slice();
+  out[i] = next;
+  return { tabs: out, dropped: tabs[i].path };
+}
+
+/** 把预览标签固定下来。 */
+export function pinTab(tabs: TabMeta[], path: string): TabMeta[] {
+  return tabs.map((t) => (t.path === path && t.preview ? { ...t, preview: false } : t));
+}
+
+/** 「关闭其他 / 右侧 / 已保存」：只关没有未保存改动的；返回要关的路径与因未保存而保留的个数。 */
+export function pickClosable(
+  tabs: TabMeta[],
+  want: (t: TabMeta, index: number) => boolean,
+): { close: string[]; kept: number } {
+  const hit = tabs.filter(want);
+  const close = hit.filter((t) => !t.dirty && !t.eolChanged).map((t) => t.path);
+  return { close, kept: hit.length - close.length };
+}
+
 /** 从磁盘读到的内容造一个标签。`readOnly` 的两种原因见 `TabMeta.readOnlyReason`。 */
 export function tabMetaFromDisk(path: string, c: FileContent): TabMeta {
   const reason = !c.lossless ? "lossy" : c.eol === "MIXED" ? "mixed" : null;

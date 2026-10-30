@@ -9,6 +9,7 @@ import { EditorPane } from "./EditorPane";
 const mocks = vi.hoisted(() => ({
   editor: {
     addCommand: vi.fn(),
+    onKeyDown: vi.fn(() => ({ dispose: vi.fn() })),
     onDidChangeCursorPosition: vi.fn(),
     updateOptions: vi.fn(),
     setModel: vi.fn(),

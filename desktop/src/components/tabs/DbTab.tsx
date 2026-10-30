@@ -1,3 +1,4 @@
+import { DockRegion } from "../workspace/WorkbenchDock";
 import { useMemo, useRef, useState } from "react";
 import "../../db.css";
 import { Icon } from "../ui/icon";
@@ -17,18 +18,28 @@ import { friendlyDbError, parseDbError, splitJdbcUrl, thousands, autonomousCallH
  * **只读由 Java 桥三道光保证**（语句白名单 / `SET TRANSACTION READ ONLY` / 执行后 rollback），
  * 这个页面不做任何「写操作」的入口——连按钮都不给。
  */
+
+/** 真实库里 1.5 万张表是常态，一次铺成按钮会让侧栏直接卡死，只渲染前 N 条 + 关键字收敛。 */
+const TABLE_LIMIT = 300;
+
 export function DbTab() {
   const s = useDbSession();
   // P2-9：SQL 草稿 / 行数上限 / 超时进模块级仓库——切页去文件页看代码、
   // 回来继续写，是核心动线，不能再面对示例 SQL 重写一遍。
   const { sql, maxRows, timeoutSec } = useDbForm();
   const [manualOpen, setManualOpen] = useState(false);
+  const [tableFilter, setTableFilter] = useState("");
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
   const lines = useMemo(() => sql.split("\n").length, [sql]);
   // 调了自定义包函数就给一句提醒：自治事务的写操作绕得过只读事务（见 autonomousCallHint）
   const callHint = useMemo(() => autonomousCallHint(sql), [sql]);
   const knownTables = useMemo(() => (s.tables.data ?? []).map((t) => t.name), [s.tables.data]);
+  const filteredTables = useMemo(() => {
+    const q = tableFilter.trim().toLowerCase();
+    return q ? knownTables.filter((name) => name.toLowerCase().includes(q)) : knownTables;
+  }, [knownTables, tableFilter]);
+  const shownTables = filteredTables.slice(0, TABLE_LIMIT);
   const url = s.defaults.data?.url ?? "";
   const user = s.defaults.data?.user ?? "";
   const target = splitJdbcUrl(url);
@@ -57,7 +68,7 @@ export function DbTab() {
 
   return (
     <div className="dq-page">
-      <div className="dq-top">
+      <DockRegion region="toolbar"><div className="dq-top">
         <h1>数据库</h1>
         {s.conn ? (
           <span className="dq-conn" title={s.conn.url}>
@@ -108,9 +119,28 @@ export function DbTab() {
             断开
           </button>
         )}
-      </div>
+      </div></DockRegion>
+      <DockRegion region="sidebar"><div className="wb-db-objects">
+        <h2>数据库对象</h2>
+        {s.conn ? <>
+          <input
+            className="wb-db-filter"
+            value={tableFilter}
+            onChange={(e) => setTableFilter(e.target.value)}
+            placeholder={`筛选表名（共 ${thousands(knownTables.length)} 张）`}
+            aria-label="筛选数据库表"
+            spellCheck={false}
+          />
+          <p>{tableFilter.trim() ? `${thousands(filteredTables.length)} 张匹配` : `共 ${thousands(knownTables.length)} 张表`}</p>
+          <div className="wb-db-list">
+            {shownTables.map(name => <button type="button" key={name} title={name} onClick={() => dbSession.set({ sql: `SELECT * FROM ${name} WHERE ROWNUM <= ${maxRows}` })}><Icon name="database" size={14} />{name}</button>)}
+            {filteredTables.length === 0 && <p>没有匹配的表名。</p>}
+            {filteredTables.length > TABLE_LIMIT && <p>只显示前 {TABLE_LIMIT} 张，继续输入关键字缩小范围。</p>}
+          </div>
+        </> : <p>连接后浏览表结构。查询使用只读会话。</p>}
+      </div></DockRegion>
 
-      {!s.defaults.data?.driverFound && s.defaults.data !== undefined && (
+      <DockRegion region="document">{!s.defaults.data?.driverFound && s.defaults.data !== undefined && (
         <div className="dq-banner" data-tone="warn">
           <Icon name="alertTriangle" size={13} />
           <span>
@@ -216,6 +246,7 @@ export function DbTab() {
         )}
       </div>
 
+      </DockRegion>
       <ConnectDialog
         open={s.askPassword || manualOpen}
         url={url}

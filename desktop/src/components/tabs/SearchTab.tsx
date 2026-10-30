@@ -1,3 +1,4 @@
+import { DockRegion } from "../workspace/WorkbenchDock";
 import { useCallback, useEffect, useState } from "react";
 import { SearchBar } from "../search/SearchBar";
 import { SearchResults } from "../search/SearchResults";
@@ -107,7 +108,7 @@ export function SearchTab({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
+    <DockRegion region="sidebar"><div className="wb-search-tool flex min-h-0 flex-1 flex-col bg-background">
       <SearchBar
         form={form}
         history={history}
@@ -117,6 +118,6 @@ export function SearchTab({
         onKeyDown={onSearchKey}
       />
       <SearchResults form={form} update={update} loading={loading} onOpen={open} />
-    </div>
+    </div></DockRegion>
   );
 }

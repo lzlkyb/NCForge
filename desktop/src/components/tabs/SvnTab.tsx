@@ -1,3 +1,4 @@
+import { DockRegion, useWorkbenchDock } from "../workspace/WorkbenchDock";
 import { useMemo, useState } from "react";
 import "../../svn.css";
 import { Icon } from "../ui/icon";
@@ -31,6 +32,7 @@ import {
  * 这个文件只负责布局与「出错弹什么」。
  */
 export function SvnTab({ onOpenFile }: { onOpenFile: (path: string) => void }) {
+  const dock = useWorkbenchDock();
   // P2-9：选中项 / 右栏视图模式 / 忽略文件显示进模块级仓库——「看 diff →
   // 文件页改代码 → 回来审下一个」的动线不再每次重新找位置。
   const { showIgnored, selectedPath, mode } = useSvnView();
@@ -69,6 +71,7 @@ export function SvnTab({ onOpenFile }: { onOpenFile: (path: string) => void }) {
   const canRevert = !!selected && !selected.isDir && busy === null;
 
   const pick = (it: ChangeItem) => {
+    dock?.showDocument();
     svnSession.set({ selectedPath: it.path, mode: "diff" });
     setCommitting(false);
   };
@@ -127,7 +130,7 @@ export function SvnTab({ onOpenFile }: { onOpenFile: (path: string) => void }) {
 
   return (
     <div className="vc-page">
-      <SvnToolbar
+      <DockRegion region="toolbar"><SvnToolbar
         rev={rev}
         url={info.data?.url ?? (info.error ? friendlySvnError(info.error) : null)}
         generatedAtMs={status.data?.generatedAtMs ?? null}
@@ -149,11 +152,11 @@ export function SvnTab({ onOpenFile }: { onOpenFile: (path: string) => void }) {
         onRefresh={() => void refresh()}
         onUpdate={() => void doUpdate()}
         onRevert={() => setRevertOpen(true)}
-        onCommit={() => setCommitting(true)}
+        onCommit={() => { setCommitting(true); dock?.showDocument(); }}
         onHousekeeping={() => setHkOpen(true)}
-      />
+      /></DockRegion>
 
-      {statusError && (
+      <DockRegion region="document">{statusError && (
         <div style={{ padding: "10px 14px" }}>
           <div className="vc-alert" data-tone={statusError.code === "auth" ? "info" : "warn"}>
             <Icon name="alert" size={13} />
@@ -174,7 +177,8 @@ export function SvnTab({ onOpenFile }: { onOpenFile: (path: string) => void }) {
         </div>
       )}
 
-      <div className="vc-split">
+      </DockRegion>
+      <DockRegion region="sidebar">
         <ChangeList
           view={status.data?.changes ?? { groups: [], shown: 0, total: 0, ignored: 0 }}
           reviewed={reviewed}
@@ -187,6 +191,8 @@ export function SvnTab({ onOpenFile }: { onOpenFile: (path: string) => void }) {
           onToggleIgnored={() => svnSession.set({ showIgnored: !showIgnored })}
         />
 
+      </DockRegion>
+      <DockRegion region="document"><div className="vc-docked-document">
         {committing ? (
           <CommitPanel
             items={files}
@@ -208,13 +214,13 @@ export function SvnTab({ onOpenFile }: { onOpenFile: (path: string) => void }) {
                 toast(friendlySvnError(e), "error");
               });
             }}
-            onOpenFile={onOpenFile}
+            onOpenFile={path => { dock?.showCode(); onOpenFile(path); }}
             onMarkAndNext={markAndNext}
             onResolve={(choice) => selected && void doResolve(selected.path, choice)}
             onLater={() => svnSession.set({ selectedPath: null })}
           />
         )}
-      </div>
+      </div></DockRegion>
 
       <ConfirmDialog
         open={revertOpen}

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { getModel, getViewState, saveViewState } from "../../lib/editorStore";
 import { registerLangProviders } from "../../lib/langProviders";
+import { editorCommand, getKeymap } from "../../lib/keymap";
 
 interface Props {
   /** 当前显示的文件；null = 没有打开的文件。 */
@@ -58,11 +59,20 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       wordBasedSuggestions: "currentDocument",
     });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => onSaveRef.current());
+    const keyboard = editor.onKeyDown(event => {
+      if (!editor.hasTextFocus()) return;
+      const action = editorCommand(event.browserEvent, getKeymap());
+      if (!action) return;
+      event.preventDefault();
+      event.stopPropagation();
+      editor.trigger("ncforge-keymap", action, undefined);
+    });
     editor.onDidChangeCursorPosition((e) => onCursorRef.current(e.position.lineNumber, e.position.column));
     editorRef.current = editor;
     return () => {
       // 注意只销毁编辑器实例，model 留在 editorStore（切到别的页签再回来还在）。
       if (shownRef.current) saveViewState(shownRef.current, editor.saveViewState());
+      keyboard.dispose();
       editor.dispose();
       editorRef.current = null;
       shownRef.current = null;

@@ -7,6 +7,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use serde::Serialize;
+
 use crate::search::{self, SearchOptions, SearchOutcome};
 use crate::state::AppState;
 
@@ -26,4 +28,31 @@ pub async fn search_workspace(
     tauri::async_runtime::spawn_blocking(move || search::search(&root, &options))
         .await
         .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 工作区文件清单（「转到文件」用）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileList {
+    /// 相对工作区根、`/` 分隔。
+    pub files: Vec<String>,
+    pub truncated: bool,
+}
+
+#[tauri::command]
+pub async fn search_list_files(state: tauri::State<'_, Arc<AppState>>) -> Result<FileList, String> {
+    let root = state
+        .config
+        .read()
+        .await
+        .workspace_root
+        .clone()
+        .ok_or_else(|| "尚未选择工作区目录".to_string())?;
+    let root = PathBuf::from(root);
+    tauri::async_runtime::spawn_blocking(move || {
+        let (files, truncated) = search::list_files(&root);
+        FileList { files, truncated }
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))
 }
