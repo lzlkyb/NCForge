@@ -52,6 +52,11 @@ pub struct CompileResult {
     pub jar_count: usize,
     pub rounds: u32,
     pub out_dir: String,
+    /// D4 诊断：产物比源码旧 / 有源码没产物 / 所在工程被停用。
+    ///
+    /// 与 `problems` 分开：`problems` 是 ecj 原文（有行列、可跳转），
+    /// 诊断是我们的推断，不该算进错误数。原文报错**不**被替换。
+    pub diagnostics: Vec<crate::compile_diag::Diagnostic>,
     /// 本次最终用到的 jar 序号（调用方缓存后下次作为 seed，省掉分轮补 jar）。
     #[serde(skip)]
     pub resolved_jars: Vec<u32>,
@@ -673,6 +678,18 @@ pub fn compile(
             output.lines().take(8).collect::<Vec<_>>().join(" | ")
         ));
     }
+    // D4：失败归因（有源码没产物 / 工程被停用 / 产物比源码旧）。
+    // **只按类判断**，不扫整棵树——全量新旧检测要 8 秒，见 compile_diag::stale_diagnostics。
+    // 依赖链在这里解析一次 `.classpath`（毫秒级）：顺序口径与 class_dirs 共用 `flat_dirs`。
+    let diagnostics = if ok && error_count == 0 {
+        Vec::new()
+    } else {
+        let graph = crate::eclipse_cp::graph(env.project_root, env.nc_home, env.overrides);
+        crate::compile_diag::uncompiled_diagnostics(&graph.projects, &problems)
+    };
+    for d in &diagnostics {
+        log(&format!("诊断：{}", d.message));
+    }
     Ok(CompileResult {
         ok: ok && error_count == 0,
         duration_ms: started.elapsed().as_millis() as u64,
@@ -683,6 +700,7 @@ pub fn compile(
         jar_count: jars.len(),
         rounds,
         out_dir: job.out_dir.to_string_lossy().into_owned(),
+        diagnostics,
         resolved_jars: jars.into_iter().collect(),
     })
 }

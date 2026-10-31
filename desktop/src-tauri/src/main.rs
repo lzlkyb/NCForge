@@ -244,6 +244,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::set_workspace,
             commands::linked_projects,
             commands::set_linked_overrides,
+            commands::check_artifacts,
             commands::fs_list_dir,
             commands::fs_read_file,
             commands::fs_write_file,

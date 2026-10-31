@@ -35,6 +35,9 @@ export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProb
   }, [log, tab]);
 
   const problems = result?.problems ?? [];
+  // D4 诊断：ecj 原文之外的推断（有源码没产物 / 工程被停用 / 产物比源码旧）。
+  // 单独一段显示，不算进错误数——它是「为什么编不过」的解释，不是又一条报错。
+  const diags = result?.diagnostics ?? [];
   const errors = result?.errorCount ?? 0;
 
   return (
@@ -70,7 +73,9 @@ export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProb
         <div className="wb-panel-body">
           {running && <div className="wb-panel-note">正在编译…</div>}
           {!running && !result && <div className="wb-panel-note">还没有编译过。点「编译」后这里列出问题。</div>}
-          {!running && result && problems.length === 0 && <div className="wb-panel-note">没有发现问题</div>}
+          {!running && result && problems.length === 0 && diags.length === 0 && (
+            <div className="wb-panel-note">没有发现问题</div>
+          )}
           {problems.map((p, i) => (
             <button type="button" key={i} className="wb-prow" onClick={() => onOpenProblem(p)} title={p.file}>
               <Icon name="alertTriangle" size={14} className={p.severity === "error" ? "wb-prow-err" : "wb-prow-warn"} />
@@ -79,6 +84,18 @@ export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProb
                 {baseName(p.file)}:{p.line}
               </span>
             </button>
+          ))}
+          {diags.map((d, i) => (
+            // 不可点：源码可能在关联工程里（工作区之外），点开会被路径守卫挡住，
+            // 与其弹个错不如把路径摆出来让人自己去看
+            <div key={`d${i}`} className="wb-prow wb-diag" data-kind={d.kind}>
+              <Icon name="info" size={14} className="wb-prow-warn" />
+              <span className="wb-prow-msg">
+                {d.message}
+                {d.file && <span className="wb-diag-path">{d.file}</span>}
+              </span>
+              <span className="wb-prow-loc">{d.project}</span>
+            </div>
           ))}
         </div>
       )}

@@ -107,3 +107,39 @@ pub async fn set_linked_overrides(
         .await?;
     Ok(saved)
 }
+
+/// 检查各工程的产物是否比源码旧（D4 的**全量**版本）。
+///
+/// 🔴 必须按需触发（「工程关联」页的按钮），**不要**挂到编译流程里：
+/// 真机实测三工程整树扫描 8.3 秒（12k 个 java / 13k 个 class、149k 个目录条目，
+/// 本机目录枚举约 15k 条目/秒），见 `compile_diag::stale_diagnostics`。
+/// 编译流程内只做按类判断（毫秒级）。
+#[tauri::command]
+pub async fn check_artifacts(
+    state: tauri::State<'_, Arc<AppState>>,
+    root: Option<String>,
+) -> Result<Vec<crate::compile_diag::Diagnostic>, String> {
+    let cfg = state.config.read().await.clone();
+    let primary = match root.map(|r| r.trim().to_string()).filter(|r| !r.is_empty()) {
+        Some(r) => PathBuf::from(r),
+        None => cfg
+            .workspace_root
+            .clone()
+            .map(PathBuf::from)
+            .ok_or_else(|| "还没有选择工作区目录，先去「文件」页打开一个工程".to_string())?,
+    };
+    if !primary.is_dir() {
+        return Err(format!("工作区目录不存在：{}", primary.display()));
+    }
+    let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
+    let nc_home = PathBuf::from(&home.root);
+
+    // 扫盘 8 秒级，绝不占 async 线程
+    tauri::async_runtime::spawn_blocking(move || {
+        let overrides = eclipse_cp::active_overrides(&cfg.linked_overrides);
+        let g = eclipse_cp::graph(&primary, &nc_home, &overrides);
+        crate::compile_diag::stale_diagnostics(&g.projects)
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))
+}
