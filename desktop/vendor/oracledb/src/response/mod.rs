@@ -67,6 +67,8 @@ pub(crate) struct Response {
     call_status: u32,
     end_of_fetch: bool,
     flush_out_binds: bool,
+    /// 隐式结果集（TTC 消息 27）解析出来的子语句，由 execute 消息填充。
+    implicit_results: Vec<CachedStatement>,
 }
 
 impl Response {
@@ -118,6 +120,7 @@ impl Response {
         self.bit_vector = None;
         self.end_of_fetch = false;
         self.flush_out_binds = false;
+        self.implicit_results.clear();
     }
 
     /// Records one pending value position while deserializing rows.
@@ -153,17 +156,25 @@ impl Response {
         statement: &mut CachedStatement,
     ) -> Result<(), Error> {
         if let Some(db_error) = self.take_db_error() {
-            if db_error.should_close_cursor() {
-                client.close_cursor(statement);
-            }
+            // 【NCForge 补丁三】查询遇到 ORA-01403（no data found）是正常的
+            // 「没有更多行」信号，必须**先**返回，绝不能走下面的关闭游标分支。
+            //
+            // 上游顺序反过来：先 `should_close_cursor()`（01403 不在白名单里，
+            // 返回 true）把游标塞进待关闭队列，再把错误当正常结束忽略。
+            // 后果是 `select cursor(...)` 这类嵌套游标：describe 子游标时服务端
+            // 会带一个 ORA-01403，父游标因此被标记关闭，下一次 piggyback
+            // （TTC_RPC_CLOSE_CURSORS）就把父游标关掉，子游标随之失效，
+            // 取子游标行时报 `ORA-01001: 无效的游标`。
             if statement.is_query()
                 && db_error.code() == constants::DB_ERR_NUM_NO_DATA_FOUND
             {
                 self.end_of_fetch = true;
-                Ok(())
-            } else {
-                Err(Error::db_error(db_error))
+                return Ok(());
             }
+            if db_error.should_close_cursor() {
+                client.close_cursor(statement);
+            }
+            Err(Error::db_error(db_error))
         } else {
             Ok(())
         }
@@ -451,6 +462,7 @@ impl Response {
             call_status: 0,
             end_of_fetch: false,
             flush_out_binds: false,
+            implicit_results: Vec::new(),
         }
     }
 
@@ -624,6 +636,19 @@ impl Response {
 
     pub(crate) fn set_num_columns(&mut self, num_columns: usize) {
         self.num_columns = num_columns;
+    }
+
+    /// Records the statements parsed out of an implicit resultset message.
+    pub(crate) fn set_implicit_results(
+        &mut self,
+        statements: Vec<CachedStatement>,
+    ) {
+        self.implicit_results = statements;
+    }
+
+    /// Takes the implicit resultset statements out of the response.
+    pub(crate) fn take_implicit_results(&mut self) -> Vec<CachedStatement> {
+        std::mem::take(&mut self.implicit_results)
     }
 
     /// Takes the rows from the response and returns them.

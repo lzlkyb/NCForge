@@ -30,23 +30,28 @@
 
 use std::sync::Arc;
 
+use crate::client::ClientRef;
+use crate::cursor::Cursor;
 use crate::metadata::Metadata;
 use crate::response::Response;
 use crate::row::{DbRow, Row};
-use crate::statement::CachedStatement;
+use crate::statement::{CachedStatement, Statement};
 
 /// Represents the result returned by the database when calling
 /// [Connection::execute()](`crate::Connection::execute()`),
 /// [Connection::execute_named()](`crate::Connection::execute_named()`).
 pub struct ExecResult {
+    client_ref: ClientRef,
     column_info: Arc<Vec<Metadata>>,
     out_bind_data: Option<DbRow>,
     returned_data: Option<Vec<DbRow>>,
+    implicit_results: Vec<CachedStatement>,
     rows_affected: u64,
 }
 
 impl ExecResult {
     pub(crate) fn new(
+        client_ref: &ClientRef,
         statement: &CachedStatement,
         resp: &mut Response,
     ) -> Self {
@@ -63,11 +68,28 @@ impl ExecResult {
             }
         }
         Self {
+            client_ref: client_ref.clone(),
             column_info: Arc::new(statement.out_metadata().to_vec()),
             out_bind_data,
             returned_data,
+            implicit_results: resp.take_implicit_results(),
             rows_affected: resp.get_rowcount(),
         }
+    }
+
+    /// Returns the implicit resultsets sent by the database while executing the
+    /// statement (TTC message 27), one [Cursor] per resultset.
+    ///
+    /// PL/SQL 用 `dbms_sql.return_result` 返回结果集时走这条路。每个游标都
+    /// 带着列元数据和自己的 cursor id，第一次 `next()` 时才真正向服务端取行。
+    /// 所有权每次调用都会转移，后续调用返回空 Vec。
+    pub fn implicit_resultsets(&mut self) -> Vec<Cursor> {
+        std::mem::take(&mut self.implicit_results)
+            .into_iter()
+            .map(|statement| {
+                Cursor::new(Statement::new(self.client_ref.clone(), statement))
+            })
+            .collect()
     }
 
     /// Returns the number of rows affected by the execution of the statement.
@@ -92,6 +114,21 @@ impl ExecResult {
             rows.into_iter().map(|r| Row::new(&self.column_info, r)).collect()
         } else {
             Vec::new()
+        }
+    }
+}
+
+/// 没被 `implicit_resultsets()` 取走的子游标也要还给服务端。
+///
+/// `CachedStatement` 本身没有 Drop，公开的 `Statement` 才负责归还；这里
+/// 持有的是裸 `CachedStatement`，不主动还就等于把服务端游标丢掉，
+/// 反复执行 `dbms_sql.return_result` 而不看结果集会攒到 `open_cursors` 上限。
+impl Drop for ExecResult {
+    fn drop(&mut self) {
+        for statement in self.implicit_results.drain(..) {
+            if let Ok(mut client) = self.client_ref.lock() {
+                client.return_statement(&statement);
+            }
         }
     }
 }

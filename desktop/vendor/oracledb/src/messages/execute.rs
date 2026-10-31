@@ -50,6 +50,11 @@ pub struct ExecuteMessage<'statement, 'params> {
     fetch_pos: u32,
     statement: &'statement mut CachedStatement,
     params: BindParameters<'params>,
+    /// 服务端随执行响应下发的隐式结果集（TTC 27 号消息）子语句。
+    ///
+    /// `dbms_sql.return_result` 这类 PL/SQL 会走这条路；每个子语句已经带
+    /// 列元数据和自己的 cursor id，可以像普通游标一样 fetch。
+    pub(crate) implicit_results: Vec<CachedStatement>,
 }
 
 impl ExecuteMessage<'_, '_> {
@@ -301,6 +306,7 @@ impl ExecuteMessage<'_, '_> {
             fetch_pos: 0,
             statement,
             params,
+            implicit_results: Vec::new(),
         }
     }
 }
@@ -315,6 +321,37 @@ impl Message for ExecuteMessage<'_, '_> {
         self.statement.populate_from_describe_info(client, resp)?;
         let num_metadata = self.statement.out_metadata().len();
         self.num_fetch_columns = num_metadata.try_into().unwrap();
+        Ok(())
+    }
+
+    /// Deserializes a TTC implicit resultset message.
+    ///
+    /// 布局（python-oracledb `base.pyx::_process_implicit_result`、
+    /// MuhDur/rust-oracledb `thin/fetch.rs` 与本实现三方一致）：
+    ///
+    /// ```text
+    /// ub4  结果集个数
+    /// 每个结果集:
+    ///   ub1  sql_len
+    ///   sql_len 字节      // ref cursor 的 SQL 文本，跳过
+    ///   describe 正文     // 从 ub4 max_row_size 开始
+    ///   ub2  cursor_id
+    /// ```
+    fn deserialize_implicit_result(
+        &mut self,
+        client: &Client,
+        resp: &mut Response,
+    ) -> Result<(), Error> {
+        let num_results = resp.read_ub4()?;
+        self.implicit_results.clear();
+        for _ in 0..num_results {
+            let statement = CachedStatement::from_implicit_result_response(
+                resp,
+                client,
+                self.statement.options(),
+            )?;
+            self.implicit_results.push(statement);
+        }
         Ok(())
     }
 

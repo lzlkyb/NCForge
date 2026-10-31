@@ -82,6 +82,20 @@ pub(crate) trait Message {
         Err(Error::not_implemented(feature))
     }
 
+    /// Deserializes a TTC implicit resultset message.
+    ///
+    /// Python-oracledb 的 `base.pyx::_process_implicit_result` 对**所有**消息
+    /// 都处理这一号；这里沿用上游「未实现就报错」的默认语义，只有
+    /// `ExecuteMessage` 真正解析，其它消息收到 27 会明确报错而不是静默丢弃。
+    fn deserialize_implicit_result(
+        &mut self,
+        _client: &Client,
+        _resp: &mut Response,
+    ) -> Result<(), Error> {
+        let feature = "deserializing implicit resultset".to_string();
+        Err(Error::not_implemented(feature))
+    }
+
     /// Deserializes a TTC I/O vector message.
     fn deserialize_io_vector(
         &mut self,
@@ -157,6 +171,9 @@ pub(crate) trait Message {
             }
             constants::TTC_MSG_TYPE_END_OF_RESPONSE => Ok(()),
             constants::TTC_MSG_TYPE_ERROR => resp.read_error_info(client),
+            constants::TTC_MSG_TYPE_IMPLICIT_RESULTSET => {
+                self.deserialize_implicit_result(client, resp)
+            }
             constants::TTC_MSG_TYPE_IO_VECTOR => {
                 self.deserialize_io_vector(client, resp)
             }

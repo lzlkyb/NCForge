@@ -124,6 +124,13 @@
 .dbx-lk:disabled { opacity: .5; }
 .dbx-rfoot input { width: 64px; height: 20px; padding: 0 4px; border: 1px solid hsl(var(--border)); border-radius: 4px; background: hsl(var(--background)); font-size: 11.5px; color: hsl(var(--foreground)); }
 
+/* 一个结果里的多个结果集（dbms_sql.return_result）：小标签 + 表格，整体还是纵向铺满 */
+.dbx-rset { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.dbx-settabs { display: flex; align-items: center; height: 26px; padding: 0 6px; gap: 2px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--secondary) / .45); flex-shrink: 0; overflow-x: auto; overflow-y: hidden; }
+.dbx-settab { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; font-size: 11.5px; color: hsl(var(--muted-foreground)); position: relative; white-space: nowrap; flex-shrink: 0; }
+.dbx-settab[data-on] { color: hsl(var(--foreground)); font-weight: 600; }
+.dbx-settab[data-on]::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: -1px; height: 2px; background: hsl(var(--primary)); }
+
 /* ── 结果表（手写虚拟滚动） ── */
 .dbx-grid { flex: 1; min-width: 0; overflow: auto; position: relative; font: 12px "Cascadia Mono", Consolas, monospace; outline: none; }
 .dbx-grid-inner { position: relative; }

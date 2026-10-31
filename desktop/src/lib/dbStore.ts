@@ -9,6 +9,7 @@ import {
   type DbConn,
   type EngineCaps,
   type PlanRow,
+  type ResultSet,
   type SchemaCacheData,
   type TableInfo,
   type TxInfo,
@@ -51,6 +52,8 @@ export interface ResultEntry {
   columns: ColumnMeta[];
   rows: Cell[][];
   hasMore: boolean;
+  /** 多个结果集（`dbms_sql.return_result`）。>1 时结果区给一排小标签。 */
+  sets?: ResultSet[];
   updateCount: number;
   ms: number;
   error?: string;
@@ -349,7 +352,11 @@ export function appendOutput(tabId: string, lines: OutputLine[]) {
 
 export function summaryOf(r: ResultEntry): string {
   if (r.kind === "error") return /ORA-\d{5}/.exec(r.error ?? "")?.[0] ?? "失败";
-  if (r.kind === "rows") return `${r.rows.length}${r.hasMore ? "+" : ""} 行`;
+  if (r.kind === "rows") {
+    // 多结果集时报个数（行数按第一个算会让用户以为其它结果集也是这么点）
+    if (r.sets && r.sets.length > 1) return `${r.sets.length} 个结果集`;
+    return `${r.rows.length}${r.hasMore ? "+" : ""} 行`;
+  }
   return r.updateCount >= 0 ? `更新 ${r.updateCount} 行` : "已执行";
 }
 
@@ -374,7 +381,7 @@ export async function execOne(tabId: string, sql: string, index: number): Promis
     const r = await dbApi.exec(connId, sql, tab.maxRows, tab.timeoutSec);
     setTx(connId, r.tx);
     entry = r.kind === "rows"
-      ? { ...base, kind: "rows", columns: r.columns, rows: r.rows, hasMore: r.hasMore, ms: r.ms }
+      ? { ...base, kind: "rows", columns: r.columns, rows: r.rows, hasMore: r.hasMore, ms: r.ms, sets: r.sets }
       : { ...base, kind: "update", updateCount: r.updateCount, ms: r.ms };
     if (r.output.length) appendOutput(tabId, r.output.map((text) => ({ at: Date.now(), text, tone: "dbms" as const })));
   } catch (e) {

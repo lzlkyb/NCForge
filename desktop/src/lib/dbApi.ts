@@ -86,12 +86,31 @@ export interface ColumnMeta {
   scale: number;
 }
 
+/**
+ * 一个结果集。只有 `dbms_sql.return_result`（PL/SQL 自己开游标返回）这类语句才有多个，
+ * 普通查询就是一个。
+ */
+export interface ResultSet {
+  columns: ColumnMeta[];
+  rows: Cell[][];
+  rowCount: number;
+  /**
+   * 取到「每次取 N 行」的上限还有剩余。
+   *
+   * 隐式结果集**不支持**「加载更多」：一条会话只留一个分页游标，多结果集时没法每个都留。
+   * 界面上这里只提示调大行数重跑，不要给「加载下 N 行」按钮。
+   */
+  hasMore: boolean;
+}
+
 export interface RowsResult {
   kind: "rows";
   columns: ColumnMeta[];
   rows: Cell[][];
   rowCount: number;
   hasMore: boolean;
+  /** `dbms_sql.return_result` 带回的全部结果集（顺序与 `return_result` 一致）。 */
+  sets?: ResultSet[];
   ms: number;
   output: string[];
   tx: TxInfo;

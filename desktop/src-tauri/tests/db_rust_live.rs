@@ -274,7 +274,123 @@ fn 纯rust引擎全命令真库核对() {
     println!("[断开后执行] {} ", err.message);
 }
 
-/// 语句中途取消：`dbms_lock.sleep` 跑 30 秒，1 秒后点「停止」必须很快回来。
+/// 隐式结果集（`dbms_sql.return_result`）在**引擎层**的样子：每个结果集摊进 `sets`，
+/// 顶层仍留第一个结果集给旧逻辑。
+///
+/// 这条是「块 c'」的门禁：驱动能取行（`db_refcursor_probe` 的 R8-R11）不等于界面上看得到，
+/// 命令层到 JSON 这一段是另一个容易漏接的地方。
+#[test]
+#[ignore = "要连真实数据库"]
+fn 纯rust引擎能取隐式结果集() {
+    let e = RustEngine::new();
+    call(&e, "connect", &[&url(), &user(), &pass(), "false"]);
+
+    // 1 个结果集：sets[0] 与顶层 columns / rows 完全一致
+    let r = call(
+        &e,
+        "exec",
+        &[
+            "declare rc sys_refcursor; \
+             begin open rc for select 111 as a, 'abc' as b from dual; \
+             dbms_sql.return_result(rc); end;",
+            "500",
+            "30",
+        ],
+    );
+    println!("[隐式结果集 1 个] {r}");
+    assert_eq!(r["kind"], "rows");
+    let sets = r["sets"].as_array().expect("要有 sets 字段");
+    assert_eq!(sets.len(), 1);
+    assert_eq!(sets[0]["columns"].as_array().unwrap().len(), 2);
+    assert_eq!(sets[0]["rows"][0][0], "111", "NUMBER 一律给字符串");
+    assert_eq!(sets[0]["rows"][0][1], "abc");
+    assert_eq!(sets[0]["rowCount"], 1);
+    assert_eq!(r["rows"], sets[0]["rows"], "顶层 rows 要给第一个结果集");
+    assert_eq!(r["columns"], sets[0]["columns"]);
+    assert_eq!(r["hasMore"], false, "隐式结果集不留游标");
+
+    // 2 个结果集：顺序与 return_result 调用顺序一致
+    let r = call(
+        &e,
+        "exec",
+        &[
+            "declare rc1 sys_refcursor; rc2 sys_refcursor; \
+             begin open rc1 for select 1 as n from dual; \
+             open rc2 for select 'x' as s from dual; \
+             dbms_sql.return_result(rc1); dbms_sql.return_result(rc2); end;",
+            "500",
+            "30",
+        ],
+    );
+    println!("[隐式结果集 2 个] {r}");
+    let sets = r["sets"].as_array().expect("要有 sets 字段");
+    assert_eq!(sets.len(), 2);
+    assert_eq!(sets[0]["columns"][0]["name"], "N");
+    assert_eq!(sets[0]["rows"][0][0], "1");
+    assert_eq!(sets[1]["columns"][0]["name"], "S");
+    assert_eq!(sets[1]["rows"][0][0], "x");
+
+    // 0 行结果集：列名仍在（客户端要靠它画表头）
+    let r = call(
+        &e,
+        "exec",
+        &[
+            "declare rc sys_refcursor; \
+             begin open rc for select dummy from dual where 1 = 0; \
+             dbms_sql.return_result(rc); end;",
+            "500",
+            "30",
+        ],
+    );
+    println!("[隐式结果集 0 行] {r}");
+    let sets = r["sets"].as_array().expect("空结果集也要给 sets");
+    assert_eq!(sets.len(), 1);
+    assert_eq!(sets[0]["columns"].as_array().unwrap().len(), 1);
+    assert_eq!(sets[0]["rows"].as_array().unwrap().len(), 0);
+
+    // 普通 PL/SQL 块不该冒出 sets（否则前端会以为有结果集）
+    let r = call(&e, "exec", &["begin null; end;", "500", "30"]);
+    println!("[普通块] {r}");
+    assert_eq!(r["kind"], "update");
+    assert!(r.get("sets").is_none(), "没有 return_result 就不该有 sets");
+
+    // 行数上限：每个结果集各取 max_rows 行，取满就标 hasMore
+    let r = call(
+        &e,
+        "exec",
+        &[
+            "declare rc sys_refcursor; \
+             begin open rc for select rownum as n from dual connect by level <= 5; \
+             dbms_sql.return_result(rc); end;",
+            "3",
+            "30",
+        ],
+    );
+    println!("[隐式结果集 截断] {r}");
+    let sets = r["sets"].as_array().unwrap();
+    assert_eq!(sets[0]["rows"].as_array().unwrap().len(), 3);
+    assert_eq!(sets[0]["hasMore"], true, "取满要标 hasMore");
+
+    // 连跑多次不留游标（引擎层也验一次：`call` 出错会直接 panic，
+    // 撞上 open_cursors 上限时看到的就是 ORA-01000）
+    for _ in 0..200 {
+        call(
+            &e,
+            "exec",
+            &[
+                "declare rc sys_refcursor; \
+                 begin open rc for select 1 from dual; \
+                 dbms_sql.return_result(rc); end;",
+                "500",
+                "30",
+            ],
+        );
+    }
+    println!("[200 次隐式结果集] 没有 ORA-01000");
+
+    call(&e, "disconnect", &[]);
+}
+
 ///
 /// 这条是 vendored 驱动补丁（`vendor/oracledb` 的 `BreakHandle`）的唯一端到端验证：
 /// 单测只能证明「原子位被置了」，能不能真的把服务器那条语句打断只有真库能回答。

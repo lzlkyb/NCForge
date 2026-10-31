@@ -56,7 +56,7 @@ impl EngineKind {
 pub struct Caps {
     /// 语句执行中能取消（JDBC 的 `Statement.cancel()`）。
     pub cancel: bool,
-    /// 能从 PL/SQL 取 REF CURSOR。
+    /// 能从 PL/SQL 取 REF CURSOR（**完整**：`open :1 for` 的 OUT 绑定 + `dbms_sql.return_result` 两种形态）。
     pub refcursor: bool,
     /// 能解 NC `prop.xml` 里加密的口令（要用 NC 自带的 `PropXMLReader`，只在 JVM 里可用）。
     pub prop_decrypt: bool,
@@ -76,7 +76,10 @@ impl Caps {
     /// 纯 Rust 驱动的能力（2026-10-30 按 `db_rust.rs` + vendored 驱动的实际实现校正）：
     /// - `cancel`：**有**。上游 issue #24 没有 break API，我们在 `vendor/oracledb` 里补了
     ///   `BreakHandle`（切片读 + INTERRUPT 标记），见该目录 `FORK.md`。
-    /// - `refcursor`：没有。实测 `PLS-00707`。
+    /// - `refcursor`：**只有一半**，所以仍是 `false`。`dbms_sql.return_result` 与嵌套游标列
+    ///   已经能出多结果集（`db_rust.rs::implicit_sets`，vendor 补丁四），但 JDBC 风格的
+    ///   `open :1 for …` 要 OUT 绑定（`BindParameters` 只有输入值），仍报 `PLS-00707`。
+    ///   两种形态都通之后再翻成 `true`——写 `true` 就代表整条路能跑。
     /// - `prop_decrypt`：仍然没有 —— 解 prop.xml 要用 NC 的 Java 类。但连接可以工作：
     ///   首次连接时由 JVM 桥解一次口令、DPAPI 存起来（`db_cmds::prop_password_ready`）。
     /// - `multi_session`：有。每条连接一个 `Connection`，内存本来就与连接数同阶。
@@ -245,7 +248,11 @@ mod tests {
             c.cancel,
             "取消靠 vendor/oracledb 里的 BreakHandle 补丁（issue #24）"
         );
-        assert!(!c.refcursor, "REF CURSOR 实测 PLS-00707");
+        // 只通了 `dbms_sql.return_result`，`open :1 for` 的 OUT 绑定仍不支持 ⇒ 整体不算有
+        assert!(
+            !c.refcursor,
+            "REF CURSOR 只有一半：隐式结果集能出多结果集，OUT 绑定仍报 PLS-00707"
+        );
         assert!(
             !c.prop_decrypt,
             "解 prop.xml 要用 NC 的 Java 类，Rust 侧调不到"

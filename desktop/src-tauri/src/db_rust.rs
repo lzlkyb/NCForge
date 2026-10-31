@@ -10,13 +10,14 @@
 //! |---|---|---|
 //! | 语句执行中取消 | `Statement.cancel()` | **有**（`vendor/oracledb` 里的 `BreakHandle` 补丁） |
 //! | NC `prop.xml` 加密口令 | `PropXMLReader` 现解 | 由 JVM 桥解一次、DPAPI 存起来（见 `db_cmds`） |
-//! | REF CURSOR | 支持 | 实测 `PLS-00707`，不走这条路 |
+//! | REF CURSOR | 支持 | `dbms_sql.return_result` / 嵌套游标列**支持**（多结果集见 [`implicit_sets`]）；`open :1 for` 这类 OUT 绑定仍不支持 |
 //! | 内存 | 底价 ~60MB + 每会话几 MB | 纯驱动，每连接几 MB |
 //!
 //! 取消的实现：`RustEngine::cancel()` 只置一个原子位（**不抢会话锁**，否则排队排到查询后面
 //! 就白取消了），驱动的传输层把阻塞读切成 100ms 的片，读到置位就返回「超时」，由持锁线程
-//! 发 INTERRUPT 标记再 reset。真库实测：30 秒的 `dbms_lock.sleep` 被打断，约 2 秒返回，
-//! 会话随后仍可正常查询。
+//! 发 INTERRUPT 标记再 reset。真库实测：计算类长查询约 180ms 生效；`dbms_lock.sleep` 这类
+//! 等待受 19c 服务端 3 秒块边界支配（30 秒的 sleep 约 3 秒返回）——不是客户端的问题，
+//! 官方 python thin 驱动同样如此。会话随后仍可正常查询。
 //!
 //! 另外仍给连接设了 `call_timeout` 兜底：万一中断没能打断（比如语句还在服务端排队），
 //! 界面也不会无限转圈。
@@ -38,7 +39,9 @@ use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use oracledb::{BreakHandle, Connection, Cursor, Error, ErrorKind, Lob, Metadata, Row, ToDbValue};
+use oracledb::{
+    BreakHandle, Connection, Cursor, Error, ErrorKind, ExecResult, Lob, Metadata, Row, ToDbValue,
+};
 use serde_json::{json, Map, Value};
 
 use crate::java_bridge::BridgeError;
@@ -484,10 +487,26 @@ impl Session {
             }
             body.insert("rowCount".into(), json!(body_len(&body)));
         } else {
-            let res = conn.execute(sql, &[]).map_err(drv_err)?;
+            let mut res = conn.execute(sql, &[]).map_err(drv_err)?;
             let n = res.rows_affected();
-            body.insert("kind".into(), json!("update"));
-            body.insert("updateCount".into(), json!(n));
+            // 隐式结果集（`dbms_sql.return_result`）：PL/SQL 块自己开的 ref cursor，
+            // 服务端按 TTC 27 号消息下发，驱动侧已解析（vendor 补丁四）。
+            let sets = implicit_sets(&mut res, max_rows)?;
+            if sets.is_empty() {
+                body.insert("kind".into(), json!("update"));
+                body.insert("updateCount".into(), json!(n));
+            } else {
+                // 顶层字段仍给第一个结果集：旧的前端 / 导出 / 排序逻辑不用改。
+                let first = &sets[0];
+                body.insert("kind".into(), json!("rows"));
+                body.insert("columns".into(), first["columns"].clone());
+                body.insert("rows".into(), first["rows"].clone());
+                // 隐式结果集不留游标（见 `implicit_sets` 的注释），顶层就永远没有「更多」；
+                // 每个结果集自己的 `hasMore` 才是真截断标记，前端据此提示调大行数。
+                body.insert("hasMore".into(), json!(false));
+                body.insert("rowCount".into(), json!(body_len(&body)));
+                body.insert("sets".into(), Value::Array(sets));
+            }
             self.track_tx(head, n as i64);
             if self.auto_commit {
                 conn.commit().map_err(drv_err)?;
@@ -885,6 +904,34 @@ impl Session {
 /// 从游标取最多 `max_rows` 行。返回（行, 是否可能还有）。
 ///
 /// 取满就停、不预读下一行：Oracle 游标不能回退，预读会把一行吞掉（JVM 桥踩过这个坑）。
+/// 把 `dbms_sql.return_result` 交回来的每个结果集取成 JSON（顺序与 `return_result` 一致）。
+///
+/// **不接「加载更多」**：会话里只留一条分页游标（`Session.cursor`），多结果集时没法给每个
+/// 都留一条，而按「最后点过的那个」留会让用户以为另一条也能接着取。所以每个结果集一次取
+/// `max_rows` 行，取满就给 `hasMore: true`（前端提示调大「每次取」再执行），然后让游标
+/// 随 `Cursor` 一起 drop —— `Statement::new` 的 `return_on_drop` 会把它还给客户端，
+/// 否则会话游标会一路漏到 `open_cursors` 上限（探针 R11 验过）。
+fn implicit_sets(res: &mut ExecResult, max_rows: usize) -> Result<Vec<Value>, BridgeError> {
+    let mut sets = Vec::new();
+    for mut cur in res.implicit_resultsets() {
+        let columns: Vec<Value> = cur.columns().iter().map(column_json).collect();
+        let types: Vec<String> = cur
+            .columns()
+            .iter()
+            .map(|m| base_type(&type_label(m)))
+            .collect();
+        let (rows, has_more) = page(&mut cur, &types, max_rows)?;
+        let count = rows.len();
+        sets.push(json!({
+            "columns": columns,
+            "rows": rows,
+            "rowCount": count,
+            "hasMore": has_more,
+        }));
+    }
+    Ok(sets)
+}
+
 fn page(
     cur: &mut Cursor,
     types: &[String],

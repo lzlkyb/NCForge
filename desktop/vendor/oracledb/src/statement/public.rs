@@ -128,7 +128,7 @@ impl Statement {
         let params: BindParameters = binding.as_slice().into();
         self.statement.check_binds(&params)?;
         let mut response = self.get_execute_response(params, false)?;
-        Ok(ExecResult::new(&self.statement, &mut response))
+        Ok(ExecResult::new(&self.client_ref, &self.statement, &mut response))
     }
 
     /// Executes a SQL statement against the database multiple times in one
@@ -155,7 +155,7 @@ impl Statement {
         let params: BindParameters = binding.as_slice().into();
         self.statement.check_binds(&params)?;
         let mut response = self.get_execute_response(params, false)?;
-        Ok(ExecResult::new(&self.statement, &mut response))
+        Ok(ExecResult::new(&self.client_ref, &self.statement, &mut response))
     }
 
     /// Returns whether or not the statement is a DDL statement.

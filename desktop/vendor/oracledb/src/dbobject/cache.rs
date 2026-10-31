@@ -405,7 +405,8 @@ fn lookup_type(
         response =
             client.execute(&mut statement, client_ref, params, false)?;
         let mut values =
-            ExecResult::new(&statement, &mut response).out_bind_data();
+            ExecResult::new(client_ref, &statement, &mut response)
+                .out_bind_data();
         cursor_statement = values
             .take::<Option<Cursor>>("attrs_rc")?
             .map(Cursor::into_cached_statement);

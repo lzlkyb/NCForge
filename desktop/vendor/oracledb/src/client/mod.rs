@@ -796,6 +796,9 @@ impl Client {
             let mut message =
                 ExecuteMessage::new(statement, params, parse_only);
             let mut response = self.process_message(&mut message)?;
+            response.set_implicit_results(std::mem::take(
+                &mut message.implicit_results,
+            ));
             response.complete_values(self, client_ref, statement)?;
             if statement.requires_define() {
                 statement.clear_requires_define();

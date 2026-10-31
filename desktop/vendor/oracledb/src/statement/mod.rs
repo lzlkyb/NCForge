@@ -276,6 +276,31 @@ impl CachedStatement {
         self.cursor_id
     }
 
+    /// Parses one resultset out of an implicit resultset (TTC message 27).
+    ///
+    /// 与 `from_cursor_response`（**嵌套游标列**）的唯一区别在长度字节：
+    /// 嵌套游标列是 `ub1（固定值，直接丢弃）` 后紧接 describe 正文；
+    /// 隐式结果集是 `ub1 长度 + N 字节`（ref cursor 的 SQL 文本）后才是 describe。
+    /// 少跳这 N 字节会把 describe 起点错位，cursor id 也会跟着读错。
+    ///
+    /// `is_nested` 传 `false`：这些子游标是真实游标，用完必须能被正常关闭
+    /// （python-oracledb 同样不给它们置 `_is_nested`）。取行结束时的
+    /// ORA-01403 已由 `check_for_statement_error` 提前返回，不会误关。
+    pub(crate) fn from_implicit_result_response(
+        resp: &mut Response,
+        client: &Client,
+        options: &StatementOptions,
+    ) -> Result<Self, Error> {
+        let mut statement = Self::create_empty(String::new(), false, options);
+        let num_bytes = resp.read_u8()?;
+        if num_bytes > 0 {
+            resp.advance(num_bytes.into())?;
+        }
+        statement.populate_from_describe_info(client, resp)?;
+        statement.set_cursor_id(resp.read_ub2()?);
+        Ok(statement)
+    }
+
     /// Deserializes a nested cursor statement from a database response.
     pub(crate) fn from_cursor_response(
         resp: &mut Response,
