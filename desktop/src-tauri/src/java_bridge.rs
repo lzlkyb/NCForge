@@ -230,12 +230,7 @@ impl Bridge {
     }
 
     /// 只发不等（取消、断开这类命令用）。
-    pub fn send_in_session(
-        &self,
-        sess: &str,
-        cmd: &str,
-        args: &[&str],
-    ) -> Result<(), BridgeError> {
+    pub fn send_in_session(&self, sess: &str, cmd: &str, args: &[&str]) -> Result<(), BridgeError> {
         if !self.alive() {
             return Err(BridgeError::new("spawn", "桥进程未运行"));
         }

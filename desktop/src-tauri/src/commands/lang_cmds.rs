@@ -77,8 +77,14 @@ fn usable_jdtls(dir: &Path) -> Result<(), String> {
         &|n| n.starts_with("org.eclipse.equinox.launcher_") && n.ends_with(".jar"),
         "equinox 启动 jar",
     )?;
-    missing(&|n| n.starts_with("org.eclipse.jdt.ls.core_"), "jdt.ls 核心 bundle")?;
-    missing(&|n| n.starts_with("org.eclipse.osgi_"), "OSGi framework bundle")?;
+    missing(
+        &|n| n.starts_with("org.eclipse.jdt.ls.core_"),
+        "jdt.ls 核心 bundle",
+    )?;
+    missing(
+        &|n| n.starts_with("org.eclipse.osgi_"),
+        "OSGi framework bundle",
+    )?;
     Ok(())
 }
 
@@ -676,7 +682,11 @@ mod tests {
         ] {
             fs::write(plugins.join(n), b"").unwrap();
         }
-        let cfg = dir.join(if cfg!(windows) { "config_win" } else { "config_linux" });
+        let cfg = dir.join(if cfg!(windows) {
+            "config_win"
+        } else {
+            "config_linux"
+        });
         fs::create_dir_all(&cfg).unwrap();
         fs::write(cfg.join("config.ini"), b"osgi.bundles=x").unwrap();
     }
@@ -699,23 +709,38 @@ mod tests {
         assert!(err.contains("plugins"), "空目录要指出缺 plugins：{err}");
 
         fake_jdtls(&d);
-        fs::remove_file(d.join("plugins").join("org.eclipse.equinox.launcher_1.5.700.v20200207-2156.jar"))
-            .unwrap();
+        fs::remove_file(
+            d.join("plugins")
+                .join("org.eclipse.equinox.launcher_1.5.700.v20200207-2156.jar"),
+        )
+        .unwrap();
         let err = usable_jdtls(&d).unwrap_err();
         assert!(err.contains("equinox 启动 jar"), "{err}");
 
         fake_jdtls(&d);
-        fs::remove_file(d.join("plugins").join("org.eclipse.jdt.ls.core_0.57.0.202006172108.jar")).unwrap();
+        fs::remove_file(
+            d.join("plugins")
+                .join("org.eclipse.jdt.ls.core_0.57.0.202006172108.jar"),
+        )
+        .unwrap();
         let err = usable_jdtls(&d).unwrap_err();
         assert!(err.contains("jdt.ls 核心"), "{err}");
 
         fake_jdtls(&d);
-        fs::remove_file(d.join("plugins").join("org.eclipse.osgi_3.15.300.v20200520-1959.jar")).unwrap();
+        fs::remove_file(
+            d.join("plugins")
+                .join("org.eclipse.osgi_3.15.300.v20200520-1959.jar"),
+        )
+        .unwrap();
         let err = usable_jdtls(&d).unwrap_err();
         assert!(err.contains("OSGi framework"), "{err}");
 
         fake_jdtls(&d);
-        let cfg = d.join(if cfg!(windows) { "config_win" } else { "config_linux" });
+        let cfg = d.join(if cfg!(windows) {
+            "config_win"
+        } else {
+            "config_linux"
+        });
         fs::remove_file(cfg.join("config.ini")).unwrap();
         let err = usable_jdtls(&d).unwrap_err();
         assert!(err.contains("config.ini"), "{err}");
@@ -728,8 +753,11 @@ mod tests {
     fn 片段_jar_不算启动_jar() {
         let d = temp("fragment");
         fake_jdtls(&d);
-        fs::remove_file(d.join("plugins").join("org.eclipse.equinox.launcher_1.5.700.v20200207-2156.jar"))
-            .unwrap();
+        fs::remove_file(
+            d.join("plugins")
+                .join("org.eclipse.equinox.launcher_1.5.700.v20200207-2156.jar"),
+        )
+        .unwrap();
         assert!(usable_jdtls(&d).is_err(), "只剩 win32 片段时必须拒绝");
         let _ = fs::remove_dir_all(&d);
     }
@@ -755,11 +783,17 @@ mod tests {
     fn 没有现场时_hint_为空() {
         let d = temp("hint");
         assert_eq!(crash_hint(&d.join("a.log"), &d), "");
-        fs::write(d.join("1793338302103.log"), b"!SESSION x\njava.net.UnknownHostException: configuration\n")
-            .unwrap();
+        fs::write(
+            d.join("1793338302103.log"),
+            b"!SESSION x\njava.net.UnknownHostException: configuration\n",
+        )
+        .unwrap();
         let hint = crash_hint(&d.join("a.log"), &d);
         assert!(hint.contains("UnknownHostException"), "{hint}");
-        assert!(hint.contains("1793338302103.log"), "要指出是哪份日志：{hint}");
+        assert!(
+            hint.contains("1793338302103.log"),
+            "要指出是哪份日志：{hint}"
+        );
         let _ = fs::remove_dir_all(&d);
     }
 }

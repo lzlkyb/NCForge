@@ -384,9 +384,10 @@ impl LspClient {
         log: Option<&Path>,
     ) -> Result<Self, String> {
         let stderr = match log {
-            Some(p) => Stdio::from(std::fs::File::create(p).map_err(|e| {
-                format!("无法创建语言服务的错误日志（{}）: {e}", p.display())
-            })?),
+            Some(p) => Stdio::from(
+                std::fs::File::create(p)
+                    .map_err(|e| format!("无法创建语言服务的错误日志（{}）: {e}", p.display()))?,
+            ),
             None => Stdio::null(),
         };
         cmd.stdin(Stdio::piped())
