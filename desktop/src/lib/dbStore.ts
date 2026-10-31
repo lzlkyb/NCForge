@@ -94,7 +94,7 @@ export interface SqlTab {
   tx?: TxInfo;
 }
 
-export type TableSub = "data" | "struct" | "idx" | "ddl";
+export type TableSub = "data" | "struct" | "idx" | "ddl" | "source";
 
 export interface TableTab {
   kind: "table";
@@ -102,6 +102,14 @@ export interface TableTab {
   connId: string;
   table: string;
   sub: TableSub;
+  /**
+   * 非表对象（包/过程/函数/序列/同义词/触发器）的类型，来自 `user_objects.object_type`。
+   *
+   * 有值 ⇒ 这是「对象页」而不是「表页」：只显示源码与 DDL，不去读字段/索引/数据。
+   * 复用 `TableTab` 而不新开一种 tab，是因为关闭、切换、持久化、退出确认这四条链路
+   * 都按 `kind` 分派——多一种 kind 就要在四处各加一支，漏一处就是「关不掉的标签」。
+   */
+  otype?: string;
 }
 
 export type DbTabItem = SqlTab | TableTab;
@@ -327,13 +335,20 @@ export function openSqlTab(connId: string | null, sql = ""): string {
   return tab.id;
 }
 
-export function openTableTab(connId: string, table: string, sub: TableSub = "data"): string {
-  const hit = state.tabs.find((t) => t.kind === "table" && t.connId === connId && t.table.toUpperCase() === table.toUpperCase());
+export function openTableTab(connId: string, table: string, sub: TableSub = "data", otype?: string): string {
+  // 同名不同类要分开：本来「包 PKG_X」和「表 PKG_X」可能共存，认 tab 时不能只看名字
+  const hit = state.tabs.find(
+    (t) =>
+      t.kind === "table" &&
+      t.connId === connId &&
+      t.table.toUpperCase() === table.toUpperCase() &&
+      (t.otype ?? "") === (otype ?? ""),
+  );
   if (hit) {
     set({ active: hit.id, tabs: state.tabs.map((t) => (t.id === hit.id ? { ...t, sub } as TableTab : t)) });
     return hit.id;
   }
-  const tab: TableTab = { kind: "table", id: newId("t"), connId, table: table.toUpperCase(), sub };
+  const tab: TableTab = { kind: "table", id: newId("t"), connId, table: table.toUpperCase(), sub, ...(otype ? { otype } : {}) };
   set({ tabs: [...state.tabs, tab], active: tab.id });
   return tab.id;
 }

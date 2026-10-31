@@ -243,6 +243,21 @@ export interface TableInfo {
   kind: "TABLE" | "VIEW";
 }
 
+/** 非表对象（包 / 过程 / 序列 / 同义词 / 触发器…）。`type` 就是 `user_objects.object_type`。 */
+export interface DbObject {
+  name: string;
+  type: string;
+  status: string;
+  created: string | null;
+}
+
+/** 源码的一行。`type` 用来区分 `PACKAGE` 与 `PACKAGE BODY`（同名对象各有一段）。 */
+export interface SourceLine {
+  type: string;
+  line: number;
+  text: string;
+}
+
 export interface ColumnInfo {
   name: string;
   type: string;
@@ -398,6 +413,24 @@ export const dbApi = {
   indexes: (id: string, table: string) =>
     invoke<{ indexes: IndexInfo[] }>("db_meta", { id, kind: "indexes", arg: table }),
   ddl: (id: string, table: string) => invoke<{ ddl: string }>("db_meta", { id, kind: "ddl", arg: table }),
+  /** 非表对象的 DDL。`otype` 走后端白名单（拼进 `get_ddl` 的字面量），认不出就按表处理。 */
+  objectDdl: (id: string, name: string, otype: string) =>
+    invoke<{ ddl: string; type?: string }>("db_meta", { id, kind: "ddl", arg: name, arg2: otype }),
+  /**
+   * 非表对象清单（包 / 包体 / 过程 / 函数 / 序列 / 同义词 / 触发器 / 类型）。
+   * 来源是 `user_objects`：只列当前账号能改的东西。
+   */
+  objects: (id: string) => invoke<{ objects: DbObject[]; count: number }>("db_meta", { id, kind: "objects" }),
+  /**
+   * 库内源码（`user_source`）。序列、同义词这类没有源码的对象 `lines` 为空。
+   * 只读：不编辑、不编译、不回写。
+   */
+  source: (id: string, name: string) =>
+    invoke<{ name: string; lines: SourceLine[]; text: string; count: number }>("db_meta", {
+      id,
+      kind: "source",
+      arg: name,
+    }),
   explain: (id: string, sql: string) => invoke<{ plan: PlanRow[] }>("db_meta", { id, kind: "explain", arg: sql }),
   /**
    * 会话与锁（只读，不生成也不执行 kill）。

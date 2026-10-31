@@ -246,6 +246,17 @@
 .dbx-where .kw { font: 600 12px "Cascadia Mono", Consolas, monospace; color: hsl(var(--primary)); flex-shrink: 0; }
 .dbx-where .dbx-inp { height: 26px; }
 .dbx-ddl { flex: 1; overflow: auto; margin: 0; padding: 10px 14px; font: 12.5px/20px "Cascadia Mono", Consolas, monospace; white-space: pre; }
+/* 库内源码：包规范与包体各一段，段头用粘性条区分，滚到一半也知道在看哪一段 */
+.dbx-src { flex: 1; overflow: auto; display: flex; flex-direction: column; }
+.dbx-srchead {
+  position: sticky; top: 0; z-index: 1; padding: 3px 14px;
+  font-size: 11px; font-weight: 600; letter-spacing: .04em;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--secondary) / .85);
+  border-bottom: 1px solid hsl(var(--border));
+  backdrop-filter: blur(2px);
+}
+.dbx-src .dbx-ddl { overflow: visible; flex: 0 0 auto; }
 .dbx-meta { flex: 1; overflow: auto; }
 .dbx-meta table { border-collapse: collapse; width: 100%; font-size: 12px; }
 .dbx-meta th, .dbx-meta td { padding: 4px 10px; text-align: left; border-bottom: 1px solid hsl(var(--border)); white-space: nowrap; }

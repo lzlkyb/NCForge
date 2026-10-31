@@ -51,6 +51,23 @@ const CLOB_MAX: usize = 1024 * 1024;
 /// DBMS_OUTPUT 一次最多取这么多行。
 const OUTPUT_MAX: usize = 5000;
 
+/// 对象树里的非表对象类型（`user_objects.object_type` 的取值）。
+///
+/// 这份白名单有两个用途：①`objects()` 的 `in (...)` 列表；②`ddl()` 拼
+/// `dbms_metadata.get_ddl('<type>', :1)` 时的**注入防线**——类型名是 SQL 字面量、
+/// 绑不进去，只能拼，所以必须只认这几个。改这里要同步 Java 桥的同名常量。
+const OBJECT_TYPES: &[&str] = &[
+    "PACKAGE",
+    "PACKAGE BODY",
+    "PROCEDURE",
+    "FUNCTION",
+    "SEQUENCE",
+    "SYNONYM",
+    "TRIGGER",
+    "TYPE",
+    "TYPE BODY",
+];
+
 fn sql_err(m: impl Into<String>) -> BridgeError {
     BridgeError::new("sql", m)
 }
@@ -293,7 +310,12 @@ impl Session {
             "ncNames" => self.nc_names(),
             "columns" => self.columns(a.first().copied().unwrap_or("")),
             "indexes" => self.indexes(a.first().copied().unwrap_or("")),
-            "ddl" => self.ddl(a.first().copied().unwrap_or("")),
+            "ddl" => self.ddl(
+                a.first().copied().unwrap_or(""),
+                a.get(1).copied(),
+            ),
+            "objects" => self.objects(),
+            "source" => self.source(a.first().copied().unwrap_or("")),
             "explain" => self.explain(a.first().copied().unwrap_or("")),
             "sessions" => self.sessions(),
             "schema" => self.schema(int_arg(a, 0, 0), int_arg(a, 1, 2000)),
@@ -797,7 +819,12 @@ impl Session {
         Ok(json!({ "indexes": list }))
     }
 
-    fn ddl(&self, table: &str) -> Result<Value, BridgeError> {
+    /// DDL。`otype` 为空 = 按表处理（TABLE 失败后回落 VIEW）；非空 = 该类型对象（包/过程/
+    /// 序列/同义词/触发器等，见 `OBJECT_TYPES`）。
+    ///
+    /// `otype` 会被拼进 SQL（`dbms_metadata.get_ddl` 的类型是字面量，绑不进去），所以
+    /// **必须过白名单**：这里只认 `OBJECT_TYPES` 里那几个，其余当表处理。
+    fn ddl(&self, table: &str, otype: Option<&str>) -> Result<Value, BridgeError> {
         let conn = self.conn_ref()?;
         let _ = conn.execute(
             "begin \
@@ -808,6 +835,12 @@ impl Session {
             &[],
         );
         let t = table.to_uppercase();
+        if let Some(ty) = object_type_of(otype) {
+            // 对象 DDL 没有「依赖索引」那一段；拿到什么给什么，失败就把驱动错误原样抛上去
+            let sql = format!("select dbms_metadata.get_ddl('{ty}', :1) from dual");
+            let text = metadata_ddl(conn, &sql, &t).map_err(sql_err)?;
+            return Ok(json!({ "ddl": text.trim(), "type": ty }));
+        }
         let main = metadata_ddl(
             conn,
             "select dbms_metadata.get_ddl('TABLE', :1) from dual",
@@ -829,6 +862,65 @@ impl Session {
         .unwrap_or_default();
         let text = format!("{}\n\n{}", main.trim(), idx.trim());
         Ok(json!({ "ddl": text.trim() }))
+    }
+
+    /// 非表对象：包 / 包体 / 过程 / 函数 / 序列 / 同义词 / 触发器 / 类型。
+    ///
+    /// 为什么用 `user_objects` 而不是 `all_objects`：二开账号通常只有自己 schema 的权限，
+    /// `all_objects` 会扫到别人的几千张表、还要额外授权，而对象树只关心「我能改的东西」。
+    /// `generated = 'N'` 排掉系统生成的（回收站对象、LOB 索引之类）。
+    fn objects(&self) -> Result<Value, BridgeError> {
+        let conn = self.conn_ref()?;
+        let sql = "select object_name, object_type, status, to_char(created, 'YYYY-MM-DD') \
+                   from user_objects \
+                   where object_type in ('PACKAGE','PACKAGE BODY','PROCEDURE','FUNCTION', \
+                        'SEQUENCE','SYNONYM','TRIGGER','TYPE','TYPE BODY') \
+                     and generated = 'N' \
+                   order by object_type, object_name";
+        let cur = conn.query(sql, &[]).map_err(drv_err)?;
+        let mut list = Vec::new();
+        for row in cur {
+            let row = row.map_err(drv_err)?;
+            list.push(json!({
+                "name": row.get::<Option<String>>(0).ok().flatten().unwrap_or_default(),
+                "type": row.get::<Option<String>>(1).ok().flatten().unwrap_or_default(),
+                "status": row.get::<Option<String>>(2).ok().flatten().unwrap_or_default(),
+                "created": row.get::<Option<String>>(3).ok().flatten(),
+            }));
+        }
+        let n = list.len();
+        Ok(json!({ "objects": list, "count": n }))
+    }
+
+    /// 库内源码（`user_source`）。序列、同义词这类没有源码的对象返回空 `lines`。
+    ///
+    /// `order by type, line`：字典序里 `PACKAGE` 排在 `PACKAGE BODY` 之前，
+    /// 正好是「规范在前、实现在后」的阅读顺序（`TYPE` / `TYPE BODY` 同理）。
+    fn source(&self, name: &str) -> Result<Value, BridgeError> {
+        let conn = self.conn_ref()?;
+        let n = name.to_uppercase();
+        let sql = "select type, line, text from user_source where name = :1 order by type, line";
+        let cur = conn.query(sql, &[&n as &dyn ToDbValue]).map_err(drv_err)?;
+        let mut lines = Vec::new();
+        let mut text = String::new();
+        for row in cur {
+            let row = row.map_err(drv_err)?;
+            let ty: String = row
+                .get::<Option<String>>(0)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let line: i64 = row.get::<Option<i64>>(1).ok().flatten().unwrap_or(0);
+            let t: String = row
+                .get::<Option<String>>(2)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            text.push_str(&t);
+            lines.push(json!({ "type": ty, "line": line, "text": t }));
+        }
+        let count = lines.len();
+        Ok(json!({ "name": n, "lines": lines, "text": text, "count": count }))
     }
 
     /// 执行计划：`EXPLAIN PLAN` 只解析不执行。PLAN_TABLE 在 11g 是会话级临时表，
@@ -1431,6 +1523,17 @@ fn is_plsql(head: &str) -> bool {
     starts_any(head, &["begin", "declare", "call", "exec", "execute"])
 }
 
+/// 校验并规范化对象类型，认不出来一律 `None`（= 按表处理）。
+///
+/// 为什么单独抽出来：`dbms_metadata.get_ddl` 的类型名是 SQL **字面量**、绑不进去，
+/// 只能拼进语句。任何拼进 SQL 的外部字符串都必须先在白名单里查一遍——`"PACKAGE';
+/// drop table x --"` 这种只要漏一次就是远端执行任意语句。返回 `&'static str` 而不是
+/// `String`，让「拼进 SQL 的值只可能来自常量表」这件事在类型上成立。
+fn object_type_of(raw: Option<&str>) -> Option<&'static str> {
+    let want = raw?.trim().to_uppercase();
+    OBJECT_TYPES.iter().copied().find(|t| *t == want)
+}
+
 fn is_ddl(head: &str) -> bool {
     starts_any(
         head,
@@ -1526,6 +1629,25 @@ fn body_len(m: &Map<String, Value>) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 对象类型会被拼进 `get_ddl('<type>', ?)`，所以「认不出来就 None」是安全边界，
+    /// 这条用例是它的守门人：任何放宽都必须先过这里。
+    #[test]
+    fn 对象类型只认白名单其余当表() {
+        assert_eq!(object_type_of(Some("package")), Some("PACKAGE"));
+        assert_eq!(
+            object_type_of(Some("  Package Body ")),
+            Some("PACKAGE BODY")
+        );
+        assert_eq!(object_type_of(Some("SEQUENCE")), Some("SEQUENCE"));
+        // 表/视图走的是表那条路（TABLE 失败再回落 VIEW），不该被当对象类型
+        assert_eq!(object_type_of(Some("TABLE")), None);
+        assert_eq!(object_type_of(None), None);
+        assert_eq!(object_type_of(Some("")), None);
+        // 注入载体：拼进 SQL 前必须被白名单挡住
+        assert_eq!(object_type_of(Some("PACKAGE'; drop table t --")), None);
+        assert_eq!(object_type_of(Some("PACKAGE'")), None);
+    }
 
     #[test]
     fn jdbc_连接串转_easy_connect() {

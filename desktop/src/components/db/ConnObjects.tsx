@@ -1,31 +1,78 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "../ui/icon";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
-import { thousands } from "../../lib/db";
-import type { ColumnInfo, TableInfo } from "../../lib/dbApi";
+import { friendlyDbError, thousands } from "../../lib/db";
+import { dbApi, type ColumnInfo, type DbObject, type TableInfo } from "../../lib/dbApi";
 import { newConsole, openTable } from "../../lib/dbActions";
 import { toggleFavorite, useFavorites } from "../../lib/dbFavorites";
-import { columnsOf, rtOf, tabOf, useDb } from "../../lib/dbStore";
+import { columnsOf, openTableTab, rtOf, tabOf, useDb } from "../../lib/dbStore";
 import { toast } from "../ui/toast";
 
 /** 真实库里上万张表是常态，一次全铺会让侧栏卡死：每组只渲染前 N 条，靠筛选收敛。 */
 const LIMIT = 200;
 const NO_NAMES: Record<string, string> = {};
 
+/**
+ * 非表对象的分组。`PACKAGE BODY` / `TYPE BODY` 不单列——点开同名 PACKAGE 时，
+ * 源码页会把规范与实现按 `user_source.type` 分成两段一起显示。
+ */
+const OBJ_GROUPS: { label: string; types: string[]; icon: "package" | "file" | "activity" | "external" }[] = [
+  { label: "包", types: ["PACKAGE"], icon: "package" },
+  { label: "过程", types: ["PROCEDURE"], icon: "file" },
+  { label: "函数", types: ["FUNCTION"], icon: "file" },
+  { label: "触发器", types: ["TRIGGER"], icon: "activity" },
+  { label: "序列", types: ["SEQUENCE"], icon: "activity" },
+  { label: "同义词", types: ["SYNONYM"], icon: "external" },
+  { label: "类型", types: ["TYPE"], icon: "package" },
+];
+
 /** 一个已连上的连接下面的对象：收藏 / 表 / 视图。展开表看字段。 */
 export function ConnObjects({ connId, filter }: { connId: string; filter: string }) {
   useDb();
   const rt = rtOf(connId);
   const favs = useFavorites(connId);
-  const [groups, setGroups] = useState<Record<string, boolean>>({ fav: true, TABLE: true, VIEW: false });
+  const [groups, setGroups] = useState<Record<string, boolean>>({ fav: true, TABLE: true, VIEW: false, obj: false });
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const [objs, setObjs] = useState<DbObject[] | null>(null);
+  const [objErr, setObjErr] = useState<string | null>(null);
   const names = rt.ncNames ?? NO_NAMES;
+
+  // 非表对象按需读：包/过程/序列加起来可能上百条，但不像表那样一进连接就要看
+  useEffect(() => {
+    setObjs(null);
+    setObjErr(null);
+    if (rt.status !== "connected") return;
+    let alive = true;
+    dbApi.objects(connId).then(
+      (r) => alive && setObjs(r.objects),
+      (e) => {
+        if (!alive) return;
+        setObjs([]);
+        setObjErr(friendlyDbError(e));
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [connId, rt.status]);
 
   const matched = useMemo(() => {
     const all = rt.tables ?? [];
     if (!filter) return all;
     return all.filter((t) => t.name.toLowerCase().includes(filter) || (names[t.name.toLowerCase()] ?? "").includes(filter));
   }, [rt.tables, filter, names]);
+
+  /** 对象按类型分组；`filter` 命中名字就留下。 */
+  const objSections = useMemo(
+    () =>
+      OBJ_GROUPS.map((g) => ({
+        ...g,
+        list: (objs ?? []).filter(
+          (o) => g.types.includes(o.type) && (!filter || o.name.toLowerCase().includes(filter)),
+        ),
+      })).filter((g) => g.list.length > 0),
+    [objs, filter],
+  );
 
   if (rt.tablesLoading && !rt.tables) return <p className="dbx-tree-note">读取对象…</p>;
 
@@ -71,6 +118,41 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
           </div>
         );
       })}
+      {rt.status === "connected" && (
+        <div>
+          <button type="button" className="dbx-sgroup" onClick={() => setGroups({ ...groups, obj: !groups.obj })}>
+            <Icon name={groups.obj ? "chevronDown" : "chevronRight"} size={11} />
+            其它对象
+            <span className="dbx-cnt">{thousands((objs ?? []).length)}</span>
+          </button>
+          {groups.obj && !objs && <p className="dbx-tree-note" style={{ paddingLeft: 25 }}>读取对象…</p>}
+          {groups.obj && objErr && <p className="dbx-tree-note" style={{ paddingLeft: 25 }}>读不到其它对象：{objErr}</p>}
+          {groups.obj && objs && objSections.length === 0 && !objErr && (
+            <p className="dbx-tree-note" style={{ paddingLeft: 25 }}>这个账号下没有包 / 过程 / 序列等对象</p>
+          )}
+          {groups.obj &&
+            objSections.map((g) => (
+              <div key={g.label}>
+                <div className="dbx-tree-note" style={{ paddingLeft: 14 }}>{g.label} · {g.list.length}</div>
+                {g.list.slice(0, LIMIT).map((o) => (
+                  <button
+                    key={`${o.type}:${o.name}`}
+                    type="button"
+                    className="dbx-trow"
+                    style={{ paddingLeft: 25 }}
+                    title={`${o.name.toLowerCase()} · ${o.type}${o.status === "INVALID" ? "（失效：编译有错）" : ""}`}
+                    onClick={() => openTableTab(connId, o.name, "source", o.type)}
+                  >
+                    <Icon name={g.icon} size={12} />
+                    <span className="nm">{o.name.toLowerCase()}</span>
+                    {o.status === "INVALID" && <span className="ty">失效</span>}
+                  </button>
+                ))}
+                {g.list.length > LIMIT && <p className="dbx-tree-note" style={{ paddingLeft: 25 }}>只显示前 {LIMIT} 个，继续输入关键字缩小范围</p>}
+              </div>
+            ))}
+        </div>
+      )}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
   );

@@ -101,7 +101,23 @@ public class NcDbBridge {
     private static final Set<String> CMDS = new HashSet<String>(Arrays.asList(
             "hello", "propList", "propCred", "connect", "connectProp", "exec", "more", "commit",
             "rollback", "autocommit", "tables", "ncNames", "columns", "indexes", "ddl",
-            "explain", "sessions", "schema", "ping", "disconnect", "quit", "cancel"));
+            "explain", "sessions", "objects", "source", "schema", "ping", "disconnect", "quit",
+            "cancel"));
+
+    /**
+     * 对象树里的非表对象类型（`user_objects.object_type` 的取值）。
+     *
+     * 两个用途：①`objects()` 的 `in (...)` 列表；②`ddl()` 拼
+     * `dbms_metadata.get_ddl('&lt;type&gt;', ?)` 时的**注入防线** —— 类型名是 SQL 字面量、
+     * 绑不进去，只能拼，所以必须只认这几个。改这里要同步 Rust 侧 `OBJECT_TYPES`。
+     */
+    private static final List<String> OBJECT_TYPES = Arrays.asList(
+            "PACKAGE", "PACKAGE BODY", "PROCEDURE", "FUNCTION",
+            "SEQUENCE", "SYNONYM", "TRIGGER", "TYPE", "TYPE BODY");
+
+    /** `OBJECT_TYPES` 拼成 SQL 的 `in (...)` 列表（写死常量，不含用户输入）。 */
+    private static final String OBJECT_TYPES_IN = "'PACKAGE','PACKAGE BODY','PROCEDURE','FUNCTION',"
+            + "'SEQUENCE','SYNONYM','TRIGGER','TYPE','TYPE BODY'";
 
     public static void main(String[] args) throws Exception {
         // stdout 只留给协议；第三方库的 System.out 一律改道 stderr，否则一行日志就把 JSON 流冲乱
@@ -349,7 +365,11 @@ public class NcDbBridge {
             } else if ("indexes".equals(cmd)) {
                 ok(id, indexes(a.get(0)));
             } else if ("ddl".equals(cmd)) {
-                ok(id, ddl(a.get(0)));
+                ok(id, ddl(a.get(0), a.size() > 1 ? a.get(1) : null));
+            } else if ("objects".equals(cmd)) {
+                ok(id, objects());
+            } else if ("source".equals(cmd)) {
+                ok(id, source(a.get(0)));
             } else if ("explain".equals(cmd)) {
                 ok(id, explain(a.get(0)));
             } else if ("sessions".equals(cmd)) {
@@ -989,7 +1009,13 @@ public class NcDbBridge {
             return "{\"indexes\":" + sb.append(']') + "}";
         }
 
-        private String ddl(String table) throws SQLException {
+        /**
+         * DDL。`otype` 为空 = 按表处理（TABLE 失败后回落 VIEW）；非空 = 该类型对象。
+         *
+         * `otype` 会被拼进 SQL（`dbms_metadata.get_ddl` 的类型是字面量、绑不进去），
+         * 所以必须过 `OBJECT_TYPES` 白名单，认不出来的一律当表处理。
+         */
+        private String ddl(String table, String otype) throws SQLException {
             requireConn();
             Statement st = conn.createStatement();
             try {
@@ -1002,6 +1028,12 @@ public class NcDbBridge {
                 st.close();
             }
             String t = table.toUpperCase();
+            String ty = otype == null ? null : otype.toUpperCase();
+            if (ty != null && OBJECT_TYPES.contains(ty)) {
+                // 对象 DDL 没有「依赖索引」那一段；拿到什么给什么
+                String d = metadata("select dbms_metadata.get_ddl('" + ty + "', ?) from dual", t);
+                return "{\"ddl\":\"" + esc(d.trim()) + "\",\"type\":\"" + esc(ty) + "\"}";
+            }
             String main;
             try {
                 main = metadata("select dbms_metadata.get_ddl('TABLE', ?) from dual", t);
@@ -1015,6 +1047,80 @@ public class NcDbBridge {
                 // ORA-31608：没有索引
             }
             return "{\"ddl\":\"" + esc((main.trim() + "\n\n" + idx.trim()).trim()) + "\"}";
+        }
+
+        /**
+         * 非表对象：包 / 包体 / 过程 / 函数 / 序列 / 同义词 / 触发器 / 类型。
+         *
+         * 用 `user_objects` 而不是 `all_objects`：二开账号通常只有自己 schema 的权限，
+         * `all_objects` 会扫到别人的几千张表、还要额外授权，而对象树只关心「我能改的东西」。
+         * `generated = 'N'` 排掉系统生成的（回收站对象、LOB 索引之类）。
+         */
+        private String objects() throws SQLException {
+            requireConn();
+            PreparedStatement ps = conn.prepareStatement(
+                    "select object_name, object_type, status, to_char(created, 'YYYY-MM-DD')"
+                    + " from user_objects where object_type in (" + OBJECT_TYPES_IN + ")"
+                    + " and generated = 'N' order by object_type, object_name");
+            try {
+                ResultSet rs = ps.executeQuery();
+                StringBuilder sb = new StringBuilder("[");
+                int n = 0;
+                while (rs.next()) {
+                    if (n++ > 0) {
+                        sb.append(',');
+                    }
+                    String created = rs.getString(4);
+                    sb.append("{\"name\":\"").append(esc(rs.getString(1)))
+                            .append("\",\"type\":\"").append(esc(rs.getString(2)))
+                            .append("\",\"status\":\"").append(esc(rs.getString(3)))
+                            .append("\",\"created\":")
+                            .append(created == null ? "null" : "\"" + esc(created) + "\"")
+                            .append("}");
+                }
+                rs.close();
+                return "{\"objects\":" + sb.append(']') + ",\"count\":" + n + "}";
+            } finally {
+                ps.close();
+            }
+        }
+
+        /**
+         * 库内源码（`user_source`）。序列、同义词这类没有源码的对象返回空 `lines`。
+         *
+         * `order by type, line`：字典序里 PACKAGE 排在 PACKAGE BODY 之前，正好是
+         * 「规范在前、实现在后」的阅读顺序（TYPE / TYPE BODY 同理）。
+         */
+        private String source(String name) throws SQLException {
+            requireConn();
+            PreparedStatement ps = conn.prepareStatement(
+                    "select type, line, text from user_source where name = ? order by type, line");
+            try {
+                ps.setString(1, name.toUpperCase());
+                ResultSet rs = ps.executeQuery();
+                StringBuilder sb = new StringBuilder("[");
+                StringBuilder all = new StringBuilder();
+                int n = 0;
+                while (rs.next()) {
+                    if (n++ > 0) {
+                        sb.append(',');
+                    }
+                    String text = rs.getString(3);
+                    if (text == null) {
+                        text = "";
+                    }
+                    all.append(text);
+                    sb.append("{\"type\":\"").append(esc(rs.getString(1)))
+                            .append("\",\"line\":").append(rs.getInt(2))
+                            .append(",\"text\":\"").append(esc(text)).append("\"}");
+                }
+                rs.close();
+                return "{\"name\":\"" + esc(name.toUpperCase()) + "\",\"lines\":"
+                        + sb.append(']') + ",\"text\":\"" + esc(all.toString())
+                        + "\",\"count\":" + n + "}";
+            } finally {
+                ps.close();
+            }
         }
 
         private String metadata(String q, String name) throws SQLException {

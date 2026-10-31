@@ -879,14 +879,16 @@ pub async fn db_tx(
     call(b, cmd, args, Duration::from_secs(60)).await
 }
 
-/// 元数据：`tables` / `ncNames` / `columns` / `indexes` / `ddl` / `explain` / `sessions`。
-/// `arg` 是表名（explain 时是 SQL；sessions 不需要参数）。返回桥的原样 JSON。
+/// 元数据：`tables` / `ncNames` / `columns` / `indexes` / `ddl` / `explain` / `sessions` /
+/// `objects` / `source`。`arg` 是表名或对象名（explain 时是 SQL；sessions、objects 不需要
+/// 参数）；`arg2` 目前只有 `ddl` 用，表示对象类型（包/过程/序列…，空 = 按表处理）。
 #[tauri::command]
 pub async fn db_meta(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
     kind: String,
     arg: Option<String>,
+    arg2: Option<String>,
 ) -> Result<Value, String> {
     let b = existing_bridge(&state, &id)?;
     let cmd: &'static str = match kind.as_str() {
@@ -897,11 +899,16 @@ pub async fn db_meta(
         "ddl" => "ddl",
         "explain" => "explain",
         "sessions" => "sessions",
+        "objects" => "objects",
+        "source" => "source",
         other => return Err(format!("未知元数据类型：{other}")),
     };
-    let args = arg.map(|a| vec![a]).unwrap_or_default();
-    // 只有这三个不需要参数。加新 kind 时别忘了把「无参」的也列进来，否则会被下面这段拦掉
-    if cmd != "tables" && cmd != "ncNames" && cmd != "sessions" && args.is_empty() {
+    if arg2.is_some() && arg.is_none() {
+        return Err(format!("{cmd} 的第二个参数不能脱离第一个单独给"));
+    }
+    let args: Vec<String> = arg.into_iter().chain(arg2).collect();
+    // 这几个不需要参数。加新 kind 时别忘了把「无参」的也列进来，否则会被下面这段拦掉
+    if !matches!(cmd, "tables" | "ncNames" | "sessions" | "objects") && args.is_empty() {
         return Err(format!("{cmd} 需要参数"));
     }
     call(b, cmd, args, T_META).await
