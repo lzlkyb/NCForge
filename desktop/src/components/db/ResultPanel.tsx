@@ -5,6 +5,10 @@ import { DbErrorBox } from "./DbErrorBox";
 import { PlanView } from "./PlanView";
 import { thousands } from "../../lib/db";
 import { guessTable } from "../../lib/resultExport";
+import { statsText, statsTitle } from "../../lib/dbStats";
+import { dbApi, type ExportFileOut, type ExportProgress } from "../../lib/dbApi";
+import { listen } from "../../lib/tauri";
+import { exportResultFile, reSortOnServer } from "../../lib/dbResultActions";
 import { loadMore, ownsCursor, patchTab, rtOf, summaryOf, type ResultEntry, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台下半：每条语句一个结果标签 + 执行计划 + 输出。 */
@@ -45,7 +49,7 @@ export function ResultPanel({ tab, height }: { tab: SqlTab; height: number }) {
         )}
       </div>
       {view === "plan" && tab.plan ? (
-        <PlanView plan={tab.plan} />
+        <PlanView plan={tab.plan} connId={tab.connId} />
       ) : view === "output" || !cur ? (
         <OutputView tab={tab} />
       ) : (
@@ -64,18 +68,38 @@ function EntryView({ tab, entry, tables, autoCommit }: { tab: SqlTab; entry: Res
         <span className="dbx-muted">
           {entry.ms} ms · {autoCommit ? "自动提交模式，已生效" : "手动提交模式：上方黄条里提交或回滚"}
         </span>
+        <StatsLine stats={entry.stats} />
       </div>
     );
-  const isLast = ownsCursor(tab.connId, entry.id);
+  const isLast = ownsCursor(tab.connId, tab.slot, entry.id);
   return <RowsEntryView tab={tab} entry={entry} isLast={isLast} />;
+}
+
+/** Autotrace 统计行（A2）。`stats` 为 null 时**整行不渲染**——读不到统计不等于 0。 */
+function StatsLine({ stats }: { stats: ResultEntry["stats"] }) {
+  const text = statsText(stats);
+  if (!text) return null;
+  return (
+    <span className="dbx-stats" title={statsTitle(stats) ?? undefined}>
+      <Icon name="activity" size={12} />
+      {text}
+    </span>
+  );
 }
 
 /**
  * 有行数据的结果。`dbms_sql.return_result` 可能一次带回多个结果集，
  * 多于一的时候表格上方给一排小标签切换（只有一个就不占那行高度）。
+ *
+ * 这里还挂着 A4 的流式导出（进度 + 落盘结果）与 A3 的「让数据库重排」入口。
  */
 function RowsEntryView({ tab, entry, isLast }: { tab: SqlTab; entry: ResultEntry; isLast: boolean }) {
   const [pick, setPick] = useState(0);
+  /** 导出进行中：`rows` 是后端每 5000 行推过来的进度。 */
+  const [job, setJob] = useState<{ rows: number } | null>(null);
+  /** 导出完成后的落盘信息（路径 + 行数 + 是否截断）。 */
+  const [saved, setSaved] = useState<ExportFileOut | null>(null);
+  const busy = job !== null;
   const sets = entry.sets ?? [];
   const at = Math.min(pick, Math.max(0, sets.length - 1));
   const set = sets.length > 0 ? sets[at] : null;
@@ -83,6 +107,36 @@ function RowsEntryView({ tab, entry, isLast }: { tab: SqlTab; entry: ResultEntry
   const rows = set?.rows ?? entry.rows;
   /** 隐式结果集取到上限还有剩：不能续取，只能调大行数重跑。 */
   const truncated = !!set?.hasMore;
+
+  useEffect(() => {
+    if (!busy) return;
+    let dead = false;
+    let un: (() => void) | undefined;
+    // 进度事件按连接过滤：同时导出两个连接时不能串数字
+    listen<ExportProgress>("db:export-progress", (p) => {
+      if (!dead && p.id === tab.connId) setJob({ rows: p.rows });
+    })
+      .then((f) => {
+        if (dead) f();
+        else un = f;
+      })
+      .catch(() => undefined);
+    return () => {
+      dead = true;
+      un?.();
+    };
+  }, [busy, tab.connId]);
+
+  const onExportFile = async (format: "csv" | "tsv" | "insert") => {
+    setSaved(null);
+    setJob({ rows: 0 });
+    try {
+      setSaved(await exportResultFile(tab.id, entry.sql, format, guessTable(entry.sql)));
+    } finally {
+      setJob(null);
+    }
+  };
+
   return (
     <div className="dbx-rset">
       {sets.length > 1 && (
@@ -106,6 +160,28 @@ function RowsEntryView({ tab, entry, isLast }: { tab: SqlTab; entry: ResultEntry
           ))}
         </div>
       )}
+      {(job || saved) && (
+        <div className="dbx-exportbar" role="status">
+          {job ? (
+            <>
+              <Icon name="spinner" size={12} />
+              正在导出（后端边读边写）：已写 <b>{thousands(job.rows)}</b> 行…
+            </>
+          ) : (
+            saved && (
+              <>
+                <Icon name="check" size={12} />
+                已导出 <b>{thousands(saved.rows)}</b> 行 · {fmtBytes(saved.bytes)} ·{" "}
+                <span className="dbx-mono" title={saved.path}>{saved.fileName}</span>
+                <button type="button" className="dbx-lk" onClick={() => void dbApi.revealExport(saved.path)}>
+                  打开所在文件夹
+                </button>
+                {saved.truncated && <span className="bad">到了行数上限，文件不是全量</span>}
+              </>
+            )
+          )}
+        </div>
+      )}
       <ResultTable
         key={at}
         columns={columns}
@@ -115,8 +191,18 @@ function RowsEntryView({ tab, entry, isLast }: { tab: SqlTab; entry: ResultEntry
           <>
             {sets.length > 1 && <>第 {at + 1}/{sets.length} 个结果集 · </>}
             <b>{thousands(rows.length)}</b> 行{truncated ? "（到行数上限）" : entry.hasMore && !sets.length ? "（还有更多）" : ""} · {entry.ms} ms
+            {statsText(entry.stats) && (
+              <>
+                {" · "}
+                <span className="dbx-stats" title={statsTitle(entry.stats) ?? undefined}>
+                  {statsText(entry.stats)}
+                </span>
+              </>
+            )}
           </>
         }
+        onServerSort={(col, dir) => void reSortOnServer(tab.id, entry.sql, columns[col]?.name ?? "", dir)}
+        onExportFile={(f) => void onExportFile(f)}
         foot={
           <div className="dbx-rfoot">
             <span>已取 {thousands(rows.length)} 行</span>
@@ -125,7 +211,7 @@ function RowsEntryView({ tab, entry, isLast }: { tab: SqlTab; entry: ResultEntry
                 type="button"
                 className="dbx-lk"
                 disabled={entry.loadingMore || !isLast || tab.running}
-                title={isLast ? "" : "这个连接上后来又执行过别的语句，游标已换掉：重新执行这条再加载"}
+                title={isLast ? "" : "这条会话上后来又执行过别的语句，游标已换掉：重新执行这条再加载"}
                 onClick={() => void loadMore(tab.id, entry.id)}
               >
                 {entry.loadingMore ? "加载中…" : `加载下 ${tab.maxRows} 行`}
@@ -152,6 +238,13 @@ function RowsEntryView({ tab, entry, isLast }: { tab: SqlTab; entry: ResultEntry
       />
     </div>
   );
+}
+
+/** 文件大小：导出结果那一行用（几十 KB 到几百 MB 都要好读）。 */
+export function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function OutputView({ tab }: { tab: SqlTab }) {

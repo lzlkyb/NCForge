@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -31,6 +31,128 @@ pub(crate) const T_CONNECT: Duration = Duration::from_secs(60);
 const T_META: Duration = Duration::from_secs(120);
 /// 临时会话名：列数据源、测试连接、解 prop.xml 口令共用，不占用任何真实连接的会话。
 pub(crate) const PROBE: &str = "__probe";
+
+// ───────────────────────── 会话槽（A0：多标签独立会话） ─────────────────────────
+
+/// 一条连接上最多几个额外会话槽。**不含 primary**。
+///
+/// 为什么是 3：`open_cursors` 与服务端会话数都要留余量；更重要的是——超过三四个标签
+/// 各跑长查询时，用户自己也分不清哪个事务在哪条会话里，界面会从「不堵」变成「看不懂」。
+const MAX_SLOTS: usize = 3;
+/// 槽空闲多久回收。关标签时正常释放，这条只兜「标签被异常关掉 / 应用崩溃后的残留」。
+const SLOT_IDLE: Duration = Duration::from_secs(600);
+
+/// 槽位的引擎键：primary 用连接 id（保持老行为），额外会话用 `id#N`。
+///
+/// **只允许数字槽名**：这个键会拼进 Java 桥的会话名与日志，允许任意字符串等于把
+/// 前端输入当标识符用。
+pub(crate) fn slot_key(id: &str, slot: Option<&str>) -> Result<String, String> {
+    match slot.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(id.to_string()),
+        Some(s) if s.chars().all(|c| c.is_ascii_digit()) && s.len() <= 2 => Ok(format!("{id}#{s}")),
+        Some(s) => Err(code_label("sql", &format!("会话槽名不合法：{s}"))),
+    }
+}
+
+/// 引擎键 → (连接 id, 槽名)。给退出前的事务探测用：`c1#2` 属于连接 `c1` 的第 2 个槽。
+pub(crate) fn split_slot_key(key: &str) -> (&str, Option<&str>) {
+    match key.rsplit_once('#') {
+        Some((id, slot)) if !id.is_empty() && slot.chars().all(|c| c.is_ascii_digit()) => {
+            (id, Some(slot))
+        }
+        _ => (key, None),
+    }
+}
+
+/// 槽的最近使用时刻（引擎键 → 时刻）。
+///
+/// 放模块级 static 而不是 `AppState`：只有这里的回收逻辑读它，没有第二个读者；
+/// 存进 AppState 反而要在构造处多加一处默认值，还要在测试里手工清空。
+fn slot_touch() -> &'static std::sync::Mutex<std::collections::HashMap<String, Instant>> {
+    static TOUCH: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, Instant>>,
+    > = std::sync::OnceLock::new();
+    TOUCH.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// 记一次使用。取不到锁不影响任何功能（最坏是这条槽晚一点被回收）。
+fn touch_slot(key: &str) {
+    if let Ok(mut m) = slot_touch().lock() {
+        m.insert(key.to_string(), Instant::now());
+    }
+}
+
+fn forget_slot(key: &str) {
+    if let Ok(mut m) = slot_touch().lock() {
+        m.remove(key);
+    }
+}
+
+/// 这个连接上现在活着的槽号（升序）。
+fn live_slots(state: &AppState, id: &str) -> Vec<String> {
+    let prefix = format!("{id}#");
+    let mut out: Vec<String> = state
+        .db
+        .lock()
+        .map(|m| {
+            m.keys()
+                .filter_map(|k| k.strip_prefix(&prefix).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort();
+    out
+}
+
+/// 回收空闲超时的槽。**在申请槽与每次执行前顺手扫一遍**，不起后台线程——
+/// 桌面应用里为了回收会话养一个定时器，代价比扫这一眼高得多。
+fn sweep_idle_slots(state: &AppState, id: &str) {
+    let now = Instant::now();
+    let stale: Vec<String> = live_slots(state, id)
+        .into_iter()
+        .filter(|n| {
+            let key = format!("{id}#{n}");
+            match slot_touch().lock() {
+                Ok(m) => m
+                    .get(&key)
+                    .map(|t| now.duration_since(*t) >= SLOT_IDLE)
+                    .unwrap_or(false),
+                // 取不到锁就当作还活着：宁可多留一条会话，也不要误杀正在用的
+                Err(_) => false,
+            }
+        })
+        .collect();
+    for n in stale {
+        let key = format!("{id}#{n}");
+        drop_bridge(state, &key);
+        forget_slot(&key);
+    }
+}
+
+/// 取某个连接上某条会话的引擎键对应的句柄。
+///
+/// 槽被回收（空闲超 10 分钟 / 断开连接）时要给出**能让用户知道下一步做什么**的错误，
+/// 不能复用 primary 的「还没连上」——那会让人以为整个连接掉了。
+pub(crate) fn slot_bridge(
+    state: &AppState,
+    id: &str,
+    slot: Option<&str>,
+) -> Result<Arc<EngineHandle>, String> {
+    let key = slot_key(id, slot)?;
+    match existing_bridge(state, &key) {
+        Ok(h) => {
+            touch_slot(&key);
+            Ok(h)
+        }
+        Err(e) => Err(match slot {
+            None => e,
+            Some(s) => code_label(
+                "slot-gone",
+                &format!("标签的独立会话 {s} 已经回收（空闲超过 10 分钟或连接断开），重新执行一次会自动重开"),
+            ),
+        }),
+    }
+}
 
 // ───────────────────────── prop.xml（只读解析，不含口令） ─────────────────────────
 
@@ -514,6 +636,80 @@ pub async fn db_connect(
     })
 }
 
+/// 会话槽：给一条已经连上的连接再开一条独立会话（A0）。
+///
+/// 为什么需要：一个句柄底下只有一条数据库会话，长查询在执行时占着它，同一连接上的
+/// 其它标签只能排队。开一条额外会话后，标签 A 跑 30 秒的查询，标签 B 照用。
+///
+/// 分工（与方案文档 13.4 一致）：
+/// - **primary**（连接 id 本身）继续服务元数据、表页、事务条；
+/// - 槽只给 SQL 标签用，**各自独立事务**；
+/// - 每连接最多 [`MAX_SLOTS`] 个，空闲 [`SLOT_IDLE`] 回收。
+#[tauri::command]
+pub async fn db_slot_acquire(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<SlotOut, String> {
+    let st = state.inner().clone();
+    let cfg = st.config.read().await.clone();
+    let conn = find_conn(&cfg, &id)?;
+    // 槽是「再加一条会话」，不是「从零连库」：primary 都没连上就没什么可加的
+    existing_bridge(&st, &id)
+        .map_err(|_| code_label("not-connected", "先连上这个库，再开独立会话"))?;
+    sweep_idle_slots(&st, &id);
+    let used = live_slots(&st, &id);
+    if used.len() >= MAX_SLOTS {
+        return Err(code_label(
+            "slots-full",
+            &format!(
+                "这条连接最多同时开 {MAX_SLOTS} 个独立会话（现在 {}/{MAX_SLOTS}）。\
+                 关掉几个跑完的 SQL 标签再试",
+                used.len()
+            ),
+        ));
+    }
+    let n = (1..=MAX_SLOTS)
+        .find(|i| !used.contains(&i.to_string()))
+        .ok_or_else(|| code_label("slots-full", "没有空闲的会话槽"))?;
+    let slot = n.to_string();
+    let key = slot_key(&id, Some(&slot))?;
+    let engine = EngineKind::parse(&conn.engine);
+    let (cmd, args) = connect_args(&cfg, &conn, None, conn.auto_commit, engine)?;
+    let handle = bridge_for(&app, &st, &cfg, &key, engine)?;
+    match call(handle, cmd, args, T_CONNECT).await {
+        Ok(_) => {
+            touch_slot(&key);
+            Ok(SlotOut { slot })
+        }
+        Err(e) => {
+            // 连不上就把半成品收掉，否则下次申请会以为这条槽还在用
+            drop_bridge(&st, &key);
+            forget_slot(&key);
+            Err(e)
+        }
+    }
+}
+
+/// 释放一条槽（关 SQL 标签时调）。断开连接时后端会连 primary 一起收掉。
+#[tauri::command]
+pub async fn db_slot_release(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+    slot: String,
+) -> Result<(), String> {
+    let key = slot_key(&id, Some(&slot))?;
+    drop_bridge(&state, &key);
+    forget_slot(&key);
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotOut {
+    pub slot: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineCaps {
@@ -527,6 +723,10 @@ pub struct EngineCaps {
     pub refcursor: bool,
     pub prop_decrypt: bool,
     pub multi_session: bool,
+    /// 能列会话与锁（权限不够由返回的 `granted` 表达，不是能力位）。
+    pub sessions: bool,
+    /// 能回实际执行统计（执行前后读 `v$mystat` 取差值；读不到时响应里 `stats` 为 null）。
+    pub stats: bool,
 }
 
 /// 这个连接用哪个引擎、那个引擎能做什么。界面上「停止」按钮可用性、引擎选择器的灰项
@@ -550,6 +750,8 @@ pub async fn db_caps(
             refcursor: c.refcursor,
             prop_decrypt: c.prop_decrypt,
             multi_session: c.multi_session,
+            sessions: c.sessions,
+            stats: c.stats,
         });
     }
     let kind = EngineKind::parse(&conn.engine);
@@ -562,6 +764,8 @@ pub async fn db_caps(
         refcursor: c.refcursor,
         prop_decrypt: c.prop_decrypt,
         multi_session: c.multi_session,
+        sessions: c.sessions,
+        stats: c.stats,
     })
 }
 
@@ -576,8 +780,12 @@ pub async fn db_caps(
 ///
 /// 两条路都表现为「原来那个请求返回一次错误」，前端照常显示为一次失败的执行。
 #[tauri::command]
-pub async fn db_cancel(state: tauri::State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    let engine = existing_bridge(&state, &id)?;
+pub async fn db_cancel(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+    slot: Option<String>,
+) -> Result<(), String> {
+    let engine = slot_bridge(&state, &id, slot.as_deref())?;
     tauri::async_runtime::spawn_blocking(move || engine.cancel())
         .await
         .map_err(|e| format!("发送取消失败：{e}"))?
@@ -585,11 +793,20 @@ pub async fn db_cancel(state: tauri::State<'_, Arc<AppState>>, id: String) -> Re
 }
 
 /// 断开（未提交的改动由桥回滚——界面已经先问过用户）。
+///
+/// **连同上开的独立会话一起断**：槽是这条连接的一部分，留着它们等于在服务端占着
+/// 几条没人管的会话（用户以为已经断开了）。
 #[tauri::command]
 pub async fn db_disconnect(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<(), String> {
+    let slots = live_slots(&state, &id);
+    for n in slots {
+        let key = slot_key(&id, Some(&n))?;
+        drop_bridge(&state, &key);
+        forget_slot(&key);
+    }
     let Ok(b) = existing_bridge(&state, &id) else {
         return Ok(());
     };
@@ -599,7 +816,10 @@ pub async fn db_disconnect(
 }
 
 /// 执行一条语句（查询 / DML / DDL / PL/SQL 块都行）。返回桥的原样 JSON：
-/// `{kind:"rows",columns,rows,rowCount,hasMore,ms,output,tx}` 或 `{kind:"update",updateCount,…}`。
+/// `{kind:"rows",columns,rows,rowCount,hasMore,ms,stats,output,tx}` 或 `{kind:"update",…}`。
+///
+/// `slot` 为空 = 走 primary（老行为）；前端给 SQL 标签申请槽之后，同一个标签的
+/// 执行 / 加载更多 / 取消 / 提交都带同一个槽名，各自的游标与事务互不干扰。
 #[tauri::command]
 pub async fn db_exec(
     state: tauri::State<'_, Arc<AppState>>,
@@ -607,11 +827,12 @@ pub async fn db_exec(
     sql: String,
     max_rows: Option<u32>,
     timeout_sec: Option<u32>,
+    slot: Option<String>,
 ) -> Result<Value, String> {
     if sql.trim().is_empty() {
         return Err(code_label("sql", "SQL 是空的"));
     }
-    let b = existing_bridge(&state, &id)?;
+    let b = slot_bridge(&state, &id, slot.as_deref())?;
     let rows = max_rows.unwrap_or(500).clamp(1, 10_000);
     let timeout = timeout_sec.unwrap_or(30).clamp(1, 3600);
     call(
@@ -623,26 +844,30 @@ pub async fn db_exec(
     .await
 }
 
-/// 「加载更多」：从上一次查询的游标接着取。
+/// 「加载更多」：从上一次查询的游标接着取（`slot` 必须与执行时相同）。
 #[tauri::command]
 pub async fn db_more(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
     max_rows: Option<u32>,
+    slot: Option<String>,
 ) -> Result<Value, String> {
-    let b = existing_bridge(&state, &id)?;
+    let b = slot_bridge(&state, &id, slot.as_deref())?;
     let rows = max_rows.unwrap_or(500).clamp(1, 10_000);
     call(b, "more", vec![rows.to_string()], T_META).await
 }
 
 /// 事务操作：`commit` / `rollback` / `autocommit-on` / `autocommit-off` / `status`。
+///
+/// 槽各自独立事务：带 `slot` 时只影响那条会话。`status` 走 `ping`，返回里带 `tx`。
 #[tauri::command]
 pub async fn db_tx(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
     action: String,
+    slot: Option<String>,
 ) -> Result<Value, String> {
-    let b = existing_bridge(&state, &id)?;
+    let b = slot_bridge(&state, &id, slot.as_deref())?;
     let (cmd, args): (&'static str, Vec<String>) = match action.as_str() {
         "commit" => ("commit", vec![]),
         "rollback" => ("rollback", vec![]),
@@ -654,8 +879,8 @@ pub async fn db_tx(
     call(b, cmd, args, Duration::from_secs(60)).await
 }
 
-/// 元数据：`tables` / `ncNames` / `columns` / `indexes` / `ddl` / `explain`。
-/// `arg` 是表名（explain 时是 SQL）。返回桥的原样 JSON。
+/// 元数据：`tables` / `ncNames` / `columns` / `indexes` / `ddl` / `explain` / `sessions`。
+/// `arg` 是表名（explain 时是 SQL；sessions 不需要参数）。返回桥的原样 JSON。
 #[tauri::command]
 pub async fn db_meta(
     state: tauri::State<'_, Arc<AppState>>,
@@ -671,13 +896,54 @@ pub async fn db_meta(
         "indexes" => "indexes",
         "ddl" => "ddl",
         "explain" => "explain",
+        "sessions" => "sessions",
         other => return Err(format!("未知元数据类型：{other}")),
     };
     let args = arg.map(|a| vec![a]).unwrap_or_default();
-    if cmd != "tables" && cmd != "ncNames" && args.is_empty() {
+    // 只有这三个不需要参数。加新 kind 时别忘了把「无参」的也列进来，否则会被下面这段拦掉
+    if cmd != "tables" && cmd != "ncNames" && cmd != "sessions" && args.is_empty() {
         return Err(format!("{cmd} 需要参数"));
     }
     call(b, cmd, args, T_META).await
+}
+
+/// 退出前的「这条连接上所有会话」事务操作：primary + 每个独立会话槽一起提交/回滚。
+///
+/// 为什么不复用 `db_tx` 在前端循环：槽是后端的内部记账，前端只知道 primary 的 id；
+/// 让它去枚举槽等于把内部结构再抄一份到界面。只允许 commit / rollback——
+/// 退出场景里切自动提交没有意义。
+///
+/// 一条失败不中断其余（别的会话的写入也别丢），最后把第一个错误报上去。
+#[tauri::command]
+pub async fn db_tx_all(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+    action: String,
+) -> Result<(), String> {
+    let cmd: &'static str = match action.as_str() {
+        "commit" => "commit",
+        "rollback" => "rollback",
+        other => return Err(format!("未知事务操作：{other}")),
+    };
+    let mut keys = vec![id.clone()];
+    keys.extend(
+        live_slots(&state, &id)
+            .into_iter()
+            .map(|n| format!("{id}#{n}")),
+    );
+    let mut first_err: Option<String> = None;
+    for key in keys {
+        let Ok(h) = existing_bridge(&state, &key) else {
+            continue;
+        };
+        if let Err(e) = call(h, cmd, vec![], Duration::from_secs(30)).await {
+            first_err.get_or_insert(e);
+        }
+    }
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 // ───────────────────────── 表结构缓存与出包核对 ─────────────────────────
@@ -1174,5 +1440,24 @@ mod tests {
         let e = resolve_password(&conn("a", "u"), None).unwrap_err();
         assert!(e.starts_with("need-password|"), "{e}");
         assert_eq!(resolve_password(&conn("a", "u"), Some("p")).unwrap(), "p");
+    }
+
+    #[test]
+    fn 会话槽键只接受数字槽名() {
+        assert_eq!(slot_key("c1", None).unwrap(), "c1", "不传槽就是 primary");
+        assert_eq!(slot_key("c1", Some("")).unwrap(), "c1");
+        assert_eq!(slot_key("c1", Some("2")).unwrap(), "c1#2");
+        // 槽名会拼进桥的会话名：允许任意字符串等于把前端输入当标识符用
+        assert!(slot_key("c1", Some("2#3")).is_err());
+        assert!(slot_key("c1", Some("abc")).is_err());
+        assert!(slot_key("c1", Some("123")).is_err(), "两位以上不收");
+    }
+
+    #[test]
+    fn 槽键能拆回连接与槽() {
+        assert_eq!(split_slot_key("c1"), ("c1", None));
+        assert_eq!(split_slot_key("c1#2"), ("c1", Some("2")));
+        // 连接 id 里本来就可能带 #（老配置 / 手改），不是纯数字就别乱拆
+        assert_eq!(split_slot_key("c#abc"), ("c#abc", None));
     }
 }

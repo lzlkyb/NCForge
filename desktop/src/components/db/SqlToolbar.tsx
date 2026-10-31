@@ -6,7 +6,7 @@ import { switchConn } from "../../lib/dbActions";
 import { connOf, rtOf, txAction, useDb, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台工具条：连接胶囊 · 执行 / 脚本 / 计划 / 格式化 · 事务模式 · 历史。生产库整条淡红。 */
-export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, historyOpen, onHistory }: {
+export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, historyOpen, onHistory, sessionsOpen, onSessions }: {
   tab: SqlTab;
   onRun: (mode: "current" | "script") => void;
   onStop: () => void;
@@ -16,6 +16,9 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
   onExport: () => void;
   historyOpen: boolean;
   onHistory: () => void;
+  /** 会话与锁抽屉是否打开（按钮高亮用）。 */
+  sessionsOpen: boolean;
+  onSessions: () => void;
 }) {
   useDb();
   const conn = connOf(tab.connId);
@@ -97,6 +100,17 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
       <button type="button" className="dbx-btn ghost" data-on={historyOpen || undefined} onClick={onHistory} disabled={!tab.connId}>
         <Icon name="history" size={12} />
         历史
+      </button>
+      <button
+        type="button"
+        className="dbx-btn ghost"
+        data-on={sessionsOpen || undefined}
+        onClick={onSessions}
+        disabled={!tab.connId}
+        title="谁在跑、谁锁了哪张表（只读，不代执行 KILL）"
+      >
+        <Icon name="lock" size={12} />
+        会话
       </button>
     </div>
   );

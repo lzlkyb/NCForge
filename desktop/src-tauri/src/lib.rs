@@ -18,6 +18,7 @@ pub mod config_io;
 pub mod db_bridge;
 pub mod db_conns;
 pub mod db_engine;
+pub mod db_file_export;
 pub mod db_rust;
 pub mod db_schema;
 pub mod eclipse_cp;

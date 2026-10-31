@@ -24,7 +24,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 
-use crate::commands::db_cmds::call;
+use crate::commands::db_cmds::{call, split_slot_key};
 use crate::db_engine::{EngineHandle, EngineKind};
 use crate::state::AppState;
 
@@ -124,12 +124,67 @@ pub async fn db_pending_tx(state: tauri::State<'_, Arc<AppState>>) -> Result<Val
     };
 
     let mut conns = Vec::with_capacity(handles.len());
-    for (id, h) in handles {
+    for (key, h) in handles {
         let kind = h.kind();
+        // A0 的独立会话槽（`c1#2`）属于同一条连接：按连接 id 归并，
+        // 否则确认框里会出现「prod」「prod#2」两条同名连接，用户不知道该点哪个。
+        let (id, _) = split_slot_key(&key);
         let r = call(h, "ping", Vec::new(), PING_TIMEOUT).await;
-        conns.push(pending_row(&id, kind, r));
+        conns.push(pending_row(id, kind, r));
     }
-    Ok(json!({ "conns": conns }))
+    Ok(json!({ "conns": merge_sessions(conns) }))
+}
+
+/// 把同一连接的多条会话（primary + 槽）合成一行。
+///
+/// 规则：
+/// - 任一条会话 `unknown` → 整条标 `unknown`（可能丢数据的那个不能藏在 pending 后面）；
+/// - 语句数 / 行数**相加**（退出时要提交的是全部会话的写入）；
+/// - 开始时刻取最早的（显示「已持续」更保守）。
+fn merge_sessions(rows: Vec<Value>) -> Vec<Value> {
+    let mut order: Vec<String> = Vec::new();
+    let mut acc: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+    for row in rows {
+        let id = row
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        match acc.get_mut(&id) {
+            None => {
+                order.push(id.clone());
+                acc.insert(id, row);
+            }
+            Some(cur) => {
+                let state = |v: &Value| {
+                    v.get("state")
+                        .and_then(Value::as_str)
+                        .unwrap_or("clean")
+                        .to_string()
+                };
+                let num = |v: &Value, k: &str| v.get(k).and_then(Value::as_i64).unwrap_or(0);
+                cur["statements"] = json!(num(cur, "statements") + num(&row, "statements"));
+                cur["rows"] = json!(num(cur, "rows") + num(&row, "rows"));
+                let a = num(cur, "since");
+                let b = num(&row, "since");
+                cur["since"] = json!(match (a, b) {
+                    (0, x) => x,
+                    (x, 0) => x,
+                    (x, y) => x.min(y),
+                });
+                let (sa, sb) = (state(cur), state(&row));
+                if sa == "unknown" || sb == "unknown" {
+                    cur["state"] = json!("unknown");
+                    if cur.get("message").is_none() {
+                        cur["message"] = row.get("message").cloned().unwrap_or(Value::Null);
+                    }
+                } else if sa == "pending" || sb == "pending" {
+                    cur["state"] = json!("pending");
+                }
+            }
+        }
+    }
+    order.into_iter().filter_map(|id| acc.remove(&id)).collect()
 }
 
 fn pending_row(id: &str, kind: EngineKind, r: Result<Value, String>) -> Value {
@@ -212,5 +267,44 @@ mod tests {
             Ok(json!({ "alive": false, "tx": { "statements": 3 } })),
         );
         assert_eq!(row["state"], "unknown");
+    }
+
+    #[test]
+    fn 同一连接的多条会话合成一行() {
+        // A0 之后一个连接上可能同时有 primary 与两个槽：退出时要提交的是全部写入
+        let rows = vec![
+            pending_row("c1", EngineKind::Java, Ok(tx(1, 5, false))),
+            pending_row("c1", EngineKind::Java, Ok(tx(2, 7, false))),
+        ];
+        let merged = merge_sessions(rows);
+        assert_eq!(merged.len(), 1, "不能出现「c1」「c1#2」两条同名连接");
+        assert_eq!(merged[0]["statements"], 3);
+        assert_eq!(merged[0]["rows"], 12);
+        assert_eq!(merged[0]["state"], "pending");
+    }
+
+    #[test]
+    fn 任一会话探测超时整条标未知() {
+        let rows = vec![
+            pending_row("c1", EngineKind::Java, Ok(tx(1, 5, false))),
+            pending_row("c1", EngineKind::Rust, Err("bridge|查询超时".into())),
+        ];
+        let merged = merge_sessions(rows);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(
+            merged[0]["state"], "unknown",
+            "一条会话状态不明时不能报「有事务」，也不能报「干净」"
+        );
+        assert_eq!(merged[0]["message"], "查询超时");
+    }
+
+    #[test]
+    fn 不同连接不会被合并() {
+        let rows = vec![
+            pending_row("c1", EngineKind::Java, Ok(tx(1, 1, false))),
+            pending_row("c2", EngineKind::Java, Ok(tx(2, 2, false))),
+        ];
+        let merged = merge_sessions(rows);
+        assert_eq!(merged.len(), 2);
     }
 }

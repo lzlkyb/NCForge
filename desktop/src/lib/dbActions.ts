@@ -1,9 +1,10 @@
 import { toast } from "../components/ui/toast";
 import { friendlyDbError } from "./db";
 import { dbApi } from "./dbApi";
-import { ask, confirmProdWrite, ensureConnected, guardTx, isLastTabOn } from "./dbConfirm";
+import { ask, confirmProdWrite, ensureConnected, guardSlotTx, guardTx, isLastTabOn } from "./dbConfirm";
 import {
   appendOutput,
+  clearSlots,
   closeTab,
   connOf,
   disconnect,
@@ -16,6 +17,7 @@ import {
   openSqlTab,
   openTableTab,
   patchTab,
+  releaseSlot,
   rtOf,
   setConns,
   sqlTabOf,
@@ -56,7 +58,10 @@ export async function switchConn(tabId: string, connId: string) {
   const tab = sqlTabOf(tabId);
   if (!tab || tab.connId === connId) return;
   if (isLastTabOn(tab.connId, tabId) && !(await guardTx(tab.connId, "切换连接"))) return;
-  patchTab<SqlTab>(tabId, { connId });
+  // 槽属于旧连接：换连接前先把它的未提交写入问清楚，再放掉
+  if (!(await guardSlotTx(tab.connId, tab.slot, "切换连接"))) return;
+  await releaseSlot(tab.connId, tab.slot);
+  patchTab<SqlTab>(tabId, { connId, slot: null, tx: undefined });
   void ensureConnected(connId);
 }
 
@@ -64,6 +69,11 @@ export async function requestCloseTab(tabId: string) {
   const tab = tabOf(tabId);
   if (!tab) return;
   if (isLastTabOn(tab.connId, tabId) && !(await guardTx(tab.connId, "关闭标签"))) return;
+  if (tab.kind === "sql") {
+    // 槽各自独立事务：primary 干净不代表这个标签里没有没提交的 update
+    if (!(await guardSlotTx(tab.connId, tab.slot, "关闭标签"))) return;
+    await releaseSlot(tab.connId, tab.slot);
+  }
   closeTab(tabId);
   if (tab.kind === "sql") disposeSqlModel(tabId);
 }
@@ -71,6 +81,8 @@ export async function requestCloseTab(tabId: string) {
 export async function disconnectConn(connId: string) {
   if (!(await guardTx(connId, "断开连接"))) return;
   await disconnect(connId);
+  // 后端已经把槽一并收掉；前端要把标签上的槽名清掉，否则下次执行会打到不存在的会话
+  clearSlots(connId);
   forgetColumns(connId);
 }
 
@@ -81,9 +93,10 @@ export async function deleteConn(connId: string) {
   if (!ok || !(await guardTx(connId, "删除连接"))) return;
   try {
     setConns(await dbApi.remove(connId));
+    clearSlots(connId);
     for (const t of getDb().tabs) {
       if (t.connId !== connId) continue;
-      if (t.kind === "sql") patchTab<SqlTab>(t.id, { connId: null });
+      if (t.kind === "sql") patchTab<SqlTab>(t.id, { connId: null, slot: null, tx: undefined });
       else closeTab(t.id);
     }
   } catch (e) {

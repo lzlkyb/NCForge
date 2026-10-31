@@ -58,26 +58,79 @@ describe("execOne 把 sets 带到结果条目上", () => {
     __resetDbForTest();
   });
 
+  const rowsBody = {
+    kind: "rows",
+    columns: [{ name: "A", type: "NUMBER", precision: 10, scale: 0 }],
+    rows: [["1"]],
+    rowCount: 1,
+    hasMore: false,
+    sets: [
+      { columns: [{ name: "A", type: "NUMBER", precision: 10, scale: 0 }], rows: [["1"]], rowCount: 1, hasMore: false },
+      { columns: [{ name: "S", type: "VARCHAR2(10)", precision: 10, scale: 0 }], rows: [["x"]], rowCount: 1, hasMore: true },
+    ],
+    ms: 5,
+    output: [],
+    tx: { autoCommit: true, statements: 0, rows: 0, since: 0 },
+  };
+
   it("后端给了 sets 就不能丢（丢了界面只剩第一张表）", async () => {
-    mocks.invoke.mockResolvedValue({
-      kind: "rows",
-      columns: [{ name: "A", type: "NUMBER", precision: 10, scale: 0 }],
-      rows: [["1"]],
-      rowCount: 1,
-      hasMore: false,
-      sets: [
-        { columns: [{ name: "A", type: "NUMBER", precision: 10, scale: 0 }], rows: [["1"]], rowCount: 1, hasMore: false },
-        { columns: [{ name: "S", type: "VARCHAR2(10)", precision: 10, scale: 0 }], rows: [["x"]], rowCount: 1, hasMore: true },
-      ],
-      ms: 5,
-      output: [],
-      tx: { autoCommit: true, statements: 0, rows: 0, since: 0 },
-    });
+    mocks.invoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "db_slot_acquire" ? { slot: "1" } : rowsBody),
+    );
     const tabId = openSqlTab("c1", "select 1 from dual");
     const e = await execOne(tabId, "select 1 from dual", 1);
     expect(e.kind).toBe("rows");
     expect(e.sets).toHaveLength(2);
     expect(e.sets?.[1].hasMore).toBe(true);
     expect(summaryOf(e)).toBe("2 个结果集");
+  });
+
+  it("标签第一次执行先申请独立会话，并把槽名带进后续每条命令", async () => {
+    mocks.invoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "db_slot_acquire" ? { slot: "2" } : rowsBody),
+    );
+    const tabId = openSqlTab("c1", "select 1 from dual");
+    await execOne(tabId, "select 1 from dual", 1);
+    // A0 的核心：执行必须落到自己那条会话上，否则长查询还是会把别的标签堵住
+    const exec = mocks.invoke.mock.calls.find((c) => c[0] === "db_exec");
+    expect(exec?.[1]).toMatchObject({ id: "c1", slot: "2" });
+    expect(mocks.invoke.mock.calls.filter((c) => c[0] === "db_slot_acquire")).toHaveLength(1);
+  });
+
+  it("申请不到槽时退回 primary，执行不失败", async () => {
+    mocks.invoke.mockImplementation((cmd: string) => {
+      if (cmd === "db_slot_acquire") return Promise.reject("slots-full|最多 3 个独立会话");
+      return Promise.resolve(rowsBody);
+    });
+    const tabId = openSqlTab("c1", "select 1 from dual");
+    const e = await execOne(tabId, "select 1 from dual", 1);
+    expect(e.kind).toBe("rows");
+    const exec = mocks.invoke.mock.calls.find((c) => c[0] === "db_exec");
+    expect(exec?.[1]).toMatchObject({ slot: null });
+  });
+
+  it("槽被空闲回收（slot-gone）后自动重开再试一次", async () => {
+    // 槽空闲 10 分钟就被后端收掉，而标签上的槽名还在。这时报错让用户「再点一次运行」
+    // 是最差的做法——他自己并不知道发生了什么。这里必须自动换新槽重跑。
+    let acquired = 0;
+    let execs = 0;
+    mocks.invoke.mockImplementation((cmd: string) => {
+      if (cmd === "db_slot_acquire") return Promise.resolve({ slot: String(++acquired) });
+      if (cmd === "db_exec") {
+        execs += 1;
+        if (execs === 1) return Promise.reject("slot-gone|会话 1 已被回收，请重试");
+        return Promise.resolve(rowsBody);
+      }
+      return Promise.resolve(null);
+    });
+    const tabId = openSqlTab("c1", "select 1 from dual");
+    const e = await execOne(tabId, "select 1 from dual", 1);
+    expect(e.kind).toBe("rows");
+    // 两次申请 = 第一次的槽 1 作废，重开拿到槽 2
+    expect(mocks.invoke.mock.calls.filter((c) => c[0] === "db_slot_acquire")).toHaveLength(2);
+    const execCalls = mocks.invoke.mock.calls.filter((c) => c[0] === "db_exec");
+    expect(execCalls).toHaveLength(2);
+    expect(execCalls[0][1]).toMatchObject({ slot: "1" });
+    expect(execCalls[1][1]).toMatchObject({ slot: "2" });
   });
 });

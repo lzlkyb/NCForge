@@ -28,12 +28,14 @@ export interface GridEdit {
  * 排序 / 筛选的结果由父组件以 `order` 传入（复制 / 导出要用同一个顺序）。
  * NULL 斜体灰字与空串区分；数字右对齐。
  */
-export function ResultGrid({ columns, rows, order, sort, onSort, sel, onSel, onOpen, edit, zh }: {
+export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onOpen, edit, zh }: {
   columns: ColumnMeta[];
   rows: Cell[][];
   order: number[];
   sort: SortState | null;
   onSort: (col: number) => void;
+  /** 表头右键（A3：让数据库重排整表）。不传就没有这个入口。 */
+  onHeaderMenu?: (col: number, x: number, y: number) => void;
   sel: CellPos | null;
   onSel: (p: CellPos) => void;
   /** 双击不可编辑的格子：打开详情。 */
@@ -153,6 +155,11 @@ export function ResultGrid({ columns, rows, order, sort, onSort, sel, onSel, onO
               style={{ width: ws[k] }}
               title={[c.name.toLowerCase(), zh?.[c.name.toLowerCase()], c.type].filter(Boolean).join(" · ")}
               onClick={() => onSort(k)}
+              onContextMenu={(e) => {
+                if (!onHeaderMenu) return;
+                e.preventDefault();
+                onHeaderMenu(k, e.clientX, e.clientY);
+              }}
             >
               <span className="nm">{c.name.toLowerCase()}</span>
               {sort?.col === k && <span className="so">{sort.dir === "asc" ? "▲" : "▼"}</span>}

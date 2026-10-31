@@ -81,10 +81,34 @@ export const dbCheckSources = (files: string[]) =>
 
 // ───────────────────────── 错误码 ─────────────────────────
 
-const KNOWN_CODES = new Set(["auth", "unreachable", "sql", "need-password", "not-connected", "bridge", "dup", "need-schema"]);
+const KNOWN_CODES = new Set([
+  "auth",
+  "unreachable",
+  "sql",
+  "need-password",
+  "not-connected",
+  "bridge",
+  "dup",
+  "need-schema",
+  // A0 会话槽：`slot-gone` = 槽被空闲回收 / 连接断开，重执行一次会自动重开
+  "slot-gone",
+  // 一条连接上的独立会话用满了（最多 3 个）
+  "slots-full",
+]);
 
 export interface DbError {
-  code: "auth" | "unreachable" | "sql" | "need-password" | "not-connected" | "bridge" | "dup" | "need-schema" | "other";
+  code:
+    | "auth"
+    | "unreachable"
+    | "sql"
+    | "need-password"
+    | "not-connected"
+    | "bridge"
+    | "dup"
+    | "need-schema"
+    | "slot-gone"
+    | "slots-full"
+    | "other";
   message: string;
 }
 

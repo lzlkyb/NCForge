@@ -10,13 +10,15 @@
 //!
 //! 三条格式规则在 [`crate::sql_export`]，那边是纯函数、有单测；这里只负责取数与拼装。
 
+use std::io::BufWriter;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use crate::commands::db_cmds::{
     bridge_for, call, connect_args, drop_bridge, existing_bridge, find_conn, prop_password_ready,
@@ -24,6 +26,7 @@ use crate::commands::db_cmds::{
 };
 use crate::config::{AppConfig, DbConnConfig};
 use crate::db_engine::{EngineHandle, EngineKind};
+use crate::db_file_export::{safe_file_name, Format, RowWriter};
 use crate::sql_export::{self, ColMeta, Plan, ResultCol};
 use crate::state::AppState;
 
@@ -424,4 +427,267 @@ fn file_name(schema: Option<&str>, table: &str) -> String {
         Some(s) => format!("{}.{}.insert.sql", safe(s), safe(table)),
         None => format!("{}.insert.sql", safe(table)),
     }
+}
+
+// ───────────────────────── 流式导出（A4：CSV / TSV / INSERT 写文件） ─────────────────────────
+
+/// 流式导出的分页行数：一次 IPC 传一页。太小往返多，太大单条 JSON 报文复制慢。
+const STREAM_PAGE: usize = 5000;
+/// 硬上限。再大就不该走这个入口了（该上数据泵），但**不能默默截断**：
+/// 到上限时 `truncated=true`，界面明确告诉用户文件不是全量。
+const STREAM_MAX_ROWS: usize = 2_000_000;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportFileReq {
+    pub id: String,
+    /// 取数语句。
+    pub sql: String,
+    /// `csv` / `tsv` / `insert`。
+    pub format: String,
+    /// INSERT 的目标表名（其余格式只用来命名文件）。
+    pub table: Option<String>,
+    /// 期望的文件名（不含目录）。**时间戳由前端给**：后端没有 chrono，
+    /// 自己算成 UTC 会让文件名比用户手表差 8 小时，看起来像 bug。
+    pub file_name: Option<String>,
+    /// 行数上限；缺省 / 0 = 不限（仍受 [`STREAM_MAX_ROWS`] 约束）。
+    pub max_rows: Option<usize>,
+    pub timeout_sec: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportFileOut {
+    /// 落盘的绝对路径（界面显示「已导出到 …」，并给「打开所在文件夹」）。
+    pub path: String,
+    pub file_name: String,
+    pub rows: usize,
+    pub bytes: u64,
+    /// 到行数上限还有剩余：文件不是全量。
+    pub truncated: bool,
+    pub ms: u64,
+}
+
+/// 把一条查询的结果**边读边写**成文件，内存峰值 O(一页)。
+///
+/// 与 `db_export_insert`（那个要读表元数据、做多语列规则、一次拼出整段文本）的区别：
+/// 这里只管「打印结果集」，不碰主键/多语/CLOB 语义，行数可以大得多。
+///
+/// **一定开独立会话**：导出要把游标读到空，用 primary 会把控制台的「加载更多」吃掉。
+/// 开不出来就直接报错，不退回复用 primary——那会让用户在毫无察觉的情况下丢掉游标。
+#[tauri::command]
+pub async fn db_export_file(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    req: ExportFileReq,
+) -> Result<ExportFileOut, String> {
+    let st = state.inner().clone();
+    let cfg = st.config.read().await.clone();
+    let t0 = Instant::now();
+    let fmt = Format::parse(&req.format)?;
+    let sql = req.sql.trim().to_string();
+    if sql.is_empty() {
+        return Err("取数语句是空的".to_string());
+    }
+    let mut conn = find_conn(&cfg, &req.id)?;
+    let engine = EngineKind::parse(&conn.engine);
+    if engine != EngineKind::Java && conn.source == "prop" {
+        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE).await?;
+    }
+    let timeout = req.timeout_sec.unwrap_or(600).clamp(5, 3600);
+    let limit = match req.max_rows.unwrap_or(0) {
+        0 => STREAM_MAX_ROWS,
+        n => n.min(STREAM_MAX_ROWS),
+    };
+    let table = req
+        .table
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .unwrap_or("result");
+
+    let dir = export_dir(&st);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("建导出目录失败 {}: {e}", dir.display()))?;
+    let name = safe_file_name(req.file_name.as_deref(), table, fmt);
+    let path = dir.join(&name);
+
+    let (key, handle) = open_session(&app, &st, &cfg, &conn, engine)
+        .await
+        .ok_or_else(|| {
+            "开不了导出用的独立会话（连接没连上，或手动连接的口令没记住）。请先连上这个库再导出"
+                .to_string()
+        })?;
+
+    let res = stream_to_file(
+        &app, &handle, &req.id, &sql, &path, fmt, table, limit, timeout,
+    )
+    .await;
+    // 导出会话用完就断，不留在服务端占连接
+    let _ = call(handle, "disconnect", vec![], Duration::from_secs(10)).await;
+    drop_bridge(&st, &key);
+    let rows = res?;
+
+    let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    Ok(ExportFileOut {
+        path: path.to_string_lossy().to_string(),
+        file_name: name,
+        rows: rows.rows,
+        bytes,
+        truncated: rows.truncated,
+        ms: t0.elapsed().as_millis() as u64,
+    })
+}
+
+struct Streamed {
+    rows: usize,
+    truncated: bool,
+}
+
+/// 取第一页 → 逐页写盘 → 每页发一次进度。
+#[allow(clippy::too_many_arguments)]
+async fn stream_to_file(
+    app: &AppHandle,
+    handle: &Arc<EngineHandle>,
+    conn_id: &str,
+    sql: &str,
+    path: &Path,
+    fmt: Format,
+    table: &str,
+    limit: usize,
+    timeout: u32,
+) -> Result<Streamed, String> {
+    let mut body = call(
+        handle.clone(),
+        "exec",
+        vec![
+            sql.to_string(),
+            STREAM_PAGE.to_string(),
+            timeout.to_string(),
+        ],
+        Duration::from_secs(u64::from(timeout) + 30),
+    )
+    .await?;
+    if body.get("kind").and_then(Value::as_str) != Some("rows") {
+        return Err("这条语句不返回结果集（导出要 select）".to_string());
+    }
+    let cols = parse_cols(&body)?;
+
+    let file =
+        std::fs::File::create(path).map_err(|e| format!("建文件失败 {}: {e}", path.display()))?;
+    let mut w = RowWriter::new(BufWriter::with_capacity(64 * 1024, file), fmt, cols, table)
+        .map_err(|e| format!("写文件头失败：{e}"))?;
+
+    let mut written = 0usize;
+    let mut truncated = false;
+    loop {
+        let has_more = body
+            .get("hasMore")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        for row in body
+            .get("rows")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if written >= limit {
+                truncated = true;
+                break;
+            }
+            let cells: Vec<Option<String>> = row
+                .as_array()
+                .map(|a| a.iter().map(cell_text).collect())
+                .unwrap_or_default();
+            w.push(&cells).map_err(|e| format!("写文件失败：{e}"))?;
+            written += 1;
+        }
+        // 每页一次进度：前端只需要「已经写了多少行」，不需要每一行
+        let _ = app.emit(
+            "db:export-progress",
+            serde_json::json!({ "id": conn_id, "rows": written }),
+        );
+        if truncated || !has_more {
+            break;
+        }
+        let left = limit.saturating_sub(written).min(STREAM_PAGE);
+        body = call(
+            handle.clone(),
+            "more",
+            vec![left.max(1).to_string()],
+            Duration::from_secs(u64::from(timeout) + 30),
+        )
+        .await?;
+    }
+    let out = w.finish().map_err(|e| format!("收尾写文件失败：{e}"))?;
+    out.into_inner()
+        .map_err(|e| format!("刷新缓冲区失败：{e}"))?
+        .sync_all()
+        .ok();
+    Ok(Streamed {
+        rows: written,
+        truncated,
+    })
+}
+
+fn parse_cols(body: &Value) -> Result<Vec<ResultCol>, String> {
+    let cols: Vec<ResultCol> = body
+        .get("columns")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .map(|c| ResultCol {
+                    name: c
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    ty: c
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if cols.is_empty() {
+        return Err("结果集没有列元数据，导出不了".to_string());
+    }
+    Ok(cols)
+}
+
+/// 导出目录：`{config_dir}/exports`。放配置目录而不是临时目录——
+/// 用户点完导出要能找回来，系统清理临时目录时不该把刚导的文件删掉。
+pub(crate) fn export_dir(state: &AppState) -> PathBuf {
+    state.config_dir.join("exports")
+}
+
+/// 在系统文件管理器里定位一个导出文件。
+///
+/// **只允许导出目录内的路径**：这个命令会调 `opener`，不校验等于给前端一个
+/// 「打开任意路径」的入口（前端被注入时后果放大的地方就在这类命令上）。
+#[tauri::command]
+pub async fn db_export_reveal(
+    state: tauri::State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = export_dir(&state);
+    let canon_dir = dir.canonicalize().unwrap_or(dir);
+    let canon = std::path::Path::new(&path)
+        .canonicalize()
+        .map_err(|e| format!("文件不存在或打不开：{e}"))?;
+    if !canon.starts_with(&canon_dir) {
+        return Err("只能打开导出目录里的文件".to_string());
+    }
+    // 定位到文件本身：Windows 资源管理器会选中它（打开的是父目录）
+    state
+        .app_handle
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .ok_or_else(|| "窗口还没准备好".to_string())?
+        .opener()
+        .reveal_item_in_dir(canon)
+        .map_err(|e| format!("打开目录失败：{e}"))
 }

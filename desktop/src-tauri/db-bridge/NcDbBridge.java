@@ -101,7 +101,7 @@ public class NcDbBridge {
     private static final Set<String> CMDS = new HashSet<String>(Arrays.asList(
             "hello", "propList", "propCred", "connect", "connectProp", "exec", "more", "commit",
             "rollback", "autocommit", "tables", "ncNames", "columns", "indexes", "ddl",
-            "explain", "schema", "ping", "disconnect", "quit", "cancel"));
+            "explain", "sessions", "schema", "ping", "disconnect", "quit", "cancel"));
 
     public static void main(String[] args) throws Exception {
         // stdout 只留给协议；第三方库的 System.out 一律改道 stderr，否则一行日志就把 JSON 流冲乱
@@ -352,6 +352,8 @@ public class NcDbBridge {
                 ok(id, ddl(a.get(0)));
             } else if ("explain".equals(cmd)) {
                 ok(id, explain(a.get(0)));
+            } else if ("sessions".equals(cmd)) {
+                ok(id, sessions());
             } else if ("schema".equals(cmd)) {
                 ok(id, schema(Integer.parseInt(a.get(0)), Integer.parseInt(a.get(1))));
             } else if ("ping".equals(cmd)) {
@@ -423,6 +425,9 @@ public class NcDbBridge {
                 throw new SQLException("空语句");
             }
             long t0 = System.currentTimeMillis();
+            // A2 Autotrace：执行前后各读一次 v$mystat，差值才是这条语句的真实开销。
+            // 读不到（低权限账号没有 V_$MYSTAT 授权）时为 null，界面据此不显示统计行。
+            long[] statBefore = statSnapshot();
             Statement st = conn.createStatement();
             boolean keep = false;
             try {
@@ -446,7 +451,10 @@ public class NcDbBridge {
                     trackTx("lock", 0);
                 }
                 long ms = System.currentTimeMillis() - t0;
-                return "{" + body + ",\"ms\":" + ms + ",\"output\":" + dbmsOutput() + ",\"tx\":" + txJson() + "}";
+                // 必须在 dbmsOutput() 之前取快照：那段 get_line 循环也会产生逻辑读
+                long[] statAfter = statSnapshot();
+                return "{" + body + ",\"ms\":" + ms + ",\"stats\":" + statsJson(statBefore, statAfter)
+                        + ",\"output\":" + dbmsOutput() + ",\"tx\":" + txJson() + "}";
             } finally {
                 running = null;
                 if (!keep) {
@@ -457,6 +465,79 @@ public class NcDbBridge {
                     }
                 }
             }
+        }
+
+        /**
+         * 读一次会话统计，顺序：[db block gets, consistent gets, physical reads, execute count]。
+         *
+         * <p>读不到就返回 null —— 「没有权限读统计」是能力降级，不是错误，也**不是 0**。
+         * 四项的名字必须与 Rust 引擎（{@code db_rust.rs} 的 STAT_NAMES）逐字一致，
+         * 否则同一条 SQL 换引擎会给出两种逻辑读。
+         */
+        private long[] statSnapshot() {
+            Statement st = null;
+            ResultSet rs = null;
+            try {
+                st = conn.createStatement();
+                rs = st.executeQuery("select n.name, m.value from v$mystat m, v$statname n "
+                        + "where n.statistic# = m.statistic# and n.name in ("
+                        + "'db block gets','consistent gets','physical reads','execute count')");
+                long[] v = new long[4];
+                int found = 0;
+                while (rs.next()) {
+                    String name = rs.getString(1);
+                    long val = rs.getLong(2);
+                    if (name == null) {
+                        continue;
+                    }
+                    name = name.trim().toLowerCase();
+                    if ("db block gets".equals(name)) {
+                        v[0] = val;
+                        found++;
+                    } else if ("consistent gets".equals(name)) {
+                        v[1] = val;
+                        found++;
+                    } else if ("physical reads".equals(name)) {
+                        v[2] = val;
+                        found++;
+                    } else if ("execute count".equals(name)) {
+                        v[3] = val;
+                        found++;
+                    }
+                }
+                return found > 0 ? v : null;
+            } catch (SQLException e) {
+                return null;
+            } finally {
+                try {
+                    if (rs != null) {
+                        rs.close();
+                    }
+                } catch (SQLException ignore) {
+                    // 忽略
+                }
+                try {
+                    if (st != null) {
+                        st.close();
+                    }
+                } catch (SQLException ignore) {
+                    // 忽略
+                }
+            }
+        }
+
+        /** 差值 → JSON。与 Rust 侧同一组字段，`logicalReads` 都在服务端算好，前端不重复推导。 */
+        private String statsJson(long[] before, long[] after) {
+            if (before == null || after == null) {
+                return "null";
+            }
+            long[] d = new long[4];
+            for (int i = 0; i < 4; i++) {
+                d[i] = Math.max(0, after[i] - before[i]);
+            }
+            return "{\"dbBlockGets\":" + d[0] + ",\"consistentGets\":" + d[1]
+                    + ",\"logicalReads\":" + (d[0] + d[1]) + ",\"physicalReads\":" + d[2]
+                    + ",\"executeCount\":" + d[3] + "}";
         }
 
         private void trackTx(String head, int updateCount) throws SQLException {
@@ -618,6 +699,143 @@ public class NcDbBridge {
                 st.close();
             }
             return "{\"tables\":" + sb.append(']') + ",\"count\":" + n + "}";
+        }
+
+        /**
+         * 会话与锁：谁在跑、谁在等、谁锁了哪张表。**只读**，不生成也不执行 kill。
+         *
+         * <p>权限边界：{@code v$session} 普通账号可读；{@code v$locked_object} 多数客户库只给 DBA，
+         * 读不到时回 {@code granted:false}，前端显示黄条与授权语句——<b>不能当成「没有锁」</b>
+         * （那是把事故说成正常）。
+         *
+         * <p>JSON 形状必须与 {@code db_rust.rs::sessions()} 完全一致：字段名、null 语义、
+         * {@code granted} 含义都对齐。不一致会变成「换个引擎面板就空白」这种只在个别人机器上
+         * 复现的 bug。
+         */
+        private String sessions() throws SQLException {
+            requireConn();
+            String q = "select s.sid, s.serial#, s.username, s.machine, s.program, s.status,"
+                    + " s.blocking_session, s.event, s.wait_class, s.seconds_in_wait,"
+                    + " s.last_call_et, s.sql_id from v$session s"
+                    + " where s.type = 'USER'"
+                    + " and (s.status = 'ACTIVE' or s.blocking_session is not null)"
+                    + " order by nvl(s.blocking_session, s.sid), s.sid";
+            List<String[]> raw = new ArrayList<String[]>();
+            Statement st = conn.createStatement();
+            try {
+                ResultSet rs = st.executeQuery(q);
+                while (rs.next()) {
+                    long sid = rs.getLong(1);
+                    long serial = rs.getLong(2);
+                    String user = nz(rs.getString(3));
+                    String machine = nz(rs.getString(4));
+                    String program = nz(rs.getString(5));
+                    String status = nz(rs.getString(6));
+                    long blocker = rs.getLong(7);
+                    boolean blockerNull = rs.wasNull();
+                    String event = nz(rs.getString(8));
+                    String waitClass = nz(rs.getString(9));
+                    long waitSec = rs.getLong(10);
+                    if (rs.wasNull()) {
+                        waitSec = 0;
+                    }
+                    long elapsed = rs.getLong(11);
+                    if (rs.wasNull()) {
+                        elapsed = 0;
+                    }
+                    String sqlId = nz(rs.getString(12));
+                    raw.add(new String[]{
+                        String.valueOf(sid), String.valueOf(serial), user, machine, program,
+                        status, blockerNull ? null : String.valueOf(blocker), event, waitClass,
+                        String.valueOf(waitSec), String.valueOf(elapsed), sqlId
+                    });
+                }
+                rs.close();
+            } finally {
+                st.close();
+            }
+
+            // 锁：读不到权限就记 granted=false，绝不返回「空锁列表」冒充「没有锁」
+            boolean granted = true;
+            Map<Long, List<String>> locks = new LinkedHashMap<Long, List<String>>();
+            try {
+                Statement ls = conn.createStatement();
+                try {
+                    ResultSet rs = ls.executeQuery(
+                            "select l.session_id, o.owner, o.object_name, o.object_type, l.locked_mode"
+                                    + " from v$locked_object l join all_objects o"
+                                    + " on o.object_id = l.object_id");
+                    while (rs.next()) {
+                        long sid = rs.getLong(1);
+                        String text = nz(rs.getString(2)) + "." + nz(rs.getString(3))
+                                + "(" + nz(rs.getString(4)) + ",L" + rs.getLong(5) + ")";
+                        List<String> v = locks.get(Long.valueOf(sid));
+                        if (v == null) {
+                            v = new ArrayList<String>();
+                            locks.put(Long.valueOf(sid), v);
+                        }
+                        v.add(text);
+                    }
+                    rs.close();
+                } finally {
+                    ls.close();
+                }
+            } catch (SQLException e) {
+                granted = false;
+            }
+
+            // SQL 文本：v$sql 在低权限账号下常常只返回自己的语句，读不到就留空（前端只显示 sqlId）
+            Map<String, String> texts = new LinkedHashMap<String, String>();
+            try {
+                Statement qs = conn.createStatement();
+                try {
+                    ResultSet rs = qs.executeQuery(
+                            "select sql_id, sql_text from v$sql"
+                                    + " where sql_id is not null and rownum <= 500");
+                    while (rs.next()) {
+                        texts.put(nz(rs.getString(1)), cut(rs.getString(2), 300));
+                    }
+                    rs.close();
+                } finally {
+                    qs.close();
+                }
+            } catch (SQLException e) {
+                // 读不到就没有 SQL 文本，其余照常
+            }
+
+            StringBuilder sb = new StringBuilder("{\"rows\":[");
+            for (int i = 0; i < raw.size(); i++) {
+                String[] r = raw.get(i);
+                if (i > 0) {
+                    sb.append(',');
+                }
+                sb.append("{\"sid\":").append(r[0])
+                        .append(",\"serial\":").append(r[1])
+                        .append(",\"user\":\"").append(esc(r[2]))
+                        .append("\",\"machine\":\"").append(esc(r[3]))
+                        .append("\",\"program\":\"").append(esc(r[4]))
+                        .append("\",\"status\":\"").append(esc(r[5]))
+                        .append("\",\"blocker\":").append(r[6] == null ? "null" : r[6])
+                        .append(",\"event\":\"").append(esc(r[7]))
+                        .append("\",\"waitClass\":\"").append(esc(r[8]))
+                        .append("\",\"waitSec\":").append(r[9])
+                        .append(",\"elapsedSec\":").append(r[10])
+                        .append(",\"sqlId\":\"").append(esc(r[11]))
+                        .append("\",\"locked\":[");
+                List<String> lk = locks.get(Long.valueOf(Long.parseLong(r[0])));
+                if (lk != null) {
+                    for (int j = 0; j < lk.size(); j++) {
+                        if (j > 0) {
+                            sb.append(',');
+                        }
+                        sb.append('"').append(esc(lk.get(j))).append('"');
+                    }
+                }
+                sb.append(']');
+                String text = texts.get(r[11]);
+                sb.append(",\"sql\":\"").append(text == null ? "" : esc(text)).append("\"}");
+            }
+            return sb.append("],\"granted\":").append(granted).append('}').toString();
         }
 
         /** NC 元数据里的表中文名（md_table.displayname）。不是 NC 库就返回空。 */
@@ -1220,6 +1438,19 @@ public class NcDbBridge {
             m = e.getClass().getSimpleName();
         }
         return "ORA " + e.getErrorCode() + "：" + m.trim();
+    }
+
+    /** null → 空串。JSON 里统一写 ""，前端不用区分 null 与空。 */
+    private static String nz(String s) {
+        return s == null ? "" : s;
+    }
+
+    /** 截断到 n 个字符：SQL 文本只用来认「是哪条」，完整语句用户点开再复制。 */
+    private static String cut(String s, int n) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= n ? s : s.substring(0, n);
     }
 
     private static String esc(String s) {

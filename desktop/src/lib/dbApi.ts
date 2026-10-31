@@ -65,6 +65,56 @@ export interface EngineCaps {
   /** 能解 NC prop.xml 里加密的口令。 */
   propDecrypt: boolean;
   multiSession: boolean;
+  /** 能列会话与锁（`v$session` / `v$locked_object`）。权限不够由返回的 `granted` 表达。 */
+  sessions: boolean;
+  /** 执行时能回实际统计（逻辑读/物理读）。账号读不到统计视图时响应里 `stats` 为 null。 */
+  stats: boolean;
+}
+
+/**
+ * 一次执行的实际开销（Autotrace）。由后端在执行前后各读一次 `v$mystat` 取差值。
+ *
+ * `null` = 这个账号读不到统计视图（没有 `V_$MYSTAT` 授权），**不是 0**：
+ * 界面必须整行不显示，而不是显示一排 0 让人以为这条 SQL 没花成本。
+ */
+export interface ExecStats {
+  /** 当前读（`db block gets`）。 */
+  dbBlockGets: number;
+  /** 一致读（`consistent gets`）。 */
+  consistentGets: number;
+  /** 逻辑读 = 当前读 + 一致读，后端已经算好，前端别自己再加一遍。 */
+  logicalReads: number;
+  physicalReads: number;
+  executeCount: number;
+}
+
+/** 一条会话（锁与会话面板的一行）。字段名与两个引擎的 JSON 严格一致。 */
+export interface SessionRow {
+  sid: number;
+  serial: number | null;
+  user: string;
+  machine: string;
+  program: string;
+  status: string;
+  /** 阻塞它的 SID；没有被阻塞时为 null。 */
+  blocker: number | null;
+  event: string;
+  waitClass: string;
+  /** 已等待秒数（`v$session.seconds_in_wait`）。 */
+  waitSec: number;
+  /** 本会话当前调用已执行秒数（`last_call_et`）。 */
+  elapsedSec: number;
+  sqlId: string;
+  /** 该会话锁住的对象，形如 `OWNER.TABLE(TABLE,L6)`。 */
+  locked: string[];
+  /** SQL 文本（截 300 字符）；低权限账号读不到 `v$sql` 时为空。 */
+  sql: string;
+}
+
+export interface SessionsResult {
+  rows: SessionRow[];
+  /** false = 这个账号读不到 `v$locked_object`，锁信息不可见（**不是**「没有锁」）。 */
+  granted: boolean;
 }
 
 /** 手动提交模式下的未提交事务。`statements = 0` 表示没有。 */
@@ -112,6 +162,8 @@ export interface RowsResult {
   /** `dbms_sql.return_result` 带回的全部结果集（顺序与 `return_result` 一致）。 */
   sets?: ResultSet[];
   ms: number;
+  /** 实际执行统计；`null` = 这个账号读不到 `v$mystat`。 */
+  stats?: ExecStats | null;
   output: string[];
   tx: TxInfo;
 }
@@ -121,6 +173,7 @@ export interface UpdateResult {
   /** DML 影响行数；DDL / PL/SQL 块为 -1 或 0。 */
   updateCount: number;
   ms: number;
+  stats?: ExecStats | null;
   output: string[];
   tx: TxInfo;
 }
@@ -246,6 +299,46 @@ export interface PendingTxRow {
   message?: string;
 }
 
+/**
+ * 流式导出请求（A4）：后端按页取、按行写文件，内存峰值 O(一页)。
+ *
+ * 与 `ExportInsertReq` 的区别：那个带 NC 多语/主键规则、一次拼出整段文本、上限 10 万行；
+ * 这个只管「把结果集打印成文件」，行数可以大得多。
+ */
+export interface ExportFileReq {
+  id: string;
+  sql: string;
+  format: "csv" | "tsv" | "insert";
+  /** INSERT 的目标表名；其余格式只用来命名文件。 */
+  table?: string | null;
+  /** 期望文件名（**前端带时间戳**，本机时区；后端没有 chrono）。 */
+  fileName?: string | null;
+  /** 0 / 不传 = 不限（后端仍有 200 万行硬上限，到了会标 `truncated`）。 */
+  maxRows?: number;
+  timeoutSec?: number;
+}
+
+export interface ExportFileOut {
+  path: string;
+  fileName: string;
+  rows: number;
+  bytes: number;
+  /** 到行数上限还有剩余：文件不是全量。 */
+  truncated: boolean;
+  ms: number;
+}
+
+/** 导出进度事件（`db:export-progress`）。 */
+export interface ExportProgress {
+  id: string;
+  rows: number;
+}
+
+/** `db_slot_acquire` 的结果：本标签要用的独立会话槽名（数字字符串）。 */
+export interface SlotOut {
+  slot: string;
+}
+
 export const dbApi = {
   list: () => invoke<DbConn[]>("db_conn_list"),
   save: (conn: DbConnInput, password?: string, remember = true) =>
@@ -262,20 +355,41 @@ export const dbApi = {
   connect: (id: string, password?: string, remember?: boolean) =>
     invoke<ConnectInfo>("db_connect", { id, password: password || null, remember: remember ?? null }),
   disconnect: (id: string) => invoke<void>("db_disconnect", { id }),
-  exec: (id: string, sql: string, maxRows: number, timeoutSec: number) =>
-    invoke<ExecResult>("db_exec", { id, sql, maxRows, timeoutSec }),
+  /**
+   * 执行一条语句。`slot` 为空 = primary（元数据 / 表页 / 事务条那条会话）；
+   * SQL 标签申请到槽之后，执行、加载更多、取消、事务都必须带同一个槽名。
+   */
+  exec: (id: string, sql: string, maxRows: number, timeoutSec: number, slot?: string | null) =>
+    invoke<ExecResult>("db_exec", { id, sql, maxRows, timeoutSec, slot: slot || null }),
+  /** 给一个 SQL 标签再开一条独立会话。最多 3 个/连接，超出报 `slots-full`。 */
+  slotAcquire: (id: string) => invoke<SlotOut>("db_slot_acquire", { id }),
+  /** 关标签时释放；断开连接时后端会连带收掉全部槽。 */
+  slotRelease: (id: string, slot: string) => invoke<void>("db_slot_release", { id, slot }),
   /**
    * 导出 insert 脚本：后端单独开会话把游标读到空，按 NC 的三条格式规则生成脚本。
    * 前端拿到整段文本再落盘（`resultExport.downloadText`）。
    */
   exportInsert: (req: ExportInsertReq) => invoke<ExportInsertResult>("db_export_insert", { req }),
+  /**
+   * 流式导出到文件（CSV / TSV / INSERT）。后端按页取数、按行写盘，
+   * 进度走 `db:export-progress` 事件；返回落盘路径，界面用 `revealExport` 定位。
+   */
+  exportFile: (req: ExportFileReq) => invoke<ExportFileOut>("db_export_file", { req }),
+  /** 在系统文件管理器里定位刚导出的文件（只允许导出目录内的路径）。 */
+  revealExport: (path: string) => invoke<void>("db_export_reveal", { path }),
   /** 取消这个连接上正在执行的语句（不等执行返回，立即生效）。能不能用先看 `caps.cancel`。 */
-  cancel: (id: string) => invoke<void>("db_cancel", { id }),
+  cancel: (id: string, slot?: string | null) => invoke<void>("db_cancel", { id, slot: slot || null }),
   /** 这个连接用哪个引擎、那个引擎能做什么。 */
   caps: (id: string) => invoke<EngineCaps>("db_caps", { id }),
-  more: (id: string, maxRows: number) => invoke<MoreResult>("db_more", { id, maxRows }),
-  tx: (id: string, action: "commit" | "rollback" | "autocommit-on" | "autocommit-off" | "status") =>
-    invoke<{ tx: TxInfo; alive?: boolean }>("db_tx", { id, action }),
+  more: (id: string, maxRows: number, slot?: string | null) =>
+    invoke<MoreResult>("db_more", { id, maxRows, slot: slot || null }),
+  tx: (id: string, action: "commit" | "rollback" | "autocommit-on" | "autocommit-off" | "status", slot?: string | null) =>
+    invoke<{ tx: TxInfo; alive?: boolean }>("db_tx", { id, action, slot: slot || null }),
+  /**
+   * 退出前用：primary + 这条连接上所有独立会话槽一起提交/回滚。
+   * 前端不知道有哪些槽（那是后端的记账），所以必须由后端枚举。
+   */
+  txAll: (id: string, action: "commit" | "rollback") => invoke<void>("db_tx_all", { id, action }),
 
   tables: (id: string) => invoke<{ tables: TableInfo[] }>("db_meta", { id, kind: "tables" }),
   ncNames: (id: string) => invoke<{ names: Record<string, string> }>("db_meta", { id, kind: "ncNames" }),
@@ -285,6 +399,11 @@ export const dbApi = {
     invoke<{ indexes: IndexInfo[] }>("db_meta", { id, kind: "indexes", arg: table }),
   ddl: (id: string, table: string) => invoke<{ ddl: string }>("db_meta", { id, kind: "ddl", arg: table }),
   explain: (id: string, sql: string) => invoke<{ plan: PlanRow[] }>("db_meta", { id, kind: "explain", arg: sql }),
+  /**
+   * 会话与锁（只读，不生成也不执行 kill）。
+   * 锁信息读不到时 `granted: false` —— 界面必须显示「缺授权」，不能显示成「没有锁」。
+   */
+  sessions: (id: string) => invoke<SessionsResult>("db_meta", { id, kind: "sessions" }),
 
   schemaCache: (id: string) => invoke<SchemaCacheData | null>("db_schema_cache", { id }),
   schemaSync: (id: string) => invoke<SchemaStatus>("db_schema_sync", { id }),

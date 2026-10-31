@@ -295,6 +295,7 @@ impl Session {
             "indexes" => self.indexes(a.first().copied().unwrap_or("")),
             "ddl" => self.ddl(a.first().copied().unwrap_or("")),
             "explain" => self.explain(a.first().copied().unwrap_or("")),
+            "sessions" => self.sessions(),
             "schema" => self.schema(int_arg(a, 0, 0), int_arg(a, 1, 2000)),
             // 真正的中断走 `RustEngine::cancel()`（不经过会话锁），这条命令只是占位
             "cancel" => Err(other_err("请用引擎层的 cancel，不要发 cancel 命令")),
@@ -431,13 +432,25 @@ impl Session {
             let _ =
                 conn.set_call_timeout(Some(Duration::from_secs(timeout_sec.max(1) as u64 + 10)));
         }
+        // A2 Autotrace：执行前后各读一次 `v$mystat`，差值才是这条语句的真实开销。
+        // 读不到（低权限账号没有 V_$MYSTAT 授权）就是 None，界面据此**不显示这一行**，
+        // 而不是给一排 0 让人以为「这条 SQL 一次逻辑读都没花」。
+        let before = self.conn_ref().ok().and_then(stat_snapshot);
         let out = self.run(&sql, &head, max_rows);
         if let Ok(conn) = self.conn_ref() {
             let _ = conn.set_call_timeout(None);
         }
+        let after = self.conn_ref().ok().and_then(stat_snapshot);
 
         let mut body = out?;
         body.insert("ms".into(), json!(t0.elapsed().as_millis() as u64));
+        body.insert(
+            "stats".into(),
+            match (before, after) {
+                (Some(b), Some(a)) => a.since(&b),
+                _ => Value::Null,
+            },
+        );
         body.insert("output".into(), json!(self.take_output()));
         body.insert("tx".into(), self.tx_json());
         Ok(Value::Object(body))
@@ -842,14 +855,23 @@ impl Session {
         for row in cur {
             let row = row.map_err(drv_err)?;
             let depth: i64 = row.get::<Option<i64>>(0).ok().flatten().unwrap_or(0);
+            // NUMBER 列在这套驱动里取出来是字符串；前端 `PlanRow.cost/rows` 是数字
+            // （JVM 桥那边 `rs.getLong` 直接给数字）。这里转成数字再给，否则成本条
+            // 在纯 Rust 引擎下画不出来——`Math.max(1, ...)` 遇上字符串会变成 NaN。
+            let num = |i: usize| -> Option<f64> {
+                row.get::<Option<String>>(i)
+                    .ok()
+                    .flatten()
+                    .and_then(|s| s.trim().parse::<f64>().ok())
+            };
             plan.push(json!({
                 "depth": depth,
                 "operation": row.get::<Option<String>>(1).ok().flatten().unwrap_or_default(),
                 "object": row.get::<Option<String>>(2).ok().flatten().unwrap_or_default(),
                 "access": row.get::<Option<String>>(3).ok().flatten().unwrap_or_default(),
                 "filter": row.get::<Option<String>>(4).ok().flatten().unwrap_or_default(),
-                "cost": row.get::<Option<String>>(5).ok().flatten(),
-                "rows": row.get::<Option<String>>(6).ok().flatten(),
+                "cost": num(5),
+                "rows": num(6),
             }));
         }
         let _ = conn.execute(
@@ -857,6 +879,133 @@ impl Session {
             &[&mark as &dyn ToDbValue],
         );
         Ok(json!({ "plan": plan }))
+    }
+
+    /// 会话与锁：谁在跑、谁在等、谁锁了哪张表。**只读**，不生成也不执行 kill。
+    ///
+    /// 权限边界（这是这个功能最容易骗人的地方）：
+    /// - `v$session` 普通账号可读，但只看到有权限的部分列；
+    /// - `v$locked_object` 多数客户库只给 DBA —— 读不到时返回 `granted:false`，
+    ///   前端显示黄条与授权语句，**不能当成「没有锁」**（那是把事故说成正常）；
+    /// - `v$sql` 同理，取不到就只给 `sqlId`，不给空 SQL 文本。
+    ///
+    /// JSON 形状与 JVM 桥严格一致（见 `db-bridge/NcDbBridge.java` 的 `sessions()`）：
+    /// 形状不一致会变成「用 Rust 引擎时面板空白」这种只在个别人机器上复现的 bug。
+    fn sessions(&self) -> Result<Value, BridgeError> {
+        let conn = self.conn_ref()?;
+        // 只取「正在跑」与「被阻塞」的会话：全量 v$session 在共用库上有几百行，界面没法看
+        let sql = "select s.sid, s.serial#, s.username, s.machine, s.program, s.status, \
+                          s.blocking_session, s.event, s.wait_class, s.seconds_in_wait, \
+                          s.last_call_et, s.sql_id \
+                     from v$session s \
+                    where s.type = 'USER' \
+                      and (s.status = 'ACTIVE' or s.blocking_session is not null) \
+                    order by nvl(s.blocking_session, s.sid), s.sid";
+        let cur = conn.query(sql, &[]).map_err(drv_err)?;
+        let mut rows: Vec<Value> = Vec::new();
+        for row in cur {
+            let row = row.map_err(drv_err)?;
+            // 字段逐个 `.ok().flatten()`：这些列在低权限账号下可能直接报「标识符无效」，
+            // 不能因为一列读不到就让整个面板空掉
+            rows.push(json!({
+                "sid": row.get::<Option<i64>>(0).ok().flatten().unwrap_or(-1),
+                "serial": row.get::<Option<i64>>(1).ok().flatten(),
+                "user": row.get::<Option<String>>(2).ok().flatten().unwrap_or_default(),
+                "machine": row.get::<Option<String>>(3).ok().flatten().unwrap_or_default(),
+                "program": row.get::<Option<String>>(4).ok().flatten().unwrap_or_default(),
+                "status": row.get::<Option<String>>(5).ok().flatten().unwrap_or_default(),
+                "blocker": row.get::<Option<i64>>(6).ok().flatten(),
+                "event": row.get::<Option<String>>(7).ok().flatten().unwrap_or_default(),
+                "waitClass": row.get::<Option<String>>(8).ok().flatten().unwrap_or_default(),
+                "waitSec": row.get::<Option<i64>>(9).ok().flatten().unwrap_or(0),
+                "elapsedSec": row.get::<Option<i64>>(10).ok().flatten().unwrap_or(0),
+                "sqlId": row.get::<Option<String>>(11).ok().flatten().unwrap_or_default(),
+                "locked": Vec::<String>::new(),
+                "sql": String::new(),
+            }));
+        }
+
+        // 锁：读不到权限就记 granted=false，绝不返回「空锁列表」冒充「没有锁」
+        let mut granted = true;
+        let mut locks: Vec<(i64, Vec<String>)> = Vec::new();
+        match conn.query(
+            "select l.session_id, o.owner, o.object_name, o.object_type, l.locked_mode \
+               from v$locked_object l join all_objects o on o.object_id = l.object_id",
+            &[],
+        ) {
+            Ok(cur) => {
+                for row in cur {
+                    let Ok(row) = row else {
+                        granted = false;
+                        break;
+                    };
+                    let sid = row.get::<Option<i64>>(0).ok().flatten().unwrap_or(-1);
+                    let owner = row
+                        .get::<Option<String>>(1)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    let obj = row
+                        .get::<Option<String>>(2)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    let kind = row
+                        .get::<Option<String>>(3)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    let mode = row.get::<Option<i64>>(4).ok().flatten().unwrap_or(0);
+                    let text = format!("{owner}.{obj}({kind},L{mode})");
+                    match locks.iter_mut().find(|(s, _)| *s == sid) {
+                        Some((_, v)) => v.push(text),
+                        None => locks.push((sid, vec![text])),
+                    }
+                }
+            }
+            Err(_) => granted = false,
+        }
+
+        // SQL 文本：v$sql 在低权限账号下常常只返回自己的语句，读不到就留空（前端只显示 sqlId）
+        let mut texts: Vec<(String, String)> = Vec::new();
+        if let Ok(cur) = conn.query(
+            "select sql_id, sql_text from v$sql where sql_id is not null and rownum <= 500",
+            &[],
+        ) {
+            for row in cur {
+                let Ok(row) = row else { break };
+                let id = row
+                    .get::<Option<String>>(0)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let text = row
+                    .get::<Option<String>>(1)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                if !id.is_empty() {
+                    // 长 SQL 截断：面板只用来认「是哪条」，完整语句点开再复制
+                    let short: String = text.chars().take(300).collect();
+                    texts.push((id, short));
+                }
+            }
+        }
+
+        for row in rows.iter_mut() {
+            let sid = row["sid"].as_i64().unwrap_or(-1);
+            if let Some((_, objs)) = locks.iter().find(|(s, _)| *s == sid) {
+                row["locked"] = json!(objs);
+            }
+            let id = row["sqlId"].as_str().unwrap_or_default();
+            if !id.is_empty() {
+                if let Some((_, text)) = texts.iter().find(|(k, _)| k == id) {
+                    row["sql"] = json!(text);
+                }
+            }
+        }
+
+        Ok(json!({ "rows": rows, "granted": granted }))
     }
 
     /// 批量导出表结构（工作台缓存到本地，出包前核对字段与补全用）。
@@ -897,6 +1046,81 @@ impl Session {
             "nextOffset": offset + n,
         }))
     }
+}
+
+// ───────────────────────── Autotrace 统计（A2） ─────────────────────────
+
+/// `v$mystat` 里我们关心的四项。**名字必须与 JVM 桥逐字一致**，否则两个引擎算出来的
+/// 数字口径不同，同一条 SQL 换引擎会给出两种「逻辑读」。
+const STAT_NAMES: &str = "'db block gets','consistent gets','physical reads','execute count'";
+
+/// 某一时刻的会话累计统计。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct StatSnap {
+    db_block_gets: i64,
+    consistent_gets: i64,
+    physical_reads: i64,
+    execute_count: i64,
+}
+
+impl StatSnap {
+    /// 与执行前快照的差值 → 给前端的 JSON。四项各自夹到非负：
+    /// 会话统计理论上单调递增，但 `ALTER SESSION` / 重新连接会让基线归零。
+    fn since(&self, before: &StatSnap) -> Value {
+        let d = |a: i64, b: i64| (a - b).max(0);
+        let block_gets = d(self.db_block_gets, before.db_block_gets);
+        let consistent = d(self.consistent_gets, before.consistent_gets);
+        json!({
+            "dbBlockGets": block_gets,
+            "consistentGets": consistent,
+            "logicalReads": block_gets + consistent,
+            "physicalReads": d(self.physical_reads, before.physical_reads),
+            "executeCount": d(self.execute_count, before.execute_count),
+        })
+    }
+}
+
+/// 读一次会话统计。**读不到就返回 `None`**（无 `V_$MYSTAT` 授权、或结果里一项都没有）。
+///
+/// 成本是每次执行多两次往返（~1 ms 级）。差值里**包含**这两次统计查询自己的开销
+/// （约十几次逻辑读），与 PL/SQL Developer 的 autotrace 同口径，不额外剔除。
+fn stat_snapshot(conn: &Connection) -> Option<StatSnap> {
+    let sql = format!(
+        "select n.name, m.value from v$mystat m, v$statname n \
+          where n.statistic# = m.statistic# and n.name in ({STAT_NAMES})"
+    );
+    let cur = conn.query(&sql, &[]).ok()?;
+    let mut s = StatSnap::default();
+    let mut found = 0usize;
+    for row in cur {
+        let Ok(row) = row else { return None };
+        let name: String = row
+            .get::<Option<String>>(0)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let v: i64 = row.get::<Option<i64>>(1).ok().flatten().unwrap_or(0);
+        match name.trim().to_ascii_lowercase().as_str() {
+            "db block gets" => {
+                s.db_block_gets = v;
+                found += 1;
+            }
+            "consistent gets" => {
+                s.consistent_gets = v;
+                found += 1;
+            }
+            "physical reads" => {
+                s.physical_reads = v;
+                found += 1;
+            }
+            "execute count" => {
+                s.execute_count = v;
+                found += 1;
+            }
+            _ => {}
+        }
+    }
+    (found > 0).then_some(s)
 }
 
 // ───────────────────────── 结果集转换 ─────────────────────────
@@ -1404,5 +1628,43 @@ mod tests {
         let e = RustEngine::new();
         let err = e.cancel().unwrap_err();
         assert!(err.message.contains("还没连"), "{}", err.message);
+    }
+
+    #[test]
+    fn 统计差值是四项各自相减() {
+        let before = StatSnap {
+            db_block_gets: 10,
+            consistent_gets: 100,
+            physical_reads: 5,
+            execute_count: 1,
+        };
+        let after = StatSnap {
+            db_block_gets: 12,
+            consistent_gets: 130,
+            physical_reads: 5,
+            execute_count: 2,
+        };
+        let v = after.since(&before);
+        assert_eq!(v["dbBlockGets"], 2);
+        assert_eq!(v["consistentGets"], 30);
+        assert_eq!(v["logicalReads"], 32, "逻辑读 = 当前读 + 一致读");
+        assert_eq!(v["physicalReads"], 0);
+        assert_eq!(v["executeCount"], 1);
+    }
+
+    #[test]
+    fn 统计基线归零不产生负数() {
+        // 重连 / ALTER SESSION 之后累计值可能比上一次小：夹到 0，
+        // 界面不出现「-120 次逻辑读」这种明显错的值
+        let before = StatSnap {
+            db_block_gets: 50,
+            consistent_gets: 900,
+            physical_reads: 3,
+            execute_count: 7,
+        };
+        let v = StatSnap::default().since(&before);
+        assert_eq!(v["logicalReads"], 0);
+        assert_eq!(v["physicalReads"], 0);
+        assert_eq!(v["executeCount"], 0);
     }
 }

@@ -8,13 +8,20 @@ import { thousands } from "../../lib/db";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { downloadText, toCsv, toInList, toInsert, toMarkdown, toTsv } from "../../lib/resultExport";
 import { nextSort, viewOrder, type SortState } from "../../lib/resultView";
+import { serverSortLabel } from "../../lib/serverSort";
+
+/** 流式导出的三种格式（A4）。 */
+export type ExportFormat = "csv" | "tsv" | "insert";
 
 /**
  * 结果表 + 工具条（筛选 / 复制为… / 导出 / 详情）+ 底栏。SQL 控制台与表页共用。
  *
  * 复制与导出都按「当前显示顺序」（筛选、排序之后的），所见即所得。
+ *
+ * **排序口径**（A3）：表头点击的排序与筛选都只作用于**已经取到的行**。底栏常驻一行
+ * 说明这件事；要让数据库重排整表，走表头右键的「重排并重查」（`onServerSort`）。
  */
-export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot }: {
+export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot, onServerSort, onExportFile }: {
   columns: ColumnMeta[];
   rows: Cell[][];
   /** 工具条左侧的说明：行数 / 耗时。 */
@@ -26,12 +33,18 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot 
   /** 工具条右侧额外的按钮（表页的保存 / 预览 SQL）。 */
   tools?: ReactNode;
   foot?: ReactNode;
+  /** 让数据库重排整表并重查；不传 = 这个结果不支持（表页 / 非 SELECT）。 */
+  onServerSort?: (col: number, dir: "asc" | "desc") => void;
+  /** 后端流式导出整条查询；不传 = 只提供「导出当前显示的行」。 */
+  onExportFile?: (format: ExportFormat) => void;
 }) {
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortState | null>(null);
   const [sel, setSel] = useState<CellPos | null>(null);
   const [detail, setDetail] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  /** 表头右键：「用此列重排整表」。`col` 是列下标。 */
+  const [head, setHead] = useState<{ x: number; y: number; col: number } | null>(null);
   const order = useMemo(() => viewOrder(rows, columns, filter, sort), [rows, columns, filter, sort]);
 
   const shown = () => order.map((i) => rows[i]);
@@ -80,8 +93,36 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot 
         <button
           type="button"
           className="dbx-btn ghost"
-          title="导出 CSV（带 BOM，Excel 直接打开不乱码）"
-          onClick={() => downloadText(`${table || "result"}.csv`, toCsv(columns, shown()))}
+          title="导出：默认「全部」由后端流式写文件（内存只占一页），当前页是浏览器下载"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            const items: ContextMenuItem[] = [
+              {
+                label: "CSV（全部，后端流式）",
+                icon: "download",
+                disabled: !onExportFile,
+                onSelect: () => onExportFile?.("csv"),
+              },
+              {
+                label: "TSV（全部，后端流式）",
+                icon: "download",
+                disabled: !onExportFile,
+                onSelect: () => onExportFile?.("tsv"),
+              },
+              {
+                label: "INSERT 脚本（全部，后端流式）",
+                icon: "download",
+                disabled: !onExportFile,
+                onSelect: () => onExportFile?.("insert"),
+              },
+              {
+                label: `CSV（当前显示 ${thousands(order.length)} 行）`,
+                icon: "copy",
+                onSelect: () => downloadText(`${table || "result"}.csv`, toCsv(columns, shown())),
+              },
+            ];
+            setMenu({ x: r.left, y: r.bottom + 4, items });
+          }}
         >
           <Icon name="download" size={12} />
           导出
@@ -98,6 +139,7 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot 
           order={order}
           sort={sort}
           onSort={(c) => setSort(nextSort(sort, c))}
+          onHeaderMenu={(c, x, y) => setHead({ x, y, col: c })}
           sel={sel}
           onSel={setSel}
           onOpen={() => setDetail(true)}
@@ -115,8 +157,34 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot 
           />
         )}
       </div>
+      {/* A3：常驻说明。不加这句，用户会以为「表头点了升序」= 整表有序 */}
+      <div className="dbx-rhint">
+        排序 / 筛选只作用于已取的 {thousands(rows.length)} 行
+        {onServerSort ? "；要整表有序：右键表头 →「重排并重查」" : ""}
+      </div>
       {foot}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {head && (
+        <ContextMenu
+          x={head.x}
+          y={head.y}
+          onClose={() => setHead(null)}
+          items={[
+            { label: "本地升序（只排已取的行）", onSelect: () => setSort({ col: head.col, dir: "asc" }) },
+            { label: "本地降序（只排已取的行）", onSelect: () => setSort({ col: head.col, dir: "desc" }) },
+            {
+              label: onServerSort ? serverSortLabel(columns[head.col]?.name ?? "", "asc") : "重排并重查（这条结果不支持）",
+              disabled: !onServerSort,
+              onSelect: () => onServerSort?.(head.col, "asc"),
+            },
+            {
+              label: onServerSort ? serverSortLabel(columns[head.col]?.name ?? "", "desc") : "重排并重查（这条结果不支持）",
+              disabled: !onServerSort,
+              onSelect: () => onServerSort?.(head.col, "desc"),
+            },
+          ]}
+        />
+      )}
     </div>
   );
 }

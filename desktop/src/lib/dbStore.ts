@@ -8,6 +8,7 @@ import {
   type ConnectInfo,
   type DbConn,
   type EngineCaps,
+  type ExecStats,
   type PlanRow,
   type ResultSet,
   type SchemaCacheData,
@@ -56,6 +57,8 @@ export interface ResultEntry {
   sets?: ResultSet[];
   updateCount: number;
   ms: number;
+  /** 实际执行开销；`null` / 缺省 = 这个账号读不到 `v$mystat`（界面不显示统计行）。 */
+  stats?: ExecStats | null;
   error?: string;
   loadingMore?: boolean;
 }
@@ -80,6 +83,15 @@ export interface SqlTab {
   output: OutputLine[];
   plan: { sql: string; rows: PlanRow[]; error?: string } | null;
   running: boolean;
+  /**
+   * 这个标签的独立会话槽（A0）。`null` = 还走 primary（还没执行过，或申请失败）。
+   *
+   * 首次执行时懒申请：多数标签只跑一两条元数据查询，一开标签就占一条会话，
+   * 五十个标签就是五十条服务端会话。槽名由后端给（数字字符串）。
+   */
+  slot?: string | null;
+  /** 这个标签所在会话的事务状态。primary 标签不用它（统一看连接的 `rt.tx`）。 */
+  tx?: TxInfo;
 }
 
 export type TableSub = "data" | "struct" | "idx" | "ddl";
@@ -108,6 +120,8 @@ export interface DbState {
   tabs: DbTabItem[];
   active: string | null;
   dialog: ConnDialogState | null;
+  /** 会话与锁抽屉（只读面板）。null = 关闭。 */
+  sessionPanel: { connId: string } | null;
 }
 
 const TABS_KEY = "ncforge-db-tabs";
@@ -120,7 +134,7 @@ const newId = (p: string) => `${p}${Date.now().toString(36)}${(seq++).toString(3
 function newSqlTab(connId: string | null, sql: string, title: string): SqlTab {
   return {
     kind: "sql", id: newId("s"), title, connId, sql, maxRows: DEFAULT_MAX_ROWS, timeoutSec: DEFAULT_TIMEOUT,
-    results: [], view: null, output: [], plan: null, running: false,
+    results: [], view: null, output: [], plan: null, running: false, slot: null,
   };
 }
 
@@ -143,7 +157,7 @@ function loadTabs(): Pick<DbState, "tabs" | "active"> {
   }
 }
 
-let state: DbState = { conns: [], loaded: false, loadError: null, rt: {}, dialog: null, ...loadTabs() };
+let state: DbState = { conns: [], loaded: false, loadError: null, rt: {}, dialog: null, sessionPanel: null, ...loadTabs() };
 const listeners = new Set<() => void>();
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -196,6 +210,21 @@ export function closeConnDialog() {
   set({ dialog: null });
 }
 
+/**
+ * 会话与锁抽屉：打开时记下是哪个连接，抽屉自己按 `connId` 轮询。
+ *
+ * 为什么放在 store 而不是组件本地状态：按钮在 SQL 工具栏、抽屉挂在数据库页级别，
+ * 两者不在同一棵子树里；本地状态只能靠回调层层传。
+ */
+export function openSessionPanel(connId: string | null) {
+  if (!connId) return;
+  set({ sessionPanel: { connId } });
+}
+
+export function closeSessionPanel() {
+  set({ sessionPanel: null });
+}
+
 export function setConns(conns: DbConn[]) {
   set({ conns, loaded: true, loadError: null });
 }
@@ -207,7 +236,7 @@ export function setConns(conns: DbConn[]) {
  * 用例读到（表现为"莫名多出一条事务"）。`setConns([])` 只清连接表，清不掉 rt。
  */
 export function __resetDbForTest() {
-  set({ conns: [], loaded: false, loadError: null, rt: {}, tabs: [], active: null, dialog: null });
+  set({ conns: [], loaded: false, loadError: null, rt: {}, tabs: [], active: null, dialog: null, sessionPanel: null });
 }
 
 export async function loadConns(): Promise<void> {
@@ -361,14 +390,68 @@ export function summaryOf(r: ResultEntry): string {
 }
 
 /**
- * 桥里每个连接只留一个游标，任何一次执行都会把它换掉。记下「游标现在属于谁」，
+ * 每个会话只留一个游标，任何一次执行都会把它换掉。记下「游标现在属于谁」，
  * 「加载下 N 行」只对游标的主人开放——否则会把别的标签（如表页）查询的行接到这张结果后面。
+ *
+ * A0 之后游标是**每个会话槽各一个**，所以键是 `连接#槽`：槽 A 的游标和槽 B 的互不相干。
  */
 const cursorOwner = new Map<string, string>();
-export const claimCursor = (connId: string, owner: string) => void cursorOwner.set(connId, owner);
-export const ownsCursor = (connId: string | null, owner: string) => !!connId && cursorOwner.get(connId) === owner;
+const cursorKey = (connId: string, slot: string | null | undefined) => `${connId}#${slot ?? ""}`;
+export const claimCursor = (connId: string, slot: string | null | undefined, owner: string) =>
+  void cursorOwner.set(cursorKey(connId, slot), owner);
+export const ownsCursor = (connId: string | null, slot: string | null | undefined, owner: string) =>
+  !!connId && cursorOwner.get(cursorKey(connId, slot)) === owner;
 
-/** 执行一条语句，结果记进标签、事务状态更新到连接、写入历史。不抛异常。 */
+/**
+ * 标签第一次执行时申请一条独立会话（A0）。返回 `null` = 还是走 primary。
+ *
+ * 申请失败（槽用满 / 后端不支持）**不让执行失败**：退回 primary 就是老行为，
+ * 只是那条标签会跟别的标签排队。这件事要说出来，不能让用户以为是后端卡了。
+ */
+export async function ensureSlot(tabId: string, connId: string): Promise<string | null> {
+  const tab = sqlTabOf(tabId);
+  if (!tab) return null;
+  if (tab.slot) return tab.slot;
+  try {
+    const { slot } = await dbApi.slotAcquire(connId);
+    patchTab<SqlTab>(tabId, { slot, tx: undefined });
+    return slot;
+  } catch (e) {
+    appendOutput(tabId, [{
+      at: Date.now(),
+      text: `[${now()}] 没申请到独立会话（这次执行会与其它标签共用主会话）：${friendlyDbError(e)}`,
+      tone: "info",
+    }]);
+    return null;
+  }
+}
+
+/** 释放标签的槽（关标签 / 换连接时）。失败不抛：断开连接时后端已经把槽一并收掉。 */
+export async function releaseSlot(connId: string | null, slot: string | null | undefined): Promise<void> {
+  if (!connId || !slot) return;
+  cursorOwner.delete(cursorKey(connId, slot));
+  try {
+    await dbApi.slotRelease(connId, slot);
+  } catch {
+    // 连接已经断了 / 槽已被回收：都不用再管
+  }
+}
+
+/**
+ * 断开或删除连接后清掉所有标签的槽与槽级事务状态。
+ *
+ * 不清的后果：标签上还留着 `slot: "1"`，下次执行会打到一条不存在的会话上，
+ * 报「会话已回收」——而用户明明刚连上。
+ */
+export function clearSlots(connId: string): void {
+  const tabs = state.tabs.map((t) =>
+    t.kind === "sql" && t.connId === connId ? { ...t, slot: null, tx: undefined } : t,
+  );
+  for (const k of [...cursorOwner.keys()]) if (k.startsWith(`${connId}#`)) cursorOwner.delete(k);
+  set({ tabs });
+}
+
+/** 执行一条语句，结果记进标签、事务状态更新到连接（或标签的槽）、写入历史。不抛异常。 */
 export async function execOne(tabId: string, sql: string, index: number): Promise<ResultEntry> {
   const tab = sqlTabOf(tabId);
   const base = { id: newId("r"), index, sql, columns: [], rows: [], hasMore: false, updateCount: -1, ms: 0 };
@@ -377,12 +460,28 @@ export async function execOne(tabId: string, sql: string, index: number): Promis
   const t0 = Date.now();
   let entry: ResultEntry;
   try {
-    claimCursor(connId, base.id);
-    const r = await dbApi.exec(connId, sql, tab.maxRows, tab.timeoutSec);
-    setTx(connId, r.tx);
+    let slot = await ensureSlot(tabId, connId);
+    claimCursor(connId, slot, base.id);
+    let r;
+    try {
+      r = await dbApi.exec(connId, sql, tab.maxRows, tab.timeoutSec, slot);
+    } catch (e) {
+      // 槽被空闲回收（10 分钟没动过）：重开一条再试一次，别让用户点一次就看见红字
+      if (slot && parseDbError(e).code === "slot-gone") {
+        patchTab<SqlTab>(tabId, { slot: null, tx: undefined });
+        slot = await ensureSlot(tabId, connId);
+        claimCursor(connId, slot, base.id);
+        r = await dbApi.exec(connId, sql, tab.maxRows, tab.timeoutSec, slot);
+      } else {
+        throw e;
+      }
+    }
+    // 槽各自独立事务：primary 的结果写回连接，槽的写回标签
+    if (slot) patchTab<SqlTab>(tabId, { tx: r.tx });
+    else setTx(connId, r.tx);
     entry = r.kind === "rows"
-      ? { ...base, kind: "rows", columns: r.columns, rows: r.rows, hasMore: r.hasMore, ms: r.ms, sets: r.sets }
-      : { ...base, kind: "update", updateCount: r.updateCount, ms: r.ms };
+      ? { ...base, kind: "rows", columns: r.columns, rows: r.rows, hasMore: r.hasMore, ms: r.ms, sets: r.sets, stats: r.stats }
+      : { ...base, kind: "update", updateCount: r.updateCount, ms: r.ms, stats: r.stats };
     if (r.output.length) appendOutput(tabId, r.output.map((text) => ({ at: Date.now(), text, tone: "dbms" as const })));
   } catch (e) {
     const { code, message } = parseDbError(e);
@@ -398,18 +497,18 @@ export async function execOne(tabId: string, sql: string, index: number): Promis
   return entry;
 }
 
-/** 「加载下 N 行」：只对最后一次查询有效（桥里只留一个游标）。 */
+/** 「加载下 N 行」：只对最后一次查询有效（每个会话一个游标）。 */
 export async function loadMore(tabId: string, resultId: string): Promise<void> {
   const tab = sqlTabOf(tabId);
   const res = tab?.results.find((r) => r.id === resultId);
-  if (!tab?.connId || !res || !ownsCursor(tab.connId, resultId)) return;
+  if (!tab?.connId || !res || !ownsCursor(tab.connId, tab.slot, resultId)) return;
   const upd = (p: Partial<ResultEntry>) => {
     const cur = sqlTabOf(tabId);
     if (cur) patchTab<SqlTab>(tabId, { results: cur.results.map((r) => (r.id === resultId ? { ...r, ...p } : r)) });
   };
   upd({ loadingMore: true });
   try {
-    const m = await dbApi.more(tab.connId, tab.maxRows);
+    const m = await dbApi.more(tab.connId, tab.maxRows, tab.slot);
     const cur = sqlTabOf(tabId)?.results.find((r) => r.id === resultId);
     upd({ rows: [...(cur?.rows ?? []), ...m.rows], hasMore: m.hasMore, loadingMore: false });
   } catch (e) {

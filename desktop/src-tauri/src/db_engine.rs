@@ -62,15 +62,22 @@ pub struct Caps {
     pub prop_decrypt: bool,
     /// 一个进程能带多条连接。为 `false` 时内存随连接数线性增长。
     pub multi_session: bool,
+    /// 能列会话与锁（`v$session` / `v$locked_object`）。**权限不够不算没有这个能力**：
+    /// 能力位说的是「这条命令有实现」，拿不拿得到锁信息由 `granted` 字段表达。
+    pub sessions: bool,
+    /// 执行语句时能回实际统计（逻辑读/物理读/影响行数）。需要读 `v$mystat`。
+    pub stats: bool,
 }
 
 impl Caps {
-    /// JVM 桥。四条都有：取消靠 `Statement.cancel()`，一个 JVM 带多条会话（A 方案）。
+    /// JVM 桥。取消靠 `Statement.cancel()`，一个 JVM 带多条会话（A 方案）。
     pub const JAVA: Caps = Caps {
         cancel: true,
         refcursor: true,
         prop_decrypt: true,
         multi_session: true,
+        sessions: true,
+        stats: true,
     };
 
     /// 纯 Rust 驱动的能力（2026-10-30 按 `db_rust.rs` + vendored 驱动的实际实现校正）：
@@ -83,11 +90,18 @@ impl Caps {
     /// - `prop_decrypt`：仍然没有 —— 解 prop.xml 要用 NC 的 Java 类。但连接可以工作：
     ///   首次连接时由 JVM 桥解一次口令、DPAPI 存起来（`db_cmds::prop_password_ready`）。
     /// - `multi_session`：有。每条连接一个 `Connection`，内存本来就与连接数同阶。
+    /// - `sessions`：有。`db_rust.rs::sessions()` 直接查 `v$session` / `v$locked_object`，
+    ///   与 JVM 桥同形（缺权限时靠 `granted:false` 表达，不靠能力位）。
+    /// - `stats`：有（A2）。`db_exec` 执行前后各读一次 `v$mystat` 取差值放进 `stats`；
+    ///   账号读不到统计视图时 `stats` 是 `null`，界面不显示那一行 —— 能力位说的是
+    ///   「这条路径有实现」，拿不拿得到数字由响应里的 `stats: null` 表达。
     pub const RUST: Caps = Caps {
         cancel: true,
         refcursor: false,
         prop_decrypt: false,
         multi_session: true,
+        sessions: true,
+        stats: true,
     };
 
     /// 按引擎种类取能力位。**连上之前**前端就要知道能力（决定「停止」能不能点、
@@ -236,6 +250,11 @@ mod tests {
         assert!(c.refcursor, "JDBC 支持 REF CURSOR");
         assert!(c.prop_decrypt, "桥里用 PropXMLReader 解 prop.xml");
         assert!(c.multi_session, "一个 JVM 带多条会话");
+        assert!(
+            c.sessions,
+            "A1：v$session / v$locked_object 两个引擎都实现了"
+        );
+        assert!(c.stats, "A2：执行前后各读一次 v$mystat 取差值");
     }
 
     #[test]
@@ -258,6 +277,11 @@ mod tests {
             "解 prop.xml 要用 NC 的 Java 类，Rust 侧调不到"
         );
         assert!(c.multi_session, "一条连接一个驱动会话，不存在进程底价");
+        assert!(
+            c.sessions,
+            "A1：v$session / v$locked_object 直接查 v$session 系视图"
+        );
+        assert!(c.stats, "A2：v$mystat 前后差值，与 JVM 桥同一组统计项");
         // 按种类查表要和真实句柄一致
         assert_eq!(Caps::of(EngineKind::Rust).cancel, c.cancel);
         assert_eq!(

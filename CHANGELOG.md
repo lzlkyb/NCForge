@@ -50,6 +50,12 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 - 补丁不再靠命令行脚本打：清单由未提交改动自动生成，落位、配对、CHANGES.md 全在窗口里核对完再出包
 
 ### 新增
+- 每条语句执行完多一行统计：逻辑读、物理读、执行次数，都是「这条语句自己消耗了多少」而不是全库累计——调优时先看逻辑读高不高，再决定要不要加索引；账号没权限读统计视图时这行不显示，不会给你一个假的 0
+- 一个连接可以同时开几条互不打扰的会话：每条 SQL 标签各占一条会话，某条标签在跑长查询时其它标签照常执行，各自的事务也互相独立（提交 / 回滚只影响自己那条，黄条上会写明是哪条会话）；最多 3 条，闲置 10 分钟自动收回给别的标签用，被回收后再执行会自动换一条新的，不用你重连
+- 排序与筛选只作用于「已经取到界面上的这些行」，结果表底栏会一直写明这一点；想按整张表排，在表头右键选「在数据库端排序」，会把这个排序套在原来的 SQL 外面重新查一遍
+- 执行计划从一张平表变成树：按原来的缩进层级折出父子关系、每条步骤带成本条，一眼看出钱花在哪一层；可以把当前计划存下来做对照，下次再看时直接标出哪几步变贵了、哪几步不见了
+- 结果集能直接导出成文件（CSV / TSV / INSERT 脚本）：按行边读边写，几十万行也不占内存、界面不卡，导出过程中显示已经写了多少行，完成后一键在资源管理器里定位文件
+- 侧栏新增「工程关联」页（Ctrl+7，设置随之变成 Ctrl+8）：把「A 工程启动要带上 B 工程」摊开给你看——依赖链自上而下的顺序就是真正生效的类路径顺序（同名类谁在前谁赢），每个工程贡献了几个类目录、哪条依赖写在 `.classpath` 里却在磁盘上找不到，都逐条标出来；还能临时停用某个关联工程（连带剪掉它往下传递的依赖）、把它排到前面、或补一个不在任何工程里的产物目录。这些只管工作台自己怎么算类路径，**不动任何工程文件**，改完一次保存；也能先预演另一个工程的依赖链再决定要不要切过去，切换前会先把没保存的文件存好
 - 设置页新增「配置迁移」：把调好的设置（工作区、NC home、数据库连接、代码智能开关等 15 项）导出成一个 json 文件，在新机器上导入时路径可以逐个改、文件里没有的项目保留本机原值；口令不随文件走——换机器本来也解不开，到新机器自己填一遍即可
 - 退出前提醒没提交的事务：点 × 时如果还有改到一半没提交的数据，会列清是哪个库、几条语句、影响几行、已经挂了多久，让你一次选全部提交 / 全部回滚 / 取消退出；没有未提交的改动就直接退，不会多问一句
 - 悬停表名弹出的字段卡片底部多了「在数据库中打开」：点一下跳到数据库页、自动连上那张表所在的库并打开它的数据（没存口令才需要输一次）
@@ -107,8 +113,13 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 - 库里两千多张表的结构拉一次存本机（约 3 秒），之后核对与悬停都走缓存；缓存按「连接串 + 用户名」分文件，换库调试不会互相覆盖，页面上显示「哪次拉的、多少张表」并可手动刷新
 - 编辑器里把鼠标停在 SQL 字符串的表名上，直接看这张表的字段与类型（见 `docs/交接清单-2026-10-27.md` 关于「只能认字符串字面量里的表名」的限制说明）
 - 版本控制页新增「维护」面板（顶部齿轮图标）：列出撤销与冲突二选一留下的备份目录（时间、文件数、体积），可单个删或一次清空；同时显示已审标记的总数 / 有效 / 已失效，并提供「清理失效标记」
+- 表被谁锁住了、谁在跑长查询：SQL 控制台点「会话」出一张只读清单（SID / 用户与机器 / 状态 / 等待事件与已等秒 / 锁住的对象 / 正在跑的 SQL），被阻塞的行整行标色并指出阻塞源，每行可复制 SQL 或复制 `alter system kill session` 语句（只复制，不代执行）；账号读不到锁视图时明说「锁信息不可见」并给出授权语句，不会显示成「没有锁」
 
 ### 修复
+- 服务显示「启动成功」但前端页面打开是 404：开发模式下只挂载软件指定的那几个前端应用，本机安装里一共有 18 个，其中 `iwebap`（主前端）和 `eyeapp`（业务前端）一直被悄悄跳过，日志里只有一句 warn。现在按安装目录里实际存在的前端应用全部挂载
+- 用官方脚本停不掉软件起的服务：软件的启动参数里漏了服务器名，运行时按默认名建了 `work/server`，而配置里写的是 `xuyserver`，官方停止脚本按配置名找端口自然找不到。现在启动前读配置、把服务器名带上，`work/` 下的目录名与配置一致
+- 装在 NC 安装目录里的两类覆盖类在软件启动时完全不生效：`external/classes`（33 个二开业务类）和 `resources/`（框架热修复类）以前根本不进类路径；后者还必须排在 `lib` 之前才能压过原来的 jar，顺序错了等于没加
+- 工程一次都没编译过时启动，报错只有一句「start tomcat error」，看不出是缺 jar 还是别的原因：现在直接提示「类路径里一个目录条目都没有，先编译一次工程」
 - 在关联工程里改了代码却总不生效：以前判断「用哪份编译产物」靠猜目录——会把你没在 Eclipse 里引用的兄弟工程也无条件收进来，谁生效只看目录名字母序（实测 `newar` 的 18 个同名类压过 `pm`），还会漏掉 Eclipse 默认输出目录（实测 `pm/bin` 里 339 个类从没进过类路径）。现在按工程自带的 Eclipse 配置决定「依赖谁、谁先谁后」，改了哪个工程就是哪个工程生效
 - 装过补丁的机器上，补丁里的覆盖类编译时找不到、启动时也加载不到：NC 安装目录里其实有六处散类目录（`hyext/classes`、`client/classes`、`META-INF/classes` 等），以前只扫了其中一处，本机实测漏 148 个类。现在六处都收，且散类排在 jar 之前——补丁覆盖产品类这条路才算通
 - 全应用的通知（toast）从来没显示过：通知容器没挂到应用根上，所有「已复制」「保存失败」这类提示都静默消失，操作成不成功只能靠看界面猜
@@ -141,6 +152,23 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 - 修复启动骨架屏、侧栏品牌、更新弹框里的应用图标一直加载不出来（`/icon.png` 缺 public 目录）
 
 ### 技术细节
+- 2026-10-31 数据库 A 档五项一次落地（A2 Autotrace / A0 多标签独立会话 / A3 排序口径 /
+  A5 XPLAN 树 / A4 流式导出）。**A2**：执行前后各读一次 `v$mystat` 取差值
+  （`db_block_gets` / `consistent_gets` / `physical_reads` / `execute_count`），
+  `Caps.stats` 两个引擎都置 true；读不到 stat 时 `stats: null`——前端 `statsText` 见到 null
+  就不渲染，**绝不显示 0**（假 0 比不显示更误导）。**A0**：会话槽键 `连接id#N`，每连接
+  `MAX_SLOTS=3`、`SLOT_IDLE=600s`；不启后台线程回收，在申请与执行前顺手 sweep
+  （`commands/db_cmds.rs`）；`db_exec`/`db_more`/`db_tx`/`db_cancel` 都带 `slot` 参数，
+  前端 `dbStore.ensureSlot` 首次执行时申请、`slot-gone` 自动重开重试一次；退出确认的
+  多会话合并放后端 `merge_sessions`（同连接任一条 unknown 整体 unknown，语句/行数相加）；
+  `db_tx_all` 逐个提交，一个失败不中断其余。**A5**：`explain()` 的 `cost`/`rows` 从字符串改
+  `Option<f64>`（不改前端成本条全是 NaN）。**A4**：`db_file_export::RowWriter<W: Write>` 边读边写，
+  每 5000 行发一次 `db:export-progress`，上限 200 万行（超出标 truncated 而不是静默截断）；
+  `db_export_reveal` 先 canonicalize 再验 `starts_with(export_dir)`，只认自己生成的目录。
+  文件名安全化用 `is_alphanumeric()` 而非 ASCII 白名单——否则 `员工表` 会被压成 `____`
+  （单测反向验证过）。前端新增 `lib/serverSort.ts` / `planTree.ts` / `dbStats.ts` /
+  `dbResultActions.ts`（后者从 `dbActions` 拆出：`dbActions → sqlModels → monacoSetup`
+  会把 Monaco 拖进 jsdom，整片测试挂掉）。
 - 2026-10-31 类路径改读 Eclipse `.classpath`（`src/eclipse_cp.rs`，9 个单测）：四条规则——①src 条目
   缺 `output=` 时回落 `kind="output"`（该行在文件末尾，必须两遍扫描）；②同一 output 被多条 src 共享时去重
   （`newar` 223 条 src → 35 个目录）；③`path="/X"` 先按兄弟目录名匹配、再按 `.project` 的 `<name>`、
@@ -166,6 +194,7 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 - 2026-10-31 关窗即退出：删掉托盘常驻（`main.rs` 的 `TrayIconBuilder` / 菜单 / 状态圆点 / `branding::tray_tip_*`，以及随之无用的 `png` 依赖）、删掉「关窗时释放界面内存」的两模式开关（`AppConfig.release_webview_on_close` 与 `patch_config` 对应字段）、删掉 `RunEvent::ExitRequested{code:None}` 的 `prevent_exit()`（留着就成了关不掉的幽灵进程）与 macOS 点 Dock 重建窗口分支；`show_or_create_main_window` 退化成 single-instance 里的 `show + unminimize + focus`。旧的 `config.json` 里残留的 `release_webview_on_close` 会被 serde 忽略，不用迁移
 - 2026-10-31 退出前事务确认：`commands/quit_cmds.rs` 三个原子位（`quit_approved` / `quit_acked` / `quit_checking`）+ 四个命令（`db_pending_tx` / `quit_check_acked` / `quit_cancel` / `app_quit`）。`CloseRequested` 同步回调不能 await，所以 `prevent_close()` 后发 `app:quit-request`，前端 ack 后才查；**5 秒没 ack 视为界面卡死直接放行**（否则 `prevent_close` 会让应用永远关不掉）。`db_pending_tx` 逐个连接发 `ping`（2 秒超时），`alive:false` 与超时一律标 `unknown` 而不是「干净」——后者会静默丢数据。前端 `lib/quitGuard.ts` 把后端（权威）与 `dbStore.rt.tx`（更及时）按连接取并集、语句数取大、开始时间取早；确认框宿主 `DbConfirmHost` 从 `DbTab` 上移到 `App`（否则在文件页点 × 看不见框），并自己 `import "../../db-console.css"`（它比数据库页先加载）
 - 2026-10-31 悬停卡片「在数据库中打开」：`tableHover.openTableLink` 生成 `command:ncforge.openTable?<encodeURIComponent(JSON.stringify([表]))>`（Monaco 的 `CommandOpener` 把 query `decodeURIComponent` 后按 JSON 解析，且必须是数组）；`isTrusted` 用**白名单** `{ enabledCommands: [...] }` 而不是 `true`（`toAllowCommandsOption` 支持数组形式），命令用 `monaco.editor.addCommand` 注册——`run` 的第一个参数是服务访问器，命令参数从第二个开始（写成 `(table) => …` 会拿到对象、表现为"点了没反应"）。连接用 `db_schema_status` 回的 `connId`（悬停显示的就是那个库的字段），没连上走 `ensureConnected`（要口令弹全局框），切页复用已有的 `ncforge-navigate` 事件
+- 2026-10-31 多工程后端（关联工程 + 覆盖表）：`eclipse_cp` 在「摊平目录」之外新增结构化视图 `graph() -> LinkedGraph{projects,extraDirs,notes,…}`——`name` 取 `.classpath` 里 `/X` 的写法而非 `.project` 自称名（`newar` 自称 `ar`，界面要能和 Eclipse 对得上号）；`root=null` = 声明了但磁盘上找不到；`disabled` 条目留壳（看得见被剪掉谁）只是不产目录。覆盖表 `AppConfig.linked_overrides`（`config.rs`，camelCase，缺省空 = 不影响既有路径）三个动作：`disable`（连同**只有它能传递到的**依赖一起连带剪掉）、`front`（排到主工程之后、其余依赖之前，标 `origin="front"`，主工程不可重复插入）、`add`（追加类目录/jar，不存在时写进 `notes` 而非报错）。`class_roots_with` 与 `graph()` 输出**逐项一致**（有测试断言，防「视图与真实类路径漂移」）；`launch.rs` / `compile.rs`(CompileEnv) / `shadow.rs`(ShadowSpec) 三处 spec 带 `overrides`，`server_cmds` 预览（:260）与启动（:461）共用同一份。命令 `commands/linked_cmds.rs`：`linked_projects(root?)`（不传用配置里的工作区，传了 = 切换工作区前的预演，不必先改配置）、`set_linked_overrides`（全量替换 + 落盘，坏条目**整体拒绝**——保存路径上的静默丢弃会让用户以为存上了、改半天不生效还找不到原因）；`config_io` schema 1→2 纳入导入导出。`nc_index` 模块层收敛成单一真源 `LAYERS[15] × SCOPES[3] = module_layers()` 45 条（extension → hyext → 标准，jar 紧跟本层），删掉 `MODULE_JAR_DIRS` / `MODULE_CLASS_DIRS` 两份各写一套的常量；`is_runtime_jar()` 排除 `_src.jar` / `_doc.jar`（与官方 `JarFilter` 一致）。`cargo test` 364 passed / 0 failed（默认 feature，16 个测试二进制）。前端「工程关联」页同日落地（依赖链只读视图 / 覆盖编辑 / 切换工作区预演），施工与坑见 `docs/交接-未完成功能-多工程前端与后续批次-20261031.md` §2
 - 2026-10-30 双执行引擎：`db_engine.rs` 抽成「命令 + 参数 → JSON」的引擎接口（`EngineKind` + `Caps{cancel,refcursor,prop_decrypt,multi_session}`），命令层不感知底下是 JVM 还是驱动；`db_rust.rs` 用 Oracle 官方纯 Rust 驱动 `oracledb =26.0.0-beta.5`（thin）实现同一套命令（connect / exec / more / 事务 / tables / ncNames / columns / indexes / ddl / explain / schema / DBMS_OUTPUT），结果 JSON 与 JVM 桥逐字段对齐（日期 `yyyy-MM-dd HH:mm:ss`、**NUMBER 一律给字符串**——JDBC 那边是 BigDecimal，转 double 会掉精度；CLOB 截 1M、RAW 转十六进制）。引擎是**连接级**配置（`DbConnConfig.engine`，缺省 `java`）。取消：上游驱动没有 `break/cancel`（oracle/rust-oracledb#24），我们在 `desktop/vendor/oracledb`（`[patch.crates-io]` 挂到 26.0.0-beta.5，改动原因写在 `FORK.md`）里补了 `BreakHandle`——`AtomicBool` 标志 + 把阻塞读切成 100ms 片 + 持锁线程收到置位后发 `MARKER_TYPE_INTERRUPT` 再 `reset()`，`Caps.cancel` 因此为 `true`；另用 `set_call_timeout` 兜「语句在服务端排队」的情况。**#63** 也在同一份 vendor 里修：按 python-oracledb thin 的算法补齐 11G 密码验证器（`SHA1(password‖vfr)` 补 4 个零当 AES-192 key，会话密钥 MD5 拼 24 字节），12C 走 PBKDF2-SHA512 + `AUTH_PBKDF2_SPEEDY_KEY`；未知验证器类型与认证参数缺失不再 `unwrap()`，改为返回 `Error`（`catch_unwind` 保留作兜底）。prop.xml 来源不再强制 JVM：首次连接由 `NcDbBridge` 的 `propCred` 解一次口令 → `DPAPI` 加密落进连接配置（`db_cmds::prop_password_ready`），之后该连接可纯 Rust 直连。同引擎多连接合并、换引擎时旧句柄自动重建
 - 2026-10-30 真库验收（19c @ 10.200.22.144）：新增 `tests/db_rust_live.rs`（纯 Rust 引擎全命令）与 `tests/db_engine_equiv.rs`（**同一批 SQL 两个引擎逐行对照**，含分页连取三页）。对照抓出并修掉 4 处与 JVM 桥不一致：NUMBER 取了数字（JDBC 给字符串）、`BINARY_FLOAT/DOUBLE` 读不出来、字符列精度没按 COLUMN_SIZE 给、驱动把 CLOB 列描述成 `LONG`；另有 2 处 SQL 写错（`explain` 的 `:1` 用两次只绑一次；`as size` 撞 19c 保留字）
 - 2026-10-30 取消与 prop.xml 真库实测（同一台 19c）：`begin dbms_lock.sleep(30); end;` 执行中调 `cancel()`，**2.01 秒**返回错误、整条 3.01 秒结束，之后 `select 1 from dual` 正常——是语句中断不是把连接弄死；`propCred` 解出 url/user/口令后 `RustEngine` 直连成功（0.55 秒），即「解一次 → 之后不依赖 JVM」成立。11G 验证器只有单测（三组常量与 JCE 逐字节比对：`key24` / AES-192 密文 / MD5），本机建不出只有 11G 验证器的账号，真机暂未验

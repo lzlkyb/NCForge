@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import { connOf, connect, getDb, rtOf, txAction } from "./dbStore";
 import { friendlyDbError } from "./db";
 import type { DbEnv, TxInfo } from "./dbApi";
+import { dbApi } from "./dbApi";
 import type { SaveFailure, UnsavedFile } from "./saveAllDirty";
 import { toast } from "../components/ui/toast";
 
@@ -132,6 +133,41 @@ export async function guardTx(connId: string | null, reason: string): Promise<bo
 export function isLastTabOn(connId: string | null, tabId: string): boolean {
   if (!connId) return false;
   return !getDb().tabs.some((t) => t.id !== tabId && t.connId === connId);
+}
+
+/**
+ * 关标签 / 换连接前查**这条会话槽**的未提交事务（A0：槽各自独立事务）。
+ *
+ * 为什么不能复用 `guardTx`：那个看的是连接的 primary 会话（`rt.tx`），
+ * 而 SQL 标签跑在自己的槽里——primary 干净不代表槽里没有没提交的 update。
+ * 漏了这一问，关标签就是静默回滚。
+ *
+ * 槽已经没了（空闲回收 / 连接断开）时直接放行：没有会话就没有可丢的事务。
+ */
+export async function guardSlotTx(
+  connId: string | null,
+  slot: string | null | undefined,
+  reason: string,
+): Promise<boolean> {
+  if (!connId || !slot) return true;
+  let tx: TxInfo;
+  try {
+    tx = (await dbApi.tx(connId, "status", slot)).tx;
+  } catch {
+    return true;
+  }
+  if (!tx || tx.autoCommit || tx.statements <= 0) return true;
+  const choice = await new Promise<TxChoice>((resolve) =>
+    show({ kind: "tx", connId, reason, tx, resolve }),
+  );
+  if (choice === "cancel") return false;
+  try {
+    await dbApi.tx(connId, choice, slot);
+    return true;
+  } catch (e) {
+    toast(`${choice === "commit" ? "提交" : "回滚"}失败：${friendlyDbError(e)}`, "error");
+    return false;
+  }
 }
 
 const quietUntil = new Map<string, number>();

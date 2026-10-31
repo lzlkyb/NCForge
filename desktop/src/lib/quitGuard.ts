@@ -1,7 +1,7 @@
 import { invoke, listen } from "./tauri";
 import { dbApi, type PendingTxRow } from "./dbApi";
 import { askQuit, askUnsavedFiles, type QuitChoice, type QuitRow } from "./dbConfirm";
-import { connOf, getDb, loadConns, rtOf, txAction } from "./dbStore";
+import { connOf, getDb, loadConns, rtOf } from "./dbStore";
 import { friendlyDbError } from "./db";
 import { requestOpenFile } from "./openFileRequest";
 import type { UnsavedFile } from "./saveAllDirty";
@@ -178,7 +178,9 @@ async function handleQuitRequest() {
     // 只动探测到状态的连接。`unknown` 的提交/回滚都可能失败，弹框里已经
     // 说明「退出后会回滚」，这里不再假装成功。
     for (const r of rows.filter((x) => x.kind === "pending")) {
-      await txAction(r.connId, txChoice);
+      // 一个连接上可能有多条独立会话（A0 的槽）：必须由后端把 primary 与全部槽
+      // 一起处理。只提交 primary 等于把槽里的写入静默回滚——那正是这个守卫存在的原因。
+      await dbApi.txAll(r.connId, txChoice);
     }
     await invoke("app_quit");
   } catch (e) {

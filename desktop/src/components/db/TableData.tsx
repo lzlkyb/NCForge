@@ -34,7 +34,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   const load = useCallback(async () => {
     setData(null);
     try {
-      claimCursor(tab.connId, tab.id);
+      claimCursor(tab.connId, null, tab.id);
       const r = await dbApi.exec(tab.connId, pageSql(tab.table.toLowerCase(), q.where, order, q.page), PAGE + 1, 60);
       if (r.kind !== "rows") throw new Error("不是查询结果");
       setTx(tab.connId, r.tx);
@@ -61,7 +61,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
     let done = 0;
     try {
       for (const s of sqls) {
-        claimCursor(tab.connId, tab.id);
+        claimCursor(tab.connId, null, tab.id);
         const r = await dbApi.exec(tab.connId, s, 1, 60);
         setTx(tab.connId, r.tx);
         if (r.kind === "update" && r.updateCount !== 1) throw new Error(`预期更新 1 行，实际 ${r.updateCount} 行：${s}`);
