@@ -6,12 +6,14 @@ import { switchConn } from "../../lib/dbActions";
 import { connOf, rtOf, txAction, useDb, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台工具条：连接胶囊 · 执行 / 脚本 / 计划 / 格式化 · 事务模式 · 历史。生产库整条淡红。 */
-export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, historyOpen, onHistory }: {
+export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, historyOpen, onHistory }: {
   tab: SqlTab;
   onRun: (mode: "current" | "script") => void;
   onStop: () => void;
   onExplain: () => void;
   onFormat: () => void;
+  /** 把光标处语句的结果导成 insert 脚本。 */
+  onExport: () => void;
   historyOpen: boolean;
   onHistory: () => void;
 }) {
@@ -71,6 +73,16 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, historyOpe
       <button type="button" className="dbx-btn ghost" onClick={onFormat} title="Ctrl+Shift+F">
         <Icon name="paintbrush" size={12} />
         格式化
+      </button>
+      <button
+        type="button"
+        className="dbx-btn ghost"
+        disabled={tab.running || !conn}
+        onClick={onExport}
+        title="把光标处这条查询的结果导成 insert 脚本（后端取全量）"
+      >
+        <Icon name="download" size={12} />
+        导出 INSERT
       </button>
       <span className="dbx-vsep" />
       <div className="dbx-txmode" title={connected ? "本连接的事务模式（临时切换，默认值在连接设置里）" : "连上后可切换"}>

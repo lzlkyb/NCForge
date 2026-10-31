@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { TableData } from "./TableData";
+import { InsertExportDialog } from "./InsertExportDialog";
 import { friendlyDbError } from "../../lib/db";
 import { dbApi, type ColumnInfo, type IndexInfo } from "../../lib/dbApi";
 import { newConsole } from "../../lib/dbActions";
@@ -22,6 +23,7 @@ export function TablePage({ tab }: { tab: TableTab }) {
   const isView = rt.tables?.find((t) => t.name === tab.table)?.kind === "VIEW";
   const [cols, setCols] = useState<ColumnInfo[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [exp, setExp] = useState(false);
 
   useEffect(() => {
     setCols(null);
@@ -46,11 +48,29 @@ export function TablePage({ tab }: { tab: TableTab }) {
           </button>
         ))}
         <span className="dbx-sp" />
+        <button
+          type="button"
+          className="dbx-btn ghost"
+          disabled={rt.status !== "connected"}
+          title="把整表数据导成 insert 脚本（主键前置 / blob 写 null / 多语列写 '~'）"
+          onClick={() => setExp(true)}
+        >
+          <Icon name="download" size={12} />
+          导出 INSERT
+        </button>
         <button type="button" className="dbx-btn ghost" onClick={() => void newConsole(tab.connId, `select * from ${lower} where rownum <= 100`)}>
           <Icon name="terminal" size={12} />
           在控制台查询
         </button>
       </div>
+      {exp && (
+        <InsertExportDialog
+          connId={tab.connId}
+          table={tab.table}
+          sql={`select * from ${lower}`}
+          onClose={() => setExp(false)}
+        />
+      )}
       {rt.status !== "connected" && <div className="dbx-empty">连接已断开，先在左侧连上</div>}
       {err && <div className="dbx-err">{err}</div>}
       {rt.status === "connected" && tab.sub === "data" && <TableData tab={tab} cols={cols} isView={isView} zh={zh} />}

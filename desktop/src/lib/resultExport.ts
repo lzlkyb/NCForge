@@ -80,9 +80,9 @@ export function guessTable(sql: string): string {
   return m ? m[1] : "表名";
 }
 
-/** 浏览器下载一个文本文件（导出 CSV 用；带 BOM，Excel 打开中文不乱码）。 */
-export function downloadText(name: string, text: string, mime = "text/csv"): void {
-  const blob = new Blob(["﻿", text], { type: `${mime};charset=utf-8` });
+/** 浏览器下载一个文本文件。`bom` 只给 CSV 用（Excel 认它）；`.sql` 不能带，否则脚本头部多出不可见字符。 */
+export function downloadText(name: string, text: string, mime = "text/csv", bom = true): void {
+  const blob = new Blob([bom ? `﻿${text}` : text], { type: `${mime};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

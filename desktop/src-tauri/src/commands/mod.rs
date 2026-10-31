@@ -11,6 +11,7 @@
 mod compile_cmds;
 mod db_cmds;
 mod db_conn_cmds;
+mod db_export_cmds;
 mod lang_cmds;
 mod patch_cmds;
 mod quit_cmds;
@@ -25,6 +26,7 @@ mod workspace_cmds;
 pub use compile_cmds::*;
 pub use db_cmds::*;
 pub use db_conn_cmds::*;
+pub use db_export_cmds::*;
 pub use lang_cmds::*;
 pub use patch_cmds::*;
 pub use quit_cmds::*;

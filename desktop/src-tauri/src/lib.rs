@@ -13,8 +13,8 @@
 pub mod branding;
 pub mod commands;
 pub mod compile;
-pub mod config;
-pub mod db_bridge;
+ pub mod config;
+ pub mod db_bridge;
 pub mod db_conns;
 pub mod db_engine;
 pub mod db_rust;
@@ -35,6 +35,7 @@ pub mod search;
 pub mod security;
 pub mod server;
 pub mod shadow;
+pub mod sql_export;
 pub mod sql_refs;
 pub mod state;
 pub mod svn_backup;

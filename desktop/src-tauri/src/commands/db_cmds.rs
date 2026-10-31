@@ -26,7 +26,7 @@ use crate::state::AppState;
 use crate::svn_cred;
 
 /// 连库（含握手）留足余量。
-const T_CONNECT: Duration = Duration::from_secs(60);
+pub(crate) const T_CONNECT: Duration = Duration::from_secs(60);
 /// 元数据（表清单、DDL、执行计划）。
 const T_META: Duration = Duration::from_secs(120);
 /// 临时会话名：列数据源、测试连接、解 prop.xml 口令共用，不占用任何真实连接的会话。

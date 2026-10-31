@@ -313,6 +313,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::db_more,
             commands::db_tx,
             commands::db_meta,
+            // 数据导出（NC 基础数据：insert 脚本）
+            commands::db_export_insert,
             // 表结构缓存 + 出包前核对
             commands::db_schema_status,
             commands::db_schema_sync,

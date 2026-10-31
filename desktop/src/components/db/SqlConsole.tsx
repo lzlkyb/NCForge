@@ -5,9 +5,11 @@ import { SqlEditor, type SqlEditorApi } from "./SqlEditor";
 import { TxBar } from "./TxBar";
 import { ResultPanel } from "./ResultPanel";
 import { HistoryDrawer } from "./HistoryDrawer";
+import { InsertExportDialog } from "./InsertExportDialog";
 import { explain, runStatements } from "../../lib/dbActions";
 import { dbApi } from "../../lib/dbApi";
 import { friendlyDbError } from "../../lib/db";
+import { guessTable } from "../../lib/resultExport";
 import { sqlTabOf, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台：工具条 / 事务条 / 编辑器 / 可拖高度的结果区 / 历史抽屉。 */
@@ -16,6 +18,8 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [resH, setResH] = useState(300);
   const [history, setHistory] = useState(false);
+  /** 导出对话框：光标处那条语句 + 猜出来的表名。 */
+  const [exp, setExp] = useState<{ sql: string; table: string } | null>(null);
   const tabId = tab.id;
 
   const run = useCallback(
@@ -34,6 +38,13 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   const onExplain = () => {
     const s = api.current?.target("current")[0];
     if (s) void explain(tabId, s.text);
+  };
+
+  /** 导出用的是「光标处这条语句」，不是编辑区全部——和「执行」的取值口径保持一致。 */
+  const onExport = () => {
+    const s = api.current?.target("current")[0];
+    if (!s) return toast("光标处没有语句", "info");
+    setExp({ sql: s.text, table: guessTable(s.text) });
   };
 
   /**
@@ -66,9 +77,18 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         onStop={onStop}
         onExplain={onExplain}
         onFormat={() => api.current?.format()}
+        onExport={onExport}
         historyOpen={history}
         onHistory={() => setHistory(!history)}
       />
+      {exp && tab.connId && (
+        <InsertExportDialog
+          connId={tab.connId}
+          table={exp.table}
+          sql={exp.sql}
+          onClose={() => setExp(null)}
+        />
+      )}
       <TxBar connId={tab.connId} />
       <div className="dbx-console-body">
         <div ref={bodyRef} className="dbx-console-main">

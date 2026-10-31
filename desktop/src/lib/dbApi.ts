@@ -115,6 +115,38 @@ export interface MoreResult {
   ms: number;
 }
 
+/** 导出 insert 脚本的请求：取数语句 + 目标表 + 三条 NC 规则的开关。 */
+export interface ExportInsertReq {
+  id: string;
+  /** 取数语句（整表导出就是 `select * from <表>`）。 */
+  sql: string;
+  /** 写进 `insert into` 的目标表名。 */
+  table: string;
+  schema?: string | null;
+  /** `false` = 不按 NC 多语约定，`X2`..`X6` 原样导出。默认 true。 */
+  multilang?: boolean;
+  /** 每 N 行插一条 `commit;`，0 = 不插。 */
+  commitEvery?: number;
+  maxRows?: number;
+  timeoutSec?: number;
+}
+
+export interface ExportInsertResult {
+  fileName: string;
+  sqlText: string;
+  rows: number;
+  /** 到行数上限还有剩余：脚本不是全量。 */
+  truncated: boolean;
+  blobNulls: number;
+  mlTildes: number;
+  /** 识别到的多语列族，如 `name（跳过 name2..name6）`。 */
+  multilang: string[];
+  /** 因多语规则被丢掉的列名。 */
+  dropped: string[];
+  warnings: string[];
+  ms: number;
+}
+
 export interface ConnectInfo {
   id: string;
   url: string;
@@ -213,6 +245,11 @@ export const dbApi = {
   disconnect: (id: string) => invoke<void>("db_disconnect", { id }),
   exec: (id: string, sql: string, maxRows: number, timeoutSec: number) =>
     invoke<ExecResult>("db_exec", { id, sql, maxRows, timeoutSec }),
+  /**
+   * 导出 insert 脚本：后端单独开会话把游标读到空，按 NC 的三条格式规则生成脚本。
+   * 前端拿到整段文本再落盘（`resultExport.downloadText`）。
+   */
+  exportInsert: (req: ExportInsertReq) => invoke<ExportInsertResult>("db_export_insert", { req }),
   /** 取消这个连接上正在执行的语句（不等执行返回，立即生效）。能不能用先看 `caps.cancel`。 */
   cancel: (id: string) => invoke<void>("db_cancel", { id }),
   /** 这个连接用哪个引擎、那个引擎能做什么。 */
