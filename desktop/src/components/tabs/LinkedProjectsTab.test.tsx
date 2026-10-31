@@ -74,12 +74,42 @@ const graph = (): LinkedGraph => ({
 });
 
 let stored: LinkedOverride[] = [];
+/** 保存过一次覆盖表之后模拟「链变了」（保存会触发 reload） */
+let chainChanged = false;
+
+/** 后端 `stale_diagnostics` 的两种结论（`stale_diagnostics` 只产工程级诊断）。 */
+const artifacts = () => [
+  {
+    kind: "stale",
+    project: "pm",
+    message: "「pm」的产物比源码旧（最新 class 比最新 .java 早 3 天），本次编译/启动可能用到旧类",
+    file: null,
+  },
+  {
+    kind: "no-output",
+    project: "newar",
+    message: "「newar」有 339 个源文件，但产物目录里一个 class 都没有，启动时会用 jar 里的旧类",
+    file: null,
+  },
+];
 
 const invokeImpl = async (cmd: string, args?: Record<string, unknown>) => {
-  if (cmd === "linked_projects") return graph();
+  if (cmd === "linked_projects") {
+    const g = graph();
+    if (chainChanged) {
+      // 真机行为：`disable newar` 之后它**仍然留在链上**（只是 disabled、不再贡献目录），
+      // 工程名序列一模一样 ⇒ 只比名字的签名会漏判，必须把目录数与停用状态一起算
+      const newar = g.projects.find((p) => p.name === "newar")!;
+      newar.disabled = true;
+      newar.classDirs = [];
+    }
+    return g;
+  }
+  if (cmd === "check_artifacts") return artifacts();
   if (cmd === "get_config") return { linked_overrides: stored };
   if (cmd === "set_linked_overrides") {
     stored = (args?.overrides ?? []) as LinkedOverride[];
+    chainChanged = true;
     return stored;
   }
   throw new Error(`unexpected command: ${cmd}`);
@@ -108,6 +138,7 @@ const callsOf = (cmd: string) => mocks.invoke.mock.calls.filter(([c]) => c === c
 beforeEach(() => {
   vi.clearAllMocks();
   stored = [];
+  chainChanged = false;
   mocks.invoke.mockImplementation(invokeImpl);
   container = document.createElement("div");
   document.body.append(container);
@@ -198,5 +229,54 @@ describe("工程关联页", () => {
     await render();
     await act(async () => buttonIn(container, "重新读取")!.click());
     expect(callsOf("linked_projects")).toHaveLength(2);
+  });
+
+  it("检查产物：用当前主工程根发命令，结论同时进列表和链上行内徽章", async () => {
+    await render();
+
+    const btn = buttonIn(container, "检查产物")!;
+    expect(btn.disabled).toBe(false);
+    await act(async () => btn.click());
+    await act(async () => {});
+
+    // 必须显式带 primaryRoot：不带就去读配置里的 workspace_root，两者可能不一致
+    expect(mocks.invoke).toHaveBeenCalledWith("check_artifacts", {
+      root: "C:\\work\\aier\\EyePortal",
+    });
+
+    const items = [...container.querySelectorAll(".lnk-chk-item")];
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toContain("产物旧");
+    expect(items[1].textContent).toContain("无产物");
+    // 行内也要标——否则用户得在两个地方对照才知道是哪一行
+    expect(rowOf("pm").textContent).toContain("产物旧");
+    expect(rowOf("newar").textContent).toContain("无产物");
+    expect(container.textContent).toContain("2 个工程有问题");
+  });
+
+  it("覆盖表有未保存草稿时不给检查（检查读的是已落盘的配置）", async () => {
+    await render();
+    expect(buttonIn(container, "检查产物")!.disabled).toBe(false);
+
+    await act(async () => buttonIn(rowOf("pm"), "停用")!.click());
+    expect(buttonIn(container, "检查产物")!.disabled).toBe(true);
+    expect(container.textContent).toContain("先保存再检查");
+    expect(callsOf("check_artifacts")).toHaveLength(0);
+  });
+
+  it("检查完链又变了：保留结论但标成过期，不假装还准", async () => {
+    await render();
+    await act(async () => buttonIn(container, "检查产物")!.click());
+    await act(async () => {});
+    expect(container.textContent).not.toContain("依赖链已经变了");
+
+    // 保存覆盖表 → reload 返回多一个工程的链 → 签名变了
+    await act(async () => buttonIn(rowOf("pm"), "停用")!.click());
+    await act(async () => saveButton()!.click());
+    await act(async () => {});
+
+    expect(container.textContent).toContain("依赖链已经变了");
+    // 结论本身没被丢掉（用户刚等完十几秒，直接清空等于白等）
+    expect(container.querySelectorAll(".lnk-chk-item")).toHaveLength(2);
   });
 });

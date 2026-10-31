@@ -127,6 +127,22 @@
 .lnk-add { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .lnk-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
+/* ── 产物检查（D4 全量新旧） ── */
+.lnk-ok {
+  padding: 8px 10px; border-radius: 8px;
+  background: hsl(var(--success) / .1); color: hsl(var(--success-ink));
+  font-size: 12px;
+}
+.lnk-chk { display: flex; flex-direction: column; gap: 4px; }
+.lnk-chk-item {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 4px 6px; border-radius: 6px;
+  background: hsl(var(--muted) / .45);
+  font-size: 12px;
+}
+.lnk-chk-item .lnk-badge { flex-shrink: 0; align-self: center; }
+.lnk-chk-msg { min-width: 0; word-break: break-word; line-height: 1.5; }
+
 /* ── 预演 / 提示 ── */
 .lnk-preview {
   display: flex; flex-direction: column; gap: 6px;

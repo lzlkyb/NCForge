@@ -1,4 +1,5 @@
 import { invoke } from "./tauri";
+import type { CompileDiagnostic } from "./compile";
 
 /**
  * 「工程关联」页的数据与操作。
@@ -83,6 +84,16 @@ export const linkedProjects = (root?: string) =>
 /** 全量替换覆盖表；返回落盘后的列表（以服务端为准，避免本地状态漂移）。 */
 export const setLinkedOverrides = (overrides: LinkedOverride[]) =>
   invoke<LinkedOverride[]>("set_linked_overrides", { overrides });
+
+/**
+ * 检查各工程的产物是否比源码旧（D4 的全量版本）。
+ *
+ * 🔴 **按需调用**，别挂到编译流程里：真机实测三工程 `C:\work\aier` 要 8~22 秒
+ * （12k 个 .java / 13k 个 .class / 149k 个目录条目，本机目录枚举约 7~15k 条目/秒）。
+ * 编译流程内只有**按类**判断（毫秒级），见 `CompileResult.diagnostics`。
+ */
+export const checkArtifacts = (root?: string) =>
+  invoke<CompileDiagnostic[]>("check_artifacts", { root: root ?? null });
 
 /**
  * 一条覆盖是否真的命中了某个工程。

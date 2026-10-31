@@ -3,6 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import "../../linked.css";
 import { DockRegion } from "../workspace/WorkbenchDock";
 import { ProjectChain } from "../linked/ProjectChain";
+import { ArtifactCheck } from "../linked/ArtifactCheck";
+import { artifactMarks } from "../linked/artifactKind";
 import { OverrideEditor } from "../linked/OverrideEditor";
 import { WorkspaceSwitch } from "../linked/WorkspaceSwitch";
 import { Icon } from "../ui/icon";
@@ -10,6 +12,7 @@ import { Skeleton } from "../ui/Skeleton";
 import { toast } from "../ui/toast";
 import { useLinkedGraph } from "../../hooks/useLinkedGraph";
 import { useOverrideDraft } from "../../hooks/useOverrideDraft";
+import { useArtifactCheck } from "../../hooks/useArtifactCheck";
 import {
   overrideHits,
   removeOverride,
@@ -39,6 +42,28 @@ export function LinkedProjectsTab() {
   const { graph, error, loading, reload } = useLinkedGraph();
   const ov = useOverrideDraft();
   const [busy, setBusy] = useState(false);
+
+  /**
+   * 产物检查的状态（8~22 秒的整树扫描，见 `check_artifacts`）。
+   *
+   * 签名 = **每个工程名 + 它贡献的类目录数 + 是否停用**。
+   * 只比工程名是不够的：停用一个工程时它仍然留在 `projects` 里（只是 `disabled`、
+   * 目录数变 0），名字序列一模一样，但**检查范围已经变了**——拿旧结论给用户看
+   * 就是「明明停用了 newar，它还在报 newar 的产物旧」。同理，追加/删除目录也改变
+   * 扫描范围。这三样一起才足以判断「这条结论还成不成立」。
+   */
+  const chainStamp = graph
+    ? graph.projects
+        .map((p) => `${p.name}:${p.classDirs.length}${p.disabled ? "!" : ""}`)
+        .join(">")
+    : "";
+  const chk = useArtifactCheck(chainStamp, graph?.primaryRoot ?? null);
+  /** 检查读的是**已落盘**的覆盖表，草稿没保存就点会得到对不上的结论 */
+  const checkBlocked = !graph
+    ? "还没读到依赖链，先点「重新读取」"
+    : ov.dirty
+      ? "覆盖表有未保存的改动：检查用的是已落盘的配置，先保存再检查"
+      : null;
 
   /** 行内按钮：只改草稿。命中判定与后端一致（工程名 / 绝对路径 / 目录名三路）。 */
   const toggle = (action: OverrideAction, p: LinkedProject) => {
@@ -140,7 +165,26 @@ export function LinkedProjectsTab() {
 
         {!graph && loading && <Skeleton className="h-40" />}
 
-        {graph && <ProjectChain graph={graph} overrides={ov.draft} onToggle={toggle} />}
+        {graph && (
+          <ProjectChain
+            graph={graph}
+            overrides={ov.draft}
+            artifacts={artifactMarks(chk.result)}
+            onToggle={toggle}
+          />
+        )}
+
+        {graph && (
+          <ArtifactCheck
+            running={chk.running}
+            error={chk.error}
+            result={chk.result}
+            stale={chk.stale}
+            elapsedMs={chk.elapsedMs}
+            disabledReason={checkBlocked}
+            onRun={() => void chk.run()}
+          />
+        )}
 
         {ov.error && (
           <div className="lnk-error">

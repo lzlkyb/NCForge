@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Icon } from "../ui/icon";
+import { artifactLabel, artifactTone } from "./artifactKind";
 import {
   originLabel,
   overrideHits,
@@ -21,10 +22,13 @@ import {
 export function ProjectChain({
   graph,
   overrides,
+  artifacts,
   onToggle,
 }: {
   graph: LinkedGraph;
   overrides: LinkedOverride[];
+  /** 「产物检查」的结论：工程名 → `stale` / `no-output`。没跑过检查就是空 */
+  artifacts?: Record<string, string>;
   onToggle: (action: OverrideAction, p: LinkedProject) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -50,6 +54,7 @@ export function ProjectChain({
             index={i}
             p={p}
             overrides={overrides}
+            mark={artifacts?.[p.name]}
             expanded={expanded.has(p.name)}
             onToggleRow={() => toggleRow(p.name)}
             onToggle={onToggle}
@@ -98,6 +103,7 @@ function ChainRow({
   index,
   p,
   overrides,
+  mark,
   expanded,
   onToggleRow,
   onToggle,
@@ -105,6 +111,8 @@ function ChainRow({
   index: number;
   p: LinkedProject;
   overrides: LinkedOverride[];
+  /** 产物检查的结论（`stale` / `no-output`），没跑过就是 undefined */
+  mark?: string;
   expanded: boolean;
   onToggleRow: () => void;
   onToggle: (action: OverrideAction, p: LinkedProject) => void;
@@ -146,6 +154,15 @@ function ChainRow({
           <span className="lnk-badge" data-kind="bad">目录找不到</span>
         )}
         {disabled && <span className="lnk-badge" data-kind="muted">已停用</span>}
+        {mark && (
+          <span
+            className="lnk-badge"
+            data-kind={artifactTone(mark)}
+            title="来自下面的「产物检查」：这类问题不会让编译失败，只会让运行时用到旧类"
+          >
+            {artifactLabel(mark)}
+          </span>
+        )}
 
         <span className="lnk-sp" />
 
