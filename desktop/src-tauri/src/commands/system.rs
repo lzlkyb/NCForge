@@ -55,6 +55,34 @@ pub async fn patch_config(
         .map(AppConfig::redacted)
 }
 
+/// 导出配置：返回 JSON 文本（前端 `downloadText` 落盘，不经文件系统）。
+///
+/// 口令密文不过导出物——白名单结构体 `ExportableConfig` 里就没有这些字段
+/// （见 `config_io` 模块文档的安全口径）。
+#[tauri::command]
+pub async fn export_config(state: tauri::State<'_, Arc<AppState>>) -> Result<String, String> {
+    let cfg = state.config.read().await.clone();
+    let export = crate::config_io::build_export(&cfg);
+    serde_json::to_string_pretty(&export).map_err(|e| format!("序列化导出配置失败: {e}"))
+}
+
+/// 导入配置：文本来自前端 `<input type=file>` 读的文件内容。
+///
+/// 走 `update_config` 串行落盘（整份读改写必须串行，否则盖掉同时刻别处的改动）；
+/// 导入是「缺字段不动本机值」的合并语义，不是整份替换。返回 redacted 后的完整
+/// 配置，前端据此刷新界面。文件里的口令字段会被主动丢弃（`config_io::parse_import`）。
+#[tauri::command]
+pub async fn import_config(
+    state: tauri::State<'_, Arc<AppState>>,
+    json: String,
+) -> Result<AppConfig, String> {
+    let export = crate::config_io::parse_import(&json)?;
+    state
+        .update_config(move |cfg| crate::config_io::apply_import(cfg, &export.config))
+        .await
+        .map(AppConfig::redacted)
+}
+
 /// 开机自启状态。
 #[tauri::command]
 pub fn get_autostart(app: tauri::AppHandle) -> Result<bool, String> {

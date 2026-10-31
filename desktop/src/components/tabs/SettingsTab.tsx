@@ -12,6 +12,7 @@ import { SettingsRow } from "../ui/SettingsRow";
 import { Button } from "../ui/button";
 import { LangSettings } from "../settings/LangSettings";
 import { ResourceSettings } from "../settings/ResourceSettings";
+import { ConfigTransferSettings } from "../settings/ConfigTransferSettings";
 import { KeymapSettings } from "../settings/KeymapSettings";
 
 /**
@@ -76,6 +77,7 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
       { label: "快捷键", content: <KeymapSettings /> },
       { label: "开发环境", content: <LangSettings /> },
       { label: "资源与更新", content: <ResourceSettings /> },
+      { label: "配置迁移", content: <ConfigTransferSettings onChanged={onChanged} /> },
       { label: "关于", content: <><Card className="flex flex-col gap-1 p-2">
         <SettingsRow
           label="关于"

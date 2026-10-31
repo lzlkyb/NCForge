@@ -14,6 +14,7 @@ pub mod branding;
 pub mod commands;
 pub mod compile;
  pub mod config;
+ pub mod config_io;
  pub mod db_bridge;
 pub mod db_conns;
 pub mod db_engine;

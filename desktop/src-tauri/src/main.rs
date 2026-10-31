@@ -271,6 +271,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::server_kill_port_owner,
             commands::nc_home_probe,
             commands::nc_home_set,
+            commands::export_config,
+            commands::import_config,
             commands::server_heap_set,
             commands::nc_port_preview,
             commands::nc_port_apply,
