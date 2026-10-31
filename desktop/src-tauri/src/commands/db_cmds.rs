@@ -54,8 +54,24 @@ pub(crate) fn slot_key(id: &str, slot: Option<&str>) -> Result<String, String> {
     }
 }
 
+/// JVM 桥兜底会话的键后缀（P0 能力路由）。
+///
+/// 它不是会话槽，也不属于 primary：是挂在某个引擎键下面的**临时会话**，只在
+/// 「Rust 引擎跑不了这条 REF CURSOR 语句」时出现。命名空间必须与槽分开——
+/// `live_slots` 只认数字，`split_slot_key` 先剥这个后缀，两边都把它当「同一条连接」。
+const JAVA_SUFFIX: &str = "#java";
+
+/// 某个引擎键对应的兜底会话键（`c1` → `c1#java`，`c1#2` → `c1#2#java`）。
+pub(crate) fn java_key(base: &str) -> String {
+    format!("{base}{JAVA_SUFFIX}")
+}
+
 /// 引擎键 → (连接 id, 槽名)。给退出前的事务探测用：`c1#2` 属于连接 `c1` 的第 2 个槽。
+///
+/// `c1#java` / `c1#2#java` 是同一连接的兜底会话，归到它所属的那条连接上——
+/// 否则退出确认里会冒出「c1#java」这种用户看不懂的假连接。
 pub(crate) fn split_slot_key(key: &str) -> (&str, Option<&str>) {
+    let key = key.strip_suffix(JAVA_SUFFIX).unwrap_or(key);
     match key.rsplit_once('#') {
         Some((id, slot)) if !id.is_empty() && slot.chars().all(|c| c.is_ascii_digit()) => {
             (id, Some(slot))
@@ -89,6 +105,9 @@ fn forget_slot(key: &str) {
 }
 
 /// 这个连接上现在活着的槽号（升序）。
+///
+/// **只认数字后缀**：`c1#java`（兜底会话）也在 `{id}#` 下，但它不是槽，
+/// 混进来会挤掉用户的会话额度、还会被空闲回收逻辑当成槽去关。
 fn live_slots(state: &AppState, id: &str) -> Vec<String> {
     let prefix = format!("{id}#");
     let mut out: Vec<String> = state
@@ -97,6 +116,7 @@ fn live_slots(state: &AppState, id: &str) -> Vec<String> {
         .map(|m| {
             m.keys()
                 .filter_map(|k| k.strip_prefix(&prefix).map(str::to_string))
+                .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) && s.len() <= 2)
                 .collect()
         })
         .unwrap_or_default();
@@ -125,6 +145,7 @@ fn sweep_idle_slots(state: &AppState, id: &str) {
     for n in stale {
         let key = format!("{id}#{n}");
         drop_bridge(state, &key);
+        drop_bridge(state, &java_key(&key));
         forget_slot(&key);
     }
 }
@@ -700,6 +721,8 @@ pub async fn db_slot_release(
 ) -> Result<(), String> {
     let key = slot_key(&id, Some(&slot))?;
     drop_bridge(&state, &key);
+    // 槽上的 JVM 桥兜底会话也不能留（否则服务端会多出一条没人管的会话）
+    drop_bridge(&state, &java_key(&key));
     forget_slot(&key);
     Ok(())
 }
@@ -795,7 +818,7 @@ pub async fn db_cancel(
 /// 断开（未提交的改动由桥回滚——界面已经先问过用户）。
 ///
 /// **连同上开的独立会话一起断**：槽是这条连接的一部分，留着它们等于在服务端占着
-/// 几条没人管的会话（用户以为已经断开了）。
+/// 几条没人管的会话（用户以为已经断开了）。P0 的 JVM 桥兜底会话（`#java`）同理。
 #[tauri::command]
 pub async fn db_disconnect(
     state: tauri::State<'_, Arc<AppState>>,
@@ -805,8 +828,10 @@ pub async fn db_disconnect(
     for n in slots {
         let key = slot_key(&id, Some(&n))?;
         drop_bridge(&state, &key);
+        drop_bridge(&state, &java_key(&key));
         forget_slot(&key);
     }
+    drop_bridge(&state, &java_key(&id));
     let Ok(b) = existing_bridge(&state, &id) else {
         return Ok(());
     };
@@ -820,8 +845,13 @@ pub async fn db_disconnect(
 ///
 /// `slot` 为空 = 走 primary（老行为）；前端给 SQL 标签申请槽之后，同一个标签的
 /// 执行 / 加载更多 / 取消 / 提交都带同一个槽名，各自的游标与事务互不干扰。
+///
+/// **P0 能力路由**：纯 Rust 引擎遇到 REF CURSOR 形态（`open :1 for …`，或打开游标却不
+/// `return_result`）时，不在这里报错，而是把这条语句改到同一连接的 JVM 桥临时会话上执行。
+/// 判定见 `db_engine::refcursor_need`，落点在 [`exec_via_java`]。
 #[tauri::command]
 pub async fn db_exec(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
     sql: String,
@@ -835,13 +865,135 @@ pub async fn db_exec(
     let b = slot_bridge(&state, &id, slot.as_deref())?;
     let rows = max_rows.unwrap_or(500).clamp(1, 10_000);
     let timeout = timeout_sec.unwrap_or(30).clamp(1, 3600);
-    call(
-        b,
+    let limit = Duration::from_secs(u64::from(timeout) + 30);
+    if b.kind() == EngineKind::Rust {
+        if let Some(need) = crate::db_engine::refcursor_need(&sql) {
+            return exec_via_java(JavaFallback {
+                app: &app,
+                st: &state,
+                id: &id,
+                slot: slot.as_deref(),
+                sql: &sql,
+                rows,
+                timeout,
+                need,
+            })
+            .await;
+        }
+    }
+    match call(
+        b.clone(),
         "exec",
-        vec![sql, rows.to_string(), timeout.to_string()],
-        Duration::from_secs(u64::from(timeout) + 30),
+        vec![sql.clone(), rows.to_string(), timeout.to_string()],
+        limit,
     )
     .await
+    {
+        Ok(v) => Ok(v),
+        // 判定没覆盖到的形态（比如游标从包里返回、写法认不出）：按报错兜一层。
+        // 兜底也失败时把两个原因都写出来——用户至少知道我们试过什么。
+        Err(e) if b.kind() == EngineKind::Rust && e.contains("PLS-00707") => {
+            exec_via_java(JavaFallback {
+                app: &app,
+                st: &state,
+                id: &id,
+                slot: slot.as_deref(),
+                sql: &sql,
+                rows,
+                timeout,
+                need: crate::db_engine::RefcursorNeed::OutBind,
+            })
+            .await
+            .map_err(|又| format!("{e}\n（自动改走 JVM 桥也没成：{又}）"))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// 一条要改走 JVM 桥执行的语句（P0）。
+///
+/// 打成一个结构体而不是八个参数：调用点两处（判定命中、按报错兜底）都要把同样的东西
+/// 原样传下去，参数列表一长，两边就容易少传一个（`slot` 少传会让兜底语句跑到另一条会话）。
+struct JavaFallback<'a> {
+    app: &'a AppHandle,
+    st: &'a Arc<AppState>,
+    id: &'a str,
+    slot: Option<&'a str>,
+    sql: &'a str,
+    rows: u32,
+    timeout: u32,
+    need: crate::db_engine::RefcursorNeed,
+}
+
+/// 在 JVM 桥的临时会话上执行一条 Rust 引擎跑不了的语句。
+///
+/// 三条纪律，改这里之前先读完：
+/// 1. **不占会话槽**：键是 `{引擎键}#java`，`live_slots` 只认数字后缀，所以它既不挤用户
+///    的 3 个槽，也不会被空闲回收当成槽关掉；断开连接 / 释放槽时随宿主一起收；
+/// 2. **不做假的无感**：结果里带 `fallback`，前端会把「这条走的是 JVM 桥」写进输出区。
+///    悄悄换引擎执行，用户排查「为什么这条 SQL 的事务没算进去」时会被坑死；
+/// 3. **绝不静默提交**：这个临时会话不归界面的事务条管。执行完先看它有没有未提交写入，
+///    有就回滚并说明白——让用户以为提交了、实际挂在一条看不见的会话里，比直接报错更糟。
+async fn exec_via_java(f: JavaFallback<'_>) -> Result<Value, String> {
+    let JavaFallback {
+        app,
+        st,
+        id,
+        slot,
+        sql,
+        rows,
+        timeout,
+        need,
+    } = f;
+    let cfg = st.config.read().await.clone();
+    let conn = find_conn(&cfg, id)?;
+    let key = java_key(&slot_key(id, slot)?);
+    let handle = bridge_for(app, st, &cfg, &key, EngineKind::Java)?;
+    // 连过一次就复用：桥的 `connect` 会先把旧连接关掉，等于每条语句重连一次库。
+    // 用一个 ping 探活，顺带能拿到「这条会话有没有未提交写入」。
+    if call(handle.clone(), "ping", Vec::new(), T_META)
+        .await
+        .is_err()
+    {
+        let (cmd, args) = connect_args(&cfg, &conn, None, false, EngineKind::Java)?;
+        call(handle.clone(), cmd, args, T_CONNECT).await?;
+    }
+    let limit = Duration::from_secs(u64::from(timeout) + 30);
+    let mut v = call(
+        handle.clone(),
+        "exec",
+        vec![sql.to_string(), rows.to_string(), timeout.to_string()],
+        limit,
+    )
+    .await?;
+    let pending = call(handle.clone(), "ping", Vec::new(), T_META)
+        .await
+        .ok()
+        .and_then(|p| {
+            p.get("tx")
+                .and_then(|t| t.get("statements"))
+                .and_then(Value::as_u64)
+        })
+        .unwrap_or(0);
+    if pending > 0 {
+        let _ = call(handle, "rollback", Vec::new(), T_META).await;
+        return Err(code_label(
+            "fallback-tx",
+            &format!(
+                "这条语句 Rust 引擎跑不了（{}），已改在 JVM 桥的临时会话里执行；\
+                 但它在那个会话里留下了 {pending} 条未提交的写入，而那个会话不受这里的事务条管理，\
+                 已经回滚以免你以为提交了。要执行会写库的这类语句，请把这条连接的引擎改成 JVM 桥。",
+                need.reason()
+            ),
+        ));
+    }
+    if let Value::Object(map) = &mut v {
+        map.insert(
+            "fallback".into(),
+            serde_json::json!({ "engine": "java", "reason": need.reason() }),
+        );
+    }
+    Ok(v)
 }
 
 /// 「加载更多」：从上一次查询的游标接着取（`slot` 必须与执行时相同）。
@@ -1466,5 +1618,8 @@ mod tests {
         assert_eq!(split_slot_key("c1#2"), ("c1", Some("2")));
         // 连接 id 里本来就可能带 #（老配置 / 手改），不是纯数字就别乱拆
         assert_eq!(split_slot_key("c#abc"), ("c#abc", None));
+        // P0 的兜底会话归它所属的连接：退出确认里不能冒出「c1#java」这种假连接
+        assert_eq!(split_slot_key(&java_key("c1")), ("c1", None));
+        assert_eq!(split_slot_key(&java_key("c1#2")), ("c1", Some("2")));
     }
 }

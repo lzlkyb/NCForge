@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("./tauri", () => ({ invoke: mocks.invoke }));
 
-import { __resetDbForTest, execOne, openSqlTab, summaryOf, type ResultEntry } from "./dbStore";
+import { __resetDbForTest, execOne, openSqlTab, sqlTabOf, summaryOf, type ResultEntry } from "./dbStore";
 
 /**
  * 结果摘要（结果标签上那截小字）。
@@ -132,5 +132,26 @@ describe("execOne 把 sets 带到结果条目上", () => {
     expect(execCalls).toHaveLength(2);
     expect(execCalls[0][1]).toMatchObject({ slot: "1" });
     expect(execCalls[1][1]).toMatchObject({ slot: "2" });
+  });
+
+  it("改走 JVM 桥执行的结果要在输出区留一行说明", async () => {
+    // P0 能力路由：Rust 引擎跑不了的 REF CURSOR 语句被搬到 JVM 桥的临时会话上执行。
+    // 那条会话**不归事务条管**——不说明的话，用户点了回滚会以为它也撤掉了。
+    mocks.invoke.mockImplementation((cmd: string) =>
+      Promise.resolve(
+        cmd === "db_slot_acquire"
+          ? { slot: "1" }
+          : {
+              ...rowsBody,
+              sets: undefined,
+              fallback: { engine: "java", reason: "游标是 OUT 绑定参数（`open :1 for …`），纯 Rust 驱动没有 OUT 绑定" },
+            },
+      ),
+    );
+    const tabId = openSqlTab("c1", "begin open :1 for select 1 from dual; end;");
+    await execOne(tabId, "begin open :1 for select 1 from dual; end;", 1);
+    const tab = sqlTabOf(tabId);
+    const lines = tab ? tab.output.map((l: { text: string }) => l.text) : [];
+    expect(lines.some((t: string) => t.includes("JVM 桥") && t.includes("不受本连接"))).toBe(true);
   });
 });

@@ -153,6 +153,20 @@ export interface ResultSet {
   hasMore: boolean;
 }
 
+/**
+ * 「这条语句不是在本引擎上跑的」——P0 能力路由的标记。
+ *
+ * 纯 Rust 引擎跑不了 REF CURSOR 的两种形态（`open :1 for` 的 OUT 绑定、开了游标却不
+ * `return_result`），这时后端会把它改到同一连接的 JVM 桥临时会话上执行，并在结果里带上
+ * 这一段。**必须显示给用户**：那条会话不归事务条管，不说清楚用户会以为提交/回滚也管着它。
+ */
+export interface ExecFallback {
+  /** 实际执行它的引擎，目前只有 `java`。 */
+  engine: string;
+  /** 为什么被搬走（后端给的中文原因）。 */
+  reason: string;
+}
+
 export interface RowsResult {
   kind: "rows";
   columns: ColumnMeta[];
@@ -166,6 +180,8 @@ export interface RowsResult {
   stats?: ExecStats | null;
   output: string[];
   tx: TxInfo;
+  /** 只在「改走 JVM 桥执行」时出现。 */
+  fallback?: ExecFallback;
 }
 
 export interface UpdateResult {
@@ -176,6 +192,7 @@ export interface UpdateResult {
   stats?: ExecStats | null;
   output: string[];
   tx: TxInfo;
+  fallback?: ExecFallback;
 }
 
 export type ExecResult = RowsResult | UpdateResult;

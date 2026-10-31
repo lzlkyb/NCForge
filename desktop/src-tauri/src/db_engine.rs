@@ -71,6 +71,12 @@ pub struct Caps {
 
 impl Caps {
     /// JVM 桥。取消靠 `Statement.cancel()`，一个 JVM 带多条会话（A 方案）。
+    ///
+    /// `refcursor: true` 到 2026-10-31 才是真的：此前桥用普通 `Statement` 执行用户 SQL，
+    /// `open :1 for …` 里的游标 OUT 参数表达不了（真库报 `ORA-01008 并非所有变量都已绑定`），
+    /// 「两种形态都通」其实只通了 `dbms_sql.return_result` 那一种。现在 `exec` 认出
+    /// `open :N for` 就走 `prepareCall` + `registerOutParameter(CURSOR)`，两种都通
+    /// （`tests/db_refcursor_probe.rs` R5 是守卫）。
     pub const JAVA: Caps = Caps {
         cancel: true,
         refcursor: true,
@@ -80,13 +86,18 @@ impl Caps {
         stats: true,
     };
 
-    /// 纯 Rust 驱动的能力（2026-10-30 按 `db_rust.rs` + vendored 驱动的实际实现校正）：
+    /// 纯 Rust 驱动的能力（2026-10-30 按 `db_rust.rs` + vendored 驱动的实际实现校正，
+    /// 2026-10-31 P0 补注）：
     /// - `cancel`：**有**。上游 issue #24 没有 break API，我们在 `vendor/oracledb` 里补了
     ///   `BreakHandle`（切片读 + INTERRUPT 标记），见该目录 `FORK.md`。
     /// - `refcursor`：**只有一半**，所以仍是 `false`。`dbms_sql.return_result` 与嵌套游标列
     ///   已经能出多结果集（`db_rust.rs::implicit_sets`，vendor 补丁四），但 JDBC 风格的
     ///   `open :1 for …` 要 OUT 绑定（`BindParameters` 只有输入值），仍报 `PLS-00707`。
     ///   两种形态都通之后再翻成 `true`——写 `true` 就代表整条路能跑。
+    ///   ⚠️ **P0 之后「用户视角」不再撞墙**：这类语句会被 `db_engine::refcursor_need` 认出来，
+    ///   改到同一连接的 JVM 桥临时会话上执行（`commands::db_cmds::exec_via_java`）。
+    ///   但这**不是这个引擎的能力**，所以能力位照旧是 `false`：界面上「引擎选择」说的是
+    ///   「这条引擎自己能不能做」，路由只是兜底，且不参与本连接的事务。
     /// - `prop_decrypt`：仍然没有 —— 解 prop.xml 要用 NC 的 Java 类。但连接可以工作：
     ///   首次连接时由 JVM 桥解一次口令、DPAPI 存起来（`db_cmds::prop_password_ready`）。
     /// - `multi_session`：有。每条连接一个 `Connection`，内存本来就与连接数同阶。
@@ -224,6 +235,143 @@ impl EngineHandle {
     }
 }
 
+// ─────────────────── REF CURSOR 语句形态判定（P0 能力路由） ───────────────────
+
+/// 这条语句**为什么**不能留在纯 Rust 引擎上跑。
+///
+/// 两种形态互斥，取更严重的那种（OUT 绑定是硬失败，取不到行是静默失败）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefcursorNeed {
+    /// `begin open :1 for … end;` —— 游标是 **OUT 绑定参数**。
+    /// Rust 驱动的 `BindParameters` 只有输入值，没有 OUT 方向，真库实测报
+    /// `ORA-06550 / PLS-00707`（2026-10-31，`tests/db_refcursor_probe.rs` R4）。
+    OutBind,
+    /// 本地声明了 `sys_refcursor` 并 `open … for`，但**既没有** `dbms_sql.return_result`
+    /// **也不在同一个块里 fetch**：Rust 能把块执行完，但行永远取不出来 —— 界面显示
+    /// 「执行成功」却没有结果，比报错更难查。
+    CursorWithoutResultSet,
+}
+
+impl RefcursorNeed {
+    /// 给人看的一句话，写进结果里的 `fallback.reason`。
+    pub fn reason(self) -> &'static str {
+        match self {
+            RefcursorNeed::OutBind => {
+                "游标是 OUT 绑定参数（`open :1 for …`），纯 Rust 驱动没有 OUT 绑定"
+            }
+            RefcursorNeed::CursorWithoutResultSet => {
+                "打开了游标却没有 dbms_sql.return_result，纯 Rust 驱动取不到行"
+            }
+        }
+    }
+}
+
+/// 判定一条 SQL 要不要改走 JVM 桥。
+///
+/// **只认能安全识别的形态**，认不出就返回 `None`（留在原引擎，按原文报错）。
+/// 宁可让用户在老路径上看到 `PLS-00707`，也不要瞎猜着把语句发到另一个引擎去——
+/// 那会把「一条语句失败」变成「一条语句悄悄跑在另一个会话/事务里」。
+pub fn refcursor_need(sql: &str) -> Option<RefcursorNeed> {
+    let code = strip_literals(sql);
+    let mut out_bind = false;
+    let mut opens_ident_for = false;
+    for (at, _) in code.match_indices("open") {
+        if !word_boundary(&code, at, 4) {
+            continue;
+        }
+        let rest = code[at + 4..].trim_start();
+        if let Some(after_colon) = rest.strip_prefix(':') {
+            // `open :1 for`：冒号后面是数字占位符，再往后必须是 for
+            let digits = after_colon.len()
+                - after_colon
+                    .trim_start_matches(|c: char| c.is_ascii_digit())
+                    .len();
+            if digits > 0 && after_colon[digits..].trim_start().starts_with("for") {
+                out_bind = true;
+            }
+        } else if rest.starts_with(|c: char| c.is_alphabetic() || c == '_') {
+            // `open rc for`：标识符形态。名字不校验（可能是包里的游标），后面跟 for 就算
+            let name_len = rest
+                .char_indices()
+                .find(|(_, c)| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '$' | '#')))
+                .map(|(i, _)| i)
+                .unwrap_or(rest.len());
+            if rest[name_len..].trim_start().starts_with("for") {
+                opens_ident_for = true;
+            }
+        }
+    }
+    if out_bind {
+        return Some(RefcursorNeed::OutBind);
+    }
+    // `return_result` 是 Rust 已经支持的那条路（隐式结果集，多结果集标签都有），必须放行；
+    // `fetch` 说明这个块自己把游标消费掉了，没有「取不出来的行」这回事
+    if code.contains("sys_refcursor")
+        && !code.contains("return_result")
+        && !code.contains("fetch")
+        && opens_ident_for
+    {
+        return Some(RefcursorNeed::CursorWithoutResultSet);
+    }
+    None
+}
+
+/// 去掉字符串常量与注释（顺便转小写），避免 `'open :1 for'` 这种字面量被当成真语句。
+///
+/// 逐字节处理：只有 ASCII 会变（大小写折叠），其余字节原样拷贝，所以结果仍是合法 UTF-8。
+fn strip_literals(sql: &str) -> String {
+    let b = sql.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'\'' => {
+                i += 1;
+                while i < b.len() {
+                    if b[i] == b'\'' {
+                        if i + 1 < b.len() && b[i + 1] == b'\'' {
+                            i += 2;
+                            continue;
+                        }
+                        i += 1;
+                        break;
+                    }
+                    i += 1;
+                }
+                out.push(b' ');
+            }
+            b'-' if i + 1 < b.len() && b[i + 1] == b'-' => {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+                out.push(b' ');
+            }
+            b'/' if i + 1 < b.len() && b[i + 1] == b'*' => {
+                i += 2;
+                while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
+                    i += 1;
+                }
+                i = (i + 2).min(b.len());
+                out.push(b' ');
+            }
+            c => {
+                out.push(c.to_ascii_lowercase());
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// `word`（长度 `len`）出现在 `at` 处时，两侧不能是标识符字符（`open_x` / `reopen` 不算）。
+fn word_boundary(s: &str, at: usize, len: usize) -> bool {
+    let is_word = |c: u8| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'$' | b'#');
+    let b = s.as_bytes();
+    let before_ok = at == 0 || !is_word(b[at - 1]);
+    let after_ok = at + len >= b.len() || !is_word(b[at + len]);
+    before_ok && after_ok
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,5 +481,87 @@ mod tests {
         same.java = PathBuf::from("java");
         same.jars = vec![PathBuf::from("b.jar")];
         assert!(!h.matches_env(&same), "换了 classpath 就该重建");
+    }
+
+    // ── REF CURSOR 形态判定 ──
+    //
+    // 每条用例都对应一个「判错的后果」，不是凑数：
+    // 判漏 = 用户在 Rust 引擎上撞 PLS-00707 或者拿到空结果；判多 = 语句被悄悄搬到
+    // 另一条会话上执行（事务不再归这条连接管）。
+
+    #[test]
+    fn 占位符游标判为_out_bind() {
+        // 真库实测原文（probe R4）：这条在 Rust 上必然 PLS-00707
+        assert_eq!(
+            refcursor_need(
+                "begin open :1 for select table_name from all_tables where rownum <= 3; end;"
+            ),
+            Some(RefcursorNeed::OutBind)
+        );
+        // 多位数、大小写、空格变体
+        assert_eq!(
+            refcursor_need("BEGIN\n  OPEN :10 FOR select 1 from dual;\nEND;"),
+            Some(RefcursorNeed::OutBind)
+        );
+        assert_eq!(
+            refcursor_need("begin open:2 for select 1 from dual; end;"),
+            Some(RefcursorNeed::OutBind)
+        );
+    }
+
+    #[test]
+    fn 本地游标没有_return_result_判为取不到行() {
+        assert_eq!(
+            refcursor_need("declare rc sys_refcursor; begin open rc for select 1 from dual; end;"),
+            Some(RefcursorNeed::CursorWithoutResultSet)
+        );
+    }
+
+    #[test]
+    fn 已经支持的形态一律放行() {
+        // 隐式结果集：Rust 侧早就能出多结果集了，绝不能把它搬去 JVM
+        assert_eq!(
+            refcursor_need(
+                "declare rc sys_refcursor; begin open rc for select 1 from dual; \
+                 dbms_sql.return_result(rc); end;"
+            ),
+            None
+        );
+        // 块自己 fetch 完了：没有「取不出来的行」这回事
+        assert_eq!(
+            refcursor_need(
+                "declare rc sys_refcursor; n number; begin open rc for select 1 from dual; \
+                 fetch rc into n; close rc; end;"
+            ),
+            None
+        );
+        // 普通语句与普通绑定变量都不是游标
+        assert_eq!(
+            refcursor_need("select * from bd_material where id = :1"),
+            None
+        );
+        assert_eq!(
+            refcursor_need("begin insert into t (a) values (:1); end;"),
+            None
+        );
+        assert_eq!(refcursor_need("update t set a = 1 where b = 2"), None);
+    }
+
+    #[test]
+    fn 字面量与注释里的形态不算() {
+        // 报错信息 / 文档字符串里经常写着这句 SQL
+        assert_eq!(
+            refcursor_need(
+                "select 'begin open :1 for select 1 from dual; end;' as sample from dual"
+            ),
+            None
+        );
+        assert_eq!(
+            refcursor_need("-- begin open :1 for select 1 from dual;\nselect 1 from dual"),
+            None
+        );
+        assert_eq!(refcursor_need("/* open :1 for */ select 1 from dual"), None);
+        // 标识符里带 open 也不算（`reopen` / `open_flag`）
+        assert_eq!(refcursor_need("select reopen, open_flag from t"), None);
     }
 }

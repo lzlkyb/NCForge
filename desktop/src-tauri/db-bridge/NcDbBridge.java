@@ -85,8 +85,37 @@ public class NcDbBridge {
     private static final Pattern WRITES = Pattern.compile(
             "^\\s*(insert|update|delete|merge|replace)\\b");
     private static final Pattern FOR_UPDATE = Pattern.compile("\\bfor\\s+update\\b");
+    /**
+     * PL/SQL 里「游标 OUT 参数」的写法：`open :1 for select …`。
+     *
+     * 这是 JDBC 调用存储过程的标准形态（DBMS_SQL / PL/SQL Developer / DBeaver 导出的脚本里都有），
+     * 但**普通 {@code Statement} 表达不了它**：`:1` 是游标类型的 OUT 参数，必须
+     * `prepareCall` + `registerOutParameter(1, CURSOR)` 才拿得到行。
+     * 2026-10-31 真库实测：走普通 Statement 报 `ORA-01008 并非所有变量都已绑定`。
+     */
+    private static final Pattern CURSOR_OPEN = Pattern.compile(
+            "\\bopen\\s*:\\s*(\\d+)\\s+for\\b");
+
+    /**
+     * 游标 OUT 参数的类型码。
+     *
+     * **编译期不能引 `oracle.jdbc.OracleTypes`**：桥只依赖 JDK 标准库（见
+     * `scripts/build-bridge-jar.mjs` 的 `cp: []`），驱动是运行时才加载的。所以运行时反射取一次，
+     * 取不到就用 −10（`OracleTypes.CURSOR` 的历史值；NC 自带的 ufjdk 是 Java 7，
+     * 连 `java.sql.Types.REF_CURSOR` 都还没有，别指望它）。
+     */
+    private static final int CURSOR_TYPE = cursorType();
 
     private static final int CLOB_MAX = 1024 * 1024;
+
+    private static int cursorType() {
+        try {
+            return Class.forName("oracle.jdbc.OracleTypes").getField("CURSOR").getInt(null);
+        } catch (Throwable ignore) {
+            // 没驱动（离线编译/单测）时用 OracleTypes.CURSOR 的历史值；真跑的时候驱动一定在
+            return -10;
+        }
+    }
 
     /** stdout 只留给协议。多个会话线程都会往这里写，PrintStream 的 println 是原子的。 */
     private static PrintStream out;
@@ -448,26 +477,55 @@ public class NcDbBridge {
             // A2 Autotrace：执行前后各读一次 v$mystat，差值才是这条语句的真实开销。
             // 读不到（低权限账号没有 V_$MYSTAT 授权）时为 null，界面据此不显示统计行。
             long[] statBefore = statSnapshot();
-            Statement st = conn.createStatement();
+            // 游标 OUT 参数要走 CallableStatement（见 CURSOR_OPEN 注释）；
+            // 其余语句仍是普通 Statement，行为一字不改。
+            int[] cursorBinds = cursorOutBinds(sql);
+            Statement st = null;
             boolean keep = false;
             try {
-                st.setQueryTimeout(timeout);
-                running = st; // 让 cancel 能找到它
-                boolean hasRs = st.execute(sql);
                 String body;
-                if (hasRs) {
-                    ResultSet rs = st.getResultSet();
-                    body = readRows(rs, maxRows);
-                    keep = cursor == rs;
-                    if (keep) {
-                        cursorStmt = st;
+                if (cursorBinds.length > 0) {
+                    CallableStatement cs = prepareCursorCall(sql, cursorBinds);
+                    st = cs;
+                    st.setQueryTimeout(timeout);
+                    running = st; // 让 cancel 能找到它
+                    cs.execute();
+                    ResultSet first = cursorResult(cs, cursorBinds[0]);
+                    // 多个游标：第一个进顶层（这样「加载更多」还能接着用那条游标），
+                    // 其余的按 Rust 引擎的 `sets` 形状带出去，前端已经有「结果集 1/2…」标签。
+                    String extra = cursorBinds.length > 1 ? cursorSets(cs, cursorBinds, maxRows) : "";
+                    if (first == null) {
+                        body = "\"kind\":\"update\",\"updateCount\":0";
+                    } else {
+                        body = readRows(first, maxRows);
+                        keep = cursor == first;
+                        if (keep) {
+                            cursorStmt = st;
+                        }
+                    }
+                    if (!extra.isEmpty()) {
+                        body = body + ",\"sets\":" + extra;
                     }
                 } else {
-                    int uc = st.getUpdateCount();
-                    body = "\"kind\":\"update\",\"updateCount\":" + uc;
-                    trackTx(head, uc);
+                    Statement plain = conn.createStatement();
+                    st = plain;
+                    st.setQueryTimeout(timeout);
+                    running = st; // 让 cancel 能找到它
+                    boolean hasRs = st.execute(sql);
+                    if (hasRs) {
+                        ResultSet rs = st.getResultSet();
+                        body = readRows(rs, maxRows);
+                        keep = cursor == rs;
+                        if (keep) {
+                            cursorStmt = st;
+                        }
+                    } else {
+                        int uc = st.getUpdateCount();
+                        body = "\"kind\":\"update\",\"updateCount\":" + uc;
+                        trackTx(head, uc);
+                    }
                 }
-                if (hasRs && FOR_UPDATE.matcher(stripLiterals(sql).toLowerCase()).find()) {
+                if (st != null && FOR_UPDATE.matcher(stripLiterals(sql).toLowerCase()).find()) {
                     trackTx("lock", 0);
                 }
                 long ms = System.currentTimeMillis() - t0;
@@ -477,7 +535,7 @@ public class NcDbBridge {
                         + ",\"output\":" + dbmsOutput() + ",\"tx\":" + txJson() + "}";
             } finally {
                 running = null;
-                if (!keep) {
+                if (!keep && st != null) {
                     try {
                         st.close();
                     } catch (SQLException ignore) {
@@ -485,6 +543,136 @@ public class NcDbBridge {
                     }
                 }
             }
+        }
+
+        /**
+         * 找出这条语句里「游标 OUT 参数」的位置（1 起，与 `:N` 的 N 一致）。
+         *
+         * 空数组 = 照常走普通 Statement。认不出就返回空：宁可让它在老路径上报
+         * `ORA-01008`，也不要把普通绑定参数误当游标注册（那样报的是更难懂的类型错）。
+         */
+        static int[] cursorOutBinds(String sql) {
+            java.util.regex.Matcher m = CURSOR_OPEN.matcher(stripLiterals(sql));
+            java.util.List<Integer> found = new java.util.ArrayList<Integer>();
+            while (m.find()) {
+                int idx = Integer.parseInt(m.group(1));
+                if (!found.contains(Integer.valueOf(idx))) {
+                    found.add(Integer.valueOf(idx));
+                }
+            }
+            int[] out = new int[found.size()];
+            for (int i = 0; i < out.length; i++) {
+                out[i] = found.get(i).intValue();
+            }
+            return out;
+        }
+
+        /** 把 `:N` 改写成 JDBC 的 `?`（字符串常量与注释里的不动）。 */
+        static String toQuestionMarks(String sql) {
+            StringBuilder b = new StringBuilder(sql.length());
+            int i = 0;
+            int n = sql.length();
+            while (i < n) {
+                char c = sql.charAt(i);
+                if (c == '\'') {
+                    int j = i++;
+                    while (i < n) {
+                        if (sql.charAt(i) == '\'') {
+                            if (i + 1 < n && sql.charAt(i + 1) == '\'') {
+                                i += 2;
+                                continue;
+                            }
+                            i++;
+                            break;
+                        }
+                        i++;
+                    }
+                    b.append(sql, j, Math.min(i, n));
+                } else if (c == '-' && i + 1 < n && sql.charAt(i + 1) == '-') {
+                    int j = i;
+                    while (i < n && sql.charAt(i) != '\n') {
+                        i++;
+                    }
+                    b.append(sql, j, i);
+                } else if (c == '/' && i + 1 < n && sql.charAt(i + 1) == '*') {
+                    int j = i;
+                    i += 2;
+                    while (i + 1 < n && !(sql.charAt(i) == '*' && sql.charAt(i + 1) == '/')) {
+                        i++;
+                    }
+                    i = Math.min(i + 2, n);
+                    b.append(sql, j, i);
+                } else if (c == ':' && i + 1 < n && Character.isDigit(sql.charAt(i + 1))) {
+                    int j = i + 1;
+                    while (j < n && Character.isDigit(sql.charAt(j))) {
+                        j++;
+                    }
+                    b.append('?');
+                    i = j;
+                } else {
+                    b.append(c);
+                    i++;
+                }
+            }
+            return b.toString();
+        }
+
+        /**
+         * 准备游标 OUT 参数的调用。
+         *
+         * **不能去掉结尾的 `;`**：这是 PL/SQL 匿名块自己的 `end;`（不是语句结束符），
+         * 去掉就变成 `begin … end`，真库报 `PLS-00103 出现符号 end-of-file`（实测踩过）。
+         * 普通 SQL 的尾分号由 {@code normalize} 处理，那条路不走这里。
+         */
+        private CallableStatement prepareCursorCall(String sql, int[] binds) throws SQLException {
+            CallableStatement cs = conn.prepareCall(toQuestionMarks(sql));
+            for (int idx : binds) {
+                cs.registerOutParameter(idx, CURSOR_TYPE);
+            }
+            return cs;
+        }
+
+        /** 取第 idx 个参数上的游标；万一不是游标（比如用户写了 INTO 别的类型）返回 null。 */
+        private static ResultSet cursorResult(CallableStatement cs, int idx) throws SQLException {
+            Object v = cs.getObject(idx);
+            return v instanceof ResultSet ? (ResultSet) v : null;
+        }
+
+        /**
+         * 第 2 个及以后的游标，按 Rust 引擎 `implicit_sets` 的形状拼成 `sets` 数组。
+         * 第一个游标已经在顶层（`kind:"rows"`），这里不重复放。
+         */
+        private String cursorSets(CallableStatement cs, int[] binds, int maxRows) throws SQLException {
+            StringBuilder b = new StringBuilder("[");
+            boolean any = false;
+            for (int k = 1; k < binds.length; k++) {
+                ResultSet rs = cursorResult(cs, binds[k]);
+                if (rs == null) {
+                    continue;
+                }
+                if (any) {
+                    b.append(',');
+                }
+                b.append(setJson(rs, maxRows));
+                any = true;
+                try {
+                    rs.close();
+                } catch (SQLException ignore) {
+                    // 忽略
+                }
+            }
+            b.append(']');
+            return any ? b.toString() : "";
+        }
+
+        /** 一段结果集：`{columns, rows, rowCount, hasMore}`，与 Rust 侧 `implicit_sets` 同形。 */
+        private String setJson(ResultSet rs, int maxRows) throws SQLException {
+            ResultSetMetaData md = rs.getMetaData();
+            // 同上：先取列信息再取行，顺序反了会撞「关闭的语句」
+            String cols = columnsJson(md);
+            Page p = pageOf(rs, md.getColumnCount(), maxRows);
+            return "{\"columns\":" + cols + ",\"rows\":" + p.rows
+                    + ",\"rowCount\":" + p.count + ",\"hasMore\":" + p.hasMore + "}";
         }
 
         /**
@@ -581,6 +769,17 @@ public class NcDbBridge {
 
         private String readRows(ResultSet rs, int maxRows) throws SQLException {
             ResultSetMetaData md = rs.getMetaData();
+            // **列信息必须在 page() 之前取**：page 取完（没更多行）会 closeCursor()，
+            // 之后再读元数据就是「ORA-17009 关闭的语句」（2026-10-31 实测踩过，堆栈指到 columnsJson）。
+            String cols = columnsJson(md);
+            cursor = rs;
+            cursorCols = md.getColumnCount();
+            String page = page(maxRows);
+            return "\"kind\":\"rows\",\"columns\":" + cols + "," + page;
+        }
+
+        /** 列信息（`[{name,type,precision,scale}]`）。总览表与 `sets` 共用同一份形状。 */
+        static String columnsJson(ResultSetMetaData md) throws SQLException {
             int n = md.getColumnCount();
             StringBuilder cols = new StringBuilder("[");
             for (int i = 1; i <= n; i++) {
@@ -594,30 +793,39 @@ public class NcDbBridge {
                         .append('}');
             }
             cols.append(']');
-            cursor = rs;
-            cursorCols = n;
-            String page = page(maxRows);
-            return "\"kind\":\"rows\",\"columns\":" + cols + "," + page;
+            return cols.toString();
         }
 
-        /** 从当前游标再取最多 maxRows 行；取完就关游标。 */
-        private String page(int maxRows) throws SQLException {
+        /** 一页行（纯函数：不动 `cursor` / `cursorStmt`，供多结果集复用）。 */
+        static final class Page {
+            final String rows;
+            final int count;
+            final boolean hasMore;
+
+            Page(String rows, int count, boolean hasMore) {
+                this.rows = rows;
+                this.count = count;
+                this.hasMore = hasMore;
+            }
+        }
+
+        static Page pageOf(ResultSet rs, int cols, int maxRows) throws SQLException {
             StringBuilder rows = new StringBuilder("[");
             int count = 0;
             boolean hasMore = false;
             while (true) {
-                if (!cursor.next()) {
+                if (!rs.next()) {
                     break;
                 }
                 if (count > 0) {
                     rows.append(',');
                 }
                 rows.append('[');
-                for (int i = 1; i <= cursorCols; i++) {
+                for (int i = 1; i <= cols; i++) {
                     if (i > 1) {
                         rows.append(',');
                     }
-                    rows.append(value(cursor, i));
+                    rows.append(value(rs, i));
                 }
                 rows.append(']');
                 count++;
@@ -628,10 +836,16 @@ public class NcDbBridge {
                 }
             }
             rows.append(']');
-            if (!hasMore) {
+            return new Page(rows.toString(), count, hasMore);
+        }
+
+        /** 从当前游标再取最多 maxRows 行；取完就关游标。 */
+        private String page(int maxRows) throws SQLException {
+            Page p = pageOf(cursor, cursorCols, maxRows);
+            if (!p.hasMore) {
                 closeCursor();
             }
-            return "\"rows\":" + rows + ",\"rowCount\":" + count + ",\"hasMore\":" + hasMore;
+            return "\"rows\":" + p.rows + ",\"rowCount\":" + p.count + ",\"hasMore\":" + p.hasMore;
         }
 
         private String more(int maxRows) throws SQLException {

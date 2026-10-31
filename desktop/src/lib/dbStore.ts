@@ -498,6 +498,15 @@ export async function execOne(tabId: string, sql: string, index: number): Promis
       ? { ...base, kind: "rows", columns: r.columns, rows: r.rows, hasMore: r.hasMore, ms: r.ms, sets: r.sets, stats: r.stats }
       : { ...base, kind: "update", updateCount: r.updateCount, ms: r.ms, stats: r.stats };
     if (r.output.length) appendOutput(tabId, r.output.map((text) => ({ at: Date.now(), text, tone: "dbms" as const })));
+    // P0 能力路由：这条语句其实是在 JVM 桥的临时会话上跑的。必须说出来——
+    // 那条会话不在下面的事务条管辖范围里，用户若以为「回滚能撤掉它」会出事。
+    if (r.fallback) {
+      appendOutput(tabId, [{
+        at: Date.now(),
+        text: `[${now()}] 这条语句改在 JVM 桥的临时会话上执行：${r.fallback.reason}。它不受本连接「事务」条管理（提交 / 回滚只作用于本连接的会话）`,
+        tone: "info",
+      }]);
+    }
   } catch (e) {
     const { code, message } = parseDbError(e);
     if (code === "bridge") setRt(connId, { status: "error", error: message });

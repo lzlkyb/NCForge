@@ -409,13 +409,95 @@ fn R11_未取结果集不泄漏游标() {
     assert_alive(&conn, "R11");
 }
 
-/// R5：对照组。同一形态在 JVM 桥（JDBC）上能跑，确认不是语句本身写错。
+/// R5：对照组。同一形态在 JVM 桥（JDBC）上能不能跑。
+///
 /// 需要 NC_HOME + ncdb.jar，缺了就跳过。
+///
+/// # 为什么要真跑一遍，而不是「JDBC 应该能跑」
+///
+/// P0「语句自动回落 JVM 桥」的全部价值都押在这条上：如果桥自己也跑不了，回落只是把
+/// 一个报错换成另一个报错。**实测结论（2026-10-31）**：桥原来也跑不了
+/// （`ORA-01008 并非所有变量都已绑定`，因为它用普通 `Statement`，没有 OUT 绑定）。
+/// 补上 `prepareCall` + `registerOutParameter(CURSOR)` 之后才通 —— 这条用例就是那道守卫。
 #[test]
 #[ignore = "要连真实数据库；需先挂 VPN"]
 fn R5_对照_JVM桥能跑() {
-    match std::env::var("NC_HOME") {
-        Ok(home) => println!("[R5] NC_HOME = {home}（JVM 桥的 REF CURSOR 能力由 K29/K30 覆盖）"),
-        Err(_) => println!("[R5] 未设 NC_HOME，跳过"),
+    let Some(h) = jvm_session() else {
+        return;
+    };
+    let t = std::time::Duration::from_secs(30);
+    // 与 R4 逐字相同的语句
+    let sql = "begin open :1 for select table_name from all_tables where rownum <= 3; end;";
+    let v = h
+        .call("exec", &[sql, "10", "30"], t)
+        .expect("桥执行 OUT 绑定形态失败");
+    assert_eq!(v["kind"], "rows", "应当是结果集：{v}");
+    let rows = v["rows"].as_array().map(|a| a.len()).unwrap_or(0);
+    assert!(rows > 0, "应当取到行（P0 回落的前提）：{v}");
+    assert_eq!(v["rowCount"].as_u64(), Some(rows as u64));
+
+    // 两个游标：第一个进顶层，其余进 sets（与 Rust 引擎同形）
+    let two = "begin open :1 for select 1 as a from dual; \
+               open :2 for select 'x' as b from dual; end;";
+    let v2 = h
+        .call("exec", &[two, "10", "30"], t)
+        .expect("两个游标执行失败");
+    // 注意：JVM 桥把所有值都编码成字符串（`"1"`），Rust 引擎给的是类型化 JSON（`1`）——
+    // 这是两条引擎既有的差异，前端按字符串渲染，这里按桥的约定断言。
+    assert_eq!(v2["rows"][0][0], "1", "第一个游标应在顶层：{v2}");
+    let sets = v2["sets"].as_array().expect("第二个游标应进 sets");
+    assert_eq!(sets.len(), 1, "只该有一个附加结果集：{v2}");
+    assert_eq!(sets[0]["rows"][0][0], "x");
+
+    // 取满就停下，`more` 还能接着取（说明桥里游标没被关掉）
+    let page = "begin open :1 for select table_name from all_tables where rownum <= 8; end;";
+    let v3 = h.call("exec", &[page, "3", "30"], t).expect("分页执行失败");
+    assert_eq!(v3["rowCount"].as_u64(), Some(3));
+    assert_eq!(v3["hasMore"], true, "8 行只取 3 行，应当还有：{v3}");
+    let v4 = h.call("more", &["3"], t).expect("加载更多失败");
+    assert_eq!(
+        v4["rowCount"].as_u64(),
+        Some(3),
+        "第二页应当也是 3 行：{v4}"
+    );
+}
+
+/// 起一个连好库的 JVM 桥会话；没有 NC_HOME 就返回 None（跳过）。
+fn jvm_session() -> Option<nc_forge::db_engine::EngineHandle> {
+    let home = std::env::var("NC_HOME")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_dir());
+    let Some(home) = home else {
+        println!("[R5] 未设 NC_HOME，跳过");
+        return None;
+    };
+    let bridge = std::sync::Arc::new(nc_forge::db_bridge::Bridge::new(jvm_env(&home)));
+    let h = nc_forge::db_engine::EngineHandle::java(bridge, "probe-r5");
+    let url = std::env::var("NC_RUST_URL")
+        .unwrap_or_else(|_| "jdbc:oracle:thin:@10.200.22.144:1521/aier260824".into());
+    let (u, p) = (user(), pass());
+    if let Err(e) = h.call(
+        "connect",
+        &[url.as_str(), u.as_str(), p.as_str(), "false"],
+        std::time::Duration::from_secs(30),
+    ) {
+        println!("[R5] 连不上，跳过：{e}");
+        return None;
     }
+    Some(h)
+}
+
+/// 探针内的 JVM 环境：直接按 NC home 拼，不经过 `AppHandle`（测试里没有 Tauri）。
+fn jvm_env(home: &std::path::Path) -> nc_forge::db_bridge::BridgeEnv {
+    let jar = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/ncdb/ncdb.jar");
+    let driver = nc_forge::db_bridge::find_driver(home)
+        .unwrap_or_else(|| panic!("{} 下没有 Oracle 驱动", home.display()));
+    nc_forge::db_bridge::env(
+        home.join("ufjdk/bin/java.exe"),
+        jar,
+        driver,
+        nc_forge::db_bridge::nc_decrypt_jars(home),
+        std::env::temp_dir().join("ncforge-r5-probe"),
+    )
 }
