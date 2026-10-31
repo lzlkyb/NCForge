@@ -1,4 +1,5 @@
 import { invoke } from "./tauri";
+import type { LinkedOverride } from "./linkedProjects";
 
 /**
  * 应用配置（与 Rust `config::AppConfig` 一一对应）。
@@ -19,6 +20,14 @@ export interface AppConfig {
   lang_enabled: boolean;
   lang_auto_start: boolean;
   lang_xmx_mb: number | null;
+  /**
+   * 多工程覆盖表（停用 / 排前 / 追加目录）。
+   *
+   * 字段名同样是 snake_case；**条目内**是 `action/target/dir` 几个单词，两边写法一致。
+   * 改它走 `setLinkedOverrides`（整表替换），不要用 `patchConfig`——`ConfigPatch`
+   * 只放设置页自己拥有的单值字段，整表进来的话一次误传就把用户手写的覆盖清空了。
+   */
+  linked_overrides: LinkedOverride[];
 }
 
 /** 代码智能设置的局部更新。`lang_xmx_mb: 0` = 恢复默认；越界（512~4096 之外）后端会明确报错。 */

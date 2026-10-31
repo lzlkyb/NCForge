@@ -10,10 +10,11 @@ export type NavItem = { key: string; label: string; icon: IconName };
 /**
  * 壳子示例导航项。业务把这里换成自家页面即可。
  *
- * 🔴 数组顺序即 Ctrl+1~6 的映射顺序 —— App.tsx 以本数组为前 6 位、追加
- *    settings 生成 Ctrl+1~7 快捷键表，改顺序/增删项只改这一处，避免
+ * 🔴 数组顺序即 Ctrl+1~N 的映射顺序 —— App.tsx 以本数组顺序为前 N 位、追加
+ *    settings 生成 Ctrl+1~N+1 快捷键表，改顺序/增删项只改这一处，避免
  *    「侧栏顺序」与「快捷键顺序」两处漂移。
- * 🔴 新项只能追加在末尾：插到中间会把既有 Ctrl+2/3/4 全改一遍，是破坏性变更。
+ * 🔴 新项只能追加在末尾：插到中间会把既有 Ctrl+2/3/4 全改一遍，是破坏性变更
+ *    （加「工程关联」时 Ctrl+7 就从设置变成了它，设置挪到 Ctrl+8）。
  */
 export const WORKSPACE_NAV: NavItem[] = [
   { key: "files", label: "文件", icon: "folder" },
@@ -22,6 +23,7 @@ export const WORKSPACE_NAV: NavItem[] = [
   { key: "services", label: "NC 服务", icon: "server" },
   { key: "patch", label: "补丁", icon: "package" },
   { key: "db", label: "数据库", icon: "database" },
+  { key: "linked", label: "工程关联", icon: "plug" },
 ];
 
 /**

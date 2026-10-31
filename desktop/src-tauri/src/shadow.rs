@@ -216,6 +216,9 @@ pub struct ShadowSpec<'a> {
     pub index: &'a ClassIndex,
     /// 该模块上次编译用到的 jar（按报错补出来的），并入后补全更完整。
     pub extra_jars: &'a [u32],
+    /// 工程关联覆盖表：影子工程的 `.classpath` 必须与编译/启动用同一份，否则
+    /// 编辑器里能解析、真编译却找不到（或反过来）。
+    pub overrides: &'a [crate::eclipse_cp::LinkedOverride],
 }
 
 #[derive(Debug)]
@@ -276,10 +279,11 @@ pub fn generate(spec: &ShadowSpec) -> Result<ShadowProject, String> {
     // 2. 类目录：规则与编译/启动服务共用。当前模块自己的 classes 要排除——那是它自己源码的
     //    旧产物，与源码重复，留着只会让跳转偏到旧 class。
     let own_classes = spec.workspace_root.join(spec.module).join("classes");
-    let class_dirs: Vec<PathBuf> = project_class_dirs(spec.workspace_root, spec.nc_home)
-        .into_iter()
-        .filter(|d| *d != own_classes)
-        .collect();
+    let class_dirs: Vec<PathBuf> =
+        project_class_dirs(spec.workspace_root, spec.nc_home, spec.overrides)
+            .into_iter()
+            .filter(|d| *d != own_classes)
+            .collect();
 
     // 3. jar：按当前模块全部源文件的 import / 同包 / 父类型链精选 + 公共库 + 上次编译的 jar 集
     let mut jar_ids: BTreeSet<u32> = compile::select_jars(spec.index, &files);
@@ -472,6 +476,7 @@ mod tests {
             shadow_dir: &shadow,
             index: &index,
             extra_jars: &[],
+            overrides: &[],
         };
         let first = generate(&spec).unwrap();
         assert!(first.changed);
@@ -662,6 +667,7 @@ mod tests {
             shadow_dir: &shadow,
             index: &index,
             extra_jars: &[],
+            overrides: &[],
         };
         let p = generate(&spec).unwrap();
         println!(

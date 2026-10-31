@@ -1,7 +1,7 @@
 //! 真机快照：NC home 的六段散类目录（D6）。
 //!
 //! 默认不跑（`#[ignore]`）：依赖本机 NC 安装目录。它验的是一个具体的数字：
-//! 旧实现只收 `modules/<m>/classes`（458 个 class），**漏掉 147 个二开覆盖类**——
+//! 旧实现只收 `modules/<m>/classes`（258 个 class），**漏掉 148 个二开覆盖类**——
 //! 它们散在 `client/classes`、`META-INF/classes`、两个 hyext 段里。
 //!
 //! 本机（`D:/ncc/1909home`，245 个模块）**2026-10-31 复核实测**：

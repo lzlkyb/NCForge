@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-use crate::nc_index::MODULE_JAR_DIRS;
+use crate::nc_index::{module_layers, LayerKind};
 use crate::server::ServerSpec;
 
 /// 中间件主类（开发态直启，不走 `bin/startup.bat` 的 NCStarter）。
@@ -30,11 +30,50 @@ pub const MIDDLEWARE_MAIN_CLASS: &str = "ufmiddle.start.tomcat.StartDirectServer
 // 「连本机 80 端口」——等以后真接客户端启动时，照抄就是「中间件改到 8081、客户端连 80」。
 // 要接的时候从 `nc_home::read_endpoints` 取端口（`-Dnc.jstart.port`），别写字面量。
 
-/// NC home 下的公共 jar 目录（相对根）。按此顺序进 classpath。
+/// classpath 条目的两种身份：收目录下的 jar，或把目录本身当类/资源根。
+#[derive(Clone, Copy)]
+enum CpKind {
+    /// 收这个目录下的一层 jar（官方 `lib` 段）
+    Jars,
+    /// 这个目录自己就是类/资源根（官方 `classes` / `resources` 段）
+    Dir,
+}
+
+/// NC home 下参与 classpath 的条目，**顺序即官方 bootstrap 的段序**（不可随意重排）。
 ///
-/// `middleware` 排最前：`StartDirectServer` 与 Tomcat 本体都在这里，让它们
-/// 先于任何模块的同名类被找到。
-const HOME_JAR_DIRS: [&str; 4] = ["middleware", "lib", "framework", "external/lib"];
+/// 对应 `BootstrapClassLoader:32` 的 8 段：middleware(1) → ant/lib(2) → framework(3)
+/// → external(4) → NCHOME 根(5) → ejb(6) → modules(7) → langlib(8)。展开成我们收的目录之后：
+///
+/// | 本表条目 | 官方位置 | 为什么在这个位置 |
+/// |---|---|---|
+/// | `middleware` | 段 1 | `StartDirectServer` 与 Tomcat 本体，必须最先被找到 |
+/// | `framework` | 段 3 | 框架 jar，早于 external 与 `lib/` |
+/// | `external/classes` | 段 4 的 classes 层 | 二开类覆盖目录，**早于 NCHOME 根、早于所有 modules** |
+/// | `external/lib` | 段 4 的 lib 层 | 589 个二开 jar |
+/// | `resources` | 段 5 第 ⑬ 层 | 能压过 `lib/*.jar` 里的同名类（热修复），但压不过 `middleware` |
+/// | `lib` | 段 5 第 ⑮ 层 | 因此必须排在 `resources` **之后**，否则上一条的覆盖失效 |
+///
+/// 曾经的顺序是 `["middleware","lib","framework","external/lib"]`（只有 jar、没有类目录）：
+/// `lib` 抢在 `framework` 与 `external` 前面，`external/classes`（33 个二开类）与
+/// `resources/`（20 个 framework 热修复类）根本不在 classpath 里。
+/// 实证与边界见 `docs/NCForge-NC启动与类加载机制-实证-20261031.md` §5 E4/E5。
+const HOME_CP: [(&str, CpKind); 6] = [
+    ("middleware", CpKind::Jars),
+    ("framework", CpKind::Jars),
+    ("external/classes", CpKind::Dir),
+    ("external/lib", CpKind::Jars),
+    ("resources", CpKind::Dir),
+    ("lib", CpKind::Jars),
+];
+
+/// `hotwebs/` 下的子目录就是可挂载的 webapp。
+const HOTWEBS_DIR: &str = "hotwebs";
+
+/// 扫不到 `hotwebs/` 时用的名单（等于改动前写死的那 5 个）。
+///
+/// **不能传空串**：`develop` 模式下 `uap.hotwebs` 是白名单，空串会被解析成空集合
+/// ⇒ 所有 hotwebs 全部跳过，服务「启动成功」但一个前端页面都打不开。
+const FALLBACK_HOTWEBS: [&str; 5] = ["nccloud", "uapws", "lfw", "portal", "fs"];
 
 /// manifest 单行字节上限（JAR 规范）。中文路径一个字 3 字节，很容易超，所以必须按字节切。
 const MANIFEST_LINE_LIMIT: usize = 72;
@@ -79,6 +118,34 @@ pub fn validate_heap_mb(mb: Option<u32>) -> Result<(), String> {
     Ok(())
 }
 
+/// 该挂载哪些 hotwebs：`hotwebs/` 下**每个子目录都算**，按名字排序。
+///
+/// 为什么不是写死名单：`develop` 模式下 `uap.hotwebs` 是**白名单**，没列进去的 webapp
+/// 会被 `log.warn("ignore hotwebs webapp " + name)` 静默跳过——服务照样显示启动成功，
+/// 只是那个前端 404。原先写死 `nccloud,uapws,lfw,portal,fs`，本机 18 个目录里有 13 个
+/// 被静默丢弃，其中 `iwebap` 是 NCC 主前端、`eyeapp` 是业务前端（实证 §4.3）。
+///
+/// 不按 `WEB-INF` 过滤：`eyeapp`（纯静态）、`bqchart`、`help` 都没有 `WEB-INF`，
+/// 但 Tomcat 对没有 `WEB-INF` 的目录照样按静态 webapp 部署——按 `WEB-INF` 筛会正好把
+/// 业务前端筛掉，等于换个方式复现同一个 bug。
+///
+/// 目录不存在或为空时回落 `FALLBACK_HOTWEBS`：宁可少挂也不要挂空，空集合等于全不挂。
+pub fn hotwebs_names(home: &Path) -> Vec<String> {
+    let mut names: Vec<String> = match std::fs::read_dir(home.join(HOTWEBS_DIR)) {
+        Ok(rd) => rd
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    names.sort();
+    if names.is_empty() {
+        return FALLBACK_HOTWEBS.iter().map(|s| s.to_string()).collect();
+    }
+    names
+}
+
 /// 中间件 VM 参数（`heap_mb` 为堆上限，调用方传 `effective_heap_mb(配置值)`）。
 ///
 /// 只有一个入口、一个必填的 `heap_mb`：留一个「默认值版本」的重载，迟早会有人
@@ -88,9 +155,14 @@ pub fn validate_heap_mb(mb: Option<u32>) -> Result<(), String> {
 /// 绝对路径，且工作目录也得是 NC home——中间件会用相对路径去开 `ejbXMLs` 与日志。
 pub fn middleware_vm_args(home: &Path, heap_mb: u32) -> Vec<String> {
     let h = home.to_string_lossy();
+    // 服务名必须与 prop.xml 一致：我们跳过 `Main` 直接起 `StartDirectServer`，
+    // 没人替我们补 `-Dnc.server.name`（实证 §5 E3），缺了就退回默认 `server`。
+    let server_name = crate::nc_home::read_server_name(home)
+        .unwrap_or_else(|| crate::nc_home::DEFAULT_SERVER_NAME.to_string());
     vec![
         "-Dnc.runMode=develop".into(),
         format!("-Dnc.server.location={h}"),
+        format!("-Dnc.server.name={server_name}"),
         format!("-DEJBConfigDir={h}\\ejbXMLs"),
         format!("-DExtServiceConfigDir={h}\\ejbXMLs"),
         // 堆上限：默认 4G，可在服务页改（理由见 DEFAULT_HEAP_MB）
@@ -101,7 +173,8 @@ pub fn middleware_vm_args(home: &Path, heap_mb: u32) -> Vec<String> {
         "-XX:MaxMetaspaceSize=768m".into(),
         // 栈 2m：NC 的递归调用（尤其在单据转换里）用默认 512k 会 StackOverflow
         "-Xss2m".into(),
-        "-Duap.hotwebs=nccloud,uapws,lfw,portal,fs".into(),
+        // 白名单语义，必须覆盖 hotwebs/ 下全部子目录（理由见 hotwebs_names）
+        format!("-Duap.hotwebs={}", hotwebs_names(home).join(",")),
         "-Djava.net.preferIPv4Stack=true".into(),
         "-DforceUseRedis=true".into(),
         // 别让 JVM 去读机器上别的 java 配置，行为才可复现
@@ -119,10 +192,19 @@ pub fn middleware_classpath(home: &Path, project_classes: &[PathBuf]) -> Vec<Pat
     // 1. 工程自己的 classes：改完立刻生效
     out.extend(project_classes.iter().filter(|p| p.is_dir()).cloned());
 
-    // 2. NC home 的公共目录
-    for rel in HOME_JAR_DIRS {
+    // 2. NC home 的公共条目，段序见 HOME_CP
+    for (rel, kind) in HOME_CP {
         let dir = home.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
-        collect_archives(&dir, &mut out);
+        match kind {
+            CpKind::Jars => collect_archives(&dir, &mut out),
+            // 类目录只在自己存在时入列：缺目录说明这套安装没用到该覆盖通道，
+            // 塞一个不存在的路径只会让 classpath 变脏（JVM 会静默忽略，但清单会骗人）
+            CpKind::Dir => {
+                if dir.is_dir() {
+                    out.push(dir);
+                }
+            }
+        }
     }
 
     // 3. 各业务模块的 lib（模块名排序，保证两次启动顺序一致）
@@ -137,7 +219,10 @@ pub fn middleware_classpath(home: &Path, project_classes: &[PathBuf]) -> Vec<Pat
     };
     names.sort_by_key(|n| n.to_uppercase());
     for name in names {
-        for rel in MODULE_JAR_DIRS {
+        for (rel, kind) in module_layers() {
+            if kind != LayerKind::Jars {
+                continue;
+            }
             let dir = modules
                 .join(&name)
                 .join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
@@ -161,8 +246,12 @@ pub fn middleware_classpath(home: &Path, project_classes: &[PathBuf]) -> Vec<Pat
 ///
 /// **编译、启动、语言服务必须共用这一份规则**：三处对不上就会出「编译通过了、重启
 /// 后改的类不生效」——旧 class 从 jar 或另一个工程目录里加载了，靠日志几乎查不出来。
-pub fn project_class_dirs(project_root: &Path, nc_home: &Path) -> Vec<PathBuf> {
-    crate::eclipse_cp::class_roots(project_root, nc_home)
+pub fn project_class_dirs(
+    project_root: &Path,
+    nc_home: &Path,
+    overrides: &[crate::eclipse_cp::LinkedOverride],
+) -> Vec<PathBuf> {
+    crate::eclipse_cp::class_roots_with(project_root, nc_home, overrides)
 }
 
 /// 拼出中间件的完整启动要素（写好 pathing jar，返回可直接起进程的 `ServerSpec`）。
@@ -178,8 +267,17 @@ pub fn middleware_spec(
     project_root: &Path,
     work_dir: &Path,
     heap_mb: u32,
+    overrides: &[crate::eclipse_cp::LinkedOverride],
 ) -> Result<(ServerSpec, usize), String> {
-    middleware_spec_inner(nc_home, java, project_root, work_dir, heap_mb, true)
+    middleware_spec_inner(
+        nc_home,
+        java,
+        project_root,
+        work_dir,
+        heap_mb,
+        overrides,
+        true,
+    )
 }
 
 /// 只算清单、**不写** pathing jar 的版本，给「命令行」预览用。
@@ -195,8 +293,17 @@ pub fn middleware_spec_preview(
     project_root: &Path,
     work_dir: &Path,
     heap_mb: u32,
+    overrides: &[crate::eclipse_cp::LinkedOverride],
 ) -> Result<(ServerSpec, usize), String> {
-    middleware_spec_inner(nc_home, java, project_root, work_dir, heap_mb, false)
+    middleware_spec_inner(
+        nc_home,
+        java,
+        project_root,
+        work_dir,
+        heap_mb,
+        overrides,
+        false,
+    )
 }
 
 fn middleware_spec_inner(
@@ -205,16 +312,30 @@ fn middleware_spec_inner(
     project_root: &Path,
     work_dir: &Path,
     heap_mb: u32,
+    overrides: &[crate::eclipse_cp::LinkedOverride],
     write_jar: bool,
 ) -> Result<(ServerSpec, usize), String> {
     if !java.is_file() {
         return Err(format!("找不到 NC 自带的 java：{}", java.display()));
     }
-    let classes = project_class_dirs(project_root, nc_home);
+    let classes = project_class_dirs(project_root, nc_home, overrides);
     let entries = middleware_classpath(nc_home, &classes);
     if entries.is_empty() {
         return Err(format!(
             "在 {} 下没找到任何 jar：这不是能启动服务的 NC 安装目录",
+            nc_home.display()
+        ));
+    }
+    // `develop` 模式下 `Bootstrap.start()` 用「classpath 里第一个目录条目」往上两级推
+    // `projectdir`，而这段代码**没有 try-catch**：classpath 全是 jar 时 `getResource("/")`
+    // 返回 null ⇒ NPE ⇒ 外层 catch 打出 `start tomcat error` 后 `System.exit(-1)`，
+    // Tomcat 根本没起（实证 §4.2）。宁可在这里说清原因，也不要让用户对着
+    // 「start tomcat error」猜是不是缺了哪个 jar。
+    if !entries.iter().any(|p| p.is_dir()) {
+        return Err(format!(
+            "类路径里一个目录条目都没有（{} 下全是 jar）：develop 模式会因 projectdir \
+             解析失败直接退出，日志里只有一句 start tomcat error。\
+             先编译一次工程（或至少让某个模块产出 classes），再启动服务。",
             nc_home.display()
         ));
     }
@@ -249,6 +370,14 @@ fn collect_archives(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn is_archive(p: &Path) -> bool {
+    // `_src.jar` / `_doc.jar` 里没有 class，进类路径只是噪声（官方 JarFilter 也排除它们）
+    let name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if name.ends_with("_src.jar") || name.ends_with("_doc.jar") {
+        return false;
+    }
     p.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("jar") || e.eq_ignore_ascii_case("zip"))
@@ -366,16 +495,26 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// 临时目录**外面再套一层**：`legacy_roots` 会把「工程根」的兄弟目录当成工作区分组
+    /// （`<兄弟>/<模块>/classes`），若把工程根直接建在 `%TEMP%` 下，同一个测试二进制里
+    /// 并行跑的其它用例建出来的目录就会被算进 classpath，断言随执行顺序时红时绿。
     fn temp_dir(tag: &str) -> PathBuf {
-        let mut d = std::env::temp_dir();
-        d.push(format!("ncforge-launch-{tag}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&d);
+        let mut shell = std::env::temp_dir();
+        shell.push(format!("ncforge-launch-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&shell);
+        let d = shell.join("root");
         fs::create_dir_all(&d).unwrap();
         d
     }
 
     fn cleanup(d: &Path) {
         let _ = fs::remove_dir_all(d);
+        // 连外面的隔离层一起删，别在 %TEMP% 里堆空目录
+        if d.file_name().is_some_and(|n| n == "root") {
+            if let Some(shell) = d.parent() {
+                let _ = fs::remove_dir_all(shell);
+            }
+        }
     }
 
     #[test]
@@ -588,7 +727,7 @@ mod tests {
         let home = base.join("home");
         fs::create_dir_all(home.join("modules").join("gl").join("classes")).unwrap();
 
-        let dirs = project_class_dirs(&proj, &home);
+        let dirs = project_class_dirs(&proj, &home, &[]);
         assert_eq!(
             dirs[0],
             proj.join("gl").join("classes"),
@@ -613,6 +752,140 @@ mod tests {
     }
 
     #[test]
+    fn hotwebs_按目录实扫而不是写死名单() {
+        let home = temp_dir("hotwebs");
+        for name in ["eyeapp", "iwebap", "nccloud"] {
+            fs::create_dir_all(home.join("hotwebs").join(name)).unwrap();
+        }
+        // 不是目录的同名文件不算 webapp
+        fs::write(home.join("hotwebs").join("readme.txt"), b"x").unwrap();
+
+        let names = hotwebs_names(&home);
+        assert_eq!(
+            names,
+            vec!["eyeapp", "iwebap", "nccloud"],
+            "hotwebs/ 下每个子目录都要挂载，iwebap 与 eyeapp 曾因写死白名单被静默丢弃"
+        );
+        cleanup(&home);
+    }
+
+    #[test]
+    fn hotwebs_目录缺失时回落默认名单而不是空串() {
+        let home = temp_dir("hotwebs-none");
+        let names = hotwebs_names(&home);
+        assert_eq!(names, FALLBACK_HOTWEBS.to_vec());
+        // 空串在白名单语义下等于「全不挂」，比少挂几个更糟
+        assert!(!names.is_empty(), "绝不能返回空集合");
+        cleanup(&home);
+    }
+
+    #[test]
+    fn 服务名取自_prop_xml_的_domain_server() {
+        let home = temp_dir("prop-name");
+        let dir = home.join("ierp").join("bin");
+        fs::create_dir_all(&dir).unwrap();
+        // 骨架照真实 prop.xml：`<server>` 块外还有同名 `<name>`（service 段的服务组件名），
+        // 全文件找 `<name>` 会拿到 StartTomcat
+        fs::write(
+            dir.join("prop.xml"),
+            b"<root><domain><server><javaHome>$JAVA_HOME</javaHome>\
+              <name>xuyserver</name><http><port>80</port></http></server></domain>\
+              <internalServiceArray><name>StartTomcat</name></internalServiceArray></root>",
+        )
+        .unwrap();
+
+        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB);
+        assert!(
+            args.iter().any(|a| a == "-Dnc.server.name=xuyserver"),
+            "要从 prop.xml 的 <server><name> 取服务名：{args:?}"
+        );
+        cleanup(&home);
+    }
+
+    #[test]
+    fn prop_xml_缺失时服务名回落_server() {
+        let home = temp_dir("prop-none");
+        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB);
+        let want = format!("-Dnc.server.name={}", crate::nc_home::DEFAULT_SERVER_NAME);
+        assert!(
+            args.contains(&want),
+            "读不到配置时要显式给默认名，与 ServiceManagerDaemon 的缺省一致：{args:?}"
+        );
+        cleanup(&home);
+    }
+
+    #[test]
+    fn vm_参数里的_hotwebs_是实扫结果() {
+        let home = temp_dir("vm-hotwebs");
+        fs::create_dir_all(home.join("hotwebs").join("uapws")).unwrap();
+        fs::create_dir_all(home.join("hotwebs").join("iwebap")).unwrap();
+        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB);
+        assert!(
+            args.iter().any(|a| a == "-Duap.hotwebs=iwebap,uapws"),
+            "{args:?}"
+        );
+        cleanup(&home);
+    }
+
+    /// `external/classes`（二开覆盖类）与 `resources`（framework 热修复类）以前根本不进
+    /// classpath；后者还必须早于 `lib/*.jar` 才有覆盖效果——顺序错了等于没加。
+    #[test]
+    fn external_classes_与_resources_进类路径且早于_lib() {
+        let home = temp_dir("home-cp");
+        fs::create_dir_all(home.join("middleware")).unwrap();
+        fs::write(home.join("middleware").join("mw.jar"), b"x").unwrap();
+        fs::create_dir_all(home.join("lib")).unwrap();
+        fs::write(home.join("lib").join("fwserver.jar"), b"x").unwrap();
+        fs::create_dir_all(home.join("external").join("classes")).unwrap();
+        fs::create_dir_all(home.join("resources")).unwrap();
+        fs::create_dir_all(home.join("framework")).unwrap();
+        fs::write(home.join("framework").join("fw.jar"), b"x").unwrap();
+
+        let cp = middleware_classpath(&home, &[]);
+        let pos = |needle: &str| {
+            cp.iter()
+                .position(|p| p.ends_with(needle))
+                .unwrap_or_else(|| panic!("{needle} 不在 classpath 里: {cp:?}"))
+        };
+        assert!(pos("middleware/mw.jar") == 0, "middleware 的 jar 必须第一");
+        assert!(
+            pos("external/classes") < pos("lib/fwserver.jar"),
+            "external 是官方第 4 段，必须早于 NCHOME 的 lib"
+        );
+        assert!(
+            pos("resources") < pos("lib/fwserver.jar"),
+            "resources 要靠「排在 lib 前」才能覆盖 fwserver.jar 里的同名类"
+        );
+        assert!(
+            pos("framework/fw.jar") < pos("external/classes"),
+            "官方 framework 是第 3 段，早于 external"
+        );
+        cleanup(&home);
+    }
+
+    /// classpath 全是 jar 时 develop 模式会 NPE → exit(-1)，错误信息只有一句
+    /// 「start tomcat error」。这里必须在拼参数阶段就拦住并说清原因。
+    #[test]
+    fn 类路径没有目录条目时给出可读错误() {
+        // home 单独放一层：`legacy_roots` 会扫「工程根的兄弟目录」，
+        // 直接建在 %TEMP% 下会把机器的真实目录算进来
+        let base = temp_dir("no-dir-entry");
+        let home = base.join("home");
+        fs::create_dir_all(home.join("middleware")).unwrap();
+        fs::write(home.join("middleware").join("mw.jar"), b"x").unwrap();
+        let java = home.join("ufjdk").join("bin").join("java.exe");
+        fs::create_dir_all(java.parent().unwrap()).unwrap();
+        fs::write(&java, b"stub").unwrap();
+
+        let err = middleware_spec(&home, &java, &home, &base, DEFAULT_HEAP_MB, &[]).unwrap_err();
+        assert!(
+            err.contains("目录条目") && err.contains("start tomcat error"),
+            "错误要解释清楚为什么起不来：{err}"
+        );
+        cleanup(&base);
+    }
+
+    #[test]
     fn nc_home_里没有_jar_时不生成启动参数() {
         let home = temp_dir("no-jar-home");
         fs::create_dir_all(home.join("modules")).unwrap();
@@ -620,7 +893,7 @@ mod tests {
         fs::create_dir_all(java.parent().unwrap()).unwrap();
         fs::write(&java, b"stub").unwrap();
 
-        let err = middleware_spec(&home, &java, &home, &home, DEFAULT_HEAP_MB).unwrap_err();
+        let err = middleware_spec(&home, &java, &home, &home, DEFAULT_HEAP_MB, &[]).unwrap_err();
         assert!(err.contains("没找到任何 jar"), "错误要指出缺 jar：{err}");
         cleanup(&home);
     }
@@ -634,6 +907,7 @@ mod tests {
             &home,
             &home,
             DEFAULT_HEAP_MB,
+            &[],
         )
         .unwrap_err();
         assert!(err.contains("找不到 NC 自带的 java"), "{err}");

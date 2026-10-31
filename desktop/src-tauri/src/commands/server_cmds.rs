@@ -257,12 +257,14 @@ pub async fn server_start(state: tauri::State<'_, Arc<AppState>>) -> Result<(), 
         let heap_mb = launch::effective_heap_mb(cfg.server_heap_mb);
         // 慢的一步放锁外：写 7000 多条清单的 pathing jar 实测约 0.6 秒，
         // 持锁会让每秒一次的状态轮询一起卡住
+        let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
         let prepared = launch::middleware_spec(
             &nc_home,
             &java,
             &project_root,
             &config_dir.join("tmp"),
             heap_mb,
+            &overrides,
         );
         let (spec, entry_count) = match prepared {
             Ok(v) => v,
@@ -455,10 +457,26 @@ pub async fn server_command_line(
             .map(PathBuf::from)
             .unwrap_or_else(|| nc_home.clone());
         let heap_mb = launch::effective_heap_mb(cfg.server_heap_mb);
+        // 预览必须用与启动完全相同的覆盖表，否则「命令行里看到的顺序」和真起的不一样
+        let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
         let prepared = if reuse {
-            launch::middleware_spec_preview(&nc_home, &java, &project_root, &work_dir, heap_mb)
+            launch::middleware_spec_preview(
+                &nc_home,
+                &java,
+                &project_root,
+                &work_dir,
+                heap_mb,
+                &overrides,
+            )
         } else {
-            launch::middleware_spec(&nc_home, &java, &project_root, &work_dir, heap_mb)
+            launch::middleware_spec(
+                &nc_home,
+                &java,
+                &project_root,
+                &work_dir,
+                heap_mb,
+                &overrides,
+            )
         };
         let (spec, entry_count) = prepared?;
         Ok(LaunchPreview {

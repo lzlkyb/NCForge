@@ -71,6 +71,11 @@ pub struct CompileEnv<'a> {
     /// 一次编译最坏是「300 秒 × 6 轮」≈ 30 分钟，没有任何中断手段时用户只能杀进程。
     /// 检查点放在轮间与 ecj 等待循环里（40ms 一次），保证点了取消能很快生效。
     pub cancel: Option<&'a std::sync::atomic::AtomicBool>,
+    /// 工程关联覆盖表（停用 / 排前 / 追加目录）。
+    ///
+    /// 编译与启动**必须**用同一份：两边差一条，就会出现「编译能过、重启加载不到」
+    /// 或者反过来的假象，而且查起来毫无线索。空切片 = 完全按 `.classpath`。
+    pub overrides: &'a [crate::eclipse_cp::LinkedOverride],
 }
 
 impl CompileEnv<'_> {
@@ -618,7 +623,8 @@ pub fn compile(
     // 跨模块依赖：工程内各模块已编译的 classes、out/<模块>、同工作区其他分组，
     // 再加 NC home 各模块的 classes。规则与启动服务共用（launch::project_class_dirs），
     // 否则会出现「编译过了、启动服务时加载的还是 jar 里的旧类」。
-    let class_dirs = crate::launch::project_class_dirs(env.project_root, env.nc_home);
+    let class_dirs =
+        crate::launch::project_class_dirs(env.project_root, env.nc_home, env.overrides);
 
     // 参数文件名带唯一后缀：以前是 `ecj-<pid>.args`，同进程两次并发编译会写同一份文件、
     // 互相覆盖（后写的那轮可能读到前半段是自己的、后半段是别人的参数）。

@@ -81,6 +81,32 @@ pub struct AppConfig {
     /// jdt.ls 堆上限（MB）。`None` = 默认 1024（见 `lang::DEFAULT_XMX_MB`）。
     #[serde(default)]
     pub lang_xmx_mb: Option<u32>,
+    /// 工程关联的覆盖表（见 `eclipse_cp::LinkedOverride`）。
+    ///
+    /// 为什么要有它：依赖顺序的真源是 `.classpath`（那是 Eclipse 写的），但真实工作里
+    /// 需要三种「不改 Eclipse 配置也能验证」的调整——把某个关联工程停掉看还编不编得过、
+    /// 把某个工程排到别的依赖前面、手工补一个不在任何工程里的产物目录。
+    /// 空表 = 完全按 `.classpath`（默认行为，与加这个字段之前一致）。
+    #[serde(default)]
+    pub linked_overrides: Vec<LinkedOverrideConfig>,
+}
+
+/// 一条工程关联覆盖。
+///
+/// `action` 存字符串而不是枚举：与 `DbConnConfig::engine` 同一口径——老配置没有这个
+/// 字段时反序列化出空串，识别不了就跳过该条，不需要写迁移代码。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedOverrideConfig {
+    /// `disable`（停用）/ `front`（排前）/ `add`（追加目录）
+    #[serde(default)]
+    pub action: String,
+    /// 工程名（`.classpath` 里 `/X` 的写法）或工程根绝对路径；`add` 时留空
+    #[serde(default)]
+    pub target: String,
+    /// 仅 `add` 使用：类目录或 jar 的绝对路径
+    #[serde(default)]
+    pub dir: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -171,6 +197,7 @@ impl Default for AppConfig {
             lang_enabled: true,
             lang_auto_start: true,
             lang_xmx_mb: None,
+            linked_overrides: Vec::new(),
         }
     }
 }

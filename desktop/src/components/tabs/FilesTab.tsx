@@ -15,13 +15,12 @@ import { Breadcrumb } from "../workspace/Breadcrumb";
 import { NoWorkspace } from "../workspace/NoWorkspace";
 import { TabStrip } from "../workspace/TabStrip";
 import { TreeHeader } from "../workspace/TreeHeader";
-import { closeModel } from "../../lib/editorStore";
-import { baseName, getWorkspace, setWorkspace } from "../../lib/workspace";
+import { baseName, getWorkspace } from "../../lib/workspace";
+import { applyWorkspace } from "../../lib/switchWorkspace";
 import { compileCancel, compileModule, isCompileCancelled, onCompileLog } from "../../lib/compile";
 import { useFileSession } from "../../hooks/useFileSession";
 import { isUnsaved } from "../../lib/saveAllDirty";
 import { useLangWiring } from "../../hooks/useLangWiring";
-import { stopLang } from "../../lib/lang";
 import { registerCommands } from "../../lib/commandRegistry";
 import { invalidateFileIndex } from "../../lib/fileIndex";
 import { langRegenerate } from "../../lib/appConfig";
@@ -123,19 +122,10 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
 
   const applyRoot = async (path: string) => {
     try {
-      const shown = await setWorkspace(path);
-      // 换目录后旧标签不再属于当前工作区：全部关掉（调用方已在有未保存修改时警告）
-      tabs.forEach((t) => closeModel(t.path));
-      void stopLang();
-      setSession({ tabs: [] });
-      setSession({ activePath: null });
-      // 编译结果和路径都指向旧工程，留着会让人误读成新工程的问题列表。
-      // 这几项现在活在模块级仓库里，不重置就会跨工作区残留。
-      setCompileResult(null);
-      setCompileLog([]);
+      // 切换的副作用（关模型 / 停 jdt.ls / 清会话 / 失效 svn 缓存）统一在 lib 里，
+      // 「工程关联」页用的是同一份——两边各写一套必然分叉
+      const shown = await applyWorkspace(path, queryClient);
       setRoot(shown);
-      void queryClient.invalidateQueries({ queryKey: ["svn-info"] });
-      void queryClient.invalidateQueries({ queryKey: ["svn-status"] });
       setEditingRoot(false);
     } catch (e) {
       toast(`无法打开目录：${e}`, "error");

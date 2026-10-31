@@ -108,29 +108,563 @@ impl ProjectCp {
     }
 }
 
-/// 主工程 + `.classpath` 声明的依赖闭包 + NC home 的类目录，按加载优先级排列。
+/// 覆盖表的一条：手工修正依赖闭包。
 ///
-/// 三条硬规则（写死在实现里，不提供旋钮）：
+/// 为什么需要它：`.classpath` 是**别人**（Eclipse / 同事）写的，我们只读。真出问题时
+/// 用户需要一个不改 `.classpath` 也能验证的旋钮——「把 B 停掉看还编不编得过」
+/// 「B 明明该排前面」「有个手工编译的产物目录不在任何工程里」。这三件事分别对应
+/// `Disable` / `Front` / `Add`。
 ///
-/// 1. **主工程永远在最前**：改自己的代码必须立刻生效，不能被任何关联工程覆盖；
-/// 2. **依赖顺序 = `.classpath` 里的出现顺序**，不是字典序、也不是字母序；
-/// 3. **`exported="true"` 才继续往下传递**，`NC home` 永远在最后兜底。
+/// 覆盖只影响**我们怎么算类路径**，不回写 `.classpath`：Eclipse 那边不受影响，
+/// 所以「工作台里禁用了 B，Eclipse 里还看得见」是预期行为，不是 bug。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverrideAction {
+    /// 整个工程不参与（连同它往下传递的依赖一起剪掉）
+    Disable,
+    /// 排到主工程之后、其它依赖之前
+    Front,
+    /// 追加一个不在任何工程里的类目录 / jar（`dir` 必填）
+    Add,
+}
+
+impl OverrideAction {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "disable" | "off" => Some(Self::Disable),
+            "front" | "first" => Some(Self::Front),
+            "add" | "extra" => Some(Self::Add),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Disable => "disable",
+            Self::Front => "front",
+            Self::Add => "add",
+        }
+    }
+}
+
+/// 一条生效中的覆盖。`target` 可以是工程名（`.classpath` 里的 `/X`）或工程根的绝对路径。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkedOverride {
+    pub action: OverrideAction,
+    pub target: String,
+    /// 仅 `Add` 使用
+    pub dir: Option<String>,
+}
+
+/// 一个参与编译/启动的工程，以及它贡献的类目录。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedProject {
+    /// 工程名：主工程取目录名，依赖取 `.classpath` 里 `/X` 的写法（用户在 Eclipse 里
+    /// 看到的就是它）。`.project` 自称的名字可能是另一个（`newar` 自称 `ar`），不采用——
+    /// 界面要能和 Eclipse 对得上号
+    pub name: String,
+    /// 工程根；`None` = `.classpath` 里写了但磁盘上找不到
+    pub root: Option<String>,
+    /// `primary` / `classpath` / `legacy` / `front`
+    pub origin: String,
+    /// 0 = 主工程；`legacy` 兜底时无意义（固定 1）
+    pub depth: usize,
+    /// 由上一级引入时那条边是否 `exported="true"`
+    pub exported: bool,
+    /// 这个工程贡献的类目录（绝对路径，已按有效顺序）
+    pub class_dirs: Vec<String>,
+    /// 被覆盖表停用（此时 `class_dirs` 为空，保留条目是为了让用户看得见「它被剪掉了」）
+    pub disabled: bool,
+    /// 是否读到了 `.classpath`（false = 走老启发式）
+    pub has_classpath: bool,
+}
+
+/// 依赖闭包的完整解析结果：既能给界面看，也是最终类路径的唯一来源。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedGraph {
+    pub primary: String,
+    pub primary_root: String,
+    pub workspace: String,
+    /// 按**有效顺序**排列（主工程 → 提前项 → 其余依赖）
+    pub projects: Vec<LinkedProject>,
+    /// 覆盖表追加的目录
+    pub extra_dirs: Vec<String>,
+    /// 工程侧类目录总数（不含 NC home）
+    pub project_dir_count: usize,
+    /// NC home 兜底的类目录数
+    pub nc_home_dir_count: usize,
+    /// 去重后的类目录总数（工程侧 + NC home），与真正塞进 classpath 的目录条目数一致
+    pub total_dir_count: usize,
+    /// 解析过程中的异常与覆盖动作，直接给界面展示
+    pub notes: Vec<String>,
+}
+
+/// 主工程 + 依赖闭包 + NC home 的类目录，**空覆盖**版本（老调用点与测试用）。
+///
+/// 真正的实现只有 `flat_dirs` 一份：分组解析与顺序完全由它决定，
+/// 这里只是把结果摊平，避免「两份各写一套顺序」。
 pub fn class_roots(primary: &Path, nc_home: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = Vec::new();
-    let workspace = primary.parent().unwrap_or(primary);
+    class_roots_with(primary, nc_home, &[])
+}
+
+/// 同上，但让覆盖表参与。返回值与 `graph().projects` 展开后完全一致。
+pub fn class_roots_with(
+    primary: &Path,
+    nc_home: &Path,
+    overrides: &[LinkedOverride],
+) -> Vec<PathBuf> {
+    let mut dirs = flat_dirs(primary, overrides).0;
+    dirs.extend(crate::nc_index::module_class_dirs(nc_home));
+    dedupe(dirs)
+}
+
+/// 依赖链的完整视图（界面用）。目录顺序与 `class_roots_with` 逐项相同。
+pub fn graph(primary: &Path, nc_home: &Path, overrides: &[LinkedOverride]) -> LinkedGraph {
+    let (project_dirs, projects, extra, notes) = flat_dirs(primary, overrides);
+    let nc_dirs = crate::nc_index::module_class_dirs(nc_home);
+    let total = dedupe({
+        let mut all = project_dirs.clone();
+        all.extend(nc_dirs.iter().cloned());
+        all
+    })
+    .len();
+    LinkedGraph {
+        primary: primary
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        primary_root: primary.to_string_lossy().to_string(),
+        workspace: primary
+            .parent()
+            .unwrap_or(primary)
+            .to_string_lossy()
+            .to_string(),
+        projects,
+        extra_dirs: extra
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect(),
+        project_dir_count: project_dirs.len(),
+        nc_home_dir_count: nc_dirs.len(),
+        total_dir_count: total,
+        notes,
+    }
+}
+
+/// 依赖闭包里的一个原始条目（覆盖表应用之前）。
+struct RawEntry {
+    name: String,
+    root: Option<PathBuf>,
+    depth: usize,
+    exported: bool,
+    origin: &'static str,
+    dirs: Vec<PathBuf>,
+    has_classpath: bool,
+    /// 被覆盖表停用（在遍历时就剪枝，不再往下走）
+    disabled: bool,
+}
+
+/// 解析一次依赖闭包。返回值：工程侧目录（未含 NC home）、工程列表、追加目录、说明。
+fn flat_dirs(
+    primary: &Path,
+    overrides: &[LinkedOverride],
+) -> (Vec<PathBuf>, Vec<LinkedProject>, Vec<PathBuf>, Vec<String>) {
+    let plan = OverridePlan::new(overrides);
+    let mut notes = plan.notes.clone();
+    let raw = collect(primary, &plan, &mut notes);
+    let workspace = primary.parent().unwrap_or(primary).to_path_buf();
+
+    // ── 1. 按覆盖表切三堆：主工程 / 提前项 / 其余 ──
+    let mut primary_entry: Option<RawEntry> = None;
+    let mut front: Vec<RawEntry> = Vec::new();
+    let mut rest: Vec<RawEntry> = Vec::new();
+    for mut e in raw {
+        if e.origin == "primary" {
+            // 主工程永远第一：配置里把它写成停用/排前都忽略，并说明原因
+            if plan.hits(&e.name, e.root.as_deref()) {
+                notes.push("覆盖表指向了主工程：主工程永远排第一、也不可停用，该条已忽略".into());
+            }
+            primary_entry = Some(e);
+        } else if plan.is_front(&e.name, e.root.as_deref()) {
+            // origin 记成 front：界面要能解释「它本在依赖链第 3 位，为什么排到了第 2 位」
+            e.origin = "front";
+            front.push(e);
+        } else {
+            rest.push(e);
+        }
+    }
+
+    // 配置里写了「排前」但不在依赖闭包里的工程：单独解析一次，让排前也能用于链外工程
+    for target in &plan.front {
+        if front.iter().any(|e| plan.name_eq(e, target)) {
+            continue;
+        }
+        // 主工程永远第一：配置里写「排前 A」不能再插一条 A（会变成两个 A 的目录）
+        if primary_entry
+            .as_ref()
+            .is_some_and(|p| plan.name_eq(p, target))
+        {
+            continue;
+        }
+        let Some(root) = resolve_ref(target, &workspace) else {
+            notes.push(format!(
+                "覆盖表里的「排前」目标 {target} 找不到对应工程，已忽略"
+            ));
+            continue;
+        };
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        let has_cp = match ProjectCp::load(&root) {
+            Some(cp) => {
+                push_outputs(&cp, &root, &mut dirs);
+                true
+            }
+            None => {
+                legacy_own_dirs(&root, &mut dirs);
+                false
+            }
+        };
+        front.push(RawEntry {
+            name: target.clone(),
+            root: Some(root),
+            depth: 1,
+            exported: false,
+            origin: "front",
+            dirs,
+            has_classpath: has_cp,
+            disabled: false,
+        });
+    }
+    // 配置顺序即优先级
+    front.sort_by_key(|e| {
+        plan.front
+            .iter()
+            .position(|t| plan.name_eq(e, t))
+            .unwrap_or(usize::MAX)
+    });
+
+    // ── 2. 有效顺序：主工程 → 提前项 → 其余（.classpath 顺序） ──
+    let mut ordered: Vec<RawEntry> = Vec::new();
+    if let Some(p) = primary_entry {
+        ordered.push(p);
+    }
+    ordered.extend(front);
+    ordered.extend(rest);
+
+    // ── 3. 拼目录。被停用的条目留壳，界面要能看见「剪掉了谁、省了多少目录」 ──
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut projects: Vec<LinkedProject> = Vec::with_capacity(ordered.len());
+    for e in ordered {
+        let disabled = e.disabled;
+        if !disabled {
+            dirs.extend(e.dirs.iter().cloned());
+        }
+        projects.push(LinkedProject {
+            name: e.name,
+            root: e.root.map(|p| p.to_string_lossy().to_string()),
+            origin: e.origin.to_string(),
+            depth: e.depth,
+            exported: e.exported,
+            class_dirs: if disabled {
+                Vec::new()
+            } else {
+                e.dirs
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect()
+            },
+            disabled,
+            has_classpath: e.has_classpath,
+        });
+    }
+
+    // ── 4. 追加目录 ──
+    let mut extra: Vec<PathBuf> = Vec::new();
+    for d in &plan.add {
+        let p = PathBuf::from(d);
+        if p.is_dir() || p.is_file() {
+            extra.push(p);
+        } else {
+            notes.push(format!("覆盖表里追加的目录 {d} 不存在，已跳过"));
+        }
+    }
+    dirs.extend(extra.iter().cloned());
+
+    (dirs, projects, extra, notes)
+}
+
+/// 走一遍 `.classpath` 的依赖图，拿到「工程 → 目录」的原始顺序。
+///
+/// 环（A→B→A）与菱形（A→B、A→C、B→C）都靠 `seen` 收敛；`exported` 只决定
+/// 「要不要继续往下走」，直接依赖本身总是收进来。
+fn collect(primary: &Path, plan: &OverridePlan, notes: &mut Vec<String>) -> Vec<RawEntry> {
+    let workspace = primary.parent().unwrap_or(primary).to_path_buf();
+    let mut out: Vec<RawEntry> = Vec::new();
 
     match ProjectCp::load(primary) {
         Some(cp) => {
+            let mut own: Vec<PathBuf> = Vec::new();
+            push_outputs(&cp, primary, &mut own);
+            out.push(RawEntry {
+                name: cp.name.clone(),
+                root: Some(primary.to_path_buf()),
+                depth: 0,
+                exported: false,
+                origin: "primary",
+                dirs: own,
+                has_classpath: true,
+                disabled: false,
+            });
             let mut seen: HashSet<PathBuf> = HashSet::new();
             seen.insert(dir_key(primary));
-            push_outputs(&cp, primary, &mut out);
-            visit_refs(&cp, workspace, &mut out, &mut seen);
+            walk(&cp, &workspace, &mut out, &mut seen, plan, 1, notes);
         }
-        None => legacy_roots(primary, &mut out),
+        None => {
+            // 老工程：没有依赖声明可按。**不假装**能表达依赖关系，界面会提示补 .classpath。
+            let mut own: Vec<PathBuf> = Vec::new();
+            legacy_roots(primary, &mut own);
+            let name = project_name(primary).unwrap_or_else(|| {
+                primary
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            });
+            notes.push(
+                "主工程没有 .classpath：依赖只能按目录启发式猜（模块 classes → out/* → bin → \
+                 兄弟工程），同名类谁生效不可控，建议在 Eclipse 里补上工程引用"
+                    .into(),
+            );
+            out.push(RawEntry {
+                name,
+                root: Some(primary.to_path_buf()),
+                depth: 0,
+                exported: false,
+                origin: "legacy",
+                dirs: own,
+                has_classpath: false,
+                disabled: false,
+            });
+        }
+    }
+    out
+}
+
+fn walk(
+    cp: &ProjectCp,
+    workspace: &Path,
+    out: &mut Vec<RawEntry>,
+    seen: &mut HashSet<PathBuf>,
+    plan: &OverridePlan,
+    depth: usize,
+    notes: &mut Vec<String>,
+) {
+    for r in &cp.refs {
+        let Some(root) = resolve_ref(&r.name, workspace) else {
+            // 不静默丢：编译期少一个工程的表现是「类找不到」，而原因在 .classpath 指向了
+            // 一个不存在的目录——这条说明直接给到界面，比让用户猜快得多。
+            notes.push(format!(
+                "依赖 {} 在 {} 下找不到对应工程，已跳过（编译若报类找不到，先查这条）",
+                r.name,
+                workspace.display()
+            ));
+            out.push(RawEntry {
+                name: r.name.clone(),
+                root: None,
+                depth,
+                exported: r.exported,
+                origin: "classpath",
+                dirs: Vec::new(),
+                has_classpath: false,
+                disabled: false,
+            });
+            continue;
+        };
+        if !seen.insert(dir_key(&root)) {
+            continue;
+        }
+        // 停用必须**在这里**生效：它要连「往下的依赖」一起剪掉。等到遍历完再过滤，
+        // B 的子孙已经被别的分支 emit 出来了，只清 B 自己的目录等于没停用。
+        if plan.is_disabled(&r.name, Some(&root)) {
+            notes.push(format!(
+                "{} 被覆盖表停用：它和它往下传递的依赖都不参与类路径",
+                r.name
+            ));
+            let has_cp = ProjectCp::load(&root).is_some();
+            out.push(RawEntry {
+                name: r.name.clone(),
+                root: Some(root),
+                depth,
+                exported: r.exported,
+                origin: "classpath",
+                dirs: Vec::new(),
+                has_classpath: has_cp,
+                disabled: true,
+            });
+            continue;
+        }
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        match ProjectCp::load(&root) {
+            Some(child) => {
+                // 直接依赖总进类路径，`exported` 只决定「要不要继续往下走」
+                push_outputs(&child, &root, &mut dirs);
+                out.push(RawEntry {
+                    // 用 `.classpath` 里的写法（`/newar`）而不是 `.project` 自称的名字（`ar`）：
+                    // 用户是在 Eclipse 里看到 `newar` 的，界面对齐那个名字才找得到人
+                    name: r.name.clone(),
+                    root: Some(root.clone()),
+                    depth,
+                    exported: r.exported,
+                    origin: "classpath",
+                    dirs,
+                    has_classpath: true,
+                    disabled: false,
+                });
+                if r.exported {
+                    walk(&child, workspace, out, seen, plan, depth + 1, notes);
+                }
+            }
+            None => {
+                // 被引用但不是 Eclipse 工程：按老规则扫它自己的产物
+                legacy_own_dirs(&root, &mut dirs);
+                out.push(RawEntry {
+                    name: r.name.clone(),
+                    root: Some(root),
+                    depth,
+                    exported: r.exported,
+                    origin: "classpath",
+                    dirs,
+                    has_classpath: false,
+                    disabled: false,
+                });
+            }
+        }
+    }
+}
+
+/// 归一化后的覆盖表：匹配规则与顺序都在这里，避免各处各写一遍。
+struct OverridePlan {
+    disabled: Vec<String>,
+    front: Vec<String>,
+    add: Vec<String>,
+    notes: Vec<String>,
+}
+
+impl OverridePlan {
+    fn new(overrides: &[LinkedOverride]) -> Self {
+        let mut p = Self {
+            disabled: Vec::new(),
+            front: Vec::new(),
+            add: Vec::new(),
+            notes: Vec::new(),
+        };
+        for o in overrides {
+            let target = o.target.trim();
+            match o.action {
+                OverrideAction::Disable => {
+                    if target.is_empty() {
+                        p.notes
+                            .push("覆盖表里有一条「停用」没写目标，已忽略".into());
+                    } else {
+                        p.disabled.push(target.to_string());
+                    }
+                }
+                OverrideAction::Front => {
+                    if target.is_empty() {
+                        p.notes
+                            .push("覆盖表里有一条「排前」没写目标，已忽略".into());
+                    } else {
+                        p.front.push(target.to_string());
+                    }
+                }
+                OverrideAction::Add => match o.dir.as_deref().map(str::trim) {
+                    Some(d) if !d.is_empty() => p.add.push(d.to_string()),
+                    _ => p
+                        .notes
+                        .push("覆盖表里有一条「追加目录」没写路径，已忽略".into()),
+                },
+            }
+        }
+        p
     }
 
-    out.extend(crate::nc_index::module_class_dirs(nc_home));
-    dedupe(out)
+    /// 三路匹配：工程名、根目录名、绝对路径。界面上显示的可能是其中任一个。
+    fn name_eq(&self, e: &RawEntry, target: &str) -> bool {
+        if e.name.eq_ignore_ascii_case(target) {
+            return true;
+        }
+        let Some(root) = &e.root else {
+            return false;
+        };
+        if root.to_string_lossy().eq_ignore_ascii_case(target) {
+            return true;
+        }
+        root.file_name()
+            .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(target))
+    }
+
+    fn hits(&self, name: &str, root: Option<&Path>) -> bool {
+        self.is_disabled(name, root) || self.is_front(name, root)
+    }
+
+    fn is_disabled(&self, name: &str, root: Option<&Path>) -> bool {
+        self.disabled.iter().any(|t| matches_target(name, root, t))
+    }
+
+    fn is_front(&self, name: &str, root: Option<&Path>) -> bool {
+        self.front.iter().any(|t| matches_target(name, root, t))
+    }
+}
+
+/// 覆盖表匹配：工程名（`.classpath` 里的写法）、根目录名、绝对路径三者任一相等即命中。
+/// 大小写不敏感——Windows 路径与工程名都不区分大小写。
+fn matches_target(name: &str, root: Option<&Path>, target: &str) -> bool {
+    if name.eq_ignore_ascii_case(target) {
+        return true;
+    }
+    let Some(root) = root else {
+        return false;
+    };
+    root.to_string_lossy().eq_ignore_ascii_case(target)
+        || root
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(target))
+}
+
+/// 把配置里的覆盖表转成解析器认识的形态。
+///
+/// 识别不了的 `action` 直接丢弃（老配置/手改文件里可能写成别的词）：
+/// 一条坏配置不该让整个类路径算不出来——那是「配置写错 → 编不过」的死循环。
+/// 丢弃不静默：返回值第二项是给人看的说明。
+pub fn overrides_from(
+    cfg: &[crate::config::LinkedOverrideConfig],
+) -> (Vec<LinkedOverride>, Vec<String>) {
+    let mut out: Vec<LinkedOverride> = Vec::new();
+    let mut notes: Vec<String> = Vec::new();
+    for c in cfg {
+        let Some(action) = OverrideAction::parse(&c.action) else {
+            notes.push(format!(
+                "覆盖表里有一条的动作 {:?} 不认识（只认 disable / front / add），已跳过",
+                c.action
+            ));
+            continue;
+        };
+        out.push(LinkedOverride {
+            action,
+            target: c.target.trim().to_string(),
+            dir: c.dir.as_deref().map(str::trim).map(str::to_string),
+        });
+    }
+    (out, notes)
+}
+
+/// 配置 → 生效覆盖表。识别不了的条目记 warn 后丢弃（界面另有 `notes` 展示，
+/// 这条日志是给「用户没打开工程关联页也要能查」用的）。
+pub fn active_overrides(cfg: &[crate::config::LinkedOverrideConfig]) -> Vec<LinkedOverride> {
+    let (v, notes) = overrides_from(cfg);
+    for n in notes {
+        log::warn!("工程关联覆盖表：{n}");
+    }
+    v
 }
 
 /// 把 `/X` 解析成工程根目录。
@@ -166,34 +700,6 @@ pub fn resolve_ref(name: &str, workspace: &Path) -> Option<PathBuf> {
     let loc = std::fs::read_to_string(reg.join(".location")).ok()?;
     let p = location_path(&loc)?;
     p.is_dir().then_some(p)
-}
-
-fn visit_refs(
-    cp: &ProjectCp,
-    workspace: &Path,
-    out: &mut Vec<PathBuf>,
-    seen: &mut HashSet<PathBuf>,
-) {
-    for r in &cp.refs {
-        let Some(root) = resolve_ref(&r.name, workspace) else {
-            continue;
-        };
-        // 环（A→B→A）与菱形（A→B、A→C、B→C）都在这里收敛
-        if !seen.insert(dir_key(&root)) {
-            continue;
-        }
-        match ProjectCp::load(&root) {
-            Some(child) => {
-                // 直接依赖总进类路径，`exported` 只决定「要不要继续往下走」
-                push_outputs(&child, &root, out);
-                if r.exported {
-                    visit_refs(&child, workspace, out, seen);
-                }
-            }
-            // 被引用但不是 Eclipse 工程：按老规则扫它自己的产物
-            None => legacy_own_dirs(&root, out),
-        }
-    }
 }
 
 fn push_outputs(cp: &ProjectCp, root: &Path, out: &mut Vec<PathBuf>) {
@@ -364,16 +870,24 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// 外面套一层隔离壳：`legacy_roots` 会把「工程根的兄弟目录」当工作区分组扫
+    /// （`<兄弟>/<模块>/classes`），临时工程直接建在 `%TEMP%` 下会被并行用例污染。
     fn temp_dir(tag: &str) -> PathBuf {
-        let mut d = std::env::temp_dir();
-        d.push(format!("ncforge-cp-{tag}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&d);
+        let mut shell = std::env::temp_dir();
+        shell.push(format!("ncforge-cp-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&shell);
+        let d = shell.join("root");
         fs::create_dir_all(&d).unwrap();
         d
     }
 
     fn cleanup(d: &Path) {
         let _ = fs::remove_dir_all(d);
+        if d.file_name().is_some_and(|n| n == "root") {
+            if let Some(shell) = d.parent() {
+                let _ = fs::remove_dir_all(shell);
+            }
+        }
     }
 
     fn touch_class(dir: &Path) {
@@ -667,5 +1181,344 @@ mod tests {
             Some(PathBuf::from("C:/Program Files/p"))
         );
         assert_eq!(location_path("garbage"), None);
+    }
+
+    /// 造一个工作区：每个工程给出「一个输出目录」与「依赖引用列表」。
+    ///
+    /// 输出目录会真的建出来并放一个 `A.class`——`push_outputs` 只收存在的目录，
+    /// 只写 `.classpath` 不建目录的话所有断言都会是空。
+    /// 一个工程的造数规格：工程名 / 输出目录 / 依赖引用（名字, 是否 exported）
+    type WsSpec<'a> = (&'a str, &'a str, &'a [(&'a str, bool)]);
+
+    fn build_ws(tag: &str, specs: &[WsSpec]) -> PathBuf {
+        let ws = temp_dir(tag);
+        for (name, out, refs) in specs {
+            let root = ws.join(name);
+            touch_class(&root.join(out));
+            let mut xml = String::from("<classpath>\n");
+            for (r, exported) in refs.iter() {
+                xml.push_str(&format!(
+                    "\t<classpathentry kind=\"src\" path=\"/{r}\" exported=\"{exported}\"/>\n"
+                ));
+            }
+            xml.push_str(&format!(
+                "\t<classpathentry kind=\"src\" output=\"{out}\" path=\"m/src/public\"/>\n"
+            ));
+            xml.push_str(&format!(
+                "\t<classpathentry kind=\"output\" path=\"{out}\"/>\n</classpath>"
+            ));
+            write(&root.join(".classpath"), &xml);
+        }
+        ws
+    }
+
+    fn names(g: &LinkedGraph) -> Vec<&str> {
+        g.projects.iter().map(|p| p.name.as_str()).collect()
+    }
+
+    /// 依赖链视图：顺序 = 主工程 → 依赖声明顺序，且分组信息能让用户对上 Eclipse。
+    #[test]
+    fn 依赖链按_classpath_顺序分组() {
+        // A → B(exported) → D；A → C。C 在 B 之后声明。
+        let ws = build_ws(
+            "graph",
+            &[
+                ("A", "a-out", &[("B", true), ("C", false)]),
+                ("B", "b-out", &[("D", true)]),
+                ("C", "c-out", &[]),
+                ("D", "d-out", &[]),
+            ],
+        );
+        let home = temp_dir("graph-home");
+        let g = graph(&ws.join("A"), &home, &[]);
+
+        assert_eq!(
+            names(&g),
+            vec!["A", "B", "D", "C"],
+            "顺序必须与 .classpath 一致"
+        );
+        assert_eq!(g.projects[0].origin, "primary");
+        assert_eq!(g.projects[0].depth, 0);
+        assert!(g.projects[1].exported, "B 那条边是 exported");
+        assert_eq!(g.projects[2].depth, 2, "D 是 B 传递进来的");
+        assert!(!g.projects[3].exported);
+        assert!(g.projects.iter().all(|p| p.has_classpath));
+        assert_eq!(g.project_dir_count, 4, "四个工程各一个输出目录");
+        assert!(g.notes.is_empty(), "干净工作区不该有说明：{:?}", g.notes);
+
+        // 视图与真正塞进 classpath 的目录必须逐项一致
+        let dirs = class_roots_with(&ws.join("A"), &home, &[]);
+        let flat: Vec<PathBuf> = g
+            .projects
+            .iter()
+            .flat_map(|p| p.class_dirs.iter().map(PathBuf::from))
+            .collect();
+        assert_eq!(dirs, flat);
+
+        cleanup(&ws);
+        cleanup(&home);
+    }
+
+    /// 停用 B 必须连带剪掉只有它能传递到的 D——只剪一层等于没剪。
+    #[test]
+    fn 停用工程连带剪掉它往下的依赖() {
+        let ws = build_ws(
+            "disable",
+            &[
+                ("A", "a-out", &[("B", true), ("C", false)]),
+                ("B", "b-out", &[("D", true)]),
+                ("C", "c-out", &[]),
+                ("D", "d-out", &[]),
+            ],
+        );
+        let home = temp_dir("disable-home");
+        let ov = [LinkedOverride {
+            action: OverrideAction::Disable,
+            target: "B".into(),
+            dir: None,
+        }];
+        let g = graph(&ws.join("A"), &home, &ov);
+        // B 留壳（用户要看得见自己停用了谁），D 只有经 B 才能传递到，必须一起消失
+        assert_eq!(names(&g), vec!["A", "B", "C"]);
+        assert!(
+            g.projects
+                .iter()
+                .find(|p| p.name == "B")
+                .is_some_and(|p| p.disabled),
+            "B 要标成停用"
+        );
+        assert!(
+            !g.projects.iter().any(|p| p.name == "D"),
+            "只有 B 能传递到的 D 必须消失，否则等于只剪了一层"
+        );
+
+        let dirs = class_roots_with(&ws.join("A"), &home, &ov);
+        assert!(
+            !dirs.iter().any(|d| d.to_string_lossy().contains("b-out")),
+            "被停用的工程不该留下目录：{dirs:?}"
+        );
+        assert!(
+            g.notes.iter().any(|n| n.contains("B 被覆盖表停用")),
+            "界面要能看见剪掉了谁：{:?}",
+            g.notes
+        );
+        cleanup(&ws);
+        cleanup(&home);
+    }
+
+    /// 停用只留壳：条目还在（用户看得见自己停用了谁），但类目录清空。
+    #[test]
+    fn 停用的工程留在列表里但目录清空() {
+        let ws = build_ws(
+            "disable-shell",
+            &[("A", "a-out", &[("B", false)]), ("B", "b-out", &[])],
+        );
+        let home = temp_dir("disable-shell-home");
+        let ov = [LinkedOverride {
+            action: OverrideAction::Disable,
+            target: "B".into(),
+            dir: None,
+        }];
+        let g = graph(&ws.join("A"), &home, &ov);
+        let b = g.projects.iter().find(|p| p.name == "B").expect("B 要留壳");
+        assert!(b.disabled);
+        assert!(b.class_dirs.is_empty());
+        cleanup(&ws);
+        cleanup(&home);
+    }
+
+    /// 排前：主工程之后、其它依赖之前；且配置顺序即优先级。
+    #[test]
+    fn 排前把工程提到其它依赖之前() {
+        let ws = build_ws(
+            "front",
+            &[
+                ("A", "a-out", &[("B", false), ("C", false)]),
+                ("B", "b-out", &[]),
+                ("C", "c-out", &[]),
+            ],
+        );
+        let home = temp_dir("front-home");
+        let ov = [
+            LinkedOverride {
+                action: OverrideAction::Front,
+                target: "C".into(),
+                dir: None,
+            },
+            LinkedOverride {
+                action: OverrideAction::Front,
+                target: "B".into(),
+                dir: None,
+            },
+        ];
+        let g = graph(&ws.join("A"), &home, &ov);
+        // 配置里 C 在前，所以 C 排第一（主工程之后）
+        assert_eq!(names(&g), vec!["A", "C", "B"]);
+        assert_eq!(g.projects[1].origin, "front");
+        cleanup(&ws);
+        cleanup(&home);
+    }
+
+    /// 排前也能用于「不在依赖链上」的工程：单独解析一次再插进来。
+    #[test]
+    fn 排前可用于链外工程() {
+        let ws = build_ws(
+            "front-outside",
+            &[
+                ("A", "a-out", &[("B", false)]),
+                ("B", "b-out", &[]),
+                ("X", "x-out", &[]),
+            ],
+        );
+        let home = temp_dir("front-outside-home");
+        let ov = [LinkedOverride {
+            action: OverrideAction::Front,
+            target: "X".into(),
+            dir: None,
+        }];
+        let g = graph(&ws.join("A"), &home, &ov);
+        assert_eq!(names(&g), vec!["A", "X", "B"]);
+        assert_eq!(g.projects[1].origin, "front");
+        cleanup(&ws);
+        cleanup(&home);
+    }
+
+    /// 追加目录：存在的收进来，不存在的跳过并说明（不能静默——用户会以为生效了）。
+    #[test]
+    fn 追加目录存在才收且不存在的要说明() {
+        let ws = build_ws("add", &[("A", "a-out", &[])]);
+        let home = temp_dir("add-home");
+        let extra = ws.join("handmade");
+        touch_class(&extra);
+        let ghost = ws.join("ghost");
+        let ov = [
+            LinkedOverride {
+                action: OverrideAction::Add,
+                target: String::new(),
+                dir: Some(extra.to_string_lossy().to_string()),
+            },
+            LinkedOverride {
+                action: OverrideAction::Add,
+                target: String::new(),
+                dir: Some(ghost.to_string_lossy().to_string()),
+            },
+        ];
+        let g = graph(&ws.join("A"), &home, &ov);
+        assert_eq!(g.extra_dirs.len(), 1, "只收存在的那个");
+        assert!(g.extra_dirs[0].ends_with("handmade"));
+        assert!(
+            g.notes.iter().any(|n| n.contains("不存在")),
+            "跳过的要说明：{:?}",
+            g.notes
+        );
+        let dirs = class_roots_with(&ws.join("A"), &home, &ov);
+        assert_eq!(dirs.last().unwrap(), &extra, "追加目录排在工程目录之后");
+        cleanup(&ws);
+        cleanup(&home);
+    }
+
+    /// 主工程永远第一、也不可停用：配置写错了要忽略并说明，而不是把主工程剪掉。
+    #[test]
+    fn 主工程不可停用也不可排后() {
+        let ws = build_ws(
+            "primary-guard",
+            &[("A", "a-out", &[("B", false)]), ("B", "b-out", &[])],
+        );
+        let home = temp_dir("primary-guard-home");
+        let ov = [
+            LinkedOverride {
+                action: OverrideAction::Disable,
+                target: "A".into(),
+                dir: None,
+            },
+            LinkedOverride {
+                action: OverrideAction::Front,
+                target: "A".into(),
+                dir: None,
+            },
+        ];
+        let g = graph(&ws.join("A"), &home, &ov);
+        assert_eq!(names(&g), vec!["A", "B"]);
+        assert!(!g.projects[0].disabled);
+        assert!(!g.projects[0].class_dirs.is_empty());
+        assert!(
+            g.notes.iter().any(|n| n.contains("主工程")),
+            "忽略配置也要说一句：{:?}",
+            g.notes
+        );
+        cleanup(&ws);
+        cleanup(&home);
+    }
+
+    /// 依赖指向不存在的工程：条目要留在列表里并说明，别静默消失。
+    #[test]
+    fn 找不到的依赖留下说明() {
+        let ws = build_ws(
+            "missing",
+            &[("A", "a-out", &[("Nope", true)]), ("B", "b-out", &[])],
+        );
+        let home = temp_dir("missing-home");
+        let g = graph(&ws.join("A"), &home, &[]);
+        let n = g
+            .projects
+            .iter()
+            .find(|p| p.name == "Nope")
+            .expect("要留条目");
+        assert!(n.root.is_none());
+        assert!(n.class_dirs.is_empty());
+        assert!(
+            g.notes.iter().any(|n| n.contains("Nope")),
+            "要说清是哪个依赖找不到：{:?}",
+            g.notes
+        );
+        cleanup(&ws);
+        cleanup(&home);
+    }
+
+    /// 覆盖表按绝对路径也能命中（用户可能从界面上贴了完整路径）。
+    #[test]
+    fn 覆盖表支持绝对路径与大小写不敏感() {
+        let ws = build_ws(
+            "match",
+            &[("A", "a-out", &[("B", false)]), ("B", "b-out", &[])],
+        );
+        let home = temp_dir("match-home");
+        let target = ws.join("B").to_string_lossy().to_uppercase();
+        let ov = [LinkedOverride {
+            action: OverrideAction::Disable,
+            target,
+            dir: None,
+        }];
+        let g = graph(&ws.join("A"), &home, &ov);
+        let b = g.projects.iter().find(|p| p.name == "B").expect("B 要留壳");
+        assert!(b.disabled, "大写路径也要命中 B");
+        assert!(b.class_dirs.is_empty());
+        cleanup(&ws);
+        cleanup(&home);
+    }
+
+    #[test]
+    fn 覆盖动作解析只认三种写法() {
+        assert_eq!(
+            OverrideAction::parse("disable"),
+            Some(OverrideAction::Disable)
+        );
+        assert_eq!(
+            OverrideAction::parse(" OFF "),
+            Some(OverrideAction::Disable)
+        );
+        assert_eq!(OverrideAction::parse("front"), Some(OverrideAction::Front));
+        assert_eq!(OverrideAction::parse("first"), Some(OverrideAction::Front));
+        assert_eq!(OverrideAction::parse("add"), Some(OverrideAction::Add));
+        assert_eq!(OverrideAction::parse("delete"), None);
+        assert_eq!(OverrideAction::parse(""), None);
+        // 回写配置用的字符串必须是 parse 认得的（否则存进去下次读不出来）
+        for a in [
+            OverrideAction::Disable,
+            OverrideAction::Front,
+            OverrideAction::Add,
+        ] {
+            assert_eq!(OverrideAction::parse(a.as_str()), Some(a));
+        }
     }
 }

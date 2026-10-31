@@ -179,6 +179,9 @@ pub async fn compile_module(
     let cache_path = state.config_dir.join("class-index.bin");
     let work_dir = state.config_dir.join("tmp");
     let st = state.inner().clone();
+    // 覆盖表在这里取（async 上下文里读配置），进 spawn_blocking 后只管用
+    let overrides =
+        crate::eclipse_cp::active_overrides(&state.config.read().await.linked_overrides);
     // 新一轮编译：先清掉上一次可能残留的取消标志
     st.compile_cancel
         .store(false, std::sync::atomic::Ordering::SeqCst);
@@ -199,6 +202,7 @@ pub async fn compile_module(
             index: &index,
             work_dir: &work_dir,
             cancel: Some(&st.compile_cancel),
+            overrides: &overrides,
         };
         let job = CompileJob {
             out_dir: root.join(&module).join("classes"),

@@ -363,6 +363,9 @@ fn launch(
         },
     )?;
 
+    // 覆盖表：影子工程要和编译/启动用同一份（launch 是同步函数，用 blocking_lock）
+    let overrides =
+        crate::eclipse_cp::active_overrides(&state.config.blocking_read().linked_overrides);
     let base = state.config_dir.join("lang");
     let shadow_dir = base.join("shadow");
     let data_dir = base.join("jdtls-data");
@@ -382,6 +385,7 @@ fn launch(
         shadow_dir: &shadow_dir,
         index: &index,
         extra_jars: &seed,
+        overrides: &overrides,
     })?;
 
     let real_dir = root.join(module);

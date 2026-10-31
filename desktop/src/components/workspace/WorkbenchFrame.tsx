@@ -12,6 +12,7 @@ const DOCUMENT_TOOLS: Record<string, DockToolTab> = {
   svn: { label: "版本控制 · 差异", icon: "gitBranch" },
   patch: { label: "补丁", icon: "package" },
   db: { label: "数据库", icon: "database", custom: true },
+  linked: { label: "工程关联", icon: "plug" },
   settings: { label: "设置", icon: "settings" },
 };
 /**
@@ -20,7 +21,7 @@ const DOCUMENT_TOOLS: Record<string, DockToolTab> = {
  * svn 有意不在列表里：打开版本控制先看源码，点「版本控制 · 差异」才切到差异，
  * 和用户从文件树点进来继续改代码的动线一致。少写这一句就会被当成漏配。
  */
-const DOCUMENT_DEFAULT_OPEN = ["patch", "db", "settings"];
+const DOCUMENT_DEFAULT_OPEN = ["patch", "db", "linked", "settings"];
 /** NC 服务的卡片 + 日志放在底部面板里，切过去时把面板撑高到够看。 */
 const SERVICES_PANEL_MIN = 360;
 const HOST_NAMES: DockRegionName[] = ["toolbar", "sidebar", "document", "bottom", "actions", "tabs"];

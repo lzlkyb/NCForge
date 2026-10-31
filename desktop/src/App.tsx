@@ -55,16 +55,21 @@ const PatchTab = lazy(() =>
   import("./components/tabs/PatchTab").then((m) => ({ default: m.PatchTab })),
 );
 const DbTab = lazy(() => import("./components/tabs/DbTab").then((m) => ({ default: m.DbTab })));
+// 工程关联页：读盘解析每个工程的 .classpath，只在切过去时加载。
+const LinkedProjectsTab = lazy(() =>
+  import("./components/tabs/LinkedProjectsTab").then((m) => ({ default: m.LinkedProjectsTab })),
+);
 // 快速导航浮层要查语言服务（间接依赖 Monaco），首次打开时才加载，和文件页共用同一个 chunk。
 const QuickPalette = lazy(() =>
   import("./components/workspace/QuickPalette").then((m) => ({ default: m.QuickPalette })),
 );
 
 /**
- * Ctrl+1~N 快捷键的完整序列：WORKSPACE_NAV 六项 + 设置（第 7 个）。
+ * Ctrl+1~N 快捷键的完整序列：WORKSPACE_NAV 全部项 + 设置（追加在尾部）。
  *
  * settings 不在 WORKSPACE_NAV 里——它在侧栏 foot 单独渲染（带更新未读红点），
  * 但键盘用户同样需要一键直达，故快捷键序列在 App 层追加，不动侧栏数据源。
+ * 加导航项会把它往后挤一位（加「工程关联」后设置从 Ctrl+7 变 Ctrl+8）。
  */
 const HOTKEY_TABS: string[] = [...WORKSPACE_NAV.map((n) => n.key), "settings"];
 
@@ -152,6 +157,7 @@ function AppContent() {
       go("services", "NC 服务"),
       go("patch", "补丁"),
       go("db", "数据库"),
+      go("linked", "工程关联"),
       go("settings", "设置"),
       { id: "view.side", title: "切换侧栏", hint: "Ctrl+B", run: toggleSide },
       { id: "view.panel", title: "切换底部面板", hint: "Ctrl+J", run: () => setSession({ panelOpen: (v) => !v }) },
@@ -243,7 +249,7 @@ function AppContent() {
           <ErrorBoundary>
             <Suspense fallback={<Skeleton className="m-4 h-40" />}>
               <FilesTab activeTool={activeTab}
-                tool={["search", "svn", "services", "patch", "db", "settings"].map(tab => <ActivityPanel key={tab} active={activeTab === tab}>{renderTab(tab, refreshStatus, navigate)}</ActivityPanel>)} />
+                tool={["search", "svn", "services", "patch", "db", "linked", "settings"].map(tab => <ActivityPanel key={tab} active={activeTab === tab}>{renderTab(tab, refreshStatus, navigate)}</ActivityPanel>)} />
             </Suspense>
           </ErrorBoundary>
         </main>
@@ -290,6 +296,9 @@ function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: strin
       return <PatchTab onNavigate={navigate} />;
     case "db":
       return <DbTab />;
+    case "linked":
+      // 依赖链 / 覆盖表 / 切换工作区：全在文档区，侧栏仍是文件树（顺手能跳去改 .classpath）
+      return <LinkedProjectsTab />;
     case "settings":
       return <SettingsTab onChanged={refreshStatus} />;
     default:

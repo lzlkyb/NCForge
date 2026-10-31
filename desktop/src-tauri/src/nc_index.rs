@@ -28,34 +28,77 @@ use std::path::{Path, PathBuf};
 /// 抽成别名是因为它同时出现在 `Vec` 和 `Mutex` 里，内联写三层泛型没人看得动。
 type JarScan = (usize, Option<Vec<(u64, u64)>>);
 
-/// 模块目录下按顺序扫描的 jar 子目录。
+/// 一层目录的两种身份：散类目录，或装 jar 的目录。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerKind {
+    /// 目录本身就是类根（`classes` / `resources` / `_classes`）
+    Classes,
+    /// 目录下是 jar（`lib` / `_lib`）
+    Jars,
+}
+
+/// 官方 15 层的相对路径（不含作用域前缀），**顺序即优先级**。
 ///
-/// 段序照 Eclipse 的库容器（`IdeaProjectGenerateUtil.java:473-510`）：段 public → client →
-/// private，段内 hyext 层在标准层之前。旧顺序 `client/hyext → client → hyext → lib → …`
-/// 把 client 段排到了 public 前面，实测会让 1 个类（`riart` 的
-/// `nc/ui/bd/ref/RefTableColumnModel`）被标准层抢先——影响面小，但方向是错的。
-pub const MODULE_JAR_DIRS: [&str; 6] = [
-    "hyext/lib",
-    "lib",
-    "client/hyext/lib",
-    "client/lib",
-    "META-INF/hyext/lib",
-    "META-INF/lib",
+/// 来自 `ClasspathComputer:23-65`（`computeStandCP`）：`extension` → `hyext` → 标准层，
+/// 且**jar 紧跟它自己那一层**，不是「所有散类在前、所有 jar 在后」——写成后者会让
+/// `hyext/lib` 的优先级掉到标准 `classes` 之后（实证 §6.4）。
+///
+/// 为什么连 `_classes` / `_lib` / `extension` 这些本机为空的层也列上：它们是官方的
+/// 「覆盖通道」（下划线前缀是为了排在同名普通目录之前），现场装了补丁/定制包就可能
+/// 有内容。本机为空只是「没用到」，不是「不存在」。
+const LAYERS: [(&str, LayerKind); 15] = [
+    ("extension/_classes", LayerKind::Classes),
+    ("extension/classes", LayerKind::Classes),
+    ("extension/resources", LayerKind::Classes),
+    ("extension/lib", LayerKind::Jars),
+    ("extension/_lib", LayerKind::Jars),
+    ("hyext/_classes", LayerKind::Classes),
+    ("hyext/classes", LayerKind::Classes),
+    ("hyext/resources", LayerKind::Classes),
+    ("hyext/lib", LayerKind::Jars),
+    ("hyext/_lib", LayerKind::Jars),
+    ("_classes", LayerKind::Classes),
+    ("classes", LayerKind::Classes),
+    ("resources", LayerKind::Classes),
+    ("_lib", LayerKind::Jars),
+    ("lib", LayerKind::Jars),
 ];
 
-/// 模块目录下的散类目录（相对模块根），顺序与 [`MODULE_JAR_DIRS`] 同源：
-/// public(hyext, std) → client(hyext, std) → private(hyext, std)。
+/// 三个作用域前缀，顺序 public → client → private。
 ///
-/// 每个 Eclipse 库容器都是「散类目录 + jar 目录」，所以散类必须排在 jar 之前——
-/// 二开覆盖类就散在这些目录里，被 jar 里的原版盖掉就白改了。
-const MODULE_CLASS_DIRS: [&str; 6] = [
-    "hyext/classes",
-    "classes",
-    "client/hyext/classes",
-    "client/classes",
-    "META-INF/hyext/classes",
-    "META-INF/classes",
-];
+/// 官方 `computeModulePublicCP` **只收 public 段**，client / META-INF 是模块自己的
+/// classloader 在运行期按需加载的（那是 NC 的模块隔离）。我们多收后两段是**有意偏离**，
+/// 理由是编译期：ecj 要能解析 client/private 里的实现类，否则报 `cannot be resolved`。
+/// 代价是运行期比官方更宽松——本应被隔离的同名类会进同一个 app classloader。
+const SCOPES: [&str; 3] = ["", "client/", "META-INF/"];
+
+/// 一个模块要扫的全部层，按优先级排列（3 个作用域 × 15 层 = 45 条）。
+///
+/// **这是模块类路径唯一的真源**：散类目录与 jar 目录都从这里派生。
+/// 以前是 `MODULE_JAR_DIRS` 与 `MODULE_CLASS_DIRS` 各写一套（6 + 6），
+/// 改一处忘另一处就会出现「编译找得到、启动加载不到」，而且没有任何报错。
+pub fn module_layers() -> Vec<(String, LayerKind)> {
+    let mut out = Vec::with_capacity(SCOPES.len() * LAYERS.len());
+    for scope in SCOPES {
+        for (rel, kind) in LAYERS {
+            out.push((format!("{scope}{rel}"), kind));
+        }
+    }
+    out
+}
+
+/// 运行时类路径要排除的 jar：`xxx_src.jar` / `xxx_doc.jar`。
+///
+/// 与官方 `JarFilter:12-24` 一致。源码/文档 jar 里没有 `.class`，却会：
+/// 1. 让 `ClassIndex` 多扫一遍（实测 6280 个 jar 里这类占一部分，纯浪费）；
+/// 2. 在极端情况下因同名资源互相覆盖，产生「明明改了却读到另一份」的假象。
+fn is_runtime_jar(p: &Path) -> bool {
+    let name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    !(name.ends_with("_src.jar") || name.ends_with("_doc.jar"))
+}
 
 /// 排序键：转大写的完整路径。Eclipse 的顺序来自 Windows 目录列举，NTFS 比较文件名时先转大写：
 /// - 按字节序会把 `Dm7JdbcDriver17.jar` 排到 `bsh-2.0b6.jar` 前面（大写在前），与 Eclipse 不一致；
@@ -103,8 +146,12 @@ pub fn classpath_jars(nc_home: &Path) -> Vec<PathBuf> {
         })
         .unwrap_or_default();
     names.sort_by_key(|n| n.to_uppercase());
+    let layers = module_layers();
     for m in names {
-        for sub in MODULE_JAR_DIRS {
+        for (sub, kind) in &layers {
+            if *kind != LayerKind::Jars {
+                continue;
+            }
             // 只取该目录本层的 jar，不递归（子目录会被下一个 sub 或别的模块覆盖）
             let dir = modules.join(&m).join(sub);
             let Ok(rd) = std::fs::read_dir(&dir) else {
@@ -114,7 +161,9 @@ pub fn classpath_jars(nc_home: &Path) -> Vec<PathBuf> {
                 .flatten()
                 .map(|e| e.path())
                 .filter(|p| {
-                    p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("jar"))
+                    p.is_file()
+                        && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("jar"))
+                        && is_runtime_jar(p)
                 })
                 .collect();
             jars.sort_by_key(|p| sort_key(p));
@@ -126,11 +175,17 @@ pub fn classpath_jars(nc_home: &Path) -> Vec<PathBuf> {
 
 /// NC home 各模块已编译好的**散类目录**，排在 jar 之前。
 ///
-/// 六段都收（旧实现只收 `modules/<m>/classes`）：本机实测 `modules/*/classes` 161 个目录
-/// 458 个 class、`client/classes` 60 个目录 67 个 class、`META-INF/classes` 50 个目录 80 个
-/// class，外加两个 hyext 目录各 1 个。**漏掉的 147 个全是二开覆盖类**——
+/// 现在是**官方 15 层 × 3 个作用域**（`module_layers`），旧的 6 段是它的子集。
+/// 本机实测（2026-10-31 逐段统计，
+/// 判据可复跑 `tests/nc_class_dirs_live.rs`）：`modules/*/classes` **49 个目录 / 258 个
+/// class**、`client/classes` 60/67、`META-INF/classes` 50/80，`hyext/classes` 与
+/// `META-INF/hyext/classes` 各 1/1 ⇒ 合计 **160 个目录 / 406 个 class**。
+/// **旧实现漏掉的 148 个全是二开覆盖类**——
 /// 看不见的后果是编译报 `cannot be resolved`，而运行时类确实存在：编译期与运行期
 /// 两份真源，比"顺序不对"严重（顺序错只是看错了，漏扫是看不见）。
+///
+/// 注：`modules/*/classes` 曾按 `find -path "*/classes"` 混算成「161 目录 / 458 class」，
+/// 那是把各层级 `classes` 一起数进去的结果，数字偏高；`147` 也是同一口径下的错值。
 pub fn module_class_dirs(nc_home: &Path) -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(nc_home.join("modules")) else {
         return Vec::new();
@@ -143,9 +198,13 @@ pub fn module_class_dirs(nc_home: &Path) -> Vec<PathBuf> {
     names.sort_by_key(|n| n.to_uppercase());
 
     let modules = nc_home.join("modules");
+    let layers = module_layers();
     let mut dirs: Vec<PathBuf> = Vec::new();
     for name in names {
-        for sub in MODULE_CLASS_DIRS {
+        for (sub, kind) in &layers {
+            if *kind != LayerKind::Classes {
+                continue;
+            }
             let p = modules
                 .join(&name)
                 .join(sub.replace('/', std::path::MAIN_SEPARATOR_STR));
@@ -478,8 +537,8 @@ mod tests {
     }
 
     /// D6：散类目录必须六段都收，且段序与 jar 同源、散类排在 jar 之前。
-    /// 本机 `modules/*/client/classes` 与 `META-INF/classes` 里躺着 147 个二开覆盖类，
-    /// 旧实现只收 `modules/<m>/classes`，它们一个都进不了类路径。
+    /// 本机 `client/classes`、`META-INF/classes` 与两个 hyext 段里合计躺着 148 个二开覆盖类，
+    /// 旧实现只收 `modules/<m>/classes`（258 个 class），它们一个都进不了类路径。
     #[test]
     fn module_class_dirs_covers_all_six_segments_in_segment_order() {
         let d = tmpdir("classdirs");
@@ -575,5 +634,86 @@ mod tests {
         let third = ClassIndex::load_or_build(jars, Some(&cache), Some(&count));
         assert_eq!(scans.load(std::sync::atomic::Ordering::Relaxed), 1);
         assert_eq!(third.jar_for_class("b.C"), Some(1));
+    }
+
+    /// 模块 15 层的顺序是官方 `computeStandCP` 抄下来的，不能凭感觉调：
+    /// `extension` → `hyext` → 标准层，且 **jar 紧跟它自己那一层**。
+    ///
+    /// 这条顺序是行为不是美观：把 `hyext/lib` 排到标准 `classes` 之后，
+    /// 现场补丁放在 `hyext/classes` 里的类就会被 `modules/<m>/lib` 的原版盖掉。
+    #[test]
+    fn 模块层是官方15层且jar紧跟本层() {
+        let layers: Vec<String> = module_layers().into_iter().map(|(p, _)| p).collect();
+
+        // 第一段（public 作用域）必须与官方 15 层逐字一致
+        let expect = [
+            "extension/_classes",
+            "extension/classes",
+            "extension/resources",
+            "extension/lib",
+            "extension/_lib",
+            "hyext/_classes",
+            "hyext/classes",
+            "hyext/resources",
+            "hyext/lib",
+            "hyext/_lib",
+            "_classes",
+            "classes",
+            "resources",
+            "_lib",
+            "lib",
+        ];
+        assert_eq!(&layers[..15], &expect[..]);
+
+        let at = |name: &str| layers.iter().position(|p| p == name).unwrap();
+        // jar 紧跟本层：hyext 的 lib 必须早于标准 classes
+        assert!(
+            at("hyext/lib") < at("classes"),
+            "hyext/lib 必须早于标准 classes"
+        );
+        assert!(
+            at("extension/lib") < at("hyext/classes"),
+            "extension 整段在 hyext 之前"
+        );
+        // 下划线变体比同名普通目录更优先（官方的「覆盖通道」）
+        assert!(at("_classes") < at("classes"));
+        assert!(at("_lib") < at("lib"));
+        // 作用域：public → client → private
+        assert!(at("classes") < at("client/classes"));
+        assert!(at("client/classes") < at("META-INF/classes"));
+        assert_eq!(layers.len(), 45, "3 个作用域 × 15 层");
+    }
+
+    /// 散类目录与 jar 目录必须来自同一份层表：以前是两份常量各写一套，
+    /// 改一处忘另一处会变成「编译找得到、启动加载不到」，还没有任何报错。
+    #[test]
+    fn 散类与jar都从同一份层表派生() {
+        let layers = module_layers();
+        let classes: Vec<&str> = layers
+            .iter()
+            .filter(|(_, k)| *k == LayerKind::Classes)
+            .map(|(p, _)| p.as_str())
+            .collect();
+        let jars: Vec<&str> = layers
+            .iter()
+            .filter(|(_, k)| *k == LayerKind::Jars)
+            .map(|(p, _)| p.as_str())
+            .collect();
+        // 15 层里 9 个类目录 + 6 个 jar 目录
+        assert_eq!(classes.len(), 9 * 3);
+        assert_eq!(jars.len(), 6 * 3);
+        assert!(classes.contains(&"classes"));
+        assert!(jars.contains(&"lib"));
+    }
+
+    #[test]
+    fn 源码与文档jar不进运行时类路径() {
+        assert!(is_runtime_jar(Path::new("D:/ncc/lib/a.jar")));
+        assert!(!is_runtime_jar(Path::new("D:/ncc/lib/a_src.jar")));
+        assert!(
+            !is_runtime_jar(Path::new("D:/ncc/lib/a_DOC.jar")),
+            "大小写不敏感"
+        );
+        assert!(!is_runtime_jar(Path::new("D:/ncc/lib/x_src.jar")));
     }
 }

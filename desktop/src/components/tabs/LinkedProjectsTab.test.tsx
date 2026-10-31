@@ -1,0 +1,202 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LinkedProjectsTab } from "./LinkedProjectsTab";
+import type { LinkedGraph, LinkedOverride } from "../../lib/linkedProjects";
+
+const mocks = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  toast: vi.fn(),
+  unsaved: vi.fn((): unknown[] => []),
+  saveAll: vi.fn(async () => ({ saved: [], failed: [] })),
+  applyWorkspace: vi.fn(async (p: string) => p),
+}));
+
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+}));
+vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
+vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
+vi.mock("../../lib/saveAllDirty", () => ({
+  collectUnsaved: () => mocks.unsaved(),
+  saveAllDirty: () => mocks.saveAll(),
+}));
+vi.mock("../../lib/switchWorkspace", () => ({
+  applyWorkspace: (p: string) => mocks.applyWorkspace(p),
+}));
+
+const dirs = (n: number, prefix = "C:\\x") =>
+  Array.from({ length: n }, (_, i) => `${prefix}\\d${i}`);
+
+/** 真机形状（C:\work\aier\EyePortal）：9 + 8 + 35 = 52。 */
+const graph = (): LinkedGraph => ({
+  primary: "EyePortal",
+  primaryRoot: "C:\\work\\aier\\EyePortal",
+  workspace: "C:\\work\\aier",
+  projects: [
+    {
+      name: "EyePortal",
+      root: "C:\\work\\aier\\EyePortal",
+      origin: "primary",
+      depth: 0,
+      exported: false,
+      classDirs: dirs(9, "C:\\work\\aier\\EyePortal"),
+      disabled: false,
+      hasClasspath: true,
+    },
+    {
+      name: "pm",
+      root: "C:\\work\\aier\\pm",
+      origin: "classpath",
+      depth: 1,
+      exported: true,
+      classDirs: dirs(8, "C:\\work\\aier\\pm"),
+      disabled: false,
+      hasClasspath: true,
+    },
+    {
+      name: "newar",
+      root: null,
+      origin: "legacy",
+      depth: 2,
+      exported: false,
+      classDirs: dirs(35, "C:\\work\\aier\\newar"),
+      disabled: false,
+      hasClasspath: false,
+    },
+  ],
+  extraDirs: ["C:\\extra\\classes"],
+  projectDirCount: 52,
+  ncHomeDirCount: 160,
+  totalDirCount: 212,
+  notes: ["disable newar：连带剪掉它往下传递的依赖"],
+});
+
+let stored: LinkedOverride[] = [];
+
+const invokeImpl = async (cmd: string, args?: Record<string, unknown>) => {
+  if (cmd === "linked_projects") return graph();
+  if (cmd === "get_config") return { linked_overrides: stored };
+  if (cmd === "set_linked_overrides") {
+    stored = (args?.overrides ?? []) as LinkedOverride[];
+    return stored;
+  }
+  throw new Error(`unexpected command: ${cmd}`);
+};
+
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let root: Root;
+let container: HTMLDivElement;
+
+const render = async () => {
+  await act(async () => root.render(<LinkedProjectsTab />));
+  await act(async () => {}); // 等 linked_projects + get_config 落回状态
+};
+
+const rows = () => [...container.querySelectorAll<HTMLElement>(".lnk-item")];
+const rowOf = (name: string) =>
+  rows().find((li) => li.querySelector(".lnk-name")?.textContent?.includes(name))!;
+const buttonIn = (scope: ParentNode, text: string) =>
+  [...scope.querySelectorAll("button")].find((b) => b.textContent?.trim() === text) as
+    | HTMLButtonElement
+    | undefined;
+const saveButton = () => buttonIn(container, "保存覆盖表");
+const callsOf = (cmd: string) => mocks.invoke.mock.calls.filter(([c]) => c === cmd);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  stored = [];
+  mocks.invoke.mockImplementation(invokeImpl);
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+});
+
+afterEach(async () => {
+  await act(async () => root.unmount());
+  container.remove();
+});
+
+describe("工程关联页", () => {
+  it("按有效顺序列出依赖链，并显示目录数、追加目录与解析说明", async () => {
+    await render();
+
+    const names = rows().map((li) => li.querySelector(".lnk-name")?.textContent?.trim());
+    expect(names).toEqual(["EyePortal", "pm", "newar"]);
+    expect(rowOf("EyePortal").textContent).toContain("主工程");
+    expect(rowOf("pm").textContent).toContain("8 个目录");
+    expect(rowOf("pm").textContent).toContain("往下传递");
+    // `.classpath` 写了但磁盘上找不到：必须显式标出来，否则用户以为它参与了
+    expect(rowOf("newar").textContent).toContain("目录找不到");
+    expect(rowOf("newar").textContent).toContain("无 .classpath");
+
+    expect(container.textContent).toContain("类目录 212 个");
+    expect(container.textContent).toContain("工程侧 52 + NC home 160");
+    expect(container.textContent).toContain("C:\\extra\\classes");
+    expect(container.textContent).toContain("disable newar：连带剪掉它往下传递的依赖");
+  });
+
+  it("行内「停用」只改草稿：不落盘，保存后整表提交并重读依赖链", async () => {
+    await render();
+    expect(callsOf("linked_projects")).toHaveLength(1);
+
+    await act(async () => buttonIn(rowOf("pm"), "停用")!.click());
+    // 草稿里出现了这一条，但还没发保存请求
+    expect(callsOf("set_linked_overrides")).toHaveLength(0);
+    expect(buttonIn(rowOf("pm"), "取消停用")).toBeTruthy();
+    expect(saveButton()?.disabled).toBe(false);
+
+    await act(async () => saveButton()!.click());
+
+    // 全量替换：提交的是整张表（此时只有这一条），不是「增量一条」
+    expect(mocks.invoke).toHaveBeenCalledWith("set_linked_overrides", {
+      overrides: [{ action: "disable", target: "pm", dir: null }],
+    });
+    // 保存后必须重读依赖链：目录数与顺序都可能变
+    expect(callsOf("linked_projects")).toHaveLength(2);
+    expect(saveButton()?.disabled).toBe(true);
+  });
+
+  it("草稿攒了两条，提交的是两条（顺序即优先级）", async () => {
+    await render();
+
+    await act(async () => buttonIn(rowOf("pm"), "停用")!.click());
+    await act(async () => buttonIn(rowOf("newar"), "排前")!.click());
+    await act(async () => saveButton()!.click());
+
+    expect(mocks.invoke).toHaveBeenCalledWith("set_linked_overrides", {
+      overrides: [
+        { action: "disable", target: "pm", dir: null },
+        { action: "front", target: "newar", dir: null },
+      ],
+    });
+  });
+
+  it("主工程不能排前（按钮禁用），取消停用会退回空草稿", async () => {
+    await render();
+    expect(buttonIn(rowOf("EyePortal"), "排前")?.disabled).toBe(true);
+
+    await act(async () => buttonIn(rowOf("pm"), "停用")!.click());
+    await act(async () => buttonIn(rowOf("pm"), "取消停用")!.click());
+    expect(saveButton()?.disabled).toBe(true);
+  });
+
+  it("配置里已有的覆盖会回填成草稿，此时不算改动", async () => {
+    stored = [{ action: "front", target: "newar", dir: null }];
+    await render();
+
+    const list = container.querySelector(".lnk-ovs");
+    expect(list?.textContent).toContain("排前");
+    expect(list?.textContent).toContain("newar");
+    expect(saveButton()?.disabled).toBe(true);
+    expect(buttonIn(rowOf("newar"), "取消排前")).toBeTruthy();
+  });
+
+  it("「重新读取」再发一次 linked_projects", async () => {
+    await render();
+    await act(async () => buttonIn(container, "重新读取")!.click());
+    expect(callsOf("linked_projects")).toHaveLength(2);
+  });
+});

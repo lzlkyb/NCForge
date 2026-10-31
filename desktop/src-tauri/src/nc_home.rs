@@ -209,6 +209,32 @@ pub fn read_endpoints(root: &Path) -> ServerEndpoints {
     }
 }
 
+/// `prop.xml` 里缺 `<server><name>` 时的默认服务器名。
+///
+/// 这个值不是我们编的：`ServiceManagerDaemon` 在 `-Dnc.server.name` 缺失时就用它，
+/// 本机实测 `work/` 下只有 `server/` 目录即为证据（见
+/// `docs/NCForge-NC启动与类加载机制-实证-20261031.md` §5 E3）。
+pub const DEFAULT_SERVER_NAME: &str = "server";
+
+/// 读 `<domain><server><name>`，也就是这台「域」里服务器的名字。
+///
+/// 为什么必须补这个参数：`startServer.bat` 走 `nc.bs.mw.domain.Main`，由它读 DomainInfo
+/// 再补进子进程命令行；我们直接起 `StartDirectServer`，跳过了那一层，服务名就退回默认
+/// `server`。后果有三个：`work/<name>/` 与配置分叉（官方 `stopServer.bat` 按默认名找端口，
+/// **停不掉我们起的服务**）、日志目录名分叉、`findServerProcessInfo` 找不到 server
+/// ⇒ `prop.xml` 里的 `<http><address>/<port>` 退回默认值。
+///
+/// 作用域必须限定在 `<server>` 块内：`prop.xml` 里 `<service>` 段也有 `<name>`
+/// （`StartTomcat`、`EJB_SERVICE`），全文件找 `<name>` 会拿到服务组件名。
+pub fn read_server_name(root: &Path) -> Option<String> {
+    let path = root.join(SERVER_PROP.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let bytes = std::fs::read(&path).ok()?;
+    let text = crate::workspace::decode_lossy(&bytes);
+    let server = tag_block(&text, "server")?;
+    let name = tag_text(server, "name")?.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 /// 取 `<tag>值</tag>` 的值（去掉两侧空白）。找不到返回 None。
 fn tag_text<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
     let open = format!("<{tag}>");

@@ -14,11 +14,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{AppConfig, DbConnConfig};
+use crate::config::{AppConfig, DbConnConfig, LinkedOverrideConfig};
 
-/// 导出文件格式版本。升级 `ExportableConfig` 结构时加一；
+/// 导出文件格式版本。升级 `ExportableConfig` 结构时加一（v2 = 加 `linked_overrides`）；
 /// 导入方版本比文件旧时**拒绝**（防止新字段被静默忽略后用户以为导全了）。
-pub const EXPORT_SCHEMA: u32 = 1;
+pub const EXPORT_SCHEMA: u32 = 2;
 
 /// 导出文件的外层信封。`app` 字段防止把别的应用的导出物导进来。
 ///
@@ -59,6 +59,12 @@ pub struct ExportableConfig {
     pub lang_enabled: Option<bool>,
     pub lang_auto_start: Option<bool>,
     pub lang_xmx_mb: Option<u32>,
+    /// 工程关联覆盖表：全量替换语义（`Some` = 换成它，`None` = 不动）。
+    ///
+    /// 里面的 `target` 可能是工程绝对路径，换机器后大概率失效。**不在这里清**——
+    /// 失效的覆盖在解析时会被「找不到工程」挡掉并在界面里说明（见 `eclipse_cp`），
+    /// 用户还能看见自己当初配了什么，比静默清空好。
+    pub linked_overrides: Option<Vec<LinkedOverrideConfig>>,
 }
 
 /// 口令字段的 JSON 键名黑名单。导入时从 JSON 树上整键删除。
@@ -99,6 +105,7 @@ pub fn build_export(cfg: &AppConfig) -> ConfigExport {
             lang_enabled: Some(cfg.lang_enabled),
             lang_auto_start: Some(cfg.lang_auto_start),
             lang_xmx_mb: cfg.lang_xmx_mb,
+            linked_overrides: Some(cfg.linked_overrides.clone()),
         },
     }
 }
@@ -196,6 +203,9 @@ pub fn apply_import(cfg: &mut AppConfig, imported: &ExportableConfig) -> Result<
     }
     if imported.lang_xmx_mb.is_some() {
         cfg.lang_xmx_mb = imported.lang_xmx_mb;
+    }
+    if let Some(v) = &imported.linked_overrides {
+        cfg.linked_overrides = v.clone();
     }
 
     if let Some(conns) = &imported.db_conns {
