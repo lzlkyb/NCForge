@@ -207,6 +207,24 @@
 .dbx-hitem .m .r { margin-left: auto; }
 .dbx-hitem code { display: block; font: 11.5px/17px "Cascadia Mono", Consolas, monospace; white-space: pre; overflow: hidden; text-overflow: ellipsis; max-height: 51px; }
 .dbx-hitem .fail { color: hsl(var(--destructive-ink)); }
+/* 搜索框下面那行开关（全部连接 / 只看失败）：12px 的小控件，别做成整行按钮 */
+.dbx-flags { display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 11.5px; color: hsl(var(--muted-foreground)); }
+.dbx-flags label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+/* 跨连接搜索时的连接名徽章：只在这一列出现，所以做得比正文更淡 */
+.dbx-hconn { padding: 0 5px; border-radius: 5px; background: hsl(var(--secondary)); color: hsl(var(--muted-foreground)); font-size: 10.5px; font-weight: 600; flex-shrink: 0; }
+/* 命中高亮：只改底色，不改字色（否则在 fail 行里会看不清） */
+.dbx-hitem mark, .dbx-snipform mark { background: hsl(var(--warning) / .35); color: inherit; border-radius: 2px; }
+
+/* ── 片段抽屉（B4）──
+   一行 = 一个 div（左边是"填入"按钮，右边是改名/删除），不能像历史那样整块做成 button：
+   button 里套 button 是非法嵌套，点了删除会连带触发填入。 */
+.dbx-hitem.snip { display: flex; align-items: flex-start; gap: 4px; padding: 0; }
+.dbx-snipmain { flex: 1; min-width: 0; text-align: left; padding: 8px 0 8px 12px; }
+.dbx-snipacts { display: flex; gap: 2px; padding: 6px 6px 0 0; opacity: 0; }
+.dbx-hitem.snip:hover .dbx-snipacts, .dbx-hitem.snip:focus-within .dbx-snipacts { opacity: 1; }
+.dbx-snipform { padding: 8px; border-bottom: 1px solid hsl(var(--border)); display: flex; flex-direction: column; gap: 6px; background: hsl(var(--secondary) / .35); flex-shrink: 0; }
+.dbx-snipform textarea.dbx-inp { height: auto; padding: 6px 9px; line-height: 1.5; resize: vertical; }
+.dbx-snipform-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: hsl(var(--muted-foreground)); }
 
 /* ── 会话与锁（只读面板） ──
    比历史抽屉宽：要同时放 SID/用户/状态/等待/锁/SQL 六列。

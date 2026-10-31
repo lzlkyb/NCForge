@@ -5,6 +5,7 @@ import { SqlEditor, type SqlEditorApi } from "./SqlEditor";
 import { TxBar } from "./TxBar";
 import { ResultPanel } from "./ResultPanel";
 import { HistoryDrawer } from "./HistoryDrawer";
+import { SnippetDrawer } from "./SnippetDrawer";
 import { SessionDrawer } from "./SessionDrawer";
 import { InsertExportDialog } from "./InsertExportDialog";
 import { explain, runStatements } from "../../lib/dbActions";
@@ -18,7 +19,8 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   const api = useRef<SqlEditorApi | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [resH, setResH] = useState(300);
-  const [history, setHistory] = useState(false);
+  /** 右侧抽屉：历史与片段互斥（同一列位置，同时开就挤成两栏了）。 */
+  const [side, setSide] = useState<"history" | "snips" | null>(null);
   // 会话面板是页级状态（按钮在工具条、抽屉在 body 里），放 store 才不用层层回调
   const db = useDb();
   const sessOpen = db.sessionPanel?.connId === tab.connId && tab.connId != null;
@@ -84,8 +86,10 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         onExplain={onExplain}
         onFormat={() => api.current?.format()}
         onExport={onExport}
-        historyOpen={history}
-        onHistory={() => setHistory(!history)}
+        historyOpen={side === "history"}
+        onHistory={() => setSide(side === "history" ? null : "history")}
+        snipsOpen={side === "snips"}
+        onSnips={() => setSide(side === "snips" ? null : "snips")}
         sessionsOpen={sessOpen}
         onSessions={() => (sessOpen ? closeSessionPanel() : openSessionPanel(tab.connId))}
       />
@@ -113,15 +117,25 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
           />
           <ResultPanel tab={tab} height={resH} />
         </div>
-        {history && tab.connId && (
+        {side === "history" && tab.connId && (
           <HistoryDrawer
             connId={tab.connId}
-            onClose={() => setHistory(false)}
+            onClose={() => setSide(null)}
             onPick={(sql, runNow) => {
               api.current?.setText(sql);
               // 双击：填回后整段执行（可能是脚本）
               if (runNow && sqlTabOf(tabId)) void run("script");
             }}
+          />
+        )}
+        {side === "snips" && tab.connId && (
+          <SnippetDrawer
+            connId={tab.connId}
+            // 取「光标处那条（有选中则是选中部分）」——与执行、导出 INSERT 同一口径，
+            // 免得存下来的片段里混着编辑器里另外十个不相关的查询
+            getSql={() => (api.current?.target("current") ?? []).map((s) => s.text).join("\n\n")}
+            onClose={() => setSide(null)}
+            onPick={(sql) => api.current?.setText(sql)}
           />
         )}
         {sessOpen && tab.connId && <SessionDrawer connId={tab.connId} onClose={closeSessionPanel} />}

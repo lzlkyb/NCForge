@@ -6,7 +6,7 @@ import { switchConn } from "../../lib/dbActions";
 import { connOf, rtOf, txAction, useDb, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台工具条：连接胶囊 · 执行 / 脚本 / 计划 / 格式化 · 事务模式 · 历史。生产库整条淡红。 */
-export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, historyOpen, onHistory, sessionsOpen, onSessions }: {
+export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, historyOpen, onHistory, snipsOpen, onSnips, sessionsOpen, onSessions }: {
   tab: SqlTab;
   onRun: (mode: "current" | "script") => void;
   onStop: () => void;
@@ -16,6 +16,9 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
   onExport: () => void;
   historyOpen: boolean;
   onHistory: () => void;
+  /** 片段抽屉是否打开（按钮高亮用）。 */
+  snipsOpen: boolean;
+  onSnips: () => void;
   /** 会话与锁抽屉是否打开（按钮高亮用）。 */
   sessionsOpen: boolean;
   onSessions: () => void;
@@ -100,6 +103,17 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
       <button type="button" className="dbx-btn ghost" data-on={historyOpen || undefined} onClick={onHistory} disabled={!tab.connId}>
         <Icon name="history" size={12} />
         历史
+      </button>
+      <button
+        type="button"
+        className="dbx-btn ghost"
+        data-on={snipsOpen || undefined}
+        onClick={onSnips}
+        disabled={!tab.connId}
+        title="常用 SQL 存下来，点一下填回编辑器（本机保存，不上传）"
+      >
+        <Icon name="code" size={12} />
+        片段
       </button>
       <button
         type="button"
