@@ -326,6 +326,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // 数据导出（流式写文件：CSV / TSV / INSERT，A4）
             commands::db_export_file,
             commands::db_export_reveal,
+            // 导入（B3）：CSV/TSV → 表，走独立会话的事务
+            commands::db_import_rows,
             // 表结构缓存 + 出包前核对
             commands::db_schema_status,
             commands::db_schema_sync,

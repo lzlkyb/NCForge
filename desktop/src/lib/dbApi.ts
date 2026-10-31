@@ -243,6 +243,37 @@ export interface TableInfo {
   kind: "TABLE" | "VIEW";
 }
 
+/** 导入的一列：名字 + 目标列类型（类型决定字面量怎么写：日期要 to_date、数字不加引号）。 */
+export interface ImportColReq {
+  name: string;
+  ty?: string | null;
+}
+
+export interface ImportFail {
+  /** 文件里的行号（1 起，表头算第 1 行）。 */
+  line: number;
+  error: string;
+}
+
+export interface ImportReq {
+  id: string;
+  table: string;
+  columns: ImportColReq[];
+  /** 与 `columns` 等长；`null` 写 NULL。 */
+  rows: (string | null)[][];
+  startLine?: number;
+  /** `true` = 坏行跳过、其余照插；`false` = 遇到第一处错误整批回滚。 */
+  skipErrors?: boolean;
+}
+
+export interface ImportOut {
+  inserted: number;
+  failed: ImportFail[];
+  truncated: boolean;
+  committed: boolean;
+  ms: number;
+}
+
 /** 非表对象（包 / 过程 / 序列 / 同义词 / 触发器…）。`type` 就是 `user_objects.object_type`。 */
 export interface DbObject {
   name: string;
@@ -392,6 +423,12 @@ export const dbApi = {
   exportFile: (req: ExportFileReq) => invoke<ExportFileOut>("db_export_file", { req }),
   /** 在系统文件管理器里定位刚导出的文件（只允许导出目录内的路径）。 */
   revealExport: (path: string) => invoke<void>("db_export_reveal", { path }),
+
+  /**
+   * 导入一批行（B3）。**每次调用自成事务**：全成功才 `commit`，有错且 `skipErrors=false`
+   * 就整批回滚。走独立会话，不会把用户自己未提交的改动一起提交。
+   */
+  importRows: (req: ImportReq) => invoke<ImportOut>("db_import_rows", { req }),
   /** 取消这个连接上正在执行的语句（不等执行返回，立即生效）。能不能用先看 `caps.cancel`。 */
   cancel: (id: string, slot?: string | null) => invoke<void>("db_cancel", { id, slot: slot || null }),
   /** 这个连接用哪个引擎、那个引擎能做什么。 */
