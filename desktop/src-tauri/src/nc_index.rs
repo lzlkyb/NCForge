@@ -5,9 +5,14 @@
 //!
 //! classpath 顺序规则（从 Eclipse 的实际 classpath 里归纳；M0 验证过顺序会影响字节一致性，
 //! 同名类先出现的优先）：
+//!
 //! 1. `lib`、`framework`、`external/lib`、`middleware`（各自递归，按完整路径字符串排序）
-//! 2. `modules/<模块名>/...`：模块名排序；每个模块内依次是
-//!    `client/hyext/lib`、`client/lib`、`hyext/lib`、`lib`、`META-INF/hyext/lib`、`META-INF/lib`
+//! 2. `modules/<模块名>/...`：模块名排序；每个模块内按「段 public → client → private，
+//!    段内 hyext 层在标准层之前」，散类目录（`*classes`）一律排在 jar 目录之前
+//!
+//! 第 2 条的段序对齐 Eclipse 的库容器（`IdeaProjectGenerateUtil.java:473-510`）：容器是
+//! 「散类 + jar」，所以二开覆盖类所在的 `META-INF/classes`、`client/classes` 必须先于 jar
+//! 出现，否则改了被覆盖的类不生效。
 //!
 //! 纯逻辑模块，不含 tauri 类型（原因见 workspace.rs 头注释）。
 
@@ -24,13 +29,32 @@ use std::path::{Path, PathBuf};
 type JarScan = (usize, Option<Vec<(u64, u64)>>);
 
 /// 模块目录下按顺序扫描的 jar 子目录。
-const MODULE_JAR_DIRS: [&str; 6] = [
-    "client/hyext/lib",
-    "client/lib",
+///
+/// 段序照 Eclipse 的库容器（`IdeaProjectGenerateUtil.java:473-510`）：段 public → client →
+/// private，段内 hyext 层在标准层之前。旧顺序 `client/hyext → client → hyext → lib → …`
+/// 把 client 段排到了 public 前面，实测会让 1 个类（`riart` 的
+/// `nc/ui/bd/ref/RefTableColumnModel`）被标准层抢先——影响面小，但方向是错的。
+pub const MODULE_JAR_DIRS: [&str; 6] = [
     "hyext/lib",
     "lib",
+    "client/hyext/lib",
+    "client/lib",
     "META-INF/hyext/lib",
     "META-INF/lib",
+];
+
+/// 模块目录下的散类目录（相对模块根），顺序与 [`MODULE_JAR_DIRS`] 同源：
+/// public(hyext, std) → client(hyext, std) → private(hyext, std)。
+///
+/// 每个 Eclipse 库容器都是「散类目录 + jar 目录」，所以散类必须排在 jar 之前——
+/// 二开覆盖类就散在这些目录里，被 jar 里的原版盖掉就白改了。
+const MODULE_CLASS_DIRS: [&str; 6] = [
+    "hyext/classes",
+    "classes",
+    "client/hyext/classes",
+    "client/classes",
+    "META-INF/hyext/classes",
+    "META-INF/classes",
 ];
 
 /// 排序键：转大写的完整路径。Eclipse 的顺序来自 Windows 目录列举，NTFS 比较文件名时先转大写：
@@ -100,17 +124,36 @@ pub fn classpath_jars(nc_home: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// NC home 各模块已编译好的 `classes` 目录（`modules/<m>/classes`），排在 jar 之前。
+/// NC home 各模块已编译好的**散类目录**，排在 jar 之前。
+///
+/// 六段都收（旧实现只收 `modules/<m>/classes`）：本机实测 `modules/*/classes` 161 个目录
+/// 458 个 class、`client/classes` 60 个目录 67 个 class、`META-INF/classes` 50 个目录 80 个
+/// class，外加两个 hyext 目录各 1 个。**漏掉的 147 个全是二开覆盖类**——
+/// 看不见的后果是编译报 `cannot be resolved`，而运行时类确实存在：编译期与运行期
+/// 两份真源，比"顺序不对"严重（顺序错只是看错了，漏扫是看不见）。
 pub fn module_class_dirs(nc_home: &Path) -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(nc_home.join("modules")) else {
         return Vec::new();
     };
-    let mut dirs: Vec<PathBuf> = rd
+    let mut names: Vec<String> = rd
         .flatten()
-        .map(|e| e.path().join("classes"))
-        .filter(|p| p.is_dir())
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
-    dirs.sort_by_key(|p| sort_key(p));
+    names.sort_by_key(|n| n.to_uppercase());
+
+    let modules = nc_home.join("modules");
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for name in names {
+        for sub in MODULE_CLASS_DIRS {
+            let p = modules
+                .join(&name)
+                .join(sub.replace('/', std::path::MAIN_SEPARATOR_STR));
+            if p.is_dir() {
+                dirs.push(p);
+            }
+        }
+    }
     dirs
 }
 
@@ -426,9 +469,51 @@ mod tests {
                 "external/lib/e.jar",
                 "middleware/x.jar",
                 "modules/aa/lib/a.jar",
-                "modules/bb/client/lib/c.jar",
+                // 段序 public → client → private（旧实现把 client 排最前）
                 "modules/bb/lib/l.jar",
+                "modules/bb/client/lib/c.jar",
                 "modules/bb/META-INF/lib/meta.jar",
+            ]
+        );
+    }
+
+    /// D6：散类目录必须六段都收，且段序与 jar 同源、散类排在 jar 之前。
+    /// 本机 `modules/*/client/classes` 与 `META-INF/classes` 里躺着 147 个二开覆盖类，
+    /// 旧实现只收 `modules/<m>/classes`，它们一个都进不了类路径。
+    #[test]
+    fn module_class_dirs_covers_all_six_segments_in_segment_order() {
+        let d = tmpdir("classdirs");
+        for p in [
+            "modules/bb/classes",
+            "modules/bb/client/classes",
+            "modules/bb/META-INF/classes",
+            "modules/bb/META-INF/hyext/classes",
+            "modules/aa/META-INF/classes",
+            "modules/aa/classes",
+            // 只有 jar、没有散类的目录不该被收
+            "modules/bb/lib",
+        ] {
+            std::fs::create_dir_all(d.join(p)).unwrap();
+        }
+        let got: Vec<String> = module_class_dirs(&d)
+            .iter()
+            .map(|p| {
+                p.strip_prefix(&d)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                // 模块名排序在前，模块内 public → private，hyext 层在标准层前
+                "modules/aa/classes",
+                "modules/aa/META-INF/classes",
+                "modules/bb/classes",
+                "modules/bb/client/classes",
+                "modules/bb/META-INF/hyext/classes",
+                "modules/bb/META-INF/classes",
             ]
         );
     }

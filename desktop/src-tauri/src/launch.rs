@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
+use crate::nc_index::MODULE_JAR_DIRS;
 use crate::server::ServerSpec;
 
 /// 中间件主类（开发态直启，不走 `bin/startup.bat` 的 NCStarter）。
@@ -34,16 +35,6 @@ pub const MIDDLEWARE_MAIN_CLASS: &str = "ufmiddle.start.tomcat.StartDirectServer
 /// `middleware` 排最前：`StartDirectServer` 与 Tomcat 本体都在这里，让它们
 /// 先于任何模块的同名类被找到。
 const HOME_JAR_DIRS: [&str; 4] = ["middleware", "lib", "framework", "external/lib"];
-
-/// 单个模块下的 jar 目录，顺序照抄 `nc_index.rs`（与 Eclipse 一致）。
-const MODULE_JAR_DIRS: [&str; 6] = [
-    "client/hyext/lib",
-    "client/lib",
-    "hyext/lib",
-    "lib",
-    "META-INF/hyext/lib",
-    "META-INF/lib",
-];
 
 /// manifest 单行字节上限（JAR 规范）。中文路径一个字 3 字节，很容易超，所以必须按字节切。
 const MANIFEST_LINE_LIMIT: usize = 72;
@@ -159,60 +150,19 @@ pub fn middleware_classpath(home: &Path, project_classes: &[PathBuf]) -> Vec<Pat
 
 /// 工程与 NC home 里所有「已编译的类目录」，按 classpath 优先级排列。
 ///
-/// 顺序（与 Eclipse 一致，M0 实测过）：
-/// 1. `<工程根>/<模块>/classes` —— 自己模块的源码输出
-/// 2. `<工程根>/out/<模块>` —— Eclipse 的默认输出目录（多数模块的产物在这里）
-/// 3. 同一工作区其他分组的 `<分组>/<模块>/classes`（如 pm、phm）
-/// 4. `<NC home>/modules/*/classes`
+/// 规则在 `crate::eclipse_cp`：读工程 `.classpath`，主工程 outputs → 声明的依赖闭包
+/// （`exported="true"` 才传递）→ NC home 兜底；没有 `.classpath` 的老工程回落到
+/// 「模块 classes → out/* → bin → 兄弟目录」这套启发式。
 ///
-/// **编译与启动服务必须共用这一份规则**：两边对不上会出「编译通过了、重启后改的类
-/// 不生效」——因为旧 class 从 jar 里加载了。这类问题靠日志几乎查不出来。
+/// 这里曾经自己扫目录（只认 `<模块>/classes` 与 `out/<模块>`、兄弟无条件全收、字典序），
+/// 实测出三个后果：`pm/bin` 的 339 个 class 从没进过类路径、未声明的兄弟工程
+/// 按目录名字母序插队、`newar` 的 18 个同名类压过 `pm`。细节见
+/// `docs/NCForge-多工程关联与启动链路-方案设计-20261031.md` §2–§3。
+///
+/// **编译、启动、语言服务必须共用这一份规则**：三处对不上就会出「编译通过了、重启
+/// 后改的类不生效」——旧 class 从 jar 或另一个工程目录里加载了，靠日志几乎查不出来。
 pub fn project_class_dirs(project_root: &Path, nc_home: &Path) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = std::fs::read_dir(project_root)
-        .map(|rd| {
-            rd.flatten()
-                .map(|e| e.path().join("classes"))
-                .filter(|p| p.is_dir())
-                .collect()
-        })
-        .unwrap_or_default();
-    dirs.sort();
-
-    let mut out_dirs: Vec<PathBuf> = std::fs::read_dir(project_root.join("out"))
-        .map(|rd| {
-            rd.flatten()
-                .map(|e| e.path())
-                .filter(|p| p.is_dir())
-                .collect()
-        })
-        .unwrap_or_default();
-    out_dirs.sort();
-    dirs.extend(out_dirs);
-
-    if let Some(workspace) = project_root.parent() {
-        let mut sibling: Vec<PathBuf> = Vec::new();
-        for group in std::fs::read_dir(workspace)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|e| e.path())
-        {
-            if !group.is_dir() || group == project_root {
-                continue;
-            }
-            for m in std::fs::read_dir(&group).into_iter().flatten().flatten() {
-                let c = m.path().join("classes");
-                if c.is_dir() {
-                    sibling.push(c);
-                }
-            }
-        }
-        sibling.sort();
-        dirs.extend(sibling);
-    }
-
-    dirs.extend(crate::nc_index::module_class_dirs(nc_home));
-    dirs
+    crate::eclipse_cp::class_roots(project_root, nc_home)
 }
 
 /// 拼出中间件的完整启动要素（写好 pathing jar，返回可直接起进程的 `ServerSpec`）。

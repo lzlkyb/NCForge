@@ -109,6 +109,8 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 - 版本控制页新增「维护」面板（顶部齿轮图标）：列出撤销与冲突二选一留下的备份目录（时间、文件数、体积），可单个删或一次清空；同时显示已审标记的总数 / 有效 / 已失效，并提供「清理失效标记」
 
 ### 修复
+- 在关联工程里改了代码却总不生效：以前判断「用哪份编译产物」靠猜目录——会把你没在 Eclipse 里引用的兄弟工程也无条件收进来，谁生效只看目录名字母序（实测 `newar` 的 18 个同名类压过 `pm`），还会漏掉 Eclipse 默认输出目录（实测 `pm/bin` 里 339 个类从没进过类路径）。现在按工程自带的 Eclipse 配置决定「依赖谁、谁先谁后」，改了哪个工程就是哪个工程生效
+- 装过补丁的机器上，补丁里的覆盖类编译时找不到、启动时也加载不到：NC 安装目录里其实有六处散类目录（`hyext/classes`、`client/classes`、`META-INF/classes` 等），以前只扫了其中一处，本机实测漏 148 个类。现在六处都收，且散类排在 jar 之前——补丁覆盖产品类这条路才算通
 - 全应用的通知（toast）从来没显示过：通知容器没挂到应用根上，所有「已复制」「保存失败」这类提示都静默消失，操作成不成功只能靠看界面猜
 - 点问题列表只打开文件、不跳到出错行
 - 切到搜索页再回文件页，已打开的标签页全部消失（标签元数据随页面卸载被清掉）
@@ -139,6 +141,18 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 - 修复启动骨架屏、侧栏品牌、更新弹框里的应用图标一直加载不出来（`/icon.png` 缺 public 目录）
 
 ### 技术细节
+- 2026-10-31 类路径改读 Eclipse `.classpath`（`src/eclipse_cp.rs`，9 个单测）：四条规则——①src 条目
+  缺 `output=` 时回落 `kind="output"`（该行在文件末尾，必须两遍扫描）；②同一 output 被多条 src 共享时去重
+  （`newar` 223 条 src → 35 个目录）；③`path="/X"` 先按兄弟目录名匹配、再按 `.project` 的 `<name>`、
+  最后按 `.metadata` 的 `.projects/X/.location`（`newar/.project` 自称 `ar`，顺序写反就解析失败）；
+  ④`exported="true"` 才继续传递（`EyePortal` 有 95 个类只能经 `pm → newar` 拿到）。`launch::project_class_dirs`
+  签名不变，`compile.rs` / `shadow.rs` / `launch.rs` 三处调用零改动；无 `.classpath` 的老工程回落旧启发式
+  （补扫 `<根>/bin`）。真机验收 `tests/eclipse_cp_live.rs`：`EyePortal → pm → newar` 共 52 个目录
+  = 9 + 8 + 35，`pm/bin`（15 位）压过 `newar/out/uapbd`（46 位）
+- 2026-10-31 NCHOME 散类目录六段全收（`nc_index::MODULE_CLASS_DIRS`）：本机 49 + 60 + 50 + 0 + 1 = 160 个
+  目录、406 个 class（旧实现只收第一段 49/258，漏 148 个二开覆盖类）。`MODULE_JAR_DIRS` 段序改
+  public → client → private（旧序把 client 排最前，实测让 1 个类被标准层抢先），并与 `launch.rs` 收敛成
+  一份 `pub const`——两份各写一套时改一处漏另一处，表现是「编译找得到、启动加载不到」。真机 `tests/nc_class_dirs_live.rs`
 - 2026-10-31 退出前检查未保存文件：`lib/saveAllDirty.ts`（从 `workspaceSession` 取标签，
   挑 `dirty || eolChanged`、跳过 `readOnly` 与 `jdt://` 虚拟标签）+ `lib/fileSave.ts`
   （写盘逻辑从 `useFileSave` 抽成模块级 `saveOne`，退出流程复用同一份，不会两边漂移）。
@@ -160,7 +174,7 @@ gen-changelog.mjs 当成真实版本段解析——该脚本不跳过代码围�
 - 停止用 `taskkill /T /F`：不带 `/F` 对控制台进程发的是 WM_CLOSE，java 没有窗口去收，会白等 3 秒
 - 日志走「offset → 新增字节」，前端每 0.5 秒拉一次增量；状态 1 秒一次，窗口收进托盘时全停
 - classpath 用 pathing jar：7230 个条目拼成字符串约 500KB，超 Windows 命令行 32767 字符上限；写成只有 `META-INF/MANIFEST.MF` 的空 jar，命令行只传 `-cp <jar>`
-- 编译与启动服务共用 `launch::project_class_dirs`（模块 `classes` → `out/<模块>` → 同工作区其他分组 → NC home 的模块 classes），否则会出现「编译过了、启动后加载的还是 jar 里的旧类」
+- 编译与启动服务共用 `launch::project_class_dirs`（工程 `.classpath` 声明的依赖闭包 → NC home 的六段散类目录 → jar；规则在 `eclipse_cp.rs`，见 2026-10-31 那条），否则会出现「编译过了、启动后加载的还是 jar 里的旧类」
 - `AppConfig` 字段是 snake_case（没做 `rename_all`），前端类型与读写统一走 `lib/appConfig.ts`
 - 版本控制页的工作副本是 **format 10**（SVN 1.6 时代每目录一份元数据）：命令行 svn 1.7+ 与 SVNKit 1.8+ 都拒绝打开、只肯让你 upgrade，而 upgrade 不可逆（升完 Eclipse 与同事都打不开）。所以只能内置 **SVNKit 1.3.5**（`ncsvn.jar` + 4 个依赖，共 3.0MB，随包资源）+ 一个 Java 桥
 - 补丁落位规则不是重新发明的：`patch_view.rs` 把 `build-nc-patch.sh`（363 行、已出过十几个正式包）逐条落成纯函数——`ic/pu/so/arap` 四模块一律 hyext 不查 jar，其余模块只查该模块的 hyext jar，命中才升 hyext；并用真实工作副本比对过现有正式包，落位逐条一致
