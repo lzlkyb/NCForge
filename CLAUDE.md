@@ -112,6 +112,16 @@ cargo test --no-default-features     # 含 tests/update_flow.rs：本地假源�
 
 接过一个资源然后什么都不做的空实现，代价不在它自己那一行，而在别的文件里。空实现处**必须写注释说明调用方需要怎么处理**，并优先还回"同步返回值"而不是"默默吃掉资源"。
 
+### 8.3 在本机跑构建 / 测试必须限并发（硬性规则）
+
+开发机 15.8GB 内存，2026-11-01 连续两次 `0x10E VIDEO_MEMORY_MANAGEMENT_INTERNAL` 蓝屏（10-31 另有三次）；显卡 TDR 先于蓝屏 3 分钟发生。高内存压力会放大 iGPU 共享显存上的这类故障，所以**跑重任务时不许把机器顶满**：
+
+1. **同一时间只跑一个重任务**：`cargo test/build/clippy` 与 `vite` / Playwright 不并发；也不许同时开两个 cargo（争同一个 PDB 会报 `LNK1207`，删掉对应 `.pdb` 重跑）。
+2. **显式限并发**：`cargo test -j 2 -- --test-threads=2`，Playwright 保持 headless。
+3. **开跑前看余量**：`powershell.exe -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize | Format-List"`；可用内存低于 **4GB** 先停，等后台任务收干净再跑。
+4. **后台任务完成即收**，不堆积；长任务用后台运行 + 完成通知，不要盲等或轮询。
+5. 用 `| tail` 看输出时，退出码是 `tail` 的——判定构建成败必须看输出里的 `error:` / `test result:`，或单独取 `PIPESTATUS[0]`。
+
 ## 9. 方案设计需考虑用户体验
 
 交互流畅度、反馈及时性、边界状态（加载中 / 空状态 / 错误）。白名单为空、连接失败等场景要有明确引导，不让用户盲猜。

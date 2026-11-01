@@ -108,6 +108,13 @@ export function RightPane({
     );
   }
 
+  // 历史放在目录 / 已删除之前：这两种状态也提供「看历史」，以前分支顺序把它们
+  // 挡在外面，按钮点了没反应。目录的 log 由后端按路径查，已删除/缺失的条目
+  // 仍在版本控制里（D / !），同样查得到。
+  if (mode === "log") {
+    return <HistoryView path={file.path} title={file.rel} onBack={() => onMode("diff")} />;
+  }
+
   if (file.isDir) {
     return (
       <section className="vc-main">
@@ -160,10 +167,6 @@ export function RightPane({
         </div>
       </section>
     );
-  }
-
-  if (mode === "log") {
-    return <HistoryView path={file.path} title={file.rel} onBack={() => onMode("diff")} />;
   }
 
   if (mode === "blame") {

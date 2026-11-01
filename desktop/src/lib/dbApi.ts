@@ -388,6 +388,8 @@ export interface ExportFileOut {
   bytes: number;
   /** 到行数上限还有剩余：文件不是全量。 */
   truncated: boolean;
+  /** 用户中途取消：文件里是已写入的合法前缀，但不是全量。 */
+  canceled: boolean;
   ms: number;
 }
 
@@ -438,6 +440,8 @@ export const dbApi = {
    * 进度走 `db:export-progress` 事件；返回落盘路径，界面用 `revealExport` 定位。
    */
   exportFile: (req: ExportFileReq) => invoke<ExportFileOut>("db_export_file", { req }),
+  /** 请求停止正在进行的流式导出；当前页写完后生效，已写入内容保留。 */
+  cancelExport: () => invoke<void>("db_export_cancel"),
   /** 在系统文件管理器里定位刚导出的文件（只允许导出目录内的路径）。 */
   revealExport: (path: string) => invoke<void>("db_export_reveal", { path }),
 

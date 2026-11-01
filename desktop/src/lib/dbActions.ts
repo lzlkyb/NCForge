@@ -78,8 +78,19 @@ export async function requestCloseTab(tabId: string) {
   if (tab.kind === "sql") disposeSqlModel(tabId);
 }
 
+/** 断开/删除连接前：primary 与这条连接上所有 SQL 标签的槽都要问一遍。 */
+async function guardAllSessions(connId: string, reason: string): Promise<boolean> {
+  if (!(await guardTx(connId, reason))) return false;
+  for (const t of getDb().tabs) {
+    if (t.connId !== connId || t.kind !== "sql") continue;
+    if (!(await guardSlotTx(connId, t.slot, reason))) return false;
+  }
+  return true;
+}
+
 export async function disconnectConn(connId: string) {
-  if (!(await guardTx(connId, "断开连接"))) return;
+  // 只问 primary 会漏掉槽里的未提交写入——后端断开时会把槽一起收掉。
+  if (!(await guardAllSessions(connId, "断开连接"))) return;
   await disconnect(connId);
   // 后端已经把槽一并收掉；前端要把标签上的槽名清掉，否则下次执行会打到不存在的会话
   clearSlots(connId);
@@ -90,7 +101,7 @@ export async function deleteConn(connId: string) {
   const c = connOf(connId);
   if (!c) return;
   const ok = await ask("删除连接", `删除「${c.name}」？存在本机的口令一并删掉；用它的 SQL 标签会变成「未选连接」。`, "删除", true);
-  if (!ok || !(await guardTx(connId, "删除连接"))) return;
+  if (!ok || !(await guardAllSessions(connId, "删除连接"))) return;
   try {
     setConns(await dbApi.remove(connId));
     clearSlots(connId);

@@ -44,6 +44,11 @@ export function toast(message: string, variant: ToastVariant = "info") {
 
 let toastId = 0;
 const TOAST_LIFETIME = 3500;
+/**
+ * 同屏最多几条。批量操作时每个失败都弹一条，堆到七八条会把编辑区右下角糊死；
+ * 最新的几条才是用户此刻要看的。
+ */
+const MAX_TOASTS = 4;
 
 // 文字用 -ink 变体：基础语义色在 12–14px 淡底上只有 2.3–3.8:1（浅色），不达 AA 4.5:1。
 // info 走 primary（浅色 5.33:1）本就达标，故保持基础色。
@@ -81,12 +86,28 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const addToast = useCallback((message: string, variant: ToastVariant = "info") => {
     const id = ++toastId;
-    setToasts((prev) => [...prev, { id, message, variant }]);
+    setToasts((prev) => {
+      // 同一条消息只留最新一份（连点「重试」会刷出一屏一模一样的通知）；
+      // 换新 id 让倒计时与进场动画重新开始，而不是静默续期
+      const rest = prev.filter((t) => t.message !== message || t.variant !== variant);
+      const next = [...rest, { id, message, variant }];
+      return next.length > MAX_TOASTS ? next.slice(next.length - MAX_TOASTS) : next;
+    });
   }, []);
 
   const removeToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  // 批量失败时用户最想要的是「把这一串贴给同事/日志」，逐条复制不现实。
+  const errors = toasts.filter((t) => t.variant === "error");
+  const copyAllErrors = useCallback(() => {
+    const text = errors.map((t) => t.message).join("\n");
+    navigator.clipboard.writeText(text).then(
+      () => addToast(`已复制 ${errors.length} 条错误`, "success"),
+      () => addToast("复制失败：剪贴板不可用", "error"),
+    );
+  }, [errors, addToast]);
 
   // 将实现暴露给模块级单例（供非组件调用，如 invokeOrToast）
   useEffect(() => {
@@ -105,6 +126,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         aria-label="通知"
         aria-live="polite"
       >
+        {errors.length > 0 && (
+          <div className="pointer-events-auto flex justify-end">
+            <button
+              type="button"
+              onClick={copyAllErrors}
+              className="rounded-full border border-border bg-card/95 px-3 py-1 text-xs font-medium text-muted-foreground shadow-pop backdrop-blur-md transition-colors hover:text-foreground"
+            >
+              复制全部错误（{errors.length}）
+            </button>
+          </div>
+        )}
         {toasts.map((t) => (
           // FLIP 只移动槽位，避免覆盖通知自身的 transform 进退场。
           <div key={t.id}><ToastItemView item={t} onDismiss={removeToast} /></div>

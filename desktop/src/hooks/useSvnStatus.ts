@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   keyOf,
   onSvnScanProgress,
@@ -26,6 +26,7 @@ import {
  * 显示「已审」，用户据此跳过审查直接提交。因此每次扫描结果一到就清空覆盖层。
  */
 export function useSvnStatus() {
+  const qc = useQueryClient();
   const [overrides, setOverrides] = useState<Map<string, boolean>>(() => new Map());
   /** 本次扫描已走过的条目数（桥每 300 条推一次）；null = 没有进行中的扫描。 */
   const [scanProgress, setScanProgress] = useState<number | null>(null);
@@ -73,8 +74,12 @@ export function useSvnStatus() {
    */
   const refresh = useCallback(async (): Promise<StatusResult | undefined> => {
     const [, s] = await Promise.all([info.refetch(), status.refetch()]);
+    // 更新 / 提交 / 撤销 / 解决冲突之后，右侧对比与追溯读的都是盘上的旧内容：
+    // 不失效就会一直显示「改动前」的差异，用户以为动作没生效
+    void qc.invalidateQueries({ queryKey: ["svn-diff"] });
+    void qc.invalidateQueries({ queryKey: ["svn-blame"] });
     return s.data;
-  }, [status, info]);
+  }, [status, info, qc]);
 
   // 扫描进度：只在扫描进行中订阅（扫完就退订，桥那边不再推）。
   // 7.6 秒里界面只有一个转圈图标时，用户分不清「在跑」和「卡死」。

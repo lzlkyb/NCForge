@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { ToolTab } from "./ToolTab";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -41,6 +41,36 @@ export function TabStrip({
 }) {
   const dock = useWorkbenchDock();
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  const tabRefs = useRef(new Map<string, HTMLDivElement>());
+  /** 漫游 tabIndex：整组标签只占一个 Tab 停靠点，组内用方向键移动（WAI-ARIA tabs 模式）。 */
+  const activeIndex = tabs.findIndex((t) => t.path === activePath);
+  const rovingIndex = !dock?.documentOpen && activeIndex >= 0 ? activeIndex : 0;
+
+  const onTabKey = (e: ReactKeyboardEvent<HTMLDivElement>, i: number, path: string) => {
+    const last = tabs.length - 1;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onSelect(path);
+      dock?.showCode();
+      return;
+    }
+    if (e.key === "Delete") {
+      e.preventDefault();
+      onClose(path);
+      return;
+    }
+    let next = -1;
+    if (e.key === "ArrowRight") next = i >= last ? 0 : i + 1;
+    else if (e.key === "ArrowLeft") next = i <= 0 ? last : i - 1;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = last;
+    if (next < 0) return;
+    e.preventDefault();
+    const target = tabs[next];
+    onSelect(target.path);
+    dock?.showCode();
+    tabRefs.current.get(target.path)?.focus();
+  };
 
   const closeMany = (want: (t: TabMeta, index: number) => boolean) => {
     const kept = onCloseMany(want);
@@ -68,17 +98,22 @@ export function TabStrip({
 
   return (
     <div className="wb-tabs" role="tablist">
-      {tabs.map((t) => (
+      {tabs.map((t, i) => (
         <div
           key={t.path}
+          ref={(node) => {
+            if (node) tabRefs.current.set(t.path, node);
+            else tabRefs.current.delete(t.path);
+          }}
           role="tab"
           aria-selected={!dock?.documentOpen && t.path === activePath}
+          aria-controls="wb-code-surface"
           className="wb-tab"
           data-active={(!dock?.documentOpen && t.path === activePath) || undefined}
           data-preview={t.preview || undefined}
           title={t.preview ? `${t.path}\n（预览标签，双击或开始编辑后固定）` : t.path}
-          tabIndex={0}
-          onKeyDown={e => { if(e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(t.path); dock?.showCode(); } }}
+          tabIndex={i === rovingIndex ? 0 : -1}
+          onKeyDown={e => onTabKey(e, i, t.path)}
           onClick={() => { onSelect(t.path); dock?.showCode(); }}
           onDoubleClick={() => onPin(t.path)}
           onAuxClick={(e) => e.button === 1 && onClose(t.path)}

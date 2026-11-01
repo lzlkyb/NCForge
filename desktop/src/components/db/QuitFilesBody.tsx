@@ -46,7 +46,7 @@ export function FilesBody({ p }: { p: Extract<Pending, { kind: "unsavedFiles" }>
               </li>
             ))}
           </ul>
-          <p className="dbx-muted">现在退出，这些文件的修改会丢失。建议回编辑器处理后再关窗。</p>
+          <p className="dbx-muted">现在{p.action}，这些文件的修改会丢失。建议回编辑器处理完再继续。</p>
         </div>
         <div className="ft">
           <span className="dbx-sp" />
@@ -54,7 +54,7 @@ export function FilesBody({ p }: { p: Extract<Pending, { kind: "unsavedFiles" }>
             返回编辑器处理
           </button>
           <button type="button" className="dbx-btn bad" onClick={() => settle((x) => x.kind === "unsavedFiles" && x.resolve("discard"))}>
-            不保存并退出
+            不保存并{p.action}
           </button>
         </div>
       </>
@@ -66,10 +66,10 @@ export function FilesBody({ p }: { p: Extract<Pending, { kind: "unsavedFiles" }>
     <>
       <div className="hd">
         <Icon name="alertTriangle" size={16} />
-        退出前有 {p.files.length} 个文件未保存
+        {p.action}前有 {p.files.length} 个文件未保存
       </div>
       <div className="bd one">
-        <p style={{ marginBottom: 6 }}>这些文件改过但还没写到磁盘，现在退出改动会丢失。</p>
+        <p style={{ marginBottom: 6 }}>这些文件改过但还没写到磁盘，现在{p.action}改动会丢失。</p>
         <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, maxHeight: 168, overflowY: "auto" }}>
           {p.files.map((f) => (
             <li key={f.path} className="dbx-mono" title={f.path}>
@@ -85,10 +85,10 @@ export function FilesBody({ p }: { p: Extract<Pending, { kind: "unsavedFiles" }>
           取消
         </button>
         <button type="button" className="dbx-btn bad" disabled={busy} onClick={() => settle((x) => x.kind === "unsavedFiles" && x.resolve("discard"))}>
-          不保存并退出
+          不保存并{p.action}
         </button>
         <button type="button" className="dbx-btn pri" disabled={busy} onClick={() => void saveAndExit()}>
-          {busy ? `正在保存 ${progress.done}/${progress.total}` : "保存全部并退出"}
+          {busy ? `正在保存 ${progress.done}/${progress.total}` : `保存全部并${p.action}`}
         </button>
       </div>
     </>

@@ -10,6 +10,11 @@ import { Button } from "./ui/button";
  */
 interface Props {
   children: ReactNode;
+  /**
+   * 值一变就清掉崩溃态（例如当前页面 id）。页面崩了不应该连累整个工作台：
+   * 侧栏还在，用户点别的页照样能继续用——不能逼他先「完全刷新」。
+   */
+  resetKey?: string;
 }
 
 interface State {
@@ -26,6 +31,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[ErrorBoundary]", error, info);
+  }
+
+  componentDidUpdate(prev: Props) {
+    if (this.state.hasError && prev.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, error: undefined });
+    }
   }
 
   handleRetry = () => {

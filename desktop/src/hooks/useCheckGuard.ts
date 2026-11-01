@@ -23,6 +23,12 @@ export function useCheckGuard(chosenKey: string) {
     setArmed(false);
   }, [chosenKey]);
 
+  // 核对结果被清掉（含切页时 TableCheck 卸载回调 onResult(null)）也必须退掉确认态：
+  // 否则切回来点一次就出包，二次确认被绕过。
+  useEffect(() => {
+    if (!check) setArmed(false);
+  }, [check]);
+
   const tablesMissing = check?.missingTables ?? 0;
   return { check, setCheck, armed, setArmed, tablesMissing };
 }

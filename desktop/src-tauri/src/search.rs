@@ -342,6 +342,7 @@ pub fn search(root: &Path, opts: &SearchOptions) -> Result<SearchOutcome, String
             .clamp(2, 8)
     };
 
+    let mut panicked = false;
     let mut batches: Vec<Vec<SearchHit>> = std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(threads);
         for _ in 0..threads {
@@ -380,7 +381,14 @@ pub fn search(root: &Path, opts: &SearchOptions) -> Result<SearchOutcome, String
         }
         handles
             .into_iter()
-            .map(|h| h.join().unwrap_or_default())
+            .map(|h| {
+                // worker panic（bug 或 OOM）不能吞成「成功」：它扫过的那批文件
+                // 会从结果里凭空消失，却报告搜索完成。至少让 truncated 说实话
+                h.join().unwrap_or_else(|_| {
+                    panicked = true;
+                    Vec::new()
+                })
+            })
             .collect()
     });
 
@@ -408,7 +416,7 @@ pub fn search(root: &Path, opts: &SearchOptions) -> Result<SearchOutcome, String
         hits,
         files_scanned: scanned.load(Ordering::Relaxed),
         files_matched,
-        truncated: capped || stop.load(Ordering::Relaxed) || walk_truncated,
+        truncated: capped || stop.load(Ordering::Relaxed) || walk_truncated || panicked,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
 }
@@ -994,5 +1002,611 @@ mod tests {
         assert!(!o.whole_word);
         assert!(o.include.is_empty());
         assert_eq!(o.max_results, 0);
+    }
+}
+
+// ───────────────────── 替换 ─────────────────────
+
+/// 「全部替换」的时间预算。
+///
+/// 比搜索的 20 秒宽：替换是**写操作**，跑到一半停下来会变成「改了一半」，
+/// 比多等一会儿难查得多。仍要设上限——机械盘上一次全量可能几分钟，不能无限等。
+const REPLACE_TIME_BUDGET_MS: u128 = 60_000;
+
+/// 一次「全部替换」的汇总。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceOutcome {
+    /// 实际被改写的文件数。
+    pub files_changed: usize,
+    /// 替换了多少处。
+    pub replacements: usize,
+    /// 实际读过的文件数。
+    pub files_scanned: usize,
+    /// 编码无法无损往返或换行混合、被跳过的文件数。
+    ///
+    /// 跳过而不是硬改：按检测出的编码写回去，会让原文件里原本就有的「乱码字节」
+    /// 被规范化，等于顺手破坏了别人的文件。宁可不改 + 报出来。
+    pub skipped_unsafe: usize,
+    /// 读写失败的文件（路径 + 原因）。只留前若干条，够定位就行。
+    pub errors: Vec<String>,
+    /// 是否因预算提前结束（此时「没改的文件」不代表「没有匹配」）。
+    pub truncated: bool,
+    pub elapsed_ms: u64,
+}
+
+impl Matcher {
+    /// 把一行里的命中全部替换掉；没有命中返回 `None`（省掉一次字符串重建）。
+    /// 返回 `(新行, 处数)`。`replacement` 必须是过过 [`escape_replacement`] 的。
+    fn replace_line(&self, line: &str, replacement: &str) -> Option<(String, usize)> {
+        match self {
+            Matcher::Plain {
+                needle,
+                case_sensitive,
+                whole_word,
+            } => {
+                let spans = plain_spans(line, needle, *case_sensitive, *whole_word, usize::MAX);
+                if spans.is_empty() {
+                    return None;
+                }
+                let n = spans.len();
+                // with_capacity 只是提示：命中数 × 替换串长度可能是个天文数字
+                // （4MB 的压缩单行里能命中几百万次），算出来的容量会把分配器直接
+                // 打爆。封顶后按需增长——真需要那么大内存时该失败的是字符串本身，
+                // 不是一次容量提示。
+                let cap = line
+                    .len()
+                    .saturating_add(replacement.len().saturating_mul(n.min(1024)));
+                let mut out = String::with_capacity(cap);
+                let mut last = 0usize;
+                for (s, e) in &spans {
+                    out.push_str(&line[last..*s]);
+                    out.push_str(replacement);
+                    last = *e;
+                }
+                out.push_str(&line[last..]);
+                Some((out, n))
+            }
+            Matcher::Re(re) => {
+                if !re.is_match(line) {
+                    return None;
+                }
+                // 正则在**每行内**做替换，不跨行：跨行的工作由用户自己写 (?s)，
+                // 这里保持与搜索（逐行扫描）一致的口径，否则「替换的」和「搜到的」不一样多。
+                let n = re.find_iter(line).count();
+                Some((re.replace_all(line, replacement).into_owned(), n))
+            }
+        }
+    }
+
+    /// 把用户写的替换串过一遍安全转义（仅正则需要：纯文本模式 `$` 没有特殊含义）。
+    fn escape_replacement(&self, rep: &str) -> String {
+        match self {
+            Matcher::Plain { .. } => rep.to_string(),
+            Matcher::Re(re) => escape_replacement(re, rep),
+        }
+    }
+}
+
+/// 把用户写的替换串转成 `regex` crate 能安全消费的形式。
+///
+/// `replace_all` 的替换串里 `$1` / `${name}` 是分组引用，且**指向不存在组的引用
+/// 会被静默替换成空串**——用户在替换框里打一个字面 `$`（价格、`$变量`）就被吃掉了。
+/// 这里只放行指向存在组的引用，其余一律转义成字面量（`$$`）。
+///
+/// 解析口径与 crate 的 `find_cap_ref` 保持一致（先数字后名称、`{}` 必须闭合），
+/// 否则同一串文本会在「我们觉得合法」与「crate 实际怎么解」之间打架。
+fn escape_replacement(re: &regex::Regex, rep: &str) -> String {
+    // 合法数字组上标（0 号组是整匹配，也算合法引用）
+    let max_group = re.captures_len().saturating_sub(1);
+    let names: Vec<&str> = re.capture_names().flatten().collect();
+    let bytes = rep.as_bytes();
+    let mut out = String::with_capacity(rep.len() + 4);
+    let mut i = 0usize;
+    while i < bytes.len() {
+        // 非 `$` 片段整段拷贝（`$` 是 ASCII，字节下标即字符边界）
+        match rep[i..].find('$') {
+            None => {
+                out.push_str(&rep[i..]);
+                break;
+            }
+            Some(off) => {
+                out.push_str(&rep[i..i + off]);
+                i += off;
+            }
+        }
+        let after = i + 1;
+        match bytes.get(after) {
+            // 末尾的 `$`：crate 会把它吞掉，转义成字面
+            None => {
+                out.push_str("$$");
+                i = after;
+            }
+            // `$$` 本来就是字面 `$` 的转义，原样保留
+            Some(b'$') => {
+                out.push_str("$$");
+                i = after + 1;
+            }
+            Some(_) => {
+                let (end, valid) = parse_group_ref(bytes, after, max_group, &names);
+                if valid {
+                    out.push_str(&rep[i..end]);
+                } else {
+                    out.push_str("$$");
+                    out.push_str(&rep[after..end]);
+                }
+                i = end;
+            }
+        }
+    }
+    out
+}
+
+/// 解析 `$` 之后的组引用，返回 `(引用结束的字节下标, 是否是合法引用)`。
+/// 非法时结束下标可能等于 `start`（如 `$` 后跟空格），调用方据此只转义 `$` 本身。
+fn parse_group_ref(bytes: &[u8], start: usize, max_group: usize, names: &[&str]) -> (usize, bool) {
+    let mut i = start;
+    let brace = bytes.get(i) == Some(&b'{');
+    if brace {
+        i += 1;
+    }
+    let valid = if matches!(bytes.get(i), Some(b) if b.is_ascii_digit()) {
+        // 数字引用：取最长数字串（`$12` 是组 12，不是组 1 后跟 '2'）
+        let mut num = 0usize;
+        while let Some(&b) = bytes.get(i) {
+            if b.is_ascii_digit() {
+                num = num.saturating_mul(10).saturating_add((b - b'0') as usize);
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        num <= max_group
+    } else {
+        // 名称引用：`[0-9A-Za-z_]` 最长串
+        let mut name = String::new();
+        while let Some(&b) = bytes.get(i) {
+            if b.is_ascii_alphanumeric() || b == b'_' {
+                name.push(b as char);
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        !name.is_empty() && names.contains(&name.as_str())
+    };
+    if brace {
+        // `${` 不闭合：整个不算引用（crate 的 find_cap_ref 返回 None，
+        // 效果是 `$` 按字面输出、后面原样跟着）
+        if bytes.get(i) != Some(&b'}') {
+            return (start, false);
+        }
+        i += 1;
+    }
+    (i, valid)
+}
+
+/// 单个文件的替换结果。
+enum FileOutcome {
+    /// 改了几处。
+    Changed(usize),
+    /// 没有命中。
+    Same,
+    /// 编码 / 换行不安全，主动跳过。
+    Unsafe,
+}
+
+fn replace_in_file(
+    path: &Path,
+    matcher: &Matcher,
+    replacement: &str,
+) -> Result<FileOutcome, String> {
+    let c = match workspace::read_text_file(path) {
+        Ok(c) => c,
+        // 二进制文件（扩展名不在名单上、内容含 NUL）归到「主动跳过」而不是错误：
+        // 一个工程里几百个这种文件会把 20 条错误名额占满，把真正的权限/占用错误
+        // 挤到看不到的地方
+        Err(e) if workspace::is_binary_read_error(&e) => return Ok(FileOutcome::Unsafe),
+        Err(e) => return Err(e),
+    };
+    // 混合换行、或编码无法无损往返的文件不改：按检测结果写回去会顺手改动原本的字节。
+    // 这不是「替换」该有的副作用，宁可跳过并报数。
+    if c.eol == workspace::Eol::Mixed || !c.lossless {
+        return Ok(FileOutcome::Unsafe);
+    }
+    let mut changed = 0usize;
+    let mut new_len = 0usize;
+    let mut lines: Vec<String> = Vec::new();
+    for line in c.text.split('\n') {
+        match matcher.replace_line(line, replacement) {
+            Some((l, n)) => {
+                changed += n;
+                new_len += l.len();
+                lines.push(l);
+            }
+            None => {
+                new_len += line.len();
+                lines.push(line.to_string());
+            }
+        }
+    }
+    if changed == 0 {
+        return Ok(FileOutcome::Same);
+    }
+    // 替换把文件撑到编辑器自己都打不下的大小就跳过：这种「替换」实质是内容生成，
+    // 且产物在本工具里没法再编辑。判定放在写盘前，跳过后磁盘上还是原样。
+    if new_len as u64 > workspace::MAX_FILE_BYTES {
+        return Ok(FileOutcome::Unsafe);
+    }
+    // 用读到的 mtime 做期望值：中途被别的程序改过就报 CONFLICT，而不是覆盖别人的改动
+    workspace::write_text_file(
+        path,
+        &lines.join("\n"),
+        c.encoding,
+        c.has_bom,
+        c.eol,
+        Some(c.mtime_ms),
+    )?;
+    Ok(FileOutcome::Changed(changed))
+}
+
+/// 在工作区内替换。候选收集与搜索同一套（同样的目录跳过、掩码、大小上限），
+/// 因此「替换」覆盖的范围与「搜索」完全一致——人看到的结果就是会被改的范围。
+pub fn replace(
+    root: &Path,
+    opts: &SearchOptions,
+    replacement: &str,
+) -> Result<ReplaceOutcome, String> {
+    // 与 search() 同一道空词校验：否则「全部替换」对空搜索词什么都不做，
+    // 用户以为点了没反应（搜索那边至少会报错）
+    let needle = if opts.regex {
+        opts.text.as_str()
+    } else {
+        opts.text.trim()
+    };
+    if needle.trim().is_empty() {
+        return Err("搜索词为空".to_string());
+    }
+    let matcher = Matcher::build(opts)?;
+    // 正则模式下 $1/${name} 是分组引用，指向不存在组的引用会被静默替换成空串
+    // （用户在替换框里打的字面 $ 会被吃掉）。先整串转义一遍：只放行合法引用。
+    let replacement = matcher.escape_replacement(replacement);
+    let filter = FileFilter::parse(&opts.include);
+    let started = Instant::now();
+    let (candidates, walk_truncated) = collect_candidates(root, &filter, started);
+
+    let cursor = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+
+    // 写操作按文件互不相交，并行安全。线程数与搜索一致（盘快线程才有意义）
+    let threads = if candidates.len() < 64 {
+        1
+    } else {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .clamp(2, 8)
+    };
+
+    struct Totals {
+        files_changed: usize,
+        replacements: usize,
+        scanned: usize,
+        skipped: usize,
+        errors: Vec<String>,
+    }
+
+    let mut panicked = false;
+    let mut batches: Vec<Totals> = std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(threads);
+        for _ in 0..threads {
+            handles.push(scope.spawn(|| {
+                let mut t = Totals {
+                    files_changed: 0,
+                    replacements: 0,
+                    scanned: 0,
+                    skipped: 0,
+                    errors: Vec::new(),
+                };
+                loop {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let idx = cursor.fetch_add(1, Ordering::Relaxed);
+                    let Some((path, _rel)) = candidates.get(idx) else {
+                        break;
+                    };
+                    if started.elapsed().as_millis() > REPLACE_TIME_BUDGET_MS {
+                        stop.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    match replace_in_file(path, &matcher, &replacement) {
+                        Ok(FileOutcome::Changed(n)) => {
+                            t.files_changed += 1;
+                            t.replacements += n;
+                        }
+                        Ok(FileOutcome::Unsafe) => t.skipped += 1,
+                        Ok(FileOutcome::Same) => {}
+                        Err(e) => {
+                            // 错误只留前 20 条：一次替换里成百上千个同类错误没有信息量
+                            if t.errors.len() < 20 {
+                                t.errors.push(format!("{}: {e}", path.display()));
+                            }
+                        }
+                    }
+                    t.scanned += 1;
+                }
+                t
+            }));
+        }
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join().unwrap_or_else(|_| {
+                    // worker panic（bug 或 OOM）不能吞成「成功」：它那份文件的计数
+                    // 会凭空消失，汇总却报告替换完成。至少让 truncated 与 errors 说实话
+                    panicked = true;
+                    Totals {
+                        files_changed: 0,
+                        replacements: 0,
+                        scanned: 0,
+                        skipped: 0,
+                        errors: Vec::new(),
+                    }
+                })
+            })
+            .collect()
+    });
+
+    let mut files_changed_n = 0usize;
+    let mut replacements_n = 0usize;
+    let mut scanned_n = 0usize;
+    let mut skipped_n = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+    for t in batches.iter_mut() {
+        files_changed_n += t.files_changed;
+        replacements_n += t.replacements;
+        scanned_n += t.scanned;
+        skipped_n += t.skipped;
+        errors.append(&mut t.errors);
+    }
+    if panicked {
+        errors.push("内部错误：有替换线程异常退出，结果可能不完整".to_string());
+    }
+    errors.truncate(20);
+
+    Ok(ReplaceOutcome {
+        files_changed: files_changed_n,
+        replacements: replacements_n,
+        files_scanned: scanned_n,
+        skipped_unsafe: skipped_n,
+        errors,
+        truncated: stop.load(Ordering::Relaxed) || walk_truncated || panicked,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+#[cfg(test)]
+mod replace_tests {
+    use super::*;
+    use std::fs;
+
+    fn opts(text: &str) -> SearchOptions {
+        SearchOptions {
+            text: text.to_string(),
+            case_sensitive: false,
+            whole_word: false,
+            regex: false,
+            include: String::new(),
+            max_results: 0,
+        }
+    }
+
+    fn tmpdir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ncf-replace-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn 纯文本替换_多文件多行() {
+        let root = tmpdir("plain");
+        fs::write(
+            root.join("A.java"),
+            "class A {\n  void save() {}\n  void run() { save(); }\n}\n",
+        )
+        .unwrap();
+        fs::write(root.join("B.java"), "int save = 1;\n").unwrap();
+        fs::create_dir_all(root.join(".svn")).unwrap();
+        fs::write(root.join(".svn/S.java"), "save save save").unwrap();
+
+        let out = replace(&root, &opts("save"), "persist").unwrap();
+        assert_eq!(out.files_changed, 2);
+        // A.java 两处（第 2、3 行）+ B.java 一处
+        assert_eq!(out.replacements, 3);
+        assert!(out.errors.is_empty());
+        let a = fs::read_to_string(root.join("A.java")).unwrap();
+        assert_eq!(
+            a,
+            "class A {\n  void persist() {}\n  void run() { persist(); }\n}\n"
+        );
+        let b = fs::read_to_string(root.join("B.java")).unwrap();
+        assert_eq!(b, "int persist = 1;\n");
+        // .svn 是版本库元数据，不动
+        assert_eq!(
+            fs::read_to_string(root.join(".svn/S.java")).unwrap(),
+            "save save save"
+        );
+    }
+
+    #[test]
+    fn 大小写不敏感默认命中() {
+        let root = tmpdir("case");
+        fs::write(root.join("A.java"), "int FOO = 1;\n").unwrap();
+        let out = replace(&root, &opts("foo"), "bar").unwrap();
+        assert_eq!(out.replacements, 1);
+        assert_eq!(
+            fs::read_to_string(root.join("A.java")).unwrap(),
+            "int bar = 1;\n"
+        );
+    }
+
+    #[test]
+    fn 整词模式不误伤更长标识符() {
+        let root = tmpdir("word");
+        fs::write(root.join("A.java"), "save(saved);\n").unwrap();
+        let mut o = opts("save");
+        o.whole_word = true;
+        let out = replace(&root, &o, "persist").unwrap();
+        // 只有独立的 save 命中：saved 是更长标识符，整词模式必须放过它。
+        // （这条期望值曾经写错过一次——写成 2 处、断言 persist(persisted)，那是把
+        //   「不误伤」的测试写成了「误伤才对」。改期望前先想清楚要的是什么行为。）
+        assert_eq!(out.replacements, 1);
+        assert_eq!(
+            fs::read_to_string(root.join("A.java")).unwrap(),
+            "persist(saved);\n"
+        );
+    }
+
+    #[test]
+    fn 正则支持分组引用() {
+        let root = tmpdir("regex");
+        fs::write(root.join("A.java"), "String a = \"x\";\n").unwrap();
+        let mut o = opts("\"([a-z]+)\"");
+        o.regex = true;
+        let out = replace(&root, &o, "'$1'").unwrap();
+        assert_eq!(out.replacements, 1);
+        assert_eq!(
+            fs::read_to_string(root.join("A.java")).unwrap(),
+            "String a = 'x';\n"
+        );
+    }
+
+    /// `replace_all` 会把指向不存在组的 `$引用` 静默替换成空串——用户在替换框里
+    /// 打的字面 `$`（价格、`$变量`）就这样被吃掉了。转义后必须按字面输出。
+    #[test]
+    fn 正则替换_字面美元符号不被吞掉() {
+        let root = tmpdir("dollar");
+        fs::write(root.join("A.java"), "price = 10;\n").unwrap();
+        let mut o = opts("price");
+        o.regex = true;
+        let out = replace(&root, &o, "$price").unwrap();
+        assert_eq!(out.replacements, 1);
+        assert_eq!(
+            fs::read_to_string(root.join("A.java")).unwrap(),
+            "$price = 10;\n"
+        );
+    }
+
+    #[test]
+    fn 正则替换_越界与不闭合引用按字面输出() {
+        let root = tmpdir("oor");
+        fs::write(root.join("A.java"), "a\n").unwrap();
+        let mut o = opts("(a)");
+        o.regex = true;
+        // 只有 1 个组，$2 越界：按字面写 $2，不是静默删掉
+        let out = replace(&root, &o, "$2").unwrap();
+        assert_eq!(out.replacements, 1);
+        assert_eq!(fs::read_to_string(root.join("A.java")).unwrap(), "$2\n");
+        // ${1 不闭合：$ 与后续字符都按字面（原文恢复，两次替换互不相干）
+        fs::write(root.join("A.java"), "a\n").unwrap();
+        let out = replace(&root, &o, "${1").unwrap();
+        assert_eq!(out.replacements, 1);
+        assert_eq!(fs::read_to_string(root.join("A.java")).unwrap(), "${1\n");
+    }
+
+    #[test]
+    fn 替换串转义_只放行合法组引用() {
+        let re = regex::Regex::new(r"(a)(?P<mid>b)").unwrap();
+        assert_eq!(escape_replacement(&re, "$1-$2"), "$1-$2", "合法引用原样");
+        assert_eq!(escape_replacement(&re, "$3"), "$$3", "越界数字组转义");
+        assert_eq!(escape_replacement(&re, "${mid}"), "${mid}", "命名组原样");
+        assert_eq!(
+            escape_replacement(&re, "${nope}"),
+            "$${nope}",
+            "不存在的命名组转义"
+        );
+        assert_eq!(escape_replacement(&re, "$"), "$$", "末尾的 $ 转义");
+        assert_eq!(escape_replacement(&re, "a$ b"), "a$$ b", "$ 后跟空格转义");
+        assert_eq!(
+            escape_replacement(&re, "$$1"),
+            "$$1",
+            "$$ 保留（它本就是字面 $ 的转义）"
+        );
+        assert_eq!(
+            escape_replacement(&re, "${1"),
+            "$${1",
+            "不闭合花括号只转义 $"
+        );
+        assert_eq!(escape_replacement(&re, "50$"), "50$$", "价格场景");
+    }
+
+    /// 与 search() 同一道空词校验：替换对空搜索词什么都不做的话，
+    /// 用户会以为「全部替换」按钮没反应。
+    #[test]
+    fn 空搜索词替换报错() {
+        let root = tmpdir("empty");
+        fs::write(root.join("A.java"), "foo\n").unwrap();
+        let err = replace(&root, &opts("   "), "x").unwrap_err();
+        assert!(err.contains("为空"), "实际：{err}");
+        assert_eq!(fs::read_to_string(root.join("A.java")).unwrap(), "foo\n");
+    }
+
+    /// 含 NUL 的文件（扩展名不在二进制名单上）归到「主动跳过」而不是错误：
+    /// 否则一个工程里几百个这种文件会占满 20 条错误名额。
+    #[test]
+    fn 二进制内容按跳过处理不占错误名额() {
+        let root = tmpdir("bin");
+        fs::write(root.join("A.bin.txt"), b"foo\x00bar\n").unwrap();
+        fs::write(root.join("B.java"), "foo\n").unwrap();
+        let out = replace(&root, &opts("foo"), "bar").unwrap();
+        assert_eq!(out.files_changed, 1, "只有 B.java 被改");
+        assert_eq!(out.skipped_unsafe, 1, "二进制文件计入跳过");
+        assert!(out.errors.is_empty(), "二进制不算错误");
+        assert_eq!(
+            fs::read(root.join("A.bin.txt")).unwrap(),
+            b"foo\x00bar\n",
+            "原文一个字节都没动"
+        );
+    }
+
+    /// 替换把文件撑到编辑器自己都打不下的大小（>10MB）就跳过：那种「替换」
+    /// 实质是内容生成，产物在本工具里没法再编辑。
+    #[test]
+    fn 替换产物体积过大时跳过不改() {
+        let root = tmpdir("balloon");
+        let path = root.join("A.java");
+        fs::write(&path, "a".repeat(200_000)).unwrap();
+        // 20 万处命中 × 60 字节 ≈ 12MB，超过 10MB 上限
+        let out = replace(path.parent().unwrap(), &opts("a"), &"b".repeat(60)).unwrap();
+        assert_eq!(out.files_changed, 0);
+        assert_eq!(out.skipped_unsafe, 1);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "a".repeat(200_000));
+    }
+
+    #[test]
+    fn 混合换行的文件跳过不改() {
+        let root = tmpdir("mixed");
+        let path = root.join("A.java");
+        fs::write(&path, b"a\r\nsave\r\nb\nsave\n").unwrap();
+        let out = replace(&root, &opts("save"), "persist").unwrap();
+        assert_eq!(out.files_changed, 0);
+        assert_eq!(out.skipped_unsafe, 1);
+        // 原文一个字节都没动：按行替换再写回会把整份文件的换行都变一遍
+        assert_eq!(fs::read(&path).unwrap(), b"a\r\nsave\r\nb\nsave\n");
+    }
+
+    #[test]
+    fn 没有命中就不写文件() {
+        let root = tmpdir("nohit");
+        fs::write(root.join("A.java"), "nothing here").unwrap();
+        let out = replace(&root, &opts("save"), "persist").unwrap();
+        assert_eq!(out.files_changed, 0);
+        assert_eq!(out.replacements, 0);
+        assert_eq!(
+            fs::read_to_string(root.join("A.java")).unwrap(),
+            "nothing here"
+        );
     }
 }

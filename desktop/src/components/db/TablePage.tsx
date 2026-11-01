@@ -4,6 +4,7 @@ import { toast } from "../ui/toast";
 import { ImportDialog } from "./ImportDialog";
 import { SourceView } from "./SourceView";
 import { TableData } from "./TableData";
+import { TxBar } from "./TxBar";
 import { InsertExportDialog } from "./InsertExportDialog";
 import { friendlyDbError } from "../../lib/db";
 import { dbApi, type ColumnInfo, type IndexInfo } from "../../lib/dbApi";
@@ -107,7 +108,14 @@ export function TablePage({ tab }: { tab: TableTab }) {
       )}
       {rt.status !== "connected" && <div className="dbx-empty">连接已断开，先在左侧连上</div>}
       {err && <div className="dbx-err">{err}</div>}
-      {rt.status === "connected" && !isObj && tab.sub === "data" && <TableData tab={tab} cols={cols} isView={isView} zh={zh} />}
+      {rt.status === "connected" && !isObj && tab.sub === "data" && (
+        <>
+          {/* 表数据走 primary 会话；手动提交模式下这里必须能看到并提交/回滚，
+              不能只让 SQL 控制台拥有事务条。 */}
+          <TxBar connId={tab.connId} />
+          <TableData tab={tab} cols={cols} isView={isView} zh={zh} />
+        </>
+      )}
       {rt.status === "connected" && !isObj && tab.sub === "struct" && <StructView cols={cols} />}
       {rt.status === "connected" && isObj && tab.sub === "source" && <SourceView tab={tab} />}
       {rt.status === "connected" && tab.sub === "ddl" && <MetaText key={`ddl:${tab.otype ?? ""}`} tab={tab} />}

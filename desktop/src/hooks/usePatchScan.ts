@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { svnStatus, type ChangeItem } from "../lib/svn";
 import { NO_FORCE, patchDefaults, patchScan, type LayerForce } from "../lib/patch";
+import { useWorkspaceRoot } from "../lib/workspaceSession";
 
 /**
  * 补丁页的数据源：SVN 改动 → 补丁清单。
@@ -15,16 +16,19 @@ import { NO_FORCE, patchDefaults, patchScan, type LayerForce } from "../lib/patc
  */
 export function usePatchScan(force: LayerForce = NO_FORCE) {
   const qc = useQueryClient();
+  // 改动清单属于某个工作副本：不带 root 的 key 会在切工程后直接把上一个工程的
+  // 文件清单端出来（路径还全是旧的），勾选、出包都会落在错的地方。
+  const root = useWorkspaceRoot();
 
   const defaults = useQuery({
-    queryKey: ["patch-defaults"],
+    queryKey: ["patch-defaults", root],
     queryFn: patchDefaults,
     staleTime: 30_000,
     retry: false,
   });
 
   const changes = useQuery({
-    queryKey: ["patch-changes"],
+    queryKey: ["patch-changes", root],
     queryFn: svnStatus,
     refetchOnWindowFocus: false,
     retry: false,
@@ -49,7 +53,7 @@ export function usePatchScan(force: LayerForce = NO_FORCE) {
 
   const scan = useQuery({
     // 改判层也进 key：改了就重扫，否则清单还留着上次的层判定和问题
-    queryKey: ["patch-scan", paths, force.hy, force.std],
+    queryKey: ["patch-scan", root, paths, force.hy, force.std],
     queryFn: () => patchScan(paths, force.hy, force.std),
     enabled: paths.length > 0,
     // 清单不缓存：class 的 mtime 随时会变（IDE 一编译），缓存只会给出

@@ -21,6 +21,12 @@ describe("复制为", () => {
     expect(toCsv(cols, rows).split("\r\n")[2]).toBe('"B,2",');
   });
 
+  it("公式开头的值被中和，负数不受影响", () => {
+    expect(toCsv(cols, [["=1+1", "-3"]])).toBe('CODE,NNUM\r\n"\'=1+1",-3');
+    expect(toTsv(cols, [["@A1", "-3"]], false)).toBe("'@A1\t-3");
+    expect(toTsv(cols, [["-2+3", null]], false)).toBe("'-2+3\t");
+  });
+
   it("INSERT 数字列不加引号、NULL 写关键字", () => {
     expect(toInsert("t", cols, [rows[1]])).toBe("insert into t (CODE, NNUM) values ('B,2', null);");
     expect(sqlLiteral("2", "NUMBER(28,8)")).toBe("2");

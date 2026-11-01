@@ -57,6 +57,11 @@ pub struct AppState {
     /// 杀进程。放在 AppState 上而不是模块级 static：它跟一个应用实例同生命周期，
     /// 测试里也不会互相污染（本文件头注释的同一条纪律）。
     pub compile_cancel: std::sync::atomic::AtomicBool,
+    /// 流式导出的取消标志（`db_export_cancel` 置位，`stream_to_file` 每页检查一次）。
+    ///
+    /// 与 `compile_cancel` 一样只置标志、不做中断：正在飞的那一页必须写完，
+    /// 否则前端不知道这一页到底提交没有。取消后保留已经写入的部分文件（合法前缀）。
+    pub export_cancel: std::sync::atomic::AtomicBool,
     /// 退出已获放行：`CloseRequested` 看到它就真的让窗口关（进程随后退出）。
     ///
     /// 为什么需要这个标志：关窗时前端要先问一遍「有未提交的事务吗」，同步的窗口
@@ -89,6 +94,7 @@ impl AppState {
             db_procs: std::sync::Mutex::new(Default::default()),
             lang: std::sync::Mutex::new(Default::default()),
             compile_cancel: std::sync::atomic::AtomicBool::new(false),
+            export_cancel: std::sync::atomic::AtomicBool::new(false),
             quit_approved: std::sync::atomic::AtomicBool::new(false),
             quit_acked: std::sync::atomic::AtomicBool::new(false),
             quit_checking: std::sync::atomic::AtomicBool::new(false),

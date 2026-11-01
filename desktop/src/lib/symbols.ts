@@ -90,6 +90,40 @@ export function kindLetter(kind: number): string {
   }
 }
 
+/**
+ * 按 mtime 缓存的文件符号。
+ *
+ * 面包屑与「文件结构」面板要的是同一份数据，两边各请求一次等于每次保存都多发一个
+ * documentSymbol（服务端还要重算一遍 AST）。mtime 变了说明文件被保存过，这时才重新取。
+ */
+const cache = new Map<string, { mtime: number; list: FlatSymbol[] }>();
+
+/**
+ * 缓存文件数上限。
+ *
+ * 不设上限就等于把整个工程的符号堆在内存里（一个 java 文件几百个符号），
+ * 而且切到别的模块后旧数据也不会释放。Map 保序，超了就淘汰最早写入的。
+ */
+const CACHE_MAX = 200;
+
+export async function symbolsFor(path: string, mtimeMs?: number): Promise<FlatSymbol[]> {
+  const key = path.toLowerCase();
+  const hit = cache.get(key);
+  if (hit && mtimeMs !== undefined && hit.mtime === mtimeMs) return hit.list;
+  const list = await fetchSymbols(path);
+  if (!cache.has(key) && cache.size >= CACHE_MAX) {
+    const oldest = cache.keys().next();
+    if (!oldest.done) cache.delete(oldest.value);
+  }
+  cache.set(key, { mtime: mtimeMs ?? -1, list });
+  return list;
+}
+
+/** 清空符号缓存（切工作区时：旧工程的符号在新工程里没有意义）。 */
+export function resetSymbolCache(): void {
+  cache.clear();
+}
+
 /** 取一个 Java 文件的符号。调用方负责确认代码智能已就绪。 */
 export async function fetchSymbols(path: string): Promise<FlatSymbol[]> {
   // 与补全 / 跳转同理：先把还没发出去的修改发给服务端，否则算的是改动前的文本

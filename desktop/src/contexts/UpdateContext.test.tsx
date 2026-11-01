@@ -36,6 +36,8 @@ const h = vi.hoisted(() => {
       return undefined;
     }),
     relaunch: vi.fn(async () => {}),
+    /** 重启前的会话安全预检（保存文件 → 未提交事务）。单独测，这里只控它的结论。 */
+    prepareRestart: vi.fn(async () => true),
   };
 });
 
@@ -58,6 +60,8 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 vi.mock("../components/update/UpdateNotesDialog", () => ({ UpdateNotesDialog: () => null }));
 vi.mock("../components/update/RestartOverlay", () => ({ RestartOverlay: () => null }));
+// 重启预检涉及真实动态 import 与 IPC，本文件只测状态机；预检结论由用例掌控。
+vi.mock("../lib/terminatePreflight", () => ({ prepareRestart: h.prepareRestart }));
 
 const EVENTS = [  "update:checking",
   "update:available",
@@ -152,6 +156,8 @@ beforeEach(() => {
   h.invoke.mockClear();
   h.relaunch.mockClear();
   h.relaunch.mockImplementation(async () => {});
+  h.prepareRestart.mockClear();
+  h.prepareRestart.mockImplementation(async () => true);
 });
 
 afterEach(async () => {
@@ -435,6 +441,21 @@ describe("8 秒自动重启窗口", () => {
       vi.advanceTimersByTime(1200);
     });
     expect(h.relaunch).toHaveBeenCalledTimes(1);
+  });
+
+  it("重启前预检不通过就不 relaunch（预检拦下未保存文件 / 未提交事务）", async () => {
+    h.prepareRestart.mockResolvedValueOnce(false);
+    await mount();
+    await act(async () => {
+      void state().restart();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(h.prepareRestart).toHaveBeenCalledTimes(1);
+    expect(h.relaunch).not.toHaveBeenCalled();
+    // 复位后用户处理完再点一次仍能重启
+    expect(state().restarting).toBe(false);
   });
 });
 

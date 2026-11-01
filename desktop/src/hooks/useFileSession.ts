@@ -25,6 +25,7 @@ import {
   type Updater,
 } from "../lib/workspaceSession";
 import { toast } from "../components/ui/toast";
+import { navBack, navForward, pushNav, type NavPoint } from "../lib/navHistory";
 
 /**
  * 标签页的生命周期：打开、保存、异地冲突、关闭、改名跟随、删除跟随。
@@ -48,14 +49,17 @@ export function useFileSession() {
   /**
    * 打开文件。`preview`：文件树单击的预览打开——顶替现有预览标签，不固定。
    * 已经开着的文件再次以非预览方式打开（双击、搜索命中、问题跳转）就把它固定下来。
+   *
+   * 返回是否真的打开成功了：导航历史只记成功的——记了打不开的文件，
+   * 「后退」过去只会再撞一次报错。
    */
   const openFile = useCallback(
-    async (path: string, opts?: { preview?: boolean }) => {
+    async (path: string, opts?: { preview?: boolean }): Promise<boolean> => {
       const existing = tabs.find((t) => t.path === path);
       if (existing) {
         if (existing.preview && !opts?.preview) setTabs((ts) => pinTab(ts, path));
         setActivePath(path);
-        return;
+        return true;
       }
       try {
         const c = await readFile(path);
@@ -82,8 +86,10 @@ export function useFileSession() {
             }),
           )
           .catch(() => {});
+        return true;
       } catch (e) {
         toast(`无法打开 ${baseName(path)}：${e}`, "error");
+        return false;
       }
     },
     [tabs],
@@ -99,10 +105,17 @@ export function useFileSession() {
   openFileRef.current = openFile;
   useEffect(() => {
     const handle = (req: OpenFileRequest) => {
-      void openFileRef.current(req.path).then(() => {
+      // nonce 提前占号：连点两条命中时，只有最后一次的定位算数
+      // （打开是异步的，后点的那个可能先 resolve，旧请求不能把定位抢回去）
+      const nonce = ++revealSeq.current;
+      void openFileRef.current(req.path).then((ok) => {
+        // 打开失败的文件不进导航历史：否则「后退」过去还是打不开，还多一声报错
+        if (!ok) return;
+        // 记进导航历史：搜索结果、SVN 里点开的位置也要能「后退」回来
+        pushNav({ path: req.path, line: req.line ?? 1, column: req.column });
         if (req.line == null) return;
-        revealSeq.current += 1;
-        setReveal({ line: req.line, column: req.column, nonce: revealSeq.current });
+        if (nonce !== revealSeq.current) return;
+        setReveal({ line: req.line, column: req.column, nonce });
       });
     };
     const off = onOpenFileRequest(handle);
@@ -157,18 +170,28 @@ export function useFileSession() {
 
   /**
    * 打开文件（已在标签里就是切过去）并跳到该行。
-   * nonce 每次自增：连点同一个文件的两条问题时，只有它变才会重新定位。
+   * nonce 提前占号：连点同一个文件的两条问题时，只有最后一次的定位算数
+   * （打开是异步的，后点的那个可能先 resolve，旧请求不能把定位抢回去）。
+   * 打开失败的不进导航历史也不定位：否则「后退」过去还是打不开，还多一声报错。
+   *
+   * `push=false` 是「后退 / 前进」在用的：那两个动作本身就是回到历史里的某个点，
+   * 再记一笔会让前进栈立刻被自己清掉（退两步就再也前进不回去）。
    */
-  const openAt = (path: string, line: number) =>
+  const openAt = (path: string, line: number, push = true): Promise<void> => {
+    const nonce = ++revealSeq.current;
     // 跳转目标的盘符/大小写可能与标签里的不一致：已有同一文件的标签就复用它，免得开出重复标签
-    openFile(tabs.find((t) => t.path.toLowerCase() === path.toLowerCase())?.path ?? path).then(() =>
-      setReveal({ line, nonce: ++revealSeq.current }),
-    );
+    return openFile(tabs.find((t) => t.path.toLowerCase() === path.toLowerCase())?.path ?? path).then((ok) => {
+      if (!ok) return;
+      if (push) pushNav({ path, line });
+      if (nonce !== revealSeq.current) return;
+      setReveal({ line, nonce });
+    });
+  };
 
   const openProblem = (p: Problem) => void openAt(p.file, p.line);
 
   /** 打开 jar 内的类（jdt.ls 给出的 `jdt://` 地址）为只读标签页。 */
-  const openJdt = async (uri: string, line: number) => {
+  const openJdt = async (uri: string, line: number, push = true) => {
     if (!tabs.some((t) => t.path === uri)) {
       try {
         const meta = tabMetaFromJdt(uri, await loadJdtSource(uri));
@@ -178,8 +201,25 @@ export function useFileSession() {
         return;
       }
     }
+    if (push) pushNav({ path: uri, line, jdt: true });
     setActivePath(uri);
     setReveal({ line, nonce: ++revealSeq.current });
+  };
+
+  /** 回到历史里的某个点。不要走 openAt 的默认参数——那会把它重新记成新历史。 */
+  const goToNav = (p: NavPoint) => {
+    if (p.jdt) void openJdt(p.path, p.line, false);
+    else void openAt(p.path, p.line, false);
+  };
+
+  const goBack = () => {
+    const p = navBack();
+    if (p) goToNav(p);
+  };
+
+  const goForward = () => {
+    const p = navForward();
+    if (p) goToNav(p);
   };
 
   /** 批量关闭（关闭其他 / 右侧 / 已保存）：未保存的保留，返回保留个数供提示。 */
@@ -215,6 +255,8 @@ export function useFileSession() {
     openProblem,
     openAt,
     openJdt,
+    goBack,
+    goForward,
     unifyEol,
     cancelClose: () => setClosingPath(null),
   };

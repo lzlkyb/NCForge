@@ -124,9 +124,41 @@ fn live_slots(state: &AppState, id: &str) -> Vec<String> {
     out
 }
 
-/// 回收空闲超时的槽。**在申请槽与每次执行前顺手扫一遍**，不起后台线程——
+/// 空闲槽的探测超时。与退出前的 `PING_TIMEOUT` 同量级：ping 要拿会话锁，
+/// 长查询在跑时会排队，等太久会把「申请一条槽」也拖慢。
+const SLOT_PING: Duration = Duration::from_secs(2);
+
+/// 探测结果 → 这条空闲槽能不能收回。
+///
+/// **超时不算干净**：空闲 10 分钟不等于没人用——跑了 20 分钟的长查询、
+/// 或者一个改完就停手的事务，恰恰最容易落在「很闲」那一侧。
+fn idle_slot_reclaimable(ping: &Result<Value, String>) -> bool {
+    let Ok(v) = ping else {
+        return false;
+    };
+    // 桥返回 `alive:false` 时 tx 里是上一次的残留数据，不能当依据；连接既然断了，收回是安全的。
+    if !v.get("alive").and_then(Value::as_bool).unwrap_or(true) {
+        return true;
+    }
+    let tx = v.get("tx");
+    let statements = tx
+        .and_then(|t| t.get("statements"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let auto_commit = tx
+        .and_then(|t| t.get("autoCommit"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    // 只有写语句会累加 statements（DDL 会重置），`>0` 就等价于「有未提交的写入」。
+    auto_commit || statements == 0
+}
+
+/// 回收空闲超时的槽。**在申请槽时顺手扫一遍**，不起后台线程——
 /// 桌面应用里为了回收会话养一个定时器，代价比扫这一眼高得多。
-fn sweep_idle_slots(state: &AppState, id: &str) {
+///
+/// 收回前先探一次事务：探测失败或有未提交写入就留下并重置计时，
+/// 免得每次申请槽都对同一条会话再探一遍。
+async fn sweep_idle_slots(state: &AppState, id: &str) {
     let now = Instant::now();
     let stale: Vec<String> = live_slots(state, id)
         .into_iter()
@@ -144,6 +176,17 @@ fn sweep_idle_slots(state: &AppState, id: &str) {
         .collect();
     for n in stale {
         let key = format!("{id}#{n}");
+        let handle = match existing_bridge(state, &key) {
+            Ok(h) => h,
+            Err(_) => {
+                forget_slot(&key);
+                continue;
+            }
+        };
+        if !idle_slot_reclaimable(&call(handle, "ping", Vec::new(), SLOT_PING).await) {
+            touch_slot(&key);
+            continue;
+        }
         drop_bridge(state, &key);
         drop_bridge(state, &java_key(&key));
         forget_slot(&key);
@@ -678,7 +721,7 @@ pub async fn db_slot_acquire(
     // 槽是「再加一条会话」，不是「从零连库」：primary 都没连上就没什么可加的
     existing_bridge(&st, &id)
         .map_err(|_| code_label("not-connected", "先连上这个库，再开独立会话"))?;
-    sweep_idle_slots(&st, &id);
+    sweep_idle_slots(&st, &id).await;
     let used = live_slots(&st, &id);
     if used.len() >= MAX_SLOTS {
         return Err(code_label(
@@ -1509,6 +1552,8 @@ fn rel_of(abs: &str, root: &str) -> String {
 mod tests {
     use super::*;
 
+    use serde_json::json;
+
     const SAMPLE: &str = r#"<?xml version="1.0" encoding='gb2312'?>
 <root ClassType="nc.uap.plugin.studio.ui.preference.prop.PropInfo">
   <isEncode>true</isEncode>
@@ -1599,6 +1644,29 @@ mod tests {
         let e = resolve_password(&conn("a", "u"), None).unwrap_err();
         assert!(e.starts_with("need-password|"), "{e}");
         assert_eq!(resolve_password(&conn("a", "u"), Some("p")).unwrap(), "p");
+    }
+
+    #[test]
+    fn 空闲槽有未提交写入时不能回收() {
+        let ping = |v: Value| Ok::<Value, String>(v);
+        // 超时 / 探测失败：一律留下（可能只是长查询还在占着会话）
+        assert!(!idle_slot_reclaimable(&Err("bridge|超时".into())));
+        // 连接已断：残留状态可以收
+        assert!(idle_slot_reclaimable(&ping(
+            json!({ "alive": false, "tx": { "autoCommit": false, "statements": 3 } })
+        )));
+        // 手动提交且改过东西：留下
+        assert!(!idle_slot_reclaimable(&ping(
+            json!({ "alive": true, "tx": { "autoCommit": false, "statements": 3 } })
+        )));
+        // 手动提交但没改过东西：可以收
+        assert!(idle_slot_reclaimable(&ping(
+            json!({ "alive": true, "tx": { "autoCommit": false, "statements": 0 } })
+        )));
+        // 自动提交：没有在途事务
+        assert!(idle_slot_reclaimable(&ping(
+            json!({ "alive": true, "tx": { "autoCommit": true, "statements": 3 } })
+        )));
     }
 
     #[test]

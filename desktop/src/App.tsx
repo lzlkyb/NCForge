@@ -5,8 +5,8 @@ import { invoke } from "./lib/tauri";
 import { CHANGELOG } from "./lib/about";
 import {
   getLastSeenVersion,
-  setLastSeenVersion,
   countUnreadVersions,
+  CHANGELOG_SEEN_EVENT,
 } from "./lib/utils";
 import { transitionPage } from "./lib/pageTransition";
 import { requestOpenFile } from "./lib/openFileRequest";
@@ -86,7 +86,8 @@ const HOTKEY_TABS: string[] = [...WORKSPACE_NAV.map((n) => n.key), "settings"];
  * 业务替换点：WORKSPACE_NAV（导航）、renderTab（页面表）、statusQuery（状态源）。
  */
 function AppContent() {
-  // 窗口最小化时给 <html> 打 data-app-hidden，暂停全部 CSS 动画。
+  // 窗口最小化时给 <html> 打 data-app-hidden，暂停白名单里的常驻无限动画
+  // （不是全部：一次性入场动画被暂停会冻在第一帧，见 index.css 的说明）。
   // WebView2 不会自己为隐藏窗口节流动画，实测不做这事会白烧约 0.6 个 CPU 核。
   useAppHiddenFlag();
   // 退出守卫：点 X 后先查一遍未提交的事务，再决定退不退（见 lib/quitGuard）。
@@ -117,15 +118,17 @@ function AppContent() {
   );
 
   // ── 更新未读计数（CHANGELOG 看了几版）──
+  // 只在用户真正打开「更新历史」时写 lastSeen（SettingsTab 里的 markChangelogSeen），
+  // 启动时不再替用户标记已读，否则红点与「未读」语义互相矛盾。
   const [unreadCount, setUnreadCount] = useState(0);
   useEffect(() => {
-    const versions = CHANGELOG.map((c) => c.version);
-    const lastSeen = getLastSeenVersion();
-    setUnreadCount(countUnreadVersions(versions, lastSeen));
-    if (versions.length > 0 && versions[0] !== lastSeen) {
-      // 首启/升级：把最新版标记为已读（红点只提示「有新版未看」，不反复）
-      setLastSeenVersion(versions[0]);
-    }
+    const recompute = () =>
+      setUnreadCount(
+        countUnreadVersions(CHANGELOG.map((c) => c.version), getLastSeenVersion()),
+      );
+    recompute();
+    window.addEventListener(CHANGELOG_SEEN_EVENT, recompute);
+    return () => window.removeEventListener(CHANGELOG_SEEN_EVENT, recompute);
   }, []);
 
   // ── 页面切换过渡 ──
@@ -182,8 +185,10 @@ function AppContent() {
   // ── Ctrl+1~7 / Ctrl+K 快捷键：前 6 位来自 WORKSPACE_NAV，第 7 位是设置 ──
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // 导航浮层与布局键：任何焦点下都生效（含编辑器），只让位给别的模态框；浮层自己开着时模式键用来切模式
-      const otherDialog = document.querySelector('[role="dialog"]:not([data-palette]), dialog[open]');
+      // 导航浮层与布局键：任何焦点下都生效（含编辑器），只让位给真正的模态框。
+      // 只认 aria-modal="true"：InfoPopover / 大纲 / 历史这类非模态浮层也是 role=dialog，
+      // 把它们算进来的话，打开一个说明气泡就按不了 Ctrl+K / Ctrl+B / Ctrl+J。
+      const otherDialog = document.querySelector('[role="dialog"][aria-modal="true"]:not([data-palette]), dialog[open]');
       const pm = paletteModeOf(e, getKeymap());
       const lk = layoutKeyOf(e);
       if ((pm || lk) && !otherDialog) {
@@ -196,7 +201,7 @@ function AppContent() {
       }
       const target = e.target instanceof HTMLElement ? e.target : null;
       const formField = target && !target.closest(".monaco-editor") && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
-      if (!formField && !document.querySelector('[role="dialog"], dialog[open]') && isWorkspaceSearch(e, getKeymap())) {
+      if (!formField && !document.querySelector('[role="dialog"][aria-modal="true"], dialog[open]') && isWorkspaceSearch(e, getKeymap())) {
         e.preventDefault();
         e.stopPropagation();
         navigate("search");
@@ -246,7 +251,7 @@ function AppContent() {
           navItems={navItems}
         />
         <main className="app-main page-transition flex min-h-0 min-w-0 flex-col">
-          <ErrorBoundary>
+          <ErrorBoundary resetKey={activeTab}>
             <Suspense fallback={<Skeleton className="m-4 h-40" />}>
               <FilesTab activeTool={activeTab}
                 tool={["search", "svn", "services", "patch", "db", "linked", "settings"].map(tab => <ActivityPanel key={tab} active={activeTab === tab}>{renderTab(tab, refreshStatus, navigate)}</ActivityPanel>)} />

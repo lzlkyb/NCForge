@@ -6,7 +6,8 @@ import { useViewActive } from "./viewActivity";
  * 全局窗口可见性 store。
  *
  * 两个消费方：
- * 1. CSS：在 `<html>` 上置 `data-app-hidden`，`index.css` 据此暂停全部动画/过渡；
+ * 1. CSS：在 `<html>` 上置 `data-app-hidden`，`index.css` 据此暂停**常驻无限动画**
+ *    （白名单；一次性入场动画不暂停，否则会冻在第一帧）；
  * 2. React：`useAppHidden()` 让组件拿到布尔值，给 `refetchInterval` / `setInterval` 断流。
  *
  * **为何用模块级 store 而不是 Context**：`App` 自身的 `useQuery` 也要读这个状态，

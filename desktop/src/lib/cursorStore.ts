@@ -34,3 +34,13 @@ export function setCursor(line: number, column: number): void {
 export function useCursor(): CursorPos {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
+
+/**
+ * 读当前光标位置，不订阅。
+ *
+ * 给「跳到下一处问题」「重命名」这类**按需执行**的动作用：它们只需要执行那一刻的位置，
+ * 订阅反而会让文件页跟着每次方向键重渲染（这个仓库存在的意义就是避免那件事）。
+ */
+export function getCursor(): CursorPos {
+  return cursor;
+}

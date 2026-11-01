@@ -105,6 +105,20 @@ export function setLastSeenVersion(version: string): void {
   }
 }
 
+/** 「更新历史」真的被打开时广播：侧栏红点据此清零。 */
+export const CHANGELOG_SEEN_EVENT = "ncforge:changelog-seen";
+
+/**
+ * 用户**主动打开更新历史**后调用（`SettingsTab`）。
+ * 写在打开的那一刻而不是启动时：启动就替用户记「已读」的话，
+ * 他从没看过也再不会看到红点——未读数与「已读」语义就互相打架了。
+ */
+export function markChangelogSeen(latest: string | null): void {
+  if (!latest) return;
+  setLastSeenVersion(latest);
+  window.dispatchEvent(new Event(CHANGELOG_SEEN_EVENT));
+}
+
 /** 语义版本比较：a>b 返回正数，a<b 返回负数，相等 0。 */
 export function compareVersion(a: string, b: string): number {
   // 按段取前导整数（parseInt 容忍 "1-rc1" 之类后缀，取到 1）；真正非数字段安全退化为 0。
@@ -132,13 +146,15 @@ export function countUnreadVersions(versions: string[], lastSeen: string | null)
  * 绝对时间（备份 createdAt 形如 "YYYY-MM-DD HH:MM:SS"）转中文相对时间：
  * 刚刚 / X 分钟前 / X 小时前 / X 天前 / X 个月前 / X 年前。
  * 解析失败（如"未知时间"）原样返回，避免崩溃。
+ *
+ * `nowMs`：相对「哪个时刻」算（Unix ms），测试注入用；不传取当前时间。
  */
-export function formatRelativeTime(dateStr: string): string {
+export function formatRelativeTime(dateStr: string, nowMs?: number): string {
   if (!dateStr) return "";
   const s = dateStr.includes("T") ? dateStr : dateStr.replace(" ", "T");
   const d = new Date(s);
   if (isNaN(d.getTime())) return dateStr;
-  const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
+  const diffSec = Math.floor(((nowMs ?? Date.now()) - d.getTime()) / 1000);
   if (diffSec < 0) return dateStr; // 未来时间（时钟异常）回退原值
   if (diffSec < 60) return "刚刚";
   const min = Math.floor(diffSec / 60);

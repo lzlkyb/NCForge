@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use crate::search::{self, SearchOptions, SearchOutcome};
+use crate::search::{self, ReplaceOutcome, SearchOptions, SearchOutcome};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -26,6 +26,29 @@ pub async fn search_workspace(
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
     let root = PathBuf::from(root);
     tauri::async_runtime::spawn_blocking(move || search::search(&root, &options))
+        .await
+        .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 在工作区内替换全部命中。范围与 `search_workspace` 完全一致（同一套候选收集）。
+///
+/// 为什么不让前端逐个文件改：编码与换行必须按原文件还原（NC 工程 GBK/UTF-8 混放、
+/// 还有混合换行的老文件），这些逻辑后端已经有一份且被单测覆盖；前端再来一份必然分叉。
+#[tauri::command]
+pub async fn search_replace(
+    state: tauri::State<'_, Arc<AppState>>,
+    options: SearchOptions,
+    replacement: String,
+) -> Result<ReplaceOutcome, String> {
+    let root = state
+        .config
+        .read()
+        .await
+        .workspace_root
+        .clone()
+        .ok_or_else(|| "尚未选择工作区目录".to_string())?;
+    let root = PathBuf::from(root);
+    tauri::async_runtime::spawn_blocking(move || search::replace(&root, &options, &replacement))
         .await
         .map_err(|e| format!("后台任务失败: {e}"))?
 }

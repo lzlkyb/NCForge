@@ -40,13 +40,26 @@ export function applyTheme(theme: Theme): boolean {
   const root = document.documentElement;
   // transitionend 会从子元素冒泡，也可能根本不触发；用有界计时器清理，连切可续期。
   clearTimeout(transitionTimer);
-  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    root.classList.add("theme-transition");
-    transitionTimer = setTimeout(() => root.classList.remove("theme-transition"), 320);
-  } else {
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const paint = () => root.classList.toggle("dark", theme === "dark");
+  if (!reduced && !document.hidden && document.startViewTransition) {
+    // 整页 cross-fade 交给 View Transition（合成器完成）。旧的「全树颜色 transition」
+    // 在切换瞬间会让每个节点各跑一次样式重算，大文件树上能明显感到卡顿。
     root.classList.remove("theme-transition");
+    const vt = document.startViewTransition(paint);
+    // 连续切主题时上一个 transition 会被 skip：ready/finished 都会 reject，吞掉即可。
+    void vt.ready.catch(() => {});
+    void vt.finished.catch(() => {});
+  } else {
+    // 旧环境回退：保留 180ms 全树颜色过渡（一次性）。class 必须先加，否则不触发动画。
+    if (reduced) {
+      root.classList.remove("theme-transition");
+    } else {
+      root.classList.add("theme-transition");
+      transitionTimer = setTimeout(() => root.classList.remove("theme-transition"), 200);
+    }
+    paint();
   }
-  root.classList.toggle("dark", theme === "dark");
   const stored = safeSetItem("theme", theme);
   window.dispatchEvent(new CustomEvent<Theme>("themechange", { detail: theme }));
   return stored;

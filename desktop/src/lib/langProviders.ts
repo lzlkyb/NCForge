@@ -52,7 +52,13 @@ let lastFailure: { method: string; message: string } | null = null;
 /** 提示节流：同一类问题 60 秒内只打扰一次。 */
 let lastNotifyAt = 0;
 
-interface Ctx {
+/**
+ * 一次请求的上下文：真实文件路径 + 光标位置。
+ *
+ * 导出给 `langProvidersExtra`（引用 / 格式化 / 快速修复）复用。别在那边另写一份：
+ * `context()` 里的 `await flushDoc` 与「文件不属于当前模块」的判断漏一个，位置就会算在改动前的文本上。
+ */
+export interface Ctx {
   path: string;
   position: LspPosition;
 }
@@ -63,20 +69,21 @@ interface Ctx {
  * `await flushDoc` 不是可选的：didChange 与随后的 request 是两次独立 IPC，
  * 不建立先后的话补全会按改动前的文本算位置。
  */
-async function context(model: Model, pos: Pos): Promise<Ctx | null> {
+export async function context(model: Model, pos: Pos): Promise<Ctx | null> {
   const path = pathOfModel(model);
   if (!path || !langReady() || !inLangModule(path)) return null;
   await flushDoc(path);
   return { path, position: toLspPosition(pos.lineNumber, pos.column) };
 }
 
-async function ask<T>(
+export async function ask<T>(
   method: string,
   ctx: Ctx,
+  params: Record<string, unknown> = {},
   timeoutMs?: number,
 ): Promise<T | null> {
   try {
-    const res = await langRequest<T>(method, ctx.path, { position: ctx.position }, timeoutMs);
+    const res = await langRequest<T>(method, ctx.path, { position: ctx.position, ...params }, timeoutMs);
     lastFailure = null;
     return res;
   } catch (e) {
@@ -205,6 +212,7 @@ export function registerLangProviders(): void {
       const res = await ask<{ items?: LspCompletionItem[]; isIncomplete?: boolean } | LspCompletionItem[]>(
         "textDocument/completion",
         ctx,
+        {},
         COMPLETION_TIMEOUT_MS,
       );
       if (!res) {
@@ -294,10 +302,11 @@ export function registerLangProviders(): void {
       const res = await ask<unknown>("textDocument/definition", ctx);
       const out: Loc[] = [];
       for (const t of toTargets(res)) {
-        // jar 内的类：先把源码取来建好只读 model，Monaco 才能解析这个目标
+        // jar 内的类：先把源码取来建好只读 model，Monaco 才能解析这个目标。
+        // peek 身份：用户多半只是看一眼 peek 窗口，不成标签页，model 走预览队列按上限淘汰
         if (t.uri.startsWith("jdt://")) {
           try {
-            await loadJdtSource(t.uri);
+            await loadJdtSource(t.uri, true);
           } catch {
             continue;
           }

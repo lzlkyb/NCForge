@@ -22,7 +22,24 @@ use serde::{Deserialize, Serialize};
 const HIDDEN_DIRS: [&str; 2] = [".svn", ".git"];
 
 /// 单文件大小上限：再大的文本不适合塞进编辑器。
-const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
+///
+/// 也是「全部替换」的产物体积判据：替换把文件撑到编辑器自己都打不开的大小
+/// 就没有意义了（那种「替换」实质是内容生成），见 `search::replace_in_file`。
+pub const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
+
+/// 读到 NUL 字节时 `read_text_file` 返回的错误文案。
+///
+/// 单独提成常量 + 判定函数，是为了让「全部替换」把这类失败归到**主动跳过**
+/// （`skipped_unsafe`）而不是错误：NC 工程里总有几百个扩展名不在二进制名单上、
+/// 内容却含 NUL 的文件，它们会把 20 条错误名额占满，把真正的权限/占用错误
+/// 挤到看不到的地方。
+pub const BINARY_FILE_ERROR: &str = "疑似二进制文件，不按文本打开";
+
+/// 这条读文件失败是不是「疑似二进制」。文案匹配而非错误码——本模块的错误
+/// 都是 `String`，引入错误码要改动所有调用方，收益不抵改动面。
+pub fn is_binary_read_error(err: &str) -> bool {
+    err.contains(BINARY_FILE_ERROR)
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -361,23 +378,16 @@ fn apply_eol(text: &str, eol: Eol) -> Result<String, String> {
 }
 
 /// 读文本文件，识别编码与换行，并校验能否无损往返。
+///
+/// 读期间文件可能被别的程序改写（编辑器 / AI / 编译器都在动这些源文件）：「先读内容、
+/// 再取 mtime」有个窗口——内容读到旧的一半、mtime 是新的，之后保存时
+/// `expected_mtime_ms` 冲突校验被骗过，旧内容就盖掉了别人的新改动。所以读前读后各
+/// stat 一次，不等就是读到了半新半旧，有限重试后仍不稳定就明说（见 `read_stable`）。
 pub fn read_text_file(path: &Path) -> Result<FileContent, String> {
-    let md = std::fs::metadata(path).map_err(|e| format!("读取文件信息失败: {e}"))?;
-    if !md.is_file() {
-        return Err("不是文件".to_string());
-    }
-    if md.len() > MAX_FILE_BYTES {
-        return Err(format!(
-            "文件过大（{} MB），超过 {} MB 上限",
-            md.len() / 1024 / 1024,
-            MAX_FILE_BYTES / 1024 / 1024
-        ));
-    }
-    let bytes = std::fs::read(path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let (bytes, mtime) = read_stable(path)?;
     if bytes.contains(&0) {
-        return Err("疑似二进制文件，不按文本打开".to_string());
+        return Err(BINARY_FILE_ERROR.to_string());
     }
-    let mtime = mtime_ms(path)?;
     let eol = detect_eol(&bytes);
     let (raw_text, encoding, has_bom, decode_err) = decode(&bytes);
 
@@ -403,6 +413,48 @@ pub fn read_text_file(path: &Path) -> Result<FileContent, String> {
         size: bytes.len() as u64,
         mtime_ms: mtime,
     })
+}
+
+/// 稳定读取：读前读后各取一次 mtime 并核对长度，最多重试 3 次。
+///
+/// 返回的 `(字节, mtime)` 保证是同一时刻的磁盘状态（除非重试耗尽）。
+/// `reader` / `mtime` 抽成参数只为单测能确定性地模拟「读到一半被改写」：
+/// 直接用 `std::fs::read` + 真实 mtime 的话，同毫秒内的改写两次 stat 相等，
+/// 测试会时红时绿（正是这个函数要防的那类事）。
+///
+/// 残余窗口（明示）：同一毫秒内、长度不变的改写仍然判不出（mtime 精度所限），
+/// 要堵死得把期望值换成内容哈希（动前后端协议，单独评估）。
+fn read_stable_with(
+    path: &Path,
+    reader: impl Fn(&Path) -> std::io::Result<Vec<u8>>,
+    mtime: impl Fn(&Path) -> Result<u64, String>,
+) -> Result<(Vec<u8>, u64), String> {
+    for _ in 0..3 {
+        let md = std::fs::metadata(path).map_err(|e| format!("读取文件信息失败: {e}"))?;
+        if !md.is_file() {
+            return Err("不是文件".to_string());
+        }
+        if md.len() > MAX_FILE_BYTES {
+            return Err(format!(
+                "文件过大（{} MB），超过 {} MB 上限",
+                md.len() / 1024 / 1024,
+                MAX_FILE_BYTES / 1024 / 1024
+            ));
+        }
+        let before = mtime(path)?;
+        let bytes = reader(path).map_err(|e| format!("读取文件失败: {e}"))?;
+        let after = mtime(path)?;
+        // 两次 mtime 相等、实读长度与预读一致，才认这次读取是稳定的
+        if after == before && bytes.len() as u64 == md.len() {
+            return Ok((bytes, after));
+        }
+    }
+    Err("文件在读取期间被其他程序修改，请重试".to_string())
+}
+
+fn read_stable(path: &Path) -> Result<(Vec<u8>, u64), String> {
+    // 包一层闭包：函数项过不了 `impl Fn(&Path)` 的高阶生命周期绑定
+    read_stable_with(path, |p| std::fs::read(p), mtime_ms)
 }
 
 /// 写文本文件，返回写入后的修改时间。
@@ -680,5 +732,65 @@ mod tests {
         std::fs::write(d.join("pkg/deep/c.java"), b"").unwrap();
         std::fs::write(d.join(".svn/entries"), b"").unwrap();
         assert_eq!(count_files(&d), 3);
+    }
+
+    #[test]
+    fn 读取期间被改会重试并拿到稳定内容() {
+        let d = tmpdir("race-once");
+        let p = d.join("a.java");
+        std::fs::write(&p, b"old\n").unwrap();
+        let clock = std::cell::Cell::new(1_000u64);
+        let calls = std::cell::Cell::new(0u32);
+        // 第一次「读到一半」时文件被改写：内容与 mtime 都变了 → 前后不等 → 重试
+        let (bytes, seen) = read_stable_with(
+            &p,
+            |path| {
+                calls.set(calls.get() + 1);
+                if calls.get() == 1 {
+                    std::fs::write(path, b"new\n").unwrap();
+                    clock.set(clock.get() + 10);
+                }
+                std::fs::read(path)
+            },
+            |_| Ok(clock.get()),
+        )
+        .unwrap();
+        assert_eq!(bytes, b"new\n");
+        assert_eq!(seen, 1_010);
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn 读取期间持续被改最终明确报错而不是静默返回() {
+        let d = tmpdir("race-always");
+        let p = d.join("a.java");
+        std::fs::write(&p, b"v0\n").unwrap();
+        let clock = std::cell::Cell::new(1_000u64);
+        // 每次读都改写：三次都不稳定，必须报错——静默返回的就是「半新半旧」的内容
+        let err = read_stable_with(
+            &p,
+            |path| {
+                std::fs::write(path, b"x\n").unwrap();
+                clock.set(clock.get() + 10);
+                std::fs::read(path)
+            },
+            |_| Ok(clock.get()),
+        )
+        .unwrap_err();
+        assert!(err.contains("读取期间"), "实际报错: {err}");
+    }
+
+    #[test]
+    fn 稳定读取不受影响() {
+        let d = tmpdir("race-stable");
+        let p = d.join("a.java");
+        std::fs::write(&p, b"class A {}\n").unwrap();
+        let (bytes, mtime) = read_stable(&p).unwrap();
+        assert_eq!(bytes, b"class A {}\n");
+        assert_eq!(mtime, mtime_ms(&p).unwrap());
+        // 顺带验证 read_text_file 仍走同一条路（编码/换行判定不变）
+        let c = read_text_file(&p).unwrap();
+        assert_eq!(c.text, "class A {}\n");
+        assert!(c.lossless);
     }
 }

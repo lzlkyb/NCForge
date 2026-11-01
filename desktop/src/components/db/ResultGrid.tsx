@@ -45,6 +45,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   zh?: Record<string, string>;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
+  /** Esc 退出编辑：`setEditing(null)` 会把 input 卸掉，紧随其后的 blur 不能再提交一次。 */
+  const cancelEdit = useRef(false);
   const [widths, setWidths] = useState<number[]>(() => initialWidths(columns, rows));
   const [scroll, setScroll] = useState({ top: 0, h: 400 });
   const [editing, setEditing] = useState<{ pos: CellPos; value: string } | null>(null);
@@ -66,6 +68,11 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     return () => ro.disconnect();
   }, []);
 
+  // 兜底：编辑框被别的原因卸掉（结果刷新）时，标记不能留到下一轮
+  useEffect(() => {
+    if (!editing) cancelEdit.current = false;
+  }, [editing]);
+
   // 新结果的第一帧里 effect 还没重算列宽：先按新列现算一份，避免宽度对不上
   const ws = widths.length === columns.length ? widths : initialWidths(columns, rows);
   const numeric = columns.map((c) => isNumericType(c.type));
@@ -74,6 +81,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const first = Math.max(0, Math.floor(scroll.top / ROW_H) - OVERSCAN);
   const last = Math.min(order.length, Math.ceil((scroll.top + scroll.h) / ROW_H) + OVERSCAN);
   const selIndex = sel ? order.indexOf(sel.r) : -1;
+  // 虚拟滚动只渲染可视行：活动单元格一旦滚出可视区，aria-activedescendant 会指向不存在的 id
+  const activeCell = sel && selIndex >= first && selIndex < last ? `dbx-cell-${sel.r}-${sel.c}` : undefined;
 
   const resize = (k: number, startX: number) => {
     const start = widths[k];
@@ -99,6 +108,10 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   };
 
   const commitEdit = () => {
+    if (cancelEdit.current) {
+      cancelEdit.current = false;
+      return;
+    }
     if (!editing || !edit) return;
     const { r, c } = editing.pos;
     // Oracle 里空串就是 NULL，直接记成 NULL，预览 SQL 才不会误导
@@ -142,17 +155,25 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
       ref={boxRef}
       className="dbx-grid"
       tabIndex={0}
+      role="grid"
+      aria-label="查询结果"
+      aria-rowcount={order.length}
+      aria-colcount={columns.length}
+      aria-activedescendant={activeCell}
       onKeyDown={onKey}
       onScroll={(e) => setScroll({ top: e.currentTarget.scrollTop, h: e.currentTarget.clientHeight })}
     >
       <div className="dbx-grid-inner" style={{ width: total, height: HEAD_H + order.length * ROW_H }}>
-        <div className="dbx-ghead" style={{ width: total }}>
-          <div className="dbx-gh rn" style={{ width: rnW }} />
+        <div className="dbx-ghead" style={{ width: total }} role="row" aria-rowindex={1}>
+          <div className="dbx-gh rn" style={{ width: rnW }} role="columnheader" aria-colindex={1} />
           {columns.map((c, k) => (
             <div
               key={k}
               className="dbx-gh"
               style={{ width: ws[k] }}
+              role="columnheader"
+              aria-colindex={k + 2}
+              aria-sort={sort?.col === k ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
               title={[c.name.toLowerCase(), zh?.[c.name.toLowerCase()], c.type].filter(Boolean).join(" · ")}
               onClick={() => onSort(k)}
               onContextMenu={(e) => {
@@ -171,14 +192,14 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
         {order.slice(first, last).map((r, j) => {
           const i = first + j;
           return (
-            <div key={r} className="dbx-grow" style={{ top: HEAD_H + i * ROW_H, width: total }} data-sel={sel?.r === r || undefined}>
-              <div className="dbx-gc rn" style={{ width: rnW }}>{r + 1}</div>
+            <div key={r} className="dbx-grow" style={{ top: HEAD_H + i * ROW_H, width: total }} data-sel={sel?.r === r || undefined} role="row" aria-rowindex={i + 2}>
+              <div className="dbx-gc rn" style={{ width: rnW }} role="gridcell" aria-colindex={1}>{r + 1}</div>
               {columns.map((_, k) => {
                 const v = valueAt(r, k);
                 const isSel = sel?.r === r && sel.c === k;
                 if (isSel && editing && editing.pos.r === r && editing.pos.c === k) {
                   return (
-                    <div key={k} className="dbx-gc" data-cell style={{ width: ws[k], padding: 0 }}>
+                    <div key={k} id={`dbx-cell-${r}-${k}`} className="dbx-gc" data-cell role="gridcell" aria-colindex={k + 2} aria-selected style={{ width: ws[k], padding: 0 }}>
                       <input
                         className="dbx-gedit"
                         autoFocus
@@ -188,6 +209,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
                         onKeyDown={(e) => {
                           if (e.key === "Enter") commitEdit();
                           if (e.key === "Escape") {
+                            cancelEdit.current = true;
                             setEditing(null);
                             boxRef.current?.focus();
                           }
@@ -200,8 +222,12 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
                 return (
                   <div
                     key={k}
+                    id={`dbx-cell-${r}-${k}`}
                     className={cls}
                     style={{ width: ws[k] }}
+                    role="gridcell"
+                    aria-colindex={k + 2}
+                    aria-selected={isSel || undefined}
                     data-cell={isSel || undefined}
                     onMouseDown={() => onSel({ r, c: k })}
                     onDoubleClick={() => startEdit({ r, c: k })}

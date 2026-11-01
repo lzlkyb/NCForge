@@ -177,7 +177,13 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
         <span className="sv-sub">开发态中间件 · 改完代码重启即可生效</span>
         <span className="sv-sp" />
         <button type="button" className="sv-btn" onClick={() => setConfigOpen(v => !v)}>配置</button>
-        <button type="button" className="sv-btn" disabled={previewing} onClick={() => void showCommandLine()}>
+        <button
+          type="button"
+          className="sv-btn"
+          disabled={previewing}
+          title={previewing ? "正在生成上次启动的命令行…" : "查看启动命令行（只读预览，不会重写 classpath）"}
+          onClick={() => void showCommandLine()}
+        >
           <Icon name="terminal" size={13} />
           {previewing ? "生成中…" : "命令行"}
         </button>

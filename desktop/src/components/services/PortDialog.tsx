@@ -78,14 +78,20 @@ export function PortDialog({
   }, [open, text]);
 
   const port = Number(text.trim());
+  // 预览带 300ms 防抖：改完端口到新预览回来之间，`plan` 还是上一个端口的。
+  // 这段时间里必须当它不存在，否则「应用」会照旧方案落笔（写进去的是改之前的端口）。
+  const fresh = !!plan && plan.newPort === port;
   // 只有「读到了现值且与目标不同」才算真要写。`current === null` 表示文件在、
   // 但找不到那条配置项——后端那时 todo 为空、apply 必然失败。前端以前按
   // 「exists 就算有待写入」判，于是「应用」亮着、点了必错。
-  const pending = !!plan && plan.edits.some((e) => e.current !== null && e.current !== e.next);
+  const pending = plan !== null && fresh && plan.edits.some((e) => e.current !== null && e.current !== e.next);
   const canApply = pending && !plan?.blocked && !applying;
 
   const apply = async () => {
-    if (!plan) return;
+    if (!plan || plan.newPort !== Number(text.trim())) {
+      toast("端口刚改过，等预览刷新后再应用", "warning");
+      return;
+    }
     setApplying(true);
     try {
       const r = await ncPortApply(plan.newPort);
@@ -151,7 +157,7 @@ export function PortDialog({
 
       {error && <p className="sv-port-err">{error}</p>}
 
-      {plan && (
+      {plan && fresh && (
         <>
           <div className="sv-port-list">
             {plan.edits.map((e) => (

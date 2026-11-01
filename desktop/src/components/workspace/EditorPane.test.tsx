@@ -26,8 +26,17 @@ vi.mock("../../lib/monacoSetup", () => ({
   initMonaco: vi.fn(),
   monaco: {
     editor: { create: () => mocks.editor },
-    KeyMod: { CtrlCmd: 2048 },
-    KeyCode: { KeyS: 49 },
+    // 引用 / 格式化 / 快速修复等 provider 的注册点：`EditorPane` 挂载时会调，
+    // 这里给出桩函数，缺一个就会在挂载时炸「cannot read properties of undefined」
+    languages: {
+      registerReferenceProvider: vi.fn(),
+      registerDocumentFormattingEditProvider: vi.fn(),
+      registerCodeActionProvider: vi.fn(),
+      registerImplementationProvider: vi.fn(),
+      registerTypeDefinitionProvider: vi.fn(),
+    },
+    KeyMod: { CtrlCmd: 2048, Alt: 512 },
+    KeyCode: { KeyS: 49, Enter: 3 },
   },
 }));
 
@@ -41,6 +50,9 @@ vi.mock("../../lib/editorStore", () => ({
   getModel: () => undefined,
   getViewState: () => null,
   saveViewState: vi.fn(),
+  // 预览模型的保活入口（EditorPane 切 model 时调）；当前用例 getModel 恒为 undefined，
+  // 这个分支不会真的走到，但 mock 必须给全，否则哪天渲染带上 activePath 就直接炸
+  touchModel: vi.fn(),
 }));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

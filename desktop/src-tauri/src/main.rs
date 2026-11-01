@@ -264,6 +264,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::lang_notify,
             commands::search_workspace,
             commands::search_list_files,
+            commands::search_replace,
+            commands::local_history_capture,
+            commands::local_history_list,
+            commands::local_history_read,
+            commands::local_history_restore,
             commands::server_status,
             commands::server_start,
             commands::server_stop,
@@ -326,6 +331,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::db_export_insert,
             // 数据导出（流式写文件：CSV / TSV / INSERT，A4）
             commands::db_export_file,
+            commands::db_export_cancel,
             commands::db_export_reveal,
             // 导入（B3）：CSV/TSV → 表，走独立会话的事务
             commands::db_import_rows,

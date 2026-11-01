@@ -3,9 +3,13 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SearchTab } from "./SearchTab";
+import { setSession } from "../../lib/workspaceSession";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
+// workspaceSession 会拉起 editorStore，editorStore 又拉起 monaco；jsdom 里 monaco 初始化就挂
+// （搜索页只从会话读 root，不碰编辑器）
+vi.mock("../../lib/editorStore", () => ({ onDirtyChange: () => () => {} }));
 
 const ROOT = "C:\\w\\newar";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -53,6 +57,8 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  // 会话仓库是模块级的：本文件里写过的 root 要还回去，否则同文件后续用例走不到兜底分支
+  setSession({ root: undefined });
 });
 
 describe("搜索页", () => {
@@ -125,5 +131,35 @@ describe("搜索页", () => {
     expect(container.textContent).toContain("正则语法错误：unclosed group");
     // 没有结果就不该还挂着「没有找到」
     expect(container.textContent).not.toContain("没有找到");
+  });
+
+  it("切换工作区后不重挂载也用新 root 拼路径（订阅会话，不是挂载时读一次）", async () => {
+    const NEW = "D:\\w\\other";
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_workspace") return ROOT;
+      if (cmd === "search_workspace")
+        return {
+          hits: [{ path: "modules/ic/src/A.java", line: 12, text: "billSave(v);", ranges: [{ start: 2, end: 8 }] }],
+          filesMatched: 1,
+          filesScanned: 7000,
+          elapsedMs: 620,
+          truncated: false,
+        };
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    await render();
+
+    // 搜索页被 ActivityPanel 保活：切工作区不会重挂载。
+    // 模拟 applyWorkspace 把新 root 写进会话——旧实现到这里还挂着旧 root，
+    // 点命中会拿旧相对路径拼旧 root，替换更糟（确认框显示旧工作区的改动面）
+    await act(async () => setSession({ root: NEW }));
+
+    await typeInto(input(), "billSave");
+    await press(input(), "Enter");
+    const hit = [...container.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("billSave(v);"),
+    )!;
+    await act(async () => hit.click());
+    expect(onOpenFile).toHaveBeenCalledWith(`${NEW}\\modules\\ic\\src\\A.java`, 12, 3);
   });
 });

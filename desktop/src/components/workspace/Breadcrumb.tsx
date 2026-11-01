@@ -3,7 +3,7 @@ import { Icon } from "../ui/icon";
 import { useCursor } from "../../lib/cursorStore";
 import { inLangModule, navigate, useLangView } from "../../lib/lang";
 import { jdtDisplayName } from "../../lib/langConvert";
-import { chainAt, fetchSymbols, kindLetter, type FlatSymbol } from "../../lib/symbols";
+import { chainAt, kindLetter, symbolsFor, type FlatSymbol } from "../../lib/symbols";
 import type { TabMeta } from "../../lib/workspaceSession";
 
 /** 路径相对工作区根。不在根下就退回全路径。 */
@@ -30,7 +30,7 @@ export function Breadcrumb({ root, active }: { root: string; active: TabMeta }) 
   useEffect(() => {
     if (!canAsk || !javaPath) return;
     let alive = true;
-    fetchSymbols(javaPath)
+    symbolsFor(javaPath, active.mtimeMs)
       .then((list) => alive && setSymbols({ path: javaPath, list }))
       .catch(() => alive && setSymbols(null));
     return () => {

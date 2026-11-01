@@ -112,6 +112,11 @@ pub async fn db_export_insert(
     };
 
     let res = fetch(&handle, &sql, max_rows, timeout).await;
+    // 元数据必须赶在断开临时会话之前读：它走的是同一个句柄，先断再读只会恒为 None
+    let meta = match &res {
+        Ok(_) => table_meta(&handle, &req.table).await,
+        Err(_) => None,
+    };
     // 临时会话用完就断，不留在服务端占连接
     if let Some((key, _)) = &owned {
         let _ = call(
@@ -124,8 +129,6 @@ pub async fn db_export_insert(
         drop_bridge(&st, key);
     }
     let fetched = res?;
-
-    let meta = table_meta(&handle, &req.table).await;
     let target = sql_export::qualified(req.schema.as_deref(), &req.table);
     let plan = sql_export::build_plan(
         target.clone(),
@@ -465,6 +468,8 @@ pub struct ExportFileOut {
     pub bytes: u64,
     /// 到行数上限还有剩余：文件不是全量。
     pub truncated: bool,
+    /// 用户中途取消：已写入的行保留在文件里（是合法前缀，但不是全量）。
+    pub canceled: bool,
     pub ms: u64,
 }
 
@@ -518,8 +523,19 @@ pub async fn db_export_file(
                 .to_string()
         })?;
 
+    // 上一轮取消可能没被消费（用户点了取消但导出恰好已结束）：每次开跑先复位。
+    st.export_cancel.store(false, Ordering::SeqCst);
     let res = stream_to_file(
-        &app, &handle, &req.id, &sql, &path, fmt, table, limit, timeout,
+        &app,
+        &handle,
+        &req.id,
+        &sql,
+        &path,
+        fmt,
+        table,
+        limit,
+        timeout,
+        &st.export_cancel,
     )
     .await;
     // 导出会话用完就断，不留在服务端占连接
@@ -534,13 +550,21 @@ pub async fn db_export_file(
         rows: rows.rows,
         bytes,
         truncated: rows.truncated,
+        canceled: rows.canceled,
         ms: t0.elapsed().as_millis() as u64,
     })
+}
+
+/// 用户取消流式导出：只置标志，真正的停止发生在下一页开始前。
+#[tauri::command]
+pub fn db_export_cancel(state: tauri::State<'_, Arc<AppState>>) {
+    state.export_cancel.store(true, Ordering::SeqCst);
 }
 
 struct Streamed {
     rows: usize,
     truncated: bool,
+    canceled: bool,
 }
 
 /// 取第一页 → 逐页写盘 → 每页发一次进度。
@@ -555,6 +579,7 @@ async fn stream_to_file(
     table: &str,
     limit: usize,
     timeout: u32,
+    cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Streamed, String> {
     let mut body = call(
         handle.clone(),
@@ -579,7 +604,13 @@ async fn stream_to_file(
 
     let mut written = 0usize;
     let mut truncated = false;
+    let mut canceled = false;
     loop {
+        // 已取回的这一页照常写完再停：请求已经发出去，必须知道它成功没有。
+        if cancel.load(Ordering::SeqCst) {
+            canceled = true;
+            break;
+        }
         let has_more = body
             .get("hasMore")
             .and_then(Value::as_bool)
@@ -626,6 +657,7 @@ async fn stream_to_file(
     Ok(Streamed {
         rows: written,
         truncated,
+        canceled,
     })
 }
 

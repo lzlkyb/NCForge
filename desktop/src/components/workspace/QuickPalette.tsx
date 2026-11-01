@@ -47,6 +47,7 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
   const [sel, setSel] = useState(0);
   const [result, setResult] = useState<PaletteResult>({ items: [], note: "" });
   const listRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   // 打开前的焦点（通常是编辑器）：Esc 关掉后要还给它；执行了某一项则不还，由目标（编辑器）自己拿焦点
   const restore = useRef<{ el: Element | null; on: boolean }>({ el: document.activeElement, on: true });
 
@@ -133,10 +134,32 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
     }
   };
 
+  /**
+   * Tab 不出弹层（模态焦点陷阱）。浮层里可聚焦的本来只有输入框和模式按钮，
+   * 不拦的话 Tab 会把焦点送到背后编辑器的 Monaco 里，而 Esc 之后焦点又回到那里。
+   */
+  const onDialogKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab") return;
+    const el = dialogRef.current;
+    if (!el) return;
+    const focusables = el.querySelectorAll<HTMLElement>('button, input, [tabindex]:not([tabindex="-1"])');
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const cur = document.activeElement;
+    if (e.shiftKey && (cur === first || !el.contains(cur))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (cur === last || !el.contains(cur))) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+
   const keymap = getKeymap();
   return (
     <div className="qp-scrim" onMouseDown={(e) => e.target === e.currentTarget && close()}>
-      <div className="qp" role="dialog" aria-modal="true" aria-label="快速导航" data-palette>
+      <div ref={dialogRef} className="qp" role="dialog" aria-modal="true" aria-label="快速导航" data-palette onKeyDown={onDialogKeyDown}>
         <div className="qp-in">
           <Icon name="search" size={15} />
           <input
@@ -146,6 +169,11 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
             spellCheck={false}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={onKeyDown}
+            role="combobox"
+            aria-expanded
+            aria-controls="qp-listbox"
+            aria-autocomplete="list"
+            aria-activedescendant={result.items.length > 0 ? `qp-opt-${sel}` : undefined}
             aria-label="快速导航输入"
           />
         </div>
@@ -158,9 +186,9 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
           ))}
         </div>
         {result.note && <div className="qp-sec">{result.note}</div>}
-        <div className="qp-list" ref={listRef} role="listbox">
+        <div className="qp-list" id="qp-listbox" ref={listRef} role="listbox" aria-label="候选">
           {result.items.map((it, i) => (
-            <div key={it.key} role="option" aria-selected={i === sel} data-sel={i === sel} className="qp-li" onMouseMove={() => i !== sel && setSel(i)} onClick={() => runAt(i)}>
+            <div key={it.key} id={`qp-opt-${i}`} role="option" aria-selected={i === sel} data-sel={i === sel} className="qp-li" onMouseMove={() => i !== sel && setSel(i)} onClick={() => runAt(i)}>
               {it.kind ? <span className="qp-k" data-k={it.kind}>{it.kind}</span> : mode === "file" ? <Icon name="file" size={14} /> : null}
               <span className="qp-title"><Marked text={it.title} ranges={it.ranges} /></span>
               {it.badge && <span className="qp-badge">{it.badge}</span>}

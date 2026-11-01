@@ -366,7 +366,8 @@ body {
   to   { transform: scaleX(0); }
 }
 
-/* 旧环境回退：恢复可感知的短距离入场；终端仍保留固定定位上下文。 */
+/* 旧环境回退：保留可感知的入场动画；位移版（slide）由 interaction-refinements.css
+   降级为淡入——切页不搬动滚动内容与输入位置。 */
 @keyframes tab-in {
   from { opacity: .45; transform:translateY(6px); }
   to   { opacity: 1; transform:none; }
@@ -1149,8 +1150,9 @@ body {
 }
 
 /* ===================================================================
-   主题切换过渡动画：仅在切换瞬间（.theme-transition）对颜色类属性做
-   平滑过渡，避免常驻 transition 拖累交互性能与首屏闪烁。
+   主题切换过渡动画 —— 仅作**旧环境回退**：支持 View Transition 时由
+   lib/theme.ts 走整页 cross-fade（合成器完成），不碰这组规则；只有不支持
+   时才加 .theme-transition 做 180ms 全树颜色过渡（一次性，勿常驻）。
    =================================================================== */
 .theme-transition,
 .theme-transition *,
@@ -1158,7 +1160,8 @@ body {
 .theme-transition *::after {
   /* 颜色覆盖不应取消正在进行的弹层进退场、开关位移。 */
   transition-property: background-color, color, border-color, fill, stroke, box-shadow;
-  transition-duration: var(--dur-slow);
+  /* 320ms 的全页颜色过渡在切主题时像慢放；180ms 已经够看出「是渐变不是跳变」 */
+  transition-duration: var(--dur-enter);
   transition-timing-function: var(--ease);
 }
 
@@ -1457,24 +1460,6 @@ body {
     radial-gradient(74% 54% at 5% 0%, rgba(99,102,241,0.22), transparent 58%),
     radial-gradient(70% 62% at 105% 100%, rgba(139,92,246,0.22), transparent 58%);
 }
-/* 托盘/最小化隐藏时冻结全部 CSS 动画（2026-10-15）：shimmer/pulse/ring 等 8 处
-   infinite 动画在窗口不可见时仍在合成器上空转，常驻托盘场景纯耗电。轮询已有
-   appVisibility 暂停体系（useAppHidden → data-app-hidden），CSS 动画同口径。
-   transition 不需要暂停：没有时间流逝感问题，且不会持续产帧。 */
-[data-app-hidden] *,
-[data-app-hidden] {
-  animation-play-state: paused !important;
-}
-
-/* 减弱动效：关闭弹框入场、光晕呼吸与内容 stagger（尊重系统设置） */
-@media (prefers-reduced-motion: reduce) {
-  .update-glow,
-  .update-glow::after,
-  .notes-rise {
-    animation: none !important;
-  }
-}
-
 /* P2-1 微交互：统一可点击元素的过渡与按压反馈。给图标按钮/可点击行选用，
    替代散落的 transition-colors；:active 轻微缩放提供按压感，hover/focus 过渡与时长基准一致。 */
 .interactive {
@@ -1650,16 +1635,6 @@ select:focus-visible,
 @keyframes saved-in {
   from { opacity: 0; transform: translateY(1px); }
   to { opacity: 1; transform: none; }
-}
-
-/* ═══ 无障碍：尊重 prefers-reduced-motion ═══ */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    transition-duration: 0.001ms !important;
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-  }
-  .skeleton { animation: none; }
 }
 
 /* ═══ 窗口不可见（收进托盘 / 最小化）时暂停全部动画与过渡 ═══

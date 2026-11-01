@@ -315,9 +315,21 @@ export function setTx(id: string, tx: TxInfo) {
   setRt(id, { tx });
 }
 
-export async function txAction(id: string, action: "commit" | "rollback" | "autocommit-on" | "autocommit-off"): Promise<void> {
-  const r = await dbApi.tx(id, action);
-  setTx(id, r.tx);
+/**
+ * 切换/提交/回滚事务。`slot` 为空 = primary；带槽时只动那条会话。
+ *
+ * 返回值必须交回调用方：槽的事务状态存在标签上（`tab.tx`），不在连接的 `rt.tx` 里。
+ * 以前这里统一写 `setTx(id, ...)`，槽的事务会被错记到 primary 上，工具条随后读到的
+ * 就是另一条会话的模式。primary 的更新仍在这里做，槽由调用方 `patchTab`。
+ */
+export async function txAction(
+  id: string,
+  action: "commit" | "rollback" | "autocommit-on" | "autocommit-off",
+  slot?: string | null,
+): Promise<TxInfo> {
+  const r = await dbApi.tx(id, action, slot);
+  if (!slot) setTx(id, r.tx);
+  return r.tx;
 }
 
 // ──────────────────────── 标签页 ────────────────────────

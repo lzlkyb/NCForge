@@ -166,12 +166,16 @@ function RowsEntryView({ tab, entry, isLast }: { tab: SqlTab; entry: ResultEntry
             <>
               <Icon name="spinner" size={12} />
               正在导出（后端边读边写）：已写 <b>{thousands(job.rows)}</b> 行…
+              <button type="button" className="dbx-lk" onClick={() => void dbApi.cancelExport()}>
+                取消
+              </button>
             </>
           ) : (
             saved && (
               <>
-                <Icon name="check" size={12} />
-                已导出 <b>{thousands(saved.rows)}</b> 行 · {fmtBytes(saved.bytes)} ·{" "}
+                <Icon name={saved.canceled ? "alertTriangle" : "check"} size={12} />
+                {saved.canceled ? "已取消导出 · 已写 " : "已导出 "}
+                <b>{thousands(saved.rows)}</b> 行 · {fmtBytes(saved.bytes)} ·{" "}
                 <span className="dbx-mono" title={saved.path}>{saved.fileName}</span>
                 <button type="button" className="dbx-lk" onClick={() => void dbApi.revealExport(saved.path)}>
                   打开所在文件夹

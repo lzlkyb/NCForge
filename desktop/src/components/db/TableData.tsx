@@ -4,8 +4,8 @@ import { toast } from "../ui/toast";
 import { ResultTable } from "./ResultTable";
 import { friendlyDbError, thousands } from "../../lib/db";
 import { dbApi, type Cell, type ColumnInfo, type ColumnMeta } from "../../lib/dbApi";
-import { confirmProdWrite } from "../../lib/dbConfirm";
-import { claimCursor, setTx, type TableTab } from "../../lib/dbStore";
+import { confirmProdWrite, ask } from "../../lib/dbConfirm";
+import { claimCursor, connOf, rtOf, setTx, type TableTab } from "../../lib/dbStore";
 import { PAGE, pageSql, stripPage, updateSql } from "../../lib/tableEdit";
 
 interface Page {
@@ -50,13 +50,27 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
     if (cols) void load();
   }, [cols, load]);
 
-  const apply = () => setQ({ where: draft.where, order: draft.order, page: 0 });
+  /** 翻页 / 改查询条件会清空 changed：有未写回的格子时先问一句，别静默丢。 */
+  const navTo = async (next: typeof q) => {
+    if (changed.size > 0) {
+      const ok = await ask(
+        "丢弃未保存的修改？",
+        `当前有 ${changed.size} 个单元格改过但没写回，翻页或改查询条件会丢弃它们。`,
+        "丢弃并继续",
+        true,
+      );
+      if (!ok) return;
+    }
+    setQ(next);
+  };
+  const apply = () => void navTo({ where: draft.where, order: draft.order, page: 0 });
   const page = data && "rows" in data ? data : null;
   const sqls = page ? updateSql(tab.table, page.columns, page.rows, pk, changed) : [];
 
   const save = async () => {
     if (!page || sqls.length === 0) return;
     if (!(await confirmProdWrite(tab.id, tab.connId, sqls.join(";\n")))) return;
+    const auto = rtOf(tab.connId).tx?.autoCommit ?? connOf(tab.connId)?.autoCommit ?? false;
     setSaving(true);
     let done = 0;
     try {
@@ -67,11 +81,21 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
         if (r.kind === "update" && r.updateCount !== 1) throw new Error(`预期更新 1 行，实际 ${r.updateCount} 行：${s}`);
         done++;
       }
-      toast(`已写回 ${done} 行`, "success");
+      toast(
+        auto
+          ? `已写回 ${done} 行（自动提交）`
+          : `已写回 ${done} 行，尚未提交——用上方事务条提交或回滚`,
+        "success",
+      );
       setPreview(false);
       await load();
     } catch (e) {
-      toast(`第 ${done + 1} 条写回失败：${friendlyDbError(e)}`, "error");
+      const prefix = done > 0
+        ? auto
+          ? `第 ${done + 1} 条写回失败：${friendlyDbError(e)}（前 ${done} 条已自动提交，无法整体回滚）`
+          : `第 ${done + 1} 条写回失败：${friendlyDbError(e)}（前 ${done} 条仍在未提交事务里，可回滚）`
+        : `写回失败：${friendlyDbError(e)}`;
+      toast(prefix, "error");
     } finally {
       setSaving(false);
     }
@@ -90,7 +114,15 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
         </button>
       </div>
       {!data && <div className="dbx-empty"><Icon name="spinner" size={18} />读取中…</div>}
-      {data && "error" in data && <div className="dbx-err">{data.error}</div>}
+      {data && "error" in data && (
+        // 失败不是终点：给一条可点的下一步，而不是只让用户对着错误文字重进页面。
+        <div className="dbx-err">
+          {data.error}
+          <button type="button" className="dbx-lk" style={{ marginLeft: 8 }} onClick={() => void load()}>
+            重试
+          </button>
+        </div>
+      )}
       {page && (
         <ResultTable
           key={`${q.where}|${order}|${q.page}`}
@@ -124,9 +156,9 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
             <>
               {preview && sqls.length > 0 && <pre className="dbx-ddl" style={{ flex: "none", maxHeight: 140, borderTop: "1px solid hsl(var(--border))" }}>{sqls.join(";\n") + ";"}</pre>}
               <div className="dbx-rfoot">
-                <button type="button" className="dbx-lk" disabled={q.page === 0} onClick={() => setQ({ ...q, page: q.page - 1 })}>上一页</button>
+                <button type="button" className="dbx-lk" disabled={q.page === 0} onClick={() => void navTo({ ...q, page: q.page - 1 })}>上一页</button>
                 <span>第 {q.page + 1} 页</span>
-                <button type="button" className="dbx-lk" disabled={!page.hasNext} onClick={() => setQ({ ...q, page: q.page + 1 })}>下一页</button>
+                <button type="button" className="dbx-lk" disabled={!page.hasNext} onClick={() => void navTo({ ...q, page: q.page + 1 })}>下一页</button>
                 <span className="dbx-sp" />
                 <span>{editable ? "双击单元格编辑（主键列不可改）" : isView ? "视图只读" : "没有主键，只读（定位不到唯一行）"}</span>
               </div>

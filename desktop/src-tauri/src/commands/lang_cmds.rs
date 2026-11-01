@@ -651,6 +651,8 @@ pub async fn lang_request(
 ///
 /// 写成 `async`：Tauri 的同步命令跑在主线程，jdt.ls 万一不再读管道（忙于索引、卡死），
 /// 写 stdin 会阻塞，整个界面跟着冻住。换成 async 就只卡一个工作线程。
+/// 真正的写入还要再进 `spawn_blocking`——只标 `async` 仍会占住 async 运行时线程，
+/// 管道卡死时连查询类命令一起排队。
 #[tauri::command]
 pub async fn lang_notify(
     state: tauri::State<'_, Arc<AppState>>,
@@ -659,7 +661,9 @@ pub async fn lang_notify(
     params: Value,
 ) -> Result<(), String> {
     let (session, p) = prepare(&state, path.as_deref(), &params)?;
-    session.client.notify(&method, p)
+    tauri::async_runtime::spawn_blocking(move || session.client.notify(&method, p))
+        .await
+        .map_err(|e| format!("后台任务失败: {e}"))?
 }
 
 #[cfg(test)]

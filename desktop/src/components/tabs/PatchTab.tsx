@@ -15,7 +15,7 @@ import { usePatchBuild } from "../../hooks/usePatchBuild";
 import { useCheckGuard } from "../../hooks/useCheckGuard";
 import { usePatchDraftPersist } from "../../hooks/usePatchDraftPersist";
 import { loadPatchDraft } from "../../lib/patchDraft";
-import { getSession } from "../../lib/workspaceSession";
+import { useWorkspaceRoot } from "../../lib/workspaceSession";
 import { baseName, buildStageTree } from "../../lib/patchTree";
 import {
   forceOf,
@@ -37,9 +37,15 @@ import { keyOf } from "../../lib/svn";
  * 这个文件只做布局、勾选与调后端。
  */
 export function PatchTab({ onNavigate }: { onNavigate: (tab: string) => void }) {
+  // 页面是保活的：切工程时它不会自己重挂载。按 root 换 key 强制重来一遍，
+  // 草稿状态机才能整体落到新工作区（旧草稿由 hook 在卸载时补写）。
+  const root = useWorkspaceRoot();
+  return <PatchPanel key={root ?? ""} root={root} onNavigate={onNavigate} />;
+}
+
+function PatchPanel({ root, onNavigate }: { root: string | null; onNavigate: (tab: string) => void }) {
   // 上次没打完的草稿（按工作区隔离，见 lib/patchDraft）。惰性初始化：
   // 进页就是填好的样子，不用先渲染一帧空表单再塞数据。
-  const root = getSession().root ?? null;
   const [initial] = useState(() => loadPatchDraft(root));
   /** 手动改判层：path → hyext / 标准层。层判错的唯一自救手段（见 ItemDetail）。 */
   const [layers, setLayers] = useState<Map<string, "hy" | "std">>(() => new Map(initial?.layers ?? []));

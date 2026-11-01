@@ -209,8 +209,15 @@ test("older engines retain a visible entry on every visit without remounting the
     await draft.waitFor({ state: "hidden" });
     await page.getByRole("button", { name: "连接页", exact: true }).click();
     await draft.waitFor({ state: "visible" });
-    const frames = await page.locator(".draft-scroll").evaluate(node => node.getAnimations().flatMap(a => a.effect.getKeyframes()).map(f => f.transform));
-    assert.ok(frames.includes("translateY(6px)"));
+    // 回退动画是淡入而非位移：切页时滚动内容与输入位置必须原地不动
+    // （interaction-refinements.css 把 slide 降级为 tab-fade-in）。
+    const entry = await page.locator(".draft-scroll").evaluate(node => ({
+      names: node.getAnimations().map(a => a.animationName),
+      frames: node.getAnimations().flatMap(a => a.effect.getKeyframes()),
+    }));
+    assert.ok(entry.names.includes("tab-fade-in"), "older engines still animate the entry");
+    assert.ok(entry.frames.some(f => f.opacity === "0.45"), "entry starts transparent and fades in");
+    assert.ok(entry.frames.every(f => !f.transform), "entry must not move scrolling content");
     assert.equal(await draft.inputValue(), "旧环境仍保留草稿");
   }
 });

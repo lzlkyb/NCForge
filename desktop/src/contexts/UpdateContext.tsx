@@ -5,6 +5,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { UpdateNotesDialog } from "../components/update/UpdateNotesDialog";
 import { RestartOverlay } from "../components/update/RestartOverlay";
 import { APP_SLUG } from "../lib/about";
+import { prepareRestart } from "../lib/terminatePreflight";
+import { useAppHidden } from "../lib/appVisibility";
 
 // ─── 类型定义 ────────────────────────────
 
@@ -192,6 +194,8 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [errorToastAllowed, setErrorToastAllowed] = useState(true);
   const [restarting, setRestarting] = useState(false);
+  /** 窗口不可见时暂停自动重启倒计时：没人看着的倒计时没有意义，也更容易撞上未保存内容。 */
+  const appHidden = useAppHidden();
   /** 自动重启倒计时（null = 不在倒计时），见 AUTO_RESTART_DELAY_SECS 注释。 */
   const [autoRestartIn, setAutoRestartIn] = useState<number | null>(null);
   /** 本轮 ready 是否被用户取消过自动重启。只在下一次 `update:ready` 时复位。 */
@@ -488,6 +492,21 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     // 无论入口是「用户点重启」还是「倒计时到点」，都先撤下倒计时显示/定时器，
     // 避免过渡层盖住界面后徽章还在背后倒数。
     setAutoRestartIn(null);
+    // 重启同样会结束进程：未保存文件 / 未提交事务必须先处理。
+    // 以前这里直接 relaunch，更新安装后的 8 秒自动重启会把编辑中的内容静默丢掉。
+    try {
+      if (!(await prepareRestart())) {
+        restartingRef.current = false;
+        // 本轮不再自动倒数；用户想重启可以随时手动点。
+        autoRestartCancelledRef.current = true;
+        return;
+      }
+    } catch (e) {
+      console.error("[Update] 重启前检查失败:", e);
+      restartingRef.current = false;
+      setError(String(e));
+      return;
+    }
     setRestarting(true);
     // 让过渡层播完再重启 —— 这段刻意的等待本身就是「仪式感」的载体。
     await new Promise((r) => setTimeout(r, RESTART_OVERLAY_MS));
@@ -512,14 +531,14 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   // 倒计时只由 status 驱动：进入 ready 时起一轮；用户取消后由 ref 拦住重来
   // （只在下一次 update:ready 复位），所以取消后徽章停在「重启」按钮，必须手动点。
   useEffect(() => {
-    if (status !== "ready" || autoRestartCancelledRef.current) return;
+    if (status !== "ready" || autoRestartCancelledRef.current || appHidden) return;
     setAutoRestartIn(AUTO_RESTART_DELAY_SECS);
     // 递减放在 updater 里（而不是用闭包里的 autoRestartIn），不受 StrictMode 双跑影响。
     const id = window.setInterval(() => {
       setAutoRestartIn((n) => (n === null ? null : n - 1));
     }, 1000);
     return () => window.clearInterval(id);
-  }, [status]);
+  }, [status, appHidden]);
 
   // 归零 → 真正重启。单独一个 effect 而不是在 interval 回调里调 restart：
   // 在 setState 更新函数里跑异步副作用，StrictMode 下会被调用两次（双 relaunch）。

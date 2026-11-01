@@ -14,13 +14,27 @@ export function isNumericType(type: string): boolean {
 
 const plain = (v: Cell) => (v === null || v === undefined ? "" : String(v));
 
+/**
+ * Excel / Sheets 会把以 `=` `@` 开头的格当公式执行（CSV 注入，CWE-1236）。
+ * `-` `+` 只在后面不是纯数字时才算风险：负数太常见，给每个 `-1` 加撇号
+ * 会把整列数字变成文本。防护方式是在值前加 `'`（Excel 的按文本处理标记）。
+ */
+function formulaRisk(s: string): boolean {
+  if (/^[=@\t\r]/.test(s)) return true;
+  if (/^[+-]/.test(s)) return !Number.isFinite(Number(s));
+  return false;
+}
+
+const guard = (s: string) => (formulaRisk(s) ? `'${s}` : s);
+
 export function toTsv(columns: ColumnMeta[], rows: Cell[][], header = true): string {
-  const body = rows.map((r) => r.map((v) => plain(v).replace(/[\t\r\n]+/g, " ")).join("\t"));
+  const body = rows.map((r) => r.map((v) => guard(plain(v)).replace(/[\t\r\n]+/g, " ")).join("\t"));
   return (header ? [columns.map((c) => c.name).join("\t"), ...body] : body).join("\n");
 }
 
 function csvField(s: string): string {
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  const g = guard(s);
+  return g !== s || /[",\r\n]/.test(s) ? `"${g.replace(/"/g, '""')}"` : s;
 }
 
 export function toCsv(columns: ColumnMeta[], rows: Cell[][]): string {

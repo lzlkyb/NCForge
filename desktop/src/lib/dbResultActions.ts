@@ -80,10 +80,12 @@ export async function exportResultFile(
       timeoutSec: Math.max(tab.timeoutSec, 300),
     });
     toast(
-      out.truncated
-        ? `已导出 ${out.rows} 行（到了上限，文件不是全量）`
-        : `已导出 ${out.rows} 行到 ${out.fileName}`,
-      out.truncated ? "warning" : "success",
+      out.canceled
+        ? `已取消导出：文件里只有前 ${out.rows} 行`
+        : out.truncated
+          ? `已导出 ${out.rows} 行（到了上限，文件不是全量）`
+          : `已导出 ${out.rows} 行到 ${out.fileName}`,
+      out.canceled || out.truncated ? "warning" : "success",
     );
     return out;
   } catch (e) {

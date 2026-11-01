@@ -1,4 +1,4 @@
-import type { SearchOutcome } from "./search";
+import type { ReplaceOutcome, SearchOutcome } from "./search";
 
 /**
  * 搜索页的状态仓库（模块级，不随组件卸载消失）。
@@ -36,6 +36,25 @@ export interface SearchForm {
   scrollTop: number;
   /** 后端报错（多半是正则语法错）。 */
   error: string | null;
+  /**
+   * 「替换为」的输入。
+   *
+   * 放仓库而不是组件 state：替换是「搜 → 看结果 → 改」的连续动作，
+   * 中途切到文件页看一眼再回来，输入不该丢。
+   */
+  replacement: string;
+  /**
+   * 替换在跑。与 `running` 同一个理由：切页会卸载组件，后端那次全量写盘不会停，
+   *  loading 归 false 会让人以为没在跑而再点一次。
+   */
+  replacing: boolean;
+  /**
+   * 最近一次替换的结果。
+   *
+   * 留着是为了说一句话：**磁盘已经变了，屏幕上的搜索结果过期了**。
+   * 不自动清空搜索结果（用户可能还想看改之前的样子），但要把「重新搜索」摆出来。
+   */
+  replaceOutcome: ReplaceOutcome | null;
 }
 
 const EMPTY: SearchForm = {
@@ -50,6 +69,9 @@ const EMPTY: SearchForm = {
   collapsed: [],
   scrollTop: 0,
   error: null,
+  replacement: "",
+  replacing: false,
+  replaceOutcome: null,
 };
 
 let form: SearchForm = { ...EMPTY };
@@ -60,6 +82,30 @@ export function getSearchForm(): SearchForm {
 
 export function setSearchForm(patch: Partial<SearchForm>): void {
   form = { ...form, ...patch };
+}
+
+/**
+ * 切工作区时清掉属于旧工作区的搜索态。
+ *
+ * 结果里存的是相对路径，换 root 后点命中只会被白名单拒掉；替换汇总更危险——
+ * 确认框会拿旧工作区的改动面骗人，实际写的是新工作区的文件。查询词与选项保留：
+ * 换工作区后往往是想用同样的词再搜一遍，清了反而要重打。
+ */
+export function resetSearchForm(): void {
+  // 顶掉还在路上的搜索请求：它们回来时 mine !== currentSearchSeq()，不会把旧
+  // 工作区的结果写回来（它们的 finally 也不会动 running，所以在这里一并清）。
+  // replacing 不清：那次全量写盘还在跑，它的完成回调会自己把状态收尾。
+  void nextSearchSeq();
+  form = {
+    ...form,
+    outcome: null,
+    outcomeRoot: null,
+    collapsed: [],
+    scrollTop: 0,
+    error: null,
+    running: false,
+    replaceOutcome: null,
+  };
 }
 
 /**

@@ -115,3 +115,27 @@ export function autoMap(headers: string[], cols: { name: string }[]): number[] {
     return i;
   });
 }
+
+/**
+ * 按字节解码 CSV 文本。Excel 中文环境默认导出的「CSV（逗号分隔）」是 GBK，
+ * 直接按 UTF-8 读会把整列中文变成 �——用户看到的只是「乱码」，却未必知道要回去改导出格式。
+ * BOM 优先，其次严格 UTF-8，解不动就退回 GB18030（GBK 的超集）：两者都是逐字映射，不会漏字。
+ */
+export async function decodeCsvBytes(f: Blob): Promise<{ text: string; encoding: string }> {
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  const has = (n: number) => bytes.length >= n;
+  if (has(3) && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return { text: new TextDecoder("utf-8").decode(bytes.subarray(3)), encoding: "UTF-8" };
+  }
+  if (has(2) && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return { text: new TextDecoder("utf-16le").decode(bytes.subarray(2)), encoding: "UTF-16LE" };
+  }
+  if (has(2) && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return { text: new TextDecoder("utf-16be").decode(bytes.subarray(2)), encoding: "UTF-16BE" };
+  }
+  try {
+    return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes), encoding: "UTF-8" };
+  } catch {
+    return { text: new TextDecoder("gb18030").decode(bytes), encoding: "GB18030" };
+  }
+}

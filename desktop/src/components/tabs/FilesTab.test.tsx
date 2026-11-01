@@ -16,6 +16,14 @@ vi.mock("../../hooks/usePrefersReducedMotion", () => ({ usePrefersReducedMotion:
 vi.mock("../workspace/EditorPane", () => ({
   EditorPane: () => <div data-testid="editor-pane" />,
 }));
+// 编辑器动作会 import 真的 monacoSetup（要 worker / canvas），本测试不关心命令面板里那几条，
+// 给个空清单即可
+vi.mock("../../lib/editorActions", () => ({
+  EDITOR_COMMANDS: [],
+  currentIsJava: () => false,
+  runEditorCommand: () => false,
+  setRenameRequest: vi.fn(),
+}));
 vi.mock("../../lib/editorStore", () => ({
   onDirtyChange: () => () => {},
   openModel: vi.fn(),

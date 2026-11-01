@@ -5,6 +5,7 @@ import { invokeOrToast } from "../../lib/tauri";
 import { patchConfig, type ConfigPatch } from "../../lib/appConfig";
 import { toast } from "../ui/toast";
 import { APP_INFO, CHANGELOG, CATEGORY_LABELS } from "../../lib/about";
+import { markChangelogSeen } from "../../lib/utils";
 import { Card } from "../ui/card";
 import { Modal } from "../ui/Modal";
 import { ToggleRow } from "../ui/ToggleRow";
@@ -83,7 +84,15 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
           label="关于"
           sub={`${APP_INFO.name} · ${APP_INFO.license}`}
           control={
-            <Button variant="ghost" size="sm" onClick={() => setHistoryOpen(true)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                // 打开 = 真的看到了：此刻才写 lastSeen，侧栏红点随之清除
+                markChangelogSeen(CHANGELOG[0]?.version ?? null);
+                setHistoryOpen(true);
+              }}
+            >
               查看更新历史（{CHANGELOG.length} 版）
             </Button>
           }

@@ -39,3 +39,36 @@ export interface SearchOptions {
 
 export const searchWorkspace = (options: SearchOptions) =>
   invoke<SearchOutcome>("search_workspace", { options });
+
+/**
+ * 「全部替换」的汇总，与 Rust `search::ReplaceOutcome` 一一对应（camelCase）。
+ */
+export interface ReplaceOutcome {
+  /** 实际被改写的文件数。 */
+  filesChanged: number;
+  /** 替换了多少处。 */
+  replacements: number;
+  /** 实际读过的文件数。 */
+  filesScanned: number;
+  /**
+   * 编码无法无损往返或换行混合、被跳过的文件数。
+   *
+   * 跳过而不是硬改：按检测出的编码写回去，会让原文件里原本就有的「乱码字节」
+   * 被规范化，等于顺手破坏了别人的文件。
+   */
+  skippedUnsafe: number;
+  /** 读写失败的文件（路径 + 原因），最多 20 条。 */
+  errors: string[];
+  /** 是否因时间预算提前结束（此时「没改的文件」不代表「没有匹配」）。 */
+  truncated: boolean;
+  elapsedMs: number;
+}
+
+/**
+ * 在工作区内替换全部命中。范围与 `searchWorkspace` 完全一致（同一套候选收集）。
+ *
+ * 不让前端逐个文件改：编码与换行必须按原文件还原（NC 工程 GBK/UTF-8 混放、
+ * 还有混合换行的老文件），这些逻辑后端已经有一份且被单测覆盖。
+ */
+export const replaceWorkspace = (options: SearchOptions, replacement: string) =>
+  invoke<ReplaceOutcome>("search_replace", { options, replacement });

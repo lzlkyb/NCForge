@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { WorkbenchDockContext, type DockRegionName, type DockToolTab } from "./WorkbenchDock";
 import { ToolTab } from "./ToolTab";
 import { useSideOpen } from "../../lib/layoutStore";
@@ -26,6 +26,38 @@ const DOCUMENT_DEFAULT_OPEN = ["patch", "db", "linked", "settings"];
 const SERVICES_PANEL_MIN = 360;
 const HOST_NAMES: DockRegionName[] = ["toolbar", "sidebar", "document", "bottom", "actions", "tabs"];
 
+/** 侧栏 / 底部面板的尺寸。拖过就该记住：每次重启都回到 240 是白费用户的调整。 */
+const SIZE_KEY = "ncforge-workbench-sizes";
+const SIDE_MIN = 180;
+const SIDE_MAX = 420;
+const BOTTOM_MIN = 140;
+// 键盘「双击 Enter 复位」回到的尺寸，与 loadSizes 的默认值保持同一处定义
+const SIDE_DEFAULT = 240;
+const BOTTOM_DEFAULT = 240;
+const bottomMax = () => Math.max(BOTTOM_MIN, Math.round(window.innerHeight * 0.65));
+
+function loadSizes(): { side: number; bottom: number } {
+  try {
+    const v = JSON.parse(localStorage.getItem(SIZE_KEY) ?? "") as { side?: number; bottom?: number };
+    const clamp = (n: unknown, lo: number, hi: number, dflt: number) =>
+      typeof n === "number" && Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : dflt;
+    return {
+      side: clamp(v.side, SIDE_MIN, SIDE_MAX, SIDE_DEFAULT),
+      bottom: clamp(v.bottom, BOTTOM_MIN, bottomMax(), BOTTOM_DEFAULT),
+    };
+  } catch {
+    return { side: SIDE_DEFAULT, bottom: BOTTOM_DEFAULT };
+  }
+}
+
+function saveSizes(s: { side: number; bottom: number }): void {
+  try {
+    localStorage.setItem(SIZE_KEY, JSON.stringify(s));
+  } catch {
+    /* 隐私模式 / 配额：只是不记住 */
+  }
+}
+
 export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, status }: {
   activeTool: string; tool?: ReactNode; tree: ReactNode; tabs: ReactNode;
   editor: ReactNode; output: ReactNode; status: ReactNode;
@@ -33,8 +65,8 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
   const [hosts, setHosts] = useState<Record<DockRegionName, HTMLElement | null>>({ toolbar: null, sidebar: null, document: null, bottom: null, actions: null, tabs: null });
   const [documentOpen, setDocumentOpen] = useState(false);
   const sideOpen = useSideOpen();
-  const [sideWidth, setSideWidth] = useState(240);
-  const [bottomHeight, setBottomHeight] = useState(240);
+  const [sideWidth, setSideWidth] = useState(() => loadSizes().side);
+  const [bottomHeight, setBottomHeight] = useState(() => loadSizes().bottom);
   // 每个宿主一个稳定的 ref 回调：回调身份变了 React 会先 null 再重填，宿主里的工具内容就闪一下
   const refs = useMemo(() => Object.fromEntries(HOST_NAMES.map(name => [name, (node: HTMLElement | null) => setHosts(old => old[name] === node ? old : { ...old, [name]: node })])) as Record<DockRegionName, (node: HTMLElement | null) => void>, []);
   useEffect(() => {
@@ -50,7 +82,14 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
   // 设置是整页表单，不需要问题 / 构建面板；其它文档页（补丁、数据库）打开时同样让位；NC 服务的内容就在面板里。
   const showPanel = Boolean(output) && activeTool !== "settings" && (!documentOpen || activeTool === "services");
   const resizeCleanup = useRef<(() => void) | null>(null);
+  /** 两个分隔条各自记「上一次 Enter」的时间，互不干扰。 */
+  const enterAt = useRef({ side: 0, bottom: 0 });
   useEffect(() => () => resizeCleanup.current?.(), []);
+  // 防抖落盘：pointermove 里同步写 localStorage 会拖慢拖动本身
+  useEffect(() => {
+    const t = setTimeout(() => saveSizes({ side: sideWidth, bottom: bottomHeight }), 300);
+    return () => clearTimeout(t);
+  }, [sideWidth, bottomHeight]);
   const resize = (axis: "side" | "bottom", start: number, value: number) => {
     resizeCleanup.current?.();
     const move = (e: PointerEvent) => axis === "side"
@@ -61,6 +100,31 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
     window.addEventListener("pointermove", move);
     window.addEventListener("pointercancel", finish, { once: true });
     window.addEventListener("pointerup", finish, { once: true });
+  };
+  /**
+   * 分隔条键盘操作：方向键 ±10px；同一个分隔条 600ms 内按两次 Enter 复位默认尺寸。
+   * 键盘用户没有「双击分隔条」这种鼠标手势，只靠方向键一格格挪回去太慢。
+   */
+  const onSeparatorKey = (e: ReactKeyboardEvent, axis: "side" | "bottom") => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const now = performance.now();
+      if (now - enterAt.current[axis] < 600) {
+        enterAt.current[axis] = 0;
+        if (axis === "side") setSideWidth(SIDE_DEFAULT);
+        else setBottomHeight(BOTTOM_DEFAULT);
+      } else {
+        enterAt.current[axis] = now;
+      }
+      return;
+    }
+    const grow = axis === "side" ? "ArrowRight" : "ArrowUp";
+    const shrink = axis === "side" ? "ArrowLeft" : "ArrowDown";
+    if (e.key !== grow && e.key !== shrink) return;
+    e.preventDefault();
+    const delta = e.key === grow ? 10 : -10;
+    if (axis === "side") setSideWidth((w) => Math.max(SIDE_MIN, Math.min(SIDE_MAX, w + delta)));
+    else setBottomHeight((h) => Math.max(BOTTOM_MIN, Math.min(bottomMax(), h + delta)));
   };
   return <WorkbenchDockContext.Provider value={dock}>
     <div className="wb-root" data-tool={activeTool}>
@@ -74,13 +138,17 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
           <div className="wb-tree-native" hidden={hasSide}>{tree}</div>
           <div ref={refs.sidebar} className="wb-sidebar-host" hidden={!hasSide} />
         </aside>
-        <div className="wb-resize-x" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" tabIndex={0} onPointerDown={e => { e.preventDefault(); resize("side", e.clientX, sideWidth); }} onKeyDown={e => { if(e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); setSideWidth(w => Math.max(180, Math.min(420, w + (e.key === "ArrowRight" ? 10 : -10)))); } }} />
+        <div className="wb-resize-x" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical"
+          aria-valuemin={SIDE_MIN} aria-valuemax={SIDE_MAX} aria-valuenow={Math.round(sideWidth)}
+          tabIndex={0} onPointerDown={e => { e.preventDefault(); resize("side", e.clientX, sideWidth); }} onKeyDown={e => onSeparatorKey(e, "side")} />
         <section className="wb-main">
           <div className="wb-tabbar">{tabs ?? <div className="wb-tabs" role="tablist"><ToolTab /></div>}</div>
-          <div className="wb-code-surface" hidden={documentOpen}>{editor}</div>
+          <div id="wb-code-surface" className="wb-code-surface" role="tabpanel" aria-label="编辑器" hidden={documentOpen}>{editor}</div>
           <div ref={refs.document} className="wb-document-surface" hidden={!documentOpen} />
           {showPanel && <>
-            <div className="wb-resize-y" role="separator" aria-label="调整底部面板高度" aria-orientation="horizontal" tabIndex={0} onPointerDown={e => { e.preventDefault(); resize("bottom", e.clientY, bottomHeight); }} onKeyDown={e => { if(e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); setBottomHeight(h => Math.max(140, Math.min(window.innerHeight * .65, h + (e.key === "ArrowUp" ? 10 : -10)))); } }} />
+            <div className="wb-resize-y" role="separator" aria-label="调整底部面板高度" aria-orientation="horizontal"
+              aria-valuemin={BOTTOM_MIN} aria-valuemax={bottomMax()} aria-valuenow={Math.round(bottomHeight)}
+              tabIndex={0} onPointerDown={e => { e.preventDefault(); resize("bottom", e.clientY, bottomHeight); }} onKeyDown={e => onSeparatorKey(e, "bottom")} />
             <div className="wb-bottom" style={{ height: bottomHeight }}>{output}</div>
           </>}
         </section>

@@ -182,14 +182,15 @@ pub async fn compile_module(
     // 覆盖表在这里取（async 上下文里读配置），进 spawn_blocking 后只管用
     let overrides =
         crate::eclipse_cp::active_overrides(&state.config.read().await.linked_overrides);
-    // 新一轮编译：先清掉上一次可能残留的取消标志
-    st.compile_cancel
-        .store(false, std::sync::atomic::Ordering::SeqCst);
 
     tauri::async_runtime::spawn_blocking(move || {
         // 同进程只允许一轮编译（前端标志挡不住切页/双击/命令重入）
         let _slot = CompileSlot::acquire()
             .ok_or_else(|| "已有一次编译在进行，等它完成再试（或点「取消」）".to_string())?;
+        // 清取消标志必须在**拿到槽之后**：在命令入口清的话，第二个请求（双击/重入）
+        // 会把用户刚点给正在跑的那一轮的「取消」悄悄吞掉。
+        st.compile_cancel
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         let log = |s: &str| {
             let _ = app.emit("compile-log", s.to_string());
         };

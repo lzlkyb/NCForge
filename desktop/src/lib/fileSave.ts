@@ -1,4 +1,5 @@
 import { getText, markSaved } from "./editorStore";
+import { captureLocalHistory } from "./localHistory";
 import { baseName, writeFile, type Eol, type TextEncoding } from "./workspace";
 
 /**
@@ -40,6 +41,22 @@ export interface SaveResult {
 }
 
 /**
+ * 写盘前归档磁盘上的旧内容（本地历史）。
+ *
+ * 必须 **await**：capture 读的是磁盘，晚于 writeFile 就只抓到刚写进去的新内容，
+ * 这一版白抓——「改动前」才是本地历史最有价值的一版。
+ * 但历史绝不能拖累保存：任何失败都吞掉，只 console.warn。
+ */
+async function archiveBeforeSave(path: string): Promise<void> {
+  if (path.includes("://")) return; // jdt:// 等虚拟路径没有磁盘内容
+  try {
+    await captureLocalHistory(path);
+  } catch (e) {
+    console.warn("[local-history] pre-save capture failed:", path, e);
+  }
+}
+
+/**
  * 写盘并标记已保存。失败时抛错，由调用方按错误类型分类
  * （`isConflictError` / `isUnencodableError`）。
  *
@@ -55,6 +72,7 @@ export async function saveOne(tab: SaveTarget, opts: SaveOptions = {}): Promise<
   // 转 UTF-8 时不写 BOM：BOM 是「原来是 UTF-8 带 BOM」这个事实的延续，
   // 转换后的文件不该凭空多出三个字节。
   const hasBom = opts.encodingOverride === "UTF-8" ? false : tab.hasBom;
+  await archiveBeforeSave(tab.path);
   const mtimeMs = await writeFile({
     path: tab.path,
     text,

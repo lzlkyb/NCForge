@@ -46,6 +46,19 @@ export function LogPanel({ active, generation, logPath, logSize, appHidden, onRe
     if (el && follow) el.scrollTop = el.scrollHeight;
   }, [lines, follow]);
 
+  /**
+   * 用户往上翻就自动暂停跟随。
+   *
+   * 以前只有工具栏那颗按钮能暂停：一边刷日志一边翻历史，每 0.5 秒被拽回底部，
+   * 根本没法读。回底部不自动恢复——恢复与否交给那颗按钮，避免「翻一眼又被粘住」。
+   */
+  const onBodyScroll = () => {
+    const el = bodyRef.current;
+    if (!el || !follow) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8;
+    if (!atBottom) logPanelStore.set({ follow: false });
+  };
+
   // Ctrl+F 聚焦过滤框（服务页独占，不影响其他页）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -67,15 +80,18 @@ export function LogPanel({ active, generation, logPath, logSize, appHidden, onRe
   const shown = filtered.length > MAX_RENDER ? filtered.slice(filtered.length - MAX_RENDER) : filtered;
   const omitted = filtered.length - shown.length;
 
+  // 复制的是「已加载的全部匹配行」，不是屏幕上渲染的那 500 行：
+  // 大日志里关键报错往往在被窗口截掉的更早位置，只拷可见部分等于悄悄丢内容。
   const onCopy = useCallback(async () => {
-    if (!shown.length) return;
+    if (!filtered.length) return;
     try {
-      await navigator.clipboard.writeText(shown.map(toRaw).join("\n"));
-      toast(`已复制 ${shown.length} 行日志`, "success");
+      await navigator.clipboard.writeText(filtered.map(toRaw).join("\n"));
+      const hidden = filtered.length - shown.length;
+      toast(`已复制 ${filtered.length} 行日志${hidden > 0 ? `（含 ${hidden} 行未显示）` : ""}`, "success");
     } catch (e) {
       toast(`复制失败：${e}`, "error");
     }
-  }, [shown]);
+  }, [filtered, shown.length]);
 
   const onClear = async () => {
     try {
@@ -160,7 +176,7 @@ export function LogPanel({ active, generation, logPath, logSize, appHidden, onRe
         </button>
       </div>
 
-      <div ref={bodyRef} className="sv-log-body" data-wrap={wrap || undefined}>
+      <div ref={bodyRef} className="sv-log-body" data-wrap={wrap || undefined} onScroll={onBodyScroll}>
         {error && <div className="sv-log-empty">读日志失败：{error}</div>}
         {!error && shown.length === 0 && (
           <div className="sv-log-empty">

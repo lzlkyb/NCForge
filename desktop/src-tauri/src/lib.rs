@@ -27,6 +27,7 @@ pub mod encoding_reg;
 pub mod java_bridge;
 pub mod lang;
 pub mod launch;
+pub mod local_history;
 pub mod lsp;
 pub mod nc_home;
 pub mod nc_index;

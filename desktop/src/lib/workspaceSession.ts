@@ -187,6 +187,15 @@ export function useWorkspaceSession(): WorkspaceSession {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+/** 只订阅工作区根目录。整会话订阅会让隐藏页在每次 dirty 翻转时跟着重渲染。 */
+export function useWorkspaceRoot(): string | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => state.root ?? null,
+    () => state.root ?? null,
+  );
+}
+
 // 「未保存」圆点要跟着编辑器走，但订阅不能绑在组件上——文件页卸载后
 // dirty 仍会变化（比如编译前的保存提醒），回来后圆点必须是准的。
 onDirtyChange((path, dirty) => {

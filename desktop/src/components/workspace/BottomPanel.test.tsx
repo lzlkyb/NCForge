@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BottomPanel } from "./BottomPanel";
 import type { CompileDiagnostic, CompileResult, Problem } from "../../lib/compile";
+import type { CodeDiag } from "../../lib/diagStore";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -31,23 +32,34 @@ const unlinked: CompileDiagnostic = {
   file: "C:\\work\\aier\\newar\\gl\\src\\private\\nc\\bs\\foo\\X.java",
 };
 
-const render = async (r: CompileResult | null, onOpenProblem = vi.fn()) => {
+const render = async (
+  r: CompileResult | null,
+  onOpenProblem = vi.fn(),
+  log: string[] = [],
+  tab: "problems" | "build" = "problems",
+  inspect: CodeDiag[] = [],
+) => {
+  const onOpenAt = vi.fn();
   await act(async () =>
     root.render(
       <BottomPanel
         root="C:/work/aier/newar"
-        tab="problems"
+        tab={tab}
         onTab={() => {}}
         running={false}
         result={r}
-        log={[]}
+        log={log}
         onOpenProblem={onOpenProblem}
+        onOpenAt={onOpenAt}
+        inspect={inspect}
+        onNextProblem={() => {}}
+        onPrevProblem={() => {}}
         onCancel={() => {}}
         onClose={() => {}}
       />,
     ),
   );
-  return onOpenProblem;
+  return { onOpenProblem, onOpenAt };
 };
 
 beforeEach(() => {
@@ -73,7 +85,7 @@ describe("BottomPanel 的编译诊断", () => {
   });
 
   it("诊断不可点：源码在关联工程里（工作区外），点了只会被路径守卫挡住", async () => {
-    const onOpen = await render(result({ diagnostics: [unlinked] }));
+    const { onOpenProblem: onOpen } = await render(result({ diagnostics: [unlinked] }));
     const rows = [...container.querySelectorAll(".wb-diag")];
     expect(rows).toHaveLength(1);
     expect(rows[0].tagName).not.toBe("BUTTON");
@@ -92,11 +104,85 @@ describe("BottomPanel 的编译诊断", () => {
       line: 12,
       message: "IVoucherQuery cannot be resolved to a type",
     };
-    const onOpen = await render(result({ problems: [p], errorCount: 1, diagnostics: [unlinked] }));
+    const { onOpenProblem: onOpen } = await render(result({ problems: [p], errorCount: 1, diagnostics: [unlinked] }));
     const row = container.querySelector<HTMLButtonElement>(".wb-prow:not(.wb-diag)");
     expect(row).not.toBeNull();
     expect(row?.textContent).toContain("IVoucherQuery");
     await act(async () => row?.click());
     expect(onOpen).toHaveBeenCalledWith(p);
+  });
+});
+
+describe("BottomPanel 的代码检查", () => {
+  const diag: CodeDiag = {
+    path: "C:\\work\\aier\\newar\\gl\\src\\public\\A.java",
+    line: 12,
+    column: 5,
+    severity: "error",
+    message: "The method save() is undefined",
+  };
+
+  it("波浪线那批也进问题面板，并且能点开", async () => {
+    // 以前只有 Monaco 的波浪线，面板里什么都没有——两套说法各说各的
+    const { onOpenAt } = await render(null, undefined, [], "problems", [diag]);
+    const text = container.textContent ?? "";
+    expect(text).toContain("代码检查");
+    expect(text).toContain("A.java:12");
+    const rows = [...container.querySelectorAll<HTMLButtonElement>(".wb-prow")];
+    expect(rows).toHaveLength(1);
+    await act(async () => rows[0].click());
+    expect(onOpenAt).toHaveBeenCalledWith(diag.path, diag.line);
+  });
+
+  it("只有代码检查时也不再是「还没有编译过」的空面板", async () => {
+    await render(null, undefined, [], "problems", [diag]);
+    expect(container.textContent).not.toContain("还没有编译过");
+    expect(container.querySelector(".wb-ptab-n")?.textContent).toBe("1");
+  });
+
+  it("编译错误与同一处代码检查不会重复计数", async () => {
+    const p: Problem = { severity: "error", file: diag.path, line: 12, message: "The method save() is undefined" };
+    await render(result({ problems: [p], errorCount: 1 }), undefined, [], "problems", [diag]);
+    expect(container.querySelector(".wb-ptab-n")?.textContent).toBe("1");
+  });
+
+  it("info 档（未使用的导入 / 命名建议）弱化显示，不顶徽章数", async () => {
+    const info: CodeDiag = { ...diag, severity: "info", message: "未使用的导入：java.util.List" };
+    const { onOpenAt } = await render(null, undefined, [], "problems", [info]);
+    // 图标用 info 档样式（弱化色），不再是警告的三角
+    expect(container.querySelector(".wb-prow-info")).not.toBeNull();
+    expect(container.querySelector(".wb-prow-warn")).toBeNull();
+    // 徽章只数 error：纯 info 时连数字都不显示
+    expect(container.querySelector(".wb-ptab-n")).toBeNull();
+    // 照旧可点开
+    const rows = [...container.querySelectorAll<HTMLButtonElement>(".wb-prow")];
+    expect(rows).toHaveLength(1);
+    await act(async () => rows[0].click());
+    expect(onOpenAt).toHaveBeenCalledWith(info.path, info.line);
+  });
+});
+
+describe("BottomPanel 的编译日志", () => {
+  it("报错行能点开对应文件的那一行", async () => {
+    const log = [
+      "模块 gl · 120 个源文件 · 按 import 挑出 30 个 jar",
+      "----------",
+      "1. ERROR in C:\\work\\aier\\newar\\gl\\src\\public\\A.java (at line 12)",
+      "\tIVoucherQuery cannot be resolved to a type",
+      "----------",
+      "11 problems (10 errors, 1 warning)",
+    ];
+    const { onOpenAt } = await render(null, undefined, log, "build");
+    const links = [...container.querySelectorAll<HTMLButtonElement>(".wb-log-link")];
+    // 只有带「文件:行」的那一行是按钮，其余仍是纯文本
+    expect(links).toHaveLength(1);
+    expect(links[0].textContent).toContain("A.java");
+    await act(async () => links[0].click());
+    expect(onOpenAt).toHaveBeenCalledWith("C:\\work\\aier\\newar\\gl\\src\\public\\A.java", 12);
+  });
+
+  it("认不出位置的日志行不变成按钮（点了没反应比不能点更糟）", async () => {
+    await render(null, undefined, ["诊断：工程 pm 有 3 个源文件比产物新"], "build");
+    expect(container.querySelectorAll(".wb-log-link")).toHaveLength(0);
   });
 });

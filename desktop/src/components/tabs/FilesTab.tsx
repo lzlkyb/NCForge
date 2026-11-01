@@ -11,20 +11,27 @@ import { FileTree, type FileTreeHandle } from "../workspace/FileTree";
 import { BottomPanel } from "../workspace/BottomPanel";
 import { EditorBanners } from "../workspace/EditorBanners";
 import { EditorStatus } from "../workspace/EditorStatus";
-import { Breadcrumb } from "../workspace/Breadcrumb";
+import { EditorNavRow } from "../workspace/EditorNavRow";
+import { RenameDialog } from "../workspace/RenameDialog";
 import { NoWorkspace } from "../workspace/NoWorkspace";
 import { TabStrip } from "../workspace/TabStrip";
 import { TreeHeader } from "../workspace/TreeHeader";
 import { baseName, getWorkspace } from "../../lib/workspace";
 import { applyWorkspace } from "../../lib/switchWorkspace";
-import { compileCancel, compileModule, isCompileCancelled, onCompileLog } from "../../lib/compile";
+import { compileCancel } from "../../lib/compile";
 import { useFileSession } from "../../hooks/useFileSession";
+import { useModuleCompile } from "../../hooks/useModuleCompile";
+import { useFilesTabCommands } from "../../hooks/useFilesTabCommands";
+import { useLocalHistorySweep } from "../../hooks/useLocalHistorySweep";
 import { isUnsaved } from "../../lib/saveAllDirty";
+import { ensureFilesSaved } from "../../lib/terminatePreflight";
 import { useLangWiring } from "../../hooks/useLangWiring";
-import { registerCommands } from "../../lib/commandRegistry";
+import { setRenameRequest } from "../../lib/editorActions";
 import { invalidateFileIndex } from "../../lib/fileIndex";
-import { langRegenerate } from "../../lib/appConfig";
-import { setCursor } from "../../lib/cursorStore";
+import { setCursor, getCursor } from "../../lib/cursorStore";
+import { getCodeDiags, useCodeDiags } from "../../lib/diagStore";
+import { mergeProblems, nextProblem } from "../../lib/problemList";
+import { useNav } from "../../lib/navHistory";
 import { setSession, useWorkspaceSession, type TabMeta, type Updater } from "../../lib/workspaceSession";
 
 /**
@@ -46,6 +53,10 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
   const queryClient = useQueryClient();
   const [rootInput, setRootInput] = useState("");
   const [editingRoot, setEditingRoot] = useState(false);
+  // 文件结构 / 本地历史两个弹层：放这里而不是组件内部，命令面板也要能打开它。
+  // 合成一个 state：两个布尔各占一个 hook，会把组件顶到体量门禁（≤8）之上
+  const [panels, setPanels] = useState({ outline: false, history: false });
+  const [renameOpen, setRenameOpen] = useState(false);
   // 标签、激活项、面板与编译结果都存在模块级仓库里：切页卸载再回来不该丢。
   const {
     root,
@@ -63,9 +74,6 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
   const setRoot = (v: Updater<string | null | undefined>) => setSession({ root: v });
   const setPanelOpen = (v: Updater<boolean>) => setSession({ panelOpen: v });
   const setPanelTab = (v: Updater<typeof panelTab>) => setSession({ panelTab: v });
-  const setCompiling = (v: Updater<boolean>) => setSession({ compiling: v });
-  const setCompileResult = (v: Updater<typeof compileResult>) => setSession({ compileResult: v });
-  const setCompileLog = (v: Updater<string[]>) => setSession({ compileLog: v });
 
   // 标题栏的「新建文件 / 新建文件夹」按钮：交给文件树，由它决定建在哪个目录下
   const treeRef = useRef<FileTreeHandle>(null);
@@ -87,15 +95,50 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
     openProblem,
     openAt,
     openJdt,
+    goBack,
+    goForward,
     unifyEol,
     cancelClose,
   } = useFileSession();
   useLangWiring({ activePath, openAt, openJdt });
+  // 本地历史的兜底归档：切文件时抓上一文件 + 每 5 分钟抓一次当前文件
+  // （保存前的那一版在 lib/fileSave.saveOne 里抓，那里才拿得到「改动前」）
+  useLocalHistorySweep(activePath);
+  const codeDiags = useCodeDiags();
+  const nav = useNav();
+  const { compileActive } = useModuleCompile();
+
+  /**
+   * 跳到上一条 / 下一条问题。
+   *
+   * 位置用光标而不是上一次跳转的目标：执行时刻的位置才是「我现在看到哪儿了」。
+   * 不用 `useCursor()` 订阅——那会让整页跟着每次方向键重渲染。
+   */
+  const jumpToProblem = (dir: 1 | -1) => {
+    const list = mergeProblems(compileResult?.problems, getCodeDiags());
+    const p = nextProblem(list, activePath ? { path: activePath, line: getCursor().line } : null, dir);
+    if (!p) {
+      toast("当前没有可跳转的问题", "info");
+      return;
+    }
+    void openAt(p.path, p.line);
+  };
 
   // 切到 NC 服务：面板打开并停在「NC 服务」标签，服务的卡片与日志就住在那里
   useEffect(() => {
     if (activeTool === "services") setSession({ panelOpen: true, panelTab: "svc" });
   }, [activeTool]);
+
+  // 换文件时把弹层收起来：留着它就是「另一个文件的符号/版本」压在代码上，容易点错
+  useEffect(() => {
+    setPanels({ outline: false, history: false });
+  }, [activePath]);
+
+  // F2 落到自己的重命名流程（Monaco 内置那套只改打开的 model，跨文件会改一半）
+  useEffect(() => {
+    setRenameRequest(() => setRenameOpen(true));
+    return () => setRenameRequest(null);
+  }, []);
 
   useEffect(() => {
     getWorkspace()
@@ -103,24 +146,28 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
       .catch(() => setRoot(null));
   }, []);
 
-  // 编译过程的逐行进度（首次建类索引时较久，靠它让界面有反馈）。
-  // 切页期间这个订阅会断，期间的日志行收不到，但最终结果写回仓库，回来仍然可见。
-  useEffect(() => {
-    let off: (() => void) | undefined;
-    let cancelled = false;
-    void onCompileLog((line) => setCompileLog((l) => [...l, line])).then((f) => {
-      // listen 握手是异步的：resolve 前就卸载的话，拿到的取消函数没人调，
-      // 每挂载一次就多留一个监听，编译日志行会成倍重复。
-      if (cancelled) f();
-      else off = f;
-    });
-    return () => {
-      cancelled = true;
-      off?.();
-    };
-  }, []);
+  // 命令面板里的文件页命令：闭包每帧刷新（hook 内部经 ref 读最新值），登记只做一次
+  useFilesTabCommands({
+    activePath,
+    compiling,
+    compileActive,
+    closeTab,
+    openOutline: () => setPanels((p) => ({ ...p, outline: true })),
+    openHistory: () => setPanels((p) => ({ ...p, history: true })),
+    jumpToProblem,
+    goBack,
+    goForward,
+    openRename: () => setRenameOpen(true),
+    canBack: () => nav.canBack,
+    canForward: () => nav.canForward,
+    // 命令面板每次打开都会问一遍 enabled；从模块仓库现算，不依赖渲染作用域的快照。
+    // 只数能跳的：全是 info 建议时这道命令没有目标，nextProblem 也只会返回 null
+    hasProblems: () => mergeProblems(compileResult?.problems, getCodeDiags()).some((p) => p.severity !== "info"),
+  });
 
   const applyRoot = async (path: string) => {
+    // 切换会 closeModel 掉全部标签：没落盘的修改必须先问用户，与「工程关联」页的切换一致
+    if (!(await ensureFilesSaved("切换工程"))) return;
     try {
       // 切换的副作用（关模型 / 停 jdt.ls / 清会话 / 失效 svn 缓存）统一在 lib 里，
       // 「工程关联」页用的是同一份——两边各写一套必然分叉
@@ -132,53 +179,14 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
     }
   };
 
-  /** 编译当前文件所在的模块；有未保存的文件先提醒，因为 ecj 读的是磁盘上的内容。 */
-  const compileActive = async () => {
-    if (!activePath || compiling || tabs.find((t) => t.path === activePath)?.virtual) return;
-    if (tabs.some((t) => t.dirty || t.eolChanged)) {
-      toast("有未保存的文件，编译读取的是磁盘版本，请先保存（Ctrl+S）", "warning");
-    }
-    setPanelOpen(true);
-    setPanelTab("build");
-    setCompiling(true);
-    setCompileResult(null);
-    setCompileLog([]);
-    try {
-      const r = await compileModule(activePath);
-      setCompileResult(r);
-      setPanelTab(r.errorCount > 0 ? "problems" : "build");
-    } catch (e) {
-      // 取消不是失败：不要用红色错误把用户自己的操作说成「编译失败」
-      if (isCompileCancelled(e)) {
-        setCompileLog((l) => [...l, "编译已取消"]);
-        toast("已取消编译", "info");
-      } else {
-        setCompileLog((l) => [...l, `编译失败：${e}`]);
-        toast(`编译失败：${e}`, "error");
-      }
-    } finally {
-      setCompiling(false);
-    }
-  };
-
-  // 命令面板里的文件页命令。闭包每次渲染都是新的，用 ref 拿最新值，登记只做一次
-  const live = useRef({ activePath, compiling, compileActive, closeTab });
-  live.current = { activePath, compiling, compileActive, closeTab };
-  useEffect(() => registerCommands([
-    { id: "build.compile", title: "编译当前模块", run: () => void live.current.compileActive(), enabled: () => !!live.current.activePath && !live.current.compiling },
-    { id: "build.cancel", title: "取消编译", run: () => void compileCancel(), enabled: () => live.current.compiling },
-    { id: "tab.close", title: "关闭当前标签", run: () => live.current.activePath && live.current.closeTab(live.current.activePath), enabled: () => !!live.current.activePath },
-    {
-      id: "lang.regenerate",
-      title: "重新生成代码智能工程（补全 / 跳转异常时用）",
-      run: () => void langRegenerate().then(() => toast("已重新生成并重启代码智能", "success"), (e) => toast(`重新生成失败：${e}`, "error")),
-    },
-  ]), []);
-
   if (root === undefined) return null;
 
   const panel = <BottomPanel root={root ?? ""} tab={panelTab} onTab={setPanelTab}
     running={compiling} result={compileResult} log={compileLog} onOpenProblem={openProblem}
+    onOpenAt={openAt}
+    inspect={codeDiags}
+    onNextProblem={() => jumpToProblem(1)}
+    onPrevProblem={() => jumpToProblem(-1)}
     onCancel={() => void compileCancel()} onClose={() => setPanelOpen(false)} />;
 
   // 尚未选择工作区：明确引导，不让用户盲猜（NC 服务不依赖工程，它的面板仍要在）
@@ -223,7 +231,28 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
           onReload={p => void reloadFile(p)} onOverwriteSave={p => void saveFile(p, true)}
           onSaveUtf8={p => void saveAsUtf8(p)}
           onDismissLargeHint={p => setSession({ largeHintDismissed: v => [...v, p] })} />
-        {active && <Breadcrumb root={root} active={active} />}
+        {active && (
+          <EditorNavRow
+            active={active}
+            root={root}
+            canBack={nav.canBack}
+            canForward={nav.canForward}
+            onBack={goBack}
+            onForward={goForward}
+            outlineOpen={panels.outline}
+            onToggleOutline={() => setPanels((p) => ({ ...p, outline: !p.outline }))}
+            onCloseOutline={() => setPanels((p) => ({ ...p, outline: false }))}
+            onJump={(line) => void openAt(active.path, line)}
+            history={{
+              open: panels.history,
+              onToggle: () => setPanels((p) => ({ ...p, history: !p.history })),
+              onClose: () => setPanels((p) => ({ ...p, history: false })),
+              dirty: isUnsaved(active),
+              // 恢复写的是磁盘：标签的 mtime 变了，必须重载，否则下一次保存会撞 CONFLICT
+              onRestored: (p) => void reloadFile(p),
+            }}
+          />
+        )}
         <div className="wb-editor">
           <EditorPane activePath={activePath} readOnly={active?.readOnly ?? false} reveal={reveal}
             heavy={heavyFile} onCursor={setCursor} onSave={() => activePath && void saveFile(activePath)} />
@@ -234,6 +263,8 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
       status={<EditorStatus root={root} active={active} mark={activeMark} saving={saving}
         panelOpen={panelOpen} onTogglePanel={() => setPanelOpen(v => !v)} />}
     />
+
+      <RenameDialog open={renameOpen} path={activePath} onClose={() => setRenameOpen(false)} />
 
       <ConfirmDialog
         open={closingPath !== null}

@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
 import { initMonaco, monaco } from "../../lib/monacoSetup";
-import { getModel, getViewState, saveViewState } from "../../lib/editorStore";
+import { getModel, getViewState, saveViewState, touchModel } from "../../lib/editorStore";
 import { registerLangProviders } from "../../lib/langProviders";
+import { registerExtraLangProviders } from "../../lib/langProvidersExtra";
+import { registerEditorKeys, setCurrentEditor } from "../../lib/editorActions";
 import { editorCommand, getKeymap } from "../../lib/keymap";
 import { registerJavaSqlActions } from "../../lib/javaSqlActions";
 import { ExtractSqlDialog } from "../db/ExtractSqlDialog";
@@ -45,6 +47,9 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     if (!hostRef.current) return;
     initMonaco();
     registerLangProviders();
+    // 引用 / 格式化 / 快速修复 / 跳实现：与上面四个 provider 同一根管道，
+    // 只是这些能力 Monaco 的右键菜单和命令面板会自动接上去，不用自己造 UI
+    registerExtraLangProviders();
     const editor = monaco.editor.create(hostRef.current, {
       model: null,
       automaticLayout: true,
@@ -71,9 +76,13 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     });
     editor.onDidChangeCursorPosition((e) => onCursorRef.current(e.position.lineNumber, e.position.column));
     const sqlActions = registerJavaSqlActions(editor);
+    // Alt+Enter 绑快速修复；命令面板要靠这个引用找到「当前在编辑哪个文件」
+    registerEditorKeys(editor);
+    setCurrentEditor(editor);
     editorRef.current = editor;
     return () => {
       sqlActions.forEach((d) => d.dispose());
+      setCurrentEditor(null);
       // 注意只销毁编辑器实例，model 留在 editorStore（切到别的页签再回来还在）。
       if (shownRef.current) saveViewState(shownRef.current, editor.saveViewState());
       keyboard.dispose();
@@ -94,6 +103,9 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     editor.setModel(model ?? null);
     shownRef.current = model ? activePath : null;
     if (model && activePath) {
+      // 预览身份（peek 队列里）的模型被显示时保活：转正路径已摘牌，这里是二道网，
+      // 免得正在看的这个正好是下一个被淘汰的
+      touchModel(activePath);
       const vs = getViewState(activePath);
       if (vs) editor.restoreViewState(vs);
       // 恢复视图不会触发 onDidChangeCursorPosition，切页回来时状态栏会停在「第 1 行」。

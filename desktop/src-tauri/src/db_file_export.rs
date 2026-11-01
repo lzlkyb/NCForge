@@ -9,7 +9,8 @@
 //!
 //! 三条格式约定（与前端 `resultExport.ts` 一致，用户在界面里复制、在文件里导出应该是同一份）：
 //! - CSV：`,` 分隔、`"` 加倍转义、含分隔符/引号/换行的字段加引号、行尾 CRLF、开头带 BOM
-//!   （Excel 开 UTF-8 CSV 不带 BOM 会乱码）；
+//!   （Excel 开 UTF-8 CSV 不带 BOM 会乱码）；以 `=` `@` 等开头的自由文本前面加 `'`，
+//!   否则 Excel 会把数据库里的值当公式执行（CSV 注入，CWE-1236）；
 //! - TSV：制表符分隔、字段里的 tab/换行压成空格（否则粘进 Excel 会串行）；
 //! - INSERT：`null` 关键字表 NULL，数字列不加引号，日期走 `to_date(...)` —— 直接复用
 //!   `sql_export::literal`，与「导出 INSERT」那条路径同一个实现。
@@ -50,11 +51,33 @@ impl Format {
     }
 }
 
+/// Excel / Sheets 把以这些字符开头的单元格当公式执行（CSV 注入，CWE-1236）。
+///
+/// `-` 与 `+` 只在后面不是纯数字时才算风险：负数是最常见的数据，给每个 `-1`
+/// 前面加撇号会把整列数字变成文本，代价比防住公式大得多。
+fn formula_risk(s: &str) -> bool {
+    match s.chars().next() {
+        Some('=' | '@' | '\t' | '\r') => true,
+        Some('+' | '-') => s.trim().parse::<f64>().is_err(),
+        _ => false,
+    }
+}
+
+/// 需要防护时在值前面加一个单引号（Excel 的「按文本处理」标记）。
+fn guard_formula(s: &str) -> Cow<'_, str> {
+    if formula_risk(s) {
+        Cow::Owned(format!("'{s}"))
+    } else {
+        Cow::Borrowed(s)
+    }
+}
+
 /// CSV 单字段。只在**需要**时加引号：全加引号虽然也对，但文件会大一倍，
 /// 而且 `less` / `diff` 里全是引号噪音。
 pub fn csv_field(s: &str) -> Cow<'_, str> {
-    if s.contains([',', '"', '\n', '\r']) {
-        Cow::Owned(format!("\"{}\"", s.replace('"', "\"\"")))
+    let guarded = guard_formula(s);
+    if s.contains([',', '"', '\n', '\r']) || guarded.len() != s.len() {
+        Cow::Owned(format!("\"{}\"", guarded.replace('"', "\"\"")))
     } else {
         Cow::Borrowed(s)
     }
@@ -62,9 +85,11 @@ pub fn csv_field(s: &str) -> Cow<'_, str> {
 
 /// TSV 单字段：tab 与换行会破坏列对齐，压成空格（与前端 `toTsv` 一致）。
 pub fn tsv_field(s: &str) -> Cow<'_, str> {
+    let guarded = guard_formula(s);
     if s.contains(['\t', '\n', '\r']) {
         Cow::Owned(
-            s.chars()
+            guarded
+                .chars()
                 .map(|c| {
                     if matches!(c, '\t' | '\n' | '\r') {
                         ' '
@@ -75,7 +100,7 @@ pub fn tsv_field(s: &str) -> Cow<'_, str> {
                 .collect(),
         )
     } else {
-        Cow::Borrowed(s)
+        guarded
     }
 }
 
@@ -272,6 +297,20 @@ mod tests {
         assert_eq!(csv_field("a\nb"), "\"a\nb\"");
         // 反引号、单引号不该触发引号包裹
         assert_eq!(csv_field("it's"), "it's");
+        // 负数照旧是数字：不能给每个 -1 加撇号，否则整列数字变文本
+        assert_eq!(csv_field("-123.45"), "-123.45");
+        assert_eq!(csv_field("+7"), "+7");
+        assert_eq!(csv_field("1e5"), "1e5");
+    }
+
+    #[test]
+    fn csv_公式注入被中和() {
+        assert_eq!(csv_field("=cmd|' /C calc'!A0"), "\"'=cmd|' /C calc'!A0\"");
+        assert_eq!(csv_field("@SUM(A1)"), "\"'@SUM(A1)\"");
+        assert_eq!(csv_field("+CMD"), "\"'+CMD\"");
+        assert_eq!(csv_field("-2+3"), "\"'-2+3\"");
+        assert_eq!(tsv_field("=HYPERLINK(\"x\")"), "'=HYPERLINK(\"x\")");
+        assert_eq!(tsv_field("-1"), "-1");
     }
 
     #[test]

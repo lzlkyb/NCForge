@@ -86,6 +86,9 @@ export function InfoPopover({ label, children }: { label: string; children: Reac
         <div
           ref={popRef}
           role="dialog"
+          // 明确非模态：不抢焦点、不阻断全局快捷键。App / 日志页的快捷键守卫
+          // 只让位给 `aria-modal="true"`，这个气泡打开时 Ctrl+K 等照常可用。
+          aria-modal="false"
           aria-label={label}
           data-state={entered ? "open" : "closed"}
           data-exiting={!open || undefined}

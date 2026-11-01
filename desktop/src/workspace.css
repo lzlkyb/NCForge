@@ -328,6 +328,8 @@
 .wb-prow:hover { background: hsl(var(--secondary)); }
 .wb-prow-err { color: hsl(var(--destructive)); flex-shrink: 0; }
 .wb-prow-warn { color: hsl(var(--warning-ink)); flex-shrink: 0; }
+/* info 档（jdt.ls 的建议/未使用的导入）：弱化色，提示不该和警告一样醒目 */
+.wb-prow-info { color: hsl(var(--muted-foreground)); flex-shrink: 0; }
 .wb-prow-msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-prow-loc { margin-left: auto; flex-shrink: 0; color: hsl(var(--muted-foreground)); font-size: 11.5px; }
 /* 编译诊断（D4）：ecj 原文之外的推断，不算错误数——多行，路径另起一行 */
@@ -339,6 +341,10 @@
 .wb-log-ok { color: hsl(var(--success-ink)); }
 .wb-log-er { color: hsl(var(--destructive-ink)); }
 .wb-log-mu { color: hsl(var(--muted-foreground)); }
+/* 能跳到源码的日志行：长得仍像一行日志，鼠标移上去才显出可点 */
+.wb-log-link { display: block; width: 100%; text-align: left; font: inherit; line-height: inherit; color: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; white-space: pre-wrap; word-break: break-all; }
+.wb-log-link:hover { background: hsl(var(--secondary)); text-decoration: underline; }
+.wb-log-link:focus-visible { outline: 1px solid hsl(var(--ring)); outline-offset: -1px; }
 .wb-tabs-sp { flex: 1; }
 .wb-compile-btn { align-self: center; margin: 0 8px; flex-shrink: 0; }
 /* 状态栏的代码智能状态（设计稿 .ls） */
@@ -362,6 +368,71 @@
 .wb-crumb-sym { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; border-radius: 4px; color: hsl(var(--foreground)); }
 .wb-crumb-sym:hover { background: hsl(var(--secondary)); }
 .wb-crumb-k { font-size: 10px; font-weight: 700; color: hsl(var(--primary)); }
+
+/* 面包屑条：左侧路径 + 右侧「结构」按钮，结构弹层相对这一条定位 */
+.wb-crumb-row { position: relative; display: flex; align-items: center; flex-shrink: 0; background: hsl(var(--card)); }
+.wb-crumb-row .wb-crumb { flex: 1 1 auto; min-width: 0; }
+.wb-nav-btn { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 20px; height: 20px; margin-left: 2px; border-radius: 4px; color: hsl(var(--muted-foreground)); }
+.wb-nav-btn:first-child { margin-left: 8px; }
+.wb-nav-btn:hover:not(:disabled) { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.wb-nav-btn:disabled { opacity: 0.35; cursor: default; }
+.wb-outline-btn { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; height: 20px; margin-right: 8px; padding: 0 6px; border-radius: 4px; font-size: 11px; color: hsl(var(--muted-foreground)); }
+.wb-outline-btn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+/* 结构弹层。z-index 必须显式给正数：面板在 .wb-crumb-row（relative、z-auto）里，
+   而 .wb-editor 在同级更靠后，不给 z-index 会被编辑区盖住。外点关闭挂在 document 上，
+   不再需要盖住编辑区的全屏遮罩——看结构的同时要能滚动代码、点别处对照。 */
+.wb-outline { position: absolute; top: 26px; right: 8px; z-index: 45; display: flex; flex-direction: column; width: 340px; max-height: 60vh; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--popover, var(--card))); box-shadow: 0 8px 24px hsl(var(--foreground) / 0.16); }
+.wb-outline-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; color: hsl(var(--muted-foreground)); }
+.wb-outline-count { margin-left: auto; }
+.wb-outline-q { margin: 6px 8px 4px; padding: 4px 8px; border: 1px solid hsl(var(--border)); border-radius: 4px; background: hsl(var(--background)); font-size: 12px; color: hsl(var(--foreground)); }
+.wb-outline-list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 4px 6px; }
+.wb-outline-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 8px; border-radius: 4px; font-size: 12px; color: hsl(var(--foreground)); text-align: left; }
+.wb-outline-row[data-active] { background: hsl(var(--secondary)); }
+.wb-outline-k { flex-shrink: 0; width: 10px; font-size: 10px; font-weight: 700; color: hsl(var(--primary)); }
+.wb-outline-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-outline-ln { flex-shrink: 0; font-size: 11px; color: hsl(var(--muted-foreground)); }
+.wb-outline-note { padding: 10px 12px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+/* 「历史」按钮选中态（弹层开着时高亮，和「结构」区分） */
+.wb-outline-btn[data-active] { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+
+/* 本地历史弹层：比结构弹层宽（要放 diff），列表 + 详情两段。z-index 同结构弹层 */
+.wb-hist { position: absolute; top: 26px; right: 8px; z-index: 45; display: flex; flex-direction: column; width: 460px; max-height: 72vh; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--popover, var(--card))); box-shadow: 0 8px 24px hsl(var(--foreground) / 0.16); }
+.wb-hist-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; color: hsl(var(--muted-foreground)); }
+.wb-hist-count { margin-left: auto; }
+.wb-hist-x { display: inline-flex; align-items: center; padding: 2px; border-radius: 4px; color: hsl(var(--muted-foreground)); }
+.wb-hist-x:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.wb-hist-x:disabled { opacity: 0.4; cursor: default; }
+.wb-hist-x:disabled:hover { background: none; color: hsl(var(--muted-foreground)); }
+.wb-hist-list { flex-shrink: 0; max-height: 30%; overflow-y: auto; padding: 2px 4px 4px; }
+.wb-hist-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 8px; border-radius: 4px; font-size: 12px; color: hsl(var(--foreground)); text-align: left; }
+.wb-hist-row[data-active] { background: hsl(var(--secondary)); }
+.wb-hist-time { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-hist-size { flex-shrink: 0; font-size: 11px; color: hsl(var(--muted-foreground)); }
+.wb-hist-note { padding: 10px 12px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.wb-hist-detail { display: flex; flex-direction: column; flex: 1; min-height: 0; border-top: 1px solid hsl(var(--border)); }
+.wb-hist-diffhead { display: flex; align-items: center; gap: 8px; padding: 6px 10px 4px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.wb-hist-changes { margin-left: auto; font-style: normal; }
+.wb-hist-changes em { margin-left: 6px; font-style: normal; font-weight: 600; }
+.wb-hist-add { color: hsl(142, 70%, 36%); }
+.wb-hist-del { color: hsl(0, 72%, 50%); }
+.wb-hist-diff { flex: 1; min-height: 0; overflow: auto; padding: 2px 0 6px; font: 11.5px/1.55 "Cascadia Mono", Consolas, monospace; }
+.wb-hist-line { display: flex; align-items: baseline; gap: 6px; padding: 0 10px; white-space: pre; }
+.wb-hist-line.add { background: hsl(142, 70%, 36% / 0.10); }
+.wb-hist-line.del { background: hsl(0, 72%, 50% / 0.10); }
+.wb-hist-ln { flex-shrink: 0; width: 34px; text-align: right; color: hsl(var(--muted-foreground)); user-select: none; }
+.wb-hist-sign { flex-shrink: 0; width: 8px; }
+.wb-hist-line.add .wb-hist-sign { color: hsl(142, 70%, 36%); }
+.wb-hist-line.del .wb-hist-sign { color: hsl(0, 72%, 50%); }
+.wb-hist-text { min-width: 0; }
+.wb-hist-gap { padding: 2px 10px; font-size: 11px; color: hsl(var(--muted-foreground)); background: hsl(var(--secondary) / 0.5); }
+.wb-hist-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding: 8px 10px; border-top: 1px solid hsl(var(--border)); }
+.wb-hist-restore { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border: 1px solid hsl(var(--border)); border-radius: 5px; font-size: 12px; color: hsl(var(--foreground)); }
+.wb-hist-restore:hover { background: hsl(var(--secondary)); }
+.wb-hist-cancel { padding: 4px 10px; border-radius: 5px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.wb-hist-cancel:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.wb-hist-warn { font-size: 12px; color: hsl(var(--muted-foreground)); }
+.wb-hist-error { margin: 0 10px 6px; padding: 6px 8px; border-radius: 5px; background: hsl(0, 72%, 50% / 0.10); font-size: 12px; color: hsl(0, 72%, 45%); }
+.wb-hist-foot { flex-shrink: 0; padding: 8px 10px; border-top: 1px solid hsl(var(--border)); font-size: 11px; color: hsl(var(--muted-foreground)); }
 
 /* 空编辑器页：最近打开 + 快捷键 */
 .wb-empty-box { width: min(420px, calc(100% - 32px)); }

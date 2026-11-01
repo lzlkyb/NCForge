@@ -6,6 +6,7 @@ import { useSyncExternalStore } from "react";
 import { forEachModel, onModelLifecycle, openVirtualModel } from "./editorStore";
 import { severityName, toMonacoRange, uriToPath, type LspRange } from "./langConvert";
 import { monaco } from "./monacoSetup";
+import { setCodeDiags, type CodeDiag } from "./diagStore";
 import { getConfig } from "./appConfig";
 import { invoke, listen } from "./tauri";
 import { getSession } from "./workspaceSession";
@@ -212,6 +213,34 @@ interface LspDiagnostic {
 /** 最近一次收到的诊断（键 = 小写路径）。未稳定时只放这里不显示。 */
 const latestDiags = new Map<string, LspDiagnostic[]>();
 
+/** 键 → 真实路径。`latestDiags` 的键是小写路径（拿来比对 model），但面板要显示原样路径。 */
+const diagPaths = new Map<string, string>();
+
+/**
+ * 把最新一批诊断摊平发给 `diagStore`，供「问题」面板与「跳到下一处」使用。
+ *
+ * 只在**整批刷新的时机**调（静默下来时、以及打开的文件收到新诊断时），不在每收到一个
+ * 文档的诊断时就调：建索引期间 jdt.ls 会在几百毫秒里连推十几份，逐份发布等于让面板
+ * 跟着不停地重建列表。
+ */
+function publishDiags(): void {
+  const out: CodeDiag[] = [];
+  latestDiags.forEach((list, key) => {
+    const path = diagPaths.get(key) ?? key;
+    for (const d of list) {
+      const sev = severityName(d.severity);
+      out.push({
+        path,
+        line: d.range.start.line + 1,
+        column: d.range.start.character + 1,
+        severity: sev === "Error" ? "error" : sev === "Warning" ? "warning" : "info",
+        message: d.message,
+      });
+    }
+  });
+  setCodeDiags(out);
+}
+
 function applyMarkers(lowerPath: string): void {
   const diags = latestDiags.get(lowerPath) ?? [];
   forEachModel((path, model) => {
@@ -231,7 +260,9 @@ function applyMarkers(lowerPath: string): void {
 
 function clearMarkers(): void {
   latestDiags.clear();
+  diagPaths.clear();
   monaco.editor.removeAllMarkers(MARKER_OWNER);
+  publishDiags();
 }
 
 function onDiagnostics(params: { uri: string; diagnostics: LspDiagnostic[] }): void {
@@ -240,7 +271,11 @@ function onDiagnostics(params: { uri: string; diagnostics: LspDiagnostic[] }): v
   const key = path.toLowerCase();
   lastDiagAt = Date.now();
   latestDiags.set(key, params.diagnostics ?? []);
-  if (view.settled) applyMarkers(key);
+  diagPaths.set(key, path);
+  if (view.settled) {
+    applyMarkers(key);
+    publishDiags();
+  }
 }
 
 // ───────────────────── 状态变化 ─────────────────────
@@ -261,6 +296,8 @@ function armSettle(): void {
     if (since >= SETTLE_MAX_MS || (since >= SETTLE_MIN_MS && idle >= SETTLE_IDLE_MS)) {
       setView({ ...view, settled: true });
       latestDiags.forEach((_, key) => applyMarkers(key));
+      // 一次刷完再发：面板要在所有文档的标记都对齐之后才更新列表
+      publishDiags();
       return;
     }
     settleTimer = setTimeout(tick, SETTLE_POLL_MS);
@@ -318,6 +355,39 @@ export async function initLang(): Promise<void> {
 let startTimer: ReturnType<typeof setTimeout> | undefined;
 
 /**
+ * lang_start / lang_stop 的串行队列。
+ *
+ * 为什么必须串行：切工作区是 `void stopLang()` 不等完成的，而防抖里的 start 可能
+ * 紧跟着发出去；两条 IPC 到后端是两个独立的 spawn_blocking，先后没有任何保证。
+ * 一旦撞上「launch 已记下旧 cancel_epoch、stop 随即把它加一」的时序，刚拉起的
+ * jdt.ls 会在登记前被当作「停止意图已作废」杀掉——约 700MB 的进程白起一轮，
+ * 状态栏还停在「正在建立索引」。排队之后，start 只在 stop 的后端处理彻底结束后
+ * 才会发出去。
+ *
+ * 前一个任务失败也继续跑下一个：失败只影响调用方看到的 promise，不毒死队列。
+ */
+let langQueue: Promise<unknown> = Promise.resolve();
+
+function serialize<T>(job: () => Promise<T>): Promise<T> {
+  const next = langQueue.then(job, job);
+  langQueue = next.catch(() => {});
+  return next;
+}
+
+/**
+ * 启动意图的代际：`ensureLang` 调度防抖时记下当前代际，停服务 / 手动启动 / 重启
+ * 都会自增它。启动任务真正**执行**前再核一次代际——它可能排在在途 stop 的后面
+ * （后端杀 jdt.ls 要一两秒），这期间又停过一次（连续切工作区），说明目标模块
+ * 已不属于任何当前工作区，必须放弃，否则会给旧路径白拉一个约 700MB 的进程。
+ */
+let intentGen = 0;
+
+/** 记下一轮新的启动意图，作废之前排队的全部旧意图。 */
+function freshIntent(): number {
+  return (intentGen += 1);
+}
+
+/**
  * 打开 / 切到一个 .java 文件时调用：该文件所在模块还没有语言服务就拉起（切模块 = 重启）。
  * 同一模块上次失败过不自动重试，避免循环弹错；用户可以手动重启。
  */
@@ -328,28 +398,46 @@ export function ensureLang(path: string): void {
   if (!module) return;
   if (view.module?.toLowerCase() === module.toLowerCase() && view.state !== "stopped") return;
   clearTimeout(startTimer);
+  const gen = intentGen;
   startTimer = setTimeout(() => {
-    void invoke("lang_start", { path }).catch(() => {
-      // 失败原因已经由 lang-status(error) 事件带给状态栏
+    void serialize(async () => {
+      // 排队等到执行这一刻再核代际：这期间停过服务，目标模块就已经过期
+      if (gen !== intentGen) return;
+      await invoke("lang_start", { path }).catch(() => {
+        // 失败原因已经由 lang-status(error) 事件带给状态栏
+      });
     });
   }, START_DEBOUNCE_MS);
 }
 
 /** 「自动启动」关掉时，状态栏的「启动」按钮走这里：不防抖、不看自动开关。 */
 export function startLangNow(path: string): void {
-  void invoke("lang_start", { path }).catch(() => {});
+  clearTimeout(startTimer);
+  // 手动启动就是最新意图：防抖里排着的旧目标作废，免得同一模块连起两轮
+  const gen = freshIntent();
+  void serialize(async () => {
+    if (gen !== intentGen) return;
+    await invoke("lang_start", { path }).catch(() => {});
+  });
 }
 
 /** 关掉语言服务（换工作区时调用：旧模块的影子工程对新工作区没有意义）。 */
 export function stopLang(): Promise<void> {
   clearTimeout(startTimer);
-  return invoke<void>("lang_stop").catch(() => {});
+  freshIntent();
+  return serialize(() => invoke<void>("lang_stop").catch(() => {}));
 }
 
 /** 手动重启（状态栏点「重试」）。 */
 export async function restartLang(path: string): Promise<void> {
-  await invoke("lang_stop");
-  await invoke("lang_start", { path });
+  clearTimeout(startTimer);
+  const gen = freshIntent();
+  await serialize(() => invoke("lang_stop"));
+  await serialize(async () => {
+    // 停的途中又停过一次（比如接着切了工作区）：重启的目标也过期了
+    if (gen !== intentGen) return;
+    await invoke("lang_start", { path });
+  });
 }
 
 export function langRequest<T>(
@@ -370,8 +458,12 @@ const jdtText = new Map<string, Promise<string>>();
  *
  * 缓存的只是**文本**，model 每次都在这里确保（`openVirtualModel` 幂等）：标签关掉时 model 会被销毁，
  * 若连 model 一起缓存，再次跳到同一个类就会命中缓存、不重建 model，编辑器显示空白。
+ *
+ * `peek` 给「只是预览」的调用方（provideDefinition 为每个跳转目标预建 model）：
+ * 这些 model 走预览队列，超上限按最近使用淘汰，peek 未必成标签页，不能无限攒。
+ * 默认正式身份：转正已存在的预览 model（摘牌），之后随标签页关闭而销毁。
  */
-export async function loadJdtSource(uri: string): Promise<string> {
+export async function loadJdtSource(uri: string, peek = false): Promise<string> {
   let p = jdtText.get(uri);
   if (!p) {
     p = langRequest<string>("java/classFileContents", null, { uri }, 60_000);
@@ -380,7 +472,8 @@ export async function loadJdtSource(uri: string): Promise<string> {
     p.catch(() => jdtText.delete(uri));
   }
   const text = await p;
-  openVirtualModel(uri, text);
+  if (peek) openVirtualModel(uri, text, { peek: true });
+  else openVirtualModel(uri, text);
   return text;
 }
 

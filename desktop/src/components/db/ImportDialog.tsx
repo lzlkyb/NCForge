@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "../../db-console.css";
 import { Modal } from "../ui/Modal";
 import { Icon } from "../ui/icon";
 import { friendlyDbError } from "../../lib/db";
-import { autoMap, parseCsv, type ParsedCsv } from "../../lib/csvParse";
+import { autoMap, decodeCsvBytes, parseCsv, type ParsedCsv } from "../../lib/csvParse";
 import { planImport } from "../../lib/csvImport";
 import { dbApi, type ColumnInfo, type ImportFail } from "../../lib/dbApi";
 
@@ -30,12 +30,18 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
 }) {
   const [target, setTarget] = useState<ColumnInfo[] | null>(cols);
   /** 文件名与解析结果绑在一起：换文件时不会出现"新名字 + 旧列映射"。 */
-  const [src, setSrc] = useState<{ name: string; csv: ParsedCsv | null }>({ name: "", csv: null });
+  const [src, setSrc] = useState<{ name: string; csv: ParsedCsv | null; encoding: string }>({
+    name: "",
+    csv: null,
+    encoding: "",
+  });
   const [map, setMap] = useState<number[]>([]);
   const [skip, setSkip] = useState(false);
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
-  const [out, setOut] = useState<{ inserted: number; failed: ImportFail[]; ms: number } | null>(null);
+  const [out, setOut] = useState<{ inserted: number; failed: ImportFail[]; ms: number; canceled: boolean } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  /** 取消只置标志：正在飞的那一批必须写完，否则请求发出去了却不知道结果。 */
+  const cancelRef = useRef(false);
   const parsed = src.csv;
   const fileName = src.name;
 
@@ -62,26 +68,22 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
     return false;
   }, [picked]);
 
-  const readFile = (f: File) => {
+  const readFile = async (f: File) => {
     setErr(null);
     setOut(null);
-    setSrc({ name: f.name, csv: null });
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const r = parseCsv(String(reader.result ?? ""));
-        if (r.headers.length === 0 || r.rows.length === 0) {
-          setErr("这个文件里没有读到数据（是不是只有表头？）");
-          return;
-        }
-        setSrc({ name: f.name, csv: r });
-        setMap(autoMap(r.headers, target ?? []));
-      } catch (e) {
-        setErr(`解析失败：${String(e)}`);
+    setSrc({ name: f.name, csv: null, encoding: "" });
+    try {
+      const { text, encoding } = await decodeCsvBytes(f);
+      const r = parseCsv(text);
+      if (r.headers.length === 0 || r.rows.length === 0) {
+        setErr("这个文件里没有读到数据（是不是只有表头？）");
+        return;
       }
-    };
-    reader.onerror = () => setErr("读不了这个文件");
-    reader.readAsText(f);
+      setSrc({ name: f.name, csv: r, encoding });
+      setMap(autoMap(r.headers, target ?? []));
+    } catch (e) {
+      setErr(`读不了这个文件：${String(e)}`);
+    }
   };
 
   const run = async () => {
@@ -93,9 +95,15 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
     let inserted = 0;
     const failed: ImportFail[] = [];
     const t0 = Date.now();
+    let stopped = false;
+    cancelRef.current = false;
     setBusy({ done: 0, total: parsed.rows.length });
     try {
       for (const ch of plan.chunks) {
+        if (cancelRef.current) {
+          stopped = true;
+          break;
+        }
         const res = await dbApi.importRows({
           id: connId,
           table,
@@ -112,7 +120,7 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
         });
         if (!res.committed) break; // 遇错停：这一批已回滚，后面的不再试
       }
-      setOut({ inserted, failed, ms: Date.now() - t0 });
+      setOut({ inserted, failed, ms: Date.now() - t0, canceled: stopped });
       if (inserted > 0) onDone();
     } catch (e) {
       setErr(friendlyDbError(e));
@@ -122,9 +130,14 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
   };
 
   const canRun = !!parsed && !!target && picked.length > 0 && !dupTarget && !busy;
+  // 导入中途关窗会让分批循环失去界面：已写入的批次无法撤回，失败也没人看见。
+  // 关不掉比「悄悄写了一半」诚实——按钮、Esc、遮罩三条路统一由 busy 拦下。
+  const requestClose = () => {
+    if (!busy) onClose();
+  };
 
   return (
-    <Modal open onClose={onClose} className="modal-surface dbx-dlg wide" ariaLabel={`导入数据到 ${table}`}>
+    <Modal open onClose={requestClose} closeOnOverlay={!busy} className="modal-surface dbx-dlg wide" ariaLabel={`导入数据到 ${table}`}>
       <div className="hd">
         <Icon name="upload" size={16} />
         导入数据
@@ -134,7 +147,7 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
       </div>
       <div className="bd one">
         <div className="dbx-hint">
-          读本机的 CSV / TSV 文本（Excel 请另存为「CSV UTF-8」）。空单元格写成 <b>NULL</b>（Oracle 里空串本来就是 NULL）；
+          读本机的 CSV / TSV 文本，UTF-8 与 Excel 默认的 GBK/GB18030 都能自动识别（文件名旁会标出实际编码）。空单元格写成 <b>NULL</b>（Oracle 里空串本来就是 NULL）；
           日期按 <span className="dbx-mono">YYYY-MM-DD HH24:MI:SS</span> 转。每批 {BATCH} 行自成事务，走独立会话——
           不会把你在这个连接上未提交的改动一起提交。
         </div>
@@ -155,12 +168,17 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
               style={{ display: "none" }}
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f) readFile(f);
+                if (f) void readFile(f);
                 e.target.value = "";
               }}
             />
           </label>
-          {fileName && <span className="dbx-mono dbx-muted">{fileName}</span>}
+          {fileName && (
+            <span className="dbx-mono dbx-muted">
+              {fileName}
+              {src.encoding && ` · ${src.encoding}`}
+            </span>
+          )}
           {parsed && (
             <span className="dbx-muted">
               {parsed.headers.length} 列 · {parsed.rows.length} 行
@@ -195,12 +213,17 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
           </>
         )}
 
-        {busy && <div className="dbx-hint" style={{ marginTop: 8 }}>正在写：{busy.done} / {busy.total} 行…</div>}
+        {busy && (
+          <div className="dbx-hint" style={{ marginTop: 8 }}>
+            正在写：{busy.done} / {busy.total} 行…（点「取消导入」会在当前批写完后停下）
+          </div>
+        )}
         {err && <div className="dbx-err" style={{ marginTop: 8 }}>{err}</div>}
         {out && (
           <div className="dbx-hint" style={{ marginTop: 8 }}>
             <div style={{ color: "hsl(var(--foreground))" }}>
-              写进 <b>{out.inserted}</b> 行 · {(out.ms / 1000).toFixed(1)}s
+              {out.canceled ? "已取消 · 已写进 " : "写进 "}
+              <b>{out.inserted}</b> 行 · {(out.ms / 1000).toFixed(1)}s
               {out.failed.length > 0 && (
                 <b style={{ color: "hsl(var(--destructive-ink))" }}> · 失败 {out.failed.length} 行</b>
               )}
@@ -222,9 +245,17 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
           {!target && " · 读取表结构…"}
         </span>
         <span className="dbx-sp" />
-        <button type="button" className="dbx-btn ghost" onClick={onClose}>
-          {out ? "关闭" : "取消"}
-        </button>
+        {busy ? (
+          // 写入中不能关窗（已写的批次撤不回），但必须留一条停下来的路：
+          // 只置标志、当前批写完再停，进度与结果仍然可见。
+          <button type="button" className="dbx-btn ghost" onClick={() => { cancelRef.current = true; }}>
+            取消导入
+          </button>
+        ) : (
+          <button type="button" className="dbx-btn ghost" onClick={requestClose}>
+            {out ? "关闭" : "取消"}
+          </button>
+        )}
         <button type="button" className="dbx-btn" disabled={!canRun} onClick={() => void run()}>
           <Icon name="upload" size={12} />
           开始导入

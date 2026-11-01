@@ -3,7 +3,7 @@ import { toast } from "../ui/toast";
 import { ConnPicker } from "./ConnPicker";
 import { friendlyDbError } from "../../lib/db";
 import { switchConn } from "../../lib/dbActions";
-import { connOf, rtOf, txAction, useDb, type SqlTab } from "../../lib/dbStore";
+import { connOf, ensureSlot, patchTab, rtOf, txAction, useDb, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台工具条：连接胶囊 · 执行 / 脚本 / 计划 / 格式化 · 事务模式 · 历史。生产库整条淡红。 */
 export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, historyOpen, onHistory, snipsOpen, onSnips, sessionsOpen, onSessions }: {
@@ -27,14 +27,21 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
   const conn = connOf(tab.connId);
   const rt = rtOf(tab.connId);
   const connected = rt.status === "connected";
-  const auto = rt.tx?.autoCommit ?? conn?.autoCommit ?? false;
-  const pending = (rt.tx?.statements ?? 0) > 0;
+  // 有槽看槽、没槽看 primary：SQL 标签执行一次之后所有语句都跑在独立槽里，
+  // 只读 primary 会把「另一条会话」的模式显示成这个标签的模式。
+  const tx = tab.slot ? tab.tx : rt.tx;
+  const auto = tx?.autoCommit ?? conn?.autoCommit ?? false;
+  const pending = (tx?.statements ?? 0) > 0;
 
   const setMode = async (on: boolean) => {
     if (!tab.connId || !connected || on === auto) return;
     try {
+      // 先拿到这条标签自己的会话：槽按连接保存的默认值创建，不会继承刚才对 primary
+      // 的临时切换。不先 ensureSlot 就直接切 primary，等于切了一条这个标签不用的会话。
+      const slot = await ensureSlot(tab.id, tab.connId);
+      const next = await txAction(tab.connId, on ? "autocommit-on" : "autocommit-off", slot);
+      if (slot) patchTab<SqlTab>(tab.id, { tx: next });
       // 切到自动提交时 JDBC 会把未提交的事务一并提交：给一句提示
-      await txAction(tab.connId, on ? "autocommit-on" : "autocommit-off");
       if (on && pending) toast("已切到自动提交，之前未提交的语句已一并提交", "warning");
     } catch (e) {
       toast(`切换失败：${friendlyDbError(e)}`, "error");
