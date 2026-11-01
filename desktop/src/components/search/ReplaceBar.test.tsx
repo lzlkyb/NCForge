@@ -52,7 +52,13 @@ const OPTIONS: SearchOptions = {
 };
 
 function form(over: Partial<SearchForm> = {}): SearchForm {
-  return { ...getSearchForm(), outcome: OUTCOME, outcomeRoot: "C:/work/aier", ...over };
+  return {
+    ...getSearchForm(),
+    outcome: OUTCOME,
+    outcomeRoot: "C:/work/aier",
+    outcomeOptions: OPTIONS,
+    ...over,
+  };
 }
 
 let host: HTMLDivElement;
@@ -194,6 +200,15 @@ describe("ReplaceBar", () => {
     act(() => b.click());
     // 禁用按钮点了也不该弹出确认框（jsdom 下 disabled 不再派发 click，双保险）
     expect(document.body.textContent).not.toContain("直接改写磁盘");
+  });
+
+  it("表单条件与结果快照不一致：禁用替换，绝不按新条件改写另一批文件", () => {
+    mount(form({ outcomeOptions: { ...OPTIONS, text: "other" } }));
+    const b = btn("全部替换")!;
+    expect(b.disabled).toBe(true);
+    act(() => b.click());
+    expect(document.body.textContent).not.toContain("直接改写磁盘");
+    expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
   it("确认框开着时工作区变了：警示上墙、确认按钮也禁用（二道网）", async () => {

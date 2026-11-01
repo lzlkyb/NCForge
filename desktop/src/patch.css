@@ -780,6 +780,12 @@
   font-size: 11.5px;
   color: hsl(var(--muted-foreground));
 }
+/* 出包进度：数字位数跳动时不抖（等宽数字），字号跟着动作条走 */
+.pk-live {
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  font-variant-numeric: tabular-nums;
+}
 .pk-out input {
   width: 240px;
   height: 26px;

@@ -55,13 +55,21 @@ export function RenameDialog({ open, path, onClose }: Props) {
     setBusy(true);
     try {
       const r = await applyRenamePlan(plan);
-      // 分开报：写盘的那部分已经生效，编辑器里的还没保存，混成一句话会让人以为都完事了
-      toast(
+      // 分开报：写盘的那部分已经生效，编辑器里的还没保存，混成一句话会让人以为都完事了。
+      // 只读标签跳过也要说——不说的话，工程停在「一半新名一半旧名」用户也不知道。
+      const done =
         r.inEditor > 0
           ? `已重命名：${r.written} 个文件已写入，${r.inEditor} 个在编辑器里（改动未保存，记得 Ctrl+S）`
-          : `已重命名：${r.written} 个文件已写入`,
-        "success",
-      );
+          : `已重命名：${r.written} 个文件已写入`;
+      const skipped = r.skippedReadOnly.length;
+      if (skipped > 0) {
+        toast(
+          `${done}；另有 ${skipped} 个只读标签（混合换行/编码有损）被跳过，这些文件里的引用没有改名`,
+          r.written + r.inEditor === 0 ? "warning" : "success",
+        );
+      } else {
+        toast(done, "success");
+      }
       onClose();
     } catch (e) {
       setError(`改名失败：${e}`);

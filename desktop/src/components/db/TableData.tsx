@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ResultTable } from "./ResultTable";
-import { friendlyDbError, thousands } from "../../lib/db";
+import { friendlyDbError, sameCell, thousands } from "../../lib/db";
 import { dbApi, type Cell, type ColumnInfo, type ColumnMeta } from "../../lib/dbApi";
 import { confirmProdWrite, ask } from "../../lib/dbConfirm";
 import { claimCursor, connOf, rtOf, setTx, type TableTab } from "../../lib/dbStore";
@@ -136,7 +136,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
             changed,
             onEdit: (r, c, v) => {
               const next = new Map(changed);
-              if (v === page.rows[r][c]) next.delete(`${r}:${c}`);
+              if (sameCell(v, page.rows[r][c])) next.delete(`${r}:${c}`);
               else next.set(`${r}:${c}`, v);
               setChanged(next);
             },

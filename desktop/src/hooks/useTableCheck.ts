@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   dbCheckSources,
   dbSchemaStatus,
@@ -20,6 +20,11 @@ export function useTableCheck(files: string[]) {
   const [running, setRunning] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * 核对请求的代数。后端核对是几十秒级的 IO，回来时勾选可能已经换了一批——
+   * 旧结果/旧错误写进去就是「拿上批文件的结论给这批背书」。
+   */
+  const gen = useRef(0);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -33,21 +38,26 @@ export function useTableCheck(files: string[]) {
     void loadStatus();
   }, [loadStatus]);
 
-  // 勾选变了，上次的结果就对不上这一批文件了——不能拿旧结果给新的一批背书
+  // 勾选变了，上次的结果就对不上这一批文件了——不能拿旧结果给新的一批背书。
+  // 同时也让还在飞的核对作废：它的 finally 不该把这一批的转圈关掉（那是它自己的）。
   const fileKey = files.join("|");
   useEffect(() => {
+    gen.current += 1;
     setResult(null);
+    setRunning(false);
   }, [fileKey]);
 
   const run = useCallback(async () => {
+    const my = ++gen.current;
     setRunning(true);
     setError(null);
     try {
-      setResult(await dbCheckSources(files));
+      const r = await dbCheckSources(files);
+      if (gen.current === my) setResult(r);
     } catch (e) {
-      setError(friendlyDbError(e));
+      if (gen.current === my) setError(friendlyDbError(e));
     } finally {
-      setRunning(false);
+      if (gen.current === my) setRunning(false);
     }
     // files 每次渲染都是新数组，用 fileKey 代替它做依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps

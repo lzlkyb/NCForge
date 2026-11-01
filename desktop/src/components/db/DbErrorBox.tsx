@@ -1,5 +1,7 @@
 import { Icon } from "../ui/icon";
+import { toast } from "../ui/toast";
 import { oraCode, similarTo, tableRefs } from "../../lib/db";
+import { copyText } from "../../lib/utils";
 
 /**
  * 执行失败的说明。
@@ -30,7 +32,7 @@ export function DbErrorBox({ error, sql, knownTables, index }: {
         <div style={{ marginTop: 4 }}>
           库里相近的表名（点击复制）：
           {suggestions.map((s) => (
-            <code key={s} onClick={() => void navigator.clipboard.writeText(s.toLowerCase())}>
+            <code key={s} onClick={() => void copyText(s.toLowerCase(), () => toast(`已复制 ${s.toLowerCase()}`, "success"), (e) => toast(`复制失败：${e}`, "error"))}>
               {s.toLowerCase()}
             </code>
           ))}

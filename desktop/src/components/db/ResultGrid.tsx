@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import { cellText } from "../../lib/db";
+import { cellText, sameCell } from "../../lib/db";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { isNumericType } from "../../lib/resultExport";
 import { initialWidths, type SortState } from "../../lib/resultView";
+import { copyText } from "../../lib/utils";
+import { toast } from "../ui/toast";
 
 const ROW_H = 24;
 const HEAD_H = 36;
@@ -116,7 +118,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     const { r, c } = editing.pos;
     // Oracle 里空串就是 NULL，直接记成 NULL，预览 SQL 才不会误导
     const v: Cell = editing.value === "" ? null : editing.value;
-    if (v !== rows[r][c] || edit.changed.has(`${r}:${c}`)) edit.onEdit(r, c, v);
+    if (!sameCell(v, rows[r][c]) || edit.changed.has(`${r}:${c}`)) edit.onEdit(r, c, v);
     setEditing(null);
     boxRef.current?.focus();
   };
@@ -146,7 +148,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     } else if (sel && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && !window.getSelection()?.toString()) {
       e.preventDefault();
       const v = valueAt(sel.r, sel.c);
-      void navigator.clipboard.writeText(v === null ? "" : String(v));
+      void copyText(v === null ? "" : String(v), () => toast("已复制单元格", "success"), (e) => toast(`复制失败：${e}`, "error"));
     }
   };
 

@@ -1,5 +1,5 @@
 import { DockRegion } from "../workspace/WorkbenchDock";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { SearchBar } from "../search/SearchBar";
 import { SearchResults } from "../search/SearchResults";
 import { ReplaceBar } from "../search/ReplaceBar";
@@ -14,6 +14,7 @@ import {
   nextSearchSeq,
   pushHistory,
   setSearchForm,
+  subscribeSearchForm,
   type SearchForm,
 } from "../../lib/searchStore";
 
@@ -35,8 +36,10 @@ export function SearchTab({
 }: {
   onOpenFile: (path: string, line: number, column?: number) => void;
 }) {
-  // 从模块仓库初始化：切走再回来，结果、折叠、滚动位置都还在
-  const [form, setForm] = useState<SearchForm>(getSearchForm);
+  // 直接订阅模块仓库，不留本地副本：applyWorkspace 会调 resetSearchForm 清结果，
+  // 本页被 ActivityPanel 保活、不会重新挂载——本地 useState 副本会让旧工作区的
+  // 结果一直挂在屏幕上（替换虽被 stale 挡住，界面却自相矛盾）。
+  const form = useSyncExternalStore(subscribeSearchForm, getSearchForm, getSearchForm);
   const [history, setHistory] = useState<string[]>(loadHistory);
   // 「在跑」也读仓库：组件卸载不代表后端那次全盘扫描停了
   const loading = form.running;
@@ -62,11 +65,8 @@ export function SearchTab({
   const root = session.root ?? fallbackRoot;
 
   const update = useCallback((patch: Partial<SearchForm>) => {
-    setForm((f) => {
-      const next = { ...f, ...patch };
-      setSearchForm(next);
-      return next;
-    });
+    // 仓库自己合并并广播；写完后本组件经由订阅拿到新的 form
+    setSearchForm(patch);
   }, []);
 
   /**
@@ -92,18 +92,21 @@ export function SearchTab({
     const q = form.query.trim();
     if (!q) return;
     const mine = nextSearchSeq();
+    // 条件与结果必须同源：这份快照既用于本次搜索，也用于之后的「全部替换」。
+    // 用表单实时值去替换，会在「搜完改词没重搜」时改写另一批文件。
+    const opts = buildOptions(form);
     // 新搜索一开始，上次替换留下的「结果已过期」提示就作废了
     update({ running: true, error: null, replaceOutcome: null });
     try {
-      const outcome = await searchWorkspace(buildOptions(form));
+      const outcome = await searchWorkspace(opts);
       if (mine !== currentSearchSeq()) return;
       setHistory(pushHistory(q));
       // 结果里存的是相对路径，必须记下它属于哪个工作区
-      update({ outcome, outcomeRoot: root, collapsed: [], scrollTop: 0 });
+      update({ outcome, outcomeRoot: root, outcomeOptions: opts, collapsed: [] });
     } catch (e) {
       if (mine !== currentSearchSeq()) return;
       // 正则语法错之类：清掉旧结果，否则「报错了但结果还在」会让人以为搜成功了
-      update({ outcome: null, outcomeRoot: null, error: String(e) });
+      update({ outcome: null, outcomeRoot: null, outcomeOptions: null, error: String(e) });
     } finally {
       if (mine === currentSearchSeq()) update({ running: false });
     }

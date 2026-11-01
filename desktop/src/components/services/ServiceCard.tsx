@@ -7,6 +7,8 @@ type Busy = "start" | "stop" | "restart" | "kill" | null;
 interface Props {
   status: ServerStatus | null;
   busy: Busy;
+  /** 状态请求失败：界面不能再把「读不到」说成「已停止」。 */
+  failed?: boolean;
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
@@ -18,6 +20,8 @@ const STATE_TEXT: Record<string, string> = {
   running: "运行中",
   starting: "启动中",
   stopped: "已停止",
+  loading: "正在读取…",
+  unknown: "状态未知",
 };
 
 /** busy 各值的人话（P2-12：按钮被锁时要悬停说得清在等什么）。 */
@@ -35,8 +39,10 @@ const BUSY_TEXT: Record<Exclude<Busy, null>, string> = {
  * 前端自己拼「进程在就算运行」会在「java 起着但端口没监听」时骗人，
  * 而那种状态恰恰最需要用户去翻日志。
  */
-export function ServiceCard({ status, busy, onStart, onStop, onRestart, onEditPort }: Props) {
-  const state = status?.state ?? "stopped";
+export function ServiceCard({ status, busy, failed, onStart, onStop, onRestart, onEditPort }: Props) {
+  // 三态而不是两态：status 没回来时既不是运行也不是停止，读失败时更不能冒充「已停止」
+  // （用户会据此以为服务没起，再点一次启动）
+  const state = status?.state ?? (failed ? "unknown" : "loading");
   const running = state === "running";
   const starting = state === "starting";
   const portConflict = !!status?.portOwner && !status.portOwnedBySelf;
@@ -46,7 +52,7 @@ export function ServiceCard({ status, busy, onStart, onStop, onRestart, onEditPo
   const portLocked = running || starting;
 
   const desc = (() => {
-    if (!status) return "正在读取状态…";
+    if (!status) return failed ? "读取服务状态失败（可重试）" : "正在读取状态…";
     if (portsText(status)) return portsText(status);
     if (status.reason) return status.reason;
     if (status.exitCode !== null && status.exitCode !== 0) return `上次退出码 ${status.exitCode}`;

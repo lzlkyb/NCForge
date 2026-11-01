@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { toast } from "../ui/toast";
 import { SqlToolbar } from "./SqlToolbar";
 import { SqlEditor, type SqlEditorApi } from "./SqlEditor";
@@ -65,16 +65,29 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
     void dbApi.cancel(tab.connId, tab.slot).catch((e) => toast(`取消失败：${friendlyDbError(e)}`, "error"));
   }, [tab.connId, tab.slot]);
 
+  /** 结果区最高能拖到哪：留出工具条与表头，不能让结果区把编辑器整个吃掉。 */
+  const maxRes = () => Math.max(90, (bodyRef.current?.clientHeight ?? 600) - 80);
+
   const dragRes = (startY: number) => {
     const start = resH;
-    const max = (bodyRef.current?.clientHeight ?? 600) - 80;
-    const move = (e: PointerEvent) => setResH(Math.max(90, Math.min(max, start + startY - e.clientY)));
+    const move = (e: PointerEvent) => setResH(Math.max(90, Math.min(maxRes(), start + startY - e.clientY)));
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+  };
+
+  /** 键盘调整分隔条：纯键盘用户也能改结果区高度（ARIA separator 的标准做法）。 */
+  const resizeByKey = (e: ReactKeyboardEvent) => {
+    const step = e.shiftKey ? 48 : 16;
+    if (e.key === "ArrowUp") setResH((h) => Math.max(90, Math.min(maxRes(), h + step)));
+    else if (e.key === "ArrowDown") setResH((h) => Math.max(90, Math.min(maxRes(), h - step)));
+    else if (e.key === "Home") setResH(90);
+    else if (e.key === "End") setResH(maxRes());
+    else return;
+    e.preventDefault();
   };
 
   return (
@@ -110,6 +123,11 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
             role="separator"
             aria-orientation="horizontal"
             aria-label="调整结果区高度"
+            tabIndex={0}
+            aria-valuemin={90}
+            aria-valuemax={maxRes()}
+            aria-valuenow={resH}
+            onKeyDown={resizeByKey}
             onPointerDown={(e) => {
               e.preventDefault();
               dragRes(e.clientY);

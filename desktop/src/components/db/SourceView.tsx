@@ -4,6 +4,7 @@ import { toast } from "../ui/toast";
 import { friendlyDbError } from "../../lib/db";
 import { dbApi, type SourceLine } from "../../lib/dbApi";
 import type { TableTab } from "../../lib/dbStore";
+import { copyText } from "../../lib/utils";
 
 /**
  * 库内源码（只读）：包规范与包体各一段，按 `user_source.type` 分成两组。
@@ -44,7 +45,7 @@ export function SourceView({ tab }: { tab: TableTab }) {
       <div className="dbx-rtool">
         <span className="meta">{lines.length} 行 · 只读（改库里的包请在库里执行，这里不编译也不回写）</span>
         <span className="dbx-sp" />
-        <button type="button" className="dbx-btn ghost" onClick={() => void navigator.clipboard.writeText(all).then(() => toast("已复制源码", "success"))}>
+        <button type="button" className="dbx-btn ghost" onClick={() => void copyText(all, () => toast("已复制源码", "success"), (e) => toast(`复制失败：${e}`, "error"))}>
           <Icon name="copy" size={12} />
           复制全文
         </button>

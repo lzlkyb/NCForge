@@ -379,6 +379,11 @@ export interface ExportFileReq {
   /** 0 / 不传 = 不限（后端仍有 200 万行硬上限，到了会标 `truncated`）。 */
   maxRows?: number;
   timeoutSec?: number;
+  /**
+   * 这次导出的实例号（前端生成）。取消与进度事件都按它定位，
+   * 不传则后端自己取一个，取消就无从下手。一个连接可以同时有好几次导出。
+   */
+  exportId?: number;
 }
 
 export interface ExportFileOut {
@@ -396,6 +401,8 @@ export interface ExportFileOut {
 /** 导出进度事件（`db:export-progress`）。 */
 export interface ExportProgress {
   id: string;
+  /** 这次导出的实例号；老后端可能没有。 */
+  exportId?: number;
   rows: number;
 }
 
@@ -440,8 +447,8 @@ export const dbApi = {
    * 进度走 `db:export-progress` 事件；返回落盘路径，界面用 `revealExport` 定位。
    */
   exportFile: (req: ExportFileReq) => invoke<ExportFileOut>("db_export_file", { req }),
-  /** 请求停止正在进行的流式导出；当前页写完后生效，已写入内容保留。 */
-  cancelExport: () => invoke<void>("db_export_cancel"),
+  /** 请求停止某一次流式导出（按 `exportId`）；当前页写完后生效，已写入内容保留。 */
+  cancelExport: (id: number) => invoke<void>("db_export_cancel", { id }),
   /** 在系统文件管理器里定位刚导出的文件（只允许导出目录内的路径）。 */
   revealExport: (path: string) => invoke<void>("db_export_reveal", { path }),
 

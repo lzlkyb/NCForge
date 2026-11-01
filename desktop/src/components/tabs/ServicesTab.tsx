@@ -45,7 +45,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const [portOpen, setPortOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
 
-  const { data: status, refetch } = useQuery({
+  const { data: status, refetch, isError, error } = useQuery({
     queryKey: ["server-status"],
     queryFn: serverStatus,
     refetchInterval: appHidden ? false : 1000,
@@ -197,11 +197,25 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
         <ServiceCard
           status={status ?? null}
           busy={busy}
+          failed={isError}
           onStart={() => void start()}
           onStop={() => setConfirm("stop")}
           onRestart={() => setConfirm("restart")}
           onEditPort={() => setPortOpen(true)}
         />
+
+        {isError && (
+          <div className="sv-alert" data-tone="warn">
+            <Icon name="alertTriangle" size={14} />
+            <span className="sv-alert-text">
+              读取服务状态失败：{String(error)}。上面的状态未知，不代表服务已停止——先重试，
+              或直接去看日志确认真实情况。
+            </span>
+            <button type="button" className="sv-btn" onClick={() => void refetch()}>
+              重试
+            </button>
+          </div>
+        )}
 
         {conflict && owner && (
           <div className="sv-alert">
@@ -227,7 +241,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
           </div>
         )}
 
-        {!status?.projectRoot && (
+        {status && !status.projectRoot && (
           <div className="sv-alert" data-tone="warn">
             <Icon name="info" size={14} />
             <span className="sv-alert-text">

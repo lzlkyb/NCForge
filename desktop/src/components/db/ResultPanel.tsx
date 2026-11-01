@@ -8,7 +8,7 @@ import { guessTable } from "../../lib/resultExport";
 import { statsText, statsTitle } from "../../lib/dbStats";
 import { dbApi, type ExportFileOut, type ExportProgress } from "../../lib/dbApi";
 import { listen } from "../../lib/tauri";
-import { exportResultFile, reSortOnServer } from "../../lib/dbResultActions";
+import { activeExportId, cancelResultExport, exportResultFile, reSortOnServer } from "../../lib/dbResultActions";
 import { loadMore, ownsCursor, patchTab, rtOf, summaryOf, type ResultEntry, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台下半：每条语句一个结果标签 + 执行计划 + 输出。 */
@@ -112,9 +112,10 @@ function RowsEntryView({ tab, entry, isLast }: { tab: SqlTab; entry: ResultEntry
     if (!busy) return;
     let dead = false;
     let un: (() => void) | undefined;
-    // 进度事件按连接过滤：同时导出两个连接时不能串数字
+    // 按「连接 + 导出实例」过滤：同一条连接上两个结果标签各导一份时不能串数字
     listen<ExportProgress>("db:export-progress", (p) => {
-      if (!dead && p.id === tab.connId) setJob({ rows: p.rows });
+      if (dead || p.id !== tab.connId || p.exportId !== activeExportId(tab.id)) return;
+      setJob({ rows: p.rows });
     })
       .then((f) => {
         if (dead) f();
@@ -125,7 +126,7 @@ function RowsEntryView({ tab, entry, isLast }: { tab: SqlTab; entry: ResultEntry
       dead = true;
       un?.();
     };
-  }, [busy, tab.connId]);
+  }, [busy, tab.connId, tab.id]);
 
   const onExportFile = async (format: "csv" | "tsv" | "insert") => {
     setSaved(null);
@@ -166,7 +167,7 @@ function RowsEntryView({ tab, entry, isLast }: { tab: SqlTab; entry: ResultEntry
             <>
               <Icon name="spinner" size={12} />
               正在导出（后端边读边写）：已写 <b>{thousands(job.rows)}</b> 行…
-              <button type="button" className="dbx-lk" onClick={() => void dbApi.cancelExport()}>
+              <button type="button" className="dbx-lk" onClick={() => cancelResultExport(tab.id)}>
                 取消
               </button>
             </>

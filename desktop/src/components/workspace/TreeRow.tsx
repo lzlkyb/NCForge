@@ -12,6 +12,8 @@ import type { EncodingMark } from "../../lib/workspace";
 export function TreeDirRow({
   name,
   path,
+  id,
+  level,
   open,
   selected,
   padLeft,
@@ -20,6 +22,9 @@ export function TreeDirRow({
 }: {
   name: string;
   path: string;
+  /** 树容器的 `aria-activedescendant` 指向它。 */
+  id: string;
+  level: number;
   open: boolean;
   selected: boolean;
   padLeft: number;
@@ -31,6 +36,11 @@ export function TreeDirRow({
     <button
       type="button"
       className="wb-row"
+      id={id}
+      role="treeitem"
+      tabIndex={-1}
+      aria-level={level}
+      aria-selected={selected}
       style={{ paddingLeft: padLeft }}
       data-selected={selected || undefined}
       onClick={() => onToggle(path)}
@@ -49,6 +59,8 @@ export function TreeDirRow({
 export function TreeFileRow({
   name,
   path,
+  id,
+  level,
   active,
   selected,
   mark,
@@ -59,6 +71,8 @@ export function TreeFileRow({
 }: {
   name: string;
   path: string;
+  id: string;
+  level: number;
   active: boolean;
   selected: boolean;
   mark: EncodingMark | undefined;
@@ -73,6 +87,11 @@ export function TreeFileRow({
     <button
       type="button"
       className="wb-row"
+      id={id}
+      role="treeitem"
+      tabIndex={-1}
+      aria-level={level}
+      aria-selected={selected}
       style={{ paddingLeft: padLeft }}
       data-active={active || undefined}
       data-selected={selected || undefined}

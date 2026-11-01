@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { PanelTab } from "../components/workspace/BottomPanel";
 import type { CompileResult } from "./compile";
-import { onDirtyChange } from "./editorStore";
+import { onDirtyChange } from "./dirtyBus";
 import type { DirItem, EncodingMark, Eol, TextEncoding } from "./workspace";
 
 /** 单个目录的加载结果：加载中 / 条目 / 错误信息。 */

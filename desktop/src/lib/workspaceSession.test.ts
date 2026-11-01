@@ -1,17 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// editorStore 会拉进 monaco（几 MB，且 node 环境跑不动）。这个仓库只依赖它的
-// dirty 事件，换成假实现即可，顺便能手动触发事件验证同步逻辑。
-const dirty = vi.hoisted(() => ({
-  handler: null as ((path: string, dirty: boolean) => void) | null,
-}));
-
-vi.mock("./editorStore", () => ({
-  onDirtyChange: (cb: (path: string, d: boolean) => void) => {
-    dirty.handler = cb;
-    return () => {};
-  },
-}));
+// editorStore 会拉进 monaco（几 MB，且 node 环境跑不动）。仓库现在只订阅
+// `dirtyBus`，这里直接发真实事件——顺带验证「两边没有互相 import」。
+const { emitDirty } = await import("./dirtyBus");
 
 const { getSession, setSession, subscribe } = await import("./workspaceSession");
 
@@ -72,9 +63,9 @@ describe("workspaceSession 仓库", () => {
 
   it("未保存圆点跟着 editorStore 的 dirty 事件翻转", () => {
     setSession({ tabs: [tab("a.java"), tab("b.java")] });
-    dirty.handler?.("b.java", true);
+    emitDirty("b.java", true);
     expect(getSession().tabs.map((t) => t.dirty)).toEqual([false, true]);
-    dirty.handler?.("b.java", false);
+    emitDirty("b.java", false);
     expect(getSession().tabs.map((t) => t.dirty)).toEqual([false, false]);
   });
 
@@ -82,7 +73,7 @@ describe("workspaceSession 仓库", () => {
     setSession({ tabs: [tab("a.java")] });
     const seen = vi.fn();
     const off = subscribe(seen);
-    dirty.handler?.("gone.java", true);
+    emitDirty("gone.java", true);
     expect(seen).not.toHaveBeenCalled();
     off();
   });

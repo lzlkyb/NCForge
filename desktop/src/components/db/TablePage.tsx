@@ -10,6 +10,7 @@ import { friendlyDbError } from "../../lib/db";
 import { dbApi, type ColumnInfo, type IndexInfo } from "../../lib/dbApi";
 import { newConsole } from "../../lib/dbActions";
 import { columnsOf, patchTab, rtOf, useDb, type TableSub, type TableTab } from "../../lib/dbStore";
+import { copyText } from "../../lib/utils";
 
 const SUBS: { key: TableSub; label: string }[] = [
   { key: "data", label: "数据" },
@@ -174,7 +175,7 @@ function MetaText({ tab }: { tab: TableTab }) {
         <div className="dbx-rtool">
           <span className="meta">DBMS_METADATA.GET_DDL（已去掉存储参数）</span>
           <span className="dbx-sp" />
-          <button type="button" className="dbx-btn ghost" onClick={() => void navigator.clipboard.writeText(ddl).then(() => toast("已复制 DDL", "success"))}>
+          <button type="button" className="dbx-btn ghost" onClick={() => void copyText(ddl, () => toast("已复制 DDL", "success"), (e) => toast(`复制失败：${e}`, "error"))}>
             <Icon name="copy" size={12} />
             复制
           </button>

@@ -5,7 +5,8 @@ import { toast } from "../ui/toast";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { PathField } from "./PathField";
 import { HeapField } from "./HeapField";
-import { setWorkspace } from "../../lib/workspace";
+import { applyWorkspace } from "../../lib/switchWorkspace";
+import { ensureFilesSaved } from "../../lib/terminatePreflight";
 import { ncHomeProbe, ncHomeSet, serverHeapSet, type ServerStatus } from "../../lib/server";
 
 /**
@@ -85,7 +86,11 @@ export function ServiceConfig({
           hint={status?.projectRoot ? "改完代码编译后重启即生效" : "未选择"}
           onSave={async (v) => {
             if (running && !(await confirmRunning("工程目录", v))) return "cancelled";
-            const shown = await setWorkspace(v);
+            // 切换会关掉全部标签：与文件页同一个预检，别让服务页成为「静默丢改动」的后门
+            if (!(await ensureFilesSaved("切换工程"))) return "cancelled";
+            // 副作用（关模型 / 停 jdt.ls / 清会话 / 失缓存）只在 applyWorkspace 里定义，
+            // 这里调 setWorkspace 会留下「文件树还是旧根、补全还指着旧工程」的撕裂状态
+            const shown = await applyWorkspace(v, queryClient);
             toast(
               running ? `工程已切换为 ${shown}，重启服务后生效` : `工程已切换为 ${shown}`,
               "success",

@@ -38,7 +38,7 @@
 /* 顶栏安全徽章槽位（横向版 Collapse）：空闲 0 宽、出现 280ms 平滑展开，
    顶栏中段被平滑让位而不是一瞬间跳。不能常驻裁剪——Menu 弹层要向下伸展，
    只在动画窗口内裁横向（组件用 data-clip 控制），稳态（含面板展开时）放开。 */
-.sec-slot { display:grid; grid-template-columns:0fr; opacity:0; transition:grid-template-columns 280ms cubic-bezier(.2,.8,.2,1),opacity 200ms ease; }
+.sec-slot { display:grid; grid-template-columns:0fr; opacity:0; transition:grid-template-columns var(--dur-slow) var(--ease),opacity var(--dur-page) var(--ease); }
 .sec-slot[data-open="true"] { grid-template-columns:1fr; opacity:1; }
 .sec-slot-item { min-width:0; }
 .sec-slot[data-clip] .sec-slot-item { overflow-x:clip; }
@@ -78,7 +78,7 @@
 .log-tab .audit th { position:sticky;top:0;z-index:1;background:hsl(var(--card));font-size:12px; }
 .log-tab .audit td { font-size:12px;font-variant-numeric:tabular-nums; }
 .log-tab .log-search-input { min-width:140px; }
-.app-side .app-side-label { opacity:1;max-width:170px;transition:opacity 120ms,max-width 180ms; }
+.app-side .app-side-label { opacity:1;max-width:170px;transition:opacity var(--dur-fast),max-width var(--dur-enter); }
 .app-side[data-collapsed] .app-side-label { display:block!important;max-width:0;opacity:0;overflow:hidden; }
 .app-shell .app-side[data-collapsed] .app-side-item { justify-content:flex-start;gap:0;padding:8px 12px;overflow:hidden; }
 .app-side[data-collapsed] .app-side-item>svg { flex-shrink:0; }

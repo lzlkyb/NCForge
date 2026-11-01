@@ -21,14 +21,23 @@ describe("applyLspEdits", () => {
     expect(out).toContain("persist();");
   });
 
-  it("行号越界不抛错（服务端给的清单可能略旧）", () => {
-    expect(() => applyLspEdits("a\nb", [edit(99, 0, 1, "x")])).not.toThrow();
+  it("行号越界直接抛错，不把行列夹到文件末尾", () => {
+    // 夹取会改写无关字符；清单与磁盘对不上时应当整体中止
+    expect(() => applyLspEdits("a\nb", [edit(99, 0, 1, "x")])).toThrow(/越界/);
   });
 
-  it("重叠的编辑直接跳过，不拼出乱七八糟的文本", () => {
+  it("列越界直接抛错（只允许行尾之后那一格插入）", () => {
+    expect(() => applyLspEdits("abc", [edit(0, 9, 1, "x")])).toThrow(/越界/);
+    expect(applyLspEdits("abc", [edit(0, 3, 0, "d")])).toBe("abcd");
+  });
+
+  it("重叠的编辑直接抛错，不拼出乱七八糟的文本", () => {
     // 两个编辑都覆盖同一段：硬改会把两次替换叠在一起
-    const out = applyLspEdits("foo bar", [edit(0, 0, 3, "AAA"), edit(0, 1, 3, "BBB")]);
-    expect(out).toBe("AAA bar");
+    expect(() => applyLspEdits("foo bar", [edit(0, 0, 3, "AAA"), edit(0, 1, 3, "BBB")])).toThrow(/重叠/);
+  });
+
+  it("相邻但不重叠的编辑照常应用", () => {
+    expect(applyLspEdits("foo bar", [edit(0, 0, 3, "AAA"), edit(0, 4, 3, "BBB")])).toBe("AAA BBB");
   });
 
   it("空编辑原样返回", () => {

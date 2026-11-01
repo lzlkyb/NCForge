@@ -8,7 +8,7 @@ import {
   readFile,
   type TextEncoding,
 } from "../lib/workspace";
-import { applySaved } from "../lib/tabSession";
+import { applySaved, tabMetaFromDisk } from "../lib/tabSession";
 import { setSession, type TabMeta, type Updater } from "../lib/workspaceSession";
 import { toast } from "../components/ui/toast";
 
@@ -82,18 +82,19 @@ export function useFileSave(tabs: TabMeta[], activePath: string | null) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  /** 异地修改后选「重新加载」：丢弃编辑器里的修改，采用磁盘版本。 */
+  /**
+   * 异地修改后选「重新加载」：丢弃编辑器里的修改，采用磁盘版本。
+   *
+   * 元数据整份按「像刚打开那样」重建（`tabMetaFromDisk`）：只改编码/换行/mtime 会漏掉
+   * 行数、只读状态。磁盘上的新版本可能变成混合换行或编码有损，而旧标签仍是可写状态，
+   * 下一次 Ctrl+S 就会把文件写坏。
+   */
   const reloadFile = async (path: string) => {
     try {
       const c = await readFile(path);
+      const meta = tabMetaFromDisk(path, c);
       replaceContent(path, c);
-      setTabs((ts) =>
-        ts.map((t) =>
-          t.path === path
-            ? { ...t, encoding: c.encoding, hasBom: c.hasBom, eol: c.eol, mtimeMs: c.mtimeMs, dirty: false, eolChanged: false }
-            : t,
-        ),
-      );
+      setTabs((ts) => ts.map((t) => (t.path === path ? { ...t, ...meta, preview: t.preview } : t)));
       setConflictPath(null);
     } catch (e) {
       toast(`重新加载失败：${e}`, "error");

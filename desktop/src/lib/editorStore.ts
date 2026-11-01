@@ -2,6 +2,7 @@
 // 为什么不放 React state：model 是带撤销栈的命令式对象，切换标签页时必须原样保留（光标/撤销/滑动位置），
 // 由 React 管理它的生命周期反而容易误销毁。React 只保存标签元数据（路径/编码/换行）。
 import { monaco } from "./monacoSetup";
+import { emitDirty } from "./dirtyBus";
 import { languageOf, type FileContent } from "./workspace";
 
 type Model = ReturnType<typeof monaco.editor.createModel>;
@@ -16,7 +17,6 @@ interface Entry {
 }
 
 const entries = new Map<string, Entry>();
-const dirtyListeners = new Set<(path: string, dirty: boolean) => void>();
 /** model 的 uri 字符串 → 仓库里的键（真实路径或 jdt:// 地址）。Monaco 的 fsPath 会改盘符大小写，不能反推。 */
 const pathByUri = new Map<string, string>();
 const openListeners = new Set<(path: string, model: Model) => void>();
@@ -134,11 +134,8 @@ export function touchModel(path: string): void {
   touchPeek(path);
 }
 
-/** 订阅「未保存」状态变化（只在 dirty 真正翻转时触发，不是每次击键）。返回取消订阅函数。 */
-export function onDirtyChange(cb: (path: string, dirty: boolean) => void): () => void {
-  dirtyListeners.add(cb);
-  return () => dirtyListeners.delete(cb);
-}
+/** 订阅「未保存」状态变化见 `dirtyBus.onDirtyChange`——这里不再持有订阅者，免得把
+ * workspaceSession 拖进 Monaco。 */
 
 /** 打开（或复用）一个文件的 model。 */
 export function openModel(path: string, content: FileContent): Model {
@@ -163,7 +160,7 @@ function watch(path: string, entry: Entry): void {
     const dirty = model.getAlternativeVersionId() !== entry.savedVersion;
     if (dirty !== entry.lastDirty) {
       entry.lastDirty = dirty;
-      dirtyListeners.forEach((cb) => cb(path, dirty));
+      emitDirty(path, dirty);
     }
   });
 }
@@ -227,7 +224,7 @@ export function markSaved(path: string): void {
   e.savedVersion = e.model.getAlternativeVersionId();
   if (e.lastDirty) {
     e.lastDirty = false;
-    dirtyListeners.forEach((cb) => cb(path, false));
+    emitDirty(path, false);
   }
 }
 

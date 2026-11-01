@@ -235,6 +235,18 @@ export function cellText(v: Cell, max = 400): string {
   return `${s.slice(0, max)}…`;
 }
 
+/**
+ * 编辑前的值算不算「没改」。
+ *
+ * 编辑器里拿到的永远是字符串（输入框），而查询结果的数字/布尔是原生类型：
+ * 直接用 `===` 比，`"128" !== 128`，双击后原样回车也会被记成改动，
+ * 于是标黄、生成一条同值 UPDATE、写回时还报「预期更新 1 行」——全是假的。
+ * NULL 与空串不在这里合并：Oracle 里空串就是 NULL，由调用方先归一。
+ */
+export function sameCell(a: Cell, b: Cell): boolean {
+  return a === b || (a !== null && b !== null && String(a) === String(b));
+}
+
 /** `128` → `128`，`3128` → `3,128`。表数量级要一眼看出来。 */
 export function thousands(n: number): string {
   return n.toLocaleString("zh-CN");

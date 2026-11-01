@@ -49,6 +49,15 @@ export function ContextMenu({
   }, [x, y, items.length]);
 
   useEffect(() => {
+    // 打开就聚焦第一项：纯键盘用户（右键键 / Menu 键）不用再 Tab 一次，
+    // 而且方向键的处理靠 activeElement 定位当前项。
+    const first = boxRef.current?.querySelector<HTMLButtonElement>(
+      '[role="menuitem"]:not(:disabled)',
+    );
+    first?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
     const onDown = (e: MouseEvent) => {
       if (!boxRef.current?.contains(e.target as Node)) onClose();
     };
@@ -59,16 +68,26 @@ export function ContextMenu({
         onClose();
         return;
       }
-      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
       const btns = Array.from(
         boxRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [],
       );
       if (!btns.length) return;
       e.preventDefault();
       const i = btns.indexOf(document.activeElement as HTMLButtonElement);
-      btns[e.key === "ArrowDown" ? (i + 1) % btns.length : (i <= 0 ? btns.length : i) - 1].focus({
-        preventScroll: true,
-      });
+      const next =
+        e.key === "Home"
+          ? 0
+          : e.key === "End"
+            ? btns.length - 1
+            : e.key === "ArrowDown"
+              ? i < 0
+                ? 0
+                : (i + 1) % btns.length
+              : i < 0
+                ? btns.length - 1
+                : (i <= 0 ? btns.length : i) - 1;
+      btns[next].focus({ preventScroll: true });
     };
     const onLeave = () => onClose();
     window.addEventListener("mousedown", onDown, true);

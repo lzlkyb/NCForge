@@ -1198,6 +1198,16 @@ body {
   contain-intrinsic-size: auto 80px;
 }
 
+/* ═════════════════════════════════════════════════════════════════
+   搜索结果按文件分组：文件分组滚出视口后跳过 layout/paint。
+   一次搜索可能带回上万处命中，全量节点在每次滚动与展开/折叠时都要
+   重新布局；分组盒子仍在 DOM 里，锚点跳转与「全部折叠」照常工作。
+   ═════════════════════════════════════════════════════════════════ */
+.sr-group {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+
 /* ═══════════════════════════════════════════ */
 /* 关于卡片 — PastePanda 折叠风格            */
 /* ═══════════════════════════════════════════ */
@@ -1286,7 +1296,7 @@ body {
 }
 
 /* 分类按钮 */
-.cat-btn { transition: all var(--dur-fast); }
+.cat-btn { transition: background-color var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast); }
 .cat-btn .chevron { transition: transform var(--dur-fast); }
 .cat-btn.open .chevron { transform: rotate(180deg); }
 .cat-front.open { background: #EBEEFF; color: #4F46E5; border-color: #4F46E5; }
@@ -1313,7 +1323,7 @@ body {
 .dark .cat-dot-doc   { background: #67E8F9; }
 
 /* 展开标签 */
-.ext-tag { transition: all var(--dur-fast); }
+.ext-tag { transition: background-color var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast); }
 .ext-tag.checked { font-weight: 600; }
 .tag-front.checked { background: #EBEEFF; color: #4F46E5; border-color: #4F46E5; }
 .tag-back.checked  { background: #FFF5ED; color: #B54F0B; border-color: #B54F0B; }
@@ -1506,7 +1516,7 @@ body {
 
 /* 版本历史弹框全屏（requestFullscreen） */
 .vh-fullscreen-container {
-  transition: all var(--dur) var(--ease);
+  transition: background-color var(--dur) var(--ease), padding var(--dur) var(--ease);
 }
 .vh-fullscreen-container:fullscreen {
   background: hsl(var(--background));

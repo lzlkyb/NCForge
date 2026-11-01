@@ -12,8 +12,6 @@ vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
 vi.mock("../../hooks/usePrefersReducedMotion", () => ({
   usePrefersReducedMotion: () => true,
 }));
-// workspaceSession 会拉起 editorStore，editorStore 又拉起 monaco；jsdom 里 monaco 初始化就挂
-vi.mock("../../lib/editorStore", () => ({ onDirtyChange: () => () => {} }));
 
 const ROOT = "C:\\w\\newar";
 const MODULES = `${ROOT}\\modules`;

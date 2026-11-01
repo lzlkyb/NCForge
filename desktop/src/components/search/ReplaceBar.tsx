@@ -41,6 +41,14 @@ export function ReplaceBar({
 }) {
   const hits = form.outcome?.hits ?? [];
   const plan = replacePlan(hits);
+  /**
+   * 结果对应的条件快照。没有快照（旧状态）或与当前表单不一致时一律不许替换：
+   * 确认框列的是旧结果的改动面，后端却按新条件全盘改写——不可撤销的错配。
+   */
+  const snapshot = form.outcomeOptions;
+  const criteriaStale = !snapshot || !sameCriteria(snapshot, options);
+  const shownQuery = snapshot?.text ?? form.query;
+  const scopeBlocked = stale || criteriaStale;
   // 惰性初值：替换在跑时切走再回来，直接进入 running——不能让人再点一次「替换」
   const [phase, setPhase] = useState<Phase>(() => (form.replacing ? "running" : "confirm"));
   const [open, setOpen] = useState(false);
@@ -54,11 +62,12 @@ export function ReplaceBar({
   };
 
   const run = async () => {
-    if (stale) return;
+    if (scopeBlocked || !snapshot) return;
     update({ replacing: true, replaceOutcome: null });
     setPhase("running");
     try {
-      const out = await replaceWorkspace(options, form.replacement);
+      // 用结果对应的快照执行，而不是表单实时值：两者不一致时界面上已经禁用了按钮
+      const out = await replaceWorkspace(snapshot, form.replacement);
       update({ replacing: false, replaceOutcome: out });
       setPhase("done");
     } catch (e) {
@@ -87,7 +96,7 @@ export function ReplaceBar({
           size="sm"
           variant="outline"
           className="h-7"
-          disabled={hits.length === 0 || form.replacing || stale}
+          disabled={hits.length === 0 || form.replacing || scopeBlocked}
           isLoading={form.replacing}
           loadingText="替换中"
           onClick={() => {
@@ -129,7 +138,7 @@ export function ReplaceBar({
         {phase === "confirm" && (
           <>
             <p className="mt-2 text-sm text-muted-foreground">
-              把 <b className="text-foreground">「{form.query.trim() || "（空）"}」</b>
+              把 <b className="text-foreground">「{shownQuery.trim() || "（空）"}」</b>
               {deleting ? "（全部删除）" : <>替换为 <b className="text-foreground">「{form.replacement}」</b></>}
               ，预计涉及 <b className="text-foreground">{plan.files}</b> 个文件、
               <b className="text-foreground">{plan.hits}</b> 处。
@@ -150,6 +159,14 @@ export function ReplaceBar({
                 ：这些搜索结果属于上一个工作区，上面列的改动面也是它的。
                 后端按**当前**工作区执行替换——照着旧清单确认，改的就是新工作区的文件。
                 请取消，重新搜索后再替换。
+              </div>
+            )}
+
+            {criteriaStale && !stale && (
+              <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] leading-relaxed">
+                <b className="text-destructive-ink">搜索条件已改</b>
+                ：上面列的是上一次搜索「{shownQuery.trim() || "（空）"}」的改动面，
+                与当前输入框里的条件不一致。请取消，重新搜索后再替换——否则改的是另一批文件。
               </div>
             )}
 
@@ -193,7 +210,7 @@ export function ReplaceBar({
               <Button variant="outline" size="sm" onClick={close}>
                 取消
               </Button>
-              <Button variant="destructive" size="sm" disabled={stale} onClick={() => void run()}>
+              <Button variant="destructive" size="sm" disabled={scopeBlocked} onClick={() => void run()}>
                 {deleting ? "确认删除" : "确认替换"}
               </Button>
             </div>
@@ -258,5 +275,16 @@ export function ReplaceBar({
         )}
       </Dialog>
     </>
+  );
+}
+
+/** 两份搜索条件是否等价（缺省值与显式 false 视为同一件事）。 */
+function sameCriteria(a: SearchOptions, b: SearchOptions): boolean {
+  return (
+    a.text === b.text &&
+    (a.caseSensitive ?? false) === (b.caseSensitive ?? false) &&
+    (a.wholeWord ?? false) === (b.wholeWord ?? false) &&
+    (a.regex ?? false) === (b.regex ?? false) &&
+    (a.include ?? "") === (b.include ?? "")
   );
 }

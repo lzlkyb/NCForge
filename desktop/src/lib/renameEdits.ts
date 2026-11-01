@@ -33,6 +33,12 @@ export interface RenameResult {
   written: number;
   /** 只在编辑器里改了、还没保存的文件数。 */
   inEditor: number;
+  /**
+   * 因为标签只读（混合换行 / 编码有损 / jar 内虚拟文件）而跳过的文件。
+   *
+   * 这些文件里的符号引用没有改名——必须让人知道，否则工程会停在「改了一半」的状态。
+   */
+  skippedReadOnly: string[];
 }
 
 const posOf = (uri: string): string | null => {
@@ -72,38 +78,53 @@ export function groupEdits(result: unknown): { groups: RenameGroup[]; skipped: s
  * 把 LSP 编辑应用到一段文本上。
  *
  * 从**后往前**改：每个编辑的行列都是相对原文算的，正着改会让后面的偏移全部错位。
- * 重叠的编辑直接跳过（重命名里不该出现，出现了说明服务端给的清单本身有问题，
- * 硬改只会把两个替换拼成一句谁也不认识的话）。
+ *
+ * **越界或重叠一律抛错，不做就近夹取**：清单与磁盘文本对不上时（索引略旧、
+ * 文件在别的程序里被改过），把行列夹到文件末尾会改写无关字符；重叠时丢掉一条
+ * 则留下「一半改名、一半旧名」的工程。两种情况都应当整体中止，让人重试。
  */
 export function applyLspEdits(text: string, edits: LspTextEdit[]): string {
   const starts = [0];
   for (let i = 0; i < text.length; i++) {
     if (text[i] === "\n") starts.push(i + 1);
   }
-  const offsetOf = (p: LspPos): number => {
-    if (p.line < 0) return 0;
-    const base = starts[Math.min(p.line, starts.length - 1)];
-    return Math.min(base + Math.max(0, p.character), text.length);
+  /** 该行内容长度（不含行尾的 \r\n / \n）。 */
+  const lineLen = (line: number): number => {
+    const start = starts[line];
+    const end = line + 1 < starts.length ? starts[line + 1] : text.length;
+    let len = end - start;
+    while (len > 0 && (text[start + len - 1] === "\n" || text[start + len - 1] === "\r")) len -= 1;
+    return len;
+  };
+  const pos = (p: LspPos, what: string): number => {
+    if (p.line < 0 || p.line >= starts.length) {
+      throw new Error(`编辑位置越界（${what} 行 ${p.line + 1}，文件只有 ${starts.length} 行），已中止`);
+    }
+    if (p.character < 0 || p.character > lineLen(p.line)) {
+      throw new Error(`编辑位置越界（${what} 行 ${p.line + 1} 列 ${p.character + 1}），已中止`);
+    }
+    return starts[p.line] + p.character;
   };
   const list = edits
-    .map((e) => ({ start: offsetOf(e.range.start), end: offsetOf(e.range.end), text: e.newText }))
+    .map((e) => ({ start: pos(e.range.start, "起点"), end: pos(e.range.end, "终点"), text: e.newText }))
+    // 起点晚于终点是空/反向区间（LSP 允许），不产生改动；越界在上面的 pos 里已经抛了
     .filter((e) => e.end >= e.start)
     .sort((a, b) => a.start - b.start);
 
-  // 重叠的只留**位置靠前**的那一条，其余丢掉。重命名里不该出现重叠，出现了说明服务端
-  // 给的清单本身有问题；硬改只会把两次替换拼成一句谁也不认识的话，丢掉至少还是一句人话。
-  const accepted: typeof list = [];
+  // 重叠 = 服务端清单本身有问题；硬改会把两次替换拼成一句谁也不认识的话，
+  // 丢掉一条又会漏改。两种都不该悄悄发生，整体中止更诚实。
   let limit = -1;
   for (const e of list) {
-    if (e.start < limit) continue;
-    accepted.push(e);
+    if (e.start < limit) {
+      throw new Error("语言服务给出的编辑范围互相重叠，已中止（没有写入任何文件），请重试");
+    }
     limit = e.end;
   }
 
   // 从后往前改：每个编辑的行列都是相对原文算的，正着改会让后面的偏移全部错位
   let out = text;
-  for (let i = accepted.length - 1; i >= 0; i--) {
-    const e = accepted[i];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i];
     out = out.slice(0, e.start) + e.text + out.slice(e.end);
   }
   return out;

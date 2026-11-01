@@ -280,6 +280,8 @@ function PatchPanel({ root, onNavigate }: { root: string | null; onNavigate: (ta
         blockedCount={scan.data?.blockedCount ?? 0}
         deletedCount={deleted.length}
         building={build.building}
+        progress={build.progress}
+        onCancel={build.doCancel}
         count={chosen.length}
         canBuild={chosen.length > 0 && dirty && !!build.dir}
         // 底部这颗也要走 buildNow：以前它直接 doBuild，把「表不存在」的二次确认

@@ -23,6 +23,8 @@ export function PatchActions({
   blockedCount,
   deletedCount,
   building,
+  progress,
+  onCancel,
   count,
   canBuild,
   onBuild,
@@ -36,6 +38,9 @@ export function PatchActions({
   blockedCount: number;
   deletedCount: number;
   building: boolean;
+  /** 出包进度：`done/total` 条目。刚点下去还没收到第一页时为 null。 */
+  progress: { done: number; total: number } | null;
+  onCancel: () => void;
   count: number;
   canBuild: boolean;
   onBuild: () => void;
@@ -124,6 +129,16 @@ export function PatchActions({
           <Icon name="alertTriangle" size={11} />
           {deletedCount} 个删除文件不进包
         </span>
+      )}
+      {building && (
+        <>
+          <span className="pk-live" role="status">
+            {progress ? `正在写入 ${progress.done}/${progress.total} 个条目…` : "正在准备出包…"}
+          </span>
+          <button type="button" className="pk-link" onClick={onCancel}>
+            取消出包
+          </button>
+        </>
       )}
       </div><button
         type="button"

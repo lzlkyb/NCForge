@@ -1,17 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "../components/ui/toast";
 import type { PatchDraft } from "../lib/patchDraft";
+import { listen } from "../lib/tauri";
 import {
   EMPTY_DRAFT,
   NO_FORCE,
   composeNote,
   patchBuild,
+  patchBuildCancel,
   patchSetOutDir,
   previewZipName,
   ymd,
   type LayerForce,
   type MdDraft,
+  type PatchBuildProgress,
   type PatchBuildResult,
 } from "../lib/patch";
 
@@ -39,7 +42,27 @@ export function usePatchBuild(
   const [draft, setDraft] = useState<MdDraft>(initial?.draft ?? EMPTY_DRAFT);
   const [sqls, setSqls] = useState<string[]>(initial?.sqls ?? []);
   const [building, setBuilding] = useState(false);
+  const [progress, setProgress] = useState<PatchBuildProgress | null>(null);
   const [result, setResult] = useState<PatchBuildResult | null>(null);
+
+  // 出包最坏几十秒，中间没有任何反馈时用户只能等；后端每写完一个条目推一次。
+  useEffect(() => {
+    if (!building) return;
+    let dead = false;
+    let un: (() => void) | undefined;
+    listen<PatchBuildProgress>("patch:build-progress", (p) => {
+      if (!dead) setProgress(p);
+    })
+      .then((f) => {
+        if (dead) f();
+        else un = f;
+      })
+      .catch(() => undefined);
+    return () => {
+      dead = true;
+      un?.();
+    };
+  }, [building]);
 
   // 用户改过就用改过的，否则用后端给的建议值——不做 effect 同步，
   // 否则「切页回来」会把用户刚敲的路径冲掉。
@@ -68,6 +91,7 @@ export function usePatchBuild(
       return;
     }
     setBuilding(true);
+    setProgress(null);
     setResult(null);
     try {
       const r = await patchBuild({
@@ -88,7 +112,13 @@ export function usePatchBuild(
       toast(String(e), "error");
     } finally {
       setBuilding(false);
+      setProgress(null);
     }
+  };
+
+  /** 取消出包：只置标志，后端在下一个条目边界退出。按钮置灰即可，不用二次确认。 */
+  const doCancel = () => {
+    void patchBuildCancel().catch((e) => toast(`取消失败：${String(e)}`, "error"));
   };
 
   return {
@@ -100,10 +130,12 @@ export function usePatchBuild(
     sqls,
     setSqls,
     building,
+    progress,
     result,
     setResult,
     zipName,
     saveOutDir,
     doBuild,
+    doCancel,
   };
 }

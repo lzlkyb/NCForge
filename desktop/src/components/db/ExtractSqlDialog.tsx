@@ -8,6 +8,7 @@ import { loadParamValues, requestExtract, saveParamValues, useExtractRequest } f
 import { ENV_LABEL } from "../../lib/dbApi";
 import { defaultConnId, explain, newConsole, runStatements } from "../../lib/dbActions";
 import { loadConns, useDb } from "../../lib/dbStore";
+import { copyText } from "../../lib/utils";
 
 const TITLE = { run: "在数据库中执行此 SQL", explain: "查看执行计划", copy: "复制为纯 SQL" } as const;
 
@@ -40,8 +41,7 @@ export function ExtractSqlDialog() {
     saveParamValues(req.file, values);
     close();
     if (req.mode === "copy") {
-      await navigator.clipboard.writeText(sql);
-      toast("已复制拼好的 SQL", "success");
+      await copyText(sql, () => toast("已复制拼好的 SQL", "success"), (e) => toast(`复制失败：${e}`, "error"));
       return;
     }
     if (!connId) return toast("先建一个数据库连接", "warning");

@@ -104,6 +104,18 @@ export const patchScan = (files: string[], forceHyext: string[] = [], forceStd: 
 
 export const patchBuild = (args: PatchBuildArgs) => invoke<PatchBuildResult>("patch_build", { args });
 
+/**
+ * 请求停止正在进行的出包。后端在下一个条目边界退出，**旧包不会被覆盖**
+ * （新包先写临时文件，成功后才改名）。
+ */
+export const patchBuildCancel = () => invoke<void>("patch_build_cancel");
+
+/** 出包进度（`patch:build-progress`）：`done/total` 是已写入/待写入的条目数。 */
+export interface PatchBuildProgress {
+  done: number;
+  total: number;
+}
+
 export const patchSetOutDir = (dir: string) => invoke<void>("patch_set_out_dir", { dir });
 
 /** 传 null 清掉自定义产物根，回到自动探测。 */

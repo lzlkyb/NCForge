@@ -1,4 +1,4 @@
-import type { ReplaceOutcome, SearchOutcome } from "./search";
+import type { ReplaceOutcome, SearchOptions, SearchOutcome } from "./search";
 
 /**
  * 搜索页的状态仓库（模块级，不随组件卸载消失）。
@@ -26,14 +26,20 @@ export interface SearchForm {
    */
   outcomeRoot: string | null;
   /**
+   * 产出 `outcome` 时用的搜索条件（快照）。
+   *
+   * 「全部替换」必须拿它执行，不能拿表单的实时值：用户搜完 foo、把输入框改成
+   * bar 再点替换时，确认框列的仍是 foo 的改动面，而按 bar 执行会改写另一批文件
+   * ——不可撤销的错配。条件变了就禁用替换，要求重新搜索。
+   */
+  outcomeOptions: SearchOptions | null;
+  /**
    * 搜索在跑。放仓库里（而不是组件 state）：切页会卸载组件，loading 归 false，
    * 而后端那次全盘扫描还在跑——回来再点一次就是两个扫描并行。
    */
   running: boolean;
   /** 折叠起来的文件路径。 */
   collapsed: string[];
-  /** 上次滚动位置，回来时恢复。 */
-  scrollTop: number;
   /** 后端报错（多半是正则语法错）。 */
   error: string | null;
   /**
@@ -65,9 +71,9 @@ const EMPTY: SearchForm = {
   regex: false,
   outcome: null,
   outcomeRoot: null,
+  outcomeOptions: null,
   running: false,
   collapsed: [],
-  scrollTop: 0,
   error: null,
   replacement: "",
   replacing: false,
@@ -76,12 +82,37 @@ const EMPTY: SearchForm = {
 
 let form: SearchForm = { ...EMPTY };
 
+/**
+ * 滚动位置不进 `form`：它每秒被 onScroll 写几十次，进快照会让整页跟着重渲染。
+ * 只需要在重挂载时恢复一次，所以单独存。
+ */
+let scrollTop = 0;
+export const getSearchScrollTop = (): number => scrollTop;
+export const setSearchScrollTop = (v: number): void => {
+  scrollTop = v;
+};
+
+const listeners = new Set<() => void>();
+
+function emit(): void {
+  listeners.forEach((l) => l());
+}
+
+/** 订阅搜索表单（SearchTab 用 useSyncExternalStore，不再持有本地副本）。 */
+export function subscribeSearchForm(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
+}
+
 export function getSearchForm(): SearchForm {
   return form;
 }
 
 export function setSearchForm(patch: Partial<SearchForm>): void {
   form = { ...form, ...patch };
+  emit();
 }
 
 /**
@@ -96,16 +127,18 @@ export function resetSearchForm(): void {
   // 工作区的结果写回来（它们的 finally 也不会动 running，所以在这里一并清）。
   // replacing 不清：那次全量写盘还在跑，它的完成回调会自己把状态收尾。
   void nextSearchSeq();
+  scrollTop = 0;
   form = {
     ...form,
     outcome: null,
     outcomeRoot: null,
+    outcomeOptions: null,
     collapsed: [],
-    scrollTop: 0,
     error: null,
     running: false,
     replaceOutcome: null,
   };
+  emit();
 }
 
 /**

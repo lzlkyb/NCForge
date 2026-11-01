@@ -2,6 +2,7 @@ import { monaco } from "./monacoSetup";
 import { extractSql } from "./sqlExtract";
 import { requestExtract, type ExtractMode } from "./sqlExtractRequest";
 import { toast } from "../components/ui/toast";
+import { copyText } from "./utils";
 
 const ACTIONS: { id: string; label: string; mode: ExtractMode; order: number }[] = [
   { id: "ncforge.sql.run", label: "在数据库中执行此 SQL", mode: "run", order: 1 },
@@ -32,7 +33,7 @@ export function registerJavaSqlActions(editor: monaco.editor.IStandaloneCodeEdit
         }
         // 没参数的复制不用弹框
         if (a.mode === "copy" && hit.params.length === 0) {
-          void navigator.clipboard.writeText(hit.sql).then(() => toast("已复制拼好的 SQL", "success"));
+          void copyText(hit.sql, () => toast("已复制拼好的 SQL", "success"), (e) => toast(`复制失败：${e}`, "error"));
           return;
         }
         requestExtract({ ...hit, file: model.uri.path, mode: a.mode });

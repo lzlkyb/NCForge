@@ -79,7 +79,12 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
           setResult(r);
           setSel(0);
         })
-        .catch(() => {});
+        .catch((e) => {
+          // 不能吞：工程根读不到、语言服务挂了都会走到这里，静默空列表会被当成「没有这个类」
+          if (!alive) return;
+          setResult({ items: [], note: `查询失败：${e instanceof Error ? e.message : String(e)}` });
+          setSel(0);
+        });
     }, mode === "type" && query ? 120 : 0);
     return () => {
       alive = false;

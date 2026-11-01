@@ -68,6 +68,11 @@ export async function saveOne(tab: SaveTarget, opts: SaveOptions = {}): Promise<
     // 标签还在但 model 已经没了：与其静默返回让调用方以为保存成功，不如明确报错
     throw new Error(`编辑器里没有 ${baseName(tab.path)} 的内容`);
   }
+  // 兜底：只读标签正常拦在调用方，但「重新加载成混合换行」「标签状态被别的路径改过」
+  // 都可能让一个可写标签带着 MIXED 走到这里。后端会拒，这里先给出人话，也免得白归档一次历史。
+  if (tab.eol === "MIXED") {
+    throw new Error(`${baseName(tab.path)} 是混合换行（CRLF 与 LF 混用），请先统一换行再保存`);
+  }
   const encoding = opts.encodingOverride ?? tab.encoding;
   // 转 UTF-8 时不写 BOM：BOM 是「原来是 UTF-8 带 BOM」这个事实的延续，
   // 转换后的文件不该凭空多出三个字节。

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Icon } from "../ui/icon";
 import type { MatchRange, SearchHit } from "../../lib/search";
-import { setSearchForm, type SearchForm } from "../../lib/searchStore";
+import { setSearchScrollTop, getSearchScrollTop, type SearchForm } from "../../lib/searchStore";
 
 /**
  * 搜索结果区：汇总行 + 按文件分组的结果。
@@ -25,8 +25,8 @@ export function SearchResults({
   // 滚动位置只在挂载时恢复一次，之后由 onScroll 持续记录
   useEffect(() => {
     const el = listRef.current;
-    if (el && form.scrollTop > 0) el.scrollTop = form.scrollTop;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const saved = getSearchScrollTop();
+    if (el && saved > 0) el.scrollTop = saved;
   }, []);
 
   // 换了一份结果（重新搜索）就回到顶部。恢复逻辑只跑一次，光把仓库里的 scrollTop
@@ -93,7 +93,7 @@ export function SearchResults({
       {/* ── 结果区 ── */}
       <div
         ref={listRef}
-        onScroll={(e) => setSearchForm({ scrollTop: e.currentTarget.scrollTop })}
+        onScroll={(e) => setSearchScrollTop(e.currentTarget.scrollTop)}
         className="min-h-0 flex-1 overflow-auto"
       >
         {!outcome && !form.error && (
@@ -132,7 +132,7 @@ export function SearchResults({
           const name = slash < 0 ? path : path.slice(slash + 1);
           const dir = slash < 0 ? "" : path.slice(0, slash);
           return (
-            <div key={path} className="border-b border-border">
+            <div key={path} className="sr-group border-b border-border">
               <button
                 type="button"
                 onClick={() => toggleCollapse(path)}

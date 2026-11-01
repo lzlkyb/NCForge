@@ -104,10 +104,12 @@ function AppContent() {
 
   // ── 状态源（壳子示例：后端还没有业务状态，这里演示查询范式）──
   // 业务把 queryKey/queryFn 换成自家命令，如 invoke<StatusResponse>("get_status")
+  // 只用来显示版本号 / 启动错误，没有「实时」语义：30 秒一次足够，兜住设置页
+  // 改完之后漏掉的 invalidate。以前 5 秒一次等于每分钟多打 11 次无意义的 IPC。
   const { data: status } = useQuery({
     queryKey: ["app-status"],
     queryFn: () => invoke<{ version?: string; running?: boolean; platform?: string }>("get_app_info"),
-    refetchInterval: appHidden ? false : 5000,
+    refetchInterval: appHidden ? false : 30_000,
     retry: false,
   });
 

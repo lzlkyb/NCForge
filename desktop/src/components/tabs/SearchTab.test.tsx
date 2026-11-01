@@ -7,9 +7,6 @@ import { setSession } from "../../lib/workspaceSession";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
-// workspaceSession 会拉起 editorStore，editorStore 又拉起 monaco；jsdom 里 monaco 初始化就挂
-// （搜索页只从会话读 root，不碰编辑器）
-vi.mock("../../lib/editorStore", () => ({ onDirtyChange: () => () => {} }));
 
 const ROOT = "C:\\w\\newar";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

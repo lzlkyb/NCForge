@@ -99,7 +99,7 @@ html.dark[data-ui-style="glass"] .app-boot-fade {
 .app-shell .app-topbar::after {
   content: ""; position: absolute; inset: auto 0 -14px; height: 16px;
   background: linear-gradient(to bottom, hsl(var(--background) / .85), transparent);
-  pointer-events: none; opacity: 0; transition: opacity 140ms ease-out;
+  pointer-events: none; opacity: 0; transition: opacity var(--dur-exit) ease-out;
 }
 html[data-ui-style="glass"] .app-topbar::after {
   background: linear-gradient(to bottom, rgb(231 237 246 / .72), transparent);
@@ -275,7 +275,7 @@ html[data-ui-style="glass"] .update-slot .header-badge {
   transform: none;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  transition: box-shadow 140ms ease, filter 140ms ease;
+  transition: box-shadow var(--dur-exit) var(--ease), filter var(--dur-exit) var(--ease);
 }
 html.dark[data-ui-style="glass"] .update-slot .header-badge {
   --badge-depth: inset 0 1px 0 rgb(215 232 255 / .22), inset 0 -1px 0 rgb(0 4 20 / .22), 0 1px 2px rgb(0 4 20 / .22), 0 4px 8px -4px rgb(0 4 20 / .48);

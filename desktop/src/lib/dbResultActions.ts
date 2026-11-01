@@ -53,6 +53,37 @@ function stamp(): string {
 }
 
 /**
+ * 正在进行的导出：结果标签 id → 这次导出的实例号。
+ *
+ * 同一条连接上可能同时开着几次导出（两个结果标签各导一份），后端只认识实例号，
+ * 所以「取消」必须按标签找到自己那一次——用一个全局布尔会把别人的导出一起停掉。
+ */
+const activeExports = new Map<string, number>();
+let exportSeq = 0;
+
+/** 本次进程内单调递增，够用；不和时间戳拼，避免同毫秒撞号。 */
+function nextExportId(): number {
+  exportSeq += 1;
+  return exportSeq;
+}
+
+/** 取消某个结果标签正在进行的导出；这个标签没有导出时什么也不做。 */
+export function cancelResultExport(tabId: string): void {
+  const id = activeExports.get(tabId);
+  if (id === undefined) return;
+  void dbApi.cancelExport(id);
+}
+
+/**
+ * 这个标签当前导出的实例号（没有 = undefined）。
+ *
+ * 进度事件按实例号过滤：同一条连接上两个结果标签各自导出时，行数不能串到对方那儿去。
+ */
+export function activeExportId(tabId: string): number | undefined {
+  return activeExports.get(tabId);
+}
+
+/**
  * 把整条查询的结果流式导出成文件（A4）。返回落盘信息（界面据此显示路径与「打开文件夹」）。
  *
  * 与工具栏那个「导出 INSERT」（`db_export_insert`）的分工：
@@ -68,6 +99,8 @@ export async function exportResultFile(
   const tab = sqlTabOf(tabId);
   if (!tab?.connId) return null;
   const base = table && table !== "表名" ? table : "result";
+  const exportId = nextExportId();
+  activeExports.set(tabId, exportId);
   try {
     const out = await dbApi.exportFile({
       id: tab.connId,
@@ -78,6 +111,7 @@ export async function exportResultFile(
       // 0 = 不限：导出要的是全量（后端仍有 200 万行硬上限，到了会标 truncated）
       maxRows: 0,
       timeoutSec: Math.max(tab.timeoutSec, 300),
+      exportId,
     });
     toast(
       out.canceled
@@ -91,5 +125,8 @@ export async function exportResultFile(
   } catch (e) {
     toast(`导出失败：${friendlyDbError(e)}`, "error");
     return null;
+  } finally {
+    // 只清理自己那一次：用户可能已经在这个标签上开始了下一次导出
+    if (activeExports.get(tabId) === exportId) activeExports.delete(tabId);
   }
 }

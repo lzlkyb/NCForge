@@ -18,10 +18,12 @@ const plain = (v: Cell) => (v === null || v === undefined ? "" : String(v));
  * Excel / Sheets 会把以 `=` `@` 开头的格当公式执行（CSV 注入，CWE-1236）。
  * `-` `+` 只在后面不是纯数字时才算风险：负数太常见，给每个 `-1` 加撇号
  * 会把整列数字变成文本。防护方式是在值前加 `'`（Excel 的按文本处理标记）。
+ * 前导空白先剥掉再判：导入器带「去前导空格」选项时 ` =1+1` 会先变成 `=1+1` 再求值。
  */
 function formulaRisk(s: string): boolean {
-  if (/^[=@\t\r]/.test(s)) return true;
-  if (/^[+-]/.test(s)) return !Number.isFinite(Number(s));
+  const t = s.replace(/^[ \t\r\n]+/, "");
+  if (/^[=@]/.test(t)) return true;
+  if (/^[+-]/.test(t)) return !Number.isFinite(Number(t));
   return false;
 }
 

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
+import { copyText } from "../../lib/utils";
 
 function prettyJson(s: string): string | null {
   const t = s.trim();
@@ -46,7 +47,7 @@ export function CellDetail({ column, zh, row, value, empty, onClose }: {
       </div>
       <pre className={value === null ? "dbx-muted" : undefined}>{empty ? "" : value === null ? "NULL" : (pretty ?? text)}</pre>
       <div className="ft">
-        <button type="button" className="dbx-btn ghost" disabled={empty || value === null} onClick={() => void navigator.clipboard.writeText(text).then(() => toast("已复制", "success"))}>
+        <button type="button" className="dbx-btn ghost" disabled={empty || value === null} onClick={() => void copyText(text, () => toast("已复制", "success"), (e) => toast(`复制失败：${e}`, "error"))}>
           <Icon name="copy" size={12} />
           复制
         </button>

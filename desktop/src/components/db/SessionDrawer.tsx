@@ -3,6 +3,7 @@ import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { dbApi, type SessionRow } from "../../lib/dbApi";
 import { friendlyDbError } from "../../lib/db";
+import { copyText } from "../../lib/utils";
 
 /** 自动刷新间隔。5 秒够看清「谁锁了谁」，也不至于把共用库查出压力。 */
 const REFRESH_MS = 5000;
@@ -52,7 +53,7 @@ export function SessionDrawer({ connId, onClose }: { connId: string; onClose: ()
 
   const copy = (text: string, what: string) => {
     if (!text) return;
-    void navigator.clipboard.writeText(text).then(() => toast(`已复制${what}`, "success"));
+    void copyText(text, () => toast(`已复制${what}`, "success"), (e) => toast(`复制失败：${e}`, "error"));
   };
 
   const blocked = (rows ?? []).filter((r) => r.blocker != null).length;

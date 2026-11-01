@@ -2,6 +2,7 @@ import {
   Fragment,
   forwardRef,
   useImperativeHandle,
+  useMemo,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -17,6 +18,8 @@ import { useTreeDelete } from "./useTreeDelete";
 import { useTreeEdit } from "./useTreeEdit";
 import { useTreeLoad } from "./useTreeLoad";
 import { baseName, dirName, joinPath, type NewEntryKind } from "../../lib/workspace";
+import { flattenTree, treeKeyAction, treeRowId as rowId } from "../../lib/treeNav";
+
 
 interface Props {
   root: string;
@@ -116,8 +119,22 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
 
   // ---- 键盘 ----
 
+  const flat = useMemo(() => flattenTree(dirs, expanded, root), [dirs, expanded, root]);
+
+  /**
+   * 方向键导航的语义在 `lib/treeNav`（纯函数，可单测）；这里只把动作落到状态上。
+   * 焦点一直留在容器上（行是 `tabIndex=-1`），靠 `aria-activedescendant` 播报当前行。
+   */
   const onKeyDown = (e: ReactKeyboardEvent) => {
     if (editing) return;
+    const act = treeKeyAction(e.key, flat, selected, expanded);
+    if (act) {
+      e.preventDefault();
+      if (act.kind === "select") setSelected({ path: act.path, isDir: act.isDir });
+      else if (act.kind === "toggle") toggle(act.path);
+      else onOpen(act.path);
+      return;
+    }
     if (!selected) return;
     if (e.key === "F2") {
       e.preventDefault();
@@ -190,6 +207,8 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
             key={full}
             name={item.name}
             path={full}
+            id={rowId(full)}
+            level={depth + 1}
             open={open}
             selected={selected?.path === full}
             padLeft={6 + depth * 14}
@@ -207,6 +226,8 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
             key={full}
             name={item.name}
             path={full}
+            id={rowId(full)}
+            level={depth + 1}
             active={activePath === full}
             selected={selected?.path === full}
             mark={marks[full]}
@@ -228,7 +249,10 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     <>
       <div
         className="wb-tree-list"
+        role="tree"
+        aria-label="文件树"
         tabIndex={0}
+        aria-activedescendant={selected ? rowId(selected.path) : undefined}
         onKeyDown={onKeyDown}
         onContextMenu={(e) => {
           // 空白处右键 = 对工作区根操作（新建到根下）

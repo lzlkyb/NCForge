@@ -129,7 +129,9 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
     }
   };
 
-  const canRun = !!parsed && !!target && picked.length > 0 && !dupTarget && !busy;
+  // 导入结束（out 有值）后不允许再点：同一份文件再导一遍就是整批重复数据，
+  // 而表上往往没有唯一约束兜底。要再导必须先重新选文件（readFile 会清掉 out）。
+  const canRun = !!parsed && !!target && picked.length > 0 && !dupTarget && !busy && !out;
   // 导入中途关窗会让分批循环失去界面：已写入的批次无法撤回，失败也没人看见。
   // 关不掉比「悄悄写了一半」诚实——按钮、Esc、遮罩三条路统一由 busy 拦下。
   const requestClose = () => {
@@ -256,7 +258,7 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
             {out ? "关闭" : "取消"}
           </button>
         )}
-        <button type="button" className="dbx-btn" disabled={!canRun} onClick={() => void run()}>
+        <button type="button" className="dbx-btn" disabled={!canRun} title={out ? "这次导入已结束；要再导一遍请重新选择文件" : undefined} onClick={() => void run()}>
           <Icon name="upload" size={12} />
           开始导入
         </button>

@@ -53,6 +53,7 @@
 .dbx-stmt-gl { border-left: 2px solid hsl(var(--primary)); margin-left: 3px; }
 .dbx-splitbar { height: 5px; background: hsl(var(--border) / .6); cursor: row-resize; flex-shrink: 0; }
 .dbx-splitbar:hover { background: hsl(var(--primary) / .4); }
+.dbx-splitbar:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; background: hsl(var(--primary) / .4); }
 .dbx-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: hsl(var(--muted-foreground)); font-size: 12.5px; padding: 24px; text-align: center; }
 
 /* ── SQL 工具条 ── */

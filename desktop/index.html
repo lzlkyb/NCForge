@@ -28,11 +28,11 @@
          样式全部内联、不依赖 Tailwind 那份 CSS（它也是外部资源）。
 
          P2-8：布局重画。原稿画的还是旧「顶部 4 个等宽 Tab」布局，而真实布局早在
-         侧栏化改造后就是「左 200px 窄导航 + 52px Header + 内容区」——每次开窗先
+         侧栏化改造后就是「左 148px 窄导航 + 36px Header + 内容区」——每次开窗先
          看到一套不存在的布局再跳变。现在参考尺寸全部取自真实布局：
-         - .app-side 200px / card 底 / 右边框；.app-side-head 52px + logo 28px；
-           导航项 padding 8px 10px + gap 10px + 图标 16px（index.css:1763-1861）
-         - .app-topbar 52px，Header 渐变 card→bg 与 --header-start/end 一致
+         - .app-side 148px（workbench-layout.css）/ card 底 / 右边框；
+           .app-side-head 52px + logo 23px；导航项 padding 8px 10px + gap 10px + 图标 16px
+         - .app-topbar 36px（workbench-layout.css 覆盖了 index.css 的 52px）
          - 暗色四色对齐 app token：bg #121620 / card #191F2C / block #2C2D32 /
            border #35363B（index.css:188-215），原 #09090b 是上一代暗色底，
            开窗瞬间会看到一道色带跳变。
@@ -70,7 +70,7 @@
       /* 左侧窄导航（对齐 .app-side） */
       .boot-side {
         flex: none;
-        width: 200px;
+        width: 148px;
         display: flex;
         flex-direction: column;
         background: var(--sk-card);
@@ -123,10 +123,10 @@
         display: flex;
         align-items: center;
         gap: 10px;
-        height: 52px;
+        height: 36px;
         padding: 0 12px;
         border-bottom: 1px solid var(--sk-border);
-        background: linear-gradient(180deg, var(--sk-card), var(--sk-bg));
+        background: var(--sk-bg);
       }
       .boot-body {
         flex: 1;
@@ -187,8 +187,8 @@
                  不用等 JS bundle——能画的就不该拿灰块代替，看着像「应用已经在了」而不是「还在加载」。
                  外层保留 .sk 作底（注意不带 live，不流光）：万一图没加载出来，看到的还是个灰方块，
                  不会变成浏览器的破图标。旁边的应用名仍用骨架块：那是文字，字体未就绪时画出来会跳。 -->
-            <div class="sk" style="width: 28px; height: 28px; border-radius: 7px; flex: none">
-              <img src="/icon.png" alt="" width="28" height="28" style="display: block; border-radius: 7px" />
+            <div class="sk" style="width: 23px; height: 23px; border-radius: 5px; flex: none">
+              <img src="/icon.png" alt="" width="23" height="23" style="display: block; border-radius: 5px" />
             </div>
             <div style="flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0">
               <div class="sk live" style="width: 96px; height: 14px"></div>

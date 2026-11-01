@@ -7,6 +7,8 @@ import type { CheckIssue, SourceCheck } from "../../lib/db";
 import { agoText } from "../../lib/tableHover";
 import { requestOpenFile } from "../../lib/openFileRequest";
 import { useTableCheck } from "../../hooks/useTableCheck";
+import { copyText } from "../../lib/utils";
+import { toast } from "../ui/toast";
 
 /**
  * 出包前的表结构核对。
@@ -264,8 +266,12 @@ async function copyReport(r: SourceCheck): Promise<void> {
       : `[字段不存在] ${i.table}.${i.column}  ${i.rel}:${i.line}`,
   );
   try {
-    await navigator.clipboard.writeText([head, ...lines].join("\n"));
+    await copyText(
+      [head, ...lines].join("\n"),
+      () => toast(`已复制核对结果（${r.issues.length} 条问题）`, "success"),
+      () => toast("复制失败：剪贴板不可用", "error"),
+    );
   } catch {
-    // 剪贴板被拒（无焦点/无权限）时不该静默，但也不值得弹窗——文案已经给出去了
+    // copyText 自己兜住拒绝，这里只是防御（如 navigator.clipboard 整个不存在）
   }
 }

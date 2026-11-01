@@ -7,6 +7,7 @@ import { newConsole, openTable } from "../../lib/dbActions";
 import { toggleFavorite, useFavorites } from "../../lib/dbFavorites";
 import { columnsOf, openTableTab, rtOf, tabOf, useDb } from "../../lib/dbStore";
 import { toast } from "../ui/toast";
+import { copyText } from "../../lib/utils";
 
 /** 真实库里上万张表是常态，一次全铺会让侧栏卡死：每组只渲染前 N 条，靠筛选收敛。 */
 const LIMIT = 200;
@@ -86,7 +87,7 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
         { label: "查看结构", icon: "info", onSelect: () => void openTable(connId, t.name, "struct") },
         { label: "查看 DDL", icon: "file", onSelect: () => void openTable(connId, t.name, "ddl") },
         { label: "新建查询", icon: "terminal", separator: true, onSelect: () => void newConsole(connId, `select * from ${lower} where rownum <= 100`) },
-        { label: "复制表名", icon: "copy", onSelect: () => void navigator.clipboard.writeText(lower).then(() => toast(`已复制 ${lower}`, "success")) },
+        { label: "复制表名", icon: "copy", onSelect: () => void copyText(lower, () => toast(`已复制 ${lower}`, "success"), (e) => toast(`复制失败：${e}`, "error")) },
         { label: favs.includes(t.name) ? "取消收藏" : "收藏", icon: "sparkles", onSelect: () => toggleFavorite(connId, t.name) },
       ],
     });
