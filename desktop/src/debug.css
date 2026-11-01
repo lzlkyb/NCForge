@@ -1,0 +1,303 @@
+/* 调试器：底部「调试」面板、行号槽断点与暂停行。
+   颜色全部取主题 token（index.css 的 :root / .dark），深浅色自动跟随。 */
+
+/* ── NC 服务卡上的调试相关状态 ───────────────────────────────────────────── */
+/* 「调试模式」开关按下去的高亮：与设置页选中态同族（accent + primary 描边） */
+.sv-btn[data-on] {
+  background: hsl(var(--accent));
+  border-color: hsl(var(--primary) / 0.45);
+  color: hsl(var(--accent-foreground));
+}
+
+/* JDWP 有端口才用警示黄：它是「这次启动带调试」的提示，不是常驻状态 */
+.sv-jdwp[data-on] {
+  color: hsl(var(--warning-ink));
+}
+
+/* ── 行号槽 ──────────────────────────────────────────────────────────────── */
+/* Monaco 的 .cgmr 是居中格且内联设置 width/height，尺寸画在伪元素上 */
+.ncforge-bp-glyph::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: hsl(var(--destructive));
+}
+
+/* 还没落点：空心虚线圆。不填实，免得用户以为「已经会停」 */
+.ncforge-bp-glyph-unverified::before {
+  background: transparent;
+  border: 1.5px dashed hsl(var(--destructive) / 0.65);
+}
+
+/* 暂停行：整行淡黄底 + 行号槽的 ▶（lineDecorations 默认宽 10px，箭头控制在 8px 内） */
+.ncforge-debug-line {
+  background: hsl(var(--warning) / 0.14);
+}
+
+.ncforge-debug-arrow::before {
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  margin: 5px 0 0 2px;
+  border-left: 6px solid hsl(var(--warning-ink));
+  border-top: 4.5px solid transparent;
+  border-bottom: 4.5px solid transparent;
+}
+
+/* ── 底部面板 ────────────────────────────────────────────────────────────── */
+/* 「调试」标签上的小灯：与 services.css 的启动中呼吸点同色系（warning） */
+.wb-ptab-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: hsl(var(--warning));
+  box-shadow: 0 0 0 3px hsl(var(--warning) / 0.18);
+}
+
+.dbg-body {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dbg-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.dbg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-btn:hover:not(:disabled) {
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+}
+
+.dbg-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dbg-btn kbd {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--secondary));
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.dbg-btn-primary {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-weight: 600;
+}
+
+.dbg-btn-primary:hover:not(:disabled) {
+  background: hsl(var(--primary) / 0.9);
+  color: hsl(var(--primary-foreground));
+}
+
+.dbg-btn-primary kbd {
+  color: hsl(var(--primary-foreground) / 0.78);
+  background: hsl(var(--primary-foreground) / 0.16);
+}
+
+.dbg-btn-danger {
+  color: hsl(var(--destructive-ink));
+}
+
+.dbg-btn-danger:hover:not(:disabled) {
+  background: hsl(var(--destructive) / 0.1);
+  color: hsl(var(--destructive-ink));
+}
+
+.dbg-sp {
+  flex: 1;
+}
+
+.dbg-where {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+  color: hsl(var(--muted-foreground));
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dbg-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+}
+
+.dbg-col {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dbg-col + .dbg-col {
+  border-left: 1px solid hsl(var(--border));
+}
+
+.dbg-col-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-col-h span {
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.dbg-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 6px 6px;
+}
+
+.dbg-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-hint {
+  padding: 10px 14px;
+  line-height: 1.7;
+  max-width: 760px;
+}
+
+.dbg-error {
+  padding: 5px 12px;
+  font-size: 12px;
+  color: hsl(var(--destructive-ink));
+  background: hsl(var(--destructive) / 0.08);
+  border-bottom: 1px solid hsl(var(--destructive) / 0.2);
+}
+
+/* ── 调用栈 ──────────────────────────────────────────────────────────────── */
+.dbg-frame {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 5px;
+  text-align: left;
+  font-size: 12px;
+}
+
+.dbg-frame:hover {
+  background: hsl(var(--secondary));
+}
+
+.dbg-frame[data-active] {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+  font-weight: 600;
+}
+
+.dbg-frame-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
+
+.dbg-frame-loc {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ── 变量 ────────────────────────────────────────────────────────────────── */
+.dbg-scope {
+  padding: 5px 8px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-var {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 5px;
+  text-align: left;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+
+.dbg-var:hover {
+  background: hsl(var(--secondary));
+}
+
+.dbg-var-chev {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-var-name {
+  flex-shrink: 0;
+  color: hsl(var(--foreground));
+}
+
+.dbg-var-eq {
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-var-val {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: hsl(var(--success-ink));
+}
+
+.dbg-var-type {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+}

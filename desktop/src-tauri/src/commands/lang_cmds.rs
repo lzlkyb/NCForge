@@ -88,6 +88,41 @@ fn usable_jdtls(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// java-debug 的 bundle 路径。
+///
+/// 放在 `<jdtls>/java-debug/` 而不是 `plugins/`：后者由 equinox 按 config.ini 装配，
+/// 塞进去会被当成平台 bundle 参与启动解析。这个 jar 由 `fetch-jdtls.mjs` 下载并校验，
+/// 旧资源包里没有时返回 `None`——语言服务不受影响，只是没有调试。
+pub fn java_debug_bundle(ls_dir: &Path) -> Option<PathBuf> {
+    let jar = ls_dir
+        .join("java-debug")
+        .join("com.microsoft.java.debug.plugin-0.32.0.jar");
+    jar.is_file().then_some(jar)
+}
+
+/// 本仓库自带的 jdt.ls 扩展 bundle（目前只有 `ncforge.typeHierarchy`）。
+///
+/// 与 java-debug 不同，它不由 jdt.ls 资源包分发，而是随安装包走 `resources/jdtls-ext/`；
+/// 因此候选顺序是「app 资源目录 → 源码目录」。找不到就返回 `None`：类型层级不可用，
+/// 语言服务照常起（和调试一个原则，别让一个可选功能拖垮整条链路）。
+pub fn jdtls_ext_bundle(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let name = "ncforge-jdt-ext.jar";
+    let mut cands: Vec<PathBuf> = Vec::new();
+    if let Ok(p) = std::env::var("NCFORGE_JDTLS_EXT_JAR") {
+        cands.push(PathBuf::from(p));
+    }
+    if let Ok(dir) = app.path().resource_dir() {
+        cands.push(dir.join("jdtls-ext").join(name));
+    }
+    cands.push(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("jdtls-ext")
+            .join(name),
+    );
+    cands.into_iter().find(|p| p.is_file())
+}
+
 fn find_jdtls(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, String> {
     let mut cands: Vec<PathBuf> = Vec::new();
     if let Ok(env_dir) = std::env::var("NCFORGE_JDTLS_DIR") {
@@ -419,9 +454,18 @@ fn launch(
     .command()?;
     let client = LspClient::spawn_with_stderr(cmd, Arc::new(handler), &stderr_log)?;
     let root_s = shadow_dir.to_string_lossy().into_owned();
+    // 两个都是可选 bundle：java-debug 管调试，扩展 jar 管类型层级（`ncforge.typeHierarchy`）。
+    // 缺哪个都只是对应入口不可用，语言服务照常起，不因此判整机不可用
+    let mut bundles: Vec<String> = Vec::new();
+    if let Some(p) = java_debug_bundle(&ls_dir) {
+        bundles.push(p.to_string_lossy().into_owned());
+    }
+    if let Some(p) = jdtls_ext_bundle(app) {
+        bundles.push(p.to_string_lossy().into_owned());
+    }
     if let Err(e) = client.request(
         "initialize",
-        build_initialize_params(&root_s, &runtime_s, std::process::id()),
+        build_initialize_params(&root_s, &runtime_s, std::process::id(), &bundles),
         Duration::from_secs(120),
     ) {
         // 失败现场立刻取：进程可能马上被 kill 掉，日志还没写完就只能看到空文件
@@ -610,7 +654,7 @@ pub fn lang_status(state: tauri::State<'_, Arc<AppState>>) -> LangStatus {
     lock_lang(&state).status.clone()
 }
 
-/// 取当前会话，并把 `path`（真实文件路径）换成 `textDocument.uri` 填进参数。
+/// 取当前会话，并把 `path`（真实文件路径）换成影子工程 URI 填进参数。
 fn prepare(
     state: &AppState,
     path: Option<&str>,
@@ -623,9 +667,32 @@ fn prepare(
     let mut p = session.to_server(params);
     if let Some(path) = path {
         let uri = session.shadow_uri_of(path)?;
-        p["textDocument"]["uri"] = Value::String(uri);
+        fill_document_uris(&mut p, &uri);
     }
     Ok((session, p))
+}
+
+/// 把 `uri` 填进参数里所有「目标文档」的位置。
+///
+/// 两种写法都要填：顶层 `textDocument` 是补全 / 跳转 / 重命名这类请求；里层
+/// `context.textDocument` 是 codeAction 与 `java/getRefactorEdit` 这类把
+/// `CodeActionParams` 塞进参数的请求。前端给的 `file://` 字符串由 Monaco 生成，
+/// 盘符冒号是 `%3A`，与 `path_to_uri` 的形态对不上，靠前缀替换换不掉，只能按
+/// `path` 重算。
+fn fill_document_uris(p: &mut Value, uri: &str) {
+    if let Some(td) = p.get_mut("context").and_then(|c| c.get_mut("textDocument")) {
+        if td.is_object() {
+            td["uri"] = Value::String(uri.to_string());
+        }
+    }
+    // 自定义命令（`ncforge.typeHierarchy`）把目标文档放在第一个参数里。
+    // 只在**已经给了 uri 键**时覆盖：别的 executeCommand 参数对象不该被塞进一个多余的字段。
+    if let Some(first) = p.get_mut("arguments").and_then(|a| a.get_mut(0)) {
+        if first.get("uri").is_some_and(Value::is_string) {
+            first["uri"] = Value::String(uri.to_string());
+        }
+    }
+    p["textDocument"]["uri"] = Value::String(uri.to_string());
 }
 
 /// 透传一个 LSP 请求。`path` 给出时按它填 `textDocument.uri`；结果里的影子 URI 会换回真实路径。
@@ -644,6 +711,38 @@ pub async fn lang_request(
     tauri::async_runtime::spawn_blocking(move || {
         let out = session.client.request(&method, p, timeout)?;
         Ok(session.from_server(&out))
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// `java.project.provideSemanticTokens` 的参数：0.57 只认影子工程 URI 这一个字符串参数。
+pub fn semantic_tokens_params(shadow_uri: &str) -> Value {
+    json!({
+        "command": "java.project.provideSemanticTokens",
+        "arguments": [shadow_uri],
+    })
+}
+
+/// 语义着色：jdt.ls 0.57 没有标准 LSP 的 `textDocument/semanticTokens/full`，只挂了
+/// `java.project.provideSemanticTokens` 这个 executeCommand（返回 5 元组增量流，见
+/// `tests/semantic_tokens_live.rs`）。参数要影子工程 URI，前端只认真实路径，换算放这里。
+#[tauri::command]
+pub async fn lang_semantic_tokens(
+    state: tauri::State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<Value, String> {
+    let session = lock_lang(&state)
+        .session
+        .clone()
+        .ok_or_else(|| "代码智能未运行".to_string())?;
+    let uri = session.shadow_uri_of(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        session.client.request(
+            "workspace/executeCommand",
+            semantic_tokens_params(&uri),
+            Duration::from_secs(30),
+        )
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
@@ -699,6 +798,15 @@ mod tests {
         });
         fs::create_dir_all(&cfg).unwrap();
         fs::write(cfg.join("config.ini"), b"osgi.bundles=x").unwrap();
+    }
+
+    /// 命令名与参数形状是钉死的：0.57 的 `SemanticTokensCommand.provide(String)` 只吃
+    /// 一个字符串参数，多一个对象就会被服务端当成坏参数（见真机测试）。
+    #[test]
+    fn 语义着色命令只带影子_uri_一个参数() {
+        let p = semantic_tokens_params("file:///D:/shadow/gl/src/A.java");
+        assert_eq!(p["command"], "java.project.provideSemanticTokens");
+        assert_eq!(p["arguments"], json!(["file:///D:/shadow/gl/src/A.java"]));
     }
 
     #[test]
@@ -805,5 +913,65 @@ mod tests {
             "要指出是哪份日志：{hint}"
         );
         let _ = fs::remove_dir_all(&d);
+    }
+
+    /// `context.textDocument` 里的 uri 必须一起换：`java/getRefactorEdit`
+    /// 的目标文档只在这里，漏了就会拿 Monaco 的 `%3A` 形态去查影子工程，查不到。
+    #[test]
+    fn fill_document_uris_fills_top_level_and_context() {
+        let mut p = serde_json::json!({
+            "context": {
+                "textDocument": { "uri": "file:///D%3A/ws/A.java" },
+                "range": { "start": { "line": 0, "character": 0 } }
+            }
+        });
+        fill_document_uris(&mut p, "file:///tmp/shadow/A.java");
+        assert_eq!(p["textDocument"]["uri"], "file:///tmp/shadow/A.java");
+        assert_eq!(
+            p["context"]["textDocument"]["uri"],
+            "file:///tmp/shadow/A.java"
+        );
+        assert_eq!(p["context"]["range"]["start"]["line"], 0, "其它字段不能动");
+    }
+
+    /// `context.textDocument` 不是对象（null / 字符串）时不能建出一个怪结构。
+    #[test]
+    fn fill_document_uris_leaves_non_object_context_alone() {
+        let mut null_ctx = serde_json::json!({ "context": { "textDocument": null } });
+        fill_document_uris(&mut null_ctx, "file:///a");
+        assert!(null_ctx["context"]["textDocument"].is_null());
+        assert_eq!(null_ctx["textDocument"]["uri"], "file:///a");
+
+        let mut no_ctx = serde_json::json!({ "position": { "line": 1 } });
+        fill_document_uris(&mut no_ctx, "file:///b");
+        assert!(no_ctx.get("context").is_none(), "没有 context 就不要造一个");
+        assert_eq!(no_ctx["textDocument"]["uri"], "file:///b");
+    }
+
+    /// 自定义命令（类型层级）的目标文档在 `arguments[0].uri`：前端给的是 Monaco 的
+    /// `%3A` 形态，必须按 path 重算。没有 uri 键的参数对象不能被塞进多余字段。
+    #[test]
+    fn fill_document_uris_fills_first_command_argument() {
+        let mut p = serde_json::json!({
+            "command": "ncforge.typeHierarchy",
+            "arguments": [{ "uri": "file:///d%3A/ws/A.java", "line": 3, "character": 6 }]
+        });
+        fill_document_uris(&mut p, "file:///tmp/shadow/A.java");
+        assert_eq!(p["arguments"][0]["uri"], "file:///tmp/shadow/A.java");
+        assert_eq!(p["arguments"][0]["line"], 3, "其它字段不能动");
+
+        let mut other = serde_json::json!({
+            "command": "java.edit.organizeImports",
+            "arguments": [{ "line": 0 }]
+        });
+        fill_document_uris(&mut other, "file:///tmp/shadow/A.java");
+        assert!(
+            other["arguments"][0].get("uri").is_none(),
+            "没有 uri 键就不要加：那是别的命令的参数"
+        );
+
+        let mut no_args = serde_json::json!({ "command": "x" });
+        fill_document_uris(&mut no_args, "file:///a");
+        assert!(no_args.get("arguments").is_none());
     }
 }

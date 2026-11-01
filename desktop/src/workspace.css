@@ -206,6 +206,22 @@
 }
 .wb-row[data-active] .wb-enc-badge { background: hsl(var(--warning) / 0.26); }
 
+/*
+ * 书签小旗：文件里有书签才出现，靠右与 U8 同列。
+ * 名字仍先让位（ellipsis）——树只有几百像素，标记跟着名字走会把文件名挤没。
+ */
+.wb-bookmark-mark {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 8px;
+  height: 11px;
+  background: hsl(var(--primary));
+  /* 底边中间剪出缺口 = 书签小旗，与编辑器行号槽同形 */
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 74%, 0 100%);
+}
+/* 两个都靠右时贴在一起：[书签][U8]，而不是让 auto 外边距把中间的空隙平分 */
+.wb-bookmark-mark + .wb-enc-badge { margin-left: 0; }
+
 /* ---- 主列：标签页 + 提示条 + 编辑器 + 状态栏 ---- */
 .wb-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .wb-tabs {

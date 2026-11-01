@@ -137,8 +137,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map_err(|e| std::io::Error::other(format!("无法创建应用配置目录：{e}")))?;
 
             let app_config = config::load_config(&config_dir);
+            let startup_root = app_config.workspace_root.clone();
             let app_state = AppState::new(app_config, config_dir.clone());
             app.manage(app_state.clone());
+
+            // 上次的工作区在启动时就挂上文件监听：树第一次列目录后，外部改动立即自动刷新。
+            // 失败只记日志（没有自动刷新，展开 / 手动刷新照常可用）。
+            if let Some(root) = startup_root {
+                commands::restart_watcher(app.handle(), &app_state, &root);
+            }
 
             // 资源包启动自检：缺包时置备（下载 jdtls / ecj / svnkit 到 config_dir/resources）。
             // 异步 spawn，不阻塞启动；进度经 resource:* 事件推给前端。已在跑就忽略
@@ -242,6 +249,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::lang_status,
             commands::lang_request,
             commands::lang_notify,
+            commands::lang_semantic_tokens,
+            // 调试（DAP）：java-debug over jdt.ls → JDWP
+            commands::debug_start,
+            commands::debug_status,
+            commands::debug_stop,
+            commands::debug_set_breakpoints,
+            commands::debug_continue,
+            commands::debug_step,
+            commands::debug_pause,
+            commands::debug_threads,
+            commands::debug_stack_trace,
+            commands::debug_scopes,
+            commands::debug_variables,
+            commands::debug_evaluate,
             commands::search_workspace,
             commands::search_list_files,
             commands::search_replace,
@@ -249,6 +270,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::local_history_list,
             commands::local_history_read,
             commands::local_history_restore,
+            commands::nc_log_sources,
+            commands::nc_log_query,
+            commands::nc_log_trace,
             commands::server_status,
             commands::server_start,
             commands::server_stop,
@@ -371,6 +395,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(st) = app_handle.try_state::<std::sync::Arc<AppState>>() {
                     let session = st.lang.lock().unwrap_or_else(|e| e.into_inner()).session.take();
                     if let Some(s) = session {
+                        s.client.kill();
+                    }
+                    // 调试连接：不关的话 java-debug 的适配器会话会挂在 jdt.ls 里
+                    let debug = st.debug.lock().unwrap_or_else(|e| e.into_inner()).session.take();
+                    if let Some(s) = debug {
                         s.client.kill();
                     }
                     // 数据库桥同理：每个连接一个 JVM，未提交的事务随进程结束由 Oracle 回滚

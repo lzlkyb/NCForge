@@ -52,6 +52,8 @@ pub struct AppState {
     >,
     /// 代码智能（jdt.ls）会话与状态。同样在 `spawn_blocking` 里持锁，用 std Mutex。
     pub lang: std::sync::Mutex<crate::lang::LangRun>,
+    /// 调试会话（java-debug 的 DAP 连接）。与语言服务是两条独立连接。
+    pub debug: std::sync::Mutex<crate::debug::DebugRun>,
     /// 编译的取消标志。
     ///
     /// 一次编译最坏是「300 秒超时 × 6 轮」≈ 30 分钟，中间没有任何中断手段，用户只能
@@ -77,6 +79,10 @@ pub struct AppState {
     /// 回调里没法等结果，只能 `prevent_close()` 拦一次；前端答完（提交/回滚完，
     /// 或确认干净）再置这个位，由 `app_quit` 重新关窗放行。
     pub quit_approved: std::sync::atomic::AtomicBool,
+    /// 当前工作区的文件监听（树自动刷新用）。`None` = 没选工作区或监听起不来。
+    ///
+    /// 存一份实例而不是裸线程：`Drop` 会停掉 OS 监听与后台线程，换工作区就是替换它。
+    pub watcher: std::sync::Mutex<Option<crate::watcher::WorkspaceWatcher>>,
     /// 前端已经开始处理这一次退出请求。
     ///
     /// 用于兜底强退：`prevent_close()` 之后如果 webview 已经卡死/崩了，没人会回话，
@@ -102,9 +108,11 @@ impl AppState {
             db: std::sync::Mutex::new(Default::default()),
             db_procs: std::sync::Mutex::new(Default::default()),
             lang: std::sync::Mutex::new(Default::default()),
+            debug: std::sync::Mutex::new(Default::default()),
             compile_cancel: std::sync::atomic::AtomicBool::new(false),
             export_cancels: std::sync::Mutex::new(Default::default()),
             patch_cancel: std::sync::atomic::AtomicBool::new(false),
+            watcher: std::sync::Mutex::new(None),
             quit_approved: std::sync::atomic::AtomicBool::new(false),
             quit_acked: std::sync::atomic::AtomicBool::new(false),
             quit_checking: std::sync::atomic::AtomicBool::new(false),

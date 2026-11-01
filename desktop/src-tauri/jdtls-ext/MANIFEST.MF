@@ -1,0 +1,9 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-SymbolicName: ncforge.jdtls.ext;singleton:=true
+Bundle-Version: 1.0.0
+Bundle-Name: NCForge JDT LS Extension
+Bundle-Vendor: NCForge
+Bundle-RequiredExecutionEnvironment: JavaSE-1.8
+Bundle-ActivationPolicy: lazy
+Require-Bundle: org.eclipse.core.runtime,org.eclipse.jdt.core,org.eclipse.jdt.ls.core,com.google.gson,org.eclipse.lsp4j

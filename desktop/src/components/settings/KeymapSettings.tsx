@@ -24,9 +24,11 @@ export function KeymapSettings() {
         <tr><td>当前文件符号</td><td><kbd>{paletteKeysLabel("symbol", value)}</kbd></td></tr>
         <tr><td>命令面板</td><td><kbd>{paletteKeysLabel("cmd", value)}</kbd></td></tr>
         <tr><td>切换侧栏 / 底部面板</td><td><kbd>Ctrl+B</kbd> / <kbd>Ctrl+J</kbd></td></tr>
+        <tr><td>调用层级</td><td><kbd>Ctrl+Alt+H</kbd></td></tr>
+        <tr><td>类型层级</td><td><kbd>{value === "idea" ? "Ctrl+H" : "Ctrl+T"}</kbd></td></tr>
         {EDITOR_KEYS.map(row => <tr key={row.action}><td>{row.label}</td><td><kbd>{row[value]}</kbd></td></tr>)}
       </tbody></table>
-      <p className="text-sm text-muted-foreground">定义跳转和补全依赖 Java 语言服务。快速修复、整理导入与格式化尚未接入，不列为可用快捷键。</p>
+      <p className="text-sm text-muted-foreground">定义跳转、补全、调用层级与类型层级依赖 Java 语言服务。格式化尚未接入，不列为可用快捷键。</p>
     </Card>
   );
 }

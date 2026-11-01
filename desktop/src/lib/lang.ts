@@ -98,6 +98,17 @@ export function useLangView(): LangView {
   );
 }
 
+const readyListeners = new Set<(ready: boolean) => void>();
+
+/** 语言服务「就绪 ⇄ 非就绪」的订阅；注册时先按当前状态回调一次。给语义着色这类非 React 的常驻订阅用。 */
+export function onLangReadyChange(cb: (ready: boolean) => void): () => void {
+  readyListeners.add(cb);
+  cb(langReady());
+  return () => {
+    readyListeners.delete(cb);
+  };
+}
+
 /** 补全、跳转等请求能不能发。 */
 export function langReady(): boolean {
   return view.state === "ready";
@@ -307,6 +318,12 @@ function armSettle(): void {
 
 function onStatus(next: LangStatus): void {
   const prev = view.state;
+  if ((prev === "ready") !== (next.state === "ready")) {
+    const ready = next.state === "ready";
+    // 放进微任务：让本次的 setView 先落地，订阅方在回调里读 langReady() 才是新状态。
+    // 直接同步调会在「即将停止」时读到旧的 ready，向已经停掉的服务发请求。
+    queueMicrotask(() => readyListeners.forEach((cb) => cb(ready)));
+  }
   if (next.state === "ready" && prev !== "ready") {
     readyAt = Date.now();
     lastDiagAt = 0;

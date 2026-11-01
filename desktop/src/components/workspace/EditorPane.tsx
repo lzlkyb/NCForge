@@ -4,12 +4,18 @@ import { getModel, getViewState, saveViewState, touchModel } from "../../lib/edi
 import { registerLangProviders } from "../../lib/langProviders";
 import { registerExtraLangProviders } from "../../lib/langProvidersExtra";
 import { registerEditorKeys, setCurrentEditor } from "../../lib/editorActions";
-import { editorCommand, getKeymap } from "../../lib/keymap";
+import { editorCommand, getKeymap, isTypeHierarchyKey } from "../../lib/keymap";
 import { registerJavaSqlActions } from "../../lib/javaSqlActions";
 import { registerJavaTemplates } from "../../lib/liveTemplates";
 import { organizeImportsCommand } from "../../lib/javaActions";
+import { registerRefactorKeys } from "../../lib/refactor";
 import { runCallHierarchy } from "../../lib/callHierarchy";
+import { runTypeHierarchy } from "../../lib/typeHierarchy";
 import { attachErrorLens } from "../../lib/errorLens";
+import { attachBookmarkGutter } from "../../lib/bookmarkGutter";
+import { attachDebugGutter } from "../../lib/debugGutter";
+import { toggleBreakpointHere } from "../../lib/debugSession";
+import { debugActionForKey, runDebugAction, type DebugKeyCode } from "../../lib/debugKeys";
 import { getEditorPrefs, monacoOptionsOf, PREFS_EVENT } from "../../lib/editorPrefs";
 import { noteEdit, previousEditSpot } from "../../lib/editHistory";
 import { pathOfModel } from "../../lib/editorStore";
@@ -18,6 +24,8 @@ import { setSession } from "../../lib/workspaceSession";
 import { toast } from "../ui/toast";
 import { navigate } from "../../lib/lang";
 import "../../error-lens.css";
+import "../../bookmark-gutter.css";
+import "../../debug.css";
 import { ExtractSqlDialog } from "../db/ExtractSqlDialog";
 
 interface Props {
@@ -73,6 +81,9 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       scrollBeyondLastLine: false,
       smoothScrolling: true,
       renderLineHighlight: "line",
+      // 行号左边留一格（行高宽）给书签小旗。ESM 版 Monaco 把默认值改成了 false
+      // （editor.api.js 里 `EditorOptions.glyphMargin.defaultValue = false`），不显式打开就没有这条槽。
+      glyphMargin: true,
       // 中文全角标点会被当成「易混淆字符」满屏框高亮，NC 源码里到处是中文注释，关掉。
       unicodeHighlight: { ambiguousCharacters: false, invisibleCharacters: false },
       // 没有语言服务时只给当前文档的单词补全，避免弹出一堆无关建议。
@@ -90,6 +101,8 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyH,
       () => void runCallHierarchy(),
     );
+    // 提取类重构（IDEA 同键：Ctrl+Alt+M/V/F/C）。键位与命令面板共用 lib/refactor 里的清单
+    registerRefactorKeys(editor);
     // F11 = 加/去书签（IDEA 同键）；Shift+F11 = 打开书签面板
     editor.addCommand(monaco.KeyCode.F11, () => {
       const model = editor.getModel();
@@ -103,8 +116,39 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       const r = toggleBookmark(path, pos.lineNumber, model.getLineContent(pos.lineNumber));
       toast(r === "added" ? `已加书签（第 ${pos.lineNumber} 行）` : "已移除书签", "success");
     });
-    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F11, () => {
-      setSession({ panelOpen: true, panelTab: "bookmarks" });
+    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F11, () => setSession({ panelOpen: true, panelTab: "bookmarks" }));
+    // Ctrl+F8 = 当前行加/去断点（IDEA 同键）。与书签 F11 互不挤占。
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.F8, () => {
+      const model = editor.getModel();
+      const pos = editor.getPosition();
+      if (!model || !pos) return;
+      const path = pathOfModel(model);
+      if (!path) {
+        toast("jar 内的类不能加断点", "info");
+        return;
+      }
+      const r = toggleBreakpointHere(path, pos.lineNumber);
+      toast(r === "added" ? `已加断点（第 ${pos.lineNumber} 行）` : "已移除断点", "success");
+    });
+    // 调试步进：同一枚 F 键在两套 keymap 里含义不同（F7 = Eclipse 步出 / IDEA 步入），
+    // 所以注册一次、按键那一刻再问当前方案；不在方案里的键什么也不做。
+    const stepKeys: [DebugKeyCode, number][] = [
+      ["F5", monaco.KeyCode.F5],
+      ["F6", monaco.KeyCode.F6],
+      ["F7", monaco.KeyCode.F7],
+      ["F8", monaco.KeyCode.F8],
+      ["F9", monaco.KeyCode.F9],
+    ];
+    for (const [code, key] of stepKeys) {
+      editor.addCommand(key, () => {
+        const action = debugActionForKey(code, false);
+        if (action) runDebugAction(action);
+      });
+    }
+    // Shift+F8 只在 IDEA 方案里是「步出」；Eclipse 方案下不接管
+    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F8, () => {
+      const action = debugActionForKey("F8", true);
+      if (action) runDebugAction(action);
     });
     // Ctrl+Shift+Backspace = 回到上一个编辑位置（与「后退」不同：它记的是打字，不是跳转）
     editor.addCommand(
@@ -122,7 +166,16 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     );
     const keyboard = editor.onKeyDown(event => {
       if (!editor.hasTextFocus()) return;
-      const action = editorCommand(event.browserEvent, getKeymap());
+      const keymap = getKeymap();
+      // 类型层级：两套方案各占一个键。不匹配的键原样放行——Eclipse 下 Ctrl+H 是全工程搜索，
+      // 由 App 的 window 监听处理，这里拦住就搜不到了。
+      if (isTypeHierarchyKey(event.browserEvent, keymap)) {
+        event.preventDefault();
+        event.stopPropagation();
+        void runTypeHierarchy();
+        return;
+      }
+      const action = editorCommand(event.browserEvent, keymap);
       if (!action) return;
       event.preventDefault();
       event.stopPropagation();
@@ -149,6 +202,10 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     const sqlActions = registerJavaSqlActions(editor);
     // 行尾诊断（Error Lens）：数据来自 diagStore，开关在设置 → 编辑器
     const lensOff = attachErrorLens(editor);
+    // 行号槽书签：数据来自 lib/bookmarks（F11 增删、书签面板共用同一份）
+    const bookmarkOff = attachBookmarkGutter(editor);
+    // 行号槽断点 + 暂停行：数据来自 lib/breakpoints 与 lib/debugSession
+    const debugOff = attachDebugGutter(editor);
     // Alt+Enter 绑快速修复；命令面板要靠这个引用找到「当前在编辑哪个文件」
     registerEditorKeys(editor);
     setCurrentEditor(editor);
@@ -156,6 +213,8 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     return () => {
       sqlActions.forEach((d) => d.dispose());
       lensOff();
+      bookmarkOff();
+      debugOff();
       contentSub.dispose();
       if (autoSaveTimer !== undefined) window.clearTimeout(autoSaveTimer);
       setCurrentEditor(null);

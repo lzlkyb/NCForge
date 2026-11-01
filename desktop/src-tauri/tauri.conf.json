@@ -57,7 +57,8 @@
     ],
     "createUpdaterArtifacts": true,
     "resources": {
-      "resources/ncdb/ncdb.jar": "ncdb/ncdb.jar"
+      "resources/ncdb/ncdb.jar": "ncdb/ncdb.jar",
+      "resources/jdtls-ext/ncforge-jdt-ext.jar": "jdtls-ext/ncforge-jdt-ext.jar"
     },
     "macOS": {
       "signingIdentity": "-"

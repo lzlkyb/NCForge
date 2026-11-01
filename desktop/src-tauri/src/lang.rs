@@ -79,6 +79,15 @@ impl LangSession {
         }
     }
 
+    pub fn module(&self) -> &str {
+        &self.module
+    }
+
+    /// 影子工程根（`.project` 所在目录）。调试器要把源码根报给 java-debug。
+    pub fn shadow_root(&self) -> &Path {
+        &self.shadow_dir
+    }
+
     /// 真实文件路径 → 影子工程里的 URI。不在当前模块内返回 `Err`。
     pub fn shadow_uri_of(&self, real_path: &str) -> Result<String, String> {
         let rel = rel_under(&self.real_dir.to_string_lossy(), real_path)
@@ -148,22 +157,29 @@ pub fn rel_under(base: &str, path: &str) -> Option<String> {
 /// 把 JSON 里所有以 `from` 开头的 URI 字符串换成 `to` 开头。
 ///
 /// 只换「字符串值的开头」，不会动正文里碰巧出现的同样文字（比如源码里写着一个 file:/// 路径）。
+/// 对象的**键**也要换：`WorkspaceEdit.changes` 的键就是文件 URI，
+/// 漏掉的话编辑清单里每个文件仍停在影子路径上——前端按真实路径找 model、
+/// 找标签页全部落空，表现是「改了但哪儿也看不见」，重命名的预览也会列出影子目录。
 pub fn swap_prefix(v: &Value, from: &str, to: &str) -> Value {
     match v {
-        // 前缀后必须是结尾或 `/`，否则 `…/gl` 会误伤同名前缀的 `…/gl2`
-        Value::String(s) => match s.strip_prefix(from) {
-            Some(rest) if rest.is_empty() || rest.starts_with('/') => {
-                Value::String(format!("{to}{rest}"))
-            }
-            _ => v.clone(),
-        },
+        Value::String(s) => Value::String(swap_head(s, from, to)),
         Value::Array(a) => Value::Array(a.iter().map(|x| swap_prefix(x, from, to)).collect()),
         Value::Object(m) => Value::Object(
             m.iter()
-                .map(|(k, x)| (k.clone(), swap_prefix(x, from, to)))
+                .map(|(k, x)| (swap_head(k, from, to), swap_prefix(x, from, to)))
                 .collect(),
         ),
         _ => v.clone(),
+    }
+}
+
+/// 字符串开头是 `from` 就换成 `to` 开头，否则原样返回。
+///
+/// 前缀后必须是结尾或 `/`，否则 `…/gl` 会误伤同名前缀的 `…/gl2`。
+fn swap_head(s: &str, from: &str, to: &str) -> String {
+    match s.strip_prefix(from) {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("{to}{rest}"),
+        _ => s.to_string(),
     }
 }
 
@@ -236,6 +252,30 @@ mod tests {
             swap_prefix(&other, "file:///C:/ws/gl", "file:///D:/s/gl"),
             other
         );
+    }
+
+    /// `WorkspaceEdit.changes` 的键就是文件 URI：值换了、键没换，前端按真实路径
+    /// 找 model 会全部落空（重命名的预览也会列出影子目录）。
+    #[test]
+    fn swap_prefix_rewrites_uri_keys() {
+        let v = json!({
+            "changes": {
+                "file:///C:/ws/gl/A.java": [],
+                "file:///C:/ws/gl2/B.java": [],
+                "jdt://contents/x.jar/A.class": []
+            }
+        });
+        let out = swap_prefix(&v, "file:///C:/ws/gl", "file:///D:/s/gl");
+        let keys: Vec<&str> = out["changes"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert!(keys.contains(&"file:///D:/s/gl/A.java"), "{keys:?}");
+        // 同名前缀的另一个模块、以及不是 file 协议的键都原样保留
+        assert!(keys.contains(&"file:///C:/ws/gl2/B.java"), "{keys:?}");
+        assert!(keys.contains(&"jdt://contents/x.jar/A.class"), "{keys:?}");
     }
 
     #[test]

@@ -19,6 +19,7 @@ import { useLocalHistorySweep } from "../../hooks/useLocalHistorySweep";
 import { isUnsaved } from "../../lib/tabDirty";
 import { ensureFilesSaved } from "../../lib/terminatePreflight";
 import { useLangWiring } from "../../hooks/useLangWiring";
+import { useBreakpointsRoot } from "../../hooks/useBreakpointsRoot";
 import { setRenameRequest, setGenerateRequest } from "../../lib/editorActions";
 import { invalidateFileIndex } from "../../lib/fileIndex";
 import { getCursor } from "../../lib/cursorStore";
@@ -87,6 +88,8 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   const { openAt, openJdt, goBack, goForward, conflictPath, closingPath } = session;
   const { saving, reveal } = session;
   useLangWiring({ activePath, openAt, openJdt });
+  // 断点按工作区隔离；行号槽与调试面板都查这份快照
+  useBreakpointsRoot(root);
   // 本地历史的兜底归档：切文件时抓上一文件 + 每 5 分钟抓一次当前文件
   // （保存前的那一版在 lib/fileSave.saveOne 里抓，那里才拿得到「改动前」）
   useLocalHistorySweep(activePath);

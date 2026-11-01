@@ -7,6 +7,7 @@ import { EditorPane } from "./EditorPane";
 // jsdom 里跑不了真的 Monaco（它要 worker、要 canvas），这里只验「按文件切换编辑器配置」这条链路：
 // 记录 updateOptions 收到了什么。
 const mocks = vi.hoisted(() => ({
+  createArgs: [] as Record<string, unknown>[],
   editor: {
     addCommand: vi.fn(),
     onKeyDown: vi.fn(() => ({ dispose: vi.fn() })),
@@ -15,6 +16,8 @@ const mocks = vi.hoisted(() => ({
     // 否则挂载即炸：这两个入口是随编辑器偏好一起加的
     onDidChangeModelContent: vi.fn(() => ({ dispose: vi.fn() })),
     onDidChangeModel: vi.fn(() => ({ dispose: vi.fn() })),
+    // 断点点位挂在行号槽上：挂载时会订阅点击（加/去断点）
+    onMouseDown: vi.fn(() => ({ dispose: vi.fn() })),
     createDecorationsCollection: vi.fn(() => ({ clear: vi.fn() })),
     updateOptions: vi.fn(),
     setModel: vi.fn(),
@@ -30,7 +33,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../lib/monacoSetup", () => ({
   initMonaco: vi.fn(),
   monaco: {
-    editor: { create: () => mocks.editor },
+    editor: {
+      create: (_el: HTMLElement, options: Record<string, unknown>) => {
+        mocks.createArgs.push(options);
+        return mocks.editor;
+      },
+    },
     // 引用 / 格式化 / 快速修复 / 折叠 / 当前符号高亮 / 扩展选区 / 代码模板等 provider
     // 的注册点：`EditorPane` 挂载时会调，这里给出桩函数，
     // 缺一个就会在挂载时炸「cannot read properties of undefined」
@@ -94,11 +102,21 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   mocks.editor.updateOptions.mockClear();
+  mocks.createArgs.length = 0;
 });
 
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+});
+
+describe("行号槽", () => {
+  // ESM 版 Monaco 把 glyphMargin 的默认值改成了 false（editor.api.js）。不显式打开，
+  // 行号左边没有那条槽，书签小旗和断点类装饰都画不出来。
+  it("建编辑器时显式打开 glyphMargin", async () => {
+    await renderPane(false);
+    expect(mocks.createArgs[0]?.glyphMargin).toBe(true);
+  });
 });
 
 describe("超大文件的编辑器降级", () => {

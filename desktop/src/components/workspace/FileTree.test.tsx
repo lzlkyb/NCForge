@@ -5,9 +5,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileTree, type FileTreeHandle } from "./FileTree";
 import { setSession } from "../../lib/workspaceSession";
 import { ViewActivityContext } from "../../lib/viewActivity";
+import { clearBookmarks, loadBookmarks, toggleBookmark } from "../../lib/bookmarks";
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), toast: vi.fn() }));
-vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
+const mocks = vi.hoisted(() => {
+  const fsChanged: {
+    handler: ((p: { dirs?: string[]; rescan?: boolean }) => void) | null;
+  } = { handler: null };
+  return { invoke: vi.fn(), toast: vi.fn(), fsChanged };
+});
+vi.mock("../../lib/tauri", () => ({
+  invoke: mocks.invoke,
+  listen: async (
+    _event: string,
+    handler: (p: { dirs?: string[]; rescan?: boolean }) => void,
+  ) => {
+    mocks.fsChanged.handler = handler;
+    return () => {
+      mocks.fsChanged.handler = null;
+    };
+  },
+}));
 vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
 vi.mock("../../hooks/usePrefersReducedMotion", () => ({
   usePrefersReducedMotion: () => true,
@@ -176,6 +193,41 @@ describe("编码标记", () => {
   });
 });
 
+describe("书签标记", () => {
+  it("有书签的文件行画小旗，删掉书签后小旗跟着消失", async () => {
+    setSession({
+      tree: {
+        root: ROOT,
+        expanded: new Set([ROOT]),
+        dirs: {
+          [ROOT]: {
+            status: "ok",
+            items: [
+              { name: "A.java", isDir: false, size: 100 },
+              { name: "B.java", isDir: false, size: 100 },
+            ],
+          },
+        },
+        marks: {},
+      },
+    });
+    loadBookmarks(ROOT);
+    clearBookmarks();
+    toggleBookmark(`${ROOT}\\A.java`, 12, "退款入口");
+    await render();
+
+    const marked = rowByName("A.java")!.querySelector(".wb-bookmark-mark");
+    expect(marked).not.toBeNull();
+    expect(marked!.getAttribute("title")).toContain("1 条书签");
+    // 没有书签的文件不打点
+    expect(rowByName("B.java")!.querySelector(".wb-bookmark-mark")).toBeNull();
+
+    // 小旗跟着存储走：清空后同一行立即摘掉
+    await act(async () => clearBookmarks());
+    expect(rowByName("A.java")!.querySelector(".wb-bookmark-mark")).toBeNull();
+  });
+});
+
 describe("文件树的右键操作", () => {
 
   it("目录右键可新建文件：输入名字回车后建文件并打开", async () => {
@@ -292,5 +344,75 @@ describe("文件树的右键操作", () => {
       name: "Top.java",
       kind: "file",
     });
+  });
+});
+
+describe("外部改动自动刷新", () => {
+  it("后端报某个已读过的目录变了，这一层重新读盘", async () => {
+    setSession({ tree: { root: ROOT, expanded: new Set([ROOT]), dirs: {}, marks: {} } });
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "fs_list_dir") return [{ name: "external.java", isDir: false, size: 1 }];
+      if (cmd === "fs_encoding_marks") return [];
+      return [];
+    });
+    await render();
+    await act(async () => {}); // 初始加载落回状态
+    expect(rowByName("external.java")).toBeTruthy();
+
+    // 外部工具换掉了文件：监听事件只报目录，前端得自己再读一次
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "fs_list_dir") return [{ name: "renamed.java", isDir: false, size: 1 }];
+      if (cmd === "fs_encoding_marks") return [];
+      return [];
+    });
+    expect(mocks.fsChanged.handler).toBeTruthy();
+    await act(async () => {
+      mocks.fsChanged.handler!({ dirs: [ROOT] });
+    });
+
+    expect(rowByName("renamed.java")).toBeTruthy();
+    expect(rowByName("external.java")).toBeNull();
+  });
+
+  it("没读过的目录收到事件不会去打 IPC", async () => {
+    await render();
+    await act(async () => {});
+    const before = mocks.invoke.mock.calls.filter(([cmd]) => cmd === "fs_list_dir").length;
+
+    await act(async () => {
+      mocks.fsChanged.handler!({ dirs: [`${ROOT}\never-opened`] });
+    });
+
+    const after = mocks.invoke.mock.calls.filter(([cmd]) => cmd === "fs_list_dir").length;
+    expect(after).toBe(before);
+  });
+
+  // 平台丢了监听范围时后端只报 rescan、不报目录：没写进 dirs 的层也得重读，
+  // 否则树的缓存会一直停在被外部工具改掉之前。
+  it("rescan 时已读过的每一层都重读", async () => {
+    setSession({
+      tree: {
+        root: ROOT,
+        expanded: new Set([ROOT, MODULES]),
+        marks: {},
+        dirs: {
+          [ROOT]: { status: "ok", items: [{ name: "modules", isDir: true, size: 0 }] },
+          [MODULES]: { status: "ok", items: [] },
+        },
+      },
+    });
+    await render();
+    await act(async () => {});
+    mocks.invoke.mockClear();
+
+    await act(async () => {
+      mocks.fsChanged.handler!({ dirs: [], rescan: true });
+    });
+
+    const listed = mocks.invoke.mock.calls
+      .filter(([cmd]) => cmd === "fs_list_dir")
+      .map(([, args]) => (args as { path: string }).path)
+      .sort();
+    expect(listed).toEqual([ROOT, MODULES].sort());
   });
 });

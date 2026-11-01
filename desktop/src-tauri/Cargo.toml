@@ -78,6 +78,7 @@ similar = "2"
 # 用 vendor 源码 + [patch.crates-io] 而不是直接吃 crates.io：上游两处硬伤我们打了补丁，
 # 见 `desktop/vendor/oracledb/FORK.md`（11G 密码验证器 issue #63、语句中断 issue #24）。
 oracledb = "=26.0.0-beta.5"
+notify = "6.1.1"
 
 # Windows 专属：DWM 圆角（Win11 窗口装饰）
 [target.'cfg(windows)'.dependencies]

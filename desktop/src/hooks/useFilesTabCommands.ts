@@ -2,7 +2,10 @@ import { useEffect, useRef } from "react";
 import { registerCommands } from "../lib/commandRegistry";
 import { EDITOR_COMMANDS, currentIsJava, runEditorCommand } from "../lib/editorActions";
 import { organizeImportsCommand } from "../lib/javaActions";
+import { runRefactor } from "../lib/refactor";
+import { REFACTOR_KINDS } from "../lib/refactorPlan";
 import { runCallHierarchy } from "../lib/callHierarchy";
+import { runTypeHierarchy, typeHierarchyKey } from "../lib/typeHierarchy";
 import { revealInTree } from "../lib/revealInTree";
 import { goToTestPair } from "../lib/goToTest";
 import { setSession } from "../lib/workspaceSession";
@@ -68,10 +71,42 @@ export function useFilesTabCommands(deps: FilesTabCommands) {
       run: () => live.current.openGenerate(),
       enabled: () => !!live.current.activePath && currentIsJava(),
     },
+    // 提取类重构：IDEA 同键。命令面板是给记不住键的人用的，标题里带上「要先选中什么」
+    {
+      id: "editor.extractMethod",
+      title: `提取方法（Ctrl+Alt+M：选中${REFACTOR_KINDS.extractMethod.need}）`,
+      run: () => void runRefactor("extractMethod"),
+      enabled: () => !!live.current.activePath && currentIsJava(),
+    },
+    {
+      id: "editor.extractVariable",
+      title: `提取局部变量（Ctrl+Alt+V：选中${REFACTOR_KINDS.extractVariable.need}）`,
+      run: () => void runRefactor("extractVariable"),
+      enabled: () => !!live.current.activePath && currentIsJava(),
+    },
+    {
+      id: "editor.extractField",
+      title: `提取字段（Ctrl+Alt+F：选中${REFACTOR_KINDS.extractField.need}）`,
+      run: () => void runRefactor("extractField"),
+      enabled: () => !!live.current.activePath && currentIsJava(),
+    },
+    {
+      id: "editor.extractConstant",
+      title: `提取常量（Ctrl+Alt+C：选中${REFACTOR_KINDS.extractConstant.need}）`,
+      run: () => void runRefactor("extractConstant"),
+      enabled: () => !!live.current.activePath && currentIsJava(),
+    },
     {
       id: "editor.callHierarchy",
       title: "调用层级（Ctrl+Alt+H：谁调用了它 / 它调用了谁）",
       run: () => void runCallHierarchy(),
+      enabled: () => currentIsJava(),
+    },
+    {
+      id: "editor.typeHierarchy",
+      // 键位随方案变（IDEA Ctrl+H / Eclipse Ctrl+T），标题按当前方案写，与设置页同源
+      title: `类型层级（${typeHierarchyKey()}：父类型 / 子类型）`,
+      run: () => void runTypeHierarchy(),
       enabled: () => currentIsJava(),
     },
     {

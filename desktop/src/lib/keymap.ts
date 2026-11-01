@@ -33,6 +33,13 @@ export function isWorkspaceSearch(event: Pick<KeyboardEvent, "ctrlKey" | "metaKe
   return keymap === "eclipse" ? !event.shiftKey && key === "h" : event.shiftKey && key === "f";
 }
 
+/** 类型层级入口键：IDEA 是 Ctrl+H，Eclipse 是 Ctrl+T（那边的 Ctrl+H 留给全工程搜索）。 */
+export function isTypeHierarchyKey(event: Pick<KeyboardEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "key" | "isComposing">, keymap: Keymap): boolean {
+  if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.isComposing) return false;
+  const key = event.key.toLowerCase();
+  return keymap === "idea" ? key === "h" : key === "t";
+}
+
 export const EDITOR_KEYS = [
   { label: "查找", eclipse: "Ctrl+F", idea: "Ctrl+F", action: "actions.find" },
   { label: "替换（Eclipse 方案从查找框展开）", eclipse: "—", idea: "Ctrl+R", action: "editor.action.startFindReplaceAction" },

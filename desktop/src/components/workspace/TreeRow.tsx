@@ -71,6 +71,7 @@ export const TreeFileRow = memo(function TreeFileRow({
   active,
   selected,
   mark,
+  bookmarks,
   padLeft,
   onOpen,
   onPin,
@@ -83,6 +84,8 @@ export const TreeFileRow = memo(function TreeFileRow({
   active: boolean;
   selected: boolean;
   mark: EncodingMark | undefined;
+  /** 这个文件里的书签条数（0 = 不打点）。 */
+  bookmarks: number;
   padLeft: number;
   onOpen: (path: string) => void;
   /** 双击：把预览标签固定下来。 */
@@ -110,6 +113,12 @@ export const TreeFileRow = memo(function TreeFileRow({
       <Icon name="file" size={14} className="wb-row-icon" />
       <span className="wb-row-name">{name}</span>
       {svn && <span className="wb-svn-mark" data-st={svn} title={`SVN：${({ M: "已修改", A: "新增", D: "已删除", "?": "未纳管", C: "冲突", "!": "缺失", R: "替换", G: "已合并", "~": "类型冲突" })[svn]}`}>{svn}</span>}
+      {bookmarks > 0 && (
+        <span
+          className="wb-bookmark-mark"
+          title={`${bookmarks} 条书签（F11 在光标处加/去）`}
+        />
+      )}
       {mark && (
         // 「UTF-8!」四个字要占 40 多像素，在六层目录下会把文件名挤成「Vouc…」。
         // 缩成 U8，完整说明放在行的 title 里。

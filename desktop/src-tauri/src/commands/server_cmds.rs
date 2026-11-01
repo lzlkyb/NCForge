@@ -19,6 +19,7 @@ use crate::nc_home::{self, NcHome, ServerEndpoints};
 use crate::nc_port::{self, PortApplied, PortPlan};
 use crate::server::{self, PortOwner, ServerProcess, ServerRun, StopOutcome};
 use crate::state::AppState;
+use tauri::Emitter;
 
 /// 一次增量读的上限。256KB 够看几千行；更大的批次对界面没有意义（人读不过来）。
 const LOG_CHUNK: u64 = 256 * 1024;
@@ -63,6 +64,8 @@ pub struct ServerStatus {
     pub heap_mb: u32,
     /// 堆上限的默认值（MB），界面用来标「默认」。
     pub default_heap_mb: u32,
+    /// 本次启动开了 JDWP 调试时，attach 用的回环端口（未开 = null）。
+    pub debug_port: Option<u16>,
 }
 
 /// 日志增量。
@@ -117,6 +120,7 @@ struct Snap {
     command_line: String,
     exit_code: Option<i32>,
     reason: Option<String>,
+    debug_port: Option<u16>,
 }
 
 fn snapshot(run: &mut ServerRun) -> Snap {
@@ -131,6 +135,7 @@ fn snapshot(run: &mut ServerRun) -> Snap {
         command_line: run.command_line.clone(),
         exit_code: run.exit_code,
         reason: run.reason.clone(),
+        debug_port: run.debug_port,
     }
 }
 
@@ -180,6 +185,7 @@ fn build_status(cfg: &AppConfig, config_dir: &Path, s: Snap, ep: &ServerEndpoint
         nc_home: cfg.nc_home.clone(),
         heap_mb: launch::effective_heap_mb(cfg.server_heap_mb),
         default_heap_mb: launch::DEFAULT_HEAP_MB,
+        debug_port: s.debug_port,
     }
 }
 
@@ -211,8 +217,15 @@ pub async fn server_status(state: tauri::State<'_, Arc<AppState>>) -> Result<Ser
 }
 
 /// 启动中间件。端口被占、NC home 不可用、已在运行时直接返回可读的错误。
+///
+/// `debug` 为 true 时给 JVM 加 JDWP 监听（**只绑 127.0.0.1**，端口由系统分配）：
+/// 调试器要靠它 attach，但 JDWP 无鉴权，绑到 0.0.0.0 等于把整台机器的代码执行权
+/// 敞开；默认不加，只有用户显式开调试才带。
 #[tauri::command]
-pub async fn server_start(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
+pub async fn server_start(
+    state: tauri::State<'_, Arc<AppState>>,
+    debug: Option<bool>,
+) -> Result<(), String> {
     let cfg = state.config.read().await.clone();
     let config_dir = state.config_dir.clone();
     let st = state.inner().clone();
@@ -222,6 +235,12 @@ pub async fn server_start(state: tauri::State<'_, Arc<AppState>>) -> Result<(), 
         let home = nc_home::resolve(cfg.nc_home.as_deref())?;
         let nc_home = PathBuf::from(&home.root);
         let java = PathBuf::from(&home.java);
+        // 端口在置「启动中」之前分配：失败时没有半启动状态要回滚
+        let debug_port = if debug == Some(true) {
+            Some(server::free_loopback_port()?)
+        } else {
+            None
+        };
 
         // 锁只圈住「检查 + 置启动中」：写 jar 要 0.6 秒，持锁会让状态轮询一起卡住
         {
@@ -264,6 +283,7 @@ pub async fn server_start(state: tauri::State<'_, Arc<AppState>>) -> Result<(), 
             &project_root,
             &config_dir.join("tmp"),
             heap_mb,
+            debug_port,
             &overrides,
         );
         let (spec, entry_count) = match prepared {
@@ -271,6 +291,7 @@ pub async fn server_start(state: tauri::State<'_, Arc<AppState>>) -> Result<(), 
             Err(e) => {
                 if let Ok(mut run) = st.server.lock() {
                     run.starting = false;
+                    run.debug_port = None;
                     run.reason = Some(e.clone());
                 }
                 let _ = server::append_log(&log, &format!("[nc-forge] 启动失败：{e}\n"));
@@ -285,6 +306,7 @@ pub async fn server_start(state: tauri::State<'_, Arc<AppState>>) -> Result<(), 
         if run.stop_requested {
             run.starting = false;
             run.stop_requested = false;
+            run.debug_port = None;
             run.reason = Some("启动已取消".to_string());
             drop(run);
             let _ = server::append_log(&log, "[nc-forge] 启动已取消（准备期间收到停止请求）\n");
@@ -300,12 +322,16 @@ pub async fn server_start(state: tauri::State<'_, Arc<AppState>>) -> Result<(), 
                 run.command_line = server::describe(&spec);
                 run.reason = None;
                 run.exit_code = None;
+                run.debug_port = debug_port;
                 run.proc = Some(proc);
                 drop(run);
+                let debug_note = debug_port
+                    .map(|p| format!("，JDWP 监听 127.0.0.1:{p}"))
+                    .unwrap_or_default();
                 let _ = server::append_log(
                     &log,
                     &format!(
-                        "[nc-forge] classpath 条目 {entry_count} 个（清单见 {}），堆上限 -Xmx{heap_mb}m\n",
+                        "[nc-forge] classpath 条目 {entry_count} 个（清单见 {}），堆上限 -Xmx{heap_mb}m{debug_note}\n",
                         spec.classpath_jar.display()
                     ),
                 );
@@ -313,6 +339,7 @@ pub async fn server_start(state: tauri::State<'_, Arc<AppState>>) -> Result<(), 
             }
             Err(e) => {
                 run.starting = false;
+                run.debug_port = None;
                 run.reason = Some(e.clone());
                 drop(run);
                 let _ = server::append_log(&log, &format!("[nc-forge] 启动失败：{e}\n"));
@@ -329,13 +356,31 @@ pub async fn server_start(state: tauri::State<'_, Arc<AppState>>) -> Result<(), 
 /// 返回三种结果而不是 bool：准备启动期间点停止既不是「停掉了」也不是「没东西可停」，
 /// 界面要能分别提示，不能一律说「已停止」。
 #[tauri::command]
-pub async fn server_stop(state: tauri::State<'_, Arc<AppState>>) -> Result<StopOutcome, String> {
+pub async fn server_stop(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<StopOutcome, String> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let outcome = {
             let mut run = st.server.lock().map_err(|_| "服务状态异常".to_string())?;
             run.stop()
         };
+        // 服务没了，附着在 JDWP 上的调试会话也就没有意义：主动收掉，
+        // 别等适配器发 terminated（进程被硬杀时它可能一个事件都来不及发）。
+        let debug_session = {
+            let mut run = st.debug.lock().map_err(|_| "调试状态异常".to_string())?;
+            crate::debug::take_session(&mut run)
+        };
+        if let Some(s) = debug_session {
+            s.client.close();
+            let status = st
+                .debug
+                .lock()
+                .map(|run| run.status.clone())
+                .unwrap_or_else(|_| crate::debug::DebugStatus::stopped());
+            let _ = app.emit("debug-status", status);
+        }
         match outcome {
             StopOutcome::Stopped => {
                 let _ = server::append_log(&log_path(&st.config_dir), "[nc-forge] 已停止\n");
@@ -438,14 +483,16 @@ pub async fn server_command_line(
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let work_dir = config_dir.join("tmp");
-        let reuse = {
+        // 预览的是「这次/最近一次真实启动」的命令行，所以调试端口跟着运行态走：
+        // 没开调试（或已停止，端口已随进程清空）时不带 -agentlib。
+        let (reuse, debug_port) = {
             let run = st.server.lock().map_err(|_| "服务状态异常".to_string())?;
             if run.starting {
                 return Err(
                     "上一次启动还在准备 classpath 清单（约 1 秒），等它完成再看命令行".to_string(),
                 );
             }
-            work_dir.join("middleware-cp.jar").is_file()
+            (work_dir.join("middleware-cp.jar").is_file(), run.debug_port)
         };
 
         let home: NcHome = nc_home::resolve(cfg.nc_home.as_deref())?;
@@ -466,6 +513,7 @@ pub async fn server_command_line(
                 &project_root,
                 &work_dir,
                 heap_mb,
+                debug_port,
                 &overrides,
             )
         } else {
@@ -475,6 +523,7 @@ pub async fn server_command_line(
                 &project_root,
                 &work_dir,
                 heap_mb,
+                debug_port,
                 &overrides,
             )
         };

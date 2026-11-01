@@ -20,6 +20,7 @@ import { useTreeLoad } from "./useTreeLoad";
 import { dirName, type NewEntryKind } from "../../lib/workspace";
 import { flattenTree, treeKeyAction, treeRowId as rowId } from "../../lib/treeNav";
 import { chainFor, chainOpen } from "../../lib/treeCompact";
+import { countBookmarks, useBookmarks } from "../../lib/bookmarks";
 
 interface Props {
   root: string;
@@ -67,6 +68,9 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   );
   const [filter, setFilter] = useState("");
   const { dirs, expanded, marks, load, expand, depthOf, reveal, setExpandedPaths } = useTreeLoad(root);
+  const bookmarks = useBookmarks(root);
+  // 行只拿一个数字（条数），值没变时行组件的 memo 仍然命中
+  const bookmarkCounts = useMemo(() => countBookmarks(bookmarks), [bookmarks]);
   const { editing, editError, busy, beginCreate, beginRename, cancelEdit, commitEdit } = useTreeEdit({
     root,
     dirs,
@@ -248,6 +252,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     activePath,
     selectedPath: selected?.path ?? null,
     marks,
+    bookmarkCounts,
     filter: filterFn,
     editing,
     editError,

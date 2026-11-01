@@ -60,6 +60,8 @@ const DbTab = lazy(() => import("./components/tabs/DbTab").then((m) => ({ defaul
 const LinkedProjectsTab = lazy(() =>
   import("./components/tabs/LinkedProjectsTab").then((m) => ({ default: m.LinkedProjectsTab })),
 );
+// NC 日志页：要读 5MB 级的日志文件并归因，切过去才加载。
+const LogTab = lazy(() => import("./components/tabs/LogTab").then((m) => ({ default: m.LogTab })));
 // 快速导航浮层要查语言服务（间接依赖 Monaco），首次打开时才加载，和文件页共用同一个 chunk。
 const QuickPalette = lazy(() =>
   import("./components/workspace/QuickPalette").then((m) => ({ default: m.QuickPalette })),
@@ -206,6 +208,7 @@ function AppContent() {
       go("patch", "补丁"),
       go("db", "数据库"),
       go("linked", "工程关联"),
+      go("logs", "NC 日志"),
       go("settings", "设置"),
       { id: "view.side", title: "切换侧栏", hint: "Ctrl+B", run: toggleSide },
       { id: "view.panel", title: "切换底部面板", hint: "Ctrl+J", run: () => setSession({ panelOpen: (v) => !v }) },
@@ -384,6 +387,8 @@ function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: strin
     case "linked":
       // 依赖链 / 覆盖表 / 切换工作区：全在文档区，侧栏仍是文件树（顺手能跳去改 .classpath）
       return <LinkedProjectsTab />;
+    case "logs":
+      return <LogTab />;
     case "settings":
       return <SettingsTab onChanged={refreshStatus} />;
     default:

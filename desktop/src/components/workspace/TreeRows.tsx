@@ -10,6 +10,7 @@ import { TreeDirRow, TreeFileRow, TreeRowNote } from "./TreeRow";
 import { joinPath, type EncodingMark } from "../../lib/workspace";
 import { chainOpen, collapseChain } from "../../lib/treeCompact";
 import { treeRowId as rowId } from "../../lib/treeNav";
+import { pathKey } from "../../lib/treeSvn";
 import type { TreeDirState } from "../../lib/workspaceSession";
 import type { EditState } from "./useTreeEdit";
 
@@ -19,6 +20,8 @@ export interface TreeRowsCtx {
   activePath: string | null;
   selectedPath: string | null;
   marks: Record<string, EncodingMark>;
+  /** 文件 → 书签条数，键已归一（`bookmarkPathKey`）。 */
+  bookmarkCounts: Map<string, number>;
   /** 名字筛选（speed search）；空时恒真。 */
   filter: (name: string) => boolean;
   editing: EditState | null;
@@ -124,6 +127,7 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
           active={ctx.activePath === full}
           selected={ctx.selectedPath === full}
           mark={ctx.marks[full]}
+          bookmarks={ctx.bookmarkCounts.get(pathKey(full)) ?? 0}
           padLeft={6 + depth * 14 + 20}
           onOpen={ctx.onActivate}
           onPin={ctx.onPin}

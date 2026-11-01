@@ -74,7 +74,7 @@ fn hotwebs_实扫覆盖_目录下全部_webapp() {
         scanned.join(",")
     );
 
-    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB);
+    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None);
     let arg = args
         .iter()
         .find(|a| a.starts_with("-Duap.hotwebs="))
@@ -103,7 +103,7 @@ fn 服务名与_prop_xml_一致() {
     let configured = nc_home::read_server_name(&home);
     eprintln!("prop.xml 里的服务名：{configured:?}");
 
-    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB);
+    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None);
     let arg = args
         .iter()
         .find(|a| a.starts_with("-Dnc.server.name="))

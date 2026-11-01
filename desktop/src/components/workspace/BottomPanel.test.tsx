@@ -14,6 +14,15 @@ vi.mock("../../lib/callHierarchy", () => ({
   openCallItem: vi.fn(),
 }));
 
+// 类型层级面板同样要连语言服务，理由同上
+vi.mock("../../lib/typeHierarchy", () => ({
+  useTypeState: () => ({ root: null, supertypes: [], subtypes: [], loading: false, error: null }),
+  openTypeHierarchy: vi.fn(),
+  openTypeEntry: vi.fn(),
+  kindLabel: (k: string) => k,
+  typeHierarchyKey: () => "Ctrl+T",
+}));
+
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root;

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <!-- jdt.ls 0.57 用这个扩展点收集 workspace/executeCommand 的处理器；
+        处理器实现 org.eclipse.jdt.ls.core.internal.IDelegateCommandHandler，
+        用 <command id="…"/> 逐个声明自己接管的命令。 -->
+   <extension point="org.eclipse.jdt.ls.core.delegateCommandHandler">
+      <delegateCommandHandler class="ncforge.jdt.TypeHierarchyHandler">
+         <command id="ncforge.typeHierarchy"/>
+      </delegateCommandHandler>
+   </extension>
+</plugin>

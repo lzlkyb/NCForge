@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bookmarkAt,
+  bookmarkLinesIn,
+  bookmarkPathKey,
   clearBookmarks,
+  countBookmarks,
   getBookmarks,
   loadBookmarks,
   removeBookmark,
+  subscribeBookmarks,
   toggleBookmark,
 } from "./bookmarks";
+import { pathKey } from "./treeSvn";
 
 /**
  * 书签按工作区隔离存在 localStorage。node 环境没有它，用内存替身。
@@ -83,5 +88,50 @@ describe("bookmarks", () => {
     store.set(`ncforge-bookmarks:${root2.toLowerCase()}`, '[{"path":"C:\\\\a.java","line":1},{"nope":1}]');
     loadBookmarks(root2);
     expect(getBookmarks().map((x) => x.path)).toEqual(["C:\\a.java"]);
+  });
+
+  it("按文件取行号：斜杠方向 / 大小写不影响，行号升序、带摘要", () => {
+    loadBookmarks(freshRoot());
+    toggleBookmark("C:\\work\\A.java", 30, "第三处");
+    toggleBookmark("C:\\work\\A.java", 10, "第一处");
+    toggleBookmark("C:\\work\\B.java", 20, "别的文件");
+
+    expect(bookmarkLinesIn("c:/work/a.java")).toEqual([
+      { line: 10, note: "第一处" },
+      { line: 30, note: "第三处" },
+    ]);
+    expect(bookmarkLinesIn("C:\\work\\none.java")).toEqual([]);
+  });
+
+  it("行号槽的路径键与树上的 pathKey 同口径", () => {
+    // 树的 pathKey 在 lib/treeSvn；两边口径要是分叉，树上的小旗就会和行号槽对不上
+    const samples = ["C:\\work\\A.java", "c:/work/a.java/", "D:\\x\\y\\Z.java", "/tmp/a.java"];
+    for (const s of samples) expect(bookmarkPathKey(s)).toBe(pathKey(s));
+  });
+
+  it("按文件计数：同一文件的多行累加，键可直接给树用", () => {
+    loadBookmarks(freshRoot());
+    toggleBookmark("C:\\work\\A.java", 10, "");
+    toggleBookmark("C:\\work\\A.java", 20, "");
+    toggleBookmark("C:\\work\\B.java", 30, "");
+
+    const counts = countBookmarks(getBookmarks());
+    expect(counts.get("c:/work/a.java")).toBe(2);
+    expect(counts.get("c:/work/b.java")).toBe(1);
+    expect(counts.size).toBe(2);
+  });
+
+  it("非 React 订阅（Monaco 行号槽）在增删与清空时都会收到通知", () => {
+    loadBookmarks(freshRoot());
+    let hits = 0;
+    const off = subscribeBookmarks(() => {
+      hits += 1;
+    });
+    toggleBookmark("C:\\work\\A.java", 10, "");
+    removeBookmark("C:\\work\\A.java", 10);
+    clearBookmarks();
+    off();
+    clearBookmarks();
+    expect(hits).toBe(3);
   });
 });

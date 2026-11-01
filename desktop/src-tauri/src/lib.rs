@@ -23,6 +23,7 @@ pub mod db_engine;
 pub mod db_file_export;
 pub mod db_rust;
 pub mod db_schema;
+pub mod debug;
 pub mod eclipse_cp;
 pub mod encoding_reg;
 pub mod java_bridge;
@@ -32,6 +33,8 @@ pub mod local_history;
 pub mod lsp;
 pub mod nc_home;
 pub mod nc_index;
+pub mod nc_log;
+pub mod nc_log_rules;
 pub mod nc_port;
 pub mod patch_build;
 pub mod patch_view;
@@ -49,6 +52,7 @@ pub mod svn_bridge;
 pub mod svn_cred;
 pub mod svn_review;
 pub mod svn_view;
+pub mod watcher;
 pub mod workspace;
 
 // main.rs 用 `use nc_forge::*;` 一把引入；AppState 是最常被引用的托管状态，

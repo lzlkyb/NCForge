@@ -37,6 +37,7 @@ export const WORKSPACE_NAV: NavItem[] = [
   { key: "patch", label: "补丁", icon: "package" },
   { key: "db", label: "数据库", icon: "database" },
   { key: "linked", label: "工程关联", icon: "plug" },
+  { key: "logs", label: "NC 日志", icon: "log" },
 ];
 
 /**

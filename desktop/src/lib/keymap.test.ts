@@ -3,6 +3,7 @@ import {
   WORKSPACE_SEARCH_CHAR,
   WORKSPACE_SEARCH_KEY,
   editorCommand,
+  isTypeHierarchyKey,
   isWorkspaceSearch,
   layoutKeyOf,
   paletteKeyLabel,
@@ -34,6 +35,18 @@ describe("workspace search keymaps", () => {
       expect(isWorkspaceSearch(key(schemeKey, shift), keymap)).toBe(true);
     }
   });
+  it("类型层级只占当前方案的那一个键，Eclipse 的 Ctrl+H 仍归全工程搜索", () => {
+    expect(isTypeHierarchyKey(key("h"), "idea")).toBe(true);
+    expect(isTypeHierarchyKey(key("t"), "eclipse")).toBe(true);
+    expect(isTypeHierarchyKey(key("h"), "eclipse")).toBe(false);
+    expect(isTypeHierarchyKey(key("t"), "idea")).toBe(false);
+    // 带 Alt / Shift / 组字中都不算，免得吃掉 Ctrl+Alt+H（调用层级）这类组合
+    expect(isTypeHierarchyKey({ ...key("h"), altKey: true }, "idea")).toBe(false);
+    expect(isTypeHierarchyKey(key("T", true), "eclipse")).toBe(false);
+    expect(isTypeHierarchyKey({ ...key("h"), isComposing: true }, "idea")).toBe(false);
+    expect(isTypeHierarchyKey({ ...key("h"), ctrlKey: false }, "idea")).toBe(false);
+  });
+
   it("resolves deletion and redo conflicts without combining schemes", () => {
     expect(editorCommand(key("y"), "eclipse")).toBe("redo");
     expect(editorCommand(key("y"), "idea")).toBe("editor.action.deleteLines");

@@ -8,7 +8,7 @@
 // 所以服务端不会自己动手——这正是我们要的。
 import { monaco } from "./monacoSetup";
 import { ask, context } from "./langProviders";
-import { toMonacoRange, type LspRange } from "./langConvert";
+import { toMonacoRange, normUri, type LspRange } from "./langConvert";
 import { langReady, langRequest } from "./lang";
 import { currentModel } from "./editorActions";
 import { toast } from "../components/ui/toast";
@@ -74,11 +74,11 @@ function applyEdit(model: Model, edit: WorkspaceEditLike): { applied: number; sk
   const uri = model.uri.toString();
   const edits: { range: LspRange; newText: string }[] = [];
   for (const [key, list] of Object.entries(edit.changes ?? {})) {
-    if (norm(key) !== norm(uri)) continue;
+    if (normUri(key) !== normUri(uri)) continue;
     edits.push(...list);
   }
   for (const d of edit.documentChanges ?? []) {
-    if (norm(d.textDocument.uri) !== norm(uri)) continue;
+    if (normUri(d.textDocument.uri) !== normUri(uri)) continue;
     edits.push(...d.edits);
   }
   const total = Object.values(edit.changes ?? {}).reduce((n, l) => n + l.length, 0)
@@ -90,8 +90,6 @@ function applyEdit(model: Model, edit: WorkspaceEditLike): { applied: number; sk
   model.pushEditOperations([], ops, () => null);
   return { applied: edits.length, skipped: total - edits.length };
 }
-
-const norm = (u: string) => decodeURI(u).replace(/\\/g, "/").toLowerCase();
 
 /**
  * 执行一个源代码动作。

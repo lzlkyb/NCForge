@@ -7,10 +7,35 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use tauri::Emitter;
+
 use crate::encoding_reg::{self, EncodingMark, EncodingRegistry};
 use crate::security::path::display_path;
 use crate::state::AppState;
 use crate::workspace::{self, DirItem, Eol, FileContent, NewEntryKind, TextEncoding};
+
+/// 换工作区时把文件监听跟着换掉（旧监听 Drop 即停）。
+///
+/// 监听起不来不影响切目录：树还有展开与手动刷新，监听只决定「外部改动后要不要自动刷新」。
+pub fn restart_watcher(app: &tauri::AppHandle, state: &AppState, root: &str) {
+    let handle = app.clone();
+    let emit: Arc<dyn Fn(crate::watcher::WatchBatch) + Send + Sync> = Arc::new(move |batch| {
+        if let Err(e) = handle.emit(
+            "fs-changed",
+            serde_json::json!({ "dirs": batch.dirs, "rescan": batch.rescan }),
+        ) {
+            log::warn!("推送 fs-changed 失败：{e}");
+        }
+    });
+    *state.watcher.lock().unwrap_or_else(|e| e.into_inner()) =
+        match crate::watcher::WorkspaceWatcher::start(PathBuf::from(root), emit) {
+            Ok(w) => Some(w),
+            Err(e) => {
+                log::warn!("文件监听未启动：{e}");
+                None
+            }
+        };
+}
 
 /// 当前工作区根；未选择时返回 Err，让前端引导用户先选目录。
 async fn workspace_root(state: &AppState) -> Result<String, String> {
@@ -49,6 +74,7 @@ pub async fn get_workspace(
 /// 设置工作区根并落盘。返回规范化后的路径（去掉 `\\?\` 前缀），前端用它刷新显示。
 #[tauri::command]
 pub async fn set_workspace(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<String, String> {
@@ -66,6 +92,7 @@ pub async fn set_workspace(
             Ok(())
         })
         .await?;
+    restart_watcher(&app, &state, &shown);
     Ok(shown)
 }
 

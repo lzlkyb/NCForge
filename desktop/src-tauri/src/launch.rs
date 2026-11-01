@@ -153,13 +153,13 @@ pub fn hotwebs_names(home: &Path) -> Vec<String> {
 ///
 /// `-Dnc.server.location` / `-DEJBConfigDir` / `-DExtServiceConfigDir` 三个必须是
 /// 绝对路径，且工作目录也得是 NC home——中间件会用相对路径去开 `ejbXMLs` 与日志。
-pub fn middleware_vm_args(home: &Path, heap_mb: u32) -> Vec<String> {
+pub fn middleware_vm_args(home: &Path, heap_mb: u32, debug_port: Option<u16>) -> Vec<String> {
     let h = home.to_string_lossy();
     // 服务名必须与 prop.xml 一致：我们跳过 `Main` 直接起 `StartDirectServer`，
     // 没人替我们补 `-Dnc.server.name`（实证 §5 E3），缺了就退回默认 `server`。
     let server_name = crate::nc_home::read_server_name(home)
         .unwrap_or_else(|| crate::nc_home::DEFAULT_SERVER_NAME.to_string());
-    vec![
+    let mut args = vec![
         "-Dnc.runMode=develop".into(),
         format!("-Dnc.server.location={h}"),
         format!("-Dnc.server.name={server_name}"),
@@ -179,7 +179,15 @@ pub fn middleware_vm_args(home: &Path, heap_mb: u32) -> Vec<String> {
         "-DforceUseRedis=true".into(),
         // 别让 JVM 去读机器上别的 java 配置，行为才可复现
         "-Dfile.encoding=GBK".into(),
-    ]
+    ];
+    if let Some(port) = debug_port {
+        // JDWP 没有认证，等同于远程执行入口：只许绑回环，且默认不开（None 时不出现）。
+        // Java 8 的 address 语法是 [host:]port；写死 127.0.0.1 而不是 0.0.0.0 是红线。
+        args.push(format!(
+            "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:{port}"
+        ));
+    }
+    args
 }
 
 /// 拼中间件的 classpath（顺序即加载优先级）。
@@ -267,6 +275,7 @@ pub fn middleware_spec(
     project_root: &Path,
     work_dir: &Path,
     heap_mb: u32,
+    debug_port: Option<u16>,
     overrides: &[crate::eclipse_cp::LinkedOverride],
 ) -> Result<(ServerSpec, usize), String> {
     middleware_spec_inner(
@@ -274,7 +283,7 @@ pub fn middleware_spec(
         java,
         project_root,
         work_dir,
-        heap_mb,
+        middleware_vm_args(nc_home, heap_mb, debug_port),
         overrides,
         true,
     )
@@ -293,6 +302,7 @@ pub fn middleware_spec_preview(
     project_root: &Path,
     work_dir: &Path,
     heap_mb: u32,
+    debug_port: Option<u16>,
     overrides: &[crate::eclipse_cp::LinkedOverride],
 ) -> Result<(ServerSpec, usize), String> {
     middleware_spec_inner(
@@ -300,7 +310,7 @@ pub fn middleware_spec_preview(
         java,
         project_root,
         work_dir,
-        heap_mb,
+        middleware_vm_args(nc_home, heap_mb, debug_port),
         overrides,
         false,
     )
@@ -311,7 +321,7 @@ fn middleware_spec_inner(
     java: &Path,
     project_root: &Path,
     work_dir: &Path,
-    heap_mb: u32,
+    vm_args: Vec<String>,
     overrides: &[crate::eclipse_cp::LinkedOverride],
     write_jar: bool,
 ) -> Result<(ServerSpec, usize), String> {
@@ -347,7 +357,7 @@ fn middleware_spec_inner(
     let spec = ServerSpec {
         java: java.to_path_buf(),
         main_class: MIDDLEWARE_MAIN_CLASS.to_string(),
-        vm_args: middleware_vm_args(nc_home, heap_mb),
+        vm_args,
         classpath_jar,
         work_dir: nc_home.to_path_buf(),
         program_args: Vec::new(),
@@ -643,7 +653,7 @@ mod tests {
 
     #[test]
     fn 中间件_vm_参数里带绝对路径() {
-        let args = middleware_vm_args(Path::new(r"D:\ncc\1909home"), DEFAULT_HEAP_MB);
+        let args = middleware_vm_args(Path::new(r"D:\ncc\1909home"), DEFAULT_HEAP_MB, None);
         assert!(args
             .iter()
             .any(|a| a == r"-Dnc.server.location=D:\ncc\1909home"));
@@ -657,7 +667,7 @@ mod tests {
 
     #[test]
     fn 堆上限按配置改且只出现一次() {
-        let args = middleware_vm_args(Path::new(r"D:\ncc\1909home"), 8192);
+        let args = middleware_vm_args(Path::new(r"D:\ncc\1909home"), 8192, None);
         let xmx: Vec<&String> = args.iter().filter(|a| a.starts_with("-Xmx")).collect();
         assert_eq!(
             xmx.len(),
@@ -665,6 +675,30 @@ mod tests {
             "堆参数只能有一个，否则 JVM 以后出现的为准：{args:?}"
         );
         assert_eq!(xmx[0], "-Xmx8192m");
+    }
+
+    /// 调试参数：默认一个都不加；开了只绑回环、不 suspend。
+    ///
+    /// `suspend=y` 会让 JVM 停在启动前等调试器 attach，NC 服务就永远起不来；
+    /// 绑 0.0.0.0 则等于把无鉴权的 JDWP 敞开给同网段任何人。
+    #[test]
+    fn 调试参数默认关闭_开启时只绑回环() {
+        let off = middleware_vm_args(Path::new(r"D:\ncc\1909home"), DEFAULT_HEAP_MB, None);
+        assert!(
+            !off.iter().any(|a| a.contains("jdwp")),
+            "没开调试不该带 JDWP：{off:?}"
+        );
+
+        let on = middleware_vm_args(Path::new(r"D:\ncc\1909home"), DEFAULT_HEAP_MB, Some(61539));
+        let jdwp: Vec<&String> = on
+            .iter()
+            .filter(|a| a.starts_with("-agentlib:jdwp"))
+            .collect();
+        assert_eq!(jdwp.len(), 1, "JDWP 参数只能有一个：{on:?}");
+        assert_eq!(
+            jdwp[0].as_str(),
+            "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:61539"
+        );
     }
 
     #[test]
@@ -781,7 +815,7 @@ mod tests {
         )
         .unwrap();
 
-        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB);
+        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None);
         assert!(
             args.iter().any(|a| a == "-Dnc.server.name=xuyserver"),
             "要从 prop.xml 的 <server><name> 取服务名：{args:?}"
@@ -792,7 +826,7 @@ mod tests {
     #[test]
     fn prop_xml_缺失时服务名回落_server() {
         let home = temp_dir("prop-none");
-        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB);
+        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None);
         let want = format!("-Dnc.server.name={}", crate::nc_home::DEFAULT_SERVER_NAME);
         assert!(
             args.contains(&want),
@@ -806,7 +840,7 @@ mod tests {
         let home = temp_dir("vm-hotwebs");
         fs::create_dir_all(home.join("hotwebs").join("uapws")).unwrap();
         fs::create_dir_all(home.join("hotwebs").join("iwebap")).unwrap();
-        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB);
+        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None);
         assert!(
             args.iter().any(|a| a == "-Duap.hotwebs=iwebap,uapws"),
             "{args:?}"
@@ -864,7 +898,8 @@ mod tests {
         fs::create_dir_all(java.parent().unwrap()).unwrap();
         fs::write(&java, b"stub").unwrap();
 
-        let err = middleware_spec(&home, &java, &home, &base, DEFAULT_HEAP_MB, &[]).unwrap_err();
+        let err =
+            middleware_spec(&home, &java, &home, &base, DEFAULT_HEAP_MB, None, &[]).unwrap_err();
         assert!(
             err.contains("目录条目") && err.contains("start tomcat error"),
             "错误要解释清楚为什么起不来：{err}"
@@ -880,7 +915,8 @@ mod tests {
         fs::create_dir_all(java.parent().unwrap()).unwrap();
         fs::write(&java, b"stub").unwrap();
 
-        let err = middleware_spec(&home, &java, &home, &home, DEFAULT_HEAP_MB, &[]).unwrap_err();
+        let err =
+            middleware_spec(&home, &java, &home, &home, DEFAULT_HEAP_MB, None, &[]).unwrap_err();
         assert!(err.contains("没找到任何 jar"), "错误要指出缺 jar：{err}");
         cleanup(&home);
     }
@@ -894,6 +930,7 @@ mod tests {
             &home,
             &home,
             DEFAULT_HEAP_MB,
+            None,
             &[],
         )
         .unwrap_err();

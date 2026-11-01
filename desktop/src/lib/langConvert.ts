@@ -46,8 +46,25 @@ export function uriToPath(uri: string): string | null {
   return /^[A-Za-z]:/.test(p) ? p.replace(/\//g, "\\") : p;
 }
 
-/** `jdt://contents/xxx.jar/nc.bs.dao/BaseDAO.class?=...` → `BaseDAO.java`。 */
-export function jdtDisplayName(uri: string): string {
+/**
+ * 比较 URI / 路径是否指同一个文件时的规范形式：解转义、统一分隔符、忽略大小写。
+ *
+ * 必须用 `decodeURIComponent`：Monaco 的 `Uri.toString()` 把盘符冒号写成 `%3A`
+ * （它的 `encodeTable` 把冒号当保留字符），后端给的是 `file:///D:/…`。
+ * `decodeURI` 不解保留字符的转义，两边永远比对不上——`WorkspaceEdit` 里一条编辑
+ * 都匹配不到，表现是「命令报成功、文件一个字没变」。
+ */
+export function normUri(u: string): string {
+  let s = u;
+  try {
+    s = decodeURIComponent(u);
+  } catch {
+    // 不合法转义或裸 %：退回原文比较，别让比较本身抛错
+  }
+  return s.replace(/\\/g, "/").toLowerCase();
+}
+
+/** `jdt://contents/xxx.jar/nc.bs.dao/BaseDAO.class?=...` → `BaseDAO.java`。 */export function jdtDisplayName(uri: string): string {
   const path = uri.split("?")[0];
   const last = path.slice(path.lastIndexOf("/") + 1);
   return last.replace(/\.class$/i, ".java");

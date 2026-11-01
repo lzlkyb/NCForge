@@ -338,6 +338,9 @@ pub struct ServerRun {
     /// 最近一次停止/失败的原因。成功启动后清空。
     pub reason: Option<String>,
     pub exit_code: Option<i32>,
+    /// 本次启动的 JDWP 端口（只绑 127.0.0.1）。`None` = 启动时没开调试。
+    /// 进程退出/手动停止后清空：端口不再有人监听，留着只会诱使界面去 attach 一个死端口。
+    pub debug_port: Option<u16>,
 }
 
 impl ServerRun {
@@ -356,6 +359,7 @@ impl ServerRun {
         };
         self.exit_code = Some(code.unwrap_or(-1));
         self.proc = None;
+        self.debug_port = None;
         if self.reason.is_none() {
             self.reason = Some(match self.exit_code {
                 Some(c) if c != 0 => format!("进程已退出（退出码 {c}）"),
@@ -377,9 +381,23 @@ impl ServerRun {
         };
         p.stop();
         self.exit_code = p.exit_code();
+        self.debug_port = None;
         self.reason = Some("已手动停止".to_string());
         StopOutcome::Stopped
     }
+}
+
+/// 挑一个当前空闲的回环端口给 JDWP。
+///
+/// 拿完立刻释放再交给 JVM：中间有极小的抢占窗口，但比写死 5005 安全得多
+/// （同事机器上 Eclipse 很可能已经占着 5005）。真正的归属以 JVM 报错为准，
+/// 起不来时错误会在日志里。
+pub fn free_loopback_port() -> Result<u16, String> {
+    let l = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .map_err(|e| format!("找不到空闲的调试端口：{e}"))?;
+    l.local_addr()
+        .map(|a| a.port())
+        .map_err(|e| format!("读不到调试端口：{e}"))
 }
 
 /// 拼 `java` 命令。抽出来是为了能单测「参数顺序对不对」而不必真起进程。

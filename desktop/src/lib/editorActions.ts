@@ -181,6 +181,47 @@ export function cursorAt(): { line: number; column: number } | null {
 }
 
 /**
+ * 当前选区快照（1 基，Monaco 语义）+ 所在 model。
+ *
+ * 重构这类「拿选定范围去问语言服务」的动作不能用 `cursorAt`：选区被整个丢掉，
+ * 提取方法会把整段语句当成一个点。`readOnly` 也一起带出来——只读标签（混合换行、
+ * jar 内文件）改了存不进去，必须在动手前拦住。
+ */
+export function currentSelection(): {
+  model: ReturnType<typeof monaco.editor.createModel>;
+  start: { line: number; column: number };
+  end: { line: number; column: number };
+  empty: boolean;
+  readOnly: boolean;
+} | null {
+  const ed = editor();
+  const model = ed?.getModel();
+  const sel = ed?.getSelection();
+  if (!ed || !model || !sel) return null;
+  return {
+    model,
+    start: { line: sel.startLineNumber, column: sel.startColumn },
+    end: { line: sel.endLineNumber, column: sel.endColumn },
+    empty: sel.isEmpty(),
+    readOnly: ed.getOption(monaco.editor.EditorOption.readOnly),
+  };
+}
+
+/** 选中一段并聚焦（重构后把生成的名字选中，紧接着按 F2 就能改名）。 */
+export function selectInEditor(
+  start: { line: number; column: number },
+  end: { line: number; column: number },
+): boolean {
+  const ed = editor();
+  if (!ed || !ed.getModel()) return false;
+  const range = new monaco.Range(start.line, start.column, end.line, end.column);
+  ed.setSelection(range);
+  ed.revealRangeInCenterIfOutsideViewport(range);
+  ed.focus();
+  return true;
+}
+
+/**
  * F2 的动作。重命名要走自己的「先预览再写」流程（Monaco 内置的那套只改打开的 model），
  * 所以这里只留一个回调，由文件页挂上。
  */

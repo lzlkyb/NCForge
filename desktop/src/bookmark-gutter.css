@@ -1,0 +1,12 @@
+/* 行号槽书签小旗（lib/bookmarkGutter）。颜色取主题 token，深浅色自动跟随。
+   Monaco 的 .cgmr 是 20×20 的居中格，且会内联设置 width/height，
+   所以小旗尺寸画在伪元素上，避免和内联样式打架。 */
+.ncforge-bookmark-glyph::before {
+  content: "";
+  width: 8px;
+  height: 11px;
+  background: hsl(var(--primary));
+  /* 底边中间剪出缺口 = 书签小旗，与 IDEA 的 gutter 书签同形；
+     不用圆点：圆在这套界面里已经是断点 / 诊断的语义 */
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 74%, 0 100%);
+}

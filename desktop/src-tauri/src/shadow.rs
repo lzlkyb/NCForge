@@ -517,7 +517,7 @@ mod tests {
         client
             .request(
                 "initialize",
-                build_initialize_params(&root, &runtime, std::process::id()),
+                build_initialize_params(&root, &runtime, std::process::id(), &[]),
                 Duration::from_secs(60),
             )
             .unwrap();
@@ -720,7 +720,7 @@ mod tests {
         client
             .request(
                 "initialize",
-                build_initialize_params(&root, &runtime, std::process::id()),
+                build_initialize_params(&root, &runtime, std::process::id(), &[]),
                 Duration::from_secs(120),
             )
             .unwrap();

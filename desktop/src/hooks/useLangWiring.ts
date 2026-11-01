@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { ensureLang, initLang, setNavHandler } from "../lib/lang";
+import { initSemanticTokens } from "../lib/semanticTokens";
 
 /**
  * 把代码智能接到文件页：
@@ -18,6 +19,7 @@ export function useLangWiring({
 }) {
   useEffect(() => {
     void initLang();
+    initSemanticTokens();
   }, []);
 
   useEffect(() => {

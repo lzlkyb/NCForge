@@ -48,6 +48,8 @@ export interface ServerStatus {
   heapMb: number;
   /** 堆上限的默认值（MB），用来标「默认 4G」。 */
   defaultHeapMb: number;
+  /** 本次启动开了 JDWP 调试时的回环端口（未开 = null）。 */
+  debugPort: number | null;
 }
 
 export interface LogChunk {
@@ -94,7 +96,12 @@ export interface NcHome {
 export type StopOutcome = "stopped" | "cancelling" | "idle";
 
 export const serverStatus = () => invoke<ServerStatus>("server_status");
-export const serverStart = () => invoke<void>("server_start");
+/**
+ * 启动中间件。`debug` 为 true 时后端给 JVM 加 JDWP（只绑 127.0.0.1，端口由系统分配，
+ * 启动后从 `ServerStatus.debugPort` 读回）。
+ */
+export const serverStart = (debug = false) =>
+  invoke<void>("server_start", { debug });
 export const serverStop = () => invoke<StopOutcome>("server_stop");
 export const serverLog = (offset: number) => invoke<LogChunk>("server_log", { offset });
 

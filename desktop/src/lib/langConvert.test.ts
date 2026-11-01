@@ -6,6 +6,7 @@ import {
   isIdentifier,
   isStubSource,
   jdtDisplayName,
+  normUri,
   severityName,
   toLspPosition,
   toMonacoRange,
@@ -82,5 +83,28 @@ describe("langConvert", () => {
     ]);
     expect(toTargets(null)).toEqual([]);
     expect(toTargets([{ foo: 1 }])).toEqual([]);
+  });
+
+  describe("normUri", () => {
+    it("Monaco 的 %3A 盘符与后端的 : 盘符是同一个文件", () => {
+      // Monaco Uri.toString() 给 file:///d%3A/...，后端给 file:///D:/...
+      // decodeURI 不解 %3A，这条断言就是「编辑清单一条都匹配不到」的回归守卫
+      expect(normUri("file:///D%3A/w/A.java")).toBe(normUri("file:///D:/w/A.java"));
+    });
+
+    it("大小写与分隔符不同的同一路径相等", () => {
+      expect(normUri("C:\\W\\A.JAVA")).toBe(normUri("c:/w/a.java"));
+      expect(normUri("file:///C:/w/总账%20gl/A.java")).toBe(normUri("file:///c:/w/总账 gl/A.java"));
+    });
+
+    it("不同文件不相等，同名前缀也不能混为一谈", () => {
+      expect(normUri("file:///C:/w/A.java")).not.toBe(normUri("file:///C:/w/B.java"));
+      expect(normUri("file:///C:/w/gl/A.java")).not.toBe(normUri("file:///C:/w/gl2/A.java"));
+    });
+
+    it("不合法转义不抛错，退回原文比较", () => {
+      expect(() => normUri("file:///C:/100%/A.java")).not.toThrow();
+      expect(normUri("file:///C:/100%/A.java")).toContain("100%");
+    });
   });
 });

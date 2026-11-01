@@ -1,6 +1,7 @@
 import { Icon } from "../ui/icon";
 import type { ServerStatus } from "../../lib/server";
 import { formatUptime } from "../../lib/serverLog";
+import "../../debug.css";
 
 type Busy = "start" | "stop" | "restart" | "kill" | null;
 
@@ -14,6 +15,14 @@ interface Props {
   onRestart: () => void;
   /** 打开「改监听端口」弹窗（弹窗自己拉预览、自己写文件）。 */
   onEditPort: () => void;
+  /** 下次启动是否带 JDWP（JVM 不重读启动参数，所以只在停止时可改）。 */
+  debugMode: boolean;
+  onToggleDebugMode: () => void;
+  /** 调试适配器是否已附加到当前 JVM。 */
+  debugAttached: boolean;
+  debugBusy: boolean;
+  onAttachDebug: () => void;
+  onDetachDebug: () => void;
 }
 
 const STATE_TEXT: Record<string, string> = {
@@ -39,7 +48,21 @@ const BUSY_TEXT: Record<Exclude<Busy, null>, string> = {
  * 前端自己拼「进程在就算运行」会在「java 起着但端口没监听」时骗人，
  * 而那种状态恰恰最需要用户去翻日志。
  */
-export function ServiceCard({ status, busy, failed, onStart, onStop, onRestart, onEditPort }: Props) {
+export function ServiceCard({
+  status,
+  busy,
+  failed,
+  onStart,
+  onStop,
+  onRestart,
+  onEditPort,
+  debugMode,
+  onToggleDebugMode,
+  debugAttached,
+  debugBusy,
+  onAttachDebug,
+  onDetachDebug,
+}: Props) {
   // 三态而不是两态：status 没回来时既不是运行也不是停止，读失败时更不能冒充「已停止」
   // （用户会据此以为服务没起，再点一次启动）
   const state = status?.state ?? (failed ? "unknown" : "loading");
@@ -130,6 +153,18 @@ export function ServiceCard({ status, busy, failed, onStart, onStop, onRestart, 
           <span className="sv-v">{running || starting ? formatUptime(status?.uptimeMs ?? 0) : "—"}</span>
         </div>
         <div className="sv-metric">
+          {/* JDWP 是「本次启动」的属性：停止后为空，重启时按调试模式开关重新生成端口。
+              端口由系统分配（不写死），所以这里显示的是真实值而不是 5005 之类的惯例值。 */}
+          <span className="sv-k">JDWP</span>
+          <span className="sv-v sv-jdwp" data-on={status?.debugPort ? "" : undefined} title={
+            status?.debugPort
+              ? "JVM 在本机回环上监听 JDWP；点右侧「附加调试器」建立会话"
+              : "这次启动没开调试。停止后勾选「调试模式」再启动"
+          }>
+            {status?.debugPort ? `127.0.0.1:${status.debugPort}` : "未开启"}
+          </span>
+        </div>
+        <div className="sv-metric">
           <span className="sv-k">classpath</span>
           <span className="sv-v">
             {status?.classpathEntries ? status.classpathEntries : "—"}
@@ -139,6 +174,61 @@ export function ServiceCard({ status, busy, failed, onStart, onStop, onRestart, 
       </div>
 
       <div className="sv-actions">
+        {/* 调试模式只在停止时可切：在跑的 JVM 不会重读 -agentlib 参数 */}
+        {!running && !starting && (
+          <button
+            type="button"
+            className="sv-btn"
+            data-on={debugMode || undefined}
+            aria-pressed={debugMode}
+            disabled={busy !== null}
+            title={
+              debugMode
+                ? "下次启动带 JDWP（只绑 127.0.0.1，端口由系统分配）；服务起来后可附加调试器"
+                : "开启后启动：JVM 监听 JDWP 回环端口，本工具才能附加调试器"
+            }
+            onClick={onToggleDebugMode}
+          >
+            <Icon name="bug" size={13} />
+            调试模式
+          </button>
+        )}
+        {running && status?.debugPort && (
+          debugAttached ? (
+            <button
+              type="button"
+              className="sv-btn"
+              disabled={debugBusy}
+              title="断开调试适配器；中间件继续运行"
+              onClick={onDetachDebug}
+            >
+              {debugBusy ? <Icon name="spinner" size={13} className="animate-spin" /> : <Icon name="plug" size={13} />}
+              {debugBusy ? "断开中…" : "断开调试"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="sv-btn"
+              disabled={debugBusy}
+              title={`附加到 JDWP 127.0.0.1:${status.debugPort}`}
+              onClick={onAttachDebug}
+            >
+              {debugBusy ? <Icon name="spinner" size={13} className="animate-spin" /> : <Icon name="bug" size={13} />}
+              {debugBusy ? "附加中…" : "附加调试器"}
+            </button>
+          )
+        )}
+        {running && status && !status.debugPort && (
+          <button
+            type="button"
+            className="sv-btn"
+            disabled
+            title="本次启动没开调试：先停止，勾选「调试模式」再启动（JVM 不会重读启动参数）"
+          >
+            <Icon name="bug" size={13} />
+            附加调试器
+          </button>
+        )}
         {running && (
           <button
             type="button"

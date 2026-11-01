@@ -59,6 +59,13 @@ export function applyMonacoTheme(theme: Theme): void {
       { token: "comment", foreground: strip(muted), fontStyle: "italic" },
       { token: "type", foreground: strip(tokenHex("--warning-ink")) },
       { token: "number", foreground: strip(tokenHex("--destructive-ink")) },
+      // 语义 token（lib/semanticTokens.ts 拉取）：方法名与注解名单独配色，
+      // 已废弃的成员画删除线并压暗。其余类型（property/variable/namespace…）不设规则，
+      // Monaco 对没有主题规则的语义 token 会退回语法色，正好不用重复维护。
+      { token: "function", foreground: strip(primary) },
+      { token: "annotation", foreground: strip(tokenHex("--success-ink")) },
+      // 名字与 semanticTokens.DEPRECATED_TOKEN_TYPE 一致（那边不能反过来 import 本模块，会成环）
+      { token: "deprecated", foreground: muted, fontStyle: "strikethrough" },
     ],
     colors: {
       "editor.background": bg,

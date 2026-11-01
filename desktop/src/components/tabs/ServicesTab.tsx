@@ -10,8 +10,11 @@ import { ServiceConfig } from "../services/ServiceConfig";
 import { CommandLineDialog } from "../services/CommandLineDialog";
 import { PortDialog } from "../services/PortDialog";
 import { ServiceConfirms } from "../services/ServiceConfirms";
+import { ServiceAlerts } from "../services/ServiceAlerts";
 import { useAppHidden } from "../../lib/appVisibility";
 import { failureText } from "../../lib/friendlyError";
+import { attachDebugger, detachDebugger, useDebugSnapshot } from "../../lib/debugSession";
+import { readDebugModePref, writeDebugModePref } from "../../lib/debugKeys";
 import {
   serverCommandLine,
   serverKillPortOwner,
@@ -22,7 +25,6 @@ import {
   type LaunchPreview,
   type ServerState,
   type ServerStatus,
-  UNKNOWN_PROCESS_NAME,
 } from "../../lib/server";
 
 type Busy = "start" | "stop" | "restart" | "kill" | null;
@@ -45,6 +47,9 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const [previewing, setPreviewing] = useState(false);
   const [portOpen, setPortOpen] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
+  /** 下次启动是否带 JDWP。持久化在 localStorage：常做二次开发的人不必每次勾。 */
+  const [debugMode, setDebugMode] = useState(readDebugModePref);
+  const debug = useDebugSnapshot();
 
   const { data: status, refetch, isError, error } = useQuery({
     queryKey: ["server-status"],
@@ -71,10 +76,15 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const start = useCallback(async () => {
     setBusy("start");
     try {
-      await serverStart();
+      await serverStart(debugMode);
       setGeneration((g) => g + 1);
       patchState("starting");
-      toast("已启动，正在加载模块（通常 10 秒左右）", "success");
+      toast(
+        debugMode
+          ? "已以调试模式启动（JDWP 只绑 127.0.0.1），正在加载模块；起来后到服务卡附加调试器"
+          : "已启动，正在加载模块（通常 10 秒左右）",
+        "success",
+      );
     } catch (e) {
       toast(failureText("启动服务", e), "error");
       // 后端把「启动失败：…」写进了日志文件，面板还停在上一代：不换一代的话，
@@ -84,7 +94,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
       setBusy(null);
       void refetch();
     }
-  }, [refetch, patchState]);
+  }, [refetch, patchState, debugMode]);
 
   const stop = useCallback(async () => {
     setConfirm(null);
@@ -116,7 +126,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
         toast("正在取消上一次启动，等一秒再点重启", "warning");
         return;
       }
-      await serverStart();
+      await serverStart(debugMode);
       setGeneration((g) => g + 1);
       patchState("starting");
       // 停止时服务已经自己崩了（idle）：这次其实是全新启动，说清比笼统的「已重启」有用
@@ -131,7 +141,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
       setBusy(null);
       void refetch();
     }
-  }, [refetch, patchState]);
+  }, [refetch, patchState, debugMode]);
 
   const killOwner = useCallback(async () => {
     setConfirm(null);
@@ -146,6 +156,24 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
       void refetch();
     }
   }, [refetch]);
+
+  const toggleDebugMode = () => {
+    const next = !debugMode;
+    setDebugMode(next);
+    writeDebugModePref(next);
+  };
+
+  const attachDebug = () => {
+    void attachDebugger()
+      .then(() => toast("已附加调试器，命中断点后底部「调试」面板会自动打开", "success"))
+      .catch((e) => toast(failureText("附加调试器", e), "error"));
+  };
+
+  const detachDebug = () => {
+    void detachDebugger()
+      .then(() => toast("已断开调试（服务继续运行）", "info"))
+      .catch((e) => toast(failureText("断开调试", e), "error"));
+  };
 
   const showCommandLine = async () => {
     setPreviewing(true);
@@ -169,12 +197,6 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const state = status?.state;
   const known = state !== undefined;
   const owner = status?.portOwner ?? null;
-  const conflict = !!owner && !status?.portOwnedBySelf;
-  const ownerIsJava = !!owner && owner.name.toLowerCase().startsWith("java");
-  // 读不到进程名时后端给的是占位值（Rust `server::UNKNOWN_PROCESS`，前端同名常量）。
-  // 那不等于「不是 java」：早先这里一律落到「它不是 java 进程」，等于替用户
-  // 下了一个我们并不知道的结论——而用户会据此去任务管理器里找一个「非 java」的进程。
-  const ownerUnknown = !!owner && owner.name === UNKNOWN_PROCESS_NAME;
 
   return (
     <div className="sv-page">
@@ -208,6 +230,12 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
           onStop={() => setConfirm("stop")}
           onRestart={() => setConfirm("restart")}
           onEditPort={() => setPortOpen(true)}
+          debugMode={debugMode}
+          onToggleDebugMode={toggleDebugMode}
+          debugAttached={debug.status.state === "attached"}
+          debugBusy={debug.busy !== null}
+          onAttachDebug={attachDebug}
+          onDetachDebug={detachDebug}
         />
 
         {isError && (
@@ -223,41 +251,12 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
           </div>
         )}
 
-        {conflict && owner && (
-          <div className="sv-alert">
-            <Icon name="alertTriangle" size={14} />
-            <span className="sv-alert-text">
-              端口 {status?.port} 被 <b>{owner.name}</b>（PID {owner.pid}）占用
-              {ownerIsJava
-                ? "，可能是上次没停干净的 NC 中间件。"
-                : ownerUnknown
-                  ? "，但读不到它的进程名——这不等于它不是 java。可以按 PID 在任务管理器里确认。"
-                  : "，它不是 java 进程，本工具不会替你结束它。"}
-            </span>
-            {(ownerIsJava || ownerUnknown) && (
-              <button
-                type="button"
-                className="sv-btn sv-btn-danger"
-                disabled={busy !== null}
-                onClick={() => setConfirm("kill")}
-              >
-                结束该进程
-              </button>
-            )}
-          </div>
-        )}
-
-        {status && !status.projectRoot && (
-          <div className="sv-alert" data-tone="warn">
-            <Icon name="info" size={14} />
-            <span className="sv-alert-text">
-              还没选工程目录：服务能起来，但你改的代码<b>不会生效</b>（用的全是 NC home 里的 jar）。
-            </span>
-            <button type="button" className="sv-btn" onClick={() => onNavigate("files")}>
-              去选工程
-            </button>
-          </div>
-        )}
+        <ServiceAlerts
+          status={status ?? null}
+          busy={busy !== null}
+          onKill={() => setConfirm("kill")}
+          onNavigate={onNavigate}
+        />
 
         {configOpen && <ServiceConfig status={status ?? null} running={!known || state !== "stopped"} onRefetch={() => void refetch()} />}
 

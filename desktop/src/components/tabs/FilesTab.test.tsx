@@ -10,7 +10,11 @@ import { setSession } from "../../lib/workspaceSession";
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), toast: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
 vi.mock("../workspace/TreeSvnProvider", () => ({ TreeSvnProvider: ({ children }: { children: import("react").ReactNode }) => <>{children}</> }));
-vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
+// 文件树要订阅 fs-changed：给个空注册，本测试不关心外部改动
+vi.mock("../../lib/tauri", () => ({
+  invoke: mocks.invoke,
+  listen: async () => () => {},
+}));
 vi.mock("../../components/ui/toast", () => ({ toast: mocks.toast }));
 vi.mock("../../hooks/usePrefersReducedMotion", () => ({ usePrefersReducedMotion: () => true }));
 // 任何一条链只要摸到编辑器就会加载真 Monaco（要 worker / canvas，jsdom 里第一行
@@ -48,6 +52,7 @@ vi.mock("../../lib/lang", () => ({
   inLangModule: () => false,
   loadJdtSource: vi.fn(),
   restartLang: vi.fn(),
+  onLangReadyChange: vi.fn(() => () => {}),
   useLangView: () => ({
     state: "stopped",
     module: null,

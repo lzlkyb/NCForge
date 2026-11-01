@@ -3,8 +3,11 @@ import { Icon } from "../ui/icon";
 import { baseName } from "../../lib/workspace";
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { CallHierarchyPanel } from "./CallHierarchyPanel";
+import { TypeHierarchyPanel } from "./TypeHierarchyPanel";
 import { TodoPanel } from "./TodoPanel";
 import { BookmarkPanel } from "./BookmarkPanel";
+import { DebugPanel } from "./DebugPanel";
+import { useDebugSnapshot } from "../../lib/debugSession";
 import { openCallHierarchy } from "../../lib/callHierarchy";
 import { relativeTo, type CompileResult, type Problem } from "../../lib/compile";
 import { parseLogLink } from "../../lib/logLink";
@@ -12,7 +15,7 @@ import { useWorkspaceSelector } from "../../lib/workspaceSession";
 import type { CodeDiag } from "../../lib/diagStore";
 import { countErrors, mergeProblems } from "../../lib/problemList";
 
-export type PanelTab = "problems" | "build" | "svc" | "calls" | "todo" | "bookmarks";
+export type PanelTab = "problems" | "build" | "svc" | "calls" | "types" | "todo" | "bookmarks" | "debug";
 
 interface Props {
   root: string;
@@ -47,6 +50,8 @@ interface Props {
 export function BottomPanel({ root, tab, onTab, running, result, log: logProp, onOpenProblem, onOpenAt, inspect, onNextProblem, onPrevProblem, onCancel, onClose }: Props) {
   const sessionLog = useWorkspaceSelector((s) => s.compileLog);
   const log = logProp ?? sessionLog;
+  // 标签上的小灯：调试停在某一行时，没开面板也能看到「现在断住了」
+  const debug = useDebugSnapshot();
   const dock = useWorkbenchDock();
   const logRef = useRef<HTMLDivElement>(null);
   // 只在用户本来就贴着底部时才跟随最新一行：首次建类索引会连续输出几十行，
@@ -86,11 +91,18 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
         <button type="button" className="wb-ptab" data-active={tab === "calls" || undefined} onClick={() => onTab("calls")}>
           调用层级
         </button>
+        <button type="button" className="wb-ptab" data-active={tab === "types" || undefined} onClick={() => onTab("types")}>
+          类型层级
+        </button>
         <button type="button" className="wb-ptab" data-active={tab === "todo" || undefined} onClick={() => onTab("todo")}>
           待办
         </button>
         <button type="button" className="wb-ptab" data-active={tab === "bookmarks" || undefined} onClick={() => onTab("bookmarks")}>
           书签
+        </button>
+        <button type="button" className="wb-ptab" data-active={tab === "debug" || undefined} onClick={() => onTab("debug")}>
+          调试
+          {debug.paused && <span className="wb-ptab-live" title="调试已暂停" />}
         </button>
         <span className="wb-status-sp" />
         {tab === "problems" && merged.length > 0 && (
@@ -245,8 +257,10 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
           </button>
         </div>
       )}
+      {tab === "types" && <TypeHierarchyPanel />}
       {tab === "todo" && <TodoPanel root={root} onOpenAt={onOpenAt} />}
       {tab === "bookmarks" && <BookmarkPanel root={root} onOpenAt={onOpenAt} />}
+      {tab === "debug" && <DebugPanel onOpenAt={onOpenAt} />}
       <div ref={dock?.bindHost("bottom")} className="wb-panel-body wb-svc-host" hidden={tab !== "svc"} />
     </section>
   );

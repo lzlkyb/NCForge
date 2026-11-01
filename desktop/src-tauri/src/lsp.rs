@@ -291,8 +291,24 @@ pub fn build_settings(runtime_home: &str) -> Value {
 ///
 /// 客户端不声明 `workspace.applyEdit`：服务端的代码修复/重命名就不会向我们要写文件
 /// （红线：jdt.ls 的修改只能落到编辑器 model，由用户自己保存）。
-pub fn build_initialize_params(root_path: &str, runtime_home: &str, process_id: u32) -> Value {
+///
+/// `bundles` 是给 jdt.ls 额外装的 OSGi bundle 路径（绝对路径，不是 URI）。
+/// 目前只有 java-debug：装上之后它才注册 `vscode.java.startDebugSession`。
+/// 传空数组等于不装；目录里没有 jar 时调用方传空即可，别让语言服务跟着起不来。
+pub fn build_initialize_params(
+    root_path: &str,
+    runtime_home: &str,
+    process_id: u32,
+    bundles: &[String],
+) -> Value {
     let root_uri = path_to_uri(root_path);
+    let mut initialization_options = json!({
+        "settings": build_settings(runtime_home),
+        "extendedClientCapabilities": { "classFileContentsSupport": true, "progressReportProvider": false }
+    });
+    if !bundles.is_empty() {
+        initialization_options["bundles"] = json!(bundles);
+    }
     json!({
         "processId": process_id,
         "rootUri": root_uri,
@@ -339,10 +355,7 @@ pub fn build_initialize_params(root_path: &str, runtime_home: &str, process_id: 
                 "applyEdit": false
             }
         },
-        "initializationOptions": {
-            "settings": build_settings(runtime_home),
-            "extendedClientCapabilities": { "classFileContentsSupport": true, "progressReportProvider": false }
-        }
+        "initializationOptions": initialization_options
     })
 }
 
@@ -693,8 +706,10 @@ pub(crate) mod tests {
 
     #[test]
     fn initialize_params_follow_probe_findings() {
-        let p = build_initialize_params(r"C:\shadow", r"D:\ncc\1909home\ufjdk", 7);
+        let p = build_initialize_params(r"C:\shadow", r"D:\ncc\1909home\ufjdk", 7, &[]);
         let opts = &p["initializationOptions"];
+        // 没有额外 bundle 时不能出现空数组：老版本对未知键虽宽容，但空数组没有任何意义
+        assert!(opts.get("bundles").is_none());
         assert_eq!(
             opts["extendedClientCapabilities"]["classFileContentsSupport"],
             true
@@ -714,6 +729,14 @@ pub(crate) mod tests {
         // 红线：不声明 applyEdit，服务端就不会让我们写文件
         assert_eq!(p["capabilities"]["workspace"]["applyEdit"], false);
         assert_eq!(p["rootUri"], "file:///C:/shadow");
+    }
+
+    #[test]
+    fn bundles_are_forwarded_to_initialize() {
+        let bundles =
+            vec![r"D:\ls\java-debug\com.microsoft.java.debug.plugin-0.32.0.jar".to_string()];
+        let p = build_initialize_params(r"C:\shadow", r"D:\ncc\1909home\ufjdk", 7, &bundles);
+        assert_eq!(p["initializationOptions"]["bundles"], json!(bundles));
     }
 
     #[test]
@@ -864,7 +887,7 @@ pub(crate) mod tests {
         let res = client
             .request(
                 "initialize",
-                build_initialize_params(&root, r"D:\ncc\1909home\ufjdk", std::process::id()),
+                build_initialize_params(&root, r"D:\ncc\1909home\ufjdk", std::process::id(), &[]),
                 Duration::from_secs(60),
             )
             .expect("initialize 应成功");

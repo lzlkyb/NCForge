@@ -1,6 +1,8 @@
 import { useCallback, useEffect } from "react";
 import { baseName, encodingMarks, joinPath, listDir, type DirItem } from "../../lib/workspace";
 import { collapseChain } from "../../lib/treeCompact";
+import { listen } from "../../lib/tauri";
+import { pathKey } from "../../lib/treeSvn";
 import { getSession, setSession, setTree, useWorkspaceSelector } from "../../lib/workspaceSession";
 
 /** 定位到某个文件时最多展开多少层：防止异常路径（工作区外的长路径）把界面锁死。 */
@@ -64,6 +66,47 @@ export function useTreeLoad(root: string) {
     },
     [markEncodings],
   );
+
+  /**
+   * 外部改动（SVN 更新、Eclipse 保存、脚本生成文件）：后端把改动合并成一批目录报上来。
+   * 只刷新已经读过的目录——没展开过的目录没有缓存，下次展开时本来就会读最新的。
+   *
+   * `rescan` = 平台丢了监听范围（如 inotify 上限、根目录被替换），这时后端不知道
+   * 具体改了哪些目录，只能把读过的一层全部重读。层数受展开深度限制，代价可控。
+   */
+  const refreshDirs = useCallback(
+    (changed: string[], rescan: boolean) => {
+      if (!rescan && changed.length === 0) return;
+      const wanted = rescan ? null : new Set(changed.map(pathKey));
+      for (const [dir, entry] of Object.entries(getSession().tree.dirs)) {
+        // 正在读的那一层，结果回来时本身就是新的，不叠加一次
+        if (entry.status === "loading") continue;
+        if (!wanted || wanted.has(pathKey(dir))) void load(dir);
+      }
+    },
+    [load],
+  );
+
+  // 订阅后端的文件监听。注册是异步的，组件可能在它回来前就卸载：
+  // 用 disposed 兜住，否则监听会挂在已卸载的组件上。
+  useEffect(() => {
+    let disposed = false;
+    let off: (() => void) | undefined;
+    void listen<{ dirs?: string[]; rescan?: boolean }>("fs-changed", (p) =>
+      refreshDirs(p?.dirs ?? [], p?.rescan === true),
+    )
+      .then((u) => {
+        if (disposed) u();
+        else off = u;
+      })
+      .catch(() => {
+        // 注册失败（如纯浏览器调试）：退化为手动刷新，不影响树本身
+      });
+    return () => {
+      disposed = true;
+      off?.();
+    };
+  }, [refreshDirs]);
 
   // 工作区根变化（首次打开 / 更换目录）时重置整棵树，只展开根。
   // 根没变（= 只是切页面回来）就直接复用缓存，不再打一次 IPC。
