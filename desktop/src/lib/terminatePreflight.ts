@@ -4,6 +4,8 @@ import { getDb, loadConns } from "./dbStore";
 import { mergePending } from "./quitGuard";
 import { requestOpenFile } from "./openFileRequest";
 import { friendlyDbError } from "./db";
+import { isUnsaved } from "./tabDirty";
+import { getSession } from "./workspaceSession";
 import { toast } from "../components/ui/toast";
 
 /**
@@ -36,6 +38,13 @@ function revealFailed(path: string) {
  * 保存失败时把人送到第一个出问题的文件，和退出守卫的行为保持一致。
  */
 export async function ensureFilesSaved(action = "退出"): Promise<boolean> {
+  // 快路径：会话里一个脏标签都没有就不可能丢东西，直接放行。
+  // 不先做这一步的话，每次切工程/退出都要为「空集合」把整条保存链
+  // （saveAllDirty → fileSave → editorStore → monaco）动态加载一遍——那是一次
+  // 真金白银的模块加载，动作会被它拖延几十毫秒。`isUnsaved` 只依赖类型，
+  // 静态引进来不会把 Monaco 拉进启动路径。
+  if (!getSession().tabs.some(isUnsaved)) return true;
+
   let files: import("./saveAllDirty").UnsavedFile[] = [];
   try {
     files = (await loadSaveAll()).collectUnsaved();

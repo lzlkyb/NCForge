@@ -18,8 +18,11 @@ import { setSession } from "./lib/workspaceSession";
 import { toggleTheme } from "./lib/theme";
 import { serverStart, serverStop } from "./lib/server";
 import { toast } from "./components/ui/toast";
+import { failureText } from "./lib/friendlyError";
+import { ConfirmDialog } from "./components/ui/ConfirmDialog";
 import { Header } from "./components/layout/Header";
 import { SideNav, WORKSPACE_NAV } from "./components/layout/SideNav";
+import { WorkbenchShell } from "./components/workspace/WorkbenchShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useAppHiddenFlag } from "./hooks/useAppHiddenFlag";
 import { useWindowSizePersistence } from "./hooks/useWindowSizePersistence";
@@ -34,10 +37,8 @@ import { wireQuitGuard } from "./lib/quitGuard";
 const SettingsTab = lazy(() =>
   import("./components/tabs/SettingsTab").then((m) => ({ default: m.SettingsTab })),
 );
-// 文件页带着 Monaco（数 MB），必须懒加载，不拖慢其它页面和首屏。
-const FilesTab = lazy(() =>
-  import("./components/tabs/FilesTab").then((m) => ({ default: m.FilesTab })),
-);
+// 文件页（带 Monaco）由 WorkbenchShell 自己懒加载：外壳不依赖编辑器，
+// 「进设置也要先下载数 MB 的编辑器」这个问题就是在这儿解决的。
 // 搜索页只有静态表单与列表，但仍然懒加载：它是第二个高频页，不该挤进首屏包。
 const SearchTab = lazy(() =>
   import("./components/tabs/SearchTab").then((m) => ({ default: m.SearchTab })),
@@ -74,6 +75,32 @@ const QuickPalette = lazy(() =>
 const HOTKEY_TABS: string[] = [...WORKSPACE_NAV.map((n) => n.key), "settings"];
 
 /**
+ * 服务启停正在路上：连按 Enter 会把同一条指令发好几遍。
+ * 放模块级是因为命令面板与确认框走的是同一个闸。
+ */
+let svcBusy = false;
+
+/**
+ * 停止 NC 服务（命令面板与确认框共用）。
+ *
+ * 三态与 NC 服务页保持一致：一律报「已停止」是最坑的——服务可能随后照旧起来。
+ */
+async function stopServerWithFeedback(): Promise<void> {
+  if (svcBusy) return;
+  svcBusy = true;
+  try {
+    const outcome = await serverStop();
+    if (outcome === "stopped") toast("已停止", "success");
+    else if (outcome === "cancelling") toast("正在取消启动…", "info");
+    else toast("服务没有在运行", "info");
+  } catch (e) {
+    toast(failureText("停止 NC 服务", e), "error");
+  } finally {
+    svcBusy = false;
+  }
+}
+
+/**
  * 应用外壳（壳子版）。
  *
  * 保留的范式（业务直接沿用）：
@@ -101,6 +128,8 @@ function AppContent() {
   const appHidden = useAppHidden();
 
   const [activeTab, setActiveTab] = useState("files");
+  /** 命令面板触发的服务停止：先弹确认，确认后才真的停。 */
+  const [svcConfirm, setSvcConfirm] = useState<null | "stop">(null);
 
   // ── 状态源（壳子示例：后端还没有业务状态，这里演示查询范式）──
   // 业务把 queryKey/queryFn 换成自家命令，如 invoke<StatusResponse>("get_status")
@@ -152,9 +181,23 @@ function AppContent() {
   // 命令面板里的应用级命令（导航 / 布局 / 主题 / NC 服务）。文件页的命令由文件页自己登记。
   const navRef = useRef(navigate);
   navRef.current = navigate;
+  /** 服务启停正在路上：连按 Enter 会把同一条指令发好几遍。 */
   useEffect(() => {
     const go = (key: string, title: string, hint?: string) => ({ id: `go.${key}`, title: `转到：${title}`, hint, run: () => navRef.current(key) });
-    const svc = (run: () => Promise<unknown>, ok: string) => () => void run().then(() => toast(ok, "success"), (e) => toast(String(e), "error"));
+    // 命令面板跑的是一条命令，没有页面上的按钮态可看，所以每个动作都要自己给反馈：
+    // 成功报真实结果，失败报人话（以前是把 Rust 英文原文直接弹出来）。
+    const runStart = async () => {
+      if (svcBusy) return;
+      svcBusy = true;
+      try {
+        await serverStart();
+        toast("已发出启动指令，正在加载模块（通常 10 秒左右）", "success");
+      } catch (e) {
+        toast(failureText("启动 NC 服务", e), "error");
+      } finally {
+        svcBusy = false;
+      }
+    };
     return registerCommands([
       go("files", "文件"),
       go("search", "全工程搜索", WORKSPACE_SEARCH_KEY),
@@ -167,8 +210,9 @@ function AppContent() {
       { id: "view.side", title: "切换侧栏", hint: "Ctrl+B", run: toggleSide },
       { id: "view.panel", title: "切换底部面板", hint: "Ctrl+J", run: () => setSession({ panelOpen: (v) => !v }) },
       { id: "view.theme", title: "切换深色 / 浅色主题", run: () => toggleTheme() },
-      { id: "svc.start", title: "启动 NC 服务", run: svc(serverStart, "已发出启动指令") },
-      { id: "svc.stop", title: "停止 NC 服务", run: svc(serverStop, "已发出停止指令") },
+      { id: "svc.start", title: "启动 NC 服务", run: () => void runStart() },
+      // 停止必须问一句：命令面板能一键到的地方，不能在服务页要确认、到这里就直接打后端。
+      { id: "svc.stop", title: "停止 NC 服务", run: () => setSvcConfirm("stop") },
     ]);
   }, []);
   // 其它页（如 Java 编辑器里「在数据库中执行此 SQL」）要切页时发这个事件，detail 是页 key
@@ -237,6 +281,34 @@ function AppContent() {
 
   const navItems = useMemo(() => WORKSPACE_NAV, []);
 
+  /**
+   * 挂在外壳里的工具页：由 `WORKSPACE_NAV` 派生，不再手写第二份页面表。
+   *
+   * 以前这里是一个 7 项字面量，加导航项时侧栏与 Ctrl+N 自动生效、这个数组不会——
+   * 点进去只看到文件页，编译器也不报错。`hosted: false`（文件页）不进这里：
+   * 它由 WorkbenchShell 自己渲染。
+   *
+   * 设置页不在 `WORKSPACE_NAV` 里（它是侧栏底部的独立入口，不进 Ctrl+1~N 的导航
+   * 序号），但同样得有面板——漏了它，点「设置」就是一片空白。
+   */
+  const hostedTabs = useMemo(
+    () => [...WORKSPACE_NAV.filter((n) => n.hosted !== false).map((n) => n.key), "settings"],
+    [],
+  );
+  const toolPanels = useMemo(
+    () =>
+      hostedTabs.map((tab) => (
+        <ActivityPanel key={tab} active={activeTab === tab}>
+          {/* 每页一个边界 + 自己的 Suspense：谁崩了卸谁，谁在加载谁显示骨架，
+              不再共用最外层那一个（那样任一工具页出错会把整个工作台卸掉）。 */}
+          <ErrorBoundary resetKey={tab}>
+            <Suspense fallback={<Skeleton className="m-4 h-40" />}>{renderTab(tab, refreshStatus, navigate)}</Suspense>
+          </ErrorBoundary>
+        </ActivityPanel>
+      )),
+    [activeTab, hostedTabs, refreshStatus, navigate],
+  );
+
   return (
     <div className="app-shell flex h-screen flex-col overflow-hidden">
       <Header
@@ -253,12 +325,7 @@ function AppContent() {
           navItems={navItems}
         />
         <main className="app-main page-transition flex min-h-0 min-w-0 flex-col">
-          <ErrorBoundary resetKey={activeTab}>
-            <Suspense fallback={<Skeleton className="m-4 h-40" />}>
-              <FilesTab activeTool={activeTab}
-                tool={["search", "svn", "services", "patch", "db", "linked", "settings"].map(tab => <ActivityPanel key={tab} active={activeTab === tab}>{renderTab(tab, refreshStatus, navigate)}</ActivityPanel>)} />
-            </Suspense>
-          </ErrorBoundary>
+          <WorkbenchShell activeTab={activeTab} tool={toolPanels} />
         </main>
       </div>
       {paletteOpen && (
@@ -268,6 +335,19 @@ function AppContent() {
       )}
       {/* 数据库/退出确认的弹框挂在最外层：任何页面（含文件页）点 X 都要能弹出来 */}
       <DbConfirmHost />
+      {/* 命令面板「停止 NC 服务」的二次确认，文案与 NC 服务页同一条 */}
+      <ConfirmDialog
+        open={svcConfirm === "stop"}
+        title="停止 NC 中间件？"
+        description="正在使用这个服务的客户端会立刻断开。停机后要重新加载 200 多个模块，大约 10 秒才能再连上。"
+        variant="destructive"
+        confirmLabel="停止"
+        onCancel={() => setSvcConfirm(null)}
+        onConfirm={() => {
+          setSvcConfirm(null);
+          void stopServerWithFeedback();
+        }}
+      />
     </div>
   );
 }
@@ -275,8 +355,6 @@ function AppContent() {
 /** 页面表：tab key → 组件。业务把这里换成自家页面。 */
 function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: string) => void) {
   switch (tab) {
-    case "files":
-      return <FilesTab />;
     case "search":
       // 点命中：先把「打开哪个文件、定位到哪行」记到管道里，再切到文件页。
       // 顺序不能反——FilesTab 是懒加载组件，切页时它才挂载，订阅晚于事件，
@@ -309,7 +387,11 @@ function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: strin
     case "settings":
       return <SettingsTab onChanged={refreshStatus} />;
     default:
-      return <FilesTab />;
+      // 到这儿说明导航项没有对应页面（加了导航忘了加页面表）。以前 default 返回
+      // <FilesTab/>，「看着能用」——点进去只看到文件页，还不报错；更糟的是
+      // 一旦有人把 "files" 塞进工具页数组，这里就是「宿主里再套一个宿主」。
+      console.warn(`[NCForge] 导航项「${tab}」没有注册页面`);
+      return null;
   }
 }
 

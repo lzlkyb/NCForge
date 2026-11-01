@@ -197,7 +197,12 @@ export async function confirmProdWrite(tabId: string, connId: string, sql: strin
 export async function ensureConnected(connId: string): Promise<boolean> {
   const rt = rtOf(connId);
   if (rt.status === "connected") return true;
-  if (rt.status === "connecting") return false;
+  if (rt.status === "connecting") {
+    // 刚点完连接（还在转圈）就按 Ctrl+Enter：不能什么都不发生——用户会连点几次，
+    // 而且连接建好之后也不会自动补跑这次执行。给一句话，让他知道该等一下。
+    toast("正在连接，稍等一下再执行", "info");
+    return false;
+  }
   let r = await connect(connId);
   // 第一次弹框且本来就没存口令：不是「出错」，不显示红字
   let quiet = !connOf(connId)?.hasPassword;

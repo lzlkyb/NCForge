@@ -125,6 +125,7 @@ export function ReplaceBar({
 
       <Dialog
         open={open}
+        ariaLabel="全部替换确认"
         onClose={() => {
           // running 阶段不给任何关闭途径（见文件头纪律 2）
           if (phase !== "running") close();
@@ -157,7 +158,7 @@ export function ReplaceBar({
               <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12px] leading-relaxed">
                 <b className="text-destructive-ink">工作区已变更</b>
                 ：这些搜索结果属于上一个工作区，上面列的改动面也是它的。
-                后端按**当前**工作区执行替换——照着旧清单确认，改的就是新工作区的文件。
+                后端按<b>当前</b>工作区执行替换——照着旧清单确认，改的就是新工作区的文件。
                 请取消，重新搜索后再替换。
               </div>
             )}

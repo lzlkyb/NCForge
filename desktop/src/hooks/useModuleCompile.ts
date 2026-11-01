@@ -2,11 +2,12 @@ import { useEffect, useRef } from "react";
 import {
   getSession,
   setSession,
-  useWorkspaceSession,
+  useWorkspaceSelector,
   type Updater,
   type WorkspaceSession,
 } from "../lib/workspaceSession";
-import { compileModule, isCompileCancelled, onCompileLog } from "../lib/compile";
+import { compileModule, compileAllModules, isCompileCancelled, onCompileLog, type CompileResult } from "../lib/compile";
+import { registerCommands } from "../lib/commandRegistry";
 import { toast } from "../components/ui/toast";
 
 /** 日志攒多久刷一次：逐行 setSession 会让整个会话订阅者（含 Monaco 外的面板）每行重渲染。 */
@@ -31,7 +32,8 @@ function appendLog(prev: string[], batch: string[]): string[] {
  * 状态本身还在 `lib/workspaceSession`（切页不该丢），这里只放动作与订阅。
  */
 export function useModuleCompile() {
-  const { activePath, tabs } = useWorkspaceSession();
+  const activePath = useWorkspaceSelector((s) => s.activePath);
+  const tabs = useWorkspaceSelector((s) => s.tabs);
   const setCompiling = (v: Updater<boolean>) => setSession({ compiling: v });
   const setCompileResult = (v: Updater<WorkspaceSession["compileResult"]>) =>
     setSession({ compileResult: v });
@@ -78,10 +80,14 @@ export function useModuleCompile() {
     };
   }, []);
 
-  /** 编译当前文件所在的模块；有未保存的文件先提醒，因为 ecj 读的是磁盘上的内容。 */
-  const compileActive = async () => {
-    if (!activePath || tabs.find((t) => t.path === activePath)?.virtual) return;
-    if (tabs.some((t) => t.dirty || t.eolChanged)) {
+  /**
+   * 一轮编译的公共流程：清日志 → 跑 → 写结果（切了工作区就丢弃）。
+   *
+   * 单模块与全量只有「跑哪条命令」不同，其余（未保存提醒、取消语义、日志清空、
+   * 工作区切换保护）必须一模一样；各写一遍必然出现「一个会提示未保存、另一个不会」。
+   */
+  const start = async (run: () => Promise<CompileResult>, unsavedHint: boolean) => {
+    if (unsavedHint && tabs.some((t) => t.dirty || t.eolChanged)) {
       toast("有未保存的文件，编译读取的是磁盘版本，请先保存（Ctrl+S）", "warning");
     }
     setSession({ panelOpen: true, panelTab: "build" });
@@ -92,7 +98,7 @@ export function useModuleCompile() {
     // 编译可能跑半分钟，期间用户可能切了工作区：结果不能写进新工程的面板
     const root = getSession().root ?? null;
     try {
-      const r = await compileModule(activePath);
+      const r = await run();
       if ((getSession().root ?? null) !== root) {
         setCompileLog((l) => [...l, "编译结果属于上一个工作区，已丢弃"]);
         return;
@@ -115,5 +121,33 @@ export function useModuleCompile() {
     }
   };
 
-  return { compileActive };
+  /** 编译当前文件所在的模块；有未保存的文件先提醒，因为 ecj 读的是磁盘上的内容。 */
+  const compileActive = async () => {
+    if (!activePath || tabs.find((t) => t.path === activePath)?.virtual) return;
+    await start(() => compileModule(activePath), true);
+  };
+
+  /** 编译全部模块：不需要活动文件，所以没打开任何标签时也能用。 */
+  const compileAll = async () => {
+    await start(() => compileAllModules(), true);
+  };
+
+  // 命令面板里的「编译全部模块」在这里登记：它不依赖任何页面状态，
+  // 挂在文件页里反而会多传一层。闭包经 ref 取最新（effect 只跑一次）。
+  const live = useRef({ compileAll });
+  live.current = { compileAll };
+  useEffect(
+    () =>
+      registerCommands([
+        {
+          id: "build.compileAll",
+          title: "编译全部模块（按依赖顺序，被依赖的先编）",
+          run: () => void live.current.compileAll(),
+          enabled: () => !!getSession().root && !getSession().compiling,
+        },
+      ]),
+    [],
+  );
+
+  return { compileActive, compileAll };
 }

@@ -47,6 +47,8 @@ export interface PaletteResult {
 const LIMIT = 50;
 /** 类 / 枚举 / 接口三种 LSP SymbolKind，类型搜索只要这些。 */
 const TYPE_KINDS = new Set([5, 10, 11]);
+/** 成员级：方法 6 / 字段 8 / 构造器 9 / 常量 14 / 枚举成员 22。 */
+const MEMBER_KINDS = new Set([6, 8, 9, 14, 22]);
 
 const lower = (p: string) => p.toLowerCase();
 
@@ -91,12 +93,16 @@ interface RawSymbolInfo {
   location?: { uri?: string; range?: { start?: { line: number; character: number } } };
 }
 
-/** 语言服务的类型搜索（连依赖 jar 里的类一起搜）。失败 / 没结果返回 null，由调用方退回工作区扫描。 */
-async function langTypes(query: string, ctx: PaletteCtx): Promise<PaletteItem[] | null> {
+/** 语言服务的符号搜索（连依赖 jar 里的类一起搜）。失败 / 没结果返回 null，由调用方退回工作区扫描。 */
+async function langSymbols(
+  query: string,
+  ctx: PaletteCtx,
+  accept: (kind: number) => boolean,
+): Promise<PaletteItem[] | null> {
   if (!langReady()) return null;
   let res: unknown;
   try {
-    res = await langRequest<unknown>("workspace/symbol", null, { query }, 15_000);
+    res = await langRequest<unknown>("workspace/symbol", null, { query }, 20_000);
   } catch {
     return null;
   }
@@ -106,8 +112,8 @@ async function langTypes(query: string, ctx: PaletteCtx): Promise<PaletteItem[] 
   for (const s of res as RawSymbolInfo[]) {
     const uri = s.location?.uri;
     const pos = s.location?.range?.start;
-    if (!s.name || !uri || !pos || !TYPE_KINDS.has(s.kind ?? 0)) continue;
-    const key = `${uri}#${s.name}`;
+    if (!s.name || !uri || !pos || !accept(s.kind ?? 0)) continue;
+    const key = `${uri}#${s.name}#${pos.line}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const line = pos.line + 1;
@@ -131,7 +137,7 @@ async function langTypes(query: string, ctx: PaletteCtx): Promise<PaletteItem[] 
 async function typesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult> {
   const q = query.trim();
   if (!q) return { items: [], note: "输入类名（支持驼峰首字母，如 VBO）" };
-  const fromLang = await langTypes(q, ctx);
+  const fromLang = await langSymbols(q, ctx, (k) => TYPE_KINDS.has(k));
   if (fromLang) return { items: fromLang, note: `工作区与依赖 jar 中的类型 · ${fromLang.length} 项` };
   // 退回：只在工作区里找「文件名 = 类名」的 .java（代码智能未就绪、或它没给结果）
   if (!ctx.root) return { items: [], note: "尚未打开工程" };
@@ -176,8 +182,17 @@ async function symbolsMode(query: string, ctx: PaletteCtx): Promise<PaletteResul
   return { items: items.slice(0, 200), note: `${path.slice(path.lastIndexOf("\\") + 1)} 中的符号 · ${items.length} 项` };
 }
 
-function commandsMode(query: string): PaletteResult {
+/** 工作区符号：方法 / 字段级搜索（IDEA 的 Ctrl+Alt+Shift+N）。 */
+async function workspaceSymbolsMode(query: string, ctx: PaletteCtx): Promise<PaletteResult> {
   const q = query.trim();
+  if (!q) return { items: [], note: "输入方法名或字段名（整个工作区 + 依赖 jar）" };
+  if (!langReady()) return { items: [], note: "代码智能未就绪，工作区符号搜索需要它" };
+  const items = await langSymbols(q, ctx, (k) => MEMBER_KINDS.has(k));
+  if (!items) return { items: [], note: "没有匹配的方法或字段" };
+  return { items, note: `方法与字段 · ${items.length} 项` };
+}
+
+function commandsMode(query: string): PaletteResult {  const q = query.trim();
   const items: { item: PaletteItem; score: number }[] = [];
   for (const c of listCommands()) {
     const hit = q ? fuzzyMatch(q, c.title) : { score: 0, ranges: [] };
@@ -195,6 +210,8 @@ export async function buildItems(mode: PaletteMode, query: string, ctx: PaletteC
       return typesMode(query, ctx);
     case "symbol":
       return symbolsMode(query, ctx);
+    case "sym":
+      return workspaceSymbolsMode(query, ctx);
     case "cmd":
       return commandsMode(query);
   }

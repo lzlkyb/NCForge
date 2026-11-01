@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useCallback, useRef, useSyncExternalStore } from "react";
 import type { PanelTab } from "../components/workspace/BottomPanel";
 import type { CompileResult } from "./compile";
 import { onDirtyChange } from "./dirtyBus";
@@ -194,6 +194,38 @@ export function useWorkspaceRoot(): string | null {
     () => state.root ?? null,
     () => state.root ?? null,
   );
+}
+
+/**
+ * 只订阅会话的一个切片。
+ *
+ * `useWorkspaceSession()` 返回整份快照：任何一个字段变化（编译状态、某个标签 dirty、
+ * 目录缓存）都会让**全部**订阅者重渲染。文件页一次解构十来个字段，等于每次都全量刷新。
+ *
+ * 实现是 `useSyncExternalStore` + 记忆化选择器：快照本身仍是整份，但只有选中值
+ * 真的变了（按 `isEqual`）才换引用、才触发重渲染。
+ *
+ * ⚠️ 选择器必须返回**稳定引用**：`s => s.tabs` 没问题（数组只在真正变更时换新对象），
+ * 但 `s => ({ a: s.a })` 每次都是新对象——要么自己 `useMemo`，要么传 `isEqual` 做浅比较。
+ */
+export function useWorkspaceSelector<T>(
+  selector: (s: WorkspaceSession) => T,
+  isEqual: (a: T, b: T) => boolean = Object.is,
+): T {
+  // 选择器与比较函数放 ref：调用方常写内联箭头，放进依赖会让订阅每次渲染都重来一遍。
+  const sel = useRef(selector);
+  const eq = useRef(isEqual);
+  sel.current = selector;
+  eq.current = isEqual;
+  const memo = useRef<{ has: boolean; value: T } | null>(null);
+  const getSelection = useCallback(() => {
+    const next = sel.current(state);
+    const m = memo.current;
+    if (m && m.has && eq.current(m.value, next)) return m.value;
+    memo.current = { has: true, value: next };
+    return next;
+  }, []);
+  return useSyncExternalStore(subscribe, getSelection, getSelection);
 }
 
 // 「未保存」圆点要跟着编辑器走，但订阅不能绑在组件上——文件页卸载后

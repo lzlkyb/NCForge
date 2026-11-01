@@ -47,6 +47,9 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   zh?: Record<string, string>;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
+  /** 拖拽中的清理函数：组件卸载（切标签、结果清空）时也要摘掉 window 上的监听。 */
+  const dragCleanup = useRef<(() => void) | null>(null);
+  useEffect(() => () => dragCleanup.current?.(), []);
   /** Esc 退出编辑：`setEditing(null)` 会把 input 卸掉，紧随其后的 blur 不能再提交一次。 */
   const cancelEdit = useRef(false);
   const [widths, setWidths] = useState<number[]>(() => initialWidths(columns, rows));
@@ -88,14 +91,23 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
 
   const resize = (k: number, startX: number) => {
     const start = widths[k];
-    const move = (e: PointerEvent) =>
-      setWidths((w) => w.map((x, i) => (i === k ? Math.max(40, Math.min(900, start + e.clientX - startX)) : x)));
-    const up = () => {
+    dragCleanup.current?.();
+    const finish = () => {
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      dragCleanup.current = null;
     };
+    const move = (e: PointerEvent) => {
+      // 指针被系统取消（Alt+Tab、触控笔离开、拖出窗口）时 pointerup 不触发；
+      // buttons 归零是最后一道兜底，否则「手早松了，鼠标再动列宽还在变」。
+      if (e.buttons === 0) return finish();
+      setWidths((w) => w.map((x, i) => (i === k ? Math.max(40, Math.min(900, start + e.clientX - startX)) : x)));
+    };
+    dragCleanup.current = finish;
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish, { once: true });
   };
 
   const valueAt = (r: number, c: number): Cell => {

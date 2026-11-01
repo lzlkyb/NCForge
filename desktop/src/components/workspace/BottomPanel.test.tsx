@@ -6,6 +6,14 @@ import { BottomPanel } from "./BottomPanel";
 import type { CompileDiagnostic, CompileResult, Problem } from "../../lib/compile";
 import type { CodeDiag } from "../../lib/diagStore";
 
+// 调用层级面板要连语言服务（`lib/callHierarchy` → `editorActions` → Monaco），
+// jsdom 里起不来；这里只验证面板宿主没被它拖挂，层级本身另有单测。
+vi.mock("../../lib/callHierarchy", () => ({
+  useCallState: () => ({ root: null, incoming: [], outgoing: [], loading: false, error: null }),
+  openCallHierarchy: vi.fn(),
+  openCallItem: vi.fn(),
+}));
+
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root;

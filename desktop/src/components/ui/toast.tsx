@@ -152,18 +152,23 @@ function ToastItemView({ item, onDismiss }: { item: ToastItem; onDismiss: (id: n
   const { mounted, entered } = usePresence(open);
   const hidden = useAppHidden();
   const paused = interaction.hover || interaction.focus || hidden;
-  const remaining = useRef(TOAST_LIFETIME);
+  // 错误不自动消失：一条 Rust 报错往往三四十词、折行三四行，3.5 秒读不完；
+  // 而它旁边就是唯一的「复制全部错误」入口。留到用户自己关，比抢时间更合理。
+  // 其它类型按时长随字数放宽（长文案仍然需要多一点时间）。
+  const isError = item.variant === "error";
+  const lifetime = isError ? 0 : Math.max(TOAST_LIFETIME, item.message.length * 90);
+  const remaining = useRef(lifetime);
 
   // 计时归通知自身所有：手动关闭、卸载及暂停均清理同一个时钟。
   useEffect(() => {
-    if (!open || paused) return;
+    if (!open || paused || lifetime <= 0) return;
     const started = performance.now();
     const timer = window.setTimeout(() => setOpen(false), remaining.current);
     return () => {
       window.clearTimeout(timer);
       remaining.current = Math.max(0, remaining.current - (performance.now() - started));
     };
-  }, [open, paused]);
+  }, [open, paused, lifetime]);
 
   useEffect(() => { if (!mounted) onDismiss(item.id); }, [mounted, item.id, onDismiss]);
 
@@ -171,16 +176,19 @@ function ToastItemView({ item, onDismiss }: { item: ToastItem; onDismiss: (id: n
 
   return (
     <div
-      onClick={() => setOpen(false)}
+      // 错误卡片点空白处不关：想全选复制时鼠标一按就没了。只有 × 能关。
+      onClick={isError ? undefined : () => setOpen(false)}
       onMouseEnter={() => setInteraction(v => ({ ...v, hover: true }))}
       onMouseLeave={() => setInteraction(v => ({ ...v, hover: false }))}
       onFocusCapture={() => setInteraction(v => ({ ...v, focus: true }))}
       onBlurCapture={e => { if (!e.currentTarget.contains(e.relatedTarget)) setInteraction(v => ({ ...v, focus: false })); }}
       data-state={entered ? "open" : "closed"}
       data-exiting={!open || undefined}
-      role={item.variant === "error" ? "alert" : "status"}
-      className={`pointer-events-auto relative flex w-[320px] max-w-[calc(100vw-2rem)] cursor-pointer select-none items-start gap-2.5 overflow-hidden rounded-lg border px-3.5 pb-3.5 pt-3 text-sm font-medium shadow-pop backdrop-blur-md toast ${
-        item.variant === "error" ? "err" : item.variant === "warning" ? "warn" : ""
+      role={isError ? "alert" : "status"}
+      className={`pointer-events-auto relative flex w-[320px] max-w-[calc(100vw-2rem)] items-start gap-2.5 overflow-hidden rounded-lg border px-3.5 pb-3.5 pt-3 text-sm font-medium shadow-pop backdrop-blur-md toast ${
+        isError ? "cursor-default" : "cursor-pointer select-none"
+      } ${
+        isError ? "err" : item.variant === "warning" ? "warn" : ""
       } ${variantStyles[item.variant]}`}
     >
       <span
@@ -199,12 +207,15 @@ function ToastItemView({ item, onDismiss }: { item: ToastItem; onDismiss: (id: n
       >
         <Icon name="close" size={12} />
       </button>
-      {/* CSS 与 JS 共用暂停条件，剩余时间不会在阅读通知时悄悄流逝。 */}
-      <span
-        aria-hidden
-        className={`toast-countdown absolute bottom-0 left-0 h-[2.5px] rounded-full ${variantProgress[item.variant]}`}
-        style={{ animationDuration: `${TOAST_LIFETIME}ms`, animationPlayState: paused || !open ? "paused" : "running" }}
-      />
+      {/* CSS 与 JS 共用暂停条件，剩余时间不会在阅读通知时悄悄流逝。
+          错误常驻、没有计时，也就不画这条进度线（否则它停满格会骗人）。 */}
+      {lifetime > 0 && (
+        <span
+          aria-hidden
+          className={`toast-countdown absolute bottom-0 left-0 h-[2.5px] rounded-full ${variantProgress[item.variant]}`}
+          style={{ animationDuration: `${lifetime}ms`, animationPlayState: paused || !open ? "paused" : "running" }}
+        />
+      )}
     </div>
   );
 }

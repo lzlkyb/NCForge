@@ -116,8 +116,13 @@ test("manual and timed toast dismissal both animate; hover pauses lifetime and p
   await page.getByRole("button", { name: "错误提示" }).click();
   const error = page.locator(".toast");
   assert.equal(await error.getAttribute("role"), "alert");
-  await page.mouse.move(0, 0);
-  await page.waitForFunction(() => document.querySelector(".toast")?.hasAttribute("data-exiting"), undefined, { timeout: 5000 });
+  // 错误常驻（lifetime = 0）：一条三四十词的报错折行三四行，3.5 秒读不完，
+  // 而它旁边就是唯一的「复制全部错误」入口——抢时间关掉等于把用户要复制的
+  // 内容变没。所以它只能手动关，没有 countdown 线可看；这里盯的是退场动画
+  // 与成功提示同一条路（data-exiting → detached）。
+  assert.equal(await error.locator(".toast-countdown").count(), 0, "常驻错误不画倒计进度线");
+  await error.getByRole("button", { name: "关闭" }).click();
+  assert.equal(await error.getAttribute("data-exiting"), "true");
   await error.waitFor({ state: "detached" });
 });
 

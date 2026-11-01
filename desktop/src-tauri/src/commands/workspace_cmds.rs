@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::encoding_reg::{self, EncodingMark, EncodingRegistry};
-use crate::security::path::{display_path, resolve_safe_path};
+use crate::security::path::display_path;
 use crate::state::AppState;
 use crate::workspace::{self, DirItem, Eol, FileContent, NewEntryKind, TextEncoding};
 
@@ -24,6 +24,9 @@ async fn workspace_root(state: &AppState) -> Result<String, String> {
 }
 
 /// 把前端传来的路径解析成工作区内的真实路径（空路径 = 工作区根本身）。
+///
+/// async：内部走 `spawn_blocking`。canonicalize 是同步磁盘操作，在命令体里逐个
+/// 文件跑会把 IPC 层堵住（审查报告 D2）。
 async fn resolve_in_workspace(state: &AppState, requested: &str) -> Result<PathBuf, String> {
     let root = workspace_root(state).await?;
     let target = if requested.is_empty() {
@@ -31,7 +34,8 @@ async fn resolve_in_workspace(state: &AppState, requested: &str) -> Result<PathB
     } else {
         requested
     };
-    resolve_safe_path(target, std::slice::from_ref(&root), &[], true)
+    crate::security::path::resolve_safe_path_async(target.to_string(), vec![root], Vec::new(), true)
+        .await
 }
 
 /// 读当前工作区根（未选择为 null）。
@@ -176,10 +180,18 @@ pub async fn fs_encoding_marks(
         if !encoding_reg::is_java_source(std::path::Path::new(&shown)) {
             continue;
         }
-        let Ok(file) = resolve_safe_path(&shown, std::slice::from_ref(&root), &[], true) else {
-            continue;
-        };
-        targets.push((shown, file));
+        // 逐个 canonicalize 是同步磁盘操作：走 spawn_blocking，不能在命令体里排队跑
+        // （一棵树可能一次传上百个 .java，审查报告 D2）
+        let file = crate::security::path::resolve_safe_path_async(
+            shown.clone(),
+            vec![root.clone()],
+            Vec::new(),
+            true,
+        )
+        .await;
+        if let Ok(file) = file {
+            targets.push((shown, file));
+        }
     }
     if targets.is_empty() {
         return Ok(Vec::new());

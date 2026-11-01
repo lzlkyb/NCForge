@@ -52,6 +52,14 @@ export function Modal({
   // enabled 跟 mounted 走：内容延迟挂载/退场延迟卸载，陷阱只在内容真正存在时生效。
   // Esc 在内容节点处理并停止冒泡，嵌套弹窗优先关闭自己。
   const surfaceRef = useRef<HTMLDivElement>(null);
+  /**
+   * 按下时指针是否就在遮罩上。
+   *
+   * 只看 click 的 target 不够：mousedown 在弹窗内、mouseup 落在遮罩上时，click 的
+   * target 是两者的公共祖先——也就是遮罩本身。导入配置、全部替换这类含不可逆操作的
+   * 确认框，会因为在框里拖选文字、手松到外面就「莫名关掉」，用户还以为已经执行了。
+   */
+  const downOnOverlay = useRef(false);
   useFocusTrap(surfaceRef, { enabled: mounted, onEscape: visible ? onClose : undefined });
 
   if (!mounted) return null;
@@ -62,7 +70,14 @@ export function Modal({
       data-state={entered ? "open" : "closed"}
       data-exiting={!visible || undefined}
       style={{ zIndex }}
-      onClick={visible && closeOnOverlay ? onClose : undefined}
+      onMouseDown={(e) => {
+        downOnOverlay.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (!visible || !closeOnOverlay) return;
+        if (!downOnOverlay.current || e.target !== e.currentTarget) return;
+        onClose();
+      }}
     >
       <div
         ref={surfaceRef}

@@ -168,4 +168,88 @@ export function registerExtraLangProviders(): void {
       return res ? toLocations(res) : null;
     },
   });
+
+  // ── 下面三个是「服务端早就有、只差接线」的低成本能力 ──
+  // jdt.ls 0.57 自带 FoldingRangeHandler / DocumentHighlightHandler / SelectionRangeHandler，
+  // 但 initialize 里不声明 capabilities 它就不会注册（见 lsp.rs）。
+
+  monaco.languages.registerFoldingRangeProvider("java", {
+    provideFoldingRanges: async (model) => {
+      const ctx = await context(model, { lineNumber: 1, column: 1 });
+      if (!ctx) return null;
+      const res = await ask<LspFoldingRange[]>("textDocument/foldingRange", ctx);
+      if (!res?.length) return null;
+      // LSP 是 0 基行号、Monaco 是 1 基；end 行也要 +1（LSP 的 end 是最后一行，不用再减）
+      return res
+        .filter((r) => r.end > r.start)
+        .map((r) => ({
+          start: r.start + 1,
+          end: r.end + 1,
+          kind:
+            r.kind === "comment"
+              ? monaco.languages.FoldingRangeKind.Comment
+              : r.kind === "imports"
+                ? monaco.languages.FoldingRangeKind.Imports
+                : monaco.languages.FoldingRangeKind.Region,
+        }));
+    },
+  });
+
+  monaco.languages.registerDocumentHighlightProvider("java", {
+    provideDocumentHighlights: async (model, position) => {
+      const ctx = await context(model, position);
+      if (!ctx) return null;
+      const res = await ask<{ range: LspRange; kind?: number }[]>(
+        "textDocument/documentHighlight",
+        ctx,
+      );
+      if (!res?.length) return null;
+      return res.map((h) => ({
+        range: toMonacoRange(h.range),
+        // 1=Text 2=Read 3=Write：写操作在主题里会用更醒目的颜色
+        kind:
+          h.kind === 3
+            ? monaco.languages.DocumentHighlightKind.Write
+            : h.kind === 2
+              ? monaco.languages.DocumentHighlightKind.Read
+              : monaco.languages.DocumentHighlightKind.Text,
+      }));
+    },
+  });
+
+  monaco.languages.registerSelectionRangeProvider("java", {
+    provideSelectionRanges: async (model, positions) => {
+      if (positions.length === 0) return null;
+      // jdt.ls 的 selectionRange 一次只认一个位置：多光标时逐个问，
+      // 任一失败就整体退回（宁可没有逐层选中，也不要错位的扩展）
+      const out: monaco.languages.SelectionRange[][] = [];
+      for (const p of positions) {
+        const c = await context(model, p);
+        const res = c
+          ? await ask<{ range: LspRange; parent?: unknown }>("textDocument/selectionRange", c)
+          : null;
+        if (!res) return null;
+        out.push(flattenSelection(res));
+      }
+      return out;
+    },
+  });
+}
+
+interface LspFoldingRange {
+  start: number;
+  end: number;
+  kind?: string;
+}
+
+/** LSP 的 SelectionRange 是链式的（每层带 `parent`）→ Monaco 要一个扁平数组（由小到大）。 */
+function flattenSelection(node: { range: LspRange; parent?: unknown }): monaco.languages.SelectionRange[] {
+  const out: monaco.languages.SelectionRange[] = [];
+  let cur: { range: LspRange; parent?: unknown } | undefined = node;
+  // 深度兜底：畸形数据里 parent 可能成环，限 32 层
+  for (let depth = 0; cur && depth < 32; depth += 1) {
+    out.push({ range: toMonacoRange(cur.range) });
+    cur = cur.parent as { range: LspRange; parent?: unknown } | undefined;
+  }
+  return out;
 }

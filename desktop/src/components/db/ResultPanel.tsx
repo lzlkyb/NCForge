@@ -16,8 +16,13 @@ export function ResultPanel({ tab, height }: { tab: SqlTab; height: number }) {
   const view = tab.view ?? tab.results[tab.results.length - 1]?.id ?? "output";
   const cur = tab.results.find((r) => r.id === view);
   const setView = (v: string) => patchTab<SqlTab>(tab.id, { view: v });
-  const tables = (rtOf(tab.connId).tables ?? []).map((t) => t.name);
-  const autoCommit = rtOf(tab.connId).tx?.autoCommit ?? true;
+  const rt = rtOf(tab.connId);
+  const tables = (rt.tables ?? []).map((t) => t.name);
+  // 槽各自独立事务：带槽的标签把事务状态写在标签上，primary 才看连接的 `rt.tx`
+  // （见 `dbStore` 的 txAction / 结果写回）。这里读错对象就会出现「上方黄条说
+  // 未提交 1 条，结果页说自动提交已生效」——同屏两个相反的结论。
+  // 读不到时保持 undefined：宁可说「未知」，也不要替用户断言「已生效」。
+  const autoCommit = (tab.slot ? tab.tx : rt.tx)?.autoCommit ?? rt.info?.autoCommit;
 
   return (
     <div className="dbx-res" style={{ height }}>
@@ -59,14 +64,19 @@ export function ResultPanel({ tab, height }: { tab: SqlTab; height: number }) {
   );
 }
 
-function EntryView({ tab, entry, tables, autoCommit }: { tab: SqlTab; entry: ResultEntry; tables: string[]; autoCommit: boolean }) {
+function EntryView({ tab, entry, tables, autoCommit }: { tab: SqlTab; entry: ResultEntry; tables: string[]; autoCommit?: boolean }) {
   if (entry.kind === "error") return <div style={{ overflow: "auto" }}><DbErrorBox error={entry.error ?? ""} sql={entry.sql} knownTables={tables} index={tab.results.length > 1 ? entry.index : undefined} /></div>;
   if (entry.kind === "update")
     return (
       <div className="dbx-update">
         <span className="big">{entry.updateCount >= 0 ? `影响 ${thousands(entry.updateCount)} 行` : "执行完成"}</span>
         <span className="dbx-muted">
-          {entry.ms} ms · {autoCommit ? "自动提交模式，已生效" : "手动提交模式：上方黄条里提交或回滚"}
+          {entry.ms} ms ·{" "}
+          {autoCommit === undefined
+            ? "提交状态未知：看上方有没有未提交事务黄条"
+            : autoCommit
+              ? "自动提交模式，已生效"
+              : "手动提交模式：上方黄条里提交或回滚"}
         </span>
         <StatsLine stats={entry.stats} />
       </div>

@@ -116,6 +116,8 @@ interface LspCompletionItem {
   sortText?: string;
   filterText?: string;
   insertText?: string;
+  /** 1 = 纯文本，2 = snippet（`${1:...}`）。jdt.ls 的模板补全会给 2。 */
+  insertTextFormat?: number;
   textEdit?: { newText: string; range?: LspRange; replace?: LspRange };
   additionalTextEdits?: { newText: string; range: LspRange }[];
 }
@@ -236,6 +238,13 @@ export function registerLangProviders(): void {
             label: it.label,
             kind: monaco.languages.CompletionItemKind[completionKindName(it.kind)],
             insertText: edit?.newText ?? it.insertText ?? it.label,
+            // snippet（insertTextFormat=2）必须声明成 InsertAsSnippet，否则
+            // `${1:name}` 会原样插进代码。我们给 jdt.ls 声明了 snippetSupport，
+            // 它才愿意发这类补全（sout / fori 之类）。
+            insertTextRules:
+              it.insertTextFormat === 2
+                ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+                : undefined,
             range: range ? toMonacoRange(range) : fallback,
             detail: it.detail,
             documentation: markdown(it.documentation),

@@ -52,3 +52,11 @@ export function getCodeDiags(): CodeDiag[] {
 export function useCodeDiags(): CodeDiag[] {
   return useSyncExternalStore(subscribe, getCodeDiags, getCodeDiags);
 }
+
+/**
+ * 非 React 侧订阅（Error Lens 的装饰器用）。
+ *
+ * 与 `useCodeDiags` 同一个数据源、同一套「内容不变不换引用」的规则，
+ * 只是不给组件用——Monaco 的装饰集合不是 React 状态。
+ */
+export const subscribeCodeDiags = subscribe;

@@ -54,7 +54,15 @@ export interface ReplacePlan {
  */
 export function replacePlan(hits: SearchHit[], maxTop = 8): ReplacePlan {
   const counts = new Map<string, number>();
-  for (const h of hits) counts.set(h.path, (counts.get(h.path) ?? 0) + 1);
+  let total = 0;
+  for (const h of hits) {
+    // 按**处**计，不按行计：一行里出现 4 次就是 4 处。以前这里每行 +1，确认框
+    // 说「3 处」而替换完报「12 处」——这是直接改磁盘、不进撤销历史的一次性动作，
+    // 确认框的数字是用户唯一的下手依据，不能偏小。
+    const n = h.ranges.length || 1;
+    total += n;
+    counts.set(h.path, (counts.get(h.path) ?? 0) + n);
+  }
   const top: ReplacePlanFile[] = [];
   let rest = 0;
   let i = 0;
@@ -63,5 +71,5 @@ export function replacePlan(hits: SearchHit[], maxTop = 8): ReplacePlan {
     else rest += 1;
     i += 1;
   }
-  return { files: counts.size, hits: hits.length, top, rest };
+  return { files: counts.size, hits: total, top, rest };
 }

@@ -1,4 +1,5 @@
 import { joinPath } from "./workspace";
+import { chainOpen, collapseChain } from "./treeCompact";
 import type { TreeDirState } from "./workspaceSession";
 
 /** 树里一行（展平后的可见顺序），键盘上下移动按这个顺序。 */
@@ -7,6 +8,8 @@ export interface FlatRow {
   isDir: boolean;
   /** 所在目录行；顶层项为 null（根目录本身不占一行）。 */
   parent: string | null;
+  /** 显示名。压缩中间包时会变成 `com.aier.erp`（省略时用路径末段）。 */
+  label?: string;
 }
 
 export interface TreeSelection {
@@ -19,20 +22,33 @@ export type TreeNavAction =
   | { kind: "toggle"; path: string }
   | { kind: "open"; path: string };
 
-/** 把已展开的目录按显示顺序摊平。键盘导航与 `aria-activedescendant` 都用它。 */
+/**
+ * 把已展开的目录按显示顺序摊平。键盘导航与 `aria-activedescendant` 都用它。
+ *
+ * 必须与 `FileTree` 的渲染口径一致：压缩中间包之后，`com` / `com/aier` 这些中间层
+ * 不占行，摊平时也只保留链尾那一行，否则方向键会停在看不见的行上。
+ */
 export function flattenTree(
   dirs: Record<string, TreeDirState>,
   expanded: Set<string>,
   root: string,
+  opts: { filter?: (name: string) => boolean } = {},
 ): FlatRow[] {
   const out: FlatRow[] = [];
+  const filter = opts.filter;
   const walk = (dir: string, parent: string | null) => {
     const st = dirs[dir];
     if (!st || st.status !== "ok") return;
     for (const item of st.items) {
+      if (filter && !filter(item.name)) continue;
       const full = joinPath(dir, item.name);
-      out.push({ path: full, isDir: item.isDir, parent });
-      if (item.isDir && expanded.has(full)) walk(full, full);
+      if (item.isDir) {
+        const chain = collapseChain(full, item.name, dirs);
+        out.push({ path: chain.tail, isDir: true, parent, label: chain.label });
+        if (chainOpen(chain, expanded)) walk(chain.tail, chain.tail);
+      } else {
+        out.push({ path: full, isDir: false, parent });
+      }
     }
   };
   walk(root, null);

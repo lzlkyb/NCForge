@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
+import { failureText } from "../../lib/friendlyError";
 
 /**
  * 一行「标签 + 路径 + 更换」。编辑态就地把路径换成输入框，不弹窗——
@@ -34,7 +35,7 @@ export function PathField({
       setEditing(false);
     } catch (e) {
       // 保存失败必须可见：路径错一个字母就会起不来服务，而错误文案往往能直接指出缺什么
-      toast(String(e), "error");
+      toast(failureText(`保存${label}`, e), "error");
     } finally {
       setSaving(false);
     }

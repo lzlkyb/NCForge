@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ResultTable } from "./ResultTable";
@@ -31,18 +31,28 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   const editable = !isView && pk.length > 0;
   const order = q.order || pk.map((p) => p.toLowerCase()).join(", ");
 
+  /**
+   * 每次查询的序号。慢库上连点两次「下一页」时，第 3 页可能先在、第 2 页后到；
+   * 没有这道判定的话页脚写「第 3 页」而表格里是第 2 页的行——此时双击改格子，
+   * `updateSql` 用的是**看得见的那一行**的主键，写回的就是另一行。
+   */
+  const gen = useRef(0);
+
   const load = useCallback(async () => {
-    setData(null);
+    const my = ++gen.current;
     try {
       claimCursor(tab.connId, null, tab.id);
       const r = await dbApi.exec(tab.connId, pageSql(tab.table.toLowerCase(), q.where, order, q.page), PAGE + 1, 60);
+      if (my !== gen.current) return;
       if (r.kind !== "rows") throw new Error("不是查询结果");
       setTx(tab.connId, r.tx);
       setData({ ...stripPage(r.columns, r.rows), ms: r.ms });
+      setChanged(new Map());
     } catch (e) {
+      if (my !== gen.current) return;
       setData({ error: friendlyDbError(e) });
+      setChanged(new Map());
     }
-    setChanged(new Map());
   }, [tab.id, tab.connId, tab.table, q.where, q.page, order]);
 
   // 等字段（主键）读到再查，否则默认排序会先空后有，多查一次
@@ -50,20 +60,36 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
     if (cols) void load();
   }, [cols, load]);
 
-  /** 翻页 / 改查询条件会清空 changed：有未写回的格子时先问一句，别静默丢。 */
+  /** 翻页 / 改查询条件 / 重新查询前：有未写回的格子时先问一句，别静默丢。 */
+  const confirmDiscard = async (): Promise<boolean> => {
+    if (changed.size === 0) return true;
+    return ask(
+      "丢弃未保存的修改？",
+      `当前有 ${changed.size} 个单元格改过但没写回，翻页或改查询条件会丢弃它们。`,
+      "丢弃并继续",
+      true,
+    );
+  };
+
   const navTo = async (next: typeof q) => {
-    if (changed.size > 0) {
-      const ok = await ask(
-        "丢弃未保存的修改？",
-        `当前有 ${changed.size} 个单元格改过但没写回，翻页或改查询条件会丢弃它们。`,
-        "丢弃并继续",
-        true,
-      );
-      if (!ok) return;
-    }
+    if (!(await confirmDiscard())) return;
     setQ(next);
   };
-  const apply = () => void navTo({ where: draft.where, order: draft.order, page: 0 });
+
+  /**
+   * 查询按钮。条件一个字都没改时也必须真的重查：同事在库里改了数据，回来点「查询」
+   * 什么都不发生的话，用户会以为这个工具在读缓存——而这页原本没有别的刷新入口。
+   */
+  const apply = () => {
+    const next = { where: draft.where, order: draft.order, page: 0 };
+    if (next.where === q.where && next.order === q.order && q.page === 0) {
+      void (async () => {
+        if (await confirmDiscard()) await load();
+      })();
+      return;
+    }
+    void navTo(next);
+  };
   const page = data && "rows" in data ? data : null;
   const sqls = page ? updateSql(tab.table, page.columns, page.rows, pk, changed) : [];
 

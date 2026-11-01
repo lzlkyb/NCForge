@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { invokeOrToast } from "../../lib/tauri";
 import { patchConfig, type ConfigPatch } from "../../lib/appConfig";
 import { toast } from "../ui/toast";
+import { failureText } from "../../lib/friendlyError";
 import { APP_INFO, CHANGELOG, CATEGORY_LABELS } from "../../lib/about";
 import { markChangelogSeen } from "../../lib/utils";
 import { Card } from "../ui/card";
@@ -15,6 +16,7 @@ import { LangSettings } from "../settings/LangSettings";
 import { ResourceSettings } from "../settings/ResourceSettings";
 import { ConfigTransferSettings } from "../settings/ConfigTransferSettings";
 import { KeymapSettings } from "../settings/KeymapSettings";
+import { EditorSettings } from "../settings/EditorSettings";
 
 /**
  * 示例设置页（壳子版）。演示「读配置 → 表单 → 写配置」闭环，
@@ -46,7 +48,7 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
       await patchConfig(patch);
       onChanged?.();
     } catch (e) {
-      toast(`保存设置失败：${e instanceof Error ? e.message : String(e)}`, "error");
+      toast(failureText("保存设置", e), "error");
     }
   };
 
@@ -76,6 +78,7 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
         />
       </Card> },
       { label: "快捷键", content: <KeymapSettings /> },
+      { label: "编辑器", content: <EditorSettings /> },
       { label: "开发环境", content: <LangSettings /> },
       { label: "资源与更新", content: <ResourceSettings /> },
       { label: "配置迁移", content: <ConfigTransferSettings onChanged={onChanged} /> },

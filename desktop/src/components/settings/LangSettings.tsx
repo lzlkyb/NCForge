@@ -7,6 +7,9 @@ import { InlineNum } from "../ui/InlineNum";
 import { SettingsRow } from "../ui/SettingsRow";
 import { ToggleRow } from "../ui/ToggleRow";
 import { toast } from "../ui/toast";
+import { InlineNotice } from "../ui/notice";
+import { Skeleton } from "../ui/Skeleton";
+import { failureText } from "../../lib/friendlyError";
 
 /** 与 Rust `lang::DEFAULT_XMX_MB` 一致。后端是权威，这里只用来显示。 */
 const DEFAULT_XMX_MB = 1024;
@@ -19,12 +22,32 @@ export function LangSettings() {
   const [cfg, setCfg] = useState<AppConfig | null>(null);
   const [savedKey, setSavedKey] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
 
+  // 读失败以前被吞进空 catch，整张卡 `return null`：设置页凭空少一块，
+  // 没有骨架、没有红条、没有重试，用户只能以为「这版没这个功能」。
   useEffect(() => {
-    getConfig()
-      .then(setCfg)
-      .catch(() => {});
-  }, []);
+    let dead = false;
+    setLoading(true);
+    setLoadError(null);
+    getConfig().then(
+      (c) => {
+        if (dead) return;
+        setCfg(c);
+        setLoading(false);
+      },
+      (e) => {
+        if (dead) return;
+        setLoadError(failureText("读取代码智能设置", e));
+        setLoading(false);
+      },
+    );
+    return () => {
+      dead = true;
+    };
+  }, [reload]);
 
   const apply = async (patch: LangConfigPatch, key: string) => {
     try {
@@ -35,7 +58,7 @@ export function LangSettings() {
       setTimeout(() => setSavedKey((k) => (k === key ? null : k)), 2000);
     } catch (e) {
       // 内存上限越界时后端会说明允许范围，原文展示即可
-      toast(String(e), "error");
+      toast(failureText("保存代码智能设置", e), "error");
     }
   };
 
@@ -45,13 +68,35 @@ export function LangSettings() {
       await langRegenerate();
       toast("已重新生成，正在重建索引（约 40 秒）", "success");
     } catch (e) {
-      toast(String(e), "error");
+      toast(failureText("重新生成影子工程", e), "error");
     } finally {
       setRebuilding(false);
     }
   };
 
-  if (!cfg) return null;
+  if (!cfg) {
+    return (
+      <Card className="flex flex-col gap-2 p-4">
+        <div className="text-sm font-medium">代码智能</div>
+        {loading ? (
+          <div className="flex flex-col gap-2" aria-busy="true" aria-label="正在读取代码智能设置">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-4 w-64" />
+            <Skeleton className="h-4 w-52" />
+          </div>
+        ) : (
+          <InlineNotice variant="error">
+            <div className="flex flex-col items-start gap-2">
+              <span>{loadError ?? "读取设置失败"}</span>
+              <Button variant="ghost" size="sm" onClick={() => setReload((n) => n + 1)}>
+                重试
+              </Button>
+            </div>
+          </InlineNotice>
+        )}
+      </Card>
+    );
+  }
   const off = !cfg.lang_enabled;
 
   return (

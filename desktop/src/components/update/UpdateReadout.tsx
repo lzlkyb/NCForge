@@ -71,7 +71,13 @@ export function UpdateReadout() {
       <ReadoutRing progress={pct} indeterminate={progressIndeterminate} />
       <span className="ur-status">{progressIndeterminate ? "下载中" : `下载中 ${pct}%`}</span>
       <span className="ur-track">
-        {progressIndeterminate ? <i className="ur-sweep" /> : <i style={{ width: `${pct}%` }} />}
+        {progressIndeterminate ? (
+          <i className="ur-sweep" />
+        ) : (
+          // 缩放而不是改宽度：宽度是布局属性，每 250ms 一次改动会让整条读数行重排；
+          // scaleX 只走合成层。起点靠 transform-origin: left 对齐（见 index.css）。
+          <i className="ur-fill" style={{ transform: `scaleX(${Math.min(1, Math.max(0, pct / 100))})` }} />
+        )}
       </span>
       <span className="ur-spd" data-stalled={stalled || undefined}>
         {stalled ? "等待响应…" : bytesPerSec > 0 ? `↓ ${formatBytesPerSec(bytesPerSec)}` : "—"}

@@ -14,32 +14,11 @@
 
 use tauri::Emitter;
 use tauri::Manager;
-#[cfg(feature = "notifications")]
-use tauri_plugin_notification::NotificationExt;
 
 use nc_forge::*;
 
-/// 统一 toast 通知辅助：notifications feature 关闭时为 no-op。
-/// 集中一处门控，避免每个调用点重复 #[cfg]。
-#[cfg(feature = "notifications")]
-#[allow(dead_code)] // 壳子暂无调用点；业务要发桌面通知时调它，并删掉这两行 allow
-fn notify_toast(handle: &tauri::AppHandle, body: &str) {
-    // 失败必须留痕：插件 desktop 侧 permission_state() 硬编码返回 Granted，
-    // 查不出真实授权状态——show() 的 Err 是唯一信号，`let _ =` 吞掉会静默。
-    if let Err(e) = handle
-        .notification()
-        .builder()
-        .title(branding::APP_DISPLAY_NAME)
-        .body(body)
-        .show()
-    {
-        log::warn!("桌面通知发送失败：{e}");
-    }
-}
-
-#[cfg(not(feature = "notifications"))]
-#[allow(dead_code)] // 同上：无调用点的模板件，业务接入后删除
-fn notify_toast(_handle: &tauri::AppHandle, _body: &str) {}
+// 桌面通知入口在 lib 里（`nc_forge::notify_toast`，按 feature 门控 no-op）：
+// 业务侧也要能调，而 main.rs 的函数对外不可见。
 
 /// 给窗口打上平台特异的装饰（目前只有 Win11 DWM 圆角）。
 ///
@@ -254,6 +233,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::fs_count_files,
             commands::fs_encoding_marks,
             commands::compile_module,
+            commands::compile_all_modules,
             commands::compile_cancel,
             commands::lang_start,
             commands::lang_stop,

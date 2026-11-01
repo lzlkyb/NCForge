@@ -1,0 +1,24 @@
+/* Error Lens 的行尾诊断文字。颜色取自主题 token，深浅色自动跟随。 */
+.ncforge-lens {
+  font-style: italic;
+  opacity: 0.85;
+  /* 行尾文字不参与折行宽度计算，避免它把行撑出横向滚动 */
+  white-space: pre;
+}
+
+.ncforge-lens-error {
+  color: var(--destructive-ink, #d9534f);
+}
+
+.ncforge-lens-warning {
+  color: var(--warning-ink, #c98a00);
+}
+
+.ncforge-lens-info {
+  color: var(--muted-foreground, #888);
+}
+
+/* 行尾文字后面留一点空隙，与代码本身分开 */
+.ncforge-lens::after {
+  content: "";
+}

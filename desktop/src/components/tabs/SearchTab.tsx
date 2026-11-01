@@ -5,7 +5,7 @@ import { SearchResults } from "../search/SearchResults";
 import { ReplaceBar } from "../search/ReplaceBar";
 import { searchWorkspace, type SearchHit, type SearchOptions } from "../../lib/search";
 import { getWorkspace, joinPath } from "../../lib/workspace";
-import { useWorkspaceSession } from "../../lib/workspaceSession";
+import { useWorkspaceSelector } from "../../lib/workspaceSession";
 import { toast } from "../ui/toast";
 import {
   currentSearchSeq,
@@ -49,11 +49,12 @@ export function SearchTab({
   // 挂载时那一次 getWorkspace 会让 root 永远是旧的——点命中拿旧相对路径拼旧 root，
   // 替换更糟（确认框显示旧工作区的改动面，实际写新工作区）。会话 root 由
   // applyWorkspace 在切换时写入，是唯一真源。
-  const session = useWorkspaceSession();
+  // 只有 root 会变；订阅整份会话会让本页在每次 dirty 翻转、编译状态变化时重渲染。
+  const sessionRoot = useWorkspaceSelector((s) => s.root);
   const [fallbackRoot, setFallbackRoot] = useState<string | null>(null);
   // 会话还没读出根（undefined：可能首屏就在搜索页，没人先读过配置）时兜底读一次
   useEffect(() => {
-    if (session.root !== undefined) return;
+    if (sessionRoot !== undefined) return;
     let alive = true;
     getWorkspace()
       .then((r) => alive && setFallbackRoot(r))
@@ -61,8 +62,8 @@ export function SearchTab({
     return () => {
       alive = false;
     };
-  }, [session.root]);
-  const root = session.root ?? fallbackRoot;
+  }, [sessionRoot]);
+  const root = sessionRoot ?? fallbackRoot;
 
   const update = useCallback((patch: Partial<SearchForm>) => {
     // 仓库自己合并并广播；写完后本组件经由订阅拿到新的 form

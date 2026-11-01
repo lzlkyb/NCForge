@@ -7,12 +7,13 @@ import { requestOpenFile } from "../../lib/openFileRequest";
 import { closePalette, openPalette, usePalette } from "../../lib/paletteStore";
 import { buildItems, type PaletteCtx, type PaletteResult, type Runner } from "../../lib/paletteSources";
 import type { Range } from "../../lib/fuzzy";
-import { useWorkspaceSession } from "../../lib/workspaceSession";
+import { useWorkspaceSelector } from "../../lib/workspaceSession";
 
 const PLACEHOLDER: Record<PaletteMode, string> = {
   file: "输入文件名…（驼峰首字母、路径片段都可以）",
   type: "输入类名…",
   symbol: "输入方法 / 字段名…",
+  sym: "输入方法 / 字段名…（整个工作区，含依赖 jar）",
   cmd: "输入命令…",
 };
 
@@ -42,7 +43,9 @@ export function QuickPalette({ activeTab, onNavigate }: { activeTab: string; onN
 }
 
 function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activeTab: string; onNavigate: (tab: string) => void }) {
-  const { root, activePath, tabs } = useWorkspaceSession();
+  const root = useWorkspaceSelector((s) => s.root);
+  const activePath = useWorkspaceSelector((s) => s.activePath);
+  const tabs = useWorkspaceSelector((s) => s.tabs);
   const [query, setQuery] = useState("");
   const [sel, setSel] = useState(0);
   const [result, setResult] = useState<PaletteResult>({ items: [], note: "" });

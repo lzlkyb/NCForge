@@ -819,9 +819,12 @@ fn percent_decode(s: &str) -> String {
     let mut out: Vec<u8> = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
+        // 两个十六进制位都按**字节**取：`&s[i+1..i+3]` 这种切法在 `%` 后面跟
+        // 多字节字符时会切在 char boundary 上直接 panic（中文路径未编码就会
+        // 踩到），而字节比较没有这个问题。
         if b[i] == b'%' && i + 2 < b.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v);
+            if let (Some(hi), Some(lo)) = (hex_val(b[i + 1]), hex_val(b[i + 2])) {
+                out.push(hi * 16 + lo);
                 i += 3;
                 continue;
             }
@@ -830,6 +833,15 @@ fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).to_string()
+}
+
+fn hex_val(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// 逐个取出 `<classpathentry …>` 标签文本（到 `>` 为止）。
@@ -865,6 +877,76 @@ fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     None
 }
 
+/// 按「依赖在前」的顺序列出工作区内的模块名（「编译全部模块」用）。
+///
+/// 顺序来源是**类路径本身的顺序**，而不是 `graph().projects`：
+/// 类路径是「主工程 → 直接依赖 → 传递依赖」，反过来就是「最底层 → 主工程」，
+/// 正好是编译需要的顺序（先把被依赖的产物编出来）。停用工程已经被覆盖表剪掉，
+/// 这里的输入里就没有它们。
+///
+/// 只收工作区**内部**的模块（`<root>/<module>/...`）：`CompileEnv` 只有一个
+/// `project_root`，工作区外的目录用这套参数编不出来。工作区内但类路径里没出现过的
+/// 模块（老工程 `bin/` 之类）由调用方兜底补上。
+///
+/// 名字保留原始大小写：调用方要拿它去拼 `<root>/<module>`，小写会在日志里把
+/// `EyePortal` 显示成 `eyeportal`（Windows 上照样能找到目录，但看着像另一个人）。
+pub fn compile_order(class_dirs: &[PathBuf], root: &Path) -> Vec<String> {
+    /// 路径按 `\` 切段（`/` 先归一），去掉空段（尾部分隔符、`\\?\` 前缀都会产生）。
+    fn parts_of(p: &Path) -> Vec<String> {
+        p.to_string_lossy()
+            .replace('/', "\\")
+            .split('\\')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+    let root_parts = parts_of(root);
+    let mut out: Vec<String> = Vec::new();
+    for d in class_dirs {
+        let parts = parts_of(d);
+        // 至少 `<root>/<模块>/<产物目录>`：直接挂在根下的那一层不是模块
+        // （追加目录、根工程自己的 `classes` 都会落到这里）
+        if parts.len() < root_parts.len() + 2 {
+            continue;
+        }
+        if !parts[..root_parts.len()]
+            .iter()
+            .zip(&root_parts)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+        {
+            continue;
+        }
+        let module = &parts[root_parts.len()];
+        if out.iter().any(|m| m.eq_ignore_ascii_case(module)) {
+            continue;
+        }
+        out.push(module.clone());
+    }
+    out.reverse();
+    out
+}
+
+/// 工作区根下看起来是模块的目录（兜底：类路径里一条都没匹配上时用它）。
+///
+/// 判据只有两条：有 `.classpath`，或有 `src` 目录。两者都没有的（日志、备份、补丁包）
+/// 不是可编译模块，编它只会报「没有源文件」。
+pub fn module_dirs_of(root: &Path) -> Vec<String> {
+    let Ok(rd) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = rd
+        .flatten()
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter(|e| {
+            let p = e.path();
+            p.join(".classpath").is_file() || p.join("src").is_dir()
+        })
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .collect();
+    out.sort();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -893,6 +975,18 @@ mod tests {
     fn touch_class(dir: &Path) {
         fs::create_dir_all(dir).unwrap();
         fs::write(dir.join("A.class"), b"x").unwrap();
+    }
+
+    /// `%` 后面跟着多字节字符时，按 `&s[i+1..i+3]` 切 `&str` 会切在 char
+    /// boundary 上直接 panic——`.location` 里出现未编码的中文路径（UNC 共享、
+    /// 中文用户名）就会让整个类路径解析崩掉，工程直接打不开。
+    #[test]
+    fn percent_decode_不能按字符边界切分() {
+        assert_eq!(percent_decode("%E4%B8%AD%E6%96%87"), "中文");
+        assert_eq!(percent_decode("a%20b"), "a b");
+        // 这两个以前会 panic：% 后第一个字节是多字节字符的开头，i+3 落在字符中间
+        assert_eq!(percent_decode("%中文"), "%中文");
+        assert_eq!(percent_decode("x%aé"), "x%aé");
     }
 
     fn write(path: &Path, text: &str) {
@@ -1520,5 +1614,62 @@ mod tests {
         ] {
             assert_eq!(OverrideAction::parse(a.as_str()), Some(a));
         }
+    }
+
+    /// 编译顺序 = 类路径顺序的倒序：类路径是「主工程 → 依赖」，编译要「依赖 → 主工程」。
+    #[test]
+    fn 编译顺序按依赖优先且去重() {
+        let root = Path::new("C:/work/aier");
+        let dirs = vec![
+            PathBuf::from("C:/work/aier/EyePortal/classes"),
+            PathBuf::from("C:/work/aier/EyePortal/bin"),
+            PathBuf::from("C:/work/aier/pm/bin"),
+            PathBuf::from("C:/work/aier/newar/out/uapbd"),
+            PathBuf::from("C:/work/aier/newar/out"),
+        ];
+        assert_eq!(
+            compile_order(&dirs, root),
+            vec!["newar", "pm", "EyePortal"],
+            "最深依赖先编，主工程最后；同名模块只出现一次"
+        );
+    }
+
+    /// 工作区外的目录不参与（CompileEnv 只有一个 project_root，编了会写错位置）。
+    #[test]
+    fn 编译顺序忽略工作区外目录() {
+        let root = Path::new("C:/work/aier");
+        let dirs = vec![
+            PathBuf::from("D:/other/foo/classes"),
+            PathBuf::from("C:/work/aier/pm/classes"),
+            // 直接挂在根下的那一层不是模块：追加目录、根工程自己的 `classes`
+            PathBuf::from("C:/work/aier/classes"),
+            PathBuf::from("C:/work/aier/pm"),
+        ];
+        assert_eq!(compile_order(&dirs, root), vec!["pm"]);
+    }
+
+    /// 模块名保留原始大小写（调用方拿它拼 `<root>/<module>`），
+    /// 去重与工作区前缀比对都大小写不敏感——Windows 上 `EyePortal` 与 `eyeportal` 是同一个目录。
+    #[test]
+    fn 编译顺序保留目录名大小写() {
+        let root = Path::new("c:/WORK/Aier");
+        let dirs = vec![
+            PathBuf::from("C:/work/aier/EyePortal/classes"),
+            PathBuf::from("c:/work/aier/eyeportal/bin"),
+            PathBuf::from("C:/work/aier/pm/classes"),
+        ];
+        assert_eq!(compile_order(&dirs, root), vec!["pm", "EyePortal"]);
+    }
+
+    #[test]
+    fn 模块目录兜底只认_classpath_或_src() {
+        let d = temp_dir("moddirs");
+        fs::create_dir_all(d.join("pm").join("src")).unwrap();
+        fs::create_dir_all(d.join("eye")).unwrap();
+        write(&d.join("eye").join(".classpath"), "<classpath/>");
+        fs::create_dir_all(d.join("logs")).unwrap();
+        fs::write(d.join("readme.txt"), "x").unwrap();
+        assert_eq!(module_dirs_of(&d), vec!["eye", "pm"]);
+        cleanup(&d);
     }
 }

@@ -1,6 +1,10 @@
 import { useCallback, useEffect } from "react";
-import { encodingMarks, joinPath, listDir, type DirItem } from "../../lib/workspace";
-import { getSession, setSession, setTree, useWorkspaceSession } from "../../lib/workspaceSession";
+import { baseName, encodingMarks, joinPath, listDir, type DirItem } from "../../lib/workspace";
+import { collapseChain } from "../../lib/treeCompact";
+import { getSession, setSession, setTree, useWorkspaceSelector } from "../../lib/workspaceSession";
+
+/** 定位到某个文件时最多展开多少层：防止异常路径（工作区外的长路径）把界面锁死。 */
+const REVEAL_MAX_DEPTH = 40;
 
 /**
  * 文件树的数据层：按需加载某一层、维护展开态与编码标记。
@@ -11,7 +15,8 @@ import { getSession, setSession, setTree, useWorkspaceSession } from "../../lib/
  * 为什么列目录与编码标记分开跑：列表先出来，标记晚一拍到，展开目录不用等它。
  */
 export function useTreeLoad(root: string) {
-  const { tree } = useWorkspaceSession();
+  // 只订阅树：整会话订阅下，每次 dirty 翻转 / 编译状态变化都会把整棵树重渲染一遍
+  const tree = useWorkspaceSelector((s) => s.tree);
   const { dirs, expanded, marks } = tree;
 
   /**
@@ -73,8 +78,29 @@ export function useTreeLoad(root: string) {
     void load(root);
   }, [root, load]);
 
+  // 「压缩中间包」要往下多看几层：某个目录展开后，若它一路只有一个子目录，
+  // 把链条末端也预读出来，行标题才能稳定显示成 `com.aier.erp`。
+  // 不预读的话，用户每展开一次标题就变一次（com → com.aier → …），很难受。
+  useEffect(() => {
+    for (const dir of expanded) {
+      const chain = collapseChain(dir, baseName(dir), dirs);
+      if (chain.tail !== dir && !dirs[chain.tail]) void load(chain.tail);
+    }
+  }, [expanded, dirs, load]);
+
   const expand = (path: string) =>
     setTree((t) => (t.expanded.has(path) ? t : { ...t, expanded: new Set(t.expanded).add(path) }));
+
+  /** 一次性改多层展开态（压缩链的展开 / 收起要动整条链）。 */
+  const setExpandedPaths = (paths: string[], open: boolean) =>
+    setTree((t) => {
+      const next = new Set(t.expanded);
+      for (const p of paths) {
+        if (open) next.add(p);
+        else next.delete(p);
+      }
+      return { ...t, expanded: next };
+    });
 
   /** 路径在树里的层级（根为 0）。只用来算缩进。 */
   const depthOf = (path: string) => {
@@ -85,15 +111,35 @@ export function useTreeLoad(root: string) {
 
   const toggle = (path: string) => {
     const isOpen = expanded.has(path);
-    setTree((t) => {
-      const next = new Set(t.expanded);
-      if (isOpen) next.delete(path);
-      else next.add(path);
-      return { ...t, expanded: next };
-    });
+    setExpandedPaths([path], !isOpen);
     // 展开且还没加载过（或上次加载失败）才请求
     if (!isOpen && dirs[path]?.status !== "ok") void load(path);
   };
 
-  return { dirs, expanded, marks, load, expand, toggle, depthOf };
+  /**
+   * 定位到某个文件：逐层展开祖先并加载，返回是否成功。
+   *
+   * 祖先链直接从路径字符串算出来，不向后端问——`com/aier/erp/x.java` 的父目录就是
+   * 路径前缀。只允许工作区内的路径（搜索结果与编译问题可能指向关联工程，那些不在树里）。
+   */
+  const reveal = useCallback(
+    async (path: string): Promise<boolean> => {
+      const current = getSession().tree.root;
+      if (!current || !path) return false;
+      const lower = path.toLowerCase();
+      if (!lower.startsWith(current.toLowerCase() + "\\")) return false;
+      const parts = path.slice(current.length).replace(/^[\\/]/, "").split(/[\\/]/).filter(Boolean);
+      if (parts.length > REVEAL_MAX_DEPTH) return false;
+      let cur = current;
+      for (let i = 0; i < parts.length - 1; i += 1) {
+        cur = joinPath(cur, parts[i]);
+        setTree((t) => (t.expanded.has(cur) ? t : { ...t, expanded: new Set(t.expanded).add(cur) }));
+        if (getSession().tree.dirs[cur]?.status !== "ok") await load(cur);
+      }
+      return true;
+    },
+    [load],
+  );
+
+  return { dirs, expanded, marks, load, expand, toggle, depthOf, reveal, setExpandedPaths };
 }

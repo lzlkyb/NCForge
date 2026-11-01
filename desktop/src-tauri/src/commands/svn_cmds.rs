@@ -283,6 +283,10 @@ fn root_of(cfg: &AppConfig) -> Result<PathBuf, String> {
 }
 
 /// 白名单校验：SVN 命令只允许作用在工作区内。
+///
+/// 同步实现，但**所有调用点都已在 `spawn_blocking` 内**（本文件的命令模式就是
+/// 「取 cfg → spawn_blocking → 在里面调桥」），所以这是对的。要在这里新增调用点时
+/// 必须保持在阻塞线程里；命令体（async）上要做校验请用 `resolve_safe_path_async`。
 fn safe_path(cfg: &AppConfig, requested: &str) -> Result<PathBuf, String> {
     let root = root_of(cfg)?;
     let root_s = display_path(&root);

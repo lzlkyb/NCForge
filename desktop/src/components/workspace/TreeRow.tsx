@@ -1,4 +1,4 @@
-import { useContext, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { memo, useContext, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { TreeSvnContext } from "./TreeSvnContext";
 import { pathKey } from "../../lib/treeSvn";
 import { Icon } from "../ui/icon";
@@ -7,9 +7,13 @@ import type { EncodingMark } from "../../lib/workspace";
 /**
  * 文件树的一行。目录行与文件行分开：两者的选中/激活语义不同
  * （目录只有 data-selected，文件还有 data-active = 编辑器里正打开的那个）。
+ *
+ * **全部 `memo`**：光标在编辑器里移动、编译状态翻转、SVN 徽标刷新这些都不该
+ * 让几百上千行重渲染。props 全是原始值，`FileTree` 那边把回调做成了稳定引用
+ * （`handlers` 的一次性外壳 + ref 取最新实现），所以比较真的能命中。
  */
 
-export function TreeDirRow({
+export const TreeDirRow = memo(function TreeDirRow({
   name,
   path,
   id,
@@ -17,6 +21,7 @@ export function TreeDirRow({
   open,
   selected,
   padLeft,
+  parent,
   onToggle,
   onContextMenu,
 }: {
@@ -28,7 +33,9 @@ export function TreeDirRow({
   open: boolean;
   selected: boolean;
   padLeft: number;
-  onToggle: (path: string) => void;
+  /** 这一行所在的目录：展开/收起要连父目录一起看（压缩链）。 */
+  parent: string;
+  onToggle: (path: string, parent: string) => void;
   onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) => void;
 }) {
   const count = useContext(TreeSvnContext).directories.get(pathKey(path));
@@ -43,7 +50,7 @@ export function TreeDirRow({
       aria-selected={selected}
       style={{ paddingLeft: padLeft }}
       data-selected={selected || undefined}
-      onClick={() => onToggle(path)}
+      onClick={() => onToggle(path, parent)}
       onContextMenu={(e) => onContextMenu(e, path, true)}
       aria-expanded={open}
       title={name}
@@ -54,9 +61,9 @@ export function TreeDirRow({
       {!!count && <span className="wb-svn-count" title={`${count} 个文件有 SVN 变更`}>{count}</span>}
     </button>
   );
-}
+});
 
-export function TreeFileRow({
+export const TreeFileRow = memo(function TreeFileRow({
   name,
   path,
   id,
@@ -112,10 +119,10 @@ export function TreeFileRow({
       )}
     </button>
   );
-}
+});
 
 /** 树里的说明行：加载中 / 读取失败 / 空目录。 */
-export function TreeRowNote({
+export const TreeRowNote = memo(function TreeRowNote({
   children,
   padLeft,
   tone,
@@ -131,7 +138,7 @@ export function TreeRowNote({
       {children}
     </div>
   );
-}
+});
 
 /**
  * 树上 `UTF-8!` 的悬停说明：说清「为什么标」以及「谁的产物是对的」。

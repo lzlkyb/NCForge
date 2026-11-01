@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
+import { failureText } from "../../lib/friendlyError";
 
 /** 像绝对路径就行——真正的落盘校验在后端 `patch_set_out_dir`。 */
 function looksAbsolute(v: string): boolean {
@@ -59,7 +60,7 @@ export function PatchActions({
       toast("这不像绝对路径（如 D:\\NC技术\\待上线补丁），不会保存", "error");
       return;
     }
-    void onSaveDir(v).catch((x) => toast(String(x), "error"));
+    void onSaveDir(v).catch((x) => toast(failureText("保存输出目录", x), "error"));
   };
 
   return (
@@ -140,10 +141,19 @@ export function PatchActions({
           </button>
         </>
       )}
+      {dirty && draft.trim() && (
+        <span className="pk-pill" data-tone="warn" title="输入框里是新的路径，但还没落盘：现在出包仍会打到旧目录">
+          <Icon name="alertTriangle" size={11} />
+          输出目录未保存
+        </span>
+      )}
       </div><button
         type="button"
         className="pk-btn pk-btn-primary"
-        disabled={building || !canBuild}
+        // 草稿脏时必须挡住出包：输入框里明写着新路径，包却落到旧目录，事后很难发现。
+        // 落盘是显式动作（见上面 commitDir 的注释），所以这里不替用户自动保存。
+        disabled={building || !canBuild || !!dirty}
+        title={dirty ? "输出目录改了还没保存：先点「保存」，否则包会打到旧目录" : undefined}
         onClick={onBuild}
       >
         <Icon name="package" size={13} />

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { toast } from "../ui/toast";
 import { SqlToolbar } from "./SqlToolbar";
 import { SqlEditor, type SqlEditorApi } from "./SqlEditor";
@@ -18,6 +18,9 @@ import { closeSessionPanel, openSessionPanel, sqlTabOf, useDb, type SqlTab } fro
 export function SqlConsole({ tab }: { tab: SqlTab }) {
   const api = useRef<SqlEditorApi | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  /** 拖拽中的清理函数：切标签会卸载这个控制台，监听必须一起摘掉。 */
+  const dragCleanup = useRef<(() => void) | null>(null);
+  useEffect(() => () => dragCleanup.current?.(), []);
   const [resH, setResH] = useState(300);
   /** 右侧抽屉：历史与片段互斥（同一列位置，同时开就挤成两栏了）。 */
   const [side, setSide] = useState<"history" | "snips" | null>(null);
@@ -70,13 +73,22 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
 
   const dragRes = (startY: number) => {
     const start = resH;
-    const move = (e: PointerEvent) => setResH(Math.max(90, Math.min(maxRes(), start + startY - e.clientY)));
-    const up = () => {
+    dragCleanup.current?.();
+    const finish = () => {
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      dragCleanup.current = null;
     };
+    const move = (e: PointerEvent) => {
+      // 系统取消指针时没有 pointerup（Alt+Tab / 笔离开），buttons 归零兜住
+      if (e.buttons === 0) return finish();
+      setResH(Math.max(90, Math.min(maxRes(), start + startY - e.clientY)));
+    };
+    dragCleanup.current = finish;
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish, { once: true });
   };
 
   /** 键盘调整分隔条：纯键盘用户也能改结果区高度（ARIA separator 的标准做法）。 */

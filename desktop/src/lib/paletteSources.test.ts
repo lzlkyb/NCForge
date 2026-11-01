@@ -97,6 +97,54 @@ describe("符号模式", () => {
   });
 });
 
+describe("工作区符号模式（方法 / 字段级）", () => {
+  const sym = (name: string, kind: number, container?: string, uri = "file:///C%3A/w/gl/A.java") => ({
+    name,
+    kind,
+    containerName: container,
+    location: { uri, range: { start: { line: 4, character: 8 } } },
+  });
+
+  it("空查询与未就绪都给提示，不打语言服务", async () => {
+    expect((await buildItems("sym", "", ctx())).note).toContain("方法名");
+    expect((await buildItems("sym", "save", ctx())).note).toContain("未就绪");
+    expect(lang.request).not.toHaveBeenCalled();
+  });
+
+  it("只留方法与字段（类 / 接口那些交给「类型」模式）", async () => {
+    lang.ready = true;
+    lang.request.mockResolvedValue([
+      sym("save", 6, "A"),
+      sym("count", 8, "A"),
+      sym("VoucherBO", 5, ""),
+      sym("A", 23, ""),
+    ]);
+    const r = await buildItems("sym", "s", ctx());
+    expect(r.items.map((i) => i.title)).toEqual(["save", "count"]);
+    expect(r.items[0].kind).toBe("M");
+    expect(r.items[0].detail).toBe("A");
+  });
+
+  it("请求的是 workspace/symbol，回车跳到命中位置（行号 1 基）", async () => {
+    lang.ready = true;
+    lang.request.mockResolvedValue([sym("save", 6)]);
+    const r = await buildItems("sym", "save", ctx());
+    expect(lang.request.mock.calls[0][0]).toBe("workspace/symbol");
+    r.items[0].run();
+    expect(run.file).toHaveBeenCalledWith("C:\\w\\gl\\A.java", 5, 9);
+  });
+
+  it("jar 里的符号标记为 jar 并走 jdt 打开", async () => {
+    lang.ready = true;
+    lang.request.mockResolvedValue([sym("getStatus", 6, "BillVO", "jdt://contents/x.class")]);
+    const r = await buildItems("sym", "status", ctx());
+    expect(r.items[0].badge).toBe("jar");
+    r.items[0].run();
+    expect(run.jdt).toHaveBeenCalled();
+    expect(run.file).not.toHaveBeenCalled();
+  });
+});
+
 describe("命令模式", () => {
   it("只列出已登记且 enabled 的命令，模糊过滤", async () => {
     const hit = vi.fn();

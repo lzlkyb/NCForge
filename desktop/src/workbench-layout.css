@@ -39,12 +39,25 @@
 .wb-bottom { display:flex; flex-direction:column; min-height:140px; max-height:65%; overflow:hidden; flex-shrink:0; }
 .wb-bottom .wb-panel { height:100%; border-top:0; }
 .wb-svc-host { display:flex; flex-direction:column; padding:0; }
-.wb-resize-x { cursor:col-resize; border-left:1px solid hsl(var(--border)); }
-.wb-resize-y { cursor:row-resize; height:4px; flex-shrink:0; border-top:1px solid hsl(var(--border)); }
+.wb-resize-x { position:relative; cursor:col-resize; border-left:1px solid hsl(var(--border)); }
+/* 抓手命中区比视觉宽：4px 的线用鼠标都难按住，触控板上还会先被当成滚动（所以要
+   `touch-action:none`）。视觉不动，用一层透明的伪元素把可点区域四周各撑 3px——
+   直接改 height/padding 会让分隔条真的占位，底部面板位置跟着漂。 */
+.wb-resize-x,.wb-resize-y { touch-action:none; }
+.wb-resize-y { position:relative; cursor:row-resize; height:4px; flex-shrink:0; border-top:1px solid hsl(var(--border)); }
+.wb-resize-x::after { content:""; position:absolute; inset:0 -3px; }
+.wb-resize-y::after { content:""; position:absolute; inset:-3px 0; }
 .wb-resize-x:hover,.wb-resize-y:hover { background:hsl(var(--primary)); }
 /* 停靠包装层不能自己产生盒子：工具页、ActivityPanel、DockRegion 都是透明的一层，
    真实布局由各自的宿主决定。非活动时 [hidden] 的 !important 会盖掉这里的 contents。 */
 .wb-tool-runtime,.wb-tool-runtime > div,.wb-dock-region,.wb-tool-runtime :is(.vc-page,.pk-page,.dq-page,.sv-page) { display:contents; }
+/* 文件页槽位的宿主：只做 portal 的落点，自身不能产生盒子（否则文件标签条 /
+   状态栏会被多套一层 flex 子项，宽度与边框都会变）。 */
+.wb-file-tabs,.wb-status-host { display:contents; }
+/* 底部面板有没有内容由文件页决定（它 portal 进来）。空的时候面板与分隔条一起收起：
+   以前靠 `Boolean(output)` 在 JS 里判断，拆开之后那个布尔跨不过来了。 */
+.wb-bottom:empty { display:none; }
+.wb-resize-y:has(+ .wb-bottom:empty) { display:none; }
 .wb-sidebar-host .pk-top,.wb-sidebar-host .vc-top { padding:12px; }
 .wb-sidebar-host :is(.pk-chips,.vc-chips) { display:flex; flex-wrap:wrap; gap:4px; }
 .wb-sidebar-host :is(.pk-grp,.vc-grp) { padding:7px 12px; }

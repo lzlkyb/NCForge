@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "../components/ui/toast";
+import { failureText } from "../lib/friendlyError";
 import type { PatchDraft } from "../lib/patchDraft";
 import { listen } from "../lib/tauri";
 import {
@@ -109,7 +110,7 @@ export function usePatchBuild(
       // 文件，两个数不是一回事，文案里说清，别让用户以为预览少数了
       toast(`已生成补丁包，共 ${r.entries} 个 zip 条目（含目录）`, "success");
     } catch (e) {
-      toast(String(e), "error");
+      toast(failureText("生成补丁包", e), "error");
     } finally {
       setBuilding(false);
       setProgress(null);
@@ -118,7 +119,7 @@ export function usePatchBuild(
 
   /** 取消出包：只置标志，后端在下一个条目边界退出。按钮置灰即可，不用二次确认。 */
   const doCancel = () => {
-    void patchBuildCancel().catch((e) => toast(`取消失败：${String(e)}`, "error"));
+    void patchBuildCancel().catch((e) => toast(failureText("取消出包", e), "error"));
   };
 
   return {

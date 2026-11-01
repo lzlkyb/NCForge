@@ -5,6 +5,7 @@ import { Modal } from "../ui/Modal";
 import { SettingsRow } from "../ui/SettingsRow";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
+import { errorTextOf, failureText } from "../../lib/friendlyError";
 import {
   buildImportPlan,
   downloadConfigExport,
@@ -41,7 +42,7 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
       await downloadConfigExport();
       toast("配置已导出，把文件发给同事即可（不含任何口令）", "success");
     } catch (e) {
-      toast(`导出失败：${e instanceof Error ? e.message : String(e)}`, "error");
+      toast(failureText("导出配置", e), "error");
     } finally {
       setExporting(false);
     }
@@ -53,7 +54,7 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
     try {
       text = await file.text();
     } catch (e) {
-      toast(`读取文件失败：${e instanceof Error ? e.message : String(e)}`, "error");
+      toast(`读取文件失败：${errorTextOf(e)}`, "error");
       return;
     }
     const parsed = parseExportFile(text);
@@ -82,7 +83,7 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
       setPending(null);
       onChanged?.();
     } catch (e) {
-      toast(`导入失败：${e instanceof Error ? e.message : String(e)}`, "error");
+      toast(failureText("导入配置", e), "error");
     } finally {
       setImporting(false);
     }
@@ -140,7 +141,7 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
             <h2 className="text-base font-medium">导入配置</h2>
             <p className="text-xs text-muted-foreground">
               来自工作台{pending.plan.fromVersion ? ` v${pending.plan.fromVersion}` : "（版本未知）"}
-              的配置文件。确认下面各项后导入；**没有出现的设置保持本机原值**。
+              的配置文件。确认下面各项后导入；<b className="text-foreground">没有出现的设置保持本机原值</b>。
             </p>
 
             {pending.plan.pathItems.length > 0 && (

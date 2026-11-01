@@ -20,12 +20,13 @@
 //! [`MAX_FILES`] 个文件，超了按「最早不动的文件」整份淘汰。没有上限的本地历史
 //! 会在几个月后悄悄吃掉几十 GB——那是另一个需要用户发现的问题。
 //!
-//! **并发**：所有读写经 [`LOCK`] 串行。保存是用户节奏的操作，临界区里只有
-//! 内存拷贝与小文件 IO，不会互相等。
+//! **并发**：每个文件的索引读-改-写由按文件分槽的 [`FILE_LOCKS`] 保护，不同文件
+//! 互不阻塞；全局淘汰单独用 [`CAP_LOCK`]，且带节流。保存是用户节奏的操作，临界区里
+//! 只有内存拷贝与小文件 IO，不会互相等。
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -73,10 +74,34 @@ struct FileIndex {
     versions: Vec<HistoryVersion>,
 }
 
-/// 串行化所有历史读写。`lock()` 只在被毒化（前一个持有者 panic）时返回 Err，
-/// 这时锁里的数据可能不一致，但继续用比直接崩溃好——历史是兜底功能。
-static LOCK: Mutex<()> = Mutex::new(());
+/// 每文件一把锁（按 slug 哈希落到固定 64 个槽位，内存不随文件数增长）。
+///
+/// 以前这里是一把**全局**锁，`capture` 全程持有——于是读文件、算 SHA-256、
+/// 写 blob 都排在别的文件后面，一次保存引发的固定开销随被跟踪文件数线性变差
+/// （审查报告 P2-12）。现在锁只保护「同一个文件的索引读-改-写」这一段，
+/// 不同文件可以并行归档。
+static FILE_LOCKS: OnceLock<Vec<Mutex<()>>> = OnceLock::new();
 
+fn file_lock(key: &str) -> &'static Mutex<()> {
+    // FNV-1a：几行、无依赖，只要分布均匀即可
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in key.as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let slots = FILE_LOCKS.get_or_init(|| (0..64).map(|_| Mutex::new(())).collect());
+    &slots[(h % slots.len() as u64) as usize]
+}
+
+/// 全局淘汰专用锁。与 `FILE_LOCKS` **分开**：淘汰要扫所有子目录，是全流程里
+/// 最重的一步；让它和「某个文件的索引写入」共用一把锁，一次淘汰会把所有保存
+/// 全堵住。加锁顺序恒定（先文件锁、再这把），不会成环。
+static CAP_LOCK: Mutex<()> = Mutex::new(());
+
+/// 淘汰扫描的最小间隔（毫秒）。淘汰是磁盘安全阀，不需要每次保存都扫一遍：
+/// 几十个文件、每个文件 20 版的索引读一遍就是几百次 IO，落在用户每次保存上。
+static LAST_CAP_SWEEP_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+const CAP_SWEEP_INTERVAL_MS: u64 = 60_000;
 fn history_dir(config_dir: &Path) -> PathBuf {
     config_dir.join("local-history")
 }
@@ -175,7 +200,6 @@ fn write_index(dir: &Path, idx: &FileIndex) -> Result<(), String> {
 ///
 /// 读不到文件也返回 `Ok(None)`：历史是兜底，不该让「存不了历史」挡住保存。
 pub fn capture(config_dir: &Path, path: &Path, keep: usize) -> Result<Option<String>, String> {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // keep=0 会把刚写进去的版本立刻裁空（连目录一起删），却仍返回 Some(id)——
     // 调用方拿到一个指向已删 blob 的 id。IPC 层硬编码 20，这里兜住这个契约
     let keep = keep.max(1);
@@ -184,6 +208,8 @@ pub fn capture(config_dir: &Path, path: &Path, keep: usize) -> Result<Option<Str
     if fs::metadata(path).map(|m| m.len()).unwrap_or(0) > MAX_TOTAL_BYTES {
         return Ok(None);
     }
+    // 读文件 + 算摘要放在锁外：这两步与「索引怎么改」无关，以前却在全局锁里
+    // 排队——被跟踪的文件越多，每次保存越慢（审查报告 P2-12）
     let bytes = match fs::read(path) {
         Ok(b) => b,
         Err(_) => return Ok(None),
@@ -191,6 +217,9 @@ pub fn capture(config_dir: &Path, path: &Path, keep: usize) -> Result<Option<Str
     let sha = hex(&Sha256::digest(&bytes));
     let key = stable_key(path);
     let dir = history_dir(config_dir).join(slug(&key));
+
+    // 只保护「这个文件」的索引读-改-写；不同文件的归档互不阻塞
+    let _g = file_lock(&key).lock().unwrap_or_else(|e| e.into_inner());
     let mut idx = read_index(&dir);
     if idx.versions.first().map(|v| v.sha.as_str()) == Some(sha.as_str()) {
         return Ok(None);
@@ -239,6 +268,8 @@ pub fn capture(config_dir: &Path, path: &Path, keep: usize) -> Result<Option<Str
             }
         }
     }
+    // 文件锁在这里就可以放了：全局淘汰有自己的锁，别让它把别的保存堵住
+    drop(_g);
     enforce_global_cap(config_dir, &dir)?;
     Ok(Some(id))
 }
@@ -248,7 +279,19 @@ pub fn capture(config_dir: &Path, path: &Path, keep: usize) -> Result<Option<Str
 /// 整份淘汰（而不是逐版本删）是有意的：跨文件挑最旧的版本会让每个文件都剩半截
 /// 历史，看哪份都不完整；整份淘汰至少保住「最近在改的文件有完整历史」。
 /// 刚写入的 `keep_dir` 不参与淘汰——不能把用户这一下保存挤掉。
+///
+/// **带节流**：两次扫描之间至少隔 `CAP_SWEEP_INTERVAL_MS`。淘汰是安全阀而不是
+/// 记账功能，晚一分钟执行没有代价；而每次保存都全量扫一遍索引，代价会随被跟踪
+/// 文件数线性上涨，全落在用户点保存到文件落盘之间（审查报告 P2-12）。
 fn enforce_global_cap(config_dir: &Path, keep_dir: &Path) -> Result<(), String> {
+    let now = now_ms();
+    let last = LAST_CAP_SWEEP_MS.load(std::sync::atomic::Ordering::Relaxed);
+    if last != 0 && now.saturating_sub(last) < CAP_SWEEP_INTERVAL_MS {
+        return Ok(());
+    }
+    // 抢到锁才更新时间戳：没抢到的那个说明别人正在扫，它这次不需要再扫
+    let _g = CAP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    LAST_CAP_SWEEP_MS.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
     evict_over_budget(
         &history_dir(config_dir),
         keep_dir,
@@ -340,8 +383,11 @@ fn evict_over_budget(
 
 /// 列出一个文件的历史版本（最新在前）。没有历史返回空 Vec。
 pub fn list(config_dir: &Path, path: &Path) -> Result<Vec<HistoryVersion>, String> {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let dir = history_dir(config_dir).join(slug(&stable_key(path)));
+    // stable_key 里有一次 canonicalize（磁盘 IO），放在锁外：它不决定索引内容，
+    // 只决定用哪个槽位的锁与哪个目录
+    let key = stable_key(path);
+    let _g = file_lock(&key).lock().unwrap_or_else(|e| e.into_inner());
+    let dir = history_dir(config_dir).join(slug(&key));
     Ok(read_index(&dir).versions)
 }
 
@@ -350,8 +396,9 @@ pub fn read_version(config_dir: &Path, path: &Path, id: &str) -> Result<Vec<u8>,
     if !valid_id(id) {
         return Err("非法的版本号".to_string());
     }
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let dir = history_dir(config_dir).join(slug(&stable_key(path)));
+    let key = stable_key(path);
+    let _g = file_lock(&key).lock().unwrap_or_else(|e| e.into_inner());
+    let dir = history_dir(config_dir).join(slug(&key));
     let blob = dir.join(format!("{id}.bin"));
     if !blob.is_file() {
         return Err("这个版本已经不在历史里了（可能被上限淘汰）".to_string());
@@ -374,8 +421,9 @@ pub fn restore(
     }
     // 先取旧版内容再锁外归档：capture 自己会拿锁（std Mutex 不可重入）
     let old = {
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = history_dir(config_dir).join(slug(&stable_key(path)));
+        let key = stable_key(path);
+        let _g = file_lock(&key).lock().unwrap_or_else(|e| e.into_inner());
+        let dir = history_dir(config_dir).join(slug(&key));
         let blob = dir.join(format!("{id}.bin"));
         if !blob.is_file() {
             return Err("这个版本已经不在历史里了（可能被上限淘汰）".to_string());
@@ -583,9 +631,19 @@ mod tests {
         fs::create_dir_all(&orphan).unwrap();
         fs::write(orphan.join("x.bin"), "没人引用的 blob").unwrap();
         let f = cfg.join("A.java");
-        fs::write(&f, "a").unwrap();
-        capture(&cfg, &f, KEEP_PER_FILE).unwrap();
-        assert!(!orphan.exists());
+        // 节流时间戳是进程级静态，而 cargo test 并行跑用例：别的用例在我
+        // store(0) 之后、capture 之前又盖一个新时间戳，这次就被节流挡掉。
+        // 生产上这个清理最多晚一分钟（安全阀不是即时任务），所以这里重试到
+        // 抢到为止——每次换内容，保证 capture 不会因「内容相同」提前返回。
+        for i in 0..8 {
+            fs::write(&f, format!("a{i}")).unwrap();
+            LAST_CAP_SWEEP_MS.store(0, std::sync::atomic::Ordering::Relaxed);
+            capture(&cfg, &f, KEEP_PER_FILE).unwrap();
+            if !orphan.exists() {
+                return;
+            }
+        }
+        panic!("无索引目录应被清掉");
     }
 
     /// 上一轮写到一半崩溃会留下「blob 落盘、索引没写成」的孤儿：

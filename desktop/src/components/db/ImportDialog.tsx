@@ -6,6 +6,7 @@ import { friendlyDbError } from "../../lib/db";
 import { autoMap, decodeCsvBytes, parseCsv, type ParsedCsv } from "../../lib/csvParse";
 import { planImport } from "../../lib/csvImport";
 import { dbApi, type ColumnInfo, type ImportFail } from "../../lib/dbApi";
+import { MapGrid } from "./ImportColumnMap";
 
 /** 一批多少行。太小则往返多，太大则一条命令里全是拼出来的 SQL。 */
 const BATCH = 200;
@@ -37,7 +38,9 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
   });
   const [map, setMap] = useState<number[]>([]);
   const [skip, setSkip] = useState(false);
-  const [busy, setBusy] = useState<{ done: number; total: number } | null>(null);
+  /** `canceling` 并进 busy：多一个 useState 就撞组件体量门禁（8 个）的上限，
+   *  而它本来就是「这次导入进行到哪一步」的一部分。 */
+  const [busy, setBusy] = useState<{ done: number; total: number; canceling: boolean } | null>(null);
   const [out, setOut] = useState<{ inserted: number; failed: ImportFail[]; ms: number; canceled: boolean } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   /** 取消只置标志：正在飞的那一批必须写完，否则请求发出去了却不知道结果。 */
@@ -97,7 +100,7 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
     const t0 = Date.now();
     let stopped = false;
     cancelRef.current = false;
-    setBusy({ done: 0, total: parsed.rows.length });
+    setBusy({ done: 0, total: parsed.rows.length, canceling: false });
     try {
       for (const ch of plan.chunks) {
         if (cancelRef.current) {
@@ -117,12 +120,17 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
         setBusy({
           done: Math.min(inserted + failed.length, parsed.rows.length),
           total: parsed.rows.length,
+          canceling: false,
         });
         if (!res.committed) break; // 遇错停：这一批已回滚，后面的不再试
       }
       setOut({ inserted, failed, ms: Date.now() - t0, canceled: stopped });
       if (inserted > 0) onDone();
     } catch (e) {
+      // 已经写进去的批不会因为异常消失：进度摘要照给，错误另显示。
+      // 少这一行的话，用户点过取消后又遇错，界面只剩一条错误，「到底写了多少」没人知道。
+      setOut({ inserted, failed, ms: Date.now() - t0, canceled: cancelRef.current });
+      if (inserted > 0) onDone();
       setErr(friendlyDbError(e));
     } finally {
       setBusy(null);
@@ -190,34 +198,27 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
         </div>
 
         {parsed && (
-          <>
-            <div className="dbx-maphd">列映射</div>
-            <div className="dbx-mapgrid">
-              <div className="h">文件列</div>
-              <div className="h">样例（前 {PREVIEW} 行）</div>
-              <div className="h">写入表的列</div>
-              {parsed.headers.map((h, i) => (
-                <MapRow
-                  key={`${h}:${i}`}
-                  head={h || `第 ${i + 1} 列`}
-                  samples={parsed.rows.slice(0, PREVIEW).map((r) => r[i] ?? "")}
-                  value={map[i] ?? -1}
-                  cols={target ?? []}
-                  onChange={(v) => setMap(map.map((m, k) => (k === i ? v : m)))}
-                />
-              ))}
-            </div>
-            {dupTarget && <div className="dbx-err" style={{ marginTop: 6 }}>同一目标列被映射了两次，改一下再导</div>}
-            <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
-              <input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} />
-              遇错跳过坏行（否则这一批整批退回）
-            </label>
-          </>
+          <MapGrid
+            headers={parsed.headers}
+            samples={parsed.rows.slice(0, PREVIEW)}
+            map={map}
+            cols={target ?? []}
+            onChange={(v, i) => setMap(map.map((m, k) => (k === i ? v : m)))}
+            dupTarget={dupTarget}
+          />
+        )}
+        {parsed && (
+          <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
+            <input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} />
+            遇错跳过坏行（否则这一批整批退回）
+          </label>
         )}
 
         {busy && (
           <div className="dbx-hint" style={{ marginTop: 8 }}>
-            正在写：{busy.done} / {busy.total} 行…（点「取消导入」会在当前批写完后停下）
+            {busy.canceling
+              ? "已请求取消，等当前批写完就停（已经在飞的那批必须写完，否则不知道结果）…"
+              : `正在写：${busy.done} / ${busy.total} 行…（点「取消导入」会在当前批写完后停下）`}
           </div>
         )}
         {err && <div className="dbx-err" style={{ marginTop: 8 }}>{err}</div>}
@@ -250,8 +251,17 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
         {busy ? (
           // 写入中不能关窗（已写的批次撤不回），但必须留一条停下来的路：
           // 只置标志、当前批写完再停，进度与结果仍然可见。
-          <button type="button" className="dbx-btn ghost" onClick={() => { cancelRef.current = true; }}>
-            取消导入
+          // 点完要立刻有反馈：大表上一批可能跑几十秒，按钮不变用户会以为没点上。
+          <button
+            type="button"
+            className="dbx-btn ghost"
+            disabled={busy.canceling}
+            onClick={() => {
+              cancelRef.current = true;
+              setBusy((b) => (b ? { ...b, canceling: true } : b));
+            }}
+          >
+            {busy.canceling ? "取消中…" : "取消导入"}
           </button>
         ) : (
           <button type="button" className="dbx-btn ghost" onClick={requestClose}>
@@ -264,33 +274,5 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
         </button>
       </div>
     </Modal>
-  );
-}
-
-/** 一行映射：文件列名 + 样例值 + 目标列下拉。 */
-function MapRow({ head, samples, value, cols, onChange }: {
-  head: string;
-  samples: string[];
-  value: number;
-  cols: ColumnInfo[];
-  onChange: (v: number) => void;
-}) {
-  return (
-    <>
-      <div className="dbx-mono">{head}</div>
-      <div className="dbx-mapcell">
-        {samples.map((s, i) => (
-          <span key={i} className="dbx-mono">{s === "" ? <span className="dbx-muted">（空）</span> : s}</span>
-        ))}
-      </div>
-      <select value={value} onChange={(e) => onChange(Number(e.target.value))}>
-        <option value={-1}>（不导入这一列）</option>
-        {cols.map((c, i) => (
-          <option key={c.name} value={i}>
-            {c.name.toLowerCase()} · {c.full}
-          </option>
-        ))}
-      </select>
-    </>
   );
 }

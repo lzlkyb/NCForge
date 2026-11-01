@@ -116,6 +116,33 @@ pub fn resolve_safe_path(
     Ok(resolved)
 }
 
+/// `resolve_safe_path` 的异步版：把磁盘校验丢进 `spawn_blocking`。
+///
+/// **async 命令体里一律用这个**。`canonicalize` 是同步磁盘操作（每次还要把
+/// 白名单根也 canonicalize 一遍），网络盘/机械盘上单次可达数百毫秒；而 tokio 的
+/// worker 数 = CPU 核数，几个路径校验就能把整个 IPC 层堵住。同步版留给测试、以及
+/// 已经身处阻塞线程的调用方（`db_cmds` 的 `spawn_blocking` 内）。
+///
+/// 参数取所有权（`String` / `Vec<String>`）是 `spawn_blocking` 的要求：任务必须
+/// `'static`。调用方本来就要把 `&str` 拼成路径，多这一层不算负担。
+pub async fn resolve_safe_path_async(
+    requested: String,
+    allowed_roots: Vec<String>,
+    exclude_patterns: Vec<String>,
+    enforce_whitelist: bool,
+) -> Result<PathBuf, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        resolve_safe_path(
+            &requested,
+            &allowed_roots,
+            &exclude_patterns,
+            enforce_whitelist,
+        )
+    })
+    .await
+    .map_err(|e| format!("路径校验任务失败: {e}"))?
+}
+
 fn is_within(path: &Path, root: &Path) -> bool {
     path.starts_with(root)
 }

@@ -11,6 +11,7 @@ import { CommandLineDialog } from "../services/CommandLineDialog";
 import { PortDialog } from "../services/PortDialog";
 import { ServiceConfirms } from "../services/ServiceConfirms";
 import { useAppHidden } from "../../lib/appVisibility";
+import { failureText } from "../../lib/friendlyError";
 import {
   serverCommandLine,
   serverKillPortOwner,
@@ -75,7 +76,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
       patchState("starting");
       toast("已启动，正在加载模块（通常 10 秒左右）", "success");
     } catch (e) {
-      toast(String(e), "error");
+      toast(failureText("启动服务", e), "error");
       // 后端把「启动失败：…」写进了日志文件，面板还停在上一代：不换一代的话，
       // 失败详情既看不到、下次成功启动又被轮转成 .1 更难找
       setGeneration((g) => g + 1);
@@ -98,7 +99,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
       } else if (outcome === "cancelling") toast("正在取消启动…", "info");
       else toast("服务没有在运行", "info");
     } catch (e) {
-      toast(String(e), "error");
+      toast(failureText("停止服务", e), "error");
     } finally {
       setBusy(null);
       void refetch();
@@ -124,7 +125,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
         "success",
       );
     } catch (e) {
-      toast(String(e), "error");
+      toast(failureText("重启服务", e), "error");
       setGeneration((g) => g + 1);
     } finally {
       setBusy(null);
@@ -139,7 +140,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
       const pid = await serverKillPortOwner();
       toast(`已结束 PID ${pid}`, "success");
     } catch (e) {
-      toast(String(e), "error");
+      toast(failureText("结束占用端口的进程", e), "error");
     } finally {
       setBusy(null);
       void refetch();
@@ -151,17 +152,22 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
     try {
       setPreview(await serverCommandLine());
     } catch (e) {
-      toast(String(e), "error");
+      toast(failureText("生成启动命令行", e), "error");
     } finally {
       setPreviewing(false);
     }
   };
 
   const revealLog = () => {
-    void serverRevealLog().catch((e) => toast(String(e), "error"));
+    void serverRevealLog().catch((e) => toast(failureText("打开日志位置", e), "error"));
   };
 
-  const state = status?.state ?? "stopped";
+  // 三态：`status` 没回来或读失败时是 undefined。**不能**当成「已停止」——
+  // 服务可能正在跑，而 `state` 决定日志要不要继续刷新、改配置要不要弹确认。
+  // 早先 `?? "stopped"` 的写法会让日志面板显示「未在运行，不再刷新」，
+  // 崩溃日志再也看不到，配置切换的确认也不弹。
+  const state = status?.state;
+  const known = state !== undefined;
   const owner = status?.portOwner ?? null;
   const conflict = !!owner && !status?.portOwnedBySelf;
   const ownerIsJava = !!owner && owner.name.toLowerCase().startsWith("java");
@@ -253,10 +259,10 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
           </div>
         )}
 
-        {configOpen && <ServiceConfig status={status ?? null} running={state !== "stopped"} onRefetch={() => void refetch()} />}
+        {configOpen && <ServiceConfig status={status ?? null} running={!known || state !== "stopped"} onRefetch={() => void refetch()} />}
 
         <LogPanel
-          active={state === "running" || state === "starting"}
+          active={!known || state === "running" || state === "starting"}
           appHidden={appHidden}
           generation={generation}
           logPath={status?.logPath ?? ""}

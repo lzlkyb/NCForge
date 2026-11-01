@@ -34,6 +34,11 @@ use crate::state::AppState;
 /// **不能**当成「没有事务」（那正是会静默丢数据的错）。
 const PING_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// 全部连接探测的总 deadline。探测是并行的，理论上最慢就等于最慢的那一条；
+/// 再留 1 秒给调度与锁等待。超过它说明有连接把流程挂住了，没出结果的一律
+/// 按 `unknown` 报——退出探测宁可误报「可能有事务」，也不能当 clean 放行。
+const PENDING_TX_DEADLINE: Duration = Duration::from_secs(3);
+
 /// 等前端回话的上限。超过它说明界面已卡死/崩溃，继续等只会让应用关不掉。
 const ACK_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -122,15 +127,40 @@ pub async fn db_pending_tx(state: tauri::State<'_, Arc<AppState>>) -> Result<Val
             .map_err(|_| "数据库连接状态异常".to_string())?;
         map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     };
+    // 原始 key → 引擎种类。总 deadline 到了要给「没出结果」的会话补 unknown 行，
+    // 那时候句柄已经被 move 进 future 了，只剩这份表。
+    let kinds: std::collections::HashMap<String, EngineKind> =
+        handles.iter().map(|(k, h)| (k.clone(), h.kind())).collect();
+    let all_keys: Vec<String> = handles.iter().map(|(k, _)| k.clone()).collect();
 
-    let mut conns = Vec::with_capacity(handles.len());
-    for (key, h) in handles {
+    // 并行探测：串行时最坏是「连接数 × PING_TIMEOUT」——五个卡住的连接就是十秒
+    // 关不掉窗口，用户会以为自己又点了一次 X。每条自带 PING_TIMEOUT，外面再包
+    // 一个总 deadline 兜住「某条把整个退出流程拖住」。
+    let futs = handles.into_iter().map(|(key, h)| async move {
         let kind = h.kind();
         // A0 的独立会话槽（`c1#2`）属于同一条连接：按连接 id 归并，
         // 否则确认框里会出现「prod」「prod#2」两条同名连接，用户不知道该点哪个。
         let (id, _) = split_slot_key(&key);
-        let r = call(h, "ping", Vec::new(), PING_TIMEOUT).await;
-        conns.push(pending_row(id, kind, r));
+        let row = pending_row(id, kind, call(h, "ping", Vec::new(), PING_TIMEOUT).await);
+        (key, row)
+    });
+    let done: Vec<(String, Value)> =
+        tokio::time::timeout(PENDING_TX_DEADLINE, futures_util::future::join_all(futs))
+            .await
+            .unwrap_or_default();
+    // 按原始 key 补行，不能按连接 id：同一条连接的 primary 与槽是不同的 future，
+    // 只探完 primary 不能替槽说「干净」——merge_sessions 的规则是「任一条 unknown
+    // 整条 unknown」，漏掉槽的 unknown 正好把可能丢数据的那个藏起来。
+    let got: std::collections::HashSet<String> = done.iter().map(|(k, _)| k.clone()).collect();
+    let mut conns: Vec<Value> = done.into_iter().map(|(_, r)| r).collect();
+    for key in &all_keys {
+        if got.contains(key) {
+            continue;
+        }
+        if let Some(kind) = kinds.get(key).copied() {
+            let (id, _) = split_slot_key(key);
+            conns.push(pending_row(id, kind, Err("退出探测超时".to_string())));
+        }
     }
     Ok(json!({ "conns": merge_sessions(conns) }))
 }

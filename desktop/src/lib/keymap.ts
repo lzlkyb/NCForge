@@ -51,19 +51,24 @@ export function editorCommand(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "sh
   return EDITOR_KEYS.find(row => row[keymap].toLowerCase() === chord)?.action;
 }
 
-/** 快速导航浮层的四种模式：转到文件 / 类型 / 当前文件符号 / 命令。 */
-export type PaletteMode = "file" | "type" | "symbol" | "cmd";
+/** 快速导航浮层的五种模式：转到文件 / 类型 / 当前文件符号 / 工作区符号 / 命令。 */
+export type PaletteMode = "file" | "type" | "symbol" | "sym" | "cmd";
 
 /**
  * 各模式的入口键，第一项是展示用的首选键。
  *
  * `Ctrl+P`（转到文件）与 `Ctrl+Shift+P`（命令）两套方案通用：这是绝大多数编辑器的习惯，
  * 而且与 Eclipse / IDEA 方案里已有的键都不冲突。
+ *
+ * `sym`（工作区符号 = 方法/字段级搜索）在两套方案下都用 `Ctrl+Alt+N`：IDEA 原本是
+ * `Ctrl+Alt+Shift+N`，但那套键在 Windows 的某些输入法/系统热键下会被吃掉，
+ * 这里给它一个稳的等价键（设置页的说明也按这个写）。
  */
 const PALETTE_KEYS: Record<PaletteMode, Record<Keymap, string[]>> = {
   file: { eclipse: ["ctrl+shift+r", "ctrl+p"], idea: ["ctrl+shift+n", "ctrl+p"] },
   type: { eclipse: ["ctrl+shift+t"], idea: ["ctrl+n"] },
   symbol: { eclipse: ["ctrl+o"], idea: ["ctrl+f12"] },
+  sym: { eclipse: ["ctrl+alt+n"], idea: ["ctrl+alt+n", "ctrl+alt+shift+n"] },
   cmd: { eclipse: ["ctrl+shift+p"], idea: ["ctrl+shift+p", "ctrl+shift+a"] },
 };
 
@@ -71,6 +76,7 @@ export const PALETTE_MODES: { mode: PaletteMode; label: string }[] = [
   { mode: "file", label: "文件" },
   { mode: "type", label: "类型" },
   { mode: "symbol", label: "符号" },
+  { mode: "sym", label: "工作区符号" },
   { mode: "cmd", label: "命令" },
 ];
 
@@ -78,8 +84,9 @@ type KeyLike = Pick<KeyboardEvent, "key" | "ctrlKey" | "shiftKey" | "altKey" | "
 
 /** 这次按键是不是某个浮层模式的入口键；不是返回 null。 */
 export function paletteModeOf(event: KeyLike, keymap: Keymap): PaletteMode | null {
-  if (event.isComposing || event.altKey || event.metaKey || !event.ctrlKey) return null;
-  const chord = `ctrl+${event.shiftKey ? "shift+" : ""}${event.key.toLowerCase()}`;
+  // Alt 要参与拼键（工作区符号是 Ctrl+Alt+N），所以这里不排除 altKey
+  if (event.isComposing || event.metaKey || !event.ctrlKey) return null;
+  const chord = `ctrl+${event.altKey ? "alt+" : ""}${event.shiftKey ? "shift+" : ""}${event.key.toLowerCase()}`;
   for (const mode of Object.keys(PALETTE_KEYS) as PaletteMode[]) {
     if (PALETTE_KEYS[mode][keymap].includes(chord)) return mode;
   }

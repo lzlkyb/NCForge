@@ -596,8 +596,11 @@ pub fn extract_zip(bytes: &[u8], dest: &Path) -> Result<usize, String> {
         let mut entry = archive
             .by_index(i)
             .map_err(|e| format!("读取 zip 条目 {i} 失败: {e}"))?;
-        // 第一遍已保证全部合法，这里直接 expect 不再走错误分支
-        let rel = entry.enclosed_name().expect("第一遍已校验条目名");
+        // 第一遍已保证全部合法；这里仍走错误分支而不是 `expect`——
+        // 「两遍扫描之间没有别人改过」是跨函数的假设，不值得用一个 panic 去赌。
+        let rel = entry
+            .enclosed_name()
+            .ok_or_else(|| format!("包内条目 {i} 的路径不合法（拒绝解压）"))?;
         let out = dest.join(&rel);
         if entry.is_dir() {
             std::fs::create_dir_all(&out).map_err(|e| format!("建目录失败 {out:?}: {e}"))?;
@@ -670,7 +673,36 @@ pub fn install_pack(
         std::fs::remove_dir_all(&tmp).ok();
         format!("安装 {id} 失败（{final_dir:?}: {e}）")
     })?;
+    // 装好了才清旧版本：每升一次 jdtls（数十 MB）就会多一个 `{id}@{旧版本}` 目录，
+    // 以前全仓没有一处删除它，用户磁盘只涨不跌且完全不可见。
+    prune_old_versions(config_dir, id, version);
     Ok(final_dir)
+}
+
+/// 删掉同一个包的历史版本目录，只留 `keep_version`。
+///
+/// 只在**新版本安装成功后**调用：这样任何失败路径上旧版本都还在，反复重试不会
+/// 把用户逼进「一个能用的都没有」的状态。`legacy` 认领的老目录不以 `{id}@` 开头，
+/// 天然不会被匹配到；正在运行的 jdt.ls 用的是已装好的目录，而安装发生在启动之前。
+fn prune_old_versions(config_dir: &Path, id: &str, keep_version: &str) {
+    let root = external_root(config_dir);
+    let prefix = format!("{id}@");
+    let keep = pack_dir(config_dir, id, keep_version);
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with(&prefix) || path == keep || !path.is_dir() {
+            continue;
+        }
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => log::info!("[resource] 已清理旧版本 {}", path.display()),
+            // 删不掉不影响可用性（比如文件被占用）：留个痕迹就够，不要打扰用户
+            Err(e) => log::warn!("[resource] 清理旧版本 {} 失败: {e}", path.display()),
+        }
+    }
 }
 
 // ───────────────────────── 编排：ensure ─────────────────────────
@@ -922,8 +954,16 @@ pub async fn ensure_packs(
             });
 
             let mut attempt = 0u32;
-            // 清单 parse 时已校验过 url 合法性，这里再解析一次只为拿到 &Url 类型
-            let pack_url = url::Url::parse(&pack.url).expect("清单 url 已在 parse 时校验");
+            // 清单 parse 时已校验过 url 合法性，这里再解析一次只为拿到 &Url 类型。
+            // 不用 `expect`：那条不变量跨函数，将来清单校验放宽一点就是生产 panic，
+            // 而 panic 到 IPC 层只剩一句「命令失败」，用户完全不知道该改哪里。
+            let Ok(pack_url) = url::Url::parse(&pack.url) else {
+                failed = Some(format!(
+                    "清单里 {} 的下载地址不合法（{}）",
+                    pack.id, pack.url
+                ));
+                break 'packs;
+            };
             let bytes = loop {
                 let mut win_start = std::time::Instant::now();
                 let mut win_bytes: u64 = 0;

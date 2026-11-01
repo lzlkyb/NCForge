@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { formatHeapMb } from "../../lib/server";
+import { failureText } from "../../lib/friendlyError";
 
 /** 与 Rust `launch::HEAP_MIN_MB` / `HEAP_MAX_MB` 保持一致（后端是权威，这里只做提前拦截）。 */
 const MIN_MB = 512;
@@ -50,7 +51,7 @@ export function HeapField({
       toast(`堆上限已设为 ${label}${running ? "，重启服务后生效" : ""}`, "success");
     } catch (e) {
       // 不吞错：后端会明确说「要在 512~65536 之间」或配置文件写不进去
-      toast(String(e), "error");
+      toast(failureText("保存堆上限", e), "error");
     } finally {
       setSaving(false);
     }

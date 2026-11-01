@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import "../../db-console.css";
 import { DockRegion } from "../workspace/WorkbenchDock";
 import { Icon } from "../ui/icon";
@@ -24,11 +24,16 @@ export function DbTab() {
     if (!db.loaded) void loadConns();
   }, [db.loaded]);
 
-  // 第一次进来有连接但没有任何标签：先给一个控制台，省一次点击（不自动连库，等第一次执行再连）
-  const empty = db.loaded && db.tabs.length === 0 && db.conns.length > 0;
+  // 第一次进来有连接但没有任何标签：先给一个控制台，省一次点击（不自动连库，等第一次执行再连）。
+  // 只在**首次**自动建：以前依赖 `empty` 做条件，关掉最后一个标签会立刻又冒出一个 `SQL 1`，
+  // × 看起来点了没用，刚关掉那份草稿也没了入口。现在空态由下面的按钮接手。
+  const seeded = useRef(false);
   useEffect(() => {
-    if (empty) openSqlTab(defaultConnId());
-  }, [empty]);
+    if (seeded.current) return;
+    if (!db.loaded || db.tabs.length > 0 || db.conns.length === 0) return;
+    seeded.current = true;
+    openSqlTab(defaultConnId());
+  }, [db.loaded, db.tabs.length, db.conns.length]);
 
   return (
     <>

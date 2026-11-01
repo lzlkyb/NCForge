@@ -12,7 +12,7 @@
 //!
 //! 纯逻辑模块，不含 tauri 类型（原因见 workspace.rs 头注释）。
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -475,19 +475,6 @@ fn to_file_url(p: &Path) -> String {
         out.push('/');
     }
     out
-}
-
-/// 把清单写到一个临时目录里方便人肉核对（开发期排查用，不参与启动）。
-#[allow(dead_code)]
-pub fn dump_manifest(path: &Path, entries: &[PathBuf]) -> Result<(), String> {
-    let mut f = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(path)
-        .map_err(|e| format!("写清单失败: {e}"))?;
-    f.write_all(class_path_manifest(entries).as_bytes())
-        .map_err(|e| format!("写清单失败: {e}"))
 }
 
 #[cfg(test)]

@@ -43,6 +43,14 @@ export interface CompileResult {
 export const compileModule = (path: string) => invoke<CompileResult>("compile_module", { path });
 
 /**
+ * 按依赖顺序编译工作区里的全部模块（被依赖的先编，编不过就停）。
+ *
+ * 与 `compileModule` 分开两条命令而不是加参数：多模块那轮**不是单模块的超集**——
+ * 它会在第一个失败的模块处停下，所以结果里的 `outDir` 是一句汇总而不是某个目录。
+ */
+export const compileAllModules = () => invoke<CompileResult>("compile_all_modules");
+
+/**
  * 取消正在跑的编译。后端只置一个标志，ecj 子进程会在 40ms 内被杀掉。
  * 取消后 `compileModule` 以 `CANCELLED:` 前缀的错误返回。
  */

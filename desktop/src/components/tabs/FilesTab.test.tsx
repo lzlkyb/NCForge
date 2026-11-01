@@ -1,9 +1,10 @@
 import { DockRegion } from "../workspace/WorkbenchDock";
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesTab } from "./FilesTab";
+import { WorkbenchFrame } from "../workspace/WorkbenchFrame";
 import { setSession } from "../../lib/workspaceSession";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), toast: vi.fn() }));
@@ -12,6 +13,9 @@ vi.mock("../workspace/TreeSvnProvider", () => ({ TreeSvnProvider: ({ children }:
 vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
 vi.mock("../../components/ui/toast", () => ({ toast: mocks.toast }));
 vi.mock("../../hooks/usePrefersReducedMotion", () => ({ usePrefersReducedMotion: () => true }));
+// 任何一条链只要摸到编辑器就会加载真 Monaco（要 worker / canvas，jsdom 里第一行
+// `document.queryCommandSupported` 就炸）。本测试只关心文件页的接线，整块替掉。
+vi.mock("../../lib/monacoSetup", () => ({ initMonaco: vi.fn(), monaco: {} }));
 // 编辑器要 Monaco，jsdom 里起不来；本测试只关心文件页的接线
 vi.mock("../workspace/EditorPane", () => ({
   EditorPane: () => <div data-testid="editor-pane" />,
@@ -23,6 +27,7 @@ vi.mock("../../lib/editorActions", () => ({
   currentIsJava: () => false,
   runEditorCommand: () => false,
   setRenameRequest: vi.fn(),
+  setGenerateRequest: vi.fn(),
 }));
 vi.mock("../../lib/editorStore", () => ({
   onDirtyChange: () => () => {},
@@ -63,8 +68,31 @@ const ROOT = "C:\\w\\newar";
 let root: Root;
 let container: HTMLDivElement;
 
-const render = async () => {
-  await act(async () => root.render(<FilesTab />));
+/**
+ * 文件页不再是「所有页面的宿主」：它只往外壳的槽位里 portal 内容。
+ * 测试要自己搭一层外壳，组合方式与 App 里的 WorkbenchShell 一致
+ * （FilesTab 必须在 frame 内部才拿得到 dock 上下文）。
+ */
+const frame = (activeTool: string, tool: ReactNode = null) => (
+  <WorkbenchFrame
+    activeTool={activeTool}
+    fileTabs
+    tool={
+      <>
+        <FilesTab activeTool={activeTool} />
+        {tool}
+      </>
+    }
+    tree={null}
+    tabs={null}
+    editor={null}
+    output={null}
+    status={null}
+  />
+);
+
+const render = async (activeTool = "files", tool: ReactNode = null) => {
+  await act(async () => root.render(frame(activeTool, tool)));
   await act(async () => {}); // 等 get_workspace 落回状态
 };
 
@@ -122,13 +150,13 @@ describe("文件页", () => {
     await render();
     const editor = container.querySelector('[data-testid="editor-pane"]');
     expect(editor).toBeTruthy();
-    await act(async () => root.render(<FilesTab activeTool="search" tool={<DockRegion region="sidebar"><div>搜索结果</div></DockRegion>} />));
+    await render("search", <DockRegion region="sidebar"><div>搜索结果</div></DockRegion>);
     expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
     expect(container.querySelector(".wb-tree")?.textContent).toContain("搜索结果");
-    await act(async () => root.render(<FilesTab activeTool="db" tool={<DockRegion region="document"><div>SQL 查询</div></DockRegion>} />));
+    await render("db", <DockRegion region="document"><div>SQL 查询</div></DockRegion>);
     expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
     expect((container.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(true);
-    await act(async () => root.render(<FilesTab activeTool="services" tool={<DockRegion region="bottom"><div>服务日志</div></DockRegion>} />));
+    await render("services", <DockRegion region="bottom"><div>服务日志</div></DockRegion>);
     expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
     // 服务日志停靠在底部面板「NC 服务」标签的宿主里
     expect(container.querySelector(".wb-svc-host")?.textContent).toContain("服务日志");

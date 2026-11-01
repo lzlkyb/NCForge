@@ -11,7 +11,6 @@ use std::sync::Arc;
 use serde::Serialize;
 
 use crate::local_history::{self, HistoryVersion, KEEP_PER_FILE, MAX_PREVIEW_BYTES};
-use crate::security::path::resolve_safe_path;
 use crate::state::AppState;
 use crate::workspace;
 
@@ -19,10 +18,18 @@ use crate::workspace;
 ///
 /// 与 `workspace_cmds::resolve_in_workspace` 同一把尺子：`..` 穿越、符号链接
 /// 逃逸、绝对路径越界都会被拒。历史页只对工作区文件有意义，收紧没有损失。
-fn resolve_history_path(root: &str, requested: &str) -> Result<PathBuf, String> {
+///
+/// async：内部走 `spawn_blocking`，不能在命令体里同步 canonicalize（审查报告 D2）。
+async fn resolve_history_path(root: &str, requested: &str) -> Result<PathBuf, String> {
     // 这里 canonicalize 后的路径与 local_history::stable_key 的键一致
     // （后者同样 canonicalize 并去 `\\?\` 前缀），历史版本不会因入口变化而失联。
-    resolve_safe_path(requested, &[root.to_string()], &[], true)
+    crate::security::path::resolve_safe_path_async(
+        requested.to_string(),
+        vec![root.to_string()],
+        Vec::new(),
+        true,
+    )
+    .await
 }
 
 async fn resolve_in_workspace(state: &AppState, requested: &str) -> Result<PathBuf, String> {
@@ -33,7 +40,7 @@ async fn resolve_in_workspace(state: &AppState, requested: &str) -> Result<PathB
         .workspace_root
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
-    resolve_history_path(&root, requested)
+    resolve_history_path(&root, requested).await
 }
 
 /// 一个历史版本的预览内容。
@@ -144,8 +151,8 @@ mod tests {
         d
     }
 
-    #[test]
-    fn 工作区内路径放行_越界与穿越一律拒绝() {
+    #[tokio::test]
+    async fn 工作区内路径放行_越界与穿越一律拒绝() {
         let root = tmpdir("root");
         let inside = root.join("src").join("A.java");
         std::fs::create_dir_all(inside.parent().unwrap()).unwrap();
@@ -155,13 +162,23 @@ mod tests {
         std::fs::write(&outside_file, "x").unwrap();
 
         let root_s = root.to_string_lossy().to_string();
-        assert!(resolve_history_path(&root_s, &inside.to_string_lossy()).is_ok());
+        assert!(resolve_history_path(&root_s, &inside.to_string_lossy())
+            .await
+            .is_ok());
         // 已删除但仍在工作区内的文件：恢复需要用这个入口写回去
         let gone = root.join("src").join("Gone.java");
-        assert!(resolve_history_path(&root_s, &gone.to_string_lossy()).is_ok());
-        assert!(resolve_history_path(&root_s, &outside_file.to_string_lossy()).is_err());
+        assert!(resolve_history_path(&root_s, &gone.to_string_lossy())
+            .await
+            .is_ok());
+        assert!(
+            resolve_history_path(&root_s, &outside_file.to_string_lossy())
+                .await
+                .is_err()
+        );
         let dotted = root.join("..").join("escape.java");
-        assert!(resolve_history_path(&root_s, &dotted.to_string_lossy()).is_err());
-        assert!(resolve_history_path(&root_s, "").is_err());
+        assert!(resolve_history_path(&root_s, &dotted.to_string_lossy())
+            .await
+            .is_err());
+        assert!(resolve_history_path(&root_s, "").await.is_err());
     }
 }

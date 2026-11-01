@@ -353,12 +353,29 @@ body {
 }
 .animate-shake { animation: shake 0.4s ease; }
 
-/* 通知图标呼吸光圈（ActionCard 折叠细条未处理态）：currentColor 随语义色，减弱动效由全局守卫降级 */
+/* 通知图标呼吸光圈（ActionCard 折叠细条未处理态）：currentColor 随语义色，减弱动效由全局守卫降级。
+   用「伪元素 scale + opacity」而不是 box-shadow spread：后者无法合成，每帧重绘图标周围的
+   像素（同档位规则见 328-331 行的禁令，chain-ripple 已是这个写法）。 */
 @keyframes notice-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 28%, transparent); }
-  50%      { box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 0%, transparent); }
+  0%, 100% { transform: scale(1);   opacity: 0.75; }
+  50%      { transform: scale(1.9); opacity: 0; }
 }
-.notice-pulse { animation: notice-pulse 2.4s ease-in-out infinite; }
+.notice-pulse {
+  position: relative;
+  isolation: isolate;
+}
+.notice-pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: notice-pulse 2.4s ease-in-out infinite;
+  pointer-events: none;
+  z-index: -1;
+}
 
 /* 倒计时只缩放，不在每帧重排通知及其相邻元素。 */
 @keyframes toast-progress {
@@ -1892,11 +1909,14 @@ select:focus-visible,
   font-size: 0;
   box-shadow: 0 0 0 2px hsl(var(--card));
 }
-/* 无未读时红点缩为零宽（常驻渲染 + scale 过渡）：出现/消失不再硬插入挤压「设置」二字。
-   放在折叠态覆盖规则之后，同特异性时靠源序覆盖其 min-width/width。 */
+/* 无未读时红点收为零宽：常驻渲染，出现/消失不再硬插入挤压「设置」二字。
+   过渡**只在 transform/opacity 上**——红点排在 flex 行尾，若把 width/min-width/padding
+   也做成过渡，这几帧里「设置」二字和更新徽章会跟着逐帧重排（同文件 328-331 行立的
+   正是这条规矩）。宽度因此是瞬时归零的：视觉上就是「立刻让位」，没有挤压动画，
+   而缩放淡出本身不可见（盒子已经没宽度了），所以不去伪造一段看不见的过渡。 */
 .app-side-badge {
-  transition: transform var(--dur-fast), opacity var(--dur-fast),
-    width var(--dur-fast), min-width var(--dur-fast), padding var(--dur-fast);
+  transition: transform var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+  transform-origin: center;
 }
 .app-side-badge--off,
 .app-side[data-collapsed] .app-side-badge--off {
@@ -2195,7 +2215,13 @@ select:focus-visible,
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #4f46e5, #7c3aed, #3b82f6);
-  transition: width 0.2s linear;
+}
+/* 确定态填充：整宽 + scaleX。后端 250ms 推一次，过渡时长必须与采样同档（250ms linear）——
+   200ms 缓动配 250ms 采样会永远慢半拍，并出现橡皮筋式追赶。 */
+.upd-readout .ur-fill {
+  width: 100%;
+  transform-origin: left center;
+  transition: transform 250ms linear;
 }
 @keyframes upd-sweep {
   from { transform: translateX(-100%); }

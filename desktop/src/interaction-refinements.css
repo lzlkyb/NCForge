@@ -61,7 +61,7 @@
 .terminal-picker-expand { display:inline-flex;align-items:center;gap:6px;flex-shrink:0;padding:4px 0;background:transparent;color:inherit;font-size:12px;white-space:nowrap;cursor:pointer; }
 .terminal-picker-expand:hover { text-decoration:underline;text-underline-offset:4px; }
 .terminal-picker-list { display:grid;gap:8px; }
-.terminal-picker-host { display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:12px;width:100%;min-width:0;min-height:60px;padding:10px 14px;border:1px solid var(--empty-border);border-radius:9px;background:var(--empty-fill);color:inherit;text-align:left;cursor:pointer;transition:background-color 150ms,border-color 150ms; }
+.terminal-picker-host { display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:12px;width:100%;min-width:0;min-height:60px;padding:10px 14px;border:1px solid var(--empty-border);border-radius:9px;background:var(--empty-fill);color:inherit;text-align:left;cursor:pointer;transition:background-color var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease); }
 .terminal-picker-host:hover:not(:disabled) { background:var(--empty-hover);border-color:var(--empty-muted); }
 .terminal-picker-copy { min-width:0; }
 .terminal-picker-name,.terminal-picker-address { display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }

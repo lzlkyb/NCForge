@@ -477,19 +477,9 @@ pub fn write_text_file(
     }
     let bytes = encode(&apply_eol(text, eol)?, encoding, has_bom)?;
 
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or("无效的文件名")?;
-    let tmp = path.with_file_name(format!(".{file_name}.{}.nc-tmp", std::process::id()));
-    if let Err(e) = std::fs::write(&tmp, &bytes) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(format!("写临时文件失败: {e}"));
-    }
-    if let Err(e) = std::fs::rename(&tmp, path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(format!("替换原文件失败（文件可能只读或被占用）: {e}"));
-    }
+    // 原子替换：临时文件与目标同目录，写完 rename 覆盖。失败不会留下半份新内容，
+    // 临时文件由 `AtomicTarget` 析构时清掉（不再手写 `.nc-tmp` 名字）。
+    crate::atomic_file::write_atomic(path, &bytes)?;
     mtime_ms(path)
 }
 

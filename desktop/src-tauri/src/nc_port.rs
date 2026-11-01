@@ -344,10 +344,11 @@ pub fn apply(home: &Path, new_port: u16) -> Result<PortApplied, String> {
         }
         backups.push(display(&item.bak));
 
-        // 直接覆盖写：文件只有几 KB，且已有备份。走「临时文件 + rename」在
-        // Windows 上不能覆盖已存在的目标（rename 会 ERROR_ALREADY_EXISTS），
-        // 要拆成 remove + rename 反而更不原子。
-        if let Err(e) = std::fs::write(&item.path, &item.patched) {
+        // 原子写：临时文件 + rename 覆盖。有人担心 Windows 上 rename 撞已有目标会
+        // `ERROR_ALREADY_EXISTS`——那是 `MoveFile` 旧 API 的脾气；`std::fs::rename`
+        // 走的是带 `MOVEFILE_REPLACE_EXISTING` 的 `MoveFileEx`，覆盖是原子的。
+        // 直接 `fs::write` 才是危险的那个：写到一半断电就留下半份 prop.xml。
+        if let Err(e) = crate::atomic_file::write_atomic(&item.path, &item.patched) {
             return Err(rollback(
                 &done,
                 format!("写入 {} 失败：{e}", item.path.display()),
@@ -376,7 +377,7 @@ fn rollback(done: &[(&Path, &[u8])], cause: String) -> String {
     }
     let mut failed: Vec<String> = Vec::new();
     for (path, original) in done {
-        if let Err(e) = std::fs::write(path, original) {
+        if let Err(e) = crate::atomic_file::write_atomic(path, original) {
             failed.push(format!("{}（{e}）", path.display()));
         }
     }

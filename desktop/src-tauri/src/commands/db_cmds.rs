@@ -174,16 +174,29 @@ async fn sweep_idle_slots(state: &AppState, id: &str) {
             }
         })
         .collect();
-    for n in stale {
+    if stale.is_empty() {
+        return;
+    }
+    // 并行探测：每条槽自带 SLOT_PING 超时。串行时一个卡住的长查询会把「申请一条
+    // 槽」拖到「槽数 × 2 秒」——用户点「新会话」时看到的就是界面卡住，而这里
+    // 本来只是顺手扫一眼。
+    let probed = futures_util::future::join_all(stale.iter().map(|n| {
         let key = format!("{id}#{n}");
-        let handle = match existing_bridge(state, &key) {
-            Ok(h) => h,
-            Err(_) => {
-                forget_slot(&key);
-                continue;
+        async move {
+            match existing_bridge(state, &key) {
+                Ok(h) => (key, Some(call(h, "ping", Vec::new(), SLOT_PING).await)),
+                Err(_) => (key, None),
             }
+        }
+    }))
+    .await;
+    for (key, ping) in probed {
+        let Some(ping) = ping else {
+            // 拿不到句柄：会话已经不在了，只差登记没清
+            forget_slot(&key);
+            continue;
         };
-        if !idle_slot_reclaimable(&call(handle, "ping", Vec::new(), SLOT_PING).await) {
+        if !idle_slot_reclaimable(&ping) {
             touch_slot(&key);
             continue;
         }

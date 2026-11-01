@@ -601,11 +601,10 @@ async fn stream_to_file(
     export_id: u64,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Streamed, String> {
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("export");
-    let tmp = path.with_file_name(format!(".{file_name}.{}.nc-tmp", std::process::id()));
+    // 临时名由 `AtomicTarget` 生成（随机名 + 同目录），写完再原子替换。
+    // 失败/取消路径不用手写 `remove_file`：不 commit 就析构 = 自动删除。
+    let target = crate::atomic_file::AtomicTarget::create(path)?;
+    let tmp = target.path().to_path_buf();
 
     let res: Result<Streamed, String> = async {
         let mut body = call(
@@ -694,8 +693,7 @@ async fn stream_to_file(
 
     match res {
         Ok(v) => {
-            if let Err(e) = std::fs::rename(&tmp, path) {
-                let _ = std::fs::remove_file(&tmp);
+            if let Err(e) = target.commit() {
                 return Err(format!(
                     "替换导出文件失败（{} 可能被别的程序占用）：{e}",
                     path.display()
@@ -703,10 +701,7 @@ async fn stream_to_file(
             }
             Ok(v)
         }
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            Err(e)
-        }
+        Err(e) => Err(e),
     }
 }
 

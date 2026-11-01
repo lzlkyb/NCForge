@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "../lib/tauri";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -577,8 +577,36 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     [dismissedVersion],
   );
 
+  /**
+   * 「知道了」：标记手动检查的「已是最新」已读。
+   *
+   * 必须是稳定引用：`UpdateBadge` 里有一个 effect 拿它当依赖，以前它是内联箭头，
+   * 每次 provider 渲染（下载期间 250ms 一次）都换身份 → effect 跟着重跑一遍。
+   */
+  const acknowledgeUptodate = useCallback(() => setManualCheck(false), []);
+
+  /**
+   * value 用 `useMemo` 包住：provider 挂在 `main.tsx` 最外层，父级任何渲染都会
+   * 重建 value 对象，四个消费方（徽章 / 收起态圆点 / 首页 / 进度读数）就得跟着
+   * 全量重渲染，即便它们关心的字段一个没变。
+   */
+  const value = useMemo(
+    () => ({
+      status, update, progress, progressIndeterminate, bytesPerSec, downloadedBytes, totalBytes,
+      restarting, autoRestartIn, cancelAutoRestart, error, errorCode, errorToastAllowed,
+      checkForUpdate, manualCheckForUpdate, downloadAndInstall, restart, openUpdateNotes,
+      dismissUpdate, isDismissed, manualCheck, acknowledgeUptodate,
+    }),
+    [
+      status, update, progress, progressIndeterminate, bytesPerSec, downloadedBytes, totalBytes,
+      restarting, autoRestartIn, cancelAutoRestart, error, errorCode, errorToastAllowed,
+      checkForUpdate, manualCheckForUpdate, downloadAndInstall, restart, openUpdateNotes,
+      dismissUpdate, isDismissed, manualCheck, acknowledgeUptodate,
+    ],
+  );
+
   return (
-    <UpdateContext.Provider value={{ status, update, progress, progressIndeterminate, bytesPerSec, downloadedBytes, totalBytes, restarting, autoRestartIn, cancelAutoRestart, error, errorCode, errorToastAllowed, checkForUpdate, manualCheckForUpdate, downloadAndInstall, restart, openUpdateNotes, dismissUpdate, isDismissed, manualCheck, acknowledgeUptodate: () => setManualCheck(false) }}>
+    <UpdateContext.Provider value={value}>
       {children}
       {restarting && <RestartOverlay current={update?.currentVersion} next={update?.version} />}
       <UpdateNotesDialog open={showNotes} update={update} onClose={closeUpdateNotes} onDownload={downloadAndInstall} onDismiss={dismissUpdate} />

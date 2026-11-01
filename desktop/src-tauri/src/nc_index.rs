@@ -268,6 +268,11 @@ struct CachedJar {
 const CACHE_MAGIC: &[u8; 5] = b"NCIX1";
 /// 缓存里「打不开」的标记值（entries 条数字段）。
 const UNREADABLE: u32 = u32::MAX;
+/// 缓存里 jar 记录数的上限。一条记录对应 classpath 里的一个 jar（真机 7000+），
+/// 10 万已经很宽松。**count 来自文件头，损坏或被篡改的缓存可以声明任意值**：
+/// `with_capacity(40 亿)` 会直接要 TB 级内存——启动进程当场 OOM，而缓存只是
+/// 「下次重扫一遍」的优化，为它冒 OOM 的险没有道理。超过上限整份作废。
+const MAX_CACHE_ENTRIES: u32 = 100_000;
 
 fn stat_jar(p: &Path) -> (u64, u64) {
     let Ok(md) = std::fs::metadata(p) else {
@@ -298,6 +303,9 @@ fn read_cache(path: &Path) -> Option<HashMap<PathBuf, CachedJar>> {
     let u32_at = |s: &[u8]| u32::from_le_bytes(s.try_into().unwrap());
     let u64_at = |s: &[u8]| u64::from_le_bytes(s.try_into().unwrap());
     let count = u32_at(take(&mut pos, 4)?);
+    if count > MAX_CACHE_ENTRIES {
+        return None;
+    }
     let mut map = HashMap::with_capacity(count as usize);
     for _ in 0..count {
         let plen = u32_at(take(&mut pos, 4)?) as usize;
@@ -634,6 +642,24 @@ mod tests {
         let third = ClassIndex::load_or_build(jars, Some(&cache), Some(&count));
         assert_eq!(scans.load(std::sync::atomic::Ordering::Relaxed), 1);
         assert_eq!(third.jar_for_class("b.C"), Some(1));
+    }
+
+    /// 缓存头的 count 是**文件里的 4 个字节**，损坏或被篡改的缓存可以声明
+    /// 任意大。`HashMap::with_capacity(40 亿)` 会直接要 TB 级内存——启动进程
+    /// 当场 OOM，而缓存只是「下次少扫一遍」的优化。超上限整份作废重扫。
+    #[test]
+    fn 缓存条目数超上限时整份作废() {
+        let d = tmpdir("badcount");
+        let cache = d.join("index.bin");
+        let mut v = Vec::new();
+        v.extend_from_slice(CACHE_MAGIC);
+        v.extend_from_slice(&u32::MAX.to_le_bytes()); // count = 40 亿
+        v.extend_from_slice(&[0u8; 32]);
+        std::fs::write(&cache, &v).unwrap();
+        assert!(
+            read_cache(&cache).is_none(),
+            "条目数超上限必须整份作废，而不是按它预分配内存"
+        );
     }
 
     /// 模块 15 层的顺序是官方 `computeStandCP` 抄下来的，不能凭感觉调：

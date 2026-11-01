@@ -867,18 +867,18 @@ pub fn build(
     //
     // 以前直接写正式文件名、并在写之前就备份：写 zip 中途失败时旧包已被改名成 .bak、
     // 新包又被删掉，输出目录里的正式包凭空消失。现在的顺序保证任何失败都只损失临时文件。
-    let file_name = zip_path
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "patch.zip".to_string());
-    let tmp = zip_path.with_file_name(format!(".{file_name}.{}.nc-tmp", std::process::id()));
+    //
+    // 临时名由 `AtomicTarget` 生成（随机名，不用 `.{名}.{pid}.nc-tmp`）：
+    // 同一进程里两个人同时出包不会撞名，失败路径也不必手写 `remove_file`。
+    let target = crate::atomic_file::AtomicTarget::create(&zip_path)?;
+    let tmp = target.path().to_path_buf();
 
     on_progress(0, scan.items.len());
     let (entries, class_count) =
         match write_package(&tmp, &scan.items, &md, &req.sqls, canceled, on_progress) {
             Ok(v) => v,
             Err(e) => {
-                let _ = std::fs::remove_file(&tmp);
+                // target 在这里析构 = 临时文件自动删除
                 if canceled.load(Ordering::SeqCst) {
                     return Err("已取消出包：没有生成新的补丁包（旧包未动）".to_string());
                 }
@@ -888,8 +888,7 @@ pub fn build(
 
     // 包已经完整写在临时文件里了，这时才碰旧包
     let backup = backup_existing(&zip_path)?;
-    if let Err(e) = std::fs::rename(&tmp, &zip_path) {
-        let _ = std::fs::remove_file(&tmp);
+    if let Err(e) = target.commit() {
         return Err(format!(
             "替换补丁包失败（{} 可能被别的程序占用）：{e}",
             zip_path.display()

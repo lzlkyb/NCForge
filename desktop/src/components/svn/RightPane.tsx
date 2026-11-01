@@ -99,6 +99,10 @@ export function RightPane({
   if (isConflict) {
     return (
       <ConflictPane
+        // 必须带 key：`choice` 是面板内 state，换文件时 React 会复用同一个实例，
+        // 于是一个文件上的「已选作最终内容」会原封不动地带到下一个冲突文件上，
+        // 用户没选过的文件也会立刻可点「已解决」——那是不可逆的覆盖。
+        key={file.path}
         file={file}
         busy={busy}
         onResolve={onResolve}

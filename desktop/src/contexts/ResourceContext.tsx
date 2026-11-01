@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { invoke, listen } from "../lib/tauri";
 import type { PackStatusInfo, PackSummary, ResourceErrorCode, ResourceErrorPayload, ResourcePhase, ResourceReadyPayload } from "../lib/resource";
 import { ResourceSetupDialog } from "../components/resource/ResourceSetupDialog";
@@ -244,32 +244,36 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
 
   const dismissMissing = useCallback(() => setMissingDismissed(true), []);
 
+  /**
+   * 对外的 `ensure`：先记下「是用户主动点的」（决定要不要弹初始化对话框、要不要
+   * 播报错误），再转内部实现。包一层 `useCallback` 是为了身份稳定——以前它是
+   * value 里的内联箭头，provider 每渲染一次（下载期间 250ms 一次）就换一次引用，
+   * 依赖它的 effect 跟着反复重跑。
+   */
+  const ensurePublic = useCallback(
+    (force = false) => {
+      userInitiatedRef.current = force;
+      return ensure(force);
+    },
+    [ensure],
+  );
+
+  /** value 用 `useMemo` 包住：父级任何渲染都不该让所有消费方重算（同 UpdateContext）。 */
+  const value = useMemo(
+    () => ({
+      phase, packs, missing, totalBytes, currentId, downloadedBytes, totalBytesCurrent,
+      bytesPerSec, lastInstalled, adoptedLegacy, partialInstalled, error, errorCode,
+      errorToastAllowed, ensure: ensurePublic, refreshStatus, dismissMissing, missingDismissed,
+    }),
+    [
+      phase, packs, missing, totalBytes, currentId, downloadedBytes, totalBytesCurrent,
+      bytesPerSec, lastInstalled, adoptedLegacy, partialInstalled, error, errorCode,
+      errorToastAllowed, ensurePublic, refreshStatus, dismissMissing, missingDismissed,
+    ],
+  );
+
   return (
-    <ResourceContext.Provider
-      value={{
-        phase,
-        packs,
-        missing,
-        totalBytes,
-        currentId,
-        downloadedBytes,
-        totalBytesCurrent,
-        bytesPerSec,
-        lastInstalled,
-        adoptedLegacy,
-        partialInstalled,
-        error,
-        errorCode,
-        errorToastAllowed,
-        ensure: (force = false) => {
-          userInitiatedRef.current = force;
-          return ensure(force);
-        },
-        refreshStatus,
-        dismissMissing,
-        missingDismissed,
-      }}
-    >
+    <ResourceContext.Provider value={value}>
       {children}
       {/* 初始化对话框：有缺失包且用户没手动关过才显示。下载/失败态都停着，
           完成（ready）时 missing 清空自动关闭。 */}

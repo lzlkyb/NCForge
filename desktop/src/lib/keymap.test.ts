@@ -66,9 +66,22 @@ describe("快速导航快捷键", () => {
     expect(paletteModeOf({ ...key("p"), altKey: true }, "eclipse")).toBeNull();
   });
 
+  it("工作区符号（方法 / 字段级）必须带 Alt：Ctrl+Alt+N，IDEA 还接受再加 Shift", () => {
+    const alt = (name: string, shiftKey = false) => ({ ...key(name), altKey: true, shiftKey });
+    expect(paletteModeOf(alt("n"), "eclipse")).toBe("sym");
+    expect(paletteModeOf(alt("n"), "idea")).toBe("sym");
+    expect(paletteModeOf(alt("n", true), "idea")).toBe("sym");
+    // 不带 Alt 的 Ctrl+N / Ctrl+Shift+N 仍是原语义，不能被 Alt 分支吃掉
+    expect(paletteModeOf(key("n"), "idea")).toBe("type");
+    expect(paletteModeOf(key("N", true), "idea")).toBe("file");
+    // Eclipse 下 Ctrl+Alt+N 只有一个键，带 Shift 不认
+    expect(paletteModeOf(alt("n", true), "eclipse")).toBeNull();
+  });
+
   it("展示用的首选键", () => {
     expect(paletteKeyLabel("file", "eclipse")).toBe("Ctrl+Shift+R");
     expect(paletteKeyLabel("symbol", "idea")).toBe("Ctrl+F12");
+    expect(paletteKeyLabel("sym", "eclipse")).toBe("Ctrl+Alt+N");
   });
 
   it("Ctrl+B / Ctrl+J 切侧栏与底部面板，带 Shift 不算", () => {

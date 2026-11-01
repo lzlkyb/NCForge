@@ -8,6 +8,7 @@
 // 1. 命令面板里的中文条目 —— 用户记不住快捷键时唯一的出路是「敲中文找」；
 // 2. `Alt+Enter` —— 从 IDEA 迁过来的人就是这个键，Monaco 内置是 Ctrl+. 。
 import { monaco } from "./monacoSetup";
+import { pathOfModel } from "./editorStore";
 
 /**
  * 当前编辑器。
@@ -104,6 +105,75 @@ export function wordAtCursor(): string {
   return model.getWordAtPosition(pos)?.word ?? "";
 }
 
+/**
+ * 当前编辑器的快照：文件路径 + 全文 + 光标位置。
+ *
+ * 代码生成要先读全文找字段，生成完再插回去；两次读取必须来自同一个 model，
+ * 中间用户如果切了标签就会对不上——调用方拿到快照后一次性算完。
+ */
+export function editorSnapshot(): {
+  path: string | null;
+  text: string;
+  line: number;
+  column: number;
+  isJava: boolean;
+} | null {
+  const ed = editor();
+  const model = ed?.getModel();
+  const pos = ed?.getPosition();
+  if (!ed || !model || !pos) return null;
+  return {
+    path: pathOfModel(model) ?? null,
+    text: model.getValue(),
+    line: pos.lineNumber,
+    column: pos.column,
+    isJava: model.getLanguageId() === "java",
+  };
+}
+
+/**
+ * 在光标处插入文本（有选区就替换选区）。
+ *
+ * 只改编辑器 model，不落盘——与 jdt.ls 的代码修复同一条红线：写不写由用户决定。
+ * 插入后把光标放到文本末尾，紧接着就能继续敲。
+ */
+export function insertEditorText(text: string): boolean {
+  const ed = editor();
+  const sel = ed?.getSelection();
+  if (!ed || !sel) return false;
+  ed.executeEdits("ncforge-generate", [{ range: sel, text, forceMoveMarkers: true }]);
+  const pos = ed.getPosition();
+  if (pos) ed.setPosition({ lineNumber: pos.lineNumber, column: pos.column });
+  ed.focus();
+  return true;
+}
+
+/** 当前 model（代码生成 / 组织导入要用它，而不是编辑器）。 */
+export function currentModel(): ReturnType<typeof monaco.editor.createModel> | null {
+  return editor()?.getModel() ?? null;
+}
+
+/**
+ * 在指定行首插入文本（代码生成用：生成的方法要落在类体末尾，不是光标所在处）。
+ *
+ * 光标会跟到插入内容的末尾——刚生成完就想接着改是常态。
+ */
+export function insertEditorTextAtLine(text: string, line: number): boolean {
+  const ed = editor();
+  const model = ed?.getModel();
+  if (!ed || !model) return false;
+  const target = Math.min(Math.max(1, line), model.getLineCount());
+  model.pushEditOperations(
+    [],
+    [{ range: new monaco.Range(target, 1, target, 1), text }],
+    () => null,
+  );
+  const lines = text.split("\n").length;
+  ed.setPosition({ lineNumber: Math.min(target + lines - 1, model.getLineCount()), column: 1 });
+  ed.focus();
+  return true;
+}
+
 /** 光标位置（1 基）。命令面板里的动作没有事件参数，只能这样取。 */
 export function cursorAt(): { line: number; column: number } | null {
   const pos = editor()?.getPosition();
@@ -118,6 +188,13 @@ let renameRequest: (() => void) | null = null;
 
 export function setRenameRequest(fn: (() => void) | null): void {
   renameRequest = fn;
+}
+
+/** Alt+Insert（生成代码）同样由文件页挂上，对话框在那里渲染。 */
+let generateRequest: (() => void) | null = null;
+
+export function setGenerateRequest(fn: (() => void) | null): void {
+  generateRequest = fn;
 }
 
 /**
@@ -135,4 +212,10 @@ export function registerEditorKeys(ed: monaco.editor.IStandaloneCodeEditor): voi
   // F2 = 重命名，IDEA 的老习惯。Monaco 自己那个 rename 只改打开的 model，
   // 跨文件会改一半，所以这里接自己的流程（见 lib/renameSymbol.ts）
   ed.addCommand(monaco.KeyCode.F2, () => renameRequest?.());
+  // Alt+Insert = 生成代码（构造器 / getter / setter / toString…），IDEA 同键
+  ed.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.Insert, () => generateRequest?.());
+  // 多光标：IDEA 用 Alt+J 逐个选中下一个相同词，Monaco 的内置动作就是这个
+  ed.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.KeyJ, () => {
+    ed.trigger("ncforge-generate", "editor.action.addSelectionToNextFindMatch", null);
+  });
 }

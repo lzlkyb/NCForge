@@ -20,11 +20,12 @@ import {
   getSession,
   setSession,
   setTree,
-  useWorkspaceSession,
+  useWorkspaceSelector,
   type TabMeta,
   type Updater,
 } from "../lib/workspaceSession";
 import { toast } from "../components/ui/toast";
+import { friendlyError } from "../lib/friendlyError";
 import { navBack, navForward, pushNav, type NavPoint } from "../lib/navHistory";
 
 /**
@@ -35,7 +36,10 @@ import { navBack, navForward, pushNav, type NavPoint } from "../lib/navHistory";
  * 界面只负责把回调接到按钮上。
  */
 export function useFileSession() {
-  const { tabs, activePath, conflictPath, closingPath } = useWorkspaceSession();
+  const tabs = useWorkspaceSelector((s) => s.tabs);
+  const activePath = useWorkspaceSelector((s) => s.activePath);
+  const conflictPath = useWorkspaceSelector((s) => s.conflictPath);
+  const closingPath = useWorkspaceSelector((s) => s.closingPath);
   const setTabs = (v: Updater<TabMeta[]>) => setSession({ tabs: v });
   const setActivePath = (v: Updater<string | null>) => setSession({ activePath: v });
   // 「等用户决定」的三态放仓库：切页卸载后必须还在（见 workspaceSession 的注释）
@@ -45,6 +49,14 @@ export function useFileSession() {
   // 点问题行/搜索命中要跳到的位置；null = 没有待跳转。
   const [reveal, setReveal] = useState<{ line: number; column?: number; nonce: number } | null>(null);
   const revealSeq = useRef(0);
+  /**
+   * 打开文件的序号。
+   *
+   * 打开是异步的：连点两条搜索结果时，先发的那次可能后回。没有这道判定的话，
+   * 它会 `setActivePath` 把用户最后点的那条顶掉——而定位（`revealSeq`）只对最后一次
+   * 生效，于是出现「激活的是 A、该跳的行被丢弃」这种组合。
+   */
+  const openSeq = useRef(0);
 
   /**
    * 打开文件。`preview`：文件树单击的预览打开——顶替现有预览标签，不固定。
@@ -58,9 +70,12 @@ export function useFileSession() {
       const existing = tabs.find((t) => t.path === path);
       if (existing) {
         if (existing.preview && !opts?.preview) setTabs((ts) => pinTab(ts, path));
+        // 已有标签是同步命中的，也要占号：它同样是「用户此刻要点的那一个」
+        openSeq.current += 1;
         setActivePath(path);
         return true;
       }
+      const nonce = ++openSeq.current;
       try {
         const c = await readFile(path);
         openModel(path, c);
@@ -72,7 +87,8 @@ export function useFileSession() {
           if (r.dropped) closeModel(r.dropped);
           return r.tabs;
         });
-        setActivePath(path);
+        // 标签照建（这个文件确实要打开），但激活项只归最后一次点击
+        if (nonce === openSeq.current) setActivePath(path);
         recordRecent(getSession().root, path);
         // 从搜索结果打开的文件不在树里，树上那次扫描覆盖不到它，这里补一次，
         // 状态栏的「UTF-8 未登记」才不会只在树里点开时才有。
@@ -88,7 +104,7 @@ export function useFileSession() {
           .catch(() => {});
         return true;
       } catch (e) {
-        toast(`无法打开 ${baseName(path)}：${e}`, "error");
+        toast(`无法打开 ${baseName(path)}：${friendlyError(e)}`, "error");
         return false;
       }
     },
@@ -192,18 +208,21 @@ export function useFileSession() {
 
   /** 打开 jar 内的类（jdt.ls 给出的 `jdt://` 地址）为只读标签页。 */
   const openJdt = async (uri: string, line: number, push = true) => {
+    // 与 openFile 同一个道理：读源码是异步的，只有最后一次打开有权激活
+    const nonce = ++revealSeq.current;
     if (!tabs.some((t) => t.path === uri)) {
       try {
         const meta = tabMetaFromJdt(uri, await loadJdtSource(uri));
         setTabs((ts) => (ts.some((t) => t.path === uri) ? ts : [...ts, meta]));
       } catch (e) {
-        toast(`无法读取类源码：${e}`, "error");
+        toast(`无法读取类源码：${friendlyError(e)}`, "error");
         return;
       }
     }
+    if (nonce !== revealSeq.current) return;
     if (push) pushNav({ path: uri, line, jdt: true });
     setActivePath(uri);
-    setReveal({ line, nonce: ++revealSeq.current });
+    setReveal({ line, nonce });
   };
 
   /** 回到历史里的某个点。不要走 openAt 的默认参数——那会把它重新记成新历史。 */

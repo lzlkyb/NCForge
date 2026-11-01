@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { WorkbenchDockContext, type DockRegionName, type DockToolTab } from "./WorkbenchDock";
+import { WorkbenchDockContext, type DockRegionName, type DockToolTab, type FileSlotName } from "./WorkbenchDock";
 import { ToolTab } from "./ToolTab";
 import { useSideOpen } from "../../lib/layoutStore";
 
@@ -25,6 +25,8 @@ const DOCUMENT_DEFAULT_OPEN = ["patch", "db", "linked", "settings"];
 /** NC 服务的卡片 + 日志放在底部面板里，切过去时把面板撑高到够看。 */
 const SERVICES_PANEL_MIN = 360;
 const HOST_NAMES: DockRegionName[] = ["toolbar", "sidebar", "document", "bottom", "actions", "tabs"];
+/** 文件页槽位：由 FilesTab 用 portal 注入（见 WorkbenchDock 的 FileSlotName）。 */
+const FILE_SLOTS: FileSlotName[] = ["tree", "tabs", "editor", "status", "output"];
 
 /** 侧栏 / 底部面板的尺寸。拖过就该记住：每次重启都回到 240 是白费用户的调整。 */
 const SIZE_KEY = "ncforge-workbench-sizes";
@@ -58,17 +60,27 @@ function saveSizes(s: { side: number; bottom: number }): void {
   }
 }
 
-export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, status }: {
-  activeTool: string; tool?: ReactNode; tree: ReactNode; tabs: ReactNode;
+export function WorkbenchFrame({ activeTool, tool, fileTabs = false, tree, tabs, editor, output, status }: {
+  activeTool: string; tool?: ReactNode;
+  /**
+   * 文件页标签是否已经由 portal 注入（= FilesTab 已挂载）。
+   *
+   * 为 true 时不再渲染 `ToolTab`：文件标签条已经在标签区里，再放一个工具标签
+   * 会多出一个重复入口。首屏就是文件页，所以实际几乎恒为 true。
+   */
+  fileTabs?: boolean;
+  tree: ReactNode; tabs: ReactNode;
   editor: ReactNode; output: ReactNode; status: ReactNode;
 }) {
   const [hosts, setHosts] = useState<Record<DockRegionName, HTMLElement | null>>({ toolbar: null, sidebar: null, document: null, bottom: null, actions: null, tabs: null });
+  const [fileHosts, setFileHosts] = useState<Record<FileSlotName, HTMLElement | null>>({ tree: null, tabs: null, editor: null, status: null, output: null });
   const [documentOpen, setDocumentOpen] = useState(false);
   const sideOpen = useSideOpen();
   const [sideWidth, setSideWidth] = useState(() => loadSizes().side);
   const [bottomHeight, setBottomHeight] = useState(() => loadSizes().bottom);
   // 每个宿主一个稳定的 ref 回调：回调身份变了 React 会先 null 再重填，宿主里的工具内容就闪一下
   const refs = useMemo(() => Object.fromEntries(HOST_NAMES.map(name => [name, (node: HTMLElement | null) => setHosts(old => old[name] === node ? old : { ...old, [name]: node })])) as Record<DockRegionName, (node: HTMLElement | null) => void>, []);
+  const fileRefs = useMemo(() => Object.fromEntries(FILE_SLOTS.map(name => [name, (node: HTMLElement | null) => setFileHosts(old => old[name] === node ? old : { ...old, [name]: node })])) as Record<FileSlotName, (node: HTMLElement | null) => void>, []);
   useEffect(() => {
     setDocumentOpen(DOCUMENT_DEFAULT_OPEN.includes(activeTool));
     if (activeTool === "services") setBottomHeight(h => Math.max(h, SERVICES_PANEL_MIN));
@@ -76,11 +88,11 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
   const showCode = useCallback(() => setDocumentOpen(false), []);
   const showDocument = useCallback(() => setDocumentOpen(true), []);
   const toolTab = DOCUMENT_TOOLS[activeTool] ?? null;
-  const dock = useMemo(() => ({ hosts, bindHost: (name: DockRegionName) => refs[name], showDocument, showCode, documentOpen, toolTab }), [hosts, refs, showDocument, showCode, documentOpen, toolTab]);
+  const dock = useMemo(() => ({ hosts, fileHosts, bindHost: (name: DockRegionName) => refs[name], bindFileSlot: (name: FileSlotName) => fileRefs[name], showDocument, showCode, documentOpen, toolTab }), [hosts, fileHosts, refs, fileRefs, showDocument, showCode, documentOpen, toolTab]);
   const hasSide = SIDE_TOOLS.includes(activeTool);
   const hasToolbar = TOOLBAR_TOOLS.includes(activeTool);
-  // 设置是整页表单，不需要问题 / 构建面板；其它文档页（补丁、数据库）打开时同样让位；NC 服务的内容就在面板里。
-  const showPanel = Boolean(output) && activeTool !== "settings" && (!documentOpen || activeTool === "services");
+  // 底部面板有没有内容由 FilesTab 决定（它 portal 到宿主）；这里不再用 `output` 断言，
+  // 空面板与分隔条靠 workbench-layout.css 的 `:empty` 规则收起。
   const resizeCleanup = useRef<(() => void) | null>(null);
   /** 两个分隔条各自记「上一次 Enter」的时间，互不干扰。 */
   const enterAt = useRef({ side: 0, bottom: 0 });
@@ -135,25 +147,26 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
       <div className="wb-layout" data-side-open={sideOpen} style={{ gridTemplateColumns: sideOpen ? `${sideWidth}px 4px minmax(0,1fr)` : "0px 0px minmax(0,1fr)" }}>
         {/* 收起时不能用 hidden：display:none 的 aside 不占网格格子，后面的分隔条与主区会各前进一格，主区落进 0px 那一列 */}
         <aside className="wb-tree" data-closed={!sideOpen || undefined}>
-          <div className="wb-tree-native" hidden={hasSide}>{tree}</div>
+          <div ref={fileRefs.tree} className="wb-tree-native" hidden={hasSide}>{tree}</div>
           <div ref={refs.sidebar} className="wb-sidebar-host" hidden={!hasSide} />
         </aside>
         <div className="wb-resize-x" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical"
           aria-valuemin={SIDE_MIN} aria-valuemax={SIDE_MAX} aria-valuenow={Math.round(sideWidth)}
           tabIndex={0} onPointerDown={e => { e.preventDefault(); resize("side", e.clientX, sideWidth); }} onKeyDown={e => onSeparatorKey(e, "side")} />
         <section className="wb-main">
-          <div className="wb-tabbar">{tabs ?? <div className="wb-tabs" role="tablist"><ToolTab /></div>}</div>
-          <div id="wb-code-surface" className="wb-code-surface" role="tabpanel" aria-label="编辑器" hidden={documentOpen}>{editor}</div>
+          <div className="wb-tabbar">
+            <div ref={fileRefs.tabs} className="wb-file-tabs">{tabs}</div>
+            {!fileTabs && <div className="wb-tabs" role="tablist"><ToolTab /></div>}
+          </div>
+          <div id="wb-code-surface" ref={fileRefs.editor} className="wb-code-surface" role="tabpanel" aria-label="编辑器" hidden={documentOpen}>{editor}</div>
           <div ref={refs.document} className="wb-document-surface" hidden={!documentOpen} />
-          {showPanel && <>
-            <div className="wb-resize-y" role="separator" aria-label="调整底部面板高度" aria-orientation="horizontal"
-              aria-valuemin={BOTTOM_MIN} aria-valuemax={bottomMax()} aria-valuenow={Math.round(bottomHeight)}
-              tabIndex={0} onPointerDown={e => { e.preventDefault(); resize("bottom", e.clientY, bottomHeight); }} onKeyDown={e => onSeparatorKey(e, "bottom")} />
-            <div className="wb-bottom" style={{ height: bottomHeight }}>{output}</div>
-          </>}
+          <div className="wb-resize-y" role="separator" aria-label="调整底部面板高度" aria-orientation="horizontal"
+            aria-valuemin={BOTTOM_MIN} aria-valuemax={bottomMax()} aria-valuenow={Math.round(bottomHeight)}
+            tabIndex={0} onPointerDown={e => { e.preventDefault(); resize("bottom", e.clientY, bottomHeight); }} onKeyDown={e => onSeparatorKey(e, "bottom")} />
+          <div ref={fileRefs.output} className="wb-bottom" style={{ height: bottomHeight }}>{output}</div>
         </section>
       </div>
-      {status}
+      <div ref={fileRefs.status} className="wb-status-host">{status}</div>
       <div className="wb-tool-runtime">{tool}</div>
     </div>
   </WorkbenchDockContext.Provider>;

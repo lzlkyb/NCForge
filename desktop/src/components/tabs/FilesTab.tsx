@@ -1,21 +1,14 @@
-import { TreeSvnProvider } from "../workspace/TreeSvnProvider";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import "../../workspace.css";
-import { WorkbenchFrame } from "../workspace/WorkbenchFrame";
+import { Skeleton } from "../ui/Skeleton";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import { EmptyEditor } from "../workspace/EmptyEditor";
 import { toast } from "../ui/toast";
-import { EditorPane } from "../workspace/EditorPane";
-import { FileTree, type FileTreeHandle } from "../workspace/FileTree";
 import { BottomPanel } from "../workspace/BottomPanel";
-import { EditorBanners } from "../workspace/EditorBanners";
-import { EditorStatus } from "../workspace/EditorStatus";
-import { EditorNavRow } from "../workspace/EditorNavRow";
+import { GenerateDialog } from "../workspace/GenerateDialog";
 import { RenameDialog } from "../workspace/RenameDialog";
-import { NoWorkspace } from "../workspace/NoWorkspace";
-import { TabStrip } from "../workspace/TabStrip";
-import { TreeHeader } from "../workspace/TreeHeader";
+import { EmptyProjectSlots, FilePaneSlots, useFileSlot } from "../workspace/FilePaneSlots";
+import type { FileTreeHandle } from "../workspace/FileTree";
 import { baseName, getWorkspace } from "../../lib/workspace";
 import { applyWorkspace } from "../../lib/switchWorkspace";
 import { compileCancel } from "../../lib/compile";
@@ -23,16 +16,22 @@ import { useFileSession } from "../../hooks/useFileSession";
 import { useModuleCompile } from "../../hooks/useModuleCompile";
 import { useFilesTabCommands } from "../../hooks/useFilesTabCommands";
 import { useLocalHistorySweep } from "../../hooks/useLocalHistorySweep";
-import { isUnsaved } from "../../lib/saveAllDirty";
+import { isUnsaved } from "../../lib/tabDirty";
 import { ensureFilesSaved } from "../../lib/terminatePreflight";
 import { useLangWiring } from "../../hooks/useLangWiring";
-import { setRenameRequest } from "../../lib/editorActions";
+import { setRenameRequest, setGenerateRequest } from "../../lib/editorActions";
 import { invalidateFileIndex } from "../../lib/fileIndex";
-import { setCursor, getCursor } from "../../lib/cursorStore";
+import { getCursor } from "../../lib/cursorStore";
 import { getCodeDiags, useCodeDiags } from "../../lib/diagStore";
 import { mergeProblems, nextProblem } from "../../lib/problemList";
 import { useNav } from "../../lib/navHistory";
-import { setSession, useWorkspaceSession, type TabMeta, type Updater } from "../../lib/workspaceSession";
+import {
+  getSession,
+  setSession,
+  useWorkspaceSelector,
+  type TabMeta,
+  type Updater,
+} from "../../lib/workspaceSession";
 
 /**
  * 超过这个行数就提示「语义补全不可用」。
@@ -43,34 +42,40 @@ import { setSession, useWorkspaceSession, type TabMeta, type Updater } from "../
 const LARGE_FILE_LINES = 2000;
 
 /**
- * 文件页：左树 + 中编辑器 + 底部面板。
+ * 文件页：状态与编排都在这里，画面在 `workspace/FilePaneSlots`。
  *
  * 标签与编译状态存在 `lib/workspaceSession`（切页卸载不该丢）；打开/保存/关闭
- * 的编排在 `hooks/useFileSession`；标题栏、标签条、提示条、状态栏各自是
- * `workspace/` 下的独立组件。本文件只做接线与布局。
+ * 的编排在 `hooks/useFileSession`。
+ *
+ * **不再自己渲染 `WorkbenchFrame`**：外壳（含文件树 / 标签条 / 编辑器 / 状态栏的容器）
+ * 由 `WorkbenchShell` 持有，这边用 portal 把内容注入那几个槽位。这样「文件页」不再是
+ * 「所有页面的宿主」——进设置页不必先下载带 Monaco 的这一坨，任何一个工具页抛错
+ * 也不会把整个工作台一起卸掉。
  */
-export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; tool?: ReactNode } = {}) {
+export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {}) {
   const queryClient = useQueryClient();
+  const slot = useFileSlot();
   const [rootInput, setRootInput] = useState("");
   const [editingRoot, setEditingRoot] = useState(false);
-  // 文件结构 / 本地历史两个弹层：放这里而不是组件内部，命令面板也要能打开它。
-  // 合成一个 state：两个布尔各占一个 hook，会把组件顶到体量门禁（≤8）之上
-  const [panels, setPanels] = useState({ outline: false, history: false });
+  // 文件结构 / 本地历史 / 生成代码三个弹层：放这里而不是组件内部，命令面板与快捷键也要能打开它。
+  // 合成一个 state：三个布尔各占一个 hook，会把组件顶到体量门禁（≤8）之上
+  const [panels, setPanels] = useState({ outline: false, history: false, generate: false });
   const [renameOpen, setRenameOpen] = useState(false);
   // 标签、激活项、面板与编译结果都存在模块级仓库里：切页卸载再回来不该丢。
-  const {
-    root,
-    tabs,
-    activePath,
-    panelOpen,
-    panelTab,
-    compiling,
-    compileResult,
-    compileLog,
-    tree,
-    largeHintDismissed,
-    encodingIssue,
-  } = useWorkspaceSession();
+  //
+  // 逐字段订阅（而不是 `useWorkspaceSession()` 拿整份快照）：整快照订阅下，任何一个
+  // 字段变化都会让这一页连同整棵文件树、标签条重渲染。编译日志那段尤其致命——
+  // 它每 80ms 换一次，而它现在由底部面板自己订阅，本页不再碰。
+  const root = useWorkspaceSelector((s) => s.root);
+  const tabs = useWorkspaceSelector((s) => s.tabs);
+  const activePath = useWorkspaceSelector((s) => s.activePath);
+  const panelOpen = useWorkspaceSelector((s) => s.panelOpen);
+  const panelTab = useWorkspaceSelector((s) => s.panelTab);
+  const compiling = useWorkspaceSelector((s) => s.compiling);
+  const compileResult = useWorkspaceSelector((s) => s.compileResult);
+  const tree = useWorkspaceSelector((s) => s.tree);
+  const largeHintDismissed = useWorkspaceSelector((s) => s.largeHintDismissed);
+  const encodingIssue = useWorkspaceSelector((s) => s.encodingIssue);
   const setRoot = (v: Updater<string | null | undefined>) => setSession({ root: v });
   const setPanelOpen = (v: Updater<boolean>) => setSession({ panelOpen: v });
   const setPanelTab = (v: Updater<typeof panelTab>) => setSession({ panelTab: v });
@@ -78,28 +83,9 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
   // 标题栏的「新建文件 / 新建文件夹」按钮：交给文件树，由它决定建在哪个目录下
   const treeRef = useRef<FileTreeHandle>(null);
 
-  const {
-    conflictPath,
-    closingPath,
-    saving,
-    reveal,
-    openFile,
-    saveFile,
-    saveAsUtf8,
-    reloadFile,
-    closeTab,
-    closeMany,
-    pin,
-    handleRenamed,
-    handleDeleted,
-    openProblem,
-    openAt,
-    openJdt,
-    goBack,
-    goForward,
-    unifyEol,
-    cancelClose,
-  } = useFileSession();
+  const session = useFileSession();
+  const { openAt, openJdt, goBack, goForward, conflictPath, closingPath } = session;
+  const { saving, reveal } = session;
   useLangWiring({ activePath, openAt, openJdt });
   // 本地历史的兜底归档：切文件时抓上一文件 + 每 5 分钟抓一次当前文件
   // （保存前的那一版在 lib/fileSave.saveOne 里抓，那里才拿得到「改动前」）
@@ -131,19 +117,31 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
 
   // 换文件时把弹层收起来：留着它就是「另一个文件的符号/版本」压在代码上，容易点错
   useEffect(() => {
-    setPanels({ outline: false, history: false });
+    setPanels({ outline: false, history: false, generate: false });
   }, [activePath]);
 
   // F2 落到自己的重命名流程（Monaco 内置那套只改打开的 model，跨文件会改一半）
+  // Alt+Insert 落到生成代码对话框（与 IDEA 同键）
   useEffect(() => {
     setRenameRequest(() => setRenameOpen(true));
-    return () => setRenameRequest(null);
+    setGenerateRequest(() => setPanels((p) => ({ ...p, generate: true })));
+    return () => {
+      setRenameRequest(null);
+      setGenerateRequest(null);
+    };
   }, []);
 
   useEffect(() => {
+    // 只在「还没读过」时写入：启动那一瞬间用户可能已经在「工程关联」里切过工作区
+    // （那边已经 `setSession({ root })`），而这条更早发出的 getWorkspace 若这时才回来，
+    // 会把新 root 覆盖回旧值——文件树按旧目录重建、SVN/补丁的 query key 也跟着退回去。
     getWorkspace()
-      .then((r) => setRoot(r))
-      .catch(() => setRoot(null));
+      .then((r) => {
+        if (getSession().root === undefined) setRoot(r);
+      })
+      .catch(() => {
+        if (getSession().root === undefined) setRoot(null);
+      });
   }, []);
 
   // 命令面板里的文件页命令：闭包每帧刷新（hook 内部经 ref 读最新值），登记只做一次
@@ -151,13 +149,14 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
     activePath,
     compiling,
     compileActive,
-    closeTab,
+    closeTab: session.closeTab,
     openOutline: () => setPanels((p) => ({ ...p, outline: true })),
     openHistory: () => setPanels((p) => ({ ...p, history: true })),
     jumpToProblem,
     goBack,
     goForward,
     openRename: () => setRenameOpen(true),
+    openGenerate: () => setPanels((p) => ({ ...p, generate: true })),
     canBack: () => nav.canBack,
     canForward: () => nav.canForward,
     // 命令面板每次打开都会问一遍 enabled；从模块仓库现算，不依赖渲染作用域的快照。
@@ -179,92 +178,86 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
     }
   };
 
-  if (root === undefined) return null;
+  const panel = (
+    <BottomPanel root={root ?? ""} tab={panelTab} onTab={setPanelTab}
+      running={compiling} result={compileResult} onOpenProblem={session.openProblem}
+      onOpenAt={openAt}
+      inspect={codeDiags}
+      onNextProblem={() => jumpToProblem(1)}
+      onPrevProblem={() => jumpToProblem(-1)}
+      onCancel={() => void compileCancel()} onClose={() => setPanelOpen(false)} />
+  );
 
-  const panel = <BottomPanel root={root ?? ""} tab={panelTab} onTab={setPanelTab}
-    running={compiling} result={compileResult} log={compileLog} onOpenProblem={openProblem}
-    onOpenAt={openAt}
-    inspect={codeDiags}
-    onNextProblem={() => jumpToProblem(1)}
-    onPrevProblem={() => jumpToProblem(-1)}
-    onCancel={() => void compileCancel()} onClose={() => setPanelOpen(false)} />;
+  // 还没读到工作区（一个 IPC 的工夫）：只影响文件页自己的槽位。以前这里 `return null`
+  // 会把**所有页面**一起吞掉——连骨架都没有，用户看到的是整片空白。
+  if (root === undefined) {
+    return <>{slot("editor", <div className="wb-editor"><Skeleton className="m-4 h-40" /></div>)}</>;
+  }
 
   // 尚未选择工作区：明确引导，不让用户盲猜（NC 服务不依赖工程，它的面板仍要在）
   if (root === null) {
-    return <WorkbenchFrame activeTool={activeTool} tool={tool} tree={<div className="wb-no-project">尚未打开工程</div>} tabs={null}
-      editor={<NoWorkspace value={rootInput} onChange={setRootInput} onOpen={() => void applyRoot(rootInput)} />}
-      output={activeTool === "services" ? panel : null} status={<div className="wb-status wb-no-project">尚未打开工程</div>} />;
+    return (
+      <EmptyProjectSlots
+        rootInput={rootInput}
+        onChange={setRootInput}
+        onOpen={() => void applyRoot(rootInput)}
+        output={panel}
+        servicesPanel={activeTool === "services"}
+      />
+    );
   }
 
   const active: TabMeta | null = tabs.find((t) => t.path === activePath) ?? null;
-  // 与退出前的「保存全部」用同一个判定（lib/saveAllDirty.isUnsaved）：
-  // 两处口径一旦不一致，就会出现「换目录时警告说会丢、退出时却没弹框」这类怪事
-  const hasUnsaved = tabs.some(isUnsaved);
-  /** 当前文件在树上被标了 UTF-8! 时，状态栏也说一句。 */
-  const activeMark = active ? tree.marks[active.path] : undefined;
   const showLargeHint =
     active !== null && active.lines > LARGE_FILE_LINES && !largeHintDismissed.includes(active.path);
-  /** 大文件降级：提示条可以关掉，但编辑器里的降级一直有效。 */
-  const heavyFile = active !== null && active.lines > LARGE_FILE_LINES;
 
   return (
     <>
-    <WorkbenchFrame
-      activeTool={activeTool}
-      tool={tool}
-      tree={<TreeSvnProvider root={root}>
-        <TreeHeader root={root} editing={editingRoot} draft={rootInput} unsaved={hasUnsaved}
-          onDraftChange={setRootInput} onOpen={() => void applyRoot(rootInput)}
-          onToggleEditing={() => { setRootInput(root); setEditingRoot(v => !v); }}
-          onCreateFile={() => treeRef.current?.startCreate("file")}
-          onCreateDir={() => treeRef.current?.startCreate("dir")} />
-        <FileTree key={root} ref={treeRef} root={root} activePath={activePath}
-          onOpen={p => void openFile(p, { preview: true })} onPin={pin} onCreated={p => { invalidateFileIndex(); void openFile(p); }}
-          onRenamed={(a, b) => { invalidateFileIndex(); handleRenamed(a, b); }} onDeleted={ps => { invalidateFileIndex(); handleDeleted(ps); }} openPaths={tabs.map(t => t.path)} />
-      </TreeSvnProvider>}
-      tabs={<TabStrip root={root} tabs={tabs} activePath={activePath} compiling={compiling}
-        canCompile={active !== null && !active.virtual} onSelect={p => setSession({ activePath: p })}
-        onClose={closeTab} onCloseMany={closeMany} onPin={pin} onCompile={() => void compileActive()} />}
-      editor={<>
-        <EditorBanners active={active} activePath={activePath} conflictPath={conflictPath}
-          encodingIssue={encodingIssue} showLargeHint={showLargeHint} onUnifyEol={unifyEol}
-          onReload={p => void reloadFile(p)} onOverwriteSave={p => void saveFile(p, true)}
-          onSaveUtf8={p => void saveAsUtf8(p)}
-          onDismissLargeHint={p => setSession({ largeHintDismissed: v => [...v, p] })} />
-        {active && (
-          <EditorNavRow
-            active={active}
-            root={root}
-            canBack={nav.canBack}
-            canForward={nav.canForward}
-            onBack={goBack}
-            onForward={goForward}
-            outlineOpen={panels.outline}
-            onToggleOutline={() => setPanels((p) => ({ ...p, outline: !p.outline }))}
-            onCloseOutline={() => setPanels((p) => ({ ...p, outline: false }))}
-            onJump={(line) => void openAt(active.path, line)}
-            history={{
-              open: panels.history,
-              onToggle: () => setPanels((p) => ({ ...p, history: !p.history })),
-              onClose: () => setPanels((p) => ({ ...p, history: false })),
-              dirty: isUnsaved(active),
-              // 恢复写的是磁盘：标签的 mtime 变了，必须重载，否则下一次保存会撞 CONFLICT
-              onRestored: (p) => void reloadFile(p),
-            }}
-          />
-        )}
-        <div className="wb-editor">
-          <EditorPane activePath={activePath} readOnly={active?.readOnly ?? false} reveal={reveal}
-            heavy={heavyFile} onCursor={setCursor} onSave={() => activePath && void saveFile(activePath)} />
-          {!active && <EmptyEditor root={root} onOpen={p => void openFile(p)} />}
-        </div>
-      </>}
-      output={panelOpen && panel}
-      status={<EditorStatus root={root} active={active} mark={activeMark} saving={saving}
-        panelOpen={panelOpen} onTogglePanel={() => setPanelOpen(v => !v)} />}
-    />
+      <FilePaneSlots
+        session={session}
+        output={panel}
+        model={{
+          root,
+          activeTool,
+          tabs,
+          activePath,
+          active,
+          marks: tree.marks,
+          // 与退出前的「保存全部」用同一个判定（lib/saveAllDirty.isUnsaved）：
+          // 两处口径一旦不一致，就会出现「换目录时警告说会丢、退出时却没弹框」这类怪事
+          hasUnsaved: tabs.some(isUnsaved),
+          activeMark: active ? tree.marks[active.path] : undefined,
+          showLargeHint,
+          // 大文件降级：提示条可以关掉，但编辑器里的降级一直有效
+          heavyFile: active !== null && active.lines > LARGE_FILE_LINES,
+          conflictPath,
+          encodingIssue,
+          saving,
+          reveal,
+          rootInput,
+          editingRoot,
+          panelOpen,
+          panels,
+          compiling,
+          canBack: nav.canBack,
+          canForward: nav.canForward,
+          treeRef,
+        }}
+        actions={{
+          setRootInput,
+          setEditingRoot,
+          setPanels,
+          setPanelOpen,
+          applyRoot,
+          compileActive,
+          onDismissLargeHint: (p) => setSession({ largeHintDismissed: (v) => [...v, p] }),
+          selectTab: (p) => setSession({ activePath: p }),
+          invalidateIndex: invalidateFileIndex,
+        }}
+      />
 
       <RenameDialog open={renameOpen} path={activePath} onClose={() => setRenameOpen(false)} />
+      <GenerateDialog open={panels.generate} onClose={() => setPanels((p) => ({ ...p, generate: false }))} />
 
       <ConfirmDialog
         open={closingPath !== null}
@@ -272,10 +265,10 @@ export function FilesTab({ activeTool = "files", tool }: { activeTool?: string; 
         description={`${baseName(closingPath ?? "")} 有未保存的修改，关闭后将丢失。`}
         variant="destructive"
         confirmLabel="放弃并关闭"
-        onCancel={cancelClose}
+        onCancel={session.cancelClose}
         onConfirm={() => {
-          if (closingPath) closeTab(closingPath, true);
-          cancelClose();
+          if (closingPath) session.closeTab(closingPath, true);
+          session.cancelClose();
         }}
       />
     </>

@@ -11,7 +11,7 @@ use tauri::Emitter;
 use crate::compile::{self, CompileEnv, CompileJob, CompileResult};
 use crate::nc_home;
 use crate::nc_index::{classpath_jars, ClassIndex};
-use crate::security::path::{display_path, resolve_safe_path};
+use crate::security::path::{display_path, resolve_safe_path_async};
 use crate::state::AppState;
 
 /// 内存里的类索引与各模块上次用到的 jar，进程内复用，避免每次编译重扫 7000 个 jar。
@@ -149,13 +149,21 @@ pub(super) async fn resolve_module(
         .workspace_root
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
-    let target = resolve_safe_path(path, std::slice::from_ref(&root), &[], true)?;
+    // async 命令链上做路径校验：canonicalize 是同步磁盘操作，走 spawn_blocking，
+    // 否则网络盘上几个校验就能把 IPC 层堵住（审查报告 D2）
+    let target =
+        resolve_safe_path_async(path.to_string(), vec![root.clone()], Vec::new(), true).await?;
     // resolve_safe_path 返回的是 canonicalize 后带 `\?\` 前缀的路径，工作区根是去掉前缀的，
-    // 两边都规整成同一种写法，否则 strip_prefix 永远匹配不上
+    // 两边都规整成同一种写法，否则 strip_prefix 永远匹配不上。
+    // 根的 canonicalize 同样不能在 async 体里同步做，与上面一并丢进阻塞线程。
     let target = PathBuf::from(display_path(&target));
-    let root = PathBuf::from(display_path(
-        &std::fs::canonicalize(&root).map_err(|e| format!("工作区目录不可用: {e}"))?,
-    ));
+    let root_raw = root.clone();
+    let root_canon = tauri::async_runtime::spawn_blocking(move || {
+        std::fs::canonicalize(&root_raw).map_err(|e| format!("工作区目录不可用: {e}"))
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))??;
+    let root = PathBuf::from(display_path(&root_canon));
     let module = compile::module_of(&root, &target).ok_or_else(|| {
         "所选路径不在工作区的某个模块里（工作区根应是 newar 这类包含各模块的目录）".to_string()
     })?;
@@ -232,4 +240,152 @@ pub fn compile_cancel(state: tauri::State<'_, Arc<AppState>>) {
     state
         .compile_cancel
         .store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// 按依赖顺序编译工作区里的全部模块。
+///
+/// 与 `compile_module` 的差别只有两点：编哪些、按什么顺序。代价在于**失败即停**——
+/// 被依赖的模块编不过时，后面的模块只会报一堆「找不到符号」的连带错误，
+/// 那种刷屏比停下来更难定位。
+#[tauri::command]
+pub async fn compile_all_modules(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<CompileResult, String> {
+    let (root, nc_home_cfg, overrides) = {
+        let cfg = state.config.read().await;
+        let root = cfg
+            .workspace_root
+            .clone()
+            .ok_or_else(|| "尚未选择工作区目录".to_string())?;
+        (
+            root,
+            cfg.nc_home.clone(),
+            crate::eclipse_cp::active_overrides(&cfg.linked_overrides),
+        )
+    };
+    // 与 compile_module 同一套规整：工作区根是去掉 `\\?\` 前缀的写法。
+    // canonicalize 是同步磁盘操作，丢进 spawn_blocking（审查报告 D2）。
+    let root_canon = tauri::async_runtime::spawn_blocking(move || {
+        std::fs::canonicalize(&root).map_err(|e| format!("工作区目录不可用: {e}"))
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))??;
+    let root = PathBuf::from(display_path(&root_canon));
+    let home = nc_home::resolve(nc_home_cfg.as_deref())?;
+    let nc_home = PathBuf::from(&home.root);
+    let java = PathBuf::from(&home.java);
+    let ecj = find_ecj(&state.config_dir)?;
+    let cache_path = state.config_dir.join("class-index.bin");
+    let work_dir = state.config_dir.join("tmp");
+    let st = state.inner().clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let _slot = CompileSlot::acquire()
+            .ok_or_else(|| "已有一次编译在进行，等它完成再试（或点「取消」）".to_string())?;
+        st.compile_cancel
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let log = |s: &str| {
+            let _ = app.emit("compile-log", s.to_string());
+        };
+
+        // 顺序来自类路径：类路径是「主工程 → 直接依赖 → 传递依赖」，反过来就是「底层先编」
+        let dirs = crate::eclipse_cp::class_roots_with(&root, &nc_home, &overrides);
+        let mut modules = crate::eclipse_cp::compile_order(&dirs, &root);
+        if modules.is_empty() {
+            modules = crate::eclipse_cp::module_dirs_of(&root);
+        }
+        if modules.is_empty() {
+            return Err(
+                "工作区里没有找到可编译的模块（子目录里应有 src 或 .classpath）".to_string(),
+            );
+        }
+        log(&format!(
+            "按依赖顺序编译 {} 个模块：{}",
+            modules.len(),
+            modules.join(" → ")
+        ));
+
+        let mut total = CompileResult {
+            ok: true,
+            duration_ms: 0,
+            source_count: 0,
+            error_count: 0,
+            warning_count: 0,
+            problems: Vec::new(),
+            jar_count: 0,
+            rounds: 0,
+            out_dir: format!("{} 个模块", modules.len()),
+            diagnostics: Vec::new(),
+            resolved_jars: Vec::new(),
+        };
+        let mut seeds: Vec<u32> = Vec::new();
+        let mut failed: Option<String> = None;
+
+        for (i, module) in modules.iter().enumerate() {
+            if st.compile_cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err("CANCELLED: 编译已取消".to_string());
+            }
+            log(&format!("=== {}/{} {} ===", i + 1, modules.len(), module));
+            let (index, cached_seed) = cached_index(&nc_home, &cache_path, module, &log)?;
+            let seed = if cached_seed.is_empty() {
+                seeds.clone()
+            } else {
+                cached_seed
+            };
+            let env = CompileEnv {
+                nc_home: &nc_home,
+                java_exe: &java,
+                ecj_jar: &ecj,
+                project_root: &root,
+                index: &index,
+                work_dir: &work_dir,
+                cancel: Some(&st.compile_cancel),
+                overrides: &overrides,
+            };
+            let job = CompileJob {
+                out_dir: root.join(module).join("classes"),
+                module: module.clone(),
+                files: None,
+                seed_jars: seed,
+            };
+            let r = compile::compile(&env, &job, &log)?;
+            seeds = r.resolved_jars.clone();
+            if let Ok(mut guard) = CACHE.lock() {
+                if let Some(c) = guard.as_mut() {
+                    c.seeds.insert(module.clone(), r.resolved_jars.clone());
+                }
+            }
+            total.duration_ms += r.duration_ms;
+            total.source_count += r.source_count;
+            total.error_count += r.error_count;
+            total.warning_count += r.warning_count;
+            total.jar_count = total.jar_count.max(r.jar_count);
+            total.rounds += r.rounds;
+            total.problems.extend(r.problems);
+            total.diagnostics.extend(r.diagnostics);
+            log(&format!(
+                "{}：{} 个源文件，{} 个错误，{:.1}s",
+                module,
+                r.source_count,
+                r.error_count,
+                r.duration_ms as f64 / 1000.0
+            ));
+            if r.error_count > 0 {
+                failed = Some(module.clone());
+                break;
+            }
+        }
+
+        total.ok = total.error_count == 0;
+        match failed {
+            Some(m) => log(&format!(
+                "{m} 编不过，后续模块依赖它的产物，已停止（修完再点一次「编译全部」）"
+            )),
+            None => log("全部模块编译完成"),
+        }
+        Ok(total)
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
 }

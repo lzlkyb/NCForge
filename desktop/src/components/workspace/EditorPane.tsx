@@ -6,6 +6,18 @@ import { registerExtraLangProviders } from "../../lib/langProvidersExtra";
 import { registerEditorKeys, setCurrentEditor } from "../../lib/editorActions";
 import { editorCommand, getKeymap } from "../../lib/keymap";
 import { registerJavaSqlActions } from "../../lib/javaSqlActions";
+import { registerJavaTemplates } from "../../lib/liveTemplates";
+import { organizeImportsCommand } from "../../lib/javaActions";
+import { runCallHierarchy } from "../../lib/callHierarchy";
+import { attachErrorLens } from "../../lib/errorLens";
+import { getEditorPrefs, monacoOptionsOf, PREFS_EVENT } from "../../lib/editorPrefs";
+import { noteEdit, previousEditSpot } from "../../lib/editHistory";
+import { pathOfModel } from "../../lib/editorStore";
+import { toggleBookmark } from "../../lib/bookmarks";
+import { setSession } from "../../lib/workspaceSession";
+import { toast } from "../ui/toast";
+import { navigate } from "../../lib/lang";
+import "../../error-lens.css";
 import { ExtractSqlDialog } from "../db/ExtractSqlDialog";
 
 interface Props {
@@ -50,13 +62,14 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     // 引用 / 格式化 / 快速修复 / 跳实现：与上面四个 provider 同一根管道，
     // 只是这些能力 Monaco 的右键菜单和命令面板会自动接上去，不用自己造 UI
     registerExtraLangProviders();
+    // 代码模板（sout / fori / ifn…）：纯编辑器能力，不依赖语言服务是否就绪
+    registerJavaTemplates();
     const editor = monaco.editor.create(hostRef.current, {
       model: null,
       automaticLayout: true,
-      fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
-      fontSize: 13,
-      lineHeight: 20,
-      minimap: { enabled: true, showSlider: "mouseover" },
+      // 字号 / 字体 / 换行 / 缩进 / 小地图 / 粘性滚动来自设置页（lib/editorPrefs），
+      // 这里给一份默认值，紧接着 updateOptions 覆盖成用户偏好
+      ...monacoOptionsOf(getEditorPrefs()),
       scrollBeyondLastLine: false,
       smoothScrolling: true,
       renderLineHighlight: "line",
@@ -66,6 +79,47 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       wordBasedSuggestions: "currentDocument",
     });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => onSaveRef.current());
+    // Ctrl+Alt+O = 组织导入（IDEA 同键）。走命令而不是 provider：
+    // 它是一次性的整文件动作，不是「编辑器要显示什么」。
+    editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyO,
+      () => void organizeImportsCommand(),
+    );
+    // Ctrl+Alt+H = 调用层级（IDEA 同键）。结果落在底部面板的「调用层级」标签。
+    editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyH,
+      () => void runCallHierarchy(),
+    );
+    // F11 = 加/去书签（IDEA 同键）；Shift+F11 = 打开书签面板
+    editor.addCommand(monaco.KeyCode.F11, () => {
+      const model = editor.getModel();
+      const pos = editor.getPosition();
+      if (!model || !pos) return;
+      const path = pathOfModel(model);
+      if (!path) {
+        toast("jar 内的类不能加书签", "info");
+        return;
+      }
+      const r = toggleBookmark(path, pos.lineNumber, model.getLineContent(pos.lineNumber));
+      toast(r === "added" ? `已加书签（第 ${pos.lineNumber} 行）` : "已移除书签", "success");
+    });
+    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F11, () => {
+      setSession({ panelOpen: true, panelTab: "bookmarks" });
+    });
+    // Ctrl+Shift+Backspace = 回到上一个编辑位置（与「后退」不同：它记的是打字，不是跳转）
+    editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Backspace,
+      () => {
+        const pos = editor.getPosition();
+        const path = editor.getModel() ? pathOfModel(editor.getModel()!) : undefined;
+        const spot = previousEditSpot(path && pos ? { path, line: pos.lineNumber } : null);
+        if (!spot) {
+          toast("没有更早的编辑位置了", "info");
+          return;
+        }
+        navigate({ kind: "file", path: spot.path, line: spot.line, column: 1 });
+      },
+    );
     const keyboard = editor.onKeyDown(event => {
       if (!editor.hasTextFocus()) return;
       const action = editorCommand(event.browserEvent, getKeymap());
@@ -75,13 +129,35 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       editor.trigger("ncforge-keymap", action, undefined);
     });
     editor.onDidChangeCursorPosition((e) => onCursorRef.current(e.position.lineNumber, e.position.column));
+    // 记录编辑位置（Ctrl+Shift+Backspace 用）+ 自动保存（可关，默认关）。
+    // 两件事都在内容变化时触发，合并一个订阅：拆成两个会让每次按键多一次回调。
+    let autoSaveTimer: number | undefined;
+    const contentSub = editor.onDidChangeModelContent(() => {
+      const model = editor.getModel();
+      if (!model) return;
+      const path = pathOfModel(model);
+      const pos = editor.getPosition();
+      if (path && pos) noteEdit(path, pos.lineNumber);
+      const prefs = getEditorPrefs();
+      if (!prefs.autoSave) return;
+      if (autoSaveTimer !== undefined) window.clearTimeout(autoSaveTimer);
+      autoSaveTimer = window.setTimeout(() => {
+        // 触发时再读一次：这期间用户可能刚关掉开关
+        if (getEditorPrefs().autoSave) onSaveRef.current();
+      }, Math.max(500, prefs.autoSaveDelayMs));
+    });
     const sqlActions = registerJavaSqlActions(editor);
+    // 行尾诊断（Error Lens）：数据来自 diagStore，开关在设置 → 编辑器
+    const lensOff = attachErrorLens(editor);
     // Alt+Enter 绑快速修复；命令面板要靠这个引用找到「当前在编辑哪个文件」
     registerEditorKeys(editor);
     setCurrentEditor(editor);
     editorRef.current = editor;
     return () => {
       sqlActions.forEach((d) => d.dispose());
+      lensOff();
+      contentSub.dispose();
+      if (autoSaveTimer !== undefined) window.clearTimeout(autoSaveTimer);
       setCurrentEditor(null);
       // 注意只销毁编辑器实例，model 留在 editorStore（切到别的页签再回来还在）。
       if (shownRef.current) saveViewState(shownRef.current, editor.saveViewState());
@@ -120,6 +196,13 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
   useEffect(() => {
     editorRef.current?.updateOptions({ readOnly });
   }, [readOnly, activePath]);
+
+  // 设置页改了字号 / 换行 / 小地图等：实时生效，不用重开编辑器
+  useEffect(() => {
+    const apply = () => editorRef.current?.updateOptions(monacoOptionsOf(getEditorPrefs()));
+    window.addEventListener(PREFS_EVENT, apply);
+    return () => window.removeEventListener(PREFS_EVENT, apply);
+  }, []);
 
   // 超大文件降级。括号对着色要逐行配对、折叠要算整个文档的区间、小地图要渲染缩略，
   // 这三样在几千行的 BO/BP 上每次输入都要重算，打字会明显掉帧。切回小文件时再打开。

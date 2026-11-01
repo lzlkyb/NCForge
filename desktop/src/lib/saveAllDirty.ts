@@ -1,6 +1,7 @@
 import { saveOne } from "./fileSave";
 import { applySaved } from "./tabSession";
-import { getSession, setSession, type TabMeta } from "./workspaceSession";
+import { isUnsaved } from "./tabDirty";
+import { getSession, setSession } from "./workspaceSession";
 import { cleanError, isConflictError, isUnencodableError } from "./workspace";
 
 /**
@@ -34,10 +35,13 @@ export interface SaveAllResult {
   failed: SaveFailure[];
 }
 
-/** 该文件的修改是否需要用户处理（与 `FilesTab` 的 `hasUnsaved` 同一口径）。 */
-export function isUnsaved(t: TabMeta): boolean {
-  return !t.readOnly && !t.virtual && (t.dirty || t.eolChanged);
-}
+/**
+ * 该文件的修改是否需要用户处理（与 `FilesTab` 的 `hasUnsaved` 同一口径）。
+ *
+ * 实现在 `lib/tabDirty`（无运行时依赖）：文件树、标签条也要问这句话，让它们引本文件
+ * 会把 Monaco 拖进模块图。这里再导出一次，保证外部仍只有一个入口。
+ */
+export { isUnsaved };
 
 /** 当前所有等待落盘的文件。没有它就是「直接退出，不用问」。 */
 export function collectUnsaved(): UnsavedFile[] {

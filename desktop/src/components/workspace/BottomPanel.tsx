@@ -2,12 +2,17 @@ import { useEffect, useMemo, useRef } from "react";
 import { Icon } from "../ui/icon";
 import { baseName } from "../../lib/workspace";
 import { useWorkbenchDock } from "./WorkbenchDock";
+import { CallHierarchyPanel } from "./CallHierarchyPanel";
+import { TodoPanel } from "./TodoPanel";
+import { BookmarkPanel } from "./BookmarkPanel";
+import { openCallHierarchy } from "../../lib/callHierarchy";
 import { relativeTo, type CompileResult, type Problem } from "../../lib/compile";
 import { parseLogLink } from "../../lib/logLink";
+import { useWorkspaceSelector } from "../../lib/workspaceSession";
 import type { CodeDiag } from "../../lib/diagStore";
 import { countErrors, mergeProblems } from "../../lib/problemList";
 
-export type PanelTab = "problems" | "build" | "svc";
+export type PanelTab = "problems" | "build" | "svc" | "calls" | "todo" | "bookmarks";
 
 interface Props {
   root: string;
@@ -15,7 +20,14 @@ interface Props {
   onTab: (t: PanelTab) => void;
   running: boolean;
   result: CompileResult | null;
-  log: string[];
+  /**
+   * 编译日志。不传就自己从会话里取。
+   *
+   * 编译期间这份数组每 80ms 换一次（后端逐行推、前端攒批刷）。由文件页当 prop
+   * 传下来的话，文件页自己就得订阅它——于是每 80ms 整棵文件树、标签条、所有
+   * 隐藏页面陪着重渲染一次。让它在这里订阅，刷新范围就只有这个面板。
+   */
+  log?: string[];
   onOpenProblem: (p: Problem) => void;
   /** 点日志里的报错行直接跳到那个文件的那一行。 */
   onOpenAt: (path: string, line: number) => void;
@@ -32,7 +44,9 @@ interface Props {
  * 底部面板：问题列表、编译输出、NC 服务（服务页把自己的卡片与日志停靠到「NC 服务」标签的宿主里）。
  * 搜索结果留在侧栏、SQL 结果留在 SQL 标签页——它们和各自的输入表单是一体的，拆出来反而来回跳。
  */
-export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProblem, onOpenAt, inspect, onNextProblem, onPrevProblem, onCancel, onClose }: Props) {
+export function BottomPanel({ root, tab, onTab, running, result, log: logProp, onOpenProblem, onOpenAt, inspect, onNextProblem, onPrevProblem, onCancel, onClose }: Props) {
+  const sessionLog = useWorkspaceSelector((s) => s.compileLog);
+  const log = logProp ?? sessionLog;
   const dock = useWorkbenchDock();
   const logRef = useRef<HTMLDivElement>(null);
   // 只在用户本来就贴着底部时才跟随最新一行：首次建类索引会连续输出几十行，
@@ -68,6 +82,15 @@ export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProb
         </button>
         <button type="button" className="wb-ptab" data-active={tab === "svc" || undefined} onClick={() => onTab("svc")}>
           NC 服务
+        </button>
+        <button type="button" className="wb-ptab" data-active={tab === "calls" || undefined} onClick={() => onTab("calls")}>
+          调用层级
+        </button>
+        <button type="button" className="wb-ptab" data-active={tab === "todo" || undefined} onClick={() => onTab("todo")}>
+          待办
+        </button>
+        <button type="button" className="wb-ptab" data-active={tab === "bookmarks" || undefined} onClick={() => onTab("bookmarks")}>
+          书签
         </button>
         <span className="wb-status-sp" />
         {tab === "problems" && merged.length > 0 && (
@@ -214,6 +237,16 @@ export function BottomPanel({ root, tab, onTab, running, result, log, onOpenProb
           )}
         </div>
       )}
+      {tab === "calls" && <CallHierarchyPanel />}
+      {tab === "calls" && (
+        <div className="wb-panel-note">
+          <button type="button" className="wb-status-btn" onClick={() => void openCallHierarchy()}>
+            查当前光标处的调用层级
+          </button>
+        </div>
+      )}
+      {tab === "todo" && <TodoPanel root={root} onOpenAt={onOpenAt} />}
+      {tab === "bookmarks" && <BookmarkPanel root={root} onOpenAt={onOpenAt} />}
       <div ref={dock?.bindHost("bottom")} className="wb-panel-body wb-svc-host" hidden={tab !== "svc"} />
     </section>
   );

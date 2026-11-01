@@ -93,7 +93,10 @@ export function InfoPopover({ label, children }: { label: string; children: Reac
           data-state={entered ? "open" : "closed"}
           data-exiting={!open || undefined}
           style={{ position: "fixed", top: pos.top, left: pos.left, width: W }}
-          className="animate-fade-in z-50 rounded-xl border border-border bg-card p-3 shadow-lg"
+          // 带上 ui-surface：退场要由 interaction-refinements.css 里那条
+          // `[data-state="closed"]` 规则驱动。只写 animate-fade-in 的话没有退场过渡，
+          // 关掉后气泡会满不透明地静止 140ms 再「啪」地消失，比直接消失更像卡了一下。
+          className="ui-surface animate-fade-in z-50 rounded-xl border border-border bg-card p-3 shadow-lg"
         >
           <div className="mb-1 text-[13px] font-semibold text-foreground">{label}</div>
           <div className="text-xs leading-relaxed text-muted-foreground">{children}</div>

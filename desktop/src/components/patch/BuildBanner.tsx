@@ -1,6 +1,7 @@
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { patchReveal, type PatchBuildResult } from "../../lib/patch";
+import { failureText } from "../../lib/friendlyError";
 
 /**
  * 出包结果横幅。
@@ -24,7 +25,7 @@ export function BuildBanner({ result }: { result: PatchBuildResult }) {
         <button
           type="button"
           className="pk-link"
-          onClick={() => void patchReveal(result.zipPath).catch((e) => toast(String(e), "error"))}
+          onClick={() => void patchReveal(result.zipPath).catch((e) => toast(failureText("打开补丁包位置", e), "error"))}
         >
           打开位置
         </button>

@@ -6,6 +6,8 @@ import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { relativeTo } from "../../lib/compile";
+import { revealInTree } from "../../lib/revealInTree";
+import { setSession } from "../../lib/workspaceSession";
 import type { TabMeta } from "../../lib/workspaceSession";
 
 /**
@@ -42,6 +44,8 @@ export function TabStrip({
   const dock = useWorkbenchDock();
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   const tabRefs = useRef(new Map<string, HTMLDivElement>());
+  /** 正在被拖的标签路径（HTML5 拖放只在 start 时给，dragover 时读不到）。 */
+  const dragFrom = useRef<string | null>(null);
   /** 漫游 tabIndex：整组标签只占一个 Tab 停靠点，组内用方向键移动（WAI-ARIA tabs 模式）。 */
   const activeIndex = tabs.findIndex((t) => t.path === activePath);
   const rovingIndex = !dock?.documentOpen && activeIndex >= 0 ? activeIndex : 0;
@@ -76,6 +80,24 @@ export function TabStrip({
     const kept = onCloseMany(want);
     if (kept > 0) toast(`${kept} 个有未保存修改的标签已保留`, "info");
   };
+
+  /** 拖拽排序的落点：把被拖的标签插到目标标签**前面**（与 IDEA / 浏览器一致）。 */
+  const moveTab = (target: string) => {
+    const from = dragFrom.current;
+    dragFrom.current = null;
+    if (!from || from === target) return;
+    setSession({
+      tabs: (prev) => {
+        const i = prev.findIndex((t) => t.path === from);
+        const j = prev.findIndex((t) => t.path === target);
+        if (i < 0 || j < 0) return prev;
+        const next = prev.slice();
+        const [moved] = next.splice(i, 1);
+        next.splice(j, 0, moved);
+        return next;
+      },
+    });
+  };
   const copy = (text: string) => {
     void navigator.clipboard
       .writeText(text)
@@ -91,6 +113,7 @@ export function TabStrip({
       { label: "关闭右侧", disabled: i === tabs.length - 1, onSelect: () => closeMany((_, j) => j > i) },
       { label: "关闭已保存的", onSelect: () => closeMany(() => true) },
       { label: "固定标签", separator: true, disabled: !t?.preview, onSelect: () => onPin(path) },
+      { label: "在文件树中显示", disabled: !!t?.virtual, onSelect: () => revealInTree(path) },
       { label: "复制路径", separator: true, disabled: !!t?.virtual, onSelect: () => copy(path) },
       { label: "复制相对路径", disabled: !!t?.virtual, onSelect: () => copy(relativeTo(root, path)) },
     ];
@@ -113,6 +136,25 @@ export function TabStrip({
           data-preview={t.preview || undefined}
           title={t.preview ? `${t.path}\n（预览标签，双击或开始编辑后固定）` : t.path}
           tabIndex={i === rovingIndex ? 0 : -1}
+          draggable
+          onDragStart={(e) => {
+            dragFrom.current = t.path;
+            e.dataTransfer.effectAllowed = "move";
+            // 某些 WebView 里不设数据的话拖拽不会启动
+            e.dataTransfer.setData("text/plain", t.path);
+          }}
+          onDragOver={(e) => {
+            if (!dragFrom.current || dragFrom.current === t.path) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            moveTab(t.path);
+          }}
+          onDragEnd={() => {
+            dragFrom.current = null;
+          }}
           onKeyDown={e => onTabKey(e, i, t.path)}
           onClick={() => { onSelect(t.path); dock?.showCode(); }}
           onDoubleClick={() => onPin(t.path)}

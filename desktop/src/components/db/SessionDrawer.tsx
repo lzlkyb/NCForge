@@ -3,6 +3,7 @@ import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { dbApi, type SessionRow } from "../../lib/dbApi";
 import { friendlyDbError } from "../../lib/db";
+import { useAppHidden } from "../../lib/appVisibility";
 import { copyText } from "../../lib/utils";
 
 /** 自动刷新间隔。5 秒够看清「谁锁了谁」，也不至于把共用库查出压力。 */
@@ -45,11 +46,15 @@ export function SessionDrawer({ connId, onClose }: { connId: string; onClose: ()
     void load();
   }, [load]);
 
+  // 抽屉是 store 级状态：切到别的页面它也不关，所以最小化后照样在查 v$locked_object。
+  // 窗口不可见时必须停（CLAUDE.md 8.1 的统一约定，同仓 useServerLog 已经这么做）。
+  const appHidden = useAppHidden();
+
   useEffect(() => {
-    if (!auto) return;
+    if (!auto || appHidden) return;
     const t = setInterval(() => void load(), REFRESH_MS);
     return () => clearInterval(t);
-  }, [auto, load]);
+  }, [auto, appHidden, load]);
 
   const copy = (text: string, what: string) => {
     if (!text) return;

@@ -71,6 +71,9 @@ export function HousekeepingDialog({
       setBusy(null);
       // 删除是逐个进行的，部分成功也要重算列表
       void qc.invalidateQueries({ queryKey: ["svn-housekeeping"] });
+      // 确认框留到删完再关：这段时间里按钮上要有「删除中…」，
+      // 否则一关框就只剩灰按钮 + 不动的列表，用户看不出到底在不在删
+      setPending(null);
     }
   };
 
@@ -156,7 +159,11 @@ export function HousekeepingDialog({
 
           <div className="vc-hk-foot">
             <span className="vc-hk-hint">
-              {backups.length > 0 ? "删掉就找不回来了（这些文件不在 SVN 里）" : ""}
+              {busy === "delete"
+                ? "正在删除备份…"
+                : backups.length > 0
+                  ? "删掉就找不回来了（这些文件不在 SVN 里）"
+                  : ""}
             </span>
             <button
               type="button"
@@ -164,7 +171,7 @@ export function HousekeepingDialog({
               disabled={busy !== null || backups.length === 0}
               onClick={() => setPending({ mode: "all" })}
             >
-              全部删除
+              {busy === "delete" ? "删除中…" : "全部删除"}
             </button>
           </div>
         </div>
@@ -224,18 +231,19 @@ export function HousekeepingDialog({
         // 嵌在维护弹窗里：两个都 portal 到 body，必须抬层级，否则确认框会被遮罩盖住
         zIndex={1100}
         title={pending?.mode === "all" ? `删除全部 ${backups.length} 个备份？` : "删除这个备份？"}
-        confirmLabel="删除"
+        confirmLabel={busy === "delete" ? "删除中…" : "删除"}
         confirmDisabled={busy !== null}
         description={
           pending?.mode === "all"
             ? `共 ${formatBytes(totalBytes)}，目录里的文件会一起删掉。这些文件不在 SVN 里，删了就找不回来了。`
             : `目录 ${pending?.name ?? ""} 里的备份文件会一起删掉，删了就找不回来了。`
         }
-        onCancel={() => setPending(null)}
-        onConfirm={() => {
-          const list = targets;
+        onCancel={() => {
+          if (busy !== null) return;
           setPending(null);
-          void remove(list);
+        }}
+        onConfirm={() => {
+          void remove(targets);
         }}
       />
     </>

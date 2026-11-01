@@ -1,6 +1,11 @@
 import { useEffect, useRef } from "react";
 import { registerCommands } from "../lib/commandRegistry";
 import { EDITOR_COMMANDS, currentIsJava, runEditorCommand } from "../lib/editorActions";
+import { organizeImportsCommand } from "../lib/javaActions";
+import { runCallHierarchy } from "../lib/callHierarchy";
+import { revealInTree } from "../lib/revealInTree";
+import { goToTestPair } from "../lib/goToTest";
+import { setSession } from "../lib/workspaceSession";
 import { compileCancel } from "../lib/compile";
 import { toast } from "../components/ui/toast";
 import { langRegenerate } from "../lib/appConfig";
@@ -17,6 +22,7 @@ export interface FilesTabCommands {
   goBack: () => void;
   goForward: () => void;
   openRename: () => void;
+  openGenerate: () => void;
   canBack: () => boolean;
   canForward: () => boolean;
   hasProblems: () => boolean;
@@ -55,6 +61,46 @@ export function useFilesTabCommands(deps: FilesTabCommands) {
       title: "重命名符号（跨文件，F2）",
       run: () => live.current.openRename(),
       enabled: () => !!live.current.activePath && currentIsJava(),
+    },
+    {
+      id: "editor.generate",
+      title: "生成代码（Alt+Insert：构造器 / getter / setter / toString / equals）",
+      run: () => live.current.openGenerate(),
+      enabled: () => !!live.current.activePath && currentIsJava(),
+    },
+    {
+      id: "editor.callHierarchy",
+      title: "调用层级（Ctrl+Alt+H：谁调用了它 / 它调用了谁）",
+      run: () => void runCallHierarchy(),
+      enabled: () => currentIsJava(),
+    },
+    {
+      id: "editor.organizeImports",
+      title: "组织导入（删掉未用的 import，Ctrl+Alt+O）",
+      run: () => void organizeImportsCommand(),
+      enabled: () => !!live.current.activePath && currentIsJava(),
+    },
+    {
+      id: "editor.goToTest",
+      title: "跳到测试 / 被测类（按命名配对）",
+      run: () => void goToTestPair(live.current.activePath),
+      enabled: () => !!live.current.activePath && !live.current.activePath.startsWith("jdt://"),
+    },
+    {
+      id: "view.todo",
+      title: "待办面板（TODO / FIXME / XXX / HACK）",
+      run: () => setSession({ panelOpen: true, panelTab: "todo" }),
+    },
+    {
+      id: "view.bookmarks",
+      title: "书签面板（Shift+F11）",
+      run: () => setSession({ panelOpen: true, panelTab: "bookmarks" }),
+    },
+    {
+      id: "view.revealInTree",
+      title: "在文件树中显示当前文件",
+      run: () => revealInTree(live.current.activePath),
+      enabled: () => !!live.current.activePath && !live.current.activePath.startsWith("jdt://"),
     },
     {
       id: "nav.back",

@@ -47,9 +47,13 @@ export function toCsv(columns: ColumnMeta[], rows: Cell[][]): string {
 /** SQL 字面量：数字列不加引号，其余加单引号并转义。 */
 export function sqlLiteral(v: Cell, type: string): string {
   if (v === null || v === undefined) return "null";
-  // 桥里日期统一格式化成 yyyy-MM-dd HH:mm:ss，写回 DATE 列要转回来
+  // 桥里日期统一格式化成 yyyy-MM-dd HH:mm:ss，写回 DATE 列要转回来。
+  // 纯日期（用户双击改成 `2026-11-01`）必须用短格式：套 hh24:mi:ss 会 ORA-01840
+  // （输入值对格式来说太短），而下面这条正则本来就允许不带时分秒的值。
   if (/^(DATE|TIMESTAMP)/i.test(type) && /^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$/.test(String(v))) {
-    return `to_date('${v}', 'yyyy-mm-dd hh24:mi:ss')`;
+    const s = String(v);
+    const fmt = /^\d{4}-\d{2}-\d{2}$/.test(s) ? "yyyy-mm-dd" : "yyyy-mm-dd hh24:mi:ss";
+    return `to_date('${s}', '${fmt}')`;
   }
   if (typeof v === "number" || (isNumericType(type) && /^-?\d+(\.\d+)?$/.test(String(v)))) return String(v);
   return `'${String(v).replace(/'/g, "''")}'`;

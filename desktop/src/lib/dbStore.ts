@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useCallback, useRef, useSyncExternalStore } from "react";
 import { friendlyDbError, parseDbError } from "./db";
 import {
   dbApi,
@@ -189,17 +189,43 @@ function set(patch: Partial<DbState>) {
   listeners.forEach((fn) => fn());
 }
 
+const subscribeDb = (fn: () => void) => {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+};
+
 export const getDb = () => state;
 
 export function useDb(): DbState {
-  return useSyncExternalStore(
-    (fn) => {
-      listeners.add(fn);
-      return () => listeners.delete(fn);
-    },
-    () => state,
-  );
+  return useSyncExternalStore(subscribeDb, () => state);
 }
+
+/**
+ * 只订阅数据库仓库的一个切片。
+ *
+ * `useDb()` 给的是整份快照：13 个调用点全部订阅整库，于是「某个连接的状态从
+ * connecting 变 connected」会让连接树、SQL 编辑器、结果区、表页一起重渲染。
+ * 同 `useWorkspaceSelector`：选择器必须返回稳定引用，或自己传 `isEqual`。
+ */
+export function useDbSelector<T>(
+  selector: (s: DbState) => T,
+  isEqual: (a: T, b: T) => boolean = Object.is,
+): T {
+  const sel = useRef(selector);
+  const eq = useRef(isEqual);
+  sel.current = selector;
+  eq.current = isEqual;
+  const memo = useRef<{ has: boolean; value: T } | null>(null);
+  const getSelection = useCallback(() => {
+    const next = sel.current(state);
+    const m = memo.current;
+    if (m && m.has && eq.current(m.value, next)) return m.value;
+    memo.current = { has: true, value: next };
+    return next;
+  }, []);
+  return useSyncExternalStore(subscribeDb, getSelection, getSelection);
+}
+
 
 // ──────────────────────── 连接 ────────────────────────
 

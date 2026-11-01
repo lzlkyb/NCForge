@@ -52,34 +52,42 @@ pub struct PackStatus {
 
 /// 本地状态快照（不联网）。前端挂载时调一次，之后靠事件驱动。
 /// `_app` 占位：命令签名保持 (app, state) 与其它命令一致，本实现只用 state。
+///
+/// **`async` + `spawn_blocking`**：非 async 的 Tauri 命令跑在主线程，而这里要读状态
+/// JSON、再对每个包 `is_dir()` 打一次盘。冷启动时那几毫秒正是窗口刚出来的时候，
+/// 走主线程就是肉眼可见的一下卡顿（同文件 `ensure_resources_async` 已是这个范式）。
 #[tauri::command]
-pub fn resources_status(
+pub async fn resources_status(
     _app: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
-) -> Vec<PackStatus> {
+) -> Result<Vec<PackStatus>, String> {
     let config_dir = state.config_dir.clone();
-    let packs_state = resource_pack::PacksState::load(&config_dir);
-    resource_pack::ALL_PACKS
-        .iter()
-        .map(|m| {
-            let rec = packs_state.packs.get(m.id);
-            let (st, version, size) = match rec {
-                Some(r) if r.legacy => ("legacy".to_string(), None, r.size),
-                Some(r) if resource_pack::pack_dir(&config_dir, m.id, &r.version).is_dir() => {
-                    ("installed".to_string(), Some(r.version.clone()), r.size)
+    tauri::async_runtime::spawn_blocking(move || {
+        let packs_state = resource_pack::PacksState::load(&config_dir);
+        resource_pack::ALL_PACKS
+            .iter()
+            .map(|m| {
+                let rec = packs_state.packs.get(m.id);
+                let (st, version, size) = match rec {
+                    Some(r) if r.legacy => ("legacy".to_string(), None, r.size),
+                    Some(r) if resource_pack::pack_dir(&config_dir, m.id, &r.version).is_dir() => {
+                        ("installed".to_string(), Some(r.version.clone()), r.size)
+                    }
+                    _ => ("missing".to_string(), None, None),
+                };
+                PackStatus {
+                    id: m.id.to_string(),
+                    title: m.title.to_string(),
+                    notes: m.notes.to_string(),
+                    state: st,
+                    version,
+                    size,
                 }
-                _ => ("missing".to_string(), None, None),
-            };
-            PackStatus {
-                id: m.id.to_string(),
-                title: m.title.to_string(),
-                notes: m.notes.to_string(),
-                state: st,
-                version,
-                size,
-            }
-        })
-        .collect()
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))
 }
 
 /// 置备资源包：拉清单 → 缺的下载安装。进度经 `resource:*` 事件推送。

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { friendlyDbError, thousands } from "../../lib/db";
+import { useAppHidden } from "../../lib/appVisibility";
 import { dbApi, type TxInfo } from "../../lib/dbApi";
 import { patchTab, rtOf, txAction, useDb, type SqlTab } from "../../lib/dbStore";
 
@@ -28,18 +29,20 @@ export function TxBar({ connId, tabId, slot, tx: override }: {
   useDb();
   const tx = override ?? rtOf(connId).tx;
   const [, tick] = useState(0);
-  const [busy, setBusy] = useState(false);
+  /** 正在提交 / 回滚哪一边：大事务要好几秒，只把按钮置灰看不出点没点上。 */
+  const [acting, setActing] = useState<null | "commit" | "rollback">(null);
+  const appHidden = useAppHidden();
   const open = !!tx && !tx.autoCommit && tx.statements > 0;
-  // 持续时间每秒刷新
+  // 持续时间每秒刷新；窗口不可见时不刷（CLAUDE.md 8.1：不可见必须停轮询）
   useEffect(() => {
-    if (!open) return;
+    if (!open || appHidden) return;
     const t = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(t);
-  }, [open]);
+  }, [open, appHidden]);
   if (!open || !connId) return null;
 
   const act = async (a: "commit" | "rollback") => {
-    setBusy(true);
+    setActing(a);
     try {
       if (slot && tabId) {
         const r = await dbApi.tx(connId, a, slot);
@@ -51,7 +54,7 @@ export function TxBar({ connId, tabId, slot, tx: override }: {
     } catch (e) {
       toast(`${a === "commit" ? "提交" : "回滚"}失败：${friendlyDbError(e)}`, "error");
     } finally {
-      setBusy(false);
+      setActing(null);
     }
   };
 
@@ -64,13 +67,13 @@ export function TxBar({ connId, tabId, slot, tx: override }: {
         {slot && <span className="dbx-muted">（独立会话 {slot}，与其它标签各自独立）</span>}
       </span>
       <span className="dbx-sp" />
-      <button type="button" className="dbx-btn" disabled={busy} onClick={() => void act("rollback")}>
+      <button type="button" className="dbx-btn" disabled={acting !== null} onClick={() => void act("rollback")}>
         <Icon name="refresh" size={12} />
-        回滚
+        {acting === "rollback" ? "回滚中…" : "回滚"}
       </button>
-      <button type="button" className="dbx-btn ok" disabled={busy} onClick={() => void act("commit")}>
+      <button type="button" className="dbx-btn ok" disabled={acting !== null} onClick={() => void act("commit")}>
         <Icon name="check" size={12} />
-        提交
+        {acting === "commit" ? "提交中…" : "提交"}
       </button>
     </div>
   );

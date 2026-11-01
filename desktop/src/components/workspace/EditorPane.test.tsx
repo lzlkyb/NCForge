@@ -11,6 +11,11 @@ const mocks = vi.hoisted(() => ({
     addCommand: vi.fn(),
     onKeyDown: vi.fn(() => ({ dispose: vi.fn() })),
     onDidChangeCursorPosition: vi.fn(),
+    // 自动保存（内容变化）与 Error Lens（装饰集合 + 切 model）也要有人应答，
+    // 否则挂载即炸：这两个入口是随编辑器偏好一起加的
+    onDidChangeModelContent: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidChangeModel: vi.fn(() => ({ dispose: vi.fn() })),
+    createDecorationsCollection: vi.fn(() => ({ clear: vi.fn() })),
     updateOptions: vi.fn(),
     setModel: vi.fn(),
     getModel: vi.fn(() => null),
@@ -26,15 +31,21 @@ vi.mock("../../lib/monacoSetup", () => ({
   initMonaco: vi.fn(),
   monaco: {
     editor: { create: () => mocks.editor },
-    // 引用 / 格式化 / 快速修复等 provider 的注册点：`EditorPane` 挂载时会调，
-    // 这里给出桩函数，缺一个就会在挂载时炸「cannot read properties of undefined」
+    // 引用 / 格式化 / 快速修复 / 折叠 / 当前符号高亮 / 扩展选区 / 代码模板等 provider
+    // 的注册点：`EditorPane` 挂载时会调，这里给出桩函数，
+    // 缺一个就会在挂载时炸「cannot read properties of undefined」
     languages: {
       registerReferenceProvider: vi.fn(),
       registerDocumentFormattingEditProvider: vi.fn(),
       registerCodeActionProvider: vi.fn(),
       registerImplementationProvider: vi.fn(),
       registerTypeDefinitionProvider: vi.fn(),
+      registerFoldingRangeProvider: vi.fn(),
+      registerDocumentHighlightProvider: vi.fn(),
+      registerSelectionRangeProvider: vi.fn(),
+      registerCompletionItemProvider: vi.fn(),
     },
+    Range: class {},
     KeyMod: { CtrlCmd: 2048, Alt: 512 },
     KeyCode: { KeyS: 49, Enter: 3 },
   },

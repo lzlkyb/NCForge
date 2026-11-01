@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::config::AppConfig;
 use crate::patch_build::{self, BuildOptions, BuildRequest, BuildResult, ScanResult};
-use crate::security::path::{display_path, resolve_safe_path};
+use crate::security::path::display_path;
 use crate::state::AppState;
 
 /// 已知的 nc-patch 脚本位置（只用来继承它缓存里的输出目录）。
@@ -141,11 +141,19 @@ fn allow_roots(cfg: &AppConfig) -> Result<Vec<String>, String> {
     Ok(roots)
 }
 
-fn check_files(cfg: &AppConfig, files: &[String]) -> Result<Vec<String>, String> {
+/// 逐个文件过白名单。async：每次都要 canonicalize（同步磁盘操作），
+/// 在命令体里逐个跑会把 IPC 层堵住（审查报告 D2）。
+async fn check_files(cfg: &AppConfig, files: &[String]) -> Result<Vec<String>, String> {
     let roots = allow_roots(cfg)?;
     let mut out = Vec::with_capacity(files.len());
     for f in files {
-        let p = resolve_safe_path(f, &roots, &[], true)?;
+        let p = crate::security::path::resolve_safe_path_async(
+            f.clone(),
+            roots.clone(),
+            Vec::new(),
+            true,
+        )
+        .await?;
         out.push(display_path(&crate::nc_home::strip_verbatim(&p)));
     }
     Ok(out)
@@ -217,7 +225,7 @@ pub async fn patch_scan(
         force_hyext.unwrap_or_default(),
         force_std.unwrap_or_default(),
     )?;
-    let files = check_files(&cfg, &files)?;
+    let files = check_files(&cfg, &files).await?;
     tauri::async_runtime::spawn_blocking(move || patch_build::scan(&opts, &files))
         .await
         .map_err(|e| format!("扫描补丁清单失败：{e}"))?
@@ -251,7 +259,7 @@ pub async fn patch_build(
         return Err(format!("不能用盘符根当补丁输出目录：{out_dir}"));
     }
 
-    let files = check_files(&cfg, &args.files)?;
+    let files = check_files(&cfg, &args.files).await?;
     let sqls = check_sqls(&args.sqls)?;
     let opts = options_of(&st, &cfg, args.force_hyext, args.force_std)?;
 

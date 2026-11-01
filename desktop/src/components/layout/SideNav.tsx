@@ -5,7 +5,20 @@ import { Collapse } from "../ui/Collapse";
 import { UpdateBadge } from "./UpdateBadge";
 import { UpdateCollapsedDot } from "./UpdateCollapsedDot";
 
-export type NavItem = { key: string; label: string; icon: IconName };
+/**
+ * 一项导航。
+ *
+ * `hosted`：这一页是不是「挂在工作台外壳里的工具页」（有 ActivityPanel、可以保活）。
+ * 页面表以前在 App 里另写了一份 7 项字面量，加导航项时侧栏与快捷键会自动生效、
+ * 而那份数组不会——点进去只看到文件页，编译器也不报错。现在页面由本数组派生。
+ */
+export type NavItem = {
+  key: string;
+  label: string;
+  icon: IconName;
+  /** 不设 = true（除了文件页，其余都是工具页）。 */
+  hosted?: boolean;
+};
 
 /**
  * 壳子示例导航项。业务把这里换成自家页面即可。
@@ -17,7 +30,7 @@ export type NavItem = { key: string; label: string; icon: IconName };
  *    （加「工程关联」时 Ctrl+7 就从设置变成了它，设置挪到 Ctrl+8）。
  */
 export const WORKSPACE_NAV: NavItem[] = [
-  { key: "files", label: "文件", icon: "folder" },
+  { key: "files", label: "文件", icon: "folder", hosted: false },
   { key: "search", label: "搜索", icon: "search" },
   { key: "svn", label: "版本控制", icon: "gitBranch" },
   { key: "services", label: "NC 服务", icon: "server" },

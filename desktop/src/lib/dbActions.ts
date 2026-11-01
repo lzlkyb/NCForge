@@ -53,21 +53,52 @@ export async function openTable(connId: string, table: string, sub: TableSub = "
   openTableTab(connId, table, sub);
 }
 
+/**
+ * 正在执行时离开这个标签：先问，再尽量把它停下来。
+ *
+ * 为什么必须拦：执行中的语句不会因为标签消失而停下——后端照样跑完、写语句照样提交，
+ * 而 `patchTab` / `appendOutput` 落在已删除的标签上会被静默丢弃（`dbStore` 的 `map`）。
+ * 用户既看不到结果，也不知道库到底改没改。取消是尽力而为（计算类语句立刻生效，
+ * 卡在服务端等待的语句受块边界支配），所以文案不能承诺「一定没执行」。
+ */
+async function guardRunning(tab: SqlTab | null | undefined, reason: string): Promise<boolean> {
+  if (!tab?.running) return true;
+  const ok = await ask(
+    `${reason}正在执行的语句？`,
+    "这个标签里还有语句在执行。取消是尽力而为：计算类语句立刻停下，正卡在库里的写语句可能已经跑完并提交，而结果不会再显示给你。",
+    `${reason}并取消执行`,
+    true,
+  );
+  if (!ok) return false;
+  if (tab.connId) {
+    try {
+      await dbApi.cancel(tab.connId, tab.slot);
+    } catch {
+      // 取消失败不该挡住关闭：语句本来就可能已经结束
+    }
+  }
+  return true;
+}
+
 /** 给 SQL 标签换连接。旧连接上如果只剩这个标签且有未提交事务，先问。 */
 export async function switchConn(tabId: string, connId: string) {
   const tab = sqlTabOf(tabId);
   if (!tab || tab.connId === connId) return;
+  if (!(await guardRunning(tab, "切换连接"))) return;
   if (isLastTabOn(tab.connId, tabId) && !(await guardTx(tab.connId, "切换连接"))) return;
   // 槽属于旧连接：换连接前先把它的未提交写入问清楚，再放掉
   if (!(await guardSlotTx(tab.connId, tab.slot, "切换连接"))) return;
   await releaseSlot(tab.connId, tab.slot);
-  patchTab<SqlTab>(tabId, { connId, slot: null, tx: undefined });
+  // 结果必须一起清掉：留着上一个库的行，而「导出 / 复制为 insert」用的是**新**连接，
+  // 两库同名表时导出的就是错数据，全程没有任何提示。计划同理（属于旧连接的执行计划）。
+  patchTab<SqlTab>(tabId, { connId, slot: null, tx: undefined, results: [], view: null, plan: null });
   void ensureConnected(connId);
 }
 
 export async function requestCloseTab(tabId: string) {
   const tab = tabOf(tabId);
   if (!tab) return;
+  if (!(await guardRunning(sqlTabOf(tabId), "关闭标签"))) return;
   if (isLastTabOn(tab.connId, tabId) && !(await guardTx(tab.connId, "关闭标签"))) return;
   if (tab.kind === "sql") {
     // 槽各自独立事务：primary 干净不代表这个标签里没有没提交的 update

@@ -1,25 +1,25 @@
 import {
-  Fragment,
-  forwardRef,
+  useCallback,
+  useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
+  forwardRef,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { ConfirmDialog } from "../ui/ConfirmDialog";
-import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
-import { TreeEditRow } from "./TreeEditRow";
-import { TreeDirRow, TreeFileRow, TreeRowNote } from "./TreeRow";
+import { TreeFilterBar, TreeDeleteConfirm } from "./TreeChrome";
+import { TreeRows, type TreeRowsCtx } from "./TreeRows";
 import { buildTreeMenu } from "./treeMenu";
 import { useTreeDelete } from "./useTreeDelete";
 import { useTreeEdit } from "./useTreeEdit";
 import { useTreeLoad } from "./useTreeLoad";
-import { baseName, dirName, joinPath, type NewEntryKind } from "../../lib/workspace";
+import { dirName, type NewEntryKind } from "../../lib/workspace";
 import { flattenTree, treeKeyAction, treeRowId as rowId } from "../../lib/treeNav";
-
+import { chainFor, chainOpen } from "../../lib/treeCompact";
 
 interface Props {
   root: string;
@@ -42,18 +42,20 @@ export interface FileTreeHandle {
   startCreate: (kind: NewEntryKind) => void;
 }
 
+/** 自动定位的防抖：连着点标签时不要每个都展开一遍。 */
+const REVEAL_DELAY_MS = 120;
+
 /**
  * 懒加载文件树：展开某个目录时才向后端请求这一层，不预读整棵树
  * （newar 约 7000 个源文件、几十个模块，整棵预读会卡首屏）。
  *
+ * 三件事与 IDEA 对齐：
+ * - **自动定位**：右边打开什么文件，左边就展开并滚到那一行（只对工作区内的真实文件）；
+ * - **压缩中间包**：`com → aier → erp` 合成一行（`lib/treeCompact`，与键盘导航同源）；
+ * - **speed search**：焦点在树上直接敲字筛选，Esc 清除。
+ *
  * 展开态与已加载的目录存在 `lib/workspaceSession`：切页面会卸载本组件，
  * 状态要是留在 useState 里，从搜索页跳回来就得重新点开一遍。
- *
- * 新建 / 重命名都在树里原地输入（VS Code 那样），不弹对话框：
- * 建文件是个高频小动作，弹窗会打断节奏；删除才需要确认。
- *
- * 拆成三层：`useTreeLoad` 只管取数与展开，`useTreeEdit` 是就地输入的状态机，
- * `useTreeDelete` 是删除流程；行渲染在 `TreeRow` / `TreeEditRow` 里。
  */
 export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   { root, activePath, onOpen, onPin, onCreated, onRenamed, onDeleted, openPaths },
@@ -63,8 +65,8 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   const [menu, setMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(
     null,
   );
-
-  const { dirs, expanded, marks, load, expand, toggle, depthOf } = useTreeLoad(root);
+  const [filter, setFilter] = useState("");
+  const { dirs, expanded, marks, load, expand, depthOf, reveal, setExpandedPaths } = useTreeLoad(root);
   const { editing, editError, busy, beginCreate, beginRename, cancelEdit, commitEdit } = useTreeEdit({
     root,
     dirs,
@@ -82,6 +84,40 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     openPaths,
     setSelected,
   });
+
+  // ---- 自动定位 ----
+
+  /** 行是异步渲染出来的：两帧之后再滚，避免"滚到了还没出现的行"。 */
+  const scrollToRow = (path: string) => {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() =>
+        document.getElementById(rowId(path))?.scrollIntoView({ block: "nearest" }),
+      ),
+    );
+  };
+
+  const locate = useCallback(
+    async (path: string | null) => {
+      if (!path) return;
+      // 被筛掉的行定位过去等于"看不见的成功"，先清筛选
+      setFilter("");
+      if (await reveal(path)) scrollToRow(path);
+    },
+    [reveal],
+  );
+
+  useEffect(() => {
+    if (!activePath) return;
+    const t = window.setTimeout(() => void locate(activePath), REVEAL_DELAY_MS);
+    return () => window.clearTimeout(t);
+  }, [activePath, locate]);
+
+  // 「在文件树中显示」命令（标签右键 / 命令面板）走同一份定位逻辑
+  useEffect(() => {
+    const h = (e: Event) => void locate((e as CustomEvent<string>).detail);
+    window.addEventListener("ncforge-reveal-in-tree", h);
+    return () => window.removeEventListener("ncforge-reveal-in-tree", h);
+  }, [locate]);
 
   // ---- 菜单 ----
 
@@ -117,22 +153,53 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     startCreate: (kind) => beginCreate(selected ?? { path: root, isDir: true }, kind),
   }));
 
-  // ---- 键盘 ----
+  // ---- 键盘与筛选 ----
 
-  const flat = useMemo(() => flattenTree(dirs, expanded, root), [dirs, expanded, root]);
+  const filterFn = useCallback(
+    (name: string) => !filter || name.toLowerCase().includes(filter.toLowerCase()),
+    [filter],
+  );
+  const flat = useMemo(() => flattenTree(dirs, expanded, root, { filter: filterFn }), [dirs, expanded, root, filterFn]);
+
+  /** 展开 / 收起一条压缩链：收起时要把链上每一层都去掉，否则下一帧又压不回去。 */
+  const toggleChain = (tail: string, parent: string | null) => {
+    const chain = chainFor(tail, parent, dirs);
+    const open = chainOpen(chain, expanded);
+    setExpandedPaths(chain.nodes, !open);
+    if (!open) void load(chain.tail);
+  };
 
   /**
    * 方向键导航的语义在 `lib/treeNav`（纯函数，可单测）；这里只把动作落到状态上。
    * 焦点一直留在容器上（行是 `tabIndex=-1`），靠 `aria-activedescendant` 播报当前行。
+   *
+   * 可打印字符进来就是 speed search 的开始（IDEA 的行为），不会误伤导航键。
    */
   const onKeyDown = (e: ReactKeyboardEvent) => {
     if (editing) return;
+    if (e.key === "Escape" && filter) {
+      e.preventDefault();
+      setFilter("");
+      return;
+    }
+    if (e.key === "Backspace" && filter) {
+      e.preventDefault();
+      setFilter((f) => f.slice(0, -1));
+      return;
+    }
+    if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault();
+      setFilter((f) => f + e.key);
+      return;
+    }
     const act = treeKeyAction(e.key, flat, selected, expanded);
     if (act) {
       e.preventDefault();
       if (act.kind === "select") setSelected({ path: act.path, isDir: act.isDir });
-      else if (act.kind === "toggle") toggle(act.path);
-      else onOpen(act.path);
+      else if (act.kind === "toggle") {
+        const row = flat.find((r) => r.path === act.path);
+        toggleChain(act.path, row?.parent ?? root);
+      } else onOpen(act.path);
       return;
     }
     if (!selected) return;
@@ -149,100 +216,43 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
 
   // ---- 渲染 ----
 
-  const editRow = (st: NonNullable<typeof editing>) => (
-    <Fragment key={`edit-${st.mode}-${st.target ?? st.parent}`}>
-      <TreeEditRow
-        initial={st.initial}
-        placeholder={st.placeholder}
-        selectStem={st.mode === "rename"}
-        isDir={st.isDir}
-        padLeft={st.padLeft}
-        error={editError}
-        busy={busy}
-        onSubmit={(v) => void commitEdit(v)}
-        onCancel={cancelEdit}
-      />
-    </Fragment>
+  /**
+   * 行组件是 `memo` 的，所以传给它们的回调必须**身份稳定**。
+   *
+   * 直接传 `() => …` 等于每次渲染都换一批 prop，`memo` 一次也命中不了；而在
+   * `useCallback` 上挂全量依赖又会随 `dirs/expanded` 每变一次就换一次身份。
+   * 做法是 ref 里存最新实现、外层给一次性外壳——行组件拿到的是稳定引用，调用的
+   * 永远是当前闭包。
+   */
+  const latest = useRef({ toggleChain, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected });
+  latest.current = { toggleChain, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected };
+  const handlers = useMemo(
+    () => ({
+      onToggle: (tail: string, parent: string) => latest.current.toggleChain(tail, parent),
+      onActivate: (path: string) => {
+        latest.current.setSelected({ path, isDir: false });
+        latest.current.onOpen(path);
+      },
+      onPin: (path: string) => latest.current.onPin?.(path),
+      onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) =>
+        latest.current.openMenu(e, path, isDir),
+      onCommitEdit: (v: string) => void latest.current.commitEdit(v),
+      onCancelEdit: () => latest.current.cancelEdit(),
+    }),
+    [],
   );
 
-  const renderDir = (path: string, depth: number): JSX.Element[] => {
-    const state = dirs[path];
-    const rows: JSX.Element[] = [];
-    const notePad = 6 + depth * 14 + 20;
-    // 新建的输入行出现在该目录内容的最前面
-    if (editing && editing.mode !== "rename" && editing.parent === path) rows.push(editRow(editing));
-    if (!state || state.status === "loading") {
-      rows.push(
-        <TreeRowNote key={`${path}#l`} padLeft={notePad}>
-          加载中…
-        </TreeRowNote>,
-      );
-      return rows;
-    }
-    if (state.status === "error") {
-      rows.push(
-        <TreeRowNote key={`${path}#e`} padLeft={notePad} tone="bad" title={state.message}>
-          读取失败：{state.message}
-        </TreeRowNote>,
-      );
-      return rows;
-    }
-    if (state.items.length === 0 && !(editing && editing.parent === path)) {
-      rows.push(
-        <TreeRowNote key={`${path}#0`} padLeft={notePad}>
-          （空目录）
-        </TreeRowNote>,
-      );
-    }
-    for (const item of state.items) {
-      const full = joinPath(path, item.name);
-      if (editing && editing.mode === "rename" && editing.target?.toLowerCase() === full.toLowerCase()) {
-        rows.push(editRow(editing));
-        continue;
-      }
-      if (item.isDir) {
-        const open = expanded.has(full);
-        rows.push(
-          <TreeDirRow
-            key={full}
-            name={item.name}
-            path={full}
-            id={rowId(full)}
-            level={depth + 1}
-            open={open}
-            selected={selected?.path === full}
-            padLeft={6 + depth * 14}
-            onToggle={(p) => {
-              setSelected({ path: p, isDir: true });
-              toggle(p);
-            }}
-            onContextMenu={openMenu}
-          />,
-        );
-        if (open) rows.push(...renderDir(full, depth + 1));
-      } else {
-        rows.push(
-          <TreeFileRow
-            key={full}
-            name={item.name}
-            path={full}
-            id={rowId(full)}
-            level={depth + 1}
-            active={activePath === full}
-            selected={selected?.path === full}
-            mark={marks[full]}
-            padLeft={6 + depth * 14 + 20}
-            onOpen={(p) => {
-              setSelected({ path: p, isDir: false });
-              onOpen(p);
-            }}
-            onPin={onPin}
-            onContextMenu={openMenu}
-          />,
-        );
-      }
-    }
-    return rows;
+  const ctx: TreeRowsCtx = {
+    dirs,
+    expanded,
+    activePath,
+    selectedPath: selected?.path ?? null,
+    marks,
+    filter: filterFn,
+    editing,
+    editError,
+    busy,
+    ...handlers,
   };
 
   return (
@@ -259,42 +269,24 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
           if (e.target === e.currentTarget) openMenu(e, root, true);
         }}
       >
-        {renderDir(root, 0)}
+        {filter && <TreeFilterBar filter={filter} count={flat.length} onClear={() => setFilter("")} />}
+        <TreeRows dir={root} depth={0} ctx={ctx} />
       </div>
 
       {menu && (
-        <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          items={menuItems(menu)}
-          onClose={() => setMenu(null)}
-        />
+        <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} />
       )}
 
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        title={`删除${pendingDelete?.isDir ? "文件夹" : "文件"} ${baseName(pendingDelete?.path ?? "")}？`}
-        description={
-          pendingDelete
-            ? pendingDelete.isDir
-              ? // 后端数到 20000 就不再数了，会回 20001 表示「还要多」——
-                // 直接显示 20001 会让人以为是个精确值
-                `共 ${pendingDelete.files > 20000 ? "20000+" : pendingDelete.files} 个文件${pendingDelete.labels > 0 ? `，其中 ${pendingDelete.labels} 个已在标签中打开` : ""}。`
-              : pendingDelete.labels > 0
-                ? "这个文件正在标签里打开，删除后标签会一并关闭。"
-                : undefined
-            : undefined
-        }
-        variant="destructive"
-        confirmLabel="删除"
+      <TreeDeleteConfirm
+        pending={pendingDelete}
         onCancel={cancelDelete}
         onConfirm={() => void confirmDelete()}
-      >
-        <div className="wb-danger-note">
-          <Icon name="alertTriangle" size={13} />
-          直接删除，不进回收站，无法撤销
-        </div>
-      </ConfirmDialog>
+      />
     </>
   );
 });
+
+/**
+ * 删除确认的正文（文件数 / 打开中的标签 / 未保存的修改 / 引用提示）在 `lib/treeDeleteText`：
+ * 这里是接线而不是措辞，况且那段判断值得单测。
+ */

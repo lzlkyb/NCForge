@@ -300,12 +300,37 @@ pub fn build_initialize_params(root_path: &str, runtime_home: &str, process_id: 
         "workspaceFolders": [{ "uri": root_uri, "name": "nc-forge" }],
         "capabilities": {
             "textDocument": {
-                "completion": { "completionItem": { "snippetSupport": false } },
+                // snippetSupport 开：jdt.ls 的模板补全（sout / fori…）才会下发。
+                // 前端按 insertTextFormat 分派到 Monaco 的 InsertAsSnippet，
+                // 不开这个的话 `${1:...}` 只能当纯文本插入（或干脆没有模板补全）。
+                "completion": { "completionItem": { "snippetSupport": true } },
                 "hover": { "contentFormat": ["markdown", "plaintext"] },
                 "definition": { "linkSupport": false },
                 "signatureHelp": {},
                 "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
-                "publishDiagnostics": {}
+                "publishDiagnostics": {},
+                // 下面四项 jdt.ls 0.57 都有 handler，不声明它就不注册。
+                // 声明了但服务端不支持也没副作用（请求会返回空）。
+                "foldingRange": { "lineFoldingOnly": false },
+                "documentHighlight": {},
+                "selectionRange": {},
+                "callHierarchy": {},
+                // codeActionLiteralSupport 必须给：没有它，jdt.ls 只回 Command，
+                // `context.only`（组织导入 / 生成方法）就没法按 kind 过滤。
+                "codeAction": {
+                    "codeActionLiteralSupport": {
+                        "codeActionKind": {
+                            "valueSet": [
+                                "quickfix",
+                                "refactor",
+                                "source",
+                                "source.organizeImports",
+                                "source.overrideMethods",
+                                "source.implementMethods"
+                            ]
+                        }
+                    }
+                }
             },
             "workspace": {
                 "workspaceFolders": true,

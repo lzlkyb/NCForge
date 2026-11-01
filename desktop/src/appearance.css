@@ -99,7 +99,7 @@ html.dark[data-ui-style="glass"] .app-boot-fade {
 .app-shell .app-topbar::after {
   content: ""; position: absolute; inset: auto 0 -14px; height: 16px;
   background: linear-gradient(to bottom, hsl(var(--background) / .85), transparent);
-  pointer-events: none; opacity: 0; transition: opacity var(--dur-exit) ease-out;
+  pointer-events: none; opacity: 0; transition: opacity var(--dur-enter) var(--ease);
 }
 html[data-ui-style="glass"] .app-topbar::after {
   background: linear-gradient(to bottom, rgb(231 237 246 / .72), transparent);
