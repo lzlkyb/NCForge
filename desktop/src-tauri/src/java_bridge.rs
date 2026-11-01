@@ -84,6 +84,12 @@ struct Shared {
     pending: Mutex<HashMap<u64, Sender<serde_json::Value>>>,
     /// 请求 id 从 1 开始递增；`0` 留给我们主动发的 `cancel`（它不需要等响应）。
     next_id: AtomicU64,
+    /// 桥进程的"代数"。每拉起一次 +1。
+    ///
+    /// 只为一件事：上一代的读线程/杀进程路径在收尾时会清空 `pending`，如果那时
+    /// 新进程已经起来了、新调用已经登记了收件箱，这一清就会把好端端在等结果的
+    /// 调用判成"桥已退出"。清之前比对代数，不是自己那一代就不许动。
+    gen: AtomicU64,
 }
 
 impl Shared {
@@ -93,6 +99,7 @@ impl Shared {
             child: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
+            gen: AtomicU64::new(0),
         }
     }
 
@@ -106,6 +113,15 @@ impl Shared {
 
     fn lock_pending(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Sender<serde_json::Value>>> {
         self.pending.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// 清空信箱，但只清「自己那一代」的。代数已经翻篇说明新进程起来了，
+    /// 里面的收件箱属于新调用，动了就是误判它们的进程已退出。
+    fn clear_pending_for(&self, gen: u64) {
+        let mut p = self.lock_pending();
+        if self.gen.load(Ordering::SeqCst) == gen {
+            p.clear();
+        }
     }
 }
 
@@ -360,6 +376,9 @@ impl Bridge {
 
     /// 杀掉进程并清空所有等待者（它们会收到 Disconnected 而各自报错）。
     fn kill(&self) {
+        // 代理要在收尾前就定下来：这期间可能有新进程被拉起（gen 已经 +1），
+        // 那种情况下信箱里躺的是新调用的收件箱，不能清。
+        let gen = self.shared.gen.load(Ordering::SeqCst);
         // 先关 stdin：桥侧的读循环会因此收到 EOF 而自己退出
         if let Some(mut stdin) = self.shared.lock_stdin().take() {
             let _ = stdin.flush();
@@ -368,7 +387,7 @@ impl Bridge {
             let _ = child.kill();
             let _ = child.wait();
         }
-        self.shared.lock_pending().clear();
+        self.shared.clear_pending_for(gen);
     }
 
     /// 确认进程在跑；不在就拉一个（并发首次调用只会有一个真的去拉）。
@@ -434,7 +453,10 @@ impl Bridge {
             .take()
             .ok_or_else(|| BridgeError::new("spawn", "桥进程没有 stderr"))?;
 
-        self.start_reader(stdout)?;
+        // 新一代进程：读线程带着这个号，收尾时只允许清属于自己那一代的收件箱。
+        // 否则旧进程的读线程晚一步到 EOF，会把新进程上正在等的调用统统判成"已退出"。
+        let gen = self.shared.gen.fetch_add(1, Ordering::SeqCst) + 1;
+        self.start_reader(stdout, gen)?;
         self.start_log_pump(stderr)?;
 
         *self.shared.lock_stdin() = Some(stdin);
@@ -443,7 +465,7 @@ impl Bridge {
     }
 
     /// stdout 读取线程：按 id 把每一行投递给对应的等待者。
-    fn start_reader(&self, stdout: std::process::ChildStdout) -> Result<(), BridgeError> {
+    fn start_reader(&self, stdout: std::process::ChildStdout, gen: u64) -> Result<(), BridgeError> {
         let shared = self.shared.clone();
         let tail = self.stderr_tail.clone();
         std::thread::Builder::new()
@@ -489,7 +511,8 @@ impl Bridge {
                     }
                 }
                 // EOF：进程没了。清空信箱让所有等待者立刻收到 Disconnected 而不是干等超时。
-                shared.lock_pending().clear();
+                // 只清自己这一代：旧进程的读线程可能晚于新进程的启动才走到这里。
+                shared.clear_pending_for(gen);
             })
             .map_err(|e| BridgeError::new("spawn", format!("起桥读取线程失败: {e}")))?;
         Ok(())
@@ -634,6 +657,22 @@ mod tests {
             };
         }
         assert!(shared.lock_pending().is_empty(), "离开作用域就该摘掉");
+    }
+
+    #[test]
+    fn 旧代读线程退出不清新代收件箱() {
+        let shared = Arc::new(Shared::new());
+        let old_gen = shared.gen.fetch_add(1, Ordering::SeqCst) + 1;
+        // 旧进程死了，新进程已经拉起，新调用也登记了收件箱
+        shared.gen.fetch_add(1, Ordering::SeqCst);
+        let (tx, _rx) = mpsc::channel();
+        shared.lock_pending().insert(7, tx);
+        // 旧读线程这时才走到 EOF
+        shared.clear_pending_for(old_gen);
+        assert_eq!(shared.lock_pending().len(), 1, "新代的收件箱必须留着");
+        // 同一代的收尾才该清干净
+        shared.clear_pending_for(shared.gen.load(Ordering::SeqCst));
+        assert!(shared.lock_pending().is_empty());
     }
 
     #[test]

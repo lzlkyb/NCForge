@@ -179,7 +179,9 @@ pub fn qualified(schema: Option<&str>, table: &str) -> String {
     }
 }
 
-fn quote_ident(s: &str) -> String {
+/// 非普通标识符加双引号。`db_file_export` 的 INSERT 列清单也走这里——
+/// 两处各写一份，迟早会有一处忘记转义列名里的双引号。
+pub(crate) fn quote_ident(s: &str) -> String {
     let plain = !s.is_empty()
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$' || c == '#')

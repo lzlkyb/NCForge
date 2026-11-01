@@ -456,6 +456,9 @@ pub struct ExportFileReq {
     /// 行数上限；缺省 / 0 = 不限（仍受 [`STREAM_MAX_ROWS`] 约束）。
     pub max_rows: Option<usize>,
     pub timeout_sec: Option<u32>,
+    /// 前端给的导出实例号（用于「只取消这一次导出」）。没给就由后端自增。
+    #[serde(default)]
+    pub export_id: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -523,21 +526,24 @@ pub async fn db_export_file(
                 .to_string()
         })?;
 
-    // 上一轮取消可能没被消费（用户点了取消但导出恰好已结束）：每次开跑先复位。
-    st.export_cancel.store(false, Ordering::SeqCst);
+    // 每次导出一个独立取消令牌：同时导出两个结果页时，取消 A 不能把 B 也停掉，
+    // A 开跑时的复位也不能吞掉 B 刚点的取消（以前共用一个全局 AtomicBool，两个都中招）。
+    let export_id = req
+        .export_id
+        .unwrap_or_else(|| SEQ.fetch_add(1, Ordering::Relaxed));
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    st.export_cancels
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(export_id, cancel.clone());
     let res = stream_to_file(
-        &app,
-        &handle,
-        &req.id,
-        &sql,
-        &path,
-        fmt,
-        table,
-        limit,
-        timeout,
-        &st.export_cancel,
+        &app, &handle, &req.id, &sql, &path, fmt, table, limit, timeout, export_id, &cancel,
     )
     .await;
+    st.export_cancels
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&export_id);
     // 导出会话用完就断，不留在服务端占连接
     let _ = call(handle, "disconnect", vec![], Duration::from_secs(10)).await;
     drop_bridge(&st, &key);
@@ -555,10 +561,19 @@ pub async fn db_export_file(
     })
 }
 
-/// 用户取消流式导出：只置标志，真正的停止发生在下一页开始前。
+/// 用户取消某一次流式导出：只置标志，真正的停止发生在下一页开始前。
+///
+/// `id` 来自前端（`ExportFileReq.exportId`）。找不到 = 这次导出已经结束，忽略即可；
+/// 不能退回「取消所有导出」——那正是旧全局标志的问题。
 #[tauri::command]
-pub fn db_export_cancel(state: tauri::State<'_, Arc<AppState>>) {
-    state.export_cancel.store(true, Ordering::SeqCst);
+pub fn db_export_cancel(state: tauri::State<'_, Arc<AppState>>, id: u64) {
+    let map = state
+        .export_cancels
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if let Some(token) = map.get(&id) {
+        token.store(true, Ordering::SeqCst);
+    }
 }
 
 struct Streamed {
@@ -567,7 +582,11 @@ struct Streamed {
     canceled: bool,
 }
 
-/// 取第一页 → 逐页写盘 → 每页发一次进度。
+/// 取第一页 → 逐页写盘 → 每页发一次进度；先写同目录临时文件，成功后再原子改名。
+///
+/// 不直接写目标文件的原因：中途失败（断连/磁盘满/进程被杀）会留下一个**截断但看起来正常**
+/// 的 CSV，用户拿去用才发现少了半张表。临时文件 + 改名保证「出现即完整」；取消时也照常
+/// 改名——已写入的行是合法前缀，文件里就是那部分数据。
 #[allow(clippy::too_many_arguments)]
 async fn stream_to_file(
     app: &AppHandle,
@@ -579,86 +598,116 @@ async fn stream_to_file(
     table: &str,
     limit: usize,
     timeout: u32,
+    export_id: u64,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Streamed, String> {
-    let mut body = call(
-        handle.clone(),
-        "exec",
-        vec![
-            sql.to_string(),
-            STREAM_PAGE.to_string(),
-            timeout.to_string(),
-        ],
-        Duration::from_secs(u64::from(timeout) + 30),
-    )
-    .await?;
-    if body.get("kind").and_then(Value::as_str) != Some("rows") {
-        return Err("这条语句不返回结果集（导出要 select）".to_string());
-    }
-    let cols = parse_cols(&body)?;
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("export");
+    let tmp = path.with_file_name(format!(".{file_name}.{}.nc-tmp", std::process::id()));
 
-    let file =
-        std::fs::File::create(path).map_err(|e| format!("建文件失败 {}: {e}", path.display()))?;
-    let mut w = RowWriter::new(BufWriter::with_capacity(64 * 1024, file), fmt, cols, table)
-        .map_err(|e| format!("写文件头失败：{e}"))?;
-
-    let mut written = 0usize;
-    let mut truncated = false;
-    let mut canceled = false;
-    loop {
-        // 已取回的这一页照常写完再停：请求已经发出去，必须知道它成功没有。
-        if cancel.load(Ordering::SeqCst) {
-            canceled = true;
-            break;
-        }
-        let has_more = body
-            .get("hasMore")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        for row in body
-            .get("rows")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            if written >= limit {
-                truncated = true;
-                break;
-            }
-            let cells: Vec<Option<String>> = row
-                .as_array()
-                .map(|a| a.iter().map(cell_text).collect())
-                .unwrap_or_default();
-            w.push(&cells).map_err(|e| format!("写文件失败：{e}"))?;
-            written += 1;
-        }
-        // 每页一次进度：前端只需要「已经写了多少行」，不需要每一行
-        let _ = app.emit(
-            "db:export-progress",
-            serde_json::json!({ "id": conn_id, "rows": written }),
-        );
-        if truncated || !has_more {
-            break;
-        }
-        let left = limit.saturating_sub(written).min(STREAM_PAGE);
-        body = call(
+    let res: Result<Streamed, String> = async {
+        let mut body = call(
             handle.clone(),
-            "more",
-            vec![left.max(1).to_string()],
+            "exec",
+            vec![
+                sql.to_string(),
+                STREAM_PAGE.to_string(),
+                timeout.to_string(),
+            ],
             Duration::from_secs(u64::from(timeout) + 30),
         )
         .await?;
+        if body.get("kind").and_then(Value::as_str) != Some("rows") {
+            return Err("这条语句不返回结果集（导出要 select）".to_string());
+        }
+        let cols = parse_cols(&body)?;
+
+        let file = std::fs::File::create(&tmp)
+            .map_err(|e| format!("建临时文件失败 {}: {e}", tmp.display()))?;
+        let mut w = RowWriter::new(BufWriter::with_capacity(64 * 1024, file), fmt, cols, table)
+            .map_err(|e| format!("写文件头失败：{e}"))?;
+
+        let mut written = 0usize;
+        let mut truncated = false;
+        let mut canceled = false;
+        loop {
+            // 已取回的这一页照常写完再停：请求已经发出去，必须知道它成功没有。
+            if cancel.load(Ordering::SeqCst) {
+                canceled = true;
+                break;
+            }
+            let has_more = body
+                .get("hasMore")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            for row in body
+                .get("rows")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if written >= limit {
+                    truncated = true;
+                    break;
+                }
+                let cells: Vec<Option<String>> = row
+                    .as_array()
+                    .map(|a| a.iter().map(cell_text).collect())
+                    .unwrap_or_default();
+                w.push(&cells).map_err(|e| format!("写文件失败：{e}"))?;
+                written += 1;
+            }
+            // 每页一次进度：前端只需要「已经写了多少行」，不需要每一行
+            let _ = app.emit(
+                "db:export-progress",
+                serde_json::json!({ "id": conn_id, "exportId": export_id, "rows": written }),
+            );
+            if truncated || !has_more {
+                break;
+            }
+            let left = limit.saturating_sub(written).min(STREAM_PAGE);
+            body = call(
+                handle.clone(),
+                "more",
+                vec![left.max(1).to_string()],
+                Duration::from_secs(u64::from(timeout) + 30),
+            )
+            .await?;
+        }
+        let out = w.finish().map_err(|e| format!("收尾写文件失败：{e}"))?;
+        // sync_all 必须报出来：它失败说明数据可能还在系统缓存里，而下面马上就要
+        // 把它当「已导出」报告给用户。
+        let file = out
+            .into_inner()
+            .map_err(|e| format!("刷新缓冲区失败：{e}"))?;
+        file.sync_all()
+            .map_err(|e| format!("把导出文件刷到磁盘失败：{e}"))?;
+        Ok(Streamed {
+            rows: written,
+            truncated,
+            canceled,
+        })
     }
-    let out = w.finish().map_err(|e| format!("收尾写文件失败：{e}"))?;
-    out.into_inner()
-        .map_err(|e| format!("刷新缓冲区失败：{e}"))?
-        .sync_all()
-        .ok();
-    Ok(Streamed {
-        rows: written,
-        truncated,
-        canceled,
-    })
+    .await;
+
+    match res {
+        Ok(v) => {
+            if let Err(e) = std::fs::rename(&tmp, path) {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(format!(
+                    "替换导出文件失败（{} 可能被别的程序占用）：{e}",
+                    path.display()
+                ));
+            }
+            Ok(v)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
 }
 
 fn parse_cols(body: &Value) -> Result<Vec<ResultCol>, String> {

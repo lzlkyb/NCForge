@@ -75,7 +75,13 @@ pub fn user_auth_dir() -> Option<PathBuf> {
 ///
 /// 同一台机器可能有多个 SVN 服务器（本机就有一条 `svn://10.201.17.8` 的旧记录），
 /// 所以必须按 host 过滤，不能「取第一条」——取错就是拿着别人的账号去连另一台服务器。
+///
+/// `host_hint` 为空（URL 是 `file://` 或根本解析不出来）时直接返回 `None`：
+/// 空串对 `contains` 永远成立，等于退化成「取第一条」，正是上面要避免的事。
 pub fn find_cached(auth_dir: &Path, host_hint: &str) -> Option<AuthRecord> {
+    if host_hint.trim().is_empty() {
+        return None;
+    }
     let entries = std::fs::read_dir(auth_dir).ok()?;
     let mut best: Option<AuthRecord> = None;
     for e in entries.flatten() {
@@ -258,6 +264,20 @@ mod tests {
         );
         assert_eq!(host_of("https://user@svn.corp/svn/x"), "svn.corp");
         assert_eq!(host_of("乱写的"), "");
+    }
+
+    #[test]
+    fn 主机为空时不去翻认证缓存() {
+        let d = std::env::temp_dir().join(format!("ncsvncred-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("cached"), SAMPLE).unwrap();
+        // 空 hint 对 contains 恒真，等于「取第一条」——会把别人的账号拿去连本地库
+        assert!(find_cached(&d, "").is_none());
+        assert!(find_cached(&d, "  ").is_none());
+        assert!(find_cached(&d, "10.200.22.231").is_some());
+        assert!(find_cached(&d, "10.201.17.8").is_none());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

@@ -21,7 +21,8 @@ pub struct AppState {
     ///
     /// 没有它的时候每个命令都是「读全量 → 改一个字段 → 写全量」：设置页拨开关的同时
     /// 服务页改堆上限，两边各拿一份旧快照，后写的那次把另一次改动整个抹掉，
-    /// 而两边都显示保存成功。普通 Mutex 够了——临界区里没有 await（只有内存拷贝与写盘）。
+    /// 而两边都显示保存成功。临界区里只有内存拷贝和一个 `spawn_blocking` 的写盘，
+    /// 锁跨过它是刻意的：写入顺序必须与修改顺序一致。
     config_write: tokio::sync::Mutex<()>,
     /// 配置目录（`{config_dir}`，与 data_dir 相同）。
     pub config_dir: std::path::PathBuf,
@@ -57,11 +58,19 @@ pub struct AppState {
     /// 杀进程。放在 AppState 上而不是模块级 static：它跟一个应用实例同生命周期，
     /// 测试里也不会互相污染（本文件头注释的同一条纪律）。
     pub compile_cancel: std::sync::atomic::AtomicBool,
-    /// 流式导出的取消标志（`db_export_cancel` 置位，`stream_to_file` 每页检查一次）。
+    /// 流式导出的取消标志，**按导出实例**登记（`db_export_cancel(id)` 置位）。
     ///
-    /// 与 `compile_cancel` 一样只置标志、不做中断：正在飞的那一页必须写完，
-    /// 否则前端不知道这一页到底提交没有。取消后保留已经写入的部分文件（合法前缀）。
-    pub export_cancel: std::sync::atomic::AtomicBool,
+    /// 以前是一个全局 `AtomicBool`：两个结果页同时导出时，取消其中一个会把另一个也停掉；
+    /// 而且 A 导出开始时复位标志，会把 B 刚点的取消吞掉。与 `compile_cancel` 一样只置
+    /// 标志、不做中断：正在飞的那一页必须写完，否则前端不知道这一页到底提交没有。
+    /// 取消后保留已经写入的部分文件（合法前缀）。
+    pub export_cancels:
+        std::sync::Mutex<std::collections::HashMap<u64, Arc<std::sync::atomic::AtomicBool>>>,
+    /// 补丁出包的取消标志（`patch_build_cancel` 置位，`write_package` 每写一项检查一次）。
+    ///
+    /// 同一时刻只允许一个出包（界面只有一个按钮、重复点击被 `building` 挡住），
+    /// 所以不需要按 id 分账；置位后正在写的那一项写完即停，临时文件被删掉。
+    pub patch_cancel: std::sync::atomic::AtomicBool,
     /// 退出已获放行：`CloseRequested` 看到它就真的让窗口关（进程随后退出）。
     ///
     /// 为什么需要这个标志：关窗时前端要先问一遍「有未提交的事务吗」，同步的窗口
@@ -94,7 +103,8 @@ impl AppState {
             db_procs: std::sync::Mutex::new(Default::default()),
             lang: std::sync::Mutex::new(Default::default()),
             compile_cancel: std::sync::atomic::AtomicBool::new(false),
-            export_cancel: std::sync::atomic::AtomicBool::new(false),
+            export_cancels: std::sync::Mutex::new(Default::default()),
+            patch_cancel: std::sync::atomic::AtomicBool::new(false),
             quit_approved: std::sync::atomic::AtomicBool::new(false),
             quit_acked: std::sync::atomic::AtomicBool::new(false),
             quit_checking: std::sync::atomic::AtomicBool::new(false),
@@ -116,7 +126,14 @@ impl AppState {
         let _serialized = self.config_write.lock().await;
         let mut cfg = self.config.read().await.clone();
         edit(&mut cfg)?;
-        crate::config::save_config(&self.config_dir, &cfg)?;
+        // 写盘放阻塞线程：落盘是 fs::write + rename，赶上杀软/机械盘要几十毫秒，
+        // 直接在 async 任务里做会把整个运行时的那条工作线程钉住（同一时刻的
+        // 其它命令、定时器都得等它）。闸门仍然罩着这一段，写入顺序不变。
+        let dir = self.config_dir.clone();
+        let to_save = cfg.clone();
+        tokio::task::spawn_blocking(move || crate::config::save_config(&dir, &to_save))
+            .await
+            .map_err(|e| format!("保存配置的后台任务异常退出：{e}"))??;
         *self.config.write().await = cfg.clone();
         Ok(cfg)
     }

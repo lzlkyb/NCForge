@@ -302,6 +302,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::patch_defaults,
             commands::patch_scan,
             commands::patch_build,
+            commands::patch_build_cancel,
             commands::patch_set_out_dir,
             commands::patch_set_out_root,
             commands::patch_reveal,

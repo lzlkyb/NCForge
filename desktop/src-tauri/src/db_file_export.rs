@@ -55,10 +55,14 @@ impl Format {
 ///
 /// `-` 与 `+` 只在后面不是纯数字时才算风险：负数是最常见的数据，给每个 `-1`
 /// 前面加撇号会把整列数字变成文本，代价比防住公式大得多。
+///
+/// 前面有空白时先剥掉再判：导入器带「去掉前导空格」选项时（LibreOffice Calc
+/// 默认就勾着），` =1+1` 会先变成 `=1+1` 再求值，只盯第一个字符就漏了。
 fn formula_risk(s: &str) -> bool {
-    match s.chars().next() {
-        Some('=' | '@' | '\t' | '\r') => true,
-        Some('+' | '-') => s.trim().parse::<f64>().is_err(),
+    let t = s.trim_start_matches([' ', '\t', '\r', '\n']);
+    match t.chars().next() {
+        Some('=' | '@') => true,
+        Some('+' | '-') => t.trim().parse::<f64>().is_err(),
         _ => false,
     }
 }
@@ -110,6 +114,8 @@ pub struct RowWriter<W: Write> {
     fmt: Format,
     cols: Vec<ResultCol>,
     table: String,
+    /// INSERT 的列清单（已按 Oracle 规则加引号）。每条语句都要用，建一次省几千次格式化。
+    insert_cols: String,
     rows: usize,
     /// 复用同一块缓冲：十万行时逐行 `format!` 会产生十万次分配
     buf: String,
@@ -152,8 +158,14 @@ impl<W: Write> RowWriter<W> {
         Ok(Self {
             out,
             fmt,
+            insert_cols: cols
+                .iter()
+                .map(|c| sql_export::quote_ident(&c.name))
+                .collect::<Vec<_>>()
+                .join(", "),
+            // 表名同样要加引号：带空格/保留字/中文时裸拼出来的 insert 跑不通
+            table: sql_export::qualified(None, table),
             cols,
-            table: table.to_string(),
             rows: 0,
             buf: String::new(),
         })
@@ -196,8 +208,7 @@ impl<W: Write> RowWriter<W> {
                 self.buf.push_str("insert into ");
                 self.buf.push_str(&self.table);
                 self.buf.push_str(" (");
-                let names: Vec<&str> = self.cols.iter().map(|c| c.name.as_str()).collect();
-                self.buf.push_str(&names.join(", "));
+                self.buf.push_str(&self.insert_cols);
                 self.buf.push_str(") values (");
                 for i in 0..self.cols.len() {
                     if i > 0 {
@@ -309,6 +320,10 @@ mod tests {
         assert_eq!(csv_field("@SUM(A1)"), "\"'@SUM(A1)\"");
         assert_eq!(csv_field("+CMD"), "\"'+CMD\"");
         assert_eq!(csv_field("-2+3"), "\"'-2+3\"");
+        // 前导空白挡不住：导入器勾了「去前导空格」就会拿掉再求值
+        assert_eq!(csv_field("  =1+1"), "\"'  =1+1\"");
+        assert_eq!(csv_field("\t@SUM(A1)"), "\"'\t@SUM(A1)\"");
+        assert_eq!(csv_field(" -1"), " -1", "带空格的负数仍然是数字");
         assert_eq!(tsv_field("=HYPERLINK(\"x\")"), "'=HYPERLINK(\"x\")");
         assert_eq!(tsv_field("-1"), "-1");
     }

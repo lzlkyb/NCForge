@@ -638,7 +638,9 @@ pub async fn lang_request(
     timeout_ms: Option<u64>,
 ) -> Result<Value, String> {
     let (session, p) = prepare(&state, path.as_deref(), &params)?;
-    let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000));
+    // 夹住：0 会让请求发出去就判定超时（前端拿到的错误是"超时"而不是真实原因），
+    // 过大的值则让一个卡死的 jdt.ls 调用长期占着工作线程。
+    let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000).clamp(1_000, 120_000));
     tauri::async_runtime::spawn_blocking(move || {
         let out = session.client.request(&method, p, timeout)?;
         Ok(session.from_server(&out))

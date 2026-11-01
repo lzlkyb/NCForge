@@ -9,10 +9,11 @@
 //!    「刚才还能打、现在不能打」的假结论。
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use crate::config::AppConfig;
 use crate::patch_build::{self, BuildOptions, BuildRequest, BuildResult, ScanResult};
@@ -225,6 +226,7 @@ pub async fn patch_scan(
 /// 出包。会先重新扫一遍，保证「看到的清单」与「打出来的包」是同一份。
 #[tauri::command]
 pub async fn patch_build(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     args: BuildArgs,
 ) -> Result<BuildResult, String> {
@@ -262,9 +264,25 @@ pub async fn patch_build(
         sqls,
         date: args.date,
     };
-    tauri::async_runtime::spawn_blocking(move || patch_build::build(&req))
-        .await
-        .map_err(|e| format!("出包失败：{e}"))?
+    // 上一次取消可能没被消费（用户点了取消但出包恰好已结束）：每次开跑先复位。
+    st.patch_cancel.store(false, Ordering::SeqCst);
+    tauri::async_runtime::spawn_blocking(move || {
+        let emit_app = app.clone();
+        patch_build::build(&req, &st.patch_cancel, &move |done, total| {
+            let _ = emit_app.emit(
+                "patch:build-progress",
+                serde_json::json!({ "done": done, "total": total }),
+            );
+        })
+    })
+    .await
+    .map_err(|e| format!("出包失败：{e}"))?
+}
+
+/// 取消正在进行的出包：只置标志，当前正在写的那一项写完即停，临时文件会被删掉。
+#[tauri::command]
+pub fn patch_build_cancel(state: tauri::State<'_, Arc<AppState>>) {
+    state.patch_cancel.store(true, Ordering::SeqCst);
 }
 
 /// 输出目录 / 产物根 / NC home 的当前建议值。

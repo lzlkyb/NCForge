@@ -18,6 +18,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -708,9 +709,12 @@ fn read_bytes(p: &Path) -> Result<Vec<u8>, String> {
 }
 
 /// 备份已有的同名包：`<zip>.bak-<yyyymmddHHMMSS>`（与脚本的 `date +%Y%m%d%H%M%S` 同名格式）。
-fn backup_existing(zip: &Path) -> Option<String> {
+///
+/// 失败必须报给调用方：`.ok()` 吞掉之后界面会显示「已生成」而 `backup` 是 `None`，
+/// 用户以为没有旧包覆盖过；更糟的是旧包此刻可能已经复制了一半。
+fn backup_existing(zip: &Path) -> Result<Option<String>, String> {
     if !zip.is_file() {
-        return None;
+        return Ok(None);
     }
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -731,13 +735,25 @@ fn backup_existing(zip: &Path) -> Option<String> {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default()
     ));
-    std::fs::copy(zip, &bak)
-        .ok()
-        .map(|_| bak.display().to_string())
+    std::fs::copy(zip, &bak).map_err(|e| {
+        format!(
+            "备份旧补丁包失败（{}）：{e}。旧包没有被覆盖，可以重试或先手工挪走它",
+            bak.display()
+        )
+    })?;
+    Ok(Some(bak.display().to_string()))
 }
 
 /// 出包。会先重新扫一遍，保证「清单看到的」与「打进包的」是同一份。
-pub fn build(req: &BuildRequest) -> Result<BuildResult, String> {
+///
+/// `canceled` 每写一项检查一次（读源码/class/SQL 都是 IO，几十项时取消才有意义）；
+/// `on_progress(已完成项, 总项)` 由命令层转成 Tauri 事件给界面画进度。
+/// 取消与失败走同一条清理路径：临时文件删掉，**正在用的旧包一个字节都不动**。
+pub fn build(
+    req: &BuildRequest,
+    canceled: &AtomicBool,
+    on_progress: &dyn Fn(usize, usize),
+) -> Result<BuildResult, String> {
     if req.files.is_empty() {
         return Err("没有勾选任何文件".to_string());
     }
@@ -822,6 +838,9 @@ pub fn build(req: &BuildRequest) -> Result<BuildResult, String> {
     // 这里读不到就直接失败（`?`）：留到写 zip 中途才失败，等于已备份 + 半截包。
     let mut md_entries: Vec<pv::MdEntry> = Vec::new();
     for item in &scan.items {
+        if canceled.load(Ordering::SeqCst) {
+            return Err("已取消出包：没有生成新的补丁包（旧包未动）".to_string());
+        }
         let working = read_bytes(Path::new(&item.path))?;
         let base = svn_base(Path::new(&item.path));
         let kind = match item.section {
@@ -844,18 +863,38 @@ pub fn build(req: &BuildRequest) -> Result<BuildResult, String> {
     let iso_date = format!("{}-{}-{}", &date[0..4], &date[4..6], &date[6..8]);
     let md = pv::build_changes_md(&req.note, &iso_date, &md_entries, &sql_names);
 
-    // 校验全过了才备份旧包
-    let backup = backup_existing(&zip_path);
+    // 先写同目录临时文件，成功后再备份旧包并改名。
+    //
+    // 以前直接写正式文件名、并在写之前就备份：写 zip 中途失败时旧包已被改名成 .bak、
+    // 新包又被删掉，输出目录里的正式包凭空消失。现在的顺序保证任何失败都只损失临时文件。
+    let file_name = zip_path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "patch.zip".to_string());
+    let tmp = zip_path.with_file_name(format!(".{file_name}.{}.nc-tmp", std::process::id()));
 
-    // 写 zip：中途任何一步失败都要把半截文件删掉——残缺的 zip 留在输出目录里，
-    // 售后会当真包拿去上线。
-    let (entries, class_count) = match write_package(&zip_path, &scan.items, &md, &req.sqls) {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = std::fs::remove_file(&zip_path);
-            return Err(e);
-        }
-    };
+    on_progress(0, scan.items.len());
+    let (entries, class_count) =
+        match write_package(&tmp, &scan.items, &md, &req.sqls, canceled, on_progress) {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                if canceled.load(Ordering::SeqCst) {
+                    return Err("已取消出包：没有生成新的补丁包（旧包未动）".to_string());
+                }
+                return Err(e);
+            }
+        };
+
+    // 包已经完整写在临时文件里了，这时才碰旧包
+    let backup = backup_existing(&zip_path)?;
+    if let Err(e) = std::fs::rename(&tmp, &zip_path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!(
+            "替换补丁包失败（{} 可能被别的程序占用）：{e}",
+            zip_path.display()
+        ));
+    }
 
     Ok(BuildResult {
         zip_path: zip_path.display().to_string(),
@@ -867,12 +906,15 @@ pub fn build(req: &BuildRequest) -> Result<BuildResult, String> {
     })
 }
 
-/// 写 zip 本体：返回（条目数，编译产物数）。失败时不负责清理半截文件（见调用方）。
+/// 写 zip 本体：返回（条目数，编译产物数）。写到调用方给的（临时）路径；
+/// 失败或取消时不在这里清理——调用方统一删。
 fn write_package(
     zip_path: &Path,
     items: &[PatchItem],
     md: &str,
     sqls: &[String],
+    canceled: &AtomicBool,
+    on_progress: &dyn Fn(usize, usize),
 ) -> Result<(usize, usize), String> {
     let file = std::fs::File::create(zip_path).map_err(|e| format!("建不了补丁包：{e}"))?;
     let mut zw = zip::ZipWriter::new(std::io::BufWriter::new(file));
@@ -914,7 +956,10 @@ fn write_package(
     entries += 1;
 
     let mut class_count = 0usize;
-    for item in items {
+    for (i, item) in items.iter().enumerate() {
+        if canceled.load(Ordering::SeqCst) {
+            return Err("已取消出包".to_string());
+        }
         let base = item
             .pkg_rel
             .rsplit('/')
@@ -933,9 +978,13 @@ fn write_package(
             entries += 1;
             class_count += 1;
         }
+        on_progress(i + 1, items.len());
     }
 
     for s in sqls {
+        if canceled.load(Ordering::SeqCst) {
+            return Err("已取消出包".to_string());
+        }
         let p = Path::new(s);
         let name = p
             .file_name()
@@ -1135,6 +1184,55 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn 取消标志先于读文件生效() {
+        // 取消后不应该再去碰磁盘：路径故意指向不存在的文件，
+        // 如果实现先 read_bytes 再查标志，这里报的会是「读不到」而不是「已取消」。
+        let dir = std::env::temp_dir().join(format!("ncp-cancel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let zip = dir.join("pkg.zip");
+        let item = PatchItem {
+            path: dir.join("nope.java").display().to_string(),
+            rel: "ic/private/nc/bs/X.java".into(),
+            label: "ic/private/nc/bs/X.java".into(),
+            module: "ic".into(),
+            section: pv::Section::Private,
+            pkg_rel: "nc/bs/X.java".into(),
+            target: "ic/private".into(),
+            layer: None,
+            classes: Vec::new(),
+            problems: Vec::new(),
+            blocked: false,
+            out_root_used: None,
+        };
+        let canceled = AtomicBool::new(true);
+        let err = write_package(&zip, &[item], "# changes", &[], &canceled, &|_, _| {})
+            .expect_err("取消时必须中止");
+        assert!(err.contains("已取消"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 备份旧包返回备份路径且旧包原样保留() {
+        let dir = std::env::temp_dir().join(format!("ncp-bak-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let zip = dir.join("patch.zip");
+        std::fs::write(&zip, b"old-bytes").unwrap();
+
+        let bak = backup_existing(&zip)
+            .unwrap()
+            .expect("有旧包就要给备份路径");
+        assert!(Path::new(&bak).is_file(), "备份文件不存在：{bak}");
+        assert!(zip.is_file(), "备份是复制，旧包必须原地还在");
+        assert_eq!(std::fs::read(&bak).unwrap(), b"old-bytes");
+
+        let none = backup_existing(&dir.join("absent.zip")).unwrap();
+        assert!(none.is_none(), "没有旧包时不该造备份");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
