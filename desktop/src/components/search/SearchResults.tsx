@@ -6,19 +6,22 @@ import { setSearchScrollTop, getSearchScrollTop, type SearchForm } from "../../l
 /**
  * 搜索结果区：汇总行 + 按文件分组的结果。
  *
- * 结果放整页而不是侧栏：侧栏放不下「路径 + 行号 + 整行代码」。
- * VS Code 用了十年侧栏，最后补了个整页 Search Editor 才解决。
+ * 现在住在文件页侧栏（和 VS Code 一样窄）：每条只给「行号 + 截断的整行代码」，
+ * 完整内容点开后在编辑器里看。宽度不够时汇总行换行，不做横向滚动。
  */
 export function SearchResults({
   form,
   update,
   loading,
   onOpen,
+  onEdit,
 }: {
   form: SearchForm;
   update: (patch: Partial<SearchForm>) => void;
   loading: boolean;
   onOpen: (hit: SearchHit) => void;
+  /** 打开「编辑匹配」轻量多缓冲；结果过期或没工作区时由调用方不传。 */
+  onEdit?: () => void;
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -65,7 +68,7 @@ export function SearchResults({
     <>
       {/* ── 汇总行 ── */}
       {outcome && (
-        <div className="flex flex-shrink-0 items-center gap-2.5 border-b border-border px-4 py-1.5 text-[12px]">
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-border px-3 py-1.5 text-[12px]">
           <span>
             <b>{outcome.hits.length}</b> 处 · <b>{outcome.filesMatched}</b> 个文件
           </span>
@@ -78,6 +81,16 @@ export function SearchResults({
             </span>
           )}
           <span className="flex-1" />
+          {onEdit && outcome.hits.length > 0 && (
+            <button
+              type="button"
+              onClick={onEdit}
+              title="把全部命中行放进一张可编辑预览，改完一次写回"
+              className="text-[12px] font-semibold text-primary hover:underline"
+            >
+              编辑匹配
+            </button>
+          )}
           {groups.length > 0 && (
             <button
               type="button"

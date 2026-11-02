@@ -8,6 +8,7 @@ import { BottomPanel } from "../workspace/BottomPanel";
 import { GenerateDialog } from "../workspace/GenerateDialog";
 import { RenameDialog } from "../workspace/RenameDialog";
 import { EmptyProjectSlots, FilePaneSlots, useFileSlot } from "../workspace/FilePaneSlots";
+import { ServicesTab } from "./ServicesTab";
 import type { FileTreeHandle } from "../workspace/FileTree";
 import { baseName, getWorkspace } from "../../lib/workspace";
 import { applyWorkspace } from "../../lib/switchWorkspace";
@@ -16,6 +17,8 @@ import { useFileSession } from "../../hooks/useFileSession";
 import { useModuleCompile } from "../../hooks/useModuleCompile";
 import { useFilesTabCommands } from "../../hooks/useFilesTabCommands";
 import { useLocalHistorySweep } from "../../hooks/useLocalHistorySweep";
+import { useTabPersistence, useTabRestore, useTabSessionKeys } from "../../hooks/useTabSession";
+import { getRecentRoots } from "../../lib/recentRoots";
 import { isUnsaved } from "../../lib/tabDirty";
 import { ensureFilesSaved } from "../../lib/terminatePreflight";
 import { useLangWiring } from "../../hooks/useLangWiring";
@@ -26,6 +29,7 @@ import { getCursor } from "../../lib/cursorStore";
 import { getCodeDiags, useCodeDiags } from "../../lib/diagStore";
 import { mergeProblems, nextProblem } from "../../lib/problemList";
 import { useNav } from "../../lib/navHistory";
+import { LARGE_FILE_LINES } from "../../lib/largeFile";
 import {
   getSession,
   setSession,
@@ -33,14 +37,6 @@ import {
   type TabMeta,
   type Updater,
 } from "../../lib/workspaceSession";
-
-/**
- * 超过这个行数就提示「语义补全不可用」。
- *
- * 阈值来自实测：`VoucherBO.java`（6433 行）在 jdt.ls 下补全恒为 0；
- * 几千行的文件打开也明显变慢。2000 行是「还正常」与「开始降级」的分界。
- */
-const LARGE_FILE_LINES = 2000;
 
 /**
  * 文件页：状态与编排都在这里，画面在 `workspace/FilePaneSlots`。
@@ -70,6 +66,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   const root = useWorkspaceSelector((s) => s.root);
   const tabs = useWorkspaceSelector((s) => s.tabs);
   const activePath = useWorkspaceSelector((s) => s.activePath);
+  const splitPath = useWorkspaceSelector((s) => s.splitPath);
   const panelOpen = useWorkspaceSelector((s) => s.panelOpen);
   const panelTab = useWorkspaceSelector((s) => s.panelTab);
   const compiling = useWorkspaceSelector((s) => s.compiling);
@@ -85,6 +82,10 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   const treeRef = useRef<FileTreeHandle>(null);
 
   const session = useFileSession();
+  // 标签会话：重启恢复、快照落盘、Ctrl+Shift+T / Ctrl+Tab
+  useTabRestore(root, session.openFile);
+  useTabPersistence(root, tabs, activePath, splitPath);
+  useTabSessionKeys(tabs, activePath, session);
   const { openAt, openJdt, goBack, goForward, conflictPath, closingPath } = session;
   const { saving, reveal } = session;
   useLangWiring({ activePath, openAt, openJdt });
@@ -112,11 +113,6 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
     }
     void openAt(p.path, p.line);
   };
-
-  // 切到 NC 服务：面板打开并停在「NC 服务」标签，服务的卡片与日志就住在那里
-  useEffect(() => {
-    if (activeTool === "services") setSession({ panelOpen: true, panelTab: "svc" });
-  }, [activeTool]);
 
   // 换文件时把弹层收起来：留着它就是「另一个文件的符号/版本」压在代码上，容易点错
   useEffect(() => {
@@ -160,6 +156,10 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
     goForward,
     openRename: () => setRenameOpen(true),
     openGenerate: () => setPanels((p) => ({ ...p, generate: true })),
+    reopenClosed: () => void session.reopenLast(),
+    openSplit: () => activePath && void session.openSplit(activePath),
+    closeSplit: session.closeSplit,
+    splitOpen: splitPath !== null,
     canBack: () => nav.canBack,
     canForward: () => nav.canForward,
     // 命令面板每次打开都会问一遍 enabled；从模块仓库现算，不依赖渲染作用域的快照。
@@ -191,22 +191,37 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
       onCancel={() => void compileCancel()} onClose={() => setPanelOpen(false)} />
   );
 
+  // NC 服务既是底部面板的一个标签，又要能在没打开工程时使用，所以跟着文件页常驻，
+  // 不经过 ActivityPanel 的「访问过才挂载」。
+  const services = (
+    <ServicesTab
+      onNavigate={(tab) =>
+        window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: tab }))
+      }
+    />
+  );
+
   // 还没读到工作区（一个 IPC 的工夫）：只影响文件页自己的槽位。以前这里 `return null`
   // 会把**所有页面**一起吞掉——连骨架都没有，用户看到的是整片空白。
   if (root === undefined) {
-    return <>{slot("editor", <div className="wb-editor"><Skeleton className="m-4 h-40" /></div>)}</>;
+    return <>{slot("editor", <div className="wb-editor"><Skeleton className="m-4 h-40" /></div>)}{services}</>;
   }
 
   // 尚未选择工作区：明确引导，不让用户盲猜（NC 服务不依赖工程，它的面板仍要在）
   if (root === null) {
     return (
-      <EmptyProjectSlots
-        rootInput={rootInput}
-        onChange={setRootInput}
-        onOpen={() => void applyRoot(rootInput)}
-        output={panel}
-        servicesPanel={activeTool === "services"}
-      />
+      <>
+        <EmptyProjectSlots
+          rootInput={rootInput}
+          recents={getRecentRoots()}
+          onChange={setRootInput}
+          onOpen={() => void applyRoot(rootInput)}
+          onOpenRecent={(p) => void applyRoot(p)}
+          output={panel}
+          servicesPanel={panelOpen && panelTab === "svc"}
+        />
+        {services}
+      </>
     );
   }
 
@@ -225,6 +240,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           tabs,
           activePath,
           active,
+          splitPath,
           marks: tree.marks,
           // 与退出前的「保存全部」用同一个判定（lib/saveAllDirty.isUnsaved）：
           // 两处口径一旦不一致，就会出现「换目录时警告说会丢、退出时却没弹框」这类怪事
@@ -239,7 +255,9 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           reveal,
           rootInput,
           editingRoot,
+          recentRoots: getRecentRoots(),
           panelOpen,
+          panelTab,
           panels,
           compiling,
           canBack: nav.canBack,
@@ -255,9 +273,12 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           compileActive,
           onDismissLargeHint: (p) => setSession({ largeHintDismissed: (v) => [...v, p] }),
           selectTab: (p) => setSession({ activePath: p }),
+          openRecentRoot: (p) => void applyRoot(p),
           invalidateIndex: invalidateFileIndex,
         }}
       />
+
+      {services}
 
       <RenameDialog open={renameOpen} path={activePath} onClose={() => setRenameOpen(false)} />
       <GenerateDialog open={panels.generate} onClose={() => setPanels((p) => ({ ...p, generate: false }))} />

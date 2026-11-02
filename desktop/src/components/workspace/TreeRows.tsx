@@ -8,7 +8,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import { TreeEditRow } from "./TreeEditRow";
 import { TreeDirRow, TreeFileRow, TreeRowNote } from "./TreeRow";
 import { joinPath, type EncodingMark } from "../../lib/workspace";
-import { chainOpen, collapseChain } from "../../lib/treeCompact";
+import { chainOpen, dirChain } from "../../lib/treeCompact";
 import { treeRowId as rowId } from "../../lib/treeNav";
 import { pathKey } from "../../lib/treeSvn";
 import type { TreeDirState } from "../../lib/workspaceSession";
@@ -24,6 +24,8 @@ export interface TreeRowsCtx {
   bookmarkCounts: Map<string, number>;
   /** 名字筛选（speed search）；空时恒真。 */
   filter: (name: string) => boolean;
+  /** 压缩中间包：单链目录合成一行；关掉时每层各占一行。 */
+  compact: boolean;
   editing: EditState | null;
   editError: string | null;
   busy: boolean;
@@ -98,7 +100,7 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
     }
     if (item.isDir) {
       // 压缩中间包：`com → aier → erp` 只有一个子目录时合成一行 `com.aier.erp`
-      const chain = collapseChain(full, item.name, ctx.dirs);
+      const chain = dirChain(ctx.compact, full, item.name, ctx.dirs);
       const open = chainOpen(chain, ctx.expanded);
       rows.push(
         <TreeDirRow

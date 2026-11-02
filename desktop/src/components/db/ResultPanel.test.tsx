@@ -9,9 +9,11 @@
  */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ResultSet } from "../../lib/dbApi";
+import { dbApi } from "../../lib/dbApi";
+import { forgetColumnZh } from "../../lib/dbColumnZh";
 import type { ResultEntry, SqlTab } from "../../lib/dbStore";
 import { ResultPanel } from "./ResultPanel";
 
@@ -130,5 +132,39 @@ describe("ResultPanel 多结果集", () => {
     await mount(entry({ columns: cols, rows: [["1"]], hasMore: true }));
     expect(host.querySelector(".dbx-settab")).toBeNull();
     expect(text()).toContain("加载下");
+  });
+});
+
+/**
+ * 列中文名这条链最容易被「看起来做了」骗过：接口通了、取数也返回了，
+ * 但结果表没把 `zh` 传下去，表头照样显示 `VARCHAR2(40)`。
+ * 所以断言落在**渲染出来的文字**上，而不是「有没有调接口」。
+ */
+describe("ResultPanel 列中文名", () => {
+  it("表头第二行显示 NC 中文名，同时按 SQL 里的表去查", async () => {
+    forgetColumnZh("c1");
+    const spy = vi
+      .spyOn(dbApi, "columnNamesZh")
+      .mockResolvedValue({ names: { "bd_material|code": "物料编码" } });
+    const cols = [{ name: "CODE", type: "VARCHAR2(40)", precision: 40, scale: 0 }];
+    await mount(entry({ sql: "select * from bd_material", columns: cols, rows: [["M1"]] }));
+    await flush();
+
+    expect(spy).toHaveBeenCalledWith("c1", ["bd_material"]);
+    const sub = [...host.querySelectorAll(".dbx-gh .t")].map((e) => e.textContent);
+    expect(sub).toContain("物料编码");
+    spy.mockRestore();
+  });
+
+  it("查不到中文名（非 NC 库 / 计算列）：表头照旧显示类型", async () => {
+    forgetColumnZh("c1");
+    const spy = vi.spyOn(dbApi, "columnNamesZh").mockResolvedValue({ names: {} });
+    const cols = [{ name: "CNT", type: "NUMBER", precision: 10, scale: 0 }];
+    await mount(entry({ sql: "select count(*) as cnt from dual", columns: cols, rows: [["1"]] }));
+    await flush();
+
+    const sub = [...host.querySelectorAll(".dbx-gh .t")].map((e) => e.textContent);
+    expect(sub).toEqual(["NUMBER"]);
+    spy.mockRestore();
   });
 });

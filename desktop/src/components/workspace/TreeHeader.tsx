@@ -2,6 +2,7 @@ import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { Input } from "../ui/input";
 import { baseName } from "../../lib/workspace";
+import { TreeViewOptions } from "./TreeViewOptions";
 
 /**
  * 左栏顶部：资源管理器标题 + 三个动作（新建文件 / 新建文件夹 / 换目录）。
@@ -14,21 +15,29 @@ export function TreeHeader({
   editing,
   draft,
   unsaved,
+  recents,
   onDraftChange,
   onOpen,
+  onOpenRecent,
   onToggleEditing,
   onCreateFile,
   onCreateDir,
+  onSearch,
 }: {
   root: string;
   editing: boolean;
   draft: string;
   unsaved: boolean;
+  /** 最近工作区（换目录时直接点，不用重新输路径）。 */
+  recents: string[];
   onDraftChange: (value: string) => void;
   onOpen: () => void;
+  onOpenRecent: (path: string) => void;
   onToggleEditing: () => void;
   onCreateFile: () => void;
   onCreateDir: () => void;
+  /** 切到全工程搜索（侧栏视图，不再占主导航页签）。 */
+  onSearch: () => void;
 }) {
   const ready = draft.trim().length > 0;
   return (
@@ -36,6 +45,16 @@ export function TreeHeader({
       <div className="wb-pane-title">
         <span title={root}>资源管理器 · {baseName(root).toUpperCase()}</span>
         <div className="wb-pane-acts">
+          <TreeViewOptions />
+          <button
+            type="button"
+            className="wb-icon-btn"
+            title="全工程搜索（Ctrl+K）"
+            aria-label="全工程搜索"
+            onClick={onSearch}
+          >
+            <Icon name="search" size={14} />
+          </button>
           <button
             type="button"
             className="wb-icon-btn"
@@ -81,6 +100,17 @@ export function TreeHeader({
       {editing && unsaved && (
         <div className="wb-row-note" data-tone="bad">
           有未保存的修改，换目录会丢弃它们
+        </div>
+      )}
+      {editing && recents.length > 0 && (
+        <div className="wb-root-recent">
+          <span className="wb-root-recent-label">最近</span>
+          {recents.map((p) => (
+            <button key={p} type="button" className="wb-root-recent-item" title={p}
+              onClick={() => onOpenRecent(p)}>
+              {baseName(p)}
+            </button>
+          ))}
         </div>
       )}
     </>

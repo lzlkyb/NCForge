@@ -1,12 +1,14 @@
 import { toast } from "../components/ui/toast";
 import { friendlyDbError } from "./db";
 import { dbApi } from "./dbApi";
+import { forgetColumnZh } from "./dbColumnZh";
 import { ask, confirmProdWrite, ensureConnected, guardSlotTx, guardTx, isLastTabOn } from "./dbConfirm";
 import {
   appendOutput,
   clearSlots,
   closeTab,
   connOf,
+  defaultConnId,
   disconnect,
   execOne,
   explainInto,
@@ -18,7 +20,6 @@ import {
   openTableTab,
   patchTab,
   releaseSlot,
-  rtOf,
   setConns,
   sqlTabOf,
   tabOf,
@@ -33,14 +34,6 @@ import { isWrite, stmtKind } from "./sqlSplit";
  * 数据库页的用户动作：把 store（状态）与 dbConfirm（要问一句的地方）串起来。
  * 组件只调这里，不自己拼流程——「关标签要先问事务」这类规则只写一遍。
  */
-
-/** 新开控制台时默认用哪个连接：当前标签的 → 已连上的 → 第一个。 */
-export function defaultConnId(): string | null {
-  const db = getDb();
-  const cur = tabOf(db.active)?.connId;
-  if (cur && connOf(cur)) return cur;
-  return db.conns.find((c) => rtOf(c.id).status === "connected")?.id ?? db.conns[0]?.id ?? null;
-}
 
 export async function newConsole(connId: string | null = defaultConnId(), sql = ""): Promise<string> {
   const id = openSqlTab(connId, sql);
@@ -98,6 +91,11 @@ export async function switchConn(tabId: string, connId: string) {
 export async function requestCloseTab(tabId: string) {
   const tab = tabOf(tabId);
   if (!tab) return;
+  // 字典标签不占会话、没有可丢的事务，关它不该顺带问连接上别的事务
+  if (tab.kind === "dict") {
+    closeTab(tabId);
+    return;
+  }
   if (!(await guardRunning(sqlTabOf(tabId), "关闭标签"))) return;
   if (isLastTabOn(tab.connId, tabId) && !(await guardTx(tab.connId, "关闭标签"))) return;
   if (tab.kind === "sql") {
@@ -126,6 +124,7 @@ export async function disconnectConn(connId: string) {
   // 后端已经把槽一并收掉；前端要把标签上的槽名清掉，否则下次执行会打到不存在的会话
   clearSlots(connId);
   forgetColumns(connId);
+  forgetColumnZh(connId);
 }
 
 export async function deleteConn(connId: string) {
@@ -173,44 +172,88 @@ export async function moveConn(fromId: string, toId: string) {
 
 export async function refreshMeta(connId: string) {
   forgetColumns(connId);
+  forgetColumnZh(connId);
   await loadMeta(connId);
 }
 
+/** 一条执行失败的语句（回放脚本时逐条记下来，供导出 / 重跑）。 */
+export interface ScriptFailure {
+  /** 第几条（从 1 开始）。 */
+  index: number;
+  /** 在脚本里的起始行。 */
+  line: number;
+  text: string;
+  error: string;
+}
+
+export interface RunOutcome {
+  /** 第一条出错语句的起始行（编辑器据此定位）；null = 没出错 / 没跑。 */
+  failLine: number | null;
+  failures: ScriptFailure[];
+  /** 实际执行的条数（含失败的）。 */
+  done: number;
+  /** 生产库确认被拒：后面的语句没跑。 */
+  stoppedByUser: boolean;
+}
+
+export interface RunOptions {
+  /** 出错后继续执行剩余语句（回放迁移脚本用）；默认出错即停。 */
+  ignoreErrors?: boolean;
+  /** 每条开始前回调（回放进度用）。 */
+  onProgress?: (p: { done: number; total: number; line: number; text: string }) => void;
+}
+
 /**
- * 按顺序执行一组语句；出错即停，返回出错语句的起始行（编辑器据此定位）。
+ * 按顺序执行一组语句；默认出错即停，并返回出错语句的起始行（编辑器据此定位）。
  *
  * 结果标签只为「查询」与「出错」开；脚本里几百条 insert 的更新行数只进「输出」，
  * 不然结果栏会被几百个标签撑爆。单条写语句仍给一个结果页，用来提示提交。
+ *
+ * `ignoreErrors` 给「回放 .sql 文件」用：迁移脚本里一条失败不该让后面全都不跑，
+ * 但失败必须逐条记下来（`failures`），否则用户看到「跑完了」却不知道漏了什么。
  */
-export async function runStatements(tabId: string, stmts: { text: string; startLine: number }[]): Promise<number | null> {
+export async function runStatements(
+  tabId: string,
+  stmts: { text: string; startLine: number }[],
+  opts: RunOptions = {},
+): Promise<RunOutcome> {
+  const outcome: RunOutcome = { failLine: null, failures: [], done: 0, stoppedByUser: false };
   const tab = sqlTabOf(tabId);
-  if (!tab || tab.running || stmts.length === 0) return null;
+  if (!tab || tab.running || stmts.length === 0) return outcome;
   if (!tab.connId) {
     toast("先在工具条左边选一个连接", "warning");
-    return null;
+    return outcome;
   }
   const connId = tab.connId;
-  if (!(await ensureConnected(connId))) return null;
+  if (!(await ensureConnected(connId))) return outcome;
   patchTab<SqlTab>(tabId, { running: true, results: [], view: null });
   const kept: ResultEntry[] = [];
-  let failLine: number | null = null;
   let ddl = false;
   try {
     for (let i = 0; i < stmts.length; i++) {
       const s = stmts[i];
+      opts.onProgress?.({ done: i, total: stmts.length, line: s.startLine, text: s.text });
       if (isWrite(s.text) && !(await confirmProdWrite(tabId, connId, s.text))) {
         appendOutput(tabId, [{ at: Date.now(), text: `第 ${i + 1} 条未执行：已取消`, tone: "info" }]);
+        outcome.stoppedByUser = true;
         break;
       }
       const r = await execOne(tabId, s.text, i + 1);
+      outcome.done = i + 1;
       if (r.kind !== "error" && stmtKind(s.text) === "ddl") ddl = true;
       if (r.kind !== "update" || stmts.length === 1) {
         kept.push(r);
         patchTab<SqlTab>(tabId, { results: [...kept], view: r.id });
       }
       if (r.kind === "error") {
-        failLine = s.startLine;
-        break;
+        outcome.failures.push({
+          index: i + 1,
+          line: s.startLine,
+          text: s.text,
+          error: r.error ?? "执行失败",
+        });
+        if (outcome.failLine === null) outcome.failLine = s.startLine;
+        if (!opts.ignoreErrors) break;
       }
     }
   } finally {
@@ -218,7 +261,7 @@ export async function runStatements(tabId: string, stmts: { text: string; startL
   }
   // 建表 / 改表之后侧栏与补全要跟上
   if (ddl) void refreshMeta(connId);
-  return failLine;
+  return outcome;
 }
 
 export async function explain(tabId: string, sql: string) {

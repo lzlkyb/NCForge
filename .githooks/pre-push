@@ -105,13 +105,16 @@ echo ""
 
 # ── Rust 静态检查（与 CI 的 macOS job 同等严格）──
 echo "[10/11] cargo clippy -D warnings ..."
-(cd desktop/src-tauri && cargo clippy --all-targets --no-default-features -- -D warnings)
+(cd desktop && node scripts/rust-gate.mjs clippy --all-targets --no-default-features -- -D warnings)
 echo "  ✅ clippy 零警告"
 echo ""
 
 # ── Rust 测试 ──
+# 走 scripts/rust-gate.mjs 而不是裸 cargo：它把测试临时目录钉到 target/test-tmp
+# 并限并发（裸 `cargo test` 在 16 核 / 15.8GB 上会顶满内存，测试残留还会把
+# 系统盘 %TEMP% 撑爆——2026-11-02 实测累积 5.12GB / 1981 个目录）。
 echo "[11/11] Rust cargo test ..."
-(cd desktop/src-tauri && cargo test --no-default-features)
+(cd desktop && node scripts/rust-gate.mjs test --no-default-features)
 echo "  ✅ Rust 测试通过"
 echo ""
 

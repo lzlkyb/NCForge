@@ -90,6 +90,12 @@ export function EditorSettings() {
           />
         }
       />
+      <ToggleRow
+        label="保存时格式化"
+        sub="Ctrl+S 与自动保存前先让代码智能整理 Java 格式；语言服务没就绪时直接存原文"
+        checked={p.formatOnSave}
+        onChange={(v) => setEditorPrefs({ formatOnSave: v })}
+      />
       <SettingsRow
         label="代码模板"
         last

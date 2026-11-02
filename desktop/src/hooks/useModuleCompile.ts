@@ -8,6 +8,12 @@ import {
 } from "../lib/workspaceSession";
 import { compileModule, compileAllModules, isCompileCancelled, onCompileLog, type CompileResult } from "../lib/compile";
 import { registerCommands } from "../lib/commandRegistry";
+import {
+  BUILTIN_TASKS,
+  buildNcTaskRuntime,
+  runTask,
+  setTaskRuntime,
+} from "../lib/ncTasks";
 import { toast } from "../components/ui/toast";
 
 /** 日志攒多久刷一次：逐行 setSession 会让整个会话订阅者（含 Monaco 外的面板）每行重渲染。 */
@@ -86,7 +92,7 @@ export function useModuleCompile() {
    * 单模块与全量只有「跑哪条命令」不同，其余（未保存提醒、取消语义、日志清空、
    * 工作区切换保护）必须一模一样；各写一遍必然出现「一个会提示未保存、另一个不会」。
    */
-  const start = async (run: () => Promise<CompileResult>, unsavedHint: boolean) => {
+  const start = async (run: () => Promise<CompileResult>, unsavedHint: boolean): Promise<boolean> => {
     if (unsavedHint && tabs.some((t) => t.dirty || t.eolChanged)) {
       toast("有未保存的文件，编译读取的是磁盘版本，请先保存（Ctrl+S）", "warning");
     }
@@ -101,13 +107,15 @@ export function useModuleCompile() {
       const r = await run();
       if ((getSession().root ?? null) !== root) {
         setCompileLog((l) => [...l, "编译结果属于上一个工作区，已丢弃"]);
-        return;
+        return false;
       }
       setCompileResult(r);
       setSession({ panelTab: r.errorCount > 0 ? "problems" : "build" });
+      // 任务链据此决定要不要继续投送/重启：编不过就不该把旧产物推上去
+      return r.errorCount === 0;
     } catch (e) {
       // 切工作区会顺手取消这一轮：那条 CANCELLED 属于旧工作区，别再弹一次
-      if ((getSession().root ?? null) !== root) return;
+      if ((getSession().root ?? null) !== root) return false;
       // 取消不是失败：不要用红色错误把用户自己的操作说成「编译失败」
       if (isCompileCancelled(e)) {
         setCompileLog((l) => [...l, "编译已取消"]);
@@ -116,38 +124,58 @@ export function useModuleCompile() {
         setCompileLog((l) => [...l, `编译失败：${e}`]);
         toast(`编译失败：${e}`, "error");
       }
+      return false;
     } finally {
       setCompiling(false);
     }
   };
 
   /** 编译当前文件所在的模块；有未保存的文件先提醒，因为 ecj 读的是磁盘上的内容。 */
-  const compileActive = async () => {
-    if (!activePath || tabs.find((t) => t.path === activePath)?.virtual) return;
-    await start(() => compileModule(activePath), true);
+  const compileActive = async (): Promise<boolean> => {
+    if (!activePath || tabs.find((t) => t.path === activePath)?.virtual) {
+      toast("没有打开的文件，无法编译当前模块", "warning");
+      return false;
+    }
+    return start(() => compileModule(activePath), true);
   };
 
   /** 编译全部模块：不需要活动文件，所以没打开任何标签时也能用。 */
-  const compileAll = async () => {
-    await start(() => compileAllModules(), true);
+  const compileAll = async (): Promise<boolean> => {
+    return start(() => compileAllModules(), true);
   };
 
   // 命令面板里的「编译全部模块」在这里登记：它不依赖任何页面状态，
   // 挂在文件页里反而会多传一层。闭包经 ref 取最新（effect 只跑一次）。
-  const live = useRef({ compileAll });
-  live.current = { compileAll };
-  useEffect(
-    () =>
-      registerCommands([
-        {
-          id: "build.compileAll",
-          title: "编译全部模块（按依赖顺序，被依赖的先编）",
-          run: () => void live.current.compileAll(),
-          enabled: () => !!getSession().root && !getSession().compiling,
-        },
-      ]),
-    [],
-  );
+  const live = useRef({ compileActive, compileAll });
+  live.current = { compileActive, compileAll };
+  useEffect(() => {
+    // 任务菜单与命令面板里的任务命令都走同一份运行时：两个编译入口来自本 hook，
+    // 投送/重启/补丁在 ncTasks 里接好
+    setTaskRuntime(
+      buildNcTaskRuntime({
+        compileActive: () => live.current.compileActive(),
+        compileAll: () => live.current.compileAll(),
+      }),
+    );
+    const off = registerCommands([
+      {
+        id: "build.compileAll",
+        title: "编译全部模块（按依赖顺序，被依赖的先编）",
+        run: () => void live.current.compileAll(),
+        enabled: () => !!getSession().root && !getSession().compiling,
+      },
+      ...BUILTIN_TASKS.map((t) => ({
+        id: `task.${t.id}`,
+        title: `运行任务：${t.name}`,
+        run: () => void runTask(t),
+        enabled: () => !!getSession().root && !getSession().compiling,
+      })),
+    ]);
+    return () => {
+      off();
+      setTaskRuntime(null);
+    };
+  }, []);
 
   return { compileActive, compileAll };
 }

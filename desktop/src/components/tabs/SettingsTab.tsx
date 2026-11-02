@@ -17,6 +17,9 @@ import { ResourceSettings } from "../settings/ResourceSettings";
 import { ConfigTransferSettings } from "../settings/ConfigTransferSettings";
 import { KeymapSettings } from "../settings/KeymapSettings";
 import { EditorSettings } from "../settings/EditorSettings";
+import { TaskSettings } from "../settings/TaskSettings";
+import { AppearanceSettings } from "../settings/AppearanceSettings";
+import { consumePendingChangelog, onOpenChangelogRequest } from "../../lib/changelogRequest";
 
 /**
  * 示例设置页（壳子版）。演示「读配置 → 表单 → 写配置」闭环，
@@ -36,6 +39,17 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
       const enabled = await invokeOrToast<boolean>("get_autostart", undefined, "读取开机自启状态失败");
       if (typeof enabled === "boolean") setAutostart(enabled);
     })();
+  }, []);
+
+  // 升级欢迎条等壳层入口要直接打开更新历史：设置页是懒加载的，挂载前发出的请求先存着。
+  useEffect(() => {
+    const open = () => {
+      markChangelogSeen(CHANGELOG[0]?.version ?? null);
+      setHistoryOpen(true);
+    };
+    const off = onOpenChangelogRequest(open);
+    if (consumePendingChangelog()) open();
+    return off;
   }, []);
 
   const save = async (patch: ConfigPatch) => {
@@ -77,8 +91,10 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
           }}
         />
       </Card> },
+      { label: "外观", content: <AppearanceSettings /> },
       { label: "快捷键", content: <KeymapSettings /> },
       { label: "编辑器", content: <EditorSettings /> },
+      { label: "任务", content: <TaskSettings /> },
       { label: "开发环境", content: <LangSettings /> },
       { label: "资源与更新", content: <ResourceSettings /> },
       { label: "配置迁移", content: <ConfigTransferSettings onChanged={onChanged} /> },

@@ -9,6 +9,7 @@ import { statsText, statsTitle } from "../../lib/dbStats";
 import { dbApi, type ExportFileOut, type ExportProgress } from "../../lib/dbApi";
 import { listen } from "../../lib/tauri";
 import { activeExportId, cancelResultExport, exportResultFile, reSortOnServer } from "../../lib/dbResultActions";
+import { useColumnZh } from "../../lib/dbColumnZh";
 import { loadMore, ownsCursor, patchTab, rtOf, summaryOf, type ResultEntry, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台下半：每条语句一个结果标签 + 执行计划 + 输出。 */
@@ -117,6 +118,8 @@ function RowsEntryView({ tab, entry, isLast }: { tab: SqlTab; entry: ResultEntry
   const rows = set?.rows ?? entry.rows;
   /** 隐式结果集取到上限还有剩：不能续取，只能调大行数重跑。 */
   const truncated = !!set?.hasMore;
+  /** 列名 → NC 中文名。查不到（非 NC 库 / 算出来的列）时表头照旧显示类型。 */
+  const zh = useColumnZh(tab.connId, entry.sql, columns);
 
   useEffect(() => {
     if (!busy) return;
@@ -218,6 +221,7 @@ function RowsEntryView({ tab, entry, isLast }: { tab: SqlTab; entry: ResultEntry
         }
         onServerSort={(col, dir) => void reSortOnServer(tab.id, entry.sql, columns[col]?.name ?? "", dir)}
         onExportFile={(f) => void onExportFile(f)}
+        zh={zh}
         foot={
           <div className="dbx-rfoot">
             <span>已取 {thousands(rows.length)} 行</span>

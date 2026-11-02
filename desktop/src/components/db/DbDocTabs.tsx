@@ -19,7 +19,8 @@ export function DbDocTabs() {
     <DockRegion region="tabs">
       {db.tabs.map((t) => {
         const c = connOf(t.connId);
-        const label = t.kind === "sql" ? t.title : t.table.toLowerCase();
+        const label = t.kind === "table" ? t.table.toLowerCase() : t.title;
+        const icon = t.kind === "sql" ? "terminal" : t.kind === "dict" ? "clipboard" : "database";
         const on = docOpen && db.active === t.id;
         return (
           <div
@@ -34,10 +35,10 @@ export function DbDocTabs() {
             onAuxClick={(e) => e.button === 1 && void requestCloseTab(t.id)}
             onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && show(t.id)}
           >
-            <Icon name={t.kind === "sql" ? "terminal" : "database"} size={13} />
+            <Icon name={icon} size={13} />
             <span className="wb-tab-name">
               {label}
-              {t.kind === "sql" && <span className="dbx-muted"> · {c?.name ?? "未选连接"}</span>}
+              {t.kind !== "table" && <span className="dbx-muted"> · {c?.name ?? "未选连接"}</span>}
             </span>
             {c && <span className={`dbx-edot e-${c.env}`} />}
             <button

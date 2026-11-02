@@ -78,7 +78,7 @@ export function ConflictPane({
           <Icon name="alertTriangle" size={13} />
           <span>
             这个文件在服务器上也被改过，更新时没能自动合并。工作台不做三路合并——
-            <b>挑一版</b>，剩下的差异到文件页手工粘。
+            <b>挑一版</b>，剩下的差异到代码页手工粘。
           </span>
         </div>
 

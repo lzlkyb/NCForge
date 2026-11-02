@@ -191,6 +191,28 @@ impl EngineHandle {
         }
     }
 
+    /// 列中文名：`{names:{"表|列":中文名}, count:N}`。
+    ///
+    /// 两个引擎取数方式不同，但**组装只有一份**（[`crate::db_zh`]）：
+    /// - Rust 引擎用绑定变量（`columnsZh`，表名不拼进 SQL）；
+    /// - JVM 桥用通用只读 `query`。**不能用 `exec`**：它开头就 `closeCursor()`，
+    ///   会把用户结果集的「加载更多」游标顶掉，表现为「跑完这句之后加载更多没了」。
+    pub fn columns_zh(&self, tables: &str, timeout: Duration) -> Result<Value, BridgeError> {
+        match &self.inner {
+            Engine::Rust(_) => self.call("columnsZh", &[tables], timeout),
+            Engine::Java { .. } => {
+                let names = crate::db_zh::sanitize(tables);
+                if names.is_empty() {
+                    return Ok(serde_json::json!({ "names": {}, "count": 0 }));
+                }
+                let sql = crate::db_zh::select_sql(&names);
+                let max = crate::db_zh::max_rows();
+                let out = self.call("query", &[&sql, &max], timeout)?;
+                crate::db_zh::names_from_rows(&out)
+            }
+        }
+    }
+
     /// 取消正在执行的语句。**不占用** `call` 的调用锁——它要能在一条长查询等待期间插进去。
     ///
     /// 两个引擎都支持，但机制不同：JVM 桥走 `Statement.cancel()`（另一条线程发给服务器），

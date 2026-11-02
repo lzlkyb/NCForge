@@ -12,6 +12,8 @@ import { setSession } from "../lib/workspaceSession";
 import { compileCancel } from "../lib/compile";
 import { toast } from "../components/ui/toast";
 import { langRegenerate } from "../lib/appConfig";
+import { getLangView } from "../lib/lang";
+import { setLightMode } from "../lib/lightMode";
 
 /** 命令面板里文件页命令用到的「当前值」。闭包每次渲染都是新的，所以经 ref 读最新值。 */
 export interface FilesTabCommands {
@@ -26,6 +28,12 @@ export interface FilesTabCommands {
   goForward: () => void;
   openRename: () => void;
   openGenerate: () => void;
+  /** 重开最近关闭的标签（Ctrl+Shift+T）。 */
+  reopenClosed: () => void;
+  /** 在当前文件上打开右侧分屏 / 关掉分屏。 */
+  openSplit: () => void;
+  closeSplit: () => void;
+  splitOpen: boolean;
   canBack: () => boolean;
   canForward: () => boolean;
   hasProblems: () => boolean;
@@ -47,6 +55,23 @@ export function useFilesTabCommands(deps: FilesTabCommands) {
     { id: "build.compile", title: "编译当前模块", run: () => void live.current.compileActive(), enabled: () => !!live.current.activePath && !live.current.compiling },
     { id: "build.cancel", title: "取消编译", run: () => void compileCancel(), enabled: () => live.current.compiling },
     { id: "tab.close", title: "关闭当前标签", run: () => live.current.activePath && live.current.closeTab(live.current.activePath), enabled: () => !!live.current.activePath },
+    {
+      id: "tab.reopen",
+      title: "重新打开关闭的标签",
+      run: () => live.current.reopenClosed(),
+    },
+    {
+      id: "tab.split",
+      title: "在右侧分屏打开当前文件",
+      run: () => live.current.openSplit(),
+      enabled: () => !!live.current.activePath && !live.current.splitOpen,
+    },
+    {
+      id: "tab.splitClose",
+      title: "关闭分屏",
+      run: () => live.current.closeSplit(),
+      enabled: () => live.current.splitOpen,
+    },
     {
       id: "editor.outline",
       title: "文件结构（本文件的类 / 方法 / 字段列表）",
@@ -165,6 +190,26 @@ export function useFilesTabCommands(deps: FilesTabCommands) {
       id: "lang.regenerate",
       title: "重新生成代码智能工程（补全 / 跳转异常时用）",
       run: () => void langRegenerate().then(() => toast("已重新生成并重启代码智能", "success"), (e) => toast(`重新生成失败：${e}`, "error")),
+    },
+    {
+      id: "lang.lightMode",
+      title: "轻量模式（暂停代码智能与语义着色，省内存）",
+      run: () => {
+        void setLightMode(true, live.current.activePath).then((r) =>
+          toast(r.ok ? "已进入轻量模式：jdt.ls 已停止，语义着色已暂停" : (r.error ?? "切换轻量模式失败"), r.ok ? "success" : "error"),
+        );
+      },
+      enabled: () => getLangView().enabled,
+    },
+    {
+      id: "lang.restore",
+      title: "恢复代码智能（退出轻量模式）",
+      run: () => {
+        void setLightMode(false, live.current.activePath).then((r) =>
+          toast(r.ok ? "已恢复代码智能" : (r.error ?? "恢复失败"), r.ok ? "success" : "error"),
+        );
+      },
+      enabled: () => !getLangView().enabled,
     },
     // 编辑器动作也进命令面板：找引用 / 格式化 / 快速修复这些操作不该逼用户记快捷键，
     // 敲「引用」「格式化」「父类」就能找到。java 之外的文件不列出来（列了点了也没反应）

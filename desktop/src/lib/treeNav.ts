@@ -1,5 +1,5 @@
 import { joinPath } from "./workspace";
-import { chainOpen, collapseChain } from "./treeCompact";
+import { chainOpen, dirChain } from "./treeCompact";
 import type { TreeDirState } from "./workspaceSession";
 
 /** 树里一行（展平后的可见顺序），键盘上下移动按这个顺序。 */
@@ -32,10 +32,11 @@ export function flattenTree(
   dirs: Record<string, TreeDirState>,
   expanded: Set<string>,
   root: string,
-  opts: { filter?: (name: string) => boolean } = {},
+  opts: { filter?: (name: string) => boolean; compact?: boolean } = {},
 ): FlatRow[] {
   const out: FlatRow[] = [];
   const filter = opts.filter;
+  const compact = opts.compact !== false;
   const walk = (dir: string, parent: string | null) => {
     const st = dirs[dir];
     if (!st || st.status !== "ok") return;
@@ -43,7 +44,7 @@ export function flattenTree(
       if (filter && !filter(item.name)) continue;
       const full = joinPath(dir, item.name);
       if (item.isDir) {
-        const chain = collapseChain(full, item.name, dirs);
+        const chain = dirChain(compact, full, item.name, dirs);
         out.push({ path: chain.tail, isDir: true, parent, label: chain.label });
         if (chainOpen(chain, expanded)) walk(chain.tail, chain.tail);
       } else {

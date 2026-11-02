@@ -2,6 +2,7 @@ import { languageOf, type EncodingMark } from "../../lib/workspace";
 import type { TabMeta } from "../../lib/workspaceSession";
 import { useCursor } from "../../lib/cursorStore";
 import { LangBadge } from "./LangBadge";
+import { ServiceStatusButton } from "./ServiceStatusButton";
 
 /**
  * 编辑器底部状态栏。
@@ -36,6 +37,7 @@ export function EditorStatus({
       <LangBadge activePath={active && !active.virtual ? active.path : null} />
       <span className="wb-status-sp" />
       {saving && <span className="wb-status-warn">保存中…</span>}
+      <ServiceStatusButton />
       <button type="button" className="wb-status-btn" onClick={onTogglePanel}>
         {panelOpen ? "隐藏面板" : "显示面板"}
       </button>

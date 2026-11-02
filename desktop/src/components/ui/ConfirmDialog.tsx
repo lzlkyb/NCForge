@@ -22,7 +22,7 @@ interface ConfirmDialogProps {
    *
    * **嵌在另一个弹框里时必须传更大的值**：两者都 portal 到 body、是兄弟节点，
    * 不抬层级的话确认框会被盖在父弹框的遮罩下面：看不见也点不到，
-   * 而点击会落到父弹框遮罩上把父弹框关掉。`ConfirmModal` 同理。
+   * 而点击会落到父弹框遮罩上把父弹框关掉。
    */
   zIndex?: number;
   onCancel: () => void;
@@ -30,8 +30,8 @@ interface ConfirmDialogProps {
 }
 
 /**
- * D12：统一确认弹窗，替换当时散在多处的重复实现（SecurityOverview 与原 SettingsToggles
- * 各有一份 ShellRiskModal/ConfirmModal）/ 重置确认弹窗 / LogTab 的 confirmClear 内联弹窗。
+ * D12：统一确认弹窗，替换当时散在多处的重复实现（SecurityOverview 的 ShellRiskModal
+ * / 重置确认弹窗 / LogTab 的 confirmClear 内联弹窗）。
  * 一律走 createPortal(document.body)，避免祖先层叠上下文影响 `fixed inset-0` 定位。
  */
 export function ConfirmDialog({

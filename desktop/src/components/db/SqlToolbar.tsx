@@ -6,7 +6,7 @@ import { switchConn } from "../../lib/dbActions";
 import { connOf, ensureSlot, patchTab, rtOf, txAction, useDb, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台工具条：连接胶囊 · 执行 / 脚本 / 计划 / 格式化 · 事务模式 · 历史。生产库整条淡红。 */
-export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, historyOpen, onHistory, snipsOpen, onSnips, sessionsOpen, onSessions }: {
+export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, onValueSearch, onScriptReplay, historyOpen, onHistory, snipsOpen, onSnips, sessionsOpen, onSessions }: {
   tab: SqlTab;
   onRun: (mode: "current" | "script") => void;
   onStop: () => void;
@@ -14,6 +14,10 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
   onFormat: () => void;
   /** 把光标处语句的结果导成 insert 脚本。 */
   onExport: () => void;
+  /** 全库按值反查（只读）。 */
+  onValueSearch: () => void;
+  /** 选一个 .sql 文件逐条回放（现场迁移脚本）。 */
+  onScriptReplay: () => void;
   historyOpen: boolean;
   onHistory: () => void;
   /** 片段抽屉是否打开（按钮高亮用）。 */
@@ -79,6 +83,16 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
         <Icon name="terminal" size={12} />
         执行脚本 <span className="k">Alt+X</span>
       </button>
+      <button
+        type="button"
+        className="dbx-btn ghost"
+        disabled={tab.running || !conn}
+        onClick={onScriptReplay}
+        title="选一个 .sql 文件，按语句逐条回放（UTF-8 / GBK 自动识别，可忽略错误继续）"
+      >
+        <Icon name="upload" size={12} />
+        回放 .sql
+      </button>
       <button type="button" className="dbx-btn ghost" disabled={tab.running || !conn} onClick={onExplain} title="EXPLAIN PLAN，不真正执行">
         <Icon name="activity" size={12} />
         执行计划
@@ -96,6 +110,16 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
       >
         <Icon name="download" size={12} />
         导出 INSERT
+      </button>
+      <button
+        type="button"
+        className="dbx-btn ghost"
+        disabled={tab.running || !conn}
+        onClick={onValueSearch}
+        title="拿一段文本在全库所有表的文本列里找（只读，可看进度和取消）"
+      >
+        <Icon name="search" size={12} />
+        按值反查
       </button>
       <span className="dbx-vsep" />
       <div className="dbx-txmode" title={connected ? "本连接的事务模式（临时切换，默认值在连接设置里）" : "连上后可切换"}>

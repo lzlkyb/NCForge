@@ -105,6 +105,75 @@ fn 两条会话共用一个桥进程并且各自可用() {
     b.shutdown();
 }
 
+/// 列中文名（`db_meta kind=columnsZh`）走 JVM 桥能不能真的取到。
+///
+/// 生产默认走 JVM 桥，这条盯三件事：
+/// ① 取得到（Java 侧 `query` 命令 + Rust 侧 `db_zh` 组装）；
+/// ② 键是「表名|列名」且**小写** —— 前端按 lower 拼键，大小写不对永远命中不了；
+/// ③ **不抢 `exec` 的游标**：查中文名之后，上一次结果集的「加载更多」还得能用。
+///    这条最容易漏：`exec` 开头就 `closeCursor()`，图省事借它查元数据会把用户
+///    正在看的结果顶掉，症状是「加载更多忽然没了」。
+#[test]
+#[ignore = "要连真实数据库"]
+fn 列中文名走jvm桥能取到且不抢游标() {
+    let Some(nc_home) = home() else {
+        println!("没有设 NC_HOME，跳过");
+        return;
+    };
+    let ds = std::env::var("NC_DB_DS").unwrap_or_else(|_| "design".into());
+    let bridge = Arc::new(db_bridge::Bridge::new(env_for(&nc_home)));
+    let home_s = nc_home.display().to_string();
+    let h = EngineHandle::java(bridge.clone(), "live-zh");
+    h.call(
+        "connectProp",
+        &[&home_s, &ds, "false"],
+        Duration::from_secs(60),
+    )
+    .expect("应该连得上（先确认 VPN 与 prop.xml）");
+
+    let out = h
+        .columns_zh("bd_material", Duration::from_secs(60))
+        .expect("columnsZh 不应报错");
+    let names = out
+        .get("names")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    println!("count={:?}", out.get("count"));
+    let sample: Vec<String> = names
+        .iter()
+        .take(6)
+        .map(|(k, v)| format!("{k}={}", v.as_str().unwrap_or("?")))
+        .collect();
+    println!("样本：{}", sample.join(" / "));
+
+    assert!(!names.is_empty(), "JVM 桥没取到任何列中文名：{out}");
+    let code = names
+        .get("bd_material|code")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(!code.is_empty(), "bd_material|code 应该有中文名：{out}");
+    println!("bd_material.code = {code}");
+
+    // 游标不能被顶掉：先开一条留下游标的查询，再取中文名，然后还能接着取行
+    let first = h
+        .call(
+            "exec",
+            &["select code from bd_material", "5", "30"],
+            Duration::from_secs(60),
+        )
+        .expect("先跑一条会被截断的查询");
+    assert_eq!(first["hasMore"], true, "这条查询应该留下游标：{first}");
+    h.columns_zh("bd_material", Duration::from_secs(60))
+        .expect("取中文名");
+    let more = h
+        .call("more", &["5"], Duration::from_secs(60))
+        .expect("取完中文名之后「加载更多」还得能用（游标被顶掉了）");
+    assert_eq!(more["rowCount"], 5, "续取应该拿到 5 行：{more}");
+    println!("续取 {} 行，游标没被抢", more["rowCount"]);
+    h.shutdown();
+}
+
 #[test]
 #[ignore = "要连真实数据库"]
 fn 取消能中断正在执行的语句() {

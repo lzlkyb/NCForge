@@ -12,9 +12,15 @@ import { transitionPage } from "./lib/pageTransition";
 import { requestOpenFile } from "./lib/openFileRequest";
 import { getKeymap, isWorkspaceSearch, layoutKeyOf, paletteModeOf, WORKSPACE_SEARCH_KEY } from "./lib/keymap";
 import { setSideOpen, toggleSide } from "./lib/layoutStore";
+import { setSidebarView } from "./lib/sidebarView";
+import { openServicePanel } from "./lib/servicePanel";
 import { openPalette, usePalette } from "./lib/paletteStore";
 import { registerCommands } from "./lib/commandRegistry";
 import { setSession } from "./lib/workspaceSession";
+import { openPatchPage } from "./lib/svnSession";
+import { requestOpenChangelog } from "./lib/changelogRequest";
+import { showWorkbenchDocument } from "./lib/dockEvents";
+import { defaultConnId, openDictTab } from "./lib/dbStore";
 import { toggleTheme } from "./lib/theme";
 import { serverStart, serverStop } from "./lib/server";
 import { toast } from "./components/ui/toast";
@@ -24,6 +30,7 @@ import { Header } from "./components/layout/Header";
 import { SideNav, WORKSPACE_NAV } from "./components/layout/SideNav";
 import { WorkbenchShell } from "./components/workspace/WorkbenchShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { UpgradeWelcomeBar } from "./components/update/UpgradeWelcomeBar";
 import { useAppHiddenFlag } from "./hooks/useAppHiddenFlag";
 import { useWindowSizePersistence } from "./hooks/useWindowSizePersistence";
 import { useTableLookup } from "./hooks/useTableLookup";
@@ -39,21 +46,11 @@ const SettingsTab = lazy(() =>
 );
 // 文件页（带 Monaco）由 WorkbenchShell 自己懒加载：外壳不依赖编辑器，
 // 「进设置也要先下载数 MB 的编辑器」这个问题就是在这儿解决的。
-// 搜索页只有静态表单与列表，但仍然懒加载：它是第二个高频页，不该挤进首屏包。
-const SearchTab = lazy(() =>
-  import("./components/tabs/SearchTab").then((m) => ({ default: m.SearchTab })),
-);
-// 服务页要拉日志、算状态，和 Monaco 一样只在切过去时加载。
-const ServicesTab = lazy(() =>
-  import("./components/tabs/ServicesTab").then((m) => ({ default: m.ServicesTab })),
-);
+// 全工程搜索与 NC 服务已并进文件页（侧栏视图 / 底部面板），不再单独成页。
 // 版本控制页带一份独立的 svn.css 与 Monaco diff editor，同样懒加载。
+// 补丁打包已并进这一页的「打包补丁」视图（读的是同一份工作副本改动）。
 const SvnTab = lazy(() =>
   import("./components/tabs/SvnTab").then((m) => ({ default: m.SvnTab })),
-);
-// 补丁页与数据库页各带一份独立样式（patch.css / db.css），同样懒加载。
-const PatchTab = lazy(() =>
-  import("./components/tabs/PatchTab").then((m) => ({ default: m.PatchTab })),
 );
 const DbTab = lazy(() => import("./components/tabs/DbTab").then((m) => ({ default: m.DbTab })));
 // 工程关联页：读盘解析每个工程的 .classpath，只在切过去时加载。
@@ -62,6 +59,7 @@ const LinkedProjectsTab = lazy(() =>
 );
 // NC 日志页：要读 5MB 级的日志文件并归因，切过去才加载。
 const LogTab = lazy(() => import("./components/tabs/LogTab").then((m) => ({ default: m.LogTab })));
+// 数据字典已并进数据库页的字典标签（见 DbTab / DictWorkspace），不再单独成页。
 // 快速导航浮层要查语言服务（间接依赖 Monaco），首次打开时才加载，和文件页共用同一个 chunk。
 const QuickPalette = lazy(() =>
   import("./components/workspace/QuickPalette").then((m) => ({ default: m.QuickPalette })),
@@ -72,7 +70,7 @@ const QuickPalette = lazy(() =>
  *
  * settings 不在 WORKSPACE_NAV 里——它在侧栏 foot 单独渲染（带更新未读红点），
  * 但键盘用户同样需要一键直达，故快捷键序列在 App 层追加，不动侧栏数据源。
- * 加导航项会把它往后挤一位（加「工程关联」后设置从 Ctrl+7 变 Ctrl+8）。
+ * 加导航项会把它往后挤一位（补丁 / 数据字典并入对应页后，设置从 Ctrl+10 变 Ctrl+6）。
  */
 const HOTKEY_TABS: string[] = [...WORKSPACE_NAV.map((n) => n.key), "settings"];
 
@@ -85,7 +83,7 @@ let svcBusy = false;
 /**
  * 停止 NC 服务（命令面板与确认框共用）。
  *
- * 三态与 NC 服务页保持一致：一律报「已停止」是最坑的——服务可能随后照旧起来。
+ * 三态与 NC 服务面板保持一致：一律报「已停止」是最坑的——服务可能随后照旧起来。
  */
 async function stopServerWithFeedback(): Promise<void> {
   if (svcBusy) return;
@@ -170,6 +168,12 @@ function AppContent() {
     transitionPage(() => setActiveTab(tab), activeTab !== tab);
   }, [activeTab]);
 
+  /** 升级欢迎条「查看更新内容」：切到设置页并打开更新历史弹窗。 */
+  const openUpdateNotes = useCallback(() => {
+    requestOpenChangelog();
+    navigate("settings");
+  }, [navigate]);
+
   // 竖栏点击：点当前项 = 收起 / 展开侧栏（和 VS Code 一致）；点别的项一律先把侧栏展开
   const onRail = useCallback((tab: string) => {
     if (tab === activeTab) {
@@ -183,6 +187,21 @@ function AppContent() {
   // 命令面板里的应用级命令（导航 / 布局 / 主题 / NC 服务）。文件页的命令由文件页自己登记。
   const navRef = useRef(navigate);
   navRef.current = navigate;
+  /**
+   * 全工程搜索不再是独立页签：切到文件页并把侧栏切到搜索视图。
+   * 侧栏收起时先展开——否则「打开了搜索」却看不到任何东西。
+   */
+  const openSearch = useCallback(() => {
+    setSidebarView("search");
+    setSideOpen(true);
+    navRef.current("files");
+  }, []);
+  /** 数据字典不再是独立页签：在数据库页开一个字典文档标签，并翻出文档区。 */
+  const openDict = useCallback(() => {
+    openDictTab(defaultConnId());
+    showWorkbenchDocument();
+    navRef.current("db");
+  }, []);
   /** 服务启停正在路上：连按 Enter 会把同一条指令发好几遍。 */
   useEffect(() => {
     const go = (key: string, title: string, hint?: string) => ({ id: `go.${key}`, title: `转到：${title}`, hint, run: () => navRef.current(key) });
@@ -201,29 +220,44 @@ function AppContent() {
       }
     };
     return registerCommands([
-      go("files", "文件"),
-      go("search", "全工程搜索", WORKSPACE_SEARCH_KEY),
+      go("files", "代码"),
+      { id: "view.search", title: "全工程搜索", hint: WORKSPACE_SEARCH_KEY, run: openSearch },
       go("svn", "版本控制"),
-      go("services", "NC 服务"),
-      go("patch", "补丁"),
+      {
+        id: "go.patch",
+        title: "转到：补丁打包",
+        hint: "版本控制 · 打包补丁",
+        run: openPatchPage,
+      },
       go("db", "数据库"),
       go("linked", "工程关联"),
       go("logs", "NC 日志"),
+      { id: "go.dict", title: "转到：数据字典", hint: "数据库 · 数据字典", run: openDict },
       go("settings", "设置"),
       { id: "view.side", title: "切换侧栏", hint: "Ctrl+B", run: toggleSide },
       { id: "view.panel", title: "切换底部面板", hint: "Ctrl+J", run: () => setSession({ panelOpen: (v) => !v }) },
       { id: "view.theme", title: "切换深色 / 浅色主题", run: () => toggleTheme() },
+      { id: "view.services", title: "打开 NC 服务面板", run: openServicePanel },
       { id: "svc.start", title: "启动 NC 服务", run: () => void runStart() },
-      // 停止必须问一句：命令面板能一键到的地方，不能在服务页要确认、到这里就直接打后端。
+      // 停止必须问一句：命令面板能一键到的地方，不能在服务面板要确认、到这里就直接打后端。
       { id: "svc.stop", title: "停止 NC 服务", run: () => setSvcConfirm("stop") },
     ]);
-  }, []);
-  // 其它页（如 Java 编辑器里「在数据库中执行此 SQL」）要切页时发这个事件，detail 是页 key
+  }, [openSearch, openDict]);
+  // 其它页（如 Java 编辑器里「在数据库中执行此 SQL」）要切页时发这个事件，detail 是页 key。
+  // 老的 "search" / "services" / "patch" / "dict" 页 key 仍然兼容：转到文件页的对应视图 /
+  // 面板、版本控制页的打包视图，或数据库页的字典标签。
   useEffect(() => {
-    const go = (e: Event) => navRef.current((e as CustomEvent<string>).detail);
+    const go = (e: Event) => {
+      const tab = (e as CustomEvent<string>).detail;
+      if (tab === "search") openSearch();
+      else if (tab === "services") openServicePanel();
+      else if (tab === "patch") openPatchPage();
+      else if (tab === "dict") openDict();
+      else navRef.current(tab);
+    };
     window.addEventListener("ncforge-navigate", go);
     return () => window.removeEventListener("ncforge-navigate", go);
-  }, []);
+  }, [openSearch, openDict]);
   const { open: paletteOpen } = usePalette();
   // 浮层的代码块在首次使用前就拉好：第一次按快捷键时才去加载，开头敲的几个字符会落进编辑器里
   useEffect(() => {
@@ -231,7 +265,7 @@ function AppContent() {
     return () => clearTimeout(t);
   }, []);
 
-  // ── Ctrl+1~7 / Ctrl+K 快捷键：前 6 位来自 WORKSPACE_NAV，第 7 位是设置 ──
+  // ── Ctrl+1~N / Ctrl+K 快捷键：前 N 位来自 WORKSPACE_NAV，最后一位是设置 ──
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // 导航浮层与布局键：任何焦点下都生效（含编辑器），只让位给真正的模态框。
@@ -253,7 +287,7 @@ function AppContent() {
       if (!formField && !document.querySelector('[role="dialog"][aria-modal="true"], dialog[open]') && isWorkspaceSearch(e, getKeymap())) {
         e.preventDefault();
         e.stopPropagation();
-        navigate("search");
+        openSearch();
         return;
       }
       if (!e.ctrlKey || e.altKey || e.metaKey) return;
@@ -275,12 +309,12 @@ function AppContent() {
       }
       if (e.key.toLowerCase() === "k") {
         e.preventDefault();
-        navigate("search");
+        openSearch();
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [navigate]);
+  }, [navigate, openSearch]);
 
   const navItems = useMemo(() => WORKSPACE_NAV, []);
 
@@ -315,7 +349,6 @@ function AppContent() {
   return (
     <div className="app-shell flex h-screen flex-col overflow-hidden">
       <Header
-        onNavigate={navigate}
         onOpenPalette={() => openPalette("file")}
       />
       <div className="app-body">
@@ -338,7 +371,7 @@ function AppContent() {
       )}
       {/* 数据库/退出确认的弹框挂在最外层：任何页面（含文件页）点 X 都要能弹出来 */}
       <DbConfirmHost />
-      {/* 命令面板「停止 NC 服务」的二次确认，文案与 NC 服务页同一条 */}
+      {/* 命令面板「停止 NC 服务」的二次确认，文案与服务面板同一条 */}
       <ConfirmDialog
         open={svcConfirm === "stop"}
         title="停止 NC 中间件？"
@@ -351,6 +384,8 @@ function AppContent() {
           void stopServerWithFeedback();
         }}
       />
+      {/* 版本变化的那次启动浮一条一次性提示，把「升级完成」这个闭环补上 */}
+      <UpgradeWelcomeBar currentVersion={status?.version} onOpenHistory={openUpdateNotes} />
     </div>
   );
 }
@@ -358,30 +393,17 @@ function AppContent() {
 /** 页面表：tab key → 组件。业务把这里换成自家页面。 */
 function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: string) => void) {
   switch (tab) {
-    case "search":
-      // 点命中：先把「打开哪个文件、定位到哪行」记到管道里，再切到文件页。
-      // 顺序不能反——FilesTab 是懒加载组件，切页时它才挂载，订阅晚于事件，
-      // 靠 openFileRequest 的 pending 兜住这一拍。
-      return (
-        <SearchTab
-          onOpenFile={(path, line, column) => {
-            requestOpenFile({ path, line, column });
-          }}
-        />
-      );
     case "svn":
-      // 「在文件中打开」：和搜索页同一条管道，先记请求再切页（SvnTab 是懒加载）。
+      // 「在文件中打开」：和搜索同一条管道，先记请求再切页（SvnTab 是懒加载）。
+      // 补丁打包是这一页的第二个视图，共用同一条渲染通道。
       return (
         <SvnTab
+          onNavigate={navigate}
           onOpenFile={(path) => {
             requestOpenFile({ path, line: 1 });
           }}
         />
       );
-    case "services":
-      return <ServicesTab onNavigate={navigate} />;
-    case "patch":
-      return <PatchTab onNavigate={navigate} />;
     case "db":
       return <DbTab />;
     case "linked":

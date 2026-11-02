@@ -48,7 +48,8 @@ describe("workbench docking", () => {
     await act(async () => (host.querySelector(".wb-tool-tab") as HTMLElement).click());
     expect((host.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(true);
     expect(host.querySelector("textarea")).toBe(editor);
-    await render("services");
+    // 换个没有文档页的工具页：文档槽让位，编辑器回到主位
+    await render("logs");
     expect((host.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(false);
     expect(host.querySelector(".svc-host")?.textContent).toContain("Logs");
     expect(host.querySelector("textarea")).toBe(editor);

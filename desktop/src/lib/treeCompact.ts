@@ -46,6 +46,21 @@ export function collapseChain(
   return { nodes, label, tail };
 }
 
+/**
+ * 一行目录在当前显示偏好下的链：关掉压缩时就只有这一层。
+ *
+ * 渲染（TreeRows）与键盘导航（treeNav.flattenTree）必须走同一份，否则会出现
+ * 「看着是 5 行、方向键却停在看不见的行上」。
+ */
+export function dirChain(
+  compact: boolean,
+  path: string,
+  name: string,
+  dirs: Record<string, TreeDirState>,
+): Chain {
+  return compact ? collapseChain(path, name, dirs) : { nodes: [path], label: name, tail: path };
+}
+
 /** 这一行是不是「压缩后的目录」：真则展开态要同时看链上任意一层。 */
 export function chainOpen(chain: Chain, expanded: Set<string>): boolean {
   return chain.nodes.some((n) => expanded.has(n));

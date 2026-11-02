@@ -48,12 +48,35 @@
   cursor: pointer;
 }
 .wb-icon-btn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.wb-icon-btn[aria-pressed="true"] { background: hsl(var(--secondary)); color: hsl(var(--primary)); }
 .wb-pane-acts { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .wb-root-edit {
   display: flex;
   gap: 6px;
   padding: 0 8px 8px;
 }
+.wb-root-recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 8px;
+  font-size: 11.5px;
+}
+.wb-root-recent-empty { padding: 0; max-width: 420px; justify-content: center; }
+.wb-root-recent-label { color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+.wb-root-recent-item {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+  font-weight: 550;
+}
+.wb-root-recent-item:hover { background: hsl(var(--primary) / 0.14); color: hsl(var(--primary)); }
 .wb-tree-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -299,7 +322,26 @@
 }
 .wb-banner-x:hover { opacity: 1; background: hsl(var(--foreground) / 0.08); }
 
-.wb-editor { position: relative; flex: 1 1 auto; min-height: 0; background: hsl(var(--card)); }
+.wb-editor { position: relative; display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; background: hsl(var(--card)); }
+.wb-editor-group { display: flex; flex: 1 1 50%; flex-direction: column; min-width: 0; min-height: 0; }
+.wb-editor-body { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; }
+.wb-editor-split { flex-basis: 50%; border-left: 1px solid hsl(var(--border)); }
+.wb-split-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  flex-shrink: 0;
+  padding: 0 6px 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--background));
+  border-bottom: 1px solid hsl(var(--border));
+  user-select: none;
+}
+.wb-split-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-split-head .wb-icon-btn { margin-left: auto; }
 .wb-editor-host { position: absolute; inset: 0; }
 .wb-editor-empty { position: absolute; inset: 0; display: grid; place-items: center; }
 
@@ -346,6 +388,16 @@
 .wb-prow-warn { color: hsl(var(--warning-ink)); flex-shrink: 0; }
 /* info 档（jdt.ls 的建议/未使用的导入）：弱化色，提示不该和警告一样醒目 */
 .wb-prow-info { color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+/* 「问题」页工具条：严重度筛选 + 按文件分组 + 复制（吸顶，列表滚动时仍可点） */
+.wb-problems-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 0 10px 6px; background: hsl(var(--card)); }
+.wb-pfilter { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 5px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.wb-pfilter:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.wb-pfilter[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
+.wb-pfilter-n { font-size: 10.5px; color: hsl(var(--muted-foreground)); }
+.wb-problems-sp { flex: 1; }
+.wb-pgroup-head { display: flex; align-items: center; gap: 8px; padding: 6px 14px 2px; font-size: 11.5px; font-weight: 600; color: hsl(var(--muted-foreground)); }
+.wb-pgroup-n { font-weight: 500; }
+.wb-status-btn[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
 .wb-prow-msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-prow-loc { margin-left: auto; flex-shrink: 0; color: hsl(var(--muted-foreground)); font-size: 11.5px; }
 /* 编译诊断（D4）：ecj 原文之外的推断，不算错误数——多行，路径另起一行 */
@@ -362,7 +414,9 @@
 .wb-log-link:hover { background: hsl(var(--secondary)); text-decoration: underline; }
 .wb-log-link:focus-visible { outline: 1px solid hsl(var(--ring)); outline-offset: -1px; }
 .wb-tabs-sp { flex: 1; }
+.wb-tabs-all-wrap { display: flex; align-items: center; align-self: center; flex-shrink: 0; margin: 0 2px; }
 .wb-compile-btn { align-self: center; margin: 0 8px; flex-shrink: 0; }
+.wb-task-btn { align-self: center; margin-left: 8px; flex-shrink: 0; }
 /* 状态栏的代码智能状态（设计稿 .ls） */
 .wb-lang { display: inline-flex; align-items: center; gap: 5px; }
 .wb-lang-dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--success)); }
@@ -375,6 +429,28 @@
 @media (prefers-reduced-motion: reduce) { .wb-lang[data-tone="busy"] .wb-lang-dot { animation: none; } }
 .wb-status-btn { color: inherit; font-size: inherit; padding: 0 4px; border-radius: 4px; }
 .wb-status-btn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+/* 状态栏的 NC 服务入口：小圆点表达启停态，点一下打开底部服务面板 */
+.wb-status-svc {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: inherit;
+  font-size: inherit;
+  white-space: nowrap;
+}
+.wb-status-svc:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.wb-status-svc-dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--muted-foreground)); }
+.wb-status-svc[data-state="running"] .wb-status-svc-dot { background: hsl(var(--success)); }
+.wb-status-svc[data-state="starting"] .wb-status-svc-dot {
+  background: hsl(var(--warning));
+  animation: wb-lang-pulse 1s infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-status-svc[data-state="starting"] .wb-status-svc-dot { animation: none; }
+}
 
 /* 面包屑：路径 › 类 › 方法 */
 .wb-crumb { display: flex; align-items: center; gap: 2px; height: 24px; padding: 0 12px; flex-shrink: 0; overflow: hidden; font-size: 12px; color: hsl(var(--muted-foreground)); background: hsl(var(--card)); white-space: nowrap; }
@@ -460,3 +536,5 @@ button.wb-empty-row:hover { background: hsl(var(--secondary)); }
 .wb-empty-mu { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: hsl(var(--muted-foreground)); }
 .wb-empty-key kbd { margin-left: auto; font: 11px Consolas, monospace; padding: 1px 5px; border: 1px solid hsl(var(--border)); border-radius: 4px; color: hsl(var(--muted-foreground)); }
 .wb-empty-go { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; height: 28px; padding: 0 12px; border-radius: 7px; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); font-size: 12px; }
+
+.wb-sedit-row[data-changed] { background: hsl(var(--warning) / 0.09); }

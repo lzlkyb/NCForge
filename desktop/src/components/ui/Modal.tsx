@@ -16,7 +16,7 @@ interface ModalProps {
   closeOnOverlay?: boolean;
   /** 进出场动画：scale（弹簧缩放，默认）| fade（纯淡入） */
   animation?: "scale" | "fade";
-  /** 层级，默认 1000（原 UpdateNotesDialog/VersionHistoryModal 用 1000，Dialog/ConfirmModal 用 50） */
+  /** 层级，默认 1000（原 UpdateNotesDialog/VersionHistoryModal 用 1000，Dialog 用 50） */
   zIndex?: number;
   ariaLabel?: string;
 }

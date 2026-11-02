@@ -284,8 +284,6 @@ body {
 * {
   border-color: hsl(var(--border));
 }
-/* 选项需要覆盖未分层的通用边框色，否则选中与未选中显示同色。 */
-.option-chip[aria-pressed="true"] { border-color: hsl(var(--primary) / .45); }
 .info-trigger:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 
 /* Page rails share the outer gutter: 12px native hit area with a 4px visible thumb.
@@ -583,32 +581,6 @@ body {
   display: flex; align-items: center;
   font-size: 11px; font-weight: 700; color: hsl(var(--muted-foreground));
 }
-
-/* 治理胶囊（评审修复 ③：10.5px → 11px，中文可读下限；+0.5px 不破行高）。 */
-.gov-pill {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; font-weight: 700;
-  border-radius: 999px; padding: 4px 10px;
-  background: hsl(var(--muted)); color: hsl(var(--muted-foreground));
-}
-.gov-pill--ok   { background: hsl(var(--success) / 0.14); color: hsl(var(--success)); }
-.gov-pill--warn { background: hsl(var(--warning) / 0.16); color: hsl(var(--warning)); }
-
-/* 可点的胶囊才给 hover 反馈。之前只有 `.nav-target { cursor: pointer }`，
-   除了指针形状什么都没有，用户根本不知道九个胶囊各自能跳到对应设置。 */
-.gov-pill.nav-target {
-  transition: transform var(--dur-fast) var(--ease),
-              box-shadow 120ms cubic-bezier(0.4, 0, 0.2, 1),
-              background-color 120ms linear;
-}
-.gov-pill.nav-target:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-  background: hsl(var(--muted-foreground) / 0.18);
-}
-/* 三种色态各配自己的 hover 底色，否则绿色 / 警色胶囊悬停时会串成中性灰。 */
-.gov-pill--ok.nav-target:hover   { background: hsl(var(--success) / 0.26); }
-.gov-pill--warn.nav-target:hover { background: hsl(var(--warning) / 0.3); }
 
 /* 热门工具占比条（健康度卡）。 */
 .tool-bar {
@@ -934,24 +906,9 @@ body {
 }
 .chain-seg { animation: chain-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
 /* 错开 60ms 依次淡入。用 nth-child 而不是行内 `animationDelay`：
-   那三段现在是 `NavTarget` 包的，为了一个 delay 给它开一个 style 口不值得。
-   mac 上只有两段，第 3 条规则自然不命中。 */
+   为了一个 delay 开 style 口不值得。mac 上只有两段，第 3 条规则自然不命中。 */
 .chain-seg:nth-child(2) { animation-delay: 60ms; }
 .chain-seg:nth-child(3) { animation-delay: 120ms; }
-
-/* 可点击跳转目标（NavTarget）。
-   只在真的可点时才挂这个类——`onNavigate` 不传时 NavTarget 渲染纯 div，
-   不会给出“能点”的假暗示。 */
-.nav-target { cursor: pointer; }
-/* 焦点环：键盘用户必须看得见自己在哪。用 :focus-visible 而不是 :focus，
-   鼠标点击后不留下一圈描边。 */
-.nav-target:focus-visible {
-  outline: 2px solid hsl(var(--ring));
-  outline-offset: 2px;
-  border-radius: 8px;
-}
-/* 深色渐变卡（状态主卡）内的焦点环换白色，否则 --ring 压在渐变上看不见。 */
-.status-card .nav-target:focus-visible { outline-color: rgba(255, 255, 255, 0.9); }
 
 /* “通”节点的光晕。只给链路末段（远程调用）且 tone=ok 时用——全屏只保留这一个
    常驻动画。只动 transform/opacity，走纯合成不重绘。
@@ -1032,7 +989,7 @@ body {
   border-color: color-mix(in srgb, hsl(var(--primary)) 55%, hsl(var(--border)));
 }
 /* The service surface shares the dashboard's elevation; its individual controls retain their own targets. */
-.metric-card.nav-target:hover, .bento-card.nav-target:hover, .status-card:hover { transform: translateY(-2px); }
+.status-card:hover { transform: translateY(-2px); }
 
 /* sparkline 末端标点：静态，**不脉动**。标明“这是当前值”而不引入常驻动画。
 
@@ -1255,101 +1212,6 @@ body {
   border-color: hsl(var(--primary));
   color: hsl(var(--foreground));
 }
-
-/* ═══ 扩展名芯片输入 ═══ */
-.chip {
-  transition: transform var(--dur-fast), box-shadow var(--dur-fast);
-}
-.chip:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
-}
-.chip .chip-x:hover {
-  opacity: 1 !important;
-  transform: scale(1.15);
-}
-.dark .chip:hover {
-  box-shadow: 0 2px 6px rgba(255,255,255,0.04);
-}
-
-/* 芯片分色 —— 浅色文字色需 ≥4.5:1（AA 小字）。原 .c-back #D55B0C 在 #FFF5ED 上仅 3.66:1、
-   .c-doc #07889B 在 #EDFAFC 上仅 3.93:1，均不达标；下方按同色相压暗亮度后 4.77–4.80:1。
-   .c-front(5.45) / .c-conf(4.64) 原本已达标，不动。深色侧全部 ≥8:1，亦不动。 */
-.c-front { background: #EBEEFF; color: #4F46E5; }
-.c-front .chip-x { color: #4F46E5; }
-.dark .c-front { background: #1C1946; color: #A5B4FC; }
-.dark .c-front .chip-x { color: #A5B4FC; }
-.c-front .chip-x:hover { background: #4F46E5; color: #fff; }
-
-.c-back { background: #FFF5ED; color: #B54F0B; }
-.c-back .chip-x { color: #B54F0B; }
-.dark .c-back { background: #3B1406; color: #FDBA74; }
-.dark .c-back .chip-x { color: #FDBA74; }
-.c-back .chip-x:hover { background: #B54F0B; color: #fff; }
-
-.c-conf { background: #E9FBF3; color: #078051; }
-.c-conf .chip-x { color: #078051; }
-.dark .c-conf { background: #042B14; color: #6EE7B7; }
-.dark .c-conf .chip-x { color: #6EE7B7; }
-.c-conf .chip-x:hover { background: #078051; color: #fff; }
-
-.c-doc { background: #EDFAFC; color: #07798B; }
-.c-doc .chip-x { color: #07798B; }
-.dark .c-doc { background: #0A2630; color: #67E8F9; }
-.dark .c-doc .chip-x { color: #67E8F9; }
-.c-doc .chip-x:hover { background: #07798B; color: #fff; }
-
-/* 默认芯片（自定义输入，不分类） */
-.chip:not(.c-front):not(.c-back):not(.c-conf):not(.c-doc) {
-  background: hsl(var(--muted));
-  color: hsl(var(--muted-foreground));
-}
-.chip:not(.c-front):not(.c-back):not(.c-conf):not(.c-doc) .chip-x {
-  color: hsl(var(--muted-foreground));
-}
-.chip:not(.c-front):not(.c-back):not(.c-conf):not(.c-doc) .chip-x:hover {
-  background: hsl(var(--border));
-  color: hsl(var(--foreground));
-}
-
-/* 分类按钮 */
-.cat-btn { transition: background-color var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast); }
-.cat-btn .chevron { transition: transform var(--dur-fast); }
-.cat-btn.open .chevron { transform: rotate(180deg); }
-.cat-front.open { background: #EBEEFF; color: #4F46E5; border-color: #4F46E5; }
-.cat-back.open  { background: #FFF5ED; color: #B54F0B; border-color: #B54F0B; }
-.cat-conf.open  { background: #E9FBF3; color: #078051; border-color: #078051; }
-.cat-doc.open   { background: #EDFAFC; color: #07798B; border-color: #07798B; }
-.dark .cat-front.open { background: #1C1946; }
-.dark .cat-back.open  { background: #3B1406; }
-.dark .cat-conf.open  { background: #042B14; }
-.dark .cat-doc.open   { background: #0A2630; }
-
-/* 分类按钮的 7px 色点（P2-10）：原是 chip-input.tsx 里四个硬编码 hex 内联，
-   脱离 token 与双主题体系，且没跟上此前 .c-back/.c-doc 的 WCAG 压暗修正
-   （#D55B0C→#B54F0B、#07889B→#07798B）——色点与芯片实际色已经不一致。
-   现在色值与 .c-* / .cat-*.open 的文字色同源同主题。色点不承载文字，
-   无需单独做小字对比度核算。 */
-.cat-dot-front { background: #4F46E5; }
-.cat-dot-back  { background: #B54F0B; }
-.cat-dot-conf  { background: #078051; }
-.cat-dot-doc   { background: #07798B; }
-.dark .cat-dot-front { background: #A5B4FC; }
-.dark .cat-dot-back  { background: #FDBA74; }
-.dark .cat-dot-conf  { background: #6EE7B7; }
-.dark .cat-dot-doc   { background: #67E8F9; }
-
-/* 展开标签 */
-.ext-tag { transition: background-color var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast); }
-.ext-tag.checked { font-weight: 600; }
-.tag-front.checked { background: #EBEEFF; color: #4F46E5; border-color: #4F46E5; }
-.tag-back.checked  { background: #FFF5ED; color: #B54F0B; border-color: #B54F0B; }
-.tag-conf.checked  { background: #E9FBF3; color: #078051; border-color: #078051; }
-.tag-doc.checked   { background: #EDFAFC; color: #07798B; border-color: #07798B; }
-.dark .tag-front.checked { background: #1C1946; }
-.dark .tag-back.checked  { background: #3B1406; }
-.dark .tag-conf.checked  { background: #042B14; }
-.dark .tag-doc.checked   { background: #0A2630; }
 
 /* ═══ 项目信息 key-value 行 ═══ */
 .info-icon-wrap {

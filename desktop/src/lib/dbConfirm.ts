@@ -132,10 +132,15 @@ export async function guardTx(connId: string | null, reason: string): Promise<bo
   }
 }
 
-/** 只有「这个标签是该连接上最后一个标签」时才需要处理事务：别的标签还在用同一个会话。 */
+/**
+ * 只有「这个标签是该连接上最后一个标签」时才需要处理事务：别的标签还在用同一个会话。
+ *
+ * 字典标签不算：它只查字典、不开会话，把「只剩字典标签」当成还有人守着会话，
+ * 会让关掉最后一个 SQL 标签时静默丢掉未提交的 update。
+ */
 export function isLastTabOn(connId: string | null, tabId: string): boolean {
   if (!connId) return false;
-  return !getDb().tabs.some((t) => t.id !== tabId && t.connId === connId);
+  return !getDb().tabs.some((t) => t.id !== tabId && t.connId === connId && t.kind !== "dict");
 }
 
 /**

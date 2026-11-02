@@ -5,16 +5,21 @@ import { Icon } from "../ui/icon";
 import { ConnTree } from "../db/ConnTree";
 import { ConnDialog } from "../db/ConnDialog";
 import { DbDocTabs } from "../db/DbDocTabs";
+import { DictWorkspace } from "../md/DictWorkspace";
 import { SqlConsole } from "../db/SqlConsole";
 import { TablePage } from "../db/TablePage";
-import { defaultConnId, newConsole } from "../../lib/dbActions";
-import { loadConns, openConnDialog, openSqlTab, tabOf, useDb } from "../../lib/dbStore";
+import { newConsole } from "../../lib/dbActions";
+import { defaultConnId, loadConns, openConnDialog, openDictTab, openSqlTab, tabOf, useDb } from "../../lib/dbStore";
 
 /**
- * 数据库页（多连接 SQL 客户端）。
+ * 数据库页（多连接 SQL 客户端 + 数据字典文档）。
  *
  * 布局照 design/NCForge-数据库升级-设计稿-2026-10-30.html：侧栏连接树、主标签条里的文档标签、
- * 文档区放 SQL 控制台或表页。读写权限由数据库账号决定，这里只负责让人看清连的是哪个库。
+ * 文档区放 SQL 控制台、表页或数据字典。读写权限由数据库账号决定，这里只负责让人看清连的是哪个库。
+ *
+ * 数据字典是这一页的一种文档标签（见 `DictWorkspace`），不再单独占主导航位：
+ * 它读的就是这个库的 `md_*` 元数据，跟连接树/连接选择是同一件事；单独成页时
+ * 用户还得在两边各自确认「这是哪个库」。
  */
 export function DbTab() {
   const db = useDb();
@@ -37,35 +42,49 @@ export function DbTab() {
 
   return (
     <>
-      <DockRegion region="sidebar">
-        <ConnTree />
-      </DockRegion>
-      <DbDocTabs />
-      <DockRegion region="document">
-        <div className="dbx-page">
-          {tab?.kind === "sql" && <SqlConsole tab={tab} />}
-          {tab?.kind === "table" && <TablePage key={tab.id} tab={tab} />}
-          {!tab && (
-            <div className="dbx-empty">
-              <Icon name="database" size={24} />
-              {db.conns.length === 0 ? (
-                <>
-                  <span>还没有数据库连接。可以从 NC prop.xml 导入，或手动填写 / 导入 .properties。</span>
-                  <button type="button" className="dbx-btn pri" onClick={() => openConnDialog(null)}>
-                    <Icon name="plus" size={12} />
-                    新建连接
-                  </button>
-                </>
-              ) : (
-                <button type="button" className="dbx-btn pri" onClick={() => void newConsole()}>
-                  <Icon name="terminal" size={12} />
-                  新建 SQL 控制台
-                </button>
+      {tab?.kind === "dict" ? (
+        // 字典标签的选表器在侧栏、文档在右侧，两块都由它自己停靠——
+        // 这一页的侧栏此时让位给「选哪几张表」，而不是再叠一棵连接树。
+        <DictWorkspace tabId={tab.id} />
+      ) : (
+        <>
+          <DockRegion region="sidebar">
+            <ConnTree />
+          </DockRegion>
+          <DockRegion region="document">
+            <div className="dbx-page">
+              {tab?.kind === "sql" && <SqlConsole tab={tab} />}
+              {tab?.kind === "table" && <TablePage key={tab.id} tab={tab} />}
+              {!tab && (
+                <div className="dbx-empty">
+                  <Icon name="database" size={24} />
+                  {db.conns.length === 0 ? (
+                    <>
+                      <span>还没有数据库连接。可以从 NC prop.xml 导入，或手动填写 / 导入 .properties。</span>
+                      <button type="button" className="dbx-btn pri" onClick={() => openConnDialog(null)}>
+                        <Icon name="plus" size={12} />
+                        新建连接
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" className="dbx-btn pri" onClick={() => void newConsole()}>
+                        <Icon name="terminal" size={12} />
+                        新建 SQL 控制台
+                      </button>
+                      <button type="button" className="dbx-btn" onClick={() => openDictTab(defaultConnId())}>
+                        <Icon name="clipboard" size={12} />
+                        数据字典
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
-      </DockRegion>
+          </DockRegion>
+        </>
+      )}
+      <DbDocTabs />
       <ConnDialog />
     </>
   );

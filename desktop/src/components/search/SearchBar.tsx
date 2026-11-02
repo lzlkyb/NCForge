@@ -9,8 +9,8 @@ const MASK_PRESETS = ["*.java", "*.xml", "*.properties"];
 /**
  * 搜索条件栏（常驻顶部，结果区滚动时不动）。
  *
- * 三个开关挨着输入框常显，不学 VS Code 收进「⋯」——整页横向空间够，
- * 收纳后不给快捷键基本想不起来。
+ * 住在文件页侧栏里，宽度只有两三百像素：输入框独占一行，开关与文件过滤依次换行。
+ * 三个开关常显、不学 VS Code 收进「⋯」——收纳后不给快捷键基本想不起来。
  */
 export function SearchBar({
   form,
@@ -37,7 +37,7 @@ export function SearchBar({
   };
 
   return (
-    <div className="flex-shrink-0 border-b border-border bg-card px-4 pb-2 pt-3">
+    <div className="flex-shrink-0 border-b border-border bg-card px-3 pb-2 pt-3">
       <div className="flex items-center gap-2">
         <div className="relative flex min-w-0 flex-1 items-center">
           <Icon
@@ -73,7 +73,13 @@ export function SearchBar({
           )}
         </div>
 
-        {/* 三个文本开关挨着输入框常显（VS Code 的位置，但不像它那样收进 ⋯） */}
+        <Button size="sm" className="h-9 px-3" onClick={onSearch} isLoading={loading} loadingText="搜索中">
+          搜索
+        </Button>
+      </div>
+
+      {/* 三个文本开关常显（VS Code 的位置，但不像它那样收进 ⋯） */}
+      <div className="mt-2 flex items-center gap-1.5">
         <Toggle
           on={form.caseSensitive}
           onClick={() => update({ caseSensitive: !form.caseSensitive })}
@@ -97,9 +103,6 @@ export function SearchBar({
         >
           .*
         </Toggle>
-        <Button size="sm" className="h-9 px-4" onClick={onSearch} isLoading={loading} loadingText="搜索中">
-          搜索
-        </Button>
       </div>
 
       {/* 文件过滤：一个框 + 常用预设，IDEA 的 File mask 语义（`,` 分隔，`!` 排除） */}
@@ -111,7 +114,7 @@ export function SearchBar({
           onKeyDown={(e) => onKeyDown(e)}
           placeholder="*.java,*.xml,!test*"
           spellCheck={false}
-          className="h-7 w-64 rounded-md border border-input bg-background px-2 font-mono text-[11.5px] outline-none placeholder:text-muted-foreground focus:border-ring"
+          className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-[11.5px] outline-none placeholder:text-muted-foreground focus:border-ring"
         />
         {MASK_PRESETS.map((mask) => {
           const on = form.include
@@ -134,8 +137,8 @@ export function SearchBar({
             </button>
           );
         })}
-        <span className="ml-auto text-[11px] text-muted-foreground">
-          范围：整个工作区 · 自动跳过 .svn .git .idea node_modules
+        <span className="w-full text-[11px] text-muted-foreground">
+          整个工作区 · 跳过 .svn .git .idea node_modules
         </span>
       </div>
 

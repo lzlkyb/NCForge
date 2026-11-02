@@ -470,6 +470,40 @@ pub(crate) fn drop_bridge(state: &AppState, key: &str) {
     }
 }
 
+/// 一次性任务的临时会话序号：导出与按值反查各用各的前缀，但序号共用一个池，
+/// 避免两次操作（甚至两个入口同时点）撞上同一个会话名。
+static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// 开一条临时会话跑「读全就断」的一次性任务（导出、按值反查）。
+///
+/// 自动提交、只读语义由调用方保证（只发 SELECT）。`None` = 拿不到可直接连接的条件
+/// （没连上 / 手动连接的口令没记住），调用方决定是报错还是降级复用现有句柄。
+/// 用完必须 `disconnect` + [`drop_bridge`]，否则服务端会话会一直挂着。
+pub(crate) async fn open_temp_session(
+    app: &AppHandle,
+    state: &AppState,
+    cfg: &AppConfig,
+    conn: &DbConnConfig,
+    engine: EngineKind,
+    kind: &str,
+) -> Option<(String, Arc<EngineHandle>)> {
+    // 读操作不需要事务：自动提交，跑完断开也不留未提交状态
+    let (cmd, args) = connect_args(cfg, conn, None, true, engine).ok()?;
+    let key = format!(
+        "__{kind}:{}:{}",
+        conn.id,
+        TEMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let bridge = bridge_for(app, state, cfg, &key, engine).ok()?;
+    match call(bridge.clone(), cmd, args, T_CONNECT).await {
+        Ok(_) => Some((key, bridge)),
+        Err(_) => {
+            drop_bridge(state, &key);
+            None
+        }
+    }
+}
+
 /// 在阻塞线程里调一次引擎，错误转成 `code|message`。
 pub(crate) async fn call(
     engine: Arc<EngineHandle>,
@@ -1087,9 +1121,10 @@ pub async fn db_tx(
     call(b, cmd, args, Duration::from_secs(60)).await
 }
 
-/// 元数据：`tables` / `ncNames` / `columns` / `indexes` / `ddl` / `explain` / `sessions` /
-/// `objects` / `source`。`arg` 是表名或对象名（explain 时是 SQL；sessions、objects 不需要
-/// 参数）；`arg2` 目前只有 `ddl` 用，表示对象类型（包/过程/序列…，空 = 按表处理）。
+/// 元数据：`tables` / `ncNames` / `columnsZh` / `columns` / `indexes` / `ddl` / `explain` /
+/// `sessions` / `objects` / `source`。`arg` 是表名或对象名（columnsZh 时是逗号分隔的
+/// 一批表名；explain 时是 SQL；sessions、objects 不需要参数）；`arg2` 目前只有 `ddl` 用，
+/// 表示对象类型（包/过程/序列…，空 = 按表处理）。
 #[tauri::command]
 pub async fn db_meta(
     state: tauri::State<'_, Arc<AppState>>,
@@ -1099,6 +1134,21 @@ pub async fn db_meta(
     arg2: Option<String>,
 ) -> Result<Value, String> {
     let b = existing_bridge(&state, &id)?;
+    // 列中文名要两个引擎各走各的取数方式（Rust 用绑定变量、JVM 桥用 `query`），
+    // 所以不进下面的「kind → 桥命令」映射，直接走 EngineHandle；拼装统一在 db_zh。
+    if kind == "columnsZh" {
+        let names = arg.unwrap_or_default();
+        return tauri::async_runtime::spawn_blocking(move || b.columns_zh(&names, T_META))
+            .await
+            .map_err(|e| format!("调用数据库桥失败：{e}"))?
+            .map_err(|e| {
+                if e.code == "timeout" || e.code == "spawn" {
+                    code_label("bridge", &e.message)
+                } else {
+                    map_sql_error(&e.message)
+                }
+            });
+    }
     let cmd: &'static str = match kind.as_str() {
         "tables" => "tables",
         "ncNames" => "ncNames",
@@ -1165,7 +1215,7 @@ pub async fn db_tx_all(
 
 /// 表结构缓存、悬停、出包核对用哪个库：最近一次在数据库页用过的连接，
 /// 其次第一条连接，再其次 prop.xml 的基础数据源（老用户还没打开过新数据库页时）。
-fn current_db(cfg: &AppConfig) -> Result<(Option<String>, String, String), String> {
+pub(crate) fn current_db(cfg: &AppConfig) -> Result<(Option<String>, String, String), String> {
     let pick = cfg
         .db_active
         .as_deref()

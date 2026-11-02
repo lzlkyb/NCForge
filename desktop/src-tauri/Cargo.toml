@@ -37,6 +37,10 @@ url = "2"
 reqwest = "0.13"
 futures-util = "0.3"
 sha2 = "0.10"
+# NC 重置操作员密码的两套哈希：NC65 是 MD5，NCC 是 SHA-256 再 Base64。
+# md-5 经 oracledb、base64 经 reqwest/tauri 已在依赖树里，提成直接依赖不增加实际编译量。
+md-5 = "0.11"
+base64 = "0.22"
 tauri-plugin-process = "2"
 tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-opener = "2"
@@ -104,6 +108,30 @@ tauri = { version = "2", features = ["test"] }
 # 仅为测试构造 UpdaterError::Semver 变体（插件错误的确定性分类断言）。
 # updater 插件已传递依赖 semver 1.x，这里不增加实际编译量。
 semver = "1"
+
+# ─── 开发 / 测试 profile：不生成依赖的调试信息 ───
+#
+# 依据（2026-11-02 实测，改动前 `target/debug/deps` 共 14.24 GB）：
+#   93 个 .pdb        9.46 GB   ← 绝对大头
+#   585 个 .rlib      3.13 GB
+# 这些 PDB 是「全量 debuginfo」的产物：每个依赖 crate 的调试信息都要被 link.exe
+# 汇进 .pdb，写盘时还要整份驻留内存。15.8GB 的机器上全量重编一次，16 路 rustc +
+# 并发 link.exe 直接把内存顶到 99%（历史上多次触发 TDR / 蓝屏，见 CLAUDE.md §8.3）。
+#
+# 取舍：真正会单步进去的只有本仓代码，所以本仓留「行号级」调试信息
+# （panic 的 backtrace 仍有文件名与行号），依赖一律不带。
+# 需要钻进依赖源码时，临时把 `debug = false` 改回 `true` 再编一次即可。
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.test.package."*"]
+debug = false
 
 [profile.release]
 # codegen-units 用默认 16 而不是 1：跨单元优化已由 lto = "thin" 提供，

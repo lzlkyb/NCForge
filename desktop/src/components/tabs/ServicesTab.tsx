@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import "../../services.css";
 import { Icon } from "../ui/icon";
+import { ServiceActionsBar } from "../services/ServiceActionsBar";
 import { toast } from "../ui/toast";
 import { ServiceCard } from "../services/ServiceCard";
 import { LogPanel } from "../services/LogPanel";
@@ -11,7 +12,9 @@ import { CommandLineDialog } from "../services/CommandLineDialog";
 import { PortDialog } from "../services/PortDialog";
 import { ServiceConfirms } from "../services/ServiceConfirms";
 import { ServiceAlerts } from "../services/ServiceAlerts";
+import { MetaDeployCard } from "../services/MetaDeployCard";
 import { useAppHidden } from "../../lib/appVisibility";
+import { useWorkspaceSelector } from "../../lib/workspaceSession";
 import { failureText } from "../../lib/friendlyError";
 import { attachDebugger, detachDebugger, useDebugSnapshot } from "../../lib/debugSession";
 import { readDebugModePref, writeDebugModePref } from "../../lib/debugKeys";
@@ -30,15 +33,21 @@ import {
 type Busy = "start" | "stop" | "restart" | "kill" | null;
 
 /**
- * NC 服务页：启停中间件 + 实时日志。
+ * NC 服务面板：启停中间件 + 实时日志。
  *
- * 状态全部来自后端轮询（1 秒一次；窗口隐藏时停），前端不自己拼状态：
- * 「进程活着」不等于「服务可用」，后者要看中间件端口是不是我们的进程在监听。
- * 端口读自 NC 自己的 `ierp/bin/prop.xml`（见 `ServerStatus.port`），不写死 80。
+ * 不再是主导航页签：内容常驻在文件页底部面板的「NC 服务」标签里，状态栏的
+ * 服务胶囊和命令面板都能直接打开它。组件始终挂载，但只在面板可见时 1 秒轮询。
+ *
+ * 状态全部来自后端轮询，前端不自己拼状态：「进程活着」不等于「服务可用」，
+ * 后者要看中间件端口是不是我们的进程在监听。端口读自 NC 自己的
+ * `ierp/bin/prop.xml`（见 `ServerStatus.port`），不写死 80。
  */
 export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void }) {
   const appHidden = useAppHidden();
   const queryClient = useQueryClient();
+  const panelOpen = useWorkspaceSelector((s) => s.panelOpen);
+  const panelTab = useWorkspaceSelector((s) => s.panelTab);
+  const svcVisible = panelOpen && panelTab === "svc";
   const [busy, setBusy] = useState<Busy>(null);
   const [confirm, setConfirm] = useState<null | "stop" | "kill" | "restart">(null);
   /** 每次启动 +1：让日志面板换一代（后端启动时把旧日志轮转成 .1）。 */
@@ -54,7 +63,8 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const { data: status, refetch, isError, error } = useQuery({
     queryKey: ["server-status"],
     queryFn: serverStatus,
-    refetchInterval: appHidden ? false : 1000,
+    // 面板不可见时不必每秒问一次：状态栏胶囊另有 5 秒轮询兜着
+    refetchInterval: appHidden || !svcVisible ? false : 1000,
     retry: false,
   });
 
@@ -199,29 +209,15 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const owner = status?.portOwner ?? null;
 
   return (
-    <div className="sv-page">
-      <DockRegion region="toolbar"><div className="sv-head">
-        <h1>NC 服务</h1>
-        <span className="sv-sub">开发态中间件 · 改完代码重启即可生效</span>
-        <span className="sv-sp" />
-        <button type="button" className="sv-btn" onClick={() => setConfigOpen(v => !v)}>配置</button>
-        <button
-          type="button"
-          className="sv-btn"
-          disabled={previewing}
-          title={previewing ? "正在生成上次启动的命令行…" : "查看启动命令行（只读预览，不会重写 classpath）"}
-          onClick={() => void showCommandLine()}
-        >
-          <Icon name="terminal" size={13} />
-          {previewing ? "生成中…" : "命令行"}
-        </button>
-        <button type="button" className="sv-btn" onClick={revealLog}>
-          <Icon name="folder" size={13} />
-          日志位置
-        </button>
-      </div></DockRegion>
-
+    <>
       <DockRegion region="bottom"><div className="sv-body wb-service-tool">
+        <ServiceActionsBar
+          configOpen={configOpen}
+          onToggleConfig={() => setConfigOpen((v) => !v)}
+          previewing={previewing}
+          onCommandLine={() => void showCommandLine()}
+          onRevealLog={revealLog}
+        />
         <ServiceCard
           status={status ?? null}
           busy={busy}
@@ -259,6 +255,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
         />
 
         {configOpen && <ServiceConfig status={status ?? null} running={!known || state !== "stopped"} onRefetch={() => void refetch()} />}
+        <MetaDeployCard />
 
         <LogPanel
           active={!known || state === "running" || state === "starting"}
@@ -290,6 +287,6 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
         onClose={() => setPortOpen(false)}
         onApplied={() => void refetch()}
       />
-    </div>
+    </>
   );
 }

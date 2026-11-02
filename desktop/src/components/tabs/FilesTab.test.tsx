@@ -6,9 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesTab } from "./FilesTab";
 import { WorkbenchFrame } from "../workspace/WorkbenchFrame";
 import { setSession } from "../../lib/workspaceSession";
+import { setSidebarView } from "../../lib/sidebarView";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), toast: vi.fn() }));
-vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
+// 服务面板与状态栏胶囊都走 useQuery（server-status）：这里给一份空状态，不让测试去碰真实后端
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQuery: () => ({ data: undefined, refetch: vi.fn(), isError: false, error: null }),
+}));
 vi.mock("../workspace/TreeSvnProvider", () => ({ TreeSvnProvider: ({ children }: { children: import("react").ReactNode }) => <>{children}</> }));
 // 文件树要订阅 fs-changed：给个空注册，本测试不关心外部改动
 vi.mock("../../lib/tauri", () => ({
@@ -123,6 +128,9 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  // 侧栏视图与底部标签都是模块级仓库：不还原，后面的用例会互相污染
+  setSidebarView("files");
+  setSession({ panelTab: "problems", panelOpen: true });
 });
 
 describe("文件页", () => {
@@ -150,21 +158,32 @@ describe("文件页", () => {
     expect(container.textContent).toContain("资源管理器");
   });
 
-  it("工具面板切换保持同一个编辑器节点", async () => {
+  it("搜索是文件侧栏视图，NC 服务在底部面板，两者都不换掉编辑器节点", async () => {
     mocks.invoke.mockImplementation(async (cmd: string) => cmd === "get_workspace" ? ROOT : []);
     await render();
     const editor = container.querySelector('[data-testid="editor-pane"]');
     expect(editor).toBeTruthy();
-    await render("search", <DockRegion region="sidebar"><div>搜索结果</div></DockRegion>);
+
+    // 搜索并进侧栏：文件树槽位换成搜索表单，编辑器原样保留
+    await act(async () => setSidebarView("search"));
     expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
-    expect(container.querySelector(".wb-tree")?.textContent).toContain("搜索结果");
+    expect(container.querySelector(".wb-tree input[list]")).toBeTruthy();
+    expect(container.querySelector(".wb-pane-title")?.textContent).toContain("全工程搜索");
+    await act(async () => setSidebarView("files"));
+    expect(container.querySelector(".wb-tree")?.textContent).toContain("资源管理器");
+    expect(container.querySelector('[aria-label="全工程搜索"]')).toBeTruthy();
+
+    // 文档型工具仍然占文档区，编辑器留在 DOM 里
     await render("db", <DockRegion region="document"><div>SQL 查询</div></DockRegion>);
     expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
     expect((container.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(true);
-    await render("services", <DockRegion region="bottom"><div>服务日志</div></DockRegion>);
+
+    // NC 服务是底部面板的一个标签：不占导航页签，也没有独立的工具页。
+    // 切回文件工具页再开服务面板——文档页（db）还占着文档槽时编辑器本就该让位
+    await render("files");
+    await act(async () => setSession({ panelOpen: true, panelTab: "svc" }));
     expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
-    // 服务日志停靠在底部面板「NC 服务」标签的宿主里
-    expect(container.querySelector(".wb-svc-host")?.textContent).toContain("服务日志");
+    expect(container.querySelector(".wb-svc-host")?.textContent).toContain("NC 中间件");
     expect((container.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(false);
   });
 

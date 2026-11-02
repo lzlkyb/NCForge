@@ -22,6 +22,14 @@ export function setCurrentEditor(editor: monaco.editor.IStandaloneCodeEditor | n
   current = editor;
 }
 
+/**
+ * 编辑器卸载时调用。分屏有两个编辑器：谁卸载都直接清空的话，
+ * 关掉分屏会把主编辑器也变成「没有当前编辑器」，F2 / 快速修复随即失灵。
+ */
+export function releaseCurrentEditor(editor: monaco.editor.IStandaloneCodeEditor): void {
+  if (current === editor) current = null;
+}
+
 function editor(): monaco.editor.IStandaloneCodeEditor | null {
   if (current && !current.getModel()?.isDisposed()) return current;
   // `getEditors()` 给的是 ICodeEditor（可能只是 diff 面板之类），这里只在兜底路径上用
@@ -73,6 +81,50 @@ export const EDITOR_COMMANDS: EditorCommand[] = [
     title: "跳到父类 / 声明类型",
     action: "editor.action.goToTypeDefinition",
     javaOnly: true,
+  },
+  {
+    id: "editor.peekdef",
+    title: "定义预览（Alt+F12：在本窗口里看一眼，不跳走）",
+    action: "editor.action.peekDefinition",
+    javaOnly: true,
+  },
+  // 多光标：Monaco 都有现成命令，这里只是把它们列进命令面板，
+  // 不用记「Alt+J / Ctrl+Alt+↓ / Ctrl+Alt+Shift+↓」也能找到。
+  {
+    id: "editor.multiNext",
+    title: "多光标：选中下一个相同词（Alt+J）",
+    action: "editor.action.addSelectionToNextFindMatch",
+    javaOnly: false,
+  },
+  {
+    id: "editor.multiAll",
+    title: "多光标：选中所有相同词（Ctrl+Shift+L）",
+    action: "editor.action.selectHighlights",
+    javaOnly: false,
+  },
+  {
+    id: "editor.multiAbove",
+    title: "多光标：在上一行加一个光标（Ctrl+Alt+↑）",
+    action: "editor.action.insertCursorAbove",
+    javaOnly: false,
+  },
+  {
+    id: "editor.multiBelow",
+    title: "多光标：在下一行加一个光标（Ctrl+Alt+↓）",
+    action: "editor.action.insertCursorBelow",
+    javaOnly: false,
+  },
+  {
+    id: "editor.columnUp",
+    title: "列选择：向上扩一列（Ctrl+Alt+Shift+↑）",
+    action: "cursorColumnSelectUp",
+    javaOnly: false,
+  },
+  {
+    id: "editor.columnDown",
+    title: "列选择：向下扩一列（Ctrl+Alt+Shift+↓）",
+    action: "cursorColumnSelectDown",
+    javaOnly: false,
   },
 ];
 

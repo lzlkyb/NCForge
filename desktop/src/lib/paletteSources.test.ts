@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const lang = vi.hoisted(() => ({ ready: false, request: vi.fn(), symbols: vi.fn() }));
 const files = vi.hoisted(() => ({ list: [] as string[] }));
+const search = vi.hoisted(() => ({ run: vi.fn() }));
 
 // lang / symbols 会间接拉起 Monaco，这里只验证「每种模式怎么选数据源」
 vi.mock("./lang", () => ({ langReady: () => lang.ready, langRequest: lang.request, flushDoc: vi.fn() }));
@@ -11,6 +12,7 @@ vi.mock("./fileIndex", async () => {
   return { getFileIndex: async (root: string) => files.list.map((f) => toEntry(root, f)) };
 });
 vi.mock("./recentFiles", () => ({ getRecent: () => ["C:\\w\\gl\\B.java"] }));
+vi.mock("./search", () => ({ searchWorkspace: search.run }));
 
 import { registerCommands } from "./commandRegistry";
 import { buildItems, type PaletteCtx } from "./paletteSources";
@@ -22,6 +24,7 @@ beforeEach(() => {
   lang.ready = false;
   lang.request.mockReset();
   lang.symbols.mockReset();
+  search.run.mockReset();
   run.file.mockReset();
   run.jdt.mockReset();
   files.list = ["gl/A.java", "gl/B.java", "gl/VoucherBO.java", "gl/voucher.xml"];
@@ -159,5 +162,52 @@ describe("命令模式", () => {
     expect(hit).toHaveBeenCalled();
     off();
     expect((await buildItems("cmd", "编译", ctx())).items).toEqual([]);
+  });
+});
+
+describe("转到任意位置：内容与行号", () => {
+  it("#内容：把相对命中拼回绝对路径，最近打开的文件排前面", async () => {
+    search.run.mockResolvedValue({
+      hits: [
+        { path: "gl/A.java", line: 10, text: "  saveBo();", ranges: [{ start: 2, end: 6 }] },
+        { path: "gl/B.java", line: 3, text: "  saveBo();", ranges: [{ start: 2, end: 6 }] },
+      ],
+      filesScanned: 2,
+      filesMatched: 2,
+      truncated: false,
+      elapsedMs: 5,
+    });
+    const r = await buildItems("file", "#saveBo", ctx());
+    expect(search.run).toHaveBeenCalledWith({ text: "saveBo", maxResults: 50 });
+    // 最近打开的是 B.java（见 recentFiles mock），它的命中排第一
+    expect(r.items.map((i) => i.detail)).toEqual(["gl/B.java:3", "gl/A.java:10"]);
+    r.items[0].run();
+    expect(run.file).toHaveBeenCalledWith("C:\\w\\gl\\B.java", 3, 3);
+  });
+
+  it("#内容：空关键词与后端失败都给出说明，不假装没有结果", async () => {
+    expect((await buildItems("file", "#  ", ctx())).note).toContain("输入");
+    search.run.mockRejectedValue(new Error("扫描超时"));
+    expect((await buildItems("file", "#abc", ctx())).note).toContain("扫描超时");
+  });
+
+  it(":行号 跳到当前文件的指定位置；带列号时按列落点", async () => {
+    const r = await buildItems("file", ":42:7", ctx());
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0].title).toContain("42");
+    r.items[0].run();
+    expect(run.file).toHaveBeenCalledWith("C:\\w\\gl\\A.java", 42, 7);
+  });
+
+  it(":行号 对 jar 内的类走 jdt", async () => {
+    const uri = "jdt://contents/a.jar/nc.vo/A.class";
+    const r = await buildItems("file", ":9", ctx({ activePath: uri }));
+    r.items[0].run();
+    expect(run.jdt).toHaveBeenCalledWith(uri, 9, 1);
+  });
+
+  it(":行号 解析不了 / 没有打开文件时只给提示", async () => {
+    expect((await buildItems("file", ":abc", ctx())).items).toEqual([]);
+    expect((await buildItems("file", ":12", ctx({ activePath: null }))).note).toContain("先打开");
   });
 });

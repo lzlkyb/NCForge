@@ -46,6 +46,39 @@
   flex: 1;
 }
 
+/* 页内视图切换（审查改动 / 打包补丁）：两段等宽，住在共享侧栏顶部。
+   侧栏 240px 放得下；工具条那行已经排了 5 个动作按钮，不再往里塞。 */
+.vc-mode {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+  background: hsl(var(--card));
+}
+.vc-mode-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 550;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+.vc-mode-btn:hover {
+  background: hsl(var(--secondary));
+}
+.vc-mode-btn[data-on] {
+  background: hsl(var(--accent));
+  border-color: hsl(var(--border));
+  color: hsl(var(--accent-foreground));
+}
+
 /* 顶部按钮沿用服务页的 .btn 观感，但这里不引 services.css，自己给一份最小的 */
 .vc-btn {
   display: inline-flex;

@@ -4,9 +4,11 @@ import "../../log.css";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { LogToolbar } from "../log/LogToolbar";
+import { LogSearchBar } from "../log/LogSearchBar";
 import { LogList } from "../log/LogList";
 import { LogDetail } from "../log/LogDetail";
 import { failureText } from "../../lib/friendlyError";
+import { exportSearchResult, scopeKey, useLogSearch } from "../../lib/logSearch";
 import {
   entryKey,
   logSources,
@@ -44,6 +46,9 @@ const DEFAULT_FILTER: Filter = { loggers: [], range: "7d", onlyProblems: true, s
  *
  * 为什么不在这里做「全文检索」：工程搜索已经覆盖源码，日志检索的价值在**结论**，
  * 不在把 5MB 原文铺出来。所以列表里只有命中的条目，没命中的要看就关掉过滤。
+ *
+ * 全文检索（`nc_log_search`）是另一个入口：按原文匹配、不看归因。两条数据源共用
+ * 同一个列表与详情 —— 检索结果也是记录，选中后同样能看结论、跳源码、追 callid。
  */
 export function LogTab() {
   const [filter, setFilter] = useState<Filter>(DEFAULT_FILTER);
@@ -52,6 +57,9 @@ export function LogTab() {
   const [tracing, setTracing] = useState(false);
   /** 手动刷新计数：进 queryKey 触发重查，比 invalidate 更好读。 */
   const [nonce, setNonce] = useState(0);
+
+  const search = useLogSearch();
+  const found = search.state.phase === "done" ? search.state : null;
 
   const args = useMemo(
     () => ({
@@ -63,6 +71,11 @@ export function LogTab() {
     }),
     [filter],
   );
+
+  /** 检索后改了时间范围 / logger：结果还在，但要提示重搜（不自动重跑，读盘不便宜）。 */
+  const stale = found
+    ? found.key !== scopeKey({ loggers: args.loggers, sinceTs: args.sinceTs })
+    : false;
 
   const sourcesQ = useQuery({
     queryKey: ["nc-log-sources"],
@@ -78,13 +91,17 @@ export function LogTab() {
     retry: false,
   });
 
-  const entries = listQ.data?.entries ?? [];
+  /** 检索结果优先：有结果时列表与详情都看命中项，清除后回到归因列表。 */
+  const visible = useMemo(
+    () => (found ? found.result.entries : (listQ.data?.entries ?? [])),
+    [found, listQ.data],
+  );
   // 选中项按 `文件:行号` 存：刷新后还能定位回同一条，换成下标会指错。
   // 依赖写 `listQ.data` 而不是 `entries`：后者是 `?? []` 造出来的新数组，
   // 每次渲染都换引用，写进依赖会让这个 useMemo 每拍重算（eslint 也会报）。
   const selected = useMemo(
-    () => (listQ.data?.entries ?? []).find((e) => entryKey(e) === selectedKey) ?? null,
-    [listQ.data, selectedKey],
+    () => visible.find((e) => entryKey(e) === selectedKey) ?? null,
+    [visible, selectedKey],
   );
 
   const onSelect = (entry: LogEntry) => setSelectedKey(entryKey(entry));
@@ -101,6 +118,7 @@ export function LogTab() {
   };
 
   const summary = (() => {
+    if (found) return `检索「${found.form.query}」：命中 ${found.result.entries.length} 条`;
     if (listQ.isError) return "读取失败";
     if (!listQ.data) return "正在读取日志…";
     const d = listQ.data;
@@ -114,6 +132,10 @@ export function LogTab() {
     if (d.stoppedEarly) parts.push("已达条数上限");
     return parts.join(" · ");
   })();
+
+  const runSearch = () => {
+    void search.run({ loggers: args.loggers, sinceTs: args.sinceTs });
+  };
 
   return (
     <div className="lg-page">
@@ -138,7 +160,17 @@ export function LogTab() {
         onOnlyProblems={(onlyProblems) => setFilter((f) => ({ ...f, onlyProblems }))}
         onSlowMs={(slowMs) => setFilter((f) => ({ ...f, slowMs }))}
         onRefresh={() => setNonce((n) => n + 1)}
-      />
+      >
+        <LogSearchBar
+          form={search.form}
+          state={search.state}
+          stale={stale}
+          onPatch={search.patch}
+          onRun={runSearch}
+          onClear={search.clear}
+          onExport={() => found && exportSearchResult(found.result, found.form)}
+        />
+      </LogToolbar>
 
       {sourcesQ.data && !sourcesQ.data.fromConfig && (
         <div className="lg-note">
@@ -149,7 +181,7 @@ export function LogTab() {
 
       <div className="lg-body">
         <div className="lg-left">
-          {listQ.isError ? (
+          {listQ.isError && !found ? (
             <div className="lg-error">
               <Icon name="alertTriangle" size={16} />
               <p>{failureText("读取 NC 日志", listQ.error)}</p>
@@ -158,13 +190,23 @@ export function LogTab() {
                 {sourcesQ.data?.configPath ?? "(未定位)"}
               </p>
             </div>
-          ) : listQ.isLoading ? (
+          ) : listQ.isLoading && !found ? (
             <div className="lg-empty">
               <Icon name="spinner" size={16} className="lg-spin" />
               <p>正在读取日志…</p>
             </div>
           ) : (
-            <LogList entries={entries} selectedKey={selectedKey} onSelect={onSelect} />
+            <LogList
+              entries={visible}
+              selectedKey={selectedKey}
+              onSelect={onSelect}
+              emptyTitle={found ? "没有记录匹配这个检索词" : undefined}
+              emptyHint={
+                found
+                  ? "换个词、关掉「区分大小写」，或放宽时间范围和 logger 再试；正则模式请先确认写法后端能编译。"
+                  : undefined
+              }
+            />
           )}
         </div>
         <LogDetail

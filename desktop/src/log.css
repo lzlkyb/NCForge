@@ -235,6 +235,81 @@
   font-variant-numeric: tabular-nums;
   color: hsl(var(--muted-foreground));
 }
+/* 检索结果的第二行：直接回答「为什么命中」。归因浏览没有这一行，布局不变。 */
+.lg-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.lg-row-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.lg-row-match {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* ── 全文检索条 ── */
+.lg-search {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 16px 8px;
+}
+.lg-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lg-search-icon {
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+}
+.lg-search-inp {
+  flex: 1;
+  min-width: 120px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-size: 11.5px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.lg-search-inp::placeholder {
+  color: hsl(var(--muted-foreground) / 0.8);
+}
+.lg-search-inp:focus-visible {
+  outline: 2px solid hsl(var(--primary) / 0.45);
+  outline-offset: -1px;
+}
+.lg-search-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.lg-search-info[data-tone="warn"] {
+  color: hsl(var(--warning-ink, var(--warning)));
+}
+.lg-search-info[data-tone="bad"] {
+  color: hsl(var(--destructive));
+}
+.lg-search-hint {
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground) / 0.9);
+}
 
 /* ── 空态 / 错误态 ── */
 .lg-empty,

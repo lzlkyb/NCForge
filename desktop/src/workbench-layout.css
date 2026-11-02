@@ -23,12 +23,15 @@
 .app-shell .wb-tree[data-closed] { visibility:hidden; }
 .wb-tree-native,.wb-sidebar-host { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; overflow:hidden; }
 .wb-sidebar-host :is(.vc-list,.pk-list) { width:100%; min-width:0; max-width:none; flex:1; border:0; }
+/* 数据字典的选表器（原独立页的左栏）停靠进共享侧栏：宽度交给容器，竖线由分隔条承担。 */
+.wb-sidebar-host .md-pick { width:100%; min-width:0; max-width:none; flex:1 1 auto; border-right:0; }
 /* .vc-chg 自带 322px 固定宽度（原双栏布局用），停靠进共享侧栏后必须让位给容器宽度，
    否则右侧被 overflow:hidden 裁掉一截；右侧竖线由 .wb-resize-x 承担，这里去掉重复边框。 */
 .wb-sidebar-host .vc-chg { width:100%; min-width:0; flex:1 1 auto; border-right:0; }
 .wb-main { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
 .wb-code-surface,.wb-document-surface { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; overflow:hidden; background:hsl(var(--card)); }
 .wb-document-surface .vc-docked-document { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; }
+.wb-document-surface .md-page { flex:1; min-height:0; min-width:0; }
 .wb-document-surface .pk-right { flex:1; min-height:0; min-width:0; }
 .wb-document-surface .dq-body { flex:1; min-height:0; }
 .wb-tool-tab { cursor:pointer; gap:6px; }
@@ -136,6 +139,8 @@ html[data-ui-style] .app-shell .app-side-item::before,html[data-ui-style] .app-s
 .wb-keymap-table th { text-align:left; font-weight:500; color:hsl(var(--muted-foreground)); }
 .wb-keymap-table th,.wb-keymap-table td { padding:10px 0; border-bottom:1px solid hsl(var(--border)); }
 .wb-keymap-table kbd { font:12px Consolas,monospace; }
+.wb-keymap-table tr[data-capturing] { background:hsl(var(--accent)); }
+.wb-keymap-table tr[data-capturing] kbd { color:hsl(var(--primary)); font-weight:600; }
 
 .wb-search-tool > div:first-child > div:first-child { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; }
 .wb-search-tool > div:first-child > div:first-child > .relative { grid-column:1 / -1; }

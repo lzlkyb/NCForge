@@ -320,3 +320,81 @@
 .dbx-dslist .mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-vars { display: grid; grid-template-columns: 140px 1fr; gap: 6px 8px; align-items: center; margin-top: 10px; }
 .dbx-vars code { font: 12px "Cascadia Mono", Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 全库按值反查（ValueSearchDialog） ── */
+.dbx-vs .bd.one { display: flex; flex-direction: column; gap: 12px; }
+.dbx-vs-form { display: flex; flex-direction: column; gap: 8px; }
+.dbx-vs-text { height: auto; min-height: 34px; padding: 7px 9px; line-height: 1.5; resize: vertical; }
+.dbx-vs-row { display: grid; grid-template-columns: 110px 1fr; gap: 8px; }
+.dbx-vs-note { font-size: 11.5px; line-height: 1.6; margin: 0; }
+.dbx-vs-prog { display: flex; flex-direction: column; gap: 6px; }
+.dbx-vs-progtext { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.dbx-vs-bar { height: 4px; border-radius: 2px; background: hsl(var(--secondary)); overflow: hidden; }
+.dbx-vs-bar > i { display: block; height: 100%; background: hsl(var(--primary)); transition: width .18s ease; }
+.dbx-vs-alert { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.6; margin: 0; }
+.dbx-vs-alert[data-tone="warn"] { background: hsl(var(--warning) / .12); color: hsl(var(--warning-ink)); }
+.dbx-vs-alert[data-tone="bad"] { background: hsl(var(--destructive) / .1); color: hsl(var(--destructive-ink)); word-break: break-all; }
+.dbx-vs-result { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.dbx-vs-sum { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.dbx-vs-sum .dbx-btn { margin-left: auto; }
+.dbx-vs-empty { font-size: 12px; margin: 0; }
+.dbx-vs-list { border: 1px solid hsl(var(--border)); border-radius: 8px; overflow: auto; max-height: 340px; }
+.dbx-vs-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.dbx-vs-table th { position: sticky; top: 0; z-index: 1; text-align: left; padding: 6px 10px; background: hsl(var(--secondary)); color: hsl(var(--muted-foreground)); font-weight: 600; font-size: 11.5px; }
+.dbx-vs-table td { padding: 5px 10px; border-top: 1px solid hsl(var(--border)); vertical-align: top; }
+.dbx-vs-table td.dbx-mono { font-size: 11.5px; white-space: nowrap; }
+.dbx-vs-table .dbx-vs-sample { white-space: pre-wrap; word-break: break-all; max-width: 420px; }
+.dbx-vs-table .dbx-ibtn { width: 22px; height: 22px; }
+.dbx-vs-link { color: hsl(var(--primary)); font-weight: 600; font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px; }
+.dbx-vs-link:hover { text-decoration: underline; }
+.dbx-vs-errors { font-size: 11.5px; color: hsl(var(--muted-foreground)); }
+.dbx-vs-errors summary { cursor: pointer; }
+.dbx-vs-errors ul { margin: 6px 0 0; padding-left: 18px; max-height: 120px; overflow: auto; }
+
+/* ── 回放 .sql（ScriptReplayDialog） ── */
+.dbx-sr-pick { display: flex; align-items: center; gap: 10px; }
+.dbx-sr-file { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 12px; }
+.dbx-sr-file b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.dbx-sr-alert { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.6; }
+.dbx-sr-alert[data-tone="warn"] { background: hsl(var(--warning) / .12); color: hsl(var(--warning-ink)); }
+.dbx-sr-alert[data-tone="bad"] { background: hsl(var(--destructive) / .1); color: hsl(var(--destructive-ink)); }
+.dbx-sr-preview { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.dbx-sr-caption { font-size: 11.5px; color: hsl(var(--muted-foreground)); }
+.dbx-sr-preview ol { display: flex; flex-direction: column; gap: 2px; margin: 0; padding-left: 18px; }
+.dbx-sr-preview code { display: block; overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-sr-opt { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; line-height: 1.5; cursor: pointer; }
+.dbx-sr-prog { display: flex; flex-direction: column; gap: 6px; }
+.dbx-sr-progtext { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.dbx-sr-current { overflow: hidden; font-size: 11.5px; color: hsl(var(--muted-foreground)); text-overflow: ellipsis; white-space: nowrap; }
+.dbx-sr-bar { height: 4px; border-radius: 2px; background: hsl(var(--secondary)); overflow: hidden; }
+.dbx-sr-bar > i { display: block; height: 100%; background: hsl(var(--primary)); transition: width .18s ease; }
+.dbx-sr-result { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.dbx-sr-sum { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.dbx-sr-fails { border: 1px solid hsl(var(--border)); border-radius: 8px; overflow: auto; max-height: 300px; }
+.dbx-sr-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.dbx-sr-table th { position: sticky; top: 0; z-index: 1; text-align: left; padding: 6px 10px; background: hsl(var(--secondary)); color: hsl(var(--muted-foreground)); font-weight: 600; font-size: 11.5px; }
+.dbx-sr-table td { padding: 5px 10px; border-top: 1px solid hsl(var(--border)); vertical-align: top; }
+.dbx-sr-err { max-width: 320px; color: hsl(var(--destructive-ink)); word-break: break-all; }
+.dbx-sr-sql { display: block; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-sr-hint { font-size: 11.5px; }
+
+/* ── 重置操作员密码（PasswordResetDialog） ── */
+.dbx-pr-alert { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.6; }
+.dbx-pr-alert[data-tone="info"] { background: hsl(var(--secondary)); color: hsl(var(--muted-foreground)); }
+.dbx-pr-alert[data-tone="warn"] { background: hsl(var(--warning) / .12); color: hsl(var(--warning-ink)); }
+.dbx-pr-alert[data-tone="bad"] { background: hsl(var(--destructive) / .1); color: hsl(var(--destructive-ink)); word-break: break-all; }
+.dbx-pr-alert code { font-size: 11px; }
+.dbx-pr-row { display: flex; align-items: center; gap: 8px; }
+.dbx-pr-row .dbx-inp { flex: 1 1 auto; min-width: 0; }
+.dbx-pr-row select.dbx-inp { flex: 0 0 auto; width: 190px; }
+.dbx-pr-label { flex: 0 0 auto; font-size: 12px; color: hsl(var(--muted-foreground)); white-space: nowrap; }
+.dbx-pr-note { margin: 0; font-size: 11.5px; line-height: 1.6; }
+.dbx-pr-users { border: 1px solid hsl(var(--border)); border-radius: 8px; overflow: auto; max-height: 260px; min-height: 84px; }
+.dbx-pr-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.dbx-pr-table th { position: sticky; top: 0; z-index: 1; text-align: left; padding: 6px 10px; background: hsl(var(--secondary)); color: hsl(var(--muted-foreground)); font-weight: 600; font-size: 11.5px; }
+.dbx-pr-table td { padding: 5px 10px; border-top: 1px solid hsl(var(--border)); white-space: nowrap; }
+.dbx-pr-table tr[data-on] td { background: hsl(var(--primary) / .07); }
+.dbx-pr-table input[type="checkbox"] { margin: 0; }
+.dbx-pr-result { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.dbx-pr-sum { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.dbx-pr-sql { margin: 0; padding: 10px; border: 1px solid hsl(var(--border)); border-radius: 8px; background: hsl(var(--secondary) / .45); font-size: 11.5px; line-height: 1.6; max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-all; }

@@ -277,6 +277,40 @@ pub async fn server_start(
         // 慢的一步放锁外：写 7000 多条清单的 pathing jar 实测约 0.6 秒，
         // 持锁会让每秒一次的状态轮询一起卡住
         let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
+
+        // 启动前把工程元数据（META-INF/*.upm）投送到 NCHOME：NC 按文件路径读组件注册表，
+        // 不落地就是「改了 upm 不生效」。失败只记日志、不阻断启动（先让人能干活）。
+        if cfg.deploy_on_start {
+            if let Some(root) = cfg
+                .workspace_root
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(Path::new)
+                .filter(|p| p.is_dir())
+            {
+                match crate::nchome_deploy::deploy_for_workspace(
+                    &config_dir,
+                    root,
+                    &nc_home,
+                    &overrides,
+                    true,
+                ) {
+                    Ok(report) => {
+                        for line in crate::nchome_deploy::summary_lines(&report) {
+                            let _ = server::append_log(&log, &format!("{line}\n"));
+                        }
+                    }
+                    Err(e) => {
+                        let _ = server::append_log(
+                            &log,
+                            &format!("[nc-forge] 元数据投送失败（不影响启动）：{e}\n"),
+                        );
+                    }
+                }
+            }
+        }
+
         let prepared = launch::middleware_spec(
             &nc_home,
             &java,

@@ -12,18 +12,24 @@ export function LogList({
   entries,
   selectedKey,
   onSelect,
+  emptyTitle,
+  emptyHint,
 }: {
   entries: LogEntry[];
   selectedKey: string | null;
   onSelect: (entry: LogEntry) => void;
+  /** 空态标题；检索模式下要换一种说法（不是「没有归因命中」而是「没匹配到」）。 */
+  emptyTitle?: string;
+  emptyHint?: string;
 }) {
   if (entries.length === 0) {
     return (
       <div className="lg-empty">
         <Icon name="check" size={18} />
-        <p>这个范围里没有命中归因的记录</p>
+        <p>{emptyTitle ?? "这个范围里没有命中归因的记录"}</p>
         <p className="lg-empty-hint">
-          关掉「只看有结论的」可以看全部原始记录；也可能是时间范围太窄，或者服务启动后还没写日志。
+          {emptyHint ??
+            "关掉「只看有结论的」可以看全部原始记录；也可能是时间范围太窄，或者服务启动后还没写日志。"}
         </p>
       </div>
     );
@@ -53,14 +59,23 @@ export function LogList({
                 <span className="lg-row-dot" aria-hidden />
               )}
             </span>
-            <span className="lg-row-title">{entryTitle(entry)}</span>
-            {entry.costMs !== null && (
-              <span className="lg-row-cost" title="NC 自己在 warningsql 里登记的耗时">
-                {entry.costMs}ms
+            <span className="lg-row-main">
+              <span className="lg-row-line">
+                <span className="lg-row-title">{entryTitle(entry)}</span>
+                {entry.costMs !== null && (
+                  <span className="lg-row-cost" title="NC 自己在 warningsql 里登记的耗时">
+                    {entry.costMs}ms
+                  </span>
+                )}
+                <span className="lg-row-meta">
+                  {entry.ts ?? "—"} · {entry.file}:{entry.lineNo}
+                </span>
               </span>
-            )}
-            <span className="lg-row-meta">
-              {entry.ts ?? "—"} · {entry.file}:{entry.lineNo}
+              {entry.matchLine && (
+                <span className="lg-row-match" title="命中的那一行">
+                  {entry.matchLine}
+                </span>
+              )}
             </span>
           </button>
         );

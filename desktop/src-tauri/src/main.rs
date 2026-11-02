@@ -270,9 +270,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::local_history_list,
             commands::local_history_read,
             commands::local_history_restore,
+            commands::nc_md_tables,
+            commands::nc_md_dict,
+            commands::nc_md_dict_text,
+            commands::nc_md_dict_export,
             commands::nc_log_sources,
             commands::nc_log_query,
             commands::nc_log_trace,
+            commands::nc_log_search,
+            // 配置投送：工程 META-INF → NCHOME（manifest + 备份 + 清理）
+            commands::deploy_preview,
+            commands::deploy_apply,
+            commands::deploy_cleanup,
+            commands::deploy_status,
+            // NCC/BIP 报文解密：只读服务端开关，解密在前端 WebCrypto 里做
+            commands::ncc_decode_config,
             commands::server_status,
             commands::server_start,
             commands::server_stop,
@@ -340,6 +352,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::db_export_reveal,
             // 导入（B3）：CSV/TSV → 表，走独立会话的事务
             commands::db_import_rows,
+            // 全库按值反查（只读；每表一条查询 + 进度/取消）
+            commands::db_value_search,
+            commands::db_value_search_cancel,
+            // 重置操作员密码：只读 sm_user + 生成 SQL，绝不执行
+            commands::db_user_list,
+            commands::db_password_reset_sql,
             // 表结构缓存 + 出包前核对
             commands::db_schema_status,
             commands::db_schema_sync,

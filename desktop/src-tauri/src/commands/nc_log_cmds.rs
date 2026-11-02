@@ -23,10 +23,13 @@ use serde::{Deserialize, Serialize};
 use crate::nc_home;
 use crate::nc_log::{self, LogFile, LogRecord};
 use crate::nc_log_rules::{self, Verdict};
+use crate::nc_log_search::{self, bytes_contain, Matcher};
 use crate::state::AppState;
 
 /// 不带 logger 过滤时，最多读几个文件（按「当前文件优先、修改时间新」取）。
 const MAX_FILES_AUTO: usize = 10;
+/// 全文检索的自动文件预算：检索要翻轮转历史，比按结论浏览看得更宽。
+const SEARCH_MAX_FILES: usize = 24;
 /// 指定了 logger 时，每个 logger 最多读几个文件（当前 + 2 个轮转）。
 const MAX_FILES_PER_LOGGER: usize = 3;
 /// 指定 logger 时总共的上限（防止用户全选 49 个 logger）。
@@ -130,6 +133,46 @@ pub struct TraceResult {
     pub elapsed_ms: u64,
 }
 
+/// 全文检索参数。`query` 为空、正则非法都会在命令里直接报人话。
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SearchArgs {
+    pub query: String,
+    /// 按正则解释 `query`（不是「先字面量失败再退回正则」——那会让 `ORA-` 悄悄变另一回事）。
+    pub regex: bool,
+    /// 默认忽略大小写；中文没有大小写，开了也只影响 ASCII。
+    pub case_sensitive: bool,
+    /// 空 = 全部 logger；与结论浏览共用同一套文件预算。
+    pub loggers: Option<Vec<String>>,
+    pub since_ts: Option<String>,
+    pub until_ts: Option<String>,
+    pub limit: Option<u32>,
+}
+
+/// 检索命中的一条记录：记录本身 + 归因 + 「为什么命中」。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchEntry {
+    #[serde(flatten)]
+    pub entry: Entry,
+    /// 第一处命中的整行（已 trim、截断到 300 字），列表直接显示。
+    pub match_line: String,
+    /// 命中的行数（同一行多次命中算 1）。
+    pub match_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResult {
+    pub entries: Vec<SearchEntry>,
+    pub scanned_files: Vec<String>,
+    pub records_scanned: usize,
+    pub truncated_files: usize,
+    /// 已凑满 `limit` 提前停了（还有文件没看）。
+    pub stopped_early: bool,
+    pub elapsed_ms: u64,
+}
+
 // ---------------------------------------------------------------- 公共
 
 /// 拿 NC home。日志功能必须有一个可读的 HOME，否则直接报人话。
@@ -174,7 +217,10 @@ fn group_loggers(
 }
 
 /// 按「当前文件优先、修改时间新」的顺序取文件，并施加预算。
-fn pick_files(all: &[LogFile], wanted: Option<&[String]>) -> Vec<LogFile> {
+///
+/// `auto_max` 是不带 logger 过滤时的文件上限：按结论浏览只要最近的，
+/// 全文检索要翻轮转历史，所以两者用不同的预算但共用这一套挑选规则。
+fn pick_files(all: &[LogFile], wanted: Option<&[String]>, auto_max: usize) -> Vec<LogFile> {
     let usable: Vec<&LogFile> = match wanted {
         Some(list) if !list.is_empty() => all.iter().filter(|f| list.contains(&f.logger)).collect(),
         _ => all.iter().filter(|f| f.size > 0).collect(),
@@ -199,7 +245,7 @@ fn pick_files(all: &[LogFile], wanted: Option<&[String]>) -> Vec<LogFile> {
             out
         }
         // 不带过滤：all 已经按「当前优先 + mtime 新」排好，直接取前 N 个非空文件
-        _ => usable.into_iter().take(MAX_FILES_AUTO).cloned().collect(),
+        _ => usable.into_iter().take(auto_max).cloned().collect(),
     }
 }
 
@@ -249,6 +295,14 @@ fn in_window(record: &LogRecord, since: Option<&str>, until: Option<&str>) -> bo
     true
 }
 
+/// 「一个日志文件都没有」时的说法：告诉人去哪看，而不是只报「空」。
+fn no_files_msg(root: &str) -> String {
+    format!(
+        "还没找到 NC 日志文件。先确认「NC 服务」里配的安装目录对不对，\
+         以及服务是否启动过（日志在 {root}/nclogs/ 下）。"
+    )
+}
+
 // ---------------------------------------------------------------- 命令
 
 /// 列出可用的日志源（logger → 文件）。
@@ -296,14 +350,10 @@ pub async fn nc_log_query(
 
         let all = nc_log::resolve_loggers(&root_path, server_name.as_deref());
         if all.is_empty() {
-            return Err(format!(
-                "还没找到 NC 日志文件。先确认「NC 服务」里配的安装目录对不对，\
-                 以及服务是否启动过（日志在 {}/nclogs/ 下）。",
-                root
-            ));
+            return Err(no_files_msg(&root));
         }
 
-        let picked = pick_files(&all, args.loggers.as_deref());
+        let picked = pick_files(&all, args.loggers.as_deref(), MAX_FILES_AUTO);
         let only_problems = args.only_problems.unwrap_or(true);
         let slow_ms = args.min_cost_ms.unwrap_or(DEFAULT_SLOW_MS);
         let limit = args.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, 5000) as usize;
@@ -419,12 +469,92 @@ pub async fn nc_log_trace(
     .map_err(|e| format!("追踪请求失败：{e}"))?
 }
 
-/// 子串查找（不引依赖；callid 一般 ≤ 30 字节，暴力搜足够快）。
-fn bytes_contain(hay: &[u8], needle: &[u8]) -> bool {
-    if needle.is_empty() || hay.len() < needle.len() {
-        return false;
-    }
-    hay.windows(needle.len()).any(|w| w == needle)
+/// 全文/正则检索：在归因浏览的同一批文件里找文本，返回命中记录 + 「为什么命中」。
+///
+/// 与 [`nc_log_query`] 的两点差别：
+/// - 不看归因，**看原文**（msg / 堆栈 / 头部字段），所以「只看有结论的」不参与；
+/// - 字面量 + 区分大小写 + 纯 ASCII 时先做字节预筛 —— GBK 文件没解码就知道整份不命中，
+///   省掉一次 5MB 解码 + 逐行解析。
+#[tauri::command]
+pub async fn nc_log_search(
+    state: tauri::State<'_, Arc<AppState>>,
+    args: SearchArgs,
+) -> Result<SearchResult, String> {
+    let cfg = state.config.read().await.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        let matcher = Matcher::build(&args.query, args.regex, args.case_sensitive)?;
+        let (root, server_name) = home_root(cfg.nc_home.as_deref())?;
+        let root_path = std::path::PathBuf::from(&root);
+        let all = nc_log::resolve_loggers(&root_path, server_name.as_deref());
+        if all.is_empty() {
+            return Err(no_files_msg(&root));
+        }
+
+        let picked = pick_files(&all, args.loggers.as_deref(), SEARCH_MAX_FILES);
+        let limit = args.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, 5000) as usize;
+        let prefilter = matcher.ascii_prefilter();
+
+        let mut entries: Vec<SearchEntry> = Vec::new();
+        let mut scanned: Vec<String> = Vec::new();
+        let mut records_scanned = 0usize;
+        let mut truncated_files = 0usize;
+        let mut stopped_early = false;
+
+        for file in &picked {
+            if entries.len() >= limit {
+                stopped_early = true;
+                break;
+            }
+            let Ok(chunk) = nc_log::read_tail(Path::new(&file.path), nc_log::DEFAULT_MAX_BYTES)
+            else {
+                continue;
+            };
+            if chunk.truncated {
+                truncated_files += 1;
+            }
+            if let Some(needle) = prefilter {
+                if !nc_log_search::bytes_contain(&chunk.bytes, needle) {
+                    continue;
+                }
+            }
+            scanned.push(file.name.clone());
+            let text = crate::workspace::decode_lossy(&chunk.bytes);
+            let records = nc_log::parse_text(&file.logger, &file.name, &text, chunk.first_line_no);
+            records_scanned += records.len();
+            for record in records {
+                if !in_window(&record, args.since_ts.as_deref(), args.until_ts.as_deref()) {
+                    continue;
+                }
+                let Some(hit) = nc_log_search::scan_record(&record, &matcher) else {
+                    continue;
+                };
+                entries.push(SearchEntry {
+                    entry: attach(record, DEFAULT_SLOW_MS),
+                    match_line: hit.line,
+                    match_count: hit.lines,
+                });
+                if entries.len() >= limit {
+                    stopped_early = true;
+                    break;
+                }
+            }
+        }
+
+        // 新的排前面（日志是追加写的，尾部最新）
+        entries.reverse();
+
+        Ok(SearchResult {
+            entries,
+            scanned_files: scanned,
+            records_scanned,
+            truncated_files,
+            stopped_early,
+            elapsed_ms: started.elapsed().as_millis() as u64,
+        })
+    })
+    .await
+    .map_err(|e| format!("日志检索失败：{e}"))?
 }
 
 #[cfg(test)]
@@ -473,14 +603,6 @@ mod tests {
     }
 
     #[test]
-    fn 字节子串查找() {
-        assert!(bytes_contain(b"abc$$callid=x-1$$", b"x-1"));
-        assert!(!bytes_contain(b"short", b"longer-than-hay"));
-        assert!(!bytes_contain(b"abc", b""));
-        assert!(bytes_contain(b"abc", b"abc"));
-    }
-
-    #[test]
     fn 文件预算只读最近改过的几个() {
         let mk = |logger: &str, rotated: bool, mtime: i64| LogFile {
             logger: logger.into(),
@@ -495,15 +617,19 @@ mod tests {
             mk("b", false, 2000),
             mk("c", true, 100),
         ];
-        let picked = pick_files(&all, None);
+        let picked = pick_files(&all, None, MAX_FILES_AUTO);
         assert_eq!(picked.len(), 3);
         // 顺序沿用 resolve_loggers 的排法（当前优先 + mtime 新）
         assert_eq!(picked[0].logger, "a");
 
         // 指定 logger 时只取那几个
-        let only_b = pick_files(&all, Some(&["b".to_string()]));
+        let only_b = pick_files(&all, Some(&["b".to_string()]), MAX_FILES_AUTO);
         assert_eq!(only_b.len(), 1);
         assert_eq!(only_b[0].logger, "b");
+
+        // 自动预算由调用方给：检索要比浏览看得更宽
+        let capped = pick_files(&all, None, 2);
+        assert_eq!(capped.len(), 2);
     }
 
     #[test]

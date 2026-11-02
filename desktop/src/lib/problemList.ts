@@ -57,6 +57,31 @@ export function countErrors(list: UnifiedProblem[]): number {
   return list.filter((p) => p.severity === "error").length;
 }
 
+export type ProblemFilter = "all" | "error" | "warning" | "info";
+
+/** 按严重度筛。`all` 原样返回（列表已经是排好的）。 */
+export function filterProblems(list: UnifiedProblem[], filter: ProblemFilter): UnifiedProblem[] {
+  return filter === "all" ? list : list.filter((p) => p.severity === filter);
+}
+
+/** 按文件分组，组内保持「行号升序」（mergeProblems 已排好，这里只做切分）。 */
+export function groupProblems(list: UnifiedProblem[]): { path: string; items: UnifiedProblem[] }[] {
+  const groups: { path: string; items: UnifiedProblem[] }[] = [];
+  for (const p of list) {
+    const last = groups[groups.length - 1];
+    if (last && last.path.toLowerCase() === p.path.toLowerCase()) last.items.push(p);
+    else groups.push({ path: p.path, items: [p] });
+  }
+  return groups;
+}
+
+/** 复制用文本：一行一条，`路径:行  错误|警告|提示  原文`。 */
+export function formatProblems(list: UnifiedProblem[]): string {
+  return list
+    .map((p) => `${p.path}:${p.line}  ${p.severity === "error" ? "错误" : p.severity === "warning" ? "警告" : "提示"}  ${p.message}`)
+    .join("\n");
+}
+
 /**
  * 从当前位置找上一条 / 下一条问题，到头就从头再来。
  *

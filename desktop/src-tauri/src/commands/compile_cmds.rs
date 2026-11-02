@@ -170,6 +170,29 @@ pub(super) async fn resolve_module(
     Ok((root, module))
 }
 
+/// 编译成功后投送工程元数据（META-INF → NCHOME）。失败只写一行编译日志，
+/// 不影响本次编译结果——投送是「让下次启动读到新 upm」，不是编译的前置条件。
+fn deploy_after_compile(
+    enabled: bool,
+    config_dir: &Path,
+    root: &Path,
+    nc_home: &Path,
+    overrides: &[crate::eclipse_cp::LinkedOverride],
+    log: &dyn Fn(&str),
+) {
+    if !enabled {
+        return;
+    }
+    match crate::nchome_deploy::deploy_for_workspace(config_dir, root, nc_home, overrides, true) {
+        Ok(r) => {
+            for line in crate::nchome_deploy::summary_lines(&r) {
+                log(&line);
+            }
+        }
+        Err(e) => log(&format!("元数据投送失败（不影响编译结果）：{e}")),
+    }
+}
+
 /// 编译 `path` 所在的模块。`path` 可以是模块目录，也可以是模块内任一文件；
 /// 进度以 `compile-log` 事件逐行推给前端，返回值是完整结果（含问题列表）。
 #[tauri::command]
@@ -186,10 +209,16 @@ pub async fn compile_module(
     let ecj = find_ecj(&state.config_dir)?;
     let cache_path = state.config_dir.join("class-index.bin");
     let work_dir = state.config_dir.join("tmp");
+    let config_dir = state.config_dir.clone();
     let st = state.inner().clone();
     // 覆盖表在这里取（async 上下文里读配置），进 spawn_blocking 后只管用
-    let overrides =
-        crate::eclipse_cp::active_overrides(&state.config.read().await.linked_overrides);
+    let (overrides, deploy_on_start) = {
+        let cfg = state.config.read().await;
+        (
+            crate::eclipse_cp::active_overrides(&cfg.linked_overrides),
+            cfg.deploy_on_start,
+        )
+    };
 
     tauri::async_runtime::spawn_blocking(move || {
         // 同进程只允许一轮编译（前端标志挡不住切页/双击/命令重入）
@@ -225,6 +254,16 @@ pub async fn compile_module(
                 c.seeds.insert(module, result.resolved_jars.clone());
             }
         }
+        if result.error_count == 0 {
+            deploy_after_compile(
+                deploy_on_start,
+                &config_dir,
+                &root,
+                &nc_home,
+                &overrides,
+                &log,
+            );
+        }
         Ok(result)
     })
     .await
@@ -252,7 +291,7 @@ pub async fn compile_all_modules(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<CompileResult, String> {
-    let (root, nc_home_cfg, overrides) = {
+    let (root, nc_home_cfg, overrides, deploy_on_start) = {
         let cfg = state.config.read().await;
         let root = cfg
             .workspace_root
@@ -262,6 +301,7 @@ pub async fn compile_all_modules(
             root,
             cfg.nc_home.clone(),
             crate::eclipse_cp::active_overrides(&cfg.linked_overrides),
+            cfg.deploy_on_start,
         )
     };
     // 与 compile_module 同一套规整：工作区根是去掉 `\\?\` 前缀的写法。
@@ -278,6 +318,7 @@ pub async fn compile_all_modules(
     let ecj = find_ecj(&state.config_dir)?;
     let cache_path = state.config_dir.join("class-index.bin");
     let work_dir = state.config_dir.join("tmp");
+    let config_dir = state.config_dir.clone();
     let st = state.inner().clone();
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -382,7 +423,17 @@ pub async fn compile_all_modules(
             Some(m) => log(&format!(
                 "{m} 编不过，后续模块依赖它的产物，已停止（修完再点一次「编译全部」）"
             )),
-            None => log("全部模块编译完成"),
+            None => {
+                log("全部模块编译完成");
+                deploy_after_compile(
+                    deploy_on_start,
+                    &config_dir,
+                    &root,
+                    &nc_home,
+                    &overrides,
+                    &log,
+                );
+            }
         }
         Ok(total)
     })

@@ -1,0 +1,47 @@
+import { Menu, MenuItem } from "../ui/Menu";
+import { Button } from "../ui/button";
+import { Icon } from "../ui/icon";
+import { listTasks, runTask, STEP_SHORT } from "../../lib/ncTasks";
+
+/**
+ * 标签条上的「任务」下拉：内置的编译/投送/重启/补丁组合，加上本工作区自定义的任务。
+ * 任务定义在设置 → 任务里维护；这里只负责运行，不提供任意命令输入。
+ */
+export function TaskMenu({ root, compiling }: { root: string; compiling: boolean }) {
+  return (
+    <Menu
+      portal
+      width="w-72"
+      trigger={(open, toggle) => (
+        <Button
+          size="sm"
+          variant="outline"
+          className="wb-task-btn"
+          disabled={compiling || !root}
+          aria-expanded={open}
+          title="运行 NC 任务（编译 / 投送 / 重启 / 补丁）"
+          onClick={toggle}
+        >
+          <Icon name="play" size={12} />
+          任务
+          <Icon name="chevronDown" size={12} />
+        </Button>
+      )}
+    >
+      {(close) =>
+        listTasks(root).map((t) => (
+          <MenuItem
+            key={t.id}
+            label={t.name}
+            hint={t.steps.map((s) => STEP_SHORT[s]).join(" → ")}
+            disabled={compiling}
+            onClick={() => {
+              close();
+              void runTask(t);
+            }}
+          />
+        ))
+      }
+    </Menu>
+  );
+}

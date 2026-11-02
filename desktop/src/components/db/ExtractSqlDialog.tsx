@@ -6,8 +6,8 @@ import { toast } from "../ui/toast";
 import { fillParams } from "../../lib/sqlExtract";
 import { loadParamValues, requestExtract, saveParamValues, useExtractRequest } from "../../lib/sqlExtractRequest";
 import { ENV_LABEL } from "../../lib/dbApi";
-import { defaultConnId, explain, newConsole, runStatements } from "../../lib/dbActions";
-import { loadConns, useDb } from "../../lib/dbStore";
+import { explain, newConsole, runStatements } from "../../lib/dbActions";
+import { defaultConnId, loadConns, useDb } from "../../lib/dbStore";
 import { copyText } from "../../lib/utils";
 
 const TITLE = { run: "在数据库中执行此 SQL", explain: "查看执行计划", copy: "复制为纯 SQL" } as const;

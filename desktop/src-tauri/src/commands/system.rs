@@ -35,6 +35,9 @@ pub async fn get_config(state: tauri::State<'_, Arc<AppState>>) -> Result<AppCon
 pub struct ConfigPatch {
     #[serde(default)]
     pub autostart_enabled: Option<bool>,
+    /// 编译/启动前自动把工程 `META-INF` 元数据投送到 NCHOME。
+    #[serde(default)]
+    pub deploy_on_start: Option<bool>,
 }
 
 /// 落盘并返回改完的**完整配置**：调用方据此回填表单，不用再 get 一次。
@@ -48,6 +51,9 @@ pub async fn patch_config(
         .update_config(move |cfg| {
             if let Some(v) = patch.autostart_enabled {
                 cfg.autostart_enabled = v;
+            }
+            if let Some(v) = patch.deploy_on_start {
+                cfg.deploy_on_start = v;
             }
             Ok(())
         })

@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from "react";
 import { baseName, encodingMarks, joinPath, listDir, type DirItem } from "../../lib/workspace";
-import { collapseChain } from "../../lib/treeCompact";
+import { chainFor, chainOpen, collapseChain } from "../../lib/treeCompact";
 import { listen } from "../../lib/tauri";
 import { pathKey } from "../../lib/treeSvn";
 import { getSession, setSession, setTree, useWorkspaceSelector } from "../../lib/workspaceSession";
@@ -16,7 +16,7 @@ const REVEAL_MAX_DEPTH = 40;
  *
  * 为什么列目录与编码标记分开跑：列表先出来，标记晚一拍到，展开目录不用等它。
  */
-export function useTreeLoad(root: string) {
+export function useTreeLoad(root: string, compact: boolean) {
   // 只订阅树：整会话订阅下，每次 dirty 翻转 / 编译状态变化都会把整棵树重渲染一遍
   const tree = useWorkspaceSelector((s) => s.tree);
   const { dirs, expanded, marks } = tree;
@@ -125,11 +125,12 @@ export function useTreeLoad(root: string) {
   // 把链条末端也预读出来，行标题才能稳定显示成 `com.aier.erp`。
   // 不预读的话，用户每展开一次标题就变一次（com → com.aier → …），很难受。
   useEffect(() => {
+    if (!compact) return;
     for (const dir of expanded) {
       const chain = collapseChain(dir, baseName(dir), dirs);
       if (chain.tail !== dir && !dirs[chain.tail]) void load(chain.tail);
     }
-  }, [expanded, dirs, load]);
+  }, [compact, expanded, dirs, load]);
 
   const expand = (path: string) =>
     setTree((t) => (t.expanded.has(path) ? t : { ...t, expanded: new Set(t.expanded).add(path) }));
@@ -144,6 +145,19 @@ export function useTreeLoad(root: string) {
       }
       return { ...t, expanded: next };
     });
+
+  /**
+   * 展开 / 收起一行。压缩模式下要动整条链：只删链尾的话，上一层在 `expanded` 里还开着，
+   * 下一帧又被 `chainOpen` 判成展开，看起来像「点了没反应」。
+   */
+  const toggleRow = (path: string, parent: string | null) => {
+    const chain = compact
+      ? chainFor(path, parent, dirs)
+      : { nodes: [path], label: path, tail: path };
+    const open = chainOpen(chain, expanded);
+    setExpandedPaths(chain.nodes, !open);
+    if (!open) void load(chain.tail);
+  };
 
   /** 路径在树里的层级（根为 0）。只用来算缩进。 */
   const depthOf = (path: string) => {
@@ -184,5 +198,5 @@ export function useTreeLoad(root: string) {
     [load],
   );
 
-  return { dirs, expanded, marks, load, expand, toggle, depthOf, reveal, setExpandedPaths };
+  return { dirs, expanded, marks, load, expand, toggle, toggleRow, depthOf, reveal, setExpandedPaths };
 }

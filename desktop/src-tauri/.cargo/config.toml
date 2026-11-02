@@ -21,3 +21,11 @@
 
 [net]
 git-fetch-with-cli = true
+
+[build]
+# 并发 rustc 数按**内存**定，不按核数。
+# 本机 16 核 / 15.8GB：16 路 rustc + 并发 link.exe 会把内存顶到 99%，历史上多次
+# 触发 TDR / 蓝屏（CLAUDE.md §8.3）。3 路是实测的安全区（冷编最低可用内存 3.0GB，
+# 4 路时只有 2.0GB），命令行 `-j N` 仍可覆盖。CI 的 runner 都是 4 vCPU，这条对它
+# 只是少开一路，耗时影响可忽略。
+jobs = 3

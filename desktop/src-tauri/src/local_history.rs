@@ -200,12 +200,28 @@ fn write_index(dir: &Path, idx: &FileIndex) -> Result<(), String> {
 ///
 /// 读不到文件也返回 `Ok(None)`：历史是兜底，不该让「存不了历史」挡住保存。
 pub fn capture(config_dir: &Path, path: &Path, keep: usize) -> Result<Option<String>, String> {
+    capture_limited(config_dir, path, keep, MAX_TOTAL_BYTES)
+}
+
+/// [`capture`] 的本体，预算是参数。
+///
+/// 预算做成参数只为测试：验证「比预算还大就不归档」必须拿一个真比预算大的文件，
+/// 而 `MAX_TOTAL_BYTES` 是 512MB。曾经用 `set_len` 造「稀疏文件」——NTFS 上
+/// `SetEndOfFile` **真的分配** 512MB，于是每跑一次门禁就往 `%TEMP%` 里丢一个
+/// 512MB 目录（2026-11-02 实测：C 盘三天攒了 1.5GB）。现在测试传 4 字节预算，
+/// 语义一模一样，一次也不再写盘。
+fn capture_limited(
+    config_dir: &Path,
+    path: &Path,
+    keep: usize,
+    max_total_bytes: u64,
+) -> Result<Option<String>, String> {
     // keep=0 会把刚写进去的版本立刻裁空（连目录一起删），却仍返回 Some(id)——
     // 调用方拿到一个指向已删 blob 的 id。IPC 层硬编码 20，这里兜住这个契约
     let keep = keep.max(1);
     // 比整个全局预算还大的文件，一版就装不下：归档它只会让全局淘汰天天删别人。
     // 保存路径自己也有 10MB 上限，这里兜的是「外部程序把文件撑大」的情况
-    if fs::metadata(path).map(|m| m.len()).unwrap_or(0) > MAX_TOTAL_BYTES {
+    if fs::metadata(path).map(|m| m.len()).unwrap_or(0) > max_total_bytes {
         return Ok(None);
     }
     // 读文件 + 算摘要放在锁外：这两步与「索引怎么改」无关，以前却在全局锁里
@@ -569,21 +585,22 @@ mod tests {
     }
 
     /// 比整个全局预算还大的文件：一版就装不下，归档它只会让全局淘汰天天删别人。
-    /// 稀疏文件只占目录项，不会真写 512MB。
+    ///
+    /// 预算通过 [`capture_limited`] 注入小值，**不**造真实大文件：`set_len` 在 NTFS 上
+    /// 会实打实分配空间（不是稀疏文件），一条用例就能往临时目录里写 512MB。
     #[test]
     fn 比全局预算还大的文件不归档() {
         let cfg = tmp("huge");
         let f = cfg.join("big.java");
-        let file = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&f)
-            .unwrap();
-        file.set_len(MAX_TOTAL_BYTES + 1).unwrap();
-        drop(file);
-        assert!(capture(&cfg, &f, KEEP_PER_FILE).unwrap().is_none());
+        fs::write(&f, b"1234567890").unwrap(); // 10 字节 > 4 字节预算
+        assert!(capture_limited(&cfg, &f, KEEP_PER_FILE, 4)
+            .unwrap()
+            .is_none());
         assert!(list(&cfg, &f).unwrap().is_empty());
+        // 边界：恰好等于预算要照常归档（判断是「严格大于」）
+        assert!(capture_limited(&cfg, &f, KEEP_PER_FILE, 10)
+            .unwrap()
+            .is_some());
     }
 
     /// 索引读不懂 ≠ 没有索引。当成空索引会把整个目录（连同完好的 blob）删掉。

@@ -81,6 +81,13 @@ pub struct AppConfig {
     /// jdt.ls 堆上限（MB）。`None` = 默认 1024（见 `lang::DEFAULT_XMX_MB`）。
     #[serde(default)]
     pub lang_xmx_mb: Option<u32>,
+    /// 启动服务/编译成功后，把工程模块的 `META-INF/*.upm` 等元数据投送到 NCHOME。
+    ///
+    /// 默认开：不投送时「改了 upm 不生效」没有任何提示，排查成本远高于多写几百 KB。
+    /// 落地失败只记日志、不阻断启动；写过的文件有 manifest + 备份，可在服务页一键清理
+    /// （见 `nchome_deploy.rs` 头注释里的安全约束）。
+    #[serde(default = "default_true")]
+    pub deploy_on_start: bool,
     /// 工程关联的覆盖表（见 `eclipse_cp::LinkedOverride`）。
     ///
     /// 为什么要有它：依赖顺序的真源是 `.classpath`（那是 Eclipse 写的），但真实工作里
@@ -197,6 +204,7 @@ impl Default for AppConfig {
             lang_enabled: true,
             lang_auto_start: true,
             lang_xmx_mb: None,
+            deploy_on_start: true,
             linked_overrides: Vec::new(),
         }
     }

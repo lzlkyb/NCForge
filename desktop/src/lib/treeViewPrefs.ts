@@ -1,0 +1,57 @@
+import { useSyncExternalStore } from "react";
+
+/**
+ * 文件树的显示偏好。都是本机界面习惯，存 localStorage，不随配置迁移走；默认都开，
+ * 升级后保持原来的行为。
+ *
+ * - `compactPackages`：`com → aier → erp` 这种「只有一个子目录」的链条压成一行
+ *   （对标 IDEA Compact Middle Packages / Eclipse Flat）；
+ * - `revealOnOpen`：右边打开文件时，左边自动展开并滚到那一行。
+ */
+function createPref(key: string) {
+  const read = () => {
+    try {
+      // 只认明确的 "0"；键不存在或被改坏都回默认，不把垃圾值当成「关」
+      return localStorage.getItem(key) !== "0";
+    } catch {
+      return true;
+    }
+  };
+  let value = read();
+  const listeners = new Set<() => void>();
+  const get = () => value;
+  const set = (on: boolean) => {
+    if (on === value) return;
+    value = on;
+    try {
+      localStorage.setItem(key, on ? "1" : "0");
+    } catch {
+      // 隐私模式 / 存储满：本次会话仍生效，下次启动回默认
+    }
+    for (const l of listeners) l();
+  };
+  const subscribe = (l: () => void) => {
+    listeners.add(l);
+    return () => {
+      listeners.delete(l);
+    };
+  };
+  return { get, set, subscribe };
+}
+
+const compactPref = createPref("ncforge.tree.compactPackages");
+const revealPref = createPref("ncforge.tree.revealOnOpen");
+
+export const getCompactPackages = compactPref.get;
+export const setCompactPackages = compactPref.set;
+export const toggleCompactPackages = () => compactPref.set(!compactPref.get());
+export function useCompactPackages(): boolean {
+  return useSyncExternalStore(compactPref.subscribe, compactPref.get);
+}
+
+export const getRevealOnOpen = revealPref.get;
+export const setRevealOnOpen = revealPref.set;
+export const toggleRevealOnOpen = () => revealPref.set(!revealPref.get());
+export function useRevealOnOpen(): boolean {
+  return useSyncExternalStore(revealPref.subscribe, revealPref.get);
+}

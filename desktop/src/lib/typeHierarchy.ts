@@ -9,7 +9,8 @@ import { currentModel, cursorAt } from "./editorActions";
 import { context } from "./langProviders";
 import { uriToPath } from "./langConvert";
 import { langReady, langRequest, navigate } from "./lang";
-import { getKeymap } from "./keymap";
+import { getKeymap, prettyChord } from "./keymap";
+import { getBindingOverride } from "./keybindings";
 import { setSession } from "./workspaceSession";
 import { toast } from "../components/ui/toast";
 
@@ -112,6 +113,8 @@ function entries(list: LspTypeEntry[] | null | undefined): TypeEntry[] {
 
 /** 面板与命令标题里的入口键：IDEA 用 Ctrl+H，Eclipse 用 Ctrl+T（Ctrl+H 在那里是搜索）。 */
 export function typeHierarchyKey(keymap = getKeymap()): string {
+  const custom = getBindingOverride("hierarchy.type");
+  if (custom) return prettyChord(custom);
   return keymap === "idea" ? "Ctrl+H" : "Ctrl+T";
 }
 

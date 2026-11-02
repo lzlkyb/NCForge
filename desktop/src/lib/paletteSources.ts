@@ -1,10 +1,12 @@
 import { listCommands } from "./commandRegistry";
 import { getFileIndex } from "./fileIndex";
 import { fuzzyMatch, rankFiles, type FileEntry, type Range } from "./fuzzy";
+import { parseLineQuery, rankFilesRecent, recentFirst } from "./gotoAnything";
 import { langReady, langRequest } from "./lang";
 import { uriToPath } from "./langConvert";
 import type { PaletteMode } from "./keymap";
 import { getRecent } from "./recentFiles";
+import { searchWorkspace } from "./search";
 import { fetchSymbols, kindLetter } from "./symbols";
 
 /** 浮层里的一行。 */
@@ -66,8 +68,12 @@ function fileItem(e: FileEntry, ctx: PaletteCtx, extra: Partial<PaletteItem>): P
 
 async function filesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult> {
   if (!ctx.root) return { items: [], note: "尚未打开工程" };
-  const entries = await getFileIndex(ctx.root);
   const q = query.trim();
+  // `#` 搜内容、`:` 跳行号：和 VS Code 的「转到任意位置」同一套前缀，
+  // 不必为它们再占一个入口键，也不用离开这个输入框。
+  if (q.startsWith("#")) return contentMode(q.slice(1).trim(), ctx);
+  if (q.startsWith(":")) return lineMode(q, ctx);
+  const entries = await getFileIndex(ctx.root);
   if (!q) {
     const byPath = new Map(entries.map((e) => [lower(e.path), e]));
     const recent = getRecent(ctx.root)
@@ -77,12 +83,62 @@ async function filesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult>
       .slice(0, 12);
     return { items: recent.map((e) => fileItem(e, ctx, { badge: undefined })), note: recent.length ? "最近打开" : `输入文件名（工程内共 ${entries.length} 个文件）` };
   }
-  const ranked = rankFiles(entries, q, LIMIT);
+  const ranked = rankFilesRecent(entries, q, LIMIT, getRecent(ctx.root));
   return {
     items: ranked.map((r) =>
       fileItem(r.entry, ctx, r.on === "name" ? { ranges: r.ranges } : { detail: r.entry.rel }),
     ),
     note: ranked.length ? `匹配 ${ranked.length} 项` : "没有匹配的文件",
+  };
+}
+
+/** `#内容`：在工作区文件里找文本，最近打开过的文件排前面。 */
+async function contentMode(text: string, ctx: PaletteCtx): Promise<PaletteResult> {
+  if (!text) return { items: [], note: "输入要在工程里找的内容（# 开头）" };
+  let out;
+  try {
+    out = await searchWorkspace({ text, maxResults: LIMIT });
+  } catch (e) {
+    return { items: [], note: `搜索失败：${e instanceof Error ? e.message : String(e)}` };
+  }
+  const base = (ctx.root ?? "").replace(/[\\/]+$/, "");
+  const hits = out.hits.map((h) => ({ hit: h, path: `${base}\\${h.path.replace(/\//g, "\\")}` }));
+  const ordered = recentFirst(hits, (h) => h.path, getRecent(ctx.root));
+  const items: PaletteItem[] = ordered.map(({ hit, path }) => ({
+    key: `${path}:${hit.line}:${hit.ranges[0]?.start ?? 0}`,
+    title: hit.text.trim() || "（空行）",
+    detail: `${hit.path}:${hit.line}`,
+    run: () => ctx.run.file(path, hit.line, (hit.ranges[0]?.start ?? 0) + 1),
+  }));
+  const note = out.truncated
+    ? `内容命中 ${items.length} 条（已到上限，缩小关键词可看到更精确的结果）`
+    : items.length
+      ? `内容 · ${items.length} 项`
+      : "没有匹配的内容";
+  return { items, note };
+}
+
+/** `:行号` / `:行号:列号`：跳到当前文件的位置（jar 内的类也能跳）。 */
+function lineMode(query: string, ctx: PaletteCtx): PaletteResult {
+  const target = parseLineQuery(query);
+  if (!target) return { items: [], note: "输入 :行号，或 :行号:列号" };
+  const path = ctx.activePath;
+  if (!path) return { items: [], note: "先打开一个文件再跳行号" };
+  const column = target.column ?? 1;
+  const name = path.slice(Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/")) + 1);
+  return {
+    items: [
+      {
+        key: `line:${target.line}:${column}`,
+        title: `跳到第 ${target.line} 行${target.column ? `第 ${column} 列` : ""}`,
+        detail: name,
+        run: () =>
+          path.startsWith("jdt://")
+            ? ctx.run.jdt(path, target.line, column)
+            : ctx.run.file(path, target.line, column),
+      },
+    ],
+    note: "行号跳转",
   };
 }
 

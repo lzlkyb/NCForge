@@ -75,6 +75,13 @@ export interface WorkspaceSession {
   root: string | null | undefined;
   tabs: TabMeta[];
   activePath: string | null;
+  /**
+   * 右侧分屏里显示的文件。null = 没有分屏。
+   *
+   * 分屏只是「另一个入口」：文件仍必须是已打开的标签（`openSplit` 会先打开它），
+   * 关标签 / 改名 / 删除时跟着走。会话级而不是组件级——切页卸载回来分屏还在。
+   */
+  splitPath: string | null;
   tree: TreeState;
   panelOpen: boolean;
   panelTab: PanelTab;
@@ -107,6 +114,7 @@ let state: WorkspaceSession = {
   root: undefined,
   tabs: [],
   activePath: null,
+  splitPath: null,
   tree: { root: null, expanded: new Set<string>(), dirs: {}, marks: {} },
   panelOpen: true,
   panelTab: "problems",

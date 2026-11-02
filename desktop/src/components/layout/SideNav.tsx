@@ -30,14 +30,15 @@ export type NavItem = {
  *    （加「工程关联」时 Ctrl+7 就从设置变成了它，设置挪到 Ctrl+8）。
  */
 export const WORKSPACE_NAV: NavItem[] = [
-  { key: "files", label: "文件", icon: "folder", hosted: false },
-  { key: "search", label: "搜索", icon: "search" },
+  // 「代码」是主工作台，也是全工程搜索与 NC 服务的宿主：
+  // 搜索是侧栏里的一个视图，服务是底部面板里的一个标签，都不再单独占主导航位。
+  { key: "files", label: "代码", icon: "code", hosted: false },
+  // 补丁打包不再是独立页签：它是版本控制页里的「打包补丁」视图（同一份工作副本改动）。
   { key: "svn", label: "版本控制", icon: "gitBranch" },
-  { key: "services", label: "NC 服务", icon: "server" },
-  { key: "patch", label: "补丁", icon: "package" },
   { key: "db", label: "数据库", icon: "database" },
   { key: "linked", label: "工程关联", icon: "plug" },
   { key: "logs", label: "NC 日志", icon: "log" },
+  // 数据字典不再是主导航项：它是数据库页的一种文档标签（读的就是连接树选中的库）。
 ];
 
 /**

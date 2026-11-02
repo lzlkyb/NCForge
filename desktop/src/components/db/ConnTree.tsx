@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { Icon } from "../ui/icon";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
+import { useWorkbenchDock } from "../workspace/WorkbenchDock";
 import { EnvDot } from "./EnvChips";
 import { ConnObjects } from "./ConnObjects";
+import { PasswordResetDialog } from "./PasswordResetDialog";
 import { dbNameOf, type DbConn } from "../../lib/dbApi";
 import { ensureConnected } from "../../lib/dbConfirm";
 import { deleteConn, disconnectConn, duplicateConn, moveConn, newConsole, refreshMeta } from "../../lib/dbActions";
-import { loadConns, openConnDialog, rtOf, tabOf, useDb } from "../../lib/dbStore";
+import { defaultConnId, loadConns, openConnDialog, openDictTab, rtOf, tabOf, useDb } from "../../lib/dbStore";
 
 /**
  * 侧栏：连接列表 + 已连上连接下的对象（收藏 / 表 / 视图）。
@@ -16,9 +18,11 @@ import { loadConns, openConnDialog, rtOf, tabOf, useDb } from "../../lib/dbStore
  */
 export function ConnTree() {
   const db = useDb();
+  const dock = useWorkbenchDock();
   const [filter, setFilter] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const [resetConn, setResetConn] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ from: string; over: string | null } | null>(null);
   const activeConn = tabOf(db.active)?.connId ?? null;
   const q = filter.trim().toLowerCase();
@@ -39,7 +43,20 @@ export function ConnTree() {
           ? { label: "断开", icon: "power", onSelect: () => void disconnectConn(c.id) }
           : { label: "连接", icon: "plug", onSelect: () => void ensureConnected(c.id) },
         { label: "新建 SQL 控制台", icon: "terminal", onSelect: () => void newConsole(c.id) },
+        {
+          label: "数据字典",
+          icon: "clipboard",
+          onSelect: () => {
+            openDictTab(c.id);
+            dock?.showDocument();
+          },
+        },
         { label: "刷新对象", icon: "refresh", disabled: !on, onSelect: () => void refreshMeta(c.id) },
+        {
+          label: "重置操作员密码…",
+          icon: "key",
+          onSelect: () => void ensureConnected(c.id).then((ok) => ok && setResetConn(c.id)),
+        },
         { label: "编辑…", icon: "edit", separator: true, onSelect: () => openConnDialog(c.id) },
         { label: "复制", icon: "copy", onSelect: () => void duplicateConn(c.id) },
         { label: "删除", icon: "trash", danger: true, onSelect: () => void deleteConn(c.id) },
@@ -61,6 +78,12 @@ export function ConnTree() {
         </button>
         <button type="button" className="dbx-ibtn" title="从 NC prop.xml 导入" onClick={() => openConnDialog(null, "prop")}>
           <Icon name="download" size={14} />
+        </button>
+        <button type="button" className="dbx-ibtn" title="数据字典" onClick={() => {
+          openDictTab(activeConn ?? defaultConnId());
+          dock?.showDocument();
+        }}>
+          <Icon name="clipboard" size={14} />
         </button>
         <button type="button" className="dbx-ibtn" title="刷新列表" onClick={() => void loadConns()}>
           <Icon name="refresh" size={14} />
@@ -129,6 +152,7 @@ export function ConnTree() {
         })}
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {resetConn && <PasswordResetDialog connId={resetConn} onClose={() => setResetConn(null)} />}
     </div>
   );
 }

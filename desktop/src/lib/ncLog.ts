@@ -79,6 +79,10 @@ export interface LogEntry {
   costMs: number | null;
   rowCount: number | null;
   verdict: Verdict | null;
+  /** 只有检索结果带：第一处命中的整行（列表用它回答「为什么命中」）。 */
+  matchLine?: string;
+  /** 只有检索结果带：命中的行数。 */
+  matchCount?: number;
 }
 
 export interface QueryResult {
@@ -111,6 +115,36 @@ export interface QueryArgs {
   limit?: number;
 }
 
+export interface SearchArgs {
+  /** 字面量或正则（由 `regex` 决定），空会被后端拒绝。 */
+  query: string;
+  regex: boolean;
+  /** 默认忽略大小写；中文没有大小写，开了也只影响 ASCII。 */
+  caseSensitive: boolean;
+  loggers?: string[] | null;
+  sinceTs?: string | null;
+  untilTs?: string | null;
+  limit?: number;
+}
+
+/** 检索命中的一条记录：记录本身 + 归因 + 「为什么命中」。 */
+export interface SearchEntry extends LogEntry {
+  /** 第一处命中的整行（后端已截断到 300 字），列表直接显示。 */
+  matchLine: string;
+  /** 命中的行数（同一行多次命中算 1）。 */
+  matchCount: number;
+}
+
+export interface SearchResult {
+  entries: SearchEntry[];
+  scannedFiles: string[];
+  recordsScanned: number;
+  truncatedFiles: number;
+  /** 已凑满条数上限提前停了（还有文件没看）。 */
+  stoppedEarly: boolean;
+  elapsedMs: number;
+}
+
 export function logSources(): Promise<SourceInfo> {
   return invoke<SourceInfo>("nc_log_sources");
 }
@@ -121,6 +155,11 @@ export function queryLogs(args: QueryArgs): Promise<QueryResult> {
 
 export function traceCall(callId: string): Promise<TraceResult> {
   return invoke<TraceResult>("nc_log_trace", { callId });
+}
+
+/** 全文/正则检索：看原文（msg / 堆栈 / 头部字段），不看归因。 */
+export function searchLogs(args: SearchArgs): Promise<SearchResult> {
+  return invoke<SearchResult>("nc_log_search", { args });
 }
 
 // ---------------------------------------------------------------- 时间

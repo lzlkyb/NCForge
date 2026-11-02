@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { WorkbenchDockContext, type DockRegionName, type DockToolTab, type FileSlotName } from "./WorkbenchDock";
 import { ToolTab } from "./ToolTab";
+import { ShowDocumentBridge } from "./ShowDocumentBridge";
 import { useSideOpen } from "../../lib/layoutStore";
+import { useWorkspaceSelector } from "../../lib/workspaceSession";
 
 /** 这些工具把自己的操作条停靠进顶部工具条；其余工具不占这一行。 */
-const TOOLBAR_TOOLS = ["svn", "patch", "services"];
-/** 这些工具的入口放在共享侧栏；其余工具侧栏仍是文件树。 */
-const SIDE_TOOLS = ["search", "svn", "patch", "db", "settings"];
+const TOOLBAR_TOOLS = ["svn"];
+/** 这些工具的入口放在共享侧栏；其余工具（含文件页）侧栏仍是文件树。 */
+const SIDE_TOOLS = ["svn", "db", "settings"];
 /** 这些工具有文档页，因此标签条里多一个工具标签。 */
 const DOCUMENT_TOOLS: Record<string, DockToolTab> = {
-  svn: { label: "版本控制 · 差异", icon: "gitBranch" },
-  patch: { label: "补丁", icon: "package" },
+  // 页内还有「审查改动 / 打包补丁」两个视图，标签只说页名，避免切到补丁时名不副实
+  svn: { label: "版本控制", icon: "gitBranch" },
   db: { label: "数据库", icon: "database", custom: true },
   linked: { label: "工程关联", icon: "plug" },
   settings: { label: "设置", icon: "settings" },
@@ -18,11 +20,12 @@ const DOCUMENT_TOOLS: Record<string, DockToolTab> = {
 /**
  * 切到该工具时默认打开文档页。
  *
- * svn 有意不在列表里：打开版本控制先看源码，点「版本控制 · 差异」才切到差异，
+ * svn 有意不在列表里：打开版本控制先看源码，点「版本控制」才切到差异，
  * 和用户从文件树点进来继续改代码的动线一致。少写这一句就会被当成漏配。
+ * 补丁视图例外：它没有「源码视图」可看，SvnTab 自己在该视图挂载时打开文档区。
  */
-const DOCUMENT_DEFAULT_OPEN = ["patch", "db", "linked", "settings"];
-/** NC 服务的卡片 + 日志放在底部面板里，切过去时把面板撑高到够看。 */
+const DOCUMENT_DEFAULT_OPEN = ["db", "linked", "settings"];
+/** NC 服务的卡片 + 日志放在底部面板里，打开这个标签时把面板撑高到够看。 */
 const SERVICES_PANEL_MIN = 360;
 const HOST_NAMES: DockRegionName[] = ["toolbar", "sidebar", "document", "bottom", "actions", "tabs"];
 /** 文件页槽位：由 FilesTab 用 portal 注入（见 WorkbenchDock 的 FileSlotName）。 */
@@ -74,17 +77,25 @@ export function WorkbenchFrame({ activeTool, tool, fileTabs = false, tree, tabs,
 }) {
   const [hosts, setHosts] = useState<Record<DockRegionName, HTMLElement | null>>({ toolbar: null, sidebar: null, document: null, bottom: null, actions: null, tabs: null });
   const [fileHosts, setFileHosts] = useState<Record<FileSlotName, HTMLElement | null>>({ tree: null, tabs: null, editor: null, status: null, output: null });
-  const [documentOpen, setDocumentOpen] = useState(false);
+  const [documentOpen, setDocumentOpen] = useState(() => DOCUMENT_DEFAULT_OPEN.includes(activeTool));
   const sideOpen = useSideOpen();
+  // NC 服务标签被选中时把面板撑高：服务卡片 + 日志至少要有 360px 才看得全
+  const panelOpen = useWorkspaceSelector((s) => s.panelOpen);
+  const panelTab = useWorkspaceSelector((s) => s.panelTab);
   const [sideWidth, setSideWidth] = useState(() => loadSizes().side);
   const [bottomHeight, setBottomHeight] = useState(() => loadSizes().bottom);
   // 每个宿主一个稳定的 ref 回调：回调身份变了 React 会先 null 再重填，宿主里的工具内容就闪一下
   const refs = useMemo(() => Object.fromEntries(HOST_NAMES.map(name => [name, (node: HTMLElement | null) => setHosts(old => old[name] === node ? old : { ...old, [name]: node })])) as Record<DockRegionName, (node: HTMLElement | null) => void>, []);
   const fileRefs = useMemo(() => Object.fromEntries(FILE_SLOTS.map(name => [name, (node: HTMLElement | null) => setFileHosts(old => old[name] === node ? old : { ...old, [name]: node })])) as Record<FileSlotName, (node: HTMLElement | null) => void>, []);
+  const lastTool = useRef(activeTool);
   useEffect(() => {
-    setDocumentOpen(DOCUMENT_DEFAULT_OPEN.includes(activeTool));
-    if (activeTool === "services") setBottomHeight(h => Math.max(h, SERVICES_PANEL_MIN));
-  }, [activeTool]);
+    // 只跟着工具切换重置文档视图；底部面板换标签不该把用户刚切回代码的视图顶走
+    if (lastTool.current !== activeTool) {
+      lastTool.current = activeTool;
+      setDocumentOpen(DOCUMENT_DEFAULT_OPEN.includes(activeTool));
+    }
+    if (panelOpen && panelTab === "svc") setBottomHeight(h => Math.max(h, SERVICES_PANEL_MIN));
+  }, [activeTool, panelOpen, panelTab]);
   const showCode = useCallback(() => setDocumentOpen(false), []);
   const showDocument = useCallback(() => setDocumentOpen(true), []);
   const toolTab = DOCUMENT_TOOLS[activeTool] ?? null;
@@ -139,6 +150,7 @@ export function WorkbenchFrame({ activeTool, tool, fileTabs = false, tree, tabs,
     else setBottomHeight((h) => Math.max(BOTTOM_MIN, Math.min(bottomMax(), h + delta)));
   };
   return <WorkbenchDockContext.Provider value={dock}>
+    <ShowDocumentBridge show={showDocument} />
     <div className="wb-root" data-tool={activeTool}>
       <header className="wb-toolbar" hidden={!hasToolbar}>
         <div ref={refs.toolbar} className="wb-toolbar-host" />

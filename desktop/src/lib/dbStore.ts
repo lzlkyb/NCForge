@@ -16,6 +16,7 @@ import {
   type TxInfo,
 } from "./dbApi";
 import { addHistory } from "./dbHistory";
+import type { MdDictOut, PickRow, ScopeKind } from "./mdDict";
 
 /**
  * 数据库页的模块级状态：连接列表、每个连接的运行态、SQL / 表标签页与结果。
@@ -112,7 +113,53 @@ export interface TableTab {
   otype?: string;
 }
 
-export type DbTabItem = SqlTab | TableTab;
+/**
+ * 数据字典标签的选表过程与结果。
+ *
+ * 这些字段原先住在一个独立页签的组件 state 里；并进数据库页后标签会随文档区
+ * 切换而卸载，不放进仓库的话「生成一份字典 → 点开 SQL 看一眼 → 回来」就全没了。
+ * `data` 可能上百张表、几千列，**只在内存**，不写 localStorage。
+ */
+export interface DictState {
+  mode: ScopeKind;
+  /** 勾中的表名（勾选表 / 补丁涉及共用）。 */
+  picked: string[];
+  prefix: string;
+  /** 左栏找表的关键词。 */
+  keyword: string;
+  /** 补丁模式下核对过库的结果；`null` 且 mode=patch 表示正在核对。 */
+  patch: { rows: PickRow[]; missing: string[] } | null;
+  data: MdDictOut | null;
+  running: boolean;
+  error: string | null;
+}
+
+/**
+ * 数据字典文档标签。
+ *
+ * `connId` 是建标签时数据库页的当前连接：字典读的是 `md_*` 元数据，多连接时
+ * 必须钉住是哪一个库，否则「看的是 A 库的标签、生成的是 B 库的字典」无从察觉。
+ */
+export interface DictTab {
+  kind: "dict";
+  id: string;
+  connId: string | null;
+  title: string;
+  state: DictState;
+}
+
+export type DbTabItem = SqlTab | TableTab | DictTab;
+
+export const EMPTY_DICT_STATE: DictState = {
+  mode: "picked",
+  picked: [],
+  prefix: "",
+  keyword: "",
+  patch: null,
+  data: null,
+  running: false,
+  error: null,
+};
 
 /** 连接对话框：新建 / 编辑某个连接（`tab` 决定打开哪一页）。 */
 export interface ConnDialogState {
@@ -172,9 +219,17 @@ let persistTimer: ReturnType<typeof setTimeout> | null = null;
 function persist() {
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
-    const tabs = state.tabs.map((t) =>
-      t.kind === "sql" ? { kind: t.kind, id: t.id, title: t.title, connId: t.connId, sql: t.sql, maxRows: t.maxRows, timeoutSec: t.timeoutSec } : t,
-    );
+    // 字典标签不落盘：它的 state 里有整份生成的字典（可能几千列），而且重开应用后
+    // 也读不到对应连接上的结果，恢复出来只会是个空壳。表标签原样存。
+    const tabs: Partial<DbTabItem>[] = [];
+    for (const t of state.tabs) {
+      if (t.kind === "sql") {
+        tabs.push({ kind: t.kind, id: t.id, title: t.title, connId: t.connId, sql: t.sql, maxRows: t.maxRows, timeoutSec: t.timeoutSec });
+      } else if (t.kind === "table") {
+        tabs.push(t);
+      }
+      // dict 不落盘（见上）
+    }
     try {
       localStorage.setItem(TABS_KEY, JSON.stringify({ tabs, active: state.active }));
     } catch {
@@ -231,6 +286,18 @@ export function useDbSelector<T>(
 
 export const connOf = (id: string | null | undefined) => state.conns.find((c) => c.id === id) ?? null;
 export const rtOf = (id: string | null | undefined): ConnRuntime => (id && state.rt[id]) || { status: "idle" };
+
+/**
+ * 新开控制台 / 数据字典时默认用哪个连接：当前标签的 → 已连上的 → 第一个。
+ *
+ * 放在仓库层而不是 dbActions：命令面板（App）也要用它开字典标签，而 dbActions
+ * 静态引了 sqlModels（含 Monaco），App 不能为了一个默认连接把它拽进首屏。
+ */
+export function defaultConnId(): string | null {
+  const cur = tabOf(state.active)?.connId;
+  if (cur && connOf(cur)) return cur;
+  return state.conns.find((c) => rtOf(c.id).status === "connected")?.id ?? state.conns[0]?.id ?? null;
+}
 
 function setRt(id: string, patch: Partial<ConnRuntime>) {
   set({ rt: { ...state.rt, [id]: { ...rtOf(id), ...patch } } });
@@ -389,6 +456,41 @@ export function openTableTab(connId: string, table: string, sub: TableSub = "dat
   const tab: TableTab = { kind: "table", id: newId("t"), connId, table: table.toUpperCase(), sub, ...(otype ? { otype } : {}) };
   set({ tabs: [...state.tabs, tab], active: tab.id });
   return tab.id;
+}
+
+/**
+ * 打开（或激活）数据字典标签。字典只开一个：再点一次入口应该是「回到那份字典」，
+ * 而不是又开一份空标签。换了绑定连接时旧结果作废——它属于上一个库。
+ */
+export function openDictTab(connId: string | null): string {
+  const hit = state.tabs.find((t): t is DictTab => t.kind === "dict");
+  if (hit) {
+    set({ active: hit.id });
+    if (hit.connId !== connId) {
+      patchTab<DictTab>(hit.id, {
+        connId,
+        state: { ...EMPTY_DICT_STATE, mode: hit.state.mode, prefix: hit.state.prefix },
+      });
+    }
+    return hit.id;
+  }
+  const tab: DictTab = { kind: "dict", id: newId("d"), connId, title: "数据字典", state: { ...EMPTY_DICT_STATE } };
+  set({ tabs: [...state.tabs, tab], active: tab.id });
+  return tab.id;
+}
+
+/**
+ * 更新字典标签的选表状态。接受函数式更新：连点两下勾选时，两次回调都读仓库里的
+ * 最新集合，而不是上一帧渲染闭包里抄来的那份。
+ */
+export function patchDictTab(
+  tabId: string,
+  patch: Partial<DictState> | ((s: DictState) => Partial<DictState>),
+): void {
+  const t = tabOf(tabId);
+  if (t?.kind !== "dict") return;
+  const next = typeof patch === "function" ? patch(t.state) : patch;
+  patchTab<DictTab>(tabId, { state: { ...t.state, ...next } });
 }
 
 export function closeTab(id: string) {

@@ -19,8 +19,8 @@ import { useTreeEdit } from "./useTreeEdit";
 import { useTreeLoad } from "./useTreeLoad";
 import { dirName, type NewEntryKind } from "../../lib/workspace";
 import { flattenTree, treeKeyAction, treeRowId as rowId } from "../../lib/treeNav";
-import { chainFor, chainOpen } from "../../lib/treeCompact";
 import { countBookmarks, useBookmarks } from "../../lib/bookmarks";
+import { useCompactPackages, useRevealOnOpen } from "../../lib/treeViewPrefs";
 
 interface Props {
   root: string;
@@ -51,7 +51,8 @@ const REVEAL_DELAY_MS = 120;
  * （newar 约 7000 个源文件、几十个模块，整棵预读会卡首屏）。
  *
  * 三件事与 IDEA 对齐：
- * - **自动定位**：右边打开什么文件，左边就展开并滚到那一行（只对工作区内的真实文件）；
+ * - **自动定位**：右边打开什么文件，左边就展开并滚到那一行（只对工作区内的真实文件；
+ *   标题栏可关，显式的「在文件树中显示」不受开关影响）；
  * - **压缩中间包**：`com → aier → erp` 合成一行（`lib/treeCompact`，与键盘导航同源）；
  * - **speed search**：焦点在树上直接敲字筛选，Esc 清除。
  *
@@ -67,7 +68,9 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     null,
   );
   const [filter, setFilter] = useState("");
-  const { dirs, expanded, marks, load, expand, depthOf, reveal, setExpandedPaths } = useTreeLoad(root);
+  const compact = useCompactPackages();
+  const revealOnOpen = useRevealOnOpen();
+  const { dirs, expanded, marks, load, expand, toggleRow, depthOf, reveal } = useTreeLoad(root, compact);
   const bookmarks = useBookmarks(root);
   // 行只拿一个数字（条数），值没变时行组件的 memo 仍然命中
   const bookmarkCounts = useMemo(() => countBookmarks(bookmarks), [bookmarks]);
@@ -110,11 +113,12 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     [reveal],
   );
 
+  // 开关只管「自动」这一路；标签右键 / 命令面板的「在文件树中显示」是显式动作，永远生效
   useEffect(() => {
-    if (!activePath) return;
+    if (!activePath || !revealOnOpen) return;
     const t = window.setTimeout(() => void locate(activePath), REVEAL_DELAY_MS);
     return () => window.clearTimeout(t);
-  }, [activePath, locate]);
+  }, [activePath, revealOnOpen, locate]);
 
   // 「在文件树中显示」命令（标签右键 / 命令面板）走同一份定位逻辑
   useEffect(() => {
@@ -163,15 +167,10 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     (name: string) => !filter || name.toLowerCase().includes(filter.toLowerCase()),
     [filter],
   );
-  const flat = useMemo(() => flattenTree(dirs, expanded, root, { filter: filterFn }), [dirs, expanded, root, filterFn]);
-
-  /** 展开 / 收起一条压缩链：收起时要把链上每一层都去掉，否则下一帧又压不回去。 */
-  const toggleChain = (tail: string, parent: string | null) => {
-    const chain = chainFor(tail, parent, dirs);
-    const open = chainOpen(chain, expanded);
-    setExpandedPaths(chain.nodes, !open);
-    if (!open) void load(chain.tail);
-  };
+  const flat = useMemo(
+    () => flattenTree(dirs, expanded, root, { filter: filterFn, compact }),
+    [dirs, expanded, root, filterFn, compact],
+  );
 
   /**
    * 方向键导航的语义在 `lib/treeNav`（纯函数，可单测）；这里只把动作落到状态上。
@@ -202,7 +201,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
       if (act.kind === "select") setSelected({ path: act.path, isDir: act.isDir });
       else if (act.kind === "toggle") {
         const row = flat.find((r) => r.path === act.path);
-        toggleChain(act.path, row?.parent ?? root);
+        toggleRow(act.path, row?.parent ?? root);
       } else onOpen(act.path);
       return;
     }
@@ -228,11 +227,11 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
    * 做法是 ref 里存最新实现、外层给一次性外壳——行组件拿到的是稳定引用，调用的
    * 永远是当前闭包。
    */
-  const latest = useRef({ toggleChain, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected });
-  latest.current = { toggleChain, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected };
+  const latest = useRef({ toggleRow, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected });
+  latest.current = { toggleRow, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected };
   const handlers = useMemo(
     () => ({
-      onToggle: (tail: string, parent: string) => latest.current.toggleChain(tail, parent),
+      onToggle: (tail: string, parent: string) => latest.current.toggleRow(tail, parent),
       onActivate: (path: string) => {
         latest.current.setSelected({ path, isDir: false });
         latest.current.onOpen(path);
@@ -254,6 +253,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     marks,
     bookmarkCounts,
     filter: filterFn,
+    compact,
     editing,
     editError,
     busy,

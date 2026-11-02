@@ -2,6 +2,8 @@ import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "reac
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { ToolTab } from "./ToolTab";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { Menu, MenuItem } from "../ui/Menu";
+import { TaskMenu } from "./TaskMenu";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
@@ -21,17 +23,22 @@ export function TabStrip({
   root,
   tabs,
   activePath,
+  splitPath,
   compiling,
   canCompile,
   onSelect,
   onClose,
   onCloseMany,
   onPin,
+  onOpenSplit,
+  onCloseSplit,
   onCompile,
 }: {
   root: string;
   tabs: TabMeta[];
   activePath: string | null;
+  /** 右侧分屏里显示的文件（没有分屏为 null）。 */
+  splitPath: string | null;
   compiling: boolean;
   canCompile: boolean;
   onSelect: (path: string) => void;
@@ -39,6 +46,8 @@ export function TabStrip({
   /** 批量关闭：未保存的保留，返回保留个数。 */
   onCloseMany: (want: (t: TabMeta, index: number) => boolean) => number;
   onPin: (path: string) => void;
+  onOpenSplit: (path: string) => void;
+  onCloseSplit: () => void;
   onCompile: () => void;
 }) {
   const dock = useWorkbenchDock();
@@ -113,7 +122,13 @@ export function TabStrip({
       { label: "关闭右侧", disabled: i === tabs.length - 1, onSelect: () => closeMany((_, j) => j > i) },
       { label: "关闭已保存的", onSelect: () => closeMany(() => true) },
       { label: "固定标签", separator: true, disabled: !t?.preview, onSelect: () => onPin(path) },
-      { label: "在文件树中显示", disabled: !!t?.virtual, onSelect: () => revealInTree(path) },
+      {
+        label: splitPath === path ? "已在右侧分屏" : "在右侧打开",
+        disabled: splitPath === path,
+        onSelect: () => onOpenSplit(path),
+      },
+      { label: "关闭分屏", disabled: !splitPath, onSelect: onCloseSplit },
+      { label: "在文件树中显示", separator: true, disabled: !!t?.virtual, onSelect: () => revealInTree(path) },
       { label: "复制路径", separator: true, disabled: !!t?.virtual, onSelect: () => copy(path) },
       { label: "复制相对路径", disabled: !!t?.virtual, onSelect: () => copy(relativeTo(root, path)) },
     ];
@@ -180,7 +195,39 @@ export function TabStrip({
         </div>
       ))}
       <ToolTab />
+      {/* 标签太多时横向滚动条不好找：给一个「所有标签」下拉，键盘用户也能到这里 */}
+      <div className="wb-tabs-all-wrap">
+        <Menu portal width="w-72" trigger={(open, toggle) => (
+          <button
+            type="button"
+            className="wb-icon-btn"
+            aria-label="所有标签"
+            aria-expanded={open}
+            title="所有标签（标签太多时从这里选）"
+            disabled={tabs.length === 0}
+            onClick={toggle}
+          >
+            <Icon name="chevronDown" size={14} />
+          </button>
+        )}>
+          {(close) => tabs.map((t) => (
+            <MenuItem
+              key={t.path}
+              label={t.name}
+              hint={t.path === splitPath ? "分屏中" : undefined}
+              active={t.path === activePath}
+              trailing={t.dirty ? <span className="wb-dirty-dot" /> : undefined}
+              onClick={() => {
+                onSelect(t.path);
+                dock?.showCode();
+                close();
+              }}
+            />
+          ))}
+        </Menu>
+      </div>
       <span className="wb-tabs-sp" />
+      {!dock?.documentOpen && <TaskMenu root={root} compiling={compiling} />}
       {!dock?.documentOpen && (
         <Button
           size="sm"

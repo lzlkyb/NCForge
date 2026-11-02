@@ -21,8 +21,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 
 use crate::commands::db_cmds::{
-    bridge_for, call, connect_args, drop_bridge, existing_bridge, find_conn, prop_password_ready,
-    PROBE, T_CONNECT,
+    call, drop_bridge, existing_bridge, find_conn, open_temp_session, prop_password_ready, PROBE,
 };
 use crate::config::{AppConfig, DbConnConfig};
 use crate::db_engine::{EngineHandle, EngineKind};
@@ -198,21 +197,7 @@ async fn open_session(
     conn: &DbConnConfig,
     engine: EngineKind,
 ) -> Option<(String, Arc<EngineHandle>)> {
-    // 读操作不需要事务：自动提交，跑完断开也不留未提交状态
-    let (cmd, args) = connect_args(cfg, conn, None, true, engine).ok()?;
-    let key = format!(
-        "__export:{}:{}",
-        conn.id,
-        SEQ.fetch_add(1, Ordering::Relaxed)
-    );
-    let bridge = bridge_for(app, st, cfg, &key, engine).ok()?;
-    match call(bridge.clone(), cmd, args, T_CONNECT).await {
-        Ok(_) => Some((key, bridge)),
-        Err(_) => {
-            drop_bridge(st, &key);
-            None
-        }
-    }
+    open_temp_session(app, st, cfg, conn, engine, "export").await
 }
 
 struct Fetched {

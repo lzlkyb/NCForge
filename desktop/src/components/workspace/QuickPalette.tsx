@@ -10,7 +10,7 @@ import type { Range } from "../../lib/fuzzy";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
 
 const PLACEHOLDER: Record<PaletteMode, string> = {
-  file: "输入文件名…（驼峰首字母、路径片段都可以）",
+  file: "输入文件名…（# 搜内容，:行号 跳转）",
   type: "输入类名…",
   symbol: "输入方法 / 字段名…",
   sym: "输入方法 / 字段名…（整个工作区，含依赖 jar）",
@@ -74,7 +74,9 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
 
   useEffect(() => {
     let alive = true;
-    // 类型搜索要问语言服务，输入时稍等一下再发，免得每个字符一个请求
+    // 类型搜索要问语言服务、`#` 内容搜索要扫整个工程：输入时稍等一下再发，
+    // 免得每个字符一个请求（`:行号` 是本地解析，不延迟）
+    const slow = mode === "type" || (mode === "file" && query.trim().startsWith("#"));
     const t = setTimeout(() => {
       buildItems(mode, query, ctxRef.current)
         .then((r) => {
@@ -88,7 +90,7 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
           setResult({ items: [], note: `查询失败：${e instanceof Error ? e.message : String(e)}` });
           setSel(0);
         });
-    }, mode === "type" && query ? 120 : 0);
+    }, slow && query ? 200 : 0);
     return () => {
       alive = false;
       clearTimeout(t);
@@ -209,7 +211,7 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
           <span>Enter 打开</span>
           <span>Esc 关闭</span>
           <span className="qp-sp" />
-          <span>{mode === "file" ? "输入 > 进入命令，@ 进入符号" : "退格回到文件模式"}</span>
+          <span>{mode === "file" ? "> 命令，@ 符号，# 内容，:行号" : "退格回到文件模式"}</span>
         </div>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Icon } from "../ui/icon";
 import {
   TIME_RANGES,
@@ -27,6 +28,7 @@ export function LogToolbar({
   onOnlyProblems,
   onSlowMs,
   onRefresh,
+  children,
 }: {
   sources: SourceInfo | undefined;
   loggers: string[];
@@ -41,6 +43,8 @@ export function LogToolbar({
   onOnlyProblems: (value: boolean) => void;
   onSlowMs: (ms: number) => void;
   onRefresh: () => void;
+  /** 检索条等：放在同一个头部容器里，才不会多出一条多余的边框。 */
+  children?: ReactNode;
 }) {
   const groups = sources?.loggers ?? [];
   return (
@@ -111,6 +115,8 @@ export function LogToolbar({
           </button>
         ))}
       </div>
+
+      {children}
     </div>
   );
 }

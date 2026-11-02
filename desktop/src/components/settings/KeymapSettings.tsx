@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { EDITOR_KEYS, getKeymap, paletteKeysLabel, setKeymap, workspaceSearchLabel, type Keymap } from "../../lib/keymap";
+import { getKeymap, setKeymap, workspaceSearchLabel, type Keymap } from "../../lib/keymap";
 import { Card } from "../ui/card";
+import { KeybindingEditor } from "./KeybindingEditor";
 import { toast } from "../ui/toast";
 
 export function KeymapSettings() {
@@ -17,18 +18,8 @@ export function KeymapSettings() {
         <label className="flex items-center gap-2"><input type="radio" name="keymap" checked={value === "idea"} onChange={() => change("idea")} />IntelliJ IDEA</label>
       </fieldset>
       <p className="text-sm text-muted-foreground">全工程搜索：{workspaceSearchLabel(value)}</p>
-      <table className="wb-keymap-table"><thead><tr><th>操作</th><th>当前快捷键</th></tr></thead><tbody>
-        <tr><td>保存</td><td><kbd>Ctrl+S</kbd></td></tr>
-        <tr><td>转到文件</td><td><kbd>{paletteKeysLabel("file", value)}</kbd></td></tr>
-        <tr><td>转到类型</td><td><kbd>{paletteKeysLabel("type", value)}</kbd></td></tr>
-        <tr><td>当前文件符号</td><td><kbd>{paletteKeysLabel("symbol", value)}</kbd></td></tr>
-        <tr><td>命令面板</td><td><kbd>{paletteKeysLabel("cmd", value)}</kbd></td></tr>
-        <tr><td>切换侧栏 / 底部面板</td><td><kbd>Ctrl+B</kbd> / <kbd>Ctrl+J</kbd></td></tr>
-        <tr><td>调用层级</td><td><kbd>Ctrl+Alt+H</kbd></td></tr>
-        <tr><td>类型层级</td><td><kbd>{value === "idea" ? "Ctrl+H" : "Ctrl+T"}</kbd></td></tr>
-        {EDITOR_KEYS.map(row => <tr key={row.action}><td>{row.label}</td><td><kbd>{row[value]}</kbd></td></tr>)}
-      </tbody></table>
-      <p className="text-sm text-muted-foreground">定义跳转、补全、调用层级与类型层级依赖 Java 语言服务。格式化尚未接入，不列为可用快捷键。</p>
+      <KeybindingEditor keymap={value} />
+      <p className="text-sm text-muted-foreground">保存（Ctrl+S）与调用层级（Ctrl+Alt+H）是固定键；定义跳转、补全、类型层级依赖 Java 语言服务。</p>
     </Card>
   );
 }

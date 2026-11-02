@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
     // 否则挂载即炸：这两个入口是随编辑器偏好一起加的
     onDidChangeModelContent: vi.fn(() => ({ dispose: vi.fn() })),
     onDidChangeModel: vi.fn(() => ({ dispose: vi.fn() })),
+    // 分屏后「当前编辑器」要跟着焦点走：挂载时会订阅焦点
+    onDidFocusEditorText: vi.fn(() => ({ dispose: vi.fn() })),
     // 断点点位挂在行号槽上：挂载时会订阅点击（加/去断点）
     onMouseDown: vi.fn(() => ({ dispose: vi.fn() })),
     createDecorationsCollection: vi.fn(() => ({ clear: vi.fn() })),
@@ -63,7 +65,6 @@ vi.mock("../../lib/monacoSetup", () => ({
 vi.mock("../../lib/langProviders", () => ({ registerLangProviders: vi.fn() }));
 // Java 右键的 SQL 动作与它的对话框同理：拉进数据库页整条依赖链
 vi.mock("../../lib/javaSqlActions", () => ({ registerJavaSqlActions: () => [] }));
-vi.mock("../db/ExtractSqlDialog", () => ({ ExtractSqlDialog: () => null }));
 
 vi.mock("../../lib/editorStore", () => ({
   getModel: () => undefined,

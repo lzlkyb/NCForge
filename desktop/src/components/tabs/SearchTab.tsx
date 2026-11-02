@@ -1,7 +1,7 @@
-import { DockRegion } from "../workspace/WorkbenchDock";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { SearchBar } from "../search/SearchBar";
 import { SearchResults } from "../search/SearchResults";
+import { SearchEditPanel } from "../search/SearchEditPanel";
 import { ReplaceBar } from "../search/ReplaceBar";
 import { searchWorkspace, type SearchHit, type SearchOptions } from "../../lib/search";
 import { getWorkspace, joinPath } from "../../lib/workspace";
@@ -19,17 +19,16 @@ import {
 } from "../../lib/searchStore";
 
 /**
- * 全工程搜索页（M2）。
+ * 全工程搜索（M2）。现在是文件页侧栏的一个视图，不再占主导航页签。
  *
  * 交互取舍（都照成熟工具的实际做法定的，理由见各处注释）：
  * - **不边输边搜**：后端是真实扫盘（7000 文件约 0.6s），边输边搜会把磁盘打满、
  *   结果还一直跳。回车或按「搜索」才真正执行——Eclipse 的 Ctrl+H 也是这个模型。
- * - **结果放整页**：侧栏那种窄面板放不下「路径 + 行号 + 整行代码」。
- * - **选项常显**：整页横向空间够，不学 VS Code 把过滤收进「⋯」——
- *   收纳后不给快捷键基本想不起来。
- * - **点命中去 Files 页并定位行**，靠 lib/openFileRequest 这条单向管道。
+ * - **选项常显**：不学 VS Code 把过滤收进「⋯」——收纳后不给快捷键基本想不起来。
+ * - **点命中打开文件并定位行**：调用方通过 `onOpenFile` 接到文件页的打开管道。
  *
  * 条件栏在 `search/SearchBar`，结果区在 `search/SearchResults`；本文件只做取数与接线。
+ * 组件保持「纯内容」：不自己往停靠区 portal，文件页把它放进侧栏槽位里。
  */
 export function SearchTab({
   onOpenFile,
@@ -41,6 +40,7 @@ export function SearchTab({
   // 结果一直挂在屏幕上（替换虽被 stale 挡住，界面却自相矛盾）。
   const form = useSyncExternalStore(subscribeSearchForm, getSearchForm, getSearchForm);
   const [history, setHistory] = useState<string[]>(loadHistory);
+  const [editing, setEditing] = useState(false);
   // 「在跑」也读仓库：组件卸载不代表后端那次全盘扫描停了
   const loading = form.running;
 
@@ -96,7 +96,9 @@ export function SearchTab({
     // 条件与结果必须同源：这份快照既用于本次搜索，也用于之后的「全部替换」。
     // 用表单实时值去替换，会在「搜完改词没重搜」时改写另一批文件。
     const opts = buildOptions(form);
-    // 新搜索一开始，上次替换留下的「结果已过期」提示就作废了
+    // 新搜索一开始，上次替换留下的「结果已过期」提示就作废了；
+    // 编辑预览里的行号也只对旧结果有效，跟着退出。
+    setEditing(false);
     update({ running: true, error: null, replaceOutcome: null });
     try {
       const outcome = await searchWorkspace(opts);
@@ -115,7 +117,7 @@ export function SearchTab({
 
   const open = (hit: SearchHit) => {
     if (!root) {
-      toast("尚未打开工作区：先在文件页选一个目录再搜", "warning");
+      toast("尚未打开工作区：先在代码页选一个目录再搜", "warning");
       return;
     }
     // 结果来自别的工作区：拿旧相对路径拼新 root 只会被白名单拒掉，报一串英文
@@ -143,7 +145,7 @@ export function SearchTab({
   const stale = form.outcomeRoot !== null && form.outcomeRoot !== root;
 
   return (
-    <DockRegion region="sidebar"><div className="wb-search-tool flex min-h-0 flex-1 flex-col bg-background">
+    <div className="wb-search-tool flex min-h-0 flex-1 flex-col bg-background">
       <SearchBar
         form={form}
         history={history}
@@ -153,7 +155,24 @@ export function SearchTab({
         onKeyDown={onSearchKey}
       />
       <ReplaceBar form={form} update={update} options={buildOptions(form)} onReSearch={() => void run()} stale={stale} />
-      <SearchResults form={form} update={update} loading={loading} onOpen={open} />
-    </div></DockRegion>
+      {editing && form.outcome && root ? (
+        <SearchEditPanel
+          hits={form.outcome.hits}
+          root={root}
+          onClose={(refresh) => {
+            setEditing(false);
+            if (refresh) void run();
+          }}
+        />
+      ) : (
+        <SearchResults
+          form={form}
+          update={update}
+          loading={loading}
+          onOpen={open}
+          onEdit={root && !stale && form.outcome ? () => setEditing(true) : undefined}
+        />
+      )}
+    </div>
   );
 }

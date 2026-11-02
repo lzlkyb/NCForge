@@ -140,7 +140,7 @@ export function WorkspaceSwitch({
           <p className="lnk-warn">
             有 {unsavedCount} 个文件还没保存：切换前会先逐个保存，
             <b>任何一个保存失败都会中止切换</b>
-            （冲突时不替你决定覆盖，去文件页处理完再切）。
+            （冲突时不替你决定覆盖，去代码页处理完再切）。
           </p>
         )}
       </ConfirmDialog>

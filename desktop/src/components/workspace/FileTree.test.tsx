@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileTree, type FileTreeHandle } from "./FileTree";
 import { setSession } from "../../lib/workspaceSession";
+import { setCompactPackages, setRevealOnOpen } from "../../lib/treeViewPrefs";
 import { ViewActivityContext } from "../../lib/viewActivity";
 import { clearBookmarks, loadBookmarks, toggleBookmark } from "../../lib/bookmarks";
 
@@ -34,6 +35,8 @@ const ROOT = "C:\\w\\newar";
 const MODULES = `${ROOT}\\modules`;
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+// jsdom 没实现滚动：自动定位会调它，给个空桩即可
+Element.prototype.scrollIntoView = () => {};
 
 let root: Root;
 let container: HTMLDivElement;
@@ -43,14 +46,14 @@ const onRenamed = vi.fn();
 const onDeleted = vi.fn();
 const treeRef = createRef<FileTreeHandle>();
 
-const render = async () => {
+const render = async (activePath: string | null = null) => {
   await act(async () =>
     root.render(
       <ViewActivityContext.Provider value={true}>
         <FileTree
           ref={treeRef}
           root={ROOT}
-          activePath={null}
+          activePath={activePath}
           onOpen={onOpen}
           onCreated={onCreated}
           onRenamed={onRenamed}
@@ -64,6 +67,12 @@ const render = async () => {
 
 const rowByName = (name: string) =>
   [...container.querySelectorAll(".wb-row")].find((el) => el.textContent?.includes(name)) ?? null;
+
+/** 按显示名精确匹配：`aier` 不该命中 `com.aier.erp`。 */
+const rowByExact = (name: string) =>
+  [...container.querySelectorAll(".wb-row")].find(
+    (el) => el.querySelector(".wb-row-name")?.textContent === name,
+  ) ?? null;
 
 const rightClick = async (el: Element) =>
   act(async () => {
@@ -97,6 +106,8 @@ const pressEnter = async (el: HTMLInputElement) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setCompactPackages(true);
+  setRevealOnOpen(true);
   // 预置一棵已展开的树，免得每次渲染都去 listDir
   setSession({
     tree: {
@@ -344,6 +355,100 @@ describe("文件树的右键操作", () => {
       name: "Top.java",
       kind: "file",
     });
+  });
+});
+
+describe("自动定位", () => {
+  const FILE = `${MODULES}\\A.java`;
+  const replyA = async (cmd: string) => {
+    if (cmd === "fs_list_dir") return [{ name: "A.java", isDir: false, size: 10 }];
+    if (cmd === "fs_encoding_marks") return [];
+    return [];
+  };
+  /** 定位有 120ms 防抖，等它落地。 */
+  const waitReveal = () =>
+    act(async () => {
+      await new Promise((r) => setTimeout(r, 160));
+    });
+
+  it("默认开：切到某个文件就展开父目录并显示那一行", async () => {
+    mocks.invoke.mockImplementation(replyA);
+    await render(FILE);
+    expect(rowByExact("A.java")).toBeNull();
+
+    await waitReveal();
+    expect(rowByExact("A.java")).toBeTruthy();
+    expect(mocks.invoke).toHaveBeenCalledWith("fs_list_dir", { path: MODULES });
+  });
+
+  it("关掉后打开文件不再动树；显式「在文件树中显示」仍然有效", async () => {
+    setRevealOnOpen(false);
+    mocks.invoke.mockImplementation(replyA);
+    await render(FILE);
+    await waitReveal();
+
+    expect(rowByExact("A.java")).toBeNull();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("fs_list_dir", { path: MODULES });
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("ncforge-reveal-in-tree", { detail: FILE }));
+    });
+    await waitReveal();
+    expect(rowByExact("A.java")).toBeTruthy();
+  });
+});
+
+describe("压缩中间包", () => {
+  const COM = `${ROOT}\\com`;
+  const AIER = `${COM}\\aier`;
+  const ERP = `${AIER}\\erp`;
+  const LISTING: Record<string, { name: string; isDir: boolean; size: number }[]> = {
+    [ROOT]: [{ name: "com", isDir: true, size: 0 }],
+    [COM]: [{ name: "aier", isDir: true, size: 0 }],
+    [AIER]: [{ name: "erp", isDir: true, size: 0 }],
+    [ERP]: [{ name: "Deep.java", isDir: false, size: 10 }],
+  };
+
+  const seedChain = () => {
+    setSession({
+      tree: {
+        root: ROOT,
+        expanded: new Set([ROOT]),
+        marks: {},
+        dirs: Object.fromEntries(
+          Object.entries(LISTING).map(([p, items]) => [p, { status: "ok" as const, items }]),
+        ),
+      },
+    });
+    // 展开时会刷新链尾那一层，回同一份列表
+    mocks.invoke.mockImplementation(async (cmd: string, args: { path?: string } = {}) => {
+      if (cmd === "fs_list_dir") return LISTING[args.path ?? ""] ?? [];
+      if (cmd === "fs_encoding_marks") return [];
+      return [];
+    });
+  };
+
+  it("单链合成一行，点一下把整条链展开到最里层", async () => {
+    seedChain();
+    await render();
+    expect(rowByExact("com.aier.erp")).toBeTruthy();
+    expect(rowByExact("aier")).toBeNull();
+
+    await click(rowByExact("com.aier.erp"));
+    expect(rowByExact("Deep.java")).toBeTruthy();
+  });
+
+  it("关掉开关后每层各占一行，点一次只展开这一层", async () => {
+    setCompactPackages(false);
+    seedChain();
+    await render();
+    expect(rowByExact("com.aier.erp")).toBeNull();
+    expect(rowByExact("com")).toBeTruthy();
+    expect(rowByExact("aier")).toBeNull();
+
+    await click(rowByExact("com"));
+    expect(rowByExact("aier")).toBeTruthy();
+    expect(rowByExact("erp")).toBeNull();
   });
 });
 

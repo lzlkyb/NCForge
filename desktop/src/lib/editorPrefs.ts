@@ -27,6 +27,8 @@ export interface EditorPrefs {
   /** 停止输入后自动保存。默认关：NC 代码常在调试中途保存，自动落盘会打断「改一半就编译」的节奏。 */
   autoSave: boolean;
   autoSaveDelayMs: number;
+  /** 保存（Ctrl+S / 自动保存）前先格式化 Java 文件。默认关：格式化会重排整份文件，不是所有人都想要。 */
+  formatOnSave: boolean;
 }
 
 export const DEFAULT_PREFS: EditorPrefs = {
@@ -40,6 +42,7 @@ export const DEFAULT_PREFS: EditorPrefs = {
   errorLens: true,
   autoSave: false,
   autoSaveDelayMs: 2000,
+  formatOnSave: false,
 };
 
 let cache: EditorPrefs = load();

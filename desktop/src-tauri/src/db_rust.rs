@@ -50,6 +50,23 @@ use crate::java_bridge::BridgeError;
 const CLOB_MAX: usize = 1024 * 1024;
 /// DBMS_OUTPUT 一次最多取这么多行。
 const OUTPUT_MAX: usize = 5000;
+/// `columnsZh` 一次最多认几张表（Oracle `in (...)` 的参数上限是 1000）。
+/// 调用方给的是「一条 SQL 里出现的表」，正常不会撞到；超了只是这一屏少几个中文名。
+/// 改这里要同步 Java 桥的 `Session.MAX_ZH_TABLES`。
+const MAX_ZH_TABLES: usize = 80;
+
+/// `columns_zh` 用的 SQL。抽成函数是为了让真库测试跑**同一条**语句
+/// （`tests/db_columns_zh_live.rs`）——另写一份「大概等价」的查询只能证明抄对了。
+pub fn columns_zh_sql(n: usize) -> String {
+    let ph = (1..=n.max(1))
+        .map(|i| format!(":{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "select lower(c.tableid), lower(c.name), c.displayname from md_column c \
+         where lower(c.tableid) in ({ph}) and c.displayname is not null"
+    )
+}
 
 /// 对象树里的非表对象类型（`user_objects.object_type` 的取值）。
 ///
@@ -308,6 +325,7 @@ impl Session {
             }
             "tables" => self.tables(),
             "ncNames" => self.nc_names(),
+            "columnsZh" => self.columns_zh(a.first().copied().unwrap_or("")),
             "columns" => self.columns(a.first().copied().unwrap_or("")),
             "indexes" => self.indexes(a.first().copied().unwrap_or("")),
             "ddl" => self.ddl(
@@ -667,6 +685,42 @@ impl Session {
                 let v: Option<String> = row.get(1).ok().flatten();
                 if let (Some(k), Some(v)) = (k, v) {
                     map.insert(k, json!(v));
+                }
+            }
+        }
+        let n = map.len();
+        Ok(json!({ "names": map, "count": n }))
+    }
+
+    /// 一批表的列中文名，键是 `表名|列名`（都小写）。
+    ///
+    /// 为什么按**表**查而不是按列名查：`name` / `id` / `code` 这类列名在几百张表里都有，
+    /// 按列名去重只能瞎挑一个 —— `code` 可能叫「编码」也可能叫「单据号」，
+    /// 张冠李戴比不显示更糟。调用方传的是 SQL 里出现的表，同名列由前端按
+    /// 「先出现的表优先」合并（主表在前）。
+    fn columns_zh(&self, tables: &str) -> Result<Value, BridgeError> {
+        let conn = self.conn_ref()?;
+        let names: Vec<String> = tables
+            .split(',')
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty())
+            .take(MAX_ZH_TABLES)
+            .collect();
+        let mut map = Map::new();
+        if names.is_empty() {
+            return Ok(json!({ "names": map, "count": 0 }));
+        }
+        let sql = columns_zh_sql(names.len());
+        let vals: Vec<&dyn ToDbValue> = names.iter().map(|s| s as &dyn ToDbValue).collect();
+        if let Ok(cur) = conn.query(&sql, &vals) {
+            for row in cur {
+                let Ok(row) = row else { continue };
+                let t: Option<String> = row.get(0).ok().flatten();
+                let c: Option<String> = row.get(1).ok().flatten();
+                let v: Option<String> = row.get(2).ok().flatten();
+                if let (Some(t), Some(c), Some(v)) = (t, c, v) {
+                    // md_column 同一列可能有多版本：先到的留下，与 `nc_column_names` 同口径
+                    map.entry(format!("{t}|{c}")).or_insert(json!(v));
                 }
             }
         }
@@ -1772,6 +1826,20 @@ mod tests {
         assert_eq!(v["logicalReads"], 32, "逻辑读 = 当前读 + 一致读");
         assert_eq!(v["physicalReads"], 0);
         assert_eq!(v["executeCount"], 1);
+    }
+
+    #[test]
+    fn 列中文名_sql_按表数给占位符() {
+        // 占位符个数与表数必须一致：错一个是「参数个数不对」的 ORA 报错，
+        // 而前端对这一路是静默失败的（表头退回显示类型），线上看不出来
+        let one = columns_zh_sql(1);
+        assert!(one.contains("in (:1)"), "{one}");
+        let three = columns_zh_sql(3);
+        assert!(three.contains("in (:1, :2, :3)"), "{three}");
+        // 0 张表也不该拼出 `in ()`（Oracle 语法错）
+        assert!(columns_zh_sql(0).contains("in (:1)"));
+        // 只读元数据：这条 SQL 不该被误写成 DML
+        assert!(three.trim_start().starts_with("select"));
     }
 
     #[test]

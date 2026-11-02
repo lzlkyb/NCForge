@@ -79,15 +79,17 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd desktop; npm r
 
 **ESLint**（`desktop/eslint.config.mjs`）：为 `react-hooks` 两条规则（`rules-of-hooks` / `exhaustive-deps`）而上——依赖数组不全导致的"闭包拿陈旧值" tsc 完全看不出来。壳子基线**零豁免**；若确需存量豁免，用 `eslint . --suppress-all` 生成 `eslint-suppressions.json`（棘轮，只许减少），修好后跑 `npm run lint:prune` 收紧。
 
-**Rust 后端规则**——提交前在 `desktop/src-tauri/` 跑这三条，保持零警告：
+**Rust 后端规则**——提交前跑这三条，保持零警告：
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets --no-default-features -- -D warnings
-cargo test --no-default-features     # 含 tests/update_flow.rs：本地假源无头跑通更新链路
+cd desktop/src-tauri && cargo fmt --check
+cd desktop && node scripts/rust-gate.mjs clippy --all-targets --no-default-features -- -D warnings
+cd desktop && node scripts/rust-gate.mjs test --no-default-features   # 含 tests/update_flow.rs：本地假源无头跑通更新链路
 ```
 
 `--no-default-features` 与 `--all-targets` 不是可选项。三项都已进 pre-push 钩子，不靠记性。
+
+🔴 **不要手敲裸 `cargo test` / `cargo clippy`**，走 `scripts/rust-gate.mjs`（`npm run gate:rust` 亦可）。它把 `TEMP`/`TMP` 指到 `desktop/src-tauri/target/test-tmp`（跑完清空）、把编译并发压到 3 路，并在跑完自检「有没有临时文件漏回 C 盘 / target 有没有涨破 6GB」。完整规则与实测数据见 **§8.3**。
 
 **Windows 测试二进制 0xc0000139 的根因与修复**（2026-10-27 定位，改 build.rs 前必读）：mock 应用集成测试会把 wry 运行时的原生对话框代码链进测试二进制，导入表含 `comctl32.dll!TaskDialogIndirect`（仅 comctl32 v6 有）。tauri-build 只给 **bin** 目标嵌 Common-Controls v6 manifest，测试目标拿不到 ⇒ 加载器给 comctl32 v5 ⇒ 进程启动即 STATUS_ENTRYPOINT_NOT_FOUND。`build.rs` 用 `embed_resource::compile_for_tests` 给测试目标补嵌了同款 manifest；且该指令**只作用于 `tests/` 集成测试目标**，不覆盖 `cargo test --lib`——所以构建 mock 应用的测试必须放 `tests/` 下，不能放 `#[cfg(test)] mod tests`。
 
@@ -112,15 +114,52 @@ cargo test --no-default-features     # 含 tests/update_flow.rs：本地假源�
 
 接过一个资源然后什么都不做的空实现，代价不在它自己那一行，而在别的文件里。空实现处**必须写注释说明调用方需要怎么处理**，并优先还回"同步返回值"而不是"默默吃掉资源"。
 
-### 8.3 在本机跑构建 / 测试必须限并发（硬性规则）
+### 8.3 本机构建 / 测试的资源红线（硬性规则）
 
-开发机 15.8GB 内存，2026-11-01 连续两次 `0x10E VIDEO_MEMORY_MANAGEMENT_INTERNAL` 蓝屏（10-31 另有三次）；显卡 TDR 先于蓝屏 3 分钟发生。高内存压力会放大 iGPU 共享显存上的这类故障，所以**跑重任务时不许把机器顶满**：
+开发机 15.8GB 内存，2026-11-01 连续两次 `0x10E VIDEO_MEMORY_MANAGEMENT_INTERNAL` 蓝屏（10-31 另有三次）；显卡 TDR 先于蓝屏 3 分钟发生。高内存压力会放大 iGPU 共享显存上的这类故障，所以**跑重任务时不许把机器顶满**。2026-11-02 又量到另一半代价：**跑一次测试会在 C 盘留 512MB 垃圾、内存顶到 99%**。下面五小节是规则，不是建议。
+
+#### 8.3.1 唯一入口：`desktop/scripts/rust-gate.mjs`（禁止裸跑 cargo）
+
+```bash
+cd desktop
+node scripts/rust-gate.mjs test  --no-default-features     # 等价 npm run gate:rust -- test ...
+node scripts/rust-gate.mjs clippy --all-targets --no-default-features -- -D warnings
+```
+
+- **不许**再手敲 `cargo test` / `cargo clippy`——在 `src-tauri/` 里也不行，pre-push 钩子里的这两步已经改成调它。
+- 它替你做三件裸 cargo 不做的事：`TEMP`/`TMP` → `src-tauri/target/test-tmp`（跑完清空）、`CARGO_BUILD_JOBS=3`、`CARGO_INCREMENTAL=0`；test 还自动补 `--test-threads=2`。
+- 跑完会自检并告警：**本轮有没有把临时文件写回 C 盘的 `%TEMP%`**、`target/debug` 有没有涨破 6GB。看到告警按 §8.3.4 修，别当噪音。
+
+#### 8.3.2 并发：按内存定，不按核数
 
 1. **同一时间只跑一个重任务**：`cargo test/build/clippy` 与 `vite` / Playwright 不并发；也不许同时开两个 cargo（争同一个 PDB 会报 `LNK1207`，删掉对应 `.pdb` 重跑）。
-2. **显式限并发**：`cargo test -j 2 -- --test-threads=2`，Playwright 保持 headless。
+2. **并发上限**：编译 **3 路**（`.cargo/config.toml` 的 `[build] jobs = 3`，wrapper 再用 `CARGO_BUILD_JOBS=3` 压一遍），测试 **2 线程**，Playwright 保持 headless。实测冷编最低可用内存：3 路 **3.0GB**、4 路 **2.0GB**——4 路已经贴线，别往上调。
 3. **开跑前看余量**：`powershell.exe -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize | Format-List"`；可用内存低于 **4GB** 先停，等后台任务收干净再跑。
 4. **后台任务完成即收**，不堆积；长任务用后台运行 + 完成通知，不要盲等或轮询。
 5. 用 `| tail` 看输出时，退出码是 `tail` 的——判定构建成败必须看输出里的 `error:` / `test result:`，或单独取 `PIPESTATUS[0]`。
+
+#### 8.3.3 磁盘：不许给依赖开全量 debuginfo
+
+- 现状（2026-11-02 定）：`[profile.dev/test] debug = "line-tables-only"` + `[profile.dev/test.package."*"] debug = false`。改前 `target/debug/deps` **14.24GB，其中 93 个 `.pdb` 占 9.46GB**；改后 `target/debug` 只有 **2.35GB**、`.pdb` 0.33GB。
+- **别为了「能单步进依赖」把 `package."*"` 长期改回 `true`**：那 9GB 不只是磁盘，它更是 link.exe 峰值内存的主要来源。真要钻依赖就临时改、调完改回来。
+- 新增依赖 / 测试目标后 `target/debug` 又涨过 6GB，先查 `.pdb` 占比，别直接 `cargo clean` 糊过去。
+
+#### 8.3.4 测试临时目录：不许落系统盘，不许造大文件
+
+- **根目录**：测试统一用 `std::env::temp_dir()`，wrapper 已把它指向 `src-tauri/target/test-tmp`（D 盘、随 `cargo clean` 消失、跑完清空）。**不要硬编码** `C:\...` 或 `%TEMP%` 路径。
+- 🔴 **禁止用 `set_len` / 大 `write` 造「超大文件」当测试数据**。NTFS 上 `SetEndOfFile` **真的分配**空间（不是稀疏文件）：`local_history` 曾用 `set_len(MAX_TOTAL_BYTES + 1)` 造"稀疏文件"，一次门禁往 C 盘写 **512MB** 且永不回收，累积成 1981 个目录 / 5.12GB。要测「文件比预算大」，把预算做成参数注入（参照 `local_history::capture_limited`）。
+- **测试创建的临时目录必须能回收**：优先 `TempDir`；手写 `join` 的用完要删。wrapper 的统清空只兜本轮，不救历史残留。
+- **新增涉及落盘 / 大对象的测试后**，本地跑一次门禁，确认输出里没有 `[gate] ⚠️` 开头的临时目录泄漏告警。
+- 清理历史残留**只删本工具自己的前缀**（`ncf-*` / `nc-forge*` / `ncforge-*`），不许对 `%TEMP%` 整体 `rm -rf`——那里还有系统和其他软件的文件。
+
+#### 8.3.5 怀疑反弹时的核对命令
+
+```bash
+# target/debug 体积（pdb 是大头，查它）
+powershell.exe -NoProfile -Command "$p='desktop\src-tauri\target\debug'; '{0:N2} GB' -f ((Get-ChildItem $p -Recurse -File | Measure-Object Length -Sum).Sum/1GB)"
+# C 盘残留目录数（健康值是 0~个位数）
+powershell.exe -NoProfile -Command "Get-ChildItem $env:TEMP -Directory | Where-Object Name -like 'nc*' | Measure-Object"
+```
 
 ## 9. 方案设计需考虑用户体验
 

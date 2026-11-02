@@ -8,6 +8,7 @@ import { toast } from "../ui/toast";
 import { failureText } from "../../lib/friendlyError";
 import { baseName } from "../../lib/workspace";
 import { DebugVariables } from "./DebugVariables";
+import { DebugWatch } from "./DebugWatch";
 import {
   attachDebugger,
   detachDebugger,
@@ -18,11 +19,15 @@ import {
   useDebugSnapshot,
 } from "../../lib/debugSession";
 import { debugKeyLabels } from "../../lib/debugKeys";
+import { clearAllBreakpoints, useBreakpoints } from "../../lib/breakpoints";
+import { useWorkspaceRoot } from "../../lib/workspaceSession";
 import "../../debug.css";
 
 export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number) => void }) {
   const snap = useDebugSnapshot();
   const keys = debugKeyLabels();
+  // 断点挂在行号槽上，这里只提供「一次清空」出口；按工作区分档，与 gutter 同一份存储。
+  const breakpoints = useBreakpoints(useWorkspaceRoot() ?? "");
   const attached = snap.status.state === "attached";
   const frame = snap.frames.find((f) => f.id === snap.frameId) ?? null;
   const threadName = snap.threads.find((t) => t.id === snap.threadId)?.name ?? (snap.threadId ? `线程 ${snap.threadId}` : "");
@@ -111,6 +116,20 @@ export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number
           <Icon name="pause" size={12} />
           暂停
         </button>
+        <button
+          type="button"
+          className="dbg-btn"
+          disabled={breakpoints.length === 0}
+          title="清空当前工作区的全部断点（之后可在行号槽重新点）"
+          onClick={() => {
+            const n = breakpoints.length;
+            clearAllBreakpoints();
+            toast(`已清除 ${n} 个断点`, "success");
+          }}
+        >
+          <Icon name="trash" size={12} />
+          清断点{breakpoints.length > 0 ? `（${breakpoints.length}）` : ""}
+        </button>
         <span className="dbg-sp" />
         <span className="dbg-where" title={where}>
           {where}
@@ -175,6 +194,8 @@ export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number
             </div>
           </div>
           <div className="dbg-col">
+            <div className="dbg-col-h">监视</div>
+            <DebugWatch paused={snap.paused} watches={snap.watches} />
             <div className="dbg-col-h">变量{frame ? <span>· {frame.name}</span> : null}</div>
             <div className="dbg-list">
               <DebugVariables paused={snap.paused} scopes={snap.scopes} variables={snap.variables} />

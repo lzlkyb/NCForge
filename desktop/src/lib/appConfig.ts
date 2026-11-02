@@ -28,6 +28,8 @@ export interface AppConfig {
    * 只放设置页自己拥有的单值字段，整表进来的话一次误传就把用户手写的覆盖清空了。
    */
   linked_overrides: LinkedOverride[];
+  /** 编译/启动前自动把工程 `META-INF` 元数据投送到 NCHOME（默认开）。 */
+  deploy_on_start: boolean;
 }
 
 /** 代码智能设置的局部更新。`lang_xmx_mb: 0` = 恢复默认；越界（512~4096 之外）后端会明确报错。 */
@@ -51,6 +53,7 @@ export const langRegenerate = () => invoke<unknown>("lang_regenerate");
  */
 export interface ConfigPatch {
   autostart_enabled?: boolean;
+  deploy_on_start?: boolean;
 }
 
 export const getConfig = () => invoke<AppConfig>("get_config");

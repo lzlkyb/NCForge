@@ -129,7 +129,7 @@ public class NcDbBridge {
     /** 已知命令名：用来区分「新格式的第二段是会话名」还是「旧格式的第二段就是命令」。 */
     private static final Set<String> CMDS = new HashSet<String>(Arrays.asList(
             "hello", "propList", "propCred", "connect", "connectProp", "exec", "more", "commit",
-            "rollback", "autocommit", "tables", "ncNames", "columns", "indexes", "ddl",
+            "rollback", "autocommit", "tables", "ncNames", "query", "columns", "indexes", "ddl",
             "explain", "sessions", "objects", "source", "schema", "ping", "disconnect", "quit",
             "cancel"));
 
@@ -389,6 +389,8 @@ public class NcDbBridge {
                 ok(id, tables());
             } else if ("ncNames".equals(cmd)) {
                 ok(id, ncNames());
+            } else if ("query".equals(cmd)) {
+                ok(id, query(a.get(0), intArg(a, 1, 1000)));
             } else if ("columns".equals(cmd)) {
                 ok(id, columns(a.get(0)));
             } else if ("indexes".equals(cmd)) {
@@ -1093,6 +1095,39 @@ public class NcDbBridge {
                 st.close();
             }
             return "{\"names\":" + sb.append('}') + ",\"count\":" + n + "}";
+        }
+
+        /**
+         * 只读查询：用**自己的** Statement/ResultSet，取完立刻关。
+         *
+         * 两条硬约束：
+         * ① 绝不碰 `cursor` / `cursorStmt`（那是 `exec` 的「加载更多」槽）——
+         *    借来查一句元数据会把用户结果集的游标顶掉，表现为「跑完之后加载更多没了」；
+         * ② 不改事务状态（不 commit / 不 rollback / 不碰 autocommit）。
+         *
+         * 返回形状与 `exec` 的 rows 一致，让 Rust 侧用同一套解析。**不在这里拼业务 JSON**：
+         * 2026-11-02 的 `columnsZh` 就是因为手拼多包了一层 `names`，整行 JSON 不合法 ⇒
+         * Rust 当「非协议输出」丢弃 ⇒ 命令干等 60 秒超时 ⇒ 前端静默，界面像功能没做。
+         */
+        private String query(String sql, int maxRows) throws SQLException {
+            requireConn();
+            Statement st = conn.createStatement();
+            try {
+                st.setQueryTimeout(30);
+                ResultSet rs = st.executeQuery(sql);
+                try {
+                    ResultSetMetaData md = rs.getMetaData();
+                    int n = md.getColumnCount();
+                    String cols = columnsJson(md);
+                    Page p = pageOf(rs, n, maxRows);
+                    return "{\"columns\":" + cols + ",\"rows\":" + p.rows
+                            + ",\"rowCount\":" + p.count + ",\"hasMore\":" + p.hasMore + "}";
+                } finally {
+                    rs.close();
+                }
+            } finally {
+                st.close();
+            }
         }
 
         private String columns(String table) throws SQLException {

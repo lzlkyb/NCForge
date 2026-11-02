@@ -16,7 +16,7 @@ interface DialogProps {
 }
 
 /**
- * 通用弹窗外壳。圆角/内距/标题字号与 ConfirmModal / ConfirmDialog 统一
+ * 通用弹窗外壳。圆角/内距/标题字号与 ConfirmDialog 统一
  * （P2-5：曾经三套外壳——rounded-lg+p-6+text-lg / rounded-xl+p-5 /
  * rounded-xl+p-5+text-base——与 --r-card token 脱节，且 z-index 50 与 Modal
  * 默认 1000 两套阶梯，嵌在弹窗里的确认框会被父弹窗遮罩盖住）。

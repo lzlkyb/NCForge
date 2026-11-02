@@ -44,6 +44,20 @@ describe("splitStatements", () => {
     expect(splitStatements("select a / b from t")).toHaveLength(1);
     expect(splitStatements("select a\n / b from t")).toHaveLength(1);
   });
+
+  it("q 引号里的分号与单引号不算结束", () => {
+    const text = "insert into t values (q'[it's a; test]', 2);\nselect 1 from dual;";
+    const s = splitStatements(text);
+    expect(s).toHaveLength(2);
+    expect(s[0].text).toBe("insert into t values (q'[it's a; test]', 2)");
+    expect(s[1].text).toBe("select 1 from dual");
+  });
+
+  it("nq 引号与自定义定界符", () => {
+    const s = splitStatements("select nq'{a'b; c}' from dual;\nselect 2 from dual;");
+    expect(s).toHaveLength(2);
+    expect(s[0].text).toBe("select nq'{a'b; c}' from dual");
+  });
 });
 
 describe("statementAt", () => {

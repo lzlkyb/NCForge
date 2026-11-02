@@ -9,6 +9,7 @@
     "test": "vitest run",
     "motion:check": "node --test scripts/check-motion.mjs",
     "test:scripts": "node --test scripts/lib/zip-store.test.mjs",
+    "gate:rust": "node scripts/rust-gate.mjs",
     "tauri": "tauri",
     "predev": "node scripts/sync-version.mjs && node scripts/gen-changelog.mjs",
     "dev": "tauri dev",

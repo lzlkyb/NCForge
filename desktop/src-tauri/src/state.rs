@@ -14,6 +14,14 @@ use tokio::sync::RwLock;
 use crate::config::AppConfig;
 use crate::server::ServerRun;
 
+/// 一次「全库按值反查」的取消登记：标志位 + 它正在用的临时会话。
+///
+/// 带句柄是为了取消能立刻生效（见 `AppState::search_cancels`）。
+pub struct ValueSearchJob {
+    pub cancel: Arc<std::sync::atomic::AtomicBool>,
+    pub engine: Arc<crate::db_engine::EngineHandle>,
+}
+
 pub struct AppState {
     /// 应用配置（跨重启持久化，见 config.rs）。
     pub config: RwLock<AppConfig>,
@@ -68,6 +76,12 @@ pub struct AppState {
     /// 取消后保留已经写入的部分文件（合法前缀）。
     pub export_cancels:
         std::sync::Mutex<std::collections::HashMap<u64, Arc<std::sync::atomic::AtomicBool>>>,
+    /// 全库按值反查：按搜索实例登记「取消标志 + 它正在用的临时会话」。
+    ///
+    /// 为什么带上引擎句柄：一批表扫下来，单张表的全表扫描可能要几十秒到几分钟。
+    /// 只置标志位然后等「两张表之间」检查，等于用户点了取消还要干等当前这张表跑完；
+    /// 带句柄才能在取消时真的把正在跑的那条查询打断（与 `db_cancel` 同一条路）。
+    pub search_cancels: std::sync::Mutex<std::collections::HashMap<u64, ValueSearchJob>>,
     /// 补丁出包的取消标志（`patch_build_cancel` 置位，`write_package` 每写一项检查一次）。
     ///
     /// 同一时刻只允许一个出包（界面只有一个按钮、重复点击被 `building` 挡住），
@@ -111,6 +125,7 @@ impl AppState {
             debug: std::sync::Mutex::new(Default::default()),
             compile_cancel: std::sync::atomic::AtomicBool::new(false),
             export_cancels: std::sync::Mutex::new(Default::default()),
+            search_cancels: std::sync::Mutex::new(Default::default()),
             patch_cancel: std::sync::atomic::AtomicBool::new(false),
             watcher: std::sync::Mutex::new(None),
             quit_approved: std::sync::atomic::AtomicBool::new(false),

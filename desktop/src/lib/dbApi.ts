@@ -406,6 +406,59 @@ export interface ExportProgress {
   rows: number;
 }
 
+/** 全库按值反查的请求。`mode`：0 包含 / 1 等于 / 2 前缀 / 3 后缀。 */
+export interface ValueSearchReq {
+  id: string;
+  /** 要找的文本（≤200 字符；`%` `_` 按字面量，不是通配符）。 */
+  text: string;
+  mode: 0 | 1 | 2 | 3;
+  /** 只看表名包含这段文字的表（不区分大小写）。 */
+  tableFilter?: string | null;
+  /** 命中（表 + 列）上限，后端再夹到 1..5000。 */
+  maxHits?: number;
+  timeoutSec?: number;
+  /** 搜索实例号：进度事件与取消都按它定位。 */
+  searchId?: number;
+}
+
+/** 一条命中：哪张表的哪一列，命中的样本值，以及可直接复制去跑的 SQL。 */
+export interface ValueHit {
+  table: string;
+  column: string;
+  sample: string;
+  sql: string;
+}
+
+export interface ValueSearchOut {
+  hits: ValueHit[];
+  /** 实际参与搜索的表数（已按表名筛选）。 */
+  tablesTotal: number;
+  tablesScanned: number;
+  /** 名字不安全或类型不可搜索而被跳过的表 / 列。 */
+  skippedTables: number;
+  skippedColumns: number;
+  /** 到命中上限，后面的表没再看。 */
+  truncated: boolean;
+  canceled: boolean;
+  /** 单表失败（权限 / 坏对象 / 超时），不中断整批。 */
+  errors: string[];
+  /** 没能开独立会话、复用了控制台会话（控制台的「加载更多」会失效）。 */
+  sharedSession: boolean;
+  ms: number;
+}
+
+/** 搜索进度事件（`db:value-search-progress`），每扫完一张表一次。 */
+export interface ValueSearchProgress {
+  id: string;
+  searchId: number;
+  phase: "catalog" | "table" | "done";
+  done: number;
+  total: number;
+  table: string | null;
+  hits: number;
+  errors: number;
+}
+
 /** `db_slot_acquire` 的结果：本标签要用的独立会话槽名（数字字符串）。 */
 export interface SlotOut {
   slot: string;
@@ -453,6 +506,14 @@ export const dbApi = {
   revealExport: (path: string) => invoke<void>("db_export_reveal", { path }),
 
   /**
+   * 全库按值反查（只读）：在一段文本里找所有表的所有文本列。
+   * 后端每表发一条查询，进度走 `db:value-search-progress`。
+   */
+  valueSearch: (req: ValueSearchReq) => invoke<ValueSearchOut>("db_value_search", { req }),
+  /** 取消一次按值反查（按 `searchId`）：会打断正在跑的那条查询，不等它超时。 */
+  cancelValueSearch: (id: number) => invoke<void>("db_value_search_cancel", { id }),
+
+  /**
    * 导入一批行（B3）。**每次调用自成事务**：全成功才 `commit`，有错且 `skipErrors=false`
    * 就整批回滚。走独立会话，不会把用户自己未提交的改动一起提交。
    */
@@ -473,6 +534,18 @@ export const dbApi = {
 
   tables: (id: string) => invoke<{ tables: TableInfo[] }>("db_meta", { id, kind: "tables" }),
   ncNames: (id: string) => invoke<{ names: Record<string, string> }>("db_meta", { id, kind: "ncNames" }),
+  /**
+   * 一批表的**列**中文名，键是 `表名|列名`（都小写）。
+   *
+   * 只按表取、不按列名取：`code` / `name` / `id` 这种列名几乎每张表都有，
+   * 按列名去重只能随便挑一个，中文名会张冠李戴。不是 NC 库返回空对象（不报错）。
+   */
+  columnNamesZh: (id: string, tables: string[]) =>
+    invoke<{ names: Record<string, string> }>("db_meta", {
+      id,
+      kind: "columnsZh",
+      arg: tables.join(","),
+    }),
   columns: (id: string, table: string) =>
     invoke<{ columns: ColumnInfo[] }>("db_meta", { id, kind: "columns", arg: table }),
   indexes: (id: string, table: string) =>

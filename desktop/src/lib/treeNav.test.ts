@@ -46,6 +46,33 @@ describe("flattenTree", () => {
   });
 });
 
+// root/com/aier/erp/ 是一路单链，erp 下面才有文件
+const COM = j(ROOT, "com");
+const AIER = j(COM, "aier");
+const ERP = j(AIER, "erp");
+const chainDirs: Record<string, TreeDirState> = {
+  [ROOT]: dir(["com"], ["com"]),
+  [COM]: dir(["aier"], ["aier"]),
+  [AIER]: dir(["erp"], ["erp"]),
+  [ERP]: dir(["Deep.java"]),
+};
+
+describe("flattenTree 的压缩中间包", () => {
+  it("单链只占一行，路径指向链尾，显示名用点连起来", () => {
+    const flat = flattenTree(chainDirs, new Set([ROOT]), ROOT);
+    expect(flat).toHaveLength(1);
+    expect(flat[0]).toMatchObject({ path: ERP, isDir: true, label: "com.aier.erp", parent: null });
+  });
+
+  it("关掉压缩后每层各占一行，父子关系按真实目录", () => {
+    const flat = flattenTree(chainDirs, new Set([ROOT, COM]), ROOT, { compact: false });
+    expect(flat.map((r) => [r.path, r.parent, r.label])).toEqual([
+      [COM, null, "com"],
+      [AIER, COM, "aier"],
+    ]);
+  });
+});
+
 describe("treeKeyAction", () => {
   const flat = flattenTree(dirs, expanded, ROOT);
   const at = (path: string) => flat.find((r) => r.path === path)!;

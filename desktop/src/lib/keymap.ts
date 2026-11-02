@@ -1,3 +1,5 @@
+import { getBindingOverride } from "./keybindings";
+
 export type Keymap = "eclipse" | "idea";
 const KEY = "ncforge-keymap";
 
@@ -11,9 +13,15 @@ const KEY = "ncforge-keymap";
 export const WORKSPACE_SEARCH_CHAR = "K";
 export const WORKSPACE_SEARCH_KEY = `Ctrl+${WORKSPACE_SEARCH_CHAR}`;
 
-/** 设置页展示用：固定入口 + 当前方案的等价键。 */
+/** 设置页展示用：固定入口 + 当前方案的等价键（改过自定义键位时显示改后的）。 */
 export function workspaceSearchLabel(keymap: Keymap): string {
-  return keymap === "eclipse" ? `${WORKSPACE_SEARCH_KEY} / Ctrl+H` : `${WORKSPACE_SEARCH_KEY} / Ctrl+Shift+F`;
+  const custom = getBindingOverride("search.workspace");
+  const scheme = custom
+    ? prettyChord(custom)
+    : keymap === "eclipse"
+      ? "Ctrl+H"
+      : "Ctrl+Shift+F";
+  return `${WORKSPACE_SEARCH_KEY} / ${scheme}`;
 }
 
 export function getKeymap(): Keymap {
@@ -28,14 +36,26 @@ export function setKeymap(value: Keymap): void {
 
 /** Only claim shortcuts whose operations actually exist in the workbench. */
 export function isWorkspaceSearch(event: Pick<KeyboardEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "key" | "isComposing">, keymap: Keymap): boolean {
-  if (!event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return false;
+  if (event.metaKey || event.isComposing) return false;
+  const custom = getBindingOverride("search.workspace");
+  if (custom) return eventChord(event) === custom;
+  if (!event.ctrlKey || event.altKey) return false;
   const key = event.key.toLowerCase();
   return keymap === "eclipse" ? !event.shiftKey && key === "h" : event.shiftKey && key === "f";
 }
 
+/** 与按键判定同一口径的绑定串（`ctrl+shift+f`）。 */
+function eventChord(event: Pick<KeyboardEvent, "ctrlKey" | "altKey" | "shiftKey" | "key">): string {
+  const k = event.key === " " ? "space" : event.key.toLowerCase();
+  return `${event.ctrlKey ? "ctrl+" : ""}${event.altKey ? "alt+" : ""}${event.shiftKey ? "shift+" : ""}${k}`;
+}
+
 /** 类型层级入口键：IDEA 是 Ctrl+H，Eclipse 是 Ctrl+T（那边的 Ctrl+H 留给全工程搜索）。 */
 export function isTypeHierarchyKey(event: Pick<KeyboardEvent, "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "key" | "isComposing">, keymap: Keymap): boolean {
-  if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.isComposing) return false;
+  if (event.metaKey || event.isComposing) return false;
+  const custom = getBindingOverride("hierarchy.type");
+  if (custom) return eventChord(event) === custom;
+  if (!event.ctrlKey || event.altKey || event.shiftKey) return false;
   const key = event.key.toLowerCase();
   return keymap === "idea" ? key === "h" : key === "t";
 }
@@ -52,10 +72,15 @@ export const EDITOR_KEYS = [
 ] as const;
 
 export function editorCommand(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "shiftKey" | "altKey" | "metaKey" | "isComposing">, keymap: Keymap): string | undefined {
-  if (event.isComposing || event.altKey || event.metaKey) return;
-  const key = event.key === " " ? "Space" : event.key;
-  const chord = `${event.ctrlKey ? "Ctrl+" : ""}${event.shiftKey ? "Shift+" : ""}${key}`.toLowerCase();
-  return EDITOR_KEYS.find(row => row[keymap].toLowerCase() === chord)?.action;
+  if (event.isComposing || event.metaKey) return;
+  const key = event.key === " " ? "space" : event.key.toLowerCase();
+  const chord = `${event.ctrlKey ? "ctrl+" : ""}${event.altKey ? "alt+" : ""}${event.shiftKey ? "shift+" : ""}${key}`;
+  // 改过键位的动作只认新键：旧默认键必须让出来，否则一处动作能从一个没显示在设置里的键触发
+  for (const row of EDITOR_KEYS) {
+    const custom = getBindingOverride(`editor.${row.action}`);
+    if (custom ? custom === chord : row[keymap].toLowerCase() === chord) return row.action;
+  }
+  return undefined;
 }
 
 /** 快速导航浮层的五种模式：转到文件 / 类型 / 当前文件符号 / 工作区符号 / 命令。 */
@@ -87,6 +112,12 @@ export const PALETTE_MODES: { mode: PaletteMode; label: string }[] = [
   { mode: "cmd", label: "命令" },
 ];
 
+/** 改过键位就只认改后的那一个（默认的多个等价键一起让出）。 */
+function paletteChords(mode: PaletteMode, keymap: Keymap): string[] {
+  const custom = getBindingOverride(`palette.${mode}`);
+  return custom ? [custom] : PALETTE_KEYS[mode][keymap];
+}
+
 type KeyLike = Pick<KeyboardEvent, "key" | "ctrlKey" | "shiftKey" | "altKey" | "metaKey" | "isComposing">;
 
 /** 这次按键是不是某个浮层模式的入口键；不是返回 null。 */
@@ -95,13 +126,13 @@ export function paletteModeOf(event: KeyLike, keymap: Keymap): PaletteMode | nul
   if (event.isComposing || event.metaKey || !event.ctrlKey) return null;
   const chord = `ctrl+${event.altKey ? "alt+" : ""}${event.shiftKey ? "shift+" : ""}${event.key.toLowerCase()}`;
   for (const mode of Object.keys(PALETTE_KEYS) as PaletteMode[]) {
-    if (PALETTE_KEYS[mode][keymap].includes(chord)) return mode;
+    if (paletteChords(mode, keymap).includes(chord)) return mode;
   }
   return null;
 }
 
 /** 展示用：`ctrl+shift+r` → `Ctrl+Shift+R`。 */
-function prettyChord(chord: string): string {
+export function prettyChord(chord: string): string {
   return chord
     .split("+")
     .map((p) => (p.length <= 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1)))
@@ -110,17 +141,94 @@ function prettyChord(chord: string): string {
 
 /** 首选键，给浮层按钮、标题栏输入框的提示用。 */
 export function paletteKeyLabel(mode: PaletteMode, keymap: Keymap): string {
-  return prettyChord(PALETTE_KEYS[mode][keymap][0]);
+  return prettyChord(paletteChords(mode, keymap)[0]);
 }
 
 /** 该模式在当前方案下的全部键（设置页的说明表用）。 */
 export function paletteKeysLabel(mode: PaletteMode, keymap: Keymap): string {
-  return PALETTE_KEYS[mode][keymap].map(prettyChord).join(" / ");
+  return paletteChords(mode, keymap).map(prettyChord).join(" / ");
 }
 
 /** 布局类快捷键（两套方案一致）：切侧栏 / 切底部面板。 */
 export function layoutKeyOf(event: KeyLike): "side" | "panel" | null {
-  if (event.isComposing || event.altKey || event.metaKey || event.shiftKey || !event.ctrlKey) return null;
+  if (event.isComposing || event.metaKey) return null;
+  const chord = eventChord(event);
+  const side = getBindingOverride("layout.side");
+  const panel = getBindingOverride("layout.panel");
+  if (side && chord === side) return "side";
+  if (panel && chord === panel) return "panel";
+  if (!event.ctrlKey || event.altKey || event.shiftKey) return null;
   const k = event.key.toLowerCase();
-  return k === "b" ? "side" : k === "j" ? "panel" : null;
+  if (!side && k === "b") return "side";
+  if (!panel && k === "j") return "panel";
+  return null;
+}
+
+/**
+ * 重新打开关闭的标签。
+ *
+ * Ctrl+Shift+T 在 IDEA / VS Code 是「恢复关闭的标签」，但在 Eclipse 是「打开类型」——
+ * 两套方案不能共用。Eclipse 方案把恢复挪到 Ctrl+Alt+T，把 Ctrl+Shift+T 还给转到类型；
+ * 用户也可以在设置里改。
+ */
+export function isReopenTabKey(event: KeyLike, keymap: Keymap): boolean {
+  if (event.metaKey || event.isComposing || !event.ctrlKey) return false;
+  const chord = getBindingOverride("tab.reopen") ?? (keymap === "eclipse" ? "ctrl+alt+t" : "ctrl+shift+t");
+  return eventChord(event) === chord;
+}
+
+export function reopenTabKeyLabel(keymap: Keymap): string {
+  return prettyChord(getBindingOverride("tab.reopen") ?? (keymap === "eclipse" ? "ctrl+alt+t" : "ctrl+shift+t"));
+}
+
+/* ─── 设置页的键位总表（默认值 + 用户覆盖） ─── */
+
+export type BindingGroup = "快速导航" | "窗口" | "搜索与层级" | "编辑器";
+
+export interface BindingRow {
+  id: string;
+  label: string;
+  group: BindingGroup;
+  /** 生效中的全部组合键（小写、`ctrl+shift+r` 形式）。 */
+  keys: string[];
+  /** 展示串；空数组表示该方案下这个动作没有默认键（可用自定义键补上）。 */
+  display: string[];
+  /** 用户改过（可恢复默认）。 */
+  overridden: boolean;
+}
+
+/**
+ * 键位总表：设置页展示与冲突判定共用同一份数据。
+ * 搜索那行保留固定的 Ctrl+K（它是顶栏入口，不参与自定义），所以自定义方案键后仍显示两个。
+ */
+export function bindingRows(keymap: Keymap): BindingRow[] {
+  const rows: BindingRow[] = [];
+  const add = (id: string, label: string, group: BindingGroup, defaults: string[]) => {
+    const custom = getBindingOverride(id);
+    const keys = custom ? [custom] : defaults;
+    rows.push({ id, label, group, keys, display: keys.map(prettyChord), overridden: !!custom });
+  };
+  for (const { mode, label } of PALETTE_MODES) {
+    add(`palette.${mode}`, `转到${label}`, "快速导航", PALETTE_KEYS[mode][keymap]);
+  }
+  add("layout.side", "切换侧栏", "窗口", ["ctrl+b"]);
+  add("layout.panel", "切换底部面板", "窗口", ["ctrl+j"]);
+  add("tab.reopen", "重新打开关闭的标签", "窗口", [keymap === "eclipse" ? "ctrl+alt+t" : "ctrl+shift+t"]);
+  const searchCustom = getBindingOverride("search.workspace");
+  const searchScheme = keymap === "eclipse" ? "ctrl+h" : "ctrl+shift+f";
+  // Ctrl+K 永远有效，所以即使改了方案键，冲突表里也要把它算作占用
+  rows.push({
+    id: "search.workspace",
+    label: "全工程搜索",
+    group: "搜索与层级",
+    keys: [...(searchCustom ? [searchCustom] : [searchScheme]), "ctrl+k"],
+    display: [searchCustom ? prettyChord(searchCustom) : prettyChord(searchScheme), prettyChord("ctrl+k")],
+    overridden: !!searchCustom,
+  });
+  add("hierarchy.type", "类型层级", "搜索与层级", [keymap === "idea" ? "ctrl+h" : "ctrl+t"]);
+  for (const row of EDITOR_KEYS) {
+    const def = row[keymap] === "—" ? [] : [row[keymap].toLowerCase()];
+    add(`editor.${row.action}`, row.label, "编辑器", def);
+  }
+  return rows;
 }

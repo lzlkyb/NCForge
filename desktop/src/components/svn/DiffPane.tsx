@@ -200,7 +200,7 @@ export function DiffPane({
         <span className="vc-hint">
           {data.editable
             ? "差异面板只读，要改内容点「在文件中打开」"
-            : "这个文件是混合换行或含无法无损往返的字符，只能在文件页只读查看"}
+            : "这个文件是混合换行或含无法无损往返的字符，只能在代码页只读查看"}
         </span>
         <span className="vc-hint">
           <kbd>Alt</kbd>+<kbd>↓</kbd> 标记已审并下一个

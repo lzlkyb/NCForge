@@ -8,6 +8,8 @@ import { HistoryDrawer } from "./HistoryDrawer";
 import { SnippetDrawer } from "./SnippetDrawer";
 import { SessionDrawer } from "./SessionDrawer";
 import { InsertExportDialog } from "./InsertExportDialog";
+import { ValueSearchDialog } from "./ValueSearchDialog";
+import { ScriptReplayDialog } from "./ScriptReplayDialog";
 import { explain, runStatements } from "../../lib/dbActions";
 import { dbApi } from "../../lib/dbApi";
 import { friendlyDbError } from "../../lib/db";
@@ -29,6 +31,10 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   const sessOpen = db.sessionPanel?.connId === tab.connId && tab.connId != null;
   /** 导出对话框：光标处那条语句 + 猜出来的表名。 */
   const [exp, setExp] = useState<{ sql: string; table: string } | null>(null);
+  /** 全库按值反查（连接级工具，从工具条开）。 */
+  const [vsOpen, setVsOpen] = useState(false);
+  /** 回放 .sql 文件（按名字取文件，不进编辑器）。 */
+  const [srOpen, setSrOpen] = useState(false);
   const tabId = tab.id;
 
   const run = useCallback(
@@ -38,8 +44,8 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         toast(mode === "script" ? "编辑器里没有可执行的语句" : "光标处没有语句", "info");
         return;
       }
-      const failLine = await runStatements(tabId, stmts);
-      if (failLine) api.current?.reveal(failLine);
+      const outcome = await runStatements(tabId, stmts);
+      if (outcome.failLine) api.current?.reveal(outcome.failLine);
     },
     [tabId],
   );
@@ -111,6 +117,8 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         onExplain={onExplain}
         onFormat={() => api.current?.format()}
         onExport={onExport}
+        onValueSearch={() => setVsOpen(true)}
+        onScriptReplay={() => setSrOpen(true)}
         historyOpen={side === "history"}
         onHistory={() => setSide(side === "history" ? null : "history")}
         snipsOpen={side === "snips"}
@@ -125,6 +133,12 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
           sql={exp.sql}
           onClose={() => setExp(null)}
         />
+      )}
+      {vsOpen && tab.connId && (
+        <ValueSearchDialog connId={tab.connId} onClose={() => setVsOpen(false)} />
+      )}
+      {srOpen && tab.connId && (
+        <ScriptReplayDialog tab={tab} onClose={() => setSrOpen(false)} />
       )}
       <TxBar connId={tab.connId} tabId={tab.id} slot={tab.slot} tx={tab.slot ? tab.tx : undefined} />
       <div className="dbx-console-body">

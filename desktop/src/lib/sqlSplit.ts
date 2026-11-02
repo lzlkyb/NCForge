@@ -80,6 +80,34 @@ function isSlashLine(text: string, i: number): number | null {
   return text.slice(i + 1, lineEnd).trim() === "" ? lineEnd : null;
 }
 
+const WORD_CHAR = /[A-Za-z0-9_$#]/;
+
+/**
+ * `'` 前面是不是 q 引号的开头（`q'…'` / `nq'…'`）。
+ *
+ * 只认「q 是独立词」：标识符里末尾的 q（`seq'…'`）不是 q 引号。
+ * 为什么必须单独处理：q 引号的内容里允许出现 `'` 和 `;`
+ * （`q'[it's fine; really]'`），按普通字符串扫会在 `it's` 的引号处提前结束，
+ * 后面的分号就被当成语句结束了。
+ */
+function isQQuoteStart(text: string, i: number): boolean {
+  const q = text[i - 1];
+  if (q !== "q" && q !== "Q") return false;
+  let p = i - 2;
+  if (p >= 0 && (text[p] === "n" || text[p] === "N")) p -= 1;
+  return p < 0 || !WORD_CHAR.test(text[p]);
+}
+
+/** q 引号的结束位置（开引号 `'` 的下标为 `i`）；找不到返回 null。 */
+function qQuoteEnd(text: string, i: number): number | null {
+  const open = text[i + 1];
+  if (open === undefined) return null;
+  const pairs: Record<string, string> = { "[": "]", "{": "}", "(": ")", "<": ">" };
+  const close = pairs[open] ?? open;
+  const at = text.indexOf(`${close}'`, i + 2);
+  return at < 0 ? null : at + 2;
+}
+
 export function splitStatements(text: string): Stmt[] {
   const out: Stmt[] = [];
   const n = text.length;
@@ -131,6 +159,10 @@ export function splitStatements(text: string): Stmt[] {
     }
     if (plsql === null && !/\s/.test(c)) {
       plsql = isPlsql(text.slice(start, Math.min(n, i + 120)));
+    }
+    if (c === "'" && isQQuoteStart(text, i)) {
+      i = qQuoteEnd(text, i) ?? n;
+      continue;
     }
     if (c === "'" || c === '"') {
       let j = i + 1;

@@ -20,7 +20,13 @@ vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
 vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
 
 import { LogTab } from "./LogTab";
-import type { LogEntry, QueryResult, SourceInfo, TraceResult } from "../../lib/ncLog";
+import type {
+  LogEntry,
+  QueryResult,
+  SearchResult,
+  SourceInfo,
+  TraceResult,
+} from "../../lib/ncLog";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -115,6 +121,24 @@ const TRACE: TraceResult = {
   ],
 };
 
+/** 检索命中的记录：归因可以没有（按原文找的就是规则还没覆盖的那些）。 */
+const HIT: SearchResult["entries"][number] = {
+  ...ORA,
+  msg: "select 1 from dual",
+  verdict: null,
+  matchLine: "thread=http-bio-80-exec-7",
+  matchCount: 1,
+};
+
+const SEARCH: SearchResult = {
+  entries: [HIT],
+  scannedFiles: ["nc-log.log"],
+  recordsScanned: 640,
+  truncatedFiles: 0,
+  stoppedEarly: false,
+  elapsedMs: 12,
+};
+
 let root: Root;
 let container: HTMLDivElement;
 
@@ -146,12 +170,23 @@ const buttonByText = (text: string) =>
 
 const rows = () => [...container.querySelectorAll<HTMLButtonElement>(".lg-row")];
 
+/** 往检索框里打字（React 只认原生 setter + input 事件）。 */
+const typeQuery = async (text: string) => {
+  const el = container.querySelector<HTMLInputElement>(".lg-search-inp")!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  await act(async () => {
+    setter?.call(el, text);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+};
+
 beforeEach(() => {
   mocks.invoke.mockReset();
   mocks.invoke.mockImplementation((cmd: string) => {
     if (cmd === "nc_log_sources") return Promise.resolve(SOURCES);
     if (cmd === "nc_log_query") return Promise.resolve(QUERY);
     if (cmd === "nc_log_trace") return Promise.resolve(TRACE);
+    if (cmd === "nc_log_search") return Promise.resolve(SEARCH);
     return Promise.resolve(null);
   });
   container = document.createElement("div");
@@ -225,5 +260,61 @@ describe("NC 日志页", () => {
     expect(err?.textContent).toContain("还没找到 NC 日志文件");
     // 光说「失败」没用，得告诉人去哪个目录看
     expect(err?.textContent).toContain("nclogs");
+  });
+
+  it("检索把当前范围带给后端，列表显示命中行", async () => {
+    await render();
+    await typeQuery("ORA-00942");
+    await act(async () => buttonByText("检索")!.click());
+    await flush();
+
+    const call = mocks.invoke.mock.calls.find((c) => c[0] === "nc_log_search");
+    const args = (call?.[1] as { args: Record<string, unknown> })?.args;
+    expect(args.query).toBe("ORA-00942");
+    expect(args.regex).toBe(false);
+    expect(args.caseSensitive).toBe(false);
+    expect(args.limit).toBe(500);
+    // 时间范围与 logger 跟着上方的过滤条走，而不是另起一套
+    expect(typeof args.sinceTs).toBe("string");
+    expect(args.loggers).toBeNull();
+
+    expect(rows().length).toBe(1);
+    expect(container.querySelector(".lg-row-match")?.textContent).toBe(
+      "thread=http-bio-80-exec-7",
+    );
+    expect(container.textContent).toContain("命中 1 条");
+  });
+
+  it("清除检索后回到归因列表", async () => {
+    await render();
+    await typeQuery("ORA-00942");
+    await act(async () => buttonByText("检索")!.click());
+    await flush();
+    expect(rows().length).toBe(1);
+
+    await act(async () => buttonByText("清除")!.click());
+    await flush();
+    expect(rows().length).toBe(2);
+    expect(container.querySelector(".lg-row-match")).toBeNull();
+  });
+
+  it("正则不合法时把后端的原话摆出来", async () => {
+    mocks.invoke.mockImplementation((cmd: string) => {
+      if (cmd === "nc_log_sources") return Promise.resolve(SOURCES);
+      if (cmd === "nc_log_query") return Promise.resolve(QUERY);
+      if (cmd === "nc_log_search") {
+        return Promise.reject(new Error("正则表达式不合法：unclosed group"));
+      }
+      return Promise.resolve(null);
+    });
+    await render();
+    await typeQuery("(unclosed");
+    await act(async () => buttonByText("检索")!.click());
+    await flush();
+
+    const bad = container.querySelector('.lg-search-info[data-tone="bad"]');
+    expect(bad?.textContent).toContain("正则表达式不合法");
+    // 检索失败不能把已有列表清空 —— 用户还得能接着看
+    expect(rows().length).toBe(2);
   });
 });

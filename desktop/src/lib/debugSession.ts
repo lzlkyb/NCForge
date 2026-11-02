@@ -11,6 +11,7 @@ import { setSession } from "./workspaceSession";
 import { toggleBreakpointAt } from "./breakpoints";
 import {
   debugContinue,
+  debugEvaluate,
   debugPause,
   debugScopes,
   debugStackTrace,
@@ -28,6 +29,18 @@ import { applyBreakpointEvent, resetBreakpointSync, startBreakpointSync, syncBre
 
 export type DebugAction = "resume" | "over" | "into" | "out";
 
+/** 一条监视表达式与其最近一次求值结果。 */
+export interface DebugWatch {
+  expression: string;
+  result: string | null;
+  type: string | null;
+  error: string | null;
+  evaluating: boolean;
+}
+
+/** 监视条数上限：再多就盖住变量区，而且 IDE 里也没人挂几十条。 */
+export const MAX_DEBUG_WATCHES = 12;
+
 export interface DebugSnapshot {
   status: DebugStatus;
   paused: boolean;
@@ -38,6 +51,8 @@ export interface DebugSnapshot {
   scopes: DapScope[];
   /** key = variablesReference（DAP 用数字字符串做键，读的时候能用数字索引）。 */
   variables: Record<number, DapVariable[]>;
+  /** 监视表达式：只在本次调试会话内有效，断开即清。 */
+  watches: DebugWatch[];
   /** 每次 stopped +1：同一帧连停两次也能让面板重新定位到编辑器。 */
   stopSeq: number;
   busy: "attach" | "detach" | null;
@@ -61,6 +76,7 @@ let snap: DebugSnapshot = {
   frameId: null,
   scopes: [],
   variables: {},
+  watches: [],
   stopSeq: 0,
   busy: null,
   error: null,
@@ -93,6 +109,8 @@ const idle = (): Partial<DebugSnapshot> => ({
   frameId: null,
   scopes: [],
   variables: {},
+  // 继续/断开后旧帧已经不存在：结果作废，但表达式留着，下次停住再算
+  watches: snap.watches.map((w) => ({ ...w, result: null, type: null, error: null, evaluating: false })),
 });
 
 // ── 事件 → 快照 ────────────────────────────────────────────────────────────
@@ -130,6 +148,7 @@ export async function selectFrame(frameId: number): Promise<void> {
     );
     if (snap.frameId !== frameId) return;
     set({ variables: Object.fromEntries(entries) as Record<number, DapVariable[]> });
+    refreshWatches(frameId);
   } catch (e) {
     if (snap.frameId === frameId) set({ error: errText(e) });
   }
@@ -144,6 +163,46 @@ export async function expandVariables(ref: number): Promise<void> {
   } catch (e) {
     set({ error: errText(e) });
   }
+}
+
+// ── 监视表达式 ─────────────────────────────────────────────────────────────
+async function evaluateWatch(frameId: number, expression: string): Promise<void> {
+  const apply = (patch: Partial<DebugWatch>): void => {
+    // 求值是异步的：帧切走或已经继续运行时这次结果作废，
+    // 否则会把旧帧的值贴到新上下文上，看起来像「当前帧算出来是这个」。
+    if (snap.frameId !== frameId || !snap.paused) return;
+    set({
+      watches: snap.watches.map((w) => (w.expression === expression ? { ...w, ...patch } : w)),
+    });
+  };
+  apply({ evaluating: true, error: null });
+  try {
+    const body = await debugEvaluate(expression, frameId);
+    const result =
+      typeof body.result === "string" ? body.result : body.result == null ? "" : JSON.stringify(body.result);
+    apply({ evaluating: false, result, type: typeof body.type === "string" ? body.type : null });
+  } catch (e) {
+    apply({ evaluating: false, result: null, error: errText(e) });
+  }
+}
+
+/** 每次停住/切换栈帧都把全部监视重算一遍（DAP 的求值上下文跟着 frame 走）。 */
+function refreshWatches(frameId: number): void {
+  if (!snap.paused || snap.watches.length === 0) return;
+  for (const w of snap.watches) void evaluateWatch(frameId, w.expression);
+}
+
+export async function addWatch(expression: string): Promise<void> {
+  const expr = expression.trim();
+  if (!expr || snap.watches.some((w) => w.expression === expr)) return;
+  if (snap.watches.length >= MAX_DEBUG_WATCHES) return;
+  set({ watches: [...snap.watches, { expression: expr, result: null, type: null, error: null, evaluating: false }] });
+  if (snap.paused && snap.frameId) await evaluateWatch(snap.frameId, expr);
+}
+
+export function removeWatch(expression: string): void {
+  if (!snap.watches.some((w) => w.expression === expression)) return;
+  set({ watches: snap.watches.filter((w) => w.expression !== expression) });
 }
 
 async function refreshThreads(): Promise<void> {
@@ -202,7 +261,11 @@ function ensureListeners(): void {
       void syncBreakpoints();
       void refreshThreads();
     }
-    if (s.state !== "attached" && wasAttached) resetBreakpointSync();
+    // 会话结束后监视表达式也不再有求值上下文：与「断开」按钮同一口径清掉
+    if (s.state !== "attached" && wasAttached) {
+      resetBreakpointSync();
+      set({ watches: [] });
+    }
   }).catch(() => {});
   void onDebugEvent(onEvent).catch(() => {});
   // 窗口重开/页面重挂时补一次真实状态：事件只覆盖变化，不覆盖「本来就是这样」
@@ -248,7 +311,7 @@ export async function detachDebugger(): Promise<void> {
   set({ busy: "detach", error: null });
   try {
     await debugStop();
-    set({ status: stoppedStatus, ...idle(), busy: null });
+    set({ status: stoppedStatus, ...idle(), watches: [], busy: null });
     resetBreakpointSync();
   } catch (e) {
     set({ busy: null, error: errText(e) });
@@ -292,4 +355,9 @@ export async function pauseDebug(): Promise<void> {
 /** 当前行加/去断点（gutter 点击与 Ctrl+F8 共用）。 */
 export function toggleBreakpointHere(path: string, line: number): "added" | "removed" {
   return toggleBreakpointAt(path, line);
+}
+
+/** 单测用：直接把快照摆到「暂停在某一帧」，不依赖事件桥。 */
+export function __setDebugFrameForTest(frameId: number | null): void {
+  set({ paused: frameId !== null, frameId, scopes: [], variables: {} });
 }

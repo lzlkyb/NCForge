@@ -78,6 +78,10 @@ export function useSvnStatus() {
     // 不失效就会一直显示「改动前」的差异，用户以为动作没生效
     void qc.invalidateQueries({ queryKey: ["svn-diff"] });
     void qc.invalidateQueries({ queryKey: ["svn-blame"] });
+    // 补丁清单读的是同一份工作副本。提交/撤销后不失效，30 秒内切到「打包补丁」
+    // 还会看到已经提交掉的文件，打出来的包必然对不上这次发布。
+    void qc.invalidateQueries({ queryKey: ["patch-changes"] });
+    void qc.invalidateQueries({ queryKey: ["patch-scan"] });
     return s.data;
   }, [status, info, qc]);
 

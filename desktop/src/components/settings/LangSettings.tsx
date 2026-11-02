@@ -110,8 +110,8 @@ export function LangSettings() {
         </div>
         <ToggleRow
           label="启用代码智能"
-          sub="关掉后退回轻量模式"
-          info="关掉后仍有编译报错（ecj）和按类名查找声明的有限跳转，但没有补全、悬停和实时错误提示。"
+          sub="关掉即轻量模式：暂停 jdt.ls 与语义着色，省约 650MB 内存"
+          info="关掉后仍有编译报错（ecj）和按类名查找声明的有限跳转，但没有补全、悬停、语义着色和实时错误提示。状态栏的「轻量模式」徽标也能直接恢复。"
           checked={cfg.lang_enabled}
           saved={savedKey === "enabled"}
           onChange={(v) => void apply({ lang_enabled: v }, "enabled")}
@@ -166,7 +166,7 @@ export function LangSettings() {
         </p>
         <p>
           <b className="text-foreground">不做的：</b>
-          跨 jar 的「查找引用」与自动重命名。引用查找请用搜索页（全文），重命名风险太高，一期不做。
+          跨 jar 的「查找引用」与自动重命名。引用查找请用代码页侧栏的「全工程搜索」（Ctrl+K），重命名风险太高，一期不做。
         </p>
       </Card>
     </>

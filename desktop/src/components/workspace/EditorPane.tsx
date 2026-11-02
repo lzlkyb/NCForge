@@ -3,7 +3,7 @@ import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { getModel, getViewState, saveViewState, touchModel } from "../../lib/editorStore";
 import { registerLangProviders } from "../../lib/langProviders";
 import { registerExtraLangProviders } from "../../lib/langProvidersExtra";
-import { registerEditorKeys, setCurrentEditor } from "../../lib/editorActions";
+import { registerEditorKeys, releaseCurrentEditor, setCurrentEditor } from "../../lib/editorActions";
 import { editorCommand, getKeymap, isTypeHierarchyKey } from "../../lib/keymap";
 import { registerJavaSqlActions } from "../../lib/javaSqlActions";
 import { registerJavaTemplates } from "../../lib/liveTemplates";
@@ -17,6 +17,7 @@ import { attachDebugGutter } from "../../lib/debugGutter";
 import { toggleBreakpointHere } from "../../lib/debugSession";
 import { debugActionForKey, runDebugAction, type DebugKeyCode } from "../../lib/debugKeys";
 import { getEditorPrefs, monacoOptionsOf, PREFS_EVENT } from "../../lib/editorPrefs";
+import { formatBeforeSave } from "../../lib/formatOnSave";
 import { noteEdit, previousEditSpot } from "../../lib/editHistory";
 import { pathOfModel } from "../../lib/editorStore";
 import { toggleBookmark } from "../../lib/bookmarks";
@@ -26,7 +27,6 @@ import { navigate } from "../../lib/lang";
 import "../../error-lens.css";
 import "../../bookmark-gutter.css";
 import "../../debug.css";
-import { ExtractSqlDialog } from "../db/ExtractSqlDialog";
 
 interface Props {
   /** 当前显示的文件；null = 没有打开的文件。 */
@@ -89,7 +89,9 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       // 没有语言服务时只给当前文档的单词补全，避免弹出一堆无关建议。
       wordBasedSuggestions: "currentDocument",
     });
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => onSaveRef.current());
+    // Ctrl+S 与自动保存共用：先按偏好格式化，再落盘
+    const saveNow = () => void formatBeforeSave(editor).then(() => onSaveRef.current());
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveNow());
     // Ctrl+Alt+O = 组织导入（IDEA 同键）。走命令而不是 provider：
     // 它是一次性的整文件动作，不是「编辑器要显示什么」。
     editor.addCommand(
@@ -196,7 +198,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       if (autoSaveTimer !== undefined) window.clearTimeout(autoSaveTimer);
       autoSaveTimer = window.setTimeout(() => {
         // 触发时再读一次：这期间用户可能刚关掉开关
-        if (getEditorPrefs().autoSave) onSaveRef.current();
+        if (getEditorPrefs().autoSave) void saveNow();
       }, Math.max(500, prefs.autoSaveDelayMs));
     });
     const sqlActions = registerJavaSqlActions(editor);
@@ -209,6 +211,8 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     // Alt+Enter 绑快速修复；命令面板要靠这个引用找到「当前在编辑哪个文件」
     registerEditorKeys(editor);
     setCurrentEditor(editor);
+    // 分屏时有两个编辑器：命令面板 / F2 / 快速修复必须跟着焦点走。
+    const focusSub = editor.onDidFocusEditorText(() => setCurrentEditor(editor));
     editorRef.current = editor;
     return () => {
       sqlActions.forEach((d) => d.dispose());
@@ -217,7 +221,8 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       debugOff();
       contentSub.dispose();
       if (autoSaveTimer !== undefined) window.clearTimeout(autoSaveTimer);
-      setCurrentEditor(null);
+      focusSub.dispose();
+      releaseCurrentEditor(editor);
       // 注意只销毁编辑器实例，model 留在 editorStore（切到别的页签再回来还在）。
       if (shownRef.current) saveViewState(shownRef.current, editor.saveViewState());
       keyboard.dispose();
@@ -290,10 +295,5 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     editor.focus();
   }, [reveal]);
 
-  return (
-    <>
-      <div ref={hostRef} className="wb-editor-host" />
-      <ExtractSqlDialog />
-    </>
-  );
+  return <div ref={hostRef} className="wb-editor-host" />;
 }

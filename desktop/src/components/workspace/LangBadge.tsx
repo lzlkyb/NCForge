@@ -1,4 +1,6 @@
 import { restartLang, startLangNow, useLangView } from "../../lib/lang";
+import { setLightMode } from "../../lib/lightMode";
+import { toast } from "../ui/toast";
 
 /**
  * 状态栏里的代码智能状态（视觉取自设计稿的 `.ls`：绿点就绪、黄点脉冲忙磌）。
@@ -8,18 +10,23 @@ import { restartLang, startLangNow, useLangView } from "../../lib/lang";
 export function LangBadge({ activePath }: { activePath: string | null }) {
   const v = useLangView();
   // 总开关关掉时不能什么都不显示：用户会以为「跳转/补全坏了」而找不到原因。
-  // 显式标成轻量模式并说明去哪儿打开（这里不做成按钮——本组件拿不到导航能力，
-  // 放个点不动的入口比没有入口更糟）。
+  // 做成可点的按钮：状态栏是用户最常看到它的地方，恢复代码智能不该再绕去设置页。
   if (!v.enabled) {
     return (
-      <span
-        className="wb-lang"
+      <button
+        type="button"
+        className="wb-status-btn wb-lang"
         data-tone="off"
-        title="代码智能已在设置里关闭，当前是轻量模式：有语法高亮、搜索、编译，没有跳转与补全。可在「设置 → 代码智能」重新打开"
+        title="当前是轻量模式：jdt.ls 与语义着色已暂停，有语法高亮、搜索、编译，没有跳转与补全。点击恢复代码智能"
+        onClick={() => {
+          void setLightMode(false, activePath).then(
+            (r) => toast(r.ok ? "已恢复代码智能" : (r.error ?? "恢复失败"), r.ok ? "success" : "error"),
+          );
+        }}
       >
         <span className="wb-lang-dot" />
-        轻量模式
-      </span>
+        轻量模式 · 恢复代码智能
+      </button>
     );
   }
   if (v.state === "stopped") {

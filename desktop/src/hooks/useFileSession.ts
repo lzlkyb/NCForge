@@ -5,7 +5,10 @@ import type { Problem } from "../lib/compile";
 import { consumePendingOpen, onOpenFileRequest, type OpenFileRequest } from "../lib/openFileRequest";
 import { loadJdtSource } from "../lib/lang";
 import { useFileSave } from "./useFileSave";
+import { useSplitView } from "./useSplitView";
 import { recordRecent } from "../lib/recentFiles";
+import { rememberClosed } from "../lib/closedTabs";
+import { reopenClosed } from "../lib/reopenClosed";
 import {
   addTab,
   applyUnifiedEol,
@@ -66,7 +69,7 @@ export function useFileSession() {
    * 「后退」过去只会再撞一次报错。
    */
   const openFile = useCallback(
-    async (path: string, opts?: { preview?: boolean }): Promise<boolean> => {
+    async (path: string, opts?: { preview?: boolean; silent?: boolean }): Promise<boolean> => {
       const existing = tabs.find((t) => t.path === path);
       if (existing) {
         if (existing.preview && !opts?.preview) setTabs((ts) => pinTab(ts, path));
@@ -104,12 +107,14 @@ export function useFileSession() {
           .catch(() => {});
         return true;
       } catch (e) {
-        toast(`无法打开 ${baseName(path)}：${friendlyError(e)}`, "error");
+        // 会话恢复时静默：上次开着的文件可能已被删/改名，启动就弹一串红字没有意义
+        if (!opts?.silent) toast(`无法打开 ${baseName(path)}：${friendlyError(e)}`, "error");
         return false;
       }
     },
     [tabs],
   );
+  const split = useSplitView(openFile);
 
   // 别的页面（搜索页）请求「打开这个文件的第 N 行」：
   // 订阅 + 取走挂载前攒下的那一条。取 pending 是必须的——切页时本组件才挂载，
@@ -150,12 +155,17 @@ export function useFileSession() {
       return;
     }
     closeModel(path);
+    rememberClosed(path);
     const idx = tabs.findIndex((t) => t.path === path);
     const rest = tabs.filter((t) => t.path !== path);
     setTabs(rest);
     if (activePath === path) setActivePath(rest[Math.min(idx, rest.length - 1)]?.path ?? null);
+    if (split.splitPath === path) split.setSplitPath(null);
     if (conflictPath === path) setConflictPath(null);
   };
+
+  /** Ctrl+Shift+T：重开最近关闭的标签（打开栈在 lib/closedTabs）。 */
+  const reopenLast = () => reopenClosed(openFile);
 
   /**
    * 文件或目录改名：把卡片、model、激活项一并挪到新路径。
@@ -169,6 +179,7 @@ export function useFileSession() {
     affected.forEach((t) => renameModel(t.path, remapPath(t.path, oldPath, newPath)));
     setTabs((ts) => renameTabs(ts, oldPath, newPath));
     if (activePath && coversPath(activePath, oldPath)) setActivePath(remapPath(activePath, oldPath, newPath));
+    if (split.splitPath && coversPath(split.splitPath, oldPath)) split.setSplitPath(remapPath(split.splitPath, oldPath, newPath));
     if (conflictPath && coversPath(conflictPath, oldPath)) setConflictPath(remapPath(conflictPath, oldPath, newPath));
   };
 
@@ -181,6 +192,7 @@ export function useFileSession() {
       setTabs(rest);
     }
     if (activePath && gone(activePath)) setActivePath(rest[0]?.path ?? null);
+    if (split.splitPath && gone(split.splitPath)) split.setSplitPath(null);
     if (conflictPath && gone(conflictPath)) setConflictPath(null);
   };
 
@@ -246,9 +258,11 @@ export function useFileSession() {
     const { close, kept } = pickClosable(tabs, want);
     if (close.length === 0) return kept;
     close.forEach((p) => closeModel(p));
+    close.forEach(rememberClosed);
     const rest = tabs.filter((t) => !close.includes(t.path));
     setTabs(rest);
     if (activePath && close.includes(activePath)) setActivePath(rest[rest.length - 1]?.path ?? null);
+    if (split.splitPath && close.includes(split.splitPath)) split.setSplitPath(null);
     if (conflictPath && close.includes(conflictPath)) setConflictPath(null);
     return kept;
   };
@@ -260,6 +274,7 @@ export function useFileSession() {
   return {
     conflictPath,
     closingPath,
+    splitPath: split.splitPath,
     saving,
     reveal,
     openFile,
@@ -268,6 +283,9 @@ export function useFileSession() {
     reloadFile,
     closeTab,
     closeMany,
+    openSplit: split.openSplit,
+    closeSplit: split.closeSplit,
+    reopenLast,
     pin,
     handleRenamed,
     handleDeleted,

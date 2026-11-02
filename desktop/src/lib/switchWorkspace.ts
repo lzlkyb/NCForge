@@ -7,6 +7,9 @@ import { getSession, setSession } from "./workspaceSession";
 import { setWorkspace } from "./workspace";
 import { resetNav } from "./navHistory";
 import { compileCancel } from "./compile";
+import { rememberRoot } from "./recentRoots";
+import { clearClosed } from "./closedTabs";
+import { resetMru } from "./tabMru";
 
 /**
  * 切换工作区：改配置 + 清掉属于旧工作区的会话状态。
@@ -26,12 +29,13 @@ export async function applyWorkspace(
 ): Promise<string> {
   // set_workspace 会让后端规范化路径，返回的才是真值；失败时抛错，下方副作用一概不做
   const shown = await setWorkspace(path);
+  rememberRoot(shown);
 
   const { tabs } = getSession();
   tabs.forEach((t) => closeModel(t.path));
   // 停掉 jdt.ls：它按工作区建索引，工作区换了必须重建，留着只会指向旧工程
   void stopLang();
-  setSession({ tabs: [], activePath: null });
+  setSession({ tabs: [], activePath: null, splitPath: null });
   // 会话里的 root 就是文件页的树根。不写它的话，从「工程关联」页切完工作区，
   // 文件页（此时是隐藏的，不会自己重读）回来还挂着旧目录——点了树才报错说路径不在工作区里
   setSession({ root: shown });
@@ -50,6 +54,9 @@ export async function applyWorkspace(
   resetSymbolCache();
   // 导航历史里全是旧工作区的路径，留着「后退」只会被路径守卫挡住报错
   resetNav();
+  // 重开栈 / MRU 同理：里面的路径在新工程里没有意义
+  clearClosed();
+  resetMru();
   // 文件树按 root 归属缓存，由 FileTree 自己重置（key={root}），这里不动
 
   void queryClient?.invalidateQueries({ queryKey: ["svn-info"] });

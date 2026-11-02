@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { countErrors, mergeProblems, nextProblem } from "./problemList";
+import {
+  countErrors,
+  filterProblems,
+  formatProblems,
+  groupProblems,
+  mergeProblems,
+  nextProblem,
+} from "./problemList";
 import type { CodeDiag } from "./diagStore";
 import type { Problem } from "./compile";
 
@@ -104,5 +111,53 @@ describe("nextProblem", () => {
     const only = mergeProblems([], [cd("A.java", 5, "命名建议", "info")]);
     expect(nextProblem(only, null, 1)).toBeNull();
     expect(nextProblem(only, { path: "A.java", line: 1 }, -1)).toBeNull();
+  });
+});
+
+describe("filterProblems", () => {
+  const list = mergeProblems(
+    [cp("A.java", 1), { ...cp("A.java", 2), severity: "warning" }],
+    [cd("A.java", 3, "未使用的导入", "info")],
+  );
+
+  it("all 原样返回同一引用（列表已排好，不必再拷一份）", () => {
+    expect(filterProblems(list, "all")).toBe(list);
+  });
+
+  it("按严重度各取各的", () => {
+    expect(filterProblems(list, "error")).toHaveLength(1);
+    expect(filterProblems(list, "warning")).toHaveLength(1);
+    expect(filterProblems(list, "info")).toHaveLength(1);
+    expect(filterProblems(list, "info")[0].message).toBe("未使用的导入");
+  });
+});
+
+describe("groupProblems", () => {
+  it("同一文件（大小写不同）切成一组，组内保持行号顺序", () => {
+    const list = mergeProblems(
+      [cp("C:\\w\\A.java", 9), cp("C:\\w\\B.java", 2)],
+      [cd("C:\\w\\a.java", 4), cd("C:\\w\\A.java", 7)],
+    );
+    // mergeProblems 已按小写路径排序：A.java 4/7/9 在前，B.java 2 在后
+    const groups = groupProblems(list);
+    expect(groups.map((g) => [g.path, g.items.map((p) => p.line)])).toEqual([
+      // 组标题用首条的写法：这里是 jdt.ls 回报的小写盘符路径
+      ["C:\\w\\a.java", [4, 7, 9]],
+      ["C:\\w\\B.java", [2]],
+    ]);
+  });
+
+  it("空列表得到空分组", () => {
+    expect(groupProblems([])).toEqual([]);
+  });
+});
+
+describe("formatProblems", () => {
+  it("一行一条：路径:行  中文严重度  原文", () => {
+    const list = mergeProblems(
+      [cp("A.java", 3, "找不到符号")],
+      [cd("B.java", 5, "未使用的导入", "info")],
+    );
+    expect(formatProblems(list)).toBe("A.java:3  错误  找不到符号\nB.java:5  提示  未使用的导入");
   });
 });

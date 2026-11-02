@@ -1,29 +1,22 @@
-import { useState, useEffect, useMemo, memo } from "react";
+import { useState, useEffect, memo } from "react";
 import { getStoredTheme, toggleTheme } from "../../lib/theme";
-import { headerSecurityBadges, type SecurityFlags } from "../../lib/headerSecurityBadges";
 import { getKeymap, paletteKeyLabel } from "../../lib/keymap";
 import { Button } from "../ui/button";
 import { APP_INFO } from "../../lib/about";
 import { Icon } from "../ui/icon";
 import { TitleBarControls } from "./TitleBarControls";
-import { SecurityBadgeGroup } from "./SecurityBadgeGroup";
 import { UpdateReadout } from "../update/UpdateReadout";
 
 /**
- * 应用标题栏（36px，横跨整个窗口）：品牌 + 安全徽章 + 下载读数 + 主题 + 窗口控件。
+ * 应用标题栏（36px，横跨整个窗口）：品牌 + 下载读数 + 主题 + 窗口控件。
  *
- * 与 cc-bridge 版 Header 的差异：剥去了「服务启停按钮」「挂起命令胶囊」等业务件，
- * 保留全部 chrome 范式——拖拽区划分（data-tauri-drag-region）、徽章槽位、
+ * 与 cc-bridge 版 Header 的差异：剥去了「服务启停按钮」「安全徽章」「挂起命令胶囊」
+ * 等业务件，保留全部 chrome 范式——拖拽区划分（data-tauri-drag-region）、
  * UpdateReadout 挂载点、窗口控件。业务按钮加在右侧 group 里即可。
  */
 function HeaderImpl({
-  flags,
-  onNavigate,
   onOpenPalette,
 }: {
-  /** 安全风险标志（业务自定义，见 lib/headerSecurityBadges）。 */
-  flags?: SecurityFlags;
-  onNavigate?: (tab: string) => void;
   /** 打开「转到文件 / 类型 / 命令」浮层（App.tsx 接线）。 */
   onOpenPalette?: () => void;
 }) {
@@ -44,18 +37,15 @@ function HeaderImpl({
     return () => window.removeEventListener("themechange", onTheme);
   }, []);
 
-  const securityBadges = useMemo(() => headerSecurityBadges(flags), [flags]);
-
   return (
     <header
       data-tauri-drag-region
       className="app-header app-topbar flex shrink-0 items-center gap-2 border-b pl-3"
     >
-      {/* 左侧：品牌（兼作拖拽区）+ 安全徽章（徽章仅在异常态出现，正常时这一区很窄） */}
+      {/* 左侧：品牌（兼作拖拽区） */}
       <div data-tauri-drag-region className="app-brand">
         <img data-tauri-drag-region src="/icon.png" alt={APP_INFO.name} width={20} height={20} className="app-brand-logo" draggable={false} />
         <span data-tauri-drag-region className="app-brand-name">{APP_INFO.name}</span>
-        <SecurityBadgeGroup badges={securityBadges} onNavigate={onNavigate} />
       </div>
 
       {/* 中部：拖拽空白（无系统标题栏，需要留足可拖区域）+ 下载期读数。
