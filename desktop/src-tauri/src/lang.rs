@@ -140,6 +140,10 @@ impl Default for LangRun {
 /// `base` 却是 canonicalize 后的真实大小写——用 `Path::strip_prefix` 会把大小写不同的同一目录当成不同目录，
 /// 于是整个模块的文件都会被判成「不在模块里」，补全全部静默失效。
 /// 只对 ASCII 折叠大小写（保持字节长度，返回的相对部分取自原路径）。
+///
+/// 返回的相对部分必须仍是「模块目录下的普通子路径」：`..` / `.` 段一律拒绝。
+/// 调用方会把它拼到影子目录上（`shadow_dir.join(rel)`），放行 `..\..\x` 等于让
+/// 前端指定的任意路径越过影子根，映射出的 URI 再发给 jdt.ls。
 pub fn rel_under(base: &str, path: &str) -> Option<String> {
     let norm = |s: &str| s.trim_start_matches(r"\\?\").replace('/', "\\");
     let (b, p) = (norm(base), norm(path));
@@ -149,9 +153,11 @@ pub fn rel_under(base: &str, path: &str) -> Option<String> {
         return None;
     }
     let rest = &p[b.len()..];
-    rest.strip_prefix('\\')
-        .filter(|r| !r.is_empty())
-        .map(str::to_string)
+    let rel = rest.strip_prefix('\\').filter(|r| !r.is_empty())?;
+    if rel.split(['\\', '/']).any(|seg| seg == ".." || seg == ".") {
+        return None;
+    }
+    Some(rel.to_string())
 }
 
 /// 把 JSON 里所有以 `from` 开头的 URI 字符串换成 `to` 开头。
@@ -219,6 +225,28 @@ mod tests {
             Some("a.java")
         );
         assert_eq!(rel_under(r"C:\工作", r"C:\工"), None);
+    }
+
+    /// 相对部分会被拼到影子目录上，`..` 必须在这里就被拒——否则前端给一个
+    /// `<模块>\..\..\x.java` 就能让映射出的影子 URI 越过影子根。
+    #[test]
+    fn rel_under_rejects_parent_segments() {
+        let base = r"C:\work\aier\newar\gl";
+        assert_eq!(
+            rel_under(base, r"C:\work\aier\newar\gl\..\..\evil.java"),
+            None
+        );
+        assert_eq!(
+            rel_under(base, r"C:\work\aier\newar\gl\src\..\A.java"),
+            None
+        );
+        assert_eq!(rel_under(base, "C:/work/aier/newar/gl/src/../../x"), None);
+        assert_eq!(rel_under(base, r"C:\work\aier\newar\gl\.\A.java"), None);
+        // 文件名里带两个点不是父目录段，不能误杀
+        assert_eq!(
+            rel_under(base, r"C:\work\aier\newar\gl\src\Foo..java").as_deref(),
+            Some(r"src\Foo..java")
+        );
     }
 
     #[test]

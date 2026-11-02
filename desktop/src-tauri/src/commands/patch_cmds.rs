@@ -436,22 +436,30 @@ pub async fn patch_set_out_root(
         .map(|_| ())
 }
 
-/// 在资源管理器里定位补丁包（或它所在的目录）。
+/// 是否构建产物补丁包（只认 `.zip`）。
+///
+/// 这条命令只用来定位刚构建出的 zip。**不提供「打开任意目录」**：前端被注入时
+/// 拿这里当通用文件管理器没有增量价值，而 `open_path` 对目录之外的输入没有任何保证。
+fn is_patch_zip(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
+}
+
+/// 在资源管理器里选中补丁包。
 #[tauri::command]
 pub fn patch_reveal(app: AppHandle, path: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     let p = Path::new(&path);
-    if p.is_file() {
-        app.opener()
-            .reveal_item_in_dir(p)
-            .map_err(|e| format!("打不开文件位置：{e}"))
-    } else if p.is_dir() {
-        app.opener()
-            .open_path(path.clone(), None::<&str>)
-            .map_err(|e| format!("打不开目录：{e}"))
-    } else {
-        Err(format!("路径不存在：{path}"))
+    if !is_patch_zip(p) {
+        return Err("只能定位 .zip 补丁包".to_string());
     }
+    if !p.is_file() {
+        return Err(format!("补丁包不存在：{path}"));
+    }
+    app.opener()
+        .reveal_item_in_dir(p)
+        .map_err(|e| format!("打不开文件位置：{e}"))
 }
 
 #[cfg(test)]
@@ -467,6 +475,16 @@ mod tests {
         let p = probe_parents(Some(&ws.join("newar")));
         assert_eq!(p[0], ws.join("newar"));
         assert_eq!(p[1], ws);
+    }
+
+    /// 定位命令只服务构建产物；目录 / 可执行文件必须被拒。
+    #[test]
+    fn 定位只接受zip补丁包() {
+        assert!(is_patch_zip(Path::new(r"D:\patch\补丁_20261102.zip")));
+        assert!(is_patch_zip(Path::new("pkg.ZIP")));
+        assert!(!is_patch_zip(Path::new(r"D:\patch")));
+        assert!(!is_patch_zip(Path::new(r"C:\Windows\System32\calc.exe")));
+        assert!(!is_patch_zip(Path::new(r"D:\patch\pkg.zip.txt")));
     }
 
     #[test]

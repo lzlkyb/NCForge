@@ -27,7 +27,8 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost ws: http:; object-src 'none'; base-uri 'self'; form-action 'none'"
     }
   },
   "plugins": {
@@ -38,7 +39,6 @@
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRDRkM3MjgzMzdEQjQwNTUKUldSVlFOczNnM0w4VEJYTHZtWnhITy9hcVRsMi9iKzRyQWVtRWxoQjcrM1A3eE40bXJOUHNWcEIK",
       "windows": {},
-      "dangerousInsecureTransportProtocol": true,
       "active": true
     },
     "resourcePacks": {
