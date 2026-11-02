@@ -42,6 +42,18 @@ jobs:
       - name: 组件体量门禁（行数 + 状态数）
         run: node scripts/check-component-size.mjs
         working-directory: desktop
+      # 孤立文件 / 依赖：knip 只看 files + dependencies（export/type 存量多，暂不收紧）。
+      - name: 孤立文件 / 依赖（knip）
+        run: npm run orphans:check
+        working-directory: desktop
+      # Rust generate_handler! 是命令真源；生成物过期、前端拼错命令名都在这里拦。
+      - name: Tauri 命令契约（Rust ↔ TS）
+        run: npm run contract:check
+        working-directory: desktop
+      # 裸 hex 色值只许减不许增；新增颜色必须落到 :root token。
+      - name: 设计 token 棘轮
+        run: npm run tokens:check
+        working-directory: desktop
       # 存量违规记在 eslint-suppressions.json（棘轮，只许减少），新违规直接拦。
       - name: eslint
         run: npm run lint
@@ -55,6 +67,10 @@ jobs:
       # vite:build 自带 tsc，上面单跑一次是为了让类型错误早一步、单独报出来。
       - name: vite build
         run: npm run vite:build
+        working-directory: desktop
+      # 体积预算必须基于真实产物，所以放在 build 之后；预算文件是棘轮。
+      - name: JS 产物体积预算
+        run: npm run bundle:check
         working-directory: desktop
 
   # 轻量测试：仅 PR / 非 tag 的 push / 手动触发时跑，保护合入质量（用 dev 编译，快）。
@@ -72,6 +88,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri
+      # 未使用依赖：误报登记在 src-tauri/Cargo.toml 的 cargo-machete.metadata。
+      - name: cargo-machete（未使用依赖）
+        uses: taiki-e/install-action@cargo-machete
+      - name: cargo machete
+        run: cargo machete
+        working-directory: desktop/src-tauri
       - name: cargo test
         run: cargo test --no-default-features
         working-directory: desktop/src-tauri

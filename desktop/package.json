@@ -20,7 +20,14 @@
     "resources:json": "node scripts/generate-resources-json.mjs",
     "release": "node scripts/release.mjs",
     "lint": "eslint .",
-    "lint:prune": "eslint . --prune-suppressions"
+    "lint:prune": "eslint . --prune-suppressions",
+    "contract:generate": "node scripts/gen-command-contract.mjs",
+    "contract:check": "node scripts/gen-command-contract.mjs --check",
+    "orphans:check": "knip --include files,dependencies --no-progress",
+    "tokens:check": "node scripts/check-design-tokens.mjs",
+    "tokens:update": "node scripts/check-design-tokens.mjs --update",
+    "bundle:check": "node scripts/check-bundle-size.mjs",
+    "bundle:update": "node scripts/check-bundle-size.mjs --update"
   },
   "dependencies": {
     "@formkit/auto-animate": "^0.10.0",
@@ -43,6 +50,7 @@
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^5.2.0",
     "jsdom": "^30.1.3",
+    "knip": "^5.88.1",
     "playwright": "^1.49.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.6.0",

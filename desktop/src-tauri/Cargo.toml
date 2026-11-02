@@ -4,6 +4,11 @@ version = "0.1.0"
 description = "NCForge —— NC65 / NCC 二开的轻量桌面工作台"
 edition = "2021"
 
+# cargo-machete 按 crate 导入名扫源码，不认「依赖名 md-5、代码里 use md5」这种改名，
+# 会把 NC65 口令哈希（nc_password.rs）实际在用的依赖误报成未使用。
+[package.metadata.cargo-machete]
+ignored = ["md-5"]
+
 [features]
 default = ["notifications"]
 # notifications 功能包含桌面通知。用 cargo feature 而非 #[cfg(not(test))] 门控：

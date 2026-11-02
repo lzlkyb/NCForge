@@ -1,8 +1,9 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { toast } from "../components/ui/toast";
+import type { TauriCommand } from "./commandContract.generated";
 
-export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+export async function invoke<T>(cmd: TauriCommand, args?: Record<string, unknown>): Promise<T> {
   return tauriInvoke<T>(cmd, args);
 }
 
@@ -12,7 +13,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
  * 成功返回 T，失败返回 undefined（已 toast）。
  */
 export async function invokeOrToast<T>(
-  cmd: string,
+  cmd: TauriCommand,
   args?: Record<string, unknown>,
   errMsg?: string,
 ): Promise<T | undefined> {

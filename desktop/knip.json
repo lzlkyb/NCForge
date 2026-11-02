@@ -1,0 +1,30 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/design-preview/main.tsx",
+    "src/design-preview/motion.tsx",
+    "scripts/build-bridge-jar.mjs",
+    "scripts/build-design-preview.mjs",
+    "scripts/build-jdtls-ext.mjs",
+    "scripts/check-component-size.mjs",
+    "scripts/fake-update-server.mjs",
+    "scripts/rename-app.mjs",
+    "scripts/update-release-notes.d.mts"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "scripts/**/*.{mjs,d.mts}"
+  ],
+  "ignore": [
+    "src/components/update/PendingCommandPill.tsx"
+  ],
+  "ignoreDependencies": [
+    "@tauri-apps/plugin-opener",
+    "@tauri-apps/plugin-updater",
+    "tailwindcss"
+  ],
+  "include": [
+    "files",
+    "dependencies"
+  ]
+}
