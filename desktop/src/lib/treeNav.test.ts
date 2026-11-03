@@ -73,6 +73,52 @@ describe("flattenTree 的压缩中间包", () => {
   });
 });
 
+describe("flattenTree 的多工程根", () => {
+  const OTHER = "other";
+  const multiDirs: Record<string, TreeDirState> = {
+    ...dirs,
+    [OTHER]: dir(["lib.java"]),
+  };
+
+  it("每个工程根先占一行，展开后才走子项", () => {
+    const roots = [
+      { path: ROOT, label: "newar" },
+      { path: OTHER, label: "lib" },
+    ];
+    const flat = flattenTree(multiDirs, new Set([A, SUB, OTHER]), roots, { projectRows: true });
+
+    expect(flat[0]).toMatchObject({
+      path: ROOT,
+      project: true,
+      isDir: true,
+      parent: null,
+      label: "newar",
+    });
+    expect(names(flat)).toContain(j(OTHER, "lib.java"));
+    // 工程根自己展开后，子项挂在它下面
+    const libRow = flat.find((r) => r.path === OTHER)!;
+    expect(libRow.project).toBe(true);
+    expect(flat.find((r) => r.path === j(OTHER, "lib.java"))!.parent).toBe(OTHER);
+  });
+
+  it("收起的工程只占一行，不往下走", () => {
+    const flat = flattenTree(multiDirs, new Set([A]), [{ path: ROOT }, { path: OTHER }], {
+      projectRows: true,
+    });
+    expect(flat.map((r) => r.path)).not.toContain(j(OTHER, "lib.java"));
+    expect(flat.find((r) => r.path === OTHER)!.project).toBe(true);
+  });
+
+  it("压缩链只作用于工程内的目录，不把工程根吸进链里", () => {
+    const flat = flattenTree(chainDirs, new Set([ROOT]), [{ path: ROOT }], {
+      projectRows: true,
+    });
+    expect(flat[0]).toMatchObject({ path: ROOT, project: true, label: undefined });
+    // com/aier/erp 仍是链尾一行，父级是工程根
+    expect(flat[1]).toMatchObject({ path: ERP, label: "com.aier.erp", parent: ROOT });
+  });
+});
+
 describe("treeKeyAction", () => {
   const flat = flattenTree(dirs, expanded, ROOT);
   const at = (path: string) => flat.find((r) => r.path === path)!;

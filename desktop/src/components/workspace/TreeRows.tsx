@@ -31,6 +31,8 @@ export interface TreeRowsCtx {
   busy: boolean;
   /** 展开 / 收起一条压缩链（tail 是链尾，parent 是链所在的目录）。 */
   onToggle: (tail: string, parent: string) => void;
+  /** 展开 / 收起一个关联工程的根（多工程树；不走压缩链）。 */
+  onProjectToggle: (path: string) => void;
   /** 点开一个文件：选中它并请求打开（合并成一个稳定回调，行组件才能 memo）。 */
   onActivate: (path: string) => void;
   onPin?: (path: string) => void;

@@ -1,13 +1,21 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Icon } from "../ui/icon";
-import type { MatchRange, SearchHit } from "../../lib/search";
-import { setSearchScrollTop, getSearchScrollTop, type SearchForm } from "../../lib/searchStore";
+import type { SearchForm } from "../../lib/searchStore";
+import {
+  setSearchScrollTop,
+  getSearchScrollTop,
+} from "../../lib/searchStore";
+import { buildResultView, groupByProject, type ResultHit } from "../../lib/searchResults";
+import { ResultFile } from "./ResultFile";
 
 /**
- * 搜索结果区：汇总行 + 按文件分组的结果。
+ * 搜索结果区：汇总行 + 按工程 / 文件分组的结果。
  *
  * 现在住在文件页侧栏（和 VS Code 一样窄）：每条只给「行号 + 截断的整行代码」，
  * 完整内容点开后在编辑器里看。宽度不够时汇总行换行，不做横向滚动。
+ *
+ * 「全部工程」结果按工程分段：同一个 `util.java` 可能同时出现在两个工程里，
+ * 不标工程的话两段完全一样，点开哪个全凭猜。当前工程的结果不分段（就一个工程）。
  */
 export function SearchResults({
   form,
@@ -19,11 +27,13 @@ export function SearchResults({
   form: SearchForm;
   update: (patch: Partial<SearchForm>) => void;
   loading: boolean;
-  onOpen: (hit: SearchHit) => void;
+  onOpen: (hit: ResultHit) => void;
   /** 打开「编辑匹配」轻量多缓冲；结果过期或没工作区时由调用方不传。 */
   onEdit?: () => void;
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);
+  const view = useMemo(() => buildResultView(form), [form]);
+  const all = form.scope === "all";
 
   // 滚动位置只在挂载时恢复一次，之后由 onScroll 持续记录
   useEffect(() => {
@@ -32,60 +42,55 @@ export function SearchResults({
     if (el && saved > 0) el.scrollTop = saved;
   }, []);
 
-  // 换了一份结果（重新搜索）就回到顶部。恢复逻辑只跑一次，光把仓库里的 scrollTop
-  // 设成 0 不会让 DOM 自己滚回去——新结果会从上一份的偏移处开始显示。
-  const shownOutcome = useRef(form.outcome);
+  // 换了一份结果（重新搜索 / 换范围）就回到顶部。恢复逻辑只跑一次，光把仓库里的
+  // scrollTop 设成 0 不会让 DOM 自己滚回去——新结果会从上一份的偏移处开始显示。
+  const identity = all ? form.projectOutcome : form.outcome;
+  const shown = useRef<unknown>(null);
   useEffect(() => {
-    if (shownOutcome.current === form.outcome) return;
-    shownOutcome.current = form.outcome;
+    if (shown.current === identity) return;
+    shown.current = identity;
     const el = listRef.current;
     if (el) el.scrollTop = 0;
-  }, [form.outcome]);
+  }, [identity]);
 
-  const groups = useMemo(() => {
-    const map = new Map<string, SearchHit[]>();
-    for (const hit of form.outcome?.hits ?? []) {
-      const list = map.get(hit.path);
-      if (list) list.push(hit);
-      else map.set(hit.path, [hit]);
-    }
-    return [...map.entries()];
-  }, [form.outcome]);
-
-  const toggleCollapse = (path: string) => {
+  const groups = useMemo(() => view?.groups ?? [], [view]);
+  const collapsed = new Set(form.collapsed);
+  const toggleCollapse = (key: string) => {
     update({
-      collapsed: form.collapsed.includes(path)
-        ? form.collapsed.filter((p) => p !== path)
-        : [...form.collapsed, path],
+      collapsed: collapsed.has(key)
+        ? form.collapsed.filter((p) => p !== key)
+        : [...form.collapsed, key],
     });
   };
+  const allCollapsed = groups.length > 0 && groups.every((g) => collapsed.has(g.key));
+  const sections = useMemo(() => (all ? groupByProject(groups) : []), [all, groups]);
 
-  const outcome = form.outcome;
-  const collapsedCount = groups.filter(([p]) => form.collapsed.includes(p)).length;
-  const allCollapsed = groups.length > 0 && collapsedCount === groups.length;
+  const noHits = view !== null && view.summary.hits === 0;
+  const currentRoot = view?.outcomeRoot;
 
   return (
     <>
       {/* ── 汇总行 ── */}
-      {outcome && (
+      {view && (
         <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-border px-3 py-1.5 text-[12px]">
           <span>
-            <b>{outcome.hits.length}</b> 处 · <b>{outcome.filesMatched}</b> 个文件
+            <b>{view.summary.hits}</b> 处 · <b>{view.summary.filesMatched}</b> 个文件
+            {all && view.summary.projects > 0 && <> · {view.summary.projects} 个工程</>}
           </span>
           <span className="text-muted-foreground">
-            扫描 {outcome.filesScanned} 个文件 · {(outcome.elapsedMs / 1000).toFixed(1)}s
+            扫描 {view.summary.filesScanned} 个文件 · {(view.summary.elapsedMs / 1000).toFixed(1)}s
           </span>
-          {outcome.truncated && (
+          {view.summary.truncated && (
             <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning-ink">
               到上限提前停了，结果可能不全
             </span>
           )}
           <span className="flex-1" />
-          {onEdit && outcome.hits.length > 0 && (
+          {onEdit && (form.outcome?.hits.length ?? 0) > 0 && (
             <button
               type="button"
               onClick={onEdit}
-              title="把全部命中行放进一张可编辑预览，改完一次写回"
+              title="把全部命中行放进一张可编辑预览，改完一次写回（仅当前工程）"
               className="text-[12px] font-semibold text-primary hover:underline"
             >
               编辑匹配
@@ -94,7 +99,7 @@ export function SearchResults({
           {groups.length > 0 && (
             <button
               type="button"
-              onClick={() => update({ collapsed: allCollapsed ? [] : groups.map(([p]) => p) })}
+              onClick={() => update({ collapsed: allCollapsed ? [] : groups.map((g) => g.key) })}
               className="text-[12px] font-semibold text-primary hover:underline"
             >
               {allCollapsed ? "全部展开" : "全部折叠"}
@@ -109,113 +114,107 @@ export function SearchResults({
         onScroll={(e) => setSearchScrollTop(e.currentTarget.scrollTop)}
         className="min-h-0 flex-1 overflow-auto"
       >
-        {!outcome && !form.error && (
+        {!view && !form.error && (
           <Empty
-            title={loading ? "搜索中…" : "输入关键字，回车搜索整个工作区"}
+            title={
+              loading
+                ? "搜索中…"
+                : all
+                  ? "输入关键字，回车搜索全部关联工程"
+                  : "输入关键字，回车搜索整个工作区"
+            }
             hint={
               loading
-                ? "首次要读几千个文件，冷缓存约 20 秒；同样的词再搜一次通常不到 2 秒"
-                : "支持正则（.*）、整词、文件过滤；搜索词历史会留最近 10 条"
+                ? all
+                  ? "正在逐个扫描关联工程；机械盘上可能要几十秒"
+                  : "首次要读几千个文件，冷缓存约 20 秒；同样的词再搜一次通常不到 2 秒"
+                : all
+                  ? "默认搜索当前工程与 .classpath 依赖链上的工程；替换只对「当前工程」开放"
+                  : "支持正则（.*）、整词、文件过滤；搜索词历史会留最近 10 条"
             }
           />
         )}
 
-        {outcome && outcome.hits.length === 0 && (
-          outcome.truncated ? (
-            // 超时才是真问题：这时「没有找到」是假话，后面的文件根本没读。
-            <Empty
-              title="没搜完就到时间上限了"
-              hint={`扫了 ${outcome.filesScanned} 个文件、${(outcome.elapsedMs / 1000).toFixed(1)}s 后停下，后面的文件还没看。加个文件过滤（如 *.java）能少读很多；或者直接再搜一次——文件进系统缓存后会快得多。`}
-            />
-          ) : (
-            <Empty
-              title={`没有找到 “${form.query.trim()}”`}
-              hint={
-                form.include.trim()
-                  ? `当前有文件过滤「${form.include.trim()}」，去掉它可能就搜到了`
-                  : "试试：换关键词 / 关掉「整词」/ 关掉「Aa」"
-              }
-            />
-          )
+        {view && noHits && view.summary.truncated && (
+          // 超时才是真问题：这时「没有找到」是假话，后面的文件根本没读。
+          <Empty
+            title="没搜完就到时间上限了"
+            hint={`扫了 ${view.summary.filesScanned} 个文件、${(view.summary.elapsedMs / 1000).toFixed(1)}s 后停下，后面的${all ? "工程和文件" : "文件"}还没看。${
+              all ? "切到「当前工程」或" : ""
+            }加个文件过滤（如 *.java）能少读很多；或者直接再搜一次——文件进系统缓存后会快得多。`}
+          />
         )}
 
-        {groups.map(([path, hits]) => {
-          const collapsed = form.collapsed.includes(path);
-          const slash = path.lastIndexOf("/");
-          const name = slash < 0 ? path : path.slice(slash + 1);
-          const dir = slash < 0 ? "" : path.slice(0, slash);
-          return (
-            <div key={path} className="sr-group border-b border-border">
-              <button
-                type="button"
-                onClick={() => toggleCollapse(path)}
-                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-secondary/60"
-              >
-                <Icon
-                  name="chevronDown"
-                  size={13}
-                  className={`flex-shrink-0 text-muted-foreground transition-transform ${
-                    collapsed ? "-rotate-90" : ""
-                  }`}
-                />
-                <Icon name="file" size={14} className="flex-shrink-0 text-primary" />
-                <span className="flex-shrink-0 text-[12.5px] font-semibold">{name}</span>
-                <span className="truncate text-[11px] text-muted-foreground">{dir}</span>
-                <span className="ml-auto grid h-4 min-w-[18px] flex-shrink-0 place-items-center rounded-full bg-muted px-1.5 text-[10.5px] font-bold text-muted-foreground">
-                  {hits.length}
-                </span>
-              </button>
-              {!collapsed &&
-                hits.map((hit) => (
-                  <button
-                    key={`${hit.path}:${hit.line}`}
-                    type="button"
-                    onClick={() => onOpen(hit)}
-                    title={`${hit.path}:${hit.line}`}
-                    className="grid w-full grid-cols-[46px_minmax(0,1fr)] gap-2.5 py-[3px] pl-9 pr-3 text-left hover:bg-secondary/55"
-                  >
-                    <span className="text-right font-mono text-[11.5px] text-muted-foreground">
-                      {hit.line}
-                    </span>
-                    <span className="truncate font-mono text-[12px]">
-                      <Highlighted text={hit.text} ranges={hit.ranges} />
-                    </span>
-                  </button>
-                ))}
+        {view && noHits && !view.summary.truncated && (
+          <Empty
+            title={`没有找到 “${form.query.trim()}”`}
+            hint={
+              all
+                ? `已搜索 ${view.summary.projects} 个工程。可以切到「当前工程」缩小范围${
+                    view.errors.length > 0 ? "；另有工程读取失败，命中可能没进来" : ""
+                  }`
+                : form.include.trim()
+                  ? `当前有文件过滤「${form.include.trim()}」，去掉它可能就搜到了`
+                  : "试试：换关键词 / 关掉「整词」/ 关掉「Aa」"
+            }
+          />
+        )}
+
+        {/* 读取失败的工程：其余工程的结果仍然有效，不能因此整页报错 */}
+        {view && view.errors.length > 0 && (
+          <div className="border-b border-border bg-warning/10 px-3 py-2 text-[11.5px] leading-relaxed">
+            <div className="flex items-center gap-1.5 font-semibold text-warning-ink">
+              <Icon name="alertTriangle" size={13} className="flex-shrink-0" />
+              {view.errors.length} 个工程没搜成
             </div>
-          );
-        })}
+            {view.errors.map((e) => (
+              <div key={e} className="break-all text-muted-foreground">
+                {e}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {all &&
+          sections.map((sec) => (
+            <section key={sec.root} aria-label={`工程 ${sec.project}`}>
+              <div className="sr-project flex items-center gap-1.5 border-b border-border bg-muted/40 px-3 py-1">
+                <Icon name="folder" size={13} className="flex-shrink-0 text-muted-foreground" />
+                <span className="truncate text-[12px] font-semibold">{sec.project}</span>
+                {currentRoot && sec.root.toLowerCase() === currentRoot.toLowerCase() && (
+                  <span className="wb-project-badge" data-current>
+                    当前
+                  </span>
+                )}
+                <span className="ml-auto flex-shrink-0 text-[11px] text-muted-foreground">
+                  {sec.hits} 处
+                </span>
+              </div>
+              {sec.groups.map((g) => (
+                <ResultFile
+                  key={g.key}
+                  group={g}
+                  collapsed={collapsed.has(g.key)}
+                  onToggle={() => toggleCollapse(g.key)}
+                  onOpen={onOpen}
+                />
+              ))}
+            </section>
+          ))}
+
+        {!all &&
+          groups.map((g) => (
+            <ResultFile
+              key={g.key}
+              group={g}
+              collapsed={collapsed.has(g.key)}
+              onToggle={() => toggleCollapse(g.key)}
+              onOpen={onOpen}
+            />
+          ))}
       </div>
     </>
   );
-}
-
-/**
- * 按后端给的区间画 `<mark>`。
- *
- * 区间是 UTF-16 偏移，直接就是 JS 字符串下标，**不要**再自己 `indexOf`——正则模式下
- * 前端算不出命中位置。区间可能超出截断后的文本长度（后端已裁掉大部分），这里再夹一次
- * 是防线。
- */
-function Highlighted({ text, ranges }: { text: string; ranges: MatchRange[] }) {
-  if (ranges.length === 0) return <>{text}</>;
-  const parts: ReactNode[] = [];
-  let at = 0;
-  ranges.forEach((r, i) => {
-    const start = Math.max(at, Math.min(r.start, text.length));
-    const end = Math.max(start, Math.min(r.end, text.length));
-    if (start > at) parts.push(<span key={`t${i}`}>{text.slice(at, start)}</span>);
-    if (end > start) {
-      parts.push(
-        <mark key={`m${i}`} className="rounded-sm bg-warning/30 text-inherit">
-          {text.slice(start, end)}
-        </mark>,
-      );
-    }
-    at = end;
-  });
-  if (at < text.length) parts.push(<span key="tail">{text.slice(at)}</span>);
-  return <>{parts}</>;
 }
 
 function Empty({ title, hint }: { title: string; hint: string }) {

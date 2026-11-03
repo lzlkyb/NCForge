@@ -116,6 +116,7 @@ export const TAURI_COMMANDS = [
   "resources_status",
   "reveal_install_dir",
   "search_list_files",
+  "search_projects",
   "search_replace",
   "search_workspace",
   "server_clear_log",
@@ -145,6 +146,7 @@ export const TAURI_COMMANDS = [
   "svn_review_prune",
   "svn_status",
   "svn_update",
+  "tree_projects",
 ] as const;
 
 export type TauriCommand = (typeof TAURI_COMMANDS)[number];

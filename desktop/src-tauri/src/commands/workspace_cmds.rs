@@ -63,6 +63,38 @@ async fn resolve_in_workspace(state: &AppState, requested: &str) -> Result<PathB
         .await
 }
 
+/// 只读浏览的白名单：当前工作区 + 依赖闭包里各工程的根。
+///
+/// 文件树把关联工程并排显示，展开其它工程时也要能列目录；但新建/改名/删除/写文件
+/// 仍只认当前工作区（`resolve_in_workspace`）——浏览不等于能改别人的工程。
+async fn allowed_read_roots(state: &AppState) -> Vec<String> {
+    let cfg = state.config.read().await.clone();
+    let Some(primary) = cfg.workspace_root.clone() else {
+        return Vec::new();
+    };
+    let primary_path = PathBuf::from(&primary);
+    if !primary_path.is_dir() {
+        return vec![primary];
+    }
+    let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
+    let fallback = primary.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut roots = vec![primary];
+        for p in crate::eclipse_cp::projects(&primary_path, &overrides) {
+            let Some(root) = p.root else { continue };
+            if !PathBuf::from(&root).is_dir() {
+                continue;
+            }
+            if !roots.iter().any(|r| r.eq_ignore_ascii_case(&root)) {
+                roots.push(root);
+            }
+        }
+        roots
+    })
+    .await
+    .unwrap_or_else(|_| vec![fallback])
+}
+
 /// 读当前工作区根（未选择为 null）。
 #[tauri::command]
 pub async fn get_workspace(
@@ -97,12 +129,20 @@ pub async fn set_workspace(
 }
 
 /// 列目录（`path` 为空 = 工作区根）。
+///
+/// 白名单放宽到「当前工作区 + 关联工程根」：文件树要能浏览其它工程的目录，
+/// 这只是读列表；写操作仍只允许当前工作区。
 #[tauri::command]
 pub async fn fs_list_dir(
     state: tauri::State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<Vec<DirItem>, String> {
-    let dir = resolve_in_workspace(&state, &path).await?;
+    let roots = allowed_read_roots(&state).await;
+    if roots.is_empty() {
+        return Err("尚未选择工作区目录".to_string());
+    }
+    let target = if path.is_empty() { roots[0].clone() } else { path };
+    let dir = crate::security::path::resolve_safe_path_async(target, roots, Vec::new(), true).await?;
     tauri::async_runtime::spawn_blocking(move || workspace::list_dir(&dir))
         .await
         .map_err(|e| format!("后台任务失败: {e}"))?

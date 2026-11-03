@@ -304,6 +304,15 @@ fn glob_to_regex(pat: &str) -> Option<Mask> {
 /// 只能覆盖 1/8 的工作区，结果是「明明有这个词却搜不到」。八线程能把冷缓存吞吐提到
 /// 370 文件/秒（5 倍），代价只是几次线程创建。
 pub fn search(root: &Path, opts: &SearchOptions) -> Result<SearchOutcome, String> {
+    search_with_budget(root, opts, TIME_BUDGET_MS)
+}
+
+/// 同 `search`，但由调用方给定总耗时预算（「全部工程」搜索要在各工程之间分预算）。
+pub fn search_with_budget(
+    root: &Path,
+    opts: &SearchOptions,
+    budget_ms: u128,
+) -> Result<SearchOutcome, String> {
     let needle = if opts.regex {
         opts.text.as_str()
     } else {
@@ -322,7 +331,7 @@ pub fn search(root: &Path, opts: &SearchOptions) -> Result<SearchOutcome, String
     };
 
     // ── 第一段：收集候选（目录枚举也是 I/O，但只做一遍）──
-    let (candidates, walk_truncated) = collect_candidates(root, &filter, started);
+    let (candidates, walk_truncated) = collect_candidates(root, &filter, started, budget_ms);
 
     // ── 第二段：并行读取 + 匹配 ──
     let cursor = AtomicUsize::new(0);
@@ -356,7 +365,7 @@ pub fn search(root: &Path, opts: &SearchOptions) -> Result<SearchOutcome, String
                     let Some((path, rel)) = candidates.get(idx) else {
                         break;
                     };
-                    if started.elapsed().as_millis() > TIME_BUDGET_MS {
+                    if started.elapsed().as_millis() > budget_ms {
                         stop.store(true, Ordering::Relaxed);
                         break;
                     }
@@ -429,12 +438,13 @@ fn collect_candidates(
     root: &Path,
     filter: &FileFilter,
     started: Instant,
+    budget_ms: u128,
 ) -> (Vec<(PathBuf, String)>, bool) {
     let mut out = Vec::new();
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
 
     while let Some(dir) = stack.pop() {
-        if started.elapsed().as_millis() > TIME_BUDGET_MS {
+        if started.elapsed().as_millis() > budget_ms {
             return (out, true);
         }
         let Ok(rd) = std::fs::read_dir(&dir) else {
@@ -1273,7 +1283,8 @@ pub fn replace(
     let replacement = matcher.escape_replacement(replacement);
     let filter = FileFilter::parse(&opts.include);
     let started = Instant::now();
-    let (candidates, walk_truncated) = collect_candidates(root, &filter, started);
+    let (candidates, walk_truncated) =
+        collect_candidates(root, &filter, started, TIME_BUDGET_MS);
 
     let cursor = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);

@@ -1,4 +1,18 @@
-import type { ReplaceOutcome, SearchOptions, SearchOutcome } from "./search";
+import type {
+  ProjectsSearchOutcome,
+  ReplaceOutcome,
+  SearchOptions,
+  SearchOutcome,
+} from "./search";
+
+/**
+ * 搜索范围：全部关联工程 / 当前工作区。
+ *
+ * 默认全部工程：依赖链上的改动（接口在 A 工程、调用在 B 工程）是 NC 二开的日常，
+ * 只搜当前工程会把跨工程引用漏掉。替换与「编辑匹配」仍只对当前工作区开放——
+ * 一次改写多个工程不可撤销，且确认框列不清跨工程改动面。
+ */
+export type SearchScope = "all" | "current";
 
 /**
  * 搜索页的状态仓库（模块级，不随组件卸载消失）。
@@ -17,7 +31,14 @@ export interface SearchForm {
   caseSensitive: boolean;
   wholeWord: boolean;
   regex: boolean;
+  /** 搜索范围：默认全部关联工程。 */
+  scope: SearchScope;
   outcome: SearchOutcome | null;
+  /**
+   * 全部工程的结果。与 `outcome` 互斥：哪个取决于发起搜索时的 `scope`。
+   * 分开存是因为替换 / 编辑匹配只认 `outcome`（当前工作区）。
+   */
+  projectOutcome: ProjectsSearchOutcome | null;
   /**
    * 这份结果是在哪个工作区下搜出来的。
    *
@@ -69,7 +90,9 @@ const EMPTY: SearchForm = {
   caseSensitive: false,
   wholeWord: false,
   regex: false,
+  scope: "all",
   outcome: null,
+  projectOutcome: null,
   outcomeRoot: null,
   outcomeOptions: null,
   running: false,
@@ -131,6 +154,7 @@ export function resetSearchForm(): void {
   form = {
     ...form,
     outcome: null,
+    projectOutcome: null,
     outcomeRoot: null,
     outcomeOptions: null,
     collapsed: [],

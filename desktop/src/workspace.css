@@ -114,6 +114,44 @@
 .wb-row[data-selected] { background: hsl(var(--ring) / 0.1); }
 .wb-row[data-active][data-selected] { box-shadow: inset 0 0 0 1px hsl(var(--ring) / 0.5); }
 
+/* ---- 多工程树的工程根行 ---- */
+.wb-row-project { font-weight: 600; }
+.wb-row-project[data-current] {
+  background: hsl(var(--primary) / 0.07);
+  box-shadow: inset 2px 0 0 hsl(var(--primary) / 0.7);
+}
+.wb-row-project[data-current] .wb-project-icon { color: hsl(var(--primary)); }
+.wb-project-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.wb-project-badge[data-current] {
+  background: hsl(var(--primary) / 0.14);
+  color: hsl(var(--primary));
+}
+/* 树头的范围说明：编译 / SVN 只作用于当前工程 */
+.wb-tree-scope {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 3px 12px 5px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  border-bottom: 1px solid hsl(var(--border));
+}
+.wb-tree-scope b { color: hsl(var(--foreground)); font-weight: 600; }
+
 /* ---- 树内联输入行（新建 / 重命名） ---- */
 .wb-tree-edit { display: flex; align-items: center; height: 26px; padding-right: 2px; }
 .wb-tree-edit-field {
@@ -454,6 +492,12 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-prow.wb-diag:hover { background: transparent; }
 .wb-diag .wb-prow-msg { white-space: normal; line-height: 1.45; }
 .wb-diag-path { display: block; color: hsl(var(--muted-foreground)); font-size: 11.5px; word-break: break-all; }
+.wb-diag-act {
+  flex-shrink: 0; height: 18px; padding: 0 6px; border-radius: 4px;
+  border: 1px solid hsl(var(--border)); font-size: 11px; white-space: nowrap;
+  color: hsl(var(--foreground));
+}
+.wb-diag-act:hover { background: hsl(var(--secondary)); }
 .wb-log { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; line-height: 19px; padding: 6px 14px; white-space: pre-wrap; word-break: break-all; }
 .wb-log-ok { color: hsl(var(--success-ink)); }
 .wb-log-er { color: hsl(var(--destructive-ink)); }

@@ -10,8 +10,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ svnStatus: vi.fn(), svnInfo: vi.fn() }));
+const mocks = vi.hoisted(() => ({ svnStatus: vi.fn(), svnInfo: vi.fn(), openLinkedDialog: vi.fn() }));
 vi.mock("../../lib/svn", () => ({ svnStatus: mocks.svnStatus, svnInfo: mocks.svnInfo }));
+vi.mock("../../lib/linkedDialog", () => ({ openLinkedDialog: mocks.openLinkedDialog }));
 
 import { StatusContributions } from "./StatusContributions";
 import { getSession, setSession } from "../../lib/workspaceSession";
@@ -49,7 +50,7 @@ afterEach(() => {
   host = null;
   window.removeEventListener("ncforge-navigate", nav);
   setCodeDiags([]);
-  setSession({ compiling: false, compileResult: null, panelOpen: false, panelTab: "problems" });
+  setSession({ compiling: false, compileResult: null, panelOpen: false, panelTab: "problems", root: null });
   __resetDbForTest();
 });
 
@@ -138,6 +139,24 @@ describe("状态栏贡献", () => {
     expect(el.textContent).toContain("改动 3");
     expect(el.textContent).toContain("忽略 2");
     expect(el.textContent).toContain("r4211");
+  });
+
+  it("代码页且选了工作区时露出「工程关联」入口，其余页不占状态栏", () => {
+    const el = render("files");
+    expect(button(el, "工程关联")).toBeUndefined();
+
+    act(() => setSession({ root: "C:\\ws" }));
+    const chip = button(el, "工程关联") as HTMLButtonElement;
+    expect(chip).toBeTruthy();
+    act(() => chip.click());
+    expect(mocks.openLinkedDialog).toHaveBeenCalledWith("chain");
+
+    act(() => root?.render(
+      <QueryClientProvider client={new QueryClient()}>
+        <StatusContributions activeTool="db" />
+      </QueryClientProvider>,
+    ));
+    expect(button(el, "工程关联")).toBeUndefined();
   });
 
   it("数据库页露出当前连接、未提交事务与运行中的查询", () => {

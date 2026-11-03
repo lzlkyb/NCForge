@@ -14,7 +14,6 @@ const DOCUMENT_TOOLS: Record<string, DockToolTab> = {
   // 页内还有「审查改动 / 打包补丁」两个视图，标签只说页名，避免切到补丁时名不副实
   svn: { label: "版本控制", icon: "gitBranch" },
   db: { label: "数据库", icon: "database", custom: true },
-  linked: { label: "工程关联", icon: "plug" },
   settings: { label: "设置", icon: "settings" },
 };
 /**
@@ -24,7 +23,7 @@ const DOCUMENT_TOOLS: Record<string, DockToolTab> = {
  * 和用户从文件树点进来继续改代码的动线一致。少写这一句就会被当成漏配。
  * 补丁视图例外：它没有「源码视图」可看，SvnTab 自己在该视图挂载时打开文档区。
  */
-const DOCUMENT_DEFAULT_OPEN = ["db", "linked", "settings"];
+const DOCUMENT_DEFAULT_OPEN = ["db", "settings"];
 /** NC 服务的卡片 + 日志放在底部面板里，打开这个标签时把面板撑高到够看。 */
 const SERVICES_PANEL_MIN = 360;
 const HOST_NAMES: DockRegionName[] = ["toolbar", "sidebar", "document", "bottom", "actions", "tabs"];

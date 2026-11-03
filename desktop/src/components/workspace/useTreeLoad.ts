@@ -3,6 +3,7 @@ import { baseName, encodingMarks, joinPath, listDir, type DirItem } from "../../
 import { chainFor, chainOpen, collapseChain } from "../../lib/treeCompact";
 import { listen } from "../../lib/tauri";
 import { pathKey } from "../../lib/treeSvn";
+import { isUnderPath } from "../../lib/treeProjects";
 import { getSession, setSession, setTree, useWorkspaceSelector } from "../../lib/workspaceSession";
 
 /** 定位到某个文件时最多展开多少层：防止异常路径（工作区外的长路径）把界面锁死。 */
@@ -15,35 +16,44 @@ const REVEAL_MAX_DEPTH = 40;
  * 留在本地状态里的话，从搜索页跳回来就得重新点开一遍。
  *
  * 为什么列目录与编码标记分开跑：列表先出来，标记晚一拍到，展开目录不用等它。
+ *
+ * `projectRoots` 是多工程树的全部根（不含时只有当前工作区）。展开 / 定位只看路径
+ * 归属，不关心它是不是当前工程——浏览别的工程是允许的，写操作才受限制。
  */
-export function useTreeLoad(root: string, compact: boolean) {
+export function useTreeLoad(root: string, compact: boolean, projectRoots?: string[]) {
   // 只订阅树：整会话订阅下，每次 dirty 翻转 / 编译状态变化都会把整棵树重渲染一遍
   const tree = useWorkspaceSelector((s) => s.tree);
   const { dirs, expanded, marks } = tree;
+  const roots = projectRoots && projectRoots.length > 0 ? projectRoots : [root];
 
   /**
    * 问后端这一层的 `.java` 里，哪些是「磁盘 UTF-8、Eclipse 却按 GBK 读」。
    *
-   * 失败就当没有标记——这是提示，不该因为它让目录打不开。
+   * 只问当前工作区：别的工程不可写，`fs_encoding_marks` 的白名单仍只认当前工程，
+   * 问了也只会拿到一串拒绝错误。失败就当没有标记——这是提示，不该让目录打不开。
    */
-  const markEncodings = useCallback(async (dir: string, items: DirItem[]) => {
-    const files = items
-      .filter((i) => !i.isDir && i.name.toLowerCase().endsWith(".java"))
-      .map((i) => joinPath(dir, i.name));
-    if (files.length === 0) return;
-    try {
-      const found = await encodingMarks(files);
-      setTree((t) => {
-        const next = { ...t.marks };
-        // 这一层刚重扫过：先清旧标记，文件改回 GBK 后徽标才会消失
-        for (const p of files) delete next[p];
-        for (const m of found) next[m.path] = m;
-        return { ...t, marks: next };
-      });
-    } catch {
-      // 忽略：标记是附加信息
-    }
-  }, []);
+  const markEncodings = useCallback(
+    async (dir: string, items: DirItem[]) => {
+      if (!isUnderPath(dir, root)) return;
+      const files = items
+        .filter((i) => !i.isDir && i.name.toLowerCase().endsWith(".java"))
+        .map((i) => joinPath(dir, i.name));
+      if (files.length === 0) return;
+      try {
+        const found = await encodingMarks(files);
+        setTree((t) => {
+          const next = { ...t.marks };
+          // 这一层刚重扫过：先清旧标记，文件改回 GBK 后徽标才会消失
+          for (const p of files) delete next[p];
+          for (const m of found) next[m.path] = m;
+          return { ...t, marks: next };
+        });
+      } catch {
+        // 忽略：标记是附加信息
+      }
+    },
+    [root],
+  );
 
   const load = useCallback(
     async (path: string) => {
@@ -177,17 +187,26 @@ export function useTreeLoad(root: string, compact: boolean) {
    * 定位到某个文件：逐层展开祖先并加载，返回是否成功。
    *
    * 祖先链直接从路径字符串算出来，不向后端问——`com/aier/erp/x.java` 的父目录就是
-   * 路径前缀。只允许工作区内的路径（搜索结果与编译问题可能指向关联工程，那些不在树里）。
+   * 路径前缀。可定位的路径 = 任一关联工程内的路径：自动定位可能停在别的工程的文件上
+   * （比如刚跨工程打开），这时要先把那个工程的根展开。
    */
   const reveal = useCallback(
     async (path: string): Promise<boolean> => {
-      const current = getSession().tree.root;
-      if (!current || !path) return false;
-      const lower = path.toLowerCase();
-      if (!lower.startsWith(current.toLowerCase() + "\\")) return false;
-      const parts = path.slice(current.length).replace(/^[\\/]/, "").split(/[\\/]/).filter(Boolean);
+      if (!path) return false;
+      // 根互相嵌套时取最长的那个：路径归属只有一位真答案
+      const owner = roots
+        .filter((r) => isUnderPath(path, r))
+        .sort((a, b) => b.length - a.length)[0];
+      if (!owner) return false;
+      const parts = path.slice(owner.length).replace(/^[\\/]/, "").split(/[\\/]/).filter(Boolean);
       if (parts.length > REVEAL_MAX_DEPTH) return false;
-      let cur = current;
+      // 多工程树里工程根本身是一行，必须先展开它；单工程时 expanded 里本来就有它
+      setTree((t) =>
+        t.expanded.has(owner) ? t : { ...t, expanded: new Set(t.expanded).add(owner) },
+      );
+      let cur = owner;
+      // 注意祖先循环从第一段开始：文件所在目录也要展开，不能只展开父目录本身
+      if (getSession().tree.dirs[owner]?.status !== "ok") await load(owner);
       for (let i = 0; i < parts.length - 1; i += 1) {
         cur = joinPath(cur, parts[i]);
         setTree((t) => (t.expanded.has(cur) ? t : { ...t, expanded: new Set(t.expanded).add(cur) }));
@@ -195,7 +214,7 @@ export function useTreeLoad(root: string, compact: boolean) {
       }
       return true;
     },
-    [load],
+    [load, roots],
   );
 
   return { dirs, expanded, marks, load, expand, toggle, toggleRow, depthOf, reveal, setExpandedPaths };

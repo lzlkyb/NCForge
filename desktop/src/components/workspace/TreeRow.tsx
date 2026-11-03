@@ -13,6 +13,66 @@ import type { EncodingMark } from "../../lib/workspace";
  * （`handlers` 的一次性外壳 + ref 取最新实现），所以比较真的能命中。
  */
 
+/**
+ * 多工程树里的工程根行。
+ *
+ * 当前工程带「当前」标记：编译 / SVN / 搜索（当前范围）都只作用于它，
+ * 别的工程是可浏览、只读的——点文件会先问要不要切换工作区。
+ */
+export const TreeProjectRow = memo(function TreeProjectRow({
+  name,
+  path,
+  id,
+  level,
+  open,
+  selected,
+  current,
+  badge,
+  onToggle,
+  onContextMenu,
+}: {
+  name: string;
+  path: string;
+  id: string;
+  level: number;
+  open: boolean;
+  selected: boolean;
+  current: boolean;
+  /** 非当前工程显示来路（依赖 / 已提前 / 无 .classpath）；当前工程显示「当前」。 */
+  badge: string;
+  onToggle: (path: string) => void;
+  onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="wb-row wb-row-project"
+      id={id}
+      role="treeitem"
+      tabIndex={-1}
+      aria-level={level}
+      aria-selected={selected}
+      aria-expanded={open}
+      data-current={current || undefined}
+      data-selected={selected || undefined}
+      onClick={() => onToggle(path)}
+      onContextMenu={(e) => onContextMenu(e, path, true)}
+      title={
+        current
+          ? `${path}\n当前工程：编译 / SVN 作用于它`
+          : `${path}\n关联工程：只读浏览，写操作请先切换工作区`
+      }
+    >
+      <Icon name="chevronDown" size={14} className={`wb-row-icon ${open ? "" : "-rotate-90"}`} />
+      <Icon name="folder" size={14} className="wb-row-icon wb-project-icon" />
+      <span className="wb-row-name">{name}</span>
+      <span className="wb-project-badge" data-current={current || undefined}>
+        {badge}
+      </span>
+    </button>
+  );
+});
+
 export const TreeDirRow = memo(function TreeDirRow({
   name,
   path,

@@ -1,4 +1,3 @@
-import { createPortal } from "react-dom";
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
 import type { EncodingMark } from "../../lib/workspace";
 import type { TabMeta } from "../../lib/workspaceSession";
@@ -17,14 +16,15 @@ import { EmptyEditor } from "./EmptyEditor";
 import { ShellStatusBar } from "./ShellStatusBar";
 import { NoWorkspace } from "./NoWorkspace";
 import { ExtractSqlDialog } from "../db/ExtractSqlDialog";
-import { useWorkbenchDock, type FileSlotName } from "./WorkbenchDock";
+import { useWorkbenchDock } from "./WorkbenchDock";
+import { useFileSlot } from "./useFileSlot";
 import { LARGE_FILE_LINES } from "../../lib/largeFile";
 import { Icon } from "../ui/icon";
 import { SearchTab } from "../tabs/SearchTab";
-import { requestOpenFile } from "../../lib/openFileRequest";
 import { setSidebarView, useSidebarView } from "../../lib/sidebarView";
 import { ServiceStatusButton } from "./ServiceStatusButton";
 import type { PanelTab } from "./BottomPanel";
+import type { LinkedProject } from "../../lib/linkedProjects";
 
 /**
  * 文件页四个槽位（树 / 标签条 / 编辑器 / 状态栏）的实际渲染。
@@ -36,6 +36,8 @@ import type { PanelTab } from "./BottomPanel";
 
 export interface FilePaneModel {
   root: string;
+  /** 关联工程（含当前）：多工程树与「全部工程搜索」共用。 */
+  projects: LinkedProject[];
   activeTool: string;
   tabs: TabMeta[];
   activePath: string | null;
@@ -71,6 +73,11 @@ export interface FilePaneActions {
   setPanels: Dispatch<SetStateAction<{ outline: boolean; history: boolean; generate: boolean }>>;
   setPanelOpen: (v: (open: boolean) => boolean) => void;
   applyRoot: (path: string) => Promise<string | null>;
+  /**
+   * 在任意关联工程里打开文件。跨工程的会先保存 / 确认再切工作区；
+   * `pos` 用于搜索命中（行、列）。
+   */
+  openPath: (path: string, pos?: { line?: number; column?: number }) => void;
   compileActive: () => void;
   onDismissLargeHint: (path: string) => void;
   /** 切到某个标签（写会话的 activePath）。 */
@@ -79,22 +86,6 @@ export interface FilePaneActions {
   openRecentRoot: (path: string) => void;
   /** 新建/改名/删除后让文件索引失效（搜索、快速导航的数据源）。 */
   invalidateIndex: () => void;
-}
-
-/**
- * 槽位投递器。
- *
- * 宿主在首帧还没挂上（frame 的 ref 回调比渲染晚一拍），返回 null 即可：
- * `fileHosts` 变化会让 dock context 换新值，订阅它的组件下一帧就进去了。
- * 没有 dock（单测里直接渲染）时退回行内渲染，至少内容还在。
- */
-export function useFileSlot() {
-  const dock = useWorkbenchDock();
-  return (name: FileSlotName, node: ReactNode) => {
-    if (!node) return null;
-    const host = dock?.fileHosts[name];
-    return host ? createPortal(node, host) : dock ? null : node;
-  };
 }
 
 export function FilePaneSlots({
@@ -114,12 +105,12 @@ export function FilePaneSlots({
   // 底部面板要不要让位给文档页，取决于外壳当前的文档槽有没有被占
   const documentOpen = useWorkbenchDock()?.documentOpen ?? false;
   const {
-    root, activeTool, tabs, activePath, active, splitPath, hasUnsaved, activeMark,
+    root, projects, activeTool, tabs, activePath, active, splitPath, hasUnsaved, activeMark,
     showLargeHint, heavyFile, conflictPath, encodingIssue, saving, reveal,
     rootInput, editingRoot, recentRoots, panelOpen, panelTab, panels, compiling, canBack, canForward, treeRef,
   } = model;
   const {
-    setRootInput, setEditingRoot, setPanels, setPanelOpen, applyRoot, compileActive,
+    setRootInput, setEditingRoot, setPanels, setPanelOpen, applyRoot, openPath, compileActive,
     onDismissLargeHint, selectTab, openRecentRoot, invalidateIndex,
   } = actions;
 
@@ -130,7 +121,7 @@ export function FilePaneSlots({
   const servicesPanel = panelTab === "svc";
   /**
    * 底部面板要不要显示，与拆开之前同一条规则：设置页不要；打开文档页（补丁 /
-   * 数据库 / 工程关联）时让位，除非当前是 NC 服务（它的日志就住在底部面板里）。
+   * 数据库）时让位，除非当前是 NC 服务（它的日志就住在底部面板里）。
    */
   const wantPanel = panelOpen && activeTool !== "settings" && (!documentOpen || servicesPanel);
 
@@ -152,11 +143,14 @@ export function FilePaneSlots({
               </button>
             </div>
           </div>
-          <SearchTab onOpenFile={(path, line, column) => requestOpenFile({ path, line, column })} />
+          <SearchTab
+            projects={projects}
+            onOpenFile={(path, line, column) => openPath(path, { line, column })}
+          />
         </>
       ) : (
         <>
-          <TreeHeader root={root} editing={editingRoot} draft={rootInput} unsaved={hasUnsaved}
+          <TreeHeader root={root} projectCount={projects.length} editing={editingRoot} draft={rootInput} unsaved={hasUnsaved}
             recents={recentRoots}
             onDraftChange={setRootInput} onOpen={() => void applyRoot(rootInput)}
             onOpenRecent={openRecentRoot}
@@ -164,8 +158,8 @@ export function FilePaneSlots({
             onCreateFile={() => treeRef.current?.startCreate("file")}
             onCreateDir={() => treeRef.current?.startCreate("dir")}
             onSearch={() => setSidebarView("search")} />
-          <FileTree key={root} ref={treeRef} root={root} activePath={activePath}
-            onOpen={(p) => void session.openFile(p, { preview: true })} onPin={session.pin}
+          <FileTree key={root} ref={treeRef} root={root} projects={projects} activePath={activePath}
+            onOpen={openPath} onPin={session.pin}
             onCreated={(p) => { invalidateIndex(); void session.openFile(p); }}
             onRenamed={(a, b) => { invalidateIndex(); session.handleRenamed(a, b); }}
             onDeleted={(ps) => { invalidateIndex(); session.handleDeleted(ps); }}

@@ -12,6 +12,7 @@ import { TreeViewOptions } from "./TreeViewOptions";
  */
 export function TreeHeader({
   root,
+  projectCount = 1,
   editing,
   draft,
   unsaved,
@@ -25,6 +26,8 @@ export function TreeHeader({
   onSearch,
 }: {
   root: string;
+  /** 关联工程数（含当前）。>1 时在标题下说清「编译 / SVN 只作用于当前」 */
+  projectCount?: number;
   editing: boolean;
   draft: string;
   unsaved: boolean;
@@ -86,6 +89,11 @@ export function TreeHeader({
           </button>
         </div>
       </div>
+      {projectCount > 1 && (
+        <div className="wb-tree-scope">
+          当前 <b>{baseName(root) || root}</b> · 编译 / SVN 只作用于它 · 共 {projectCount} 个关联工程
+        </div>
+      )}
       {editing && (
         <div className="wb-root-edit">
           <Input

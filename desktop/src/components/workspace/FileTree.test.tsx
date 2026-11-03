@@ -7,6 +7,7 @@ import { setSession } from "../../lib/workspaceSession";
 import { setCompactPackages, setRevealOnOpen } from "../../lib/treeViewPrefs";
 import { ViewActivityContext } from "../../lib/viewActivity";
 import { clearBookmarks, loadBookmarks, toggleBookmark } from "../../lib/bookmarks";
+import type { LinkedProject } from "../../lib/linkedProjects";
 
 const mocks = vi.hoisted(() => {
   const fsChanged: {
@@ -46,13 +47,14 @@ const onRenamed = vi.fn();
 const onDeleted = vi.fn();
 const treeRef = createRef<FileTreeHandle>();
 
-const render = async (activePath: string | null = null) => {
+const render = async (activePath: string | null = null, projects?: LinkedProject[]) => {
   await act(async () =>
     root.render(
       <ViewActivityContext.Provider value={true}>
         <FileTree
           ref={treeRef}
           root={ROOT}
+          projects={projects}
           activePath={activePath}
           onOpen={onOpen}
           onCreated={onCreated}
@@ -355,6 +357,73 @@ describe("文件树的右键操作", () => {
       name: "Top.java",
       kind: "file",
     });
+  });
+});
+
+describe("多工程树", () => {
+  const OTHER = "C:\\w\\lib";
+  const project = (name: string, root: string, origin: LinkedProject["origin"], depth: number): LinkedProject => ({
+    name,
+    root,
+    origin,
+    depth,
+    exported: false,
+    classDirs: [],
+    disabled: false,
+    hasClasspath: true,
+  });
+  const PROJECTS = [project("newar", ROOT, "primary", 0), project("lib", OTHER, "classpath", 1)];
+
+  beforeEach(() => {
+    setSession({
+      tree: {
+        root: ROOT,
+        expanded: new Set([ROOT]),
+        marks: {},
+        dirs: {
+          [ROOT]: { status: "ok", items: [{ name: "modules", isDir: true, size: 0 }] },
+          [OTHER]: { status: "ok", items: [{ name: "Util.java", isDir: false, size: 10 }] },
+        },
+      },
+    });
+  });
+
+  const projectRow = (name: string) =>
+    [...container.querySelectorAll(".wb-row-project")].find(
+      (el) => el.querySelector(".wb-row-name")?.textContent === name,
+    );
+
+  it("每个关联工程各占一行，当前工程带标记，展开依赖工程只动它自己", async () => {
+    await render(null, PROJECTS);
+    const current = projectRow("newar")!;
+    const other = projectRow("lib")!;
+    expect(current.getAttribute("data-current")).toBe("true");
+    expect(other.getAttribute("data-current")).toBeNull();
+    expect(current.getAttribute("aria-expanded")).toBe("true");
+    expect(other.getAttribute("aria-expanded")).toBe("false");
+
+    // 当前工程已展开，依赖工程默认收起
+    expect(rowByExact("modules")).toBeTruthy();
+    expect(rowByExact("Util.java")).toBeNull();
+
+    await click(other);
+    expect(rowByExact("Util.java")).toBeTruthy();
+    // 目录已缓存，展开工程行不该再打一次 IPC
+    expect(mocks.invoke).not.toHaveBeenCalledWith("fs_list_dir", { path: OTHER });
+  });
+
+  it("依赖工程的文件只读：菜单没有新建，改名 / 删除是禁用态", async () => {
+    await render(null, PROJECTS);
+    await click(projectRow("lib"));
+    await rightClick(rowByExact("Util.java")!);
+
+    expect(menuItem("新建文件")).toBeUndefined();
+    expect(menuItem("新建文件夹")).toBeUndefined();
+    expect(menuItem("重命名")?.disabled).toBe(true);
+    expect(menuItem("删除")?.disabled).toBe(true);
+    // 只读不挡「打开」「复制路径」这类不写盘的操作
+    expect(menuItem("打开")?.disabled).toBe(false);
+    expect(menuItem("复制路径")).toBeTruthy();
   });
 });
 

@@ -4,6 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProblemsView } from "./ProblemsView";
 import type { UnifiedProblem } from "../../lib/problemList";
+import type { CompileDiagnostic } from "../../lib/compile";
+
+const mocks = vi.hoisted(() => ({ openLinkedDialog: vi.fn() }));
+vi.mock("../../lib/linkedDialog", () => ({ openLinkedDialog: mocks.openLinkedDialog }));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -120,6 +124,38 @@ describe("ProblemsView 行语义", () => {
       ),
     );
     expect(container.textContent).toContain("还没有编译过");
+  });
+});
+
+describe("ProblemsView 诊断行", () => {
+  it("按诊断归属给出去处：被停用去覆盖规则，没产物/产物旧去依赖链", async () => {
+    const diag = (kind: CompileDiagnostic["kind"], project: string): CompileDiagnostic => ({
+      kind,
+      project,
+      message: `${project} 的诊断`,
+      file: null,
+    });
+    await act(async () =>
+      root.render(
+        <ProblemsView
+          problems={[]}
+          diags={[diag("disabled", "pm"), diag("uncompiled", "newar"), diag("stale-class", "EyePortal")]}
+          running={false}
+          compiled
+          onOpenProblem={() => {}}
+          onOpenAt={() => {}}
+        />,
+      ),
+    );
+
+    const acts = [...container.querySelectorAll<HTMLButtonElement>(".wb-diag-act")];
+    expect(acts.map((b) => b.textContent)).toEqual(["覆盖规则", "依赖链", "依赖链"]);
+
+    await act(async () => acts[0].click());
+    expect(mocks.openLinkedDialog).toHaveBeenCalledWith("overrides");
+    await act(async () => acts[1].click());
+    expect(mocks.openLinkedDialog).toHaveBeenCalledWith("chain");
+    expect(mocks.openLinkedDialog).toHaveBeenCalledTimes(2);
   });
 });
 

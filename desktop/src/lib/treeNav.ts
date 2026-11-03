@@ -6,9 +6,17 @@ import type { TreeDirState } from "./workspaceSession";
 export interface FlatRow {
   path: string;
   isDir: boolean;
-  /** 所在目录行；顶层项为 null（根目录本身不占一行）。 */
+  /** 所在目录行；顶层项为 null（单工程时根目录本身不占一行）。 */
   parent: string | null;
   /** 显示名。压缩中间包时会变成 `com.aier.erp`（省略时用路径末段）。 */
+  label?: string;
+  /** 这一行是关联工程的根（多工程树才有），不是普通目录。 */
+  project?: boolean;
+}
+
+/** 一棵树的根：单工程时就是工作区根，多工程时是每个关联工程的根。 */
+export interface TreeRoot {
+  path: string;
   label?: string;
 }
 
@@ -27,12 +35,19 @@ export type TreeNavAction =
  *
  * 必须与 `FileTree` 的渲染口径一致：压缩中间包之后，`com` / `com/aier` 这些中间层
  * 不占行，摊平时也只保留链尾那一行，否则方向键会停在看不见的行上。
+ *
+ * `projectRows` = 多工程树：每棵根先占一行，展开后才是它的子项。单工程保持原样
+ * （根目录本身不占行），否则所有现有行为都会多出一行「工作区根」。
  */
 export function flattenTree(
   dirs: Record<string, TreeDirState>,
   expanded: Set<string>,
-  root: string,
-  opts: { filter?: (name: string) => boolean; compact?: boolean } = {},
+  root: string | TreeRoot[],
+  opts: {
+    filter?: (name: string) => boolean;
+    compact?: boolean;
+    projectRows?: boolean;
+  } = {},
 ): FlatRow[] {
   const out: FlatRow[] = [];
   const filter = opts.filter;
@@ -52,7 +67,15 @@ export function flattenTree(
       }
     }
   };
-  walk(root, null);
+  const roots = typeof root === "string" ? [{ path: root }] : root;
+  for (const r of roots) {
+    if (opts.projectRows) {
+      out.push({ path: r.path, isDir: true, parent: null, label: r.label, project: true });
+      if (expanded.has(r.path)) walk(r.path, r.path);
+    } else {
+      walk(r.path, null);
+    }
+  }
   return out;
 }
 

@@ -219,6 +219,14 @@ pub fn class_roots_with(
     dedupe(dirs)
 }
 
+/// 依赖闭包里的工程条目（不读 NC home）。
+///
+/// 文件树与「全部工程搜索」只关心工程根，不需要 NC home 的类目录统计；走 `graph()`
+/// 会在没配 NC home 的机器上直接失败，一条工程都列不出来。
+pub fn projects(primary: &Path, overrides: &[LinkedOverride]) -> Vec<LinkedProject> {
+    flat_dirs(primary, overrides).1
+}
+
 /// 依赖链的完整视图（界面用）。目录顺序与 `class_roots_with` 逐项相同。
 pub fn graph(primary: &Path, nc_home: &Path, overrides: &[LinkedOverride]) -> LinkedGraph {
     let (project_dirs, projects, extra, notes) = flat_dirs(primary, overrides);

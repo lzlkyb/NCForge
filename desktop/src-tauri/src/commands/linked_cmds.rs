@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::config::LinkedOverrideConfig;
-use crate::eclipse_cp::{self, LinkedGraph, OverrideAction};
+use crate::eclipse_cp::{self, LinkedGraph, LinkedProject, OverrideAction};
 use crate::state::AppState;
 
 /// 解析当前工作区的依赖闭包，返回给「工程关联」页。
@@ -42,6 +42,32 @@ pub async fn linked_projects(
     tauri::async_runtime::spawn_blocking(move || {
         let overrides = eclipse_cp::active_overrides(&cfg.linked_overrides);
         eclipse_cp::graph(&primary, &nc_home, &overrides)
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))
+}
+
+/// 文件树要并排显示的工程根。
+///
+/// 与 `linked_projects` 的区别是**不读 NC home**：它只是类路径目录统计的来源，
+/// 而树只关心工程根。没配 NC home 的机器上 `linked_projects` 会直接失败，
+/// 整棵多工程树会退化成单工程。
+#[tauri::command]
+pub async fn tree_projects(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<LinkedProject>, String> {
+    let cfg = state.config.read().await.clone();
+    let primary = cfg
+        .workspace_root
+        .clone()
+        .map(PathBuf::from)
+        .ok_or_else(|| "尚未选择工作区目录".to_string())?;
+    if !primary.is_dir() {
+        return Err(format!("工作区目录不存在：{}", primary.display()));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let overrides = eclipse_cp::active_overrides(&cfg.linked_overrides);
+        eclipse_cp::projects(&primary, &overrides)
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))

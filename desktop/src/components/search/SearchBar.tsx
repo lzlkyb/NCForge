@@ -16,14 +16,22 @@ export function SearchBar({
   form,
   history,
   loading,
+  projectCount,
+  currentName,
   update,
+  onScope,
   onSearch,
   onKeyDown,
 }: {
   form: SearchForm;
   history: string[];
   loading: boolean;
+  /** 可搜索的关联工程数（含当前，磁盘上存在的才计）。 */
+  projectCount: number;
+  /** 当前工作区名字，用于「当前工程」范围的提示。 */
+  currentName: string;
   update: (patch: Partial<SearchForm>) => void;
+  onScope: (scope: SearchForm["scope"]) => void;
   onSearch: () => void;
   onKeyDown: (e: KeyboardEvent) => void;
 }) {
@@ -49,7 +57,9 @@ export function SearchBar({
             value={form.query}
             onChange={(e) => update({ query: e.target.value })}
             onKeyDown={(e) => onKeyDown(e)}
-            placeholder="在整个工作区搜索（回车）"
+            placeholder={
+              form.scope === "all" ? "搜索全部关联工程（回车）" : "搜索当前工程（回车）"
+            }
             spellCheck={false}
             autoFocus
             list="ncforge-search-history"
@@ -76,6 +86,28 @@ export function SearchBar({
         <Button size="sm" className="h-9 px-3" onClick={onSearch} isLoading={loading} loadingText="搜索中">
           搜索
         </Button>
+      </div>
+
+      {/* 搜索范围：默认全部关联工程。切换会丢弃旧结果（口径不同，留着只会自相矛盾），
+          所以只在没有搜索在跑时可选。 */}
+      <div className="mt-2 flex items-center gap-1.5">
+        <span className="text-[11.5px] text-muted-foreground">范围</span>
+        <ScopeChip
+          on={form.scope === "all"}
+          disabled={loading}
+          onClick={() => onScope("all")}
+          title="当前工程 + .classpath 依赖链上的全部工程（默认）"
+        >
+          全部工程{projectCount > 0 ? ` ${projectCount}` : ""}
+        </ScopeChip>
+        <ScopeChip
+          on={form.scope === "current"}
+          disabled={loading}
+          onClick={() => onScope("current")}
+          title="只搜当前工作区（可替换、可编辑匹配）"
+        >
+          当前工程
+        </ScopeChip>
       </div>
 
       {/* 三个文本开关常显（VS Code 的位置，但不像它那样收进 ⋯） */}
@@ -138,7 +170,9 @@ export function SearchBar({
           );
         })}
         <span className="w-full text-[11px] text-muted-foreground">
-          整个工作区 · 跳过 .svn .git .idea node_modules
+          {form.scope === "all"
+            ? `全部关联工程 · 逐个扫描 · 跳过 .svn .git .idea node_modules`
+            : `${currentName ? `当前工程 ${currentName}` : "当前工作区"} · 跳过 .svn .git .idea node_modules`}
         </span>
       </div>
 
@@ -150,6 +184,38 @@ export function SearchBar({
         </div>
       )}
     </div>
+  );
+}
+
+/** 范围切换：两个互斥的小圆角按钮，样式与文件过滤预设一致。 */
+function ScopeChip({
+  on,
+  disabled,
+  onClick,
+  title,
+  children,
+}: {
+  on: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={on}
+      title={title}
+      className={`h-6 rounded-full border px-2 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        on
+          ? "border-primary/40 bg-primary/10 font-semibold text-primary"
+          : "border-border text-muted-foreground hover:bg-muted"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

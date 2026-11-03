@@ -40,6 +40,38 @@ export interface SearchOptions {
 export const searchWorkspace = (options: SearchOptions) =>
   invoke<SearchOutcome>("search_workspace", { options });
 
+/** 单个工程的搜索结果（`search_projects` 的一项）。`outcome` 里的路径相对 `root`。 */
+export interface ProjectSearch {
+  project: string;
+  /** 工程根绝对路径。 */
+  root: string;
+  outcome: SearchOutcome;
+}
+
+/**
+ * 「全部工程」搜索的结果。
+ *
+ * 后端按工程逐个扫描并分别计时：一个工程超时/读盘失败不该把其余工程的结果一起吞掉，
+ * 所以错误单独收集，界面才能说清「哪几个工程没搜完」。
+ */
+export interface ProjectsSearchOutcome {
+  projects: ProjectSearch[];
+  /** 读取失败的工程（`工程名: 原因`），其余工程的结果仍然有效。 */
+  errors: string[];
+  /** 任一工程（或总预算）提前停下。 */
+  truncated: boolean;
+  elapsedMs: number;
+}
+
+/** 同一个文件可能出现在多个工程里，结果必须带上工程归属才能拼出绝对路径。 */
+export interface ProjectSearchHit extends SearchHit {
+  project: string;
+  root: string;
+}
+
+export const searchProjects = (options: SearchOptions) =>
+  invoke<ProjectsSearchOutcome>("search_projects", { options });
+
 /**
  * 「全部替换」的汇总，与 Rust `search::ReplaceOutcome` 一一对应（camelCase）。
  */

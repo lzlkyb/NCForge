@@ -17,6 +17,9 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   confirmDisabled?: boolean;
+  /** 第三个动作（如「放弃改动并关闭」），放在取消与确认之间；由调用方收尾。 */
+  extraLabel?: string;
+  onExtra?: () => void;
   /**
    * 层级，默认 1000（与 Modal 默认一致，P2-5 统一阶梯）。
    *
@@ -43,6 +46,8 @@ export function ConfirmDialog({
   confirmLabel,
   cancelLabel = "取消",
   confirmDisabled = false,
+  extraLabel,
+  onExtra,
   zIndex = 1000,
   onCancel,
   onConfirm,
@@ -68,6 +73,11 @@ export function ConfirmDialog({
         {description && <p className="mb-3 text-sm text-muted-foreground">{description}</p>}
         {children}
         <div className="mt-4 flex justify-end gap-2 dlg-act">
+          {extraLabel && onExtra && (
+            <Button variant="ghost" size="sm" disabled={closing} onClick={onExtra}>
+              {extraLabel}
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => dismiss()}>
             {cancelLabel}
           </Button>

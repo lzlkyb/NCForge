@@ -1,6 +1,5 @@
 import {
   useCallback,
-  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -9,21 +8,29 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { toast } from "../ui/toast";
-import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { ContextMenu } from "./ContextMenu";
 import { TreeFilterBar, TreeDeleteConfirm } from "./TreeChrome";
 import { TreeRows, type TreeRowsCtx } from "./TreeRows";
-import { buildTreeMenu } from "./treeMenu";
+import { TreeProjectRows } from "./TreeProjectRows";
 import { useTreeDelete } from "./useTreeDelete";
 import { useTreeEdit } from "./useTreeEdit";
 import { useTreeLoad } from "./useTreeLoad";
-import { dirName, type NewEntryKind } from "../../lib/workspace";
+import { useTreeMenu } from "../../hooks/useTreeMenu";
+import { useTreeLocate } from "../../hooks/useTreeLocate";
+import { type NewEntryKind } from "../../lib/workspace";
 import { flattenTree, treeKeyAction, treeRowId as rowId } from "../../lib/treeNav";
 import { countBookmarks, useBookmarks } from "../../lib/bookmarks";
 import { useCompactPackages, useRevealOnOpen } from "../../lib/treeViewPrefs";
+import { isUnderPath } from "../../lib/treeProjects";
+import type { LinkedProject } from "../../lib/linkedProjects";
 
 interface Props {
   root: string;
+  /**
+   * 关联工程（含当前工作区）。多于一个时树把各工程并排显示；不给或只有一个时
+   * 保持原样（根目录本身不占行）。
+   */
+  projects?: LinkedProject[];
   activePath: string | null;
   onOpen: (path: string) => void;
   /** 双击文件：固定预览标签。 */
@@ -43,9 +50,6 @@ export interface FileTreeHandle {
   startCreate: (kind: NewEntryKind) => void;
 }
 
-/** 自动定位的防抖：连着点标签时不要每个都展开一遍。 */
-const REVEAL_DELAY_MS = 120;
-
 /**
  * 懒加载文件树：展开某个目录时才向后端请求这一层，不预读整棵树
  * （newar 约 7000 个源文件、几十个模块，整棵预读会卡首屏）。
@@ -60,20 +64,35 @@ const REVEAL_DELAY_MS = 120;
  * 状态要是留在 useState 里，从搜索页跳回来就得重新点开一遍。
  */
 export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
-  { root, activePath, onOpen, onPin, onCreated, onRenamed, onDeleted, openPaths },
+  { root, projects, activePath, onOpen, onPin, onCreated, onRenamed, onDeleted, openPaths },
   ref,
 ) {
   const [selected, setSelected] = useState<{ path: string; isDir: boolean } | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(
-    null,
-  );
   const [filter, setFilter] = useState("");
   const compact = useCompactPackages();
   const revealOnOpen = useRevealOnOpen();
-  const { dirs, expanded, marks, load, expand, toggleRow, depthOf, reveal } = useTreeLoad(root, compact);
+  const multi = (projects?.length ?? 0) > 1;
+  // 稳定引用：它进了 useTreeLoad.reveal 的依赖，每帧换新会让自动定位反复触发
+  const rootRows = useMemo(
+    () => (multi ? projects!.filter((p) => p.root).map((p) => ({ path: p.root!, label: p.name })) : []),
+    [multi, projects],
+  );
+  const roots = useMemo(
+    () => (multi ? rootRows.map((r) => r.path) : [root]),
+    [multi, rootRows, root],
+  );
+  const { dirs, expanded, marks, load, expand, toggle, toggleRow, depthOf, reveal } = useTreeLoad(
+    root,
+    compact,
+    roots,
+  );
   const bookmarks = useBookmarks(root);
   // 行只拿一个数字（条数），值没变时行组件的 memo 仍然命中
   const bookmarkCounts = useMemo(() => countBookmarks(bookmarks), [bookmarks]);
+  const isEditable = useCallback(
+    (path: string) => isUnderPath(path, root),
+    [root],
+  );
   const { editing, editError, busy, beginCreate, beginRename, cancelEdit, commitEdit } = useTreeEdit({
     root,
     dirs,
@@ -92,73 +111,32 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     setSelected,
   });
 
-  // ---- 自动定位 ----
+  // ---- 定位 ----
 
-  /** 行是异步渲染出来的：两帧之后再滚，避免"滚到了还没出现的行"。 */
-  const scrollToRow = (path: string) => {
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() =>
-        document.getElementById(rowId(path))?.scrollIntoView({ block: "nearest" }),
-      ),
-    );
-  };
-
-  const locate = useCallback(
-    async (path: string | null) => {
-      if (!path) return;
-      // 被筛掉的行定位过去等于"看不见的成功"，先清筛选
-      setFilter("");
-      if (await reveal(path)) scrollToRow(path);
-    },
-    [reveal],
-  );
-
-  // 开关只管「自动」这一路；标签右键 / 命令面板的「在文件树中显示」是显式动作，永远生效
-  useEffect(() => {
-    if (!activePath || !revealOnOpen) return;
-    const t = window.setTimeout(() => void locate(activePath), REVEAL_DELAY_MS);
-    return () => window.clearTimeout(t);
-  }, [activePath, revealOnOpen, locate]);
-
-  // 「在文件树中显示」命令（标签右键 / 命令面板）走同一份定位逻辑
-  useEffect(() => {
-    const h = (e: Event) => void locate((e as CustomEvent<string>).detail);
-    window.addEventListener("ncforge-reveal-in-tree", h);
-    return () => window.removeEventListener("ncforge-reveal-in-tree", h);
-  }, [locate]);
+  // 清筛选的引用要稳定：它进了 locate 的依赖，每帧换新会让自动定位反复触发
+  const clearFilter = useCallback(() => setFilter(""), []);
+  useTreeLocate(reveal, activePath, revealOnOpen, clearFilter);
 
   // ---- 菜单 ----
 
-  const copyPath = async (path: string) => {
-    try {
-      await navigator.clipboard.writeText(path);
-      toast("已复制路径", "success");
-    } catch {
-      toast("复制失败：系统剪贴板不可用", "error");
-    }
-  };
-
-  const menuItems = (m: { path: string; isDir: boolean }): ContextMenuItem[] =>
-    buildTreeMenu({
-      target: m,
-      root,
-      onOpen,
-      onBeginCreate: beginCreate,
-      onBeginRename: beginRename,
-      onDelete: (t) => void askDelete(t),
-      onCopyPath: (p) => void copyPath(p),
-      onRefresh: (t) => void load(t.isDir ? t.path : dirName(t.path)),
-    });
-
-  const openMenu = (e: ReactMouseEvent, path: string, isDir: boolean) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setSelected({ path, isDir });
-    setMenu({ x: e.clientX, y: e.clientY, path, isDir });
-  };
+  const { menu, menuItems, openMenu, closeMenu } = useTreeMenu({
+    root,
+    isEditable,
+    onOpen,
+    beginCreate,
+    beginRename,
+    askDelete,
+    load,
+    setSelected,
+  });
 
   useImperativeHandle(ref, () => ({
-    startCreate: (kind) => beginCreate(selected ?? { path: root, isDir: true }, kind),
+    startCreate: (kind) => {
+      // 选中的是关联工程的目录时，新建会落到当前工作区根：后端只允许写当前工程
+      const target =
+        selected && isEditable(selected.path) ? selected : { path: root, isDir: true };
+      beginCreate(target, kind);
+    },
   }));
 
   // ---- 键盘与筛选 ----
@@ -168,8 +146,13 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     [filter],
   );
   const flat = useMemo(
-    () => flattenTree(dirs, expanded, root, { filter: filterFn, compact }),
-    [dirs, expanded, root, filterFn, compact],
+    () =>
+      flattenTree(dirs, expanded, multi ? rootRows : root, {
+        filter: filterFn,
+        compact,
+        projectRows: multi,
+      }),
+    [dirs, expanded, root, rootRows, multi, filterFn, compact],
   );
 
   /**
@@ -201,11 +184,15 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
       if (act.kind === "select") setSelected({ path: act.path, isDir: act.isDir });
       else if (act.kind === "toggle") {
         const row = flat.find((r) => r.path === act.path);
-        toggleRow(act.path, row?.parent ?? root);
+        // 工程根行不参与压缩链：点一下只展开这一层
+        if (row?.project) toggle(act.path);
+        else toggleRow(act.path, row?.parent ?? root);
       } else onOpen(act.path);
       return;
     }
     if (!selected) return;
+    // 关联工程只读：F2 / Del 在后端必被拒，这里直接不接
+    if (!isEditable(selected.path)) return;
     if (e.key === "F2") {
       e.preventDefault();
       beginRename(selected);
@@ -227,16 +214,20 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
    * 做法是 ref 里存最新实现、外层给一次性外壳——行组件拿到的是稳定引用，调用的
    * 永远是当前闭包。
    */
-  const latest = useRef({ toggleRow, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected });
-  latest.current = { toggleRow, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected };
+  const latest = useRef({ toggleRow, toggle, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected, isEditable });
+  latest.current = { toggleRow, toggle, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected, isEditable };
   const handlers = useMemo(
     () => ({
       onToggle: (tail: string, parent: string) => latest.current.toggleRow(tail, parent),
+      onProjectToggle: (path: string) => latest.current.toggle(path),
       onActivate: (path: string) => {
         latest.current.setSelected({ path, isDir: false });
         latest.current.onOpen(path);
       },
-      onPin: (path: string) => latest.current.onPin?.(path),
+      // 双击固定预览只对当前工程的文件有意义：别的工程还没打开，点了会先切工作区
+      onPin: (path: string) => {
+        if (latest.current.isEditable(path)) latest.current.onPin?.(path);
+      },
       onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) =>
         latest.current.openMenu(e, path, isDir),
       onCommitEdit: (v: string) => void latest.current.commitEdit(v),
@@ -275,11 +266,15 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
         }}
       >
         {filter && <TreeFilterBar filter={filter} count={flat.length} onClear={() => setFilter("")} />}
-        <TreeRows dir={root} depth={0} ctx={ctx} />
+        {multi ? (
+          <TreeProjectRows projects={projects!} root={root} ctx={ctx} />
+        ) : (
+          <TreeRows dir={root} depth={0} ctx={ctx} />
+        )}
       </div>
 
       {menu && (
-        <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} onClose={() => setMenu(null)} />
+        <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} onClose={closeMenu} />
       )}
 
       <TreeDeleteConfirm

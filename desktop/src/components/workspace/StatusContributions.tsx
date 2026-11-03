@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { setSession, useWorkspaceSelector } from "../../lib/workspaceSession";
+import { setSession, useWorkspaceRoot, useWorkspaceSelector } from "../../lib/workspaceSession";
 import { useCodeDiags } from "../../lib/diagStore";
 import { countErrors, mergeProblems } from "../../lib/problemList";
 import { svnInfo, svnStatus } from "../../lib/svn";
 import { connOf, rtOf, useDbSelector } from "../../lib/dbStore";
+import { openLinkedDialog } from "../../lib/linkedDialog";
 import { Icon } from "../ui/icon";
 
 /**
@@ -20,6 +21,7 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
   const compiling = useWorkspaceSelector((s) => s.compiling);
   const compileResult = useWorkspaceSelector((s) => s.compileResult);
   const diags = useCodeDiags();
+  const root = useWorkspaceRoot();
 
   const svnOn = activeTool === "svn";
   const svn = useQuery({
@@ -94,6 +96,17 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
               {warnings}
             </span>
           )}
+        </button>
+      )}
+      {activeTool === "files" && root && (
+        <button
+          type="button"
+          className="wb-status-chip"
+          title="多工程依赖链 / 覆盖规则 / 产物检查"
+          onClick={() => openLinkedDialog("chain")}
+        >
+          <Icon name="plug" size={11} />
+          工程关联
         </button>
       )}
       {svnOn && ready && (

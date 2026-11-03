@@ -2,29 +2,19 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LinkedProjectsTab } from "./LinkedProjectsTab";
+import { LinkedProjectsPanel } from "./LinkedProjectsPanel";
+import { clearLinkedGraphCache } from "../../hooks/useLinkedGraph";
+import { setSession } from "../../lib/workspaceSession";
 import type { LinkedGraph, LinkedOverride } from "../../lib/linkedProjects";
+import type { LinkedSection } from "../../lib/linkedDialog";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   toast: vi.fn(),
-  unsaved: vi.fn((): unknown[] => []),
-  saveAll: vi.fn(async () => ({ saved: [], failed: [] })),
-  applyWorkspace: vi.fn(async (p: string) => p),
 }));
 
-vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-}));
 vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
 vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
-vi.mock("../../lib/saveAllDirty", () => ({
-  collectUnsaved: () => mocks.unsaved(),
-  saveAllDirty: () => mocks.saveAll(),
-}));
-vi.mock("../../lib/switchWorkspace", () => ({
-  applyWorkspace: (p: string) => mocks.applyWorkspace(p),
-}));
 
 const dirs = (n: number, prefix = "C:\\x") =>
   Array.from({ length: n }, (_, i) => `${prefix}\\d${i}`);
@@ -119,9 +109,12 @@ const invokeImpl = async (cmd: string, args?: Record<string, unknown>) => {
 
 let root: Root;
 let container: HTMLDivElement;
+const scrollTo = vi.fn();
 
-const render = async () => {
-  await act(async () => root.render(<LinkedProjectsTab />));
+const render = async (section: LinkedSection = "chain", active = true) => {
+  await act(async () =>
+    root.render(<LinkedProjectsPanel section={section} active={active} />),
+  );
   await act(async () => {}); // 等 linked_projects + get_config 落回状态
 };
 
@@ -137,9 +130,16 @@ const callsOf = (cmd: string) => mocks.invoke.mock.calls.filter(([c]) => c === c
 
 beforeEach(() => {
   vi.clearAllMocks();
+  clearLinkedGraphCache();
+  setSession({ root: "C:\\work\\aier\\EyePortal" });
   stored = [];
   chainChanged = false;
   mocks.invoke.mockImplementation(invokeImpl);
+  Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+    configurable: true,
+    writable: true,
+    value: scrollTo,
+  });
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -148,11 +148,16 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  delete (HTMLElement.prototype as { scrollTo?: unknown }).scrollTo;
+  setSession({ root: null });
 });
 
-describe("工程关联页", () => {
+describe("工程关联面板", () => {
   it("按有效顺序列出依赖链，并显示目录数、追加目录与解析说明", async () => {
     await render();
+
+    // 根目录要显式带出去：不带就去读配置里的 workspace_root，两者可能不一致
+    expect(mocks.invoke).toHaveBeenCalledWith("linked_projects", { root: "C:\\work\\aier\\EyePortal" });
 
     const names = rows().map((li) => li.querySelector(".lnk-name")?.textContent?.trim());
     expect(names).toEqual(["EyePortal", "pm", "newar"]);
@@ -278,5 +283,31 @@ describe("工程关联页", () => {
     expect(container.textContent).toContain("依赖链已经变了");
     // 结论本身没被丢掉（用户刚等完十几秒，直接清空等于白等）
     expect(container.querySelectorAll(".lnk-chk-item")).toHaveLength(2);
+  });
+
+  it("关着不读盘；打开才读；60 秒内重开走缓存不再扫", async () => {
+    await render("chain", false);
+    expect(callsOf("linked_projects")).toHaveLength(0);
+
+    await render("chain", true);
+    expect(callsOf("linked_projects")).toHaveLength(1);
+
+    // 关掉再打开：缓存还新鲜，不能重新读盘
+    await render("chain", false);
+    await render("chain", true);
+    expect(callsOf("linked_projects")).toHaveLength(1);
+
+    // 显式「重新读取」必须绕过缓存
+    await act(async () => buttonIn(container, "重新读取")!.click());
+    expect(callsOf("linked_projects")).toHaveLength(2);
+  });
+
+  it("从问题面板进来：打开后滚到请求的区块（产物检查），而不是停在顶部", async () => {
+    await render("artifacts");
+    expect(scrollTo).toHaveBeenCalled();
+    const anchors = [...container.querySelectorAll<HTMLElement>(".lnk-anchor")];
+    expect(anchors).toHaveLength(3);
+    expect(anchors[2].classList.contains("lnk-flash")).toBe(true);
+    expect(anchors[0].classList.contains("lnk-flash")).toBe(false);
   });
 });

@@ -3,15 +3,17 @@ import { useEffect, useRef, useState } from "react";
 import "../../workspace.css";
 import { Skeleton } from "../ui/Skeleton";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import { toast } from "../ui/toast";
 import { BottomPanel } from "../workspace/BottomPanel";
 import { GenerateDialog } from "../workspace/GenerateDialog";
 import { RenameDialog } from "../workspace/RenameDialog";
-import { EmptyProjectSlots, FilePaneSlots, useFileSlot } from "../workspace/FilePaneSlots";
+import { EmptyProjectSlots, FilePaneSlots } from "../workspace/FilePaneSlots";
+import { useFileSlot } from "../workspace/useFileSlot";
+import { SwitchProjectDialog } from "../workspace/SwitchProjectDialog";
 import { ServicesTab } from "./ServicesTab";
 import type { FileTreeHandle } from "../workspace/FileTree";
 import { baseName, getWorkspace } from "../../lib/workspace";
-import { applyWorkspace } from "../../lib/switchWorkspace";
+import { useTreeProjects } from "../../hooks/useTreeProjects";
+import { useProjectSwitch } from "../../hooks/useProjectSwitch";
 import { compileCancel } from "../../lib/compile";
 import { useFileSession } from "../../hooks/useFileSession";
 import { useModuleCompile } from "../../hooks/useModuleCompile";
@@ -20,14 +22,13 @@ import { useLocalHistorySweep } from "../../hooks/useLocalHistorySweep";
 import { useTabPersistence, useTabRestore, useTabSessionKeys } from "../../hooks/useTabSession";
 import { getRecentRoots } from "../../lib/recentRoots";
 import { isUnsaved } from "../../lib/tabDirty";
-import { ensureFilesSaved } from "../../lib/terminatePreflight";
 import { useLangWiring } from "../../hooks/useLangWiring";
+import { useProblemJump } from "../../hooks/useProblemJump";
 import { useBreakpointsRoot } from "../../hooks/useBreakpointsRoot";
 import { setRenameRequest, setGenerateRequest } from "../../lib/editorActions";
 import { invalidateFileIndex } from "../../lib/fileIndex";
-import { getCursor } from "../../lib/cursorStore";
 import { getCodeDiags, useCodeDiags } from "../../lib/diagStore";
-import { mergeProblems, nextProblem } from "../../lib/problemList";
+import { mergeProblems } from "../../lib/problemList";
 import { useNav } from "../../lib/navHistory";
 import { LARGE_FILE_LINES } from "../../lib/largeFile";
 import {
@@ -80,8 +81,19 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
 
   // 标题栏的「新建文件 / 新建文件夹」按钮：交给文件树，由它决定建在哪个目录下
   const treeRef = useRef<FileTreeHandle>(null);
+  // 关联工程：多工程树、跨工程打开的确认框与「全部工程搜索」共用这一份列表
+  const { projects } = useTreeProjects(root ?? null);
 
   const session = useFileSession();
+  // 跨工程打开 / 切换工作区（含保存确认与确认框）统一在 hook 里
+  const { switchTarget, setSwitchTarget, applyRoot, openPath, switchAndOpen } = useProjectSwitch({
+    root: root ?? null,
+    projects,
+    queryClient,
+    setRoot,
+    setEditingRoot,
+    openFile: session.openFile,
+  });
   // 标签会话：重启恢复、快照落盘、Ctrl+Shift+T / Ctrl+Tab
   useTabRestore(root, session.openFile);
   useTabPersistence(root, tabs, activePath, splitPath);
@@ -97,17 +109,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   const codeDiags = useCodeDiags();
   const nav = useNav();
   const { compileActive } = useModuleCompile();
-
-  /** 跳上/下一条问题：位置取执行时刻的光标，不订阅 useCursor（那会让整页随方向键重渲染）。 */
-  const jumpToProblem = (dir: 1 | -1) => {
-    const list = mergeProblems(compileResult?.problems, getCodeDiags());
-    const p = nextProblem(list, activePath ? { path: activePath, line: getCursor().line } : null, dir);
-    if (!p) {
-      toast("当前没有可跳转的问题", "info");
-      return;
-    }
-    void openAt(p.path, p.line);
-  };
+  const jumpToProblem = useProblemJump(compileResult?.problems, activePath, openAt);
 
   // 换文件时把弹层收起来：留着它就是「另一个文件的符号/版本」压在代码上，容易点错
   useEffect(() => {
@@ -126,9 +128,9 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   }, []);
 
   useEffect(() => {
-    // 只在「还没读过」时写入：启动那一瞬间用户可能已经在「工程关联」里切过工作区
-    // （那边已经 `setSession({ root })`），而这条更早发出的 getWorkspace 若这时才回来，
-    // 会把新 root 覆盖回旧值——文件树按旧目录重建、SVN/补丁的 query key 也跟着退回去。
+    // 只在「还没读过」时写入：会话里的 root 可能已被更早的入口写好（最近工作区恢复等），
+    // 而这条更早发出的 getWorkspace 若这时才回来，会把新 root 覆盖回旧值——
+    // 文件树按旧目录重建、SVN/补丁的 query key 也跟着退回去。
     getWorkspace()
       .then((r) => {
         if (getSession().root === undefined) setRoot(r);
@@ -161,24 +163,6 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
     // 只数能跳的：全是 info 建议时这道命令没有目标，nextProblem 也只会返回 null
     hasProblems: () => mergeProblems(compileResult?.problems, getCodeDiags()).some((p) => p.severity !== "info"),
   });
-
-  const applyRoot = async (path: string): Promise<string | null> => {
-    // 切换会 closeModel 掉全部标签：没落盘的修改必须先问用户，与「工程关联」页的切换一致
-    if (!(await ensureFilesSaved("切换工程"))) return null;
-    try {
-      // 切换的副作用（关模型 / 停 jdt.ls / 清会话 / 失效 svn 缓存）统一在 lib 里，
-      // 「工程关联」页用的是同一份——两边各写一套必然分叉
-      const shown = await applyWorkspace(path, queryClient);
-      setRoot(shown);
-      setEditingRoot(false);
-      return null;
-    } catch (e) {
-      const message = `无法打开目录：${e}`;
-      // 返回值给引导页留在输入框下方，toast 给树头 / 最近工作区这些没有行内位置的入口
-      toast(message, "error");
-      return message;
-    }
-  };
 
   const panel = (
     <BottomPanel root={root ?? ""} tab={panelTab} onTab={setPanelTab}
@@ -234,6 +218,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
         output={panel}
         model={{
           root,
+          projects,
           activeTool,
           tabs,
           activePath,
@@ -268,6 +253,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           setPanels,
           setPanelOpen,
           applyRoot,
+          openPath,
           compileActive,
           onDismissLargeHint: (p) => setSession({ largeHintDismissed: (v) => [...v, p] }),
           selectTab: (p) => setSession({ activePath: p }),
@@ -291,6 +277,17 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
         onConfirm={() => {
           if (closingPath) session.closeTab(closingPath, true);
           session.cancelClose();
+        }}
+      />
+
+      <SwitchProjectDialog
+        open={switchTarget !== null}
+        from={root}
+        to={switchTarget?.project ?? null}
+        unsavedCount={tabs.filter(isUnsaved).length}
+        onCancel={() => setSwitchTarget(null)}
+        onConfirm={() => {
+          if (switchTarget) void switchAndOpen(switchTarget);
         }}
       />
     </>

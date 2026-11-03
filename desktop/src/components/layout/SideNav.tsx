@@ -28,7 +28,7 @@ export type NavItem = {
  *    settings 生成 Ctrl+1~N+1 快捷键表，改顺序/增删项只改这一处，避免
  *    「侧栏顺序」与「快捷键顺序」两处漂移。
  * 🔴 新项只能追加在末尾：插到中间会把既有 Ctrl+2/3/4 全改一遍，是破坏性变更
- *    （加「工程关联」时 Ctrl+7 就从设置变成了它，设置挪到 Ctrl+8）。
+ *    （「工程关联」从页签改成弹框后，它空出的 Ctrl+4 由 NC 日志接上）。
  */
 /** 页面 key → 中文名（状态栏等共享位置用，避免再抄一份页面表）。 */
 export const WORKSPACE_LABELS: Record<string, string> = { settings: "设置" };
@@ -40,8 +40,8 @@ export const WORKSPACE_NAV: NavItem[] = [
   // 补丁打包不再是独立页签：它是版本控制页里的「打包补丁」视图（同一份工作副本改动）。
   { key: "svn", label: "版本控制", icon: "gitBranch" },
   { key: "db", label: "数据库", icon: "database" },
-  { key: "linked", label: "工程关联", icon: "plug" },
   { key: "logs", label: "NC 日志", icon: "log" },
+  // 工程关联不是页签：入口在代码页状态栏、问题面板诊断行与命令面板（弹框）。
   // 数据字典不再是主导航项：它是数据库页的一种文档标签（读的就是连接树选中的库）。
 ];
 

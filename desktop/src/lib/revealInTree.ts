@@ -8,7 +8,7 @@ export const REVEAL_IN_TREE_EVENT = "ncforge-reveal-in-tree";
 /** jar 内的虚拟文件（`jdt://`）不在树里，直接忽略而不是弹一句"找不到"。 */
 export function revealInTree(path: string | null): void {
   if (!path || path.startsWith("jdt://")) return;
-  // 先切回文件页：树可能正被别的工具页挡着（服务/数据库/工程关联）。
+  // 先切回文件页：树可能正被别的工具页挡着（服务/数据库）。
   // 切换是同步 setState，紧接着派发定位事件即可——树本身一直挂着，不需要等重挂载。
   window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "files" }));
   window.dispatchEvent(new CustomEvent(REVEAL_IN_TREE_EVENT, { detail: path }));

@@ -3,6 +3,7 @@ import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { baseName } from "../../lib/workspace";
 import { copyText } from "../../lib/utils";
+import { openLinkedDialog, type LinkedSection } from "../../lib/linkedDialog";
 import type { CompileDiagnostic, Problem } from "../../lib/compile";
 import {
   filterProblems,
@@ -33,6 +34,13 @@ const FILTERS: { key: ProblemFilter; label: string }[] = [
 
 const severityClass = (s: UnifiedProblem["severity"]) =>
   s === "error" ? "wb-prow-err" : s === "info" ? "wb-prow-info" : "wb-prow-warn";
+
+/**
+ * 诊断行上「去处理」的落点：停用要去覆盖表取消停用；没产物 / 产物旧要先看依赖链
+ * 是怎么排的。其余档（工程级 stale / no-output）不来自编译，不在这里给入口。
+ */
+const diagTarget = (kind: CompileDiagnostic["kind"]): LinkedSection | null =>
+  kind === "disabled" ? "overrides" : kind === "uncompiled" || kind === "stale-class" ? "chain" : null;
 
 /**
  * 「问题」页的主体：筛选、按文件分组、复制全部，以及编译诊断与代码检查行。
@@ -148,18 +156,31 @@ export function ProblemsView({ problems, diags, running, compiled, onOpenProblem
           ))
         : shown.map((p, i) => row(p, `${p.path}|${p.line}|${i}`))}
 
-      {diags.map((d, i) => (
-        // 不可点：源码可能在关联工程里（工作区之外），点开会被路径守卫挡住，
-        // 与其弹个错不如把路径摆出来让人自己去看
-        <div key={`d${i}`} className="wb-prow wb-diag" data-kind={d.kind}>
-          <Icon name="info" size={14} className="wb-prow-warn" />
-          <span className="wb-prow-msg">
-            {d.message}
-            {d.file && <span className="wb-diag-path">{d.file}</span>}
-          </span>
-          <span className="wb-prow-loc">{d.project}</span>
-        </div>
-      ))}
+      {diags.map((d, i) => {
+        const target = diagTarget(d.kind);
+        return (
+          // 行本身不可点：源码可能在关联工程里（工作区之外），点开会被路径守卫挡住，
+          // 与其弹个错不如把路径摆出来让人自己去看；能去工程关联里处理的给一个去处。
+          <div key={`d${i}`} className="wb-prow wb-diag" data-kind={d.kind}>
+            <Icon name="info" size={14} className="wb-prow-warn" />
+            <span className="wb-prow-msg">
+              {d.message}
+              {d.file && <span className="wb-diag-path">{d.file}</span>}
+            </span>
+            <span className="wb-prow-loc">{d.project}</span>
+            {target && (
+              <button
+                type="button"
+                className="wb-diag-act"
+                title="在「工程关联」里处理"
+                onClick={() => openLinkedDialog(target)}
+              >
+                {target === "overrides" ? "覆盖规则" : "依赖链"}
+              </button>
+            )}
+          </div>
+        );
+      })}
 
       {problems.some((p) => p.source === "inspect") && (
         <div className="wb-panel-note">

@@ -15,6 +15,7 @@ import { setSideOpen, toggleRail, toggleSide, useRailExpanded } from "./lib/layo
 import { setSidebarView } from "./lib/sidebarView";
 import { openServicePanel } from "./lib/servicePanel";
 import { openPalette, usePalette } from "./lib/paletteStore";
+import { openLinkedDialog } from "./lib/linkedDialog";
 import { ShortcutSheet } from "./components/layout/ShortcutSheet";
 import { registerCommands } from "./lib/commandRegistry";
 import { setSession } from "./lib/workspaceSession";
@@ -38,6 +39,7 @@ import { useTableLookup } from "./hooks/useTableLookup";
 import { useAppHidden } from "./lib/appVisibility";
 import { Skeleton } from "./components/ui/Skeleton";
 import { DbConfirmHost } from "./components/db/DbConfirmHost";
+import { LinkedDialogHost } from "./components/linked/LinkedDialogHost";
 import { wireQuitGuard } from "./lib/quitGuard";
 
 // 非首屏 Tab 懒加载：减小首屏 JS，切到对应 Tab 时才加载（fallback 用骨架屏）。
@@ -54,10 +56,7 @@ const SvnTab = lazy(() =>
   import("./components/tabs/SvnTab").then((m) => ({ default: m.SvnTab })),
 );
 const DbTab = lazy(() => import("./components/tabs/DbTab").then((m) => ({ default: m.DbTab })));
-// 工程关联页：读盘解析每个工程的 .classpath，只在切过去时加载。
-const LinkedProjectsTab = lazy(() =>
-  import("./components/tabs/LinkedProjectsTab").then((m) => ({ default: m.LinkedProjectsTab })),
-);
+// 工程关联不再是页签：入口在代码页状态栏 / 问题面板 / 命令面板，弹框本身懒加载。
 // NC 日志页：要读 5MB 级的日志文件并归因，切过去才加载。
 const LogTab = lazy(() => import("./components/tabs/LogTab").then((m) => ({ default: m.LogTab })));
 // 数据字典已并进数据库页的字典标签（见 DbTab / DictWorkspace），不再单独成页。
@@ -71,7 +70,7 @@ const QuickPalette = lazy(() =>
  *
  * settings 不在 WORKSPACE_NAV 里——它在侧栏 foot 单独渲染（带更新未读红点），
  * 但键盘用户同样需要一键直达，故快捷键序列在 App 层追加，不动侧栏数据源。
- * 加导航项会把它往后挤一位（补丁 / 数据字典并入对应页后，设置从 Ctrl+10 变 Ctrl+6）。
+ * 加导航项会把它往后挤一位（补丁 / 数据字典 / 工程关联并入别处后，设置从 Ctrl+10 变 Ctrl+5）。
  */
 const HOTKEY_TABS: string[] = [...WORKSPACE_NAV.map((n) => n.key), "settings"];
 
@@ -232,7 +231,18 @@ function AppContent() {
         run: openPatchPage,
       },
       go("db", "数据库"),
-      go("linked", "工程关联"),
+      {
+        id: "go.linked",
+        title: "打开：工程关联",
+        hint: "依赖链 · 覆盖规则 · 产物检查",
+        run: () => openLinkedDialog("chain"),
+      },
+      {
+        id: "go.linked.artifacts",
+        title: "打开：检查工程产物",
+        hint: "工程关联 · 产物检查",
+        run: () => openLinkedDialog("artifacts"),
+      },
       go("logs", "NC 日志"),
       { id: "go.dict", title: "转到：数据字典", hint: "数据库 · 数据字典", run: openDict },
       go("settings", "设置"),
@@ -247,8 +257,8 @@ function AppContent() {
     ]);
   }, [openSearch, openDict]);
   // 其它页（如 Java 编辑器里「在数据库中执行此 SQL」）要切页时发这个事件，detail 是页 key。
-  // 老的 "search" / "services" / "patch" / "dict" 页 key 仍然兼容：转到文件页的对应视图 /
-  // 面板、版本控制页的打包视图，或数据库页的字典标签。
+  // 老的 "search" / "services" / "patch" / "dict" / "linked" 页 key 仍然兼容：
+  // 转到文件页的对应视图 / 面板、版本控制页的打包视图、数据库页的字典标签，或工程关联弹框。
   useEffect(() => {
     const go = (e: Event) => {
       const tab = (e as CustomEvent<string>).detail;
@@ -256,6 +266,7 @@ function AppContent() {
       else if (tab === "services") openServicePanel();
       else if (tab === "patch") openPatchPage();
       else if (tab === "dict") openDict();
+      else if (tab === "linked") openLinkedDialog("chain");
       else navRef.current(tab);
     };
     window.addEventListener("ncforge-navigate", go);
@@ -381,6 +392,8 @@ function AppContent() {
       )}
       {/* 数据库/退出确认的弹框挂在最外层：任何页面（含文件页）点 X 都要能弹出来 */}
       <DbConfirmHost />
+      {/* 工程关联弹框：代码页状态栏 / 问题面板 / 命令面板三处入口共用 */}
+      <LinkedDialogHost />
       {/* 命令面板「停止 NC 服务」的二次确认，文案与服务面板同一条 */}
       <ConfirmDialog
         open={svcConfirm === "stop"}
@@ -417,9 +430,6 @@ function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: strin
       );
     case "db":
       return <DbTab />;
-    case "linked":
-      // 依赖链 / 覆盖表 / 切换工作区：全在文档区，侧栏仍是文件树（顺手能跳去改 .classpath）
-      return <LinkedProjectsTab />;
     case "logs":
       return <LogTab />;
     case "settings":

@@ -206,7 +206,7 @@ pub fn uncompiled_diagnostics(projects: &[LinkedProject], problems: &[Problem]) 
                     kind: "disabled",
                     project: pr.name.clone(),
                     message: format!(
-                        "「{}」里有 {fqcn} 的源码，但这个工程被覆盖表停用了，它的类目录不进本次编译（要恢复就去「工程关联」页取消停用）",
+                        "「{}」里有 {fqcn} 的源码，但这个工程被覆盖表停用了，它的类目录不进本次编译（要恢复就去「工程关联」弹框的覆盖规则里取消停用）",
                         pr.name
                     ),
                     file: Some(file),

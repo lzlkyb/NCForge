@@ -1,0 +1,56 @@
+import { Fragment } from "react";
+import { TreeProjectRow } from "./TreeRow";
+import { TreeRows, type TreeRowsCtx } from "./TreeRows";
+import { originLabel, type LinkedProject } from "../../lib/linkedProjects";
+import { treeRowId as rowId } from "../../lib/treeNav";
+
+const samePath = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+function badgeOf(p: LinkedProject, root: string): string {
+  if (p.root && samePath(p.root, root)) return "当前";
+  if (p.disabled) return "已停用";
+  return originLabel(p.origin);
+}
+
+/**
+ * 多工程树的顶层：每个关联工程各占一行，展开后才是它的目录。
+ *
+ * 从 `FileTree` 抽出来是为了守住 300 行门禁；这里只有「工程行 + 递归子树」，
+ * 菜单、键盘、自动定位仍归 `FileTree`。
+ */
+export function TreeProjectRows({
+  projects,
+  root,
+  ctx,
+}: {
+  projects: LinkedProject[];
+  /** 当前工作区根：决定哪一行带「当前」标记。 */
+  root: string;
+  ctx: TreeRowsCtx;
+}) {
+  return (
+    <>
+      {projects.map((p) => {
+        const path = p.root;
+        if (!path) return null;
+        return (
+          <Fragment key={path}>
+            <TreeProjectRow
+              name={p.name}
+              path={path}
+              id={rowId(path)}
+              level={1}
+              open={ctx.expanded.has(path)}
+              selected={ctx.selectedPath === path}
+              current={samePath(path, root)}
+              badge={badgeOf(p, root)}
+              onToggle={ctx.onProjectToggle}
+              onContextMenu={ctx.onContextMenu}
+            />
+            {ctx.expanded.has(path) && <TreeRows dir={path} depth={1} ctx={ctx} />}
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}

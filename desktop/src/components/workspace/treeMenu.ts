@@ -8,6 +8,7 @@ import type { NewEntryKind } from "../../lib/workspace";
 export function buildTreeMenu({
   target,
   root,
+  canEdit = true,
   onOpen,
   onBeginCreate,
   onBeginRename,
@@ -17,6 +18,11 @@ export function buildTreeMenu({
 }: {
   target: { path: string; isDir: boolean };
   root: string;
+  /**
+   * 这一项是否可写（默认 true）。关联工程的根不在当前工作区白名单里：
+   * 新建 / 改名 / 删除都会被后端拒绝，菜单里就不该摆出来。
+   */
+  canEdit?: boolean;
   onOpen: (path: string) => void;
   onBeginCreate: (target: { path: string; isDir: boolean }, kind: NewEntryKind) => void;
   onBeginRename: (target: { path: string; isDir: boolean }) => void;
@@ -27,17 +33,19 @@ export function buildTreeMenu({
   const atRoot = target.path === root;
   const items: ContextMenuItem[] = [];
   if (target.isDir) {
-    items.push({
-      label: "新建文件",
-      icon: "filePlus",
-      // 不标 Ctrl+N：全局没有这个快捷键，标了就是承诺一个不存在的操作
-      onSelect: () => onBeginCreate(target, "file"),
-    });
-    items.push({
-      label: "新建文件夹",
-      icon: "folderPlus",
-      onSelect: () => onBeginCreate(target, "dir"),
-    });
+    if (canEdit) {
+      items.push({
+        label: "新建文件",
+        icon: "filePlus",
+        // 不标 Ctrl+N：全局没有这个快捷键，标了就是承诺一个不存在的操作
+        onSelect: () => onBeginCreate(target, "file"),
+      });
+      items.push({
+        label: "新建文件夹",
+        icon: "folderPlus",
+        onSelect: () => onBeginCreate(target, "dir"),
+      });
+    }
   } else {
     items.push({ label: "打开", icon: "file", onSelect: () => onOpen(target.path) });
   }
@@ -45,8 +53,8 @@ export function buildTreeMenu({
     label: "重命名",
     icon: "edit",
     hint: "F2",
-    separator: true,
-    disabled: atRoot,
+    separator: items.length > 0,
+    disabled: atRoot || !canEdit,
     onSelect: () => onBeginRename(target),
   });
   items.push({
@@ -54,7 +62,7 @@ export function buildTreeMenu({
     icon: "trash",
     hint: "Del",
     danger: true,
-    disabled: atRoot,
+    disabled: atRoot || !canEdit,
     onSelect: () => onDelete(target),
   });
   items.push({

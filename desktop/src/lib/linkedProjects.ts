@@ -2,7 +2,7 @@ import { invoke } from "./tauri";
 import type { CompileDiagnostic } from "./compile";
 
 /**
- * 「工程关联」页的数据与操作。
+ * 「工程关联」弹框的数据与操作。
  *
  * 与 Rust `eclipse_cp::{LinkedGraph,LinkedProject}` 一一对应（camelCase）。
  * 依赖顺序的真源是工程自己的 `.classpath`；这里只是把它解析出来给人看，
