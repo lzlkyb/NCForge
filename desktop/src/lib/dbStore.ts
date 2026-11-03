@@ -33,6 +33,8 @@ export interface ConnRuntime {
   tx?: TxInfo;
   tables?: TableInfo[];
   tablesLoading?: boolean;
+  /** 表 / 视图清单读到的时刻。只记成功那次：失败后还标「刚刚」等于骗人。 */
+  tablesAt?: number;
   /** NC 表中文名：小写表名 → 显示名。 */
   ncNames?: Record<string, string>;
   schema?: SchemaCacheData | null;
@@ -380,6 +382,7 @@ export async function loadMeta(id: string): Promise<void> {
   const [t, n, s] = await Promise.allSettled([dbApi.tables(id), dbApi.ncNames(id), dbApi.schemaCache(id)]);
   setRt(id, {
     tablesLoading: false,
+    tablesAt: t.status === "fulfilled" ? Date.now() : rtOf(id).tablesAt,
     tables: t.status === "fulfilled" ? t.value.tables : rtOf(id).tables,
     ncNames: n.status === "fulfilled" ? n.value.names : rtOf(id).ncNames,
     schema: s.status === "fulfilled" ? s.value : rtOf(id).schema,

@@ -163,6 +163,14 @@ describe("命令模式", () => {
     off();
     expect((await buildItems("cmd", "编译", ctx())).items).toEqual([]);
   });
+
+  it("拼音首字母能命中中文命令，高亮区间映射回标题", async () => {
+    const off = registerCommands([{ id: "py", title: "编译当前模块", run: () => {} }]);
+    const r = await buildItems("cmd", "bydq", ctx());
+    expect(r.items.map((i) => i.title)).toEqual(["编译当前模块"]);
+    expect(r.items[0].ranges).toEqual([[0, 4]]);
+    off();
+  });
 });
 
 describe("转到任意位置：内容与行号", () => {

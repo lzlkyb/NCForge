@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { failureText } from "../../lib/friendlyError";
 
 /** 像绝对路径就行——真正的落盘校验在后端 `patch_set_out_dir`。 */
@@ -27,6 +28,7 @@ export function PatchActions({
   progress,
   onCancel,
   count,
+  zipName,
   canBuild,
   onBuild,
 }: {
@@ -43,6 +45,8 @@ export function PatchActions({
   progress: { done: number; total: number } | null;
   onCancel: () => void;
   count: number;
+  /** 出包后的文件名（由描述 + 日期算出），确认框里给用户对一遍。 */
+  zipName: string;
   canBuild: boolean;
   onBuild: () => void;
 }) {
@@ -50,6 +54,7 @@ export function PatchActions({
   // 以前 onBlur 直接调 onSaveDir——误敲一个路径、点到别处，配置就被改写、
   // 磁盘还多出一个目录，无确认无撤销。
   const [draft, setDraft] = useState(dir);
+  const [askBuild, setAskBuild] = useState(false);
   useEffect(() => setDraft(dir), [dir]);
   const dirty = draft.trim() !== dir;
 
@@ -154,11 +159,28 @@ export function PatchActions({
         // 落盘是显式动作（见上面 commitDir 的注释），所以这里不替用户自动保存。
         disabled={building || !canBuild || !!dirty}
         title={dirty ? "输出目录改了还没保存：先点「保存」，否则包会打到旧目录" : undefined}
-        onClick={onBuild}
+        onClick={() => setAskBuild(true)}
       >
         <Icon name="package" size={13} />
         {building ? "出包中…" : `生成补丁包（${count} 项）`}
       </button>
+      <ConfirmDialog
+        open={askBuild}
+        title="确认出包"
+        confirmLabel={`生成 ${count} 项`}
+        description={
+          <>
+            会把这 <b>{count}</b> 个文件打进 <b>{zipName}</b>，落到 <code>{dir}</code>。
+            同名包若已存在，会先复制成 <code>.bak-时间戳</code> 再覆盖；出包后可用横幅上的
+            「回滚到出包前」换回来。
+          </>
+        }
+        onCancel={() => setAskBuild(false)}
+        onConfirm={() => {
+          setAskBuild(false);
+          onBuild();
+        }}
+      />
     </div>
   );
 }

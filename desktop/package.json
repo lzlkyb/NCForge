@@ -27,6 +27,8 @@
     "orphans:check": "knip --include files,dependencies --no-progress",
     "tokens:check": "node scripts/check-design-tokens.mjs",
     "tokens:update": "node scripts/check-design-tokens.mjs --update",
+    "ui:check": "node scripts/check-ui-contract.mjs",
+    "ui:update": "node scripts/check-ui-contract.mjs --update",
     "bundle:check": "node scripts/check-bundle-size.mjs",
     "bundle:update": "node scripts/check-bundle-size.mjs --update"
   },

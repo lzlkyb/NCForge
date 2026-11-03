@@ -1027,3 +1027,8 @@
 .vc-hk-mk-cell[data-tone="stale"] b {
   color: hsl(var(--warning-ink));
 }
+
+/* 友好提示下面默认收起的 SVN 原始输出（排查编码/权限问题时要看原话）。 */
+.vc-raw { margin-top:6px; font-size:11px; color:hsl(var(--muted-foreground)); }
+.vc-raw summary { cursor:pointer; width:max-content; }
+.vc-raw pre { margin-top:4px; max-height:180px; overflow:auto; padding:8px; border:1px solid hsl(var(--border)); border-radius:6px; background:hsl(var(--muted) / 0.4); font-family:"Cascadia Mono",Consolas,monospace; white-space:pre-wrap; word-break:break-all; }

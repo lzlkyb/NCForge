@@ -26,16 +26,20 @@ export function ServiceStatusButton() {
   });
   const state = data?.state;
   const label = state ? LABELS[state] : "状态未知";
+  // 端口跟着状态一起报：服务起来了但连不上时，第一个要核对的就是「连的是哪个端口」
+  const port = state === "running" && data?.port ? data.port : null;
+  const where = port ? ` · ${data?.portAddress ? `${data.portAddress}:` : ":"}${port}` : "";
   return (
     <button
       type="button"
       className="wb-status-svc"
       data-state={state ?? "unknown"}
-      title={`NC 中间件${label} · 点击打开服务面板`}
+      title={`NC 中间件${label}${where} · 点击打开服务面板`}
       onClick={openServicePanel}
     >
       <span className="wb-status-svc-dot" />
       NC 服务 · {label}
+      {port !== null && <span className="wb-status-svc-port">:{port}</span>}
     </button>
   );
 }

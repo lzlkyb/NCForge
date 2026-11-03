@@ -1,0 +1,169 @@
+// @vitest-environment jsdom
+/**
+ * 状态栏的各页贡献。
+ *
+ * 盯三件事：编译 / 问题小签能一键回到对应面板；SVN 的数字只在该页订阅
+ * （不能在启动时替用户跑 7.6 秒的扫描）；数据库页露出当前连接、事务与运行中查询。
+ */
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({ svnStatus: vi.fn(), svnInfo: vi.fn() }));
+vi.mock("../../lib/svn", () => ({ svnStatus: mocks.svnStatus, svnInfo: mocks.svnInfo }));
+
+import { StatusContributions } from "./StatusContributions";
+import { getSession, setSession } from "../../lib/workspaceSession";
+import { setCodeDiags } from "../../lib/diagStore";
+import {
+  __resetDbForTest,
+  activateTab,
+  openSqlTab,
+  patchTab,
+  setConns,
+  setTx,
+  type SqlTab,
+} from "../../lib/dbStore";
+import type { DbConn } from "../../lib/dbApi";
+
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+let root: Root | null = null;
+let host: HTMLDivElement | null = null;
+/** 显式收一个 Event 参数，才能直接当 EventListener 传进 addEventListener。 */
+const makeNav = () => vi.fn((_: Event) => {});
+let nav: ReturnType<typeof makeNav>;
+
+beforeEach(() => {
+  nav = makeNav();
+  window.addEventListener("ncforge-navigate", nav);
+  mocks.svnStatus.mockReset();
+  mocks.svnInfo.mockReset();
+});
+
+afterEach(() => {
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+  window.removeEventListener("ncforge-navigate", nav);
+  setCodeDiags([]);
+  setSession({ compiling: false, compileResult: null, panelOpen: false, panelTab: "problems" });
+  __resetDbForTest();
+});
+
+const flush = async (times = 4) => {
+  for (let i = 0; i < times; i += 1) {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  }
+};
+
+function render(activeTool: string) {
+  host = document.createElement("div");
+  document.body.appendChild(host);
+  root = createRoot(host);
+  act(() => {
+    root!.render(
+      <QueryClientProvider client={new QueryClient()}>
+        <footer className="wb-status">
+          <StatusContributions activeTool={activeTool} />
+        </footer>
+      </QueryClientProvider>,
+    );
+  });
+  return host;
+}
+
+const button = (el: HTMLElement, text: string) =>
+  [...el.querySelectorAll("button")].find((b) => b.textContent?.includes(text));
+
+describe("状态栏贡献", () => {
+  it("编译中可点回编译输出，问题数可点回问题面板", async () => {
+    act(() => setSession({ compiling: true }));
+    const el = render("files");
+    expect(el.textContent).toContain("编译中");
+
+    await act(async () => button(el, "编译中")!.click());
+    expect(getSession().panelOpen).toBe(true);
+    expect(getSession().panelTab).toBe("build");
+    expect((nav.mock.calls[0][0] as CustomEvent).detail).toBe("files");
+    expect(nav.mock.calls[0][0].type).toBe("ncforge-navigate");
+
+    act(() => setSession({ compiling: false }));
+    act(() =>
+      setCodeDiags([
+        { path: "a.java", line: 1, column: 1, severity: "error", message: "找不到符号" },
+        { path: "b.java", line: 2, column: 1, severity: "warning", message: "未使用的导入" },
+      ]),
+    );
+    const chip = el.querySelector<HTMLButtonElement>('button[title="点击打开问题面板"]')!;
+    expect(chip.textContent).toContain("1");
+    await act(async () => chip.click());
+    expect(getSession().panelTab).toBe("problems");
+  });
+
+  it("SVN 贡献只在版本控制页订阅，并显示改动数与版本号", async () => {
+    mocks.svnStatus.mockResolvedValue({
+      changes: { groups: [], shown: 3, total: 3, ignored: 2 },
+      scanned: 120,
+      generatedAtMs: Date.now(),
+      hasConflict: false,
+      reviewed: [],
+    });
+    mocks.svnInfo.mockResolvedValue({
+      root: "C:/ws",
+      url: "svn://example/project",
+      revision: 4211,
+      host: "example",
+      user: "dev",
+      hasPassword: true,
+      credentialSource: "saved",
+      bridgeAlive: true,
+    });
+
+    const el = render("files");
+    expect(mocks.svnStatus).not.toHaveBeenCalled();
+
+    act(() => root?.render(
+      <QueryClientProvider client={new QueryClient()}>
+        <StatusContributions activeTool="svn" />
+      </QueryClientProvider>,
+    ));
+    await flush();
+
+    expect(mocks.svnStatus).toHaveBeenCalledTimes(1);
+    expect(el.textContent).toContain("改动 3");
+    expect(el.textContent).toContain("忽略 2");
+    expect(el.textContent).toContain("r4211");
+  });
+
+  it("数据库页露出当前连接、未提交事务与运行中的查询", () => {
+    const conn: DbConn = {
+      id: "c1",
+      name: "测试库",
+      env: "dev",
+      source: "manual",
+      url: "jdbc:oracle:thin:@127.0.0.1:1521/orcl",
+      user: "u",
+      propDs: null,
+      autoCommit: false,
+      note: "",
+      hasPassword: false,
+      engine: "java",
+    };
+    setConns([conn]);
+    const tabId = openSqlTab("c1", "select 1 from dual");
+    activateTab(tabId);
+    setTx("c1", { autoCommit: false, statements: 2, rows: 3, since: Date.now() });
+
+    const el = render("db");
+    expect(el.textContent).toContain("数据库 · 测试库");
+    expect(el.textContent).toContain("事务 2 条未提交");
+
+    act(() => patchTab<SqlTab>(tabId, { running: true }));
+    expect(el.textContent).toContain("查询中");
+  });
+});

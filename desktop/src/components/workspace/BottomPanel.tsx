@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import { Icon } from "../ui/icon";
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { ProblemsView } from "./ProblemsView";
@@ -16,6 +16,17 @@ import type { CodeDiag } from "../../lib/diagStore";
 import { countErrors, mergeProblems } from "../../lib/problemList";
 
 export type PanelTab = "problems" | "build" | "svc" | "calls" | "types" | "todo" | "bookmarks" | "debug";
+
+const PANEL_TABS: { id: PanelTab; label: string }[] = [
+  { id: "problems", label: "问题" },
+  { id: "build", label: "编译输出" },
+  { id: "svc", label: "NC 服务" },
+  { id: "calls", label: "调用层级" },
+  { id: "types", label: "类型层级" },
+  { id: "todo", label: "待办" },
+  { id: "bookmarks", label: "书签" },
+  { id: "debug", label: "调试" },
+];
 
 interface Props {
   root: string;
@@ -54,6 +65,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
   const debug = useDebugSnapshot();
   const dock = useWorkbenchDock();
   const logRef = useRef<HTMLDivElement>(null);
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   // 只在用户本来就贴着底部时才跟随最新一行：首次建类索引会连续输出几十行，
   // 无条件贴底等于把正往上翻看的人一脚踹回底部。
   const follow = useRef(true);
@@ -74,35 +86,52 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
   const merged = useMemo(() => mergeProblems(result?.problems, inspect), [result?.problems, inspect]);
   const errors = countErrors(merged);
 
+  // 页签条走标准 tablist 键盘约定：左右键循环、Home/End 到两端，焦点与选中同步移动。
+  const onTabKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const i = PANEL_TABS.findIndex((t) => t.id === tab);
+    const n = PANEL_TABS.length;
+    const next =
+      e.key === "ArrowLeft"
+        ? (i - 1 + n) % n
+        : e.key === "ArrowRight"
+          ? (i + 1) % n
+          : e.key === "Home"
+            ? 0
+            : e.key === "End"
+              ? n - 1
+              : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    onTab(PANEL_TABS[next].id);
+    tabRefs.current[next]?.focus();
+  };
+
   return (
     <section className="wb-panel">
       <div className="wb-panel-tabs">
-        <button type="button" className="wb-ptab" data-active={tab === "problems" || undefined} onClick={() => onTab("problems")}>
-          问题
-          {errors > 0 && <span className="wb-ptab-n">{errors}</span>}
-        </button>
-        <button type="button" className="wb-ptab" data-active={tab === "build" || undefined} onClick={() => onTab("build")}>
-          编译输出
-        </button>
-        <button type="button" className="wb-ptab" data-active={tab === "svc" || undefined} onClick={() => onTab("svc")}>
-          NC 服务
-        </button>
-        <button type="button" className="wb-ptab" data-active={tab === "calls" || undefined} onClick={() => onTab("calls")}>
-          调用层级
-        </button>
-        <button type="button" className="wb-ptab" data-active={tab === "types" || undefined} onClick={() => onTab("types")}>
-          类型层级
-        </button>
-        <button type="button" className="wb-ptab" data-active={tab === "todo" || undefined} onClick={() => onTab("todo")}>
-          待办
-        </button>
-        <button type="button" className="wb-ptab" data-active={tab === "bookmarks" || undefined} onClick={() => onTab("bookmarks")}>
-          书签
-        </button>
-        <button type="button" className="wb-ptab" data-active={tab === "debug" || undefined} onClick={() => onTab("debug")}>
-          调试
-          {debug.paused && <span className="wb-ptab-live" title="调试已暂停" />}
-        </button>
+        <div className="wb-ptabs" role="tablist" aria-label="底部面板" onKeyDown={onTabKeyDown}>
+          {PANEL_TABS.map((t, i) => (
+            <button
+              key={t.id}
+              ref={(el) => {
+                tabRefs.current[i] = el;
+              }}
+              type="button"
+              role="tab"
+              id={`wb-ptab-${t.id}`}
+              aria-selected={tab === t.id}
+              aria-controls="wb-panel-body"
+              tabIndex={tab === t.id ? 0 : -1}
+              className="wb-ptab"
+              data-active={tab === t.id || undefined}
+              onClick={() => onTab(t.id)}
+            >
+              {t.label}
+              {t.id === "problems" && errors > 0 && <span className="wb-ptab-n">{errors}</span>}
+              {t.id === "debug" && debug.paused && <span className="wb-ptab-live" title="调试已暂停" />}
+            </button>
+          ))}
+        </div>
         <span className="wb-status-sp" />
         {tab === "problems" && merged.length > 0 && (
           <>
@@ -129,6 +158,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
         </button>
       </div>
 
+      <div className="wb-tabpanel" role="tabpanel" id="wb-panel-body" aria-labelledby={`wb-ptab-${tab}`}>
       {tab === "problems" && (
         <ProblemsView
           problems={merged}
@@ -207,6 +237,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
       {tab === "bookmarks" && <BookmarkPanel root={root} onOpenAt={onOpenAt} />}
       {tab === "debug" && <DebugPanel onOpenAt={onOpenAt} />}
       <div ref={dock?.bindHost("bottom")} className="wb-panel-body wb-svc-host" hidden={tab !== "svc"} />
+      </div>
     </section>
   );
 }

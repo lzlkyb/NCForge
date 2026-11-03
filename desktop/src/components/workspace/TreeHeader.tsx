@@ -43,7 +43,9 @@ export function TreeHeader({
   return (
     <>
       <div className="wb-pane-title">
-        <span title={root}>资源管理器 · {baseName(root).toUpperCase()}</span>
+        {/* 原样显示目录名：`toUpperCase` 会把 `nc-workbench` 改成另一串字，
+            含中文时又只改到其中几个字母，用户核对路径时反而找不到对应目录。 */}
+        <span title={root}>资源管理器 · {baseName(root) || root}</span>
         <div className="wb-pane-acts">
           <TreeViewOptions />
           <button

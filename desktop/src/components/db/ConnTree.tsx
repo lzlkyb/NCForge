@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Icon } from "../ui/icon";
+import { EmptyState } from "../ui/EmptyState";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { useWorkbenchDock } from "../workspace/WorkbenchDock";
 import { EnvDot } from "./EnvChips";
 import { ConnObjects } from "./ConnObjects";
+import { FavoriteSection } from "./FavoriteSection";
 import { PasswordResetDialog } from "./PasswordResetDialog";
 import { dbNameOf, type DbConn } from "../../lib/dbApi";
 import { ensureConnected } from "../../lib/dbConfirm";
@@ -31,6 +33,16 @@ export function ConnTree() {
     const next = !open[c.id];
     setOpen({ ...open, [c.id]: next });
     if (next && rtOf(c.id).status !== "connected") void ensureConnected(c.id);
+  };
+
+  /** 从收藏「在连接中定位」：清筛选、展开并滚到该连接。 */
+  const locate = (connId: string) => {
+    setFilter("");
+    setOpen((prev) => ({ ...prev, [connId]: true }));
+    if (rtOf(connId).status !== "connected") void ensureConnected(connId);
+    requestAnimationFrame(() => {
+      document.getElementById(`dbx-conn-${connId}`)?.scrollIntoView?.({ block: "nearest" });
+    });
   };
 
   const connMenu = (c: DbConn, x: number, y: number) => {
@@ -73,20 +85,35 @@ export function ConnTree() {
       <div className="dbx-side-head">
         数据库连接
         <span className="dbx-sp" />
-        <button type="button" className="dbx-ibtn" title="新建连接" onClick={() => openConnDialog(null)}>
+        <button type="button" className="dbx-ibtn" title="新建连接" aria-label="新建连接" onClick={() => openConnDialog(null)}>
           <Icon name="plus" size={14} />
         </button>
-        <button type="button" className="dbx-ibtn" title="从 NC prop.xml 导入" onClick={() => openConnDialog(null, "prop")}>
-          <Icon name="download" size={14} />
-        </button>
-        <button type="button" className="dbx-ibtn" title="数据字典" onClick={() => {
-          openDictTab(activeConn ?? defaultConnId());
-          dock?.showDocument();
-        }}>
-          <Icon name="clipboard" size={14} />
-        </button>
-        <button type="button" className="dbx-ibtn" title="刷新列表" onClick={() => void loadConns()}>
-          <Icon name="refresh" size={14} />
+        <button
+          type="button"
+          className="dbx-ibtn"
+          title="更多"
+          aria-label="更多连接操作"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setMenu({
+              x: r.left,
+              y: r.bottom + 4,
+              items: [
+                { label: "从 NC prop.xml 导入", icon: "download", onSelect: () => openConnDialog(null, "prop") },
+                {
+                  label: "数据字典",
+                  icon: "clipboard",
+                  onSelect: () => {
+                    openDictTab(activeConn ?? defaultConnId());
+                    dock?.showDocument();
+                  },
+                },
+                { label: "刷新连接列表", icon: "refresh", onSelect: () => void loadConns() },
+              ],
+            });
+          }}
+        >
+          <Icon name="more" size={14} />
         </button>
       </div>
       <input
@@ -98,15 +125,22 @@ export function ConnTree() {
         onChange={(e) => setFilter(e.target.value)}
       />
       <div className="dbx-tree">
+        <FavoriteSection filter={q} onLocate={locate} />
         {db.loadError && <p className="dbx-tree-note">{db.loadError}</p>}
         {db.loaded && db.conns.length === 0 && (
-          <div className="dbx-tree-note">
-            <p>还没有连接。</p>
-            <button type="button" className="dbx-btn" style={{ marginTop: 8 }} onClick={() => openConnDialog(null)}>
-              <Icon name="plus" size={12} />
-              新建连接
-            </button>
-          </div>
+          <EmptyState
+            icon="database"
+            description="还没有数据库连接。可从 NC prop.xml 导入，或手动填写。"
+            className="py-8"
+            bigIconSize={64}
+            iconSize={22}
+            action={
+              <button type="button" className="dbx-btn" onClick={() => openConnDialog(null)}>
+                <Icon name="plus" size={12} />
+                新建连接
+              </button>
+            }
+          />
         )}
         {shown.map((c) => {
           const rt = rtOf(c.id);
@@ -114,6 +148,7 @@ export function ConnTree() {
           return (
             <div key={c.id}>
               <button
+                id={`dbx-conn-${c.id}`}
                 type="button"
                 className="dbx-crow"
                 data-active={activeConn === c.id || undefined}
@@ -140,9 +175,7 @@ export function ConnTree() {
                 <Icon name={expanded ? "chevronDown" : "chevronRight"} size={12} />
                 <EnvDot env={c.env} />
                 <b>{c.name}</b>
-                <span className="u">
-                  {c.user}@{dbNameOf(c.url)}
-                </span>
+                <span className="u">{dbNameOf(c.url)}</span>
                 <ConnStatus status={rt.status} />
               </button>
               {expanded && rt.status === "connected" && <ConnObjects connId={c.id} filter={q} />}
@@ -157,21 +190,10 @@ export function ConnTree() {
   );
 }
 
+/** 状态只画一个点，文字进 title：侧栏一行里名称 + 库名已经够挤。 */
 function ConnStatus({ status }: { status: string }) {
-  if (status === "connected")
-    return (
-      <span className="st">
-        <Icon name="check" size={11} />
-        已连接
-      </span>
-    );
-  if (status === "connecting")
-    return (
-      <span className="st off">
-        <Icon name="spinner" size={11} />
-        连接中
-      </span>
-    );
-  if (status === "error") return <span className="st bad">失败</span>;
-  return <span className="st off">未连接</span>;
+  const tone = status === "connected" ? "ok" : status === "connecting" ? "busy" : status === "error" ? "bad" : undefined;
+  const label =
+    status === "connected" ? "已连接" : status === "connecting" ? "连接中" : status === "error" ? "连接失败" : "未连接";
+  return <span className={`dbx-stdot${tone ? ` ${tone}` : ""}`} role="img" title={label} aria-label={label} />;
 }

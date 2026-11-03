@@ -14,7 +14,7 @@ import { EditorBanners } from "./EditorBanners";
 import { EditorNavRow } from "./EditorNavRow";
 import { EditorPane } from "./EditorPane";
 import { EmptyEditor } from "./EmptyEditor";
-import { EditorStatus } from "./EditorStatus";
+import { ShellStatusBar } from "./ShellStatusBar";
 import { NoWorkspace } from "./NoWorkspace";
 import { ExtractSqlDialog } from "../db/ExtractSqlDialog";
 import { useWorkbenchDock, type FileSlotName } from "./WorkbenchDock";
@@ -70,7 +70,7 @@ export interface FilePaneActions {
   setEditingRoot: Dispatch<SetStateAction<boolean>>;
   setPanels: Dispatch<SetStateAction<{ outline: boolean; history: boolean; generate: boolean }>>;
   setPanelOpen: (v: (open: boolean) => boolean) => void;
-  applyRoot: (path: string) => Promise<void>;
+  applyRoot: (path: string) => Promise<string | null>;
   compileActive: () => void;
   onDismissLargeHint: (path: string) => void;
   /** 切到某个标签（写会话的 activePath）。 */
@@ -244,8 +244,9 @@ export function FilePaneSlots({
   );
 
   const status = (
-    <EditorStatus root={root} active={active} mark={activeMark} saving={saving}
-      panelOpen={panelOpen} onTogglePanel={() => setPanelOpen((v) => !v)} />
+    <ShellStatusBar root={root} active={active} mark={activeMark} saving={saving}
+      panelOpen={panelOpen} onTogglePanel={() => setPanelOpen((v) => !v)}
+      activeTool={activeTool} />
   );
 
   return (
@@ -265,15 +266,14 @@ export function EmptyProjectSlots({
   recents,
   onChange,
   onOpen,
-  onOpenRecent,
   output,
   servicesPanel,
 }: {
   rootInput: string;
   recents: string[];
-  onChange: Dispatch<SetStateAction<string>>;
-  onOpen: () => void;
-  onOpenRecent: (path: string) => void;
+  onChange: (value: string) => void;
+  /** 失败时返回原因，由引导页贴在输入框下方。 */
+  onOpen: (path: string) => Promise<string | null>;
   output: ReactNode;
   servicesPanel: boolean;
 }) {
@@ -282,7 +282,7 @@ export function EmptyProjectSlots({
     <>
       {slot("tree", <div className="wb-no-project">尚未打开工程</div>)}
       {slot("editor", <NoWorkspace value={rootInput} recents={recents} onChange={onChange}
-        onOpen={onOpen} onOpenRecent={onOpenRecent} />)}
+        onOpen={onOpen} />)}
       {slot("status", (
         <footer className="wb-status">
           <span className="wb-status-path wb-no-project">尚未打开工程</span>

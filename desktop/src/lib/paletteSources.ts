@@ -1,6 +1,8 @@
-import { listCommands } from "./commandRegistry";
+import { listCommands, type Command } from "./commandRegistry";
+import { recentCommandIds, recordCommandUse } from "./commandUsage";
 import { getFileIndex } from "./fileIndex";
 import { fuzzyMatch, rankFiles, type FileEntry, type Range } from "./fuzzy";
+import { matchText } from "./pinyin";
 import { parseLineQuery, rankFilesRecent, recentFirst } from "./gotoAnything";
 import { langReady, langRequest } from "./lang";
 import { uriToPath } from "./langConvert";
@@ -248,11 +250,43 @@ async function workspaceSymbolsMode(query: string, ctx: PaletteCtx): Promise<Pal
   return { items, note: `方法与字段 · ${items.length} 项` };
 }
 
-function commandsMode(query: string): PaletteResult {  const q = query.trim();
+function commandItem(c: Command, extra: Partial<PaletteItem> = {}): PaletteItem {
+  return {
+    key: c.id,
+    title: c.title,
+    hint: c.hint,
+    // 从面板执行才算「用过」：这是命令面板自己的排序依据，不影响真实调用。
+    run: () => {
+      recordCommandUse(c.id);
+      c.run();
+    },
+    ...extra,
+  };
+}
+
+function commandsMode(query: string): PaletteResult {
+  const q = query.trim();
+  const commands = listCommands();
+  if (!q) {
+    const byId = new Map(commands.map((c) => [c.id, c]));
+    const recent = recentCommandIds()
+      .map((id) => byId.get(id))
+      .filter((c): c is Command => !!c);
+    const used = new Set(recent.map((c) => c.id));
+    const items = [
+      ...recent.map((c) => commandItem(c, { badge: "最近" })),
+      ...commands.filter((c) => !used.has(c.id)).map((c) => commandItem(c)),
+    ];
+    return {
+      items,
+      note: recent.length ? `最近使用 ${recent.length} 项 · 共 ${items.length} 条命令` : `全部命令 · ${items.length} 项`,
+    };
+  }
+  // 中文标题支持拼音首字母（`bydqmk` → 编译当前模块），原文命中优先取高分。
   const items: { item: PaletteItem; score: number }[] = [];
-  for (const c of listCommands()) {
-    const hit = q ? fuzzyMatch(q, c.title) : { score: 0, ranges: [] };
-    if (hit) items.push({ item: { key: c.id, title: c.title, ranges: hit.ranges, hint: c.hint, run: c.run }, score: hit.score });
+  for (const c of commands) {
+    const hit = matchText(q, c.title);
+    if (hit) items.push({ item: commandItem(c, { ranges: hit.ranges }), score: hit.score });
   }
   items.sort((a, b) => b.score - a.score);
   return { items: items.map((x) => x.item), note: items.length ? "命令" : "没有匹配的命令" };

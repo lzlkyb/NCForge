@@ -744,6 +744,56 @@ fn backup_existing(zip: &Path) -> Result<Option<String>, String> {
     Ok(Some(bak.display().to_string()))
 }
 
+/// 把出包前的备份恢复成正式包（撤销一次覆盖）。
+///
+/// 只在「同一个目录、备份名正是 `<包名>.bak-时间戳`」时动手：这个入口按路径收参数，
+/// 不校验的话，任何注入进来的 IPC 都能拿任意文件覆盖任意 zip。校验全部在复制之前，
+/// 失败时正式包一个字节都不会动。
+pub fn restore_backup(zip: &Path, backup: &Path) -> Result<(), String> {
+    if !zip.is_file() {
+        return Err(format!("补丁包不存在：{}", zip.display()));
+    }
+    if !backup.is_file() {
+        return Err(format!("备份文件不存在：{}", backup.display()));
+    }
+    if zip.parent() != backup.parent() {
+        return Err("备份文件必须和补丁包在同一个目录".to_string());
+    }
+    let zip_name = zip
+        .file_name()
+        .ok_or_else(|| format!("不是文件路径：{}", zip.display()))?
+        .to_string_lossy()
+        .to_string();
+    let bak_name = backup
+        .file_name()
+        .ok_or_else(|| format!("不是文件路径：{}", backup.display()))?
+        .to_string_lossy()
+        .to_string();
+    if !bak_name.starts_with(&format!("{zip_name}.bak-")) {
+        return Err(format!(
+            "这不是该补丁包的备份：文件名应形如 {zip_name}.bak-20260101120000"
+        ));
+    }
+    // 先写到同目录临时文件、刷盘后再原子替换：直接 copy 覆盖正式包时，
+    // 中途崩溃/断电会留下半截 zip；临时文件+rename 下正式包要么是旧的、
+    // 要么是完整备份，最多多出一个临时文件。
+    let parent = zip
+        .parent()
+        .ok_or_else(|| format!("不是文件路径：{}", zip.display()))?;
+    let tmp = parent.join(format!(".{zip_name}.restore-{}", std::process::id()));
+    std::fs::copy(backup, &tmp).map_err(|e| format!("回滚失败（{}）：{e}", zip.display()))?;
+    let replaced = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&tmp)
+        .and_then(|f| f.sync_all())
+        .and_then(|()| std::fs::rename(&tmp, zip));
+    if let Err(e) = replaced {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("回滚失败（{}）：{e}", zip.display()));
+    }
+    Ok(())
+}
+
 /// 出包。会先重新扫一遍，保证「清单看到的」与「打进包的」是同一份。
 ///
 /// `canceled` 每写一项检查一次（读源码/class/SQL 都是 IO，几十项时取消才有意义）；
@@ -1231,6 +1281,50 @@ mod tests {
 
         let none = backup_existing(&dir.join("absent.zip")).unwrap();
         assert!(none.is_none(), "没有旧包时不该造备份");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 回滚只认同目录下本包的备份() {
+        let dir = std::env::temp_dir().join(format!("ncp-restore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let zip = dir.join("patch.zip");
+        let bak = dir.join("patch.zip.bak-20260101120000");
+        std::fs::write(&zip, b"new").unwrap();
+        std::fs::write(&bak, b"old").unwrap();
+
+        // 名字不对（别的 zip 的备份）必须先拒绝，不能有「复制一半」的中间态
+        let other = dir.join("other.zip.bak-20260101120000");
+        std::fs::write(&other, b"x").unwrap();
+        let err = restore_backup(&zip, &other).expect_err("跨包备份必须拒绝");
+        assert!(err.contains("备份"), "{err}");
+        assert_eq!(
+            std::fs::read(&zip).unwrap(),
+            b"new",
+            "拒绝时正式包不能被动过"
+        );
+
+        // 不同目录同样拒绝
+        let sub = dir.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        let away = sub.join("patch.zip.bak-20260101120000");
+        std::fs::write(&away, b"x").unwrap();
+        assert!(restore_backup(&zip, &away).is_err());
+
+        restore_backup(&zip, &bak).expect("合法备份应恢复成功");
+        assert_eq!(std::fs::read(&zip).unwrap(), b"old");
+        assert!(bak.is_file(), "回滚是复制，备份本身要留着");
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.contains(".restore-"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "回滚后不能留下临时文件：{leftovers:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

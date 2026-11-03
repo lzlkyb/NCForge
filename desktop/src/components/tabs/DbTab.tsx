@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import "../../db-console.css";
 import { DockRegion } from "../workspace/WorkbenchDock";
 import { Icon } from "../ui/icon";
+import { EmptyState } from "../ui/EmptyState";
 import { ConnTree } from "../db/ConnTree";
 import { ConnDialog } from "../db/ConnDialog";
 import { DbDocTabs } from "../db/DbDocTabs";
@@ -56,29 +57,36 @@ export function DbTab() {
               {tab?.kind === "sql" && <SqlConsole tab={tab} />}
               {tab?.kind === "table" && <TablePage key={tab.id} tab={tab} />}
               {!tab && (
-                <div className="dbx-empty">
-                  <Icon name="database" size={24} />
-                  {db.conns.length === 0 ? (
-                    <>
-                      <span>还没有数据库连接。可以从 NC prop.xml 导入，或手动填写 / 导入 .properties。</span>
-                      <button type="button" className="dbx-btn pri" onClick={() => openConnDialog(null)}>
-                        <Icon name="plus" size={12} />
-                        新建连接
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button type="button" className="dbx-btn pri" onClick={() => void newConsole()}>
-                        <Icon name="terminal" size={12} />
-                        新建 SQL 控制台
-                      </button>
-                      <button type="button" className="dbx-btn" onClick={() => openDictTab(defaultConnId())}>
-                        <Icon name="clipboard" size={12} />
-                        数据字典
-                      </button>
-                    </>
-                  )}
-                </div>
+                <EmptyState
+                  icon="database"
+                  className="dbx-empty"
+                  description={
+                    db.conns.length === 0
+                      ? "还没有数据库连接。可以从 NC prop.xml 导入，或手动填写 / 导入 .properties。"
+                      : "选一个连接开始写 SQL，或直接查数据字典。"
+                  }
+                  action={
+                    <div className="flex items-center gap-2">
+                      {db.conns.length === 0 ? (
+                        <button type="button" className="dbx-btn pri" onClick={() => openConnDialog(null)}>
+                          <Icon name="plus" size={12} />
+                          新建连接
+                        </button>
+                      ) : (
+                        <>
+                          <button type="button" className="dbx-btn pri" onClick={() => void newConsole()}>
+                            <Icon name="terminal" size={12} />
+                            新建 SQL 控制台
+                          </button>
+                          <button type="button" className="dbx-btn" onClick={() => openDictTab(defaultConnId())}>
+                            <Icon name="clipboard" size={12} />
+                            数据字典
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  }
+                />
               )}
             </div>
           </DockRegion>

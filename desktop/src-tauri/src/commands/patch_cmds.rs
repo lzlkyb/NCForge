@@ -446,6 +446,16 @@ fn is_patch_zip(path: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
 }
 
+/// 把出包前的备份恢复成正式包。校验（同目录 + 备份名前缀）在 `patch_build` 里。
+#[tauri::command]
+pub async fn patch_restore_backup(zip: String, backup: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        patch_build::restore_backup(Path::new(&zip), Path::new(&backup))
+    })
+    .await
+    .map_err(|e| format!("回滚补丁包失败：{e}"))?
+}
+
 /// 在资源管理器里选中补丁包。
 #[tauri::command]
 pub fn patch_reveal(app: AppHandle, path: String) -> Result<(), String> {

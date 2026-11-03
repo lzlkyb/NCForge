@@ -7,7 +7,12 @@
 .qp-mode { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 12px; font-size: 12px; background: hsl(var(--secondary)); color: hsl(var(--muted-foreground)); }
 .qp-mode[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
 .qp-mode kbd, .qp-h kbd, kbd.qp-h { font: 11px Consolas, monospace; padding: 0 4px; border: 1px solid hsl(var(--border)); border-radius: 4px; background: hsl(var(--card)); color: hsl(var(--muted-foreground)); }
-.qp-sec { padding: 8px 14px 4px; font-size: 11px; font-weight: 600; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+.qp-sec { display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 8px 14px 4px; font-size: 11px; font-weight: 600; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+.qp-sec-err { color: hsl(var(--destructive)); }
+.qp-busy { display: inline-flex; align-items: center; gap: 5px; }
+.qp-retry { margin-left: auto; padding: 1px 8px; border-radius: 5px; font-size: 11px; font-weight: 600; color: hsl(var(--foreground)); background: hsl(var(--secondary)); border: 1px solid hsl(var(--border)); cursor: pointer; }
+.qp-retry:hover { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
+.qp-retry:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }
 .qp-list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 4px; }
 .qp-li { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 14px; margin: 0 6px; border-radius: 7px; font-size: 13px; cursor: pointer; }
 .qp-li[data-sel="true"] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }

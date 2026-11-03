@@ -74,6 +74,13 @@ describe("自定义键位覆盖默认行为", () => {
     expect(layoutKeyOf(ev("j"))).toBe("panel");
   });
 
+  it("布局键：导航栏默认 Ctrl+Shift+B，改后旧键让出", () => {
+    expect(layoutKeyOf(ev("b", { shiftKey: true }))).toBe("rail");
+    setBindingOverride("layout.rail", "ctrl+alt+r");
+    expect(layoutKeyOf(ev("r", { altKey: true }))).toBe("rail");
+    expect(layoutKeyOf(ev("b", { shiftKey: true }))).toBeNull();
+  });
+
   it("编辑器动作：旧键释放、新键触发，Eclipse 下原本没有的替换也能绑", () => {
     setBindingOverride("editor.actions.find", "ctrl+alt+f");
     expect(editorCommand(ev("f", { altKey: true }), "eclipse")).toBe("actions.find");

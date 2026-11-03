@@ -1,5 +1,6 @@
 import { useLayoutEffect, useState, memo } from "react";
 import type { StaticStatus } from "../../lib/types";
+import { railAriaKey, railKeyLabel } from "../../lib/keymap";
 import { Icon, type IconName } from "../ui/icon";
 import { Collapse } from "../ui/Collapse";
 import { UpdateBadge } from "./UpdateBadge";
@@ -29,6 +30,9 @@ export type NavItem = {
  * 🔴 新项只能追加在末尾：插到中间会把既有 Ctrl+2/3/4 全改一遍，是破坏性变更
  *    （加「工程关联」时 Ctrl+7 就从设置变成了它，设置挪到 Ctrl+8）。
  */
+/** 页面 key → 中文名（状态栏等共享位置用，避免再抄一份页面表）。 */
+export const WORKSPACE_LABELS: Record<string, string> = { settings: "设置" };
+
 export const WORKSPACE_NAV: NavItem[] = [
   // 「代码」是主工作台，也是全工程搜索与 NC 服务的宿主：
   // 搜索是侧栏里的一个视图，服务是底部面板里的一个标签，都不再单独占主导航位。
@@ -40,6 +44,8 @@ export const WORKSPACE_NAV: NavItem[] = [
   { key: "logs", label: "NC 日志", icon: "log" },
   // 数据字典不再是主导航项：它是数据库页的一种文档标签（读的就是连接树选中的库）。
 ];
+
+for (const item of WORKSPACE_NAV) WORKSPACE_LABELS[item.key] = item.label;
 
 /**
  * 左侧主导航栏（壳子版）：品牌区（拖拽区）+ 导航项 + 设置入口（带更新未读红点）
@@ -55,6 +61,7 @@ function SideNavImpl({
   unreadCount,
   status,
   collapsed,
+  onToggleRail,
   navItems,
   statusPill,
 }: {
@@ -64,6 +71,8 @@ function SideNavImpl({
   unreadCount: number;
   status?: StaticStatus;
   collapsed: boolean;
+  /** 展开 / 收起主导航栏（图标栏 ↔ 带中文页名）。 */
+  onToggleRail?: () => void;
   /** 导航项；默认用 WORKSPACE_NAV 示例。 */
   navItems?: NavItem[];
   /** 异常态状态胶囊：null = 不显示（槽位平滑收起）。 */
@@ -126,6 +135,20 @@ function SideNavImpl({
       </nav>
 
       <div className="app-side-foot">
+        {onToggleRail && (
+          <button
+            type="button"
+            className="app-side-item app-side-rail-toggle"
+            aria-label={collapsed ? "展开导航栏" : "收起导航栏"}
+            aria-expanded={!collapsed}
+            aria-keyshortcuts={railAriaKey()}
+            title={collapsed ? `展开导航栏（${railKeyLabel()}）` : undefined}
+            onClick={onToggleRail}
+          >
+            <Icon name={collapsed ? "chevronRight" : "chevronLeft"} size={16} className="app-side-icon" />
+            <span className="app-side-label">收起导航</span>
+          </button>
+        )}
         {/* 更新槽位：设置行右端一个**定宽格子**，七种状态在同一个格子里原地变形
             ⇒ foot 高度恒定、导航区零位移。折叠态由 index.css 的 .update-slot 收起。 */}
         <div className="app-side-settings-row">

@@ -2,8 +2,10 @@ import { DockRegion } from "../workspace/WorkbenchDock";
 import { useMemo, useState } from "react";
 import "../../patch.css";
 import { Icon } from "../ui/icon";
+import { FreshnessBadge } from "../ui/FreshnessBadge";
 import { toast } from "../ui/toast";
 import { PatchList } from "../patch/PatchList";
+import { PatchNotices } from "../patch/PatchNotices";
 import { StageTree } from "../patch/StageTree";
 import { ItemDetail } from "../patch/ItemDetail";
 import { ChangesMd } from "../patch/PatchChangesMd";
@@ -11,6 +13,7 @@ import { PatchActions } from "../patch/PatchActions";
 import { BuildBanner } from "../patch/BuildBanner";
 import { TableCheck } from "../patch/TableCheck";
 import { OutRootField } from "../patch/OutRootField";
+import { PatchHealth } from "../patch/PatchHealth";
 import { usePatchScan } from "../../hooks/usePatchScan";
 import { usePatchBuild } from "../../hooks/usePatchBuild";
 import { useCheckGuard } from "../../hooks/useCheckGuard";
@@ -151,6 +154,7 @@ function PatchPanel({ root, onNavigate }: { root: string | null; onNavigate: (ta
     <div className="pk-page">
       <DockRegion region="toolbar"><div className="pk-head">
         <h1>补丁打包</h1>
+        <PatchHealth />
         <OutRootField
           value={defaults.data?.outRoot ?? null}
           detected={scan.data?.outRoots ?? []}
@@ -160,26 +164,24 @@ function PatchPanel({ root, onNavigate }: { root: string | null; onNavigate: (ta
           输出到 <b>{build.dir ? baseName(build.dir) : "未设置"}</b>
         </span>
         <span className="pk-sp" />
+        {(scan.data || scan.isError) && (
+          <FreshnessBadge
+            state={scan.isFetching ? "loading" : scan.isError ? "error" : "live"}
+            at={scan.data ? scan.dataUpdatedAt : null}
+            label="补丁扫描"
+            staleAfterMs={120_000}
+            onRefresh={refresh}
+          />
+        )}
         <button type="button" className="pk-btn" disabled={scan.isFetching} onClick={refresh}>
           <Icon name="refresh" size={13} className={scan.isFetching ? "animate-spin" : undefined} />
           {scan.isFetching ? "扫描中…" : "重扫改动"}
         </button>
       </div></DockRegion>
 
-      <DockRegion region="document">{err && (
-        <div className="pk-banner" data-tone="bad">
-          <Icon name="alert" size={13} />
-          <span>{String(err)}</span>
-        </div>
-      )}
-      {scan.data && scan.data.problems.length > 0 && (
-        <div className="pk-banner" data-tone="warn">
-          <Icon name="alertTriangle" size={13} />
-          <span>{scan.data.problems.map((p) => p.text).join("；")}</span>
-        </div>
-      )}
-      {build.result && <BuildBanner result={build.result} />}
-
+      <DockRegion region="document">
+        <PatchNotices error={err} problems={scan.data?.problems ?? []} />
+        {build.result && <BuildBanner result={build.result} />}
       </DockRegion>
       <DockRegion region="sidebar">
         <PatchList
@@ -286,6 +288,7 @@ function PatchPanel({ root, onNavigate }: { root: string | null; onNavigate: (ta
         progress={build.progress}
         onCancel={build.doCancel}
         count={chosen.length}
+        zipName={build.zipName}
         canBuild={chosen.length > 0 && dirty && !!build.dir}
         // 底部这颗也要走 buildNow：以前它直接 doBuild，把「表不存在」的二次确认
         // 整个绕过去了——顶部按钮点第一次只是变成确认态，底部一次就出包。

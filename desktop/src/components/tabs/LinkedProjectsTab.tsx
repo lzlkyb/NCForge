@@ -8,6 +8,7 @@ import { artifactMarks } from "../linked/artifactKind";
 import { OverrideEditor } from "../linked/OverrideEditor";
 import { WorkspaceSwitch } from "../linked/WorkspaceSwitch";
 import { Icon } from "../ui/icon";
+import { FreshnessBadge } from "../ui/FreshnessBadge";
 import { Skeleton } from "../ui/Skeleton";
 import { toast } from "../ui/toast";
 import { useLinkedGraph } from "../../hooks/useLinkedGraph";
@@ -39,7 +40,7 @@ import { collectUnsaved, saveAllDirty } from "../../lib/saveAllDirty";
  */
 export function LinkedProjectsTab() {
   const queryClient = useQueryClient();
-  const { graph, error, loading, reload } = useLinkedGraph();
+  const { graph, error, loading, at, reload } = useLinkedGraph();
   const ov = useOverrideDraft();
   const [busy, setBusy] = useState(false);
 
@@ -137,6 +138,13 @@ export function LinkedProjectsTab() {
               : "从各工程的 .classpath 解析依赖闭包"}
           </span>
           <span className="lnk-sp" />
+          <FreshnessBadge
+            state={loading ? "loading" : error ? "error" : "live"}
+            at={at}
+            label="依赖链"
+            staleAfterMs={300_000}
+            onRefresh={() => void reload()}
+          />
           <button
             type="button"
             className="lnk-btn"

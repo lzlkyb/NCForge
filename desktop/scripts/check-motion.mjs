@@ -245,6 +245,11 @@ test("reduced motion removes spatial movement and JS animation delays, including
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.getByTestId("modal-trigger").click();
   await page.emulateMedia({ reducedMotion: "reduce" });
+  // 媒体偏好切换对**正在运行**的 CSS 过渡晚一帧生效：同步读到的还是动画中间值。
+  // 等 100ms 再断言（远大于一帧、又短于未降级时的 0.2s 过渡），别把「一帧内收敛」
+  // 误判成「没降级」。反例：把全局降级规则去掉后，100ms 时过渡仍在跑，
+  // transform 仍是 matrix(...)，本断言照样失败。
+  await page.waitForTimeout(100);
   assert.equal(await modal.evaluate(node => getComputedStyle(node).transform), "none");
 });
 

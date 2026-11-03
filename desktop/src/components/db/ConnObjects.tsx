@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "../ui/icon";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { friendlyDbError, thousands } from "../../lib/db";
-import { dbApi, type ColumnInfo, type DbObject, type TableInfo } from "../../lib/dbApi";
-import { newConsole, openTable } from "../../lib/dbActions";
-import { toggleFavorite, useFavorites } from "../../lib/dbFavorites";
-import { columnsOf, openTableTab, rtOf, tabOf, useDb } from "../../lib/dbStore";
+import { dbApi, type DbObject, type TableInfo } from "../../lib/dbApi";
+import { newConsole, openTable, refreshMeta } from "../../lib/dbActions";
+import { favoriteKey, toggleFavorite, useAllFavorites, type FavoriteKind } from "../../lib/dbFavorites";
+import { openTableTab, rtOf, useDb } from "../../lib/dbStore";
 import { toast } from "../ui/toast";
 import { copyText } from "../../lib/utils";
+import { FavStar, TableRow } from "./ConnTableRow";
 
 /** 真实库里上万张表是常态，一次全铺会让侧栏卡死：每组只渲染前 N 条，靠筛选收敛。 */
 const LIMIT = 200;
@@ -31,8 +32,19 @@ const OBJ_GROUPS: { label: string; types: string[]; icon: "package" | "file" | "
 export function ConnObjects({ connId, filter }: { connId: string; filter: string }) {
   useDb();
   const rt = rtOf(connId);
-  const favs = useFavorites(connId);
-  const [groups, setGroups] = useState<Record<string, boolean>>({ fav: true, TABLE: true, VIEW: false, obj: false });
+  const favItems = useAllFavorites();
+  const favKeys = useMemo(
+    () =>
+      new Set(
+        favItems
+          .filter((f) => f.connId === connId)
+          .map((f) => favoriteKey(f.connId, f.kind, f.name, f.otype)),
+      ),
+    [favItems, connId],
+  );
+  const isFav = (kind: FavoriteKind, name: string, otype?: string) =>
+    favKeys.has(favoriteKey(connId, kind, name, otype));
+  const [groups, setGroups] = useState<Record<string, boolean>>({ TABLE: true, VIEW: false, obj: false });
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const [objs, setObjs] = useState<DbObject[] | null>(null);
   const [objErr, setObjErr] = useState<string | null>(null);
@@ -79,6 +91,7 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
 
   const tableMenu = (t: TableInfo, x: number, y: number) => {
     const lower = t.name.toLowerCase();
+    const fav = isFav("table", t.name);
     setMenu({
       x,
       y,
@@ -88,22 +101,41 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
         { label: "查看 DDL", icon: "file", onSelect: () => void openTable(connId, t.name, "ddl") },
         { label: "新建查询", icon: "terminal", separator: true, onSelect: () => void newConsole(connId, `select * from ${lower} where rownum <= 100`) },
         { label: "复制表名", icon: "copy", onSelect: () => void copyText(lower, () => toast(`已复制 ${lower}`, "success"), (e) => toast(`复制失败：${e}`, "error")) },
-        { label: favs.includes(t.name) ? "取消收藏" : "收藏", icon: "sparkles", onSelect: () => toggleFavorite(connId, t.name) },
+        { label: fav ? "取消收藏" : "收藏", icon: "star", onSelect: () => toggleFavorite(connId, "table", t.name) },
       ],
     });
   };
 
-  const favTables = matched.filter((t) => favs.includes(t.name.toUpperCase()));
+  const objMenu = (o: DbObject, x: number, y: number) => {
+    const lower = o.name.toLowerCase();
+    const fav = isFav("object", o.name, o.type);
+    setMenu({
+      x,
+      y,
+      items: [
+        { label: "打开源码", icon: "file", onSelect: () => openTableTab(connId, o.name, "source", o.type) },
+        { label: "复制名称", icon: "copy", onSelect: () => void copyText(lower, () => toast(`已复制 ${lower}`, "success"), (e) => toast(`复制失败：${e}`, "error")) },
+        { label: fav ? "取消收藏" : "收藏", icon: "star", separator: true, onSelect: () => toggleFavorite(connId, "object", o.name, o.type) },
+      ],
+    });
+  };
+
   const sections: { key: string; label: string; list: TableInfo[] }[] = [
-    { key: "fav", label: "收藏", list: favTables },
     { key: "TABLE", label: "表", list: matched.filter((t) => t.kind === "TABLE") },
     { key: "VIEW", label: "视图", list: matched.filter((t) => t.kind === "VIEW") },
   ];
 
   return (
     <div style={{ paddingLeft: 10 }}>
+      {rt.status === "connected" && rt.tablesAt && (
+        <div className="dbx-tree-note" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span>表结构读取于 {new Date(rt.tablesAt).toLocaleTimeString("zh-CN", { hour12: false })}</span>
+          <button type="button" className="dbx-lk" onClick={() => void refreshMeta(connId)}>
+            刷新
+          </button>
+        </div>
+      )}
       {sections.map((s) => {
-        if (s.key === "fav" && s.list.length === 0) return null;
         const isOpen = groups[s.key] || (!!filter && s.list.length > 0);
         return (
           <div key={s.key}>
@@ -113,7 +145,15 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
               <span className="dbx-cnt">{thousands(s.list.length)}</span>
             </button>
             {isOpen && s.list.slice(0, LIMIT).map((t) => (
-              <TableRow key={`${s.key}:${t.name}`} connId={connId} table={t} zh={names[t.name.toLowerCase()]} fav={favs.includes(t.name)} onMenu={tableMenu} />
+              <TableRow
+                key={`${s.key}:${t.name}`}
+                connId={connId}
+                table={t}
+                zh={names[t.name.toLowerCase()]}
+                fav={isFav("table", t.name)}
+                onToggleFav={() => toggleFavorite(connId, "table", t.name)}
+                onMenu={tableMenu}
+              />
             ))}
             {isOpen && s.list.length > LIMIT && <p className="dbx-tree-note">只显示前 {LIMIT} 张，继续输入关键字缩小范围</p>}
           </div>
@@ -135,20 +175,39 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
             objSections.map((g) => (
               <div key={g.label}>
                 <div className="dbx-tree-note" style={{ paddingLeft: 14 }}>{g.label} · {g.list.length}</div>
-                {g.list.slice(0, LIMIT).map((o) => (
-                  <button
-                    key={`${o.type}:${o.name}`}
-                    type="button"
-                    className="dbx-trow"
-                    style={{ paddingLeft: 25 }}
-                    title={`${o.name.toLowerCase()} · ${o.type}${o.status === "INVALID" ? "（失效：编译有错）" : ""}`}
-                    onClick={() => openTableTab(connId, o.name, "source", o.type)}
-                  >
-                    <Icon name={g.icon} size={12} />
-                    <span className="nm">{o.name.toLowerCase()}</span>
-                    {o.status === "INVALID" && <span className="ty">失效</span>}
-                  </button>
-                ))}
+                {g.list.slice(0, LIMIT).map((o) => {
+                  const fav = isFav("object", o.name, o.type);
+                  return (
+                    <button
+                      key={`${o.type}:${o.name}`}
+                      type="button"
+                      className="dbx-trow"
+                      style={{ paddingLeft: 25 }}
+                      aria-label={`${o.name.toLowerCase()} · ${o.type}${o.status === "INVALID" ? "（失效：编译有错）" : ""}${fav ? "，已收藏" : ""}`}
+                      title={`${o.name.toLowerCase()} · ${o.type}${o.status === "INVALID" ? "（失效：编译有错）" : ""}`}
+                      onClick={() => openTableTab(connId, o.name, "source", o.type)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        objMenu(o, e.clientX, e.clientY);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key !== "ContextMenu" && !(e.shiftKey && e.key === "F10")) return;
+                        e.preventDefault();
+                        const r = e.currentTarget.getBoundingClientRect();
+                        objMenu(o, r.left + 12, r.bottom);
+                      }}
+                    >
+                      <Icon name={g.icon} size={12} />
+                      <span className="nm">{o.name.toLowerCase()}</span>
+                      {o.status === "INVALID" && <span className="ty">失效</span>}
+                      <FavStar
+                        fav={fav}
+                        name={o.name.toLowerCase()}
+                        onToggle={() => toggleFavorite(connId, "object", o.name, o.type)}
+                      />
+                    </button>
+                  );
+                })}
                 {g.list.length > LIMIT && <p className="dbx-tree-note" style={{ paddingLeft: 25 }}>只显示前 {LIMIT} 个，继续输入关键字缩小范围</p>}
               </div>
             ))}
@@ -156,64 +215,5 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
       )}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
-  );
-}
-
-function TableRow({ connId, table, zh, fav, onMenu }: {
-  connId: string;
-  table: TableInfo;
-  zh: string | undefined;
-  fav: boolean;
-  onMenu: (t: TableInfo, x: number, y: number) => void;
-}) {
-  const [cols, setCols] = useState<ColumnInfo[] | "loading" | null>(null);
-  const cur = tabOf(useDb().active);
-  const active = cur?.kind === "table" && cur.connId === connId && cur.table === table.name.toUpperCase();
-  const expand = () => {
-    if (cols) return setCols(null);
-    setCols("loading");
-    columnsOf(connId, table.name).then(setCols, () => setCols(null));
-  };
-  return (
-    <>
-      <button
-        type="button"
-        className="dbx-trow"
-        data-active={active || undefined}
-        title={zh ? `${table.name.toLowerCase()} · ${zh}` : table.name.toLowerCase()}
-        onClick={() => void openTable(connId, table.name)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          onMenu(table, e.clientX, e.clientY);
-        }}
-      >
-        <span
-          role="button"
-          tabIndex={-1}
-          aria-label="展开字段"
-          onClick={(e) => {
-            e.stopPropagation();
-            expand();
-          }}
-          style={{ display: "inline-flex" }}
-        >
-          <Icon name={cols ? "chevronDown" : "chevronRight"} size={11} />
-        </span>
-        <Icon name={table.kind === "VIEW" ? "eye" : "database"} size={12} />
-        <span className="nm">{table.name.toLowerCase()}</span>
-        {zh && <span className="zh">{zh}</span>}
-        {fav && <span className="star">★</span>}
-      </button>
-      {cols === "loading" && <p className="dbx-tree-note" style={{ paddingLeft: 28 }}>读取字段…</p>}
-      {Array.isArray(cols) &&
-        cols.map((c) => (
-          <div key={c.name} className="dbx-trow" style={{ paddingLeft: 28 }} title={c.comment ?? c.zh ?? ""}>
-            {c.pk ? <Icon name="key" size={11} /> : <span style={{ width: 11 }} />}
-            <span className="nm">{c.name.toLowerCase()}</span>
-            {c.zh && <span className="zh">{c.zh}</span>}
-            <span className="ty">{c.full}</span>
-          </div>
-        ))}
-    </>
   );
 }

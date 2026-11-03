@@ -97,9 +97,9 @@ describe("快速导航快捷键", () => {
     expect(paletteKeyLabel("sym", "eclipse")).toBe("Ctrl+Alt+N");
   });
 
-  it("Ctrl+B / Ctrl+J 切侧栏与底部面板，带 Shift 不算", () => {
+  it("Ctrl+B / Ctrl+J 切侧栏与底部面板，Ctrl+Shift+B 展开导航栏", () => {
     expect(layoutKeyOf(key("b"))).toBe("side");
     expect(layoutKeyOf(key("J"))).toBe("panel");
-    expect(layoutKeyOf(key("b", true))).toBeNull();
+    expect(layoutKeyOf(key("b", true))).toBe("rail");
   });
 });

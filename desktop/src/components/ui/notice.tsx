@@ -279,7 +279,7 @@ export function ActionCard({
 
       {/* 展开详情：grid-rows 0fr→1fr 平滑高度过渡 */}
       <div
-        className={`grid transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+        className={`grid transition-[grid-template-rows] duration-300 ease-[var(--ease)] ${
           expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
         }`}
       >

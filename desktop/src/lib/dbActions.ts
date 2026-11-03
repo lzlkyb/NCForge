@@ -3,6 +3,7 @@ import { friendlyDbError } from "./db";
 import { dbApi } from "./dbApi";
 import { forgetColumnZh } from "./dbColumnZh";
 import { ask, confirmProdWrite, ensureConnected, guardSlotTx, guardTx, isLastTabOn } from "./dbConfirm";
+import { clearFavorites } from "./dbFavorites";
 import {
   appendOutput,
   clearSlots,
@@ -134,6 +135,7 @@ export async function deleteConn(connId: string) {
   if (!ok || !(await guardAllSessions(connId, "删除连接"))) return;
   try {
     setConns(await dbApi.remove(connId));
+    clearFavorites(connId);
     clearSlots(connId);
     for (const t of getDb().tabs) {
       if (t.connId !== connId) continue;

@@ -77,6 +77,15 @@
   font-weight: 550;
 }
 .wb-root-recent-item:hover { background: hsl(var(--primary) / 0.14); color: hsl(var(--primary)); }
+.wb-root-error {
+  display: flex;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: hsl(var(--destructive-ink));
+  /* 长路径会把整块撑宽，必须在 360px 的输入栏里换行 */
+  overflow-wrap: anywhere;
+}
 .wb-tree-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -291,6 +300,12 @@
 }
 .wb-tab-x:hover { opacity: 1; background: hsl(var(--secondary)); }
 .wb-dirty-dot { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--primary)); }
+/* 未保存标签：平时显示圆点（状态），悬停/聚焦时让位给叉（动作）——点圆点本身就是关闭，不能让它看起来不可点。 */
+.wb-tab-x .wb-tab-close { display: none; }
+.wb-tab:hover .wb-tab-close,
+.wb-tab-x:focus-visible .wb-tab-close { display: block; }
+.wb-tab:hover .wb-dirty-dot,
+.wb-tab-x:focus-visible .wb-dirty-dot { display: none; }
 
 .wb-banner {
   display: flex;
@@ -359,6 +374,7 @@
   user-select: none;
 }
 .wb-status-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-status-mode { flex-shrink: 0; padding: 0 6px; border-radius: 4px; background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
 .wb-status-sp { flex: 1; }
 .wb-status-warn { color: hsl(var(--warning-ink)); font-weight: 600; }
 /* 状态栏里的编码小签：打开被标记的文件时才出现，和树上的 UTF-8! 是同一件事 */
@@ -373,11 +389,44 @@
   background: hsl(var(--warning) / 0.16);
   color: hsl(var(--warning-ink));
 }
+/* 状态栏各页贡献（编译 / 问题 / 改动 / 连接）：同一枚小签，颜色只表达当下状态 */
+.wb-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: inherit;
+  font-size: inherit;
+  white-space: nowrap;
+}
+button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.wb-status-chip[data-tone="busy"] { color: hsl(var(--warning-ink)); }
+.wb-status-chip[data-tone="warn"] { color: hsl(var(--warning-ink)); font-weight: 600; }
+.wb-status-chip[data-tone="bad"] { color: hsl(var(--destructive-ink)); font-weight: 600; }
+.wb-status-num { display: inline-flex; align-items: center; gap: 3px; font-variant-numeric: tabular-nums; }
+.wb-status-num + .wb-status-num { margin-left: 2px; }
+.wb-status-dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--muted-foreground)); flex-shrink: 0; }
+.wb-status-dot[data-tone="busy"],
+.wb-status-chip[data-tone="busy"] .wb-status-dot { background: hsl(var(--warning)); animation: wb-lang-pulse 1s infinite; }
+.wb-status-dot[data-tone="ok"] { background: hsl(var(--success)); }
+.wb-status-dot[data-tone="bad"] { background: hsl(var(--destructive)); }
+/* 服务端口跟状态一起报：连不上时第一个要核对的就是端口号 */
+.wb-status-svc-port { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) {
+  .wb-status-dot,
+  .wb-status-chip[data-tone="busy"] .wb-status-dot { animation: none; }
+}
 
 /* ---- 底部面板（问题 / 编译输出），取自设计稿 .panel ---- */
 .wb-panel { height: 220px; flex-shrink: 0; display: flex; flex-direction: column; background: hsl(var(--card)); border-top: 1px solid hsl(var(--border)); }
 .wb-panel-tabs { display: flex; align-items: center; gap: 2px; height: 34px; flex-shrink: 0; padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); }
-.wb-ptab { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 6px; font-size: 12px; font-weight: 550; color: hsl(var(--muted-foreground)); }
+.wb-ptabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.wb-ptabs::-webkit-scrollbar { display: none; }
+/* 页签内容容器：抽屉本身是纵向 flex，保留 body 的 flex:1 与滚动。 */
+.wb-tabpanel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wb-ptab { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 6px; font-size: 12px; font-weight: 550; color: hsl(var(--muted-foreground)); flex: 0 0 auto; white-space: nowrap; }
 .wb-ptab[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
 .wb-ptab-n { min-width: 16px; height: 16px; border-radius: 8px; display: grid; place-items: center; font-size: 10px; font-weight: 700; background: hsl(var(--destructive) / 0.14); color: hsl(var(--destructive-ink)); }
 .wb-panel-body { flex: 1; min-height: 0; overflow: auto; padding: 6px 0; font-size: 12.5px; }

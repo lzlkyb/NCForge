@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { ToolTab } from "./ToolTab";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -58,6 +58,17 @@ export function TabStrip({
   /** 漫游 tabIndex：整组标签只占一个 Tab 停靠点，组内用方向键移动（WAI-ARIA tabs 模式）。 */
   const activeIndex = tabs.findIndex((t) => t.path === activePath);
   const rovingIndex = !dock?.documentOpen && activeIndex >= 0 ? activeIndex : 0;
+
+  // 开得太多时当前标签可能滚到看不见：切换后把它带回可视区，只动标签条自己的 scrollLeft。
+  useEffect(() => {
+    const el = activePath ? tabRefs.current.get(activePath) : null;
+    const strip = el?.parentElement;
+    if (!el || !strip) return;
+    const left = el.offsetLeft;
+    const right = left + el.offsetWidth;
+    if (left < strip.scrollLeft) strip.scrollLeft = Math.max(0, left - 8);
+    else if (right > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = right - strip.clientWidth + 8;
+  }, [activePath, tabs.length]);
 
   const onTabKey = (e: ReactKeyboardEvent<HTMLDivElement>, i: number, path: string) => {
     const last = tabs.length - 1;
@@ -185,12 +196,20 @@ export function TabStrip({
             type="button"
             className="wb-tab-x"
             aria-label={`关闭 ${t.name}`}
+            title={t.dirty || t.eolChanged ? "关闭（有未保存修改，会先确认）" : `关闭 ${t.name}`}
             onClick={(e) => {
               e.stopPropagation();
               onClose(t.path);
             }}
           >
-            {t.dirty || t.eolChanged ? <span className="wb-dirty-dot" /> : <Icon name="close" size={12} />}
+            {t.dirty || t.eolChanged ? (
+              <>
+                <span className="wb-dirty-dot" />
+                <Icon name="close" size={12} className="wb-tab-close" />
+              </>
+            ) : (
+              <Icon name="close" size={12} />
+            )}
           </button>
         </div>
       ))}

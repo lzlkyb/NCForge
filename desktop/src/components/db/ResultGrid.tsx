@@ -6,8 +6,8 @@ import { initialWidths, type SortState } from "../../lib/resultView";
 import { copyText } from "../../lib/utils";
 import { toast } from "../ui/toast";
 
-const ROW_H = 24;
-const HEAD_H = 36;
+const ROW_H = 26;
+const HEAD_H = 34;
 /** 可视区上下多渲染的行数，滚得快时不露白。 */
 const OVERSCAN = 12;
 
@@ -206,7 +206,15 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
         {order.slice(first, last).map((r, j) => {
           const i = first + j;
           return (
-            <div key={r} className="dbx-grow" style={{ top: HEAD_H + i * ROW_H, width: total }} data-sel={sel?.r === r || undefined} role="row" aria-rowindex={i + 2}>
+            <div
+              key={r}
+              className="dbx-grow"
+              style={{ top: HEAD_H + i * ROW_H, width: total }}
+              data-odd={i % 2 === 1 || undefined}
+              data-sel={sel?.r === r || undefined}
+              role="row"
+              aria-rowindex={i + 2}
+            >
               <div className="dbx-gc rn" style={{ width: rnW }} role="gridcell" aria-colindex={1}>{r + 1}</div>
               {columns.map((_, k) => {
                 const v = valueAt(r, k);

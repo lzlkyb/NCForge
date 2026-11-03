@@ -123,6 +123,15 @@ export const patchSetOutRoot = (dir: string | null) => invoke<void>("patch_set_o
 
 export const patchReveal = (path: string) => invoke<void>("patch_reveal", { path });
 
+/**
+ * 撤销一次覆盖：把出包后自动备份的旧包恢复成正式包。
+ *
+ * 后端要求备份与补丁包同目录、且名字是 `<包名>.bak-时间戳`，
+ * 前端只要把出包结果里的 `backup` 原样传回去。
+ */
+export const patchRestoreBackup = (zip: string, backup: string) =>
+  invoke<void>("patch_restore_backup", { zip, backup });
+
 // ───────────────────────── 纯函数 ─────────────────────────
 
 /**

@@ -5,6 +5,8 @@ export interface LinkedGraphState {
   graph: LinkedGraph | null;
   error: string | null;
   loading: boolean;
+  /** 上次成功读到依赖链的时间；失败时清空（旧图也一起清了）。 */
+  at: number | null;
 }
 
 /**
@@ -18,19 +20,19 @@ export interface LinkedGraphState {
  * 工作区，而用户刚点完切换会以为切换失败了。
  */
 export function useLinkedGraph() {
-  const [state, setState] = useState<LinkedGraphState>({ graph: null, error: null, loading: true });
+  const [state, setState] = useState<LinkedGraphState>({ graph: null, error: null, loading: true, at: null });
   const seq = useRef(0);
 
   const reload = useCallback(async (root?: string) => {
     const mine = seq.current + 1;
     seq.current = mine;
-    setState((s) => ({ graph: s.graph, error: null, loading: true }));
+    setState((s) => ({ graph: s.graph, error: null, loading: true, at: s.at }));
     try {
       const graph = await linkedProjects(root);
-      if (seq.current === mine) setState({ graph, error: null, loading: false });
+      if (seq.current === mine) setState({ graph, error: null, loading: false, at: Date.now() });
     } catch (e) {
       // 出错时把旧图一起清掉：留着的话用户看着上一份目录数，会以为「其实读到了」
-      if (seq.current === mine) setState({ graph: null, error: String(e), loading: false });
+      if (seq.current === mine) setState({ graph: null, error: String(e), loading: false, at: null });
     }
   }, []);
 

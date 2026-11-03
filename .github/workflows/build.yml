@@ -54,6 +54,10 @@ jobs:
       - name: 设计 token 棘轮
         run: npm run tokens:check
         working-directory: desktop
+      # 缓动必须走 token、字号不得低于 10px；存量违规记基线，只许减。
+      - name: UI 约定棘轮
+        run: npm run ui:check
+        working-directory: desktop
       # 存量违规记在 eslint-suppressions.json（棘轮，只许减少），新违规直接拦。
       - name: eslint
         run: npm run lint

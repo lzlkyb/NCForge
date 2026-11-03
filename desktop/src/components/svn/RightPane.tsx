@@ -180,8 +180,10 @@ export function RightPane({
         text={diff.data?.workingText ?? ""}
         lines={blame.data}
         loading={blame.isLoading || diff.isLoading}
+        retrying={blame.isFetching}
         error={blame.error ? friendlySvnError(blame.error) : null}
         onShowDiff={() => onMode("diff")}
+        onRetry={() => void blame.refetch()}
       />
     );
   }
@@ -213,7 +215,13 @@ export function RightPane({
         <div style={{ padding: 12 }}>
           <div className="vc-alert" data-tone="warn">
             <Icon name="alert" size={13} />
-            <span>{diff.error ? friendlySvnError(diff.error) : "拿不到这个文件的内容"}</span>
+            <span style={{ flex: 1 }}>{diff.error ? friendlySvnError(diff.error) : "拿不到这个文件的内容"}</span>
+            {/* 失败多半是 svn 瞬时错（锁 / 网络 / 服务器忙）：留一个原地重试，
+                否则用户只能去顶栏点「刷新」，把整份改动清单重扫一遍 */}
+            <button type="button" className="vc-btn vc-btn-sm" disabled={diff.isFetching}
+              onClick={() => void diff.refetch()}>
+              {diff.isFetching ? "重试中…" : "重试"}
+            </button>
           </div>
           {file.isDir && <div className="vc-hint" style={{ marginTop: 8 }}>目录没有可对比的内容，展开到具体文件再看。</div>}
         </div>

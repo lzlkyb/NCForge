@@ -29,15 +29,20 @@ export function BlameView({
   text,
   lines,
   loading,
+  retrying,
   error,
   onShowDiff,
+  onRetry,
 }: {
   title: string;
   text: string;
   lines: BlameLine[] | undefined;
   loading: boolean;
+  /** 重算进行中：按钮要能看出「点了、在跑」，否则用户会连点。 */
+  retrying: boolean;
   error: string | null;
   onShowDiff: () => void;
+  onRetry: () => void;
 }) {
   const rows = useMemo(() => {
     const src = text.split("\n");
@@ -116,7 +121,10 @@ export function BlameView({
           <div style={{ padding: 12 }}>
             <div className="vc-alert" data-tone="warn">
               <Icon name="alert" size={13} />
-              <span>{error}</span>
+              <span style={{ flex: 1 }}>{error}</span>
+              <button type="button" className="vc-btn vc-btn-sm" disabled={retrying} onClick={onRetry}>
+                {retrying ? "重算中…" : "重试"}
+              </button>
             </div>
           </div>
         )}

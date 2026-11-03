@@ -5,10 +5,10 @@ import { ImportDialog } from "./ImportDialog";
 import { SourceView } from "./SourceView";
 import { TableData } from "./TableData";
 import { TxBar } from "./TxBar";
+import { TableMoreActions } from "./TableMoreActions";
 import { InsertExportDialog } from "./InsertExportDialog";
 import { friendlyDbError } from "../../lib/db";
 import { dbApi, type ColumnInfo, type IndexInfo } from "../../lib/dbApi";
-import { newConsole } from "../../lib/dbActions";
 import { columnsOf, patchTab, rtOf, useDb, type TableSub, type TableTab } from "../../lib/dbStore";
 import { copyText } from "../../lib/utils";
 
@@ -62,32 +62,13 @@ export function TablePage({ tab }: { tab: TableTab }) {
         ))}
         <span className="dbx-sp" />
         {!isObj && (
-          <>
-            <button
-              type="button"
-              className="dbx-btn ghost"
-              disabled={rt.status !== "connected"}
-              title="把整表数据导成 insert 脚本（主键前置 / blob 写 null / 多语列写 '~'）"
-              onClick={() => setDlg("exp")}
-            >
-              <Icon name="download" size={12} />
-              导出 INSERT
-            </button>
-            <button
-              type="button"
-              className="dbx-btn ghost"
-              disabled={rt.status !== "connected"}
-              title="从 CSV / TSV 文件写入这张表（列映射、分批事务、失败行报告）"
-              onClick={() => setDlg("imp")}
-            >
-              <Icon name="upload" size={12} />
-              导入
-            </button>
-            <button type="button" className="dbx-btn ghost" onClick={() => void newConsole(tab.connId, `select * from ${lower} where rownum <= 100`)}>
-              <Icon name="terminal" size={12} />
-              在控制台查询
-            </button>
-          </>
+          <TableMoreActions
+            connId={tab.connId}
+            table={lower}
+            disabled={rt.status !== "connected"}
+            onExport={() => setDlg("exp")}
+            onImport={() => setDlg("imp")}
+          />
         )}
       </div>
       {dlg === "exp" && (

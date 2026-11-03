@@ -105,6 +105,7 @@ export const TAURI_COMMANDS = [
   "patch_build_cancel",
   "patch_config",
   "patch_defaults",
+  "patch_restore_backup",
   "patch_reveal",
   "patch_scan",
   "patch_set_out_dir",

@@ -322,6 +322,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::patch_set_out_dir,
             commands::patch_set_out_root,
             commands::patch_reveal,
+            commands::patch_restore_backup,
             // 数据库：连接管理
             commands::db_conn_list,
             commands::db_conn_save,

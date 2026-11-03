@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ConnPicker } from "./ConnPicker";
+import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { friendlyDbError } from "../../lib/db";
 import { switchConn } from "../../lib/dbActions";
 import { connOf, ensureSlot, patchTab, rtOf, txAction, useDb, type SqlTab } from "../../lib/dbStore";
@@ -36,6 +38,12 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
   const tx = tab.slot ? tab.tx : rt.tx;
   const auto = tx?.autoCommit ?? conn?.autoCommit ?? false;
   const pending = (tx?.statements ?? 0) > 0;
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+
+  const popup = (el: HTMLElement, items: ContextMenuItem[]) => {
+    const r = el.getBoundingClientRect();
+    setMenu({ x: r.left, y: r.bottom + 4, items });
+  };
 
   const setMode = async (on: boolean) => {
     if (!tab.connId || !connected || on === auto) return;
@@ -55,6 +63,11 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
   return (
     <div className="dbx-sqlbar" data-prod={conn?.env === "prod" || undefined}>
       <ConnPicker connId={tab.connId} onPick={(id) => void switchConn(tab.id, id)} />
+      {conn?.env === "prod" && (
+        <span className="dbx-prodchip" title="生产环境：写操作会二次确认">
+          生产
+        </span>
+      )}
       {tab.running ? (
         // 执行中把「执行」换成「停止」：以前只能干等 30 秒超时，或者杀掉整个应用。
         // 能不能停按 `Caps.cancel` 决定（两个引擎现在都支持，但要留出按能力降级的路）：
@@ -74,89 +87,103 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
           停止
         </button>
       ) : (
-        <button type="button" className="dbx-btn pri" disabled={!conn} onClick={() => onRun("current")} title="执行光标所在的语句（有选中则执行选中部分）">
-          <Icon name="play" size={12} />
-          执行 <span className="k">Ctrl+Enter</span>
-        </button>
+        <div className="dbx-runsplit">
+          <button type="button" className="dbx-btn pri" disabled={!conn} onClick={() => onRun("current")} title="执行光标所在的语句（有选中则执行选中部分）">
+            <Icon name="play" size={12} />
+            执行 <span className="k">Ctrl+Enter</span>
+          </button>
+          <button
+            type="button"
+            className="dbx-btn pri"
+            disabled={!conn}
+            aria-label="更多执行方式"
+            title="更多执行方式"
+            onClick={(e) =>
+              popup(e.currentTarget, [
+                { label: "执行整个脚本", icon: "terminal", hint: "Alt+X", onSelect: () => onRun("script") },
+                { label: "执行计划（不真正执行）", icon: "activity", onSelect: onExplain },
+                { label: "回放 .sql 文件", icon: "upload", onSelect: onScriptReplay },
+              ])
+            }
+          >
+            <Icon name="chevronDown" size={12} />
+          </button>
+        </div>
       )}
-      <button type="button" className="dbx-btn" disabled={tab.running || !conn} onClick={() => onRun("script")} title="按顺序执行整个脚本，出错即停">
-        <Icon name="terminal" size={12} />
-        执行脚本 <span className="k">Alt+X</span>
-      </button>
       <button
         type="button"
-        className="dbx-btn ghost"
-        disabled={tab.running || !conn}
-        onClick={onScriptReplay}
-        title="选一个 .sql 文件，按语句逐条回放（UTF-8 / GBK 自动识别，可忽略错误继续）"
+        className="dbx-txchip"
+        data-auto={auto || undefined}
+        disabled={!connected}
+        title={connected ? `事务模式：${auto ? "自动提交" : "手动提交"}（临时切换，默认值在连接设置里）` : "连上后可切换"}
+        onClick={(e) =>
+          popup(e.currentTarget, [
+            { label: "手动提交", icon: "lock", onSelect: () => void setMode(false) },
+            { label: "自动提交", icon: "check", onSelect: () => void setMode(true) },
+          ])
+        }
       >
-        <Icon name="upload" size={12} />
-        回放 .sql
+        <span className="dot" />
+        {auto ? "自动提交" : "手动提交"}
       </button>
-      <button type="button" className="dbx-btn ghost" disabled={tab.running || !conn} onClick={onExplain} title="EXPLAIN PLAN，不真正执行">
-        <Icon name="activity" size={12} />
-        执行计划
-      </button>
-      <button type="button" className="dbx-btn ghost" onClick={onFormat} title="Ctrl+Shift+F">
-        <Icon name="paintbrush" size={12} />
-        格式化
-      </button>
-      <button
-        type="button"
-        className="dbx-btn ghost"
-        disabled={tab.running || !conn}
-        onClick={onExport}
-        title="把光标处这条查询的结果导成 insert 脚本（后端取全量）"
-      >
-        <Icon name="download" size={12} />
-        导出 INSERT
-      </button>
-      <button
-        type="button"
-        className="dbx-btn ghost"
-        disabled={tab.running || !conn}
-        onClick={onValueSearch}
-        title="拿一段文本在全库所有表的文本列里找（只读，可看进度和取消）"
-      >
-        <Icon name="search" size={12} />
-        按值反查
-      </button>
-      <span className="dbx-vsep" />
-      <div className="dbx-txmode" title={connected ? "本连接的事务模式（临时切换，默认值在连接设置里）" : "连上后可切换"}>
-        <button type="button" disabled={!connected} data-on={!auto || undefined} onClick={() => void setMode(false)}>
-          手动提交
-        </button>
-        <button type="button" disabled={!connected} data-on={auto || undefined} onClick={() => void setMode(true)}>
-          自动提交
-        </button>
-      </div>
       <span className="dbx-sp" />
-      <button type="button" className="dbx-btn ghost" data-on={historyOpen || undefined} onClick={onHistory} disabled={!tab.connId}>
-        <Icon name="history" size={12} />
-        历史
+      <button
+        type="button"
+        className="dbx-ibtn"
+        data-on={historyOpen ? "" : undefined}
+        onClick={onHistory}
+        disabled={!tab.connId}
+        title="执行历史"
+        aria-label="执行历史"
+        aria-pressed={historyOpen}
+      >
+        <Icon name="history" size={15} />
       </button>
       <button
         type="button"
-        className="dbx-btn ghost"
-        data-on={snipsOpen || undefined}
+        className="dbx-ibtn"
+        data-on={snipsOpen ? "" : undefined}
         onClick={onSnips}
         disabled={!tab.connId}
-        title="常用 SQL 存下来，点一下填回编辑器（本机保存，不上传）"
+        title="常用 SQL 片段（本机保存，不上传）"
+        aria-label="SQL 片段"
+        aria-pressed={snipsOpen}
       >
-        <Icon name="code" size={12} />
-        片段
+        <Icon name="code" size={15} />
       </button>
       <button
         type="button"
-        className="dbx-btn ghost"
-        data-on={sessionsOpen || undefined}
-        onClick={onSessions}
+        className="dbx-ibtn"
         disabled={!tab.connId}
-        title="谁在跑、谁锁了哪张表（只读，不代执行 KILL）"
+        aria-label="更多数据库操作"
+        title="更多：格式化 / 导出 INSERT / 按值反查 / 会话与锁"
+        onClick={(e) =>
+          popup(e.currentTarget, [
+            { label: "格式化 SQL", icon: "paintbrush", hint: "Ctrl+Shift+F", onSelect: onFormat },
+            {
+              label: "导出 INSERT（光标处查询）",
+              icon: "download",
+              disabled: tab.running || !conn,
+              onSelect: onExport,
+            },
+            {
+              label: "按值反查（只读）",
+              icon: "search",
+              disabled: tab.running || !conn,
+              onSelect: onValueSearch,
+            },
+            {
+              label: sessionsOpen ? "收起会话与锁" : "会话与锁",
+              icon: "lock",
+              separator: true,
+              onSelect: onSessions,
+            },
+          ])
+        }
       >
-        <Icon name="lock" size={12} />
-        会话
+        <Icon name="more" size={15} />
       </button>
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
   );
 }

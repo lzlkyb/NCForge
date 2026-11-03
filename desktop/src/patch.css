@@ -218,6 +218,31 @@
   background: hsl(var(--secondary));
 }
 
+/* 批量条：在流里的一行，不叠在清单上；只有多选时才渲染（见 PatchList）。 */
+.pk-batch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 28px;
+  padding: 0 10px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--secondary) / 0.45);
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.pk-batch-count {
+  font-variant-numeric: tabular-nums;
+}
+.pk-batch-count b {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+.pk-batch .pk-link:disabled {
+  color: hsl(var(--muted-foreground) / 0.5);
+  cursor: default;
+  text-decoration: none;
+}
+
 .pk-rows {
   flex: 1;
   overflow: auto;
@@ -712,7 +737,7 @@
   margin-bottom: 6px;
 }
 .pk-tag {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
   padding: 1px 5px;
   border-radius: 4px;
@@ -899,3 +924,16 @@
   border-color: transparent;
   color: #fff;
 }
+
+/* 出包环境健康条：四项各自可点，指向能修它的那一页。 */
+.pk-health { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.pk-health-chip { display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 9px; border:1px solid hsl(var(--border)); border-radius:999px; font-size:11px; color:hsl(var(--muted-foreground)); white-space:nowrap; }
+.pk-health-chip:hover { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); }
+.pk-health-dot { width:6px; height:6px; border-radius:999px; background:hsl(var(--muted-foreground) / 0.5); }
+.pk-health-chip[data-tone="ok"] .pk-health-dot { background:hsl(var(--success)); }
+.pk-health-chip[data-tone="warn"] { color:hsl(var(--warning-ink)); }
+.pk-health-chip[data-tone="warn"] .pk-health-dot { background:hsl(var(--warning)); }
+.pk-health-chip[data-tone="bad"] { color:hsl(var(--destructive-ink)); }
+.pk-health-chip[data-tone="bad"] .pk-health-dot { background:hsl(var(--destructive)); }
+.pk-health-chip[data-tone="busy"] .pk-health-dot { background:hsl(var(--primary)); animation:wb-lang-pulse 1.4s ease-in-out infinite; }
+@media(prefers-reduced-motion:reduce) { .pk-health-chip[data-tone="busy"] .pk-health-dot { animation:none; } }

@@ -927,3 +927,19 @@
   line-height: 1.6;
   color: hsl(var(--muted-foreground));
 }
+
+/* 服务链路条：一眼看出断在进程 / 端口 / 应用 / 数据库哪一环。 */
+.sv-chain { display:flex; align-items:center; gap:2px; flex-wrap:wrap; padding:8px 12px; border-top:1px solid hsl(var(--border)); }
+.sv-chain-cell { display:inline-flex; align-items:center; gap:2px; }
+.sv-chain-arrow { color:hsl(var(--muted-foreground) / 0.5); font-size:12px; padding:0 2px; }
+.sv-chain-node { display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 8px; border-radius:999px; font-size:11px; color:hsl(var(--muted-foreground)); white-space:nowrap; }
+button.sv-chain-node:hover { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); }
+.sv-chain-node i { width:6px; height:6px; border-radius:999px; background:hsl(var(--muted-foreground) / 0.5); }
+.sv-chain-node[data-tone="ok"] { color:hsl(var(--success-ink)); }
+.sv-chain-node[data-tone="ok"] i { background:hsl(var(--success)); }
+.sv-chain-node[data-tone="warn"] { color:hsl(var(--warning-ink)); }
+.sv-chain-node[data-tone="warn"] i { background:hsl(var(--warning)); }
+.sv-chain-node[data-tone="bad"] { color:hsl(var(--destructive-ink)); }
+.sv-chain-node[data-tone="bad"] i { background:hsl(var(--destructive)); }
+.sv-chain-node[data-tone="busy"] i { background:hsl(var(--primary)); animation:wb-lang-pulse 1.4s ease-in-out infinite; }
+@media(prefers-reduced-motion:reduce) { .sv-chain-node[data-tone="busy"] i { animation:none; } }

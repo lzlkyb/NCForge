@@ -1,22 +1,29 @@
 import { languageOf, type EncodingMark } from "../../lib/workspace";
 import type { TabMeta } from "../../lib/workspaceSession";
 import { useCursor } from "../../lib/cursorStore";
+import { WORKSPACE_LABELS } from "../layout/SideNav";
 import { LangBadge } from "./LangBadge";
 import { ServiceStatusButton } from "./ServiceStatusButton";
+import { StatusContributions } from "./StatusContributions";
 
 /**
- * 编辑器底部状态栏。
+ * 外壳状态栏（工作台里只有这一条）。
+ *
+ * 左边是「你在哪」（工程 / 当前文件或当前工具页），中间是当前页的贡献
+ * （编译、问题、SVN 改动、数据库连接，见 StatusContributions），右边是全局
+ * 入口（NC 服务、底部面板）与代码页自己的编码 / 行尾 / 光标。
  *
  * 「Eclipse 按 GBK 读」这条只在树里标了号的 SQL 上出现：它的意义是提醒
  * 「用 Eclipse 编译这个文件会烂」，而工作台自己的产物是对的。
  */
-export function EditorStatus({
+export function ShellStatusBar({
   root,
   active,
   mark,
   saving,
   panelOpen,
   onTogglePanel,
+  activeTool,
 }: {
   root: string;
   active: TabMeta | null;
@@ -25,23 +32,37 @@ export function EditorStatus({
   saving: boolean;
   panelOpen: boolean;
   onTogglePanel: () => void;
+  /** 当前页 key：文件页展示编辑器信息，工具页只留全局信息 + 该页贡献。 */
+  activeTool: string;
 }) {
   // 光标自己订阅（lib/cursorStore）：它每秒可能变几十次，
   // 挂在父组件上会拖着整棵文件树一起重渲染。
   const cursor = useCursor();
+  const toolMode = activeTool !== "files";
+  const toolLabel = WORKSPACE_LABELS[activeTool];
   return (
     <footer className="wb-status">
-      <span className="wb-status-path" title={active?.path}>
-        {active ? (active.virtual ? `${active.name} · jar 内` : active.path) : root}
-      </span>
-      <LangBadge activePath={active && !active.virtual ? active.path : null} />
+      {toolMode ? (
+        <>
+          <span className="wb-status-path" title={root}>{root || "尚未打开工程"}</span>
+          {toolLabel && <span className="wb-status-mode">{toolLabel}</span>}
+        </>
+      ) : (
+        <>
+          <span className="wb-status-path" title={active?.path}>
+            {active ? (active.virtual ? `${active.name} · jar 内` : active.path) : root}
+          </span>
+          <LangBadge activePath={active && !active.virtual ? active.path : null} />
+        </>
+      )}
+      <StatusContributions activeTool={activeTool} />
       <span className="wb-status-sp" />
       {saving && <span className="wb-status-warn">保存中…</span>}
       <ServiceStatusButton />
       <button type="button" className="wb-status-btn" onClick={onTogglePanel}>
         {panelOpen ? "隐藏面板" : "显示面板"}
       </button>
-      {active && (
+      {!toolMode && active && (
         <>
           <span>{active.virtual ? "java" : languageOf(active.path)}</span>
           {mark && (

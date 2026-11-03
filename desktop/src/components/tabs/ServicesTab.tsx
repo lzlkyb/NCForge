@@ -217,6 +217,9 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
           previewing={previewing}
           onCommandLine={() => void showCommandLine()}
           onRevealLog={revealLog}
+          known={known}
+          failed={isError}
+          onRetryStatus={() => void refetch()}
         />
         <ServiceCard
           status={status ?? null}

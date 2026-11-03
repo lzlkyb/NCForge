@@ -98,12 +98,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   const nav = useNav();
   const { compileActive } = useModuleCompile();
 
-  /**
-   * 跳到上一条 / 下一条问题。
-   *
-   * 位置用光标而不是上一次跳转的目标：执行时刻的位置才是「我现在看到哪儿了」。
-   * 不用 `useCursor()` 订阅——那会让整页跟着每次方向键重渲染。
-   */
+  /** 跳上/下一条问题：位置取执行时刻的光标，不订阅 useCursor（那会让整页随方向键重渲染）。 */
   const jumpToProblem = (dir: 1 | -1) => {
     const list = mergeProblems(compileResult?.problems, getCodeDiags());
     const p = nextProblem(list, activePath ? { path: activePath, line: getCursor().line } : null, dir);
@@ -167,17 +162,21 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
     hasProblems: () => mergeProblems(compileResult?.problems, getCodeDiags()).some((p) => p.severity !== "info"),
   });
 
-  const applyRoot = async (path: string) => {
+  const applyRoot = async (path: string): Promise<string | null> => {
     // 切换会 closeModel 掉全部标签：没落盘的修改必须先问用户，与「工程关联」页的切换一致
-    if (!(await ensureFilesSaved("切换工程"))) return;
+    if (!(await ensureFilesSaved("切换工程"))) return null;
     try {
       // 切换的副作用（关模型 / 停 jdt.ls / 清会话 / 失效 svn 缓存）统一在 lib 里，
       // 「工程关联」页用的是同一份——两边各写一套必然分叉
       const shown = await applyWorkspace(path, queryClient);
       setRoot(shown);
       setEditingRoot(false);
+      return null;
     } catch (e) {
-      toast(`无法打开目录：${e}`, "error");
+      const message = `无法打开目录：${e}`;
+      // 返回值给引导页留在输入框下方，toast 给树头 / 最近工作区这些没有行内位置的入口
+      toast(message, "error");
+      return message;
     }
   };
 
@@ -215,8 +214,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           rootInput={rootInput}
           recents={getRecentRoots()}
           onChange={setRootInput}
-          onOpen={() => void applyRoot(rootInput)}
-          onOpenRecent={(p) => void applyRoot(p)}
+          onOpen={applyRoot}
           output={panel}
           servicesPanel={panelOpen && panelTab === "svc"}
         />

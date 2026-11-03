@@ -5,7 +5,7 @@
 #  安装：cp .githooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
 #  跳过：git push --no-verify
 #
-#  为什么把这十一项都放进钩子：
+#  为什么把这十二项都放进钩子：
 #  一条规则要么由机器把关，要么就会烂掉。CLAUDE.md 要求「提交前跑 cargo fmt +
 #  clippy，保持零警告」，但之前没有任何东西执行它——clippy 只在 tag 触发的
 #  macOS job 里跑，于是可以连着 push 十次都不知道有警告。
@@ -28,21 +28,21 @@ set -e
 
 echo ""
 echo "══════════════════════════════════════════════"
-echo "  Pre-push: 运行门禁（11 项）..."
+echo "  Pre-push: 运行门禁（12 项）..."
 echo "══════════════════════════════════════════════"
 echo ""
 
 # ── 组件体量（纯读文件，最快，放最前）──
 # 规则 7 的机器执行版：行数 + 单文件里的 useState/useEffect 总数。
 # 存量超标文件走棘轮基线（只许变小），新文件必须直接合规。
-echo "[1/11] 组件体量门禁 ..."
+echo "[1/12] 组件体量门禁 ..."
 (cd desktop && node scripts/check-component-size.mjs)
 echo ""
 
 # ── 孤立文件 / 依赖（knip，约 1 秒）──
 # 只看 files + dependencies：未使用的 export / type 暂不纳入（存量多，且不少是
 # 有意的对外 API），等孤立文件清零后再逐类收紧。
-echo "[2/11] knip 孤立文件/依赖 ..."
+echo "[2/12] knip 孤立文件/依赖 ..."
 (cd desktop && npx knip --include files,dependencies --no-progress)
 echo "  ✅ 无孤立文件或依赖"
 echo ""
@@ -50,18 +50,24 @@ echo ""
 # ── Rust ↔ TS 命令契约 ──
 # 真源是 main.rs 的 generate_handler!；生成物过期、登记了没定义、前端拼错命令名，
 # 都在这里和 tsc 两道拦住。
-echo "[3/11] Tauri 命令契约 ..."
+echo "[3/12] Tauri 命令契约 ..."
 (cd desktop && node scripts/gen-command-contract.mjs --check)
 echo ""
 
 # ── 设计 token 棘轮 ──
 # 裸 hex 只许减不许增；新增颜色必须走 :root 里的 token。
-echo "[4/11] 设计 token 棘轮 ..."
+echo "[4/12] 设计 token 棘轮 ..."
 (cd desktop && node scripts/check-design-tokens.mjs)
 echo ""
 
+# ── UI 约定棘轮 ──
+# 缓动必须走 --ease* token；字号不得低于 10px。存量记基线，只许减。
+echo "[5/12] UI 约定棘轮 ..."
+(cd desktop && node scripts/check-ui-contract.mjs)
+echo ""
+
 # ── Rust 格式（瞬完，最常见的低级失败放最前）──
-echo "[5/11] cargo fmt --check ..."
+echo "[6/12] cargo fmt --check ..."
 if ! (cd desktop/src-tauri && cargo fmt --check >/dev/null 2>&1); then
   echo "  ❌ 格式不合规。在 desktop/src-tauri 下跑一句 'cargo fmt' 即可修复。"
   exit 1
@@ -71,7 +77,7 @@ echo ""
 
 # ── Rust 未使用依赖 ──
 # 误报登记在 src-tauri/Cargo.toml 的 [package.metadata.cargo-machete]。
-echo "[6/11] cargo machete ..."
+echo "[7/12] cargo machete ..."
 if ! command -v cargo-machete >/dev/null 2>&1; then
   echo "  ❌ 未安装 cargo-machete。跑一次 'cargo install cargo-machete --locked' 再来。"
   exit 1
@@ -84,13 +90,13 @@ echo ""
 # 上它的唯一理由是 react-hooks 那两条规则：依赖数组不全 / hooks 调用顺序问题
 # 会造成“闭包拿陈旧值”，而 tsc 完全看不出来。存量违规记在 eslint-suppressions.json
 # 里（棘轮，只许减少），新违规直接拦。
-echo "[7/11] eslint ..."
+echo "[8/12] eslint ..."
 (cd desktop && npx eslint .)
 echo "  ✅ eslint 通过"
 echo ""
 
 # ── 前端类型 ──
-echo "[8/11] 前端 tsc --noEmit ..."
+echo "[9/12] 前端 tsc --noEmit ..."
 (cd desktop && npx tsc --noEmit)
 echo "  ✅ 前端类型检查通过"
 echo ""
@@ -98,13 +104,13 @@ echo ""
 # ── 前端单测 ──
 # 单测盖的是真机难复现的纯计算（更新状态机、错误分类、随包记录汇总等）。
 # 不跑它们等于白写——历史上这里曾因"没有单测"被跳过整整两年。
-echo "[9/11] 前端 vitest ..."
-(cd desktop && npm test --silent)
+echo "[10/12] 前端 vitest ..."
+(cd desktop && npm test --silent -- --maxWorkers=2)
 echo "  ✅ 前端单测通过"
 echo ""
 
 # ── Rust 静态检查（与 CI 的 macOS job 同等严格）──
-echo "[10/11] cargo clippy -D warnings ..."
+echo "[11/12] cargo clippy -D warnings ..."
 (cd desktop && node scripts/rust-gate.mjs clippy --all-targets --no-default-features -- -D warnings)
 echo "  ✅ clippy 零警告"
 echo ""
@@ -113,7 +119,7 @@ echo ""
 # 走 scripts/rust-gate.mjs 而不是裸 cargo：它把测试临时目录钉到 target/test-tmp
 # 并限并发（裸 `cargo test` 在 16 核 / 15.8GB 上会顶满内存，测试残留还会把
 # 系统盘 %TEMP% 撑爆——2026-11-02 实测累积 5.12GB / 1981 个目录）。
-echo "[11/11] Rust cargo test ..."
+echo "[12/12] Rust cargo test ..."
 (cd desktop && node scripts/rust-gate.mjs test --no-default-features)
 echo "  ✅ Rust 测试通过"
 echo ""

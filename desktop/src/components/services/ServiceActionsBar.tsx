@@ -1,4 +1,5 @@
 import { Icon } from "../ui/icon";
+import { FreshnessBadge } from "../ui/FreshnessBadge";
 import { NccDecodeLauncher } from "./NccDecodeLauncher";
 
 /**
@@ -13,12 +14,19 @@ export function ServiceActionsBar({
   previewing,
   onCommandLine,
   onRevealLog,
+  known,
+  failed,
+  onRetryStatus,
 }: {
   configOpen: boolean;
   onToggleConfig: () => void;
   previewing: boolean;
   onCommandLine: () => void;
   onRevealLog: () => void;
+  /** 拿到过状态（徽标显示「实时」）；面板不可见时轮询会暂停，但徽标本身不可见。 */
+  known: boolean;
+  failed: boolean;
+  onRetryStatus: () => void;
 }) {
   return (
     <div className="sv-svc-bar">
@@ -26,6 +34,13 @@ export function ServiceActionsBar({
         <Icon name="server" size={13} />
         NC 中间件
       </span>
+      <FreshnessBadge
+        // 1 秒轮询是实时流，不显示秒级时间戳；失败时由徽标给出重试。
+        state={failed ? "error" : known ? "live" : "loading"}
+        at={null}
+        label="服务状态"
+        onRefresh={onRetryStatus}
+      />
       <span className="sv-sp" />
       <button
         type="button"

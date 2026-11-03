@@ -170,7 +170,18 @@ export function WorkbenchFrame({ activeTool, tool, fileTabs = false, tree, tabs,
             <div ref={fileRefs.tabs} className="wb-file-tabs">{tabs}</div>
             {!fileTabs && <div className="wb-tabs" role="tablist"><ToolTab /></div>}
           </div>
-          <div id="wb-code-surface" ref={fileRefs.editor} className="wb-code-surface" role="tabpanel" aria-label="编辑器" hidden={documentOpen}>{editor}</div>
+          <div
+            id="wb-code-surface"
+            ref={fileRefs.editor}
+            className="wb-code-surface"
+            role="tabpanel"
+            aria-label="编辑器"
+            hidden={documentOpen}
+            // 切页过渡只捕获内容区；同一时刻只能有一个元素叫 workspace-page。
+            data-page-panel={activeTool === "files" ? "" : undefined}
+          >
+            {editor}
+          </div>
           <div ref={refs.document} className="wb-document-surface" hidden={!documentOpen} />
           <div className="wb-resize-y" role="separator" aria-label="调整底部面板高度" aria-orientation="horizontal"
             aria-valuemin={BOTTOM_MIN} aria-valuemax={bottomMax()} aria-valuenow={Math.round(bottomHeight)}

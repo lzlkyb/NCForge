@@ -49,6 +49,9 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
   const [query, setQuery] = useState("");
   const [sel, setSel] = useState(0);
   const [result, setResult] = useState<PaletteResult>({ items: [], note: "" });
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [retryTick, setRetryTick] = useState(0);
+  const lastKey = useRef("");
   const listRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   // 打开前的焦点（通常是编辑器）：Esc 关掉后要还给它；执行了某一项则不还，由目标（编辑器）自己拿焦点
@@ -74,6 +77,14 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
 
   useEffect(() => {
     let alive = true;
+    // 查询一变就先清空：不把上一次的结果留在列表里，回车就不会打开已经不匹配的条目。
+    const key = `${mode}\u0000${query}`;
+    if (lastKey.current !== key) {
+      lastKey.current = key;
+      setResult({ items: [], note: "" });
+      setSel(0);
+    }
+    setLoadState("loading");
     // 类型搜索要问语言服务、`#` 内容搜索要扫整个工程：输入时稍等一下再发，
     // 免得每个字符一个请求（`:行号` 是本地解析，不延迟）
     const slow = mode === "type" || (mode === "file" && query.trim().startsWith("#"));
@@ -83,19 +94,21 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
           if (!alive) return;
           setResult(r);
           setSel(0);
+          setLoadState("ready");
         })
         .catch((e) => {
           // 不能吞：工程根读不到、语言服务挂了都会走到这里，静默空列表会被当成「没有这个类」
           if (!alive) return;
           setResult({ items: [], note: `查询失败：${e instanceof Error ? e.message : String(e)}` });
           setSel(0);
+          setLoadState("error");
         });
     }, slow && query ? 200 : 0);
     return () => {
       alive = false;
       clearTimeout(t);
     };
-  }, [mode, query]);
+  }, [mode, query, retryTick]);
 
   useEffect(() => {
     listRef.current?.querySelector('[data-sel="true"]')?.scrollIntoView({ block: "nearest" });
@@ -195,8 +208,20 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
             </button>
           ))}
         </div>
-        {result.note && <div className="qp-sec">{result.note}</div>}
-        <div className="qp-list" id="qp-listbox" ref={listRef} role="listbox" aria-label="候选">
+        <div
+          className={loadState === "error" ? "qp-sec qp-sec-err" : "qp-sec"}
+          role={loadState === "error" ? "alert" : "status"}
+          aria-live="polite"
+        >
+          {loadState === "loading" && (
+            <span className="qp-busy"><Icon name="spinner" size={12} className="animate-spin" aria-hidden="true" />查询中…</span>
+          )}
+          {result.note && <span>{result.note}</span>}
+          {loadState === "error" && (
+            <button type="button" className="qp-retry" onClick={() => setRetryTick((n) => n + 1)}>重试</button>
+          )}
+        </div>
+        <div className="qp-list" id="qp-listbox" ref={listRef} role="listbox" aria-label="候选" aria-busy={loadState === "loading"}>
           {result.items.map((it, i) => (
             <div key={it.key} id={`qp-opt-${i}`} role="option" aria-selected={i === sel} data-sel={i === sel} className="qp-li" onMouseMove={() => i !== sel && setSel(i)} onClick={() => runAt(i)}>
               {it.kind ? <span className="qp-k" data-k={it.kind}>{it.kind}</span> : mode === "file" ? <Icon name="file" size={14} /> : null}

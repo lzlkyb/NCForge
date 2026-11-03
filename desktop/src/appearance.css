@@ -45,8 +45,11 @@ html.dark[data-ui-style="glass"] {
   --muted-foreground: 218 25% 79%;
 }
 
-/* Soft gradients already contain blurred color: cards need no live blur layer. */
-html[data-ui-style="glass"] .app-boot-fade {
+/* Soft gradients already contain blurred color: cards need no live blur layer.
+   ⚠️ 这张柔光底必须挂在真实存在的窗口壳上。原先写的是 `.app-boot-fade`，但全仓
+   没有任何元素挂这个类（首帧骨架用的是 index.html 里的 `.boot`），玻璃卡其实一直
+   叠在平铺的 --background 上——「背景光晕」只存在于这段注释和死规则里。 */
+html[data-ui-style="glass"] .app-shell {
   background:
     radial-gradient(ellipse at 12% 4%, rgb(111 203 213 / .46), transparent 61%),
     radial-gradient(ellipse at 92% 8%, rgb(166 151 219 / .40), transparent 64%),
@@ -54,7 +57,7 @@ html[data-ui-style="glass"] .app-boot-fade {
     #e7edf6;
 }
 
-html.dark[data-ui-style="glass"] .app-boot-fade {
+html.dark[data-ui-style="glass"] .app-shell {
   background:
     radial-gradient(ellipse at 12% 4%, rgb(25 133 156 / .40), transparent 61%),
     radial-gradient(ellipse at 92% 8%, rgb(105 78 177 / .34), transparent 64%),
@@ -73,6 +76,41 @@ html.dark[data-ui-style="glass"] .app-boot-fade {
 .app-shell .app-side[data-collapsed] .app-side-head { padding-inline: 0; }
 .app-shell .app-side-foot { padding-bottom: 12px; }
 
+/* ── 工作台（文件树 / 编辑器 / 标签 / 底部面板）─────────────────────────────
+   workbench-layout.css 里这些面都是实色；只做壳的话，文件页主体永远看不到玻璃。
+   按现有分级处理：树面板 = panel，代码/文档/底部面板 = reading，标签条与主区
+   透出壳的柔光底。classic 不受影响（全部挂在 data-ui-style 下）。 */
+html[data-ui-style="glass"] .app-shell .wb-root { background: transparent; }
+html[data-ui-style="glass"] .app-shell .wb-tree { background: var(--glass-panel); }
+html[data-ui-style="glass"] .app-shell :is(.wb-code-surface, .wb-document-surface) { background: var(--glass-reading); }
+html[data-ui-style="glass"] .app-shell :is(.wb-tabbar, .wb-tabs) { background: transparent; }
+html[data-ui-style="glass"] .app-shell .wb-tabbar { border-bottom-color: var(--glass-chrome-edge); }
+html[data-ui-style="glass"] .app-shell .wb-tab[data-active] { background: var(--glass-reading); }
+html[data-ui-style="glass"] .app-shell :is(.wb-resize-x, .wb-resize-y) { border-color: var(--glass-chrome-edge); }
+html[data-ui-style="glass"] .app-shell .wb-toolbar { border-bottom-color: var(--glass-chrome-edge); }
+html[data-ui-style="glass"] .app-shell .wb-bottom { background: transparent; }
+html[data-ui-style="glass"] .app-shell .wb-panel { background: var(--glass-reading); border-top-color: var(--glass-chrome-edge); }
+
+/* 全工程搜索停靠在玻璃侧栏里：整块与工具条不能是实色，输入框走 L2 inset。 */
+html[data-ui-style="glass"] .app-shell .wb-search-tool,
+html[data-ui-style="glass"] .app-shell .wb-search-tool > div.bg-card,
+html[data-ui-style="glass"] .app-shell .wb-search-tool :is(div, section).bg-background {
+  background-color: transparent;
+}
+html[data-ui-style="glass"] .app-shell .wb-search-tool > div.bg-card { border-bottom-color: var(--glass-chrome-edge); }
+html[data-ui-style="glass"] .app-shell .wb-search-tool :is(input, textarea, select).bg-background {
+  background-color: var(--glass-inset);
+  border-color: var(--glass-chrome-edge);
+}
+
+/* 弹窗/设置页里的原生输入框：实底在玻璃面上会变成一块块白斑，统一走 L2 inset。 */
+html[data-ui-style="glass"] .modal-surface :is(input, textarea, select):not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+  background-color: var(--glass-inset);
+  border-color: var(--glass-chrome-edge);
+}
+/* 弹窗内手写的实底条（如快捷键筛选框的包裹层）同样降为 inset。 */
+html[data-ui-style="glass"] .modal-surface .bg-card { background-color: var(--glass-inset); }
+
 /* Put breathing room inside each scrolling page, rather than in a fixed colored strip. */
 .app-shell { --shell-page-gap: 12px; }
 @media (min-width: 1600px) { .app-shell { --shell-page-gap: 16px; } }
@@ -87,11 +125,9 @@ html.dark[data-ui-style="glass"] .app-boot-fade {
    🔴 新页面必须自己声明这条 —— 上面 74 行已把 main 的 px-5 清零，
    漏了就会变成「内容贴到窗口边缘」，而且只有真实构建才看得出来。 */
 .app-shell .app-main-content[data-page="ccgui"] > [data-page-panel]:not([hidden]) { padding: var(--shell-page-gap); }
-.app-shell .settings-category-panel { padding: var(--shell-page-gap) max(0px, calc(var(--shell-page-gap) - 12px)) var(--shell-page-gap) var(--shell-page-gap); }
 .app-shell .app-content-box { padding-bottom: 0; }
 .app-shell .page-scroll { scrollbar-gutter: auto; }
-.app-shell .app-main-content:not([data-terminal]) > .page-scroll,
-.app-shell .settings-category-panel { scrollbar-gutter: stable; }
+.app-shell .app-main-content:not([data-terminal]) > .page-scroll { scrollbar-gutter: stable; }
 
 /* Only the active page's outer viewport can reveal the toolbar's quiet scroll edge.
    Hidden categories retain their offset without bleeding an edge into the next page. */
@@ -108,8 +144,7 @@ html.dark[data-ui-style="glass"] .app-topbar::after {
   background: linear-gradient(to bottom, rgb(24 36 58 / .80), transparent);
 }
 .app-shell .app-main:has(
-  .app-main-content > [data-page-panel]:not([hidden])[data-scroll-started],
-  .app-main-content > [data-page-panel]:not([hidden]) .settings-category-panel:not([hidden])[data-scroll-started]
+  .app-main-content > [data-page-panel]:not([hidden])[data-scroll-started]
 ) .app-topbar::after { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   .app-shell .app-topbar::after { transition: none; }
@@ -403,8 +438,10 @@ html[data-ui-style="glass"] [data-cc-panel] [class*="text-warning-ink"] {
     --glass-floating: hsl(var(--card));
     --glass-data-header: hsl(var(--card));
     --glass-canvas: hsl(var(--card));
+    /* 工作台树面板也用 panel，不补会在该模式下仍半透。 */
+    --glass-panel: hsl(var(--card));
   }
-  html:root[data-ui-style="glass"] :is(.app-side, .app-topbar, .ui-card, .bento-card, .metric-card, .terminal-tabs-header, .terminal-pane-head, .modal-surface, .ui-surface, [role="listbox"], [role="dialog"].bg-card, .toast),
+  html:root[data-ui-style="glass"] :is(.app-shell, .app-side, .app-topbar, .ui-card, .bento-card, .metric-card, .terminal-tabs-header, .terminal-pane-head, .modal-surface, .ui-surface, [role="listbox"], [role="dialog"].bg-card, .toast),
   html[data-ui-style="glass"] .terminal-workspace .terminal-pane-frame[data-focused] > .terminal-pane-head {
     background: hsl(var(--card));
     backdrop-filter: none;
@@ -427,6 +464,7 @@ html[data-ui-style="glass"] [data-cc-panel] [class*="text-warning-ink"] {
     --glass-inset: Canvas;
     --glass-data-header: Canvas;
     --glass-canvas: Canvas;
+    --glass-panel: Canvas;
   }
   /* 对话页的壳与实体件在强制配色下同样要退回系统色，暖白审批卡尤其不能留。 */
   html:root[data-ui-style="glass"] [data-cc-panel] :is([data-cc-entity], [data-cc-bubble], [data-cc-composer], [data-cc-inset], [data-cc-data]),
@@ -436,7 +474,7 @@ html[data-ui-style="glass"] [data-cc-panel] [class*="text-warning-ink"] {
     box-shadow: none;
   }
   html:root[data-ui-style="glass"] .sw:not(.on) { background: ButtonFace; box-shadow: none; outline: 1px solid ButtonText; }
-  html:root[data-ui-style="glass"] :is(.app-boot-fade, .app-side, .app-topbar, .ui-card, .bento-card, .metric-card, .status-card, .terminal-tabs-header, .terminal-pane-head, .modal-surface, .ui-surface, [role="listbox"], [role="dialog"].bg-card, .toast),
+  html:root[data-ui-style="glass"] :is(.app-shell, .app-side, .app-topbar, .ui-card, .bento-card, .metric-card, .status-card, .terminal-tabs-header, .terminal-pane-head, .modal-surface, .ui-surface, [role="listbox"], [role="dialog"].bg-card, .toast),
   html[data-ui-style="glass"] .terminal-workspace .terminal-pane-frame[data-focused] > .terminal-pane-head {
     background: Canvas;
     border-color: CanvasText;

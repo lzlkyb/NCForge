@@ -1,5 +1,5 @@
 import { Icon } from "../ui/icon";
-import { formatRevTime } from "../../lib/svn";
+import { FreshnessBadge } from "../ui/FreshnessBadge";
 
 /**
  * 版本控制页顶部工具条。
@@ -57,10 +57,14 @@ export function SvnToolbar({
         {url ?? "正在识别工作副本…"}
       </span>
       <span className="vc-sp" />
-      {generatedAtMs !== null && shown !== null && (
-        <span className="vc-hint">
-          {shown} 处改动 · 扫于 {formatRevTime(generatedAtMs)}
-        </span>
+      {shown !== null && <span className="vc-hint">{shown} 处改动</span>}
+      {generatedAtMs !== null && (
+        <FreshnessBadge
+          state={fetching ? "loading" : "live"}
+          at={generatedAtMs}
+          label="扫描"
+          staleAfterMs={300_000}
+        />
       )}
       <button type="button" className="vc-btn" disabled={fetching} onClick={onRefresh}>
         <Icon name="refresh" size={13} className={fetching ? "animate-spin" : undefined} />

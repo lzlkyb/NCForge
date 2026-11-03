@@ -9,9 +9,9 @@ import { APP_INFO, CHANGELOG, CATEGORY_LABELS } from "../../lib/about";
 import { markChangelogSeen } from "../../lib/utils";
 import { Card } from "../ui/card";
 import { Modal } from "../ui/Modal";
-import { ToggleRow } from "../ui/ToggleRow";
 import { SettingsRow } from "../ui/SettingsRow";
 import { Button } from "../ui/button";
+import { AutostartRow } from "../settings/AutostartRow";
 import { LangSettings } from "../settings/LangSettings";
 import { ResourceSettings } from "../settings/ResourceSettings";
 import { ConfigTransferSettings } from "../settings/ConfigTransferSettings";
@@ -28,18 +28,7 @@ import { consumePendingChangelog, onOpenChangelogRequest } from "../../lib/chang
  * 体量红线同样适用：超 300 行 / 8 个 state 前拆件。
  */
 export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
-  const [autostart, setAutostart] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-
-  // 自启开关显示**系统真源**（get_autostart 读注册表/LaunchAgent）：
-  // 配置里的 autostart_enabled 只是镜像值——用户在系统设置或安装器里改过自启，
-  // 镜像不会同步，UI 会显示一个与事实不符的状态。
-  useEffect(() => {
-    void (async () => {
-      const enabled = await invokeOrToast<boolean>("get_autostart", undefined, "读取开机自启状态失败");
-      if (typeof enabled === "boolean") setAutostart(enabled);
-    })();
-  }, []);
 
   // 升级欢迎条等壳层入口要直接打开更新历史：设置页是懒加载的，挂载前发出的请求先存着。
   useEffect(() => {
@@ -68,37 +57,17 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
 
   return (
     <DockRegion region="document"><div className="wb-settings-page">
-      <SettingsLayout sections={[{ label: "常规", content: <Card className="flex flex-col gap-1 p-2">
-        <ToggleRow
-          label="开机自启"
-          sub="登录系统时自动启动（点 X 即退出，不会留在后台）"
-          checked={autostart}
-          onChange={async (v) => {
-            // 乐观置值 + 失败回滚：set_autostart 返回最终生效状态（Result<bool>），
-            // 拿不到布尔值就是失败了——UI 不能显示一个系统里不存在的状态。
-            setAutostart(v);
-            const finalState = await invokeOrToast<boolean>(
-              "set_autostart",
-              { enabled: v },
-              "设置开机自启失败",
-            );
-            if (typeof finalState !== "boolean") {
-              setAutostart(!v);
-              return;
-            }
-            setAutostart(finalState);
-            await save({ autostart_enabled: finalState });
-          }}
-        />
+      <SettingsLayout sections={[{ label: "常规", keywords: ["开机自启", "启动", "登录", "通用", "autostart"], content: <Card className="flex flex-col gap-1 p-2">
+        <AutostartRow onSaved={(v) => save({ autostart_enabled: v })} />
       </Card> },
-      { label: "外观", content: <AppearanceSettings /> },
-      { label: "快捷键", content: <KeymapSettings /> },
-      { label: "编辑器", content: <EditorSettings /> },
-      { label: "任务", content: <TaskSettings /> },
-      { label: "开发环境", content: <LangSettings /> },
-      { label: "资源与更新", content: <ResourceSettings /> },
-      { label: "配置迁移", content: <ConfigTransferSettings onChanged={onChanged} /> },
-      { label: "关于", content: <><Card className="flex flex-col gap-1 p-2">
+      { label: "外观", keywords: ["材质", "玻璃", "经典", "主题", "深色", "浅色", "明暗", "appearance", "theme", "material"], content: <AppearanceSettings /> },
+      { label: "快捷键", keywords: ["键位", "方案", "Eclipse", "IDEA", "冲突", "自定义", "keymap", "shortcut"], content: <KeymapSettings /> },
+      { label: "编辑器", keywords: ["字号", "字体", "缩进", "自动换行", "小地图", "粘性滚动", "诊断", "Error Lens", "自动保存", "格式化", "代码模板", "editor", "font"], content: <EditorSettings /> },
+      { label: "任务", keywords: ["编译", "投送", "重启", "补丁", "步骤", "task", "build"], content: <TaskSettings /> },
+      { label: "开发环境", keywords: ["代码智能", "Java", "JDK", "jdt", "内存", "堆", "轻量模式", "索引", "影子工程", "lang", "jvm"], content: <LangSettings /> },
+      { label: "资源与更新", keywords: ["组件", "下载", "重新下载", "资源", "更新", "缓存", "磁盘", "update", "resource"], content: <ResourceSettings /> },
+      { label: "配置迁移", keywords: ["导入", "导出", "配置", "备份", "JSON", "迁移", "config"], content: <ConfigTransferSettings onChanged={onChanged} /> },
+      { label: "关于", keywords: ["版本", "更新历史", "仓库", "许可", "license", "about", "changelog"], content: <><Card className="flex flex-col gap-1 p-2">
         <SettingsRow
           label="关于"
           sub={`${APP_INFO.name} · ${APP_INFO.license}`}

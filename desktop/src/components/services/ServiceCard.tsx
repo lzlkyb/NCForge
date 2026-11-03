@@ -1,6 +1,7 @@
 import { Icon } from "../ui/icon";
 import type { ServerStatus } from "../../lib/server";
 import { formatUptime } from "../../lib/serverLog";
+import { ServiceChain } from "./ServiceChain";
 import "../../debug.css";
 
 type Busy = "start" | "stop" | "restart" | "kill" | null;
@@ -172,6 +173,8 @@ export function ServiceCard({
           </span>
         </div>
       </div>
+
+      <ServiceChain status={status} failed={!!failed} onEditPort={onEditPort} />
 
       <div className="sv-actions">
         {/* 调试模式只在停止时可切：在跑的 JVM 不会重读 -agentlib 参数 */}

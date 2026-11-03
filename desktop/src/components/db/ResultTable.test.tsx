@@ -2,8 +2,8 @@
 /**
  * A3：排序口径的界面接线。
  *
- * 两个动作必须都在：
- * ① 底栏常驻一行「排序/筛选只作用于已取的 N 行」——不能只靠 hover 提示；
+ * ① 一旦真的排序 / 筛选，结果条上必须出现「仅作用于已取的 N 行」——不能只靠 hover
+ *    提示，用户看到「点了升序」就走了；没排序时不占这条横带。
  * ② 表头右键能「重排并重查」，回调带的是**列下标 + 方向**，由父组件去包 SQL。
  */
 import { act } from "react";
@@ -43,23 +43,31 @@ afterEach(() => {
 });
 
 describe("结果表的排序口径（A3）", () => {
-  it("底栏常驻说明只作用于已取的行", () => {
+  it("没排序时不占横带；点了表头就说明只作用于已取的行", async () => {
     act(() => {
       root = createRoot(host);
       root.render(<ResultTable columns={columns} rows={[["b", "2"], ["a", "1"]]} meta="2 行" table="T" />);
     });
-    expect(host.textContent).toContain("排序 / 筛选只作用于已取的 2 行");
+    expect(host.textContent).not.toContain("仅作用于已取");
     // 没有重排回调（表页 / 非 SELECT）时不该提示「右键表头」
+    expect(host.textContent).not.toContain("右键表头");
+
+    const head = host.querySelectorAll(".dbx-gh")[1] as HTMLElement;
+    await act(async () => head.click());
+    expect(host.textContent).toContain("仅作用于已取的 2 行");
     expect(host.textContent).not.toContain("右键表头");
   });
 
-  it("有重排回调时提示入口位置", () => {
+  it("有重排回调时，排序后的说明里给出整表重排入口", async () => {
     act(() => {
       root = createRoot(host);
       root.render(
         <ResultTable columns={columns} rows={[["b", "2"]]} meta="1 行" table="T" onServerSort={() => {}} />,
       );
     });
+    const head = host.querySelectorAll(".dbx-gh")[1] as HTMLElement;
+    await act(async () => head.click());
+    expect(host.textContent).toContain("仅作用于已取的 1 行");
     expect(host.textContent).toContain("右键表头");
   });
 

@@ -10,11 +10,12 @@ import {
 } from "./lib/utils";
 import { transitionPage } from "./lib/pageTransition";
 import { requestOpenFile } from "./lib/openFileRequest";
-import { getKeymap, isWorkspaceSearch, layoutKeyOf, paletteModeOf, WORKSPACE_SEARCH_KEY } from "./lib/keymap";
-import { setSideOpen, toggleSide } from "./lib/layoutStore";
+import { getKeymap, isWorkspaceSearch, layoutKeyOf, paletteModeOf, RAIL_KEY, WORKSPACE_SEARCH_KEY } from "./lib/keymap";
+import { setSideOpen, toggleRail, toggleSide, useRailExpanded } from "./lib/layoutStore";
 import { setSidebarView } from "./lib/sidebarView";
 import { openServicePanel } from "./lib/servicePanel";
 import { openPalette, usePalette } from "./lib/paletteStore";
+import { ShortcutSheet } from "./components/layout/ShortcutSheet";
 import { registerCommands } from "./lib/commandRegistry";
 import { setSession } from "./lib/workspaceSession";
 import { openPatchPage } from "./lib/svnSession";
@@ -128,6 +129,7 @@ function AppContent() {
   const appHidden = useAppHidden();
 
   const [activeTab, setActiveTab] = useState("files");
+  const railExpanded = useRailExpanded();
   /** 命令面板触发的服务停止：先弹确认，确认后才真的停。 */
   const [svcConfirm, setSvcConfirm] = useState<null | "stop">(null);
 
@@ -235,6 +237,7 @@ function AppContent() {
       { id: "go.dict", title: "转到：数据字典", hint: "数据库 · 数据字典", run: openDict },
       go("settings", "设置"),
       { id: "view.side", title: "切换侧栏", hint: "Ctrl+B", run: toggleSide },
+      { id: "view.rail", title: "展开 / 收起左侧导航栏", hint: RAIL_KEY, run: toggleRail },
       { id: "view.panel", title: "切换底部面板", hint: "Ctrl+J", run: () => setSession({ panelOpen: (v) => !v }) },
       { id: "view.theme", title: "切换深色 / 浅色主题", run: () => toggleTheme() },
       { id: "view.services", title: "打开 NC 服务面板", run: openServicePanel },
@@ -279,6 +282,7 @@ function AppContent() {
         e.stopPropagation();
         if (pm) openPalette(pm);
         else if (lk === "side") toggleSide();
+        else if (lk === "rail") toggleRail();
         else setSession({ panelOpen: (v) => !v });
         return;
       }
@@ -335,7 +339,12 @@ function AppContent() {
   const toolPanels = useMemo(
     () =>
       hostedTabs.map((tab) => (
-        <ActivityPanel key={tab} active={activeTab === tab}>
+        <ActivityPanel
+          key={tab}
+          active={activeTab === tab}
+          data-page-panel={activeTab === tab ? "" : undefined}
+          className={activeTab === tab ? "animate-tab-in" : ""}
+        >
           {/* 每页一个边界 + 自己的 Suspense：谁崩了卸谁，谁在加载谁显示骨架，
               不再共用最外层那一个（那样任一工具页出错会把整个工作台卸掉）。 */}
           <ErrorBoundary resetKey={tab}>
@@ -357,7 +366,8 @@ function AppContent() {
           onNavigate={onRail}
           unreadCount={unreadCount}
           status={status}
-          collapsed
+          collapsed={!railExpanded}
+          onToggleRail={toggleRail}
           navItems={navItems}
         />
         <main className="app-main page-transition flex min-h-0 min-w-0 flex-col">
@@ -386,6 +396,7 @@ function AppContent() {
       />
       {/* 版本变化的那次启动浮一条一次性提示，把「升级完成」这个闭环补上 */}
       <UpgradeWelcomeBar currentVersion={status?.version} onOpenHistory={openUpdateNotes} />
+      <ShortcutSheet />
     </div>
   );
 }

@@ -1,0 +1,26 @@
+{
+  "src/db.css": {
+    "easing": 0,
+    "tinyFont": 1
+  },
+  "src/index.css": {
+    "easing": 0,
+    "tinyFont": 2
+  },
+  "src/patch.css": {
+    "easing": 0,
+    "tinyFont": 3
+  },
+  "src/services.css": {
+    "easing": 0,
+    "tinyFont": 1
+  },
+  "src/svn.css": {
+    "easing": 0,
+    "tinyFont": 2
+  },
+  "src/workspace.css": {
+    "easing": 0,
+    "tinyFont": 1
+  }
+}

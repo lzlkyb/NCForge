@@ -60,6 +60,8 @@ export function PatchList({
   const shown = filterItems(items, picked, keyword, filter);
   const groups = groupByModule(shown);
   const stats = selectionStats(items, picked);
+  const shownSelectable = shown.filter((i) => !i.blocked);
+  const shownOn = shownSelectable.filter((i) => picked.has(i.path)).length;
 
   const chips: { key: FilterKey; text: string; n: number }[] = [
     { key: "all", text: "全部", n: counts.all },
@@ -101,6 +103,44 @@ export function PatchList({
         </div>
       </div>
 
+      {/* 批量条只在「确实多选」时出现：单勾一个文件时这里没有可批量的动作，
+          一条常驻的窄条只会从清单里抢走一行高度。操作都作用在**当前筛选结果**上，
+          这样搜索/筛选后想「只留这几项」不用逐条点。 */}
+      {stats.picked >= 2 && (
+        <div className="pk-batch" role="group" aria-label="批量勾选">
+          <span className="pk-batch-count">
+            已选 <b>{stats.picked}</b> / {stats.total}
+            {shown.length !== items.length && ` · 当前 ${shown.length}`}
+          </span>
+          <span className="pk-sp" />
+          <button
+            type="button"
+            className="pk-link"
+            disabled={shownSelectable.length === 0 || shownOn === shownSelectable.length}
+            title="把当前筛选结果里所有能打的项都勾上（只作用在当前搜索结果）"
+            onClick={() => onToggleGroup(shownSelectable.map((i) => i.path), true)}
+          >
+            全选当前
+          </button>
+          <button
+            type="button"
+            className="pk-link"
+            disabled={shownOn === 0}
+            onClick={() => onToggleGroup(shownSelectable.map((i) => i.path), false)}
+          >
+            取消当前
+          </button>
+          <button
+            type="button"
+            className="pk-link"
+            title="不勾任何项（包括当前筛选外的）"
+            onClick={() => onToggleGroup(items.filter((i) => !i.blocked).map((i) => i.path), false)}
+          >
+            清空
+          </button>
+        </div>
+      )}
+
       <div className="pk-rows">
         {scanning && <div className="pk-empty">正在扫描改动并配对 class…</div>}
         {!scanning && items.length === 0 && (
@@ -114,11 +154,14 @@ export function PatchList({
           <div className="pk-empty">筛选后没有匹配项</div>
         )}
 
-        {groups.map((g) => {
+        {groups.map((g, gi) => {
           const paths = g.items.filter((i) => !i.blocked).map((i) => i.path);
           const allOn = paths.length > 0 && paths.every((p) => picked.has(p));
           return (
-            <div key={g.module}>
+            // 模块名做 key 不够：同一个模块在输入里不相邻时会被切成两组，
+            // 重复 key 会让 React 悄悄丢掉一组。序号只在「同一份结果」内稳定，
+            // 足够用——重扫后整棵列表本来就按新数据重建。
+            <div key={`${gi}-${g.module}`}>
               <div className="pk-grp">
                 {g.module}
                 <span className="n">{g.items.length}</span>

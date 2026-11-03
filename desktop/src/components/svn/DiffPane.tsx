@@ -57,6 +57,9 @@ export function DiffPane({
   const modelsRef = useRef<{ base: TextModel | null; work: TextModel | null }>({ base: null, work: null });
   const [stats, setStats] = useState<{ add: number; del: number } | null>(null);
   const [pos, setPos] = useState<{ at: number; total: number }>({ at: 0, total: 0 });
+  /** 单栏内联 diff。窄窗口自动切，用户点过按钮后就不再自动覆盖他的选择。 */
+  const [inline, setInline] = useState(false);
+  const manual = useRef(false);
 
   // 建编辑器只做一次；内容变化走后面的 effect
   useEffect(() => {
@@ -95,6 +98,22 @@ export function DiffPane({
       diff.dispose();
       editorRef.current = null;
     };
+  }, []);
+
+  useEffect(() => {
+    editorRef.current?.updateOptions({ renderSideBySide: !inline });
+  }, [inline]);
+
+  // 右栏被拖窄到双栏挤不下时自动退成单栏；用户手动选过就尊重他的选择。
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const ro = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      if (!manual.current && width > 0) setInline(width < 560);
+    });
+    ro.observe(host);
+    return () => ro.disconnect();
   }, []);
 
   // 换文件/换内容：重建两个 model（旧的必须 dispose，否则每次点文件都漏一份）
@@ -140,6 +159,18 @@ export function DiffPane({
         <b>{file.rel.slice(file.rel.lastIndexOf("/") + 1)}</b>
         <span className="vc-path">{dirName}</span>
         <span className="vc-sp" />
+        <button
+          type="button"
+          className="vc-btn vc-btn-sm"
+          aria-pressed={inline}
+          title={inline ? "现在单栏显示；点一下回到左右对照" : "右栏太窄时左右对照会挤成两半：切成单栏"}
+          onClick={() => {
+            manual.current = true;
+            setInline((v) => !v);
+          }}
+        >
+          {inline ? "单栏" : "双栏"}
+        </button>
         <button type="button" className="vc-btn vc-btn-sm" onClick={onShowLog}>
           历史
         </button>

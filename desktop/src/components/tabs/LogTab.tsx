@@ -147,6 +147,8 @@ export function LogTab() {
         slowMs={filter.slowMs}
         busy={listQ.isFetching}
         summary={summary}
+        updatedAt={listQ.data ? listQ.dataUpdatedAt : null}
+        error={listQ.isError}
         onToggleLogger={(name) =>
           setFilter((f) => ({
             ...f,

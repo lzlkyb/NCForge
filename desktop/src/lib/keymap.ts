@@ -149,16 +149,40 @@ export function paletteKeysLabel(mode: PaletteMode, keymap: Keymap): string {
   return paletteChords(mode, keymap).map(prettyChord).join(" / ");
 }
 
-/** 布局类快捷键（两套方案一致）：切侧栏 / 切底部面板。 */
-export function layoutKeyOf(event: KeyLike): "side" | "panel" | null {
+/** 展开 / 收起主导航栏（图标栏 ↔ 带页名）的默认键。展示与判定都从这里派生。 */
+const RAIL_DEFAULT = "ctrl+shift+b";
+export const RAIL_KEY = prettyChord(RAIL_DEFAULT);
+
+/** 当前生效的导航栏键位展示串（用户改过就用改后的）。 */
+export function railKeyLabel(): string {
+  return prettyChord(getBindingOverride("layout.rail") ?? RAIL_DEFAULT);
+}
+
+/** `aria-keyshortcuts` 要求 `Control+Shift+B` 这种写法，与展示串不能直接复用。 */
+export function railAriaKey(): string {
+  return (getBindingOverride("layout.rail") ?? RAIL_DEFAULT)
+    .split("+")
+    .map((p) =>
+      p === "ctrl" ? "Control" : p === "alt" ? "Alt" : p === "shift" ? "Shift" : p === "meta" ? "Meta" : p.length === 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1),
+    )
+    .join("+");
+}
+
+/** 布局类快捷键（两套方案一致）：切侧栏 / 切底部面板 / 展开导航栏。 */
+export function layoutKeyOf(event: KeyLike): "side" | "panel" | "rail" | null {
   if (event.isComposing || event.metaKey) return null;
   const chord = eventChord(event);
   const side = getBindingOverride("layout.side");
   const panel = getBindingOverride("layout.panel");
+  const rail = getBindingOverride("layout.rail");
   if (side && chord === side) return "side";
   if (panel && chord === panel) return "panel";
-  if (!event.ctrlKey || event.altKey || event.shiftKey) return null;
+  if (rail && chord === rail) return "rail";
+  if (!event.ctrlKey || event.altKey) return null;
   const k = event.key.toLowerCase();
+  // Shift 只放行导航栏那一键：Ctrl+B / Ctrl+J 带 Shift 仍是别的编辑器动作
+  if (!rail && chord === RAIL_DEFAULT) return "rail";
+  if (event.shiftKey) return null;
   if (!side && k === "b") return "side";
   if (!panel && k === "j") return "panel";
   return null;
@@ -183,7 +207,7 @@ export function reopenTabKeyLabel(keymap: Keymap): string {
 
 /* ─── 设置页的键位总表（默认值 + 用户覆盖） ─── */
 
-export type BindingGroup = "快速导航" | "窗口" | "搜索与层级" | "编辑器";
+export type BindingGroup = "快速导航" | "窗口" | "搜索与层级" | "编辑器" | "固定键";
 
 export interface BindingRow {
   id: string;
@@ -213,6 +237,7 @@ export function bindingRows(keymap: Keymap): BindingRow[] {
   }
   add("layout.side", "切换侧栏", "窗口", ["ctrl+b"]);
   add("layout.panel", "切换底部面板", "窗口", ["ctrl+j"]);
+  add("layout.rail", "展开 / 收起导航栏", "窗口", ["ctrl+shift+b"]);
   add("tab.reopen", "重新打开关闭的标签", "窗口", [keymap === "eclipse" ? "ctrl+alt+t" : "ctrl+shift+t"]);
   const searchCustom = getBindingOverride("search.workspace");
   const searchScheme = keymap === "eclipse" ? "ctrl+h" : "ctrl+shift+f";

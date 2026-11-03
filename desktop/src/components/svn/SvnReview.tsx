@@ -125,6 +125,8 @@ export function SvnReview({ onOpenFile }: { onOpenFile: (path: string) => void }
   };
 
   const statusError = status.error ? parseSvnError(status.error) : null;
+  // 原文提前取出来：JSX 里再摸一次 status.error，控制流会把它收窄成 never。
+  const rawStatusError = status.error ? String(status.error) : "";
   // 不能拿「改动条数」当版本号兜底：那会在 info 失败时显示成 r12（其实是 12 处改动）
   const rev = info.data?.revision ?? 0;
 
@@ -174,6 +176,12 @@ export function SvnReview({ onOpenFile }: { onOpenFile: (path: string) => void }
               重试
             </button>
           </div>
+          {/* 友好文案会把「认证失败」「工作副本锁定」等术语换成可操作的话；
+              但真正排查时（尤其中文乱码 / 编码问题）要看 SVN 原话。原文默认收起。 */}
+          <details className="vc-raw">
+            <summary>原始输出</summary>
+            <pre>{rawStatusError}</pre>
+          </details>
         </div>
       )}
 

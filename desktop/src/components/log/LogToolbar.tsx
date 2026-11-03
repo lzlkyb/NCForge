@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Icon } from "../ui/icon";
+import { FreshnessBadge } from "../ui/FreshnessBadge";
 import {
   TIME_RANGES,
   formatSize,
@@ -22,6 +23,8 @@ export function LogToolbar({
   slowMs,
   busy,
   summary,
+  updatedAt,
+  error,
   onToggleLogger,
   onClearLoggers,
   onRange,
@@ -37,6 +40,9 @@ export function LogToolbar({
   slowMs: number;
   busy: boolean;
   summary: string;
+  /** 上次成功读取的时间；null = 还没读到过。 */
+  updatedAt: number | null;
+  error: boolean;
   onToggleLogger: (name: string) => void;
   onClearLoggers: () => void;
   onRange: (range: RangeKey) => void;
@@ -52,6 +58,13 @@ export function LogToolbar({
       <div className="lg-head">
         <h1>NC 日志</h1>
         <span className="lg-sub">{summary}</span>
+        <FreshnessBadge
+          state={busy ? "loading" : error ? "error" : "live"}
+          at={updatedAt}
+          label="日志"
+          staleAfterMs={120_000}
+          onRefresh={onRefresh}
+        />
         <span className="lg-sp" />
         <label className="lg-field">
           <span>时间</span>

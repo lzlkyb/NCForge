@@ -6,6 +6,7 @@ import {
   clearBindingOverride,
   setBindingOverride,
 } from "../../lib/keybindings";
+import { useSettingsRequest } from "../../lib/settingsJump";
 import { Button } from "../ui/button";
 import { toast } from "../ui/toast";
 
@@ -21,6 +22,15 @@ export function KeybindingEditor({ keymap }: { keymap: Keymap }) {
   const [capturing, setCapturing] = useState<string | null>(null);
   const [, bump] = useState(0);
   const rows = bindingRows(keymap);
+  // 快捷键一览里点「修改」会带着键位 id 跳到这里：直接进入采集态，
+  // 不用在设置页再找一遍那一行。
+  const jump = useSettingsRequest();
+  const jumpId = jump?.binding;
+  const jumpNonce = jump?.nonce;
+  useEffect(() => {
+    if (!jumpId) return;
+    if (bindingRows(keymap).some((r) => r.id === jumpId)) setCapturing(jumpId);
+  }, [jumpId, jumpNonce, keymap]);
 
   useEffect(() => {
     if (!capturing) return;

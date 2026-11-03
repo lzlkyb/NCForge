@@ -63,7 +63,7 @@ export function ConnPicker({ connId, onPick }: { connId: string | null; onPick: 
           <>
             <EnvDot env={c.env} />
             <b>{c.name}</b>
-            <span className="u">{c.user}</span>
+            <span className="u">{dbNameOf(c.url)}</span>
             {rt.status === "connecting" && <Icon name="spinner" size={11} />}
             {rt.status === "error" && <Icon name="alert" size={11} />}
           </>
