@@ -61,6 +61,8 @@ export interface TabMeta {
    * `decompiled` = 没有源码，正文由 CFR 反编译得到。不可编辑、不可保存、不可编译。
    */
   virtual?: "source" | "stub" | "decompiled";
+  /** 反编译失败原因，用于签名桩上的组件下载引导。 */
+  decompileError?: string;
   /**
    * 预览标签：文件树单击打开，斜体显示，会被下一次单击预览替换；
    * 双击标签 / 双击树里的文件 / 开始编辑后固定。
@@ -90,6 +92,7 @@ export interface WorkspaceSession {
   compiling: boolean;
   compileResult: CompileResult | null;
   compileLog: string[];
+  compileResourceMissing?: boolean;
   /**
    * 用户关掉了「大文件」提示的文件。放仓库里是因为切页会卸载文件页——
    * 关了又回来还弹一次，等于没关。

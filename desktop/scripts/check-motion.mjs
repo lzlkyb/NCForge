@@ -170,7 +170,7 @@ test("kept pages retain draft, scroll and DOM; transitions never transform the t
   assert.deepEqual(await page.locator(".draft-scroll").evaluate(node => [node.dataset.identity, node.scrollTop, getComputedStyle(node).transform]), ["preserved", 50, "none"]);
 });
 
-test("page motion really slides and crossfades snapshots; rapid switches never block controls or leave stale pages", async () => {
+test("page motion crossfades snapshots without moving content; rapid switches never block controls or leave stale pages", async () => {
   const motion = await page.getByRole("button", { name: "设置页", exact: true }).evaluate(async node => {
     const start = document.startViewTransition.bind(document);
     document.startViewTransition = update => {
@@ -188,7 +188,10 @@ test("page motion really slides and crossfades snapshots; rapid switches never b
   });
   assert.equal(motion.transform, "none", "Actual page must not move its fixed descendants");
   assert.equal(motion.pointerEvents, "none");
-  assert.ok(motion.animations.some(a => a.name === "tab-in" && a.duration === 200 && a.frames.some(f => f.transform === "translateY(6px)")));
+  // 页面已采用 170ms 淡入；实际内容与转场快照都不能产生位移。
+  const entry = motion.animations.find(a => a.name === "tab-in");
+  assert.ok(entry && entry.duration === 170 && entry.frames.some(f => f.opacity === "0.45"));
+  assert.ok(entry.frames.every(f => !f.transform || f.transform === "none"));
   assert.ok(motion.animations.some(a => a.name === "page-out" && a.duration === 100));
   await page.getByRole("button", { name: "连接页", exact: true }).click();
   await page.getByTestId("draft").waitFor({ state: "visible" });

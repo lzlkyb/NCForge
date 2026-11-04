@@ -5,7 +5,7 @@ import { friendlyDbError, thousands } from "../../lib/db";
 import { dbApi, type DbObject, type TableInfo } from "../../lib/dbApi";
 import { newConsole, openTable, refreshMeta } from "../../lib/dbActions";
 import { favoriteKey, toggleFavorite, useAllFavorites, type FavoriteKind } from "../../lib/dbFavorites";
-import { openTableTab, rtOf, useDb } from "../../lib/dbStore";
+import { openTableTab, useConnRt } from "../../lib/dbStore";
 import { toast } from "../ui/toast";
 import { copyText } from "../../lib/utils";
 import { FavStar, TableRow } from "./ConnTableRow";
@@ -30,8 +30,7 @@ const OBJ_GROUPS: { label: string; types: string[]; icon: "package" | "file" | "
 
 /** 一个已连上的连接下面的对象：收藏 / 表 / 视图。展开表看字段。 */
 export function ConnObjects({ connId, filter }: { connId: string; filter: string }) {
-  useDb();
-  const rt = rtOf(connId);
+  const rt = useConnRt(connId);
   const favItems = useAllFavorites();
   const favKeys = useMemo(
     () =>

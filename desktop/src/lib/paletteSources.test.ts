@@ -186,7 +186,8 @@ describe("转到任意位置：内容与行号", () => {
       elapsedMs: 5,
     });
     const r = await buildItems("file", "#saveBo", ctx());
-    expect(search.run).toHaveBeenCalledWith({ text: "saveBo", maxResults: 50 });
+    // 带来源标识：后端据此取消同一面板上一次还在跑的扫描
+    expect(search.run).toHaveBeenCalledWith({ text: "saveBo", maxResults: 50 }, false, "palette");
     // 最近打开的是 B.java（见 recentFiles mock），它的命中排第一
     expect(r.items.map((i) => i.detail)).toEqual(["gl/B.java:3", "gl/A.java:10"]);
     r.items[0].run();

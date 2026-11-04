@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DbConn } from "../../lib/dbApi";
 
 vi.mock("../../lib/dbStore", () => ({
-  useDb: () => ({ conns }),
+  useDbConns: () => conns,
+  useDbRt: () => ({}),
   connOf: (id: string | null) => conns.find((c) => c.id === id) ?? null,
   rtOf: (id: string) => ({ status: id === "dev" ? "connected" : "idle" }),
   openConnDialog: vi.fn(),

@@ -3,11 +3,13 @@ import { createPortal } from "react-dom";
 import { Icon } from "../ui/icon";
 import { EnvDot } from "./EnvChips";
 import { dbNameOf, ENV_LABEL } from "../../lib/dbApi";
-import { connOf, openConnDialog, rtOf, useDb } from "../../lib/dbStore";
+import { connOf, openConnDialog, rtOf, useDbConns, useDbRt } from "../../lib/dbStore";
 
 /** 工具条上的连接胶囊：点开切换这个标签用的连接。 */
 export function ConnPicker({ connId, onPick, disabled = false }: { connId: string | null; onPick: (id: string) => void; disabled?: boolean }) {
-  const db = useDb();
+  // 列表里每个连接都按状态分组：订阅连接清单 + 运行态，不订标签（查询结果变化与它无关）
+  useDbRt();
+  const db = { conns: useDbConns() };
   const btnRef = useRef<HTMLButtonElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);

@@ -41,7 +41,7 @@ fn find_cfr(config_dir: &Path) -> Result<PathBuf, String> {
             .join("cfr"),
     ));
     cands.into_iter().find(|p| p.is_file()).ok_or_else(|| {
-        "找不到反编译组件（CFR）。请到设置 → 组件里下载，或检查网络后重试".to_string()
+        "找不到反编译组件（CFR）。请点击下载按钮，或到设置 → 维护 → 组件与更新下载，然后再次打开这个类".to_string()
     })
 }
 

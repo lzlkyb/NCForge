@@ -1,0 +1,17 @@
+{
+  "passed": [
+    "Automatic class-prefix popup",
+    "Accepted type with import",
+    "Method snippet",
+    "Parameter hints",
+    "No popup in string",
+    "No popup in comment",
+    "Document word fallback",
+    "Accept before import resolve",
+    "Keep typing while resolving",
+    "NC type discovery and import",
+    "Safe qualified type during NC dependency load",
+    "No stale import on model switch"
+  ],
+  "scope": "Real Monaco plus production providers and document sync, replayed live JDT results"
+}

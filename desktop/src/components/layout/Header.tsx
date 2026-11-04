@@ -8,6 +8,7 @@ import { TitleBarControls } from "./TitleBarControls";
 import { UpdateReadout } from "../update/UpdateReadout";
 import { ApplicationMenu, LayoutMenu } from "./HeaderMenus";
 import { OperationStatus } from "../ui/OperationStatus";
+import { ResourceDownloadEntry } from "../resource/ResourceDownloadEntry";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 
 /**
@@ -70,6 +71,7 @@ function HeaderImpl({
       {/* 右侧：搜索 / 主题 / 窗口控件 */}
       <div data-tauri-drag-region="false" className="flex shrink-0 items-center gap-1">
         <OperationStatus />
+        <ResourceDownloadEntry />
         <LayoutMenu activeTool={activeTool} />
         <Button
           variant="ghost"

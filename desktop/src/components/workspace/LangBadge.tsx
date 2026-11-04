@@ -3,6 +3,8 @@ import { Icon } from "../ui/icon";
 import { restartLang, startLangNow, useLangView } from "../../lib/lang";
 import { setLightMode } from "../../lib/lightMode";
 import { toast } from "../ui/toast";
+import { missingResourceId } from "../../lib/resourceMissing";
+import { requestResourceDownload } from "../../lib/resourceActions";
 
 /**
  * 状态栏里的代码智能状态（视觉取自设计稿的 `.ls`：绿点就绪、黄点脉冲忙磌）。
@@ -58,18 +60,19 @@ export function LangBadge({ activePath }: { activePath: string | null }) {
     .join(" · ");
 
   if (v.state === "error") {
+    const missing = missingResourceId(v.message) === "jdtls";
     return (
       <button
         type="button"
         className="wb-status-btn wb-lang"
         data-tone="bad"
-        title={`${v.message}\n\n点击重试`}
+        title={`${v.message}\n\n${missing ? "点击下载代码智能组件，完成后可重试启动" : "点击重试"}`}
         disabled={requesting}
         aria-busy={requesting}
-        onClick={() => activePath && void restartLang(activePath).catch(e => toast(`重启代码智能失败：${e}`, "error"))}
+        onClick={() => missing ? requestResourceDownload("jdtls") : activePath && void restartLang(activePath).catch(e => toast(`重启代码智能失败：${e}`, "error"))}
       >
         {requesting && <Icon name="spinner" size={11} className="animate-spin" />}
-        <span className="wb-lang-text">{requesting ? "正在重启代码智能" : "代码智能不可用 · 重试"}</span>
+        <span className="wb-lang-text">{requesting ? "正在重启代码智能" : missing ? "代码智能缺少组件 · 下载" : "代码智能不可用 · 重试"}</span>
       </button>
     );
   }

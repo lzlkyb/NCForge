@@ -16,7 +16,7 @@
  *
  * 只 mock 掉三个展示组件：本文件测的是状态机，不是渲染。
  */
-import { act } from "react";
+import { act, StrictMode, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateProvider, friendlyError, useUpdate, type UpdateState } from "./UpdateContext";
@@ -32,6 +32,7 @@ const h = vi.hoisted(() => {
   return {
     handlers,
     order,
+    beforeListen: vi.fn(async (_event: string) => {}),
     invoke: vi.fn(async (cmd: string) => {
       order.push(`invoke:${cmd}`);
       return undefined;
@@ -47,6 +48,7 @@ vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: h.relaunch }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: async (event: string, handler: (e: { payload: unknown }) => void) => {
     h.order.push(`listen:${event}`);
+    await h.beforeListen(event);
     const list = h.handlers.get(event) ?? [];
     list.push(handler);
     h.handlers.set(event, list);
@@ -86,8 +88,12 @@ const DISMISSED_KEY = `${APP_SLUG}.ignored_update_version`;
 
 /** 探针：把 context 值抓到一个外部变量里，断言时直接读它。 */
 let ctx: UpdateState | null = null;
-function Probe() {
+function Probe({ checkOnMount = false }: { checkOnMount?: boolean }) {
   ctx = useUpdate();
+  const { manualCheckForUpdate } = ctx;
+  useEffect(() => {
+    if (checkOnMount) void manualCheckForUpdate();
+  }, [checkOnMount, manualCheckForUpdate]);
   return null;
 }
 
@@ -104,16 +110,17 @@ async function flush(times = 12) {
   for (let i = 0; i < times; i++) await act(async () => {});
 }
 
-async function mount() {
+async function mount({ checkOnMount = false, strict = false } = {}) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root?.render(
+    const provider = (
       <UpdateProvider>
-        <Probe />
-      </UpdateProvider>,
+        <Probe checkOnMount={checkOnMount} />
+      </UpdateProvider>
     );
+    root?.render(strict ? <StrictMode>{provider}</StrictMode> : provider);
   });
   await flush();
 }
@@ -144,7 +151,13 @@ beforeEach(() => {
   localStorage.clear();
   h.handlers.clear();
   h.order.length = 0;
-  h.invoke.mockClear();
+  h.beforeListen.mockReset();
+  h.beforeListen.mockImplementation(async () => {});
+  h.invoke.mockReset();
+  h.invoke.mockImplementation(async (cmd: string) => {
+    h.order.push(`invoke:${cmd}`);
+    return undefined;
+  });
   h.relaunch.mockClear();
   h.relaunch.mockImplementation(async () => {});
   h.prepareRestart.mockClear();
@@ -188,6 +201,162 @@ describe("监听注册与启动自检的顺序", () => {
     await mount();
 
     expect(state().status).toBe("checking");
+  });
+});
+
+describe("启动早期手动检查的监听握手", () => {
+  function delayListener(event = "update:checking") {
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    h.beforeListen.mockImplementation(async name => {
+      if (name === event) await pending;
+    });
+    return release;
+  }
+
+  function replyImmediately(event: string, payload?: unknown) {
+    h.invoke.mockImplementation(async cmd => {
+      h.order.push(`invoke:${cmd}`);
+      if (cmd === "check_update") {
+        for (const handler of h.handlers.get(event) ?? []) handler({ payload });
+      }
+      return undefined;
+    });
+  }
+
+  it.each([
+    ["update:checking", "update:available", "available"],
+    ["update:uptodate", "update:uptodate", "uptodate"],
+  ])("等待 %s 注册再检查，快速 %s 结果不丢失", async (delayed, result, expected) => {
+    const release = delayListener(delayed);
+    replyImmediately(result, available());
+    await mount();
+    await act(async () => { void state().manualCheckForUpdate(); void state().manualCheckForUpdate(); });
+    expect(state().status).toBe("checking");
+    expect(h.invoke).not.toHaveBeenCalled();
+    expect(getOperations().find(o => o.key === "update.check")?.state).toBe("running");
+
+    await act(async () => release());
+    await flush();
+    expect(state().status).toBe(expected);
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+    expect(getOperations().find(o => o.key === "update.check")?.state).toBe("success");
+    if (expected === "available") expect(state().update?.version).toBe("99.9.9");
+    else expect(state().manualCheck).toBe(true);
+  });
+
+  it("子组件 effect 在 Provider effect 之前检查也等待监听", async () => {
+    const release = delayListener();
+    replyImmediately("update:available", available());
+    await mount({ checkOnMount: true });
+    expect(h.invoke).not.toHaveBeenCalled();
+    await act(async () => release());
+    await flush();
+    expect(state().status).toBe("available");
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("等待期间卸载立即结束任务，注册完成后不再检查或泄漏监听", async () => {
+    const release = delayListener();
+    await mount();
+    let check!: Promise<void>;
+    await act(async () => { check = state().manualCheckForUpdate(); });
+    let finished = false;
+    void check.then(() => { finished = true; });
+    await act(async () => root?.unmount());
+    root = null;
+    await flush();
+    expect(finished).toBe(true);
+    expect(getOperations().some(o => o.state === "running")).toBe(false);
+    await act(async () => release());
+    await flush();
+    await check;
+    expect(h.invoke).not.toHaveBeenCalled();
+    expect(getOperations().some(o => o.state === "running")).toBe(false);
+    expect([...h.handlers.values()].flat()).toHaveLength(0);
+    expect(localStorage.getItem(LAST_CHECK_KEY)).toBeNull();
+  });
+
+  it("StrictMode 清理旧注册后，仅新生命周期发起一次检查", async () => {
+    const release = delayListener();
+    replyImmediately("update:available", available());
+    await mount({ strict: true });
+    await act(async () => { void state().manualCheckForUpdate(); });
+    await act(async () => release());
+    await flush();
+    expect(state().status).toBe("available");
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+    for (const event of EVENTS) expect(h.handlers.get(event)).toHaveLength(1);
+  });
+
+  it("注册失败终止等待并提示，重试重新注册且不重复监听", async () => {
+    // 本例需要在中途注册失败；阻塞第一个监听直到手动入口占用检查守卫。
+    let unblock!: () => void;
+    const pending = new Promise<void>(resolve => { unblock = resolve; });
+    h.beforeListen.mockImplementation(async event => {
+      if (event === "update:checking") await pending;
+      if (event === "update:ready") throw new Error("listen denied");
+    });
+    await mount();
+    await act(async () => { void state().manualCheckForUpdate(); });
+    await act(async () => unblock());
+    await flush();
+    expect(state().status).toBe("error");
+    expect(state().error).toContain("监听");
+    expect(state().error).toContain("listen denied");
+    expect(state().errorToastAllowed).toBe(true);
+    expect(h.invoke).not.toHaveBeenCalled();
+    expect(getOperations().find(o => o.key === "update.check")?.state).toBe("failed");
+    expect([...h.handlers.values()].flat()).toHaveLength(0);
+
+    h.beforeListen.mockImplementation(async () => {});
+    replyImmediately("update:available", available());
+    await act(async () => state().manualCheckForUpdate());
+    expect(state().status).toBe("available");
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+    for (const event of EVENTS) expect(h.handlers.get(event)).toHaveLength(1);
+  });
+
+  it("自动注册失败仅显示错误，下一次检查可以恢复", async () => {
+    h.beforeListen.mockRejectedValueOnce(new Error("listen denied"));
+    await mount();
+    expect(state().status).toBe("error");
+    expect(state().error).toContain("监听");
+    expect(state().errorToastAllowed).toBe(false);
+    expect(h.invoke).not.toHaveBeenCalled();
+    expect(localStorage.getItem(LAST_CHECK_KEY)).toBeNull();
+    await act(async () => state().checkForUpdate());
+    await emit("update:uptodate");
+    expect(state().status).toBe("uptodate");
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("旧生命周期延迟注册失败不覆盖新生命周期的检查结果", async () => {
+    let rejectOld!: (error: Error) => void;
+    h.beforeListen.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectOld = reject; }));
+    replyImmediately("update:available", available());
+    await mount({ strict: true });
+    expect(state().status).toBe("available");
+    await act(async () => rejectOld(new Error("old listen denied")));
+    await flush();
+    expect(state().status).toBe("available");
+    expect(state().error).toBeNull();
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+    for (const event of EVENTS) expect(h.handlers.get(event)).toHaveLength(1);
+  });
+
+  it("检查请求失败结束任务，手动重试仍收到终态", async () => {
+    await mount();
+    await emit("update:uptodate");
+    h.invoke.mockRejectedValueOnce(new Error("check denied"));
+    await act(async () => state().manualCheckForUpdate());
+    expect(state().status).toBe("error");
+    expect(state().errorToastAllowed).toBe(true);
+    expect(getOperations().find(o => o.key === "update.check")?.state).toBe("failed");
+    replyImmediately("update:available", available());
+    await act(async () => state().manualCheckForUpdate());
+    expect(state().status).toBe("available");
+    expect(getOperations().filter(o => o.key === "update.check").map(o => o.state)).toEqual(["failed", "success"]);
   });
 });
 

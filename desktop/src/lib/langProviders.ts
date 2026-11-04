@@ -4,35 +4,24 @@
 import { pathOfModel } from "./editorStore";
 import { searchWorkspace, type SearchHit } from "./search";
 import { getSession } from "./workspaceSession";
-import { flushDoc, inLangModule, langReady, langRequest, loadJdtSource, navigate } from "./lang";
+import { langRequest, loadJdtSource, navigate, langCapabilityEpoch } from "./lang";
+import { workspaceEpoch } from "./workspaceEpoch";
 import {
-  completionKindName,
   contentsToMarkdown,
   declarationPattern,
   isIdentifier,
-  toLspPosition,
   toMonacoRange,
   toTargets,
   uriToPath,
-  type LspPosition,
   type LspRange,
 } from "./langConvert";
 import { monaco } from "./monacoSetup";
-import { toast } from "../components/ui/toast";
+import { registerJavaCompletion } from "./javaCompletion";
+import { context, type Ctx } from "./langProviderContext";
+export { context, type Ctx } from "./langProviderContext";
 
 type Model = ReturnType<typeof monaco.editor.createModel>;
 type Pos = { lineNumber: number; column: number };
-
-/** 补全过慢就放弃，不让弹窗一直转。 */
-const COMPLETION_TIMEOUT_MS = 15_000;
-
-/**
- * 超过这个行数就不再请求语义补全。
- *
- * 阈值与文件页「大文件降级」一致（2000 行）：这个量级下 jdt.ls 的补全实测恒为 0，
- * 请求本身白等 15 秒。降级提示条已经说明了这件事。
- */
-const HEAVY_LINES = 2000;
 
 /** Monaco 的 uri 字符串 → jdt.ls 给出的原始地址。打开跳转目标时要用原始地址查。 */
 const originalUri = new Map<string, string>();
@@ -44,38 +33,6 @@ function rememberUri(monacoUri: string, original: string): void {
   if (originalUri.size > ORIGINAL_URI_MAX) originalUri.clear();
 }
 
-/**
- * 最近一次「服务就绪但请求失败」的原因。只留最后一条——这里不需要历史，
- * 留历史就是内存泄漏。
- */
-let lastFailure: { method: string; message: string } | null = null;
-/** 提示节流：同一类问题 60 秒内只打扰一次。 */
-let lastNotifyAt = 0;
-
-/**
- * 一次请求的上下文：真实文件路径 + 光标位置。
- *
- * 导出给 `langProvidersExtra`（引用 / 格式化 / 快速修复）复用。别在那边另写一份：
- * `context()` 里的 `await flushDoc` 与「文件不属于当前模块」的判断漏一个，位置就会算在改动前的文本上。
- */
-export interface Ctx {
-  path: string;
-  position: LspPosition;
-}
-
-/**
- * 能不能走语言服务；能就先把没发出去的修改发过去再返回（必须 await）。
- *
- * `await flushDoc` 不是可选的：didChange 与随后的 request 是两次独立 IPC，
- * 不建立先后的话补全会按改动前的文本算位置。
- */
-export async function context(model: Model, pos: Pos): Promise<Ctx | null> {
-  const path = pathOfModel(model);
-  if (!path || !langReady() || !inLangModule(path)) return null;
-  await flushDoc(path);
-  return { path, position: toLspPosition(pos.lineNumber, pos.column) };
-}
-
 export async function ask<T>(
   method: string,
   ctx: Ctx,
@@ -83,43 +40,11 @@ export async function ask<T>(
   timeoutMs?: number,
 ): Promise<T | null> {
   try {
-    const res = await langRequest<T>(method, ctx.path, { position: ctx.position, ...params }, timeoutMs);
-    lastFailure = null;
-    return res;
-  } catch (e) {
+    return await langRequest<T>(method, ctx.path, { position: ctx.position, ...params }, timeoutMs);
+  } catch {
     // 超时、服务重启中等：先静默退回，不打断输入；要不要提示由调用方决定
-    lastFailure = { method, message: String(e) };
     return null;
   }
-}
-
-/**
- * 「服务明明就绪，却没有响应」要说出来。
- *
- * 以前所有失败都被 catch 成 null，Monaco 静默退化成「当前文档单词补全」：
- * 用户看到的是「补全只剩本文件里的词」，没有任何说明；某个 6433 行的文件
- * 补全恒为 0 也正是这样被藏了大半年。
- */
-function notifyStalled(what: string): void {
-  if (!lastFailure) return;
-  const now = Date.now();
-  if (now - lastNotifyAt < 60_000) return;
-  lastNotifyAt = now;
-  toast(`语义${what}没有响应，已退回本地提示（${lastFailure.message}）`, "warning");
-}
-
-interface LspCompletionItem {
-  label: string;
-  kind?: number;
-  detail?: string;
-  documentation?: unknown;
-  sortText?: string;
-  filterText?: string;
-  insertText?: string;
-  /** 1 = 纯文本，2 = snippet（`${1:...}`）。jdt.ls 的模板补全会给 2。 */
-  insertTextFormat?: number;
-  textEdit?: { newText: string; range?: LspRange; replace?: LspRange };
-  additionalTextEdits?: { newText: string; range: LspRange }[];
 }
 
 interface LspSignature {
@@ -204,62 +129,7 @@ export function registerLangProviders(): void {
   if (registered) return;
   registered = true;
 
-  monaco.languages.registerCompletionItemProvider("java", {
-    triggerCharacters: ["."],
-    provideCompletionItems: async (model, position) => {
-      // 大文件不请求：这个量级下 jdt.ls 补全恒为 0，白等 15 秒还会顶掉输入手感
-      if (model.getLineCount() > HEAVY_LINES) return null;
-      const ctx = await context(model, position);
-      if (!ctx) return null;
-      const res = await ask<{ items?: LspCompletionItem[]; isIncomplete?: boolean } | LspCompletionItem[]>(
-        "textDocument/completion",
-        ctx,
-        {},
-        COMPLETION_TIMEOUT_MS,
-      );
-      if (!res) {
-        notifyStalled("补全");
-        return null;
-      }
-      const items = Array.isArray(res) ? res : (res.items ?? []);
-      const word = model.getWordUntilPosition(position);
-      const fallback = {
-        startLineNumber: position.lineNumber,
-        startColumn: word.startColumn,
-        endLineNumber: position.lineNumber,
-        endColumn: word.endColumn,
-      };
-      return {
-        incomplete: !Array.isArray(res) && !!res.isIncomplete,
-        suggestions: items.map((it) => {
-          const edit = it.textEdit;
-          const range = edit?.range ?? edit?.replace;
-          return {
-            label: it.label,
-            kind: monaco.languages.CompletionItemKind[completionKindName(it.kind)],
-            insertText: edit?.newText ?? it.insertText ?? it.label,
-            // snippet（insertTextFormat=2）必须声明成 InsertAsSnippet，否则
-            // `${1:name}` 会原样插进代码。我们给 jdt.ls 声明了 snippetSupport，
-            // 它才愿意发这类补全（sout / fori 之类）。
-            insertTextRules:
-              it.insertTextFormat === 2
-                ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
-                : undefined,
-            range: range ? toMonacoRange(range) : fallback,
-            detail: it.detail,
-            documentation: markdown(it.documentation),
-            sortText: it.sortText,
-            filterText: it.filterText,
-            // 补全未导入的类时 jdt.ls 会附带 import 行；只改编辑器里的内容，落盘仍由用户保存
-            additionalTextEdits: it.additionalTextEdits?.map((e) => ({
-              range: toMonacoRange(e.range),
-              text: e.newText,
-            })),
-          };
-        }),
-      };
-    },
-  });
+  registerJavaCompletion();
 
   monaco.languages.registerHoverProvider("java", {
     provideHover: async (model, position) => {
@@ -277,15 +147,25 @@ export function registerLangProviders(): void {
 
   monaco.languages.registerSignatureHelpProvider("java", {
     signatureHelpTriggerCharacters: ["(", ","],
-    provideSignatureHelp: async (model, position) => {
+    signatureHelpRetriggerCharacters: [")"],
+    provideSignatureHelp: async (model, position, token, trigger) => {
+      const version = model.getVersionId(), epoch = workspaceEpoch(), capabilityEpoch = langCapabilityEpoch();
+      const current = () => !token.isCancellationRequested && !model.isDisposed()
+        && model.getVersionId() === version && workspaceEpoch() === epoch && langCapabilityEpoch() === capabilityEpoch;
+      if (!current()) return null;
       const ctx = await context(model, position);
-      if (!ctx) return null;
+      if (!ctx || !current()) return null;
       const res = await ask<{
         signatures?: LspSignature[];
         activeSignature?: number;
         activeParameter?: number;
-      }>("textDocument/signatureHelp", ctx);
-      if (!res?.signatures?.length) return null;
+      }>("textDocument/signatureHelp", ctx, { context: {
+        triggerKind: trigger.triggerKind, isRetrigger: trigger.isRetrigger,
+        ...(trigger.triggerCharacter ? { triggerCharacter: trigger.triggerCharacter } : {}),
+      } });
+      if (!res?.signatures?.length || !current()) return null;
+      const activeSignature = Math.max(0, Math.min(res.activeSignature ?? 0, res.signatures.length - 1));
+      const activeParameter = Math.max(0, Math.min(res.activeParameter ?? 0, (res.signatures[activeSignature].parameters?.length ?? 1) - 1));
       return {
         value: {
           signatures: res.signatures.map((s) => ({
@@ -296,8 +176,7 @@ export function registerLangProviders(): void {
               documentation: markdown(p.documentation),
             })),
           })),
-          activeSignature: res.activeSignature ?? 0,
-          activeParameter: res.activeParameter ?? 0,
+          activeSignature, activeParameter,
         },
         dispose() {},
       };

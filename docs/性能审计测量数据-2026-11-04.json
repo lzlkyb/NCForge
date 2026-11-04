@@ -1,0 +1,327 @@
+{
+  "at": "2026-11-04T08:22:18.253Z",
+  "node": "v24.13.0",
+  "methodology": "Exact current source functions, transpiled without changing function bodies. Node CPU microbenchmarks, three samples per case. No WebView, JDT, SVN, database or NC service was started. Optimized membership is an algorithm comparison, not a shipped fix.",
+  "svn": [
+    {
+      "rows": 100,
+      "selected": 100,
+      "current": {
+        "medianMs": 3.097,
+        "samplesMs": [
+          2.95,
+          3.097,
+          3.791
+        ],
+        "result": 100
+      },
+      "normalizedSet": {
+        "medianMs": 0.081,
+        "samplesMs": [
+          0.079,
+          0.081,
+          0.122
+        ],
+        "result": 100
+      }
+    },
+    {
+      "rows": 1000,
+      "selected": 1000,
+      "current": {
+        "medianMs": 235.466,
+        "samplesMs": [
+          230.65,
+          235.466,
+          260.843
+        ],
+        "result": 1000
+      },
+      "normalizedSet": {
+        "medianMs": 0.768,
+        "samplesMs": [
+          0.703,
+          0.768,
+          0.821
+        ],
+        "result": 1000
+      }
+    },
+    {
+      "rows": 3000,
+      "selected": 3000,
+      "current": {
+        "medianMs": 2059.152,
+        "samplesMs": [
+          2018.946,
+          2059.152,
+          2075.177
+        ],
+        "result": 3000
+      },
+      "normalizedSet": {
+        "medianMs": 2.466,
+        "samplesMs": [
+          2.271,
+          2.466,
+          2.59
+        ],
+        "result": 3000
+      }
+    }
+  ],
+  "sql": [
+    {
+      "statements": 250,
+      "utf16Characters": 17890,
+      "highlight": {
+        "medianMs": 15.106,
+        "samplesMs": [
+          14.953,
+          15.106,
+          18.225
+        ],
+        "result": {
+          "total": 250,
+          "startLine": 126
+        },
+        "description": "Current highlight path: statementAt plus splitStatements"
+      }
+    },
+    {
+      "statements": 1000,
+      "utf16Characters": 71890,
+      "highlight": {
+        "medianMs": 227.89,
+        "samplesMs": [
+          226.353,
+          227.89,
+          228.143
+        ],
+        "result": {
+          "total": 1000,
+          "startLine": 501
+        },
+        "description": "Current highlight path: statementAt plus splitStatements"
+      }
+    },
+    {
+      "statements": 2000,
+      "utf16Characters": 144890,
+      "highlight": {
+        "medianMs": 902.776,
+        "samplesMs": [
+          897.272,
+          902.776,
+          932.897
+        ],
+        "result": {
+          "total": 2000,
+          "startLine": 1008
+        },
+        "description": "Current highlight path: statementAt plus splitStatements"
+      }
+    }
+  ],
+  "bundle": {
+    "total": {
+      "files": [
+        "appConfig-CoDeNOAO.js",
+        "css-D3h14YRZ.js",
+        "dbActions-CMj_LIFv.js",
+        "DbTab-DAjhMHtk.js",
+        "editor.worker-BctYAlYZ.js",
+        "editorPrefs-Cjzro3Zk.js",
+        "editorStore-DJYW1yVj.js",
+        "fileIndex-CMTQXeEZ.js",
+        "fileSave-DRRx1QDC.js",
+        "FilesTab-B1JyA8IV.js",
+        "FreshnessBadge-B5-408FR.js",
+        "html-BuXEAHjX.js",
+        "index-NeR8hRm_.js",
+        "ini-Drc7WvVn.js",
+        "input-B7U0imnO.js",
+        "java-B_fMsGYe.js",
+        "javascript-bdCldvI7.js",
+        "lang-CH2lE-Py.js",
+        "langConvert-DLCNLUYu.js",
+        "linkedProjects-DW0cvYRZ.js",
+        "LinkedProjectsDialog-Wc0BXvv_.js",
+        "LogTab-DRmTcaof.js",
+        "markdown-DSZPf7rp.js",
+        "monacoSetup-Cf9CCAuw.js",
+        "ncTasks-DgnlGcfU.js",
+        "openTableFromHover-BhVNchrf.js",
+        "patchDraft-BsedUnx7.js",
+        "QuickPalette-DOzWpXRl.js",
+        "resultExport-DrJHWKwL.js",
+        "saveAllDirty-Bm3IOXDh.js",
+        "searchEdit-OGbjNHjE.js",
+        "searchStore-D9vw6ThC.js",
+        "SettingsTab-DLJWkHd3.js",
+        "sql-CCSDG5nI.js",
+        "SvnTab-FG8qP_Zu.js",
+        "tabSession-Dt9RZWOj.js",
+        "typescript-B0kbba53.js",
+        "vendor-query-D11jdkVP.js",
+        "vendor-react-CDG6s8c4.js",
+        "vendor-tauri-Chue6t80.js",
+        "workspaceEpoch-DPpoUXij.js",
+        "xml-Cv4rEb8D.js"
+      ],
+      "rawBytes": 4672920,
+      "gzipBytes": 1308480
+    },
+    "shell": {
+      "files": [
+        "index-NeR8hRm_.js",
+        "vendor-query-D11jdkVP.js",
+        "vendor-react-CDG6s8c4.js",
+        "vendor-tauri-Chue6t80.js"
+      ],
+      "rawBytes": 381092,
+      "gzipBytes": 127347
+    },
+    "defaultCodePage": {
+      "files": [
+        "index-NeR8hRm_.js",
+        "vendor-query-D11jdkVP.js",
+        "vendor-react-CDG6s8c4.js",
+        "vendor-tauri-Chue6t80.js",
+        "FilesTab-B1JyA8IV.js",
+        "input-B7U0imnO.js",
+        "monacoSetup-Cf9CCAuw.js",
+        "openTableFromHover-BhVNchrf.js",
+        "editorStore-DJYW1yVj.js",
+        "fileIndex-CMTQXeEZ.js",
+        "lang-CH2lE-Py.js",
+        "workspaceEpoch-DPpoUXij.js",
+        "langConvert-DLCNLUYu.js",
+        "appConfig-CoDeNOAO.js",
+        "ncTasks-DgnlGcfU.js",
+        "fileSave-DRRx1QDC.js",
+        "searchStore-D9vw6ThC.js",
+        "linkedProjects-DW0cvYRZ.js",
+        "editorPrefs-Cjzro3Zk.js",
+        "dbActions-CMj_LIFv.js",
+        "FreshnessBadge-B5-408FR.js",
+        "tabSession-Dt9RZWOj.js"
+      ],
+      "rawBytes": 3952397,
+      "gzipBytes": 1070706
+    },
+    "largest": [
+      {
+        "name": "monacoSetup-Cf9CCAuw.js",
+        "rawBytes": 3244862,
+        "gzipBytes": 826174,
+        "imports": [
+          "index-NeR8hRm_.js",
+          "openTableFromHover-BhVNchrf.js"
+        ],
+        "modified": "2026-11-04T07:12:15.428Z"
+      },
+      {
+        "name": "FilesTab-B1JyA8IV.js",
+        "rawBytes": 268984,
+        "gzipBytes": 90788,
+        "imports": [
+          "vendor-query-D11jdkVP.js",
+          "index-NeR8hRm_.js",
+          "input-B7U0imnO.js",
+          "monacoSetup-Cf9CCAuw.js",
+          "editorStore-DJYW1yVj.js",
+          "fileIndex-CMTQXeEZ.js",
+          "lang-CH2lE-Py.js",
+          "langConvert-DLCNLUYu.js",
+          "ncTasks-DgnlGcfU.js",
+          "fileSave-DRRx1QDC.js",
+          "searchStore-D9vw6ThC.js",
+          "linkedProjects-DW0cvYRZ.js",
+          "editorPrefs-Cjzro3Zk.js",
+          "appConfig-CoDeNOAO.js",
+          "dbActions-CMj_LIFv.js",
+          "FreshnessBadge-B5-408FR.js",
+          "workspaceEpoch-DPpoUXij.js",
+          "tabSession-Dt9RZWOj.js",
+          "vendor-react-CDG6s8c4.js",
+          "vendor-tauri-Chue6t80.js",
+          "openTableFromHover-BhVNchrf.js"
+        ],
+        "modified": "2026-11-04T07:12:15.338Z"
+      },
+      {
+        "name": "editor.worker-BctYAlYZ.js",
+        "rawBytes": 231288,
+        "gzipBytes": 70711,
+        "imports": [],
+        "modified": "2026-11-04T07:12:15.339Z"
+      },
+      {
+        "name": "DbTab-DAjhMHtk.js",
+        "rawBytes": 203469,
+        "gzipBytes": 66191,
+        "imports": [
+          "vendor-query-D11jdkVP.js",
+          "index-NeR8hRm_.js",
+          "dbActions-CMj_LIFv.js",
+          "searchStore-D9vw6ThC.js",
+          "resultExport-DrJHWKwL.js",
+          "patchDraft-BsedUnx7.js",
+          "monacoSetup-Cf9CCAuw.js",
+          "vendor-react-CDG6s8c4.js",
+          "vendor-tauri-Chue6t80.js",
+          "openTableFromHover-BhVNchrf.js"
+        ],
+        "modified": "2026-11-04T07:12:15.338Z"
+      },
+      {
+        "name": "index-NeR8hRm_.js",
+        "rawBytes": 190166,
+        "gzipBytes": 67555,
+        "imports": [
+          "vendor-query-D11jdkVP.js",
+          "vendor-react-CDG6s8c4.js",
+          "vendor-tauri-Chue6t80.js"
+        ],
+        "modified": "2026-11-04T07:12:15.338Z"
+      }
+    ],
+    "note": "Static JS import closures only. CSS, languages loaded dynamically and editor worker runtime requests are excluded from page closures. gzip is a size comparison, not measured Tauri wire compression."
+  },
+  "sourceHashes": {
+    "desktop/src/lib/svn.ts": "de452edbe0b80ca88d47d29bfd65ffc1228c75cbafe787d9f56c6401b07d7192",
+    "desktop/src/lib/svnDraft.ts": "8b9b0bffd9a30fcc9bddff50adc96aff5690c4bbfb0c861f1ea6e53c58f6bb11",
+    "desktop/src/lib/sqlSplit.ts": "4483b10adb02edd8757daadf5c762082120a26d0a579b308aa1113a15865000d",
+    "desktop/src/lib/lang.ts": "9b96f7a84ac562dadb6ff8ac2e7c92c445d8a36d1cb9a7b19b3a61a33fcc5aa3",
+    "desktop/src-tauri/src/commands/lang_cmds.rs": "4b573f568bfa9b42deeec2785689a7859f4ca53c2771bcf2cd5f6233b9deb79c",
+    "desktop/src-tauri/src/watcher.rs": "8b50e38cf2930449a8b1c979418f60a31a8647b8de3bce27ed59b3a053759cb8",
+    "desktop/src/lib/javaCompletion.ts": "5b19daca1d4d8835869b46fabbbfc06a3fb242cc491e33c8b018d11bd730cfb0",
+    "desktop/src/lib/monacoSetup.ts": "ee07556d48e3861905a3056dbc009eb3e1e7a72e41350be9d2ed2af22c632734",
+    "desktop/src/components/svn/SvnFileRows.tsx": "43f8c0cd3745129afbcc9f68fe9c129d62510f3863e2f11226f16ba302e9aa0b"
+  },
+  "langSync": {
+    "calls": 100,
+    "unchangedDocumentFullReads": 100,
+    "notifications": 0
+  },
+  "validation": {
+    "command": "node node_modules/vitest/vitest.mjs run src/lib/sqlSplit.test.ts src/lib/svnDraft.test.ts src/lib/langDocSync.test.ts --maxWorkers=1",
+    "files": 3,
+    "tests": 28,
+    "status": "passed",
+    "durationSeconds": 2.66,
+    "measuredFunctionHashesVerified": true,
+    "finalSourceCheckAt": "2026-11-04T08:36:55.2380760Z",
+    "ancillaryFilesChangedAfterMeasurement": [
+      "desktop/src-tauri/src/commands/lang_cmds.rs",
+      "desktop/src/lib/javaCompletion.ts"
+    ]
+  },
+  "limitations": [
+    "No running NCForge instance was available during inspection, so release startup, app working set, idle CPU and WebView frame latency were not measured.",
+    "Bundle figures describe the existing 2026-11-04 15:12 Asia/Shanghai production assets. The workspace has additional uncommitted changes.",
+    "Node function timings were sampled on the current machine with other applications present; they are not end-to-end UI timings.",
+    "Ancillary language-service files changed during the audit and were rechecked: module cache deletion and repeated catalogue loading remain. All four measured function source hashes remained unchanged in the final check."
+  ]
+}

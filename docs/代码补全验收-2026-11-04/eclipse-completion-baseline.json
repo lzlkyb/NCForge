@@ -1,0 +1,220 @@
+{
+  "eclipseHome": "D:/tool/eclipsehy",
+  "jdkHome": "D:/ncc/1909home/ufjdk",
+  "classpathJars": [
+    "D:/ncc/1909home\\external/lib\\basic.jar",
+    "D:/ncc/1909home\\modules\\uapfw\\lib\\pubuapfw_jdbcframeworkLevel-1.jar"
+  ],
+  "scope": "Installed Eclipse core codeComplete, same disposable source and dependencies; UI ranking excluded",
+  "cases": [
+    {
+      "case": "JDK 类名前缀",
+      "eclipseMs": 100,
+      "eclipseCount": 7,
+      "eclipseFound": true,
+      "jdtCompletionMs": 213,
+      "jdtResolveMs": 572,
+      "jdtWarmMs": 17,
+      "jdtCount": 1,
+      "jdtFound": true
+    },
+    {
+      "case": "驼峰首字母",
+      "eclipseMs": 19,
+      "eclipseCount": 49,
+      "eclipseFound": true,
+      "jdtCompletionMs": 47,
+      "jdtResolveMs": 511,
+      "jdtWarmMs": 43,
+      "jdtCount": 15,
+      "jdtFound": true
+    },
+    {
+      "case": "工作区类",
+      "eclipseMs": 9,
+      "eclipseCount": 1,
+      "eclipseFound": true,
+      "jdtCompletionMs": 15,
+      "jdtResolveMs": 12,
+      "jdtWarmMs": 15,
+      "jdtCount": 1,
+      "jdtFound": true
+    },
+    {
+      "case": "对象方法重载",
+      "eclipseMs": 9,
+      "eclipseCount": 16,
+      "eclipseFound": true,
+      "jdtCompletionMs": 95,
+      "jdtResolveMs": 522,
+      "jdtWarmMs": 29,
+      "jdtCount": 14,
+      "jdtFound": true
+    },
+    {
+      "case": "构造器与菱形泛型",
+      "eclipseMs": 7,
+      "eclipseCount": 3,
+      "eclipseFound": true,
+      "jdtCompletionMs": 104,
+      "jdtResolveMs": 8,
+      "jdtWarmMs": 40,
+      "jdtCount": 4,
+      "jdtFound": true
+    },
+    {
+      "case": "链式调用",
+      "eclipseMs": 14,
+      "eclipseCount": 2,
+      "eclipseFound": true,
+      "jdtCompletionMs": 20,
+      "jdtResolveMs": 12,
+      "jdtWarmMs": 18,
+      "jdtCount": 2,
+      "jdtFound": true
+    },
+    {
+      "case": "流与泛型方法",
+      "eclipseMs": 13,
+      "eclipseCount": 12,
+      "eclipseFound": true,
+      "jdtCompletionMs": 100,
+      "jdtResolveMs": 185,
+      "jdtWarmMs": 29,
+      "jdtCount": 12,
+      "jdtFound": true
+    },
+    {
+      "case": "继承方法",
+      "eclipseMs": 7,
+      "eclipseCount": 1,
+      "eclipseFound": true,
+      "jdtCompletionMs": 12,
+      "jdtResolveMs": 164,
+      "jdtWarmMs": 9,
+      "jdtCount": 1,
+      "jdtFound": true
+    },
+    {
+      "case": "废弃方法",
+      "eclipseMs": 10,
+      "eclipseCount": 3,
+      "eclipseFound": true,
+      "jdtCompletionMs": 88,
+      "jdtResolveMs": 163,
+      "jdtWarmMs": 9,
+      "jdtCount": 2,
+      "jdtFound": true
+    },
+    {
+      "case": "泛型返回值",
+      "eclipseMs": 5,
+      "eclipseCount": 2,
+      "eclipseFound": true,
+      "jdtCompletionMs": 70,
+      "jdtResolveMs": 107,
+      "jdtWarmMs": 8,
+      "jdtCount": 2,
+      "jdtFound": true
+    },
+    {
+      "case": "静态方法",
+      "eclipseMs": 5,
+      "eclipseCount": 5,
+      "eclipseFound": true,
+      "jdtCompletionMs": 76,
+      "jdtResolveMs": 152,
+      "jdtWarmMs": 22,
+      "jdtCount": 5,
+      "jdtFound": true
+    },
+    {
+      "case": "完整包名前缀",
+      "eclipseMs": 5,
+      "eclipseCount": 1,
+      "eclipseFound": true,
+      "jdtCompletionMs": 57,
+      "jdtResolveMs": 131,
+      "jdtWarmMs": 8,
+      "jdtCount": 1,
+      "jdtFound": true
+    },
+    {
+      "case": "同名类区分包",
+      "eclipseMs": 12,
+      "eclipseCount": 40,
+      "eclipseFound": true,
+      "jdtCompletionMs": 38,
+      "jdtResolveMs": 153,
+      "jdtWarmMs": 38,
+      "jdtCount": 21,
+      "jdtFound": true
+    },
+    {
+      "case": "注解",
+      "eclipseMs": 6,
+      "eclipseCount": 1,
+      "eclipseFound": true,
+      "jdtCompletionMs": 22,
+      "jdtResolveMs": 134,
+      "jdtWarmMs": 7,
+      "jdtCount": 1,
+      "jdtFound": true
+    },
+    {
+      "case": "NC 类前缀",
+      "eclipseMs": 8,
+      "eclipseCount": 4,
+      "eclipseFound": true,
+      "jdtCompletionMs": 11,
+      "jdtResolveMs": 7,
+      "jdtWarmMs": 9,
+      "jdtCount": 3,
+      "jdtFound": true
+    },
+    {
+      "case": "NC 类方法",
+      "eclipseMs": 8,
+      "eclipseCount": 8,
+      "eclipseFound": true,
+      "jdtCompletionMs": 14,
+      "jdtResolveMs": 5,
+      "jdtWarmMs": 8,
+      "jdtCount": 4,
+      "jdtFound": true
+    },
+    {
+      "case": "NC 跨模块未导入类",
+      "eclipseMs": 7,
+      "eclipseCount": 7,
+      "eclipseFound": true,
+      "jdtCompletionMs": 274,
+      "jdtResolveMs": 342,
+      "jdtWarmMs": 117,
+      "jdtCount": 30,
+      "jdtFound": true
+    },
+    {
+      "case": "按需加载后成员",
+      "eclipseMs": 11,
+      "eclipseCount": 28,
+      "eclipseFound": true,
+      "jdtCompletionMs": 57,
+      "jdtResolveMs": 50,
+      "jdtWarmMs": 38,
+      "jdtCount": 28,
+      "jdtFound": true
+    },
+    {
+      "case": "6500 行有效源码",
+      "eclipseMs": 239,
+      "eclipseCount": 7,
+      "eclipseFound": true,
+      "jdtCompletionMs": 324,
+      "jdtResolveMs": 160,
+      "jdtWarmMs": 100,
+      "jdtCount": 2,
+      "jdtFound": true
+    }
+  ]
+}

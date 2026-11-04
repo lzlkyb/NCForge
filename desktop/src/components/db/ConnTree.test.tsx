@@ -4,7 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 vi.mock("../../lib/dbActions", () => ({ deleteConn: vi.fn(), disconnectConn: vi.fn(), duplicateConn: vi.fn(), moveConn: vi.fn(), newConsole: vi.fn(), refreshMeta: vi.fn() }));
 vi.mock("../../lib/dbConfirm", () => ({ ensureConnected: vi.fn() }));
-vi.mock("../../lib/dbStore", () => ({ useDb: () => ({ conns: [{ id: "c1", name: "开发库", env: "dev", url: "", user: "u" }], active: null, loaded: true }), rtOf: () => ({ status: "connected" }), tabOf: () => null, defaultConnId: vi.fn(), loadConns: vi.fn(), openConnDialog: vi.fn(), openDictTab: vi.fn() }));
+vi.mock("../../lib/dbStore", () => {
+  const S = { conns: [{ id: "c1", name: "开发库", env: "dev", url: "", user: "u" }], tabs: [], active: null, loaded: true, loadError: null, rt: {} };
+  return { useDbSelector: (sel: (s: typeof S) => unknown) => sel(S), useDbConns: () => S.conns, useDbRt: () => S.rt, rtOf: () => ({ status: "connected" }), defaultConnId: vi.fn(), loadConns: vi.fn(), openConnDialog: vi.fn(), openDictTab: vi.fn() };
+});
 vi.mock("./ConnObjects", () => ({ ConnObjects: () => <span>连接对象</span> }));
 vi.mock("./FavoriteSection", () => ({ FavoriteSection: () => null }));
 vi.mock("./PasswordResetDialog", () => ({ PasswordResetDialog: () => null }));

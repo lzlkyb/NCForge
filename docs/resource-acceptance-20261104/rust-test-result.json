@@ -1,0 +1,11 @@
+{
+  "task": "rust-test",
+  "jobs": 1,
+  "testThreads": 2,
+  "passed": 656,
+  "ignored": 59,
+  "startFreeGB": 3.28,
+  "minimumFreeGB": 2.2,
+  "endFreeGB": 3.86,
+  "samples": 115
+}

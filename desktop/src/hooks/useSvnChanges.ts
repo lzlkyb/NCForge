@@ -1,128 +1,126 @@
 import { useCallback } from "react";
 import { toast } from "../components/ui/toast";
-import {
-  friendlySvnError,
-  parseSvnError,
-  svnCommit,
-  svnResolve,
-  svnRevert,
-  svnUpdate,
-  type StatusResult,
-} from "../lib/svn";
+import { friendlySvnError, keyOf, parseSvnError, svnCommit, svnResolve, svnRevert, svnUpdate, type CommitResult, type StatusResult } from "../lib/svn";
+import { completeSvnDraft, getSvnDraft, markSvnUnknown } from "../lib/svnDraft";
+import { assertSvnWorkspace, isUnknownSvnCommitError, prepareSvnSubmit } from "../lib/svnSubmit";
+import { getSession } from "../lib/workspaceSession";
+import { workspaceEpoch } from "../lib/workspaceEpoch";
+import { trackOperation, waitForFileOperations } from "../lib/operations";
+import { getSvnWrite, useSvnWrite, withSvnWriteLock } from "../lib/svnWrite";
 
 type Busy = null | "commit" | "update" | "revert" | "resolve" | "auth";
 
-/**
- * 会改工作副本/仓库的四个动作（更新、提交、撤销、解决冲突）。
- *
- * 单独一个 hook：这些动作都有「认证失败要弹账号框」这一条公共分支，
- * 放在页面里会和布局代码缠在一起。每个动作成功后都必须 `refresh()`——
- * 界面上显示的改动数、审查进度全来自那次扫描，不重扫就是错的。
- *
- * `refresh` 返回扫描结果而不是 void：更新之后要靠它判断有没有新冲突
- * （后端不再自己扫一遍，见 `svn_update` 的注释）。
- */
-export function useSvnChanges({
-  setBusy,
-  setAuth,
-  refresh,
-  onCommitted,
-  onReverted,
-}: {
-  setBusy: (b: Busy) => void;
-  setAuth: (a: { open: boolean; error: string | null }) => void;
+/** 工作副本写锁从预检起保持到扫描收尾；服务器确认与扫描失败分别记账。 */
+export function useSvnChanges({ setBusy, setAuth, refresh, onCommitted, onReverted }: {
+  setBusy: (busy: Busy) => void;
+  setAuth: (auth: { open: boolean; error: string | null }) => void;
   refresh: () => Promise<StatusResult | undefined>;
   onCommitted: () => void;
   onReverted: () => void;
 }) {
-  const handle = useCallback(
-    (e: unknown) => {
-      if (parseSvnError(e).code === "auth") {
-        setAuth({ open: true, error: null });
-        return;
-      }
-      toast(friendlySvnError(e), "error");
-    },
-    [setAuth],
-  );
+  const root = getSession().root ?? "";
+  const writeBusy = useSvnWrite(root);
+  const handle = useCallback((error: unknown) => {
+    if (parseSvnError(error).code === "auth") { setAuth({ open: true, error: null }); return; }
+    toast(friendlySvnError(error), "error");
+  }, [setAuth]);
+  const rescan = useCallback(async (actionRoot: string, epoch: number, prefix: string) => {
+    if (getSession().root !== actionRoot || workspaceEpoch() !== epoch) return undefined;
+    try {
+      assertSvnWorkspace(actionRoot, epoch);
+      const scanned = await refresh();
+      assertSvnWorkspace(actionRoot, epoch);
+      if (!scanned) throw new Error("扫描结果未返回");
+      return scanned;
+    } catch (error) {
+      if (getSession().root !== actionRoot || workspaceEpoch() !== epoch) return undefined;
+      toast(`${prefix}，但刷新未完成：${friendlySvnError(error)}。请刷新清单核对。`, "warning");
+      return undefined;
+    }
+  }, [refresh]);
+
+  const doCommit = useCallback(async (message: string, paths: string[]): Promise<CommitResult | null> => {
+    const actionRoot = getSession().root ?? "";
+    const epoch = workspaceEpoch();
+    const snapshot = { message: message.trim(), paths: [...new Map(paths.map(path => [keyOf(path), path])).values()] };
+    if (!snapshot.message || snapshot.paths.length === 0) return null;
+    if (getSvnDraft(actionRoot).unknown) { toast("上次提交结果尚未确认，请先核实服务器历史", "warning"); return null; }
+    try {
+      return await withSvnWriteLock(actionRoot, "commit", async guard => {
+        setBusy("commit");
+        return trackOperation<CommitResult | null>({ key: `svn.commit:${actionRoot}`, label: "提交 SVN 改动", scope: actionRoot, page: "svn", phase: "检查本次提交范围与未保存内容", errorDetail: error => getSvnDraft(actionRoot).unknown ? "提交结果待确认，请核实服务器历史，确认前不要重试提交" : friendlySvnError(error) }, async operation => {
+          const prepared = await prepareSvnSubmit(actionRoot, epoch, snapshot, operation);
+          if (!prepared) return null;
+          operation.update({ phase: "提交选中文件，等待服务器确认" });
+          let result: CommitResult;
+          try { result = await svnCommit(prepared.paths, prepared.message, guard); }
+          catch (error) {
+            if (isUnknownSvnCommitError(error)) markSvnUnknown(actionRoot, prepared, friendlySvnError(error));
+            throw error;
+          }
+          completeSvnDraft(actionRoot, prepared, result);
+          toast(`服务器已确认 r${result.revision}，提交 ${prepared.paths.length} 个文件`, "success");
+          operation.update({ phase: `服务器已确认 r${result.revision}，刷新工作副本状态` });
+          // 旧工程完成只写自己的草稿，不能清空新工程选择或发起新工程扫描。
+          if (getSession().root === actionRoot && workspaceEpoch() === epoch) {
+            try { onCommitted(); } catch (error) { console.warn("[svn] commit UI callback failed", error); }
+            await rescan(actionRoot, epoch, `r${result.revision} 已提交`);
+          }
+          return result;
+        }, result => ({ state: result ? "success" : "cancelled", detail: result ? `服务器已确认提交 r${result.revision}` : "已取消提交，草稿保留" }));
+      });
+    } catch (error) {
+      if (getSvnDraft(actionRoot).unknown) toast("提交结果待确认。请查看服务器历史，核实后再解除待确认状态。", "warning");
+      else handle(error);
+      return null;
+    } finally {
+      if (getSession().root === actionRoot && !getSvnWrite(actionRoot)) setBusy(null);
+    }
+  }, [setBusy, onCommitted, rescan, handle]);
 
   const doUpdate = useCallback(async () => {
-    setBusy("update");
+    const actionRoot = getSession().root ?? "", epoch = workspaceEpoch();
     try {
-      const r = await svnUpdate();
-      const scanned = await refresh();
-      const conflicts =
-        scanned?.changes.groups.flatMap((g) => g.items).filter((it) => it.letter === "C").length ?? 0;
-      if (conflicts > 0) {
-        toast(`已更新到 r${r.revision}，${conflicts} 个文件有冲突待处理`, "warning");
-      } else {
-        toast(`已更新到 r${r.revision}`, "success");
-      }
-    } catch (e) {
-      handle(e);
-    } finally {
-      setBusy(null);
-    }
-  }, [handle, refresh, setBusy]);
+      await withSvnWriteLock(actionRoot, "update", async guard => {
+        setBusy("update"); await waitForFileOperations(); assertSvnWorkspace(actionRoot, epoch);
+        const result = await svnUpdate(guard);
+        if (getSession().root !== actionRoot || workspaceEpoch() !== epoch) return;
+        const scanned = await rescan(actionRoot, epoch, `已更新到 r${result.revision}`);
+        if (!scanned) return;
+        const conflicts = scanned.changes.groups.flatMap(group => group.items).filter(item => item.letter === "C").length;
+        toast(`已更新到 r${result.revision}${conflicts ? `，${conflicts} 个文件有冲突待处理` : "，工作副本状态已核对"}`, conflicts ? "warning" : "success");
+      });
+    } catch (error) { handle(error); }
+    finally { if (getSession().root === actionRoot && !getSvnWrite(actionRoot)) setBusy(null); }
+  }, [setBusy, rescan, handle]);
 
-  const doCommit = useCallback(
-    async (message: string, paths: string[]) => {
-      setBusy("commit");
-      try {
-        const r = await svnCommit(paths, message);
-        const added = r.added.length > 0 ? `，新增 ${r.added.length} 个` : "";
-        toast(`已提交为 r${r.revision}（${paths.length} 个文件${added}）`, "success");
-        onCommitted();
-        void refresh();
-      } catch (e) {
-        handle(e);
-      } finally {
-        setBusy(null);
-      }
-    },
-    [handle, onCommitted, refresh, setBusy],
-  );
+  const doRevert = useCallback(async (paths: string[], recursive: boolean) => {
+    const actionRoot = getSession().root ?? "", epoch = workspaceEpoch();
+    try {
+      await withSvnWriteLock(actionRoot, "revert", async guard => {
+        setBusy("revert"); await waitForFileOperations(); assertSvnWorkspace(actionRoot, epoch);
+        const result = await svnRevert([...paths], recursive, guard);
+        toast(`已撤销 ${result.count} 处改动，备份在 ${result.backupDir}`, "success");
+        if (getSession().root !== actionRoot || workspaceEpoch() !== epoch) return;
+        onReverted(); await rescan(actionRoot, epoch, "本地改动已撤销");
+      });
+    } catch (error) { handle(error); }
+    finally { if (getSession().root === actionRoot && !getSvnWrite(actionRoot)) setBusy(null); }
+  }, [setBusy, onReverted, rescan, handle]);
 
-  const doRevert = useCallback(
-    async (paths: string[], recursive: boolean) => {
-      setBusy("revert");
-      try {
-        const r = await svnRevert(paths, recursive);
-        // 给全路径：备份目录在工作区旁边而不是里面，只报个目录名用户找不到
-        toast(`已撤销 ${r.count} 处改动，备份在 ${r.backupDir}`, "success");
-        onReverted();
-        void refresh();
-      } catch (e) {
-        handle(e);
-      } finally {
-        setBusy(null);
-      }
-    },
-    [handle, onReverted, refresh, setBusy],
-  );
+  const doResolve = useCallback(async (path: string, choice: "mine" | "theirs" | "base") => {
+    const actionRoot = getSession().root ?? "", epoch = workspaceEpoch();
+    try {
+      await withSvnWriteLock(actionRoot, "resolve", async guard => {
+        setBusy("resolve"); await waitForFileOperations(); assertSvnWorkspace(actionRoot, epoch);
+        const result = await svnResolve(path, choice, guard);
+        toast(result.backupDir ? `冲突已解决，另一版备份在 ${result.backupDir}。请重新编译这个类` : "冲突已解决，请重新编译这个类", "success");
+        if (getSession().root !== actionRoot || workspaceEpoch() !== epoch) return;
+        onReverted(); await rescan(actionRoot, epoch, "冲突处理已完成");
+      });
+    } catch (error) { handle(error); }
+    finally { if (getSession().root === actionRoot && !getSvnWrite(actionRoot)) setBusy(null); }
+  }, [setBusy, onReverted, rescan, handle]);
 
-  const doResolve = useCallback(
-    async (path: string, choice: "mine" | "theirs" | "base") => {
-      setBusy("resolve");
-      try {
-        const r = await svnResolve(path, choice);
-        // 说清备份在哪：resolve 会把 .mine/.rN 删掉，这是唯一的后悔药
-        toast(
-          r.backupDir
-            ? `冲突已解决，另一版备份在 ${r.backupDir}。记得重新编译这个类`
-            : "冲突已解决，记得重新编译这个类",
-          "success",
-        );
-        onReverted();
-        void refresh();
-      } catch (e) {
-        handle(e);
-      } finally {
-        setBusy(null);
-      }
-    },
-    [handle, onReverted, refresh, setBusy],
-  );
-
-  return { doUpdate, doCommit, doRevert, doResolve };
+  return { doUpdate, doCommit, doRevert, doResolve, writeBusy };
 }

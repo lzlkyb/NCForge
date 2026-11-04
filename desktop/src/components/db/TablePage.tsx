@@ -11,7 +11,7 @@ import { friendlyDbError } from "../../lib/db";
 import { dbApi, type ColumnInfo, type IndexInfo } from "../../lib/dbApi";
 import { trackOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
-import { columnsOf, patchTab, rtOf, useDb, type TableSub, type TableTab } from "../../lib/dbStore";
+import { columnsOf, patchTab, useConnRt, type TableSub, type TableTab } from "../../lib/dbStore";
 import { copyText } from "../../lib/utils";
 
 import { returnRelated } from "../../lib/dbRelations";
@@ -32,8 +32,7 @@ const OBJ_SUBS: { key: TableSub; label: string }[] = [
 
 /** 表页：数据 / 结构（含 NC 中文名）/ 索引 / DDL。对象页（`tab.otype` 有值）只保留源码与 DDL。 */
 export function TablePage({ tab }: { tab: TableTab }) {
-  useDb();
-  const rt = rtOf(tab.connId);
+  const rt = useConnRt(tab.connId);
   const lower = tab.table.toLowerCase();
   const isObj = !!tab.otype;
   const isView = rt.tables?.find((t) => t.name === tab.table)?.kind === "VIEW";

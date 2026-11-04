@@ -1,0 +1,30 @@
+[
+  {
+    "task": "rust-test",
+    "samples": 115,
+    "startFreeGB": 3.28,
+    "minimumFreeGB": 2.2,
+    "endFreeGB": 3.86
+  },
+  {
+    "task": "frontend-test",
+    "samples": 84,
+    "startFreeGB": 2.82,
+    "minimumFreeGB": 2.02,
+    "endFreeGB": 3.11
+  },
+  {
+    "task": "browser-test",
+    "samples": 4,
+    "startFreeGB": 2.72,
+    "minimumFreeGB": 2.24,
+    "endFreeGB": 2.26
+  },
+  {
+    "task": "vite-build",
+    "samples": 8,
+    "startFreeGB": 3.03,
+    "minimumFreeGB": 2.45,
+    "endFreeGB": 2.45
+  }
+]

@@ -5,7 +5,8 @@ import { getKeymap, paletteKeyLabel, PALETTE_MODES, type PaletteMode } from "../
 import { navigate } from "../../lib/lang";
 import { requestOpenFile } from "../../lib/openFileRequest";
 import { closePalette, openPalette, usePalette } from "../../lib/paletteStore";
-import { buildItems, type PaletteCtx, type PaletteResult, type Runner } from "../../lib/paletteSources";
+import { buildItems, PALETTE_SEARCH_SOURCE, type PaletteCtx, type PaletteResult, type Runner } from "../../lib/paletteSources";
+import { cancelSearch } from "../../lib/search";
 import type { Range } from "../../lib/fuzzy";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
 
@@ -107,6 +108,8 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
     return () => {
       alive = false;
       clearTimeout(t);
+      // 换词 / 关面板：旧的 `#` 内容搜索结果已经没人要了，让后端停掉扫描、让出磁盘
+      if (mode === "file" && query.trim().startsWith("#")) void cancelSearch(PALETTE_SEARCH_SOURCE);
     };
   }, [mode, query, retryTick]);
 

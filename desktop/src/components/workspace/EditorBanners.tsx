@@ -1,4 +1,6 @@
 import { Button } from "../ui/button";
+import { missingResourceId } from "../../lib/resourceMissing";
+import { ResourceDownloadButton } from "../resource/ResourceDownloadButton";
 import { Icon } from "../ui/icon";
 import { useOperations } from "../../lib/operations";
 import type { Eol } from "../../lib/workspace";
@@ -95,6 +97,7 @@ export function EditorBanners({
             : active.virtual === "decompiled"
               ? "这个类没有配套源码（_src.jar），以下是 CFR 反编译出来的近似实现，只读——局部变量名可能丢失、语法糖被展开，与原始源码不逐字一致"
               : "这个类没有配套源码（_src.jar），反编译也没成功，只显示方法签名，只读"}
+          {active.virtual === "stub" && missingResourceId(active.decompileError) === "cfr" && <div className="wb-banner-actions"><ResourceDownloadButton id="cfr" /><span>下载完成后再次打开这个类即可重试</span></div>}
         </div>
       )}
       {showLargeHint && active && (
@@ -102,8 +105,7 @@ export function EditorBanners({
           <Icon name="info" size={14} />
           <span className="wb-banner-text">
             <b>{active.lines}</b> 行的大文件：为保证打字流畅，已关掉括号对着色、代码折叠与小地图；
-            语法高亮、搜索、编译不受影响，但<b>语义补全与跳转可能不可用</b>（这个行数下 jdt.ls
-            的补全实测恒为 0，正是选 2000 行作分界的原因）
+            语法高亮、搜索、编译与<b>代码补全仍可用</b>，语言服务首次分析大文件可能较慢
           </span>
           <button
             type="button"

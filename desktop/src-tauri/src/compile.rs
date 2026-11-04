@@ -305,6 +305,15 @@ fn add_super_chain(index: &ClassIndex, jars: &mut BTreeSet<u32>, start: &str) {
     add_super_chain_seen(index, jars, start, &mut std::collections::HashSet::new());
 }
 
+/// 按需补全一个全限定类型时复用编译的父类/接口链，避免只加目标 jar 造成假红线。
+pub fn type_dependency_jars(index: &ClassIndex, name: &str) -> Vec<PathBuf> {
+    let mut jars = BTreeSet::new();
+    add_super_chain(index, &mut jars, name);
+    jars.into_iter()
+        .map(|id| index.jars[id as usize].clone())
+        .collect()
+}
+
 /// 带「已访问」集合的版本：批量处理很多文件时共用同一个集合，同一个父类只读一次 class 头。
 fn add_super_chain_seen(
     index: &ClassIndex,
@@ -790,7 +799,8 @@ import a.B;"
     }
 
     #[test]
-    fn module_of_takes_first_directory_under_root() {        let root = Path::new("C:/work/aier/newar");
+    fn module_of_takes_first_directory_under_root() {
+        let root = Path::new("C:/work/aier/newar");
         assert_eq!(
             module_of(root, Path::new("C:/work/aier/newar/gl/src/private/A.java")).as_deref(),
             Some("gl")
@@ -873,7 +883,12 @@ import a.B;"
         assert_eq!(r.source_count, 1);
         assert_eq!(r.error_count, 0, "问题：{:?}", r.problems);
         assert!(
-            out.join("nc").join("bs").join("gl").join("busirecon").join("BusiReconBO.class").is_file(),
+            out.join("nc")
+                .join("bs")
+                .join("gl")
+                .join("busirecon")
+                .join("BusiReconBO.class")
+                .is_file(),
             "产物没落到 out_dir"
         );
     }

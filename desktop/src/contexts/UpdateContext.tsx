@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect, useMemo, u
 import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "../lib/tauri";
 import { beginOperation, type OperationHandle } from "../lib/operations";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
 import { UpdateNotesDialog } from "../components/update/UpdateNotesDialog";
 import { RestartOverlay } from "../components/update/RestartOverlay";
 import { APP_SLUG } from "../lib/about";
@@ -170,6 +170,24 @@ const DISMISSED_KEY = `${APP_SLUG}.ignored_update_version`;
 /** 重启过渡层停留时长：这段刻意的等待本身就是「正在应用更新」的载体（方案 C） */
 const RESTART_OVERLAY_MS = 1100;
 
+interface UpdateListeners {
+  active: boolean;
+  ready: Promise<boolean>;
+  resolve: (ready: boolean) => void;
+  closed: Promise<boolean>;
+  close: () => void;
+  start?: () => Promise<boolean>;
+  error?: string;
+}
+
+function createUpdateListeners(): UpdateListeners {
+  let resolve!: UpdateListeners["resolve"];
+  let close!: UpdateListeners["close"];
+  const ready = new Promise<boolean>(done => { resolve = done; });
+  const closed = new Promise<boolean>(done => { close = () => done(false); });
+  return { active: true, ready, resolve, closed, close };
+}
+
 // ─── Provider ────────────────────────────
 
 export function UpdateProvider({ children }: { children: ReactNode }) {
@@ -217,6 +235,9 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
    */
   const userInitiatedRef = useRef(true);
   const [manualCheck, setManualCheck] = useState(false);
+  // 子组件的 effect 可能先于 Provider effect 调用检查，握手必须在首次渲染就存在。
+  const listenersRef = useRef<UpdateListeners | null>(null);
+  if (!listenersRef.current) listenersRef.current = createUpdateListeners();
 
   // ─── 静默检查（不改变 UI 状态，仅内部记录）─────
   // 统一走后端 check_update 命令，状态由事件驱动（update:available / update:uptodate）。
@@ -225,17 +246,23 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     // 与 runCheck 同样挡 downloading：下载进行中并发检查，后端的 update:checking /
     // update:available 复查事件会被监听器的 downloadingRef 守卫吃掉，没有任何事件
     // 能把状态救回来（runCheck 处的同款注释）。静默检查只是"顺手问问"，不值得冒险。
-    if (checkingRef.current || downloadingRef.current || restartingRef.current || statusRef.current === "ready" || statusRef.current === "installing") return;
+    const listeners = listenersRef.current!;
+    if (!listeners.active || checkingRef.current || downloadingRef.current || restartingRef.current || statusRef.current === "ready" || statusRef.current === "installing") return;
     checkingRef.current = true;
     userInitiatedRef.current = false; // 这一轮失败不弹 toast
+    let requested = false;
     try {
+      const ready = await Promise.race([listeners.start?.() ?? listeners.ready, listeners.closed]);
+      if (!listeners.active) return;
+      if (!ready) throw new Error(listeners.error);
+      requested = true;
       await invoke("check_update");
     } catch {
-      checkingRef.current = false;
+      if (listeners.active) checkingRef.current = false;
       // 静默检查失败不处理
     } finally {
       try {
-        localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
+        if (requested && listeners.active) localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
       } catch {
         // 存储不可用只影响「24 小时内不重复自动检查」的抑制，不值得打断更新流程
       }
@@ -252,7 +279,8 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     // 下载进行中不接受检查：状态会被打成 checking，而 start_update 内部复查发的
     // checking/available 事件又被监听器的 downloadingRef 守卫吃掉，没有任何事件
     // 能把状态救回来 → 徽章永远停在「检查中」。下载完成后可再查。
-    if (checkingRef.current || downloadingRef.current || restartingRef.current || statusRef.current === "ready" || statusRef.current === "installing") return;
+    const listeners = listenersRef.current!;
+    if (!listeners.active || checkingRef.current || downloadingRef.current || restartingRef.current || statusRef.current === "ready" || statusRef.current === "installing") return;
     checkingRef.current = true;
     if (manual) checkTask.current = beginOperation({ key: "update.check", label: "检查软件更新", page: "settings", phase: "读取更新信息" });
     manualCheckRef.current = manual;
@@ -261,10 +289,18 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     setError(null);
     setErrorCode(null);
 
+    let requested = false;
     try {
+      // 先占检查守卫再等待完整监听，防止连点与启动自检抢发；只等待注册，不能等待自检本身。
+      const ready = await Promise.race([listeners.start?.() ?? listeners.ready, listeners.closed]);
+      if (!listeners.active) return;
+      if (!ready) throw new Error(listeners.error);
+      requested = true;
       await invoke("check_update");
     } catch (e) {
+      if (!listeners.active) return;
       checkingRef.current = false;
+      manualCheckRef.current = false;
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[Update] 检查更新失败:", msg);
       setError(msg);
@@ -276,7 +312,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       setStatus("error");
     } finally {
       try {
-        localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
+        if (requested && listeners.active) localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
       } catch {
         // 同 silentCheck：写不进只丢「24 小时抑制」，不影响检查本身
       }
@@ -345,6 +381,8 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    const listeners = listenersRef.current!.active ? listenersRef.current! : createUpdateListeners();
+    listenersRef.current = listeners;
     const unlisteners: UnlistenFn[] = [];
     // async 注册期间若组件已卸载（StrictMode/快速重挂载，cleanup 会早于 await 完成），
     // 立即注销刚注册的监听，避免监听器泄漏与重复注册。
@@ -352,10 +390,14 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       if (cancelled) fn();
       else unlisteners.push(fn);
     };
+    const register = async <T,>(event: string, handler: EventCallback<T>) => {
+      if (cancelled) return () => {};
+      return listen<T>(event, e => { if (!cancelled) handler(e); });
+    };
 
     const setupListeners = async () => {
       track(
-        await listen("update:checking", () => {
+        await register("update:checking", () => {
           // 下载进行中（start_update 内部复查也会发 checking），不回退状态
           if (downloadingRef.current || statusRef.current === "ready" || statusRef.current === "installing") return;
           checkingRef.current = true;
@@ -365,7 +407,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         }),
       );
       track(
-        await listen<{ version: string; body: string | null; date?: string | null; currentVersion?: string }>("update:available", (e) => {
+        await register<{ version: string; body: string | null; date?: string | null; currentVersion?: string }>("update:available", (e) => {
           // 下载进行中（start_update 内部复查会再发 available），保持 downloading 不被回退
           if (downloadingRef.current || statusRef.current === "ready" || statusRef.current === "installing") return;
           checkingRef.current = false;
@@ -378,7 +420,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         }),
       );
       track(
-        await listen("update:downloading", () => {
+        await register("update:downloading", () => {
           checkingRef.current = false;
           downloadingRef.current = true;
           setStatus("downloading");
@@ -390,7 +432,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         }),
       );
       track(
-        await listen<{ downloaded: number; total: number | null; bytesPerSec?: number }>("update:progress", (e) => {
+        await register<{ downloaded: number; total: number | null; bytesPerSec?: number }>("update:progress", (e) => {
           const { downloaded, total, bytesPerSec: bps } = e.payload;
           downloadTask.current?.update({ phase: "下载更新包", progress: { done: downloaded, total: total ?? undefined } });
           setDownloadedBytes(downloaded);
@@ -408,7 +450,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         }),
       );
       track(
-        await listen<UpdateInfo | undefined>("update:ready", (event) => {
+        await register<UpdateInfo | undefined>("update:ready", (event) => {
           checkingRef.current = false;
           setProgress(100);
           setProgressIndeterminate(false);
@@ -420,7 +462,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         }),
       );
       track(
-        await listen<{ message: string; code?: string }>("update:error", (e) => {
+        await register<{ message: string; code?: string }>("update:error", (e) => {
           checkingRef.current = false;
           const { message, code } = e.payload;
           checkTask.current?.finish("failed", message);
@@ -439,7 +481,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         }),
       );
       track(
-        await listen("update:uptodate", () => {
+        await register("update:uptodate", () => {
           // 与 checking / available 同款守卫：下载进行中不回退状态。后端 check_update
           // 与 start_update 是两条独立命令（各自的单飞闸），前端调用侧虽已挡过一轮，
           // 这里作为双保险——状态被打回 uptodate 会让进度读数与徽章全部错乱。
@@ -494,17 +536,41 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       await checkForUpdate();
     };
 
-    setupListeners().then(() => {
-      // cancelled 时不再发起检查（组件已卸载，监听器也已注销）
-      if (!cancelled) doStartupCheck();
+    let registration: Promise<boolean> | null = null;
+    listeners.start = () => {
+      // 注册失败后清理半成品，下一次手动重试重新注册；同一轮等待者共享一次注册。
+      if (!registration) registration = setupListeners().then(() => true, e => {
+        unlisteners.splice(0).forEach(fn => fn());
+        listeners.error = `更新事件监听初始化失败，请重试：${e instanceof Error ? e.message : String(e)}`;
+        registration = null;
+        return false;
+      });
+      return registration;
+    };
+    void listeners.start().then(ready => {
+      listeners.resolve(ready);
+      if (cancelled) return;
+      if (ready) void doStartupCheck();
+      else if (!checkingRef.current) {
+        setError(listeners.error ?? null);
+        setErrorCode(null);
+        setErrorToastAllowed(false);
+        setStatus("error");
+      }
     });
     return () => {
       cancelled = true;
+      listeners.active = false;
+      // IPC 注册不能撤销，但调用者必须立即退出等待，旧结果也不能影响新生命周期。
+      listeners.close();
+      listeners.resolve(false);
       unlisteners.forEach((fn) => fn());
       checkTask.current?.finish("failed", "更新监听已关闭，结果尚未确认");
       downloadTask.current?.finish("failed", "更新监听已关闭，后台下载结果尚未确认");
       installTask.current?.finish("failed", "安装监听已关闭，最终版本需重启后确认");
       checkTask.current = downloadTask.current = installTask.current = null;
+      checkingRef.current = false;
+      manualCheckRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

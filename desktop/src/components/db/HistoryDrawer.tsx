@@ -9,7 +9,7 @@ import {
   historyTime,
   subscribeHistory,
 } from "../../lib/dbHistory";
-import { connOf, useDb } from "../../lib/dbStore";
+import { useDbConns } from "../../lib/dbStore";
 
 /** 执行历史：单击填回编辑器，双击填回并执行。 */
 export function HistoryDrawer({ connId, onPick, onClose }: {
@@ -18,8 +18,8 @@ export function HistoryDrawer({ connId, onPick, onClose }: {
   onClose: () => void;
 }) {
   const map = useSyncExternalStore(subscribeHistory, getHistoryMap);
-  // 订阅连接列表：跨连接搜索要显示连接名，连接改名 / 删除后这里得跟着变
-  useDb();
+  // 订阅连接列表：跨连接搜索要显示连接名，连接改名 / 删除后这里得跟着变（查询结果 / 标签变化与它无关）
+  const conns = useDbConns();
   const [q, setQ] = useState("");
   /** 搜索范围：默认只看当前连接（多数时候要找的就是它），要捞别的库时才开。 */
   const [all, setAll] = useState(false);
@@ -93,7 +93,7 @@ export function HistoryDrawer({ connId, onPick, onClose }: {
             onDoubleClick={() => onPick(entry.sql, true)}
           >
             <span className="m">
-              {all && <span className="dbx-hconn">{connOf(id)?.name ?? "已删除的连接"}</span>}
+              {all && <span className="dbx-hconn">{conns.find((c) => c.id === id)?.name ?? "已删除的连接"}</span>}
               {historyTime(entry.at)} · {entry.ms} ms
               <span className={`r${entry.ok ? "" : " fail"}`}>
                 <Highlight text={entry.summary} query={q} />

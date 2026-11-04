@@ -275,7 +275,7 @@ pub fn pack_dir(config_dir: &Path, id: &str, version: &str) -> PathBuf {
     external_root(config_dir).join(format!("{id}@{version}"))
 }
 
-/// 当前生效的已安装目录（state 记录 + 目录真实存在，双重确认）。
+/// 当前生效的已安装目录（state 记录 + 关键文件真实存在，双重确认）。
 /// legacy 记录返回 None——旧安装包里的资源由 finder 的原有候选负责。
 pub fn active_dir(config_dir: &Path, id: &str) -> Option<PathBuf> {
     let st = PacksState::load(config_dir);
@@ -284,7 +284,7 @@ pub fn active_dir(config_dir: &Path, id: &str) -> Option<PathBuf> {
         return None;
     }
     let dir = pack_dir(config_dir, id, &rec.version);
-    dir.is_dir().then_some(dir)
+    pack_probe_ok(&dir, id).then_some(dir)
 }
 
 /// 旧版安装包内的资源布局（bundle.resources 映射的落点，v0.1.0 及以前）。
@@ -296,12 +296,7 @@ pub fn legacy_dir(resource_dir: &Path, id: &str) -> PathBuf {
 /// 空目录 / 半吊子安装都算没有）。
 pub fn legacy_present(resource_dir: &Path, id: &str) -> bool {
     let dir = legacy_dir(resource_dir, id);
-    match id {
-        PACK_JDTLS => dir.join("plugins").is_dir() && dir.join("config_win").is_dir(),
-        PACK_ECJ => dir.join("ecj-3.17.jar").is_file(),
-        PACK_SVNKIT => dir.join("svnkit.jar").is_file(),
-        _ => dir.is_dir(),
-    }
+    pack_probe_ok(&dir, id)
 }
 
 /// 旧安装包里这个包的资源总字节（认领时记进 state，设置页展示用）。
@@ -330,14 +325,66 @@ fn legacy_dir_size(resource_dir: &Path, id: &str) -> Option<u64> {
     Some(total)
 }
 
-/// 解压/安装后冒烟：包内容是不是这个包该有的样子。
-fn pack_probe_ok(dir: &Path, id: &str) -> bool {
+/// 安装、状态和 finder 共用关键文件检查，目录存在不能代表组件仍可用。
+pub fn pack_probe_ok(dir: &Path, id: &str) -> bool {
     match id {
-        PACK_JDTLS => dir.join("plugins").is_dir() && dir.join("config_win").is_dir(),
+        PACK_JDTLS => {
+            let config = if cfg!(windows) {
+                "config_win"
+            } else {
+                "config_linux"
+            };
+            if !dir.join(config).join("config.ini").is_file() {
+                return false;
+            }
+            let Ok(entries) = std::fs::read_dir(dir.join("plugins")) else {
+                return false;
+            };
+            let names: Vec<_> = entries
+                .flatten()
+                .filter(|entry| entry.path().is_file())
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect();
+            [
+                "org.eclipse.equinox.launcher_",
+                "org.eclipse.jdt.ls.core_",
+                "org.eclipse.osgi_",
+            ]
+            .iter()
+            .all(|prefix| {
+                names
+                    .iter()
+                    .any(|name| name.starts_with(prefix) && name.ends_with(".jar"))
+            })
+        }
         PACK_ECJ => dir.join("ecj-3.17.jar").is_file(),
-        PACK_SVNKIT => dir.join("svnkit.jar").is_file(),
+        PACK_SVNKIT => crate::svn_bridge::BRIDGE_JARS
+            .iter()
+            .all(|name| dir.join(name).is_file()),
+        PACK_CFR => contains_jar(dir),
         _ => dir.is_dir(),
     }
+}
+
+/// CFR 文件名包含版本号，允许归档额外包一层目录；不跟随目录链接，避免循环。
+fn contains_jar(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let Ok(kind) = entry.file_type() else {
+            return false;
+        };
+        let path = entry.path();
+        if kind.is_dir() {
+            contains_jar(&path)
+        } else {
+            kind.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("jar"))
+        }
+    })
 }
 
 // ───────────────────────── 更新源端点 ─────────────────────────
@@ -486,6 +533,26 @@ pub async fn download_pack(
     max_bytes: u64,
     mut on_progress: impl FnMut(usize, u64, Option<u64>),
 ) -> Result<Vec<u8>, String> {
+    download_pack_events(client, url, expected_sha256, max_bytes, |event| {
+        if let DownloadEvent::Progress(chunk, downloaded, total) = event {
+            on_progress(chunk, downloaded, total);
+        }
+    })
+    .await
+}
+
+enum DownloadEvent {
+    Progress(usize, u64, Option<u64>),
+    Verifying,
+}
+
+async fn download_pack_events(
+    client: &reqwest::Client,
+    url: &url::Url,
+    expected_sha256: &str,
+    max_bytes: u64,
+    mut on_event: impl FnMut(DownloadEvent),
+) -> Result<Vec<u8>, String> {
     let resp = client
         .get(url.clone())
         .send()
@@ -522,8 +589,9 @@ pub async fn download_pack(
                 "下载量超过上限（已收 {downloaded} 字节，上限 {max_bytes}）——源可能声明了错误的大小，或根本不是预期的包"
             ));
         }
-        on_progress(chunk.len(), downloaded, total);
+        on_event(DownloadEvent::Progress(chunk.len(), downloaded, total));
     }
+    on_event(DownloadEvent::Verifying);
     let got = hex_lower(&hasher.finalize());
     if got != expected_sha256.to_lowercase() {
         return Err(format!(
@@ -724,6 +792,12 @@ pub enum PackEvent {
     Downloading {
         id: String,
     },
+    Verifying {
+        id: String,
+    },
+    Installing {
+        id: String,
+    },
     Progress {
         id: String,
         downloaded: u64,
@@ -789,31 +863,74 @@ fn is_deterministic_download_error(e: &str) -> bool {
 
 /// 本地是否已「全就绪」：三个包都有记录且资源真在磁盘上（安装目录或 legacy 认领）。
 /// 用于离线短路（M8-5）：清单一个源都拉不到时，本地已齐就不该判失败。
+#[cfg(test)]
 fn locally_ready(
     config_dir: &Path,
     legacy_resource_dir: Option<&Path>,
     state: &PacksState,
 ) -> bool {
-    ALL_PACKS.iter().all(|meta| {
-        let Some(rec) = state.packs.get(meta.id) else {
-            return false;
-        };
-        if rec.legacy {
-            // legacy 认领：资源在旧安装目录里，按关键文件确认还在
-            return legacy_resource_dir
-                .map(|rd| legacy_present(rd, meta.id))
-                .unwrap_or(false);
-        }
-        pack_dir(config_dir, meta.id, &rec.version).is_dir()
-    })
+    locally_ready_selected(config_dir, legacy_resource_dir, state, None)
+}
+
+fn locally_ready_selected(
+    config_dir: &Path,
+    legacy_resource_dir: Option<&Path>,
+    state: &PacksState,
+    ids: Option<&[String]>,
+) -> bool {
+    ALL_PACKS
+        .iter()
+        .filter(|meta| ids.is_none_or(|ids| ids.iter().any(|id| id == meta.id)))
+        .all(|meta| {
+            let Some(rec) = state.packs.get(meta.id) else {
+                return false;
+            };
+            if rec.legacy {
+                // legacy 认领：资源在旧安装目录里，按关键文件确认还在
+                return legacy_resource_dir
+                    .map(|rd| legacy_present(rd, meta.id))
+                    .unwrap_or(false);
+            }
+            pack_probe_ok(&pack_dir(config_dir, meta.id, &rec.version), meta.id)
+        })
 }
 
 pub async fn ensure_packs(
     config_dir: &Path,
     legacy_resource_dir: Option<&Path>,
     force: bool,
+    on_event: impl FnMut(PackEvent),
+) -> Result<EnsureOutcome, EnsureFailure> {
+    ensure_selected_packs(config_dir, legacy_resource_dir, force, None, on_event).await
+}
+
+pub fn validate_pack_selection(ids: &[String]) -> Result<(), String> {
+    if ids.is_empty() {
+        return Err("请至少选择一个需要下载的组件".to_string());
+    }
+    if let Some(id) = ids
+        .iter()
+        .find(|id| !ALL_PACKS.iter().any(|meta| meta.id == id.as_str()))
+    {
+        return Err(format!("不支持的运行组件：{id}"));
+    }
+    Ok(())
+}
+
+/// 指定组件独立置备；未指定时兼容原批量入口，其他包不会被认领、下载或重装。
+pub async fn ensure_selected_packs(
+    config_dir: &Path,
+    legacy_resource_dir: Option<&Path>,
+    force: bool,
+    ids: Option<&[String]>,
     mut on_event: impl FnMut(PackEvent),
 ) -> Result<EnsureOutcome, EnsureFailure> {
+    if let Some(ids) = ids {
+        validate_pack_selection(ids).map_err(|message| EnsureFailure {
+            outcome: EnsureOutcome::default(),
+            message,
+        })?;
+    }
     // 这两个错误发生在任何包之前，outcome 只能是空的
     let endpoints = resource_endpoints().map_err(|message| EnsureFailure {
         outcome: EnsureOutcome::default(),
@@ -849,11 +966,28 @@ pub async fn ensure_packs(
             }
         };
 
+        let platform_packs = manifest.packs_for_current_platform();
+        if let Some(ids) = ids {
+            if let Some(id) = ids
+                .iter()
+                .find(|id| !platform_packs.iter().any(|pack| &pack.id == *id))
+            {
+                last_err = Some(format!("组件源清单没有当前平台的 {id} 组件"));
+                continue;
+            }
+        }
         // 逐包判定：已装且版本一致 → 跳过；旧安装包里有 → 认领（记 legacy，不下载）；
         // 其余进待下载列表。认领先落盘：哪怕后面下载失败，legacy 认领也不该丢。
         let mut state = PacksState::load(config_dir);
         let mut needed: Vec<MissingPack> = Vec::new();
-        for pack in manifest.packs_for_current_platform() {
+        for pack in platform_packs {
+            if ids.is_some_and(|ids| !ids.iter().any(|id| id == &pack.id)) {
+                continue;
+            }
+            // 强制重下只作用于尚未完成的选中项；换源也不能重下本轮已经成功的包。
+            if outcome.installed.iter().any(|(id, _)| id == &pack.id) {
+                continue;
+            }
             let meta = pack_meta(&pack.id);
             let title = if pack.title.is_empty() {
                 meta.title.to_string()
@@ -872,7 +1006,10 @@ pub async fn ensure_packs(
                     .map(|rec| {
                         !rec.legacy
                             && rec.version == pack.version
-                            && pack_dir(config_dir, &pack.id, &rec.version).is_dir()
+                            && pack_probe_ok(
+                                &pack_dir(config_dir, &pack.id, &rec.version),
+                                &pack.id,
+                            )
                     })
                     .unwrap_or(false);
                 if installed_same {
@@ -955,10 +1092,6 @@ pub async fn ensure_packs(
                 failed = Some(format!("清单里找不到 {}", want.id));
                 break 'packs;
             };
-            on_event(PackEvent::Downloading {
-                id: pack.id.clone(),
-            });
-
             let mut attempt = 0u32;
             // 清单 parse 时已校验过 url 合法性，这里再解析一次只为拿到 &Url 类型。
             // 不用 `expect`：那条不变量跨函数，将来清单校验放宽一点就是生产 panic，
@@ -971,16 +1104,23 @@ pub async fn ensure_packs(
                 break 'packs;
             };
             let bytes = loop {
+                on_event(PackEvent::Downloading {
+                    id: pack.id.clone(),
+                });
                 let mut win_start = std::time::Instant::now();
                 let mut win_bytes: u64 = 0;
                 let mut last_bps: f64 = 0.0;
                 let ev_id = pack.id.clone();
-                let r = download_pack(
+                let r = download_pack_events(
                     &client,
                     &pack_url,
                     &pack.sha256,
                     download_cap(pack.size),
-                    |chunk_len, downloaded, total| {
+                    |event| {
+                        let DownloadEvent::Progress(chunk_len, downloaded, total) = event else {
+                            on_event(PackEvent::Verifying { id: ev_id.clone() });
+                            return;
+                        };
                         // 下载速度：~250ms 窗口限流重算（与 update.rs 的进度口径一致，
                         // 快网速下 chunk 回调每秒几十次，逐次算瞬时速率会跳得难看）。
                         // 注意：这里刻意**不是** move 闭包——on_event 是 FnMut，
@@ -1033,6 +1173,9 @@ pub async fn ensure_packs(
                 }
             };
 
+            on_event(PackEvent::Installing {
+                id: pack.id.clone(),
+            });
             // install_pack 要解压 54MB + 冒烟 + rename，是数秒量级的磁盘重活：
             // 进 spawn_blocking，不钉占 tokio worker（同 runtime 上的其它 async
             // 命令——状态轮询、日志流——会被连带延迟数秒到数十秒）。
@@ -1103,7 +1246,7 @@ pub async fn ensure_packs(
     // force（设置页「重新下载组件」）不适用：那是明确要求联网拉新，必须报网络错。
     if !force && last_err.is_some() {
         let state = PacksState::load(config_dir);
-        if locally_ready(config_dir, legacy_resource_dir, &state) {
+        if locally_ready_selected(config_dir, legacy_resource_dir, &state, ids) {
             log::info!("[Resource] 清单源均不可达，但本地资源已就绪，按 uptodate 放行");
             on_event(PackEvent::Uptodate);
             return Ok(outcome);
@@ -1161,6 +1304,98 @@ mod tests {
         assert_eq!(m.packs.len(), 2);
         assert_eq!(m.pack("ecj").unwrap().version, "abc123def456");
         assert!(m.pack("nope").is_none());
+    }
+
+    fn write_pack_fixture(dir: &Path, id: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        let names: Vec<String> = match id {
+            PACK_JDTLS => {
+                let config = if cfg!(windows) {
+                    "config_win"
+                } else {
+                    "config_linux"
+                };
+                vec![
+                    format!("{config}/config.ini"),
+                    "plugins/org.eclipse.equinox.launcher_test.jar".into(),
+                    "plugins/org.eclipse.jdt.ls.core_test.jar".into(),
+                    "plugins/org.eclipse.osgi_test.jar".into(),
+                ]
+            }
+            PACK_ECJ => vec!["ecj-3.17.jar".into()],
+            PACK_SVNKIT => crate::svn_bridge::BRIDGE_JARS
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
+            PACK_CFR => vec!["cfr-0.152.jar".into()],
+            _ => unreachable!(),
+        };
+        for name in names {
+            let path = dir.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"fixture").unwrap();
+        }
+    }
+
+    #[test]
+    fn probes_require_files_for_every_component() {
+        let root = temp_dir("component-probes");
+        for meta in ALL_PACKS {
+            let dir = root.join(meta.id);
+            std::fs::create_dir_all(&dir).unwrap();
+            assert!(!pack_probe_ok(&dir, meta.id), "{} 空目录不应可用", meta.id);
+            write_pack_fixture(&dir, meta.id);
+            assert!(pack_probe_ok(&dir, meta.id));
+            let key = match meta.id {
+                PACK_JDTLS => "plugins/org.eclipse.equinox.launcher_test.jar",
+                PACK_ECJ => "ecj-3.17.jar",
+                PACK_SVNKIT => "ncsvn.jar",
+                PACK_CFR => "cfr-0.152.jar",
+                _ => unreachable!(),
+            };
+            std::fs::remove_file(dir.join(key)).unwrap();
+            assert!(
+                !pack_probe_ok(&dir, meta.id),
+                "{} 关键文件消失后不应可用",
+                meta.id
+            );
+        }
+        // CFR 的版本 jar 可位于归档子目录，文件名无需固定为 cfr.jar。
+        let nested = root.join(PACK_CFR).join("cfr");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("cfr-0.152.jar"), b"fixture").unwrap();
+        assert!(pack_probe_ok(&root.join(PACK_CFR), PACK_CFR));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn install_rejects_cfr_archive_without_jar() {
+        let dir = temp_dir("cfr-no-jar");
+        let config_dir = dir.join("config");
+        let final_dir = pack_dir(&config_dir, PACK_CFR, "v1");
+        std::fs::create_dir_all(&final_dir).unwrap();
+        let mut bytes = Vec::new();
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
+        let opts: zip::write::SimpleFileOptions = Default::default();
+        zip.start_file("README.txt", opts).unwrap();
+        std::io::Write::write_all(&mut zip, b"missing executable jar").unwrap();
+        zip.finish().unwrap();
+        let error = install_pack(&config_dir, PACK_CFR, "v1", &bytes).unwrap_err();
+        assert!(error.contains("关键文件缺失"));
+        assert!(!pack_probe_ok(&final_dir, PACK_CFR));
+        assert!(!final_dir.join("README.txt").exists());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn selection_rejects_empty_and_unknown_ids() {
+        assert!(validate_pack_selection(&[])
+            .unwrap_err()
+            .contains("至少选择"));
+        assert!(validate_pack_selection(&["unknown".to_string()])
+            .unwrap_err()
+            .contains("unknown"));
+        assert!(validate_pack_selection(&[PACK_ECJ.to_string(), PACK_CFR.to_string()]).is_ok());
     }
 
     #[test]
@@ -1269,8 +1504,10 @@ mod tests {
         assert_eq!(reloaded.packs.get(PACK_ECJ).unwrap().size, Some(1234));
         assert!(active_dir(&dir, PACK_ECJ).is_none(), "目录不存在不能算生效");
 
-        // 建目录后才生效
+        // 空目录不生效，关键文件在才生效。
         std::fs::create_dir_all(pack_dir(&dir, PACK_ECJ, "v1")).unwrap();
+        assert!(active_dir(&dir, PACK_ECJ).is_none());
+        write_pack_fixture(&pack_dir(&dir, PACK_ECJ, "v1"), PACK_ECJ);
         assert_eq!(
             active_dir(&dir, PACK_ECJ),
             Some(pack_dir(&dir, PACK_ECJ, "v1"))
@@ -1430,19 +1667,32 @@ mod tests {
             let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
             let opts: zip::write::SimpleFileOptions = Default::default();
             w.add_directory("plugins/", opts).unwrap();
-            w.start_file("plugins/a.jar", opts).unwrap();
+            w.start_file("plugins/org.eclipse.equinox.launcher_test.jar", opts)
+                .unwrap();
             std::io::Write::write_all(&mut w, b"jar").unwrap();
-            w.start_file("config_win/config.ini", opts).unwrap();
+            w.start_file("plugins/org.eclipse.jdt.ls.core_test.jar", opts)
+                .unwrap();
+            std::io::Write::write_all(&mut w, b"jar").unwrap();
+            w.start_file("plugins/org.eclipse.osgi_test.jar", opts)
+                .unwrap();
+            std::io::Write::write_all(&mut w, b"jar").unwrap();
+            let config = if cfg!(windows) {
+                "config_win"
+            } else {
+                "config_linux"
+            };
+            w.start_file(format!("{config}/config.ini"), opts).unwrap();
             std::io::Write::write_all(&mut w, b"ini").unwrap();
             w.finish().unwrap();
         }
         let dest = dir.join("out");
         std::fs::create_dir_all(&dest).unwrap();
         let n = extract_zip(&buf, &dest).unwrap();
-        assert_eq!(n, 2);
-        assert!(dest.join("plugins/a.jar").is_file());
-        assert!(dest.join("config_win/config.ini").is_file());
-        // jdtls 探针：plugins + config_win 都在才算完整
+        assert_eq!(n, 4);
+        assert!(dest
+            .join("plugins/org.eclipse.equinox.launcher_test.jar")
+            .is_file());
+        // jdtls 的启动配置和必需 bundle 都在才算完整。
         assert!(pack_probe_ok(&dest, PACK_JDTLS));
         // ecj 探针：缺 ecj-3.17.jar ⇒ 不完整
         assert!(!pack_probe_ok(&dest, PACK_ECJ));
@@ -1614,6 +1864,39 @@ mod tests {
             "有 legacy 可认领时不该报缺失: {kinds:?}"
         );
 
+        // 按需请求只能认领选中项，即使旧资源目录和源清单都有其他组件。
+        std::fs::create_dir_all(legacy_root.join(PACK_CFR)).unwrap();
+        std::fs::write(legacy_root.join(PACK_CFR).join("cfr.jar"), b"legacy-cfr").unwrap();
+        let selected_config = dir.join("selected-config");
+        std::fs::create_dir_all(&selected_config).unwrap();
+        let manifest = serde_json::json!({ "packs": [
+            { "id": PACK_ECJ, "version": "ecj-v1", "size": 1,
+                "sha256": "0".repeat(64), "url": "http://127.0.0.1:1/ecj.zip" },
+            { "id": PACK_CFR, "version": "cfr-v1", "size": 1,
+                "sha256": "0".repeat(64), "url": "http://127.0.0.1:1/cfr.zip" },
+        ] })
+        .to_string();
+        let selected_port = spawn_manifest_only_source(manifest);
+        std::env::set_var(
+            "APP_RESOURCES_ENDPOINT",
+            format!("http://127.0.0.1:{selected_port}/resources.json"),
+        );
+        let selected = ensure_selected_packs(
+            &selected_config,
+            Some(&legacy_root),
+            false,
+            Some(&[PACK_ECJ.to_string()]),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        std::env::remove_var("APP_RESOURCES_ENDPOINT");
+        assert_eq!(selected.adopted_legacy, vec![PACK_ECJ.to_string()]);
+        assert!(selected.installed.is_empty());
+        let selected_state = PacksState::load(&selected_config);
+        assert_eq!(selected_state.packs.len(), 1);
+        assert!(selected_state.packs.contains_key(PACK_ECJ));
+
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1689,10 +1972,22 @@ mod tests {
                 size: None,
             },
         );
-        std::fs::create_dir_all(pack_dir(&config_dir, PACK_ECJ, "v1")).unwrap();
+        write_pack_fixture(&pack_dir(&config_dir, PACK_ECJ, "v1"), PACK_ECJ);
         assert!(!locally_ready(&config_dir, None, &st));
+        assert!(locally_ready_selected(
+            &config_dir,
+            None,
+            &st,
+            Some(&[PACK_ECJ.to_string()]),
+        ));
+        assert!(!locally_ready_selected(
+            &config_dir,
+            None,
+            &st,
+            Some(&[PACK_ECJ.to_string(), PACK_CFR.to_string()]),
+        ));
 
-        // 除 ecj 外的包都装上 = 全齐（目录在即可——离线短路只确认资源找得到，探针在安装时已做过）。
+        // 除 ecj 外的包都装上，离线短路也要确认关键文件仍在。
         // 这里遍历 ALL_PACKS 而不是写死三个 id：以后再加包，忘了同步这条用例才会红。
         for meta in ALL_PACKS.iter().filter(|m| m.id != PACK_ECJ) {
             st.packs.insert(
@@ -1703,7 +1998,7 @@ mod tests {
                     size: None,
                 },
             );
-            std::fs::create_dir_all(pack_dir(&config_dir, meta.id, "v1")).unwrap();
+            write_pack_fixture(&pack_dir(&config_dir, meta.id, "v1"), meta.id);
         }
         assert!(locally_ready(&config_dir, None, &st));
 
@@ -1716,10 +2011,7 @@ mod tests {
         let mut st = PacksState::default();
         for meta in ALL_PACKS {
             let d = legacy_root.join(meta.id);
-            std::fs::create_dir_all(d.join("plugins")).unwrap();
-            std::fs::create_dir_all(d.join("config_win")).unwrap();
-            std::fs::write(d.join("ecj-3.17.jar"), b"x").unwrap();
-            std::fs::write(d.join("svnkit.jar"), b"x").unwrap();
+            write_pack_fixture(&d, meta.id);
             st.packs.insert(
                 meta.id.to_string(),
                 InstalledPack {
@@ -1734,6 +2026,8 @@ mod tests {
             !locally_ready(&config_dir, None, &st),
             "没有 legacy 目录可看时不能算就绪"
         );
+        std::fs::remove_file(legacy_root.join(PACK_CFR).join("cfr-0.152.jar")).unwrap();
+        assert!(!locally_ready(&config_dir, Some(&legacy_root), &st));
 
         std::fs::remove_dir_all(&dir).ok();
     }

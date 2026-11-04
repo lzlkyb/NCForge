@@ -371,7 +371,13 @@ pub(crate) fn bridge_for(
     engine: EngineKind,
     policy_id: &str,
 ) -> Result<Arc<EngineHandle>, String> {
-    let policy = state.db_policies.lock().map_err(|_| "数据库只读状态异常")?.entry(policy_id.to_string()).or_insert_with(|| Arc::new(std::sync::RwLock::new(false))).clone();
+    let policy = state
+        .db_policies
+        .lock()
+        .map_err(|_| "数据库只读状态异常")?
+        .entry(policy_id.to_string())
+        .or_insert_with(|| Arc::new(std::sync::RwLock::new(false)))
+        .clone();
     // Registration holds the same read lock as execution, so a toggle cannot miss a new handle.
     let _registration = policy.read().map_err(|_| "数据库只读状态异常")?;
     if engine == EngineKind::Rust {

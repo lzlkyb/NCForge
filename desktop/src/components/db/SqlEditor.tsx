@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { sqlModel, tabIdOfModel } from "../../lib/sqlModels";
 import { registerSqlProviders } from "../../lib/sqlProviders";
-import { isPlsql, splitStatements, statementAt } from "../../lib/sqlSplit";
+import { isPlsql, pickStatement, splitStatements } from "../../lib/sqlSplit";
+import { statementsOf } from "../../lib/sqlStmtCache";
 import { formatSql } from "../../lib/sqlFormat";
 import { setSqlDraft } from "../../lib/dbStore";
 
@@ -30,15 +31,14 @@ const HL_LIMIT = 200_000;
 function targetOf(editor: Editor, mode: "current" | "script"): RunStmt[] {
   const model = editor.getModel();
   if (!model) return [];
-  const text = model.getValue();
   const sel = editor.getSelection();
   if (mode === "current" && sel && !sel.isEmpty()) {
     const part = model.getValueInRange(sel);
     return splitStatements(part).map((s) => ({ text: s.text, startLine: sel.startLineNumber + s.startLine - 1 }));
   }
-  if (mode === "script") return splitStatements(text).map((s) => ({ text: s.text, startLine: s.startLine }));
+  if (mode === "script") return statementsOf(model).map((s) => ({ text: s.text, startLine: s.startLine }));
   const pos = editor.getPosition();
-  const s = pos ? statementAt(text, model.getOffsetAt(pos)) : null;
+  const s = pos ? pickStatement(statementsOf(model), model.getOffsetAt(pos)) : null;
   return s ? [{ text: s.text, startLine: s.startLine }] : [];
 }
 
@@ -54,7 +54,7 @@ function formatAt(editor: Editor) {
     src = model.getValueInRange(sel);
   } else {
     const pos = editor.getPosition();
-    const s = pos ? statementAt(model.getValue(), model.getOffsetAt(pos)) : null;
+    const s = pos ? pickStatement(statementsOf(model), model.getOffsetAt(pos)) : null;
     if (!s) return;
     const a = model.getPositionAt(s.start);
     const b = model.getPositionAt(s.start + s.text.length);
@@ -115,10 +115,11 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope }: {
         const model = editor.getModel();
         const pos = editor.getPosition();
         if (!model || !pos || model.getValueLength() > HL_LIMIT) return deco.clear();
-        const text = model.getValue();
-        const s = statementAt(text, model.getOffsetAt(pos));
+        // 切分结果按 model 版本缓存：光标移动不重切，内容变了才切一遍
+        const all = statementsOf(model);
+        const s = pickStatement(all, model.getOffsetAt(pos));
         // 只有一条语句时不高亮：整篇都是它，高亮反而是噪音
-        if (!s || splitStatements(text).length < 2) return deco.clear();
+        if (!s || all.length < 2) return deco.clear();
         deco.set([{
           range: new monaco.Range(s.startLine, 1, s.endLine, 1),
           options: { isWholeLine: true, className: "dbx-stmt-hl", linesDecorationsClassName: "dbx-stmt-gl" },

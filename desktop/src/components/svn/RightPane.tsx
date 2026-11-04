@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Icon } from "../ui/icon";
 import { DiffPane } from "./DiffPane";
@@ -9,10 +9,12 @@ import {
   friendlySvnError,
   isMarkable,
   keyOf,
-  svnBlame,
   svnDiff,
   type ChangeItem,
 } from "../../lib/svn";
+import { svnBlameSnapshot } from "../../lib/svnHistory";
+import { useWorkspaceRoot } from "../../lib/workspaceSession";
+import { workspaceEpoch } from "../../lib/workspaceEpoch";
 
 export type RightMode = "diff" | "log" | "blame";
 
@@ -33,6 +35,9 @@ export function RightPane({
   onMarkAndNext,
   onResolve,
   onLater,
+  picked,
+  onTogglePicked,
+  disabled = false,
 }: {
   file: ChangeItem | null;
   mode: RightMode;
@@ -44,24 +49,29 @@ export function RightPane({
   onMarkAndNext: () => void;
   onResolve: (choice: "mine" | "theirs" | "base") => void;
   onLater: () => void;
+  picked?: boolean;
+  onTogglePicked?: () => void;
+  disabled?: boolean;
 }) {
+  const root = useWorkspaceRoot(); const epoch = workspaceEpoch();
+  const [historyRevision, setHistoryRevision] = useState<number | undefined>();
   const path = file?.path ?? "";
   const isConflict = file?.letter === "C";
   /** 已删除（D）/ 缺失（!）：盘上没有内容可对比，也不该去拉 BASE。 */
-  const isGone = file?.letter === "D" || file?.letter === "!";
+  const isGone = file?.letter === "!";
   const needDiff = !!file && !isConflict && !file.isDir && !isGone;
 
   const diff = useQuery({
-    queryKey: ["svn-diff", path],
+    queryKey: ["svn-diff", root, epoch, path],
     queryFn: () => svnDiff(path),
-    enabled: needDiff && mode !== "log",
+    enabled: needDiff && mode === "diff",
     retry: false,
   });
 
   const blame = useQuery({
-    queryKey: ["svn-blame", path],
-    queryFn: () => svnBlame(path),
-    enabled: !!file && mode === "blame",
+    queryKey: ["svn-blame-snapshot", root, epoch, path],
+    queryFn: () => svnBlameSnapshot(path),
+    enabled: !!file && !file.isDir && mode === "blame",
     retry: false,
   });
 
@@ -69,9 +79,10 @@ export function RightPane({
   // DiffPane 的 hook 数已经贴着门禁上限（8），再塞一个监听就要拆组件了。
   useEffect(() => {
     // 目录、已删除、缺失、冲突都标记不了（见 `isMarkable`），不接这个快捷键
-    if (!file || !isMarkable(file)) return;
+    if (!file || !isMarkable(file) || disabled || mode !== "diff" || diff.isFetching) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!e.altKey || e.key !== "ArrowDown") return;
+      if (e.isComposing || !e.altKey || e.key !== "ArrowDown") return;
+      if ((e.target as HTMLElement)?.closest("input,textarea,select,[contenteditable='true']")) return;
       // 账号框这类模态打开时不抢：标记会连带把选中项跳走，而用户正忙着填密码
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       e.preventDefault();
@@ -79,7 +90,12 @@ export function RightPane({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [file, onMarkAndNext]);
+  }, [file, onMarkAndNext, disabled, mode, diff.isFetching]);
+
+  if (mode === "log" && root) {
+    const module = file?.rel.includes("/") ? `${root.replace(/[\\/]$/, "")}/${file.rel.split("/")[0]}` : undefined;
+    return <HistoryView key={`${root}:${epoch}:${path}:${historyRevision ?? ""}`} path={file?.path ?? root} title={file?.rel ?? "工作副本"} modulePath={module} initialRevision={historyRevision} onBack={() => { setHistoryRevision(undefined); onMode("diff"); }} />;
+  }
 
   if (!file) {
     return (
@@ -115,9 +131,6 @@ export function RightPane({
   // 历史放在目录 / 已删除之前：这两种状态也提供「看历史」，以前分支顺序把它们
   // 挡在外面，按钮点了没反应。目录的 log 由后端按路径查，已删除/缺失的条目
   // 仍在版本控制里（D / !），同样查得到。
-  if (mode === "log") {
-    return <HistoryView path={file.path} title={file.rel} onBack={() => onMode("diff")} />;
-  }
 
   if (file.isDir) {
     return (
@@ -177,13 +190,13 @@ export function RightPane({
     return (
       <BlameView
         title={file.rel}
-        text={diff.data?.workingText ?? ""}
-        lines={blame.data}
-        loading={blame.isLoading || diff.isLoading}
+        snapshot={blame.data}
+        loading={blame.isLoading}
         retrying={blame.isFetching}
         error={blame.error ? friendlySvnError(blame.error) : null}
         onShowDiff={() => onMode("diff")}
         onRetry={() => void blame.refetch()}
+        onShowRevision={revision => { setHistoryRevision(revision); onMode("log"); }}
       />
     );
   }
@@ -239,6 +252,9 @@ export function RightPane({
       onShowLog={() => onMode("log")}
       onShowBlame={() => onMode("blame")}
       onMarkAndNext={onMarkAndNext}
+      picked={picked}
+      onTogglePicked={onTogglePicked}
+      disabled={disabled || diff.isFetching}
     />
   );
 }

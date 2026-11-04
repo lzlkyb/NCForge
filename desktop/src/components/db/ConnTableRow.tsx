@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Icon } from "../ui/icon";
 import type { ColumnInfo, TableInfo } from "../../lib/dbApi";
 import { openTable } from "../../lib/dbActions";
-import { columnsOf, tabOf, useDb } from "../../lib/dbStore";
+import { columnsOf, useDbSelector } from "../../lib/dbStore";
 
 /** 表/视图一行：点开数据，箭头展开字段。 */
 export function TableRow({ connId, table, zh, fav, onToggleFav, onMenu }: {
@@ -14,8 +14,12 @@ export function TableRow({ connId, table, zh, fav, onToggleFav, onMenu }: {
   onMenu: (t: TableInfo, x: number, y: number) => void;
 }) {
   const [cols, setCols] = useState<ColumnInfo[] | "loading" | null>(null);
-  const cur = tabOf(useDb().active);
-  const active = cur?.kind === "table" && cur.connId === connId && cur.table === table.name.toUpperCase();
+  // 只订阅「自己是不是当前打开的那张表」这一个布尔值：几百行表各自订阅整库的话，
+  // 任何连接状态、查询结果的变化都会把整棵对象树重画一遍
+  const active = useDbSelector((s) => {
+    const cur = s.tabs.find((t) => t.id === s.active);
+    return cur?.kind === "table" && cur.connId === connId && cur.table === table.name.toUpperCase();
+  });
   const expand = () => {
     if (cols) return setCols(null);
     setCols("loading");

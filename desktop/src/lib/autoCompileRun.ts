@@ -16,6 +16,7 @@ import { compileFile, isCompileCancelled } from "./compile";
 import { isAutoCompileTarget, mergeFileResult } from "./autoCompile";
 import { requeueAutoCompile } from "./autoCompileQueue";
 import { toast } from "../components/ui/toast";
+import { missingResourceId } from "./resourceMissing";
 
 const sameFile = (a: string, b: string) =>
   a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
@@ -60,6 +61,7 @@ export async function runAutoCompile(paths: readonly string[]): Promise<void> {
     }
     // 保存到编译之间可能已经切了工作区：这份结果不能写进新工程的面板
     if ((getSession().root ?? null) !== root) return;
+    setSession({ compileResourceMissing: false });
     const before = getSession().compileResult;
     const beforeErrors = errorCountOf(before?.problems ?? [], targets);
     // 用 updater 拿最新值：这一轮跑着的时候手动编译可能刚写完结果
@@ -72,7 +74,11 @@ export async function runAutoCompile(paths: readonly string[]): Promise<void> {
   } catch (e) {
     if ((getSession().root ?? null) !== root) return;
     // 用户自己点「取消」不该说成「自动编译失败」
-    if (!isCompileCancelled(e)) toast(`自动编译失败：${e}`, "error");
+    if (!isCompileCancelled(e)) {
+      // 保存触发的错误也要留下载入口，但不能强行打开或切换用户的面板。
+      if (missingResourceId(e) === "ecj") setSession({ compileResourceMissing: true });
+      toast(`自动编译失败：${e}`, "error");
+    }
   } finally {
     setSession({ compiling: wasCompiling });
   }

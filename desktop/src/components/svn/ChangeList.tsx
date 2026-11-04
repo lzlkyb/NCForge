@@ -1,291 +1,42 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Icon } from "../ui/icon";
-import {
-  formatRevTime,
-  formatWhen,
-  keyOf,
-  letterTone,
-  reviewProgress,
-  sortChanges,
-  type ChangeItem,
-  type ChangesView,
-  type SortMode,
-} from "../../lib/svn";
+import { SvnFileRows } from "./SvnFileRows";
+import { keyOf, reviewProgress, type ChangeItem, type ChangesView } from "../../lib/svn";
+import { SVN_FILTERS, svnFilterCounts, svnVisibleGroups } from "../../lib/svnList";
+import { setSvnListPrefs, useSvnListPrefs } from "../../lib/svnListPrefs";
+import { clearSvnPicked, isSvnCommittable, selectSvnPaths } from "../../lib/svnDraft";
 
-type Filter = "all" | "changed" | "untracked" | "conflict";
-
-const FILTER_LABEL: Record<Filter, string> = {
-  all: "全部",
-  changed: "已改",
-  untracked: "未纳管",
-  conflict: "冲突",
-};
-
-function matchesFilter(item: ChangeItem, filter: Filter): boolean {
-  switch (filter) {
-    case "changed":
-      return item.letter !== "?" && item.letter !== "C";
-    case "untracked":
-      return item.letter === "?";
-    case "conflict":
-      return item.letter === "C";
-    default:
-      return true;
-  }
-}
-
-/**
- * 排序偏好。存 localStorage（本机界面习惯，不随配置迁移），默认按路径——
- * 与后端 `build_changes` 的初始顺序一致，第一次用不会有"列表突然变了"的感觉。
- */
-const SORT_KEY = "ncforge.vc.sort";
-
-function readSort(): SortMode {
-  try {
-    return localStorage.getItem(SORT_KEY) === "mtime" ? "mtime" : "path";
-  } catch {
-    return "path";
-  }
-}
-
-/**
- * 改动列表（左栏）：按模块分组 + 状态徽标 + 审查进度。
- *
- * 过滤与搜索都在本地做：一次 status 已经拿到全部条目（过滤后通常几十条），
- * 再往后端跑一趟只会让每敲一个字都等一次 IPC。
- */
-export function ChangeList({
-  view,
-  reviewed,
-  selected,
-  loading,
-  error,
-  onSelect,
-  showIgnored,
-  onToggleIgnored,
-}: {
-  view: ChangesView;
-  reviewed: Set<string>;
-  selected: string | null;
-  loading: boolean;
-  /** 扫描失败的原因。有值时绝不能显示「干净」——用户会以为改动丢了。 */
-  error: string | null;
-  onSelect: (item: ChangeItem) => void;
-  showIgnored: boolean;
-  onToggleIgnored: () => void;
-}) {
-  const [filter, setFilter] = useState<Filter>("all");
-  const [search, setSearch] = useState("");
-  const [closed, setClosed] = useState<Set<string>>(new Set());
-  const [sort, setSort] = useState<SortMode>(readSort);
-  useEffect(() => {
-    try {
-      localStorage.setItem(SORT_KEY, sort);
-    } catch {
-      // 隐私模式 / 存储满：本次会话仍生效，下次启动回默认
-    }
-  }, [sort]);
-
-  // 「显示全部」是纯本地开关：后端一次就把构建产物一起给了（带 ignored 标记），
-  // 按开关重扫一遍要等 7.6 秒，纯浪费。
-  const visible = useMemo(
-    () =>
-      view.groups
-        .map((g) => ({
-          module: g.module,
-          items: g.items.filter((it) => showIgnored || !it.ignored),
-        }))
-        .filter((g) => g.items.length > 0),
-    [view, showIgnored],
-  );
-
-  const counts = useMemo(() => {
-    const c: Record<Filter, number> = { all: 0, changed: 0, untracked: 0, conflict: 0 };
-    for (const g of visible) {
-      for (const it of g.items) {
-        c.all += 1;
-        for (const f of ["changed", "untracked", "conflict"] as Filter[]) {
-          if (matchesFilter(it, f)) c[f] += 1;
-        }
-      }
-    }
-    return c;
-  }, [visible]);
-
-  const groups = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const filtered = visible
-      .map((g) => ({
-        module: g.module,
-        items: g.items.filter(
-          (it) =>
-            matchesFilter(it, filter) &&
-            (q === "" || it.rel.toLowerCase().includes(q) || it.path.toLowerCase().includes(q)),
-        ),
-      }))
-      .filter((g) => g.items.length > 0);
-    // 排序纯本地：切一次排序不能再扫一遍后端（全量 status 要 7.6 秒）
-    return sortChanges(filtered, sort);
-  }, [visible, filter, search, sort]);
-
-  // 进度只按非构建产物算：把几百个 .class 算进分母，「已审 2 / 540」没有任何意义。
-  // 注意分母与「显示全部」开关无关——打开开关是为了看见它们，不是为了把它们列进审查清单。
-  const progress = useMemo(() => {
-    const counted = view.groups
-      .map((g) => ({ module: g.module, items: g.items.filter((it) => !it.ignored) }))
-      .filter((g) => g.items.length > 0);
-    return reviewProgress({ groups: counted, shown: 0, total: 0, ignored: 0 }, reviewed);
-  }, [view, reviewed]);
-
-  const toggleGroup = (module: string) => {
-    setClosed((prev) => {
-      const next = new Set(prev);
-      if (next.has(module)) next.delete(module);
-      else next.add(module);
-      return next;
-    });
-  };
-
-  return (
-    <aside className="vc-chg">
-      <div className="vc-chg-top">
-        <div className="vc-search" data-focus-container>
-          <Icon name="search" size={13} />
-          <input
-            aria-label="筛选版本控制文件"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="筛选文件，支持 / 分段"
-            spellCheck={false}
-          />
-        </div>
-        <div className="vc-chips">
-          {(Object.keys(FILTER_LABEL) as Filter[]).map((f) => (
-            <button
-              key={f}
-              type="button"
-              className="vc-chip"
-              data-on={filter === f || undefined}
-              onClick={() => setFilter(f)}
-            >
-              {FILTER_LABEL[f]}
-              <span className="n">{counts[f]}</span>
-            </button>
-          ))}
-          <span className="vc-sp" />
-          {(["path", "mtime"] as SortMode[]).map((m) => (
-            <button
-              key={m}
-              type="button"
-              className="vc-chip"
-              data-on={sort === m || undefined}
-              onClick={() => setSort(m)}
-              title={m === "path" ? "按文件路径排序（后端返回的顺序）" : "按本地文件修改时间排序，最近改的排在前面；只在本页排序，不会重新扫描工作副本"}
-            >
-              {m === "path" ? "按路径" : "按改动时间"}
-            </button>
-          ))}
-        </div>
+export function ChangeList({ view, reviewed, selected, loading, error, onSelect, showIgnored, onToggleIgnored, root = "", picked = new Set<string>(), busy = false, onOpenFile }: { view: ChangesView; reviewed: Set<string>; selected: string | null; loading: boolean; error: string | null; onSelect: (item: ChangeItem) => void; showIgnored: boolean; onToggleIgnored: () => void; root?: string; picked?: ReadonlySet<string>; busy?: boolean; onOpenFile?: (path: string) => void }) {
+  const prefs = useSvnListPrefs(root), list = useRef<HTMLDivElement>(null);
+  const initialScroll = useRef(prefs.scroll);
+  const groups = useMemo(() => svnVisibleGroups(view,prefs.filter,prefs.search,prefs.sort,showIgnored,reviewed,picked),[view,prefs,showIgnored,reviewed,picked]);
+  // 筛选片计数一趟算完并记住：输入搜索词、滚动等无关渲染不再把几千行过 7 遍
+  const counts = useMemo(() => svnFilterCounts(view.groups.flatMap(g => g.items).filter(it => showIgnored || !it.ignored),reviewed,picked),[view,showIgnored,reviewed,picked]);
+  const progress = reviewProgress({ ...view, groups: view.groups.map(g => ({ ...g, items: g.items.filter(it => !it.ignored) })) },reviewed);
+  useEffect(() => { const el = list.current; if (el) el.scrollTop = initialScroll.current; return () => { if (el) setSvnListPrefs(root,{scroll:el.scrollTop}); }; },[root]); // 滚动只在离开时落盘，避免每个滚动帧写本地存储。
+  return <aside className="vc-chg">
+    <div className="vc-chg-top">
+      <div className="vc-list-title"><b>本地改动</b><span>{view.shown} 个</span></div>
+      <div className="vc-search" data-focus-container>
+        <Icon name="search" size={13} /><input aria-label="筛选版本控制文件" value={prefs.search} onChange={e => setSvnListPrefs(root,{search:e.target.value})} placeholder="搜索文件、路径或模块" spellCheck={false} />
+        {prefs.search && <button type="button" aria-label="清除文件筛选" onClick={() => setSvnListPrefs(root,{search:""})}><Icon name="close" size={12} /></button>}
       </div>
-
-      <div className="vc-list">
-        {/* 首次扫描要 7 秒左右（12757 个条目）。这段时间显示「干净」是假话，
-            用户会以为改动丢了、转头去 Eclipse 里找。 */}
-        {loading && view.total === 0 && (
-          <div className="vc-empty">
-            <Icon name="spinner" size={22} className="animate-spin" />
-            <div>
-              正在扫描工作副本…
-              <br />
-              这个工程有上万个条目，首次要几秒
-            </div>
-          </div>
-        )}
-        {error && !loading && (
-          <div className="vc-empty" data-tone="bad">
-            <Icon name="alert" size={22} />
-            <div>
-              扫描失败，见上方提示
-              <br />
-              这<b>不表示</b>工作副本是干净的——先修好错误再刷新
-            </div>
-          </div>
-        )}
-        {!error && groups.length === 0 && !(loading && view.total === 0) && (
-          <div className="vc-empty">
-            <Icon name="check" size={22} />
-            <div>
-              {view.total === 0
-                ? "工作副本是干净的，没有本地改动"
-                : view.shown === 0 && view.ignored > 0
-                  ? `只有 ${view.ignored} 条构建产物，没有真实改动`
-                  : "当前筛选没有匹配的文件"}
-            </div>
-          </div>
-        )}
-        {groups.map((g) => {
-          const isClosed = closed.has(g.module);
-          return (
-            <div key={g.module}>
-              <button type="button" className="vc-grp" data-closed={isClosed || undefined} onClick={() => toggleGroup(g.module)}>
-                <Icon name="chevronDown" size={12} />
-                <span className="vc-grp-name" title={g.module}>{g.module}</span>
-                <span className="n">{g.items.length}</span>
-              </button>
-              {!isClosed &&
-                g.items.map((it) => {
-                  const name = it.rel.slice(it.rel.lastIndexOf("/") + 1);
-                  const dir = it.rel.includes("/") ? it.rel.slice(0, it.rel.lastIndexOf("/")) : "";
-                  const tone = letterTone(it.letter);
-                  return (
-                    <button
-                      key={it.path}
-                      type="button"
-                      className="vc-row"
-                      data-on={selected === it.path || undefined}
-                      data-reviewed={reviewed.has(keyOf(it.path)) || undefined}
-                      onClick={() => onSelect(it)}
-                      title={
-                        sort === "mtime" && it.mtimeMs
-                          ? `${it.rel}\n修改时间 ${formatRevTime(it.mtimeMs)}`
-                          : it.rel
-                      }
-                    >
-                      <span className="vc-badge" data-st={tone}>
-                        {it.letter}
-                      </span>
-                      <span className="vc-fn">{name}</span>
-                      {dir && <span className="vc-dir">{dir.split("/").slice(-2).join("/")}</span>}
-                      {/* 时间列只在按时间排序时出现：300px 的左栏放不下常驻第三列，
-                          而按路径排序时用户关心的也不是时间 */}
-                      {sort === "mtime" && <span className="vc-when">{formatWhen(it.mtimeMs)}</span>}
-                    </button>
-                  );
-                })}
-            </div>
-          );
-        })}
+      <div className="vc-chips" aria-label="改动筛选">
+        {(Object.keys(SVN_FILTERS) as (keyof typeof SVN_FILTERS)[]).map(f => <button key={f} type="button" className="vc-chip" aria-pressed={prefs.filter === f} data-on={prefs.filter === f || undefined} onClick={() => setSvnListPrefs(root,{filter:f})}>{SVN_FILTERS[f]}<span className="n">{counts[f]}</span></button>)}
       </div>
-
-      <div className="vc-chg-foot">
-        <div style={{ display: "flex", gap: 6 }}>
-          <span>审查进度</span>
-          <span className="vc-sp" />
-          <span>
-            已审 <b>{progress.done}</b> / {progress.total}
-          </span>
-        </div>
-        <div className="vc-prog">
-          <i style={{ width: `${progress.percent}%` }} />
-        </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <span>{showIgnored ? `含构建产物，共 ${view.total} 条` : `已隐藏 ${view.ignored} 条构建产物`}</span>
-          <span className="vc-sp" />
-          <button type="button" className="vc-chip" onClick={onToggleIgnored}>
-            {showIgnored ? "隐藏" : "显示全部"}
-          </button>
-        </div>
-      </div>
-    </aside>
-  );
+      <div className="vc-list-options"><label>排序 <select aria-label="改动排序" value={prefs.sort} onChange={e => setSvnListPrefs(root,{sort:e.target.value === "mtime" ? "mtime" : "path"})}><option value="path">文件路径</option><option value="mtime">最近改动</option></select></label><button type="button" className="vc-chip" disabled={busy} onClick={() => selectSvnPaths(root,view.groups.flatMap(g => g.items).filter(it => isSvnCommittable(it) && reviewed.has(keyOf(it.path))).map(it => it.path))}>只选已审</button></div>
+    </div>
+    <div className="vc-list" ref={list}>
+      {loading && !view.total && <div className="vc-empty" role="status"><Icon name="spinner" size={20} className="animate-spin" /><div>正在扫描工作副本…<br />完成后显示真实改动</div></div>}
+      {error && !loading && <div className="vc-alert" data-tone="warn"><Icon name="alert" size={14} /><span>{view.total ? "扫描失败，以下是上次结果。" : "尚未取得改动结果。"}请在上方重试。</span></div>}
+      {!error && !groups.length && !(loading && !view.total) && <div className="vc-empty"><Icon name="check" size={24} /><div>{!view.total ? "工作副本没有本地改动" : !view.shown && view.ignored ? "只有构建产物，没有源码改动" : "当前筛选没有匹配文件"}</div>{view.total > 0 && <button type="button" className="vc-btn" onClick={() => setSvnListPrefs(root,{search:"",filter:"all"})}>清除筛选</button>}</div>}
+      {groups.map(group => <SvnFileRows key={group.module} group={group} closed={prefs.closed.includes(group.module)} onToggleGroup={() => setSvnListPrefs(root,{closed:prefs.closed.includes(group.module) ? prefs.closed.filter(s => s !== group.module) : [...prefs.closed,group.module]})} selected={selected} reviewed={reviewed} picked={picked} root={root} busy={busy} sort={prefs.sort} onSelect={onSelect} onOpenFile={onOpenFile} />)}
+    </div>
+    <div className="vc-chg-foot">
+      <div className="vc-list-summary"><span>已审 {progress.done} / {progress.total}</span><span>本次已选 <b>{picked.size}</b></span></div>
+      <progress className="vc-review-progress" value={progress.done} max={progress.total || 1} aria-label="文件审查进度" />
+      <div className="vc-list-summary"><button type="button" className="vc-chip" onClick={() => setSvnListPrefs(root,{filter:"picked",search:""})}>查看已选</button><button type="button" className="vc-chip" disabled={busy || !picked.size} onClick={() => clearSvnPicked(root)}>清空选择</button></div>
+      <button type="button" className="vc-chip" aria-pressed={showIgnored} onClick={onToggleIgnored}>{showIgnored ? "隐藏构建产物" : `显示 ${view.ignored} 条构建产物`}</button>
+    </div>
+  </aside>;
 }

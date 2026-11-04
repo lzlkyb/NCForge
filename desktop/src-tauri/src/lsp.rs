@@ -319,10 +319,28 @@ pub fn build_initialize_params(
                 // snippetSupport 开：jdt.ls 的模板补全（sout / fori…）才会下发。
                 // 前端按 insertTextFormat 分派到 Monaco 的 InsertAsSnippet，
                 // 不开这个的话 `${1:...}` 只能当纯文本插入（或干脆没有模板补全）。
-                "completion": { "completionItem": { "snippetSupport": true } },
+                "completion": {
+                    "contextSupport": true,
+                    "completionItem": {
+                        "snippetSupport": true,
+                        "documentationFormat": ["markdown", "plaintext"],
+                        "deprecatedSupport": true,
+                        "tagSupport": { "valueSet": [1] },
+                        "preselectSupport": true,
+                        "insertReplaceSupport": true,
+                        "resolveSupport": { "properties": ["documentation", "detail", "additionalTextEdits"] }
+                    }
+                },
                 "hover": { "contentFormat": ["markdown", "plaintext"] },
                 "definition": { "linkSupport": false },
-                "signatureHelp": {},
+                "signatureHelp": {
+                    "contextSupport": true,
+                    "signatureInformation": {
+                        "documentationFormat": ["markdown", "plaintext"],
+                        "parameterInformation": { "labelOffsetSupport": true },
+                        "activeParameterSupport": true
+                    }
+                },
                 "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
                 "publishDiagnostics": {},
                 // 下面四项 jdt.ls 0.57 都有 handler，不声明它就不注册。

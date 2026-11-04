@@ -9,9 +9,10 @@
 //! APP_RESOURCES_ENDPOINT 注入，而 env 是进程级全局的——并行测试会互相抢。
 //! update_flow 用 APP_UPDATE_ENDPOINT（另一个变量），与本文件无交叉。
 
-use nc_forge::commands::ensure_resources_async;
+use nc_forge::commands::{ensure_resources_async, ensure_selected_resources_async};
 use nc_forge::resource_pack::{
-    external_root, pack_dir, InstalledPack, PacksState, PACK_ECJ, PACK_JDTLS, PACK_SVNKIT,
+    external_root, pack_dir, InstalledPack, PacksState, ALL_PACKS, PACK_CFR, PACK_ECJ, PACK_JDTLS,
+    PACK_SVNKIT,
 };
 use nc_forge::state::AppState;
 use std::sync::mpsc::{channel, Receiver};
@@ -77,10 +78,14 @@ fn spawn_local_source(manifest: String, packs: Vec<(String, Vec<u8>)>) -> u16 {
 
 /// 造一个合法 ecj 包 zip（含 ecj-3.17.jar，探针能过）。
 fn ecj_pack_zip() -> Vec<u8> {
+    jar_pack_zip("ecj-3.17.jar")
+}
+
+fn jar_pack_zip(name: &str) -> Vec<u8> {
     let mut buf = Vec::new();
     let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
     let opts: zip::write::SimpleFileOptions = Default::default();
-    w.start_file("ecj-3.17.jar", opts).unwrap();
+    w.start_file(name, opts).unwrap();
     std::io::Write::write_all(&mut w, b"fake-jar-bytes").unwrap();
     w.finish().unwrap();
     buf
@@ -142,6 +147,8 @@ fn watch(app: &tauri::App<tauri::test::MockRuntime>) -> Receiver<(String, String
         "resource:uptodate",
         "resource:downloading",
         "resource:progress",
+        "resource:verifying",
+        "resource:installing",
         "resource:installed",
         "resource:ready",
         "resource:error",
@@ -213,6 +220,9 @@ fn local_source_drives_install_failures_and_failover() {
         "resource:checking",
         "resource:available",
         "resource:downloading",
+        "resource:progress",
+        "resource:verifying",
+        "resource:installing",
         "resource:installed",
         "resource:ready",
     ] {
@@ -221,6 +231,22 @@ fn local_source_drives_install_failures_and_failover() {
             "事件序列缺少 {expected}: {seen:?}"
         );
     }
+    let phases = [
+        "resource:downloading",
+        "resource:progress",
+        "resource:verifying",
+        "resource:installing",
+        "resource:installed",
+        "resource:ready",
+    ];
+    let positions: Vec<_> = phases
+        .iter()
+        .map(|phase| seen.iter().position(|name| name == phase).unwrap())
+        .collect();
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "下载、校验、安装事件应按真实阶段排列: {seen:?}"
+    );
     // available 应带包清单与总大小
     let available = events
         .iter()
@@ -281,6 +307,11 @@ fn local_source_drives_install_failures_and_failover() {
         err.1.contains("\"signature\""),
         "错误码应为 signature: {}",
         err.1
+    );
+    assert!(names(&events2).contains(&"resource:verifying"));
+    assert!(
+        !names(&events2).contains(&"resource:installing"),
+        "完整性校验失败时不得开始安装"
     );
     let st2 = PacksState::load(&config_dir2);
     assert!(
@@ -401,18 +432,32 @@ fn local_source_drives_install_failures_and_failover() {
         st4.packs
     );
 
-    // ─── 场景 5：源全不可达 + 本地三包已就绪 ⇒ uptodate/ready，不报错 ───
+    // ─── 场景 5：源全不可达 + 本地全部资源已就绪 ⇒ uptodate/ready，不报错 ───
     // 离线笔记本冷启动的真实形态：清单一个源都拉不到，但资源一个都不缺。
     // 以前这里直接 resource:error——每次冷启动触发数分钟后台网络重试，
     // 而资源其实一直是齐的（M8-5 离线短路）。
     let (app5, config_dir5) = mock_app("offline");
-    // 预置三包：不走下载，直接按「安装后」的布局落盘并记 state
+    // 按产品清单预置全部包，避免新增组件后测试仍声称旧清单是全部已就绪。
     let prepopulate = |id: &str, version: &str| {
         let dir = pack_dir(&config_dir5, id, version);
         match id {
             PACK_JDTLS => {
                 std::fs::create_dir_all(dir.join("plugins")).unwrap();
-                std::fs::create_dir_all(dir.join("config_win")).unwrap();
+                let config = if cfg!(windows) {
+                    "config_win"
+                } else {
+                    "config_linux"
+                };
+                std::fs::create_dir_all(dir.join(config)).unwrap();
+                std::fs::write(dir.join(config).join("config.ini"), b"x").unwrap();
+                for prefix in [
+                    "org.eclipse.equinox.launcher_",
+                    "org.eclipse.jdt.ls.core_",
+                    "org.eclipse.osgi_",
+                ] {
+                    std::fs::write(dir.join("plugins").join(format!("{prefix}test.jar")), b"x")
+                        .unwrap();
+                }
             }
             PACK_ECJ => {
                 std::fs::create_dir_all(&dir).unwrap();
@@ -420,13 +465,19 @@ fn local_source_drives_install_failures_and_failover() {
             }
             PACK_SVNKIT => {
                 std::fs::create_dir_all(&dir).unwrap();
-                std::fs::write(dir.join("svnkit.jar"), b"x").unwrap();
+                for name in nc_forge::svn_bridge::BRIDGE_JARS {
+                    std::fs::write(dir.join(name), b"x").unwrap();
+                }
+            }
+            PACK_CFR => {
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("cfr.jar"), b"x").unwrap();
             }
             _ => unreachable!(),
         }
     };
     let mut st5 = PacksState::default();
-    for id in [PACK_JDTLS, PACK_ECJ, PACK_SVNKIT] {
+    for id in ALL_PACKS.iter().map(|pack| pack.id) {
         let ver = format!("pre-{id}");
         prepopulate(id, &ver);
         st5.packs.insert(
@@ -462,6 +513,194 @@ fn local_source_drives_install_failures_and_failover() {
         "离线但本地齐不该报错: {seen5:?}"
     );
 
+    // ─── 场景 6：完整清单中按需下载 ecj，其他组件不下载、不认领 ───
+    let (app6, config_dir6) = mock_app("selected");
+    let good = ecj_pack_zip();
+    let good_sha = sha256_hex(&good);
+    let good_version = good_sha[..12].to_string();
+    let selected_pack_port = spawn_local_source(
+        manifest_json(0, &good_version, &good_sha, good.len() as u64),
+        vec![("ecj.zip".to_string(), good.clone())],
+    );
+    let full_manifest = serde_json::json!({
+        "packs": ALL_PACKS.iter().map(|meta| serde_json::json!({
+            "id": meta.id,
+            "version": good_version,
+            "size": good.len(),
+            "sha256": good_sha,
+            "url": format!("http://127.0.0.1:{selected_pack_port}/packs/{}.zip", meta.id),
+        })).collect::<Vec<_>>()
+    })
+    .to_string();
+    let selected_manifest_port = spawn_local_source(full_manifest, vec![]);
+    std::env::set_var(
+        "APP_RESOURCES_ENDPOINT",
+        format!("http://127.0.0.1:{selected_manifest_port}/resources.json"),
+    );
+    let rx6 = watch(&app6);
+    ensure_selected_resources_async(
+        app6.handle().clone(),
+        false,
+        Some(vec![PACK_ECJ.to_string()]),
+    )
+    .unwrap();
+    let events6 = wait_until(&rx6, "resource:ready", Duration::from_secs(30));
+    assert!(names(&events6).contains(&"resource:ready"));
+    let st6 = PacksState::load(&config_dir6);
+    assert_eq!(st6.packs.len(), 1, "按需下载不得带上无关组件");
+    assert!(st6.packs.contains_key(PACK_ECJ));
+    let available6: serde_json::Value = serde_json::from_str(
+        &events6
+            .iter()
+            .find(|(name, _)| name == "resource:available")
+            .unwrap()
+            .1,
+    )
+    .unwrap();
+    assert_eq!(available6["packs"].as_array().unwrap().len(), 1);
+    assert_eq!(available6["packs"][0]["id"], PACK_ECJ);
+
+    // 强制重装也必须限制到选中项，其他已装版本及目录保持原样。
+    let mut st6 = st6;
+    let unrelated_dir = pack_dir(&config_dir6, PACK_JDTLS, "keep-jdtls");
+    std::fs::create_dir_all(&unrelated_dir).unwrap();
+    std::fs::write(unrelated_dir.join("keep.txt"), b"unchanged").unwrap();
+    st6.packs.insert(
+        PACK_JDTLS.to_string(),
+        InstalledPack {
+            version: "keep-jdtls".to_string(),
+            legacy: false,
+            size: Some(9),
+        },
+    );
+    st6.save(&config_dir6).unwrap();
+    let rx6force = watch(&app6);
+    ensure_selected_resources_async(
+        app6.handle().clone(),
+        true,
+        Some(vec![PACK_ECJ.to_string()]),
+    )
+    .unwrap();
+    let force_events = wait_until(&rx6force, "resource:ready", Duration::from_secs(30));
+    assert!(names(&force_events).contains(&"resource:installed"));
+    let after_force = PacksState::load(&config_dir6);
+    assert_eq!(after_force.packs.len(), 2);
+    assert_eq!(after_force.packs[PACK_JDTLS].version, "keep-jdtls");
+    assert_eq!(
+        std::fs::read(unrelated_dir.join("keep.txt")).unwrap(),
+        b"unchanged"
+    );
+
+    // 同版本目录还在但关键文件丢失，按需 ensure 必须修复，不能误发 uptodate。
+    let ecj_jar = pack_dir(&config_dir6, PACK_ECJ, &good_version).join("ecj-3.17.jar");
+    std::fs::remove_file(&ecj_jar).unwrap();
+    let rx6repair = watch(&app6);
+    ensure_selected_resources_async(
+        app6.handle().clone(),
+        false,
+        Some(vec![PACK_ECJ.to_string()]),
+    )
+    .unwrap();
+    let repair_events = wait_until(&rx6repair, "resource:ready", Duration::from_secs(30));
+    assert!(names(&repair_events).contains(&"resource:installed"));
+    assert!(ecj_jar.is_file());
+
+    // ─── 场景 7：离线时只判断所选组件，其他缺失组件不阻止继续使用 ───
+    std::env::set_var(
+        "APP_RESOURCES_ENDPOINT",
+        format!("http://127.0.0.1:{dead_port}/resources.json"),
+    );
+    let rx6offline = watch(&app6);
+    ensure_selected_resources_async(
+        app6.handle().clone(),
+        false,
+        Some(vec![PACK_ECJ.to_string()]),
+    )
+    .unwrap();
+    let offline_events = wait_until(&rx6offline, "resource:ready", Duration::from_secs(30));
+    assert!(names(&offline_events).contains(&"resource:uptodate"));
+    assert!(!names(&offline_events).contains(&"resource:error"));
+
+    // ─── 场景 8：清单缺少所选组件时明确失败，不能误报全部就绪 ───
+    let incomplete_port = spawn_local_source(
+        manifest_json(
+            selected_pack_port,
+            &good_version,
+            &good_sha,
+            good.len() as u64,
+        ),
+        vec![],
+    );
+    std::env::set_var(
+        "APP_RESOURCES_ENDPOINT",
+        format!("http://127.0.0.1:{incomplete_port}/resources.json"),
+    );
+    let rx6missing = watch(&app6);
+    ensure_selected_resources_async(
+        app6.handle().clone(),
+        false,
+        Some(vec![PACK_SVNKIT.to_string()]),
+    )
+    .unwrap();
+    let missing_events = wait_until(&rx6missing, "resource:error", Duration::from_secs(30));
+    let missing_error = missing_events
+        .iter()
+        .find(|(name, _)| name == "resource:error")
+        .unwrap();
+    assert!(missing_error.1.contains("svnkit"));
+    assert!(!names(&missing_events).contains(&"resource:downloading"));
+    assert!(!names(&missing_events).contains(&"resource:ready"));
+
+    // ─── 场景 9：强制下载换源后，已成功组件不得再次安装 ───
+    let cfr = jar_pack_zip("cfr.jar");
+    let cfr_sha = sha256_hex(&cfr);
+    let cfr_version = cfr_sha[..12].to_string();
+    let retry_pack_port = spawn_local_source(
+        String::new(),
+        vec![
+            ("ecj.zip".to_string(), good.clone()),
+            ("cfr.zip".to_string(), cfr.clone()),
+        ],
+    );
+    let pair_manifest = |ecj_version: &str, cfr_hash: &str| {
+        serde_json::json!({
+            "packs": [
+                { "id": PACK_ECJ, "version": ecj_version, "size": good.len(),
+                    "sha256": good_sha,
+                    "url": format!("http://127.0.0.1:{retry_pack_port}/packs/ecj.zip") },
+                { "id": PACK_CFR, "version": cfr_version, "size": cfr.len(),
+                    "sha256": cfr_hash,
+                    "url": format!("http://127.0.0.1:{retry_pack_port}/packs/cfr.zip") },
+            ]
+        })
+        .to_string()
+    };
+    let retry_first = spawn_local_source(pair_manifest(&good_version, &"0".repeat(64)), vec![]);
+    let retry_second = spawn_local_source(pair_manifest("other-mirror-version", &cfr_sha), vec![]);
+    std::env::set_var(
+        "APP_RESOURCES_ENDPOINT",
+        format!("http://127.0.0.1:{retry_first}/resources.json,http://127.0.0.1:{retry_second}/resources.json"),
+    );
+    let rx6retry = watch(&app6);
+    ensure_selected_resources_async(
+        app6.handle().clone(),
+        true,
+        Some(vec![PACK_ECJ.to_string(), PACK_CFR.to_string()]),
+    )
+    .unwrap();
+    let retry_events = wait_until(&rx6retry, "resource:ready", Duration::from_secs(30));
+    assert!(names(&retry_events).contains(&"resource:ready"));
+    let installed_ecj = retry_events
+        .iter()
+        .filter(|(name, payload)| {
+            name == "resource:installed" && payload.contains("\"id\":\"ecj\"")
+        })
+        .count();
+    assert_eq!(installed_ecj, 1, "换源不得重新安装本轮已成功组件");
+    let retry_state = PacksState::load(&config_dir6);
+    assert_eq!(retry_state.packs[PACK_ECJ].version, good_version);
+    assert_eq!(retry_state.packs[PACK_CFR].version, cfr_version);
+
     std::env::remove_var("APP_RESOURCES_ENDPOINT");
     for d in [
         &config_dir,
@@ -469,6 +708,7 @@ fn local_source_drives_install_failures_and_failover() {
         &config_dir3,
         &config_dir4,
         &config_dir5,
+        &config_dir6,
     ] {
         std::fs::remove_dir_all(d).ok();
     }

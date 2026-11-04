@@ -134,7 +134,7 @@ node scripts/rust-gate.mjs clippy --all-targets --no-default-features -- -D warn
 
 1. **同一时间只跑一个重任务**：`cargo test/build/clippy` 与 `vite` / Playwright 不并发；也不许同时开两个 cargo（争同一个 PDB 会报 `LNK1207`，删掉对应 `.pdb` 重跑）。
 2. **并发上限**：编译 **3 路**（`.cargo/config.toml` 的 `[build] jobs = 3`，wrapper 再用 `CARGO_BUILD_JOBS=3` 压一遍），测试 **2 线程**，Playwright 保持 headless。实测冷编最低可用内存：3 路 **3.0GB**、4 路 **2.0GB**——4 路已经贴线，别往上调。
-3. **开跑前看余量**：`powershell.exe -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize | Format-List"`；可用内存低于 **4GB** 先停，等后台任务收干净再跑。
+3. **开跑前看余量**：`powershell.exe -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize | Format-List"`；未测过的重任务以 **3GB** 可用内存起跑，低于 4GB 时设 `CARGO_BUILD_JOBS=1`，4GB 以上最多 3 路；测试仍为 2 线程，重任务仍串行。已有相同缓存、并发条件的成功采样时，以「该类任务实测最大内存消耗 + 至少 1GB 余量」决定能否运行，低于该余量暂缓。记录启动、最低及结束可用内存和任务结果，以实测决定后续阈值，不能把一次增量构建通过当成冷编译上限。
 4. **后台任务完成即收**，不堆积；长任务用后台运行 + 完成通知，不要盲等或轮询。
 5. 用 `| tail` 看输出时，退出码是 `tail` 的——判定构建成败必须看输出里的 `error:` / `test result:`，或单独取 `PIPESTATUS[0]`。
 

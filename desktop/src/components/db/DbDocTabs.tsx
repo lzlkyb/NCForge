@@ -2,7 +2,7 @@ import { useEffect, useRef, type KeyboardEvent } from "react";
 import { Icon } from "../ui/icon";
 import { DockRegion, useWorkbenchDock } from "../workspace/WorkbenchDock";
 import { newConsole, requestCloseTab } from "../../lib/dbActions";
-import { activateTab, connOf, getDb, useDb } from "../../lib/dbStore";
+import { activateTab, connOf, getDb, useDbConns, useDbSelector } from "../../lib/dbStore";
 import { ENV_LABEL } from "../../lib/dbApi";
 import { dbPanelId, dbTabId, dbTabLabel } from "../../lib/dbPendingSessions";
 
@@ -11,7 +11,9 @@ import { dbPanelId, dbTabId, dbTabLabel } from "../../lib/dbPendingSessions";
  * 标签底边是连接的环境色；中键关闭；「+」新开控制台。
  */
 export function DbDocTabs() {
-  const db = useDb();
+  // 标签栏要标签清单、活动标签和连接名（connOf 读的就是订阅的这份）；连接运行态变化不重画
+  useDbConns();
+  const db = { tabs: useDbSelector((s) => s.tabs), active: useDbSelector((s) => s.active) };
   const dock = useWorkbenchDock();
   const docOpen = dock?.documentOpen ?? true;
   const refs = useRef(new Map<string, HTMLDivElement>());

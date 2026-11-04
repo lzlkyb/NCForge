@@ -7,7 +7,7 @@ import type { ContextMenuItem } from "../workspace/ContextMenu";
 const mocks = vi.hoisted(() => ({ setMode: vi.fn(), switchConn: vi.fn() }));
 vi.mock("../../lib/dbTransactionMode", () => ({ setSqlTransactionMode: mocks.setMode }));
 vi.mock("../../lib/dbActions", () => ({ switchConn: mocks.switchConn }));
-vi.mock("../../lib/dbStore", () => ({ useDb: () => ({}), connOf: () => ({ name: "测试库", env: "test", autoCommit: false }), rtOf: () => ({ status: "connected" }) }));
+vi.mock("../../lib/dbStore", () => ({ useConnOf: () => ({ name: "测试库", env: "test", autoCommit: false }), useConnRt: () => ({ status: "connected" }), rtOf: () => ({ status: "connected" }) }));
 vi.mock("./ConnPicker", () => ({ ConnPicker: ({ disabled }: { disabled: boolean }) => <button disabled={disabled} aria-label="选择连接">测试库</button> }));
 vi.mock("../workspace/ContextMenu", () => ({ ContextMenu: ({ items }: { items: ContextMenuItem[] }) => <div>{items.map((item) => <button key={item.label} onClick={item.onSelect}>{item.label}</button>)}</div> }));
 import { SqlToolbar } from "./SqlToolbar";

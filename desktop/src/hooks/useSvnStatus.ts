@@ -1,6 +1,8 @@
 import { trackOperation, updateOperation } from "../lib/operations";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getSession, useWorkspaceRoot } from "../lib/workspaceSession";
+import { workspaceEpoch } from "../lib/workspaceEpoch";
 import {
   keyOf,
   onSvnScanProgress,
@@ -27,22 +29,25 @@ import {
  * 显示「已审」，用户据此跳过审查直接提交。因此每次扫描结果一到就清空覆盖层。
  */
 export function useSvnStatus() {
+  const root = useWorkspaceRoot() ?? "";
   const qc = useQueryClient();
   const [overrides, setOverrides] = useState<Map<string, boolean>>(() => new Map());
   /** 本次扫描已走过的条目数（桥每 300 条推一次）；null = 没有进行中的扫描。 */
   const [scanProgress, setScanProgress] = useState<number | null>(null);
 
   const info = useQuery({
-    queryKey: ["svn-info"],
+    queryKey: ["svn-info", root],
     queryFn: svnInfo,
     staleTime: 30_000,
     retry: false,
+    enabled: !!root,
   });
 
   const status = useQuery({
-    queryKey: ["svn-status"],
+    queryKey: ["svn-status", root],
     queryFn: svnStatus,
     retry: false,
+    enabled: !!root,
   });
 
   /** 每次新扫描结果落地就作废覆盖层，让后端标记成为唯一真相。 */
@@ -74,7 +79,10 @@ export function useSvnStatus() {
    * 以前只能再单独扫一遍（等于同一件事做两遍，多等 7.6 秒）。
    */
   const refresh = useCallback(async (): Promise<StatusResult | undefined> => {
-    const [, s] = await trackOperation({ key: "svn.scan", label: "重新扫描 SVN 改动", page: "svn", phase: "扫描工作副本条目" }, () => Promise.all([info.refetch(), status.refetch({ cancelRefetch: false })]), results => ({ state: results[1].error ? "failed" : "success", detail: results[1].error ? String(results[1].error) : `扫描 ${results[1].data?.scanned ?? 0} 个条目${results[1].data?.hasConflict ? "；存在冲突待处理" : ""}` }));
+    if (!root || getSession().root !== root) return undefined;
+    const epoch = workspaceEpoch();
+    const [, s] = await trackOperation({ key: `svn.scan:${root}`, label: "重新扫描 SVN 改动", scope: root, page: "svn", phase: "扫描工作副本条目" }, () => Promise.all([info.refetch(), status.refetch({ cancelRefetch: false })]), results => ({ state: results[1].error ? "failed" : "success", detail: results[1].error ? String(results[1].error) : `扫描 ${results[1].data?.scanned ?? 0} 个条目${results[1].data?.hasConflict ? "；存在冲突待处理" : ""}` }));
+    if (getSession().root !== root || workspaceEpoch() !== epoch) return undefined;
     // 更新 / 提交 / 撤销 / 解决冲突之后，右侧对比与追溯读的都是盘上的旧内容：
     // 不失效就会一直显示「改动前」的差异，用户以为动作没生效
     void qc.invalidateQueries({ queryKey: ["svn-diff"] });
@@ -83,8 +91,8 @@ export function useSvnStatus() {
     // 还会看到已经提交掉的文件，打出来的包必然对不上这次发布。
     void qc.invalidateQueries({ queryKey: ["patch-changes"] });
     void qc.invalidateQueries({ queryKey: ["patch-scan"] });
-    return s.data;
-  }, [status, info, qc]);
+    return s.error ? undefined : s.data;
+  }, [status, info, qc, root]);
 
   // 扫描进度：只在扫描进行中订阅（扫完就退订，桥那边不再推）。
   // 7.6 秒里界面只有一个转圈图标时，用户分不清「在跑」和「卡死」。
@@ -95,7 +103,7 @@ export function useSvnStatus() {
     }
     let gone = false;
     let un: (() => void) | undefined;
-    void onSvnScanProgress((n) => { setScanProgress(n); updateOperation("svn.scan", { progress: { done: n }, phase: "扫描工作副本条目" }); })
+    void onSvnScanProgress((n) => { if (getSession().root !== root) return; setScanProgress(n); updateOperation(`svn.scan:${root}`, { progress: { done: n }, phase: "扫描工作副本条目" }); })
       .then((fn) => {
         // 订阅回来之前扫描可能已经结束了，此时立刻退订，别把监听留在窗口上
         if (gone) fn();
@@ -108,7 +116,7 @@ export function useSvnStatus() {
       gone = true;
       un?.();
     };
-  }, [status.isFetching]);
+  }, [status.isFetching, root]);
 
   return { info, status, reviewed, mark, refresh, scanProgress };
 }

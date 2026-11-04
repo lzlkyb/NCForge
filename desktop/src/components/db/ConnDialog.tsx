@@ -3,7 +3,7 @@ import { Icon } from "../ui/icon";
 import { ConnManualForm } from "./ConnManualForm";
 import { PropImportPane } from "./ConnImportPanes";
 import { PropsFileImportPane } from "./PropsFileImportPane";
-import { closeConnDialog, connOf, openConnDialog, useDb } from "../../lib/dbStore";
+import { closeConnDialog, openConnDialog, useConnOf, useDbSelector } from "../../lib/dbStore";
 
 const TABS = [
   { key: "manual", label: "手动填写" },
@@ -17,8 +17,8 @@ const TABS = [
  * 编辑已有连接时只给「手动填写」一页；新建时三种来源任选。
  */
 export function ConnDialog() {
-  const { dialog } = useDb();
-  const editing = dialog?.connId ? connOf(dialog.connId) : null;
+  const dialog = useDbSelector((s) => s.dialog);
+  const editing = useConnOf(dialog?.connId ?? null);
   return (
     <Modal open={dialog !== null} onClose={closeConnDialog} className="modal-surface dbx-dlg" ariaLabel="数据库连接">
       {dialog && (

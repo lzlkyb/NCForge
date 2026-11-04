@@ -174,7 +174,8 @@ pub fn scan_project(root: &Path) -> Scan {
         scan_metainf(&root_meta, &module, UpmOrigin::Project, &mut out);
     }
     let Ok(rd) = std::fs::read_dir(root) else {
-        out.notes.push(format!("读不到工程目录：{}", root.display()));
+        out.notes
+            .push(format!("读不到工程目录：{}", root.display()));
         return out;
     };
     let mut dirs: Vec<PathBuf> = Vec::new();
@@ -209,7 +210,8 @@ pub fn scan_home(home: &Path) -> Scan {
     let mut out = Scan::default();
     let modules = home.join("modules");
     let Ok(rd) = std::fs::read_dir(&modules) else {
-        out.notes.push(format!("读不到模块目录：{}", modules.display()));
+        out.notes
+            .push(format!("读不到模块目录：{}", modules.display()));
         return out;
     };
     let mut dirs: Vec<PathBuf> = rd
@@ -232,8 +234,7 @@ pub fn scan_home(home: &Path) -> Scan {
 /// 扫一个 `META-INF` 目录下的全部 upm。
 fn scan_metainf(meta: &Path, module: &str, origin: UpmOrigin, out: &mut Scan) {
     let Ok(rd) = std::fs::read_dir(meta) else {
-        out.notes
-            .push(format!("读不到目录：{}", meta.display()));
+        out.notes.push(format!("读不到目录：{}", meta.display()));
         return;
     };
     let mut files: Vec<PathBuf> = rd
@@ -735,7 +736,10 @@ mod tests {
         assert_eq!(module.as_deref(), Some("aierreport"));
         assert_eq!(comps.len(), 1);
         let c = &comps[0];
-        assert_eq!(c.interface, "nc.itf.aier.report.service.IAierICReportService");
+        assert_eq!(
+            c.interface,
+            "nc.itf.aier.report.service.IAierICReportService"
+        );
         assert_eq!(
             c.implementation,
             "nc.impl.aier.report.service.AierICReportServiceImpl"
@@ -851,7 +855,11 @@ mod tests {
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].implementation, "ProjImpl", "工程侧必须排前面");
         assert_eq!(hits[0].origin, UpmOrigin::Project);
-        assert_eq!(idx.lookup("x")[0].implementation, "ProjImpl", "大小写不敏感");
+        assert_eq!(
+            idx.lookup("x")[0].implementation,
+            "ProjImpl",
+            "大小写不敏感"
+        );
         assert_eq!(idx.by_implementation("ProjImpl").len(), 1);
     }
 
@@ -1061,7 +1069,11 @@ mod live_tests {
         }
         let scan = scan_project(root);
         println!("工程侧 upm 文件 {} 个", scan.files.len());
-        assert_eq!(scan.files.len(), 29, "工程侧 upm 数量变了就说明工程结构动了");
+        assert_eq!(
+            scan.files.len(),
+            29,
+            "工程侧 upm 数量变了就说明工程结构动了"
+        );
         let idx = build(scan, Scan::default());
         println!("装配条目 {} 条", idx.entries.len());
         assert_eq!(idx.entries.len(), 39);
@@ -1126,7 +1138,10 @@ mod live_tests {
         );
         let idx = build(Scan::default(), scan);
         println!("产品侧装配条目 {} 条", idx.entries.len());
-        assert!(idx.entries.len() > idx.files.len(), "平均每个 upm 至少一条装配");
+        assert!(
+            idx.entries.len() > idx.files.len(),
+            "平均每个 upm 至少一条装配"
+        );
     }
 
     /// 产品侧全量诊断的底座：装配里指向的实现类，有多少在本机类索引里找不到。
@@ -1143,10 +1158,11 @@ mod live_tests {
             eprintln!("跳过：本机没有 {HOME}");
             return;
         }
-        let Some(cache) = std::env::var("APPDATA")
-            .ok()
-            .map(|p| PathBuf::from(p).join("com.aier.ncforge").join("class-index.bin"))
-        else {
+        let Some(cache) = std::env::var("APPDATA").ok().map(|p| {
+            PathBuf::from(p)
+                .join("com.aier.ncforge")
+                .join("class-index.bin")
+        }) else {
             eprintln!("跳过：没有 APPDATA");
             return;
         };

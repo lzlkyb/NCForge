@@ -147,18 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 commands::restart_watcher(app.handle(), &app_state, &root);
             }
 
-            // 资源包启动自检：缺包时置备（下载 jdtls / ecj / svnkit 到 config_dir/resources）。
-            // 异步 spawn，不阻塞启动；进度经 resource:* 事件推给前端。已在跑就忽略
-            // （命令层的单飞闸兜底，这里提前挡一次少发一个无用任务）。
-            // dev 构建默认跳过（resource_cmds.rs 的 dev_auto_skip）：开发期资源由
-            // `npm run jdtls:fetch` 拉进源码树，finder 回退用它；设
-            // APP_RESOURCES_ENDPOINT 可强制跑自检（联调下载流程）。
-            {
-                let bg = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    commands::ensure_resources_async(bg, false);
-                });
-            }
+            // 资源只在用户选择组件或功能提示中请求下载；启动读取本地状态，不联网置备。
 
             // 注入 AppHandle 供需要发桌面通知的代码用（feature 关闭时不注入）。
             // 中毒恢复而非 unwrap：一次 panic 不该让后续每个 setup 路径都连锁 panic。
@@ -275,6 +264,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::search_projects,
             commands::search_list_files,
             commands::search_replace,
+            commands::search_cancel,
             commands::local_history_capture,
             commands::local_history_list,
             commands::local_history_read,
@@ -314,6 +304,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::svn_diff,
             commands::svn_log,
             commands::svn_blame,
+            commands::svn_history,
+            commands::svn_revision_diff,
+            commands::svn_blame_snapshot,
+            commands::svn_conflict_snapshot,
+            commands::svn_resolve_working,
             commands::svn_commit,
             commands::svn_update,
             commands::svn_revert,

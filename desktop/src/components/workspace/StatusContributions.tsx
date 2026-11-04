@@ -31,14 +31,14 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
 
   const svnOn = activeTool === "svn";
   const svn = useQuery({
-    queryKey: ["svn-status"],
+    queryKey: ["svn-status", root ?? ""],
     queryFn: svnStatus,
     enabled: svnOn,
     staleTime: 30_000,
     retry: false,
   });
   const info = useQuery({
-    queryKey: ["svn-info"],
+    queryKey: ["svn-info", root ?? ""],
     queryFn: svnInfo,
     enabled: svnOn,
     staleTime: 30_000,

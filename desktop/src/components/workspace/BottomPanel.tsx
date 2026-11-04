@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import { Icon } from "../ui/icon";
+import { missingResourceId } from "../../lib/resourceMissing";
+import { ResourceDownloadButton } from "../resource/ResourceDownloadButton";
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { ProblemsView } from "./ProblemsView";
 import { CallHierarchyPanel } from "./CallHierarchyPanel";
@@ -60,6 +62,7 @@ interface Props {
  */
 export function BottomPanel({ root, tab, onTab, running, result, log: logProp, onOpenProblem, onOpenAt, inspect, onNextProblem, onPrevProblem, onCancel, onClose }: Props) {
   const sessionLog = useWorkspaceSelector((s) => s.compileLog);
+  const compileResourceMissing = useWorkspaceSelector((s) => s.compileResourceMissing);
   const log = logProp ?? sessionLog;
   // 标签上的小灯：调试停在某一行时，没开面板也能看到「现在断住了」
   const debug = useDebugSnapshot();
@@ -159,6 +162,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
       </div>
 
       <div className="wb-tabpanel" role="tabpanel" id="wb-panel-body" aria-labelledby={`wb-ptab-${tab}`}>
+      {(tab === "build" || tab === "problems") && !running && (compileResourceMissing || log.some(line => missingResourceId(line) === "ecj")) && <div className="wb-banner"><span>缺少 Java 编译器，下载完成后请重新编译。</span><ResourceDownloadButton id="ecj" /></div>}
       {tab === "problems" && (
         <ProblemsView
           problems={merged}

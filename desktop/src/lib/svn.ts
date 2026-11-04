@@ -1,6 +1,7 @@
 import { invoke, listen } from "./tauri";
 import { trackOperation } from "./operations";
 import { getSession } from "./workspaceSession";
+import { withSvnWriteLock, type SvnWriteHandle } from "./svnWrite";
 
 /**
  * 版本控制（SVN）的命令封装与纯函数。
@@ -146,13 +147,26 @@ export const svnDiff = (path: string) => trackOperation({ key: `svn.diff:${path.
 export const svnLog = (path: string, limit: number, from: number) =>
   trackOperation({ key: `svn.log:${path.toLowerCase()}:${from}`, label: "读取 SVN 历史", scope: path || "工作副本", page: "svn" }, () => invoke<LogEntry[]>("svn_log", { path, limit, from }));
 export const svnBlame = (path: string) => trackOperation({ key: `svn.blame:${path.toLowerCase()}`, label: "读取逐行追溯", scope: path, page: "svn", path }, () => invoke<BlameLine[]>("svn_blame", { path }));
-export const svnCommit = (paths: string[], message: string) =>
-  trackOperation({ key: `svn.commit:${getSession().root}:${JSON.stringify(paths)}:${message}`, label: "提交 SVN 改动", scope: getSession().root ?? "工作副本", page: "svn", phase: "提交选中文件，等待服务器确认" }, () => invoke<CommitResult>("svn_commit", { paths, message }), r => ({ state: "success", detail: `服务器已确认提交 r${r.revision}` }));
-export const svnUpdate = () => trackOperation({ key: `svn.update:${getSession().root}`, label: "更新 SVN 工作副本", scope: getSession().root ?? "工作副本", page: "svn", phase: "更新文件，等待服务器返回" }, () => invoke<UpdateResult>("svn_update"), r => ({ state: "success", detail: `已更新到 r${r.revision}；冲突由后续扫描确认` }));
-export const svnRevert = (paths: string[], recursive: boolean) =>
-  trackOperation({ key: `svn.revert:${JSON.stringify(paths)}:${recursive}`, label: "撤销 SVN 本地改动", page: "svn", phase: "备份后恢复 BASE" }, () => invoke<RevertResult>("svn_revert", { paths, recursive }), r => ({ state: "success", detail: `已撤销 ${r.count} 个；备份位于 ${r.backupDir}` }));
-export const svnResolve = (path: string, choice: "mine" | "theirs" | "base") =>
-  trackOperation({ key: `svn.resolve:${path}:${choice}`, label: "解决 SVN 冲突", scope: path, page: "svn", phase: "备份冲突文件并应用所选版本" }, () => invoke<ResolveResult>("svn_resolve", { path, choice }));
+export const svnCommit = (paths: string[], message: string, guard?: SvnWriteHandle) => {
+  const root = getSession().root ?? "";
+  const snapshot = { paths: [...paths], message };
+  return withSvnWriteLock(root, "commit", () => guard
+    ? invoke<CommitResult>("svn_commit", { ...snapshot, expectedRoot: root })
+    : trackOperation({ key: `svn.commit:${root}`, label: "提交 SVN 改动", scope: root, page: "svn", phase: "提交选中文件，等待服务器确认" }, () => invoke<CommitResult>("svn_commit", { ...snapshot, expectedRoot: root }), r => ({ state: "success", detail: `服务器已确认提交 r${r.revision}` })), guard);
+};
+export const svnUpdate = (guard?: SvnWriteHandle) => {
+  const root = getSession().root ?? "";
+  return withSvnWriteLock(root, "update", () => trackOperation({ key: `svn.update:${root}`, label: "更新 SVN 工作副本", scope: root, page: "svn", phase: "更新文件，等待服务器返回" }, () => invoke<UpdateResult>("svn_update", { expectedRoot: root }), r => ({ state: "success", detail: `已更新到 r${r.revision}；冲突由后续扫描确认` })), guard);
+};
+export const svnRevert = (paths: string[], recursive: boolean, guard?: SvnWriteHandle) => {
+  const root = getSession().root ?? "";
+  const snapshot = [...paths];
+  return withSvnWriteLock(root, "revert", () => trackOperation({ key: `svn.revert:${root}`, label: "撤销 SVN 本地改动", page: "svn", phase: "备份后恢复 BASE" }, () => invoke<RevertResult>("svn_revert", { paths: snapshot, recursive, expectedRoot: root }), r => ({ state: "success", detail: `已撤销 ${r.count} 个；备份位于 ${r.backupDir}` })), guard);
+};
+export const svnResolve = (path: string, choice: "mine" | "theirs" | "base", guard?: SvnWriteHandle) => {
+  const root = getSession().root ?? "";
+  return withSvnWriteLock(root, "resolve", () => trackOperation({ key: `svn.resolve:${root}:${path}`, label: "解决 SVN 冲突", scope: path, page: "svn", phase: "备份冲突文件并应用所选版本" }, () => invoke<ResolveResult>("svn_resolve", { path, choice, expectedRoot: root })), guard);
+};
 export const svnReviewMark = (path: string, revision: number, reviewed: boolean) =>
   invoke<void>("svn_review_mark", { path, revision, reviewed });
 export const svnReviewPrune = () => trackOperation({ key: "svn.review.prune", label: "清理失效审查标记", page: "svn" }, () => invoke<number>("svn_review_prune"));

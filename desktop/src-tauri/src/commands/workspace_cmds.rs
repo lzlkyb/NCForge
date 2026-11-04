@@ -144,8 +144,13 @@ pub async fn fs_list_dir(
     if roots.is_empty() {
         return Err("尚未选择工作区目录".to_string());
     }
-    let target = if path.is_empty() { roots[0].clone() } else { path };
-    let dir = crate::security::path::resolve_safe_path_async(target, roots, Vec::new(), true).await?;
+    let target = if path.is_empty() {
+        roots[0].clone()
+    } else {
+        path
+    };
+    let dir =
+        crate::security::path::resolve_safe_path_async(target, roots, Vec::new(), true).await?;
     tauri::async_runtime::spawn_blocking(move || workspace::list_dir(&dir))
         .await
         .map_err(|e| format!("后台任务失败: {e}"))?

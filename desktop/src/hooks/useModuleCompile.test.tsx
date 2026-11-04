@@ -35,6 +35,15 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); clearCompletedOperations(); });
 
 describe("手动编译任务", () => {
+  it("缺 ecj 保留下载引导，新一轮成功后清除", async () => {
+    mocks.all.mockRejectedValue(new Error("找不到 Java 编译器组件（ecj）"));
+    expect(await api.compileAll()).toBe(false);
+    expect(mocks.state.compileResourceMissing).toBe(true);
+    expect(String(mocks.state.compileLog)).toContain("找不到 Java 编译器组件");
+    mocks.all.mockResolvedValue(RESULT);
+    expect(await api.compileAll()).toBe(true);
+    expect(mocks.state.compileResourceMissing).toBe(false);
+  });
   it("同帧重复点击只启动一次编译", async () => {
     let done!: (value: typeof RESULT) => void;
     mocks.all.mockImplementation(() => new Promise(resolve => { done = resolve; }));

@@ -15,19 +15,20 @@
  * 3. 下载中的守卫：available/uptodate 不回退状态、ensure 不重入。
  * 4. total=null（源不给 Content-Length）走不确定态。
  */
-import { act } from "react";
+import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearCompletedOperations, getOperations } from "../lib/operations";
 import { ResourceProvider, useResources, type ResourceState } from "./ResourceContext";
 import { resourceFriendlyError, type PackStatusInfo } from "../lib/resource";
+import { openResourceDownloads, requestResourceDownload } from "../lib/resourceActions";
 
 // ─── 事件总线与 IPC 打桩 ────────────────────
 const h = vi.hoisted(() => {
   const handlers = new Map<string, ((payload: unknown) => void)[]>();
   /** 记录 listen/invoke 的调用顺序，用来断言「先注册监听、再拉快照」 */
   const order: string[] = [];
-  const state = { statusResult: [] as unknown[] };
+  const state = { statusResult: [] as unknown[], holdListen: null as Promise<void> | null, failListen: null as string | null };
   return {
     handlers,
     order,
@@ -44,6 +45,11 @@ vi.mock("../lib/tauri", () => ({
   invoke: h.invoke,
   listen: async (event: string, handler: (payload: unknown) => void) => {
     h.order.push(`listen:${event}`);
+    if (event === h.state.failListen) {
+      h.state.failListen = null;
+      throw new Error("监听暂时不可用");
+    }
+    if (event === "resource:checking" && h.state.holdListen) await h.state.holdListen;
     const list = h.handlers.get(event) ?? [];
     list.push(handler);
     h.handlers.set(event, list);
@@ -65,6 +71,8 @@ const EVENTS = [
   "resource:uptodate",
   "resource:downloading",
   "resource:progress",
+  "resource:verifying",
+  "resource:installing",
   "resource:installed",
   "resource:ready",
   "resource:error",
@@ -75,8 +83,10 @@ const EVENTS = [
 // ─── 渲染工具 ────────────────────────────
 
 let ctx: ResourceState | null = null;
-function Probe() {
+function Probe({ startOnMount = false }: { startOnMount?: boolean }) {
   ctx = useResources();
+  const ensure = ctx.ensure;
+  useEffect(() => { if (startOnMount) void ensure(false, ["ecj"]); }, [ensure, startOnMount]);
   return null;
 }
 
@@ -93,14 +103,14 @@ async function flush(times = 16) {
   for (let i = 0; i < times; i++) await act(async () => {});
 }
 
-async function mount() {
+async function mount(startOnMount = false) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
     root?.render(
       <ResourceProvider>
-        <Probe />
+        <Probe startOnMount={startOnMount} />
       </ResourceProvider>,
     );
   });
@@ -133,6 +143,8 @@ beforeEach(() => {
   h.order.length = 0;
   h.invoke.mockClear();
   h.state.statusResult = [];
+  h.state.holdListen = null;
+  h.state.failListen = null;
 });
 
 afterEach(async () => {
@@ -146,7 +158,47 @@ afterEach(async () => {
 // ─── 用例 ────────────────────────────────
 
 describe("启动自检的顺序与克制", () => {
-  it("8 个监听全部注册后才拉本地快照", async () => {
+  it("子组件先发起请求，也必须等全部监听注册完成", async () => {
+    let release!: () => void;
+    h.state.holdListen = new Promise<void>(resolve => { release = resolve; });
+    await mount(true);
+    expect(h.invoke).not.toHaveBeenCalledWith("resources_ensure", expect.anything());
+    await act(async () => { release(); });
+    await flush();
+    const ensureAt = h.order.indexOf("invoke:resources_ensure");
+    expect(ensureAt).toBeGreaterThan(h.order.indexOf("listen:resource:error"));
+    expect(h.invoke).toHaveBeenCalledWith("resources_ensure", { force: false, ids: ["ecj"] });
+  });
+
+  it("等待监听期间卸载会结束请求，晚到的注册不能再发起下载", async () => {
+    let release!: () => void;
+    h.state.holdListen = new Promise<void>(resolve => { release = resolve; });
+    await mount();
+    let request!: Promise<void>;
+    let settled = false;
+    act(() => { request = state().ensure(false, ["ecj"]).then(() => { settled = true; }); });
+    await act(async () => { root?.unmount(); });
+    root = null;
+    await flush();
+    expect(settled).toBe(true);
+    await act(async () => { release(); await request; });
+    await flush();
+    expect(h.invoke).not.toHaveBeenCalledWith("resources_ensure", expect.anything());
+    expect([...h.handlers.values()].flat()).toHaveLength(0);
+  });
+
+  it("监听初始化失败后重试会清理半成品并重新注册", async () => {
+    h.state.failListen = "resource:progress";
+    await mount();
+    expect(state().phase).toBe("error");
+    expect([...h.handlers.values()].flat()).toHaveLength(0);
+    await act(async () => { await state().ensure(false, ["ecj"]); });
+    await flush();
+    expect(h.invoke).toHaveBeenCalledWith("resources_ensure", { force: false, ids: ["ecj"] });
+    expect([...h.handlers.values()].map(list => list.length)).toEqual(EVENTS.map(() => 1));
+  });
+
+  it("10 个监听全部注册后才拉本地快照", async () => {
     await mount();
 
     expect([...h.handlers.keys()].sort()).toEqual([...EVENTS].sort());
@@ -158,7 +210,7 @@ describe("启动自检的顺序与克制", () => {
     expect(statusAt).toBeGreaterThan(lastListenAt);
   });
 
-  it("快照显示有缺失包时，自动发起一次 ensure(false)", async () => {
+  it("快照显示缺失包时也不自动联网或弹下载面板", async () => {
     h.state.statusResult = [
       { id: "jdtls", title: "Java 语言服务", notes: "补全与跳转", state: "missing", version: null, size: null },
       { id: "ecj", title: "Java 编译器", notes: "编译 NC 模块", state: "missing", version: null, size: null },
@@ -166,7 +218,8 @@ describe("启动自检的顺序与克制", () => {
     ];
     await mount();
 
-    expect(h.invoke).toHaveBeenCalledWith("resources_ensure", { force: false });
+    expect(h.invoke).not.toHaveBeenCalledWith("resources_ensure", expect.anything());
+    expect(state().panelOpen).toBe(false);
     expect(state().packs.map((p) => p.state)).toEqual(["missing", "missing", "missing"]);
   });
 
@@ -185,9 +238,9 @@ describe("启动自检的顺序与克制", () => {
       { id: "ecj", title: "Java 编译器", notes: "编译 NC 模块", state: "installed", version: "0f1e2d3c4b5a", size: 6_700_000 },
       { id: "svnkit", title: "SVN 客户端", notes: "检出与更新", state: "missing", version: null, size: null },
     ];
-    // 注意：这个快照里有 missing（svnkit）→ 应该发起。legacy 不阻断，missing 才触发。
+    // 已安装、旧版沿用与缺失可以共存，首启不会发起网络请求。
     await mount();
-    expect(h.invoke).toHaveBeenCalledWith("resources_ensure", { force: false });
+    expect(h.invoke).not.toHaveBeenCalledWith("resources_ensure", expect.anything());
   });
 });
 
@@ -329,7 +382,7 @@ describe("下载中的守卫与重入防护", () => {
     h.invoke.mockClear();
 
     await act(async () => {
-      void state().ensure(false);
+      void state().ensure(false, ["ecj"]);
     });
     expect(h.invoke).not.toHaveBeenCalledWith("resources_ensure", expect.anything());
   });
@@ -341,9 +394,9 @@ describe("下载中的守卫与重入防护", () => {
     h.invoke.mockClear();
 
     await act(async () => {
-      void state().ensure(false);
+      void state().ensure(false, ["ecj"]);
     });
-    expect(h.invoke).toHaveBeenCalledWith("resources_ensure", { force: false });
+    expect(h.invoke).toHaveBeenCalledWith("resources_ensure", { force: false, ids: ["ecj"] });
   });
 });
 
@@ -352,6 +405,7 @@ describe("对话框抑制", () => {
     await mount();
     await emit("resource:available", { packs: missingPacks(), totalBytes: 63_800_000 });
 
+    await act(async () => state().showDownloads());
     expect(state().missingDismissed).toBe(false);
     await act(async () => {
       state().dismissMissing();
@@ -414,5 +468,163 @@ describe("组件置备任务", () => {
     expect(getOperations().find(o => o.key === "resources.ensure")).toMatchObject({ state: "failed", detail: "下载失败；已有 1 个组件完成，其余可重试" });
     await act(async () => state().ensure(true));
     expect(h.invoke.mock.calls.filter(c => c[0] === "resources_ensure")).toHaveLength(2);
+  });
+});
+
+describe("按需下载与可恢复面板", () => {
+  it("单个组件只传选中 IDs，同帧连点只发一次", async () => {
+    h.state.statusResult = installedPacks().map(p => ({ ...p, state: "missing", version: null }));
+    await mount();
+    await act(async () => { await Promise.all([state().ensure(false, ["ecj", "ecj"]), state().ensure(false, ["ecj"])]); });
+    expect(h.invoke.mock.calls.filter(c => c[0] === "resources_ensure")).toEqual([["resources_ensure", { force: false, ids: ["ecj"] }]]);
+    expect(state().requestedIds).toEqual(["ecj"]);
+    expect(state().panelOpen).toBe(true);
+    expect(state().busy).toBe(true);
+  });
+
+  it("无参数下载只请求本地缺失组件", async () => {
+    h.state.statusResult = installedPacks().map(p => p.id === "svnkit" ? { ...p, state: "missing", version: null } : p);
+    await mount();
+    await act(async () => state().ensure());
+    expect(h.invoke).toHaveBeenCalledWith("resources_ensure", { force: false, ids: ["svnkit"] });
+  });
+
+  it("功能页面事件直接请求单包，关闭与重开不会重新下载", async () => {
+    await mount();
+    await act(async () => requestResourceDownload("cfr"));
+    expect(h.invoke).toHaveBeenCalledWith("resources_ensure", { force: false, ids: ["cfr"] });
+    await act(async () => state().dismissMissing());
+    expect(state().panelOpen).toBe(false);
+    await act(async () => openResourceDownloads());
+    expect(state().panelOpen).toBe(true);
+    expect(h.invoke.mock.calls.filter(c => c[0] === "resources_ensure")).toHaveLength(1);
+  });
+
+  it("unknown IDs 不发送后台下载请求", async () => {
+    await mount();
+    await act(async () => state().ensure(false, ["unknown"]));
+    expect(state().phase).toBe("error");
+    expect(h.invoke).not.toHaveBeenCalledWith("resources_ensure", expect.anything());
+  });
+
+  it("下载到 100% 后仍区分校验/安装，忽略过时的检查事件", async () => {
+    await mount();
+    await act(async () => state().ensure(false, ["ecj"]));
+    await emit("resource:downloading", { id: "ecj" });
+    await emit("resource:progress", { id: "ecj", downloaded: 100, total: 100, bytesPerSec: 50 });
+    await emit("resource:verifying", { id: "ecj" });
+    expect(state().phase).toBe("verifying");
+    expect(state().busy).toBe(true);
+    expect(state().bytesPerSec).toBe(0);
+    await emit("resource:checking");
+    await emit("resource:available", { packs: missingPacks(), totalBytes: 100 });
+    await emit("resource:uptodate");
+    expect(state().phase).toBe("verifying");
+    await emit("resource:installing", { id: "ecj" });
+    expect(state().phase).toBe("installing");
+    expect(getOperations().find(o => o.key === "resources.ensure")?.state).toBe("running");
+  });
+
+  it("uptodate 尚未 ready 时仍保持单飞锁", async () => {
+    await mount();
+    await act(async () => state().ensure(false, ["ecj"]));
+    await emit("resource:uptodate");
+    await act(async () => state().ensure(false, ["cfr"]));
+    expect(h.invoke.mock.calls.filter(c => c[0] === "resources_ensure")).toHaveLength(1);
+    expect(getOperations().find(o => o.key === "resources.ensure")?.state).toBe("running");
+    await emit("resource:ready", { installed: [], adoptedLegacy: false });
+    expect(state().busy).toBe(false);
+  });
+
+  it("单包 installed 立即更新快照，失败后重试只下载原请求剩余项", async () => {
+    h.state.statusResult = installedPacks().map(p => ({ ...p, state: "missing", version: null }));
+    await mount();
+    await act(async () => state().ensure(false, ["jdtls", "ecj"]));
+    await emit("resource:available", { packs: missingPacks().slice(0, 2), totalBytes: 100 });
+    await emit("resource:installed", { id: "jdtls", version: "v2" });
+    expect(state().packs.find(p => p.id === "jdtls")).toMatchObject({ state: "installed", version: "v2" });
+    await emit("resource:error", { message: "断网", code: "network" });
+    expect(state().partialInstalled).toEqual([{ id: "jdtls", version: "v2" }]);
+    await act(async () => state().retry());
+    expect(h.invoke).toHaveBeenLastCalledWith("resources_ensure", { force: false, ids: ["ecj"] });
+    expect(state().requestedIds).toEqual(["jdtls", "ecj"]);
+    expect(state().batch.map(p => p.id)).toEqual(["jdtls", "ecj"]);
+    await emit("resource:available", { packs: [missingPacks()[1]], totalBytes: 100 });
+    await emit("resource:ready", { installed: [{ id: "ecj", version: "v3" }], adoptedLegacy: false });
+    expect(state().lastInstalled).toEqual([{ id: "jdtls", version: "v2" }, { id: "ecj", version: "v3" }]);
+    expect(state().batch.map(p => p.id)).toEqual(["jdtls", "ecj"]);
+    expect(state().panelOpen).toBe(true);
+  });
+
+  it("force 重下失败重试仍强制修复原包，不扩展到其他组件", async () => {
+    h.state.statusResult = installedPacks();
+    await mount();
+    await act(async () => state().ensure(true, ["jdtls", "ecj"]));
+    await emit("resource:installed", { id: "jdtls", version: "v2" });
+    await emit("resource:error", { message: "断网", code: "network" });
+    await act(async () => state().retry(["ecj"]));
+    expect(h.invoke).toHaveBeenLastCalledWith("resources_ensure", { force: true, ids: ["ecj"] });
+    expect(state().lastInstalled).toEqual([{ id: "jdtls", version: "v2" }]);
+  });
+
+  it("单项重试完成不会把原批次其他失败组件标记为成功", async () => {
+    await mount();
+    await act(async () => state().ensure(true, ["jdtls", "ecj", "cfr"]));
+    await emit("resource:installed", { id: "jdtls", version: "v2" });
+    await emit("resource:error", { message: "断网", code: "network" });
+    await act(async () => state().retry(["ecj"]));
+    await emit("resource:ready", { installed: [{ id: "ecj", version: "v3" }], adoptedLegacy: false });
+    expect(state().lastInstalled.map(p => p.id)).toEqual(["jdtls", "ecj"]);
+    expect(state().requestedIds).toEqual(["jdtls", "ecj", "cfr"]);
+    await act(async () => state().retry());
+    expect(h.invoke).toHaveBeenLastCalledWith("resources_ensure", { force: true, ids: ["cfr"] });
+  });
+});
+
+describe("本地快照与安装事件竞态", () => {
+  it("卸载后返回的快照不能更新已结束的读取", async () => {
+    h.state.statusResult = installedPacks();
+    await mount();
+    let resolveSnapshot!: (packs: PackStatusInfo[]) => void;
+    h.invoke.mockImplementationOnce(() => new Promise<PackStatusInfo[]>(resolve => { resolveSnapshot = resolve; }));
+    let reading!: Promise<PackStatusInfo[] | null>;
+    await act(async () => { reading = state().refreshStatus(); });
+    await act(async () => { root?.unmount(); });
+    root = null;
+    const stale = installedPacks().map(p => ({ ...p, state: "missing" as const, version: null }));
+    let returned: PackStatusInfo[] | null = null;
+    await act(async () => { resolveSnapshot(stale); returned = await reading; });
+    expect(returned).toEqual(installedPacks());
+  });
+
+  it("读取开始后 installed 到达，晚返回的旧快照不能覆盖新安装状态", async () => {
+    const stale = installedPacks().map(p => ({ ...p, state: "missing" as const, version: null }));
+    h.state.statusResult = stale;
+    await mount();
+    let resolveSnapshot!: (packs: PackStatusInfo[]) => void;
+    h.invoke.mockImplementationOnce(() => new Promise<PackStatusInfo[]>(resolve => { resolveSnapshot = resolve; }));
+    let reading!: Promise<PackStatusInfo[] | null>;
+    await act(async () => { reading = state().refreshStatus(); });
+    await emit("resource:installed", { id: "ecj", version: "new-version" });
+    let returned: PackStatusInfo[] | null = null;
+    await act(async () => { resolveSnapshot(stale); returned = await reading; });
+    expect(state().packs.find(p => p.id === "ecj")).toMatchObject({ state: "installed", version: "new-version" });
+    expect(returned).toEqual(state().packs);
+  });
+
+  it("并行读取倒序返回时保留较新请求快照", async () => {
+    const stale = installedPacks().map(p => ({ ...p, state: "missing" as const, version: null }));
+    h.state.statusResult = stale;
+    await mount();
+    let resolveOlder!: (packs: PackStatusInfo[]) => void;
+    let resolveNewer!: (packs: PackStatusInfo[]) => void;
+    h.invoke.mockImplementationOnce(() => new Promise<PackStatusInfo[]>(resolve => { resolveOlder = resolve; }));
+    h.invoke.mockImplementationOnce(() => new Promise<PackStatusInfo[]>(resolve => { resolveNewer = resolve; }));
+    let older!: Promise<PackStatusInfo[] | null>;
+    let newer!: Promise<PackStatusInfo[] | null>;
+    await act(async () => { older = state().refreshStatus(); newer = state().refreshStatus(); });
+    await act(async () => { resolveNewer(installedPacks()); await newer; });
+    await act(async () => { resolveOlder(stale); await older; });
+    expect(state().packs).toEqual(installedPacks());
   });
 });

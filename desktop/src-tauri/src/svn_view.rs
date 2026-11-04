@@ -175,7 +175,9 @@ pub fn relative(root: &Path, path: &Path) -> String {
 fn fs_modified_ms(path: &str) -> Option<i64> {
     let md = std::fs::metadata(path).ok()?;
     let m = md.modified().ok()?;
-    m.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as i64)
+    m.duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as i64)
 }
 
 /// 原始状态 → 界面视图：拼字段、打忽略标记、按模块分组（模块按条目数降序，条目按路径升序）。
@@ -352,7 +354,11 @@ mod tests {
         // 0 会被前端当成 1970 年排在最后，但「读不到」和「很旧」是两件事：
         // 删除/缺失的条目就该排最后，用一个不存在的值排序会把它排到最前面。
         let root = PathBuf::from("C:").join("ws");
-        let raw = vec![raw(&root.join("pu").join("A.java").to_string_lossy(), "modified", false)];
+        let raw = vec![raw(
+            &root.join("pu").join("A.java").to_string_lossy(),
+            "modified",
+            false,
+        )];
         let v = build_changes(&root, &raw);
         assert_eq!(v.groups[0].items[0].mtime_ms, None);
     }
@@ -394,7 +400,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64;
-        assert!(ms > now - 600_000 && ms <= now, "mtime 应在刚刚：{ms} vs {now}");
+        assert!(
+            ms > now - 600_000 && ms <= now,
+            "mtime 应在刚刚：{ms} vs {now}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -149,7 +149,10 @@ fn stats_of(index: &UpmIndex) -> UpmStats {
     let mut interfaces: Vec<&str> = Vec::new();
     let mut modules: Vec<&str> = Vec::new();
     for e in &index.entries {
-        if !interfaces.iter().any(|i| i.eq_ignore_ascii_case(&e.interface)) {
+        if !interfaces
+            .iter()
+            .any(|i| i.eq_ignore_ascii_case(&e.interface))
+        {
             interfaces.push(&e.interface);
         }
         if !modules.iter().any(|m| m.eq_ignore_ascii_case(&e.module)) {

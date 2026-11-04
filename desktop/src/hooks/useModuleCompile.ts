@@ -27,6 +27,7 @@ import {
 import { beginOperation } from "../lib/operations";
 import { compileCancel } from "../lib/compile";
 import { toast } from "../components/ui/toast";
+import { missingResourceId } from "../lib/resourceMissing";
 
 /** 日志攒多久刷一次：逐行 setSession 会让整个会话订阅者（含 Monaco 外的面板）每行重渲染。 */
 const LOG_FLUSH_MS = 80;
@@ -119,7 +120,7 @@ export function useModuleCompile() {
     if (unsavedHint && tabs.some((t) => t.dirty || t.eolChanged)) {
       toast("有未保存的文件，编译读取的是磁盘版本，请先保存（Ctrl+S）", "warning");
     }
-    setSession({ panelOpen: true, panelTab: "build" });
+    setSession({ panelOpen: true, panelTab: "build", compileResourceMissing: false });
     setCompiling(true);
     if (!mergeFiles) setCompileResult(null);
     flushLog.current();
@@ -150,6 +151,7 @@ export function useModuleCompile() {
         setCompileLog((l) => [...l, "编译已取消"]);
         toast("已取消编译", "info");
       } else {
+        setSession({ compileResourceMissing: missingResourceId(e) === "ecj" });
         setCompileLog((l) => [...l, `编译失败：${e}`]);
         toast(`编译失败：${e}`, "error");
       }

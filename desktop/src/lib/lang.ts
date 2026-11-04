@@ -70,6 +70,9 @@ const STOPPED: LangStatus = { state: "stopped", module: null, message: "", sourc
 
 let prefs = { enabled: true, autoStart: true };
 let view: LangView = { ...STOPPED, settled: false, ...prefs };
+let capabilityEpoch = 0;
+/** 服务重启时即使工作区和文件未变，旧 JDT 候选的 request id 也已经失效。 */
+export const langCapabilityEpoch = (): number => capabilityEpoch;
 let settleTimer: ReturnType<typeof setTimeout> | undefined;
 /** 服务进入 ready 的时刻。 */
 let readyAt = 0;
@@ -144,16 +147,110 @@ type Model = ReturnType<typeof monaco.editor.createModel>;
 interface Doc {
   model: Model;
   version: number;
+  syncedVersion: number;
+  opened: boolean;
+  pending: Promise<void>;
   timer: ReturnType<typeof setTimeout> | undefined;
   sub: { dispose(): void };
+  /**
+   * 从 `editsBase` 版本起累积的局部改动（LSP 增量格式）。`null` = 这段时间里有说不清的改动
+   * （整篇替换、事件没带明细、改动太碎），下一次必须发全文。
+   */
+  edits: LspChange[] | null;
+  editsBase: number;
+}
+
+/** LSP `TextDocumentContentChangeEvent` 的增量形态。行列从 0 起，列按 UTF-16（与 Monaco 一致）。 */
+interface LspChange {
+  range: { start: { line: number; character: number }; end: { line: number; character: number } };
+  rangeLength: number;
+  text: string;
+}
+/** 一次同步里最多带多少条增量；再碎就不如发一次全文。 */
+const MAX_INCREMENTAL_EDITS = 200;
+
+type ContentEvent = { isFlush?: boolean; changes?: readonly { range: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number }; rangeLength: number; text: string }[] };
+
+/**
+ * 把一次 Monaco 内容事件并进文档的待发增量。
+ *
+ * 顺序直接沿用 Monaco 的 `changes`：VS Code 扩展宿主也是原样转成 LSP 增量的，
+ * 同一事件里的多处改动（多光标）已按「依次应用」排好。
+ */
+function recordEdits(doc: Doc, e: ContentEvent | undefined): void {
+  if (!doc.edits) return;
+  if (!e?.changes || e.isFlush || doc.edits.length + e.changes.length > MAX_INCREMENTAL_EDITS) {
+    doc.edits = null;
+    return;
+  }
+  for (const c of e.changes) {
+    doc.edits.push({
+      range: {
+        start: { line: c.range.startLineNumber - 1, character: c.range.startColumn - 1 },
+        end: { line: c.range.endLineNumber - 1, character: c.range.endColumn - 1 },
+      },
+      rangeLength: c.rangeLength,
+      text: c.text,
+    });
+  }
 }
 
 const docs = new Map<string, Doc>();
+const closingDocs = new Map<string, Promise<void>>();
 
 function notify(method: string, path: string, params: Record<string, unknown>): Promise<void> {
   return invoke<unknown>("lang_notify", { method, path, params })
-    .then(() => undefined)
-    .catch(() => undefined);
+    .then(() => undefined);
+}
+
+function syncDoc(path: string, doc: Doc): Promise<void> {
+  const version = doc.version;
+  // 快速路径：这个版本已经确实发给 jdt.ls 了。每次补全 / 悬停 / 跳转前都会 flushDoc，
+  // 没有新改动时不该再 getValue() 拷一遍整篇。只看「已发出」而不看「已排队」：
+  // 排队中的那次可能因为服务未就绪而空转，不能拿它当成已同步。
+  if (doc.syncedVersion >= version) return doc.pending;
+  // 增量只在「已打开、且这段改动都有明细」时可用；否则照旧拷全文。
+  // 切下这一段：之后的改动从 version 起重新累积。
+  const base = doc.editsBase;
+  const edits = doc.opened ? doc.edits : null;
+  const text = edits ? null : doc.model.getValue();
+  doc.edits = [];
+  doc.editsBase = version;
+  // 等待已发出的通知，而不只是等防抖定时器；IPC 写入必须按文档版本串行。
+  const pending = doc.pending.catch(() => {}).then(async () => {
+    if (docs.get(path) !== doc || !langReady() || !inLangModule(path) || doc.syncedVersion >= version) return;
+    if (edits && doc.opened && doc.syncedVersion === base) {
+      // 服务端手里正好是 base 版本，增量能接上
+      await notify("textDocument/didChange", path, { textDocument: { version }, contentChanges: edits });
+      doc.syncedVersion = version;
+      return;
+    }
+    if (text === null) {
+      // 本想发增量，但前一次没发成（失败 / 服务未就绪），服务端版本对不上：
+      // 按当前最新内容发一次全文，并把累积点挂到最新版本
+      const latest = doc.version;
+      const full = doc.model.getValue();
+      doc.edits = [];
+      doc.editsBase = latest;
+      await notify(doc.opened ? "textDocument/didChange" : "textDocument/didOpen", path,
+        doc.opened
+          ? { textDocument: { version: latest }, contentChanges: [{ text: full }] }
+          : { textDocument: { languageId: "java", version: latest, text: full } });
+      doc.opened = true;
+      doc.syncedVersion = latest;
+      return;
+    }
+    await notify(doc.opened ? "textDocument/didChange" : "textDocument/didOpen", path,
+      doc.opened
+        ? { textDocument: { version }, contentChanges: [{ text }] }
+        : { textDocument: { languageId: "java", version, text } });
+    doc.opened = true;
+    doc.syncedVersion = version;
+  });
+  doc.pending = pending;
+  // 自动同步失败不产生未处理异常；补全前的 flushDoc 仍能取得真实失败并重试。
+  void pending.catch(() => {});
+  return pending;
 }
 
 function openDoc(path: string, model: Model): void {
@@ -161,17 +258,21 @@ function openDoc(path: string, model: Model): void {
   const doc: Doc = {
     model,
     version: 1,
+    syncedVersion: 0,
+    opened: false,
+    pending: closingDocs.get(path) ?? Promise.resolve(),
     timer: undefined,
-    sub: model.onDidChangeContent(() => {
+    edits: [],
+    editsBase: 1,
+    sub: model.onDidChangeContent((e?: ContentEvent) => {
       doc.version += 1;
+      recordEdits(doc, e);
       clearTimeout(doc.timer);
-      doc.timer = setTimeout(() => void flushDoc(path), CHANGE_DEBOUNCE_MS);
+      doc.timer = setTimeout(() => void flushDoc(path).catch(() => {}), CHANGE_DEBOUNCE_MS);
     }),
   };
   docs.set(path, doc);
-  void notify("textDocument/didOpen", path, {
-    textDocument: { languageId: "java", version: 1, text: model.getValue() },
-  });
+  void syncDoc(path, doc);
 }
 
 function closeDoc(path: string): void {
@@ -180,7 +281,15 @@ function closeDoc(path: string): void {
   clearTimeout(doc.timer);
   doc.sub.dispose();
   docs.delete(path);
-  if (view.state === "ready") void notify("textDocument/didClose", path, { textDocument: {} });
+  const closing = doc.pending.catch(() => {}).then(async () => {
+    if (closingDocs.get(path) === closing && doc.opened && langReady() && inLangModule(path)) {
+      await notify("textDocument/didClose", path, { textDocument: {} });
+    }
+  });
+  closingDocs.set(path, closing);
+  void closing.catch(() => {}).then(() => {
+    if (closingDocs.get(path) === closing) closingDocs.delete(path);
+  });
 }
 
 /**
@@ -193,13 +302,10 @@ function closeDoc(path: string): void {
  */
 export async function flushDoc(path: string): Promise<void> {
   const doc = docs.get(path);
-  if (!doc || doc.timer === undefined) return;
+  if (!doc) return;
   clearTimeout(doc.timer);
   doc.timer = undefined;
-  await notify("textDocument/didChange", path, {
-    textDocument: { version: doc.version },
-    contentChanges: [{ text: doc.model.getValue() }],
-  });
+  await syncDoc(path, doc);
 }
 
 /** 服务端已不在：只丢本地记录，不再给它发 didClose。 */
@@ -209,6 +315,7 @@ function forgetDocs(): void {
     d.sub.dispose();
   });
   docs.clear();
+  closingDocs.clear();
 }
 
 function syncAll(): void {
@@ -324,6 +431,7 @@ function armSettle(): void {
 function onStatus(next: LangStatus): void {
   const prev = view.state;
   if ((prev === "ready") !== (next.state === "ready")) {
+    capabilityEpoch++;
     const ready = next.state === "ready";
     // 放进微任务：让本次的 setView 先落地，订阅方在回调里读 langReady() 才是新状态。
     // 直接同步调会在「即将停止」时读到旧的 ready，向已经停掉的服务发请求。
@@ -488,6 +596,45 @@ export function langRequest<T>(
 // ───────────────────── jar 内类源码与跳转 ─────────────────────
 
 const jdtText = new Map<string, Promise<JdtSource>>();
+/** 已缓存正文的大小（UTF-16 字节估算）。只记已经拿到、确定留下的。 */
+const jdtBytes = new Map<string, number>();
+let jdtTotal = 0;
+let jdtEpoch = workspaceEpoch();
+/**
+ * jar 内类正文缓存上限。反编译结果动辄几百 KB，一天点几百个类不淘汰会一直涨。
+ * 按最近使用淘汰；淘汰只丢文本，再打开时重新问一次 jdt.ls，不影响已打开的标签（model 自己持有文本）。
+ */
+export const JDT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+export const JDT_CACHE_MAX_ENTRIES = 300;
+
+function jdtForget(uri: string): void {
+  jdtText.delete(uri);
+  jdtTotal -= jdtBytes.get(uri) ?? 0;
+  jdtBytes.delete(uri);
+}
+
+/** 记下一份留在缓存里的正文，并把它挂到最近使用的一端；超限就从最久没用的开始淘汰。 */
+function jdtKeep(uri: string, p: Promise<JdtSource>, text: string): void {
+  if (jdtText.get(uri) !== p) return; // 等待期间被 force / 换工作区替掉了
+  if (text.length * 2 > JDT_CACHE_MAX_BYTES) {
+    jdtForget(uri); // 单个超限正文仍可打开，但不应挤掉缓存或永久突破预算。
+    return;
+  }
+  jdtTotal -= jdtBytes.get(uri) ?? 0;
+  jdtText.delete(uri);
+  jdtText.set(uri, p);
+  jdtBytes.set(uri, text.length * 2);
+  jdtTotal += text.length * 2;
+  for (const old of jdtText.keys()) {
+    if (jdtTotal <= JDT_CACHE_MAX_BYTES && jdtText.size <= JDT_CACHE_MAX_ENTRIES) break;
+    if (old !== uri) jdtForget(old);
+  }
+}
+
+/** 测试用：当前缓存条数与字节数。 */
+export function jdtCacheStats(): { entries: number; bytes: number } {
+  return { entries: jdtText.size, bytes: jdtTotal };
+}
 
 /** `loadJdtSource` 的产物：正文 + 它是不是反编译出来的。 */
 export interface JdtSource {
@@ -550,7 +697,14 @@ export async function loadJdtSource(
     if(epoch===workspaceEpoch()) openVirtualModel(uri, text, { peek: true });
     return { text, decompiled: false };
   }
-  if (force) jdtText.delete(uri);
+  // 换了工作区：同一个 jdt:// 在新工程里可能指向别的 jar，旧文本整体作废
+  if (epoch !== jdtEpoch) {
+    jdtText.clear();
+    jdtBytes.clear();
+    jdtTotal = 0;
+    jdtEpoch = epoch;
+  }
+  if (force) jdtForget(uri);
   let p = jdtText.get(uri);
   if (!p) {
     p = fetchJdtSource(uri);
@@ -560,10 +714,12 @@ export async function loadJdtSource(
   try {
     src = await p;
   } catch (e) {
-    jdtText.delete(uri);
+    if (jdtText.get(uri) === p) jdtForget(uri);
     throw e;
   }
-  if (src.decompileError) jdtText.delete(uri);
+  if (src.decompileError) {
+    if (jdtText.get(uri) === p) jdtForget(uri);
+  } else jdtKeep(uri, p, src.text);
   // `replace`：预览可能已经用桩建过 model，这里要把内容换成完整版
   if(epoch===workspaceEpoch()) openVirtualModel(uri, src.text, { replace: true });
   return src;

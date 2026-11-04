@@ -2,8 +2,8 @@
 /**
  * 编译 jdt.ls 扩展 bundle 并打包成 resources 下的 jar。
  *
- * 这个扩展只做一件事：在 jdt.ls 进程内实现 `ncforge.typeHierarchy`（0.57 没有
- * LSP 的 TypeHierarchy）。它靠 `initializationOptions.bundles` 挂进 OSGi，
+ * 扩展在 jdt.ls 进程内提供类型层级、按需 NC 类路径与补全元数据。
+ * 它靠 `initializationOptions.bundles` 挂进 OSGi，
  * 因此必须是带 MANIFEST.MF 与 plugin.xml 的合法 bundle —— 不能像普通 jar 那样只装 class。
  *
  * 用法：

@@ -33,7 +33,7 @@ export function DbConfirmHost() {
       open={p !== null}
       onClose={close}
       className="modal-surface dbx-dlg sm"
-      ariaLabel="数据库确认"
+      ariaLabel={p?.kind === "unsavedFiles" ? "未保存文件确认" : "数据库确认"}
       zIndex={1100}
       // 退出确认不靠点遮罩关：用户想点「保存」却点到旁边，框没了、应用还在，
       // 他多半会以为「取消成功了」而不知道刚才那一下什么都没决定。ESC 仍然可以取消。

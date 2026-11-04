@@ -11,9 +11,15 @@
 
 // ─── 类型 ────────────────────────────
 
-/** 资源置备阶段。比更新链路简单：没有 available/uptodate 的独立 UI 态
- *  （available 直接触发下载对话框；uptodate 等于 idle）。 */
-export type ResourcePhase = "idle" | "checking" | "downloading" | "ready" | "error";
+/** 按真实后台事件区分下载、校验与安装；下载到 100% 不等于可使用。 */
+export type ResourcePhase = "idle" | "checking" | "downloading" | "verifying" | "installing" | "ready" | "error";
+
+export const RESOURCE_IDS = ["jdtls", "ecj", "svnkit", "cfr"] as const;
+export const resourceBusy = (phase: ResourcePhase) => ["checking", "downloading", "verifying", "installing"].includes(phase);
+export const RESOURCE_PHASE_TEXT: Record<ResourcePhase, string> = {
+  idle: "尚未开始", checking: "检查组件", downloading: "下载中", verifying: "校验中",
+  installing: "安装中", ready: "已就绪", error: "下载失败",
+};
 
 /** 缺失包摘要（resource:available 事件的 packs 数组元素）。 */
 export interface PackSummary {

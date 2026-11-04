@@ -13,7 +13,9 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::java_types::TypeCatalog;
 use crate::lsp::{path_to_uri, LspClient};
+use crate::nc_index::ClassIndex;
 
 /// jdt.ls 默认堆上限（MB）。实测 gl 模块实际用 656MB。
 pub const DEFAULT_XMX_MB: u32 = 1024;
@@ -65,6 +67,7 @@ pub struct LangSession {
     shadow_dir: PathBuf,
     real_prefix: String,
     shadow_prefix: String,
+    pub completion_catalog: Option<(Arc<ClassIndex>, Arc<TypeCatalog>, PathBuf)>,
 }
 
 impl LangSession {
@@ -76,7 +79,18 @@ impl LangSession {
             shadow_dir: shadow_dir.to_path_buf(),
             real_prefix: path_to_uri(&real_dir.to_string_lossy()),
             shadow_prefix: path_to_uri(&shadow_dir.to_string_lossy()),
+            completion_catalog: None,
         }
+    }
+
+    pub fn with_completion_catalog(
+        mut self,
+        index: Arc<ClassIndex>,
+        catalog: Arc<TypeCatalog>,
+        project_root: &Path,
+    ) -> Self {
+        self.completion_catalog = Some((index, catalog, project_root.to_path_buf()));
+        self
     }
 
     pub fn module(&self) -> &str {

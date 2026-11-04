@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "vite:dev": "vite",
-    "vite:build": "tsc && vite build",
+    "postinstall": "node scripts/patch-monaco.mjs",
+    "vite:dev": "node scripts/patch-monaco.mjs && vite",
+    "vite:build": "node scripts/patch-monaco.mjs && tsc && vite build",
     "test": "vitest run",
     "motion:check": "node --test scripts/check-motion.mjs",
     "test:scripts": "node --test scripts/lib/zip-store.test.mjs",

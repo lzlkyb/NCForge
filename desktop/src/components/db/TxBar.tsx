@@ -4,7 +4,7 @@ import { toast } from "../ui/toast";
 import { friendlyDbError, thousands } from "../../lib/db";
 import { useAppHidden } from "../../lib/appVisibility";
 import { type TxInfo } from "../../lib/dbApi";
-import { patchTab, rtOf, txAction, useDb, type SqlTab } from "../../lib/dbStore";
+import { patchTab, txAction, useConnRt, type SqlTab } from "../../lib/dbStore";
 
 function since(ms: number): string {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -26,9 +26,9 @@ export function TxBar({ connId, tabId, slot, tx: override }: {
   /** 槽的事务状态；primary 不传（统一看连接的 `rt.tx`）。 */
   tx?: TxInfo;
 }) {
-  useDb();
+  const primaryTx = useConnRt(connId).tx;
   // 独立槽刚创建时状态尚未知；不能把另一条主会话的未提交写入显示为它的事务。
-  const tx = slot ? override : rtOf(connId).tx;
+  const tx = slot ? override : primaryTx;
   const [, tick] = useState(0);
   /** 正在提交 / 回滚哪一边：大事务要好几秒，只把按钮置灰看不出点没点上。 */
   const [acting, setActing] = useState<null | "commit" | "rollback">(null);

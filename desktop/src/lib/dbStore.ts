@@ -268,8 +268,9 @@ export function useDb(): DbState {
 /**
  * 只订阅数据库仓库的一个切片。
  *
- * `useDb()` 给的是整份快照：13 个调用点全部订阅整库，于是「某个连接的状态从
- * connecting 变 connected」会让连接树、SQL 编辑器、结果区、表页一起重渲染。
+ * `useDb()` 给的是整份快照：「某个连接的状态从 connecting 变 connected」会让连接树、
+ * SQL 编辑器、结果区、表页一起重渲染。组件一律用本函数或下面的 `useConnRt` 等切片钩子
+ * （2026-11-04 起数据库组件已全部改用切片，`useDb` 只留给测试与一次性读取）。
  * 同 `useWorkspaceSelector`：选择器必须返回稳定引用，或自己传 `isEqual`。
  */
 export function useDbSelector<T>(
@@ -295,7 +296,18 @@ export function useDbSelector<T>(
 // ──────────────────────── 连接 ────────────────────────
 
 export const connOf = (id: string | null | undefined) => state.conns.find((c) => c.id === id) ?? null;
-export const rtOf = (id: string | null | undefined): ConnRuntime => (id && state.rt[id]) || { status: "idle" };
+/** 没连过的连接的运行态。用同一个对象：选择器按引用比较，每次 new 会让订阅者无谓重渲染。 */
+const IDLE_RT: ConnRuntime = { status: "idle" };
+export const rtOf = (id: string | null | undefined): ConnRuntime => (id && state.rt[id]) || IDLE_RT;
+
+// 常用切片。仓库更新都是「只换变了的那一项」（rt[id] / tabs[i] / conns），
+// 所以按引用比较就能做到：连接 B 变了，只看连接 A 的组件不重渲染。
+export const useConnRt = (id: string | null | undefined) => useDbSelector((s) => (id && s.rt[id]) || IDLE_RT);
+export const useConnOf = (id: string | null | undefined) => useDbSelector((s) => s.conns.find((c) => c.id === id) ?? null);
+export const useDbConns = () => useDbSelector((s) => s.conns);
+/** 各连接运行态的整张表：列表里每行都显示状态的组件用（任一连接变了都要重画）。 */
+export const useDbRt = () => useDbSelector((s) => s.rt);
+export const useActiveDbTab = () => useDbSelector((s) => s.tabs.find((t) => t.id === s.active) ?? null);
 
 /**
  * 新开控制台 / 数据字典时默认用哪个连接：当前标签的 → 已连上的 → 第一个。

@@ -1,7 +1,8 @@
 import { monaco } from "./monacoSetup";
 import { tabIdOfModel } from "./sqlModels";
 import { columnsOf, rtOf, sqlTabOf } from "./dbStore";
-import { statementAt } from "./sqlSplit";
+import { pickStatement } from "./sqlSplit";
+import { statementsOf } from "./sqlStmtCache";
 import { aliasMap, completionContext, SQL_KEYWORDS, tablesIn } from "./sqlComplete";
 import { tableLinks } from "./sqlLinks";
 import { openTable } from "./dbActions";
@@ -95,7 +96,7 @@ export function registerSqlProviders(): void {
       const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
       const K = monaco.languages.CompletionItemKind;
       const text = model.getValue();
-      const stmt = statementAt(text, model.getOffsetAt(position));
+      const stmt = pickStatement(statementsOf(model), model.getOffsetAt(position));
       const stmtText = stmt?.text ?? text;
       const before = model.getValueInRange(new monaco.Range(position.lineNumber, 1, position.lineNumber, position.column));
       const ctx = completionContext(before);

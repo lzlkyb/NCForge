@@ -49,6 +49,10 @@ export type Pending =
       action: string;
       /** 更新安装要求先保存，不能提供会丢失修改的继续入口。 */
       allowDiscard?: boolean;
+      /** SVN 提交保留编辑器草稿；不能使用退出时“修改会丢失”的说明。 */
+      purpose?: "svn";
+      /** 保存尚未收尾时 Escape 不能提前释放调用方的工作保护锁。 */
+      saving?: boolean;
       /** 「保存全部并退出」真正做事的入口，由 `quitGuard` 注入；返回还失败的那些。 */
       onSave: (onProgress: (done: number, total: number) => void) => Promise<SaveFailure[]>;
       resolve: (c: FileQuitChoice) => void;
@@ -78,6 +82,7 @@ export function usePending(): Pending | null {
 /** 弹框里的按钮调它：先关框再回调，回调里可以接着弹下一个。 */
 export function settle(run: (p: Pending) => void) {
   const p = pending;
+  if (p?.kind === "unsavedFiles" && p.saving) return;
   show(null);
   if (p) run(p);
 }
@@ -100,8 +105,19 @@ export function askUnsavedFiles(
   onSave: (onProgress: (done: number, total: number) => void) => Promise<SaveFailure[]>,
   action = "退出",
   allowDiscard = true,
+  purpose?: "svn",
 ): Promise<FileQuitChoice> {
-  return new Promise((resolve) => show({ kind: "unsavedFiles", files, action, allowDiscard, onSave, resolve }));
+  return new Promise((resolve) => {
+    const request: Extract<Pending, { kind: "unsavedFiles" }> = {
+      kind: "unsavedFiles", files, action, allowDiscard, purpose, resolve,
+      onSave: async onProgress => {
+        request.saving = true;
+        try { return await onSave(onProgress); }
+        finally { request.saving = false; }
+      },
+    };
+    show(request);
+  });
 }
 
 /**

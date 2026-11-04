@@ -7,7 +7,7 @@ import { DockRegion } from "../workspace/WorkbenchDock";
 import { MdScopeBar } from "./MdScopeBar";
 import { MdTablePicker } from "./MdTablePicker";
 import { MdDictResult } from "./MdDictResult";
-import { useDb } from "../../lib/dbStore";
+import { useDbSelector } from "../../lib/dbStore";
 import { beginOperation, trackOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
 import { getDb, connOf } from "../../lib/dbStore";
@@ -46,7 +46,8 @@ const PICK_LIMIT = 200;
  */
 export function DictWorkspace({ tabId }: { tabId: string }) {
   const root = useWorkspaceRoot();
-  const tab = useDb().tabs.find((t) => t.id === tabId);
+  // 只订阅自己这个标签：别的标签跑查询不重画字典页
+  const tab = useDbSelector((s) => s.tabs.find((t) => t.id === tabId));
   const st = tab?.kind === "dict" ? tab.state : null;
   const connId = tab?.kind === "dict" ? tab.connId : null;
 

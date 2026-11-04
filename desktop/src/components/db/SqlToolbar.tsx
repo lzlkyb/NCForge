@@ -5,7 +5,7 @@ import { ConnPicker } from "./ConnPicker";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { friendlyDbError } from "../../lib/db";
 import { switchConn } from "../../lib/dbActions";
-import { connOf, rtOf, useDb, type SqlTab } from "../../lib/dbStore";
+import { useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
 import { useDbReadOnly } from "../../lib/dbReadOnly";
 import { useOperations } from "../../lib/operations";
 import { setSqlTransactionMode } from "../../lib/dbTransactionMode";
@@ -32,9 +32,8 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
   sessionsOpen: boolean;
   onSessions: () => void;
 }) {
-  useDb();
-  const conn = connOf(tab.connId);
-  const rt = rtOf(tab.connId);
+  const conn = useConnOf(tab.connId);
+  const rt = useConnRt(tab.connId);
   const readonly=useDbReadOnly(tab.connId);
   const connected = rt.status === "connected";
   const stopping=useOperations().some(o=>o.key===`db.sql:${tab.id}` && o.state==="cancelling");

@@ -11,6 +11,9 @@ import { getRecent } from "./recentFiles";
 import { searchWorkspace } from "./search";
 import { fetchSymbols, kindLetter } from "./symbols";
 
+/** 快速面板 `#内容` 搜索在后端的来源标识：同来源新搜索顺带取消旧的。 */
+export const PALETTE_SEARCH_SOURCE = "palette";
+
 /** 浮层里的一行。 */
 export interface PaletteItem {
   key: string;
@@ -99,7 +102,8 @@ async function contentMode(text: string, ctx: PaletteCtx): Promise<PaletteResult
   if (!text) return { items: [], note: "输入要在工程里找的内容（# 开头）" };
   let out;
   try {
-    out = await searchWorkspace({ text, maxResults: LIMIT });
+    // 每改一次词就是一次全量扫描：按来源登记，新的一发出，后端就停掉旧的
+    out = await searchWorkspace({ text, maxResults: LIMIT }, false, PALETTE_SEARCH_SOURCE);
   } catch (e) {
     return { items: [], note: `搜索失败：${e instanceof Error ? e.message : String(e)}` };
   }

@@ -11,7 +11,9 @@ const mocks = vi.hoisted(() => ({
     downloadedBytes: 0, totalBytes: null as number | null, bytesPerSec: 0, preparing: false, restarting: false,
     error: null as string | null, errorCode: null, openUpdateNotes: vi.fn(), manualCheckForUpdate: vi.fn(), restart: vi.fn() },
   resources: { packs: [{ id: "jdtls", title: "Java 代码智能", notes: "语言服务", state: "installed", version: "0.57.0", size: 1024 }],
-    phase: "idle" as ResourcePhase, error: null as string | null, errorCode: null, ensure: vi.fn(), refreshStatus: vi.fn() },
+    phase: "idle" as ResourcePhase, error: null as string | null, errorCode: null, ensure: vi.fn(), refreshStatus: vi.fn(),
+    currentId: null as string | null, requestedIds: [] as string[], lastInstalled: [] as { id: string; version: string }[],
+    downloadedBytes: 0, totalBytesCurrent: null as number | null, bytesPerSec: 0, retry: vi.fn(), showDownloads: vi.fn() },
   invoke: vi.fn(), toast: vi.fn(),
 }));
 vi.mock("../../hooks/useAppInfo", () => ({ useAppInfo: () => mocks.info }));
@@ -44,7 +46,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   Object.assign(mocks.update, { status: "idle", progress: 0, progressIndeterminate: false, downloadedBytes: 0,
     totalBytes: null, bytesPerSec: 0, preparing: false, restarting: false, error: null });
-  Object.assign(mocks.resources, { phase: "idle", error: null });
+  Object.assign(mocks.resources, { phase: "idle", error: null, currentId: null, requestedIds: [], lastInstalled: [],
+    downloadedBytes: 0, totalBytesCurrent: null, bytesPerSec: 0,
+    packs: [{ id: "jdtls", title: "Java 代码智能", notes: "语言服务", state: "installed", version: "0.57.0", size: 1024 }] });
   mocks.resources.refreshStatus.mockResolvedValue(mocks.resources.packs);
   mocks.resources.ensure.mockResolvedValue(undefined);
   container = document.createElement("div");
@@ -87,7 +91,7 @@ describe("维护设置入口", () => {
   it("组件维护明确重下全部，并调用原有 force 接口", async () => {
     await mount(<ResourceSettings />);
     await act(async () => button("重新下载全部组件").click());
-    expect(mocks.resources.ensure).toHaveBeenCalledExactlyOnceWith(true);
+    expect(mocks.resources.ensure).toHaveBeenCalledExactlyOnceWith(true, ["jdtls", "ecj", "svnkit", "cfr"]);
     expect(container.querySelector("#resource-jdtls")?.textContent).toContain("已安装");
   });
 
@@ -97,6 +101,27 @@ describe("维护设置入口", () => {
     expect(container.textContent).toContain("读取组件状态失败");
     await act(async () => button("重新读取").click());
     expect(mocks.resources.refreshStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("未下载组件可独立下载，也提供缺失组件批量入口", async () => {
+    mocks.resources.packs[0].state = "missing";
+    await mount(<ResourceSettings />);
+    await act(async () => button("下载").click());
+    expect(mocks.resources.ensure).toHaveBeenCalledWith(false, ["jdtls"]);
+    await act(async () => button("下载缺失组件（1）").click());
+    expect(mocks.resources.ensure).toHaveBeenLastCalledWith(false, ["jdtls"]);
+  });
+
+  it("设置页显示百分比与网速，安装期间禁止重复下载", async () => {
+    Object.assign(mocks.resources, { phase: "downloading", currentId: "jdtls", requestedIds: ["jdtls"], downloadedBytes: 512, totalBytesCurrent: 1024, bytesPerSec: 256 });
+    await mount(<ResourceSettings />);
+    expect(container.textContent).toContain("50%");
+    expect(container.textContent).toContain("256 B/s");
+    Object.assign(mocks.resources, { phase: "installing" });
+    await mount(<ResourceSettings />);
+    expect(container.textContent).toContain("安装中");
+    expect(button("重新下载全部组件").disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="重新下载Java 代码智能"]')?.disabled).toBe(true);
   });
 
   it("配置导入失败保留已修改路径和确认表单", async () => {

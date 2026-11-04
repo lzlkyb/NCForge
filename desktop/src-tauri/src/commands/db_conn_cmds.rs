@@ -120,7 +120,14 @@ async fn prop_sources(
     cfg: &AppConfig,
 ) -> Result<Value, String> {
     let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
-    let b = bridge_for(app, st, cfg, PROBE, crate::db_engine::EngineKind::Java, PROBE)?;
+    let b = bridge_for(
+        app,
+        st,
+        cfg,
+        PROBE,
+        crate::db_engine::EngineKind::Java,
+        PROBE,
+    )?;
     call(b, "propList", vec![home.root], Duration::from_secs(60)).await
 }
 

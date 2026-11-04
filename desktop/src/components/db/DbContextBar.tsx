@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { dbApi, dbNameOf, ENV_LABEL } from "../../lib/dbApi";
-import { claimCursor, connOf, getDb, patchTab, rtOf, setTx, useDb, type SqlTab } from "../../lib/dbStore";
+import { claimCursor, getDb, patchTab, setTx, useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
 import { toast } from "../ui/toast";
 import { friendlyDbError } from "../../lib/db";
 
@@ -10,8 +10,7 @@ import { Icon } from "../ui/icon";
 import { useDbReadOnly } from "../../lib/dbReadOnly";
 
 export function DbContextBar({ connId, independent = false }: { connId: string | null; independent?: boolean }) {
-  useDb();
-  const conn = connOf(connId), rt = rtOf(connId);
+  const conn = useConnOf(connId), rt = useConnRt(connId);
   const readOnly = useDbReadOnly(connId); const [busy,setBusy] = useState(false); const lock=useRef(false);
   const toggle = async () => {
     if (!connId || lock.current) return;

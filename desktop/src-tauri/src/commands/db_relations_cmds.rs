@@ -94,22 +94,6 @@ pub async fn db_relations(
         json!({"foreign":foreign,"references":references,"enums":enumerations,"notes":notes,"sharedSession":shared}),
     )
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn compound_keys_join_by_position() {
-        assert!(FOREIGN_KEYS.contains("pc.position=fc.position"));
-        assert!(FOREIGN_KEYS.contains("f.r_owner=user"));
-    }
-    #[test]
-    fn nc_reference_requires_real_class_mapping() {
-        assert!(NC_REFS.contains("cl.id=p.datatype"));
-        assert!(NC_REFS.contains("tc.pkey"));
-        assert!(!NC_REFS.contains("pk_org"));
-    }
-}
-
 async fn read_enums(b: Arc<crate::db_engine::EngineHandle>, table: &str) -> Result<Value, String> {
     let schema=call(b.clone(),"exec",vec!["select table_name, column_name from user_tab_columns where table_name in ('MD_ENUM','MD_ENUMCLASS','MD_ENUMVALUE')".into(),"200".into(),"60".into()],Duration::from_secs(90)).await?;
     let has = |t: &str, c: &str| {
@@ -142,4 +126,21 @@ async fn read_enums(b: Arc<crate::db_engine::EngineHandle>, table: &str) -> Resu
         .map(|(_, alias)| format!(" and nvl({alias}.dr,0)=0"))
         .collect::<String>();
     read(b, &format!("{sql}{deleted}"), table).await
+}
+
+// clippy::items_after_test_module：测试模块必须放在文件末尾
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn compound_keys_join_by_position() {
+        assert!(FOREIGN_KEYS.contains("pc.position=fc.position"));
+        assert!(FOREIGN_KEYS.contains("f.r_owner=user"));
+    }
+    #[test]
+    fn nc_reference_requires_real_class_mapping() {
+        assert!(NC_REFS.contains("cl.id=p.datatype"));
+        assert!(NC_REFS.contains("tc.pkey"));
+        assert!(!NC_REFS.contains("pk_org"));
+    }
 }

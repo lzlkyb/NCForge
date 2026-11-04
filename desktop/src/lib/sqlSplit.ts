@@ -60,10 +60,18 @@ export function isWrite(sql: string): boolean {
   return stmtKind(sql) !== "query";
 }
 
-function lineAt(text: string, offset: number): number {
-  let n = 1;
-  for (let i = 0; i < offset && i < text.length; i++) if (text.charCodeAt(i) === 10) n++;
-  return n;
+/**
+ * 单调前进的行号计数器：查询的偏移量必须不减，整篇只扫一遍。
+ * 原来每条语句都从文首数换行，几千条语句的脚本是 O(语句数 × 长度)。
+ */
+function lineCounter(text: string): (offset: number) => number {
+  let pos = 0;
+  let line = 1;
+  return (offset) => {
+    const to = Math.min(offset, text.length);
+    for (; pos < to; pos++) if (text.charCodeAt(pos) === 10) line++;
+    return line;
+  };
 }
 
 /** 是否只有空白与注释。 */
@@ -115,6 +123,8 @@ export function splitStatements(text: string): Stmt[] {
   let i = 0;
   // 当前语句是否 PL/SQL 块：看到第一个有效字符后才知道
   let plsql: boolean | null = null;
+  // push 按偏移递增调用（本条起点 ≤ 本条终点 < 下一条起点），可以共用一个计数器
+  const lineAt = lineCounter(text);
 
   const push = (endExclusive: number, bodyEnd: number) => {
     const raw = text.slice(start, bodyEnd);
@@ -129,8 +139,8 @@ export function splitStatements(text: string): Stmt[] {
         text: body,
         start: s,
         end: endExclusive,
-        startLine: lineAt(text, s),
-        endLine: lineAt(text, Math.max(s, endExclusive - 1)),
+        startLine: lineAt(s),
+        endLine: lineAt(Math.max(s, endExclusive - 1)),
       });
     }
     start = endExclusive;
@@ -197,10 +207,29 @@ export function splitStatements(text: string): Stmt[] {
  * 上方没有就取第一条。
  */
 export function statementAt(text: string, offset: number): Stmt | null {
-  const all = splitStatements(text);
+  return pickStatement(splitStatements(text), offset);
+}
+
+/**
+ * 在已切好的语句里找光标所在的一条（规则同 `statementAt`），二分查找。
+ * 编辑器缓存了切分结果，光标移动只走这里，不再重切整篇。
+ */
+export function pickStatement(all: readonly Stmt[], offset: number): Stmt | null {
   if (all.length === 0) return null;
-  const hit = all.find((s) => offset >= s.start && offset <= s.end);
-  if (hit) return hit;
-  const before = all.filter((s) => s.end <= offset);
-  return before.length ? before[before.length - 1] : all[0];
+  // 最后一条 start <= offset 的语句
+  let lo = 0;
+  let hi = all.length - 1;
+  let idx = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (all[mid].start <= offset) {
+      idx = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  if (idx < 0) return all[0];
+  // 光标正好落在上一条的结尾 = 下一条的开头时，按原规则取上一条
+  if (idx > 0 && all[idx - 1].end >= offset) return all[idx - 1];
+  // 命中就是它；没命中说明在它之后的空白里，同样取它（上方最近的一条）
+  return all[idx];
 }

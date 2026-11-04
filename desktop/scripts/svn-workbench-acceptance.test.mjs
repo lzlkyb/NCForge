@@ -1,0 +1,82 @@
+/* global window, document, innerWidth, requestAnimationFrame */
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
+const origin=process.env.SVN_PREVIEW_URL || 'http://localhost:1423';
+const artifacts=new URL('../../docs/svn-acceptance-20261104/',import.meta.url);
+const bootstrap=String.raw`
+import {mockIPC,mockWindows} from '/node_modules/@tauri-apps/api/mocks.js';
+mockWindows('main');window.svnCommands=[];window.svnSubmitted=[];window.svnDelayPath='';window.svnPending=[];
+const root='C:/svn-acceptance';
+const entries=[['A.java','M'],['B.java','M'],['Deleted.java','D'],['Conflict.java','C'],['New.java','?']].map(([name,letter],index)=>({path:root+'/module/src/'+name,rel:'module/src/'+name,module:'module',letter,status:'modified',revision:8,isDir:false,ignored:false,mtimeMs:1000+index}));
+const text='public class A {\n    public void execute() {\n        save();\n    }\n}\n';
+mockIPC(async(cmd,args)=>{
+ window.svnCommands.push({cmd,args});
+ if(cmd==='get_workspace')return root;
+ if(cmd==='get_config')return {workspace_root:root,nc_home:null,autostart_enabled:false,lang_enabled:false,lang_auto_start:false,lang_xmx_mb:null,linked_overrides:[],auto_compile:false,deploy_on_start:false};
+ if(cmd==='get_app_info')return {version:'0.1.0',platform:'windows',running:false};
+ if(cmd==='svn_info')return {root,url:'file:///QA/NC/module',revision:8,host:'',user:'qa',hasPassword:true,credentialSource:'saved',bridgeAlive:true};
+ if(cmd==='svn_status') {const items=entries.filter(e=>!window.svnSubmitted.includes(e.path));return {changes:{groups:[{module:'module',items}],shown:items.length,total:items.length,ignored:0},scanned:100,generatedAtMs:Date.now(),hasConflict:true,reviewed:[]};}
+ if(cmd==='svn_diff') {if(args.path===window.svnDelayPath)await new Promise(resolve=>window.svnPending.push(resolve));return {baseText:text.replace('save();','oldSave();'),workingText:args.path.endsWith('Deleted.java')?'':text,encoding:'UTF-8',eol:'LF',baseEmpty:args.path.endsWith('New.java'),baseSize:50,workingSize:50,editable:true};}
+ if(cmd==='svn_review_mark')return null;
+ if(cmd==='svn_commit') {window.svnSubmitted.push(...args.paths);return {revision:12,author:'qa',added:[]};}
+ if(cmd==='svn_history')return {repositoryPath:'/module/src/A.java',entries:[{revision:12,author:'qa',date:Date.now(),message:'保存流程修复\n核对日期绑定',paths:[{path:'/module/src/A.java',action:'M',copyFromPath:null,copyFromRevision:-1}]}]};
+ if(cmd==='svn_revision_diff')return {path:args.repositoryPath,beforePath:args.repositoryPath,beforeRevision:11,revision:12,beforeEmpty:false,afterEmpty:false,beforeText:text.replace('save();','oldSave();'),afterText:text,beforeEncoding:'UTF-8',afterEncoding:'UTF-8'};
+ if(cmd==='svn_blame_snapshot')return {sourceRevision:12,text:'HEAD source only\n',encoding:'UTF-8',lines:[{revision:12,author:'qa',date:Date.now()}]};
+ if(cmd==='svn_conflict_snapshot')return {treeConflict:false,propertyConflict:false,textConflict:true,mine:{role:'mine',name:'Conflict.java.mine',revision:-1,binary:false,text:'mine\n',encoding:'UTF-8'},base:{role:'base',name:'Conflict.java.r8',revision:8,binary:false,text:'base\n',encoding:'UTF-8'},theirs:{role:'theirs',name:'Conflict.java.r12',revision:12,binary:false,text:'theirs\n',encoding:'UTF-8'},workingReadable:true,workingHasMarkers:true};
+ if(cmd==='patch_defaults')return {workspaceRoot:root,outDir:'C:/qa-output',outDirSource:'suggest',outDirExists:false,outRoot:null,outRootCandidates:[],ncHome:null,ncHomeModules:0};
+ if(cmd==='patch_scan')return {root,items:[],problems:[],outRoots:[],javaCount:0,classCount:0,blockedCount:0};
+ if(cmd==='tree_projects' || cmd==='fs_list_dir' || cmd==='fs_encoding_marks' || cmd==='workspace_recent' || cmd==='resources_status' || cmd==='local_history_list' || cmd==='db_conn_list')return [];
+ if(cmd==='get_autostart')return false;
+ if(cmd==='lang_status')return {state:'stopped',module:null,reason:null};
+ if(cmd==='server_status')return {state:'stopped',pid:null,port:80,portOpen:false,portOwnedBySelf:false,projectRoot:root,ncHome:null,logPath:'',logSize:0,reason:null,heapMb:4096,defaultHeapMb:4096,debugPort:null};
+ if(cmd==='server_log')return {text:'',nextOffset:0};
+ if(cmd==='nc_home_probe')return {path:null,valid:false,issues:[]};
+ if(cmd==='nc_manifest')return null;
+ if(cmd==='db_cached_tables')return {tables:[],fetchedAt:0};
+ if(cmd==='db_schema_cache')return null;
+ if(cmd.startsWith('plugin:'))return cmd==='plugin:window|is_visible'?true:cmd==='plugin:window|is_maximized'?false:null;
+ return null;
+},{shouldMockEvents:true});
+localStorage.clear();
+const appearance=await import('/src/lib/appearance.ts');appearance.applyAppearance('glass');
+const theme=await import('/src/lib/theme.ts'),density=await import('/src/lib/uiDensity.ts');
+window.svnTheme=(dark,comfortable)=>{theme.applyTheme(dark?'dark':'light');density.applyUiDensity(comfortable?'comfortable':'standard');};
+await import('/src/main.tsx');
+`;
+test('SVN continuous review, draft, snapshots and 12 layout combinations',async()=>{
+ await mkdir(artifacts,{recursive:true});
+ const browser=await chromium.launch({headless:true,channel:'msedge'}),page=await browser.newPage({viewport:{width:1440,height:900}});
+ page.setDefaultTimeout(15000);const errors=[],errorDetails=[],measurements=[];page.on('pageerror',e=>{errors.push(e.message);errorDetails.push({message:e.message,stack:e.stack});});
+ await page.route(origin+'/',async route=>{const response=await route.fetch();const body=(await response.text()).replace(/<script type="module" src="\/src\/main\.tsx[^"]*"><\/script>/,'<script type="module">'+bootstrap+'</script>');assert.ok(body.includes('mockWindows'));await route.fulfill({response,body});});
+ const settled=()=>page.evaluate(async()=>{await document.startViewTransition?.(()=>{}).finished;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
+ const row=name=>page.locator('[data-file-row]').filter({hasText:name});
+ const commit=()=>page.locator('.vc-commit:visible');
+ const showFiles=async()=>{if(!await row('A.java').isVisible())await page.getByRole('button',{name:'显示改动清单',exact:true}).click();};
+ const closeCommit=async()=>{const close=page.getByRole('button',{name:'收起提交区',exact:true});if(await close.isVisible()){await close.click();await page.locator('.vc-commit:visible').waitFor({state:'hidden'});}};
+ try {
+  await page.goto(origin,{waitUntil:'domcontentloaded'});await page.locator('.app-side').getByRole('button',{name:/^版本/}).click();
+  await row('A.java').click();await page.locator('.monaco-diff-editor').waitFor();
+  await page.locator('[data-commit-trigger]').click();await commit().waitFor();await commit().getByRole('textbox',{name:'提交说明',exact:true}).fill('修复保存流程');
+  await closeCommit();await row('B.java').click();await page.locator('[data-commit-trigger]').click();assert.equal(await commit().getByRole('textbox',{name:'提交说明',exact:true}).inputValue(),'修复保存流程');
+  await closeCommit();
+  for(const width of process.env.SVN_QA_DIAGNOSTIC ? [1280] : [1280,1024,560])for(const dark of process.env.SVN_QA_DIAGNOSTIC ? [false] : [false,true])for(const comfortable of process.env.SVN_QA_DIAGNOSTIC ? [false] : [false,true]){
+   await page.setViewportSize({width,height:900});await page.evaluate(({dark,comfortable})=>window.svnTheme(dark,comfortable),{dark,comfortable});
+   await page.waitForFunction(()=>!document.documentElement.classList.contains('theme-transition'));await showFiles();await row('A.java').click();await settled();
+   await page.screenshot({path:fileURLToPath(new URL(`review-${width}-${dark?'dark':'light'}-${comfortable?'comfortable':'standard'}.png`,artifacts))});
+   await page.locator('[data-commit-trigger]').click();await commit().waitFor();await settled();
+   const m=await page.evaluate(()=>{const header=document.querySelector('.vc-head'),panel=[...document.querySelectorAll('.vc-commit')].find(e=>e.getBoundingClientRect().width>0);const r=panel.getBoundingClientRect();return {width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth,toolbarOverflow:header.scrollWidth>header.clientWidth+1,panelLeft:r.left,panelRight:r.right,diffCount:document.querySelectorAll('.monaco-diff-editor').length};});
+   measurements.push({...m,dark,comfortable});assert.equal(m.overflow,false);assert.equal(m.toolbarOverflow,false);assert.ok(m.panelLeft>=0 && m.panelRight<=width);assert.equal(m.diffCount,1);
+   await page.screenshot({path:fileURLToPath(new URL(`commit-${width}-${dark?'dark':'light'}-${comfortable?'comfortable':'standard'}.png`,artifacts))});await closeCommit();
+  }
+  await page.setViewportSize({width:1280,height:900});await showFiles();await row('A.java').click();await page.getByRole('button',{name:'逐行追溯',exact:true}).click();await page.getByText('正文与作者：r12',{exact:true}).waitFor();assert.ok((await page.locator('.vc-blame').innerText()).includes('HEAD source only'));assert.equal(await page.locator('.vc-blame').getByText('save();',{exact:true}).count(),0);
+  await page.screenshot({path:fileURLToPath(new URL('blame-source.png',artifacts))});await page.getByRole('button',{name:'返回差异',exact:true}).click();
+  await page.getByRole('button',{name:'历史',exact:true}).click();await page.locator('.vc-history-record').first().click();await page.locator('.vc-history-detail .monaco-diff-editor').waitFor();await page.screenshot({path:fileURLToPath(new URL('history-revision.png',artifacts))});
+  await showFiles();await row('Conflict.java').click();await page.getByText('Conflict.java.r12',{exact:false}).first().waitFor();await page.screenshot({path:fileURLToPath(new URL('conflict-versions.png',artifacts))});
+  await row('A.java').click();await page.locator('[data-commit-trigger]').click();await commit().getByRole('button',{name:'清空',exact:true}).click();await commit().getByRole('button',{name:'全选',exact:true}).click();await commit().getByRole('textbox',{name:'提交说明',exact:true}).fill('修复保存流程');await commit().getByRole('button',{name:/^提交 \d+ 个文件$/}).click();await page.getByText('已提交 r12',{exact:true}).waitFor();
+  const calls=await page.evaluate(()=>window.svnCommands.filter(c=>c.cmd==='svn_commit'));assert.equal(calls.length,1);assert.equal(calls[0].args.expectedRoot,'C:/svn-acceptance');assert.equal(calls[0].args.paths.some(p=>p.endsWith('Conflict.java')),false);
+  assert.deepEqual(errors,[]);await writeFile(new URL('measurements.json',artifacts),JSON.stringify({measurements,errors,commitCalls:calls.length},null,2));
+ }catch(error){await writeFile(new URL('failure.json',artifacts),JSON.stringify({error:String(error),errors,errorDetails,body:await page.locator('body').innerText(),commands:await page.evaluate(()=>window.svnCommands)},null,2));await page.screenshot({path:fileURLToPath(new URL('failure.png',artifacts))});throw error;}finally{await browser.close();}
+});

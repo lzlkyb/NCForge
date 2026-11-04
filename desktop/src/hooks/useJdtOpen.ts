@@ -67,7 +67,7 @@ export function useJdtOpen(setTabs: (v: Updater<TabMeta[]>) => void) {
       const root=getSession().root,epoch=workspaceEpoch();
       const src = await trackOperation({key:`class:${epoch}:${uri}`,root,label:"读取库中的类",scope:uri,page:"files",phase:"读取源码，缺少源码时尝试反编译"},()=>loadJdtSource(uri));
       if(epoch!==workspaceEpoch() || root!==getSession().root) return false;
-      const meta = tabMetaFromJdt(uri, src.text, src.decompiled);
+      const meta = { ...tabMetaFromJdt(uri, src.text, src.decompiled), decompileError: src.decompileError ?? undefined };
       setTabs((ts) => (ts.some((t) => t.path === uri) ? ts : [...ts, meta]));
       // 反编译失败退回签名桩：桩没有实现，不说明原因用户只会以为「这个类就长这样」
       if (src.decompileError) {

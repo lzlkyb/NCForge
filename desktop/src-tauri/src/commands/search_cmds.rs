@@ -5,24 +5,43 @@
 //! 然后把纯逻辑丢进 spawn_blocking，避免一次全量扫盘卡住 async 运行时。
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use serde::Serialize;
 
-use crate::search::{self, ReplaceOutcome, SearchOptions, SearchOutcome};
+use crate::search::{self, ReplaceOutcome, SearchGate, SearchOptions, SearchOutcome};
 use crate::state::AppState;
+
+/// 同时运行的全量扫描上限。单次扫描已经 8 线程，2 个足够让「搜索页 + 快速面板」
+/// 互不阻塞，又不至于几个积压的旧搜索一起抢磁盘。
+const SCAN_SLOTS: usize = 2;
+
+fn gate() -> &'static SearchGate {
+    static GATE: OnceLock<SearchGate> = OnceLock::new();
+    GATE.get_or_init(|| SearchGate::new(SCAN_SLOTS))
+}
+
+/// 取消某个来源正在跑的搜索（快速面板关闭时调用）。没有在跑的就什么也不做。
+#[tauri::command]
+pub fn search_cancel(source: String) {
+    gate().cancel(&source);
+}
 
 /// 「全部工程搜索」的总预算：工程一多，逐个 20 秒会变成几分钟。
 /// 单个工程仍按 20 秒封顶，剩余预算不够就按剩下的跑，跑完再标记截断。
 const MULTI_PROJECT_BUDGET_MS: u128 = 60_000;
 const PER_PROJECT_BUDGET_MS: u128 = 20_000;
 
+/// `source`：调用方标识（如 `palette`）。同来源的新搜索会取消旧的；不传则互不影响。
 #[tauri::command]
 pub async fn search_workspace(
     state: tauri::State<'_, Arc<AppState>>,
     options: SearchOptions,
+    source: Option<String>,
 ) -> Result<SearchOutcome, String> {
+    let request = gate().register(source.as_deref());
     let root = state
         .config
         .read()
@@ -31,9 +50,13 @@ pub async fn search_workspace(
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
     let root = PathBuf::from(root);
-    tauri::async_runtime::spawn_blocking(move || search::search(&root, &options))
-        .await
-        .map_err(|e| format!("后台任务失败: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        request.run(|cancel| {
+            search::search_cancellable(&root, &options, search::TIME_BUDGET_MS, cancel)
+        })
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
 }
 
 /// 在工作区内替换全部命中。范围与 `search_workspace` 完全一致（同一套候选收集）。
@@ -104,6 +127,8 @@ pub struct ProjectsSearchOutcome {
     pub errors: Vec<String>,
     pub truncated: bool,
     pub elapsed_ms: u64,
+    /// 被同来源的新搜索或显式取消打断；此时结果不完整。
+    pub cancelled: bool,
 }
 
 /// 搜索依赖闭包里的全部工程（默认范围）。
@@ -118,7 +143,9 @@ pub struct ProjectsSearchOutcome {
 pub async fn search_projects(
     state: tauri::State<'_, Arc<AppState>>,
     options: SearchOptions,
+    source: Option<String>,
 ) -> Result<ProjectsSearchOutcome, String> {
+    let request = gate().register(source.as_deref());
     if !options.dirs.is_empty() {
         return Err("按组件搜索只支持当前工作区，请把范围切到「当前工程」或「组件」".to_string());
     }
@@ -134,51 +161,62 @@ pub async fn search_projects(
     let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
 
     tauri::async_runtime::spawn_blocking(move || {
-        let mut roots: Vec<(String, String)> = Vec::new();
-        for p in crate::eclipse_cp::projects(&primary_path, &overrides) {
-            let Some(root) = p.root else { continue };
-            if !Path::new(&root).is_dir() {
-                continue;
-            }
-            if roots.iter().any(|(_, r)| r.eq_ignore_ascii_case(&root)) {
-                continue;
-            }
-            roots.push((p.name, root));
-        }
-        // 覆盖表解析异常时至少还要能搜当前工作区
-        if !roots.iter().any(|(_, r)| r.eq_ignore_ascii_case(&primary)) {
-            let name = primary_path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| primary.clone());
-            roots.insert(0, (name, primary.clone()));
-        }
-
-        let started = Instant::now();
-        let mut projects = Vec::new();
-        let mut errors = Vec::new();
-        let mut truncated = false;
-        for (project, root) in roots {
-            let used = started.elapsed().as_millis();
-            if used >= MULTI_PROJECT_BUDGET_MS {
-                truncated = true;
-                break;
-            }
-            let budget = PER_PROJECT_BUDGET_MS.min(MULTI_PROJECT_BUDGET_MS - used);
-            match search::search_with_budget(Path::new(&root), &options, budget) {
-                Ok(outcome) => {
-                    truncated |= outcome.truncated;
-                    projects.push(ProjectSearch { project, root, outcome });
+        request.run(|cancel| {
+            let mut roots: Vec<(String, String)> = Vec::new();
+            for p in crate::eclipse_cp::projects(&primary_path, &overrides) {
+                let Some(root) = p.root else { continue };
+                if !Path::new(&root).is_dir() {
+                    continue;
                 }
-                Err(e) => errors.push(format!("{project}: {e}")),
+                if roots.iter().any(|(_, r)| r.eq_ignore_ascii_case(&root)) {
+                    continue;
+                }
+                roots.push((p.name, root));
             }
-        }
-        ProjectsSearchOutcome {
-            projects,
-            errors,
-            truncated,
-            elapsed_ms: started.elapsed().as_millis() as u64,
-        }
+            // 覆盖表解析异常时至少还要能搜当前工作区
+            if !roots.iter().any(|(_, r)| r.eq_ignore_ascii_case(&primary)) {
+                let name = primary_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| primary.clone());
+                roots.insert(0, (name, primary.clone()));
+            }
+
+            let started = Instant::now();
+            let mut projects = Vec::new();
+            let mut errors = Vec::new();
+            let mut truncated = false;
+            for (project, root) in roots {
+                if cancel.load(Ordering::Relaxed) {
+                    truncated = true;
+                    break;
+                }
+                let used = started.elapsed().as_millis();
+                if used >= MULTI_PROJECT_BUDGET_MS {
+                    truncated = true;
+                    break;
+                }
+                let budget = PER_PROJECT_BUDGET_MS.min(MULTI_PROJECT_BUDGET_MS - used);
+                match search::search_cancellable(Path::new(&root), &options, budget, cancel) {
+                    Ok(outcome) => {
+                        truncated |= outcome.truncated;
+                        projects.push(ProjectSearch {
+                            project,
+                            root,
+                            outcome,
+                        });
+                    }
+                    Err(e) => errors.push(format!("{project}: {e}")),
+                }
+            }
+            ProjectsSearchOutcome {
+                projects,
+                errors,
+                truncated,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+                cancelled: cancel.load(Ordering::Relaxed),
+            }
+        })
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))

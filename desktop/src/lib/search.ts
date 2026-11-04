@@ -33,7 +33,12 @@ export interface SearchOutcome {
   missingDirs: string[];
   /** 请求的范围一个都不存在 → 后端已回落成整个工作区。 */
   scopeFallback: boolean;
+  /** 被同来源的新搜索或 `cancelSearch` 打断；结果不完整，不能当成「没搜到」。 */
+  cancelled?: boolean;
 }
+
+/** 取消某个来源正在跑的搜索（没有就什么也不做）。失败只是没停下，不影响界面。 */
+export const cancelSearch = (source: string) => invoke("search_cancel", { source }).catch(() => {});
 
 export interface SearchOptions {
   text: string;
@@ -52,8 +57,12 @@ export interface SearchOptions {
   maxResults?: number;
 }
 
-export const searchWorkspace = (options: SearchOptions, report = false) =>
-  !report ? invoke<SearchOutcome>("search_workspace", { options }) : trackOperation({ key: `search.workspace:${getSession().root}:${JSON.stringify(options)}`, label: "搜索当前工程", errorDetail: () => "搜索失败，请查看搜索页错误详情", scope: getSession().root ?? "工作区", page: "search", phase: "扫描所选范围，保留已有结果" }, () => invoke<SearchOutcome>("search_workspace", { options }), r => ({ state: "success", detail: `扫描 ${r.filesScanned} 个文件，命中 ${r.filesMatched} 个${r.truncated ? "；达到上限，结果不完整" : ""}${r.scopeFallback ? "；指定范围不存在，已回落到整个工作区" : ""}` }));
+/**
+ * `source`：调用方标识。同来源的新搜索会让后端取消旧的那次扫描（旧结果带 `cancelled`）；
+ * 不传则与其它搜索互不影响。
+ */
+export const searchWorkspace = (options: SearchOptions, report = false, source?: string) =>
+  !report ? invoke<SearchOutcome>("search_workspace", source ? { options, source } : { options }) : trackOperation({ key: `search.workspace:${getSession().root}:${JSON.stringify(options)}`, label: "搜索当前工程", errorDetail: () => "搜索失败，请查看搜索页错误详情", scope: getSession().root ?? "工作区", page: "search", phase: "扫描所选范围，保留已有结果" }, () => invoke<SearchOutcome>("search_workspace", { options }), r => ({ state: "success", detail: `扫描 ${r.filesScanned} 个文件，命中 ${r.filesMatched} 个${r.truncated ? "；达到上限，结果不完整" : ""}${r.scopeFallback ? "；指定范围不存在，已回落到整个工作区" : ""}` }));
 
 /** 单个工程的搜索结果（`search_projects` 的一项）。`outcome` 里的路径相对 `root`。 */
 export interface ProjectSearch {

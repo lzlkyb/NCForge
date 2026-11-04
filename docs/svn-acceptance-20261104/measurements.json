@@ -1,0 +1,126 @@
+{
+  "measurements": [
+    {
+      "width": 1280,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "panelLeft": 935,
+      "panelRight": 1274,
+      "diffCount": 1,
+      "dark": false,
+      "comfortable": false
+    },
+    {
+      "width": 1280,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "panelLeft": 935,
+      "panelRight": 1274,
+      "diffCount": 1,
+      "dark": false,
+      "comfortable": true
+    },
+    {
+      "width": 1280,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "panelLeft": 935,
+      "panelRight": 1274,
+      "diffCount": 1,
+      "dark": true,
+      "comfortable": false
+    },
+    {
+      "width": 1280,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "panelLeft": 935,
+      "panelRight": 1274,
+      "diffCount": 1,
+      "dark": true,
+      "comfortable": true
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "panelLeft": 592,
+      "panelRight": 1012,
+      "diffCount": 1,
+      "dark": false,
+      "comfortable": false
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "panelLeft": 592,
+      "panelRight": 1012,
+      "diffCount": 1,
+      "dark": false,
+      "comfortable": true
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "panelLeft": 592,
+      "panelRight": 1012,
+      "diffCount": 1,
+      "dark": true,
+      "comfortable": false
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "panelLeft": 592,
+      "panelRight": 1012,
+      "diffCount": 1,
+      "dark": true,
+      "comfortable": true
+    },
+    {
+      "width": 560,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "panelLeft": 132,
+      "panelRight": 552,
+      "diffCount": 1,
+      "dark": false,
+      "comfortable": false
+    },
+    {
+      "width": 560,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "panelLeft": 132,
+      "panelRight": 552,
+      "diffCount": 1,
+      "dark": false,
+      "comfortable": true
+    },
+    {
+      "width": 560,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "panelLeft": 132,
+      "panelRight": 552,
+      "diffCount": 1,
+      "dark": true,
+      "comfortable": false
+    },
+    {
+      "width": 560,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "panelLeft": 132,
+      "panelRight": 552,
+      "diffCount": 1,
+      "dark": true,
+      "comfortable": true
+    }
+  ],
+  "errors": [],
+  "commitCalls": 1
+}

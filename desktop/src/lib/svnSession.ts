@@ -1,6 +1,7 @@
 import type { RightMode } from "../components/svn/RightPane";
 import { showWorkbenchDocument } from "./dockEvents";
 import { createSessionStore, useSessionStore } from "./sessionStore";
+import { getSession, useWorkspaceRoot } from "./workspaceSession";
 
 /**
  * 版本控制页的两个视图。
@@ -27,16 +28,26 @@ export interface SvnView {
   showIgnored: boolean;
   selectedPath: string | null;
   mode: RightMode;
+  commitOpen: boolean;
 }
 
-export const svnSession = createSessionStore<SvnView>({
+const initial = (): SvnView => ({
   page: "review",
   showIgnored: false,
   selectedPath: null,
   mode: "diff",
+  commitOpen: false,
 });
-
-export const useSvnView = (): SvnView => useSessionStore(svnSession);
+const views = new Map<string, ReturnType<typeof createSessionStore<SvnView>>>();
+const listeners = new Set<() => void>();
+function currentView() {
+  const root = (getSession().root ?? "").toLowerCase().replace(/\\/g,"/");
+  let view = views.get(root);
+  if (!view) { view = createSessionStore(initial()); view.subscribe(() => listeners.forEach(fn => fn())); views.set(root,view); }
+  return view;
+}
+export const svnSession = { get: () => currentView().get(), set: (patch: Partial<SvnView>) => currentView().set(patch), subscribe: (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; } };
+export const useSvnView = (): SvnView => { useWorkspaceRoot(); return useSessionStore(svnSession); };
 
 /**
  * 从别处（命令面板、编辑器的「打包补丁」入口）直达补丁视图。

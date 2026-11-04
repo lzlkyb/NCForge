@@ -19,6 +19,7 @@ use crate::nc_home::{self, NcHome, ServerEndpoints};
 use crate::nc_port::{self, PortApplied, PortPlan};
 use crate::server::{self, PortOwner, ServerProcess, ServerRun, StopOutcome};
 use crate::state::AppState;
+use crate::status_probe;
 use tauri::Emitter;
 
 /// 一次增量读的上限。256KB 够看几千行；更大的批次对界面没有意义（人读不过来）。
@@ -139,10 +140,15 @@ fn snapshot(run: &mut ServerRun) -> Snap {
     }
 }
 
-fn build_status(cfg: &AppConfig, config_dir: &Path, s: Snap, ep: &ServerEndpoints) -> ServerStatus {
+fn build_status(
+    cfg: &AppConfig,
+    config_dir: &Path,
+    s: Snap,
+    ep: &ServerEndpoints,
+    owner: Option<PortOwner>,
+) -> ServerStatus {
     let path = log_path(config_dir);
     let port = ep.http_port;
-    let owner = server::port_owner(port);
     let owned_by_self = match (&owner, s.pid) {
         (Some(o), Some(p)) => o.pid == p,
         _ => false,
@@ -206,11 +212,26 @@ pub async fn server_status(state: tauri::State<'_, Arc<AppState>>) -> Result<Ser
         };
         // NC home 定位失败时不能直接报错：服务页还得能显示「未找到 NC 安装目录」，
         // 此时端口按默认 80 显示，并标记「不是从配置读的」（界面据此不宣称端口可信）。
-        let endpoints = match nc_home::resolve(cfg.nc_home.as_deref()) {
-            Ok(home) => nc_home::read_endpoints(Path::new(&home.root)),
-            Err(_) => ServerEndpoints::fallback(String::new()),
+        // 定位、读 prop.xml、查端口三样都走缓存（规则见 status_probe 模块头）：
+        // 稳态下不再每秒数几百个模块目录、每秒 fork 一次 netstat。
+        let now = std::time::Instant::now();
+        let mut probe = status_probe::lock();
+        let root = probe.home_root(cfg.nc_home.as_deref(), now, || {
+            nc_home::resolve(cfg.nc_home.as_deref())
+                .ok()
+                .map(|h| PathBuf::from(h.root))
+        });
+        let endpoints = probe.endpoints(root.as_deref(), nc_home::read_endpoints);
+        let proc = status_probe::ProcState {
+            starting: snap.starting,
+            alive: snap.alive,
+            pid: snap.pid,
         };
-        Ok(build_status(&cfg, &st.config_dir, snap, &endpoints))
+        let owner = probe.owner(endpoints.http_port, proc, now, || {
+            server::port_owner(endpoints.http_port)
+        });
+        drop(probe);
+        Ok(build_status(&cfg, &st.config_dir, snap, &endpoints, owner))
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?

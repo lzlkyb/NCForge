@@ -38,7 +38,7 @@ fn find_ecj(config_dir: &Path) -> Result<PathBuf, String> {
             .join("ecj-3.17.jar"),
     );
     cands.into_iter().find(|p| p.is_file()).ok_or_else(|| {
-        "找不到 Java 编译器组件（ecj）。若刚安装/更新过，请到设置 → 组件里下载；否则检查网络后重试"
+        "找不到 Java 编译器组件（ecj）。请点击下载按钮，或到设置 → 维护 → 组件与更新下载，然后重新编译"
             .to_string()
     })
 }

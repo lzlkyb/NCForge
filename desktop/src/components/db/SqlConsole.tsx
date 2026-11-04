@@ -15,7 +15,7 @@ import { cancelOperation, getOperations } from "../../lib/operations";
 import { dbApi } from "../../lib/dbApi";
 import { friendlyDbError } from "../../lib/db";
 import { guessTable } from "../../lib/resultExport";
-import { closeSessionPanel, openSessionPanel, sqlTabOf, useDb, type SqlTab } from "../../lib/dbStore";
+import { closeSessionPanel, openSessionPanel, sqlTabOf, useDbSelector, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台：工具条 / 事务条 / 编辑器 / 可拖高度的结果区 / 历史与会话抽屉。 */
 import { DbContextBar } from "./DbContextBar";
@@ -31,8 +31,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   /** 右侧抽屉：历史与片段互斥（同一列位置，同时开就挤成两栏了）。 */
   const [side, setSide] = useState<"history" | "snips" | null>(null);
   // 会话面板是页级状态（按钮在工具条、抽屉在 body 里），放 store 才不用层层回调
-  const db = useDb();
-  const sessOpen = db.sessionPanel?.connId === tab.connId && tab.connId != null;
+  const sessOpen = useDbSelector((s) => s.sessionPanel?.connId === tab.connId && tab.connId != null);
   /** 导出对话框：光标处那条语句 + 猜出来的表名。 */
   const [exp, setExp] = useState<{ sql: string; table: string } | null>(null);
   /** 全库按值反查（连接级工具，从工具条开）。 */

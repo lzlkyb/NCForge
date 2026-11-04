@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { settle, type Pending, type SaveFailure } from "../../lib/dbConfirm";
 
@@ -18,10 +18,17 @@ export function FilesBody({ p }: { p: Extract<Pending, { kind: "unsavedFiles" }>
   const [phase, setPhase] = useState<"idle" | "saving" | "failed">("idle");
   const [progress, setProgress] = useState({ done: 0, total: p.files.length });
   const [failed, setFailed] = useState<SaveFailure[]>([]);
+  const svn = p.purpose === "svn";
+  const saving = useRef(false);
 
   const saveAndExit = async () => {
+    if (saving.current) return;
+    saving.current = true;
     setPhase("saving");
-    const bad = await p.onSave((done, total) => setProgress({ done, total }));
+    let bad: SaveFailure[];
+    try { bad = await p.onSave((done, total) => setProgress({ done, total })); }
+    catch (error) { bad = p.files.map(file => ({ path: file.path, name: file.name, reason: error instanceof Error ? error.message : String(error) })); }
+    saving.current = false;
     if (bad.length === 0) {
       settle((x) => x.kind === "unsavedFiles" && x.resolve("save"));
       return;
@@ -46,7 +53,7 @@ export function FilesBody({ p }: { p: Extract<Pending, { kind: "unsavedFiles" }>
               </li>
             ))}
           </ul>
-          <p className="dbx-muted">现在{p.action}，这些文件的修改会丢失。建议回编辑器处理完再继续。</p>
+          <p className="dbx-muted">{svn ? "未保存修改仍保留在编辑器中，提交磁盘版本不会包含这些修改。建议先处理保存问题。" : <>现在{p.action}，这些文件的修改会丢失。建议回编辑器处理完再继续。</>}</p>
         </div>
         <div className="ft">
           <span className="dbx-sp" />
@@ -54,7 +61,7 @@ export function FilesBody({ p }: { p: Extract<Pending, { kind: "unsavedFiles" }>
             返回编辑器处理
           </button>
           {p.allowDiscard !== false && <button type="button" className="dbx-btn bad" onClick={() => settle((x) => x.kind === "unsavedFiles" && x.resolve("discard"))}>
-            不保存并{p.action}
+            {svn ? "提交磁盘版本" : <>不保存并{p.action}</>}
           </button>}
         </div>
       </>
@@ -69,7 +76,7 @@ export function FilesBody({ p }: { p: Extract<Pending, { kind: "unsavedFiles" }>
         {p.action}前有 {p.files.length} 个文件未保存
       </div>
       <div className="bd one">
-        <p style={{ marginBottom: 6 }}>这些文件改过但还没写到磁盘，现在{p.action}改动会丢失。</p>
+        <p style={{ marginBottom: 6 }}>{svn ? "这些选中文件在编辑器里有未保存修改。可先保存再继续，或只提交磁盘上的版本；编辑器中的修改会保留。" : <>这些文件改过但还没写到磁盘，现在{p.action}改动会丢失。</>}</p>
         <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, maxHeight: 168, overflowY: "auto" }}>
           {p.files.map((f) => (
             <li key={f.path} className="dbx-mono" title={f.path}>
@@ -85,10 +92,10 @@ export function FilesBody({ p }: { p: Extract<Pending, { kind: "unsavedFiles" }>
           取消
         </button>
         {p.allowDiscard !== false && <button type="button" className="dbx-btn bad" disabled={busy} onClick={() => settle((x) => x.kind === "unsavedFiles" && x.resolve("discard"))}>
-          不保存并{p.action}
+          {svn ? "提交磁盘版本" : <>不保存并{p.action}</>}
         </button>}
         <button type="button" className="dbx-btn pri" disabled={busy} onClick={() => void saveAndExit()}>
-          {busy ? `正在保存 ${progress.done}/${progress.total}` : `保存全部并${p.action}`}
+          {busy ? `正在保存 ${progress.done}/${progress.total}` : svn ? "保存后继续" : `保存全部并${p.action}`}
         </button>
       </div>
     </>

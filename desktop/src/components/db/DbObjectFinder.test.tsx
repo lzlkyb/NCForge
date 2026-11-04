@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 const mock=vi.hoisted(()=>({objects:vi.fn()}));
 vi.mock("../../lib/dbApi",()=>({dbApi:{objects:mock.objects},ENV_LABEL:{test:"测试"}}));
-vi.mock("../../lib/dbStore",()=>({useDb:()=>({conns:[{id:"c",name:"测试库",env:"test"}],active:null}),connOf:()=>({name:"测试库"}),rtOf:()=>({status:"connected",tables:[],tablesAt:1}),sqlTabOf:()=>null}));
+vi.mock("../../lib/dbStore",()=>{const S={conns:[{id:"c",name:"测试库",env:"test"}],tabs:[],active:null};const RT={status:"connected",tables:[],tablesAt:1};return {useDbConns:()=>S.conns,useDbSelector:(sel:(s:typeof S)=>unknown)=>sel(S),useConnRt:()=>RT,connOf:()=>({name:"测试库"})};});
 vi.mock("../../lib/dbActions",()=>({newConsole:vi.fn(),openTable:vi.fn(),refreshMeta:vi.fn()}));
 vi.mock("../../lib/dbConfirm",()=>({ensureConnected:vi.fn(async()=>true)}));
 vi.mock("../ui/Modal",()=>({Modal:({children}:{children:ReactNode})=><section>{children}</section>}));

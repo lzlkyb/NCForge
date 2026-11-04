@@ -250,7 +250,10 @@ mod live_tests {
             a.unregistered
         );
 
-        assert_eq!(a.registered, 32, "newar 的 manifest 登记 32 个（33 条，medpub 重复）");
+        assert_eq!(
+            a.registered, 32,
+            "newar 的 manifest 登记 32 个（33 条，medpub 重复）"
+        );
         assert_eq!(a.on_disk, 59, "newar 根下 59 个目录有 src 或 .classpath");
         assert_eq!(a.unregistered.len(), 27);
         // 已登记的不能出现在缺口里（大小写不敏感）

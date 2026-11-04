@@ -30,7 +30,7 @@ use crate::workspace;
 /// status 超时：实测全量 7.6 秒，给 4 倍余量应付别人机器上的杀软扫描。
 const T_STATUS: Duration = Duration::from_secs(180);
 /// 单文件操作（diff/blame/log）通常毫秒级，但首次要连服务器。
-const T_NET: Duration = Duration::from_secs(90);
+pub(super) const T_NET: Duration = Duration::from_secs(90);
 /// 提交、更新可能搬大量数据。
 const T_WRITE: Duration = Duration::from_secs(600);
 
@@ -155,11 +155,15 @@ fn resource_dirs(app: &AppHandle, config_dir: &Path) -> Vec<PathBuf> {
 /// 只比 java 路径是不够的：桥进程全程握着自己的 classpath，jar 升级（组件下载换包）
 /// 后旧 JVM 仍然跑旧 class，必须重启应用才生效——而升级正是「刚点完更新组件」的时刻，
 /// 用户会以为新版本没起作用。所以连 jar 列表一起比。
-fn bridge_for(app: &AppHandle, state: &AppState, cfg: &AppConfig) -> Result<Arc<Bridge>, String> {
+pub(super) fn bridge_for(
+    app: &AppHandle,
+    state: &AppState,
+    cfg: &AppConfig,
+) -> Result<Arc<Bridge>, String> {
     let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
     let java = PathBuf::from(&home.java);
     let (jars, _) = svn_bridge::find_jars(&resource_dirs(app, &state.config_dir)).ok_or_else(|| {
-        "找不到 SVN 组件（ncsvn.jar / svnkit.jar）。若刚安装/更新过，请到设置 → 组件里下载；否则检查网络后重试".to_string()
+        "找不到 SVN 组件（ncsvn.jar / svnkit.jar）。请点击下载按钮，或到设置 → 维护 → 组件与更新下载，然后重新扫描".to_string()
     })?;
     let cfg_dir = state.config_dir.join("svn");
     svn_bridge::ensure_dir(&cfg_dir)?;
@@ -235,7 +239,7 @@ fn lookup_cred(cfg: &AppConfig, host: &str) -> Cred {
 }
 
 /// 本地 info（不联网）：拿 URL / 版本 / host。凭据缺失也能跑。
-fn wc_info(bridge: &Bridge, root: &Path) -> Result<SvnInfo, String> {
+pub(super) fn wc_info(bridge: &Bridge, root: &Path) -> Result<SvnInfo, String> {
     let root_s = root.display().to_string();
     let v = bridge
         .call("info", &[&root_s], T_NET)
@@ -255,7 +259,7 @@ fn wc_info(bridge: &Bridge, root: &Path) -> Result<SvnInfo, String> {
 
 /// 网络操作前把凭据喂给桥。没有可用密码时返回 `code = "auth"` 的错误，
 /// 前端据此弹登录框（而不是显示「命令失败」）。
-fn ensure_auth(
+pub(super) fn ensure_auth(
     bridge: &Bridge,
     cfg: &AppConfig,
     host: &str,
@@ -274,7 +278,7 @@ fn ensure_auth(
     }
 }
 
-fn root_of(cfg: &AppConfig) -> Result<PathBuf, String> {
+pub(super) fn root_of(cfg: &AppConfig) -> Result<PathBuf, String> {
     cfg.workspace_root
         .as_deref()
         .filter(|s| !s.is_empty())
@@ -282,12 +286,24 @@ fn root_of(cfg: &AppConfig) -> Result<PathBuf, String> {
         .ok_or_else(|| "还没有选择工作区（先在文件页打开一个工程根目录）".to_string())
 }
 
+/// 前端捕获发起动作的工程；IPC 排队期间切工程时不能把写动作应用到新根目录。
+fn validate_expected_root(cfg: &AppConfig, expected: &Option<String>) -> Result<(), String> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let norm = |path: &str| path.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    if cfg.workspace_root.as_deref().map(norm) != Some(norm(expected)) {
+        return Err("工作副本已切换，写操作没有执行，请回到来源工程重新检查".to_string());
+    }
+    Ok(())
+}
+
 /// 白名单校验：SVN 命令只允许作用在工作区内。
 ///
 /// 同步实现，但**所有调用点都已在 `spawn_blocking` 内**（本文件的命令模式就是
 /// 「取 cfg → spawn_blocking → 在里面调桥」），所以这是对的。要在这里新增调用点时
 /// 必须保持在阻塞线程里；命令体（async）上要做校验请用 `resolve_safe_path_async`。
-fn safe_path(cfg: &AppConfig, requested: &str) -> Result<PathBuf, String> {
+pub(super) fn safe_path(cfg: &AppConfig, requested: &str) -> Result<PathBuf, String> {
     let root = root_of(cfg)?;
     let root_s = display_path(&root);
     let p = resolve_safe_path(requested, std::slice::from_ref(&root_s), &[], true)?;
@@ -412,7 +428,7 @@ pub async fn svn_status(
 
 /// 命令层错误统一编码成 `code|message`：前端按第一个 `|` 切开，`code` 决定引导方式
 /// （`auth` 弹登录框、`conflict` 指到冲突面板、其余原样显示）。
-fn split_code_label(code: String, message: String) -> String {
+pub(super) fn split_code_label(code: String, message: String) -> String {
     format!("{code}|{message}")
 }
 
@@ -428,7 +444,6 @@ pub async fn svn_diff(
     tauri::async_runtime::spawn_blocking(move || {
         let target = safe_path(&cfg, &path)?;
         let bridge = bridge_for(&app, &st, &cfg)?;
-        let working = workspace::read_text_file(&target)?;
         let v = bridge
             .call("diff", &[&target.display().to_string()], T_NET)
             .map_err(|e| split_code_label(e.code, e.message))?;
@@ -437,6 +452,24 @@ pub async fn svn_diff(
             .as_str()
             .and_then(svn_cred::b64_decode)
             .unwrap_or_default();
+        // 删除文件仍要展示 BASE；缺失状态由界面单独处理，不能把删除误报成读取故障。
+        if !target.exists() {
+            return Ok(DiffResult {
+                base_text: workspace::decode_lossy(&base_bytes).replace("\r\n", "\n"),
+                working_text: String::new(),
+                encoding: match workspace::detect_encoding(&base_bytes) {
+                    workspace::TextEncoding::Utf8 => "UTF-8",
+                    workspace::TextEncoding::Gbk => "GBK",
+                }
+                .to_string(),
+                eol: "LF".to_string(),
+                base_empty,
+                base_size: base_bytes.len() as u64,
+                working_size: 0,
+                editable: false,
+            });
+        }
+        let working = workspace::read_text_file(&target)?;
         // BASE 用工作副本的编码解：两侧必须同一种解码，否则 GBK 文件会满屏假差异
         let base_text = if base_empty {
             String::new()
@@ -543,6 +576,7 @@ pub async fn svn_commit(
     state: tauri::State<'_, Arc<AppState>>,
     paths: Vec<String>,
     message: String,
+    expected_root: Option<String>,
 ) -> Result<CommitResult, String> {
     if paths.is_empty() {
         return Err("没有勾选任何文件".to_string());
@@ -551,6 +585,7 @@ pub async fn svn_commit(
         return Err("提交说明不能为空".to_string());
     }
     let cfg = state.config.read().await.clone();
+    validate_expected_root(&cfg, &expected_root)?;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let root = root_of(&cfg)?;
@@ -597,8 +632,10 @@ pub async fn svn_commit(
 pub async fn svn_update(
     app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
+    expected_root: Option<String>,
 ) -> Result<UpdateResult, String> {
     let cfg = state.config.read().await.clone();
+    validate_expected_root(&cfg, &expected_root)?;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let root = root_of(&cfg)?;
@@ -623,11 +660,13 @@ pub async fn svn_revert(
     state: tauri::State<'_, Arc<AppState>>,
     paths: Vec<String>,
     recursive: bool,
+    expected_root: Option<String>,
 ) -> Result<RevertResult, String> {
     if paths.is_empty() {
         return Err("没有选中要撤销的文件".to_string());
     }
     let cfg = state.config.read().await.clone();
+    validate_expected_root(&cfg, &expected_root)?;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let root = root_of(&cfg)?;
@@ -676,11 +715,13 @@ pub async fn svn_resolve(
     state: tauri::State<'_, Arc<AppState>>,
     path: String,
     choice: String,
+    expected_root: Option<String>,
 ) -> Result<ResolveResult, String> {
     if !matches!(choice.as_str(), "mine" | "theirs" | "base") {
         return Err("未知的解决方式".to_string());
     }
     let cfg = state.config.read().await.clone();
+    validate_expected_root(&cfg, &expected_root)?;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let root = root_of(&cfg)?;
@@ -702,7 +743,7 @@ pub async fn svn_resolve(
 ///
 /// 版本号事先不知道（服务器把冲突版本写成 `.r1234`，本地那一版是 `.mine`），
 /// 所以按文件名前缀扫一遍目录，而不是拼死一个名字。
-fn backup_conflict_files(
+pub(super) fn backup_conflict_files(
     root: &Path,
     target: &Path,
     config_dir: &Path,
@@ -728,6 +769,9 @@ fn backup_conflict_files(
                 found.push(entry.path());
             }
         }
+    }
+    if target.is_file() {
+        found.push(target.to_path_buf());
     }
     if found.is_empty() {
         return Ok(None);
@@ -1016,5 +1060,38 @@ fn parse_code(e: &str) -> &str {
     match e.find('|') {
         Some(i) => &e[..i],
         None => "",
+    }
+}
+
+#[cfg(test)]
+mod upgrade_tests {
+    use super::*;
+    #[test]
+    fn queued_write_cannot_target_another_workspace() {
+        let cfg = AppConfig {
+            workspace_root: Some("D:/Source/".to_string()),
+            ..AppConfig::default()
+        };
+        assert!(validate_expected_root(&cfg, &Some("d:\\source".to_string())).is_ok());
+        assert!(validate_expected_root(&cfg, &Some("D:/Other".to_string())).is_err());
+    }
+    #[test]
+    fn conflict_backup_preserves_working_and_all_versions() {
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/test-tmp");
+        let temp = base.join(format!("ncf-svn-backup-{}", now_ms()));
+        let root = temp.join("wc");
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("A.java");
+        for name in ["A.java", "A.java.mine", "A.java.r2", "A.java.r9"] {
+            std::fs::write(root.join(name), name).unwrap();
+        }
+        let backup = backup_conflict_files(&root, &target, &temp.join("config"), "A.java")
+            .unwrap()
+            .unwrap();
+        for name in ["A.java", "A.java.mine", "A.java.r2", "A.java.r9"] {
+            assert_eq!(std::fs::read_to_string(backup.join(name)).unwrap(), name);
+        }
+        assert!(temp.starts_with(&base));
+        std::fs::remove_dir_all(temp).unwrap();
     }
 }

@@ -1,0 +1,104 @@
+{
+  "layouts": [
+    {
+      "width": 1280,
+      "dark": false,
+      "left": 360,
+      "right": 920,
+      "top": 185.5,
+      "bottom": 614.5,
+      "overflow": false,
+      "viewportOverflow": false,
+      "theme": "light"
+    },
+    {
+      "width": 1280,
+      "dark": true,
+      "left": 360,
+      "right": 920,
+      "top": 185.5,
+      "bottom": 614.5,
+      "overflow": false,
+      "viewportOverflow": false,
+      "theme": "dark"
+    },
+    {
+      "width": 1024,
+      "dark": false,
+      "left": 232,
+      "right": 792,
+      "top": 185.5,
+      "bottom": 614.5,
+      "overflow": false,
+      "viewportOverflow": false,
+      "theme": "light"
+    },
+    {
+      "width": 1024,
+      "dark": true,
+      "left": 232,
+      "right": 792,
+      "top": 185.5,
+      "bottom": 614.5,
+      "overflow": false,
+      "viewportOverflow": false,
+      "theme": "dark"
+    },
+    {
+      "width": 560,
+      "dark": false,
+      "left": 22.40625,
+      "right": 537.59375,
+      "top": 185.5,
+      "bottom": 614.5,
+      "overflow": false,
+      "viewportOverflow": false,
+      "theme": "light"
+    },
+    {
+      "width": 560,
+      "dark": true,
+      "left": 22.40625,
+      "right": 537.59375,
+      "top": 185.5,
+      "bottom": 614.5,
+      "overflow": false,
+      "viewportOverflow": false,
+      "theme": "dark"
+    }
+  ],
+  "errors": [],
+  "calls": [
+    {
+      "force": false,
+      "ids": [
+        "ecj"
+      ]
+    },
+    {
+      "force": false,
+      "ids": [
+        "svnkit"
+      ]
+    },
+    {
+      "force": false,
+      "ids": [
+        "svnkit"
+      ]
+    },
+    {
+      "force": false,
+      "ids": [
+        "jdtls",
+        "cfr"
+      ]
+    },
+    {
+      "force": false,
+      "ids": [
+        "cfr"
+      ]
+    }
+  ]
+}

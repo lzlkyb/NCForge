@@ -8,5 +8,11 @@
       <delegateCommandHandler class="ncforge.jdt.TypeHierarchyHandler">
          <command id="ncforge.typeHierarchy"/>
       </delegateCommandHandler>
+      <delegateCommandHandler class="ncforge.jdt.IncludeTypeHandler">
+         <command id="ncforge.includeType"/>
+      </delegateCommandHandler>
+      <delegateCommandHandler class="ncforge.jdt.CompletionMetadataHandler">
+         <command id="ncforge.completionMetadata"/>
+      </delegateCommandHandler>
    </extension>
 </plugin>

@@ -119,6 +119,18 @@ describe("BottomPanel 页签条", () => {
 });
 
 describe("BottomPanel 的编译日志", () => {
+  it("编译器缺失时可直接请求单包下载", () => {
+    const requested = vi.fn();
+    window.addEventListener("ncforge-resource-download", requested);
+    try {
+      render("build", { log: ["编译失败：找不到 Java 编译器组件（ecj）"] });
+      const download = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("下载 Java 编译器"));
+      expect(download).toBeDefined(); act(() => download!.click());
+      expect((requested.mock.calls[0][0] as CustomEvent).detail).toEqual({ id: "ecj" });
+      render("build", { log: ["其他编译错误"] });
+      expect(container.textContent).not.toContain("下载 Java 编译器");
+    } finally { window.removeEventListener("ncforge-resource-download", requested); }
+  });
   it("报错行能点开对应文件的那一行", () => {
     const log = [
       "模块 gl · 120 个源文件 · 按 import 挑出 30 个 jar",

@@ -10,7 +10,7 @@ import { PasswordResetDialog } from "./PasswordResetDialog";
 import { dbNameOf, type DbConn } from "../../lib/dbApi";
 import { ensureConnected } from "../../lib/dbConfirm";
 import { deleteConn, disconnectConn, duplicateConn, moveConn, newConsole, refreshMeta } from "../../lib/dbActions";
-import { defaultConnId, loadConns, openConnDialog, openDictTab, rtOf, tabOf, useDb } from "../../lib/dbStore";
+import { defaultConnId, loadConns, openConnDialog, openDictTab, rtOf, useDbConns, useDbRt, useDbSelector } from "../../lib/dbStore";
 
 /**
  * 侧栏：连接列表 + 已连上连接下的对象（收藏 / 表 / 视图）。
@@ -19,14 +19,21 @@ import { defaultConnId, loadConns, openConnDialog, openDictTab, rtOf, tabOf, use
  * 筛选框同时筛连接名与表名（含 NC 中文名）。
  */
 export function ConnTree() {
-  const db = useDb();
+  // 只订阅连接树用到的切片：SQL 执行、结果写回标签不再把整棵连接树重画。
+  // rt 整表要订：每个连接行都显示自己的状态（下面用 rtOf 读的就是这一份）。
+  useDbRt();
+  const db = {
+    conns: useDbConns(),
+    loaded: useDbSelector((s) => s.loaded),
+    loadError: useDbSelector((s) => s.loadError),
+  };
   const dock = useWorkbenchDock();
   const [filter, setFilter] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const [resetConn, setResetConn] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ from: string; over: string | null } | null>(null);
-  const activeConn = tabOf(db.active)?.connId ?? null;
+  const activeConn = useDbSelector((s) => s.tabs.find((t) => t.id === s.active)?.connId ?? null);
   const q = filter.trim().toLowerCase();
 
   const toggle = (c: DbConn) => {

@@ -112,6 +112,9 @@ export function registerJavaTemplates(): void {
     // 多一个触发字符只会让补全弹窗在奇怪的时候跳出来
     provideCompletionItems: (model, position) => {
       const word = model.getWordUntilPosition(position);
+      // Monaco 在分组产生任何候选后便停止后续 provider；不匹配的模板会挡住单词补全。
+      const matches = word.word ? TEMPLATES.filter(t => t.prefix.startsWith(word.word)) : [];
+      if (!matches.length) return null;
       const range = {
         startLineNumber: position.lineNumber,
         startColumn: word.startColumn,
@@ -119,7 +122,7 @@ export function registerJavaTemplates(): void {
         endColumn: word.endColumn,
       };
       return {
-        suggestions: TEMPLATES.map((t) => ({
+        suggestions: matches.map((t) => ({
           label: t.prefix,
           kind: monaco.languages.CompletionItemKind.Snippet,
           detail: t.detail,

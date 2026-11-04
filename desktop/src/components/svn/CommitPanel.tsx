@@ -1,181 +1,43 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useRef } from "react";
 import { Icon } from "../ui/icon";
-import { letterTone, type ChangeItem } from "../../lib/svn";
-
-/**
- * 提交视图（右栏原地替换，不弹模态框）。
- *
- * 勾选状态默认「全勾掉冲突」，不是「全不勾」：审查流的动作是「把不想提的勾掉」，
- * 从 30 个文件里一个个勾上比勾掉两三个慢一个数量级。
- *
- * 状态刷新后只自动勾上**新出现**的文件（`seenRef` 记着见过的），
- * 否则用户刚取消勾选的会被一次轮询又勾回去。
- */
-export function CommitPanel({
-  items,
-  hasConflict,
-  busy,
-  onSubmit,
-  onCancel,
-}: {
-  items: ChangeItem[];
-  hasConflict: boolean;
-  busy: boolean;
-  onSubmit: (message: string, paths: string[]) => void;
-  onCancel: () => void;
-}) {
-  const files = useMemo(() => items.filter((it) => !it.isDir), [items]);
-  const [message, setMessage] = useState("");
-  const [picked, setPicked] = useState<Set<string>>(() => new Set());
-  const seenRef = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    setPicked((prev) => {
-      const next = new Set(prev);
-      for (const f of files) {
-        // 冲突文件一律剔除：桥会直接拒绝整笔提交，留着只会让用户点了报错
-        if (f.letter === "C") {
-          next.delete(f.path);
-          continue;
-        }
-        if (!seenRef.current.has(f.path)) next.add(f.path);
-        seenRef.current.add(f.path);
-      }
-      return next;
-    });
-  }, [files]);
-
-  const conflictCount = files.filter((f) => f.letter === "C").length;
-  const pickedCount = files.filter((f) => picked.has(f.path)).length;
-  const canSubmit = !busy && pickedCount > 0 && message.trim().length > 0;
-
-  const toggle = (path: string) => {
-    setPicked((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  };
-
-  const toggleAll = () => {
-    setPicked(() => {
-      const all = files.filter((f) => f.letter !== "C").map((f) => f.path);
-      return all.length === pickedCount ? new Set() : new Set(all);
-    });
-  };
-
+import { SvnCheckbox } from "./SvnCheckbox";
+import { keyOf, letterTone, type ChangeItem } from "../../lib/svn";
+import { clearSvnPicked, isSvnCommittable, isSvnPicked, selectSvnPaths, setSvnMessage, toggleSvnPicked, useSvnDraft } from "../../lib/svnDraft";
+export function CommitPanel({ items, root = "", reviewed = new Set<string>(), busy, onSubmit, onCancel, onSelect }: { items: ChangeItem[]; root?: string; reviewed?: ReadonlySet<string>; hasConflict?: boolean; busy: boolean; onSubmit: (message: string, paths: string[]) => void; onCancel: () => void; onSelect?: (item: ChangeItem) => void }) {
+  const draft = useSvnDraft(root), sending = useRef(false);
+  const files = items.filter(isSvnCommittable), chosen = files.filter(f => isSvnPicked(draft.picked,f.path));
+  const unreviewed = chosen.filter(f => !reviewed.has(keyOf(f.path))).length;
+  const groups = new Map<string,ChangeItem[]>();
+  for (const f of chosen) {
+    const group = groups.get(f.module);
+    if (group) group.push(f); else groups.set(f.module,[f]);
+  }
+  const canSubmit = !!root && !busy && !draft.unknown && chosen.length > 0 && !!draft.message.trim();
   const submit = () => {
-    if (!canSubmit) return;
-    onSubmit(
-      message.trim(),
-      files.filter((f) => picked.has(f.path)).map((f) => f.path),
-    );
+    if (!canSubmit || sending.current) return;
+    // 同帧点击与快捷键共用保护；整个异步链由工作副本写锁接管。
+    sending.current = true; onSubmit(draft.message.trim(),chosen.map(f => f.path)); queueMicrotask(() => { sending.current = false; });
   };
-
-  return (
-    <section className="vc-commit">
-      <div className="vc-bar">
-        <Icon name="upload" size={14} />
-        <b>提交</b>
-        <span className="vc-sp" />
-        <span className="vc-hint">
-          {conflictCount > 0
-            ? `将提交 ${pickedCount} 个文件（不含 ${conflictCount} 个冲突）`
-            : `将提交 ${pickedCount} / ${files.length} 个文件`}
-        </span>
+  return <section className="vc-commit" aria-label="本次提交">
+    <div className="vc-bar"><Icon name="upload" size={14} /><b>本次提交</b><span className="vc-sp" /><button type="button" className="vc-btn vc-btn-icon" aria-label="收起提交区" onClick={onCancel}><Icon name="close" size={14} /></button></div>
+    <div className="vc-commit-body">
+      <label className="vc-label" htmlFor="svn-commit-message">提交说明<span className="vc-sp" /><span className="vc-hint">草稿自动保留</span></label>
+      <textarea id="svn-commit-message" className="vc-msg" aria-label="提交说明" value={draft.message} disabled={!root || busy || !!draft.unknown} placeholder="说明这次修改的内容与原因" spellCheck={false} onChange={e => setSvnMessage(root,e.target.value)} onKeyDown={e => { if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return; if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); submit(); } }} />
+      <div className="vc-commit-summary"><b>已选 {chosen.length} / {files.length} 个文件</b><span>{unreviewed ? `${unreviewed} 个尚未标记已审` : chosen.length ? "所选文件均已审查" : "在文件清单勾选本次提交内容"}</span></div>
+      {items.some(f => f.letter === "C") && <div className="vc-alert" data-tone="warn"><Icon name="alertTriangle" size={13} /><span>冲突文件已排除，其他所选文件仍可提交。</span></div>}
+      <div className="vc-selection-tools">
+        <SvnCheckbox label="选择全部可提交文件" checked={files.length > 0 && chosen.length === files.length} mixed={chosen.length > 0 && chosen.length < files.length} disabled={busy || !!draft.unknown || !files.length} onChange={() => chosen.length === files.length ? clearSvnPicked(root) : selectSvnPaths(root,files.map(f => f.path))} />
+        <button type="button" className="vc-chip" disabled={busy || !!draft.unknown || !files.length} onClick={() => selectSvnPaths(root,files.map(f => f.path))}>全选</button>
+        <button type="button" className="vc-chip" disabled={busy || !!draft.unknown || !chosen.length} onClick={() => clearSvnPicked(root)}>清空</button>
+        <button type="button" className="vc-chip" disabled={busy || !!draft.unknown} onClick={() => selectSvnPaths(root,files.filter(f => reviewed.has(keyOf(f.path))).map(f => f.path))}>只选已审</button>
       </div>
-
-      <div className="vc-commit-body">
-        <div className="vc-label">
-          提交说明
-          <span className="vc-sp" />
-          <span className="vc-hint">第一行会显示在历史列表里</span>
-        </div>
-        <textarea
-          className="vc-msg"
-          autoFocus
-          value={message}
-          placeholder={"一句话说清改了什么，例如：\n视光品种（CL04）：工单保存时型号自动转大写"}
-          spellCheck={false}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.ctrlKey && e.key === "Enter") {
-              e.preventDefault();
-              submit();
-            }
-          }}
-        />
-
-        {hasConflict && (
-          <div className="vc-alert" data-tone="bad">
-            <Icon name="alert" size={13} />
-            <span>
-              <b>{conflictCount} 个文件有冲突</b>，已从提交清单里剔除。冲突没解决前提交会被 SVN 服务端拒绝。
-            </span>
-          </div>
-        )}
-
-        <div className="vc-pick">
-          <div className="vc-pick-hd">
-            <button
-              type="button"
-              className="vc-cbx"
-              data-on={pickedCount > 0 && pickedCount === files.length - conflictCount ? true : undefined}
-              onClick={toggleAll}
-              title={pickedCount > 0 ? "全不选" : "全选"}
-              aria-label="全选"
-            >
-              <Icon name="check" size={9} />
-            </button>
-            已勾选 {pickedCount} / {files.length - conflictCount}
-            <span className="vc-sp" />
-            <button type="button" className="vc-btn vc-btn-sm" onClick={toggleAll}>
-              {pickedCount > 0 ? "全不选" : "全选"}
-            </button>
-          </div>
-          {files.map((f) => {
-            const off = f.letter === "C" || !picked.has(f.path);
-            return (
-              <button
-                key={f.path}
-                type="button"
-                className="vc-pick-it"
-                data-off={off || undefined}
-                disabled={f.letter === "C"}
-                onClick={() => toggle(f.path)}
-                title={f.rel}
-              >
-                <span className="vc-cbx" data-on={!off || undefined}>
-                  <Icon name="check" size={9} />
-                </span>
-                <span className="vc-badge" data-st={letterTone(f.letter)}>
-                  {f.letter}
-                </span>
-                <span className="vc-fn">{f.rel.slice(f.rel.lastIndexOf("/") + 1)}</span>
-                <span className="vc-sp" />
-                <span className="vc-hint">
-                  {f.letter === "C" ? "冲突，不可提交" : f.letter === "?" ? "提交时自动 add" : ""}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="vc-commit-foot">
-        <button type="button" className="vc-btn" onClick={onCancel} disabled={busy}>
-          取消
-        </button>
-        <span className="vc-sp" />
-        <span className="vc-hint">
-          <kbd>Ctrl</kbd>+<kbd>Enter</kbd> 提交
-        </span>
-        <button type="button" className="vc-btn vc-btn-primary" disabled={!canSubmit} onClick={submit}>
-          {busy ? <Icon name="spinner" size={12} /> : <Icon name="check" size={12} />}
-          {busy ? "提交中…" : `提交 ${pickedCount} 个文件`}
-        </button>
-      </div>
-    </section>
-  );
+      <div className="vc-commit-files">{[...groups].map(([module,entries]) => <div key={module}><div className="vc-commit-module">{module}<span>{entries.length}</span></div>{entries.map(f => <div className="vc-commit-file" key={f.path}>
+        <SvnCheckbox label={`提交 ${f.rel}`} checked disabled={busy || !!draft.unknown} onChange={() => toggleSvnPicked(root,f.path)} />
+        <span className="vc-badge" data-st={letterTone(f.letter)}>{f.letter}</span><button type="button" className="vc-commit-path" title={f.rel} onClick={() => onSelect?.(f)}>{f.rel}</button>{reviewed.has(keyOf(f.path)) && <Icon name="check" size={12} />}
+      </div>)}</div>)}</div>
+      {!chosen.length && <div className="vc-empty"><Icon name="check" size={22} /><span>尚未选择文件<br />选择范围会跨筛选保留</span></div>}
+      <p className="vc-hint">提交包含磁盘上的内容；未保存编辑会在提交前确认。</p>
+    </div>
+    <div className="vc-commit-foot"><span className="vc-hint">Ctrl+Enter 提交</span><span className="vc-sp" /><button type="button" className="vc-btn vc-btn-primary" disabled={!canSubmit} onClick={submit}>{busy ? <Icon name="spinner" size={12} className="animate-spin" /> : <Icon name="upload" size={12} />}{busy ? "处理中…" : `提交 ${chosen.length} 个文件`}</button></div>
+  </section>;
 }

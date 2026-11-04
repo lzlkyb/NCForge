@@ -1,4 +1,5 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import { createDirRefresher } from "../../lib/dirRefresh";
 import { baseName, encodingMarks, joinPath, listDir, type DirItem } from "../../lib/workspace";
 import { chainFor, chainOpen, collapseChain } from "../../lib/treeCompact";
 import { SRC_DIR, ncDepthOffset } from "../../lib/ncStructure";
@@ -6,6 +7,7 @@ import { listen } from "../../lib/tauri";
 import { pathKey } from "../../lib/treeSvn";
 import { isUnderPath } from "../../lib/treeProjects";
 import { getSession, setSession, setTree, useWorkspaceSelector } from "../../lib/workspaceSession";
+import { workspaceEpoch } from "../../lib/workspaceEpoch";
 
 /** 定位到某个文件时最多展开多少层：防止异常路径（工作区外的长路径）把界面锁死。 */
 const REVEAL_MAX_DEPTH = 40;
@@ -32,6 +34,7 @@ export function useTreeLoad(
 ) {
   // 只订阅树：整会话订阅下，每次 dirty 翻转 / 编译状态变化都会把整棵树重渲染一遍
   const tree = useWorkspaceSelector((s) => s.tree);
+  const epoch = workspaceEpoch();
   const { dirs, expanded, marks } = tree;
 
   /**
@@ -42,7 +45,7 @@ export function useTreeLoad(
    */
   const markEncodings = useCallback(
     async (dir: string, items: DirItem[]) => {
-      if (!isUnderPath(dir, root)) return;
+      if (workspaceEpoch() !== epoch || getSession().tree.root !== root || !isUnderPath(dir, root)) return;
       const files = items
         .filter((i) => !i.isDir && i.name.toLowerCase().endsWith(".java"))
         .map((i) => joinPath(dir, i.name));
@@ -50,6 +53,7 @@ export function useTreeLoad(
       try {
         const found = await encodingMarks(files);
         setTree((t) => {
+          if (t.root !== root || workspaceEpoch() !== epoch) return t;
           const next = { ...t.marks };
           // 这一层刚重扫过：先清旧标记，文件改回 GBK 后徽标才会消失
           for (const p of files) delete next[p];
@@ -60,11 +64,12 @@ export function useTreeLoad(
         // 忽略：标记是附加信息
       }
     },
-    [root],
+    [root, epoch],
   );
 
   const load = useCallback(
     async (path: string) => {
+      if (workspaceEpoch() !== epoch) return;
       // 已经有内容就别退回「加载中…」，刷新时列表原地替换，不闪
       setTree((t) =>
         t.dirs[path]?.status === "ok"
@@ -73,16 +78,16 @@ export function useTreeLoad(
       );
       try {
         const items = await listDir(path);
-        setTree((t) => ({ ...t, dirs: { ...t.dirs, [path]: { status: "ok", items } } }));
+        setTree((t) => t.root !== root || workspaceEpoch() !== epoch ? t : { ...t, dirs: { ...t.dirs, [path]: { status: "ok", items } } });
         void markEncodings(path, items);
       } catch (e) {
-        setTree((t) => ({
+        setTree((t) => t.root !== root || workspaceEpoch() !== epoch ? t : ({
           ...t,
           dirs: { ...t.dirs, [path]: { status: "error", message: String(e) } },
         }));
       }
     },
-    [markEncodings],
+    [markEncodings, root, epoch],
   );
 
   /**
@@ -91,18 +96,49 @@ export function useTreeLoad(
    *
    * `rescan` = 平台丢了监听范围（如 inotify 上限、根目录被替换），这时后端不知道
    * 具体改了哪些目录，只能把读过的一层全部重读。层数受展开深度限制，代价可控。
+   *
+   * 实际读盘交给 `refresher`：限并发、按路径去重、一轮只写一次树（见 lib/dirRefresh）。
+   * rescan 时几百个目录不再同时飞 IPC、也不再触发几百次整棵树重渲染。
    */
+  const refresher = useMemo(
+    () =>
+      createDirRefresher({
+        limit: 4,
+        read: async (dir: string) => {
+          if (workspaceEpoch() !== epoch) return { status: "error" as const, message: "工作区已切换" };
+          try {
+            return { status: "ok" as const, items: await listDir(dir) };
+          } catch (e) {
+            return { status: "error" as const, message: String(e) };
+          }
+        },
+        apply: (results) => {
+          setTree((t) => {
+            // 读盘期间换了工作区：旧结果不能写进新树
+            if (t.root !== root || workspaceEpoch() !== epoch) return t;
+            const dirs = { ...t.dirs };
+            for (const [dir, st] of results) dirs[dir] = st;
+            return { ...t, dirs };
+          });
+          for (const [dir, st] of results) if (st.status === "ok") void markEncodings(dir, st.items);
+        },
+      }),
+    [root, markEncodings, epoch],
+  );
+
   const refreshDirs = useCallback(
     (changed: string[], rescan: boolean) => {
       if (!rescan && changed.length === 0) return;
       const wanted = rescan ? null : new Set(changed.map(pathKey));
+      const todo: string[] = [];
       for (const [dir, entry] of Object.entries(getSession().tree.dirs)) {
         // 正在读的那一层，结果回来时本身就是新的，不叠加一次
         if (entry.status === "loading") continue;
-        if (!wanted || wanted.has(pathKey(dir))) void load(dir);
+        if (!wanted || wanted.has(pathKey(dir))) todo.push(dir);
       }
+      void refresher.request(todo).catch(() => {});
     },
-    [load],
+    [refresher],
   );
 
   // 订阅后端的文件监听。注册是异步的，组件可能在它回来前就卸载：
@@ -222,7 +258,7 @@ export function useTreeLoad(
    */
   const reveal = useCallback(
     async (path: string): Promise<boolean> => {
-      if (!path) return false;
+      if (!path || workspaceEpoch() !== epoch) return false;
       // 根列表在回调内部算：写成外层变量会让依赖每次渲染都变（eslint 也会拦），
       // 而这个表达式只依赖两个原始值，换工程才需要重算。
       const roots = projectRoots && projectRoots.length > 0 ? projectRoots : [root];
@@ -241,13 +277,14 @@ export function useTreeLoad(
       // 注意祖先循环从第一段开始：文件所在目录也要展开，不能只展开父目录本身
       if (getSession().tree.dirs[owner]?.status !== "ok") await load(owner);
       for (let i = 0; i < parts.length - 1; i += 1) {
+        if (workspaceEpoch() !== epoch) return false;
         cur = joinPath(cur, parts[i]);
         setTree((t) => (t.expanded.has(cur) ? t : { ...t, expanded: new Set(t.expanded).add(cur) }));
         if (getSession().tree.dirs[cur]?.status !== "ok") await load(cur);
       }
-      return true;
+      return workspaceEpoch() === epoch;
     },
-    [load, projectRoots, root],
+    [load, projectRoots, root, epoch],
   );
 
   return { dirs, expanded, marks, load, expand, toggle, toggleRow, depthOf, reveal, setExpandedPaths };

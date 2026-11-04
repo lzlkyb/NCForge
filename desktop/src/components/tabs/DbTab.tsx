@@ -12,7 +12,7 @@ import { DictWorkspace } from "../md/DictWorkspace";
 import { SqlConsole } from "../db/SqlConsole";
 import { TablePage } from "../db/TablePage";
 import { newConsole } from "../../lib/dbActions";
-import { showObjectFinder, defaultConnId, loadConns, openConnDialog, openDictTab, openSqlTab, tabOf, useDb } from "../../lib/dbStore";
+import { showObjectFinder, defaultConnId, loadConns, openConnDialog, openDictTab, openSqlTab, useActiveDbTab, useDbSelector } from "../../lib/dbStore";
 import { dbPanelId, dbTabId } from "../../lib/dbPendingSessions";
 
 /**
@@ -26,8 +26,14 @@ import { dbPanelId, dbTabId } from "../../lib/dbPendingSessions";
  * 用户还得在两边各自确认「这是哪个库」。
  */
 export function DbTab() {
-  const db = useDb();
-  const tab = tabOf(db.active);
+  // 整页只跟着「当前标签」和几个计数走：别的标签跑查询、连接状态变化不重画整页
+  const tab = useActiveDbTab();
+  const db = {
+    loaded: useDbSelector((s) => s.loaded),
+    tabs: { length: useDbSelector((s) => s.tabs.length) },
+    conns: { length: useDbSelector((s) => s.conns.length) },
+    objectFinder: useDbSelector((s) => s.objectFinder),
+  };
 
   useEffect(() => {
     if (!db.loaded) void loadConns();

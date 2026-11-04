@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { initMonaco, monaco } from "../../lib/monacoSetup";
+import { javaSuggestOptions } from "../../lib/javaSuggestOptions";
 import { getModel, getViewState, saveViewState, touchModel } from "../../lib/editorStore";
 import { registerLangProviders } from "../../lib/langProviders";
 import { registerExtraLangProviders } from "../../lib/langProvidersExtra";
@@ -87,7 +88,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       // 中文全角标点会被当成「易混淆字符」满屏框高亮，NC 源码里到处是中文注释，关掉。
       unicodeHighlight: { ambiguousCharacters: false, invisibleCharacters: false },
       // 没有语言服务时只给当前文档的单词补全，避免弹出一堆无关建议。
-      wordBasedSuggestions: "currentDocument",
+      ...javaSuggestOptions,
     });
     // Ctrl+S 与自动保存共用：先按偏好格式化，再落盘
     const saveNow = () => onSaveRef.current(() => formatBeforeSave(editor));

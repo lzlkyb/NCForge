@@ -17,18 +17,18 @@ vi.mock("./monacoSetup", () => ({
 import { registerJavaTemplates, TEMPLATE_PREFIXES } from "./liveTemplates";
 
 /** 取出注册进去的那个 provider，模拟一次补全。 */
-const suggest = (prefixLen: number) => {
+const suggest = (prefix: string) => {
   registerJavaTemplates();
   const provider = registered.providers[0] as {
     provideCompletionItems: (
       m: unknown,
       p: unknown,
-    ) => { suggestions: { label: string; insertText: string; insertTextRules?: number; sortText?: string }[] };
+    ) => { suggestions: { label: string; insertText: string; insertTextRules?: number; sortText?: string }[] } | null;
   };
   const model = {
-    getWordUntilPosition: () => ({ startColumn: 1, endColumn: prefixLen + 1 }),
+    getWordUntilPosition: () => ({ word: prefix, startColumn: 1, endColumn: prefix.length + 1 }),
   };
-  return provider.provideCompletionItems(model, { lineNumber: 3, column: prefixLen + 1 }).suggestions;
+  return provider.provideCompletionItems(model, { lineNumber: 3, column: prefix.length + 1 })?.suggestions ?? [];
 };
 
 describe("Java live templates", () => {
@@ -46,19 +46,25 @@ describe("Java live templates", () => {
   });
 
   it("必须走 InsertAsSnippet：否则 `${1:x}` 会原样打进代码里", () => {
-    const s = suggest(4);
+    const s = suggest("sout");
     const sout = s.find((x) => x.label === "sout")!;
     expect(sout.insertTextRules).toBe(4);
     expect(sout.insertText).toContain("$0");
   });
 
   it("排位靠后（zz- 前缀），敲半截时语义补全排前面", () => {
-    const s = suggest(2);
+    const s = suggest("so");
     for (const it of s) expect(it.sortText?.startsWith("zz-")).toBe(true);
   });
 
   it("psvm 生成的是 main 方法骨架（换行 + 占位符）", () => {
-    const psvm = suggest(4).find((x) => x.label === "psvm")!;
+    const psvm = suggest("psvm").find((x) => x.label === "psvm")!;
     expect(psvm.insertText).toContain("public static void main(String[] args)");
+  });
+
+  it("没有匹配模板时返回空，不能阻挡下一级文档单词补全", () => {
+    expect(suggest("ArrayL")).toEqual([]);
+    expect(suggest("localVariable")).toEqual([]);
+    expect(suggest("")).toEqual([]);
   });
 });

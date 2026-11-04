@@ -151,7 +151,7 @@ fn find_jdtls(app: &tauri::AppHandle, config_dir: &Path) -> Result<PathBuf, Stri
         }
     }
     Err(format!(
-        "找不到可用的 Java 语言服务组件（jdt.ls）。若刚安装/更新过，请到设置 → 组件里下载；\
+        "找不到可用的 Java 语言服务组件（jdt.ls）。请点击下载按钮，或到设置 → 维护 → 组件与更新下载；\
          或设置环境变量 NCFORGE_JDTLS_DIR 指定已有目录。已检查：{}",
         skipped.join("；")
     ))
@@ -357,6 +357,103 @@ fn start_blocking(
     }
 }
 
+/// jdt.ls 工作区缓存的版式号：目录规则变了就加一，旧缓存自然不再命中、随后被淘汰。
+const DATA_LAYOUT: u32 = 1;
+/// 最多保留几个模块的索引缓存。一份大约百 MB 级，4 份够在常用的几个模块间来回切。
+const DATA_KEEP: usize = 4;
+/// 缓存目录里记「最近一次使用时间」的文件（内容是毫秒时间戳）。
+const DATA_STAMP: &str = ".ncforge-used";
+
+/// FNV-1a：稳定、不随 Rust 版本变化（`DefaultHasher` 不保证这一点）。
+/// 路径先转小写：Windows 上 `C:\Work` 与 `c:\work` 是同一个目录。
+fn stable_hash(parts: &[&str]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for p in parts {
+        for b in p.to_lowercase().bytes().chain(std::iter::once(0)) {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    h
+}
+
+/// 某个模块自己的 jdt.ls 工作区缓存目录：`<base>/jdtls-ws/<模块>-<指纹>`。
+///
+/// 指纹覆盖工作区根、模块、NC home、jdt.ls 目录（含版本）与版式号：任一变化都换新目录，
+/// 旧的不再被读到。NC home 里 jar 增减不在指纹里——影子工程的 .classpath 每次启动都重生成，
+/// jdt.ls 自己会按新的类路径重新解析。
+fn data_dir_for(base: &Path, root: &Path, module: &str, nc_home: &Path, ls_dir: &Path) -> PathBuf {
+    let key = stable_hash(&[
+        &DATA_LAYOUT.to_string(),
+        &root.to_string_lossy(),
+        module,
+        &nc_home.to_string_lossy(),
+        &ls_dir.to_string_lossy(),
+    ]);
+    let safe: String = module
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(40)
+        .collect();
+    base.join("jdtls-ws").join(format!("{safe}-{key:016x}"))
+}
+
+fn now_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+/// 是不是可以放心递归删除的普通目录：符号链接与 junction 一律不碰
+/// （`symlink_metadata` 不跟随链接，junction 在 Windows 上也报成符号链接）。
+fn plain_dir(p: &Path) -> bool {
+    std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+}
+
+/// 给本次用的缓存打上「刚用过」，再把同级里最久没用的删到只剩 `keep` 份。
+/// 正在用的这份永远不删。缓存目录里只有 jdt.ls 自己写的文件，没有 junction。
+fn touch_and_prune(current: &Path, keep: usize, now: u128) {
+    let _ = std::fs::write(current.join(DATA_STAMP), now.to_string());
+    let Some(parent) = current.parent() else {
+        return;
+    };
+    let Ok(rd) = std::fs::read_dir(parent) else {
+        return;
+    };
+    let mut others: Vec<(u128, PathBuf)> = rd
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p != current && plain_dir(p))
+        .map(|p| {
+            let used = std::fs::read_to_string(p.join(DATA_STAMP))
+                .ok()
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0);
+            (used, p)
+        })
+        .collect();
+    others.sort_by_key(|o| std::cmp::Reverse(o.0));
+    for (_, p) in others.into_iter().skip(keep.saturating_sub(1)) {
+        let _ = std::fs::remove_dir_all(&p);
+    }
+}
+
+/// 旧版本只有一份的 `jdtls-data` 与 `last-module.txt`：新版不再用，顺手清掉（只会发生一次）。
+fn remove_legacy_data(base: &Path) {
+    let legacy = base.join("jdtls-data");
+    if plain_dir(&legacy) {
+        let _ = std::fs::remove_dir_all(&legacy);
+    }
+    let _ = std::fs::remove_file(base.join("last-module.txt"));
+}
+
 /// 准备期间被停止/切工作区时的统一错误文案。`start_blocking` 据此**不覆盖**状态：
 /// 这不是失败，`stop_now` 已经把状态置成 stopped 了。
 const CANCELLED: &str = "启动已取消：准备期间停止或切换了工作区";
@@ -386,6 +483,9 @@ fn launch(
         &state.config_dir.join("class-index.bin"),
         module,
         &|s| {
+            if lock_lang(state).cancel_epoch != cancel_epoch {
+                return;
+            }
             let _ = app.emit(
                 "lang-status",
                 LangStatus {
@@ -403,15 +503,13 @@ fn launch(
         crate::eclipse_cp::active_overrides(&state.config.blocking_read().linked_overrides);
     let base = state.config_dir.join("lang");
     let shadow_dir = base.join("shadow");
-    let data_dir = base.join("jdtls-data");
-    // 上次用的是另一个模块时清掉 jdt.ls 的工作区缓存，避免旧索引混进来。
-    // data_dir 在影子目录之外、里面没有 junction，递归删除是安全的。
-    let last_file = base.join("last-module.txt");
-    if std::fs::read_to_string(&last_file).ok().as_deref() != Some(module) {
-        let _ = std::fs::remove_dir_all(&data_dir);
-    }
-    std::fs::create_dir_all(&base).map_err(|e| format!("无法创建代码智能目录: {e}"))?;
-    let _ = std::fs::write(&last_file, module);
+    // jdt.ls 的工作区缓存按「工作区 + 模块 + NC home + jdt.ls 目录」各存一份：
+    // 以前只有一份、换模块就整个删掉，A → B → A 回到 A 要从头建索引。
+    // 现在各模块互不混用，又能复用；只留最近用过的 DATA_KEEP 份控制磁盘占用。
+    let data_dir = data_dir_for(&base, root, module, &nc_home, &ls_dir);
+    std::fs::create_dir_all(&data_dir).map_err(|e| format!("无法创建代码智能目录: {e}"))?;
+    remove_legacy_data(&base);
+    touch_and_prune(&data_dir, DATA_KEEP, now_ms());
 
     let project = shadow::generate(&ShadowSpec {
         workspace_root: root,
@@ -422,6 +520,27 @@ fn launch(
         extra_jars: &seed,
         overrides: &overrides,
     })?;
+    // 同一份类索引（同一 NC home）在进程内只建一次类名目录，切模块 / 重启语言服务直接复用
+    let catalog = crate::java_types::TypeCatalog::shared_cancellable(
+        &index,
+        &base.join("type-names.json"),
+        &|done, total| {
+            if lock_lang(state).cancel_epoch != cancel_epoch {
+                return;
+            }
+            let _ = app.emit(
+                "lang-status",
+                LangStatus {
+                    state: "starting".into(),
+                    module: Some(module.into()),
+                    message: format!("准备全 NC 类名补全 {done}/{total}…"),
+                    ..LangStatus::stopped()
+                },
+            );
+        },
+        &|| lock_lang(state).cancel_epoch != cancel_epoch,
+    )
+    .ok_or(CANCELLED)?;
 
     let real_dir = root.join(module);
     let shadow_module = shadow_dir.join(module);
@@ -484,7 +603,13 @@ fn launch(
         source_files: project.source_files,
         jar_count: project.jar_count,
     };
-    let session = Arc::new(LangSession::new(client, module, &real_dir, &shadow_module));
+    let session = Arc::new(
+        LangSession::new(client, module, &real_dir, &shadow_module).with_completion_catalog(
+            index,
+            catalog,
+            &shadow_dir,
+        ),
+    );
     {
         let mut run = lock_lang(state);
         // 登记前复检停止意图：这几秒里 session 还是 None，stop_now 摘不到东西、
@@ -593,8 +718,15 @@ pub async fn lang_regenerate(
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         stop_now(&app, &state);
-        // 删掉「上次模块」记录，launch 会据此连 jdt.ls 的工作区缓存一起清掉
-        let _ = std::fs::remove_file(state.config_dir.join("lang").join("last-module.txt"));
+        // 只清这个模块自己的 jdt.ls 工作区缓存（别的模块的索引照样留着）。
+        // 进程已停，没有人占着这个目录；目录里没有 junction，递归删除是安全的。
+        if let Ok(ls_dir) = find_jdtls(&app, &state.config_dir) {
+            let base = state.config_dir.join("lang");
+            let dir = data_dir_for(&base, &root, &module, Path::new(&home.root), &ls_dir);
+            if plain_dir(&dir) {
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+        }
         start_blocking(app, state, root, module, home, xmx)
     })
     .await
@@ -704,11 +836,26 @@ pub async fn lang_request(
     params: Value,
     timeout_ms: Option<u64>,
 ) -> Result<Value, String> {
+    if method == "ncforge/resolveTypeCompletion" && path.is_none() {
+        return Err("加载 NC 类型必须提供当前模块的真实文件路径".into());
+    }
+    if method == "workspace/executeCommand" && params["command"] == "ncforge.includeType" {
+        return Err("NC 类型依赖只能通过受控类型补全加载".into());
+    }
     let (session, p) = prepare(&state, path.as_deref(), &params)?;
     // 夹住：0 会让请求发出去就判定超时（前端拿到的错误是"超时"而不是真实原因），
     // 过大的值则让一个卡死的 jdt.ls 调用长期占着工作线程。
     let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000).clamp(1_000, 120_000));
     tauri::async_runtime::spawn_blocking(move || {
+        if method == "ncforge/typeCompletion" {
+            return Ok(crate::java_type_completion::candidates(&session, &p));
+        }
+        if method == "ncforge/resolveTypeCompletion" {
+            return crate::java_type_completion::resolve(&session, &p, timeout);
+        }
+        if method == "completionItem/resolve" {
+            return crate::java_type_completion::resolve_item(&session, &p, timeout);
+        }
         let out = session.client.request(&method, p, timeout)?;
         Ok(session.from_server(&out))
     })
@@ -771,6 +918,65 @@ pub async fn lang_notify(
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn 索引缓存按模块与环境隔离() {
+        let base = Path::new("C:\\cfg\\lang");
+        let ws = Path::new("C:\\work\\aier\\newar");
+        let home = Path::new("D:\\ncc\\1909home");
+        let ls = Path::new("C:\\cfg\\jdtls-1.40");
+        let a = data_dir_for(base, ws, "gl", home, ls);
+        // 同一组参数必须落到同一目录（A → B → A 才能复用），大小写不影响
+        assert_eq!(
+            a,
+            data_dir_for(base, Path::new("c:\\WORK\\aier\\newar"), "gl", home, ls)
+        );
+        assert!(a.starts_with(base.join("jdtls-ws")));
+        assert!(a.file_name().unwrap().to_string_lossy().starts_with("gl-"));
+        // 模块 / 工作区 / NC home / jdt.ls 版本任一变化都换目录
+        assert_ne!(a, data_dir_for(base, ws, "ia", home, ls));
+        assert_ne!(
+            a,
+            data_dir_for(base, Path::new("C:\\work\\other"), "gl", home, ls)
+        );
+        assert_ne!(
+            a,
+            data_dir_for(base, ws, "gl", Path::new("D:\\ncc\\nc65home"), ls)
+        );
+        assert_ne!(
+            a,
+            data_dir_for(base, ws, "gl", home, Path::new("C:\\cfg\\jdtls-1.41"))
+        );
+        // 模块名里的怪字符不能跑出缓存根
+        let odd = data_dir_for(base, ws, "..\\x y", home, ls);
+        assert_eq!(odd.parent().unwrap(), base.join("jdtls-ws"));
+    }
+
+    #[test]
+    fn 索引缓存只留最近用过的几份() {
+        let base = temp("data-prune");
+        let ws = base.join("jdtls-ws");
+        let dirs: Vec<PathBuf> = (0..6).map(|i| ws.join(format!("m{i}"))).collect();
+        for (i, d) in dirs.iter().enumerate() {
+            fs::create_dir_all(d.join(".metadata")).unwrap();
+            fs::write(d.join(DATA_STAMP), (100 + i).to_string()).unwrap();
+        }
+        // 用最旧的 m0：它变成最新，另外留 m5/m4/m3，m2/m1 被删
+        touch_and_prune(&dirs[0], 4, 1000);
+        let alive: Vec<bool> = dirs.iter().map(|d| d.is_dir()).collect();
+        assert_eq!(alive, [true, false, false, true, true, true]);
+        assert_eq!(
+            fs::read_to_string(dirs[0].join(DATA_STAMP)).unwrap(),
+            "1000"
+        );
+
+        // 旧版单份缓存与「上次模块」记录会被清掉
+        fs::create_dir_all(base.join("jdtls-data").join(".metadata")).unwrap();
+        fs::write(base.join("last-module.txt"), "gl").unwrap();
+        remove_legacy_data(&base);
+        assert!(!base.join("jdtls-data").exists() && !base.join("last-module.txt").exists());
+        let _ = fs::remove_dir_all(&base);
+    }
 
     fn temp(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("ncforge-lang-{tag}-{}", std::process::id()));

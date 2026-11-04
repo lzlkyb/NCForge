@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { getConfig, langConfigSet, langRegenerate, type AppConfig, type LangConfigPatch } from "../../lib/appConfig";
 import { applyLangPrefs, useLangView, type LangState } from "../../lib/lang";
 import { Button } from "../ui/button";
+import { missingResourceId } from "../../lib/resourceMissing";
+import { ResourceDownloadButton } from "../resource/ResourceDownloadButton";
 import { Card } from "../ui/card";
 import { LangMemoryField } from "./LangMemoryField";
 import { Badge } from "../ui/badge";
@@ -141,6 +143,7 @@ export function LangSettings() {
             {off ? "轻量模式" : STATE_LABELS[view.state]}
           </Badge>
           <p className="text-xs text-muted-foreground">{off ? "代码智能已暂停，编译功能仍可使用。" : view.state === "error" && view.message ? view.message : STATE_DESCRIPTIONS[view.state]}</p>
+          {!off && view.state === "error" && missingResourceId(view.message) === "jdtls" && <ResourceDownloadButton id="jdtls" />}
         </div>
         <ToggleRow
           id="lang-enabled"

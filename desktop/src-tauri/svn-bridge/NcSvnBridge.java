@@ -16,6 +16,10 @@ import java.util.List;
 import org.tmatesoft.svn.core.SVNDepth;
 import org.tmatesoft.svn.core.SVNException;
 import org.tmatesoft.svn.core.SVNLogEntry;
+import org.tmatesoft.svn.core.SVNLogEntryPath;
+import org.tmatesoft.svn.core.SVNNodeKind;
+import org.tmatesoft.svn.core.SVNURL;
+import org.tmatesoft.svn.core.io.SVNRepository;
 import org.tmatesoft.svn.core.wc.ISVNAnnotateHandler;
 import org.tmatesoft.svn.core.wc.ISVNInfoHandler;
 import org.tmatesoft.svn.core.ISVNLogEntryHandler;
@@ -139,6 +143,21 @@ public class NcSvnBridge {
 		if ("blame".equals(cmd)) {
 			return blame(new File(f[2]));
 		}
+		if ("history".equals(cmd)) {
+			return history(new File(f[2]), Integer.parseInt(f[3]), Long.parseLong(f[4]));
+		}
+		if ("revision_diff".equals(cmd)) {
+			return revisionDiff(new File(f[2]), f[3], Long.parseLong(f[4]));
+		}
+		if ("blame_snapshot".equals(cmd)) {
+			return blameSnapshot(new File(f[2]), Long.parseLong(f[3]));
+		}
+		if ("conflict_snapshot".equals(cmd)) {
+			return conflictSnapshot(new File(f[2]));
+		}
+		if ("resolve_working".equals(cmd)) {
+			return resolveWorking(new File(f[2]));
+		}
 		if ("commit".equals(cmd)) {
 			return commit(new File(f[2]), tail(f, 3));
 		}
@@ -189,6 +208,7 @@ public class NcSvnBridge {
 						}
 						SVNStatusType st = s.getContentsStatus();
 						String name = st == null ? "none" : st.toString();
+						if (st == SVNStatusType.STATUS_CONFLICTED || s.getPropertiesStatus() == SVNStatusType.STATUS_CONFLICTED || s.getTreeConflict() != null) name = "conflicted";
 						if ("normal".equals(name) || "none".equals(name)) {
 							return;
 						}
@@ -196,7 +216,7 @@ public class NcSvnBridge {
 								+ ",\"status\":" + jstr(name)
 								+ ",\"revision\":" + (s.getRevision() == null || s.getRevision().getNumber() < 0 ? -1
 										: s.getRevision().getNumber())
-								+ ",\"dir\":" + (s.getFile().isDirectory() ? "true" : "false") + "}");
+								+ ",\"dir\":" + (s.getKind() == SVNNodeKind.DIR || s.getFile().isDirectory() ? "true" : "false") + "}");
 					}
 				}, null);
 		return "{\"scanned\":" + n[0] + ",\"entries\":[" + join(items) + "]}";
@@ -332,6 +352,10 @@ public class NcSvnBridge {
 	}
 
 	private static String resolve(String choice, File path) throws SVNException {
+		SVNInfo local = manager().getWCClient().doInfo(path, SVNRevision.WORKING);
+		if (local.getTreeConflict() != null || local.getPropConflictFile() != null) {
+			throw new IllegalStateException("树冲突或属性冲突需要使用 SVN 客户端处理，不能按文本版本解除");
+		}
 		SVNConflictChoice c;
 		if ("mine".equals(choice)) {
 			c = SVNConflictChoice.MINE_FULL;
@@ -344,6 +368,200 @@ public class NcSvnBridge {
 		}
 		// 注意：doResolve 会丢掉 .mine/.rN 临时文件，必须由用户先选定版本再调用（界面分两步）
 		manager().getWCClient().doResolve(path, SVNDepth.EMPTY, c);
+		return "{}";
+	}
+
+	private static String history(File path, int limit, long from) throws SVNException {
+		final List<String> entries = new ArrayList<String>();
+		final SVNInfo local = manager().getWCClient().doInfo(path, SVNRevision.WORKING);
+		final String scope = repositoryPath(local);
+		// 游标是上一页最后一条：必须排除它，否则一页正好一条时会永远重复。
+		if (from == 1) return "{\"repositoryPath\":" + jstr(scope) + ",\"entries\":[]}";
+		SVNRevision start = from > 1 ? SVNRevision.create(from - 1) : SVNRevision.HEAD;
+		manager().getLogClient().doLog(local.getURL(), null, SVNRevision.HEAD, start, SVNRevision.create(1),
+				true, true, false, Math.max(1, Math.min(limit, 200)), null, new ISVNLogEntryHandler() {
+			public void handleLogEntry(SVNLogEntry entry) {
+				List<String> changes = new ArrayList<String>();
+				if (entry.getChangedPaths() != null) for (Object value : entry.getChangedPaths().values()) {
+					SVNLogEntryPath change = (SVNLogEntryPath) value;
+					if (!withinRepositoryPath(change.getPath(), scope)) continue;
+					changes.add("{\"path\":" + jstr(change.getPath()) + ",\"action\":" + jstr(String.valueOf(change.getType()))
+							+ ",\"copyFromPath\":" + jstr(change.getCopyPath()) + ",\"copyFromRevision\":" + change.getCopyRevision() + "}");
+				}
+				entries.add("{\"revision\":" + entry.getRevision() + ",\"author\":" + jstr(entry.getAuthor() == null ? "" : entry.getAuthor())
+						+ ",\"date\":" + (entry.getDate() == null ? 0 : entry.getDate().getTime()) + ",\"message\":"
+						+ jstr(entry.getMessage() == null ? "" : entry.getMessage()) + ",\"paths\":[" + join(changes) + "]}");
+			}
+		});
+		return "{\"repositoryPath\":" + jstr(scope) + ",\"entries\":[" + join(entries) + "]}";
+	}
+
+	private static String repositoryPath(SVNInfo info) {
+		String rootPath = info.getRepositoryRootURL().getPath();
+		String path = info.getURL().getPath();
+		String rel = path.substring(rootPath.length());
+		return rel.isEmpty() ? "/" : rel;
+	}
+
+	private static boolean withinRepositoryPath(String path, String scope) {
+		return "/".equals(scope) || path.equals(scope) || path.startsWith(scope + "/");
+	}
+
+	private static void validateRepositoryPath(String path) {
+		if (path == null || !path.startsWith("/") || path.contains("\\") || path.contains("//"))
+			throw new IllegalArgumentException("仓库路径无效");
+		for (String part : path.split("/")) if ("..".equals(part) || ".".equals(part))
+			throw new IllegalArgumentException("仓库路径不能包含相对跳转");
+	}
+
+	private static String revisionDiff(File scopeFile, final String path, final long revision) throws Exception {
+		if (revision < 1) throw new IllegalArgumentException("版本号必须大于零");
+		validateRepositoryPath(path);
+		SVNInfo local = manager().getWCClient().doInfo(scopeFile, SVNRevision.WORKING);
+		if (!withinRepositoryPath(path, repositoryPath(local))) throw new IllegalArgumentException("历史路径不在当前工作副本范围内");
+		final SVNLogEntryPath[] selected = new SVNLogEntryPath[1];
+		manager().getLogClient().doLog(local.getRepositoryRootURL(), null, SVNRevision.HEAD, SVNRevision.create(revision),
+				SVNRevision.create(revision), true, true, false, 1, null, new ISVNLogEntryHandler() {
+			public void handleLogEntry(SVNLogEntry entry) {
+				if (entry.getChangedPaths() != null) selected[0] = (SVNLogEntryPath) entry.getChangedPaths().get(path);
+			}
+		});
+		if (selected[0] == null) throw new IllegalArgumentException("该版本没有修改这个路径");
+		SVNLogEntryPath change = selected[0];
+		long beforeRevision = revision - 1;
+		String beforePath = path;
+		boolean beforeEmpty = change.getType() == 'A';
+		if (beforeEmpty && change.getCopyPath() != null) {
+			beforePath = change.getCopyPath(); beforeRevision = change.getCopyRevision(); beforeEmpty = false;
+		}
+		boolean afterEmpty = change.getType() == 'D';
+		SVNRepository repo = manager().createRepository(local.getRepositoryRootURL(), true);
+		try {
+			byte[] before = beforeEmpty ? new byte[0] : repositoryFile(repo, beforePath, beforeRevision);
+			byte[] after = afterEmpty ? new byte[0] : repositoryFile(repo, path, revision);
+			return "{\"path\":" + jstr(path) + ",\"beforePath\":" + jstr(beforePath) + ",\"beforeRevision\":" + beforeRevision
+					+ ",\"revision\":" + revision + ",\"beforeEmpty\":" + beforeEmpty + ",\"afterEmpty\":" + afterEmpty
+					+ ",\"before\":" + jstr(Base64.getEncoder().encodeToString(before)) + ",\"after\":"
+					+ jstr(Base64.getEncoder().encodeToString(after)) + "}";
+		} finally { repo.closeSession(); }
+	}
+
+	private static byte[] repositoryFile(SVNRepository repo, String path, long revision) throws Exception {
+		String rel = path.startsWith("/") ? path.substring(1) : path;
+		SVNNodeKind kind = repo.checkPath(rel, revision);
+		if (kind != SVNNodeKind.FILE) throw new IllegalArgumentException(kind == SVNNodeKind.DIR ? "目录没有可阅读的文件正文" : "这个路径在指定版本中不存在");
+		LimitedBytes bytes = new LimitedBytes(MAX_READ_BYTES);
+		repo.getFile(rel, revision, null, bytes);
+		return readableBytes(bytes.toByteArray());
+	}
+
+	private static final int MAX_READ_BYTES = 8 * 1024 * 1024;
+
+	// 在流入时限制，不能先把大文件装进 JVM 再判断是否允许展示。
+	private static class LimitedBytes extends ByteArrayOutputStream {
+		private final int limit;
+		LimitedBytes(int limit) { super(Math.min(8192, limit)); this.limit = limit; }
+		public synchronized void write(int value) {
+			if (count >= limit) throw new IllegalArgumentException("文件超过 8MB，无法在版本阅读区展示");
+			super.write(value);
+		}
+		public synchronized void write(byte[] bytes, int offset, int length) {
+			if (length > limit - count) throw new IllegalArgumentException("文件超过 8MB，无法在版本阅读区展示");
+			super.write(bytes, offset, length);
+		}
+	}
+
+	private static byte[] localFile(File path, int limit) throws Exception {
+		if (java.nio.file.Files.size(path.toPath()) > limit) throw new IllegalArgumentException("文件超过 8MB，无法在版本阅读区展示");
+		LimitedBytes bytes = new LimitedBytes(limit);
+		try (FileInputStream input = new FileInputStream(path)) {
+			byte[] buffer = new byte[8192];
+			int length;
+			while ((length = input.read(buffer)) != -1) bytes.write(buffer, 0, length);
+		}
+		return bytes.toByteArray();
+	}
+
+	private static byte[] readableBytes(byte[] bytes) {
+		if (bytes.length > MAX_READ_BYTES) throw new IllegalArgumentException("文件超过 8MB，无法在版本阅读区展示");
+		for (byte b : bytes) if (b == 0) throw new IllegalArgumentException("二进制文件没有可阅读的文本差异，请使用 SVN 客户端查看");
+		return bytes;
+	}
+
+	private static String blameSnapshot(File path, long requestedRevision) throws Exception {
+		SVNInfo local = manager().getWCClient().doInfo(path, SVNRevision.WORKING);
+		SVNRepository repo = manager().createRepository(local.getRepositoryRootURL(), true);
+		final long revision;
+		final String encoding;
+		try {
+			revision = requestedRevision > 0 ? requestedRevision : repo.getLatestRevision();
+			byte[] content = repositoryFile(repo, repositoryPath(local), revision);
+			encoding = textEncoding(content);
+		} finally { repo.closeSession(); }
+		final List<String> lines = new ArrayList<String>();
+		final List<String> content = new ArrayList<String>();
+		// HEAD 先固定成数字；正文直接使用同一次 annotate 的行，禁止再次读取工作副本。
+		manager().getLogClient().doAnnotate(local.getURL(), SVNRevision.create(revision), SVNRevision.create(1), SVNRevision.create(revision),
+				new ISVNAnnotateHandler() {
+			public void handleLine(Date date, long rev, String author, String line) {
+				lines.add("{\"revision\":" + rev + ",\"author\":" + jstr(author == null ? "" : author) + ",\"date\":" + (date == null ? 0 : date.getTime()) + "}");
+				content.add(line);
+			}
+			public void handleLine(Date date, long rev, String author, String line, Date mergedDate, long mergedRevision, String mergedAuthor, String mergedPath, int lineNumber) { handleLine(date, rev, author, line); }
+			public boolean handleRevision(Date date, long rev, String author, File contents) { return true; }
+			public void handleEOF() { }
+		}, encoding);
+		StringBuilder text = new StringBuilder();
+		for (int i = 0; i < content.size(); i++) { if (i > 0) text.append('\n'); text.append(content.get(i)); }
+		return "{\"sourceRevision\":" + revision + ",\"text\":" + jstr(text.toString()) + ",\"encoding\":" + jstr(encoding) + ",\"lines\":[" + join(lines) + "]}";
+	}
+
+	private static String textEncoding(byte[] bytes) {
+		try { java.nio.charset.StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)); return "UTF-8"; }
+		catch (java.nio.charset.CharacterCodingException e) { return "GBK"; }
+	}
+
+	private static File conflictFile(File target, File candidate) throws Exception {
+		if (candidate == null) return null;
+		File resolved = candidate.isAbsolute() ? candidate : new File(target.getParentFile(), candidate.getPath());
+		if (!resolved.getCanonicalFile().getParentFile().equals(target.getCanonicalFile().getParentFile())) throw new IllegalArgumentException("冲突副本不在文件所在目录");
+		return resolved.isFile() ? resolved : null;
+	}
+
+	private static String conflictVersion(File path, String role) throws Exception {
+		if (path == null) return "null";
+		byte[] bytes = localFile(path, MAX_READ_BYTES);
+		boolean binary = false;
+		for (byte b : bytes) if (b == 0) binary = true;
+		String name = path.getName();
+		String suffix = name.substring(name.lastIndexOf('.') + 1);
+		long revision = suffix.matches("r[0-9]+") ? Long.parseLong(suffix.substring(1)) : -1;
+		return "{\"role\":" + jstr(role) + ",\"name\":" + jstr(name) + ",\"revision\":" + revision
+				+ ",\"binary\":" + binary + ",\"content\":" + jstr(binary ? "" : Base64.getEncoder().encodeToString(bytes)) + "}";
+	}
+
+	private static String conflictSnapshot(File path) throws Exception {
+		SVNInfo info = manager().getWCClient().doInfo(path, SVNRevision.WORKING);
+		File mine = conflictFile(path, info.getConflictWrkFile());
+		File base = conflictFile(path, info.getConflictOldFile());
+		File theirs = conflictFile(path, info.getConflictNewFile());
+		return "{\"treeConflict\":" + (info.getTreeConflict() != null) + ",\"propertyConflict\":" + (info.getPropConflictFile() != null)
+				+ ",\"textConflict\":" + (mine != null || base != null || theirs != null) + ",\"mine\":" + conflictVersion(mine, "mine")
+				+ ",\"base\":" + conflictVersion(base, "base") + ",\"theirs\":" + conflictVersion(theirs, "theirs") + "}";
+	}
+
+	private static boolean hasConflictMarkers(String text) {
+		for (String line : text.split("\\r?\\n", -1)) if (line.matches("^(<<<<<<<|\\|\\|\\|\\|\\|\\|\\||=======|>>>>>>>)(\\s.*)?$")) return true;
+		return false;
+	}
+
+	private static String resolveWorking(File path) throws Exception {
+		SVNInfo info = manager().getWCClient().doInfo(path, SVNRevision.WORKING);
+		if (info.getTreeConflict() != null || info.getPropConflictFile() != null) throw new IllegalArgumentException("树冲突或属性冲突需要 SVN 客户端处理");
+		if (info.getConflictNewFile() == null && info.getConflictOldFile() == null && info.getConflictWrkFile() == null) throw new IllegalArgumentException("这个文件已经没有文本冲突");
+		byte[] bytes = readableBytes(localFile(path, MAX_READ_BYTES));
+		if (hasConflictMarkers(new String(bytes, textEncoding(bytes)))) throw new IllegalArgumentException("工作副本仍含冲突标记，请先完成手工合并并保存");
+		manager().getWCClient().doResolve(path, SVNDepth.EMPTY, true, false, false, SVNConflictChoice.MERGED);
 		return "{}";
 	}
 

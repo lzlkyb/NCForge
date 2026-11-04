@@ -1,6 +1,9 @@
 import { Icon } from "../ui/icon";
 import { FreshnessBadge } from "../ui/FreshnessBadge";
 import { Menu, MenuItem } from "../ui/Menu";
+import type { SvnInfo } from "../../lib/svn";
+import { SvnContextMenu } from "./SvnContextMenu";
+import { openPatchPage } from "../../lib/svnSession";
 
 /**
  * 版本控制页顶部工具条。
@@ -30,6 +33,10 @@ export function SvnToolbar({
   onRevert,
   onCommit,
   onHousekeeping,
+  info,
+  pickedCount = committable,
+  onHistory,
+  onFiles,
 }: {
   rev: number;
   url: string | null;
@@ -49,14 +56,16 @@ export function SvnToolbar({
   onRevert: () => void;
   onCommit: () => void;
   onHousekeeping: () => void;
+  info?: SvnInfo;
+  pickedCount?: number;
+  onHistory?: () => void;
+  onFiles?: () => void;
 }) {
   return (
     <div className="vc-head">
-      <h1>版本控制</h1>
-      <span className="vc-rev">r{rev > 0 ? rev : "?"}</span>
-      <span className="vc-url" title={url ?? ""}>
-        {url ?? "正在识别工作副本…"}
-      </span>
+      <div className="vc-heading"><h1>版本控制</h1><span className="vc-heading-rev">本地 r{rev > 0 ? rev : "?"}</span></div>
+      {onFiles && <button type="button" className="vc-btn vc-btn-icon vc-files-toggle" aria-label="显示改动清单" title="显示改动清单" onClick={onFiles}><Icon name="panel" size={14} /></button>}
+      <SvnContextMenu info={info} url={url} />
       <span className="vc-sp" />
       {shown !== null && <span className="vc-hint">{shown} 处改动</span>}
       {generatedAtMs !== null && (
@@ -65,6 +74,7 @@ export function SvnToolbar({
           at={generatedAtMs}
           label="扫描"
           staleAfterMs={300_000}
+          className="vc-scan-freshness"
         />
       )}
       <button type="button" className="vc-btn" disabled={fetching} onClick={onRefresh}>
@@ -72,12 +82,13 @@ export function SvnToolbar({
         {fetching ? (scanned === null ? "扫描中…" : `已扫 ${scanned} 条…`) : "刷新"}
       </button>
       <button type="button" className="vc-btn" disabled={busy !== null} onClick={onUpdate}>
-        <Icon name="download" size={13} />
+        <Icon name={busy === "update" ? "spinner" : "download"} size={13} className={busy === "update" ? "animate-spin" : undefined} />
         {busy === "update" ? "更新中…" : "更新"}
       </button>
       <button
         type="button"
         className="vc-btn vc-btn-primary"
+        data-commit-trigger
         // 有冲突时不再禁用：提交面板本来就会把冲突文件从清单里剔掉
         //（「将提交 N 个文件（不含 M 个冲突）」），按钮一禁，那套逻辑全成了不可达。
         disabled={busy !== null || committable === 0}
@@ -91,7 +102,7 @@ export function SvnToolbar({
         }
       >
         <Icon name="upload" size={13} />
-        提交 {committable}
+        准备提交 {pickedCount}
       </button>
       <Menu portal width="w-56" trigger={(open, toggle) => (
         <button
@@ -109,6 +120,8 @@ export function SvnToolbar({
       )}>
         {(close) => (
           <>
+            {onHistory && <MenuItem label="工作副本历史" icon="history" onClick={() => { close(); onHistory(); }} />}
+            <MenuItem label="打包 NC 补丁" icon="package" onClick={() => { close(); openPatchPage(); }} />
             <MenuItem
               label={<span title={revertTitle}>撤销当前改动</span>}
               icon="trash"

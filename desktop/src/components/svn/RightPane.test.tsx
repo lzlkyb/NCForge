@@ -13,6 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ diff: vi.fn(), blame: vi.fn() }));
 
 vi.mock("../../lib/tauri", () => ({ invoke: vi.fn() }));
+vi.mock("../../lib/svnHistory", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/svnHistory")>();
+  return { ...actual, svnBlameSnapshot: mocks.blame };
+});
 vi.mock("../../lib/svn", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/svn")>();
   return { ...actual, svnDiff: mocks.diff, svnBlame: mocks.blame };
@@ -120,7 +124,7 @@ describe("RightPane 差异失败重试", () => {
       editable: true,
     });
     mocks.blame.mockRejectedValueOnce(new Error("svn: E170013 无法连接服务器"));
-    mocks.blame.mockResolvedValueOnce([{ revision: 3, author: "dev", date: 1 }]);
+    mocks.blame.mockResolvedValueOnce({ sourceRevision: 3, text: "a", encoding: "UTF-8", lines: [{ revision: 3, author: "dev", date: 1 }] });
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     host = document.createElement("div");
     document.body.appendChild(host);

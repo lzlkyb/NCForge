@@ -1,52 +1,42 @@
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { invoke, listen } from "../lib/tauri";
 import { beginOperation, type OperationHandle } from "../lib/operations";
-import type { PackStatusInfo, PackSummary, ResourceErrorCode, ResourceErrorPayload, ResourcePhase, ResourceReadyPayload } from "../lib/resource";
+import { formatBytes, RESOURCE_IDS, resourceBusy, type PackStatusInfo, type PackSummary, type ResourceErrorCode, type ResourceErrorPayload, type ResourcePhase, type ResourceReadyPayload } from "../lib/resource";
+import { RESOURCE_DOWNLOAD_EVENT, RESOURCE_OPEN_EVENT, openResourceDownloads } from "../lib/resourceActions";
 import { ResourceSetupDialog } from "../components/resource/ResourceSetupDialog";
 
-// ─── 类型定义 ────────────────────────────
-
-export interface ResourceState {
-  /** 置备阶段（事件驱动，见下方监听 effect） */
-  phase: ResourcePhase;
-  /** 本地状态快照（resources_status，设置页用；不含联网） */
-  packs: PackStatusInfo[];
-  /** 待下载的包（resource:available 带全量信息，初始化对话框用） */
-  missing: PackSummary[];
-  /** missing 总字节数（对话框「共 X MB」） */
-  totalBytes: number;
-  /** 正在下载的包 id；非下载中为 null */
-  currentId: string | null;
-  /** 当前包已下载字节 */
-  downloadedBytes: number;
-  /** 当前包总字节（源不给 Content-Length 时为 null ⇒ 不确定态） */
-  totalBytesCurrent: number | null;
-  /** 下载速率（字节/秒），~250ms 窗口 */
-  bytesPerSec: number;
-  /** 刚完成的动作摘要（ready 事件）：装了什么 / 是否认领了旧版 */
-  lastInstalled: { id: string; version: string }[];
-  adoptedLegacy: boolean;
-  /** 失败前已完成的部分（error 事件的 installed 数组）：对话框据此显示
-   *  「N/3 已就绪」——这些包已在 state 里，重试会自动跳过 */
-  partialInstalled: { id: string; version: string }[];
-  error: string | null;
-  errorCode: ResourceErrorCode | null;
-  /** 本次失败是否该弹 toast（与 UpdateContext 同款：自动发起的不弹） */
-  errorToastAllowed: boolean;
-  /** 触发置备（force=true 无视已有状态重下，设置页用） */
-  ensure: (force?: boolean) => Promise<void>;
-  /** 重拉本地状态快照（不联网）；返回快照内容，调用方可基于它做判断 */
-  refreshStatus: () => Promise<PackStatusInfo[] | null>;
-  /** 关闭初始化对话框（仅本会话；下载在后台继续） */
-  dismissMissing: () => void;
-  /** 本次会话是否已手动关过对话框 */
-  missingDismissed: boolean;
+type Installed = { id: string; version: string };
+interface DownloadState {
+  phase: ResourcePhase; packs: PackStatusInfo[]; missing: PackSummary[]; batch: PackSummary[];
+  requestedIds: string[]; panelOpen: boolean; currentId: string | null;
+  downloadedBytes: number; totalBytesCurrent: number | null; bytesPerSec: number;
+  lastInstalled: Installed[]; adoptedLegacy: boolean; partialInstalled: Installed[];
+  error: string | null; errorCode: ResourceErrorCode | null; errorToastAllowed: boolean;
 }
-
-// ─── Provider ────────────────────────────
-
+export interface ResourceState extends DownloadState {
+  totalBytes: number; busy: boolean; missingDismissed: boolean;
+  ensure: (force?: boolean, ids?: string[]) => Promise<void>;
+  retry: (ids?: string[]) => Promise<void>; showDownloads: () => void; dismissMissing: () => void;
+  refreshStatus: () => Promise<PackStatusInfo[] | null>;
+}
+const initialState: DownloadState = {
+  phase: "idle", packs: [], missing: [], batch: [], requestedIds: [], panelOpen: false,
+  currentId: null, downloadedBytes: 0, totalBytesCurrent: null, bytesPerSec: 0,
+  lastInstalled: [], adoptedLegacy: false, partialInstalled: [], error: null,
+  errorCode: null, errorToastAllowed: false,
+};
+const mergeInstalled = (before: Installed[], after: Installed[]) => [...new Map([...before, ...after].map(p => [p.id, p])).values()];
+interface ResourceListeners {
+  active: boolean; ready: Promise<boolean>; resolve: (ready: boolean) => void;
+  closed: Promise<boolean>; close: () => void; start?: () => Promise<boolean>; error?: string;
+}
+function createResourceListeners(): ResourceListeners {
+  let resolve!: ResourceListeners["resolve"], close!: ResourceListeners["close"];
+  const ready = new Promise<boolean>(done => { resolve = done; });
+  const closed = new Promise<boolean>(done => { close = () => done(false); });
+  return { active: true, ready, resolve, closed, close };
+}
 const ResourceContext = createContext<ResourceState | null>(null);
-
 export function useResources() {
   const ctx = useContext(ResourceContext);
   if (!ctx) throw new Error("useResources 必须在 ResourceProvider 内使用");
@@ -54,267 +44,191 @@ export function useResources() {
 }
 
 export function ResourceProvider({ children }: { children: ReactNode }) {
-  const [phase, setPhase] = useState<ResourcePhase>("idle");
-  const [packs, setPacks] = useState<PackStatusInfo[]>([]);
-  const [missing, setMissing] = useState<PackSummary[]>([]);
-  const [currentId, setCurrentId] = useState<string | null>(null);
-  const [downloadedBytes, setDownloadedBytes] = useState(0);
-  const [totalBytesCurrent, setTotalBytesCurrent] = useState<number | null>(null);
-  const [bytesPerSec, setBytesPerSec] = useState(0);
-  const [lastInstalled, setLastInstalled] = useState<{ id: string; version: string }[]>([]);
-  const [adoptedLegacy, setAdoptedLegacy] = useState(false);
-  const [partialInstalled, setPartialInstalled] = useState<{ id: string; version: string }[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [errorCode, setErrorCode] = useState<ResourceErrorCode | null>(null);
-  const [errorToastAllowed, setErrorToastAllowed] = useState(true);
-  const [missingDismissed, setMissingDismissed] = useState(false);
-  /** 本次 ensure 是否由用户主动发起（设置页重下 / 对话框重试），决定失败弹不弹 toast */
-  const userInitiatedRef = useRef(false);
-  /** 下载守卫：downloading 期间 checking/available/uptodate 不回退状态（同 UpdateContext 套路） */
-  const downloadingRef = useRef(false);
-  const ensuringRef = useRef(false);
+  const [state, setState] = useState(initialState);
+  const stateRef = useRef(state);
+  const locked = useRef(false);
+  const requestForce = useRef(false);
+  const attemptIds = useRef<string[]>([]);
+  const statusReads = useRef({ request: 0, revision: 0 });
   const resourceTask = useRef<OperationHandle | null>(null);
-
-  const totalBytes = missing.reduce((sum, p) => sum + p.size, 0);
-
-  // ─── 本地状态快照（不联网）─────
-
+  // 子组件的 effect 可以先发起下载，握手必须在首次渲染时就存在。
+  const listenersRef = useRef<ResourceListeners | null>(null);
+  if (!listenersRef.current) listenersRef.current = createResourceListeners();
+  const commit = useCallback((patch: Partial<DownloadState>) => {
+    // 同帧事件及连点必须看到刚更新的状态，不能等待 React 下一次渲染。
+    stateRef.current = { ...stateRef.current, ...patch };
+    setState(stateRef.current);
+  }, []);
   const refreshStatus = useCallback(async () => {
+    const request = ++statusReads.current.request;
+    const revision = statusReads.current.revision;
     try {
       const list = await invoke<PackStatusInfo[]>("resources_status");
-      setPacks(list);
+      // 设置页读取与安装事件可能并行：旧快照不能覆盖新安装或更新的读取结果。
+      if (request !== statusReads.current.request || revision !== statusReads.current.revision) return stateRef.current.packs;
+      commit({ packs: list });
       return list;
     } catch (e) {
-      // 快照失败不置 error：它只是设置页的展示源，置错会把「没网」误报成
-      // 「组件下载失败」（真正的下载状态由事件驱动，不走这里）。
       console.error("[Resource] 读取本地状态失败:", e);
       return null;
     }
-  }, []);
+  }, [commit]);
+  const fail = useCallback((payload: ResourceErrorPayload) => {
+    locked.current = false;
+    const done = mergeInstalled(stateRef.current.lastInstalled, [
+      ...(payload.installed ?? []), ...(payload.adoptedLegacy ?? []).map(id => ({ id, version: "" })),
+    ]);
+    resourceTask.current?.finish("failed", `${payload.message}${done.length ? `；已有 ${done.length} 个组件完成，其余可重试` : ""}`);
+    resourceTask.current = null;
+    commit({ phase: "error", error: payload.message, errorCode: (payload.code as ResourceErrorCode) ?? null, partialInstalled: done, lastInstalled: done, bytesPerSec: 0 });
+  }, [commit]);
+  const start = useCallback(async (force = false, selected?: string[], resume = false) => {
+    const listeners = listenersRef.current!;
+    if (!listeners.active) return;
+    commit({ panelOpen: true });
+    if (locked.current || resourceBusy(stateRef.current.phase)) return;
+    const ids = [...new Set(selected ?? (force ? [...RESOURCE_IDS] : stateRef.current.packs.filter(p => p.state === "missing").map(p => p.id)))];
+    if (!ids.length) return;
+    if (ids.some(id => !(RESOURCE_IDS as readonly string[]).includes(id))) {
+      commit({ phase: "error", error: "未知的运行组件，请刷新组件状态后重试", errorCode: "config" });
+      return;
+    }
+    locked.current = true;
+    if (!resume) requestForce.current = force;
+    attemptIds.current = ids;
+    const batch = resume ? stateRef.current.batch : ids.map(id => {
+      const pack = stateRef.current.packs.find(p => p.id === id);
+      return { id, title: pack?.title ?? id, notes: pack?.notes ?? "", size: pack?.size ?? 0 };
+    });
+    commit({ phase: "checking", error: null, errorCode: null, errorToastAllowed: true,
+      batch, requestedIds: resume ? stateRef.current.requestedIds : ids, missing: [],
+      lastInstalled: resume ? stateRef.current.lastInstalled : [], partialInstalled: resume ? stateRef.current.partialInstalled : [],
+      currentId: null, downloadedBytes: 0, totalBytesCurrent: null, bytesPerSec: 0, adoptedLegacy: false });
+    resourceTask.current = beginOperation({ key: "resources.ensure", label: force ? "重新下载运行组件" : "下载运行组件", page: "settings", phase: "检查组件清单", reveal: openResourceDownloads });
+    try {
+      // 监听注册完毕后才能发起网络操作，否则快速完成的事件可能丢失。
+      const ready = await Promise.race([listeners.start?.() ?? listeners.ready, listeners.closed]);
+      if (!listeners.active) return;
+      if (!ready) throw new Error(listeners.error);
+      await invoke("resources_ensure", { force, ids });
+    } catch (e) {
+      if (listeners.active) fail({ message: e instanceof Error ? e.message : String(e) });
+    }
+  }, [commit, fail]);
+  const ensure = useCallback((force = false, ids?: string[]) => start(force, ids), [start]);
+  const retry = useCallback((selected?: string[]) => {
+    const remaining = stateRef.current.requestedIds.filter(id => (!selected || selected.includes(id)) && !stateRef.current.lastInstalled.some(p => p.id === id));
+    // 强制重下失败时旧包仍可能可用；保留 force 才能真正修复失败的选中包。
+    return start(requestForce.current, remaining, true);
+  }, [start]);
+  const showDownloads = useCallback(() => commit({ panelOpen: true }), [commit]);
+  const dismissMissing = useCallback(() => commit({ panelOpen: false }), [commit]);
 
-  // ─── 触发置备 ────────────────────
-  // 后端 ensure_packs 是一路下载到底的编排（拉清单 → 缺的下载安装），
-  // 前端只负责发起 + 收听事件，不自己维护下载状态机（避免双真相源）。
-
-  const ensure = useCallback(
-    async (force = false) => {
-      if (ensuringRef.current || downloadingRef.current) return;
-      ensuringRef.current = true;
-      setPhase("checking");
-      setError(null);
-      setErrorCode(null);
-      setPartialInstalled([]);
-      try {
-        await invoke("resources_ensure", { force });
-      } catch (e) {
-        // invoke 直接 reject（后端没接住）才走到这里；后端的 resource:error
-        // 事件覆盖不了这条路径。
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error("[Resource] resources_ensure invoke 失败:", msg);
-        ensuringRef.current = false;
-        resourceTask.current?.finish("failed", msg);
-        resourceTask.current = null;
-        setError(msg);
-        setErrorCode(null);
-        setErrorToastAllowed(userInitiatedRef.current);
-        setPhase("error");
-      }
-    },
-    [],
-  );
-
-  // ─── 监听后台置备事件 + 启动自检 ────────────────────
-  // 两者必须在同一个 effect 里、且自检晚于**全部** listen 注册完成：
-  // listen() 是异步 IPC，而 Rust 侧 main.rs 的启动自检 spawn 后很快就会 emit；
-  // 若发起早于监听注册，available 等事件会在注册前发出、永久丢失
-  // （UpdateContext 在 macOS CI 上抓到过同款竞态，见那里的长注释）。
-  //
-  // 这里即使与 Rust 启动自检撞车也无副作用：后端有单飞闸，前端这次 invoke
-  // 若被挡住，Rust 自检的后续事件照样送达已注册的监听器；若自检已结束，
-  // 前端这轮会真正跑一遍（本地已装则秒回 uptodate）。
-  //
-  // 只有本地快照显示有 missing 时才发起 ensure：快照说全部就绪就别打扰用户
-  // （legacy 认领用户的快照是 installed/legacy，不会走到这里）。
   useEffect(() => {
     let cancelled = false;
+    const reads = statusReads.current;
+    const listeners = listenersRef.current!.active ? listenersRef.current! : createResourceListeners();
+    listenersRef.current = listeners;
     const unlisteners: (() => void)[] = [];
-    // async 注册期间若组件已卸载（StrictMode/快速重挂载），立即注销刚注册的监听，
-    // 避免监听器泄漏与重复注册（同 UpdateContext 的 track）。
-    const track = (fn: () => void) => {
-      if (cancelled) fn();
-      else unlisteners.push(fn);
+    const activeTransfer = () => ["downloading", "verifying", "installing"].includes(stateRef.current.phase);
+    const finishReady = (payload: ResourceReadyPayload) => {
+      statusReads.current.revision++;
+      const confirmed = attemptIds.current.map(id => payload.installed.find(p => p.id === id)
+        ?? { id, version: stateRef.current.packs.find(p => p.id === id)?.version ?? "" });
+      attemptIds.current = [];
+      locked.current = false;
+      resourceTask.current?.finish("success", "所选运行组件已就绪");
+      resourceTask.current = null;
+      commit({ phase: "ready", currentId: null, missing: [], partialInstalled: [], bytesPerSec: 0,
+        lastInstalled: mergeInstalled(stateRef.current.lastInstalled, mergeInstalled(confirmed, payload.installed)), adoptedLegacy: payload.adoptedLegacy });
+      void refreshStatus();
     };
-
-    const setupListeners = async () => {
-      track(
-        await listen("resource:checking", () => {
-          // 下载进行中不回退状态（后端一轮 ensure 内部顺序发
-          // checking→available→downloading；这里防御的是下载中又触发一轮的场景）
-          if (downloadingRef.current) return;
-          setPhase("checking");
-          setError(null);
-          setErrorCode(null);
-          setPartialInstalled([]);
-        }),
-      );
-      track(
-        await listen<{ packs: PackSummary[]; totalBytes: number }>("resource:available", (payload) => {
-          if (downloadingRef.current) return;
-          setMissing(payload.packs);
-          setPhase("checking");
-        }),
-      );
-      track(
-        await listen("resource:uptodate", () => {
-          if (downloadingRef.current) return;
-          setMissing([]);
-          setPartialInstalled([]);
-          ensuringRef.current = false;
-          resourceTask.current?.finish("success", "运行组件已就绪");
-          resourceTask.current = null;
-          setPhase("idle");
-        }),
-      );
-      track(
-        await listen<{ id: string }>("resource:downloading", (payload) => {
-          downloadingRef.current = true;
-          resourceTask.current?.update({ phase: `下载组件 ${payload.id}` });
-          setCurrentId(payload.id);
-          setDownloadedBytes(0);
-          setTotalBytesCurrent(null);
-          setBytesPerSec(0);
-          setPhase("downloading");
-        }),
-      );
-      track(
-        await listen<{ id: string; downloaded: number; total: number | null; bytesPerSec: number }>(
-          "resource:progress",
-          (payload) => {
-            resourceTask.current?.update({ phase: `下载组件 ${payload.id}`, progress: { done: payload.downloaded, total: payload.total ?? undefined } });
-            setDownloadedBytes(payload.downloaded);
-            // total 为 null（源不给 Content-Length）时保持 null ⇒ UI 走不确定态。
-            setTotalBytesCurrent(payload.total);
-            setBytesPerSec(payload.bytesPerSec);
-          },
-        ),
-      );
-      track(
-        await listen<{ id: string; version: string }>("resource:installed", () => {
-          // 单包装好的展示由 ready 统一收尾；这里不切 phase，
-          // 避免多包下载时每装一个包就闪一次「完成」。
-        }),
-      );
-      track(
-        await listen<ResourceReadyPayload>("resource:ready", (payload) => {
-          downloadingRef.current = false;
-          ensuringRef.current = false;
-          resourceTask.current?.finish("success", `已准备 ${payload.installed.length} 个组件${payload.adoptedLegacy ? "，并保留可用的本地组件" : ""}`);
-          resourceTask.current = null;
-          setCurrentId(null);
-          setMissing([]);
-          setPartialInstalled([]);
-          setLastInstalled(payload.installed);
-          setAdoptedLegacy(payload.adoptedLegacy);
-          setPhase("ready");
-          void refreshStatus();
-        }),
-      );
-      track(
-        await listen<ResourceErrorPayload>("resource:error", (payload) => {
-          downloadingRef.current = false;
-          setCurrentId(null);
-          setError(payload.message);
-          setErrorCode((payload.code as ResourceErrorCode) ?? null);
-          // 失败前已完成的部分（后端 EnsureFailure.outcome）：旧版本后端不发
-          // 这两个字段，?? [] 兜底。adoptedLegacy 在这里是 string[]（id 列表），
-          // 与 ready 事件的 boolean 不同——error 路径要的是「哪些包已就绪」。
-          ensuringRef.current = false;
-          const done = payload.installed ?? [];
-          resourceTask.current?.finish("failed", `${payload.message}${done.length ? `；已有 ${done.length} 个组件完成，其余可重试` : ""}`);
-          resourceTask.current = null;
-          const legacyIds = payload.adoptedLegacy ?? [];
-          setPartialInstalled([
-            ...done,
-            ...legacyIds.map((id) => ({ id, version: "" })),
-          ]);
-          setErrorToastAllowed(userInitiatedRef.current);
-          setPhase("error");
-        }),
-      );
+    const stage = (phase: "verifying" | "installing", id: string) => {
+      locked.current = true;
+      commit({ phase, currentId: id, bytesPerSec: 0 });
+      resourceTask.current?.update({ phase: `${phase === "verifying" ? "校验" : "安装"}组件 ${id}`, progress: undefined, detail: "下载已完成，正在准备组件" });
     };
-
-    setupListeners().then(() => {
-      // cancelled 时不再发起自检（组件已卸载，监听器也已注销）
+    const register = async <T,>(event: string, handler: (payload: T) => void) => {
       if (cancelled) return;
-      void (async () => {
-        const list = await refreshStatus();
-        if (cancelled) return;
-        if (list && list.some((p) => p.state === "missing")) {
-          void ensure(false);
-        }
-      })();
+      const stop = await listen<T>(event, payload => { if (!cancelled) handler(payload); });
+      if (cancelled) stop(); else unlisteners.push(stop);
+    };
+    const setupListeners = async () => {
+      await register("resource:checking", () => {
+        if (!activeTransfer()) commit({ phase: "checking", error: null, errorCode: null });
+      });
+      await register<{ packs: PackSummary[]; totalBytes: number }>("resource:available", payload => {
+        if (activeTransfer()) return;
+        const old = stateRef.current.batch;
+        const batch = old.length ? old.map(p => payload.packs.find(next => next.id === p.id) ?? p) : payload.packs;
+        commit({ missing: payload.packs, batch, phase: "checking" });
+      });
+      await register("resource:uptodate", () => {
+        // 后台仍持有单飞锁，只有随后真正的 ready 才能结束本次任务。
+        if (!activeTransfer()) resourceTask.current?.update({ phase: "所选组件已存在，确认可用状态" });
+      });
+      await register<{ id: string }>("resource:downloading", ({ id }) => {
+        locked.current = true;
+        commit({ phase: "downloading", currentId: id, downloadedBytes: 0, totalBytesCurrent: null, bytesPerSec: 0 });
+        resourceTask.current?.update({ phase: `下载组件 ${id}`, detail: undefined, progress: undefined });
+      });
+      await register<{ id: string; downloaded: number; total: number | null; bytesPerSec: number }>("resource:progress", payload => {
+        if (stateRef.current.currentId && payload.id !== stateRef.current.currentId) return;
+        commit({ downloadedBytes: payload.downloaded, totalBytesCurrent: payload.total, bytesPerSec: payload.bytesPerSec });
+        resourceTask.current?.update({ phase: `下载组件 ${payload.id}`, progress: { done: payload.downloaded, total: payload.total ?? undefined }, detail: `${formatBytes(payload.downloaded)}${payload.total ? ` / ${formatBytes(payload.total)}` : " · 总大小未知"} · ${payload.bytesPerSec > 0 ? `${formatBytes(payload.bytesPerSec)}/s` : "计算速率中…"}` });
+      });
+      await register<{ id: string }>("resource:verifying", ({ id }) => stage("verifying", id));
+      await register<{ id: string }>("resource:installing", ({ id }) => stage("installing", id));
+      await register<Installed>("resource:installed", payload => {
+        statusReads.current.revision++;
+        const packs = stateRef.current.packs.map(p => p.id === payload.id ? { ...p, state: "installed" as const, version: payload.version } : p);
+        commit({ packs, lastInstalled: mergeInstalled(stateRef.current.lastInstalled, [payload]) });
+      });
+      await register<ResourceReadyPayload>("resource:ready", finishReady);
+      await register<ResourceErrorPayload>("resource:error", fail);
+    };
+    let registration: Promise<boolean> | null = null;
+    listeners.start = () => {
+      // 注册失败要释放半成品，下次请求重新注册；同一轮等待者共享一次注册。
+      if (!registration) registration = setupListeners().then(() => true, e => {
+        unlisteners.splice(0).forEach(stop => stop());
+        listeners.error = `组件监听注册失败，请重试：${String(e)}`;
+        registration = null;
+        return false;
+      });
+      return registration;
+    };
+    void listeners.start().then(ready => {
+      listeners.resolve(ready);
+      if (cancelled) return;
+      // 首启仅读取本地状态，缺失组件由用户或对应功能按需下载。
+      if (ready) void refreshStatus();
+      else if (!locked.current) fail({ message: listeners.error! });
     });
+    const onDownload = (event: Event) => {
+      const id = (event as CustomEvent<{ id?: string }>).detail?.id;
+      if (id) void ensure(false, [id]);
+    };
+    window.addEventListener(RESOURCE_DOWNLOAD_EVENT, onDownload);
+    window.addEventListener(RESOURCE_OPEN_EVENT, showDownloads);
     return () => {
       cancelled = true;
-      unlisteners.forEach((fn) => fn());
+      listeners.active = false;
+      listeners.close(); listeners.resolve(false);
+      locked.current = false;
+      reads.request++;
+      unlisteners.forEach(stop => stop());
+      window.removeEventListener(RESOURCE_DOWNLOAD_EVENT, onDownload);
+      window.removeEventListener(RESOURCE_OPEN_EVENT, showDownloads);
       resourceTask.current?.finish("failed", "组件监听已关闭，后台结果尚未确认");
       resourceTask.current = null;
     };
-  }, [refreshStatus, ensure]);
-
-  const dismissMissing = useCallback(() => setMissingDismissed(true), []);
-
-  /**
-   * 对外的 `ensure`：先记下「是用户主动点的」（决定要不要弹初始化对话框、要不要
-   * 播报错误），再转内部实现。包一层 `useCallback` 是为了身份稳定——以前它是
-   * value 里的内联箭头，provider 每渲染一次（下载期间 250ms 一次）就换一次引用，
-   * 依赖它的 effect 跟着反复重跑。
-   */
-  const ensurePublic = useCallback(
-    (force = false) => {
-      if (ensuringRef.current || downloadingRef.current) return Promise.resolve();
-      userInitiatedRef.current = true;
-      resourceTask.current = beginOperation({ key: "resources.ensure", label: force ? "重新下载运行组件" : "准备运行组件", page: "settings", phase: "检查组件清单" });
-      return ensure(force);
-    },
-    [ensure],
-  );
-
-  /** value 用 `useMemo` 包住：父级任何渲染都不该让所有消费方重算（同 UpdateContext）。 */
-  const value = useMemo(
-    () => ({
-      phase, packs, missing, totalBytes, currentId, downloadedBytes, totalBytesCurrent,
-      bytesPerSec, lastInstalled, adoptedLegacy, partialInstalled, error, errorCode,
-      errorToastAllowed, ensure: ensurePublic, refreshStatus, dismissMissing, missingDismissed,
-    }),
-    [
-      phase, packs, missing, totalBytes, currentId, downloadedBytes, totalBytesCurrent,
-      bytesPerSec, lastInstalled, adoptedLegacy, partialInstalled, error, errorCode,
-      errorToastAllowed, ensurePublic, refreshStatus, dismissMissing, missingDismissed,
-    ],
-  );
-
-  return (
-    <ResourceContext.Provider value={value}>
-      {children}
-      {/* 初始化对话框：有缺失包且用户没手动关过才显示。下载/失败态都停着，
-          完成（ready）时 missing 清空自动关闭。 */}
-      {missing.length > 0 && !missingDismissed && (
-        <ResourceSetupDialog
-          missing={missing}
-          totalBytes={totalBytes}
-          phase={phase}
-          currentId={currentId}
-          downloadedBytes={downloadedBytes}
-          totalBytesCurrent={totalBytesCurrent}
-          bytesPerSec={bytesPerSec}
-          partialInstalled={partialInstalled}
-          error={error}
-          errorCode={errorCode}
-          onRetry={() => void ensurePublic(false)}
-          onDismiss={dismissMissing}
-        />
-      )}
-    </ResourceContext.Provider>
-  );
+  }, [commit, ensure, fail, refreshStatus, showDownloads]);
+  const value = useMemo(() => ({ ...state, totalBytes: state.batch.reduce((sum, p) => sum + p.size, 0),
+    busy: resourceBusy(state.phase), missingDismissed: !state.panelOpen, ensure, retry, showDownloads, refreshStatus, dismissMissing,
+  }), [state, ensure, retry, showDownloads, refreshStatus, dismissMissing]);
+  return <ResourceContext.Provider value={value}>
+    {children}
+    <ResourceSetupDialog {...state} open={state.panelOpen} onDownload={ensure} onRetry={ids => void retry(ids)} onDismiss={dismissMissing} />
+  </ResourceContext.Provider>;
 }

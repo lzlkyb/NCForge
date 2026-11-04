@@ -5,7 +5,7 @@ import { EnvDot } from "./EnvChips";
 import { dbApi } from "../../lib/dbApi";
 import { ensureConnected } from "../../lib/dbConfirm";
 import { openTable } from "../../lib/dbActions";
-import { openTableTab, rtOf, useDb } from "../../lib/dbStore";
+import { openTableTab, rtOf, useDbConns, useDbRt } from "../../lib/dbStore";
 import {
   favoriteKey,
   toggleFavorite,
@@ -46,7 +46,9 @@ function readOpen(): boolean {
  * 同名表在不同库之间也能分清。对象失效只做提示，不自动删收藏。
  */
 export function FavoriteSection({ filter, onLocate }: { filter: string; onLocate: (connId: string) => void }) {
-  const db = useDb();
+  // 收藏要按连接状态 / 表清单过滤：订连接清单 + 运行态，不订标签
+  useDbRt();
+  const db = { conns: useDbConns() };
   const items = useAllFavorites();
   const [open, setOpen] = useState(readOpen);
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);

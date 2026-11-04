@@ -15,9 +15,11 @@
 //! - 每行额外回 `ranges`（命中区间）。正则模式下前端无法自己 `indexOf` 出高亮位置，
 //!   所以高亮一律由后端给，纯文本模式也走同一字段，前端只写一份渲染逻辑。
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use regex::RegexBuilder;
 use serde::{Deserialize, Serialize};
@@ -62,7 +64,128 @@ const MAX_RANGES_PER_LINE: usize = 32;
 /// 20 秒的依据是实测：本机冷缓存八线程读约 370 文件/秒，7000+ 个文件全量约 23 秒，
 /// 20 秒能覆盖到八成以上；第二次搜索走系统文件缓存只要 1~2 秒。定得再长，
 /// 「什么都没搜到时还要干等」的代价就超过收益了。
-const TIME_BUDGET_MS: u128 = 20_000;
+pub const TIME_BUDGET_MS: u128 = 20_000;
+
+/// 搜索闸门：按来源登记正在跑的搜索，并限制同时运行的全量扫描数。
+///
+/// - 同一来源（如快速面板）的新搜索会把旧搜索的取消标志置位；
+/// - 同时只放 `slots` 个扫描进场：单次扫描内部已有 8 线程并行，再叠加只会抢磁盘；
+///   排队中被取消的不再等，直接以「已取消」进场（扫描会立刻返回半成品）。
+///
+/// 放在纯逻辑模块里是为了能单测（命令层只持有一个全局实例）。
+pub struct SearchGate {
+    slots: usize,
+    state: Mutex<GateState>,
+    freed: Condvar,
+}
+
+#[derive(Default)]
+struct GateState {
+    running: usize,
+    by_source: HashMap<String, Arc<AtomicBool>>,
+}
+
+/// 请求到达时就登记，不能等阻塞线程启动后才登记：线程可能晚于取消或后来的请求。
+pub struct SearchRequest<'a> {
+    gate: &'a SearchGate,
+    source: Option<String>,
+    flag: Arc<AtomicBool>,
+    holding: bool,
+}
+
+impl SearchGate {
+    pub fn new(slots: usize) -> Self {
+        Self {
+            slots: slots.max(1),
+            state: Mutex::new(GateState::default()),
+            freed: Condvar::new(),
+        }
+    }
+
+    /// 取消某个来源正在跑（或排队）的搜索。没有就什么都不做。
+    pub fn cancel(&self, source: &str) {
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(flag) = st.by_source.remove(source) {
+            flag.store(true, Ordering::Relaxed);
+        }
+        drop(st);
+        // 排队中的人要醒来看一眼自己是不是被取消了
+        self.freed.notify_all();
+    }
+
+    /// 在第一个 await / spawn_blocking 之前调用；入口失败时 Drop 也会注销请求。
+    pub fn register(&self, source: Option<&str>) -> SearchRequest<'_> {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(src) = source {
+            if let Some(old) = st.by_source.insert(src.to_string(), flag.clone()) {
+                old.store(true, Ordering::Relaxed);
+                self.freed.notify_all();
+            }
+        }
+        SearchRequest {
+            gate: self,
+            source: source.map(str::to_owned),
+            flag,
+            holding: false,
+        }
+    }
+
+    #[cfg(test)]
+    fn run<T>(&self, source: Option<&str>, f: impl FnOnce(&AtomicBool) -> T) -> T {
+        self.register(source).run(f)
+    }
+
+    #[cfg(test)]
+    fn running(&self) -> usize {
+        self.state.lock().unwrap().running
+    }
+}
+
+impl SearchRequest<'_> {
+    /// 排队、运行 `f`；被取消的请求不占扫描名额。
+    pub fn run<T>(mut self, f: impl FnOnce(&AtomicBool) -> T) -> T {
+        let mut st = self.gate.state.lock().unwrap_or_else(|e| e.into_inner());
+        // 等名额；被取消就不占名额直接跑（带着已取消的标志，扫描会马上返回）
+        while !self.flag.load(Ordering::Relaxed) {
+            if st.running < self.gate.slots {
+                st.running += 1;
+                self.holding = true;
+                break;
+            }
+            st = self
+                .gate
+                .freed
+                .wait_timeout(st, Duration::from_millis(50))
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        drop(st);
+        f(&self.flag)
+    }
+}
+
+impl Drop for SearchRequest<'_> {
+    fn drop(&mut self) {
+        // panic 和入口提前返回也归还名额，否则会永久少一个坑位。
+        let mut st = self.gate.state.lock().unwrap_or_else(|e| e.into_inner());
+        if self.holding {
+            st.running -= 1;
+        }
+        if let Some(src) = &self.source {
+            // 只注销自己，不能移除后来的请求。
+            if st
+                .by_source
+                .get(src)
+                .is_some_and(|f| Arc::ptr_eq(f, &self.flag))
+            {
+                st.by_source.remove(src);
+            }
+        }
+        drop(st);
+        self.gate.freed.notify_all();
+    }
+}
 
 /// 搜索选项。前端传 camelCase（与 `serde(rename_all)` 对齐）。
 #[derive(Debug, Clone, Deserialize)]
@@ -145,6 +268,9 @@ pub struct SearchOutcome {
     /// manifest 只做参考，磁盘才是真源：组件目录被删/搬走后必须仍然搜得到东西，
     /// 但也要让用户看见「这次没按组件搜」，否则「怎么搜出别的模块」无从解释。
     pub scope_fallback: bool,
+    /// 被调用方取消（同来源的新搜索顶替、面板关闭）。此时 `truncated` 也为真，
+    /// 结果只是半成品，不能当成「完整搜索无结果」展示。
+    pub cancelled: bool,
 }
 
 /// 实际生效的搜索范围。
@@ -228,10 +354,7 @@ fn plan_scope(root: &Path, dirs: &[String]) -> Scope {
     let mut kept: Vec<String> = Vec::new();
     for rel in want {
         let lower = rel.to_lowercase();
-        if kept
-            .iter()
-            .any(|k| rel_within(&lower, &k.to_lowercase()))
-        {
+        if kept.iter().any(|k| rel_within(&lower, &k.to_lowercase())) {
             continue;
         }
         kept.push(rel);
@@ -451,6 +574,20 @@ pub fn search_with_budget(
     opts: &SearchOptions,
     budget_ms: u128,
 ) -> Result<SearchOutcome, String> {
+    search_cancellable(root, opts, budget_ms, &AtomicBool::new(false))
+}
+
+/// 同 `search_with_budget`，另带取消标志：枚举目录、逐文件读取前都会看它，
+/// 置位后尽快停下并把 `cancelled` / `truncated` 置真。
+///
+/// 为什么要做：快速面板的 `#内容` 搜索每改一次词就发一次全量扫描，前端只是
+/// 丢弃旧结果，旧扫描的 8 个线程还在抢磁盘，新请求被拖慢。
+pub fn search_cancellable(
+    root: &Path,
+    opts: &SearchOptions,
+    budget_ms: u128,
+    cancel: &AtomicBool,
+) -> Result<SearchOutcome, String> {
     let needle = if opts.regex {
         opts.text.as_str()
     } else {
@@ -472,7 +609,7 @@ pub fn search_with_budget(
 
     // ── 第一段：收集候选（目录枚举也是 I/O，但只做一遍）──
     let (candidates, walk_truncated) =
-        collect_candidates(root, &scope.abs, &filter, started, budget_ms);
+        collect_candidates(root, &scope.abs, &filter, started, budget_ms, cancel);
 
     // ── 第二段：并行读取 + 匹配 ──
     let cursor = AtomicUsize::new(0);
@@ -500,6 +637,10 @@ pub fn search_with_budget(
                 let mut local: Vec<SearchHit> = Vec::new();
                 loop {
                     if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    if cancel.load(Ordering::Relaxed) {
+                        stop.store(true, Ordering::Relaxed);
                         break;
                     }
                     let idx = cursor.fetch_add(1, Ordering::Relaxed);
@@ -566,11 +707,16 @@ pub fn search_with_budget(
         hits,
         files_scanned: scanned.load(Ordering::Relaxed),
         files_matched,
-        truncated: capped || stop.load(Ordering::Relaxed) || walk_truncated || panicked,
+        truncated: capped
+            || stop.load(Ordering::Relaxed)
+            || walk_truncated
+            || panicked
+            || cancel.load(Ordering::Relaxed),
         elapsed_ms: started.elapsed().as_millis() as u64,
         scope_dirs: scope.rel,
         missing_dirs: scope.missing,
         scope_fallback: scope.fallback,
+        cancelled: cancel.load(Ordering::Relaxed),
     })
 }
 
@@ -587,6 +733,7 @@ fn collect_candidates(
     filter: &FileFilter,
     started: Instant,
     budget_ms: u128,
+    cancel: &AtomicBool,
 ) -> (Vec<(PathBuf, String)>, bool) {
     let mut out = Vec::new();
     let mut stack: Vec<PathBuf> = if dirs.is_empty() {
@@ -596,7 +743,7 @@ fn collect_candidates(
     };
 
     while let Some(dir) = stack.pop() {
-        if started.elapsed().as_millis() > budget_ms {
+        if started.elapsed().as_millis() > budget_ms || cancel.load(Ordering::Relaxed) {
             return (out, true);
         }
         let Ok(rd) = std::fs::read_dir(&dir) else {
@@ -1019,6 +1166,110 @@ mod tests {
     }
 
     #[test]
+    fn 取消后立即停下并标记半成品() {
+        let dir = std::env::temp_dir().join("ncforge_search_cancel");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..100 {
+            std::fs::write(dir.join(format!("F{i:03}.java")), "// foo\n").unwrap();
+        }
+
+        // 已取消：一个文件都不读，结果必须同时标 cancelled 与 truncated，
+        // 前端才不会把它当成「完整搜索、没有结果」
+        let cancel = AtomicBool::new(true);
+        let out = search_cancellable(&dir, &opts("foo"), TIME_BUDGET_MS, &cancel).unwrap();
+        assert!(out.cancelled && out.truncated);
+        assert!(out.hits.is_empty());
+        assert_eq!(out.files_scanned, 0);
+
+        // 未取消：照常全量
+        let out = search_cancellable(&dir, &opts("foo"), TIME_BUDGET_MS, &AtomicBool::new(false))
+            .unwrap();
+        assert!(!out.cancelled && !out.truncated);
+        assert_eq!(out.hits.len(), 100);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 后台线程尚未启动时也能取消请求() {
+        let gate = SearchGate::new(1);
+        let request = gate.register(Some("palette"));
+        gate.cancel("palette");
+        assert!(request.run(|cancel| {
+            assert_eq!(gate.running(), 0);
+            cancel.load(Ordering::Relaxed)
+        }));
+    }
+
+    #[test]
+    fn 旧请求晚启动不能取消新请求() {
+        let gate = SearchGate::new(1);
+        let old = gate.register(Some("palette"));
+        let new = gate.register(Some("palette"));
+        assert!(old.run(|cancel| cancel.load(Ordering::Relaxed)));
+        assert!(!new.run(|cancel| cancel.load(Ordering::Relaxed)));
+        assert_eq!(gate.running(), 0);
+    }
+
+    #[test]
+    fn 同来源新搜索顶替旧搜索_名额用完排队() {
+        use std::sync::mpsc;
+        let gate = Arc::new(SearchGate::new(1));
+
+        // A 占住唯一名额，一直跑到被取消
+        let (started_tx, started_rx) = mpsc::channel();
+        let g = gate.clone();
+        let a = std::thread::spawn(move || {
+            g.run(Some("palette"), |cancel| {
+                started_tx.send(()).unwrap();
+                let t = Instant::now();
+                while !cancel.load(Ordering::Relaxed) && t.elapsed() < Duration::from_secs(10) {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                cancel.load(Ordering::Relaxed)
+            })
+        });
+        started_rx.recv().unwrap();
+        assert_eq!(gate.running(), 1);
+
+        // 另一来源 B 排队；同来源 C 进来顶替 A，A 让出名额
+        let g = gate.clone();
+        let b =
+            std::thread::spawn(move || g.run(Some("search-tab"), |c| c.load(Ordering::Relaxed)));
+        std::thread::sleep(Duration::from_millis(30));
+        let g = gate.clone();
+        let c = std::thread::spawn(move || g.run(Some("palette"), |c| c.load(Ordering::Relaxed)));
+
+        assert!(a.join().unwrap(), "A 应被同来源的新搜索取消");
+        assert!(!b.join().unwrap(), "B 是别的来源，不能被牵连");
+        assert!(!c.join().unwrap(), "C 自己不该带着取消标志");
+        assert_eq!(gate.running(), 0, "名额都要归还");
+
+        // 显式取消排队中的搜索：不等名额，带着已取消标志立刻返回
+        let gate = Arc::new(SearchGate::new(1));
+        let (hold_tx, hold_rx) = mpsc::channel::<()>();
+        let (in_tx, in_rx) = mpsc::channel();
+        let g = gate.clone();
+        let holder = std::thread::spawn(move || {
+            g.run(None, |_| {
+                in_tx.send(()).unwrap();
+                hold_rx.recv().ok();
+            })
+        });
+        in_rx.recv().unwrap();
+        let g = gate.clone();
+        let waiting =
+            std::thread::spawn(move || g.run(Some("palette"), |c| c.load(Ordering::Relaxed)));
+        std::thread::sleep(Duration::from_millis(30));
+        gate.cancel("palette");
+        assert!(waiting.join().unwrap());
+        hold_tx.send(()).unwrap();
+        holder.join().unwrap();
+        assert_eq!(gate.running(), 0);
+    }
+
+    #[test]
     fn 并行扫描仍然守住条数上限() {
         // 上限必须由「已收集条数」这个全局计数来卡：每个线程各自数自己那份
         // 会得到 线程数 × limit 条。
@@ -1211,11 +1462,18 @@ mod tests {
     #[test]
     fn 多个范围目录都走一遍() {
         let root = scope_fixture("multi");
-        let out = search(&root, &opts_in("foo", &["bill\\src\\public", "bill/src/client"])).unwrap();
+        let out = search(
+            &root,
+            &opts_in("foo", &["bill\\src\\public", "bill/src/client"]),
+        )
+        .unwrap();
         // 反斜杠写法与 `/` 等价（NC 的 manifest 写的可能是任一种）；
         // 回显顺序按 (长度, 字典序) 固定，同一份清单反复搜不会每次都变
         assert_eq!(out.scope_dirs, vec!["bill/src/client", "bill/src/public"]);
-        assert_eq!(paths(&out), vec!["bill/src/client/A.java", "bill/src/public/A.java"]);
+        assert_eq!(
+            paths(&out),
+            vec!["bill/src/client/A.java", "bill/src/public/A.java"]
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1233,7 +1491,11 @@ mod tests {
     #[test]
     fn 不存在的范围目录记下来其余照搜() {
         let root = scope_fixture("partial");
-        let out = search(&root, &opts_in("foo", &["bill/src/public", "bill/src/nope"])).unwrap();
+        let out = search(
+            &root,
+            &opts_in("foo", &["bill/src/public", "bill/src/nope"]),
+        )
+        .unwrap();
         assert_eq!(out.hits.len(), 1);
         assert_eq!(out.scope_dirs, vec!["bill/src/public"]);
         assert_eq!(out.missing_dirs, vec!["bill/src/nope"]);
@@ -1581,8 +1843,14 @@ pub fn replace(
             scope.missing.join("、")
         ));
     }
-    let (candidates, walk_truncated) =
-        collect_candidates(root, &scope.abs, &filter, started, TIME_BUDGET_MS);
+    let (candidates, walk_truncated) = collect_candidates(
+        root,
+        &scope.abs,
+        &filter,
+        started,
+        TIME_BUDGET_MS,
+        &AtomicBool::new(false),
+    );
 
     let cursor = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
@@ -1995,7 +2263,10 @@ mod live_tests {
 
         // 截断会让对比失去意义：先确认两边都搜完
         assert!(!full.truncated, "全量搜索被截断（条数或时间上限）");
-        assert!(!scoped.truncated, "范围搜索被截断，说明范围没生效或结果过多");
+        assert!(
+            !scoped.truncated,
+            "范围搜索被截断，说明范围没生效或结果过多"
+        );
         assert!(!full.hits.is_empty(), "这个词在 newar 里应该搜得到");
         assert!(
             scoped.files_scanned < full.files_scanned,
@@ -2010,7 +2281,11 @@ mod live_tests {
             .filter(|h| h.path.starts_with(&format!("{COMPONENT}/")))
             .map(|h| (h.path.clone(), h.line))
             .collect();
-        assert_eq!(lines(&scoped), want, "范围搜索与「全量 + 路径过滤」必须逐行一致");
+        assert_eq!(
+            lines(&scoped),
+            want,
+            "范围搜索与「全量 + 路径过滤」必须逐行一致"
+        );
         // 范围外确有命中，这条对比才说明「范围真的排除了东西」
         assert!(
             want.len() < full.hits.len(),
@@ -2044,7 +2319,10 @@ mod live_tests {
         );
 
         assert!(fallen.scope_fallback, "范围全不存在时必须标记回落");
-        assert_eq!(fallen.missing_dirs, vec!["ncforge-不存在的组件".to_string()]);
+        assert_eq!(
+            fallen.missing_dirs,
+            vec!["ncforge-不存在的组件".to_string()]
+        );
         assert!(fallen.scope_dirs.is_empty(), "回落时生效范围就是整个工作区");
         assert_eq!(lines(&fallen), lines(&full), "回落不能丢结果");
     }

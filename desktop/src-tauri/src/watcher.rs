@@ -6,7 +6,11 @@
 //!    的写入量比业务代码大一个数量级；
 //! 2. 事件级：只认「增 / 删 / 改名」，不认内容与属性变更——文件树只关心目录里
 //!    有哪几项，编译一次改几千个 `.class` 的内容，跟着刷新是白烧 IO；
-//! 3. 时间级：DEBOUNCE 内的改动合成一批，一次发去重后的父目录集合。
+//! 3. 时间级：DEBOUNCE 内的改动合成一批，一次发去重后的父目录集合；持续不断的事件
+//!    最多合并 MAX_WAIT，不会因为「一直有新事件」而一直不发。
+//!
+//! 前两层在 OS 回调里就做掉，再入有界队列（EVENT_QUEUE）：编译 / SVN 更新 / 解压
+//! 这类事件风暴不会无限排队吃内存；队列满了就丢事件、记一笔，下一批改成全量重读。
 //!
 //! 纯逻辑（过滤 / 归类 / 合并）都在本文件；[`WorkspaceWatcher`] 是唯一摸 OS 的地方，
 //! 命令层只负责在切工作区时换一份监听（见 `workspace_cmds::restart_watcher`）。
@@ -21,7 +25,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use notify::{RecursiveMode, Watcher};
 
@@ -38,8 +42,71 @@ const DEBOUNCE: Duration = Duration::from_millis(350);
 /// 不能把 IPC 与 `list_dir` 堆满界面。
 const MAX_DIRS: usize = 64;
 
-/// 待发队列上限：到顶立刻发一批，不等合并窗口。
+/// 待发目录上限：到顶改为全量重读，不再继续积累路径。
 const MAX_PENDING: usize = 256;
+
+/// 一批最多攒多久：持续写入时每来一个事件都会重置 DEBOUNCE，没有这个上限
+/// 编译期间目录变化可能几十秒都送不到前端。
+const MAX_WAIT: Duration = Duration::from_millis(1000);
+
+/// OS 回调 → 合并线程之间的有界队列长度（已过滤后的事件）。
+const EVENT_QUEUE: usize = 4096;
+
+/// 这个事件值不值得送进队列：内容 / 属性变更、全在元数据目录里的，回调里就丢掉。
+/// 平台的「可能丢事件」信号无论如何都要送。
+pub fn worth_queueing(ev: &notify::Event) -> bool {
+    ev.need_rescan() || (needs_tree_refresh(&ev.kind) && ev.paths.iter().any(|p| !is_ignored(p)))
+}
+
+/// 合并状态机（纯逻辑，时间由调用方传入，便于单测）。
+#[derive(Default)]
+struct Batcher {
+    pending: BTreeSet<PathBuf>,
+    rescan: bool,
+    /// 这一批第一个事件到达的时间；空批为 None。
+    since: Option<Instant>,
+}
+
+impl Batcher {
+    fn add(&mut self, root: &Path, ev: &notify::Event, now: Instant) {
+        self.rescan |= ev.need_rescan();
+        if !self.rescan && needs_tree_refresh(&ev.kind) {
+            affected_dirs(root, &ev.paths, &mut self.pending);
+            self.rescan |= self.pending.len() >= MAX_PENDING;
+        }
+        if self.since.is_none() && (self.rescan || !self.pending.is_empty()) {
+            self.since = Some(now);
+        }
+    }
+
+    /// 队列溢出丢了事件：下一批让前端整体重读。
+    fn mark_lost(&mut self, now: Instant) {
+        self.rescan = true;
+        self.since.get_or_insert(now);
+    }
+
+    /// 重扫也要合并一个窗口：持续队列溢出不能退化成逐事件触发整棵树重读。
+    fn due(&self, now: Instant) -> bool {
+        self.since
+            .is_some_and(|t| now.duration_since(t) >= if self.rescan { DEBOUNCE } else { MAX_WAIT })
+    }
+
+    /// 下一次 recv 最多等多久：平时 DEBOUNCE，但不能越过这一批的 MAX_WAIT 截止点。
+    fn wait(&self, now: Instant) -> Duration {
+        match self.since {
+            Some(t) => DEBOUNCE.min(
+                (if self.rescan { DEBOUNCE } else { MAX_WAIT })
+                    .saturating_sub(now.duration_since(t)),
+            ),
+            None => DEBOUNCE,
+        }
+    }
+
+    fn flush(&mut self, emit: &Arc<dyn Fn(WatchBatch) + Send + Sync>) {
+        self.since = None;
+        flush(&mut self.pending, &mut self.rescan, emit);
+    }
+}
 
 /// 这条路径是不是落在不看的目录里。
 pub fn is_ignored(path: &Path) -> bool {
@@ -109,11 +176,20 @@ impl WorkspaceWatcher {
         root: PathBuf,
         emit: Arc<dyn Fn(WatchBatch) + Send + Sync>,
     ) -> Result<Self, String> {
-        let (tx, rx) = mpsc::channel::<notify::Event>();
+        let (tx, rx) = mpsc::sync_channel::<notify::Event>(EVENT_QUEUE);
+        // 队列满时丢掉的事件不能当没发生：记下来，合并线程据此改成全量重读
+        let lost = Arc::new(AtomicBool::new(false));
+        let lost_cb = Arc::clone(&lost);
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             match res {
-                // 接收方已退出（正在换工作区）时 send 失败：丢弃即可，回调里不能阻塞
-                Ok(ev) => drop(tx.send(ev)),
+                // 先过滤再入队：内容变更（编译写 .class）与 .svn 写入占事件的绝大多数
+                Ok(ev) if worth_queueing(&ev) => match tx.try_send(ev) {
+                    Ok(()) => {}
+                    Err(mpsc::TrySendError::Full(_)) => lost_cb.store(true, Ordering::Relaxed),
+                    // 接收方已退出（正在换工作区）：丢弃即可，回调里不能阻塞
+                    Err(mpsc::TrySendError::Disconnected(_)) => {}
+                },
+                Ok(_) => {}
                 Err(e) => log::warn!("文件监听出错：{e}"),
             }
         })
@@ -127,29 +203,25 @@ impl WorkspaceWatcher {
         std::thread::Builder::new()
             .name("nc-fs-watch".to_string())
             .spawn(move || {
-                let mut pending: BTreeSet<PathBuf> = BTreeSet::new();
-                let mut rescan = false;
+                let mut batch = Batcher::default();
                 loop {
                     // 让出点：没有事件时阻塞在 recv_timeout 上，每轮至多一次 flush
                     if stop_thread.load(Ordering::Relaxed) {
                         break;
                     }
-                    match rx.recv_timeout(DEBOUNCE) {
-                        Ok(ev) => {
-                            // 丢了事件时平台给的补偿信号：宁可让前端重读一遍，也别一直显示旧树
-                            rescan |= ev.need_rescan();
-                            if needs_tree_refresh(&ev.kind) {
-                                affected_dirs(&root, &ev.paths, &mut pending);
-                            }
-                            if rescan || pending.len() >= MAX_PENDING {
-                                flush(&mut pending, &mut rescan, &emit);
-                            }
-                        }
-                        Err(RecvTimeoutError::Timeout) => {
-                            flush(&mut pending, &mut rescan, &emit);
-                        }
+                    match rx.recv_timeout(batch.wait(Instant::now())) {
+                        // 丢了事件时平台给的补偿信号（need_rescan）在 add 里并入：
+                        // 宁可让前端重读一遍，也别一直显示旧树
+                        Ok(ev) => batch.add(&root, &ev, Instant::now()),
+                        Err(RecvTimeoutError::Timeout) => batch.flush(&emit),
                         // 生产端（watcher 回调里的 tx）没了：循环自行结束，不空转
                         Err(RecvTimeoutError::Disconnected) => break,
+                    }
+                    if lost.swap(false, Ordering::Relaxed) {
+                        batch.mark_lost(Instant::now());
+                    }
+                    if batch.due(Instant::now()) {
+                        batch.flush(&emit);
                     }
                 }
             })
@@ -303,6 +375,93 @@ mod tests {
         pending.insert(root().join("one"));
         flush(&mut pending, &mut rescan, &emit);
         assert!(!rx.try_recv().expect("应当又发了一批").rescan);
+    }
+
+    fn ev(kind: K, path: PathBuf) -> notify::Event {
+        notify::Event::new(kind).add_path(path)
+    }
+
+    #[test]
+    fn 回调里先过滤再入队() {
+        let src = root().join("newar").join("src");
+        assert!(worth_queueing(&ev(
+            K::Create(CreateKind::File),
+            src.join("A.java")
+        )));
+        // 编译改 .class 内容、.svn 里的新建：都不进队列
+        assert!(!worth_queueing(&ev(
+            K::Modify(ModifyKind::Data(DataChange::Content)),
+            src.join("A.class")
+        )));
+        assert!(!worth_queueing(&ev(
+            K::Create(CreateKind::File),
+            root().join(".svn").join("tmp")
+        )));
+        // 平台说可能丢事件：必须送
+        let lost = notify::Event::new(K::Other).set_flag(notify::event::Flag::Rescan);
+        assert!(worth_queueing(&lost));
+    }
+
+    #[test]
+    fn 持续事件最多合并一个截止期() {
+        let t0 = Instant::now();
+        let mut b = Batcher::default();
+        let src = root().join("newar").join("src");
+        // 每 100ms 来一个事件（比 DEBOUNCE 短，旧逻辑永远等不到超时）
+        let mut now = t0;
+        let mut flushed_at = None;
+        for i in 0..30 {
+            b.add(
+                &root(),
+                &ev(K::Create(CreateKind::File), src.join(format!("F{i}.java"))),
+                now,
+            );
+            if b.due(now) {
+                flushed_at = Some(now.duration_since(t0));
+                break;
+            }
+            // 等待时间不能越过本批截止点
+            assert!(b.wait(now) <= MAX_WAIT.saturating_sub(now.duration_since(t0)));
+            now += Duration::from_millis(100);
+        }
+        let at = flushed_at.expect("持续写入时也必须按期发出");
+        assert!(
+            at >= MAX_WAIT && at < MAX_WAIT + Duration::from_millis(100),
+            "{at:?}"
+        );
+
+        // 发完后状态清空，空批等待恢复 DEBOUNCE
+        let (tx, rx) = mpsc::channel::<WatchBatch>();
+        let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |x| drop(tx.send(x)));
+        b.flush(&emit);
+        assert_eq!(rx.try_recv().unwrap().dirs.len(), 1);
+        assert!(!b.due(now) && b.wait(now) == DEBOUNCE);
+
+        // 队列溢出丢了事件：合并一个窗口后要求全量重读
+        b.mark_lost(now);
+        assert!(!b.due(now));
+        assert!(b.due(now + DEBOUNCE));
+        b.flush(&emit);
+        assert!(rx.try_recv().unwrap().rescan);
+    }
+
+    #[test]
+    fn 持续溢出不会逐事件触发全量重读() {
+        let t0 = Instant::now();
+        let mut b = Batcher::default();
+        let (tx, rx) = mpsc::channel::<WatchBatch>();
+        let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |x| drop(tx.send(x)));
+        for ms in 0..2000 {
+            let now = t0 + Duration::from_millis(ms);
+            b.mark_lost(now);
+            if b.due(now) {
+                b.flush(&emit);
+            }
+        }
+        let batches: Vec<_> = rx.try_iter().collect();
+        assert!(!batches.is_empty());
+        assert!(batches.len() <= 6, "两秒内只允许按合并窗口重扫");
+        assert!(batches.iter().all(|batch| batch.rescan));
     }
 
     #[test]
