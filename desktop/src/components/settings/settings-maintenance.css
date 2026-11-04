@@ -1,0 +1,24 @@
+.settings-maintenance-section { display:flex; flex-direction:column; gap:0; min-width:0; }
+.settings-maintenance-heading { padding-block:4px 8px; }
+.settings-maintenance-heading h2,.settings-about-brand h2 { font-size:14px; font-weight:600; }
+.settings-maintenance-heading p,.settings-about-brand p { margin-top:4px; font-size:12px; line-height:1.6; color:hsl(var(--muted-foreground)); }
+.settings-maintenance-muted { font-size:12px; color:hsl(var(--muted-foreground)); }
+.settings-maintenance-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.settings-version { font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; color:hsl(var(--foreground)); white-space:nowrap; }
+.settings-maintenance-footnote { padding-block:8px; color:hsl(var(--muted-foreground)); font-size:12px; line-height:1.6; }
+.settings-about-brand { display:flex; align-items:center; gap:12px; padding-block:4px 18px; }
+.settings-about-brand img { flex-shrink:0; border-radius:var(--r-control); }
+.settings-update-progress { padding-block:4px 12px; }
+.settings-update-track { overflow:hidden; height:4px; border-radius:var(--r-control); background:hsl(var(--secondary)); }
+.settings-update-track > span { display:block; width:100%; height:100%; background:hsl(var(--primary)); transform-origin:left; transition:transform 150ms var(--ease); }
+.settings-update-track > .is-indeterminate { width:35%; animation:settings-update-progress 1.4s linear infinite; }
+.settings-update-metrics { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px 12px; padding-top:8px; color:hsl(var(--muted-foreground)); font-size:12px; font-variant-numeric:tabular-nums; }
+.settings-resource-loading { display:flex; flex-direction:column; gap:12px; padding-block:14px; }
+.settings-maintenance-section + .settings-maintenance-section { padding-top:20px; border-top:1px solid hsl(var(--border)); }
+.settings-import-preview { display:flex; flex-direction:column; gap:14px; width:min(560px,90vw); max-height:70vh; overflow-y:auto; padding:20px; }
+.settings-import-preview h2 { font-size:16px; font-weight:600; }
+.settings-import-preview .input { min-width:0; }
+.settings-import-preview .settings-maintenance-actions { justify-content:flex-end; }
+.settings-import-error { font-size:12px; line-height:1.6; color:hsl(var(--destructive-ink)); }
+@keyframes settings-update-progress { from { transform:translateX(-100%); } to { transform:translateX(385%); } }
+@media(prefers-reduced-motion:reduce) { .settings-update-track > span { transition:none; } .settings-update-track > .is-indeterminate { animation:none; width:100%; opacity:.45; } }

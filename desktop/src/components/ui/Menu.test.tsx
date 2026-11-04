@@ -15,6 +15,22 @@ beforeEach(() => { vi.clearAllMocks(); container = document.createElement("div")
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 
 describe("menus in scrollable SSH sidebar", () => {
+  it("搜索输入保留Home/End与中文组词，方向键仍可进入菜单项", async () => {
+    await act(async () => root.render(<Menu portal trigger={(open, toggle) => <button aria-expanded={open} onClick={toggle}>来源</button>}>
+      {close => <><input aria-label="搜索来源" defaultValue="metadata" /><MenuItem label="metadata" onClick={close} /></>}
+    </Menu>));
+    await click(container.querySelector("button")!);
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="搜索来源"]')!; input.focus();
+    for (const key of ["Home", "End"]) {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      await act(async () => input.dispatchEvent(event));
+      expect(event.defaultPrevented).toBe(false); expect(document.activeElement).toBe(input);
+    }
+    await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", isComposing: true, bubbles: true })));
+    expect(document.activeElement).toBe(input);
+    await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    expect(document.activeElement?.textContent).toBe("metadata");
+  });
   it("浮层挂到 body；菜单内点击不会被外部点击处理器抢先关闭", async () => {
     await render(); await click(container.querySelector("button")!);
     const menu = document.querySelector('[role="menu"]')!;
@@ -31,8 +47,11 @@ describe("menus in scrollable SSH sidebar", () => {
     await click(trigger); trigger.focus();
     await act(async () => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
     expect(document.activeElement?.textContent).toBe("文件");
+    const last = document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[1];
+    const scroll = vi.fn(); last.scrollIntoView = scroll;
     await act(async () => document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
     expect(document.activeElement?.textContent).toBe("编辑");
+    expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     expect(document.querySelector('[role="menu"]')).toBeNull(); expect(document.activeElement).toBe(trigger);
   });

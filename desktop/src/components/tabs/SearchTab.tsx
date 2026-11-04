@@ -1,19 +1,18 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { SearchBar } from "../search/SearchBar";
 import { SearchResults } from "../search/SearchResults";
 import { SearchEditPanel } from "../search/SearchEditPanel";
 import { ReplaceBar } from "../search/ReplaceBar";
-import {
-  searchProjects,
-  searchWorkspace,
-  type SearchOptions,
-} from "../../lib/search";
+import { searchProjects, searchWorkspace } from "../../lib/search";
 import type { ResultHit } from "../../lib/searchResults";
+import { componentOptions, isSingleScope, toSearchOptions } from "../../lib/searchScope";
+import { useNcManifest, useNcManifestAudit } from "../../hooks/useNcManifest";
 import { getWorkspace, joinPath } from "../../lib/workspace";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
 import { toast } from "../ui/toast";
 import type { LinkedProject } from "../../lib/linkedProjects";
 import {
+  applySearchScope,
   currentSearchSeq,
   getSearchForm,
   loadHistory,
@@ -80,26 +79,25 @@ export function SearchTab({
   }, [sessionRoot]);
   const root = sessionRoot ?? fallbackRoot;
 
+  // 业务组件清单（manifest）：既是「按组件」的范围来源，也是那个范围可不可用的判据。
+  // 读不到就是空数组 → 范围芯片置灰，不让用户选到一个会静默变成全工程的范围。
+  const components = useNcManifest(root ?? null);
+  const componentChoices = useMemo(() => componentOptions(components), [components]);
+  // 登记缺口：组件菜单底部那行「另有 N 个模块未登记」，解释「为什么 aim 不在清单里」
+  const audit = useNcManifestAudit(root ?? null);
+
   const update = useCallback((patch: Partial<SearchForm>) => {
     // 仓库自己合并并广播；写完后本组件经由订阅拿到新的 form
     setSearchForm(patch);
   }, []);
 
   /**
-   * 从当前表单现算搜索条件。
+   * 从当前表单现算搜索条件（纯函数在 `lib/searchScope::toSearchOptions`）。
    *
    * 抽出来是为了让「替换」与「搜索」用**同一份** options：后端的替换复用搜索的候选
    * 收集逻辑，两边参数必须逐字一致，否则「搜到的」和「会被改的」不是同一批文件。
    */
-  const buildOptions = (f: SearchForm): SearchOptions => ({
-    // 正则模式按原样传（前后空格有意义），纯文本模式传 trim 过的
-    text: f.regex ? f.query : f.query.trim(),
-    caseSensitive: f.caseSensitive,
-    // 正则开着时「整词」不生效（后端也忽略）：想整词自己写 \b，与 IDEA 一致
-    wholeWord: f.regex ? false : f.wholeWord,
-    regex: f.regex,
-    include: f.include.trim(),
-  });
+  const buildOptions = toSearchOptions;
 
   const run = async () => {
     // running 从仓库读：连点两次时第二次的事件闭包还是上一次渲染的，
@@ -131,7 +129,7 @@ export function SearchTab({
           collapsed: [],
         });
       } else {
-        const outcome = await searchWorkspace(opts);
+        const outcome = await searchWorkspace(opts, true);
         if (mine !== currentSearchSeq()) return;
         setHistory(pushHistory(q));
         // 结果里存的是相对路径，必须记下它属于哪个工作区
@@ -159,29 +157,23 @@ export function SearchTab({
   };
 
   /**
-   * 换搜索范围就丢掉旧结果。
-   *
-   * 不换结果的话会出现最坏的一种界面：切到「全部工程」后屏幕上是当前工程的结果，
-   * 汇总行却按全部工程口径念；反过来，切回「当前工程」后替换入口会对着上一次
-   * 全部工程的结果开确认框——它没有 outcome，替换按钮其实是禁用的，但用户看到的
-   * 是「搜到了却替换不了」。查询词与选项保留，换范围往往就是想用同样的词再搜一遍。
+   * 换范围 / 换组件就丢掉旧结果——这条状态机在仓库里（`applySearchScope`），
+   * 这里只负责收起编辑态；「为什么必须清」写在那个函数上。
    */
+  const pickScope = (scope: SearchScope, component: string | null) => {
+    setEditing(false);
+    applySearchScope(scope, component);
+  };
+
   const changeScope = (scope: SearchScope) => {
     if (scope === form.scope) return;
-    // 正在跑时范围按钮是禁用的，这里仍是二道网：顶掉旧请求序号，它的结果不会写回来。
-    void nextSearchSeq();
-    setEditing(false);
-    update({
-      scope,
-      outcome: null,
-      projectOutcome: null,
-      outcomeRoot: null,
-      outcomeOptions: null,
-      collapsed: [],
-      error: null,
-      running: false,
-      replaceOutcome: null,
-    });
+    pickScope(scope, form.component);
+  };
+
+  /** 从菜单里点了一个组件：切到组件范围（`component` 记住，切回来不用重选）。 */
+  const pickComponent = (name: string) => {
+    if (name === form.component && form.scope === "component") return;
+    pickScope("component", name);
   };
 
   const open = (hit: ResultHit) => {
@@ -205,6 +197,8 @@ export function SearchTab({
   };
 
   const onSearchKey = (e: React.KeyboardEvent) => {
+    // 组词的 Enter/Esc 留给输入法；部分 WebView 结束组词时仍用 229 标记。
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
     if (e.key === "Enter") {
       e.preventDefault();
       void run();
@@ -217,7 +211,9 @@ export function SearchTab({
   // 结果是别的工作区搜出来的（只对当前范围有意义；全部工程的结果自带工程根）：
   // 替换必须禁用。否则确认框拿旧工作区的改动面骗人，实际改写的是新工作区的文件。
   const stale =
-    form.scope === "current" && form.outcomeRoot !== null && form.outcomeRoot !== root;
+    isSingleScope(form.scope) && form.outcomeRoot !== null && form.outcomeRoot !== root;
+  // 组件范围与当前工程一样只碰当前工作区：替换、编辑匹配都按这条路开放
+  const single = isSingleScope(form.scope);
 
   const projectCount = projects.filter((p) => p.root).length;
   const currentName =
@@ -232,12 +228,15 @@ export function SearchTab({
         loading={loading}
         projectCount={projectCount}
         currentName={currentName}
+        components={componentChoices}
+        audit={audit}
         update={update}
         onScope={changeScope}
+        onPickComponent={pickComponent}
         onSearch={() => void run()}
         onKeyDown={onSearchKey}
       />
-      {form.scope === "current" && (
+      {single && (
         <ReplaceBar
           form={form}
           update={update}
@@ -246,7 +245,7 @@ export function SearchTab({
           stale={stale}
         />
       )}
-      {editing && form.scope === "current" && form.outcome && root ? (
+      {editing && single && form.outcome && root ? (
         <SearchEditPanel
           hits={form.outcome.hits}
           root={root}
@@ -262,9 +261,7 @@ export function SearchTab({
           loading={loading}
           onOpen={open}
           onEdit={
-            form.scope === "current" && root && !stale && form.outcome
-              ? () => setEditing(true)
-              : undefined
+            single && root && !stale && form.outcome ? () => setEditing(true) : undefined
           }
         />
       )}

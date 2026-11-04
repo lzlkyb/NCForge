@@ -10,6 +10,7 @@ import { compileCancel } from "./compile";
 import { rememberRoot } from "./recentRoots";
 import { clearClosed } from "./closedTabs";
 import { resetMru } from "./tabMru";
+import { invalidateWorkspaceRequests } from "./workspaceEpoch";
 
 /**
  * 切换工作区：改配置 + 清掉属于旧工作区的会话状态。
@@ -30,6 +31,7 @@ export async function applyWorkspace(
 ): Promise<string> {
   // set_workspace 会让后端规范化路径，返回的才是真值；失败时抛错，下方副作用一概不做
   const shown = await setWorkspace(path);
+  invalidateWorkspaceRequests();
   rememberRoot(shown);
 
   const { tabs } = getSession();

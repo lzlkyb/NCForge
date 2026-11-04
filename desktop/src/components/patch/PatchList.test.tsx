@@ -36,14 +36,14 @@ const ITEMS = [item("ic/A.java"), item("ic/B.java"), item("pu/C.java")];
 let root: Root;
 let container: HTMLDivElement;
 
-const mount = async ({ picked, keyword = "" }: { picked: Set<string>; keyword?: string }) => {
+const mount = async ({ picked, keyword = "", items = ITEMS }: { picked: Set<string>; keyword?: string; items?: PatchItem[] }) => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
     root.render(
       <PatchList
-        items={ITEMS}
+        items={items}
         deleted={[]}
         letters={new Map()}
         scanning={false}
@@ -53,17 +53,19 @@ const mount = async ({ picked, keyword = "" }: { picked: Set<string>; keyword?: 
         selected={null}
         onKeyword={() => {}}
         onFilter={() => {}}
-        onToggle={() => {}}
+        onToggle={onToggle}
         onToggleGroup={onGroup}
-        onSelect={() => {}}
+        onSelect={onSelect}
       />,
     );
   });
 };
 
 const onGroup = vi.fn();
+const onToggle = vi.fn();
+const onSelect = vi.fn();
 
-beforeEach(() => onGroup.mockReset());
+beforeEach(() => { onGroup.mockReset(); onToggle.mockReset(); onSelect.mockReset(); });
 
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -77,6 +79,26 @@ const link = (text: string) =>
     | undefined;
 
 describe("PatchList 批量条", () => {
+  it("长文件名保留完整提示，查看详情与勾选互不触发，编译状态仍可读", async () => {
+    const long = item("很长的业务模块/VeryLongBusinessOperationModel.java");
+    const upm = item("ic/META-INF/aiercrossborrow.upm", { section: "upm", layer: null });
+    await mount({ picked: new Set(), items: [long, upm] });
+    const row = container.querySelector(".pk-row")!;
+    const file = row.querySelector<HTMLButtonElement>(".pk-fn")!;
+    expect(file.title).toBe(long.label);
+    expect(container.querySelector<HTMLElement>(".pk-grp-name")?.title).toBe(long.module);
+    expect(row.querySelector(".pk-lay")?.textContent).toBe("标准");
+    expect(row.querySelector(".pk-pair")?.textContent).toBe("未编译");
+    expect(container.querySelectorAll(".pk-pair")[1].textContent).toBe("整文件");
+    await act(async () => file.click());
+    expect(onSelect).toHaveBeenCalledWith(long.path);
+    expect(onToggle).not.toHaveBeenCalled();
+    onSelect.mockClear();
+    await act(async () => row.querySelector<HTMLButtonElement>(".pk-cbx")!.click());
+    expect(onToggle).toHaveBeenCalledWith(long.path);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it("只勾一项时不渲染批量条", async () => {
     await mount({ picked: new Set([ITEMS[0].path]) });
     expect(bar()).toBeNull();

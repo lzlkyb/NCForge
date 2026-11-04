@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import "../../db-console.css";
 import { Modal } from "../ui/Modal";
 import { Icon } from "../ui/icon";
@@ -6,6 +6,8 @@ import { toast } from "../ui/toast";
 import { friendlyDbError } from "../../lib/db";
 import { connOf } from "../../lib/dbStore";
 import { dbApi, type ExportInsertResult } from "../../lib/dbApi";
+import { beginOperation } from "../../lib/operations";
+import { dbTaskSpec } from "../../lib/dbOperations";
 import { downloadText } from "../../lib/resultExport";
 
 /** 每 N 行提交一次的备选值。0 = 全程只在结尾提交。 */
@@ -17,8 +19,8 @@ const COMMITS = [0, 500, 1000, 5000];
  * 数据由后端单独开会话取全，前端只负责选项与落盘——结果网格里只有一页（默认 500 行），
  * 在界面上拼 insert 等于「导出你看见的那点数据」。
  */
-export function InsertExportDialog({ connId, table, sql, schema, onClose }: {
-  connId: string;
+export function InsertExportDialog({ connId, table, sql, schema, onClose,tabId }: {
+  connId: string; tabId?:string;
   /** 默认目标表名（可改）。 */
   table: string;
   /** 取数语句。 */
@@ -36,13 +38,17 @@ export function InsertExportDialog({ connId, table, sql, schema, onClose }: {
     multilang: true,
   });
   const [busy, setBusy] = useState(false);
+  const lock=useRef(false);
   const [done, setDone] = useState<ExportInsertResult | null>(null);
 
   const set = <K extends keyof typeof opt>(k: K, v: (typeof opt)[K]) => setOpt((o) => ({ ...o, [k]: v }));
 
   const run = async () => {
+    if(lock.current) return;
     if (!opt.table.trim()) return toast("目标表名不能为空", "warning");
-    setBusy(true);
+    const task=beginOperation(dbTaskSpec(`insert.export:${connId}`,"生成 INSERT 导出",connId,"独立导出会话",conn?.name,tabId));
+    if(!task) return;
+    lock.current=true;setBusy(true);
     try {
       const r = await dbApi.exportInsert({
         id: connId,
@@ -54,17 +60,19 @@ export function InsertExportDialog({ connId, table, sql, schema, onClose }: {
         maxRows: opt.maxRows,
       });
       downloadText(r.fileName, r.sqlText, "text/plain", false);
+      task.finish("success",`已生成 ${r.rows} 行${r.truncated ? "（到达上限，非全量）" : ""}，已发出文件保存请求`);
       setDone(r);
       toast(`已生成 ${r.fileName}（${r.rows} 行）`, r.truncated ? "warning" : "success");
     } catch (e) {
+      task.finish("failed","导出失败，返回导出窗口查看原因");
       toast(`导出失败：${friendlyDbError(e)}`, "error");
     } finally {
-      setBusy(false);
+      lock.current=false;setBusy(false);
     }
   };
 
   return (
-    <Modal open onClose={onClose} className="modal-surface dbx-dlg" ariaLabel="导出为 INSERT 脚本">
+    <Modal open onClose={()=>{if(!lock.current) onClose();}} closeOnOverlay={!busy} className="modal-surface dbx-dlg" ariaLabel="导出为 INSERT 脚本">
       <div className="hd">
         <Icon name="download" size={16} />
         导出为 INSERT 脚本
@@ -139,12 +147,12 @@ export function InsertExportDialog({ connId, table, sql, schema, onClose }: {
       <div className="ft">
         <span className="dbx-muted">主键前置 · blob 写 null · 日期显式 to_date</span>
         <span className="dbx-sp" />
-        <button type="button" className="dbx-btn" onClick={onClose}>
+        <button type="button" className="dbx-btn" disabled={busy} onClick={onClose}>
           关闭
         </button>
         <button type="button" className="dbx-btn pri" disabled={busy} onClick={() => void run()}>
           {busy ? <Icon name="spinner" size={12} /> : <Icon name="download" size={12} />}
-          {done ? "重新导出" : "导出"}
+          {busy ? "导出中…" : done ? "重新导出" : "导出"}
         </button>
       </div>
     </Modal>

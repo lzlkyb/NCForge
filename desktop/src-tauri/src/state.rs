@@ -55,6 +55,7 @@ pub struct AppState {
     ///
     /// 用 `Weak` 而不是 `Arc`：最后一条会话释放时 `Arc<Bridge>` 归零，桥自己 `Drop` 掉进程，
     /// 池里那条记录随之失效（下次 upgrade 失败就重建）。省掉一套「谁该关进程」的记账。
+    pub db_policies: std::sync::Mutex<std::collections::HashMap<String, Arc<std::sync::RwLock<bool>>>>,
     pub db_procs: std::sync::Mutex<
         std::collections::HashMap<String, std::sync::Weak<crate::java_bridge::Bridge>>,
     >,
@@ -120,6 +121,7 @@ impl AppState {
             server: std::sync::Mutex::new(ServerRun::default()),
             svn: std::sync::Mutex::new(None),
             db: std::sync::Mutex::new(Default::default()),
+            db_policies: std::sync::Mutex::new(std::collections::HashMap::new()),
             db_procs: std::sync::Mutex::new(Default::default()),
             lang: std::sync::Mutex::new(Default::default()),
             debug: std::sync::Mutex::new(Default::default()),

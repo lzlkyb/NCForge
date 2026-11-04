@@ -1,3 +1,5 @@
+import { useOperations } from "../../lib/operations";
+import { Icon } from "../ui/icon";
 import { restartLang, startLangNow, useLangView } from "../../lib/lang";
 import { setLightMode } from "../../lib/lightMode";
 import { toast } from "../ui/toast";
@@ -9,6 +11,7 @@ import { toast } from "../ui/toast";
  */
 export function LangBadge({ activePath }: { activePath: string | null }) {
   const v = useLangView();
+  const requesting = useOperations().some(o => o.key === "language.control" && (o.state === "running" || o.state === "cancelling"));
   // 总开关关掉时不能什么都不显示：用户会以为「跳转/补全坏了」而找不到原因。
   // 做成可点的按钮：状态栏是用户最常看到它的地方，恢复代码智能不该再绕去设置页。
   if (!v.enabled) {
@@ -25,7 +28,7 @@ export function LangBadge({ activePath }: { activePath: string | null }) {
         }}
       >
         <span className="wb-lang-dot" />
-        轻量模式 · 恢复代码智能
+        <span className="wb-lang-text">轻量模式 · 恢复代码智能</span>
       </button>
     );
   }
@@ -35,11 +38,14 @@ export function LangBadge({ activePath }: { activePath: string | null }) {
     return (
       <button
         type="button"
-        className="wb-status-btn"
+        className="wb-status-btn wb-lang"
         title="自动启动已在设置里关闭：点击为当前模块启动代码智能（约 650MB 内存）"
+        disabled={requesting}
+        aria-busy={requesting}
         onClick={() => startLangNow(activePath)}
       >
-        启动代码智能
+        {requesting && <Icon name="spinner" size={11} className="animate-spin" />}
+        <span className="wb-lang-text">{requesting ? "正在启动代码智能" : "启动代码智能"}</span>
       </button>
     );
   }
@@ -58,9 +64,12 @@ export function LangBadge({ activePath }: { activePath: string | null }) {
         className="wb-status-btn wb-lang"
         data-tone="bad"
         title={`${v.message}\n\n点击重试`}
-        onClick={() => activePath && void restartLang(activePath)}
+        disabled={requesting}
+        aria-busy={requesting}
+        onClick={() => activePath && void restartLang(activePath).catch(e => toast(`重启代码智能失败：${e}`, "error"))}
       >
-        代码智能不可用 · 重试
+        {requesting && <Icon name="spinner" size={11} className="animate-spin" />}
+        <span className="wb-lang-text">{requesting ? "正在重启代码智能" : "代码智能不可用 · 重试"}</span>
       </button>
     );
   }
@@ -75,7 +84,7 @@ export function LangBadge({ activePath }: { activePath: string | null }) {
   return (
     <span className="wb-lang" data-tone={v.state === "ready" && v.settled ? "ok" : "busy"} title={detail}>
       <span className="wb-lang-dot" />
-      {text}
+      <span className="wb-lang-text">{text}</span>
     </span>
   );
 }

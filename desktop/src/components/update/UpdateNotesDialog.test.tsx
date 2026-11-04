@@ -4,17 +4,18 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateNotesDialog } from "./UpdateNotesDialog";
 import type { UpdateNotesInfo } from "../../lib/updateNotes";
+import { AVAILABLE_PROCESS, type UpdateDialogProcess } from "./UpdateProcess";
 
 vi.mock("../../hooks/usePrefersReducedMotion", () => ({ usePrefersReducedMotion: () => true }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
-const close = vi.fn(), download = vi.fn(), dismiss = vi.fn();
-const props = { open: true, update: { version: "99.0.0", currentVersion: "2.9.1", body: "### 亮点\n- **更稳定**：可靠复制\n### 修复\n- <img src=x onerror=alert(1)>" }, onClose: close, onDownload: download, onDismiss: dismiss };
+const close = vi.fn(), download = vi.fn(), dismiss = vi.fn(), restart = vi.fn(), retry = vi.fn();
+const props = { open: true, update: { version: "99.0.0", currentVersion: "2.9.1", body: "### 亮点\n- **更稳定**：可靠复制\n### 修复\n- <img src=x onerror=alert(1)>" }, onClose: close, onDownload: download, onDismiss: dismiss, onRestart: restart, onRetry: retry };
 const button = (text: string) => [...document.querySelectorAll("button")].find(node => node.textContent?.includes(text))!;
 
 beforeEach(() => { vi.clearAllMocks(); root = createRoot(document.createElement("div")); });
 afterEach(async () => { await act(async () => root.unmount()); });
-async function mount(update: UpdateNotesInfo = props.update) { await act(async () => root.render(<UpdateNotesDialog {...props} update={update} />)); }
+async function mount(update: UpdateNotesInfo | null = props.update, process?: UpdateDialogProcess) { await act(async () => root.render(<UpdateNotesDialog {...props} update={update} process={process} />)); }
 
 describe("update dialog behavior", () => {
   it("关闭不抑制当前版本，也不会触发下载", async () => {
@@ -24,16 +25,20 @@ describe("update dialog behavior", () => {
     expect(dismiss).not.toHaveBeenCalled();
     expect(download).not.toHaveBeenCalled();
   });
-  it("稍后仍按原有顺序抑制并关闭", async () => {
-    await mount(); await act(async () => button("稍后").click());
+  it("稍后提醒只关闭，不写忽略记忆", async () => {
+    await mount(); await act(async () => button("稍后提醒").click());
+    expect(dismiss).not.toHaveBeenCalled(); expect(close).toHaveBeenCalledOnce();
+    expect(download).not.toHaveBeenCalled();
+  });
+  it("只有明确忽略此版本才抑制并关闭", async () => {
+    await mount(); await act(async () => button("忽略此版本").click());
     expect(dismiss).toHaveBeenCalledOnce(); expect(close).toHaveBeenCalledOnce();
     expect(dismiss.mock.invocationCallOrder[0]).toBeLessThan(close.mock.invocationCallOrder[0]);
     expect(download).not.toHaveBeenCalled();
   });
-  it("下载仍按原有顺序发起并关闭，不写稍后记忆", async () => {
+  it("下载发起后保持弹框显示进度，不写忽略记忆", async () => {
     await mount(); await act(async () => button("下载并更新").click());
-    expect(download).toHaveBeenCalledOnce(); expect(close).toHaveBeenCalledOnce();
-    expect(download.mock.invocationCallOrder[0]).toBeLessThan(close.mock.invocationCallOrder[0]);
+    expect(download).toHaveBeenCalledOnce(); expect(close).not.toHaveBeenCalled();
     expect(dismiss).not.toHaveBeenCalled();
   });
   it("记录按需挂载，远端内容以安全文本呈现，切换版本重置折叠", async () => {
@@ -69,5 +74,49 @@ describe("update dialog behavior", () => {
     expect(document.querySelector('.update-stats')).not.toBeNull();
     // 本次发布没有说明 ⇒ 详情区仍要诚实地说没有，不能用汇总内容冒充。
     expect(document.body.textContent).toContain("此版本未提供详细说明");
+  });
+  it("进度变化保持收起按钮焦点，未知大小不伪造百分比", async () => {
+    const downloading = { ...AVAILABLE_PROCESS, status: "downloading" as const, progress: 42, downloadedBytes: 42, totalBytes: 100 };
+    await mount(props.update, downloading);
+    const background = button("收起到后台"); background.focus();
+    await mount(props.update, { ...downloading, progress: 49, downloadedBytes: 49 });
+    expect(button("收起到后台")).toBe(background);
+    expect(document.activeElement).toBe(background);
+    expect(document.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("49");
+    await mount(props.update, { ...downloading, totalBytes: null, progressIndeterminate: true });
+    expect(document.querySelector('[role="progressbar"]')?.hasAttribute("aria-valuenow")).toBe(false);
+    expect(document.querySelector('[role="progressbar"]')?.getAttribute("aria-valuetext")).toBe("总大小未知");
+    await act(async () => background.click()); expect(close).toHaveBeenCalledOnce();
+  });
+  it("就绪态先显示确认，点击后才安装并重启", async () => {
+    await mount(props.update, { ...AVAILABLE_PROCESS, status: "ready", progress: 100 });
+    expect(document.body.textContent).toContain("更新包已下载并验证");
+    expect(restart).not.toHaveBeenCalled(); expect(download).not.toHaveBeenCalled();
+    await act(async () => button("安装并重启").click());
+    expect(restart).toHaveBeenCalledOnce(); expect(download).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+  });
+  it("没有版本信息的检查失败也能打开详情并重试", async () => {
+    await mount(null, { ...AVAILABLE_PROCESS, status: "error", errorCode: "network", error: "failed to fetch <img src=x>" });
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("无法连接更新服务器");
+    await act(async () => button("重试更新").click()); expect(retry).toHaveBeenCalledOnce();
+    expect(download).not.toHaveBeenCalled();
+    expect(document.querySelectorAll("img")).toHaveLength(1);
+  });
+  it("安装期间不会由关闭按钮或Esc中断", async () => {
+    await mount(props.update, { ...AVAILABLE_PROCESS, status: "installing" });
+    const closeButton = document.querySelector('[aria-label="关闭更新弹窗"]') as HTMLButtonElement;
+    expect(closeButton.disabled).toBe(true);
+    await act(async () => closeButton.click());
+    await act(async () => document.querySelector('[role="dialog"]')?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(close).not.toHaveBeenCalled();
+  });
+  it("首屏最多显示三项亮点，其他说明留在折叠记录", async () => {
+    await mount({ version: "99.0.0", body: "### 亮点\n- 第一项\n- 第二项\n- 第三项\n- 第四项\n- 第五项" });
+    expect(document.querySelectorAll('.update-benefits>li')).toHaveLength(3);
+    expect(document.querySelector('.update-release-notes')).toBeNull();
+    await act(async () => button("本次发布").click());
+    expect(document.querySelector('.update-release-notes')?.textContent).toContain("第五项");
   });
 });

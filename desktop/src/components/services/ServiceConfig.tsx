@@ -5,6 +5,7 @@ import { toast } from "../ui/toast";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { PathField } from "./PathField";
 import { HeapField } from "./HeapField";
+import { beginOperation } from "../../lib/operations";
 import { applyWorkspace } from "../../lib/switchWorkspace";
 import { ensureFilesSaved } from "../../lib/terminatePreflight";
 import { ncHomeProbe, ncHomeSet, serverHeapSet, type ServerStatus } from "../../lib/server";
@@ -85,17 +86,18 @@ export function ServiceConfig({
           placeholder="C:\work\aier\newar"
           hint={status?.projectRoot ? "改完代码编译后重启即生效" : "未选择"}
           onSave={async (v) => {
-            if (running && !(await confirmRunning("工程目录", v))) return "cancelled";
-            // 切换会关掉全部标签：与文件页同一个预检，别让服务页成为「静默丢改动」的后门
-            if (!(await ensureFilesSaved("切换工程"))) return "cancelled";
-            // 副作用（关模型 / 停 jdt.ls / 清会话 / 失缓存）只在 applyWorkspace 里定义，
-            // 这里调 setWorkspace 会留下「文件树还是旧根、补全还指着旧工程」的撕裂状态
-            const shown = await applyWorkspace(v, queryClient);
-            toast(
-              running ? `工程已切换为 ${shown}，重启服务后生效` : `工程已切换为 ${shown}`,
-              "success",
-            );
-            onRefetch();
+            const task = beginOperation({ key: "workspace.switch", label: "切换工程", scope: v, page: "files", phase: "检查运行服务与未保存文件" });
+            if (!task) throw new Error("工程正在切换，请稍候");
+            try {
+              if (running && !(await confirmRunning("工程目录", v))) { task.finish("cancelled", "用户取消工程切换"); return "cancelled"; }
+              // 服务页和文件页共用同一把锁与保存守卫，防止跨入口重复切换丢失标签。
+              if (!(await ensureFilesSaved("切换工程"))) { task.finish("cancelled", "用户取消工程切换"); return "cancelled"; }
+              task.update({ phase: "验证目录并切换工作区" });
+              const shown = await applyWorkspace(v, queryClient);
+              task.finish("success", "工程已切换；代码智能按新工程单独准备");
+              toast(running ? `工程已切换为 ${shown}，重启服务后生效` : `工程已切换为 ${shown}`, "success");
+              onRefetch();
+            } catch (error) { task.finish("failed", String(error)); throw error; }
           }}
         />
         {/* 堆上限：状态里带的是「后端收口后真正会写进命令行」的值，

@@ -9,6 +9,7 @@ import {
   CHANGELOG_SEEN_EVENT,
 } from "./lib/utils";
 import { transitionPage } from "./lib/pageTransition";
+import { navigateRail } from "./lib/railNavigation";
 import { requestOpenFile } from "./lib/openFileRequest";
 import { getKeymap, isWorkspaceSearch, layoutKeyOf, paletteModeOf, RAIL_KEY, WORKSPACE_SEARCH_KEY } from "./lib/keymap";
 import { setSideOpen, toggleRail, toggleSide, useRailExpanded } from "./lib/layoutStore";
@@ -17,6 +18,8 @@ import { openServicePanel } from "./lib/servicePanel";
 import { openPalette, usePalette } from "./lib/paletteStore";
 import { openLinkedDialog } from "./lib/linkedDialog";
 import { ShortcutSheet } from "./components/layout/ShortcutSheet";
+import { showObjectFinder } from "./lib/dbStore";
+import { isDbObjectKey } from "./lib/keymap";
 import { registerCommands } from "./lib/commandRegistry";
 import { setSession } from "./lib/workspaceSession";
 import { openPatchPage } from "./lib/svnSession";
@@ -57,7 +60,7 @@ const SvnTab = lazy(() =>
 );
 const DbTab = lazy(() => import("./components/tabs/DbTab").then((m) => ({ default: m.DbTab })));
 // 工程关联不再是页签：入口在代码页状态栏 / 问题面板 / 命令面板，弹框本身懒加载。
-// NC 日志页：要读 5MB 级的日志文件并归因，切过去才加载。
+// 低频日志排查从菜单按需打开；首次使用才加载，主导航不常驻入口。
 const LogTab = lazy(() => import("./components/tabs/LogTab").then((m) => ({ default: m.LogTab })));
 // 数据字典已并进数据库页的字典标签（见 DbTab / DictWorkspace），不再单独成页。
 // 快速导航浮层要查语言服务（间接依赖 Monaco），首次打开时才加载，和文件页共用同一个 chunk。
@@ -66,7 +69,8 @@ const QuickPalette = lazy(() =>
 );
 
 /**
- * Ctrl+1~N 快捷键的完整序列：WORKSPACE_NAV 全部项 + 设置（追加在尾部）。
+ * Ctrl+1~N 快捷键的完整序列：WORKSPACE_NAV 注册项 + 设置（追加在尾部）。
+ * 低频日志工具只隐藏主导航入口，保留 Ctrl+4 与设置 Ctrl+5 的既有位置。
  *
  * settings 不在 WORKSPACE_NAV 里——它在侧栏 foot 单独渲染（带更新未读红点），
  * 但键盘用户同样需要一键直达，故快捷键序列在 App 层追加，不动侧栏数据源。
@@ -175,14 +179,9 @@ function AppContent() {
     navigate("settings");
   }, [navigate]);
 
-  // 竖栏点击：点当前项 = 收起 / 展开侧栏（和 VS Code 一致）；点别的项一律先把侧栏展开
+  // 重复点击只切换当前页可见的侧栏；日志往返保留代码侧栏的开合偏好。
   const onRail = useCallback((tab: string) => {
-    if (tab === activeTab) {
-      toggleSide();
-      return;
-    }
-    setSideOpen(true);
-    navigate(tab);
+    navigateRail(activeTab, tab, navigate);
   }, [activeTab, navigate]);
 
   // 命令面板里的应用级命令（导航 / 布局 / 主题 / NC 服务）。文件页的命令由文件页自己登记。
@@ -202,6 +201,11 @@ function AppContent() {
     openDictTab(defaultConnId());
     showWorkbenchDocument();
     navRef.current("db");
+  }, []);
+  const openLogs = useCallback(() => {
+    // 从源码标签回到排查时路由可能没有变化，仍需明确显示工具文档。
+    showWorkbenchDocument();
+    navRef.current("logs");
   }, []);
   /** 服务启停正在路上：连按 Enter 会把同一条指令发好几遍。 */
   useEffect(() => {
@@ -231,6 +235,7 @@ function AppContent() {
         run: openPatchPage,
       },
       go("db", "数据库"),
+      {id:"db.objects",title:"查找数据库对象",hint:"Ctrl+Alt+O",run:()=>{navRef.current("db");showObjectFinder();}},
       {
         id: "go.linked",
         title: "打开：工程关联",
@@ -243,7 +248,7 @@ function AppContent() {
         hint: "工程关联 · 产物检查",
         run: () => openLinkedDialog("artifacts"),
       },
-      go("logs", "NC 日志"),
+      { id: "go.logs", title: "打开：日志排查", hint: "按需工具 · Ctrl+4", run: openLogs },
       { id: "go.dict", title: "转到：数据字典", hint: "数据库 · 数据字典", run: openDict },
       go("settings", "设置"),
       { id: "view.side", title: "切换侧栏", hint: "Ctrl+B", run: toggleSide },
@@ -255,7 +260,7 @@ function AppContent() {
       // 停止必须问一句：命令面板能一键到的地方，不能在服务面板要确认、到这里就直接打后端。
       { id: "svc.stop", title: "停止 NC 服务", run: () => setSvcConfirm("stop") },
     ]);
-  }, [openSearch, openDict]);
+  }, [openSearch, openDict, openLogs]);
   // 其它页（如 Java 编辑器里「在数据库中执行此 SQL」）要切页时发这个事件，detail 是页 key。
   // 老的 "search" / "services" / "patch" / "dict" / "linked" 页 key 仍然兼容：
   // 转到文件页的对应视图 / 面板、版本控制页的打包视图、数据库页的字典标签，或工程关联弹框。
@@ -267,11 +272,12 @@ function AppContent() {
       else if (tab === "patch") openPatchPage();
       else if (tab === "dict") openDict();
       else if (tab === "linked") openLinkedDialog("chain");
+      else if (tab === "logs") openLogs();
       else navRef.current(tab);
     };
     window.addEventListener("ncforge-navigate", go);
     return () => window.removeEventListener("ncforge-navigate", go);
-  }, [openSearch, openDict]);
+  }, [openSearch, openDict, openLogs]);
   const { open: paletteOpen } = usePalette();
   // 浮层的代码块在首次使用前就拉好：第一次按快捷键时才去加载，开头敲的几个字符会落进编辑器里
   useEffect(() => {
@@ -286,6 +292,7 @@ function AppContent() {
       // 只认 aria-modal="true"：InfoPopover / 大纲 / 历史这类非模态浮层也是 role=dialog，
       // 把它们算进来的话，打开一个说明气泡就按不了 Ctrl+K / Ctrl+B / Ctrl+J。
       const otherDialog = document.querySelector('[role="dialog"][aria-modal="true"]:not([data-palette]), dialog[open]');
+      if(isDbObjectKey(e) && !otherDialog) {e.preventDefault();e.stopPropagation();navigate("db");showObjectFinder();return;}
       const pm = paletteModeOf(e, getKeymap());
       const lk = layoutKeyOf(e);
       if ((pm || lk) && !otherDialog) {
@@ -319,7 +326,8 @@ function AppContent() {
       const idx = Number(e.key);
       if (Number.isInteger(idx) && idx >= 1 && idx <= HOTKEY_TABS.length) {
         e.preventDefault();
-        navigate(HOTKEY_TABS[idx - 1]);
+        const tab = HOTKEY_TABS[idx - 1];
+        if (tab === "logs") openLogs(); else navigate(tab);
         return;
       }
       if (e.key.toLowerCase() === "k") {
@@ -329,7 +337,7 @@ function AppContent() {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [navigate, openSearch]);
+  }, [navigate, openSearch, openLogs]);
 
   const navItems = useMemo(() => WORKSPACE_NAV, []);
 
@@ -353,8 +361,6 @@ function AppContent() {
         <ActivityPanel
           key={tab}
           active={activeTab === tab}
-          data-page-panel={activeTab === tab ? "" : undefined}
-          className={activeTab === tab ? "animate-tab-in" : ""}
         >
           {/* 每页一个边界 + 自己的 Suspense：谁崩了卸谁，谁在加载谁显示骨架，
               不再共用最外层那一个（那样任一工具页出错会把整个工作台卸掉）。 */}
@@ -370,6 +376,7 @@ function AppContent() {
     <div className="app-shell flex h-screen flex-col overflow-hidden">
       <Header
         onOpenPalette={() => openPalette("file")}
+        activeTool={activeTab}
       />
       <div className="app-body">
         <SideNav

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { beginOperation, trackOperation } from "./operations";
+import { dbTaskSpec } from "./dbOperations";
 import { invoke } from "./tauri";
 import { friendlyDbError } from "./db";
 
@@ -99,7 +101,7 @@ export function useNcUsers(connId: string) {
       setLoading(true);
       setError(null);
       try {
-        const out = await listUsers(connId, filter);
+        const out = await trackOperation(dbTaskSpec(`users:${connId}:${n}`,"读取 NC 操作员",connId,"NC 操作员"),()=>listUsers(connId, filter),out=>({state:"success",detail:`已读取 ${out.users.length} 个账号${out.truncated ? "，已到读取上限" : ""}`}));
         if (n !== seq.current) return;
         setUsers(out.users);
         setTruncated(out.truncated);
@@ -131,7 +133,9 @@ export function usePasswordReset() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const revision=useRef(0),lock=useRef(false);
   const toggle = (cuserid: string) => {
+    revision.current++;
     setSelected((s) => {
       const next = { ...s };
       if (next[cuserid]) delete next[cuserid];
@@ -143,31 +147,40 @@ export function usePasswordReset() {
   };
 
   const clear = () => {
+    revision.current++;
     setSelected({});
     setResult(null);
   };
 
   // 密码或方案改了，脚本里的哈希就不再对应当前输入：留着会被复制走一份错的
   const changePassword = (v: string) => {
+    revision.current++;
     setPassword(v);
     setResult(null);
   };
   const changeScheme = (v: PwdScheme) => {
+    revision.current++;
     setScheme(v);
     setResult(null);
   };
 
   const generate = async (users: NcUserRow[], effective: PwdScheme) => {
+    if(lock.current) return;
     const picked = users.filter((u) => selected[u.cuserid]);
-    setBusy(true);
+    const task=beginOperation(dbTaskSpec("users.reset.sql","生成 NC 密码重置脚本",null,"仅生成脚本"));
+    if(!task) return;lock.current=true;const version=revision.current;setBusy(true);
     setError(null);
     try {
-      setResult(await resetSql(effective, password, picked));
+      const out=await resetSql(effective, password, picked);
+      if(version!==revision.current) {task.finish("cancelled","表单已修改，生成结果未展示");return;}
+      task.finish("success",`已生成 ${out.count} 条语句，未执行数据库写入`);setResult(out);
     } catch (e) {
+      task.finish("failed","生成脚本失败，返回操作员面板查看原因");
+      if(version!==revision.current) return;
       setResult(null);
       setError(String(e));
     } finally {
-      setBusy(false);
+      lock.current=false;setBusy(false);
     }
   };
 

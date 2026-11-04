@@ -16,6 +16,9 @@ const outcome = (hits: SearchHit[], extra: Partial<SearchOutcome> = {}): SearchO
   filesMatched: 1,
   truncated: false,
   elapsedMs: 50,
+  scopeDirs: [],
+  missingDirs: [],
+  scopeFallback: false,
   ...extra,
 });
 
@@ -26,6 +29,7 @@ const form = (patch: Partial<SearchForm>): SearchForm => ({
   wholeWord: false,
   regex: false,
   scope: "all",
+  component: null,
   outcome: null,
   projectOutcome: null,
   outcomeRoot: null,
@@ -106,6 +110,56 @@ describe("buildResultView", () => {
   it("没有对应范围的结果时返回 null（空状态，不是空表格）", () => {
     expect(buildResultView(form({ scope: "all" }))).toBeNull();
     expect(buildResultView(form({ scope: "current", projectOutcome: projectOutcome() }))).toBeNull();
+    // 组件范围同理：只有 projectOutcome 时不该拿它充数
+    expect(
+      buildResultView(form({ scope: "component", component: "bill", projectOutcome: projectOutcome() })),
+    ).toBeNull();
+  });
+
+  it("组件范围按单工作区展示，范围说明只在真有问题时才出现", () => {
+    const view = buildResultView(
+      form({
+        scope: "component",
+        component: "bill",
+        outcome: outcome([hit("bill/src/public/A.java", 1)], { scopeDirs: ["bill"] }),
+        outcomeRoot: "C:\\w\\newar",
+      }),
+    )!;
+    expect(view.groups).toHaveLength(1);
+    expect(view.summary.projects).toBe(1);
+    expect(view.scopeNote).toBeNull();
+  });
+
+  it("范围回落成整个工作区时给出说明（否则用户以为搜索坏了）", () => {
+    const view = buildResultView(
+      form({
+        scope: "component",
+        component: "bill",
+        outcome: outcome([hit("gl/src/A.java", 1)], {
+          scopeFallback: true,
+          missingDirs: ["bill"],
+        }),
+        outcomeRoot: "C:\\w\\newar",
+      }),
+    )!;
+    expect(view.scopeNote).toContain("bill");
+    expect(view.scopeNote).toContain("按整个工作区搜索");
+  });
+
+  it("只有部分目录不存在时说明「已跳过」，不影响范围本身", () => {
+    const view = buildResultView(
+      form({
+        scope: "component",
+        component: "bill",
+        outcome: outcome([hit("bill/A.java", 1)], {
+          scopeDirs: ["bill/src/public"],
+          missingDirs: ["bill/src/client"],
+        }),
+        outcomeRoot: "C:\\w\\newar",
+      }),
+    )!;
+    expect(view.scopeNote).toContain("已跳过");
+    expect(view.summary.projects).toBe(1);
   });
 });
 

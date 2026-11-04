@@ -4,6 +4,7 @@
 // （`src-tauri/jdtls-ext`）注册的 `ncforge.typeHierarchy` 命令，通道是
 // `workspace/executeCommand`。参数里 uri 留空：后端 `prepare` 会按真实路径算出
 // 影子工程的 URI，结果再经 `from_server` 换回真实路径——前端永远不碰 URI 映射。
+import { beginOperation } from "./operations";
 import { useSyncExternalStore } from "react";
 import { currentModel, cursorAt } from "./editorActions";
 import { context } from "./langProviders";
@@ -145,43 +146,38 @@ export async function openTypeHierarchy(): Promise<void> {
     toast("代码智能未就绪，类型层级需要它（设置 → 开发环境里启动）", "warning");
     return;
   }
-  const ctx = await context(model, { lineNumber: pos.line, column: pos.column });
-  if (!ctx) {
-    toast("当前文件不在可分析的模块里", "warning");
-    return;
-  }
+  const operation = beginOperation({ key: "language.types", label: "查询类型层级", page: "files", phase: "准备类型并查找父类与子类" });
+  if (!operation) return;
   const my = ++seq;
-  set({ loading: true, error: null });
   try {
+    const ctx = await context(model, { lineNumber: pos.line, column: pos.column });
+    if (!ctx) {
+      toast("当前文件不在可分析的模块里", "warning");
+      return;
+    }
+    set({ loading: true, error: null });
     const res = await langRequest<LspTypeHierarchy | null>(
-      "workspace/executeCommand",
-      ctx.path,
-      {
-        command: TYPE_HIERARCHY_COMMAND,
-        arguments: [
-          { uri: "", line: ctx.position.line, character: ctx.position.character }
-        ],
-      },
+      "workspace/executeCommand", ctx.path,
+      { command: TYPE_HIERARCHY_COMMAND, arguments: [{ uri: "", line: ctx.position.line, character: ctx.position.character }] },
       60_000,
     );
     if (my !== seq) return;
+    if (model.isDisposed()) { set({ loading: false, error: "文件已关闭或工程已切换，请重新查询" }); return; }
     const root = toTypeEntry(res?.type);
     if (!root) {
       set({ root: null, supertypes: [], subtypes: [], loading: false, error: "光标所在位置不是一个类型（类 / 接口 / 枚举）" });
       return;
     }
-    set({
-      root,
-      supertypes: entries(res?.supertypes),
-      subtypes: entries(res?.subtypes),
-      loading: false,
-      error: null,
-    });
+    operation.finish("success", `父类型 ${res?.supertypes?.length ?? 0} 个、子类型 ${res?.subtypes?.length ?? 0} 个`);
+    set({ root, supertypes: entries(res?.supertypes), subtypes: entries(res?.subtypes), loading: false, error: null });
   } catch (e) {
     if (my !== seq) return;
     const msg = explainTypeHierarchyError(String(e));
+    operation.finish("failed", msg);
     set({ loading: false, error: msg });
     toast(msg, "warning");
+  } finally {
+    operation.finish("cancelled", "未应用层级结果，请根据面板提示重新查询");
   }
 }
 

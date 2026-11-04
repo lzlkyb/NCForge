@@ -53,9 +53,9 @@ export function FilesBody({ p }: { p: Extract<Pending, { kind: "unsavedFiles" }>
           <button type="button" className="dbx-btn" onClick={() => settle((x) => x.kind === "unsavedFiles" && x.resolve("cancel"))}>
             返回编辑器处理
           </button>
-          <button type="button" className="dbx-btn bad" onClick={() => settle((x) => x.kind === "unsavedFiles" && x.resolve("discard"))}>
+          {p.allowDiscard !== false && <button type="button" className="dbx-btn bad" onClick={() => settle((x) => x.kind === "unsavedFiles" && x.resolve("discard"))}>
             不保存并{p.action}
-          </button>
+          </button>}
         </div>
       </>
     );
@@ -84,9 +84,9 @@ export function FilesBody({ p }: { p: Extract<Pending, { kind: "unsavedFiles" }>
         <button type="button" className="dbx-btn" disabled={busy} onClick={() => settle((x) => x.kind === "unsavedFiles" && x.resolve("cancel"))}>
           取消
         </button>
-        <button type="button" className="dbx-btn bad" disabled={busy} onClick={() => settle((x) => x.kind === "unsavedFiles" && x.resolve("discard"))}>
+        {p.allowDiscard !== false && <button type="button" className="dbx-btn bad" disabled={busy} onClick={() => settle((x) => x.kind === "unsavedFiles" && x.resolve("discard"))}>
           不保存并{p.action}
-        </button>
+        </button>}
         <button type="button" className="dbx-btn pri" disabled={busy} onClick={() => void saveAndExit()}>
           {busy ? `正在保存 ${progress.done}/${progress.total}` : `保存全部并${p.action}`}
         </button>

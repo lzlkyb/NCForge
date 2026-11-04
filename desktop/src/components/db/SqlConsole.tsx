@@ -11,19 +11,23 @@ import { InsertExportDialog } from "./InsertExportDialog";
 import { ValueSearchDialog } from "./ValueSearchDialog";
 import { ScriptReplayDialog } from "./ScriptReplayDialog";
 import { explain, runStatements } from "../../lib/dbActions";
+import { cancelOperation, getOperations } from "../../lib/operations";
 import { dbApi } from "../../lib/dbApi";
 import { friendlyDbError } from "../../lib/db";
 import { guessTable } from "../../lib/resultExport";
 import { closeSessionPanel, openSessionPanel, sqlTabOf, useDb, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台：工具条 / 事务条 / 编辑器 / 可拖高度的结果区 / 历史与会话抽屉。 */
+import { DbContextBar } from "./DbContextBar";
+
 export function SqlConsole({ tab }: { tab: SqlTab }) {
   const api = useRef<SqlEditorApi | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   /** 拖拽中的清理函数：切标签会卸载这个控制台，监听必须一起摘掉。 */
   const dragCleanup = useRef<(() => void) | null>(null);
   useEffect(() => () => dragCleanup.current?.(), []);
-  const [resH, setResH] = useState(300);
+  const [resH, setResH] = useState(()=>{try{return Number(localStorage.getItem("ncforge-db-result-height")) || 300;}catch{return 300;}});
+  const [scope,setScope]=useState("执行当前语句");
   /** 右侧抽屉：历史与片段互斥（同一列位置，同时开就挤成两栏了）。 */
   const [side, setSide] = useState<"history" | "snips" | null>(null);
   // 会话面板是页级状态（按钮在工具条、抽屉在 body 里），放 store 才不用层层回调
@@ -36,6 +40,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   /** 回放 .sql 文件（按名字取文件，不进编辑器）。 */
   const [srOpen, setSrOpen] = useState(false);
   const tabId = tab.id;
+  useEffect(()=>{const insert=(e:Event)=>{const v=(e as CustomEvent<{tabId:string;text:string}>).detail;if(v.tabId===tab.id) api.current?.insert(v.text);};window.addEventListener("ncforge-db-insert-name",insert);return()=>window.removeEventListener("ncforge-db-insert-name",insert);},[tab.id]);
 
   const run = useCallback(
     async (mode: "current" | "script") => {
@@ -71,8 +76,10 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
    */
   const onStop = useCallback(() => {
     if (!tab.connId) return;
-    void dbApi.cancel(tab.connId, tab.slot).catch((e) => toast(`取消失败：${friendlyDbError(e)}`, "error"));
-  }, [tab.connId, tab.slot]);
+    const task=getOperations().find(o=>o.key===`db.sql:${tab.id}` && o.endedAt===undefined);
+    if(task) void cancelOperation(task.id);
+    else void dbApi.cancel(tab.connId, tab.slot).catch((e) => toast(`取消失败：${friendlyDbError(e)}`, "error"));
+  }, [tab.id,tab.connId, tab.slot]);
 
   /** 结果区最高能拖到哪：留出工具条与表头，不能让结果区把编辑器整个吃掉。 */
   const maxRes = () => Math.max(90, (bodyRef.current?.clientHeight ?? 600) - 80);
@@ -85,6 +92,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
       dragCleanup.current = null;
+      try {localStorage.setItem("ncforge-db-result-height",String(bodyRef.current?.querySelector(".dbx-res")?.clientHeight ?? resH));}catch{/* 当前高度仍有效。 */}
     };
     const move = (e: PointerEvent) => {
       // 系统取消指针时没有 pointerup（Alt+Tab / 笔离开），buttons 归零兜住
@@ -127,7 +135,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         onSessions={() => (sessOpen ? closeSessionPanel() : openSessionPanel(tab.connId))}
       />
       {exp && tab.connId && (
-        <InsertExportDialog
+        <InsertExportDialog tabId={tab.id}
           connId={tab.connId}
           table={exp.table}
           sql={exp.sql}
@@ -135,15 +143,17 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         />
       )}
       {vsOpen && tab.connId && (
-        <ValueSearchDialog connId={tab.connId} onClose={() => setVsOpen(false)} />
+        <ValueSearchDialog tabId={tab.id} connId={tab.connId} onClose={() => setVsOpen(false)} />
       )}
       {srOpen && tab.connId && (
         <ScriptReplayDialog tab={tab} onClose={() => setSrOpen(false)} />
       )}
+      <DbContextBar connId={tab.connId} independent={!!tab.slot} />
+      <div className="dbx-read-status" aria-live="polite">Ctrl+Enter：{scope} · Alt+X：执行整个脚本</div>
       <TxBar connId={tab.connId} tabId={tab.id} slot={tab.slot} tx={tab.slot ? tab.tx : undefined} />
       <div className="dbx-console-body">
         <div ref={bodyRef} className="dbx-console-main">
-          <SqlEditor tabId={tab.id} initial={tab.sql} onRun={(m) => void run(m)} apiRef={api} />
+          <SqlEditor tabId={tab.id} initial={tab.sql} onRun={(m) => void run(m)} apiRef={api} onScope={setScope} />
           <div
             className="dbx-splitbar"
             role="separator"
@@ -159,7 +169,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
               dragRes(e.clientY);
             }}
           />
-          <ResultPanel tab={tab} height={resH} />
+          <ResultPanel tab={tab} height={resH} onLocate={line=>api.current?.reveal(line)} />
         </div>
         {side === "history" && tab.connId && (
           <HistoryDrawer

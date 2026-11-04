@@ -1,0 +1,46 @@
+/* Retain the fixed settings-row slot in every state; no extra navigation row. */
+.update-slot { min-width:66px;width:66px; }
+.update-slot .header-badge,
+html:root[data-ui-style] .app-side .update-slot .header-badge {
+  justify-content:center;gap:4px;min-width:62px;max-width:62px;min-height:26px;padding:4px;
+  border:1px solid hsl(var(--primary)/.3);border-radius:var(--r-control,6px);background:hsl(var(--accent));color:hsl(var(--primary));
+  box-shadow:none;font-size:12px;font-weight:650;line-height:1.4;font-variant-numeric:tabular-nums;white-space:nowrap;animation:none;transform:none;
+}
+.update-slot .header-badge > span { min-width:0;overflow:hidden;text-overflow:ellipsis; }
+.update-slot .header-badge > svg { flex-shrink:0; }
+html:root[data-ui-style] .app-side .update-slot :is(.header-badge-update,.header-badge-downloading,.header-badge-ready),
+.update-slot :is(.header-badge-update,.header-badge-downloading,.header-badge-ready) { background:hsl(var(--accent));color:hsl(var(--primary)); }
+html:root[data-ui-style] .app-side .update-slot .header-badge-error,
+.update-slot .header-badge-error { background:hsl(var(--destructive)/.08);color:hsl(var(--destructive-ink));border-color:hsl(var(--destructive-ink)/.3); }
+html:root[data-ui-style] .app-side .update-slot .header-badge::after,
+.update-slot .header-badge::after { content:none; }
+html:root[data-ui-style] .app-side .update-slot button.header-badge:hover,
+.update-slot button.header-badge:hover { filter:none;box-shadow:none;background:hsl(var(--primary)/.14);color:hsl(var(--primary));transform:none; }
+html:root[data-ui-style] .app-side .update-slot button.header-badge:active { box-shadow:none;filter:none; }
+html:root[data-ui-style] .app-side .update-slot .header-badge-downloading circle { stroke:currentColor; }
+.update-slot button.header-badge:disabled { opacity:.48;pointer-events:none; }
+.update-slot button.header-badge:focus-visible,.upd-dot:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:3px; }
+.app-side .upd-dot { color:hsl(var(--primary));border-radius:var(--r-control,6px); }
+.app-side .upd-dot--dl { pointer-events:auto;cursor:pointer; }
+.app-side .upd-dot--available::before,.app-side .upd-dot--ready::before { background:hsl(var(--primary));animation:none; }
+.app-side .upd-dot--error::before { background:hsl(var(--destructive-ink));animation:none; }
+.app-side .upd-dot:disabled { opacity:.48;pointer-events:none; }
+
+/* 148px 导航内设置与版本并列：隐藏标记不能留下 flex 间距。 */
+.app-side:not([data-collapsed]) .app-side-settings-row > .app-side-item {
+  padding-inline:4px;gap:6px;
+}
+.app-side-settings-row > .app-side-item > .app-side-label { flex-shrink:0; }
+.app-side-settings-row .changelog-dot.app-side-badge--off { display:none; }
+/* 未读数量留在可访问名称与提示里，视觉点靠近齿轮，不挤压文字。 */
+.app-side:not([data-collapsed]) .app-side-settings-row .changelog-dot:not(.app-side-badge--off) {
+  position:absolute;left:16px;right:auto;top:5px;margin:0;padding:0;
+  width:6px;min-width:6px;height:6px;font-size:0;box-shadow:0 0 0 2px hsl(var(--chrome));
+}
+html:root[data-ui-style] .app-side .update-slot :is(.header-badge-update,.header-badge-ready),
+.update-slot :is(.header-badge-update,.header-badge-ready) {
+  background:hsl(var(--primary));color:hsl(var(--primary-foreground));border-color:transparent;
+}
+@media(forced-colors:active) {
+  html:root[data-ui-style] .app-side .update-slot .header-badge,.update-slot .header-badge { border:1px solid ButtonText;background:ButtonFace;color:ButtonText; }
+}

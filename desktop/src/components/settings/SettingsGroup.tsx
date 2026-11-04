@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../ui/icon";
 
 /**
@@ -21,8 +21,17 @@ export function SettingsGroup({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const ref = useRef<HTMLDetailsElement>(null);
+  // 搜索定位需要同步 React 的展开状态，下一次偏好更新才不会把目标重新折起。
+  useEffect(() => {
+    const node = ref.current;
+    const reveal = () => setOpen(true);
+    node?.addEventListener("settings:reveal", reveal);
+    return () => node?.removeEventListener("settings:reveal", reveal);
+  }, []);
   return (
     <details
+      ref={ref}
       className="settings-group"
       open={open}
       onToggle={(e) => setOpen(e.currentTarget.open)}

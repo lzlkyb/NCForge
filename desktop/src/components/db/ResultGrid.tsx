@@ -11,6 +11,8 @@ const HEAD_H = 34;
 /** 可视区上下多渲染的行数，滚得快时不露白。 */
 const OVERSCAN = 12;
 
+import { selectedRows, selectedCols, selectionText, type Selection } from "../../lib/dbResultTools";
+
 export interface CellPos {
   /** 原始行号（rows 下标），不是显示顺序。 */
   r: number;
@@ -30,7 +32,7 @@ export interface GridEdit {
  * 排序 / 筛选的结果由父组件以 `order` 传入（复制 / 导出要用同一个顺序）。
  * NULL 斜体灰字与空串区分；数字右对齐。
  */
-export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onOpen, edit, zh }: {
+export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onOpen, edit, zh, visible, frozen, widthOverrides, onWidths, selection }: {
   columns: ColumnMeta[];
   rows: Cell[][];
   order: number[];
@@ -39,7 +41,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   /** 表头右键（A3：让数据库重排整表）。不传就没有这个入口。 */
   onHeaderMenu?: (col: number, x: number, y: number) => void;
   sel: CellPos | null;
-  onSel: (p: CellPos) => void;
+  onSel: (p: CellPos, extend?:boolean) => void;
+  visible: number[]; frozen: string[]; widthOverrides: Record<string,number>; onWidths: (w:number[])=>void; selection:Selection|null;
   /** 双击不可编辑的格子：打开详情。 */
   onOpen?: () => void;
   edit?: GridEdit;
@@ -52,6 +55,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   useEffect(() => () => dragCleanup.current?.(), []);
   /** Esc 退出编辑：`setEditing(null)` 会把 input 卸掉，紧随其后的 blur 不能再提交一次。 */
   const cancelEdit = useRef(false);
+  const widthRef=useRef<number[]>([]);
   const [widths, setWidths] = useState<number[]>(() => initialWidths(columns, rows));
   const [scroll, setScroll] = useState({ top: 0, h: 400 });
   const [editing, setEditing] = useState<{ pos: CellPos; value: string } | null>(null);
@@ -59,11 +63,11 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   // 列变了（新的一次查询）才重算列宽；加载更多行不动用户拖过的宽度
   const colKey = columns.map((c) => c.name).join("|");
   useEffect(() => {
-    setWidths(initialWidths(columns, rows));
+    setWidths(initialWidths(columns,rows).map((w,c)=>widthOverrides[columns[c].name] ?? w));
     setEditing(null);
     boxRef.current?.scrollTo({ top: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [colKey]);
+  }, [colKey, widthOverrides]);
 
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -82,7 +86,10 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const ws = widths.length === columns.length ? widths : initialWidths(columns, rows);
   const numeric = columns.map((c) => isNumericType(c.type));
   const rnW = Math.max(40, String(rows.length).length * 8 + 18);
-  const total = rnW + ws.reduce((a, b) => a + b, 0);
+  const total = rnW + visible.reduce((n,c)=>n+ws[c],0);
+  const rangeRows = new Set(selection ? selectedRows(order,selection) : []);
+  const rangeCols = new Set(selection ? selectedCols(visible,selection) : []);
+  const cellStyle = (c:number) => ({width:ws[c], ...(frozen.includes(columns[c].name) ? {position:"sticky" as const,left:rnW+visible.slice(0,visible.indexOf(c)).reduce((n,k)=>n+ws[k],0),zIndex:2,background:"hsl(var(--card))"} : {})});
   const first = Math.max(0, Math.floor(scroll.top / ROW_H) - OVERSCAN);
   const last = Math.min(order.length, Math.ceil((scroll.top + scroll.h) / ROW_H) + OVERSCAN);
   const selIndex = sel ? order.indexOf(sel.r) : -1;
@@ -97,12 +104,13 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
       dragCleanup.current = null;
+      if(widthRef.current.length) onWidths(widthRef.current);
     };
     const move = (e: PointerEvent) => {
       // 指针被系统取消（Alt+Tab、触控笔离开、拖出窗口）时 pointerup 不触发；
       // buttons 归零是最后一道兜底，否则「手早松了，鼠标再动列宽还在变」。
       if (e.buttons === 0) return finish();
-      setWidths((w) => w.map((x, i) => (i === k ? Math.max(40, Math.min(900, start + e.clientX - startX)) : x)));
+      setWidths(w=> {const next=w.map((x,i)=>i===k?Math.max(40,Math.min(900,start+e.clientX-startX)):x);widthRef.current=next;return next;});
     };
     dragCleanup.current = finish;
     window.addEventListener("pointermove", move);
@@ -135,13 +143,15 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     boxRef.current?.focus();
   };
 
-  const move = (dr: number, dc: number) => {
-    if (order.length === 0 || columns.length === 0) return;
+  const move = (dr: number, dc: number, extend=false) => {
+    if (order.length === 0 || visible.length === 0) return;
     const i = Math.max(0, Math.min(order.length - 1, (selIndex < 0 ? 0 : selIndex) + dr));
-    const c = Math.max(0, Math.min(columns.length - 1, (sel?.c ?? 0) + dc));
-    onSel({ r: order[i], c });
+    const ci=Math.max(0,Math.min(visible.length-1,Math.max(0,visible.indexOf(sel?.c ?? visible[0]))+dc));
+    const c=visible[ci]; onSel({r:order[i],c},extend);
     const el = boxRef.current;
     if (el) {
+      const x=rnW+visible.slice(0,ci).reduce((n,k)=>n+ws[k],0);
+      if(!frozen.includes(columns[c].name)) {if(x<el.scrollLeft) el.scrollLeft=x;else if(x+ws[c]>el.scrollLeft+el.clientWidth) el.scrollLeft=x+ws[c]-el.clientWidth;}
       const y = i * ROW_H;
       if (y < el.scrollTop) el.scrollTop = y;
       else if (y + ROW_H > el.scrollTop + el.clientHeight - HEAD_H) el.scrollTop = y + ROW_H - el.clientHeight + HEAD_H;
@@ -153,14 +163,14 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     const step: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], PageUp: [-20, 0], PageDown: [20, 0] };
     if (step[e.key]) {
       e.preventDefault();
-      move(...step[e.key]);
+      move(...step[e.key],e.shiftKey);
     } else if (sel && (e.key === "Enter" || e.key === "F2")) {
       e.preventDefault();
       startEdit(sel);
     } else if (sel && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && !window.getSelection()?.toString()) {
       e.preventDefault();
-      const v = valueAt(sel.r, sel.c);
-      void copyText(v === null ? "" : String(v), () => toast("已复制单元格", "success"), (e) => toast(`复制失败：${e}`, "error"));
+      const text=selection ? selectionText(rows,order,visible,selection,valueAt) : String(valueAt(sel.r,sel.c) ?? "");
+      void copyText(text, () => toast("已复制选区", "success"), (e) => toast(`复制失败：${e}`, "error"));
     }
   };
 
@@ -170,26 +180,27 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
       className="dbx-grid"
       tabIndex={0}
       role="grid"
+      aria-multiselectable
       aria-label="查询结果"
-      aria-rowcount={order.length}
-      aria-colcount={columns.length}
+      aria-rowcount={order.length+1}
+      aria-colcount={visible.length+1}
       aria-activedescendant={activeCell}
       onKeyDown={onKey}
       onScroll={(e) => setScroll({ top: e.currentTarget.scrollTop, h: e.currentTarget.clientHeight })}
     >
       <div className="dbx-grid-inner" style={{ width: total, height: HEAD_H + order.length * ROW_H }}>
         <div className="dbx-ghead" style={{ width: total }} role="row" aria-rowindex={1}>
-          <div className="dbx-gh rn" style={{ width: rnW }} role="columnheader" aria-colindex={1} />
-          {columns.map((c, k) => (
+          <div className="dbx-gh rn" style={{ width: rnW }} role="columnheader" aria-colindex={1} title="选择全部" onClick={()=>{if(order.length && visible.length) {onSel({r:order[0],c:visible[0]});onSel({r:order[order.length-1],c:visible[visible.length-1]},true);}}} />
+          {visible.map((k,vi) => { const c=columns[k]; return (
             <div
               key={k}
               className="dbx-gh"
-              style={{ width: ws[k] }}
+              style={cellStyle(k)}
               role="columnheader"
-              aria-colindex={k + 2}
+              aria-colindex={vi + 2}
               aria-sort={sort?.col === k ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
               title={[c.name.toLowerCase(), zh?.[c.name.toLowerCase()], c.type].filter(Boolean).join(" · ")}
-              onClick={() => onSort(k)}
+              onClick={e => {if(e.shiftKey && order.length){onSel({r:order[0],c:k});onSel({r:order[order.length-1],c:k},true);}else onSort(k);}}
               onContextMenu={(e) => {
                 if (!onHeaderMenu) return;
                 e.preventDefault();
@@ -201,7 +212,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
               <span className="t">{zh?.[c.name.toLowerCase()] ?? c.type}</span>
               <span className="rz" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); resize(k, e.clientX); }} />
             </div>
-          ))}
+          );})}
         </div>
         {order.slice(first, last).map((r, j) => {
           const i = first + j;
@@ -215,13 +226,13 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
               role="row"
               aria-rowindex={i + 2}
             >
-              <div className="dbx-gc rn" style={{ width: rnW }} role="gridcell" aria-colindex={1}>{r + 1}</div>
-              {columns.map((_, k) => {
+              <div className="dbx-gc rn" style={{ width: rnW }} role="rowheader" aria-colindex={1} onMouseDown={()=> {if(visible.length) {onSel({r,c:visible[0]});onSel({r,c:visible[visible.length-1]},true);}}}>{i + 1}</div>
+              {visible.map((k,vi) => {
                 const v = valueAt(r, k);
-                const isSel = sel?.r === r && sel.c === k;
+                const isSel = rangeRows.has(r) && rangeCols.has(k);
                 if (isSel && editing && editing.pos.r === r && editing.pos.c === k) {
                   return (
-                    <div key={k} id={`dbx-cell-${r}-${k}`} className="dbx-gc" data-cell role="gridcell" aria-colindex={k + 2} aria-selected style={{ width: ws[k], padding: 0 }}>
+                    <div key={k} id={`dbx-cell-${r}-${k}`} className="dbx-gc" data-cell data-focus-container role="gridcell" aria-colindex={vi + 2} aria-selected style={{...cellStyle(k),padding:0}}>
                       <input
                         className="dbx-gedit"
                         autoFocus
@@ -246,12 +257,13 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
                     key={k}
                     id={`dbx-cell-${r}-${k}`}
                     className={cls}
-                    style={{ width: ws[k] }}
+                    style={cellStyle(k)}
                     role="gridcell"
-                    aria-colindex={k + 2}
+                    aria-colindex={vi + 2}
                     aria-selected={isSel || undefined}
                     data-cell={isSel || undefined}
-                    onMouseDown={() => onSel({ r, c: k })}
+                    onMouseDown={e=>{e.preventDefault();boxRef.current?.focus();onSel({r,c:k},e.shiftKey);}}
+                    onMouseEnter={e=>{if(e.buttons===1 && !editing) onSel({r,c:k},true);}}
                     onDoubleClick={() => startEdit({ r, c: k })}
                   >
                     {cellText(v, 300)}

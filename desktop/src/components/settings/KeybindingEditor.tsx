@@ -75,7 +75,7 @@ export function KeybindingEditor({ keymap }: { keymap: Keymap }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-3">
+      <div className="settings-keybinding-head flex items-center gap-3">
         <h2 className="font-medium">自定义键位</h2>
         <span className="text-sm text-muted-foreground">
           {capturing ? "现在按下新组合键，Esc 取消" : "点「修改」后直接按组合键"}
@@ -95,21 +95,22 @@ export function KeybindingEditor({ keymap }: { keymap: Keymap }) {
             return (
               <FragmentRows key={group} group={group}>
                 {list.map((r) => (
-                  <tr key={r.id} data-capturing={capturing === r.id || undefined}>
+                  <tr key={r.id} id={`binding-${r.id}`} tabIndex={-1} data-settings-item="" data-settings-label={r.label} data-settings-description={`${group} · 点击修改后按组合键`} data-setting-value={r.display.join(" / ") || "未绑定"} data-capturing={capturing === r.id || undefined}>
                     <td>{r.label}</td>
-                    <td>
+                    <td className="settings-keybinding-key">
                       <kbd>{r.display.length > 0 ? r.display.join(" / ") : "—"}</kbd>
                     </td>
-                    <td className="whitespace-nowrap">
+                    <td className="settings-keybinding-actions whitespace-nowrap">
                       <Button
                         size="sm"
                         variant="ghost"
+                        aria-label={`修改${r.label}快捷键`}
                         onClick={() => setCapturing(capturing === r.id ? null : r.id)}
                       >
                         {capturing === r.id ? "按键…" : "修改"}
                       </Button>
                       {r.overridden && (
-                        <Button size="sm" variant="ghost" onClick={() => resetOne(r.id)}>
+                        <Button size="sm" variant="ghost" aria-label={`恢复${r.label}快捷键`} onClick={() => resetOne(r.id)}>
                           恢复
                         </Button>
                       )}

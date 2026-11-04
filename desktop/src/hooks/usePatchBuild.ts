@@ -3,13 +3,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "../components/ui/toast";
 import { failureText } from "../lib/friendlyError";
 import type { PatchDraft } from "../lib/patchDraft";
+import { cancelOperation, getOperations, operationActive } from "../lib/operations";
 import { listen } from "../lib/tauri";
 import {
   EMPTY_DRAFT,
   NO_FORCE,
   composeNote,
   patchBuild,
-  patchBuildCancel,
   patchSetOutDir,
   previewZipName,
   ymd,
@@ -79,6 +79,7 @@ export function usePatchBuild(
   };
 
   const doBuild = async (files: string[]) => {
+    if (operationActive("patch.build")) return;
     if (!desc.trim()) {
       toast("先写一句「改动内容描述」——它就是补丁包的名字", "error");
       return;
@@ -110,7 +111,8 @@ export function usePatchBuild(
       // 文件，两个数不是一回事，文案里说清，别让用户以为预览少数了
       toast(`已生成补丁包，共 ${r.entries} 个 zip 条目（含目录）`, "success");
     } catch (e) {
-      toast(failureText("生成补丁包", e), "error");
+      const cancelled = String(e instanceof Error ? e.message : e).startsWith("已取消出包");
+      toast(cancelled ? String(e) : failureText("生成补丁包", e), cancelled ? "info" : "error");
     } finally {
       setBuilding(false);
       setProgress(null);
@@ -119,7 +121,8 @@ export function usePatchBuild(
 
   /** 取消出包：只置标志，后端在下一个条目边界退出。按钮置灰即可，不用二次确认。 */
   const doCancel = () => {
-    void patchBuildCancel().catch((e) => toast(failureText("取消出包", e), "error"));
+    const operation = getOperations().find(o => o.key === "patch.build" && o.state === "running");
+    if (operation) void cancelOperation(operation.id);
   };
 
   return {

@@ -120,7 +120,7 @@ async fn prop_sources(
     cfg: &AppConfig,
 ) -> Result<Value, String> {
     let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
-    let b = bridge_for(app, st, cfg, PROBE, crate::db_engine::EngineKind::Java)?;
+    let b = bridge_for(app, st, cfg, PROBE, crate::db_engine::EngineKind::Java, PROBE)?;
     call(b, "propList", vec![home.root], Duration::from_secs(60)).await
 }
 
@@ -351,7 +351,7 @@ pub async fn db_conn_test(
         prop_password_ready(&app, &st, &cfg, &mut draft, password.as_deref(), PROBE).await?;
     }
     let (cmd, args) = connect_args(&cfg, &draft, password.as_deref(), true, engine)?;
-    let b = bridge_for(&app, &st, &cfg, PROBE, engine)?;
+    let b = bridge_for(&app, &st, &cfg, PROBE, engine, PROBE)?;
     let t0 = Instant::now();
     let out = call(b.clone(), cmd, args, Duration::from_secs(60)).await?;
     let ms = t0.elapsed().as_millis() as u64;

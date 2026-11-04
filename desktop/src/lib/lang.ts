@@ -1,10 +1,15 @@
 // 代码智能（jdt.ls）的前端侧：状态仓库、事件订阅、文档同步、诊断展示、自动启动。
 //
 // 模块级单例：文件页切走会卸载组件，但 jdt.ls 进程与已打开的文档不能跟着丢。
-// 后端只认真实文件路径（影子工程的 URI 映射在 Rust 侧完成），这里永远不碰 URI。
+// 后端只认真实文件路径（影子工程的 URI 映射在 Rust 侧完成），这里不碰**文件** URI；
+// 唯一的例外是 `jdt://`——它本来就是语言服务的地址，反编译要用它定位 jar 与条目。
+import { beginOperation } from "./operations";
 import { useSyncExternalStore } from "react";
 import { forEachModel, onModelLifecycle, openVirtualModel } from "./editorStore";
-import { severityName, toMonacoRange, uriToPath, type LspRange } from "./langConvert";
+import { workspaceEpoch } from "./workspaceEpoch";
+import { isStubSource, severityName, toMonacoRange, uriToPath, type LspRange } from "./langConvert";
+import { decompileClass, decompileHeader } from "./decompile";
+import { friendlyError } from "./friendlyError";
 import { monaco } from "./monacoSetup";
 import { setCodeDiags, type CodeDiag } from "./diagStore";
 import { getConfig } from "./appConfig";
@@ -429,13 +434,18 @@ export function ensureLang(path: string): void {
 
 /** 「自动启动」关掉时，状态栏的「启动」按钮走这里：不防抖、不看自动开关。 */
 export function startLangNow(path: string): void {
+  const operation = beginOperation({ key: "language.control", label: "请求启动代码智能", scope: path, page: "files", path, phase: "等待旧请求结束并准备语言服务" });
+  if (!operation) return;
   clearTimeout(startTimer);
-  // 手动启动就是最新意图：防抖里排着的旧目标作废，免得同一模块连起两轮
+  // 手动启动就是最新意图：防抖里排着的旧目标作废，免得同一模块连起两轮。
   const gen = freshIntent();
   void serialize(async () => {
-    if (gen !== intentGen) return;
-    await invoke("lang_start", { path }).catch(() => {});
-  });
+    if (gen !== intentGen) { operation.finish("cancelled", "目标已变化，未启动旧模块"); return; }
+    operation.update({ phase: "启动语言服务并完成握手" });
+    await invoke("lang_start", { path });
+    // lang_start 只完成拉起与握手，索引的 ServiceReady 是之后的后端事件。
+    operation.finish(gen === intentGen ? "success" : "cancelled", gen === intentGen ? "启动请求已处理；索引是否就绪以状态栏为准" : "工程已变化，请查看当前代码智能状态");
+  }).catch(error => operation.finish(gen !== intentGen || String(error instanceof Error ? error.message : error).startsWith("启动已取消") ? "cancelled" : "failed", String(error)));
 }
 
 /** 关掉语言服务（换工作区时调用：旧模块的影子工程对新工作区没有意义）。 */
@@ -447,14 +457,23 @@ export function stopLang(): Promise<void> {
 
 /** 手动重启（状态栏点「重试」）。 */
 export async function restartLang(path: string): Promise<void> {
+  const operation = beginOperation({ key: "language.control", label: "请求重启代码智能", scope: path, page: "files", path, phase: "停止旧语言服务" });
+  if (!operation) return;
   clearTimeout(startTimer);
   const gen = freshIntent();
-  await serialize(() => invoke("lang_stop"));
-  await serialize(async () => {
-    // 停的途中又停过一次（比如接着切了工作区）：重启的目标也过期了
-    if (gen !== intentGen) return;
-    await invoke("lang_start", { path });
-  });
+  try {
+    await serialize(() => invoke("lang_stop"));
+    await serialize(async () => {
+      // 停的途中又停过一次（比如接着切了工作区）：重启的目标也过期了。
+      if (gen !== intentGen) { operation.finish("cancelled", "目标已变化，未重启旧模块"); return; }
+      operation.update({ phase: "启动语言服务并完成握手" });
+      await invoke("lang_start", { path });
+      operation.finish(gen === intentGen ? "success" : "cancelled", gen === intentGen ? "重启请求已处理；索引是否就绪以状态栏为准" : "工程已变化，请查看当前代码智能状态");
+    });
+  } catch (error) {
+    operation.finish(gen !== intentGen || String(error instanceof Error ? error.message : error).startsWith("启动已取消") ? "cancelled" : "failed", String(error));
+    throw error;
+  }
 }
 
 export function langRequest<T>(
@@ -468,7 +487,35 @@ export function langRequest<T>(
 
 // ───────────────────── jar 内类源码与跳转 ─────────────────────
 
-const jdtText = new Map<string, Promise<string>>();
+const jdtText = new Map<string, Promise<JdtSource>>();
+
+/** `loadJdtSource` 的产物：正文 + 它是不是反编译出来的。 */
+export interface JdtSource {
+  /** 给只读 model 用的正文：真源码 / CFR 反编译结果 / 签名桩。 */
+  text: string;
+  /** 这份正文是 CFR 反编译的，不是原始源码。 */
+  decompiled: boolean;
+  /** 反编译失败的原因（此时 `text` 仍是桩）。成功或本来就有源码时为空。 */
+  decompileError?: string;
+}
+
+/**
+ * 拿 `jdt://` 类的正文：先问 jdt.ls，拿到桩就再让后端用 CFR 反编译一次。
+ *
+ * 桩本身只有方法签名，点进去看不到实现——NC 的 jar 里只有 27.8% 带 `_src.jar`，
+ * 现场补丁包更是几乎全裸，所以「桩 → 反编译」是常态路径而不是兜底。
+ * 反编译失败不抛错：降级成桩，并把原因带回去由界面提示一次（见 `useFileSession`）。
+ */
+async function fetchJdtSource(uri: string): Promise<JdtSource> {
+  const text = await langRequest<string>("java/classFileContents", null, { uri }, 60_000);
+  if (!isStubSource(text)) return { text, decompiled: false };
+  try {
+    const r = await decompileClass(uri);
+    return { text: decompileHeader(r.jar) + r.source, decompiled: true };
+  } catch (e) {
+    return { text, decompiled: false, decompileError: friendlyError(e) };
+  }
+}
 
 /**
  * 取 `jdt://` 类的源码（或反编译桩）并确保只读 model 存在。
@@ -476,22 +523,50 @@ const jdtText = new Map<string, Promise<string>>();
  * 缓存的只是**文本**，model 每次都在这里确保（`openVirtualModel` 幂等）：标签关掉时 model 会被销毁，
  * 若连 model 一起缓存，再次跳到同一个类就会命中缓存、不重建 model，编辑器显示空白。
  *
+ * 只有「真拿到内容」的结果才留在缓存里：
+ * - 请求本身失败 → 删掉，下次还能再试；
+ * - 反编译失败退回签名桩 → 也删掉。桩没有信息量，而用户很可能马上去设置里下载
+ *   CFR 组件；留着这份缓存会让「装好组件后还是只能看桩」变成必须重启才能摆脱的状态。
+ *
+ * `force` 给「标签已经是桩、用户又点了一次」用：明确要求重新问一次 jdt.ls + 反编译。
+ *
  * `peek` 给「只是预览」的调用方（provideDefinition 为每个跳转目标预建 model）：
  * 这些 model 走预览队列，超上限按最近使用淘汰，peek 未必成标签页，不能无限攒。
  * 默认正式身份：转正已存在的预览 model（摘牌），之后随标签页关闭而销毁。
  */
-export async function loadJdtSource(uri: string, peek = false): Promise<string> {
+export async function loadJdtSource(
+  uri: string,
+  peek = false,
+  force = false,
+): Promise<JdtSource> {
+  const epoch=workspaceEpoch();
+  if (peek) {
+    // 预览是给「跳转前先看一眼」用的，多数候选不会被真正打开。反编译要起一次 JVM
+    // （实测 0.6 s），为一个可能不打开的候选付这个代价不值得——而且 provideDefinition
+    // 一次可能预建好几个目标，并发起 JVM 更糟。
+    // 所以预览只拿 jdt.ls 的原样内容（有源码就是源码，没有就是桩）；真正打开时
+    // 走下面那条路，用 `replace` 把桩换成反编译结果。
+    const text = await langRequest<string>("java/classFileContents", null, { uri }, 60_000);
+    if(epoch===workspaceEpoch()) openVirtualModel(uri, text, { peek: true });
+    return { text, decompiled: false };
+  }
+  if (force) jdtText.delete(uri);
   let p = jdtText.get(uri);
   if (!p) {
-    p = langRequest<string>("java/classFileContents", null, { uri }, 60_000);
+    p = fetchJdtSource(uri);
     jdtText.set(uri, p);
-    // 失败不缓存，下次还能再试
-    p.catch(() => jdtText.delete(uri));
   }
-  const text = await p;
-  if (peek) openVirtualModel(uri, text, { peek: true });
-  else openVirtualModel(uri, text);
-  return text;
+  let src: JdtSource;
+  try {
+    src = await p;
+  } catch (e) {
+    jdtText.delete(uri);
+    throw e;
+  }
+  if (src.decompileError) jdtText.delete(uri);
+  // `replace`：预览可能已经用桩建过 model，这里要把内容换成完整版
+  if(epoch===workspaceEpoch()) openVirtualModel(uri, src.text, { replace: true });
+  return src;
 }
 
 export type NavTarget =

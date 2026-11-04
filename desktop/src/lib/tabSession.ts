@@ -72,10 +72,12 @@ export function tabMetaFromDisk(path: string, c: FileContent): TabMeta {
 
 /**
  * jar 内的类（jdt.ls 给的 `jdt://` 地址）：永远是只读标签。
- * `virtual` 区分「真源码」与「签名的 stub」——stub 里是方法签名而不是实现，
- * 不标出来用户会当成代码找不到。
+ * `virtual` 区分三种：
+ * - `source`：`_src.jar` 里的真源码；
+ * - `stub`：只有方法签名（反编译也没成功），不标出来用户会当成代码找不到；
+ * - `decompiled`：没有源码，正文是 CFR 反编译的近似实现。
  */
-export function tabMetaFromJdt(uri: string, text: string): TabMeta {
+export function tabMetaFromJdt(uri: string, text: string, decompiled = false): TabMeta {
   return {
     path: uri,
     name: jdtDisplayName(uri),
@@ -88,7 +90,7 @@ export function tabMetaFromJdt(uri: string, text: string): TabMeta {
     readOnly: true,
     readOnlyReason: null,
     lines: countLines(text),
-    virtual: isStubSource(text) ? "stub" : "source",
+    virtual: decompiled ? "decompiled" : isStubSource(text) ? "stub" : "source",
   };
 }
 

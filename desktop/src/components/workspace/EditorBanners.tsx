@@ -1,5 +1,6 @@
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
+import { useOperations } from "../../lib/operations";
 import type { Eol } from "../../lib/workspace";
 import type { TabMeta } from "../../lib/workspaceSession";
 
@@ -35,6 +36,9 @@ export function EditorBanners({
   onSaveUtf8: (path: string) => void;
   onDismissLargeHint: (path: string) => void;
 }) {
+  const tasks = useOperations();
+  const saveBusy=tasks.some(o=>o.key===`file.save:${activePath?.toLowerCase()}` && o.endedAt===undefined);
+  const reloadBusy=tasks.some(o=>o.key===`file.reload:${activePath?.toLowerCase()}` && o.endedAt===undefined);
   return (
     <>
       {active?.readOnlyReason === "mixed" && (
@@ -63,7 +67,7 @@ export function EditorBanners({
           <Icon name="alertTriangle" size={14} />
           {encodingIssue.message}
           <div className="wb-banner-actions">
-            <Button size="sm" variant="outline" onClick={() => onSaveUtf8(encodingIssue.path)}>
+            <Button size="sm" variant="outline" isLoading={saveBusy} loadingText="保存中" disabled={reloadBusy} onClick={() => onSaveUtf8(encodingIssue.path)}>
               转为 UTF-8 保存
             </Button>
           </div>
@@ -74,10 +78,10 @@ export function EditorBanners({
           <Icon name="alertTriangle" size={14} />
           文件在磁盘上已被其他程序修改（如 AI 或 Eclipse），未保存
           <div className="wb-banner-actions">
-            <Button size="sm" variant="outline" onClick={() => onReload(conflictPath)}>
+            <Button size="sm" variant="outline" isLoading={reloadBusy} loadingText="重新加载中" disabled={saveBusy} onClick={() => onReload(conflictPath)}>
               放弃我的修改并重新加载
             </Button>
-            <Button size="sm" variant="destructive" onClick={() => onOverwriteSave(conflictPath)}>
+            <Button size="sm" variant="destructive" isLoading={saveBusy} loadingText="保存中" disabled={reloadBusy} onClick={() => onOverwriteSave(conflictPath)}>
               覆盖保存
             </Button>
           </div>
@@ -88,7 +92,9 @@ export function EditorBanners({
           <Icon name="info" size={14} />
           {active.virtual === "source"
             ? "NC 标准库 jar 里的类，配有源码，只读"
-            : "这个类没有配套源码（_src.jar），只显示方法签名，只读"}
+            : active.virtual === "decompiled"
+              ? "这个类没有配套源码（_src.jar），以下是 CFR 反编译出来的近似实现，只读——局部变量名可能丢失、语法糖被展开，与原始源码不逐字一致"
+              : "这个类没有配套源码（_src.jar），反编译也没成功，只显示方法签名，只读"}
         </div>
       )}
       {showLargeHint && active && (

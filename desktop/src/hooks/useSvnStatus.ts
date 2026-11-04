@@ -1,3 +1,4 @@
+import { trackOperation, updateOperation } from "../lib/operations";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -73,7 +74,7 @@ export function useSvnStatus() {
    * 以前只能再单独扫一遍（等于同一件事做两遍，多等 7.6 秒）。
    */
   const refresh = useCallback(async (): Promise<StatusResult | undefined> => {
-    const [, s] = await Promise.all([info.refetch(), status.refetch()]);
+    const [, s] = await trackOperation({ key: "svn.scan", label: "重新扫描 SVN 改动", page: "svn", phase: "扫描工作副本条目" }, () => Promise.all([info.refetch(), status.refetch({ cancelRefetch: false })]), results => ({ state: results[1].error ? "failed" : "success", detail: results[1].error ? String(results[1].error) : `扫描 ${results[1].data?.scanned ?? 0} 个条目${results[1].data?.hasConflict ? "；存在冲突待处理" : ""}` }));
     // 更新 / 提交 / 撤销 / 解决冲突之后，右侧对比与追溯读的都是盘上的旧内容：
     // 不失效就会一直显示「改动前」的差异，用户以为动作没生效
     void qc.invalidateQueries({ queryKey: ["svn-diff"] });
@@ -94,7 +95,7 @@ export function useSvnStatus() {
     }
     let gone = false;
     let un: (() => void) | undefined;
-    void onSvnScanProgress((n) => setScanProgress(n))
+    void onSvnScanProgress((n) => { setScanProgress(n); updateOperation("svn.scan", { progress: { done: n }, phase: "扫描工作副本条目" }); })
       .then((fn) => {
         // 订阅回来之前扫描可能已经结束了，此时立刻退订，别把监听留在窗口上
         if (gone) fn();

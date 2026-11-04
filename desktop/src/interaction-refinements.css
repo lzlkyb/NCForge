@@ -1,5 +1,5 @@
 /* 操作界面的动效只表达状态，滚动和输入位置保持稳定。 */
-.animate-tab-in[data-page-motion="slide"] {animation-name:tab-fade-in;animation-duration:var(--dur-exit)}
+.animate-tab-in[data-page-motion="slide"] {animation-name:tab-fade-in;animation-duration:var(--dur-page)}
 .ui-overlay, .ui-surface {
   opacity:1;
   transition:opacity var(--dur-enter) var(--ease),transform var(--dur-enter) var(--ease);
@@ -72,8 +72,6 @@
 .log-tab .audit td { font-size:12px;font-variant-numeric:tabular-nums; }
 .log-tab .log-search-input { min-width:140px; }
 .app-side .app-side-label { opacity:1;max-width:170px;transition:opacity var(--dur-fast),max-width var(--dur-enter); }
-.app-side[data-collapsed] .app-side-label { display:block!important;max-width:0;opacity:0;overflow:hidden; }
-.app-shell .app-side[data-collapsed] .app-side-item { justify-content:flex-start;gap:0;padding:8px 12px;overflow:hidden; }
 .app-side[data-collapsed] .app-side-item>svg { flex-shrink:0; }
 @media(max-width:700px) {
  .app-topbar .max-w-40 { max-width:100px; }

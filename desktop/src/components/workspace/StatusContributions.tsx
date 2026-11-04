@@ -3,9 +3,14 @@ import { setSession, useWorkspaceRoot, useWorkspaceSelector } from "../../lib/wo
 import { useCodeDiags } from "../../lib/diagStore";
 import { countErrors, mergeProblems } from "../../lib/problemList";
 import { svnInfo, svnStatus } from "../../lib/svn";
-import { connOf, rtOf, useDbSelector } from "../../lib/dbStore";
+import { useState } from "react";
+import { activateTab, connOf, rtOf, useDbSelector } from "../../lib/dbStore";
+import { pendingDbSessions, type PendingDbSession } from "../../lib/dbPendingSessions";
+import { showWorkbenchDocument } from "../../lib/dockEvents";
 import { openLinkedDialog } from "../../lib/linkedDialog";
 import { Icon } from "../ui/icon";
+import { Menu, MenuItem } from "../ui/Menu";
+import { PrimarySessionSummary } from "../db/PrimarySessionSummary";
 
 /**
  * 状态栏的各页贡献。
@@ -18,6 +23,7 @@ import { Icon } from "../ui/icon";
  * 共用同一个查询键，不会多扫一次。
  */
 export function StatusContributions({ activeTool }: { activeTool: string }) {
+  const [primaryConn, setPrimaryConn] = useState<string | null>(null);
   const compiling = useWorkspaceSelector((s) => s.compiling);
   const compileResult = useWorkspaceSelector((s) => s.compileResult);
   const diags = useCodeDiags();
@@ -46,16 +52,25 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
       if (!tab) return null;
       const rt = rtOf(tab.connId);
       return {
+        connId: tab.connId,
         name: connOf(tab.connId)?.name ?? "数据库",
         status: rt.status,
-        pending: rt.tx?.statements ?? 0,
+        pending: tab.connId ? pendingDbSessions(s, tab.connId) : [],
         running: s.tabs.some((t) => t.kind === "sql" && t.running),
       };
     },
     (a, b) =>
       a === b ||
-      (!!a && !!b && a.name === b.name && a.status === b.status && a.pending === b.pending && a.running === b.running),
+      (!!a && !!b && a.connId === b.connId && a.name === b.name && a.status === b.status && JSON.stringify(a.pending) === JSON.stringify(b.pending) && a.running === b.running),
   );
+
+  const locateSession = (session: PendingDbSession) => {
+    if (!db?.connId) return;
+    if (!session.tabId) { setPrimaryConn(db.connId); return; }
+    activateTab(session.tabId);
+    showWorkbenchDocument();
+    window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "db" }));
+  };
 
   const problems = mergeProblems(compileResult?.problems, diags);
   const errors = countErrors(problems);
@@ -103,6 +118,7 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
           type="button"
           className="wb-status-chip"
           title="多工程依赖链 / 覆盖规则 / 产物检查"
+          data-priority="secondary"
           onClick={() => openLinkedDialog("chain")}
         >
           <Icon name="plug" size={11} />
@@ -149,13 +165,20 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
               查询中…
             </span>
           )}
-          {db.pending > 0 && (
-            <span className="wb-status-chip" data-tone="warn" title="这些语句还没提交，断开连接会丢失">
-              事务 {db.pending} 条未提交
-            </span>
+          {db.pending.length > 0 && (
+            <Menu portal align="right" width="w-80" trigger={(open, toggle) => (
+              <button type="button" className="wb-status-chip" data-tone="warn" aria-haspopup="menu" aria-expanded={open} title="选择一个会话查看；各会话需要分别提交或回滚" onClick={toggle}>
+                {db.pending.length} 个会话待提交
+              </button>
+            )}>
+              {(close) => db.pending.map((session) => (
+                <MenuItem key={session.slot ?? "primary"} label={`${session.label} · ${session.statements} 条未提交`} icon="alertTriangle" onClick={() => { close(); locateSession(session); }} />
+              ))}
+            </Menu>
           )}
         </>
       )}
+      {primaryConn && <PrimarySessionSummary connId={primaryConn} onClose={() => setPrimaryConn(null)} />}
     </>
   );
 }

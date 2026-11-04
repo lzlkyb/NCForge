@@ -8,6 +8,7 @@
 // 红线同代码动作：返回的 WorkspaceEdit 只落到编辑器 model，绝不替用户写文件，
 // 保存仍由 Ctrl+S。跨文件的编辑一律不应用——提取只改当前编译单元，出现别的文件
 // 说明清单和我们对不上，半改比不改更糟。
+import { beginOperation } from "./operations";
 import { monaco } from "./monacoSetup";
 import { context } from "./langProviders";
 import { langRequest } from "./lang";
@@ -64,17 +65,18 @@ export async function runRefactor(kind: RefactorKind): Promise<void> {  const sp
     end = { line: start.line, column: word.endColumn };
   }
 
-  const ctx = await context(model, { lineNumber: start.line, column: start.column });
-  if (!ctx) {
-    toast("代码智能没就绪，或这个文件不在正在服务的模块里", "warning");
-    return;
-  }
-
-  const prefs = getEditorPrefs();
-  const version = model.getVersionId();
-  let res: RefactorResponse | null;
+  const operation = beginOperation({ key: `refactor:${path.toLowerCase()}`, label: spec.label, scope: path, path, page: "files", phase: "准备文档并计算编辑" });
+  if (!operation) return;
   try {
-    res = await langRequest<RefactorResponse | null>(
+    const ctx = await context(model, { lineNumber: start.line, column: start.column });
+    if (!ctx) {
+      toast("代码智能没就绪，或这个文件不在正在服务的模块里", "warning");
+      return;
+    }
+
+    const prefs = getEditorPrefs();
+    const version = model.getVersionId();
+    const res = await langRequest<RefactorResponse | null>(
       "java/getRefactorEdit",
       path,
       refactorParams(
@@ -85,60 +87,65 @@ export async function runRefactor(kind: RefactorKind): Promise<void> {  const sp
       ),
       60_000,
     );
+
+    // 请求在途时用户可能继续打字：这时清单的行列是旧文本的，落下去会改错位置
+    if (model.isDisposed() || model.getVersionId() !== version) {
+      toast(`文件在${spec.label}过程中被修改，已取消；请重新执行`, "warning");
+      return;
+    }
+    if (!res) {
+      toast(`这里没有可提取的内容：请先选中${spec.need}`, "warning");
+      return;
+    }
+    if (res.errorMessage) {
+      operation.finish("failed", res.errorMessage);
+      toast(`${spec.label}失败：${res.errorMessage}`, "error");
+      return;
+    }
+
+    const { groups } = groupEdits(res.edit);
+    const mine = groups.find((g) => g.path.toLowerCase() === path.toLowerCase());
+    if (!mine) {
+      toast("代码智能没有给出改动（选中的内容可能不能被提取）", "warning");
+      return;
+    }
+    if (groups.length > 1) {
+      toast(`这次${spec.label}还涉及 ${groups.length - 1} 个其它文件，未应用；请改用快速修复逐处处理`, "warning");
+      return;
+    }
+
+    // 预检：越界 / 重叠直接抛错，此时一个字符都还没改
+    try {
+      applyLspEdits(model.getValue(), mine.edits);
+    } catch (e) {
+      operation.finish("failed", String(e));
+      toast(`${spec.label}中止：${e}`, "error");
+      return;
+    }
+    applyEdits(model, mine.edits);
+
+    operation.finish("success", "改动已应用到编辑器；尚未保存，Ctrl+S 落盘");
+    // 新名字选中，紧接着 F2 就能改名（提取方法的默认名 `extracted` 尤其需要）
+    const span = newNameSpan(res);
+    const named =
+      span !== null && span.offset + span.length <= model.getValueLength()
+        ? selectInEditor(
+            toPosition(model, span.offset),
+            toPosition(model, span.offset + span.length),
+          )
+        : false;
+    toast(
+      named
+        ? `${spec.label}完成，已选中新名字（按 F2 改名；未保存，Ctrl+S 落盘）`
+        : `${spec.label}完成（未保存，Ctrl+S 落盘）`,
+      "success",
+    );
   } catch (e) {
+    operation.finish("failed", String(e));
     toast(`${spec.label}失败：${e}`, "error");
-    return;
+  } finally {
+    operation.finish("cancelled", "未应用改动，请根据提示重新执行");
   }
-
-  // 请求在途时用户可能继续打字：这时清单的行列是旧文本的，落下去会改错位置
-  if (model.isDisposed() || model.getVersionId() !== version) {
-    toast(`文件在${spec.label}过程中被修改，已取消；请重新执行`, "warning");
-    return;
-  }
-  if (!res) {
-    toast(`这里没有可提取的内容：请先选中${spec.need}`, "warning");
-    return;
-  }
-  if (res.errorMessage) {
-    toast(`${spec.label}失败：${res.errorMessage}`, "error");
-    return;
-  }
-
-  const { groups } = groupEdits(res.edit);
-  const mine = groups.find((g) => g.path.toLowerCase() === path.toLowerCase());
-  if (!mine) {
-    toast("代码智能没有给出改动（选中的内容可能不能被提取）", "warning");
-    return;
-  }
-  if (groups.length > 1) {
-    toast(`这次${spec.label}还涉及 ${groups.length - 1} 个其它文件，未应用；请改用快速修复逐处处理`, "warning");
-    return;
-  }
-
-  // 预检：越界 / 重叠直接抛错，此时一个字符都还没改
-  try {
-    applyLspEdits(model.getValue(), mine.edits);
-  } catch (e) {
-    toast(`${spec.label}中止：${e}`, "error");
-    return;
-  }
-  applyEdits(model, mine.edits);
-
-  // 新名字选中，紧接着 F2 就能改名（提取方法的默认名 `extracted` 尤其需要）
-  const span = newNameSpan(res);
-  const named =
-    span !== null && span.offset + span.length <= model.getValueLength()
-      ? selectInEditor(
-          toPosition(model, span.offset),
-          toPosition(model, span.offset + span.length),
-        )
-      : false;
-  toast(
-    named
-      ? `${spec.label}完成，已选中新名字（按 F2 改名；未保存，Ctrl+S 落盘）`
-      : `${spec.label}完成（未保存，Ctrl+S 落盘）`,
-    "success",
-  );
 }
 
 function toPosition(model: Model, offset: number): { line: number; column: number } {

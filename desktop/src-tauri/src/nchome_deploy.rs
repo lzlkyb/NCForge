@@ -212,7 +212,7 @@ fn is_plain_name(name: &str) -> bool {
 
 /// 从 `module.xml` 读模块名。NC 以声明名为准，目录名不一定等于模块名
 /// （本机 `EyePortal/META-INF/module.xml` 声明的是 `eye`）。
-fn declared_module(meta: &Path) -> Option<String> {
+pub(crate) fn declared_module(meta: &Path) -> Option<String> {
     let bytes = std::fs::read(meta.join("module.xml")).ok()?;
     // module.xml 声明 gb2312，但标签与模块名都是 ASCII；lossy 解码足够
     let text = crate::workspace::decode_lossy(&bytes);

@@ -84,6 +84,14 @@ pub struct SearchOptions {
     /// 例：`*.java` / `*.java,*.xml` / `*.java,!test*`。空串 = 全都要。
     #[serde(default)]
     pub include: String,
+    /// 范围收窄到这些**工作区相对的目录**（`/` 或 `\` 分隔，空 = 整个工作区）。
+    ///
+    /// 这是「按业务组件搜索」的落点：manifest 只提供 `src/public` 这类源码根，
+    /// 拼成 `bill/src/public` 后作为范围传进来。这里刻意**不**接受绝对路径：
+    /// 范围只能收窄、不能跳出工作区（白名单之外读写都会被 `workspace_cmds` 拒掉，
+    /// 在这里就挡掉能给出更直白的错误）。
+    #[serde(default)]
+    pub dirs: Vec<String>,
     /// 结果条数上限；0 或超过 `HARD_MAX_RESULTS` 时按上限处理。
     #[serde(default)]
     pub max_results: usize,
@@ -125,6 +133,136 @@ pub struct SearchOutcome {
     /// 是否因条数或超时提前结束。
     pub truncated: bool,
     pub elapsed_ms: u64,
+    /// 本次**真正生效**的范围（工作区相对、`/` 分隔）；空 = 整个工作区。
+    ///
+    /// 回显给前端而不是让它自己记：请求的范围可能被归一化（去重、丢掉被覆盖的
+    /// 子目录）或回落，界面要说的是「实际搜了哪里」，不是「本来想搜哪里」。
+    pub scope_dirs: Vec<String>,
+    /// 请求了但磁盘上不存在（或非法）的目录，原样回显。
+    pub missing_dirs: Vec<String>,
+    /// 请求了范围，但一个都不存在 → 已回落成整个工作区。
+    ///
+    /// manifest 只做参考，磁盘才是真源：组件目录被删/搬走后必须仍然搜得到东西，
+    /// 但也要让用户看见「这次没按组件搜」，否则「怎么搜出别的模块」无从解释。
+    pub scope_fallback: bool,
+}
+
+/// 实际生效的搜索范围。
+///
+/// 「按业务组件搜索」只提供一组目录（`bill/src/public` 等），不是一个新的根：
+/// 结果里的相对路径必须仍相对**工作区根**，否则前端拼绝对路径要换一套口径，
+/// `点击命中打开文件` 与替换都会跟着分叉。
+struct Scope {
+    /// 工作区相对、`/` 分隔的生效范围（空 = 整个工作区）。
+    rel: Vec<String>,
+    /// 与 `rel` 一一对应的绝对路径。
+    abs: Vec<PathBuf>,
+    /// 请求了但不存在/非法的目录（原样回显给前端）。
+    missing: Vec<String>,
+    /// 一个都没命中 → 已回落整个工作区。
+    fallback: bool,
+}
+
+/// 把范围目录归一成「工作区相对、`/` 分隔」，非法项返回 `None`。
+///
+/// 拒绝绝对路径、盘符与 `..`：范围只能**收窄**。不拒绝的话，前端一个笔误就能让
+/// 搜索跑到工作区外面去读盘——虽然后续读写有白名单兜着，但在这里给直白结果更省事。
+fn normalize_rel_dir(raw: &str) -> Option<String> {
+    let mut s = raw.trim().replace('\\', "/");
+    while let Some(rest) = s.strip_prefix("./") {
+        s = rest.to_string();
+    }
+    if s.contains(':') {
+        return None; // 盘符 / NTFS 数据流
+    }
+    let mut segs: Vec<&str> = Vec::new();
+    for seg in s.split('/') {
+        match seg {
+            "" | "." => continue,
+            ".." => return None,
+            other => segs.push(other),
+        }
+    }
+    if segs.is_empty() {
+        None
+    } else {
+        Some(segs.join("/"))
+    }
+}
+
+/// 判断 `child` 是否在 `parent` 里（含等于）。两者都是归一化后的 `小写` 串。
+fn rel_within(child: &str, parent: &str) -> bool {
+    child == parent
+        || (child.len() > parent.len()
+            && child.starts_with(parent)
+            && child.as_bytes()[parent.len()] == b'/')
+}
+
+/// 把请求的范围解析成真正要走的目录。
+///
+/// 三件事：归一化 + 去重；丢掉被更短范围覆盖的子目录（否则同一个文件被数两遍，
+/// 结果里会出现重复行）；逐个 `is_dir()` 验一下，全都不存在就回落整个工作区。
+fn plan_scope(root: &Path, dirs: &[String]) -> Scope {
+    if dirs.is_empty() {
+        return Scope {
+            rel: Vec::new(),
+            abs: Vec::new(),
+            missing: Vec::new(),
+            fallback: false,
+        };
+    }
+    let mut want: Vec<String> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
+    for raw in dirs {
+        match normalize_rel_dir(raw) {
+            Some(rel) => {
+                if !want.iter().any(|w| w.eq_ignore_ascii_case(&rel)) {
+                    want.push(rel);
+                }
+            }
+            None => missing.push(raw.clone()),
+        }
+    }
+    // 短的先占位：`bill/src` 已经在范围里时，`bill/src/public` 只会让它数两遍
+    want.sort_by(|a, b| a.len().cmp(&b.len()).then(a.cmp(b)));
+    let mut kept: Vec<String> = Vec::new();
+    for rel in want {
+        let lower = rel.to_lowercase();
+        if kept
+            .iter()
+            .any(|k| rel_within(&lower, &k.to_lowercase()))
+        {
+            continue;
+        }
+        kept.push(rel);
+    }
+
+    let mut abs = Vec::new();
+    let mut alive = Vec::new();
+    for rel in kept {
+        let p = root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+        if p.is_dir() {
+            abs.push(p);
+            alive.push(rel);
+        } else {
+            missing.push(rel);
+        }
+    }
+    if abs.is_empty() {
+        // 全部不存在：manifest 与磁盘不一致（组件被删/改名）时不能让用户一无所获
+        return Scope {
+            rel: Vec::new(),
+            abs: Vec::new(),
+            missing,
+            fallback: true,
+        };
+    }
+    Scope {
+        rel: alive,
+        abs,
+        missing,
+        fallback: false,
+    }
 }
 
 /// 匹配器：纯文本与正则两条路，编译一次复用（正则逐行编译会慢到不可用）。
@@ -323,6 +461,8 @@ pub fn search_with_budget(
     }
     let matcher = Matcher::build(opts)?;
     let filter = FileFilter::parse(&opts.include);
+    // 范围在收集候选之前定下来：候选一旦开始枚举，就没有「换个范围」的余地了
+    let scope = plan_scope(root, &opts.dirs);
 
     let started = Instant::now();
     let limit = match opts.max_results {
@@ -331,7 +471,8 @@ pub fn search_with_budget(
     };
 
     // ── 第一段：收集候选（目录枚举也是 I/O，但只做一遍）──
-    let (candidates, walk_truncated) = collect_candidates(root, &filter, started, budget_ms);
+    let (candidates, walk_truncated) =
+        collect_candidates(root, &scope.abs, &filter, started, budget_ms);
 
     // ── 第二段：并行读取 + 匹配 ──
     let cursor = AtomicUsize::new(0);
@@ -427,21 +568,32 @@ pub fn search_with_budget(
         files_matched,
         truncated: capped || stop.load(Ordering::Relaxed) || walk_truncated || panicked,
         elapsed_ms: started.elapsed().as_millis() as u64,
+        scope_dirs: scope.rel,
+        missing_dirs: scope.missing,
+        scope_fallback: scope.fallback,
     })
 }
 
 /// 走一遍工作区，返回通过掩码、大小合适的候选文件 `(绝对路径, 相对路径)`。
 ///
+/// `dirs` 是收窄后的范围（绝对路径）；空表示整个工作区。多入口时每个入口各走一遍，
+/// 但 `rel` 一律相对**工作区根**算——结果路径的口径不能因为范围变窄而变。
+///
 /// 掩码判断放在读文件之前：7000 个文件里通常只需要读几百个，
 /// 先判掩码比先读再丢快一个量级。返回值第二项表示是否因为时间预算中途放弃。
 fn collect_candidates(
     root: &Path,
+    dirs: &[PathBuf],
     filter: &FileFilter,
     started: Instant,
     budget_ms: u128,
 ) -> (Vec<(PathBuf, String)>, bool) {
     let mut out = Vec::new();
-    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    let mut stack: Vec<PathBuf> = if dirs.is_empty() {
+        vec![root.to_path_buf()]
+    } else {
+        dirs.to_vec()
+    };
 
     while let Some(dir) = stack.pop() {
         if started.elapsed().as_millis() > budget_ms {
@@ -666,7 +818,16 @@ mod tests {
             whole_word: false,
             regex: false,
             include: String::new(),
+            dirs: Vec::new(),
             max_results: 0,
+        }
+    }
+
+    /// 带范围目录的选项（按业务组件搜索）。
+    fn opts_in(text: &str, dirs: &[&str]) -> SearchOptions {
+        SearchOptions {
+            dirs: dirs.iter().map(|d| d.to_string()).collect(),
+            ..opts(text)
         }
     }
 
@@ -1012,6 +1173,131 @@ mod tests {
         assert!(!o.whole_word);
         assert!(o.include.is_empty());
         assert_eq!(o.max_results, 0);
+        assert!(o.dirs.is_empty(), "不传范围 = 整个工作区");
+    }
+
+    // ── 范围收窄（按业务组件搜索）──
+    //
+    // 口径：范围只是「收窄入口目录」，结果路径仍相对工作区根；范围不存在时搜索
+    // 回落整个工作区（并标记），替换**拒绝执行**（破坏性操作不许悄悄扩大范围）。
+
+    /// 三个源码根各放一个同名文件：整工程 3 处命中，只搜一个根就 1 处。
+    fn scope_fixture(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("ncf-scope-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in ["bill/src/public", "bill/src/client", "gl/src/public"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+            std::fs::write(root.join(dir).join("A.java"), "foo\n").unwrap();
+        }
+        root
+    }
+
+    fn paths(out: &SearchOutcome) -> Vec<&str> {
+        out.hits.iter().map(|h| h.path.as_str()).collect()
+    }
+
+    #[test]
+    fn 范围目录只搜指定目录且路径仍相对工作区根() {
+        let root = scope_fixture("only");
+        let out = search(&root, &opts_in("foo", &["bill/src/public"])).unwrap();
+        assert_eq!(out.scope_dirs, vec!["bill/src/public"]);
+        assert!(out.missing_dirs.is_empty());
+        assert!(!out.scope_fallback);
+        // 关键：路径是 `bill/src/public/A.java`，不是相对范围目录的 `A.java`
+        assert_eq!(paths(&out), vec!["bill/src/public/A.java"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn 多个范围目录都走一遍() {
+        let root = scope_fixture("multi");
+        let out = search(&root, &opts_in("foo", &["bill\\src\\public", "bill/src/client"])).unwrap();
+        // 反斜杠写法与 `/` 等价（NC 的 manifest 写的可能是任一种）；
+        // 回显顺序按 (长度, 字典序) 固定，同一份清单反复搜不会每次都变
+        assert_eq!(out.scope_dirs, vec!["bill/src/client", "bill/src/public"]);
+        assert_eq!(paths(&out), vec!["bill/src/client/A.java", "bill/src/public/A.java"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn 嵌套范围去重后不重复计数() {
+        let root = scope_fixture("nested");
+        // `bill/src` 已覆盖 `bill/src/public`：不丢的话每个文件会被数两遍
+        let out = search(&root, &opts_in("foo", &["bill/src", "bill/src/public"])).unwrap();
+        assert_eq!(out.scope_dirs, vec!["bill/src"]);
+        assert_eq!(out.hits.len(), 2, "bill 下两个源码根各一处，不能翻倍");
+        assert_eq!(out.files_matched, 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn 不存在的范围目录记下来其余照搜() {
+        let root = scope_fixture("partial");
+        let out = search(&root, &opts_in("foo", &["bill/src/public", "bill/src/nope"])).unwrap();
+        assert_eq!(out.hits.len(), 1);
+        assert_eq!(out.scope_dirs, vec!["bill/src/public"]);
+        assert_eq!(out.missing_dirs, vec!["bill/src/nope"]);
+        assert!(!out.scope_fallback, "还有一个能搜，就不算回落");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn 范围全不存在时回落整个工作区() {
+        let root = scope_fixture("fallback");
+        // manifest 说组件在 `gone/`，磁盘上却没了（组件被删/改名）
+        let out = search(&root, &opts_in("foo", &["gone/src", "gone/client"])).unwrap();
+        assert!(out.scope_fallback);
+        assert!(out.scope_dirs.is_empty());
+        assert_eq!(out.missing_dirs.len(), 2);
+        assert_eq!(out.hits.len(), 3, "回落不能连结果一起丢掉");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn 非法范围被挡在工作区里() {
+        let root = scope_fixture("illegal");
+        // `..` 能跳出工作区、盘符是绝对路径、空串没有意义：都当非法范围
+        let out = search(
+            &root,
+            &opts_in("foo", &["../../Windows", "C:\\Windows", "", "."]),
+        )
+        .unwrap();
+        assert!(out.scope_fallback, "没有可用范围 → 回落整个工作区");
+        assert_eq!(out.missing_dirs.len(), 4);
+        assert_eq!(out.hits.len(), 3, "只能搜到工作区里的东西");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn 范围收窄后替换也只改范围内的文件() {
+        let root = scope_fixture("replace-in");
+        let out = replace(&root, &opts_in("foo", &["bill/src/client"]), "bar").unwrap();
+        assert_eq!(out.files_changed, 1);
+        assert_eq!(
+            std::fs::read_to_string(root.join("bill/src/public/A.java")).unwrap(),
+            "foo\n",
+            "范围外的文件一个字节都不能动"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("bill/src/client/A.java")).unwrap(),
+            "bar\n"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn 范围全不存在时拒绝替换而不是改整个工程() {
+        let root = scope_fixture("replace-gone");
+        let err = replace(&root, &opts_in("foo", &["gone/src"]), "bar").unwrap_err();
+        assert!(err.contains("已取消替换"), "实际：{err}");
+        for dir in ["bill/src/public", "bill/src/client", "gl/src/public"] {
+            assert_eq!(
+                std::fs::read_to_string(root.join(dir).join("A.java")).unwrap(),
+                "foo\n",
+                "拒绝时磁盘必须原样"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 
@@ -1283,8 +1569,20 @@ pub fn replace(
     let replacement = matcher.escape_replacement(replacement);
     let filter = FileFilter::parse(&opts.include);
     let started = Instant::now();
+    // 与搜索同一份范围解析：替换的覆盖面必须**逐字等于**屏幕上列出的结果，
+    // 否则「按组件搜索 + 全部替换」会改到组件外面的文件（不可撤销）
+    let scope = plan_scope(root, &opts.dirs);
+    // 搜索可以静默回落（非破坏性，顶多噪声多一点）；替换不行：请求的范围一个都
+    // 不存在时会退化成「改整个工作区」，而用户按下按钮时脑子里是「只改这个组件」。
+    // 宁可拒绝并让他重新搜一次——那时界面上会明确显示「已回落成整个工作区」。
+    if !opts.dirs.is_empty() && scope.fallback {
+        return Err(format!(
+            "范围目录都不存在（{}），已取消替换：重新搜索确认范围后再改",
+            scope.missing.join("、")
+        ));
+    }
     let (candidates, walk_truncated) =
-        collect_candidates(root, &filter, started, TIME_BUDGET_MS);
+        collect_candidates(root, &scope.abs, &filter, started, TIME_BUDGET_MS);
 
     let cursor = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
@@ -1409,6 +1707,7 @@ mod replace_tests {
             whole_word: false,
             regex: false,
             include: String::new(),
+            dirs: Vec::new(),
             max_results: 0,
         }
     }
@@ -1619,5 +1918,134 @@ mod replace_tests {
             fs::read_to_string(root.join("A.java")).unwrap(),
             "nothing here"
         );
+    }
+}
+
+// ───────────────────── 真机 ─────────────────────
+
+/// 真机快照（`#[ignore]`，本机 `C:\work\aier\newar`）。
+///
+/// 为什么放在 lib 里而不是 `tests/*_live.rs`：`cargo test --test <名>` 会顺带重建
+/// 主二进制（为了 `CARGO_BIN_EXE_*`），开发时 `nc-forge.exe` 正在跑就必然
+/// 「拒绝访问」；`--lib` 不碰 bin。`shadow.rs` 的真机用例也是这个理由。
+///
+/// ```bash
+/// node scripts/rust-gate.mjs test --lib -- --ignored 范围搜索_
+/// ```
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+
+    const ROOT: &str = r"C:\work\aier\newar";
+    /// 注册在 manifest 里、磁盘上真有 `.java` 的组件（`bill` 只有资源，比不了）。
+    const COMPONENT: &str = "gl";
+
+    fn opts(text: &str, dirs: &[&str]) -> SearchOptions {
+        SearchOptions {
+            text: text.to_string(),
+            case_sensitive: false,
+            whole_word: false,
+            regex: false,
+            include: "*.java".to_string(),
+            dirs: dirs.iter().map(|d| d.to_string()).collect(),
+            max_results: 0,
+        }
+    }
+
+    fn find(root: &Path, o: &SearchOptions) -> SearchOutcome {
+        // 预算给足：7000 个 java 冷缓存实测 29.8 秒；180 秒保证不会因截断而误判
+        search_with_budget(root, o, 180_000).expect("搜索不该报错")
+    }
+
+    /// 命中行的可比形态（`SearchHit` 没实现 `PartialEq`）。
+    fn lines(out: &SearchOutcome) -> Vec<(String, u32)> {
+        out.hits.iter().map(|h| (h.path.clone(), h.line)).collect()
+    }
+
+    /// **等价性**：在 `gl` 里搜 X ≡ 全工程搜 X 再按路径前缀 `gl/` 过滤。
+    ///
+    /// 这是「按组件搜索」能不能信的全部依据。范围实现换的是「入口目录」，一旦在
+    /// `collect_candidates` 里把相对路径算成了相对范围目录、或漏了范围外的目录，
+    /// 结果就会和过滤对不上——界面上看不出来，只会「少几条」。
+    ///
+    /// 2026-11-03 实测（`gl_voucher`，冷缓存）：全工程 127 条 / 扫 7339 个文件 / 29.8s；
+    /// `gl` 内 126 条 / 扫 111 个文件 / **90ms**——范围外只排掉 1 条（`ia/`）。
+    /// 也就是说这个例子的价值在**速度**（330 倍）而不在噪声，热缓存下全量约 1~2s。
+    #[test]
+    #[ignore = "真机：依赖 C:\\work\\aier\\newar"]
+    fn 范围搜索_按组件与全量过滤一致() {
+        let root = Path::new(ROOT);
+        if !root.is_dir() {
+            eprintln!("跳过：本机没有 {ROOT}");
+            return;
+        }
+
+        let full = find(root, &opts("gl_voucher", &[]));
+        let scoped = find(root, &opts("gl_voucher", &[COMPONENT]));
+
+        println!(
+            "全工程 {} 条 / 扫 {} 个文件 / {}ms；组件 {COMPONENT} {} 条 / 扫 {} 个文件 / {}ms",
+            full.hits.len(),
+            full.files_scanned,
+            full.elapsed_ms,
+            scoped.hits.len(),
+            scoped.files_scanned,
+            scoped.elapsed_ms
+        );
+
+        // 截断会让对比失去意义：先确认两边都搜完
+        assert!(!full.truncated, "全量搜索被截断（条数或时间上限）");
+        assert!(!scoped.truncated, "范围搜索被截断，说明范围没生效或结果过多");
+        assert!(!full.hits.is_empty(), "这个词在 newar 里应该搜得到");
+        assert!(
+            scoped.files_scanned < full.files_scanned,
+            "范围没生效：组件内扫了 {} 个文件，全量扫了 {} 个",
+            scoped.files_scanned,
+            full.files_scanned
+        );
+
+        let want: Vec<(String, u32)> = full
+            .hits
+            .iter()
+            .filter(|h| h.path.starts_with(&format!("{COMPONENT}/")))
+            .map(|h| (h.path.clone(), h.line))
+            .collect();
+        assert_eq!(lines(&scoped), want, "范围搜索与「全量 + 路径过滤」必须逐行一致");
+        // 范围外确有命中，这条对比才说明「范围真的排除了东西」
+        assert!(
+            want.len() < full.hits.len(),
+            "全工程的命中全在 {COMPONENT} 里，换个词才能验证范围"
+        );
+        println!(
+            "范围内 {} 条，范围外排除 {} 条",
+            want.len(),
+            full.hits.len() - want.len()
+        );
+    }
+
+    /// 组件目录被删 / 改名（manifest 与磁盘不一致）时必须回落全量，不能一条都搜不到。
+    #[test]
+    #[ignore = "真机：依赖 C:\\work\\aier\\newar"]
+    fn 范围搜索_组件不存在时回落全量() {
+        let root = Path::new(ROOT);
+        if !root.is_dir() {
+            eprintln!("跳过：本机没有 {ROOT}");
+            return;
+        }
+
+        let full = find(root, &opts("gl_voucher", &[]));
+        let fallen = find(root, &opts("gl_voucher", &["ncforge-不存在的组件"]));
+
+        println!(
+            "回落：{} 条 / scope_fallback={} / missing={:?}",
+            fallen.hits.len(),
+            fallen.scope_fallback,
+            fallen.missing_dirs
+        );
+
+        assert!(fallen.scope_fallback, "范围全不存在时必须标记回落");
+        assert_eq!(fallen.missing_dirs, vec!["ncforge-不存在的组件".to_string()]);
+        assert!(fallen.scope_dirs.is_empty(), "回落时生效范围就是整个工作区");
+        assert_eq!(lines(&fallen), lines(&full), "回落不能丢结果");
     }
 }

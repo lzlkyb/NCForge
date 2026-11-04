@@ -4,6 +4,8 @@ import { svnStatus, type StatusResult } from "../../lib/svn";
 import type { CompileResult } from "../../lib/compile";
 import { setSession, useWorkspaceRoot, useWorkspaceSelector } from "../../lib/workspaceSession";
 import { useDbSelector } from "../../lib/dbStore";
+import { Menu } from "../ui/Menu";
+import { Icon } from "../ui/icon";
 
 type Tone = "ok" | "warn" | "bad" | "busy" | "idle";
 
@@ -42,31 +44,55 @@ export function PatchHealth() {
     dbOn > 0
       ? { tone: "ok", text: `DB · ${dbName || `${dbOn} 个连接`}`, title: "点一下打开数据库页（表结构核对要用）" }
       : { tone: "warn", text: "DB · 未连接", title: "表结构核对需要数据库连接：点一下去连接" };
+  const compiler = compileChip(compiling, compiled);
+  const home = homeChip(defaults.data, defaults.isError);
+  const svn = svnChip(changes.data, changes.isFetching, changes.isError);
+  const states = [compiler, home, svn, db];
+  const errors = states.filter((c) => c.tone === "bad").length;
+  const warnings = states.filter((c) => c.tone === "warn").length;
+  const checking = states.some((c) => c.tone === "busy");
+  const tone: Tone = errors ? "bad" : warnings ? "warn" : checking ? "busy" : "idle";
+  const summary = errors ? `环境 · ${errors} 项异常` : warnings ? `环境 · ${warnings} 项提示` : checking ? "环境 · 检查中" : "出包环境";
 
   return (
     <div className="pk-health" role="group" aria-label="出包环境">
-      <ChipView
-        chip={compileChip(compiling, compiled)}
-        onClick={() => {
-          setSession({ panelOpen: true, panelTab: "problems" });
-          go("files");
-        }}
-      />
-      <ChipView
-        chip={homeChip(defaults.data, defaults.isError)}
-        onClick={() => {
-          if (defaults.isError) void defaults.refetch();
-          go("services");
-        }}
-      />
-      <ChipView
-        chip={svnChip(changes.data, changes.isFetching, changes.isError)}
-        onClick={() => {
-          void qc.invalidateQueries({ queryKey: ["patch-changes"] });
-          void qc.invalidateQueries({ queryKey: ["patch-scan"] });
-        }}
-      />
-      <ChipView chip={db} onClick={() => go("db")} />
+      <Menu portal width="w-72" trigger={(open, toggle) => (
+        <button
+          type="button"
+          className="pk-health-chip"
+          data-tone={tone}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={`出包环境：${summary}`}
+          title={states.map((c) => c.text).join(" · ")}
+          onClick={toggle}
+        >
+          <span className="pk-health-dot" aria-hidden="true" />
+          <span className="pk-health-label">{summary}</span>
+          <Icon name="chevronDown" size={12} aria-hidden="true" />
+        </button>
+      )}>
+        {(close) => (
+          <>
+            <ChipView chip={compiler} onClick={() => {
+              close();
+              setSession({ panelOpen: true, panelTab: "problems" });
+              go("files");
+            }} />
+            <ChipView chip={home} onClick={() => {
+              close();
+              if (defaults.isError) void defaults.refetch();
+              go("services");
+            }} />
+            <ChipView chip={svn} onClick={() => {
+              close();
+              void qc.invalidateQueries({ queryKey: ["patch-changes"] });
+              void qc.invalidateQueries({ queryKey: ["patch-scan"] });
+            }} />
+            <ChipView chip={db} onClick={() => { close(); go("db"); }} />
+          </>
+        )}
+      </Menu>
     </div>
   );
 }
@@ -81,13 +107,14 @@ function ChipView({ chip, onClick }: { chip: Chip; onClick: () => void }) {
   return (
     <button
       type="button"
-      className="pk-health-chip"
+      role="menuitem"
+      className="pk-health-chip pk-env-item"
       data-tone={chip.tone}
       title={chip.title}
       onClick={onClick}
     >
       <span className="pk-health-dot" aria-hidden="true" />
-      {chip.text}
+      <span className="pk-health-label" title={chip.text}>{chip.text}</span>
     </button>
   );
 }

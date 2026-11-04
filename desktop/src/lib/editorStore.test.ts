@@ -126,6 +126,18 @@ describe("openVirtualModel 预览身份（peek）", () => {
     expect(h.models[1].disposed).toBe(true);
   });
 
+  it("replace 才覆盖已有内容（预览建的是桩，正式打开拿到反编译结果）", () => {
+    const uri = jdt(7);
+    store.openVirtualModel(uri, "// stub", { peek: true });
+    // 不带 replace：沿用已有内容，不覆盖
+    store.openVirtualModel(uri, "// 反编译");
+    expect(fake(h.models[h.models.length - 1]).value).toBe("// stub");
+    // 带 replace：换掉，且仍然是同一个 model
+    const m = store.openVirtualModel(uri, "// 反编译", { replace: true });
+    expect(fake(m).value).toBe("// 反编译");
+    expect(h.models).toHaveLength(1);
+  });
+
   it("预览模型转成标签页后摘牌，不再受上限约束", () => {
     const m0 = store.openVirtualModel(jdt(0), "class C0 {}", { peek: true });
     // openJdt 路径：不带 peek = 正式身份，从预览队列摘掉
@@ -165,5 +177,13 @@ describe("openVirtualModel 预览身份（peek）", () => {
       store.pathOfModel(first as unknown as Parameters<typeof store.pathOfModel>[0]),
     ).toBeUndefined();
     expect(closed).toContain(jdt(0));
+  });
+});
+
+describe("保存版本不会抹掉后续输入",()=>{
+  it("保存点保留提交版本，后续输入仍脏，撤销回保存点才干净",async()=>{
+    const dirty=await import("./dirtyBus");const events:boolean[]=[];const off=dirty.onDirtyChange((_path,value)=>events.push(value));
+    const path="C:\\w\\A.java";const model=store.openModel(path,{text:"old",encoding:"UTF-8",hasBom:false,eol:"LF",mtimeMs:1,lossless:true} as Parameters<typeof store.openModel>[1]);
+    fake(model).version=2;store.markSaved(path,1);expect(events).toEqual([true]);fake(model).version=1;store.markSaved(path,1);expect(events).toEqual([true,false]);off();
   });
 });

@@ -1,4 +1,4 @@
-import { getText, markSaved } from "./editorStore";
+import { getModel, getText, markSaved } from "./editorStore";
 import { captureLocalHistory } from "./localHistory";
 import { baseName, writeFile, type Eol, type TextEncoding } from "./workspace";
 
@@ -64,6 +64,8 @@ async function archiveBeforeSave(path: string): Promise<void> {
  */
 export async function saveOne(tab: SaveTarget, opts: SaveOptions = {}): Promise<SaveResult> {
   const text = getText(tab.path);
+  const model = getModel(tab.path);
+  const version = model?.getAlternativeVersionId();
   if (text === undefined) {
     // 标签还在但 model 已经没了：与其静默返回让调用方以为保存成功，不如明确报错
     throw new Error(`编辑器里没有 ${baseName(tab.path)} 的内容`);
@@ -88,6 +90,6 @@ export async function saveOne(tab: SaveTarget, opts: SaveOptions = {}): Promise<
   });
   // 先记账再返回：退出流程不看 React 状态，靠这里把 model 从「未保存」里摘出来，
   // 否则紧接着再查一遍还会认为它是脏的。
-  markSaved(tab.path);
+  if (getModel(tab.path) === model) markSaved(tab.path, version);
   return { mtimeMs, encoding, hasBom, converted: !!opts.encodingOverride };
 }

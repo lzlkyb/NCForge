@@ -1,0 +1,92 @@
+/* 设置使用工作台共享侧栏；正文尺寸决定控件换行，避免整窗很宽但正文被其他面板挤窄。 */
+.wb-settings-layout { display:flex; min-width:0; min-height:0; height:100%; }
+.wb-settings-menu { display:flex; flex-direction:column; width:100%; min-width:0; gap:16px; padding:16px 12px; overflow:auto; }
+.wb-settings-search { display:flex; align-items:center; gap:7px; min-height:32px; padding:0 9px; border:1px solid hsl(var(--input)); border-radius:var(--r-control); background:hsl(var(--card)); color:hsl(var(--muted-foreground)); }
+.wb-settings-search > svg { flex-shrink:0; }
+.wb-settings-search input { flex:1; min-width:0; width:100%; height:30px; border:0; outline:none; background:transparent; font-size:12px; color:hsl(var(--foreground)); }
+.wb-settings-clear { display:grid; place-items:center; width:22px; height:22px; flex-shrink:0; border-radius:var(--r-control); }
+.wb-settings-clear:hover { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); }
+.wb-settings-nav { display:flex; flex-direction:column; gap:20px; }
+.wb-settings-nav-group { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.wb-settings-nav-heading { padding:0 10px 5px; color:hsl(var(--muted-foreground)); font-size:12px; }
+.wb-settings-nav-group > button { display:block; width:100%; min-width:0; min-height:34px; padding:7px 10px; text-align:left; font-size:13px; border-radius:var(--r-control); white-space:nowrap; transition:background var(--dur-fast) var(--ease); }
+.wb-settings-nav-group > button:hover { background:hsl(var(--secondary)); }
+.wb-settings-nav-group > button[aria-current] { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); font-weight:600; }
+.wb-settings-body { flex:1; min-width:0; min-height:0; overflow:auto; padding:28px 32px; container:settings-pane / inline-size; }
+.wb-settings-pages > section,.wb-settings-body > .wb-settings-results { max-width:800px; min-width:0; display:flex; flex-direction:column; gap:24px; }
+.wb-settings-pages > section[hidden] { display:none !important; }
+.wb-settings-pages > section:not([hidden]) { animation:settings-page-in var(--dur-page) var(--ease); }
+.wb-settings-page-header { display:flex; flex-direction:column; gap:7px; }
+.wb-settings-page-header h1 { font-size:18px; line-height:1.4; font-weight:600; color:hsl(var(--foreground)); }
+.wb-settings-page-header h1:focus { outline:none; }
+.wb-settings-page-header p { font-size:13px; line-height:1.6; color:hsl(var(--muted-foreground)); }
+.wb-settings-section-content { display:flex; flex-direction:column; gap:24px; min-width:0; }
+.wb-settings-body .ui-card { padding:0; border:0; border-radius:0; box-shadow:none; background:transparent; }
+.settings-section-block { border-top:1px solid hsl(var(--border)); padding-top:20px; }
+.wb-settings-body .wb-setting-meta { flex-wrap:wrap; padding:0; gap:8px; font-size:12px; }
+.wb-settings-body .wb-setting-meta button { min-height:28px; border-radius:var(--r-control); font-size:12px; }
+.wb-settings-body h2 { font-size:14px; font-weight:600; line-height:1.5; }
+.wb-settings-body .srow { min-width:0; padding:16px 0; gap:16px; align-items:center; flex-wrap:wrap; scroll-margin:24px; }
+.wb-settings-body .srow > .grow { flex:1 1 220px; min-width:0; }
+.wb-settings-body .srow-heading { flex-wrap:wrap; row-gap:4px; }
+.wb-settings-body .srow .t { font-size:13px; line-height:1.5; }
+.wb-settings-body .srow .d { margin-top:5px; font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+.wb-settings-body .srow-control { min-width:0; max-width:100%; flex:0 1 auto; }
+.wb-settings-body .srow-control > :is(span,div) { max-width:100%; }
+.wb-settings-body .srow-control > span { flex-wrap:wrap; }
+.wb-settings-body .srow-control :is(input,select,textarea) { min-width:0; max-width:100%; }
+.wb-settings-body .srow-control :is(button,label,.s-unit,.settings-toggle-state) { white-space:nowrap; }
+.wb-settings-body .srow.stack { align-items:stretch; }
+.wb-settings-body .srow.stack > .grow { flex-basis:auto; }
+.wb-settings-body .settings-row-feedback { flex-basis:100%; line-height:1.6; overflow-wrap:anywhere; }
+.wb-settings-body .srow[data-settings-item]:focus { outline:none; }
+.wb-settings-body .settings-group { min-width:0; border-bottom:1px solid hsl(var(--border)); }
+.wb-settings-body .settings-group-head { padding:14px 0; gap:9px; flex-wrap:wrap; border-radius:var(--r-control); }
+.wb-settings-body .settings-group-title { font-size:14px; line-height:1.5; white-space:nowrap; }
+.wb-settings-body .settings-group-sum { font-size:12px; margin-left:auto; }
+.wb-settings-body .settings-group-body { padding:0 0 4px; }
+.settings-keybinding-head { flex-wrap:wrap; row-gap:8px; }
+.wb-settings-body .wb-keymap-table { width:100%; table-layout:fixed; }
+.wb-settings-body .wb-keymap-table th { padding-top:22px; font-size:13px; font-weight:600; }
+.wb-settings-body .wb-keymap-table td { padding:11px 6px 11px 0; overflow-wrap:anywhere; }
+.wb-settings-body .wb-keymap-table td:first-child { width:40%; }
+.settings-keybinding-key kbd { white-space:normal; overflow-wrap:anywhere; }
+.settings-keybinding-actions { text-align:right; }
+.wb-settings-result-list { display:flex; flex-direction:column; }
+.wb-settings-result { width:100%; display:flex; align-items:center; gap:16px; padding:16px 8px; border-bottom:1px solid hsl(var(--border)); text-align:left; border-radius:var(--r-control); }
+.wb-settings-result:hover { background:hsl(var(--secondary)); }
+.wb-settings-result-main { display:flex; flex:1; min-width:0; flex-direction:column; gap:5px; }
+.wb-settings-result-main strong { font-size:13px; font-weight:600; }
+.wb-settings-result-main > span { font-size:12px; line-height:1.6; color:hsl(var(--muted-foreground)); }
+.wb-settings-result-main small { font-size:12px; color:hsl(var(--muted-foreground)); }
+.wb-settings-result-value { max-width:35%; font-size:12px; color:hsl(var(--muted-foreground)); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.wb-settings-result > svg { flex-shrink:0; color:hsl(var(--muted-foreground)); }
+.wb-settings-empty { padding:40px 8px; text-align:center; }
+.wb-settings-empty p { line-height:1.6; }
+.wb-settings-empty button { min-height:30px; border-radius:var(--r-control); }
+.settings-history { display:flex; flex-direction:column; gap:22px; width:min(560px,90vw); max-height:70vh; padding:24px; overflow:auto; }
+.settings-history h2 { font-size:17px; font-weight:600; }
+.settings-history-entry > div { display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; }
+.settings-history-entry strong { font-size:14px; font-weight:600; }
+.settings-history-entry span,.settings-history-entry li,.settings-history > p { font-size:12px; line-height:1.7; color:hsl(var(--muted-foreground)); }
+.settings-history-entry ul { padding-left:16px; margin-top:8px; }
+.wb-settings-flash { border-radius:var(--r-control); animation:wb-settings-flash 2s var(--ease) both !important; }
+@keyframes settings-page-in { from { opacity:.7; } to { opacity:1; } }
+@container settings-pane (max-width:560px) {
+  .wb-settings-body .srow:not(.stack) { flex-direction:column; align-items:stretch; gap:10px; }
+  .wb-settings-body .srow > .grow { flex-basis:auto; }
+  .wb-settings-body .srow-control { align-self:flex-start; width:auto; max-width:100%; }
+  .wb-settings-body .settings-group-sum { flex-basis:100%; margin-left:21px; }
+  .wb-settings-result { flex-wrap:wrap; gap:8px; }
+  .wb-settings-result-value { max-width:100%; margin-left:0; }
+  .wb-settings-result-main { flex-basis:calc(100% - 30px); }
+  .wb-settings-body .wb-keymap-table :is(tbody,tr,td,th) { display:block; width:100%; }
+  .wb-settings-body .wb-keymap-table td { border:0; padding:3px 0; }
+  .wb-settings-body .wb-keymap-table tr[data-settings-item] { padding:10px 0; border-bottom:1px solid hsl(var(--border)); }
+  .wb-settings-body .wb-keymap-table .settings-keybinding-actions { text-align:left; }
+}
+@media(max-width:900px) { .wb-settings-body { padding:22px 20px; } }
+@media(prefers-reduced-motion:reduce) {
+  .wb-settings-pages > section:not([hidden]) { animation:none; }
+  .wb-settings-flash { animation:none !important; background:hsl(var(--accent)); }
+}

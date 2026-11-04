@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { WorkbenchDockContext, type DockRegionName, type DockToolTab, type FileSlotName } from "./WorkbenchDock";
 import { ToolTab } from "./ToolTab";
 import { ShowDocumentBridge } from "./ShowDocumentBridge";
-import { useSideOpen } from "../../lib/layoutStore";
+import { WorkspacePageMotion } from "./WorkspacePageMotion";
+import { setSideOpen, useSideOpen } from "../../lib/layoutStore";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
+import { Icon } from "../ui/icon";
 
 /** 这些工具把自己的操作条停靠进顶部工具条；其余工具不占这一行。 */
 const TOOLBAR_TOOLS = ["svn"];
@@ -14,16 +16,11 @@ const DOCUMENT_TOOLS: Record<string, DockToolTab> = {
   // 页内还有「审查改动 / 打包补丁」两个视图，标签只说页名，避免切到补丁时名不副实
   svn: { label: "版本控制", icon: "gitBranch" },
   db: { label: "数据库", icon: "database", custom: true },
+  logs: { label: "日志排查", icon: "log" },
   settings: { label: "设置", icon: "settings" },
 };
-/**
- * 切到该工具时默认打开文档页。
- *
- * svn 有意不在列表里：打开版本控制先看源码，点「版本控制」才切到差异，
- * 和用户从文件树点进来继续改代码的动线一致。少写这一句就会被当成漏配。
- * 补丁视图例外：它没有「源码视图」可看，SvnTab 自己在该视图挂载时打开文档区。
- */
-const DOCUMENT_DEFAULT_OPEN = ["db", "settings"];
+/** 主导航直接显示对应工具；文件模型仍挂载，点源码标签即可继续编辑。 */
+const DOCUMENT_DEFAULT_OPEN = ["svn", "db", "logs", "settings"];
 /** NC 服务的卡片 + 日志放在底部面板里，打开这个标签时把面板撑高到够看。 */
 const SERVICES_PANEL_MIN = 360;
 const HOST_NAMES: DockRegionName[] = ["toolbar", "sidebar", "document", "bottom", "actions", "tabs"];
@@ -78,6 +75,7 @@ export function WorkbenchFrame({ activeTool, tool, fileTabs = false, tree, tabs,
   const [fileHosts, setFileHosts] = useState<Record<FileSlotName, HTMLElement | null>>({ tree: null, tabs: null, editor: null, status: null, output: null });
   const [documentOpen, setDocumentOpen] = useState(() => DOCUMENT_DEFAULT_OPEN.includes(activeTool));
   const sideOpen = useSideOpen();
+  const pageRef = useRef<HTMLDivElement>(null);
   // NC 服务标签被选中时把面板撑高：服务卡片 + 日志至少要有 360px 才看得全
   const panelOpen = useWorkspaceSelector((s) => s.panelOpen);
   const panelTab = useWorkspaceSelector((s) => s.panelTab);
@@ -97,10 +95,38 @@ export function WorkbenchFrame({ activeTool, tool, fileTabs = false, tree, tabs,
   }, [activeTool, panelOpen, panelTab]);
   const showCode = useCallback(() => setDocumentOpen(false), []);
   const showDocument = useCallback(() => setDocumentOpen(true), []);
-  const toolTab = DOCUMENT_TOOLS[activeTool] ?? null;
+  // 必须包 useMemo：`logs` 分支里有内联 onClose，每次渲染都是新对象，
+  // 会让下面 `dock` 的 useMemo 依赖整体失效（每次渲染都重建宿主导航绑定）
+  const toolTab = useMemo(
+    () =>
+      activeTool === "logs"
+        ? {
+            ...DOCUMENT_TOOLS.logs,
+            onClose: () => {
+              setDocumentOpen(false);
+              window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "files" }));
+              requestAnimationFrame(() =>
+                document
+                  .querySelector<HTMLElement>(
+                    '.wb-file-tabs [role="tab"][aria-selected="true"], .app-side-item[aria-label="代码"]',
+                  )
+                  ?.focus(),
+              );
+            },
+          }
+        : DOCUMENT_TOOLS[activeTool] ?? null,
+    [activeTool],
+  );
   const dock = useMemo(() => ({ hosts, fileHosts, bindHost: (name: DockRegionName) => refs[name], bindFileSlot: (name: FileSlotName) => fileRefs[name], showDocument, showCode, documentOpen, toolTab }), [hosts, fileHosts, refs, fileRefs, showDocument, showCode, documentOpen, toolTab]);
   const hasSide = SIDE_TOOLS.includes(activeTool);
   const hasToolbar = TOOLBAR_TOOLS.includes(activeTool);
+  // 日志已有列表/详情两栏，不再占用资源树；保留用户在代码页设置的开合偏好。
+  const sideShown = sideOpen && activeTool !== "logs";
+  const sideLabel = activeTool === "settings" ? "设置分类" : "资源侧栏";
+  const closeSide = () => {
+    setSideOpen(false);
+    document.querySelector<HTMLElement>('[aria-label="工作台布局"]')?.focus();
+  };
   // 底部面板有没有内容由 FilesTab 决定（它 portal 到宿主）；这里不再用 `output` 断言，
   // 空面板与分隔条靠 workbench-layout.css 的 `:empty` 规则收起。
   const resizeCleanup = useRef<(() => void) | null>(null);
@@ -150,20 +176,28 @@ export function WorkbenchFrame({ activeTool, tool, fileTabs = false, tree, tabs,
   };
   return <WorkbenchDockContext.Provider value={dock}>
     <ShowDocumentBridge show={showDocument} />
+    <WorkspacePageMotion page={activeTool} target={pageRef} />
     <div className="wb-root" data-tool={activeTool}>
+      <div ref={pageRef} className="wb-content-frame" data-page-panel>
       <header className="wb-toolbar" hidden={!hasToolbar}>
         <div ref={refs.toolbar} className="wb-toolbar-host" />
         <div ref={refs.actions} className="wb-toolbar-actions" />
       </header>
-      <div className="wb-layout" data-side-open={sideOpen} style={{ gridTemplateColumns: sideOpen ? `${sideWidth}px 4px minmax(0,1fr)` : "0px 0px minmax(0,1fr)" }}>
+      <div className="wb-layout" data-side-open={sideShown} style={{ gridTemplateColumns: sideShown ? `${sideWidth}px 4px minmax(0,1fr)` : "0px 0px minmax(0,1fr)" }}>
         {/* 收起时不能用 hidden：display:none 的 aside 不占网格格子，后面的分隔条与主区会各前进一格，主区落进 0px 那一列 */}
-        <aside className="wb-tree" data-closed={!sideOpen || undefined}>
+        <button type="button" className="wb-side-backdrop" aria-label="收起侧栏" tabIndex={-1} hidden={!sideShown} onClick={closeSide} />
+        <aside className="wb-tree" data-closed={!sideShown || undefined} onKeyDown={e => {
+          if (e.key === "Escape" && !e.defaultPrevented && window.matchMedia?.("(max-width: 650px)").matches) {
+            e.preventDefault(); e.stopPropagation(); closeSide();
+          }
+        }}>
+          <div className="wb-tree-heading"><span>{sideLabel}</span><button type="button" className="wb-tree-close" aria-label={`关闭${sideLabel}`} onClick={closeSide}><Icon name="close" size={16} /></button></div>
           <div ref={fileRefs.tree} className="wb-tree-native" hidden={hasSide}>{tree}</div>
           <div ref={refs.sidebar} className="wb-sidebar-host" hidden={!hasSide} />
         </aside>
         <div className="wb-resize-x" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical"
           aria-valuemin={SIDE_MIN} aria-valuemax={SIDE_MAX} aria-valuenow={Math.round(sideWidth)}
-          tabIndex={0} onPointerDown={e => { e.preventDefault(); resize("side", e.clientX, sideWidth); }} onKeyDown={e => onSeparatorKey(e, "side")} />
+          aria-hidden={!sideShown || undefined} tabIndex={sideShown ? 0 : -1} onPointerDown={e => { e.preventDefault(); resize("side", e.clientX, sideWidth); }} onKeyDown={e => onSeparatorKey(e, "side")} />
         <section className="wb-main">
           <div className="wb-tabbar">
             <div ref={fileRefs.tabs} className="wb-file-tabs">{tabs}</div>
@@ -176,17 +210,16 @@ export function WorkbenchFrame({ activeTool, tool, fileTabs = false, tree, tabs,
             role="tabpanel"
             aria-label="编辑器"
             hidden={documentOpen}
-            // 切页过渡只捕获内容区；同一时刻只能有一个元素叫 workspace-page。
-            data-page-panel={activeTool === "files" ? "" : undefined}
           >
             {editor}
           </div>
-          <div ref={refs.document} className="wb-document-surface" hidden={!documentOpen} />
+          <div id="wb-document-surface" ref={refs.document} className="wb-document-surface" role="tabpanel" aria-label={toolTab?.label} hidden={!documentOpen} />
           <div className="wb-resize-y" role="separator" aria-label="调整底部面板高度" aria-orientation="horizontal"
             aria-valuemin={BOTTOM_MIN} aria-valuemax={bottomMax()} aria-valuenow={Math.round(bottomHeight)}
             tabIndex={0} onPointerDown={e => { e.preventDefault(); resize("bottom", e.clientY, bottomHeight); }} onKeyDown={e => onSeparatorKey(e, "bottom")} />
           <div ref={fileRefs.output} className="wb-bottom" style={{ height: bottomHeight }}>{output}</div>
         </section>
+      </div>
       </div>
       <div ref={fileRefs.status} className="wb-status-host">{status}</div>
       <div className="wb-tool-runtime">{tool}</div>

@@ -138,11 +138,13 @@ enum Engine {
 /// 一条连接背后的执行器。对外只暴露「跑命令」，不暴露底下是进程还是连接。
 pub struct EngineHandle {
     inner: Engine,
+    pub policy: Option<Arc<std::sync::RwLock<bool>>>,
 }
 
 impl EngineHandle {
     pub fn java(bridge: Arc<Bridge>, session_id: impl Into<String>) -> Self {
         Self {
+            policy: None,
             inner: Engine::Java {
                 bridge,
                 sid: session_id.into(),
@@ -153,6 +155,24 @@ impl EngineHandle {
     pub fn rust() -> Self {
         Self {
             inner: Engine::Rust(Box::default()),
+            policy: None,
+        }
+    }
+
+    pub fn with_policy(mut self, policy: Arc<std::sync::RwLock<bool>>) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+
+    pub fn raw_call(
+        &self,
+        cmd: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> Result<Value, BridgeError> {
+        match &self.inner {
+            Engine::Java { bridge, sid } => bridge.call_in_session(sid, cmd, args, timeout),
+            Engine::Rust(eng) => eng.call(cmd, args, timeout),
         }
     }
 
@@ -179,7 +199,33 @@ impl EngineHandle {
     ///   它们一起带走）。取消要带上会话名，所以由这里补发。
     /// - 纯 Rust：同样发中断（`db_rust` 里走 `BreakHandle`），到点仍不返回就按超时返回。
     pub fn call(&self, cmd: &str, args: &[&str], timeout: Duration) -> Result<Value, BridgeError> {
-        match &self.inner {
+        let policy = self
+            .policy
+            .as_ref()
+            .map(|p| p.read().unwrap_or_else(|e| e.into_inner()));
+        let readonly = policy.as_ref().is_some_and(|p| **p);
+        if readonly {
+            if matches!(cmd, "exec" | "execBound" | "query")
+                && !readonly_query(args.first().copied().unwrap_or(""))
+            {
+                return Err(BridgeError::new(
+                    "readonly",
+                    "只读查询模式仅允许 SELECT 查询；关闭后才能写入",
+                ));
+            }
+            if matches!(cmd, "explain" | "autocommit") {
+                return Err(BridgeError::new("readonly", "只读查询模式不允许此操作"));
+            }
+        }
+        if readonly
+            && !matches!(
+                cmd,
+                "connect" | "connectProp" | "disconnect" | "hello" | "propList" | "propCred"
+            )
+        {
+            self.raw_call("readOnly", &["true"], timeout)?;
+        }
+        let result = match &self.inner {
             Engine::Java { bridge, sid } => match bridge.call_in_session(sid, cmd, args, timeout) {
                 Err(e) if e.code == "timeout" => {
                     let _ = bridge.send_cancel_in_session(sid);
@@ -188,7 +234,11 @@ impl EngineHandle {
                 other => other,
             },
             Engine::Rust(eng) => eng.call(cmd, args, timeout),
+        };
+        if readonly && matches!(cmd, "connect" | "connectProp") && result.is_ok() {
+            self.raw_call("readOnly", &["true"], timeout)?;
         }
+        result
     }
 
     /// 列中文名：`{names:{"表|列":中文名}, count:N}`。
@@ -341,6 +391,34 @@ pub fn refcursor_need(sql: &str) -> Option<RefcursorNeed> {
 /// 去掉字符串常量与注释（顺便转小写），避免 `'open :1 for'` 这种字面量被当成真语句。
 ///
 /// 逐字节处理：只有 ASCII 会变（大小写折叠），其余字节原样拷贝，所以结果仍是合法 UTF-8。
+pub fn readonly_query(sql: &str) -> bool {
+    let code = strip_literals(sql).to_ascii_lowercase();
+    let words: Vec<&str> = code
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|w| !w.is_empty())
+        .collect();
+    matches!(words.first(), Some(&"select") | Some(&"with"))
+        && !code.trim_end().trim_end_matches(';').contains(';')
+        && !words.iter().any(|w| {
+            matches!(
+                *w,
+                "insert"
+                    | "update"
+                    | "delete"
+                    | "merge"
+                    | "alter"
+                    | "drop"
+                    | "create"
+                    | "begin"
+                    | "declare"
+                    | "commit"
+                    | "rollback"
+                    | "function"
+                    | "procedure"
+                    | "into"
+            )
+        })
+}
 fn strip_literals(sql: &str) -> String {
     let b = sql.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(b.len());
@@ -585,5 +663,51 @@ mod tests {
         assert_eq!(refcursor_need("/* open :1 for */ select 1 from dual"), None);
         // 标识符里带 open 也不算（`reopen` / `open_flag`）
         assert_eq!(refcursor_need("select reopen, open_flag from t"), None);
+    }
+}
+
+#[cfg(test)]
+mod readonly_tests {
+    use super::*;
+    #[test]
+    fn accepts_selects_ctes_comments_and_string_literals() {
+        for sql in [
+            "select 'update delete; begin' from dual",
+            "-- delete\nselect * from t",
+            "with q as (select 1 x from dual) select * from q",
+            "select 1 from dual;",
+        ] {
+            assert!(readonly_query(sql), "{sql}");
+        }
+    }
+    #[test]
+    fn rejects_write_lock_plsql_and_multiple_statement_paths() {
+        for sql in [
+            "update t set x=1",
+            "select * from t for update",
+            "begin null; end;",
+            "with function f return number is begin return 1; end; select f() from dual",
+            "select 1 from dual; delete from t",
+            "commit",
+            "alter session set current_schema=x",
+        ] {
+            assert!(!readonly_query(sql), "{sql}");
+        }
+    }
+    #[test]
+    fn policy_blocks_primary_slot_and_bound_write_before_driver_execution() {
+        let policy = Arc::new(std::sync::RwLock::new(true));
+        let primary = EngineHandle::rust().with_policy(policy.clone());
+        let slot = EngineHandle::rust().with_policy(policy);
+        for h in [&primary, &slot] {
+            for cmd in ["exec", "execBound", "query"] {
+                assert_eq!(
+                    h.call(cmd, &["delete from t"], Duration::from_secs(1))
+                        .unwrap_err()
+                        .code,
+                    "readonly"
+                );
+            }
+        }
     }
 }

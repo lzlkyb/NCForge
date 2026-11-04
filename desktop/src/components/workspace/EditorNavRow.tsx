@@ -76,6 +76,8 @@ export function EditorNavRow({
             type="button"
             className="wb-outline-btn"
             data-popover="outline"
+            data-active={outlineOpen || undefined}
+            aria-expanded={outlineOpen}
             title="文件结构（本文件的类 / 方法 / 字段）"
             onClick={onToggleOutline}
           >
@@ -87,6 +89,7 @@ export function EditorNavRow({
             className="wb-outline-btn"
             data-active={history.open || undefined}
             data-popover="history"
+            aria-expanded={history.open}
             title="本地历史（自动归档的旧版本，可恢复）"
             onClick={history.onToggle}
           >

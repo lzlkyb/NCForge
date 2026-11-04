@@ -13,6 +13,9 @@ const outcome = (hits: SearchHit[], truncated = false): SearchOutcome => ({
   filesMatched: hits.length,
   truncated,
   elapsedMs: 3,
+  scopeDirs: [],
+  missingDirs: [],
+  scopeFallback: false,
 });
 
 describe("checkReferences", () => {

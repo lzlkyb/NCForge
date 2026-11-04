@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 
 import "../../linked.css";
 import { ProjectChain } from "./ProjectChain";
 import { ArtifactCheck } from "./ArtifactCheck";
+import { UpmCheck } from "./UpmCheck";
 import { artifactMarks } from "./artifactKind";
 import { OverrideEditor } from "./OverrideEditor";
 import { Icon } from "../ui/icon";
@@ -11,6 +12,7 @@ import { toast } from "../ui/toast";
 import { useLinkedGraph } from "../../hooks/useLinkedGraph";
 import { useOverrideDraft } from "../../hooks/useOverrideDraft";
 import { useArtifactCheck } from "../../hooks/useArtifactCheck";
+import { useUpmCheck } from "../../hooks/useUpmCheck";
 import {
   overrideHits,
   removeOverride,
@@ -82,6 +84,8 @@ export const LinkedProjectsPanel = forwardRef<
         .join(">")
     : "";
   const chk = useArtifactCheck(chainStamp, graph?.primaryRoot ?? null);
+  // 装配表的结论挂在**主工程根**上：切了工作区（primaryRoot 变）就不再成立
+  const upm = useUpmCheck(graph?.primaryRoot ?? "", graph?.primaryRoot ?? null);
   /** 检查读的是**已落盘**的覆盖表，草稿没保存就点会得到对不上的结论 */
   const checkBlocked = !graph
     ? "还没读到依赖链，先点「重新读取」"
@@ -239,6 +243,22 @@ export const LinkedProjectsPanel = forwardRef<
               elapsedMs={chk.elapsedMs}
               disabledReason={checkBlocked}
               onRun={() => void chk.run()}
+            />
+          )}
+        </div>
+
+        {/* 不加 `lnk-anchor`：那是给左侧区块跳转用的锚点，导航里没有「UPM 装配」这一项，
+            多一个锚点会让「跳转到第 N 块」的定位错位 */}
+        <div>
+          {graph && (
+            <UpmCheck
+              running={upm.running}
+              deep={upm.deep}
+              error={upm.error}
+              report={upm.report}
+              stale={upm.stale}
+              elapsedMs={upm.elapsedMs}
+              onRun={(opts) => void upm.run(opts)}
             />
           )}
         </div>

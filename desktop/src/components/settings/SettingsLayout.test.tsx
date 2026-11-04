@@ -1,109 +1,134 @@
 // @vitest-environment jsdom
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsLayout } from "./SettingsLayout";
+import { SettingsRow } from "../ui/SettingsRow";
+import { ToggleRow } from "../ui/ToggleRow";
+import { SettingsGroup } from "./SettingsGroup";
 import { clearSettingsRequest, getSettingsRequest, requestSettingsSection } from "../../lib/settingsJump";
+import { getSideOpen, setSideOpen } from "../../lib/layoutStore";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
 let root: Root;
 let container: HTMLDivElement;
-
+let wasSideOpen: boolean;
 beforeEach(() => {
+  wasSideOpen = getSideOpen();
   clearSettingsRequest();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
 });
-
-afterEach(() => {
-  act(() => root.unmount());
+afterEach(async () => {
+  await act(async () => root.unmount());
   container.remove();
   clearSettingsRequest();
+  setSideOpen(wasSideOpen);
+  vi.unstubAllGlobals();
 });
 
-function render(): ReactElement {
-  const el = (
-    <SettingsLayout
-      sections={[
-        { label: "外观", keywords: ["材质", "主题", "theme"], content: <div>外观内容</div> },
-        { label: "编辑器", keywords: ["字体", "自动保存", "font"], content: <div>编辑器内容</div> },
-        { label: "关于", keywords: ["版本", "仓库"], content: <div>关于内容</div> },
-      ]}
-    />
-  );
-  act(() => root.render(el));
+async function render(): Promise<ReactElement> {
+  const el = <SettingsLayout sections={[
+    { label: "外观与常规", aliases: ["外观", "常规"], group: "工作台", content: <SettingsRow id="density" label="界面密度" keywords={["density"]} valueText="标准" control={<button>标准</button>} /> },
+    { label: "编辑器", group: "工作台", content: <>
+      <SettingsRow id="font" label="字体" keywords={["font"]} valueText="默认字体" control={<input aria-label="字体草稿" defaultValue="" />} />
+      <SettingsGroup title="保存" summary="自动保存关"><ToggleRow id="autosave" label="自动保存" checked={false} onChange={() => {}} /></SettingsGroup>
+    </> },
+    { label: "关于", group: "维护", content: <SettingsRow id="version" label="运行版本" valueText="v1.2.3" /> },
+  ]} />;
+  await act(async () => root.render(<section className="wb-main">{el}</section>));
   return el;
 }
-
-function search(value: string) {
+async function search(value: string) {
   const input = container.querySelector<HTMLInputElement>('input[aria-label="搜索设置"]')!;
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-  act(() => {
-    setter.call(input, value);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
+const visiblePage = () => container.querySelector<HTMLElement>(".wb-settings-pages > section:not([hidden])");
+const results = () => [...container.querySelectorAll<HTMLButtonElement>(".wb-settings-result")];
 
-const menuLabels = () =>
-  Array.from(container.querySelectorAll(".wb-settings-nav button")).map((b) => b.textContent);
-
-// 未选中的分类仍挂在 DOM 里（hidden），只断言当前可见的分类正文。
-const visibleText = () =>
-  Array.from(container.querySelectorAll(".wb-settings-body > section:not([hidden])"))
-    .map((s) => s.textContent)
-    .join("");
-
-describe("设置搜索", () => {
-  it("按标签 / 关键词过滤分类，命中项自动成为当前页", () => {
-    render();
-    search("字体");
-    expect(menuLabels()).toEqual(["编辑器"]);
-    expect(visibleText()).toContain("编辑器内容");
-    expect(visibleText()).not.toContain("外观内容");
+describe("设置中心搜索与导航", () => {
+  it("窄窗口选分类自动收起侧栏，并将焦点移到正文标题", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+    setSideOpen(true);
+    await render();
+    const editor = [...container.querySelectorAll<HTMLButtonElement>(".wb-settings-nav button")].find(b => b.textContent === "编辑器")!;
+    await act(async () => { editor.focus(); editor.click(); });
+    expect(getSideOpen()).toBe(false);
+    expect(document.activeElement).toBe(visiblePage()?.querySelector("h1"));
+    expect(visiblePage()?.className).not.toContain("wb-settings-flash");
   });
-
-  it("拼音首字母也能命中中文关键词", () => {
-    render();
-    search("cz");
-    expect(menuLabels()).toEqual(["外观"]);
-    expect(visibleText()).toContain("外观内容");
+  it("宽窗口选分类保留侧栏，窄窗口搜索结果定位后收起侧栏", async () => {
+    const media = vi.fn(() => ({ matches: false }));
+    vi.stubGlobal("matchMedia", media);
+    setSideOpen(true);
+    await render();
+    await act(async () => container.querySelector<HTMLButtonElement>(".wb-settings-nav button")!.click());
+    expect(getSideOpen()).toBe(true);
+    media.mockReturnValue({ matches: true });
+    await search("字体");
+    await act(async () => results()[0].click());
+    expect(getSideOpen()).toBe(false);
+    expect(document.activeElement?.id).toBe("font");
   });
-
-  it("多个词按「且」组合；没有命中时给出空状态和清除入口", () => {
-    render();
-    search("编辑器 字体");
-    expect(menuLabels()).toEqual(["编辑器"]);
-    search("不存在的设置");
-    expect(menuLabels()).toEqual([]);
+  it("搜索具体设置及当前值，点击后直达并强调目标", async () => {
+    await render();
+    await search("密度");
+    expect(results()).toHaveLength(1);
+    expect(results()[0].textContent).toContain("标准");
+    await act(async () => results()[0].click());
+    expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
+    expect(container.querySelector("#density")?.className).toContain("wb-settings-flash");
+    expect(document.activeElement?.id).toBe("density");
+  });
+  it("搜索折叠组内项目，定位时自动展开", async () => {
+    await render();
+    expect(container.querySelector("details")?.open).toBe(false);
+    await search("编辑器 自动保存");
+    expect(results()).toHaveLength(1);
+    await act(async () => results()[0].click());
+    expect(container.querySelector("details")?.open).toBe(true);
+    expect(document.activeElement?.id).toBe("autosave");
+  });
+  it("拼音首字母及英文关键词可以定位具体项", async () => {
+    await render();
+    await search("jmmd");
+    expect(results()[0]?.textContent).toContain("界面密度");
+    await search("font");
+    expect(results()[0]?.textContent).toContain("字体");
+  });
+  it("无结果可清除并返回原分类，菜单始终完整", async () => {
+    await render();
+    await search("不存在的设置");
+    expect(results()).toHaveLength(0);
     expect(container.textContent).toContain("没有找到");
-    const clear = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "清除搜索");
-    act(() => clear?.click());
-    expect(menuLabels()).toEqual(["外观", "编辑器", "关于"]);
-    expect(container.textContent).toContain("外观内容");
+    expect(container.querySelectorAll(".wb-settings-nav button")).toHaveLength(3);
+    const clear = [...container.querySelectorAll("button")].find(b => b.textContent === "清除搜索")!;
+    await act(async () => clear.click());
+    expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
   });
-
-  it("外部请求跳到指定分类，并闪一下目标区块", () => {
-    render();
-    act(() => requestSettingsSection("编辑器"));
-    expect(visibleText()).toContain("编辑器内容");
-    const section = container.querySelector(".wb-settings-body > section:not([hidden])")!;
-    expect(section.className).toContain("wb-settings-flash");
-    // 请求在闪完之前不能被提前清掉，否则 2 秒计时器会被一起撤掉
-    expect(getSettingsRequest()?.section).toBe("编辑器");
+  it("旧分类入口仍能跳转，重复请求会重新定位", async () => {
+    await render();
+    await act(async () => requestSettingsSection("外观"));
+    expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
+    expect(getSettingsRequest()?.section).toBe("外观");
+    await act(async () => requestSettingsSection("编辑器"));
+    expect(visiblePage()?.dataset.settingsSection).toBe("编辑器");
+    expect(visiblePage()?.className).toContain("wb-settings-flash");
   });
-
-  it("点击分类切页，搜索清空后回到手动选中的分类", () => {
-    render();
-    const editor = Array.from(container.querySelectorAll<HTMLButtonElement>(".wb-settings-nav button")).find(
-      (b) => b.textContent === "编辑器",
-    )!;
-    act(() => editor.click());
-    expect(visibleText()).toContain("编辑器内容");
-    search("版本");
-    expect(visibleText()).toContain("关于内容");
-    search("");
-    expect(visibleText()).toContain("编辑器内容");
+  it("切换分类及搜索不会重挂控件或丢弃输入草稿", async () => {
+    await render();
+    const font = container.querySelector<HTMLInputElement>("#font input")!;
+    font.value = "Consolas";
+    const editor = [...container.querySelectorAll<HTMLButtonElement>(".wb-settings-nav button")].find(b => b.textContent === "编辑器")!;
+    await act(async () => editor.click());
+    await search("版本");
+    await search("");
+    expect(visiblePage()?.dataset.settingsSection).toBe("编辑器");
+    expect(container.querySelector("#font input")).toBe(font);
+    expect(font.value).toBe("Consolas");
   });
 });

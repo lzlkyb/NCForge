@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { replaceContent } from "../lib/editorStore";
+import { queueAutoCompile } from "../lib/autoCompileQueue";
+import { isJavaFile } from "../lib/autoCompile";
+import { autoCompileCached } from "../lib/appConfig";
+import { getModel, replaceContent } from "../lib/editorStore";
+import { operationActive, trackOperation } from "../lib/operations";
 import { saveOne } from "../lib/fileSave";
+import { workspaceEpoch } from "../lib/workspaceEpoch";
 import {
   cleanError,
   isConflictError,
@@ -9,7 +14,7 @@ import {
   type TextEncoding,
 } from "../lib/workspace";
 import { applySaved, tabMetaFromDisk } from "../lib/tabSession";
-import { setSession, type TabMeta, type Updater } from "../lib/workspaceSession";
+import { getSession, setSession, type TabMeta, type Updater } from "../lib/workspaceSession";
 import { toast } from "../components/ui/toast";
 
 /**
@@ -17,7 +22,7 @@ import { toast } from "../components/ui/toast";
  *
  * 从 useFileSession 里拆出来：保存只依赖标签数组与激活项，和打开 / 关闭 / 改名跟随无关。
  */
-export function useFileSave(tabs: TabMeta[], activePath: string | null) {
+export function useFileSave(activePath: string | null) {
   const setTabs = (v: Updater<TabMeta[]>) => setSession({ tabs: v });
   const setConflictPath = (v: Updater<string | null>) => setSession({ conflictPath: v });
   const setEncodingIssue = (v: Updater<{ path: string; message: string } | null>) =>
@@ -35,17 +40,39 @@ export function useFileSave(tabs: TabMeta[], activePath: string | null) {
    * 写盘本身在 `lib/fileSave.ts`（模块级），退出流程复用同一份；这里只负责
    * 并发保护、标签回写与错误分类。
    */
-  const saveFile = async (path: string, force = false, encodingOverride?: TextEncoding) => {
-    const tab = tabs.find((t) => t.path === path);
-    if (!tab || tab.readOnly || savingRef.current) return;
+  const saveFile = async (path: string, force = false, encodingOverride?: TextEncoding, prepare?: () => Promise<void | "failed">) => {
+    const tab = getSession().tabs.find((t) => t.path === path);
+    const root = getSession().root,epoch=workspaceEpoch();
+    if (!tab || tab.readOnly || savingRef.current || operationActive(`file.reload:${path.toLowerCase()}`)) return;
     savingRef.current = true;
     setSaving(true);
     try {
-      const r = await saveOne(tab, { force, encodingOverride });
-      setTabs((ts) => applySaved(ts, path, r));
-      setConflictPath(null);
-      setEncodingIssue(null);
-      toast(encodingOverride ? `已转为 UTF-8 并保存 ${tab.name}` : `已保存 ${tab.name}`, "success");
+      await trackOperation({ key:`file.save:${path.toLowerCase()}`,label:`保存 ${tab.name}`,scope:path,page:"files",path,phase:prepare?"保存前格式化":"正在写入文件" }, async task => {
+        const formatResult = await prepare?.();
+        const latest = getSession().tabs.find(t => t.path === path);
+        if (epoch !== workspaceEpoch() || root !== getSession().root || !latest) { task.finish("cancelled", "文件已关闭或工程已切换，未写入"); return; }
+        task.update({phase:"归档旧版本并写入文件"});
+        const r = await saveOne(latest, { force, encodingOverride });
+        if (epoch !== workspaceEpoch() || root !== getSession().root) { task.finish("success", "已写入原工程文件"); return; }
+        setTabs((ts) => applySaved(ts, path, r));
+        setConflictPath(null);
+        setEncodingIssue(null);
+        // 保存后自动编译（防抖 700 ms，由 useModuleCompile 消费）。放在这里而不是
+        // `saveOne` 里：退出流程的「保存全部」也走 saveOne，那时候不该起 JVM。
+        //
+        // 入队成功时**不弹「已保存」**：700 ms 后就会有编译结果回来（或一条跳过提示），
+        // 紧接着再弹一条绿色 toast 只会把真正要看的那条顶掉。没入队（自动编译关掉 /
+        // 不在文件页 / 不是 .java / 没有工作区）时才提示，那种情况下用户没有别的反馈。
+        const willCompile =
+          isJavaFile(path) &&
+          autoCompileCached() &&
+          !!getSession().root &&
+          queueAutoCompile(path);
+        if (!willCompile) {
+          toast(`${encodingOverride ? "已转为 UTF-8 并保存" : "已保存"} ${tab.name}${formatResult === "failed" ? "（格式化未完成）" : ""}`, "success");
+        }
+        task.finish("success", `文件已保存${formatResult === "failed" ? "；格式化未完成" : ""}${willCompile ? "；自动编译已排队" : ""}${getSession().tabs.find(t=>t.path===path)?.dirty ? "；后续编辑仍未保存" : ""}`);
+      });
     } catch (e) {
       if (isConflictError(e)) setConflictPath(path);
       else if (isUnencodableError(e)) setEncodingIssue({ path, message: cleanError(e) });
@@ -69,7 +96,7 @@ export function useFileSave(tabs: TabMeta[], activePath: string | null) {
   activeRef.current = activePath;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || document.querySelector('[role="dialog"][aria-modal="true"]:not([data-exiting])')) return;
+      if (e.defaultPrevented || e.isComposing || document.querySelector('[role="dialog"][aria-modal="true"]:not([data-exiting])')) return;
       const target = e.target instanceof HTMLElement ? e.target : null;
       if (document.querySelector('.wb-code-surface[hidden]') || target && !target.closest('.monaco-editor') && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
       if (!e.ctrlKey || e.altKey || e.shiftKey || e.key.toLowerCase() !== "s") return;
@@ -90,12 +117,20 @@ export function useFileSave(tabs: TabMeta[], activePath: string | null) {
    * 下一次 Ctrl+S 就会把文件写坏。
    */
   const reloadFile = async (path: string) => {
+    if (savingRef.current || operationActive(`file.reload:${path.toLowerCase()}`)) return;
+    const root = getSession().root,epoch=workspaceEpoch();
+    const model = getModel(path);
+    const version = model?.getAlternativeVersionId();
     try {
-      const c = await readFile(path);
-      const meta = tabMetaFromDisk(path, c);
-      replaceContent(path, c);
-      setTabs((ts) => ts.map((t) => (t.path === path ? { ...t, ...meta, preview: t.preview } : t)));
-      setConflictPath(null);
+      await trackOperation({key:`file.reload:${path.toLowerCase()}`,label:"重新加载文件",scope:path,page:"files",path,phase:"读取磁盘上的版本"},async task=>{
+        const c = await readFile(path);
+        if (epoch !== workspaceEpoch() || root !== getSession().root || !getSession().tabs.some(t=>t.path===path)) {task.finish("cancelled","工程已切换或文件已关闭，未覆盖编辑器");return;}
+        if (getModel(path) !== model || model?.getAlternativeVersionId() !== version) throw new Error("读取期间文件有新编辑，已保留修改；请再次确认后重新加载");
+        const meta = tabMetaFromDisk(path, c);
+        replaceContent(path, c);
+        setTabs((ts) => ts.map((t) => (t.path === path ? { ...t, ...meta, preview: t.preview } : t)));
+        setConflictPath(null);
+      });
     } catch (e) {
       toast(`重新加载失败：${e}`, "error");
     }

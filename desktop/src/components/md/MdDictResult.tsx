@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { Spinner } from "../ui/Spinner";
 import { toast } from "../ui/toast";
+import { beginOperation } from "../../lib/operations";
+import { dbTaskSpec } from "../../lib/dbOperations";
 import { copyText, formatBytes } from "../../lib/utils";
 import {
   dictDocOf,
@@ -33,18 +35,21 @@ const FMT_NAME: Record<DocFormat, string> = { csv: "CSV", md: "Markdown" };
 export function MdDictResult({
   data,
   running,
-  error,
+  error, tabId,connId,
 }: {
   data: MdDictOut | null;
   running: boolean;
   error: string | null;
+  tabId?:string; connId?:string|null;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<DocFormat | null>(null);
   const [saved, setSaved] = useState<ExportOut | null>(null);
 
+  const taskId=useId(),lock=useRef(false);
   const doc = useMemo(() => (data ? dictDocOf(data) : null), [data]);
 
+  const docRef=useRef(doc);docRef.current=doc;
   // 重新生成后上一份的落盘路径就不再对应当前内容了，别让它挂在抬头下面误导人
   useEffect(() => setSaved(null), [data]);
 
@@ -57,33 +62,36 @@ export function MdDictResult({
     });
 
   const copy = async (format: DocFormat) => {
-    if (!doc) return;
-    setBusy(format);
+    if (!doc || lock.current) return;
+    const task=beginOperation(dbTaskSpec(`dict.output:${taskId}`,"复制 NC 字典文档",connId??null,"字典文档",undefined,tabId));
+    if(!task) return;lock.current=true;setBusy(format);
     try {
       const { text, bytes } = await mdDictText(doc, format);
       await copyText(
         text,
-        () => toast(`已复制 ${FMT_NAME[format]} · ${formatBytes(bytes)}`, "success"),
-        (e) => toast(`复制失败：${mdErrorText(e)}`, "error"),
+        () => {task.finish("success","字典文档已复制");toast(`已复制 ${FMT_NAME[format]} · ${formatBytes(bytes)}`, "success");},
+        (e) => {task.finish("failed","复制失败，返回字典页查看原因");toast(`复制失败：${mdErrorText(e)}`, "error");},
       );
     } catch (e) {
-      toast(mdErrorText(e), "error");
+      task.finish("failed","字典文档处理失败，返回字典页查看原因");toast(mdErrorText(e), "error");
     } finally {
-      setBusy(null);
+      lock.current=false;setBusy(null);
     }
   };
 
   const exportFile = async (format: DocFormat) => {
-    if (!doc) return;
-    setBusy(format);
+    if (!doc || lock.current) return;
+    const task=beginOperation(dbTaskSpec(`dict.output:${taskId}`,"导出 NC 字典文档",connId??null,"字典文档",undefined,tabId));
+    if(!task) return;lock.current=true;setBusy(format);
     try {
       const out = await mdDictExport(doc, format);
-      setSaved(out);
+      task.finish("success","字典文档已保存");
+      if(docRef.current===doc) setSaved(out);
       toast(`已导出 ${out.name}`, "success");
     } catch (e) {
-      toast(mdErrorText(e), "error");
+      task.finish("failed","字典导出失败，返回字典页查看原因");toast(mdErrorText(e), "error");
     } finally {
-      setBusy(null);
+      lock.current=false;setBusy(null);
     }
   };
 

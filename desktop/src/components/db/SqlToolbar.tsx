@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ConnPicker } from "./ConnPicker";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { friendlyDbError } from "../../lib/db";
 import { switchConn } from "../../lib/dbActions";
-import { connOf, ensureSlot, patchTab, rtOf, txAction, useDb, type SqlTab } from "../../lib/dbStore";
+import { connOf, rtOf, useDb, type SqlTab } from "../../lib/dbStore";
+import { useDbReadOnly } from "../../lib/dbReadOnly";
+import { useOperations } from "../../lib/operations";
+import { setSqlTransactionMode } from "../../lib/dbTransactionMode";
 
 /** SQL 控制台工具条：连接胶囊 · 执行 / 脚本 / 计划 / 格式化 · 事务模式 · 历史。生产库整条淡红。 */
 export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, onValueSearch, onScriptReplay, historyOpen, onHistory, snipsOpen, onSnips, sessionsOpen, onSessions }: {
@@ -32,13 +35,16 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
   useDb();
   const conn = connOf(tab.connId);
   const rt = rtOf(tab.connId);
+  const readonly=useDbReadOnly(tab.connId);
   const connected = rt.status === "connected";
+  const stopping=useOperations().some(o=>o.key===`db.sql:${tab.id}` && o.state==="cancelling");
   // 有槽看槽、没槽看 primary：SQL 标签执行一次之后所有语句都跑在独立槽里，
   // 只读 primary 会把「另一条会话」的模式显示成这个标签的模式。
   const tx = tab.slot ? tab.tx : rt.tx;
   const auto = tx?.autoCommit ?? conn?.autoCommit ?? false;
-  const pending = (tx?.statements ?? 0) > 0;
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const [changingMode, setChangingMode] = useState(false);
+  const modeBusy = useRef(false);
 
   const popup = (el: HTMLElement, items: ContextMenuItem[]) => {
     const r = el.getBoundingClientRect();
@@ -46,23 +52,22 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
   };
 
   const setMode = async (on: boolean) => {
-    if (!tab.connId || !connected || on === auto) return;
+    if (!tab.connId || !connected || tab.running || on === auto || modeBusy.current) return;
+    modeBusy.current = true;
+    setChangingMode(true);
     try {
-      // 先拿到这条标签自己的会话：槽按连接保存的默认值创建，不会继承刚才对 primary
-      // 的临时切换。不先 ensureSlot 就直接切 primary，等于切了一条这个标签不用的会话。
-      const slot = await ensureSlot(tab.id, tab.connId);
-      const next = await txAction(tab.connId, on ? "autocommit-on" : "autocommit-off", slot);
-      if (slot) patchTab<SqlTab>(tab.id, { tx: next });
-      // 切到自动提交时 JDBC 会把未提交的事务一并提交：给一句提示
-      if (on && pending) toast("已切到自动提交，之前未提交的语句已一并提交", "warning");
+      await setSqlTransactionMode(tab.id, tab.connId, on);
     } catch (e) {
       toast(`切换失败：${friendlyDbError(e)}`, "error");
+    } finally {
+      modeBusy.current = false;
+      setChangingMode(false);
     }
   };
 
   return (
     <div className="dbx-sqlbar" data-prod={conn?.env === "prod" || undefined}>
-      <ConnPicker connId={tab.connId} onPick={(id) => void switchConn(tab.id, id)} />
+      <ConnPicker connId={tab.connId} disabled={changingMode} onPick={(id) => { if (!modeBusy.current) void switchConn(tab.id, id); }} />
       {conn?.env === "prod" && (
         <span className="dbx-prodchip" title="生产环境：写操作会二次确认">
           生产
@@ -75,7 +80,7 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
         <button
           type="button"
           className="dbx-btn bad"
-          disabled={rt.caps ? !rt.caps.cancel : false}
+          disabled={stopping || (rt.caps ? !rt.caps.cancel : false)}
           onClick={onStop}
           title={
             rt.caps && !rt.caps.cancel
@@ -83,19 +88,19 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
               : "取消正在执行的语句（数据库侧会收到 ORA-01013）"
           }
         >
-          <Icon name="stop" size={12} />
-          停止
+          <Icon name={stopping ? "spinner" : "stop"} size={12} />
+          {stopping ? "等待停止返回…" : "停止"}
         </button>
       ) : (
         <div className="dbx-runsplit">
-          <button type="button" className="dbx-btn pri" disabled={!conn} onClick={() => onRun("current")} title="执行光标所在的语句（有选中则执行选中部分）">
+          <button type="button" className="dbx-btn pri" disabled={!conn || changingMode} onClick={() => { if (!modeBusy.current) onRun("current"); }} title="执行光标所在的语句（有选中则执行选中部分）">
             <Icon name="play" size={12} />
             执行 <span className="k">Ctrl+Enter</span>
           </button>
           <button
             type="button"
             className="dbx-btn pri"
-            disabled={!conn}
+            disabled={!conn || changingMode}
             aria-label="更多执行方式"
             title="更多执行方式"
             onClick={(e) =>
@@ -114,7 +119,8 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
         type="button"
         className="dbx-txchip"
         data-auto={auto || undefined}
-        disabled={!connected}
+        disabled={!connected || tab.running || changingMode || readonly === true}
+        aria-busy={changingMode}
         title={connected ? `事务模式：${auto ? "自动提交" : "手动提交"}（临时切换，默认值在连接设置里）` : "连上后可切换"}
         onClick={(e) =>
           popup(e.currentTarget, [
@@ -124,12 +130,12 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
         }
       >
         <span className="dot" />
-        {auto ? "自动提交" : "手动提交"}
+        {readonly ? "只读事务" : changingMode ? "切换中…" : auto ? "自动提交" : "手动提交"}
       </button>
       <span className="dbx-sp" />
       <button
         type="button"
-        className="dbx-ibtn"
+        className="dbx-btn ghost"
         data-on={historyOpen ? "" : undefined}
         onClick={onHistory}
         disabled={!tab.connId}
@@ -138,10 +144,11 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
         aria-pressed={historyOpen}
       >
         <Icon name="history" size={15} />
+        历史
       </button>
       <button
         type="button"
-        className="dbx-ibtn"
+        className="dbx-btn ghost"
         data-on={snipsOpen ? "" : undefined}
         onClick={onSnips}
         disabled={!tab.connId}
@@ -150,10 +157,11 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
         aria-pressed={snipsOpen}
       >
         <Icon name="code" size={15} />
+        片段
       </button>
       <button
         type="button"
-        className="dbx-ibtn"
+        className="dbx-btn ghost"
         disabled={!tab.connId}
         aria-label="更多数据库操作"
         title="更多：格式化 / 导出 INSERT / 按值反查 / 会话与锁"
@@ -182,6 +190,7 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
         }
       >
         <Icon name="more" size={15} />
+        工具
       </button>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>

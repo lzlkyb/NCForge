@@ -73,9 +73,10 @@ export function PatchList({
   return (
     <div className="pk-list">
       <div className="pk-top">
-        <div className="pk-search">
+        <div className="pk-search" data-focus-container>
           <Icon name="search" size={13} />
           <input
+            aria-label="筛选补丁文件或包名"
             value={keyword}
             placeholder="筛选文件或包名"
             spellCheck={false}
@@ -163,9 +164,8 @@ export function PatchList({
             // 足够用——重扫后整棵列表本来就按新数据重建。
             <div key={`${gi}-${g.module}`}>
               <div className="pk-grp">
-                {g.module}
+                <span className="pk-grp-name" title={g.module}>{g.module}</span>
                 <span className="n">{g.items.length}</span>
-                <span className="pk-sp" />
                 {paths.length > 0 && (
                   <button
                     type="button"
@@ -194,10 +194,9 @@ export function PatchList({
         {deleted.length > 0 && filter !== "picked" && (
           <>
             <div className="pk-grp">
-              不进补丁
+              <span className="pk-grp-name">不进补丁</span>
               <span className="n">{deleted.length}</span>
-              <span className="pk-sp" />
-              <span className="pk-grp-hint">已删除，补丁只加不删</span>
+              <span className="pk-grp-hint" title="已删除，补丁只加不删">已删除，补丁只加不删</span>
             </div>
             {deleted.map((d) => (
               <div key={d.rel} className="pk-row" data-off>
@@ -229,7 +228,7 @@ export function PatchList({
         {stats.risky > 0 && (
           <div className="pk-foot-line pk-warn">
             <Icon name="alert" size={11} />
-            {stats.risky} 项勾了也打不进去（未编译 / class 过期）
+            <span className="pk-foot-warning">{stats.risky} 项勾了也打不进去（未编译 / class 过期）</span>
           </div>
         )}
       </div>

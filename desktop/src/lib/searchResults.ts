@@ -1,5 +1,6 @@
 import type { ProjectSearchHit, SearchHit } from "./search";
 import type { SearchForm } from "./searchStore";
+import { fallbackNote, missingNote } from "./searchScope";
 
 /** 结果行：当前范围没有工程归属；全部工程时由后端结果补上。 */
 export type ResultHit = SearchHit & { project?: string; root?: string };
@@ -31,13 +32,23 @@ export interface SearchResultView {
   errors: string[];
   /** 结果所属的工作区根（「当前」标记与打开路径都靠它）。 */
   outcomeRoot: string | null;
+  /**
+   * 范围说明（组件范围才有）：后端回落成整个工作区、或有目录不存在时的提示。
+   *
+   * 必须显示出来——用户点的是「组件」，实际搜的是整个工作区，出现别的模块的结果
+   * 不解释就成了「搜索坏了」。`null` = 没什么要说的。
+   */
+  scopeNote: string | null;
 }
 
 /** 把两种范围的结果整理成同一份展示模型。没有结果（还没搜 / 报错）返回 null。 */
 export function buildResultView(form: SearchForm): SearchResultView | null {
-  if (form.scope === "current") {
+  // 「当前工程」与「组件」都是单工作区结果：只差搜索时传的 `dirs`，展示模型一样
+  if (form.scope !== "all") {
     const o = form.outcome;
     if (!o) return null;
+    // 兼容更早的载荷（没有范围字段）：少一个字段不该把搜索结果页整页打挂
+    const missing = o.missingDirs ?? [];
     const map = new Map<string, ResultFileGroup>();
     for (const hit of o.hits) {
       const g = map.get(hit.path);
@@ -56,6 +67,11 @@ export function buildResultView(form: SearchForm): SearchResultView | null {
       },
       errors: [],
       outcomeRoot: form.outcomeRoot,
+      scopeNote: o.scopeFallback
+        ? fallbackNote(missing)
+        : missing.length > 0
+          ? missingNote(missing)
+          : null,
     };
   }
 
@@ -99,6 +115,8 @@ export function buildResultView(form: SearchForm): SearchResultView | null {
     },
     errors: po.errors,
     outcomeRoot: form.outcomeRoot,
+    // 全部工程不分组件范围，后端也不接受 dirs
+    scopeNote: null,
   };
 }
 

@@ -10,6 +10,7 @@ import { revealInTree } from "../lib/revealInTree";
 import { goToTestPair } from "../lib/goToTest";
 import { setSession } from "../lib/workspaceSession";
 import { compileCancel } from "../lib/compile";
+import { isJavaFile } from "../lib/autoCompile";
 import { toast } from "../components/ui/toast";
 import { langRegenerate } from "../lib/appConfig";
 import { getLangView } from "../lib/lang";
@@ -20,6 +21,8 @@ export interface FilesTabCommands {
   activePath: string | null;
   compiling: boolean;
   compileActive: () => void;
+  /** 只编当前这一个文件（自动编译的手动版，比编整模块快）。 */
+  compileActiveFile: () => void;
   closeTab: (path: string) => void;
   openOutline: () => void;
   openHistory: () => void;
@@ -53,6 +56,10 @@ export function useFilesTabCommands(deps: FilesTabCommands) {
 
   useEffect(() => registerCommands([
     { id: "build.compile", title: "编译当前模块", run: () => void live.current.compileActive(), enabled: () => !!live.current.activePath && !live.current.compiling },
+    // 与「编译当前模块」是两条命令：只编一个文件约 1~3 秒，编整模块几十秒。
+    // 自动编译关掉的人也能按需编一下当前文件。
+    // `isJavaFile` 同时挡掉 `jdt://` 虚拟标签：jar 内的类没有可编的源文件。
+    { id: "build.compileFile", title: "编译当前文件（只编这一个，比编模块快）", run: () => live.current.compileActiveFile(), enabled: () => !!live.current.activePath && isJavaFile(live.current.activePath) && !live.current.compiling },
     { id: "build.cancel", title: "取消编译", run: () => void compileCancel(), enabled: () => live.current.compiling },
     { id: "tab.close", title: "关闭当前标签", run: () => live.current.activePath && live.current.closeTab(live.current.activePath), enabled: () => !!live.current.activePath },
     {
@@ -189,7 +196,7 @@ export function useFilesTabCommands(deps: FilesTabCommands) {
     {
       id: "lang.regenerate",
       title: "重新生成代码智能工程（补全 / 跳转异常时用）",
-      run: () => void langRegenerate().then(() => toast("已重新生成并重启代码智能", "success"), (e) => toast(`重新生成失败：${e}`, "error")),
+      run: () => void langRegenerate().then(() => toast("工程已重新生成，代码智能索引仍在准备", "success"), (e) => toast(`重新生成失败：${e}`, "error")),
     },
     {
       id: "lang.lightMode",

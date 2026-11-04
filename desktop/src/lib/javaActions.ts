@@ -6,6 +6,8 @@
 //
 // 客户端没有声明 `workspace.applyEdit`（见 lsp.rs 的 build_initialize_params），
 // 所以服务端不会自己动手——这正是我们要的。
+import { beginOperation } from "./operations";
+import { pathOfModel } from "./editorStore";
 import { monaco } from "./monacoSetup";
 import { ask, context } from "./langProviders";
 import { toMonacoRange, normUri, type LspRange } from "./langConvert";
@@ -104,6 +106,7 @@ export async function applySourceAction(
   if (action.edit) return applyEdit(model, action.edit);
   const cmd = action.command?.command;
   if (!cmd) return null;
+  const version = model.getVersionId();
   try {
     const res = await langRequest<WorkspaceEditLike | null>(
       "workspace/executeCommand",
@@ -111,7 +114,7 @@ export async function applySourceAction(
       { command: cmd, arguments: action.command?.arguments ?? [] },
       30_000,
     );
-    if (!res || typeof res !== "object") return null;
+    if (!res || typeof res !== "object" || model.isDisposed() || model.getVersionId() !== version) return null;
     return applyEdit(model, res);
   } catch {
     return null;
@@ -120,7 +123,10 @@ export async function applySourceAction(
 
 /** 组织导入：不需要用户选择，返回改了几处。 */
 export async function organizeImports(model: Model): Promise<number | null> {
+  const version = model.getVersionId();
   const actions = await sourceActions(model, KINDS.organizeImports);
+  // 整理过程中继续输入会使返回编辑的位置过期，禁止把旧坐标落入新文本。
+  if (model.isDisposed() || model.getVersionId() !== version) throw new Error("整理导入期间文件已修改，请重新执行");
   // 排序动作在前（`isPreferred` 我们不解析，按标题兜底）：标题里通常带「组织导入」/「Organize Imports」
   const picked = actions[0];
   if (!picked) return null;
@@ -140,10 +146,19 @@ export async function organizeImportsCommand(): Promise<void> {
     toast("先把光标放到编辑器里再执行", "info");
     return;
   }
-  const n = await organizeImports(model);
-  if (n === null) {
-    toast("代码智能没有返回「组织导入」动作（服务未就绪，或本文件不在模块里）", "warning");
-    return;
-  }
-  toast(n === 0 ? "导入已经是干净的" : `已整理 ${n} 处导入（未保存，Ctrl+S 落盘）`, "success");
+  const path = pathOfModel(model) ?? undefined;
+  const operation = beginOperation({ key: `imports:${path ?? model.uri.toString()}`, label: "整理导入", scope: path, path, page: "files", phase: "分析导入并计算编辑" });
+  if (!operation) return;
+  try {
+    const n = await organizeImports(model);
+    if (n === null) {
+      toast("代码智能没有返回「组织导入」动作（服务未就绪，或本文件不在模块里）", "warning");
+      return;
+    }
+    operation.finish("success", n === 0 ? "导入已经是干净的" : `已整理 ${n} 处导入；尚未保存`);
+    toast(n === 0 ? "导入已经是干净的" : `已整理 ${n} 处导入（未保存，Ctrl+S 落盘）`, "success");
+  } catch (e) {
+    operation.finish("failed", String(e));
+    toast(`整理导入失败：${e}`, "error");
+  } finally { operation.finish("cancelled", "代码智能未返回可应用的动作，请根据提示重新执行"); }
 }

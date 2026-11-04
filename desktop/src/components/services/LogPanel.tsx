@@ -123,10 +123,11 @@ export function LogPanel({ active, generation, logPath, logSize, appHidden, onRe
           </button>
         </div>
         <span className="sv-divider" />
-        <label className="sv-search">
+        <label className="sv-search" data-focus-container>
           <Icon name="search" size={12} />
           <input
             ref={inputRef}
+            aria-label="过滤服务日志"
             value={keyword}
             placeholder="过滤日志…"
             onChange={(e) => logPanelStore.set({ keyword: e.target.value })}

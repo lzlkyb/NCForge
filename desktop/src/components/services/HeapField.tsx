@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { formatHeapMb } from "../../lib/server";
@@ -37,12 +37,14 @@ export function HeapField({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const save = async (mb: number | null) => {
     // 拦重复提交：Enter 连按、或 Enter 后马上点 ✓，会发出两个 server_heap_set。
     // 两个都是合法写，但第二次会把第一次的 toast 变成「保存成功」而实际以后一次为准，
     // 用户看到的生效值可能和手里那次输入不一致。禁用态只挡鼠标，挡不住键盘。
-    if (saving) return;
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
       const applied = await onSave(mb);
@@ -53,12 +55,13 @@ export function HeapField({
       // 不吞错：后端会明确说「要在 512~65536 之间」或配置文件写不进去
       toast(failureText("保存堆上限", e), "error");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
 
   const submit = () => {
-    if (saving) return;
+    if (savingRef.current) return;
     const mb = Number(draft.trim());
     if (!draft.trim() || !Number.isInteger(mb)) {
       toast("堆上限要填整数（单位 MB）", "error");
@@ -82,11 +85,14 @@ export function HeapField({
         <input
           autoFocus
           className="sv-cfg-input sv-cfg-num"
+          aria-label="堆上限，单位 MB"
+          disabled={saving}
           value={draft}
           inputMode="numeric"
           spellCheck={false}
           onChange={(e) => setDraft(e.target.value.replace(/[^\d]/g, "").slice(0, 5))}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || savingRef.current) return;
             if (e.key === "Enter") submit();
             if (e.key === "Escape") setEditing(false);
           }}
@@ -94,15 +100,15 @@ export function HeapField({
         <span className="sv-cfg-unit">MB</span>
         <div className="sv-port-quick">
           {PRESETS.map((mb) => (
-            <button key={mb} type="button" data-active={Number(draft) === mb} onClick={() => setDraft(String(mb))}>
+            <button key={mb} type="button" disabled={saving} data-active={Number(draft) === mb} onClick={() => setDraft(String(mb))}>
               {mb / 1024}G
             </button>
           ))}
         </div>
-        <button type="button" className="sv-icon-btn" disabled={saving} title="保存" onClick={submit}>
-          <Icon name="check" size={14} />
+        <button type="button" className="sv-icon-btn" disabled={saving} aria-busy={saving} title="保存" onClick={submit}>
+          <Icon name={saving ? "spinner" : "check"} size={14} className={saving ? "animate-spin" : undefined} />
         </button>
-        <button type="button" className="sv-icon-btn" title="取消" onClick={() => setEditing(false)}>
+        <button type="button" className="sv-icon-btn" disabled={saving} title="取消" onClick={() => setEditing(false)}>
           <Icon name="close" size={14} />
         </button>
       </div>
@@ -127,13 +133,14 @@ export function HeapField({
       </span>
       <span className="sv-sp" />
       {heapMb !== defaultHeapMb && (
-        <button type="button" className="sv-link" onClick={restoreDefault} title={`改回默认的 ${formatHeapMb(defaultHeapMb)}`}>
-          恢复默认
+        <button type="button" className="sv-link" disabled={saving} aria-busy={saving} onClick={restoreDefault} title={`改回默认的 ${formatHeapMb(defaultHeapMb)}`}>
+          {saving ? "保存中…" : "恢复默认"}
         </button>
       )}
       <button
         type="button"
         className="sv-link"
+        disabled={saving}
         onClick={() => {
           setDraft(String(heapMb));
           setEditing(true);

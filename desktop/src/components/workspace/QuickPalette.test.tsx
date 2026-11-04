@@ -57,6 +57,28 @@ function type(value: string) {
 }
 
 describe("快速导航浮层的查询状态", () => {
+  it("五种模式的标签与快捷键分开显示，切换后只标记当前模式", async () => {
+    deps.buildItems.mockResolvedValue({ items: [], note: "" });
+    openPalette("file");
+    act(() => root.render(<QuickPalette activeTab="files" onNavigate={vi.fn()} />));
+    await flush();
+
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>(".qp-mode"));
+    expect(buttons.map((b) => b.querySelector(".qp-mode-label")?.textContent)).toEqual(["文件", "类型", "符号", "工作区符号", "命令"]);
+    expect(buttons.every((b) => b.querySelector("kbd")?.textContent)).toBe(true);
+
+    for (const label of ["工作区符号", "命令", "类型", "符号", "文件"]) {
+      const target = Array.from(container.querySelectorAll<HTMLButtonElement>(".qp-mode"))
+        .find((b) => b.querySelector(".qp-mode-label")?.textContent === label)!;
+      act(() => target.click());
+      await flush();
+      const selected = container.querySelectorAll('.qp-mode[aria-pressed="true"]');
+      expect(selected).toHaveLength(1);
+      expect(selected[0].querySelector(".qp-mode-label")?.textContent).toBe(label);
+      expect(document.activeElement).toBe(container.querySelector(".qp-in input"));
+    }
+  });
+
   it("查询失败给出原因和重试按钮，重试成功后列表恢复", async () => {
     deps.buildItems.mockRejectedValueOnce(new Error("语言服务挂了"));
     openPalette("cmd");

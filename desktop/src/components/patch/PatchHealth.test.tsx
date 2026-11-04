@@ -2,7 +2,7 @@
 /**
  * 出包环境健康条：
  * - 只读缓存与模块级状态，不额外发请求（除用户点刷新 SVN）；
- * - 四个 chip 各自把「能不能出包」说清楚（未编译 / 0 模块 / 扫描失败 / 未连库）；
+ * - 菜单中的四个 chip 各自说明状态（未编译 / 0 模块 / 扫描失败 / 未连库）；
  * - 点编译器 chip 要打开问题面板并跳到文件页。
  */
 import { act } from "react";
@@ -47,6 +47,10 @@ const mount = async () => {
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
+  const trigger = container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]');
+  expect(trigger).not.toBeNull();
+  await act(async () => trigger!.click());
+  return trigger!;
 };
 
 const chip = (text: string) =>
@@ -130,6 +134,28 @@ afterEach(async () => {
 });
 
 describe("PatchHealth", () => {
+  it("摘要保留真实异常，菜单可通过键盘选择并用 Esc 回到触发器", async () => {
+    setSession({ compileResult: compileResult({ ok: false, errorCount: 2, warningCount: 1 }) });
+    const trigger = await mount();
+    expect(trigger.textContent).toContain("环境 · 1 项异常");
+    expect(trigger.dataset.tone).toBe("bad");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    const entries = document.querySelectorAll<HTMLButtonElement>('[role="menu"] [role="menuitem"]');
+    expect(entries).toHaveLength(4);
+
+    await act(async () => {
+      trigger.focus();
+      trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(entries[0]);
+
+    await act(async () => {
+      entries[0].dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("默认读数来自缓存：编译未跑、NC Home 正常、SVN 只算非产物改动、DB 未连接", async () => {
     await mount();
 

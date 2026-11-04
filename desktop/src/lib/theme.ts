@@ -6,7 +6,10 @@
  */
 
 export type Theme = "dark" | "light";
+export type ThemeSaveResult = { theme: Theme; stored: boolean };
 let transitionTimer: ReturnType<typeof setTimeout>;
+let themeRevision = 0;
+let requestedTheme: Theme | undefined;
 
 /**
  * 安全读 localStorage：DOM Storage 可能被策略禁用（企业策略 / 隐私模式 /
@@ -38,10 +41,17 @@ export function getStoredTheme(): Theme {
 
 export function applyTheme(theme: Theme): boolean {
   const root = document.documentElement;
+  requestedTheme = theme;
   // transitionend 会从子元素冒泡，也可能根本不触发；用有界计时器清理，连切可续期。
   clearTimeout(transitionTimer);
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const paint = () => root.classList.toggle("dark", theme === "dark");
+  const revision = ++themeRevision;
+  const paint = () => {
+    if (revision !== themeRevision) return;
+    root.classList.toggle("dark", theme === "dark");
+    // Monaco 会读取新的 CSS token；必须在 class 实际切换后再通知它。
+    window.dispatchEvent(new CustomEvent<Theme>("themechange", { detail: theme }));
+  };
   if (!reduced && !document.hidden && document.startViewTransition) {
     // 整页 cross-fade 交给 View Transition（合成器完成）。旧的「全树颜色 transition」
     // 在切换瞬间会让每个节点各跑一次样式重算，大文件树上能明显感到卡顿。
@@ -61,12 +71,15 @@ export function applyTheme(theme: Theme): boolean {
     paint();
   }
   const stored = safeSetItem("theme", theme);
-  window.dispatchEvent(new CustomEvent<Theme>("themechange", { detail: theme }));
+  // 保存结果独立于延迟的绘制事件：所有入口都能同步反馈，包括同值重试。
+  window.dispatchEvent(new CustomEvent<ThemeSaveResult>("themesave", { detail: { theme, stored } }));
   return stored;
 }
 
 export function toggleTheme(): Theme {
-  const next: Theme = getStoredTheme() === "dark" ? "light" : "dark";
+  // 保存失败或动画尚未绘制时，磁盘值/DOM 都可能落后于本次会话的选择。
+  const current = requestedTheme ?? (document.documentElement.classList.contains("dark") ? "dark" : "light");
+  const next: Theme = current === "dark" ? "light" : "dark";
   applyTheme(next);
   return next;
 }

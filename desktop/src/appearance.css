@@ -1,69 +1,4 @@
-/* Shared window shell; glass materials stay scoped so classic keeps its solid surfaces. */
-html[data-ui-style="glass"] {
-  --glass-panel: linear-gradient(145deg, rgb(255 255 255 / .64), rgb(255 255 255 / .30));
-  --glass-edge: rgb(255 255 255 / .20);
-  --glass-chrome-edge: rgb(65 84 127 / .12);
-  --glass-depth: inset 0 1px 0 rgb(255 255 255 / .18), 0 1px 2px -1px rgb(45 61 101 / .10), 0 6px 16px -9px rgb(55 70 114 / .22);
-  --glass-reading: linear-gradient(145deg, rgb(249 252 255 / .84), rgb(244 247 253 / .72));
-  --glass-inset: rgb(241 246 253 / .86);
-  --glass-status-panel: linear-gradient(145deg, rgb(182 211 240 / .94), rgb(193 188 232 / .91));
-  --glass-status-depth: inset 0 1px 0 rgb(255 255 255 / .28), 0 1px 2px -1px rgb(45 61 101 / .12), 0 8px 20px -10px rgb(55 70 114 / .28);
-  --glass-status-ink: #1b2948;
-  --glass-status-muted: #354768;
-  --glass-data-header: #eef3fa;
-  --glass-switch-off: #758ba9;
-  --glass-switch-edge: rgb(55 75 111 / .26);
-  --glass-floating: rgb(248 251 255 / .95);
-  /* 对话页长时停留的阅读画布：reading 那档是纯白叠纯白，一大张卡铺满主区时
-     会把背景光晕全盖成一片死白（实测 64% 白叠在 #e7edf6 上仍是 246,249,252）。
-     这里换成带色相的淡青→淡紫，与 --glass-terminal-chrome 同一路做法，
-     既保住可读性又让壳自己带上「柔光」的颜色。 */
-  --glass-canvas: linear-gradient(145deg, rgb(228 243 251 / .90), rgb(230 232 250 / .84));
-  --glass-terminal-chrome: linear-gradient(115deg, #edf8fc, #efedfa);
-  --glass-terminal-focus: linear-gradient(115deg, #e4efff, #e9e5fc);
-  --muted-foreground: 217 24% 31%;
-}
-
-html.dark[data-ui-style="glass"] {
-  --glass-panel: linear-gradient(145deg, rgb(57 76 109 / .61), rgb(32 43 66 / .48));
-  --glass-edge: rgb(191 215 255 / .12);
-  --glass-chrome-edge: rgb(164 188 224 / .12);
-  --glass-depth: inset 0 1px 0 rgb(215 232 255 / .10), 0 1px 2px rgb(0 4 20 / .14), 0 6px 16px -9px rgb(0 4 20 / .36);
-  --glass-reading: linear-gradient(145deg, rgb(42 57 82 / .90), rgb(30 43 65 / .86));
-  --glass-inset: rgb(51 68 94 / .88);
-  --glass-status-panel: linear-gradient(145deg, rgb(54 80 121 / .96), rgb(66 58 107 / .94));
-  --glass-status-depth: inset 0 1px 0 rgb(215 232 255 / .16), 0 1px 2px rgb(0 4 20 / .18), 0 8px 20px -10px rgb(0 4 20 / .44);
-  --glass-status-ink: #edf2fc;
-  --glass-status-muted: #bdcbe2;
-  --glass-data-header: #2c3d56;
-  --glass-switch-off: #566c89;
-  --glass-switch-edge: rgb(202 220 248 / .26);
-  --glass-floating: rgb(29 39 56 / .96);
-  --glass-canvas: linear-gradient(145deg, rgb(32 50 68 / .80), rgb(42 39 66 / .76));
-  --glass-terminal-chrome: linear-gradient(115deg, #233348, #2c2945);
-  --glass-terminal-focus: linear-gradient(115deg, #2b3c58, #393354);
-  --muted-foreground: 218 25% 79%;
-}
-
-/* Soft gradients already contain blurred color: cards need no live blur layer.
-   ⚠️ 这张柔光底必须挂在真实存在的窗口壳上。原先写的是 `.app-boot-fade`，但全仓
-   没有任何元素挂这个类（首帧骨架用的是 index.html 里的 `.boot`），玻璃卡其实一直
-   叠在平铺的 --background 上——「背景光晕」只存在于这段注释和死规则里。 */
-html[data-ui-style="glass"] .app-shell {
-  background:
-    radial-gradient(ellipse at 12% 4%, rgb(111 203 213 / .46), transparent 61%),
-    radial-gradient(ellipse at 92% 8%, rgb(166 151 219 / .40), transparent 64%),
-    radial-gradient(ellipse at 95% 100%, rgb(232 189 171 / .30), transparent 60%),
-    #e7edf6;
-}
-
-html.dark[data-ui-style="glass"] .app-shell {
-  background:
-    radial-gradient(ellipse at 12% 4%, rgb(25 133 156 / .40), transparent 61%),
-    radial-gradient(ellipse at 92% 8%, rgb(105 78 177 / .34), transparent 64%),
-    radial-gradient(ellipse at 95% 100%, rgb(156 93 69 / .22), transparent 60%),
-    #18243a;
-}
+/* Shared component materials; tokens and the continuous backdrop live in glass-material.css. */
 
 /* One shared backdrop avoids separate tinted sheets and visible window seams. */
 .app-shell :is(.app-side, .app-topbar, .app-side-foot) {
@@ -102,6 +37,7 @@ html[data-ui-style="glass"] .app-shell .wb-search-tool :is(input, textarea, sele
   background-color: var(--glass-inset);
   border-color: var(--glass-chrome-edge);
 }
+html[data-ui-style="glass"] .app-shell .wb-search-tool [data-focus-container] { background-color:var(--glass-inset); }
 
 /* 弹窗/设置页里的原生输入框：实底在玻璃面上会变成一块块白斑，统一走 L2 inset。 */
 html[data-ui-style="glass"] .modal-surface :is(input, textarea, select):not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
@@ -138,10 +74,7 @@ html[data-ui-style="glass"] .modal-surface .bg-card { background-color: var(--gl
   pointer-events: none; opacity: 0; transition: opacity var(--dur-enter) var(--ease);
 }
 html[data-ui-style="glass"] .app-topbar::after {
-  background: linear-gradient(to bottom, rgb(231 237 246 / .72), transparent);
-}
-html.dark[data-ui-style="glass"] .app-topbar::after {
-  background: linear-gradient(to bottom, rgb(24 36 58 / .80), transparent);
+  background: linear-gradient(to bottom, hsl(var(--chrome) / .72), transparent);
 }
 .app-shell .app-main:has(
   .app-main-content > [data-page-panel]:not([hidden])[data-scroll-started]
@@ -156,10 +89,6 @@ html.dark[data-ui-style="glass"] .app-topbar::after {
 html[data-ui-style="glass"] .app-side-item[data-active] {
   background: linear-gradient(120deg, hsl(var(--primary) / .17), hsl(var(--primary) / .08));
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .18), inset 0 0 0 1px hsl(var(--primary) / .12);
-}
-/* The cyan backing needs darker selected ink than the opaque classic sidebar. */
-html:not(.dark)[data-ui-style="glass"] .app-side-item[data-active] {
-  color: hsl(243 64% 43%);
 }
 
 html[data-ui-style="glass"] :is(.ui-card, .bento-card, .metric-card) {

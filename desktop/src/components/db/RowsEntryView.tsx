@@ -1,15 +1,15 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../ui/icon";
 import { ResultTable } from "./ResultTable";
 import { QuerySettings } from "./QuerySettings";
 import { thousands } from "../../lib/db";
 import { guessTable } from "../../lib/resultExport";
 import { statsText, statsTitle } from "../../lib/dbStats";
-import { dbApi, type ExportFileOut, type ExportProgress } from "../../lib/dbApi";
+import { dbApi, dbSourceOf, type ExportFileOut, type ExportProgress } from "../../lib/dbApi";
 import { listen } from "../../lib/tauri";
 import { activeExportId, cancelResultExport, exportResultFile, reSortOnServer } from "../../lib/dbResultActions";
 import { useColumnZh } from "../../lib/dbColumnZh";
-import { loadMore, type ResultEntry, type SqlTab } from "../../lib/dbStore";
+import { connOf, loadMore, type ResultEntry, type SqlTab } from "../../lib/dbStore";
 
 /**
  * 有行数据的结果。`dbms_sql.return_result` 可能一次带回多个结果集，
@@ -24,6 +24,7 @@ export function RowsEntryView({ tab, entry, isLast, tabs }: { tab: SqlTab; entry
   /** 导出完成后的落盘信息（路径 + 行数 + 是否截断）。 */
   const [saved, setSaved] = useState<ExportFileOut | null>(null);
   const busy = job !== null;
+  const exportLock=useRef(false);
   const sets = entry.sets ?? [];
   const at = Math.min(pick, Math.max(0, sets.length - 1));
   const set = sets.length > 0 ? sets[at] : null;
@@ -55,12 +56,13 @@ export function RowsEntryView({ tab, entry, isLast, tabs }: { tab: SqlTab; entry
   }, [busy, tab.connId, tab.id]);
 
   const onExportFile = async (format: "csv" | "tsv" | "insert") => {
-    setSaved(null);
+    if(exportLock.current) return;
+    exportLock.current=true;setSaved(null);
     setJob({ rows: 0 });
     try {
       setSaved(await exportResultFile(tab.id, entry.sql, format, guessTable(entry.sql)));
     } finally {
-      setJob(null);
+      exportLock.current=false;setJob(null);
     }
   };
 
@@ -128,6 +130,8 @@ export function RowsEntryView({ tab, entry, isLast, tabs }: { tab: SqlTab; entry
         columns={columns}
         rows={rows}
         table={guessTable(entry.sql)}
+        layoutKey={`${tab.connId}:${guessTable(entry.sql) || columns.map(c=>c.name).join("|")}`}
+        snapshot={{source:dbSourceOf(connOf(tab.connId)),sql:entry.sql,at:entry.completedAt ?? Date.now(),complete:sets.length ? !truncated : !entry.hasMore,columns,rows}}
         meta={
           <>
             {sets.length > 1 && <>第 {at + 1}/{sets.length} 个结果集 · </>}

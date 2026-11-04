@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { Modal } from "../ui/Modal";
+import { trackOperation } from "../../lib/operations";
 import { nccDecodeConfig } from "../../lib/ncc";
 import { DEFAULT_COWBOY_KEY, decodePayload, type DecodeOptions } from "../../lib/nccDecode";
 
@@ -43,15 +44,19 @@ export function NccDecodeDialog({ open, onClose }: { open: boolean; onClose: () 
   };
   const set = (patch: Partial<DecodeOptions>) => setOpts({ ...cur, ...patch });
 
+  const lock = useRef(false);
   const run = async () => {
+    if (lock.current) return;
+    lock.current = true;
     setBusy(true);
     setError("");
     try {
-      setResult(await decodePayload(input, cur));
+      setResult(await trackOperation({ key: "tools.ncc.decode", label: "解密 NCC 报文", page: "files" }, () => decodePayload(input, cur)));
     } catch (e) {
       setResult(null);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      lock.current = false;
       setBusy(false);
     }
   };
@@ -145,6 +150,7 @@ export function NccDecodeDialog({ open, onClose }: { open: boolean; onClose: () 
           disabled={busy || input.trim() === ""}
           onClick={() => void run()}
         >
+          {busy && <Icon name="spinner" size={13} className="animate-spin" />}
           {busy ? "解密中…" : "解密"}
         </button>
       </div>

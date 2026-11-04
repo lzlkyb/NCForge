@@ -23,7 +23,13 @@ pub struct RawEntry {
 }
 
 /// 给前端的一条改动。
+///
+/// `rename_all` 必须与 `commands/svn_cmds.rs` 的 DTO 一致：这些 struct 直接嵌在
+/// `StatusResult.changes` 里序列化，不带 camelCase 就会把 `is_dir` 原样吐给前端，
+/// 而前端 TS 类型写的是 `isDir`（2026-11-04 实测：目录过滤、目录提示、审查进度
+/// 分母全都静默失效）。
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChangeItem {
     /// 绝对路径，前端点开文件、算 diff 都用它。
     pub path: String,
@@ -41,16 +47,23 @@ pub struct ChangeItem {
     /// 标记放在条目上而不是整份结果过滤掉：「显示全部」只是界面开关，
     /// 让后端按开关重扫一遍等于点一下按钮等 7.6 秒，而扫出来的东西完全一样。
     pub ignored: bool,
+    /// 本地文件修改时间（毫秒 epoch），读不到为 `None`。
+    ///
+    /// 排序用：前端「按改动时间」不再重扫后端。取不到是常态（删除 `D`、
+    /// 缺失 `!`、权限），所以是 `Option` 而不是 0——0 会被当成 1970 年排到最后。
+    pub mtime_ms: Option<i64>,
 }
 
 /// 一个模块分组。
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChangeGroup {
     pub module: String,
     pub items: Vec<ChangeItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChangesView {
     pub groups: Vec<ChangeGroup>,
     /// 过滤后剩下的条目数。
@@ -151,6 +164,20 @@ pub fn relative(root: &Path, path: &Path) -> String {
     }
 }
 
+/// 本地修改时间（毫秒 epoch）。读不到一律 `None`，不让一次 stat 失败毁掉整份列表。
+///
+/// 只对**改动条目**取：桥是 `reportAll=false`，12757 个条目只回约 28 条，
+/// 所以这点 IO 相对 7.6 秒的扫描可以忽略。
+///
+/// 语义要说清楚：这是「文件最后一次被写」的时间，对 M / A / ? 就是本次改动
+/// （`svn update` 刷下来的文件状态是 normal，进不了这份列表）；被删除/缺失的
+/// 文件拿不到，界面排到最后。
+fn fs_modified_ms(path: &str) -> Option<i64> {
+    let md = std::fs::metadata(path).ok()?;
+    let m = md.modified().ok()?;
+    m.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as i64)
+}
+
 /// 原始状态 → 界面视图：拼字段、打忽略标记、按模块分组（模块按条目数降序，条目按路径升序）。
 ///
 /// **不在这里按忽略规则删条目**：条目带上 `ignored` 标记，由界面决定显不显示。
@@ -169,6 +196,7 @@ pub fn build_changes(root: &Path, raw: &[RawEntry]) -> ChangesView {
             status: e.status.clone(),
             revision: e.revision,
             is_dir: e.dir,
+            mtime_ms: fs_modified_ms(&e.path),
         });
     }
     items.sort_by_key(|a| a.rel.to_lowercase());
@@ -317,5 +345,56 @@ mod tests {
         let root = PathBuf::from("C:").join("ws");
         let p = root.join("pu").join("src").join("A.java");
         assert_eq!(relative(&root, &p), "pu/src/A.java");
+    }
+
+    #[test]
+    fn 文件不存在时_mtime_是_none_而不是_0() {
+        // 0 会被前端当成 1970 年排在最后，但「读不到」和「很旧」是两件事：
+        // 删除/缺失的条目就该排最后，用一个不存在的值排序会把它排到最前面。
+        let root = PathBuf::from("C:").join("ws");
+        let raw = vec![raw(&root.join("pu").join("A.java").to_string_lossy(), "modified", false)];
+        let v = build_changes(&root, &raw);
+        assert_eq!(v.groups[0].items[0].mtime_ms, None);
+    }
+
+    #[test]
+    fn 序列化字段是_camel_case() {
+        // 这三个 struct 没跟 `commands/svn_cmds.rs` 的 DTO 一样带 rename_all，
+        // 实测会把 `is_dir` 原样吐给前端——而前端 TS 类型写的是 `isDir`，
+        // 于是目录判断（CommitPanel 过滤、RightPane 提示、审查进度分母）全是 undefined。
+        let item = ChangeItem {
+            path: "a".into(),
+            rel: "a".into(),
+            module: "pu".into(),
+            letter: "M".into(),
+            status: "modified".into(),
+            revision: 1,
+            is_dir: false,
+            ignored: false,
+            mtime_ms: Some(1),
+        };
+        let json = serde_json::to_string(&item).expect("序列化");
+        assert!(json.contains("\"isDir\""), "字段名应是 camelCase：{json}");
+        assert!(json.contains("\"mtimeMs\""), "字段名应是 camelCase：{json}");
+        assert!(!json.contains("\"is_dir\""), "不能出现 snake_case：{json}");
+    }
+
+    #[test]
+    fn 真实文件能取到_mtime() {
+        let dir = std::env::temp_dir().join(format!("ncf-svn-view-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        let f = dir.join("A.java");
+        std::fs::write(&f, b"x").expect("写临时文件");
+        let root = PathBuf::from("C:").join("ws");
+        let raw = vec![raw(&f.to_string_lossy(), "modified", false)];
+        let v = build_changes(&root, &raw);
+        let ms = v.groups[0].items[0].mtime_ms.expect("刚写的文件必须有时间");
+        // 10 分钟内：防止多年以后时钟异常时这条测试变成莫名其妙的时间断言
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        assert!(ms > now - 600_000 && ms <= now, "mtime 应在刚刚：{ms} vs {now}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

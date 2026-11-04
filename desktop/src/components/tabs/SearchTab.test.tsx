@@ -50,6 +50,9 @@ const ONE_HIT = {
   filesScanned: 7000,
   elapsedMs: 620,
   truncated: false,
+  scopeDirs: [],
+  missingDirs: [],
+  scopeFallback: false,
 };
 
 const clickHit = async (text: string) => {
@@ -90,6 +93,50 @@ afterEach(async () => {
 });
 
 describe("搜索页", () => {
+  it("搜索与文件过滤输入有稳定名称，清空搜索词按钮按名称可找到", async () => {
+    await render();
+    expect(input().getAttribute("aria-label")).toBe("搜索工程文件内容");
+    expect(container.querySelector('input[aria-label="文件过滤"]')).not.toBeNull();
+    await typeInto(input(), "凭证");
+    const clear = container.querySelector<HTMLButtonElement>('button[aria-label="清空搜索词"]')!;
+    await act(async () => clear.click());
+    expect(input().value).toBe("");
+  });
+
+  it.each([
+    { field: "query", composing: true, keyCode: 13 },
+    { field: "query", composing: false, keyCode: 229 },
+    { field: "filter", composing: true, keyCode: 13 },
+    { field: "filter", composing: false, keyCode: 229 },
+  ])("$field 输入法组词 Enter 不启动扫描（composing=$composing / $keyCode）", async ({ field, composing, keyCode }) => {
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_workspace") return ROOT;
+      if (cmd === "search_projects") return { projects: [], errors: [], truncated: false, elapsedMs: 0 };
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    await render(); await typeInto(input(), "凭证");
+    const target = field === "query" ? input() : container.querySelector<HTMLInputElement>('input[aria-label="文件过滤"]')!;
+    const event = new KeyboardEvent("keydown", { key: "Enter", keyCode, isComposing: composing, bubbles: true, cancelable: true });
+    await act(async () => { target.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(false);
+    expect(mocks.invoke.mock.calls.filter(([cmd]) => cmd === "search_projects")).toHaveLength(0);
+    await press(target, "Enter");
+    expect(mocks.invoke.mock.calls.filter(([cmd]) => cmd === "search_projects")).toHaveLength(1);
+  });
+
+  it("后端截断丢失匹配位置时打开原行，不用显示副本猜列号", async () => {
+    const missingRange = { path: "A.java", line: 42, text: `${"x".repeat(300)}…`, ranges: [] };
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_workspace") return ROOT;
+      if (cmd === "search_workspace") return { ...ONE_HIT, hits: [missingRange] };
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    await render(); await act(async () => buttonByText("当前工程")!.click());
+    await typeInto(input(), "凭证"); await press(input(), "Enter");
+    await clickHit("预览未包含匹配位置，打开完整行查看");
+    expect(onOpenFile).toHaveBeenCalledWith(`${ROOT}\\A.java`, 42, 1);
+  });
+
   it("没搜过时给的是操作指引，不是空表格", async () => {
     await render();
     // 默认范围是全部关联工程
@@ -130,6 +177,8 @@ describe("搜索页", () => {
         wholeWord: false,
         regex: false,
         include: "",
+        // 全部工程不接受范围（后端会拒绝 dirs），所以这里必须是空的
+        dirs: [],
       },
     });
     // 默认范围不该退化成只搜当前工作区
@@ -219,5 +268,105 @@ describe("搜索页", () => {
     await press(input(), "Enter");
     await clickHit("billSave(v);");
     expect(onOpenFile).toHaveBeenCalledWith(`${NEW}\\modules\\ic\\src\\A.java`, 12, 3);
+  });
+
+  // ── 按业务组件搜索（manifest 当数据用）──
+
+  const MANIFEST = {
+    components: [
+      { name: "bill", dispname: "票据", roots: ["src/public", "src/client"] },
+      { name: "gl", dispname: "总账", roots: ["src/public"] },
+    ],
+    notes: [],
+  };
+
+  /** 打开「组件」菜单并点一个组件（菜单体是 portal 到 body 的）。 */
+  const pickComponent = async (name: string) => {
+    await act(async () => buttonByText("组件")!.click());
+    await act(async () => {});
+    const item = [...document.querySelectorAll('[role^="menuitem"]')].find((el) =>
+      el.textContent?.includes(name),
+    ) as HTMLButtonElement;
+    expect(item).toBeTruthy();
+    await act(async () => item.click());
+  };
+
+  it("按组件搜索：范围取组件目录，命令仍是单工作区那条", async () => {
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_workspace") return ROOT;
+      if (cmd === "nc_manifest") return MANIFEST;
+      if (cmd === "search_workspace") return { ...ONE_HIT, scopeDirs: ["bill"] };
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    await render();
+    await pickComponent("bill");
+
+    // 芯片上写清选的是哪个组件（切范围后也能一眼看出当前口径）
+    expect(container.textContent).toContain("组件 bill");
+    await typeInto(input(), "billSave");
+    await press(input(), "Enter");
+
+    // 范围是模块目录本身：resources / META-INF 也算组件的一部分（不只是 src/public）
+    expect(mocks.invoke).toHaveBeenCalledWith("search_workspace", {
+      options: {
+        text: "billSave",
+        caseSensitive: false,
+        wholeWord: false,
+        regex: false,
+        include: "",
+        dirs: ["bill"],
+      },
+    });
+    expect(container.textContent).toContain("A.java");
+  });
+
+  it("组件菜单底部说明「另有 N 个模块未登记」", async () => {
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_workspace") return ROOT;
+      if (cmd === "nc_manifest") return MANIFEST;
+      if (cmd === "nc_manifest_audit")
+        return { registered: 2, onDisk: 4, unregistered: ["aim", "cmp"] };
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    await render();
+    await act(async () => buttonByText("组件")!.click());
+    await act(async () => {});
+
+    // 只陈述事实，不报警：登记表由 NC 设计器维护，平台/工具模块本来就不在里面
+    expect(document.body.textContent).toContain("另有 2 个模块未在 manifest 登记");
+    expect(document.body.textContent).toContain("照样能搜索、能编译");
+    expect(document.body.textContent).toContain("aim");
+  });
+
+  it("组件目录不存在时说明「已按整个工作区搜索」，不静默换口径", async () => {
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_workspace") return ROOT;
+      if (cmd === "nc_manifest")
+        return { components: [{ name: "gone", dispname: "", roots: [] }], notes: [] };
+      if (cmd === "search_workspace")
+        return { ...ONE_HIT, scopeFallback: true, missingDirs: ["gone"], scopeDirs: [] };
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    await render();
+    await pickComponent("gone");
+    await typeInto(input(), "billSave");
+    await press(input(), "Enter");
+
+    expect(container.textContent).toContain("按整个工作区搜索");
+    // 结果没丢：回落不是报错
+    expect(container.textContent).toContain("A.java");
+  });
+
+  it("拿不到 manifest 时「按组件」置灰，并在 title 里说明原因", async () => {
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_workspace") return ROOT;
+      if (cmd === "nc_manifest") throw new Error("读取 manifest.xml 失败: 文件不存在");
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    await render();
+
+    const chip = buttonByText("组件") as HTMLButtonElement;
+    expect(chip.disabled).toBe(true);
+    expect(chip.getAttribute("title")).toContain("没有登记业务组件");
   });
 });

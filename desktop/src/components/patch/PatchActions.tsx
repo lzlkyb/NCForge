@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
@@ -55,17 +55,21 @@ export function PatchActions({
   // 磁盘还多出一个目录，无确认无撤销。
   const [draft, setDraft] = useState(dir);
   const [askBuild, setAskBuild] = useState(false);
+  const [savingDir, setSavingDir] = useState(false);
+  const savingDirRef = useRef(false);
   useEffect(() => setDraft(dir), [dir]);
   const dirty = draft.trim() !== dir;
 
   const commitDir = () => {
+    if (savingDirRef.current || building) return;
     const v = draft.trim();
     if (!v || v === dir) return;
     if (!looksAbsolute(v)) {
       toast("这不像绝对路径（如 D:\\NC技术\\待上线补丁），不会保存", "error");
       return;
     }
-    void onSaveDir(v).catch((x) => toast(failureText("保存输出目录", x), "error"));
+    savingDirRef.current = true; setSavingDir(true);
+    void onSaveDir(v).catch((x) => toast(failureText("保存输出目录", x), "error")).finally(() => { savingDirRef.current = false; setSavingDir(false); });
   };
 
   return (
@@ -73,7 +77,9 @@ export function PatchActions({
       <div className="pk-action-meta"><div className="pk-out">
         <span>输出目录</span>
         <input
+          aria-label="补丁输出目录"
           value={draft}
+          disabled={savingDir || building}
           placeholder="D:\\NC技术\\待上线补丁"
           spellCheck={false}
           onChange={(e) => setDraft(e.target.value)}
@@ -84,16 +90,16 @@ export function PatchActions({
             }
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") commitDir();
-            if (e.key === "Escape") setDraft(dir);
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) commitDir();
+            if (e.key === "Escape" && !savingDir) setDraft(dir);
           }}
         />
         {dirty && (
           <>
-            <button type="button" className="pk-link" onClick={commitDir}>
-              保存
+            <button type="button" className="pk-link" disabled={savingDir || building} aria-busy={savingDir} onClick={commitDir}>
+              {savingDir ? <><Icon name="spinner" size={11} className="animate-spin" />保存中</> : "保存"}
             </button>
-            <button type="button" className="pk-link" onClick={() => setDraft(dir)}>
+            <button type="button" className="pk-link" disabled={savingDir || building} onClick={() => setDraft(dir)}>
               撤销
             </button>
           </>
@@ -108,7 +114,7 @@ export function PatchActions({
         ) : (
           sqls.map((s) => (
             <span key={s} className="pk-sql-item" title={s}>
-              {s.split(/[\\/]/).pop()}
+              <span className="pk-sql-name">{s.split(/[\\/]/).pop()}</span>
               <button
                 type="button"
                 title="移除"
@@ -243,12 +249,13 @@ function SqlAdder({ onAdd }: { onAdd: (path: string) => void }) {
     <span className="pk-sql-add">
       <input
         autoFocus
+        aria-label="附带的 SQL 文件路径"
         value={value}
         placeholder="D:\\nc\\aier_crossborrow_ddl.sql"
         spellCheck={false}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) commit();
           if (e.key === "Escape") setOpen(false);
         }}
       />

@@ -2,6 +2,7 @@ import { useState, type MouseEvent } from "react";
 import { toast } from "../components/ui/toast";
 import type { ContextMenuItem } from "../components/workspace/ContextMenu";
 import { buildTreeMenu } from "../components/workspace/treeMenu";
+import { moduleOf } from "../lib/ncModule";
 import { dirName, type NewEntryKind } from "../lib/workspace";
 
 export interface TreeMenuTarget {
@@ -19,6 +20,7 @@ export function useTreeMenu({
   root,
   isEditable,
   onOpen,
+  onCompileModule,
   beginCreate,
   beginRename,
   askDelete,
@@ -28,6 +30,8 @@ export function useTreeMenu({
   root: string;
   isEditable: (path: string) => boolean;
   onOpen: (path: string) => void;
+  /** 编译右键目标所属的模块（不依赖活动标签）；不传则不显示编译项。 */
+  onCompileModule?: (path: string) => void;
   beginCreate: (target: TreeMenuTarget, kind: NewEntryKind) => void;
   beginRename: (target: TreeMenuTarget) => void;
   askDelete: (target: TreeMenuTarget) => Promise<void>;
@@ -52,6 +56,9 @@ export function useTreeMenu({
       target: m,
       root,
       canEdit: isEditable(m.path),
+      // 文件先取所在目录再判模块：直接拿文件路径算会得到「模块名 = 文件名」
+      module: moduleOf(root, m.isDir ? m.path : dirName(m.path)),
+      onCompileModule,
       onOpen,
       onBeginCreate: beginCreate,
       onBeginRename: beginRename,

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "../ui/icon";
 
@@ -36,6 +36,11 @@ export function ContextMenu({
   onClose: () => void;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const closeAndRestoreFocus = useCallback(() => {
+    if (returnFocus.current?.isConnected) returnFocus.current.focus({ preventScroll: true });
+    onClose();
+  }, [onClose]);
   // 先按鼠标点渲染（不可见），量到真实尺寸后再纠正到不出界的位置，避免第一帧闪一下。
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
@@ -49,6 +54,9 @@ export function ContextMenu({
   }, [x, y, items.length]);
 
   useEffect(() => {
+    if (!returnFocus.current && document.activeElement instanceof HTMLElement) {
+      returnFocus.current = document.activeElement;
+    }
     // 打开就聚焦第一项：纯键盘用户（右键键 / Menu 键）不用再 Tab 一次，
     // 而且方向键的处理靠 activeElement 定位当前项。
     const first = boxRef.current?.querySelector<HTMLButtonElement>(
@@ -59,13 +67,14 @@ export function ContextMenu({
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
+      // 外部按下会由浏览器把焦点交给目标；关闭菜单不能再抢回触发器。
       if (!boxRef.current?.contains(e.target as Node)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        closeAndRestoreFocus();
         return;
       }
       if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
@@ -89,7 +98,7 @@ export function ContextMenu({
                 : (i <= 0 ? btns.length : i) - 1;
       btns[next].focus({ preventScroll: true });
     };
-    const onLeave = () => onClose();
+    const onLeave = () => closeAndRestoreFocus();
     window.addEventListener("mousedown", onDown, true);
     window.addEventListener("keydown", onKey, true);
     // 捕获阶段：文件树自己的滚动会让菜单飘在错误的位置，直接关掉
@@ -101,7 +110,7 @@ export function ContextMenu({
       window.removeEventListener("scroll", onLeave, true);
       window.removeEventListener("resize", onLeave);
     };
-  }, [onClose]);
+  }, [onClose, closeAndRestoreFocus]);
 
   return createPortal(
     <div
@@ -125,7 +134,7 @@ export function ContextMenu({
             data-danger={item.danger || undefined}
             disabled={item.disabled}
             onClick={() => {
-              onClose();
+              closeAndRestoreFocus();
               item.onSelect();
             }}
           >

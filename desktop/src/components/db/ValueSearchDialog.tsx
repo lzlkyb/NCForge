@@ -20,9 +20,9 @@ const MODES: { v: MatchValue; label: string }[] = [
  * 纯只读（后端只发 SELECT）。搜索走独立会话，不占用控制台的游标；扫全库可能要几分钟，
  * 所以进度、取消、命中上限三件事都必须有：一个没有任何反馈的全库扫描等于界面卡死。
  */
-export function ValueSearchDialog({ connId, onClose }: { connId: string; onClose: () => void }) {
+export function ValueSearchDialog({ connId, onClose,tabId }: { connId: string; tabId?:string; onClose: () => void }) {
   const conn = connOf(connId);
-  const { form, patchForm, run, start, stop, cancelIfRunning } = useValueSearchRun(connId);
+  const { form, patchForm, run, start, stop, cancelIfRunning } = useValueSearchRun(connId,tabId);
 
   /** 关窗 = 真的停下：否则关掉的只是界面，数据库还在全表扫。 */
   const close = () => {
@@ -112,9 +112,9 @@ export function ValueSearchDialog({ connId, onClose }: { connId: string; onClose
               <span className="dbx-muted">
                 命中 {prog.hits} 处{prog.errors > 0 ? ` · ${prog.errors} 张表出错` : ""}
               </span>
-              <button type="button" className="dbx-btn bad" onClick={stop}>
+              <button type="button" className="dbx-btn bad" disabled={prog.cancelling} onClick={stop}>
                 <Icon name="stop" size={12} />
-                取消
+                {prog.cancelling ? "正在请求停止…" : "取消"}
               </button>
             </div>
             <div className="dbx-vs-bar" aria-hidden>

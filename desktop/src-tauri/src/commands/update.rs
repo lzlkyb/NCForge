@@ -1,4 +1,4 @@
-//! 自动更新相关的 IPC 命令（`start_update` / `check_update`）与其私有辅助。
+//! 自动更新相关的 IPC 命令（检查、下载与确认安装）及其私有辅助。
 //!
 //! 从 `commands.rs` 拆出来的第一块（D19 方案 C 第 1 批）。选它打头阵的理由：
 //! 4 个私有辅助（`retry_with_backoff` / `resolve_update_endpoints` /
@@ -6,14 +6,72 @@
 //! 因此这一批能干净地验证「`pub use` 重导出 + `main.rs` 的 `invoke_handler!` 零改动」
 //! 这套机制到底成不成立——机制若不成立，在这里暴露远比在大搬动里暴露好查。
 //!
-//! 本文件是**纯搬动**：函数体逐字节未改，可用 `tools/fingerprint.py` 比对哈希验证。
-//! 唯一新增的是下面这行 import —— 区块内 13 处 `.emit()` 需要 `Emitter` trait 在作用域，
-//! 其余外部符号（`url::Url` / `tauri_plugin_updater::` / `serde_json::` 等）原本就是全限定路径。
+//! 下载与安装分离：后台仅下载并验签，用户确认并完成工作预检后才启动安装器。
 
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 // 指数退避重试与资源包下载共用（见 retry.rs）；本文件只传 should_retry 策略。
 use crate::retry::retry_with_backoff;
+
+// 检查、下载与安装共用闸，避免旧检查的迟到终态覆盖正在下载或已就绪的状态。
+static UPDATE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+struct CachedPackage {
+    bytes: Vec<u8>,
+    installed: bool,
+}
+
+impl CachedPackage {
+    fn install<E>(&mut self, install: impl FnOnce(&[u8]) -> Result<(), E>) -> Result<(), E> {
+        if self.installed {
+            return Ok(());
+        }
+        // 安装失败保留已验签字节；成功释放包，但保留标记避免重复启动安装器。
+        install(&self.bytes)?;
+        self.bytes = Vec::new();
+        self.installed = true;
+        Ok(())
+    }
+}
+
+struct PreparedUpdate {
+    update: tauri_plugin_updater::Update,
+    package: CachedPackage,
+}
+
+#[derive(Default)]
+struct UpdateCache {
+    pending: std::sync::Mutex<Option<PreparedUpdate>>,
+}
+
+fn update_cache<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::State<'_, UpdateCache> {
+    // manage 已存在时不会替换状态；每个应用只保留一个包，检查与重复点击均不清空它。
+    app.manage(UpdateCache::default());
+    app.state::<UpdateCache>()
+}
+
+fn emit_cached_ready<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<bool, String> {
+    let update = update_cache(app)
+        .pending
+        .lock()
+        .map_err(|_| "更新缓存暂时不可用，请重新启动软件".to_string())?
+        .as_ref()
+        .map(|prepared| prepared.update.clone());
+    if let Some(update) = update {
+        // ready 代表已下载并验签，不代表已安装。元数据可恢复重新打开的前端。
+        let _ = app.emit(
+            "update:ready",
+            serde_json::json!({
+                "version": update.version,
+                "body": update.body,
+                "date": update.date.map(|date| date.to_string()),
+                "currentVersion": update.current_version,
+            }),
+        );
+        return Ok(true);
+    }
+    Ok(false)
+}
 
 // ===== 自动更新（后台线程，不阻塞 UI），採自 PastePanda 实现 =====
 
@@ -233,20 +291,26 @@ fn build_updater<R: tauri::Runtime>(
         .map_err(|e| format!("更新插件初始化失败: {e}"))
 }
 
-/// 后台执行更新检查+下载安装，通过 Tauri event 推送状态到前端。
+/// 后台执行更新检查、下载与验签，通过 Tauri event 推送状态到前端。
 /// 按 `candidate_endpoint_groups` 的顺序依次尝试候选源（默认 Gitee 优先、ghproxy/GitHub
 /// 回退），前一个候选检查或下载任一步失败就换下一个，全部失败才报错。内置指数退避重试：
-/// 每个候选内检查最多重试 2 次、下载安装最多重试 2 次。
+/// 每个候选内检查最多重试 2 次、下载最多重试 2 次；这里绝不启动安装器。
 #[tauri::command]
-pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
-    // 已有任务在跑就直接忽略本次触发（事件由在跑的那个推送，不重复发状态）。
-    static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let Some(guard) = SingleFlight::acquire(&RUNNING) else {
-        log::info!("更新任务已在进行，忽略重复触发");
-        return;
+pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    // 明确拒绝忙时请求：前端不能把 spawn 调用被忽略误认为下载已经开始。
+    let Some(guard) = SingleFlight::acquire(&UPDATE_RUNNING) else {
+        return Err("更新任务正在进行，请稍后再试".into());
     };
     tauri::async_runtime::spawn(async move {
         let _guard = guard; // 持有到任务结束（含所有 early return）
+        match emit_cached_ready(&app) {
+            Ok(true) => return,
+            Ok(false) => {}
+            Err(message) => {
+                let _ = app.emit("update:error", serde_json::json!({ "message": message }));
+                return;
+            }
+        }
         let _ = app.emit("update:checking", ());
 
         let groups = match candidate_endpoint_groups() {
@@ -321,7 +385,7 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
             // 且重试会从头下载，代价可控；换源由外层 `continue` 负责。
             let result = retry_with_backoff(
                 2,
-                "下载安装",
+                "下载更新",
                 |_: &tauri_plugin_updater::Error| true,
                 || {
                     let u = update.clone();
@@ -335,7 +399,7 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
                         let mut window_start = std::time::Instant::now();
                         let mut window_bytes: u64 = 0;
                         let mut last_bytes_per_sec: f64 = 0.0;
-                        u.download_and_install(
+                        u.download(
                             move |chunk_len, total| {
                                 downloaded_total += chunk_len as u64;
                                 window_bytes += chunk_len as u64;
@@ -356,11 +420,8 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
                                 );
                             },
                             || {
-                                // 🔴 插件这个回调是 on_download_finish（updater.rs:712），触发点在
-                                // verify_signature **之前**。绝不能在这里发 update:ready——验签失败
-                                // 时前端会误进自动重启倒计时并 relaunch，而更新根本没装上
-                                // （2026-10-18 假签名实测：失败后 +9.2s app 被自行重启）。
-                                // update:ready 改到 download_and_install 成功返回之后发（见 match）。
+                                // 此回调在验签之前触发；调用方只能在 download 成功返回后
+                                // 宣告 ready，验签失败时不能缓存包或允许用户安装。
                             },
                         )
                         .await
@@ -370,16 +431,37 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
             .await;
 
             match result {
-                Ok(()) => {
-                    // 下载 + 验签 + 安装全部成功才宣告 ready，前端据此起自动重启倒计时。
-                    // Windows NSIS 路径走不到这里：install_inner 以 process::exit(0) 收尾，
-                    // 重启由安装器负责；macOS/Linux 走到这里，事件才有意义。
-                    let _ = app.emit("update:ready", ());
+                Ok(bytes) => {
+                    let cache = update_cache(&app);
+                    match cache.pending.lock() {
+                        Ok(mut pending) => {
+                            *pending = Some(PreparedUpdate {
+                                update,
+                                package: CachedPackage {
+                                    bytes,
+                                    installed: false,
+                                },
+                            });
+                        }
+                        Err(_) => {
+                            let _ = app.emit(
+                                "update:error",
+                                serde_json::json!({
+                                    "message": "更新缓存暂时不可用，请重新启动软件",
+                                }),
+                            );
+                            return;
+                        }
+                    }
+                    // Windows 的 install 会退出应用，因此 ready 必须在安装之前可见，
+                    // 后续只由用户明确调用 install_update，不倒计时、不自动安装。
+                    drop(_guard);
+                    let _ = emit_cached_ready(&app);
                     return; // 这个源成功，结束
                 }
                 Err(e) => {
                     last_code = classify_update_error(&e);
-                    last_message = Some(format!("下载安装失败: {e}"));
+                    last_message = Some(format!("下载更新失败: {e}"));
                     continue; // 换下一个候选源重试
                 }
             }
@@ -410,21 +492,56 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
             }),
         );
     });
+    Ok(())
+}
+
+/// 用户确认且前端已完成文件、事务与任务预检后，安装缓存的已验签包。
+/// Windows 由安装器退出并重启；其它桌面平台返回后由前端 relaunch。
+#[tauri::command]
+pub async fn install_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    let Some(guard) = SingleFlight::acquire(&UPDATE_RUNNING) else {
+        return Err("更新任务正在进行，请稍后再试".into());
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let cache = update_cache(&app);
+        let mut prepared = cache
+            .pending
+            .lock()
+            .map_err(|_| "更新缓存暂时不可用，请重新启动软件".to_string())?
+            .take()
+            .ok_or_else(|| "尚无已下载并验证的更新包，请先下载更新".to_string())?;
+        let update = &prepared.update;
+        let result = prepared.package.install(|bytes| update.install(bytes));
+        // 不在安装器运行时持锁；失败也放回同一个包，用户重试无需重新下载。
+        *cache
+            .pending
+            .lock()
+            .map_err(|_| "更新缓存暂时不可用，请重新启动软件".to_string())? = Some(prepared);
+        result.map_err(|error| format!("安装更新失败: {error}"))
+    })
+    .await
+    .map_err(|error| format!("安装更新任务失败: {error}"))?
 }
 
 /// 只检查更新、不下载，通过 Tauri event 把结果推给前端用于展示徽章。
 /// 与 `start_update` 共用 `updater.check()`、指数退避重试与候选源回退顺序，确保检查逻辑
 /// 只有这一处实现（单一真相源）。
 #[tauri::command]
-pub fn check_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
-    // 与下载任务**分开**的闸：检查和下载可以并存，但各自不能重入。
-    static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let Some(guard) = SingleFlight::acquire(&RUNNING) else {
-        log::info!("更新检查已在进行，忽略重复触发");
-        return;
+pub fn check_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    let Some(guard) = SingleFlight::acquire(&UPDATE_RUNNING) else {
+        return Err("更新任务正在进行，请稍后再试".into());
     };
     tauri::async_runtime::spawn(async move {
         let _guard = guard;
+        match emit_cached_ready(&app) {
+            Ok(true) => return,
+            Ok(false) => {}
+            Err(message) => {
+                let _ = app.emit("update:error", serde_json::json!({ "message": message }));
+                return;
+            }
+        }
         let _ = app.emit("update:checking", ());
 
         let groups = match candidate_endpoint_groups() {
@@ -456,6 +573,7 @@ pub fn check_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
                 Ok(Some(u)) => {
                     let date_str = u.date.map(|d| d.to_string());
                     let current_ver = u.current_version.clone();
+                    drop(_guard);
                     let _ = app.emit(
                         "update:available",
                         serde_json::json!({
@@ -486,6 +604,8 @@ pub fn check_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
 
         // 全部候选问完：无任何错误 ⇒ 确实没有更新；有错误 ⇒ 如实报错
         // （None 不是失败，不能拿 None 掩盖真的失败）。
+        // 发终态前释放闸；收到 available 的前端可立即开始下载，不撞上已结束的检查。
+        drop(_guard);
         match last_message {
             None => {
                 let _ = app.emit("update:uptodate", ());
@@ -501,6 +621,7 @@ pub fn check_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
             }
         }
     });
+    Ok(())
 }
 
 #[cfg(test)]
@@ -509,6 +630,51 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tauri_plugin_updater::Error as UpdaterError;
+
+    #[test]
+    fn update_single_flight_rejects_reentry_and_releases_on_drop() {
+        static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        let first = SingleFlight::acquire(&RUNNING).expect("首次操作应可开始");
+        assert!(SingleFlight::acquire(&RUNNING).is_none());
+        drop(first);
+        assert!(SingleFlight::acquire(&RUNNING).is_some());
+    }
+
+    #[test]
+    fn failed_install_keeps_verified_package_for_retry() {
+        let mut package = CachedPackage {
+            bytes: vec![1, 2, 3],
+            installed: false,
+        };
+        let result = package.install(|bytes| {
+            assert_eq!(bytes, &[1, 2, 3]);
+            Err("installer unavailable")
+        });
+        assert_eq!(result, Err("installer unavailable"));
+        assert!(!package.installed);
+        assert_eq!(package.bytes, vec![1, 2, 3]);
+        assert_eq!(package.install(|_| Ok::<(), &str>(())), Ok(()));
+        assert!(package.installed);
+        assert!(package.bytes.is_empty());
+    }
+
+    #[test]
+    fn installed_package_does_not_launch_installer_twice() {
+        let mut package = CachedPackage {
+            bytes: vec![1],
+            installed: false,
+        };
+        let calls = std::cell::Cell::new(0);
+        for _ in 0..2 {
+            package
+                .install(|_| {
+                    calls.set(calls.get() + 1);
+                    Ok::<(), &str>(())
+                })
+                .expect("安装应成功");
+        }
+        assert_eq!(calls.get(), 1);
+    }
 
     /// 源上找不到 manifest（Gitee releases 分支失效时的真实形态）不该重试：
     /// 重试只会让用户多等一轮 1s+2s 退避。

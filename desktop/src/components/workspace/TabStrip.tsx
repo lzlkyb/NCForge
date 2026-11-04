@@ -71,6 +71,7 @@ export function TabStrip({
   }, [activePath, tabs.length]);
 
   const onTabKey = (e: ReactKeyboardEvent<HTMLDivElement>, i: number, path: string) => {
+    if(e.target!==e.currentTarget || e.nativeEvent.isComposing) return;
     const last = tabs.length - 1;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
@@ -253,6 +254,7 @@ export function TabStrip({
           variant="outline"
           className="wb-compile-btn"
           disabled={!canCompile || compiling}
+          isLoading={compiling} loadingText="编译中"
           title="用 ecj 编译当前文件所在模块，产物写到该模块的 classes 目录"
           onClick={onCompile}
         >

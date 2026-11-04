@@ -1,0 +1,62 @@
+{
+  "measurements": [
+    {
+      "name": "browser-light-narrow",
+      "width": 560,
+      "overflow": false,
+      "body": [
+        {
+          "client": 493,
+          "scroll": 493
+        }
+      ],
+      "controls": [
+        {
+          "label": "明暗主题",
+          "left": 81,
+          "right": 187
+        },
+        {
+          "label": "界面材质",
+          "left": 81,
+          "right": 211
+        },
+        {
+          "label": "界面密度",
+          "left": 81,
+          "right": 187
+        }
+      ]
+    },
+    {
+      "name": "browser-dark-narrow",
+      "width": 560,
+      "overflow": false,
+      "body": [
+        {
+          "client": 493,
+          "scroll": 493
+        }
+      ],
+      "controls": [
+        {
+          "label": "明暗主题",
+          "left": 81,
+          "right": 187
+        },
+        {
+          "label": "界面材质",
+          "left": 81,
+          "right": 211
+        },
+        {
+          "label": "界面密度",
+          "left": 81,
+          "right": 187
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "ipc": "Tauri mocks; no real workspace or database commands"
+}

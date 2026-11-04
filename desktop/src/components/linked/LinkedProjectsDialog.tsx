@@ -45,7 +45,7 @@ export function LinkedProjectsDialog() {
       <Modal
         open={open}
         onClose={requestClose}
-        className="lnk-dialog rounded-[var(--r-card)] modal-surface"
+        className="lnk-dialog modal-surface"
         ariaLabel="工程关联"
       >
         <LinkedProjectsPanel

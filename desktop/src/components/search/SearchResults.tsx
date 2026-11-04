@@ -67,6 +67,12 @@ export function SearchResults({
 
   const noHits = view !== null && view.summary.hits === 0;
   const currentRoot = view?.outcomeRoot;
+  // 空态文案要说清「回车会搜哪儿」：组件范围下「整个工作区」是错的
+  const scopeLabel = all
+    ? "全部关联工程"
+    : form.scope === "component" && form.component
+      ? `组件 ${form.component}`
+      : "整个工作区";
 
   return (
     <>
@@ -108,6 +114,14 @@ export function SearchResults({
         </div>
       )}
 
+      {/* ── 范围说明：组件目录不存在 / 回落成整个工作区 ── */}
+      {view?.scopeNote && (
+        <div className="flex flex-shrink-0 items-start gap-1.5 border-b border-border bg-warning/10 px-3 py-1.5 text-[11.5px] leading-relaxed">
+          <Icon name="alertTriangle" size={12} className="mt-0.5 flex-shrink-0 text-warning-ink" />
+          <span className="break-all text-warning-ink">{view.scopeNote}</span>
+        </div>
+      )}
+
       {/* ── 结果区 ── */}
       <div
         ref={listRef}
@@ -121,7 +135,7 @@ export function SearchResults({
                 ? "搜索中…"
                 : all
                   ? "输入关键字，回车搜索全部关联工程"
-                  : "输入关键字，回车搜索整个工作区"
+                  : `输入关键字，回车搜索${scopeLabel}`
             }
             hint={
               loading

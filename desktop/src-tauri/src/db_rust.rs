@@ -171,6 +171,9 @@ struct Session {
     /// 结果集的列（`columns` 字段原样），分页时复用。
     columns: Vec<Value>,
     auto_commit: bool,
+    readonly: bool,
+    readonly_started: bool,
+    previous_auto: bool,
     tx_statements: i64,
     tx_rows: i64,
     tx_since: i64,
@@ -193,6 +196,9 @@ impl RustEngine {
                 cursor: None,
                 columns: Vec::new(),
                 auto_commit: false,
+                readonly: false,
+                readonly_started: false,
+                previous_auto: false,
                 tx_statements: 0,
                 tx_rows: 0,
                 tx_since: 0,
@@ -289,6 +295,22 @@ impl Session {
                 int_arg(a, 1, 500),
                 int_arg(a, 2, 30),
             ),
+            "execBound" => {
+                if a.len()<3 || (a.len()-3)%2!=0 {return Err(sql_err("绑定参数协议不完整"));}
+                let params: Result<Vec<Box<dyn ToDbValue>>, BridgeError> = a[3..].chunks_exact(2).map(|pair| {
+                    Ok(match pair[0] {
+                        "null" => Box::new(None::<String>) as Box<dyn ToDbValue>,
+                        "number" => Box::new(decimal_number(pair[1])?),
+                        "bool" => Box::new(if pair[1] == "true" { 1i32 } else { 0i32 }),
+                        "string" => Box::new(pair[1].to_string()),
+                        _ => return Err(sql_err("未知绑定类型")),
+                    })
+                }).collect();
+                let params = params?;
+                let refs: Vec<&dyn ToDbValue> = params.iter().map(|p| p.as_ref()).collect();
+                self.exec_params(a[0],int_arg(a,1,500),int_arg(a,2,30),&refs)
+            }
+            "readOnly" => self.set_readonly(a.first() == Some(&"true")),
             "more" => self.more(int_arg(a, 0, 500)),
             "commit" => {
                 let conn = self.conn_ref()?;
@@ -348,6 +370,7 @@ impl Session {
     }
 
     fn reset_tx(&mut self) {
+        self.readonly_started = false;
         self.tx_statements = 0;
         self.tx_rows = 0;
         self.tx_since = 0;
@@ -429,6 +452,8 @@ impl Session {
         let login_user =
             scalar_string(&conn, "select user from dual").unwrap_or_else(|| user.to_string());
         let version = db_version(&conn);
+        self.readonly = false;
+        self.readonly_started = false;
         self.auto_commit = auto;
         self.reset_tx();
         // 中断句柄先取出来再交所有权：`cancel()` 要从另一个线程用它
@@ -448,11 +473,44 @@ impl Session {
 
     // ───────────────────── 执行 ─────────────────────
 
+    fn set_readonly(&mut self, enabled: bool) -> Result<Value, BridgeError> {
+        self.conn_ref()?;
+        if enabled != self.readonly {
+            if self.tx_statements > 0 {
+                return Err(sql_err("有未提交写入，请先提交或回滚再切换只读查询"));
+            }
+            self.conn_ref()?.rollback().map_err(drv_err)?;
+            if enabled {
+                self.previous_auto = self.auto_commit;
+                self.auto_commit = false;
+            } else {
+                self.auto_commit = self.previous_auto;
+            }
+            self.readonly = enabled;
+            self.readonly_started = false;
+        }
+        if enabled && !self.readonly_started {
+            self.conn_ref()?
+                .execute("set transaction read only", &[])
+                .map_err(drv_err)?;
+            self.readonly_started = true;
+        }
+        Ok(json!({"readOnly":self.readonly,"tx":self.tx_json()}))
+    }
     fn exec(
         &mut self,
         raw: &str,
         max_rows: usize,
         timeout_sec: usize,
+    ) -> Result<Value, BridgeError> {
+        self.exec_params(raw, max_rows, timeout_sec, &[])
+    }
+    fn exec_params(
+        &mut self,
+        raw: &str,
+        max_rows: usize,
+        timeout_sec: usize,
+        params: &[&dyn ToDbValue],
     ) -> Result<Value, BridgeError> {
         if self.conn.is_none() {
             return Err(not_connected());
@@ -476,7 +534,7 @@ impl Session {
         // 读不到（低权限账号没有 V_$MYSTAT 授权）就是 None，界面据此**不显示这一行**，
         // 而不是给一排 0 让人以为「这条 SQL 一次逻辑读都没花」。
         let before = self.conn_ref().ok().and_then(stat_snapshot);
-        let out = self.run(&sql, &head, max_rows);
+        let out = self.run(&sql, &head, max_rows, params);
         if let Ok(conn) = self.conn_ref() {
             let _ = conn.set_call_timeout(None);
         }
@@ -502,9 +560,10 @@ impl Session {
         sql: &str,
         head: &str,
         max_rows: usize,
+        params: &[&dyn ToDbValue],
     ) -> Result<Map<String, Value>, BridgeError> {
         let conn = self.conn.take().ok_or_else(not_connected)?;
-        let r = self.run_with(&conn, sql, head, max_rows);
+        let r = self.run_with(&conn, sql, head, max_rows, params);
         self.conn = Some(conn);
         r
     }
@@ -515,10 +574,11 @@ impl Session {
         sql: &str,
         head: &str,
         max_rows: usize,
+        params: &[&dyn ToDbValue],
     ) -> Result<Map<String, Value>, BridgeError> {
         let mut body = Map::new();
         if is_query(head, sql) {
-            let mut cur = conn.query(sql, &[]).map_err(drv_err)?;
+            let mut cur = conn.query(sql, params).map_err(drv_err)?;
             let columns: Vec<Value> = cur.columns().iter().map(column_json).collect();
             let types: Vec<String> = cur
                 .columns()
@@ -540,7 +600,7 @@ impl Session {
             }
             body.insert("rowCount".into(), json!(body_len(&body)));
         } else {
-            let mut res = conn.execute(sql, &[]).map_err(drv_err)?;
+            let mut res = conn.execute(sql, params).map_err(drv_err)?;
             let n = res.rows_affected();
             // 隐式结果集（`dbms_sql.return_result`）：PL/SQL 块自己开的 ref cursor，
             // 服务端按 TTC 27 号消息下发，驱动侧已解析（vendor 补丁四）。
@@ -1856,5 +1916,66 @@ mod tests {
         assert_eq!(v["logicalReads"], 0);
         assert_eq!(v["physicalReads"], 0);
         assert_eq!(v["executeCount"], 0);
+    }
+}
+
+fn decimal_number(input: &str) -> Result<oracledb::OracleNumber, BridgeError> {
+    if input.len() > 400 {
+        return Err(sql_err("绑定数字超出 Oracle 范围"));
+    }
+    let normalized;
+    let text = if let Some(at) = input.find(['e', 'E']) {
+        let exponent = input[at + 1..]
+            .parse::<i32>()
+            .map_err(|_| sql_err("数字指数无效"))?;
+        if !(-130..=126).contains(&exponent) {
+            return Err(sql_err("数字指数超出 Oracle 范围"));
+        }
+        let mantissa = &input[..at];
+        let sign = if mantissa.starts_with('-') { "-" } else { "" };
+        let unsigned = mantissa.trim_start_matches(['-', '+']);
+        if unsigned.chars().filter(|c| *c == '.').count() > 1
+            || unsigned.chars().any(|c| !c.is_ascii_digit() && c != '.')
+        {
+            return Err(sql_err("绑定数字无效"));
+        }
+        let point = unsigned.find('.').unwrap_or(unsigned.len()) as i32 + exponent;
+        let digits = unsigned.replace('.', "");
+        normalized = if point <= 0 {
+            format!("{sign}0.{}{digits}", "0".repeat((-point) as usize))
+        } else if point as usize >= digits.len() {
+            format!(
+                "{sign}{digits}{}",
+                "0".repeat(point as usize - digits.len())
+            )
+        } else {
+            format!(
+                "{sign}{}.{}",
+                &digits[..point as usize],
+                &digits[point as usize..]
+            )
+        };
+        normalized.as_str()
+    } else {
+        input
+    };
+    text.parse()
+        .map_err(|_| sql_err("绑定数字无效或超出 Oracle 精度"))
+}
+#[cfg(test)]
+mod bound_number_tests {
+    use super::*;
+    #[test]
+    fn preserves_high_precision_and_scientific_numbers() {
+        let s = "12345678901234567890123456789012345678";
+        assert_eq!(decimal_number(s).unwrap().to_string(), s);
+        assert_eq!(decimal_number("1.234e-4").unwrap().to_string(), "0.0001234");
+        assert_eq!(decimal_number("-1.2E+3").unwrap().to_string(), "-1200");
+    }
+    #[test]
+    fn rejects_sql_fragments_and_unbounded_exponents() {
+        for s in ["1);delete from t--", "NaN", "1e999999", "1.2.3", "--1"] {
+            assert!(decimal_number(s).is_err(), "{s}");
+        }
     }
 }

@@ -8,7 +8,11 @@ import { MdScopeBar } from "./MdScopeBar";
 import { MdTablePicker } from "./MdTablePicker";
 import { MdDictResult } from "./MdDictResult";
 import { useDb } from "../../lib/dbStore";
+import { beginOperation, trackOperation } from "../../lib/operations";
+import { dbTaskSpec } from "../../lib/dbOperations";
+import { getDb, connOf } from "../../lib/dbStore";
 import { patchDictTab } from "../../lib/dbStore";
+import { dbPanelId, dbTabId } from "../../lib/dbPendingSessions";
 import { useWorkspaceRoot } from "../../lib/workspaceSession";
 import { loadPatchDraft } from "../../lib/patchDraft";
 import {
@@ -95,15 +99,17 @@ export function DictWorkspace({ tabId }: { tabId: string }) {
 
   /** 切到「补丁涉及」：扫草稿 → 核对库里有哪些 → 补齐中文名与缺失名单。 */
   const scanPatch = async () => {
+    const task=beginOperation(dbTaskSpec(`dict.scan:${tab.id}`,"核对补丁涉及的数据库表",tab.connId,"NC 字典",connOf(tab.connId)?.name,tab.id));
+    if(!task) return;
     const found = sqlTables(loadPatchDraft(root)?.sqls ?? []);
     const capped = found.slice(0, MAX_TABLES);
     if (found.length > MAX_TABLES) {
       toast(`补丁草稿的 SQL 提到 ${found.length} 张表，超过上限，只取了前 ${MAX_TABLES} 张`, "error");
     }
-    patchDictTab(tab.id, { mode: "patch", keyword: "", picked: capped.map((t) => t.name), patch: null });
+    patchDictTab(tab.id, { mode: "patch", error:null, keyword: "", picked: capped.map((t) => t.name), patch: null });
     if (capped.length === 0) {
       patchDictTab(tab.id, { patch: { rows: [], missing: [] } });
-      return;
+      task.finish("success","补丁草稿未涉及数据库表");return;
     }
     try {
       // 多要一次查询是为了拿到中文名，并提前分辨「草稿里写了、库里没有」的表——
@@ -113,6 +119,9 @@ export function DictWorkspace({ tabId }: { tabId: string }) {
         MAX_TABLES,
         tab.connId,
       );
+      const current=getDb().tabs.find(t=>t.id===tab.id);
+      if(current?.kind!=="dict" || current.state.mode!=="patch") {task.finish("cancelled","来源标签或范围已切换");return;}
+      task.finish("success",`已核对 ${capped.length} 张表，找到 ${out.tables.length} 张`);
       const have = new Set(out.tables.map((t) => t.name.toLowerCase()));
       patchDictTab(tab.id, {
         patch: {
@@ -121,12 +130,14 @@ export function DictWorkspace({ tabId }: { tabId: string }) {
         },
       });
     } catch (e) {
+      task.finish("failed","补丁表核对失败，返回字典页查看原因");
       toast(mdErrorText(e), "error");
-      patchDictTab(tab.id, { patch: { rows: [], missing: [] } });
+      patchDictTab(tab.id, { patch: { rows: [], missing: [] },error:`补丁表核对失败：${mdErrorText(e)}` });
     }
   };
 
   const onMode = (k: ScopeKind) => {
+    if(st.running) return;
     if (k === "patch") {
       void scanPatch();
       return;
@@ -135,9 +146,10 @@ export function DictWorkspace({ tabId }: { tabId: string }) {
   };
 
   const run = async () => {
+    if(!canRun) return;
     patchDictTab(tab.id, { running: true, error: null });
     try {
-      const data = await mdDict(scopeFilter(scope), tab.connId);
+      const data = await trackOperation(dbTaskSpec(`dict:${tab.id}`,"生成 NC 数据字典",tab.connId,"NC 字典",connOf(tab.connId)?.name,tab.id),()=>mdDict(scopeFilter(scope), tab.connId),d=>({state:d.missing.length ? "failed" : "success",detail:`已读取 ${d.tableCount} 张表、${d.columnCount} 列${d.missing.length ? `，${d.missing.length} 张表未找到` : ""}${d.columnsWithoutName ? `，${d.columnsWithoutName} 列缺少中文名` : ""}`}));
       patchDictTab(tab.id, { data, running: false });
     } catch (e) {
       patchDictTab(tab.id, { error: mdErrorText(e), running: false });
@@ -185,7 +197,7 @@ export function DictWorkspace({ tabId }: { tabId: string }) {
             }
             onNone={() => patchDictTab(tab.id, { picked: [] })}
             busy={st.mode === "patch" ? st.patch === null : searching && tablesQ.isFetching}
-            error={st.mode === "picked" && tablesQ.isError ? mdErrorText(tablesQ.error) : null}
+            error={st.mode === "picked" && tablesQ.isError ? mdErrorText(tablesQ.error) : st.mode==="patch" ? st.error : null}
             truncated={st.mode === "picked" && (tablesQ.data?.truncated ?? false)}
             emptyTitle={
               st.mode === "patch"
@@ -208,7 +220,7 @@ export function DictWorkspace({ tabId }: { tabId: string }) {
       </DockRegion>
 
       <DockRegion region="document">
-        <div className="md-page">
+        <div className="md-page" role="tabpanel" id={dbPanelId(tab.id)} aria-labelledby={dbTabId(tab.id)}>
           <MdScopeBar
             mode={st.mode}
             onMode={onMode}
@@ -226,7 +238,7 @@ export function DictWorkspace({ tabId }: { tabId: string }) {
                 value={st.prefix}
                 onChange={(e) => patchDictTab(tab.id, { prefix: e.target.value })}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && canRun) void run();
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing && canRun) void run();
                 }}
                 placeholder="bd_"
                 spellCheck={false}
@@ -238,7 +250,7 @@ export function DictWorkspace({ tabId }: { tabId: string }) {
           )}
 
           <div className="md-res">
-            <MdDictResult data={st.data} running={st.running} error={st.error} />
+            <MdDictResult tabId={tab.id} connId={tab.connId} data={st.data} running={st.running} error={st.error} />
           </div>
         </div>
       </DockRegion>

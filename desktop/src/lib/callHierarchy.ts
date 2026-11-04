@@ -8,9 +8,10 @@
 // 既慢又没人看得完。想看更深就点那一行再发起一次。
 import { useSyncExternalStore } from "react";
 import { currentModel, cursorAt } from "./editorActions";
-import { ask, context } from "./langProviders";
+import { beginOperation } from "./operations";
+import { context } from "./langProviders";
 import { uriToPath } from "./langConvert";
-import { langReady, navigate } from "./lang";
+import { langReady, langRequest, navigate } from "./lang";
 import { setSession } from "./workspaceSession";
 import { toast } from "../components/ui/toast";
 
@@ -35,6 +36,7 @@ export interface CallState {
 
 const EMPTY: CallState = { root: null, incoming: [], outgoing: [], loading: false, error: null };
 let state: CallState = EMPTY;
+let seq = 0;
 const listeners = new Set<() => void>();
 
 function set(next: Partial<CallState>): void {
@@ -58,6 +60,7 @@ export function useCallState(): CallState {
 }
 
 export function clearCallHierarchy(): void {
+  seq += 1;
   state = EMPTY;
   listeners.forEach((l) => l());
 }
@@ -101,33 +104,46 @@ export async function openCallHierarchy(): Promise<void> {
     toast("代码智能未就绪，调用层级需要它（设置 → 开发环境里启动）", "warning");
     return;
   }
-  const ctx = await context(model, { lineNumber: pos.line, column: pos.column });
-  if (!ctx) {
-    toast("当前文件不在可分析的模块里", "warning");
-    return;
-  }
-  set({ loading: true, error: null, incoming: [], outgoing: [] });
-  const prepared = await ask<LspCallItem[] | LspCallItem>("textDocument/prepareCallHierarchy", ctx);
-  const list = Array.isArray(prepared) ? prepared : prepared ? [prepared] : [];
-  const root = list.length ? toItem(list[0]) : null;
-  if (!root) {
-    set({ loading: false, error: "光标所在位置不是一个可分析的方法 / 构造器" });
-    return;
-  }
-  // incoming / outgoing 的 item 必须是服务端给的原对象（带 data 字段），
-  // 用我们自己转出来的结构发回去会被拒——所以保留原始对象
-  const rawItem = Array.isArray(prepared) ? prepared[0] : prepared;
-  const [incoming, outgoing] = await Promise.all([
-    ask<{ from?: LspCallItem }[]>("callHierarchy/incomingCalls", ctx, { item: rawItem }, 20_000),
-    ask<{ to?: LspCallItem }[]>("callHierarchy/outgoingCalls", ctx, { item: rawItem }, 20_000),
-  ]);
-  set({
-    root,
-    incoming: (incoming ?? []).map((c) => toItem(c.from ?? {})).filter((x): x is CallItem => !!x),
-    outgoing: (outgoing ?? []).map((c) => toItem(c.to ?? {})).filter((x): x is CallItem => !!x),
-    loading: false,
-    error: null,
-  });
+  const operation = beginOperation({ key: "language.calls", label: "查询调用层级", page: "files", phase: "准备方法与调用关系" });
+  if (!operation) return;
+  const my = ++seq;
+  try {
+    const ctx = await context(model, { lineNumber: pos.line, column: pos.column });
+    if (!ctx) {
+      toast("当前文件不在可分析的模块里", "warning");
+      return;
+    }
+    set({ loading: true, error: null, incoming: [], outgoing: [] });
+    const prepared = await langRequest<LspCallItem[] | LspCallItem | null>("textDocument/prepareCallHierarchy", ctx.path, { position: ctx.position });
+    if (my !== seq) return;
+    const list = Array.isArray(prepared) ? prepared : prepared ? [prepared] : [];
+    const root = list.length ? toItem(list[0]) : null;
+    if (!root) {
+      set({ loading: false, error: "光标所在位置不是一个可分析的方法 / 构造器" });
+      return;
+    }
+    // incoming / outgoing 的 item 必须是服务端给的原对象（带 data 字段），
+    // 用我们自己转出来的结构发回去会被拒——所以保留原始对象
+    const rawItem = Array.isArray(prepared) ? prepared[0] : prepared;
+    const [incoming, outgoing] = await Promise.all([
+      langRequest<{ from?: LspCallItem }[] | null>("callHierarchy/incomingCalls", ctx.path, { item: rawItem }, 20_000),
+      langRequest<{ to?: LspCallItem }[] | null>("callHierarchy/outgoingCalls", ctx.path, { item: rawItem }, 20_000),
+    ]);
+    if (my !== seq) return;
+    if (model.isDisposed()) { set({ loading: false, error: "文件已关闭或工程已切换，请重新查询" }); return; }
+    operation.finish("success", `调用者 ${incoming?.length ?? 0} 个、调用目标 ${outgoing?.length ?? 0} 个`);
+    set({
+      root,
+      incoming: (incoming ?? []).map((c) => toItem(c.from ?? {})).filter((x): x is CallItem => !!x),
+      outgoing: (outgoing ?? []).map((c) => toItem(c.to ?? {})).filter((x): x is CallItem => !!x),
+      loading: false,
+      error: null,
+    });
+  } catch (e) {
+    operation.finish("failed", String(e));
+    if (my !== seq) return;
+    set({ loading: false, error: String(e) });
+  } finally { operation.finish("cancelled", "此位置没有可分析的方法，请根据提示重新执行"); }
 }
 
 /** 点一行跳到那个调用点（jar 内的类走只读标签）。 */

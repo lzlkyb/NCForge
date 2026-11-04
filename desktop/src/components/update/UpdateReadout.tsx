@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useUpdate } from "../../contexts/UpdateContext";
 import { formatBytes, formatBytesPerSec } from "../../lib/utils";
+import { useAppHidden } from "../../lib/appVisibility";
 
 /** 判定「等待响应」的静默时长：后端进度窗口约 250ms，1.5s ≈ 连续 6 个窗口没有新事件。 */
 const STALL_MS = 1500;
@@ -29,23 +30,24 @@ const STALL_MS = 1500;
 export function UpdateReadout() {
   const { status, progress, progressIndeterminate, bytesPerSec, downloadedBytes, totalBytes } = useUpdate();
   const active = status === "downloading";
+  const appHidden = useAppHidden();
 
   // 「等待响应」：速率冻结在一个数字上不动，用户会以为卡死。有事件就刷新心跳，
   // 静默超过 STALL_MS 才转灰 —— 真卡死时进度事件不再来，这个定时器是唯一的信号源。
   const [stalled, setStalled] = useState(false);
   const beatRef = useRef(0);
   useEffect(() => {
-    if (!active) return;
+    if (!active || appHidden) return;
     beatRef.current = Date.now();
     setStalled(false);
-  }, [active, downloadedBytes, bytesPerSec]);
+  }, [active, appHidden, downloadedBytes, bytesPerSec]);
   useEffect(() => {
-    if (!active) return;
+    if (!active || appHidden) return;
     const t = setInterval(() => {
       setStalled(Date.now() - beatRef.current > STALL_MS);
     }, 400);
     return () => clearInterval(t);
-  }, [active]);
+  }, [active, appHidden]);
 
   const pct = Math.min(100, Math.max(0, progress));
   const known = !!totalBytes && totalBytes > 0;
@@ -67,9 +69,10 @@ export function UpdateReadout() {
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={active && !progressIndeterminate ? pct : undefined}
+      aria-valuetext={active && progressIndeterminate ? "总大小未知" : undefined}
     >
       <ReadoutRing progress={pct} indeterminate={progressIndeterminate} />
-      <span className="ur-status">{progressIndeterminate ? "下载中" : `下载中 ${pct}%`}</span>
+      <span className="ur-status">{progressIndeterminate ? "下载中" : pct >= 100 ? "正在校验" : `下载中 ${pct}%`}</span>
       <span className="ur-track">
         {progressIndeterminate ? (
           <i className="ur-sweep" />

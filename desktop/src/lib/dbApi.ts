@@ -126,6 +126,8 @@ export interface TxInfo {
   since: number;
 }
 
+export type BoundCell = Cell | {number:string};
+
 export type Cell = string | number | boolean | null;
 
 export interface ColumnMeta {
@@ -465,6 +467,9 @@ export interface SlotOut {
 }
 
 export const dbApi = {
+  relations:(id:string,table:string)=>invoke<{foreign:ExecResult;references:ExecResult;enums?:ExecResult;notes:string[];sharedSession:boolean}>("db_relations",{id,table}),
+  execBound: (id: string, sql: string, params: BoundCell[], maxRows: number, timeoutSec: number, slot?: string | null) => invoke<ExecResult>("db_exec_bound", {id,sql,params,maxRows,timeoutSec,slot:slot || null}),
+  readOnly: (id: string, enabled?: boolean) => invoke<{readOnly:boolean;tx:TxInfo}>("db_read_only", {id,enabled:enabled ?? null}),
   list: () => invoke<DbConn[]>("db_conn_list"),
   save: (conn: DbConnInput, password?: string, remember = true) =>
     invoke<DbConn>("db_conn_save", { conn, password: password || null, remember }),
@@ -603,4 +608,9 @@ export function buildOracleUrl(host: string, port: string, service: string, sid:
 /** 连接串里最有辨识度的那段（服务名 / SID）。 */
 export function dbNameOf(url: string): string {
   return parseOracleUrl(url)?.service ?? url;
+}
+
+/** 查询快照使用完整连接上下文，避免同名连接的结果被混淆。 */
+export function dbSourceOf(conn:DbConn|null):string {
+  return conn ? `${conn.name} · ${ENV_LABEL[conn.env]} · ${conn.user}@${dbNameOf(conn.url)}` : "查询结果";
 }

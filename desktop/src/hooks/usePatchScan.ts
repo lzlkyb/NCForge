@@ -1,3 +1,4 @@
+import { trackOperation } from "../lib/operations";
 import { useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { svnStatus, type ChangeItem } from "../lib/svn";
@@ -54,7 +55,7 @@ export function usePatchScan(force: LayerForce = NO_FORCE) {
   const scan = useQuery({
     // 改判层也进 key：改了就重扫，否则清单还留着上次的层判定和问题
     queryKey: ["patch-scan", root, paths, force.hy, force.std],
-    queryFn: () => patchScan(paths, force.hy, force.std),
+    queryFn: () => trackOperation({ key: `patch.scan:${root}:${JSON.stringify([paths, force])}`, label: "核对补丁清单", scope: root ?? "工作区", page: "patch", phase: "检查源码、编译产物与补丁层" }, () => patchScan(paths, force.hy, force.std), r => ({ state: "success", detail: `${r.items.length} 项返回，${r.blockedCount} 项阻止出包；详见补丁清单` })),
     enabled: paths.length > 0,
     // 清单不缓存：class 的 mtime 随时会变（IDE 一编译），缓存只会给出
     // 「刚才还能打、现在不能打」的假结论。每次进页 / 点重扫都真扫。

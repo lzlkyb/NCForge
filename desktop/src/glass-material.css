@@ -1,0 +1,131 @@
+/* 一个静态柔光底层承载整窗，避免每个面板重复实时模糊。
+   预览和真实窗口共享材质；数据阅读面保持实底，不随底层光色变化。 */
+:is(html[data-ui-style="glass"], .settings-appearance-preview[data-material="glass"]) {
+  --glass-stage: rgb(229 238 240);
+  --glass-backdrop: radial-gradient(ellipse at 8% 0%, rgb(91 181 177 / .48), transparent 64%), radial-gradient(ellipse at 96% 12%, rgb(147 175 211 / .40), transparent 66%), radial-gradient(ellipse at 86% 100%, rgb(181 202 202 / .28), transparent 60%);
+  --glass-panel: rgb(255 255 255 / .42);
+  --glass-wash: rgb(255 255 255 / .12);
+  --glass-document: rgb(247 251 251 / .80);
+  --glass-sheen: linear-gradient(145deg, rgb(255 255 255 / .16), transparent 70%);
+  --glass-edge: rgb(72 100 111 / .18);
+  --glass-chrome-edge: rgb(72 100 111 / .16);
+  --glass-depth: inset 0 1px 0 rgb(255 255 255 / .48), 0 2px 8px rgb(30 58 67 / .08);
+  --glass-reading: hsl(var(--card));
+  --glass-inset: rgb(247 251 252 / .94);
+  --glass-floating: rgb(247 251 252 / .94);
+  --glass-status-panel: hsl(var(--accent));
+  --glass-status-depth: none;
+  --glass-status-ink: hsl(var(--foreground));
+  --glass-status-muted: hsl(var(--muted-foreground));
+  --glass-data-header: hsl(var(--chrome));
+  --glass-switch-off: hsl(var(--input));
+  --glass-switch-edge: hsl(var(--border));
+  --glass-canvas: hsl(var(--card));
+  --glass-terminal-chrome: hsl(var(--chrome));
+  --glass-terminal-focus: hsl(var(--accent));
+  --muted-foreground: 207 20% 31%;
+}
+:is(html.dark[data-ui-style="glass"], .settings-appearance-preview[data-material="glass"][data-theme="dark"]) {
+  --glass-stage: rgb(25 34 42);
+  --glass-backdrop: radial-gradient(ellipse at 8% 0%, rgb(28 108 110 / .44), transparent 64%), radial-gradient(ellipse at 96% 12%, rgb(66 88 129 / .38), transparent 66%), radial-gradient(ellipse at 86% 100%, rgb(60 85 87 / .24), transparent 60%);
+  --glass-panel: rgb(43 57 65 / .48);
+  --glass-wash: rgb(26 39 46 / .12);
+  --glass-document: rgb(29 39 45 / .84);
+  --glass-sheen: linear-gradient(145deg, rgb(197 229 233 / .04), transparent 70%);
+  --glass-edge: rgb(187 217 225 / .16);
+  --glass-chrome-edge: rgb(187 217 225 / .14);
+  --glass-depth: inset 0 1px 0 rgb(203 231 235 / .10), 0 2px 10px rgb(0 9 14 / .24);
+  --glass-inset: rgb(38 49 57 / .96);
+  --glass-floating: rgb(38 49 57 / .96);
+  --muted-foreground: 204 15% 73%;
+}
+
+html[data-ui-style="glass"] .app-shell,
+.settings-appearance-preview[data-material="glass"] .appearance-preview-window {
+  background-color: var(--glass-stage);
+  background-image: var(--glass-backdrop);
+}
+/* 外层容器只负责几何布局。实底留在编辑器、表格、日志等阅读面上。 */
+html[data-ui-style="glass"] .app-shell :is(.wb-root, .wb-content-frame, .wb-tabbar, .wb-tabs, .wb-status) {
+  background: transparent;
+}
+html[data-ui-style="glass"] .app-shell .wb-content-frame { border-color: var(--glass-chrome-edge); }
+html[data-ui-style="glass"] .app-shell :is(.app-header, .app-side) {
+  background: var(--glass-wash);
+  box-shadow: none;
+}
+html[data-ui-style="glass"] .app-shell .app-header { box-shadow: inset 0 1px 0 var(--glass-edge); }
+html[data-ui-style="glass"] .app-shell :is(.wb-tree, .wb-toolbar),
+.settings-appearance-preview[data-material="glass"] .appearance-preview-nav {
+  background-color: var(--glass-panel);
+  background-image: var(--glass-sheen);
+  border-color: var(--glass-chrome-edge);
+}
+html[data-ui-style="glass"] .app-shell .wb-tree { box-shadow: inset 0 1px 0 var(--glass-edge); }
+/* 只给当前显示的设置停靠页透色，已缓存的隐藏设置不能改变数据库阅读面。 */
+html[data-ui-style="glass"] .app-shell .wb-document-surface:has(> .wb-dock-region:not([hidden]) > .wb-settings-page) {
+  background-color: var(--glass-document);
+  background-image: var(--glass-sheen);
+}
+html[data-ui-style="glass"] .wb-settings-body .ui-card { background: transparent; box-shadow: none; }
+html[data-ui-style="glass"] .wb-settings-search,
+html[data-ui-style="glass"] .wb-global-search {
+  background: var(--glass-inset);
+  border-color: var(--glass-chrome-edge);
+}
+html[data-ui-style="glass"] .settings-choice { background: var(--glass-panel); border-color: var(--glass-chrome-edge); }
+html[data-ui-style="glass"] .settings-choice button[aria-checked="true"] { background: var(--glass-inset); }
+html[data-ui-style="glass"] :is(.app-side-item[data-active], .wb-settings-nav-group > button[aria-current]) {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+  box-shadow: none;
+}
+html[data-ui-style="glass"] :is(.modal-surface, .ui-surface, [role="listbox"], .toast) {
+  background-color: var(--glass-floating);
+  background-image: var(--glass-sheen);
+  border-color: var(--glass-edge);
+  box-shadow: var(--glass-depth), var(--sh-pop);
+}
+
+.settings-appearance-preview[data-material="glass"] .appearance-preview-chrome { background: var(--glass-wash); }
+.settings-appearance-preview[data-material="glass"] .appearance-preview-window { border-color: var(--glass-chrome-edge); }
+.settings-appearance-preview[data-material="glass"] .appearance-preview-document { background: var(--glass-reading); }
+/* 用现有整页快照过渡切换材质，不给所有控件分别挂颜色动画。 */
+html[data-material-transitions]::view-transition-group(root) { animation-duration: var(--dur); animation-timing-function: var(--ease); }
+
+@media (prefers-reduced-transparency: reduce) {
+  :is(html:root[data-ui-style="glass"], .settings-appearance-preview[data-material="glass"][data-theme]) {
+    --glass-stage: hsl(var(--chrome));
+    --glass-backdrop: none;
+    --glass-sheen: none;
+    --glass-wash: hsl(var(--chrome));
+    --glass-panel: hsl(var(--chrome));
+    --glass-document: hsl(var(--card));
+    --glass-reading: hsl(var(--card));
+    --glass-inset: hsl(var(--card));
+    --glass-floating: hsl(var(--popover));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-material-transitions]::view-transition-group(root),
+  html[data-material-transitions]::view-transition-old(root),
+  html[data-material-transitions]::view-transition-new(root) { animation: none; }
+}
+@media (forced-colors: active) {
+  :is(html:root[data-ui-style="glass"], .settings-appearance-preview[data-material="glass"][data-theme]) {
+    --glass-stage: Canvas;
+    --glass-backdrop: none;
+    --glass-sheen: none;
+    --glass-wash: Canvas;
+    --glass-panel: Canvas;
+    --glass-document: Canvas;
+    --glass-reading: Canvas;
+    --glass-inset: Canvas;
+    --glass-floating: Canvas;
+    --glass-edge: CanvasText;
+    --glass-chrome-edge: CanvasText;
+    --glass-depth: none;
+  }
+  html:root[data-ui-style="glass"] :is(.app-header, .wb-tree, .modal-surface, .ui-surface, [role="listbox"], .toast) { box-shadow: none; backdrop-filter: none; }
+  html:root[data-ui-style="glass"] :is(.app-side-item[data-active], .wb-settings-nav-group > button[aria-current]) { background: Highlight; color: HighlightText; }
+}

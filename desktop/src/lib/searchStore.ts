@@ -6,13 +6,16 @@ import type {
 } from "./search";
 
 /**
- * 搜索范围：全部关联工程 / 当前工作区。
+ * 搜索范围：全部关联工程 / 当前工作区 / 当前工作区里的某个业务组件。
  *
  * 默认全部工程：依赖链上的改动（接口在 A 工程、调用在 B 工程）是 NC 二开的日常，
  * 只搜当前工程会把跨工程引用漏掉。替换与「编辑匹配」仍只对当前工作区开放——
  * 一次改写多个工程不可撤销，且确认框列不清跨工程改动面。
+ *
+ * `component` 是 `current` 的收窄（同样只碰当前工作区），范围由 manifest 决定，
+ * 见 `lib/searchScope`。
  */
-export type SearchScope = "all" | "current";
+export type SearchScope = "all" | "current" | "component";
 
 /**
  * 搜索页的状态仓库（模块级，不随组件卸载消失）。
@@ -33,6 +36,13 @@ export interface SearchForm {
   regex: boolean;
   /** 搜索范围：默认全部关联工程。 */
   scope: SearchScope;
+  /**
+   * 组件范围选中的组件目录名（manifest 的 `name`）。
+   *
+   * 切到别的范围时**不清**：来回对比「组件 vs 整个工程」是常事，每次都要重选
+   * 组件很烦。换工作区时才清（旧工程的组件名对新工程没有意义，`resetSearchForm`）。
+   */
+  component: string | null;
   outcome: SearchOutcome | null;
   /**
    * 全部工程的结果。与 `outcome` 互斥：哪个取决于发起搜索时的 `scope`。
@@ -91,6 +101,7 @@ const EMPTY: SearchForm = {
   wholeWord: false,
   regex: false,
   scope: "all",
+  component: null,
   outcome: null,
   projectOutcome: null,
   outcomeRoot: null,
@@ -153,6 +164,42 @@ export function resetSearchForm(): void {
   scrollTop = 0;
   form = {
     ...form,
+    // 组件属于旧工作区的 manifest：留着它，新工程里同名的目录会被当成「刚选的组件」。
+    // 没有组件可言的「组件范围」也退回「当前工程」——否则芯片是灰的、实际却在搜整个工作区。
+    component: null,
+    scope: form.scope === "component" ? "current" : form.scope,
+    outcome: null,
+    projectOutcome: null,
+    outcomeRoot: null,
+    outcomeOptions: null,
+    collapsed: [],
+    error: null,
+    running: false,
+    replaceOutcome: null,
+  };
+  emit();
+}
+
+/**
+ * 换搜索范围 / 换组件：连旧结果一起清掉。
+ *
+ * 不清的话会出现最坏的一种界面：切到「全部工程」后屏幕上是当前工程的结果，汇总行
+ * 却按全部工程口径念；反过来，切回「当前工程」后替换入口对着上一次全部工程的结果
+ * 开确认框——它没有 outcome，替换按钮其实是禁用的，但用户看到的是「搜到了却替换不了」。
+ *
+ * 组件范围同理：从 `bill` 切到 `gl` 后屏幕上的命中属于 `bill`，而替换会拿新的 `dirs`
+ * 去改 `gl`——「看到的就是会被改的」这条不成立了。
+ *
+ * 查询词与选项保留：换范围往往就是想用同样的词再搜一遍。
+ * 这条是**状态机**而不是渲染细节，所以留在仓库里，组件只负责调它 + 收起编辑态。
+ */
+export function applySearchScope(scope: SearchScope, component: string | null): void {
+  // 顶掉还在路上的请求：它们回来时序号已经不对，不会把旧范围的结果写回来
+  void nextSearchSeq();
+  form = {
+    ...form,
+    scope,
+    component,
     outcome: null,
     projectOutcome: null,
     outcomeRoot: null,

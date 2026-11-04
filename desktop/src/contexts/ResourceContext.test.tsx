@@ -18,6 +18,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearCompletedOperations, getOperations } from "../lib/operations";
 import { ResourceProvider, useResources, type ResourceState } from "./ResourceContext";
 import { resourceFriendlyError, type PackStatusInfo } from "../lib/resource";
 
@@ -127,6 +128,7 @@ const missingPacks = () => [
 ];
 
 beforeEach(() => {
+  clearCompletedOperations();
   h.handlers.clear();
   h.order.length = 0;
   h.invoke.mockClear();
@@ -388,5 +390,29 @@ describe("resourceFriendlyError", () => {
     const fe = resourceFriendlyError("某个没见过的错误", "unknown");
     expect(fe.friendly).toBe("组件下载失败，请重试");
     expect(fe.raw).toBe("某个没见过的错误");
+  });
+});
+
+
+describe("组件置备任务", () => {
+  it("检查阶段同帧重复调用只发一次，下载按真实事件更新并结束", async () => {
+    h.state.statusResult = installedPacks();
+    await mount(); expect(getOperations()).toHaveLength(0);
+    await act(async () => { await Promise.all([state().ensure(true), state().ensure(true)]); });
+    expect(h.invoke.mock.calls.filter(c => c[0] === "resources_ensure")).toHaveLength(1);
+    const task = getOperations().find(o => o.key === "resources.ensure")!;
+    expect(task.state).toBe("running");
+    await emit("resource:progress", { id: "ecj", downloaded: 40, total: null, bytesPerSec: 10 });
+    expect(getOperations().find(o => o.id === task.id)?.progress).toEqual({ done: 40, total: undefined });
+    await emit("resource:ready", { installed: [{ id: "ecj", version: "1" }], adoptedLegacy: false });
+    expect(getOperations().find(o => o.id === task.id)?.state).toBe("success");
+  });
+  it("部分组件完成后失败保留数量，检查仍可重新发起", async () => {
+    h.state.statusResult = installedPacks(); await mount();
+    await act(async () => state().ensure(true));
+    await emit("resource:error", { message: "下载失败", code: "network", installed: [{ id: "ecj", version: "1" }], adoptedLegacy: [] });
+    expect(getOperations().find(o => o.key === "resources.ensure")).toMatchObject({ state: "failed", detail: "下载失败；已有 1 个组件完成，其余可重试" });
+    await act(async () => state().ensure(true));
+    expect(h.invoke.mock.calls.filter(c => c[0] === "resources_ensure")).toHaveLength(2);
   });
 });

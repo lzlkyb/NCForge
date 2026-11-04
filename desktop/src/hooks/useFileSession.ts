@@ -3,8 +3,8 @@ import { closeModel, openModel, renameModel } from "../lib/editorStore";
 import { baseName, encodingMarks, readFile, remapPath, type Eol } from "../lib/workspace";
 import type { Problem } from "../lib/compile";
 import { consumePendingOpen, onOpenFileRequest, type OpenFileRequest } from "../lib/openFileRequest";
-import { loadJdtSource } from "../lib/lang";
 import { useFileSave } from "./useFileSave";
+import { useJdtOpen } from "./useJdtOpen";
 import { useSplitView } from "./useSplitView";
 import { recordRecent } from "../lib/recentFiles";
 import { rememberClosed } from "../lib/closedTabs";
@@ -17,7 +17,6 @@ import {
   pinTab,
   renameTabs,
   tabMetaFromDisk,
-  tabMetaFromJdt,
 } from "../lib/tabSession";
 import {
   getSession,
@@ -28,6 +27,8 @@ import {
   type Updater,
 } from "../lib/workspaceSession";
 import { toast } from "../components/ui/toast";
+import { trackOperation } from "../lib/operations";
+import { workspaceEpoch } from "../lib/workspaceEpoch";
 import { friendlyError } from "../lib/friendlyError";
 import { navBack, navForward, pushNav, type NavPoint } from "../lib/navHistory";
 
@@ -52,6 +53,8 @@ export function useFileSession() {
   // 点问题行/搜索命中要跳到的位置；null = 没有待跳转。
   const [reveal, setReveal] = useState<{ line: number; column?: number; nonce: number } | null>(null);
   const revealSeq = useRef(0);
+  /** 打开 jar 内类：读源码（没有就反编译）、建标签、失败提示都在里面。 */
+  const openJdtTab = useJdtOpen(setTabs);
   /**
    * 打开文件的序号。
    *
@@ -70,8 +73,9 @@ export function useFileSession() {
    */
   const openFile = useCallback(
     async (path: string, opts?: { preview?: boolean; silent?: boolean }): Promise<boolean> => {
-      const existing = tabs.find((t) => t.path === path);
+      const existing = getSession().tabs.find((t) => t.path.toLowerCase() === path.toLowerCase());
       if (existing) {
+        path=existing.path;
         if (existing.preview && !opts?.preview) setTabs((ts) => pinTab(ts, path));
         // 已有标签是同步命中的，也要占号：它同样是「用户此刻要点的那一个」
         openSeq.current += 1;
@@ -79,8 +83,12 @@ export function useFileSession() {
         return true;
       }
       const nonce = ++openSeq.current;
+      const root=getSession().root,epoch=workspaceEpoch();
       try {
-        const c = await readFile(path);
+        const c = opts?.silent ? await readFile(path) : await trackOperation({key:`file.open:${path.toLowerCase()}`,label:`读取 ${baseName(path)}`,scope:path,page:"files",path,phase:"正在读取文件"},()=>readFile(path));
+        // 慢读取属于旧工程/旧预览时，不能把它加进当前工作区或顶替最新预览。
+        if(epoch!==workspaceEpoch() || root!==getSession().root || opts?.preview && nonce!==openSeq.current) return false;
+        path=getSession().tabs.find(t=>t.path.toLowerCase()===path.toLowerCase())?.path??path;
         openModel(path, c);
         const meta = tabMetaFromDisk(path, c);
         // 连点两次时第二次可能已经加过，避免重复标签
@@ -96,7 +104,7 @@ export function useFileSession() {
         // 从搜索结果打开的文件不在树里，树上那次扫描覆盖不到它，这里补一次，
         // 状态栏的「UTF-8 未登记」才不会只在树里点开时才有。
         void encodingMarks([path])
-          .then((found) =>
+          .then((found) => epoch === workspaceEpoch() && root === getSession().root &&
             setTree((t) => {
               const next = { ...t.marks };
               if (found.length > 0) next[path] = found[0];
@@ -112,7 +120,7 @@ export function useFileSession() {
         return false;
       }
     },
-    [tabs],
+    [],
   );
   const split = useSplitView(openFile);
 
@@ -145,7 +153,7 @@ export function useFileSession() {
     return off;
   }, []);
 
-  const { saving, saveFile, saveAsUtf8, reloadFile } = useFileSave(tabs, activePath);
+  const { saving, saveFile, saveAsUtf8, reloadFile } = useFileSave(activePath);
 
   const closeTab = (path: string, confirmed = false) => {
     const tab = tabs.find((t) => t.path === path);
@@ -164,7 +172,6 @@ export function useFileSession() {
     if (conflictPath === path) setConflictPath(null);
   };
 
-  /** Ctrl+Shift+T：重开最近关闭的标签（打开栈在 lib/closedTabs）。 */
   const reopenLast = () => reopenClosed(openFile);
 
   /**
@@ -221,17 +228,9 @@ export function useFileSession() {
   /** 打开 jar 内的类（jdt.ls 给出的 `jdt://` 地址）为只读标签页。 */
   const openJdt = async (uri: string, line: number, push = true) => {
     // 与 openFile 同一个道理：读源码是异步的，只有最后一次打开有权激活
-    const nonce = ++revealSeq.current;
-    if (!tabs.some((t) => t.path === uri)) {
-      try {
-        const meta = tabMetaFromJdt(uri, await loadJdtSource(uri));
-        setTabs((ts) => (ts.some((t) => t.path === uri) ? ts : [...ts, meta]));
-      } catch (e) {
-        toast(`无法读取类源码：${friendlyError(e)}`, "error");
-        return;
-      }
-    }
-    if (nonce !== revealSeq.current) return;
+    const nonce = ++revealSeq.current,openNonce=++openSeq.current;
+    if (!(await openJdtTab(uri))) return;
+    if (nonce !== revealSeq.current || openNonce !== openSeq.current) return;
     if (push) pushNav({ path: uri, line, jdt: true });
     setActivePath(uri);
     setReveal({ line, nonce });

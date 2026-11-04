@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { baseName, encodingMarks, joinPath, listDir, type DirItem } from "../../lib/workspace";
 import { chainFor, chainOpen, collapseChain } from "../../lib/treeCompact";
+import { SRC_DIR, ncDepthOffset } from "../../lib/ncStructure";
 import { listen } from "../../lib/tauri";
 import { pathKey } from "../../lib/treeSvn";
 import { isUnderPath } from "../../lib/treeProjects";
@@ -19,12 +20,19 @@ const REVEAL_MAX_DEPTH = 40;
  *
  * `projectRoots` 是多工程树的全部根（不含时只有当前工作区）。展开 / 定位只看路径
  * 归属，不关心它是不是当前工程——浏览别的工程是允许的，写操作才受限制。
+ *
+ * `hoist` = NC 结构视图的摊平判断（`FileTree` 传进来）。它只影响两件事：
+ * 展开业务组件时把 `src` 那一层也预读出来；`depthOf` 少算一层。
  */
-export function useTreeLoad(root: string, compact: boolean, projectRoots?: string[]) {
+export function useTreeLoad(
+  root: string,
+  compact: boolean,
+  projectRoots?: string[],
+  hoist?: (dir: string) => boolean,
+) {
   // 只订阅树：整会话订阅下，每次 dirty 翻转 / 编译状态变化都会把整棵树重渲染一遍
   const tree = useWorkspaceSelector((s) => s.tree);
   const { dirs, expanded, marks } = tree;
-  const roots = projectRoots && projectRoots.length > 0 ? projectRoots : [root];
 
   /**
    * 问后端这一层的 `.java` 里，哪些是「磁盘 UTF-8、Eclipse 却按 GBK 读」。
@@ -142,6 +150,23 @@ export function useTreeLoad(root: string, compact: boolean, projectRoots?: strin
     }
   }, [compact, expanded, dirs, load]);
 
+  // NC 结构视图要把 `src` 摊平：业务组件模块展开时，顺手把它那一层也读出来，
+  // 否则 `src` 会先凭空消失一帧、子目录下一拍才补上。
+  //
+  // 只在 `dirs[模块]` 确实有 `src` 时才读，不会凭猜测制造一堆失败记录；
+  // 读失败时 `visibleChildren` 会把 `src` 原样露出来，错误不会被吞掉。
+  useEffect(() => {
+    if (!hoist) return;
+    for (const dir of expanded) {
+      if (!hoist(dir)) continue;
+      const st = dirs[dir];
+      if (st?.status !== "ok") continue;
+      const hasSrc = st.items.some((i) => i.isDir && i.name.toLowerCase() === SRC_DIR);
+      const src = joinPath(dir, SRC_DIR);
+      if (hasSrc && !dirs[src]) void load(src);
+    }
+  }, [hoist, expanded, dirs, load]);
+
   const expand = (path: string) =>
     setTree((t) => (t.expanded.has(path) ? t : { ...t, expanded: new Set(t.expanded).add(path) }));
 
@@ -169,11 +194,16 @@ export function useTreeLoad(root: string, compact: boolean, projectRoots?: strin
     if (!open) void load(chain.tail);
   };
 
-  /** 路径在树里的层级（根为 0）。只用来算缩进。 */
+  /**
+   * 路径在树里的层级（根为 0）。只用来算缩进。
+   *
+   * NC 结构视图开着时，`bill/src/public` 与 `bill/resources` 同级，要少算一层——
+   * 新建 / 重命名那行输入框靠它对齐，算错就比别人多缩进一格。
+   */
   const depthOf = (path: string) => {
     if (!path || path === root) return 0;
     const rel = path.slice(root.length).replace(/^[\\/]/, "");
-    return rel.split(/[\\/]/).filter(Boolean).length;
+    return rel.split(/[\\/]/).filter(Boolean).length + ncDepthOffset(root, path, hoist);
   };
 
   const toggle = (path: string) => {
@@ -193,6 +223,9 @@ export function useTreeLoad(root: string, compact: boolean, projectRoots?: strin
   const reveal = useCallback(
     async (path: string): Promise<boolean> => {
       if (!path) return false;
+      // 根列表在回调内部算：写成外层变量会让依赖每次渲染都变（eslint 也会拦），
+      // 而这个表达式只依赖两个原始值，换工程才需要重算。
+      const roots = projectRoots && projectRoots.length > 0 ? projectRoots : [root];
       // 根互相嵌套时取最长的那个：路径归属只有一位真答案
       const owner = roots
         .filter((r) => isUnderPath(path, r))
@@ -214,7 +247,7 @@ export function useTreeLoad(root: string, compact: boolean, projectRoots?: strin
       }
       return true;
     },
-    [load, roots],
+    [load, projectRoots, root],
   );
 
   return { dirs, expanded, marks, load, expand, toggle, toggleRow, depthOf, reveal, setExpandedPaths };

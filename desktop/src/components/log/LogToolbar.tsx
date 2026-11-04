@@ -1,9 +1,9 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { Icon } from "../ui/icon";
 import { FreshnessBadge } from "../ui/FreshnessBadge";
+import { LogSourcePicker } from "./LogSourcePicker";
 import {
   TIME_RANGES,
-  formatSize,
   type RangeKey,
   type SourceInfo,
 } from "../../lib/ncLog";
@@ -11,11 +11,12 @@ import {
 /**
  * 日志页顶部：结论覆盖面 + 过滤条 + logger 切换。
  *
- * logger 用横向滚动的 chip 而不是下拉多选：NC 有 49 个 logger，但真正有人看的就那几个
- * （nc / warningsql / metadata / pfxx），chip 上还能直接看到「最最近写过」的顺序。
+ * 常用来源及已选项直接展示，其余来源通过带搜索的菜单多选。
  * 「全部」是默认态，点任意 chip 就变成白名单。
  */
 export function LogToolbar({
+  advanced,
+  onToggleAdvanced,
   sources,
   loggers,
   range,
@@ -25,6 +26,7 @@ export function LogToolbar({
   summary,
   updatedAt,
   error,
+  searchMode = false,
   onToggleLogger,
   onClearLoggers,
   onRange,
@@ -33,6 +35,8 @@ export function LogToolbar({
   onRefresh,
   children,
 }: {
+  advanced: boolean;
+  onToggleAdvanced: () => void;
   sources: SourceInfo | undefined;
   loggers: string[];
   range: RangeKey;
@@ -43,6 +47,7 @@ export function LogToolbar({
   /** 上次成功读取的时间；null = 还没读到过。 */
   updatedAt: number | null;
   error: boolean;
+  searchMode?: boolean;
   onToggleLogger: (name: string) => void;
   onClearLoggers: () => void;
   onRange: (range: RangeKey) => void;
@@ -53,15 +58,17 @@ export function LogToolbar({
   children?: ReactNode;
 }) {
   const groups = sources?.loggers ?? [];
+  const advancedId = useId();
+  const filterHint = [loggers.length ? `${loggers.length} 个来源` : "", !onlyProblems ? "含普通记录" : "", slowMs !== 1000 ? `慢 SQL ≥ ${slowMs}ms` : ""].filter(Boolean).join(" · ");
   return (
     <div className="lg-head-wrap">
       <div className="lg-head">
-        <h1>NC 日志</h1>
+        <h1>日志排查</h1>
         <span className="lg-sub">{summary}</span>
         <FreshnessBadge
           state={busy ? "loading" : error ? "error" : "live"}
           at={updatedAt}
-          label="日志"
+          label={searchMode ? "检索结果" : "日志"}
           staleAfterMs={120_000}
           onRefresh={onRefresh}
         />
@@ -76,6 +83,19 @@ export function LogToolbar({
             ))}
           </select>
         </label>
+        <button type="button" className="lg-btn" aria-expanded={advanced} aria-controls={advancedId}
+          onClick={onToggleAdvanced} title={filterHint || "来源、慢 SQL 阈值与原始记录"}>
+          高级筛选{filterHint && <span> · 已设置</span>}<Icon name="chevronDown" size={12} />
+        </button>
+        <button type="button" className="lg-btn" onClick={onRefresh} disabled={busy}>
+          <Icon name="refresh" size={14} className={busy ? "lg-spin" : undefined} />
+          {searchMode ? "重新检索" : "刷新"}
+        </button>
+      </div>
+
+      {filterHint && !advanced && <p className="lg-empty-hint px-3 pb-2">筛选：{filterHint}</p>}
+      <div id={advancedId} hidden={!advanced}>
+      <div className="lg-head">
         <label className="lg-field" title="warningsql 里 NC 自己登记的耗时超过这个值才算慢 SQL">
           <span>慢 SQL ≥</span>
           <input
@@ -93,40 +113,11 @@ export function LogToolbar({
             checked={onlyProblems}
             onChange={(e) => onOnlyProblems(e.target.checked)}
           />
-          <span>只看有结论的</span>
+          <span>仅问题与慢 SQL</span>
         </label>
-        <button type="button" className="lg-btn" onClick={onRefresh} disabled={busy}>
-          <Icon name="refresh" size={14} className={busy ? "lg-spin" : undefined} />
-          刷新
-        </button>
       </div>
 
-      <div className="lg-chips" role="group" aria-label="日志来源">
-        <button
-          type="button"
-          className="lg-chip"
-          data-on={loggers.length === 0 || undefined}
-          onClick={onClearLoggers}
-        >
-          全部
-          <span className="lg-chip-n">{groups.length}</span>
-        </button>
-        {groups.map((g) => (
-          <button
-            key={g.name}
-            type="button"
-            className="lg-chip"
-            data-on={loggers.includes(g.name) || undefined}
-            data-idle={g.newestMs === 0 || undefined}
-            title={`${g.files.length} 个文件 · ${formatSize(g.totalSize)}${
-              g.level ? ` · 门限 ${g.level}` : ""
-            }`}
-            onClick={() => onToggleLogger(g.name)}
-          >
-            {g.name}
-            <span className="lg-chip-n">{g.files.length}</span>
-          </button>
-        ))}
+      <LogSourcePicker groups={groups} loggers={loggers} onToggle={onToggleLogger} onClear={onClearLoggers} />
       </div>
 
       {children}

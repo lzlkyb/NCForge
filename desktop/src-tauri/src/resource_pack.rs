@@ -43,6 +43,7 @@ use crate::retry::retry_with_backoff;
 pub const PACK_JDTLS: &str = "jdtls";
 pub const PACK_ECJ: &str = "ecj";
 pub const PACK_SVNKIT: &str = "svnkit";
+pub const PACK_CFR: &str = "cfr";
 
 /// 全部包 + 展示元信息。顺序即 UI 展示顺序（大的在前，先给用户体积预期）。
 /// 清单里带的 title/notes 优先；缺失时回落这里，保证旧清单也能显示。
@@ -61,6 +62,11 @@ pub const ALL_PACKS: &[PackMeta] = &[
         id: PACK_SVNKIT,
         title: "SVN 组件",
         notes: " diff / 更新 / 提交",
+    },
+    PackMeta {
+        id: PACK_CFR,
+        title: "Java 反编译器（CFR）",
+        notes: "反编译 jar 里的类，看不到源码时也能读实现",
     },
 ];
 
@@ -1686,17 +1692,18 @@ mod tests {
         std::fs::create_dir_all(pack_dir(&config_dir, PACK_ECJ, "v1")).unwrap();
         assert!(!locally_ready(&config_dir, None, &st));
 
-        // 三包齐（目录在即可——离线短路只确认资源找得到，探针在安装时已做过）
-        for id in [PACK_JDTLS, PACK_SVNKIT] {
+        // 除 ecj 外的包都装上 = 全齐（目录在即可——离线短路只确认资源找得到，探针在安装时已做过）。
+        // 这里遍历 ALL_PACKS 而不是写死三个 id：以后再加包，忘了同步这条用例才会红。
+        for meta in ALL_PACKS.iter().filter(|m| m.id != PACK_ECJ) {
             st.packs.insert(
-                id.to_string(),
+                meta.id.to_string(),
                 InstalledPack {
                     version: "v1".into(),
                     legacy: false,
                     size: None,
                 },
             );
-            std::fs::create_dir_all(pack_dir(&config_dir, id, "v1")).unwrap();
+            std::fs::create_dir_all(pack_dir(&config_dir, meta.id, "v1")).unwrap();
         }
         assert!(locally_ready(&config_dir, None, &st));
 
@@ -1705,16 +1712,16 @@ mod tests {
         assert!(!locally_ready(&config_dir, None, &st));
 
         // legacy 记录：看旧安装目录的关键文件在不在，与 finder 回退链一致。
-        // locally_ready 是三包全齐判定，legacy 也要三个都在旧目录里。
+        // locally_ready 是全包齐判定，legacy 也要每个包都在旧目录里。
         let mut st = PacksState::default();
-        for id in [PACK_JDTLS, PACK_ECJ, PACK_SVNKIT] {
-            let d = legacy_root.join(id);
+        for meta in ALL_PACKS {
+            let d = legacy_root.join(meta.id);
             std::fs::create_dir_all(d.join("plugins")).unwrap();
             std::fs::create_dir_all(d.join("config_win")).unwrap();
             std::fs::write(d.join("ecj-3.17.jar"), b"x").unwrap();
             std::fs::write(d.join("svnkit.jar"), b"x").unwrap();
             st.packs.insert(
-                id.to_string(),
+                meta.id.to_string(),
                 InstalledPack {
                     version: String::new(),
                     legacy: true,

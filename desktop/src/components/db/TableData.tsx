@@ -3,16 +3,24 @@ import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ResultTable } from "./ResultTable";
 import { friendlyDbError, sameCell, thousands } from "../../lib/db";
-import { dbApi, type Cell, type ColumnInfo, type ColumnMeta } from "../../lib/dbApi";
+import { dbApi, dbSourceOf, type BoundCell, type Cell, type ColumnInfo, type ColumnMeta } from "../../lib/dbApi";
 import { confirmProdWrite, ask } from "../../lib/dbConfirm";
 import { claimCursor, connOf, rtOf, setTx, type TableTab } from "../../lib/dbStore";
-import { PAGE, pageSql, stripPage, updateSql } from "../../lib/tableEdit";
+import { beginOperation } from "../../lib/operations";
+import { dbTaskSpec } from "../../lib/dbOperations";
+import { PAGE, pageSql, stripPage } from "../../lib/tableEdit";
 
+import { TableRelations } from "./TableRelations";
+import { TableFilterBar } from "./TableFilterBar";
+import { ChangeReview } from "./ChangeReview";
+import { compileFilter, loadFilter } from "../../lib/dbConditions";
+import { optimisticChanges, lookupRow } from "../../lib/dbOptimisticEdit";
+import { useDbReadOnly } from "../../lib/dbReadOnly";
 interface Page {
   columns: ColumnMeta[];
   rows: Cell[][];
   hasNext: boolean;
-  ms: number;
+  ms: number; at:number; sql:string; pageNumber:number;
 }
 
 /**
@@ -22,14 +30,24 @@ interface Page {
  */
 export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: ColumnInfo[] | null; isView: boolean; zh: Record<string, string> }) {
   const pk = (cols ?? []).filter((c) => c.pk).map((c) => c.name);
-  const [q, setQ] = useState({ where: "", order: "", page: 0 });
-  const [draft, setDraft] = useState({ where: "", order: "" });
+  const [q, setQ] = useState<{where:string;order:string;params:BoundCell[];page:number} | null>(null);
+  const [ui,setUi] = useState({loading:false,conflict:"",preview:false,saving:false,relationRow:null as Cell[]|null, conflictValues:[] as {name:string;before:Cell;current:Cell;after:Cell}[]});
+  const {loading,conflict,preview,saving}=ui;
+  const setLoading=(loading:boolean)=>setUi(v=>({...v,loading}));
+  const setConflict=(conflict:string)=>setUi(v=>({...v,conflict}));
+  const setPreview=(preview:boolean)=>setUi(v=>({...v,preview}));
+  const setSaving=(saving:boolean)=>setUi(v=>({...v,saving}));
+  const readonly = useDbReadOnly(tab.connId);
+  useEffect(() => {
+    if (!cols) return;
+    try { setQ({...tab.query ?? compileFilter(loadFilter(tab.connId,tab.table),cols),page:0}); }
+    catch { setQ({where:"",order:"",params:[],page:0}); }
+  },[cols,tab.connId,tab.table,tab.query]);
   const [data, setData] = useState<Page | { error: string } | null>(null);
   const [changed, setChanged] = useState<Map<string, Cell>>(new Map());
-  const [preview, setPreview] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const editable = !isView && pk.length > 0;
-  const order = q.order || pk.map((p) => p.toLowerCase()).join(", ");
+
+  const editable = !isView && pk.length > 0 && readonly === false && !saving && !loading;
+  const order = q?.order || pk.map((p) => p.toLowerCase()).join(", ");
 
   /**
    * 每次查询的序号。慢库上连点两次「下一页」时，第 3 页可能先在、第 2 页后到；
@@ -37,28 +55,34 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
    * `updateSql` 用的是**看得见的那一行**的主键，写回的就是另一行。
    */
   const gen = useRef(0);
+  const reading = useRef<typeof q>(null);
 
   const load = useCallback(async () => {
-    const my = ++gen.current;
+    if (!q || reading.current===q) return;
+    reading.current=q;
+    const my = ++gen.current; setLoading(true);
+    const task=beginOperation(dbTaskSpec(`table:${tab.id}:${my}`,"查询表数据",tab.connId,`${tab.table} · 第 ${q.page+1} 页`,connOf(tab.connId)?.name,tab.id));
     try {
       claimCursor(tab.connId, null, tab.id);
-      const r = await dbApi.exec(tab.connId, pageSql(tab.table.toLowerCase(), q.where, order, q.page), PAGE + 1, 60);
-      if (my !== gen.current) return;
+      const r = await dbApi.execBound(tab.connId, pageSql(tab.table.toLowerCase(), q.where, order, q.page), q.params, PAGE + 1, 60);
+      if (my !== gen.current) {task?.finish("cancelled","已被后续查询取代");return;}
       if (r.kind !== "rows") throw new Error("不是查询结果");
       setTx(tab.connId, r.tx);
-      setData({ ...stripPage(r.columns, r.rows), ms: r.ms });
+      setData({ ...stripPage(r.columns, r.rows), ms: r.ms, at:Date.now(), sql:pageSql(tab.table.toLowerCase(),q.where,order,q.page), pageNumber:q.page+1 });
       setChanged(new Map());
+      task?.finish("success",`已读取 ${Math.min(r.rows.length,PAGE)} 行${r.rows.length>PAGE ? "，可继续翻页" : ""}`);
     } catch (e) {
+      task?.finish("failed","查询失败，返回数据库页查看详细错误");
       if (my !== gen.current) return;
       setData({ error: friendlyDbError(e) });
       setChanged(new Map());
-    }
-  }, [tab.id, tab.connId, tab.table, q.where, q.page, order]);
+    } finally { if(my===gen.current) {reading.current=null;setLoading(false);} }
+  }, [tab.id, tab.connId, tab.table, q, order]);
 
   // 等字段（主键）读到再查，否则默认排序会先空后有，多查一次
   useEffect(() => {
-    if (cols) void load();
-  }, [cols, load]);
+    if (cols && q) void load();
+  }, [cols, q, load]);
 
   /** 翻页 / 改查询条件 / 重新查询前：有未写回的格子时先问一句，别静默丢。 */
   const confirmDiscard = async (): Promise<boolean> => {
@@ -71,40 +95,52 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
     );
   };
 
-  const navTo = async (next: typeof q) => {
+  const navTo = async (next: NonNullable<typeof q>) => {
     if (!(await confirmDiscard())) return;
-    setQ(next);
+    setLoading(true); setQ(next);
   };
 
   /**
    * 查询按钮。条件一个字都没改时也必须真的重查：同事在库里改了数据，回来点「查询」
    * 什么都不发生的话，用户会以为这个工具在读缓存——而这页原本没有别的刷新入口。
    */
-  const apply = () => {
-    const next = { where: draft.where, order: draft.order, page: 0 };
-    if (next.where === q.where && next.order === q.order && q.page === 0) {
-      void (async () => {
-        if (await confirmDiscard()) await load();
-      })();
-      return;
-    }
-    void navTo(next);
+  const apply = (where:string,order:string,params:BoundCell[]) => {
+    const next = {where,order,params,page:0};
+    if(JSON.stringify(next) === JSON.stringify(q)) { void (async () => {if(await confirmDiscard()) await load();})(); }
+    else void navTo(next);
   };
   const page = data && "rows" in data ? data : null;
-  const sqls = page ? updateSql(tab.table, page.columns, page.rows, pk, changed) : [];
+  const changes = page ? optimisticChanges(tab.table,page.columns,page.rows,pk,changed) : [];
+  const sqls=changes.map(c=>c.sql);
 
   const save = async () => {
-    if (!page || sqls.length === 0) return;
-    if (!(await confirmProdWrite(tab.id, tab.connId, sqls.join(";\n")))) return;
+    if (!page || readonly !== false || sqls.length === 0) return;
+    const task=beginOperation(dbTaskSpec(`table.save:${tab.id}`,"写回表数据",tab.connId,tab.table,connOf(tab.connId)?.name,tab.id));
+    if(!task) return;
+    if (!(await confirmProdWrite(tab.id, tab.connId, sqls.join(";\n")))) {task.finish("cancelled","未确认写回，未执行写入");return;}
     const auto = rtOf(tab.connId).tx?.autoCommit ?? connOf(tab.connId)?.autoCommit ?? false;
     setSaving(true);
     let done = 0;
     try {
-      for (const s of sqls) {
+      for (const change of changes) {
+        task.update({phase:`写回第 ${done+1} / ${changes.length} 行`,progress:{done,total:changes.length}});
         claimCursor(tab.connId, null, tab.id);
-        const r = await dbApi.exec(tab.connId, s, 1, 60);
+        const r = await dbApi.execBound(tab.connId, change.sql, change.params, 1, 60);
         setTx(tab.connId, r.tx);
-        if (r.kind === "update" && r.updateCount !== 1) throw new Error(`预期更新 1 行，实际 ${r.updateCount} 行：${s}`);
+        if (r.kind !== "update" || r.updateCount !== 1) {
+          const message=`记录 ${change.row+1} 已变化或被删除，原值校验未通过，已停止写回。`;
+          setConflict(message);
+          try {
+            const query=lookupRow(tab.table,page.columns,page.rows[change.row],pk);
+            const latest=await dbApi.execBound(tab.connId,query.sql,query.params,2,60);
+            if(latest.kind==="rows" && latest.rows.length===1) setUi(v=>({...v,conflictValues:change.cells.map(c=>({name:page.columns[c.column].name,before:c.before,after:c.after,current:latest.rows[0][latest.columns.findIndex(x=>x.name.toUpperCase()===page.columns[c.column].name.toUpperCase())]}))}));
+            else setConflict(`${message} 当前主键已找不到唯一记录。`);
+          }catch {setConflict(`${message} 当前记录无法读取，可重新查询核对。`);}
+          throw new Error(message);
+        }
+        // Successful rows no longer belong to the retry set, even when a later row conflicts.
+        setChanged(current => {const next=new Map(current);change.cells.forEach(c=>next.delete(`${change.row}:${c.column}`));return next;});
+        setData(current => current && "rows" in current ? {...current,rows:current.rows.map((row,i)=>i===change.row ? row.map((v,c)=>change.cells.some(x=>x.column===c) ? change.cells.find(x=>x.column===c)!.after : v) : row)} : current);
         done++;
       }
       toast(
@@ -113,6 +149,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
           : `已写回 ${done} 行，尚未提交——用上方事务条提交或回滚`,
         "success",
       );
+      task.finish("success",`已写回 ${done} 行${auto ? "（自动提交）" : "，尚未提交"}`);
       setPreview(false);
       await load();
     } catch (e) {
@@ -121,6 +158,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
           ? `第 ${done + 1} 条写回失败：${friendlyDbError(e)}（前 ${done} 条已自动提交，无法整体回滚）`
           : `第 ${done + 1} 条写回失败：${friendlyDbError(e)}（前 ${done} 条仍在未提交事务里，可回滚）`
         : `写回失败：${friendlyDbError(e)}`;
+      task.finish("failed",`写回失败；前 ${done} 行${auto ? "已自动提交" : "仍在未提交事务中"}，返回表页核对`);
       toast(prefix, "error");
     } finally {
       setSaving(false);
@@ -129,36 +167,35 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
 
   return (
     <>
-      <div className="dbx-where">
-        <span className="kw">WHERE</span>
-        <input className="dbx-inp mono" value={draft.where} placeholder="dr = 0 and pk_org = '…'" onChange={(e) => setDraft({ ...draft, where: e.target.value })} onKeyDown={(e) => e.key === "Enter" && apply()} />
-        <span className="kw">ORDER BY</span>
-        <input className="dbx-inp mono" style={{ maxWidth: 260 }} value={draft.order} placeholder={pk.map((p) => p.toLowerCase()).join(", ") || "字段"} onChange={(e) => setDraft({ ...draft, order: e.target.value })} onKeyDown={(e) => e.key === "Enter" && apply()} />
-        <button type="button" className="dbx-btn pri" onClick={apply}>
-          <Icon name="play" size={12} />
-          查询
-        </button>
-      </div>
+      {ui.relationRow && page && <TableRelations tab={tab} columns={page.columns} row={ui.relationRow} onClose={()=>setUi(v=>({...v,relationRow:null}))} />}
+      {cols && <TableFilterBar connId={tab.connId} table={tab.table} cols={cols} disabled={saving || loading} onApply={apply} />}
+      {loading && data && <div className="dbx-read-status" role="status">正在查询，暂保留上一份结果…</div>}
+      {conflict && <div className="dbx-err" role="alert">{conflict} <button type="button" className="dbx-btn" disabled={saving || loading} onClick={() => void (async()=> {if(await confirmDiscard()) {setConflict("");await load();}})()}>重新读取并处理冲突</button></div>}
+      {conflict && ui.conflictValues.length>0 && <div className="dbx-change-review"><table><thead><tr><th>字段</th><th>读取时原值</th><th>数据库当前值</th><th>拟写入</th></tr></thead><tbody>{ui.conflictValues.map(c=><tr key={c.name}><td>{c.name}</td><td>{String(c.before ?? "NULL")}</td><td>{String(c.current ?? "NULL")}</td><td>{String(c.after ?? "NULL")}</td></tr>)}</tbody></table></div>}
       {!data && <div className="dbx-empty"><Icon name="spinner" size={18} />读取中…</div>}
       {data && "error" in data && (
         // 失败不是终点：给一条可点的下一步，而不是只让用户对着错误文字重进页面。
         <div className="dbx-err">
           {data.error}
-          <button type="button" className="dbx-lk" style={{ marginLeft: 8 }} onClick={() => void load()}>
+          <button type="button" className="dbx-lk" style={{ marginLeft: 8 }} disabled={loading} onClick={() => void load()}>
             重试
           </button>
         </div>
       )}
-      {page && (
+      {page && q && (
         <ResultTable
-          key={`${q.where}|${order}|${q.page}`}
+          key={`${q.where}|${order}|${q.page}|${page.at}`}
           columns={page.columns}
           rows={page.rows}
           table={tab.table.toLowerCase()}
+          layoutKey={`${tab.connId}:${tab.table.toLowerCase()}`}
+          snapshot={{source:`${dbSourceOf(connOf(tab.connId))} · ${tab.table} · 第 ${page.pageNumber} 页`,sql:page.sql,at:page.at,complete:false,columns:page.columns,rows:page.rows}}
+          connId={tab.connId}
+          onRelated={row=>setUi(v=>({...v,relationRow:row}))}
           zh={zh}
           meta={<>第 {q.page + 1} 页 · <b>{thousands(page.rows.length)}</b> 行 · {page.ms} ms</>}
           edit={editable ? {
-            canEdit: (c) => !pk.includes(page.columns[c].name),
+            canEdit: (c) => !pk.includes(page.columns[c].name) && !/TIME ZONE/i.test(page.columns[c].type) && /^(VARCHAR|NVARCHAR|CHAR|NCHAR|NUMBER|FLOAT|INTEGER|DECIMAL|DATE|TIMESTAMP|CLOB)/i.test(page.columns[c].type),
             changed,
             onEdit: (r, c, v) => {
               const next = new Map(changed);
@@ -167,26 +204,27 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
               setChanged(next);
             },
           } : undefined}
-          tools={editable && changed.size > 0 && (
+          tools={changed.size > 0 && (
             <>
               <span className="meta" style={{ color: "hsl(var(--warning-ink))" }}>已改 {changed.size} 格</span>
-              <button type="button" className="dbx-btn ghost" onClick={() => setChanged(new Map())}>撤销改动</button>
-              <button type="button" className="dbx-btn ghost" data-on={preview || undefined} onClick={() => setPreview(!preview)}>预览 SQL</button>
-              <button type="button" className="dbx-btn pri" disabled={saving || sqls.length === 0} onClick={() => void save()}>
-                <Icon name="check" size={12} />
-                写回 {sqls.length} 行
+              <button type="button" className="dbx-btn ghost" disabled={saving} onClick={() => setChanged(new Map())}>撤销改动</button>
+              <button type="button" className="dbx-btn ghost" data-on={preview || undefined} disabled={saving} onClick={() => setPreview(!preview)}>复核修改 / SQL</button>
+              <button type="button" className="dbx-btn pri" disabled={!editable || !preview || sqls.length === 0} onClick={() => void save()}>
+                <Icon name={saving ? "spinner" : "check"} size={12} />
+                {saving ? "写回中…" : `写回 ${sqls.length} 行`}
               </button>
             </>
           )}
           foot={
             <>
-              {preview && sqls.length > 0 && <pre className="dbx-ddl" style={{ flex: "none", maxHeight: 140, borderTop: "1px solid hsl(var(--border))" }}>{sqls.join(";\n") + ";"}</pre>}
+              {preview && changes.length > 0 && <ChangeReview changes={changes} columns={page.columns} rows={page.rows} pk={pk} disabled={saving} onUndo={key=>setChanged(current=>{const next=new Map(current);next.delete(key);return next;})} />}
+              {preview && sqls.length > 0 && <pre className="dbx-ddl" style={{ flex: "none", maxHeight: 140, borderTop: "1px solid hsl(var(--border))" }}>{changes.map(c=>`${c.sql};\n-- 绑定参数: ${JSON.stringify(c.params)}`).join("\n")}</pre>}
               <div className="dbx-rfoot">
-                <button type="button" className="dbx-lk" disabled={q.page === 0} onClick={() => void navTo({ ...q, page: q.page - 1 })}>上一页</button>
+                <button type="button" className="dbx-lk" disabled={saving || loading || q.page === 0} onClick={() => void navTo({ ...q, page: q.page - 1 })}>上一页</button>
                 <span>第 {q.page + 1} 页</span>
-                <button type="button" className="dbx-lk" disabled={!page.hasNext} onClick={() => void navTo({ ...q, page: q.page + 1 })}>下一页</button>
+                <button type="button" className="dbx-lk" disabled={saving || loading || !page.hasNext} onClick={() => void navTo({ ...q, page: q.page + 1 })}>下一页</button>
                 <span className="dbx-sp" />
-                <span>{editable ? "双击单元格编辑（主键列不可改）" : isView ? "视图只读" : "没有主键，只读（定位不到唯一行）"}</span>
+                <span>{readonly ? "只读查询模式" : editable ? "双击单元格编辑（主键列不可改）" : isView ? "视图只读" : "没有主键，只读（定位不到唯一行）"}</span>
               </div>
             </>
           }

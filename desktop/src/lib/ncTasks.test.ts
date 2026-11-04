@@ -127,3 +127,9 @@ describe("runTask 串行编排", () => {
     await expect(first).resolves.toBe(true);
   });
 });
+
+it("补丁和重启步骤的结果不冒充打包完成或服务就绪",async()=>{
+  const {getOperations}=await import("./operations");
+  await runTask(task(["patch","restart"]),runtime());
+  const all=getOperations(),last=all[all.length-1];expect(last.detail).toContain("请选择文件并生成补丁包");expect(last.detail).toContain("重启请求已接受");
+});

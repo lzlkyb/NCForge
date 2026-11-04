@@ -21,7 +21,10 @@ export function ToolTab() {
       data-active={dock.documentOpen || undefined}
       tabIndex={0}
       onClick={dock.showDocument}
+      onAuxClick={(e) => { if (e.button === 1) tab.onClose?.(); }}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Delete" && tab.onClose) { e.preventDefault(); tab.onClose(); return; }
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           dock.showDocument();
@@ -30,6 +33,8 @@ export function ToolTab() {
     >
       <Icon name={tab.icon} size={13} />
       <span className="wb-tab-name">{tab.label}</span>
+      {tab.onClose && <button type="button" className="wb-tab-x" aria-label={`关闭${tab.label}`}
+        onClick={(e) => { e.stopPropagation(); tab.onClose?.(); }}><Icon name="close" size={12} /></button>}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 /*
  * 「工程关联」弹框（多工程依赖链 / 覆盖表 / 产物检查）。
  *
- * 尺度与取色照 db-console.css：正文 12.5px、控件 26px、颜色一律走
+ * 尺度与统一工作台一致：正文 12px、控件 30px、颜色一律走
  * `hsl(var(--token))`，深浅主题自动适应。前缀 `lnk-` 独占，不与 dbx-/pk-/sv- 冲突。
  */
 
@@ -13,54 +13,58 @@
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+  border-radius: var(--r-dialog);
 }
 .lnk-panel {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  font-size: 12.5px;
+  font-size: 12px;
   background: hsl(var(--card));
 }
 
 /* ── 弹框头 ── */
 .lnk-head {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex-shrink: 0;
-  padding: 12px 16px 10px;
+  padding: 8px 16px;
   border-bottom: 1px solid hsl(var(--border));
 }
-.lnk-head h2 { font-size: 15px; font-weight: 600; letter-spacing: .01em; }
-.lnk-hint { font-size: 11.5px; font-weight: 400; color: hsl(var(--muted-foreground)); }
+.lnk-head h2 { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
+.lnk-hint { font-size: 11px; font-weight: 400; color: hsl(var(--muted-foreground)); }
 .lnk-sp { flex: 1; }
 
 /* ── 区块跳转 ── */
 .lnk-jump {
   display: flex; align-items: center; gap: 6px; flex-shrink: 0;
-  padding: 8px 16px;
-  border-bottom: 1px solid hsl(var(--border) / .6);
-  background: hsl(var(--muted) / .35);
+  min-height: 36px;
+  padding: 3px 16px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / .25);
 }
 .lnk-jump-btn {
-  height: 22px; padding: 0 8px; border-radius: 6px;
+  height: 30px; padding: 0 8px; border-radius: var(--r-control);
   border: 1px solid transparent;
-  font-size: 11.5px; color: hsl(var(--muted-foreground));
+  font-size: 12px; color: hsl(var(--muted-foreground));
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 .lnk-jump-btn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 
 /* ── 滚动体 ── */
 .lnk-body {
   flex: 1; min-height: 0; overflow: auto;
-  display: flex; flex-direction: column; gap: 12px;
-  padding: 12px 16px 20px;
+  display: flex; flex-direction: column; gap: 0;
+  padding: 0;
 }
-.lnk-anchor { display: flex; flex-direction: column; gap: 8px; border-radius: 10px; }
-.lnk-anchor.lnk-flash { animation: lnk-flash 1.6s var(--ease); }
+.lnk-anchor { display: flex; flex-direction: column; gap: 0; border-radius: 0; }
+.lnk-anchor + .lnk-anchor { border-top: 1px solid hsl(var(--border)); }
+.lnk-anchor.lnk-flash .lnk-sec { animation: lnk-flash var(--dur-slow) var(--ease-standard); }
 @keyframes lnk-flash {
-  0% { box-shadow: 0 0 0 0 hsl(var(--ring) / .45); }
-  100% { box-shadow: 0 0 0 8px transparent; }
+  0% { background: hsl(var(--accent)); }
+  100% { background: hsl(var(--card)); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .lnk-anchor.lnk-flash { animation: none; }
+  .lnk-anchor.lnk-flash .lnk-sec { animation: none; }
 }
 @media (max-width: 650px) {
   .lnk-dialog { width: 96vw; height: 92vh; }
@@ -69,10 +73,11 @@
 /* ── 通用控件 ── */
 .lnk-btn {
   display: inline-flex; align-items: center; gap: 5px;
-  height: 26px; padding: 0 9px; flex-shrink: 0;
-  border: 1px solid hsl(var(--border)); border-radius: 7px;
+  height: 30px; padding: 0 10px; flex-shrink: 0;
+  border: 1px solid hsl(var(--border)); border-radius: var(--r-control);
   background: hsl(var(--card)); font-size: 12px; white-space: nowrap;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  color: hsl(var(--foreground));
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
 }
 .lnk-btn:hover:not(:disabled) { background: hsl(var(--secondary)); }
 .lnk-btn:disabled { opacity: .5; cursor: default; }
@@ -80,49 +85,52 @@
 .lnk-btn.pri:hover:not(:disabled) { background: hsl(var(--primary) / .9); }
 .lnk-btn[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); border-color: transparent; font-weight: 600; }
 .lnk-ibtn {
-  width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0;
+  width: 28px; height: 28px; border-radius: var(--r-control); flex-shrink: 0;
   display: grid; place-items: center; color: hsl(var(--muted-foreground));
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 .lnk-ibtn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 .lnk-inp {
-  height: 28px; min-width: 0; flex: 1 1 160px; padding: 0 9px;
-  border: 1px solid hsl(var(--border)); border-radius: 7px;
+  height: 30px; min-width: 0; flex: 1 1 160px; padding: 0 9px;
+  border: 1px solid hsl(var(--border)); border-radius: var(--r-control);
   background: hsl(var(--background)); color: hsl(var(--foreground));
-  font-size: 12.5px; outline: none;
+  font-size: 12px;
 }
-.lnk-inp:focus { border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / .18); }
+.lnk-inp:focus { border-color: hsl(var(--ring)); }
 .lnk-inp.mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
 .lnk-inp.sel { flex: 0 1 320px; }
 
-/* ── 分区卡 ── */
+/* ── 连续分区 ── */
 .lnk-sec {
-  display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;
-  padding: 10px 12px; border: 1px solid hsl(var(--border)); border-radius: 10px;
+  display: flex; flex-direction: column; gap: 12px; flex-shrink: 0;
+  padding: 16px; border: 0; border-radius: 0;
   background: hsl(var(--card));
 }
-.lnk-sec-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; font-weight: 600; }
+.lnk-sec-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; font-weight: 600; }
 
 /* ── 依赖链 ── */
 .lnk-chain { display: flex; flex-direction: column; gap: 2px; }
-.lnk-item { border-radius: 7px; }
+.lnk-item { border-radius: 0; }
+.lnk-item + .lnk-item { border-top: 1px solid hsl(var(--border)); }
 .lnk-item[data-disabled] { background: hsl(var(--secondary) / .55); }
 .lnk-item[data-disabled] .lnk-name { text-decoration: line-through; color: hsl(var(--muted-foreground)); }
-.lnk-row { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 2px 4px; flex-wrap: wrap; }
+.lnk-row { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 3px 0; flex-wrap: wrap; }
 .lnk-idx {
   width: 18px; flex-shrink: 0; text-align: right;
   font-size: 11px; font-variant-numeric: tabular-nums; color: hsl(var(--muted-foreground));
 }
 .lnk-name {
   display: inline-flex; align-items: center; gap: 3px;
-  height: 22px; padding: 0 4px; border-radius: 5px;
-  font-size: 12.5px; font-weight: 600;
+  height: 30px; padding: 0 4px; border-radius: var(--r-control);
+  font-size: 12px; font-weight: 600;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 .lnk-name:hover { background: hsl(var(--secondary)); }
 .lnk-meta { font-size: 11px; color: hsl(var(--muted-foreground)); white-space: nowrap; }
-.lnk-dirs { font-size: 11.5px; font-variant-numeric: tabular-nums; color: hsl(var(--muted-foreground)); white-space: nowrap; }
+.lnk-dirs { font-size: 11px; font-variant-numeric: tabular-nums; color: hsl(var(--muted-foreground)); white-space: nowrap; }
 .lnk-badge {
-  flex-shrink: 0; padding: 0 6px; border-radius: 8px;
-  font-size: 10.5px; line-height: 16px; font-weight: 600;
+  flex-shrink: 0; padding: 0 6px; border-radius: var(--r-control);
+  font-size: 11px; line-height: 16px; font-weight: 600;
   background: hsl(var(--secondary)); color: hsl(var(--secondary-foreground));
 }
 .lnk-badge[data-kind="primary"] { background: hsl(var(--primary) / .14); color: hsl(var(--accent-foreground)); }
@@ -137,11 +145,12 @@
 .lnk-dirbox {
   display: flex; flex-direction: column; gap: 2px;
   max-height: 220px; overflow: auto;
-  padding: 6px 8px; border-radius: 7px;
-  background: hsl(var(--muted) / .5);
+  padding: 4px 8px; border-radius: 0;
+  border-left: 2px solid hsl(var(--border));
+  background: transparent;
 }
 .lnk-dir {
-  font-family: "Cascadia Mono", Consolas, monospace; font-size: 11.5px;
+  font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px;
   color: hsl(var(--foreground)); word-break: break-all;
 }
 .lnk-empty { font-size: 12px; color: hsl(var(--muted-foreground)); }
@@ -152,36 +161,38 @@
 .lnk-notes { display: flex; flex-direction: column; gap: 4px; }
 .lnk-notes ul {
   display: flex; flex-direction: column; gap: 2px;
-  padding: 6px 8px; border-radius: 7px;
+  padding: 8px 12px; border-radius: 0;
+  border-left: 2px solid hsl(var(--warning));
   background: hsl(var(--warning) / .1); color: hsl(var(--warning-ink));
-  font-size: 11.5px; list-style: none;
+  font-size: 11px; list-style: none;
 }
 .lnk-notes li::before { content: "· "; }
 
 /* ── 覆盖表 ── */
 .lnk-ovs { display: flex; flex-direction: column; gap: 2px; }
-.lnk-ov { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 1px 4px; border-radius: 6px; }
+.lnk-ov { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 3px 0; border-radius: 0; border-bottom: 1px solid hsl(var(--border)); }
 .lnk-ov:hover { background: hsl(var(--secondary) / .6); }
-.lnk-ov-target { font-weight: 600; word-break: break-all; }
+.lnk-ov-target { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
 .lnk-dirty {
-  padding: 0 6px; border-radius: 8px; line-height: 16px;
-  font-size: 10.5px; font-weight: 600;
+  padding: 0 6px; border-radius: var(--r-control); line-height: 16px;
+  font-size: 11px; font-weight: 600;
   background: hsl(var(--warning) / .16); color: hsl(var(--warning-ink));
 }
 .lnk-add { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.lnk-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lnk-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid hsl(var(--border)); }
 
 /* ── 产物检查（D4 全量新旧） ── */
 .lnk-ok {
-  padding: 8px 10px; border-radius: 8px;
+  padding: 8px 12px; border-radius: 0;
   background: hsl(var(--success) / .1); color: hsl(var(--success-ink));
   font-size: 12px;
 }
 .lnk-chk { display: flex; flex-direction: column; gap: 4px; }
 .lnk-chk-item {
   display: flex; align-items: baseline; gap: 8px;
-  padding: 4px 6px; border-radius: 6px;
-  background: hsl(var(--muted) / .45);
+  padding: 8px 0; border-radius: 0;
+  border-bottom: 1px solid hsl(var(--border));
+  background: transparent;
   font-size: 12px;
 }
 .lnk-chk-item .lnk-badge { flex-shrink: 0; align-self: center; }
@@ -190,12 +201,26 @@
 /* ── 提示 ── */
 .lnk-error {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 8px 10px; border-radius: 8px;
+  padding: 8px 12px; border-radius: 0;
   background: hsl(var(--destructive) / .08); color: hsl(var(--destructive-ink));
   font-size: 12px;
 }
 .lnk-warn {
-  padding: 8px 10px; border-radius: 8px;
+  padding: 8px 12px; border-radius: 0;
   background: hsl(var(--warning) / .12); color: hsl(var(--warning-ink));
   font-size: 12px;
 }
+
+/* ── UPM 装配查询 ── */
+.lnk-upm-q { display: flex; align-items: center; gap: 8px; }
+.lnk-input {
+  flex: 1; min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-control);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 12px; font-family: inherit;
+}
+.lnk-input:focus { outline: none; border-color: hsl(var(--primary) / .5); }
+.lnk-input::placeholder { color: hsl(var(--muted-foreground)); }

@@ -1,9 +1,10 @@
 /*
  * 数据库页（多连接 SQL 控制台 / 表页 / 连接管理）。
- * 照 design/NCForge-数据库升级-设计稿-2026-10-30.html；旧的 dq-* 样式在 db.css，只剩补丁页核对表结构在用。
+ * 沿用 docs/teal-workbench-20261103/integrated-v2/DESIGN.md 的窗口表面与控件档位。
+ * 旧的 dq-* 样式在 db.css，只剩补丁页核对表结构在用。
  *
- * 高度只有四档（24 图标 / 26 控件 / 32 横带 / 36 标签），字号只有四档；
- * 结果区只有两条常驻横带：`.dbx-rbar`（32）与 `.dbx-rfoot`（26）。
+ * 默认高度为 28 图标 / 30 控件 / 36 横带与标签，字号只有四档；
+ * 结果网格仍保留 26px 行高，与 ResultGrid 的虚拟滚动步长一致。
  */
 
 :root {
@@ -11,9 +12,9 @@
   --dbx-fs-meta: 11px;
   --dbx-fs-body: 12px;
   --dbx-fs-title: 13px;
-  --dbx-h-icon: 24px;
-  --dbx-h-control: 26px;
-  --dbx-h-bar: 32px;
+  --dbx-h-icon: 28px;
+  --dbx-h-control: 30px;
+  --dbx-h-bar: 36px;
   --dbx-h-tab: 36px;
   --dbx-fav: 45 93% 47%;
 }
@@ -24,7 +25,7 @@
 .e-prod { --env: var(--destructive); --env-ink: var(--destructive-ink); }
 .e-other { --env: var(--muted-foreground); --env-ink: var(--muted-foreground); }
 .dbx-edot { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--env)); flex-shrink: 0; }
-.dbx-echip { font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 8px; background: hsl(var(--env) / .15); color: hsl(var(--env-ink)); font-weight: 600; flex-shrink: 0; }
+.dbx-echip { font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 8px; background: hsl(var(--env) / .15); color: hsl(var(--env-ink)); font-weight: 600; flex-shrink: 0; white-space: nowrap; }
 .dbx-mono { font-family: "Cascadia Mono", Consolas, monospace; }
 .dbx-muted { color: hsl(var(--muted-foreground)); }
 .dbx-sp { flex: 1; }
@@ -40,24 +41,24 @@
 .dbx-tabadd:hover { color: hsl(var(--foreground)); background: hsl(var(--secondary) / .6); }
 
 /* ── 通用按钮 / 输入 ── */
-.dbx-btn { display: inline-flex; align-items: center; gap: 5px; height: var(--dbx-h-control); padding: 0 9px; border-radius: 7px; border: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: var(--dbx-fs-body); white-space: nowrap; flex-shrink: 0; }
+.dbx-btn { display: inline-flex; align-items: center; gap: 5px; height: var(--dbx-h-control); padding: 0 9px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: var(--dbx-fs-body); white-space: nowrap; flex-shrink: 0; }
 .dbx-btn:hover:not(:disabled) { background: hsl(var(--secondary)); }
 .dbx-btn:disabled { opacity: .5; cursor: default; }
 .dbx-btn.pri { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); border-color: transparent; }
 .dbx-btn.pri:hover:not(:disabled) { background: hsl(var(--primary) / .9); }
 .dbx-btn.ok { background: hsl(var(--success) / .15); color: hsl(var(--success-ink)); border-color: transparent; font-weight: 600; }
-.dbx-btn.bad { background: hsl(var(--destructive)); color: #fff; border-color: transparent; }
+.dbx-btn.bad { background: hsl(var(--destructive)); color: hsl(var(--destructive-foreground)); border-color: transparent; }
 .dbx-btn.ghost { border-color: transparent; background: none; color: hsl(var(--muted-foreground)); }
-.dbx-btn.ghost:hover:not(:disabled), .dbx-btn.ghost[data-on] { color: hsl(var(--foreground)); background: hsl(var(--secondary)); }
+.dbx-btn.ghost:hover:not(:disabled) { color: hsl(var(--foreground)); background: hsl(var(--secondary)); }
+.dbx-btn.ghost[data-on] { color: hsl(var(--accent-foreground)); background: hsl(var(--accent)); }
 .dbx-btn .k { opacity: .65; font-size: var(--dbx-fs-meta); }
-.dbx-ibtn { width: var(--dbx-h-icon); height: var(--dbx-h-icon); border-radius: 6px; display: grid; place-items: center; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+.dbx-ibtn { width: var(--dbx-h-icon); height: var(--dbx-h-icon); border-radius: var(--r-control); display: grid; place-items: center; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
 .dbx-ibtn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 .dbx-ibtn[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
 .dbx-ibtn:disabled { opacity: .45; cursor: default; }
 .dbx-ibtn:disabled:hover { background: none; color: hsl(var(--muted-foreground)); }
 .dbx-vsep { width: 1px; height: 18px; background: hsl(var(--border)); margin: 0 2px; flex-shrink: 0; }
-.dbx-inp { height: var(--dbx-h-control); width: 100%; min-width: 0; padding: 0 9px; border-radius: 7px; border: 1px solid hsl(var(--border)); background: hsl(var(--background)); font-size: var(--dbx-fs-body); color: hsl(var(--foreground)); outline: none; }
-.dbx-inp:focus { border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / .18); }
+.dbx-inp { height: var(--dbx-h-control); width: 100%; min-width: 0; padding: 0 9px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: var(--dbx-fs-body); color: hsl(var(--foreground)); }
 .dbx-inp.mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: var(--dbx-fs-body); }
 .dbx-inp.sm { height: var(--dbx-h-icon); font-size: var(--dbx-fs-body); }
 
@@ -72,54 +73,56 @@
 .dbx-stmt-gl { border-left: 2px solid hsl(var(--primary)); margin-left: 3px; }
 .dbx-splitbar { height: 5px; background: hsl(var(--border) / .6); cursor: row-resize; flex-shrink: 0; }
 .dbx-splitbar:hover { background: hsl(var(--primary) / .4); }
-.dbx-splitbar:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; background: hsl(var(--primary) / .4); }
+.dbx-splitbar:focus-visible { outline-offset: -2px; background: hsl(var(--primary) / .4); }
 .dbx-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: hsl(var(--muted-foreground)); font-size: 12.5px; padding: 24px; text-align: center; }
 
 /* ── SQL 工具条 ── */
-.dbx-sqlbar { display: flex; align-items: center; gap: 5px; height: var(--dbx-h-bar); padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--card)); flex-shrink: 0; font-size: var(--dbx-fs-body); overflow: hidden; }
+.dbx-sqlbar { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 6px; min-height: var(--dbx-h-bar); padding: 3px 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); flex-shrink: 0; min-width: 0; font-size: var(--dbx-fs-body); }
 /* 生产环境只留一条 2px 顶线 + 胶囊：整条染红会把「执行」也染成警示色 */
 .dbx-sqlbar[data-prod] { box-shadow: inset 0 2px 0 hsl(var(--destructive)); }
-.dbx-prodchip { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 999px; background: hsl(var(--destructive) / .12); color: hsl(var(--destructive-ink)); font-size: var(--dbx-fs-badge); font-weight: 700; letter-spacing: .04em; flex-shrink: 0; }
-.dbx-connpick { white-space: nowrap; flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; height: var(--dbx-h-control); padding: 0 8px; border-radius: 7px; border: 1px solid hsl(var(--border)); background: hsl(var(--background)); font-size: var(--dbx-fs-body); max-width: 240px; }
+.dbx-prodchip { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 999px; background: hsl(var(--destructive) / .12); color: hsl(var(--destructive-ink)); font-size: var(--dbx-fs-badge); font-weight: 700; letter-spacing: .04em; flex-shrink: 0; white-space: nowrap; }
+.dbx-connpick { white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; height: var(--dbx-h-control); min-width: 0; padding: 0 8px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: var(--dbx-fs-body); max-width: min(240px, 100%); }
 .dbx-connpick b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .dbx-connpick .u { color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); overflow: hidden; text-overflow: ellipsis; }
 /* 执行 + 执行脚本合成一组：主按钮执行光标语句，小三角里放脚本 / 计划 / 回放 */
 .dbx-runsplit { display: inline-flex; flex-shrink: 0; }
-.dbx-runsplit .dbx-btn.pri:first-child { border-radius: 7px 0 0 7px; }
-.dbx-runsplit .dbx-btn.pri + .dbx-btn { border-radius: 0 7px 7px 0; border-left: 1px solid hsl(var(--primary-foreground) / .25); padding: 0 4px; }
+.dbx-runsplit .dbx-btn.pri:first-child { border-radius: var(--r-control) 0 0 var(--r-control); }
+.dbx-runsplit .dbx-btn.pri + .dbx-btn { border-radius: 0 var(--r-control) var(--r-control) 0; border-left: 1px solid hsl(var(--primary-foreground) / .25); padding: 0 6px; }
 /* 事务模式收成一枚胶囊：点开才是两个选项，平时只占一个控件的宽度 */
-.dbx-txchip { display: inline-flex; align-items: center; gap: 5px; height: var(--dbx-h-control); padding: 0 9px; border-radius: 7px; border: 1px solid hsl(var(--border)); background: hsl(var(--background)); font-size: var(--dbx-fs-meta); color: hsl(var(--muted-foreground)); white-space: nowrap; flex-shrink: 0; }
+.dbx-txchip { display: inline-flex; align-items: center; gap: 5px; height: var(--dbx-h-control); padding: 0 9px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: var(--dbx-fs-body); color: hsl(var(--muted-foreground)); white-space: nowrap; flex-shrink: 0; }
 .dbx-txchip:hover:not(:disabled) { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 .dbx-txchip[data-auto] { color: hsl(var(--success-ink)); }
 .dbx-txchip .dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--muted-foreground)); }
 .dbx-txchip[data-auto] .dot { background: hsl(var(--success)); }
 .dbx-txchip:disabled { opacity: .5; cursor: default; }
 /* 连接设置里的分段控件（新建/编辑连接对话框）仍用两段按钮 */
-.dbx-txmode { display: inline-flex; border: 1px solid hsl(var(--border)); border-radius: 7px; overflow: hidden; height: 26px; flex-shrink: 0; }
+.dbx-txmode { display: inline-flex; border: 1px solid hsl(var(--border)); border-radius: var(--r-control); height: var(--dbx-h-control); flex-shrink: 0; }
 .dbx-txmode button { white-space: nowrap; padding: 0 8px; font-size: 11.5px; color: hsl(var(--muted-foreground)); }
+.dbx-txmode button:first-child { border-radius: var(--r-control) 0 0 var(--r-control); }
+.dbx-txmode button:last-child { border-radius: 0 var(--r-control) var(--r-control) 0; }
 .dbx-txmode button[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
 .dbx-txmode button:disabled { cursor: default; }
 
 /* ── 下拉（连接选择） ── */
-.dbx-dd { position: fixed; z-index: 1200; width: 380px; max-height: 60vh; overflow: auto; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 10px; box-shadow: var(--sh-pop, 0 8px 30px rgba(15,23,42,.14)); font-size: 12.5px; padding: 5px; }
+.dbx-dd { position: fixed; z-index: 1200; width: 380px; max-width: calc(100vw - 16px); max-height: 60vh; overflow: auto; background: hsl(var(--popover)); border: 1px solid hsl(var(--border)); border-radius: var(--r-menu); box-shadow: var(--sh-pop); font-size: 12.5px; padding: 5px; }
 .dbx-dd .sec { padding: 6px 8px 3px; font-size: 11px; font-weight: 600; color: hsl(var(--muted-foreground)); }
-.dbx-dd .li { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 8px; border-radius: 7px; text-align: left; }
+.dbx-dd .li { display: flex; align-items: center; gap: 8px; width: 100%; height: var(--dbx-h-control); padding: 0 8px; border-radius: var(--r-control); text-align: left; }
 .dbx-dd .li:hover, .dbx-dd .li[data-sel] { background: hsl(var(--accent)); }
 .dbx-dd .li .u { color: hsl(var(--muted-foreground)); font-size: 11.5px; font-family: "Cascadia Mono", Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-dd .li .r { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; }
 .dbx-dd hr { border: 0; border-top: 1px solid hsl(var(--border)); margin: 4px 2px; }
 
 /* ── 事务条 ── */
-.dbx-txbar { display: flex; align-items: center; gap: 8px; height: var(--dbx-h-bar); padding: 0 10px; background: hsl(var(--warning) / .14); border-bottom: 1px solid hsl(var(--warning) / .35); color: hsl(var(--warning-ink)); font-size: var(--dbx-fs-body); flex-shrink: 0; }
+.dbx-txbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: var(--dbx-h-bar); padding: 3px 10px; background: hsl(var(--warning) / .14); border-bottom: 1px solid hsl(var(--warning) / .35); color: hsl(var(--warning-ink)); font-size: var(--dbx-fs-body); flex-shrink: 0; }
 .dbx-txbar b { font-weight: 700; }
 .dbx-banner { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; border-bottom: 1px solid hsl(var(--border)); flex-shrink: 0; }
 .dbx-banner[data-tone="bad"] { background: hsl(var(--destructive) / .08); color: hsl(var(--destructive-ink)); }
 .dbx-banner[data-tone="warn"] { background: hsl(var(--warning) / .12); color: hsl(var(--warning-ink)); }
 
 /* ── 侧栏：连接树 ── */
-.dbx-side { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.dbx-side { display: flex; flex-direction: column; height: 100%; min-height: 0; background: hsl(var(--chrome)); }
 .dbx-side-head { display: flex; align-items: center; gap: 2px; height: var(--dbx-h-tab); padding: 0 6px 0 12px; font-size: var(--dbx-fs-meta); font-weight: 600; letter-spacing: .04em; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
-.dbx-side-filter { margin: 0 8px 6px; flex-shrink: 0; }
+.dbx-side-filter { width: calc(100% - 16px); margin: 0 8px 6px; flex-shrink: 0; }
 .dbx-tree { flex: 1; overflow: auto; padding: 0 6px 8px; font-size: var(--dbx-fs-body); }
 .dbx-crow { display: flex; align-items: center; gap: 6px; width: 100%; height: var(--dbx-h-control); padding: 0 8px 0 4px; border-radius: 6px; white-space: nowrap; text-align: left; }
 .dbx-crow:hover { background: hsl(var(--secondary) / .7); }
@@ -133,7 +136,7 @@
 .dbx-stdot.bad { background: hsl(var(--destructive)); }
 .dbx-crow[data-drop] { box-shadow: inset 0 2px 0 hsl(var(--primary)); }
 .dbx-sgroup { font-size: var(--dbx-fs-meta); font-weight: 600; color: hsl(var(--muted-foreground)); padding: 6px 6px 2px; display: flex; align-items: center; gap: 4px; width: 100%; text-align: left; }
-.dbx-trow { display: flex; align-items: center; gap: 6px; width: 100%; height: 24px; border-radius: 6px; padding-right: 6px; white-space: nowrap; text-align: left; }
+.dbx-trow { display: flex; align-items: center; gap: 6px; width: 100%; height: var(--dbx-h-icon); border-radius: var(--r-control); padding-right: 6px; white-space: nowrap; text-align: left; }
 .dbx-trow:hover { background: hsl(var(--secondary) / .7); }
 .dbx-trow[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
 .dbx-trow .nm { overflow: hidden; text-overflow: ellipsis; }
@@ -146,7 +149,7 @@
 .dbx-favbtn:hover { color: hsl(var(--dbx-fav)); background: hsl(var(--secondary)); }
 .dbx-favbtn[data-on] { color: hsl(var(--dbx-fav)); }
 .dbx-favbtn[data-on] svg { fill: hsl(var(--dbx-fav)); }
-.dbx-favbtn:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; opacity: 1; }
+.dbx-favbtn:focus-visible { opacity: 1; }
 .dbx-tree-note { padding: 4px 8px; font-size: 11.5px; color: hsl(var(--muted-foreground)); }
 
 /* 侧栏顶部跨连接收藏：连接名放右侧，同名表在不同库之间也能分清 */
@@ -159,80 +162,81 @@
 
 /* ── 结果区 ── */
 .dbx-res { display: flex; flex-direction: column; border-top: 1px solid hsl(var(--border)); background: hsl(var(--card)); flex-shrink: 0; min-height: 0; }
-/* 结果条：结果标签、行数/耗时、筛选/复制/导出/详情同住一条 32px 横带 */
-.dbx-rbar { display: flex; align-items: center; gap: 6px; height: var(--dbx-h-bar); padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--card)); flex-shrink: 0; min-width: 0; overflow: hidden; }
+/* 结果条窄时换行：筛选、复制、导出和保存入口不能被结果标签挤出视口。 */
+.dbx-rbar { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 6px; min-height: var(--dbx-h-bar); padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); flex-shrink: 0; min-width: 0; }
 .dbx-rtabs { display: flex; align-items: center; gap: 2px; height: var(--dbx-h-bar); min-width: 0; max-width: 55%; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex-shrink: 0; }
 .dbx-rtabs::-webkit-scrollbar { display: none; }
 .dbx-rtab { display: flex; align-items: center; gap: 5px; height: var(--dbx-h-bar); padding: 0 9px; font-size: var(--dbx-fs-body); color: hsl(var(--muted-foreground)); position: relative; white-space: nowrap; flex-shrink: 0; }
-.dbx-rtab[data-on] { color: hsl(var(--foreground)); font-weight: 600; }
+.dbx-rtab[data-on] { color: hsl(var(--primary)); font-weight: 600; }
 .dbx-rtab[data-on]::after { content: ""; position: absolute; left: 7px; right: 7px; bottom: 0; height: 2px; background: hsl(var(--primary)); }
 .dbx-rtab .bad { color: hsl(var(--destructive-ink)); }
 .dbx-cnt { font-size: var(--dbx-fs-badge); padding: 0 5px; border-radius: 8px; background: hsl(var(--secondary)); color: hsl(var(--muted-foreground)); font-weight: 600; }
-.dbx-rbar .meta { color: hsl(var(--muted-foreground)); white-space: nowrap; font-size: var(--dbx-fs-meta); }
+.dbx-rbar .meta { color: hsl(var(--muted-foreground)); min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--dbx-fs-meta); }
 .dbx-rbar .meta b { color: hsl(var(--foreground)); font-weight: 600; }
 .dbx-rbar .dbx-inp { width: 180px; }
 .dbx-rbar .dbx-btn { padding: 0 7px; }
 /* 排序 / 筛选后的一行说明：只在这两件事真的生效时占用宽度 */
 .dbx-localhint { color: hsl(var(--warning-ink)); font-size: var(--dbx-fs-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; }
 .dbx-busy { display: inline-flex; align-items: center; gap: 4px; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); white-space: nowrap; }
-/* 多结果集 / 导出进度：条件出现的 26px 副条，不占常驻高度 */
-.dbx-rsub { display: flex; align-items: center; gap: 6px; height: var(--dbx-h-control); padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--secondary) / .25); font-size: var(--dbx-fs-meta); flex-shrink: 0; overflow: hidden; }
-.dbx-rtool { display: flex; align-items: center; gap: 6px; height: var(--dbx-h-bar); padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); font-size: var(--dbx-fs-meta); flex-shrink: 0; }
+/* 多结果集 / 导出进度：条件出现，不占常驻高度。 */
+.dbx-rsub { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 6px; min-height: var(--dbx-h-tab); padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); font-size: var(--dbx-fs-meta); flex-shrink: 0; min-width: 0; }
+.dbx-rtool { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 6px; min-height: var(--dbx-h-bar); padding: 3px 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); font-size: var(--dbx-fs-meta); flex-shrink: 0; }
 .dbx-rtool .meta { color: hsl(var(--muted-foreground)); white-space: nowrap; }
 .dbx-rtool .meta b { color: hsl(var(--foreground)); font-weight: 600; }
 .dbx-rtool .dbx-inp { width: 200px; }
 .dbx-rbody { flex: 1; min-height: 0; display: flex; overflow: hidden; }
-.dbx-rfoot { display: flex; align-items: center; gap: 10px; height: var(--dbx-h-control); padding: 0 10px; border-top: 1px solid hsl(var(--border)); font-size: var(--dbx-fs-meta); color: hsl(var(--muted-foreground)); flex-shrink: 0; }
-.dbx-lk { color: hsl(var(--primary)); font-weight: 600; }
+.dbx-rfoot { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 10px; min-height: var(--dbx-h-control); padding: 3px 10px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); font-size: var(--dbx-fs-meta); color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+.dbx-lk { color: hsl(var(--primary)); font-weight: 600; flex-shrink: 0; white-space: nowrap; }
 .dbx-lk:disabled { opacity: .5; }
 /* 查询设置浮层（每次取 / 超时）：从底栏搬进结果条的齿轮里 */
 .dbx-qset { width: 220px; padding: 8px; font-size: var(--dbx-fs-body); }
-.dbx-qset label { display: flex; align-items: center; gap: 6px; height: 30px; color: hsl(var(--muted-foreground)); }
-.dbx-qset input { width: 84px; height: var(--dbx-h-icon); margin-left: auto; padding: 0 6px; border: 1px solid hsl(var(--border)); border-radius: 5px; background: hsl(var(--background)); font-size: var(--dbx-fs-body); color: hsl(var(--foreground)); }
+.dbx-qset label { display: flex; align-items: center; gap: 6px; min-height: var(--dbx-h-bar); color: hsl(var(--muted-foreground)); }
+.dbx-qset input { width: 84px; height: var(--dbx-h-control); margin-left: auto; padding: 0 6px; border: 1px solid hsl(var(--border)); border-radius: var(--r-control); background: hsl(var(--card)); font-size: var(--dbx-fs-body); color: hsl(var(--foreground)); }
 
 /* A2：Autotrace 统计（逻辑读 / 物理读）。读不到时整块不渲染 */
 .dbx-stats { display: inline-flex; align-items: center; gap: 4px; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
 
 /* A4：流式导出的进度 / 结果条（住在 `.dbx-rsub` 里） */
-.dbx-exportbar { display: flex; align-items: center; gap: 8px; height: var(--dbx-h-control); font-size: var(--dbx-fs-meta); color: hsl(var(--foreground)); flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+.dbx-exportbar { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 8px; min-height: var(--dbx-h-control); font-size: var(--dbx-fs-meta); color: hsl(var(--foreground)); flex: 1; min-width: 0; }
 .dbx-exportbar .bad { color: hsl(var(--destructive-ink)); }
-.dbx-exportbar .dbx-mono { font-family: "Cascadia Mono", Consolas, monospace; }
+.dbx-exportbar .dbx-mono { font-family: "Cascadia Mono", Consolas, monospace; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 一个结果里的多个结果集（dbms_sql.return_result）：小标签 + 表格，整体还是纵向铺满 */
 .dbx-rset { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
-.dbx-settabs { display: flex; align-items: center; height: var(--dbx-h-control); gap: 2px; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex-shrink: 0; }
-.dbx-settab { display: flex; align-items: center; gap: 5px; height: var(--dbx-h-control); padding: 0 8px; font-size: var(--dbx-fs-meta); color: hsl(var(--muted-foreground)); position: relative; white-space: nowrap; flex-shrink: 0; }
-.dbx-settab[data-on] { color: hsl(var(--foreground)); font-weight: 600; }
+.dbx-settabs { display: flex; align-items: center; height: var(--dbx-h-tab); gap: 2px; min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex-shrink: 0; }
+.dbx-settab { display: flex; align-items: center; gap: 5px; height: var(--dbx-h-tab); padding: 0 8px; font-size: var(--dbx-fs-meta); color: hsl(var(--muted-foreground)); position: relative; white-space: nowrap; flex-shrink: 0; }
+.dbx-settab[data-on] { color: hsl(var(--primary)); font-weight: 600; }
 .dbx-settab[data-on]::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: 0; height: 2px; background: hsl(var(--primary)); }
 
 /* ── 结果表（手写虚拟滚动） ── */
 .dbx-grid { flex: 1; min-width: 0; overflow: auto; position: relative; font: 12px "Cascadia Mono", Consolas, monospace; outline: none; }
 .dbx-grid-inner { position: relative; }
 .dbx-grow { display: flex; position: absolute; left: 0; height: 26px; }
-.dbx-ghead { display: flex; position: sticky; top: 0; z-index: 2; height: 34px; background: hsl(var(--secondary)); }
+.dbx-ghead { display: flex; position: sticky; top: 0; z-index: 2; height: 34px; background: hsl(var(--chrome)); }
 /* 只留横线 + 隔行底色：竖线一多，宽表就像一张 Excel 格纸，读数反而跳 */
 .dbx-gc { flex-shrink: 0; height: 26px; line-height: 25px; padding: 0 8px; border-bottom: 1px solid hsl(var(--border) / .55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: hsl(var(--card)); cursor: default; }
-.dbx-grow[data-odd] .dbx-gc { background: hsl(var(--secondary) / .3); }
+.dbx-grow[data-odd] .dbx-gc { background: color-mix(in srgb, hsl(var(--chrome)) 35%, hsl(var(--card))); }
 .dbx-gc.n { text-align: right; }
-.dbx-gc.null { color: hsl(var(--muted-foreground) / .8); font-style: italic; }
-.dbx-gc.rn { text-align: right; color: hsl(var(--muted-foreground) / .8); background: hsl(var(--secondary) / .55); position: sticky; left: 0; z-index: 1; }
-.dbx-grow[data-odd] .dbx-gc.rn { background: hsl(var(--secondary) / .7); }
-.dbx-grow[data-sel] .dbx-gc, .dbx-grow[data-sel] .dbx-gc.rn { background: hsl(var(--accent) / .7); }
+.dbx-gc.null { color: hsl(var(--muted-foreground)); font-style: italic; }
+.dbx-gc.rn { text-align: right; color: hsl(var(--muted-foreground)); background: hsl(var(--chrome)); position: sticky; left: 0; z-index: 1; }
+.dbx-grow[data-odd] .dbx-gc.rn { background: hsl(var(--chrome)); }
+.dbx-grow[data-sel] .dbx-gc, .dbx-grow[data-sel] .dbx-gc.rn { background: hsl(var(--accent)); }
 .dbx-gc[data-cell] { outline: 2px solid hsl(var(--primary)); outline-offset: -2px; background: hsl(var(--accent)) !important; }
+.dbx-gc[data-focus-container]:focus-within { outline-offset: -2px; }
 .dbx-gc.chg { background: hsl(var(--warning) / .18); }
-.dbx-gh { flex-shrink: 0; position: relative; height: 34px; padding: 2px 8px 0; border-bottom: 1px solid hsl(var(--border)); font: 600 12px system-ui, "Segoe UI", sans-serif; white-space: nowrap; overflow: hidden; text-align: left; background: hsl(var(--secondary)); }
+.dbx-gh { flex-shrink: 0; position: relative; height: 34px; padding: 2px 8px 0; border-bottom: 1px solid hsl(var(--border)); font: 600 12px system-ui, "Segoe UI", sans-serif; white-space: nowrap; overflow: hidden; text-align: left; background: hsl(var(--chrome)); }
 .dbx-gh .t { display: block; font: 10.5px "Cascadia Mono", Consolas, monospace; color: hsl(var(--muted-foreground)); font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
 .dbx-gh .nm { overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: calc(100% - 14px); vertical-align: top; }
 .dbx-gh .so { float: right; color: hsl(var(--primary)); }
 .dbx-gh.rn { position: sticky; left: 0; z-index: 3; }
 .dbx-gh .rz { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 1; }
 .dbx-gedit { width: 100%; height: 22px; border: 0; outline: none; padding: 0 2px; font: inherit; background: hsl(var(--background)); color: hsl(var(--foreground)); }
-.dbx-detail { width: 270px; border-left: 1px solid hsl(var(--border)); display: flex; flex-direction: column; flex-shrink: 0; font-size: 12px; min-height: 0; }
-.dbx-detail .hd { display: flex; align-items: flex-start; gap: 6px; padding: 8px 10px; border-bottom: 1px solid hsl(var(--border)); }
+.dbx-detail { width: 270px; max-width: 55%; border-left: 1px solid hsl(var(--border)); background: hsl(var(--card)); display: flex; flex-direction: column; flex-shrink: 0; font-size: 12px; min-height: 0; }
+.dbx-detail .hd { display: flex; align-items: flex-start; gap: 6px; padding: 8px 10px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); }
 .dbx-detail .hd b { font-family: "Cascadia Mono", Consolas, monospace; }
 .dbx-detail .hd .s { color: hsl(var(--muted-foreground)); font-size: 11.5px; margin-top: 2px; }
 .dbx-detail pre { flex: 1; margin: 0; padding: 8px 10px; font: 12px/18px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; word-break: break-all; overflow: auto; }
-.dbx-detail .ft { display: flex; gap: 6px; padding: 6px 8px; border-top: 1px solid hsl(var(--border)); }
+.dbx-detail .ft { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); }
 
 /* ── 输出 / 计划 / 错误 ── */
 .dbx-output { flex: 1; overflow: auto; padding: 6px 12px; font: 12px/19px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; }
@@ -263,8 +267,8 @@
 .dbx-err pre { margin-top: 6px; font: 11.5px/17px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; color: hsl(var(--foreground) / .8); }
 
 /* ── 历史抽屉 ── */
-.dbx-drawer { width: 330px; border-left: 1px solid hsl(var(--border)); background: hsl(var(--card)); display: flex; flex-direction: column; flex-shrink: 0; min-height: 0; }
-.dbx-drawer .hd { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 6px 0 12px; border-bottom: 1px solid hsl(var(--border)); font-weight: 600; font-size: 12.5px; flex-shrink: 0; }
+.dbx-drawer { width: 330px; max-width: 55%; border-left: 1px solid hsl(var(--border)); background: hsl(var(--card)); display: flex; flex-direction: column; flex-shrink: 0; min-width: 0; min-height: 0; }
+.dbx-drawer .hd { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 6px; min-height: var(--dbx-h-tab); padding: 3px 6px 3px 12px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); font-weight: 600; font-size: 12.5px; flex-shrink: 0; }
 .dbx-drawer .flt { padding: 6px 8px; border-bottom: 1px solid hsl(var(--border)); flex-shrink: 0; }
 .dbx-drawer .list { flex: 1; overflow: auto; }
 .dbx-hitem { display: block; width: 100%; text-align: left; padding: 8px 12px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; }
@@ -274,7 +278,7 @@
 .dbx-hitem code { display: block; font: 11.5px/17px "Cascadia Mono", Consolas, monospace; white-space: pre; overflow: hidden; text-overflow: ellipsis; max-height: 51px; }
 .dbx-hitem .fail { color: hsl(var(--destructive-ink)); }
 /* 搜索框下面那行开关（全部连接 / 只看失败）：12px 的小控件，别做成整行按钮 */
-.dbx-flags { display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 11.5px; color: hsl(var(--muted-foreground)); }
+.dbx-flags { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 11.5px; color: hsl(var(--muted-foreground)); }
 .dbx-flags label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
 /* 跨连接搜索时的连接名徽章：只在这一列出现，所以做得比正文更淡 */
 .dbx-hconn { padding: 0 5px; border-radius: 5px; background: hsl(var(--secondary)); color: hsl(var(--muted-foreground)); font-size: 10.5px; font-weight: 600; flex-shrink: 0; }
@@ -321,15 +325,18 @@
 .dbx-sess-foot { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-top: 1px solid hsl(var(--border)); font-size: 10.5px; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
 
 /* ── 表页 ── */
-.dbx-subtabs { display: flex; align-items: center; gap: 2px; height: var(--dbx-h-tab); padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--card)); flex-shrink: 0; font-size: var(--dbx-fs-title); }
-.dbx-subtabs .t { padding: 0 10px; height: var(--dbx-h-tab); display: grid; place-items: center; color: hsl(var(--muted-foreground)); position: relative; }
-.dbx-subtabs .t[data-on] { color: hsl(var(--foreground)); font-weight: 600; }
+.dbx-subtabs { display: flex; align-items: center; gap: 2px; height: var(--dbx-h-tab); padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); flex-shrink: 0; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; font-size: var(--dbx-fs-body); }
+.dbx-subtabs .t { padding: 0 10px; height: var(--dbx-h-tab); display: grid; place-items: center; flex-shrink: 0; color: hsl(var(--muted-foreground)); position: relative; white-space: nowrap; }
+.dbx-subtabs .t[data-on] { color: hsl(var(--primary)); font-weight: 600; }
 .dbx-subtabs .t[data-on]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; background: hsl(var(--primary)); }
-.dbx-subtabs .title { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; font-weight: 600; min-width: 0; max-width: 55%; }
+.dbx-subtabs .title { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; font-weight: 600; min-width: 0; max-width: 42%; }
+.dbx-subtabs .title .dbx-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-subtabs .title .dbx-mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dbx-where { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: var(--dbx-fs-body); flex-shrink: 0; }
+.dbx-where { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 8px; min-height: var(--dbx-h-bar); padding: 3px 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); font-size: var(--dbx-fs-body); flex-shrink: 0; }
+.dbx-where-field { display: flex; align-items: center; gap: 8px; flex: 1 1 240px; min-width: 0; }
+.dbx-where-field.order { flex-basis: 200px; max-width: 340px; }
 .dbx-where .kw { font: 600 11px "Cascadia Mono", Consolas, monospace; color: hsl(var(--primary)); flex-shrink: 0; }
-.dbx-where .dbx-inp { height: var(--dbx-h-control); }
+.dbx-where .dbx-inp { height: var(--dbx-h-control); flex: 1; width: auto; }
 .dbx-ddl { flex: 1; overflow: auto; margin: 0; padding: 10px 14px; font: 12.5px/20px "Cascadia Mono", Consolas, monospace; white-space: pre; }
 /* 库内源码：包规范与包体各一段，段头用粘性条区分，滚到一半也知道在看哪一段 */
 .dbx-src { flex: 1; overflow: auto; display: flex; flex-direction: column; }
@@ -337,20 +344,21 @@
   position: sticky; top: 0; z-index: 1; padding: 3px 14px;
   font-size: 11px; font-weight: 600; letter-spacing: .04em;
   color: hsl(var(--muted-foreground));
-  background: hsl(var(--secondary) / .85);
+  background: hsl(var(--chrome));
   border-bottom: 1px solid hsl(var(--border));
-  backdrop-filter: blur(2px);
 }
 .dbx-src .dbx-ddl { overflow: visible; flex: 0 0 auto; }
 .dbx-meta { flex: 1; overflow: auto; }
 .dbx-meta table { border-collapse: collapse; width: 100%; font-size: 12px; }
-.dbx-meta th, .dbx-meta td { padding: 4px 10px; text-align: left; border-bottom: 1px solid hsl(var(--border)); white-space: nowrap; }
-.dbx-meta th { background: hsl(var(--secondary) / .6); font-weight: 600; position: sticky; top: 0; }
+.dbx-meta th, .dbx-meta td { height: 30px; padding: 4px 10px; text-align: left; border-bottom: 1px solid hsl(var(--border)); white-space: nowrap; }
+.dbx-meta th { background: hsl(var(--chrome)); font-weight: 600; position: sticky; top: 0; }
+.dbx-meta tbody tr:nth-child(even) { background: color-mix(in srgb, hsl(var(--chrome)) 35%, hsl(var(--card))); }
+.dbx-meta tbody tr:hover { background: hsl(var(--accent)); }
 .dbx-meta td.mono { font-family: "Cascadia Mono", Consolas, monospace; }
-.dbx-meta .pk { color: #d97706; font-weight: 700; }
+.dbx-meta .pk { color: hsl(var(--warning-ink)); font-weight: 700; }
 
 /* ── 对话框 ── */
-.dbx-dlg { width: 620px; max-width: calc(100vw - 32px); max-height: calc(100vh - 48px); display: flex; flex-direction: column; border-radius: 12px; font-size: 12.5px; overflow: hidden; }
+.dbx-dlg { width: 620px; max-width: calc(100vw - 32px); max-height: calc(100vh - 48px); display: flex; flex-direction: column; border-radius: var(--r-dialog); font-size: 12.5px; overflow: hidden; }
 .dbx-dlg.sm { width: 460px; }
 /* 导入向导要摊开「文件列 / 样例 / 目标列」三列，620px 挤不下 */
 .dbx-dlg.wide { width: 860px; }
@@ -362,16 +370,16 @@
 .dbx-mapgrid select { width: 100%; min-width: 0; }
 .dbx-dlg .hd { display: flex; align-items: center; gap: 8px; padding: 14px 16px 0; font-size: 14px; font-weight: 600; }
 .dbx-dlg .tabs { display: flex; gap: 2px; padding: 10px 16px 0; border-bottom: 1px solid hsl(var(--border)); }
-.dbx-dlg .tabs button { padding: 6px 10px; font-size: 12.5px; color: hsl(var(--muted-foreground)); position: relative; }
+.dbx-dlg .tabs button { height: var(--dbx-h-tab); padding: 0 10px; font-size: 12.5px; color: hsl(var(--muted-foreground)); position: relative; }
 .dbx-dlg .tabs button[data-on] { color: hsl(var(--foreground)); font-weight: 600; }
 .dbx-dlg .tabs button[data-on]::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: -1px; height: 2px; background: hsl(var(--primary)); }
 .dbx-dlg .bd { padding: 14px 16px; display: grid; grid-template-columns: 76px 1fr; gap: 10px 12px; align-items: center; overflow: auto; }
 .dbx-dlg .bd > label { color: hsl(var(--muted-foreground)); text-align: right; }
 .dbx-dlg .bd.one { display: block; }
-.dbx-dlg .ft { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--secondary) / .4); }
+.dbx-dlg .ft { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); }
 .dbx-dlg pre.sql { margin: 0; padding: 8px 10px; border-radius: 8px; background: hsl(var(--secondary) / .6); font: 11.5px/18px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; max-height: 220px; overflow: auto; }
 .dbx-envs { display: flex; gap: 6px; flex-wrap: wrap; }
-.dbx-envs > button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid hsl(var(--border)); font-size: 12px; }
+.dbx-envs > button { display: inline-flex; align-items: center; gap: 6px; height: var(--dbx-h-control); padding: 0 10px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); font-size: 12px; }
 .dbx-envs > button[data-on] { border-color: hsl(var(--env)); background: hsl(var(--env) / .12); color: hsl(var(--env-ink)); font-weight: 600; }
 .dbx-row2 { display: grid; grid-template-columns: 1fr 90px; gap: 8px; }
 .dbx-row3 { display: grid; grid-template-columns: 1fr 70px 1fr; gap: 8px; align-items: center; }

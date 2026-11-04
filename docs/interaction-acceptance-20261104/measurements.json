@@ -1,0 +1,84 @@
+{
+  "measurements": [
+    {
+      "width": 1280,
+      "overflow": false,
+      "left": 848,
+      "right": 1268,
+      "panels": [
+        ":r1:"
+      ],
+      "editors": 1,
+      "statusClipped": [],
+      "statusOverflow": false,
+      "dark": false
+    },
+    {
+      "width": 1280,
+      "overflow": false,
+      "left": 848,
+      "right": 1268,
+      "panels": [
+        ":r1:"
+      ],
+      "editors": 1,
+      "statusClipped": [],
+      "statusOverflow": false,
+      "dark": true
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "left": 592,
+      "right": 1012,
+      "panels": [
+        ":r1:"
+      ],
+      "editors": 1,
+      "statusClipped": [],
+      "statusOverflow": false,
+      "dark": false
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "left": 592,
+      "right": 1012,
+      "panels": [
+        ":r1:"
+      ],
+      "editors": 1,
+      "statusClipped": [],
+      "statusOverflow": false,
+      "dark": true
+    },
+    {
+      "width": 560,
+      "overflow": false,
+      "left": 128,
+      "right": 548,
+      "panels": [
+        ":r1:"
+      ],
+      "editors": 1,
+      "statusClipped": [],
+      "statusOverflow": false,
+      "dark": false
+    },
+    {
+      "width": 560,
+      "overflow": false,
+      "left": 128,
+      "right": 548,
+      "panels": [
+        ":r1:"
+      ],
+      "editors": 1,
+      "statusClipped": [],
+      "statusOverflow": false,
+      "dark": true
+    }
+  ],
+  "errors": [],
+  "reads": 1
+}

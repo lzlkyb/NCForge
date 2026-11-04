@@ -27,15 +27,15 @@ function formulaRisk(s: string): boolean {
   return false;
 }
 
-const guard = (s: string) => (formulaRisk(s) ? `'${s}` : s);
+export const spreadsheetCell = (s: string) => (formulaRisk(s) ? `'${s}` : s);
 
 export function toTsv(columns: ColumnMeta[], rows: Cell[][], header = true): string {
-  const body = rows.map((r) => r.map((v) => guard(plain(v)).replace(/[\t\r\n]+/g, " ")).join("\t"));
+  const body = rows.map((r) => r.map((v) => spreadsheetCell(plain(v)).replace(/[\t\r\n]+/g, " ")).join("\t"));
   return (header ? [columns.map((c) => c.name).join("\t"), ...body] : body).join("\n");
 }
 
 function csvField(s: string): string {
-  const g = guard(s);
+  const g = spreadsheetCell(s);
   return g !== s || /[",\r\n]/.test(s) ? `"${g.replace(/"/g, '""')}"` : s;
 }
 

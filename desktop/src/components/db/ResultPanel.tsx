@@ -8,7 +8,7 @@ import { statsText, statsTitle } from "../../lib/dbStats";
 import { ownsCursor, patchTab, rtOf, summaryOf, type ResultEntry, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台下半：每条语句一个结果标签 + 执行计划 + 输出。 */
-export function ResultPanel({ tab, height }: { tab: SqlTab; height: number }) {
+export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: number; onLocate?:(line:number)=>void }) {
   const view = tab.view ?? tab.results[tab.results.length - 1]?.id ?? "output";
   const cur = tab.results.find((r) => r.id === view);
   const setView = (v: string) => patchTab<SqlTab>(tab.id, { view: v });
@@ -45,7 +45,7 @@ export function ResultPanel({ tab, height }: { tab: SqlTab; height: number }) {
       ) : (
         <>
           <ViewBar tabs={tabs} running={tab.running} />
-          <EntryView tab={tab} entry={cur} tables={tables} autoCommit={autoCommit} />
+          <EntryView tab={tab} entry={cur} tables={tables} autoCommit={autoCommit} onLocate={onLocate} />
         </>
       )}
     </div>
@@ -94,8 +94,8 @@ function ViewBar({ tabs, running }: { tabs: ReactNode; running: boolean }) {
   );
 }
 
-function EntryView({ tab, entry, tables, autoCommit }: { tab: SqlTab; entry: ResultEntry; tables: string[]; autoCommit?: boolean }) {
-  if (entry.kind === "error") return <div style={{ overflow: "auto" }}><DbErrorBox error={entry.error ?? ""} sql={entry.sql} knownTables={tables} index={tab.results.length > 1 ? entry.index : undefined} /></div>;
+function EntryView({ tab, entry, tables, autoCommit, onLocate }: { tab: SqlTab; entry: ResultEntry; tables: string[]; autoCommit?: boolean; onLocate?:(line:number)=>void }) {
+  if (entry.kind === "error") return <div style={{ overflow: "auto" }}><DbErrorBox error={entry.error ?? ""} sql={entry.sql} knownTables={tables} connId={tab.connId} onLocate={()=>onLocate?.(entry.startLine ?? 1)} index={tab.results.length > 1 ? entry.index : undefined} /></div>;
   if (entry.kind === "update")
     return (
       <div className="dbx-update">

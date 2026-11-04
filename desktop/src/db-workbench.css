@@ -1,0 +1,45 @@
+/* Operate surfaces retain opaque reading backgrounds inside the glass shell. */
+.dbx-context, .dbx-read-status, .dbx-finder-entry { flex: none; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 10px; border-bottom:1px solid hsl(var(--border)); font-size:var(--dbx-fs-body); }
+.dbx-context { background:hsl(var(--card)); }
+.dbx-context[data-prod] { border-left:3px solid hsl(var(--destructive)); }
+.dbx-context strong {font-size:var(--dbx-fs-title);}
+.dbx-context .dbx-btn {margin-left:auto;}
+.dbx-read-status {color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);overflow-wrap:anywhere;}
+.dbx-filterbar {flex:none; padding:8px 10px; border-bottom:1px solid hsl(var(--border)); max-height:240px; overflow:auto; background:hsl(var(--card));}
+.dbx-filter-actions {display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:4px 0;}
+.dbx-filterbar select,.dbx-object-dialog select {min-height:var(--dbx-h-control);border:1px solid hsl(var(--border));border-radius:var(--r-control);padding:3px 6px;background:hsl(var(--background));color:hsl(var(--foreground));font-size:var(--dbx-fs-body);min-width:0;}
+.dbx-condition {display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px;}
+.dbx-condition label {display:flex;align-items:center;gap:6px;min-width:0;}
+.dbx-condition .dbx-inp {width:180px;max-width:100%;}
+.dbx-filter-sql {margin-top:6px;font-size:var(--dbx-fs-meta);color:hsl(var(--muted-foreground));}
+.dbx-filter-sql pre {white-space:pre-wrap;overflow-wrap:anywhere;}
+.dbx-object-dialog,.dbx-column-dialog,.dbx-compare-dialog,.dbx-relations-dialog {width:min(760px,calc(100vw - 32px));max-height:calc(100dvh - 40px);overflow:auto;padding:20px;color:hsl(var(--foreground));display:flex;flex-direction:column;gap:10px;}
+.dbx-object-dialog h2,.dbx-column-dialog h2,.dbx-compare-dialog h2,.dbx-relations-dialog h2 {font-size:18px;line-height:1.4;margin:0;}
+.dbx-object-options,.dbx-column-list,.dbx-diff-list {max-height:340px;overflow:auto;min-height:0;}
+.dbx-object-options button {display:grid;grid-template-columns:minmax(160px,1fr) minmax(100px,1fr);text-align:left;width:100%;gap:4px 12px;padding:10px;border-bottom:1px solid hsl(var(--border));color:hsl(var(--foreground));}
+.dbx-object-options button small {grid-column:1 / -1;color:hsl(var(--muted-foreground));}
+.dbx-object-options button[aria-selected="true"] {background:hsl(var(--accent));color:hsl(var(--accent-foreground));}
+.dbx-column-list>div {display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid hsl(var(--border));}
+.dbx-column-list label:first-child {flex:1;overflow-wrap:anywhere;}
+.dbx-column-list label,.dbx-compare-dialog fieldset label {display:flex;gap:6px;align-items:center;}
+.dbx-compare-dialog fieldset {display:flex;flex-wrap:wrap;gap:10px;padding:10px;border:1px solid hsl(var(--border));}
+.dbx-change-review {flex:none;max-height:220px;overflow:auto;padding:8px 10px;border-top:1px solid hsl(var(--border));background:hsl(var(--card));}
+.dbx-change-review h3 {font-size:var(--dbx-fs-body);margin:0 0 6px;}
+.dbx-change-review table {width:100%;border-collapse:collapse;font-size:var(--dbx-fs-body);}
+.dbx-change-review td,.dbx-change-review th {padding:6px;text-align:left;border-bottom:1px solid hsl(var(--border));max-width:260px;overflow-wrap:anywhere;white-space:pre-wrap;}
+.dbx-diff-list>div,.dbx-relation {border-bottom:1px solid hsl(var(--border));padding:10px 0;}
+.dbx-diff-list pre,.dbx-compare-dialog pre {white-space:pre-wrap;overflow-wrap:anywhere;}
+.dbx-relation {display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+.dbx-relation span {color:hsl(var(--muted-foreground));overflow-wrap:anywhere;}
+.dbx-relation .dbx-btn {margin-left:auto;}
+.dbx-rbar {flex-wrap:wrap;height:auto;min-height:var(--dbx-h-bar);flex-shrink:0;}
+.dbx-gc.rn {position:sticky;left:0;z-index:3;background:hsl(var(--card));cursor:pointer;}
+.dbx-gh {cursor:pointer;}
+@media(max-width:720px) {
+ .dbx-condition>* {max-width:100%;}
+ .dbx-condition .dbx-inp {flex:1;min-width:100px;}
+ .dbx-object-options button {grid-template-columns:1fr;}
+ .dbx-context {gap:4px 8px;}
+ .dbx-filterbar {max-height:200px;}
+ .dbx-object-dialog,.dbx-column-dialog,.dbx-compare-dialog,.dbx-relations-dialog {padding:14px;}
+}

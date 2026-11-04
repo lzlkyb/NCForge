@@ -105,6 +105,7 @@ export function OverrideEditor({
         </select>
         <input
           className="lnk-inp"
+          aria-label={action === "add" ? "关联工程名，可留空" : "覆盖的工程名或工程根目录"}
           placeholder={action === "add" ? "工程名（可留空）" : "工程名或工程根绝对路径"}
           value={target}
           onChange={(e) => setTarget(e.target.value)}
@@ -118,6 +119,7 @@ export function OverrideEditor({
         {action === "add" && (
           <input
             className="lnk-inp mono"
+            aria-label="追加类目录或 jar 的绝对路径"
             placeholder="类目录 / jar 的绝对路径"
             value={dir}
             onChange={(e) => setDir(e.target.value)}

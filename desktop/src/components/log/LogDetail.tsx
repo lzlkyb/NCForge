@@ -1,4 +1,5 @@
 import { Icon } from "../ui/icon";
+import { Menu, MenuItem } from "../ui/Menu";
 import {
   entryTitle,
   severityMeta,
@@ -29,6 +30,7 @@ function jumpLabel(entry: LogEntry): string | null {
  */
 export function LogDetail({
   entry,
+  entryOutsideList = false,
   trace,
   tracing,
   onTrace,
@@ -36,6 +38,7 @@ export function LogDetail({
   onClearTrace,
 }: {
   entry: LogEntry | null;
+  entryOutsideList?: boolean;
   trace: TraceResult | null;
   tracing: boolean;
   onTrace: (callId: string) => void;
@@ -47,7 +50,7 @@ export function LogDetail({
       <div className="lg-detail lg-detail-empty">
         <p>选一条记录看详情</p>
         <p className="lg-empty-hint">
-          每条结论都会说明「为什么」和「下一步」；有 callid 的还能追踪这一次请求的完整链路。
+          每条结论都会说明「为什么」和「下一步」；有 callid 的可在高级操作中追踪请求链路。
         </p>
       </div>
     );
@@ -57,6 +60,7 @@ export function LogDetail({
   const meta = verdict ? severityMeta(verdict.severity) : null;
   const jump = jumpLabel(entry);
   const isSql = entry.costMs !== null;
+  const currentTrace = trace?.callId === entry.callId ? trace : null;
 
   return (
     <div className="lg-detail">
@@ -66,18 +70,13 @@ export function LogDetail({
         </span>
         <strong>{entryTitle(entry)}</strong>
         <span className="lg-sp" />
-        {entry.callId && (
-          <button
-            type="button"
-            className="lg-btn"
-            disabled={tracing}
-            title={entry.callId}
-            onClick={() => onTrace(entry.callId!)}
-          >
-            <Icon name="activity" size={13} />
-            追踪这次请求
-          </button>
-        )}
+        {entry.callId && <Menu portal trigger={(open, toggle) => <button type="button" className="lg-btn"
+          aria-haspopup="menu" aria-expanded={open} disabled={tracing} onClick={toggle}>
+          {tracing ? "正在追踪…" : "高级操作"}<Icon name="chevronDown" size={12} />
+        </button>}>
+          {(close) => <MenuItem label="追踪这次请求" icon="activity" disabled={tracing}
+            onClick={() => { close(); onTrace(entry.callId!); }} />}
+        </Menu>}
         {jump && (
           <button type="button" className="lg-btn" onClick={() => void runJump(verdict!.jump!)}>
             <Icon name="external" size={13} />
@@ -100,10 +99,15 @@ export function LogDetail({
           className="lg-btn"
           onClick={() => void copyWithToast(entry.msg, "消息")}
           title="复制这条记录的消息"
+          aria-label="复制这条记录的消息"
         >
           <Icon name="copy" size={13} />
         </button>
       </div>
+
+      {entryOutsideList && (
+        <p className="lg-empty-hint" role="status">此记录不在当前列表中；详情已保留。</p>
+      )}
 
       {verdict && (
         <div className="lg-why" data-sev={verdict.severity}>
@@ -144,27 +148,27 @@ export function LogDetail({
         </details>
       )}
 
-      {trace && (
+      {currentTrace && (
         <div className="lg-trace">
           <div className="lg-trace-head">
             <Icon name="activity" size={13} />
             <strong>同一次请求</strong>
             <span className="lg-sub">
-              callid {trace.callId} · {trace.entries.length} 条 · {trace.elapsedMs}ms
+              callid {currentTrace.callId} · {currentTrace.entries.length} 条 · {currentTrace.elapsedMs}ms
             </span>
             <span className="lg-sp" />
-            <button type="button" className="lg-btn" onClick={onClearTrace}>
+            <button type="button" className="lg-btn" aria-label="清除请求追踪" onClick={onClearTrace}>
               <Icon name="close" size={12} />
             </button>
           </div>
-          {trace.entries.length === 0 ? (
+          {currentTrace.entries.length === 0 ? (
             <p className="lg-empty-hint">
-              只扫到 {trace.scannedFiles.length} 个文件里有这个 callid，但没解析出记录 ——
+              只扫到 {currentTrace.scannedFiles.length} 个文件里有这个 callid，但没解析出记录 ——
               可能日志已轮转掉了。
             </p>
           ) : (
             <ol className="lg-timeline">
-              {trace.entries.map((t, i) => (
+              {currentTrace.entries.map((t, i) => (
                 <li key={`${t.file}:${t.lineNo}:${i}`}>
                   <button
                     type="button"

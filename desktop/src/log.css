@@ -15,20 +15,24 @@
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: hsl(var(--background));
+  flex: 1;
+  min-width: 0;
+  background: hsl(var(--card));
 }
 
 /* ── 顶部 ── */
 .lg-head-wrap {
   flex-shrink: 0;
   border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--chrome));
 }
 .lg-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 46px;
-  padding: 0 16px;
+  min-height: 36px;
+  padding: 6px 12px;
+  flex-wrap: wrap;
 }
 .lg-head h1 {
   font-size: 13.5px;
@@ -55,7 +59,7 @@
 }
 .lg-field select,
 .lg-field input {
-  height: 26px;
+  height: 30px;
   padding: 0 6px;
   border-radius: var(--radius-md);
   border: 1px solid hsl(var(--border));
@@ -79,10 +83,12 @@
   cursor: pointer;
 }
 .lg-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 26px;
+  height: 30px;
   padding: 0 9px;
   border-radius: var(--radius-md);
   border: 1px solid hsl(var(--border));
@@ -104,18 +110,19 @@
 .lg-chips {
   display: flex;
   gap: 6px;
-  padding: 0 16px 8px;
+  padding: 0 12px 8px;
   overflow-x: auto;
   scrollbar-width: thin;
 }
 .lg-chip {
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 5px;
   flex-shrink: 0;
-  height: 24px;
+  height: 28px;
   padding: 0 8px 0 9px;
-  border-radius: 999px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   background: transparent;
   color: hsl(var(--muted-foreground));
@@ -129,9 +136,9 @@
   color: hsl(var(--foreground));
 }
 .lg-chip[data-on] {
-  background: hsl(var(--primary) / 0.14);
-  border-color: hsl(var(--primary) / 0.4);
-  color: hsl(var(--primary));
+  background: hsl(var(--accent));
+  border-color: hsl(var(--primary) / 0.35);
+  color: hsl(var(--accent-foreground));
 }
 /* 只有轮转旧文件、再没写过的 logger：弱化但不隐藏 */
 .lg-chip[data-idle] {
@@ -193,7 +200,7 @@
   background: hsl(var(--accent) / 0.6);
 }
 .lg-row[data-active] {
-  background: hsl(var(--primary) / 0.12);
+  background: hsl(var(--accent));
 }
 .lg-row-icon {
   display: inline-flex;
@@ -263,7 +270,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 0 16px 8px;
+  padding: 0 12px 8px;
 }
 .lg-search-row {
   display: flex;
@@ -277,7 +284,7 @@
 .lg-search-inp {
   flex: 1;
   min-width: 120px;
-  height: 26px;
+  height: 30px;
   padding: 0 8px;
   border-radius: var(--radius-md);
   border: 1px solid hsl(var(--border));
@@ -288,10 +295,6 @@
 }
 .lg-search-inp::placeholder {
   color: hsl(var(--muted-foreground) / 0.8);
-}
-.lg-search-inp:focus-visible {
-  outline: 2px solid hsl(var(--primary) / 0.45);
-  outline-offset: -1px;
 }
 .lg-search-info {
   display: flex;
@@ -383,10 +386,8 @@
   flex-direction: column;
   gap: 6px;
   padding: 9px 11px;
-  border-radius: var(--radius-md);
-  border: 1px solid hsl(var(--border));
-  border-left: 3px solid hsl(var(--warning));
-  background: hsl(var(--card));
+  border-left: 2px solid hsl(var(--warning));
+  background: hsl(var(--muted) / .5);
   font-size: 11.5px;
   line-height: 1.65;
 }
@@ -422,9 +423,12 @@
   max-width: 100%;
 }
 .lg-meta-label {
+  flex-shrink: 0;
+  white-space: nowrap;
   opacity: 0.75;
 }
 .lg-meta-value {
+  min-width: 0;
   max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -550,16 +554,24 @@
     width: 100%;
     min-width: 0;
     border-right: 0;
+    flex: 1 1 45%;
+    min-height: 150px;
   }
   .lg-body {
     flex-direction: column;
   }
   .lg-detail {
     border-top: 1px solid hsl(var(--border));
+    flex: 1 1 55%;
   }
   .lg-head .lg-sub {
     display: none;
   }
+}
+@media (max-width: 650px) {
+  .lg-search-row { flex-wrap:wrap; }
+  .lg-search-inp { flex-basis:calc(100% - 24px); }
+  .lg-head .lg-sp { display:none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

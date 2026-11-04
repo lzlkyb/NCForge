@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("./tauri", () => ({ invoke: mocks.invoke }));
 
-import { __resetDbForTest, execOne, openSqlTab, sqlTabOf, summaryOf, type ResultEntry } from "./dbStore";
+import { __resetDbForTest, closeTab, ensureSlot, execOne, openSqlTab, patchTab, sqlTabOf, summaryOf, type ResultEntry, type SqlTab } from "./dbStore";
 
 /**
  * 结果摘要（结果标签上那截小字）。
@@ -24,6 +24,23 @@ const base: ResultEntry = {
   updateCount: -1,
   ms: 12,
 };
+
+describe("独立槽申请期间的标签身份", () => {
+  beforeEach(() => { mocks.invoke.mockReset(); __resetDbForTest(); });
+  it.each(["close", "switch"])("申请完成前%s标签会释放旧槽，避免错绑或遗留会话", async (change) => {
+    let acquired!: (value: { slot: string }) => void;
+    const waiting = new Promise<{ slot: string }>((resolve) => { acquired = resolve; });
+    mocks.invoke.mockImplementation((cmd: string) => cmd === "db_slot_acquire" ? waiting : Promise.resolve(null));
+    const id = openSqlTab("c1");
+    const task = ensureSlot(id, "c1");
+    if (change === "close") closeTab(id);
+    else patchTab<SqlTab>(id, { connId: "c2", slot: null, tx: undefined });
+    acquired({ slot: "7" });
+    expect(await task).toBeNull();
+    expect(mocks.invoke).toHaveBeenCalledWith("db_slot_release", { id: "c1", slot: "7" });
+    expect(sqlTabOf(id)?.slot).not.toBe("7");
+  });
+});
 
 describe("summaryOf", () => {
   it("单结果集报行数，取满加 +", () => {

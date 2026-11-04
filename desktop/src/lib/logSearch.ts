@@ -29,7 +29,7 @@ export interface SearchScope {
 export type LogSearchState =
   | { phase: "idle" }
   | { phase: "running"; query: string }
-  | { phase: "done"; result: SearchResult; form: SearchForm; key: string }
+  | { phase: "done"; result: SearchResult; form: SearchForm; key: string; updatedAt: number }
   | { phase: "error"; message: string };
 
 /** 范围的稳定指纹：logger 顺序不影响结果，先排序再比。 */
@@ -44,6 +44,8 @@ export function scopeKey(scope: SearchScope): string {
 export function useLogSearch() {
   const [form, setForm] = useState<SearchForm>({ query: "", regex: false, caseSensitive: false });
   const [state, setState] = useState<LogSearchState>({ phase: "idle" });
+  // 重新检索/失败时保留最后成功结果，避免列表和更新时间退回普通查询。
+  const [result, setResult] = useState<Extract<LogSearchState, { phase: "done" }> | null>(null);
   /** 连点两次「检索」时只认最后一次的响应（上次可能更慢）。 */
   const seq = useRef(0);
 
@@ -52,20 +54,22 @@ export function useLogSearch() {
   }, []);
 
   const run = useCallback(
-    async (scope: SearchScope) => {
-      const query = form.query.trim();
+    async (scope: SearchScope, submitted: SearchForm = form) => {
+      const query = submitted.query.trim();
       if (!query) {
         setState({ phase: "error", message: "检索词不能为空" });
         return;
       }
-      const snapshot: SearchForm = { query, regex: form.regex, caseSensitive: form.caseSensitive };
+      const snapshot: SearchForm = { query, regex: submitted.regex, caseSensitive: submitted.caseSensitive };
       const args: SearchArgs = { ...scope, ...snapshot, limit: SEARCH_LIMIT };
       const mine = (seq.current += 1);
       setState({ phase: "running", query });
       try {
         const result = await searchLogs(args);
         if (seq.current !== mine) return;
-        setState({ phase: "done", result, form: snapshot, key: scopeKey(scope) });
+        const completed: Extract<LogSearchState, { phase: "done" }> = { phase: "done", result, form: snapshot, key: scopeKey(scope), updatedAt: Date.now() };
+        setResult(completed);
+        setState(completed);
       } catch (e) {
         if (seq.current !== mine) return;
         setState({ phase: "error", message: failureText("检索日志", e) });
@@ -77,9 +81,10 @@ export function useLogSearch() {
   const clear = useCallback(() => {
     seq.current += 1;
     setState({ phase: "idle" });
+    setResult(null);
   }, []);
 
-  return { form, patch, state, run, clear };
+  return { form, patch, state, result, run, clear };
 }
 
 function stampFile(d: Date): string {

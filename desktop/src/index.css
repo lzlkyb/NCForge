@@ -14,7 +14,7 @@
   --dur-press: 70ms;
   --dur-enter: 180ms;
   --dur-exit: 140ms;
-  --dur-page: 200ms;
+  --dur-page: 170ms;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
@@ -25,6 +25,7 @@
 
 @theme inline {
   --color-background: hsl(var(--background));
+  --color-chrome: hsl(var(--chrome));
   --color-foreground: hsl(var(--foreground));
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
@@ -56,13 +57,11 @@
   --color-ring: hsl(var(--ring));
   --radius: var(--radius);
 
-  /* 圆角档位覆写（2026-10-15 拍板）：把「控件档」从 Tailwind 默认 6px 抬到 8px，
-     对齐设计稿的控件圆角（稿子 .nav-button / 真按钮 = 8px）。
-     影响面 = 全部 `rounded-md`（144 处）。⚠️ 其中约 29 处是 18–20px 高的小元素
-     （版本胶囊 / 信息标签 / 图标按钮盒 / 行内 code），8px 已占其高度近半、会明显
-     变圆接近胶囊 —— 该代价用户已确认接受（对照实测 design/圆角对照-6px-vs-8px.html）。
-     其余档位未动：rounded-sm 4px / rounded-lg 8px / rounded 9.6px / xl 12px / 2xl 16px。 */
-  --radius-md: 0.5rem;
+  /* 已确认的一体化工作台：普通控件 6px，菜单与弹窗按角色使用独立档位。 */
+  --radius-md: var(--r-control);
+  --radius-lg: var(--r-control);
+  --radius-xl: var(--r-dialog);
+  --radius-2xl: var(--r-dialog);
 
   /* P1-3 阴影 token（值指向 :root / .dark 的 --sh-*，深浅主题自适应）*/
   --shadow-card: var(--sh-card);
@@ -85,22 +84,23 @@
 }
 
 :root {
-  --background: 220 23% 96%;        /* #F4F6F9 应用底 */
-  --foreground: 222 47% 11%;
+  color-scheme: light;
+  --background: 210 10% 96.08%;
+  --chrome: 195 13.33% 94.12%;
+  --foreground: 211.76 17.17% 19.41%;
   --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
+  --card-foreground: 211.76 17.17% 19.41%;
   --popover: 0 0% 100%;
-  --popover-foreground: 222 47% 11%;
-  --primary: 243 75% 59%;           /* 靛蓝 #4F46E5 */
+  --popover-foreground: 211.76 17.17% 19.41%;
+  --primary: 174.15 53.25% 30.20%;  /* 深青 #24766e */
   --primary-foreground: 0 0% 100%;
-  --secondary: 220 20% 94%;
-  --secondary-foreground: 222 47% 11%;
-  --muted: 214 25% 95%;
-  /* 47%→43%：原值在白卡上 4.72:1 达标，但叠 bg-muted(214 25% 95%) / bg-secondary(220 20% 94%)
-     只有 4.20 / 4.09，不达 AA 小字 4.5:1。压到 43% 后全场景 4.72–5.45:1 达标（WCAG 实算）。 */
-  --muted-foreground: 215 16% 43%;
-  --accent: 226 100% 97%;           /* 靛蓝淡底 #EEF2FF */
-  --accent-foreground: 243 75% 59%;
+  --secondary: 195 13.33% 94.12%;
+  --secondary-foreground: 211.76 17.17% 19.41%;
+  --muted: 200 11.11% 94.71%;
+  /* 次要文字在窗口框架上 4.64:1，选中项文字在淡青底上 5.73:1。 */
+  --muted-foreground: 210 9.17% 42.75%;
+  --accent: 162 27.78% 92.94%;
+  --accent-foreground: 172.39 51.82% 26.86%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 100%;
   --success: 142 71% 45%;
@@ -114,40 +114,30 @@
   --success-ink: 142 71% 28%;
   --warning-ink: 27 90% 35%;
   --destructive-ink: 0 72% 40%;
-  --border: 216 20% 90%;
-  --input: 216 20% 90%;
-  --ring: 243 75% 59%;
-  --radius: 0.6rem;
-
-  /* 圆角 token（2026-10-14 侧栏改造）。
-     ⚠️ 准确说明：这**不是**「把全站圆角收口成三档」。全站圆角仍由 Tailwind scale
-     主导（2026-10-15 起：rounded-sm 4px / **md 8px** / lg 8px / rounded 9.6px /
-     xl 12px / 2xl 16px，约 400 处；md 档覆写见文件顶部 @theme 段）。本组 token 只
-     覆盖两个具体用途：
-       - --r-card   ：.bento-card / .status-card / .metric-card。这三处早已写
-                      `var(--r-card, 14px)` 但变量从未定义、一直走 fallback；
-                      此处补定义与 fallback 同值 ⇒ 零视觉变化。
-       - --r-control：侧栏导航项 + 底部服务状态胶囊（值 8px，对齐设计稿
-                      `.nav-button` 的 8px）。
-     2026-10-15 复核：稿子分级 5/6/8/12/14 与 app 的 4/8/8/9.6/12/14 已对齐（仅徽章
-     档差 1px）；一度加入的 --r-panel:12px 因全仓零引用已删。
-     对照实测见 design/圆角对照-6px-vs-8px.html。 */
-  --r-control: 8px;
-  --r-card: 14px;
+  --border: 205.71 12.28% 88.82%;
+  --input: 205 12.50% 81.18%;
+  --ring: var(--primary);
+  --radius: 0.375rem;
+  --r-control: 6px;
+  --r-card: 8px;
+  --r-menu: 10px;
+  --r-dialog: 12px;
+  --window-close: #c42b1c;
+  --window-close-ink: #fff;
 
   /* 视觉增强专用（非 Tailwind 语义色）
      （2026-10-17 清理：--hero-gradient、--hero-shadow、--hero-glow-*、--hero-metric-*、
      --hero-addr-*、--hero-stopped-* 随 Hero 卡下线一并删除，全仓零引用；
      --hero-text 保留——version-badge / header-badge / upgrade-welcome 在用）*/
   --hero-text: #fff;
-  --version-gradient: linear-gradient(135deg, #6366F1, #4F46E5);
-  --version-shadow: rgba(79, 70, 229, 0.32);
+  --version-gradient: hsl(var(--primary));
+  --version-shadow: none;
   --header-start: #ffffff;
-  --header-end: #f4f6f9;
+  --header-end: #eef1f2;
 
   /* 图表/数据可视化固定调色板（PerfCharts / TimingBreakdown 共用；主题无关、深浅一致，
      改配色只动此处）。SVG fill 与 inline style background 均直接引用 var()。 */
-  --chart-1: #6366f1;  /* indigo */
+  --chart-1: #24766e;  /* primary */
   --chart-2: #14b8a6;  /* teal */
   --chart-3: #f59e0b;  /* amber */
   --chart-4: #ef4444;  /* rose */
@@ -163,7 +153,7 @@
   --card-primary-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 0 0 1px color-mix(in srgb, hsl(var(--primary)) 12%, transparent);
 
   /* 浅色下 Header Logo 阴影 */
-  --logo-icon-bg-shadow: 0 2px 6px rgba(79,70,229,0.2);
+  --logo-icon-bg-shadow: none;
   --logo-img-shadow: drop-shadow(0 1px 2px rgba(0,0,0,0.15));
 
   /* 浅色下徽章渐变（默认色） */
@@ -181,31 +171,31 @@
   --sh-card: 0 1px 2px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
   --sh-pop: 0 8px 40px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06);
   --sh-hover: 0 4px 12px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06);
-  --sh-glow-primary: 0 2px 8px rgba(79,70,229,0.25);
-  --sh-glow-primary-lg: 0 8px 24px rgba(79,70,229,0.25);
-  --sh-glow-primary-strong: 0 4px 16px rgba(79,70,229,0.35);
+  --sh-glow-primary: 0 2px 8px hsl(var(--primary) / .12);
+  --sh-glow-primary-lg: 0 4px 12px hsl(var(--primary) / .12);
+  --sh-glow-primary-strong: 0 4px 12px hsl(var(--primary) / .18);
   --sh-glow-warning: 0 2px 6px rgba(245,158,11,0.25);
   --sh-ring-focus: 0 0 0 3px color-mix(in srgb, hsl(var(--primary)) 14%, transparent);
   --sh-ring-inset-primary: inset 0 0 0 1px hsl(var(--primary));
 }
 
 .dark {
-  /* 深色底吸收设计稿的蓝灰层次：#09090B → #121620（hue 240 → 222，带蓝）。
-     所有灰阶仅做 hue 平移，S/L 不动 → 现有对比度关系全部保持。 */
-  --background: 223 28% 10%;        /* #121620 */
-  --foreground: 222 5% 90%;
-  --card: 221 28% 14%;              /* #191F2C 设计稿卡片底 */
-  --card-foreground: 222 5% 90%;
-  --popover: 221 28% 14%;
-  --popover-foreground: 222 5% 90%;
-  --primary: 239 84% 74%;          /* 靛蓝 #818CF8 */
-  --primary-foreground: 240 6% 10%;
-  --secondary: 222 5% 18%;         /* B6: 16→18 */
-  --secondary-foreground: 222 5% 90%;
-  --muted: 222 5% 18%;             /* B6: 16→18 增强对比 */
-  --muted-foreground: 222 5% 68%;  /* B6: 55→65→68 次要文字对比达标（卡片底约 5.9:1） */
-  --accent: 243 47% 20%;           /* 靛蓝深底 #1E1B4B */
-  --accent-foreground: 239 84% 74%;
+  color-scheme: dark;
+  --background: 214.29 12.73% 10.78%;
+  --chrome: 210 12.90% 12.16%;
+  --foreground: 210 16.67% 90.59%;
+  --card: 213.33 12.33% 14.31%;
+  --card-foreground: 210 16.67% 90.59%;
+  --popover: 212.73 11.83% 18.24%;
+  --popover-foreground: 210 16.67% 90.59%;
+  --primary: 170.70 35.68% 60.98%;  /* 暗色深青 #78bfb4 */
+  --primary-foreground: 210 12.90% 12.16%;
+  --secondary: 212.73 11.83% 18.24%;
+  --secondary-foreground: 210 16.67% 90.59%;
+  --muted: 212.73 11.83% 18.24%;
+  --muted-foreground: 211.58 11.80% 68.43%;
+  --accent: 166.36 21.15% 20.39%;
+  --accent-foreground: 164.73 35.48% 69.61%;
   --destructive: 0 72% 71%;
   --destructive-foreground: 222 6% 10%;
   --success: 142 69% 58%;
@@ -216,22 +206,18 @@
   --success-ink: 142 69% 65%;
   --warning-ink: 27 96% 68%;
   --destructive-ink: 0 72% 76%;
-  --border: 222 5% 22%;            /* B6: 19→22 分隔线更清晰 */
-  --input: 222 5% 22%;
-  --ring: 239 84% 74%;
-  --radius: 0.6rem;
+  --border: 210 11.67% 23.53%;
+  --input: 208.42 11.66% 31.96%;
 
   --hero-text: #fff;
-  --version-gradient: linear-gradient(135deg, #818CF8, #6366F1);
-  --version-shadow: rgba(129, 140, 248, 0.35);
-  --header-start: #1a202e;
-  --header-end: #121620;
+  --header-start: #202429;
+  --header-end: #1b1f23;
 
   /* 暗色下卡片阴影：黑色变白色半透明 */
   --card-primary-shadow: 0 1px 3px rgba(255,255,255,0.03), 0 0 0 1px color-mix(in srgb, hsl(var(--primary)) 12%, transparent);
 
   /* 暗色下 Header Logo 阴影 */
-  --logo-icon-bg-shadow: 0 2px 6px rgba(129,140,248,0.25);
+  --logo-icon-bg-shadow: none;
   --logo-img-shadow: drop-shadow(0 1px 2px rgba(255,255,255,0.1));
 
   /* 暗色下徽章渐变：提高亮度增强对比 */
@@ -249,9 +235,9 @@
   --sh-card: 0 1px 2px rgba(0,0,0,0.4);
   --sh-pop: 0 8px 40px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3);
   --sh-hover: 0 4px 12px rgba(0,0,0,0.45), 0 2px 4px rgba(0,0,0,0.35);
-  --sh-glow-primary: 0 2px 8px rgba(129,140,248,0.35);
-  --sh-glow-primary-lg: 0 8px 24px rgba(129,140,248,0.35);
-  --sh-glow-primary-strong: 0 4px 16px rgba(129,140,248,0.45);
+  --sh-glow-primary: 0 2px 8px hsl(var(--primary) / .12);
+  --sh-glow-primary-lg: 0 4px 12px hsl(var(--primary) / .12);
+  --sh-glow-primary-strong: 0 4px 12px hsl(var(--primary) / .18);
   --sh-glow-warning: 0 2px 6px rgba(245,158,11,0.28);
   --sh-ring-focus: 0 0 0 3px color-mix(in srgb, hsl(var(--primary)) 14%, transparent);
   --sh-ring-inset-primary: inset 0 0 0 1px hsl(var(--primary));
@@ -260,7 +246,9 @@
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  accent-color: hsl(var(--primary));
 }
 
 /* 自定义滚动条：细条 + 圆角 + 半透明，仅对可滚动区域生效 */
@@ -388,8 +376,8 @@ body {
 /* 旧环境回退：保留可感知的入场动画；位移版（slide）由 interaction-refinements.css
    降级为淡入——切页不搬动滚动内容与输入位置。 */
 @keyframes tab-in {
-  from { opacity: .45; transform:translateY(6px); }
-  to   { opacity: 1; transform:none; }
+  from { opacity: .45; }
+  to   { opacity: 1; }
 }
 @keyframes tab-fade-in { from { opacity:.45; } to { opacity:1; } }
 .animate-tab-in { animation: tab-in var(--dur-page) var(--ease); }
@@ -402,7 +390,7 @@ body {
 ::view-transition-group(workspace-page) { animation-duration:var(--dur-page);animation-timing-function:var(--ease); }
 ::view-transition-old(workspace-page) { animation:page-out var(--dur-fast) var(--ease-exit) both;mix-blend-mode:normal; }
 ::view-transition-new(workspace-page) { animation:tab-in var(--dur-page) var(--ease) both;mix-blend-mode:normal; }
-@keyframes page-out { to { opacity:0;transform:translateY(-3px); } }
+@keyframes page-out { to { opacity:0; } }
 @media(prefers-reduced-motion:reduce) {
  .animate-tab-in { animation:none; }
  ::view-transition-group(workspace-page), ::view-transition-old(workspace-page), ::view-transition-new(workspace-page) { animation:none; }
@@ -682,7 +670,7 @@ body {
 .usage-matrix-corner,
 .usage-matrix-th {
   position: sticky; top: 0;
-  padding: 4px 3px; font-weight: 500; font-size: 9.5px; color: hsl(var(--muted-foreground));
+  padding: 4px 3px; font-weight: 500; font-size: 10px; color: hsl(var(--muted-foreground));
   background: hsl(var(--card)); border-bottom: 1px solid hsl(var(--border));
   white-space: nowrap;
 }
@@ -1479,15 +1467,30 @@ body {
 .collapsible-body { padding: 10px 4px 2px; }
 
 /* ═══ 无障碍：键盘聚焦描边 ═══ */
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible,
-[tabindex]:focus-visible {
+:is(button, a, summary, [tabindex]):not(.monaco-editor *, input, textarea, select):focus-visible,
+:is(input[type="checkbox"], input[type="radio"], input[type="range"]):focus-visible {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }
+
+/* 文本控件无论鼠标或键盘都显示同一条焦点线，不再叠加 Tailwind ring。
+   Monaco 管理自己的光标和编辑焦点，通用表单规则不能碰它的隐藏输入节点。 */
+:is(input, textarea, select):not(.monaco-editor *, [type="checkbox"], [type="radio"], [type="range"]):focus {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 0;
+  box-shadow: none;
+}
+[data-focus-container]:focus-within {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 0;
+  box-shadow: none;
+}
+[data-focus-container] :is(input, textarea, select):focus {
+  outline: none;
+  box-shadow: none;
+}
+.ui-surface[role="menu"], .ui-surface[role="listbox"] { border-radius: var(--r-menu); }
+.ui-surface[role="dialog"], .modal-surface[role="dialog"] { border-radius: var(--r-dialog); }
 
 /* 日志搜索框：外层容器已用 focus-within:ring 显示聚焦态，
    抑制输入框自身 focus-visible 描边（未分层规则，特异性压过全局 input:focus-visible）。*/
@@ -1744,7 +1747,7 @@ select:focus-visible,
   border-radius: 999px;
   background: hsl(var(--destructive));
   color: #fff;
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 700;
   line-height: 1;
 }
@@ -1928,7 +1931,7 @@ select:focus-visible,
 /* 更新槽位：折叠态 56px 装不下 66px 格子，整格收起（display:none 不占位、不计 gap） */
 .app-side[data-collapsed] .update-slot { display: none; }
 .app-side[data-collapsed] .app-side-item { justify-content: center; gap: 0; padding: 8px 0; }
-.app-side[data-collapsed] .app-side-label { display: none; }
+.app-side[data-collapsed] .app-side-label { display: block; }
 
 /* ── 侧栏「设置目录」模式（B 方案 2026-10-15）──
    进设置页时主侧栏切换为设置目录（SideNavSettings）：返回工作区 + 搜索过滤 +

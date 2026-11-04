@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
+import { beginOperation, operationActive } from "../lib/operations";
 import { toast } from "../components/ui/toast";
 import { applyWorkspace } from "../lib/switchWorkspace";
 import { requestOpenFile } from "../lib/openFileRequest";
@@ -48,18 +49,22 @@ export function useProjectSwitch({
    * 否则会把取消当成成功，接着去打开一个属于旧工作区白名单外的路径。
    */
   const switchWorkspace = async (path: string): Promise<{ ok: boolean; message?: string }> => {
-    // 切换会 closeModel 掉全部标签：没落盘的修改必须先问用户
-    if (!(await ensureFilesSaved("切换工程"))) return { ok: false };
+    const task=beginOperation({key:"workspace.switch",label:"切换工程",scope:path,page:"files",phase:"检查未保存文件"});
+    if(!task) return {ok:false,message:"正在切换工程，请等待当前操作结束"};
     try {
+      if (!(await ensureFilesSaved("切换工程"))) {task.finish("cancelled","已取消切换，当前工程未变");return {ok:false};}
+      task.update({phase:"验证目录并切换工作区"});
       // 切换的副作用（关模型 / 停 jdt.ls / 清会话 / 失效 svn 缓存）统一在 lib 里，
       // 各入口各写一套必然分叉
       const shown = await applyWorkspace(path, queryClient);
       setRoot(shown);
       setEditingRoot(false);
+      task.finish("success","工程已切换；代码智能按新工程单独准备");
       return { ok: true };
     } catch (e) {
       const message = `无法打开目录：${e}`;
       // 返回值给引导页留在输入框下方，toast 给树头 / 最近工作区这些没有行内位置的入口
+      task.finish("failed",message);
       toast(message, "error");
       return { ok: false, message };
     }
@@ -71,6 +76,7 @@ export function useProjectSwitch({
   };
 
   const switchAndOpen = async (target: SwitchTarget) => {
+    if(operationActive("workspace.switch")) return;
     setSwitchTarget(null);
     if (!target.project.root) return;
     const r = await switchWorkspace(target.project.root);

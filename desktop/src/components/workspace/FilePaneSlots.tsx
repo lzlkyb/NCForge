@@ -8,8 +8,10 @@ import type { useFileSession } from "../../hooks/useFileSession";
 import { FileTree } from "./FileTree";
 import { TreeHeader } from "./TreeHeader";
 import { TreeSvnProvider } from "./TreeSvnProvider";
+import { ToolTab } from "./ToolTab";
 import { TabStrip } from "./TabStrip";
 import { EditorBanners } from "./EditorBanners";
+import { FileReadFeedback } from "./FileReadFeedback";
 import { EditorNavRow } from "./EditorNavRow";
 import { EditorPane } from "./EditorPane";
 import { EmptyEditor } from "./EmptyEditor";
@@ -20,6 +22,7 @@ import { useWorkbenchDock } from "./WorkbenchDock";
 import { useFileSlot } from "./useFileSlot";
 import { LARGE_FILE_LINES } from "../../lib/largeFile";
 import { Icon } from "../ui/icon";
+import { OperationStatus } from "../ui/OperationStatus";
 import { SearchTab } from "../tabs/SearchTab";
 import { setSidebarView, useSidebarView } from "../../lib/sidebarView";
 import { ServiceStatusButton } from "./ServiceStatusButton";
@@ -79,6 +82,8 @@ export interface FilePaneActions {
    */
   openPath: (path: string, pos?: { line?: number; column?: number }) => void;
   compileActive: () => void;
+  /** 编译指定路径所属的模块：不依赖活动标签，供文件树右键使用。 */
+  compileModulePath: (path: string) => void;
   onDismissLargeHint: (path: string) => void;
   /** 切到某个标签（写会话的 activePath）。 */
   selectTab: (path: string) => void;
@@ -111,7 +116,7 @@ export function FilePaneSlots({
   } = model;
   const {
     setRootInput, setEditingRoot, setPanels, setPanelOpen, applyRoot, openPath, compileActive,
-    onDismissLargeHint, selectTab, openRecentRoot, invalidateIndex,
+    compileModulePath, onDismissLargeHint, selectTab, openRecentRoot, invalidateIndex,
   } = actions;
 
   const sideView = useSidebarView();
@@ -163,7 +168,8 @@ export function FilePaneSlots({
             onCreated={(p) => { invalidateIndex(); void session.openFile(p); }}
             onRenamed={(a, b) => { invalidateIndex(); session.handleRenamed(a, b); }}
             onDeleted={(ps) => { invalidateIndex(); session.handleDeleted(ps); }}
-            openPaths={tabs.map((t) => t.path)} />
+            openPaths={tabs.map((t) => t.path)}
+            onCompileModule={compileModulePath} />
         </>
       )}
     </TreeSvnProvider>
@@ -179,6 +185,7 @@ export function FilePaneSlots({
 
   const editor = (
     <>
+      <FileReadFeedback root={root} onOpen={p=>p.startsWith("jdt://")?session.openJdt(p,1):session.openFile(p)}/>
       <EditorBanners active={active} activePath={activePath} conflictPath={conflictPath}
         encodingIssue={encodingIssue} showLargeHint={showLargeHint} onUnifyEol={session.unifyEol}
         onReload={(p) => void session.reloadFile(p)} onOverwriteSave={(p) => void session.saveFile(p, true)}
@@ -211,7 +218,7 @@ export function FilePaneSlots({
           <div className="wb-editor-body">
             <EditorPane activePath={activePath} readOnly={active?.readOnly ?? false} reveal={reveal}
               heavy={heavyFile} onCursor={setCursor}
-              onSave={() => activePath && void session.saveFile(activePath)} />
+              onSave={(prepare) => activePath && void session.saveFile(activePath, false, undefined, prepare)} />
           </div>
         </div>
         {splitTab && (
@@ -227,7 +234,7 @@ export function FilePaneSlots({
               {/* 光标不回报：状态栏显示的是主编辑器的位置，分屏移动光标不该改它 */}
               <EditorPane activePath={splitTab.path} readOnly={splitTab.readOnly} reveal={null}
                 heavy={splitHeavy} onCursor={() => {}}
-                onSave={() => void session.saveFile(splitTab.path)} />
+                onSave={(prepare) => void session.saveFile(splitTab.path, false, undefined, prepare)} />
             </div>
           </section>
         )}
@@ -275,12 +282,14 @@ export function EmptyProjectSlots({
   return (
     <>
       {slot("tree", <div className="wb-no-project">尚未打开工程</div>)}
+      {/* 数据库标签不依赖工程目录；空工程也要登记多文档工具的停靠宿主。 */}
+      {slot("tabs", <div className="wb-tabs" role="tablist"><ToolTab /></div>)}
       {slot("editor", <NoWorkspace value={rootInput} recents={recents} onChange={onChange}
         onOpen={onOpen} />)}
       {slot("status", (
         <footer className="wb-status">
           <span className="wb-status-path wb-no-project">尚未打开工程</span>
-          <span className="wb-status-sp" />
+          <OperationStatus compact/><span className="wb-status-sp" />
           {/* 服务不依赖工作区：没开工程也要能从这里启动中间件 */}
           <ServiceStatusButton />
         </footer>

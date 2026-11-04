@@ -3,15 +3,14 @@
    混进 index.css 只会让全局样式表更难读。
 
    颜色全部走 index.css 的 token（浅/深色主题自动跟随），
-   只有「hyext 层」用了一个局部变量：它没有对应的全局语义 token，
-   借 primary 的靛蓝表示「会覆盖 NC 自己的扩展层」。 */
+   「hyext 层」沿用主题主色，并用文字表示覆盖 NC 的扩展层。 */
 
 .pk-page {
-  --pk-hy: 243 75% 59%;
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  background: hsl(var(--card));
 }
 
 /* ── 顶栏 ── */
@@ -19,13 +18,13 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 44px;
-  padding: 0 14px;
+  height: 36px;
+  padding: 0 12px;
   border-bottom: 1px solid hsl(var(--border));
   flex-shrink: 0;
 }
 .pk-head h1 {
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 650;
   white-space: nowrap;
 }
@@ -42,7 +41,7 @@
   }
 }
 .pk-kv {
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
@@ -55,22 +54,42 @@
 .pk-sp {
   flex: 1;
 }
+.pk-out-root {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 220px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+.pk-out-root b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  color: hsl(var(--foreground));
+}
+.pk-out-root .pk-link {
+  flex-shrink: 0;
+}
 
 /* ── 按钮 ── */
 .pk-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 11px;
-  border-radius: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   background: hsl(var(--card));
   font-size: 12px;
   font-weight: 550;
   white-space: nowrap;
   color: hsl(var(--foreground));
-  transition: background var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
 }
 .pk-btn:hover:not(:disabled) {
   background: hsl(var(--secondary));
@@ -90,6 +109,8 @@
 }
 .pk-link {
   display: inline-flex;
+  flex-shrink: 0;
+  white-space: nowrap;
   align-items: center;
   gap: 4px;
   font-size: 11px;
@@ -98,6 +119,7 @@
   background: none;
   border: 0;
   padding: 0 2px;
+  min-height: 28px;
 }
 .pk-link:hover {
   text-decoration: underline;
@@ -108,7 +130,7 @@
   align-items: center;
   gap: 7px;
   padding: 7px 14px;
-  font-size: 11.5px;
+  font-size: 11px;
   border-bottom: 1px solid hsl(var(--border));
   flex-shrink: 0;
 }
@@ -144,7 +166,8 @@
 
 /* ── 左：清单 ── */
 .pk-list {
-  width: 352px;
+  container: patch-list / inline-size;
+  width: 300px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -153,7 +176,7 @@
   min-height: 0;
 }
 .pk-top {
-  padding: 10px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -163,9 +186,9 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  height: 28px;
+  height: 30px;
   padding: 0 9px;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   background: hsl(var(--background));
   color: hsl(var(--muted-foreground));
@@ -186,6 +209,10 @@
   color: hsl(var(--muted-foreground));
   background: none;
   border: 0;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--r-control);
 }
 .pk-chips {
   display: flex;
@@ -193,20 +220,23 @@
   flex-wrap: wrap;
 }
 .pk-chip {
-  height: 22px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  height: 30px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: var(--r-control);
   border: 0;
   background: none;
-  font-size: 11.5px;
+  font-size: 12px;
   color: hsl(var(--muted-foreground));
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 .pk-chip .n {
   font-variant-numeric: tabular-nums;
-  font-size: 10.5px;
+  font-size: 11px;
   opacity: 0.85;
 }
 .pk-chip[data-on] {
@@ -223,14 +253,17 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 28px;
+  min-height: 32px;
   padding: 0 10px;
   border-bottom: 1px solid hsl(var(--border));
   background: hsl(var(--secondary) / 0.45);
   font-size: 11px;
   color: hsl(var(--muted-foreground));
+  flex-wrap: wrap;
 }
 .pk-batch-count {
+  flex-shrink: 0;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 .pk-batch-count b {
@@ -250,7 +283,7 @@
 }
 .pk-empty {
   padding: 22px 16px;
-  font-size: 11.5px;
+  font-size: 11px;
   line-height: 1.7;
   color: hsl(var(--muted-foreground));
   text-align: center;
@@ -259,11 +292,18 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
+  min-height: 28px;
   padding: 0 10px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 650;
   color: hsl(var(--muted-foreground));
+}
+.pk-grp-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .pk-grp + .pk-grp,
 .pk-row + .pk-grp {
@@ -272,15 +312,21 @@
   padding-top: 3px;
 }
 .pk-grp .n {
+  flex-shrink: 0;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   background: hsl(var(--secondary));
-  border-radius: 999px;
+  border-radius: var(--r-control);
   padding: 0 6px;
-  font-size: 10.5px;
+  font-size: 11px;
 }
 .pk-grp-hint {
-  font-size: 10px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
   font-weight: 500;
   opacity: 0.8;
 }
@@ -315,15 +361,15 @@
 }
 
 .pk-cbx {
-  width: 13px;
-  height: 13px;
-  border-radius: 3.5px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--r-control);
   border: 1.5px solid hsl(var(--border));
   flex-shrink: 0;
   display: grid;
   place-items: center;
   background: hsl(var(--card));
-  color: #fff;
+  color: hsl(var(--primary-foreground));
   padding: 0;
 }
 .pk-cbx[data-on] {
@@ -341,12 +387,12 @@
 }
 
 .pk-badge {
-  width: 15px;
-  height: 15px;
-  border-radius: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--r-control);
   display: grid;
   place-items: center;
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 800;
   flex-shrink: 0;
   font-family: "Cascadia Mono", Consolas, monospace;
@@ -369,6 +415,7 @@
 }
 
 .pk-fn {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -381,6 +428,8 @@
   color: hsl(var(--foreground));
 }
 .pk-st {
+  /* 状态保留完整宽度，文件名负责省略；不能把状态区裁成固定窄列。 */
+  white-space: nowrap;
   margin-left: auto;
   flex-shrink: 0;
   display: flex;
@@ -388,14 +437,16 @@
   gap: 4px;
 }
 .pk-lay {
-  font-size: 9.5px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 11px;
   font-weight: 700;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--r-control);
 }
 .pk-lay[data-l="hy"] {
-  color: hsl(var(--pk-hy));
-  background: hsl(var(--pk-hy) / 0.12);
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.12);
 }
 .pk-lay[data-l="std"] {
   color: hsl(var(--muted-foreground));
@@ -406,14 +457,28 @@
   background: hsl(var(--destructive) / 0.12);
 }
 .pk-pair {
+  flex-shrink: 0;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 .pk-pair[data-k="ok"] {
   color: hsl(var(--muted-foreground));
+}
+/* 180px 是共享侧栏的最小宽度；此时状态另起一行，避免文件名只剩一个字。 */
+@container patch-list (max-width: 220px) {
+  .pk-row {
+    display: grid;
+    grid-template-columns: 16px 16px minmax(0, 1fr);
+    height: auto;
+    min-height: 44px;
+    row-gap: 2px;
+    padding-block: 4px;
+  }
+  .pk-st { grid-column: 3; margin-left: 0; }
 }
 .pk-pair[data-k="miss"] {
   color: hsl(var(--destructive-ink));
@@ -434,6 +499,7 @@
   color: hsl(var(--muted-foreground));
 }
 .pk-foot-line {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -459,7 +525,7 @@
   display: block;
   height: 100%;
   background: hsl(var(--success));
-  transition: width var(--dur) var(--ease);
+  transition: width var(--dur-fast) var(--ease);
 }
 
 /* ── 右栏 ── */
@@ -469,22 +535,24 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: hsl(var(--background));
+  background: hsl(var(--card));
 }
 .pk-tabs {
   display: flex;
   align-items: center;
   gap: 4px;
-  height: 38px;
-  padding: 0 10px;
+  min-height: 36px;
+  padding: 3px 12px;
   border-bottom: 1px solid hsl(var(--border));
   flex-shrink: 0;
   background: hsl(var(--card));
 }
 .pk-tab {
-  height: 26px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  height: 30px;
   padding: 0 11px;
-  border-radius: 6px;
+  border-radius: var(--r-control);
   border: 0;
   background: none;
   font-size: 12px;
@@ -492,37 +560,41 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 .pk-tab[data-on] {
-  background: hsl(var(--secondary));
-  color: hsl(var(--foreground));
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
   font-weight: 600;
 }
 .pk-desc {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
   white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 270px;
 }
 .pk-desc input {
-  height: 24px;
+  height: 30px;
   width: 220px;
   padding: 0 8px;
-  border-radius: 7px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   background: hsl(var(--background));
   font: inherit;
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--foreground));
-  outline: none;
+  min-width: 0;
+  flex: 1;
 }
 .pk-desc input:focus {
   border-color: hsl(var(--ring));
 }
 .pk-zipname {
-  font-size: 10.5px;
+  font-size: 11px;
   font-family: "Cascadia Mono", Consolas, monospace;
   color: hsl(var(--muted-foreground));
   max-width: 240px;
@@ -538,31 +610,38 @@
   flex-direction: column;
 }
 .pk-tree-head {
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 8px 12px;
-  font-size: 11.5px;
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 12px;
   color: hsl(var(--muted-foreground));
   border-bottom: 1px solid hsl(var(--border));
   flex-shrink: 0;
 }
 .pk-tree-head code {
   font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: 10.5px;
+  font-size: 11px;
   color: hsl(var(--foreground));
   background: hsl(var(--secondary));
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--r-control);
   margin: 0 2px;
 }
+.pk-tree-head > span:not(.pk-sp) { white-space: nowrap; }
+.pk-foot-line .pk-bad { flex-shrink: 0; white-space: nowrap; }
+.pk-foot-line.pk-warn { flex-wrap: nowrap; align-items: flex-start; }
+.pk-foot-line.pk-warn > svg { flex-shrink: 0; margin-top: 2px; }
+.pk-foot-warning { flex: 1; min-width: 0; line-height: 1.5; overflow-wrap: anywhere; }
 .pk-tree {
   flex: 1;
   overflow: auto;
-  padding: 8px 0 14px;
+  padding: 4px 0 12px;
   font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
-  font-size: 11.5px;
-  line-height: 19px;
+  font-size: 12px;
+  line-height: 22px;
 }
 .pk-tree-empty {
   flex: 1;
@@ -582,6 +661,7 @@
   gap: 6px;
   padding: 0 12px;
   white-space: pre;
+  min-height: 28px;
 }
 .pk-tn:hover {
   background: hsl(var(--secondary) / 0.7);
@@ -606,16 +686,16 @@
 }
 .pk-tn-badge {
   font-family: system-ui, sans-serif;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   color: hsl(var(--primary));
   background: hsl(var(--primary) / 0.1);
-  border-radius: 3px;
+  border-radius: var(--r-control);
   padding: 0 4px;
 }
 .pk-tn-meta {
   font-family: system-ui, sans-serif;
-  font-size: 10px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
   margin-left: auto;
 }
@@ -633,11 +713,11 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
 }
 .pk-detail h4 {
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 650;
   margin-bottom: 7px;
   display: flex;
@@ -653,7 +733,7 @@
 }
 .pk-map {
   display: grid;
-  grid-template-columns: 46px 1fr;
+  grid-template-columns: 46px minmax(0, 1fr);
   gap: 3px 8px;
   font-size: 11px;
 }
@@ -662,7 +742,7 @@
 }
 .pk-map dd {
   font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: 10.5px;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -713,16 +793,17 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  min-height: 36px;
+  padding: 6px 12px;
   border-bottom: 1px solid hsl(var(--border));
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
   flex-shrink: 0;
 }
 .pk-md-body {
   flex: 1;
   overflow: auto;
-  padding: 14px 18px;
+  padding: 12px 16px;
 }
 .pk-sec {
   margin-bottom: 14px;
@@ -731,7 +812,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 650;
   color: hsl(var(--muted-foreground));
   margin-bottom: 6px;
@@ -740,7 +821,7 @@
   font-size: 11px;
   font-weight: 700;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--r-control);
   background: hsl(var(--success) / 0.14);
   color: hsl(var(--success-ink));
 }
@@ -751,7 +832,7 @@
 .pk-edit {
   width: 100%;
   border: 1px solid hsl(var(--border));
-  border-radius: 8px;
+  border-radius: var(--r-control);
   background: hsl(var(--card));
   padding: 9px 11px;
   font: inherit;
@@ -759,18 +840,18 @@
   line-height: 1.7;
   color: hsl(var(--foreground));
   resize: vertical;
-  outline: none;
 }
 .pk-edit:focus {
   border-color: hsl(var(--ring));
 }
 .pk-auto {
-  border: 1px dashed hsl(var(--border));
-  border-radius: 8px;
-  background: hsl(var(--secondary) / 0.5);
+  border: 0;
+  border-left: 2px solid hsl(var(--border));
+  border-radius: 0;
+  background: hsl(var(--muted) / 0.25);
   padding: 10px 12px;
   font-family: "Cascadia Mono", Consolas, monospace;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.75;
   color: hsl(var(--muted-foreground));
   word-break: break-all;
@@ -788,11 +869,11 @@
 
 /* ── 底部动作条 ── */
 .pk-actions {
-  min-height: 52px;
+  min-height: 36px;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 14px;
+  padding: 3px 12px;
   border-top: 1px solid hsl(var(--border));
   background: hsl(var(--card));
   flex-shrink: 0;
@@ -802,27 +883,26 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
 }
 /* 出包进度：数字位数跳动时不抖（等宽数字），字号跟着动作条走 */
 .pk-live {
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
 }
 .pk-out input {
   width: 240px;
-  height: 26px;
+  height: 30px;
   padding: 0 8px;
-  border-radius: 7px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   background: hsl(var(--background));
   font: inherit;
   font-size: 11px;
   font-family: "Cascadia Mono", Consolas, monospace;
   color: hsl(var(--foreground));
-  outline: none;
 }
 .pk-out input:focus {
   border-color: hsl(var(--ring));
@@ -834,8 +914,8 @@
   align-items: center;
   gap: 4px;
   padding: 1px 6px;
-  border-radius: 5px;
-  font-size: 10.5px;
+  border-radius: var(--r-control);
+  font-size: 11px;
   white-space: nowrap;
   color: hsl(var(--muted-foreground));
   background: hsl(var(--secondary));
@@ -850,12 +930,15 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
-  border: 1px dashed hsl(var(--border));
-  border-radius: 7px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-control);
   padding: 3px 9px;
   min-height: 30px;
+  flex-wrap: wrap;
+  max-width: 100%;
+  min-width: 0;
 }
 .pk-sql[data-filled] {
   border-style: solid;
@@ -868,6 +951,14 @@
   gap: 4px;
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 11px;
+  min-width: 0;
+  max-width: 100%;
+}
+.pk-sql-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .pk-sql-item button {
   display: grid;
@@ -876,7 +967,10 @@
   border: 0;
   padding: 0;
   color: hsl(var(--muted-foreground));
-  opacity: 0.7;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--r-control);
 }
 .pk-sql-item button:hover {
   opacity: 1;
@@ -886,25 +980,30 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1 1 180px;
 }
 .pk-sql-add input {
   width: 260px;
-  height: 24px;
+  height: 30px;
   padding: 0 7px;
-  border-radius: 6px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   background: hsl(var(--background));
   font-size: 11px;
   font-family: "Cascadia Mono", Consolas, monospace;
   color: hsl(var(--foreground));
-  outline: none;
+  min-width: 100px;
+  max-width: 100%;
+  flex: 1 1 180px;
 }
 .pk-pill {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  border-radius: 999px;
+  border-radius: var(--r-control);
   padding: 3px 9px;
   white-space: nowrap;
 }
@@ -920,20 +1019,22 @@
 /* 「有表不存在」时的二次确认态：第一次点变橙，第二次才真出包。
    不做弹窗——弹窗要人读一段话再点，这里只要人意识到「这次不一样」。 */
 .pk-btn-primary[data-armed] {
-  background: hsl(var(--warning));
-  border-color: transparent;
-  color: #fff;
+  background: hsl(var(--warning) / 0.16);
+  border-color: hsl(var(--warning) / 0.5);
+  color: hsl(var(--warning-ink));
 }
 
 /* 出包环境健康条：四项各自可点，指向能修它的那一页。 */
-.pk-health { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-.pk-health-chip { display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 9px; border:1px solid hsl(var(--border)); border-radius:999px; font-size:11px; color:hsl(var(--muted-foreground)); white-space:nowrap; }
+.pk-health { display:inline-flex; align-items:center; flex-shrink:0; }
+.pk-health-chip { display:inline-flex; align-items:center; gap:6px; height:30px; min-width:0; max-width:170px; padding:0 6px; border:1px solid hsl(var(--border)); border-radius:var(--r-control); font-size:11px; color:hsl(var(--muted-foreground)); white-space:nowrap; transition:background var(--dur-fast) var(--ease-standard),color var(--dur-fast) var(--ease-standard); }
+.pk-health-label { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.pk-env-item { width:100%; max-width:none; justify-content:flex-start; border:0; background:transparent; font-size:12px; }
 .pk-health-chip:hover { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); }
-.pk-health-dot { width:6px; height:6px; border-radius:999px; background:hsl(var(--muted-foreground) / 0.5); }
+.pk-health-dot { width:6px; height:6px; border-radius:var(--r-control); background:hsl(var(--muted-foreground) / 0.5); }
 .pk-health-chip[data-tone="ok"] .pk-health-dot { background:hsl(var(--success)); }
 .pk-health-chip[data-tone="warn"] { color:hsl(var(--warning-ink)); }
 .pk-health-chip[data-tone="warn"] .pk-health-dot { background:hsl(var(--warning)); }
 .pk-health-chip[data-tone="bad"] { color:hsl(var(--destructive-ink)); }
 .pk-health-chip[data-tone="bad"] .pk-health-dot { background:hsl(var(--destructive)); }
-.pk-health-chip[data-tone="busy"] .pk-health-dot { background:hsl(var(--primary)); animation:wb-lang-pulse 1.4s ease-in-out infinite; }
+.pk-health-chip[data-tone="busy"] .pk-health-dot { background:hsl(var(--primary)); animation:wb-lang-pulse 1.4s var(--ease-standard) infinite; }
 @media(prefers-reduced-motion:reduce) { .pk-health-chip[data-tone="busy"] .pk-health-dot { animation:none; } }

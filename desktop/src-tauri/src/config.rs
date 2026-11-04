@@ -88,6 +88,13 @@ pub struct AppConfig {
     /// （见 `nchome_deploy.rs` 头注释里的安全约束）。
     #[serde(default = "default_true")]
     pub deploy_on_start: bool,
+    /// 保存 `.java` 后自动编译这一个文件（默认开）。
+    ///
+    /// 默认开是因为这就是用户要的行为（Eclipse 里保存即出 class）；关掉的场景是低配
+    /// 机器、或正在做大批量替换嫌它吵。**只编保存的那一个文件**，不是整个模块——
+    /// 整模块一次几十秒，绑在保存上等于编辑器卡死。见 `docs/NCForge-自动编译-调研与方案-20261104.md`。
+    #[serde(default = "default_true")]
+    pub auto_compile: bool,
     /// 工程关联的覆盖表（见 `eclipse_cp::LinkedOverride`）。
     ///
     /// 为什么要有它：依赖顺序的真源是 `.classpath`（那是 Eclipse 写的），但真实工作里
@@ -205,6 +212,7 @@ impl Default for AppConfig {
             lang_auto_start: true,
             lang_xmx_mb: None,
             deploy_on_start: true,
+            auto_compile: true,
             linked_overrides: Vec::new(),
         }
     }

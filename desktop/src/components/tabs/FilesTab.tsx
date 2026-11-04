@@ -14,6 +14,7 @@ import type { FileTreeHandle } from "../workspace/FileTree";
 import { baseName, getWorkspace } from "../../lib/workspace";
 import { useTreeProjects } from "../../hooks/useTreeProjects";
 import { useProjectSwitch } from "../../hooks/useProjectSwitch";
+import { useWorkspacePicker } from "../../hooks/useWorkspacePicker";
 import { compileCancel } from "../../lib/compile";
 import { useFileSession } from "../../hooks/useFileSession";
 import { useModuleCompile } from "../../hooks/useModuleCompile";
@@ -94,6 +95,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
     setEditingRoot,
     openFile: session.openFile,
   });
+  useWorkspacePicker({ root: root ?? null, setDraft: setRootInput, setEditing: setEditingRoot, applyRoot });
   // 标签会话：重启恢复、快照落盘、Ctrl+Shift+T / Ctrl+Tab
   useTabRestore(root, session.openFile);
   useTabPersistence(root, tabs, activePath, splitPath);
@@ -108,7 +110,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   useLocalHistorySweep(activePath);
   const codeDiags = useCodeDiags();
   const nav = useNav();
-  const { compileActive } = useModuleCompile();
+  const { compileActive, compilePath, compileActiveFile } = useModuleCompile();
   const jumpToProblem = useProblemJump(compileResult?.problems, activePath, openAt);
 
   // 换文件时把弹层收起来：留着它就是「另一个文件的符号/版本」压在代码上，容易点错
@@ -145,6 +147,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
     activePath,
     compiling,
     compileActive,
+    compileActiveFile,
     closeTab: session.closeTab,
     openOutline: () => setPanels((p) => ({ ...p, outline: true })),
     openHistory: () => setPanels((p) => ({ ...p, history: true })),
@@ -255,6 +258,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           applyRoot,
           openPath,
           compileActive,
+          compileModulePath: (p) => void compilePath(p),
           onDismissLargeHint: (p) => setSession({ largeHintDismissed: (v) => [...v, p] }),
           selectTab: (p) => setSession({ activePath: p }),
           openRecentRoot: (p) => void applyRoot(p),

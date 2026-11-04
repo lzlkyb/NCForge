@@ -1,4 +1,6 @@
 import { invoke, listen } from "./tauri";
+import { trackOperation } from "./operations";
+import { dbTaskSpec } from "./dbOperations";
 import { dbApi, type PendingTxRow } from "./dbApi";
 import { askQuit, askUnsavedFiles, type QuitChoice, type QuitRow } from "./dbConfirm";
 import { connOf, getDb, loadConns, rtOf } from "./dbStore";
@@ -180,7 +182,7 @@ async function handleQuitRequest() {
     for (const r of rows.filter((x) => x.kind === "pending")) {
       // 一个连接上可能有多条独立会话（A0 的槽）：必须由后端把 primary 与全部槽
       // 一起处理。只提交 primary 等于把槽里的写入静默回滚——那正是这个守卫存在的原因。
-      await dbApi.txAll(r.connId, txChoice);
+      await trackOperation(dbTaskSpec(`quit.txAll:${r.connId}`, `退出前${txChoice === "rollback" ? "回滚" : "提交"}事务`, r.connId, "全部会话"),()=>dbApi.txAll(r.connId, txChoice as "commit"|"rollback"));
     }
     await invoke("app_quit");
   } catch (e) {

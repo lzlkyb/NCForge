@@ -47,6 +47,8 @@ export type Pending =
       files: UnsavedFile[];
       /** 这一步叫「退出」还是「切换工程」——按钮与正文都要说得对。 */
       action: string;
+      /** 更新安装要求先保存，不能提供会丢失修改的继续入口。 */
+      allowDiscard?: boolean;
       /** 「保存全部并退出」真正做事的入口，由 `quitGuard` 注入；返回还失败的那些。 */
       onSave: (onProgress: (done: number, total: number) => void) => Promise<SaveFailure[]>;
       resolve: (c: FileQuitChoice) => void;
@@ -97,8 +99,9 @@ export function askUnsavedFiles(
   files: UnsavedFile[],
   onSave: (onProgress: (done: number, total: number) => void) => Promise<SaveFailure[]>,
   action = "退出",
+  allowDiscard = true,
 ): Promise<FileQuitChoice> {
-  return new Promise((resolve) => show({ kind: "unsavedFiles", files, action, onSave, resolve }));
+  return new Promise((resolve) => show({ kind: "unsavedFiles", files, action, allowDiscard, onSave, resolve }));
 }
 
 /**
@@ -170,7 +173,7 @@ export async function guardSlotTx(
   );
   if (choice === "cancel") return false;
   try {
-    await dbApi.tx(connId, choice, slot);
+    await txAction(connId, choice, slot);
     return true;
   } catch (e) {
     toast(`${choice === "commit" ? "提交" : "回滚"}失败：${friendlyDbError(e)}`, "error");

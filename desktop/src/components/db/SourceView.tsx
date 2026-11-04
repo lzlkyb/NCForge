@@ -4,6 +4,8 @@ import { toast } from "../ui/toast";
 import { friendlyDbError } from "../../lib/db";
 import { dbApi, type SourceLine } from "../../lib/dbApi";
 import type { TableTab } from "../../lib/dbStore";
+import { trackOperation } from "../../lib/operations";
+import { dbTaskSpec } from "../../lib/dbOperations";
 import { copyText } from "../../lib/utils";
 
 /**
@@ -16,16 +18,18 @@ export function SourceView({ tab }: { tab: TableTab }) {
   const [lines, setLines] = useState<SourceLine[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  const [revision,setRevision]=useState(0);
   useEffect(() => {
-    setLines(null);
+    let live=true;setLines(null);
     setErr(null);
-    dbApi.source(tab.connId, tab.table).then(
-      (r) => setLines(r.lines),
-      (e) => setErr(friendlyDbError(e)),
+    void trackOperation(dbTaskSpec(`source:${tab.connId}:${tab.table}`,"读取数据库源码",tab.connId,tab.table,undefined,tab.id),()=>dbApi.source(tab.connId, tab.table)).then(
+      (r) => {if(live) setLines(r.lines);},
+      (e) => {if(live) setErr(friendlyDbError(e));},
     );
-  }, [tab.connId, tab.table]);
+    return()=>{live=false;};
+  }, [tab.id,tab.connId, tab.table,revision]);
 
-  if (err) return <div className="dbx-err">{err}</div>;
+  if (err) return <div className="dbx-err">{err}<button type="button" className="dbx-btn" onClick={()=>setRevision(v=>v+1)}>重新读取</button></div>;
   if (!lines) return <div className="dbx-empty"><Icon name="spinner" size={18} />读取中…</div>;
   if (lines.length === 0) {
     return <div className="dbx-empty">这个对象没有源码（序列、同义词这类只有定义），切到「DDL」看它的定义</div>;

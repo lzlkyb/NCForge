@@ -34,7 +34,7 @@ describe("loadJdtSource", () => {
     await loadJdtSource(uri);
     expect(h.invoke).toHaveBeenCalledTimes(1);
     expect(h.openVirtualModel).toHaveBeenCalledTimes(2);
-    expect(h.openVirtualModel).toHaveBeenLastCalledWith(uri, "class A {}");
+    expect(h.openVirtualModel).toHaveBeenLastCalledWith(uri, "class A {}", { replace: true });
   });
 
   it("请求失败不缓存，下次可重试", async () => {
@@ -44,6 +44,66 @@ describe("loadJdtSource", () => {
     h.invoke.mockResolvedValueOnce("class B {}");
     await loadJdtSource(uri);
     expect(h.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("签名桩会换成本地反编译结果，并在正文里标出处", async () => {
+    const uri = "jdt://contents/pubgl.jar/nc/bs/gl/GlBO.class";
+    h.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "decompile_class") {
+        return {
+          source: "package nc.bs.gl;\n\npublic class GlBO {}\n",
+          jar: "D:\\ncc\\1909home\\modules\\gl\\lib\\pubgl.jar",
+          class: "nc.bs.gl.GlBO",
+          ms: 250,
+        };
+      }
+      return "// Failed to get sources. Instead, stub sources have been generated\npublic class GlBO {}";
+    });
+    const src = await loadJdtSource(uri);
+    expect(src.decompiled).toBe(true);
+    expect(src.decompileError).toBeUndefined();
+    expect(src.text).toContain("反编译自 pubgl.jar");
+    expect(src.text).toContain("public class GlBO {}");
+    expect(h.openVirtualModel).toHaveBeenLastCalledWith(uri, src.text, { replace: true });
+  });
+
+  it("反编译失败降级成桩并带回原因（不抛错，jar 里的类照样能打开）", async () => {
+    const uri = "jdt://contents/nope.jar/p/N.class";
+    h.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "decompile_class") throw "在 NC 安装目录与工作区里都没找到 nope.jar";
+      return "// Failed to get sources. Instead, stub sources have been generated\npublic class N {}";
+    });
+    const src = await loadJdtSource(uri);
+    expect(src.decompiled).toBe(false);
+    expect(src.text).toContain("Failed to get sources");
+    expect(src.decompileError).toContain("nope.jar");
+  });
+
+  it("有真源码时不去反编译", async () => {
+    const uri = "jdt://contents/withsrc.jar/p/S.class";
+    h.invoke.mockResolvedValue("package p;\n\npublic class S {}\n");
+    const src = await loadJdtSource(uri);
+    expect(src.decompiled).toBe(false);
+    expect(h.invoke.mock.calls.every((c) => c[0] !== "decompile_class")).toBe(true);
+  });
+
+  it("预览不反编译（一次跳转可能预建多个候选，起多个 JVM 不值得）", async () => {
+    const uri = "jdt://contents/prev.jar/p/P.class";
+    const stub = "// Failed to get sources. Instead, stub sources have been generated\npublic class P {}";
+    h.invoke.mockResolvedValue(stub);
+    const src = await loadJdtSource(uri, true);
+    expect(src.decompiled).toBe(false);
+    expect(h.invoke.mock.calls.every((c) => c[0] !== "decompile_class")).toBe(true);
+    expect(h.openVirtualModel).toHaveBeenLastCalledWith(uri, stub, { peek: true });
+    // 正式打开同一条地址时才反编译，并把 model 内容换掉
+    h.invoke.mockImplementation(async (cmd: string) =>
+      cmd === "decompile_class"
+        ? { source: "public class P {}", jar: "prev.jar", class: "p.P", ms: 1 }
+        : stub,
+    );
+    const full = await loadJdtSource(uri);
+    expect(full.decompiled).toBe(true);
+    expect(h.openVirtualModel).toHaveBeenLastCalledWith(uri, full.text, { replace: true });
   });
 });
 
@@ -158,5 +218,38 @@ describe("lang_start / lang_stop 串行与意图代际", () => {
     void startLangNow(JAVA);
     await vi.advanceTimersByTimeAsync(0);
     expect(h.invoke).toHaveBeenCalledWith("lang_start", { path: JAVA });
+  });
+});
+import { clearCompletedOperations, getOperations } from "./operations";
+
+describe("手动语言服务请求反馈", () => {
+  beforeEach(async () => {
+    h.root = "C:\\ws"; h.invoke.mockReset();
+    h.invoke.mockImplementation(async cmd => cmd === "lang_stop" ? undefined : { state: "indexing", module: "gl", message: "indexing", sourceFiles: 10, jarCount: 1 });
+    vi.useFakeTimers(); await stopLang(); h.invoke.mockClear(); clearCompletedOperations();
+  });
+  afterEach(async () => { await vi.advanceTimersByTimeAsync(0); clearCompletedOperations(); vi.useRealTimers(); });
+  it("启动请求返回 indexing 后准确说明索引仍由状态栏报告", async () => {
+    startLangNow(JAVA); await vi.advanceTimersByTimeAsync(0);
+    const operations = getOperations(), operation = operations[operations.length - 1];
+    expect(operation.state).toBe("success"); expect(operation.label).toBe("请求启动代码智能");
+    expect(operation.detail).toContain("索引是否就绪以状态栏为准");
+  });
+  it("启动按钮同帧连点只发送一次请求", async () => {
+    let done!: () => void;
+    h.invoke.mockImplementation(() => new Promise<void>(resolve => { done = resolve; }));
+    startLangNow(JAVA); startLangNow(JAVA); await Promise.resolve(); await Promise.resolve();
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+    done(); await vi.advanceTimersByTimeAsync(0);
+  });
+  it("启动失败结束任务，允许用户重新点击", async () => {
+    h.invoke.mockRejectedValueOnce(new Error("failed handshake"));
+    startLangNow(JAVA); await vi.advanceTimersByTimeAsync(0);
+    const operations = getOperations(); expect(operations[operations.length - 1].state).toBe("failed");
+    startLangNow(JAVA); await vi.advanceTimersByTimeAsync(0); expect(h.invoke).toHaveBeenCalledTimes(2);
+  });
+  it("自动 ensureLang 不登记全局用户任务", async () => {
+    ensureLang(JAVA); await vi.advanceTimersByTimeAsync(1500);
+    expect(getOperations()).toHaveLength(0);
   });
 });

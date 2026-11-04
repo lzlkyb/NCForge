@@ -3,11 +3,18 @@ import { tabIdOfModel } from "./sqlModels";
 import { columnsOf, rtOf, sqlTabOf } from "./dbStore";
 import { statementAt } from "./sqlSplit";
 import { aliasMap, completionContext, SQL_KEYWORDS, tablesIn } from "./sqlComplete";
+import { tableLinks } from "./sqlLinks";
+import { openTable } from "./dbActions";
 
 /**
  * SQL 编辑器的补全：表名（带 NC 中文名）、别名后的字段（带类型与中文名）、关键字。
  *
  * 字段优先问已连上的库（有中文名和主键，按表缓存），没连上就用本地表结构缓存。
+ *
+ * 另外给表名挂上 Ctrl+点击跳转（对标 PL/SQL Developer）：点 `from bd_material m` 里的
+ * 表名或别名，直接开这张表的 DDL 页。走 LinkProvider 而不是 DefinitionProvider——
+ * 后者的 Ctrl+悬停会去 `createModelReference` 取目标行做预览，而我们的目标是数据库
+ * 标签页、根本没有对应的 text model，装饰反而挂不上（还会甩一条未处理的 rejection）。
  */
 
 type Item = monaco.languages.CompletionItem;
@@ -55,6 +62,27 @@ function tableItems(connId: string, range: monaco.IRange): Item[] {
 
 let wired = false;
 
+/** 表名链接的自定义 scheme：`ncforge-table:/<连接 id>/<表名>`。 */
+const TABLE_SCHEME = "ncforge-table";
+/** 一条语句里最多挂多少个链接；几千个装饰会把编辑器拖慢，超出部分不跳。 */
+const MAX_LINKS = 2000;
+
+function tableUri(connId: string, table: string): monaco.Uri {
+  return monaco.Uri.from({
+    scheme: TABLE_SCHEME,
+    path: `/${encodeURIComponent(connId)}/${encodeURIComponent(table)}`,
+  });
+}
+
+/** 链接被点开：解析出连接与表名，开它的 DDL 页。认不出的 scheme 交还给下一个 opener。 */
+function openTableUri(resource: monaco.Uri): boolean {
+  if (resource.scheme !== TABLE_SCHEME) return false;
+  const [connId, table] = resource.path.replace(/^\//, "").split("/").map(decodeURIComponent);
+  if (!connId || !table) return false;
+  void openTable(connId, table, "ddl");
+  return true;
+}
+
 export function registerSqlProviders(): void {
   if (wired) return;
   wired = true;
@@ -85,4 +113,21 @@ export function registerSqlProviders(): void {
       return { suggestions: [...cols, ...keywords, ...tableItems(connId, range)] };
     },
   });
+
+  // 表名链接：Ctrl+悬停出现下划线，Ctrl+点击开 DDL；Ctrl+点击表名以外的地方不弹任何东西
+  monaco.languages.registerLinkProvider("sql", {
+    provideLinks: (model) => {
+      const connId = sqlTabOf(tabIdOfModel(model))?.connId;
+      if (!connId) return null;
+      const links = tableLinks(model.getValue())
+        .slice(0, MAX_LINKS)
+        .map((l) => ({
+          range: monaco.Range.fromPositions(model.getPositionAt(l.start), model.getPositionAt(l.end)),
+          url: tableUri(connId, l.table),
+          tooltip: `查看 ${l.table} 的 DDL`,
+        }));
+      return links.length > 0 ? { links } : null;
+    },
+  });
+  monaco.editor.registerLinkOpener({ open: openTableUri });
 }

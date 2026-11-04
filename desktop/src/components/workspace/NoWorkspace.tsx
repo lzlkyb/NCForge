@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useOperations } from "../../lib/operations";
 import { Button } from "../ui/button";
 import { EmptyState } from "../ui/EmptyState";
 import { Input } from "../ui/input";
@@ -22,14 +23,19 @@ export function NoWorkspace({
   // 已经不知道刚才为什么没打开，而输入框里的路径还留着
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const ready = value.trim().length > 0 && !busy;
+  const lock=useRef(false);
+  const tasks=useOperations();
+  const switching=busy || tasks.some(o=>o.key==="workspace.switch" && o.endedAt===undefined);
+  const ready = value.trim().length > 0 && !switching;
   const open = async (path: string) => {
-    if (!path.trim() || busy) return;
+    if (!path.trim() || lock.current || switching) return;
+    lock.current=true;
     setBusy(true);
     setError(null);
     try {
       setError(await onOpen(path));
     } finally {
+      lock.current=false;
       setBusy(false);
     }
   };
@@ -38,9 +44,9 @@ export function NoWorkspace({
       <EmptyState
         icon="folder"
         description="还没有打开工程目录。输入 NC 二开工程的根目录（如 newar 所在的路径）。"
-        className="w-[420px] py-10"
+        className="w-full max-w-[420px] px-4 py-10"
         action={
-          <div className="flex w-[360px] flex-col gap-1.5">
+          <div className="flex w-full max-w-[360px] flex-col gap-1.5">
             <div className="flex gap-2">
               <Input
                 value={value}
@@ -51,10 +57,10 @@ export function NoWorkspace({
                   onChange(e.target.value);
                   setError(null);
                 }}
-                onKeyDown={(e) => e.key === "Enter" && ready && void open(value)}
+                onKeyDown={(e) => !e.nativeEvent.isComposing && e.key === "Enter" && ready && void open(value)}
               />
-              <Button disabled={!ready} onClick={() => void open(value)}>
-                {busy ? "打开中…" : "打开"}
+              <Button disabled={!ready} isLoading={switching} loadingText="切换中" onClick={() => void open(value)}>
+                打开
               </Button>
             </div>
             {error && (
@@ -70,7 +76,7 @@ export function NoWorkspace({
           <span className="wb-root-recent-label">最近打开</span>
           {recents.map((p) => (
             <button key={p} type="button" className="wb-root-recent-item" title={p}
-              disabled={busy} onClick={() => void open(p)}>
+              disabled={switching} onClick={() => void open(p)}>
               {baseName(p)}
             </button>
           ))}

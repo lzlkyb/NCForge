@@ -9,6 +9,8 @@ import { TreeEditRow } from "./TreeEditRow";
 import { TreeDirRow, TreeFileRow, TreeRowNote } from "./TreeRow";
 import { joinPath, type EncodingMark } from "../../lib/workspace";
 import { chainOpen, dirChain } from "../../lib/treeCompact";
+import { bcBadge, type ComponentIndex } from "../../lib/ncManifest";
+import { visibleChildren } from "../../lib/ncStructure";
 import { treeRowId as rowId } from "../../lib/treeNav";
 import { pathKey } from "../../lib/treeSvn";
 import type { TreeDirState } from "../../lib/workspaceSession";
@@ -26,6 +28,20 @@ export interface TreeRowsCtx {
   filter: (name: string) => boolean;
   /** 压缩中间包：单链目录合成一行；关掉时每层各占一行。 */
   compact: boolean;
+  /**
+   * 这一层是不是「工程根下的业务组件模块」——只按目录位置与 manifest 判断，
+   * 与任何显示偏好无关（徽章与摊平都问它）。
+   */
+  isBcModule: (dir: string) => boolean;
+  /**
+   * 这一层的子目录要不要摊平 `src`（NC 结构视图）。
+   *
+   * 判断放在 `FileTree`（那里才知道 pref、manifest 与工程根），这里只负责执行，
+   * 与 `treeNav.flattenTree` 走同一份 `visibleChildren`。
+   */
+  hoist: (dir: string) => boolean;
+  /** 业务组件索引（`manifest.xml`）：工程根下同名的模块目录打「业务组件」徽章。 */
+  bcNames: ComponentIndex;
   editing: EditState | null;
   editError: string | null;
   busy: boolean;
@@ -94,8 +110,9 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
     );
   }
 
-  for (const item of items) {
-    const full = joinPath(dir, item.name);
+  const kids = visibleChildren(dir, items, { hoist: ctx.hoist(dir), dirs: ctx.dirs });
+  for (const { dir: from, item } of kids) {
+    const full = joinPath(from, item.name);
     if (ctx.editing && ctx.editing.mode === "rename" && ctx.editing.target?.toLowerCase() === full.toLowerCase()) {
       rows.push(<EditRow key={`rename-${full}`} ctx={ctx} />);
       continue;
@@ -104,6 +121,8 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
       // 压缩中间包：`com → aier → erp` 只有一个子目录时合成一行 `com.aier.erp`
       const chain = dirChain(ctx.compact, full, item.name, ctx.dirs);
       const open = chainOpen(chain, ctx.expanded);
+      // 只有工程根下这一层才是 NC 的模块目录；再深就是包/目录，名字对上了也不是组件
+      const bc = ctx.isBcModule(full) ? bcBadge(item.name, ctx.bcNames) : undefined;
       rows.push(
         <TreeDirRow
           key={chain.tail}
@@ -114,7 +133,8 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
           open={open}
           selected={ctx.selectedPath === chain.tail}
           padLeft={6 + depth * 14}
-          parent={dir}
+          parent={from}
+          bc={bc}
           onToggle={ctx.onToggle}
           onContextMenu={ctx.onContextMenu}
         />,

@@ -22,6 +22,8 @@ export function LogList({
   emptyTitle?: string;
   emptyHint?: string;
 }) {
+  const selectedIndex = entries.findIndex((entry) => entryKey(entry) === selectedKey);
+  const tabIndex = selectedIndex < 0 ? 0 : selectedIndex;
   if (entries.length === 0) {
     return (
       <div className="lg-empty">
@@ -29,15 +31,25 @@ export function LogList({
         <p>{emptyTitle ?? "这个范围里没有命中归因的记录"}</p>
         <p className="lg-empty-hint">
           {emptyHint ??
-            "关掉「只看有结论的」可以看全部原始记录；也可能是时间范围太窄，或者服务启动后还没写日志。"}
+            "在高级筛选中关闭「仅问题与慢 SQL」可以看全部原始记录；也可能是时间范围太窄，或者服务启动后还没写日志。"}
         </p>
       </div>
     );
   }
 
   return (
-    <div className="lg-list" role="listbox" aria-label="日志归因条目">
-      {entries.map((entry) => {
+    <div className="lg-list" role="listbox" aria-label="日志记录" onKeyDown={(event) => {
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+      const rows = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'));
+      const current = rows.indexOf(event.target as HTMLButtonElement);
+      if (current < 0) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? rows.length - 1
+        : Math.max(0, Math.min(rows.length - 1, current + (event.key === "ArrowDown" ? 1 : -1)));
+      rows[next].focus({ preventScroll: true });
+      rows[next].scrollIntoView?.({ block: "nearest" });
+    }}>
+      {entries.map((entry, index) => {
         const key = entryKey(entry);
         const severity = entry.verdict?.severity;
         const meta = severity ? severityMeta(severity) : null;
@@ -47,10 +59,12 @@ export function LogList({
             type="button"
             role="option"
             aria-selected={selectedKey === key}
+            tabIndex={index === tabIndex ? 0 : -1}
             className="lg-row"
             data-sev={severity}
             data-active={selectedKey === key || undefined}
             onClick={() => onSelect(entry)}
+            onFocus={() => onSelect(entry)}
           >
             <span className="lg-row-icon">
               {meta ? (

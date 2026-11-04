@@ -15,6 +15,8 @@ import {
   type TableInfo,
   type TxInfo,
 } from "./dbApi";
+import { beginOperation, trackOperation } from "./operations";
+import { dbCancelled, dbTaskSpec } from "./dbOperations";
 import { addHistory } from "./dbHistory";
 import type { MdDictOut, PickRow, ScopeKind } from "./mdDict";
 
@@ -48,6 +50,8 @@ export interface ConnRuntime {
 }
 
 export interface ResultEntry {
+  completedAt?:number;
+  startLine?:number;
   id: string;
   /** 第几条语句（脚本执行时）。 */
   index: number;
@@ -63,6 +67,7 @@ export interface ResultEntry {
   /** 实际执行开销；`null` / 缺省 = 这个账号读不到 `v$mystat`（界面不显示统计行）。 */
   stats?: ExecStats | null;
   error?: string;
+  cancelled?: boolean;
   loadingMore?: boolean;
 }
 
@@ -113,6 +118,8 @@ export interface TableTab {
    * 都按 `kind` 分派——多一种 kind 就要在四处各加一支，漏一处就是「关不掉的标签」。
    */
   otype?: string;
+  query?:{where:string;order:string;params:import("./dbApi").BoundCell[]};
+  trail?:{tabId:string;label:string}[];
 }
 
 /**
@@ -179,6 +186,7 @@ export interface DbState {
   dialog: ConnDialogState | null;
   /** 会话与锁抽屉（只读面板）。null = 关闭。 */
   sessionPanel: { connId: string } | null;
+  objectFinder?:boolean;
 }
 
 const TABS_KEY = "ncforge-db-tabs";
@@ -228,7 +236,7 @@ function persist() {
       if (t.kind === "sql") {
         tabs.push({ kind: t.kind, id: t.id, title: t.title, connId: t.connId, sql: t.sql, maxRows: t.maxRows, timeoutSec: t.timeoutSec });
       } else if (t.kind === "table") {
-        tabs.push(t);
+        tabs.push({...t,query:undefined,trail:undefined});
       }
       // dict 不落盘（见上）
     }
@@ -319,6 +327,8 @@ export function closeConnDialog() {
  * 为什么放在 store 而不是组件本地状态：按钮在 SQL 工具栏、抽屉挂在数据库页级别，
  * 两者不在同一棵子树里；本地状态只能靠回调层层传。
  */
+export function showObjectFinder(open=true) {set({objectFinder:open});}
+
 export function openSessionPanel(connId: string | null) {
   if (!connId) return;
   set({ sessionPanel: { connId } });
@@ -354,7 +364,7 @@ export async function loadConns(): Promise<void> {
 export async function connect(id: string, password?: string, remember?: boolean): Promise<"ok" | "need-password" | "error"> {
   setRt(id, { status: "connecting", error: undefined });
   try {
-    const info = await dbApi.connect(id, password, remember);
+    const info = await trackOperation(dbTaskSpec(`connect:${id}`,"连接数据库",id,"连接",connOf(id)?.name),()=>dbApi.connect(id, password, remember));
     setRt(id, { status: "connected", info, tx: { autoCommit: info.autoCommit, statements: 0, rows: 0, since: 0 } });
     // 能力位问一次就够（连接期间不会变）；失败不影响已连上的状态，只是按钮按保守处理
     void dbApi.caps(id).then((caps) => setRt(id, { caps })).catch(() => undefined);
@@ -369,15 +379,14 @@ export async function connect(id: string, password?: string, remember?: boolean)
 }
 
 export async function disconnect(id: string): Promise<void> {
-  try {
-    await dbApi.disconnect(id);
-  } finally {
-    setRt(id, { status: "idle", info: undefined, tx: undefined, error: undefined });
-  }
+  await trackOperation(dbTaskSpec(`disconnect:${id}`,"断开数据库",id,"全部会话",connOf(id)?.name),()=>dbApi.disconnect(id));
+  setRt(id, { status: "idle", info: undefined, tx: undefined, error: undefined });
 }
 
 /** 连上之后拉表清单、NC 中文名、本地表结构缓存（补全用）。任一失败不影响其它。 */
-export async function loadMeta(id: string): Promise<void> {
+export async function loadMeta(id: string, observed=false): Promise<void> {
+  const task=observed ? beginOperation(dbTaskSpec(`meta:${id}`,"刷新数据库对象",id,"主会话",connOf(id)?.name)) : null;
+  if(observed && !task) return;
   setRt(id, { tablesLoading: true });
   const [t, n, s] = await Promise.allSettled([dbApi.tables(id), dbApi.ncNames(id), dbApi.schemaCache(id)]);
   setRt(id, {
@@ -387,6 +396,8 @@ export async function loadMeta(id: string): Promise<void> {
     ncNames: n.status === "fulfilled" ? n.value.names : rtOf(id).ncNames,
     schema: s.status === "fulfilled" ? s.value : rtOf(id).schema,
   });
+  const failed=[t,n,s].filter(r=>r.status==="rejected").length;
+  task?.finish(failed ? "failed" : "success",failed ? `有 ${failed} 项未读取成功；已保留可用清单，返回数据库页核对` : "对象清单与缓存已刷新");
 }
 
 const colCache = new Map<string, Promise<ColumnInfo[]>>();
@@ -423,7 +434,8 @@ export async function txAction(
   action: "commit" | "rollback" | "autocommit-on" | "autocommit-off",
   slot?: string | null,
 ): Promise<TxInfo> {
-  const r = await dbApi.tx(id, action, slot);
+  const label={commit:"提交事务",rollback:"回滚事务","autocommit-on":"开启自动提交","autocommit-off":"关闭自动提交"}[action];
+  const r = await trackOperation(dbTaskSpec(`tx:${id}:${slot || "primary"}`,label,id,slot ? `独立会话 ${slot}` : "主会话",connOf(id)?.name,slot ? state.tabs.find(t=>t.kind==="sql" && t.connId===id && t.slot===slot)?.id : undefined),()=>dbApi.tx(id, action, slot));
   if (!slot) setTx(id, r.tx);
   return r.tx;
 }
@@ -568,12 +580,19 @@ export const ownsCursor = (connId: string | null, slot: string | null | undefine
  */
 export async function ensureSlot(tabId: string, connId: string): Promise<string | null> {
   const tab = sqlTabOf(tabId);
-  if (!tab) return null;
+  if (!tab || tab.connId !== connId) return null;
   if (tab.slot) return tab.slot;
   try {
-    const { slot } = await dbApi.slotAcquire(connId);
+    return await trackOperation(dbTaskSpec(`slot:${tabId}`,"申请 SQL 独立会话",connId,`SQL 标签 ${tabId}`,connOf(connId)?.name,tabId),async()=>{
+    const {slot}=await dbApi.slotAcquire(connId);
+    const current = sqlTabOf(tabId);
+    // 申请期间标签可能关闭或换库，不能把旧连接的槽塞进新标签，也不能遗留它。
+    if (!current || current.connId !== connId || current.slot !== tab.slot) {
+      await releaseSlot(connId, slot);
+      return null;
+    }
     patchTab<SqlTab>(tabId, { slot, tx: undefined });
-    return slot;
+    return slot;});
   } catch (e) {
     appendOutput(tabId, [{
       at: Date.now(),
@@ -638,7 +657,7 @@ export async function execOne(tabId: string, sql: string, index: number): Promis
     if (slot) patchTab<SqlTab>(tabId, { tx: r.tx });
     else setTx(connId, r.tx);
     entry = r.kind === "rows"
-      ? { ...base, kind: "rows", columns: r.columns, rows: r.rows, hasMore: r.hasMore, ms: r.ms, sets: r.sets, stats: r.stats }
+      ? { ...base, completedAt:Date.now(), kind: "rows", columns: r.columns, rows: r.rows, hasMore: r.hasMore, ms: r.ms, sets: r.sets, stats: r.stats }
       : { ...base, kind: "update", updateCount: r.updateCount, ms: r.ms, stats: r.stats };
     if (r.output.length) appendOutput(tabId, r.output.map((text) => ({ at: Date.now(), text, tone: "dbms" as const })));
     // P0 能力路由：这条语句其实是在 JVM 桥的临时会话上跑的。必须说出来——
@@ -653,7 +672,7 @@ export async function execOne(tabId: string, sql: string, index: number): Promis
   } catch (e) {
     const { code, message } = parseDbError(e);
     if (code === "bridge") setRt(connId, { status: "error", error: message });
-    entry = { ...base, kind: "error", error: friendlyDbError(e), ms: Date.now() - t0 };
+    entry = { ...base, kind: "error", error: friendlyDbError(e), cancelled:dbCancelled(e), ms: Date.now() - t0 };
   }
   appendOutput(tabId, [{
     at: Date.now(),
@@ -668,28 +687,28 @@ export async function execOne(tabId: string, sql: string, index: number): Promis
 export async function loadMore(tabId: string, resultId: string): Promise<void> {
   const tab = sqlTabOf(tabId);
   const res = tab?.results.find((r) => r.id === resultId);
-  if (!tab?.connId || !res || !ownsCursor(tab.connId, tab.slot, resultId)) return;
+  if (!tab?.connId || !res || res.loadingMore || !ownsCursor(tab.connId, tab.slot, resultId)) return;
   const upd = (p: Partial<ResultEntry>) => {
     const cur = sqlTabOf(tabId);
     if (cur) patchTab<SqlTab>(tabId, { results: cur.results.map((r) => (r.id === resultId ? { ...r, ...p } : r)) });
   };
   upd({ loadingMore: true });
   try {
-    const m = await dbApi.more(tab.connId, tab.maxRows, tab.slot);
+    const m = await trackOperation({...dbTaskSpec(`more:${tabId}:${resultId}`,"加载后续结果",tab.connId,tab.slot ? `独立会话 ${tab.slot}` : "主会话",connOf(tab.connId)?.name,tabId),cancel:()=>dbApi.cancel(tab.connId!,tab.slot),cancelled:dbCancelled},()=>dbApi.more(tab.connId!, tab.maxRows, tab.slot));
     const cur = sqlTabOf(tabId)?.results.find((r) => r.id === resultId);
     upd({ rows: [...(cur?.rows ?? []), ...m.rows], hasMore: m.hasMore, loadingMore: false });
   } catch (e) {
-    upd({ hasMore: false, loadingMore: false });
+    upd({ loadingMore: false });
     appendOutput(tabId, [{ at: Date.now(), text: `[${now()}] 加载更多失败：${friendlyDbError(e)}`, tone: "bad" }]);
   }
 }
 
 export async function explainInto(tabId: string, sql: string): Promise<void> {
   const tab = sqlTabOf(tabId);
-  if (!tab?.connId) return;
+  if (!tab?.connId || tab.running) return;
   patchTab<SqlTab>(tabId, { running: true });
   try {
-    const r = await dbApi.explain(tab.connId, sql);
+    const r = await trackOperation(dbTaskSpec(`explain:${tabId}`,"读取执行计划",tab.connId,"主会话",connOf(tab.connId)?.name,tabId),()=>dbApi.explain(tab.connId!, sql));
     patchTab<SqlTab>(tabId, { plan: { sql, rows: r.plan }, view: "plan", running: false });
   } catch (e) {
     patchTab<SqlTab>(tabId, { plan: { sql, rows: [], error: friendlyDbError(e) }, view: "plan", running: false });

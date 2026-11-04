@@ -20,6 +20,7 @@ import { setCodeDiags } from "../../lib/diagStore";
 import {
   __resetDbForTest,
   activateTab,
+  getDb,
   openSqlTab,
   patchTab,
   setConns,
@@ -180,9 +181,36 @@ describe("状态栏贡献", () => {
 
     const el = render("db");
     expect(el.textContent).toContain("数据库 · 测试库");
-    expect(el.textContent).toContain("事务 2 条未提交");
+    expect(el.textContent).toContain("1 个会话待提交");
 
     act(() => patchTab<SqlTab>(tabId, { running: true }));
     expect(el.textContent).toContain("查询中");
+  });
+
+  it("汇总当前连接的主会话和独立槽，同槽去重并可定位单个标签", () => {
+    const first = openSqlTab("c1");
+    const sameSlot = openSqlTab("c1");
+    const second = openSqlTab("c1");
+    const other = openSqlTab("c2");
+    const tx = { autoCommit: false, statements: 2, rows: 3, since: 1 };
+    setTx("c1", tx);
+    setTx("c2", tx);
+    patchTab<SqlTab>(first, { slot: "1", tx });
+    patchTab<SqlTab>(sameSlot, { slot: "1", tx });
+    patchTab<SqlTab>(second, { slot: "2", tx: { ...tx, statements: 3 } });
+    patchTab<SqlTab>(other, { slot: "3", tx });
+    activateTab(first);
+    const el = render("db");
+    expect(el.textContent).toContain("3 个会话待提交");
+    act(() => button(el, "会话待提交")!.click());
+    const items = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+    expect(items).toHaveLength(3);
+    expect(items.map((item) => item.textContent).join(" ")).toContain("主会话");
+    act(() => items.find((item) => item.textContent?.includes("独立会话 2"))!.click());
+    expect(getDb().active).toBe(second);
+    expect((nav.mock.calls[nav.mock.calls.length - 1][0] as CustomEvent).detail).toBe("db");
+    // 定位不会顺带提交任何会话。
+    expect(getDb().rt.c1.tx?.statements).toBe(2);
+    expect(getDb().tabs.find((tab) => tab.id === second && tab.kind === "sql")).toMatchObject({ tx: { statements: 3 } });
   });
 });

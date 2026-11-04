@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { Modal } from "../ui/Modal";
@@ -32,11 +32,13 @@ export function PortDialog({
   const [plan, setPlan] = useState<PortPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const writing = useRef(false);
 
   // 打开时给一个建议值并清空上次的预览：80 被 IIS 之类占着是最常见的原因，
   // 直接推到 8081，用户不改也能一键确认。
   useEffect(() => {
-    if (!open) return;
+    if (!open || writing.current) return;
     setText(String(currentPort === 80 ? 8081 : currentPort + 1));
     setPlan(null);
     setError(null);
@@ -48,26 +50,32 @@ export function PortDialog({
     if (!open) return;
     const raw = text.trim();
     if (!raw) {
+      setPreviewing(false);
       setPlan(null);
       setError(null);
       return;
     }
     const port = Number(raw);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setPreviewing(false);
       setPlan(null);
       setError("端口要填 1~65535 之间的整数");
       return;
     }
+    setPreviewing(true);
+    setError(null);
     let stale = false;
     const timer = setTimeout(() => {
       ncPortPreview(port)
         .then((p) => {
           if (stale) return;
+          setPreviewing(false);
           setPlan(p);
           setError(null);
         })
         .catch((e) => {
           if (stale) return;
+          setPreviewing(false);
           setPlan(null);
           setError(String(e));
         });
@@ -89,10 +97,12 @@ export function PortDialog({
   const canApply = pending && !plan?.blocked && !applying;
 
   const apply = async () => {
+    if (writing.current) return;
     if (!plan || plan.newPort !== Number(text.trim())) {
       toast("端口刚改过，等预览刷新后再应用", "warning");
       return;
     }
+    writing.current = true;
     setApplying(true);
     try {
       const r = await ncPortApply(plan.newPort);
@@ -108,6 +118,7 @@ export function PortDialog({
     } catch (e) {
       toast(failureText("改端口", e), "error");
     } finally {
+      writing.current = false;
       setApplying(false);
     }
   };
@@ -115,7 +126,7 @@ export function PortDialog({
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={() => { if (!writing.current) onClose(); }}
       className="modal-surface w-[620px] max-w-[92vw] p-5"
       ariaLabel="改监听端口"
     >
@@ -124,7 +135,7 @@ export function PortDialog({
         <h2 className="text-sm font-semibold">改监听端口</h2>
         <span className="text-xs text-muted-foreground">当前 {currentPort}</span>
         <span className="flex-1" />
-        <button type="button" className="sv-icon-btn" onClick={onClose} title="关闭">
+        <button type="button" className="sv-icon-btn" disabled={applying} onClick={onClose} title="关闭">
           <Icon name="close" size={14} />
         </button>
       </div>
@@ -134,12 +145,13 @@ export function PortDialog({
         <input
           id="sv-port-field"
           value={text}
+          disabled={applying}
           inputMode="numeric"
           autoComplete="off"
           spellCheck={false}
           onChange={(e) => setText(e.target.value.replace(/[^\d]/g, "").slice(0, 5))}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && canApply) void apply();
+            if (e.key === "Enter" && !e.nativeEvent.isComposing && canApply) void apply();
           }}
         />
         <div className="sv-port-quick">
@@ -147,6 +159,7 @@ export function PortDialog({
             <button
               key={p}
               type="button"
+              disabled={applying}
               data-active={port === p}
               onClick={() => setText(String(p))}
             >
@@ -156,7 +169,8 @@ export function PortDialog({
         </div>
       </div>
 
-      {error && <p className="sv-port-err">{error}</p>}
+      {previewing && <p className="sv-port-hint flex items-center gap-2" role="status"><Icon name="spinner" size={13} className="animate-spin" />正在检查端口与配置文件…</p>}
+      {error && <p className="sv-port-err" role="alert">{error}</p>}
 
       {plan && fresh && (
         <>
@@ -220,7 +234,7 @@ export function PortDialog({
           改动会留下 <code>.ncforge-bak</code> 备份；服务运行中不能改（要先停止）。
         </span>
         <span className="flex-1" />
-        <button type="button" className="sv-btn" onClick={onClose}>
+        <button type="button" className="sv-btn" disabled={applying} onClick={onClose}>
           取消
         </button>
         <button
@@ -229,6 +243,7 @@ export function PortDialog({
           disabled={!canApply}
           onClick={() => void apply()}
         >
+          {applying && <Icon name="spinner" size={13} className="animate-spin" />}
           {applying ? "写入中…" : "应用"}
         </button>
       </div>

@@ -4,7 +4,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileTree, type FileTreeHandle } from "./FileTree";
 import { setSession } from "../../lib/workspaceSession";
-import { setCompactPackages, setRevealOnOpen } from "../../lib/treeViewPrefs";
+import {
+  setCompactPackages,
+  setNcStructure,
+  setRevealOnOpen,
+} from "../../lib/treeViewPrefs";
 import { ViewActivityContext } from "../../lib/viewActivity";
 import { clearBookmarks, loadBookmarks, toggleBookmark } from "../../lib/bookmarks";
 import type { LinkedProject } from "../../lib/linkedProjects";
@@ -45,6 +49,7 @@ const onOpen = vi.fn();
 const onCreated = vi.fn();
 const onRenamed = vi.fn();
 const onDeleted = vi.fn();
+const onCompileModule = vi.fn();
 const treeRef = createRef<FileTreeHandle>();
 
 const render = async (activePath: string | null = null, projects?: LinkedProject[]) => {
@@ -61,6 +66,7 @@ const render = async (activePath: string | null = null, projects?: LinkedProject
           onRenamed={onRenamed}
           onDeleted={onDeleted}
           openPaths={[]}
+          onCompileModule={onCompileModule}
         />
       </ViewActivityContext.Provider>,
     ),
@@ -110,6 +116,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   setCompactPackages(true);
   setRevealOnOpen(true);
+  setNcStructure(false);
   // 预置一棵已展开的树，免得每次渲染都去 listDir
   setSession({
     tree: {
@@ -134,6 +141,8 @@ beforeEach(() => {
     if (cmd === "fs_rename") return `${ROOT}\\B.java`;
     if (cmd === "fs_count_files") return 3;
     if (cmd === "fs_delete") return null;
+    // 默认没有 manifest：徽章用例自己覆盖
+    if (cmd === "nc_manifest") return { components: [], notes: [] };
     throw new Error(`unexpected command: ${cmd}`);
   });
   container = document.createElement("div");
@@ -345,6 +354,29 @@ describe("文件树的右键操作", () => {
     expect(menuItem("删除")?.disabled).toBe(true);
   });
 
+  /**
+   * 编译项：标出模块名，点它编的是**这一行**所属的模块。
+   *
+   * 它和标签栏那个「编译当前模块」不是一回事：那个取活动文件所在模块，
+   * 批量替换改完 `gl` 之后活动文件常常在别的模块里，点它会静默编错模块。
+   */
+  it("模块右键能直接编译这个模块，且不依赖活动标签", async () => {
+    // 活动标签故意指向另一个模块的文件：右键的模块必须照旧是 modules
+    await render(`${MODULES}\\A.java`);
+    await rightClick(rowByName("modules")!);
+
+    const item = menuItem("编译模块");
+    expect(item?.textContent).toContain("编译模块 modules");
+    await click(item);
+    expect(onCompileModule).toHaveBeenCalledWith(MODULES);
+  });
+
+  it("工作区根没有编译项（根不是一个模块）", async () => {
+    await render();
+    await rightClick(container.querySelector(".wb-tree-list")!);
+    expect(menuItem("编译模块")).toBeUndefined();
+  });
+
   it("标题栏的新建按钮作用在当前选中项上", async () => {
     await render();
     // 没选中时建在根下
@@ -424,6 +456,80 @@ describe("多工程树", () => {
     // 只读不挡「打开」「复制路径」这类不写盘的操作
     expect(menuItem("打开")?.disabled).toBe(false);
     expect(menuItem("复制路径")).toBeTruthy();
+    // 编译也没有：它不是只读问题，是「关联工程不属于当前工作区的编译范围」，后端必拒
+    expect(menuItem("编译模块")).toBeUndefined();
+  });
+
+  /**
+   * 多工程树里徽章与 NC 结构视图按**各自工程**的 manifest 生效。
+   *
+   * 回归点：徽章以前看 `depth === 0`，多工程树的模块行在 depth=1（工程行占了 0），
+   * 关联工程的模块一次都没亮过；`isBcModule` 改成「父目录是某个工程根」后这里盯住。
+   */
+  it("关联工程的模块也带 BC 徽章，NC 结构视图摊的是它的 src", async () => {
+    const LIB_BILL = `${OTHER}\\bill`;
+    const LIB_SRC = `${LIB_BILL}\\src`;
+    const LIB_PUBLIC = `${LIB_SRC}\\public`;
+    const LISTING: Record<string, { name: string; isDir: boolean; size: number }[]> = {
+      [ROOT]: [{ name: "modules", isDir: true, size: 0 }],
+      [OTHER]: [
+        { name: "bill", isDir: true, size: 0 },
+        { name: "util", isDir: true, size: 0 },
+      ],
+      [LIB_BILL]: [
+        { name: "src", isDir: true, size: 0 },
+        { name: "resources", isDir: true, size: 0 },
+      ],
+      [LIB_SRC]: [
+        { name: "public", isDir: true, size: 0 },
+        { name: "client", isDir: true, size: 0 },
+      ],
+      [LIB_PUBLIC]: [{ name: "U.java", isDir: false, size: 8 }],
+    };
+    setSession({
+      tree: {
+        root: ROOT,
+        expanded: new Set([ROOT, OTHER]),
+        marks: {},
+        dirs: Object.fromEntries(
+          Object.entries(LISTING).map(([p, items]) => [p, { status: "ok" as const, items }]),
+        ),
+      },
+    });
+    mocks.invoke.mockImplementation(async (cmd: string, args: { root?: string; path?: string } = {}) => {
+      if (cmd === "nc_manifest") {
+        // 当前工作区没有 manifest；关联工程登记了 bill
+        if (args.root === OTHER) {
+          return {
+            components: [{ name: "bill", dispname: "票据", roots: ["src/public"] }],
+            notes: [],
+          };
+        }
+        throw new Error("读取 manifest.xml 失败: 系统找不到指定的文件");
+      }
+      // 展开时会重列一次已缓存的层，得按真实内容回，不能回空
+      if (cmd === "fs_list_dir") return LISTING[args.path ?? ""] ?? [];
+      if (cmd === "fs_encoding_marks") return [];
+      return [];
+    });
+    setNcStructure(true);
+    await render(null, PROJECTS);
+    await act(async () => {}); // 等两个工程的 manifest 落地
+
+    // 徽章跟工程走：关联工程的 bill 有，当前工作区的 modules、没登记的 util 没有
+    const badge = rowByExact("bill")!.querySelector(".wb-bc-badge");
+    expect(badge?.textContent).toBe("BC");
+    expect(badge?.getAttribute("title")).toContain("票据");
+    expect(rowByExact("modules")!.querySelector(".wb-bc-badge")).toBeNull();
+    expect(rowByExact("util")!.querySelector(".wb-bc-badge")).toBeNull();
+
+    // 摊平的也是关联工程那一份 src：展开 bill 直接看到源码根，行带真实路径
+    await click(rowByExact("bill"));
+    expect(rowByExact("src")).toBeNull();
+    const pub = rowByExact("public")!;
+    expect(pub.getAttribute("id")).toContain(encodeURIComponent(LIB_PUBLIC));
+    await click(pub);
+    expect(rowByExact("U.java")).toBeTruthy();
   });
 });
 
@@ -588,5 +694,222 @@ describe("外部改动自动刷新", () => {
       .map(([, args]) => (args as { path: string }).path)
       .sort();
     expect(listed).toEqual([ROOT, MODULES].sort());
+  });
+});
+
+/**
+ * `manifest.xml` 的业务组件徽章。
+ *
+ * 盯两件事：① 徽章只按「工程根下这一层」判断，包的子目录里出现同名目录不能误标
+ * （`com/…/bill` 不是业务组件）；② manifest 读不到时树照常显示，不弹错、不空树。
+ */
+describe("业务组件徽章", () => {
+  it("根下登记过的模块带 BC，未登记的不带；更深的同名目录不算", async () => {
+    setSession({
+      tree: {
+        root: ROOT,
+        expanded: new Set([ROOT, `${ROOT}\\gl`]),
+        marks: {},
+        dirs: {
+          [ROOT]: {
+            status: "ok",
+            items: [
+              { name: "bill", isDir: true, size: 0 },
+              { name: "gl", isDir: true, size: 0 },
+            ],
+          },
+          // gl 下放两个子目录避开压缩链，才能看到 depth=1 的 bill 行
+          [`${ROOT}\\gl`]: {
+            status: "ok",
+            items: [
+              { name: "bill", isDir: true, size: 0 },
+              { name: "src", isDir: true, size: 0 },
+            ],
+          },
+        },
+      },
+    });
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "nc_manifest") {
+        return { components: [{ name: "bill", dispname: "票据", roots: ["src/public"] }], notes: [] };
+      }
+      if (cmd === "fs_list_dir" || cmd === "fs_encoding_marks") return [];
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    await render();
+    await act(async () => {}); // 等 manifest 那次 invoke 落地
+
+    const bills = [...container.querySelectorAll(".wb-row")].filter(
+      (el) => el.querySelector(".wb-row-name")?.textContent === "bill",
+    );
+    expect(bills).toHaveLength(2);
+    const badge = bills[0].querySelector(".wb-bc-badge");
+    expect(badge?.textContent).toBe("BC");
+    expect(badge?.getAttribute("title")).toContain("票据");
+    expect(bills[1].querySelector(".wb-bc-badge")).toBeNull();
+
+    const gl = rowByExact("gl")!;
+    expect(gl.querySelector(".wb-bc-badge")).toBeNull();
+  });
+
+  it("manifest 读不到时树照常渲染，只是一个徽章都没有", async () => {
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "nc_manifest") throw new Error("读取 manifest.xml 失败: 系统找不到指定的文件");
+      if (cmd === "fs_list_dir" || cmd === "fs_encoding_marks") return [];
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    await render();
+    await act(async () => {});
+
+    expect(container.querySelectorAll(".wb-row").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll(".wb-bc-badge")).toHaveLength(0);
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * NC 结构视图：业务组件模块的 `src` 摊平。
+ *
+ * 盯四件事：
+ * ① 开着时展开 `bill` 第一层直接是 public/client/private/test/resources，没有 `src`；
+ * ② 摊平后的行**仍是真实磁盘路径**（`bill/src/public`），不引入虚拟节点；
+ * ③ 关掉时 `src` 回来，逐层显示；
+ * ④ `reveal` 定位 `bill/src/public/x.java` 在两种开关下都能滚到那一行；
+ *    没登记在 manifest 里的模块（`aim`）两种开关下都照普通目录展开。
+ */
+describe("NC 结构视图", () => {
+  const BILL = `${ROOT}\\bill`;
+  const AIM = `${ROOT}\\aim`;
+  const BILL_SRC = `${BILL}\\src`;
+  const BILL_PUBLIC = `${BILL_SRC}\\public`;
+  const LISTING: Record<string, { name: string; isDir: boolean; size: number }[]> = {
+    [ROOT]: [
+      { name: "bill", isDir: true, size: 0 },
+      { name: "aim", isDir: true, size: 0 },
+    ],
+    [BILL]: [
+      { name: "src", isDir: true, size: 0 },
+      { name: "resources", isDir: true, size: 0 },
+      { name: "META-INF", isDir: true, size: 0 },
+    ],
+    [BILL_SRC]: [
+      { name: "public", isDir: true, size: 0 },
+      { name: "client", isDir: true, size: 0 },
+      { name: "private", isDir: true, size: 0 },
+      { name: "test", isDir: true, size: 0 },
+    ],
+    [BILL_PUBLIC]: [{ name: "x.java", isDir: false, size: 12 }],
+    // aim 也放两个子目录：只有一个的话会被「压缩中间包」并成 `aim.src` 一行，
+    // 行名就不是 `aim` 了（那是压缩链的行为，不是本用例要测的东西）
+    [AIM]: [
+      { name: "src", isDir: true, size: 0 },
+      { name: "lib", isDir: true, size: 0 },
+    ],
+    // 两个子目录：一个的话 `aim/src` 也会被并进压缩链里
+    [`${AIM}\\src`]: [
+      { name: "main", isDir: true, size: 0 },
+      { name: "gen", isDir: true, size: 0 },
+    ],
+  };
+
+  const seed = () => {
+    setSession({
+      tree: {
+        root: ROOT,
+        expanded: new Set([ROOT]),
+        marks: {},
+        dirs: Object.fromEntries(
+          Object.entries(LISTING).map(([p, items]) => [p, { status: "ok" as const, items }]),
+        ),
+      },
+    });
+    mocks.invoke.mockImplementation(async (cmd: string, args: { path?: string } = {}) => {
+      if (cmd === "nc_manifest") {
+        return {
+          components: [{ name: "bill", dispname: "票据", roots: ["src/public", "src/client"] }],
+          notes: [],
+        };
+      }
+      if (cmd === "fs_list_dir") return LISTING[args.path ?? ""] ?? [];
+      if (cmd === "fs_encoding_marks") return [];
+      return [];
+    });
+  };
+
+  it("开着：展开 bill 直接看到 5 个源码根，没有 src 这一层", async () => {
+    setNcStructure(true);
+    seed();
+    await render();
+    await act(async () => {}); // 等 manifest 落地
+    await click(rowByExact("bill"));
+
+    expect(rowByExact("src")).toBeNull();
+    expect(rowByExact("public")).toBeTruthy();
+    for (const n of ["client", "private", "test", "resources", "META-INF"]) {
+      expect(rowByExact(n)).toBeTruthy();
+    }
+    // 摊平后的行带的是真实路径：父目录是 bill/src，不是虚拟节点
+    const pub = rowByExact("public")!;
+    expect(pub.getAttribute("id")).toContain(encodeURIComponent(BILL_PUBLIC));
+    await click(pub);
+    expect(rowByExact("x.java")).toBeTruthy();
+  });
+
+  it("关掉：src 自己占一行，要点两下才到源码根", async () => {
+    setNcStructure(false);
+    seed();
+    await render();
+    await act(async () => {});
+    await click(rowByExact("bill"));
+
+    expect(rowByExact("src")).toBeTruthy();
+    expect(rowByExact("public")).toBeNull();
+    await click(rowByExact("src"));
+    expect(rowByExact("public")).toBeTruthy();
+  });
+
+  /**
+   * 定位有 120ms 防抖，等它落地。
+   *
+   * 每个开关单独一条用例：在一条用例里来回切开关，组件不重挂，`useTreeLocate`
+   * 的 effect 依赖没变就不会再跑一次定位——那是测试自己的坑，不是产品的。
+   */
+  const waitReveal = () =>
+    act(async () => {
+      await new Promise((r) => setTimeout(r, 160));
+    });
+
+  it("开着：定位 bill/src/public/x.java 能滚到那一行（public 是展开态）", async () => {
+    setNcStructure(true);
+    seed();
+    await render(`${BILL_PUBLIC}\\x.java`);
+    await waitReveal();
+
+    expect(rowByExact("x.java")).toBeTruthy();
+    // 定位是顺着真实路径逐层展开的：摊平后 public 这一行必须真的是展开态
+    expect(rowByExact("public")!.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("关掉：定位同一个文件照样能滚到那一行", async () => {
+    setNcStructure(false);
+    seed();
+    await render(`${BILL_PUBLIC}\\x.java`);
+    await waitReveal();
+
+    expect(rowByExact("src")).toBeTruthy();
+    expect(rowByExact("x.java")).toBeTruthy();
+    expect(rowByExact("public")!.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("没登记在 manifest 里的 aim：开着 NC 结构视图也按普通目录展开", async () => {
+    setNcStructure(true);
+    seed();
+    await render();
+    await act(async () => {});
+    await click(rowByExact("aim"));
+
+    expect(rowByExact("src")).toBeTruthy();
+    await click(rowByExact("src"));
+    expect(rowByExact("main")).toBeTruthy();
   });
 });

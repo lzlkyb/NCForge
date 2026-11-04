@@ -5,252 +5,101 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NCForge</title>
     <script>
-      // 抢先定主题。主题本来是 main.tsx 里打的 class，也就是说 JS bundle 加载完
-      // 之前页面永远是浅色（窗口 backgroundColor 写死为 #F4F6F9）——深色用户每次开窗
-      // 都先挨一下白屏。同步 script 会阻塞渲染，所以不会有中间态。
-      // 与 main.tsx 里那行不冲突（重复置为同一值，幂等）。
+      // Bundle 加载前恢复窗口颜色和导航宽度，避免首帧闪回上一套布局。
       try {
-        if (localStorage.getItem("theme") === "dark") {
-          document.documentElement.classList.add("dark");
-        }
-      } catch (_) {
-        /* 隐私模式下 localStorage 可能抛错，按浅色走就行 */
-      }
+        if (localStorage.getItem("theme") === "dark") document.documentElement.classList.add("dark");
+        if (localStorage.getItem("ncforge-rail-expanded") === "1") document.documentElement.dataset.bootRail = "expanded";
+        if (localStorage.getItem("ncforge.ui-density") === "comfortable") document.documentElement.dataset.uiDensity = "comfortable";
+      } catch (_) { /* 存储不可用时采用浅色紧凑导航。 */ }
     </script>
     <style>
-      /* 首帧骨架屏（设计稿：design/开窗首帧骨架屏-设计稿.html）。
-
-         为何写在这里而不是做成 React 组件：空白的 1~2 秒正是「JS bundle 还没加载完」
-         的时间，React 组件要等 bundle 执行完才能渲染，恰好错过了需要它的那段时间。
-         写在 #root 里面则浏览器解析 HTML 就渲染；React createRoot().render() 时会
-         自然把它清掉，不需要任何手动拆除代码。
-
-         样式全部内联、不依赖 Tailwind 那份 CSS（它也是外部资源）。
-
-         P2-8：布局重画。原稿画的还是旧「顶部 4 个等宽 Tab」布局，而真实布局早在
-         侧栏化改造后就是「左 148px 窄导航 + 36px Header + 内容区」——每次开窗先
-         看到一套不存在的布局再跳变。现在参考尺寸全部取自真实布局：
-         - .app-side 148px（workbench-layout.css）/ card 底 / 右边框；
-           .app-side-head 52px + logo 23px；导航项 padding 8px 10px + gap 10px + 图标 16px
-         - .app-topbar 36px（workbench-layout.css 覆盖了 index.css 的 52px）
-         - 暗色四色对齐 app token：bg #121620 / card #191F2C / block #2C2D32 /
-           border #35363B（index.css:188-215），原 #09090b 是上一代暗色底，
-           开窗瞬间会看到一道色带跳变。
-         只画到卡片轮廓为止：真实内容高度随状态变，画得越细越快过时。 */
       :root {
-        --sk-bg: #f4f6f9;
+        --sk-bg: #eef1f2;
         --sk-card: #ffffff;
-        --sk-border: #e2e6ec;
-        --sk-block: #eef1f5;
-        --sk-sheen: rgba(255, 255, 255, 0.55);
+        --sk-border: #dfe3e6;
+        --sk-block: #dfe3e6;
+        --sk-ink: #636d77;
+        --sk-sheen: rgb(255 255 255 / .45);
+        --sk-nav: 60px;
       }
       :root.dark {
-        --sk-bg: #121620;
-        --sk-card: #191f2c;
-        --sk-border: #35363b;
-        --sk-block: #2c2d32;
-        --sk-sheen: rgba(255, 255, 255, 0.1);
+        color-scheme: dark;
+        --sk-bg: #1b1f23;
+        --sk-card: #202429;
+        --sk-border: #353c43;
+        --sk-block: #353c43;
+        --sk-ink: #a5aeb8;
+        --sk-sheen: rgb(255 255 255 / .08);
       }
-      html,
-      body {
-        margin: 0;
-        height: 100%;
-        background: var(--sk-bg);
-      }
-      #root {
-        height: 100%;
-      }
-      .boot {
-        height: 100%;
-        display: flex;
-        flex-direction: row;
-        overflow: hidden;
-        font: 13px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-      }
-      /* 左侧窄导航（对齐 .app-side） */
-      .boot-side {
-        flex: none;
-        width: 148px;
-        display: flex;
-        flex-direction: column;
-        background: var(--sk-card);
-        border-right: 1px solid var(--sk-border);
-      }
-      .boot-side-head {
-        flex: none;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        height: 52px;
-        padding: 0 12px;
-        overflow: hidden;
-      }
-      .boot-side-nav {
-        flex: 1;
-        min-height: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        padding: 8px;
-      }
-      .boot-nav-item {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 8px 10px;
-        border-radius: 8px;
-      }
-      .boot-nav-item.on {
-        background: var(--sk-block);
-      }
-      .boot-side-foot {
-        flex: none;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        padding: 8px;
-        border-top: 1px solid var(--sk-border);
-      }
-      /* 右侧主区：Header（对齐 .app-topbar 52px，渐变 card→bg 与真实一致）+ 内容 */
-      .boot-main {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-      }
-      .boot-hd {
-        flex: none;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        height: 36px;
-        padding: 0 12px;
-        border-bottom: 1px solid var(--sk-border);
-        background: var(--sk-bg);
-      }
-      .boot-body {
-        flex: 1;
-        min-height: 0;
-        padding: 20px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        overflow: hidden;
-      }
-      .boot-card {
-        border: 1px solid var(--sk-border);
-        border-radius: 12px;
-        background: var(--sk-card);
-        padding: 12px;
-      }
-      .sk {
-        border-radius: 5px;
-        background: var(--sk-block);
-      }
-      /* 流光用 background-position 平移渐变，纯合成。
-         不用 box-shadow / filter——项目里早就因为那个每帧重绘做过一轮优化。 */
-      @keyframes boot-sheen {
-        from {
-          background-position: -240px 0;
-        }
-        to {
-          background-position: calc(240px + 100%) 0;
-        }
-      }
-      .sk.live {
-        background-image: linear-gradient(
-          90deg,
-          var(--sk-block) 0%,
-          var(--sk-sheen) 50%,
-          var(--sk-block) 100%
-        );
-        background-size: 240px 100%;
-        background-repeat: no-repeat;
-        animation: boot-sheen 1.3s ease-in-out infinite;
-      }
-      /* 全局减弱动效守卫在 Tailwind CSS 里，而这段在它之外，得自己写一份。 */
-      @media (prefers-reduced-motion: reduce) {
-        .sk.live {
-          background-image: none;
-          animation: none;
-        }
-      }
+      :root[data-boot-rail="expanded"] { --sk-nav: 148px; }
+      html, body { margin:0; height:100%; background:var(--sk-bg); }
+      #root { height:100%; }
+      .boot { display:flex; flex-direction:column; height:100%; overflow:hidden; font:13px/1.5 "Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif; }
+      .boot-hd { display:flex; align-items:center; flex:none; gap:10px; height:40px; padding:0 12px; }
+      .boot-brand { display:flex; align-items:center; gap:7px; color:var(--sk-ink); font-weight:600; }
+      .boot-brand img { display:block; border-radius:6px; }
+      .boot-search { width:clamp(230px,32vw,440px); height:28px; margin-inline:auto; border:1px solid var(--sk-border); border-radius:6px; background:var(--sk-card); }
+      .boot-controls,.boot-window-group { display:flex; align-items:center; flex:none; gap:0; }
+      .boot-tool { width:28px; height:28px; display:grid; place-items:center; margin-right:4px; }
+      .boot-window { width:44px; height:40px; display:grid; place-items:center; }
+      .boot-body { display:flex; flex:1; min-height:0; min-width:0; padding-right:5px; }
+      .boot-side { width:var(--sk-nav); flex:none; display:flex; flex-direction:column; }
+      .boot-side-nav { display:flex; flex:1; flex-direction:column; gap:5px; padding:7px 5px; }
+      .boot-nav-item { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; min-height:53px; border-radius:6px; }
+      .boot-nav-item.on { background:var(--sk-card); }
+      .boot-nav-icon { width:19px; height:19px; }
+      .boot-nav-label { width:30px; height:10px; }
+      .boot-side-foot { padding:6px; }
+      :root[data-boot-rail="expanded"] .boot-nav-item { flex-direction:row; justify-content:flex-start; min-height:36px; padding-inline:10px; gap:10px; }
+      :root[data-boot-rail="expanded"] .boot-nav-label { width:64px; }
+      .boot-main { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; }
+      .boot-surface { display:flex; flex:1; min-height:0; overflow:hidden; border:1px solid var(--sk-border); border-radius:8px 8px 0 0; background:var(--sk-card); }
+      .boot-tree { width:240px; flex:none; padding:12px; box-sizing:border-box; border-right:1px solid var(--sk-border); background:var(--sk-bg); }
+      .boot-tree .sk { height:10px; margin-bottom:16px; }
+      .boot-editor { display:flex; flex:1; flex-direction:column; min-width:0; }
+      .boot-tabs { display:flex; align-items:center; gap:12px; height:36px; flex:none; padding-inline:12px; border-bottom:1px solid var(--sk-border); background:var(--sk-bg); }
+      .boot-loading { display:grid; place-content:center; flex:1; color:var(--sk-ink); }
+      .boot-status { display:flex; align-items:center; gap:12px; height:26px; flex:none; padding-inline:9px; }
+      .sk { position:relative; overflow:hidden; border-radius:4px; background:var(--sk-block); }
+      .sk.live::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent,var(--sk-sheen),transparent); animation:boot-sheen 1.3s linear infinite; }
+      @keyframes boot-sheen { from { transform:translateX(-100%); } to { transform:translateX(100%); } }
+      @media(max-width:850px) { .boot-tree { width:200px; } .boot-window { width:32px; } .boot-search { width:clamp(150px,24vw,300px); } }
+      @media(max-width:650px) { .boot-tree,.boot-hd>.sk { display:none; } }
+      @media(prefers-reduced-motion:reduce) { .sk.live::after { display:none; animation:none; } }
     </style>
+    <style>html[data-ui-density="comfortable"] .boot-loading { font-size:14px; }</style>
   </head>
   <body>
     <div id="root">
-      <!-- React 挂载后这整块会被自动替掉，无需手动清理 -->
-      <div class="boot" aria-hidden="true">
-        <div class="boot-side">
-          <div class="boot-side-head">
-            <!-- logo 用真图而不是骨架块：它是 public/ 下的静态文件，浏览器解析到这行就能发请求，
-                 不用等 JS bundle——能画的就不该拿灰块代替，看着像「应用已经在了」而不是「还在加载」。
-                 外层保留 .sk 作底（注意不带 live，不流光）：万一图没加载出来，看到的还是个灰方块，
-                 不会变成浏览器的破图标。旁边的应用名仍用骨架块：那是文字，字体未就绪时画出来会跳。 -->
-            <div class="sk" style="width: 23px; height: 23px; border-radius: 5px; flex: none">
-              <img src="/icon.png" alt="" width="23" height="23" style="display: block; border-radius: 5px" />
+      <!-- React 挂载时整体接管；这里仅展示已批准的窗口框架。 -->
+      <div class="boot">
+        <header class="boot-hd" aria-hidden="true">
+          <div class="boot-brand"><img src="/icon.png" alt="" width="20" height="20" /><span>NCForge</span></div>
+          <div class="sk" style="width:20px;height:18px"></div>
+          <div class="sk live" style="width:100px;height:12px"></div>
+          <div class="boot-search"></div>
+          <div class="boot-controls"><div class="boot-tool"><div class="sk" style="width:16px;height:16px"></div></div><div class="boot-tool"><div class="sk" style="width:16px;height:16px"></div></div><div class="boot-window-group"><div class="boot-window"><div class="sk" style="width:16px;height:16px"></div></div><div class="boot-window"><div class="sk" style="width:16px;height:16px"></div></div><div class="boot-window"><div class="sk" style="width:16px;height:16px"></div></div></div></div>
+        </header>
+        <div class="boot-body">
+          <aside class="boot-side" aria-hidden="true">
+            <nav class="boot-side-nav">
+              <div class="boot-nav-item on"><div class="sk boot-nav-icon"></div><div class="sk boot-nav-label"></div></div>
+              <div class="boot-nav-item"><div class="sk boot-nav-icon"></div><div class="sk boot-nav-label"></div></div>
+              <div class="boot-nav-item"><div class="sk boot-nav-icon"></div><div class="sk boot-nav-label"></div></div>
+              <div class="boot-nav-item"><div class="sk boot-nav-icon"></div><div class="sk boot-nav-label"></div></div>
+            </nav>
+            <div class="boot-side-foot"><div class="boot-nav-item"><div class="sk boot-nav-icon"></div><div class="sk boot-nav-label"></div></div></div>
+          </aside>
+          <main class="boot-main">
+            <div class="boot-surface">
+              <aside class="boot-tree" aria-hidden="true"><div class="sk live" style="width:72%"></div><div class="sk" style="width:54%"></div><div class="sk" style="width:82%"></div><div class="sk" style="width:63%"></div></aside>
+              <section class="boot-editor">
+                <div class="boot-tabs" aria-hidden="true"><div class="sk live" style="width:90px;height:12px"></div><div class="sk" style="width:66px;height:12px"></div></div>
+                <div class="boot-loading" role="status">正在打开工作台…</div>
+              </section>
             </div>
-            <div style="flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0">
-              <div class="sk live" style="width: 96px; height: 14px"></div>
-              <div class="sk live" style="width: 120px; height: 10px"></div>
-            </div>
-          </div>
-          <div class="boot-side-nav">
-            <!-- 6 个导航项对应 WORKSPACE_NAV：文件/搜索/版本控制/NC 服务/补丁/数据库。
-                 首项画选中态（淡底 + 不流光的实块），其余照常。 -->
-            <div class="boot-nav-item on">
-              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
-              <div class="sk" style="flex: 1; height: 10px"></div>
-            </div>
-            <div class="boot-nav-item">
-              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
-              <div class="sk live" style="flex: 1; height: 10px"></div>
-            </div>
-            <div class="boot-nav-item">
-              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
-              <div class="sk live" style="flex: 1; height: 10px"></div>
-            </div>
-            <div class="boot-nav-item">
-              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
-              <div class="sk live" style="flex: 1; height: 10px"></div>
-            </div>
-            <div class="boot-nav-item">
-              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
-              <div class="sk live" style="flex: 1; height: 10px"></div>
-            </div>
-            <div class="boot-nav-item">
-              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
-              <div class="sk live" style="flex: 1; height: 10px"></div>
-            </div>
-          </div>
-          <div class="boot-side-foot">
-            <!-- 侧栏 foot 的设置行（带更新红点的那个位置） -->
-            <div class="boot-nav-item">
-              <div class="sk" style="width: 16px; height: 16px; border-radius: 4px; flex: none"></div>
-              <div class="sk live" style="flex: 1; height: 10px"></div>
-            </div>
-          </div>
-        </div>
-        <div class="boot-main">
-          <div class="boot-hd">
-            <!-- 侧栏开关钮 + 中段拖拽空白 + 主题/最小化/最大化/关闭（TitleBarControls） -->
-            <div class="sk" style="width: 32px; height: 32px; border-radius: 8px; flex: none"></div>
-            <div style="flex: 1"></div>
-            <div class="sk live" style="width: 32px; height: 32px; border-radius: 8px; flex: none"></div>
-            <div class="sk live" style="width: 32px; height: 32px; border-radius: 8px; flex: none"></div>
-            <div class="sk live" style="width: 32px; height: 32px; border-radius: 8px; flex: none"></div>
-          </div>
-          <div class="boot-body">
-            <div class="boot-card">
-              <div class="sk live" style="width: 40%; height: 10px; margin-bottom: 10px"></div>
-              <div class="sk live" style="width: 72%; height: 8px; margin-bottom: 6px"></div>
-              <div class="sk live" style="width: 55%; height: 8px"></div>
-            </div>
-            <div class="boot-card">
-              <div class="sk live" style="width: 32%; height: 10px; margin-bottom: 10px"></div>
-              <div class="sk live" style="width: 64%; height: 8px"></div>
-            </div>
-          </div>
+            <footer class="boot-status" aria-hidden="true"><div class="sk" style="width:100px;height:9px"></div><div style="flex:1"></div><div class="sk" style="width:70px;height:9px"></div></footer>
+          </main>
         </div>
       </div>
     </div>

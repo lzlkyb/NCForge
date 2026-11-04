@@ -88,7 +88,7 @@ export function PasswordResetDialog({ connId, onClose }: { connId: string; onClo
             spellCheck={false}
             onChange={(e) => setFilter(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") search(filter);
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) search(filter);
             }}
           />
           <button type="button" className="dbx-btn" disabled={loading} onClick={() => search(filter)}>

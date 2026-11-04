@@ -17,6 +17,9 @@ import { forgetColumnZh } from "../../lib/dbColumnZh";
 import type { ResultEntry, SqlTab } from "../../lib/dbStore";
 import { ResultPanel } from "./ResultPanel";
 
+// 本测试验证结果集接线，错误区的跳转动作不应把 Monaco 加载到 jsdom。
+vi.mock("../../lib/dbActions",()=>({openTable:vi.fn(),disconnectConn:vi.fn()}));
+
 // ResultGrid 的虚拟滚动靠 ResizeObserver，`scrollTo` 在 jsdom 上也不存在
 class RO {
   observe() {}

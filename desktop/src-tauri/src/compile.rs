@@ -790,8 +790,7 @@ import a.B;"
     }
 
     #[test]
-    fn module_of_takes_first_directory_under_root() {
-        let root = Path::new("C:/work/aier/newar");
+    fn module_of_takes_first_directory_under_root() {        let root = Path::new("C:/work/aier/newar");
         assert_eq!(
             module_of(root, Path::new("C:/work/aier/newar/gl/src/private/A.java")).as_deref(),
             Some("gl")
@@ -803,6 +802,79 @@ import a.B;"
         assert_eq!(
             module_of(Path::new("C:/work/aier/newar"), Path::new(&mixed)).as_deref(),
             Some("aim")
+        );
+    }
+
+    /// 真机快照：**单文件编译**这条新路径到底能不能编过、要多久。
+    ///
+    /// 保存后自动编译全靠它，所以这里验三件事而不是只看「没报错」：
+    /// 1. 只编一个文件也能编过（class 路径靠 `project_class_dirs` 解析，不靠整模块源码）；
+    /// 2. 产出的 class 落在指定目录（测试里指向临时目录，绝不写用户的 `<模块>/classes`）；
+    /// 3. 耗时在「保存后等得起」的量级。
+    ///
+    /// 运行：`node scripts/rust-gate.mjs test --lib -- --ignored single_file_compile_live --nocapture`
+    #[test]
+    #[ignore]
+    fn single_file_compile_live() {
+        use std::sync::atomic::AtomicBool;
+        let root = Path::new(r"C:\work\aier\newar");
+        let home = Path::new(r"D:\ncc\1909home");
+        let java = home.join("ufjdk").join("bin").join("java.exe");
+        let ecj = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("ecj")
+            .join("ecj-3.17.jar");
+        let file = root
+            .join("gl")
+            .join("src")
+            .join("private")
+            .join("nc")
+            .join("bs")
+            .join("gl")
+            .join("busirecon")
+            .join("BusiReconBO.java");
+        if !file.is_file() || !java.is_file() || !ecj.is_file() {
+            return;
+        }
+
+        // 首次清冷要扫 7000 个 jar；这里不落缓存文件，避免测试污染用户配置目录
+        let index = crate::nc_index::ClassIndex::load_or_build(
+            crate::nc_index::classpath_jars(home),
+            None,
+            None,
+        );
+        let work = std::env::temp_dir().join("ncf-single-file-live");
+        std::fs::create_dir_all(&work).unwrap();
+        let out = work.join("out");
+        let cancel = AtomicBool::new(false);
+        let env = CompileEnv {
+            nc_home: home,
+            java_exe: &java,
+            ecj_jar: &ecj,
+            project_root: root,
+            index: &index,
+            work_dir: &work,
+            cancel: Some(&cancel),
+            overrides: &[],
+        };
+        let job = CompileJob {
+            out_dir: out.clone(),
+            module: "gl".to_string(),
+            files: Some(vec![file]),
+            seed_jars: Vec::new(),
+        };
+        let started = Instant::now();
+        let r = compile(&env, &job, &|s| println!("{s}")).unwrap();
+        let ms = started.elapsed().as_millis();
+        println!(
+            "单文件编译：{ms} ms · {} 个 jar · {} 轮 · {} 错误",
+            r.jar_count, r.rounds, r.error_count
+        );
+        assert_eq!(r.source_count, 1);
+        assert_eq!(r.error_count, 0, "问题：{:?}", r.problems);
+        assert!(
+            out.join("nc").join("bs").join("gl").join("busirecon").join("BusiReconBO.class").is_file(),
+            "产物没落到 out_dir"
         );
     }
 }

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { invoke, listen } from "../lib/tauri";
+import { beginOperation, type OperationHandle } from "../lib/operations";
 import type { PackStatusInfo, PackSummary, ResourceErrorCode, ResourceErrorPayload, ResourcePhase, ResourceReadyPayload } from "../lib/resource";
 import { ResourceSetupDialog } from "../components/resource/ResourceSetupDialog";
 
@@ -71,6 +72,8 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
   const userInitiatedRef = useRef(false);
   /** 下载守卫：downloading 期间 checking/available/uptodate 不回退状态（同 UpdateContext 套路） */
   const downloadingRef = useRef(false);
+  const ensuringRef = useRef(false);
+  const resourceTask = useRef<OperationHandle | null>(null);
 
   const totalBytes = missing.reduce((sum, p) => sum + p.size, 0);
 
@@ -95,7 +98,8 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
 
   const ensure = useCallback(
     async (force = false) => {
-      if (downloadingRef.current) return;
+      if (ensuringRef.current || downloadingRef.current) return;
+      ensuringRef.current = true;
       setPhase("checking");
       setError(null);
       setErrorCode(null);
@@ -107,6 +111,9 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
         // 事件覆盖不了这条路径。
         const msg = e instanceof Error ? e.message : String(e);
         console.error("[Resource] resources_ensure invoke 失败:", msg);
+        ensuringRef.current = false;
+        resourceTask.current?.finish("failed", msg);
+        resourceTask.current = null;
         setError(msg);
         setErrorCode(null);
         setErrorToastAllowed(userInitiatedRef.current);
@@ -162,12 +169,16 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
           if (downloadingRef.current) return;
           setMissing([]);
           setPartialInstalled([]);
+          ensuringRef.current = false;
+          resourceTask.current?.finish("success", "运行组件已就绪");
+          resourceTask.current = null;
           setPhase("idle");
         }),
       );
       track(
         await listen<{ id: string }>("resource:downloading", (payload) => {
           downloadingRef.current = true;
+          resourceTask.current?.update({ phase: `下载组件 ${payload.id}` });
           setCurrentId(payload.id);
           setDownloadedBytes(0);
           setTotalBytesCurrent(null);
@@ -179,6 +190,7 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
         await listen<{ id: string; downloaded: number; total: number | null; bytesPerSec: number }>(
           "resource:progress",
           (payload) => {
+            resourceTask.current?.update({ phase: `下载组件 ${payload.id}`, progress: { done: payload.downloaded, total: payload.total ?? undefined } });
             setDownloadedBytes(payload.downloaded);
             // total 为 null（源不给 Content-Length）时保持 null ⇒ UI 走不确定态。
             setTotalBytesCurrent(payload.total);
@@ -195,6 +207,9 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
       track(
         await listen<ResourceReadyPayload>("resource:ready", (payload) => {
           downloadingRef.current = false;
+          ensuringRef.current = false;
+          resourceTask.current?.finish("success", `已准备 ${payload.installed.length} 个组件${payload.adoptedLegacy ? "，并保留可用的本地组件" : ""}`);
+          resourceTask.current = null;
           setCurrentId(null);
           setMissing([]);
           setPartialInstalled([]);
@@ -213,7 +228,10 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
           // 失败前已完成的部分（后端 EnsureFailure.outcome）：旧版本后端不发
           // 这两个字段，?? [] 兜底。adoptedLegacy 在这里是 string[]（id 列表），
           // 与 ready 事件的 boolean 不同——error 路径要的是「哪些包已就绪」。
+          ensuringRef.current = false;
           const done = payload.installed ?? [];
+          resourceTask.current?.finish("failed", `${payload.message}${done.length ? `；已有 ${done.length} 个组件完成，其余可重试` : ""}`);
+          resourceTask.current = null;
           const legacyIds = payload.adoptedLegacy ?? [];
           setPartialInstalled([
             ...done,
@@ -239,6 +257,8 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
       unlisteners.forEach((fn) => fn());
+      resourceTask.current?.finish("failed", "组件监听已关闭，后台结果尚未确认");
+      resourceTask.current = null;
     };
   }, [refreshStatus, ensure]);
 
@@ -252,7 +272,9 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
    */
   const ensurePublic = useCallback(
     (force = false) => {
-      userInitiatedRef.current = force;
+      if (ensuringRef.current || downloadingRef.current) return Promise.resolve();
+      userInitiatedRef.current = true;
+      resourceTask.current = beginOperation({ key: "resources.ensure", label: force ? "重新下载运行组件" : "准备运行组件", page: "settings", phase: "检查组件清单" });
       return ensure(force);
     },
     [ensure],
@@ -289,7 +311,7 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
           partialInstalled={partialInstalled}
           error={error}
           errorCode={errorCode}
-          onRetry={() => void ensure(false)}
+          onRetry={() => void ensurePublic(false)}
           onDismiss={dismissMissing}
         />
       )}

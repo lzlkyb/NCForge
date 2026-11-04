@@ -62,12 +62,13 @@ export function TitleBarControls() {
     tryWin()?.close().catch(() => {});
   }, []);
 
-  const btnCls = "flex items-center justify-center w-8 h-8 rounded-lg transition-[color,background-color,border-color,transform,box-shadow,opacity] hover:bg-accent hover:text-accent-foreground active:scale-95";
+  const btnCls = "wb-window-button";
 
   return (
-    <div className="flex items-center gap-0.5" data-tauri-drag-region="false">
+    <div className="wb-window-controls" data-tauri-drag-region="false">
       {/* 最小化 */}
       <button
+        type="button"
         className={btnCls}
         onClick={minimize}
         title="最小化"
@@ -78,6 +79,7 @@ export function TitleBarControls() {
 
       {/* 最大化 / 还原 */}
       <button
+        type="button"
         className={btnCls}
         onClick={toggleMaximize}
         title={maximized ? "还原" : "最大化"}
@@ -88,7 +90,8 @@ export function TitleBarControls() {
 
       {/* 关闭（= 退出应用；有未提交的事务会先弹确认） */}
       <button
-        className={`${btnCls} hover:bg-destructive hover:text-destructive-foreground`}
+        type="button"
+        className={`${btnCls} wb-window-close`}
         onClick={close}
         title="退出"
         aria-label="退出"

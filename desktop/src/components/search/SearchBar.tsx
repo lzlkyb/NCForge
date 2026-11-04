@@ -1,7 +1,11 @@
 import type { KeyboardEvent, ReactNode } from "react";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
+import { ComponentScopeMenu } from "./ComponentScopeMenu";
+import { ScopeChip } from "./ScopeChip";
 import type { SearchForm } from "../../lib/searchStore";
+import type { ManifestAudit } from "../../lib/ncManifest";
+import type { ComponentOption } from "../../lib/searchScope";
 
 /** 文件过滤的常用预设：NC 工程的代码在 .java，配置与单据模板在 .xml / .properties。 */
 const MASK_PRESETS = ["*.java", "*.xml", "*.properties"];
@@ -18,8 +22,11 @@ export function SearchBar({
   loading,
   projectCount,
   currentName,
+  components,
+  audit,
   update,
   onScope,
+  onPickComponent,
   onSearch,
   onKeyDown,
 }: {
@@ -30,8 +37,13 @@ export function SearchBar({
   projectCount: number;
   /** 当前工作区名字，用于「当前工程」范围的提示。 */
   currentName: string;
+  /** 业务组件清单（manifest）；空 = 「按组件」不可用。 */
+  components: ComponentOption[];
+  /** 登记缺口：组件菜单底部那行「另有 N 个模块未登记」。 */
+  audit: ManifestAudit | null;
   update: (patch: Partial<SearchForm>) => void;
   onScope: (scope: SearchForm["scope"]) => void;
+  onPickComponent: (name: string) => void;
   onSearch: () => void;
   onKeyDown: (e: KeyboardEvent) => void;
 }) {
@@ -44,10 +56,20 @@ export function SearchBar({
     update({ include: next.join(",") });
   };
 
+  // 当前范围的短说明：底部那行要一直看得见「现在搜的是哪儿」，别让人对着旧结果猜
+  const scopeHint =
+    form.scope === "all"
+      ? "全部关联工程 · 逐个扫描"
+      : form.scope === "component" && form.component
+        ? `组件 ${form.component} · 只搜这个模块`
+        : currentName
+          ? `当前工程 ${currentName}`
+          : "当前工作区";
+
   return (
     <div className="flex-shrink-0 border-b border-border bg-card px-3 pb-2 pt-3">
       <div className="flex items-center gap-2">
-        <div className="relative flex min-w-0 flex-1 items-center">
+        <div className="relative flex min-w-0 flex-1 items-center rounded-md border border-input bg-background" data-focus-container>
           <Icon
             name="search"
             size={15}
@@ -58,12 +80,17 @@ export function SearchBar({
             onChange={(e) => update({ query: e.target.value })}
             onKeyDown={(e) => onKeyDown(e)}
             placeholder={
-              form.scope === "all" ? "搜索全部关联工程（回车）" : "搜索当前工程（回车）"
+              form.scope === "all"
+                ? "搜索全部关联工程（回车）"
+                : form.scope === "component" && form.component
+                  ? `在组件 ${form.component} 里搜索（回车）`
+                  : "搜索当前工程（回车）"
             }
             spellCheck={false}
+            aria-label="搜索工程文件内容"
             autoFocus
             list="ncforge-search-history"
-            className="h-9 w-full rounded-lg border border-input bg-background pl-8 pr-8 text-[13px] outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30"
+            className="h-[30px] w-full rounded-md border-0 bg-transparent pl-8 pr-8 text-[13px] transition-colors placeholder:text-muted-foreground"
           />
           {/* 搜索词历史：datalist 是最省事的原生下拉，不用自己画浮层 */}
           <datalist id="ncforge-search-history">
@@ -75,6 +102,7 @@ export function SearchBar({
             <button
               type="button"
               title="清空（Esc）"
+              aria-label="清空搜索词"
               onClick={() => update({ query: "" })}
               className="absolute right-2 grid h-5 w-5 place-items-center rounded text-muted-foreground hover:bg-secondary"
             >
@@ -89,8 +117,8 @@ export function SearchBar({
       </div>
 
       {/* 搜索范围：默认全部关联工程。切换会丢弃旧结果（口径不同，留着只会自相矛盾），
-          所以只在没有搜索在跑时可选。 */}
-      <div className="mt-2 flex items-center gap-1.5">
+          所以只在没有搜索在跑时可选。三个档位在窄侧栏里放不下一行，与文件过滤一样换行。 */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1">
         <span className="text-[11.5px] text-muted-foreground">范围</span>
         <ScopeChip
           on={form.scope === "all"}
@@ -108,6 +136,13 @@ export function SearchBar({
         >
           当前工程
         </ScopeChip>
+        <ComponentScopeMenu
+          options={components}
+          audit={audit}
+          value={form.scope === "component" ? form.component : null}
+          disabled={loading || components.length === 0}
+          onPick={onPickComponent}
+        />
       </div>
 
       {/* 三个文本开关常显（VS Code 的位置，但不像它那样收进 ⋯） */}
@@ -146,6 +181,7 @@ export function SearchBar({
           onKeyDown={(e) => onKeyDown(e)}
           placeholder="*.java,*.xml,!test*"
           spellCheck={false}
+          aria-label="文件过滤"
           className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-[11.5px] outline-none placeholder:text-muted-foreground focus:border-ring"
         />
         {MASK_PRESETS.map((mask) => {
@@ -170,9 +206,7 @@ export function SearchBar({
           );
         })}
         <span className="w-full text-[11px] text-muted-foreground">
-          {form.scope === "all"
-            ? `全部关联工程 · 逐个扫描 · 跳过 .svn .git .idea node_modules`
-            : `${currentName ? `当前工程 ${currentName}` : "当前工作区"} · 跳过 .svn .git .idea node_modules`}
+          {scopeHint} · 跳过 .svn .git .idea node_modules
         </span>
       </div>
 
@@ -184,38 +218,6 @@ export function SearchBar({
         </div>
       )}
     </div>
-  );
-}
-
-/** 范围切换：两个互斥的小圆角按钮，样式与文件过滤预设一致。 */
-function ScopeChip({
-  on,
-  disabled,
-  onClick,
-  title,
-  children,
-}: {
-  on: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={on}
-      title={title}
-      className={`h-6 rounded-full border px-2 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        on
-          ? "border-primary/40 bg-primary/10 font-semibold text-primary"
-          : "border-border text-muted-foreground hover:bg-muted"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 

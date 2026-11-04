@@ -2,6 +2,7 @@ import { type ReactNode } from "react";
 import { Icon } from "../ui/icon";
 import type { MatchRange } from "../../lib/search";
 import type { ResultFileGroup, ResultHit } from "../../lib/searchResults";
+import { buildSearchPreview } from "../../lib/searchPreview";
 
 /** 一个文件的命中组（标题行 + 逐行命中）。当前范围与全部工程共用。 */
 export function ResultFile({
@@ -27,7 +28,9 @@ export function ResultFile({
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-secondary/60"
+        aria-expanded={!collapsed}
+        title={abs}
+        className="flex w-full min-w-0 items-center gap-1.5 px-3 py-1.5 text-left hover:bg-secondary/60"
       >
         <Icon
           name="chevronDown"
@@ -37,29 +40,37 @@ export function ResultFile({
           }`}
         />
         <Icon name="file" size={14} className="flex-shrink-0 text-primary" />
-        <span className="flex-shrink-0 text-[12.5px] font-semibold">{name}</span>
-        <span className="truncate text-[11px] text-muted-foreground">{dir}</span>
+        <span className="min-w-0 truncate text-[12.5px] font-semibold">{name}</span>
+        <span className="min-w-0 truncate text-[11px] text-muted-foreground">{dir}</span>
         <span className="ml-auto grid h-4 min-w-[18px] flex-shrink-0 place-items-center rounded-full bg-muted px-1.5 text-[10.5px] font-bold text-muted-foreground">
           {hits.length}
         </span>
       </button>
       {!collapsed &&
-        hits.map((hit) => (
-          <button
-            key={`${group.key}:${hit.line}`}
-            type="button"
-            onClick={() => onOpen(hit)}
-            title={`${abs}:${hit.line}`}
-            className="grid w-full grid-cols-[46px_minmax(0,1fr)] gap-2.5 py-[3px] pl-9 pr-3 text-left hover:bg-secondary/55"
-          >
-            <span className="text-right font-mono text-[11.5px] text-muted-foreground">
-              {hit.line}
-            </span>
-            <span className="truncate font-mono text-[12px]">
-              <Highlighted text={hit.text} ranges={hit.ranges} />
-            </span>
-          </button>
-        ))}
+        hits.map((hit) => {
+          const preview = buildSearchPreview(hit.text, hit.ranges);
+          return (
+            <button
+              key={`${group.key}:${hit.line}`}
+              type="button"
+              onClick={() => onOpen(hit)}
+              title={`${abs}:${hit.line}\n${hit.text}`}
+              className="grid w-full grid-cols-[36px_minmax(0,1fr)] gap-x-2 py-[3px] px-3 text-left hover:bg-secondary/55"
+            >
+              <span className="text-right font-mono text-[11.5px] text-muted-foreground">
+                {hit.line}
+              </span>
+              <span className="truncate font-mono text-[12px]">
+                <Highlighted text={preview.text} ranges={preview.ranges} />
+              </span>
+              {preview.ranges.length === 0 && (
+                <span className="col-start-2 text-[11px] text-muted-foreground">
+                  预览未包含匹配位置，打开完整行查看
+                </span>
+              )}
+            </button>
+          );
+        })}
     </div>
   );
 }

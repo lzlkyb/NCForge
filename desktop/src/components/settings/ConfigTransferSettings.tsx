@@ -1,10 +1,12 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Modal } from "../ui/Modal";
 import { SettingsRow } from "../ui/SettingsRow";
-import { Icon } from "../ui/icon";
+import { Input } from "../ui/input";
+import { InlineNotice } from "../ui/notice";
 import { toast } from "../ui/toast";
+import { trackOperation } from "../../lib/operations";
 import { errorTextOf, failureText } from "../../lib/friendlyError";
 import {
   buildImportPlan,
@@ -16,6 +18,7 @@ import {
   type ImportPlan,
   type PathFieldKey,
 } from "../../lib/configTransfer";
+import "./settings-maintenance.css";
 
 /**
  * 「配置迁移」卡（M8 团队化）：导出 / 导入配置。
@@ -27,7 +30,11 @@ import {
  */
 export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const pathId = useId();
   const [exporting, setExporting] = useState(false);
+  const [reading, setReading] = useState(false);
+  const lock = useRef(false);
+  const [feedback, setFeedback] = useState<{ kind: "export" | "import"; error: string } | null>(null);
   /** 待确认的导入：原始导出对象 + 预览模型 + 路径编辑值。 */
   const [pending, setPending] = useState<{
     data: ConfigExport;
@@ -37,33 +44,46 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
   const [importing, setImporting] = useState(false);
 
   const doExport = async () => {
+    if (lock.current) return;
+    lock.current = true;
+    setFeedback(null);
     setExporting(true);
     try {
       await downloadConfigExport();
       toast("配置已导出，把文件发给同事即可（不含任何口令）", "success");
     } catch (e) {
-      toast(failureText("导出配置", e), "error");
+      const error = failureText("导出配置", e);
+      setFeedback({ kind: "export", error });
+      toast(error, "error");
     } finally {
+      lock.current = false;
       setExporting(false);
     }
   };
 
   const onFile = async (file: File | undefined) => {
-    if (!file) return;
+    if (!file || lock.current) return;
+    lock.current = true;
+    setReading(true);
+    setFeedback(null);
     let text: string;
     try {
-      text = await file.text();
+      text = await trackOperation({ key: "settings.import.read", label: "读取配置文件", page: "settings" }, () => file.text());
     } catch (e) {
-      toast(`读取文件失败：${errorTextOf(e)}`, "error");
+      const error = `读取文件失败：${errorTextOf(e)}`;
+      setFeedback({ kind: "import", error });
+      toast(error, "error");
       return;
-    }
+    } finally { lock.current = false; setReading(false); }
     const parsed = parseExportFile(text);
     if (!parsed.ok) {
+      setFeedback({ kind: "import", error: parsed.error });
       toast(parsed.error, "error");
       return;
     }
     const plan = buildImportPlan(parsed.data);
     if (plan.pathItems.length === 0 && plan.connCount === 0 && !plan.hasHeap && !plan.hasSvnUser) {
+      setFeedback({ kind: "import", error: "文件里没有可导入的设置" });
       toast("文件里没有可导入的设置", "error");
       return;
     }
@@ -75,7 +95,9 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
   };
 
   const confirmImport = async () => {
-    if (!pending) return;
+    if (!pending || lock.current) return;
+    lock.current = true;
+    setFeedback(null);
     setImporting(true);
     try {
       await importConfig(withPathEdits(pending.data, pending.edits));
@@ -83,39 +105,46 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
       setPending(null);
       onChanged?.();
     } catch (e) {
-      toast(failureText("导入配置", e), "error");
+      const error = failureText("导入配置", e);
+      setFeedback({ kind: "import", error });
+      toast(error, "error");
     } finally {
+      lock.current = false;
       setImporting(false);
     }
   };
 
   return (
-    <Card className="flex flex-col gap-1 p-2">
-      <div className="px-2 pt-2">
-        <div className="text-sm font-medium">配置迁移</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">
-          把调好的设置打包发给同事，或从同事那里导入。换机器 / 重装系统同样适用。
-        </div>
-      </div>
+    <Card className="settings-maintenance-section">
       <SettingsRow
+        id="transfer-export"
         label="导出配置"
-        sub="生成本机设置的 JSON 文件（数据库 / SVN 口令不含在内）"
+        keywords={["备份", "JSON", "迁移", "分享配置"]}
+        sub="生成可迁移的 JSON 文件"
+        info="导出工作区、NC 路径、数据库连接等可迁移配置。数据库与 SVN 密码不包含在文件中。外观和编辑器阅读偏好只保存在本机。"
+        valueText={exporting ? "正在导出" : "JSON 文件"}
+        error={feedback?.kind === "export" ? feedback.error : undefined}
         control={
-          <Button variant="outline" size="sm" disabled={exporting} onClick={() => void doExport()}>
+          <Button variant="outline" size="sm" isLoading={exporting} loadingText="导出中…" disabled={exporting || importing || reading} onClick={() => void doExport()}>
             {exporting ? "导出中…" : "导出"}
           </Button>
         }
       />
       <SettingsRow
+        id="transfer-import"
         label="导入配置"
-        sub="选择同事给的 JSON 文件；路径类设置可在导入前改写"
+        keywords={["恢复", "JSON", "迁移", "配置文件"]}
+        sub="选择文件，预览并调整路径后确认导入"
+        valueText={pending ? "待确认" : "选择 JSON 文件"}
+        error={feedback?.kind === "import" ? feedback.error : undefined}
         last
         control={
-          <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+          <Button variant="outline" size="sm" isLoading={reading} loadingText="读取中…" disabled={importing || exporting || reading} onClick={() => fileRef.current?.click()}>
             选择文件
           </Button>
         }
       />
+      <p className="settings-maintenance-footnote">数据库与 SVN 密码只存本机，迁移后需要重新输入。</p>
       <input
         ref={fileRef}
         type="file"
@@ -132,12 +161,12 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
 
       <Modal
         open={pending !== null}
-        onClose={() => setPending(null)}
+        onClose={() => { if (!importing) setPending(null); }}
         ariaLabel="导入配置预览"
         className="modal-surface"
       >
         {pending && (
-          <div className="flex max-h-[70vh] w-[min(560px,90vw)] flex-col gap-3 overflow-y-auto p-5">
+          <div className="settings-import-preview">
             <h2 className="text-base font-medium">导入配置</h2>
             <p className="text-xs text-muted-foreground">
               来自工作台{pending.plan.fromVersion ? ` v${pending.plan.fromVersion}` : "（版本未知）"}
@@ -148,12 +177,13 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
               <div className="flex flex-col gap-2">
                 <div className="text-sm font-medium">路径设置（已按导入机器改写）</div>
                 {pending.plan.pathItems.map((item) => (
-                  <label key={item.key} className="flex flex-col gap-0.5">
+                  <label key={item.key} htmlFor={`${pathId}-${item.key}`} className="flex flex-col gap-0.5">
                     <span className="text-xs text-muted-foreground">
                       {item.label} · {item.hint}
                     </span>
-                    <input
-                      className="rounded border bg-background px-2 py-1 text-sm"
+                    <Input
+                      id={`${pathId}-${item.key}`}
+                      disabled={importing}
                       spellCheck={false}
                       value={pending.edits[item.key] ?? ""}
                       onChange={(e) =>
@@ -181,18 +211,16 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
               </div>
             )}
 
-            <div className="flex items-start gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5">
-              <Icon name="info" size={13} aria-hidden="true" />
-              <span className="text-xs">
+            <InlineNotice variant="warning">
                 口令不随配置导入：数据库 / SVN 密码只存本机，导入后需在新机器上重新输入一次。
-              </span>
-            </div>
+            </InlineNotice>
+            {feedback?.kind === "import" && <p className="settings-import-error" role="alert">{feedback.error}</p>}
 
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setPending(null)}>
+            <div className="settings-maintenance-actions">
+              <Button variant="ghost" size="sm" disabled={importing} onClick={() => setPending(null)}>
                 取消
               </Button>
-              <Button size="sm" disabled={importing} onClick={() => void confirmImport()}>
+              <Button size="sm" isLoading={importing} loadingText="导入中…" disabled={importing} onClick={() => void confirmImport()}>
                 {importing ? "导入中…" : "确认导入"}
               </Button>
             </div>

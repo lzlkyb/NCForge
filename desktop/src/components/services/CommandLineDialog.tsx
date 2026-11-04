@@ -17,7 +17,7 @@ export function CommandLineDialog({
   onClose: () => void;
 }) {
   return (
-    <Modal open={!!preview} onClose={onClose} className="modal-surface w-[860px] max-w-[92vw] p-5">
+    <Modal open={!!preview} onClose={onClose} ariaLabel="启动命令行" className="modal-surface w-[860px] max-w-[92vw] p-5">
       <div className="flex items-center gap-2">
         <Icon name="terminal" size={15} />
         <h2 className="text-sm font-semibold">启动命令行</h2>

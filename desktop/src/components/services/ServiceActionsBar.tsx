@@ -1,5 +1,6 @@
 import { Icon } from "../ui/icon";
 import { FreshnessBadge } from "../ui/FreshnessBadge";
+import { Menu, MenuItem } from "../ui/Menu";
 import { NccDecodeLauncher } from "./NccDecodeLauncher";
 
 /**
@@ -46,25 +47,49 @@ export function ServiceActionsBar({
         type="button"
         className="sv-btn"
         data-on={configOpen || undefined}
+        aria-expanded={configOpen}
         onClick={onToggleConfig}
       >
         配置
-      </button>
-      <button
-        type="button"
-        className="sv-btn"
-        disabled={previewing}
-        title={previewing ? "正在生成上次启动的命令行…" : "查看启动命令行（只读预览，不会重写 classpath）"}
-        onClick={onCommandLine}
-      >
-        <Icon name="terminal" size={13} />
-        {previewing ? "生成中…" : "命令行"}
       </button>
       <button type="button" className="sv-btn" onClick={onRevealLog}>
         <Icon name="folder" size={13} />
         日志位置
       </button>
-      <NccDecodeLauncher />
+      {/* 入口一直挂载，命令面板中的报文解密不会随菜单关闭而消失。 */}
+      <NccDecodeLauncher trigger={(onDecode) => (
+        <Menu portal trigger={(open, toggle) => (
+          <button
+            type="button"
+            className="sv-icon-btn"
+            data-on={open || undefined}
+            aria-label="更多服务工具"
+            aria-haspopup="menu"
+            aria-expanded={open}
+            title="更多服务工具"
+            onClick={toggle}
+          >
+            <Icon name="more" size={14} />
+          </button>
+        )}>
+          {(close) => (
+            <>
+              <MenuItem
+                label={previewing ? "命令行生成中…" : "启动命令行"}
+                icon="terminal"
+                hint="只读预览"
+                disabled={previewing}
+                onClick={() => { close(); onCommandLine(); }}
+              />
+              <MenuItem
+                label="NCC / BIP 报文解密"
+                icon="key"
+                onClick={() => { close(); onDecode(); }}
+              />
+            </>
+          )}
+        </Menu>
+      )} />
     </div>
   );
 }

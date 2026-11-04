@@ -1,6 +1,16 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "../ui/icon";
-import { keyOf, letterTone, reviewProgress, type ChangeItem, type ChangesView } from "../../lib/svn";
+import {
+  formatRevTime,
+  formatWhen,
+  keyOf,
+  letterTone,
+  reviewProgress,
+  sortChanges,
+  type ChangeItem,
+  type ChangesView,
+  type SortMode,
+} from "../../lib/svn";
 
 type Filter = "all" | "changed" | "untracked" | "conflict";
 
@@ -21,6 +31,20 @@ function matchesFilter(item: ChangeItem, filter: Filter): boolean {
       return item.letter === "C";
     default:
       return true;
+  }
+}
+
+/**
+ * 排序偏好。存 localStorage（本机界面习惯，不随配置迁移），默认按路径——
+ * 与后端 `build_changes` 的初始顺序一致，第一次用不会有"列表突然变了"的感觉。
+ */
+const SORT_KEY = "ncforge.vc.sort";
+
+function readSort(): SortMode {
+  try {
+    return localStorage.getItem(SORT_KEY) === "mtime" ? "mtime" : "path";
+  } catch {
+    return "path";
   }
 }
 
@@ -53,6 +77,14 @@ export function ChangeList({
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [closed, setClosed] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState<SortMode>(readSort);
+  useEffect(() => {
+    try {
+      localStorage.setItem(SORT_KEY, sort);
+    } catch {
+      // 隐私模式 / 存储满：本次会话仍生效，下次启动回默认
+    }
+  }, [sort]);
 
   // 「显示全部」是纯本地开关：后端一次就把构建产物一起给了（带 ignored 标记），
   // 按开关重扫一遍要等 7.6 秒，纯浪费。
@@ -82,7 +114,7 @@ export function ChangeList({
 
   const groups = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return visible
+    const filtered = visible
       .map((g) => ({
         module: g.module,
         items: g.items.filter(
@@ -92,7 +124,9 @@ export function ChangeList({
         ),
       }))
       .filter((g) => g.items.length > 0);
-  }, [visible, filter, search]);
+    // 排序纯本地：切一次排序不能再扫一遍后端（全量 status 要 7.6 秒）
+    return sortChanges(filtered, sort);
+  }, [visible, filter, search, sort]);
 
   // 进度只按非构建产物算：把几百个 .class 算进分母，「已审 2 / 540」没有任何意义。
   // 注意分母与「显示全部」开关无关——打开开关是为了看见它们，不是为了把它们列进审查清单。
@@ -115,9 +149,10 @@ export function ChangeList({
   return (
     <aside className="vc-chg">
       <div className="vc-chg-top">
-        <div className="vc-search">
+        <div className="vc-search" data-focus-container>
           <Icon name="search" size={13} />
           <input
+            aria-label="筛选版本控制文件"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="筛选文件，支持 / 分段"
@@ -135,6 +170,19 @@ export function ChangeList({
             >
               {FILTER_LABEL[f]}
               <span className="n">{counts[f]}</span>
+            </button>
+          ))}
+          <span className="vc-sp" />
+          {(["path", "mtime"] as SortMode[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              className="vc-chip"
+              data-on={sort === m || undefined}
+              onClick={() => setSort(m)}
+              title={m === "path" ? "按文件路径排序（后端返回的顺序）" : "按本地文件修改时间排序，最近改的排在前面；只在本页排序，不会重新扫描工作副本"}
+            >
+              {m === "path" ? "按路径" : "按改动时间"}
             </button>
           ))}
         </div>
@@ -181,7 +229,7 @@ export function ChangeList({
             <div key={g.module}>
               <button type="button" className="vc-grp" data-closed={isClosed || undefined} onClick={() => toggleGroup(g.module)}>
                 <Icon name="chevronDown" size={12} />
-                {g.module}
+                <span className="vc-grp-name" title={g.module}>{g.module}</span>
                 <span className="n">{g.items.length}</span>
               </button>
               {!isClosed &&
@@ -197,13 +245,20 @@ export function ChangeList({
                       data-on={selected === it.path || undefined}
                       data-reviewed={reviewed.has(keyOf(it.path)) || undefined}
                       onClick={() => onSelect(it)}
-                      title={it.rel}
+                      title={
+                        sort === "mtime" && it.mtimeMs
+                          ? `${it.rel}\n修改时间 ${formatRevTime(it.mtimeMs)}`
+                          : it.rel
+                      }
                     >
                       <span className="vc-badge" data-st={tone}>
                         {it.letter}
                       </span>
                       <span className="vc-fn">{name}</span>
                       {dir && <span className="vc-dir">{dir.split("/").slice(-2).join("/")}</span>}
+                      {/* 时间列只在按时间排序时出现：300px 的左栏放不下常驻第三列，
+                          而按路径排序时用户关心的也不是时间 */}
+                      {sort === "mtime" && <span className="vc-when">{formatWhen(it.mtimeMs)}</span>}
                     </button>
                   );
                 })}
@@ -226,7 +281,7 @@ export function ChangeList({
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <span>{showIgnored ? `含构建产物，共 ${view.total} 条` : `已隐藏 ${view.ignored} 条构建产物`}</span>
           <span className="vc-sp" />
-          <button type="button" className="vc-chip" style={{ height: 20, padding: "0 7px" }} onClick={onToggleIgnored}>
+          <button type="button" className="vc-chip" onClick={onToggleIgnored}>
             {showIgnored ? "隐藏" : "显示全部"}
           </button>
         </div>

@@ -1,4 +1,5 @@
 import { invoke } from "./tauri";
+import { trackOperation } from "./operations";
 import { downloadText } from "./resultExport";
 
 /**
@@ -161,12 +162,14 @@ export const exportConfig = () => invoke<string>("export_config");
 
 /** 把（可能改过路径的）导出对象序列化后交给 Rust 导入。 */
 export const importConfig = (data: ConfigExport) =>
-  invoke<unknown>("import_config", { json: JSON.stringify(data) });
+  trackOperation({ key: "settings.import", label: "导入配置", page: "settings", phase: "校验并写入配置" }, () => invoke<unknown>("import_config", { json: JSON.stringify(data) }));
 
 /** 导出并下载。复用 `downloadText`（SQL 导出同款通道，webview 内 Blob 下载）。 */
-export async function downloadConfigExport(): Promise<string> {
+export function downloadConfigExport(): Promise<string> {
+  return trackOperation({ key: "settings.export", label: "导出配置", page: "settings" }, async () => {
   const json = await exportConfig();
   // 第 4 参 false = 不带 BOM：JSON 头部多一个不可见字符，导入侧 JSON.parse 会直接失败
   downloadText(exportFileName(new Date()), json, "application/json", false);
   return json;
+  });
 }

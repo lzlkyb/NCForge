@@ -6,9 +6,12 @@ import { APP_INFO } from "../../lib/about";
 import { Icon } from "../ui/icon";
 import { TitleBarControls } from "./TitleBarControls";
 import { UpdateReadout } from "../update/UpdateReadout";
+import { ApplicationMenu, LayoutMenu } from "./HeaderMenus";
+import { OperationStatus } from "../ui/OperationStatus";
+import { WorkspaceMenu } from "./WorkspaceMenu";
 
 /**
- * 应用标题栏（36px，横跨整个窗口）：品牌 + 下载读数 + 主题 + 窗口控件。
+ * 应用标题栏（40px，横跨整个窗口）：品牌、工作区、全局入口与原生窗口控件。
  *
  * 与 cc-bridge 版 Header 的差异：剥去了「服务启停按钮」「安全徽章」「挂起命令胶囊」
  * 等业务件，保留全部 chrome 范式——拖拽区划分（data-tauri-drag-region）、
@@ -16,9 +19,11 @@ import { UpdateReadout } from "../update/UpdateReadout";
  */
 function HeaderImpl({
   onOpenPalette,
+  activeTool = "files",
 }: {
   /** 打开「转到文件 / 类型 / 命令」浮层（App.tsx 接线）。 */
   onOpenPalette?: () => void;
+  activeTool?: string;
 }) {
   const [dark, setDark] = useState(() => getStoredTheme() === "dark");
   // 提示里的快捷键跟随快捷键方案（设置页切换后立即变）
@@ -40,12 +45,17 @@ function HeaderImpl({
   return (
     <header
       data-tauri-drag-region
-      className="app-header app-topbar flex shrink-0 items-center gap-2 border-b pl-3"
+      className="app-header app-topbar flex shrink-0 items-center gap-2 pl-3"
     >
       {/* 左侧：品牌（兼作拖拽区） */}
       <div data-tauri-drag-region className="app-brand">
         <img data-tauri-drag-region src="/icon.png" alt={APP_INFO.name} width={20} height={20} className="app-brand-logo" draggable={false} />
         <span data-tauri-drag-region className="app-brand-name">{APP_INFO.name}</span>
+      </div>
+      <div className="wb-header-menus" data-tauri-drag-region="false">
+        <ApplicationMenu />
+        <span className="wb-header-divider" aria-hidden="true" />
+        <WorkspaceMenu />
       </div>
 
       {/* 中部：拖拽空白（无系统标题栏，需要留足可拖区域）+ 下载期读数。
@@ -58,10 +68,13 @@ function HeaderImpl({
       </div>
 
       {/* 右侧：搜索 / 主题 / 窗口控件 */}
-      <div data-tauri-drag-region="false" className="flex shrink-0 items-center gap-2">
+      <div data-tauri-drag-region="false" className="flex shrink-0 items-center gap-1">
+        <OperationStatus />
+        <LayoutMenu activeTool={activeTool} />
         <Button
           variant="ghost"
           size="icon"
+          className="wb-header-icon"
           onClick={() => toggleTheme()}
           title={dark ? "切换浅色主题" : "切换深色主题"}
           aria-label={dark ? "切换浅色" : "切换深色"}

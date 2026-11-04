@@ -369,7 +369,11 @@ pub(crate) fn bridge_for(
     cfg: &AppConfig,
     key: &str,
     engine: EngineKind,
+    policy_id: &str,
 ) -> Result<Arc<EngineHandle>, String> {
+    let policy = state.db_policies.lock().map_err(|_| "数据库只读状态异常")?.entry(policy_id.to_string()).or_insert_with(|| Arc::new(std::sync::RwLock::new(false))).clone();
+    // Registration holds the same read lock as execution, so a toggle cannot miss a new handle.
+    let _registration = policy.read().map_err(|_| "数据库只读状态异常")?;
     if engine == EngineKind::Rust {
         // 纯 Rust 引擎连 config_dir 都不用建：它不读 NC 的任何文件
         let old = {
@@ -387,7 +391,7 @@ pub(crate) fn bridge_for(
         if let Some(old) = old {
             old.shutdown();
         }
-        let handle = Arc::new(EngineHandle::rust());
+        let handle = Arc::new(EngineHandle::rust().with_policy(policy.clone()));
         state
             .db
             .lock()
@@ -416,7 +420,7 @@ pub(crate) fn bridge_for(
         old.shutdown();
     }
     let bridge = shared_bridge(state, &env)?;
-    let handle = Arc::new(EngineHandle::java(bridge, key));
+    let handle = Arc::new(EngineHandle::java(bridge, key).with_policy(policy.clone()));
     state
         .db
         .lock()
@@ -494,7 +498,7 @@ pub(crate) async fn open_temp_session(
         conn.id,
         TEMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
-    let bridge = bridge_for(app, state, cfg, &key, engine).ok()?;
+    let bridge = bridge_for(app, state, cfg, &key, engine, &conn.id).ok()?;
     match call(bridge.clone(), cmd, args, T_CONNECT).await {
         Ok(_) => Some((key, bridge)),
         Err(_) => {
@@ -637,7 +641,7 @@ pub(crate) async fn prop_password_ready(
         .clone()
         .ok_or_else(|| "这个连接缺数据源名".to_string())?;
     let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
-    let b = bridge_for(app, st, cfg, probe, EngineKind::Java)?;
+    let b = bridge_for(app, st, cfg, probe, EngineKind::Java, probe)?;
     let v = call(b, "propCred", vec![home.root, ds], T_CONNECT).await?;
     let pwd = v.get("password").and_then(Value::as_str).unwrap_or("");
     if pwd.is_empty() {
@@ -712,7 +716,7 @@ pub async fn db_connect(
         prop_password_ready(&app, &st, &cfg, &mut conn, password.as_deref(), PROBE).await?;
     }
     let (cmd, args) = connect_args(&cfg, &conn, password.as_deref(), conn.auto_commit, engine)?;
-    let bridge = bridge_for(&app, &st, &cfg, &id, engine)?;
+    let bridge = bridge_for(&app, &st, &cfg, &id, engine, &id)?;
     let out = call(bridge, cmd, args, T_CONNECT).await?;
 
     let typed = password.filter(|p| !p.is_empty());
@@ -787,7 +791,7 @@ pub async fn db_slot_acquire(
     let key = slot_key(&id, Some(&slot))?;
     let engine = EngineKind::parse(&conn.engine);
     let (cmd, args) = connect_args(&cfg, &conn, None, conn.auto_commit, engine)?;
-    let handle = bridge_for(&app, &st, &cfg, &key, engine)?;
+    let handle = bridge_for(&app, &st, &cfg, &key, engine, &id)?;
     match call(handle, cmd, args, T_CONNECT).await {
         Ok(_) => {
             touch_slot(&key);
@@ -1038,7 +1042,7 @@ async fn exec_via_java(f: JavaFallback<'_>) -> Result<Value, String> {
     let cfg = st.config.read().await.clone();
     let conn = find_conn(&cfg, id)?;
     let key = java_key(&slot_key(id, slot)?);
-    let handle = bridge_for(app, st, &cfg, &key, EngineKind::Java)?;
+    let handle = bridge_for(app, st, &cfg, &key, EngineKind::Java, id)?;
     // 连过一次就复用：桥的 `connect` 会先把旧连接关掉，等于每条语句重连一次库。
     // 用一个 ping 探活，顺带能拿到「这条会话有没有未提交写入」。
     if call(handle.clone(), "ping", Vec::new(), T_META)

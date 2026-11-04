@@ -1,4 +1,6 @@
 import { invoke } from "./tauri";
+import { trackOperation } from "./operations";
+import { getSession } from "./workspaceSession";
 
 /**
  * 工程元数据投送（Rust `nchome_deploy`）。
@@ -58,7 +60,10 @@ export interface DeployStatus {
   updatedMs: number;
 }
 
-export const deployPreview = () => invoke<DeployReport>("deploy_preview");
-export const deployApply = () => invoke<DeployReport>("deploy_apply");
-export const deployCleanup = () => invoke<CleanupReport>("deploy_cleanup");
+export const deployPreview = () => trackOperation({ key: `deploy.preview:${getSession().root}`, label: "预览元数据投送", scope: getSession().root ?? "工作区", page: "services", phase: "检查目标文件与工程顺序" }, () => invoke<DeployReport>("deploy_preview"), deployOutcome);
+export const deployApply = () => trackOperation({ key: `deploy.apply:${getSession().root}`, label: "投送元数据", scope: getSession().root ?? "工作区", page: "services", phase: "备份并写入 NC home" }, () => invoke<DeployReport>("deploy_apply"), deployOutcome);
+export const deployCleanup = () => trackOperation({ key: `deploy.cleanup:${getSession().root}`, label: "清理已投送元数据", page: "services", phase: "还原备份与清理受管文件" }, () => invoke<CleanupReport>("deploy_cleanup"), r => ({ state: "success", detail: `删除 ${r.deleted.length} 个、还原 ${r.restored.length} 个、跳过 ${r.skipped.length} 个；详见投送报告` }));
+function deployOutcome(r: DeployReport) {
+  return { state: "success" as const, detail: `${r.applied ? "已投送" : "预览"}：新增 ${r.created.length} 个、更新 ${r.updated.length} 个；跳过 ${r.skipped.length} 个，${r.conflicts.length} 个冲突按工程顺序取首个；详见投送报告` };
+}
 export const deployStatus = () => invoke<DeployStatus>("deploy_status");

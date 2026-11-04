@@ -115,3 +115,19 @@ describe("OutlinePanel", () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+describe("结构加载与失败",()=>{
+  it("等待时显示加载，失败保留错误，重试后才显示空结果",async()=>{
+    let reject!:(e:unknown)=>void;mocks.symbolsFor.mockReturnValue(new Promise((_,no)=>{reject=no;}));
+    await render(<Harness/>);expect(container.textContent).toContain("正在读取文件结构");expect(container.textContent).not.toContain("没有可显示");
+    await act(async()=>{reject("代码智能超时");});expect(container.textContent).toContain("代码智能超时");expect(container.textContent).not.toContain("没有可显示");
+    mocks.symbolsFor.mockResolvedValue([]);await act(async()=>{container.querySelector<HTMLButtonElement>(".wb-outline-note button")!.click();});
+    expect(container.textContent).toContain("没有可显示的符号");expect(mocks.symbolsFor).toHaveBeenCalledTimes(2);
+  });
+  it("旧路径请求返回不会替换新文件结构",async()=>{
+    let resolve!:(x:typeof SYMS)=>void;mocks.symbolsFor.mockReturnValueOnce(new Promise(yes=>{resolve=yes;})).mockResolvedValueOnce([]);
+    await render(<OutlinePanel open onClose={()=>{}} path={PATH} onJump={()=>{}}/>);
+    await render(<OutlinePanel open onClose={()=>{}} path="C:\\w\\B.java" onJump={()=>{}}/>);
+    await act(async()=>{resolve(SYMS);});expect(container.querySelectorAll(".wb-outline-row")).toHaveLength(0);expect(container.textContent).toContain("没有可显示");
+  });
+});

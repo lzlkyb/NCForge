@@ -1,3 +1,4 @@
+import { beginOperation } from "./operations";
 // NC 任务（run configuration）：把「编译 → 投送 → 重启 → 打补丁」串成一条可复用动作。
 //
 // 刻意只提供固定步骤，不开放任意 shell：这些动作都会读写 NC 安装目录或起 JVM，
@@ -175,7 +176,7 @@ export function buildNcTaskRuntime(
           return false;
         }
         await serverStart(readDebugModePref());
-        toast(outcome === "idle" ? "服务先前已退出，本次是全新启动" : "已重启，正在加载模块", "success");
+        toast(outcome === "idle" ? "服务先前已退出，本次启动请求已接受" : "重启请求已接受，正在加载模块", "success");
         return true;
       } catch (e) {
         toast(failureText("重启服务", e), "error");
@@ -191,6 +192,9 @@ export function buildNcTaskRuntime(
 
 let running = false;
 
+/** 更新关闭工作台前必须等任务链结束，不能只看其中的编译步骤。 */
+export const isNcTaskRunning = () => running;
+
 /** 串行执行任务：已有一个在跑时直接拒绝，避免两个编译/重启互相踩。 */
 export async function runTask(task: NcTask, rt: TaskRuntime | null = runtime): Promise<boolean> {
   if (!rt) {
@@ -202,11 +206,14 @@ export async function runTask(task: NcTask, rt: TaskRuntime | null = runtime): P
     return false;
   }
   running = true;
+  const operation=beginOperation({key:"nc.task",label:task.steps.length===1 && task.steps[0]==="patch"?"打开补丁打包页":task.name,page:"files",phase:"准备任务链"});
   try {
     for (let i = 0; i < task.steps.length; i++) {
       const step = task.steps[i];
+      operation?.update({phase:`第 ${i+1}/${task.steps.length} 步：${STEP_LABELS[step]}`});
       const ok = await rt[step]();
       if (!ok) {
+        operation?.finish("failed",`任务停在「${STEP_LABELS[step]}」，后续步骤未执行`);
         // 单步任务失败时那一步自己已经报过原因，这里再弹一条只是噪音
         if (i < task.steps.length - 1) {
           toast(`「${task.name}」停在「${STEP_LABELS[step]}」，后续步骤已跳过`, "warning");
@@ -214,7 +221,10 @@ export async function runTask(task: NcTask, rt: TaskRuntime | null = runtime): P
         return false;
       }
     }
+    operation?.finish("success",`任务步骤已执行${task.steps.includes("restart")?"；服务重启请求已接受，监听端口就绪见服务任务":""}${task.steps.includes("patch")?"；补丁页已打开，请选择文件并生成补丁包":""}`);
     return true;
+  } catch(error) {
+    operation?.finish("failed",String(error));throw error;
   } finally {
     running = false;
   }

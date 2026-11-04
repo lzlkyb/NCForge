@@ -11,7 +11,7 @@
  *    永久丢失（这是 CI 在真实 macOS runner 上抓到过的竞态，见 UpdateContext 里的长注释）。
  * 2. **`relaunch` 抛错时 `restarting` 必须复位**——唯一会导致「过渡层永久盖住界面、
  *    用户只能杀进程」的失败路径。
- * 3. **8 秒自动重启倒计时**：到点触发、取消后不再触发、下一轮恢复。
+ * 3. 下载验签后等待明确确认，预检取消或安装失败时保持更新包可重试。
  * 4. `total=null`（源不给 Content-Length）走不确定态，且后续带 total 时能恢复百分比。
  *
  * 只 mock 掉三个展示组件：本文件测的是状态机，不是渲染。
@@ -19,7 +19,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AUTO_RESTART_DELAY_SECS, UpdateProvider, friendlyError, useUpdate, type UpdateState } from "./UpdateContext";
+import { UpdateProvider, friendlyError, useUpdate, type UpdateState } from "./UpdateContext";
+import { clearCompletedOperations, getOperations } from "../lib/operations";
 import { APP_SLUG } from "../lib/about";
 
 // ─── 事件总线与 IPC 打桩 ────────────────────
@@ -75,7 +76,7 @@ const EVENTS = [  "update:checking",
 // 存储键与 UpdateContext 同源动态推导（APP_SLUG 前缀）——断言壳子改名后键自动跟随，
 // 不再有 "shell_" 硬编码残留。
 const LAST_CHECK_KEY = `${APP_SLUG}.last_update_check`;
-const DISMISSED_KEY = `${APP_SLUG}.dismissed_update_version`;
+const DISMISSED_KEY = `${APP_SLUG}.ignored_update_version`;
 
 // React 18 的 act 需要这个标记，否则每次 act 都会打「environment is not configured」警告，
 // 且异步副作用不会被正确 flush。
@@ -125,20 +126,9 @@ async function emit(event: string, payload?: unknown) {
   });
 }
 
-/**
- * 走完「倒计时 → 过渡层 → relaunch」。
- *
- * 必须分两步推进：倒计时归零后才在 effect 里调 restart()，而 restart() 的
- * RESTART_OVERLAY_MS 定时器要等 effect 跑完才注册——一次 advance 到底的话，
- * 那个 1.1 秒 timer 根本没机会被推进（表现为 relaunch 一次都没被调用）。
- */
 async function advanceToRelaunch() {
-  await act(async () => {
-    vi.advanceTimersByTime(AUTO_RESTART_DELAY_SECS * 1000);
-  });
-  await act(async () => {
-    vi.advanceTimersByTime(1200);
-  });
+  await act(async () => { void state().restart(); });
+  await act(async () => { vi.advanceTimersByTime(1200); });
 }
 
 const available = (version = "99.9.9") => ({
@@ -150,6 +140,7 @@ const available = (version = "99.9.9") => ({
 
 beforeEach(() => {
   vi.useFakeTimers();
+  clearCompletedOperations();
   localStorage.clear();
   h.handlers.clear();
   h.order.length = 0;
@@ -267,7 +258,7 @@ describe("事件驱动的状态转移", () => {
     expect(state().update?.version).toBe("99.9.9");
   });
 
-  it("update:ready 置 100% 并清掉下载守卫（可以再发起下载）", async () => {
+  it("update:ready 置 100% 并保留已验签包，不能重复下载", async () => {
     await mount();
     await emit("update:available", available());
     await act(async () => {
@@ -278,12 +269,12 @@ describe("事件驱动的状态转移", () => {
     expect(state().status).toBe("ready");
     expect(state().progress).toBe(100);
 
-    // 守卫若没复位，这次调用会被静默吞掉 —— 表现是「装完了点不动」。
+    // ready 尚未安装：保留已验签包，不让重复下载覆盖待安装版本。
     h.invoke.mockClear();
     await act(async () => {
       void state().downloadAndInstall();
     });
-    expect(h.invoke).toHaveBeenCalledWith("start_update");
+    expect(h.invoke).not.toHaveBeenCalledWith("start_update");
   });
 
   it("update:error 记录原始文案并复位下载守卫", async () => {
@@ -361,101 +352,62 @@ describe("启动自检的存储降级", () => {
   });
 });
 
-describe("8 秒自动重启窗口", () => {
-  it("进入 ready 开始倒计时，到点自动 relaunch（含 1.1 秒过渡层）", async () => {
-    await mount();
-    await emit("update:available", available());
-    await emit("update:ready");
-
-    expect(state().autoRestartIn).toBe(AUTO_RESTART_DELAY_SECS);
-
-    // 倒计时本身走完还不重启：restart() 里还有 RESTART_OVERLAY_MS 的仪式感等待。
-    await act(async () => {
-      vi.advanceTimersByTime(AUTO_RESTART_DELAY_SECS * 1000);
-    });
-    expect(h.relaunch).not.toHaveBeenCalled();
-    expect(state().restarting).toBe(true);
-
-    await act(async () => {
-      vi.advanceTimersByTime(1200);
-    });
-    expect(h.relaunch).toHaveBeenCalledTimes(1);
-  });
-
-  it("取消后本轮不再自动重启，且倒计时读数清空", async () => {
-    await mount();
-    await emit("update:available", available());
-    await emit("update:ready");
-
-    await act(async () => {
-      state().cancelAutoRestart();
-    });
-    expect(state().autoRestartIn).toBeNull();
-
-    await act(async () => {
-      vi.advanceTimersByTime(60_000);
-    });
-    expect(h.relaunch).not.toHaveBeenCalled();
-  });
-
-  it("取消只影响本轮：下一次 ready 重新开始倒计时", async () => {
-    await mount();
-    await emit("update:ready");
-    await act(async () => {
-      state().cancelAutoRestart();
-    });
-    expect(state().autoRestartIn).toBeNull();
-
-    // 真实顺序：第二轮下载会先经过 downloading，status 变化才会让倒计时 effect 重跑。
-    await emit("update:downloading");
-    await emit("update:ready");
-    expect(state().autoRestartIn).toBe(AUTO_RESTART_DELAY_SECS);
-
-    await advanceToRelaunch();
-    expect(h.relaunch).toHaveBeenCalledTimes(1);
-  });
-
-  it("relaunch 抛错时 restarting 必须复位，且状态留在 ready", async () => {
-    h.relaunch.mockRejectedValueOnce(new Error("relaunch boom"));
-    await mount();
-    await emit("update:available", available());
-    await emit("update:ready");
-
-    await advanceToRelaunch();
-
-    expect(h.relaunch).toHaveBeenCalledTimes(1);
-    // 🔴 不复位就是「过渡层永久盖住界面、用户只能杀进程」。
-    expect(state().restarting).toBe(false);
-    // 刻意不落成 error：更新已安装完成，最准确的语义仍是「再点一次重启」。
+describe("确认安装与重启", () => {
+  it("下载完成后长期等待用户，不自动安装或重启", async () => {
+    await mount(); await emit("update:available", available()); await emit("update:ready");
+    await act(async () => { vi.advanceTimersByTime(60_000); });
     expect(state().status).toBe("ready");
-    expect(state().error).toContain("relaunch boom");
+    expect(h.invoke).not.toHaveBeenCalledWith("install_update");
+    expect(h.relaunch).not.toHaveBeenCalled();
   });
-
-  it("手动重启连按两次只 relaunch 一次", async () => {
-    await mount();
-    await act(async () => {
-      void state().restart();
-      void state().restart();
-    });
-    await act(async () => {
-      vi.advanceTimersByTime(1200);
-    });
+  it("检查与重复下载不会覆盖待确认的更新包", async () => {
+    await mount(); await emit("update:available", available()); await emit("update:ready"); h.invoke.mockClear();
+    await act(async () => { await state().checkForUpdate(); await state().downloadAndInstall(); });
+    await emit("update:checking"); await emit("update:available", available("100.0.0")); await emit("update:uptodate");
+    expect(state().status).toBe("ready"); expect(state().update?.version).toBe("99.9.9");
+    expect(h.invoke).not.toHaveBeenCalled();
+  });
+  it("用户确认后先检查工作，再安装和重启", async () => {
+    await mount(); await emit("update:available", available()); await emit("update:ready");
+    await advanceToRelaunch();
+    expect(h.prepareRestart).toHaveBeenCalledTimes(1);
+    expect(h.invoke).toHaveBeenCalledWith("install_update");
+    expect(h.prepareRestart.mock.invocationCallOrder[0]).toBeLessThan(h.invoke.mock.invocationCallOrder.slice(-1)[0]);
     expect(h.relaunch).toHaveBeenCalledTimes(1);
   });
-
-  it("重启前预检不通过就不 relaunch（预检拦下未保存文件 / 未提交事务）", async () => {
+  it("重启失败回到就绪态，重试不会重复安装", async () => {
+    h.relaunch.mockRejectedValueOnce(new Error("relaunch boom"));
+    await mount(); await emit("update:available", available()); await emit("update:ready");
+    await advanceToRelaunch();
+    expect(state().restarting).toBe(false); expect(state().status).toBe("ready");
+    expect(state().error).toContain("relaunch boom");
+    await advanceToRelaunch();
+    expect(h.invoke.mock.calls.filter(c => c[0] === "install_update")).toHaveLength(1);
+    expect(h.relaunch).toHaveBeenCalledTimes(2);
+  });
+  it("安装失败可重试同一个更新包", async () => {
+    await mount(); await emit("update:available", available()); await emit("update:ready");
+    h.invoke.mockRejectedValueOnce(new Error("install boom")); await advanceToRelaunch();
+    expect(state().status).toBe("ready"); expect(state().restarting).toBe(false);
+    expect(state().error).toContain("install boom"); expect(h.relaunch).not.toHaveBeenCalled();
+    await advanceToRelaunch();
+    expect(h.invoke.mock.calls.filter(c => c[0] === "install_update")).toHaveLength(2);
+    expect(h.relaunch).toHaveBeenCalledTimes(1);
+  });
+  it("同一帧重复确认只安装并重启一次", async () => {
+    await mount(); await emit("update:available", available()); await emit("update:ready");
+    await act(async () => { void state().restart(); void state().restart(); });
+    await act(async () => { vi.advanceTimersByTime(1200); });
+    expect(h.invoke.mock.calls.filter(c => c[0] === "install_update")).toHaveLength(1);
+    expect(h.relaunch).toHaveBeenCalledTimes(1);
+  });
+  it("预检取消后不启动安装器，处理完可再次确认", async () => {
     h.prepareRestart.mockResolvedValueOnce(false);
-    await mount();
-    await act(async () => {
-      void state().restart();
-    });
-    await act(async () => {
-      vi.advanceTimersByTime(2000);
-    });
-    expect(h.prepareRestart).toHaveBeenCalledTimes(1);
-    expect(h.relaunch).not.toHaveBeenCalled();
-    // 复位后用户处理完再点一次仍能重启
-    expect(state().restarting).toBe(false);
+    await mount(); await emit("update:available", available()); await emit("update:ready");
+    await advanceToRelaunch();
+    expect(h.invoke).not.toHaveBeenCalledWith("install_update"); expect(h.relaunch).not.toHaveBeenCalled();
+    expect(state().preparing).toBe(false); expect(state().notesOpen).toBe(false); expect(state().status).toBe("ready");
+    await advanceToRelaunch(); expect(h.relaunch).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -475,6 +427,7 @@ describe("已是最新（uptodate）与手动/自动区分", () => {
 
   it("手动检查命中 uptodate 才置 manualCheck，可由 acknowledgeUptodate 消费", async () => {
     await mount();
+    await emit("update:uptodate");
     await act(async () => {
       void state().manualCheckForUpdate();
     });
@@ -490,6 +443,7 @@ describe("已是最新（uptodate）与手动/自动区分", () => {
 
   it("auto 与 manual 交替时 manualCheck 只跟随最近一次检查", async () => {
     await mount();
+    await emit("update:uptodate");
     await act(async () => {
       void state().manualCheckForUpdate();
     });
@@ -505,7 +459,7 @@ describe("已是最新（uptodate）与手动/自动区分", () => {
   });
 });
 
-describe("「稍后」按版本抑制", () => {
+describe("忽略版本记忆", () => {
   it("dismiss 写入 localStorage，isDismissed 只对同版本为真", async () => {
     await mount();
     await emit("update:available", available("99.9.9"));
@@ -596,6 +550,7 @@ describe("失败提示的打扰程度", () => {
 
   it("用户手动检查失败：要弹", async () => {
     await mount();
+    await emit("update:uptodate");
     await act(async () => {
       await state().manualCheckForUpdate();
     });
@@ -616,5 +571,84 @@ describe("失败提示的打扰程度", () => {
 
     expect(state().errorCode).toBe("signature");
     expect(state().errorToastAllowed).toBe(true);
+  });
+});
+
+describe("默认更新提醒", () => {
+  it("自动发现新版本默认打开详情，稍后不持久忽略", async () => {
+    await mount(); await emit("update:available", available()); expect(state().notesOpen).toBe(true);
+    await act(async () => state().closeUpdateNotes());
+    expect(localStorage.getItem(DISMISSED_KEY)).toBeNull();
+    await emit("update:checking"); await emit("update:available", available());
+    expect(state().notesOpen).toBe(false);
+    await emit("update:available", available("100.0.0")); expect(state().notesOpen).toBe(true);
+  });
+  it("忽略只阻止自动弹框，手动仍可打开详情", async () => {
+    localStorage.setItem(DISMISSED_KEY, "99.9.9");
+    await mount(); await emit("update:available", available()); expect(state().notesOpen).toBe(false);
+    await act(async () => state().openUpdateNotes()); expect(state().notesOpen).toBe(true);
+    expect(h.invoke).not.toHaveBeenCalledWith("start_update");
+  });
+  it("其它确认框关闭后才显示更新，不抢当前焦点", async () => {
+    const modal = document.createElement("div"); modal.setAttribute("role", "dialog"); modal.setAttribute("aria-modal", "true"); document.body.appendChild(modal);
+    await mount(); await emit("update:available", available()); expect(state().notesOpen).toBe(false);
+    await act(async () => modal.remove()); await flush(); expect(state().notesOpen).toBe(true);
+  });
+});
+
+describe("提醒等待期间的用户选择", () => {
+  it("等待其它弹框期间选择稍后不会再次打开", async () => {
+    const modal = document.createElement("div"); modal.setAttribute("role", "dialog"); modal.setAttribute("aria-modal", "true"); document.body.appendChild(modal);
+    await mount(); await emit("update:available", available());
+    await act(async () => { state().openUpdateNotes(); state().closeUpdateNotes(); });
+    await act(async () => modal.remove()); await flush();
+    expect(state().notesOpen).toBe(false);
+  });
+  it("旧版稍后记忆不应继续阻止默认启动提醒", async () => {
+    localStorage.setItem(APP_SLUG + ".dismissed_update_version", "99.9.9");
+    await mount(); await emit("update:available", available());
+    expect(state().notesOpen).toBe(true);
+  });
+});
+
+describe("检查与下载的单飞", () => {
+  it("检查命令返回后仍等事件终态，重复检查不并发", async () => {
+    await mount(); h.invoke.mockClear();
+    await act(async () => { await state().manualCheckForUpdate(); });
+    expect(h.invoke).not.toHaveBeenCalled();
+    await emit("update:available", available());
+    await act(async () => { await state().downloadAndInstall(); });
+    expect(h.invoke).toHaveBeenCalledWith("start_update");
+  });
+});
+
+
+describe("更新任务按事件结束", () => {
+  it("自动检查不登记，手动检查只在终态事件到达后结束", async () => {
+    await mount(); expect(getOperations()).toHaveLength(0);
+    await emit("update:uptodate");
+    await act(async () => state().manualCheckForUpdate());
+    const task = getOperations().find(o => o.key === "update.check")!;
+    expect(task.state).toBe("running");
+    await emit("update:available", available());
+    expect(getOperations().find(o => o.id === task.id)?.state).toBe("success");
+  });
+  it("下载请求返回不会结束；未知长度显示真实字节，ready只表示包已验签", async () => {
+    await mount(); await emit("update:available", available());
+    await act(async () => state().downloadAndInstall());
+    const task = getOperations().find(o => o.key === "update.download")!;
+    expect(task.state).toBe("running");
+    await emit("update:progress", { downloaded: 1234, total: null });
+    expect(getOperations().find(o => o.id === task.id)?.progress).toEqual({ done: 1234, total: undefined });
+    await emit("update:ready");
+    expect(getOperations().find(o => o.id === task.id)).toMatchObject({ state: "success", detail: "更新包已下载并验签，等待用户安装" });
+  });
+  it("安装前取消会结束任务；安装请求没有最终版本成功提示", async () => {
+    await mount(); await emit("update:available", available()); await emit("update:ready");
+    h.prepareRestart.mockResolvedValueOnce(false);
+    await act(async () => state().restart());
+    expect(getOperations().find(o => o.key === "update.install")?.state).toBe("cancelled");
+    await advanceToRelaunch();
+    expect(getOperations()[getOperations().length - 1]?.state).toBe("running");
   });
 });

@@ -2,7 +2,8 @@ import { useId, useMemo, useState, type ReactNode } from "react";
 import { APP_INFO } from "../../lib/about";
 import { countReleaseItems, createUpdateNotesModel, type ReleaseContent, type UpdateNotesInfo } from "../../lib/updateNotes";
 import { Icon } from "../ui/icon";
-import { Button } from "../ui/button";
+import { UpdateBrand } from "./UpdateBrand";
+import { AVAILABLE_PROCESS, UpdateActions, UpdateProcess, updateProcessTitle, type UpdateDialogProcess } from "./UpdateProcess";
 import "./update-dialog.css";
 
 function formattedDate(value?: string | null) {
@@ -42,34 +43,35 @@ function Disclosure({ label, children, secondary = false }: { label: string; chi
   </section>;
 }
 
-export function UpdateDialogContent({ update, onClose, onDownload, onDismiss }: {
-  update: UpdateNotesInfo;
+export function UpdateDialogContent({ update, process = AVAILABLE_PROCESS, onClose, onDownload, onDismiss, onRestart, onRetry }: {
+  update: UpdateNotesInfo | null;
+  process?: UpdateDialogProcess;
   onClose: () => void;
   onDownload: () => void;
   onDismiss: () => void;
+  onRestart?: () => void;
+  onRetry?: () => void;
 }) {
-  const model = useMemo(() => createUpdateNotesModel(update), [update]);
-  const { latest, releases, highlights, total, counts } = model;
+  const model = useMemo(() => update ? createUpdateNotesModel(update) : null, [update]);
+  const latest = model?.latest;
+  const releases = model?.releases ?? [];
+  const highlights = model?.highlights.slice(0, 3) ?? [];
   const cross = releases.length > 1;
-  const date = formattedDate(latest.date);
-  const hasNotes = latest.groups.length || latest.summary.length || latest.paragraphs.length || latest.highlights.length;
+  const date = formattedDate(latest?.date);
+  const hasNotes = latest && (latest.groups.length || latest.summary.length || latest.paragraphs.length || latest.highlights.length);
+  const blocked = process.preparing || process.restarting || process.status === "installing";
   return <>
-    <button type="button" onClick={onClose} className="interactive update-close" aria-label="关闭更新弹窗"><Icon name="close" size={17} aria-hidden="true" /></button>
-    <header className="update-dialog-header">
-      <div className="update-app-icon"><img src="/icon.png" alt="" /></div>
-      <div><h2>{APP_INFO.name} 有新版本</h2><p>{date ? `${date}发布` : `${APP_INFO.name} 软件更新`}</p></div>
-    </header>
-    <div className="update-dialog-scroll" tabIndex={0} role="region" aria-label="更新内容">
-      <section className="update-upgrade" aria-label="升级版本与更新范围">
-        <div className="update-versions">
-          {update.currentVersion && <><span>v{update.currentVersion.replace(/^v/, "")}</span><Icon name="arrowRight" size={16} aria-hidden="true" /></>}
-          <strong>{latest.version ? `v${latest.version}` : "新版本"}</strong>
-        </div>
-        <p>{cross ? `从你当前的版本起，汇总已收录的 ${releases.length} 个版本更新。` : "新的更新已准备就绪，以下是本次发布的更新内容。"}</p>
-        {total > 0 && <div className="update-stats"><span><strong>{total}</strong>条更新记录</span>{Object.entries(counts).map(([label, count]) => <span key={label}><strong>{count}</strong>{label}</span>)}</div>}
-      </section>
+    <button type="button" disabled={blocked} onClick={onClose} className="interactive update-close" aria-label="关闭更新弹窗"><Icon name="close" size={17} aria-hidden="true" /></button>
+    <UpdateBrand currentVersion={update?.currentVersion} version={latest?.version} ready={process.status === "ready"} />
+    <div className="update-dialog-main">
+      <header className="update-dialog-header"><h2>{updateProcessTitle(process)}</h2><p>{date ? `${date}发布 · ` : ""}{APP_INFO.name} 软件更新</p></header>
+      <div className="update-dialog-scroll" tabIndex={0} role="region" aria-label="更新内容与进度">
+      <UpdateProcess process={process} />
+      {model && <>
+      <p className="update-scope-note">{cross ? `从你当前的版本起，汇总已收录的 ${releases.length} 个版本更新。` : "从当前版本升级，以下是本次值得关注的变化。"}</p>
+      {model.total > 0 && <div className="update-stats"><span><strong>{model.total}</strong>项更新</span>{Object.entries(model.counts).map(([label, count]) => <span key={label}><strong>{count}</strong>{label}</span>)}</div>}
       {highlights.length > 0 && <section aria-label="升级亮点" className="update-benefits-section">
-        <div className="update-benefits-heading"><h3>{cross ? "这次升级，值得期待的变化" : "本次更新亮点"}</h3><span>精选 {highlights.length} 项变化</span></div>
+        <div className="update-benefits-heading"><h3>{cross ? "这次升级，值得关注的变化" : "本次更新亮点"}</h3><span>精选 {highlights.length} 项</span></div>
         <ul className="update-benefits">{highlights.map(({ version, text }) => {
           const plain = text.replace(/\*\*/g, "");
           const split = plain.search(/：|:\s/);
@@ -78,27 +80,22 @@ export function UpdateDialogContent({ update, onClose, onDownload, onDismiss }: 
           return <li key={`${version}-${text}`}>
             <div className="update-benefit-title"><Icon name="sparkles" size={16} aria-hidden="true" /><h4>{title}</h4></div>
             {description && <p>{description}</p>}
-            <span className="update-source-version">来自 <strong>v{version.replace(/^v/, "")}</strong></span>
+            {cross && <span className="update-source-version">来自 <strong>v{version.replace(/^v/, "")}</strong></span>}
           </li>;
         })}</ul>
       </section>}
-      {hasNotes ? <Disclosure label={`本次发布${latest.version ? ` · v${latest.version}` : ""}${countReleaseItems(latest) ? ` · ${countReleaseItems(latest)} 条记录` : " · 更新说明"}`}>
+      {hasNotes && latest ? <Disclosure label={`本次发布${latest.version ? ` · v${latest.version}` : ""}${countReleaseItems(latest) ? ` · ${countReleaseItems(latest)} 条记录` : " · 更新说明"}`}>
         <ReleaseDetails content={latest} />
       </Disclosure> : <p className="update-empty">此版本未提供详细说明。</p>}
-      {cross && <Disclosure secondary label={`查看跨版本完整记录${total ? ` · ${total} 条` : ""}`}>
+      {cross && <Disclosure secondary label={`查看跨版本完整记录${model.total ? ` · ${model.total} 条` : ""}`}>
         {releases.map(release => <article className="update-history-release" key={release.version}>
           <h3>v{release.version}<time>{formattedDate(release.date)}</time></h3>
           <ReleaseDetails content={release} />
         </article>)}
       </Disclosure>}
-    </div>
-    <footer className="update-dialog-footer">
-      <p className="update-restart-note"><Icon name="refresh" size={14} aria-hidden="true" /><span>安装完成后将于 8 秒后重启，可取消倒计时。</span></p>
-      <div className="update-dialog-actions">
-        <Button variant="outline" onClick={() => { onDismiss(); onClose(); }}>稍后</Button>
-        <Button onClick={() => { onDownload(); onClose(); }}><Icon name="download" size={15} aria-hidden="true" />下载并更新</Button>
+      </>}
       </div>
-      <p className="update-dismiss-note">选择“稍后”，将不再主动提示此版本。</p>
-    </footer>
+      <UpdateActions process={process} onClose={onClose} onDownload={onDownload} onDismiss={onDismiss} onRestart={onRestart} onRetry={onRetry} />
+    </div>
   </>;
 }

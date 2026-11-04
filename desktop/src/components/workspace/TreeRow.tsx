@@ -82,6 +82,7 @@ export const TreeDirRow = memo(function TreeDirRow({
   selected,
   padLeft,
   parent,
+  bc,
   onToggle,
   onContextMenu,
 }: {
@@ -95,6 +96,8 @@ export const TreeDirRow = memo(function TreeDirRow({
   padLeft: number;
   /** 这一行所在的目录：展开/收起要连父目录一起看（压缩链）。 */
   parent: string;
+  /** 业务组件名（`manifest.xml` 登记过才有）：非空时目录后面打 BC 徽章。 */
+  bc?: string;
   onToggle: (path: string, parent: string) => void;
   onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) => void;
 }) {
@@ -118,6 +121,16 @@ export const TreeDirRow = memo(function TreeDirRow({
       <Icon name="chevronDown" size={14} className={`wb-row-icon ${open ? "" : "-rotate-90"}`} />
       <Icon name="folder" size={14} className="wb-row-icon" />
       <span className="wb-row-name">{name}</span>
+      {bc && (
+        // 两个字母足够区分：满屏 60 个模块里，「哪些是 manifest 登记的业务组件」是
+        // 唯一需要一眼看出的信息，完整说明放 title。
+        <span
+          className="wb-bc-badge"
+          title={`业务组件：${bc}\n由工程根的 manifest.xml（BusinessComponet）登记`}
+        >
+          BC
+        </span>
+      )}
       {!!count && <span className="wb-svn-count" title={`${count} 个文件有 SVN 变更`}>{count}</span>}
     </button>
   );

@@ -2,6 +2,7 @@ import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { Input } from "../ui/input";
 import { baseName } from "../../lib/workspace";
+import { useOperations } from "../../lib/operations";
 import { TreeViewOptions } from "./TreeViewOptions";
 
 /**
@@ -42,7 +43,9 @@ export function TreeHeader({
   /** 切到全工程搜索（侧栏视图，不再占主导航页签）。 */
   onSearch: () => void;
 }) {
-  const ready = draft.trim().length > 0;
+  const tasks=useOperations();
+  const switching=tasks.some(o=>o.key==="workspace.switch" && !o.endedAt);
+  const ready = draft.trim().length > 0 && !switching;
   return (
     <>
       <div className="wb-pane-title">
@@ -50,7 +53,7 @@ export function TreeHeader({
             含中文时又只改到其中几个字母，用户核对路径时反而找不到对应目录。 */}
         <span title={root}>资源管理器 · {baseName(root) || root}</span>
         <div className="wb-pane-acts">
-          <TreeViewOptions />
+          <TreeViewOptions root={root} />
           <button
             type="button"
             className="wb-icon-btn"
@@ -99,24 +102,24 @@ export function TreeHeader({
           <Input
             value={draft}
             onChange={(e) => onDraftChange(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && ready && onOpen()}
+            onKeyDown={(e) => !e.nativeEvent.isComposing && e.key === "Enter" && ready && onOpen()}
             autoFocus
           />
-          <Button size="sm" disabled={!ready} onClick={onOpen}>
+          <Button size="sm" disabled={!ready} isLoading={switching} loadingText="切换中" onClick={onOpen}>
             打开
           </Button>
         </div>
       )}
       {editing && unsaved && (
         <div className="wb-row-note" data-tone="bad">
-          有未保存的修改，换目录会丢弃它们
+          切换前会提示保存未完成的修改
         </div>
       )}
       {editing && recents.length > 0 && (
         <div className="wb-root-recent">
           <span className="wb-root-recent-label">最近</span>
           {recents.map((p) => (
-            <button key={p} type="button" className="wb-root-recent-item" title={p}
+            <button key={p} type="button" className="wb-root-recent-item" title={p} disabled={switching}
               onClick={() => onOpenRecent(p)}>
               {baseName(p)}
             </button>

@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
-import { ResultGrid, type CellPos, type GridEdit } from "./ResultGrid";
+import { ResultGrid, type GridEdit } from "./ResultGrid";
 import { CellDetail } from "./CellDetail";
 import { thousands } from "../../lib/db";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
@@ -22,8 +22,13 @@ export type ExportFormat = "csv" | "tsv" | "insert";
  * 或筛了，结果条上就出现「仅作用于已取的 N 行」；要让数据库重排整表，走表头右键的
  * 「重排并重查」（`onServerSort`）。
  */
-export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot, tabs, subbar, settings, running, onServerSort, onExportFile }: {
+import { GridColumns } from "./GridColumns";
+import { ResultCompare } from "./ResultCompare";
+import { loadLayout, saveLayout, gridColumns, selectedRows, selectedCols, selectionText, type Selection, type GridLayout, type ResultSnapshot } from "../../lib/dbResultTools";
+
+export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot, tabs, subbar, settings, running, onServerSort, onExportFile, layoutKey, snapshot, onRelated }: {
   columns: ColumnMeta[];
+  layoutKey?:string; snapshot?:ResultSnapshot; connId?:string|null; onRelated?:(row:Cell[])=>void;
   rows: Cell[][];
   /** 结果条左侧的说明：行数 / 耗时。 */
   meta: ReactNode;
@@ -48,38 +53,51 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
   onExportFile?: (format: ExportFormat) => void;
 }) {
   const [filter, setFilter] = useState("");
-  const [filterOpen, setFilterOpen] = useState(false);
+
   const [sort, setSort] = useState<SortState | null>(null);
-  const [sel, setSel] = useState<CellPos | null>(null);
-  const [detail, setDetail] = useState(false);
-  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
-  /** 表头右键：「用此列重排整表」。`col` 是列下标。 */
-  const [head, setHead] = useState<{ x: number; y: number; col: number } | null>(null);
+  const [selection,setSelection] = useState<Selection|null>(null);
+  const sel=selection?.end ?? null;
+  const [layout,setLayout] = useState(()=>loadLayout(layoutKey));
+
+  const visible=gridColumns(columns,layout);
+  const setColumns=(value:GridLayout)=>{setLayout(value);setSelection(null);try{saveLayout(layoutKey,value);}catch{toast("列布局未能保存，当前布局仍可使用","error");}};
+  const select=(p:{r:number;c:number},extend=false)=>setSelection(current=>({anchor:extend && current ? current.anchor : p,end:p}));
+  const [ui,setUi] = useState<{filterOpen:boolean;columnOpen:boolean;detail:boolean;menu:{x:number;y:number;items:ContextMenuItem[]}|null;head:{x:number;y:number;col:number}|null}>({filterOpen:false,columnOpen:false,detail:false,menu:null,head:null});
+  const {filterOpen,columnOpen,detail,menu,head}=ui;
+  const setFilterOpen=(value:boolean|((v:boolean)=>boolean))=>setUi(v=>({...v,filterOpen:typeof value==="function"?value(v.filterOpen):value}));
+  const setColumnOpen=(columnOpen:boolean)=>setUi(v=>({...v,columnOpen}));
+  const setDetail=(detail:boolean)=>setUi(v=>({...v,detail}));
+  const setMenu=(menu:typeof ui.menu)=>setUi(v=>({...v,menu}));
+  const setHead=(head:typeof ui.head)=>setUi(v=>({...v,head}));
   const order = useMemo(() => viewOrder(rows, columns, filter, sort), [rows, columns, filter, sort]);
 
-  const shown = () => order.map((i) => rows[i]);
-  const copy = (label: string, text: string) =>
+  const valueAt=(r:number,c:number)=>edit?.changed.has(`${r}:${c}`) ? edit.changed.get(`${r}:${c}`)! : rows[r][c];
+  const shown = () => order.map(i=>visible.map(c=>valueAt(i,c)));
+  const shownColumns=visible.map(c=>columns[c]);
+  const copySelection=()=>{if(selection) void copy("选区",selectionText(rows,order,visible,selection,valueAt),selectedRows(order,selection).length);};
+  const copy = (label: string, text: string, count=order.length) =>
     navigator.clipboard.writeText(text).then(
-      () => toast(`已复制为 ${label}（${thousands(order.length)} 行）`, "success"),
+      () => toast(`已复制为 ${label}（${thousands(count)} 行）`, "success"),
       (e) => toast(`复制失败：${e}`, "error"),
     );
 
   const copyMenu = (x: number, y: number) => {
-    const col = sel?.c ?? 0;
+    const col = Math.max(0,visible.indexOf(sel?.c ?? visible[0]));
     setMenu({
       x,
       y,
       items: [
-        { label: "TSV（贴 Excel）", icon: "copy", onSelect: () => void copy("TSV", toTsv(columns, shown())) },
-        { label: "CSV", icon: "copy", onSelect: () => void copy("CSV", toCsv(columns, shown())) },
-        { label: `INSERT 语句（${table || "表名"}）`, icon: "copy", onSelect: () => void copy("INSERT", toInsert(table || "table_name", columns, shown())) },
-        { label: `in (…) 列表（${columns[col]?.name.toLowerCase() ?? ""}）`, icon: "copy", disabled: columns.length === 0, onSelect: () => void copy("in 列表", toInList(columns, shown(), col)) },
-        { label: "Markdown 表格", icon: "copy", onSelect: () => void copy("Markdown", toMarkdown(columns, shown())) },
+        {label:"复制选区（无表头）",icon:"copy",disabled:!selection,onSelect:copySelection},
+        { label: "当前显示 · TSV（贴 Excel）", icon: "copy", onSelect: () => void copy("TSV", toTsv(shownColumns, shown())) },
+        { label: "CSV", icon: "copy", onSelect: () => void copy("CSV", toCsv(shownColumns, shown())) },
+        { label: `INSERT 语句（${table || "表名"}）`, icon: "copy", onSelect: () => void copy("INSERT", toInsert(table || "table_name", shownColumns, shown())) },
+        { label: `in (…) 列表（${shownColumns[col]?.name.toLowerCase() ?? ""}）`, icon: "copy", disabled: columns.length === 0, onSelect: () => void copy("in 列表", toInList(shownColumns, shown(), col)) },
+        { label: "Markdown 表格", icon: "copy", onSelect: () => void copy("Markdown", toMarkdown(shownColumns, shown())) },
       ],
     });
   };
 
-  const selValue = sel ? (edit?.changed.get(`${sel.r}:${sel.c}`) ?? rows[sel.r]?.[sel.c]) : undefined;
+  const selValue = sel ? valueAt(sel.r,sel.c) : undefined;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
@@ -100,7 +118,11 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
           </span>
         )}
         <span className="dbx-sp" />
+        {selection && <span className="meta">选区 {selectedRows(order,selection).length} 行 × {selectedCols(visible,selection).length} 列</span>}
         {tools}
+        {snapshot && <ResultCompare snapshot={snapshot} />}
+        {onRelated && <button type="button" className="dbx-btn" disabled={!sel} onClick={()=>sel && onRelated(rows[sel.r])}>关联记录</button>}
+        <button type="button" className="dbx-btn" aria-label="结果列布局" onClick={()=>setColumnOpen(true)}>列布局</button>
         {running && (
           <span className="dbx-busy">
             <Icon name="spinner" size={12} />
@@ -169,7 +191,7 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
               {
                 label: `CSV（当前显示 ${thousands(order.length)} 行）`,
                 icon: "copy",
-                onSelect: () => downloadText(`${table || "result"}.csv`, toCsv(columns, shown())),
+                onSelect: () => downloadText(`${table || "result"}.csv`, toCsv(shownColumns, shown())),
               },
             ];
             setMenu({ x: r.left, y: r.bottom + 4, items });
@@ -200,7 +222,12 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
           onSort={(c) => setSort(nextSort(sort, c))}
           onHeaderMenu={(c, x, y) => setHead({ x, y, col: c })}
           sel={sel}
-          onSel={setSel}
+          onSel={select}
+          selection={selection}
+          visible={visible}
+          frozen={layout.frozen}
+          widthOverrides={layout.widths}
+          onWidths={w=>setColumns({...layout,widths:Object.fromEntries(columns.map((c,i)=>[c.name,w[i]]))})}
           onOpen={() => setDetail(true)}
           edit={edit}
           zh={zh}
@@ -216,7 +243,9 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
           />
         )}
       </div>
+      {snapshot && <div className="dbx-read-status" title={snapshot.sql}>{snapshot.source} · {new Date(snapshot.at).toLocaleString()} · {snapshot.complete ? "完整查询结果" : "已读取部分数据"}</div>}
       {foot}
+      {columnOpen && <GridColumns columns={columns} layout={layout} onChange={setColumns} onClose={()=>setColumnOpen(false)} />}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       {head && (
         <ContextMenu

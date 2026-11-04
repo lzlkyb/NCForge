@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PREFS,
   getEditorPrefs,
@@ -15,6 +15,7 @@ import {
  * Monaco 选项的映射不能把 false 写成 undefined（否则关了又"自己打开"）。
  */
 describe("editorPrefs", () => {
+  afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
     localStorage.clear();
     setEditorPrefs({ ...DEFAULT_PREFS });
@@ -66,5 +67,14 @@ describe("editorPrefs", () => {
     });
     // 空字体名要用内置字体栈，不能把空串塞给 Monaco
     expect(String(o.fontFamily)).toContain("monospace");
+  });
+
+  it("写入失败返回 false，保持本次生效，并允许重试同一个值", () => {
+    const write = vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => { throw new Error("quota"); });
+    expect(setEditorPrefs({ fontSize: 19 })).toBe(false);
+    expect(getEditorPrefs().fontSize).toBe(19);
+    expect(setEditorPrefs({ fontSize: 19 })).toBe(true);
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(localStorage.getItem("ncforge-editor-prefs")!).fontSize).toBe(19);
   });
 });

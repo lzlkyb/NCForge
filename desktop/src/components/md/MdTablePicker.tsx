@@ -8,7 +8,7 @@ import type { PickRow } from "../../lib/mdDict";
  * 「勾选表」与「补丁涉及」共用它——两种模式下 rows 来自不同地方（一个来自关键词查询，
  * 一个来自补丁草稿扫表），但「怎么显示、怎么勾」是同一件事，不做两套。
  *
- * 行高刻意压到 22px：一次要能扫过几十张表，行距大了就得滚。
+ * 行高沿用工作台的 30px 控件档位，表名与中文名仍在同一行内对照。
  */
 export function MdTablePicker({
   rows,
@@ -107,7 +107,7 @@ export function MdTablePicker({
                     <>
                       <span className="md-cn">{r.displayName || "—"}</span>
                       {r.isExtend && <span className="md-tag-ext">扩展</span>}
-                      {r.module && <span className="md-mod">{r.module}</span>}
+                      {r.module && <span className="md-mod" title={r.module}>{r.module}</span>}
                     </>
                   )}
                 </button>

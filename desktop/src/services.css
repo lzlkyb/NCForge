@@ -12,23 +12,23 @@
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: hsl(var(--background));
+  background: hsl(var(--card));
 }
 .sv-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 46px;
-  padding: 0 16px;
+  height: 36px;
+  padding: 0 12px;
   border-bottom: 1px solid hsl(var(--border));
   flex-shrink: 0;
 }
 .sv-head h1 {
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 650;
 }
 .sv-sub {
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
 }
 .sv-sp {
@@ -40,6 +40,11 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  min-width: 0;
+  min-height: 36px;
+  padding: 3px 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
 }
 .sv-svc-name {
   display: inline-flex;
@@ -47,6 +52,7 @@
   gap: 6px;
   font-size: 12px;
   font-weight: 650;
+  white-space: nowrap;
 }
 .sv-btn[data-on] {
   border-color: hsl(var(--primary) / 0.5);
@@ -64,10 +70,12 @@
 .sv-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
   min-height: 0;
   flex: 1;
-  padding: 12px 16px 0;
+  padding: 0;
+  overflow: auto;
+  background: hsl(var(--card));
 }
 
 /* ── 按钮 ── */
@@ -75,9 +83,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 12px;
-  border-radius: var(--r-control, 8px);
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   background: hsl(var(--card));
   color: hsl(var(--foreground));
@@ -86,7 +94,7 @@
   white-space: nowrap;
   flex-shrink: 0;
   cursor: pointer;
-  transition: background var(--dur, 160ms) var(--ease, ease);
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
 }
 .sv-btn:hover:not(:disabled) {
   background: hsl(var(--secondary));
@@ -113,25 +121,34 @@
   background: hsl(var(--destructive) / 0.14);
 }
 .sv-icon-btn {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
-  border-radius: 6px;
+  border-radius: var(--r-control);
   color: hsl(var(--muted-foreground));
   cursor: pointer;
   flex-shrink: 0;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
-.sv-icon-btn:hover {
+.sv-icon-btn:hover:not(:disabled) {
   background: hsl(var(--secondary));
   color: hsl(var(--foreground));
+}
+.sv-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .sv-icon-btn[data-on] {
   background: hsl(var(--accent));
   color: hsl(var(--accent-foreground));
 }
 .sv-link {
-  font-size: 11.5px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 2px;
+  font-size: 11px;
   color: hsl(var(--accent-foreground));
   cursor: pointer;
   flex-shrink: 0;
@@ -145,18 +162,19 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   flex-wrap: wrap;
-  padding: 12px 16px;
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--r-card, 14px);
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid hsl(var(--border));
+  border-radius: 0;
   background: hsl(var(--card));
   flex-shrink: 0;
   overflow: hidden;
 }
-/* 左侧竖条 = 状态色，扫一眼就知道在跑没跑 */
+/* 状态由文字徽标表达，停靠区只保留分隔边界。 */
 .sv-card::before {
-  content: "";
+  content: none;
   position: absolute;
   left: 0;
   top: 0;
@@ -171,14 +189,15 @@
   background: hsl(var(--warning));
 }
 .sv-state {
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 12px;
   min-width: 0;
 }
 .sv-ring {
-  width: 38px;
-  height: 38px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -191,22 +210,20 @@
   height: 9px;
   border-radius: 50%;
   background: currentColor;
-  box-shadow: 0 0 0 5px hsl(var(--success) / 0.16);
 }
 .sv-card[data-state="stopped"] .sv-ring {
   background: hsl(var(--muted-foreground) / 0.12);
   color: hsl(var(--muted-foreground));
 }
 .sv-card[data-state="stopped"] .sv-dot {
-  box-shadow: 0 0 0 5px hsl(var(--muted-foreground) / 0.12);
+  color: hsl(var(--muted-foreground));
 }
 .sv-card[data-state="starting"] .sv-ring {
   background: hsl(var(--warning) / 0.14);
   color: hsl(var(--warning-ink));
 }
 .sv-card[data-state="starting"] .sv-dot {
-  box-shadow: 0 0 0 5px hsl(var(--warning) / 0.14);
-  animation: sv-pulse 1.4s var(--ease, ease) infinite;
+  animation: sv-pulse 1.4s var(--ease-standard) infinite;
 }
 @keyframes sv-pulse {
   0%,
@@ -224,20 +241,27 @@
   min-width: 0;
 }
 .sv-line1 {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 .sv-name {
-  font-size: 14.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
   font-weight: 650;
 }
 .sv-badge {
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-control);
   background: hsl(var(--success) / 0.14);
   color: hsl(var(--success-ink));
 }
@@ -250,7 +274,7 @@
   color: hsl(var(--warning-ink));
 }
 .sv-desc {
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
   max-width: 460px;
   overflow: hidden;
@@ -259,9 +283,11 @@
 }
 .sv-metrics {
   display: flex;
-  gap: 22px;
-  margin-left: 10px;
+  gap: 16px;
+  margin-left: 0;
   flex-wrap: wrap;
+  flex: 1 1 360px;
+  min-width: 0;
 }
 .sv-metric {
   display: flex;
@@ -269,7 +295,7 @@
   gap: 2px;
 }
 .sv-k {
-  font-size: 10.5px;
+  font-size: 11px;
   letter-spacing: 0.03em;
   color: hsl(var(--muted-foreground));
 }
@@ -279,7 +305,7 @@
   font-variant-numeric: tabular-nums;
 }
 .sv-v small {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 500;
   color: hsl(var(--muted-foreground));
 }
@@ -289,6 +315,8 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  min-height: 30px;
 }
 
 /* ── 告警条 ── */
@@ -297,10 +325,11 @@
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: 0;
   font-size: 12px;
   line-height: 1.5;
-  border: 1px solid hsl(var(--destructive) / 0.3);
+  border: 0;
+  border-bottom: 1px solid hsl(var(--destructive) / 0.3);
   background: hsl(var(--destructive) / 0.08);
   color: hsl(var(--destructive-ink));
   flex-shrink: 0;
@@ -322,12 +351,14 @@
 .sv-cfg {
   display: flex;
   align-items: stretch;
-  gap: 12px;
-  padding: 4px 12px;
-  border: 1px solid hsl(var(--border));
-  border-radius: 10px;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid hsl(var(--border));
+  border-radius: 0;
   background: hsl(var(--card));
-  font-size: 11.5px;
+  font-size: 11px;
   flex-shrink: 0;
 }
 .sv-cfg-item {
@@ -339,6 +370,9 @@
 }
 .sv-cfg-item-edit {
   gap: 6px;
+}
+.sv-cfg-item:not(.sv-cfg-heap) {
+  flex: 1 1 260px;
 }
 /* 堆上限这一项内容短、但一个字都不能截：1024 宽时三个配置项会互相挤，
    路径截成 `D:\ncc\1909h…` 还有 title 可看，而「堆上限 6 GB」截成「堆上 6 …」
@@ -366,31 +400,26 @@
 }
 .sv-cfg-hint {
   color: hsl(var(--muted-foreground));
-  opacity: 0.8;
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 10.5px;
+  font-size: 11px;
 }
 .sv-cfg-input {
   flex: 1;
-  min-width: 160px;
-  height: 24px;
+  min-width: 100px;
+  height: 30px;
   padding: 0 8px;
-  border-radius: 6px;
-  border: 1px solid hsl(var(--ring));
+  border-radius: var(--r-control);
+  border: 1px solid hsl(var(--border));
   background: hsl(var(--background));
   color: hsl(var(--foreground));
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 11px;
-  outline: none;
 }
 .sv-cfg-sep {
-  width: 1px;
-  background: hsl(var(--border));
-  margin: 8px 0;
-  flex-shrink: 0;
+  display: none;
 }
 /* 堆上限：数字输入框比路径短得多，不跟着 flex 撑满 */
 .sv-cfg-input.sv-cfg-num {
@@ -400,7 +429,7 @@
   font-variant-numeric: tabular-nums;
 }
 .sv-cfg-unit {
-  font-size: 10.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
   flex-shrink: 0;
 }
@@ -411,9 +440,10 @@
   flex-direction: column;
   min-height: 0;
   flex: 1;
-  margin-bottom: 12px;
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--r-card, 14px);
+  margin-bottom: 0;
+  border: 0;
+  border-radius: 0;
+  min-height: 140px;
   background: hsl(var(--card));
   overflow: hidden;
 }
@@ -421,8 +451,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 38px;
-  padding: 0 8px 0 10px;
+  min-height: 36px;
+  padding: 3px 12px;
+  flex-wrap: wrap;
   border-bottom: 1px solid hsl(var(--border));
   flex-shrink: 0;
 }
@@ -430,29 +461,29 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 2px;
-  border-radius: 7px;
-  background: hsl(var(--secondary));
+  padding: 0;
+  border-radius: var(--r-control);
+  background: transparent;
   flex-shrink: 0;
 }
 .sv-lv button {
-  height: 22px;
+  height: 30px;
   padding: 0 9px;
-  border-radius: 5px;
-  font-size: 11.5px;
+  border-radius: var(--r-control);
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 .sv-lv button[data-on] {
-  background: hsl(var(--card));
-  color: hsl(var(--foreground));
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
   font-weight: 650;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
 }
 .sv-n {
-  font-size: 10px;
+  font-size: 11px;
   opacity: 0.7;
   margin-left: 3px;
 }
@@ -467,29 +498,31 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
+  height: 30px;
   padding: 0 8px;
-  border-radius: 7px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   background: hsl(var(--background));
   color: hsl(var(--muted-foreground));
   width: 210px;
-  flex-shrink: 0;
+  flex: 1 1 160px;
+  min-width: 120px;
+  max-width: 320px;
 }
 .sv-search input {
   border: 0;
   background: none;
   outline: none;
   font: inherit;
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--foreground));
   flex: 1;
   min-width: 0;
 }
 .sv-kbd {
-  font-size: 9.5px;
+  font-size: 11px;
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   color: hsl(var(--muted-foreground));
   white-space: nowrap;
@@ -557,7 +590,6 @@
 /* logger 固定列宽：不固定的话每行消息的起始位置都不一样，纵向扫读很费劲 */
 .sv-obj {
   color: hsl(var(--muted-foreground));
-  opacity: 0.78;
   flex-shrink: 0;
   width: 200px;
   overflow: hidden;
@@ -597,10 +629,10 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 24px;
+  height: 26px;
   padding: 0 12px;
   border-top: 1px solid hsl(var(--border));
-  font-size: 10.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
   flex-shrink: 0;
 }
@@ -623,7 +655,7 @@
 .sv-cmdline {
   margin-top: 10px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   background: hsl(var(--background));
   font-family: "Cascadia Mono", Consolas, monospace;
@@ -652,11 +684,11 @@
   padding: 0;
   border: 0;
   background: none;
-  font-size: 10.5px;
+  font-size: 11px;
   letter-spacing: 0.03em;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--r-control);
 }
 .sv-k-edit:hover {
   color: hsl(var(--foreground));
@@ -665,7 +697,7 @@
 }
 .sv-k-edit svg {
   opacity: 0;
-  transition: opacity var(--dur, 160ms) var(--ease, ease);
+  transition: opacity var(--dur-fast) var(--ease-standard);
 }
 .sv-k-edit:hover svg,
 .sv-k-edit:focus-visible svg {
@@ -680,13 +712,14 @@
   margin-top: 14px;
 }
 .sv-port-input label {
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
 }
 .sv-port-input input {
   width: 92px;
-  padding: 5px 8px;
-  border-radius: var(--r-control, 8px);
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   background: hsl(var(--background));
   color: hsl(var(--foreground));
@@ -696,23 +729,23 @@
   font-variant-numeric: tabular-nums;
 }
 .sv-port-input input:focus {
-  outline: none;
-  border-color: hsl(var(--primary));
-  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25);
+  border-color: hsl(var(--ring));
 }
 .sv-port-quick {
   display: flex;
   gap: 4px;
 }
 .sv-port-quick button {
-  padding: 3px 8px;
-  border-radius: 5px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   background: transparent;
   color: hsl(var(--muted-foreground));
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
 }
 .sv-port-quick button:hover {
   color: hsl(var(--foreground));
@@ -725,7 +758,7 @@
 }
 .sv-port-err {
   margin-top: 10px;
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--destructive-ink));
 }
 
@@ -733,7 +766,7 @@
 .sv-port-list {
   margin-top: 12px;
   border: 1px solid hsl(var(--border));
-  border-radius: var(--r-card, 10px);
+  border-radius: var(--r-card);
   overflow: hidden;
 }
 .sv-port-item {
@@ -761,7 +794,7 @@
   font-weight: 550;
 }
 .sv-port-path {
-  font-size: 10.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
   overflow: hidden;
   text-overflow: ellipsis;
@@ -776,8 +809,8 @@
 }
 .sv-port-diff code {
   padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 11.5px;
+  border-radius: var(--r-control);
+  font-size: 11px;
   font-weight: 600;
 }
 .sv-port-old {
@@ -806,11 +839,11 @@
   gap: 6px;
   margin-top: 10px;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   background: hsl(var(--destructive) / 0.08);
   border: 1px solid hsl(var(--destructive) / 0.28);
   color: hsl(var(--destructive-ink));
-  font-size: 11.5px;
+  font-size: 11px;
   line-height: 1.55;
 }
 .sv-port-blocked svg {
@@ -847,21 +880,22 @@
   border-top: 1px solid hsl(var(--border));
 }
 .sv-port-hint {
-  font-size: 10.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
 }
 .sv-port-hint code {
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 /* ── 元数据投送（MetaDeployCard）── */
 .sv-deploy {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 12px;
-  border: 1px solid hsl(var(--border));
-  border-radius: 10px;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid hsl(var(--border));
+  border-radius: 0;
   background: hsl(var(--card));
   flex-shrink: 0;
 }
@@ -869,7 +903,9 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 28px;
+  min-height: 36px;
+  padding: 6px 12px;
+  flex-wrap: wrap;
 }
 .sv-deploy-head .sv-link {
   display: inline-flex;
@@ -878,18 +914,19 @@
   flex-shrink: 0;
 }
 .sv-deploy-sub {
+  flex: 1 1 180px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
 }
 .sv-deploy-auto {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11.5px;
+  font-size: 11px;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
   user-select: none;
@@ -899,12 +936,12 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding-top: 8px;
+  padding: 10px 12px;
   border-top: 1px solid hsl(var(--border));
 }
 .sv-deploy-line {
   margin: 0;
-  font-size: 11.5px;
+  font-size: 11px;
   line-height: 1.65;
   color: hsl(var(--foreground));
 }
@@ -917,29 +954,35 @@
   margin: 0;
   padding-left: 16px;
   list-style: disc;
-  font-size: 11.5px;
+  font-size: 11px;
   line-height: 1.65;
   color: hsl(var(--muted-foreground));
 }
 .sv-deploy-hint {
   margin: 0;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.6;
   color: hsl(var(--muted-foreground));
 }
+.sv-deploy-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 
 /* 服务链路条：一眼看出断在进程 / 端口 / 应用 / 数据库哪一环。 */
-.sv-chain { display:flex; align-items:center; gap:2px; flex-wrap:wrap; padding:8px 12px; border-top:1px solid hsl(var(--border)); }
+.sv-chain { display:flex; align-items:center; gap:2px; flex-wrap:wrap; flex:1 1 280px; padding:0; }
 .sv-chain-cell { display:inline-flex; align-items:center; gap:2px; }
 .sv-chain-arrow { color:hsl(var(--muted-foreground) / 0.5); font-size:12px; padding:0 2px; }
-.sv-chain-node { display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 8px; border-radius:999px; font-size:11px; color:hsl(var(--muted-foreground)); white-space:nowrap; }
+.sv-chain-node { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 8px; border-radius:var(--r-control); font-size:11px; color:hsl(var(--muted-foreground)); white-space:nowrap; }
 button.sv-chain-node:hover { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); }
-.sv-chain-node i { width:6px; height:6px; border-radius:999px; background:hsl(var(--muted-foreground) / 0.5); }
+.sv-chain-node i { width:6px; height:6px; border-radius:var(--r-control); background:hsl(var(--muted-foreground) / 0.5); }
 .sv-chain-node[data-tone="ok"] { color:hsl(var(--success-ink)); }
 .sv-chain-node[data-tone="ok"] i { background:hsl(var(--success)); }
 .sv-chain-node[data-tone="warn"] { color:hsl(var(--warning-ink)); }
 .sv-chain-node[data-tone="warn"] i { background:hsl(var(--warning)); }
 .sv-chain-node[data-tone="bad"] { color:hsl(var(--destructive-ink)); }
 .sv-chain-node[data-tone="bad"] i { background:hsl(var(--destructive)); }
-.sv-chain-node[data-tone="busy"] i { background:hsl(var(--primary)); animation:wb-lang-pulse 1.4s ease-in-out infinite; }
+.sv-chain-node[data-tone="busy"] i { background:hsl(var(--primary)); animation:wb-lang-pulse 1.4s var(--ease-standard) infinite; }
 @media(prefers-reduced-motion:reduce) { .sv-chain-node[data-tone="busy"] i { animation:none; } }

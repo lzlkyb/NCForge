@@ -31,6 +31,9 @@ const OUTCOME = {
   filesMatched: 2,
   truncated: false,
   elapsedMs: 640,
+  scopeDirs: [],
+  missingDirs: [],
+  scopeFallback: false,
 };
 
 const REPLACED = {

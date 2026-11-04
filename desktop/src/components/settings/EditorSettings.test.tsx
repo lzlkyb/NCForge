@@ -40,6 +40,21 @@ afterEach(async () => {
 });
 
 describe("EditorSettings 渐进披露", () => {
+  it("字体标签关联输入，完成输入后才保存并更新摘要", async () => {
+    const label = [...container.querySelectorAll("label")].find((n) => n.textContent === "字体")!;
+    const field = label.control as HTMLInputElement;
+    expect(field).toBeInstanceOf(HTMLInputElement);
+    expect(label.htmlFor).toBe(field.id);
+    expect([...field.labels!]).toContain(label);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "Consolas");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(summaries()[0]).toContain("默认字体");
+    await act(async () => field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(summaries()[0]).toContain("Consolas");
+  });
+
   it("摘要行写当前值，而不是分类名", () => {
     expect(summaries()).toEqual([
       "13px · Tab 4 制表符 · 自动换行 关 · 默认字体",

@@ -1,4 +1,6 @@
 import { invoke, listen } from "./tauri";
+import { trackOperation } from "./operations";
+import { getSession } from "./workspaceSession";
 
 /**
  * 版本控制（SVN）的命令封装与纯函数。
@@ -31,6 +33,8 @@ export interface ChangeItem {
   isDir: boolean;
   /** 构建产物 / 冲突残留：列表默认隐藏，由界面开关决定显不显示（不在后端过滤）。 */
   ignored: boolean;
+  /** 本地文件修改时间（毫秒 epoch）；读不到为 null（删除、缺失、权限）。 */
+  mtimeMs?: number | null;
 }
 
 export interface ChangeGroup {
@@ -138,27 +142,27 @@ export const svnInfo = () => invoke<SvnInfo>("svn_info");
  * 界面的「显示全部」开关只在本地过滤，不再重扫。
  */
 export const svnStatus = () => invoke<StatusResult>("svn_status");
-export const svnDiff = (path: string) => invoke<DiffResult>("svn_diff", { path });
+export const svnDiff = (path: string) => trackOperation({ key: `svn.diff:${path.toLowerCase()}`, label: "读取 SVN 差异", scope: path, page: "svn", path }, () => invoke<DiffResult>("svn_diff", { path }));
 export const svnLog = (path: string, limit: number, from: number) =>
-  invoke<LogEntry[]>("svn_log", { path, limit, from });
-export const svnBlame = (path: string) => invoke<BlameLine[]>("svn_blame", { path });
+  trackOperation({ key: `svn.log:${path.toLowerCase()}:${from}`, label: "读取 SVN 历史", scope: path || "工作副本", page: "svn" }, () => invoke<LogEntry[]>("svn_log", { path, limit, from }));
+export const svnBlame = (path: string) => trackOperation({ key: `svn.blame:${path.toLowerCase()}`, label: "读取逐行追溯", scope: path, page: "svn", path }, () => invoke<BlameLine[]>("svn_blame", { path }));
 export const svnCommit = (paths: string[], message: string) =>
-  invoke<CommitResult>("svn_commit", { paths, message });
-export const svnUpdate = () => invoke<UpdateResult>("svn_update");
+  trackOperation({ key: `svn.commit:${getSession().root}:${JSON.stringify(paths)}:${message}`, label: "提交 SVN 改动", scope: getSession().root ?? "工作副本", page: "svn", phase: "提交选中文件，等待服务器确认" }, () => invoke<CommitResult>("svn_commit", { paths, message }), r => ({ state: "success", detail: `服务器已确认提交 r${r.revision}` }));
+export const svnUpdate = () => trackOperation({ key: `svn.update:${getSession().root}`, label: "更新 SVN 工作副本", scope: getSession().root ?? "工作副本", page: "svn", phase: "更新文件，等待服务器返回" }, () => invoke<UpdateResult>("svn_update"), r => ({ state: "success", detail: `已更新到 r${r.revision}；冲突由后续扫描确认` }));
 export const svnRevert = (paths: string[], recursive: boolean) =>
-  invoke<RevertResult>("svn_revert", { paths, recursive });
+  trackOperation({ key: `svn.revert:${JSON.stringify(paths)}:${recursive}`, label: "撤销 SVN 本地改动", page: "svn", phase: "备份后恢复 BASE" }, () => invoke<RevertResult>("svn_revert", { paths, recursive }), r => ({ state: "success", detail: `已撤销 ${r.count} 个；备份位于 ${r.backupDir}` }));
 export const svnResolve = (path: string, choice: "mine" | "theirs" | "base") =>
-  invoke<ResolveResult>("svn_resolve", { path, choice });
+  trackOperation({ key: `svn.resolve:${path}:${choice}`, label: "解决 SVN 冲突", scope: path, page: "svn", phase: "备份冲突文件并应用所选版本" }, () => invoke<ResolveResult>("svn_resolve", { path, choice }));
 export const svnReviewMark = (path: string, revision: number, reviewed: boolean) =>
   invoke<void>("svn_review_mark", { path, revision, reviewed });
-export const svnReviewPrune = () => invoke<number>("svn_review_prune");
+export const svnReviewPrune = () => trackOperation({ key: "svn.review.prune", label: "清理失效审查标记", page: "svn" }, () => invoke<number>("svn_review_prune"));
 /** 维护面板的只读数据：备份目录盘点 + 审查标记统计。 */
-export const svnHousekeeping = () => invoke<HousekeepingInfo>("svn_housekeeping");
+export const svnHousekeeping = () => trackOperation({ key: `svn.housekeeping:${getSession().root}`, label: "盘点 SVN 备份", page: "svn" }, () => invoke<HousekeepingInfo>("svn_housekeeping"));
 /** 按**目录名**删备份（后端校验名字与父目录，前端不传路径）。 */
 export const svnBackupDelete = (names: string[]) =>
-  invoke<BackupPurgeResult>("svn_backup_delete", { names });
+  trackOperation({ key: `svn.backup.purge:${getSession().root}`, label: "清理 SVN 备份", page: "svn" }, () => invoke<BackupPurgeResult>("svn_backup_delete", { names }), r => ({ state: r.failed.length ? "failed" : "success", detail: `删除 ${r.deleted} 个；${r.failed.length} 个未删除，详见维护面板` }));
 export const svnAuthSet = (user: string, password: string) =>
-  invoke<void>("svn_auth_set", { user, password });
+  trackOperation({ key: "svn.auth", label: "验证 SVN 账号", errorDetail: () => "账号验证失败，请查看账号对话框", page: "svn", phase: "连接服务器验证并保存凭据" }, () => invoke<void>("svn_auth_set", { user, password }));
 
 /**
  * 扫描进度（桥每 300 条推一次）。
@@ -246,6 +250,54 @@ export function reviewProgress(
 /** 把后端给的已审 key 列表变成 Set。 */
 export function reviewedSet(status: StatusResult | undefined): Set<string> {
   return new Set(status?.reviewed ?? []);
+}
+
+export type SortMode = "path" | "mtime";
+
+/**
+ * 排序：`path` 原样返回（后端已按路径排好），`mtime` 组内新的在上、
+ * 模块组按「组内最新时间」降序。**纯本地**——切排序不能再扫一次后端（7.6 秒）。
+ *
+ * 取不到 `mtimeMs`（删除、缺失、权限）当 0 处理，与「很旧」一起排到最后，
+ * 同刻的按路径兜底，保证顺序稳定。
+ */
+export function sortChanges(groups: ChangeGroup[], mode: SortMode): ChangeGroup[] {
+  if (mode === "path") return groups;
+  const at = (it: ChangeItem) => it.mtimeMs ?? 0;
+  const newest = (g: ChangeGroup) => g.items.reduce((m, it) => Math.max(m, at(it)), 0);
+  const out = groups.map((g) => ({
+    module: g.module,
+    items: [...g.items].sort((a, b) => at(b) - at(a) || a.rel.toLowerCase().localeCompare(b.rel.toLowerCase())),
+  }));
+  out.sort((a, b) => newest(b) - newest(a) || a.module.localeCompare(b.module));
+  return out;
+}
+
+/**
+ * 列表里的修改时间：5 分钟内「刚刚」、当天 `HH:mm`、昨天「昨天」、
+ * 7 天内「N 天前」、更早 `MM-DD`（跨年带年份）。读不到给 `—`。
+ *
+ * 当天给时刻而不是「N 小时前」：`09:05` 比 `5 小时前`更能直接回答"什么时候改的"。
+ * `now` 可注入：时钟偏差与「刚刚」的边界都得靠它单测。
+ */
+export function formatWhen(ms: number | null | undefined, now: number = Date.now()): string {
+  if (!ms || ms <= 0) return "—";
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const day = (t: number) => {
+    const x = new Date(t);
+    return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
+  };
+  const diff = now - ms;
+  // 时钟偏差（系统时间被改、文件来自未来）不显示「N 小时前」这种负数
+  if (diff < 0) return day(now) === day(ms) ? `${p(d.getHours())}:${p(d.getMinutes())}` : `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  if (diff < 5 * 60_000) return "刚刚";
+  if (day(now) === day(ms)) return `${p(d.getHours())}:${p(d.getMinutes())}`;
+  if (day(now - 86_400_000) === day(ms)) return "昨天";
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`;
+  return new Date(now).getFullYear() === d.getFullYear()
+    ? `${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    : `${String(d.getFullYear()).slice(2)}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 /** `2026-10-19 17:15` 这种短格式；时间戳单位是毫秒。 */

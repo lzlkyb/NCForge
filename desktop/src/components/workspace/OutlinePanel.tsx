@@ -7,7 +7,9 @@
 // 数据与面包屑共用 `symbolsFor` 的缓存，所以打开这一步通常不再发请求。
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
+import { usePresence } from "../../hooks/usePresence";
 import { inLangModule, useLangView } from "../../lib/lang";
+import { trackOperation } from "../../lib/operations";
 import { kindLetter, symbolsFor, type FlatSymbol } from "../../lib/symbols";
 import { buildOutline, filterOutline, moveActive, outlineRows } from "../../lib/outline";
 
@@ -27,7 +29,9 @@ export function OutlinePanel({ open, onClose, path, mtimeMs, onJump }: Props) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(-1);
   const [data, setData] = useState<{ path: string; list: FlatSymbol[] } | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const [request,setRequest]=useState({loading:false,error:"",revision:0});
+  const panelRef = useRef<HTMLDivElement|null>(null);
+  const {mounted,entered}=usePresence(open);
   // onClose 每次渲染都是新身份：监听只在开屏时注册一次，用 ref 穿透闭包读最新值
   const live = useRef({ onClose });
   live.current = { onClose };
@@ -42,18 +46,19 @@ export function OutlinePanel({ open, onClose, path, mtimeMs, onJump }: Props) {
     if (!canAsk || !javaPath) {
       // 不能问的时候必须清掉上一份数据：留着会显示**别的文件**的结构，
       // 点一行还跳到别的文件的行——用户以为结构面板坏了，其实是数据陈旧
-      setData(null);
+      setData(null);setRequest(v=>({...v,loading:false,error:""}));
       return;
     }
     let alive = true;
-    // 失败就当没有符号：结构面板是辅助功能，它取不到不该弹错打断用户
-    symbolsFor(javaPath, mtimeMs)
-      .then((list) => alive && setData({ path: javaPath, list }))
-      .catch(() => alive && setData(null));
+    setData(null);
+    setRequest(v=>({...v,loading:true,error:""}));
+    trackOperation({key:`outline:${javaPath}`,label:"读取文件结构",scope:javaPath,page:"files",path:javaPath,phase:"向代码智能查询符号"},()=>symbolsFor(javaPath, mtimeMs))
+      .then((list) => {if(alive) {setData({ path: javaPath, list });setRequest(v=>({...v,loading:false}));}})
+      .catch(e => {if(alive) {setData(null);setRequest(v=>({...v,loading:false,error:String(e)}));}});
     return () => {
       alive = false;
     };
-  }, [open, canAsk, javaPath, mtimeMs]);
+  }, [open, canAsk, javaPath, mtimeMs,request.revision]);
 
   const rows = useMemo(() => {
     if (!data || data.path !== javaPath) return [];
@@ -76,9 +81,10 @@ export function OutlinePanel({ open, onClose, path, mtimeMs, onJump }: Props) {
     };
     // Esc 从过滤输入框里挪到文档级：焦点在列表行按钮上时原来按了没反应
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.isComposing || e.key !== "Escape") return;
       e.preventDefault();
       live.current.onClose();
+      panelRef.current?.closest(".wb-crumb-row")?.querySelector<HTMLButtonElement>('[data-popover="outline"]')?.focus();
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKey);
@@ -88,7 +94,7 @@ export function OutlinePanel({ open, onClose, path, mtimeMs, onJump }: Props) {
     };
   }, [open]);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   const jump = (i: number) => {
     const row = rows[i];
@@ -98,7 +104,7 @@ export function OutlinePanel({ open, onClose, path, mtimeMs, onJump }: Props) {
   };
 
   return (
-    <div ref={panelRef} className="wb-outline" role="dialog" aria-label="文件结构">
+    <div ref={node=>{panelRef.current=node;if(node) node.inert=!open;}} className="wb-outline ui-surface" data-state={entered?"open":"closed"} data-exiting={!open || undefined} role="dialog" aria-hidden={!open || undefined} aria-label="文件结构" aria-busy={request.loading}>
       <div className="wb-outline-head">
         <Icon name="code" size={13} />
         <span>文件结构</span>
@@ -114,6 +120,7 @@ export function OutlinePanel({ open, onClose, path, mtimeMs, onJump }: Props) {
           setActive(-1);
         }}
         onKeyDown={(e) => {
+          if(e.nativeEvent.isComposing) return;
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault();
             setActive(moveActive(rows.length, active, e.key === "ArrowDown" ? 1 : -1));
@@ -125,7 +132,9 @@ export function OutlinePanel({ open, onClose, path, mtimeMs, onJump }: Props) {
       />
       <div className="wb-outline-list">
         {!canAsk && <div className="wb-outline-note">代码智能未就绪（或这个文件不在语言服务的模块里），暂时看不到结构</div>}
-        {canAsk && rows.length === 0 && <div className="wb-outline-note">没有可显示的符号</div>}
+        {canAsk && request.loading && <div className="wb-outline-note" role="status"><Icon name="spinner" size={13} className="animate-spin"/> 正在读取文件结构…</div>}
+        {canAsk && request.error && <div className="wb-outline-note" role="alert">读取结构失败：{request.error}<button type="button" className="wb-outline-btn" onClick={()=>setRequest(v=>({...v,revision:v.revision+1}))}>重新读取</button></div>}
+        {canAsk && !request.loading && !request.error && rows.length === 0 && <div className="wb-outline-note">{query?"没有匹配的符号":"没有可显示的符号"}</div>}
         {rows.map((r, i) => (
           <button
             type="button"

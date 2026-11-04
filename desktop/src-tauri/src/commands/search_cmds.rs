@@ -111,11 +111,17 @@ pub struct ProjectsSearchOutcome {
 /// 逐个工程跑同一套 `search_with_budget`：并行读多个工程会把机械盘打满，
 /// 而且结果顺序不稳定；串行的代价由总预算兜住。工程根仍由后端从 `.classpath`
 /// 解析，前端不能传任意路径进来。
+///
+/// 不接受 `dirs`（按组件范围）：manifest 的组件只属于**当前工作区**，把它套到
+/// 依赖工程上会得到「每个工程都少搜一堆文件」的静默错范围。宁可明确拒绝。
 #[tauri::command]
 pub async fn search_projects(
     state: tauri::State<'_, Arc<AppState>>,
     options: SearchOptions,
 ) -> Result<ProjectsSearchOutcome, String> {
+    if !options.dirs.is_empty() {
+        return Err("按组件搜索只支持当前工作区，请把范围切到「当前工程」或「组件」".to_string());
+    }
     let cfg = state.config.read().await.clone();
     let primary = cfg
         .workspace_root

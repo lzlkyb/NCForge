@@ -183,7 +183,7 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
   return (
     <div className="qp-scrim" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div ref={dialogRef} className="qp" role="dialog" aria-modal="true" aria-label="快速导航" data-palette onKeyDown={onDialogKeyDown}>
-        <div className="qp-in">
+        <div className="qp-in" data-focus-container>
           <Icon name="search" size={15} />
           <input
             autoFocus
@@ -202,8 +202,8 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
         </div>
         <div className="qp-modes">
           {PALETTE_MODES.map((m) => (
-            <button key={m.mode} type="button" className="qp-mode" data-on={m.mode === mode || undefined} onClick={() => openPalette(m.mode)}>
-              {m.label}
+            <button key={m.mode} type="button" className="qp-mode" data-on={m.mode === mode || undefined} aria-pressed={m.mode === mode} onClick={() => openPalette(m.mode)}>
+              <span className="qp-mode-label">{m.label}</span>
               <kbd>{paletteKeyLabel(m.mode, keymap)}</kbd>
             </button>
           ))}

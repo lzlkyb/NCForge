@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { trackOperation } from "../lib/operations";
 import { checkArtifacts } from "../lib/linkedProjects";
 import type { CompileDiagnostic } from "../lib/compile";
 
@@ -47,7 +48,7 @@ export function useArtifactCheck(chainStamp: string, root: string | null) {
     try {
       // 显式指定主工程根：检查的必须是**眼前这条链**，而不是配置里可能过期的
       // `workspace_root`（用户在别处改过配置、这页还没重读时两者会不一致）
-      const result = await checkArtifacts(root ?? undefined);
+      const result = await trackOperation({ key: `artifacts.check:${root}`, label: "检查工程编译产物", scope: root ?? "工程依赖链", page: "linked", phase: "对照源码与 class 的更新时间" }, () => checkArtifacts(root ?? undefined), r => ({ state: "success", detail: `${r.length} 项诊断；结果基于本次工程依赖链` }));
       if (seq.current !== mine) return;
       setState({
         running: false,

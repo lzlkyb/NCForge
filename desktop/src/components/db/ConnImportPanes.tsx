@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { EnvChips } from "./EnvChips";
 import { friendlyDbError } from "../../lib/db";
 import { dbApi, type DbEnv, type PropSource } from "../../lib/dbApi";
+import { beginOperation } from "../../lib/operations";
+import { dbTaskSpec } from "../../lib/dbOperations";
 import { closeConnDialog, loadConns } from "../../lib/dbStore";
 
 /** 从 NC prop.xml 导入：列出全部数据源（不止 isBase 那个），勾选添加。 */
@@ -20,16 +22,20 @@ export function PropImportPane() {
   const toggle = (name: string) =>
     setPicked((old) => (old.includes(name) ? old.filter((n) => n !== name) : [...old, name]));
 
+  const lock=useRef(false);
   const add = async () => {
-    setBusy(true);
+    if(lock.current) return;
+    const task=beginOperation(dbTaskSpec("connection.import","导入 NC 数据源配置",null,"连接配置"));
+    if(!task) return;lock.current=true;setBusy(true);
     try {
       await dbApi.propImport(picked, env);
       await loadConns();
-      closeConnDialog();
+      task.finish("success","连接配置已导入");closeConnDialog();
     } catch (e) {
+      task.finish("failed","配置导入失败，返回连接配置查看原因");
       setErr(friendlyDbError(e));
     } finally {
-      setBusy(false);
+      lock.current=false;setBusy(false);
     }
   };
 

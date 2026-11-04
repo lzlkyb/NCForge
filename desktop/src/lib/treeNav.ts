@@ -1,5 +1,6 @@
 import { joinPath } from "./workspace";
 import { chainOpen, dirChain } from "./treeCompact";
+import { visibleChildren } from "./ncStructure";
 import type { TreeDirState } from "./workspaceSession";
 
 /** 树里一行（展平后的可见顺序），键盘上下移动按这个顺序。 */
@@ -8,6 +9,14 @@ export interface FlatRow {
   isDir: boolean;
   /** 所在目录行；顶层项为 null（单工程时根目录本身不占一行）。 */
   parent: string | null;
+  /**
+   * 真实所在目录。只有 NC 结构视图摊平后才与 `parent` 不同：`bill/src/public`
+   * 显示在 `bill` 下面（`parent` = bill），真身在 `bill/src` 下。
+   *
+   * 展开 / 收起必须拿它去问压缩链（`chainFor` 在真实父目录里找这一行）；
+   * 而方向键的「左回父目录」「右进子项」要看得到的那一层，所以用 `parent`。
+   */
+  realParent?: string;
   /** 显示名。压缩中间包时会变成 `com.aier.erp`（省略时用路径末段）。 */
   label?: string;
   /** 这一行是关联工程的根（多工程树才有），不是普通目录。 */
@@ -38,6 +47,9 @@ export type TreeNavAction =
  *
  * `projectRows` = 多工程树：每棵根先占一行，展开后才是它的子项。单工程保持原样
  * （根目录本身不占行），否则所有现有行为都会多出一行「工作区根」。
+ *
+ * `hoist` = NC 结构视图：业务组件模块的 `src` 层被摊平，模块下直接列
+ * `public/client/private/test/resources`（见 `lib/ncStructure`）。
  */
 export function flattenTree(
   dirs: Record<string, TreeDirState>,
@@ -47,6 +59,8 @@ export function flattenTree(
     filter?: (name: string) => boolean;
     compact?: boolean;
     projectRows?: boolean;
+    /** 这一层的子目录要不要摊平 `src`（NC 结构视图）。 */
+    hoist?: (dir: string) => boolean;
   } = {},
 ): FlatRow[] {
   const out: FlatRow[] = [];
@@ -55,15 +69,25 @@ export function flattenTree(
   const walk = (dir: string, parent: string | null) => {
     const st = dirs[dir];
     if (!st || st.status !== "ok") return;
-    for (const item of st.items) {
+    const kids = visibleChildren(dir, st.items, {
+      hoist: opts.hoist?.(dir) === true,
+      dirs,
+    });
+    for (const { dir: from, item } of kids) {
       if (filter && !filter(item.name)) continue;
-      const full = joinPath(dir, item.name);
+      const full = joinPath(from, item.name);
       if (item.isDir) {
         const chain = dirChain(compact, full, item.name, dirs);
-        out.push({ path: chain.tail, isDir: true, parent, label: chain.label });
+        out.push({
+          path: chain.tail,
+          isDir: true,
+          parent,
+          label: chain.label,
+          realParent: from === dir ? undefined : from,
+        });
         if (chainOpen(chain, expanded)) walk(chain.tail, chain.tail);
       } else {
-        out.push({ path: full, isDir: false, parent });
+        out.push({ path: full, isDir: false, parent, realParent: from === dir ? undefined : from });
       }
     }
   };

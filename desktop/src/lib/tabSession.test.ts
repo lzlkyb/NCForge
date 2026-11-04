@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addTab, pickClosable, pinTab } from "./tabSession";
+import { addTab, pickClosable, pinTab, tabMetaFromJdt } from "./tabSession";
 import type { TabMeta } from "./workspaceSession";
 
 const tab = (path: string, extra: Partial<TabMeta> = {}): TabMeta =>
@@ -47,5 +47,29 @@ describe("pickClosable", () => {
     const r = pickClosable(tabs, (_t, i) => i > 0);
     expect(r.close).toEqual(["b", "c"]);
     expect(r.kept).toBe(0);
+  });
+});
+
+describe("tabMetaFromJdt", () => {
+  const uri = "jdt://contents/a.jar/p/A.class";
+  const stub = [
+    "// Failed to get sources. Instead, stub sources have been generated",
+    "public class A {}",
+  ].join("\n");
+  const source = ["package p;", "", "public class A {}", ""].join("\n");
+
+  it("三种正文对应三种标记", () => {
+    expect(tabMetaFromJdt(uri, source).virtual).toBe("source");
+    expect(tabMetaFromJdt(uri, stub).virtual).toBe("stub");
+    // 反编译结果本身不含桩那句话，标记只能由调用方显式带进来
+    const decompiled = ["// 反编译自 a.jar（CFR）", "public class A {}"].join("\n");
+    expect(tabMetaFromJdt(uri, decompiled, true).virtual).toBe("decompiled");
+  });
+
+  it("jar 内的类永远是只读，名字按类名给", () => {
+    const m = tabMetaFromJdt(uri, source);
+    expect(m.readOnly).toBe(true);
+    expect(m.name).toBe("A.java");
+    expect(m.path).toBe(uri);
   });
 });

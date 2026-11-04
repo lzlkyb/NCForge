@@ -137,15 +137,6 @@ export function MetaDeployCard() {
         >
           {busy === "apply" ? "投送中…" : "立即投送"}
         </button>
-        <button
-          type="button"
-          className="sv-btn"
-          disabled={busy !== null || !st?.hasManifest}
-          title="只删本工具写过的文件；被外部改过的会保留，覆盖前的备份会还原"
-          onClick={() => void run("cleanup")}
-        >
-          {busy === "cleanup" ? "清理中…" : "清理"}
-        </button>
       </div>
 
       {open && (
@@ -219,10 +210,22 @@ export function MetaDeployCard() {
             </p>
           )}
 
-          <p className="sv-deploy-hint">
-            只写 <code>modules/&lt;模块&gt;/META-INF/</code> 下的文件；覆盖前先备份，
-            清理时只删本工具写过且内容未被外部改动的文件。
-          </p>
+          <div className="sv-deploy-foot">
+            <p className="sv-deploy-hint">
+              只写 <code>modules/&lt;模块&gt;/META-INF/</code> 下的文件；覆盖前先备份，
+              清理时只删本工具写过且内容未被外部改动的文件。
+            </p>
+            <span className="sv-sp" />
+            <button
+              type="button"
+              className="sv-btn"
+              disabled={busy !== null || !st?.hasManifest}
+              title="只删本工具写过的文件；被外部改过的会保留，覆盖前的备份会还原"
+              onClick={() => void run("cleanup")}
+            >
+              {busy === "cleanup" ? "清理中…" : "清理投送"}
+            </button>
+          </div>
         </div>
       )}
     </section>

@@ -6,6 +6,8 @@ import { friendlyDbError } from "../../lib/db";
 import { autoMap, decodeCsvBytes, parseCsv, type ParsedCsv } from "../../lib/csvParse";
 import { planImport } from "../../lib/csvImport";
 import { dbApi, type ColumnInfo, type ImportFail } from "../../lib/dbApi";
+import { beginOperation, cancelOperation, type OperationHandle } from "../../lib/operations";
+import { dbTaskSpec } from "../../lib/dbOperations";
 import { MapGrid } from "./ImportColumnMap";
 
 /** 一批多少行。太小则往返多，太大则一条命令里全是拼出来的 SQL。 */
@@ -20,9 +22,9 @@ const PREVIEW = 5;
  * **列映射是这里唯一的判断点**：对错了不会报错，只会把名字写进日期列。所以自动只匹配
  * 「看起来就是同一列」的，其余留给用户手点。
  */
-export function ImportDialog({ connId, table, cols, onClose, onDone }: {
+export function ImportDialog({ connId, table, cols, onClose, onDone,tabId }: {
   connId: string;
-  table: string;
+  table: string; tabId?:string;
   /** 目标表的列；`null` 时自己读一次（表页是懒加载的，进页面时可能还没读完）。 */
   cols: ColumnInfo[] | null;
   onClose: () => void;
@@ -31,10 +33,10 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
 }) {
   const [target, setTarget] = useState<ColumnInfo[] | null>(cols);
   /** 文件名与解析结果绑在一起：换文件时不会出现"新名字 + 旧列映射"。 */
-  const [src, setSrc] = useState<{ name: string; csv: ParsedCsv | null; encoding: string }>({
+  const [src, setSrc] = useState<{ name: string; csv: ParsedCsv | null; encoding: string; reading:boolean }>({
     name: "",
     csv: null,
-    encoding: "",
+    encoding: "", reading:false,
   });
   const [map, setMap] = useState<number[]>([]);
   const [skip, setSkip] = useState(false);
@@ -45,6 +47,8 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
   const [err, setErr] = useState<string | null>(null);
   /** 取消只置标志：正在飞的那一批必须写完，否则请求发出去了却不知道结果。 */
   const cancelRef = useRef(false);
+  const taskRef=useRef<OperationHandle|null>(null);
+  const readSeq=useRef(0);
   const parsed = src.csv;
   const fileName = src.name;
 
@@ -74,23 +78,31 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
   const readFile = async (f: File) => {
     setErr(null);
     setOut(null);
-    setSrc({ name: f.name, csv: null, encoding: "" });
+    const seq=++readSeq.current;
+    setSrc({ name: f.name, csv: null, encoding: "",reading:true });
+    const task=beginOperation(dbTaskSpec(`import.read:${connId}:${table}:${seq}`,"读取导入文件",connId,table,undefined,tabId));
     try {
       const { text, encoding } = await decodeCsvBytes(f);
+      if(seq!==readSeq.current) {task?.finish("cancelled","已选择其它文件");return;}
       const r = parseCsv(text);
       if (r.headers.length === 0 || r.rows.length === 0) {
+        task?.finish("failed","文件没有可导入数据");
         setErr("这个文件里没有读到数据（是不是只有表头？）");
         return;
       }
-      setSrc({ name: f.name, csv: r, encoding });
+      setSrc({ name: f.name, csv: r, encoding,reading:false });
+      task?.finish("success",`已读取 ${r.rows.length} 行，尚未写入数据库`);
       setMap(autoMap(r.headers, target ?? []));
     } catch (e) {
-      setErr(`读不了这个文件：${String(e)}`);
-    }
+      task?.finish("failed","文件读取失败，返回导入窗口查看原因");
+      if(seq===readSeq.current) setErr(`读不了这个文件：${String(e)}`);
+    } finally {if(seq===readSeq.current) setSrc(v=>({...v,reading:false}));}
   };
 
   const run = async () => {
-    if (!parsed || !target || picked.length === 0) return;
+    if (!parsed || !target || picked.length === 0 || taskRef.current || out) return;
+    const task=beginOperation({...dbTaskSpec(`import:${connId}:${table}`,"导入表数据",connId,`${table} · 独立导入会话`,undefined,tabId),cancel:async()=>{cancelRef.current=true;setBusy(v=>v ? {...v,canceling:true} : v);}});
+    if(!task) return;taskRef.current=task;
     setErr(null);
     setOut(null);
     // 切批与行号换算是纯函数（lib/csvImport），这里只管发请求与报进度
@@ -98,7 +110,7 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
     let inserted = 0;
     const failed: ImportFail[] = [];
     const t0 = Date.now();
-    let stopped = false;
+    let stopped = false, rolledBack=false;
     cancelRef.current = false;
     setBusy({ done: 0, total: parsed.rows.length, canceling: false });
     try {
@@ -120,20 +132,23 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
         setBusy({
           done: Math.min(inserted + failed.length, parsed.rows.length),
           total: parsed.rows.length,
-          canceling: false,
+          canceling: cancelRef.current,
         });
-        if (!res.committed) break; // 遇错停：这一批已回滚，后面的不再试
+        task.update({phase:"分批写入（每批独立提交）",progress:{done:Math.min(inserted+failed.length,parsed.rows.length),total:parsed.rows.length}});
+        if (!res.committed) {rolledBack=true;break;} // 遇错停：这一批已回滚，后面的不再试
       }
+      task.finish(stopped ? "cancelled" : failed.length || rolledBack ? "failed" : "success",`已写入 ${inserted} 行，失败 ${failed.length} 行${stopped ? "；已在批次边界停止" : rolledBack ? "；当前批已回滚" : ""}`);
       setOut({ inserted, failed, ms: Date.now() - t0, canceled: stopped });
       if (inserted > 0) onDone();
     } catch (e) {
+      task.finish("failed",`导入中断；前 ${inserted} 行已写入，返回导入窗口核对`);
       // 已经写进去的批不会因为异常消失：进度摘要照给，错误另显示。
       // 少这一行的话，用户点过取消后又遇错，界面只剩一条错误，「到底写了多少」没人知道。
       setOut({ inserted, failed, ms: Date.now() - t0, canceled: cancelRef.current });
       if (inserted > 0) onDone();
       setErr(friendlyDbError(e));
     } finally {
-      setBusy(null);
+      taskRef.current=null;setBusy(null);
     }
   };
 
@@ -183,6 +198,7 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
               }}
             />
           </label>
+          {src.reading && <span role="status"><Icon name="spinner" size={12} />读取文件中…</span>}
           {fileName && (
             <span className="dbx-mono dbx-muted">
               {fileName}
@@ -257,8 +273,7 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
             className="dbx-btn ghost"
             disabled={busy.canceling}
             onClick={() => {
-              cancelRef.current = true;
-              setBusy((b) => (b ? { ...b, canceling: true } : b));
+              if(taskRef.current) void cancelOperation(taskRef.current.id);
             }}
           >
             {busy.canceling ? "取消中…" : "取消导入"}
@@ -269,8 +284,8 @@ export function ImportDialog({ connId, table, cols, onClose, onDone }: {
           </button>
         )}
         <button type="button" className="dbx-btn" disabled={!canRun} title={out ? "这次导入已结束；要再导一遍请重新选择文件" : undefined} onClick={() => void run()}>
-          <Icon name="upload" size={12} />
-          开始导入
+          <Icon name={busy ? "spinner" : "upload"} size={12} />
+          {busy ? "导入中…" : "开始导入"}
         </button>
       </div>
     </Modal>

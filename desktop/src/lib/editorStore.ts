@@ -102,12 +102,24 @@ function unregister(path: string, entry: Entry): void {
  * `peek: true` 表示这个 model 只是给预览窗口用的：进预览队列，数量超上限时按
  * 最近使用淘汰。默认（不传）是正式身份：要么本来就在队列里（转正、摘牌，之后不受
  * 上限约束），要么新建后不进队列——调用方保证它会成为标签页，由 closeModel 收尾。
+ *
+ * `replace: true` 允许覆盖已有内容。唯一的用处是「预览先给了签名桩，正式打开拿到了
+ * 反编译结果」——内容确实会变的那一次（见 `lang.ts::loadJdtSource`）。覆盖会清掉
+ * undo 栈与光标，只读 model 上无所谓；可编辑文件永远不走这个函数。
  */
-export function openVirtualModel(uri: string, text: string, opts?: { peek?: boolean }): Model {
+export function openVirtualModel(
+  uri: string,
+  text: string,
+  opts?: { peek?: boolean; replace?: boolean },
+): Model {
   const existing = entries.get(uri);
   if (existing) {
     if (opts?.peek) touchPeek(uri);
     else unqueuePeek(uri);
+    if (opts?.replace && existing.model.getValue() !== text) {
+      existing.model.setValue(text);
+      existing.savedVersion = existing.model.getAlternativeVersionId();
+    }
     return existing.model;
   }
   const model = monaco.editor.createModel(text, "java", monaco.Uri.parse(uri));
@@ -218,13 +230,15 @@ export function getText(path: string): string | undefined {
 }
 
 /** 保存成功后调用：把当前版本记为干净。 */
-export function markSaved(path: string): void {
+export function markSaved(path: string, version?: number): void {
   const e = entries.get(path);
   if (!e) return;
-  e.savedVersion = e.model.getAlternativeVersionId();
-  if (e.lastDirty) {
-    e.lastDirty = false;
-    emitDirty(path, false);
+  // 写盘耗时期间仍可打字：保存点只能是提交的版本，不能抹掉后续编辑。
+  e.savedVersion = version ?? e.model.getAlternativeVersionId();
+  const dirty = e.model.getAlternativeVersionId() !== e.savedVersion;
+  if (e.lastDirty !== dirty) {
+    e.lastDirty = dirty;
+    emitDirty(path, dirty);
   }
 }
 

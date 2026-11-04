@@ -1,6 +1,7 @@
 import { Menu, MenuItem } from "../ui/Menu";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
+import { useOperations } from "../../lib/operations";
 import { listTasks, runTask, STEP_SHORT } from "../../lib/ncTasks";
 
 /**
@@ -8,6 +9,7 @@ import { listTasks, runTask, STEP_SHORT } from "../../lib/ncTasks";
  * 任务定义在设置 → 任务里维护；这里只负责运行，不提供任意命令输入。
  */
 export function TaskMenu({ root, compiling }: { root: string; compiling: boolean }) {
+  const tasks=useOperations();const running=tasks.some(o=>o.key==="nc.task" && !o.endedAt);
   return (
     <Menu
       portal
@@ -17,7 +19,7 @@ export function TaskMenu({ root, compiling }: { root: string; compiling: boolean
           size="sm"
           variant="outline"
           className="wb-task-btn"
-          disabled={compiling || !root}
+          disabled={compiling || running || !root}
           aria-expanded={open}
           title="运行 NC 任务（编译 / 投送 / 重启 / 补丁）"
           onClick={toggle}
@@ -34,7 +36,7 @@ export function TaskMenu({ root, compiling }: { root: string; compiling: boolean
             key={t.id}
             label={t.name}
             hint={t.steps.map((s) => STEP_SHORT[s]).join(" → ")}
-            disabled={compiling}
+            disabled={compiling || running}
             onClick={() => {
               close();
               void runTask(t);

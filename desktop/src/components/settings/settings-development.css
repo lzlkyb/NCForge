@@ -1,0 +1,23 @@
+.settings-memory-field { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.settings-memory-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-width:0; }
+.settings-memory-input { width:100px; min-width:0; max-width:100%; }
+.settings-memory-controls > span { white-space:nowrap; }
+.settings-lang-status { display:flex; align-items:baseline; flex-wrap:wrap; gap:8px; padding:0 0 12px; }
+.settings-lang-status > span { flex-shrink:0; }
+.settings-lang-status p { min-width:0; overflow-wrap:anywhere; }
+.settings-lang-capabilities { border-top:1px solid hsl(var(--border)); padding-top:12px; }
+.settings-lang-capabilities summary,.settings-task-create > summary { cursor:pointer; font-size:13px; font-weight:600; padding:8px 0; }
+.settings-lang-capabilities summary:focus-visible,.settings-task-create > summary:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; border-radius:var(--r-control); }
+.settings-lang-capabilities > div { display:flex; flex-direction:column; gap:9px; padding:8px 0; font-size:12px; line-height:1.7; color:hsl(var(--muted-foreground)); }
+.settings-task-create { border-top:1px solid hsl(var(--border)); padding-top:8px; }
+.settings-task-builtins { border-bottom:1px solid hsl(var(--border)); padding-bottom:8px; }
+.settings-task-builtins > summary { padding:12px 0; cursor:pointer; font-size:14px; font-weight:600; }
+.settings-task-builtins > summary span { margin-left:8px; font-size:12px; font-weight:400; color:hsl(var(--muted-foreground)); }
+.settings-task-form { display:flex; flex-direction:column; gap:12px; padding:8px 0 12px; min-width:0; }
+.settings-task-name { display:flex; flex-direction:column; gap:6px; font-size:13px; }
+.settings-task-steps { display:flex; flex-direction:column; gap:8px; }
+.settings-task-steps legend { margin-bottom:8px; font-size:13px; }
+.settings-task-steps label { display:flex; align-items:center; gap:8px; font-size:13px; }
+.settings-task-steps input { flex-shrink:0; accent-color:hsl(var(--primary)); }
+.settings-task-sequence { font-size:12px; line-height:1.6; color:hsl(var(--muted-foreground)); overflow-wrap:anywhere; }
+.settings-task-form-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }

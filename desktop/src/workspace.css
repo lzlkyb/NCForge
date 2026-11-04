@@ -49,6 +49,8 @@
 }
 .wb-icon-btn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 .wb-icon-btn[aria-pressed="true"] { background: hsl(var(--secondary)); color: hsl(var(--primary)); }
+/* 不可用时（如没有 manifest 的 NC 结构视图）要能看出点不了，而不是 hover 高亮后没反应 */
+.wb-icon-btn:disabled { opacity: 0.4; cursor: default; }
 .wb-pane-acts { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .wb-root-edit {
   display: flex;
@@ -138,6 +140,19 @@
 .wb-project-badge[data-current] {
   background: hsl(var(--primary) / 0.14);
   color: hsl(var(--primary));
+}
+/* manifest.xml 登记的业务组件（BusinessComponet）：紧贴目录名，靠右的 SVN 计数不受影响 */
+.wb-bc-badge {
+  flex-shrink: 0;
+  margin-left: 2px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  letter-spacing: 0.02em;
 }
 /* 树头的范围说明：编译 / SVN 只作用于当前工程 */
 .wb-tree-scope {
@@ -268,7 +283,7 @@
   height: 14px;
   padding: 0 3px;
   border-radius: 3px;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.02em;
   background: hsl(var(--warning) / 0.16);
@@ -411,6 +426,8 @@
   border-top: 1px solid hsl(var(--border));
   user-select: none;
 }
+.wb-status { white-space: nowrap; }
+.wb-status > :not(.wb-status-path, .wb-status-sp, .wb-lang) { flex-shrink: 0; }
 .wb-status-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-status-mode { flex-shrink: 0; padding: 0 6px; border-radius: 4px; background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
 .wb-status-sp { flex: 1; }
@@ -511,8 +528,9 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-compile-btn { align-self: center; margin: 0 8px; flex-shrink: 0; }
 .wb-task-btn { align-self: center; margin-left: 8px; flex-shrink: 0; }
 /* 状态栏的代码智能状态（设计稿 .ls） */
-.wb-lang { display: inline-flex; align-items: center; gap: 5px; }
-.wb-lang-dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--success)); }
+.wb-lang { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.wb-lang-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-lang-dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--success)); flex-shrink: 0; }
 .wb-lang[data-tone="busy"] .wb-lang-dot { background: hsl(var(--warning)); animation: wb-lang-pulse 1s infinite; }
 .wb-lang[data-tone="bad"] { color: hsl(var(--destructive-ink)); font-weight: 600; }
 /* 轻量模式：灰点 + 弱化文字，不抢注意力但看得见 */

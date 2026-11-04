@@ -9,8 +9,13 @@ import { TableMoreActions } from "./TableMoreActions";
 import { InsertExportDialog } from "./InsertExportDialog";
 import { friendlyDbError } from "../../lib/db";
 import { dbApi, type ColumnInfo, type IndexInfo } from "../../lib/dbApi";
+import { trackOperation } from "../../lib/operations";
+import { dbTaskSpec } from "../../lib/dbOperations";
 import { columnsOf, patchTab, rtOf, useDb, type TableSub, type TableTab } from "../../lib/dbStore";
 import { copyText } from "../../lib/utils";
+
+import { returnRelated } from "../../lib/dbRelations";
+import { DbContextBar } from "./DbContextBar";
 
 const SUBS: { key: TableSub; label: string }[] = [
   { key: "data", label: "数据" },
@@ -41,22 +46,29 @@ export function TablePage({ tab }: { tab: TableTab }) {
     setErr(null);
     // 对象页不去读字段：包/过程在 user_tab_columns 里根本不存在，读只会白跑一次并报错
     if (isObj || rt.status !== "connected") return;
-    columnsOf(tab.connId, tab.table).then(setCols, (e) => setErr(friendlyDbError(e)));
-  }, [tab.connId, tab.table, rt.status, isObj]);
+    let live=true;
+    void trackOperation(dbTaskSpec(`columns:${tab.connId}:${tab.table}`,"读取数据库表结构",tab.connId,tab.table,undefined,tab.id),()=>columnsOf(tab.connId, tab.table)).then(r=>{if(live) setCols(r);},e=>{if(live) setErr(friendlyDbError(e));});
+    return()=>{live=false;};
+  }, [tab.id,tab.connId, tab.table, rt.status, isObj]);
 
   const zh = Object.fromEntries((cols ?? []).filter((c) => c.zh).map((c) => [c.name.toLowerCase(), c.zh!]));
   const subs = isObj ? OBJ_SUBS : SUBS;
+  const returnTo = (step: {tabId:string;label:string}) => {
+    if (returnRelated(tab,step)) toast("来源标签已关闭，已重新打开表", "info");
+  };
 
   return (
     <div className="dbx-page">
-      <div className="dbx-subtabs" role="tablist">
+      <DbContextBar connId={tab.connId} />
+      {tab.trail?.length ? <nav className="dbx-read-status" aria-label="关联浏览路径">{tab.trail.map((step,i)=><button type="button" className="dbx-lk" key={`${step.tabId}:${i}`} onClick={()=>returnTo(step)}>{step.label} → </button>)}{tab.table}<button type="button" className="dbx-btn" onClick={()=>returnTo(tab.trail![tab.trail!.length-1])}>返回上一表</button></nav>:null}
+      <div className="dbx-subtabs" role="tablist" aria-label="数据库对象视图">
         <span className="title">
           <Icon name={isObj ? "file" : isView ? "eye" : "database"} size={14} />
           <span className="dbx-mono">{lower}</span>
           <span className="dbx-muted" style={{ fontWeight: 400 }}>{tab.otype ?? rt.ncNames?.[lower]}</span>
         </span>
         {subs.map((s) => (
-          <button key={s.key} type="button" role="tab" className="t" data-on={tab.sub === s.key || undefined} onClick={() => patchTab<TableTab>(tab.id, { sub: s.key })}>
+          <button key={s.key} type="button" role="tab" className="t" aria-selected={tab.sub === s.key} data-on={tab.sub === s.key || undefined} onClick={() => patchTab<TableTab>(tab.id, { sub: s.key })}>
             {s.label}
           </button>
         ))}
@@ -72,7 +84,7 @@ export function TablePage({ tab }: { tab: TableTab }) {
         )}
       </div>
       {dlg === "exp" && (
-        <InsertExportDialog
+        <InsertExportDialog tabId={tab.id}
           connId={tab.connId}
           table={tab.table}
           sql={`select * from ${lower}`}
@@ -80,12 +92,12 @@ export function TablePage({ tab }: { tab: TableTab }) {
         />
       )}
       {dlg === "imp" && (
-        <ImportDialog
+        <ImportDialog tabId={tab.id}
           connId={tab.connId}
           table={tab.table}
           cols={cols}
           onClose={() => setDlg(null)}
-          onDone={() => setDlg(null)}
+          onDone={() => toast("已有数据写入；关闭此窗口后点击查询刷新表数据，当前编辑尚未丢弃", "info")}
         />
       )}
       {rt.status !== "connected" && <div className="dbx-empty">连接已断开，先在左侧连上</div>}
@@ -134,21 +146,22 @@ function StructView({ cols }: { cols: ColumnInfo[] | null }) {
 
 /** 索引表与 DDL：切到这页时按需读。对象页（`otype`）走 `get_ddl(类型, 名字)`。 */
 function MetaText({ tab }: { tab: TableTab }) {
-  const [idx, setIdx] = useState<IndexInfo[] | null>(null);
-  const [ddl, setDdl] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [request,setRequest]=useState({idx:null as IndexInfo[]|null,ddl:null as string|null,err:null as string|null,revision:0});
+  const {idx,ddl,err,revision}=request;
   useEffect(() => {
-    const fail = (e: unknown) => setErr(friendlyDbError(e));
+    let live=true;setRequest(v=>({...v,err:null,idx:null,ddl:null}));
+    const fail = (e: unknown) => {if(live) setRequest(v=>({...v,err:friendlyDbError(e)}));};
     if (tab.sub === "idx") {
-      dbApi.indexes(tab.connId, tab.table).then((r) => setIdx(r.indexes), fail);
-      return;
+      void trackOperation(dbTaskSpec(`indexes:${tab.connId}:${tab.table}`,"读取数据库索引",tab.connId,tab.table,undefined,tab.id),()=>dbApi.indexes(tab.connId, tab.table)).then((r) => {if(live) setRequest(v=>({...v,idx:r.indexes}));}, fail);
+      return()=>{live=false;};
     }
-    const req = tab.otype
+    const req = trackOperation(dbTaskSpec(`ddl:${tab.connId}:${tab.table}`,"读取数据库对象定义",tab.connId,tab.table,undefined,tab.id),()=>tab.otype
       ? dbApi.objectDdl(tab.connId, tab.table, tab.otype)
-      : dbApi.ddl(tab.connId, tab.table);
-    req.then((r) => setDdl(r.ddl), fail);
-  }, [tab.connId, tab.table, tab.sub, tab.otype]);
-  if (err) return <div className="dbx-err">{err}</div>;
+      : dbApi.ddl(tab.connId, tab.table));
+    void req.then((r) => {if(live) setRequest(v=>({...v,ddl:r.ddl}));}, fail);
+    return()=>{live=false;};
+  }, [tab.id,tab.connId, tab.table, tab.sub, tab.otype,revision]);
+  if (err) return <div className="dbx-err">{err}<button type="button" className="dbx-btn" onClick={()=>setRequest(v=>({...v,revision:v.revision+1}))}>重新读取</button></div>;
   if (tab.sub === "ddl") {
     if (ddl === null) return <div className="dbx-empty"><Icon name="spinner" size={18} />读取中…</div>;
     return (

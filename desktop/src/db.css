@@ -91,9 +91,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
+  height: 30px;
   padding: 0 11px;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
   background: hsl(var(--card));
   font-size: 12px;
@@ -110,7 +110,7 @@
   cursor: not-allowed;
 }
 .dq-btn-sm {
-  height: 24px;
+  height: 28px;
   padding: 0 9px;
   font-size: 11.5px;
 }
@@ -364,7 +364,7 @@ table.dq-grid th .t {
   display: block;
   font-weight: 400;
   color: hsl(var(--muted-foreground));
-  font-size: 9px;
+  font-size: 10px;
 }
 table.dq-grid th.rn,
 table.dq-grid td.rn {
@@ -529,16 +529,12 @@ table.dq-grid td[data-null] {
   flex: 1;
   height: 30px;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: var(--r-control);
   border: 1px solid hsl(var(--border));
-  background: hsl(var(--background));
+  background: hsl(var(--card));
   font: inherit;
   font-size: 12px;
   color: hsl(var(--foreground));
-  outline: none;
-}
-.dq-field .dq-input:focus {
-  border-color: hsl(var(--ring));
 }
 .dq-dialog-foot {
   display: flex;
@@ -555,13 +551,16 @@ table.dq-grid td[data-null] {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  background: hsl(var(--card));
 }
 .dq-check-bar {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 7px 12px;
+  min-height: 36px;
+  padding: 3px 12px;
   border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--chrome));
   flex-shrink: 0;
   flex-wrap: wrap;
 }
@@ -681,6 +680,7 @@ table.dq-grid td[data-null] {
   gap: 8px;
   padding: 8px 12px;
   border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--chrome));
   flex-shrink: 0;
   font-size: 11px;
   color: hsl(var(--muted-foreground));

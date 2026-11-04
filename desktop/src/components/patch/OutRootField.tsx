@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
@@ -31,10 +31,13 @@ export function OutRootField({
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const shown = value ?? (detected.length > 0 ? detected.join("、") : "未探测");
 
   const save = async (dir: string | null) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
       await patchSetOutRoot(dir);
@@ -47,13 +50,14 @@ export function OutRootField({
     } catch (e) {
       toast(failureText("保存产物根", e), "error");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
 
   return (
     <>
-      <span className="pk-kv">
+      <span className="pk-out-root">
         产物根 <b title={shown}>{shown}</b>
         <button
           type="button"
@@ -86,13 +90,14 @@ export function OutRootField({
         </p>
         <Input
           className="mt-3 font-mono text-xs"
+          aria-label="编译产物根目录"
           value={draft}
           placeholder={candidates[0] ?? "D:\\work\\newar\\out"}
           spellCheck={false}
           autoFocus
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !saving) void save(draft.trim() || null);
+            if (e.key === "Enter" && !e.nativeEvent.isComposing && !saving) void save(draft.trim() || null);
           }}
         />
         {candidates.length > 0 && (

@@ -3,6 +3,8 @@ import { Icon } from "../ui/icon";
 import { EnvChips } from "./EnvChips";
 import { friendlyDbError, parseDbError } from "../../lib/db";
 import { dbApi, type DbEnv } from "../../lib/dbApi";
+import { beginOperation } from "../../lib/operations";
+import { dbTaskSpec } from "../../lib/dbOperations";
 import { closeConnDialog, loadConns } from "../../lib/dbStore";
 
 /** 导入 .properties（url / user / pwd，与 ncdb.sh 的 --conf 文件同格式）。 */
@@ -21,17 +23,21 @@ export function PropsFileImportPane() {
     if (!name) setName(f.name.replace(/\.properties$/i, "").replace(/^db-/, ""));
   };
 
+  const lock=useRef(false);
   const add = async () => {
+    if(lock.current) return;
     if (!file) return;
-    setBusy(true);
+    const task=beginOperation(dbTaskSpec("connection.import","导入数据库配置文件",null,"连接配置"));
+    if(!task) return;lock.current=true;setBusy(true);
     try {
       await dbApi.importProps(file.text, file.name, name.trim(), env);
       await loadConns();
-      closeConnDialog();
+      task.finish("success","连接配置已导入");closeConnDialog();
     } catch (e) {
+      task.finish("failed","配置导入失败，返回连接配置查看原因");
       setErr(parseDbError(e).code === "dup" ? `已有同一个库和用户的连接：${parseDbError(e).message}` : friendlyDbError(e));
     } finally {
-      setBusy(false);
+      lock.current=false;setBusy(false);
     }
   };
 

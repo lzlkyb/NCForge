@@ -18,7 +18,7 @@
 //! 更新源，需要 tauri.conf.json 的 plugins.updater.dangerousInsecureTransportProtocol
 //! = true（本地联调开关，见 scripts/fake-update-server.mjs 头注）。debug 两者皆可。
 
-use nc_forge::commands::{check_update, start_update};
+use nc_forge::commands::{check_update, install_update, start_update};
 use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
 use tauri::test::mock_builder;
@@ -94,6 +94,10 @@ fn local_http_source_drives_check_download_and_signature_failure() {
         .build(tauri::generate_context!())
         .expect("mock 应用构建失败");
 
+    // 没有已验签包时必须明确拒绝，不能误启动安装器或触发额外下载。
+    let install = tauri::async_runtime::block_on(install_update(app.handle().clone()));
+    assert!(install.unwrap_err().contains("尚无已下载并验证的更新包"));
+
     // manifest 版本 = 当前版本 patch+1：保证「有更新」且不写死
     // （真实版本变化后测试依然成立，不会静默失效）。
     let v = app.package_info().version.clone();
@@ -158,7 +162,7 @@ fn local_http_source_drives_check_download_and_signature_failure() {
     }
 
     // 第一跳：只检查 ⇒ 应收到 available 且版本为 next_version。
-    check_update(app.handle().clone());
+    check_update(app.handle().clone()).expect("检查任务应被接受");
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut saw_available = false;
     while Instant::now() < deadline {
@@ -180,9 +184,9 @@ fn local_http_source_drives_check_download_and_signature_failure() {
     }
     assert!(saw_available, "未收到 update:available（检查链路断裂）");
 
-    // 第二跳：下载 + 安装。假签名 ⇒ 重试 3 次后发 error{signature}。
+    // 第二跳：下载 + 验签。假签名 ⇒ 重试 3 次后发 error{signature}。
     // ready 绝不该出现（2026-10-18 假签名实测抓到的回归点）。
-    start_update(app.handle().clone());
+    start_update(app.handle().clone()).expect("下载任务应被接受");
     let deadline = Instant::now() + Duration::from_secs(60);
     let mut saw_downloading = false;
     let mut saw_progress = false;

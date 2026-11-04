@@ -1,4 +1,6 @@
 import { invoke } from "./tauri";
+import { trackOperation } from "./operations";
+import { getSession } from "./workspaceSession";
 
 /**
  * 与 Rust `search.rs` 的 serde 结构一一对应（camelCase）。
@@ -25,6 +27,12 @@ export interface SearchOutcome {
   filesMatched: number;
   truncated: boolean;
   elapsedMs: number;
+  /** 本次真正生效的范围（工作区相对、`/` 分隔）；空 = 整个工作区。 */
+  scopeDirs: string[];
+  /** 请求了但磁盘上不存在的目录（组件被删/改名时会出现在这里）。 */
+  missingDirs: string[];
+  /** 请求的范围一个都不存在 → 后端已回落成整个工作区。 */
+  scopeFallback: boolean;
 }
 
 export interface SearchOptions {
@@ -34,11 +42,18 @@ export interface SearchOptions {
   regex?: boolean;
   /** IDEA 风格掩码：`*.java,*.xml,!test*`。空串 = 不过滤。 */
   include?: string;
+  /**
+   * 把范围收窄到这些**工作区相对的目录**（空/不传 = 整个工作区）。
+   *
+   * 只用于「按业务组件搜索」：manifest 告诉我们哪些目录是组件，范围就是它们。
+   * 后端不接受绝对路径与 `..`（范围只能收窄，不能跳出工作区）。
+   */
+  dirs?: string[];
   maxResults?: number;
 }
 
-export const searchWorkspace = (options: SearchOptions) =>
-  invoke<SearchOutcome>("search_workspace", { options });
+export const searchWorkspace = (options: SearchOptions, report = false) =>
+  !report ? invoke<SearchOutcome>("search_workspace", { options }) : trackOperation({ key: `search.workspace:${getSession().root}:${JSON.stringify(options)}`, label: "搜索当前工程", errorDetail: () => "搜索失败，请查看搜索页错误详情", scope: getSession().root ?? "工作区", page: "search", phase: "扫描所选范围，保留已有结果" }, () => invoke<SearchOutcome>("search_workspace", { options }), r => ({ state: "success", detail: `扫描 ${r.filesScanned} 个文件，命中 ${r.filesMatched} 个${r.truncated ? "；达到上限，结果不完整" : ""}${r.scopeFallback ? "；指定范围不存在，已回落到整个工作区" : ""}` }));
 
 /** 单个工程的搜索结果（`search_projects` 的一项）。`outcome` 里的路径相对 `root`。 */
 export interface ProjectSearch {
@@ -70,7 +85,7 @@ export interface ProjectSearchHit extends SearchHit {
 }
 
 export const searchProjects = (options: SearchOptions) =>
-  invoke<ProjectsSearchOutcome>("search_projects", { options });
+  trackOperation({ key: `search.projects:${getSession().root}:${JSON.stringify(options)}`, label: "搜索全部工程", errorDetail: () => "搜索失败，请查看搜索页错误详情", page: "search", phase: "逐工程扫描所选范围" }, () => invoke<ProjectsSearchOutcome>("search_projects", { options }), r => ({ state: r.errors.length ? "failed" : "success", detail: `${r.projects.length} 个工程返回结果；${r.errors.length} 个工程读取失败${r.truncated ? "；结果达到上限，未查全" : ""}` }));
 
 /**
  * 「全部替换」的汇总，与 Rust `search::ReplaceOutcome` 一一对应（camelCase）。
@@ -103,4 +118,4 @@ export interface ReplaceOutcome {
  * 还有混合换行的老文件），这些逻辑后端已经有一份且被单测覆盖。
  */
 export const replaceWorkspace = (options: SearchOptions, replacement: string) =>
-  invoke<ReplaceOutcome>("search_replace", { options, replacement });
+  trackOperation({ key: `search.replace:${getSession().root}`, label: "替换工程中的匹配", errorDetail: () => "替换失败，请查看搜索页错误详情", scope: getSession().root ?? "工作区", page: "search", phase: "按预览范围读写文件，保留原编码" }, () => invoke<ReplaceOutcome>("search_replace", { options, replacement }), r => ({ state: r.errors.length ? "failed" : "success", detail: `改写 ${r.filesChanged} 个文件、替换 ${r.replacements} 处；跳过 ${r.skippedUnsafe} 个不安全编码文件，${r.errors.length} 个失败${r.truncated ? "；提前结束，尚未全部替换" : ""}` }));

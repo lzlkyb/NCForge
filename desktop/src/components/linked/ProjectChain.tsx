@@ -130,6 +130,7 @@ function ChainRow({
         <button
           type="button"
           className="lnk-name"
+          aria-expanded={expanded}
           onClick={onToggleRow}
           title={p.root ?? "`.classpath` 里写了，但磁盘上找不到这个工程"}
         >

@@ -1,0 +1,115 @@
+{
+  "errors": [],
+  "message": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\nfalse !== true\n",
+  "active": {
+    "tag": "BODY",
+    "label": null
+  },
+  "focus": [
+    {
+      "event": "focusin",
+      "tag": "BUTTON",
+      "text": "设置2"
+    },
+    {
+      "event": "focusout",
+      "tag": "BUTTON",
+      "text": "设置2"
+    },
+    {
+      "event": "focusin",
+      "tag": "BUTTON",
+      "text": "柔光玻璃"
+    },
+    {
+      "event": "focusout",
+      "tag": "BUTTON",
+      "text": "柔光玻璃"
+    },
+    {
+      "event": "focusin",
+      "tag": "BUTTON",
+      "text": ""
+    },
+    {
+      "event": "focusout",
+      "tag": "BUTTON",
+      "text": ""
+    },
+    {
+      "event": "focusin",
+      "tag": "BUTTON",
+      "text": ""
+    },
+    {
+      "event": "focusout",
+      "tag": "BUTTON",
+      "text": ""
+    },
+    {
+      "event": "focusin",
+      "tag": "BUTTON",
+      "text": "设置分类"
+    },
+    {
+      "event": "focusout",
+      "tag": "BUTTON",
+      "text": "设置分类"
+    },
+    {
+      "event": "focusin",
+      "tag": "BUTTON",
+      "text": ""
+    },
+    {
+      "event": "focusout",
+      "tag": "BUTTON",
+      "text": ""
+    },
+    {
+      "event": "focusin",
+      "tag": "BUTTON",
+      "text": "编辑器"
+    },
+    {
+      "event": "focusout",
+      "tag": "BUTTON",
+      "text": "编辑器"
+    }
+  ],
+  "headings": [
+    {
+      "text": "外观与常规",
+      "visible": false
+    },
+    {
+      "text": "编辑器",
+      "visible": true
+    },
+    {
+      "text": "快捷键",
+      "visible": false
+    },
+    {
+      "text": "开发环境",
+      "visible": false
+    },
+    {
+      "text": "任务",
+      "visible": false
+    },
+    {
+      "text": "组件与更新",
+      "visible": false
+    },
+    {
+      "text": "配置迁移",
+      "visible": false
+    },
+    {
+      "text": "关于",
+      "visible": false
+    }
+  ],
+  "sidebar": "true"
+}

@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { EnvChips } from "./EnvChips";
 import { friendlyDbError, thousands } from "../../lib/db";
 import { buildOracleUrl, dbApi, parseOracleUrl, type DbConn, type DbConnInput, type DbEngine, type DbEnv, type TestResult } from "../../lib/dbApi";
+import { beginOperation } from "../../lib/operations";
+import { dbTaskSpec } from "../../lib/dbOperations";
 import { closeConnDialog, disconnect, loadConns, rtOf } from "../../lib/dbStore";
 
 interface Form {
@@ -47,6 +49,8 @@ function initial(conn: DbConn | null): Form {
  * 选纯 Rust 驱动时，口令会在第一次连接时由 JVM 桥解一次并加密存本机（之后不再需要 JVM）。
  */
 export function ConnManualForm({ conn }: { conn: DbConn | null }) {
+  const formId = useId();
+  const fieldId = (field: string) => `${formId}-${field}`;
   const [f, setF] = useState<Form>(() => initial(conn));
   const [test, setTest] = useState<{ ok?: TestResult; err?: string; busy?: boolean }>({});
   const [saving, setSaving] = useState(false);
@@ -79,70 +83,80 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
 
   const missing = !f.url.trim() ? "连接串" : !f.user.trim() ? "用户名" : null;
 
+  const lock=useRef(false);
   const runTest = async () => {
+    if(lock.current) return;
+    const task=beginOperation(dbTaskSpec(`connection.form:${conn?.id || "new"}`,"测试数据库连接",conn?.id ?? null,"连接配置"));
+    if(!task) return;lock.current=true;
     setTest({ busy: true });
     try {
-      setTest({ ok: await dbApi.test(input(), f.password || undefined) });
+      const ok=await dbApi.test(input(), f.password || undefined);
+      task.finish("success","连接测试已通过");setTest({ok});
     } catch (e) {
+      task.finish("failed","连接测试失败，返回连接配置查看原因");
       setTest({ err: friendlyDbError(e) });
-    }
+    } finally {lock.current=false;}
   };
 
   const save = async () => {
-    setSaving(true);
+    if(lock.current) return;
+    const task=beginOperation(dbTaskSpec(`connection.form:${conn?.id || "new"}`,"保存数据库连接配置",conn?.id ?? null,"连接配置"));
+    if(!task) return;lock.current=true;setSaving(true);
     try {
       const target = conn && (conn.url !== f.url.trim() || conn.user !== f.user.trim() || conn.engine !== input().engine);
       await dbApi.save(input(), f.password || undefined, f.remember);
       // 连接串、用户或引擎变了：旧会话已经不是这个连接了，断掉重连
       if (target && conn && rtOf(conn.id).status === "connected") await disconnect(conn.id);
       await loadConns();
-      closeConnDialog();
+      task.finish("success","配置已保存");closeConnDialog();
     } catch (e) {
+      task.finish("failed","配置保存失败，返回连接配置查看原因");
       setTest({ err: friendlyDbError(e) });
     } finally {
-      setSaving(false);
+      lock.current=false;setSaving(false);
     }
   };
 
   return (
     <>
       <div className="bd">
-        <label>名称</label>
-        <input className="dbx-inp" value={f.name} placeholder="留空则用服务名" onChange={(e) => put({ name: e.target.value })} />
-        <label>环境</label>
+        <label htmlFor={fieldId("name")}>名称</label>
+        <input id={fieldId("name")} className="dbx-inp" value={f.name} placeholder="留空则用服务名" onChange={(e) => put({ name: e.target.value })} />
+        <span className="dbx-form-label">环境</span>
         <EnvChips value={f.env} onChange={(env) => put({ env })} />
         {fromProp ? (
           <>
-            <label>连接串</label>
+            <span className="dbx-form-label">连接串</span>
             <span className="dbx-mono">{f.url}</span>
-            <label>用户</label>
+            <span className="dbx-form-label">用户</span>
             <span className="dbx-mono">{f.user}</span>
             <p className="dbx-hint">来自 NC prop.xml 的数据源 {conn?.propDs}：连接串与口令跟着 prop.xml 走，每次连接时由 NC 自带的类解密。</p>
           </>
         ) : (
           <>
-            <label>主机</label>
+            <div className="dbx-form-label"><label htmlFor={fieldId("host")}>主机</label> / <label htmlFor={fieldId("port")}>端口</label></div>
             <div className="dbx-row2">
-              <input className="dbx-inp mono" value={f.host} placeholder="10.200.22.144" onChange={(e) => put({ host: e.target.value })} />
-              <input className="dbx-inp mono" value={f.port} placeholder="1521" onChange={(e) => put({ port: e.target.value })} />
+              <input id={fieldId("host")} className="dbx-inp mono" value={f.host} placeholder="10.200.22.144" onChange={(e) => put({ host: e.target.value })} />
+              <input id={fieldId("port")} className="dbx-inp mono" value={f.port} placeholder="1521" onChange={(e) => put({ port: e.target.value })} />
             </div>
-            <label>{f.sid ? "SID" : "服务名"}</label>
+            <label htmlFor={fieldId("service")}>{f.sid ? "SID" : "服务名"}</label>
             <div className="dbx-row2">
-              <input className="dbx-inp mono" value={f.service} onChange={(e) => put({ service: e.target.value })} />
+              <input id={fieldId("service")} className="dbx-inp mono" value={f.service} onChange={(e) => put({ service: e.target.value })} />
               <label className="dbx-chk">
                 <input type="checkbox" checked={f.sid} onChange={(e) => put({ sid: e.target.checked })} />
                 SID 写法
               </label>
             </div>
-            <label>JDBC URL</label>
-            <input className="dbx-inp mono" value={f.url} placeholder="jdbc:oracle:thin:@host:1521/service" onChange={(e) => put({ url: e.target.value })} />
-            <label>用户</label>
-            <input className="dbx-inp mono" value={f.user} onChange={(e) => put({ user: e.target.value })} />
-            <label>口令</label>
+            <label htmlFor={fieldId("url")}>JDBC URL</label>
+            <input id={fieldId("url")} className="dbx-inp mono" value={f.url} placeholder="jdbc:oracle:thin:@host:1521/service" onChange={(e) => put({ url: e.target.value })} />
+            <label htmlFor={fieldId("user")}>用户</label>
+            <input id={fieldId("user")} className="dbx-inp mono" value={f.user} onChange={(e) => put({ user: e.target.value })} />
+            <label htmlFor={fieldId("password")}>口令</label>
             <div className="dbx-row2" style={{ gridTemplateColumns: "1fr auto" }}>
               <input
                 className="dbx-inp"
                 type="password"
+                id={fieldId("password")}
                 value={f.password}
                 placeholder={conn?.hasPassword ? "已保存，不改就留空" : ""}
                 onChange={(e) => put({ password: e.target.value })}
@@ -154,12 +168,12 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
             </div>
           </>
         )}
-        <label>引擎</label>
-        <div className="dbx-txmode" style={{ justifySelf: "start" }}>
-          <button type="button" data-on={f.engine === "java" || undefined} onClick={() => put({ engine: "java" })}>
+        <span className="dbx-form-label" id={fieldId("engine")}>引擎</span>
+        <div className="dbx-txmode" role="group" aria-labelledby={fieldId("engine")} style={{ justifySelf: "start" }}>
+          <button type="button" aria-pressed={f.engine === "java"} data-on={f.engine === "java" || undefined} onClick={() => put({ engine: "java" })}>
             JVM 桥
           </button>
-          <button type="button" data-on={f.engine === "rust" || undefined} onClick={() => put({ engine: "rust" })}>
+          <button type="button" aria-pressed={f.engine === "rust"} data-on={f.engine === "rust" || undefined} onClick={() => put({ engine: "rust" })}>
             纯 Rust 驱动
           </button>
         </div>
@@ -172,17 +186,17 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
               ? "JVM 桥：prop.xml 的口令每次现解、不落盘，这是默认选项。"
               : "JVM 桥：能力最全（支持 REF CURSOR、能解 prop.xml 口令），多条连接共用一个 JVM。"}
         </p>
-        <label>事务</label>
-        <div className="dbx-txmode" style={{ justifySelf: "start" }}>
-          <button type="button" data-on={!f.autoCommit || undefined} onClick={() => put({ autoCommit: false })}>
+        <span className="dbx-form-label" id={fieldId("tx")}>事务</span>
+        <div className="dbx-txmode" role="group" aria-labelledby={fieldId("tx")} style={{ justifySelf: "start" }}>
+          <button type="button" aria-pressed={!f.autoCommit} data-on={!f.autoCommit || undefined} onClick={() => put({ autoCommit: false })}>
             手动提交
           </button>
-          <button type="button" data-on={f.autoCommit || undefined} onClick={() => put({ autoCommit: true })}>
+          <button type="button" aria-pressed={f.autoCommit} data-on={f.autoCommit || undefined} onClick={() => put({ autoCommit: true })}>
             自动提交
           </button>
         </div>
-        <label>备注</label>
-        <input className="dbx-inp" value={f.note} onChange={(e) => put({ note: e.target.value })} />
+        <label htmlFor={fieldId("note")}>备注</label>
+        <input id={fieldId("note")} className="dbx-inp" value={f.note} onChange={(e) => put({ note: e.target.value })} />
         {test.ok && (
           <div className="dbx-okline">
             <Icon name="check" size={13} />

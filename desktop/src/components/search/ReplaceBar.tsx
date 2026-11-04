@@ -286,6 +286,8 @@ function sameCriteria(a: SearchOptions, b: SearchOptions): boolean {
     (a.caseSensitive ?? false) === (b.caseSensitive ?? false) &&
     (a.wholeWord ?? false) === (b.wholeWord ?? false) &&
     (a.regex ?? false) === (b.regex ?? false) &&
-    (a.include ?? "") === (b.include ?? "")
+    (a.include ?? "") === (b.include ?? "") &&
+    // 范围也是条件的一部分：按组件搜出来的结果，换成整个工程去替换就等于改别的模块
+    (a.dirs ?? []).join("|").toLowerCase() === (b.dirs ?? []).join("|").toLowerCase()
   );
 }

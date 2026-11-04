@@ -1,6 +1,9 @@
 import { toast } from "../components/ui/toast";
 import { friendlyDbError } from "./db";
-import { dbApi, type ExportFileOut } from "./dbApi";
+import { dbApi, type ExportFileOut, type ExportProgress } from "./dbApi";
+import { beginOperation, cancelOperation, getOperations } from "./operations";
+import { dbTaskSpec } from "./dbOperations";
+import { listen } from "./tauri";
 import { ensureConnected } from "./dbConfirm";
 import { execOne, patchTab, sqlTabOf, type SqlTab } from "./dbStore";
 import { orderBySql } from "./serverSort";
@@ -35,12 +38,15 @@ export async function reSortOnServer(
     return;
   }
   if (!(await ensureConnected(tab.connId))) return;
+  const task=beginOperation({...dbTaskSpec(`sort:${tabId}`,"数据库重排结果",tab.connId,tab.slot ? `独立会话 ${tab.slot}` : "主会话",undefined,tabId),cancel:()=>{const active=sqlTabOf(tabId);return active?.connId===tab.connId ? dbApi.cancel(tab.connId!,active.slot) : Promise.reject(new Error("来源标签已关闭或切换"));}});
+  if(!task) return;
   patchTab<SqlTab>(tabId, { running: true });
   try {
     const entry = await execOne(tabId, wrapped, (sqlTabOf(tabId)?.results.length ?? 0) + 1);
+    task.finish(entry.cancelled ? "cancelled" : entry.kind==="error" ? "failed" : "success",entry.kind==="error" ? "重排未完成，返回结果页查看原因" : `已重新读取 ${entry.rows.length} 行${entry.hasMore ? "，仍有后续结果" : ""}`);
     const cur = sqlTabOf(tabId);
     patchTab<SqlTab>(tabId, { results: [...(cur?.results ?? []), entry], view: entry.id });
-  } finally {
+  } catch(error) {task.finish("failed","重排失败，返回数据库页查看原因");throw error;} finally {
     patchTab<SqlTab>(tabId, { running: false });
   }
 }
@@ -71,7 +77,8 @@ function nextExportId(): number {
 export function cancelResultExport(tabId: string): void {
   const id = activeExports.get(tabId);
   if (id === undefined) return;
-  void dbApi.cancelExport(id);
+  const task=getOperations().find(o=>o.key===`db.export:${tabId}` && o.endedAt===undefined);
+  if(task) void cancelOperation(task.id);
 }
 
 /**
@@ -100,7 +107,11 @@ export async function exportResultFile(
   if (!tab?.connId) return null;
   const base = table && table !== "表名" ? table : "result";
   const exportId = nextExportId();
+  const task=beginOperation({...dbTaskSpec(`export:${tabId}`,"导出查询结果",tab.connId,`SQL 标签 ${tabId} · 独立导出会话`,undefined,tabId),phase:"读取查询并写入文件",cancel:()=>dbApi.cancelExport(exportId)});
+  if(!task) return null;
   activeExports.set(tabId, exportId);
+  let finished=false,un:(()=>void)|undefined;
+  void listen<ExportProgress>("db:export-progress",p=>{if(!finished && p.id===tab.connId && p.exportId===exportId) task.update({phase:"读取查询并写入文件",progress:{done:p.rows}});}).then(f=>{if(finished) f();else un=f;}).catch(()=>undefined);
   try {
     const out = await dbApi.exportFile({
       id: tab.connId,
@@ -113,6 +124,8 @@ export async function exportResultFile(
       timeoutSec: Math.max(tab.timeoutSec, 300),
       exportId,
     });
+    task.update({progress:{done:out.rows}});
+    task.finish(out.canceled ? "cancelled" : "success",`已写出 ${out.rows} 行${out.canceled ? "，已停止，文件保留已写内容" : out.truncated ? "，到达读取上限，文件不是全量" : "，文件已保存"}`);
     toast(
       out.canceled
         ? `已取消导出：文件里只有前 ${out.rows} 行`
@@ -123,9 +136,11 @@ export async function exportResultFile(
     );
     return out;
   } catch (e) {
+    task.finish("failed","导出失败，返回数据库页查看错误与已有文件");
     toast(`导出失败：${friendlyDbError(e)}`, "error");
     return null;
   } finally {
+    finished=true;un?.();
     // 只清理自己那一次：用户可能已经在这个标签上开始了下一次导出
     if (activeExports.get(tabId) === exportId) activeExports.delete(tabId);
   }

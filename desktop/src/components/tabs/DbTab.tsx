@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import "../../db-console.css";
+import "../../db-workbench.css";
+import { DbObjectFinder } from "../db/DbObjectFinder";
 import { DockRegion } from "../workspace/WorkbenchDock";
 import { Icon } from "../ui/icon";
 import { EmptyState } from "../ui/EmptyState";
@@ -10,7 +12,8 @@ import { DictWorkspace } from "../md/DictWorkspace";
 import { SqlConsole } from "../db/SqlConsole";
 import { TablePage } from "../db/TablePage";
 import { newConsole } from "../../lib/dbActions";
-import { defaultConnId, loadConns, openConnDialog, openDictTab, openSqlTab, tabOf, useDb } from "../../lib/dbStore";
+import { showObjectFinder, defaultConnId, loadConns, openConnDialog, openDictTab, openSqlTab, tabOf, useDb } from "../../lib/dbStore";
+import { dbPanelId, dbTabId } from "../../lib/dbPendingSessions";
 
 /**
  * 数据库页（多连接 SQL 客户端 + 数据字典文档）。
@@ -50,10 +53,11 @@ export function DbTab() {
       ) : (
         <>
           <DockRegion region="sidebar">
+<div className="dbx-finder-entry"><button type="button" className="dbx-btn" onClick={()=>showObjectFinder()}>查找数据库对象</button></div>
             <ConnTree />
           </DockRegion>
           <DockRegion region="document">
-            <div className="dbx-page">
+            <div className="dbx-page" role="tabpanel" id={tab ? dbPanelId(tab.id) : "dbx-panel-empty"} aria-labelledby={tab ? dbTabId(tab.id) : "dbx-tab-empty"}>
               {tab?.kind === "sql" && <SqlConsole tab={tab} />}
               {tab?.kind === "table" && <TablePage key={tab.id} tab={tab} />}
               {!tab && (
@@ -94,6 +98,7 @@ export function DbTab() {
       )}
       <DbDocTabs />
       <ConnDialog />
+      {db.objectFinder && <DbObjectFinder connId={defaultConnId()} onClose={()=>showObjectFinder(false)} />}
     </>
   );
 }

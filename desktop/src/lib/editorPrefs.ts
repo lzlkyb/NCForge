@@ -46,6 +46,7 @@ export const DEFAULT_PREFS: EditorPrefs = {
 };
 
 let cache: EditorPrefs = load();
+let lastWriteSucceeded = true;
 const listeners = new Set<() => void>();
 
 function load(): EditorPrefs {
@@ -64,18 +65,25 @@ export function getEditorPrefs(): EditorPrefs {
   return cache;
 }
 
-export function setEditorPrefs(patch: Partial<EditorPrefs>): void {
+export function setEditorPrefs(patch: Partial<EditorPrefs>): boolean {
   const next = { ...cache, ...patch };
-  // 值没变就不写盘不广播：设置页的滑块会连续触发，没必要每次都惊动编辑器
-  if ((Object.keys(patch) as (keyof EditorPrefs)[]).every((k) => cache[k] === next[k])) return;
+  const changed = !(Object.keys(patch) as (keyof EditorPrefs)[]).every((k) => cache[k] === next[k]);
+  // Retry an identical value only after a failed write; otherwise keep no-op updates cheap.
+  if (!changed && lastWriteSucceeded) return true;
   cache = next;
+  let stored = true;
   try {
     localStorage.setItem(KEY, JSON.stringify(cache));
   } catch {
-    // 隐私模式 / 配额满：只在本次会话生效，不打断用户
+    // Keep the existing session-only fallback; settings must disclose that it was not persisted.
+    stored = false;
   }
-  window.dispatchEvent(new Event(PREFS_EVENT));
-  listeners.forEach((l) => l());
+  if (changed) {
+    window.dispatchEvent(new Event(PREFS_EVENT));
+    listeners.forEach((l) => l());
+  }
+  lastWriteSucceeded = stored;
+  return stored;
 }
 
 function subscribe(cb: () => void): () => void {

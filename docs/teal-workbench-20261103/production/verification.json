@@ -1,0 +1,253 @@
+{
+  "date": "2026-11-03",
+  "scope": "production frontend integration of the approved unified teal workbench",
+  "syntaxAndLocalImports": {
+    "status": "passed",
+    "files": 81,
+    "includesPreexistingWorkspaceFiles": true,
+    "includesFinalHeaderMenuPatch": true
+  },
+  "themeAndAppearanceLogic": {
+    "status": "passed",
+    "checks": 7,
+    "mode": "isolated lightweight logic"
+  },
+  "startupDom": {
+    "status": "passed",
+    "checks": 3,
+    "mode": "lightweight DOM, not browser visual verification"
+  },
+  "componentSize": {
+    "status": "passed"
+  },
+  "designTokens": {
+    "status": "passed"
+  },
+  "uiContract": {
+    "status": "passed"
+  },
+  "commandContract": {
+    "status": "passed",
+    "commands": 145
+  },
+  "staticReview": {
+    "status": "passed",
+    "unresolvedBlockingFindings": 0,
+    "includesFinalAnimationScopeReview": true
+  },
+  "finalHeaderMenuSourceReview": {
+    "status": "passed",
+    "mode": "local source review",
+    "checks": [
+      "Header passes the active tool through to LayoutMenu",
+      "logs omit the inactive resource-sidebar action",
+      "code-panel and split actions from tools return to the file document"
+    ]
+  },
+  "diffWhitespace": {
+    "status": "passed"
+  },
+  "typecheck": {
+    "status": "not_run",
+    "reason": "preflight available RAM below project 4GiB threshold"
+  },
+  "eslint": {
+    "status": "not_run",
+    "reason": "same memory threshold"
+  },
+  "vitest": {
+    "status": "not_run",
+    "reason": "same memory threshold; regression cases prepared"
+  },
+  "frontendBuild": {
+    "status": "not_run",
+    "reason": "same memory threshold"
+  },
+  "browserAndNativeVisualVerification": {
+    "status": "deferred",
+    "reason": "user selected delivery before browser acceptance"
+  },
+  "lastHeavyTaskPreflight": {
+    "availableGiB": 3.27,
+    "availableKB": 3430584,
+    "requiredGiB": 4,
+    "started": false
+  },
+  "installerBuilt": false,
+  "versionChanged": false,
+  "committed": false,
+  "latestVerificationSection": "onDemandLogs",
+  "followupRepairs": {
+    "date": "2026-11-03",
+    "scope": "All frontend issues from the overall UI source review, preserving the approved unified teal workbench",
+    "implementationStatus": "source_changes_completed_runtime_acceptance_pending",
+    "document": "整体界面修复-2026-11-03.md",
+    "syntaxAndLocalImports": {
+      "status": "passed",
+      "files": 129,
+      "typescriptFiles": 113,
+      "cssFiles": 16,
+      "relativeImports": 532,
+      "includesPreexistingWorkspaceFiles": true,
+      "includesFinalMenuTxBarDensityAndEs2020Patches": true
+    },
+    "inlineStartupScriptSyntax": {
+      "status": "passed",
+      "scripts": 1
+    },
+    "isolatedLogic": {
+      "status": "passed",
+      "checks": 10,
+      "mode": "transpiled actual source with mocked store and document; not Vitest, DOM, or browser",
+      "areas": [
+        "search match visibility, original ranges, emoji boundaries, missing ranges",
+        "pending primary and slot sessions, deduplication, connection isolation",
+        "log navigation and resource-sidebar preference",
+        "density persistence, change notifications, storage failure"
+      ]
+    },
+    "componentSize": {
+      "status": "passed"
+    },
+    "designTokens": {
+      "status": "passed",
+      "baselineChanged": false
+    },
+    "uiContract": {
+      "status": "passed",
+      "baselineChanged": false
+    },
+    "commandContract": {
+      "status": "passed",
+      "commands": 145
+    },
+    "staticReview": {
+      "status": "passed",
+      "unresolvedBlockingFindings": 0,
+      "scope": "bounded source review only",
+      "reviewer": "/root/production_shell_review",
+      "findingFixed": "menu keyboard focus scrolls the selected option into view"
+    },
+    "diffWhitespace": {
+      "status": "passed"
+    },
+    "typecheck": {
+      "status": "not_rerun_after_fixes",
+      "initialRun": {
+        "started": true,
+        "availableKB": 4336252,
+        "exitCode": 2,
+        "errors": [
+          "StatusContributions.test.tsx array.at unsupported by ES2020",
+          "WorkspacePageMotion.tsx function capability condition reported always true"
+        ]
+      },
+      "corrections": [
+        "read final mock call via array index",
+        "detect ViewTransition with typeof function"
+      ],
+      "reason": "subsequent preflight below the project 4GiB memory threshold"
+    },
+    "eslint": {
+      "status": "not_run",
+      "reason": "project memory threshold"
+    },
+    "vitest": {
+      "status": "not_run",
+      "reason": "project memory threshold; regression test files prepared"
+    },
+    "frontendBuild": {
+      "status": "not_run",
+      "reason": "project memory threshold"
+    },
+    "browserAndNativeVisualVerification": {
+      "status": "deferred",
+      "reason": "user selected delivery before browser acceptance; current 8765 page is the approved prototype, not production verification"
+    },
+    "lastHeavyTaskPreflight": {
+      "availableKB": 3975332,
+      "availableGiB": 3.79,
+      "requiredKB": 4194304,
+      "requiredGiB": 4,
+      "started": false
+    },
+    "retainedLimitations": [
+      "backend search preview still capped at 300 characters; absent match ranges are explained in the UI",
+      "visual and component runtime acceptance pending"
+    ],
+    "installerBuilt": false,
+    "versionChanged": false,
+    "committed": false,
+    "rustChangedByThisFollowup": false
+  },
+  "onDemandLogs": {
+    "date": "2026-11-03",
+    "status": "implemented_runtime_acceptance_pending",
+    "document": "日志按需工具-实施记录-2026-11-03.md",
+    "prototype": "design/NCForge-日志按需工具-设计稿-2026-11-03.html",
+    "changes": [
+      "log tool removed from primary rail, available via application menu and commands",
+      "original log route and Ctrl+4 preserved; settings stays Ctrl+5",
+      "closable tool tab returns to code and preserves drafts",
+      "advanced filters and request tracing collapsed by default with active-filter hints",
+      "queries enabled only for visible log document; no window-focus refetch"
+    ],
+    "serviceRuntimeLogsChanged": false,
+    "syntaxAndLocalImports": {
+      "status": "passed",
+      "files": 15,
+      "includesFinalCopyAndShortcutPatch": true,
+      "mode": "transpile and local import resolution, not semantic typecheck",
+      "relativeImports": 111
+    },
+    "prototypeSyntax": {
+      "status": "passed",
+      "scripts": 1,
+      "styles": 1
+    },
+    "componentSize": {
+      "status": "passed"
+    },
+    "designTokens": {
+      "status": "passed",
+      "baselineChanged": false
+    },
+    "uiContract": {
+      "status": "passed",
+      "baselineChanged": false
+    },
+    "diffWhitespace": {
+      "status": "passed"
+    },
+    "regressionFiles": [
+      "SideNav.test.tsx",
+      "HeaderMenus.test.tsx",
+      "WorkbenchFrame.test.tsx",
+      "LogTab.test.tsx"
+    ],
+    "typecheck": {
+      "status": "not_run",
+      "reason": "4GiB project preflight failed"
+    },
+    "eslint": {
+      "status": "not_run",
+      "reason": "project memory threshold"
+    },
+    "vitest": {
+      "status": "not_run",
+      "reason": "project memory threshold"
+    },
+    "browserAndNativeVerification": {
+      "status": "deferred",
+      "reason": "user deferred visual acceptance; existing browser page is older prototype"
+    },
+    "lastHeavyTaskPreflight": {
+      "availableKB": 3217144,
+      "requiredKB": 4194304,
+      "started": false
+    },
+    "committed": false,
+    "installerBuilt": false,
+    "versionChanged": false
+  }
+}

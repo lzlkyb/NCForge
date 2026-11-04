@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { dbApi, type SessionRow } from "../../lib/dbApi";
 import { friendlyDbError } from "../../lib/db";
 import { useAppHidden } from "../../lib/appVisibility";
+import { beginOperation } from "../../lib/operations";
+import { dbTaskSpec } from "../../lib/dbOperations";
 import { copyText } from "../../lib/utils";
 
 /** 自动刷新间隔。5 秒够看清「谁锁了谁」，也不至于把共用库查出压力。 */
@@ -28,7 +30,11 @@ export function SessionDrawer({ connId, onClose }: { connId: string; onClose: ()
   const [auto, setAuto] = useState(true);
   const [at, setAt] = useState(0);
 
-  const load = useCallback(async () => {
+  const [loading,setLoading]=useState(false);
+  const lock=useRef(false);
+  const load = useCallback(async (observed=true) => {
+    if(lock.current) return;lock.current=true;setLoading(true);
+    const task=observed ? beginOperation(dbTaskSpec(`sessions:${connId}`,"读取数据库会话与锁",connId,"会话诊断")) : null;
     try {
       const r = await dbApi.sessions(connId);
       setRows(r.rows ?? []);
@@ -36,10 +42,12 @@ export function SessionDrawer({ connId, onClose }: { connId: string; onClose: ()
       setGranted(r.granted !== false);
       setErr(null);
       setAt(Date.now());
+      task?.finish("success",r.granted===false ? "会话已读取；账号无权读取完整锁信息" : `已读取 ${r.rows?.length ?? 0} 个会话`);
     } catch (e) {
+      task?.finish("failed","会话查询失败，返回数据库会话面板查看原因");
       setErr(friendlyDbError(e));
       setRows(null);
-    }
+    } finally {lock.current=false;setLoading(false);}
   }, [connId]);
 
   useEffect(() => {
@@ -52,7 +60,7 @@ export function SessionDrawer({ connId, onClose }: { connId: string; onClose: ()
 
   useEffect(() => {
     if (!auto || appHidden) return;
-    const t = setInterval(() => void load(), REFRESH_MS);
+    const t = setInterval(() => void load(false), REFRESH_MS);
     return () => clearInterval(t);
   }, [auto, appHidden, load]);
 
@@ -71,7 +79,7 @@ export function SessionDrawer({ connId, onClose }: { connId: string; onClose: ()
         <span className="dbx-cnt">{rows?.length ?? 0}</span>
         {blocked > 0 && <span className="dbx-sess-bad">阻塞 {blocked}</span>}
         <span className="dbx-sp" />
-        <button type="button" className="dbx-ibtn" title="刷新" aria-label="刷新会话" onClick={() => void load()}>
+        <button type="button" className="dbx-ibtn" title="刷新" aria-label="刷新会话" disabled={loading} onClick={() => void load()}>
           <Icon name="refresh" size={13} />
         </button>
         <button

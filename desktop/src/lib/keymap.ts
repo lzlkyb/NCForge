@@ -225,6 +225,7 @@ export interface BindingRow {
  * 键位总表：设置页展示与冲突判定共用同一份数据。
  * 搜索那行保留固定的 Ctrl+K（它是顶栏入口，不参与自定义），所以自定义方案键后仍显示两个。
  */
+export function isDbObjectKey(e: KeyboardEvent): boolean {return !e.isComposing && !e.metaKey && eventChord(e) === (getBindingOverride("db.objects") ?? "ctrl+alt+o");}
 export function bindingRows(keymap: Keymap): BindingRow[] {
   const rows: BindingRow[] = [];
   const add = (id: string, label: string, group: BindingGroup, defaults: string[]) => {
@@ -250,6 +251,7 @@ export function bindingRows(keymap: Keymap): BindingRow[] {
     display: [searchCustom ? prettyChord(searchCustom) : prettyChord(searchScheme), prettyChord("ctrl+k")],
     overridden: !!searchCustom,
   });
+  add("db.objects", "查找数据库对象", "搜索与层级", ["ctrl+alt+o"]);
   add("hierarchy.type", "类型层级", "搜索与层级", [keymap === "idea" ? "ctrl+h" : "ctrl+t"]);
   for (const row of EDITOR_KEYS) {
     const def = row[keymap] === "—" ? [] : [row[keymap].toLowerCase()];

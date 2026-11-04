@@ -19,6 +19,8 @@ export type NavItem = {
   icon: IconName;
   /** 不设 = true（除了文件页，其余都是工具页）。 */
   hosted?: boolean;
+  /** 低频工具保留页面与既有快捷键，只从主导航隐藏。 */
+  showInRail?: boolean;
 };
 
 /**
@@ -40,7 +42,7 @@ export const WORKSPACE_NAV: NavItem[] = [
   // 补丁打包不再是独立页签：它是版本控制页里的「打包补丁」视图（同一份工作副本改动）。
   { key: "svn", label: "版本控制", icon: "gitBranch" },
   { key: "db", label: "数据库", icon: "database" },
-  { key: "logs", label: "NC 日志", icon: "log" },
+  { key: "logs", label: "日志排查", icon: "log", showInRail: false },
   // 工程关联不是页签：入口在代码页状态栏、问题面板诊断行与命令面板（弹框）。
   // 数据字典不再是主导航项：它是数据库页的一种文档标签（读的就是连接树选中的库）。
 ];
@@ -78,7 +80,7 @@ function SideNavImpl({
   /** 异常态状态胶囊：null = 不显示（槽位平滑收起）。 */
   statusPill?: { tone: string; text: string; target?: string | null; title: string } | null;
 }) {
-  const items = navItems ?? WORKSPACE_NAV;
+  const items = (navItems ?? WORKSPACE_NAV).filter((item) => item.showInRail !== false);
 
   // 状态口径：startupError 升红；running 但业务报异常 = warn。壳子只演示范式。
   const startupError = status?.startupError ?? null;
@@ -125,30 +127,17 @@ function SideNavImpl({
             className="app-side-item"
             data-active={activeTab === item.key || undefined}
             aria-current={activeTab === item.key ? "page" : undefined}
+            aria-label={item.label}
             title={collapsed ? item.label : undefined}
             onClick={() => onNavigate(item.key)}
           >
-            <Icon name={item.icon} size={16} className="app-side-icon" />
-            <span className="app-side-label">{item.label}</span>
+            <Icon name={item.icon} size={collapsed ? 19 : 16} className="app-side-icon" />
+            <span className="app-side-label">{collapsed && item.key === "svn" ? "版本" : collapsed && item.key === "logs" ? "日志" : item.label}</span>
           </button>
         ))}
       </nav>
 
       <div className="app-side-foot">
-        {onToggleRail && (
-          <button
-            type="button"
-            className="app-side-item app-side-rail-toggle"
-            aria-label={collapsed ? "展开导航栏" : "收起导航栏"}
-            aria-expanded={!collapsed}
-            aria-keyshortcuts={railAriaKey()}
-            title={collapsed ? `展开导航栏（${railKeyLabel()}）` : undefined}
-            onClick={onToggleRail}
-          >
-            <Icon name={collapsed ? "chevronRight" : "chevronLeft"} size={16} className="app-side-icon" />
-            <span className="app-side-label">收起导航</span>
-          </button>
-        )}
         {/* 更新槽位：设置行右端一个**定宽格子**，七种状态在同一个格子里原地变形
             ⇒ foot 高度恒定、导航区零位移。折叠态由 index.css 的 .update-slot 收起。 */}
         <div className="app-side-settings-row">
@@ -157,7 +146,8 @@ function SideNavImpl({
             className="app-side-item"
             data-active={activeTab === "settings" || undefined}
             aria-current={activeTab === "settings" ? "page" : undefined}
-            title={collapsed ? `设置${unreadCount > 0 ? `（${unreadCount} 项新更新）` : ""}` : undefined}
+            aria-label={unreadCount > 0 ? `设置，${unreadCount} 项更新记录未读` : "设置"}
+            title={collapsed || unreadCount > 0 ? `设置${unreadCount > 0 ? `（${unreadCount} 项更新记录未读）` : ""}` : undefined}
             onClick={() => onNavigate("settings")}
           >
             <Icon name="settings" size={16} className="app-side-icon" />
@@ -193,6 +183,20 @@ function SideNavImpl({
             </button>
           )}
         </Collapse>
+        {onToggleRail && (
+          <button
+            type="button"
+            className="app-side-item app-side-rail-toggle"
+            aria-label={collapsed ? "展开导航栏" : "收起导航栏"}
+            aria-expanded={!collapsed}
+            aria-keyshortcuts={railAriaKey()}
+            title={collapsed ? `展开导航栏（${railKeyLabel()}）` : undefined}
+            onClick={onToggleRail}
+          >
+            <Icon name={collapsed ? "chevronRight" : "chevronLeft"} size={16} className="app-side-icon" />
+            <span className="app-side-label">{collapsed ? "展开" : "收起导航"}</span>
+          </button>
+        )}
       </div>
     </aside>
   );

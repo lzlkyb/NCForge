@@ -57,9 +57,10 @@ export interface TabMeta {
   lines: number;
   /**
    * 虚拟文件（不在磁盘上）：jar 内的类，`path` 是 jdt:// 地址。
-   * `source` = 有真实源码（配了 _src.jar），`stub` = 只有方法签名。不可编辑、不可保存、不可编译。
+   * `source` = 有真实源码（配了 _src.jar），`stub` = 只有方法签名，
+   * `decompiled` = 没有源码，正文由 CFR 反编译得到。不可编辑、不可保存、不可编译。
    */
-  virtual?: "source" | "stub";
+  virtual?: "source" | "stub" | "decompiled";
   /**
    * 预览标签：文件树单击打开，斜体显示，会被下一次单击预览替换；
    * 双击标签 / 双击树里的文件 / 开始编辑后固定。

@@ -67,7 +67,10 @@ async fn resolve_in_workspace(state: &AppState, requested: &str) -> Result<PathB
 ///
 /// 文件树把关联工程并排显示，展开其它工程时也要能列目录；但新建/改名/删除/写文件
 /// 仍只认当前工作区（`resolve_in_workspace`）——浏览不等于能改别人的工程。
-async fn allowed_read_roots(state: &AppState) -> Vec<String> {
+///
+/// `pub(crate)`：`nc_manifest_cmds` 取每个工程根的 manifest.xml 时用同一份白名单，
+/// 不能再自己拼一遍（两处规则迟早走偏）。
+pub(crate) async fn allowed_read_roots(state: &AppState) -> Vec<String> {
     let cfg = state.config.read().await.clone();
     let Some(primary) = cfg.workspace_root.clone() else {
         return Vec::new();

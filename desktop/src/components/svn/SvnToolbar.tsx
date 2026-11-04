@@ -1,5 +1,6 @@
 import { Icon } from "../ui/icon";
 import { FreshnessBadge } from "../ui/FreshnessBadge";
+import { Menu, MenuItem } from "../ui/Menu";
 
 /**
  * 版本控制页顶部工具条。
@@ -9,7 +10,7 @@ import { FreshnessBadge } from "../ui/FreshnessBadge";
  * 150 行 JSX 里，改一个禁用条件要在三处找。
  *
  * 窄窗口径保持原样（见 svn.css 末尾的 1180 / 1000 两档）：扫描时间先隐藏、
- * URL 再隐藏，五个按钮一个都不收——维护做成纯图标按钮就是为了这一刻。
+ * URL 再隐藏；刷新、更新、提交直接可达，撤销与维护放进更多菜单。
  */
 export function SvnToolbar({
   rev,
@@ -76,16 +77,6 @@ export function SvnToolbar({
       </button>
       <button
         type="button"
-        className="vc-btn"
-        disabled={!canRevert}
-        onClick={onRevert}
-        title={revertTitle}
-      >
-        <Icon name="trash" size={13} />
-        撤销
-      </button>
-      <button
-        type="button"
         className="vc-btn vc-btn-primary"
         // 有冲突时不再禁用：提交面板本来就会把冲突文件从清单里剔掉
         //（「将提交 N 个文件（不含 M 个冲突）」），按钮一禁，那套逻辑全成了不可达。
@@ -102,17 +93,37 @@ export function SvnToolbar({
         <Icon name="upload" size={13} />
         提交 {committable}
       </button>
-      {/* 维护：备份目录只增不删，得有个能删的入口（审查报告 P2-18 ⑧） */}
-      <button
-        type="button"
-        className="vc-btn vc-btn-icon"
-        data-on={hkOpen || undefined}
-        onClick={onHousekeeping}
-        title="备份与审查标记维护"
-        aria-label="备份与审查标记维护"
-      >
-        <Icon name="settings" size={14} />
-      </button>
+      <Menu portal width="w-56" trigger={(open, toggle) => (
+        <button
+          type="button"
+          className="vc-btn vc-btn-icon"
+          data-on={open || hkOpen || undefined}
+          aria-label="更多版本控制操作"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title="撤销与备份维护"
+          onClick={toggle}
+        >
+          <Icon name="more" size={14} />
+        </button>
+      )}>
+        {(close) => (
+          <>
+            <MenuItem
+              label={<span title={revertTitle}>撤销当前改动</span>}
+              icon="trash"
+              disabled={!canRevert}
+              onClick={() => { close(); onRevert(); }}
+            />
+            <MenuItem
+              label="备份与审查标记维护"
+              icon="settings"
+              active={hkOpen}
+              onClick={() => { close(); onHousekeeping(); }}
+            />
+          </>
+        )}
+      </Menu>
     </div>
   );
 }

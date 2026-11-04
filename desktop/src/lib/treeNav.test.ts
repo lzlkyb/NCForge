@@ -193,3 +193,125 @@ describe("treeKeyAction", () => {
     expect(treeKeyAction("F2", flat, at(A), expanded)).toBeNull();
   });
 });
+
+// root/bill 是 manifest 登记过的业务组件，root/aim 不是
+//   bill/
+//     src/public/…  src/client/…  resources/…
+//   aim/src/…
+const NC_ROOT = "root";
+const BILL = j(NC_ROOT, "bill");
+const AIM = j(NC_ROOT, "aim");
+const BILL_SRC = j(BILL, "src");
+const BILL_PUBLIC = j(BILL_SRC, "public");
+const BILL_PUBLIC_X = j(BILL_PUBLIC, "x.java");
+const ncDirs: Record<string, TreeDirState> = {
+  [NC_ROOT]: dir(["bill", "aim"], ["bill", "aim"]),
+  [BILL]: dir(["src", "resources"], ["src", "resources"]),
+  [BILL_SRC]: dir(["public", "client"], ["public", "client"]),
+  [BILL_PUBLIC]: dir(["x.java"]),
+  [AIM]: dir(["src", "lib"], ["src", "lib"]),
+  [j(AIM, "src")]: dir(["main.java"]),
+};
+
+describe("flattenTree 的 NC 结构视图", () => {
+  const onlyBill = (d: string) => d.toLowerCase() === BILL.toLowerCase();
+
+  it("摊平：bill 下直接是源码根，src 不占行，路径仍是真实路径", () => {
+    const flat = flattenTree(ncDirs, new Set([NC_ROOT, BILL]), NC_ROOT, { hoist: onlyBill });
+    const names = flat.map((r) => r.label ?? r.path);
+    expect(names).toEqual(["bill", "public", "client", "resources", "aim"]);
+    // 行上的路径是磁盘真实路径；显示父级还是 bill（用户看到的层级），
+    // 真身所在目录单独放 realParent——展开/收起要拿它去问压缩链
+    const pub = flat.find((r) => r.path === BILL_PUBLIC)!;
+    expect(pub.parent).toBe(BILL);
+    expect(pub.realParent).toBe(BILL_SRC);
+    expect(pub.isDir).toBe(true);
+  });
+
+  it("摊平：往下展开仍按真实目录走，父级是 bill/src 而不是 bill", () => {
+    const flat = flattenTree(ncDirs, new Set([NC_ROOT, BILL, BILL_PUBLIC]), NC_ROOT, {
+      hoist: onlyBill,
+    });
+    const x = flat.find((r) => r.path === BILL_PUBLIC_X)!;
+    expect(x.parent).toBe(BILL_PUBLIC);
+  });
+
+  it("不摊平（开关关着）：bill 下先看到 src", () => {
+    const flat = flattenTree(ncDirs, new Set([NC_ROOT, BILL]), NC_ROOT, { hoist: () => false });
+    expect(flat.map((r) => r.label ?? r.path)).toEqual(["bill", "src", "resources", "aim"]);
+  });
+
+  it("没登记的 aim 不摊平：它下面照旧是 src/lib", () => {
+    const flat = flattenTree(ncDirs, new Set([NC_ROOT, BILL, AIM]), NC_ROOT, {
+      hoist: onlyBill,
+    });
+    expect(flat.map((r) => r.label ?? r.path)).toEqual([
+      "bill",
+      "public",
+      "client",
+      "resources",
+      "aim",
+      "src",
+      "lib",
+    ]);
+  });
+
+  it("src 还没读出来时它也不占行（不会露出半棵树）", () => {
+    const partial: Record<string, TreeDirState> = {
+      [NC_ROOT]: ncDirs[NC_ROOT],
+      [BILL]: ncDirs[BILL],
+    };
+    const flat = flattenTree(partial, new Set([NC_ROOT, BILL]), NC_ROOT, { hoist: onlyBill });
+    expect(flat.map((r) => r.label ?? r.path)).toEqual(["bill", "resources", "aim"]);
+  });
+
+  it("src 读失败时原样露出 src，错误不被吞掉", () => {
+    const broken: Record<string, TreeDirState> = {
+      ...ncDirs,
+      [BILL_SRC]: { status: "error", message: "拒绝访问" },
+    };
+    const flat = flattenTree(broken, new Set([NC_ROOT, BILL]), NC_ROOT, { hoist: onlyBill });
+    expect(flat.map((r) => r.label ?? r.path)).toEqual(["bill", "src", "resources", "aim"]);
+  });
+});
+
+describe("treeKeyAction 在 NC 结构视图下", () => {
+  const flat = flattenTree(ncDirs, new Set([NC_ROOT, BILL, BILL_PUBLIC]), NC_ROOT, {
+    hoist: (d: string) => d.toLowerCase() === BILL.toLowerCase(),
+  });
+
+  it("右：从 bill 进第一个子项，落到摊平后的 public 上", () => {
+    const act = treeKeyAction("ArrowRight", flat, { path: BILL, isDir: true }, new Set([NC_ROOT, BILL]));
+    expect(act).toEqual({ kind: "select", path: BILL_PUBLIC, isDir: true });
+  });
+
+  it("左：从摊平后的 public 回到看得见的父行 bill，不是隐藏的 bill/src", () => {
+    // public 收起时左键才是「回父行」；展开着的话先收起（现有语义，不动）
+    const collapsed = flattenTree(ncDirs, new Set([NC_ROOT, BILL]), NC_ROOT, {
+      hoist: (d: string) => d.toLowerCase() === BILL.toLowerCase(),
+    });
+    const act = treeKeyAction(
+      "ArrowLeft",
+      collapsed,
+      { path: BILL_PUBLIC, isDir: true },
+      new Set([NC_ROOT, BILL]),
+    );
+    expect(act).toEqual({ kind: "select", path: BILL, isDir: true });
+  });
+
+  it("右右左一圈：从 bill 能下到 x.java 再回 public", () => {
+    const exp = new Set([NC_ROOT, BILL, BILL_PUBLIC]);
+    const at = (p: string) => flat.findIndex((r) => r.path === p);
+    expect(treeKeyAction("ArrowRight", flat, { path: BILL_PUBLIC, isDir: true }, exp)).toEqual({
+      kind: "select",
+      path: BILL_PUBLIC_X,
+      isDir: false,
+    });
+    expect(treeKeyAction("ArrowLeft", flat, { path: BILL_PUBLIC_X, isDir: false }, exp)).toEqual({
+      kind: "select",
+      path: BILL_PUBLIC,
+      isDir: true,
+    });
+    expect(at(BILL_PUBLIC_X)).toBeGreaterThan(at(BILL_PUBLIC));
+  });
+});

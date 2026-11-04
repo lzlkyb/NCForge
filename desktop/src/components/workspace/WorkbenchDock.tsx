@@ -21,6 +21,8 @@ export interface DockToolTab {
   icon: IconName;
   /** 工具自己画多个文档标签（停靠到 `tabs` 区），不用这一个固定标签。 */
   custom?: boolean;
+  /** 按需工具可关闭入口并返回代码，其他工具沿用原有导航。 */
+  onClose?: () => void;
 }
 
 export interface DockSlots {

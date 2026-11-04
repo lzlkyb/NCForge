@@ -25,7 +25,7 @@ export function SettingsRow({
   danger = false,
   last = false,
   layout = "row",
-  id, controlId, pending = false, error,
+  id, controlId, pending = false, error, keywords, valueText,
 }: {
   label: ReactNode;
   /** L0 常显短句：≤20 字结果性描述；原理/边界请改传 info。 */
@@ -41,6 +41,9 @@ export function SettingsRow({
   controlId?: string;
   pending?: boolean;
   error?: string;
+  /** 可定位的设置行同时作为设置搜索的索引来源。 */
+  keywords?: string[];
+  valueText?: string;
 }) {
   const isStack = layout === "stack";
   const generatedId = useId();
@@ -48,6 +51,7 @@ export function SettingsRow({
   return (
     <div
       id={id} tabIndex={id ? -1 : undefined} role="group" aria-labelledby={labelId} aria-busy={pending || undefined}
+      data-settings-item={id ? "" : undefined} data-settings-keywords={keywords?.join(" ")} data-setting-value={valueText}
       className={[
         "srow flex gap-3 py-3",
         isStack ? "stack flex-col items-stretch" : "flex-row items-center justify-between",
@@ -57,7 +61,7 @@ export function SettingsRow({
     >
       {/* 标签 + 说明（横排时说明在标签下方、控制区左侧；竖排时说明在控制区下方） */}
       <div className="grow min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="srow-heading flex items-center gap-2">
           {controlId ? <label id={labelId} htmlFor={controlId} className="t text-sm font-medium">{label}</label> : <span id={labelId} className="t text-sm font-medium">{label}</span>}
           {saved && <SavedHint>已保存</SavedHint>}
           {info && <InfoPopover label={typeof label === "string" ? label : "详细说明"}>{info}</InfoPopover>}

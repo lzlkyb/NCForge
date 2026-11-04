@@ -51,6 +51,7 @@ export function Menu({
       if (!boxRef.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return;
       if (e.key === "Escape") {
         // 先关菜单；不要让同一次 Esc 穿透到外层弹窗或终端。
         e.preventDefault();
@@ -60,12 +61,15 @@ export function Menu({
         return;
       }
       if ((!boxRef.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node)) || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
-      const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
+      const editing = e.target instanceof HTMLElement && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
+      if (editing && (e.key === "Home" || e.key === "End")) return;
+      const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)') ?? []);
       if (!items.length) return;
       e.preventDefault();
       const current = items.indexOf(document.activeElement as HTMLButtonElement);
       const index = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : e.key === "ArrowDown" ? (current + 1) % items.length : (current <= 0 ? items.length : current) - 1;
       items[index].focus({ preventScroll: true });
+      items[index].scrollIntoView?.({ block: "nearest" });
     };
     window.addEventListener("mousedown", onDown, true);
     window.addEventListener("keydown", onKey, true);
@@ -79,10 +83,15 @@ export function Menu({
     };
   }, [open, portal]);
 
+  const close = () => {
+    // 选完项后菜单会变成 inert；键盘焦点要先回到触发器，后续弹窗仍可接管焦点。
+    if (menuRef.current?.contains(document.activeElement)) boxRef.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+    setOpen(false);
+  };
   const menu = mounted && <div role="menu" aria-hidden={!open || undefined} ref={node => { menuRef.current = node; if (node) node.inert = !open; }} data-state={entered ? "open" : "closed"} data-exiting={!open || undefined}
     style={portal ? { ...position, visibility: position ? "visible" : "hidden" } : undefined}
     className={`ui-surface ${portal ? "fixed z-50" : `absolute top-full z-20 mt-1 ${align === "right" ? "right-0 origin-top-right" : "left-0 origin-top-left"}`} ${width} max-h-[70vh] overflow-auto rounded-lg border border-border bg-card p-1 shadow-lg`}>
-    {children(() => setOpen(false))}
+    {children(close)}
   </div>;
 
   return (
@@ -101,6 +110,7 @@ export function MenuItem({
   onClick,
   trailing,
   disabled,
+  checked,
 }: {
   label: ReactNode;
   hint?: string;
@@ -110,11 +120,13 @@ export function MenuItem({
   /** 右侧附加内容（如当前项打勾），自带 ml-auto 推到最右。 */
   trailing?: ReactNode;
   disabled?: boolean;
+  checked?: boolean;
 }) {
   return (
     <button
       type="button"
-      role="menuitem"
+      role={checked === undefined ? "menuitem" : "menuitemcheckbox"}
+      aria-checked={checked}
       disabled={disabled}
       onClick={onClick}
       className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 ${

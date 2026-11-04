@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { failureText } from "../../lib/friendlyError";
@@ -25,7 +25,10 @@ export function PathField({
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const savingRef = useRef(false);
   const save = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
       const outcome = await onSave(draft.trim());
@@ -37,6 +40,7 @@ export function PathField({
       // 保存失败必须可见：路径错一个字母就会起不来服务，而错误文案往往能直接指出缺什么
       toast(failureText(`保存${label}`, e), "error");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -48,19 +52,23 @@ export function PathField({
         <input
           autoFocus
           className="sv-cfg-input"
+          aria-label={label}
           value={draft}
           placeholder={placeholder}
           spellCheck={false}
+          disabled={saving}
+          aria-busy={saving}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") void save();
+            if (e.nativeEvent.isComposing || savingRef.current) return;
+            if (e.key === "Enter") { e.preventDefault(); void save(); }
             if (e.key === "Escape") setEditing(false);
           }}
         />
-        <button type="button" className="sv-icon-btn" disabled={saving} title="保存" onClick={() => void save()}>
-          <Icon name="check" size={14} />
+        <button type="button" className="sv-icon-btn" disabled={saving} aria-busy={saving} title={saving ? "保存中" : "保存"} onClick={() => void save()}>
+          <Icon name={saving ? "spinner" : "check"} size={14} className={saving ? "animate-spin" : undefined} />
         </button>
-        <button type="button" className="sv-icon-btn" title="取消" onClick={() => setEditing(false)}>
+        <button type="button" className="sv-icon-btn" disabled={saving} title={saving ? "正在保存，请稍候" : "取消"} onClick={() => setEditing(false)}>
           <Icon name="close" size={14} />
         </button>
       </div>

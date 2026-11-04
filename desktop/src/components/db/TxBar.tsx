@@ -3,7 +3,7 @@ import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { friendlyDbError, thousands } from "../../lib/db";
 import { useAppHidden } from "../../lib/appVisibility";
-import { dbApi, type TxInfo } from "../../lib/dbApi";
+import { type TxInfo } from "../../lib/dbApi";
 import { patchTab, rtOf, txAction, useDb, type SqlTab } from "../../lib/dbStore";
 
 function since(ms: number): string {
@@ -27,7 +27,8 @@ export function TxBar({ connId, tabId, slot, tx: override }: {
   tx?: TxInfo;
 }) {
   useDb();
-  const tx = override ?? rtOf(connId).tx;
+  // 独立槽刚创建时状态尚未知；不能把另一条主会话的未提交写入显示为它的事务。
+  const tx = slot ? override : rtOf(connId).tx;
   const [, tick] = useState(0);
   /** 正在提交 / 回滚哪一边：大事务要好几秒，只把按钮置灰看不出点没点上。 */
   const [acting, setActing] = useState<null | "commit" | "rollback">(null);
@@ -45,8 +46,8 @@ export function TxBar({ connId, tabId, slot, tx: override }: {
     setActing(a);
     try {
       if (slot && tabId) {
-        const r = await dbApi.tx(connId, a, slot);
-        patchTab<SqlTab>(tabId, { tx: r.tx });
+        const tx = await txAction(connId, a, slot);
+        patchTab<SqlTab>(tabId, { tx });
       } else {
         await txAction(connId, a);
       }
@@ -68,11 +69,11 @@ export function TxBar({ connId, tabId, slot, tx: override }: {
       </span>
       <span className="dbx-sp" />
       <button type="button" className="dbx-btn" disabled={acting !== null} onClick={() => void act("rollback")}>
-        <Icon name="refresh" size={12} />
+        <Icon name={acting === "rollback" ? "spinner" : "refresh"} size={12} />
         {acting === "rollback" ? "回滚中…" : "回滚"}
       </button>
       <button type="button" className="dbx-btn ok" disabled={acting !== null} onClick={() => void act("commit")}>
-        <Icon name="check" size={12} />
+        <Icon name={acting === "commit" ? "spinner" : "check"} size={12} />
         {acting === "commit" ? "提交中…" : "提交"}
       </button>
     </div>

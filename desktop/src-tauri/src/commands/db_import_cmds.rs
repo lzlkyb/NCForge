@@ -164,7 +164,7 @@ pub async fn db_import_rows(
         conn.id,
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let bridge = bridge_for(&app, &st, &cfg, &key, engine)
+    let bridge = bridge_for(&app, &st, &cfg, &key, engine, &conn.id)
         .map_err(|e| format!("开不了导入用的独立会话：{e}"))?;
     if let Err(e) = call(bridge.clone(), cmd, args, T_CONNECT).await {
         drop_bridge(&st, &key);

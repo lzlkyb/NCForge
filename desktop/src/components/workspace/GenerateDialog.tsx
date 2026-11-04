@@ -19,6 +19,7 @@ import {
   summarize,
   type GenKind,
 } from "../../lib/javaCodeGen";
+import { trackOperation, operationActive } from "../../lib/operations";
 import { KINDS, applySourceAction, sourceActions, type JavaSourceAction } from "../../lib/javaActions";
 
 interface Props {
@@ -91,6 +92,7 @@ export function GenerateDialog({ open, onClose }: Props) {
   };
 
   const loadMembers = async (which: "override" | "implement") => {
+    if (operationActive("language.generate")) return;
     const model = currentModel();
     if (!model) {
       setError("编辑器不可用");
@@ -99,7 +101,7 @@ export function GenerateDialog({ open, onClose }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const list = await sourceActions(model, KINDS[which]);
+      const list = await trackOperation({ key: "language.generate", label: "读取可生成的方法", page: "files", phase: which === "override" ? "查找可覆盖的父类方法" : "查找待实现的接口方法" }, () => sourceActions(model, KINDS[which]), list => ({ state: list.length ? "success" : "cancelled", detail: list.length ? `返回 ${list.length} 项可选动作` : "未返回可用动作，请查看对话框说明" }));
       setMembers(list);
       setPickedMembers(list.map((_, i) => i));
       if (list.length === 0) {
@@ -109,36 +111,37 @@ export function GenerateDialog({ open, onClose }: Props) {
             : "代码智能没有给出可实现的接口方法（接口未实现时先看「问题」面板里的编译错误）",
         );
       }
-    } finally {
+    } catch (e) { setError(String(e)); } finally {
       setBusy(false);
     }
   };
 
   const applyMembers = async () => {
+    if (operationActive("language.generate")) return;
     const model = currentModel();
     if (!model) return;
     setBusy(true);
-    let applied = 0;
-    let skipped = 0;
-    for (const i of pickedMembers) {
-      const r = await applySourceAction(model, members[i]);
-      if (r) {
-        applied += r.applied;
-        skipped += r.skipped;
+    try {
+      const { applied, skipped } = await trackOperation({ key: "language.generate", label: "生成接口与覆盖方法", page: "files", phase: "应用选中的代码动作" }, async () => {
+        let applied = 0, skipped = 0;
+        for (const i of pickedMembers) {
+          const r = await applySourceAction(model, members[i]);
+          if (r) { applied += r.applied; skipped += r.skipped; }
+        }
+        return { applied, skipped };
+      }, r => ({ state: r.applied ? "success" : "failed", detail: `应用 ${r.applied} 处、跳过 ${r.skipped} 处；仅修改编辑器，尚未保存` }));
+      if (applied === 0) {
+        setError("没有插入任何代码：动作返回的编辑不属于当前文件");
+        return;
       }
-    }
-    setBusy(false);
-    if (applied === 0) {
-      setError("没有插入任何代码：动作返回的编辑不属于当前文件");
-      return;
-    }
-    toast(
-      skipped > 0
-        ? `已插入 ${applied} 处；另有 ${skipped} 处落在别的文件，未处理（不替用户改其他文件）`
-        : `已插入 ${applied} 处（未保存，Ctrl+S 落盘）`,
-      skipped > 0 ? "warning" : "success",
-    );
-    onClose();
+      toast(
+        skipped > 0
+          ? `已插入 ${applied} 处；另有 ${skipped} 处落在别的文件，未处理（不替用户改其他文件）`
+          : `已插入 ${applied} 处（未保存，Ctrl+S 落盘）`,
+        skipped > 0 ? "warning" : "success",
+      );
+      onClose();
+    } catch (e) { setError(String(e)); } finally { setBusy(false); }
   };
 
   const summary = summarize(picked, opts);

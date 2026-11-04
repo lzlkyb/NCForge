@@ -4,6 +4,7 @@ import { useCursor } from "../../lib/cursorStore";
 import { WORKSPACE_LABELS } from "../layout/SideNav";
 import { LangBadge } from "./LangBadge";
 import { ServiceStatusButton } from "./ServiceStatusButton";
+import { OperationStatus } from "../ui/OperationStatus";
 import { StatusContributions } from "./StatusContributions";
 
 /**
@@ -56,6 +57,7 @@ export function ShellStatusBar({
         </>
       )}
       <StatusContributions activeTool={activeTool} />
+      <OperationStatus compact />
       <span className="wb-status-sp" />
       {saving && <span className="wb-status-warn">保存中…</span>}
       <ServiceStatusButton />
@@ -64,7 +66,7 @@ export function ShellStatusBar({
       </button>
       {!toolMode && active && (
         <>
-          <span>{active.virtual ? "java" : languageOf(active.path)}</span>
+          <span className="wb-status-meta">{active.virtual ? "java" : languageOf(active.path)}</span>
           {mark && (
             <span
               className="wb-status-enc"
@@ -77,9 +79,9 @@ export function ShellStatusBar({
               Eclipse 按 GBK 读
             </span>
           )}
-          <span>{active.encoding}{active.hasBom ? " BOM" : ""}</span>
-          <span className={active.eolChanged ? "wb-status-warn" : undefined}>{active.eol}</span>
-          <span>
+          <span className="wb-status-meta">{active.encoding}{active.hasBom ? " BOM" : ""}</span>
+          <span className={`wb-status-meta${active.eolChanged ? " wb-status-warn" : ""}`}>{active.eol}</span>
+          <span className="wb-status-meta">
             第 {cursor.line} 行，第 {cursor.column} 列
           </span>
         </>

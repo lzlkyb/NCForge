@@ -20,6 +20,7 @@ vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
 vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
 
 import { LogTab } from "./LogTab";
+import { ViewActivityContext } from "../../lib/viewActivity";
 import type {
   LogEntry,
   QueryResult,
@@ -151,12 +152,12 @@ const flush = async () => {
   }
 };
 
-const render = async () => {
+const render = async (active = true) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await act(async () => {
     root.render(
       <QueryClientProvider client={client}>
-        <LogTab />
+        <ViewActivityContext.Provider value={active}><LogTab /></ViewActivityContext.Provider>
       </QueryClientProvider>,
     );
   });
@@ -164,11 +165,15 @@ const render = async () => {
 };
 
 const buttonByText = (text: string) =>
-  [...container.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim().includes(text)) as
+  [...document.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim().includes(text)) as
     | HTMLButtonElement
     | undefined;
 
 const rows = () => [...container.querySelectorAll<HTMLButtonElement>(".lg-row")];
+const traceRequest = async () => {
+  await act(async () => buttonByText("高级操作")!.click());
+  await act(async () => buttonByText("追踪这次请求")!.click());
+};
 
 /** 往检索框里打字（React 只认原生 setter + input 事件）。 */
 const typeQuery = async (text: string) => {
@@ -197,9 +202,73 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.restoreAllMocks();
 });
 
 describe("NC 日志页", () => {
+  it("检索结果显示自己的更新时间；重新检索使用已提交条件且保留草稿和旧结果", async () => {
+    const initial = new Date("2026-11-04T09:00:00").getTime();
+    const now = vi.spyOn(Date, "now").mockReturnValue(initial);
+    await render();
+    now.mockReturnValue(initial + 180_000);
+    await typeQuery("ORA-00942");
+    await act(async () => buttonByText("检索")!.click());
+    await flush();
+    const badge = () => container.querySelector<HTMLElement>('[data-freshness]')!;
+    expect(badge().getAttribute("title")).toBe(`更新于 ${new Date(initial + 180_000).toLocaleString("zh-CN")}`);
+    expect(badge().dataset.freshness).toBe("live");
+    await typeQuery("未提交的新草稿");
+    let finish!: (result: SearchResult) => void;
+    mocks.invoke.mockImplementation((cmd: string) => cmd === "nc_log_search"
+      ? new Promise<SearchResult>(resolve => { finish = resolve; }) : Promise.resolve(null));
+    now.mockReturnValue(initial + 240_000);
+    await act(async () => buttonByText("重新检索")!.click());
+    expect(buttonByText("重新检索")?.disabled).toBe(true);
+    expect(badge().dataset.freshness).toBe("loading");
+    expect(rows()).toHaveLength(1);
+    const searches = mocks.invoke.mock.calls.filter(call => call[0] === "nc_log_search");
+    expect((searches[1][1] as { args: { query: string } }).args.query).toBe("ORA-00942");
+    await act(async () => finish({ ...SEARCH, entries: [{ ...SEARCH.entries[0], lineNo: 9999 }] }));
+    expect(badge().getAttribute("title")).toBe(`更新于 ${new Date(initial + 240_000).toLocaleString("zh-CN")}`);
+    expect(container.querySelector<HTMLInputElement>(".lg-search-inp")?.value).toBe("未提交的新草稿");
+    expect(buttonByText("重新检索")?.disabled).toBe(false);
+  });
+  it("普通查询失败不污染成功检索状态；检索重试失败后仍保留命中结果", async () => {
+    mocks.invoke.mockImplementation((cmd: string) => {
+      if (cmd === "nc_log_sources") return Promise.resolve(SOURCES);
+      if (cmd === "nc_log_query") return Promise.reject(new Error("普通查询失败"));
+      if (cmd === "nc_log_search") return Promise.resolve(SEARCH);
+      return Promise.resolve(null);
+    });
+    await render();
+    await typeQuery("ORA-00942");
+    await act(async () => buttonByText("检索")!.click());
+    await flush();
+    expect(container.querySelector('[data-freshness]')?.getAttribute("data-freshness")).toBe("live");
+    mocks.invoke.mockRejectedValue(new Error("检索暂时失败"));
+    await act(async () => buttonByText("重新检索")!.click());
+    await flush();
+    expect(rows()).toHaveLength(1);
+    expect(container.querySelector('[data-freshness]')?.getAttribute("data-freshness")).toBe("error");
+    mocks.invoke.mockResolvedValue(SEARCH);
+    await act(async () => buttonByText("重试")!.click());
+    await flush();
+    expect(container.querySelector('[data-freshness]')?.getAttribute("data-freshness")).toBe("live");
+    expect(mocks.invoke.mock.calls.filter(call => call[0] === "nc_log_search")).toHaveLength(3);
+  });
+  it("非活动工具不读取日志，首次打开后才加载；高级筛选默认收起", async () => {
+    await render(false);
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    await render();
+    expect(mocks.invoke.mock.calls.some(call => call[0] === "nc_log_query")).toBe(true);
+    const toggle = buttonByText("高级筛选")!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const advanced = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(advanced.hidden).toBe(true);
+    await act(async () => toggle.click());
+    expect(advanced.hidden).toBe(false);
+    expect(container.querySelector<HTMLElement>('.lg-search-row .lg-check')?.hidden).toBe(false);
+  });
   it("列表显示结论而不是异常原文", async () => {
     await render();
     const titles = rows().map((r) => r.querySelector(".lg-row-title")?.textContent);
@@ -230,13 +299,119 @@ describe("NC 日志页", () => {
   it("追踪这次请求会带上 callId 并画出时间线", async () => {
     await render();
     await act(async () => rows()[1].click());
-    await act(async () => buttonByText("追踪这次请求")!.click());
+    await traceRequest();
     await flush();
 
     const call = mocks.invoke.mock.calls.find((c) => c[0] === "nc_log_trace");
     expect(call?.[1]).toEqual({ callId: "1793173890985-5927" });
     expect(container.querySelectorAll(".lg-timeline-row").length).toBe(2);
     expect(container.textContent).toContain("同一次请求");
+  });
+
+  it("时间线中被列表筛掉的完整记录仍可打开，并保留同请求追踪", async () => {
+    const hidden = { ...ORA, lineNo: 9000, msg: "筛选以外的原始消息", verdict: null, stack: ["完整续行"] };
+    mocks.invoke.mockImplementation((cmd: string) => {
+      if (cmd === "nc_log_sources") return Promise.resolve(SOURCES);
+      if (cmd === "nc_log_query") return Promise.resolve(QUERY);
+      if (cmd === "nc_log_trace") return Promise.resolve({ ...TRACE, entries: [hidden, ORA] });
+      return Promise.resolve(null);
+    });
+    await render();
+    await act(async () => rows()[1].click());
+    await traceRequest();
+    await act(async () => container.querySelector<HTMLButtonElement>(".lg-timeline-row")!.click());
+    expect(container.querySelector(".lg-msg")?.textContent).toBe(hidden.msg);
+    expect(container.querySelector(".lg-stack")?.textContent).toBe("完整续行");
+    expect(container.querySelector('.lg-detail [role="status"]')?.textContent).toContain("详情已保留");
+    expect(container.querySelectorAll(".lg-timeline-row")).toHaveLength(2);
+    expect(rows().every(row => row.getAttribute("aria-selected") === "false")).toBe(true);
+  });
+
+  it("从请求 A 切到 B 后清理时间线；切到无 callid 记录也清理", async () => {
+    const other = { ...SLOW, callId: "request-B" };
+    mocks.invoke.mockImplementation((cmd: string, args?: { callId?: string }) => {
+      if (cmd === "nc_log_sources") return Promise.resolve(SOURCES);
+      if (cmd === "nc_log_query") return Promise.resolve({ ...QUERY, entries: [other, ORA] });
+      if (cmd === "nc_log_trace") return Promise.resolve(args?.callId === "request-B"
+        ? { ...TRACE, callId: "request-B", entries: [{ ...other, callId: null, lineNo: 9999 }] }
+        : TRACE);
+      return Promise.resolve(null);
+    });
+    await render();
+    await act(async () => rows()[1].click());
+    await traceRequest();
+    expect(container.querySelector(".lg-trace")).not.toBeNull();
+    await act(async () => rows()[0].click());
+    expect(container.querySelector(".lg-trace")).toBeNull();
+    await traceRequest();
+    await act(async () => container.querySelector<HTMLButtonElement>(".lg-timeline-row")!.click());
+    expect(container.querySelector(".lg-trace")).toBeNull();
+    expect(buttonByText("高级操作")).toBeUndefined();
+  });
+
+  it("A 的旧追踪晚到时不覆盖 B，也不提前结束 B 的追踪状态", async () => {
+    let resolveA!: (result: TraceResult) => void;
+    let resolveB!: (result: TraceResult) => void;
+    const pendingA = new Promise<TraceResult>(resolve => { resolveA = resolve; });
+    const pendingB = new Promise<TraceResult>(resolve => { resolveB = resolve; });
+    const other = { ...SLOW, callId: "request-B" };
+    mocks.invoke.mockImplementation((cmd: string, args?: { callId?: string }) => {
+      if (cmd === "nc_log_sources") return Promise.resolve(SOURCES);
+      if (cmd === "nc_log_query") return Promise.resolve({ ...QUERY, entries: [other, ORA] });
+      if (cmd === "nc_log_trace") return args?.callId === "request-B" ? pendingB : pendingA;
+      return Promise.resolve(null);
+    });
+    await render();
+    await act(async () => rows()[1].click());
+    await traceRequest();
+    await act(async () => rows()[0].click());
+    await traceRequest();
+    await act(async () => resolveA(TRACE));
+    expect(container.querySelector(".lg-trace")).toBeNull();
+    expect(buttonByText("正在追踪")?.disabled).toBe(true);
+    await act(async () => resolveB({ ...TRACE, callId: "request-B", entries: [other] }));
+    expect(container.querySelector(".lg-trace-head")?.textContent).toContain("request-B");
+    expect(buttonByText("高级操作")?.disabled).toBe(false);
+  });
+
+  it("检索模式切换后保留当前完整详情，并说明不参与检索的归因筛选", async () => {
+    await render();
+    await act(async () => rows()[0].click());
+    await typeQuery("dual");
+    await act(async () => buttonByText("检索")!.click());
+    await flush();
+    expect(container.querySelector(".lg-msg")?.textContent).toBe(SLOW.msg);
+    expect(container.querySelector('.lg-detail [role="status"]')?.textContent).toContain("当前列表");
+    await act(async () => buttonByText("高级筛选")!.click());
+    expect(container.querySelector(".lg-search-hint")?.textContent).toContain("「仅问题与慢 SQL」和「慢 SQL ≥」");
+  });
+
+  it("修改来源沿用查询范围和归因条件，并保留检索草稿", async () => {
+    await render();
+    await act(async () => buttonByText("高级筛选")!.click());
+    await typeQuery("尚未提交的检索词");
+    const source = container.querySelector<HTMLButtonElement>('.lg-chip:not([aria-pressed="true"])')!;
+    await act(async () => source.click());
+    await flush();
+    const calls = mocks.invoke.mock.calls.filter(call => call[0] === "nc_log_query");
+    const initial = (calls[0][1] as { args: Record<string, unknown> }).args;
+    const latest = (calls[calls.length - 1][1] as { args: Record<string, unknown> }).args;
+    expect(latest.loggers).toEqual(["nclog"]);
+    expect(latest.sinceTs).toBe(initial.sinceTs);
+    expect(latest.onlyProblems).toBe(true);
+    expect(latest.minCostMs).toBe(1000);
+    expect(container.querySelector<HTMLInputElement>(".lg-search-inp")?.value).toBe("尚未提交的检索词");
+  });
+
+  it("中文组词 Enter 与 229 兼容事件不检索，普通 Enter 才提交", async () => {
+    await render();
+    await typeQuery("错误");
+    const input = container.querySelector<HTMLInputElement>(".lg-search-inp")!;
+    await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true })));
+    await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 229, bubbles: true })));
+    expect(mocks.invoke.mock.calls.some(call => call[0] === "nc_log_search")).toBe(false);
+    await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(mocks.invoke.mock.calls.filter(call => call[0] === "nc_log_search")).toHaveLength(1);
   });
 
   it("没读到 logger 配置时给出提示", async () => {

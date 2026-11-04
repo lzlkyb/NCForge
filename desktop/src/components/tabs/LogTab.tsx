@@ -1,23 +1,23 @@
+import { trackOperation } from "../../lib/operations";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import "../../log.css";
 import { Icon } from "../ui/icon";
-import { toast } from "../ui/toast";
 import { LogToolbar } from "../log/LogToolbar";
 import { LogSearchBar } from "../log/LogSearchBar";
 import { LogList } from "../log/LogList";
 import { LogDetail } from "../log/LogDetail";
+import { DockRegion, useWorkbenchDock } from "../workspace/WorkbenchDock";
+import { useViewActive } from "../../lib/viewActivity";
 import { failureText } from "../../lib/friendlyError";
-import { exportSearchResult, scopeKey, useLogSearch } from "../../lib/logSearch";
+import { useLogSelection } from "../../hooks/useLogSelection";
+import { exportSearchResult, scopeKey, useLogSearch, type SearchForm } from "../../lib/logSearch";
 import {
   entryKey,
   logSources,
   queryLogs,
   sinceOf,
-  traceCall,
-  type LogEntry,
   type RangeKey,
-  type TraceResult,
 } from "../../lib/ncLog";
 
 /** 一次最多回多少条。再多人也看不过来，而且 IPC 负载会明显变大。 */
@@ -42,34 +42,34 @@ const DEFAULT_FILTER: Filter = { loggers: [], range: "7d", onlyProblems: true, s
  *
  * 与「NC 服务」页底部那块日志面板的区别：那块抓的是我们启动中间件时的 stdout，
  * 是给人看进程活没活的；这一页读的是 NC 自己按 logger 写的 `nclogs/`，
- * 用来定位现场故障。两个不是一回事，所以是独立页签。
- *
- * 为什么不在这里做「全文检索」：工程搜索已经覆盖源码，日志检索的价值在**结论**，
- * 不在把 5MB 原文铺出来。所以列表里只有命中的条目，没命中的要看就关掉过滤。
+ * 用来定位现场故障，通过应用菜单按需打开，不占主导航。
  *
  * 全文检索（`nc_log_search`）是另一个入口：按原文匹配、不看归因。两条数据源共用
  * 同一个列表与详情 —— 检索结果也是记录，选中后同样能看结论、跳源码、追 callid。
  */
 export function LogTab() {
   const [filter, setFilter] = useState<Filter>(DEFAULT_FILTER);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [trace, setTrace] = useState<TraceResult | null>(null);
-  const [tracing, setTracing] = useState(false);
-  /** 手动刷新计数：进 queryKey 触发重查，比 invalidate 更好读。 */
-  const [nonce, setNonce] = useState(0);
+  const selection = useLogSelection();
+  const [advanced, setAdvanced] = useState(false);
+  const active = useViewActive();
+  const dock = useWorkbenchDock();
+  const visibleDocument = active && (dock?.documentOpen ?? true);
 
   const search = useLogSearch();
-  const found = search.state.phase === "done" ? search.state : null;
+  const found = search.result;
+  const searchMode = search.state.phase !== "idle";
+  // 归因开关和慢 SQL 阈值不参与全文检索，不应顺带改变它的时间边界。
+  const sinceTs = useMemo(() => sinceOf(filter.range), [filter.range]);
 
   const args = useMemo(
     () => ({
       loggers: filter.loggers.length > 0 ? filter.loggers : null,
-      sinceTs: sinceOf(filter.range),
+      sinceTs,
       onlyProblems: filter.onlyProblems,
       minCostMs: filter.slowMs,
       limit: LIMIT,
     }),
-    [filter],
+    [filter, sinceTs],
   );
 
   /** 检索后改了时间范围 / logger：结果还在，但要提示重搜（不自动重跑，读盘不便宜）。 */
@@ -80,42 +80,29 @@ export function LogTab() {
   const sourcesQ = useQuery({
     queryKey: ["nc-log-sources"],
     queryFn: logSources,
+    enabled: visibleDocument,
+    refetchOnWindowFocus: false,
     staleTime: 60_000,
     retry: false,
   });
 
   const listQ = useQuery({
-    queryKey: ["nc-log", args, nonce],
+    queryKey: ["nc-log", args],
     queryFn: () => queryLogs(args),
+    enabled: visibleDocument && !found,
     refetchOnWindowFocus: false,
     retry: false,
   });
+
+  const refresh = () => void trackOperation({ key: `log.refresh:${JSON.stringify(args)}`, label: "重新读取日志", page: "logs", phase: "扫描选定的日志来源与时间范围" }, () => listQ.refetch({ cancelRefetch: false }), r => ({ state: r.error ? "failed" : "success", detail: r.error ? "日志读取失败，请查看日志页错误详情" : `扫描 ${r.data?.scannedFiles.length ?? 0} 个文件${r.data?.stoppedEarly || r.data?.truncatedFiles ? "；按上限读取，结果不完整" : ""}` })).catch(() => {});
 
   /** 检索结果优先：有结果时列表与详情都看命中项，清除后回到归因列表。 */
   const visible = useMemo(
     () => (found ? found.result.entries : (listQ.data?.entries ?? [])),
     [found, listQ.data],
   );
-  // 选中项按 `文件:行号` 存：刷新后还能定位回同一条，换成下标会指错。
-  // 依赖写 `listQ.data` 而不是 `entries`：后者是 `?? []` 造出来的新数组，
-  // 每次渲染都换引用，写进依赖会让这个 useMemo 每拍重算（eslint 也会报）。
-  const selected = useMemo(
-    () => visible.find((e) => entryKey(e) === selectedKey) ?? null,
-    [visible, selectedKey],
-  );
-
-  const onSelect = (entry: LogEntry) => setSelectedKey(entryKey(entry));
-
-  const onTrace = async (callId: string) => {
-    setTracing(true);
-    try {
-      setTrace(await traceCall(callId));
-    } catch (e) {
-      toast(failureText("追踪这次请求", e), "error");
-    } finally {
-      setTracing(false);
-    }
-  };
+  const selectedKey = selection.entry ? entryKey(selection.entry) : null;
+  const entryOutsideList = !!selection.entry && !visible.some((entry) => entryKey(entry) === selectedKey);
 
   const summary = (() => {
     if (found) return `检索「${found.form.query}」：命中 ${found.result.entries.length} 条`;
@@ -133,22 +120,26 @@ export function LogTab() {
     return parts.join(" · ");
   })();
 
-  const runSearch = () => {
-    void search.run({ loggers: args.loggers, sinceTs: args.sinceTs });
+  const runSearch = (submitted?: SearchForm) => {
+    void search.run({ loggers: args.loggers, sinceTs: args.sinceTs }, submitted);
   };
 
   return (
+    <DockRegion region="document">
     <div className="lg-page">
       <LogToolbar
+        advanced={advanced}
+        onToggleAdvanced={() => setAdvanced((value) => !value)}
         sources={sourcesQ.data}
         loggers={filter.loggers}
         range={filter.range}
         onlyProblems={filter.onlyProblems}
         slowMs={filter.slowMs}
-        busy={listQ.isFetching}
+        searchMode={searchMode}
+        busy={searchMode ? search.state.phase === "running" : listQ.isFetching}
         summary={summary}
-        updatedAt={listQ.data ? listQ.dataUpdatedAt : null}
-        error={listQ.isError}
+        updatedAt={searchMode ? found?.updatedAt ?? null : listQ.data ? listQ.dataUpdatedAt : null}
+        error={searchMode ? search.state.phase === "error" : listQ.isError}
         onToggleLogger={(name) =>
           setFilter((f) => ({
             ...f,
@@ -161,14 +152,15 @@ export function LogTab() {
         onRange={(range) => setFilter((f) => ({ ...f, range }))}
         onOnlyProblems={(onlyProblems) => setFilter((f) => ({ ...f, onlyProblems }))}
         onSlowMs={(slowMs) => setFilter((f) => ({ ...f, slowMs }))}
-        onRefresh={() => setNonce((n) => n + 1)}
+        onRefresh={() => searchMode ? runSearch(found?.form) : refresh()}
       >
         <LogSearchBar
+          advanced={advanced}
           form={search.form}
           state={search.state}
           stale={stale}
           onPatch={search.patch}
-          onRun={runSearch}
+          onRun={() => runSearch()}
           onClear={search.clear}
           onExport={() => found && exportSearchResult(found.result, found.form)}
         />
@@ -201,25 +193,27 @@ export function LogTab() {
             <LogList
               entries={visible}
               selectedKey={selectedKey}
-              onSelect={onSelect}
+              onSelect={selection.select}
               emptyTitle={found ? "没有记录匹配这个检索词" : undefined}
               emptyHint={
                 found
-                  ? "换个词、关掉「区分大小写」，或放宽时间范围和 logger 再试；正则模式请先确认写法后端能编译。"
+                  ? "换个词、关掉「区分大小写」，或放宽时间范围和来源再试；正则模式请先确认写法后端能编译。"
                   : undefined
               }
             />
           )}
         </div>
         <LogDetail
-          entry={selected}
-          trace={trace}
-          tracing={tracing}
-          onTrace={(id) => void onTrace(id)}
-          onSelectTrace={onSelect}
-          onClearTrace={() => setTrace(null)}
+          entry={selection.entry}
+          entryOutsideList={entryOutsideList}
+          trace={selection.trace}
+          tracing={selection.tracing}
+          onTrace={(id) => void selection.runTrace(id)}
+          onSelectTrace={selection.select}
+          onClearTrace={selection.clearTrace}
         />
       </div>
     </div>
+    </DockRegion>
   );
 }

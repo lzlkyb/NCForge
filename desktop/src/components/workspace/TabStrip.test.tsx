@@ -30,6 +30,7 @@ let root: Root;
 let container: HTMLDivElement;
 
 beforeEach(() => {
+  vi.clearAllMocks();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -40,6 +41,7 @@ afterEach(() => {
   container.remove();
 });
 
+const onSelect=vi.fn(),onClose=vi.fn();
 function render(tabs: TabMeta[], activePath: string) {
   act(() =>
     root.render(
@@ -50,8 +52,8 @@ function render(tabs: TabMeta[], activePath: string) {
         splitPath={null}
         compiling={false}
         canCompile
-        onSelect={vi.fn()}
-        onClose={vi.fn()}
+        onSelect={onSelect}
+        onClose={onClose}
         onCloseMany={() => 0}
         onPin={vi.fn()}
         onOpenSplit={vi.fn()}
@@ -77,5 +79,23 @@ describe("TabStrip 未保存标签", () => {
     const x = container.querySelector<HTMLButtonElement>(".wb-tab-x");
     expect(x?.querySelector(".wb-dirty-dot")).toBeNull();
     expect(x?.querySelector(".wb-tab-close")).toBeNull();
+  });
+});
+
+describe("标签键盘与子按钮",()=>{
+  it.each(["Enter"," "])("关闭按钮的%s不被父标签拦截",key=>{
+    render([tab("C:\\w\\A.java")],"C:\\w\\A.java");
+    const x=container.querySelector<HTMLButtonElement>(".wb-tab-x")!;
+    const e=new KeyboardEvent("keydown",{key,bubbles:true,cancelable:true});act(()=>x.dispatchEvent(e));
+    expect(e.defaultPrevented).toBe(false);expect(onSelect).not.toHaveBeenCalled();
+    act(()=>x.click());expect(onClose).toHaveBeenCalledOnce();expect(onSelect).not.toHaveBeenCalled();
+  });
+  it("标签自身方向键漫游仍生效，组合输入不选中",()=>{
+    render([tab("C:\\w\\A.java"),tab("C:\\w\\B.java")],"C:\\w\\A.java");
+    const row=container.querySelector<HTMLElement>('[role="tab"]')!;
+    act(()=>row.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",isComposing:true,bubbles:true,cancelable:true})));
+    expect(onSelect).not.toHaveBeenCalled();
+    act(()=>row.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowRight",bubbles:true,cancelable:true})));
+    expect(onSelect).toHaveBeenCalledWith("C:\\w\\B.java");
   });
 });

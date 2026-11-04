@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { trackOperation } from "../../lib/operations";
 import { invokeOrToast } from "../../lib/tauri";
 import { ToggleRow } from "../ui/ToggleRow";
 
@@ -44,7 +45,7 @@ export function AutostartRow({ onSaved }: { onSaved: (enabled: boolean) => Promi
     // 乐观置值 + 失败回滚：set_autostart 返回最终生效状态，拿不到布尔值就是失败了。
     setOn(v);
     try {
-      const finalState = await invokeOrToast<boolean>("set_autostart", { enabled: v }, "设置开机自启失败");
+      const finalState = await trackOperation({ key: "settings.autostart", label: "保存开机自启设置", page: "settings" }, () => invokeOrToast<boolean>("set_autostart", { enabled: v }, "设置开机自启失败"), result => ({ state: typeof result === "boolean" ? "success" : "failed", detail: typeof result === "boolean" ? undefined : "系统未确认开机自启设置" }));
       if (typeof finalState !== "boolean") {
         setOn(!v);
         return;
@@ -61,9 +62,15 @@ export function AutostartRow({ onSaved }: { onSaved: (enabled: boolean) => Promi
   return (
     <>
       <ToggleRow
+        id="appearance-autostart"
         label="开机自启"
+        keywords={["启动", "登录", "autostart"]}
         sub="登录系统时自动启动（点 X 即退出，不会留在后台）"
         checked={on}
+        pending={busy}
+        disabled={busy || at === null}
+        disabledReason={at === null ? "先重新读取系统状态" : busy ? "正在处理，请稍候" : undefined}
+        valueText={at ? (on ? "已开启" : "已关闭") : busy ? "读取中" : "读取失败"}
         onChange={(v) => void change(v)}
       />
       <div className="wb-setting-meta">

@@ -22,8 +22,8 @@ export function TableMoreActions({
     <>
       <button
         type="button"
-        className="dbx-ibtn"
-        title="更多表操作"
+        className="dbx-btn ghost"
+        title="表操作：导出 INSERT、从文件导入、在控制台查询"
         aria-label="更多表操作"
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
@@ -43,6 +43,7 @@ export function TableMoreActions({
         }}
       >
         <Icon name="more" size={15} />
+        表操作
       </button>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </>

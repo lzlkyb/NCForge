@@ -16,12 +16,13 @@ export interface SaveEditor {
   getAction(id: string): { run(): Promise<void> } | null;
 }
 
-export async function formatBeforeSave(editor: SaveEditor): Promise<void> {
+export async function formatBeforeSave(editor: SaveEditor): Promise<void | "failed"> {
   if (!getEditorPrefs().formatOnSave) return;
   if (editor.getModel()?.getLanguageId() !== "java") return;
   try {
     await editor.getAction("editor.action.formatDocument")?.run();
   } catch {
     // 语言服务未就绪 / 文档有语法错误：保留原文，保存照常进行
+    return "failed";
   }
 }

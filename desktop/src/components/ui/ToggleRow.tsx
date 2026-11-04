@@ -23,7 +23,7 @@ export function ToggleRow({
   last = false,
   saved = false,
   id,
-  disabled = false, pending = false, error, disabledReason,
+  disabled = false, pending = false, error, disabledReason, keywords, valueText,
 }: {
   label: string;
   /** L0 常显短句：≤20 字结果性描述；原理/边界请改传 info。 */
@@ -42,18 +42,21 @@ export function ToggleRow({
   error?: string;
   /** disabled 的原因说明（P2-12，透传给 Switch 的悬停 title）。 */
   disabledReason?: string;
+  keywords?: string[];
+  valueText?: string;
 }) {
   const generatedId = useId();
   const descriptionId = `${id ?? generatedId}-description`;
   return (
     <div
       id={id} tabIndex={id ? -1 : undefined} aria-busy={pending || undefined}
+      data-settings-item={id ? "" : undefined} data-settings-keywords={keywords?.join(" ")} data-setting-value={valueText ?? (pending ? "保存中…" : checked ? "已开启" : "已关闭")}
       className={`srow flex items-center justify-between gap-4 py-3.5 ${
         last ? "" : "border-b"
       } ${danger ? "-mx-3 rounded-lg bg-destructive/5 px-3" : ""}`}
     >
       <div className="grow min-w-0">
-        <div className="flex items-center gap-1.5">
+        <div className="srow-heading flex items-center gap-1.5">
           <span className="t text-sm font-medium">{label}</span>
           {saved && <SavedHint>已保存</SavedHint>}
           {info && <InfoPopover label={label}>{info}</InfoPopover>}
@@ -65,7 +68,7 @@ export function ToggleRow({
         )}
       </div>
       <div className="srow-control flex shrink-0 items-center gap-2">
-        <span data-pending={pending || undefined} role={pending ? "status" : undefined} className="settings-toggle-state text-xs text-muted-foreground">{pending ? "保存中…" : checked ? "已开启" : "已关闭"}</span>
+        <span data-pending={pending || undefined} role={pending ? "status" : undefined} className="settings-toggle-state text-xs text-muted-foreground">{valueText ?? (pending ? "保存中…" : checked ? "已开启" : "已关闭")}</span>
         <Switch checked={checked} onChange={onChange} variant={variant} ariaLabel={label} disabled={disabled || pending} disabledReason={disabledReason ?? (pending ? "正在保存，请稍候" : undefined)} ariaDescribedBy={sub ? descriptionId : undefined} />
       </div>
       {error && <div className="settings-row-feedback text-xs text-destructive-ink" role="alert">{error}</div>}

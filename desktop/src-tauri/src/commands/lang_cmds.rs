@@ -529,7 +529,7 @@ pub async fn lang_start(
     if !cfg.lang_enabled {
         return Err("代码智能已在设置里关闭".to_string());
     }
-    let (root, module) = resolve_module(&state, &path).await?;
+    let (root, module, _dir) = resolve_module(&state, &path).await?;
     let home = nc_home::resolve(cfg.nc_home.as_deref())?;
     let xmx = cfg.lang_xmx_mb.unwrap_or(DEFAULT_XMX_MB);
     let state = state.inner().clone();
@@ -586,7 +586,7 @@ pub async fn lang_regenerate(
         .workspace_root
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
-    let (root, module) =
+    let (root, module, _dir) =
         resolve_module(&state, &PathBuf::from(ws).join(&module).to_string_lossy()).await?;
     let home = nc_home::resolve(cfg.nc_home.as_deref())?;
     let xmx = cfg.lang_xmx_mb.unwrap_or(DEFAULT_XMX_MB);

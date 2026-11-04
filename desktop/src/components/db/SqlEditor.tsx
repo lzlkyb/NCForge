@@ -14,6 +14,7 @@ export interface RunStmt {
 /** SqlConsole 拿到的编辑器句柄。 */
 export interface SqlEditorApi {
   /** `current`：选中的那段（可能多条），没选中就是光标所在的一条；`script`：全部。 */
+  insert:(text:string)=>void;
   target: (mode: "current" | "script") => RunStmt[];
   format: () => void;
   reveal: (line: number) => void;
@@ -67,15 +68,18 @@ function formatAt(editor: Editor) {
 /**
  * SQL 编辑器（Monaco，与源码编辑器同一套）。整个控制台只有一个实例，切标签 = 换 model。
  * Ctrl+Enter 执行当前语句 / Alt+X 执行脚本 / Ctrl+Shift+F 格式化；光标所在语句浅色高亮。
+ * Ctrl+点击表名打开它的 DDL——链接由 `lib/sqlProviders.ts` 里的 LinkProvider 挂上。
  */
-export function SqlEditor({ tabId, initial, onRun, apiRef }: {
+export function SqlEditor({ tabId, initial, onRun, apiRef, onScope }: {
   tabId: string;
   initial: string;
   onRun: (mode: "current" | "script") => void;
   apiRef: { current: SqlEditorApi | null };
+  onScope?:(label:string)=>void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Editor | null>(null);
+  const onScopeRef=useRef(onScope);onScopeRef.current=onScope;
   const onRunRef = useRef(onRun);
   onRunRef.current = onRun;
 
@@ -105,6 +109,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef }: {
     const deco = editor.createDecorationsCollection();
     let raf = 0;
     const highlight = () => {
+      onScopeRef.current?.(editor.getSelection()?.isEmpty() === false ? "执行选中 SQL" : "执行当前语句");
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         const model = editor.getModel();
@@ -122,6 +127,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef }: {
     };
     const subs = [
       editor.onDidChangeCursorPosition(highlight),
+      editor.onDidChangeCursorSelection(highlight),
       editor.onDidChangeModelContent(() => {
         const model = editor.getModel();
         const id = model && tabIdOfModel(model);
@@ -130,6 +136,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef }: {
       }),
     ];
     apiRef.current = {
+      insert:(text)=>{const range=editor.getSelection();if(range) editor.executeEdits("ncforge-object-name",[{range,text,forceMoveMarkers:true}]);editor.focus();},
       target: (mode) => targetOf(editor, mode),
       format: () => formatAt(editor),
       reveal: (line) => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * pack-resources.mjs —— 把 jdtls / ecj / svnkit 三个大块资源打成 zip，并生成本地
+ * pack-resources.mjs —— 把 jdtls / ecj / svnkit / cfr 几个大块资源打成 zip，并生成本地
  * manifest（含内容寻址版本、大小、SHA-256）。产物体积见文件尾注释。
  *
  * 为什么打 zip 而不是原样传目录：release 资产只支持单文件；zip 同时给了我们
@@ -18,7 +18,7 @@
  * 裁剪逻辑：锁定 0.57.0 + SHA-256 校验 + 只留 Windows 平台插件）。
  *
  * 产物：
- *   <out>/{jdtls,ecj,svnkit}.zip
+ *   <out>/{jdtls,ecj,svnkit,cfr}.zip
  *   <out>/manifest.json    —— 本地版清单；URL 由 generate-resources-json.mjs 拼
  */
 
@@ -56,6 +56,13 @@ const PACKS = [
     dir: join(RESOURCES, "svnkit"),
     title: "SVN 客户端",
     notes: "代码检出与更新",
+    skip: () => false,
+  },
+  {
+    id: "cfr",
+    dir: join(RESOURCES, "cfr"),
+    title: "Java 反编译器",
+    notes: "没有源码的 jar 类也能读实现（CFR 0.152）",
     skip: () => false,
   },
 ];

@@ -1,4 +1,5 @@
-import { invoke } from "./tauri";
+import { invoke, listen } from "./tauri";
+import { trackOperation } from "./operations";
 
 /**
  * 补丁打包（M7）的命令封装与纯函数。
@@ -102,7 +103,11 @@ export const patchDefaults = () => invoke<PatchDefaults>("patch_defaults");
 export const patchScan = (files: string[], forceHyext: string[] = [], forceStd: string[] = []) =>
   invoke<PatchScan>("patch_scan", { files, forceHyext, forceStd });
 
-export const patchBuild = (args: PatchBuildArgs) => invoke<PatchBuildResult>("patch_build", { args });
+export const patchBuild = (args: PatchBuildArgs) => trackOperation({ key: "patch.build", label: "生成补丁包", scope: args.outDir, page: "patch", phase: "复查选中文件并写入临时包", cancel: patchBuildCancel, cancelled: e => String(e instanceof Error ? e.message : e).startsWith("已取消出包") }, async operation => {
+  const unlisten = await listen<PatchBuildProgress>("patch:build-progress", p => operation.update({ phase: "写入补丁条目", progress: p })).catch(() => undefined);
+  try { return await invoke<PatchBuildResult>("patch_build", { args }); }
+  finally { unlisten?.(); }
+}, r => ({ state: "success", detail: `已生成 ${r.entries} 个 zip 条目（含目录）；文件：${r.zipPath}` }));
 
 /**
  * 请求停止正在进行的出包。后端在下一个条目边界退出，**旧包不会被覆盖**
@@ -116,10 +121,10 @@ export interface PatchBuildProgress {
   total: number;
 }
 
-export const patchSetOutDir = (dir: string) => invoke<void>("patch_set_out_dir", { dir });
+export const patchSetOutDir = (dir: string) => trackOperation({ key: "patch.outdir", label: "保存补丁输出目录", scope: dir, page: "patch", phase: "验证并保存目录" }, () => invoke<void>("patch_set_out_dir", { dir }));
 
 /** 传 null 清掉自定义产物根，回到自动探测。 */
-export const patchSetOutRoot = (dir: string | null) => invoke<void>("patch_set_out_root", { dir });
+export const patchSetOutRoot = (dir: string | null) => trackOperation({ key: "patch.outroot", label: "保存编译产物根", scope: dir ?? "自动探测", page: "patch", phase: "验证并保存产物根" }, () => invoke<void>("patch_set_out_root", { dir }));
 
 export const patchReveal = (path: string) => invoke<void>("patch_reveal", { path });
 
@@ -130,7 +135,7 @@ export const patchReveal = (path: string) => invoke<void>("patch_reveal", { path
  * 前端只要把出包结果里的 `backup` 原样传回去。
  */
 export const patchRestoreBackup = (zip: string, backup: string) =>
-  invoke<void>("patch_restore_backup", { zip, backup });
+  trackOperation({ key: `patch.restore:${zip}`, label: "恢复旧补丁包", scope: zip, page: "patch", phase: "从备份还原正式包" }, () => invoke<void>("patch_restore_backup", { zip, backup }));
 
 // ───────────────────────── 纯函数 ─────────────────────────
 

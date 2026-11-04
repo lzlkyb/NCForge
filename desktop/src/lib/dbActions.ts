@@ -1,6 +1,8 @@
 import { toast } from "../components/ui/toast";
 import { friendlyDbError } from "./db";
 import { dbApi } from "./dbApi";
+import { beginOperation } from "./operations";
+import { dbTaskSpec } from "./dbOperations";
 import { forgetColumnZh } from "./dbColumnZh";
 import { ask, confirmProdWrite, ensureConnected, guardSlotTx, guardTx, isLastTabOn } from "./dbConfirm";
 import { clearFavorites } from "./dbFavorites";
@@ -134,7 +136,10 @@ export async function deleteConn(connId: string) {
   const ok = await ask("删除连接", `删除「${c.name}」？存在本机的口令一并删掉；用它的 SQL 标签会变成「未选连接」。`, "删除", true);
   if (!ok || !(await guardAllSessions(connId, "删除连接"))) return;
   try {
-    setConns(await dbApi.remove(connId));
+    const task=beginOperation(dbTaskSpec(`connection.delete:${connId}`,"删除数据库连接配置",connId,"连接配置",c.name));
+    if(!task) return;
+    try {setConns(await dbApi.remove(connId));task.finish("success","连接配置已删除");}
+    catch(e) {task.finish("failed","删除失败，返回数据库页查看原因");throw e;}
     clearFavorites(connId);
     clearSlots(connId);
     for (const t of getDb().tabs) {
@@ -152,7 +157,10 @@ export async function duplicateConn(connId: string) {
   const c = connOf(connId);
   if (!c) return;
   try {
-    await dbApi.save({ ...c, id: null, name: `${c.name} 副本` });
+    const task=beginOperation(dbTaskSpec(`connection.copy:${connId}`,"复制数据库连接配置",connId,"连接配置",c.name));
+    if(!task) return;
+    try {await dbApi.save({ ...c, id: null, name: `${c.name} 副本` });task.finish("success","连接配置已复制（未复制口令）");}
+    catch(e) {task.finish("failed","复制失败，返回数据库页查看原因");throw e;}
     await loadConns();
   } catch (e) {
     toast(`复制失败：${friendlyDbError(e)}`, "error");
@@ -175,7 +183,7 @@ export async function moveConn(fromId: string, toId: string) {
 export async function refreshMeta(connId: string) {
   forgetColumns(connId);
   forgetColumnZh(connId);
-  await loadMeta(connId);
+  await loadMeta(connId,true);
 }
 
 /** 一条执行失败的语句（回放脚本时逐条记下来，供导出 / 重跑）。 */
@@ -226,22 +234,33 @@ export async function runStatements(
     toast("先在工具条左边选一个连接", "warning");
     return outcome;
   }
-  const connId = tab.connId;
-  if (!(await ensureConnected(connId))) return outcome;
+  const connId = tab.connId;let stopRequested=false;
+  const task=beginOperation({...dbTaskSpec(`sql:${tabId}`,"执行 SQL",connId,tab.slot ? `独立会话 ${tab.slot}` : `SQL 标签 ${tab.title}`,connOf(connId)?.name,tabId),phase:"检查连接与执行范围",cancel:async()=>{const active=sqlTabOf(tabId);if(active?.connId!==connId) throw new Error("来源标签已关闭或切换");stopRequested=true;try {if(active.running) await dbApi.cancel(connId,active.slot);}catch(e){stopRequested=false;throw e;}}});
+  if(!task) return outcome;
+  try {if (!(await ensureConnected(connId))) {task.finish("cancelled","连接未建立，语句未执行");return outcome;}}
+  catch {task.finish("failed","连接未建立，返回数据库页查看原因");return outcome;}
+  if(stopRequested) {task.finish("cancelled","执行请求尚未发出，语句未执行");outcome.stoppedByUser=true;return outcome;}
+  if(sqlTabOf(tabId)?.connId!==connId) {task.finish("cancelled","来源标签或连接已切换，语句未执行");return outcome;}
   patchTab<SqlTab>(tabId, { running: true, results: [], view: null });
   const kept: ResultEntry[] = [];
   let ddl = false;
   try {
     for (let i = 0; i < stmts.length; i++) {
+      if(stopRequested) {outcome.stoppedByUser=true;break;}
       const s = stmts[i];
+      task.update({phase:`执行第 ${i+1} / ${stmts.length} 条`,progress:{done:i,total:stmts.length}});
       opts.onProgress?.({ done: i, total: stmts.length, line: s.startLine, text: s.text });
       if (isWrite(s.text) && !(await confirmProdWrite(tabId, connId, s.text))) {
         appendOutput(tabId, [{ at: Date.now(), text: `第 ${i + 1} 条未执行：已取消`, tone: "info" }]);
         outcome.stoppedByUser = true;
         break;
       }
+      if(stopRequested) {outcome.stoppedByUser=true;break;}
       const r = await execOne(tabId, s.text, i + 1);
+      r.startLine=s.startLine;
+      if(r.cancelled) {outcome.stoppedByUser=true;task.finish("cancelled",`数据库已返回取消；已执行 ${i+1} 条，写入状态请核对事务`);}
       outcome.done = i + 1;
+      task.update({progress:{done:i+1,total:stmts.length}});
       if (r.kind !== "error" && stmtKind(s.text) === "ddl") ddl = true;
       if (r.kind !== "update" || stmts.length === 1) {
         kept.push(r);
@@ -255,14 +274,18 @@ export async function runStatements(
           error: r.error ?? "执行失败",
         });
         if (outcome.failLine === null) outcome.failLine = s.startLine;
-        if (!opts.ignoreErrors) break;
+        if (r.cancelled || !opts.ignoreErrors) break;
       }
     }
+  } catch(error) {
+    task.finish("failed",`执行中断；已执行 ${outcome.done} 条，返回数据库页核对`);
+    throw error;
   } finally {
+    task.finish(outcome.stoppedByUser ? "cancelled" : outcome.failures.length ? "failed" : "success",`已执行 ${outcome.done} / ${stmts.length} 条${outcome.failures.length ? `，失败 ${outcome.failures.length} 条` : ""}；写入状态以事务条为准`);
     patchTab<SqlTab>(tabId, { running: false, ...(kept.length === 0 ? { view: "output" } : {}) });
   }
   // 建表 / 改表之后侧栏与补全要跟上
-  if (ddl) void refreshMeta(connId);
+  if (ddl) void loadMeta(connId);
   return outcome;
 }
 

@@ -215,7 +215,9 @@ async function refreshThreads(): Promise<void> {
   }
 }
 
+let eventRevision = 0;
 function onEvent(e: DebugEvent): void {
+  if (["stopped", "continued", "terminated"].includes(e.event)) eventRevision++;
   const body = e.body ?? {};
   switch (e.event) {
     case "stopped": {
@@ -255,6 +257,7 @@ function ensureListeners(): void {
   listening = true;
   // 非 Tauri 环境（单测 / 浏览器预览）没有事件桥：订阅失败不该冒成未处理拒绝
   void onDebugStatus((s) => {
+    if (snap.status.state !== s.state || snap.status.module !== s.module) eventRevision++;
     const wasAttached = snap.status.state === "attached";
     set({ status: s, ...(s.state === "attached" ? {} : idle()) });
     if (s.state === "attached" && !wasAttached) {
@@ -320,17 +323,23 @@ export async function detachDebugger(): Promise<void> {
 }
 
 export async function resumeDebug(): Promise<void> {
+  const previous = snap;
+  const revision = eventRevision;
   const threadId = snap.threadId;
   if (!snap.paused || !threadId) return;
   set(idle());
   try {
     await debugContinue(threadId);
   } catch (e) {
-    set({ error: errText(e) });
+    // 请求失败且没有新的调试事件时恢复暂停位置，保留可重试的按钮和上下文。
+    if (eventRevision === revision && snap.stopSeq === previous.stopSeq && snap.status.state === "attached") set({ ...previous, error: errText(e) });
+    else set({ error: errText(e) });
   }
 }
 
 export async function stepDebug(kind: Exclude<DebugAction, "resume">): Promise<void> {
+  const previous = snap;
+  const revision = eventRevision;
   const threadId = snap.threadId;
   if (!snap.paused || !threadId) return;
   // 先松开 paused：步过要等下一次 stopped 事件，界面不能在这期间一直显示「已暂停」
@@ -338,7 +347,9 @@ export async function stepDebug(kind: Exclude<DebugAction, "resume">): Promise<v
   try {
     await debugStep(threadId, kind);
   } catch (e) {
-    set({ error: errText(e) });
+    // 请求失败且没有新的调试事件时恢复暂停位置，保留可重试的按钮和上下文。
+    if (eventRevision === revision && snap.stopSeq === previous.stopSeq && snap.status.state === "attached") set({ ...previous, error: errText(e) });
+    else set({ error: errText(e) });
   }
 }
 

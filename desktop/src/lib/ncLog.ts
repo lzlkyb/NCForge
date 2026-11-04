@@ -1,4 +1,5 @@
 import { invoke } from "./tauri";
+import { trackOperation } from "./operations";
 
 /**
  * NC 运行日志（`nclogs/`）的接口层。**与 Rust `nc_log_cmds` / `nc_log` 一一对应**
@@ -154,12 +155,12 @@ export function queryLogs(args: QueryArgs): Promise<QueryResult> {
 }
 
 export function traceCall(callId: string): Promise<TraceResult> {
-  return invoke<TraceResult>("nc_log_trace", { callId });
+  return trackOperation({ key: `log.trace:${callId}`, label: "追踪日志调用链", page: "logs", phase: "扫描相关日志文件" }, () => invoke<TraceResult>("nc_log_trace", { callId }), r => ({ state: "success", detail: `扫描 ${r.scannedFiles.length} 个文件，找到 ${r.entries.length} 条记录` }));
 }
 
 /** 全文/正则检索：看原文（msg / 堆栈 / 头部字段），不看归因。 */
 export function searchLogs(args: SearchArgs): Promise<SearchResult> {
-  return invoke<SearchResult>("nc_log_search", { args });
+  return trackOperation({ key: `log.search:${JSON.stringify(args)}`, label: "检索日志原文", errorDetail: () => "检索失败，请查看日志页错误详情", page: "logs", phase: "扫描选定时间与日志来源" }, () => invoke<SearchResult>("nc_log_search", { args }), r => ({ state: "success", detail: `扫描 ${r.scannedFiles.length} 个文件，命中 ${r.entries.length} 条${r.stoppedEarly || r.truncatedFiles ? "；按上限截断，结果不完整" : ""}` }));
 }
 
 // ---------------------------------------------------------------- 时间

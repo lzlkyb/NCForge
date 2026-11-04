@@ -18,8 +18,33 @@ use std::time::UNIX_EPOCH;
 use encoding_rs::GBK;
 use serde::{Deserialize, Serialize};
 
-/// 目录树里不展示的目录（版本库元数据，用户不会想编辑）。
-const HIDDEN_DIRS: [&str; 2] = [".svn", ".git"];
+/// 目录树里不展示的目录：版本库元数据 + 工具链自己的元数据目录。
+///
+/// `.settings` / `.nc-compile` 这类在 NC 工程根各占一行，而根下本来就有 60 来个
+/// 模块目录（2026-11-03 实测 newar 根 71 个可见条目，其中 6 个是这类元数据）。
+/// 隐藏的是**显示**，不是可访问性：`fs_read_file` 仍能打开里面的文件。
+const HIDDEN_DIRS: [&str; 5] = [
+    ".svn",
+    ".git",
+    ".settings",
+    ".nc-compile",
+    ".externalToolBuilders",
+];
+
+/// 目录树里不展示的文件：Eclipse / NC 的工程描述文件。
+///
+/// 它们由工具自己维护（`.classpath` 还是编译侧唯一真源，见 `eclipse_cp`），
+/// 在编辑器里手改只会把工程改坏。
+const HIDDEN_FILES: [&str; 4] = [".project", ".classpath", ".dependency", ".module_prj"];
+
+/// 这个名字要不要在树里隐藏。
+///
+/// 按目录/文件分开判断而不是只看名字：`.classpath` 是文件、`.settings` 是目录，
+/// 混在一张表里遇到同名异类会误伤。Windows 文件名不区分大小写，比对也不区分。
+fn is_hidden_entry(name: &str, is_dir: bool) -> bool {
+    let table: &[&str] = if is_dir { &HIDDEN_DIRS } else { &HIDDEN_FILES };
+    table.iter().any(|h| name.eq_ignore_ascii_case(h))
+}
 
 /// 单文件大小上限：再大的文本不适合塞进编辑器。
 ///
@@ -82,7 +107,8 @@ pub struct FileContent {
     pub mtime_ms: u64,
 }
 
-/// 列出目录：目录在前，其余按名字（不分大小写）排序；跳过 `.svn` / `.git`。
+/// 列出目录：目录在前，其余按名字（不分大小写）排序；
+/// 跳过版本库目录与工程元数据（见 `HIDDEN_DIRS` / `HIDDEN_FILES`）。
 pub fn list_dir(dir: &Path) -> Result<Vec<DirItem>, String> {
     let rd = std::fs::read_dir(dir).map_err(|e| format!("读取目录失败: {e}"))?;
     let mut items = Vec::new();
@@ -90,7 +116,7 @@ pub fn list_dir(dir: &Path) -> Result<Vec<DirItem>, String> {
         let Ok(entry) = entry else { continue };
         let name = entry.file_name().to_string_lossy().into_owned();
         let Ok(md) = entry.metadata() else { continue };
-        if md.is_dir() && HIDDEN_DIRS.contains(&name.as_str()) {
+        if is_hidden_entry(&name, md.is_dir()) {
             continue;
         }
         items.push(DirItem {
@@ -621,6 +647,34 @@ mod tests {
         std::fs::write(d.join("a.txt"), b"").unwrap();
         let names: Vec<_> = list_dir(&d).unwrap().into_iter().map(|i| i.name).collect();
         assert_eq!(names, vec!["zdir", "a.txt", "B.txt"]);
+    }
+
+    /// 工程元数据（Eclipse 的 `.settings` / `.classpath` 等）不进树；
+    /// 同名但类型不同的一律按类型判：`.classpath` 是文件，不隐藏同名的目录。
+    #[test]
+    fn list_dir_hides_engine_metadata_only_by_kind() {
+        let d = tmpdir("ls-meta");
+        std::fs::create_dir_all(d.join(".settings")).unwrap();
+        std::fs::create_dir_all(d.join(".nc-compile")).unwrap();
+        std::fs::create_dir_all(d.join(".classpath")).unwrap(); // 同名目录：不是元数据文件，要显示
+        std::fs::create_dir_all(d.join("bill")).unwrap();
+        std::fs::write(d.join(".project"), b"").unwrap();
+        std::fs::write(d.join(".classpath.bak"), b"").unwrap();
+        std::fs::write(d.join("manifest.xml"), b"").unwrap();
+        let names: Vec<_> = list_dir(&d).unwrap().into_iter().map(|i| i.name).collect();
+        assert_eq!(
+            names,
+            vec![".classpath", "bill", ".classpath.bak", "manifest.xml"]
+        );
+    }
+
+    /// 隐藏的只是列表；单独 path 访问仍可达（树以外没有入口，但 API 语义要一致）。
+    #[test]
+    fn hidden_names_match_case_insensitively() {
+        assert!(is_hidden_entry(".SVN", true));
+        assert!(is_hidden_entry(".Project", false));
+        assert!(!is_hidden_entry("project", false));
+        assert!(!is_hidden_entry("manifest.xml", false));
     }
 
     #[test]

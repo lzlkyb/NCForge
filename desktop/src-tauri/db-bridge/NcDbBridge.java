@@ -128,7 +128,7 @@ public class NcDbBridge {
 
     /** 已知命令名：用来区分「新格式的第二段是会话名」还是「旧格式的第二段就是命令」。 */
     private static final Set<String> CMDS = new HashSet<String>(Arrays.asList(
-            "hello", "propList", "propCred", "connect", "connectProp", "exec", "more", "commit",
+            "hello", "propList", "propCred", "connect", "connectProp", "exec", "execBound", "readOnly", "more", "commit",
             "rollback", "autocommit", "tables", "ncNames", "query", "columns", "indexes", "ddl",
             "explain", "sessions", "objects", "source", "schema", "ping", "disconnect", "quit",
             "cancel"));
@@ -293,6 +293,7 @@ public class NcDbBridge {
         int txStatements;
         long txRows;
         long txSince;
+        boolean readOnly, readOnlyStarted, previousAuto;
 
         volatile boolean closed;
 
@@ -366,6 +367,10 @@ public class NcDbBridge {
                 ok(id, connect(url, str(ds.get("user")), str(ds.get("password")), flag(a, 2)));
             } else if ("exec".equals(cmd)) {
                 ok(id, exec(a.get(0), intArg(a, 1, 500), intArg(a, 2, 30)));
+            } else if ("execBound".equals(cmd)) {
+                ok(id, execParams(a.get(0), intArg(a,1,500), intArg(a,2,30), a.subList(3,a.size())));
+            } else if ("readOnly".equals(cmd)) {
+                ok(id, setReadOnly(flag(a,0)));
             } else if ("more".equals(cmd)) {
                 ok(id, more(intArg(a, 0, 500)));
             } else if ("commit".equals(cmd)) {
@@ -435,6 +440,7 @@ public class NcDbBridge {
             p.setProperty("oracle.net.CONNECT_TIMEOUT", "15000");
             DriverManager.setLoginTimeout(15);
             conn = DriverManager.getConnection(url, p);
+            readOnly = false; readOnlyStarted = false;
             conn.setAutoCommit(autoCommit);
             resetTx();
             // DBMS_OUTPUT 默认关着：打开后 PL/SQL 里的 put_line 才能在「输出」标签里看到
@@ -454,6 +460,7 @@ public class NcDbBridge {
         }
 
         private void resetTx() {
+            readOnlyStarted = false;
             txStatements = 0;
             txRows = 0;
             txSince = 0;
@@ -467,7 +474,25 @@ public class NcDbBridge {
 
         // ───────────────────── 执行 ─────────────────────
 
+        private String setReadOnly(boolean enabled) throws Exception {
+            requireConn();
+            if (enabled != readOnly) {
+                if (txStatements > 0) throw new SQLException("有未提交写入，请先提交或回滚再切换只读查询");
+                if (enabled) { previousAuto = conn.getAutoCommit(); conn.setAutoCommit(false); }
+                conn.rollback();
+                if (!enabled) conn.setAutoCommit(previousAuto);
+                readOnly = enabled; readOnlyStarted = false;
+            }
+            if (enabled && !readOnlyStarted) {
+                Statement s = conn.createStatement();
+                try { s.execute("set transaction read only"); readOnlyStarted = true; } finally { s.close(); }
+            }
+            return "{\"readOnly\":" + readOnly + ",\"tx\":" + txJson() + "}";
+        }
         private String exec(String raw, int maxRows, int timeout) throws Exception {
+            return execParams(raw,maxRows,timeout,null);
+        }
+        private String execParams(String raw, int maxRows, int timeout, List<String> binds) throws Exception {
             requireConn();
             closeCursor();
             String sql = normalize(raw);
@@ -509,11 +534,21 @@ public class NcDbBridge {
                         body = body + ",\"sets\":" + extra;
                     }
                 } else {
-                    Statement plain = conn.createStatement();
-                    st = plain;
+                    if (binds == null) st = conn.createStatement();
+                    else {
+                        PreparedStatement ps = conn.prepareStatement(toQuestionMarks(sql));
+                        st = ps;
+                        for (int i=0; i<binds.size(); i+=2) {
+                            int n=i/2+1; String type=binds.get(i), value=binds.get(i+1);
+                            if ("null".equals(type)) ps.setNull(n, java.sql.Types.VARCHAR);
+                            else if ("number".equals(type)) ps.setBigDecimal(n,new java.math.BigDecimal(value));
+                            else if ("bool".equals(type)) ps.setInt(n,"true".equals(value)?1:0);
+                            else ps.setString(n,value);
+                        }
+                    }
                     st.setQueryTimeout(timeout);
                     running = st; // 让 cancel 能找到它
-                    boolean hasRs = st.execute(sql);
+                    boolean hasRs = binds == null ? st.execute(sql) : ((PreparedStatement)st).execute();
                     if (hasRs) {
                         ResultSet rs = st.getResultSet();
                         body = readRows(rs, maxRows);

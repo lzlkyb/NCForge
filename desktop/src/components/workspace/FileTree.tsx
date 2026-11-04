@@ -2,11 +2,9 @@ import {
   useCallback,
   useImperativeHandle,
   useMemo,
-  useRef,
   useState,
   forwardRef,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import { ContextMenu } from "./ContextMenu";
 import { TreeFilterBar, TreeDeleteConfirm } from "./TreeChrome";
@@ -15,12 +13,16 @@ import { TreeProjectRows } from "./TreeProjectRows";
 import { useTreeDelete } from "./useTreeDelete";
 import { useTreeEdit } from "./useTreeEdit";
 import { useTreeLoad } from "./useTreeLoad";
+import { useTreeHandlers } from "./useTreeHandlers";
+import { useNcComponents } from "../../hooks/useNcComponents";
 import { useTreeMenu } from "../../hooks/useTreeMenu";
 import { useTreeLocate } from "../../hooks/useTreeLocate";
-import { type NewEntryKind } from "../../lib/workspace";
+import {
+  type NewEntryKind,
+} from "../../lib/workspace";
 import { flattenTree, treeKeyAction, treeRowId as rowId } from "../../lib/treeNav";
 import { countBookmarks, useBookmarks } from "../../lib/bookmarks";
-import { useCompactPackages, useRevealOnOpen } from "../../lib/treeViewPrefs";
+import { useCompactPackages, useNcStructure, useRevealOnOpen } from "../../lib/treeViewPrefs";
 import { isUnderPath } from "../../lib/treeProjects";
 import type { LinkedProject } from "../../lib/linkedProjects";
 
@@ -43,6 +45,11 @@ interface Props {
   onDeleted: (paths: string[]) => void;
   /** 当前已打开的标签，删除确认里要提示会影响几个。 */
   openPaths: string[];
+  /**
+   * 编译某个路径所属的模块（右键菜单「编译模块 X」）。
+   * 与标签栏那个不同：它不依赖活动标签，批量改完一个模块后不用先打开它的文件。
+   */
+  onCompileModule: (path: string) => void;
 }
 
 export interface FileTreeHandle {
@@ -58,18 +65,22 @@ export interface FileTreeHandle {
  * - **自动定位**：右边打开什么文件，左边就展开并滚到那一行（只对工作区内的真实文件；
  *   标题栏可关，显式的「在文件树中显示」不受开关影响）；
  * - **压缩中间包**：`com → aier → erp` 合成一行（`lib/treeCompact`，与键盘导航同源）；
- * - **speed search**：焦点在树上直接敲字筛选，Esc 清除。
+ * - **NC 结构视图**：业务组件模块的 `src` 摊平，展开直接看到 `public/client/private/test`
+ *   （`lib/ncStructure`，与键盘导航同源；默认关，见 `lib/treeViewPrefs`）。
+ *
+ * speed search：焦点在树上直接敲字筛选，Esc 清除。
  *
  * 展开态与已加载的目录存在 `lib/workspaceSession`：切页面会卸载本组件，
  * 状态要是留在 useState 里，从搜索页跳回来就得重新点开一遍。
  */
 export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
-  { root, projects, activePath, onOpen, onPin, onCreated, onRenamed, onDeleted, openPaths },
+  { root, projects, activePath, onOpen, onPin, onCreated, onRenamed, onDeleted, openPaths, onCompileModule },
   ref,
 ) {
   const [selected, setSelected] = useState<{ path: string; isDir: boolean } | null>(null);
   const [filter, setFilter] = useState("");
   const compact = useCompactPackages();
+  const ncStructure = useNcStructure();
   const revealOnOpen = useRevealOnOpen();
   const multi = (projects?.length ?? 0) > 1;
   // 稳定引用：它进了 useTreeLoad.reveal 的依赖，每帧换新会让自动定位反复触发
@@ -81,12 +92,16 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     () => (multi ? rootRows.map((r) => r.path) : [root]),
     [multi, rootRows, root],
   );
+  const bookmarks = useBookmarks(root);
+  // manifest.xml 只用来给模块行打「业务组件」徽章、并决定 NC 结构视图摊不摊 `src`，
+  // 不参与树的取数（见 lib/ncManifest / hooks/useNcComponents）
+  const { bcNames, isBcModule, hoist } = useNcComponents(roots, ncStructure);
   const { dirs, expanded, marks, load, expand, toggle, toggleRow, depthOf, reveal } = useTreeLoad(
     root,
     compact,
     roots,
+    hoist,
   );
-  const bookmarks = useBookmarks(root);
   // 行只拿一个数字（条数），值没变时行组件的 memo 仍然命中
   const bookmarkCounts = useMemo(() => countBookmarks(bookmarks), [bookmarks]);
   const isEditable = useCallback(
@@ -123,6 +138,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     root,
     isEditable,
     onOpen,
+    onCompileModule,
     beginCreate,
     beginRename,
     askDelete,
@@ -151,8 +167,9 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
         filter: filterFn,
         compact,
         projectRows: multi,
+        hoist,
       }),
-    [dirs, expanded, root, rootRows, multi, filterFn, compact],
+    [dirs, expanded, root, rootRows, multi, filterFn, compact, hoist],
   );
 
   /**
@@ -186,7 +203,8 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
         const row = flat.find((r) => r.path === act.path);
         // 工程根行不参与压缩链：点一下只展开这一层
         if (row?.project) toggle(act.path);
-        else toggleRow(act.path, row?.parent ?? root);
+        // NC 结构视图摊平后的行真身在 `bill/src` 下，问压缩链要用真实父目录
+        else toggleRow(act.path, row?.realParent ?? row?.parent ?? root);
       } else onOpen(act.path);
       return;
     }
@@ -206,35 +224,17 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
 
   // ---- 渲染 ----
 
-  /**
-   * 行组件是 `memo` 的，所以传给它们的回调必须**身份稳定**。
-   *
-   * 直接传 `() => …` 等于每次渲染都换一批 prop，`memo` 一次也命中不了；而在
-   * `useCallback` 上挂全量依赖又会随 `dirs/expanded` 每变一次就换一次身份。
-   * 做法是 ref 里存最新实现、外层给一次性外壳——行组件拿到的是稳定引用，调用的
-   * 永远是当前闭包。
-   */
-  const latest = useRef({ toggleRow, toggle, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected, isEditable });
-  latest.current = { toggleRow, toggle, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected, isEditable };
-  const handlers = useMemo(
-    () => ({
-      onToggle: (tail: string, parent: string) => latest.current.toggleRow(tail, parent),
-      onProjectToggle: (path: string) => latest.current.toggle(path),
-      onActivate: (path: string) => {
-        latest.current.setSelected({ path, isDir: false });
-        latest.current.onOpen(path);
-      },
-      // 双击固定预览只对当前工程的文件有意义：别的工程还没打开，点了会先切工作区
-      onPin: (path: string) => {
-        if (latest.current.isEditable(path)) latest.current.onPin?.(path);
-      },
-      onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) =>
-        latest.current.openMenu(e, path, isDir),
-      onCommitEdit: (v: string) => void latest.current.commitEdit(v),
-      onCancelEdit: () => latest.current.cancelEdit(),
-    }),
-    [],
-  );
+  const handlers = useTreeHandlers({
+    toggleRow,
+    toggle,
+    onOpen,
+    onPin,
+    openMenu,
+    commitEdit,
+    cancelEdit,
+    setSelected,
+    isEditable,
+  });
 
   const ctx: TreeRowsCtx = {
     dirs,
@@ -245,6 +245,9 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     bookmarkCounts,
     filter: filterFn,
     compact,
+    hoist,
+    isBcModule,
+    bcNames,
     editing,
     editError,
     busy,

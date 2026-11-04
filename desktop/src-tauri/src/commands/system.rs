@@ -38,6 +38,9 @@ pub struct ConfigPatch {
     /// 编译/启动前自动把工程 `META-INF` 元数据投送到 NCHOME。
     #[serde(default)]
     pub deploy_on_start: Option<bool>,
+    /// 保存 `.java` 后自动编译该文件（只编这一个文件，不编整模块）。
+    #[serde(default)]
+    pub auto_compile: Option<bool>,
 }
 
 /// 落盘并返回改完的**完整配置**：调用方据此回填表单，不用再 get 一次。
@@ -54,6 +57,9 @@ pub async fn patch_config(
             }
             if let Some(v) = patch.deploy_on_start {
                 cfg.deploy_on_start = v;
+            }
+            if let Some(v) = patch.auto_compile {
+                cfg.auto_compile = v;
             }
             Ok(())
         })

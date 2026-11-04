@@ -43,7 +43,7 @@ interface Props {
    */
   heavy: boolean;
   onCursor: (line: number, column: number) => void;
-  onSave: () => void;
+  onSave: (prepare?: () => Promise<void | "failed">) => void;
 }
 
 type Editor = ReturnType<typeof monaco.editor.create>;
@@ -90,7 +90,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       wordBasedSuggestions: "currentDocument",
     });
     // Ctrl+S 与自动保存共用：先按偏好格式化，再落盘
-    const saveNow = () => void formatBeforeSave(editor).then(() => onSaveRef.current());
+    const saveNow = () => onSaveRef.current(() => formatBeforeSave(editor));
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveNow());
     // Ctrl+Alt+O = 组织导入（IDEA 同键）。走命令而不是 provider：
     // 它是一次性的整文件动作，不是「编辑器要显示什么」。

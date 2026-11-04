@@ -3,12 +3,16 @@ import {
   firstLine,
   formatBytes,
   formatRevTime,
+  formatWhen,
   friendlySvnError,
   keyOf,
   letterTone,
   parseSvnError,
   reviewProgress,
   reviewedSet,
+  sortChanges,
+  type ChangeGroup,
+  type ChangeItem,
   type ChangesView,
   type StatusLetter,
 } from "./svn";
@@ -184,5 +188,91 @@ describe("friendlySvnError", () => {
 
   it("其它 code 原样透出后端消息（不丢关键细节）", () => {
     expect(friendlySvnError("other|磁盘满了")).toBe("磁盘满了");
+  });
+});
+
+describe("sortChanges", () => {
+  const item = (rel: string, mtimeMs: number | null, module = "pu"): ChangeItem => ({
+    path: `C:/ws/${rel}`,
+    rel,
+    module,
+    letter: "M",
+    status: "modified",
+    revision: 1,
+    isDir: false,
+    ignored: false,
+    mtimeMs,
+  });
+  const group = (module: string, items: ChangeItem[]): ChangeGroup => ({ module, items });
+
+  it("path 模式原样返回（后端已按路径排好）", () => {
+    const gs = [group("pu", [item("b.java", 200), item("a.java", 100)])];
+    expect(sortChanges(gs, "path")).toBe(gs);
+  });
+
+  it("mtime 模式组内新的在上", () => {
+    const gs = [group("pu", [item("a.java", 100), item("b.java", 300), item("c.java", 200)])];
+    expect(sortChanges(gs, "mtime")[0].items.map((i) => i.rel)).toEqual(["b.java", "c.java", "a.java"]);
+  });
+
+  it("取不到 mtime 的条目排最后，且不被当成 1970 年排最前", () => {
+    const gs = [group("pu", [item("gone.java", null), item("old.java", 100), item("new.java", 900)])];
+    expect(sortChanges(gs, "mtime")[0].items.map((i) => i.rel)).toEqual(["new.java", "old.java", "gone.java"]);
+  });
+
+  it("同一时刻按路径兜底，顺序稳定", () => {
+    const gs = [group("pu", [item("b.java", 500), item("a.java", 500)])];
+    expect(sortChanges(gs, "mtime")[0].items.map((i) => i.rel)).toEqual(["a.java", "b.java"]);
+  });
+
+  it("模块组按组内最新时间降序", () => {
+    const gs = [
+      group("pu", [item("x.java", 100)]),
+      group("ic", [item("y.java", 900)]),
+      group("ap", [item("z.java", 500)]),
+    ];
+    expect(sortChanges(gs, "mtime").map((g) => g.module)).toEqual(["ic", "ap", "pu"]);
+  });
+
+  it("不改传入的数组", () => {
+    const gs = [group("pu", [item("a.java", 100), item("b.java", 200)])];
+    sortChanges(gs, "mtime");
+    expect(gs[0].items.map((i) => i.rel)).toEqual(["a.java", "b.java"]);
+  });
+});
+
+describe("formatWhen", () => {
+  const now = new Date("2026-11-04T14:30:00").getTime();
+  const at = (s: string) => new Date(s).getTime();
+
+  it("读不到给破折号", () => {
+    expect(formatWhen(null, now)).toBe("—");
+    expect(formatWhen(0, now)).toBe("—");
+    expect(formatWhen(undefined, now)).toBe("—");
+  });
+
+  it("5 分钟内是刚刚", () => {
+    expect(formatWhen(at("2026-11-04T14:26:00"), now)).toBe("刚刚");
+  });
+
+  it("当天给时刻", () => {
+    expect(formatWhen(at("2026-11-04T09:05:00"), now)).toBe("09:05");
+  });
+
+  it("昨天与天前", () => {
+    expect(formatWhen(at("2026-11-03T23:50:00"), now)).toBe("昨天");
+    expect(formatWhen(at("2026-11-03T20:00:00"), now)).toBe("昨天");
+    expect(formatWhen(at("2026-11-01T08:00:00"), now)).toBe("3 天前");
+  });
+
+  it("更早给月日，跨年带年份", () => {
+    expect(formatWhen(at("2026-10-19T17:15:00"), now)).toBe("10-19");
+    expect(formatWhen(at("2025-12-30T17:15:00"), now)).toBe("25-12-30");
+  });
+
+  it("时钟偏差不出现负数", () => {
+    // 文件时间比现在新 2 小时：同一天给时刻，跨天给月日
+    expect(formatWhen(at("2026-11-04T16:00:00"), now)).toBe("16:00");
+    expect(formatWhen(at("2026-11-06T01:00:00"), now)).toBe("11-06");
   });
 });

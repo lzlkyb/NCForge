@@ -152,6 +152,8 @@ export function ConnTree() {
                 type="button"
                 className="dbx-crow"
                 data-active={activeConn === c.id || undefined}
+                aria-expanded={expanded}
+                aria-controls={expanded ? `dbx-objects-${c.id}` : undefined}
                 data-drop={drag?.over === c.id && drag.from !== c.id ? "" : undefined}
                 title={`${c.user}@${c.url}${c.note ? `\n${c.note}` : ""}`}
                 draggable
@@ -178,8 +180,10 @@ export function ConnTree() {
                 <span className="u">{dbNameOf(c.url)}</span>
                 <ConnStatus status={rt.status} />
               </button>
-              {expanded && rt.status === "connected" && <ConnObjects connId={c.id} filter={q} />}
-              {expanded && rt.status === "error" && <p className="dbx-tree-note" style={{ color: "hsl(var(--destructive-ink))" }}>{rt.error}</p>}
+              {expanded && <div id={`dbx-objects-${c.id}`}>
+                {rt.status === "connected" && <ConnObjects connId={c.id} filter={q} />}
+                {rt.status === "error" && <p className="dbx-tree-note" style={{ color: "hsl(var(--destructive-ink))" }}>{rt.error}</p>}
+              </div>}
             </div>
           );
         })}

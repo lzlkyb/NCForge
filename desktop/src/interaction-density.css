@@ -1,0 +1,44 @@
+/* The shell keeps its window geometry; comfort improves reading without invalidating virtual row offsets. */
+.app-shell .wb-tab-x { width:26px; height:26px; border-radius:var(--r-control); }
+.app-shell .wb-settings-clear { width:24px; height:24px; flex-shrink:0; border-radius:var(--r-control); }
+.app-shell .wb-global-search { min-width:28px; max-width:100%; }
+.app-shell .wb-global-search > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.app-shell .wb-main { container-name:workbench-document; container-type:inline-size; }
+.app-shell .dbx-dd .li:focus-visible { background:hsl(var(--accent)); outline:2px solid hsl(var(--ring)); outline-offset:-2px; }
+.dbx-dlg .bd > .dbx-form-label { color:hsl(var(--muted-foreground)); text-align:right; }
+.dbx-dlg .bd > div.dbx-form-label { font-size:var(--dbx-fs-meta); }
+.app-shell .lg-chips { flex-wrap:wrap; overflow-x:hidden; overflow-y:auto; max-height:112px; }
+html[data-ui-density="comfortable"] { --dbx-fs-body:13px; --dbx-fs-meta:12px; --dbx-h-control:32px; }
+html[data-ui-density="comfortable"] .app-shell { font-size:14px; }
+html[data-ui-density="comfortable"] .app-shell :is(.wb-row,.wb-tab,.lg-list,.lg-chip,.wb-settings-nav button,.wb-db-list button) { font-size:13px; }
+html[data-ui-density="comfortable"] .app-shell :is(.lg-btn,.lg-field input,.lg-field select,.lg-chip,.wb-db-filter,.wb-settings-search) { min-height:32px; height:32px; }
+html[data-ui-density="comfortable"] .app-shell :is(.srow .t,.srow-control input,.srow-control select,.settings-choice button) { font-size:14px; }
+html[data-ui-density="comfortable"] .app-shell .srow .d { font-size:13px; }
+html[data-ui-density="comfortable"] .app-shell .wb-search-tool input { font-size:14px; }
+html[data-ui-density="comfortable"] .app-shell :is(.wb-settings-search input,.lg-field input,.lg-field select,.lg-check) { font-size:13px; }
+html[data-ui-density="comfortable"] .app-shell :is(.settings-choice button,.srow-control input:not([type="checkbox"],[type="radio"],[type="range"]),.srow-control select) { min-height:32px; }
+html[data-ui-density="comfortable"] .app-shell .wb-settings-nav button { padding-block:9px; }
+@container workbench-document (max-width:720px) {
+  .dbx-sqlbar .dbx-connpick { max-width:100%; }
+  .dbx-sqlbar .dbx-sp { flex-basis:100%; height:0; }
+  .lg-head .lg-sub { flex-basis:100%; overflow-wrap:anywhere; }
+  .dbx-txbar { flex-wrap:wrap; }
+  .vc-file-head { flex-wrap:wrap; height:auto; }
+  .vc-file-head :is(.vc-path,.vc-url) { min-width:0; overflow-wrap:anywhere; }
+}
+@container workbench-document (max-width:440px) {
+  .dbx-sqlbar .dbx-connpick { flex-basis:100%; }
+  .dbx-sqlbar .dbx-connpick > b { flex:1; }
+  .dbx-sqlbar .k { display:none; }
+  .lg-head { gap:6px; padding-inline:10px; }
+}
+@media(max-width:650px) {
+  .app-shell .app-topbar { gap:4px; }
+  .app-shell .wb-header-menus { gap:3px; }
+  .app-shell .wb-global-search { width:auto; flex:1; }
+  .app-shell .wb-status { gap:5px; overflow-x:auto; scrollbar-width:none; }
+  .app-shell .wb-status-path { min-width:36px; max-width:70px; }
+  .app-shell .wb-status .wb-lang { max-width:110px; }
+  /* 编码等次要信息让位于任务与服务；警告和待提交事务仍然可见。 */
+  .app-shell .wb-status :is(.wb-status-meta,[data-priority="secondary"]) { display:none; }
+}
