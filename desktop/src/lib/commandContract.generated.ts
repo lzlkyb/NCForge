@@ -4,6 +4,15 @@
 
 export const TAURI_COMMANDS = [
   "app_quit",
+  "bmf_doc_detail",
+  "bmf_edit_preview",
+  "bmf_edit_save",
+  "bmf_generate",
+  "bmf_index_scan",
+  "bmf_publish_probe",
+  "bmf_scaffold_preview",
+  "bmf_scaffold_write",
+  "bmf_validate",
   "check_artifacts",
   "check_update",
   "compile_all_modules",

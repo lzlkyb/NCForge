@@ -11,6 +11,13 @@
 //! 最后在 `main.rs` 的 `invoke_handler!` 注册。四处，缺一不可。
 
 pub mod atomic_file;
+pub mod bmf_gen;
+pub mod bmf_index;
+pub mod bmf_model;
+pub mod bmf_publish;
+pub mod bmf_rules;
+pub mod bmf_scaffold;
+pub mod bmf_write;
 pub mod branding;
 pub mod commands;
 pub mod compile;

@@ -43,6 +43,11 @@ export const WORKSPACE_NAV: NavItem[] = [
   { key: "svn", label: "版本控制", icon: "gitBranch" },
   { key: "db", label: "数据库", icon: "database" },
   { key: "logs", label: "日志排查", icon: "log", showInRail: false },
+  // 元数据（BMF）独立成页：读/校验/生成/发布 POC 与数据库连接是两件事，
+  // 并进数据库页会让「我在改结构」和「我在看库」混在同一套侧栏里。
+  // 它在 rail 上紧跟数据库（logs 隐藏时不占位）；Ctrl 序号另见 App.tsx 的
+  // HOTKEY_TABS——为不挤动日志 Ctrl+4 / 设置 Ctrl+5，元数据排在设置之后。
+  { key: "meta", label: "元数据", icon: "layers" },
   // 工程关联不是页签：入口在代码页状态栏、问题面板诊断行与命令面板（弹框）。
   // 数据字典不再是主导航项：它是数据库页的一种文档标签（读的就是连接树选中的库）。
 ];

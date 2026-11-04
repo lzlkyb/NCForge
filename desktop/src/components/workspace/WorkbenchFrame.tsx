@@ -16,11 +16,12 @@ const DOCUMENT_TOOLS: Record<string, DockToolTab> = {
   // 页内还有「审查改动 / 打包补丁」两个视图，标签只说页名，避免切到补丁时名不副实
   svn: { label: "版本控制", icon: "gitBranch" },
   db: { label: "数据库", icon: "database", custom: true },
+  meta: { label: "元数据", icon: "layers" },
   logs: { label: "日志排查", icon: "log" },
   settings: { label: "设置", icon: "settings" },
 };
 /** 主导航直接显示对应工具；文件模型仍挂载，点源码标签即可继续编辑。 */
-const DOCUMENT_DEFAULT_OPEN = ["svn", "db", "logs", "settings"];
+const DOCUMENT_DEFAULT_OPEN = ["svn", "db", "meta", "logs", "settings"];
 /** NC 服务的卡片 + 日志放在底部面板里，打开这个标签时把面板撑高到够看。 */
 const SERVICES_PANEL_MIN = 360;
 const HOST_NAMES: DockRegionName[] = ["toolbar", "sidebar", "document", "bottom", "actions", "tabs"];

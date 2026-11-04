@@ -8,6 +8,7 @@
 //! - 新增命令：在子模块写 `#[tauri::command]` → 此处 `mod` + `pub use` →
 //!   `main.rs` 的 `invoke_handler!` 加一行。三处，缺一不可。
 
+mod bmf_cmds;
 mod compile_cmds;
 mod db_cmds;
 mod db_conn_cmds;
@@ -39,6 +40,7 @@ mod update;
 mod upm_cmds;
 mod workspace_cmds;
 
+pub use bmf_cmds::*;
 pub use compile_cmds::*;
 pub use db_cmds::*;
 pub use db_conn_cmds::*;

@@ -59,6 +59,8 @@ const SvnTab = lazy(() =>
   import("./components/tabs/SvnTab").then((m) => ({ default: m.SvnTab })),
 );
 const DbTab = lazy(() => import("./components/tabs/DbTab").then((m) => ({ default: m.DbTab })));
+// 元数据页带自己的解析/校验/生成视图与 meta.css，低频但体量不小，懒加载。
+const MetaTab = lazy(() => import("./components/meta/MetaTab").then((m) => ({ default: m.MetaTab })));
 // 工程关联不再是页签：入口在代码页状态栏 / 问题面板 / 命令面板，弹框本身懒加载。
 // 低频日志排查从菜单按需打开；首次使用才加载，主导航不常驻入口。
 const LogTab = lazy(() => import("./components/tabs/LogTab").then((m) => ({ default: m.LogTab })));
@@ -75,8 +77,13 @@ const QuickPalette = lazy(() =>
  * settings 不在 WORKSPACE_NAV 里——它在侧栏 foot 单独渲染（带更新未读红点），
  * 但键盘用户同样需要一键直达，故快捷键序列在 App 层追加，不动侧栏数据源。
  * 加导航项会把它往后挤一位（补丁 / 数据字典 / 工程关联并入别处后，设置从 Ctrl+10 变 Ctrl+5）。
+ * 元数据页是新加的：顺序上排在设置之后（Ctrl+6），否则会把日志 / 设置的既有键位挤动。
  */
-const HOTKEY_TABS: string[] = [...WORKSPACE_NAV.map((n) => n.key), "settings"];
+const HOTKEY_TABS: string[] = [
+  ...WORKSPACE_NAV.map((n) => n.key).filter((key) => key !== "meta"),
+  "settings",
+  "meta",
+];
 
 /**
  * 服务启停正在路上：连按 Enter 会把同一条指令发好几遍。
@@ -235,6 +242,7 @@ function AppContent() {
         run: openPatchPage,
       },
       go("db", "数据库"),
+      go("meta", "元数据"),
       {id:"db.objects",title:"查找数据库对象",hint:"Ctrl+Alt+O",run:()=>{navRef.current("db");showObjectFinder();}},
       {
         id: "go.linked",
@@ -437,6 +445,8 @@ function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: strin
       );
     case "db":
       return <DbTab />;
+    case "meta":
+      return <MetaTab />;
     case "logs":
       return <LogTab />;
     case "settings":
