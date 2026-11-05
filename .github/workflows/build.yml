@@ -826,7 +826,11 @@ jobs:
           # Release 上的资产是平铺的，而镜像脚本按 mac-artifact/ 与
           # desktop/dist/resource-packs/ 两处取，这里搬到对应位置。
           # 若本次没发 mac，这两条 Move 匹配不到文件，SilentlyContinue 即"没有 mac 条目"。
-          Move-Item dist-out/*.app.tar.gz dist-out/*.app.tar.gz.sig -Destination mac-artifact/ -ErrorAction SilentlyContinue
+          # Move-Item 的 Path 只吃一个位置参数：两个通配必须分两条，写成
+          # `Move-Item a/*.x a/*.x.sig -Destination d` 会报
+          # "A positional parameter cannot be found that accepts argument 'a/*.x.sig'"。
+          Move-Item dist-out/*.app.tar.gz -Destination mac-artifact/ -ErrorAction SilentlyContinue
+          Move-Item dist-out/*.app.tar.gz.sig -Destination mac-artifact/ -ErrorAction SilentlyContinue
           Get-ChildItem dist-out/*.zip | Where-Object { $_.Name -notlike 'nc-forge_*' } |
             Move-Item -Destination desktop/dist/resource-packs/ -Force
           Write-Host "已下载：$((Get-ChildItem dist-out -File).Name -join ', ')"
