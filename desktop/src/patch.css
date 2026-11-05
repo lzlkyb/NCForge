@@ -158,12 +158,6 @@
   white-space: nowrap;
 }
 
-.pk-split {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
 /* ── 左：清单 ── */
 .pk-list {
   container: patch-list / inline-size;

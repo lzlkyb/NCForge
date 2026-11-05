@@ -24,25 +24,6 @@
   white-space: nowrap;
   flex-shrink: 0;
 }
-.vc-rev {
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: hsl(var(--muted-foreground));
-  background: hsl(var(--secondary));
-  border-radius: var(--r-control);
-  padding: 1px 8px;
-  font-family: "Cascadia Mono", Consolas, monospace;
-}
-.vc-url {
-  min-width: 0;
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
-  font-family: "Cascadia Mono", Consolas, monospace;
-  max-width: 420px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .vc-sp {
   flex: 1;
 }
@@ -122,13 +103,6 @@
   color: hsl(var(--destructive-ink));
   border-color: hsl(var(--destructive) / 0.4);
   background: hsl(var(--destructive) / 0.08);
-}
-
-/* 左右分栏 */
-.vc-split {
-  display: flex;
-  flex: 1;
-  min-height: 0;
 }
 
 /* ── 左：改动列表 ── */
@@ -281,16 +255,6 @@
 .vc-row[data-reviewed] .vc-fn {
   color: hsl(var(--muted-foreground));
 }
-.vc-dir {
-  margin-left: auto;
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
-  max-width: 96px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
 /* 修改时间列（只在按时间排序时出现）：跟在目录后面，固定宽度不参与压缩 */
 .vc-row .vc-when {
   margin-left: 8px;
@@ -345,19 +309,6 @@
   color: hsl(var(--foreground));
   font-variant-numeric: tabular-nums;
 }
-.vc-prog {
-  height: 4px;
-  border-radius: 2px;
-  background: hsl(var(--secondary));
-  overflow: hidden;
-}
-.vc-prog i {
-  display: block;
-  height: 100%;
-  background: hsl(var(--success));
-  border-radius: 2px;
-  transition: width var(--dur-fast) var(--ease);
-}
 
 /* ── 右：内容区 ── */
 .vc-main {
@@ -386,17 +337,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.vc-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 26px;
-  padding: 0 12px;
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
-  border-bottom: 1px solid hsl(var(--border));
-  flex-shrink: 0;
 }
 .vc-meta .mono {
   font-family: "Cascadia Mono", Consolas, monospace;
@@ -428,23 +368,6 @@
   color: hsl(var(--success-ink));
   border-color: hsl(var(--success) / 0.45);
   background: hsl(var(--success) / 0.1);
-}
-
-.vc-diff-body {
-  flex: 1;
-  min-height: 0;
-  background: hsl(var(--card));
-}
-.vc-diff-foot {
-  min-height: 36px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 12px;
-  flex-wrap: wrap;
-  border-top: 1px solid hsl(var(--border));
-  flex-shrink: 0;
-  background: hsl(var(--card));
 }
 
 /* ── 提交 ── */
@@ -490,53 +413,6 @@
 .vc-msg:focus {
   border-color: hsl(var(--ring));
 }
-.vc-pick {
-  border: 0;
-  border-top: 1px solid hsl(var(--border));
-  border-bottom: 1px solid hsl(var(--border));
-  border-radius: 0;
-  overflow: hidden;
-}
-.vc-pick-hd {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  background: hsl(var(--secondary));
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
-  min-height: 30px;
-}
-.vc-pick-it {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 5px 10px;
-  font-size: 12px;
-  border-top: 1px solid hsl(var(--border));
-  text-align: left;
-  min-height: 30px;
-}
-.vc-pick-it[data-off] {
-  color: hsl(var(--muted-foreground));
-}
-.vc-cbx {
-  width: 13px;
-  height: 13px;
-  border-radius: var(--r-control);
-  border: 1.5px solid hsl(var(--border));
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  font-size: 11px;
-  color: transparent;
-}
-.vc-cbx[data-on] {
-  background: hsl(var(--primary));
-  border-color: transparent;
-  color: hsl(var(--primary-foreground));
-}
 .vc-commit-foot {
   border-top: 1px solid hsl(var(--border));
   padding: 6px 12px;
@@ -557,17 +433,6 @@
   flex: 1;
   overflow: auto;
   min-height: 0;
-}
-.vc-log-it {
-  padding: 9px 12px;
-  border-bottom: 1px solid hsl(var(--border));
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  cursor: default;
-}
-.vc-log-it:hover {
-  background: hsl(var(--secondary) / 0.5);
 }
 .vc-log-hd {
   display: flex;
@@ -642,27 +507,6 @@
   background: hsl(var(--card));
   border-radius: var(--r-control);
   padding: 0 3px;
-}
-
-/* ── 冲突 ── */
-.vc-conflict {
-  flex: 1;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow: auto;
-}
-.vc-ver {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 9px;
-  border: 0;
-  border-bottom: 1px solid hsl(var(--border));
-  border-radius: 0;
-  background: hsl(var(--card));
-  font-size: 11px;
 }
 .vc-ver .tag {
   font-size: 11px;
@@ -747,27 +591,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.vc-pick-it:disabled {
-  cursor: not-allowed;
-}
-.vc-pick-it:disabled:hover {
-  background: none;
-}
-.vc-cbx {
-  padding: 0;
-  cursor: pointer;
-}
 
 /* 提交视图需要 min-width:0，否则长文件名会把右栏顶宽 */
 .vc-commit {
   min-width: 0;
-}
-
-/* 冲突：三个版本纵向排列 */
-.vc-ver-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
 }
 .vc-ver .p {
   font-family: "Cascadia Mono", Consolas, monospace;
@@ -800,11 +627,6 @@
 }
 .vc-blame-row:hover {
   background: hsl(var(--secondary) / 0.6);
-}
-.vc-blame-g {
-  width: 3px;
-  height: 20px;
-  flex-shrink: 0;
 }
 .vc-blame-rev {
   width: 58px;
@@ -847,14 +669,8 @@
   .vc-head .vc-hint {
     display: none;
   }
-  .vc-url {
-    max-width: 220px;
-  }
 }
 @media (max-width: 1000px) {
-  .vc-url {
-    display: none;
-  }
   .vc-chg {
     width: 268px;
   }

@@ -1,12 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 
 // 纯函数测试跑在 node 环境：monaco 的 ESM 在导入期就摸 window，必须先挡掉。
-vi.mock("./monacoSetup", () => ({ monaco: { editor: {}, languages: {} } }));
+const mocks = vi.hoisted(() => ({ register: vi.fn(), invoke: vi.fn(), session: 1 }));
+vi.mock("./monacoSetup", () => ({ monaco: { languages: { registerDocumentSemanticTokensProvider: mocks.register } } }));
+vi.mock("./editorStore", () => ({ pathOfModel: () => "C:/workspace/Demo.java" }));
+vi.mock("./tauri", () => ({ invoke: mocks.invoke }));
+vi.mock("./lang", () => ({
+  inLangModule: () => true,
+  langReady: () => true,
+  langCapabilityEpoch: () => mocks.session,
+  onLangReadyChange: (cb: (ready: boolean) => void) => cb(true),
+  flushDoc: async () => {},
+  langRequest: async () => ({ tokenTypes: ["property", "type", "variable"], tokenModifiers: ["static", "readonly", "deprecated"] }),
+}));
 
 import {
   DEPRECATED_TOKEN_TYPE,
   deprecatedBit,
   markDeprecated,
+  initSemanticTokens,
   parseLegend,
   toTokenData,
 } from "./semanticTokens";
@@ -74,4 +86,25 @@ describe("legend 与 deprecated 修饰", () => {
     markDeprecated(data, 0, 9);
     expect(data[3]).toBe(0);
   });
+});
+
+
+it("常量保留独立样式，编辑或语言服务切换后的旧结果不会着色", async () => {
+  let version = 1;
+  const model = { getVersionId: () => version, isDisposed: () => false };
+  const cancel = { isCancellationRequested: false };
+  initSemanticTokens();
+  await vi.waitFor(() => expect(mocks.register).toHaveBeenCalledOnce());
+  const provider = mocks.register.mock.calls[0][1];
+  const types: string[] = provider.getLegend().tokenTypes;
+  const tokens = { data: [0, 0, 4, 0, 3, 0, 6, 4, 0, 1, 0, 6, 4, 0, 7] };
+  mocks.invoke.mockImplementationOnce(async () => { version++; return tokens; });
+  expect(await provider.provideDocumentSemanticTokens(model, null, cancel)).toBeNull();
+  mocks.invoke.mockImplementationOnce(async () => { mocks.session++; return tokens; });
+  expect(await provider.provideDocumentSemanticTokens(model, null, cancel)).toBeNull();
+  mocks.invoke.mockResolvedValueOnce(tokens);
+  const result = await provider.provideDocumentSemanticTokens(model, null, cancel);
+  expect([types[result.data[3]], types[result.data[8]], types[result.data[13]]]).toEqual([
+    "nc-java-constant", "nc-java-property", "nc-java-deprecated",
+  ]);
 });

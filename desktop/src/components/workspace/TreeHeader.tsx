@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
-import { Icon } from "../ui/icon";
+import { WorkspaceGlyph } from "./WorkspaceGlyph";
 import { pickFolder, pickFolderError } from "../../lib/folderPicker";
 import { baseName } from "../../lib/workspace";
 import { useOperations } from "../../lib/operations";
+import { setPackageView, usePackageView } from "../../lib/treeViewPrefs";
 import { TreeViewOptions } from "./TreeViewOptions";
 
 /**
@@ -33,6 +34,7 @@ export function TreeHeader({
   /** 切到全工程搜索（侧栏视图，不再占主导航页签）。 */
   onSearch: () => void;
 }) {
+  const packageView = usePackageView();
   const tasks = useOperations();
   const switching = tasks.some((o) => o.key === "workspace.switch" && !o.endedAt);
   const [error, setError] = useState<string | null>(null);
@@ -55,10 +57,16 @@ export function TreeHeader({
 
   return (
     <>
-      <div className="wb-pane-title">
+      <div className="wb-pane-title wb-code-tree-title">
         {/* 原样显示目录名：`toUpperCase` 会把 `nc-workbench` 改成另一串字，
             含中文时又只改到其中几个字母，用户核对路径时反而找不到对应目录。 */}
-        <span title={root}>资源管理器 · {baseName(root) || root}</span>
+        <div className="wb-code-tree-heading">
+          <span title={root}>{packageView ? "包资源管理器" : "资源管理器"}</span>
+          <div className="wb-tree-view-switch" role="group" aria-label="资源树视图">
+            <button type="button" aria-label="文件视图" aria-pressed={!packageView} onClick={() => setPackageView(false)}>文件</button>
+            <button type="button" aria-label="包视图" aria-pressed={packageView} onClick={() => setPackageView(true)}>包</button>
+          </div>
+        </div>
         <div className="wb-pane-acts">
           <TreeViewOptions root={root} />
           <button
@@ -68,7 +76,7 @@ export function TreeHeader({
             aria-label="全工程搜索"
             onClick={onSearch}
           >
-            <Icon name="search" size={14} />
+            <WorkspaceGlyph name="search" size={14} />
           </button>
           <button
             type="button"
@@ -77,7 +85,7 @@ export function TreeHeader({
             aria-label="新建文件"
             onClick={onCreateFile}
           >
-            <Icon name="filePlus" size={14} />
+            <WorkspaceGlyph name="newFile" size={14} />
           </button>
           <button
             type="button"
@@ -86,7 +94,7 @@ export function TreeHeader({
             aria-label="新建文件夹"
             onClick={onCreateDir}
           >
-            <Icon name="folderPlus" size={14} />
+            <WorkspaceGlyph name="newFolder" size={14} />
           </button>
           <button
             type="button"
@@ -96,7 +104,7 @@ export function TreeHeader({
             disabled={switching}
             onClick={() => void choose()}
           >
-            <Icon name="folder" size={14} />
+            <WorkspaceGlyph name="openWorkspace" size={14} />
           </button>
         </div>
       </div>

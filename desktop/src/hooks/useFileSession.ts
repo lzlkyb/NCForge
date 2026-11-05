@@ -30,15 +30,10 @@ import { toast } from "../components/ui/toast";
 import { trackOperation } from "../lib/operations";
 import { workspaceEpoch } from "../lib/workspaceEpoch";
 import { friendlyError } from "../lib/friendlyError";
-import { navBack, navForward, pushNav, type NavPoint } from "../lib/navHistory";
+import { navAt, navBack, navForward, type NavPoint } from "../lib/navHistory";
+import { captureFileJumpOrigin, recordFileJump } from "../lib/navContext";
 
-/**
- * 标签页的生命周期：打开、保存、异地冲突、关闭、改名跟随、删除跟随。
- *
- * 为什么单独一个 hook：这几件事共用同一批互相牵扯的状态
- * （标签数组、激活项、冲突项、待关闭项、跳转 nonce），拆开就会各自持有一份陈旧副本。
- * 界面只负责把回调接到按钮上。
- */
+/** 标签与文件操作共用打开序号，避免异步读盘把较新的选择顶掉。 */
 export function useFileSession() {
   const tabs = useWorkspaceSelector((s) => s.tabs);
   const activePath = useWorkspaceSelector((s) => s.activePath);
@@ -137,13 +132,12 @@ export function useFileSession() {
       // nonce 提前占号：连点两条命中时，只有最后一次的定位算数
       // （打开是异步的，后点的那个可能先 resolve，旧请求不能把定位抢回去）
       const nonce = ++revealSeq.current;
+      const origin = captureFileJumpOrigin();
       void openFileRef.current(req.path).then((ok) => {
         // 打开失败的文件不进导航历史：否则「后退」过去还是打不开，还多一声报错
-        if (!ok) return;
-        // 记进导航历史：搜索结果、SVN 里点开的位置也要能「后退」回来
-        pushNav({ path: req.path, line: req.line ?? 1, column: req.column });
+        if (!ok || nonce !== revealSeq.current) return;
+        recordFileJump(origin, { path: req.path, line: req.line ?? 1, column: req.column });
         if (req.line == null) return;
-        if (nonce !== revealSeq.current) return;
         setReveal({ line: req.line, column: req.column, nonce });
       });
     };
@@ -212,14 +206,14 @@ export function useFileSession() {
    * `push=false` 是「后退 / 前进」在用的：那两个动作本身就是回到历史里的某个点，
    * 再记一笔会让前进栈立刻被自己清掉（退两步就再也前进不回去）。
    */
-  const openAt = (path: string, line: number, push = true): Promise<void> => {
+  const openAt = (path: string, line: number, push = true, column?: number): Promise<void> => {
+    const origin = push ? captureFileJumpOrigin() : null;
     const nonce = ++revealSeq.current;
     // 跳转目标的盘符/大小写可能与标签里的不一致：已有同一文件的标签就复用它，免得开出重复标签
     return openFile(tabs.find((t) => t.path.toLowerCase() === path.toLowerCase())?.path ?? path).then((ok) => {
-      if (!ok) return;
-      if (push) pushNav({ path, line });
-      if (nonce !== revealSeq.current) return;
-      setReveal({ line, nonce });
+      if (!ok || nonce !== revealSeq.current) return;
+      if (push) recordFileJump(origin, { path, line, column });
+      setReveal({ line, column, nonce });
     });
   };
 
@@ -227,11 +221,12 @@ export function useFileSession() {
 
   /** 打开 jar 内的类（jdt.ls 给出的 `jdt://` 地址）为只读标签页。 */
   const openJdt = async (uri: string, line: number, push = true) => {
+    const origin = push ? captureFileJumpOrigin() : null;
     // 与 openFile 同一个道理：读源码是异步的，只有最后一次打开有权激活
     const nonce = ++revealSeq.current,openNonce=++openSeq.current;
     if (!(await openJdtTab(uri))) return;
     if (nonce !== revealSeq.current || openNonce !== openSeq.current) return;
-    if (push) pushNav({ path: uri, line, jdt: true });
+    if (push) recordFileJump(origin, { path: uri, line, jdt: true });
     setActivePath(uri);
     setReveal({ line, nonce });
   };
@@ -239,7 +234,7 @@ export function useFileSession() {
   /** 回到历史里的某个点。不要走 openAt 的默认参数——那会把它重新记成新历史。 */
   const goToNav = (p: NavPoint) => {
     if (p.jdt) void openJdt(p.path, p.line, false);
-    else void openAt(p.path, p.line, false);
+    else void openAt(p.path, p.line, false, p.column);
   };
 
   const goBack = () => {
@@ -293,6 +288,7 @@ export function useFileSession() {
     openJdt,
     goBack,
     goForward,
+    goToHistory: (index: number) => { const point = navAt(index); if (point) goToNav(point); },
     unifyEol,
     cancelClose: () => setClosingPath(null),
   };

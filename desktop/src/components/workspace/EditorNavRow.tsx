@@ -1,7 +1,8 @@
-import { Icon } from "../ui/icon";
+import { WorkspaceGlyph } from "./WorkspaceGlyph";
 import { Breadcrumb } from "./Breadcrumb";
 import { HistoryPanel } from "./HistoryPanel";
-import { OutlinePanel } from "./OutlinePanel";
+import { NavigationHistoryMenu } from "./NavigationHistoryMenu";
+import { setEditorPrefs, useEditorPrefs } from "../../lib/editorPrefs";
 import type { TabMeta } from "../../lib/workspaceSession";
 
 /** 「本地历史」弹层的开关与回调。打包成一个 prop：平铺会把参数列表撑到 16 个。 */
@@ -15,12 +16,7 @@ export interface HistorySlot {
   onRestored: (path: string) => void;
 }
 
-/**
- * 编辑器上方那一行：后退 / 前进 + 面包屑 + 「结构」「历史」按钮 + 两个弹层。
- *
- * 从 `FilesTab` 抽出来（它已经顶到组件体量门禁：≤300 行、≤8 个 useState/useEffect）。
- * 本组件无自己的状态，全部经 props 进出——导航栈在 `lib/navHistory`，弹层开关在父组件。
- */
+/** 阅读区工具栏。跳转记录和本地版本历史分别使用各自的数据源。 */
 export function EditorNavRow({
   active,
   root,
@@ -28,10 +24,10 @@ export function EditorNavRow({
   canForward,
   onBack,
   onForward,
+  onJumpHistory,
+  heavy,
   outlineOpen,
   onToggleOutline,
-  onCloseOutline,
-  onJump,
   history,
 }: {
   active: TabMeta;
@@ -40,12 +36,13 @@ export function EditorNavRow({
   canForward: boolean;
   onBack: () => void;
   onForward: () => void;
+  onJumpHistory: (index: number) => void;
+  heavy: boolean;
   outlineOpen: boolean;
   onToggleOutline: () => void;
-  onCloseOutline: () => void;
-  onJump: (line: number) => void;
   history: HistorySlot;
 }) {
+  const { minimap } = useEditorPrefs();
   return (
     <div className="wb-crumb-row">
       {/* 后退 / 前进：找引用、跳实现之后一定要有，否则只能靠自己记「刚才在哪儿」 */}
@@ -57,7 +54,7 @@ export function EditorNavRow({
         aria-label="后退"
         onClick={onBack}
       >
-        <Icon name="arrowLeft" size={13} />
+        <WorkspaceGlyph name="back" size={13} />
       </button>
       <button
         type="button"
@@ -67,9 +64,13 @@ export function EditorNavRow({
         aria-label="前进"
         onClick={onForward}
       >
-        <Icon name="arrowRight" size={13} />
+        <WorkspaceGlyph name="forward" size={13} />
       </button>
+      <NavigationHistoryMenu root={root} onSelect={onJumpHistory} />
       <Breadcrumb root={root} active={active} />
+      <button type="button" className="wb-outline-btn wb-minimap-toggle" aria-pressed={minimap && !heavy}
+        disabled={heavy} title={heavy ? "大文件已暂停小地图" : "显示或隐藏小地图"}
+        onClick={() => setEditorPrefs({ minimap: !minimap })}>小地图</button>
       {!active.virtual && (
         <>
           <button
@@ -78,10 +79,10 @@ export function EditorNavRow({
             data-popover="outline"
             data-active={outlineOpen || undefined}
             aria-expanded={outlineOpen}
-            title="文件结构（本文件的类 / 方法 / 字段）"
+            title="查看当前文件的声明结构"
             onClick={onToggleOutline}
           >
-            <Icon name="code" size={13} />
+            <WorkspaceGlyph name="outline" size={13} />
             <span>结构</span>
           </button>
           <button
@@ -93,18 +94,11 @@ export function EditorNavRow({
             title="本地历史（自动归档的旧版本，可恢复）"
             onClick={history.onToggle}
           >
-            <Icon name="clock" size={13} />
-            <span>历史</span>
+            <WorkspaceGlyph name="history" size={13} />
+            <span>本地历史</span>
           </button>
         </>
       )}
-      <OutlinePanel
-        open={outlineOpen && !active.virtual}
-        onClose={onCloseOutline}
-        path={active.path}
-        mtimeMs={active.mtimeMs}
-        onJump={onJump}
-      />
       <HistoryPanel
         open={history.open && !active.virtual}
         onClose={history.onClose}

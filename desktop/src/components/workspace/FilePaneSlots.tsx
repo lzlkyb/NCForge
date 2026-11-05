@@ -12,7 +12,7 @@ import { ToolTab } from "./ToolTab";
 import { TabStrip } from "./TabStrip";
 import { EditorBanners } from "./EditorBanners";
 import { FileReadFeedback } from "./FileReadFeedback";
-import { EditorNavRow } from "./EditorNavRow";
+import { EditorReadingLayout } from "./EditorReadingLayout";
 import { EditorPane } from "./EditorPane";
 import { EmptyEditor } from "./EmptyEditor";
 import { ShellStatusBar } from "./ShellStatusBar";
@@ -60,7 +60,7 @@ export interface FilePaneModel {
   recentRoots: string[];
   panelOpen: boolean;
   panelTab: PanelTab;
-  panels: { outline: boolean; history: boolean; generate: boolean };
+  panels: { outline: boolean; outlinePinned: boolean; history: boolean; generate: boolean };
   compiling: boolean;
   canBack: boolean;
   canForward: boolean;
@@ -68,7 +68,7 @@ export interface FilePaneModel {
 }
 
 export interface FilePaneActions {
-  setPanels: Dispatch<SetStateAction<{ outline: boolean; history: boolean; generate: boolean }>>;
+  setPanels: Dispatch<SetStateAction<FilePaneModel["panels"]>>;
   setPanelOpen: (v: (open: boolean) => boolean) => void;
   applyRoot: (path: string) => Promise<string | null>;
   /**
@@ -184,55 +184,51 @@ export function FilePaneSlots({
         onReload={(p) => void session.reloadFile(p)} onOverwriteSave={(p) => void session.saveFile(p, true)}
         onSaveUtf8={(p) => void session.saveAsUtf8(p)}
         onDismissLargeHint={onDismissLargeHint} />
-      {active && (
-        <EditorNavRow
-          active={active}
-          root={root}
-          canBack={canBack}
-          canForward={canForward}
-          onBack={session.goBack}
-          onForward={session.goForward}
-          outlineOpen={panels.outline}
-          onToggleOutline={() => setPanels((p) => ({ ...p, outline: !p.outline }))}
-          onCloseOutline={() => setPanels((p) => ({ ...p, outline: false }))}
-          onJump={(line) => void session.openAt(active.path, line)}
-          history={{
+      <EditorReadingLayout split={!!splitTab} pinned={panels.outlinePinned}
+        onTogglePin={() => setPanels(p => ({ ...p, outlinePinned: !p.outlinePinned }))}
+        onCloseOutline={() => setPanels(p => ({ ...p, outline: false }))}
+        onJump={(line, column) => { if (active) void session.openAt(active.path, line, true, column); }}
+        nav={active ? {
+          active, root, canBack, canForward, heavy: heavyFile,
+          onBack: session.goBack, onForward: session.goForward, onJumpHistory: session.goToHistory,
+          outlineOpen: panels.outline,
+          onToggleOutline: () => setPanels(p => ({ ...p, outline: !p.outline })),
+          history: {
             open: panels.history,
-            onToggle: () => setPanels((p) => ({ ...p, history: !p.history })),
-            onClose: () => setPanels((p) => ({ ...p, history: false })),
-            dirty: active ? isUnsaved(active) : false,
-            // 恢复写的是磁盘：标签的 mtime 变了，必须重载，否则下一次保存会撞 CONFLICT
-            onRestored: (p) => void session.reloadFile(p),
-          }}
-        />
-      )}
-      <div className="wb-editor" data-split={splitTab ? "" : undefined}>
-        <div className="wb-editor-group">
-          <div className="wb-editor-body">
-            <EditorPane activePath={activePath} readOnly={active?.readOnly ?? false} reveal={reveal}
-              heavy={heavyFile} onCursor={setCursor}
-              onSave={(prepare) => activePath && void session.saveFile(activePath, false, undefined, prepare)} />
-          </div>
-        </div>
-        {splitTab && (
-          <section className="wb-editor-group wb-editor-split" aria-label="分屏编辑器">
-            <div className="wb-split-head">
-              <span className="wb-split-name" title={splitTab.path}>{splitTab.name}</span>
-              <button type="button" className="wb-icon-btn" title="关闭分屏" aria-label="关闭分屏"
-                onClick={session.closeSplit}>
-                <Icon name="close" size={12} />
-              </button>
-            </div>
+            onToggle: () => setPanels(p => ({ ...p, history: !p.history })),
+            onClose: () => setPanels(p => ({ ...p, history: false })),
+            dirty: isUnsaved(active),
+            onRestored: p => void session.reloadFile(p),
+          },
+        } : null}>
+        <div className="wb-editor" data-split={splitTab ? "" : undefined}>
+          <div className="wb-editor-group">
             <div className="wb-editor-body">
-              {/* 光标不回报：状态栏显示的是主编辑器的位置，分屏移动光标不该改它 */}
-              <EditorPane activePath={splitTab.path} readOnly={splitTab.readOnly} reveal={null}
-                heavy={splitHeavy} onCursor={() => {}}
-                onSave={(prepare) => void session.saveFile(splitTab.path, false, undefined, prepare)} />
+              <EditorPane activePath={activePath} readOnly={active?.readOnly ?? false} reveal={reveal}
+                heavy={heavyFile} onCursor={setCursor}
+                onSave={(prepare) => activePath && void session.saveFile(activePath, false, undefined, prepare)} />
             </div>
-          </section>
-        )}
-        {!active && <EmptyEditor root={root} onOpen={(p) => void session.openFile(p)} />}
-      </div>
+          </div>
+          {splitTab && (
+            <section className="wb-editor-group wb-editor-split" aria-label="分屏编辑器">
+              <div className="wb-split-head">
+                <span className="wb-split-name" title={splitTab.path}>{splitTab.name}</span>
+                <button type="button" className="wb-icon-btn" title="关闭分屏" aria-label="关闭分屏"
+                  onClick={session.closeSplit}>
+                  <Icon name="close" size={12} />
+                </button>
+              </div>
+              <div className="wb-editor-body">
+                {/* 光标不回报：状态栏显示的是主编辑器的位置，分屏移动光标不该改它 */}
+                <EditorPane activePath={splitTab.path} readOnly={splitTab.readOnly} reveal={null}
+                  heavy={splitHeavy} onCursor={() => {}}
+                  onSave={(prepare) => void session.saveFile(splitTab.path, false, undefined, prepare)} />
+              </div>
+            </section>
+          )}
+          {!active && <EmptyEditor root={root} onOpen={(p) => void session.openFile(p)} />}
+        </div>
+      </EditorReadingLayout>
       <ExtractSqlDialog />
     </>
   );

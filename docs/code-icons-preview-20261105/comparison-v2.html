@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NCForge 代码区图标第二版</title>
+<style>
+  * { box-sizing: border-box; }
+  :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+  body { margin: 0; background: #edf3f4; color: #192b32; }
+  main { width: min(900px, 100%); margin: auto; padding: 32px 24px 26px; }
+  header { margin: 0 auto 22px; max-width: 756px; }
+  .edition { font-size: 11px; font-weight: 650; letter-spacing: .12em; color: #35645f; text-transform: uppercase; }
+  h1 { font-size: clamp(24px, 3.5vw, 34px); font-weight: 680; letter-spacing: -.025em; margin: 7px 0 7px; line-height: 1.14; }
+  header p { margin: 0; font-size: 13px; line-height: 1.65; color: #49626a; }
+  .comparison { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; }
+  .column { flex: 0 1 240px; min-width: 0; }
+  .caption { margin: 0 1px 7px; display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+  .caption strong { font-size: 13px; }
+  .caption span { color: #4c6670; font-size: 11px; }
+  .tree {
+    --paper: #fafcfd; --surface: #f2f7f8; --line: #d7e2e5; --ink: #263a43; --muted: #4f6972;
+    --blue: #2e61ab; --teal: #24776e; --violet: #754b9b; --amber: #965018; --slate: #516a84; --green: #39744d;
+    --cut: #fff; --current: #e3f0ee; --select: #cee8e2; --status: #89501c;
+    background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: 9px;
+    overflow: hidden; box-shadow: 0 8px 21px #23445312;
+  }
+  .tree.dark {
+    color-scheme: dark;
+    --paper: #19262e; --surface: #1e3038; --line: #364b56; --ink: #e4edf0; --muted: #a3b8bf;
+    --blue: #92baff; --teal: #82d2c4; --violet: #c5a9ef; --amber: #f1b77e; --slate: #a4b9d3; --green: #9ad2a9;
+    --cut: #19262e; --current: #223b43; --select: #2b4d52; --status: #f0bb83;
+  }
+  .bar { min-height: 35px; display:flex; align-items:center; justify-content:space-between; padding: 0 10px; background: var(--surface); border-bottom:1px solid var(--line); font-size: 12px; font-weight: 650; }
+  .bar .mode { font-size:11px; font-weight:550; padding:2px 6px; color:var(--teal); border:1px solid var(--line); border-radius:4px; }
+  .list { padding: 6px 5px; }
+  .row { display:flex; align-items:center; gap:5px; padding-inline:calc(6px + var(--depth,0) * 12px) 6px; height:25px; border-radius:4px; min-width:0; font-size:12px; white-space:nowrap; }
+  .tree:not(.previous) .row { position:relative; }
+  .tree:not(.previous) .row:not([data-depth="0"])::before { content:""; position:absolute; inset-block:0; inset-inline-start:calc(10px + (var(--depth) - 1) * 12px); width:1px; background:var(--line); pointer-events:none; }
+  .row[data-current] { background:var(--current); font-weight:650; }
+  .row[data-active] { background:var(--select); font-weight:600; }
+  .row[data-group="true"] { font-weight:600; }
+  .caret { flex:0 0 10px; color:var(--muted); }
+  .caret svg { display:block; }
+  .icon { flex:0 0 16px; width:16px; height:16px; display:block; color:var(--tone, var(--slate)); }
+  .name { flex:1 1 auto; min-width:0; display:flex; overflow:hidden; }
+  .stem { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .ext { flex:none; }
+  .row[data-active] .ext { color:var(--teal); }
+  .badge { flex:none; min-width:12px; color:var(--status); font-size:10px; line-height:15px; font-weight:700; text-align:center; }
+  .badge.test { color:var(--teal); padding-inline:3px; background:var(--current); border-radius:3px; }
+  .bottom { border-top:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; height:28px; padding-inline:10px; color:var(--muted); font-size:11px; }
+  .note { margin:16px auto 0; max-width:756px; display:flex; flex-wrap:wrap; gap:8px 22px; color:#405e66; font-size:11.5px; line-height:1.55; }
+  .note b { color:#233d45; }
+  .sample-icons { --cut:#fff; --teal:#24776e; --blue:#2e61ab; --amber:#965018; display:inline-flex; align-items:center; gap:12px; }
+  .sample-icons span { display:inline-flex; align-items:center; gap:4px; }
+  @media(max-width:540px) { main { padding:24px 12px 18px; } header { max-width:300px; } .note { max-width:300px; } }
+</style>
+</head>
+<body>
+<svg aria-hidden="true" width="0" height="0" style="position:absolute" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="v1-project" viewBox="0 0 16 16"><path fill="currentColor" d="M5 2h6l1 2h2a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2zm1 1-.5 1h5L10 3z"/><path d="M2.4 7.7h11.2m-7.1 0v2h3v-2" fill="none" stroke="var(--cut)" stroke-linejoin="round" stroke-width="1.2"/></symbol>
+  <symbol id="v1-folder" viewBox="0 0 16 16"><path fill="currentColor" d="M1 4a1 1 0 0 1 1-1h4l1.6 1.7H14a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1z"/><path d="M2.4 6h11.2" stroke="var(--cut)" stroke-width="1.1" opacity=".7"/></symbol>
+  <symbol id="v1-source" viewBox="0 0 16 16"><path fill="currentColor" d="M1 4a1 1 0 0 1 1-1h4l1.6 1.7H14a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1z"/><path d="m6 7-2 2 2 2m4-4 2 2-2 2" fill="none" stroke="var(--cut)" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="v1-package" viewBox="0 0 16 16"><path fill="currentColor" d="m8 1.5 6 3.2v6.6l-6 3.2-6-3.2V4.7z"/><path d="m2.7 5.2 5.3 2.9 5.3-2.9M8 8.1v5.5m-2.5-10 5.5 3" stroke="var(--cut)" stroke-width="1.12" fill="none"/></symbol>
+  <symbol id="v1-class" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="currentColor"/><path d="M10 5.4a3.3 3.3 0 1 0 0 5.2" fill="none" stroke="var(--cut)" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="v1-interface" viewBox="0 0 16 16"><path d="m7.2 1.8-5.4 5.4a1.2 1.2 0 0 0 0 1.6l5.4 5.4a1.2 1.2 0 0 0 1.6 0l5.4-5.4a1.2 1.2 0 0 0 0-1.6L8.8 1.8a1.2 1.2 0 0 0-1.6 0" fill="currentColor"/><path d="M6.4 5.3h3.2M8 5.3v5.4m-1.6 0h3.2" fill="none" stroke="var(--cut)" stroke-width="1.35" stroke-linecap="round"/></symbol>
+  <symbol id="v1-enum" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2" fill="currentColor"/><path d="M10.6 5H6v6h4.6M6 8h3.6" fill="none" stroke="var(--cut)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="v1-annotation" viewBox="0 0 16 16"><path d="M12.5 12a6 6 0 1 1 1.4-4v.8c0 2-2.9 2.2-2.9.2V5.6m0 2.2a2.6 2.6 0 1 1-5.2 0 2.6 2.6 0 0 1 5.2 0Z" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.55"/></symbol>
+  <symbol id="v1-record" viewBox="0 0 16 16"><path d="M4.4 2h7.2L15 8l-3.4 6H4.4L1 8z" fill="currentColor"/><path d="M6 11V5h2.5a1.6 1.6 0 0 1 0 3.2H6m2.2 0L10 11" fill="none" stroke="var(--cut)" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.35"/></symbol>
+  <symbol id="v1-rest" viewBox="0 0 16 16"><path fill="currentColor" d="M2 3h12v10H2z" opacity=".17"/><path d="M1.5 8h11m-3.6-3.4L12.5 8l-3.6 3.4" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round" stroke-width="1.6"/><path d="M14.5 3.2v9.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="v1-upm" viewBox="0 0 16 16"><path d="M2.4 5.1h4V3.3a1.3 1.3 0 1 1 2.6 0v1.8h4.6v3.1h-1.8a1.3 1.3 0 0 0 0 2.6h1.8v3.1H2.4v-3.1h1.8a1.3 1.3 0 0 0 0-2.6H2.4z" fill="currentColor"/></symbol>
+  <symbol id="v1-aop" viewBox="0 0 16 16"><path d="M2 4h2.6c2.5 0 4.3 8 6.8 8H14M2 12h2.6c.9 0 1.7-.9 2.4-2.1M9 6.1c.7-1.2 1.5-2.1 2.4-2.1H14" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" fill="none"/><path d="m12 2 2 2-2 2m0 4 2 2-2 2" stroke="currentColor" fill="none" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="v1-bmf" viewBox="0 0 16 16"><path d="m5.3 2 4 2.2v4.3l-4 2.2-4-2.2V4.2zM11.4 6l3.3 1.9v3.8l-3.3 1.9-3.3-1.9V7.9z" fill="currentColor"/><path d="m1.6 4.5 3.7 2 3.7-2M5.3 6.5v3.6m3.1-1.9 3 1.7 3-1.7m-3 1.7v3.1" stroke="var(--cut)" stroke-width="1" fill="none"/></symbol>
+  <symbol id="v1-bpf" viewBox="0 0 16 16"><path d="M8 3.5v4m-4.6 4V9.1A1.6 1.6 0 0 1 5 7.5h6a1.6 1.6 0 0 1 1.6 1.6v2.4" fill="none" stroke="currentColor" stroke-width="1.45"/><circle cx="8" cy="2.8" r="1.9" fill="currentColor"/><rect x="1" y="10.4" width="4.8" height="4" rx=".7" fill="currentColor"/><rect x="10.2" y="10.4" width="4.8" height="4" rx=".7" fill="currentColor"/></symbol>
+  <symbol id="v1-xml" viewBox="0 0 16 16"><path d="M3.5 1.8H9L13 6v8.2H3.5z" fill="currentColor"/><path d="M9 2.7V6h3.1M6.9 8.4l-1.3 1.4 1.3 1.4m2.2-2.8 1.3 1.4-1.3 1.4" fill="none" stroke="var(--cut)" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round"/></symbol>
+  <symbol id="v1-sql" viewBox="0 0 16 16"><path d="M2 4.5v7c0 3.3 12 3.3 12 0v-7z" fill="currentColor"/><ellipse cx="8" cy="4.5" rx="6" ry="2.8" fill="currentColor"/><path d="M2.5 5.5c1.4 2.2 9.6 2.2 11 0m-11 3.2c1.4 2.2 9.6 2.2 11 0" fill="none" stroke="var(--cut)" stroke-width="1.1"/></symbol>
+  <symbol id="v1-config" viewBox="0 0 16 16"><path d="M3.3 2v12M8 2v12m4.7-12v12" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/><path d="M1.2 5.1h4.2v2.5H1.2zm4.7 4.4h4.2V12H5.9zm4.7-5.3h4.2v2.5h-4.2z" fill="currentColor"/></symbol>
+  <symbol id="v1-archive" viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2.5h13v3h-13zm1 4h11v7h-11z"/><path d="M6.4 9h3.2" stroke="var(--cut)" stroke-width="1.4" stroke-linecap="round"/></symbol>
+  <symbol id="v2-project" viewBox="0 0 16 16"><path fill="currentColor" d="M5 2.2h6l1.3 2.1h1.5A1.2 1.2 0 0 1 15 5.5v7.2a1.1 1.1 0 0 1-1.1 1.1H2.1A1.1 1.1 0 0 1 1 12.7V5.5a1.2 1.2 0 0 1 1.2-1.2h1.5z"/><path d="M2.6 8h10.8m-7 0v1.9h3.2V8" stroke="var(--cut)" stroke-width="1.12" fill="none" stroke-linejoin="round"/></symbol>
+  <symbol id="v2-source" viewBox="0 0 16 16"><path fill="currentColor" d="M1 3.9c0-.7.5-1.2 1.2-1.2h3.5l2 1.9h6.1c.7 0 1.2.5 1.2 1.2v6.5c0 .7-.5 1.2-1.2 1.2H2.2c-.7 0-1.2-.5-1.2-1.2z"/><path d="M6 7.1 4.3 9l1.7 1.8m4-3.7L11.7 9 10 10.8m-1-4.5-2 5.4" fill="none" stroke="var(--cut)" stroke-width="1.12" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="v2-rest" viewBox="0 0 16 16"><rect x="9.1" y="2.7" width="5.4" height="10.6" rx="1.4" fill="currentColor"/><path d="M1.4 8h6.1M5.1 5.5 7.6 8l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/><circle cx="11.8" cy="8" r="1.14" fill="var(--cut)"/></symbol>
+  <symbol id="v2-upm" viewBox="0 0 16 16"><path d="M4.7 2.1v3.5m6.6-3.5v3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M2.3 5.6h11.4v1.5a5.7 5.7 0 0 1-4.65 5.6v1.7H6.95v-1.7A5.7 5.7 0 0 1 2.3 7.1z" fill="currentColor"/><path d="M4.3 7.6h7.4" fill="none" stroke="var(--cut)" stroke-width="1.1" stroke-linecap="round"/></symbol>
+  <symbol id="v2-aop" viewBox="0 0 16 16"><path d="M2.1 4.4h2.1c1.8 0 3.15 1.95 4.95 4.6 1.2 1.75 2 2.6 3.05 2.6h1.7M2.1 11.6h2.1c1.05 0 2.02-.95 2.9-2.15m2-3.02c1.05-1.35 2.03-2.03 3.1-2.03h1.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="2.1" cy="4.4" r="1.5" fill="currentColor"/><circle cx="13.9" cy="11.6" r="1.5" fill="currentColor"/></symbol>
+  <symbol id="v2-bmf" viewBox="0 0 16 16"><rect x="1" y="2" width="8.2" height="7.2" rx="1.05" fill="currentColor"/><rect x="8.2" y="8.1" width="6.7" height="5.9" rx=".9" fill="currentColor"/><path d="M2.6 4.4h5m-5 2.1h3.8m3.1 4h4m-4 1.6h2.8" fill="none" stroke="var(--cut)" stroke-width="1" stroke-linecap="round"/><path d="M4.8 9.3v2.2h3.4" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+  <symbol id="v2-bpf" viewBox="0 0 16 16"><path d="M8 3.8v2.3m-2 2H3.2v3.4M10 8.1h2.8v3.4" fill="none" stroke="currentColor" stroke-width="1.25"/><circle cx="8" cy="2.6" r="1.65" fill="currentColor"/><path d="m8 5.2 2.9 2.9L8 11 5.1 8.1z" fill="currentColor"/><rect x="1.1" y="11.25" width="4.2" height="3.65" rx=".65" fill="currentColor"/><rect x="10.7" y="11.25" width="4.2" height="3.65" rx=".65" fill="currentColor"/></symbol>
+  <symbol id="v2-method" viewBox="0 0 16 16"><path d="M5 3.5h6l2.5 4.5L11 12.5H5L2.5 8z" fill="currentColor"/><path d="M5.5 10V6l2.5 2 2.5-2v4" fill="none" stroke="var(--cut)" stroke-width="1.12" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="v2-field" viewBox="0 0 16 16"><rect x="2.8" y="2.8" width="10.4" height="10.4" rx="1.6" fill="currentColor"/><path d="M6.2 10.9V5.1h4.2M6.2 8h3.1" fill="none" stroke="var(--cut)" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="v2-constant" viewBox="0 0 16 16"><path d="M8 1.8 14.2 8 8 14.2 1.8 8z" fill="currentColor"/><path d="m8 4.8-1.7 3H8l-.7 3.1 2.5-3.8H8.2z" fill="var(--cut)"/></symbol>
+</svg>
+<main>
+  <header>
+    <div class="edition">NCForge · 代码工作区</div>
+    <h1>资源树图标 · 第二版</h1>
+    <p>同一份工程、同样的 16px 图标。左边是上一版，右边两列展示第二版的浅色和深色效果。</p>
+  </header>
+  <div class="comparison" id="comparison"></div>
+  <div class="note"><span><b>NC 声明</b>　REST 端点、UPM 插接、AOP 交织、BMF 实体关系、BPF 分支流程</span><span class="sample-icons" id="member-icons"></span></div>
+</main>
+<script>
+const nodes = [
+  ["project", "newar", 0, "open"],
+  ["source", "bill/src/public", 1, "open"],
+  ["package", "nccloud.api.util", 2, "open"],
+  ["class", "VoucherServiceImpl.java", 3],
+  ["interface", "VoucherService.java", 3],
+  ["enum", "VoucherMode.java", 3],
+  ["annotation", "AuditTrail.java", 3],
+  ["record", "VoucherKey.java", 3],
+  ["source", "bill/src/test", 1, "closed", "T"],
+  ["folder", "META-INF", 1, "open"],
+  ["rest", "eyeInterfaceSettlementQuery.rest", 2, "", "M"],
+  ["upm", "P_EyeAdjustBill.upm", 2],
+  ["aop", "eyevim.aop", 2],
+  ["bmf", "ArrivalGoods.bmf", 2],
+  ["bpf", "ArrivalProcess.bpf", 2],
+  ["folder", "resources", 1, "open"],
+  ["xml", "mapping.xml", 2],
+  ["sql", "query.sql", 2],
+  ["config", "app.properties", 2],
+  ["archive", "nc-api.jar", 2],
+];
+const tone = {project:"slate", source:"teal", package:"slate", folder:"slate", class:"blue", interface:"teal", enum:"violet", annotation:"amber", record:"violet", rest:"teal", upm:"blue", aop:"amber", bmf:"violet", bpf:"green", xml:"blue", sql:"teal", config:"slate", archive:"amber", method:"teal", field:"blue", constant:"amber"};
+const label = {class:"Java 类", interface:"Java 接口", enum:"Java 枚举", annotation:"Java 注解声明", record:"Java record", rest:"NC REST 声明", upm:"NC UPM 组件", aop:"NC AOP 声明", bmf:"NC 业务模型", bpf:"NC 业务流程"};
+const redrawn = new Set(['project','source','rest','upm','aop','bmf','bpf','method','field','constant']);
+function icon(kind, previous) {
+  const version = previous || !redrawn.has(kind) ? 'v1' : 'v2';
+  return `<svg viewBox="0 0 16 16" class="icon" style="--tone:var(--${tone[kind]})" aria-hidden="true"><use href="#${version}-${kind}"/></svg>`;
+}
+function row([kind,name,depth,disclosure,mark],previous) {
+  const isFile = !disclosure;
+  const dot = isFile ? name.lastIndexOf('.') : -1;
+  const caret = disclosure ? `<svg width="10" height="10" viewBox="0 0 10 10"><path d="${disclosure==='open'?'m2 3.5 3 3 3-3':'m3.5 2 3 3-3 3'}" stroke="currentColor" stroke-width="1.15" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>` : '';
+  const nameHtml = dot > 0 ? `<span class="stem">${name.slice(0,dot)}</span><span class="ext">${name.slice(dot)}</span>` : `<span class="stem">${name}</span>`;
+  return `<div class="row" style="--depth:${depth}" data-depth="${depth}" ${kind==='project'?'data-current':''} ${kind==='rest'?'data-active':''} data-group="${!!disclosure}" title="${name}${label[kind]?' · '+label[kind]:''}"><span class="caret" aria-hidden="true">${caret}</span>${icon(kind,previous)}<span class="name">${nameHtml}</span>${mark?`<span class="badge ${mark==='T'?'test':''}">${mark}</span>`:''}</div>`;
+}
+const comparisons = [["上一版","浅色 · 16px","previous"],["第二版","浅色 · 16px","light"],["第二版","深色 · 16px","dark"]];
+document.getElementById('comparison').innerHTML = comparisons.map(([title,meta,theme]) => `<section class="column" aria-label="${title} ${meta}"><div class="caption"><strong>${title}</strong><span>${meta}</span></div><div class="tree ${theme}"><div class="bar"><span>包资源管理器</span><span class="mode">包视图</span></div><div class="list">${nodes.map(n=>row(n,theme==='previous')).join('')}</div><div class="bottom"><span>20 个节点</span><span>SVN · 已修改 1 项</span></div></div></section>`).join('');
+document.getElementById('member-icons').innerHTML = `<b>成员</b>${[['method','方法'],['field','字段'],['constant','常量']].map(([kind,name])=>`<span>${icon(kind,false)}${name}</span>`).join('')}`;
+</script>
+</body>
+</html>

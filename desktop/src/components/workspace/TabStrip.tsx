@@ -1,3 +1,4 @@
+import { EditorTabTypeIcon } from "./EditorTabTypeIcon";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { ToolTab } from "./ToolTab";
@@ -5,8 +6,10 @@ import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { Menu, MenuItem } from "../ui/Menu";
 import { TaskMenu } from "./TaskMenu";
 import { Button } from "../ui/button";
-import { Icon } from "../ui/icon";
+import { WorkspaceGlyph } from "./WorkspaceGlyph";
+import { WorkspaceFileName } from "./WorkspaceFileName";
 import { toast } from "../ui/toast";
+import { tabPathLabels } from "../../lib/tabPathLabels";
 import { relativeTo } from "../../lib/compile";
 import { revealInTree } from "../../lib/revealInTree";
 import { setSession } from "../../lib/workspaceSession";
@@ -51,6 +54,7 @@ export function TabStrip({
   onCompile: () => void;
 }) {
   const dock = useWorkbenchDock();
+  const pathLabels = tabPathLabels(root, tabs);
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   const tabRefs = useRef(new Map<string, HTMLDivElement>());
   /** 正在被拖的标签路径（HTML5 拖放只在 start 时给，dragover 时读不到）。 */
@@ -158,6 +162,8 @@ export function TabStrip({
           role="tab"
           aria-selected={!dock?.documentOpen && t.path === activePath}
           aria-controls="wb-code-surface"
+          aria-label={pathLabels.has(t.path) ? `${t.name} · ${pathLabels.get(t.path)}` : t.name}
+          aria-description={t.readOnly ? "只读" : undefined}
           className="wb-tab"
           data-active={(!dock?.documentOpen && t.path === activePath) || undefined}
           data-preview={t.preview || undefined}
@@ -191,7 +197,9 @@ export function TabStrip({
             setMenu({ x: e.clientX, y: e.clientY, path: t.path });
           }}
         >
-          <span className="wb-tab-name">{t.name}</span>
+          <EditorTabTypeIcon path={t.path} name={t.name} mtimeMs={t.mtimeMs} />
+          <WorkspaceFileName name={t.name} className="wb-tab-name" />
+          {pathLabels.has(t.path) && <span className="wb-tab-scope">· {pathLabels.get(t.path)}</span>}
           {t.readOnly && <span className="wb-status-warn">只读</span>}
           <button
             type="button"
@@ -206,10 +214,10 @@ export function TabStrip({
             {t.dirty || t.eolChanged ? (
               <>
                 <span className="wb-dirty-dot" />
-                <Icon name="close" size={12} className="wb-tab-close" />
+                <WorkspaceGlyph name="close" size={12} className="wb-tab-close" />
               </>
             ) : (
-              <Icon name="close" size={12} />
+              <WorkspaceGlyph name="close" size={12} />
             )}
           </button>
         </div>
@@ -227,14 +235,14 @@ export function TabStrip({
             disabled={tabs.length === 0}
             onClick={toggle}
           >
-            <Icon name="chevronDown" size={14} />
+            <WorkspaceGlyph name="down" size={14} />
           </button>
         )}>
           {(close) => tabs.map((t) => (
             <MenuItem
               key={t.path}
               label={t.name}
-              hint={t.path === splitPath ? "分屏中" : undefined}
+              hint={[pathLabels.get(t.path), t.path === splitPath ? "分屏中" : ""].filter(Boolean).join(" · ") || undefined}
               active={t.path === activePath}
               trailing={t.dirty ? <span className="wb-dirty-dot" /> : undefined}
               onClick={() => {
@@ -258,7 +266,7 @@ export function TabStrip({
           title="用 ecj 编译当前文件所在模块，产物写到该模块的 classes 目录"
           onClick={onCompile}
         >
-          <Icon name="play" size={12} />
+          <WorkspaceGlyph name="play" size={12} />
           {compiling ? "编译中…" : "编译"}
         </Button>
       )}

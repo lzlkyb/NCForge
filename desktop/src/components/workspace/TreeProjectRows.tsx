@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import { TreeProjectRow } from "./TreeRow";
 import { TreeRows, type TreeRowsCtx } from "./TreeRows";
 import { originLabel, type LinkedProject } from "../../lib/linkedProjects";
+import { baseName } from "../../lib/workspace";
 import { treeRowId as rowId } from "../../lib/treeNav";
 
 const samePath = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -23,34 +24,32 @@ export function TreeProjectRows({
   root,
   ctx,
 }: {
-  projects: LinkedProject[];
+  projects?: LinkedProject[];
   /** 当前工作区根：决定哪一行带「当前」标记。 */
   root: string;
   ctx: TreeRowsCtx;
 }) {
+  const rows = projects?.flatMap(p => p.root ? [{ path: p.root, name: p.name, badge: badgeOf(p, root) }] : []) ?? [];
+  if (!rows.length) rows.push({ path: root, name: baseName(root) || root, badge: "当前" });
   return (
     <>
-      {projects.map((p) => {
-        const path = p.root;
-        if (!path) return null;
-        return (
-          <Fragment key={path}>
-            <TreeProjectRow
-              name={p.name}
-              path={path}
-              id={rowId(path)}
-              level={1}
-              open={ctx.expanded.has(path)}
-              selected={ctx.selectedPath === path}
-              current={samePath(path, root)}
-              badge={badgeOf(p, root)}
-              onToggle={ctx.onProjectToggle}
-              onContextMenu={ctx.onContextMenu}
-            />
-            {ctx.expanded.has(path) && <TreeRows dir={path} depth={1} ctx={ctx} />}
-          </Fragment>
-        );
-      })}
+      {rows.map(({ path, name, badge }) => (
+        <Fragment key={path}>
+          <TreeProjectRow
+            name={name}
+            path={path}
+            id={rowId(path)}
+            level={1}
+            open={ctx.expanded.has(path)}
+            selected={ctx.selectedPath === path}
+            current={samePath(path, root)}
+            badge={badge}
+            onToggle={ctx.onProjectToggle}
+            onContextMenu={ctx.onContextMenu}
+          />
+          {ctx.expanded.has(path) && <TreeRows dir={path} depth={1} ctx={ctx} />}
+        </Fragment>
+      ))}
     </>
   );
 }

@@ -57,7 +57,7 @@ describe("editorPrefs", () => {
   });
 
   it("Monaco 选项：关掉的项写 false 而不是省略", () => {
-    const o = monacoOptionsOf({ ...DEFAULT_PREFS, minimap: false, wordWrap: true, fontFamily: "" });
+    const o = monacoOptionsOf({ ...DEFAULT_PREFS, minimap: false, stickyScroll: false, wordWrap: true, fontFamily: "" });
     expect(o).toMatchObject({
       wordWrap: "on",
       minimap: { enabled: false },

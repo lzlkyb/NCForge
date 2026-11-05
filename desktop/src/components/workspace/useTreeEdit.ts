@@ -34,6 +34,7 @@ export function useTreeEdit({
   expand,
   depthOf,
   onCreated,
+  onEntryCreated,
   onRenamed,
   setSelected,
 }: {
@@ -42,6 +43,7 @@ export function useTreeEdit({
   load: (path: string) => Promise<void>;
   expand: (path: string) => void;
   depthOf: (path: string) => number;
+  onEntryCreated?: (path: string) => void;
   onCreated: (path: string) => void;
   onRenamed: (oldPath: string, newPath: string) => void;
   setSelected: (value: { path: string; isDir: boolean } | null) => void;
@@ -70,12 +72,12 @@ export function useTreeEdit({
   const beginRename = (target: { path: string; isDir: boolean }) => {
     if (target.path === root) return; // 工作区根不给改名，后端也会拒
     const parent = dirName(target.path);
-    const parentDepth = depthOf(parent) + 1;
+    const rowDepth = depthOf(target.path);
     setEditError(null);
     setEditing({
       mode: "rename",
       parent,
-      padLeft: 6 + parentDepth * 14 + (target.isDir ? 0 : 20),
+      padLeft: 6 + rowDepth * 14 + (target.isDir ? 0 : 20),
       isDir: target.isDir,
       target: target.path,
       initial: baseName(target.path),
@@ -129,6 +131,7 @@ export function useTreeEdit({
         const isDir = editing.isDir;
         const created = await createEntry(parent, value, isDir ? "dir" : "file");
         setEditing(null);
+        onEntryCreated?.(created);
         expand(parent);
         await load(parent);
         setSelected({ path: created, isDir });

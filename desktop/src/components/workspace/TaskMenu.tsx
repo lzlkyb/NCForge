@@ -1,6 +1,6 @@
 import { Menu, MenuItem } from "../ui/Menu";
 import { Button } from "../ui/button";
-import { Icon } from "../ui/icon";
+import { WorkspaceGlyph } from "./WorkspaceGlyph";
 import { useOperations } from "../../lib/operations";
 import { listTasks, runTask, STEP_SHORT } from "../../lib/ncTasks";
 
@@ -24,9 +24,9 @@ export function TaskMenu({ root, compiling }: { root: string; compiling: boolean
           title="运行 NC 任务（编译 / 投送 / 重启 / 补丁）"
           onClick={toggle}
         >
-          <Icon name="play" size={12} />
+          <WorkspaceGlyph name="play" size={12} />
           任务
-          <Icon name="chevronDown" size={12} />
+          <WorkspaceGlyph name="down" size={12} />
         </Button>
       )}
     >

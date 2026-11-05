@@ -73,6 +73,69 @@ pub async fn tree_projects(
     .map_err(|e| format!("后台任务失败: {e}"))
 }
 
+async fn dependency_rows(
+    state: &AppState,
+    root: String,
+) -> Result<Option<Vec<eclipse_cp::DependencyEntry>>, String> {
+    let cfg = state.config.read().await.clone();
+    let primary = cfg.workspace_root.ok_or("尚未选择工作区目录")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let primary = PathBuf::from(primary);
+        let overrides = eclipse_cp::active_overrides(&cfg.linked_overrides);
+        let workspace_projects = eclipse_cp::projects(&primary, &overrides);
+        let requested = PathBuf::from(root)
+            .canonicalize()
+            .map_err(|e| format!("工程不可用：{e}"))?;
+        let allowed = |p: &std::path::Path| p.canonicalize().is_ok_and(|p| p == requested);
+        if !allowed(&primary)
+            && !workspace_projects.iter().any(|p| {
+                p.root
+                    .as_ref()
+                    .is_some_and(|r| allowed(std::path::Path::new(r)))
+            })
+        {
+            return Err("该工程不在当前工作区的关联范围内".into());
+        }
+        let projects = if allowed(&primary) {
+            workspace_projects
+        } else {
+            eclipse_cp::projects(&requested, &overrides)
+        };
+        eclipse_cp::dependency_entries(&requested, &projects)
+    })
+    .await
+    .map_err(|e| format!("后台任务失败：{e}"))?
+}
+
+#[tauri::command]
+pub async fn project_dependencies(
+    state: tauri::State<'_, Arc<AppState>>,
+    root: String,
+) -> Result<Option<Vec<eclipse_cp::DependencyEntry>>, String> {
+    dependency_rows(&state, root).await
+}
+
+#[tauri::command]
+pub async fn reveal_dependency_source(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    root: String,
+    path: String,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    // Only reveal a source attachment currently declared by this project.
+    let entries = dependency_rows(&state, root).await?.unwrap_or_default();
+    if !entries
+        .iter()
+        .any(|entry| entry.source_path.as_deref() == Some(path.as_str()))
+    {
+        return Err("源码位置已失效，请刷新依赖库".into());
+    }
+    app.opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|e| format!("定位源码失败：{e}"))
+}
+
 /// 覆盖表里的一条（前端提交的形态）。动作非法时**整体拒绝**，不做「跳过坏条目」：
 /// 保存路径上的静默丢弃会让用户以为存上了，改了半天不生效还找不到原因。
 #[derive(Debug, serde::Deserialize)]

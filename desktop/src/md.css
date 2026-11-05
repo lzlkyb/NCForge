@@ -131,13 +131,6 @@
   font-weight: 600;
 }
 
-/* ── 主体 ── */
-.md-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
 /* 左栏：找表 + 勾选 */
 .md-pick {
   display: flex;

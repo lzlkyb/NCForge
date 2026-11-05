@@ -23,7 +23,6 @@ html[data-ui-density="comfortable"] .app-shell .wb-settings-nav button { padding
   .dbx-sqlbar .dbx-sp { flex-basis:100%; height:0; }
   .lg-head .lg-sub { flex-basis:100%; overflow-wrap:anywhere; }
   .dbx-txbar { flex-wrap:wrap; }
-  .vc-file-head { flex-wrap:wrap; height:auto; }
   .vc-file-head :is(.vc-path,.vc-url) { min-width:0; overflow-wrap:anywhere; }
 }
 @container workbench-document (max-width:440px) {

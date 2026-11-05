@@ -1,3 +1,4 @@
+import { languageOfFormat } from "./fileFormats";
 import { invoke } from "./tauri";
 
 // 与 Rust `workspace.rs` 的 serde 结构一一对应（camelCase，枚举用字面值）。
@@ -171,39 +172,5 @@ export function splitFileName(name: string): { stem: string; ext: string } {
   return { stem: name.slice(0, i), ext: name.slice(i) };
 }
 
-/** 按扩展名选 Monaco 语言 id；认不出的按纯文本。NC 的 upm/bmf/xsd 等都是 XML。 */
-export function languageOf(path: string): string {
-  const ext = baseName(path).split(".").pop()?.toLowerCase() ?? "";
-  switch (ext) {
-    case "java":
-      return "java";
-    case "xml":
-    case "upm":
-    case "bmf":
-    case "xsd":
-    case "wsdl":
-    case "xsl":
-    case "project":
-    case "classpath":
-      return "xml";
-    case "sql":
-      return "sql";
-    case "js":
-      return "javascript";
-    case "ts":
-      return "typescript";
-    case "html":
-    case "htm":
-      return "html";
-    case "css":
-      return "css";
-    case "properties":
-    case "ini":
-    case "prefs":
-      return "ini";
-    case "md":
-      return "markdown";
-    default:
-      return "plaintext";
-  }
-}
+/** 编辑器与文件树共用格式清单。NC 声明文件可根据正文选择高亮。 */
+export const languageOf = languageOfFormat;

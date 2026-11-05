@@ -4,13 +4,17 @@
 // 压缩中间包）就有 70 行；两者混在一起会顶爆单文件 300 行的门禁。
 //
 // 递归渲染：目录展开时直接渲染它的下一层，不额外建虚拟列表（NC 工程一个目录最多几百项）。
+import { useJavaTreeKinds } from "../../hooks/useJavaTreeKinds";
 import type { MouseEvent as ReactMouseEvent } from "react";
+import { javaKindOfSymbol } from "../../lib/treeFileKind";
+import { hasJavaMembers, type TreeMembers, type JavaTreeMember } from "../../lib/javaTreeMembers";
+import { JavaMemberRows } from "./JavaMemberRows";
 import { TreeEditRow } from "./TreeEditRow";
 import { TreeDirRow, TreeFileRow, TreeRowNote } from "./TreeRow";
 import { joinPath, type EncodingMark } from "../../lib/workspace";
 import { chainOpen, dirChain } from "../../lib/treeCompact";
 import { bcBadge, type ComponentIndex } from "../../lib/ncManifest";
-import { visibleChildren } from "../../lib/ncStructure";
+import { packageChildren, packageCompact, sourceForPath, type PackageRoots, type PackageIndexes } from "../../lib/packageTree";
 import { treeRowId as rowId } from "../../lib/treeNav";
 import { pathKey } from "../../lib/treeSvn";
 import type { TreeDirState } from "../../lib/workspaceSession";
@@ -28,6 +32,11 @@ export interface TreeRowsCtx {
   filter: (name: string) => boolean;
   /** 压缩中间包：单链目录合成一行；关掉时每层各占一行。 */
   compact: boolean;
+  packageRoots?: PackageRoots;
+  packageIndexes?: PackageIndexes;
+  members?: TreeMembers;
+  onToggleMembers: (path: string) => void;
+  onOpenMember: (path: string, member: JavaTreeMember) => void;
   /**
    * 这一层是不是「工程根下的业务组件模块」——只按目录位置与 manifest 判断，
    * 与任何显示偏好无关（徽章与摊平都问它）。
@@ -78,6 +87,7 @@ function EditRow({ ctx }: { ctx: TreeRowsCtx }) {
 /** 渲染 `dir` 这一层；目录展开时递归渲染下一层。 */
 export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx: TreeRowsCtx }) {
   const state = ctx.dirs[dir];
+  const javaKinds = useJavaTreeKinds(dir, state);
   const rows: JSX.Element[] = [];
   const notePad = 6 + depth * 14 + 20;
   const creating = ctx.editing && ctx.editing.mode !== "rename" && ctx.editing.parent === dir;
@@ -101,8 +111,14 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
     return <>{rows}</>;
   }
 
-  const items = state.items.filter((i) => ctx.filter(i.name));
-  if (items.length === 0 && !creating) {
+  const kids = packageChildren(dir, state.items, { hoist: ctx.hoist(dir), dirs: ctx.dirs }, ctx.packageRoots, ctx.packageIndexes)
+    .filter(({ item, label }) => ctx.filter(label ?? item.name));
+  const source = sourceForPath(ctx.packageRoots, dir);
+  if (source === dir && ctx.packageIndexes?.get(dir) === undefined) {
+    rows.push(<TreeRowNote key={`${dir}#index`} padLeft={notePad}>正在整理包列表…</TreeRowNote>);
+  } else if (source === dir && ctx.packageIndexes?.get(dir) === null) {
+    rows.push(<TreeRowNote key={`${dir}#index-error`} padLeft={notePad}>包列表读取失败，已显示目录。</TreeRowNote>);
+  } else if (kids.length === 0 && !creating) {
     rows.push(
       <TreeRowNote key={`${dir}#0`} padLeft={notePad}>
         {state.items.length === 0 ? "（空目录）" : "没有匹配的项"}
@@ -110,8 +126,7 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
     );
   }
 
-  const kids = visibleChildren(dir, items, { hoist: ctx.hoist(dir), dirs: ctx.dirs });
-  for (const { dir: from, item } of kids) {
+  for (const { dir: from, item, label, kind } of kids) {
     const full = joinPath(from, item.name);
     if (ctx.editing && ctx.editing.mode === "rename" && ctx.editing.target?.toLowerCase() === full.toLowerCase()) {
       rows.push(<EditRow key={`rename-${full}`} ctx={ctx} />);
@@ -119,7 +134,7 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
     }
     if (item.isDir) {
       // 压缩中间包：`com → aier → erp` 只有一个子目录时合成一行 `com.aier.erp`
-      const chain = dirChain(ctx.compact, full, item.name, ctx.dirs);
+      const chain = dirChain(ctx.compact && packageCompact(ctx.packageRoots, full, ctx.packageIndexes), full, label ?? item.name, ctx.dirs);
       const open = chainOpen(chain, ctx.expanded);
       // 只有工程根下这一层才是 NC 的模块目录；再深就是包/目录，名字对上了也不是组件
       const bc = ctx.isBcModule(full) ? bcBadge(item.name, ctx.bcNames) : undefined;
@@ -135,12 +150,18 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
           padLeft={6 + depth * 14}
           parent={from}
           bc={bc}
+          sourceRoot={kind === "source"}
+          packageDir={kind === "package"}
           onToggle={ctx.onToggle}
           onContextMenu={ctx.onContextMenu}
         />,
       );
       if (open) rows.push(<TreeRows key={`${chain.tail}-kids`} dir={chain.tail} depth={depth + 1} ctx={ctx} />);
     } else {
+      const canExpand = !!ctx.members && hasJavaMembers(full);
+      const members = ctx.members?.get(full);
+      const types = members?.status === "ready" ? members.rows.filter(row => row.depth === 0) : undefined;
+      const javaKind = types ? (types.length === 1 ? javaKindOfSymbol(types[0].kind) : undefined) : javaKinds[item.name];
       rows.push(
         <TreeFileRow
           key={full}
@@ -151,6 +172,9 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
           active={ctx.activePath === full}
           selected={ctx.selectedPath === full}
           mark={ctx.marks[full]}
+          javaKind={javaKind}
+          memberExpanded={canExpand ? !!members : undefined}
+          onToggleMembers={canExpand ? ctx.onToggleMembers : undefined}
           bookmarks={ctx.bookmarkCounts.get(pathKey(full)) ?? 0}
           padLeft={6 + depth * 14 + 20}
           onOpen={ctx.onActivate}
@@ -158,6 +182,8 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
           onContextMenu={ctx.onContextMenu}
         />,
       );
+      if (members) rows.push(<JavaMemberRows key={`${full}-symbols`} state={members} depth={depth + 1}
+        selected={ctx.selectedPath} onJump={member => ctx.onOpenMember(full, member)} />);
     }
   }
   return <>{rows}</>;

@@ -23,6 +23,9 @@ export interface TreeChild {
   /** 真实父目录：拼路径、找压缩链、判断展开态都按它。 */
   dir: string;
   item: DirItem;
+  /** 源码根的展示路径；真实目录仍由 dir + item.name 给出。 */
+  label?: string;
+  kind?: "source" | "package" | "folder";
 }
 
 export interface HoistOpts {

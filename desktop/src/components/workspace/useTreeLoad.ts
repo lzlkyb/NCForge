@@ -3,10 +3,13 @@ import { createDirRefresher } from "../../lib/dirRefresh";
 import { baseName, encodingMarks, joinPath, listDir, type DirItem } from "../../lib/workspace";
 import { chainFor, chainOpen, collapseChain } from "../../lib/treeCompact";
 import { SRC_DIR, ncDepthOffset } from "../../lib/ncStructure";
-import { listen } from "../../lib/tauri";
+import { useTreeWatch } from "./useTreeWatch";
 import { pathKey } from "../../lib/treeSvn";
 import { isUnderPath } from "../../lib/treeProjects";
 import { getSession, setSession, setTree, useWorkspaceSelector } from "../../lib/workspaceSession";
+import { usePackageIndexes } from "../../hooks/usePackageIndexes";
+import { usePackageRoots } from "../../hooks/usePackageRoots";
+import { packageLocation, sourceForPath } from "../../lib/packageTree";
 import { workspaceEpoch } from "../../lib/workspaceEpoch";
 
 /** 定位到某个文件时最多展开多少层：防止异常路径（工作区外的长路径）把界面锁死。 */
@@ -31,11 +34,15 @@ export function useTreeLoad(
   compact: boolean,
   projectRoots?: string[],
   hoist?: (dir: string) => boolean,
+  packageView = false,
 ) {
   // 只订阅树：整会话订阅下，每次 dirty 翻转 / 编译状态变化都会把整棵树重渲染一遍
   const tree = useWorkspaceSelector((s) => s.tree);
   const epoch = workspaceEpoch();
   const { dirs, expanded, marks } = tree;
+  const fallbackRoots = useMemo(() => [root], [root]);
+  const packageRoots = usePackageRoots(projectRoots ?? fallbackRoots, expanded, packageView);
+  const { indexes: packageIndexes, ensure, invalidate } = usePackageIndexes(packageRoots, expanded, epoch);
 
   /**
    * 问后端这一层的 `.java` 里，哪些是「磁盘 UTF-8、Eclipse 却按 GBK 读」。
@@ -141,26 +148,7 @@ export function useTreeLoad(
     [refresher],
   );
 
-  // 订阅后端的文件监听。注册是异步的，组件可能在它回来前就卸载：
-  // 用 disposed 兜住，否则监听会挂在已卸载的组件上。
-  useEffect(() => {
-    let disposed = false;
-    let off: (() => void) | undefined;
-    void listen<{ dirs?: string[]; rescan?: boolean }>("fs-changed", (p) =>
-      refreshDirs(p?.dirs ?? [], p?.rescan === true),
-    )
-      .then((u) => {
-        if (disposed) u();
-        else off = u;
-      })
-      .catch(() => {
-        // 注册失败（如纯浏览器调试）：退化为手动刷新，不影响树本身
-      });
-    return () => {
-      disposed = true;
-      off?.();
-    };
-  }, [refreshDirs]);
+  useTreeWatch(refreshDirs, invalidate, packageView);
 
   // 工作区根变化（首次打开 / 更换目录）时重置整棵树，只展开根。
   // 根没变（= 只是切页面回来）就直接复用缓存，不再打一次 IPC。
@@ -179,12 +167,12 @@ export function useTreeLoad(
   // 把链条末端也预读出来，行标题才能稳定显示成 `com.aier.erp`。
   // 不预读的话，用户每展开一次标题就变一次（com → com.aier → …），很难受。
   useEffect(() => {
-    if (!compact) return;
+    if (!compact || packageView) return;
     for (const dir of expanded) {
       const chain = collapseChain(dir, baseName(dir), dirs);
       if (chain.tail !== dir && !dirs[chain.tail]) void load(chain.tail);
     }
-  }, [compact, expanded, dirs, load]);
+  }, [compact, packageView, expanded, dirs, load]);
 
   // NC 结构视图要把 `src` 摊平：业务组件模块展开时，顺手把它那一层也读出来，
   // 否则 `src` 会先凭空消失一帧、子目录下一拍才补上。
@@ -273,19 +261,28 @@ export function useTreeLoad(
       setTree((t) =>
         t.expanded.has(owner) ? t : { ...t, expanded: new Set(t.expanded).add(owner) },
       );
-      let cur = owner;
+      const source = sourceForPath(packageRoots, path);
+      const index = source ? await ensure(source) : null;
+      if (workspaceEpoch() !== epoch) return false;
+      const projection = source && index ? [source, packageLocation(source, index, path)] : null;
+      const revealDirs = projection ? projection.filter((dir): dir is string => !!dir) : [];
+      let cur = revealDirs[revealDirs.length - 1] ?? owner;
+      const from = cur === owner ? 0 : cur.slice(owner.length).split(/[\\/]/).filter(Boolean).length;
+      for (let i = from; i < parts.length - 1; i += 1) {
+        cur = joinPath(cur, parts[i]);
+        revealDirs.push(cur);
+      }
       // 注意祖先循环从第一段开始：文件所在目录也要展开，不能只展开父目录本身
       if (getSession().tree.dirs[owner]?.status !== "ok") await load(owner);
-      for (let i = 0; i < parts.length - 1; i += 1) {
+      for (const cur of revealDirs) {
         if (workspaceEpoch() !== epoch) return false;
-        cur = joinPath(cur, parts[i]);
         setTree((t) => (t.expanded.has(cur) ? t : { ...t, expanded: new Set(t.expanded).add(cur) }));
         if (getSession().tree.dirs[cur]?.status !== "ok") await load(cur);
       }
       return workspaceEpoch() === epoch;
     },
-    [load, projectRoots, root, epoch],
+    [load, projectRoots, root, epoch, packageRoots, ensure],
   );
 
-  return { dirs, expanded, marks, load, expand, toggle, toggleRow, depthOf, reveal, setExpandedPaths };
+  return { dirs, expanded, marks, load, expand, toggle, toggleRow, depthOf, reveal, setExpandedPaths, packageRoots, packageIndexes, invalidatePackages: invalidate };
 }

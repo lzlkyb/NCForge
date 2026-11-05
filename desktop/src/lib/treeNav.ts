@@ -1,6 +1,7 @@
 import { joinPath } from "./workspace";
 import { chainOpen, dirChain } from "./treeCompact";
-import { visibleChildren } from "./ncStructure";
+import { packageChildren, packageCompact, type PackageRoots, type PackageIndexes } from "./packageTree";
+import { hasJavaMembers, type TreeMembers } from "./javaTreeMembers";
 import type { TreeDirState } from "./workspaceSession";
 
 /** 树里一行（展平后的可见顺序），键盘上下移动按这个顺序。 */
@@ -21,6 +22,8 @@ export interface FlatRow {
   label?: string;
   /** 这一行是关联工程的根（多工程树才有），不是普通目录。 */
   project?: boolean;
+  branch?: "java-file" | "java-symbol";
+  symbol?: { file: string; line: number; column: number };
 }
 
 /** 一棵树的根：单工程时就是工作区根，多工程时是每个关联工程的根。 */
@@ -61,6 +64,9 @@ export function flattenTree(
     projectRows?: boolean;
     /** 这一层的子目录要不要摊平 `src`（NC 结构视图）。 */
     hoist?: (dir: string) => boolean;
+    packageRoots?: PackageRoots;
+    packageIndexes?: PackageIndexes;
+    members?: TreeMembers;
   } = {},
 ): FlatRow[] {
   const out: FlatRow[] = [];
@@ -69,15 +75,15 @@ export function flattenTree(
   const walk = (dir: string, parent: string | null) => {
     const st = dirs[dir];
     if (!st || st.status !== "ok") return;
-    const kids = visibleChildren(dir, st.items, {
+    const kids = packageChildren(dir, st.items, {
       hoist: opts.hoist?.(dir) === true,
       dirs,
-    });
-    for (const { dir: from, item } of kids) {
-      if (filter && !filter(item.name)) continue;
+    }, opts.packageRoots, opts.packageIndexes);
+    for (const { dir: from, item, label } of kids) {
+      if (filter && !filter(label ?? item.name)) continue;
       const full = joinPath(from, item.name);
       if (item.isDir) {
-        const chain = dirChain(compact, full, item.name, dirs);
+        const chain = dirChain(compact && packageCompact(opts.packageRoots, full, opts.packageIndexes), full, label ?? item.name, dirs);
         out.push({
           path: chain.tail,
           isDir: true,
@@ -87,7 +93,17 @@ export function flattenTree(
         });
         if (chainOpen(chain, expanded)) walk(chain.tail, chain.tail);
       } else {
-        out.push({ path: full, isDir: false, parent, realParent: from === dir ? undefined : from });
+        const memberRows = opts.members?.get(full)?.rows ?? [];
+        const branch = opts.members && hasJavaMembers(full) ? "java-file" : undefined;
+        out.push({ path: full, isDir: false, parent, realParent: from === dir ? undefined : from, ...(branch ? { branch } : {}) });
+        const parents = new Set(memberRows.map(member => member.parent));
+        for (const member of memberRows) {
+          out.push({
+            path: member.id, isDir: false, parent: member.parent, label: member.name,
+            branch: parents.has(member.id) ? "java-symbol" : undefined,
+            symbol: { file: full, line: member.line, column: member.column },
+          });
+        }
       }
     }
   };
@@ -132,20 +148,25 @@ export function treeKeyAction(
       return selectAt(flat.length - 1);
     case "ArrowRight":
       if (!selected) return selectAt(0);
+      if (flat[at]?.branch === "java-file") {
+        if (!expanded.has(selected.path)) return { kind: "toggle", path: selected.path };
+        return selectAt(flat.findIndex(r => r.parent === selected.path));
+      }
+      if (flat[at]?.branch === "java-symbol") return selectAt(flat.findIndex(r => r.parent === selected.path));
       if (!selected.isDir) return null;
       if (!expanded.has(selected.path)) return { kind: "toggle", path: selected.path };
       return selectAt(flat.findIndex((r) => r.parent === selected.path));
     case "ArrowLeft": {
       if (!selected) return null;
-      if (selected.isDir && expanded.has(selected.path)) {
+      if ((selected.isDir || flat[at]?.branch === "java-file") && expanded.has(selected.path)) {
         return { kind: "toggle", path: selected.path };
       }
       const row = flat[at];
-      return row?.parent ? { kind: "select", path: row.parent, isDir: true } : null;
+      return row?.parent ? selectAt(flat.findIndex(r => r.path === row.parent)) : null;
     }
     case "Enter":
     case " ":
-      if (!selected) return null;
+      if (!selected || at < 0) return null;
       return selected.isDir ? { kind: "toggle", path: selected.path } : { kind: "open", path: selected.path };
     default:
       return null;

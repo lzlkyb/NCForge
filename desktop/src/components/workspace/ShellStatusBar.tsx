@@ -1,3 +1,4 @@
+import { getModel } from "../../lib/editorStore";
 import { languageOf, type EncodingMark } from "../../lib/workspace";
 import type { TabMeta } from "../../lib/workspaceSession";
 import { useCursor } from "../../lib/cursorStore";
@@ -66,7 +67,7 @@ export function ShellStatusBar({
       </button>
       {!toolMode && active && (
         <>
-          <span className="wb-status-meta">{active.virtual ? "java" : languageOf(active.path)}</span>
+          <span className="wb-status-meta">{active.virtual ? "java" : (getModel(active.path)?.getLanguageId() ?? languageOf(active.path))}</span>
           {mark && (
             <span
               className="wb-status-enc"

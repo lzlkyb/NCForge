@@ -19,6 +19,7 @@ import { wireDebugHover } from "../../lib/debugHover";
 import { toggleBreakpointHere } from "../../lib/debugSession";
 import { registerDebugEditorKeys } from "../../lib/debugEditorKeys";
 import { getEditorPrefs, monacoOptionsOf, PREFS_EVENT } from "../../lib/editorPrefs";
+import { attachJavaStickyScope } from "../../lib/javaStickyScope";
 import { formatBeforeSave } from "../../lib/formatOnSave";
 import { noteEdit, previousEditSpot } from "../../lib/editHistory";
 import { pathOfModel } from "../../lib/editorStore";
@@ -85,6 +86,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       scrollBeyondLastLine: false,
       smoothScrolling: true,
       renderLineHighlight: "line",
+      "semanticHighlighting.enabled": true,
       // 行号左边留一格（行高宽）给书签小旗。ESM 版 Monaco 把默认值改成了 false
       // （editor.api.js 里 `EditorOptions.glyphMargin.defaultValue = false`），不显式打开就没有这条槽。
       glyphMargin: true,
@@ -247,21 +249,16 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     editorRef.current?.updateOptions({ readOnly });
   }, [readOnly, activePath]);
 
-  // 设置页改了字号 / 换行 / 小地图等：实时生效，不用重开编辑器
+  // 设置变化与大文件降级共用一次计算，切换文件时保留用户的小地图偏好。
   useEffect(() => {
-    const apply = () => editorRef.current?.updateOptions(monacoOptionsOf(getEditorPrefs()));
+    const editor = editorRef.current;
+    if (!editor) return;
+    const java = editor.getModel()?.getLanguageId() === "java";
+    const apply = () => editor.updateOptions(monacoOptionsOf(getEditorPrefs(), heavy, java));
+    apply();
+    const detach = java && activePath && !heavy ? attachJavaStickyScope(editor, activePath) : undefined;
     window.addEventListener(PREFS_EVENT, apply);
-    return () => window.removeEventListener(PREFS_EVENT, apply);
-  }, []);
-
-  // 超大文件降级。括号对着色要逐行配对、折叠要算整个文档的区间、小地图要渲染缩略，
-  // 这三样在几千行的 BO/BP 上每次输入都要重算，打字会明显掉帧。切回小文件时再打开。
-  useEffect(() => {
-    editorRef.current?.updateOptions({
-      bracketPairColorization: { enabled: !heavy },
-      folding: !heavy,
-      minimap: { enabled: !heavy, showSlider: "mouseover" },
-    });
+    return () => { window.removeEventListener(PREFS_EVENT, apply); detach?.(); };
   }, [heavy, activePath]);
 
   // 跳转到指定行。必须排在上面的「切换文件」之后：同一个 commit 里 effect 按声明顺序执行，

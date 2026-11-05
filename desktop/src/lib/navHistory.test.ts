@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { navBack, navForward, navSize, pushNav, resetNav } from "./navHistory";
+import { navAt, recordNavJump, navBack, navForward, navSize, pushNav, resetNav } from "./navHistory";
 
 beforeEach(() => resetNav());
 
@@ -48,4 +48,18 @@ describe("导航历史", () => {
     pushNav({ path: "jdt://Contents/x.class", line: 1 });
     expect(navSize()).toBe(2);
   });
+});
+
+
+it("跳到任一历史位置时保留前进分支与列号", () => {
+  resetNav();
+  const start = { path: "A.java", line: 10, column: 8, symbol: "run()" };
+  const middle = { path: "B.java", line: 20 };
+  const end = { path: "C.java", line: 30 };
+  recordNavJump(start, middle);
+  recordNavJump(middle, end);
+  expect(navAt(0)).toEqual(start);
+  expect(navForward()).toEqual(middle);
+  expect(navAt(2)).toEqual(end);
+  expect(navAt(2)).toBeNull();
 });

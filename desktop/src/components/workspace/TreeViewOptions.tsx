@@ -1,6 +1,7 @@
-import { Icon } from "../ui/icon";
+import { WorkspaceGlyph } from "./WorkspaceGlyph";
 import {
   toggleCompactPackages,
+  usePackageView,
   toggleNcStructure,
   toggleRevealOnOpen,
   useCompactPackages,
@@ -27,6 +28,7 @@ export function TreeViewOptions({ root }: { root?: string }) {
   const compact = useCompactPackages();
   const reveal = useRevealOnOpen();
   const direct = useDirectSwitch();
+  const packageView = usePackageView();
   const nc = useNcStructure();
   // 只看当前工作区这一份：别的工程有没有登记，不影响这里能不能用
   const { bcNames } = useNcComponents(root ? [root] : [], false);
@@ -45,7 +47,7 @@ export function TreeViewOptions({ root }: { root?: string }) {
         }
         onClick={toggleRevealOnOpen}
       >
-        <Icon name="target" size={14} />
+        <WorkspaceGlyph name="locate" size={14} />
       </button>
       <button
         type="button"
@@ -59,16 +61,16 @@ export function TreeViewOptions({ root }: { root?: string }) {
         }
         onClick={toggleCompactPackages}
       >
-        <Icon name="package" size={14} />
+        <WorkspaceGlyph name="compact" size={14} />
       </button>
       <button
         type="button"
         className="wb-icon-btn"
         aria-pressed={nc}
         aria-label="NC 结构视图"
-        disabled={!ncReady}
+        disabled={!ncReady || packageView}
         title={
-          ncReady
+          packageView ? "切换到文件视图后可调整 NC 结构视图" : ncReady
             ? nc
               ? "NC 结构视图：业务组件模块下直接列 public/client/private/test/resources，不再多一层 src（点击关闭）"
               : "按目录层级显示，模块下先看到 src（点击改为 NC 结构视图）"
@@ -76,7 +78,7 @@ export function TreeViewOptions({ root }: { root?: string }) {
         }
         onClick={toggleNcStructure}
       >
-        <Icon name="layers" size={14} />
+        <WorkspaceGlyph name="ncStructure" size={14} />
       </button>
       <button
         type="button"
@@ -90,7 +92,7 @@ export function TreeViewOptions({ root }: { root?: string }) {
         }
         onClick={toggleDirectSwitch}
       >
-        <Icon name="external" size={14} />
+        <WorkspaceGlyph name="switchProject" size={14} />
       </button>
     </>
   );

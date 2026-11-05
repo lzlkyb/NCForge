@@ -7,12 +7,15 @@
 // 形状上就是一个数组 + 游标，纯逻辑，能单测。放在模块级单例里而不是组件 state：
 // 文件页切走再回来，历史不该清空（与 workspaceSession 同一个理由）。
 import { useSyncExternalStore } from "react";
+import { getCursor } from "./cursorStore";
+import { getSession } from "./workspaceSession";
 
 export interface NavPoint {
   /** 文件路径（`jdt://` 开头的表示 jar 里的类）。 */
   path: string;
   line: number;
   column?: number;
+  symbol?: string;
   /** jdt 目标要走「打开 jar 内类」那条路，不能当磁盘文件读。 */
   jdt?: boolean;
 }
@@ -32,8 +35,10 @@ let cursor = -1;
 interface NavView {
   canBack: boolean;
   canForward: boolean;
+  points: readonly NavPoint[];
+  cursor: number;
 }
-let view: NavView = { canBack: false, canForward: false };
+let view: NavView = { canBack: false, canForward: false, points: stack, cursor };
 const listeners = new Set<() => void>();
 
 const subscribe = (cb: () => void): (() => void) => {
@@ -46,10 +51,8 @@ const subscribe = (cb: () => void): (() => void) => {
 const snapshot = (): NavView => view;
 
 function recompute(): void {
-  const next = { canBack: cursor > 0, canForward: cursor >= 0 && cursor < stack.length - 1 };
-  // 引用必须稳定：每次算出新对象会让订阅方无限重渲染
-  if (next.canBack === view.canBack && next.canForward === view.canForward) return;
-  view = next;
+  if (view.points === stack && view.cursor === cursor) return;
+  view = { canBack: cursor > 0, canForward: cursor >= 0 && cursor < stack.length - 1, points: stack, cursor };
   listeners.forEach((l) => l());
 }
 
@@ -62,35 +65,37 @@ function recompute(): void {
 export function pushNav(p: NavPoint): void {
   const cur = stack[cursor];
   if (cur && cur.jdt === p.jdt && cur.path.toLowerCase() === p.path.toLowerCase() && cur.line === p.line) return;
-  if (cursor < stack.length - 1) stack = stack.slice(0, cursor + 1);
-  stack.push(p);
-  if (stack.length > MAX) stack = stack.slice(stack.length - MAX);
+  stack = [...stack.slice(0, cursor + 1), p].slice(-MAX);
   cursor = stack.length - 1;
   recompute();
 }
 
-/** 后退一步，返回要去的点（没有就返回 null）。 */
-export function navBack(): NavPoint | null {
-  if (cursor <= 0) return null;
-  cursor -= 1;
+/** 回到栈内某个位置，保留它之后可前进的记录。 */
+export function navAt(index: number): NavPoint | null {
+  if (!Number.isInteger(index) || index < 0 || index >= stack.length || index === cursor) return null;
+  cursor = index;
   recompute();
   return stack[cursor];
 }
 
-/** 前进一步。 */
-export function navForward(): NavPoint | null {
-  if (cursor < 0 || cursor >= stack.length - 1) return null;
-  cursor += 1;
-  recompute();
-  return stack[cursor];
+export function navBack(): NavPoint | null { return navAt(cursor - 1); }
+export function navForward(): NavPoint | null { return navAt(cursor + 1); }
+
+export function captureNavOrigin(): NavPoint | null {
+  const path = getSession().activePath;
+  return path ? { path, ...getCursor(), jdt: path.startsWith("jdt://") || undefined } : null;
+}
+
+export function recordNavJump(origin: NavPoint | null, target: NavPoint): void {
+  if (origin) pushNav(origin);
+  pushNav(target);
 }
 
 /** 清空（换工作区时）。旧工作区的路径在新区里点开只会被守卫挡住。 */
 export function resetNav(): void {
   stack = [];
   cursor = -1;
-  view = { canBack: false, canForward: false };
-  listeners.forEach((l) => l());
+  recompute();
 }
 
 export function navSize(): number {

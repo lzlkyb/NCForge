@@ -37,6 +37,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.wb-code-tree-title { height:auto; display:grid; grid-template-columns:minmax(0,1fr); gap:5px; padding:8px 8px 5px; border-bottom:1px solid hsl(var(--border)); }
+.wb-code-tree-heading { display:flex; align-items:center; justify-content:space-between; gap:6px; min-width:0; color:hsl(var(--foreground)); font-size:12px; letter-spacing:0; }
+.wb-code-tree-title .wb-pane-acts { flex-wrap:wrap; gap:0; }
+.app-shell .wb-code-tree-title .wb-icon-btn { flex:0 0 12.5%; min-width:24px; max-width:28px; }
+.wb-tree-view-switch { display:flex; flex:none; gap:2px; padding:2px; border:1px solid hsl(var(--border)); border-radius:var(--r-control); background:hsl(var(--muted) / .5); }
+.wb-tree-view-switch button { min-height:22px; min-width:29px; padding-inline:5px; border-radius:calc(var(--r-control) - 2px); color:hsl(var(--muted-foreground)); font-size:11px; font-weight:600; }
+.wb-tree-view-switch button:hover { color:hsl(var(--foreground)); }
+.wb-tree-view-switch button[aria-pressed="true"] { background:hsl(var(--card)); color:hsl(var(--primary)); box-shadow:0 1px 2px hsl(var(--foreground) / .08); }
+
 .wb-icon-btn {
   display: grid;
   place-items: center;
@@ -83,41 +92,107 @@
   /* 长路径会把整块撑宽，必须在 360px 的输入栏里换行 */
   overflow-wrap: anywhere;
 }
+.wb-dependencies { flex:none; max-height:42%; overflow:auto; border-top:1px solid hsl(var(--border)); font-size:12px; }
+.wb-dependencies > summary { padding:8px 12px; font-weight:600; }
+.wb-dependencies summary { cursor:pointer; }
+.wb-dependencies-body { padding:0 12px 8px; }
+.wb-dependency-project { display:flex; align-items:center; gap:6px; }
+.wb-dependency-project select { min-width:0; flex:1; color:hsl(var(--foreground)); background:hsl(var(--card)); }
+.wb-dependency-summary,.wb-dependency-path { color:hsl(var(--muted-foreground)); }
+.wb-dependency-group { padding-block:4px; }
+.wb-dependency-group li { padding-block:6px; border-bottom:1px solid hsl(var(--border)); }
+.wb-dependency-name { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; overflow-wrap:anywhere; }
+.wb-dependency-name [data-status="missing"],.wb-dependency-missing { color:hsl(var(--destructive-ink)); }
+.wb-dependency-path { overflow-wrap:anywhere; }
+.wb-dependency-locate { color:hsl(var(--primary)); text-decoration:underline; }
+
 .wb-tree-list {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 0 6px 8px;
+  padding: 5px 5px 8px;
   font-size: 12.5px;
+  container-type: inline-size;
 }
 .wb-tree-list:focus-visible { outline: 2px solid hsl(var(--ring) / 0.5); outline-offset: -2px; }
 .wb-row {
+  /* Cap deep indentation so the type, suffix and row statuses still fit at 180px. */
+  --wb-row-indent: min(var(--wb-tree-pad, 6px), 43cqi, max(6px, 100cqi - 136px));
+  --wb-branch: color-mix(in srgb, hsl(var(--muted-foreground)) 30%, transparent);
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
-  height: 26px;
-  padding-right: 8px;
-  border-radius: 6px;
+  height: 27px;
+  padding-inline: var(--wb-row-indent) 6px;
+  border-radius: var(--r-control);
   color: hsl(var(--foreground));
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
 }
-.wb-row:hover { background: hsl(var(--secondary)); }
-.wb-row[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
-/* 选中（右键 / F2 / Del 的作用对象）与「已打开」是两回事：
-   前者淡底，后者填充 + 主色文字，两种状态叠在同一行也分得清 */
-.wb-row[data-selected] { background: hsl(var(--ring) / 0.1); }
-.wb-row[data-active][data-selected] { box-shadow: inset 0 0 0 1px hsl(var(--ring) / 0.5); }
-
-/* ---- 多工程树的工程根行 ---- */
-.wb-row-project { font-weight: 600; }
-.wb-row-project[data-current] {
-  background: hsl(var(--primary) / 0.07);
-  box-shadow: inset 2px 0 0 hsl(var(--primary) / 0.7);
+/* The short guide is aligned with the parent disclosure. Keep it visible beside the hover fill. */
+.wb-row[aria-level]:not([aria-level="1"]):not([data-kind="project"])::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: max(4px, calc(var(--wb-row-indent) - 9px));
+  border-inline-start: 1px solid var(--wb-branch);
+  pointer-events: none;
 }
-.wb-row-project[data-current] .wb-project-icon { color: hsl(var(--primary)); }
+.wb-row[data-file]::before {
+  inset-inline-start: max(4px, calc(var(--wb-row-indent) - 29px));
+}
+.wb-row:hover { background: hsl(var(--secondary)); }
+.wb-row[data-selected] { background: hsl(var(--ring) / .10); }
+.wb-row[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 650; }
+.wb-tree-list:focus-visible .wb-row[data-selected],
+.wb-row[data-active][data-selected] { box-shadow: inset 0 0 0 1px hsl(var(--ring) / .60); }
+.wb-row-project { font-weight: 650; height: 30px; margin-block: 2px; }
+.wb-row-project[data-current]:not([data-selected]) { background: hsl(var(--primary) / .08); }
+:root {
+  --wb-icon-blue: #2e61ab;
+  --wb-icon-teal: #24776e;
+  --wb-icon-violet: #754b9b;
+  --wb-icon-amber: #965018;
+  --wb-icon-slate: #516a84;
+  --wb-icon-green: #39744d;
+  --wb-icon-cut: #fff;
+}
+.dark {
+  --wb-icon-blue: #92baff;
+  --wb-icon-teal: #82d2c4;
+  --wb-icon-violet: #c5a9ef;
+  --wb-icon-amber: #f1b77e;
+  --wb-icon-slate: #a4b9d3;
+  --wb-icon-green: #9ad2a9;
+  --wb-icon-cut: #19262e;
+}
+.wb-workspace-icon { display:block; flex:none; }
+:is(.wb-workspace-icon,.wb-tree-type-badge)[data-tone="blue"] { color:var(--wb-icon-blue); }
+:is(.wb-workspace-icon,.wb-tree-type-badge)[data-tone="teal"] { color:var(--wb-icon-teal); }
+:is(.wb-workspace-icon,.wb-tree-type-badge)[data-tone="violet"] { color:var(--wb-icon-violet); }
+:is(.wb-workspace-icon,.wb-tree-type-badge)[data-tone="amber"] { color:var(--wb-icon-amber); }
+:is(.wb-workspace-icon,.wb-tree-type-badge)[data-tone="slate"] { color:var(--wb-icon-slate); }
+:is(.wb-workspace-icon,.wb-tree-type-badge)[data-tone="green"] { color:var(--wb-icon-green); }
+.wb-file-disclosure {
+  position:absolute; inset-block:0; inset-inline-start:max(2px, calc(var(--wb-row-indent) - 20px));
+  width:18px; display:grid; place-items:center; border-radius:var(--r-control); color:hsl(var(--muted-foreground));
+}
+.wb-file-disclosure:hover { background:hsl(var(--accent)); color:hsl(var(--foreground)); }
+.wb-symbol-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; color:hsl(var(--muted-foreground)); }
+.wb-member-row { color:hsl(var(--muted-foreground)); }
+.wb-member-row:hover, .wb-member-row[data-selected] { color:hsl(var(--foreground)); }
+.wb-tree-test-badge { flex:none; padding-inline:4px; border-radius:3px; background:hsl(var(--accent)); color:hsl(var(--primary)); font-size:10px; font-weight:700; }
+.wb-row[data-kind="source"] { font-weight: 600; }
+.wb-row[data-kind="source"] .wb-row-tail,
+.wb-row[data-kind="package"] .wb-row-prefix { color:hsl(var(--muted-foreground)); font-weight:400; }
+.wb-row[data-kind="package"] .wb-row-tail { font-weight:550; }
+.wb-row[data-kind="package"] .wb-row-prefix { flex:0 1 auto; }
+.wb-row[data-kind="package"] .wb-row-tail { flex:0 0 auto; max-width:100%; }
+html[data-ui-density="comfortable"] .wb-tree-list .wb-row { height:30px; }
+
 .wb-project-badge {
   margin-left: auto;
   flex-shrink: 0;
@@ -262,7 +337,33 @@
 }
 .wb-row-icon { flex-shrink: 0; color: hsl(var(--muted-foreground)); }
 .wb-row[data-active] .wb-row-icon { color: inherit; }
+.wb-row-disclosure { opacity:.78; }
+.wb-row:hover .wb-row-disclosure, .wb-row[aria-expanded="true"] .wb-row-disclosure { opacity:1; }
 .wb-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wb-file-name { display:inline-flex; min-width:0; white-space:nowrap; }
+.wb-file-stem, .wb-file-ext { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.wb-file-ext { flex:none; max-width:100%; }
+.wb-row > .wb-file-name { flex:1 1 auto; }
+.wb-tree-type {
+  display:grid;
+  place-items:center;
+  flex:0 0 45px;
+}
+.wb-tree-type-badge {
+  display:grid;
+  place-items:center;
+  width:100%;
+  height:17px;
+  border-radius:4px;
+  background:color-mix(in srgb, currentColor 11%, transparent);
+  font-size:11px;
+  font-weight:650;
+  line-height:1;
+}
+:is(.wb-row,.wb-tab)[data-active] .wb-file-ext { color:var(--wb-icon-teal); }
+.wb-row-name[data-split] { display:flex; flex:1 1 auto; }
+.wb-row-prefix,.wb-row-tail { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.wb-row[data-kind="source"] .wb-row-prefix { flex-shrink:0; max-width:62%; }
 .wb-row-note { padding-left: 28px; font-size: 12px; color: hsl(var(--muted-foreground)); }
 .wb-row-note[data-tone="bad"] { color: hsl(var(--destructive-ink)); }
 
@@ -336,6 +437,8 @@
   font-weight: 600;
   box-shadow: inset 0 2px 0 hsl(var(--primary));
 }
+.wb-tab:has(.wb-tab-scope) { max-width:310px; }
+.wb-tab-scope { flex:none; max-width:46%; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:hsl(var(--muted-foreground)); font-size:11px; font-weight:500; font-style:normal; }
 .wb-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-tab-x {
   display: grid;
@@ -562,10 +665,9 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-crumb { display: flex; align-items: center; gap: 2px; height: 24px; padding: 0 12px; flex-shrink: 0; overflow: hidden; font-size: 12px; color: hsl(var(--muted-foreground)); background: hsl(var(--card)); white-space: nowrap; }
 .wb-crumb-sep { flex-shrink: 0; opacity: 0.6; }
 .wb-crumb-seg { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.wb-crumb-file { color: hsl(var(--foreground)); flex-shrink: 0; }
+.wb-crumb-file { display:inline-flex; align-items:center; gap:4px; min-width:0; flex-shrink:.5; color:hsl(var(--foreground)); }
 .wb-crumb-sym { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; border-radius: 4px; color: hsl(var(--foreground)); }
 .wb-crumb-sym:hover { background: hsl(var(--secondary)); }
-.wb-crumb-k { font-size: 10px; font-weight: 700; color: hsl(var(--primary)); }
 
 /* 面包屑条：左侧路径 + 右侧「结构」按钮，结构弹层相对这一条定位 */
 .wb-crumb-row { position: relative; display: flex; align-items: center; flex-shrink: 0; background: hsl(var(--card)); }
@@ -576,17 +678,32 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-nav-btn:disabled { opacity: 0.35; cursor: default; }
 .wb-outline-btn { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; height: 20px; margin-right: 8px; padding: 0 6px; border-radius: 4px; font-size: 11px; color: hsl(var(--muted-foreground)); }
 .wb-outline-btn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
-/* 结构弹层。z-index 必须显式给正数：面板在 .wb-crumb-row（relative、z-auto）里，
-   而 .wb-editor 在同级更靠后，不给 z-index 会被编辑区盖住。外点关闭挂在 document 上，
-   不再需要盖住编辑区的全屏遮罩——看结构的同时要能滚动代码、点别处对照。 */
-.wb-outline { position: absolute; top: 26px; right: 8px; z-index: 45; display: flex; flex-direction: column; width: 340px; max-height: 60vh; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--popover, var(--card))); box-shadow: 0 8px 24px hsl(var(--foreground) / 0.16); }
+/* 阅读区同时容纳编辑器和固定结构，浮动结构锚定在代码区右上。 */
+.wb-reading-layout { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; container-type:inline-size; }
+.wb-java-sticky {
+  display:flex; align-items:center; box-sizing:border-box; overflow:hidden; white-space:nowrap;
+  border-bottom:1px solid hsl(var(--border)); background:hsl(var(--secondary));
+  color:hsl(var(--foreground)); pointer-events:none; z-index:3;
+}
+.wb-java-sticky[hidden] { display:none; }
+.wb-reading-body { position:relative; display:flex; flex:1; min-width:0; min-height:0; }
+.wb-outline { position: absolute; top: 0; right: 8px; z-index: 45; display: flex; flex-direction: column; width: min(340px, calc(100% - 16px)); max-height: min(100%, 60vh); overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--popover, var(--card))); box-shadow: 0 8px 24px hsl(var(--foreground) / 0.16); }
+.wb-outline[data-pinned] { position:static; flex:0 0 224px; width:auto; max-height:none; border-width:0 0 0 1px; border-radius:0; box-shadow:none; background:hsl(var(--card)); }
+.wb-outline-options { display:flex; align-items:center; gap:6px; padding:2px 8px 4px; color:hsl(var(--muted-foreground)); font-size:11px; }
+.wb-outline-option { border:1px solid hsl(var(--border)); border-radius:var(--r-control); padding:2px 5px; white-space:nowrap; font-size:11px; }
+.wb-outline-option[aria-pressed="true"],.wb-outline-row[data-current],.wb-minimap-toggle[aria-pressed="true"] { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); }
+.wb-outline-row[data-current] { font-weight:650; }
+.wb-outline-kind { flex:none; border-radius:3px; padding:1px 4px; background:hsl(var(--primary) / .12); color:hsl(var(--primary)); font-size:10px; }
+.wb-nav-record { min-width:0; display:grid; gap:1px; }
+.wb-nav-record > * { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wb-nav-record small { color:hsl(var(--muted-foreground)); font-size:11px; }
+@container (max-width:580px) { .wb-minimap-toggle { display:none; } }
 .wb-outline-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; color: hsl(var(--muted-foreground)); }
 .wb-outline-count { margin-left: auto; }
 .wb-outline-q { margin: 6px 8px 4px; padding: 4px 8px; border: 1px solid hsl(var(--border)); border-radius: 4px; background: hsl(var(--background)); font-size: 12px; color: hsl(var(--foreground)); }
 .wb-outline-list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 4px 6px; }
 .wb-outline-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 8px; border-radius: 4px; font-size: 12px; color: hsl(var(--foreground)); text-align: left; }
 .wb-outline-row[data-active] { background: hsl(var(--secondary)); }
-.wb-outline-k { flex-shrink: 0; width: 10px; font-size: 10px; font-weight: 700; color: hsl(var(--primary)); }
 .wb-outline-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-outline-ln { flex-shrink: 0; font-size: 11px; color: hsl(var(--muted-foreground)); }
 .wb-outline-note { padding: 10px 12px; font-size: 12px; color: hsl(var(--muted-foreground)); }

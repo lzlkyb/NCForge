@@ -1,6 +1,7 @@
 // 编辑器模型仓库：每个打开的文件一个 Monaco model。
 // 为什么不放 React state：model 是带撤销栈的命令式对象，切换标签页时必须原样保留（光标/撤销/滑动位置），
 // 由 React 管理它的生命周期反而容易误销毁。React 只保存标签元数据（路径/编码/换行）。
+import { fileFormat } from "./fileFormats";
 import { monaco } from "./monacoSetup";
 import { emitDirty } from "./dirtyBus";
 import { languageOf, type FileContent } from "./workspace";
@@ -153,7 +154,7 @@ export function touchModel(path: string): void {
 export function openModel(path: string, content: FileContent): Model {
   const existing = entries.get(path);
   if (existing) return existing.model;
-  const model = monaco.editor.createModel(content.text, languageOf(path), monaco.Uri.file(path));
+  const model = monaco.editor.createModel(content.text, languageOf(path, content.text), monaco.Uri.file(path));
   const entry: Entry = {
     model,
     savedVersion: model.getAlternativeVersionId(),
@@ -191,7 +192,7 @@ export function renameModel(oldPath: string, newPath: string): void {
   const viewState = e.viewState;
   unregister(oldPath, e);
   e.model.dispose();
-  const model = monaco.editor.createModel(text, languageOf(newPath), monaco.Uri.file(newPath));
+  const model = monaco.editor.createModel(text, languageOf(newPath, text), monaco.Uri.file(newPath));
   const entry: Entry = {
     model,
     savedVersion: wasDirty ? -1 : model.getAlternativeVersionId(),
@@ -236,6 +237,10 @@ export function markSaved(path: string, version?: number): void {
   // 写盘耗时期间仍可打字：保存点只能是提交的版本，不能抹掉后续编辑。
   e.savedVersion = version ?? e.model.getAlternativeVersionId();
   const dirty = e.model.getAlternativeVersionId() !== e.savedVersion;
+  if (!dirty && fileFormat(path).language === "xml-content") {
+    const language = languageOf(path, e.model.getValue());
+    if (language !== e.model.getLanguageId()) monaco.editor.setModelLanguage(e.model, language);
+  }
   if (e.lastDirty !== dirty) {
     e.lastDirty = dirty;
     emitDirty(path, dirty);

@@ -44,6 +44,7 @@ vi.mock("../../lib/editorStore", () => ({
   closeModel: vi.fn(),
   renameModel: vi.fn(),
   markSaved: vi.fn(),
+  getModel: vi.fn(() => undefined),
   getText: vi.fn(() => ""),
   replaceContent: vi.fn(),
 }));

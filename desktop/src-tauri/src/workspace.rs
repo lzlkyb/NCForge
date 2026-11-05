@@ -133,6 +133,77 @@ pub fn list_dir(dir: &Path) -> Result<Vec<DirItem>, String> {
     Ok(items)
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageDir {
+    pub relative: String,
+    pub is_package: bool,
+}
+
+fn package_segment(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_alphabetic() || c == '_' || c == '$')
+        && chars.all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+}
+
+/// Only index directory names and file presence. Individual package files are read on expansion.
+pub fn package_dirs(root: &Path) -> Result<Vec<PackageDir>, String> {
+    const MAX_DIRS: usize = 12_000;
+    let mut pending = vec![root.to_path_buf()];
+    let mut seen = 0;
+    let mut out = Vec::new();
+    while let Some(dir) = pending.pop() {
+        seen += 1;
+        if seen > MAX_DIRS {
+            return Err("源码根的目录数量超过包视图上限".into());
+        }
+        let relative = |path: &Path| {
+            path.strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .into_owned()
+        };
+        let mut has_files = false;
+        let mut has_dirs = false;
+        for entry in std::fs::read_dir(&dir).map_err(|e| format!("读取源码目录失败：{e}"))?
+        {
+            let entry = entry.map_err(|e| format!("读取源码目录项失败：{e}"))?;
+            let kind = entry
+                .file_type()
+                .map_err(|e| format!("检查源码目录项失败：{e}"))?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if is_hidden_entry(&name, kind.is_dir()) {
+                continue;
+            }
+            if kind.is_dir() {
+                has_dirs = true;
+                if package_segment(&name) && !kind.is_symlink() {
+                    pending.push(entry.path());
+                } else {
+                    out.push(PackageDir {
+                        relative: relative(&entry.path()),
+                        is_package: false,
+                    });
+                }
+            } else {
+                has_files = true;
+            }
+        }
+        // Keep an empty package visible so a newly created package can receive its first file.
+        if dir != root && (has_files || !has_dirs) {
+            out.push(PackageDir {
+                relative: relative(&dir),
+                is_package: true,
+            });
+        }
+    }
+    out.sort_by_cached_key(|entry| entry.relative.to_lowercase().replace(['/', '\\'], "."));
+    Ok(out)
+}
+
 // ---------------------------------------------------------------------------
 // 文件树操作：新建 / 重命名 / 删除
 //
@@ -636,6 +707,36 @@ mod tests {
             .unwrap_err();
         assert!(e.starts_with("CONFLICT"));
         assert_eq!(std::fs::read(&p).unwrap(), b"int j;\n"); // 没被覆盖
+    }
+
+    #[test]
+    fn package_dirs_projects_occupied_packages_and_preserves_non_package_branches() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        for path in [
+            "nccloud/itf/eye/portal/factory",
+            "assets-data/nested",
+            ".svn/hidden",
+            "newpkg",
+        ] {
+            std::fs::create_dir_all(root.join(path)).unwrap();
+        }
+        std::fs::write(root.join("nccloud/itf/eye/portal/config.properties"), "").unwrap();
+        std::fs::write(root.join("nccloud/itf/eye/portal/factory/Factory.java"), "").unwrap();
+        let rows: Vec<_> = package_dirs(root)
+            .unwrap()
+            .into_iter()
+            .map(|row| (row.relative.replace('\\', "/"), row.is_package))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("assets-data".into(), false),
+                ("nccloud/itf/eye/portal".into(), true),
+                ("nccloud/itf/eye/portal/factory".into(), true),
+                ("newpkg".into(), true),
+            ]
+        );
     }
 
     #[test]

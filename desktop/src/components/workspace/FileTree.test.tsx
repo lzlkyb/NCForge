@@ -7,6 +7,7 @@ import { setSession } from "../../lib/workspaceSession";
 import {
   setCompactPackages,
   setNcStructure,
+  setPackageView,
   setRevealOnOpen,
 } from "../../lib/treeViewPrefs";
 import { ViewActivityContext } from "../../lib/viewActivity";
@@ -17,7 +18,7 @@ const mocks = vi.hoisted(() => {
   const fsChanged: {
     handler: ((p: { dirs?: string[]; rescan?: boolean }) => void) | null;
   } = { handler: null };
-  return { invoke: vi.fn(), toast: vi.fn(), fsChanged };
+  return { invoke: vi.fn(), toast: vi.fn(), fsChanged, modelText: vi.fn() };
 });
 vi.mock("../../lib/tauri", () => ({
   invoke: mocks.invoke,
@@ -30,6 +31,11 @@ vi.mock("../../lib/tauri", () => ({
       mocks.fsChanged.handler = null;
     };
   },
+}));
+vi.mock("../../lib/editorStore", () => ({
+  getModel: () => undefined,
+  getText: mocks.modelText,
+  onModelLifecycle: () => () => {},
 }));
 vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
 vi.mock("../../hooks/usePrefersReducedMotion", () => ({
@@ -117,6 +123,7 @@ beforeEach(() => {
   setCompactPackages(true);
   setRevealOnOpen(true);
   setNcStructure(false);
+  setPackageView(false);
   // 预置一棵已展开的树，免得每次渲染都去 listDir
   setSession({
     tree: {
@@ -153,6 +160,58 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+});
+
+describe("树目录文件类型", () => {
+  it("NC 文件用后缀徽标，并保留真实文件名后缀", async () => {
+    const files = ["CustomerLookupEndpointDeclaration.REST", "meta.upm", "meta.aop", "meta.bmf", "meta.bpf"];
+    setSession({ tree: {
+      root: ROOT, expanded: new Set([ROOT]), marks: {},
+      dirs: { [ROOT]: { status: "ok", items: files.map(name => ({ name, isDir: false, size: 10 })) } },
+    } });
+    await render();
+    const rows = files.map(rowByExact);
+    expect(rows.map(row => row?.getAttribute("data-kind"))).toEqual(["rest", "upm", "aop", "bmf", "bpf"]);
+    expect(rows.map(row => row?.querySelector(".wb-tree-type-badge")?.textContent)).toEqual(["REST", "UPM", "AOP", "BMF", "BPF"]);
+    expect(rows[0]?.getAttribute("aria-label")).toBe(files[0]);
+    expect(rows[0]?.getAttribute("aria-description")).toBe("NC REST 声明");
+    expect(rows[0]?.querySelector(".wb-tree-type svg")).toBeNull();
+    expect(rows[0]?.querySelector(".wb-file-ext")?.textContent).toBe(".REST");
+    await click(rows[0]);
+    expect(onOpen).toHaveBeenCalledWith(`${ROOT}\\${files[0]}`);
+  });
+
+  it("文件先出现，按目录批量补齐 Java 类型并保留文件打开路径", async () => {
+    const names = ["Demo.java", "Service.java", "Mode.java", "Tag.java", "Pair.java", "Mixed.java", "data.xml", "query.sql", "meta.bmf", "lib.jar"];
+    setSession({ tree: {
+      root: ROOT, expanded: new Set([ROOT]), marks: {},
+      dirs: { [ROOT]: { status: "ok", items: names.map(name => ({ name, isDir: false, size: 10 })) } },
+    } });
+    const original = mocks.invoke.getMockImplementation()!;
+    let resolveKinds: (value: Record<string, string>) => void = () => {};
+    mocks.invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "fs_java_kinds") return new Promise<Record<string, string>>(resolve => { resolveKinds = resolve; });
+      return original(cmd, args);
+    });
+    await render();
+    expect(rowByExact("Service.java")?.getAttribute("data-kind")).toBe("java");
+    expect(rowByExact("data.xml")?.getAttribute("data-kind")).toBe("xml");
+    expect(rowByExact("query.sql")?.getAttribute("data-kind")).toBe("sql");
+    expect(rowByExact("meta.bmf")?.getAttribute("data-kind")).toBe("bmf");
+    expect(rowByExact("lib.jar")?.getAttribute("data-kind")).toBe("archive");
+    expect(mocks.invoke).toHaveBeenCalledWith("fs_java_kinds", { path: ROOT, names: names.slice(0, 6) });
+    await act(async () => resolveKinds({ "Demo.java": "class", "Service.java": "interface", "Mode.java": "enum", "Tag.java": "annotation", "Pair.java": "record" }));
+    expect(names.slice(0, 6).map(name => rowByExact(name)?.getAttribute("data-kind"))).toEqual([
+      "java-class", "java-interface", "java-enum", "java-annotation", "java-record", "java",
+    ]);
+    expect(names.slice(0, 6).map(name => rowByExact(name)?.querySelector(".wb-tree-type-badge")?.textContent)).toEqual([
+      "类", "接口", "枚举", "注解", "Record", "Java",
+    ]);
+    expect(rowByExact("data.xml")?.querySelector(".wb-tree-type svg")).not.toBeNull();
+    expect(rowByExact("Service.java")?.getAttribute("aria-description")).toBe("Java 接口");
+    await click(rowByExact("Service.java"));
+    expect(onOpen).toHaveBeenCalledWith(`${ROOT}\\Service.java`);
+  });
 });
 
 describe("编码标记", () => {
@@ -911,5 +970,159 @@ describe("NC 结构视图", () => {
     expect(rowByExact("src")).toBeTruthy();
     await click(rowByExact("src"));
     expect(rowByExact("main")).toBeTruthy();
+  });
+});
+
+
+describe("包资源管理器", () => {
+  it("展开依赖库才读取工程依赖，并按已解析的附件定位源码", async () => {
+    const original = mocks.invoke.getMockImplementation()!;
+    const sourcePath = `${ROOT}\\sources.zip`;
+    mocks.invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "project_dependencies") return [
+        { kind: "library", name: "present.jar", declared: "present.jar", status: "available", source: "sources.zip", sourcePath },
+        { kind: "library", name: "missing.jar", declared: "missing.jar", status: "missing" },
+      ];
+      if (cmd === "reveal_dependency_source") return;
+      return original(cmd, args);
+    });
+    setPackageView(true);
+    await render();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("project_dependencies", expect.anything());
+    await act(async () => {
+      const panel = container.querySelector<HTMLDetailsElement>(".wb-dependencies")!;
+      panel.open = true;
+      panel.dispatchEvent(new Event("toggle"));
+    });
+    expect(mocks.invoke).toHaveBeenCalledWith("project_dependencies", { root: ROOT });
+    expect(container.textContent).toContain("缺失 1 项");
+    const locate = [...container.querySelectorAll("button")].find(b => b.textContent === "定位源码");
+    await click(locate);
+    expect(mocks.invoke).toHaveBeenCalledWith("reveal_dependency_source", { root: ROOT, path: sourcePath });
+  });
+
+  it("按需展开 Java 文件并用键盘跳转，成员不进入磁盘操作", async () => {
+    const path = `${ROOT}\\Demo.java`;
+    setSession({ tree: { root: ROOT, expanded: new Set([ROOT]), marks: {}, dirs: {
+      [ROOT]: { status: "ok", items: [{ name: "Demo.java", isDir: false, size: 80 }] },
+    } } });
+    const original = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "fs_java_outline_source") return "class Demo {\n  private int count;\n  void run() {}\n}";
+      return original(cmd, args);
+    });
+    setPackageView(true);
+    await render();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("fs_java_outline_source", expect.anything());
+    await click(rowByExact("Demo.java"));
+    expect(onOpen).toHaveBeenCalledWith(path);
+    const tree = container.querySelector('[role="tree"]')!;
+    const key = (name: string) => act(async () => tree.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true })));
+    await key("ArrowRight");
+    expect(rowByExact("Demo")?.querySelector(".wb-tree-type-badge")?.textContent).toBe("类");
+    expect(rowByExact("count")?.getAttribute("aria-description")).toContain("字段");
+    await key("ArrowRight");
+    await key("ArrowRight");
+    await key("ArrowDown");
+    await key("Enter");
+    expect(onOpen).toHaveBeenLastCalledWith(path, { line: 3, column: 8 });
+    await key("F2");
+    await key("Delete");
+    expect(container.querySelector(".wb-tree-edit")).toBeNull();
+    expect(mocks.invoke.mock.calls.some(call => call[0] === "fs_delete")).toBe(false);
+    await click(rowByExact("Demo.java")!.querySelector(".wb-file-disclosure"));
+    expect(rowByExact("run()")).toBeNull();
+    mocks.modelText.mockReturnValueOnce("class Demo { void unsaved() {} }");
+    await click(rowByExact("Demo.java")!.querySelector(".wb-file-disclosure"));
+    expect(rowByExact("unsaved()")).toBeTruthy();
+    expect(mocks.invoke.mock.calls.filter(call => call[0] === "fs_java_outline_source")).toHaveLength(1);
+  });
+
+  it("完整包名同级展示，展开和定位无需打开前缀目录", async () => {
+    const source = `${ROOT}\\src`;
+    const parent = `${source}\\nccloud\\itf\\eye\\portal`;
+    const child = `${parent}\\factory`;
+    const folder = (name: string) => ({ name, isDir: true, size: 0 });
+    const file = (name: string) => ({ name, isDir: false, size: 1 });
+    const indexed = [
+      { relative: "nccloud/itf/eye/portal", isPackage: true },
+      { relative: "nccloud/itf/eye/portal/factory", isPackage: true },
+    ];
+    const dirs: Record<string, unknown[]> = {
+      [ROOT]: [folder("src")], [source]: [folder("nccloud")],
+      [parent]: [folder("factory"), file("Parent.properties")], [child]: [file("Factory.java")],
+    };
+    setSession({ tree: { root: ROOT, dirs: { [ROOT]: { status: "ok", items: [folder("src")] } }, expanded: new Set([ROOT]), marks: {} } });
+    mocks.invoke.mockImplementation(async (cmd: string, args: { path?: string }) => {
+      if (cmd === "fs_read_file") return { text: '<classpath><classpathentry kind="src" path="src"/></classpath>' };
+      if (cmd === "nc_manifest") return { components: [] };
+      if (cmd === "fs_list_dir") return dirs[args.path!] ?? [];
+      if (cmd === "fs_package_dirs") return [...indexed];
+      if (cmd === "fs_encoding_marks") return [];
+      throw new Error(cmd);
+    });
+    setPackageView(true);
+    await render();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("fs_package_dirs", expect.anything());
+    await click(rowByExact("src"));
+    const parentRow = rowByExact("nccloud.itf.eye.portal")!;
+    const childRow = rowByExact("nccloud.itf.eye.portal.factory")!;
+    expect(parentRow.getAttribute("aria-level")).toBe(childRow.getAttribute("aria-level"));
+    await click(parentRow);
+    expect(rowByExact("Parent.properties")).toBeTruthy();
+    expect(rowByExact("factory")).toBeNull();
+    await act(async () => window.dispatchEvent(new CustomEvent("ncforge-reveal-in-tree", { detail: `${child}\\Factory.java` })));
+    expect(rowByExact("Factory.java")).toBeTruthy();
+    expect(mocks.invoke).not.toHaveBeenCalledWith("fs_list_dir", { path: `${source}\\nccloud` });
+    await click(rowByExact("Factory.java"));
+    expect(onOpen).toHaveBeenCalledWith(`${child}\\Factory.java`);
+    const tree = container.querySelector('[role="tree"]')!;
+    await act(async () => tree.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })));
+    expect(document.getElementById(tree.getAttribute("aria-activedescendant")!)?.textContent).toBe("nccloud.itf.eye.portal.factory");
+    indexed.push({ relative: "nccloud/itf/eye/portal/page", isPackage: true });
+    await act(async () => {
+      mocks.fsChanged.handler?.({ dirs: [parent] });
+      await new Promise(resolve => setTimeout(resolve, 220));
+    });
+    expect(rowByExact("nccloud.itf.eye.portal.page")).toBeTruthy();
+  });
+
+  it("平铺已验证的源码根，按需打开真实路径，切换后可从原目录访问", async () => {
+    const j = (...parts: string[]) => [ROOT, ...parts].join("\\");
+    const src = j("Bill", "src", "private");
+    const file = `${src}\\A.java`;
+    const dir = (name: string) => ({ name, isDir: true, size: 0 });
+    const listings: Record<string, unknown[]> = {
+      [ROOT]: [dir("Bill")], [j("Bill")]: [dir("src"), dir("resources")],
+      [j("Bill", "src")]: [dir("private"), dir("public")],
+      [src]: [{ name: "A.java", isDir: false, size: 1 }],
+    };
+    setSession({ tree: { root: ROOT, dirs: { [ROOT]: { status: "ok", items: [dir("Bill")] } }, expanded: new Set([ROOT]), marks: {} } });
+    mocks.invoke.mockImplementation(async (cmd: string, args: { path?: string }) => {
+      if (cmd === "fs_read_file") return { text: '<classpath><classpathentry kind="src" path="bill/src/private"/><classpathentry kind="src" path="/Other"/><classpathentry kind="src" path="Bill/src/missing"/></classpath>' };
+      if (cmd === "nc_manifest") return { components: [{ name: "bill", dispname: "", roots: [] }], notes: [] };
+      if (cmd === "fs_list_dir") return listings[args.path!] ?? [];
+      if (cmd === "fs_encoding_marks") return [];
+      throw new Error(cmd);
+    });
+    setPackageView(true);
+    await render();
+    const tree = container.querySelector('[role="tree"]')!;
+    expect(tree.getAttribute("aria-label")).toBe("包资源管理器");
+    expect(rowByExact("Bill/src/private")?.getAttribute("aria-level")).toBe("2");
+    expect([...tree.querySelectorAll(".wb-row-name")].slice(1, 4).map(r => r.textContent)).toEqual(["Bill/src/public", "Bill/src/private", "Bill/resources"]);
+    expect(mocks.invoke).not.toHaveBeenCalledWith("fs_list_dir", { path: src });
+    await click(rowByExact("Bill/src/private"));
+    await click(rowByExact("A.java"));
+    expect(onOpen).toHaveBeenCalledWith(file);
+    await act(async () => tree.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })));
+    expect(document.getElementById(tree.getAttribute("aria-activedescendant")!)?.textContent).toContain("Bill/src/private");
+    await click(rowByExact("Bill/src/private"));
+    await act(async () => window.dispatchEvent(new CustomEvent("ncforge-reveal-in-tree", { detail: file })));
+    expect(rowByExact("A.java")).toBeTruthy();
+    expect(rowByExact("private")).toBeNull();
+    await act(async () => setPackageView(false));
+    expect(rowByExact("Bill/src/private")).toBeNull();
+    expect(rowByExact("A.java")).toBeTruthy();
   });
 });

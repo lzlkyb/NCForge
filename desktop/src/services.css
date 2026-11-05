@@ -5,32 +5,6 @@
  * 服务页与它没有共享结构，混在一起只会让 340 行变 500 行。
  * 颜色全部走 index.css 里的 `--token`（深浅色自动跟随），不写字面色值。
  */
-
-/* ── 页面骨架 ── */
-.sv-page {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  height: 100%;
-  background: hsl(var(--card));
-}
-.sv-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 36px;
-  padding: 0 12px;
-  border-bottom: 1px solid hsl(var(--border));
-  flex-shrink: 0;
-}
-.sv-head h1 {
-  font-size: 13px;
-  font-weight: 650;
-}
-.sv-sub {
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
-}
 .sv-sp {
   flex: 1;
 }
@@ -62,11 +36,6 @@
 
 /* ── 窄窗口降级（P2-14，档位与 svn.css 对齐）──
    sv-sub 是说明性副标题，第一个让位；两个功能按钮始终保留。 */
-@media (max-width: 1180px) {
-  .sv-head .sv-sub {
-    display: none;
-  }
-}
 .sv-body {
   display: flex;
   flex-direction: column;

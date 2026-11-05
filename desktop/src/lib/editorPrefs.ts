@@ -37,8 +37,8 @@ export const DEFAULT_PREFS: EditorPrefs = {
   wordWrap: false,
   tabSize: 4,
   insertSpaces: false,
-  minimap: true,
-  stickyScroll: false,
+  minimap: false,
+  stickyScroll: true,
   errorLens: true,
   autoSave: false,
   autoSaveDelayMs: 2000,
@@ -99,14 +99,17 @@ export function useEditorPrefs(): EditorPrefs {
 }
 
 /** Monaco 的 `updateOptions` 片段：只映射与选项有关的字段。 */
-export function monacoOptionsOf(p: EditorPrefs): Record<string, unknown> {
+export function monacoOptionsOf(p: EditorPrefs, heavy = false, java = false): Record<string, unknown> {
   return {
     fontSize: p.fontSize,
+    lineHeight: Math.round(p.fontSize * 1.62),
     fontFamily: p.fontFamily || '"Cascadia Mono", Consolas, "Courier New", monospace',
     wordWrap: p.wordWrap ? "on" : "off",
     tabSize: p.tabSize,
     insertSpaces: p.insertSpaces,
-    minimap: { enabled: p.minimap, showSlider: "mouseover" },
-    stickyScroll: { enabled: p.stickyScroll },
+    minimap: { enabled: p.minimap && !heavy, showSlider: "mouseover" },
+    stickyScroll: { enabled: p.stickyScroll && !heavy && !java, maxLineCount: 1 },
+    bracketPairColorization: { enabled: !heavy },
+    folding: !heavy,
   };
 }

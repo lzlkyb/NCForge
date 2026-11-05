@@ -30,6 +30,14 @@ describe("workspace 路径与语言工具", () => {
     expect(languageOf("x\\Makefile")).toBe("plaintext");
   });
 
+  it("按 .rest 的内容在 XML 和纯文本之间选择", () => {
+    expect(languageOf("x/portal.REST", "\uFEFF  <!-- config -->\n<nc:endpoint/>")).toBe("xml");
+    expect(languageOf("portal.rest", '<?xml version="1.0"?>\n<endpoint />')).toBe("xml");
+    expect(languageOf("portal.rest", "GET /portal/users")).toBe("plaintext");
+    expect(languageOf("portal.rest", "<!-- unfinished")).toBe("plaintext");
+    expect(languageOf("portal.rest")).toBe("plaintext");
+  });
+
   it("isConflictError 只认 CONFLICT 前缀", () => {
     expect(isConflictError("CONFLICT: 文件在磁盘上已被其他程序修改")).toBe(true);
     expect(isConflictError(new Error("写临时文件失败"))).toBe(false);

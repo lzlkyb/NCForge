@@ -14,7 +14,7 @@ export function useLangWiring({
   openJdt,
 }: {
   activePath: string | null;
-  openAt: (path: string, line: number) => Promise<void>;
+  openAt: (path: string, line: number, push?: boolean, column?: number) => Promise<void>;
   openJdt: (uri: string, line: number) => Promise<void>;
 }) {
   useEffect(() => {
@@ -35,7 +35,7 @@ export function useLangWiring({
   useEffect(() => {
     setNavHandler((t) => {
       const { openAt: at, openJdt: toJdt } = jumpRef.current;
-      if (t.kind === "file") void at(t.path, t.line);
+      if (t.kind === "file") void at(t.path, t.line, true, t.column);
       else void toJdt(t.uri, t.line);
     });
     return () => setNavHandler(null);

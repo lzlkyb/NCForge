@@ -43,6 +43,7 @@ pub mod encoding_reg;
 pub mod java_bridge;
 pub mod java_type_completion;
 pub mod java_types;
+mod java_tree;
 pub mod lang;
 pub mod launch;
 pub mod local_history;

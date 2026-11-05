@@ -56,7 +56,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   const slot = useFileSlot();
   // 文件结构 / 本地历史 / 生成代码三个弹层：放这里而不是组件内部，命令面板与快捷键也要能打开它。
   // 合成一个 state：三个布尔各占一个 hook，会把组件顶到体量门禁（≤8）之上
-  const [panels, setPanels] = useState({ outline: false, history: false, generate: false });
+  const [panels, setPanels] = useState({ outline: false, outlinePinned: false, history: false, generate: false });
   const [renameOpen, setRenameOpen] = useState(false);
   // 标签、激活项、面板与编译结果都存在模块级仓库里：切页卸载再回来不该丢。
   //
@@ -110,9 +110,9 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   const { compileActive, compilePath, compileActiveFile } = useModuleCompile();
   const jumpToProblem = useProblemJump(compileResult?.problems, activePath, openAt);
 
-  // 换文件时把弹层收起来：留着它就是「另一个文件的符号/版本」压在代码上，容易点错
+  // 临时弹层随文件关闭，固定的结构面板则跟随当前文件。
   useEffect(() => {
-    setPanels({ outline: false, history: false, generate: false });
+    setPanels(p => ({ ...p, outline: p.outline && p.outlinePinned, history: false, generate: false }));
   }, [activePath]);
 
   // F2 落到自己的重命名流程（Monaco 内置那套只改打开的 model，跨文件会改一半）

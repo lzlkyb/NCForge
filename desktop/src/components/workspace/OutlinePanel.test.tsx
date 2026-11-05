@@ -10,12 +10,14 @@ const SYMS = [
   { name: "foo", kind: 6, container: "A", line: 10 },
 ];
 
-const mocks = vi.hoisted(() => ({ symbolsFor: vi.fn() }));
+const mocks = vi.hoisted(() => ({ symbolsFor: vi.fn(), outline: vi.fn(), lang: { state: "ready" } }));
 vi.mock("../../lib/lang", () => ({
-  useLangView: () => ({ state: "ready" }),
+  useLangView: () => mocks.lang,
   inLangModule: () => true,
 }));
+vi.mock("../../hooks/useLocalOutline", () => ({ useLocalOutline: () => mocks.outline() }));
 vi.mock("../../lib/symbols", () => ({
+  chainAt: (items: unknown[]) => items.slice(-1),
   symbolsFor: (...a: unknown[]) => mocks.symbolsFor(...a),
   kindLetter: (k: number) => `K${k}`,
 }));
@@ -50,6 +52,8 @@ const render = async (ui: React.ReactElement) => {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.symbolsFor.mockResolvedValue(SYMS);
+  mocks.outline.mockReturnValue([]);
+  mocks.lang.state = "ready";
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -111,7 +115,7 @@ describe("OutlinePanel", () => {
     await act(async () => {
       container.querySelectorAll<HTMLButtonElement>(".wb-outline-row")[1].click();
     });
-    expect(onJump).toHaveBeenCalledWith(10);
+    expect(onJump).toHaveBeenCalledWith(10, undefined);
     expect(onClose).toHaveBeenCalled();
   });
 });
@@ -130,4 +134,20 @@ describe("结构加载与失败",()=>{
     await render(<OutlinePanel open onClose={()=>{}} path="C:\\w\\B.java" onJump={()=>{}}/>);
     await act(async()=>{resolve(SYMS);});expect(container.querySelectorAll(".wb-outline-row")).toHaveLength(0);expect(container.textContent).toContain("没有可显示");
   });
+});
+
+
+it("固定面板使用本地 Java 结构，按方法筛选后跳转保持面板打开", async () => {
+  mocks.lang.state = "stopped";
+  mocks.outline.mockReturnValue(SYMS);
+  const onClose = vi.fn(), onJump = vi.fn();
+  await render(<OutlinePanel open pinned onClose={onClose} path={PATH} onJump={onJump} />);
+  expect(mocks.symbolsFor).not.toHaveBeenCalled();
+  expect(container.querySelector('[data-current]')?.textContent).toContain("foo");
+  fire(container.querySelector(".wb-outline-options button")!, "click");
+  expect(container.querySelectorAll(".wb-outline-row")).toHaveLength(1);
+  fire(container.querySelector(".wb-outline-row")!, "click");
+  fire(document.body, "pointerdown");
+  expect(onJump).toHaveBeenCalledWith(10, undefined);
+  expect(onClose).not.toHaveBeenCalled();
 });

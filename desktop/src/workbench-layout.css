@@ -3,9 +3,6 @@
 .app-shell [hidden] { display:none !important; }
 .app-side { width:148px; background:hsl(var(--chrome)); border:0; }
 .app-topbar { height:40px; min-height:40px; border:0; }
-.app-side-tagline { display:none; }
-.app-side-logo { width:23px; height:23px; border-radius:5px; }
-.app-side-name { font-size:14px; }
 .app-side-item { padding:8px 10px; gap:10px; min-height:36px; font-size:13px; }
 .app-side-nav { padding-top:7px; gap:5px; }
 .app-header { background:hsl(var(--chrome)); box-shadow:none; }
@@ -82,14 +79,6 @@
 .wb-search-tool .ml-auto { margin-left:0; }
 .wb-search-tool > .flex { flex-wrap:wrap; }
 .wb-search-tool [title] { max-width:100%; }
-/* 一万多张表不能一次铺成按钮（DOM 直接卡死），筛选框固定在上方，列表自己滚动。 */
-.wb-db-objects { display:flex; flex-direction:column; min-height:0; overflow:hidden; padding:12px; gap:5px; }
-.wb-db-objects h2 { font-size:12px; margin-bottom:8px; flex-shrink:0; }
-.wb-db-objects p { font-size:12px; color:hsl(var(--muted-foreground)); line-height:1.8; }
-.wb-db-filter { flex-shrink:0; height:30px; padding:0 8px; border:1px solid hsl(var(--input)); border-radius:var(--r-control); background:hsl(var(--card)); color:hsl(var(--foreground)); font-size:12px; }
-.wb-db-list { display:flex; flex-direction:column; gap:5px; flex:1; min-height:0; overflow:auto; }
-.wb-db-list button { display:flex; gap:8px; align-items:center; text-align:left; font-size:12px; padding:6px; border-radius:4px; overflow-wrap:anywhere; }
-.wb-db-list button:hover { background:hsl(var(--accent)); }
 .wb-service-tool { padding:0; gap:0; height:100%; }
 .wb-service-tool .sv-card { border:0; border-radius:0; padding:8px 12px; gap:8px; border-bottom:1px solid hsl(var(--border)); }
 .wb-service-tool .sv-card::before,.wb-service-tool .sv-ring { display:none; }
@@ -136,7 +125,6 @@
 .wb-settings-clear:hover { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); }
 .wb-settings-nav { display:flex; flex-direction:column; gap:5px; }
 .wb-settings-nav button { padding:7px 12px; font-size:12px; text-align:left; border-radius:5px; }
-.wb-settings-count { padding:0 4px; font-size:11px; color:hsl(var(--muted-foreground)); }
 .wb-settings-empty { display:flex; flex-direction:column; align-items:center; gap:10px; padding:56px 20px; color:hsl(var(--muted-foreground)); }
 .wb-settings-empty p { font-size:13px; }
 .wb-settings-empty button { padding:4px 12px; border:1px solid hsl(var(--border)); border-radius:6px; font-size:12px; }
@@ -170,11 +158,6 @@ html[data-ui-style] .app-shell .app-side-item { box-shadow:none; transform:none;
 html[data-ui-style] .app-shell .app-side-item[data-active] { background:hsl(var(--accent)); box-shadow:none; }
 html[data-ui-style] .app-shell .app-side-item::before,html[data-ui-style] .app-shell .app-side-item::after { display:none; }
 .wb-no-project { padding:18px 12px; font-size:12px; color:hsl(var(--muted-foreground)); }
-
-.wb-keymap-choices { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:8px 0; }
-.wb-keymap-choices label { padding:16px 12px; border:1px solid hsl(var(--border)); border-radius:6px; font-size:13px; cursor:pointer; }
-.wb-keymap-choices label:has(input:checked) { border-color:hsl(var(--primary)); background:hsl(var(--accent)); }
-.wb-keymap-choices input { accent-color:hsl(var(--primary)); }
 .wb-keymap-table { width:100%; font-size:12px; border-collapse:collapse; }
 .wb-keymap-table th { text-align:left; font-weight:500; color:hsl(var(--muted-foreground)); }
 .wb-keymap-table th,.wb-keymap-table td { padding:10px 0; border-bottom:1px solid hsl(var(--border)); }
@@ -193,7 +176,6 @@ html[data-ui-style] .app-shell .app-side-item::before,html[data-ui-style] .app-s
 .pk-action-meta .pk-out { min-width:0; flex:1 1 270px; }
 .pk-action-meta .pk-out input { min-width:0; flex:1; }
 .pk-action-meta .pk-sp { display:none; }
-@media(max-width:650px) { .wb-keymap-choices { grid-template-columns:1fr; } .wb-document-surface .pk-actions { grid-template-columns:minmax(0,1fr); } .wb-document-surface .pk-actions > button { justify-self:end; } }
 
 /* ═══ 界面重构（2026-10-30）：标题栏横跨整窗 36px + 64px 竖栏（图标在上、文字在下）═══ */
 html .app-shell { display:flex; flex-direction:column; }

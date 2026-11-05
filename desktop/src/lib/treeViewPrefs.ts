@@ -67,3 +67,10 @@ export const toggleNcStructure = () => ncStructurePref.set(!ncStructurePref.get(
 export function useNcStructure(): boolean {
   return useSyncExternalStore(ncStructurePref.subscribe, ncStructurePref.get);
 }
+
+const packagePref = createPref("ncforge.tree.packageView", false);
+export const setPackageView = packagePref.set;
+export const togglePackageView = () => packagePref.set(!packagePref.get());
+export function usePackageView(): boolean {
+  return useSyncExternalStore(packagePref.subscribe, packagePref.get);
+}

@@ -57,7 +57,6 @@
 .dbx-ibtn[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
 .dbx-ibtn:disabled { opacity: .45; cursor: default; }
 .dbx-ibtn:disabled:hover { background: none; color: hsl(var(--muted-foreground)); }
-.dbx-vsep { width: 1px; height: 18px; background: hsl(var(--border)); margin: 0 2px; flex-shrink: 0; }
 .dbx-inp { height: var(--dbx-h-control); width: 100%; min-width: 0; padding: 0 9px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: var(--dbx-fs-body); color: hsl(var(--foreground)); }
 .dbx-inp.mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: var(--dbx-fs-body); }
 .dbx-inp.sm { height: var(--dbx-h-icon); font-size: var(--dbx-fs-body); }
@@ -115,9 +114,6 @@
 /* ── 事务条 ── */
 .dbx-txbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: var(--dbx-h-bar); padding: 3px 10px; background: hsl(var(--warning) / .14); border-bottom: 1px solid hsl(var(--warning) / .35); color: hsl(var(--warning-ink)); font-size: var(--dbx-fs-body); flex-shrink: 0; }
 .dbx-txbar b { font-weight: 700; }
-.dbx-banner { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; border-bottom: 1px solid hsl(var(--border)); flex-shrink: 0; }
-.dbx-banner[data-tone="bad"] { background: hsl(var(--destructive) / .08); color: hsl(var(--destructive-ink)); }
-.dbx-banner[data-tone="warn"] { background: hsl(var(--warning) / .12); color: hsl(var(--warning-ink)); }
 
 /* ── 侧栏：连接树 ── */
 .dbx-side { display: flex; flex-direction: column; height: 100%; min-height: 0; background: hsl(var(--chrome)); }
@@ -332,8 +328,6 @@
 .dbx-subtabs .title { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; font-weight: 600; min-width: 0; max-width: 42%; }
 .dbx-subtabs .title .dbx-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-subtabs .title .dbx-mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dbx-where { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 8px; min-height: var(--dbx-h-bar); padding: 3px 8px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); font-size: var(--dbx-fs-body); flex-shrink: 0; }
-.dbx-where-field { display: flex; align-items: center; gap: 8px; flex: 1 1 240px; min-width: 0; }
 .dbx-where-field.order { flex-basis: 200px; max-width: 340px; }
 .dbx-where .kw { font: 600 11px "Cascadia Mono", Consolas, monospace; color: hsl(var(--primary)); flex-shrink: 0; }
 .dbx-where .dbx-inp { height: var(--dbx-h-control); flex: 1; width: auto; }
@@ -382,7 +376,6 @@
 .dbx-envs > button { display: inline-flex; align-items: center; gap: 6px; height: var(--dbx-h-control); padding: 0 10px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); font-size: 12px; }
 .dbx-envs > button[data-on] { border-color: hsl(var(--env)); background: hsl(var(--env) / .12); color: hsl(var(--env-ink)); font-weight: 600; }
 .dbx-row2 { display: grid; grid-template-columns: 1fr 90px; gap: 8px; }
-.dbx-row3 { display: grid; grid-template-columns: 1fr 70px 1fr; gap: 8px; align-items: center; }
 .dbx-hint { grid-column: 2; color: hsl(var(--muted-foreground)); font-size: 11.5px; line-height: 1.6; margin-top: -4px; }
 .dbx-okline { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: hsl(var(--success) / .12); color: hsl(var(--success-ink)); font-size: 12px; }
 .dbx-badline { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: hsl(var(--destructive) / .1); color: hsl(var(--destructive-ink)); font-size: 12px; line-height: 1.6; word-break: break-all; }

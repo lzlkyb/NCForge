@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_PREFS, setEditorPrefs } from "../../lib/editorPrefs";
 import { EditorPane } from "./EditorPane";
 
 // jsdom 里跑不了真的 Monaco（它要 worker、要 canvas），这里只验「按文件切换编辑器配置」这条链路：
@@ -101,6 +102,7 @@ const renderPane = async (heavy: boolean) => {
 const lastOptions = () => mocks.editor.updateOptions.mock.lastCall?.[0] as Record<string, unknown>;
 
 beforeEach(() => {
+  setEditorPrefs({ ...DEFAULT_PREFS, minimap: true });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -139,6 +141,14 @@ describe("超大文件的编辑器降级", () => {
       folding: false,
       minimap: { enabled: false },
     });
+  });
+
+  it("大文件降级与切换都尊重手动关闭的小地图", async () => {
+    await renderPane(true);
+    await act(async () => { setEditorPrefs({ minimap: false, fontSize: 14 }); });
+    expect(lastOptions()).toMatchObject({ lineHeight: 23, minimap: { enabled: false }, folding: false });
+    await renderPane(false);
+    expect(lastOptions()).toMatchObject({ minimap: { enabled: false }, folding: true });
   });
 
   it("从一个文件切到另一个时，降级跟着当前文件走", async () => {

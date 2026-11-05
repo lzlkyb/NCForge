@@ -6,8 +6,10 @@
 // 走**拉取**而不是 draft 推送：推送要客户端按行维护缓存、跟着编辑做行位移，错一行就永久错位；
 // 拉取整份重算，正好是 Monaco provider 的形状，正确性成本最低。
 import { pathOfModel } from "./editorStore";
-import { flushDoc, inLangModule, langReady, langRequest, onLangReadyChange } from "./lang";
+import { flushDoc, inLangModule, langCapabilityEpoch, langReady, langRequest, onLangReadyChange } from "./lang";
 import { monaco } from "./monacoSetup";
+import { JAVA_CONSTANT_KIND, javaSemanticToken } from "./javaColors";
+import { workspaceEpoch } from "./workspaceEpoch";
 import { invoke } from "./tauri";
 
 /** deprecated 修饰统一映射到这个附加类型：Monaco 的主题选择器按 `类型.修饰1.修饰2` 匹配，
@@ -65,9 +67,8 @@ export function markDeprecated(data: Uint32Array, bit: number, typeIndex: number
 }
 
 /** 每个文件最近一次的结果，按 model 版本号复用（Monaco 会因配置/语言变化重复询问）。 */
-const cache = new Map<string, { version: number; data: Uint32Array }>();
+const cache = new WeakMap<Model, { version: number; session: number; workspace: number; data: Uint32Array }>();
 const changeListeners = new Set<() => void>();
-const watched = new WeakSet<Model>();
 let legend: SemanticLegend | null = null;
 let provider: monaco.languages.DocumentSemanticTokensProvider | null = null;
 let pending: Promise<void> | null = null;
@@ -77,11 +78,16 @@ function fireChange(): void {
   changeListeners.forEach((cb) => cb());
 }
 
-/** model 销毁时把缓存一起清掉：路径会被别的 model 复用，留着就是错位着色。 */
-function watchModel(model: Model, path: string): void {
-  if (watched.has(model)) return;
-  watched.add(model);
-  model.onWillDispose(() => cache.delete(path));
+/** A field needs both modifiers to be rendered as a Java constant. */
+export function markConstants(data: Uint32Array, legend: SemanticLegend, constantIndex: number): void {
+  const field = legend.tokenTypes.indexOf("property");
+  const staticIndex = legend.tokenModifiers.indexOf("static");
+  const readonlyIndex = legend.tokenModifiers.indexOf("readonly");
+  if (field < 0 || staticIndex < 0 || readonlyIndex < 0 || staticIndex > 30 || readonlyIndex > 30) return;
+  const mask = (1 << staticIndex) | (1 << readonlyIndex);
+  for (let i = 3; i < data.length; i += 5) {
+    if (data[i] === field && (data[i + 1] & mask) === mask) data[i] = constantIndex;
+  }
 }
 
 async function fetchLegend(): Promise<SemanticLegend | null> {
@@ -97,26 +103,34 @@ async function fetchLegend(): Promise<SemanticLegend | null> {
 function makeProvider(l: SemanticLegend): monaco.languages.DocumentSemanticTokensProvider {
   const bit = deprecatedBit(l);
   const deprecatedIndex = l.tokenTypes.length - 1;
+  const constantIndex = l.tokenTypes.length;
+  const types = [...l.tokenTypes, JAVA_CONSTANT_KIND].map(javaSemanticToken);
   return {
-    getLegend: () => ({ tokenTypes: l.tokenTypes, tokenModifiers: l.tokenModifiers }),
+    getLegend: () => ({ tokenTypes: types, tokenModifiers: l.tokenModifiers }),
     provideDocumentSemanticTokens: async (model, _lastResultId, cancel) => {
       const path = pathOfModel(model);
       if (!path || !langReady() || !inLangModule(path)) return null;
       // 版本要在发请求**之前**取：等回复期间再编辑，结果对应的是旧文本，不能记到新版本上
       const version = model.getVersionId();
-      const hit = cache.get(path);
-      if (hit && hit.version === version) return { resultId: String(version), data: hit.data };
-      await flushDoc(path);
-      if (cancel.isCancellationRequested) return null;
-      const res = await invoke<{ data?: unknown }>("lang_semantic_tokens", { path }).catch(
-        () => null,
-      );
-      if (cancel.isCancellationRequested) return null;
+      const session = langCapabilityEpoch();
+      const workspace = workspaceEpoch();
+      const current = () => !cancel.isCancellationRequested && !model.isDisposed()
+        && model.getVersionId() === version && langCapabilityEpoch() === session
+        && workspaceEpoch() === workspace && langReady() && inLangModule(path);
+      if (!current()) return null;
+      const hit = cache.get(model);
+      if (hit?.version === version && hit.session === session && hit.workspace === workspace) {
+        return { resultId: String(version), data: hit.data };
+      }
+      const synced = await flushDoc(path).then(() => true, () => false);
+      if (!synced || !current()) return null;
+      const res = await invoke<{ data?: unknown }>("lang_semantic_tokens", { path }).catch(() => null);
+      if (!current()) return null;
       const data = toTokenData(res?.data);
       if (!data) return null;
+      markConstants(data, l, constantIndex);
       markDeprecated(data, bit, deprecatedIndex);
-      cache.set(path, { version, data });
-      watchModel(model, path);
+      cache.set(model, { version, session, workspace, data });
       return { resultId: String(version), data };
     },
     // resultId 只是 model 版本号，服务端没有要回收的资源
@@ -145,7 +159,7 @@ function ensureProvider(): Promise<void> {
 }
 
 /**
- * 应用启动后调用一次（幂等）：服务就绪后注册 provider；服务停了就清缓存并通知 Monaco 重取
+ * 应用启动后调用一次（幂等）：服务就绪后注册 provider；服务切换后旧缓存失效并通知 Monaco 重取
  * （否则标签页里会一直挂着旧会话的颜色）。
  */
 export function initSemanticTokens(): void {
@@ -153,12 +167,11 @@ export function initSemanticTokens(): void {
   wired = true;
   onLangReadyChange((ready) => {
     if (ready) {
-      // 就绪时也要通知一次：服务重启后会先清缓存，不主动重拉的话 Monaco 会一直
+      // 就绪时也要通知一次：服务重启后旧缓存失效，不主动重拉的话 Monaco 会一直
       // 保持「无 token」状态，直到用户下一次改动文件。
       void ensureProvider().then(() => fireChange());
       return;
     }
-    cache.clear();
     fireChange();
   });
 }

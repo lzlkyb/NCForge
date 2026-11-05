@@ -862,6 +862,106 @@ fn hex_val(c: u8) -> Option<u8> {
     }
 }
 
+/// Read-only browser rows. Eclipse containers and variables need an Eclipse resolver.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DependencyEntry {
+    pub kind: &'static str,
+    pub name: String,
+    pub declared: String,
+    pub path: Option<String>,
+    pub status: &'static str,
+    pub source: Option<String>,
+    pub source_path: Option<String>,
+}
+
+pub fn dependency_entries(
+    root: &Path,
+    projects: &[LinkedProject],
+) -> Result<Option<Vec<DependencyEntry>>, String> {
+    let xml = match std::fs::read_to_string(root.join(".classpath")) {
+        Ok(xml) => xml,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("读取 .classpath 失败：{e}")),
+    };
+    let project = |name: &str| projects.iter().find(|p| p.name.eq_ignore_ascii_case(name));
+    let resolve = |declared: &str| {
+        if let Some(workspace_path) = declared.strip_prefix('/') {
+            let (name, rest) = workspace_path
+                .split_once('/')
+                .unwrap_or((workspace_path, ""));
+            project(name)?
+                .root
+                .as_ref()
+                .map(|p| PathBuf::from(p).join(rest))
+        } else {
+            Some(root.join(declared))
+        }
+    };
+    let mut entries = Vec::new();
+    for tag in classpathentry_tags(&xml) {
+        let Some(declared) = attr(tag, "path").filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let kind = match attr(tag, "kind") {
+            Some("src") if declared.starts_with('/') => "project",
+            Some("lib") => "library",
+            Some("con") => "container",
+            Some("var") => "variable",
+            _ => continue,
+        };
+        let mut path = None;
+        let status = match kind {
+            "project" => match project(&declared[1..]) {
+                Some(p) if p.disabled => "disabled",
+                Some(p) if p.root.as_ref().is_some_and(|p| Path::new(p).is_dir()) => {
+                    path = p.root.clone();
+                    "available"
+                }
+                _ => "missing",
+            },
+            "library" => match resolve(declared) {
+                Some(candidate) => {
+                    let exists = candidate.is_file() || candidate.is_dir();
+                    path = Some(crate::security::path::display_path(&candidate));
+                    if exists {
+                        "available"
+                    } else {
+                        "missing"
+                    }
+                }
+                None => "unresolved",
+            },
+            _ => "unresolved",
+        };
+        let source = attr(tag, "sourcepath").filter(|s| !s.is_empty());
+        let source_path = source
+            .filter(|_| kind == "library")
+            .and_then(resolve)
+            .and_then(|p| p.canonicalize().ok())
+            .map(|p| crate::security::path::display_path(&p));
+        let name = if declared.contains("JRE_CONTAINER") && kind == "container" {
+            "JRE System Library".to_string()
+        } else {
+            declared
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(declared)
+                .to_string()
+        };
+        entries.push(DependencyEntry {
+            kind,
+            name,
+            declared: declared.to_string(),
+            path,
+            status,
+            source: source.map(str::to_string),
+            source_path,
+        });
+    }
+    Ok(Some(entries))
+}
+
 /// 逐个取出 `<classpathentry …>` 标签文本（到 `>` 为止）。
 fn classpathentry_tags(xml: &str) -> Vec<&str> {
     let mut out: Vec<&str> = Vec::new();
@@ -967,6 +1067,39 @@ pub fn module_dirs_of(root: &Path) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dependency_browser_distinguishes_missing_libraries_and_eclipse_containers() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        assert!(super::dependency_entries(root, &[]).unwrap().is_none());
+        std::fs::write(root.join("present.jar"), "").unwrap();
+        std::fs::write(root.join("sources.zip"), "").unwrap();
+        std::fs::write(
+            root.join(".classpath"),
+            r#"<classpath>
+          <classpathentry kind="src" path="src"/>
+          <classpathentry kind="src" path="/MissingProject"/>
+          <classpathentry kind="lib" path="present.jar" sourcepath="sources.zip"/>
+          <classpathentry kind="lib" path="missing.jar" sourcepath="missing-sources.zip"/>
+          <classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/JavaSE-1.8"/>
+        </classpath>"#,
+        )
+        .unwrap();
+        let rows = super::dependency_entries(root, &[]).unwrap().unwrap();
+        assert_eq!(rows.len(), 4);
+        assert_eq!((rows[0].kind, rows[0].status), ("project", "missing"));
+        assert_eq!((rows[1].kind, rows[1].status), ("library", "available"));
+        assert!(rows[1]
+            .source_path
+            .as_deref()
+            .unwrap()
+            .ends_with("sources.zip"));
+        assert_eq!(rows[2].status, "missing");
+        assert!(rows[2].source_path.is_none());
+        assert_eq!(rows[3].name, "JRE System Library");
+        assert_eq!(rows[3].status, "unresolved");
+    }
+
     use super::*;
     use std::fs;
 

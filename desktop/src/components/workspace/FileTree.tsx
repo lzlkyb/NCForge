@@ -9,11 +9,14 @@ import {
 import { ContextMenu } from "./ContextMenu";
 import { TreeFilterBar, TreeDeleteConfirm } from "./TreeChrome";
 import { TreeRows, type TreeRowsCtx } from "./TreeRows";
+import { PackageDependencies } from "./PackageDependencies";
 import { TreeProjectRows } from "./TreeProjectRows";
 import { useTreeDelete } from "./useTreeDelete";
 import { useTreeEdit } from "./useTreeEdit";
+import { useTreeMembers } from "../../hooks/useTreeMembers";
 import { useTreeLoad } from "./useTreeLoad";
 import { useTreeHandlers } from "./useTreeHandlers";
+import { packageCompact, packageDepthOffset } from "../../lib/packageTree";
 import { useNcComponents } from "../../hooks/useNcComponents";
 import { useTreeMenu } from "../../hooks/useTreeMenu";
 import { useTreeLocate } from "../../hooks/useTreeLocate";
@@ -22,7 +25,7 @@ import {
 } from "../../lib/workspace";
 import { flattenTree, treeKeyAction, treeRowId as rowId } from "../../lib/treeNav";
 import { countBookmarks, useBookmarks } from "../../lib/bookmarks";
-import { useCompactPackages, useNcStructure, useRevealOnOpen } from "../../lib/treeViewPrefs";
+import { useCompactPackages, useNcStructure, usePackageView, useRevealOnOpen } from "../../lib/treeViewPrefs";
 import { isUnderPath } from "../../lib/treeProjects";
 import type { LinkedProject } from "../../lib/linkedProjects";
 
@@ -34,7 +37,7 @@ interface Props {
    */
   projects?: LinkedProject[];
   activePath: string | null;
-  onOpen: (path: string) => void;
+  onOpen: (path: string, pos?: { line: number; column: number }) => void;
   /** 双击文件：固定预览标签。 */
   onPin?: (path: string) => void;
   /** 新建文件成功，调用方负责打开它。 */
@@ -58,20 +61,8 @@ export interface FileTreeHandle {
 }
 
 /**
- * 懒加载文件树：展开某个目录时才向后端请求这一层，不预读整棵树
- * （newar 约 7000 个源文件、几十个模块，整棵预读会卡首屏）。
- *
- * 三件事与 IDEA 对齐：
- * - **自动定位**：右边打开什么文件，左边就展开并滚到那一行（只对工作区内的真实文件；
- *   标题栏可关，显式的「在文件树中显示」不受开关影响）；
- * - **压缩中间包**：`com → aier → erp` 合成一行（`lib/treeCompact`，与键盘导航同源）；
- * - **NC 结构视图**：业务组件模块的 `src` 摊平，展开直接看到 `public/client/private/test`
- *   （`lib/ncStructure`，与键盘导航同源；默认关，见 `lib/treeViewPrefs`）。
- *
- * speed search：焦点在树上直接敲字筛选，Esc 清除。
- *
- * 展开态与已加载的目录存在 `lib/workspaceSession`：切页面会卸载本组件，
- * 状态要是留在 useState 里，从搜索页跳回来就得重新点开一遍。
+ * 目录和 Java 成员按展开加载，避免首次打开大工程时预读全部源码。
+ * 文件夹展开态和缓存放在 workspaceSession，切换侧栏后仍可复用。
  */
 export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   { root, projects, activePath, onOpen, onPin, onCreated, onRenamed, onDeleted, openPaths, onCompileModule },
@@ -81,6 +72,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   const [filter, setFilter] = useState("");
   const compact = useCompactPackages();
   const ncStructure = useNcStructure();
+  const packageView = usePackageView();
   const revealOnOpen = useRevealOnOpen();
   const multi = (projects?.length ?? 0) > 1;
   // 稳定引用：它进了 useTreeLoad.reveal 的依赖，每帧换新会让自动定位反复触发
@@ -95,14 +87,23 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   const bookmarks = useBookmarks(root);
   // manifest.xml 只用来给模块行打「业务组件」徽章、并决定 NC 结构视图摊不摊 `src`，
   // 不参与树的取数（见 lib/ncManifest / hooks/useNcComponents）
-  const { bcNames, isBcModule, hoist } = useNcComponents(roots, ncStructure);
-  const { dirs, expanded, marks, load, expand, toggle, toggleRow, depthOf, reveal } = useTreeLoad(
+  const { bcNames, isBcModule, hoist } = useNcComponents(roots, ncStructure && !packageView);
+  const { dirs, expanded, marks, load, expand, toggle, toggleRow, depthOf, reveal, packageRoots, packageIndexes, invalidatePackages } = useTreeLoad(
     root,
     compact,
     roots,
-    hoist,
+    hoist, packageView,
   );
-  // 行只拿一个数字（条数），值没变时行组件的 memo 仍然命中
+  const toggleVisibleRow = (path: string, parent: string | null) => {
+    if (packageView && packageIndexes.get(path) === null && !expanded.has(path)) void invalidatePackages([path], false, false);
+    if (packageCompact(packageRoots, path, packageIndexes)) toggleRow(path, parent);
+    else toggle(path);
+  };
+  const { members, toggle: toggleMembers } = useTreeMembers(packageView, dirs);
+  const toggleFileMembers = (path: string) => {
+    setSelected({ path, isDir: false });
+    toggleMembers(path);
+  };
   const bookmarkCounts = useMemo(() => countBookmarks(bookmarks), [bookmarks]);
   const isEditable = useCallback(
     (path: string) => isUnderPath(path, root),
@@ -113,20 +114,19 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     dirs,
     load,
     expand,
-    depthOf,
+    depthOf: path => depthOf(path) + packageDepthOffset(packageRoots, path, packageIndexes),
     onCreated,
-    onRenamed,
+    onRenamed: (from, to) => { if (packageView) invalidatePackages([from, to]); onRenamed(from, to); },
+    onEntryCreated: path => { if (packageView) invalidatePackages([path]); },
     setSelected,
   });
   const { pendingDelete, askDelete, confirmDelete, cancelDelete } = useTreeDelete({
     root,
     load,
-    onDeleted,
+    onDeleted: paths => { if (packageView) invalidatePackages(paths); onDeleted(paths); },
     openPaths,
     setSelected,
   });
-
-  // ---- 定位 ----
 
   // 清筛选的引用要稳定：它进了 locate 的依赖，每帧换新会让自动定位反复触发
   const clearFilter = useCallback(() => setFilter(""), []);
@@ -166,18 +166,13 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
       flattenTree(dirs, expanded, multi ? rootRows : root, {
         filter: filterFn,
         compact,
-        projectRows: multi,
-        hoist,
+        projectRows: multi || packageView,
+        hoist, packageRoots, packageIndexes, members: packageView ? members : undefined,
       }),
-    [dirs, expanded, root, rootRows, multi, filterFn, compact, hoist],
+    [dirs, expanded, root, rootRows, multi, filterFn, compact, hoist, packageRoots, packageIndexes, packageView, members],
   );
 
-  /**
-   * 方向键导航的语义在 `lib/treeNav`（纯函数，可单测）；这里只把动作落到状态上。
-   * 焦点一直留在容器上（行是 `tabIndex=-1`），靠 `aria-activedescendant` 播报当前行。
-   *
-   * 可打印字符进来就是 speed search 的开始（IDEA 的行为），不会误伤导航键。
-   */
+  // 焦点留在容器，方向键按视觉树移动。
   const onKeyDown = (e: ReactKeyboardEvent) => {
     if (editing) return;
     if (e.key === "Escape" && filter) {
@@ -190,22 +185,27 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
       setFilter((f) => f.slice(0, -1));
       return;
     }
-    if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    if (e.key.length === 1 && (e.key !== " " || filter) && !e.ctrlKey && !e.altKey && !e.metaKey) {
       e.preventDefault();
       setFilter((f) => f + e.key);
       return;
     }
-    const act = treeKeyAction(e.key, flat, selected, expanded);
+    const act = treeKeyAction(e.key, flat, selected, new Set([...expanded, ...members.keys()]));
     if (act) {
       e.preventDefault();
       if (act.kind === "select") setSelected({ path: act.path, isDir: act.isDir });
       else if (act.kind === "toggle") {
         const row = flat.find((r) => r.path === act.path);
         // 工程根行不参与压缩链：点一下只展开这一层
-        if (row?.project) toggle(act.path);
+        if (row?.branch === "java-file") toggleFileMembers(act.path);
+        else if (row?.project) toggle(act.path);
         // NC 结构视图摊平后的行真身在 `bill/src` 下，问压缩链要用真实父目录
-        else toggleRow(act.path, row?.realParent ?? row?.parent ?? root);
-      } else onOpen(act.path);
+        else toggleVisibleRow(act.path, row?.realParent ?? row?.parent ?? root);
+      } else {
+        const symbol = flat.find(row => row.path === act.path)?.symbol;
+        if (symbol) onOpen(symbol.file, { line: symbol.line, column: symbol.column });
+        else onOpen(act.path);
+      }
       return;
     }
     if (!selected) return;
@@ -225,7 +225,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   // ---- 渲染 ----
 
   const handlers = useTreeHandlers({
-    toggleRow,
+    toggleRow: toggleVisibleRow,
     toggle,
     onOpen,
     onPin,
@@ -244,8 +244,14 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     marks,
     bookmarkCounts,
     filter: filterFn,
-    compact,
+    compact, packageRoots, packageIndexes,
     hoist,
+    members: packageView ? members : undefined,
+    onToggleMembers: toggleFileMembers,
+    onOpenMember: (path, member) => {
+      setSelected({ path: member.id, isDir: false });
+      onOpen(path, { line: member.line, column: member.column });
+    },
     isBcModule,
     bcNames,
     editing,
@@ -259,9 +265,9 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
       <div
         className="wb-tree-list"
         role="tree"
-        aria-label="文件树"
+        aria-label={packageView ? "包资源管理器" : "文件树"}
         tabIndex={0}
-        aria-activedescendant={selected ? rowId(selected.path) : undefined}
+        aria-activedescendant={selected && flat.some(row => row.path === selected.path) ? rowId(selected.path) : undefined}
         onKeyDown={onKeyDown}
         onContextMenu={(e) => {
           // 空白处右键 = 对工作区根操作（新建到根下）
@@ -269,12 +275,14 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
         }}
       >
         {filter && <TreeFilterBar filter={filter} count={flat.length} onClear={() => setFilter("")} />}
-        {multi ? (
-          <TreeProjectRows projects={projects!} root={root} ctx={ctx} />
+        {multi || packageView ? (
+          <TreeProjectRows projects={multi ? projects : undefined} root={root} ctx={ctx} />
         ) : (
           <TreeRows dir={root} depth={0} ctx={ctx} />
         )}
       </div>
+
+      {packageView && <PackageDependencies key={root} root={root} projects={rootRows} />}
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} onClose={closeMenu} />
@@ -288,8 +296,3 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     </>
   );
 });
-
-/**
- * 删除确认的正文（文件数 / 打开中的标签 / 未保存的修改 / 引用提示）在 `lib/treeDeleteText`：
- * 这里是接线而不是措辞，况且那段判断值得单测。
- */

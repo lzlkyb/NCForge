@@ -58,7 +58,7 @@ describe("EditorSettings 渐进披露", () => {
   it("摘要行写当前值，而不是分类名", () => {
     expect(summaries()).toEqual([
       "13px · Tab 4 制表符 · 自动换行 关 · 默认字体",
-      "小地图 开 · 粘性滚动 关 · Error Lens 开",
+      "小地图 关 · 粘性滚动 开 · Error Lens 开",
       "自动保存关 · 保存时格式化 关",
     ]);
   });

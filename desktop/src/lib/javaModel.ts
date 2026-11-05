@@ -255,6 +255,35 @@ function parseMethodHeader(header: string): JavaMethod | null {
   return { name, returnType: rest || "void", params };
 }
 
+export function javaEnumConstant(header: string) {
+  const clean = stripAnnotations(header).trimStart();
+  const name = /^[\p{L}_$][\p{L}\p{N}_$]*/u.exec(clean)?.[0];
+  return name ? { name, offset: header.indexOf(clean) } : null;
+}
+
+/** Read a declaration header from a class body without treating field initializers as methods. */
+export function javaMemberHeader(header: string, owner: string) {
+  const clean = stripAnnotations(header).trim();
+  const signature = splitTopLevel(clean, "=")[0] ?? "";
+  const prefix = header.indexOf(clean);
+  const open = signature.indexOf("(");
+  if (open >= 0) {
+    const method = parseMethodHeader(signature);
+    if (!method) return null;
+    const nameOffset = signature.slice(0, open).lastIndexOf(method.name);
+    const beforeName = signature.slice(0, nameOffset).trim().split(/\s+/).filter(word => !MODIFIERS.has(word)).join(" ");
+    const constructor = method.name === owner && (!beforeName || /^<.*>$/.test(beforeName));
+    return {
+      label: `${method.name}(${method.params.join(", ")})`,
+      offset: prefix + nameOffset,
+      kind: constructor ? 9 : 6,
+    };
+  }
+  const field = parseField(signature);
+  if (!field || /,\s*[^<>]*$/.test(field.type)) return null;
+  return { label: field.name, offset: prefix + signature.lastIndexOf(field.name), kind: field.isStatic && field.isFinal ? 14 : 8 };
+}
+
 /**
  * 解析一段 Java 源码。
  *
