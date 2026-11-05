@@ -4,6 +4,59 @@ import type { ChangelogEntry } from "./about";
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "0.1.2",
+    "date": "2026-11-05",
+    "items": [
+      {
+        "category": "feat",
+        "text": "标签条按面归属，侧栏折叠态加更新入口"
+      },
+      {
+        "category": "feat",
+        "text": "Gitee 镜像改本地一条命令，CI 不再尝试推送"
+      },
+      {
+        "category": "improve",
+        "text": "chore(ci): 修正注释里的 Gitee 仓库名为 lzul（实际账号），补镜像提示改用 mirror_only"
+      },
+      {
+        "category": "improve",
+        "text": "chore(ci): 启用 Gitee 镜像，mac 默认不发版"
+      },
+      {
+        "category": "fix",
+        "text": "Move-Item 两个通配不能当两个位置参数，拆成两条"
+      },
+      {
+        "category": "fix",
+        "text": "补镜像改从 main 触发，版本用 release_tag 输入"
+      },
+      {
+        "category": "fix",
+        "text": "修复安装版 SQL 编辑器出现黑框、行号贴边的问题；调整窗口或结果区高度时保留足够的输入空间，支持键盘和拖动调节并记住高度。"
+      },
+      {
+        "category": "fix",
+        "text": "关于页改用真实项目仓库与可读平台名称，版本读取异常时可重试，复制与打开链接提供等待及结果反馈。"
+      },
+      {
+        "category": "fix",
+        "text": "数据库、版本控制、元数据、设置、日志页只显示自己的标签，不再和源码文件标签挤在同一条标签栏里。"
+      },
+      {
+        "category": "improve",
+        "text": "关于页集中展示产品、运行版本与更新入口；更新历史支持版本选择、分类、搜索和分段展开，技术记录按需阅读，新增完整 MIT 许可入口。"
+      },
+      {
+        "category": "improve",
+        "text": "侧栏收起时，有可用更新会在「设置」上方单独出现一行更新入口（随下载进度、安装中、重试变化），没有更新时不占位。"
+      }
+    ],
+    "summary": [
+      "标签栏各归其页，侧栏有更新时才出现入口；关于页与 SQL 编辑器一并改进"
+    ]
+  },
+  {
     "version": "0.1.1",
     "date": "2026-11-05",
     "items": [
