@@ -22,6 +22,11 @@
  *   6. cargo test + cargo clippy --no-default-features 门禁（不过不提交）
  *   7. git add 相关文件 → commit → push origin main → tag vX.Y.Z → push tag
  *
+ * 发版口径（2026-11-05 起）：推 tag 的 CI **只构建 Windows**（约 28 分钟）。
+ * mac 默认不发——它的作业 26 分钟且与 Windows 串行，v0.1.1 为此跑了 53 分钟。
+ * 需要 mac 包时不要再推一次 tag，在本脚本跑完后手动触发（脚本会把这行打出来）：
+ *   gh workflow run build.yml --ref vX.Y.Z -f with_macos=true
+ *
  * 设计要点：
  *   - 版本号只动 Cargo.toml 一处，其余全自动同步（治愈"漏改版本号"）。
  *   - 非 TTY 环境（无 --yes）只准备到 commit，不 push/tag，避免误发。
@@ -403,7 +408,11 @@ async function main() {
   run(`git push origin main`);
   run(`git tag ${tagName}`);
   run(`git push origin ${tagName}`);
-  console.log(`\x1b[32m✅ 发版 ${tagName} 完成，CI 正在构建。\x1b[0m`);
+  console.log(`\x1b[32m✅ 发版 ${tagName} 完成，CI 正在构建 Windows 包（约 28 分钟）。\x1b[0m`);
+  // mac 默认不发（见文件头说明）：把"要 mac 时敲什么"直接打出来，省得回头翻 workflow。
+  console.log(`\x1b[36m   需要 macOS 包（+约 26 分钟，别重推 tag）：\x1b[0m`);
+  console.log(`   gh workflow run build.yml --ref ${tagName} -f with_macos=true`);
+  console.log(`\x1b[36m   Gitee 镜像未启用时会在 CI 里打 warning：\x1b[0m gh secret list 看 GITEE_TOKEN / GITEE_REPOSITORY`);
 }
 
 main().catch((e) => {

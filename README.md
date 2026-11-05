@@ -154,6 +154,7 @@ APP_UPDATE_ENDPOINT=http://127.0.0.1:8787/updater.json npm run tauri dev
 - 窗口不可见时**必须**停轮询：`useAppHidden` + `refetchInterval: false`。
 - updater.json **跨平台合并**（`UPDATER_MERGE_INTO`）：两个平台各产片段，Windows 侧统一合并——防互覆。
 - Gitee 镜像失败不能静默：push 后必须回头验证客户端实际读的 raw 地址且版本号匹配（cc-bridge v2.4.0~v2.5.0 四个版本绿灯但镜像 404 的教训）。
+- **发版口径**：推 tag 只出 Windows（约 28 分钟）。mac 作业 26 分钟且与 Windows 串行，默认关；要 mac 包用 `gh workflow run build.yml --ref vX.Y.Z -f with_macos=true`，补镜像用 `-f mirror_only=true`（不重编译）。
 - 组件体量红线（300 行 + 8 个状态）由 `check-component-size.mjs` 机器执行，棘轮式管理存量。
 
 ## 许可

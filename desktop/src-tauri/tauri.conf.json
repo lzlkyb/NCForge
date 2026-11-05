@@ -45,7 +45,7 @@
       "_comment": "顺序即故障转移顺序：Release 资产优先，Gitee raw 镜像次之（国内直连 GitHub 慢），gh-pages 垫底（站点当前未启用，404 只是多耗一轮；updater 侧同款端点也是这个状态）。资源 zip 的实际下载 URL 在各自清单里（GitHub 侧走 gh-proxy 镜像，Gitee 侧是 raw 直链）。",
       "endpoints": [
         "https://github.com/lzlkyb/NCForge/releases/latest/download/resources.json",
-        "https://gitee.com/lzlkyb/NCForge/raw/releases/latest/resources-gitee.json",
+        "https://gitee.com/lzul/NCForge/raw/releases/latest/resources-gitee.json",
         "https://lzlkyb.github.io/NCForge/resources.json"
       ]
     }
