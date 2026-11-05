@@ -4,7 +4,6 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkbenchFrame } from "./WorkbenchFrame";
 import { DockRegion, useWorkbenchDock } from "./WorkbenchDock";
-import { ToolTab } from "./ToolTab";
 import { ActivityPanel } from "../ui/ActivityPanel";
 import { getSideOpen, setSideOpen } from "../../lib/layoutStore";
 
@@ -45,7 +44,7 @@ describe("workbench docking", () => {
     globalThis.requestAnimationFrame = (callback) => { callback(0); return 0; };
     let requested: string | null = null;
     const render = (active: string) => root.render(<WorkbenchFrame activeTool={active} tree={null}
-      tabs={<><div role="tab" tabIndex={0} aria-selected={active === "files"}>Source.java</div><ToolTab /></>}
+      tabs={<div role="tab" tabIndex={0} aria-selected={active === "files"}>Source.java</div>}
       editor={<textarea defaultValue="code draft" />} output={null} status={null} />);
     const navigate = (event: Event) => { requested = (event as CustomEvent<string>).detail; render(requested); };
     window.addEventListener("ncforge-navigate", navigate);
@@ -83,13 +82,17 @@ describe("workbench docking", () => {
     const root = createRoot(host);
     dispose = () => { act(() => root.unmount()); host.remove(); };
     const render = (activeTool: string) => act(async () => root.render(<WorkbenchFrame activeTool={activeTool}
-      tree={<div>File tree</div>} tabs={<><span>Source tabs</span><ToolTab /></>} editor={<textarea aria-label="Source" defaultValue="draft" />}
+      tree={<div>File tree</div>} tabs={<span>Source tabs</span>} editor={<textarea aria-label="Source" defaultValue="draft" />}
       output={<FakePanel />} status={<div>Status</div>}
       tool={<><DockRegion region="toolbar"><h1>Tool header</h1></DockRegion><DockRegion region="sidebar"><div>Changes</div></DockRegion><DockRegion region="document"><div>Diff</div></DockRegion><DockRegion region="bottom"><div>Logs</div></DockRegion></>} />));
     await render("svn");
     const editor = host.querySelector("textarea");
     expect(host.querySelector(".wb-sidebar-host")?.textContent).toBe("Changes");
     expect(host.querySelector(".wb-toolbar-host")?.textContent).toBe("Tool header");
+    // 文件标签条属于代码面：切到工具页后它随代码面一起收起，工具标签独占文档面的标签条，
+    // 两套标签在 DOM 上就不在同一个容器里（以前它们是同一个 .wb-tabs 的兄弟节点）。
+    expect(host.querySelector<HTMLElement>(".wb-file-tabs")?.closest<HTMLElement>(".wb-code-surface")?.hidden).toBe(true);
+    expect(host.querySelector(".wb-doc-tabs .wb-tabs")?.textContent).toBe("版本控制");
     await act(async () => (host.querySelector(".wb-tool-tab") as HTMLElement).click());
     expect((host.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(true);
     expect(host.querySelector("textarea")).toBe(editor);
@@ -100,6 +103,53 @@ describe("workbench docking", () => {
     expect(host.querySelector("textarea")).toBe(editor);
     expect(editor?.value).toBe("draft");
   });
+  it("数据库标签停在文档面标签条里，与代码面的文件标签不同容器", async () => {
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    dispose = () => { act(() => root.unmount()); host.remove(); };
+    const render = (active: string) => act(async () => root.render(<WorkbenchFrame activeTool={active}
+      tree={null} tabs={<div role="tab">Source.java</div>} editor={<div>Code</div>} output={null} status={null}
+      tool={<ActivityPanel active={active === "db"}>
+        <DockRegion region="doctabs"><div role="tab" className="db-tab">查询 1</div></DockRegion>
+        <DockRegion region="document"><div>SELECT 1</div></DockRegion>
+      </ActivityPanel>} />));
+    await render("db");
+    const dbTab = host.querySelector(".db-tab")!;
+    const dbStrip = host.querySelector(".wb-doc-tabs")!;
+    const fileStrip = host.querySelector(".wb-file-tabs")!;
+    // 数据库标签只出现在文档面自己的标签条里；文件标签条随代码面一起收起。
+    expect(dbTab.closest(".wb-doc-tabs")).toBe(dbStrip);
+    expect(dbStrip.textContent).toContain("查询 1");
+    expect(fileStrip.textContent).toContain("Source.java");
+    expect(dbStrip.contains(fileStrip)).toBe(false);
+    expect(host.querySelector<HTMLElement>(".wb-code-surface")?.hidden).toBe(true);
+    // 回到代码页：文件标签条回到主位，数据库标签条随文档面一起收起。
+    await render("files");
+    expect(host.querySelector<HTMLElement>(".wb-code-surface")?.hidden).toBe(false);
+    expect(host.querySelector<HTMLElement>(".wb-document-surface")?.hidden).toBe(true);
+    expect(host.querySelector<HTMLElement>(".db-tab")?.closest<HTMLElement>(".wb-dock-region")?.hidden).toBe(true);
+  });
+  it("每个工具页在文档面标签条里渲染自己的标签，数据库由自己的多文档标签条接管", async () => {
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    dispose = () => { act(() => root.unmount()); host.remove(); };
+    const render = (active: string) => act(async () => root.render(<WorkbenchFrame activeTool={active}
+      tree={null} tabs={<div role="tab">Source.java</div>} editor={<div>Code</div>} output={null} status={null} />));
+    for (const [tool, label] of [["svn", "版本控制"], ["meta", "元数据"], ["logs", "日志排查"], ["settings", "设置"]] as const) {
+      await render(tool);
+      const strip = host.querySelector(".wb-doc-tabs")!;
+      // 一条标签条里只有这个工具自己的一枚标签，名字与页名一致
+      expect(strip.querySelectorAll(".wb-tool-tab")).toHaveLength(1);
+      expect(strip.querySelector(".wb-tool-tab .wb-tab-name")?.textContent).toBe(label);
+      // 文件标签条随代码面一起收起，不与工具标签同屏
+      expect(host.querySelector<HTMLElement>(".wb-code-surface")?.hidden).toBe(true);
+    }
+    // 数据库是多文档工具：ToolTab 让位，不额外塞一个「数据库」标签，
+    // 标签条由 DbDocTabs 停靠进同一个 doctabs 区（见 DbDocTabs.test）。
+    await render("db");
+    expect(host.querySelector(".wb-doc-tabs .wb-tool-tab")).toBeNull();
+    expect(host.querySelector<HTMLElement>(".wb-code-surface")?.hidden).toBe(true);
+  });
   it("导航到日志时直接停靠文档，隐藏资源树但保留代码和日志状态", async () => {
     const wasOpen = getSideOpen();
     setSideOpen(true);
@@ -107,7 +157,7 @@ describe("workbench docking", () => {
     const root = createRoot(host);
     dispose = () => { act(() => root.unmount()); host.remove(); setSideOpen(wasOpen); };
     const render = (activeTool: string) => act(async () => root.render(<WorkbenchFrame activeTool={activeTool}
-      tree={<div>File tree</div>} tabs={<ToolTab />} editor={<textarea aria-label="Code draft" defaultValue="edited code" />}
+      tree={<div>File tree</div>} tabs={null} editor={<textarea aria-label="Code draft" defaultValue="edited code" />}
       output={null} status={<div>Status</div>}
       tool={<ActivityPanel active={activeTool === "logs"}><DockRegion region="document"><input aria-label="Log filter" defaultValue="callid" /></DockRegion></ActivityPanel>} />));
     await render("files");

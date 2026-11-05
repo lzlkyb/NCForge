@@ -4,7 +4,7 @@ import { railAriaKey, railKeyLabel } from "../../lib/keymap";
 import { Icon, type IconName } from "../ui/icon";
 import { Collapse } from "../ui/Collapse";
 import { UpdateBadge } from "./UpdateBadge";
-import { UpdateCollapsedDot } from "./UpdateCollapsedDot";
+import { UpdateRailItem } from "./UpdateRailItem";
 
 /**
  * 一项导航。
@@ -143,6 +143,10 @@ function SideNavImpl({
       </nav>
 
       <div className="app-side-foot">
+        {/* 折叠态更新入口：独立一行 rail 项（图标在上、文字在下），与设置同构。
+            🔴 只有真有更新时才渲染（空闲态不出占位，手动检查在展开态徽章与设置页）；
+            点它只打开详情，不直接下载/安装。展开态由设置行右端的更新槽位承担。 */}
+        {collapsed && <UpdateRailItem />}
         {/* 更新槽位：设置行右端一个**定宽格子**，七种状态在同一个格子里原地变形
             ⇒ foot 高度恒定、导航区零位移。折叠态由 index.css 的 .update-slot 收起。 */}
         <div className="app-side-settings-row">
@@ -166,9 +170,8 @@ function SideNavImpl({
               {unreadCount > 0 ? unreadLabel : lastUnread > 0 ? (lastUnread > 9 ? "9+" : String(lastUnread)) : ""}
             </span>
           </button>
-          {/* 折叠态更新状态点：overlay 按钮，覆盖设置按钮右上角，点状态点=直接执行
-              更新动作（一步直达），点齿轮本体仍进设置页。展开态不渲染。 */}
-          {collapsed && <UpdateCollapsedDot />}
+          {/* 折叠态更新状态点已改为 foot 里的独立「更新」项（UpdateRailItem）：
+              压齿轮角的小圆点与设置自身的 changelog 红点视觉撞车，且折叠态没有文字。 */}
           <UpdateBadge currentVersion={status?.version} />
         </div>
 

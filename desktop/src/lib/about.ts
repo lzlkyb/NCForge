@@ -1,9 +1,9 @@
 // 应用元信息（关于卡片用）。
-// - 仓库地址 / 作者：发布时填真实的（这两个字段按需手改）
+// - 仓库地址来自项目 remote；版权主体来自根目录许可证
 // - 协议：根目录 LICENSE（MIT）
 // - 更新历史：由 scripts/gen-changelog.mjs 在 predev/prebuild 时从根目录 CHANGELOG.md
 //   （Keep a Changelog，唯一手写源）自动解析生成 lib/changelog.generated.ts，此处 re-export。
-//   分类映射（新增→feat / 变更→improve / 修复→fix / 安全→sec，技术细节→improve）
+//   分类映射（新增→feat / 变更与优化→improve / 修复→fix / 安全→sec，技术细节单独保留）
 //   集中在脚本内，根除手写数组「双份维护、漏写版本」的痛点。
 
 export const APP_INFO = {
@@ -12,10 +12,10 @@ export const APP_INFO = {
   name: "NCForge",
   // 侧栏品牌区标语。
   tagline: "写代码 · 编译 · 启服务",
-  author: "your-name",
-  repoUrl: "https://github.com/your-name/your-app",
+  author: "NCForge contributors",
+  repoUrl: "https://github.com/lzlkyb/NCForge",
   license: "MIT",
-  description: "NCForge —— NC65 / NCC 二开的轻量桌面工作台",
+  description: "NC65 / NCC 二开的轻量桌面工作台",
 } as const;
 
 export type ChangeCategory = "feat" | "improve" | "fix" | "sec";
@@ -45,6 +45,9 @@ export interface ChangelogEntry {
   version: string;
   date: string;
   items: ChangelogItem[];
+  summary?: string[];
+  /** 工程记录保留全文，主阅读区只显示用户说明。 */
+  technical?: { heading: string; text: string }[];
   /** 本期亮点（可选）：CHANGELOG.md 的 `### 亮点` 小节，UI 顶部突出展示。 */
   highlights?: string[];
 }

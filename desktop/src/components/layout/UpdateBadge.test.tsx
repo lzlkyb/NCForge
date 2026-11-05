@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateBadge } from "./UpdateBadge";
-import { UpdateCollapsedDot } from "./UpdateCollapsedDot";
+import { UpdateRailItem } from "./UpdateRailItem";
 
 const h = vi.hoisted(() => ({
   state: {} as Record<string, unknown>, toast: vi.fn(), open: vi.fn(), download: vi.fn(),
@@ -32,17 +32,17 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 async function render(status: string) {
   h.state.status = status;
-  await act(async () => root.render(<><UpdateBadge currentVersion="0.1.0" /><UpdateCollapsedDot /></>));
+  await act(async () => root.render(<><UpdateBadge currentVersion="0.1.0" /><UpdateRailItem /></>));
 }
 
 describe("update entry points", () => {
   for (const status of ["available", "downloading", "ready", "installing", "error"]) {
-    it(`${status}展开徽章与折叠点都只打开更新详情`, async () => {
+    it(`${status}展开徽章与折叠项都只打开更新详情`, async () => {
       await render(status);
       const badge = host.querySelector('.update-slot button') as HTMLButtonElement;
-      const dot = host.querySelector('.upd-dot') as HTMLButtonElement;
-      expect(badge).not.toBeNull(); expect(dot).not.toBeNull();
-      await act(async () => { badge.click(); dot.click(); });
+      const rail = host.querySelector('.app-side-update') as HTMLButtonElement;
+      expect(badge).not.toBeNull(); expect(rail).not.toBeNull();
+      await act(async () => { badge.click(); rail.click(); });
       expect(h.open).toHaveBeenCalledTimes(2);
       expect(h.download).not.toHaveBeenCalled(); expect(h.restart).not.toHaveBeenCalled();
       expect(h.check).not.toHaveBeenCalled();
@@ -54,7 +54,18 @@ describe("update entry points", () => {
     await render("downloading");
     expect(host.querySelector('.header-badge')?.textContent).toContain("下载中");
     expect(host.querySelector('.header-badge')?.textContent).not.toContain("%");
-    expect(host.querySelector('.upd-dot')?.getAttribute("aria-label")).toContain("总大小未知");
+    expect(host.querySelector('.app-side-update')?.getAttribute("aria-label")).toContain("总大小未知");
+  });
+  it("没有更新时不占位：空闲/检查中/已是最新都不出现折叠项", async () => {
+    for (const status of ["idle", "checking", "uptodate"]) {
+      await render(status);
+      expect(host.querySelector('.app-side-update')).toBeNull();
+      expect(host.querySelector('.update-slot')).not.toBeNull();
+    }
+  });
+  it("下载中把进度写进折叠项文字", async () => {
+    await render("downloading");
+    expect(host.querySelector('.app-side-update')?.textContent).toContain("42%");
   });
   it("自动新版本弹框不再叠加通知，自动检查失败保持安静", async () => {
     await render("idle"); await render("available"); expect(h.toast).not.toHaveBeenCalled();

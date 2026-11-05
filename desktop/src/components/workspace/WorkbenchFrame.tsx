@@ -24,7 +24,7 @@ const DOCUMENT_TOOLS: Record<string, DockToolTab> = {
 const DOCUMENT_DEFAULT_OPEN = ["svn", "db", "meta", "logs", "settings"];
 /** NC 服务的卡片 + 日志放在底部面板里，打开这个标签时把面板撑高到够看。 */
 const SERVICES_PANEL_MIN = 360;
-const HOST_NAMES: DockRegionName[] = ["toolbar", "sidebar", "document", "bottom", "actions", "tabs"];
+const HOST_NAMES: DockRegionName[] = ["toolbar", "sidebar", "document", "bottom", "actions", "doctabs"];
 /** 文件页槽位：由 FilesTab 用 portal 注入（见 WorkbenchDock 的 FileSlotName）。 */
 const FILE_SLOTS: FileSlotName[] = ["tree", "tabs", "editor", "status", "output"];
 
@@ -60,19 +60,12 @@ function saveSizes(s: { side: number; bottom: number }): void {
   }
 }
 
-export function WorkbenchFrame({ activeTool, tool, fileTabs = false, tree, tabs, editor, output, status }: {
+export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, status }: {
   activeTool: string; tool?: ReactNode;
-  /**
-   * 文件页标签是否已经由 portal 注入（= FilesTab 已挂载）。
-   *
-   * 为 true 时不再渲染 `ToolTab`：文件标签条已经在标签区里，再放一个工具标签
-   * 会多出一个重复入口。首屏就是文件页，所以实际几乎恒为 true。
-   */
-  fileTabs?: boolean;
   tree: ReactNode; tabs: ReactNode;
   editor: ReactNode; output: ReactNode; status: ReactNode;
 }) {
-  const [hosts, setHosts] = useState<Record<DockRegionName, HTMLElement | null>>({ toolbar: null, sidebar: null, document: null, bottom: null, actions: null, tabs: null });
+  const [hosts, setHosts] = useState<Record<DockRegionName, HTMLElement | null>>({ toolbar: null, sidebar: null, document: null, bottom: null, actions: null, doctabs: null });
   const [fileHosts, setFileHosts] = useState<Record<FileSlotName, HTMLElement | null>>({ tree: null, tabs: null, editor: null, status: null, output: null });
   const [documentOpen, setDocumentOpen] = useState(() => DOCUMENT_DEFAULT_OPEN.includes(activeTool));
   const sideOpen = useSideOpen();
@@ -201,21 +194,24 @@ export function WorkbenchFrame({ activeTool, tool, fileTabs = false, tree, tabs,
           aria-valuemin={SIDE_MIN} aria-valuemax={SIDE_MAX} aria-valuenow={Math.round(sideWidth)}
           aria-hidden={!sideShown || undefined} tabIndex={sideShown ? 0 : -1} onPointerDown={e => { e.preventDefault(); resize("side", e.clientX, sideWidth); }} onKeyDown={e => onSeparatorKey(e, "side")} />
         <section className="wb-main">
-          <div className="wb-tabbar">
-            <div ref={fileRefs.tabs} className="wb-file-tabs">{tabs}</div>
-            {!fileTabs && <div className="wb-tabs" role="tablist"><ToolTab /></div>}
-          </div>
+          {/* 代码面自带文件标签条：切到工具页时整块 hidden，文件标签就不可能和
+              文档面的工具标签同屏（以前两者挤在顶层 `wb-tabbar` 的同一条 flex 行里）。 */}
           <div
             id="wb-code-surface"
-            ref={fileRefs.editor}
             className="wb-code-surface"
             role="tabpanel"
             aria-label="编辑器"
             hidden={documentOpen}
           >
-            {editor}
+            <div ref={fileRefs.tabs} className="wb-file-tabs">{tabs}</div>
+            <div ref={fileRefs.editor} className="wb-code-body">{editor}</div>
           </div>
-          <div id="wb-document-surface" ref={refs.document} className="wb-document-surface" role="tabpanel" aria-label={toolTab?.label} hidden={!documentOpen} />
+          {/* 文档面同样自带标签条：多文档工具（数据库）停靠进 doctabs，
+              单文档工具由 ToolTab 渲染。两个面互斥显示 ⇒ 两套标签永不同屏。 */}
+          <div id="wb-document-surface" className="wb-document-surface" role="tabpanel" aria-label={toolTab?.label} hidden={!documentOpen}>
+            <div ref={refs.doctabs} className="wb-doc-tabs"><ToolTab /></div>
+            <div ref={refs.document} className="wb-doc-body" />
+          </div>
           <div className="wb-resize-y" role="separator" aria-label="调整底部面板高度" aria-orientation="horizontal"
             aria-valuemin={BOTTOM_MIN} aria-valuemax={bottomMax()} aria-valuenow={Math.round(bottomHeight)}
             tabIndex={0} onPointerDown={e => { e.preventDefault(); resize("bottom", e.clientY, bottomHeight); }} onKeyDown={e => onSeparatorKey(e, "bottom")} />

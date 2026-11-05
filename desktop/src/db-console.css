@@ -30,9 +30,9 @@
 .dbx-muted { color: hsl(var(--muted-foreground)); }
 .dbx-sp { flex: 1; }
 
-/* ── 主标签条里的文档标签 ── */
-.wb-tool-tabs-host { display: flex; min-width: 0; }
-.wb-tool-tabs-host > .wb-dock-region:not([hidden]) { display: contents; }
+/* ── 文档面自己的标签条（数据库多文档标签停靠在这里） ── */
+/* 数据库标签条独占文档面第一行：文件标签在代码面，两个面互斥，不会并列。
+   底边线/高度沿用 `.wb-tabs`，这里不再重复声明。 */
 .dbx-doctab { position: relative; }
 /* 环境色只出现在「当前标签」的 2px 底线上：每个标签都染色时整条像装饰彩带，反而看不出在哪一页 */
 .dbx-doctab[data-active][class*="e-"]::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: hsl(var(--env)); opacity: .9; }
@@ -65,8 +65,8 @@
 .dbx-page { display: flex; flex-direction: column; height: 100%; min-height: 0; background: hsl(var(--card)); }
 .dbx-console { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .dbx-console-body { display: flex; flex: 1; min-height: 0; }
-.dbx-console-main { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
-.dbx-editor { flex: 1; min-height: 80px; position: relative; }
+.dbx-console-main { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.dbx-editor { flex: 1; min-height: 140px; min-width: 0; position: relative; }
 .dbx-editor .wb-editor-host { position: absolute; inset: 0; }
 .dbx-stmt-hl { background: hsl(var(--primary) / .07); }
 .dbx-stmt-gl { border-left: 2px solid hsl(var(--primary)); margin-left: 3px; }

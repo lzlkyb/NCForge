@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "../ui/toast";
 import { SqlToolbar } from "./SqlToolbar";
 import { SqlEditor, type SqlEditorApi } from "./SqlEditor";
@@ -16,17 +16,14 @@ import { dbApi } from "../../lib/dbApi";
 import { friendlyDbError } from "../../lib/db";
 import { guessTable } from "../../lib/resultExport";
 import { closeSessionPanel, openSessionPanel, sqlTabOf, useDbSelector, type SqlTab } from "../../lib/dbStore";
+import { useSqlConsoleSplit } from "../../hooks/useSqlConsoleSplit";
 
 /** SQL 控制台：工具条 / 事务条 / 编辑器 / 可拖高度的结果区 / 历史与会话抽屉。 */
 import { DbContextBar } from "./DbContextBar";
 
 export function SqlConsole({ tab }: { tab: SqlTab }) {
   const api = useRef<SqlEditorApi | null>(null);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  /** 拖拽中的清理函数：切标签会卸载这个控制台，监听必须一起摘掉。 */
-  const dragCleanup = useRef<(() => void) | null>(null);
-  useEffect(() => () => dragCleanup.current?.(), []);
-  const [resH, setResH] = useState(()=>{try{return Number(localStorage.getItem("ncforge-db-result-height")) || 300;}catch{return 300;}});
+  const split = useSqlConsoleSplit();
   const [scope,setScope]=useState("执行当前语句");
   /** 右侧抽屉：历史与片段互斥（同一列位置，同时开就挤成两栏了）。 */
   const [side, setSide] = useState<"history" | "snips" | null>(null);
@@ -80,41 +77,6 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
     else void dbApi.cancel(tab.connId, tab.slot).catch((e) => toast(`取消失败：${friendlyDbError(e)}`, "error"));
   }, [tab.id,tab.connId, tab.slot]);
 
-  /** 结果区最高能拖到哪：留出工具条与表头，不能让结果区把编辑器整个吃掉。 */
-  const maxRes = () => Math.max(90, (bodyRef.current?.clientHeight ?? 600) - 80);
-
-  const dragRes = (startY: number) => {
-    const start = resH;
-    dragCleanup.current?.();
-    const finish = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
-      dragCleanup.current = null;
-      try {localStorage.setItem("ncforge-db-result-height",String(bodyRef.current?.querySelector(".dbx-res")?.clientHeight ?? resH));}catch{/* 当前高度仍有效。 */}
-    };
-    const move = (e: PointerEvent) => {
-      // 系统取消指针时没有 pointerup（Alt+Tab / 笔离开），buttons 归零兜住
-      if (e.buttons === 0) return finish();
-      setResH(Math.max(90, Math.min(maxRes(), start + startY - e.clientY)));
-    };
-    dragCleanup.current = finish;
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", finish, { once: true });
-    window.addEventListener("pointercancel", finish, { once: true });
-  };
-
-  /** 键盘调整分隔条：纯键盘用户也能改结果区高度（ARIA separator 的标准做法）。 */
-  const resizeByKey = (e: ReactKeyboardEvent) => {
-    const step = e.shiftKey ? 48 : 16;
-    if (e.key === "ArrowUp") setResH((h) => Math.max(90, Math.min(maxRes(), h + step)));
-    else if (e.key === "ArrowDown") setResH((h) => Math.max(90, Math.min(maxRes(), h - step)));
-    else if (e.key === "Home") setResH(90);
-    else if (e.key === "End") setResH(maxRes());
-    else return;
-    e.preventDefault();
-  };
-
   return (
     <div className="dbx-console">
       <SqlToolbar
@@ -151,7 +113,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
       <div className="dbx-read-status" aria-live="polite">Ctrl+Enter：{scope} · Alt+X：执行整个脚本</div>
       <TxBar connId={tab.connId} tabId={tab.id} slot={tab.slot} tx={tab.slot ? tab.tx : undefined} />
       <div className="dbx-console-body">
-        <div ref={bodyRef} className="dbx-console-main">
+        <div ref={split.bodyRef} className="dbx-console-main">
           <SqlEditor tabId={tab.id} initial={tab.sql} onRun={(m) => void run(m)} apiRef={api} onScope={setScope} />
           <div
             className="dbx-splitbar"
@@ -159,16 +121,16 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
             aria-orientation="horizontal"
             aria-label="调整结果区高度"
             tabIndex={0}
-            aria-valuemin={90}
-            aria-valuemax={maxRes()}
-            aria-valuenow={resH}
-            onKeyDown={resizeByKey}
+            aria-valuemin={split.min}
+            aria-valuemax={split.max}
+            aria-valuenow={split.height}
+            onKeyDown={split.onKeyDown}
             onPointerDown={(e) => {
               e.preventDefault();
-              dragRes(e.clientY);
+              split.startDrag(e.clientY);
             }}
           />
-          <ResultPanel tab={tab} height={resH} onLocate={line=>api.current?.reveal(line)} />
+          <ResultPanel tab={tab} height={split.height} onLocate={line=>api.current?.reveal(line)} />
         </div>
         {side === "history" && tab.connId && (
           <HistoryDrawer

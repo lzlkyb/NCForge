@@ -61,12 +61,12 @@ afterEach(async () => {
 });
 
 describe("维护设置入口", () => {
-  it("关于显示实际运行版本，占位仓库无法打开", async () => {
+  it("关于显示实际运行版本，并打开真实项目仓库", async () => {
     await mount(<AboutSettings onOpenHistory={vi.fn()} />);
     expect(container.querySelector("#about-version")?.textContent).toContain("v9.8.7");
-    expect(button("打开仓库").disabled).toBe(true);
+    expect(button("打开仓库").disabled).toBe(false);
     await act(async () => button("打开仓库").click());
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(mocks.invoke).toHaveBeenCalledWith("open_external", { url: "https://github.com/lzlkyb/NCForge" });
   });
 
   it("就绪安装入口打开现有弹框，避免跳过确认立即重启", async () => {

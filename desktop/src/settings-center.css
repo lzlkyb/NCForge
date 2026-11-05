@@ -64,12 +64,6 @@
 .wb-settings-empty { padding:40px 8px; text-align:center; }
 .wb-settings-empty p { line-height:1.6; }
 .wb-settings-empty button { min-height:30px; border-radius:var(--r-control); }
-.settings-history { display:flex; flex-direction:column; gap:22px; width:min(560px,90vw); max-height:70vh; padding:24px; overflow:auto; }
-.settings-history h2 { font-size:17px; font-weight:600; }
-.settings-history-entry > div { display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; }
-.settings-history-entry strong { font-size:14px; font-weight:600; }
-.settings-history-entry span,.settings-history-entry li,.settings-history > p { font-size:12px; line-height:1.7; color:hsl(var(--muted-foreground)); }
-.settings-history-entry ul { padding-left:16px; margin-top:8px; }
 .wb-settings-flash { border-radius:var(--r-control); animation:wb-settings-flash 2s var(--ease) both !important; }
 @keyframes settings-page-in { from { opacity:.7; } to { opacity:1; } }
 @container settings-pane (max-width:560px) {

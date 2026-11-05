@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { sqlModel, tabIdOfModel } from "../../lib/sqlModels";
 import { registerSqlProviders } from "../../lib/sqlProviders";
@@ -83,7 +83,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope }: {
   const onRunRef = useRef(onRun);
   onRunRef.current = onRun;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!hostRef.current) return;
     initMonaco();
     registerSqlProviders();
@@ -93,6 +93,8 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope }: {
       fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
       fontSize: 13,
       lineHeight: 20,
+      ariaLabel: "SQL 查询编辑器",
+      padding: { top: 8, bottom: 8 },
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       renderLineHighlight: "none",
@@ -163,10 +165,12 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope }: {
   }, [apiRef]);
 
   // 切标签：换 model（撤销栈与光标都跟着 model 走）
-  useEffect(() => {
+  useLayoutEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
     editor.setModel(sqlModel(tabId, initial));
+    // 绑定 model 后按当前容器重新布局，首次打开/切页不能沿用隐藏时的行号与光标位置。
+    editor.layout();
     editor.focus();
     // initial 只在第一次建 model 时有用，之后以 model 为准
     // eslint-disable-next-line react-hooks/exhaustive-deps

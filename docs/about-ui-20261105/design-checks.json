@@ -1,0 +1,9 @@
+{
+  "checks": [
+    "Version/category/search/empty/close",
+    "Exact license text",
+    "Failure/retry/loading",
+    "Themes/material/narrow layout"
+  ],
+  "errors": []
+}

@@ -87,7 +87,6 @@ let container: HTMLDivElement;
 const frame = (activeTool: string, tool: ReactNode = null) => (
   <WorkbenchFrame
     activeTool={activeTool}
-    fileTabs
     tool={
       <>
         <FilesTab activeTool={activeTool} />

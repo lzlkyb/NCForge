@@ -1,0 +1,19 @@
+{
+  "csp": "default-src 'self'; script-src 'self' 'sha256-llIDFp2fZ82VkdNzIVt/83d6ZSk91weJeFxC4i9gFVo='; style-src 'self' 'unsafe-inline' 'nonce-sql-acceptance-nonce'; style-src-elem 'self' 'unsafe-inline'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'",
+  "style": {
+    "border": "0px",
+    "outline": "none",
+    "color": "rgba(0, 0, 0, 0)"
+  },
+  "contentLeft": 64,
+  "violations": [],
+  "errors": [],
+  "passed": [
+    "Production CSS",
+    "Packaged CSP nonces",
+    "Input and execution",
+    "Navigation draft",
+    "Low window layout",
+    "Dark theme"
+  ]
+}

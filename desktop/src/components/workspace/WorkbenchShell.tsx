@@ -27,7 +27,6 @@ export function WorkbenchShell({ activeTab, tool }: { activeTab: string; tool: R
   return (
     <WorkbenchFrame
       activeTool={activeTab}
-      fileTabs={seenFiles.current}
       tool={
         <>
           {seenFiles.current && (

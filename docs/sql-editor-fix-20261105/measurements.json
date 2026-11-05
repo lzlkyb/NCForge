@@ -1,0 +1,309 @@
+{
+  "errors": [],
+  "measurements": [
+    {
+      "name": "empty-wide",
+      "main": {
+        "width": 969,
+        "height": 683.5,
+        "bottom": 873
+      },
+      "editor": {
+        "width": 969,
+        "height": 378.5,
+        "bottom": 568
+      },
+      "result": {
+        "width": 969,
+        "height": 300,
+        "bottom": 873
+      },
+      "layout": {
+        "width": 969,
+        "height": 378,
+        "glyphMarginLeft": 0,
+        "glyphMarginWidth": 0,
+        "glyphMarginDecorationLaneCount": 1,
+        "lineNumbersLeft": 0,
+        "lineNumbersWidth": 38,
+        "decorationsLeft": 38,
+        "decorationsWidth": 26,
+        "contentLeft": 64,
+        "contentWidth": 905,
+        "minimap": {
+          "renderMinimap": 0,
+          "minimapLeft": 0,
+          "minimapWidth": 0,
+          "minimapHeightIsEditorHeight": false,
+          "minimapIsSampling": false,
+          "minimapScale": 1,
+          "minimapLineHeight": 1,
+          "minimapCanvasInnerWidth": 0,
+          "minimapCanvasInnerHeight": 378,
+          "minimapCanvasOuterWidth": 0,
+          "minimapCanvasOuterHeight": 378
+        },
+        "viewportColumn": 116,
+        "isWordWrapMinified": false,
+        "isViewportWrapping": false,
+        "wrappingColumn": -1,
+        "verticalScrollbarWidth": 14,
+        "horizontalScrollbarHeight": 12,
+        "overviewRuler": {
+          "top": 0,
+          "width": 14,
+          "height": 378,
+          "right": 0
+        }
+      },
+      "border": "0px",
+      "outline": "none",
+      "text": ""
+    },
+    {
+      "name": "empty-low",
+      "main": {
+        "width": 713,
+        "height": 287.5,
+        "bottom": 513
+      },
+      "editor": {
+        "width": 713,
+        "height": 140,
+        "bottom": 365.5
+      },
+      "result": {
+        "width": 713,
+        "height": 143,
+        "bottom": 513.5
+      },
+      "layout": {
+        "width": 713,
+        "height": 140,
+        "glyphMarginLeft": 0,
+        "glyphMarginWidth": 0,
+        "glyphMarginDecorationLaneCount": 1,
+        "lineNumbersLeft": 0,
+        "lineNumbersWidth": 38,
+        "decorationsLeft": 38,
+        "decorationsWidth": 26,
+        "contentLeft": 64,
+        "contentWidth": 649,
+        "minimap": {
+          "renderMinimap": 0,
+          "minimapLeft": 0,
+          "minimapWidth": 0,
+          "minimapHeightIsEditorHeight": false,
+          "minimapIsSampling": false,
+          "minimapScale": 1,
+          "minimapLineHeight": 1,
+          "minimapCanvasInnerWidth": 0,
+          "minimapCanvasInnerHeight": 140,
+          "minimapCanvasOuterWidth": 0,
+          "minimapCanvasOuterHeight": 140
+        },
+        "viewportColumn": 83,
+        "isWordWrapMinified": false,
+        "isViewportWrapping": false,
+        "wrappingColumn": -1,
+        "verticalScrollbarWidth": 14,
+        "horizontalScrollbarHeight": 12,
+        "overviewRuler": {
+          "top": 0,
+          "width": 14,
+          "height": 140,
+          "right": 0
+        }
+      },
+      "border": "0px",
+      "outline": "none",
+      "text": ""
+    },
+    {
+      "name": "empty-narrow",
+      "main": {
+        "width": 493,
+        "height": 447.5,
+        "bottom": 673
+      },
+      "editor": {
+        "width": 493,
+        "height": 142.5,
+        "bottom": 368
+      },
+      "result": {
+        "width": 493,
+        "height": 300,
+        "bottom": 673
+      },
+      "layout": {
+        "width": 493,
+        "height": 142,
+        "glyphMarginLeft": 0,
+        "glyphMarginWidth": 0,
+        "glyphMarginDecorationLaneCount": 1,
+        "lineNumbersLeft": 0,
+        "lineNumbersWidth": 38,
+        "decorationsLeft": 38,
+        "decorationsWidth": 26,
+        "contentLeft": 64,
+        "contentWidth": 429,
+        "minimap": {
+          "renderMinimap": 0,
+          "minimapLeft": 0,
+          "minimapWidth": 0,
+          "minimapHeightIsEditorHeight": false,
+          "minimapIsSampling": false,
+          "minimapScale": 1,
+          "minimapLineHeight": 1,
+          "minimapCanvasInnerWidth": 0,
+          "minimapCanvasInnerHeight": 142,
+          "minimapCanvasOuterWidth": 0,
+          "minimapCanvasOuterHeight": 142
+        },
+        "viewportColumn": 54,
+        "isWordWrapMinified": false,
+        "isViewportWrapping": false,
+        "wrappingColumn": -1,
+        "verticalScrollbarWidth": 14,
+        "horizontalScrollbarHeight": 12,
+        "overviewRuler": {
+          "top": 0,
+          "width": 14,
+          "height": 142,
+          "right": 0
+        }
+      },
+      "border": "0px",
+      "outline": "none",
+      "text": ""
+    },
+    {
+      "name": "empty-dark-low",
+      "main": {
+        "width": 713,
+        "height": 287.5,
+        "bottom": 513
+      },
+      "editor": {
+        "width": 713,
+        "height": 140,
+        "bottom": 365.5
+      },
+      "result": {
+        "width": 713,
+        "height": 143,
+        "bottom": 513.5
+      },
+      "layout": {
+        "width": 713,
+        "height": 140,
+        "glyphMarginLeft": 0,
+        "glyphMarginWidth": 0,
+        "glyphMarginDecorationLaneCount": 1,
+        "lineNumbersLeft": 0,
+        "lineNumbersWidth": 38,
+        "decorationsLeft": 38,
+        "decorationsWidth": 26,
+        "contentLeft": 64,
+        "contentWidth": 649,
+        "minimap": {
+          "renderMinimap": 0,
+          "minimapLeft": 0,
+          "minimapWidth": 0,
+          "minimapHeightIsEditorHeight": false,
+          "minimapIsSampling": false,
+          "minimapScale": 1,
+          "minimapLineHeight": 1,
+          "minimapCanvasInnerWidth": 0,
+          "minimapCanvasInnerHeight": 140,
+          "minimapCanvasOuterWidth": 0,
+          "minimapCanvasOuterHeight": 140
+        },
+        "viewportColumn": 83,
+        "isWordWrapMinified": false,
+        "isViewportWrapping": false,
+        "wrappingColumn": -1,
+        "verticalScrollbarWidth": 14,
+        "horizontalScrollbarHeight": 12,
+        "overviewRuler": {
+          "top": 0,
+          "width": 14,
+          "height": 140,
+          "right": 0
+        }
+      },
+      "border": "0px",
+      "outline": "none",
+      "text": ""
+    },
+    {
+      "name": "scale-125",
+      "main": {
+        "width": 508,
+        "height": 361.5,
+        "bottom": 587
+      },
+      "editor": {
+        "width": 508,
+        "height": 140,
+        "bottom": 365.5
+      },
+      "result": {
+        "width": 508,
+        "height": 217,
+        "bottom": 587.5
+      },
+      "layout": {
+        "width": 508,
+        "height": 140,
+        "glyphMarginLeft": 0,
+        "glyphMarginWidth": 0,
+        "glyphMarginDecorationLaneCount": 1,
+        "lineNumbersLeft": 0,
+        "lineNumbersWidth": 38,
+        "decorationsLeft": 38,
+        "decorationsWidth": 26,
+        "contentLeft": 64,
+        "contentWidth": 444,
+        "minimap": {
+          "renderMinimap": 0,
+          "minimapLeft": 0,
+          "minimapWidth": 0,
+          "minimapHeightIsEditorHeight": false,
+          "minimapIsSampling": false,
+          "minimapScale": 1,
+          "minimapLineHeight": 1,
+          "minimapCanvasInnerWidth": 0,
+          "minimapCanvasInnerHeight": 140,
+          "minimapCanvasOuterWidth": 0,
+          "minimapCanvasOuterHeight": 140
+        },
+        "viewportColumn": 56,
+        "isWordWrapMinified": false,
+        "isViewportWrapping": false,
+        "wrappingColumn": -1,
+        "verticalScrollbarWidth": 14,
+        "horizontalScrollbarHeight": 12,
+        "overviewRuler": {
+          "top": 0,
+          "width": 14,
+          "height": 140,
+          "right": 0
+        }
+      },
+      "border": "0px",
+      "outline": "none",
+      "text": ""
+    }
+  ],
+  "passed": [
+    "Empty SQL layout",
+    "Focus styles",
+    "Input and Ctrl+Enter via mocked IPC",
+    "Resize limits",
+    "Draft survives navigation",
+    "Keyboard split limits",
+    "Pointer split limits and persistence"
+  ]
+}

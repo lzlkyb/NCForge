@@ -4,9 +4,9 @@ import { DockRegion } from "../workspace/WorkbenchDock";
 import { patchConfig, type ConfigPatch } from "../../lib/appConfig";
 import { toast } from "../ui/toast";
 import { failureText } from "../../lib/friendlyError";
-import { CHANGELOG, CATEGORY_LABELS } from "../../lib/about";
+import { CHANGELOG } from "../../lib/about";
 import { markChangelogSeen } from "../../lib/utils";
-import { Modal } from "../ui/Modal";
+import { VersionHistoryDialog } from "../settings/VersionHistoryDialog";
 import { AutostartRow } from "../settings/AutostartRow";
 import { LangSettings } from "../settings/LangSettings";
 import { ResourceSettings } from "../settings/ResourceSettings";
@@ -78,19 +78,10 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
         keywords: ["导入", "导出", "备份", "JSON", "迁移", "config"], content: <ConfigTransferSettings onChanged={onChanged} />,
       },
       {
-        label: "关于", group: "维护", description: "查看正在运行的版本与更新历史。",
-        keywords: ["版本", "仓库", "许可", "license", "about", "changelog"], content: <AboutSettings onOpenHistory={openHistory} />,
+        label: "关于", group: "维护", description: "了解当前运行的软件，查看版本变化与项目支持。",
+        keywords: ["版本", "仓库", "许可", "反馈", "license", "about", "changelog"], content: <AboutSettings onOpenHistory={openHistory} />,
       },
     ]} />
-    <Modal open={historyOpen} onClose={() => setHistoryOpen(false)} ariaLabel="更新历史" className="modal-surface">
-      <div className="settings-history">
-        <h2>更新历史</h2>
-        {CHANGELOG.map((entry) => <div key={entry.version} className="settings-history-entry">
-          <div><strong>v{entry.version}</strong><span>{entry.date}</span></div>
-          <ul>{entry.items.map((item, i) => <li key={i}>[{CATEGORY_LABELS[item.category]}] {item.text}</li>)}</ul>
-        </div>)}
-        {CHANGELOG.length === 0 && <p>还没有版本记录。</p>}
-      </div>
-    </Modal>
+    <VersionHistoryDialog open={historyOpen} onClose={() => setHistoryOpen(false)} />
   </div></DockRegion>;
 }

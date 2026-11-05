@@ -1,0 +1,70 @@
+{
+  "errors": [],
+  "violations": [
+    {
+      "directive": "style-src-elem",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    },
+    {
+      "directive": "style-src-attr",
+      "blocked": "inline"
+    }
+  ],
+  "error": "TimeoutError: page.waitForFunction: Timeout 10000ms exceeded."
+}

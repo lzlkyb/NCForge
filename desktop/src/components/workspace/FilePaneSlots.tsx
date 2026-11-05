@@ -8,7 +8,6 @@ import type { useFileSession } from "../../hooks/useFileSession";
 import { FileTree } from "./FileTree";
 import { TreeHeader } from "./TreeHeader";
 import { TreeSvnProvider } from "./TreeSvnProvider";
-import { ToolTab } from "./ToolTab";
 import { TabStrip } from "./TabStrip";
 import { EditorBanners } from "./EditorBanners";
 import { FileReadFeedback } from "./FileReadFeedback";
@@ -267,8 +266,6 @@ export function EmptyProjectSlots({
   return (
     <>
       {slot("tree", <div className="wb-no-project">尚未打开工程</div>)}
-      {/* 数据库标签不依赖工程目录；空工程也要登记多文档工具的停靠宿主。 */}
-      {slot("tabs", <div className="wb-tabs" role="tablist"><ToolTab /></div>)}
       {slot("editor", <NoWorkspace recents={recents} onOpen={onOpen} />)}
       {slot("status", (
         <footer className="wb-status">

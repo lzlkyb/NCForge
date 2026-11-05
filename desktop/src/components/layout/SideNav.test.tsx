@@ -6,7 +6,7 @@ import { SideNav, WORKSPACE_NAV } from "./SideNav";
 
 const h = vi.hoisted(() => ({ checkUpdate: vi.fn() }));
 vi.mock("./UpdateBadge", () => ({ UpdateBadge: () => <span className="update-slot"><button aria-label="检查更新" onClick={h.checkUpdate}>v0.1.0</button></span> }));
-vi.mock("./UpdateCollapsedDot", () => ({ UpdateCollapsedDot: () => null }));
+vi.mock("./UpdateRailItem", () => ({ UpdateRailItem: () => null }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 it("低频日志保留页面和原快捷键位置，主导航只显示常用工作区", () => {

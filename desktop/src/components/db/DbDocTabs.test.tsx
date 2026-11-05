@@ -22,6 +22,14 @@ afterEach(() => { act(() => root.unmount()); host.remove(); __resetDbForTest(); 
 const render = () => act(() => root.render(<div role="tablist"><DbDocTabs /></div>));
 const key = (id: string, value: string) => act(() => document.getElementById(dbTabId(id))!.dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true })));
 describe("数据库文档标签键盘规则", () => {
+  it("没有打开的文档时也有「数据库」占位标签和新建控制台按钮", () => {
+    render();
+    const tabs = [...host.querySelectorAll<HTMLElement>('[role="tab"]')];
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].textContent).toBe("数据库");
+    expect(tabs[0].getAttribute("aria-controls")).toBe("dbx-panel-empty");
+    expect(host.querySelector('[aria-label="新建 SQL 控制台"]')).not.toBeNull();
+  });
   it("只有活动标签可Tab停靠，方向键循环并同步激活，Home/End定位", () => {
     const first = openSqlTab("c1"); const second = openSqlTab("c1"); const last = openTableTab("c1", "BD_MATERIAL");
     activateTab(first); render();

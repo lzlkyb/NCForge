@@ -1,7 +1,6 @@
 import { EditorTabTypeIcon } from "./EditorTabTypeIcon";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useWorkbenchDock } from "./WorkbenchDock";
-import { ToolTab } from "./ToolTab";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { Menu, MenuItem } from "../ui/Menu";
 import { TaskMenu } from "./TaskMenu";
@@ -222,7 +221,6 @@ export function TabStrip({
           </button>
         </div>
       ))}
-      <ToolTab />
       {/* 标签太多时横向滚动条不好找：给一个「所有标签」下拉，键盘用户也能到这里 */}
       <div className="wb-tabs-all-wrap">
         <Menu portal width="w-72" trigger={(open, toggle) => (

@@ -19,12 +19,27 @@ html:root[data-ui-style] .app-side .update-slot button.header-badge:hover,
 html:root[data-ui-style] .app-side .update-slot button.header-badge:active { box-shadow:none;filter:none; }
 html:root[data-ui-style] .app-side .update-slot .header-badge-downloading circle { stroke:currentColor; }
 .update-slot button.header-badge:disabled { opacity:.48;pointer-events:none; }
-.update-slot button.header-badge:focus-visible,.upd-dot:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:3px; }
-.app-side .upd-dot { color:hsl(var(--primary));border-radius:var(--r-control,6px); }
-.app-side .upd-dot--dl { pointer-events:auto;cursor:pointer; }
-.app-side .upd-dot--available::before,.app-side .upd-dot--ready::before { background:hsl(var(--primary));animation:none; }
-.app-side .upd-dot--error::before { background:hsl(var(--destructive-ink));animation:none; }
-.app-side .upd-dot:disabled { opacity:.48;pointer-events:none; }
+.update-slot button.header-badge:focus-visible,.app-side-update:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:2px; }
+
+/* ── 折叠态更新入口（rail 项，见 UpdateRailItem）──
+   以前是压在设置齿轮右上角的 8px 状态点：与设置自身的 changelog 红点同一套视觉语言
+   （用户读成「设置里有未读」），折叠态又没有文字兜底。现在是 foot 里一行常规导航项，
+   状态直接写进 11px 文字：42% / 安装 / 重试。
+   tone 只染图标：`.app-side-item:hover` 会把按钮 color 翻成前景色，挂按钮上会被 hover
+   冲掉，状态色会随鼠标闪烁。 */
+.app-side-update-icon { position:relative;display:inline-flex;align-items:center;justify-content:center;width:19px;height:19px; }
+.app-side-update[data-tone="primary"] .app-side-update-icon { color:hsl(var(--primary)); }
+.app-side-update[data-tone="success"] .app-side-update-icon { color:hsl(var(--success-ink)); }
+.app-side-update[data-tone="danger"]  .app-side-update-icon { color:hsl(var(--destructive-ink)); }
+.app-side-update[data-status="available"] .app-side-update-icon::after {
+  content:"";position:absolute;inset:-2px;border-radius:999px;pointer-events:none;
+  animation:upd-rail-halo 2.1s ease-out infinite;
+}
+@keyframes upd-rail-halo {
+  0%       { box-shadow:0 0 0 0 hsl(var(--primary)/.42); }
+  70%,100% { box-shadow:0 0 0 6px hsl(var(--primary)/0); }
+}
+.app-side-update:disabled { opacity:.48;cursor:default; }
 
 /* 148px 导航内设置与版本并列：隐藏标记不能留下 flex 间距。 */
 .app-side:not([data-collapsed]) .app-side-settings-row > .app-side-item {

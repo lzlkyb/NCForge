@@ -4,11 +4,23 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), {
+    name: "project-license",
+    resolveId(id) { if (id === "virtual:project-license") return "\0project-license"; },
+    load(id) {
+      if (id !== "\0project-license") return;
+      const path = fileURLToPath(new URL("../LICENSE", import.meta.url));
+      this.addWatchFile(path);
+      // Import the authoritative license without broadening the dev server's file boundary.
+      return `export default ${JSON.stringify(readFileSync(path, "utf8"))};`;
+    },
+  }],
   clearScreen: false,
   server: {
     port: 1420,

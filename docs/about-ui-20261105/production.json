@@ -1,0 +1,148 @@
+{
+  "passed": [
+    "Running metadata",
+    "Clipboard",
+    "External link failure and recovery",
+    "Version choice and pagination",
+    "Category and search",
+    "Escape and focus return",
+    "Authoritative license",
+    "Update checking feedback",
+    "Missing and failed metadata recovery",
+    "Bundled and running versions distinguished",
+    "Six responsive and theme profiles",
+    "Internal scrolling and fixed close controls",
+    "Keyboard focus trap",
+    "Packaged CSP"
+  ],
+  "measurements": [
+    {
+      "name": "production-light",
+      "width": 1280,
+      "height": 840,
+      "theme": "light",
+      "style": "glass",
+      "overflow": false,
+      "cardOverflow": false,
+      "font": "22px",
+      "modal": {
+        "left": 246,
+        "right": 1034,
+        "top": 69.39999389648438,
+        "bottom": 778.5999450683594,
+        "height": 709.199951171875,
+        "bodyHeight": 479,
+        "bodyOverflow": false,
+        "headerBottom": 154.0946044921875,
+        "footerTop": 725.4100341796875
+      }
+    },
+    {
+      "name": "production-dark-low",
+      "width": 1024,
+      "height": 600,
+      "theme": "dark",
+      "style": "glass",
+      "overflow": false,
+      "cardOverflow": false,
+      "font": "22px",
+      "modal": {
+        "left": 118,
+        "right": 906,
+        "top": 32.139984130859375,
+        "bottom": 575.8599548339844,
+        "height": 543.719970703125,
+        "bodyHeight": 311,
+        "bodyOverflow": false,
+        "headerBottom": 116.8345947265625,
+        "footerTop": 522.6699829101562
+      }
+    },
+    {
+      "name": "production-light-narrow",
+      "width": 560,
+      "height": 700,
+      "theme": "light",
+      "style": "glass",
+      "overflow": false,
+      "cardOverflow": false,
+      "font": "20px",
+      "modal": {
+        "left": 19.959991455078125,
+        "right": 540.0400695800781,
+        "top": 32.889984130859375,
+        "bottom": 675.1099548339844,
+        "height": 642.219970703125,
+        "bodyHeight": 367,
+        "bodyOverflow": false,
+        "headerBottom": 117.5845947265625,
+        "footerTop": 621.9200439453125
+      }
+    },
+    {
+      "name": "production-dark-narrow",
+      "width": 560,
+      "height": 700,
+      "theme": "dark",
+      "style": "glass",
+      "overflow": false,
+      "cardOverflow": false,
+      "font": "20px",
+      "modal": {
+        "left": 19.959991455078125,
+        "right": 540.0400695800781,
+        "top": 32.889984130859375,
+        "bottom": 675.1099548339844,
+        "height": 642.219970703125,
+        "bodyHeight": 367,
+        "bodyOverflow": false,
+        "headerBottom": 117.5845947265625,
+        "footerTop": 621.9200439453125
+      }
+    },
+    {
+      "name": "production-classic-narrow",
+      "width": 560,
+      "height": 700,
+      "theme": "light",
+      "style": "classic",
+      "overflow": false,
+      "cardOverflow": false,
+      "font": "20px",
+      "modal": {
+        "left": 19.959991455078125,
+        "right": 540.0400695800781,
+        "top": 32.889984130859375,
+        "bottom": 675.1099548339844,
+        "height": 642.219970703125,
+        "bodyHeight": 367,
+        "bodyOverflow": false,
+        "headerBottom": 117.5845947265625,
+        "footerTop": 621.9200439453125
+      }
+    },
+    {
+      "name": "production-scale-125",
+      "width": 819,
+      "height": 672,
+      "theme": "light",
+      "style": "glass",
+      "overflow": false,
+      "cardOverflow": false,
+      "font": "20px",
+      "modal": {
+        "left": 21.902496337890625,
+        "right": 797.0975646972656,
+        "top": 32.67999267578125,
+        "bottom": 647.3200073242188,
+        "height": 614.6400146484375,
+        "bodyHeight": 383,
+        "bodyOverflow": false,
+        "headerBottom": 117.37460327148438,
+        "footerTop": 594.1300048828125
+      }
+    }
+  ],
+  "csp": "default-src 'self'; script-src 'self' 'sha256-llIDFp2fZ82VkdNzIVt/83d6ZSk91weJeFxC4i9gFVo='; style-src 'self' 'unsafe-inline' 'nonce-about-acceptance-nonce'; style-src-elem 'self' 'unsafe-inline'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'",
+  "errors": []
+}
