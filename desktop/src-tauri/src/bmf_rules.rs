@@ -73,9 +73,48 @@ pub struct PublishColumn {
     pub is_pk: bool,
 }
 
+/// 行号索引：一次走树 + 一次扫换行，避免每条属性都做全树 DFS 和全文数行。
+///
+/// 病态语料（100 实体 × 50 属性）下旧的 `find_node` + `line_of` 组合是 O(n²)，
+/// 实测 3s；这里降到 O(n log n)。
+struct LineIndex<'a> {
+    by_id: std::collections::HashMap<&'a str, usize>,
+    newlines: Vec<usize>,
+}
+
+impl<'a> LineIndex<'a> {
+    fn build(doc: &'a BmfDoc) -> Self {
+        fn walk<'a>(n: &'a crate::bmf_model::XmlNode, out: &mut std::collections::HashMap<&'a str, usize>) {
+            if let Some(id) = n.attr("id") {
+                // 与 find_node 的 DFS 首命中语义一致：重复 id 保留最先出现的节点。
+                out.entry(id).or_insert(n.start);
+            }
+            for c in &n.children {
+                walk(c, out);
+            }
+        }
+        let mut by_id = std::collections::HashMap::new();
+        walk(&doc.root, &mut by_id);
+        let newlines = doc
+            .bytes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| (*b == b'\n').then_some(i))
+            .collect();
+        Self { by_id, newlines }
+    }
+
+    fn line_by_id(&self, id: &str) -> Option<u32> {
+        self.by_id
+            .get(id)
+            .map(|&off| self.newlines.partition_point(|&nl| nl < off) as u32 + 1)
+    }
+}
+
 /// 检查一份文档。`file` 是给用户看的路径（索引层已转字符串）。
 pub fn check_doc(doc: &BmfDoc, file: &str) -> Vec<Issue> {
     let mut out = Vec::new();
+    let lines = LineIndex::build(doc);
     let c = &doc.component;
     let comp = c.name.clone();
     // 用宏而不是闭包：下面还要把 `&mut out` 交给 `check_attrs`，闭包会把可变借用
@@ -184,7 +223,7 @@ pub fn check_doc(doc: &BmfDoc, file: &str) -> Vec<Issue> {
     }
 
     for e in &doc.entities {
-        let eline = doc.find_node(&e.id).map(|n| doc.line_of(n.start));
+        let eline = lines.line_by_id(&e.id);
         if e.table.trim().is_empty() {
             add!("E001", "error", "实体没有表名", format!("{} 的 tableName 为空", e.name),
                 "没有表名就生成不了 DDL，发布也会找不到落点。",
@@ -219,13 +258,13 @@ pub fn check_doc(doc: &BmfDoc, file: &str) -> Vec<Issue> {
                 add!("E007", "error", "主键属性未标记 isKey", k.name.clone(),
                     "keyAttributeId 指向的属性 isKey=false，DDL 与 VO 会各按一套理解。",
                     "把该属性 isKey 设为 true（并且只设一个）",
-                    Some(doc.line_of(doc.find_node(&k.id).map(|n| n.start).unwrap_or(0))), &e.name, &k.name);
+                    lines.line_by_id(&k.id), &e.name, &k.name);
             }
             if k.type_name != "UFID" {
                 add!("E008", "warn", "主键类型不是 UFID", format!("{}: {}", k.name, k.type_name),
                     "NC 单据主键惯例是 20 位 UFID；其它类型在参照与聚合关系里会被当成业务字段。",
                     "改成 UFID(length=20)，或确认这是特例",
-                    Some(doc.line_of(doc.find_node(&k.id).map(|n| n.start).unwrap_or(0))), &e.name, &k.name);
+                    lines.line_by_id(&k.id), &e.name, &k.name);
             }
         }
         let keys = e.attrs.iter().filter(|a| a.is_key).count();
@@ -235,11 +274,11 @@ pub fn check_doc(doc: &BmfDoc, file: &str) -> Vec<Issue> {
                 "只保留一个 isKey", eline, &e.name, "");
         }
 
-        check_attrs(doc, e, file, &mut out);
+        check_attrs(doc, e, &lines, file, &mut out);
     }
 
     for en in &doc.enums {
-        let eline = doc.find_node(&en.id).map(|n| doc.line_of(n.start));
+        let eline = lines.line_by_id(&en.id);
         if en.items.is_empty() {
             add!("N001", "error", "枚举没有枚举项", en.name.clone(),
                 "空枚举在界面上是空白下拉框，VO 里也无法初始化。",
@@ -269,14 +308,14 @@ pub fn check_doc(doc: &BmfDoc, file: &str) -> Vec<Issue> {
                         format!("{} -> {}", a.name, a.data_type),
                         "主子表关系靠 dataType 指向子实体；跨组件引用时发布顺序会影响解析。",
                         "确认子实体已在本组件，或先发布被引用组件",
-                        Some(doc.line_of(doc.find_node(&a.id).map(|n| n.start).unwrap_or(0))), &e.name, &a.name);
+                        lines.line_by_id(&a.id), &e.name, &a.name);
                 }
                 if !a.db_type.is_empty() {
                     add!("A011", "warn", "ARRAY 属性带了数据库类型",
                         format!("{}: dbtype={}", a.name, a.db_type),
                         "ARRAY 表示聚合关系，不应落成物理列；带 dbtype 会让 DDL 多出一列。",
                         "把 dbtype 清空",
-                        Some(doc.line_of(doc.find_node(&a.id).map(|n| n.start).unwrap_or(0))), &e.name, &a.name);
+                        lines.line_by_id(&a.id), &e.name, &a.name);
                 }
                 continue;
             }
@@ -296,7 +335,7 @@ pub fn check_doc(doc: &BmfDoc, file: &str) -> Vec<Issue> {
                     format!("{} -> {} ({})", a.name, a.data_type, a.type_name),
                     "不是基础类型、也不是本组件实体/枚举，可能引用其它组件。",
                     "确认被引用组件已发布；跨组件引用属于正常用法",
-                    Some(doc.line_of(doc.find_node(&a.id).map(|n| n.start).unwrap_or(0))), &e.name, &a.name);
+                    lines.line_by_id(&a.id), &e.name, &a.name);
             }
         }
     }
@@ -307,7 +346,13 @@ pub fn check_doc(doc: &BmfDoc, file: &str) -> Vec<Issue> {
     out
 }
 
-fn check_attrs(doc: &BmfDoc, e: &crate::bmf_model::Entity, _file: &str, out: &mut Vec<Issue>) {
+fn check_attrs(
+    doc: &BmfDoc,
+    e: &crate::bmf_model::Entity,
+    lines: &LineIndex<'_>,
+    _file: &str,
+    out: &mut Vec<Issue>,
+) {
     let mut seen_name: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     let mut seen_field: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for a in &e.attrs {
@@ -331,7 +376,7 @@ fn check_attrs(doc: &BmfDoc, e: &crate::bmf_model::Entity, _file: &str, out: &mu
         .collect();
 
     for a in &e.attrs {
-        let line = doc.find_node(&a.id).map(|n| doc.line_of(n.start));
+        let line = lines.line_by_id(&a.id);
         let push = |out: &mut Vec<Issue>, code: &str, sev: &str, title: String, detail: String, why: String, action: String| {
             out.push(Issue {
                 id: String::new(),

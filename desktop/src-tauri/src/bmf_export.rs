@@ -140,7 +140,7 @@ fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
     Ok(root.join(p))
 }
 
-fn encode(text: &str, enc: TextEncoding, crlf: bool) -> Result<Vec<u8>, String> {
+pub(crate) fn encode(text: &str, enc: TextEncoding, crlf: bool) -> Result<Vec<u8>, String> {
     let norm = if crlf {
         text.replace("\r\n", "\n").replace('\n', "\r\n")
     } else {

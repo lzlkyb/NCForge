@@ -4,14 +4,19 @@
 //! 写：仅编辑保存与向导新建两处，都先过工作区白名单，且必须由前端显式调用。
 //! 这里不做「打开文件就顺手格式化」之类的隐式写入：BMF 里未知节点的字节要原样活着。
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::Serialize;
 use tauri::State;
 
 use crate::bmf_export;
 use crate::bmf_gen::{self, Generation};
+use crate::bmf_gen_manifest::{self, ApplyResult, DiffResult};
+use crate::bmf_gen_plan;
+use crate::bmf_gen_types::{GenPlan, GenProfile, Timings};
 use crate::bmf_index::{self, BmfIndex, RootSpec};
 use crate::bmf_model::BmfDoc;
 use crate::bmf_nchome;
@@ -22,6 +27,7 @@ use crate::bmf_scaffold::{self, Scaffold, ScaffoldSpec};
 use crate::bmf_write::{self, EditOp, WriteResult};
 use crate::config::AppConfig;
 use crate::eclipse_cp;
+use crate::nc_home;
 use crate::security::path::resolve_safe_path;
 use crate::state::AppState;
 
@@ -191,6 +197,163 @@ pub fn bmf_validate(path: String) -> Result<Vec<Issue>, String> {
 pub fn bmf_generate(path: String, entities: Option<Vec<String>>) -> Result<Generation, String> {
     let doc = BmfDoc::open(Path::new(&path))?;
     Ok(bmf_gen::generate(&doc, entities.as_deref().unwrap_or(&[])))
+}
+
+/// 解析落盘根：必须在工作区或链接工程内（与写 BMF 同一套白名单），返回
+/// canonical 路径（供读写）+ 去 `\\?\` 前缀的展示串（供清单比对与 UI）。
+async fn safe_root(
+    state: &State<'_, Arc<AppState>>,
+    raw: &str,
+) -> Result<(PathBuf, String), String> {
+    let cfg = state.config.read().await;
+    let path = safe_write_path(&cfg, raw)?;
+    let text = nc_home::strip_verbatim(&path)
+        .to_string_lossy()
+        .into_owned();
+    Ok((path, text))
+}
+
+/// 生成中心：一次解析 BMF，产出全部预览（不落盘、不开子进程、不连库）。
+///
+/// `profile` 为空时按 BMF 的 `gencodestyle` 推导；响应里带回实际生效的配置，
+/// 前端第一次打开就能把面板填成「这个组件真实会用的值」。
+#[tauri::command]
+pub async fn bmf_generate_plan(
+    path: String,
+    profile: Option<GenProfile>,
+    entities: Option<Vec<String>>,
+) -> Result<GenPlan, String> {
+    // 纯 CPU/IO 活，放到阻塞池：病态组件（5000 属性）也不能占住 IPC 线程。
+    tauri::async_runtime::spawn_blocking(move || {
+        let t0 = Instant::now();
+        let doc = BmfDoc::open(Path::new(&path))?;
+        let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let profile = profile.unwrap_or_else(|| GenProfile::from_bmf(&doc));
+        let mut plan = bmf_gen_plan::plan(&doc, &profile, entities.as_deref().unwrap_or(&[]));
+        plan.timings.parse_ms = parse_ms;
+        plan.timings.total_ms += parse_ms;
+        Ok(plan)
+    })
+    .await
+    .map_err(|e| format!("生成任务失败：{e}"))?
+}
+
+/// 漂移对比：计划产物 vs 上次清单 vs 磁盘。`root` 为空时只看清单（不读盘）。
+#[tauri::command]
+pub async fn bmf_gen_diff(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    profile: Option<GenProfile>,
+    entities: Option<Vec<String>>,
+    root: Option<String>,
+) -> Result<DiffResult, String> {
+    let t0 = Instant::now();
+    let doc = BmfDoc::open(Path::new(&path))?;
+    let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let profile = profile.unwrap_or_else(|| GenProfile::from_bmf(&doc));
+    let plan = bmf_gen_plan::plan(&doc, &profile, entities.as_deref().unwrap_or(&[]));
+    let (root_path, root_text) = match root.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(r) => {
+            let (p, t) = safe_root(&state, r).await?;
+            (Some(p), t)
+        }
+        None => (None, String::new()),
+    };
+    let component = doc.component.name.clone();
+    let config_dir = state.config_dir.clone();
+    // 换过落盘根（另一个工程）时旧清单不能拿来判「被手改」。
+    let manifest = bmf_gen_manifest::load(&config_dir, &component).filter(|m| {
+        root_text.is_empty() || m.root.is_empty() || m.root.eq_ignore_ascii_case(&root_text)
+    });
+    let t1 = Instant::now();
+    let items = bmf_gen_manifest::diff(&plan, manifest.as_ref(), root_path.as_deref());
+    let t2 = Instant::now();
+    Ok(DiffResult {
+        items,
+        manifest: manifest
+            .as_ref()
+            .map(|m| serde_json::to_string_pretty(m).unwrap_or_default()),
+        timings: Timings {
+            parse_ms,
+            graph_ms: plan.timings.graph_ms,
+            render_ms: plan.timings.render_ms,
+            diff_ms: (t2 - t1).as_secs_f64() * 1000.0,
+            total_ms: (t2 - t0).as_secs_f64() * 1000.0,
+            ..Default::default()
+        },
+    })
+}
+
+/// 落盘：只写选中且允许写的产物。`force` 才覆盖「生成后被手改」的文件，
+/// 覆盖前会备份到 config 目录下。清单在写成功后更新，供下次漂移对比。
+#[tauri::command]
+pub async fn bmf_gen_apply(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    profile: Option<GenProfile>,
+    entities: Option<Vec<String>>,
+    root: String,
+    selected: Option<Vec<String>>,
+    force: Option<bool>,
+) -> Result<ApplyResult, String> {
+    let t0 = Instant::now();
+    let doc = BmfDoc::open(Path::new(&path))?;
+    let bmf_path = doc.path.clone();
+    let component = doc.component.name.clone();
+    let bmf_sha = bmf_write::sha256(&doc.bytes);
+    let bmf_version = doc.component.version;
+    let profile = profile.unwrap_or_else(|| GenProfile::from_bmf(&doc));
+    let plan = bmf_gen_plan::plan(&doc, &profile, entities.as_deref().unwrap_or(&[]));
+    let parse_plan_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let profile_sha = plan.profile_sha256.clone();
+    let (root_path, root_text) = safe_root(&state, &root).await?;
+    let config_dir = state.config_dir.clone();
+    let backup_dir = config_dir.join("bmf_backup").join("gen");
+    let selected = selected.unwrap_or_default();
+    let force = force.unwrap_or(false);
+
+    let mut result = tauri::async_runtime::spawn_blocking(move || -> Result<ApplyResult, String> {
+        let prev = bmf_gen_manifest::load(&config_dir, &component)
+            .filter(|m| m.root.is_empty() || m.root.eq_ignore_ascii_case(&root_text));
+        let mut res = bmf_gen_manifest::apply(
+            &plan,
+            prev.as_ref(),
+            &root_path,
+            &selected,
+            force,
+            &backup_dir,
+        )?;
+        // 一个都没写就不动清单：generated_at 不能假装刚生成过。
+        if res.written > 0 {
+            let mut m = bmf_gen_manifest::build_manifest(
+                &bmf_path,
+                &root_text,
+                &bmf_sha,
+                bmf_version,
+                &profile_sha,
+                &plan,
+            )?;
+            // 保留旧清单里本次不再生成的文件（orphan）：它们还在盘上，用户需要
+            // 看到「BMF 已不生成，但是否删除由人决定」。
+            if let Some(old) = prev.as_ref() {
+                let known: HashSet<String> =
+                    m.artifacts.iter().map(|e| e.path.clone()).collect();
+                for e in &old.artifacts {
+                    if !known.contains(&e.path) {
+                        m.artifacts.push(e.clone());
+                    }
+                }
+            }
+            let p = bmf_gen_manifest::save(&config_dir, &component, &m)?;
+            res.manifest = nc_home::strip_verbatim(&p).to_string_lossy().into_owned();
+        }
+        Ok(res)
+    })
+    .await
+    .map_err(|e| format!("保存任务失败：{e}"))??;
+    result.timings.parse_ms = parse_plan_ms;
+    result.timings.total_ms += parse_plan_ms;
+    Ok(result)
 }
 
 /// 新建向导：只预览，不落盘。返回骨架、字段表与自校验结果。

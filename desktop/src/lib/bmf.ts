@@ -158,6 +158,105 @@ export interface BmfGeneration {
   warnings: string[];
 }
 
+// ── 生成中心（bmf_generate_plan / bmf_gen_diff / bmf_gen_apply）──
+
+export type BmfCodeStyle = "traditional" | "standard" | "custom";
+export type BmfSqlDialect =
+  | "db2"
+  | "gbase"
+  | "informix"
+  | "oracle"
+  | "oscar"
+  | "postgresql"
+  | "sqlserver"
+  | "sybase";
+
+export interface BmfGenOptions {
+  generateAggVo: boolean;
+  generateEnumVo: boolean;
+  generateInterfaces: boolean;
+  generateSelVo: boolean;
+  generateTest: boolean;
+  generateDdl: boolean;
+  withForeignKeys: boolean;
+  onlyExtensionTables: boolean;
+  ufBooleanToBoolean: boolean;
+  localization: boolean;
+}
+
+export interface BmfGenProfile {
+  style: BmfCodeStyle;
+  dialect: BmfSqlDialect;
+  basePackage: string;
+  publicSrcRoot: string;
+  clientSrcRoot: string;
+  testSrcRoot: string;
+  options: BmfGenOptions;
+}
+
+export interface BmfArtifact {
+  id: string;
+  family: "java" | "db" | "bill" | "format" | "meta";
+  kind: string;
+  name: string;
+  pathHint: string;
+  encoding: string;
+  eol: string;
+  text: string;
+  sha256: string;
+  sourceRefs: string[];
+  dependsOn: string[];
+}
+
+export interface BmfTimings {
+  parseMs: number;
+  validateMs: number;
+  graphMs: number;
+  renderMs: number;
+  diffMs: number;
+  writeMs: number;
+  totalMs: number;
+}
+
+export interface BmfGenPlan {
+  artifacts: BmfArtifact[];
+  warnings: string[];
+  timings: BmfTimings;
+  inputSha256: string;
+  profileSha256: string;
+  profile: BmfGenProfile;
+}
+
+export type BmfArtifactStatusKind =
+  | "new"
+  | "unchanged"
+  | "outdated"
+  | "modified"
+  | "conflict"
+  | "orphan";
+
+export interface BmfArtifactStatus {
+  id: string;
+  path: string;
+  family: string;
+  status: BmfArtifactStatusKind;
+  detail: string;
+}
+
+export interface BmfGenDiff {
+  items: BmfArtifactStatus[];
+  manifest: string | null;
+  timings: BmfTimings;
+}
+
+export interface BmfGenApply {
+  written: number;
+  skipped: number;
+  items: BmfExportItem[];
+  manifest: string;
+  timings: BmfTimings;
+}
+
 export type BmfSkeleton = "treeCard" | "singleHead" | "singleBody" | "headBody" | "free";
 
 export interface BmfScaffoldSpec {
@@ -425,6 +524,47 @@ export const bmfDetail = (path: string) => invoke<BmfDetail>("bmf_doc_detail", {
 export const bmfValidate = (path: string) => invoke<BmfIssue[]>("bmf_validate", { path });
 export const bmfGenerate = (path: string, entities?: string[]) =>
   invoke<BmfGeneration>("bmf_generate", { path, entities: entities ?? null });
+/** 生成中心：一次解析出全部产物（不落盘）。`profile` 为空时按 BMF 的代码风格推导。 */
+export const bmfGeneratePlan = (
+  path: string,
+  profile?: BmfGenProfile | null,
+  entities?: string[],
+) =>
+  invoke<BmfGenPlan>("bmf_generate_plan", {
+    path,
+    profile: profile ?? null,
+    entities: entities ?? null,
+  });
+/** 漂移对比：计划 vs 上次清单 vs 磁盘。`root` 为空只看清单。 */
+export const bmfGenDiff = (
+  path: string,
+  profile: BmfGenProfile | null,
+  entities: string[] | undefined,
+  root: string | null,
+) =>
+  invoke<BmfGenDiff>("bmf_gen_diff", {
+    path,
+    profile,
+    entities: entities ?? null,
+    root,
+  });
+/** 落盘选中产物；`force` 才覆盖「生成后被手改」的文件（覆盖前备份）。 */
+export const bmfGenApply = (
+  path: string,
+  profile: BmfGenProfile | null,
+  entities: string[] | undefined,
+  root: string,
+  selected: string[],
+  force = false,
+) =>
+  invoke<BmfGenApply>("bmf_gen_apply", {
+    path,
+    profile,
+    entities: entities ?? null,
+    root,
+    selected,
+    force,
+  });
 export const bmfScaffoldPreview = (spec: BmfScaffoldSpec) =>
   invoke<BmfScaffold>("bmf_scaffold_preview", { spec });
 /** 生成物落盘：只写相对路径；已有文件默认跳过，`overwrite` 时先备份再重写。 */

@@ -379,6 +379,13 @@ jobs:
         run: cargo test --release --no-default-features
         working-directory: desktop/src-tauri
 
+      # 生成链性能门禁：release 口径对照 benchmarks/bmf-gen-budget.json。
+      # CI 上没有真实 NC_HOME，只跑合成语料（典型主子表 + 100×50 病态样本），
+      # 断言 P95/硬上限；超预算直接失败并打印阶段耗时。
+      - name: 生成性能门禁 (release, 合成语料)
+        run: cargo test --release --no-default-features --test bmf_gen_perf -- --ignored --nocapture --test-threads=1
+        working-directory: desktop/src-tauri
+
       - name: Build Tauri desktop app (NSIS installer)
         shell: pwsh
         run: |

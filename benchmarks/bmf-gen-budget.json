@@ -1,0 +1,10 @@
+{
+  "$comment": "生成中心性能预算（release，单组件）。来源：docs/NCForge-对标UAP-Studio-生成能力-方案-2026-11-05.md §12.2。超限即失败；只允许整体上调并附实测归因。",
+  "openCenterMs": 800,
+  "generateP95Ms": 3000,
+  "generateHardMs": 10000,
+  "repeatMs": 1000,
+  "writeP95Ms": 2000,
+  "pathologicalMaxMs": 10000,
+  "pathologicalFeedbackMs": 1000
+}
