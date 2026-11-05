@@ -9,6 +9,8 @@
  *   npm run release -- --version 2.3.99   # 显式指定
  *   npm run release -- --patch --dry-run  # 只打印将要做什么，不改任何文件
  *   npm run release -- --patch --yes      # 非交互：用默认摘要，自动确认 push/tag
+ *   npm run release -- --patch --yes --summary "一句话更新摘要"
+ *                                         # 非交互但自己写摘要（更新弹窗顶部那句）
  *   npm run release -- --patch --skip-tests  # 跳过 cargo test + clippy 门禁（不推荐）
  *
  * 流程（自动）：
@@ -50,6 +52,9 @@ const hasFlag = (name) => argv.includes(name);
 
 const DRY_RUN = hasFlag("--dry-run");
 const YES = hasFlag("--yes");
+// 非交互场景（CI / 自动化）没法回答摘要提问，`ask` 会直接取默认值。
+// 想让更新弹窗顶部那句是人话而不是 `vX.Y.Z 版本更新`，走这个参数。
+const SUMMARY = getOpt("--summary");
 const SKIP_TESTS = hasFlag("--skip-tests");
 let bumpType = null;
 let explicitVersion = getOpt("--version");
@@ -187,7 +192,9 @@ async function main() {
   }
 
   // 交互：更新摘要（用户向，显示在更新弹框）
+  // `--summary` 优先：给了就不问，也不落回默认占位文案。
   const summary =
+    (SUMMARY ?? "").trim() ||
     (await ask(`填写「更新摘要」（用户向，回车用默认）:`, `v${next} 版本更新`)) ||
     `v${next} 版本更新`;
 
