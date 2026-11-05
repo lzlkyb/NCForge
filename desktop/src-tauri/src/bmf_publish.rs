@@ -753,12 +753,15 @@ mod tests {
     #[test]
     fn plan_detects_tools_and_orders_steps_without_auto_publish() {
         let root = fake_release_home("plan");
+        // `plan` 内部经 `nc_home::probe` 做 canonicalize（macOS `/var`→`/private/var`，
+        // Windows 8.3 短名→长名），期望值必须走同一条路，否则比的是两种写法。
+        let canon_root = nc_home::strip_verbatim(&std::fs::canonicalize(&root).unwrap());
         let ws = tmp("plan-ws");
         let ws_file = ws.join("demo.bmf");
         std::fs::write(&ws_file, b"<component name=\"demo\"><celllist/></component>").unwrap();
 
         let p = plan(
-            Some(root.to_string_lossy().as_ref()),
+            Some(canon_root.to_string_lossy().as_ref()),
             "demo",
             "uapbd",
             Some(ws_file.to_string_lossy().as_ref()),
@@ -785,7 +788,7 @@ mod tests {
         assert_eq!(p.steps[0].status, "ready");
         assert!(p.steps.iter().any(|s| s.id == "publish" && s.mode == "manual"));
         assert!(p.evidence_template.contains("不表示发布已由工具执行"));
-        let expect_install = root
+        let expect_install = canon_root
             .join("modules")
             .join("uapbd")
             .join("METADATA")

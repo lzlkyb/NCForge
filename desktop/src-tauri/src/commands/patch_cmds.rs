@@ -463,13 +463,15 @@ mod tests {
 
     #[test]
     fn 父目录不重复出现() {
-        // 工作副本根、父级、祖父三段之间不能有重复项
-        let p = probe_parents(Some(Path::new(r"C:\work\newar")));
-        let n = p
-            .iter()
-            .filter(|x| x.as_path() == Path::new(r"C:\work"))
-            .count();
+        // 工作副本根、父级、祖父三段之间不能有重复项。
+        // 用平台无关的路径拼法：Windows 字面量 `C:\work\newar` 在 macOS 上
+        // 整串就是一个路径组件，`parent()` 为空，测不出去重。
+        let root = std::env::temp_dir().join("ncforge-probe").join("newar");
+        let p = probe_parents(Some(&root));
+        let parent = root.parent().unwrap();
+        let n = p.iter().filter(|x| x.as_path() == parent).count();
         assert_eq!(n, 1);
+        assert_eq!(p.len(), 3, "根、父级、祖父各一次：{p:?}");
     }
 
     #[test]
