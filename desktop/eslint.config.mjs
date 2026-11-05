@@ -75,6 +75,10 @@ export default tseslint.config(
         __dirname: "readonly",
         // Node 18+ 内置全局（fetch-jdtls.mjs 下载 jdt.ls 用），不需要 import
         fetch: "readonly",
+        // Node 18+ 的 fetch 配套类型（mirror-gitee.mjs 上传发行版附件用）
+        FormData: "readonly",
+        Blob: "readonly",
+        setTimeout: "readonly",
       },
     },
   },

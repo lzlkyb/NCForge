@@ -21,6 +21,10 @@
  *   5. 重新生成 changelog.generated.ts
  *   6. cargo test + cargo clippy --no-default-features 门禁（不过不提交）
  *   7. git add 相关文件 → commit → push origin main → tag vX.Y.Z → push tag
+ *   8. 打印两条后续命令（都不在 CI 里做）：要 mac 包怎么触发、Gitee 镜像怎么补
+ *
+ * Gitee 镜像也是本地做的：CI 的境外 runner 到 Gitee 只有 ~50KB/s（推 13 分钟被断连），
+ * 本地直连 2.2MB/s。等 CI 出完 Release 后跑 `npm run mirror:gitee -- vX.Y.Z`。
  *
  * 发版口径（2026-11-05 起）：推 tag 的 CI **只构建 Windows**（约 28 分钟）。
  * mac 默认不发——它的作业 26 分钟且与 Windows 串行，v0.1.1 为此跑了 53 分钟。
@@ -412,7 +416,10 @@ async function main() {
   // mac 默认不发（见文件头说明）：把"要 mac 时敲什么"直接打出来，省得回头翻 workflow。
   console.log(`\x1b[36m   需要 macOS 包（+约 26 分钟，别重推 tag）：\x1b[0m`);
   console.log(`   gh workflow run build.yml --ref ${tagName} -f with_macos=true`);
-  console.log(`\x1b[36m   Gitee 镜像未启用时会在 CI 里打 warning：\x1b[0m gh secret list 看 GITEE_TOKEN / GITEE_REPOSITORY`);
+  // Gitee 镜像只能在本地做：CI 的境外 runner 到 Gitee 只有 ~50KB/s，实测推 13 分钟
+  // 被断连（见 build.yml 顶部）。本地直连 2.2MB/s，一条命令 72 秒。
+  console.log(`\x1b[36m   Gitee 镜像（等 CI 出完 Release 之后跑，别在 CI 里等）：\x1b[0m`);
+  console.log(`   GITEE_TOKEN=<token> npm run mirror:gitee -- ${tagName}`);
 }
 
 main().catch((e) => {

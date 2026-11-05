@@ -7,17 +7,17 @@ name: Build
 # 为什么默认关：mac 作业实测 25m50s，且与 Windows 串行（Windows 要合并 mac 的
 # updater 平台片段）——v0.1.1 因此跑满 53 分钟。mac 用户占比低，每次发版陪跑不值。
 #
-# ── Gitee 镜像为何一直没生效（2026-11-05 核实）───────────────────────────
-# 镜像步骤每次都在"未配置 secret"处跳过，且 Gitee 上并不存在同名仓库，所以国内用户
-# 从未拿到过镜像。2026-11-05 已配齐（三件事，缺一不可）：
-#   1. 建**公开**仓库 lzul/NCForge（raw 匿名可读，私有 = 客户端 404）。
-#      🔴 Gitee 账号登录名是 lzul，与 GitHub 的 lzlkyb **不是同一个**——别照抄。
-#      releases 分支不用手建，首次镜像会自动建孤儿分支。
-#   2. gh secret set GITEE_REPOSITORY -b lzul/NCForge
-#   3. gh secret set GITEE_TOKEN -b <token>   # 需 projects 写权限
-# 配完推下一个 tag 即生效。只想把**已经发过的版本**补上镜像（不重新编译）：
-#   gh workflow run build.yml --ref main -f mirror_only=true -f release_tag=v0.1.1
-#   （见文件末尾 mirror-gitee；ref 必须是 main，理由写在那里）
+# ── Gitee 镜像为什么不在 CI 里做（2026-11-05 实测）────────────────────────
+# GitHub 的 runner 在境外，到 Gitee 的上传只有 ~50 KB/s：85MB 要推半小时以上，
+# 实测 13 分钟后被 Gitee 断连（send-pack: unexpected disconnect while reading
+# sideband packet）。本机直连是 2.2 MB/s、72 秒跑完，所以镜像挪到本地一条命令：
+#   cd desktop && GITEE_TOKEN=xxx npm run mirror:gitee -- v0.1.2
+# （脚本会自己下载资产、建发行版、传附件、推清单、回头验 raw 版本号）
+#
+# 🔴 附件走「发行版附件」，不走 raw 分支：Gitee raw 对 >50MB 的文件返回 403
+#    `large file require login for access`，匿名客户端读不到（jdtls.zip 56MB 踩线）。
+#    raw 的 releases 分支只放两份几 KB 的清单（客户端端点是固定地址）。
+# 🔴 Gitee 账号是 lzul，与 GitHub 的 lzlkyb 不是同一个，别照抄仓库路径。
 on:
   push:
     # tag → 发版（build-windows，mac 默认不发）；main → 只跑测试门禁。
@@ -35,15 +35,6 @@ on:
         description: '同时构建 macOS 包（默认不发，构建期间 Windows 要等它 ~26 分钟）'
         type: boolean
         default: false
-      mirror_only:
-        description: '只把已有 Release 产物补推到 Gitee（不重建；需同时填 release_tag）'
-        type: boolean
-        default: false
-      release_tag:
-        description: 'mirror_only 时要同步的 tag（如 v0.1.1）；正常发版留空'
-        type: string
-        required: false
-        default: ''
 
 # 共享编译缓存：sccache 把每个 crate 的编译对象按 hash 存到 GitHub Actions Cache，
 # 跨发版 / 跨 PR 命中（依赖不变时基本秒级）；第一次或改了大段 Rust 仍要全编。
@@ -237,10 +228,9 @@ jobs:
           npx tauri build --bundles app
         working-directory: desktop
 
-      # 生成两份平台片段：GitHub 路径与 Gitee 镜像路径的 URL 形状不同，
-      # 各自都要一份，否则 mac 用户在 Gitee 那一组拿不到条目（updater 会返回
-      # TargetsNotFound 错误→自动回退到 GitHub 组，功能不断但白多一轮重试延迟）。
+      # 平台片段由 build-windows 合并进 updater.json（它要 darwin-aarch64 那条）。
       # 片段里的 version/notes 不重要：合并时只取 platforms，顶层字段由 Windows 侧提供。
+      # Gitee 变体的片段不再在 CI 生成——镜像已挪到本地（见文件顶部说明）。
       - name: 生成 mac 平台片段（GitHub 路径）
         run: |
           set -e
@@ -249,23 +239,6 @@ jobs:
         env:
           GITHUB_RELEASE_TAG: ${{ github.ref_name }}
           UPDATER_DOWNLOAD_BASE: "https://gh-proxy.com/https://github.com/${{ github.repository }}/releases/download"
-
-      - name: 生成 Gitee 变体的 mac 片段（覆盖 URL 为 Gitee 直链）
-        # secrets 不能出现在 step 级 `if:` 里，只能在 shell 里判空提前退出。
-        # 不判空的后果不是报错：模板会生成 https://gitee.com//raw/... 这种双斜杠
-        # 死链，mac 用户在 Gitee 那组永远 404，而构建一路绿灯。
-        run: |
-          set -e
-          if [ -z "$GITEE_REPOSITORY" ]; then
-            echo "::warning title=Gitee 镜像未启用::未配置 GITEE_REPOSITORY secret，跳过 mac 的 Gitee 变体片段（客户端会落到 GitHub/ghproxy 源）"
-            exit 0
-          fi
-          UPDATER_OUTPUT_FILENAME=updater-macos-gitee.json npm run updater:generate
-        working-directory: desktop
-        env:
-          GITEE_REPOSITORY: ${{ secrets.GITEE_REPOSITORY }}
-          GITHUB_RELEASE_TAG: ${{ github.ref_name }}
-          UPDATER_URL_TEMPLATE: "https://gitee.com/${{ secrets.GITEE_REPOSITORY }}/raw/releases/latest/{filename}"
 
       - name: 校验 darwin-aarch64 签名非空
         run: |
@@ -308,7 +281,6 @@ jobs:
           cp nc-forge_*_aarch64-apple-darwin.zip dist-out/ 2>/dev/null || true
           # 平台片段只作为 artifact 传给 build-windows 合并，**不** attach 到 Release
           cp dist/updater-macos.json dist-out/ 2>/dev/null || true
-          cp dist/updater-macos-gitee.json dist-out/ 2>/dev/null || true
           ls -l dist-out
 
       - uses: actions/upload-artifact@v5
@@ -348,9 +320,7 @@ jobs:
     #     不应被 mac 拖累）；此时下载片段会被跳过，generate 脚本对缺失的
     #     UPDATER_MERGE_INTO 只 warn，于是降级为只发 Windows 条目。
     needs: [build-macos]
-    # mirror_only 是"只补镜像"的入口：它的 ref 也是 tag，若不排除就会顺手把整个
-    # Windows 包重编一遍（27 分钟），与补镜像的初衷正好相反。
-    if: always() && startsWith(github.ref, 'refs/tags/v') && github.event.inputs.mirror_only != 'true'
+    if: always() && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     permissions:
       contents: write   # 创建 GitHub Release 需要写权限（默认 token 只读）
@@ -554,306 +524,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Gitee 镜像（可选）──────────────────────────────────────────────
-      # 解决国内用户直连 GitHub 下载安装包不稳定/很慢：把产物同步一份到 Gitee。
-      # 两个 secret（GITEE_TOKEN/GITEE_REPOSITORY）未配置时整组跳过，不影响发版。
-      #
-      # 若要用 Gitee 镜像，客户端侧也需打开对应候选源：
-      #   src-tauri/src/commands/update.rs 的 gitee_repository() 读 APP_GITEE_REPOSITORY env，
-      #   在 tauri.conf.json 或本 workflow 里注入即可（未设置时 Gitee 候选组被跳过）。
-      #
-      # 关键教训（cc-bridge v2.4.0~v2.5.0 实测踩过）：镜像失败不能静默——
-      #   旧实现用 try/catch 包住 native git 命令，失败不抛异常，"✅ 已镜像"照样打印，
-      #   连着四个版本绿灯但 Gitee 上压根没有 releases 分支，客户端读的 raw 地址
-      #   一直是 404。现在：每个 git 调用后显式判 $LASTEXITCODE，且推送后必须
-      #   **回头验证客户端实际使用的地址**（比 version 字段，防旧 manifest 屏蔽新版本）。
-      - name: 生成 Gitee 版 updater-gitee.json（国内加速镜像，可选）
-        shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace("${{ secrets.GITEE_REPOSITORY }}")) {
-            # 以前这里只有一行 Write-Host，日志里翻不到、页面上也不显示——于是
-            # Gitee 镜像连续多个版本"绿灯但没做"没人发现。warning 注解会挂到
-            # run 的 Annotations 上，一眼可见。
-            Write-Host "::warning title=Gitee 镜像未启用::缺 GITEE_REPOSITORY / GITEE_TOKEN secret，本次不生成 Gitee 变体清单（客户端落到 GitHub/ghproxy 源）。启用清单见 build.yml 顶部注释。"
-            exit 0
-          }
-          npm run updater:generate
-          # 资源清单的 Gitee 变体（方案 B）：三个资源 zip 也会推到 latest/，
-          # URL 指向 Gitee raw。客户端侧 tauri.conf.json 的 resourcePacks.endpoints
-          # 第三顺位就是这个地址（第二顺位是 GitHub Release，gh-pages 垫底当前 404），
-          # 国内用户直连 GitHub 慢时走这条。没有这份变体的后果：客户端只剩
-          # Release 一个源，它挂了首启组件下载就全挂。
-          npm run resources:json
-        working-directory: desktop
-        env:
-          GITHUB_RELEASE_TAG: ${{ github.ref_name }}
-          # Gitee raw 文件直链与 GitHub Release 拼法形状不同（owner/repo/raw/ref/path，
-          # 非 base/tag/filename），用 *_URL_TEMPLATE 完全接管拼接。
-          # 固定走 releases 分支下的 latest/ 目录（每次发版覆盖，不按 tag 累加）：
-          # 客户端检查更新时事先不知道最新 tag 是什么，需要一个固定不变的 URL
-          # （对齐 GitHub 的 releases/latest/download 语义）。
-          UPDATER_URL_TEMPLATE: "https://gitee.com/${{ secrets.GITEE_REPOSITORY }}/raw/releases/latest/{filename}"
-          UPDATER_OUTPUT_FILENAME: "updater-gitee.json"
-          # 用 Gitee 变体的 mac 片段（URL 指向 Gitee 直链），不能用 GitHub 那份。
-          UPDATER_MERGE_INTO: ${{ github.workspace }}\mac-artifact\updater-macos-gitee.json
-          RESOURCES_URL_TEMPLATE: "https://gitee.com/${{ secrets.GITEE_REPOSITORY }}/raw/releases/latest/{filename}"
-          RESOURCES_OUTPUT_FILENAME: "resources-gitee.json"
-
-      - name: 镜像发布产物到 Gitee（国内加速，可选）
-        shell: pwsh
-        # 不设 continue-on-error：本步骤内部的 Fail 已经区分了"没配 secret"（exit 0
-        # 跳过）与"真失败"（exit 1）。continue-on-error 会把后者也染成绿色——
-        # 正是 cc-bridge v2.4.0~v2.5.0"四个版本绿灯但镜像 404"的教训：
-        # 镜像失败时客户端首选源读到旧 manifest，国内用户静默看不到新版本。
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          GITEE_REPOSITORY: ${{ secrets.GITEE_REPOSITORY }}
-        # &gitee-mirror-run 是个 YAML 锚点：mirror-gitee 作业（只补镜像时用）
-        # 用 *gitee-mirror-run 原样复用同一段脚本。复制粘贴两份的后果是改一处漏一处，
-        # 而这段脚本的坑（orphan 分支、pathspec、push 大包）全是硬伤。
-        # 它约定输入目录布局：dist-out/（exe/sig/绿色版 zip）、mac-artifact/（mac 包）、
-        # desktop/dist/（两份 -gitee 清单 + resource-packs/*.zip）。
-        run: &gitee-mirror-run |
-          # 不用 Stop：让流程走到我们自己的检查点，而不是被某个 cmdlet 的异常抢跑。
-          $ErrorActionPreference = 'Continue'
-
-          function Fail([string]$why) {
-            Write-Host ""
-            Write-Host "❌ Gitee 镜像未完成：$why"
-            Write-Host "   GitHub Release 已正常发布："
-            Write-Host "   · 组件下载（resourcePacks.endpoints）第 2 顺位是 Gitee，失败会自动落到"
-            Write-Host "     GitHub Release / gh-pages，功能不断，只多一轮超时；"
-            Write-Host "   · 自动更新（updater）只在 APP_GITEE_REPOSITORY 注入时才把 Gitee 列为首选，"
-            Write-Host "     当前发布包未注入，所以本次不发镜像不会让用户静默漏更新。"
-            Write-Host "   真正的风险是**镜像半新半旧**：latest/ 里留着上一版 manifest 而 zip 已换，"
-            Write-Host "   读到旧版本号会认为'已是最新'。所以这一步宁可红，也不要糊过去。"
-            exit 1
-          }
-
-          if ([string]::IsNullOrWhiteSpace($env:GITEE_TOKEN) -or [string]::IsNullOrWhiteSpace($env:GITEE_REPOSITORY)) {
-            # 把"缺什么"逐项列出来：只说"未配置 secret"时，没人知道是两个还是一个、
-            # 也不知道 Gitee 上还得先有仓库（2026-11-05 才发现仓库压根不存在）。
-            $missing = @()
-            if ([string]::IsNullOrWhiteSpace($env:GITEE_REPOSITORY)) { $missing += 'GITEE_REPOSITORY' }
-            if ([string]::IsNullOrWhiteSpace($env:GITEE_TOKEN)) { $missing += 'GITEE_TOKEN' }
-            Write-Host "::warning title=Gitee 镜像未启用::缺 secret: $($missing -join ' + ')。镜像未执行，客户端只会用 GitHub/ghproxy 源。"
-            Write-Host ""
-            Write-Host "启用需要三件事（缺一不可，详见 build.yml 顶部注释）："
-            Write-Host "  1) Gitee 上建**公开**仓库（例如 lzul/NCForge）；私有仓库 raw 匿名读不到 = 客户端 404"
-            Write-Host "  2) gh secret set GITEE_REPOSITORY -b <owner>/<repo>"
-            Write-Host "  3) gh secret set GITEE_TOKEN -b <token>   # 需 projects 写权限"
-            Write-Host "  补发本次镜像（不重编译）：gh workflow run build.yml --ref main -f mirror_only=true -f release_tag=${{ github.ref_name }}"
-            exit 0
-          }
-          # 补镜像作业从 main 跑（原因见 mirror-gitee 注释），版本由 release_tag 显式给出；
-          # 正常发版时该输入为空，回退到当前 ref。
-          $tag = "${{ github.event.inputs.release_tag }}"
-          if ([string]::IsNullOrWhiteSpace($tag)) { $tag = "${{ github.ref_name }}" }
-          # 仓库路径不是秘密，打出来：客户端 update.rs 里配置的 Gitee 仓库与这个
-          # secret 不一致时，镜像会"成功"到一个没人读的仓库，不打印根本无法发现。
-          Write-Host "目标 Gitee 仓库：$($env:GITEE_REPOSITORY)（分支 releases，目录 latest/）"
-
-          $giteeUrl = "https://oauth2:$($env:GITEE_TOKEN)@gitee.com/$($env:GITEE_REPOSITORY).git"
-          $mirrorDir = Join-Path $env:RUNNER_TEMP "gitee-mirror"
-
-          # 独立临时目录里操作 Gitee remote，不动主 checkout 的分支/工作区状态。
-          git clone --depth 1 --branch releases $giteeUrl $mirrorDir 2>&1 | Write-Host
-          if ($LASTEXITCODE -ne 0) {
-            # releases 分支还不存在（首次发布）：clone 默认分支后本地新建孤儿分支。
-            # clone 失败时 git 会自己删掉半截目录（实测 2.55：空仓库与非空仓库都是
-            # 报 "Remote branch releases not found" 且不留目录），所以不用先清理。
-            Write-Host "ℹ️ releases 分支不存在，改为 clone 默认分支后建孤儿分支"
-            git clone --depth 1 $giteeUrl $mirrorDir 2>&1 | Write-Host
-            if ($LASTEXITCODE -ne 0) {
-              Fail ("clone Gitee 仓库失败。逐项排查：" +
-                "① Gitee 上是否真的存在公开仓库 $($env:GITEE_REPOSITORY)（私有仓库 raw 匿名读不到，等于没镜像）；" +
-                "② GITEE_TOKEN 是否对该仓库有写权限（projects 勾选）；" +
-                "③ 用 token 访问 https://gitee.com/api/v5/repos/$($env:GITEE_REPOSITORY) 看返回 404 还是 401")
-            }
-            if (-not (Test-Path $mirrorDir)) { Fail "clone 返回 0 但目录不存在：$mirrorDir" }
-            Push-Location $mirrorDir
-            git checkout --orphan releases 2>&1 | Write-Host
-            if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "创建 releases 孤儿分支失败" }
-            # reset --hard 的作用是把 clone 下来的文件从工作区/索引里清掉。
-            # 必须查退出码：失败时索引里留着 clone 下来的全部文件，后面的 commit 会
-            # 把它们一起提交（见 commit 处的 pathspec 注释）。
-            # 实测空仓库也返回 0（unborn HEAD 上 reset 是空操作），不会误判。
-            git reset --hard 2>&1 | Write-Host
-            if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "orphan 分支重置失败（git reset --hard）：索引未清空，终止以免提交意外内容" }
-            Pop-Location
-          }
-          if (-not (Test-Path $mirrorDir)) { Fail "镜像工作目录不存在：$mirrorDir" }
-
-          # 固定覆盖 latest/ 目录（不按 tag 累加）：先清空旧内容再写新的，
-          # 避免上一个版本不同文件名的 exe/sig 残留下来。
-          $destDir = Join-Path $mirrorDir "latest"
-          if (Test-Path $destDir) { Remove-Item $destDir -Recurse -Force }
-          New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-          Copy-Item dist-out/*.exe $destDir/ -ErrorAction SilentlyContinue
-          Copy-Item dist-out/*.exe.sig $destDir/ -ErrorAction SilentlyContinue
-          # mac 产物也得推上去：updater-gitee.json 里的 darwin 条目指向 Gitee 直链，
-          # 不推就是指向一个不存在的文件 → mac 用户在 Gitee 那组下载 404。
-          Copy-Item mac-artifact/*.app.tar.gz $destDir/ -ErrorAction SilentlyContinue
-          Copy-Item mac-artifact/*.app.tar.gz.sig $destDir/ -ErrorAction SilentlyContinue
-          Copy-Item desktop/dist/updater-gitee.json $destDir/ -ErrorAction SilentlyContinue
-          # 资源包（方案 B）：三个 zip + resources-gitee.json。jdtls 单个 53.7MB，
-          # 在 Gitee 单文件上限内；缺任何一个 zip，客户端首启下载就 404。
-          Copy-Item desktop/dist/resource-packs/*.zip $destDir/ -ErrorAction SilentlyContinue
-          Copy-Item desktop/dist/resources-gitee.json $destDir/ -ErrorAction SilentlyContinue
-
-          # 文件清单必须打印：体积是事后定性的关键依据。
-          $files = @(Get-ChildItem $destDir -Recurse -File)
-          if ($files.Count -eq 0) { Fail "latest/ 里一个文件都没有（产物路径变了？上面的 Copy-Item 全没匹配上）" }
-          $mb = ($files | Measure-Object -Property Length -Sum).Sum / 1MB
-          Write-Host ("待推送 latest/：{0} 个文件，合计 {1:N2} MB" -f $files.Count, $mb)
-          if (-not ($files | Where-Object { $_.Name -eq 'updater-gitee.json' })) {
-            Fail "latest/ 里没有 updater-gitee.json —— 客户端就是读它，缺了镜像等于白做"
-          }
-          if (-not ($files | Where-Object { $_.Name -eq 'resources-gitee.json' })) {
-            Fail "latest/ 里没有 resources-gitee.json —— 客户端首启组件下载靠它，缺了镜像等于白做"
-          }
-
-          Push-Location $mirrorDir
-          git add -A latest 2>&1 | Write-Host
-          if ($LASTEXITCODE -ne 0) { Pop-Location; Fail "git add 失败" }
-          # commit 带 `-- latest` pathspec：只提交 latest/ 下的暂存内容。
-          # 没有它，索引里任何残留（如 orphan 重置没清干净时留下的旧文件）
-          # 都会被一起提交到 releases 分支——提交范围必须与 add 的范围显式一致。
-          git -c user.email="ci@shell.local" -c user.name="shell-ci" commit -m "release: mirror $tag to Gitee (latest)" -- latest 2>&1 | Write-Host
-          if ($LASTEXITCODE -ne 0) {
-            Pop-Location
-            # 无变更可提交（与上一版字节级相同）不是错误：Gitee 上已经是这份内容。
-            Write-Host "⚠️ git commit 返回非零：latest/ 与上一版完全相同（无新内容可提交），视为已同步"
-          }
-
-          Write-Host "====== git push ======"
-          git push --progress --verbose origin releases 2>&1 | Write-Host
-          $pushCode = $LASTEXITCODE
-          Pop-Location
-          if ($pushCode -ne 0) {
-            Fail "git push 失败（常见原因：GITEE_TOKEN 无写权限、包体过大被断连。可试 -c http.postBuffer=524288000 push --no-thin）"
-          }
-
-          # ── 真正的"发成功了吗"检测：push 返回 0 只说明 git 不报错，不说明客户端能用 ──
-          # 客户端（update.rs）读的就是下面这个地址。Gitee raw 会 302 跳到签名地址，
-          # 必须跟随重定向。只比 200 还不够：推失败时 Gitee 上会留着上一版的 manifest，
-          # 也是 200。所以还要比 version 字段是不是本次 tag——这才能拦住
-          # "旧 manifest 静默屏蔽新版本"那个坑。
-          $ver = $tag.TrimStart('v')
-          $raw = "https://gitee.com/$($env:GITEE_REPOSITORY)/raw/releases/latest/updater-gitee.json"
-          Write-Host "--- 验证客户端实际使用的地址：$raw ---"
-          try {
-            $resp = Invoke-WebRequest -Uri $raw -MaximumRedirection 5 -TimeoutSec 60 -UseBasicParsing
-            $manifest = $resp.Content | ConvertFrom-Json
-            Write-Host ("manifest.version = {0}（本次 tag = {1}）" -f $manifest.version, $ver)
-            Write-Host ("platforms = {0}" -f (($manifest.platforms.PSObject.Properties | ForEach-Object { $_.Name }) -join ', '))
-            if ($manifest.version -ne $ver) {
-              Fail "raw 读到的 manifest 版本是 $($manifest.version)，不是本次的 $ver —— 镜像内容是旧的"
-            }
-          } catch {
-            Fail "raw 地址请求/解析失败：$_（推上去了却读不到，客户端一样用不了）"
-          }
-
-          # 资源清单（方案 B）的客户端地址验证：三件事——读得到、包数够、
-          # **url 必须指向 Gitee**。url 指 GitHub 的镜像清单等于没镜像：
-          # 国内客户端从 Gitee 读清单、再从 GitHub 下 zip，慢/断的根源没解决。
-          $resRaw = "https://gitee.com/$($env:GITEE_REPOSITORY)/raw/releases/latest/resources-gitee.json"
-          Write-Host "--- 验证资源清单地址：$resRaw ---"
-          try {
-            $resp2 = Invoke-WebRequest -Uri $resRaw -MaximumRedirection 5 -TimeoutSec 60 -UseBasicParsing
-            $resManifest = $resp2.Content | ConvertFrom-Json
-            if ($resManifest.packs.Count -lt 3) {
-              Fail "resources-gitee.json 只有 $($resManifest.packs.Count) 个包（应 >= 3：jdtls/ecj/svnkit）"
-            }
-            $notGitee = $resManifest.packs | Where-Object { $_.url -notlike "https://gitee.com/*" }
-            if ($notGitee) {
-              Fail "resources-gitee.json 里有非 Gitee 的下载 url（$($notGitee.url)）——镜像白做"
-            }
-            Write-Host ("resources-gitee.json 校验通过：{0} 个包，url 均指向 Gitee" -f $resManifest.packs.Count)
-          } catch {
-            Fail "resources-gitee.json raw 地址请求/解析失败：$_"
-          }
-
-          Write-Host ("::notice title=Gitee 镜像::已验证可用 version={0} pack={1:N2}MB files={2}" -f $ver, $mb, $files.Count)
-          Write-Host "✅ 已镜像到 Gitee 并验证客户端地址可读：$tag"
-
-  # ── 只补 Gitee 镜像（不重建、不发新版）─────────────────────────────────
-  # 为什么单独开一个作业：镜像步骤排在 build-windows 的最后（第 27 分钟），
-  # 它失败、或当时 secret 根本还没配，重来一次就得再等 27 分钟重新编译——而产物
-  # 一个字节都没变。本作业只做三件事：下载已有 Release 资产 → 重写两份清单的 URL
-  # → 复用上面那段 *gitee-mirror-run 推送。
-  #
-  #   gh workflow run build.yml --ref main -f mirror_only=true -f release_tag=v0.1.1
-  #
-  # 🔴 ref 必须是 **main**，不能是 tag。workflow_dispatch 的 inputs 是按 ref 上那份
-  # workflow 文件校验的：拿 --ref v0.1.1 触发时，GitHub 读的是 v0.1.1 里的 build.yml，
-  # 那个版本没有 mirror_only / release_tag，直接 422 "Unexpected inputs provided"。
-  # 要同步的版本号因此由 release_tag 显式给出；代码 checkout 默认分支（要用本作业和
-  # gitee-manifest.mjs，旧 tag 上都没有）。
-  mirror-gitee:
-    name: Mirror release assets to Gitee
-    if: github.event.inputs.mirror_only == 'true'
-    runs-on: windows-latest
-    permissions:
-      contents: read   # 只读 Release 资产，不写仓库
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: '22'
-
-      - name: 下载已有 Release 资产，摆成镜像步骤约定的目录布局
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = "${{ github.event.inputs.release_tag }}"
-          if ([string]::IsNullOrWhiteSpace($tag)) {
-            Write-Error "缺 release_tag。用法：gh workflow run build.yml --ref main -f mirror_only=true -f release_tag=v0.1.1"
-            exit 1
-          }
-          if ($tag -notlike 'v*') {
-            Write-Error "release_tag 必须是 v 开头的 tag（例：v0.1.1），当前是 $tag"
-            exit 1
-          }
-          gh release download $tag --dir dist-out --clobber
-          if ($LASTEXITCODE -ne 0) { Write-Error "下载 $tag 的 Release 资产失败"; exit 1 }
-
-          New-Item -ItemType Directory -Force mac-artifact, desktop/dist/resource-packs | Out-Null
-          # Release 上的资产是平铺的，而镜像脚本按 mac-artifact/ 与
-          # desktop/dist/resource-packs/ 两处取，这里搬到对应位置。
-          # 若本次没发 mac，这两条 Move 匹配不到文件，SilentlyContinue 即"没有 mac 条目"。
-          # Move-Item 的 Path 只吃一个位置参数：两个通配必须分两条，写成
-          # `Move-Item a/*.x a/*.x.sig -Destination d` 会报
-          # "A positional parameter cannot be found that accepts argument 'a/*.x.sig'"。
-          Move-Item dist-out/*.app.tar.gz -Destination mac-artifact/ -ErrorAction SilentlyContinue
-          Move-Item dist-out/*.app.tar.gz.sig -Destination mac-artifact/ -ErrorAction SilentlyContinue
-          Get-ChildItem dist-out/*.zip | Where-Object { $_.Name -notlike 'nc-forge_*' } |
-            Move-Item -Destination desktop/dist/resource-packs/ -Force
-          Write-Host "已下载：$((Get-ChildItem dist-out -File).Name -join ', ')"
-
-      - name: 生成 Gitee 变体清单（URL 换成 raw 直链）
-        shell: pwsh
-        env:
-          GITEE_REPOSITORY: ${{ secrets.GITEE_REPOSITORY }}
-          # 走 env 而不是位置参数：Windows 路径在 npm 的多层引号里容易被吃掉。
-          GITEE_ASSET_DIR: ${{ github.workspace }}\dist-out
-          GITEE_OUT_DIR: ${{ github.workspace }}\desktop\dist
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:GITEE_REPOSITORY)) {
-            Write-Host "::warning title=Gitee 镜像未启用::缺 GITEE_REPOSITORY，无法生成变体清单"
-            exit 0
-          }
-          # 只改 URL：签名与 sha256 原样搬（重算 sha256 得再下一次 60MB 的 zip）。
-          npm run gitee:manifest
-        working-directory: desktop
-
-      - name: 镜像发布产物到 Gitee（与发版作业同一段脚本）
-        shell: pwsh
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          GITEE_REPOSITORY: ${{ secrets.GITEE_REPOSITORY }}
-        run: *gitee-mirror-run
