@@ -8,11 +8,12 @@ name: Build
 # updater 平台片段）——v0.1.1 因此跑满 53 分钟。mac 用户占比低，每次发版陪跑不值。
 #
 # ── Gitee 镜像为何一直没生效（2026-11-05 核实）───────────────────────────
-# 镜像步骤每次都在"未配置 secret"处跳过，且 Gitee 上 lzlkyb/NCForge 并不存在
-# （网页与 raw 均 404），所以国内用户从未拿到过镜像。启用需要三件事，缺一不可：
-#   1. 在 Gitee 建**公开**仓库 lzlkyb/NCForge（raw 匿名可读，私有 = 客户端 404）；
+# 镜像步骤每次都在"未配置 secret"处跳过，且 Gitee 上并不存在同名仓库，所以国内用户
+# 从未拿到过镜像。2026-11-05 已配齐（三件事，缺一不可）：
+#   1. 建**公开**仓库 lzul/NCForge（raw 匿名可读，私有 = 客户端 404）。
+#      🔴 Gitee 账号登录名是 lzul，与 GitHub 的 lzlkyb **不是同一个**——别照抄。
 #      releases 分支不用手建，首次镜像会自动建孤儿分支。
-#   2. gh secret set GITEE_REPOSITORY -b lzlkyb/NCForge
+#   2. gh secret set GITEE_REPOSITORY -b lzul/NCForge
 #   3. gh secret set GITEE_TOKEN -b <token>   # 需 projects 写权限
 # 配完推下一个 tag 即生效。只想把**已经发过的版本**补上镜像（不重新编译）：
 #   gh workflow run build.yml --ref v0.1.1 -f mirror_only=true    # 见文件末尾 mirror-gitee
@@ -632,10 +633,10 @@ jobs:
             Write-Host "::warning title=Gitee 镜像未启用::缺 secret: $($missing -join ' + ')。镜像未执行，客户端只会用 GitHub/ghproxy 源。"
             Write-Host ""
             Write-Host "启用需要三件事（缺一不可，详见 build.yml 顶部注释）："
-            Write-Host "  1) Gitee 上建**公开**仓库（例如 lzlkyb/NCForge）；私有仓库 raw 匿名读不到 = 客户端 404"
+            Write-Host "  1) Gitee 上建**公开**仓库（例如 lzul/NCForge）；私有仓库 raw 匿名读不到 = 客户端 404"
             Write-Host "  2) gh secret set GITEE_REPOSITORY -b <owner>/<repo>"
             Write-Host "  3) gh secret set GITEE_TOKEN -b <token>   # 需 projects 写权限"
-            Write-Host "  再运行：gh workflow run build.yml --ref ${{ github.ref_name }} -f with_macos=false"
+            Write-Host "  补发本次镜像（不重编译）：gh workflow run build.yml --ref ${{ github.ref_name }} -f mirror_only=true"
             exit 0
           }
           $tag = "${{ github.ref_name }}"
