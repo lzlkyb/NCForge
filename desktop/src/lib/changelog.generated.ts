@@ -8,28 +8,8 @@ export const CHANGELOG: ChangelogEntry[] = [
     "date": "2026-11-05",
     "items": [
       {
-        "category": "feat",
-        "text": "标签条按面归属，侧栏折叠态加更新入口"
-      },
-      {
-        "category": "feat",
-        "text": "Gitee 镜像改本地一条命令，CI 不再尝试推送"
-      },
-      {
         "category": "improve",
-        "text": "chore(ci): 修正注释里的 Gitee 仓库名为 lzul（实际账号），补镜像提示改用 mirror_only"
-      },
-      {
-        "category": "improve",
-        "text": "chore(ci): 启用 Gitee 镜像，mac 默认不发版"
-      },
-      {
-        "category": "fix",
-        "text": "Move-Item 两个通配不能当两个位置参数，拆成两条"
-      },
-      {
-        "category": "fix",
-        "text": "补镜像改从 main 触发，版本用 release_tag 输入"
+        "text": "数据库、版本控制、元数据、设置、日志页现在只有自己的标签，切换页面时不再把源码文件标签混进同一条标签栏。"
       },
       {
         "category": "fix",
@@ -38,10 +18,6 @@ export const CHANGELOG: ChangelogEntry[] = [
       {
         "category": "fix",
         "text": "关于页改用真实项目仓库与可读平台名称，版本读取异常时可重试，复制与打开链接提供等待及结果反馈。"
-      },
-      {
-        "category": "fix",
-        "text": "数据库、版本控制、元数据、设置、日志页只显示自己的标签，不再和源码文件标签挤在同一条标签栏里。"
       },
       {
         "category": "improve",
@@ -54,6 +30,12 @@ export const CHANGELOG: ChangelogEntry[] = [
     ],
     "summary": [
       "标签栏各归其页，侧栏有更新时才出现入口；关于页与 SQL 编辑器一并改进"
+    ],
+    "technical": [
+      {
+        "heading": "技术细节",
+        "text": "- 标签条按「代码面 / 文档面」拆分：文件标签随代码面、工具标签随文档面，两面 hidden 互斥；多文档工具（数据库）停靠自建 `doctabs` 区，`ToolTab` 对其返回 null。\n- Gitee 镜像改为本地一条命令（`npm run mirror:gitee -- vX.Y.Z`）：境外 runner 到 Gitee 带宽不足会被断连，CI 只负责 GitHub Release。\n- 发版默认只构建 Windows；需要 macOS 包时用 `gh workflow run build.yml --ref vX.Y.Z -f with_macos=true` 手动触发，不要重推 tag。"
+      }
     ]
   },
   {
