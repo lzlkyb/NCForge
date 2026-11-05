@@ -34,14 +34,9 @@ const renderHeader = () =>
     root.render(
       <TreeHeader
         root={"C:\\w\\newar"}
-        editing={false}
-        draft={"C:\\w\\newar"}
-        unsaved={false}
         recents={[]}
-        onDraftChange={noop}
         onOpen={noop}
         onOpenRecent={noop}
-        onToggleEditing={noop}
         onCreateFile={noop}
         onCreateDir={noop}
         onSearch={noop}

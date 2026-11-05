@@ -1,0 +1,540 @@
+//! NC 客户端（Swing `JStarter`）的命令层：状态、启动、停止、日志、命令行、堆上限。
+//!
+//! 客户端和中间件是两个独立进程，但生命周期操作完全同构，所以进程管理、日志读取、
+//! pathing jar 都复用 `server.rs` 与 `launch.rs`，这里只负责「拿配置 → 调它们 → 包形状」。
+//!
+//! 与中间件的三个差异：
+//! 1. **没有监听端口**。客户端是 Swing 界面，进程活着就是可用；`serverReachable` 只表示
+//!    它连的中间件端口当前通不通（客户端可以先于服务启动，界面提示即可）。
+//! 2. **classpath 规则不同**。Eclipse 的客户端 provider 只收「产品公共库 + 模块 public +
+//!    模块 client + langlib」，不含 middleware/framework/ant（见 `launch::client_classpath`）。
+//! 3. **连接地址来自 prop.xml**。`-Dnc.jstart.server/port` 必须跟着用户改过的端口走，
+//!    不能写死 80（那正是旧注释里警告过的坑）。
+//!
+//! 三条约定与中间件相同：起停全在 `spawn_blocking`、日志按偏移增量读、不在持锁时做慢操作。
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use tauri::Emitter;
+
+use crate::config::AppConfig;
+use crate::launch;
+use crate::nc_home::{self, NcHome, ServerEndpoints};
+use crate::server::{self, ServerProcess, ServerRun, StopOutcome};
+use crate::state::AppState;
+
+/// 一次增量读的上限（与中间件一致）。
+const LOG_CHUNK: u64 = 256 * 1024;
+
+/// 客户端状态快照（前端每秒轮询这一份）。
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientStatus {
+    /// `stopped` / `starting` / `running`。
+    pub state: &'static str,
+    pub pid: Option<u32>,
+    pub started_at_ms: Option<u64>,
+    pub uptime_ms: Option<u64>,
+    /// 客户端连接中间件用的地址（`-Dnc.jstart.server/port`）。
+    pub host: String,
+    pub port: u16,
+    /// 中间件端口当前是否可连。客户端能起来但连不上服务时，界面要能指出原因。
+    pub server_reachable: bool,
+    pub log_path: String,
+    pub log_size: u64,
+    pub java: Option<String>,
+    pub classpath_entries: usize,
+    pub main_class: String,
+    pub command_line: String,
+    pub exit_code: Option<i32>,
+    pub reason: Option<String>,
+    pub project_root: Option<String>,
+    pub nc_home: Option<String>,
+    pub heap_mb: u32,
+    pub default_heap_mb: u32,
+    /// 本次启动开了 JDWP 时的回环端口（未开 = null）。
+    pub debug_port: Option<u16>,
+}
+
+/// 客户端日志增量。
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientLogChunk {
+    pub text: String,
+    pub offset: u64,
+}
+
+/// 客户端清空日志的结果。
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientClearResult {
+    /// 前端应把读取偏移设到这里。
+    pub offset: u64,
+    /// true = 旧日志已改名成 `.log.1`；false = 文件没动（客户端在跑）。
+    pub rotated: bool,
+}
+
+/// 客户端启动命令行预览。
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreview {
+    pub command_line: String,
+    pub classpath_jar: String,
+    pub entry_count: usize,
+    pub work_dir: String,
+    pub java: String,
+    pub endpoints: ServerEndpoints,
+    pub heap_mb: u32,
+    /// 复用上次启动写好的清单（true）还是这次新算的。
+    pub reused: bool,
+}
+
+fn log_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("logs").join("client.log")
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// 从运行态抄出来的一份不可变快照（锁外做端点探测与状态拼装）。
+struct Snap {
+    starting: bool,
+    alive: bool,
+    pid: Option<u32>,
+    started_at_ms: Option<u64>,
+    java: Option<String>,
+    classpath_entries: usize,
+    command_line: String,
+    exit_code: Option<i32>,
+    reason: Option<String>,
+    debug_port: Option<u16>,
+}
+
+fn snapshot(run: &mut ServerRun) -> Snap {
+    let alive = run.is_alive();
+    Snap {
+        starting: run.starting,
+        alive,
+        pid: run.proc.as_ref().map(|p| p.pid),
+        started_at_ms: run.proc.as_ref().map(|p| p.started_at_ms),
+        java: run.java.as_ref().map(|p| p.to_string_lossy().to_string()),
+        classpath_entries: run.classpath_entries,
+        command_line: run.command_line.clone(),
+        exit_code: run.exit_code,
+        reason: run.reason.clone(),
+        debug_port: run.debug_port,
+    }
+}
+
+fn build_status(cfg: &AppConfig, config_dir: &Path, s: Snap, ep: &ServerEndpoints) -> ClientStatus {
+    let path = log_path(config_dir);
+    let (host, port) = launch::client_endpoint_host_port(ep);
+    let state = if s.alive {
+        "running"
+    } else if s.starting {
+        "starting"
+    } else {
+        "stopped"
+    };
+    ClientStatus {
+        state,
+        pid: s.pid,
+        started_at_ms: s.started_at_ms,
+        uptime_ms: s.started_at_ms.map(|t| now_ms().saturating_sub(t)),
+        host,
+        port,
+        server_reachable: server::port_reachable(port, ep.http_address.as_deref()),
+        log_path: path.to_string_lossy().to_string(),
+        log_size: path.metadata().map(|m| m.len()).unwrap_or(0),
+        java: s.java,
+        classpath_entries: s.classpath_entries,
+        main_class: launch::CLIENT_MAIN_CLASS.to_string(),
+        command_line: s.command_line,
+        exit_code: s.exit_code,
+        reason: s.reason,
+        project_root: cfg.workspace_root.clone(),
+        nc_home: cfg.nc_home.clone(),
+        heap_mb: launch::effective_client_heap_mb(cfg.client_heap_mb),
+        default_heap_mb: launch::DEFAULT_CLIENT_HEAP_MB,
+        debug_port: s.debug_port,
+    }
+}
+
+fn endpoints_for(home: Option<&NcHome>) -> ServerEndpoints {
+    match home {
+        Some(h) => nc_home::read_endpoints(Path::new(&h.root)),
+        None => ServerEndpoints::fallback(nc_home::SERVER_PROP.to_string()),
+    }
+}
+
+/// 当前客户端状态（前端在服务面板可见时每秒轮询）。
+#[tauri::command]
+pub async fn client_status(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<ClientStatus, String> {
+    let cfg = state.config.read().await.clone();
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let snap = {
+            let mut run = st.client.lock().map_err(|_| "客户端状态异常".to_string())?;
+            snapshot(&mut run)
+        };
+        // NC home 定位失败不该让整个面板打不开：用回环 + 默认端口，界面会标「未从配置读到」
+        let home = nc_home::resolve(cfg.nc_home.as_deref()).ok();
+        let ep = endpoints_for(home.as_ref());
+        Ok(build_status(&cfg, &st.config_dir, snap, &ep))
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 启动客户端。`debug` 为 true 时给 JVM 加 JDWP（只绑 127.0.0.1，端口由系统分配）。
+#[tauri::command]
+pub async fn client_start(
+    state: tauri::State<'_, Arc<AppState>>,
+    debug: Option<bool>,
+) -> Result<(), String> {
+    let cfg = state.config.read().await.clone();
+    let config_dir = state.config_dir.clone();
+    let st = state.inner().clone();
+
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let log = log_path(&config_dir);
+        let home = nc_home::resolve(cfg.nc_home.as_deref())?;
+        let nc_home = PathBuf::from(&home.root);
+        let java = PathBuf::from(&home.java);
+        let debug_port = if debug == Some(true) {
+            Some(server::free_loopback_port()?)
+        } else {
+            None
+        };
+
+        // 锁只圈住「检查 + 置启动中」：扫 4000+ 条目、写 pathing jar 都在锁外
+        {
+            let mut run = st.client.lock().map_err(|_| "客户端状态异常".to_string())?;
+            if run.is_alive() {
+                return Err("客户端已在运行，先停止再启动".to_string());
+            }
+            if run.starting {
+                return Err("上一次客户端启动还没完成，稍等一下".to_string());
+            }
+            run.starting = true;
+            run.stop_requested = false;
+            run.reason = None;
+        }
+
+        let project_root = cfg
+            .workspace_root
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| nc_home.clone());
+        let heap_mb = launch::effective_client_heap_mb(cfg.client_heap_mb);
+        let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
+
+        let prepared = launch::client_spec(
+            &nc_home,
+            &java,
+            &project_root,
+            &config_dir.join("tmp"),
+            heap_mb,
+            debug_port,
+            &overrides,
+        );
+        let (spec, entry_count) = match prepared {
+            Ok(v) => v,
+            Err(e) => {
+                if let Ok(mut run) = st.client.lock() {
+                    run.starting = false;
+                    run.debug_port = None;
+                    run.reason = Some(e.clone());
+                }
+                let _ = server::append_log(&log, &format!("[nc-forge] 客户端启动失败：{e}\n"));
+                return Err(e);
+            }
+        };
+
+        let mut run = st.client.lock().map_err(|_| "客户端状态异常".to_string())?;
+        if run.stop_requested {
+            run.starting = false;
+            run.stop_requested = false;
+            run.debug_port = None;
+            run.reason = Some("启动已取消".to_string());
+            drop(run);
+            let _ =
+                server::append_log(&log, "[nc-forge] 客户端启动已取消（准备期间收到停止请求）\n");
+            return Err("启动已取消：准备期间点了停止".to_string());
+        }
+        rotate_log(&log);
+        match ServerProcess::spawn(&spec, &log) {
+            Ok(proc) => {
+                run.starting = false;
+                run.java = Some(spec.java.clone());
+                run.classpath_jar = Some(spec.classpath_jar.clone());
+                run.classpath_entries = entry_count;
+                run.command_line = server::describe(&spec);
+                run.reason = None;
+                run.exit_code = None;
+                run.debug_port = debug_port;
+                run.proc = Some(proc);
+                drop(run);
+                let (host, port) = launch::client_endpoint(&nc_home);
+                let debug_note = debug_port
+                    .map(|p| format!("，JDWP 监听 127.0.0.1:{p}"))
+                    .unwrap_or_default();
+                let _ = server::append_log(
+                    &log,
+                    &format!(
+                        "[nc-forge] classpath 条目 {entry_count} 个（清单见 {}），\
+                         连接 {host}:{port}，堆上限 -Xmx{heap_mb}m{debug_note}\n",
+                        spec.classpath_jar.display()
+                    ),
+                );
+                Ok(())
+            }
+            Err(e) => {
+                run.starting = false;
+                run.debug_port = None;
+                run.reason = Some(e.clone());
+                drop(run);
+                let _ = server::append_log(&log, &format!("[nc-forge] 客户端启动失败：{e}\n"));
+                Err(e)
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 停止客户端（杀进程树）。
+#[tauri::command]
+pub async fn client_stop(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<StopOutcome, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let outcome = {
+            let mut run = st.client.lock().map_err(|_| "客户端状态异常".to_string())?;
+            run.stop()
+        };
+        // 客户端进程没了，附着在它 JDWP 上的会话也就没有意义。中间件那条会话不动：
+        // 两个 JVM 互相独立，停客户端不该把中间件的断点一起断掉。
+        let debug_session = {
+            let mut run = st.debug.lock().map_err(|_| "调试状态异常".to_string())?;
+            crate::debug::take_session(&mut run, crate::debug::DebugTarget::Client)
+        };
+        if let Some(s) = debug_session {
+            s.client.close();
+            let status = st
+                .debug
+                .lock()
+                .map(|run| run.client.status.clone())
+                .unwrap_or_else(|_| {
+                    crate::debug::DebugStatus::stopped(crate::debug::DebugTarget::Client)
+                });
+            let _ = app.emit("debug-status", status);
+        }
+        match outcome {
+            StopOutcome::Stopped => {
+                let _ = server::append_log(&log_path(&st.config_dir), "[nc-forge] 客户端已停止\n");
+            }
+            StopOutcome::Cancelling => {
+                let _ = server::append_log(
+                    &log_path(&st.config_dir),
+                    "[nc-forge] 收到客户端停止请求（启动还在准备，已取消）\n",
+                );
+            }
+            StopOutcome::Idle => {}
+        }
+        Ok(outcome)
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 读客户端日志增量。
+#[tauri::command]
+pub async fn client_log(
+    state: tauri::State<'_, Arc<AppState>>,
+    offset: u64,
+) -> Result<ClientLogChunk, String> {
+    let path = log_path(&state.config_dir);
+    tauri::async_runtime::spawn_blocking(move || {
+        let (text, offset) = server::read_log_from(&path, offset, LOG_CHUNK)?;
+        Ok(ClientLogChunk { text, offset })
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 清空客户端日志。规则与中间件相同：运行中只清屏、不动磁盘文件。
+#[tauri::command]
+pub async fn client_clear_log(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<ClientClearResult, String> {
+    let path = log_path(&state.config_dir);
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let running = {
+            let mut run = st.client.lock().map_err(|_| "客户端状态异常".to_string())?;
+            run.is_alive() || run.starting
+        };
+        if running {
+            let offset = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            return Ok(ClientClearResult {
+                offset,
+                rotated: false,
+            });
+        }
+        if path.exists() {
+            let _ = std::fs::rename(&path, path.with_extension("log.1"));
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("建日志目录失败: {e}"))?;
+        }
+        std::fs::write(&path, b"").map_err(|e| format!("清空日志失败: {e}"))?;
+        Ok(ClientClearResult {
+            offset: 0,
+            rotated: true,
+        })
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 预览客户端命令行（不起进程、不重写 pathing jar）。
+#[tauri::command]
+pub async fn client_command_line(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<ClientPreview, String> {
+    let cfg = state.config.read().await.clone();
+    let config_dir = state.config_dir.clone();
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let work_dir = config_dir.join("tmp");
+        let (reuse, debug_port) = {
+            let run = st.client.lock().map_err(|_| "客户端状态异常".to_string())?;
+            if run.starting {
+                return Err(
+                    "上一次客户端启动还在准备 classpath 清单（约 1 秒），等它完成再看命令行"
+                        .to_string(),
+                );
+            }
+            (work_dir.join("client-cp.jar").is_file(), run.debug_port)
+        };
+
+        let home: NcHome = nc_home::resolve(cfg.nc_home.as_deref())?;
+        let nc_home = PathBuf::from(&home.root);
+        let java = PathBuf::from(&home.java);
+        let project_root = cfg
+            .workspace_root
+            .clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| nc_home.clone());
+        let heap_mb = launch::effective_client_heap_mb(cfg.client_heap_mb);
+        let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
+        let prepared = if reuse {
+            launch::client_spec_preview(
+                &nc_home,
+                &java,
+                &project_root,
+                &work_dir,
+                heap_mb,
+                debug_port,
+                &overrides,
+            )
+        } else {
+            launch::client_spec(
+                &nc_home,
+                &java,
+                &project_root,
+                &work_dir,
+                heap_mb,
+                debug_port,
+                &overrides,
+            )
+        };
+        let (spec, entry_count) = prepared?;
+        Ok(ClientPreview {
+            command_line: server::describe(&spec),
+            classpath_jar: spec.classpath_jar.to_string_lossy().to_string(),
+            entry_count,
+            work_dir: spec.work_dir.to_string_lossy().to_string(),
+            java: spec.java.to_string_lossy().to_string(),
+            endpoints: nc_home::read_endpoints(&nc_home),
+            heap_mb,
+            reused: reuse,
+        })
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 在资源管理器里定位客户端日志。
+#[tauri::command]
+pub fn client_reveal_log(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = log_path(&state.config_dir);
+    if path.exists() {
+        return app
+            .opener()
+            .reveal_item_in_dir(&path)
+            .map_err(|e| format!("打开日志位置失败: {e}"));
+    }
+    let dir = path.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir).map_err(|e| format!("建日志目录失败: {e}"))?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| format!("打开日志目录失败: {e}"))
+}
+
+/// 设置客户端堆上限（MB）。传 `None` = 恢复默认 768。返回生效值。
+#[tauri::command]
+pub async fn client_heap_set(
+    state: tauri::State<'_, Arc<AppState>>,
+    heap_mb: Option<u32>,
+) -> Result<u32, String> {
+    launch::validate_heap_mb(heap_mb)?;
+    state
+        .update_config(|cfg| {
+            cfg.client_heap_mb = heap_mb;
+            Ok(())
+        })
+        .await?;
+    Ok(launch::effective_client_heap_mb(heap_mb))
+}
+
+/// 把上次日志轮转掉，给本次启动一个干净文件（与中间件同款）。
+fn rotate_log(path: &Path) {
+    let _ = std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")));
+    if path.exists() {
+        let _ = std::fs::rename(path, path.with_extension("log.1"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 客户端日志与中间件日志分文件() {
+        let dir = Path::new(r"D:\config");
+        assert!(log_path(dir).ends_with("client.log"));
+        assert!(!log_path(dir).ends_with("middleware.log"));
+    }
+
+    #[test]
+    fn 没有_nc_home_时端点回落默认() {
+        let ep = endpoints_for(None);
+        assert_eq!(ep.http_port, nc_home::DEFAULT_HTTP_PORT);
+        assert!(!ep.from_config);
+    }
+}

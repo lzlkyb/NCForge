@@ -252,7 +252,10 @@ pub fn build(spec: &ScaffoldSpec) -> Result<Scaffold, String> {
     if spec.name.trim().is_empty() {
         return Err("组件名称不能为空".to_string());
     }
-    let defs = spec.defs.unwrap_or(20).min(50);
+    let defs = spec.defs.unwrap_or(20);
+    if defs > 50 {
+        return Err(format!("自定义项数量最多 50 个：{defs}"));
+    }
     let vo = vo_name(&code);
     let head_class = format!("{vo}HVO");
     let body_class = format!("{vo}BVO");
@@ -683,13 +686,16 @@ mod tests {
     }
 
     #[test]
-    fn defs_are_adjustable_and_capped() {
+    fn defs_are_adjustable_and_over_limit_is_rejected() {
         let mut sp = spec(Skeleton::SingleHead);
         sp.defs = Some(5);
         let s = build(&sp).unwrap();
         let d = BmfDoc::from_bytes(std::path::PathBuf::new(), s.text.into_bytes()).unwrap();
         assert_eq!(d.entities[0].attrs.iter().filter(|a| a.name.starts_with("def")).count(), 5);
         sp.defs = Some(999);
+        // 以前是静默截断到 50：用户填 999、界面说 999，文件里只有 50，且不告知。
+        assert!(build(&sp).unwrap_err().contains("最多 50"));
+        sp.defs = Some(50);
         assert_eq!(build(&sp).unwrap().defs, 50);
     }
 

@@ -1,11 +1,21 @@
 /* Operate surfaces retain opaque reading backgrounds inside the glass shell. */
 .dbx-context, .dbx-read-status, .dbx-finder-entry { flex: none; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 10px; border-bottom:1px solid hsl(var(--border)); font-size:var(--dbx-fs-body); }
-.dbx-context { background:hsl(var(--card)); }
+.dbx-context { font-size:13px;line-height:1.5; background:hsl(var(--card)); }
 .dbx-context[data-prod] { border-left:3px solid hsl(var(--destructive)); }
 .dbx-context strong {font-size:var(--dbx-fs-title);}
 .dbx-context .dbx-btn {margin-left:auto;}
-.dbx-read-status {color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);overflow-wrap:anywhere;}
-.dbx-filterbar {flex:none; padding:8px 10px; border-bottom:1px solid hsl(var(--border)); max-height:240px; overflow:auto; background:hsl(var(--card));}
+.dbx-read-status {color:hsl(var(--muted-foreground));font-size:13px;line-height:1.5;overflow-wrap:anywhere;}
+.dbx-filterbar {flex:none; padding:8px 10px; border-bottom:1px solid hsl(var(--border)); max-height:240px; display:flex; flex-direction:column; min-height:0; overflow:hidden; background:hsl(var(--card));}
+/* 查询入口不随条件区域滚动，窄窗也保留在固定的头部右侧。 */
+.dbx-filter-header {display:flex;align-items:center;justify-content:space-between;gap:8px;flex:none;}
+.dbx-filter-body {min-height:0;overflow:auto;padding-top:6px;}
+.dbx-filter-summary {flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--dbx-fs-body);color:hsl(var(--muted-foreground));}
+.dbx-filterbar[data-expanded="false"] {padding-block:5px;}
+/* 低窗口优先保留结果区，筛选编辑在自己的区域滚动。 */
+@media(max-height:700px) { .dbx-filterbar[data-expanded="true"] {max-height: min(160px,30dvh);} }
+.dbx-filter-secondary {padding-top:8px;border-top:1px solid hsl(var(--border));margin-top:8px;}
+.dbx-filter-shortcuts summary {cursor:pointer;padding:5px 8px;color:hsl(var(--muted-foreground));}
+.dbx-filter-shortcuts[open] {flex-basis:100%;}
 .dbx-filter-actions {display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:4px 0;}
 .dbx-filterbar select,.dbx-object-dialog select {min-height:var(--dbx-h-control);border:1px solid hsl(var(--border));border-radius:var(--r-control);padding:3px 6px;background:hsl(var(--background));color:hsl(var(--foreground));font-size:var(--dbx-fs-body);min-width:0;}
 .dbx-condition {display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px;}

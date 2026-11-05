@@ -9,6 +9,7 @@ import { beginOperation } from "../../lib/operations";
 import { applyWorkspace } from "../../lib/switchWorkspace";
 import { ensureFilesSaved } from "../../lib/terminatePreflight";
 import { ncHomeProbe, ncHomeSet, serverHeapSet, type ServerStatus } from "../../lib/server";
+import { clientHeapSet, type ClientStatus } from "../../lib/client";
 
 /**
  * 服务页配置栏：NC home / 工程 / 堆上限。
@@ -22,12 +23,18 @@ import { ncHomeProbe, ncHomeSet, serverHeapSet, type ServerStatus } from "../../
 export function ServiceConfig({
   status,
   running,
+  clientStatus,
+  clientRunning,
   onRefetch,
+  onRefetchClient,
 }: {
   status: ServerStatus | null;
   /** running / starting（含准备启动的那一秒）。 */
   running: boolean;
+  clientStatus: ClientStatus | null;
+  clientRunning: boolean;
   onRefetch: () => void;
+  onRefetchClient: () => void;
 }) {
   const queryClient = useQueryClient();
   const [pending, setPending] = useState<null | {
@@ -112,6 +119,25 @@ export function ServiceConfig({
               onSave={async (mb) => {
                 const applied = await serverHeapSet(mb);
                 onRefetch();
+                return applied;
+              }}
+            />
+          </>
+        )}
+        {/* 客户端是另一个 JVM，堆上限单独存（默认 768M）。放在同一栏里是因为
+            它同样属于「启动参数」，改了也得重启客户端才生效。 */}
+        {clientStatus && (
+          <>
+            <span className="sv-cfg-sep" />
+            <HeapField
+              label="客户端堆上限"
+              scope="客户端"
+              heapMb={clientStatus.heapMb}
+              defaultHeapMb={clientStatus.defaultHeapMb}
+              running={clientRunning}
+              onSave={async (mb) => {
+                const applied = await clientHeapSet(mb);
+                onRefetchClient();
                 return applied;
               }}
             />

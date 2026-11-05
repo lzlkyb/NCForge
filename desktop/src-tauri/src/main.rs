@@ -127,6 +127,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     builder
         .plugin(tauri_plugin_opener::init())
+        // 工程目录只让用户通过系统文件夹选择器挑，不再手填路径
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
             let config_dir = handle
@@ -216,6 +218,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::check_update,
             commands::resources_status,
             commands::resources_ensure,
+            commands::pick_folder,
             commands::get_workspace,
             commands::set_workspace,
             commands::linked_projects,
@@ -252,6 +255,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::debug_status,
             commands::debug_stop,
             commands::debug_set_breakpoints,
+            commands::debug_set_exception_breakpoints,
             commands::debug_continue,
             commands::debug_step,
             commands::debug_pause,
@@ -259,6 +263,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::debug_stack_trace,
             commands::debug_scopes,
             commands::debug_variables,
+            commands::debug_set_variable,
+            commands::debug_exception_info,
             commands::debug_evaluate,
             commands::search_workspace,
             commands::search_projects,
@@ -277,6 +283,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::bmf_doc_detail,
             commands::bmf_validate,
             commands::bmf_generate,
+            commands::bmf_gen_export,
+            commands::bmf_references,
             commands::bmf_scaffold_preview,
             commands::bmf_scaffold_write,
             commands::bmf_edit_preview,
@@ -301,6 +309,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::server_command_line,
             commands::server_reveal_log,
             commands::server_kill_port_owner,
+            // NC 客户端（Swing JStarter）：独立进程，与中间件各用一套启停与日志
+            commands::client_status,
+            commands::client_start,
+            commands::client_stop,
+            commands::client_log,
+            commands::client_clear_log,
+            commands::client_command_line,
+            commands::client_reveal_log,
+            commands::client_heap_set,
             commands::nc_home_probe,
             commands::nc_home_set,
             commands::export_config,
@@ -432,9 +449,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(s) = session {
                         s.client.kill();
                     }
-                    // 调试连接：不关的话 java-debug 的适配器会话会挂在 jdt.ls 里
-                    let debug = st.debug.lock().unwrap_or_else(|e| e.into_inner()).session.take();
-                    if let Some(s) = debug {
+                    // 调试连接：不关的话 java-debug 的适配器会话会挂在 jdt.ls 里。
+                    // 两个目标各一条，退出时都要收。
+                    let (server_debug, client_debug) = {
+                        let mut run = st.debug.lock().unwrap_or_else(|e| e.into_inner());
+                        (run.server.session.take(), run.client.session.take())
+                    };
+                    for s in [server_debug, client_debug].into_iter().flatten() {
                         s.client.kill();
                     }
                     // 数据库桥同理：每个连接一个 JVM，未提交的事务随进程结束由 Oracle 回滚

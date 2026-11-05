@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { serverLog } from "../lib/server";
+import { serverLog, type LogChunk } from "../lib/server";
 import { appendChunk, emptyLogState, type LogLine, type LogState } from "../lib/serverLog";
+
+/** 取一段日志增量。默认取中间件，客户端日志面板传入 `clientLog`。 */
+export type FetchLog = (offset: number) => Promise<LogChunk>;
 
 /**
  * 服务日志的增量轮询。
@@ -16,7 +19,12 @@ import { appendChunk, emptyLogState, type LogLine, type LogState } from "../lib/
  * 而上一代的拉取请求可能还在路上。它回来时若直接落笔，旧内容会插进新一代，
  * offset 还会被旧文件的长度带偏——新一代的头几行就永远对不上了。
  */
-export function useServerLog(active: boolean, generation: number, appHidden = false) {
+export function useServerLog(
+  active: boolean,
+  generation: number,
+  appHidden = false,
+  fetchLog: FetchLog = serverLog,
+) {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [error, setError] = useState<string | null>(null);
   const offsetRef = useRef(0);
@@ -24,13 +32,19 @@ export function useServerLog(active: boolean, generation: number, appHidden = fa
   const inFlight = useRef(false);
   /** 日志「代」：reset（换一代 / 用户清空）时 +1，在途回来对不上号就整份丢弃。 */
   const epochRef = useRef(0);
+  /**
+   * 取数函数放 ref：调用方每次渲染都可能传新闭包（`(o) => clientLog(o)`），
+   * 直接进依赖会让 `tick` 每次重建、两处 effect 跟着重跑，轮询被反复重启。
+   */
+  const fetchRef = useRef(fetchLog);
+  fetchRef.current = fetchLog;
 
   const tick = useCallback(async () => {
     if (inFlight.current) return;
     inFlight.current = true;
     const epoch = epochRef.current;
     try {
-      const chunk = await serverLog(offsetRef.current);
+      const chunk = await fetchRef.current(offsetRef.current);
       // 对不上号 = 这趟是上一代日志的：内容、偏移都不能要
       if (epoch !== epochRef.current) return;
       offsetRef.current = chunk.offset;

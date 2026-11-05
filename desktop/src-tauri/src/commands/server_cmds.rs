@@ -425,15 +425,15 @@ pub async fn server_stop(
         // 别等适配器发 terminated（进程被硬杀时它可能一个事件都来不及发）。
         let debug_session = {
             let mut run = st.debug.lock().map_err(|_| "调试状态异常".to_string())?;
-            crate::debug::take_session(&mut run)
+            crate::debug::take_session(&mut run, crate::debug::DebugTarget::Server)
         };
         if let Some(s) = debug_session {
             s.client.close();
             let status = st
                 .debug
                 .lock()
-                .map(|run| run.status.clone())
-                .unwrap_or_else(|_| crate::debug::DebugStatus::stopped());
+                .map(|run| run.server.status.clone())
+                .unwrap_or_else(|_| crate::debug::DebugStatus::stopped(crate::debug::DebugTarget::Server));
             let _ = app.emit("debug-status", status);
         }
         match outcome {

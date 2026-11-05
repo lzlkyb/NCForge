@@ -6,7 +6,8 @@ import { Icon } from "../ui/icon";
 import { ServiceActionsBar } from "../services/ServiceActionsBar";
 import { toast } from "../ui/toast";
 import { ServiceCard } from "../services/ServiceCard";
-import { LogPanel } from "../services/LogPanel";
+import { ClientCard } from "../services/ClientCard";
+import { ServiceLogSection } from "../services/ServiceLogSection";
 import { ServiceConfig } from "../services/ServiceConfig";
 import { CommandLineDialog } from "../services/CommandLineDialog";
 import { PortDialog } from "../services/PortDialog";
@@ -14,6 +15,7 @@ import { ServiceConfirms } from "../services/ServiceConfirms";
 import { ServiceAlerts } from "../services/ServiceAlerts";
 import { MetaDeployCard } from "../services/MetaDeployCard";
 import { useServiceCommands } from "../../hooks/useServiceCommands";
+import { useClientService } from "../../hooks/useClientService";
 import { useAppHidden } from "../../lib/appVisibility";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
 import { failureText } from "../../lib/friendlyError";
@@ -29,14 +31,15 @@ import {
 } from "../../lib/server";
 
 /**
- * NC 服务面板：启停中间件 + 实时日志。
+ * NC 服务面板：启停中间件与 Swing 客户端 + 两边各自的实时日志。
  *
  * 不再是主导航页签：内容常驻在文件页底部面板的「NC 服务」标签里，状态栏的
  * 服务胶囊和命令面板都能直接打开它。组件始终挂载，但只在面板可见时 1 秒轮询。
  *
  * 状态全部来自后端轮询，前端不自己拼状态：「进程活着」不等于「服务可用」，
  * 后者要看中间件端口是不是我们的进程在监听。端口读自 NC 自己的
- * `ierp/bin/prop.xml`（见 `ServerStatus.port`），不写死 80。
+ * `ierp/bin/prop.xml`（见 `ServerStatus.port`），不写死 80。客户端卡片的
+ * 「可连接/未就绪」也来自同一份端点，只是它表示「能不能连上中间件」。
  */
 export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void }) {
   const appHidden = useAppHidden();
@@ -83,21 +86,29 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
     onGeneration: () => setGeneration(g => g + 1), onClearConfirm: () => setConfirm(null),
   });
 
+  const {
+    status: clientStatus, isError: clientFailed, error: clientError, refetch: refetchClient,
+    busy: clientBusy, start: clientStart, stop: clientStop, restart: clientRestart,
+    preview: clientPreview, previewing: clientPreviewing,
+    showCommandLine: showClientCommandLine, closePreview: closeClientPreview, revealLog: revealClientLog,
+    debugMode: clientDebugMode, toggleDebugMode: toggleClientDebugMode, generation: clientGeneration,
+  } = useClientService({ visible: svcVisible, appHidden });
+
   const toggleDebugMode = () => {
     const next = !debugMode;
     setDebugMode(next);
     writeDebugModePref(next);
   };
 
-  const attachDebug = () => {
-    void attachDebugger()
-      .then(() => toast("已附加调试器，命中断点后底部「调试」面板会自动打开", "success"))
+  const attachDebug = (target: "server" | "client") => {
+    void attachDebugger(target)
+      .then(() => toast(`已附加${target === "client" ? "客户端" : "中间件"}调试器，命中断点后底部「调试」面板会自动打开`, "success"))
       .catch((e) => toast(failureText("附加调试器", e), "error"));
   };
 
-  const detachDebug = () => {
-    void detachDebugger()
-      .then(() => toast("已断开调试（服务继续运行）", "info"))
+  const detachDebug = (target: "server" | "client") => {
+    void detachDebugger(target)
+      .then(() => toast(`已断开${target === "client" ? "客户端" : "中间件"}调试（进程继续运行）`, "info"))
       .catch((e) => toast(failureText("断开调试", e), "error"));
   };
 
@@ -123,6 +134,8 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const state = status?.state;
   const known = state !== undefined;
   const owner = status?.portOwner ?? null;
+  const clientState = clientStatus?.state;
+  const clientKnown = clientState !== undefined;
 
   return (
     <>
@@ -147,10 +160,10 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
           onEditPort={() => setPortOpen(true)}
           debugMode={debugMode}
           onToggleDebugMode={toggleDebugMode}
-          debugAttached={debug.status.state === "attached"}
-          debugBusy={debug.busy !== null}
-          onAttachDebug={attachDebug}
-          onDetachDebug={detachDebug}
+          debugAttached={debug.targets.server.state === "attached"}
+          debugBusy={debug.targets.server.busy !== null}
+          onAttachDebug={() => attachDebug("server")}
+          onDetachDebug={() => detachDebug("server")}
         />
 
         {isError && (
@@ -173,17 +186,62 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
           onNavigate={onNavigate}
         />
 
-        {configOpen && <ServiceConfig status={status ?? null} running={!known || state !== "stopped"} onRefetch={() => void refetch()} />}
+        <ClientCard
+          status={clientStatus}
+          busy={clientBusy}
+          failed={clientFailed}
+          debugMode={clientDebugMode}
+          onToggleDebugMode={toggleClientDebugMode}
+          onStart={() => void clientStart()}
+          onStop={() => void clientStop()}
+          onRestart={() => void clientRestart()}
+          onCommandLine={() => void showClientCommandLine()}
+          previewing={clientPreviewing}
+          debugAttached={debug.targets.client.state === "attached"}
+          debugBusy={debug.targets.client.busy !== null}
+          onAttachDebug={() => attachDebug("client")}
+          onDetachDebug={() => detachDebug("client")}
+        />
+        {clientFailed && (
+          <div className="sv-alert" data-tone="warn">
+            <Icon name="alertTriangle" size={14} />
+            <span className="sv-alert-text">读取客户端状态失败：{String(clientError)}</span>
+            <button type="button" className="sv-btn" onClick={() => void refetchClient()}>
+              重试
+            </button>
+          </div>
+        )}
+
+        {configOpen && (
+          <ServiceConfig
+            status={status ?? null}
+            running={!known || state !== "stopped"}
+            clientStatus={clientStatus}
+            clientRunning={!clientKnown || clientState !== "stopped"}
+            onRefetch={() => void refetch()}
+            onRefetchClient={() => void refetchClient()}
+          />
+        )}
         <MetaDeployCard />
 
-        <LogPanel
-          active={!known || state === "running" || state === "starting"}
+        <ServiceLogSection
           appHidden={appHidden}
-          generation={generation}
-          logPath={status?.logPath ?? ""}
-          logSize={status?.logSize ?? 0}
-          onReveal={revealLog}
-          onCleared={() => void refetch()}
+          middleware={{
+            active: !known || state === "running" || state === "starting",
+            generation,
+            logPath: status?.logPath ?? "",
+            logSize: status?.logSize ?? 0,
+            onReveal: revealLog,
+            onCleared: () => void refetch(),
+          }}
+          client={{
+            active: !clientKnown || clientState === "running" || clientState === "starting",
+            generation: clientGeneration,
+            logPath: clientStatus?.logPath ?? "",
+            logSize: clientStatus?.logSize ?? 0,
+            onReveal: revealClientLog,
+            onCleared: () => void refetchClient(),
+          }}
         />
       </div></DockRegion>
 
@@ -199,6 +257,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
       />
 
       <CommandLineDialog preview={preview} onClose={() => setPreview(null)} />
+      <CommandLineDialog preview={clientPreview} onClose={closeClientPreview} kind="client" />
 
       <PortDialog
         open={portOpen}

@@ -68,6 +68,49 @@ pub enum EditOp {
         #[serde(default)]
         id: String,
     },
+    /// 删除任意可删节点（实体/属性/枚举/枚举项/关系）。容器与组件根不允许删；
+    /// 仍被引用的节点会拒绝，避免留下悬空引用。
+    DeleteNode { id: String },
+    /// 新增实体（带空的 attributelist）。
+    AddEntity {
+        name: String,
+        display_name: String,
+        table: String,
+        full_class: String,
+        #[serde(default)]
+        accessor: String,
+        #[serde(default)]
+        is_primary: bool,
+        #[serde(default)]
+        id: String,
+        /// 随实体一起写入的字段（「复制已有实体」用它，避免两次保存之间引用不到新实体）。
+        #[serde(default)]
+        attrs: Vec<NewAttr>,
+    },
+    /// 新增枚举（带空的 enumitemlist）。
+    AddEnum {
+        name: String,
+        display_name: String,
+        #[serde(default = "dflt_type")]
+        type_name: String,
+        #[serde(default)]
+        data_type: String,
+        #[serde(default)]
+        id: String,
+    },
+    /// 新增连接关系（聚合/参照/业务接口）。
+    AddRelation {
+        kind: String,
+        name: String,
+        source: String,
+        target: String,
+        #[serde(default)]
+        src_attr_id: String,
+        #[serde(default)]
+        target_attr_id: String,
+        #[serde(default)]
+        id: String,
+    },
 }
 
 fn dflt_style() -> String {
@@ -77,16 +120,221 @@ fn dflt_type() -> String {
     "String".into()
 }
 
+/// 新建实体时随实体写入的字段规格（与 AddAttribute 同字段名）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewAttr {
+    pub name: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default = "dflt_style")]
+    pub style: String,
+    #[serde(default = "dflt_type")]
+    pub type_name: String,
+    #[serde(default)]
+    pub data_type: String,
+    #[serde(default)]
+    pub db_type: String,
+    #[serde(default)]
+    pub length: Option<u32>,
+    #[serde(default)]
+    pub nullable: bool,
+    #[serde(default)]
+    pub default_value: String,
+    #[serde(default)]
+    pub is_key: bool,
+    #[serde(default)]
+    pub id: String,
+}
+
+/// 字段名口径与脚手架 `normalize_ident` 一致：小写字母开头，只含小写字母/数字/下划线。
+/// 写回层再校验一次：命令可被前端以外调用，不能只靠界面禁用按钮。
+fn is_field_ident(s: &str) -> bool {
+    let mut it = s.bytes();
+    match it.next() {
+        Some(b) if b.is_ascii_lowercase() => {}
+        _ => return false,
+    }
+    it.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+/// 只允许能通过官方工具与数据库校验的属性值。`escape_xml` 只管转义，不管内容合法性：
+/// 以前长度提交 `NaN` / 负数会原样写进 BMF，下一次解析或建表才炸。
+fn validate_attr_value(name: &str, value: &str) -> Result<(), String> {
+    let attr = name.to_ascii_lowercase();
+    let v = value.trim();
+    match attr.as_str() {
+        "length" => {
+            if v.is_empty() {
+                return Ok(());
+            }
+            let n: u32 = v
+                .parse()
+                .map_err(|_| format!("length 必须是正整数：{value}"))?;
+            if n == 0 {
+                return Err("length 必须大于 0".to_string());
+            }
+        }
+        "sequence" | "precision" => {
+            if !v.is_empty() {
+                v.parse::<u32>()
+                    .map_err(|_| format!("{name} 必须是非负整数：{value}"))?;
+            }
+        }
+        "isnullable" | "iskey" if v != "true" && v != "false" => {
+            return Err(format!("{name} 只能是 true 或 false：{value}"));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn is_entity_name(s: &str) -> bool {
+    let mut it = s.bytes();
+    match it.next() {
+        Some(b) if b.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    it.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+fn is_table_name(s: &str) -> bool {
+    let mut it = s.bytes();
+    match it.next() {
+        Some(b) if b.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    it.all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'$' | b'#'))
+}
+
+fn is_accessor(s: &str) -> bool {
+    !s.is_empty()
+        && s.split('.').all(|seg| {
+            !seg.is_empty()
+                && seg
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'$')
+        })
+}
+
+fn is_qualified_class(s: &str) -> bool {
+    if !s.starts_with("nc.vo.") {
+        return false;
+    }
+    s.split('.').all(|seg| !seg.is_empty() && seg.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'$'))
+}
+
+/// 按节点类型校验被改的 XML 属性。写回命令可被前端以外调用，不能只靠界面禁用。
+fn validate_node_attr(doc: &BmfDoc, node: &crate::bmf_model::XmlNode, name: &str, value: &str) -> Result<(), String> {
+    let lower = name.to_ascii_lowercase();
+    if lower == "id" {
+        return Err("id 是引用锚点，不能在编辑里修改".to_string());
+    }
+    let v = value.trim();
+    match node.name.as_str() {
+        "attribute" => {
+            validate_attr_value(name, value)?;
+            match lower.as_str() {
+                "name" | "fieldname" if !is_field_ident(v) => {
+                    return Err(format!("字段名只能以小写字母开头，且只含小写字母、数字、下划线：{value}"))
+                }
+                "style" if !matches!(v, "SINGLE" | "REF" | "ARRAY") => {
+                    return Err(format!("dataTypeStyle 只能是 SINGLE / REF / ARRAY：{value}"))
+                }
+                "typename" if v.is_empty() => return Err("typeName 不能为空".to_string()),
+                "name" | "fieldname" => {
+                    let dup = doc.entities.iter().flat_map(|e| e.attrs.iter()).any(|a| {
+                        a.id != node.attr_or("id", "") &&
+                            ((lower == "name" && a.name == v) || (lower == "fieldname" && a.field == v))
+                    });
+                    if dup {
+                        return Err(format!("同一组件内已存在相同的{}：{v}", if lower == "name" { "字段名" } else { "列名" }));
+                    }
+                }
+                _ => {}
+            }
+        }
+        "entity" => match lower.as_str() {
+            "name" if !is_entity_name(v) => {
+                return Err(format!("实体名只能包含字母、数字、下划线，且以字母开头：{value}"))
+            }
+            "tablename" if !is_table_name(v) => {
+                return Err(format!("表名只能包含字母、数字、下划线、$、#，且以字母开头：{value}"))
+            }
+            "fullclassname" if !is_qualified_class(v) => {
+                return Err(format!("fullClassName 必须是 nc.vo. 开头的完整类名：{value}"))
+            }
+            "accessor" if !v.is_empty() && !is_accessor(v) => {
+                return Err(format!("访问器只能是字母/数字/下划线：{value}"))
+            }
+            "isprimary" | "iskey" if v != "true" && v != "false" => {
+                return Err(format!("{name} 只能是 true 或 false：{value}"))
+            }
+            "keyattributeid" if !v.is_empty() => {
+                let id = node.attr_or("id", "");
+                let own = doc.entities.iter().find(|e| e.id == id);
+                if !own.map(|e| e.attrs.iter().any(|a| a.id == v)).unwrap_or(false) {
+                    return Err("keyAttributeId 必须指向该实体内某个属性".to_string());
+                }
+            }
+            _ => {}
+        },
+        "component" => match lower.as_str() {
+            "name" | "namespace" | "ownmodule" if !is_field_ident(v) => {
+                return Err(format!("{name} 只能用小写字母、数字、下划线，且以字母开头：{value}"))
+            }
+            "mainentity" if !v.is_empty() => {
+                if !doc.entities.iter().any(|e| e.id == v) {
+                    return Err("mainEntity 必须指向本组件内某个实体".to_string());
+                }
+            }
+            "version" if v.parse::<u32>().is_err() => {
+                return Err(format!("version 必须是非负整数：{value}"))
+            }
+            _ => {}
+        },
+        "Enumerate" => match lower.as_str() {
+            "name" if !is_entity_name(v) => return Err(format!("枚举名只能包含字母、数字、下划线：{value}")),
+            "typename" if v.is_empty() => return Err("枚举 typeName 不能为空".to_string()),
+            _ => {}
+        },
+        "AggregationRelation" | "Reference" | "busiitfconnection" => match lower.as_str() {
+            "source" | "target" if !doc.entities.iter().any(|e| e.id == v || e.name == v) => {
+                return Err(format!("关系端点必须是本组件内的实体：{value}"))
+            }
+            "srcattributeid" | "targetattributeid"
+                if !v.is_empty()
+                    && !doc.entities.iter().flat_map(|e| e.attrs.iter()).any(|a| a.id == v) =>
+            {
+                return Err(format!("关系属性必须是本组件内的属性：{value}"))
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+    Ok(())
+}
+
 /// 在内存里执行编辑，返回新字节。**不碰磁盘**——预览与保存共用这一条路径。
 pub fn apply(doc: &BmfDoc, ops: &[EditOp]) -> Result<Vec<u8>, String> {
     // 所有 span 都是**原始字节**里的位置。边改边写会让后面的 span 全部偏移，
     // 所以先收集 (start, end, 新字节)，再按位置倒序应用。
     let mut edits: Vec<(usize, usize, Vec<u8>)> = Vec::new();
     let mut added: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    // 同一批里新增的实体/枚举/关系也要去重：校验拿的是打开时的 doc，看不到还没落地的兄弟操作。
+    let mut new_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // 新增实体的 name/id → 生成的 id，供同批 AddRelation 解析端点。
+    let mut new_entities: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut new_tables: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut new_enum_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut new_relations: std::collections::HashSet<(String, String, String)> =
+        std::collections::HashSet::new();
     for op in ops {
         match op {
             EditOp::SetAttr { id, name, value } => {
+                validate_attr_value(name, value)?;
                 let node = doc.find_node(id).ok_or_else(|| format!("找不到节点 {id}"))?;
+                validate_node_attr(doc, node, name, value)?;
                 let attr = node
                     .attrs
                     .iter()
@@ -99,6 +347,14 @@ pub fn apply(doc: &BmfDoc, ops: &[EditOp]) -> Result<Vec<u8>, String> {
                 let node = doc.find_node(entity).ok_or_else(|| format!("找不到实体 {entity}"))?;
                 if node.name != "entity" {
                     return Err(format!("{entity} 不是 entity 节点"));
+                }
+                let ent = doc
+                    .entities
+                    .iter()
+                    .find(|e| e.id == *entity || e.name == *entity)
+                    .ok_or_else(|| format!("找不到实体 {entity}"))?;
+                if !attr_id.trim().is_empty() && !ent.attrs.iter().any(|a| a.id == *attr_id) {
+                    return Err(format!("主键必须指向实体 {} 内的属性", ent.name));
                 }
                 let attr = node
                     .attrs
@@ -127,6 +383,12 @@ pub fn apply(doc: &BmfDoc, ops: &[EditOp]) -> Result<Vec<u8>, String> {
             } => {
                 let ent = doc.entities.iter().find(|e| e.id == *entity || e.name == *entity)
                     .ok_or_else(|| format!("找不到实体 {entity}"))?;
+                if !is_field_ident(name) {
+                    return Err(format!("字段名只能以小写字母开头，且只含小写字母、数字、下划线：{name}"));
+                }
+                if *length == Some(0) {
+                    return Err("length 必须大于 0".to_string());
+                }
                 let key = (ent.id.clone(), name.clone());
                 if ent.attrs.iter().any(|a| a.name == *name) || !added.insert(key) {
                     return Err(format!("实体 {} 已有属性 {}", ent.name, name));
@@ -137,25 +399,21 @@ pub fn apply(doc: &BmfDoc, ops: &[EditOp]) -> Result<Vec<u8>, String> {
                     .ok_or_else(|| format!("实体 {} 没有 attributelist", ent.name))?;
                 let attr_id = if id.is_empty() { uuid_like() } else { id.clone() };
                 let seq = ent.attrs.iter().map(|a| a.sequence).max().unwrap_or(-1) + 1;
-                let xml = format!(
-                    "<attribute accessStrategy=\"\" classID=\"{}\" dataType=\"{}\" dataTypeStyle=\"{}\" dbtype=\"{}\" defaultValue=\"{}\" displayName=\"{}\" fieldName=\"{}\" fieldType=\"{}\" id=\"{}\" isKey=\"{}\" isNullable=\"{}\" length=\"{}\" name=\"{}\" precise=\"\" sequence=\"{}\" typeDisplayName=\"{}\" typeName=\"{}\"/>",
-                    ent.id,
-                    xml_attr(data_type),
-                    xml_attr(style),
-                    xml_attr(db_type),
-                    xml_attr(default_value),
-                    xml_attr(display_name),
-                    xml_attr(name),
-                    xml_attr(if db_type.is_empty() { "" } else { db_type }),
-                    attr_id,
-                    is_key,
-                    nullable,
-                    length.map(|l| l.to_string()).unwrap_or_default(),
-                    xml_attr(name),
+                let xml = attribute_xml(AttributeSpec {
+                    class_id: &ent.id,
+                    id: &attr_id,
+                    name,
+                    display_name,
+                    type_name,
+                    data_type,
+                    db_type,
+                    style,
+                    length: *length,
+                    nullable: *nullable,
+                    default_value,
+                    is_key: *is_key,
                     seq,
-                    xml_attr(type_name),
-                    xml_attr(type_name)
-                );
+                });
                 edits.push(container_edit(doc, list, "attributelist", &xml));
             }
             EditOp::AddEnumItem { enum_id, value, display, id } => {
@@ -173,6 +431,233 @@ pub fn apply(doc: &BmfDoc, ops: &[EditOp]) -> Result<Vec<u8>, String> {
                 );
                 edits.push(container_edit(doc, list, "enumitemlist", &xml));
             }
+            EditOp::DeleteNode { id } => {
+                let node = doc.find_node(id).ok_or_else(|| format!("找不到节点 {id}"))?;
+                check_deletable(doc, node)?;
+                edits.push(removal_edit(doc, node));
+            }
+            EditOp::AddEntity {
+                name,
+                display_name,
+                table,
+                full_class,
+                accessor,
+                is_primary,
+                id,
+                attrs,
+            } => {
+                let name = name.trim();
+                let table = table.trim();
+                let full_class = full_class.trim();
+                if !is_entity_name(name) {
+                    return Err(format!("实体名只能包含字母、数字、下划线，且以字母开头：{name}"));
+                }
+                if !is_table_name(table) {
+                    return Err(format!("表名只能包含字母、数字、下划线、$、#，且以字母开头：{table}"));
+                }
+                if !is_qualified_class(full_class) {
+                    return Err(format!("fullClassName 必须是 nc.vo. 开头的完整类名：{full_class}"));
+                }
+                let accessor = if accessor.trim().is_empty() {
+                    full_class.to_string()
+                } else {
+                    accessor.trim().to_string()
+                };
+                if !is_accessor(&accessor) {
+                    return Err(format!("访问器必须是合法的类名：{accessor}"));
+                }
+                if doc.entities.iter().any(|e| e.name == name) || new_entities.contains_key(name) {
+                    return Err(format!("组件里已有实体 {name}"));
+                }
+                if doc.entities.iter().any(|e| e.table == table) || !new_tables.insert(table.to_string()) {
+                    return Err(format!("组件里已有实体使用表 {table}"));
+                }
+                if doc.entities.iter().any(|e| e.full_class == full_class) {
+                    return Err(format!("组件里已有实体使用类 {full_class}"));
+                }
+                let new_id = if id.trim().is_empty() { uuid_like() } else { id.trim().to_string() };
+                if doc.find_node(&new_id).is_some() || !new_ids.insert(new_id.clone()) {
+                    return Err(format!("节点 id 已存在：{new_id}"));
+                }
+                // 字段随实体一次写入：复制实体时字段必须和实体同批落地，
+                // 否则第二次保存前拿不到新实体的节点。
+                let mut seen = std::collections::HashSet::new();
+                let mut attr_xmls = Vec::new();
+                let mut key_id = String::new();
+                for (i, a) in attrs.iter().enumerate() {
+                    let an = a.name.trim();
+                    if !is_field_ident(an) {
+                        return Err(format!("字段名只能以小写字母开头，且只含小写字母、数字、下划线：{an}"));
+                    }
+                    if !seen.insert(an.to_string()) {
+                        return Err(format!("实体 {name} 里字段重复：{an}"));
+                    }
+                    if a.length == Some(0) {
+                        return Err("length 必须大于 0".to_string());
+                    }
+                    if a.type_name.trim().is_empty() {
+                        return Err(format!("字段 {an} 的 typeName 不能为空"));
+                    }
+                    let aid = if a.id.trim().is_empty() { uuid_like() } else { a.id.trim().to_string() };
+                    if doc.find_node(&aid).is_some() || !new_ids.insert(aid.clone()) {
+                        return Err(format!("节点 id 已存在：{aid}"));
+                    }
+                    if a.is_key && key_id.is_empty() {
+                        key_id = aid.clone();
+                    }
+                    attr_xmls.push(attribute_xml(AttributeSpec {
+                        class_id: &new_id,
+                        id: &aid,
+                        name: an,
+                        display_name: &a.display_name,
+                        type_name: a.type_name.trim(),
+                        data_type: &a.data_type,
+                        db_type: &a.db_type,
+                        style: &a.style,
+                        length: a.length,
+                        nullable: a.nullable,
+                        default_value: &a.default_value,
+                        is_key: a.is_key,
+                        seq: i as i32,
+                    }));
+                }
+                new_entities.insert(name.to_string(), new_id.clone());
+                new_entities.insert(new_id.clone(), new_id.clone());
+                let cell = doc.root.child("celllist").ok_or("组件没有 celllist")?;
+                let indent = child_indent(doc, cell);
+                let eol = eol_str(doc);
+                let list_xml = if attr_xmls.is_empty() {
+                    "<attributelist/>".to_string()
+                } else {
+                    format!(
+                        "<attributelist>{eol}{indent}    {}{eol}{indent}  </attributelist>",
+                        attr_xmls.join(&format!("{eol}{indent}    "))
+                    )
+                };
+                let xml = format!(
+                    "<entity accessor=\"{}\" displayName=\"{}\" fullClassName=\"{}\" id=\"{}\" isPrimary=\"{}\" keyAttributeId=\"{}\" name=\"{}\" tableName=\"{}\">{eol}{indent}  {list_xml}{eol}{indent}</entity>",
+                    xml_attr(&accessor),
+                    xml_attr(display_name),
+                    xml_attr(full_class),
+                    new_id,
+                    is_primary,
+                    key_id,
+                    xml_attr(name),
+                    xml_attr(table)
+                );
+                edits.push(container_edit(doc, cell, "celllist", &xml));
+            }
+            EditOp::AddEnum {
+                name,
+                display_name,
+                type_name,
+                data_type,
+                id,
+            } => {
+                let name = name.trim();
+                if !is_entity_name(name) {
+                    return Err(format!("枚举名只能包含字母、数字、下划线，且以字母开头：{name}"));
+                }
+                if type_name.trim().is_empty() {
+                    return Err("枚举 typeName 不能为空".to_string());
+                }
+                if doc.enums.iter().any(|e| e.name == name) || !new_enum_names.insert(name.to_string()) {
+                    return Err(format!("组件里已有枚举 {name}"));
+                }
+                let new_id = if id.trim().is_empty() { uuid_like() } else { id.trim().to_string() };
+                if doc.find_node(&new_id).is_some() || !new_ids.insert(new_id.clone()) {
+                    return Err(format!("节点 id 已存在：{new_id}"));
+                }
+                let cell = doc.root.child("celllist").ok_or("组件没有 celllist")?;
+                let indent = child_indent(doc, cell);
+                let eol = eol_str(doc);
+                let xml = format!(
+                    "<Enumerate dataType=\"{}\" displayName=\"{}\" id=\"{}\" name=\"{}\" typeName=\"{}\">{eol}{indent}  <enumitemlist/>{eol}{indent}</Enumerate>",
+                    xml_attr(data_type.trim()),
+                    xml_attr(display_name),
+                    new_id,
+                    xml_attr(name),
+                    xml_attr(type_name.trim())
+                );
+                edits.push(container_edit(doc, cell, "celllist", &xml));
+            }
+            EditOp::AddRelation {
+                kind,
+                name,
+                source,
+                target,
+                src_attr_id,
+                target_attr_id,
+                id,
+            } => {
+                if !matches!(kind.as_str(), "AggregationRelation" | "Reference" | "busiitfconnection") {
+                    return Err(format!("不支持的关系类型 {kind}（只支持聚合/参照/业务接口）"));
+                }
+                let src_id = doc
+                    .entities
+                    .iter()
+                    .find(|e| e.id == *source || e.name == *source)
+                    .map(|e| e.id.clone())
+                    .or_else(|| new_entities.get(source.trim()).cloned())
+                    .ok_or_else(|| format!("关系源端不是本组件内的实体：{source}"))?;
+                let tgt_id = doc
+                    .entities
+                    .iter()
+                    .find(|e| e.id == *target || e.name == *target)
+                    .map(|e| e.id.clone())
+                    .or_else(|| new_entities.get(target.trim()).cloned())
+                    .ok_or_else(|| format!("关系目标端不是本组件内的实体：{target}"))?;
+                if src_id == tgt_id {
+                    return Err("关系两端不能是同一个实体".to_string());
+                }
+                let attr_ok = |entity_id: &str, attr_id: &str| {
+                    doc.entities
+                        .iter()
+                        .find(|e| e.id == entity_id)
+                        .map(|e| e.attrs.iter().any(|a| a.id == attr_id))
+                        .unwrap_or(false)
+                };
+                if !src_attr_id.trim().is_empty() && !attr_ok(&src_id, src_attr_id) {
+                    return Err(format!("源属性必须属于实体 {source}"));
+                }
+                if !target_attr_id.trim().is_empty() && !attr_ok(&tgt_id, target_attr_id) {
+                    return Err(format!("目标属性必须属于实体 {target}"));
+                }
+                if doc
+                    .relations
+                    .iter()
+                    .any(|r| r.kind == *kind && r.source == src_id && r.target == tgt_id)
+                    || !new_relations.insert((kind.clone(), src_id.clone(), tgt_id.clone()))
+                {
+                    return Err("同类型关系已存在".to_string());
+                }
+                let new_id = if id.trim().is_empty() { uuid_like() } else { id.trim().to_string() };
+                if doc.find_node(&new_id).is_some() || !new_ids.insert(new_id.clone()) {
+                    return Err(format!("节点 id 已存在：{new_id}"));
+                }
+                let xml = format!(
+                    "<{kind} id=\"{}\" name=\"{}\" source=\"{}\" srcAttributeid=\"{}\" target=\"{}\" targetAttributeid=\"{}\"/>",
+                    new_id,
+                    xml_attr(name),
+                    src_id,
+                    xml_attr(src_attr_id.trim()),
+                    tgt_id,
+                    xml_attr(target_attr_id.trim())
+                );
+                match doc.root.child("connectlist") {
+                    Some(list) => edits.push(container_edit(doc, list, "connectlist", &xml)),
+                    None => {
+                        // connectlist 是 celllist 的兄弟节点，不能塞进 celllist。
+                        let cell = doc.root.child("celllist").ok_or("组件没有 celllist，无法新增关系")?;
+                        let indent = indent_before(doc, cell.start);
+                        let eol = eol_str(doc);
+                        let block = format!(
+                            "{eol}{indent}<connectlist>{eol}{indent}  {xml}{eol}{indent}</connectlist>"
+                        );
+                        edits.push((cell.end, cell.end, block.into_bytes()));
+                    }
+                }
+            }
         }
     }
     edits.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
@@ -188,6 +673,151 @@ pub fn apply(doc: &BmfDoc, ops: &[EditOp]) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+struct AttributeSpec<'a> {
+    class_id: &'a str,
+    id: &'a str,
+    name: &'a str,
+    display_name: &'a str,
+    type_name: &'a str,
+    data_type: &'a str,
+    db_type: &'a str,
+    style: &'a str,
+    length: Option<u32>,
+    nullable: bool,
+    default_value: &'a str,
+    is_key: bool,
+    seq: i32,
+}
+
+/// 一行 `<attribute/>`。加字段与「新增实体带字段」共用，避免两处属性顺序/默认值漂移。
+fn attribute_xml(s: AttributeSpec) -> String {
+    format!(
+        "<attribute accessStrategy=\"\" classID=\"{}\" dataType=\"{}\" dataTypeStyle=\"{}\" dbtype=\"{}\" defaultValue=\"{}\" displayName=\"{}\" fieldName=\"{}\" fieldType=\"{}\" id=\"{}\" isKey=\"{}\" isNullable=\"{}\" length=\"{}\" name=\"{}\" precise=\"\" sequence=\"{}\" typeDisplayName=\"{}\" typeName=\"{}\"/>",
+        xml_attr(s.class_id),
+        xml_attr(s.data_type),
+        xml_attr(s.style),
+        xml_attr(s.db_type),
+        xml_attr(s.default_value),
+        xml_attr(s.display_name),
+        xml_attr(s.name),
+        xml_attr(s.db_type),
+        s.id,
+        s.is_key,
+        s.nullable,
+        s.length.map(|l| l.to_string()).unwrap_or_default(),
+        xml_attr(s.name),
+        s.seq,
+        xml_attr(s.type_name),
+        xml_attr(s.type_name)
+    )
+}
+
+/// 可删除的节点类型与引用检查。只放行叶子/带自身容器的已知类型：
+/// 容器、组件根、未知标签一律不删（删了解析器可能直接失败）。
+fn check_deletable(doc: &BmfDoc, node: &crate::bmf_model::XmlNode) -> Result<(), String> {
+    let id = node.attr_or("id", "");
+    if id.is_empty() {
+        return Err(format!("<{}> 没有 id，无法安全删除", node.name));
+    }
+    match node.name.as_str() {
+        "entity" => {
+            if doc.component.main_entity == id {
+                return Err("该实体是组件主实体（mainEntity），先改主实体再删".to_string());
+            }
+            if doc.relations.iter().any(|r| r.source == id || r.target == id) {
+                return Err("实体仍被连接关系引用，先删关系".to_string());
+            }
+            let entity = doc.entities.iter().find(|e| e.id == id);
+            if let Some(e) = entity {
+                let referenced = doc.entities.iter().flat_map(|x| x.attrs.iter()).any(|a| {
+                    a.data_type == e.name || a.ref_target == e.name || a.data_type == id
+                });
+                if referenced {
+                    return Err(format!("实体 {} 仍被字段 dataType 引用，先改字段", e.name));
+                }
+            }
+            Ok(())
+        }
+        "attribute" => {
+            let owner = doc.entities.iter().find(|e| e.attrs.iter().any(|a| a.id == id));
+            if let Some(e) = owner {
+                if e.key_attr_id == id {
+                    return Err(format!("字段 {} 是实体主键，先改主键再删", e.name));
+                }
+                if e.attrs.iter().any(|a| a.id == id && a.is_key) {
+                    return Err("字段标了 isKey，先取消主键标记再删".to_string());
+                }
+            }
+            if doc
+                .relations
+                .iter()
+                .any(|r| r.src_attr_id == id || r.target_attr_id == id)
+            {
+                return Err("字段仍被连接关系引用，先删关系".to_string());
+            }
+            Ok(())
+        }
+        "Enumerate" => {
+            let en = doc.enums.iter().find(|e| e.id == id);
+            if let Some(e) = en {
+                let referenced = doc
+                    .entities
+                    .iter()
+                    .flat_map(|x| x.attrs.iter())
+                    .any(|a| a.type_name == e.name || a.data_type == e.name || a.ref_target == e.name);
+                if referenced {
+                    return Err(format!("枚举 {} 仍被字段引用，先改字段类型", e.name));
+                }
+            }
+            Ok(())
+        }
+        "enumitem" | "AggregationRelation" | "Reference" | "busiitfconnection" => Ok(()),
+        other => Err(format!(
+            "<{other}> 不是可删除的节点类型（只支持实体/属性/枚举/枚举项/关系）"
+        )),
+    }
+}
+
+/// 删除节点。节点独占一行时连缩进与行尾一起删（不留空行）；同行还有别的内容时
+/// 只删节点本身的字节。
+fn removal_edit(doc: &BmfDoc, node: &crate::bmf_model::XmlNode) -> (usize, usize, Vec<u8>) {
+    let b = &doc.bytes;
+    let line_start = b[..node.start]
+        .iter()
+        .rposition(|x| *x == b'\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let prefix_is_ws = b[line_start..node.start]
+        .iter()
+        .all(|x| matches!(x, b' ' | b'\t' | b'\r'));
+    let mut after = node.end;
+    while after < b.len() && matches!(b[after], b' ' | b'\t' | b'\r') {
+        after += 1;
+    }
+    let alone = prefix_is_ws && (after == b.len() || b[after] == b'\n');
+    if alone {
+        let end = if after < b.len() { after + 1 } else { after };
+        (line_start, end, Vec::new())
+    } else {
+        (node.start, node.end, Vec::new())
+    }
+}
+
+fn eol_str(doc: &BmfDoc) -> &'static str {
+    match doc.eol {
+        crate::workspace::Eol::Lf => "\n",
+        _ => "\r\n",
+    }
+}
+
+/// 容器追加子节点时该用的缩进：优先跟随第一个子节点，空容器则比容器多两级。
+fn child_indent(doc: &BmfDoc, node: &crate::bmf_model::XmlNode) -> String {
+    node.children
+        .first()
+        .map(|c| indent_before(doc, c.start))
+        .unwrap_or_else(|| format!("{}  ", indent_before(doc, node.start)))
+}
+
 /// 往容器里追加一个子节点。空容器 `<x/>` 要先展开成 `<x>…</x>`。
 fn container_edit(
     doc: &BmfDoc,
@@ -195,27 +825,24 @@ fn container_edit(
     tag: &str,
     xml: &str,
 ) -> (usize, usize, Vec<u8>) {
+    let eol = eol_str(doc);
     if node.self_closing {
         let outer = indent_before(doc, node.start);
-        let inner = format!("{outer}  ");
+        let inner = child_indent(doc, node);
         return (
             node.end.saturating_sub(2),
             node.end,
-            format!(">\r\n{inner}{xml}\r\n{outer}</{tag}>").into_bytes(),
+            format!(">{eol}{inner}{xml}{eol}{outer}</{tag}>").into_bytes(),
         );
     }
-    let indent = node
-        .children
-        .first()
-        .map(|c| indent_before(doc, c.start))
-        .unwrap_or_else(|| format!("{}  ", indent_before(doc, node.start)));
+    let indent = child_indent(doc, node);
     let close = format!("</{tag}>");
     let at = node
         .end
         .checked_sub(close.len())
         .filter(|i| doc.bytes[*i..node.end] == *close.as_bytes())
         .unwrap_or(node.end);
-    (at, at, format!("{indent}{xml}\r\n").into_bytes())
+    (at, at, format!("{indent}{xml}{eol}").into_bytes())
 }
 
 /// 执行编辑并预览 diff（不写盘）。
@@ -539,6 +1166,383 @@ mod tests {
         let err = write_new(&p, b"y").unwrap_err();
         assert!(err.contains("拒绝覆盖"));
         assert_eq!(std::fs::read(&p).unwrap(), b"x");
+    }
+
+    #[test]
+    fn set_attr_rejects_invalid_length_and_booleans() {
+        let d = doc();
+        for bad in ["NaN", "-1", "0", "12.5"] {
+            let err = apply(
+                &d,
+                &[EditOp::SetAttr {
+                    id: "a1".into(),
+                    name: "length".into(),
+                    value: bad.into(),
+                }],
+            )
+            .unwrap_err();
+            assert!(err.contains("length"), "{bad} → {err}");
+        }
+        let err = apply(
+            &d,
+            &[EditOp::SetAttr {
+                id: "a1".into(),
+                name: "isNullable".into(),
+                value: "yes".into(),
+            }],
+        )
+        .unwrap_err();
+        assert!(err.contains("true"));
+        // 空长度 = 移除该属性，是合法编辑
+        apply(
+            &d,
+            &[EditOp::SetAttr {
+                id: "a1".into(),
+                name: "length".into(),
+                value: String::new(),
+            }],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn add_attribute_rejects_bad_identifier_and_zero_length() {
+        let d = doc();
+        for (name, len, want) in [
+            ("BadName", Some(20), "字段名"),
+            ("1abc", Some(20), "字段名"),
+            ("ok_name", Some(0), "length"),
+        ] {
+            let err = apply(
+                &d,
+                &[EditOp::AddAttribute {
+                    entity: "e".into(),
+                    name: name.into(),
+                    display_name: String::new(),
+                    style: "SINGLE".into(),
+                    type_name: "String".into(),
+                    data_type: String::new(),
+                    db_type: String::new(),
+                    length: len,
+                    nullable: true,
+                    default_value: String::new(),
+                    is_key: false,
+                    id: String::new(),
+                }],
+            )
+            .unwrap_err();
+            assert!(err.contains(want), "{name}/{len:?} → {err}");
+        }
+    }
+
+    #[test]
+    fn set_attr_rejects_identity_and_conflicting_names() {
+        let d = doc();
+        let err = apply(
+            &d,
+            &[EditOp::SetAttr {
+                id: "a1".into(),
+                name: "id".into(),
+                value: "a9".into(),
+            }],
+        )
+        .unwrap_err();
+        assert!(err.contains("引用锚点"), "{err}");
+
+        // 先加一个字段，再把主键改成同名字段 → 拒绝
+        let with_extra = apply(
+            &d,
+            &[EditOp::AddAttribute {
+                entity: "e".into(),
+                name: "vbillcode".into(),
+                display_name: String::new(),
+                style: "SINGLE".into(),
+                type_name: "String".into(),
+                data_type: String::new(),
+                db_type: String::new(),
+                length: Some(20),
+                nullable: true,
+                default_value: String::new(),
+                is_key: false,
+                id: "a2".into(),
+            }],
+        )
+        .unwrap();
+        let d2 = BmfDoc::from_bytes(PathBuf::new(), with_extra).unwrap();
+        let err = apply(
+            &d2,
+            &[EditOp::SetAttr {
+                id: "a1".into(),
+                name: "name".into(),
+                value: "vbillcode".into(),
+            }],
+        )
+        .unwrap_err();
+        assert!(err.contains("已存在"), "{err}");
+    }
+
+    #[test]
+    fn set_entity_key_must_belong_to_the_entity() {
+        let d = doc();
+        let err = apply(
+            &d,
+            &[EditOp::SetEntityKey {
+                entity: "e".into(),
+                attr_id: "i1".into(),
+            }],
+        )
+        .unwrap_err();
+        assert!(err.contains("主键"), "{err}");
+        apply(
+            &d,
+            &[EditOp::SetEntityKey {
+                entity: "e".into(),
+                attr_id: "a1".into(),
+            }],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn delete_node_removes_the_whole_line() {
+        let d = doc();
+        let with_extra = apply(
+            &d,
+            &[EditOp::AddAttribute {
+                entity: "e".into(),
+                name: "memo".into(),
+                display_name: "备注".into(),
+                style: "SINGLE".into(),
+                type_name: "String".into(),
+                data_type: String::new(),
+                db_type: "varchar".into(),
+                length: Some(101),
+                nullable: true,
+                default_value: String::new(),
+                is_key: false,
+                id: "a2".into(),
+            }],
+        )
+        .unwrap();
+        let d2 = BmfDoc::from_bytes(PathBuf::new(), with_extra).unwrap();
+        let new = apply(&d2, &[EditOp::DeleteNode { id: "a2".into() }]).unwrap();
+        let s = String::from_utf8(new.clone()).unwrap();
+        assert!(!s.contains("memo"));
+        assert!(!s.contains("\n\n"), "删除后不应留下空行");
+        let d3 = BmfDoc::from_bytes(PathBuf::new(), new).unwrap();
+        assert_eq!(d3.entities[0].attrs.len(), 1);
+        assert_eq!(d3.entities[0].attrs[0].id, "a1");
+    }
+
+    #[test]
+    fn delete_is_refused_while_still_referenced() {
+        let d = doc();
+        let err = apply(&d, &[EditOp::DeleteNode { id: "a1".into() }]).unwrap_err();
+        assert!(err.contains("主键"), "{err}");
+        let err = apply(&d, &[EditOp::DeleteNode { id: "e".into() }]).unwrap_err();
+        assert!(err.contains("mainEntity"), "{err}");
+        // 组件根不是可删除节点类型
+        let err = apply(&d, &[EditOp::DeleteNode { id: "c".into() }]).unwrap_err();
+        assert!(err.contains("可删除"), "{err}");
+    }
+
+    #[test]
+    fn add_entity_enum_and_relation_round_trip() {
+        let d = doc();
+        let new = apply(
+            &d,
+            &[
+                EditOp::AddEntity {
+                    name: "H2".into(),
+                    display_name: "子表".into(),
+                    table: "t2".into(),
+                    full_class: "nc.vo.m.c.H2".into(),
+                    accessor: "nc.vo.m.c.H2".into(),
+                    is_primary: false,
+                    id: "e2".into(),
+                    attrs: vec![],
+                },
+                EditOp::AddEnum {
+                    name: "billstatus".into(),
+                    display_name: "单据状态".into(),
+                    type_name: "String".into(),
+                    data_type: "BS2".into(),
+                    id: "n2".into(),
+                },
+                EditOp::AddRelation {
+                    kind: "AggregationRelation".into(),
+                    name: "H-H2".into(),
+                    source: "e".into(),
+                    target: "e2".into(),
+                    src_attr_id: String::new(),
+                    target_attr_id: String::new(),
+                    id: "r1".into(),
+                },
+            ],
+        )
+        .unwrap();
+        let s = String::from_utf8(new.clone()).unwrap();
+        assert!(s.contains("\n  <entity "), "新增实体应与已有实体同缩进：\n{s}");
+        let d2 = BmfDoc::from_bytes(PathBuf::from("t3.bmf"), new).unwrap();
+        assert_eq!(d2.entities.len(), 2);
+        assert!(d2.entities.iter().any(|e| e.id == "e2" && e.attrs.is_empty()));
+        assert_eq!(d2.enums.len(), 2);
+        assert!(d2.enums.iter().any(|e| e.id == "n2" && e.name == "billstatus"));
+        assert_eq!(d2.relations.len(), 1);
+        assert_eq!(d2.relations[0].source, "e");
+        assert_eq!(d2.relations[0].target, "e2");
+        assert!(d2.root.child("connectlist").is_some());
+    }
+
+    #[test]
+    fn add_entity_validates_shape_and_uniqueness() {
+        let d = doc();
+        let mk = |name: &str, table: &str, class: &str| EditOp::AddEntity {
+            name: name.into(),
+            display_name: String::new(),
+            table: table.into(),
+            full_class: class.into(),
+            accessor: String::new(),
+            is_primary: false,
+            id: String::new(),
+            attrs: vec![],
+        };
+        for (op, want) in [
+            (mk("1bad", "tx", "nc.vo.m.c.X"), "实体名"),
+            (mk("H3", "1bad", "nc.vo.m.c.X"), "表名"),
+            (mk("H3", "tx", "com.other.X"), "fullClassName"),
+            (mk("H", "tx", "nc.vo.m.c.X"), "已有实体"),
+            (mk("H3", "t", "nc.vo.m.c.X"), "已有实体使用表"),
+        ] {
+            let err = apply(&d, &[op]).unwrap_err();
+            assert!(err.contains(want), "{want} → {err}");
+        }
+    }
+
+    #[test]
+    fn add_entity_with_attrs_lands_fields_and_key() {
+        let d = doc();
+        let new = apply(
+            &d,
+            &[EditOp::AddEntity {
+                name: "H2".into(),
+                display_name: "复制来的表头".into(),
+                table: "t2".into(),
+                full_class: "nc.vo.m.c.H2".into(),
+                accessor: "nc.vo.m.c.H2".into(),
+                is_primary: false,
+                id: "e2".into(),
+                attrs: vec![
+                    NewAttr {
+                        name: "pk_head".into(),
+                        display_name: "主键".into(),
+                        style: "SINGLE".into(),
+                        type_name: "UFID".into(),
+                        data_type: String::new(),
+                        db_type: "char".into(),
+                        length: Some(20),
+                        nullable: false,
+                        default_value: String::new(),
+                        is_key: true,
+                        id: "b1".into(),
+                    },
+                    NewAttr {
+                        name: "vbillcode".into(),
+                        display_name: "单据号".into(),
+                        style: "SINGLE".into(),
+                        type_name: "String".into(),
+                        data_type: String::new(),
+                        db_type: "varchar".into(),
+                        length: Some(40),
+                        nullable: true,
+                        default_value: "''".into(),
+                        is_key: false,
+                        id: "b2".into(),
+                    },
+                ],
+            }],
+        )
+        .unwrap();
+        let d2 = BmfDoc::from_bytes(PathBuf::from("t4.bmf"), new).unwrap();
+        let e = d2.entities.iter().find(|x| x.id == "e2").unwrap();
+        assert_eq!(e.name, "H2");
+        assert_eq!(e.attrs.len(), 2);
+        assert_eq!(e.key_attr_id, "b1");
+        let code = e.attrs.iter().find(|a| a.name == "vbillcode").unwrap();
+        assert_eq!(code.length, Some(40));
+        assert!(code.nullable);
+        assert_eq!(code.default_value, "''");
+        assert_eq!(e.attrs[1].sequence, 1);
+    }
+
+    #[test]
+    fn add_entity_with_attrs_rejects_duplicate_fields() {
+        let d = doc();
+        let attr = |id: &str| NewAttr {
+            name: "same".into(),
+            display_name: String::new(),
+            style: "SINGLE".into(),
+            type_name: "String".into(),
+            data_type: String::new(),
+            db_type: String::new(),
+            length: Some(20),
+            nullable: true,
+            default_value: String::new(),
+            is_key: false,
+            id: id.into(),
+        };
+        let err = apply(
+            &d,
+            &[EditOp::AddEntity {
+                name: "H2".into(),
+                display_name: String::new(),
+                table: "t2".into(),
+                full_class: "nc.vo.m.c.H2".into(),
+                accessor: String::new(),
+                is_primary: false,
+                id: "e2".into(),
+                attrs: vec![attr("b1"), attr("b2")],
+            }],
+        )
+        .unwrap_err();
+        assert!(err.contains("字段重复"), "{err}");
+    }
+
+    #[test]
+    fn add_relation_rejects_unknown_endpoints_and_duplicates() {
+        let d = doc();
+        let mk = |source: &str, target: &str| EditOp::AddRelation {
+            kind: "Reference".into(),
+            name: String::new(),
+            source: source.into(),
+            target: target.into(),
+            src_attr_id: String::new(),
+            target_attr_id: String::new(),
+            id: String::new(),
+        };
+        let err = apply(&d, &[mk("e", "nope")]).unwrap_err();
+        assert!(err.contains("目标端"), "{err}");
+        let err = apply(&d, &[mk("e", "e")]).unwrap_err();
+        assert!(err.contains("同一个实体"), "{err}");
+
+        let two = apply(
+            &d,
+            &[EditOp::AddEntity {
+                name: "H2".into(),
+                display_name: String::new(),
+                table: "t2".into(),
+                full_class: "nc.vo.m.c.H2".into(),
+                accessor: String::new(),
+                is_primary: false,
+                id: "e2".into(),
+                attrs: vec![],
+            }],
+        )
+        .unwrap();
+        let d2 = BmfDoc::from_bytes(PathBuf::new(), two).unwrap();
+        apply(&d2, &[mk("e", "e2")]).unwrap();
+        let err = apply(&d2, &[mk("e", "e2"), mk("e", "e2")]).unwrap_err();
+        assert!(err.contains("已存在"), "{err}");
     }
 
     #[test]

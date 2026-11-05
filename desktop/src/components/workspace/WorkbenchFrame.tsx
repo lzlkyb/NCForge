@@ -121,8 +121,9 @@ export function WorkbenchFrame({ activeTool, tool, fileTabs = false, tree, tabs,
   const dock = useMemo(() => ({ hosts, fileHosts, bindHost: (name: DockRegionName) => refs[name], bindFileSlot: (name: FileSlotName) => fileRefs[name], showDocument, showCode, documentOpen, toolTab }), [hosts, fileHosts, refs, fileRefs, showDocument, showCode, documentOpen, toolTab]);
   const hasSide = SIDE_TOOLS.includes(activeTool);
   const hasToolbar = TOOLBAR_TOOLS.includes(activeTool);
-  // 日志已有列表/详情两栏，不再占用资源树；保留用户在代码页设置的开合偏好。
-  const sideShown = sideOpen && activeTool !== "logs";
+  // 日志已有列表/详情两栏，不再占用资源树；元数据页自带组件清单，再摆一份文件树
+  // 会变成双左栏、把主区挤窄。两页都保留用户在代码页设置的开合偏好。
+  const sideShown = sideOpen && activeTool !== "logs" && activeTool !== "meta";
   const sideLabel = activeTool === "settings" ? "设置分类" : "资源侧栏";
   const closeSide = () => {
     setSideOpen(false);

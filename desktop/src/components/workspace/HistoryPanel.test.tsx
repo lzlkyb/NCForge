@@ -157,6 +157,33 @@ describe("HistoryPanel", () => {
     expect(container.querySelector(".wb-hist-detail")).toBeNull();
   });
 
+  it("恢复中不能通过切换版本解除锁定或重复提交", async () => {
+    const original = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((cmd: string, ...args: unknown[]) => cmd === "local_history_restore" ? new Promise(() => {}) : original(cmd, ...args));
+    await render(<Harness />);
+    await act(async () => container.querySelector<HTMLButtonElement>(".wb-hist-row")!.click());
+    await act(async () => btn("恢复此版本")!.click());
+    await act(async () => { btn("确认恢复")!.click(); btn("确认恢复")!.click(); });
+    await act(async () => container.querySelectorAll<HTMLButtonElement>(".wb-hist-row")[1].click());
+    expect(container.textContent).toContain("恢复中");
+    expect(container.querySelector<HTMLButtonElement>(".wb-hist-x")!.disabled).toBe(true);
+    expect(mocks.invoke.mock.calls.filter(c => c[0] === "local_history_restore")).toHaveLength(1);
+  });
+
+  it("长差异明确提示截断并能继续查看", async () => {
+    const original = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((cmd: string, ...args: unknown[]) => cmd === "local_history_read"
+      ? Promise.resolve({ size: 5000, text: Array.from({length: 450}, (_, i) => `old-${i}`).join("\n"), truncated: false, ts: V1.ts })
+      : original(cmd, ...args));
+    await render(<Harness />);
+    await act(async () => container.querySelector<HTMLButtonElement>(".wb-hist-row")!.click());
+    expect(container.textContent).toContain("仅展示前 400 项");
+    expect(container.textContent).not.toContain("old-449");
+    await act(async () => btn("继续显示差异")!.click());
+    expect(container.textContent).toContain("old-449");
+    expect(container.textContent).not.toContain("尚未显示");
+  });
+
   it("恢复失败时原因留在框内，不弹错误 toast", async () => {
     mocks.invoke.mockImplementation(async (cmd: string) => {
       if (cmd === "local_history_list") return [V1];

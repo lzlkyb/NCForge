@@ -25,14 +25,20 @@ export function HeapField({
   defaultHeapMb,
   running,
   onSave,
+  label = "堆上限",
+  scope = "服务",
 }: {
   /** 当前生效值（后端收口后的，不是配置原值）。 */
   heapMb: number;
   defaultHeapMb: number;
   /** 服务是否在跑：改了要重启才生效，界面得说出来。 */
   running: boolean;
-  /** 保存并返回后端生效值。传 null = 恢复默认 4G。 */
+  /** 保存并返回后端生效值。传 null = 恢复默认。 */
   onSave: (mb: number | null) => Promise<number>;
+  /** 字段名（中间件「堆上限」/ 客户端「客户端堆上限」）。 */
+  label?: string;
+  /** 提示里说的对象（「重启服务后生效」/「重启客户端后生效」）。 */
+  scope?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -49,8 +55,8 @@ export function HeapField({
     try {
       const applied = await onSave(mb);
       setEditing(false);
-      const label = mb === null ? `默认 ${formatHeapMb(applied)}` : formatHeapMb(applied);
-      toast(`堆上限已设为 ${label}${running ? "，重启服务后生效" : ""}`, "success");
+      const shown = mb === null ? `默认 ${formatHeapMb(applied)}` : formatHeapMb(applied);
+      toast(`${label}已设为 ${shown}${running ? `，重启${scope}后生效` : ""}`, "success");
     } catch (e) {
       // 不吞错：后端会明确说「要在 512~65536 之间」或配置文件写不进去
       toast(failureText("保存堆上限", e), "error");
@@ -81,11 +87,11 @@ export function HeapField({
   if (editing) {
     return (
       <div className="sv-cfg-item sv-cfg-heap sv-cfg-item-edit">
-        <span className="sv-cfg-k">堆上限</span>
+        <span className="sv-cfg-k">{label}</span>
         <input
           autoFocus
           className="sv-cfg-input sv-cfg-num"
-          aria-label="堆上限，单位 MB"
+          aria-label={`${label}，单位 MB`}
           disabled={saving}
           value={draft}
           inputMode="numeric"
@@ -119,12 +125,12 @@ export function HeapField({
 
   return (
     <div className="sv-cfg-item sv-cfg-heap">
-      <span className="sv-cfg-k">堆上限</span>
+      <span className="sv-cfg-k">{label}</span>
       {/* 悬停说清三件事：这个数从哪来（启动参数 -Xmx）、什么时候生效（重启）、
           怎么回去（恢复默认）。和端口那处一个思路—— tooltip 是免费文档位 */}
       <span
         className="sv-cfg-v"
-        title={`JVM 启动参数 -Xmx${heapMb}m${running ? "；改完要重启服务才生效（堆大小只能在启动时定）" : ""}`}
+        title={`JVM 启动参数 -Xmx${heapMb}m${running ? `；改完要重启${scope}才生效（堆大小只能在启动时定）` : ""}`}
       >
         {formatHeapMb(heapMb)}
       </span>

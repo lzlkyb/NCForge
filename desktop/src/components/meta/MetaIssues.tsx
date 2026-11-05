@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { BmfIssue } from "../../lib/bmf";
+import { severityCounts } from "../../lib/bmfSummary";
 
 const SEV_LABEL: Record<string, string> = { error: "错误", warn: "警告", info: "提示" };
 
@@ -14,13 +15,7 @@ export function MetaIssues({
   error: string | null;
 }) {
   const [filter, setFilter] = useState<"all" | "error" | "warn" | "info">("all");
-  const counts = useMemo(() => {
-    const c = { error: 0, warn: 0, info: 0 };
-    for (const i of issues) {
-      if (i.severity in c) c[i.severity as keyof typeof c]++;
-    }
-    return c;
-  }, [issues]);
+  const counts = useMemo(() => severityCounts(issues), [issues]);
   const shown = filter === "all" ? issues : issues.filter((i) => i.severity === filter);
 
   if (loading) return <p className="meta-note">正在校验…</p>;
@@ -49,12 +44,13 @@ export function MetaIssues({
       ) : (
         <div className="meta-issue-list">
           {shown.map((i) => (
-            <article key={`${i.code}-${i.entity}-${i.attr}-${i.title}`} className={`meta-issue sev-${i.severity}`}>
+            <article key={`${i.code}-${i.line ?? "x"}-${i.entity}-${i.attr}-${i.title}`} className={`meta-issue sev-${i.severity}`}>
               <header>
                 <span className={`meta-sev-dot sev-${i.severity}`} />
                 <strong>{i.title}</strong>
                 <span className="meta-issue-code">{i.code}</span>
-                {i.line != null && <span className="meta-issue-loc">第 {i.line + 1} 行</span>}
+                {/* 后端 `line_of` 已经返回 1 基行号，这里不能再 +1。 */}
+                {i.line != null && <span className="meta-issue-loc">第 {i.line} 行</span>}
                 {(i.entity || i.attr) && (
                   <span className="meta-issue-loc">
                     {i.entity}

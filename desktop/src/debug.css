@@ -64,6 +64,64 @@
   font-size: 12px;
 }
 
+/* 目标页签：中间件 / 客户端。两边可同时附加，页签只决定「看哪一个」。 */
+.dbg-targets {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 12px 0;
+  border-bottom: 1px solid hsl(var(--border));
+  flex-shrink: 0;
+}
+
+.dbg-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--r-control) var(--r-control) 0 0;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-target:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--secondary) / 0.6);
+}
+
+.dbg-target[data-on] {
+  color: hsl(var(--foreground));
+  border-bottom-color: hsl(var(--primary));
+  background: hsl(var(--secondary) / 0.5);
+  font-weight: 600;
+}
+
+.dbg-target-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: hsl(var(--muted-foreground) / 0.35);
+  flex-shrink: 0;
+}
+
+.dbg-target-dot[data-state="attached"] {
+  background: hsl(var(--success));
+}
+
+/* 暂停优先于「已附加」：真正断住时应该是黄色呼吸点，而不是普通的绿点 */
+.dbg-target-dot[data-paused] {
+  background: hsl(var(--warning));
+  box-shadow: 0 0 0 3px hsl(var(--warning) / 0.18);
+}
+
+.dbg-target-state {
+  font-size: 10px;
+  font-weight: 400;
+  color: hsl(var(--muted-foreground));
+}
+
 .dbg-bar {
   display: flex;
   align-items: center;
@@ -148,11 +206,12 @@
   min-width: 0;
 }
 
+/* 三栏：线程/栈 | 监视/变量 | 断点。断点常看常改，不再藏在弹层里。 */
 .dbg-cols {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(200px, 0.9fr) minmax(0, 1.15fr) minmax(210px, 0.85fr);
 }
 
 .dbg-col {
@@ -207,6 +266,86 @@
   padding: 10px 14px;
   line-height: 1.7;
   max-width: 760px;
+}
+
+/* 远程附加：手工填 JDWP 地址（通常是 SSH 隧道映射到本机的端口）。 */
+.dbg-remote {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  max-width: 760px;
+}
+
+.dbg-remote-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.dbg-remote-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dbg-remote-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-remote-row input {
+  width: 180px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-control);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+
+.dbg-remote-row input:focus-visible {
+  outline: 2px solid hsl(var(--primary) / 0.5);
+  outline-offset: 1px;
+}
+
+.dbg-remote-error {
+  font-size: 12px;
+  line-height: 1.5;
+  color: hsl(var(--destructive-ink));
+}
+
+.dbg-remote-note {
+  padding: 0;
+  max-width: none;
+}
+
+.dbg-remote-note p {
+  margin: 0;
+  line-height: 1.7;
+}
+
+.dbg-remote-cmd {
+  display: block;
+  margin: 4px 0;
+  padding: 6px 8px;
+  border-radius: var(--r-control);
+  background: hsl(var(--muted) / 0.5);
+  color: hsl(var(--foreground));
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .dbg-error {
@@ -424,4 +563,557 @@
 .dbg-watch:hover .dbg-watch-del,
 .dbg-watch:focus-within .dbg-watch-del {
   opacity: 1;
+}
+
+/* 栏头右侧的小图标按钮：靠右但不抢标题的省略号 */
+.dbg-hd-btn {
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+}
+
+.dbg-hd-btn + .dbg-hd-btn {
+  margin-left: 0;
+}
+
+/* 异常断点开着时给个常亮提示，否则用户不知道「为什么停在异常上」 */
+.dbg-hd-btn[data-on] {
+  color: hsl(var(--warning-ink));
+  background: hsl(var(--warning) / 0.14);
+}
+
+/* 控制台按钮上的条数：与工具栏里其他按钮的文字同一行，不额外占高度 */
+.dbg-btn[data-on] {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.dbg-btn-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: hsl(var(--primary) / 0.14);
+  color: hsl(var(--primary));
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.dbg-btn-primary .dbg-btn-count {
+  background: hsl(var(--primary-foreground) / 0.2);
+  color: hsl(var(--primary-foreground));
+}
+
+/* ── 线程列表 ────────────────────────────────────────────────────────────── */
+.dbg-thread-list {
+  flex-shrink: 0;
+  max-height: 132px;
+  overflow: auto;
+  padding: 4px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.dbg-thread {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-control);
+  text-align: left;
+  font-size: 12px;
+}
+
+.dbg-thread:hover {
+  background: hsl(var(--secondary));
+}
+
+.dbg-thread[data-active] {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+  font-weight: 600;
+}
+
+.dbg-thread-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dbg-thread-id {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ── 栈帧行（栈 + 行尾复制） ──────────────────────────────────────────────── */
+.dbg-frame-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--r-control);
+}
+
+.dbg-frame-row .dbg-frame {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.dbg-frame-row[data-active] {
+  background: hsl(var(--accent));
+}
+
+.dbg-frame-row[data-active] .dbg-frame {
+  color: hsl(var(--accent-foreground));
+  font-weight: 600;
+}
+
+.dbg-frame-copy {
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+
+.dbg-frame-row:hover .dbg-frame-copy,
+.dbg-frame-row:focus-within .dbg-frame-copy {
+  opacity: 1;
+}
+
+/* ── 暂停原因条 ──────────────────────────────────────────────────────────── */
+.dbg-stop {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 7px 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--warning) / 0.07);
+}
+
+.dbg-stop[data-exc] {
+  background: hsl(var(--destructive) / 0.06);
+  border-bottom-color: hsl(var(--destructive) / 0.2);
+}
+
+.dbg-stop-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-top: 1px;
+  font-size: 11px;
+  font-weight: 700;
+  color: hsl(var(--warning-ink));
+}
+
+.dbg-stop[data-exc] .dbg-stop-tag {
+  color: hsl(var(--destructive-ink));
+}
+
+.dbg-stop-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dbg-stop-id {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  color: hsl(var(--destructive-ink));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dbg-stop-msg {
+  font-size: 12px;
+  line-height: 1.5;
+  color: hsl(var(--foreground));
+  overflow-wrap: anywhere;
+}
+
+.dbg-stop-stack {
+  margin: 2px 0 0;
+  max-height: 92px;
+  overflow: auto;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-stop-copy {
+  width: 22px;
+  height: 22px;
+}
+
+/* ── 断点清单 ────────────────────────────────────────────────────────────── */
+.dbg-bp-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.dbg-bp-group + .dbg-bp-group {
+  margin-top: 6px;
+}
+
+.dbg-bp-file {
+  padding: 3px 8px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: hsl(var(--muted-foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dbg-bp-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  padding: 0 2px 0 7px;
+  border-radius: var(--r-control);
+}
+
+.dbg-bp-row:hover {
+  background: hsl(var(--secondary));
+}
+
+.dbg-bp-row[data-off] {
+  opacity: 0.55;
+}
+
+.dbg-bp-check {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  accent-color: hsl(var(--destructive));
+  cursor: pointer;
+}
+
+.dbg-bp-open {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+}
+
+.dbg-bp-line {
+  flex-shrink: 0;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+
+.dbg-bp-badge {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+.dbg-bp-badge[data-kind="log"] {
+  background: hsl(var(--primary) / 0.13);
+  color: hsl(var(--primary));
+}
+
+.dbg-bp-act {
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+
+.dbg-bp-row:hover .dbg-bp-act,
+.dbg-bp-row:focus-within .dbg-bp-act {
+  opacity: 1;
+}
+
+/* 条件 / 命中 / 日志的内联编辑表单 */
+.dbg-bp-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 4px 6px;
+  padding: 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-control);
+  background: hsl(var(--muted) / 0.22);
+}
+
+.dbg-bp-edit label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-bp-edit input {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-control);
+  background: hsl(var(--background));
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+}
+
+.dbg-bp-edit input:focus {
+  border-color: hsl(var(--ring));
+}
+
+.dbg-bp-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* 异常断点：内联小面板，不遮断点清单 */
+.dbg-exc-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+  margin: 4px 4px 2px;
+  padding: 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-control);
+  background: hsl(var(--card));
+  box-shadow: var(--shadow-sm, 0 1px 2px hsl(var(--foreground) / 0.06));
+}
+
+.dbg-exc-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-exc-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dbg-exc-item input {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  accent-color: hsl(var(--warning));
+}
+
+.dbg-exc-close {
+  align-self: flex-end;
+  padding: 2px 8px;
+  border-radius: var(--r-control);
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-exc-close:hover {
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+}
+
+/* ── 变量改写 / 分页 ─────────────────────────────────────────────────────── */
+.dbg-var-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--r-control);
+}
+
+.dbg-var-row:hover {
+  background: hsl(var(--secondary));
+}
+
+.dbg-var-row .dbg-var {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.dbg-var-row .dbg-var:hover {
+  background: transparent;
+}
+
+.dbg-var-edit {
+  width: 20px;
+  height: 20px;
+  opacity: 0;
+}
+
+.dbg-var-row:hover .dbg-var-edit,
+.dbg-var-row:focus-within .dbg-var-edit {
+  opacity: 1;
+}
+
+.dbg-var-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 4px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+
+.dbg-var-edit-row input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid hsl(var(--ring));
+  border-radius: var(--r-control);
+  background: hsl(var(--background));
+  font-family: inherit;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+}
+
+.dbg-var-more {
+  display: block;
+  width: 100%;
+  padding: 3px 8px;
+  text-align: left;
+  font-size: 11px;
+  color: hsl(var(--primary));
+}
+
+.dbg-var-more:hover {
+  background: hsl(var(--secondary));
+  text-decoration: underline;
+}
+
+/* ── 调试控制台 ──────────────────────────────────────────────────────────── */
+.dbg-console {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  height: 190px;
+  min-height: 120px;
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+}
+
+.dbg-console-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0 6px 0 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground));
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.25);
+}
+
+.dbg-console-log {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 5px 8px;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+}
+
+.dbg-console-row + .dbg-console-row {
+  margin-top: 7px;
+}
+
+.dbg-console-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dbg-console-prompt {
+  flex-shrink: 0;
+  color: hsl(var(--primary));
+}
+
+.dbg-console-expr {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: hsl(var(--foreground));
+}
+
+.dbg-console-copy {
+  width: 18px;
+  height: 18px;
+  opacity: 0;
+}
+
+.dbg-console-entry:hover .dbg-console-copy {
+  opacity: 1;
+}
+
+.dbg-console-out {
+  padding-left: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: hsl(var(--success-ink));
+}
+
+.dbg-console-err {
+  color: hsl(var(--destructive-ink));
+}
+
+.dbg-console-type {
+  color: hsl(var(--muted-foreground));
+}
+
+.dbg-console-input-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 6px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+/* ── 行号槽：禁用 / 日志 / 条件断点 ──────────────────────────────────────── */
+/* 禁用：灰空心圆，和「未落点」的红色虚线区分开 */
+.ncforge-bp-glyph-disabled::before {
+  background: transparent;
+  border: 1.5px solid hsl(var(--muted-foreground) / 0.6);
+}
+
+/* 日志断点：黄色实心（与 IDEA 同语义），停下的事不用看红点 */
+.ncforge-bp-glyph-log::before {
+  background: hsl(var(--warning));
+}
+
+/* 条件 / 命中次数断点：红环空芯，与普通红点一眼可分 */
+.ncforge-bp-glyph-cond::before {
+  background: hsl(var(--card));
+  border: 2px solid hsl(var(--destructive));
 }

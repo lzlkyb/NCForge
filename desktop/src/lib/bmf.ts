@@ -211,6 +211,20 @@ export interface BmfWriteResult {
   changed: boolean;
 }
 
+export interface BmfNewAttr {
+  name: string;
+  displayName?: string;
+  style?: string;
+  typeName?: string;
+  dataType?: string;
+  dbType?: string;
+  length?: number | null;
+  nullable?: boolean;
+  defaultValue?: string;
+  isKey?: boolean;
+  id?: string;
+}
+
 export type BmfEditOp =
   | { op: "setAttr"; id: string; name: string; value: string }
   | { op: "setEntityKey"; entity: string; attrId: string }
@@ -229,7 +243,67 @@ export type BmfEditOp =
       isKey?: boolean;
       id?: string;
     }
-  | { op: "addEnumItem"; enumId: string; value: string; display: string; id?: string };
+  | { op: "addEnumItem"; enumId: string; value: string; display: string; id?: string }
+  | { op: "deleteNode"; id: string }
+  | {
+      op: "addEntity";
+      name: string;
+      displayName: string;
+      table: string;
+      fullClass: string;
+      accessor?: string;
+      isPrimary?: boolean;
+      id?: string;
+      /** 随实体一次写入的字段（复制实体用）。 */
+      attrs?: BmfNewAttr[];
+    }
+  | { op: "addEnum"; name: string; displayName: string; typeName?: string; dataType?: string; id?: string }
+  | {
+      op: "addRelation";
+      kind: RelationshipKind;
+      name: string;
+      source: string;
+      target: string;
+      srcAttrId?: string;
+      targetAttrId?: string;
+      id?: string;
+    };
+
+/** BMF 连接关系类型（与 UAP MDP 的 connectlist 一致）。 */
+export const RELATION_KINDS = ["AggregationRelation", "Reference", "busiitfconnection"] as const;
+export type RelationshipKind = (typeof RELATION_KINDS)[number];
+
+/** 落盘结果里的单条文件：status = written | replaced | skipped。 */
+export interface BmfExportItem {
+  relPath: string;
+  kind: string;
+  status: "written" | "replaced" | "skipped";
+  detail: string;
+}
+
+export interface BmfExportResult {
+  items: BmfExportItem[];
+  written: number;
+  skipped: number;
+  targetDir: string;
+}
+
+/** 跨工程引用命中：谁在用本组件的实体 / 枚举。 */
+export interface BmfRefHit {
+  path: string;
+  component: string;
+  entity: string;
+  attr: string;
+  field: string;
+  value: string;
+}
+
+export interface BmfRefScan {
+  hits: BmfRefHit[];
+  scanned: number;
+  skipped: number;
+  truncated: boolean;
+}
 
 export interface BmfPublishCheck {
   id: string;
@@ -257,6 +331,19 @@ export const bmfGenerate = (path: string, entities?: string[]) =>
   invoke<BmfGeneration>("bmf_generate", { path, entities: entities ?? null });
 export const bmfScaffoldPreview = (spec: BmfScaffoldSpec) =>
   invoke<BmfScaffold>("bmf_scaffold_preview", { spec });
+/** 生成物落盘：只写相对路径；已有文件默认跳过，`overwrite` 时先备份再重写。 */
+export const bmfGenExport = (
+  path: string,
+  targetDir: string,
+  entities?: string[],
+  overwrite = false,
+) =>
+  invoke<BmfExportResult>("bmf_gen_export", {
+    path,
+    targetDir,
+    entities: entities ?? null,
+    overwrite,
+  });
 export const bmfScaffoldWrite = (spec: BmfScaffoldSpec, path: string) =>
   invoke<string>("bmf_scaffold_write", { spec, path });
 export const bmfEditPreview = (path: string, ops: BmfEditOp[]) =>
@@ -264,6 +351,8 @@ export const bmfEditPreview = (path: string, ops: BmfEditOp[]) =>
 /** `expectedSha` = 打开时 detail.sha256；外部改过文件会拒绝保存。 */
 export const bmfEditSave = (path: string, ops: BmfEditOp[], expectedSha: string | null = null) =>
   invoke<BmfWriteResult>("bmf_edit_save", { path, ops, expectedSha });
+/** 跨工程引用扫描（F1）：按类全名找 typeName / refModelName，只读。 */
+export const bmfReferences = (path: string) => invoke<BmfRefScan>("bmf_references", { path });
 export const bmfPublishProbe = (component: string, module: string, bmfPath?: string) =>
   invoke<BmfPublishProbe>("bmf_publish_probe", {
     component,

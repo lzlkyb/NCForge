@@ -1,33 +1,35 @@
-// 底部面板的「调试」标签：控制栏 + 调用栈 + 变量。
+// 底部面板的「调试」标签：控制栏 + 线程/调用栈 + 监视/变量 + 断点 + 控制台。
 //
 // 数据全在 `lib/debugSession`（事件驱动）：这里不做轮询，也不自己拼状态。
-// 断点不在这里管理——它们挂在编辑器行号槽上，按 F11 旁边那套习惯点击即可。
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { failureText } from "../../lib/friendlyError";
 import { baseName } from "../../lib/workspace";
 import { DebugVariables } from "./DebugVariables";
 import { DebugWatch } from "./DebugWatch";
+import { DebugStack } from "./DebugStack";
+import { DebugBreakpoints } from "./DebugBreakpoints";
+import { DebugConsole } from "./DebugConsole";
+import { DebugStopBanner } from "./DebugStopBanner";
+import { RemoteAttachForm } from "./RemoteAttachForm";
 import {
   attachDebugger,
   detachDebugger,
   pauseDebug,
   resumeDebug,
-  selectFrame,
+  selectDebugTarget,
   stepDebug,
   useDebugSnapshot,
 } from "../../lib/debugSession";
+import { DEBUG_TARGETS, debugTargetLabel } from "../../lib/debug";
 import { debugKeyLabels } from "../../lib/debugKeys";
-import { clearAllBreakpoints, useBreakpoints } from "../../lib/breakpoints";
-import { useWorkspaceRoot } from "../../lib/workspaceSession";
 import "../../debug.css";
 
 export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number) => void }) {
   const snap = useDebugSnapshot();
   const keys = debugKeyLabels();
-  // 断点挂在行号槽上，这里只提供「一次清空」出口；按工作区分档，与 gutter 同一份存储。
-  const breakpoints = useBreakpoints(useWorkspaceRoot() ?? "");
+  const [consoleOpen, setConsoleOpen] = useState(false);
   const attached = snap.status.state === "attached";
   const frame = snap.frames.find((f) => f.id === snap.frameId) ?? null;
   const threadName = snap.threads.find((t) => t.id === snap.threadId)?.name ?? (snap.threadId ? `线程 ${snap.threadId}` : "");
@@ -44,17 +46,50 @@ export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number
 
   const attach = () =>
     void attachDebugger().catch((e) => toast(failureText("附加调试器", e), "error"));
+  const attachRemote = (host: string, port: number) =>
+    void attachDebugger("remote", { host, port }).catch((e) =>
+      toast(failureText("附加远程 JVM", e), "error"),
+    );
   const detach = () =>
     void detachDebugger().catch((e) => toast(failureText("断开调试", e), "error"));
 
+  // 远程目标没填地址前不显示附加按钮：走下面的表单，避免点了才报「缺端口」。
+  const showLocalAttach = !attached && snap.target !== "remote";
+  const endpoint =
+    snap.status.jdwpHost && snap.status.jdwpPort
+      ? `${snap.status.jdwpHost}:${snap.status.jdwpPort}`
+      : null;
   const where = snap.paused && frame
-    ? `已暂停 · ${threadName || "线程"} · ${frame.source?.path ? `${baseName(frame.source.path)}:${frame.line}` : frame.name}`
+    ? `${debugTargetLabel(snap.target)} · 已暂停 · ${threadName || "线程"} · ${frame.source?.path ? `${baseName(frame.source.path)}:${frame.line}` : frame.name}`
     : attached
-      ? "运行中"
-      : "未附加";
+      ? `${debugTargetLabel(snap.target)} · 运行中${endpoint ? ` · ${endpoint}` : ""}`
+      : `${debugTargetLabel(snap.target)} · 未附加`;
 
   return (
     <div className="wb-panel-body dbg-body">
+      {/* 中间件 / 客户端 / 远程各一条会话：页签只切换「看哪一个」，不互相断开。 */}
+      <div className="dbg-targets" role="tablist" aria-label="调试目标">
+        {DEBUG_TARGETS.map((t) => {
+          const info = snap.targets?.[t] ?? { state: "stopped", paused: false, busy: null };
+          return (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              aria-selected={snap.target === t}
+              className="dbg-target"
+              data-on={snap.target === t || undefined}
+              title={`查看${debugTargetLabel(t)}的调试会话（各目标可以同时附加）`}
+              onClick={() => selectDebugTarget(t)}
+            >
+              <span className="dbg-target-dot" data-state={info.state} data-paused={info.paused || undefined} />
+              {debugTargetLabel(t)}
+              {info.state === "attached" && <span className="dbg-target-state">已附加</span>}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="dbg-bar">
         <button
           type="button"
@@ -119,16 +154,14 @@ export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number
         <button
           type="button"
           className="dbg-btn"
-          disabled={breakpoints.length === 0}
-          title="清空当前工作区的全部断点（之后可在行号槽重新点）"
-          onClick={() => {
-            const n = breakpoints.length;
-            clearAllBreakpoints();
-            toast(`已清除 ${n} 个断点`, "success");
-          }}
+          data-on={consoleOpen || undefined}
+          disabled={!attached}
+          title={attached ? "调试控制台：对当前暂停帧试算表达式" : "附加调试器后可用"}
+          onClick={() => setConsoleOpen((v) => !v)}
         >
-          <Icon name="trash" size={12} />
-          清断点{breakpoints.length > 0 ? `（${breakpoints.length}）` : ""}
+          <Icon name="terminal" size={12} />
+          控制台
+          {snap.console.length > 0 ? <span className="dbg-btn-count">{snap.console.length}</span> : null}
         </button>
         <span className="dbg-sp" />
         <span className="dbg-where" title={where}>
@@ -139,59 +172,47 @@ export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number
             type="button"
             className="dbg-btn dbg-btn-danger"
             disabled={snap.busy !== null}
-            title="断开调试适配器（服务继续运行）"
+            title={`断开${debugTargetLabel(snap.target)}调试适配器（进程继续运行）`}
             onClick={detach}
           >
             {snap.busy === "detach" ? <Icon name="spinner" size={12} className="animate-spin" /> : null}
             断开
           </button>
-        ) : (
+        ) : showLocalAttach ? (
           <button
             type="button"
             className="dbg-btn dbg-btn-primary"
             disabled={snap.busy !== null}
-            title="要求服务以「调试模式」启动，且代码智能已就绪"
+            title={`要求${debugTargetLabel(snap.target)}以「调试模式」启动，且代码智能已就绪`}
             onClick={attach}
           >
             {snap.busy === "attach" ? <Icon name="spinner" size={12} className="animate-spin" /> : <Icon name="bug" size={12} />}
             {snap.busy === "attach" ? "附加中…" : "附加调试器"}
           </button>
-        )}
+        ) : null}
       </div>
 
       {snap.error && <div className="dbg-error">{snap.error}</div>}
 
+      {snap.paused && (
+        <DebugStopBanner reason={snap.stopReason} text={snap.stopText} exception={snap.exception} />
+      )}
+
       {!attached ? (
-        <div className="wb-panel-note dbg-hint">
-          还没附加调试器：到「NC 服务」页勾选<b>调试模式</b>再启动（JDWP 只绑 127.0.0.1），
-          服务起来后回到这里点「附加调试器」。断点可以先在行号槽点好，附加时会整批下发。
-        </div>
+        snap.target === "remote" ? (
+          <RemoteAttachForm busy={snap.busy === "attach"} onAttach={attachRemote} />
+        ) : (
+          <div className="wb-panel-note dbg-hint">
+            还没附加{debugTargetLabel(snap.target)}调试器：到「NC 服务」页
+            {snap.target === "client" ? "客户端卡" : "中间件卡"}勾选<b>调试模式</b>再启动
+            （JDWP 只绑 127.0.0.1），进程起来后回到这里点「附加调试器」。
+            断点可以先在行号槽点好，附加时会整批下发到已附加的会话。
+          </div>
+        )
       ) : (
         <div className="dbg-cols">
           <div className="dbg-col">
-            <div className="dbg-col-h">
-              调用栈
-              {snap.frames.length > 0 && <span>· {snap.frames.length} 帧</span>}
-            </div>
-            <div className="dbg-list">
-              {!snap.paused && <div className="dbg-empty">运行中：命中断点或按「暂停」后显示调用栈。</div>}
-              {snap.paused && snap.frames.length === 0 && <div className="dbg-empty">读取调用栈…</div>}
-              {snap.frames.map((f) => (
-                <button
-                  type="button"
-                  key={f.id}
-                  className="dbg-frame"
-                  data-active={f.id === snap.frameId || undefined}
-                  title={f.source?.path ? `${f.source.path}:${f.line}` : f.name}
-                  onClick={() => void selectFrame(f.id)}
-                >
-                  <span className="dbg-frame-name">{f.name}</span>
-                  <span className="dbg-frame-loc">
-                    {f.source?.path ? `${baseName(f.source.path)}:${f.line}` : "—"}
-                  </span>
-                </button>
-              ))}
-            </div>
+            <DebugStack snap={snap} onOpenAt={onOpenAt} />
           </div>
           <div className="dbg-col">
             <div className="dbg-col-h">监视</div>
@@ -201,8 +222,17 @@ export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number
               <DebugVariables paused={snap.paused} scopes={snap.scopes} variables={snap.variables} />
             </div>
           </div>
+          <div className="dbg-col">
+            <DebugBreakpoints
+              availableFilters={snap.status.exceptionFilters ?? []}
+              enabledFilters={snap.enabledFilters}
+              onOpenAt={onOpenAt}
+            />
+          </div>
         </div>
       )}
+
+      {consoleOpen && attached && <DebugConsole paused={snap.paused} entries={snap.console} />}
     </div>
   );
 }

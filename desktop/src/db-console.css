@@ -25,7 +25,7 @@
 .e-prod { --env: var(--destructive); --env-ink: var(--destructive-ink); }
 .e-other { --env: var(--muted-foreground); --env-ink: var(--muted-foreground); }
 .dbx-edot { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--env)); flex-shrink: 0; }
-.dbx-echip { font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 8px; background: hsl(var(--env) / .15); color: hsl(var(--env-ink)); font-weight: 600; flex-shrink: 0; white-space: nowrap; }
+.dbx-echip { font-size: 12px; line-height: 16px; padding: 0 6px; border-radius: 8px; background: hsl(var(--env) / .15); color: hsl(var(--env-ink)); font-weight: 600; flex-shrink: 0; white-space: nowrap; }
 .dbx-mono { font-family: "Cascadia Mono", Consolas, monospace; }
 .dbx-muted { color: hsl(var(--muted-foreground)); }
 .dbx-sp { flex: 1; }
@@ -262,7 +262,7 @@
 .dbx-plan tr[data-diff="gone"] td.op { opacity: .6; text-decoration: line-through; }
 .dbx-update { flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; font-size: 12.5px; }
 .dbx-update .big { font-size: 15px; font-weight: 600; }
-.dbx-err { margin: 12px; padding: 10px 12px; border-radius: 8px; background: hsl(var(--destructive) / .08); border: 1px solid hsl(var(--destructive) / .25); color: hsl(var(--destructive-ink)); font-size: 12.5px; line-height: 1.6; }
+.dbx-err { margin: 12px; padding: 10px 12px; border-radius: 8px; background: hsl(var(--destructive) / .08); border: 1px solid hsl(var(--destructive) / .25); color: hsl(var(--destructive-ink)); font-size: 13px; line-height: 1.6; }
 .dbx-err code { font-family: "Cascadia Mono", Consolas, monospace; background: hsl(var(--card)); padding: 0 4px; border-radius: 4px; margin: 0 3px; cursor: pointer; }
 .dbx-err pre { margin-top: 6px; font: 11.5px/17px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; color: hsl(var(--foreground) / .8); }
 

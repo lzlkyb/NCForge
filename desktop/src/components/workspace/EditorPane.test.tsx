@@ -54,6 +54,8 @@ vi.mock("../../lib/monacoSetup", () => ({
       registerDocumentHighlightProvider: vi.fn(),
       registerSelectionRangeProvider: vi.fn(),
       registerCompletionItemProvider: vi.fn(),
+      // 调试悬停：随编辑器创建时注册一次
+      registerHoverProvider: vi.fn(),
     },
     Range: class {},
     KeyMod: { CtrlCmd: 2048, Alt: 512 },

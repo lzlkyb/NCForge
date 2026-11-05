@@ -7,7 +7,18 @@ import { setSession } from "../../lib/workspaceSession";
 
 vi.mock("../../lib/debugSession", () => ({
   useDebugSnapshot: () => ({
-    status: { state: "stopped", module: null, dapPort: null, jdwpPort: null, message: "" },
+    target: "server",
+    // 断点清单只在已附加时渲染，所以这里直接给 attached
+    status: {
+      target: "server",
+      state: "attached",
+      module: "nc-forge-shadow",
+      dapPort: 5005,
+      jdwpPort: 5006,
+      jdwpHost: "127.0.0.1",
+      message: "",
+      exceptionFilters: [{ filter: "caught", label: "Caught Exceptions", default: false }],
+    },
     paused: false,
     threadId: null,
     threads: [],
@@ -19,14 +30,32 @@ vi.mock("../../lib/debugSession", () => ({
     stopSeq: 0,
     busy: null,
     error: null,
+    targets: {
+      server: { state: "attached", paused: false, busy: null },
+      client: { state: "stopped", paused: false, busy: null },
+      remote: { state: "stopped", paused: false, busy: null },
+    },
+    anyPaused: false,
+    stopReason: null,
+    stopText: null,
+    exception: null,
+    console: [],
+    enabledFilters: [],
   }),
   attachDebugger: vi.fn(),
   detachDebugger: vi.fn(),
+  selectDebugTarget: vi.fn(),
   pauseDebug: vi.fn(),
   resumeDebug: vi.fn(),
   selectFrame: vi.fn(),
   stepDebug: vi.fn(),
   expandVariables: vi.fn(),
+  setVariableValue: vi.fn(),
+  evaluateConsole: vi.fn(),
+  clearConsole: vi.fn(),
+  setExceptionFilter: vi.fn(),
+  refreshThreadsNow: vi.fn(),
+  selectThread: vi.fn(),
   MAX_DEBUG_WATCHES: 12,
   addWatch: vi.fn(),
   removeWatch: vi.fn(),
@@ -59,13 +88,15 @@ afterEach(async () => {
   container.remove();
 });
 
-describe("调试面板的全局断点清理", () => {
+describe("调试面板的断点清单", () => {
   it("显示当前断点数，点一下清空并落盘", async () => {
     await act(async () => root.render(<DebugPanel onOpenAt={vi.fn()} />));
+    const header = document.querySelector(".dbg-bp-col .dbg-col-h");
+    expect(header?.textContent).toContain("· 2");
     const clear = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) =>
       b.title.includes("清空当前工作区"),
     )!;
-    expect(clear.textContent).toContain("（2）");
+    expect(clear.disabled).toBe(false);
 
     await act(async () => clear.click());
     expect(JSON.parse(localStorage.getItem(KEY) ?? "null")).toEqual([]);

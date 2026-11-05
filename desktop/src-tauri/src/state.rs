@@ -39,6 +39,9 @@ pub struct AppState {
     /// 用 `std::sync::Mutex` 而不是 tokio 的：起停是阻塞操作（杀进程要等 200ms 级），
     /// 调用方都在 `spawn_blocking` 里持锁，不需要 await 语义。
     pub server: std::sync::Mutex<ServerRun>,
+    /// NC 客户端（Swing `JStarter`）的运行态。与中间件是两个独立进程，不能共用一个槽位：
+    /// 客户端可以连别的机器上的服务，也可能在中间件停止后继续开着。
+    pub client: std::sync::Mutex<ServerRun>,
     /// SVN 桥（常驻 JVM）。`None` = 还没用过；`Err` 由命令层转成可读错误。
     ///
     /// 存 `Arc` 是因为命令层要把它从锁里拿出来在 `spawn_blocking` 里用——桥内部自己
@@ -120,6 +123,7 @@ impl AppState {
             config_write: tokio::sync::Mutex::new(()),
             config_dir,
             server: std::sync::Mutex::new(ServerRun::default()),
+            client: std::sync::Mutex::new(ServerRun::default()),
             svn: std::sync::Mutex::new(None),
             db: std::sync::Mutex::new(Default::default()),
             db_policies: std::sync::Mutex::new(std::collections::HashMap::new()),

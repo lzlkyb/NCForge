@@ -11,7 +11,7 @@ vi.mock("../lib/switchWorkspace",()=>({applyWorkspace:h.apply}));
 vi.mock("../components/ui/toast",()=>({toast:h.toast}));
 (globalThis as unknown as {IS_REACT_ACT_ENVIRONMENT:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
 let api:ReturnType<typeof useProjectSwitch>,root:Root,host:HTMLDivElement;
-function Harness(){api=useProjectSwitch({root:"C:\\old",projects:[],queryClient:new QueryClient(),setRoot:vi.fn(),setEditingRoot:vi.fn(),openFile:vi.fn()});return null;}
+function Harness(){api=useProjectSwitch({root:"C:\\old",projects:[],queryClient:new QueryClient(),setRoot:vi.fn(),openFile:vi.fn()});return null;}
 beforeEach(()=>{vi.clearAllMocks();clearCompletedOperations();h.ensure.mockResolvedValue(true);h.apply.mockResolvedValue("C:\\new");host=document.createElement("div");document.body.append(host);root=createRoot(host);act(()=>root.render(<Harness/>));});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 describe("工程切换等待",()=>{

@@ -82,6 +82,7 @@ const variantProgress: Record<ToastVariant, string> = {
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [showErrors, setShowErrors] = useState(false);
   const stackRef = useAutoAnimateRM<HTMLDivElement>();
 
   const addToast = useCallback((message: string, variant: ToastVariant = "info") => {
@@ -91,7 +92,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       // 换新 id 让倒计时与进场动画重新开始，而不是静默续期
       const rest = prev.filter((t) => t.message !== message || t.variant !== variant);
       const next = [...rest, { id, message, variant }];
-      return next.length > MAX_TOASTS ? next.slice(next.length - MAX_TOASTS) : next;
+      // 显示上限不能删除未处理错误；普通通知仅保留最近几条。
+      const ordinary = next.filter(t => t.variant !== "error").slice(-MAX_TOASTS);
+      return next.filter(t => t.variant === "error" || ordinary.includes(t));
     });
   }, []);
 
@@ -101,6 +104,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   // 批量失败时用户最想要的是「把这一串贴给同事/日志」，逐条复制不现实。
   const errors = toasts.filter((t) => t.variant === "error");
+  const visibleToasts = showErrors && errors.length > 0 ? errors : toasts.slice(-MAX_TOASTS);
   const copyAllErrors = useCallback(() => {
     const text = errors.map((t) => t.message).join("\n");
     navigator.clipboard.writeText(text).then(
@@ -121,13 +125,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {/* Toast 容器：右下角堆叠，z-[2000] 在 Header 之上，错误项用 role=alert 走 assertive 播报 */}
       <div
         ref={stackRef}
-        className="pointer-events-none fixed bottom-4 right-4 z-[2000] flex flex-col gap-2 toast-stack"
+        className="pointer-events-none fixed bottom-4 right-4 z-[2000] flex max-h-[calc(100dvh-2rem)] flex-col gap-2 overflow-y-auto toast-stack"
         role="region"
         aria-label="通知"
         aria-live="polite"
       >
         {errors.length > 0 && (
           <div className="pointer-events-auto flex justify-end">
+            <button type="button" onClick={() => setShowErrors(v => !v)} aria-expanded={showErrors}
+              className="rounded-full border border-border bg-card/95 px-3 py-1 text-xs text-foreground">
+              {showErrors ? "返回通知" : `查看错误（${errors.length}）`}
+            </button>
             <button
               type="button"
               onClick={copyAllErrors}
@@ -137,7 +145,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             </button>
           </div>
         )}
-        {toasts.map((t) => (
+        {visibleToasts.map((t) => (
           // FLIP 只移动槽位，避免覆盖通知自身的 transform 进退场。
           <div key={t.id}><ToastItemView item={t} onDismiss={removeToast} /></div>
         ))}

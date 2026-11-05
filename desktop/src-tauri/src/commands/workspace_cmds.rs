@@ -7,7 +7,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::encoding_reg::{self, EncodingMark, EncodingRegistry};
 use crate::security::path::display_path;
@@ -96,6 +97,40 @@ pub(crate) async fn allowed_read_roots(state: &AppState) -> Vec<String> {
     })
     .await
     .unwrap_or_else(|_| vec![fallback])
+}
+
+/// 选择工程目录（系统文件夹对话框）。用户取消返回 null。
+///
+/// 对话框由后端拉起，前端不直接拿 `dialog:` 权限：插件权限一旦授予 WebView，
+/// 任意脚本都能弹文件对话框；这里前端只拿到一个用户明确点选的路径字符串。
+#[tauri::command]
+pub async fn pick_folder(
+    app: tauri::AppHandle,
+    title: Option<String>,
+    default_path: Option<String>,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        // 挂到主窗口上：对话框与工作台同一个 owner，切换窗口时不会跑到后面去
+        let owner = app.get_webview_window("main");
+        let mut dialog = app.dialog().file();
+        if let Some(w) = &owner {
+            dialog = dialog.set_parent(w);
+        }
+        let dialog = match title.filter(|t| !t.trim().is_empty()) {
+            Some(t) => dialog.set_title(t),
+            None => dialog,
+        };
+        let dialog = match default_path.filter(|p| PathBuf::from(p.as_str()).is_dir()) {
+            Some(p) => dialog.set_directory(p),
+            None => dialog,
+        };
+        dialog
+            .blocking_pick_folder()
+            // `simplified` 去掉 Windows 的 `\\?\` 前缀，和 set_workspace 的展示形态一致
+            .map(|p| p.simplified().to_string())
+    })
+    .await
+    .map_err(|e| format!("文件夹选择器异常：{e}"))
 }
 
 /// 读当前工作区根（未选择为 null）。

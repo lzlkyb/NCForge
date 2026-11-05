@@ -2,9 +2,9 @@ import { useViewActive } from "../../lib/viewActivity";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
-import { serverClearLog } from "../../lib/server";
+import { serverClearLog, type LogClearResult } from "../../lib/server";
 import { countLevels, filterLines, formatBytes, type LogLine } from "../../lib/serverLog";
-import { useServerLog } from "../../hooks/useServerLog";
+import { useServerLog, type FetchLog } from "../../hooks/useServerLog";
 import { logPanelStore, useLogPanelForm } from "../../lib/logPanelStore";
 
 /** 一次最多渲染多少行。日志保留 4000 行，DOM 只挂最后这些—— */
@@ -22,6 +22,12 @@ interface Props {
   appHidden: boolean;
   onReveal: () => void;
   onCleared: () => void;
+  /** 日志来源：只影响文案与默认取数（中间件 / 客户端各一个日志文件）。 */
+  target?: "middleware" | "client";
+  /** 自定义取数（客户端传 `clientLog`）；不传 = 中间件日志。 */
+  fetchLog?: FetchLog;
+  /** 自定义清空（客户端传 `clientClearLog`）；不传 = 中间件日志。 */
+  clearLog?: () => Promise<LogClearResult>;
 }
 
 /**
@@ -30,9 +36,22 @@ interface Props {
  * 为什么轮询而不是订阅事件：日志是「按 offset 拉增量」，重复拉同一段不会出错，
  * 漏一拍只是晚 0.5 秒；事件方式丢一条就永久缺行，而排查问题时少的偏偏是那条。
  */
-export function LogPanel({ active, generation, logPath, logSize, appHidden, onReveal, onCleared }: Props) {
+export function LogPanel({
+  active,
+  generation,
+  logPath,
+  logSize,
+  appHidden,
+  onReveal,
+  onCleared,
+  target = "middleware",
+  fetchLog,
+  clearLog,
+}: Props) {
   const viewActive = useViewActive();
-  const { lines, error, reset } = useServerLog(active, generation, appHidden);
+  const { lines, error, reset } = useServerLog(active, generation, appHidden, fetchLog);
+  const who = target === "client" ? "客户端" : "中间件";
+  const archiveName = target === "client" ? "client.log.1" : "middleware.log.1";
   // P2-9：级别/关键字过滤与跟随/换行进模块级仓库——「服务页看日志 → 文件页
   // 改代码 → 回来看新日志」是排查动线，过滤器不能随切页重置。
   const { level, keyword, follow, wrap } = useLogPanelForm();
@@ -95,7 +114,7 @@ export function LogPanel({ active, generation, logPath, logSize, appHidden, onRe
 
   const onClear = async () => {
     try {
-      const result = await serverClearLog();
+      const result = await (clearLog ?? serverClearLog)();
       // 运行中清空只是「从现在开始看」：文件没动，偏移要快进到末尾，
       // 否则归零后旧内容会被整份读回来。
       reset(result.offset);
@@ -168,8 +187,8 @@ export function LogPanel({ active, generation, logPath, logSize, appHidden, onRe
           className="sv-icon-btn"
           title={
             active
-              ? "清空当前显示（服务运行中：磁盘文件不动，只是从现在开始看；旧内容还在日志文件里）"
-              : "清空日志（旧的存为 middleware.log.1）"
+              ? `${who}运行中：已清屏，磁盘文件不动，只是从现在开始看；旧内容还在日志文件里`
+              : `清空日志（旧的存为 ${archiveName}）`
           }
           onClick={() => void onClear()}
         >
@@ -181,7 +200,9 @@ export function LogPanel({ active, generation, logPath, logSize, appHidden, onRe
         {error && <div className="sv-log-empty">读日志失败：{error}</div>}
         {!error && shown.length === 0 && (
           <div className="sv-log-empty">
-            {lines.length === 0 ? "还没有输出。点「启动」后这里会跟随中间件的控制台输出。" : "没有匹配的行。"}
+            {lines.length === 0
+              ? `还没有输出。点「启动」后这里会跟随${who}的控制台输出。`
+              : "没有匹配的行。"}
           </div>
         )}
         {omitted > 0 && <div className="sv-log-more">前 {omitted} 行未渲染（只显示最新 {MAX_RENDER} 行）</div>}

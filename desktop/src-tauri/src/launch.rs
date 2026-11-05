@@ -25,10 +25,17 @@ use crate::server::ServerSpec;
 /// 中间件主类（开发态直启，不走 `bin/startup.bat` 的 NCStarter）。
 pub const MIDDLEWARE_MAIN_CLASS: &str = "ufmiddle.start.tomcat.StartDirectServer";
 
-// 客户端（`nc.starter.test.JStarter`）的启动要素暂时不在这里拼。
-// 原先有一份 `default_client_vm_args(server, port)`：没人调用，而它的文档与示例都写着
-// 「连本机 80 端口」——等以后真接客户端启动时，照抄就是「中间件改到 8081、客户端连 80」。
-// 要接的时候从 `nc_home::read_endpoints` 取端口（`-Dnc.jstart.port`），别写字面量。
+/// NC 客户端主类（Swing 界面）。
+///
+/// Eclipse 的 `newar_JStarter.launch` 用的就是它；类在
+/// `modules/riart/client/lib/uiriart_riasfbaseLevel-1.jar` 里。
+pub const CLIENT_MAIN_CLASS: &str = "nc.starter.test.JStarter";
+
+/// 客户端堆上限默认值（MB）。
+///
+/// Eclipse 启动配置写的是 `-Xmx768m`。客户端只画 Swing 界面，不像中间件要装 245 个
+/// 模块；768M 是官方验证过的值，用户仍可在服务页改。
+pub const DEFAULT_CLIENT_HEAP_MB: u32 = 768;
 
 /// classpath 条目的两种身份：收目录下的 jar，或把目录本身当类/资源根。
 #[derive(Clone, Copy)]
@@ -358,6 +365,210 @@ fn middleware_spec_inner(
         java: java.to_path_buf(),
         main_class: MIDDLEWARE_MAIN_CLASS.to_string(),
         vm_args,
+        classpath_jar,
+        work_dir: nc_home.to_path_buf(),
+        program_args: Vec::new(),
+    };
+    Ok((spec, entries.len()))
+}
+
+/// 客户端堆上限的生效值。规则与 `effective_heap_mb` 相同，只换默认值。
+pub fn effective_client_heap_mb(configured: Option<u32>) -> u32 {
+    configured.map_or(DEFAULT_CLIENT_HEAP_MB, |mb| {
+        mb.clamp(HEAP_MIN_MB, HEAP_MAX_MB)
+    })
+}
+
+/// 客户端要连的中间件地址：`-Dnc.jstart.server` / `-Dnc.jstart.port`。
+///
+/// 端口必须取自 `ierp/bin/prop.xml`（用户可能把 80 改成 8081）。地址也跟配置走：
+/// 配了具体局域网 IP 时客户端要连那个 IP；`0.0.0.0` / `::` 表示监听所有网卡，
+/// 客户端连回环即可（Eclipse 的工作区变量值也是 `127.0.0.1`）。
+pub fn client_endpoint(home: &Path) -> (String, u16) {
+    client_endpoint_host_port(&crate::nc_home::read_endpoints(home))
+}
+
+/// 从已读好的端点里取客户端要连的主机与端口。
+///
+/// 单独抽出来是因为状态查询已经读过一次 `prop.xml`：再调 `client_endpoint(home)`
+/// 会把同一个文件读两遍，而这段逻辑还需要处理 `0.0.0.0` / `::` 的映射。
+pub fn client_endpoint_host_port(ep: &crate::nc_home::ServerEndpoints) -> (String, u16) {
+    let host = match ep.http_address.as_deref().map(str::trim) {
+        Some(a) if !a.is_empty() && a != "0.0.0.0" && a != "::" && a != "[::]" => a.to_string(),
+        _ => "127.0.0.1".to_string(),
+    };
+    (host, ep.http_port)
+}
+
+/// 客户端 VM 参数。
+///
+/// 对齐 Eclipse 的 `newar_JStarter.launch`：`-Dnc.runMode=develop`、
+/// `-Dnc.jstart.server`、`-Dnc.jstart.port`、`-Xmx768m`。Eclipse 老配置里的
+/// `-XX:MaxPermSize=256m` 在 1.8 上是被忽略的空参数（Metaspace 才是真正生效的），
+/// 这里写成 `-XX:MaxMetaspaceSize=256m`，避免日志里出现一行无意义的警告。
+pub fn client_vm_args(host: &str, port: u16, heap_mb: u32, debug_port: Option<u16>) -> Vec<String> {
+    let mut args = vec![
+        "-Dnc.runMode=develop".into(),
+        format!("-Dnc.jstart.server={host}"),
+        format!("-Dnc.jstart.port={port}"),
+        format!("-Xmx{heap_mb}m"),
+        "-XX:MaxMetaspaceSize=256m".into(),
+    ];
+    if let Some(port) = debug_port {
+        // 与中间件同一条红线：JDWP 无鉴权，只许绑回环
+        args.push(format!(
+            "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:{port}"
+        ));
+    }
+    args
+}
+
+/// 客户端 classpath：复刻 Eclipse UAP 插件的 `ClientClasspathEntry`。
+///
+/// 顺序（也是优先级）：
+/// 1. 工程侧输出目录（`.classpath` 解析出来，不含 NC home 的模块 classes）；
+/// 2. `Product_Common_Library`：NC home 根 + `external/` 的 `computeStandCP`；
+/// 3. `Module_Public_Library`：每个模块的 `computeStandCP`（15 层里的 public 作用域）；
+/// 4. `Module_Client_Library`：每个模块的 `client/` 再走 `computeStandCP`。
+///    `uap*` 与当前工程同名模块算「accessible」排前面，其余算「discouraged」排后面——
+///    两者都进 classpath，只是 Eclipse 会给后者打警告。这里不读那个偏好设置。
+/// 5. `Module_Lang_Library`：`langlib/` 下一层 jar。
+///
+/// 已知差异：Eclipse 还会按 `FIELD_EX_MODULES` 排除显式 ex 模块，本工具不读该偏好，
+/// 因此这些模块的 public/client 仍会进 classpath。多收通常只是清单更长，不会缺类；
+/// 若确有 ex 模块与主模块同名类冲突，以 Eclipse 的清单为准时需要把该偏好的实际值
+/// 补进来（未做是因为它存在 Eclipse 工作区变量里，跨机器不可得）。
+///
+/// **不包含** `middleware` / `framework` / `ant` / `ejb`，也不包含
+/// `modules/*/META-INF`（`Module_Private_Library`）——这是插件的客户端规则，
+/// 与服务端 7000+ jar 的全量 classpath 是两回事。
+pub fn client_classpath(
+    home: &Path,
+    project_dirs: &[PathBuf],
+    current_module: Option<&str>,
+) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = project_dirs
+        .iter()
+        .filter(|p| p.is_dir())
+        .cloned()
+        .collect();
+
+    // Product_Common_Library：NC home 根 + external
+    out.extend(crate::nc_index::stand_cp(home));
+    out.extend(crate::nc_index::stand_cp(
+        &home.join("external"),
+    ));
+
+    let modules = home.join("modules");
+    let names = crate::nc_index::module_names(home);
+
+    // Module_Public_Library
+    for name in &names {
+        out.extend(crate::nc_index::stand_cp(&modules.join(name)));
+    }
+
+    // Module_Client_Library：accessible 在前，discouraged 在后
+    let accessible = |name: &str| {
+        name.to_ascii_lowercase().starts_with("uap")
+            || current_module.is_some_and(|m| name.eq_ignore_ascii_case(m))
+    };
+    for name in names.iter().filter(|n| accessible(n)) {
+        out.extend(crate::nc_index::stand_cp(&modules.join(name).join("client")));
+    }
+    for name in names.iter().filter(|n| !accessible(n)) {
+        out.extend(crate::nc_index::stand_cp(&modules.join(name).join("client")));
+    }
+
+    // Module_Lang_Library：langlib 下的 jar 直接放在目录里，没有 lib/ 这一层
+    out.extend(crate::nc_index::one_level_archives(&home.join("langlib")));
+    out
+}
+
+/// 拼出客户端的完整启动要素（写好 pathing jar，返回可直接起进程的 `ServerSpec`）。
+///
+/// `work_dir` 只用来放 pathing jar；客户端进程的工作目录仍是 NC home
+/// （Eclipse 的 `ATTR_WORKING_DIRECTORY = FIELD_NC_HOME`）。
+pub fn client_spec(
+    nc_home: &Path,
+    java: &Path,
+    project_root: &Path,
+    work_dir: &Path,
+    heap_mb: u32,
+    debug_port: Option<u16>,
+    overrides: &[crate::eclipse_cp::LinkedOverride],
+) -> Result<(ServerSpec, usize), String> {
+    client_spec_inner(
+        nc_home,
+        java,
+        project_root,
+        work_dir,
+        LaunchTuning { heap_mb, debug_port },
+        overrides,
+        true,
+    )
+}
+
+/// 只算清单、**不写** pathing jar 的客户端版本，给「命令行」预览用。
+pub fn client_spec_preview(
+    nc_home: &Path,
+    java: &Path,
+    project_root: &Path,
+    work_dir: &Path,
+    heap_mb: u32,
+    debug_port: Option<u16>,
+    overrides: &[crate::eclipse_cp::LinkedOverride],
+) -> Result<(ServerSpec, usize), String> {
+    client_spec_inner(
+        nc_home,
+        java,
+        project_root,
+        work_dir,
+        LaunchTuning { heap_mb, debug_port },
+        overrides,
+        false,
+    )
+}
+
+/// 两个只在启动时生效的 JVM 参数。打包成一个结构是给 `client_spec_inner`
+/// 控制参数个数（clippy 上限 7），同时让「堆 + 调试端口」这对语义保持成组。
+#[derive(Clone, Copy)]
+struct LaunchTuning {
+    heap_mb: u32,
+    debug_port: Option<u16>,
+}
+
+fn client_spec_inner(
+    nc_home: &Path,
+    java: &Path,
+    project_root: &Path,
+    work_dir: &Path,
+    tuning: LaunchTuning,
+    overrides: &[crate::eclipse_cp::LinkedOverride],
+    write_jar: bool,
+) -> Result<(ServerSpec, usize), String> {
+    if !java.is_file() {
+        return Err(format!("找不到 NC 自带的 java：{}", java.display()));
+    }
+    // 客户端只保留工程侧输出，NC home 的模块类由下面四个库提供；
+    // 再拼 `module_class_dirs` 会让同一批类出现两次、顺序也偏离 Eclipse。
+    let project_dirs = crate::eclipse_cp::project_outputs(project_root, overrides);
+    let current_module = project_root.file_name().and_then(|n| n.to_str());
+    let entries = client_classpath(nc_home, &project_dirs, current_module);
+    if entries.is_empty() {
+        return Err(format!(
+            "在 {} 下没找到任何客户端 classpath 条目：这不是能启动客户端的 NC 安装目录",
+            nc_home.display()
+        ));
+    }
+    let classpath_jar = work_dir.join("client-cp.jar");
+    if write_jar {
+        write_pathing_jar(&classpath_jar, &entries)?;
+    }
+    let (host, port) = client_endpoint(nc_home);
+    let spec = ServerSpec {
+        java: java.to_path_buf(),
+        main_class: CLIENT_MAIN_CLASS.to_string(),
+        vm_args: client_vm_args(&host, port, tuning.heap_mb, tuning.debug_port),
         classpath_jar,
         work_dir: nc_home.to_path_buf(),
         program_args: Vec::new(),
@@ -936,5 +1147,159 @@ mod tests {
         .unwrap_err();
         assert!(err.contains("找不到 NC 自带的 java"), "{err}");
         cleanup(&home);
+    }
+
+    /// 客户端 VM 参数对齐 Eclipse 的 `JStarter` 启动配置。
+    #[test]
+    fn 客户端_vm_参数带连接地址与默认堆() {
+        let args = client_vm_args("192.168.1.20", 8081, DEFAULT_CLIENT_HEAP_MB, None);
+        assert!(args.iter().any(|a| a == "-Dnc.runMode=develop"));
+        assert!(args.iter().any(|a| a == "-Dnc.jstart.server=192.168.1.20"));
+        assert!(args.iter().any(|a| a == "-Dnc.jstart.port=8081"));
+        assert!(
+            args.iter().any(|a| a == "-Xmx768m"),
+            "客户端默认堆应为 768M：{args:?}"
+        );
+        assert!(
+            !args.iter().any(|a| a.contains("jdwp")),
+            "没开调试不该带 JDWP：{args:?}"
+        );
+        // Eclipse 老配置的 MaxPermSize 在 JDK 8 上无效，不能再原样搬过来
+        assert!(!args.iter().any(|a| a.contains("MaxPermSize")));
+    }
+
+    #[test]
+    fn 客户端调试参数只绑回环且不_suspend() {
+        let args = client_vm_args("127.0.0.1", 80, DEFAULT_CLIENT_HEAP_MB, Some(61539));
+        let jdwp: Vec<&String> = args
+            .iter()
+            .filter(|a| a.starts_with("-agentlib:jdwp"))
+            .collect();
+        assert_eq!(jdwp.len(), 1, "JDWP 参数只能有一个：{args:?}");
+        assert!(jdwp[0].contains("address=127.0.0.1:61539"), "{jdwp:?}");
+        assert!(!jdwp[0].contains("0.0.0.0"), "JDWP 不能敞开给同网段");
+        assert!(jdwp[0].contains("suspend=n"), "suspend=y 会让客户端卡在启动前");
+    }
+
+    /// 通配监听地址（`0.0.0.0` / `::`）下客户端应连回环，而不是拿通配地址去 connect。
+    #[test]
+    fn 客户端端点把通配地址回落成回环() {
+        let ep = |addr: Option<&str>, port: u16| crate::nc_home::ServerEndpoints {
+            http_port: port,
+            http_address: addr.map(str::to_string),
+            service_port: None,
+            config_path: "ierp/bin/prop.xml".into(),
+            from_config: true,
+        };
+        assert_eq!(client_endpoint_host_port(&ep(Some("0.0.0.0"), 8081)), ("127.0.0.1".into(), 8081));
+        assert_eq!(client_endpoint_host_port(&ep(Some("::"), 80)), ("127.0.0.1".into(), 80));
+        assert_eq!(
+            client_endpoint_host_port(&ep(Some("192.168.1.20"), 8081)),
+            ("192.168.1.20".into(), 8081)
+        );
+        assert_eq!(client_endpoint_host_port(&ep(None, 80)), ("127.0.0.1".into(), 80));
+    }
+
+    /// classpath 必须复刻 Eclipse 客户端 provider 的五段顺序，并排除中间件/私有库。
+    #[test]
+    fn 客户端_classpath_按_eclipse_规则排序并排除中间件() {
+        let home = temp_dir("client-cp-home");
+        let write = |rel: &str| {
+            let p = home.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(&p, b"x").unwrap();
+            p
+        };
+        write("lib/product.jar");
+        write("external/lib/ext.jar");
+        write("middleware/mw.jar");
+        write("framework/fw.jar");
+        write("ant/ant.jar");
+        write("ejb/ejb.jar");
+        write("modules/aa/META-INF/private.jar");
+        write("modules/aa/lib/public.jar");
+        fs::create_dir_all(home.join("modules").join("aa").join("classes")).unwrap();
+        write("modules/aa/client/lib/aa-client.jar");
+        write("modules/uapbase/client/lib/uap-client.jar");
+        write("modules/zz/client/lib/zz-client.jar");
+        write("langlib/lang.jar");
+
+        let project = temp_dir("client-cp-proj");
+        let out = project.join("bin");
+        fs::create_dir_all(&out).unwrap();
+
+        let cp = client_classpath(&home, std::slice::from_ref(&out), Some("aa"));
+        let pos = |needle: &str| {
+            cp.iter()
+                .position(|p| p.to_string_lossy().replace('\\', "/").ends_with(needle))
+                .unwrap_or_else(|| panic!("classpath 缺 {needle}：{cp:?}"))
+        };
+
+        assert_eq!(cp.first(), Some(&out), "工程输出目录必须排第一");
+        assert!(cp.iter().any(|p| p.ends_with("public.jar") && p.to_string_lossy().contains("modules")));
+        assert!(
+            cp.iter().any(|p| p.ends_with("classes") || p.ends_with("resources")),
+            "computeStandCP 的 classes/resources 目录应被收进来：{cp:?}"
+        );
+        // 五段顺序：产品公共库 → 模块 public → 客户端 client → langlib
+        assert!(pos("product.jar") < pos("public.jar"), "产品公共库先于模块 public");
+        assert!(pos("ext.jar") < pos("public.jar"), "external 同属产品公共库");
+        assert!(pos("public.jar") < pos("aa-client.jar"), "模块 public 先于 client");
+        assert!(pos("aa-client.jar") < pos("lang.jar"), "langlib 最后");
+        // accessible（uap* / 当前模块）排在其它模块之前
+        assert!(pos("aa-client.jar") < pos("uap-client.jar"), "当前模块排前");
+        assert!(pos("uap-client.jar") < pos("zz-client.jar"), "uap* 排在普通模块前");
+
+        let joined = cp
+            .iter()
+            .map(|p| p.to_string_lossy().to_ascii_lowercase())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for banned in ["middleware", "framework", "ant", "ejb", "meta-inf"] {
+            assert!(!joined.contains(banned), "客户端 classpath 不该含 {banned}");
+        }
+        cleanup(&home);
+        cleanup(&project);
+    }
+
+    #[test]
+    fn 客户端_spec_写清单且工作目录是_nc_home() {
+        let home = temp_dir("client-spec-home");
+        fs::create_dir_all(home.join("lib")).unwrap();
+        fs::write(home.join("lib").join("product.jar"), b"x").unwrap();
+        let java = home.join("ufjdk").join("bin").join("java.exe");
+        fs::create_dir_all(java.parent().unwrap()).unwrap();
+        fs::write(&java, b"stub").unwrap();
+
+        let project = temp_dir("client-spec-proj");
+        fs::write(
+            project.join(".classpath"),
+            "<classpath><classpathentry kind=\"src\" path=\"src\" output=\"bin\"/></classpath>",
+        )
+        .unwrap();
+        fs::create_dir_all(project.join("bin")).unwrap();
+        let work = temp_dir("client-spec-work");
+
+        let (spec, entries) = client_spec(
+            &home,
+            &java,
+            &project,
+            &work,
+            DEFAULT_CLIENT_HEAP_MB,
+            None,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(spec.main_class, CLIENT_MAIN_CLASS);
+        assert_eq!(spec.work_dir, home, "客户端工作目录必须是 NC home");
+        assert!(spec.classpath_jar.is_file(), "pathing jar 必须写出来");
+        assert!(entries >= 2, "至少应有工程 bin + 产品 jar：{entries}");
+        assert!(spec
+            .vm_args
+            .iter()
+            .any(|a| a == "-Dnc.jstart.server=127.0.0.1"));
+        cleanup(&home);
+        cleanup(&project);
+        cleanup(&work);
     }
 }

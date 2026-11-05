@@ -15,13 +15,17 @@ const STATUS_TEXT: Record<string, string> = { ok: "通过", warn: "需确认", b
 export function MetaPublish({ component, module, path }: { component: string; module: string; path: string }) {
   const [probe, setProbe] = useState<BmfPublishProbe | null>(null);
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   const run = useCallback(async () => {
     setBusy(true);
+    setErr(null);
     try {
       setProbe(await bmfPublishProbe(component, module, path));
     } catch (e) {
-      toast(`探针失败：${e}`, "error");
+      // 失败时清掉上一次结果：留着旧的「前置条件通过」比什么都不显示更危险。
+      setProbe(null);
+      setErr(String(e));
     } finally {
       setBusy(false);
     }
@@ -60,6 +64,7 @@ export function MetaPublish({ component, module, path }: { component: string; mo
       </div>
 
       {busy && <p className="meta-note">正在检查…</p>}
+      {!busy && err && <p className="meta-error">探针失败：{err}</p>}
 
       {probe && !busy && (
         <>

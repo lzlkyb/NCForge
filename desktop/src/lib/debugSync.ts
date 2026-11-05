@@ -3,11 +3,29 @@
 // 与 `debugSession.ts` 分开：那边管「会话停在哪、栈和变量是什么」，这边只管
 // 「本地断点清单怎样落到适配器上」。两件事的触发源不同（用户点 gutter vs DAP 事件），
 // 合在一个文件里会把两个状态机缠在一起。
-import { bpKey, getBreakpoints, groupBreakpoints, subscribeBreakpoints } from "./breakpoints";
+//
+// 中间件与客户端是两个独立 JVM：各自记一份「已下发签名」与 verified 状态。
+// 一个断点只要在任一边落点成功就画实心圆——同一份源码的同一行，两边是否都能解析
+// 由各自的 classpath 决定，不能因为客户端没这个类就把中间件的落点也涂掉。
+import type { DebugTarget } from "./debug";
+import { DEBUG_TARGETS } from "./debug";
+import { bpKey, breakpointGroupSig, getBreakpoints, groupBreakpoints, subscribeBreakpoints } from "./breakpoints";
 import { debugSetBreakpoints } from "./debug";
 import type { DapBreakpoint } from "./debug";
 
-let verified: Record<string, boolean> = {};
+const emptyMap = (): Record<DebugTarget, Map<string, { path: string; sig: string }>> => ({
+  server: new Map(),
+  client: new Map(),
+  remote: new Map(),
+});
+
+const emptyVerified = (): Record<DebugTarget, Record<string, boolean>> => ({
+  server: {},
+  client: {},
+  remote: {},
+});
+
+let verified = emptyVerified();
 const verifiedListeners = new Set<() => void>();
 
 export const getVerifiedMap = () => verified;
@@ -19,35 +37,37 @@ export function subscribeVerified(cb: () => void): () => void {
   };
 }
 
-/** 某个断点适配器是否落点（gutter 画空心圆用）。 */
+/** 某个断点是否在任一已附加的目标上落点（gutter 画空心圆用）。 */
 export function isVerified(path: string, line: number): boolean {
-  return verified[bpKey(path, line)] === true;
+  const key = bpKey(path, line);
+  return DEBUG_TARGETS.some((t) => verified[t][key] === true);
 }
 
-function applyVerified(path: string, list: DapBreakpoint[]): void {
-  const next = { ...verified };
+function applyVerified(target: DebugTarget, path: string, list: DapBreakpoint[]): void {
+  const next = { ...verified[target] };
   for (const b of list) {
     const p = b.source?.path ?? path;
     if (typeof b.line === "number") next[bpKey(p, b.line)] = !!b.verified;
   }
-  verified = next;
+  verified = { ...verified, [target]: next };
   verifiedListeners.forEach((l) => l());
 }
 
 /** `breakpoint` 事件里回报的落点状态。 */
-export function applyBreakpointEvent(path: string, line: number, ok: boolean): void {
-  verified = { ...verified, [bpKey(path, line)]: ok };
+export function applyBreakpointEvent(target: DebugTarget, path: string, line: number, ok: boolean): void {
+  verified = { ...verified, [target]: { ...verified[target], [bpKey(path, line)]: ok } };
   verifiedListeners.forEach((l) => l());
 }
 
-// 上次成功下发的「路径 + 行的签名」：附加成功后整批补发，之后只发变了的文件。
-const synced = new Map<string, { path: string; sig: string }>();
+// 每个目标上次成功下发的「路径 + 行的签名」：附加成功后整批补发，之后只发变了的文件。
+const synced = emptyMap();
 let syncing = false;
 let dirty = false;
-let isAttached: (() => boolean) | null = null;
+let attachedTargets: (() => DebugTarget[]) | null = null;
 
 export async function syncBreakpoints(): Promise<void> {
-  if (!isAttached?.()) return;
+  const targets = attachedTargets?.() ?? [];
+  if (targets.length === 0) return;
   if (syncing) {
     dirty = true;
     return;
@@ -55,25 +75,28 @@ export async function syncBreakpoints(): Promise<void> {
   syncing = true;
   try {
     const groups = groupBreakpoints(getBreakpoints());
-    for (const [key, g] of groups) {
-      const sig = g.lines.join(",");
-      if (synced.get(key)?.sig === sig) continue;
-      try {
-        const r = await debugSetBreakpoints(g.path, g.lines);
-        applyVerified(g.path, r.breakpoints ?? []);
-        synced.set(key, { path: g.path, sig });
-      } catch {
-        // 下一轮再试：不写 synced，避免把失败记成「已同步」
+    for (const target of targets) {
+      const sent = synced[target];
+      for (const [key, g] of groups) {
+        const sig = breakpointGroupSig(g);
+        if (sent.get(key)?.sig === sig) continue;
+        try {
+          const r = await debugSetBreakpoints(target, g.path, g.breakpoints);
+          applyVerified(target, g.path, r.breakpoints ?? []);
+          sent.set(key, { path: g.path, sig });
+        } catch {
+          // 下一轮再试：不写 synced，避免把失败记成「已同步」
+        }
       }
-    }
-    // 整个文件的断点都被清掉了：显式发一次空集合，适配器那边才会真删
-    for (const [key, s] of [...synced]) {
-      if (groups.has(key)) continue;
-      try {
-        await debugSetBreakpoints(s.path, []);
-        synced.delete(key);
-      } catch {
-        // 同上
+      // 整个文件的断点都被清掉了：显式发一次空集合，适配器那边才会真删
+      for (const [key, s] of [...sent]) {
+        if (groups.has(key)) continue;
+        try {
+          await debugSetBreakpoints(target, s.path, []);
+          sent.delete(key);
+        } catch {
+          // 同上
+        }
       }
     }
   } finally {
@@ -86,17 +109,19 @@ export async function syncBreakpoints(): Promise<void> {
 }
 
 /** 挂上断点订阅（幂等）。`attached` 由会话状态提供，避免这里又存一份。 */
-export function startBreakpointSync(attached: () => boolean): void {
-  if (isAttached) return;
-  isAttached = attached;
+export function startBreakpointSync(attached: () => DebugTarget[]): void {
+  if (attachedTargets) return;
+  attachedTargets = attached;
   subscribeBreakpoints(() => {
     void syncBreakpoints();
   });
 }
 
-/** 断开/重新附加时丢掉签名：下一次附加要整批重发。 */
-export function resetBreakpointSync(): void {
-  synced.clear();
-  verified = {};
+/** 断开/重新附加时丢掉签名：下一次附加要整批重发。只清指定目标，另一边不受影响。 */
+export function resetBreakpointSync(target?: DebugTarget): void {
+  for (const t of target ? [target] : DEBUG_TARGETS) {
+    synced[t].clear();
+    verified = { ...verified, [t]: {} };
+  }
   verifiedListeners.forEach((l) => l());
 }

@@ -227,6 +227,16 @@ pub fn projects(primary: &Path, overrides: &[LinkedOverride]) -> Vec<LinkedProje
     flat_dirs(primary, overrides).1
 }
 
+/// **只**包含工程侧的输出目录（不含 NC home 的模块 classes）。
+///
+/// 客户端启动用这一份：Eclipse 的 `ClientClasspathEntry` 只保留 runtime classpath 里
+/// `type == PROJECT` 的条目，NC home 的模块类由另外四个容器提供（`Module_Public_Library`
+/// 等）。若这里再拼 `module_class_dirs`，`modules/*/classes` 会进两次，且顺序会偏离
+/// Eclipse 的「工程 → 产品公共库 → 模块 public → 模块 client → langlib」。
+pub fn project_outputs(primary: &Path, overrides: &[LinkedOverride]) -> Vec<PathBuf> {
+    flat_dirs(primary, overrides).0
+}
+
 /// 依赖链的完整视图（界面用）。目录顺序与 `class_roots_with` 逐项相同。
 pub fn graph(primary: &Path, nc_home: &Path, overrides: &[LinkedOverride]) -> LinkedGraph {
     let (project_dirs, projects, extra, notes) = flat_dirs(primary, overrides);

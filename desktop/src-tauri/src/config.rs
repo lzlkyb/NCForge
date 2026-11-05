@@ -34,6 +34,12 @@ pub struct AppConfig {
     /// 都认，认错就静默回落成默认值，用户以为改成功了。
     #[serde(default)]
     pub server_heap_mb: Option<u32>,
+    /// 客户端（`nc.starter.test.JStarter`）堆上限（MB）。`None` = 默认 768
+    /// （Eclipse 启动配置里的值，见 `launch::DEFAULT_CLIENT_HEAP_MB`）。
+    ///
+    /// 与中间件分开存：客户端只画 Swing 界面，768M 就够；跟着 4G 走纯属浪费。
+    #[serde(default)]
+    pub client_heap_mb: Option<u32>,
     /// SVN 用户名。存在这里是为了「下次不用再输一遍」；密码见下一个字段。
     #[serde(default)]
     pub svn_user: Option<String>,
@@ -197,6 +203,7 @@ impl Default for AppConfig {
             workspace_root: None,
             nc_home: None,
             server_heap_mb: None,
+            client_heap_mb: None,
             svn_user: None,
             svn_password_dpapi: None,
             patch_out_dir: None,

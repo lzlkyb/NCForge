@@ -12,17 +12,26 @@ import type { LaunchPreview } from "../../lib/server";
 export function CommandLineDialog({
   preview,
   onClose,
+  kind = "server",
 }: {
   preview: LaunchPreview | null;
   onClose: () => void;
+  /** 客户端预览与中间件的结构相同，只是 classpath 规则与提示文案不同。 */
+  kind?: "server" | "client";
 }) {
+  const client = kind === "client";
   return (
-    <Modal open={!!preview} onClose={onClose} ariaLabel="启动命令行" className="modal-surface w-[860px] max-w-[92vw] p-5">
+    <Modal
+      open={!!preview}
+      onClose={onClose}
+      ariaLabel={client ? "客户端启动命令行" : "启动命令行"}
+      className="modal-surface w-[860px] max-w-[92vw] p-5"
+    >
       <div className="flex items-center gap-2">
         <Icon name="terminal" size={15} />
-        <h2 className="text-sm font-semibold">启动命令行</h2>
+        <h2 className="text-sm font-semibold">{client ? "客户端启动命令行" : "启动命令行"}</h2>
         <span className="text-xs text-muted-foreground">
-          端口 {preview?.endpoints.httpPort ?? "—"}
+          {client ? "中间件端口" : "端口"} {preview?.endpoints.httpPort ?? "—"}
           {preview?.endpoints.httpAddress ? `（${preview.endpoints.httpAddress}）` : ""}
           {" · "}classpath {preview?.entryCount ?? 0} 项 · 工作目录 {preview?.workDir ?? ""}
         </span>
@@ -50,15 +59,31 @@ export function CommandLineDialog({
         </p>
       )}
       <p className="sv-cmd-hint">
-        端口读自 <code>{preview?.endpoints.configPath || "ierp/bin/prop.xml"}</code>
-        （NC 自己的服务器配置，<code>bin/sysConfig.bat</code> 改的也是它）。要换端口就点状态卡上的端口号——
-        会连同 web 端的 <code>system.ejb.port</code> 一起改，只改一处网页端会连不上。
+        {client
+          ? "客户端连接地址取自 "
+          : "端口读自 "}
+        <code>{preview?.endpoints.configPath || "ierp/bin/prop.xml"}</code>
+        {client
+          ? "（-Dnc.jstart.server/port）。中间件改过端口后，重启客户端才能连到新端口——已经起来的 JVM 不会重读配置。"
+          : "（NC 自己的服务器配置，bin/sysConfig.bat 改的也是它）。要换端口就点状态卡上的端口号——会连同 web 端的 system.ejb.port 一起改，只改一处网页端会连不上。"}
       </p>
       <p className="sv-cmd-hint">
-        排错时对照 Eclipse 的启动配置：classpath 只有一个 pathing jar，真正的 {preview?.entryCount ?? 0}{" "}
-        个条目写在它的 META-INF/MANIFEST.MF 里。这里的内存上限是{" "}
-        <code>-Xmx{preview?.heapMb ?? 4096}m</code>——Eclipse 老配置是 1G，跑 245 个模块不够；
-        要改就回服务页的「堆上限」，改完重启服务生效。
+        {client ? (
+          <>
+            排错时对照 Eclipse 的 <code>JStarter</code> 启动配置：classpath 只有一个 pathing jar，
+            真正的 {preview?.entryCount ?? 0} 个条目写在它的 META-INF/MANIFEST.MF 里。客户端按 Eclipse
+            的客户端规则收集（工程输出 + 产品公共库 + 模块 public/client + langlib），不含 middleware /
+            framework / ant。内存上限是 <code>-Xmx{preview?.heapMb ?? 768}m</code>，要改就回配置栏的
+            「客户端堆上限」，改完重启客户端生效。
+          </>
+        ) : (
+          <>
+            排错时对照 Eclipse 的启动配置：classpath 只有一个 pathing jar，真正的{" "}
+            {preview?.entryCount ?? 0} 个条目写在它的 META-INF/MANIFEST.MF 里。这里的内存上限是{" "}
+            <code>-Xmx{preview?.heapMb ?? 4096}m</code>——Eclipse 老配置是 1G，跑 245 个模块不够；
+            要改就回服务页的「堆上限」，改完重启服务生效。
+          </>
+        )}
       </p>
     </Modal>
   );

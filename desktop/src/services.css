@@ -435,6 +435,47 @@
 }
 
 /* ── 日志 ── */
+/* 来源切换条 + 日志面板：外层负责占满剩余高度，内层仍是原来的 .sv-log */
+.sv-log-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.sv-log-src {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  flex-shrink: 0;
+}
+.sv-log-src button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: var(--r-control);
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
+}
+.sv-log-src button[data-on] {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+  font-weight: 650;
+}
+.sv-log-src-file {
+  font-size: 10px;
+  font-weight: 400;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
 .sv-log {
   display: flex;
   flex-direction: column;

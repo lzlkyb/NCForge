@@ -21,17 +21,26 @@ let wasSideOpen: boolean;
 let events: string[];
 const navigate = (event: Event) => events.push((event as CustomEvent<string>).detail);
 const applyRoot = vi.fn(async () => null);
-const setDraft = vi.fn();
-const setEditing = vi.fn();
+const picker = vi.hoisted(() => ({ pickFolder: vi.fn() }));
+vi.mock("../../lib/folderPicker", () => ({
+  pickFolder: picker.pickFolder,
+  pickFolderError: (e: unknown) => String(e),
+}));
 function PickerBridge() {
-  useWorkspacePicker({ root: "D:\\NC65", applyRoot, setDraft, setEditing });
+  useWorkspacePicker({ root: "D:\\NC65", applyRoot });
   return <WorkspaceMenu />;
 }
 const trigger = (label: string) => host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
+const flush = async () => {
+  for (let i = 0; i < 3; i += 1) {
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  }
+};
 const item = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((button) => button.textContent?.startsWith(label))!;
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
+  picker.pickFolder.mockResolvedValue("D:\\NC65-test");
   original = getSession();
   wasSideOpen = getSideOpen();
   setSession({ root: "D:\\NC65", panelOpen: false, splitPath: null });
@@ -86,16 +95,16 @@ describe("一体化标题栏真实入口", () => {
     expect(getSideOpen()).toBe(false);
     expect(document.activeElement).toBe(trigger("工作台布局"));
   });
-  it("从搜索侧栏打开其他工作区时切回文件树，让目录输入实际可见", () => {
+  it("从搜索侧栏打开其他工作区时切回文件树，并拉起文件夹选择器", async () => {
     setSidebarView("search");
     act(() => root.render(<PickerBridge />));
     act(() => trigger("选择工作区").click());
     act(() => item("打开其他工作区").click());
     expect(getSidebarView()).toBe("files");
-    expect(setDraft).toHaveBeenCalledWith("D:\\NC65");
-    expect(setEditing).toHaveBeenCalledWith(true);
     expect(events).toEqual(["files"]);
-    expect(applyRoot).not.toHaveBeenCalled();
+    await flush();
+    expect(picker.pickFolder).toHaveBeenCalledWith({ title: "选择工程目录", defaultPath: "D:\\NC65" });
+    expect(applyRoot).toHaveBeenCalledExactlyOnceWith("D:\\NC65-test");
   });
   it("最近工作区交给已有保存与切换流程处理", () => {
     rememberRoot("D:\\NC65-test");

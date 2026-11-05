@@ -131,7 +131,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
             >
               {t.label}
               {t.id === "problems" && errors > 0 && <span className="wb-ptab-n">{errors}</span>}
-              {t.id === "debug" && debug.paused && <span className="wb-ptab-live" title="调试已暂停" />}
+              {t.id === "debug" && debug.anyPaused && <span className="wb-ptab-live" title="调试已暂停（中间件或客户端）" />}
             </button>
           ))}
         </div>

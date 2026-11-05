@@ -52,11 +52,6 @@
 /* 不可用时（如没有 manifest 的 NC 结构视图）要能看出点不了，而不是 hover 高亮后没反应 */
 .wb-icon-btn:disabled { opacity: 0.4; cursor: default; }
 .wb-pane-acts { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
-.wb-root-edit {
-  display: flex;
-  gap: 6px;
-  padding: 0 8px 8px;
-}
 .wb-root-recent {
   display: flex;
   flex-wrap: wrap;
@@ -649,3 +644,8 @@ button.wb-empty-row:hover { background: hsl(var(--secondary)); }
 .wb-empty-go { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; height: 28px; padding: 0 12px; border-radius: 7px; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); font-size: 12px; }
 
 .wb-sedit-row[data-changed] { background: hsl(var(--warning) / 0.09); }
+
+.wb-root-recent-empty {width:min(420px,calc(100% - 32px));flex-direction:column;align-items:stretch;gap:6px;}
+.wb-root-recent-empty .wb-root-recent-item {display:flex;flex-direction:column;align-items:flex-start;max-width:none;min-width:0;padding:8px 12px;border-radius:var(--r-control);text-align:left;white-space:normal;}
+.wb-root-recent-name {font-size:13px;font-weight:600;overflow-wrap:anywhere;}
+.wb-root-recent-path {font-size:12px;font-weight:400;line-height:1.5;color:hsl(var(--muted-foreground));overflow-wrap:anywhere;}

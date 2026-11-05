@@ -15,8 +15,9 @@ import { runTypeHierarchy } from "../../lib/typeHierarchy";
 import { attachErrorLens } from "../../lib/errorLens";
 import { attachBookmarkGutter } from "../../lib/bookmarkGutter";
 import { attachDebugGutter } from "../../lib/debugGutter";
+import { wireDebugHover } from "../../lib/debugHover";
 import { toggleBreakpointHere } from "../../lib/debugSession";
-import { debugActionForKey, runDebugAction, type DebugKeyCode } from "../../lib/debugKeys";
+import { registerDebugEditorKeys } from "../../lib/debugEditorKeys";
 import { getEditorPrefs, monacoOptionsOf, PREFS_EVENT } from "../../lib/editorPrefs";
 import { formatBeforeSave } from "../../lib/formatOnSave";
 import { noteEdit, previousEditSpot } from "../../lib/editHistory";
@@ -73,6 +74,8 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     registerExtraLangProviders();
     // 代码模板（sout / fori / ifn…）：纯编辑器能力，不依赖语言服务是否就绪
     registerJavaTemplates();
+    // 调试悬停：只在暂停时求值，其余时间不接管悬停
+    wireDebugHover();
     const editor = monaco.editor.create(hostRef.current, {
       model: null,
       automaticLayout: true,
@@ -133,26 +136,8 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       const r = toggleBreakpointHere(path, pos.lineNumber);
       toast(r === "added" ? `已加断点（第 ${pos.lineNumber} 行）` : "已移除断点", "success");
     });
-    // 调试步进：同一枚 F 键在两套 keymap 里含义不同（F7 = Eclipse 步出 / IDEA 步入），
-    // 所以注册一次、按键那一刻再问当前方案；不在方案里的键什么也不做。
-    const stepKeys: [DebugKeyCode, number][] = [
-      ["F5", monaco.KeyCode.F5],
-      ["F6", monaco.KeyCode.F6],
-      ["F7", monaco.KeyCode.F7],
-      ["F8", monaco.KeyCode.F8],
-      ["F9", monaco.KeyCode.F9],
-    ];
-    for (const [code, key] of stepKeys) {
-      editor.addCommand(key, () => {
-        const action = debugActionForKey(code, false);
-        if (action) runDebugAction(action);
-      });
-    }
-    // Shift+F8 只在 IDEA 方案里是「步出」；Eclipse 方案下不接管
-    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F8, () => {
-      const action = debugActionForKey("F8", true);
-      if (action) runDebugAction(action);
-    });
+    // 调试步进键：F5–F9 的含义由当前 keymap 决定（见 lib/debugKeys）
+    registerDebugEditorKeys(editor);
     // Ctrl+Shift+Backspace = 回到上一个编辑位置（与「后退」不同：它记的是打字，不是跳转）
     editor.addCommand(
       monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Backspace,

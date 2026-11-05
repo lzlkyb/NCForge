@@ -23,7 +23,7 @@ describe("调试动作失败恢复", () => {
   it("附加返回未建立时失败，不能显示附加成功", async () => {
     mock.invoke.mockResolvedValueOnce({ state: "stopped", message: "JDWP不可用" });
     await expect(debugStart()).rejects.toThrow("JDWP不可用");
-    expect(getOperations().find(o => o.key === "debug.attach")?.state).toBe("failed");
+    expect(getOperations().find(o => o.key === "debug.attach:server")?.state).toBe("failed");
   });
   it("继续/步进请求失败恢复可重试的暂停位置", async () => {
     await pause(); clearCompletedOperations();

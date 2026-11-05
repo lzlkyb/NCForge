@@ -49,7 +49,6 @@ export interface FilePaneModel {
   splitPath: string | null;
   /** 树上的编码标记（`UTF-8!` 徽标用）。 */
   marks: Record<string, EncodingMark>;
-  hasUnsaved: boolean;
   activeMark: EncodingMark | undefined;
   showLargeHint: boolean;
   heavyFile: boolean;
@@ -57,8 +56,6 @@ export interface FilePaneModel {
   encodingIssue: { path: string; message: string } | null;
   saving: boolean;
   reveal: { line: number; column?: number; nonce: number } | null;
-  rootInput: string;
-  editingRoot: boolean;
   /** 最近工作区（换目录时直接点）。 */
   recentRoots: string[];
   panelOpen: boolean;
@@ -71,8 +68,6 @@ export interface FilePaneModel {
 }
 
 export interface FilePaneActions {
-  setRootInput: Dispatch<SetStateAction<string>>;
-  setEditingRoot: Dispatch<SetStateAction<boolean>>;
   setPanels: Dispatch<SetStateAction<{ outline: boolean; history: boolean; generate: boolean }>>;
   setPanelOpen: (v: (open: boolean) => boolean) => void;
   applyRoot: (path: string) => Promise<string | null>;
@@ -110,12 +105,12 @@ export function FilePaneSlots({
   // 底部面板要不要让位给文档页，取决于外壳当前的文档槽有没有被占
   const documentOpen = useWorkbenchDock()?.documentOpen ?? false;
   const {
-    root, projects, activeTool, tabs, activePath, active, splitPath, hasUnsaved, activeMark,
+    root, projects, activeTool, tabs, activePath, active, splitPath, activeMark,
     showLargeHint, heavyFile, conflictPath, encodingIssue, saving, reveal,
-    rootInput, editingRoot, recentRoots, panelOpen, panelTab, panels, compiling, canBack, canForward, treeRef,
+    recentRoots, panelOpen, panelTab, panels, compiling, canBack, canForward, treeRef,
   } = model;
   const {
-    setRootInput, setEditingRoot, setPanels, setPanelOpen, applyRoot, openPath, compileActive,
+    setPanels, setPanelOpen, applyRoot, openPath, compileActive,
     compileModulePath, onDismissLargeHint, selectTab, openRecentRoot, invalidateIndex,
   } = actions;
 
@@ -155,11 +150,9 @@ export function FilePaneSlots({
         </>
       ) : (
         <>
-          <TreeHeader root={root} projectCount={projects.length} editing={editingRoot} draft={rootInput} unsaved={hasUnsaved}
-            recents={recentRoots}
-            onDraftChange={setRootInput} onOpen={() => void applyRoot(rootInput)}
+          <TreeHeader root={root} projectCount={projects.length} recents={recentRoots}
+            onOpen={(path) => void applyRoot(path)}
             onOpenRecent={openRecentRoot}
-            onToggleEditing={() => { setRootInput(root); setEditingRoot((v) => !v); }}
             onCreateFile={() => treeRef.current?.startCreate("file")}
             onCreateDir={() => treeRef.current?.startCreate("dir")}
             onSearch={() => setSidebarView("search")} />
@@ -263,17 +256,13 @@ export function FilePaneSlots({
 
 /** 尚未打开工程时的槽位内容（树一列提示 + 中间打开引导 + 状态栏）。 */
 export function EmptyProjectSlots({
-  rootInput,
   recents,
-  onChange,
   onOpen,
   output,
   servicesPanel,
 }: {
-  rootInput: string;
   recents: string[];
-  onChange: (value: string) => void;
-  /** 失败时返回原因，由引导页贴在输入框下方。 */
+  /** 失败时返回原因，由引导页贴在按钮下方。 */
   onOpen: (path: string) => Promise<string | null>;
   output: ReactNode;
   servicesPanel: boolean;
@@ -284,8 +273,7 @@ export function EmptyProjectSlots({
       {slot("tree", <div className="wb-no-project">尚未打开工程</div>)}
       {/* 数据库标签不依赖工程目录；空工程也要登记多文档工具的停靠宿主。 */}
       {slot("tabs", <div className="wb-tabs" role="tablist"><ToolTab /></div>)}
-      {slot("editor", <NoWorkspace value={rootInput} recents={recents} onChange={onChange}
-        onOpen={onOpen} />)}
+      {slot("editor", <NoWorkspace recents={recents} onOpen={onOpen} />)}
       {slot("status", (
         <footer className="wb-status">
           <span className="wb-status-path wb-no-project">尚未打开工程</span>

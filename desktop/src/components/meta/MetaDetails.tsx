@@ -1,10 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { BmfAttr, BmfDetail, BmfEntity } from "../../lib/bmf";
 import { Icon } from "../ui/icon";
 import { Input } from "../ui/input";
+import { MetaActionButton, MetaDeleteButton } from "./MetaDeleteButton";
+import { MetaCopyEntityDialog } from "./MetaCopyEntityDialog";
 import { MetaEditDialog } from "./MetaEditDialog";
+import { MetaEntityDialog } from "./MetaEntityDialog";
+import { MetaEnumRelationSection } from "./MetaEnumRelationSection";
+import { MetaOverview } from "./MetaOverview";
 
-/** 概览 + 实体字段 + 枚举关系。只负责看清结构；改字段走 MetaEditDialog（预览 diff 后才落盘）。 */
+/** 概览 + 实体字段 + 枚举关系。只负责看清结构；所有写操作先预览 diff 再落盘。 */
 export function MetaDetails({
   detail,
   onEdited,
@@ -14,10 +19,20 @@ export function MetaDetails({
 }) {
   const [entityId, setEntityId] = useState(() => detail.entities[0]?.id ?? "");
   const [attrSearch, setAttrSearch] = useState("");
-  const [selectedAttr, setSelectedAttr] = useState<BmfAttr | null>(null);
+  // 存 id 而不是属性对象：保存后父级会重新加载详情，存对象会把旧值一直显示在检查器里。
+  const [selectedAttrId, setSelectedAttrId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<{ attr: BmfAttr | null; entity: BmfEntity } | null>(null);
+  const [entityTarget, setEntityTarget] = useState<{ entity: BmfEntity | null } | null>(null);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const inspectorRef = useRef<HTMLDivElement>(null);
 
   const entity = detail.entities.find((e) => e.id === entityId) ?? detail.entities[0];
+  const selectedAttr = entity?.attrs.find((a) => a.id === selectedAttrId) ?? null;
+
+  // 检查器在字段表之后，长表里选中靠上的行时它在折叠线以下；选中即滚到可见。
+  useEffect(() => {
+    if (selectedAttrId) inspectorRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [selectedAttrId]);
 
   const attrs = useMemo(() => {
     if (!entity) return [];
@@ -32,23 +47,22 @@ export function MetaDetails({
     );
   }, [entity, attrSearch]);
 
+  const reload = () => {
+    setSelectedAttrId(null);
+    onEdited();
+  };
+
   return (
     <div className="meta-detail-body">
-      <section className="meta-overview">
-        <Info label="组件" value={`${detail.component.name} · ${detail.component.displayName || "—"}`} />
-        <Info label="命名空间" value={detail.component.namespace || "—"} />
-        <Info label="所属模块" value={detail.component.ownModule || "—"} />
-        <Info label="版本 / 风格" value={`v${detail.component.version} · ${detail.component.genCodeStyle || "未声明"}`} />
-        <Info
-          label="文件"
-          value={`${detail.encoding} ${detail.eol}${detail.bom ? " · BOM" : ""} · ${(detail.size / 1024).toFixed(1)} KB`}
-          mono
-        />
-        <Info label="SHA-256" value={detail.sha256.slice(0, 16)} mono title={detail.sha256} />
-      </section>
+      <MetaOverview detail={detail} />
 
       {detail.entities.length === 0 ? (
-        <p className="meta-note">这个组件没有实体（纯枚举 / 纯接口 / 历史残留都是合法形态，不一定是解析失败）。</p>
+        <div className="meta-note">
+          <p>这个组件没有实体（纯枚举 / 纯接口 / 历史残留都是合法形态，不一定是解析失败）。</p>
+          <MetaActionButton icon="plus" onClick={() => setEntityTarget({ entity: null })}>
+            加实体
+          </MetaActionButton>
+        </div>
       ) : (
         <>
           <div className="meta-entity-tabs">
@@ -59,7 +73,7 @@ export function MetaDetails({
                 className={`meta-entity-tab ${e.id === entity?.id ? "is-active" : ""}`}
                 onClick={() => {
                   setEntityId(e.id);
-                  setSelectedAttr(null);
+                  setSelectedAttrId(null);
                 }}
               >
                 <span>{e.name}</span>
@@ -69,6 +83,9 @@ export function MetaDetails({
                 {e.isPrimary && <span className="meta-pk-badge">主</span>}
               </button>
             ))}
+            <MetaActionButton icon="plus" onClick={() => setEntityTarget({ entity: null })}>
+              加实体
+            </MetaActionButton>
           </div>
 
           {entity && (
@@ -91,12 +108,27 @@ export function MetaDetails({
                       value={attrSearch}
                       onChange={(ev) => setAttrSearch(ev.target.value)}
                       placeholder="过滤字段"
+                      aria-label="过滤字段"
                       className="h-6 border-0 bg-transparent px-1 text-[12px] focus-visible:ring-0"
                     />
                   </div>
                   <button type="button" className="meta-link" onClick={() => setEditTarget({ attr: null, entity })}>
                     <Icon name="plus" size={12} /> 加字段
                   </button>
+                  <MetaActionButton icon="edit" onClick={() => setEntityTarget({ entity })}>
+                    编辑实体
+                  </MetaActionButton>
+                  <MetaActionButton icon="plus" onClick={() => setCopyOpen(true)}>
+                    复制实体
+                  </MetaActionButton>
+                  <MetaDeleteButton
+                    path={detail.path}
+                    sha={detail.sha256}
+                    id={entity.id}
+                    what={`实体 ${entity.name}`}
+                    onDone={reload}
+                    onReload={reload}
+                  />
                 </div>
               </div>
 
@@ -113,8 +145,8 @@ export function MetaDetails({
                   <button
                     key={a.id}
                     type="button"
-                    className={`meta-attr-row ${selectedAttr?.id === a.id ? "is-active" : ""}`}
-                    onClick={() => setSelectedAttr(a)}
+                    className={`meta-attr-row ${selectedAttrId === a.id ? "is-active" : ""}`}
+                    onClick={() => setSelectedAttrId(a.id)}
                   >
                     <span className="meta-mono">{a.name}</span>
                     <span>{a.displayName || "—"}</span>
@@ -131,7 +163,7 @@ export function MetaDetails({
               </div>
 
               {selectedAttr && (
-                <div className="meta-inspector">
+                <div className="meta-inspector" ref={inspectorRef}>
                   <div className="meta-inspector-head">
                     <span className="text-[12px] font-medium">字段检查器</span>
                     <div className="flex gap-2">
@@ -142,7 +174,15 @@ export function MetaDetails({
                       >
                         <Icon name="edit" size={12} /> 编辑
                       </button>
-                      <button type="button" className="meta-link" onClick={() => setSelectedAttr(null)}>
+                      <MetaDeleteButton
+                        path={detail.path}
+                        sha={detail.sha256}
+                        id={selectedAttr.id}
+                        what={`字段 ${selectedAttr.name}`}
+                        onDone={reload}
+                        onReload={reload}
+                      />
+                      <button type="button" className="meta-link" onClick={() => setSelectedAttrId(null)}>
                         关闭
                       </button>
                     </div>
@@ -166,42 +206,7 @@ export function MetaDetails({
         </>
       )}
 
-      <section className="meta-two-col">
-        <div>
-          <h4 className="meta-section-title">枚举（{detail.enums.length}）</h4>
-          {detail.enums.length === 0 && <p className="meta-note">没有枚举定义。</p>}
-          {detail.enums.map((en) => (
-            <div key={en.id} className="meta-enum">
-              <div className="meta-enum-head">
-                <span className="font-medium">{en.name}</span>
-                <span className="text-muted-foreground">
-                  {en.displayName || "—"} · {en.items.length} 项
-                </span>
-              </div>
-              <div className="meta-enum-items">
-                {en.items.map((it) => (
-                  <span key={it.id} className="meta-enum-item" title={it.id}>
-                    {it.value} = {it.display}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div>
-          <h4 className="meta-section-title">关系（{detail.relations.length}）</h4>
-          {detail.relations.length === 0 && <p className="meta-note">没有连接关系。</p>}
-          {detail.relations.map((r) => (
-            <div key={r.id} className="meta-relation">
-              <div className="font-medium">{r.kind}</div>
-              <div className="text-muted-foreground">
-                {r.source} → {r.target}
-                {r.srcAttrId ? `（${r.srcAttrId} → ${r.targetAttrId}）` : ""}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+      <MetaEnumRelationSection detail={detail} onEdited={reload} />
 
       {detail.unknownTags.length > 0 && (
         <p className="meta-note">
@@ -220,17 +225,46 @@ export function MetaDetails({
             setEditTarget(null);
             onEdited();
           }}
+          onReload={() => {
+            setEditTarget(null);
+            onEdited();
+          }}
         />
       )}
-    </div>
-  );
-}
 
-function Info({ label, value, mono, title }: { label: string; value: string; mono?: boolean; title?: string }) {
-  return (
-    <div className="meta-info" title={title}>
-      <span>{label}</span>
-      <strong className={mono ? "meta-mono" : ""}>{value}</strong>
+      {entityTarget && (
+        <MetaEntityDialog
+          path={detail.path}
+          sha={detail.sha256}
+          entity={entityTarget.entity}
+          onClose={() => setEntityTarget(null)}
+          onSaved={() => {
+            setEntityTarget(null);
+            onEdited();
+          }}
+          onReload={() => {
+            setEntityTarget(null);
+            onEdited();
+          }}
+        />
+      )}
+
+      {copyOpen && (
+        <MetaCopyEntityDialog
+          path={detail.path}
+          sha={detail.sha256}
+          detail={detail}
+          onClose={() => setCopyOpen(false)}
+          onSaved={() => {
+            setCopyOpen(false);
+            onEdited();
+          }}
+          onReload={() => {
+            setCopyOpen(false);
+            onEdited();
+          }}
+        />
+      )}
     </div>
   );
 }

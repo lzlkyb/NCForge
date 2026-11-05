@@ -48,6 +48,8 @@ export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) 
   const [current, setCurrent] = useState<FileContent | null>(null);
   const [phase, setPhase] = useState<"idle" | "confirm" | "restoring">("idle");
   const [error, setError] = useState<string | null>(null);
+  const restoring = useRef(false);
+  const [diffLimit, setDiffLimit] = useState(MAX_DIFF_ITEMS);
   const panelRef = useRef<HTMLDivElement>(null);
 
   // phase / onClose 的活引用：Esc 与外点监听只在开屏时注册一次（不新增 effect，
@@ -102,6 +104,7 @@ export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) 
     if (!open || !path || !sel) return;
     let alive = true;
     setPreview(null);
+    setDiffLimit(MAX_DIFF_ITEMS);
     readLocalHistory(path, sel)
       .then((p) => alive && setPreview(p))
       .catch((e) => alive && setError(String(e)));
@@ -113,7 +116,9 @@ export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) 
   if (!open || !path) return null;
 
   const doRestore = async () => {
-    if (!sel || !current) return;
+    if (!sel || !current || dirty || restoring.current) return;
+    // 同一帧的重复点击也必须锁住，不能只依赖下一次渲染的按钮状态。
+    restoring.current = true;
     setPhase("restoring");
     setError(null);
     try {
@@ -130,6 +135,8 @@ export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) 
     } catch (e) {
       setError(String(e));
       setPhase("idle");
+    } finally {
+      restoring.current = false;
     }
   };
 
@@ -138,7 +145,8 @@ export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) 
       ? diffLines(norm(preview.text), norm(current.text))
       : null;
   const changes = diff ? countChanges(diff.rows) : null;
-  const items = diff && !diff.tooBig ? collapseDiff(diff.rows).slice(0, MAX_DIFF_ITEMS) : [];
+  const allItems = diff && !diff.tooBig ? collapseDiff(diff.rows) : [];
+  const items = allItems.slice(0, diffLimit);
 
   return (
     <div ref={panelRef} className="wb-hist" role="dialog" aria-label="本地历史">
@@ -169,8 +177,10 @@ export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) 
             type="button"
             key={v.id}
             className="wb-hist-row"
+            disabled={phase === "restoring"}
             data-active={v.id === sel || undefined}
             onClick={() => {
+              if (restoring.current) return;
               setSel(v.id);
               setError(null);
               setPhase("idle");
@@ -217,6 +227,11 @@ export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) 
               ),
             )}
           </div>
+
+          {allItems.length > diffLimit && <div className="wb-hist-note" role="status">
+            仅展示前 {items.length} 项，共 {allItems.length} 项，后续差异尚未显示。
+            <button type="button" className="wb-hist-restore" onClick={() => setDiffLimit(n => n + MAX_DIFF_ITEMS)}>继续显示差异</button>
+          </div>}
 
           <div className="wb-hist-actions">
             {dirty ? (

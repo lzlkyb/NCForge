@@ -139,20 +139,26 @@ describe("文件页", () => {
     expect(container.textContent).toContain("还没有打开工程目录");
     expect(container.querySelector('[data-testid="editor-pane"]')).toBeNull();
     expect(container.querySelector(".wb-root")).toBeTruthy();
-    // 没填路径时「打开」是禁用的
-    expect(buttonByText("打开")?.disabled).toBe(true);
+    // 不再手填路径：只有「选择工程目录」按钮，没有输入框
+    expect(container.querySelector("input")).toBeNull();
+    expect(buttonByText("选择工程目录…")?.disabled).toBe(false);
   });
 
-  it("填了路径点打开，把后端返回的规范化路径写回会话，页面切到正常布局", async () => {
-    await render();
-    const input = container.querySelector<HTMLInputElement>("input")!;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-      setter.call(input, ROOT);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+  it("选文件夹后把后端返回的规范化路径写回会话，页面切到正常布局", async () => {
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_workspace") return null;
+      if (cmd === "pick_folder") return ROOT;
+      if (cmd === "set_workspace") return ROOT;
+      return [];
     });
-    await act(async () => buttonByText("打开")!.click());
+    await render();
+    await act(async () => buttonByText("选择工程目录…")!.click());
+    await act(async () => {});
 
+    expect(mocks.invoke).toHaveBeenCalledWith("pick_folder", {
+      title: "选择 NC 二开工程根目录",
+      defaultPath: null,
+    });
     expect(mocks.invoke).toHaveBeenCalledWith("set_workspace", { path: ROOT });
     expect(container.querySelector(".wb-root")).toBeTruthy();
     expect(container.textContent).toContain("资源管理器");

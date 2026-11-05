@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { BmfEntry } from "../../lib/bmf";
+import { normalizeBmfPath } from "../../lib/bmfPath";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { Input } from "../ui/input";
@@ -82,6 +83,7 @@ export function MetaTree({
           value={search}
           onChange={(e) => onSearch(e.target.value)}
           placeholder="组件名 / 模块"
+          aria-label="搜索元数据组件"
           className="h-7 border-0 bg-transparent px-1 text-[12px] focus-visible:ring-0"
         />
       </div>
@@ -100,9 +102,10 @@ export function MetaTree({
               <button
                 key={e.path}
                 type="button"
-                className={`meta-entry ${selected === e.path ? "is-active" : ""} ${e.error ? "is-broken" : ""}`}
+                className={`meta-entry ${selected && normalizeBmfPath(selected) === normalizeBmfPath(e.path) ? "is-active" : ""} ${e.error ? "is-broken" : ""}`}
+                aria-current={selected && normalizeBmfPath(selected) === normalizeBmfPath(e.path) ? "true" : undefined}
                 onClick={() => onSelect(e)}
-                title={e.path}
+                title={e.error ? `${e.path}\n${e.error}` : e.path}
               >
                 <span className="meta-entry-name">{e.name || "(无名)"}</span>
                 <span className="meta-entry-sub">
@@ -114,11 +117,18 @@ export function MetaTree({
           </div>
         ))}
       </div>
-      <div className="meta-side-foot" title={warnings.join("\n")}>
-        {refreshing
-          ? "正在索引…"
-          : `${(elapsedMs / 1000).toFixed(2)}s · 缓存 ${cached}`}
-        {warnings.length > 0 && <span className="text-amber-500"> · {warnings.length} 条提示</span>}
+      {warnings.length > 0 && (
+        <details className="meta-warn-list">
+          <summary>{warnings.length} 条索引提示</summary>
+          <ul>
+            {warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <div className="meta-side-foot">
+        {refreshing ? "正在索引…" : `${(elapsedMs / 1000).toFixed(2)}s · 缓存 ${cached}`}
       </div>
     </aside>
   );

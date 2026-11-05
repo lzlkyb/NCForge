@@ -313,7 +313,12 @@ fn 真机走完一条调试会话() {
     let attached = client
         .request(
             "attach",
-            debug::attach_args(jdwp_port, PROJECT, &[ws.to_string_lossy().into_owned()]),
+            debug::attach_args(
+                "127.0.0.1",
+                jdwp_port,
+                PROJECT,
+                &[ws.to_string_lossy().into_owned()],
+            ),
             Duration::from_secs(40),
         )
         .expect("attach 到 JDWP 应成功");
@@ -323,7 +328,13 @@ fn 真机走完一条调试会话() {
     let bp = client
         .request(
             "setBreakpoints",
-            debug::set_breakpoints_args(&hello, &[5]),
+            debug::set_breakpoints_args(
+                &hello,
+                &[debug::BreakpointSpec {
+                    line: 5,
+                    ..Default::default()
+                }],
+            ),
             Duration::from_secs(20),
         )
         .expect("setBreakpoints");

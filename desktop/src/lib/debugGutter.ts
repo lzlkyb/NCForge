@@ -8,7 +8,12 @@
 // 两件事不会抢同一格——停在断点上时也要同时看得见红点和箭头。
 import { monaco } from "./monacoSetup";
 import { pathOfModel } from "./editorStore";
-import { breakpointLinesIn, subscribeBreakpoints } from "./breakpoints";
+import {
+  breakpointItemsIn,
+  isBreakpointEnabled,
+  subscribeBreakpoints,
+  type Breakpoint,
+} from "./breakpoints";
 import { isVerified, subscribeVerified } from "./debugSync";
 import { getDebugSnapshot, subscribeDebug, toggleBreakpointHere } from "./debugSession";
 
@@ -16,27 +21,44 @@ type Editor = ReturnType<typeof monaco.editor.create>;
 
 const norm = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 
+/** 一条断点的视觉类别：日志点（蓝）、条件点（红环）、禁用（灰空心）、普通（实心红）。 */
+function glyphClass(path: string, bp: Breakpoint): string {
+  if (!isBreakpointEnabled(bp)) return "ncforge-bp-glyph ncforge-bp-glyph-disabled";
+  if (bp.logMessage) return "ncforge-bp-glyph ncforge-bp-glyph-log";
+  if (isVerified(path, bp.line)) {
+    return bp.condition || bp.hitCondition
+      ? "ncforge-bp-glyph ncforge-bp-glyph-cond"
+      : "ncforge-bp-glyph";
+  }
+  return "ncforge-bp-glyph ncforge-bp-glyph-unverified";
+}
+
+/** 悬停说明：禁用/日志/条件/未落点都要说清楚「为什么和普通的红点不一样」。 */
+function glyphTip(path: string, bp: Breakpoint): string {
+  const parts = [`断点 · 第 ${bp.line} 行`];
+  if (!isBreakpointEnabled(bp)) return `${parts[0]}（已禁用，不会停下）`;
+  if (bp.logMessage) parts.push(`日志断点：${bp.logMessage}`);
+  if (bp.condition) parts.push(`条件：${bp.condition}`);
+  if (bp.hitCondition) parts.push(`命中次数：${bp.hitCondition}`);
+  if (!isVerified(path, bp.line)) parts.push("还没落点：源码可能没进影子工程");
+  return parts.join(" · ");
+}
+
 function applyBreakpoints(editor: Editor): { clear(): void } | null {
   const model = editor.getModel();
   if (!model) return null;
   const path = pathOfModel(model);
   if (!path) return null;
   const lastLine = model.getLineCount();
-  const lines = breakpointLinesIn(path).filter((l) => l <= lastLine);
-  if (lines.length === 0) return null;
+  const items = breakpointItemsIn(path).filter((b) => b.line <= lastLine);
+  if (items.length === 0) return null;
   const collection = editor.createDecorationsCollection();
   collection.set(
-    lines.map((line) => ({
-      range: new monaco.Range(line, 1, line, 1),
+    items.map((bp) => ({
+      range: new monaco.Range(bp.line, 1, bp.line, 1),
       options: {
-        glyphMarginClassName: isVerified(path, line)
-          ? "ncforge-bp-glyph"
-          : "ncforge-bp-glyph ncforge-bp-glyph-unverified",
-        glyphMarginHoverMessage: {
-          value: isVerified(path, line)
-            ? `断点 · 第 ${line} 行`
-            : `断点 · 第 ${line} 行（还没落点：源码可能没进影子工程）`,
-        },
+        glyphMarginClassName: glyphClass(path, bp),
+        glyphMarginHoverMessage: { value: glyphTip(path, bp) },
         stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
       },
     })),

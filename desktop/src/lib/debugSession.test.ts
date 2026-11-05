@@ -18,6 +18,9 @@ import {
   MAX_DEBUG_WATCHES,
   __setDebugFrameForTest,
   addWatch,
+  clearConsole,
+  evaluateConsole,
+  expandVariables,
   getDebugSnapshot,
   removeWatch,
   selectFrame,
@@ -31,6 +34,7 @@ beforeEach(() => {
   mocks.invoke.mockReset();
   mocks.invoke.mockResolvedValue({});
   __setDebugFrameForTest(null);
+  clearConsole();
   clearWatches();
 });
 
@@ -41,7 +45,12 @@ describe("调试监视表达式", () => {
 
     await addWatch("  1 + 41 ");
 
-    expect(mocks.invoke).toHaveBeenCalledWith("debug_evaluate", { expression: "1 + 41", frameId: 7 });
+    expect(mocks.invoke).toHaveBeenCalledWith("debug_evaluate", {
+      target: "server",
+      expression: "1 + 41",
+      frameId: 7,
+      context: "watch",
+    });
     expect(getDebugSnapshot().watches).toEqual([
       { expression: "1 + 41", result: "42", type: "int", error: null, evaluating: false },
     ]);
@@ -100,6 +109,64 @@ describe("调试监视表达式", () => {
       expect(getDebugSnapshot().watches[0].result).toBe("new");
     });
     const call = mocks.invoke.mock.calls.find((c) => c[0] === "debug_evaluate");
-    expect(call?.[1]).toEqual({ expression: "x", frameId: 3 });
+    expect(call?.[1]).toEqual({ target: "server", expression: "x", frameId: 3, context: "watch" });
+  });
+});
+
+describe("调试控制台与变量分页", () => {
+  it("暂停时以 repl 上下文求值，结果写进对应条目", async () => {
+    __setDebugFrameForTest(7);
+    mocks.invoke.mockResolvedValue({ result: "42", type: "int" });
+
+    await evaluateConsole("  1 + 41 ");
+
+    expect(mocks.invoke).toHaveBeenCalledWith("debug_evaluate", {
+      target: "server",
+      expression: "1 + 41",
+      frameId: 7,
+      context: "repl",
+    });
+    const entries = getDebugSnapshot().console;
+    expect(entries[entries.length - 1]).toMatchObject({
+      expression: "1 + 41",
+      result: "42",
+      type: "int",
+      error: null,
+      pending: false,
+    });
+  });
+
+  it("未暂停时控制台不求值", async () => {
+    await evaluateConsole("vo.getCode()");
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(getDebugSnapshot().console).toEqual([]);
+  });
+
+  it("集合分页按已加载条数续取，重叠页不产生重复行", async () => {
+    __setDebugFrameForTest(7);
+    mocks.invoke.mockResolvedValueOnce({
+      variables: [
+        { name: "0", value: "a", variablesReference: 0 },
+        { name: "1", value: "b", variablesReference: 0 },
+      ],
+    });
+    await expandVariables(9);
+
+    // 适配器按 start 重新给了一页（与上一页有重叠），前端只认新名字
+    mocks.invoke.mockResolvedValueOnce({
+      variables: [
+        { name: "1", value: "b", variablesReference: 0 },
+        { name: "2", value: "c", variablesReference: 0 },
+      ],
+    });
+    await expandVariables(9, 2);
+
+    expect(mocks.invoke).toHaveBeenLastCalledWith("debug_variables", {
+      target: "server",
+      variablesReference: 9,
+      start: 2,
+      count: 100,
+    });
+    expect(getDebugSnapshot().variables[9].map((v) => v.name)).toEqual(["0", "1", "2"]);
   });
 });

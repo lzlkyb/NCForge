@@ -1,6 +1,6 @@
-import { Button } from "../ui/button";
+import { useRef, useState } from "react";
 import { Icon } from "../ui/icon";
-import { Input } from "../ui/input";
+import { pickFolder, pickFolderError } from "../../lib/folderPicker";
 import { baseName } from "../../lib/workspace";
 import { useOperations } from "../../lib/operations";
 import { TreeViewOptions } from "./TreeViewOptions";
@@ -8,20 +8,15 @@ import { TreeViewOptions } from "./TreeViewOptions";
 /**
  * 左栏顶部：资源管理器标题 + 三个动作（新建文件 / 新建文件夹 / 换目录）。
  *
- * 换目录用就地展开的输入框而不是弹窗：换目录要能看到当前路径做参照，
- * 弹窗遮住树反而不方便核对。
+ * 换目录走系统文件夹选择器：手打路径的斜杠方向、大小写、目录不存在都会失败，
+ * 而选择器至少保证选中的是一个真实存在的文件夹。最近工作区仍保留一键切换。
  */
 export function TreeHeader({
   root,
   projectCount = 1,
-  editing,
-  draft,
-  unsaved,
   recents,
-  onDraftChange,
   onOpen,
   onOpenRecent,
-  onToggleEditing,
   onCreateFile,
   onCreateDir,
   onSearch,
@@ -29,23 +24,35 @@ export function TreeHeader({
   root: string;
   /** 关联工程数（含当前）。>1 时在标题下说清「编译 / SVN 只作用于当前」 */
   projectCount?: number;
-  editing: boolean;
-  draft: string;
-  unsaved: boolean;
-  /** 最近工作区（换目录时直接点，不用重新输路径）。 */
+  /** 最近工作区（换目录时直接点，不用再走选择器）。 */
   recents: string[];
-  onDraftChange: (value: string) => void;
-  onOpen: () => void;
+  onOpen: (path: string) => void;
   onOpenRecent: (path: string) => void;
-  onToggleEditing: () => void;
   onCreateFile: () => void;
   onCreateDir: () => void;
   /** 切到全工程搜索（侧栏视图，不再占主导航页签）。 */
   onSearch: () => void;
 }) {
-  const tasks=useOperations();
-  const switching=tasks.some(o=>o.key==="workspace.switch" && !o.endedAt);
-  const ready = draft.trim().length > 0 && !switching;
+  const tasks = useOperations();
+  const switching = tasks.some((o) => o.key === "workspace.switch" && !o.endedAt);
+  const [error, setError] = useState<string | null>(null);
+  const picking = useRef(false);
+
+  const choose = async () => {
+    if (picking.current || switching) return;
+    picking.current = true;
+    setError(null);
+    try {
+      const path = await pickFolder({ title: "更换工作区目录", defaultPath: root });
+      // 取消选择保持原目录，不弹错误。
+      if (path) onOpen(path);
+    } catch (e) {
+      setError(pickFolderError(e));
+    } finally {
+      picking.current = false;
+    }
+  };
+
   return (
     <>
       <div className="wb-pane-title">
@@ -84,9 +91,10 @@ export function TreeHeader({
           <button
             type="button"
             className="wb-icon-btn"
-            title="更换工作区目录"
+            title="更换工作区目录（系统文件夹选择器）"
             aria-label="更换工作区目录"
-            onClick={onToggleEditing}
+            disabled={switching}
+            onClick={() => void choose()}
           >
             <Icon name="folder" size={14} />
           </button>
@@ -97,25 +105,12 @@ export function TreeHeader({
           当前 <b>{baseName(root) || root}</b> · 编译 / SVN 只作用于它 · 共 {projectCount} 个关联工程
         </div>
       )}
-      {editing && (
-        <div className="wb-root-edit">
-          <Input
-            value={draft}
-            onChange={(e) => onDraftChange(e.target.value)}
-            onKeyDown={(e) => !e.nativeEvent.isComposing && e.key === "Enter" && ready && onOpen()}
-            autoFocus
-          />
-          <Button size="sm" disabled={!ready} isLoading={switching} loadingText="切换中" onClick={onOpen}>
-            打开
-          </Button>
+      {error && (
+        <div className="wb-row-note" data-tone="bad" role="alert">
+          {error}
         </div>
       )}
-      {editing && unsaved && (
-        <div className="wb-row-note" data-tone="bad">
-          切换前会提示保存未完成的修改
-        </div>
-      )}
-      {editing && recents.length > 0 && (
+      {recents.length > 0 && (
         <div className="wb-root-recent">
           <span className="wb-root-recent-label">最近</span>
           {recents.map((p) => (

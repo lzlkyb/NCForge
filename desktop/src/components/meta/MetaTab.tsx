@@ -8,19 +8,24 @@ import {
   type BmfIndex,
   type BmfIssue,
 } from "../../lib/bmf";
+import { normalizeBmfPath } from "../../lib/bmfPath";
+import { severityCounts } from "../../lib/bmfSummary";
 import { toast } from "../ui/toast";
-import { Button } from "../ui/button";
 import { EmptyState } from "../ui/EmptyState";
-import { Icon } from "../ui/icon";
+import { DockRegion } from "../workspace/WorkbenchDock";
+import { MetaCanvas } from "./MetaCanvas";
+import { MetaCompare } from "./MetaCompare";
 import { MetaDetails } from "./MetaDetails";
 import { MetaGenerate } from "./MetaGenerate";
+import { MetaHead } from "./MetaHead";
 import { MetaIssues } from "./MetaIssues";
 import { MetaNewDialog } from "./MetaNewDialog";
 import { MetaPublish } from "./MetaPublish";
+import { MetaRefs } from "./MetaRefs";
 import { MetaTree } from "./MetaTree";
 import "../../meta.css";
 
-type View = "detail" | "issues" | "generate" | "publish";
+type View = "detail" | "canvas" | "compare" | "refs" | "issues" | "generate" | "publish";
 
 interface IndexState {
   data: BmfIndex | null;
@@ -47,6 +52,9 @@ const EMPTY_DOC: DocState = {
   issueError: null,
 };
 
+const samePath = (a: string, b: string) => normalizeBmfPath(a) === normalizeBmfPath(b);
+const sameEntry = (a: BmfEntry | null, b: BmfEntry) => !!a && samePath(a.path, b.path);
+
 /**
  * 元数据页（Ctrl+6；键位排在设置之后，见 App.tsx 的 HOTKEY_TABS）。
  *
@@ -54,6 +62,9 @@ const EMPTY_DOC: DocState = {
  * 「看字段」和「看某个字段的全部属性」是同一件事，常驻第三栏只会挤窄字段表。
  *
  * 读取全链路只读；唯一的写入口是编辑弹框与新建向导，两者都要用户点「保存」。
+ *
+ * 内容停靠进 `document` 区：本页以前直接返回 `.meta-page`，在 WorkbenchFrame 里
+ * 会变成 `.wb-content-frame` 的兄弟节点（占满整列、把工具栏顶走），而不是文档区内容。
  */
 export function MetaTab() {
   const [idx, setIdx] = useState<IndexState>({ data: null, loading: false });
@@ -61,17 +72,22 @@ export function MetaTab() {
   const [search, setSearch] = useState("");
   const [view, setView] = useState<View>("detail");
   const [newOpen, setNewOpen] = useState(false);
+  // 两个独立令牌：详情加载与索引扫描互不取消，但同类请求只认最后一次。
   const pickSeq = useRef(0);
+  const scanSeq = useRef(0);
 
   const scan = useCallback(async (force: boolean): Promise<BmfIndex | null> => {
+    const seq = ++scanSeq.current;
     setIdx((s) => ({ ...s, loading: true }));
     try {
       const data = await bmfIndexScan(force);
-      setIdx({ data, loading: false });
+      if (seq === scanSeq.current) setIdx({ data, loading: false });
       return data;
     } catch (e) {
-      toast(`索引失败：${e}`, "error");
-      setIdx((s) => ({ ...s, loading: false }));
+      if (seq === scanSeq.current) {
+        toast(`索引失败：${e}`, "error");
+        setIdx((s) => ({ ...s, loading: false }));
+      }
       return null;
     }
   }, []);
@@ -80,47 +96,69 @@ export function MetaTab() {
     void scan(false);
   }, [scan]);
 
-  const loadDetail = useCallback(async (entry: BmfEntry) => {
+  /**
+   * 加载详情并校验。`seq` 之外再比对当前选中路径：坏文件与正常文件之间的快速
+   * 切换、以及保存后的刷新，都可能让旧请求晚到；只认「还是同一个文件」的结果。
+   */
+  const loadDetail = useCallback(async (target: BmfEntry) => {
     const seq = ++pickSeq.current;
-    setDoc((s) => ({ ...s, busy: true, error: null, issueBusy: true, issueError: null }));
+    setDoc((s) => (sameEntry(s.entry, target) ? { ...s, busy: true, error: null, issueBusy: true, issueError: null } : s));
     try {
-      const detail = await bmfDetail(entry.path);
+      const detail = await bmfDetail(target.path);
       if (seq !== pickSeq.current) return;
-      setDoc((s) => ({ ...s, detail, busy: false }));
+      setDoc((s) => (sameEntry(s.entry, target) ? { ...s, detail, busy: false, error: null } : s));
       try {
-        const issues = await bmfValidate(entry.path);
-        if (seq === pickSeq.current) setDoc((s) => ({ ...s, issues, issueBusy: false }));
+        const issues = await bmfValidate(target.path);
+        if (seq === pickSeq.current) setDoc((s) => (sameEntry(s.entry, target) ? { ...s, issues, issueBusy: false } : s));
       } catch (e) {
-        if (seq === pickSeq.current) setDoc((s) => ({ ...s, issueError: String(e), issueBusy: false }));
+        if (seq === pickSeq.current) setDoc((s) => (sameEntry(s.entry, target) ? { ...s, issueError: String(e), issueBusy: false } : s));
       }
     } catch (e) {
       if (seq !== pickSeq.current) return;
-      setDoc((s) => ({ ...s, detail: null, error: String(e), busy: false, issueBusy: false }));
+      setDoc((s) => (sameEntry(s.entry, target) ? { ...s, detail: null, error: String(e), busy: false, issueBusy: false } : s));
     }
   }, []);
 
-  const pick = (entry: BmfEntry) => {
-    setDoc({ ...EMPTY_DOC, entry, error: entry.error });
-    setView("detail");
-    if (!entry.error) void loadDetail(entry);
-  };
+  const pick = useCallback(
+    (entry: BmfEntry) => {
+      // 坏文件也要推进令牌：否则上一个正常文件的详情请求晚到，会把「解析失败」
+      // 的页面覆盖成另一个文件的字段表。
+      pickSeq.current++;
+      setDoc({ ...EMPTY_DOC, entry, error: entry.error });
+      setView("detail");
+      if (!entry.error) void loadDetail(entry);
+    },
+    [loadDetail],
+  );
 
-  const revalidate = async () => {
-    if (!doc.entry) return;
-    setDoc((s) => ({ ...s, issueBusy: true, issueError: null }));
-    try {
-      const issues = await bmfValidate(doc.entry.path);
-      setDoc((s) => ({ ...s, issues, issueBusy: false }));
-    } catch (e) {
-      setDoc((s) => ({ ...s, issueError: String(e), issueBusy: false }));
+  /**
+   * 右上角「校验」= 重新读盘 + 重新校验。只调 bmfValidate 的话，解析失败 / 文件被
+   * 删除 / SHA 冲突之后无论如何都恢复不了——用户按提示「修好后点校验」也没用。
+   */
+  const revalidate = useCallback(() => {
+    if (doc.entry) void loadDetail(doc.entry);
+  }, [doc.entry, loadDetail]);
+
+  /** 保存后：重扫索引（字段数变了）并刷新详情；选中项按路径对齐，不用旧对象。 */
+  const refreshAfterEdit = useCallback(async () => {
+    const before = doc.entry;
+    if (!before) return;
+    const data = await scan(false);
+    const fresh = data?.entries.find((e) => samePath(e.path, before.path));
+    if (fresh) {
+      setDoc((s) => (sameEntry(s.entry, before) ? { ...s, entry: fresh } : s));
+      void loadDetail(fresh);
+    } else {
+      void loadDetail(before);
     }
-  };
+  }, [doc.entry, scan, loadDetail]);
 
-  const counts = scoreboard(doc.issues);
+  const counts = severityCounts(doc.issues);
   const entry = doc.entry;
 
   return (
-    <div className="meta-page">
+    <DockRegion region="document">
+      <div className="meta-page">
       <MetaTree
         entries={idx.data?.entries ?? []}
         selected={entry?.path ?? null}
@@ -146,62 +184,84 @@ export function MetaTab() {
           />
         ) : (
           <>
-            <header className="meta-main-head">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h2 className="truncate text-[15px] font-semibold">{entry.displayName || entry.name}</h2>
-                  <span className="meta-mono text-[11px] text-muted-foreground">{entry.name}</span>
-                  {entry.error && <span className="meta-tag meta-tag-danger">解析失败</span>}
-                </div>
-                <div className="meta-path" title={entry.path}>
-                  {entry.path}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="meta-sev-summary">
-                  <span className="sev-error">{counts.error} 错误</span>
-                  <span className="sev-warn">{counts.warn} 警告</span>
-                  <span className="sev-info">{counts.info} 提示</span>
-                </div>
-                <Button size="sm" variant="outline" onClick={() => void revalidate()} disabled={doc.issueBusy}>
-                  <Icon name="shield" size={13} /> 校验
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setNewOpen(true)}>
-                  <Icon name="filePlus" size={13} /> 新建
-                </Button>
-              </div>
-            </header>
+            <MetaHead
+              entry={entry}
+              counts={counts}
+              busy={doc.busy}
+              onRevalidate={revalidate}
+              onNew={() => setNewOpen(true)}
+            />
 
-            <nav className="meta-tabs">
+            <nav className="meta-tabs" role="tablist" aria-label="元数据视图">
               {(
                 [
                   ["detail", "结构", doc.detail ? `${doc.detail.entities.length} 实体` : ""],
+                  ["canvas", "画布", "ER"],
+                  ["compare", "对比", "字段级"],
+                  ["refs", "引用", "跨工程"],
                   ["issues", "校验", `${doc.issues.length}`],
                   ["generate", "生成", "DDL / VO"],
                   ["publish", "发布 POC", "M3"],
                 ] as [View, string, string][]
               ).map(([key, label, hint]) => (
-                <button key={key} type="button" className={view === key ? "is-active" : ""} onClick={() => setView(key)}>
+                <button
+                  key={key}
+                  id={`meta-tab-${key}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === key}
+                  aria-controls="meta-view-panel"
+                  tabIndex={view === key ? 0 : -1}
+                  className={view === key ? "is-active" : ""}
+                  onClick={() => setView(key)}
+                >
                   {label}
                   {hint && <span>{hint}</span>}
                 </button>
               ))}
             </nav>
 
-            <div className="meta-main-body">
+            <div
+              className="meta-main-body"
+              id="meta-view-panel"
+              role="tabpanel"
+              aria-labelledby={`meta-tab-${view}`}
+            >
               {doc.busy && <p className="meta-note">正在解析…</p>}
-              {!doc.busy && doc.error && (
+              {doc.error && (
                 <div className="meta-error-box">
                   <strong>无法解析这个组件</strong>
                   <pre>{doc.error}</pre>
-                  <p className="meta-note m-0">文件仍在索引里；修好 XML 后点右上角「校验」或重新索引。</p>
+                  <p className="meta-note m-0">
+                    文件仍在索引里；修好 XML 后点右上角「校验」重新加载，或在左栏点刷新重新索引。
+                  </p>
                 </div>
               )}
-              {!doc.busy && !doc.error && doc.detail && (
+              {!doc.error && doc.detail && (
                 <>
-                  {view === "detail" && <MetaDetails detail={doc.detail} onEdited={() => void loadDetail(entry)} />}
+                  {view === "detail" && <MetaDetails detail={doc.detail} onEdited={() => void refreshAfterEdit()} />}
+                  {view === "canvas" && (
+                    <MetaCanvas detail={doc.detail} onEdited={() => void refreshAfterEdit()} />
+                  )}
+                  {view === "compare" && (
+                    <MetaCompare current={doc.detail} entries={idx.data?.entries ?? []} />
+                  )}
+                  {view === "refs" && (
+                    <MetaRefs
+                      path={doc.detail.path}
+                      onOpen={(p) => {
+                        const target = idx.data?.entries.find((e) => samePath(e.path, p));
+                        if (target) {
+                          void loadDetail(target);
+                          setView("detail");
+                        }
+                      }}
+                    />
+                  )}
                   {view === "issues" && <MetaIssues issues={doc.issues} loading={doc.issueBusy} error={doc.issueError} />}
-                  {view === "generate" && <MetaGenerate path={doc.detail.path} />}
+                  {view === "generate" && (
+                    <MetaGenerate path={doc.detail.path} component={doc.detail.component.name} />
+                  )}
                   {view === "publish" && (
                     <MetaPublish
                       component={doc.detail.component.name}
@@ -223,20 +283,18 @@ export function MetaTab() {
           onCreated={(path) => {
             setNewOpen(false);
             void scan(false).then((data) => {
-              const created = data?.entries.find((e) => e.path === path);
-              if (created) pick(created);
+              const created = data?.entries.find((e) => samePath(e.path, path));
+              if (created) {
+                setSearch("");
+                pick(created);
+              } else {
+                toast("文件已创建，但索引里没有找到它；确认它位于 METADATA 目录下", "info");
+              }
             });
           }}
         />
       )}
-    </div>
+      </div>
+    </DockRegion>
   );
-}
-
-function scoreboard(issues: BmfIssue[]) {
-  const c = { error: 0, warn: 0, info: 0 };
-  for (const i of issues) {
-    if (i.severity in c) c[i.severity as keyof typeof c]++;
-  }
-  return c;
 }

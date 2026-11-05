@@ -54,8 +54,6 @@ import {
 export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {}) {
   const queryClient = useQueryClient();
   const slot = useFileSlot();
-  const [rootInput, setRootInput] = useState("");
-  const [editingRoot, setEditingRoot] = useState(false);
   // 文件结构 / 本地历史 / 生成代码三个弹层：放这里而不是组件内部，命令面板与快捷键也要能打开它。
   // 合成一个 state：三个布尔各占一个 hook，会把组件顶到体量门禁（≤8）之上
   const [panels, setPanels] = useState({ outline: false, history: false, generate: false });
@@ -92,10 +90,9 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
     projects,
     queryClient,
     setRoot,
-    setEditingRoot,
     openFile: session.openFile,
   });
-  useWorkspacePicker({ root: root ?? null, setDraft: setRootInput, setEditing: setEditingRoot, applyRoot });
+  useWorkspacePicker({ root: root ?? null, applyRoot });
   // 标签会话：重启恢复、快照落盘、Ctrl+Shift+T / Ctrl+Tab
   useTabRestore(root, session.openFile);
   useTabPersistence(root, tabs, activePath, splitPath);
@@ -198,9 +195,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
     return (
       <>
         <EmptyProjectSlots
-          rootInput={rootInput}
           recents={getRecentRoots()}
-          onChange={setRootInput}
           onOpen={applyRoot}
           output={panel}
           servicesPanel={panelOpen && panelTab === "svc"}
@@ -228,9 +223,6 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           active,
           splitPath,
           marks: tree.marks,
-          // 与退出前的「保存全部」用同一个判定（lib/saveAllDirty.isUnsaved）：
-          // 两处口径一旦不一致，就会出现「换目录时警告说会丢、退出时却没弹框」这类怪事
-          hasUnsaved: tabs.some(isUnsaved),
           activeMark: active ? tree.marks[active.path] : undefined,
           showLargeHint,
           // 大文件降级：提示条可以关掉，但编辑器里的降级一直有效
@@ -239,8 +231,6 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           encodingIssue,
           saving,
           reveal,
-          rootInput,
-          editingRoot,
           recentRoots: getRecentRoots(),
           panelOpen,
           panelTab,
@@ -251,8 +241,6 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           treeRef,
         }}
         actions={{
-          setRootInput,
-          setEditingRoot,
           setPanels,
           setPanelOpen,
           applyRoot,

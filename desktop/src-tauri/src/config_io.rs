@@ -46,6 +46,8 @@ pub struct ExportableConfig {
     pub workspace_root: Option<String>,
     pub nc_home: Option<String>,
     pub server_heap_mb: Option<u32>,
+    /// 客户端（JStarter）堆上限。旧导出物没有这个键 → `None` → 不动本机值。
+    pub client_heap_mb: Option<u32>,
     pub svn_user: Option<String>,
     pub patch_out_dir: Option<String>,
     pub patch_out_root: Option<String>,
@@ -84,6 +86,7 @@ pub fn build_export(cfg: &AppConfig) -> ConfigExport {
             workspace_root: cfg.workspace_root.clone(),
             nc_home: cfg.nc_home.clone(),
             server_heap_mb: cfg.server_heap_mb,
+            client_heap_mb: cfg.client_heap_mb,
             svn_user: cfg.svn_user.clone(),
             patch_out_dir: cfg.patch_out_dir.clone(),
             patch_out_root: cfg.patch_out_root.clone(),
@@ -173,6 +176,9 @@ pub fn apply_import(cfg: &mut AppConfig, imported: &ExportableConfig) -> Result<
     }
     if imported.server_heap_mb.is_some() {
         cfg.server_heap_mb = imported.server_heap_mb;
+    }
+    if imported.client_heap_mb.is_some() {
+        cfg.client_heap_mb = imported.client_heap_mb;
     }
     if let Some(v) = &imported.svn_user {
         cfg.svn_user = Some(v.clone());
@@ -293,6 +299,30 @@ mod tests {
             !json.contains("svn_password_dpapi"),
             "导出物不该有 svn 口令键"
         );
+    }
+
+    /// 客户端堆上限属于启动参数，换机器时也要跟着走（否则新机按 768M 起客户端）。
+    #[test]
+    fn 客户端堆上限随导出导入往返() {
+        let cfg = AppConfig {
+            client_heap_mb: Some(1024),
+            ..Default::default()
+        };
+        let export = build_export(&cfg);
+        assert_eq!(export.config.client_heap_mb, Some(1024));
+
+        let mut target = AppConfig::default();
+        apply_import(&mut target, &export.config).unwrap();
+        assert_eq!(target.client_heap_mb, Some(1024));
+
+        // 旧导出物没有这个键：不能把本机值清掉
+        let mut kept = AppConfig {
+            client_heap_mb: Some(2048),
+            ..Default::default()
+        };
+        let old = parse_import(r#"{"app":"ncforge","schema":1,"config":{}}"#).unwrap();
+        apply_import(&mut kept, &old.config).unwrap();
+        assert_eq!(kept.client_heap_mb, Some(2048));
     }
 
     /// 导入文件里硬塞口令字段（手改 / 恶意文件）也必须被丢掉。

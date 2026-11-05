@@ -248,6 +248,15 @@ fn load_cache(dir: &Path) -> Option<CacheFile> {
     (c.v == CACHE_V).then_some(c)
 }
 
+/// 列出某个根下索引口径内的全部 BMF。引用扫描（F1）复用它，保证「扫到的文件」
+/// 与左栏清单是同一批，不会再写一套目录遍历规则。
+pub fn list_bmfs(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_bmfs(root, 0, &mut out);
+    out.sort();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

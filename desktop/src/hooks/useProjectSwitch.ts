@@ -31,14 +31,12 @@ export function useProjectSwitch({
   projects,
   queryClient,
   setRoot,
-  setEditingRoot,
   openFile,
 }: {
   root: string | null;
   projects: LinkedProject[];
   queryClient: QueryClient;
   setRoot: (root: string) => void;
-  setEditingRoot: (editing: boolean) => void;
   openFile: (path: string, opts?: { preview?: boolean }) => Promise<boolean>;
 }) {
   const [switchTarget, setSwitchTarget] = useState<SwitchTarget | null>(null);
@@ -58,7 +56,6 @@ export function useProjectSwitch({
       // 各入口各写一套必然分叉
       const shown = await applyWorkspace(path, queryClient);
       setRoot(shown);
-      setEditingRoot(false);
       task.finish("success","工程已切换；代码智能按新工程单独准备");
       return { ok: true };
     } catch (e) {

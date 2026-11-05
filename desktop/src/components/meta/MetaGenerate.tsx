@@ -3,9 +3,11 @@ import { bmfGenerate, type BmfGeneration } from "../../lib/bmf";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
+import { MetaDdlRun } from "./MetaDdlRun";
+import { MetaExportBar } from "./MetaExportBar";
 
-/** 生成预览：DDL / VO / 注册清单。全是文本，复制走剪贴板，**不执行、不写盘**。 */
-export function MetaGenerate({ path }: { path: string }) {
+/** 生成预览：DDL / VO / 注册清单。预览不写盘；落盘走下方的导出栏，且只增不改。 */
+export function MetaGenerate({ path, component }: { path: string; component?: string }) {
   const [gen, setGen] = useState<BmfGeneration | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -19,6 +21,8 @@ export function MetaGenerate({ path }: { path: string }) {
       setGen(await bmfGenerate(path));
       setVoIndex(0);
     } catch (e) {
+      // 不能把上一次的生成结果留在错误旁边：用户会以为那是当前文件的内容。
+      setGen(null);
       setErr(String(e));
     } finally {
       setBusy(false);
@@ -78,6 +82,8 @@ export function MetaGenerate({ path }: { path: string }) {
             </div>
           )}
 
+          <MetaExportBar path={path} />
+
           {tab === "vo" && gen.files.length > 0 && (
             <div className="meta-vo-tabs">
               {gen.files.map((f, i) => (
@@ -130,12 +136,19 @@ export function MetaGenerate({ path }: { path: string }) {
               )}
             </div>
           ) : (
-            <pre className="meta-code">{current || "（没有内容）"}</pre>
+            <>
+              <pre className="meta-code">{current || "（没有内容）"}</pre>
+              {tab === "ddl" && <MetaDdlRun ddl={gen.ddl} component={component || componentOf(path)} />}
+            </>
           )}
         </>
       )}
     </div>
   );
+}
+
+function componentOf(path: string): string {
+  return path.replace(/^.*[\\/]/, "").replace(/\.bmf$/i, "");
 }
 
 function registryText(gen: BmfGeneration | null): string {

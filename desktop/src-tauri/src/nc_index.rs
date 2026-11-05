@@ -100,6 +100,107 @@ fn is_runtime_jar(p: &Path) -> bool {
     !(name.ends_with("_src.jar") || name.ends_with("_doc.jar"))
 }
 
+/// 运行时类路径要收的压缩包：`.jar` / `.zip`，且不是 `_src` / `_doc`。
+///
+/// 客户端规则来自 Eclipse 插件的正则 `(?<!_(doc|src))\.(jar|zip)$`，所以
+/// `_src.zip` / `_doc.zip` 也要排除（`is_runtime_jar` 只管 `.jar`）。
+fn is_runtime_archive(p: &Path) -> bool {
+    let name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let archive = name.ends_with(".jar") || name.ends_with(".zip");
+    let generated = name.ends_with("_src.jar")
+        || name.ends_with("_doc.jar")
+        || name.ends_with("_src.zip")
+        || name.ends_with("_doc.zip");
+    archive && !generated
+}
+
+/// `modules` 下一级模块名，按 NTFS 的忽略大小写顺序排序。
+///
+/// Eclipse 的 `getAccessibleModuleFolders` 直接用 `File.listFiles` 的顺序，
+/// 两次启动可能不同；这里显式排序，保证同一次安装每次拼出来的 classpath 一致。
+pub fn module_names(home: &Path) -> Vec<String> {
+    let Ok(rd) = std::fs::read_dir(home.join("modules")) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = rd
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort_by_key(|n| n.to_uppercase());
+    names
+}
+
+/// Eclipse **客户端**启动用的 `computeStandCP`（`nc.uap.mde` 插件 `ClasspathComputer`）。
+///
+/// 与中间件的 15 层**不是同一套规则**：
+/// - `extension/` 与 `var/` 是递归的（内部还能再有 extension/var）；
+/// - `lib` 只收一层 jar，按**文件名**忽略大小写排序（不是完整路径）；
+/// - 没有 `_classes` / `_lib` / `hyext`。
+///
+/// 两边各用各的规则，是因为官方插件对客户端与服务端本来就是两套代码：
+/// 服务端走 NC 自己的 `BootstrapClassLoader`，客户端走插件自己的容器解析。
+/// 照抄服务端那套会让客户端 classpath 少掉 `extension` / `var` 里的覆盖类。
+pub fn stand_cp(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    push_stand_cp(root, 0, &mut out);
+    out
+}
+
+fn push_stand_cp(root: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+    // extension/var 正常只嵌套一层；限制深度是防符号链接成环时无限递归
+    if depth > 2 || !root.is_dir() {
+        return;
+    }
+    push_stand_cp(&root.join("extension"), depth + 1, out);
+    push_stand_cp(&root.join("var"), depth + 1, out);
+    // 散类目录只在自己存在时入列：不存在的路径进 classpath 只会让清单骗人
+    for sub in ["classes", "resources"] {
+        let p = root.join(sub);
+        if p.is_dir() {
+            out.push(p);
+        }
+    }
+    let Ok(rd) = std::fs::read_dir(root.join("lib")) else {
+        return;
+    };
+    let mut jars: Vec<PathBuf> = rd
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && is_runtime_archive(p))
+        .collect();
+    jars.sort_by_key(|p| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default()
+    });
+    out.extend(jars);
+}
+
+/// 目录下一层的运行时压缩包，按文件名忽略大小写排序。
+///
+/// `langlib/` 与 `computeStandCP` 的结构不同：jar 直接躺在目录里、没有 `lib/`
+/// 子目录，所以不能复用 `stand_cp`。
+pub fn one_level_archives(dir: &Path) -> Vec<PathBuf> {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut jars: Vec<PathBuf> = rd
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && is_runtime_archive(p))
+        .collect();
+    jars.sort_by_key(|p| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default()
+    });
+    jars
+}
+
 /// 排序键：转大写的完整路径。Eclipse 的顺序来自 Windows 目录列举，NTFS 比较文件名时先转大写：
 /// - 按字节序会把 `Dm7JdbcDriver17.jar` 排到 `bsh-2.0b6.jar` 前面（大写在前），与 Eclipse 不一致；
 /// - 转小写会把 `uibc_x.jar` 排到 `uibcbd_x.jar` 前面（`_`=0x5F 小于 `b`=0x62），也不对；
@@ -137,17 +238,8 @@ pub fn classpath_jars(nc_home: &Path) -> Vec<PathBuf> {
         collect_jars(&nc_home.join(d), &mut out);
     }
     let modules = nc_home.join("modules");
-    let mut names: Vec<String> = std::fs::read_dir(&modules)
-        .map(|rd| {
-            rd.flatten()
-                .filter(|e| e.path().is_dir())
-                .map(|e| e.file_name().to_string_lossy().into_owned())
-                .collect()
-        })
-        .unwrap_or_default();
-    names.sort_by_key(|n| n.to_uppercase());
     let layers = module_layers();
-    for m in names {
+    for m in module_names(nc_home) {
         for (sub, kind) in &layers {
             if *kind != LayerKind::Jars {
                 continue;
@@ -187,20 +279,10 @@ pub fn classpath_jars(nc_home: &Path) -> Vec<PathBuf> {
 /// 注：`modules/*/classes` 曾按 `find -path "*/classes"` 混算成「161 目录 / 458 class」，
 /// 那是把各层级 `classes` 一起数进去的结果，数字偏高；`147` 也是同一口径下的错值。
 pub fn module_class_dirs(nc_home: &Path) -> Vec<PathBuf> {
-    let Ok(rd) = std::fs::read_dir(nc_home.join("modules")) else {
-        return Vec::new();
-    };
-    let mut names: Vec<String> = rd
-        .flatten()
-        .filter(|e| e.path().is_dir())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .collect();
-    names.sort_by_key(|n| n.to_uppercase());
-
     let modules = nc_home.join("modules");
     let layers = module_layers();
     let mut dirs: Vec<PathBuf> = Vec::new();
-    for name in names {
+    for name in module_names(nc_home) {
         for (sub, kind) in &layers {
             if *kind != LayerKind::Classes {
                 continue;

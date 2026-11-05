@@ -10,10 +10,12 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::State;
 
+use crate::bmf_export;
 use crate::bmf_gen::{self, Generation};
 use crate::bmf_index::{self, BmfIndex, RootSpec};
 use crate::bmf_model::BmfDoc;
 use crate::bmf_publish::{self, Probe};
+use crate::bmf_refs;
 use crate::bmf_rules::{self, Issue};
 use crate::bmf_scaffold::{self, Scaffold, ScaffoldSpec};
 use crate::bmf_write::{self, EditOp, WriteResult};
@@ -64,6 +66,32 @@ fn safe_write_path(cfg: &AppConfig, requested: &str) -> Result<PathBuf, String> 
         .map(|r| r.path.to_string_lossy().into_owned())
         .collect();
     resolve_safe_path(requested, &allowed, &[], true)
+}
+
+/// 新建文件的目标必须符合索引口径：`<...>/METADATA/<code>.bmf`。
+///
+/// 后端兜底而不是只靠界面禁用：写在别处的文件索引扫不到，用户会以为创建失败；
+/// 文件名与组件编码不一致时，索引里显示的名字和 component/@name 也会对不上。
+fn check_scaffold_target(target: &Path, code: &str) -> Result<(), String> {
+    let file = target
+        .file_name()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let Some(stem) = file.strip_suffix(".bmf") else {
+        return Err("目标文件必须以 .bmf 结尾".to_string());
+    };
+    if stem != code.to_lowercase() {
+        return Err(format!("目标文件名应与组件编码一致：{code}.bmf"));
+    }
+    let parent = target
+        .parent()
+        .and_then(|p| p.file_name())
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if parent != "metadata" {
+        return Err("目标必须放在 METADATA 目录下（否则索引扫不到）".to_string());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
@@ -169,7 +197,13 @@ pub async fn bmf_scaffold_write(
         let cfg = state.config.read().await;
         safe_write_path(&cfg, &path)?
     };
-    let written = target.to_string_lossy().into_owned();
+    let code = bmf_scaffold::normalize_ident(&spec.code, "组件编码")?;
+    check_scaffold_target(&target, &code)?;
+    // resolve_safe_path 会返回 Windows verbatim 路径（`\\?\D:\...`）；回传给前端后
+    // 与索引里的普通路径比较会失败，自动选中就永远不生效。
+    let written = crate::nc_home::strip_verbatim(&target)
+        .to_string_lossy()
+        .into_owned();
     let scaffold = bmf_scaffold::build(&spec)?;
     let bytes = scaffold.text.into_bytes();
     tauri::async_runtime::spawn_blocking(move || bmf_write::write_new(&target, &bytes))
@@ -215,6 +249,67 @@ pub async fn bmf_edit_save(
     .map_err(|e| format!("保存任务失败：{e}"))?
 }
 
+/// 生成物落盘（M5）：DDL / VO / UPM / 注册清单写到用户指定目录。
+///
+/// 目标目录必须在工作区或链接工程内；已有文件默认跳过，`overwrite` 时才备份后重写。
+/// 不执行 SQL、不改 NC 安装目录。
+#[tauri::command]
+pub async fn bmf_gen_export(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    target_dir: String,
+    entities: Option<Vec<String>>,
+    overwrite: bool,
+) -> Result<bmf_export::ExportResult, String> {
+    let (target, backup_dir) = {
+        let cfg = state.config.read().await;
+        (
+            safe_write_path(&cfg, &target_dir)?,
+            state.config_dir.join("bmf_backup").join("gen"),
+        )
+    };
+    let doc = BmfDoc::open(Path::new(&path))?;
+    let gen = bmf_gen::generate(&doc, entities.as_deref().unwrap_or(&[]));
+    let files = bmf_export::plan(&gen, &doc.component.name, &doc.component.namespace);
+    let target = crate::nc_home::strip_verbatim(&target).to_path_buf();
+    tauri::async_runtime::spawn_blocking(move || {
+        bmf_export::write_all(&target, &files, overwrite, &backup_dir)
+    })
+    .await
+    .map_err(|e| format!("写入任务失败：{e}"))?
+}
+
+/// F1 跨工程引用扫描：只读，按类全名找 `typeName` / `refModelName`。
+/// 扫描范围与左栏索引同一批文件；坏 XML 计入 skipped，不会让整次扫描失败。
+#[tauri::command]
+pub async fn bmf_references(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<bmf_refs::RefScan, String> {
+    let root_paths: Vec<PathBuf> = {
+        let cfg = state.config.read().await;
+        let primary = primary_root(&cfg)?;
+        let overrides = eclipse_cp::active_overrides(&cfg.linked_overrides);
+        roots(&primary, &overrides).into_iter().map(|r| r.path).collect()
+    };
+    let target = PathBuf::from(path);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut files = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for root in root_paths {
+            for f in bmf_index::list_bmfs(&root) {
+                let norm = f.canonicalize().unwrap_or_else(|_| f.clone());
+                if seen.insert(norm) {
+                    files.push(f);
+                }
+            }
+        }
+        bmf_refs::scan_files(&target, &files)
+    })
+    .await
+    .map_err(|e| format!("扫描任务失败：{e}"))?
+}
+
 /// M3 发布探针：只读检查前置条件并生成操作手册，不连库、不发布。
 #[tauri::command]
 pub async fn bmf_publish_probe(
@@ -230,4 +325,26 @@ pub async fn bmf_publish_probe(
         &module,
         bmf_path.as_deref(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_scaffold_target;
+    use std::path::Path;
+
+    #[test]
+    fn scaffold_target_must_be_metadata_dir_and_match_code() {
+        assert!(check_scaffold_target(Path::new("D:/w/uapbd/METADATA/demo.bmf"), "demo").is_ok());
+        // 索引目录名与扩展名按 Windows 口径大小写不敏感
+        assert!(check_scaffold_target(Path::new("D:/w/uapbd/metadata/DEMO.BMF"), "demo").is_ok());
+        assert!(check_scaffold_target(Path::new("D:/w/uapbd/demo.bmf"), "demo")
+            .unwrap_err()
+            .contains("METADATA"));
+        assert!(check_scaffold_target(Path::new("D:/w/uapbd/METADATA/demo.xml"), "demo")
+            .unwrap_err()
+            .contains(".bmf"));
+        assert!(check_scaffold_target(Path::new("D:/w/uapbd/METADATA/other.bmf"), "demo")
+            .unwrap_err()
+            .contains("组件编码"));
+    }
 }

@@ -55,3 +55,27 @@ export function writeDebugModePref(on: boolean): void {
     // 隐私模式：本次会话内仍按内存里的开关走
   }
 }
+
+const CLIENT_DEBUG_MODE_KEY = "ncforge-client-debug-mode";
+
+/**
+ * 客户端是否带 JDWP 启动。
+ *
+ * 与服务端分开存：两者是独立 JVM，同时开调试会各占一个回环端口；共用开关会让
+ * 「只想调客户端」的人把服务也拖进调试模式（反之亦然）。
+ */
+export function readClientDebugModePref(): boolean {
+  try {
+    return localStorage.getItem(CLIENT_DEBUG_MODE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function writeClientDebugModePref(on: boolean): void {
+  try {
+    localStorage.setItem(CLIENT_DEBUG_MODE_KEY, on ? "1" : "0");
+  } catch {
+    // 隐私模式：本次会话内仍按内存里的开关走
+  }
+}
