@@ -1,5 +1,5 @@
 // 应用元信息（关于卡片用）。
-// - 仓库地址 / 作者：发布时填真实的（rename-app.mjs 会改 name，这两个字段按需手改）
+// - 仓库地址 / 作者：发布时填真实的（这两个字段按需手改）
 // - 协议：根目录 LICENSE（MIT）
 // - 更新历史：由 scripts/gen-changelog.mjs 在 predev/prebuild 时从根目录 CHANGELOG.md
 //   （Keep a Changelog，唯一手写源）自动解析生成 lib/changelog.generated.ts，此处 re-export。
@@ -9,7 +9,6 @@
 export const APP_INFO = {
   // 面向用户的**显示名**。与 Rust 侧 `src-tauri/src/branding.rs` 的 APP_DISPLAY_NAME
   // 是同一个字符串的两份维护（前端拿不到 Rust 常量，只能各存一份），改这里请同步改那边
-  // （或跑 `node scripts/rename-app.mjs` 一把改完）。
   name: "NCForge",
   // 侧栏品牌区标语。
   tagline: "写代码 · 编译 · 启服务",

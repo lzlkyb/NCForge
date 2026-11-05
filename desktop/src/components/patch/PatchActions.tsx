@@ -211,10 +211,9 @@ function OriginBadge({ origin }: { origin: { source: string; exists: boolean } |
       </span>
     );
   }
-  const text = origin.source === "nc-patch" ? "继承 nc-patch 脚本" : "自动找到";
   return (
-    <span className="pk-origin" title={`这个路径是${text}的，不是手填的`}>
-      {text}
+    <span className="pk-origin" title="这个路径是在工作副本附近自动找到的，不是手填的">
+      自动找到
     </span>
   );
 }
@@ -251,7 +250,7 @@ function SqlAdder({ onAdd }: { onAdd: (path: string) => void }) {
         autoFocus
         aria-label="附带的 SQL 文件路径"
         value={value}
-        placeholder="D:\\nc\\aier_crossborrow_ddl.sql"
+        placeholder="D:\\nc\\ddl.sql"
         spellCheck={false}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {

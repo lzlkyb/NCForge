@@ -15,7 +15,7 @@ import { captureLocalHistory } from "./localHistory";
 import { getSession } from "./workspaceSession";
 import { applyLspEdits, groupEdits, type RenameGroup, type RenamePlan, type RenameResult } from "./renameEdits";
 
-export type { RenameGroup, RenamePlan, RenameResult, LspTextEdit } from "./renameEdits";
+export type { RenameGroup, RenamePlan, RenameResult } from "./renameEdits";
 
 /** 问 jdt.ls「把这个位置上的符号改成 newName 要动哪些地方」。 */
 export async function planRename(path: string, line: number, column: number, newName: string): Promise<RenamePlan> {

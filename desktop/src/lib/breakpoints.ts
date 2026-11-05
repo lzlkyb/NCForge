@@ -40,9 +40,6 @@ const norm = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "").toLo
 /** 同一文件同一行的键（面板、gutter、适配器回报共用一套口径）。 */
 export const bpKey = (path: string, line: number) => `${norm(path)}#${line}`;
 
-/** 路径键；分组下发断点时用。 */
-export const bpPathKey = norm;
-
 const cleanField = (raw: unknown): string | undefined => {
   if (typeof raw !== "string") return undefined;
   const text = raw.trim().slice(0, MAX_FIELD);
@@ -119,11 +116,6 @@ export function useBreakpoints(root: string): Breakpoint[] {
     loadBreakpoints(root);
   }, [root]);
   return list;
-}
-
-export function hasBreakpointAt(path: string, line: number): boolean {
-  const k = bpKey(path, line);
-  return items.some((b) => bpKey(b.path, b.line) === k);
 }
 
 /** 某个文件里的全部断点（升序，含禁用项——gutter 要能把禁用态画出来）。 */

@@ -221,9 +221,3 @@ export function wireQuitGuard(): () => void {
     wired = false;
   };
 }
-
-/** 仅测试用：复位模块级状态，避免用例间污染。 */
-export function __resetQuitGuardForTest() {
-  inFlight = false;
-  wired = false;
-}

@@ -985,6 +985,210 @@ button.meta-attr-row.is-active {
 }
 .meta-compare-arrow { color: hsl(var(--muted-foreground)); }
 
+/* ── NC 安装目录只读对比 ── */
+.meta-nc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-card);
+}
+.meta-nc-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.meta-nc-kind {
+  padding: 1px 7px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+.meta-nc-home {
+  flex: 1;
+  min-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ── 自有模板导入导出 ── */
+.meta-excel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.meta-excel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-card);
+}
+.meta-excel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.meta-excel-kind {
+  margin-left: auto;
+  padding: 1px 7px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+.meta-excel-sum {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+.meta-excel-sum .is-added { color: hsl(var(--success-ink)); }
+.meta-excel-sum .is-changed { color: hsl(var(--warning-ink)); }
+.meta-excel-sum .is-same { color: hsl(var(--muted-foreground)); }
+.meta-excel-sum .is-error { color: hsl(var(--destructive-ink)); }
+.meta-excel-rows {
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-card);
+}
+.meta-excel-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.meta-excel-table th {
+  position: sticky;
+  top: 0;
+  padding: 5px 8px;
+  background: hsl(var(--card));
+  border-bottom: 1px solid hsl(var(--border));
+  text-align: left;
+  font-weight: 600;
+}
+.meta-excel-table td {
+  padding: 4px 8px;
+  border-top: 1px solid hsl(var(--border) / 0.6);
+  vertical-align: top;
+}
+.meta-excel-rowno {
+  width: 40px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: hsl(var(--muted-foreground));
+}
+.meta-excel-status { white-space: nowrap; }
+.meta-excel-table tr.is-add .meta-excel-status { color: hsl(var(--success-ink)); }
+.meta-excel-table tr.is-update .meta-excel-status { color: hsl(var(--warning-ink)); }
+.meta-excel-table tr.is-error .meta-excel-status,
+.meta-excel-table tr.is-error .meta-excel-changes { color: hsl(var(--destructive-ink)); }
+.meta-excel-table tr.is-same .meta-excel-changes { opacity: 0.7; }
+.meta-excel-changes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.meta-excel-change {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.meta-excel-change b {
+  font-size: 10px;
+  font-weight: 550;
+  color: hsl(var(--muted-foreground));
+}
+.meta-excel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.meta-excel-actions .meta-note,
+.meta-excel-actions .meta-error { flex: 1; }
+
+/* ── 版本历史 ── */
+.meta-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.meta-history-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.meta-history-bar .meta-note { flex: 1; min-width: 220px; }
+.meta-history-body {
+  display: grid;
+  grid-template-columns: minmax(230px, 34%) 1fr;
+  gap: 10px;
+  min-height: 0;
+}
+.meta-history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-card);
+}
+.meta-history-list > li + li { border-top: 1px solid hsl(var(--border) / 0.6); }
+.meta-history-item {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+}
+.meta-history-item:hover { background: hsl(var(--accent) / 0.5); }
+.meta-history-item.is-active { background: hsl(var(--accent)); }
+.meta-history-rev {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+}
+.meta-history-msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+}
+.meta-history-meta,
+.meta-history-copy {
+  grid-column: 2;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta-history-copy { font-style: italic; }
+.meta-history-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
 /* ── 跨工程引用 ── */
 .meta-refs {
   display: flex;
@@ -1076,6 +1280,152 @@ button.meta-attr-row.is-active {
   font-weight: 600;
 }
 .meta-manual pre { max-height: 46vh; }
+
+/* ── 发布编排骨架（M6） ── */
+.meta-release {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid hsl(var(--border));
+}
+.meta-release-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.meta-release-bar .meta-section-title { margin: 0; }
+.meta-release-badge {
+  padding: 1px 7px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+.meta-release-bar button { margin-left: auto; }
+.meta-release-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.meta-release-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+}
+.meta-tool-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+.meta-tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-top: 1px solid hsl(var(--border) / 0.6);
+  font-size: 11px;
+}
+.meta-tool:first-child { border-top: 0; }
+.meta-tool strong { flex: none; min-width: 130px; font-weight: 550; }
+.meta-tool-status {
+  flex: none;
+  width: 40px;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+.meta-tool-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+.meta-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+.meta-step {
+  display: grid;
+  grid-template-columns: 22px auto auto auto 1fr;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  border-top: 1px solid hsl(var(--border) / 0.6);
+}
+.meta-step:first-child { border-top: 0; }
+.meta-step-index {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  color: hsl(var(--muted-foreground));
+}
+.meta-step-title { font-size: 12px; font-weight: 550; }
+.meta-step-mode,
+.meta-step-status {
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--border));
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+}
+.meta-step-status.is-ready { color: hsl(var(--success-ink)); border-color: hsl(var(--success) / 0.4); }
+.meta-step-status.is-blocked { color: hsl(var(--destructive-ink)); border-color: hsl(var(--destructive) / 0.4); }
+.meta-step-mode.is-manual { color: hsl(var(--warning-ink)); border-color: hsl(var(--warning) / 0.4); }
+.meta-step-detail,
+.meta-step-hint {
+  grid-column: 2 / -1;
+  margin: 0;
+  font-size: 11px;
+}
+.meta-step-hint { color: hsl(var(--muted-foreground)); font-size: 10.5px; }
+.meta-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.meta-evidence label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.meta-evidence label > .meta-ddl-conn { flex: 1; min-width: 0; }
+.meta-evidence-note { align-items: flex-start !important; }
+.meta-evidence textarea.meta-ddl-conn { resize: vertical; font-family: inherit; }
+.meta-evidence-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.meta-release-template > summary { cursor: pointer; }
+.meta-release-template pre {
+  max-height: 40vh;
+  margin: 6px 0 0;
+  padding: 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-control);
+  background: hsl(var(--background) / 0.7);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow: auto;
+}
 
 /* ── 弹框表单 ── */
 .meta-form {

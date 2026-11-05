@@ -62,7 +62,6 @@ export function useRevealOnOpen(): boolean {
   return useSyncExternalStore(revealPref.subscribe, revealPref.get);
 }
 
-export const getNcStructure = ncStructurePref.get;
 export const setNcStructure = ncStructurePref.set;
 export const toggleNcStructure = () => ncStructurePref.set(!ncStructurePref.get());
 export function useNcStructure(): boolean {

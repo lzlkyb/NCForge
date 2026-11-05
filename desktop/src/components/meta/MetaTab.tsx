@@ -13,19 +13,11 @@ import { severityCounts } from "../../lib/bmfSummary";
 import { toast } from "../ui/toast";
 import { EmptyState } from "../ui/EmptyState";
 import { DockRegion } from "../workspace/WorkbenchDock";
-import { MetaCanvas } from "./MetaCanvas";
-import { MetaCompare } from "./MetaCompare";
-import { MetaDetails } from "./MetaDetails";
-import { MetaGenerate } from "./MetaGenerate";
 import { MetaHead } from "./MetaHead";
-import { MetaIssues } from "./MetaIssues";
 import { MetaNewDialog } from "./MetaNewDialog";
-import { MetaPublish } from "./MetaPublish";
-import { MetaRefs } from "./MetaRefs";
 import { MetaTree } from "./MetaTree";
+import { MetaViewPanel, type MetaView } from "./MetaViewPanel";
 import "../../meta.css";
-
-type View = "detail" | "canvas" | "compare" | "refs" | "issues" | "generate" | "publish";
 
 interface IndexState {
   data: BmfIndex | null;
@@ -70,7 +62,7 @@ export function MetaTab() {
   const [idx, setIdx] = useState<IndexState>({ data: null, loading: false });
   const [doc, setDoc] = useState<DocState>(EMPTY_DOC);
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<View>("detail");
+  const [view, setView] = useState<MetaView>("detail");
   const [newOpen, setNewOpen] = useState(false);
   // 两个独立令牌：详情加载与索引扫描互不取消，但同类请求只认最后一次。
   const pickSeq = useRef(0);
@@ -198,11 +190,13 @@ export function MetaTab() {
                   ["detail", "结构", doc.detail ? `${doc.detail.entities.length} 实体` : ""],
                   ["canvas", "画布", "ER"],
                   ["compare", "对比", "字段级"],
+                  ["history", "历史", "SVN"],
                   ["refs", "引用", "跨工程"],
                   ["issues", "校验", `${doc.issues.length}`],
                   ["generate", "生成", "DDL / VO"],
+                  ["excel", "导入导出", "Excel"],
                   ["publish", "发布 POC", "M3"],
-                ] as [View, string, string][]
+                ] as [MetaView, string, string][]
               ).map(([key, label, hint]) => (
                 <button
                   key={key}
@@ -221,57 +215,24 @@ export function MetaTab() {
               ))}
             </nav>
 
-            <div
-              className="meta-main-body"
-              id="meta-view-panel"
-              role="tabpanel"
-              aria-labelledby={`meta-tab-${view}`}
-            >
-              {doc.busy && <p className="meta-note">正在解析…</p>}
-              {doc.error && (
-                <div className="meta-error-box">
-                  <strong>无法解析这个组件</strong>
-                  <pre>{doc.error}</pre>
-                  <p className="meta-note m-0">
-                    文件仍在索引里；修好 XML 后点右上角「校验」重新加载，或在左栏点刷新重新索引。
-                  </p>
-                </div>
-              )}
-              {!doc.error && doc.detail && (
-                <>
-                  {view === "detail" && <MetaDetails detail={doc.detail} onEdited={() => void refreshAfterEdit()} />}
-                  {view === "canvas" && (
-                    <MetaCanvas detail={doc.detail} onEdited={() => void refreshAfterEdit()} />
-                  )}
-                  {view === "compare" && (
-                    <MetaCompare current={doc.detail} entries={idx.data?.entries ?? []} />
-                  )}
-                  {view === "refs" && (
-                    <MetaRefs
-                      path={doc.detail.path}
-                      onOpen={(p) => {
-                        const target = idx.data?.entries.find((e) => samePath(e.path, p));
-                        if (target) {
-                          void loadDetail(target);
-                          setView("detail");
-                        }
-                      }}
-                    />
-                  )}
-                  {view === "issues" && <MetaIssues issues={doc.issues} loading={doc.issueBusy} error={doc.issueError} />}
-                  {view === "generate" && (
-                    <MetaGenerate path={doc.detail.path} component={doc.detail.component.name} />
-                  )}
-                  {view === "publish" && (
-                    <MetaPublish
-                      component={doc.detail.component.name}
-                      module={doc.detail.component.ownModule || doc.detail.component.namespace}
-                      path={doc.detail.path}
-                    />
-                  )}
-                </>
-              )}
-            </div>
+            <MetaViewPanel
+              view={view}
+              detail={doc.detail}
+              error={doc.error}
+              busy={doc.busy}
+              issues={doc.issues}
+              issueBusy={doc.issueBusy}
+              issueError={doc.issueError}
+              entries={idx.data?.entries ?? []}
+              onEdited={() => void refreshAfterEdit()}
+              onOpenRefs={(p) => {
+                const target = idx.data?.entries.find((e) => samePath(e.path, p));
+                if (target) {
+                  void loadDetail(target);
+                  setView("detail");
+                }
+              }}
+            />
           </>
         )}
       </section>

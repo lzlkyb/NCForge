@@ -18,70 +18,7 @@ export async function copyText(
   }
 }
 
-/**
- * 秒数格式化为中文时长（精确到秒），用于运行时长 / 已运行列展示。
- *
- * 超过一天后进一位到“天”：服务跑上几天是常态，“86小时40分12秒”读起来很费劲。
- * 只给最大两级单位（如“3天14小时”而不是“3天14小时22分13秒”）：精度再高对“跑了多久”
- * 这个问题没有意义，而卡片右上角宽度有限。不足一分钟时仍给到秒，刚启动时能看到跳。
- */
-export function formatUptime(seconds: number): string {
-  const total = Math.max(0, Math.floor(seconds));
-  const d = Math.floor(total / 86400);
-  const h = Math.floor((total % 86400) / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (d > 0) return `${d}天${h}小时`;
-  if (h > 0) return `${h}小时${m}分`;
-  if (m > 0) return `${m}分${s}秒`;
-  return `${s}秒`;
-}
-
-/** 版本号统一格式化为 "vX.Y.Z"（已带 v 则不重复加）。各处版本展示共用，避免前缀漂移。 */
-export function formatVersion(v?: string): string {
-  if (!v) return "?";
-  return v.startsWith("v") ? v : `v${v}`;
-}
-
-/**
- * 毫秒耗时格式化为一眼可读的中文文本，自动换算单位（微秒/毫秒/秒/分），避免用户看到
- * 大数字（如 10000ms）还要心算，也不用英文缩写（ms/s）而用中文单位。
- * - <1ms：换算成微秒（审计写盘等微秒级耗时仍能看清，不四舍五入成 0）。
- * - <10ms：毫秒保留 1 位小数（区分 1.2毫秒与 8.7毫秒）。
- * - <1000ms：毫秒取整。
- * - <60s：换算成秒（保留 1 位小数，如 10000ms → "10.0秒"）。
- * - ≥60s：换算成 "X分Y秒"。
- */
-export function formatDurationMs(ms: number): string {
-  if (ms <= 0) return "0毫秒";
-  if (ms < 1) return `${Math.round(ms * 1000)}微秒`;
-  if (ms < 10) return `${ms.toFixed(1)}毫秒`;
-  if (ms < 1000) return `${Math.round(ms)}毫秒`;
-  const totalSeconds = ms / 1000;
-  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)}秒`;
-  const m = Math.floor(totalSeconds / 60);
-  const s = Math.round(totalSeconds % 60);
-  return `${m}分${s}秒`;
-}
-
 /* ─── Token 用量展示（纯函数，共用，规则 11）─── */
-
-/**
- * token 数格式化：≥1 万显示「x.x万」（保留 1 位小数，去尾随 .0），否则千分位原值。
- * 口径是估算值（见后端 audit.rs），展示层不做任何「账单」暗示。
- */
-export function fmtTokens(n: number): string {
-  if (n < 10000) return n.toLocaleString("en-US");
-  const w = n / 10000;
-  return `${w >= 100 ? Math.round(w) : Math.round(w * 10) / 10}万`;
-}
-
-/** 日期键 "2026-09-27" → 短标签 "9/27"。非法输入原样返回。 */
-export function shortDateKey(date: string): string {
-  const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(date);
-  if (!m) return date;
-  return `${Number(m[1])}/${Number(m[2])}`;
-}
 
 /* ─── 更新历史「已读」状态（localStorage，纯函数，规则 11）─── */
 
@@ -168,18 +105,6 @@ export function formatRelativeTime(dateStr: string, nowMs?: number): string {
   return `${Math.floor(mon / 12)} 年前`;
 }
 
-/**
- * 相对时间，但入参是 **unix 秒**。
- *
- * 历史会话表里存的是秒（`file_mtime / 1000`），转成 ISO 字符串再交给
- * `formatRelativeTime` 去解析纯属绕路 —— 但比在库里存一份字符串好：
- * 时间戳能被排序、能被比较，字符串不能。
- */
-export function formatRelativeSecs(sec: number): string {
-  if (!Number.isFinite(sec) || sec <= 0) return "";
-  return formatRelativeTime(new Date(sec * 1000).toISOString());
-}
-
 /** 字节数格式化为带单位的人类可读文本（B/KB/MB/GB），SecurityTab 与版本历史弹框共用（规则 11）。 */
 export function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return "0 B";
@@ -192,72 +117,6 @@ export function formatBytes(bytes: number): string {
 /** 下载速率格式化（复用 formatBytes 加 "/s" 后缀），UpdateBadge/AboutGroup 的更新进度展示共用。 */
 export function formatBytesPerSec(bytesPerSec: number): string {
   return `${formatBytes(bytesPerSec)}/s`;
-}
-
-/**
- * 清理 SFTP 报错里的 PTY 噪声：scp/ssh 在 PTY 下会输出 `\r` 进度条、ANSI 转义、
- * 多余空行。剥掉后只留人类可读的错误（权限拒绝 / 路径不存在 / 连接失败等）。
- */
-export function cleanErr(raw: unknown): string {
-  const s = String(raw ?? "");
-  return s
-    // eslint-disable-next-line no-control-regex -- 本函数的职责就是剥掉 PTY 的控制字符
-    .replace(/\[[0-9;]*m/g, "") // ANSI 颜色
-    // eslint-disable-next-line no-control-regex -- 同上：退格是 scp 进度条的刷新方式
-    .replace(/[\r]/g, "") // 回车 / 退格（进度条覆盖）
-    .split("\n")
-    .map((l) => l.trimEnd())
-    .filter((l) => l.trim().length > 0)
-    .slice(-6) // 只取末尾关键几行
-    .join("\n")
-    .trim();
-}
-
-/* ─── 白名单排除规则 glob（与 Rust 侧 security/path.rs 同语义，编辑器实时预览用）─── */
-
-/**
- * fnmatch 式 glob：`**` 跨层（零或多段）、`*` 单段内任意字符、`?` 单段内单字符。
- * 与 Rust 实现的对齐约定：
- * - 模式含 `/` → 对相对路径整体匹配；不含 `/` → 对任意一段的段名匹配；
- * - 本应用是 Windows 桌面端，匹配统一不区分大小写；
- * - `\` 与 `/` 都视作路径分隔符。
- * 🔴 预览仅供人工参考，**强制执行在后端 path.rs**——两处语义如需调整必须同步改。
- */
-export function globMatch(pattern: string, path: string): boolean {
-  const norm = (s: string) => s.replace(/\\/g, "/").toLowerCase();
-  const p = norm(pattern);
-  const t = norm(path);
-  const segMatch = (pat: string[], txt: string[]): boolean => {
-    const [ph, ...prest] = pat;
-    if (ph === undefined) return txt.length === 0;
-    if (ph === "**") {
-      for (let n = 0; n <= txt.length; n++) {
-        if (segMatch(prest, txt.slice(n))) return true;
-      }
-      return false;
-    }
-    const [th, ...trest] = txt;
-    if (th === undefined) return false;
-    return segFnmatch(ph, th) && segMatch(prest, trest);
-  };
-  if (p.includes("/")) return segMatch(p.split("/"), t.split("/"));
-  return t.split("/").some((seg) => segMatch([p], [seg]));
-}
-
-/** 单段内 fnmatch：`*` 任意串、`?` 单字符、其余字面量相等（递归回溯，段很短）。 */
-function segFnmatch(pattern: string, text: string): boolean {
-  if (pattern.length === 0) return text.length === 0;
-  const c = pattern[0];
-  const rest = pattern.slice(1);
-  if (c === "*") {
-    for (let n = 0; n <= text.length; n++) {
-      if (segFnmatch(rest, text.slice(n))) return true;
-    }
-    return false;
-  }
-  if (text.length === 0) return false;
-  if (c === "?") return segFnmatch(rest, text.slice(1));
-  return text[0] === c && segFnmatch(rest, text.slice(1));
 }
 
 /**
@@ -297,22 +156,4 @@ export function isEditableTarget(el: EventTarget | null): boolean {
  */
 export function isImeComposing(e: { isComposing?: unknown; keyCode?: unknown }): boolean {
   return e.isComposing === true || e.keyCode === 229;
-}
-
-/**
- * 浮层「点外面关闭」的公共判定：面板自身里的按下不算外点；**本面板的开关按钮**
- * （`data-cc-toggle="<owner>"`）也不算 —— 不豁免它的话，capture 的 pointerdown
- * 先把面板收掉，随后的 click 再把面板翻开，这个按钮就永远关不掉自己的浮层。
- *
- * `owner` 之外的开关按钮**仍然算外点**（点了别家开关 ⇒ 先收自己，click 去开别家），
- * 与没有这个 bug 之前的行为一致。
- */
-export function isOutsideDismiss(
-  e: PointerEvent,
-  box: HTMLElement | null,
-  owner: string,
-): boolean {
-  if (box?.contains(e.target as Node)) return false;
-  const target = e.target;
-  return !(target instanceof Element && target.closest(`[data-cc-toggle="${owner}"]`));
 }

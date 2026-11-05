@@ -8,7 +8,6 @@ import { ConflictPane } from "./ConflictPane";
 import {
   friendlySvnError,
   isMarkable,
-  keyOf,
   svnDiff,
   type ChangeItem,
 } from "../../lib/svn";
@@ -257,9 +256,4 @@ export function RightPane({
       disabled={disabled || diff.isFetching}
     />
   );
-}
-
-/** 选中项是否已审：把 key 规则收在一处，别让调用方各写一遍小写化。 */
-export function isReviewed(reviewed: Set<string>, path: string): boolean {
-  return reviewed.has(keyOf(path));
 }

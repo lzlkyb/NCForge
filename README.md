@@ -1,7 +1,7 @@
 # NCForge
 
-可复用的 **Tauri 2 桌面应用壳子**：从生产项目 cc-bridge 抽离的完整桌面应用脚手架。
-复制一份、跑一条改名命令，10 分钟内得到一个能跑、能自动更新、UI 成体系的 Hello World 桌面应用。
+**NC65 / NCC 二开的轻量桌面工作台**（Tauri 2 + React）。仓库最早从 cc-bridge 抽离成
+可复用壳子，「复制壳子 + 一键改名」的流程已于 2026-11-05 移除，现在是应用本体。
 
 **包含三层资产**：
 
@@ -11,56 +11,54 @@
 | ⚙️ 技术架构 | App 骨架 + 托盘/单实例/窗口销毁重建/DWM 圆角 + 命令分层 + 路径白名单安全原语 + JSON 配置持久化 | `desktop/src/App.tsx` `desktop/src-tauri/src/main.rs` `commands/` `security/` |
 | 🔄 软件更新架构 | 单飞闸 + 指数退避 + 错误分类 → 前端状态机 + 可撤销自动重启 → 一键发版 + 跨平台 updater.json 合并 + CI tag 构建 | `desktop/src-tauri/src/commands/update.rs` `desktop/src/contexts/UpdateContext.tsx` `desktop/scripts/release.mjs` |
 
-不包含任何业务代码（MCP / SSH / 对话 GUI / 防火墙等）——那些在你的应用里按需加。
+功能面：文件与 SVN 工作台、补丁打包、数据库查询与数据字典、元数据（BMF）编辑/校验/生成、
+NC 服务与客户端调试、日志排查。
 
-设计文档见 [`docs/桌面应用壳子抽离方案-2026-10-26.md`](docs/桌面应用壳子抽离方案-2026-10-26.md)；
-工程纪律（版本真源、发版流程、体量门禁、性能检查项）见 [`CLAUDE.md`](CLAUDE.md)。
+壳子时期的设计文档 [`docs/桌面应用壳子抽离方案-2026-10-26.md`](docs/桌面应用壳子抽离方案-2026-10-26.md)
+仅作历史参考；工程纪律（版本真源、发版流程、体量门禁、性能检查项）见 [`CLAUDE.md`](CLAUDE.md)。
 
 ---
 
-## 快速开始（复制即用，5 步）
+## 快速开始
 
 ```bash
 # 0. 前置：Node 22+、Rust stable、Tauri 2 系统依赖（Windows 需 WebView2 + VS C++ Build Tools）
 #    https://tauri.app/start/prerequisites/
 
-# 1. 复制壳子（整目录拷贝，保留 git 仓库历史可选）
-cp -r desktop-app-shell my-app && cd my-app/desktop
+# 1. 取代码并进入前端目录
+git clone <repo-url> nc-workbench && cd nc-workbench/desktop
 
-# 2. 一键改名：产品标识一次改齐（Cargo 包名/exe 名、Rust crate 名、tauri.conf、
-#    package.json、branding.rs 托盘文案、about.ts、HTML 标题、CI 产物名……）
-#    漏改的典型症状：托盘 tooltip 还叫 MyApp、CI 找不到 exe、updater 404、
-#    Rust 编译直接 E0432（包名一改 crate 名就从 desktop_app_shell 变了）
-node scripts/rename-app.mjs my-tool --repo your-name/my-tool --display "我的工具"
-
-# 3. 换图标（现在用的是壳子占位图）
-#    desktop/src-tauri/icons/ —— 至少替换 icon.ico / icon.png / 128x128.png / icon.icns
-#    可用 `npx tauri icon your-logo.png` 从一张图生成全套
-
-# 4. 生成更新签名密钥对（自动更新的命脉，每个应用必须自己签）
-#    ⚠️ 壳子自带的是一个一次性测试公钥（仅供开箱即用的 cargo test 与本地联调），
-#    上线前必须按此步骤换成自己生成的——
-npx tauri signer generate -w ~/.tauri/my-tool.key
-#    公钥   → desktop/src-tauri/tauri.conf.json 的 plugins.updater.pubkey
-#    私钥   → GitHub 仓库 Settings → Secrets → TAURI_SIGNING_PRIVATE_KEY（整个文件内容）
-#    另：tauri.conf.json 里的 dangerousInsecureTransportProtocol 是本地 http 联调开关，
-#    面向 https 源发布前删掉它
-
-# 5. 跑起来
+# 2. 安装依赖
 npm install        # ⚠️ 首次安装若报 "Cannot read properties of null (reading 'edgesOut')"
                    # （npm 10.9.x + vitest 4 可选 peer 的已知 bug），加 --legacy-peer-deps 跑一次：
                    #   npm install --legacy-peer-deps
                    # 生成 package-lock.json 之后，npm install / npm ci 均恢复正常
+
+# 3. 跑起来
 npm run tauri dev
 ```
 
-`npm run tauri dev` 起来后能看到：左侧导航（home/监控/设置）、顶栏（拖拽区/主题切换/更新状态）、
-首页示例（配置读写演示）、设置页（自动开机 + 更新历史弹框）、托盘菜单（打开面板/检查更新/退出）。
+`npm run tauri dev` 起来后是文件 / SVN / 补丁 / 数据库 / 元数据等页签的工作台
+（Ctrl+1~6 直达，Ctrl+J 底部面板）。
+
+### 发布前准备
+
+```bash
+# 换图标：至少替换 desktop/src-tauri/icons/ 下的 icon.ico / icon.png / 128x128.png / icon.icns
+# 可用 `npx tauri icon your-logo.png` 从一张图生成全套
+
+# 生成更新签名密钥对（自动更新的命脉，每个发布者必须自己签）
+npx tauri signer generate -w ~/.tauri/ncforge.key
+# 公钥 → desktop/src-tauri/tauri.conf.json 的 plugins.updater.pubkey
+# 私钥 → GitHub 仓库 Settings → Secrets → TAURI_SIGNING_PRIVATE_KEY（整个文件内容）
+# 另：tauri.conf.json 里的 dangerousInsecureTransportProtocol 是本地 http 联调开关，
+# 面向 https 源发布前删掉它
+```
 
 ## 目录结构
 
 ```
-desktop-app-shell/
+nc-workbench/
 ├── CLAUDE.md                  # 工程纪律（AI 协作规则，先读它再改代码）
 ├── CHANGELOG.md               # Keep a Changelog 唯一手写源（更新弹框内容从这抽）
 ├── docs/                      # 设计文档
@@ -144,7 +142,7 @@ APP_UPDATE_ENDPOINT=http://127.0.0.1:8787/updater.json npm run tauri dev
 
 ## 换平台/换技术栈前的自检
 
-- **引新依赖前**：先评估二进制体积增量（红线：程序本体 NSIS ≤ 15MB（不含随包资源，如 jdt.ls），壳子现状约 3.2MB）。
+- **引新依赖前**：先评估二进制体积增量（红线：程序本体 NSIS ≤ 15MB（不含随包资源，如 jdt.ls））。
 - **加后台循环前**：过一遍 CLAUDE.md §8.1 六条检查项（让出点/生产端异常/流结束信号/单轮成本/兜底上限/平台分支验证）。
 - **改 UI 前**：先读 `src/index.css` token 与真实组件源码，再出 HTML 设计稿（`design/`），确认后落代码。
 - **提交前**：pre-push 钩子跑 7 项门禁（体量/eslint/tsc/vitest/fmt/clippy/test），不要手动起独立 cargo test 抢锁。

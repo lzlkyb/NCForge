@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 合成样本：最小可解析组件（单实体、两字段、无枚举/关系）。 -->
+<component id="c2" name="demo_simple" displayName="简单组件" namespace="uapbd" ownModule="uapbd" version="1" mainEntity="e1">
+  <celllist>
+    <entity id="e1" name="DemoHVO" displayName="表头" tableName="uapbd_demo_h" keyAttributeId="a1">
+      <attributelist>
+        <attribute id="a1" name="pk_demo" fieldName="pk_demo" displayName="主键" typeName="UFID" dbtype="char" length="20" isKey="true" isNullable="false" sequence="0"/>
+        <attribute id="a2" name="memo" fieldName="memo" displayName="备注" typeName="String" dbtype="varchar2" length="200" isNullable="true" sequence="1"/>
+      </attributelist>
+    </entity>
+  </celllist>
+</component>

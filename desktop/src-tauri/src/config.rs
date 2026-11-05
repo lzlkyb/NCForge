@@ -56,9 +56,6 @@ pub struct AppConfig {
     /// 编译写到 `<模块>/classes`——两套产物会同时存在，必须能人工指定以哪套为准。
     #[serde(default)]
     pub patch_out_root: Option<String>,
-    /// nc-patch 脚本目录（可选）。只用来继承它缓存里的输出目录，省得用户再选一次。
-    #[serde(default)]
-    pub nc_patch_dir: Option<String>,
     /// 数据库连接串覆盖（默认从 NC home 的 `ierp/bin/prop.xml` 读）。
     #[serde(default)]
     pub db_url: Option<String>,
@@ -208,7 +205,6 @@ impl Default for AppConfig {
             svn_password_dpapi: None,
             patch_out_dir: None,
             patch_out_root: None,
-            nc_patch_dir: None,
             db_url: None,
             db_user: None,
             db_password_dpapi: None,

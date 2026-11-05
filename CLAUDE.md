@@ -4,17 +4,13 @@
 > （签名/多源回退/updater.json 合并）+ UI 风格架构（设计 token + 组件库 + 动效体系）。
 > 规则从 cc-bridge 移植，剔除业务专属条目，保留全部工程纪律。
 
-## 0. 先读这里：三层架构与复制即用
+## 0. 三层架构
 
-本仓库**不是应用，是壳子**。任何具体应用都从这里复制一份再改：
+本仓库即 **NCForge 应用本体**。「从壳子复制再改」的流程已废弃（`desktop-app-shell`
+目录与 `scripts/rename-app.mjs` 均已移除，壳子时代的文档 `docs/桌面应用壳子抽离方案-2026-10-26.md`
+仅作历史参考）。下表三层资产仍是本仓库的组织方式：
 
-```bash
-# 复制壳子 → 一键改名（十余处产品标识一次改齐）→ 换图标 → 生成签名密钥 → 开发
-cp -r desktop-app-shell my-app && cd my-app/desktop
-node scripts/rename-app.mjs my-tool --repo your-name/my-tool --display "我的工具"
-```
-
-三层资产与边界（详见 `docs/桌面应用壳子抽离方案-2026-10-26.md`）：
+三层资产与边界：
 
 | 层 | 资产 | 位置 |
 |----|------|------|

@@ -1,0 +1,244 @@
+{
+  "fixtures": {
+    "baseapp/broken.bmf": {
+      "error": true,
+      "parse": "error"
+    },
+    "uapbd/demo_simple.bmf": {
+      "doc": {
+        "component": {
+          "displayName": "简单组件",
+          "genCodeStyle": "",
+          "industry": "",
+          "mainEntity": "e1",
+          "metaType": "",
+          "name": "demo_simple",
+          "namespace": "uapbd",
+          "ownModule": "uapbd",
+          "version": 1
+        },
+        "entities": [
+          {
+            "accessor": "",
+            "attrs": [
+              {
+                "dataType": "",
+                "dbType": "char",
+                "defaultValue": "",
+                "displayName": "主键",
+                "field": "pk_demo",
+                "fieldType": "",
+                "isKey": true,
+                "length": 20,
+                "name": "pk_demo",
+                "nullable": false,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 0,
+                "style": "SINGLE",
+                "typeDisplayName": "",
+                "typeName": "UFID"
+              },
+              {
+                "dataType": "",
+                "dbType": "varchar2",
+                "defaultValue": "",
+                "displayName": "备注",
+                "field": "memo",
+                "fieldType": "",
+                "isKey": false,
+                "length": 200,
+                "name": "memo",
+                "nullable": true,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 1,
+                "style": "SINGLE",
+                "typeDisplayName": "",
+                "typeName": "String"
+              }
+            ],
+            "displayName": "表头",
+            "fullClass": "",
+            "isPrimary": false,
+            "keyAttr": "pk_demo",
+            "name": "DemoHVO",
+            "table": "uapbd_demo_h"
+          }
+        ],
+        "enums": [],
+        "relations": []
+      },
+      "issues": [
+        {
+          "attr": "",
+          "code": "C005",
+          "entity": "",
+          "severity": "info"
+        },
+        {
+          "attr": "",
+          "code": "C011",
+          "entity": "",
+          "severity": "error"
+        },
+        {
+          "attr": "",
+          "code": "E003",
+          "entity": "DemoHVO",
+          "severity": "error"
+        }
+      ],
+      "parse": "ok"
+    },
+    "uapbd/sz02.bmf": {
+      "doc": {
+        "component": {
+          "displayName": "任务接口",
+          "genCodeStyle": "NC传统样式",
+          "industry": "0",
+          "mainEntity": "e1",
+          "metaType": ".bmf",
+          "name": "sz02",
+          "namespace": "uapbd",
+          "ownModule": "uapbd",
+          "version": 5
+        },
+        "entities": [
+          {
+            "accessor": "x",
+            "attrs": [
+              {
+                "dataType": "BS000010000100001051",
+                "dbType": "char",
+                "defaultValue": "",
+                "displayName": "主键",
+                "field": "pk_head",
+                "fieldType": "char",
+                "isKey": true,
+                "length": 20,
+                "name": "pk_head",
+                "nullable": false,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 0,
+                "style": "SINGLE",
+                "typeDisplayName": "",
+                "typeName": "UFID"
+              },
+              {
+                "dataType": "e2",
+                "dbType": "",
+                "defaultValue": "",
+                "displayName": "表体",
+                "field": "pk_head",
+                "fieldType": "",
+                "isKey": false,
+                "length": null,
+                "name": "pk_body",
+                "nullable": true,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "Sz02BVO",
+                "sequence": 1,
+                "style": "ARRAY",
+                "typeDisplayName": "",
+                "typeName": "Sz02BVO"
+              }
+            ],
+            "displayName": "表头",
+            "fullClass": "nc.vo.uapbd.sz02.Sz02HVO",
+            "isPrimary": true,
+            "keyAttr": "pk_head",
+            "name": "Sz02HVO",
+            "table": "uapbd_sz02_h"
+          },
+          {
+            "accessor": "",
+            "attrs": [
+              {
+                "dataType": "",
+                "dbType": "",
+                "defaultValue": "",
+                "displayName": "",
+                "field": "pk_body",
+                "fieldType": "",
+                "isKey": true,
+                "length": 20,
+                "name": "pk_body",
+                "nullable": true,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 0,
+                "style": "SINGLE",
+                "typeDisplayName": "",
+                "typeName": "UFID"
+              }
+            ],
+            "displayName": "",
+            "fullClass": "",
+            "isPrimary": false,
+            "keyAttr": null,
+            "name": "Sz02BVO",
+            "table": "uapbd_sz02_b"
+          }
+        ],
+        "enums": [
+          {
+            "dataType": "BS000010000100001001",
+            "displayName": "状态",
+            "fullClass": "",
+            "items": [
+              {
+                "display": "启用",
+                "hidden": false,
+                "value": "0"
+              },
+              {
+                "display": "停用",
+                "hidden": false,
+                "value": "1"
+              }
+            ],
+            "name": "state",
+            "typeName": "String"
+          }
+        ],
+        "relations": [
+          {
+            "kind": "AggregationRelation",
+            "name": "",
+            "source": "e1",
+            "target": "e2"
+          }
+        ]
+      },
+      "issues": [
+        {
+          "attr": "",
+          "code": "C007",
+          "entity": "",
+          "severity": "info"
+        },
+        {
+          "attr": "",
+          "code": "E003",
+          "entity": "Sz02BVO",
+          "severity": "error"
+        },
+        {
+          "attr": "",
+          "code": "E005",
+          "entity": "Sz02BVO",
+          "severity": "error"
+        }
+      ],
+      "parse": "ok"
+    }
+  },
+  "version": 1
+}

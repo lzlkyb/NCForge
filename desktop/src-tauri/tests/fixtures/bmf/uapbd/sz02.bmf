@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 合成样本：覆盖表头/表体、主键、枚举、聚合关系、未知节点与注释。
+     用途：结构回归基线，不代表任何真实客户数据。 -->
+<component id="c1" name="sz02" displayName="任务接口" namespace="uapbd" ownModule="uapbd" gencodestyle="NC传统样式" version="5" mainEntity="e1" industry="0" metaType=".bmf">
+  <celllist>
+    <entity id="e1" name="Sz02HVO" displayName="表头" fullClassName="nc.vo.uapbd.sz02.Sz02HVO" tableName="uapbd_sz02_h" accessorClassName="x" isPrimary="true" keyAttributeId="a1">
+      <attributelist>
+        <attribute id="a1" name="pk_head" fieldName="pk_head" displayName="主键" typeName="UFID" dataType="BS000010000100001051" dataTypeStyle="SINGLE" dbtype="char" fieldType="char" length="20" isKey="true" isNullable="false" sequence="0"/>
+        <attribute id="a2" name="pk_body" fieldName="pk_head" displayName="表体" typeName="Sz02BVO" dataType="e2" dataTypeStyle="ARRAY" sequence="1"/>
+      </attributelist>
+    </entity>
+    <entity id="e2" name="Sz02BVO" tableName="uapbd_sz02_b">
+      <attributelist><attribute id="a3" name="pk_body" fieldName="pk_body" typeName="UFID" length="20" isKey="true" sequence="0"/></attributelist>
+    </entity>
+    <Enumerate id="en1" name="state" displayName="状态" dataType="BS000010000100001001" typeName="String">
+      <enumitemlist>
+        <enumitem id="i1" enumValue="1" enumDisplay="停用"/>
+        <enumitem id="i2" enumValue="0" enumDisplay="启用"/>
+      </enumitemlist>
+    </Enumerate>
+  </celllist>
+  <connectlist>
+    <AggregationRelation id="r1" source="e1" target="e2" srcAttributeid="a2"/>
+  </connectlist>
+  <refdepends/>
+  <rulers><ruler><guideList/></ruler></rulers>
+  <FutureNode foo="bar"><inner/></FutureNode>
+</component>

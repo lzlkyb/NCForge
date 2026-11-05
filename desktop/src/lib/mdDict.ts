@@ -230,5 +230,5 @@ export function dedupeNames(names: string[]): string[] {
  * `md_column`），留在字典模块里会让数据库控制台为了几个表名把整页数据字典一起拽进来。
  * 这里 re-export 保持既有调用点与测试不动。
  */
-export { sqlTables, type PatchTable } from "./sqlTables";
+export { sqlTables } from "./sqlTables";
 

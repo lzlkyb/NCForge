@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::config::AppConfig;
@@ -83,24 +83,6 @@ pub struct DiffResult {
     pub working_size: u64,
     /// 文件在编辑器里是否可编辑（MIXED 换行或无法无损往返时为 false）。
     pub editable: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LogEntry {
-    pub revision: i64,
-    pub author: String,
-    /// 毫秒时间戳。
-    pub date: i64,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BlameLine {
-    pub revision: i64,
-    pub author: String,
-    pub date: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -511,62 +493,6 @@ fn decode_as(bytes: &[u8], enc: workspace::TextEncoding) -> String {
             cow.replace("\r\n", "\n")
         }
     }
-}
-
-/// 历史（分页：`from` 传上一页最后一条的 revision，首页传 0）。
-#[tauri::command]
-pub async fn svn_log(
-    app: AppHandle,
-    state: tauri::State<'_, Arc<AppState>>,
-    path: String,
-    limit: u32,
-    from: i64,
-) -> Result<Vec<LogEntry>, String> {
-    let cfg = state.config.read().await.clone();
-    let st = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let target = safe_path(&cfg, &path)?;
-        let bridge = bridge_for(&app, &st, &cfg)?;
-        let info = wc_info(&bridge, &root_of(&cfg)?)?;
-        ensure_auth(&bridge, &cfg, &info.host)?;
-        let v = bridge
-            .call(
-                "log",
-                &[
-                    &target.display().to_string(),
-                    &limit.clamp(1, 200).to_string(),
-                    &from.to_string(),
-                ],
-                T_NET,
-            )
-            .map_err(|e| split_code_label(e.code, e.message))?;
-        serde_json::from_value(v["entries"].clone()).map_err(|e| format!("解析历史失败: {e}"))
-    })
-    .await
-    .map_err(|e| format!("取历史失败: {e}"))?
-}
-
-/// blame：每行对应的版本与作者（正文由前端从编辑器拿，不重复传）。
-#[tauri::command]
-pub async fn svn_blame(
-    app: AppHandle,
-    state: tauri::State<'_, Arc<AppState>>,
-    path: String,
-) -> Result<Vec<BlameLine>, String> {
-    let cfg = state.config.read().await.clone();
-    let st = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let target = safe_path(&cfg, &path)?;
-        let bridge = bridge_for(&app, &st, &cfg)?;
-        let info = wc_info(&bridge, &root_of(&cfg)?)?;
-        ensure_auth(&bridge, &cfg, &info.host)?;
-        let v = bridge
-            .call("blame", &[&target.display().to_string()], T_NET)
-            .map_err(|e| split_code_label(e.code, e.message))?;
-        serde_json::from_value(v["lines"].clone()).map_err(|e| format!("解析 blame 失败: {e}"))
-    })
-    .await
-    .map_err(|e| format!("取 blame 失败: {e}"))?
 }
 
 /// 提交勾选的文件。冲突文件会被桥拒绝（返回 code=conflict）。

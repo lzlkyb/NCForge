@@ -50,6 +50,23 @@ async function flush() {
 it("探测失败时清掉旧的通过结果，并给出内联错误", async () => {
   let fail = false;
   mocks.invoke.mockImplementation((cmd: string) => {
+    if (cmd === "bmf_release_plan") {
+      return Promise.resolve({
+        ncHome: null,
+        component: "demo",
+        module: "uapbd",
+        tools: [],
+        steps: [],
+        blockers: 1,
+        warnings: 0,
+        ready: false,
+        autoPublish: false,
+        installCopy: null,
+        workspaceSha256: null,
+        installSha256: null,
+        evidenceTemplate: "",
+      });
+    }
     if (cmd !== "bmf_publish_probe") return Promise.reject(new Error(`unexpected ${cmd}`));
     return fail ? Promise.reject(new Error("nc_home 未配置")) : Promise.resolve(probe);
   });

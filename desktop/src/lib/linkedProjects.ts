@@ -112,14 +112,6 @@ export function overrideHits(o: LinkedOverride, p: LinkedProject): boolean {
   return base === t;
 }
 
-/** 某个工程身上生效的覆盖（用于按钮高亮与「为什么它排在这里」的解释）。 */
-export function activeOverridesOf(
-  overrides: LinkedOverride[],
-  p: LinkedProject,
-): LinkedOverride[] {
-  return overrides.filter((o) => o.action !== "add" && overrideHits(o, p));
-}
-
 // ── 覆盖表的草稿运算 ──────────────────────────────────────────────
 //
 // 后端 `set_linked_overrides` 是**全量替换**，所以界面只能「整表草稿 + 一次保存」：

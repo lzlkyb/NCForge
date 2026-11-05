@@ -3,7 +3,7 @@
   "productName": "NCForge",
   "mainBinaryName": "nc-forge",
   "version": "0.1.0",
-  "identifier": "com.aier.ncforge",
+  "identifier": "io.github.lzlkyb.ncforge",
   "build": {
     "beforeDevCommand": "npm run vite:dev",
     "devUrl": "http://localhost:1420",

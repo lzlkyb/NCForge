@@ -14,6 +14,7 @@ use crate::bmf_export;
 use crate::bmf_gen::{self, Generation};
 use crate::bmf_index::{self, BmfIndex, RootSpec};
 use crate::bmf_model::BmfDoc;
+use crate::bmf_nchome;
 use crate::bmf_publish::{self, Probe};
 use crate::bmf_refs;
 use crate::bmf_rules::{self, Issue};
@@ -28,7 +29,7 @@ use crate::state::AppState;
 ///
 /// NC home 的 `modules` 不扫：那是安装目录，组件以万计，索引一次要几十秒；
 /// POC 阶段看的是「自己工程里正在改的那几个 BMF」。
-fn roots(primary: &Path, overrides: &[eclipse_cp::LinkedOverride]) -> Vec<RootSpec> {
+pub(super) fn roots(primary: &Path, overrides: &[eclipse_cp::LinkedOverride]) -> Vec<RootSpec> {
     let mut out = vec![RootSpec {
         origin: "工作区".to_string(),
         path: primary.to_path_buf(),
@@ -47,7 +48,7 @@ fn roots(primary: &Path, overrides: &[eclipse_cp::LinkedOverride]) -> Vec<RootSp
     out
 }
 
-fn primary_root(cfg: &AppConfig) -> Result<PathBuf, String> {
+pub(super) fn primary_root(cfg: &AppConfig) -> Result<PathBuf, String> {
     let raw = cfg
         .workspace_root
         .as_deref()
@@ -58,7 +59,7 @@ fn primary_root(cfg: &AppConfig) -> Result<PathBuf, String> {
 }
 
 /// 写操作的白名单：工作区 + 链接工程。NC 安装目录不在其中。
-fn safe_write_path(cfg: &AppConfig, requested: &str) -> Result<PathBuf, String> {
+pub(super) fn safe_write_path(cfg: &AppConfig, requested: &str) -> Result<PathBuf, String> {
     let primary = primary_root(cfg)?;
     let overrides = eclipse_cp::active_overrides(&cfg.linked_overrides);
     let allowed: Vec<String> = roots(&primary, &overrides)
@@ -130,19 +131,8 @@ pub async fn bmf_index_scan(
     .map_err(|e| format!("索引任务失败：{e}"))
 }
 
-/// 解析一份 BMF 并返回语义模型。只读；解析失败时把「哪一行、什么错」原样带回去。
-#[tauri::command]
-pub fn bmf_doc_detail(path: String) -> Result<BmfDetail, String> {
-    let p = PathBuf::from(&path);
-    let doc = BmfDoc::open(&p)?;
-    let meta = std::fs::metadata(&p).map_err(|e| format!("读取文件信息失败：{e}"))?;
-    let mtime_ms = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    Ok(BmfDetail {
+fn build_detail(path: String, doc: BmfDoc, mtime_ms: u64) -> BmfDetail {
+    BmfDetail {
         path,
         encoding: serde_json::to_value(doc.encoding)
             .ok()
@@ -156,12 +146,36 @@ pub fn bmf_doc_detail(path: String) -> Result<BmfDetail, String> {
         size: doc.bytes.len(),
         sha256: bmf_write::sha256(&doc.bytes),
         mtime_ms,
-        component: doc.component.clone(),
-        entities: doc.entities.clone(),
-        enums: doc.enums.clone(),
-        relations: doc.relations.clone(),
-        unknown_tags: doc.unknown_tags.clone(),
-    })
+        component: doc.component,
+        entities: doc.entities,
+        enums: doc.enums,
+        relations: doc.relations,
+        unknown_tags: doc.unknown_tags,
+    }
+}
+
+/// 解析一份 BMF 并返回语义模型。只读；解析失败时把「哪一行、什么错」原样带回去。
+#[tauri::command]
+pub fn bmf_doc_detail(path: String) -> Result<BmfDetail, String> {
+    let p = PathBuf::from(&path);
+    let doc = BmfDoc::open(&p)?;
+    let meta = std::fs::metadata(&p).map_err(|e| format!("读取文件信息失败：{e}"))?;
+    let mtime_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    Ok(build_detail(path, doc, mtime_ms))
+}
+
+/// 解析一段 BMF 正文（SVN 历史修订、导入预览），不读盘、不写盘。
+///
+/// `path` 只用于回显与 diff 归属；正文按 UTF-8 解析（历史正文已由 SVN 层转成 UTF-8）。
+#[tauri::command]
+pub fn bmf_detail_text(path: String, text: String) -> Result<BmfDetail, String> {
+    let doc = BmfDoc::from_bytes(PathBuf::from(&path), text.into_bytes())?;
+    Ok(build_detail(path, doc, 0))
 }
 
 /// 结构校验（只读）。不连库：「已发布库结构」的漂移检查要等用户在数据库页连上测试库再做，
@@ -325,6 +339,148 @@ pub async fn bmf_publish_probe(
         &module,
         bmf_path.as_deref(),
     ))
+}
+
+/// M6 发布编排计划：官方工具探测、前置检查、步骤顺序、证据模板。只读，不发布。
+#[tauri::command]
+pub async fn bmf_release_plan(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    component: String,
+    module: String,
+) -> Result<bmf_publish::Plan, String> {
+    let home = state.config.read().await.nc_home.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(bmf_publish::plan(
+            home.as_deref(),
+            &component,
+            &module,
+            Some(&path),
+        ))
+    })
+    .await
+    .map_err(|e| format!("生成发布计划失败：{e}"))?
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceSaved {
+    pub path: String,
+    pub content: String,
+}
+
+/// M6 证据记录：把计划快照与人工结论写成 Markdown，存到 `{config_dir}/bmf_release`。
+///
+/// 只写应用自己的配置目录；不碰工作区、不碰 NC 安装目录。记录本身**不代表发布已执行**。
+#[tauri::command]
+pub async fn bmf_release_evidence(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    component: String,
+    module: String,
+    result: String,
+    operator: String,
+    note: String,
+) -> Result<EvidenceSaved, String> {
+    let (home, dir) = {
+        let cfg = state.config.read().await;
+        (cfg.nc_home.clone(), state.config_dir.join("bmf_release"))
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let plan = bmf_publish::plan(home.as_deref(), &component, &module, Some(&path));
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let content = bmf_publish::evidence_markdown(&plan, now_ms, &result, &operator, &note)?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建证据目录失败：{e}"))?;
+        let stem = format!(
+            "{}-{}",
+            bmf_publish::safe_file_stem(&component),
+            bmf_publish::utc_stamp_compact(now_ms)
+        );
+        // 同一秒内连记两次时不要互相覆盖：追加 -2、-3…
+        let mut file = dir.join(format!("{stem}.md"));
+        let mut n = 2;
+        while file.exists() {
+            file = dir.join(format!("{stem}-{n}.md"));
+            n += 1;
+        }
+        crate::atomic_file::write_atomic(&file, content.as_bytes())?;
+        Ok(EvidenceSaved {
+            path: file.to_string_lossy().into_owned(),
+            content,
+        })
+    })
+    .await
+    .map_err(|e| format!("记录发布证据失败：{e}"))?
+}
+
+/// F3 结果：工作区组件 vs NC 安装目录里的同名组件。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NcCompare {
+    pub nc_home: String,
+    pub component: String,
+    /// 工作区文件所在模块（`…/<模块>/METADATA/x.bmf`），用于把同模块候选排前面。
+    pub workspace_module: Option<String>,
+    pub candidates: Vec<bmf_nchome::Candidate>,
+    pub selected: Option<String>,
+    /// 选中副本的语义模型；没有候选时为 None。
+    pub detail: Option<BmfDetail>,
+}
+
+/// F3 NC 安装目录只读对比：按文件名找同名组件，解析后交给前端做结构 diff。
+///
+/// **只读**：只读 `<NCHOME>/modules/*/METADATA` 下的文件，不写安装目录、不建索引缓存。
+/// `install_path` 必须来自上一次返回的候选列表；传任意路径会被拒绝。
+#[tauri::command]
+pub async fn bmf_nchome_compare(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    component: String,
+    install_path: Option<String>,
+) -> Result<NcCompare, String> {
+    let home_cfg = state.config.read().await.nc_home.clone();
+    let component = component.trim().to_string();
+    if component.is_empty() {
+        return Err("组件编码为空，先打开一个 BMF".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = crate::nc_home::resolve(home_cfg.as_deref())?;
+        let root = PathBuf::from(&home.root);
+        let workspace_module = bmf_nchome::module_of(Path::new(&path));
+        let candidates =
+            bmf_nchome::find_candidates(&root, &component, workspace_module.as_deref())?;
+        let Some(picked) = bmf_nchome::pick(&candidates, install_path.as_deref())? else {
+            return Ok(NcCompare {
+                nc_home: home.root,
+                component,
+                workspace_module,
+                candidates,
+                selected: None,
+                detail: None,
+            });
+        };
+        let file = PathBuf::from(&picked.path);
+        let doc = BmfDoc::open(&file)?;
+        let mtime_ms = std::fs::metadata(&file)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        Ok(NcCompare {
+            nc_home: home.root,
+            component,
+            workspace_module,
+            candidates,
+            selected: Some(picked.path.clone()),
+            detail: Some(build_detail(picked.path, doc, mtime_ms)),
+        })
+    })
+    .await
+    .map_err(|e| format!("读取 NC 安装目录失败：{e}"))?
 }
 
 #[cfg(test)]

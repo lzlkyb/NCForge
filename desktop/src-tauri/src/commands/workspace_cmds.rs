@@ -133,6 +133,50 @@ pub async fn pick_folder(
     .map_err(|e| format!("文件夹选择器异常：{e}"))
 }
 
+/// 选择单个文件（系统文件对话框）。用户取消返回 null。
+///
+/// 与 `pick_folder` 同一套约束：对话框由后端拉起，WebView 不拿 `dialog:` 权限。
+/// `extensions` 只影响筛选列表，不改变「用户能选什么」——调用方仍需自己校验扩展名。
+#[tauri::command]
+pub async fn pick_file(
+    app: tauri::AppHandle,
+    title: Option<String>,
+    default_path: Option<String>,
+    extensions: Option<Vec<String>>,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let owner = app.get_webview_window("main");
+        let mut dialog = app.dialog().file();
+        if let Some(w) = &owner {
+            dialog = dialog.set_parent(w);
+        }
+        if let Some(t) = title.filter(|t| !t.trim().is_empty()) {
+            dialog = dialog.set_title(t);
+        }
+        let exts: Vec<String> = extensions
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.trim().trim_start_matches('.').to_string())
+            .filter(|e| !e.is_empty())
+            .collect();
+        if !exts.is_empty() {
+            let refs: Vec<&str> = exts.iter().map(String::as_str).collect();
+            dialog = dialog.add_filter("支持的文件", &refs);
+        }
+        let dialog = match default_path
+            .filter(|p| PathBuf::from(p.as_str()).is_dir())
+        {
+            Some(p) => dialog.set_directory(p),
+            None => dialog,
+        };
+        dialog
+            .blocking_pick_file()
+            .map(|p| p.simplified().to_string())
+    })
+    .await
+    .map_err(|e| format!("文件选择器异常：{e}"))
+}
+
 /// 读当前工作区根（未选择为 null）。
 #[tauri::command]
 pub async fn get_workspace(

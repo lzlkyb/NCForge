@@ -4,8 +4,7 @@
 //! 两个名字——桌面通知标题、窗口标题用显示名；安装目录、exe 名、bundle identifier、
 //! 防火墙规则名用标识层（`tauri.conf.json` 的 productName）。
 //!
-//! 改名时只改这里 + `tauri.conf.json` + `src/lib/about.ts` 三处（或跑
-//! `node scripts/rename-app.mjs` 一把改完）。
+//! 改名时只改这里 + `tauri.conf.json` + `src/lib/about.ts` 三处。
 //!
 //! 前端那侧对应 `src/lib/about.ts` 的 `APP_INFO.name`，是同一个字符串的第二份维护
 //! （前端拿不到 Rust 常量，只能各存一份）。改这里请同步改那边。

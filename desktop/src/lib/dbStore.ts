@@ -545,9 +545,6 @@ export function setSqlDraft(tabId: string, sql: string) {
   persist();
 }
 
-/** 某连接上还开着的标签（删除 / 断开前提示用）。 */
-export const tabsOfConn = (connId: string) => state.tabs.filter((t) => t.connId === connId);
-
 // ──────────────────────── 执行 ────────────────────────
 
 function now(): string {

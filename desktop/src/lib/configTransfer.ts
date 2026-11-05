@@ -29,7 +29,6 @@ export interface ExportableConfig {
   svn_user?: string | null;
   patch_out_dir?: string | null;
   patch_out_root?: string | null;
-  nc_patch_dir?: string | null;
   db_url?: string | null;
   db_user?: string | null;
   db_active?: string | null;
@@ -59,15 +58,13 @@ export const PATH_FIELDS: { key: PathFieldKey; label: string; hint: string }[] =
   { key: "nc_home", label: "NC home", hint: "NC 安装目录（含 ufjdk / modules）" },
   { key: "patch_out_dir", label: "补丁输出目录", hint: "「待上线补丁」位置" },
   { key: "patch_out_root", label: "编译产物根", hint: "Eclipse 编译输出目录" },
-  { key: "nc_patch_dir", label: "nc-patch 脚本目录", hint: "可选" },
 ];
 
 export type PathFieldKey =
   | "workspace_root"
   | "nc_home"
   | "patch_out_dir"
-  | "patch_out_root"
-  | "nc_patch_dir";
+  | "patch_out_root";
 
 export type ParseResult =
   | { ok: true; data: ConfigExport }

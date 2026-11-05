@@ -36,8 +36,6 @@ export interface DbConn {
  */
 export type DbEngine = "java" | "rust";
 
-export const ENGINE_LABEL: Record<DbEngine, string> = { java: "JVM 桥", rust: "纯 Rust 驱动" };
-
 export interface DbConnInput {
   id?: string | null;
   name: string;

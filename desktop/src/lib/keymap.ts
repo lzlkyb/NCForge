@@ -201,10 +201,6 @@ export function isReopenTabKey(event: KeyLike, keymap: Keymap): boolean {
   return eventChord(event) === chord;
 }
 
-export function reopenTabKeyLabel(keymap: Keymap): string {
-  return prettyChord(getBindingOverride("tab.reopen") ?? (keymap === "eclipse" ? "ctrl+alt+t" : "ctrl+shift+t"));
-}
-
 /* ─── 设置页的键位总表（默认值 + 用户覆盖） ─── */
 
 export type BindingGroup = "快速导航" | "窗口" | "搜索与层级" | "编辑器" | "固定键";

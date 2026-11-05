@@ -35,7 +35,7 @@ fn connect() -> Option<oracledb::Connection> {
     let pass = std::env::var("NCFORGE_DB_PASS").ok().or_else(|| {
         let appdata = std::env::var("APPDATA").ok()?;
         let path = std::path::Path::new(&appdata)
-            .join("com.aier.ncforge")
+            .join("io.github.lzlkyb.ncforge")
             .join("config.json");
         let text = std::fs::read_to_string(path).ok()?;
         let cfg: serde_json::Value = serde_json::from_str(&text).ok()?;

@@ -65,10 +65,10 @@ export interface PatchDefaults {
   outDir: string | null;
   /**
    * 这个路径哪来的：
-   * `config` 用户自己设过 / `nc-patch` 继承脚本缓存 / `detect` 首次使用自动找到 /
+   * `config` 用户自己设过 / `detect` 首次使用自动找到 /
    * `suggest` 首次使用给的建议值（还不存在）/ `none` 连工作区都没开。
    */
-  outDirSource: "config" | "nc-patch" | "detect" | "suggest" | "none";
+  outDirSource: "config" | "detect" | "suggest" | "none";
   /** `outDir` 现在是否真实存在；`suggest` 必然为 false。 */
   outDirExists: boolean;
   outRoot: string | null;
@@ -158,15 +158,6 @@ export function forceOf(layers: Map<string, "hy" | "std">): LayerForce {
   const std: string[] = [];
   for (const [path, v] of layers) (v === "hy" ? hy : std).push(path);
   return { hy, std };
-}
-
-/**
- * 像不像绝对路径：`D:\x`、`D:/x`、`\\server\share`、`/x`。
- * 输出目录与挂的 SQL 共用这一条——两处各写一遍正则迟早会跑偏。
- */
-export function isAbsolutePath(p: string): boolean {
-  const t = p.trim();
-  return /^[A-Za-z]:[\\/]/.test(t) || t.startsWith("\\\\") || t.startsWith("/");
 }
 
 /** 本机日期的 `YYYYMMDD`。文件名用的就是它，所以必须取本地时区而不是 UTC。 */

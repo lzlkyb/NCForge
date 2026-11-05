@@ -10,6 +10,7 @@
 
 mod client_cmds;
 mod bmf_cmds;
+mod bmf_excel_cmds;
 mod compile_cmds;
 mod db_cmds;
 mod db_conn_cmds;
@@ -43,6 +44,7 @@ mod workspace_cmds;
 
 pub use client_cmds::*;
 pub use bmf_cmds::*;
+pub use bmf_excel_cmds::*;
 pub use compile_cmds::*;
 pub use db_cmds::*;
 pub use db_conn_cmds::*;

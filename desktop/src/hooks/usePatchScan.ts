@@ -1,7 +1,7 @@
 import { trackOperation } from "../lib/operations";
 import { useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { svnStatus, type ChangeItem } from "../lib/svn";
+import { svnStatus } from "../lib/svn";
 import { NO_FORCE, patchDefaults, patchScan, type LayerForce } from "../lib/patch";
 import { useWorkspaceRoot } from "../lib/workspaceSession";
 
@@ -72,10 +72,4 @@ export function usePatchScan(force: LayerForce = NO_FORCE) {
   };
 
   return { defaults, changes, candidates, deleted, scan, refresh };
-}
-
-/** 候选文件的展示名：去掉模块前缀后的相对路径，列表里只放得下一行。 */
-export function shortLabel(it: ChangeItem): string {
-  const parts = it.rel.split("/");
-  return parts.length > 1 ? parts.slice(1).join("/") : it.rel;
 }

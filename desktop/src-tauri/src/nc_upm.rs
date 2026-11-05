@@ -1160,7 +1160,7 @@ mod live_tests {
         }
         let Some(cache) = std::env::var("APPDATA").ok().map(|p| {
             PathBuf::from(p)
-                .join("com.aier.ncforge")
+                .join("io.github.lzlkyb.ncforge")
                 .join("class-index.bin")
         }) else {
             eprintln!("跳过：没有 APPDATA");

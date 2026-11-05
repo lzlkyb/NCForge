@@ -59,12 +59,6 @@ export function useCallState(): CallState {
   return useSyncExternalStore(subscribe, getCallState, getCallState);
 }
 
-export function clearCallHierarchy(): void {
-  seq += 1;
-  state = EMPTY;
-  listeners.forEach((l) => l());
-}
-
 interface LspCallItem {
   name?: string;
   detail?: string;

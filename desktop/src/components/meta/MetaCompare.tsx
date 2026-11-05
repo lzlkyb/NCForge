@@ -1,18 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { bmfDetail, type BmfDetail, type BmfEntry } from "../../lib/bmf";
-import { diffDetails, summarize, type DiffKind, type DiffRow } from "../../lib/bmfDiff";
+import { diffDetails, summarize } from "../../lib/bmfDiff";
 import { normalizeBmfPath } from "../../lib/bmfPath";
-
-const KIND_LABEL: Record<DiffKind, string> = {
-  component: "组件",
-  entity: "实体",
-  attr: "字段",
-  enum: "枚举",
-  enumItem: "枚举项",
-  relation: "关系",
-};
-
-const CHANGE_LABEL = { added: "新增", removed: "删除", changed: "变更" } as const;
+import { MetaDiffRows } from "./MetaDiffRows";
+import { MetaNcCompare } from "./MetaNcCompare";
 
 /**
  * 结构对比（M7/F2）：当前组件 vs 索引里任意另一个 BMF。
@@ -100,33 +91,13 @@ export function MetaCompare({ current, entries }: { current: BmfDetail; entries:
         <p className="meta-note">两份组件的语义结构一致（实体 / 字段 / 枚举 / 关系层面没有差异）。</p>
       )}
 
-      {other && !busy && rows.length > 0 && (
-        <div className="meta-compare-rows">
-          {rows.map((r, i) => (
-            <DiffLine key={`${r.kind}-${r.scope}-${r.field}-${i}`} row={r} />
-          ))}
-        </div>
-      )}
+      {other && !busy && rows.length > 0 && <MetaDiffRows rows={rows} />}
 
       {!other && !busy && (
         <p className="meta-note">选一个对比对象后，会按实体、字段、枚举、关系逐项列出差异；不写任何文件。</p>
       )}
-    </div>
-  );
-}
 
-function DiffLine({ row }: { row: DiffRow }) {
-  return (
-    <div className={`meta-compare-row is-${row.change}`}>
-      <span className="meta-compare-badge">{CHANGE_LABEL[row.change]}</span>
-      <span className="meta-compare-kind">{KIND_LABEL[row.kind]}</span>
-      <span className="meta-compare-scope">{row.scope}</span>
-      <span className="meta-compare-field">{row.field}</span>
-      <span className="meta-compare-values">
-        {row.change !== "added" && <code>{row.before || "—"}</code>}
-        {row.change === "changed" && <span className="meta-compare-arrow">→</span>}
-        {row.change !== "removed" && <code>{row.after || "—"}</code>}
-      </span>
+      <MetaNcCompare current={current} />
     </div>
   );
 }

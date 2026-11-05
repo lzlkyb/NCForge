@@ -90,7 +90,7 @@ export function ServiceConfig({
         <PathField
           label="工程"
           value={status?.projectRoot ?? ""}
-          placeholder="C:\work\aier\newar"
+          placeholder="C:\work\newar"
           hint={status?.projectRoot ? "改完代码编译后重启即生效" : "未选择"}
           onSave={async (v) => {
             const task = beginOperation({ key: "workspace.switch", label: "切换工程", scope: v, page: "files", phase: "检查运行服务与未保存文件" });

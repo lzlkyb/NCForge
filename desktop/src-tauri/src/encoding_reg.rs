@@ -18,9 +18,6 @@ use std::path::Path;
 
 use serde::Serialize;
 
-/// 偏好文件相对工作区根的位置。没有它很正常：没在 Eclipse 里改过编码的工程就没有。
-pub const PREFS_REL: &str = ".settings/org.eclipse.core.resources.prefs";
-
 /// 超过这个大小的 `.java` 不读：几 MB 的源文件极罕见，为判断编码整份读进来不划算。
 const MAX_SCAN_BYTES: u64 = 4 * 1024 * 1024;
 

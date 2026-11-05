@@ -112,10 +112,6 @@ function read(): Record<string, string> {
   return out;
 }
 
-export function getBindingOverrides(): Record<string, string> {
-  return { ...read() };
-}
-
 export function getBindingOverride(id: string): string | undefined {
   return read()[id];
 }

@@ -102,10 +102,11 @@ pub fn probe(root: &Path) -> Result<NcHome, String> {
     })
 }
 
-/// 团队约定的默认 NC 安装目录。配置里没填时先试它。
+/// 配置为空时先试的一个常见 NC 安装位置。
 ///
 /// 只在「没配置」时当候选，**不参与判定**——判定始终看内容（`probe`），
-/// 所以同事把 NC 装在别处时，改配置即可，代码里不需要再加一个目录名。
+/// 所以把 NC 装在别处时，改配置即可，代码里不需要再加一个目录名。
+/// 试不通就交给「NC 服务」页让用户自己选，不在这里堆盘符。
 pub const DEFAULT_NC_HOME: &str = r"D:\ncc\1909home";
 
 /// 解析本次要用的 NC home：配置优先，没配就试默认位置。
@@ -116,7 +117,7 @@ pub fn resolve(configured: Option<&str>) -> Result<NcHome, String> {
     match configured {
         Some(path) => probe(Path::new(path)),
         None => probe(Path::new(DEFAULT_NC_HOME)).map_err(|e| {
-            format!("{e}（默认位置是 {DEFAULT_NC_HOME}；可在「NC 服务」页选择你的 NC 安装目录）")
+            format!("{e}。还没有设置 NC 安装目录，请在「NC 服务」页选择（选含 ufjdk/bin/java.exe 的那一层）")
         }),
     }
 }
@@ -450,10 +451,10 @@ mod tests {
     #[test]
     fn 空白配置当成没配() {
         let d = fake_home("resolve-blank");
-        // 空白串走默认位置；默认位置在本机不存在时就报错，但错误里一定提到默认路径
+        // 空白串走默认位置；默认位置在本机不存在时报错，但必须告诉用户下一步去哪设
         match resolve(Some("   ")) {
             Ok(_) => {}
-            Err(e) => assert!(e.contains(DEFAULT_NC_HOME), "{e}"),
+            Err(e) => assert!(e.contains("NC 服务"), "要引导用户去选目录：{e}"),
         }
         cleanup(&d);
     }

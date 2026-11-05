@@ -144,9 +144,6 @@ export const svnInfo = () => invoke<SvnInfo>("svn_info");
  */
 export const svnStatus = () => invoke<StatusResult>("svn_status");
 export const svnDiff = (path: string) => trackOperation({ key: `svn.diff:${path.toLowerCase()}`, label: "读取 SVN 差异", scope: path, page: "svn", path }, () => invoke<DiffResult>("svn_diff", { path }));
-export const svnLog = (path: string, limit: number, from: number) =>
-  trackOperation({ key: `svn.log:${path.toLowerCase()}:${from}`, label: "读取 SVN 历史", scope: path || "工作副本", page: "svn" }, () => invoke<LogEntry[]>("svn_log", { path, limit, from }));
-export const svnBlame = (path: string) => trackOperation({ key: `svn.blame:${path.toLowerCase()}`, label: "读取逐行追溯", scope: path, page: "svn", path }, () => invoke<BlameLine[]>("svn_blame", { path }));
 export const svnCommit = (paths: string[], message: string, guard?: SvnWriteHandle) => {
   const root = getSession().root ?? "";
   const snapshot = { paths: [...paths], message };

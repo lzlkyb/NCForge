@@ -28,8 +28,6 @@ const emptyVerified = (): Record<DebugTarget, Record<string, boolean>> => ({
 let verified = emptyVerified();
 const verifiedListeners = new Set<() => void>();
 
-export const getVerifiedMap = () => verified;
-
 export function subscribeVerified(cb: () => void): () => void {
   verifiedListeners.add(cb);
   return () => {

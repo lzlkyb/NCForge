@@ -112,12 +112,3 @@ export function initAppVisibility(): () => void {
   };
   return disposeInner;
 }
-
-/** 仅测试用：重置模块级状态，避免用例间污染。 */
-export function __resetAppVisibilityForTest() {
-  disposeInner?.();
-  listeners.clear();
-  hiddenByHost = false;
-  hidden = false;
-  initialized = false;
-}

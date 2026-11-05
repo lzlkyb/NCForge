@@ -1,4 +1,5 @@
 import { invoke } from "./tauri";
+import type { HistoryResult } from "./svnHistory";
 
 /** 元数据（BMF）前端契约。字段名与 Rust 侧 `#[serde(rename_all = "camelCase")]` 对齐。 */
 
@@ -324,6 +325,101 @@ export interface BmfPublishProbe {
   manual: string;
 }
 
+/** 历史修订 / 导入正文解码后的结果；`empty` = 该修订里没有这个文件。 */
+export interface BmfRevisionText {
+  revision: number;
+  sourcePath: string;
+  text: string;
+  encoding: string;
+  empty: boolean;
+}
+
+/** 自有 Excel 模板的逐行导入状态。`same` 不产生任何写操作。 */
+export interface BmfImportChange {
+  field: string;
+  before: string;
+  after: string;
+}
+
+export interface BmfImportRow {
+  row: number;
+  entity: string;
+  attrName: string;
+  status: "add" | "update" | "same" | "error";
+  changes: BmfImportChange[];
+  message: string;
+}
+
+export interface BmfImportPreview {
+  file: string;
+  sheet: string;
+  /** 预览所基于的文件 SHA；写入时作为冲突校验的期望值。 */
+  sha256: string;
+  rows: BmfImportRow[];
+  ops: BmfEditOp[];
+  add: number;
+  update: number;
+  same: number;
+  errors: number;
+}
+
+/** NC 安装目录里的同名组件副本（F3）。 */
+export interface BmfNcCandidate {
+  path: string;
+  module: string;
+  size: number;
+  mtimeMs: number;
+}
+
+export interface BmfNcCompare {
+  ncHome: string;
+  component: string;
+  workspaceModule: string | null;
+  candidates: BmfNcCandidate[];
+  selected: string | null;
+  detail: BmfDetail | null;
+}
+
+/** M6 发布编排：官方工具探测项。unknown = 无法从 NC home 判断。 */
+export interface BmfReleaseTool {
+  id: string;
+  label: string;
+  status: "found" | "missing" | "unknown";
+  path: string | null;
+  note: string;
+}
+
+export interface BmfReleaseStep {
+  id: string;
+  title: string;
+  mode: "auto" | "manual";
+  status: "ready" | "blocked" | "pending";
+  detail: string;
+  hint: string;
+}
+
+export interface BmfReleasePlan {
+  ncHome: string | null;
+  component: string;
+  module: string;
+  tools: BmfReleaseTool[];
+  steps: BmfReleaseStep[];
+  blockers: number;
+  warnings: number;
+  ready: boolean;
+  /** 骨架阶段恒为 false：官方入口确认前不提供自动发布。 */
+  autoPublish: boolean;
+  installCopy: string | null;
+  workspaceSha256: string | null;
+  installSha256: string | null;
+  evidenceTemplate: string;
+}
+
+export interface BmfReleaseEvidenceSaved {
+  path: string;
+  content: string;
+}
+
 export const bmfIndexScan = (force = false) => invoke<BmfIndex>("bmf_index_scan", { force });
 export const bmfDetail = (path: string) => invoke<BmfDetail>("bmf_doc_detail", { path });
 export const bmfValidate = (path: string) => invoke<BmfIssue[]>("bmf_validate", { path });
@@ -358,4 +454,53 @@ export const bmfPublishProbe = (component: string, module: string, bmfPath?: str
     component,
     module,
     bmfPath: bmfPath ?? null,
+  });
+
+/**
+ * 组件历史：工作副本根按**文件路径**推导，链接工程的 BMF 也能读到，
+ * 不受主工作区（`getSession().root`）限制。
+ */
+export const bmfHistory = (path: string, limit = 50, from = 0) =>
+  invoke<HistoryResult>("bmf_history", { path, limit, from });
+/** 某个修订里的完整正文（SVN 层已转 UTF-8、统一 LF）。 */
+export const bmfRevisionText = (path: string, repositoryPath: string, revision: number) =>
+  invoke<BmfRevisionText>("bmf_revision_text", { path, repositoryPath, revision });
+/** 把一段 BMF 正文解析成语义模型；`path` 只用于归属与回显，不读写磁盘。 */
+export const bmfDetailText = (path: string, text: string) =>
+  invoke<BmfDetail>("bmf_detail_text", { path, text });
+/** 导出自有字段模板（.xlsx）到工作区内目录；目标已存在会拒绝。 */
+export const bmfExcelTemplate = (path: string, targetDir: string) =>
+  invoke<string>("bmf_excel_template", { path, targetDir });
+/** 解析自有模板并生成逐行差异与待写操作；只读，不写文件。 */
+export const bmfExcelPreview = (path: string, file: string) =>
+  invoke<BmfImportPreview>("bmf_excel_preview", { path, file });
+/**
+ * F3 只读对比：按文件名在 NC 安装目录各模块的 METADATA 下找同名组件并解析。
+ * `installPath` 只能来自上一次返回的候选；不会写入安装目录。
+ */
+export const bmfNchomeCompare = (path: string, component: string, installPath?: string | null) =>
+  invoke<BmfNcCompare>("bmf_nchome_compare", {
+    path,
+    component,
+    installPath: installPath ?? null,
+  });
+/** M6 发布编排骨架：工具探测 + 前置检查 + 步骤；只读，不发布。 */
+export const bmfReleasePlan = (path: string, component: string, module: string) =>
+  invoke<BmfReleasePlan>("bmf_release_plan", { path, component, module });
+/** 记录发布证据（Markdown），存到应用配置目录；`result` = success | failed | conditional。 */
+export const bmfReleaseEvidence = (
+  path: string,
+  component: string,
+  module: string,
+  result: string,
+  operator: string,
+  note: string,
+) =>
+  invoke<BmfReleaseEvidenceSaved>("bmf_release_evidence", {
+    path,
+    component,
+    module,
+    result,
+    operator,
+    note,
   });

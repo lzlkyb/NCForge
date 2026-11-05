@@ -504,15 +504,6 @@ impl BmfDoc {
         })
     }
 
-    /// 组件主实体；`mainEntity` 悬空时返回第一个 `isPrimary`，再退回第一个实体。
-    pub fn primary_entity(&self) -> Option<&Entity> {
-        self.entities
-            .iter()
-            .find(|e| e.id == self.component.main_entity)
-            .or_else(|| self.entities.iter().find(|e| e.is_primary))
-            .or_else(|| self.entities.first())
-    }
-
     /// 按行号定位字节偏移（问题列表的「文件第 N 行」）。1 起算。
     pub fn line_of(&self, offset: usize) -> u32 {
         let end = offset.min(self.bytes.len());

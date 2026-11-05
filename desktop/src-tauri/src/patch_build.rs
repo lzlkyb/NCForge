@@ -1052,85 +1052,6 @@ fn write_package(
     Ok((entries, class_count))
 }
 
-/// 继承 nc-patch 脚本缓存的补丁输出目录。
-///
-/// `.nc-patch-cache.sh` 里是 bash 的 `%q` 转义（中文会变成 `$'/d/NC\xe6\x8a\x80...'`），
-/// 直接 std 读出来是乱码路径。这里只做一件事：认出 `CACHED_PATCH_DIR=` 后面那段，
-/// 把 `\nnn` 八进制还原成字节再按 UTF-8 解。解不出来就返回 None，界面让用户自己选。
-pub fn read_cached_patch_dir(script_dir: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(script_dir.join(".nc-patch-cache.sh")).ok()?;
-    let line = text
-        .lines()
-        .find(|l| l.trim_start().starts_with("CACHED_PATCH_DIR="))?;
-    let raw = line.split_once('=')?.1.trim();
-    let unescaped = unescape_bash(raw);
-    // MSYS 风格 `/d/NC技术文档/...` → `D:\NC技术文档\...`
-    let bytes = unescaped.as_bytes();
-    if bytes.len() > 2 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b'/' {
-        let drive = (bytes[1] as char).to_ascii_uppercase();
-        let rest = String::from_utf8_lossy(&bytes[3..]).replace('/', "\\");
-        return Some(format!("{drive}:\\{rest}"));
-    }
-    Some(unescaped)
-}
-
-/// bash `$'...'` 里的转义：`\n` `\t` `\'` `\\` 与 `\nnn`（八进制，UTF-8 中文就靠它）。
-fn unescape_bash(s: &str) -> String {
-    let inner = s.trim_start_matches("$'").trim_end_matches('\'');
-    let b = inner.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] != b'\\' {
-            out.push(b[i]);
-            i += 1;
-            continue;
-        }
-        i += 1;
-        if i >= b.len() {
-            out.push(b'\\');
-            break;
-        }
-        match b[i] {
-            b'n' => {
-                out.push(b'\n');
-                i += 1;
-            }
-            b't' => {
-                out.push(b'\t');
-                i += 1;
-            }
-            b'r' => {
-                out.push(b'\r');
-                i += 1;
-            }
-            b'\\' => {
-                out.push(b'\\');
-                i += 1;
-            }
-            b'\'' => {
-                out.push(b'\'');
-                i += 1;
-            }
-            c if (b'0'..=b'7').contains(&c) => {
-                let mut v: u32 = 0;
-                let mut n = 0;
-                while n < 3 && i < b.len() && (b'0'..=b'7').contains(&b[i]) {
-                    v = v * 8 + (b[i] - b'0') as u32;
-                    i += 1;
-                    n += 1;
-                }
-                out.push(v as u8);
-            }
-            c => {
-                out.push(c);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1161,20 +1082,6 @@ mod tests {
             let (y, m, d) = civil_from_days(z);
             assert_eq!(days_from_civil(y, m, d), z);
         }
-    }
-
-    #[test]
-    fn bash_转义还原中文路径() {
-        // Git Bash 的 %q 对中文输出八进制：`/d/NC\xe6\x8a\x80...`
-        let raw =
-            "$'/d/NC\\346\\212\\200\\346\\234\\257/\\345\\276\\205\\344\\270\\212\\347\\272\\277'";
-        assert_eq!(unescape_bash(raw), "/d/NC技术/待上线");
-    }
-
-    #[test]
-    fn 还原成_windows_盘符路径() {
-        let raw = "$'/d/patch/dir'";
-        assert_eq!(unescape_bash(raw), "/d/patch/dir");
     }
 
     #[test]

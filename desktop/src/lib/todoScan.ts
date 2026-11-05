@@ -71,7 +71,3 @@ export function cachedTodos(root: string): TodoScanResult | null {
   if (!cache || cache.root !== root) return null;
   return { items: cache.items, truncated: cache.truncated, scannedAt: cache.at };
 }
-
-export function clearTodoCache(): void {
-  cache = null;
-}

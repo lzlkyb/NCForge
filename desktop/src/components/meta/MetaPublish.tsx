@@ -3,6 +3,7 @@ import { bmfPublishProbe, type BmfPublishProbe } from "../../lib/bmf";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
+import { MetaReleasePlan } from "./MetaReleasePlan";
 
 const STATUS_TEXT: Record<string, string> = { ok: "通过", warn: "需确认", block: "阻断" };
 
@@ -103,6 +104,8 @@ export function MetaPublish({ component, module, path }: { component: string; mo
           </div>
         </>
       )}
+
+      <MetaReleasePlan path={path} component={component} module={module} />
     </div>
   );
 }

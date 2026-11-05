@@ -12,7 +12,7 @@
 //! 取连接的方式（按顺序回退，口令不经过命令行，避免写进日志）：
 //! 1. `NCFORGE_DB_URL` / `NCFORGE_DB_USER` / `NCFORGE_DB_PASS`
 //! 2. `NCFORGE_DB_URL` 缺省时读 `<NCFORGE_NC_HOME>/ierp/bin/prop.xml` 的 design 数据源
-//! 3. 口令缺省时读 `%APPDATA%/com.aier.ncforge/config.json` 的 `db_password_dpapi`（DPAPI 解）
+//! 3. 口令缺省时读 `%APPDATA%/io.github.lzlkyb.ncforge/config.json` 的 `db_password_dpapi`（DPAPI 解）
 //!
 //! 本机 2026-11-02 实测（`aier260824`，Oracle 19.3 / ZHS16GBK）：
 //! - `md_table` 5 876 张、`md_column` 223 413 列、`displayname` 含中文 99%
@@ -44,7 +44,7 @@ fn connect() -> Option<oracledb::Connection> {
     let pass = std::env::var("NCFORGE_DB_PASS").ok().or_else(|| {
         let appdata = std::env::var("APPDATA").ok()?;
         let path = std::path::Path::new(&appdata)
-            .join("com.aier.ncforge")
+            .join("io.github.lzlkyb.ncforge")
             .join("config.json");
         let text = std::fs::read_to_string(path).ok()?;
         let cfg: serde_json::Value = serde_json::from_str(&text).ok()?;

@@ -30,7 +30,7 @@ pub struct WriteResult {
 }
 
 /// 一次编辑。只覆盖 M2 首期范围：改属性、加属性、加枚举项。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum EditOp {
     /// 改已有属性的一个 XML 属性（displayName / length / isNullable / defaultValue / fieldName）。
@@ -121,7 +121,7 @@ fn dflt_type() -> String {
 }
 
 /// 新建实体时随实体写入的字段规格（与 AddAttribute 同字段名）。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewAttr {
     pub name: String,
@@ -149,7 +149,7 @@ pub struct NewAttr {
 
 /// 字段名口径与脚手架 `normalize_ident` 一致：小写字母开头，只含小写字母/数字/下划线。
 /// 写回层再校验一次：命令可被前端以外调用，不能只靠界面禁用按钮。
-fn is_field_ident(s: &str) -> bool {
+pub(crate) fn is_field_ident(s: &str) -> bool {
     let mut it = s.bytes();
     match it.next() {
         Some(b) if b.is_ascii_lowercase() => {}

@@ -38,12 +38,6 @@ export function subscribeHistory(fn: () => void): () => void {
   return () => listeners.delete(fn);
 }
 
-const NONE: HistoryEntry[] = [];
-
-export function getHistory(connId: string): HistoryEntry[] {
-  return readAll()[connId] ?? NONE;
-}
-
 /**
  * 全部连接的原始映射（引用稳定，可直接喂给 `useSyncExternalStore`）。
  * 「搜历史」默认只搜当前连接，但常有人记得「那条 SQL 我在另一个库上跑过」——

@@ -51,7 +51,6 @@ pub struct ExportableConfig {
     pub svn_user: Option<String>,
     pub patch_out_dir: Option<String>,
     pub patch_out_root: Option<String>,
-    pub nc_patch_dir: Option<String>,
     pub db_url: Option<String>,
     pub db_user: Option<String>,
     pub db_active: Option<String>,
@@ -90,7 +89,6 @@ pub fn build_export(cfg: &AppConfig) -> ConfigExport {
             svn_user: cfg.svn_user.clone(),
             patch_out_dir: cfg.patch_out_dir.clone(),
             patch_out_root: cfg.patch_out_root.clone(),
-            nc_patch_dir: cfg.nc_patch_dir.clone(),
             db_url: cfg.db_url.clone(),
             db_user: cfg.db_user.clone(),
             db_active: cfg.db_active.clone(),
@@ -188,9 +186,6 @@ pub fn apply_import(cfg: &mut AppConfig, imported: &ExportableConfig) -> Result<
     }
     if let Some(v) = &imported.patch_out_root {
         cfg.patch_out_root = Some(v.clone());
-    }
-    if let Some(v) = &imported.nc_patch_dir {
-        cfg.nc_patch_dir = Some(v.clone());
     }
     if let Some(v) = &imported.db_url {
         cfg.db_url = Some(v.clone());

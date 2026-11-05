@@ -183,23 +183,6 @@ export function editorSnapshot(): {
   };
 }
 
-/**
- * 在光标处插入文本（有选区就替换选区）。
- *
- * 只改编辑器 model，不落盘——与 jdt.ls 的代码修复同一条红线：写不写由用户决定。
- * 插入后把光标放到文本末尾，紧接着就能继续敲。
- */
-export function insertEditorText(text: string): boolean {
-  const ed = editor();
-  const sel = ed?.getSelection();
-  if (!ed || !sel) return false;
-  ed.executeEdits("ncforge-generate", [{ range: sel, text, forceMoveMarkers: true }]);
-  const pos = ed.getPosition();
-  if (pos) ed.setPosition({ lineNumber: pos.lineNumber, column: pos.column });
-  ed.focus();
-  return true;
-}
-
 /** 当前 model（代码生成 / 组织导入要用它，而不是编辑器）。 */
 export function currentModel(): ReturnType<typeof monaco.editor.createModel> | null {
   return editor()?.getModel() ?? null;

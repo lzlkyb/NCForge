@@ -11,11 +11,6 @@ interface CacheEntry {
 const CACHE_TTL_MS = 30_000;
 const cache = new Map<string, CacheEntry>();
 
-/** 测试用：模块级缓存跨用例活着，清掉才能断言「这次读没读盘」。 */
-export function clearTreeProjectsCache(): void {
-  cache.clear();
-}
-
 export interface TreeProjectsState {
   /** 只有磁盘上真实存在的工程根；当前工作区永远排第一。 */
   projects: LinkedProject[];
