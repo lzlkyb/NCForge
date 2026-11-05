@@ -145,7 +145,7 @@ fn execute(session: &LangSession, command: &str, args: Value) -> Value {
 fn decode(data: &[u32], legend: &[String]) -> Vec<(u32, u32, u32, String, u32)> {
     let mut out = Vec::new();
     let (mut line, mut start) = (0u32, 0u32);
-    for t in data.chunks_exact(5) {
+    for t in data.as_chunks::<5>().0 {
         line += t[0];
         start = if t[0] == 0 { start + t[1] } else { t[1] };
         let ty = legend
