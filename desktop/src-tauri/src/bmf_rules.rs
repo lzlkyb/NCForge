@@ -190,7 +190,7 @@ pub fn check_doc(doc: &BmfDoc, file: &str) -> Vec<Issue> {
                 "没有表名就生成不了 DDL，发布也会找不到落点。",
                 "填写 tableName（如 uapbd_sz02_h）", eline, &e.name, "");
         } else if !e.table.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' || ch == '#') {
-            add!("E002", "error", "表名含非法字符", format!("{}", e.table),
+            add!("E002", "error", "表名含非法字符", e.table.clone(),
                 "Oracle 标识符只能是字母/数字/下划线/美元/井号，且不能以数字开头。",
                 "改成合法标识符", eline, &e.name, "");
         }

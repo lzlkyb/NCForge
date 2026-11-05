@@ -297,7 +297,7 @@ impl Session {
             ),
             "execBound" => {
                 if a.len()<3 || !(a.len()-3).is_multiple_of(2) {return Err(sql_err("绑定参数协议不完整"));}
-                let params: Result<Vec<Box<dyn ToDbValue>>, BridgeError> = a[3..].chunks_exact(2).map(|pair| {
+                let params: Result<Vec<Box<dyn ToDbValue>>, BridgeError> = a[3..].as_chunks::<2>().0.iter().map(|pair| {
                     Ok(match pair[0] {
                         "null" => Box::new(None::<String>) as Box<dyn ToDbValue>,
                         "number" => Box::new(decimal_number(pair[1])?),
