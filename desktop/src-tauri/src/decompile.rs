@@ -244,13 +244,16 @@ mod tests {
 
     #[test]
     fn 按文件名挑_jar_不区分大小写() {
+        // 夹具用 `/` 而不是 `\`：`Path::file_name` 在 macOS/Linux 上不把反斜杠当
+        // 分隔符，用 Windows 反斜杠写夹具会让整串都变成「文件名」而在这条用例上假红。
+        // 被测的是「按文件名不区分大小写匹配」，与分隔符无关。
         let jars = vec![
-            p(r"D:\ncc\1909home\lib\PubUapbd_aassign.jar"),
-            p(r"D:\ncc\1909home\modules\uapbd\lib\other.jar"),
+            p("D:/ncc/1909home/lib/PubUapbd_aassign.jar"),
+            p("D:/ncc/1909home/modules/uapbd/lib/other.jar"),
         ];
         assert_eq!(
             pick_jar("pubuapbd_aassign.jar", &jars),
-            Some(p(r"D:\ncc\1909home\lib\PubUapbd_aassign.jar"))
+            Some(p("D:/ncc/1909home/lib/PubUapbd_aassign.jar"))
         );
         assert_eq!(pick_jar("nope.jar", &jars), None);
         // 只比文件名，不拿目录里的字眼凑

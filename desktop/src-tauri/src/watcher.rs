@@ -484,14 +484,25 @@ mod tests {
         });
         let _watcher = WorkspaceWatcher::start(root.clone(), emit).unwrap();
 
-        std::fs::write(root.join("external.txt"), "x").unwrap();
-        let got = rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("新建文件后没有收到目录事件");
-        assert!(
-            got.dirs.iter().any(|d| Path::new(d) == root),
-            "事件里应当有工作区根：{got:?}"
-        );
+        // FSEvents（macOS）的事件流是异步就绪的：start 返回后立刻写一次文件，事件可能
+        // 落在监听真正生效之前。固定 sleep 猜不中窗口，改成「写一次、等一小会儿」重试；
+        // 断言没放松——仍要求某一批事件里出现工作区根，只是不再赌首次写入的时序。
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut attempt = 0u32;
+        loop {
+            std::fs::write(root.join(format!("external-{attempt}.txt")), "x").unwrap();
+            attempt += 1;
+            match rx.recv_timeout(Duration::from_millis(500)) {
+                Ok(got) if got.dirs.iter().any(|d| Path::new(d) == root) => break,
+                Ok(_) | Err(RecvTimeoutError::Timeout) => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "10 秒内没有收到工作区根的刷新事件（写了 {attempt} 次）"
+                    );
+                }
+                Err(RecvTimeoutError::Disconnected) => panic!("事件通道被关闭"),
+            }
+        }
     }
 
     /// `.svn` 目录里的写入不能变成刷新事件（NC 工作副本里这类写入最密集）。

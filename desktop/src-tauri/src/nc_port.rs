@@ -869,16 +869,23 @@ mod tests {
             .join("system.properties");
         write_web(&d, "system.ejb.port=80\n");
 
-        // 把 web 端设成只读，模拟「被别的进程占着 / 权限不足」
-        let readonly = |on: bool| {
-            let mut p = fs::metadata(&web).unwrap().permissions();
-            p.set_readonly(on);
-            fs::set_permissions(&web, p).unwrap();
-        };
-        readonly(true);
-        // 前置自检：有的文件系统/账户下只读拦不住写，那就没法测这条
-        if fs::write(&web, b"x").is_ok() {
-            readonly(false);
+        // 让第二份写入必然失败。apply 走的是「临时文件 + rename」：只读**文件**在
+        // Unix 上拦不住 rename（替换只看目录权限），所以按平台选注入点——
+        // Unix 把 web 的父目录设成只读（建不出临时文件），Windows 把文件设成只读
+        // （MoveFileEx 替换只读目标会拒绝）。
+        #[cfg(unix)]
+        let guard: PathBuf = web.parent().unwrap().to_path_buf();
+        #[cfg(windows)]
+        let guard: PathBuf = web.clone();
+        let orig = fs::metadata(&guard).unwrap().permissions();
+        let restore = || fs::set_permissions(&guard, orig.clone()).unwrap();
+        let mut ro = orig.clone();
+        ro.set_readonly(true);
+        fs::set_permissions(&guard, ro).unwrap();
+        // 前置自检：注入必须真的拦得住**原子写**。只试 fs::write 会在 Unix 上给出
+        // 假阳性——直接写被拦了，rename 照样能覆盖目标。
+        if crate::atomic_file::write_atomic(&web, b"x").is_ok() {
+            restore();
             let _ = fs::remove_dir_all(&d);
             return;
         }
@@ -891,7 +898,7 @@ mod tests {
                 .contains("<port>80</port>"),
             "第一份必须还原成 80"
         );
-        readonly(false);
+        restore();
         let _ = fs::remove_dir_all(&d);
     }
 

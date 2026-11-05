@@ -111,12 +111,30 @@ fn registry_md(gen: &Generation) -> String {
     s
 }
 
+/// 哪些路径成分算「写穿」。
+///
+/// `Prefix` 只在 Windows 上会出现；macOS / Linux 上 `D:/evil.txt` 的 `D:` 只是一个
+/// 普通目录名，`is_absolute()` 也是 false。但本函数收的是调用方按 Windows 口径
+/// 拼出来的相对路径，带盘符就该一律拒绝——macOS CI 上这条曾被当成合法相对路径放行。
+fn unsafe_component(c: std::path::Component<'_>) -> bool {
+    match c {
+        std::path::Component::ParentDir
+        | std::path::Component::RootDir
+        | std::path::Component::Prefix(_) => true,
+        std::path::Component::Normal(s) => {
+            let b = s.as_encoded_bytes();
+            b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+        }
+        std::path::Component::CurDir => false,
+    }
+}
+
 fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let p = Path::new(rel);
     if p.is_absolute() {
         return Err(format!("只接受相对路径：{rel}"));
     }
-    if p.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))) {
+    if p.components().any(unsafe_component) {
         return Err(format!("路径不能包含 .. 或盘符：{rel}"));
     }
     Ok(root.join(p))
