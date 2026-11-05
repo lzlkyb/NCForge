@@ -477,6 +477,12 @@ mod tests {
     #[test]
     fn 真实监听报出新建文件的父目录() {
         let dir = tempfile::tempdir().unwrap();
+        // macOS 的 FSEvents 交回真实路径（/var → /private/var），notify 内部也按
+        // canonical 路径匹配监听根；用非 canonical 的临时目录会让事件被平台侧丢掉，
+        // 与合并窗口无关。Windows 保持原样，避免 \\?\ 前缀干扰事件路径比较。
+        #[cfg(unix)]
+        let root = dir.path().canonicalize().unwrap();
+        #[cfg(windows)]
         let root = dir.path().to_path_buf();
         let (tx, rx) = mpsc::channel::<WatchBatch>();
         let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |batch| {
