@@ -16,7 +16,8 @@ name: Build
 #   2. gh secret set GITEE_REPOSITORY -b lzul/NCForge
 #   3. gh secret set GITEE_TOKEN -b <token>   # 需 projects 写权限
 # 配完推下一个 tag 即生效。只想把**已经发过的版本**补上镜像（不重新编译）：
-#   gh workflow run build.yml --ref v0.1.1 -f mirror_only=true    # 见文件末尾 mirror-gitee
+#   gh workflow run build.yml --ref main -f mirror_only=true -f release_tag=v0.1.1
+#   （见文件末尾 mirror-gitee；ref 必须是 main，理由写在那里）
 on:
   push:
     # tag → 发版（build-windows，mac 默认不发）；main → 只跑测试门禁。
@@ -35,9 +36,14 @@ on:
         type: boolean
         default: false
       mirror_only:
-        description: '只把已有 Release 产物补推到 Gitee（不重建；ref 需是 tag）'
+        description: '只把已有 Release 产物补推到 Gitee（不重建；需同时填 release_tag）'
         type: boolean
         default: false
+      release_tag:
+        description: 'mirror_only 时要同步的 tag（如 v0.1.1）；正常发版留空'
+        type: string
+        required: false
+        default: ''
 
 # 共享编译缓存：sccache 把每个 crate 的编译对象按 hash 存到 GitHub Actions Cache，
 # 跨发版 / 跨 PR 命中（依赖不变时基本秒级）；第一次或改了大段 Rust 仍要全编。
@@ -636,10 +642,13 @@ jobs:
             Write-Host "  1) Gitee 上建**公开**仓库（例如 lzul/NCForge）；私有仓库 raw 匿名读不到 = 客户端 404"
             Write-Host "  2) gh secret set GITEE_REPOSITORY -b <owner>/<repo>"
             Write-Host "  3) gh secret set GITEE_TOKEN -b <token>   # 需 projects 写权限"
-            Write-Host "  补发本次镜像（不重编译）：gh workflow run build.yml --ref ${{ github.ref_name }} -f mirror_only=true"
+            Write-Host "  补发本次镜像（不重编译）：gh workflow run build.yml --ref main -f mirror_only=true -f release_tag=${{ github.ref_name }}"
             exit 0
           }
-          $tag = "${{ github.ref_name }}"
+          # 补镜像作业从 main 跑（原因见 mirror-gitee 注释），版本由 release_tag 显式给出；
+          # 正常发版时该输入为空，回退到当前 ref。
+          $tag = "${{ github.event.inputs.release_tag }}"
+          if ([string]::IsNullOrWhiteSpace($tag)) { $tag = "${{ github.ref_name }}" }
           # 仓库路径不是秘密，打出来：客户端 update.rs 里配置的 Gitee 仓库与这个
           # secret 不一致时，镜像会"成功"到一个没人读的仓库，不打印根本无法发现。
           Write-Host "目标 Gitee 仓库：$($env:GITEE_REPOSITORY)（分支 releases，目录 latest/）"
@@ -774,10 +783,13 @@ jobs:
   # 一个字节都没变。本作业只做三件事：下载已有 Release 资产 → 重写两份清单的 URL
   # → 复用上面那段 *gitee-mirror-run 推送。
   #
-  #   gh workflow run build.yml --ref v0.1.1 -f mirror_only=true
+  #   gh workflow run build.yml --ref main -f mirror_only=true -f release_tag=v0.1.1
   #
-  # ref 必须是 tag（决定同步哪个 Release 的资产），但**代码 checkout 默认分支**：
-  # 补镜像多半是给已经发过的旧版本补，那个 tag 上还没有本作业与 gitee-manifest.mjs。
+  # 🔴 ref 必须是 **main**，不能是 tag。workflow_dispatch 的 inputs 是按 ref 上那份
+  # workflow 文件校验的：拿 --ref v0.1.1 触发时，GitHub 读的是 v0.1.1 里的 build.yml，
+  # 那个版本没有 mirror_only / release_tag，直接 422 "Unexpected inputs provided"。
+  # 要同步的版本号因此由 release_tag 显式给出；代码 checkout 默认分支（要用本作业和
+  # gitee-manifest.mjs，旧 tag 上都没有）。
   mirror-gitee:
     name: Mirror release assets to Gitee
     if: github.event.inputs.mirror_only == 'true'
@@ -798,9 +810,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tag = "${{ github.ref_name }}"
+          $tag = "${{ github.event.inputs.release_tag }}"
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            Write-Error "缺 release_tag。用法：gh workflow run build.yml --ref main -f mirror_only=true -f release_tag=v0.1.1"
+            exit 1
+          }
           if ($tag -notlike 'v*') {
-            Write-Error "mirror_only 需要 ref 是 tag（例：--ref v0.1.1），当前是 $tag"
+            Write-Error "release_tag 必须是 v 开头的 tag（例：v0.1.1），当前是 $tag"
             exit 1
           }
           gh release download $tag --dir dist-out --clobber
