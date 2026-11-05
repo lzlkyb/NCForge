@@ -85,9 +85,20 @@ where
     port
 }
 
+// release 下这条**跑不了**：`tauri_plugin_updater::config::validate_endpoints` 只在
+// `#[cfg(debug_assertions)]` 里对非 https 端点放行，release 直接返回
+// `InsecureTransportProtocol`（我们 tauri.conf.json 没有开 `dangerousInsecureTransportProtocol`，
+// 也不该为了一条测试开）。本地 http 源是纯测试脚手架，所以 release 这遍跳过它。
+// 覆盖面不丢：debug 下 macOS 的 `cargo test` 与 Windows 的 `cargo test` 都会跑这条；
+// 发版 job 里那遍 `cargo test --release` 只为复用编译产物、顺带验一遍其余用例。
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "release 构建下 updater 拒绝非 https 端点，本地 http 源只在 debug 可用"
+)]
 #[test]
 fn local_http_source_drives_check_download_and_signature_failure() {
-    // mock 应用 + 真实 tauri.conf.json（pubkey / endpoints / http 允许均从那里读）。
+    // mock 应用 + 真实 tauri.conf.json（pubkey 与线上 endpoints 从那里读；
+    // 注意 `dangerousInsecureTransportProtocol` **没有**开，所以这条只在 debug 下有意义）。
     // build_updater 依赖 updater 插件初始化时插入的 UpdaterState，必须注册插件。
     let app = mock_builder()
         .plugin(tauri_plugin_updater::Builder::new().build())
