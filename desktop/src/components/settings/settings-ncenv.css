@@ -78,7 +78,7 @@
 }
 
 .settings-ncenv-check[data-tone="ok"] .settings-ncenv-check-dot { background: hsl(var(--primary)); }
-.settings-ncenv-check[data-tone="warn"] .settings-ncenv-check-dot { background: #d97706; }
+.settings-ncenv-check[data-tone="warn"] .settings-ncenv-check-dot { background: hsl(var(--warning)); }
 .settings-ncenv-check[data-tone="bad"] .settings-ncenv-check-dot { background: hsl(var(--destructive)); }
 .settings-ncenv-check[data-tone="idle"] .settings-ncenv-check-dot { background: hsl(var(--muted-foreground)); }
 

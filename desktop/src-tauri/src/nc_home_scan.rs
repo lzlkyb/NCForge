@@ -23,7 +23,7 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-use crate::nc_home::{count_subdirs, looks_like_nc_home};
+use crate::nc_home::{count_subdirs, looks_like_nc_home, strip_verbatim};
 
 /// 候选的来源，界面上用来解释「这个位置是怎么找到的」。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -135,9 +135,17 @@ fn scan_tree(roots: &[(PathBuf, CandidateSource)]) -> Vec<HomeCandidate> {
                 continue;
             }
             if looks_like_nc_home(&path) {
+                // 路径规范化：`read_dir` 给的是按字面拼出来的路径，同一个目录可能
+                // 有两种写法——Windows 的 8.3 短名（CI runner 的 `RUNNER~1`）、
+                // macOS 的 `/var` → `/private/var` 符号链接。不规范化就有两个后果：
+                // 与 `nc_home::probe` 返回的 root 字符串对不上（同一个 home 被当成
+                // 两个），以及 `candidates` 的去重按字符串比较会失效。
+                // canonicalize 失败时保留原路径——读得到目录却解析不了是极端情况，
+                // 宁可给出一个「可能带短名」的候选，也不要凭空丢掉。
+                let real = strip_verbatim(&std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone()));
                 out.push(HomeCandidate {
-                    root: path.to_string_lossy().to_string(),
-                    module_count: count_subdirs(&path.join("modules")),
+                    root: real.to_string_lossy().to_string(),
+                    module_count: count_subdirs(&real.join("modules")),
                     source,
                 });
             } else if depth == 0 {
@@ -153,7 +161,6 @@ fn scan_tree(roots: &[(PathBuf, CandidateSource)]) -> Vec<HomeCandidate> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nc_home::strip_verbatim;
     use std::fs;
 
     fn temp_dir(tag: &str) -> PathBuf {

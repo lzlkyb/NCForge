@@ -979,7 +979,7 @@ pub fn stale_classes(layout: &ModuleLayout, previous: &Manifest, next: &Manifest
                 continue;
             }
             if let Some(p) = build_layout::safe_join(&out_dir, c) {
-                if p.is_file() && !build_layout::has_reparse_component(&p) {
+                if p.is_file() && !build_layout::has_reparse_component_under(&p, &layout.module_dir) {
                     out.push(p);
                 }
             }
@@ -1073,7 +1073,7 @@ pub fn clean_module(
                     continue;
                 };
                 if p.is_file() {
-                    if build_layout::has_reparse_component(&p) {
+                    if build_layout::has_reparse_component_under(&p, &layout.module_dir) {
                         report.failed.push(format!("拒绝跟随重解析点：{}", crate::security::path::display_path(&p)));
                     } else {
                         targets.push(p);
@@ -1104,7 +1104,7 @@ pub fn clean_module(
     }
 
     for p in targets {
-        if build_layout::has_reparse_component(&p) {
+        if build_layout::has_reparse_component_under(&p, &layout.module_dir) {
             report.failed.push(format!("拒绝跟随重解析点：{}", crate::security::path::display_path(&p)));
             break;
         }
@@ -1125,7 +1125,7 @@ pub fn clean_module(
     }
     // 包目录清空后自底向上删；输出根永远保留（classpath / 依赖顺序还要用它）
     for out in &layout.outputs {
-        if !out.is_dir() || build_layout::has_reparse_component(out) {
+        if !out.is_dir() || build_layout::has_reparse_component_under(out, &layout.module_dir) {
             continue;
         }
         report.dirs_removed += remove_empty_dirs(out);

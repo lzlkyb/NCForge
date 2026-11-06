@@ -306,7 +306,7 @@ pub(super) fn build_one(
         );
         if let Some(prev) = previous.as_ref() {
             let stale = build_state::stale_classes(&layout, prev, &next);
-            let removed = delete_stale(&stale);
+            let removed = delete_stale(&stale, &layout.module_dir);
             if removed > 0 {
                 ctx.log_module(module, &format!("清理 {removed} 个上次有、这次没有的 class"));
             }
@@ -345,10 +345,14 @@ pub(super) fn build_one(
 }
 
 /// 清单里的旧 class：只在声明过的输出目录内、且不是重解析点时才删。
-fn delete_stale(files: &[PathBuf]) -> usize {
+///
+/// 重解析点检查以 `module_dir` 为界：越过它（`/var`、`/tmp` 这类系统符号链接）
+/// 不属于逃逸，越界检查会让 macOS 上的删除整体失效（见
+/// `build_layout::has_reparse_component_under`）。
+fn delete_stale(files: &[PathBuf], module_dir: &Path) -> usize {
     let mut n = 0;
     for p in files {
-        if crate::build_layout::has_reparse_component(p) {
+        if crate::build_layout::has_reparse_component_under(p, module_dir) {
             continue;
         }
         if std::fs::remove_file(p).is_ok() {

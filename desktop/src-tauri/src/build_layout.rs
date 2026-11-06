@@ -235,6 +235,39 @@ pub fn has_reparse_component(path: &Path) -> bool {
     }
 }
 
+/// 只在 `base` 之下这一段的路径检查重解析点（含 `base` 自身）。
+///
+/// 为什么需要基准：安全检查的目标是「别顺着链接把文件读写到模块目录之外」。
+/// 一路查到文件系统根是过度防御——macOS/Linux 上 `/var`、`/tmp` 本身就是
+/// 符号链接（`/var` → `/private/var`），于是临时目录下的每个产物文件都被判成
+/// 「跟随重解析点」，清理与产物删除在 macOS 上整体失效（CI 的 macOS job 就是
+/// 红在这里，只有非 dry-run 的用例挂）。基准之上属于系统布置，既不是我们能
+/// 控制的东西，也不构成逃逸——我们本来就是从这条路径找到的文件。
+///
+/// `path` 不在 `base` 之下时退回完整链检查：那说明调用方给了个不在管辖范围内的
+/// 路径，宁可多拒，不能放宽。
+pub fn has_reparse_component_under(path: &Path, base: &Path) -> bool {
+    if !path_starts_with(path, base) {
+        return has_reparse_component(path);
+    }
+    let mut p = path;
+    loop {
+        if let Ok(md) = std::fs::symlink_metadata(p) {
+            if is_reparse(&md) {
+                return true;
+            }
+        }
+        // 含 base 自身：模块目录本身是链接时整块拒绝
+        if eq_path(p, base) {
+            return false;
+        }
+        match p.parent() {
+            Some(parent) if parent != p => p = parent,
+            _ => return false,
+        }
+    }
+}
+
 /// 路径比较：Windows 不区分大小写，统一 `/` 后比较。
 pub fn eq_path(a: &Path, b: &Path) -> bool {
     slash(a).eq_ignore_ascii_case(&slash(b))
@@ -307,6 +340,17 @@ pub fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+/// 测试用：造目录符号链接。Windows 需要开发者模式，建不出来由调用方跳过。
+#[cfg(all(test, unix))]
+fn dir_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(all(test, windows))]
+fn dir_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_dir(target, link)
 }
 
 #[cfg(test)]
@@ -421,5 +465,49 @@ mod tests {
             &["classes".to_string()]
         ));
         assert!(!l.matches_manifest(&["src/client".to_string()], &["classes".to_string()]));
+    }
+
+    /// 重解析点检查以模块目录为界：**之上**的符号链接不算逃逸，**之内**的必须拒。
+    ///
+    /// 2026-11-06 CI 的 macOS job 红在这里——`/var` 是 `/private/var` 的符号链接，
+    /// 临时目录下每次真删产物都被判成「跟随重解析点」，清理整体失效（dry-run 不
+    /// 检查路径所以通过了，掩盖了问题：只有非 dry-run 的用例挂）。
+    #[test]
+    fn 重解析点检查在模块目录处截止() {
+        let root = tmp("reparse");
+        let real = root.join("real");
+        let classes = real.join("gl/classes/p");
+        std::fs::create_dir_all(&classes).unwrap();
+        std::fs::write(classes.join("A.class"), b"x").unwrap();
+
+        // 模拟「祖先目录是链接」：macOS 的 /var，或 Linux/macOS 的 /tmp。
+        // 建不出来就跳过（Windows 建目录符号链接要开发者模式）；
+        // CI 的 macOS 上必然建得出来，那边正是出问题的平台。
+        let link = root.join("via-link");
+        if dir_symlink(&real, &link).is_err() {
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+        let module = link.join("gl");
+        let class = module.join("classes/p/A.class");
+
+        assert!(
+            has_reparse_component(&class),
+            "完整链检查会看到祖先链接——这正是它误伤 macOS 的原因"
+        );
+        assert!(
+            !has_reparse_component_under(&class, &module),
+            "模块目录之上的链接不算逃逸，否则 macOS 上清理永远删不动"
+        );
+
+        // 模块目录**之内**出现链接仍然要拒：那才是真正的逃逸路径。
+        let inner = module.join("classes/linkp");
+        if dir_symlink(&classes, &inner).is_ok() {
+            assert!(
+                has_reparse_component_under(&inner.join("A.class"), &module),
+                "模块目录之内的链接必须拒绝"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
