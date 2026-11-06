@@ -38,7 +38,7 @@ const subscribe = (cb: () => void): (() => void) => {
  * 订阅方会无限重渲染（这个坑在 SQL 片段库那边踩过一次）。
  */
 export function setCodeDiags(next: CodeDiag[]): void {
-  const sig = next.map((d) => `${d.path.toLowerCase()}|${d.line}|${d.severity}|${d.message}`).join("\n");
+  const sig = next.map((d) => `${d.path.toLowerCase()}|${d.line}|${d.column}|${d.severity}|${d.message}`).join("\n");
   if (sig === signature) return;
   signature = sig;
   items = next;

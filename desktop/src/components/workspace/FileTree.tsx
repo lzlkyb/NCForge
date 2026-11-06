@@ -7,7 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { ContextMenu } from "./ContextMenu";
-import { TreeDeleteConfirm } from "./TreeChrome";
+import { TreeDeleteConfirm, TreeProblemToggle } from "./TreeChrome";
 import { TreeRows, type TreeRowsCtx } from "./TreeRows";
 import { PackageDependencies } from "./PackageDependencies";
 import { TreeProjectRows } from "./TreeProjectRows";
@@ -21,6 +21,7 @@ import { useTreeHandlers } from "./useTreeHandlers";
 import { packageCompact, packageDepthOffset } from "../../lib/packageTree";
 import { useNcComponents } from "../../hooks/useNcComponents";
 import { useTreeMenu } from "../../hooks/useTreeMenu";
+import { useProblemMarks, useProblemTreeFilter } from "../../hooks/useProblemMarks";
 import { useTreeLocate } from "../../hooks/useTreeLocate";
 import type { NewEntryKind } from "../../lib/workspace";
 import { flattenTree, treeKeyAction, treeRowId as rowId } from "../../lib/treeNav";
@@ -70,6 +71,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
 ) {
   const [selected, setSelected] = useState<{ path: string; isDir: boolean } | null>(null);
   const [filter, setFilter] = useTreeFilterState(root);
+  const problemMarks = useProblemMarks();
   const compact = useCompactPackages();
   const ncStructure = useNcStructure();
   const packageView = usePackageView();
@@ -88,7 +90,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   // manifest.xml 只用来给模块行打「业务组件」徽章、并决定 NC 结构视图摊不摊 `src`，
   // 不参与树的取数（见 lib/ncManifest / hooks/useNcComponents）
   const { bcNames, isBcModule, hoist } = useNcComponents(roots, ncStructure && !packageView);
-  const { dirs, expanded, marks, load, expand, toggle, toggleRow, depthOf, reveal, packageRoots, packageIndexes, invalidatePackages } = useTreeLoad(
+  const { dirs, expanded, marks, onlyProblems, setOnlyProblems, load, expand, toggle, toggleRow, depthOf, reveal, packageRoots, packageIndexes, invalidatePackages } = useTreeLoad(
     root,
     compact,
     roots,
@@ -132,10 +134,9 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   const clearFilter = useCallback(() => setFilter(""), [setFilter]);
   useTreeLocate(reveal, activePath, revealOnOpen, clearFilter);
 
-  // ---- 菜单 ----
-
   const { menu, menuItems, openMenu, closeMenu } = useTreeMenu({
     root,
+    marks: problemMarks.paths,
     isEditable,
     onOpen,
     onCompileModule,
@@ -159,10 +160,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
 
   // ---- 键盘与筛选 ----
 
-  const filterFn = useCallback(
-    (name: string) => !filter || name.toLowerCase().includes(filter.toLowerCase()),
-    [filter],
-  );
+  const filterFn = useProblemTreeFilter(filter, onlyProblems, problemMarks);
   const flat = useMemo(
     () =>
       flattenTree(dirs, expanded, multi ? rootRows : root, {
@@ -176,7 +174,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
 
   // 焦点留在容器，方向键按视觉树移动。
   const onKeyDown = (e: ReactKeyboardEvent) => {
-    if (editing || e.nativeEvent.isComposing) return;
+    if ((e.target as HTMLElement).closest(".wb-problem-badge") || editing || e.nativeEvent.isComposing) return;
     if (e.key === "Escape" && filter) {
       e.preventDefault();
       setFilter("");
@@ -224,8 +222,6 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     }
   };
 
-  // ---- 渲染 ----
-
   const handlers = useTreeHandlers({
     toggleRow: toggleVisibleRow,
     toggle,
@@ -246,6 +242,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     marks,
     bookmarkCounts,
     filter: filterFn,
+    problemPaths: problemMarks.paths, problemPackages: problemMarks.packages,
     compact, packageRoots, packageIndexes,
     hoist,
     members: packageView ? members : undefined,
@@ -264,6 +261,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
 
   return (
     <>
+      <TreeProblemToggle active={onlyProblems} onToggle={() => setOnlyProblems(!onlyProblems)} />
       <TreeQuickFilter root={root} />
       <div
         className="wb-tree-list"
@@ -277,14 +275,16 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
           if (e.target === e.currentTarget) openMenu(e, root, true);
         }}
       >
-        {multi || packageView ? (
+        {onlyProblems && !problemMarks.paths.size ? (
+          <div className="wb-row-note" role="status">当前没有已报告的错误或警告</div>
+        ) : multi || packageView ? (
           <TreeProjectRows projects={multi ? projects : undefined} root={root} ctx={ctx} />
         ) : (
           <TreeRows dir={root} depth={0} ctx={ctx} />
         )}
       </div>
 
-      {packageView && <PackageDependencies key={root} root={root} projects={rootRows} />}
+      {packageView && !onlyProblems && <PackageDependencies key={root} root={root} projects={rootRows} />}
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} onClose={closeMenu} />

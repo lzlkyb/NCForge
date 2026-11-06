@@ -2,6 +2,18 @@ import type { UnifiedProblem } from "./problemList";
 import { moduleOf } from "./ncModule";
 import { dirName } from "./workspace";
 
+export type ProblemPathScope = "file" | "branch" | "package";
+
+export function problemsAtPath(problems: UnifiedProblem[], path: string, scope: ProblemPathScope): UnifiedProblem[] {
+  const key = diagnosticPathKey(path);
+  return problems.filter(problem => {
+    const file = diagnosticPathKey(problem.path);
+    if (scope === "file") return file === key;
+    if (scope === "package") return file.slice(0, file.lastIndexOf("/")) === key;
+    return file.startsWith(key + "/");
+  });
+}
+
 export type DiagnosticScope = "project" | "module" | "file";
 export const diagnosticPathKey = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 export function scopeProblems(problems: UnifiedProblem[], scope: DiagnosticScope, root: string | null, activePath: string | null): UnifiedProblem[] {

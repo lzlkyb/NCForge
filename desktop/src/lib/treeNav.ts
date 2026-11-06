@@ -59,7 +59,7 @@ export function flattenTree(
   expanded: Set<string>,
   root: string | TreeRoot[],
   opts: {
-    filter?: (name: string) => boolean;
+    filter?: (name: string, path: string, isDir: boolean, kind?: string) => boolean;
     compact?: boolean;
     projectRows?: boolean;
     /** 这一层的子目录要不要摊平 `src`（NC 结构视图）。 */
@@ -79,9 +79,9 @@ export function flattenTree(
       hoist: opts.hoist?.(dir) === true,
       dirs,
     }, opts.packageRoots, opts.packageIndexes);
-    for (const { dir: from, item, label } of kids) {
-      if (filter && !filter(label ?? item.name)) continue;
+    for (const { dir: from, item, label, kind } of kids) {
       const full = joinPath(from, item.name);
+      if (filter && !filter(label ?? item.name, full, item.isDir, kind)) continue;
       if (item.isDir) {
         const chain = dirChain(compact && packageCompact(opts.packageRoots, full, opts.packageIndexes), full, label ?? item.name, dirs);
         out.push({
@@ -110,6 +110,7 @@ export function flattenTree(
   const roots = typeof root === "string" ? [{ path: root }] : root;
   for (const r of roots) {
     if (opts.projectRows) {
+      if (filter && !filter(r.label ?? "", r.path, true, "project")) continue;
       out.push({ path: r.path, isDir: true, parent: null, label: r.label, project: true });
       if (expanded.has(r.path)) walk(r.path, r.path);
     } else {

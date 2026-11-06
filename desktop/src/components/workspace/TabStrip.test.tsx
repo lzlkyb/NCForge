@@ -12,7 +12,7 @@ import type { TabMeta } from "../../lib/workspaceSession";
 
 vi.mock("./WorkbenchDock", () => ({ useWorkbenchDock: () => null }));
 vi.mock("./TaskMenu", () => ({ TaskMenu: () => null }));
-const session = vi.hoisted(() => ({ state: {} as { compileResult?: unknown; root?: string } }));
+const session = vi.hoisted(() => ({ state: {} as { compileResult?: unknown; root?: string; tabs?: TabMeta[] } }));
 vi.mock("../../lib/workspaceSession", () => ({
   setSession: vi.fn(),
   useWorkspaceSelector: (select: (s: typeof session.state) => unknown) => select(session.state),
@@ -52,6 +52,7 @@ afterEach(() => {
 
 const onSelect=vi.fn(),onClose=vi.fn();
 function render(tabs: TabMeta[], activePath: string) {
+  session.state.tabs = tabs;
   act(() =>
     root.render(
       <TabStrip
@@ -103,20 +104,20 @@ describe("编译问题落到标签", () => {
     const badges = container.querySelectorAll(".wb-tab .wb-problem-badge");
     expect(badges).toHaveLength(1);
     expect(badges[0].textContent).toBe("1");
-    expect(badges[0].getAttribute("title")).toContain("1 个编译错误");
+    expect(badges[0].getAttribute("title")).toContain("1 个错误 · 最近编译 1 条");
   });
 });
 
 describe("代码检查徽标", () => {
-  it("jdt.ls 用独立徽标和 tooltip，不和编译错误相加", () => {
+  it("实时检查按警告样式显示，悬停说明来源", () => {
     setCodeDiags([
       { path: "C:\\w\\A.java", line: 1, column: 1, severity: "warning", message: "未使用的导入" },
     ]);
     render([tab("C:\\w\\A.java"), tab("C:\\w\\B.java")], "C:\\w\\A.java");
-    const badges = container.querySelectorAll('.wb-tab .wb-problem-badge[data-sev="inspect"]');
+    const badges = container.querySelectorAll('.wb-tab .wb-problem-badge[data-sev="warning"]');
     expect(badges).toHaveLength(1);
     expect(badges[0].textContent).toBe("1");
-    expect(badges[0].getAttribute("title")).toContain("代码检查（jdt.ls）");
+    expect(badges[0].getAttribute("title")).toContain("实时检查 1 条");
   });
 });
 

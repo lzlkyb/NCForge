@@ -40,7 +40,7 @@ interface Props {
   log?: string[];
   onOpenProblem: (p: Problem) => void;
   /** 点日志里的报错行直接跳到那个文件的那一行。 */
-  onOpenAt: (path: string, line: number) => void;
+  onOpenAt: (path: string, line: number, push?: boolean, column?: number) => void;
   /** jdt.ls 的代码检查（波浪线那批），与编译问题一起显示。 */
   inspect: CodeDiag[];
   onNextProblem: () => void;
@@ -68,6 +68,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
   const compileResourceMissing = useWorkspaceSelector((s) => s.compileResourceMissing);
   // 树右键「查看该文件的问题」设置的路径过滤；面板卸载/切换页签后仍保留
   const problemsPath = useWorkspaceSelector((s) => s.problemsPath);
+  const problemsPathScope = useWorkspaceSelector(s => s.problemsPathScope);
   const log = logProp ?? sessionLog;
   // 标签上的小灯：调试停在某一行时，没开面板也能看到「现在断住了」
   const debug = useDebugSnapshot();
@@ -121,6 +122,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
       {(tab === "build" || tab === "problems") && !running && (compileResourceMissing || log.some(line => missingResourceId(line) === "ecj")) && <div className="wb-banner"><span>缺少 Java 编译器，下载完成后请重新编译。</span><ResourceDownloadButton id="ecj" /></div>}
       {tab === "problems" && (
         <ProblemsView
+          key={problemsPath ? `${problemsPathScope}:${problemsPath}` : "default"}
           root={root}
           activePath={activePath}
           result={result}
@@ -129,7 +131,8 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
           running={running}
           compiled={result !== null}
           pathFilter={problemsPath}
-          onClearPathFilter={() => setSession({ problemsPath: null })}
+          pathFilterScope={problemsPathScope}
+          onClearPathFilter={() => setSession({ problemsPath: null, problemsPathScope: undefined })}
           onOpenProblem={onOpenProblem}
           onOpenAt={onOpenAt}
         />

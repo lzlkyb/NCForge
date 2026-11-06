@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProblemsView } from "./ProblemsView";
+import type { ProblemPathScope } from "../../lib/diagnosticScope";
 import type { UnifiedProblem } from "../../lib/problemList";
 import type { CompileDiagnostic, CompileResult } from "../../lib/compile";
 import { setSession } from "../../lib/workspaceSession";
@@ -27,7 +28,7 @@ const u = (over: Partial<UnifiedProblem> = {}): UnifiedProblem => ({
 
 const render = async (
   problems: UnifiedProblem[],
-  extra: { pathFilter?: string | null; onClearPathFilter?: () => void; root?: string; activePath?: string; result?: CompileResult } = {},
+  extra: { pathFilter?: string | null; pathFilterScope?: ProblemPathScope; onClearPathFilter?: () => void; root?: string; activePath?: string; result?: CompileResult } = {},
 ) => {
   const onOpenProblem = vi.fn();
   const onOpenAt = vi.fn();
@@ -39,6 +40,7 @@ const render = async (
         running={false}
         compiled
         pathFilter={extra.pathFilter ?? null}
+        pathFilterScope={extra.pathFilterScope}
         onClearPathFilter={extra.onClearPathFilter}
         root={extra.root}
         activePath={extra.activePath}
@@ -126,6 +128,20 @@ describe("ProblemsView 筛选与分组", () => {
 });
 
 describe("ProblemsView 行语义", () => {
+  it("按目录边界筛选，跳到合并诊断保留的实时列号", async () => {
+    const problems = [
+      u({ path: "C:/w/mod/A.java", column: 7, alsoInspected: true }),
+      u({ path: "C:/w/mod/nested/B.java" }),
+      u({ path: "C:/w/module/C.java" }),
+    ];
+    const actions = await render(problems, { pathFilter: "c:/W/mod", pathFilterScope: "branch" });
+    expect(container.querySelectorAll(".wb-prow")).toHaveLength(2);
+    expect(container.textContent).toContain("实时检查 + 最近编译");
+    await act(async () => container.querySelector<HTMLButtonElement>(".wb-prow")!.click());
+    expect(actions.onOpenAt).toHaveBeenCalledWith("C:/w/mod/A.java", 1, true, 7);
+    await render(problems, { pathFilter: "c:/W/mod", pathFilterScope: "package" });
+    expect(container.querySelectorAll(".wb-prow")).toHaveLength(1);
+  });
   it("编译问题点开走 onOpenProblem，代码检查点开走 onOpenAt", async () => {
     const { onOpenProblem, onOpenAt } = await render([
       u({ line: 7, message: "编译错" }),
@@ -201,13 +217,13 @@ describe("ProblemsView 复制全部", () => {
 });
 
 describe("ProblemsView 来源与文件过滤", () => {
-  it("每行标出来源 ecj / jdt.ls，不混成一个数字", async () => {
+  it("每行标出最近编译或实时检查来源", async () => {
     await render([
       u({ line: 1 }),
       u({ path: "C:\\w\\B.java", line: 2, severity: "info", source: "inspect", message: "未使用的导入" }),
     ]);
     const srcs = [...container.querySelectorAll(".wb-prow-src")];
-    expect(srcs.map((s) => s.textContent)).toEqual(["ecj", "jdt.ls"]);
+    expect(srcs.map((s) => s.textContent)).toEqual(["最近编译", "实时检查"]);
     expect(srcs[1].getAttribute("data-source")).toBe("inspect");
   });
 

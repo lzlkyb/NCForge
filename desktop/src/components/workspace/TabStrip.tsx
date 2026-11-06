@@ -1,5 +1,5 @@
 import { EditorTabTypeIcon } from "./EditorTabTypeIcon";
-import { ProblemBadge } from "./ProblemBadge";
+import { ProblemBadge, problemDescription } from "./ProblemBadge";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -13,9 +13,8 @@ import { tabPathLabels } from "../../lib/tabPathLabels";
 import { relativeTo } from "../../lib/compile";
 import { revealInTree } from "../../lib/revealInTree";
 import { setSession } from "../../lib/workspaceSession";
-import { useCompileMarks } from "../../hooks/useCompileMarks";
-import { markOf } from "../../lib/compileMarks";
-import { inspectMarkOf, useInspectMarks } from "../../lib/inspectMarks";
+import { useProblemMarks } from "../../hooks/useProblemMarks";
+import { diagnosticPathKey } from "../../lib/diagnosticScope";
 import type { TabMeta } from "../../lib/workspaceSession";
 import { emptyEditorGroups, type EditorGroupId } from "../../lib/editorGroups";
 
@@ -65,9 +64,7 @@ export function TabStrip({
 }) {
   const dock = useWorkbenchDock();
   const pathLabels = tabPathLabels(root, tabs);
-  // 编译结果按文件落到标签上：开着五个文件时不用逐个点开找哪个有错
-  const marks = useCompileMarks();
-  const inspectMarks = useInspectMarks();
+  const { paths: marks } = useProblemMarks();
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   const tabRefs = useRef(new Map<string, HTMLDivElement>());
   /** 正在被拖的标签路径（HTML5 拖放只在 start 时给，dragover 时读不到）。 */
@@ -175,7 +172,7 @@ export function TabStrip({
   return (
     <div className="wb-tabs" role="tablist" aria-label={groupId ? `${groupId === 'left' ? '左' : '右'}编辑器组文件` : '打开的文件'}>
       {tabs.map((t, i) => {
-        const problem = markOf(marks, t.path);
+        const problem = marks.get(diagnosticPathKey(t.path));
         return (
         <div
           key={t.path}
@@ -187,7 +184,7 @@ export function TabStrip({
           aria-selected={!dock?.documentOpen && t.path === activePath}
           aria-controls={groupId ? `wb-editor-${groupId}-surface` : "wb-code-surface"}
           aria-label={pathLabels.has(t.path) ? `${t.name} · ${pathLabels.get(t.path)}` : t.name}
-          aria-description={t.readOnly ? "只读" : undefined}
+          aria-description={[t.readOnly && "只读", problemDescription(problem)].filter(Boolean).join(" · ") || undefined}
           className="wb-tab"
           data-active={(!dock?.documentOpen && t.path === activePath) || undefined}
           data-preview={t.preview || undefined}
@@ -226,7 +223,7 @@ export function TabStrip({
           {t.pinned && <span className="wb-tab-pinned" title="已钉住"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M16 3H8l1 6-4 4v3h14v-3l-4-4 1-6Z M12 16v6" /></svg></span>}
           <WorkspaceFileName name={t.name} className="wb-tab-name" />
           {pathLabels.has(t.path) && <span className="wb-tab-scope">· {pathLabels.get(t.path)}</span>}
-          <ProblemBadge mark={problem} inspect={inspectMarkOf(inspectMarks, t.path)} />
+          <ProblemBadge mark={problem} path={t.path} name={t.name} tabStop={i === rovingIndex} />
           {t.readOnly && <span className="wb-status-warn">只读</span>}
           <button
             type="button"

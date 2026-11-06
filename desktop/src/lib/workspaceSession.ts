@@ -100,6 +100,7 @@ export interface WorkspaceSession {
    * 放会话里而不是面板本地 state：设置入口在文件树，面板可能还没挂载/被切走。
    */
   problemsPath: string | null;
+  problemsPathScope?: import("./diagnosticScope").ProblemPathScope;
   /** 编译在跑。放这里是因为编译可能在切页期间结束，回调要写回仓库。 */
   compiling: boolean;
   /** 模块级进度（`build-progress`）；单模块编译没有这个事件，值为 null。 */

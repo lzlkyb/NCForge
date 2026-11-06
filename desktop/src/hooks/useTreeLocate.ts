@@ -11,7 +11,7 @@ const REVEAL_DELAY_MS = 120;
  * （不受开关影响——用户主动要求定位时说「你关了自动所以不给你定位」是耍赖）。
  */
 export function useTreeLocate(
-  reveal: (path: string) => Promise<boolean>,
+  reveal: (path: string, explicit?: boolean) => Promise<boolean>,
   activePath: string | null,
   enabled: boolean,
   clearFilter: () => void,
@@ -21,10 +21,10 @@ export function useTreeLocate(
    * 被筛掉的行定位过去等于「看不见的成功」，所以先清筛选。
    */
   const locate = useCallback(
-    async (path: string | null) => {
+    async (path: string | null, explicit = false) => {
       if (!path) return;
       clearFilter();
-      if (!(await reveal(path))) return;
+      if (!(await reveal(path, explicit))) return;
       requestAnimationFrame(() =>
         requestAnimationFrame(() =>
           document.getElementById(treeRowId(path))?.scrollIntoView({ block: "nearest" }),
@@ -41,7 +41,7 @@ export function useTreeLocate(
   }, [activePath, enabled, locate]);
 
   useEffect(() => {
-    const h = (e: Event) => void locate((e as CustomEvent<string>).detail);
+    const h = (e: Event) => void locate((e as CustomEvent<string>).detail, true);
     window.addEventListener("ncforge-reveal-in-tree", h);
     return () => window.removeEventListener("ncforge-reveal-in-tree", h);
   }, [locate]);

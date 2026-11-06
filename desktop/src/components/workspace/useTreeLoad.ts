@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createDirRefresher } from "../../lib/dirRefresh";
 import { baseName, encodingMarks, joinPath, listDir, type DirItem } from "../../lib/workspace";
 import { chainFor, chainOpen, collapseChain } from "../../lib/treeCompact";
@@ -39,7 +39,13 @@ export function useTreeLoad(
   // 只订阅树：整会话订阅下，每次 dirty 翻转 / 编译状态变化都会把整棵树重渲染一遍
   const tree = useWorkspaceSelector((s) => s.tree);
   const epoch = workspaceEpoch();
-  const { dirs, expanded, marks } = tree;
+  const { dirs, marks } = tree;
+  const [problemExpansion, setProblemExpansion] = useState<{ root: string; expanded: Set<string> } | null>(null);
+  const onlyProblems = problemExpansion?.root === root;
+  const expanded = onlyProblems ? problemExpansion.expanded : tree.expanded;
+  const setOnlyProblems = (enabled: boolean) => setProblemExpansion(enabled ? { root, expanded: tree.expanded } : null);
+  const filterMode = useRef(onlyProblems);
+  filterMode.current = onlyProblems;
   const fallbackRoots = useMemo(() => [root], [root]);
   const packageRoots = usePackageRoots(projectRoots ?? fallbackRoots, expanded, packageView);
   const { indexes: packageIndexes, ensure, invalidate } = usePackageIndexes(packageRoots, expanded, epoch);
@@ -191,19 +197,30 @@ export function useTreeLoad(
     }
   }, [hoist, expanded, dirs, load]);
 
-  const expand = (path: string) =>
-    setTree((t) => (t.expanded.has(path) ? t : { ...t, expanded: new Set(t.expanded).add(path) }));
-
-  /** 一次性改多层展开态（压缩链的展开 / 收起要动整条链）。 */
-  const setExpandedPaths = (paths: string[], open: boolean) =>
-    setTree((t) => {
-      const next = new Set(t.expanded);
-      for (const p of paths) {
-        if (open) next.add(p);
-        else next.delete(p);
+  const setExpandedPaths = useCallback((paths: string[], open: boolean, filtered = filterMode.current) => {
+    if (workspaceEpoch() !== epoch) return;
+    const update = (previous: Set<string>) => {
+      if (paths.every(path => previous.has(path) === open)) return previous;
+      const next = new Set(previous);
+      for (const path of paths) {
+        if (open) next.add(path);
+        else next.delete(path);
       }
-      return { ...t, expanded: next };
+      return next;
+    };
+    // The diagnostic view shares directory caches but keeps its own expansion state.
+    if (filtered) setProblemExpansion(previous => {
+      if (previous?.root !== root) return previous;
+      const next = update(previous.expanded);
+      return next === previous.expanded ? previous : { root, expanded: next };
     });
+    else setTree(t => {
+      const next = update(t.expanded);
+      return next === t.expanded ? t : { ...t, expanded: next };
+    });
+  }, [epoch, root]);
+
+  const expand = (path: string) => setExpandedPaths([path], true);
 
   /**
    * 展开 / 收起一行。压缩模式下要动整条链：只删链尾的话，上一层在 `expanded` 里还开着，
@@ -219,10 +236,7 @@ export function useTreeLoad(
   };
 
   /**
-   * 路径在树里的层级（根为 0）。只用来算缩进。
-   *
-   * NC 结构视图开着时，`bill/src/public` 与 `bill/resources` 同级，要少算一层——
-   * 新建 / 重命名那行输入框靠它对齐，算错就比别人多缩进一格。
+   * 用可见层级对齐新建和重命名行。NC 结构视图摊平的 `src` 不占缩进。
    */
   const depthOf = (path: string) => {
     if (!path || path === root) return 0;
@@ -245,10 +259,8 @@ export function useTreeLoad(
    * （比如刚跨工程打开），这时要先把那个工程的根展开。
    */
   const reveal = useCallback(
-    async (path: string): Promise<boolean> => {
+    async (path: string, explicit = false): Promise<boolean> => {
       if (!path || workspaceEpoch() !== epoch) return false;
-      // 根列表在回调内部算：写成外层变量会让依赖每次渲染都变（eslint 也会拦），
-      // 而这个表达式只依赖两个原始值，换工程才需要重算。
       const roots = projectRoots && projectRoots.length > 0 ? projectRoots : [root];
       // 根互相嵌套时取最长的那个：路径归属只有一位真答案
       const owner = roots
@@ -258,9 +270,9 @@ export function useTreeLoad(
       const parts = path.slice(owner.length).replace(/^[\\/]/, "").split(/[\\/]/).filter(Boolean);
       if (parts.length > REVEAL_MAX_DEPTH) return false;
       // 多工程树里工程根本身是一行，必须先展开它；单工程时 expanded 里本来就有它
-      setTree((t) =>
-        t.expanded.has(owner) ? t : { ...t, expanded: new Set(t.expanded).add(owner) },
-      );
+      const filtered = !explicit && filterMode.current;
+      if (explicit && filterMode.current) setProblemExpansion(null);
+      setExpandedPaths([owner], true, filtered);
       const source = sourceForPath(packageRoots, path);
       const index = source ? await ensure(source) : null;
       if (workspaceEpoch() !== epoch) return false;
@@ -276,13 +288,13 @@ export function useTreeLoad(
       if (getSession().tree.dirs[owner]?.status !== "ok") await load(owner);
       for (const cur of revealDirs) {
         if (workspaceEpoch() !== epoch) return false;
-        setTree((t) => (t.expanded.has(cur) ? t : { ...t, expanded: new Set(t.expanded).add(cur) }));
+        setExpandedPaths([cur], true, filtered);
         if (getSession().tree.dirs[cur]?.status !== "ok") await load(cur);
       }
       return workspaceEpoch() === epoch;
     },
-    [load, projectRoots, root, epoch, packageRoots, ensure],
+    [load, projectRoots, root, epoch, packageRoots, ensure, setExpandedPaths],
   );
 
-  return { dirs, expanded, marks, load, expand, toggle, toggleRow, depthOf, reveal, setExpandedPaths, packageRoots, packageIndexes, invalidatePackages: invalidate };
+  return { dirs, expanded, marks, onlyProblems, setOnlyProblems, load, expand, toggle, toggleRow, depthOf, reveal, setExpandedPaths, packageRoots, packageIndexes, invalidatePackages: invalidate };
 }

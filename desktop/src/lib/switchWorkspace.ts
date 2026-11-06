@@ -52,7 +52,7 @@ export async function applyWorkspace(
   resetSearchForm();
   // 三个「等用户决定」的挂起状态同样是旧工作区的：留着就是僵尸确认框
   // （关闭未保存文件 / 异地修改冲突 / 编码提示，对应的标签都已经没了）
-  setSession({ closingPath: null, conflictPath: null, encodingIssue: null, problemsPath: null });
+  setSession({ closingPath: null, conflictPath: null, encodingIssue: null, problemsPath: null, problemsPathScope: undefined });
   // 符号缓存按路径存，不认工作区：旧工程的符号在新工程里只会误导面包屑与结构面板
   resetSymbolCache();
   // 导航历史里全是旧工作区的路径，留着「后退」只会被路径守卫挡住报错

@@ -4,9 +4,9 @@ import type { ContextMenuItem } from "../components/workspace/ContextMenu";
 import { buildTreeMenu } from "../components/workspace/treeMenu";
 import { moduleOf } from "../lib/ncModule";
 import { dirName, type NewEntryKind } from "../lib/workspace";
-import { useCompileMarks } from "./useCompileMarks";
-import { markOf } from "../lib/compileMarks";
-import { setSession } from "../lib/workspaceSession";
+import type { ProblemMark } from "../lib/problemMarks";
+import { diagnosticPathKey } from "../lib/diagnosticScope";
+import { showProblems } from "../lib/showProblems";
 
 export interface TreeMenuTarget {
   path: string;
@@ -21,6 +21,7 @@ export interface TreeMenuTarget {
  */
 export function useTreeMenu({
   root,
+  marks,
   isEditable,
   onOpen,
   onCompileModule,
@@ -33,6 +34,7 @@ export function useTreeMenu({
   setSelected,
 }: {
   root: string;
+  marks: ReadonlyMap<string, ProblemMark>;
   isEditable: (path: string) => boolean;
   onOpen: (path: string) => void;
   /** 编译右键目标所属的模块（不依赖活动标签）；不传则不显示编译项。 */
@@ -48,8 +50,6 @@ export function useTreeMenu({
   const [menu, setMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(
     null,
   );
-  // 菜单项里的条数与树徽标同源（编译问题）；点击后问题面板按这个路径过滤
-  const marks = useCompileMarks();
 
   const copyPath = async (path: string) => {
     try {
@@ -78,12 +78,10 @@ export function useTreeMenu({
       onRefresh: (t) => void load(t.isDir ? t.path : dirName(t.path)),
       problemCount: (() => {
         if (m.isDir) return 0;
-        const mark = markOf(marks, m.path);
+        const mark = marks.get(diagnosticPathKey(m.path));
         return mark ? mark.errors + mark.warnings : 0;
       })(),
-      onShowProblems: (p) => {
-        setSession({ problemsPath: p, panelOpen: true, panelTab: "problems" });
-      },
+      onShowProblems: showProblems,
     });
 
   const openMenu = (e: MouseEvent, path: string, isDir: boolean) => {

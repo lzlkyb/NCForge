@@ -131,6 +131,7 @@ beforeEach(() => {
   setSession({
     compileResult: null,
     problemsPath: null,
+    problemsPathScope: undefined,
     tree: {
       root: ROOT,
       expanded: new Set([ROOT]),
@@ -1133,7 +1134,7 @@ describe("包资源管理器", () => {
 });
 
 describe("编译问题标记", () => {
-  it("文件、包、模块行各自显示计数，上级目录加总", async () => {
+  it("折叠包和模块只显示严重度，文件显示去重计数，徽标可按范围打开面板", async () => {
     setCompactPackages(false);
     const mod = `${ROOT}\\modules`;
     const pkg = `${mod}\\p`;
@@ -1173,18 +1174,32 @@ describe("编译问题标记", () => {
         },
       },
     });
+    await act(async () => setCodeDiags([
+      { path: (pkg + "\\A.java").replace(/\\/g, "/").toUpperCase(), line: 1, column: 9, severity: "error", message: "x" },
+    ]));
     await render();
     const badge = (name: string) =>
       rowByExact(name)?.querySelector(".wb-problem-badge") ?? null;
-    // 有错误时徽标只显示错误数，警告数进 title；模块 / 包行拿到的是整棵子树的合计
-    expect(badge("modules")?.textContent).toBe("1");
-    expect(badge("modules")?.getAttribute("title")).toContain("1 个编译错误，1 个编译警告");
-    expect(badge("p")?.textContent).toBe("1");
+    expect(badge("modules")?.textContent).toBe("");
+    expect(badge("modules")?.getAttribute("title")).toContain("1 个错误 · 1 个警告");
+    expect(badge("p")?.getAttribute("data-sev")).toBe("error");
+    expect(rowByExact("A.java")?.querySelectorAll(".wb-problem-badge")).toHaveLength(1);
+    expect(badge("A.java")?.getAttribute("title")).toContain("实时检查 1 条 · 最近编译 1 条");
     expect(badge("A.java")?.textContent).toBe("1");
     expect(badge("A.java")?.getAttribute("data-sev")).toBe("error");
     expect(badge("B.java")?.textContent).toBe("1");
     expect(badge("B.java")?.getAttribute("data-sev")).toBe("warning");
-    expect(badge("B.java")?.getAttribute("title")).toContain("1 个编译警告");
+    expect(badge("B.java")?.getAttribute("title")).toContain("1 个警告");
+    await click(rowByExact("p"));
+    expect(rowByExact("A.java")).toBeNull();
+    await click(badge("p"));
+    expect(getSession()).toMatchObject({ problemsPath: pkg, problemsPathScope: "branch", panelTab: "problems" });
+    expect(rowByExact("p")?.getAttribute("aria-expanded")).toBe("false");
+    mocks.invoke.mockResolvedValueOnce([{ name: "A.java", isDir: false, size: 1 }, { name: "B.java", isDir: false, size: 1 }]);
+    await click(rowByExact("p"));
+    await click(badge("A.java"));
+    expect(getSession()).toMatchObject({ problemsPath: pkg + "\\A.java", problemsPathScope: "file" });
+    expect(onOpen).not.toHaveBeenCalled();
   });
 
   it("右键文件可把问题面板过滤到该文件", async () => {
@@ -1229,7 +1244,7 @@ describe("编译问题标记", () => {
     expect(getSession().panelOpen).toBe(true);
   });
 
-  it("jdt.ls 代码检查在文件行用独立徽标，title 写明来源", async () => {
+  it("只看问题保留父级，退出后恢复展开；提示不产生树徽标", async () => {
     setCompactPackages(false);
     const mod = `${ROOT}\\modules`;
     const pkg = `${mod}\\p`;
@@ -1249,9 +1264,25 @@ describe("编译问题标记", () => {
         },
       },
     });
+    const expandBefore = new Set([ROOT, mod]);
+    setSession({ tree: { ...getSession().tree, expanded: expandBefore } });
     await render();
-    const badge = rowByExact("A.java")?.querySelector('.wb-problem-badge[data-sev="inspect"]');
+    const toggle = container.querySelector(".wb-tree-problem-tools button");
+    await click(toggle);
+    expect(toggle?.getAttribute("aria-pressed")).toBe("true");
+    expect(rowByExact("p")).toBeTruthy();
+    mocks.invoke.mockResolvedValueOnce([{ name: "A.java", isDir: false, size: 1 }]);
+    await click(rowByExact("p"));
+    const badge = rowByExact("A.java")?.querySelector('.wb-problem-badge[data-sev="warning"]');
     expect(badge?.textContent).toBe("1");
-    expect(badge?.getAttribute("title")).toContain("代码检查（jdt.ls）");
+    expect(badge?.getAttribute("title")).toContain("实时检查 1 条");
+    expect(getSession().tree.expanded).toEqual(expandBefore);
+    await act(async () => setCodeDiags([
+      { path: pkg + "\\A.java", line: 1, column: 1, severity: "info", message: "建议" },
+    ]));
+    expect(container.textContent).toContain("当前没有已报告的错误或警告");
+    expect(container.querySelector(".wb-problem-badge")).toBeNull();
+    await click(toggle);
+    expect(rowByExact("p")?.getAttribute("aria-expanded")).toBe("false");
   });
 });

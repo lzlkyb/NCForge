@@ -17,3 +17,8 @@ export function mergeCompileSnapshots(previous: CompileResult, next: CompileResu
   if (!previous.sourceSnapshots && !next.sourceSnapshots) return {};
   return { sourceSnapshots: { ...Object.fromEntries(Object.entries(previous.sourceSnapshots ?? {}).filter(([path]) => !touched(path))), ...next.sourceSnapshots } };
 }
+
+export function compileSourceChanged(tab: { path: string; dirty?: boolean; eolChanged?: boolean; mtimeMs?: number }, result?: CompileResult | null): boolean {
+  const snapshot = result?.sourceSnapshots?.[diagnosticPathKey(tab.path)];
+  return !!(tab.dirty || tab.eolChanged || snapshot && snapshot.mtimeMs !== tab.mtimeMs);
+}

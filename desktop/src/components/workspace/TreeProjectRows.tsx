@@ -4,9 +4,7 @@ import { TreeRows, type TreeRowsCtx } from "./TreeRows";
 import { originLabel, type LinkedProject } from "../../lib/linkedProjects";
 import { baseName } from "../../lib/workspace";
 import { treeRowId as rowId } from "../../lib/treeNav";
-import { inspectMarkOf, useInspectMarks } from "../../lib/inspectMarks";
-import { useCompileMarks } from "../../hooks/useCompileMarks";
-import { markOf } from "../../lib/compileMarks";
+import { diagnosticPathKey } from "../../lib/diagnosticScope";
 
 const samePath = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -32,13 +30,11 @@ export function TreeProjectRows({
   root: string;
   ctx: TreeRowsCtx;
 }) {
-  const inspectMarks = useInspectMarks();
   const rows = projects?.flatMap(p => p.root ? [{ path: p.root, name: p.name, badge: badgeOf(p, root) }] : []) ?? [];
   if (!rows.length) rows.push({ path: root, name: baseName(root) || root, badge: "当前" });
-  const marks = useCompileMarks();
   return (
     <>
-      {rows.map(({ path, name, badge }) => (
+      {rows.filter(({ path, name }) => ctx.filter(name, path, true, "project")).map(({ path, name, badge }) => (
         <Fragment key={path}>
           <TreeProjectRow
             name={name}
@@ -49,8 +45,7 @@ export function TreeProjectRows({
             selected={ctx.selectedPath === path}
             current={samePath(path, root)}
             badge={badge}
-            problem={markOf(marks, path)}
-            inspect={inspectMarkOf(inspectMarks, path)}
+            problem={ctx.problemPaths.get(diagnosticPathKey(path))}
             onToggle={ctx.onProjectToggle}
             onContextMenu={ctx.onContextMenu}
           />

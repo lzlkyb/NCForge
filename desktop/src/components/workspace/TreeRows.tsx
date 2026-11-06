@@ -5,9 +5,8 @@
 //
 // 递归渲染：目录展开时直接渲染它的下一层，不额外建虚拟列表（NC 工程一个目录最多几百项）。
 import { useJavaTreeKinds } from "../../hooks/useJavaTreeKinds";
-import { useCompileMarks } from "../../hooks/useCompileMarks";
-import { markOf } from "../../lib/compileMarks";
-import { inspectMarkOf, useInspectMarks } from "../../lib/inspectMarks";
+import type { ProblemMark } from "../../lib/problemMarks";
+import { diagnosticPathKey } from "../../lib/diagnosticScope";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { javaKindOfSymbol } from "../../lib/treeFileKind";
 import { hasJavaMembers, type TreeMembers, type JavaTreeMember } from "../../lib/javaTreeMembers";
@@ -32,7 +31,9 @@ export interface TreeRowsCtx {
   /** 文件 → 书签条数，键已归一（`bookmarkPathKey`）。 */
   bookmarkCounts: Map<string, number>;
   /** 名字筛选（speed search）；空时恒真。 */
-  filter: (name: string) => boolean;
+  filter: (name: string, path: string, isDir: boolean, kind?: string) => boolean;
+  problemPaths: ReadonlyMap<string, ProblemMark>;
+  problemPackages: ReadonlyMap<string, ProblemMark>;
   /** 压缩中间包：单链目录合成一行；关掉时每层各占一行。 */
   compact: boolean;
   packageRoots?: PackageRoots;
@@ -91,10 +92,6 @@ function EditRow({ ctx }: { ctx: TreeRowsCtx }) {
 export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx: TreeRowsCtx }) {
   const state = ctx.dirs[dir];
   const javaKinds = useJavaTreeKinds(dir, state);
-  // 编译问题按目录聚合：模块/包/源码根行先看到「这里有错」，展开后文件行再给具体数
-  const marks = useCompileMarks();
-  // jdt.ls 代码检查单独一个徽标：只覆盖打开的文件，不能和编译数相加
-  const inspectMarks = useInspectMarks();
   const rows: JSX.Element[] = [];
   const notePad = 6 + depth * 14 + 20;
   const creating = ctx.editing && ctx.editing.mode !== "rename" && ctx.editing.parent === dir;
@@ -119,7 +116,7 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
   }
 
   const kids = packageChildren(dir, state.items, { hoist: ctx.hoist(dir), dirs: ctx.dirs }, ctx.packageRoots, ctx.packageIndexes)
-    .filter(({ item, label }) => ctx.filter(label ?? item.name));
+    .filter(({ dir: from, item, label, kind }) => ctx.filter(label ?? item.name, joinPath(from, item.name), item.isDir, kind));
   const source = sourceForPath(ctx.packageRoots, dir);
   if (source === dir && ctx.packageIndexes?.get(dir) === undefined) {
     rows.push(<TreeRowNote key={`${dir}#index`} padLeft={notePad}>正在整理包列表…</TreeRowNote>);
@@ -159,8 +156,7 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
           bc={bc}
           sourceRoot={kind === "source"}
           packageDir={kind === "package"}
-          problem={markOf(marks, chain.tail)}
-          inspect={inspectMarkOf(inspectMarks, chain.tail)}
+          problem={(kind === "package" ? ctx.problemPackages : ctx.problemPaths).get(diagnosticPathKey(chain.tail))}
           onToggle={ctx.onToggle}
           onContextMenu={ctx.onContextMenu}
         />,
@@ -182,8 +178,7 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
           selected={ctx.selectedPath === full}
           mark={ctx.marks[full]}
           javaKind={javaKind}
-          problem={markOf(marks, full)}
-          inspect={inspectMarkOf(inspectMarks, full)}
+          problem={ctx.problemPaths.get(diagnosticPathKey(full))}
           memberExpanded={canExpand ? !!members : undefined}
           onToggleMembers={canExpand ? ctx.onToggleMembers : undefined}
           bookmarks={ctx.bookmarkCounts.get(pathKey(full)) ?? 0}

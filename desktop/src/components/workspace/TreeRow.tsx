@@ -4,11 +4,10 @@ import { treeFileKind, type JavaTreeKind } from "../../lib/treeFileKind";
 import { pathKey } from "../../lib/treeSvn";
 import { WorkspaceGlyph } from "./WorkspaceGlyph";
 import { TreeTypeMarker } from "./TreeTypeMarker";
-import { ProblemBadge } from "./ProblemBadge";
+import { ProblemBadge, problemDescription } from "./ProblemBadge";
 import { WorkspaceFileName } from "./WorkspaceFileName";
 import type { EncodingMark } from "../../lib/workspace";
-import type { ProblemMark } from "../../lib/compileMarks";
-import type { InspectMark } from "../../lib/inspectMarks";
+import type { ProblemMark } from "../../lib/problemMarks";
 
 /**
  * 文件树的一行。目录行与文件行分开：两者的选中/激活语义不同
@@ -35,7 +34,6 @@ export const TreeProjectRow = memo(function TreeProjectRow({
   current,
   badge,
   problem,
-  inspect,
   onToggle,
   onContextMenu,
 }: {
@@ -50,14 +48,11 @@ export const TreeProjectRow = memo(function TreeProjectRow({
   badge: string;
   /** 当前工程根下（含更深层）的编译问题合计。 */
   problem?: ProblemMark;
-  /** jdt.ls 代码检查（只覆盖打开的文件）；与编译问题分开计数。 */
-  inspect?: InspectMark;
   onToggle: (path: string) => void;
   onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) => void;
 }) {
   return (
-    <button
-      type="button"
+    <div
       className="wb-row wb-row-project"
       data-kind="project"
       id={id}
@@ -66,6 +61,8 @@ export const TreeProjectRow = memo(function TreeProjectRow({
       aria-level={level}
       aria-selected={selected}
       aria-expanded={open}
+      aria-label={name}
+      aria-description={problemDescription(problem) || undefined}
       data-current={current || undefined}
       data-selected={selected || undefined}
       onClick={() => onToggle(path)}
@@ -82,8 +79,8 @@ export const TreeProjectRow = memo(function TreeProjectRow({
       <span className="wb-project-badge" data-current={current || undefined}>
         {badge}
       </span>
-      <ProblemBadge mark={problem} inspect={inspect} />
-    </button>
+      <ProblemBadge mark={problem} path={path} name={name} scope="branch" tabStop={selected} />
+    </div>
   );
 });
 
@@ -100,7 +97,6 @@ export const TreeDirRow = memo(function TreeDirRow({
   sourceRoot,
   packageDir,
   problem,
-  inspect,
   onToggle,
   onContextMenu,
 }: {
@@ -120,8 +116,6 @@ export const TreeDirRow = memo(function TreeDirRow({
   packageDir?: boolean;
   /** 这个目录下（含更深层）的编译问题合计。 */
   problem?: ProblemMark;
-  /** jdt.ls 代码检查（只覆盖打开的文件）；与编译问题分开计数。 */
-  inspect?: InspectMark;
   onToggle: (path: string, parent: string) => void;
   onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) => void;
 }) {
@@ -130,8 +124,7 @@ export const TreeDirRow = memo(function TreeDirRow({
   const kind = sourceRoot ? "source" : packageDir ? "package" : "folder";
   const split = sourceRoot ? name.indexOf("/") : packageDir ? name.lastIndexOf(".") + 1 : 0;
   return (
-    <button
-      type="button"
+    <div
       className="wb-row"
       data-kind={kind}
       id={id}
@@ -144,8 +137,8 @@ export const TreeDirRow = memo(function TreeDirRow({
       onClick={() => onToggle(path, parent)}
       onContextMenu={(e) => onContextMenu(e, path, true)}
       aria-expanded={open}
-      aria-label={sourceRoot || packageDir ? name : undefined}
-      aria-description={testRoot ? "测试源码根" : undefined}
+      aria-label={name}
+      aria-description={[testRoot && "测试源码根", problemDescription(problem)].filter(Boolean).join(" · ") || undefined}
       title={sourceRoot ? path : name}
     >
       <WorkspaceGlyph name={open ? "down" : "right"} size={14} className="wb-row-icon wb-row-disclosure" />
@@ -154,7 +147,6 @@ export const TreeDirRow = memo(function TreeDirRow({
         {split > 0 ? <><span className="wb-row-prefix">{name.slice(0, split)}</span><span className="wb-row-tail">{name.slice(split)}</span></> : name}
       </span>
       {testRoot && <span className="wb-tree-test-badge" title="测试源码根" aria-hidden="true">T</span>}
-      <ProblemBadge mark={problem} inspect={inspect} />
       {bc && (
         // 两个字母足够区分：满屏 60 个模块里，「哪些是 manifest 登记的业务组件」是
         // 唯一需要一眼看出的信息，完整说明放 title。
@@ -166,7 +158,8 @@ export const TreeDirRow = memo(function TreeDirRow({
         </span>
       )}
       {!!count && <span className="wb-svn-count" title={`${count} 个文件有 SVN 变更`}>{count}</span>}
-    </button>
+      <ProblemBadge mark={problem} path={path} name={name} scope={packageDir ? "package" : "branch"} tabStop={selected} />
+    </div>
   );
 });
 
@@ -180,7 +173,6 @@ export const TreeFileRow = memo(function TreeFileRow({
   mark,
   javaKind,
   problem,
-  inspect,
   memberExpanded,
   onToggleMembers,
   bookmarks,
@@ -199,8 +191,6 @@ export const TreeFileRow = memo(function TreeFileRow({
   javaKind?: JavaTreeKind;
   /** 这个文件自己的编译问题。 */
   problem?: ProblemMark;
-  /** jdt.ls 代码检查（只覆盖打开的文件）；与编译问题分开计数。 */
-  inspect?: InspectMark;
   memberExpanded?: boolean;
   onToggleMembers?: (path: string) => void;
   /** 这个文件里的书签条数（0 = 不打点）。 */
@@ -214,8 +204,7 @@ export const TreeFileRow = memo(function TreeFileRow({
   const svn = useContext(TreeSvnContext).files.get(pathKey(path));
   const kind = treeFileKind(name, javaKind);
   return (
-    <button
-      type="button"
+    <div
       className="wb-row"
       data-file
       data-kind={kind.id}
@@ -227,7 +216,7 @@ export const TreeFileRow = memo(function TreeFileRow({
       aria-current={active || undefined}
       aria-expanded={memberExpanded}
       aria-label={name}
-      aria-description={kind.label}
+      aria-description={[kind.label, problemDescription(problem)].filter(Boolean).join(" · ")}
       style={{ "--wb-tree-pad": `${padLeft}px` } as CSSProperties}
       data-active={active || undefined}
       data-selected={selected || undefined}
@@ -242,7 +231,6 @@ export const TreeFileRow = memo(function TreeFileRow({
       </span>}
       <TreeTypeMarker kind={kind} />
       <WorkspaceFileName name={name} className="wb-row-name" />
-      <ProblemBadge mark={problem} inspect={inspect} />
       {svn && <span className="wb-svn-mark" data-st={svn} title={`SVN：${({ M: "已修改", A: "新增", D: "已删除", "?": "未纳管", C: "冲突", "!": "缺失", R: "替换", G: "已合并", "~": "类型冲突" })[svn]}`}>{svn}</span>}
       {bookmarks > 0 && (
         <span
@@ -257,7 +245,8 @@ export const TreeFileRow = memo(function TreeFileRow({
           U8
         </span>
       )}
-    </button>
+      <ProblemBadge mark={problem} path={path} name={name} tabStop={selected} />
+    </div>
   );
 });
 

@@ -1,4 +1,6 @@
 import { toast } from "../components/ui/toast";
+import { getSession } from "../lib/workspaceSession";
+import { problemsAtPath } from "../lib/diagnosticScope";
 import { getCursor } from "../lib/cursorStore";
 import { getCodeDiags } from "../lib/diagStore";
 import { mergeProblems, nextProblem } from "../lib/problemList";
@@ -13,19 +15,23 @@ import type { Problem } from "../lib/compile";
 export function useProblemJump(
   compileProblems: Problem[] | undefined,
   activePath: string | null,
-  openAt: (path: string, line: number, push?: boolean) => Promise<void>,
+  openAt: (path: string, line: number, push?: boolean, column?: number) => Promise<void>,
 ) {
   return (dir: 1 | -1) => {
-    const list = mergeProblems(compileProblems, getCodeDiags());
+    const all = mergeProblems(compileProblems, getCodeDiags());
+    const { panelOpen, panelTab, problemsPath, problemsPathScope = "file" } = getSession();
+    const list = panelOpen && panelTab === "problems" && problemsPath
+      ? problemsAtPath(all, problemsPath, problemsPathScope) : all;
     const p = nextProblem(
       list,
-      activePath ? { path: activePath, line: getCursor().line } : null,
+      activePath ? { path: activePath, ...getCursor() } : null,
       dir,
     );
     if (!p) {
       toast("当前没有可跳转的问题", "info");
       return;
     }
-    void openAt(p.path, p.line);
+    if (p.column !== undefined) void openAt(p.path, p.line, true, p.column);
+    else void openAt(p.path, p.line);
   };
 }

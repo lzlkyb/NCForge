@@ -42,6 +42,15 @@ export function TreeFilterBar({
   );
 }
 
+export function TreeProblemToggle({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+  return <div className="wb-tree-problem-tools">
+    <button type="button" className="wb-status-btn" aria-pressed={active}
+      title="只显示有错误或警告的文件及所在目录" onClick={onToggle}>
+      <Icon name="alertTriangle" size={13} />只看问题
+    </button>
+  </div>;
+}
+
 /** 删除确认：正文由 `deleteDescription` 生成（文件数 / 打开中的标签 / 未保存 / 引用数）。 */
 export function TreeDeleteConfirm({
   pending,

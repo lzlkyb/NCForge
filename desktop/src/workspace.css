@@ -211,34 +211,45 @@ html[data-ui-density="comfortable"] .wb-tree-list .wb-row { height:30px; }
   background: hsl(var(--primary) / 0.14);
   color: hsl(var(--primary));
 }
-/* 编译问题徽标：文件 / 包 / 模块行与标签共用；有错误时红色，只有警告时黄色 */
+/* Keep the diagnostic action separate from file type and SVN metadata. */
+.wb-tree-problem-tools {
+  display: flex;
+  padding: 2px 6px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.wb-tree-problem-tools .wb-status-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  font-size: 12px;
+}
+.wb-tree-problem-tools .wb-status-btn[aria-pressed="true"] {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
 .wb-problem-badge {
-  flex-shrink: 0;
+  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 15px;
-  height: 14px;
-  margin-left: 4px;
+  gap: 2px;
+  min-width: 18px;
+  height: 20px;
   padding: 0 3px;
-  border-radius: 3px;
-  background: hsl(var(--destructive) / 0.14);
+  border-radius: 4px;
   color: hsl(var(--destructive-ink));
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 650;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
-.wb-problem-badge[data-sev="warning"] {
-  background: hsl(var(--warning) / 0.18);
-  color: hsl(var(--warning-ink));
-}
-/* 代码检查（jdt.ls）：中性色，明确它和编译错误不是同一来源、也不是同一个数 */
-.wb-problem-badge[data-sev="inspect"] {
-  background: hsl(var(--muted));
-  color: hsl(var(--muted-foreground));
-  font-weight: 600;
-}
+.wb-problem-badge[data-sev="warning"] { color: hsl(var(--warning-ink)); }
+.wb-problem-badge[data-stale] { text-decoration: underline dashed; text-underline-offset: 3px; }
+.wb-problem-badge[data-stale] svg { stroke-dasharray: 2 1; }
+.wb-problem-badge:hover { background: hsl(var(--muted)); }
+.wb-problem-badge:focus-visible { outline: 1px solid hsl(var(--ring)); outline-offset: -1px; }
+.wb-row:has(> .wb-problem-badge) > .wb-row-name { flex: 1 1 auto; }
 /* manifest.xml 登记的业务组件（BusinessComponet）：紧贴目录名，靠右的 SVN 计数不受影响 */
 .wb-bc-badge {
   flex-shrink: 0;
@@ -624,7 +635,7 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-pfilter:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 .wb-pfilter[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
 .wb-pfilter-n { font-size: 10.5px; color: hsl(var(--muted-foreground)); }
-/* 问题行来源：ecj 编译结果 / jdt.ls 代码检查，数字分开数，不混成一条 */
+/* 问题行保留诊断来源。 */
 .wb-prow-src {
   flex-shrink: 0;
   padding: 0 4px;
