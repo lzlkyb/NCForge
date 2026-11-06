@@ -1,0 +1,11 @@
+{
+  "gate": "orphans",
+  "recordedAt": "2026-11-06T09:56:20.5904607+08:00",
+  "command": "node node_modules/knip/bin/knip.js --include files,dependencies --no-progress",
+  "startFreeKiB": 4284364,
+  "minimumSampledFreeKiB": 3827072,
+  "endFreeKiB": 4222720,
+  "elapsedSeconds": 12.15,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

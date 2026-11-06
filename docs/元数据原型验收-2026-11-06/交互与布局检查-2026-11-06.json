@@ -1,0 +1,188 @@
+{
+  "browser": "existing in-app browser; one tab",
+  "layout": [
+    {
+      "name": "宽屏-浅色",
+      "canvasVisible": true,
+      "editHeight": 30,
+      "fieldHeight": 193,
+      "height": 900,
+      "inspectorVisible": true,
+      "overflow": false,
+      "resourceVisible": true,
+      "width": 1600
+    },
+    {
+      "name": "宽屏-深色",
+      "canvasVisible": true,
+      "editHeight": 30,
+      "fieldHeight": 193,
+      "height": 900,
+      "inspectorVisible": true,
+      "overflow": false,
+      "resourceVisible": true,
+      "width": 1600
+    },
+    {
+      "name": "标准窗口",
+      "canvasVisible": true,
+      "editHeight": 0,
+      "fieldHeight": 193,
+      "height": 900,
+      "inspectorVisible": false,
+      "overflow": false,
+      "resourceVisible": true,
+      "width": 1280
+    },
+    {
+      "name": "中等窗口",
+      "canvasVisible": true,
+      "editHeight": 0,
+      "fieldHeight": 193,
+      "height": 768,
+      "inspectorVisible": false,
+      "overflow": false,
+      "resourceVisible": false,
+      "width": 1024
+    },
+    {
+      "name": "低高度窗口",
+      "canvasVisible": false,
+      "editHeight": 0,
+      "fieldHeight": 230,
+      "height": 540,
+      "inspectorVisible": false,
+      "overflow": false,
+      "resourceVisible": false,
+      "width": 1024
+    },
+    {
+      "name": "缩放等效125",
+      "canvasVisible": false,
+      "editHeight": 0,
+      "fieldHeight": 304.3999938964844,
+      "height": 614,
+      "inspectorVisible": false,
+      "overflow": false,
+      "resourceVisible": false,
+      "width": 819
+    },
+    {
+      "name": "缩放等效150",
+      "canvasVisible": false,
+      "editHeight": 0,
+      "fieldHeight": 202,
+      "height": 512,
+      "inspectorVisible": false,
+      "overflow": false,
+      "resourceVisible": false,
+      "width": 683
+    },
+    {
+      "name": "窄窗口-浅色",
+      "canvasVisible": false,
+      "editHeight": 0,
+      "fieldHeight": 590,
+      "height": 900,
+      "inspectorVisible": false,
+      "overflow": false,
+      "resourceVisible": false,
+      "width": 560
+    },
+    {
+      "name": "窄窗口-深色",
+      "canvasVisible": false,
+      "editHeight": 0,
+      "fieldHeight": 590,
+      "height": 900,
+      "inspectorVisible": false,
+      "overflow": false,
+      "resourceVisible": false,
+      "width": 560
+    }
+  ],
+  "interactions": [
+    "图表检查器选中一致",
+    "检查器编辑并应用草稿",
+    "预览差异后模拟保存",
+    "接口映射定位字段",
+    "键盘移动节点且不产生文件修改",
+    "窄窗口资源与属性抽屉",
+    "抽屉键盘焦点循环和返回",
+    "窄窗口新建字段与差异弹窗",
+    "撤销新建字段"
+  ],
+  "contrast": [
+    {
+      "theme": "light",
+      "pairs": [
+        {
+          "background": "#fff",
+          "foreground": "#29313a",
+          "label": "正文",
+          "ratio": 13.17
+        },
+        {
+          "background": "#eef1f2",
+          "foreground": "#5f6b76",
+          "label": "次要文字",
+          "ratio": 4.8
+        },
+        {
+          "background": "#e6f1ee",
+          "foreground": "#205d57",
+          "label": "选中项",
+          "ratio": 6.58
+        },
+        {
+          "background": "#fff3df",
+          "foreground": "#92500c",
+          "label": "警告提示",
+          "ratio": 5.67
+        },
+        {
+          "background": "#24766e",
+          "foreground": "#fff",
+          "label": "主按钮",
+          "ratio": 5.4
+        }
+      ]
+    },
+    {
+      "theme": "dark",
+      "pairs": [
+        {
+          "background": "#22282e",
+          "foreground": "#e3e7eb",
+          "label": "正文",
+          "ratio": 11.97
+        },
+        {
+          "background": "#1b2126",
+          "foreground": "#adb9c2",
+          "label": "次要文字",
+          "ratio": 8.12
+        },
+        {
+          "background": "#293e3a",
+          "foreground": "#a4dbd0",
+          "label": "选中项",
+          "ratio": 7.39
+        },
+        {
+          "background": "#3b3022",
+          "foreground": "#edbd76",
+          "label": "警告提示",
+          "ratio": 7.44
+        },
+        {
+          "background": "#78bfb4",
+          "foreground": "#142e2a",
+          "label": "主按钮",
+          "ratio": 6.82
+        }
+      ]
+    }
+  ],
+  "consoleErrors": []
+}

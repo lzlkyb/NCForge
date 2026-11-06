@@ -3,7 +3,9 @@ import type { BmfDetail, BmfEntity } from "../../lib/bmf";
 export const KIND_SHORT: Record<string, string> = {
   AggregationRelation: "聚合",
   Reference: "引用",
-  busiitfconnection: "业务接口",
+  relation: "参照关联",
+  busiitfconnection: "实现接口",
+  ExtendConnection: "继承",
 };
 
 export const kindLabel = (kind: string) => KIND_SHORT[kind] ?? kind;

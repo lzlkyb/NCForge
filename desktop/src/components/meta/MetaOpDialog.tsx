@@ -3,6 +3,7 @@ import { bmfEditPreview, bmfEditSave, type BmfEditOp } from "../../lib/bmf";
 import { toast } from "../ui/toast";
 import { Button } from "../ui/button";
 import { Dialog, DialogHeader, DialogTitle } from "../ui/dialog";
+import type { MetaStage } from "../../lib/metaDraft";
 
 /**
  * 元数据编辑弹框的统一外壳：**先预览 diff、再保存**。
@@ -21,6 +22,9 @@ export function MetaOpDialog({
   onSaved,
   onReload,
   children,
+  inline = false,
+  onStage,
+  draftLabel,
 }: {
   title: ReactNode;
   ariaLabel: string;
@@ -33,6 +37,10 @@ export function MetaOpDialog({
   /** SHA 冲突时重新加载组件（关闭弹框并刷新详情）。 */
   onReload?: () => void;
   children: ReactNode;
+  /** 同一条预览/SHA 写回链，也可停靠在属性检查器内。 */
+  inline?: boolean;
+  onStage?: MetaStage;
+  draftLabel?: string;
 }) {
   const [diff, setDiff] = useState<string | null>(null);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
@@ -40,11 +48,11 @@ export function MetaOpDialog({
   const [err, setErr] = useState<{ msg: string; conflict: boolean } | null>(null);
   const previewSeq = useRef(0);
 
-  const currentKey = JSON.stringify(ops);
+  const currentKey = JSON.stringify({ path, sha, ops });
   const previewFresh = diff != null && previewKey === currentKey;
 
   const preview = async () => {
-    if (!valid) return;
+    if (!valid || busy) return;
     const seq = ++previewSeq.current;
     setBusy(true);
     setErr(null);
@@ -52,7 +60,7 @@ export function MetaOpDialog({
       const text = ops.length === 0 ? "没有变化。" : await bmfEditPreview(path, ops);
       if (seq !== previewSeq.current) return;
       setDiff(text);
-      setPreviewKey(JSON.stringify(ops));
+      setPreviewKey(currentKey);
     } catch (e) {
       if (seq === previewSeq.current) setErr({ msg: String(e), conflict: false });
     } finally {
@@ -61,6 +69,7 @@ export function MetaOpDialog({
   };
 
   const save = async () => {
+    if (busy) return;
     if (!valid) {
       toast("请先修正输入", "info");
       return;
@@ -87,13 +96,29 @@ export function MetaOpDialog({
     }
   };
 
-  return (
-    <Dialog open onClose={onClose} ariaLabel={ariaLabel} zIndex={1200}>
-      <DialogHeader>
-        <DialogTitle>{title}</DialogTitle>
-      </DialogHeader>
+  const stage = async () => {
+    if (!onStage || !valid || busy) return;
+    setBusy(true); setErr(null);
+    try { if (await onStage(draftLabel ?? ariaLabel, ops)) onSaved(); }
+    catch (error) { setErr({ msg: String(error), conflict: String(error).includes("外部修改") }); }
+    finally { setBusy(false); }
+  };
 
-      {children}
+  const body = (
+    <div className={inline ? "meta-inline-edit" : undefined} onKeyDown={(e) => {
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+      // 抽屉里的 Esc 只收起面板并保留输入；停靠编辑的 Esc 与「取消」一致。
+      if (inline && !busy && e.key === "Escape" && !e.currentTarget.closest('[aria-modal="true"]')) {
+        e.preventDefault(); e.stopPropagation(); onClose(); return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        e.stopPropagation();
+        void (onStage ? stage() : previewFresh ? save() : preview());
+      }
+    }}>
+      {inline ? <h3>{title}</h3> : <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>}
+      <fieldset disabled={busy} className="meta-edit-fields">{children}</fieldset>
 
       {err && (
         <div className="meta-error-box meta-dialog-error">
@@ -108,22 +133,26 @@ export function MetaOpDialog({
       )}
 
       {diff != null && (
-        <pre className="meta-diff" aria-label="修改预览">
+        <pre className={`meta-diff ${previewFresh ? "" : "is-stale"}`} aria-label="修改预览">
           {diff || "（无差异）"}
         </pre>
       )}
+      {diff != null && !previewFresh && <p className="meta-note" role="status">输入已改变，请重新预览。</p>}
 
       <div className="mt-4 flex items-center justify-end gap-2">
         <Button variant="ghost" onClick={onClose} disabled={busy}>
           取消
         </Button>
-        <Button variant="outline" onClick={() => void preview()} disabled={busy || !valid}>
+        {!onStage && <Button variant="outline" onClick={() => void preview()} disabled={busy || !valid}>
           预览 diff
-        </Button>
-        <Button onClick={() => void save()} disabled={busy || !valid || !previewFresh}>
-          保存
+        </Button>}
+        <Button onClick={() => void (onStage ? stage() : save())} disabled={busy || !valid || (!onStage && !previewFresh)}>
+          {onStage ? "加入草稿" : "保存"}
         </Button>
       </div>
-    </Dialog>
+    </div>
+  );
+  return inline ? body : (
+    <Dialog open onClose={() => { if (!busy) onClose(); }} ariaLabel={ariaLabel} zIndex={1200}>{body}</Dialog>
   );
 }

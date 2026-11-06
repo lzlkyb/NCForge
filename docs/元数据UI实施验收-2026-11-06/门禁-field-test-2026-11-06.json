@@ -1,0 +1,11 @@
+{
+  "gate": "field-test",
+  "recordedAt": "2026-11-06T09:46:47.3427223+08:00",
+  "command": "node node_modules/vitest/vitest.mjs run src/components/meta/MetaEditor.test.tsx --maxWorkers=1",
+  "startFreeKiB": 3868720,
+  "minimumSampledFreeKiB": 3640416,
+  "endFreeKiB": 3819416,
+  "elapsedSeconds": 3.78,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

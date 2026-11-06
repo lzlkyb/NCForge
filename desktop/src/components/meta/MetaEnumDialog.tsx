@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { BmfEditOp, BmfEnum } from "../../lib/bmf";
+import type { MetaStage } from "../../lib/metaDraft";
 import { Icon } from "../ui/icon";
 import { Input } from "../ui/input";
 import { MetaOpDialog } from "./MetaOpDialog";
@@ -7,8 +8,7 @@ import { MetaOpDialog } from "./MetaOpDialog";
 const ENUM_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 /**
- * 枚举编辑 / 新增。新增只建枚举壳（`<enumitemlist/>`），枚举项保存后再加：
- * 后端新增项要按 id 找已落地的节点，同批插入无法引用还没写出的容器。
+ * 枚举与枚举项同一批预检，新增容器可以被后续操作引用。
  */
 export function MetaEnumDialog({
   path,
@@ -17,6 +17,7 @@ export function MetaEnumDialog({
   onClose,
   onSaved,
   onReload,
+  onStage,
 }: {
   path: string;
   sha: string;
@@ -25,15 +26,17 @@ export function MetaEnumDialog({
   onClose: () => void;
   onSaved: () => void;
   onReload?: () => void;
+  onStage?: MetaStage;
 }) {
   const adding = en === null;
+  const [newId] = useState(() => en?.id ?? crypto.randomUUID());
   const [form, setForm] = useState(() => ({
     name: en?.name ?? "",
     displayName: en?.displayName ?? "",
     typeName: en?.typeName || "String",
     dataType: en?.dataType ?? "",
   }));
-  const [pending, setPending] = useState<{ value: string; display: string }[]>([]);
+  const [pending, setPending] = useState<{ id: string; value: string; display: string }[]>([]);
   const [removed, setRemoved] = useState<string[]>([]);
   const [draft, setDraft] = useState({ value: "", display: "" });
   const patch = (p: Partial<typeof form>) => setForm((f) => ({ ...f, ...p }));
@@ -42,27 +45,31 @@ export function MetaEnumDialog({
   const typeOk = form.typeName.trim() !== "";
   const draftOk = draft.value.trim() !== "" && draft.display.trim() !== "";
   const kept = (en?.items ?? []).filter((it) => !removed.includes(it.id));
-  const values = [...kept.map((it) => it.value), ...pending.map((p) => p.value.trim())];
+  const values = [...kept.map((it) => it.value.trim()), ...pending.map((p) => p.value.trim())];
   const duplicate = values.length !== new Set(values).size;
-  const valid = nameOk && typeOk && !duplicate;
+  const unfinished = !!draft.value.trim() || !!draft.display.trim();
+  const valid = nameOk && typeOk && !duplicate && !unfinished;
 
   const addDraft = () => {
     if (!draftOk) return;
-    setPending((list) => [...list, { value: draft.value.trim(), display: draft.display.trim() }]);
+    setPending((list) => [...list, { id: crypto.randomUUID(), value: draft.value.trim(), display: draft.display.trim() }]);
     setDraft({ value: "", display: "" });
   };
 
   const ops = (): BmfEditOp[] => {
     if (adding) {
-      return [
+      const out: BmfEditOp[] = [
         {
           op: "addEnum",
+          id: newId,
           name: form.name.trim(),
           displayName: form.displayName.trim(),
           typeName: form.typeName.trim() || "String",
           dataType: form.dataType.trim(),
         },
       ];
+      for (const p of pending) out.push({ op: "addEnumItem", id: p.id, enumId: newId, value: p.value, display: p.display });
+      return out;
     }
     const e = en!;
     const out: BmfEditOp[] = [];
@@ -73,7 +80,7 @@ export function MetaEnumDialog({
     if (form.dataType.trim() !== e.dataType) set("dataType", form.dataType.trim());
     for (const id of removed) out.push({ op: "deleteNode", id });
     for (const p of pending) {
-      out.push({ op: "addEnumItem", enumId: e.id, value: p.value, display: p.display });
+      out.push({ op: "addEnumItem", id: p.id, enumId: e.id, value: p.value, display: p.display });
     }
     return out;
   };
@@ -85,7 +92,7 @@ export function MetaEnumDialog({
         <>
           {adding ? "新增枚举" : `编辑枚举 ${en?.name}`}
           <span className="ml-2 text-[11px] font-normal text-muted-foreground">
-            {adding ? "保存后再加枚举项" : "改名不会同步字段里的引用"}
+            {adding ? "枚举与枚举项同批加入草稿" : "改名不会同步字段里的引用"}
           </span>
         </>
       }
@@ -96,6 +103,8 @@ export function MetaEnumDialog({
       onClose={onClose}
       onSaved={onSaved}
       onReload={onReload}
+      onStage={onStage}
+      draftLabel={`${adding ? "新增" : "修改"}枚举 ${form.name}`}
     >
       <div className="meta-form">
         <label>
@@ -136,8 +145,7 @@ export function MetaEnumDialog({
         </label>
       </div>
 
-      {!adding && en && (
-        <div className="meta-enum-edit">
+      <div className="meta-enum-edit">
           <div className="meta-enum-edit-head">
             <span>枚举项（{kept.length + pending.length}）</span>
             {duplicate && <span className="meta-field-error">枚举值重复</span>}
@@ -157,7 +165,7 @@ export function MetaEnumDialog({
               </span>
             ))}
             {pending.map((p, i) => (
-              <span key={`new-${i}`} className="meta-enum-item is-new" title="保存后写入">
+              <span key={p.id} className="meta-enum-item is-new" title={onStage ? "待加入草稿" : "保存后写入"}>
                 {p.value} = {p.display}
                 <button
                   type="button"
@@ -188,8 +196,8 @@ export function MetaEnumDialog({
               <Icon name="plus" size={12} /> 加一项
             </button>
           </div>
+          {unfinished && <p className="meta-field-error" role="status">当前枚举项尚未加入：请填写非空的值和显示名，点击「加一项」，或清空输入后再应用。</p>}
         </div>
-      )}
     </MetaOpDialog>
   );
 }

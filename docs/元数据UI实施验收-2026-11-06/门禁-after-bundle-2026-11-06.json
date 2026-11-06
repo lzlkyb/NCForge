@@ -1,0 +1,11 @@
+{
+  "gate": "after-bundle",
+  "recordedAt": "2026-11-06T09:54:17.6505386+08:00",
+  "command": "node node_modules/vite/bin/vite.js build --config .cache/元数据体积对照-2026-11-06/升级后/vite.config.ts",
+  "startFreeKiB": 4524496,
+  "minimumSampledFreeKiB": 3217308,
+  "endFreeKiB": 4593448,
+  "elapsedSeconds": 12.32,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

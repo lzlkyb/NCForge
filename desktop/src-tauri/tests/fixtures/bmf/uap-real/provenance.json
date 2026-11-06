@@ -1,0 +1,30 @@
+[
+  {
+    "file": "general_interface.bmf",
+    "source": "D:\\ncc\\1909home\\modules\\uapbs\\METADATA\\meta\\general_interface.bmf",
+    "sha256": "278e3657afb93f6797b8bccc984c4229957950ef52092ff1d677e5a96f0b2789",
+    "bytes": 3893,
+    "note": "本机 NC 1909 安装元数据原字节，只做解析与隔离写回验收；未验证 UAP 发布。"
+  },
+  {
+    "file": "matters.bmf",
+    "source": "D:\\ncc\\1909home\\modules\\uapbd\\METADATA\\mkma\\matters.bmf",
+    "sha256": "4d8ca6467cb262a4cd41d28b6dd0ccf2820ca68a456be54a4177a2abb9a2e663",
+    "bytes": 11586,
+    "note": "本机 NC 1909 安装元数据原字节，只做解析与隔离写回验收；未验证 UAP 发布。"
+  },
+  {
+    "file": "exsystem.bmf",
+    "source": "D:\\ncc\\1909home\\modules\\ufesbexpress\\METADATA\\exsystem.bmf",
+    "sha256": "e40c52c82d1b02837ebe2ace00ccedf49e6e468b1d426c3266311c2d7b704a8a",
+    "bytes": 17860,
+    "note": "本机 NC 1909 安装元数据原字节，只做解析与隔离写回验收；未验证 UAP 发布。"
+  },
+  {
+    "file": "structureorg.bmf",
+    "source": "D:\\ncc\\1909home\\modules\\riaorg\\METADATA\\uap\\org\\orgstru\\structureorg.bmf",
+    "sha256": "218e4f10170cb99f77c6dd369abf30cbd7fdf99ca8da1512d9a5649fec070197",
+    "bytes": 12261,
+    "note": "本机 NC 1909 安装元数据原字节，只做解析与隔离写回验收；未验证 UAP 发布。"
+  }
+]

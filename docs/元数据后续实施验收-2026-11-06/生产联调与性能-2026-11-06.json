@@ -1,0 +1,229 @@
+{
+  "source": "production MetaTab + WorkbenchFrame + application CSS, isolated memory IPC",
+  "sourceRoot": "D:\\AItool\\winapp\\nc-workbench\\desktop\\node_modules\\.cache\\meta-completion\\snapshot-1793937675785-metadata\\desktop",
+  "windows": [
+    {
+      "width": 1640,
+      "height": 960,
+      "theme": "light",
+      "fieldHeight": 588,
+      "workbenchWidth": 1638,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 15,
+      "mode": "wide"
+    },
+    {
+      "width": 1640,
+      "height": 960,
+      "theme": "dark",
+      "fieldHeight": 588,
+      "workbenchWidth": 1638,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 15,
+      "mode": "wide"
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "theme": "light",
+      "fieldHeight": 528,
+      "workbenchWidth": 1278,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 15,
+      "mode": "medium"
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "theme": "dark",
+      "fieldHeight": 528,
+      "workbenchWidth": 1278,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 15,
+      "mode": "medium"
+    },
+    {
+      "width": 1024,
+      "height": 768,
+      "theme": "light",
+      "fieldHeight": 396,
+      "workbenchWidth": 1022,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "small"
+    },
+    {
+      "width": 1024,
+      "height": 768,
+      "theme": "dark",
+      "fieldHeight": 396,
+      "workbenchWidth": 1022,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "small"
+    },
+    {
+      "width": 1024,
+      "height": 540,
+      "theme": "light",
+      "fieldHeight": 143.5,
+      "workbenchWidth": 1022,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 1024,
+      "height": 540,
+      "theme": "dark",
+      "fieldHeight": 143.5,
+      "workbenchWidth": 1022,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 819,
+      "height": 614,
+      "theme": "light",
+      "fieldHeight": 217.5,
+      "workbenchWidth": 817,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 819,
+      "height": 614,
+      "theme": "dark",
+      "fieldHeight": 217.5,
+      "workbenchWidth": 817,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 683,
+      "height": 512,
+      "theme": "light",
+      "fieldHeight": 115.5,
+      "workbenchWidth": 681,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 683,
+      "height": 512,
+      "theme": "dark",
+      "fieldHeight": 115.5,
+      "workbenchWidth": 681,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 560,
+      "height": 900,
+      "theme": "light",
+      "fieldHeight": 503.5,
+      "workbenchWidth": 558,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 560,
+      "height": 900,
+      "theme": "dark",
+      "fieldHeight": 503.5,
+      "workbenchWidth": 558,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    }
+  ],
+  "functional": [
+    "图表与接口属性定位",
+    "快改加入草稿",
+    "撤销重做",
+    "关闭保护",
+    "失败保留与重新预览重试",
+    "严格 SHA 保存",
+    "错误粘贴整批阻断",
+    "外部修改不覆盖"
+  ],
+  "performance": {
+    "largeModel": {
+      "nodes": 15,
+      "fields": 16,
+      "resources": 13,
+      "entities": 500,
+      "relations": 100,
+      "fieldsInPrimary": 1000,
+      "resourcesInIndex": 1500,
+      "feedback": {
+        "samples": 60,
+        "medianMs": 25.80000001192093,
+        "p95Ms": 37.69999998807907,
+        "method": "DOM keydown to next requestAnimationFrame, includes scheduling"
+      }
+    },
+    "drag": {
+      "entities": 50,
+      "relations": 100,
+      "samples": 45,
+      "medianIntervalMs": 15.699999988079071,
+      "p95IntervalMs": 30.5,
+      "p95InputToFrameMs": 30.5,
+      "initialTransform": "translate(28 28)",
+      "finalTransform": "translate(118 73)",
+      "method": "headless Edge with GPU disabled, includes frame scheduling; does not measure native WebView render CPU time",
+      "mainThread": {
+        "samples": 45,
+        "medianMs": 9.698,
+        "p95Ms": 14.967,
+        "tasks": 288,
+        "method": "CDP renderer-main RunTask duration union within pointer-frame performance marks; includes scripting/layout/paint and driver overhead, excludes scheduling idle and native/GPU work"
+      }
+    },
+    "hotSwitch": {
+      "samples": 30,
+      "medianMs": 43.09999996423721,
+      "p95Ms": 58.69999998807907,
+      "shaRefreshReads": 30,
+      "method": "two warmed normal fixtures, document click until unique target body appears at rAF in production browser with memory IPC; excludes native file I/O and parsing"
+    },
+    "memory": {
+      "baselineUsedBytes": 6263836,
+      "closedUsedBytes": [
+        5352140,
+        5388040,
+        5450048,
+        5495320,
+        5517720,
+        5524528,
+        5510820,
+        5532404
+      ],
+      "closedGrowthBytes": 180264,
+      "method": "CDP forced-GC JavaScript heap for repeated mount/unmount; excludes WebView native memory"
+    }
+  },
+  "errors": [],
+  "passed": true
+}

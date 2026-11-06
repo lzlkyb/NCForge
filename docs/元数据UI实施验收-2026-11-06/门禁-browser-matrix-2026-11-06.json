@@ -1,0 +1,11 @@
+{
+  "gate": "browser-matrix",
+  "recordedAt": "2026-11-06T10:01:45.3798422+08:00",
+  "command": "node .cache/元数据生产验收-2026-11-06/补充窗口检查.mjs",
+  "startFreeKiB": 3152252,
+  "minimumSampledFreeKiB": 2264388,
+  "endFreeKiB": 2663864,
+  "elapsedSeconds": 13.95,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

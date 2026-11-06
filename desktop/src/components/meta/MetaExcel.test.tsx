@@ -143,6 +143,8 @@ it("无错误时按预览时的 SHA 写入并回报 diff", async () => {
     path: "D:/ws/METADATA/demo.bmf",
     ops,
     expectedSha: "sha-1",
+    expectedDefinitions: null,
+    strict: false,
   });
   expect(onEdited).toHaveBeenCalled();
   expect(host.textContent).toContain("+length=\"32\"");

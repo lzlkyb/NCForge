@@ -1,9 +1,9 @@
 import type { BmfAttr, BmfEntity, BmfRelation } from "../../lib/bmf";
 
-export const NODE_W = 188;
+export const NODE_W = 244;
 /** 节点头部：标题 + 类/表名 + 字段数。之后才是字段行。 */
 export const HEAD_H = 72;
-export const ROW_H = 16;
+export const ROW_H = 22;
 export const ROW_PAD = 6;
 /** 每个节点最多显示几行字段；被截掉的字段靠信息面板看。 */
 export const MAX_ROWS = 6;
@@ -33,7 +33,7 @@ export interface Layout {
  * 节点里显示哪些字段：关系端点字段优先（否则连线没有行可落），
  * 其次主键，最后按声明顺序补满。超出上限的端点会退回节点边框连线。
  */
-export function visibleAttrs(e: BmfEntity, relations: BmfRelation[]): BmfAttr[] {
+export function visibleAttrs(e: BmfEntity, relations: BmfRelation[], selectedId?: string): BmfAttr[] {
   const order: string[] = [];
   const seen = new Set<string>();
   const take = (id: string) => {
@@ -51,10 +51,17 @@ export function visibleAttrs(e: BmfEntity, relations: BmfRelation[]): BmfAttr[] 
     take(a.id);
   }
   const byId = new Map(e.attrs.map((a) => [a.id, a]));
-  return order
+  const rows = order
     .slice(0, MAX_ROWS)
     .map((id) => byId.get(id))
     .filter((a): a is BmfAttr => !!a);
+  // 补入隐藏的选中字段，同时保留其他摘要行的相对顺序。
+  const selected = selectedId ? byId.get(selectedId) : undefined;
+  if (selected && !rows.some((a) => a.id === selected.id)) {
+    if (rows.length >= MAX_ROWS) rows.pop();
+    rows.push(selected);
+  }
+  return rows;
 }
 
 export function nodeShape(e: BmfEntity, relations: BmfRelation[]): NodeShape {

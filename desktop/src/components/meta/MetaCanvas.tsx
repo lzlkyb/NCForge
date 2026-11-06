@@ -1,273 +1,161 @@
-import {
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BmfDetail } from "../../lib/bmf";
+import { canvasObjects, canvasSelection, canvasSelectionId, visibleCanvasNodes } from "../../lib/metaCanvasModel";
+import { newMetaEditorState, selectedMetaEntity, type MetaCanvasState, type MetaSelection } from "../../lib/metaEditor";
+import { useMetaCanvasPointer } from "../../hooks/useMetaCanvasPointer";
 import { Icon } from "../ui/icon";
-import { canvasLayout, hitNode, rowIndexOf, HEAD_H, NODE_W, type Pos } from "./canvasLayout";
+import { canvasLayout, visibleAttrs, rowIndexOf, HEAD_H, ROW_H, ROW_PAD, NODE_W, PAD, type Pos } from "./canvasLayout";
 import { MetaCanvasEdge } from "./MetaCanvasEdge";
 import { MetaCanvasInfo, kindLabel } from "./MetaCanvasInfo";
 import { MetaCanvasNode } from "./MetaCanvasNode";
 import { MetaRelationDialog } from "./MetaRelationDialog";
 
-type PointerState =
-  | { mode: "move"; id: string; dx: number; dy: number }
-  | { mode: "link"; from: string; x: number; y: number };
-
-/**
- * 关系画布（M8）：实体方阵 + 关系连线 + 拖拽建关系。
- *
- * 拖节点移动、拖右侧把手连线；连线落下后在弹框里补关系类型，保存走与「结构」页
- * 完全相同的预览/SHA 校验写回。画布坐标只是本视图状态，不回写 BMF。
- *
- * 关系指定了字段就画到字段行；字段被行数上限截掉时退回节点边框，不隐藏关系。
- */
-export function MetaCanvas({ detail, onEdited }: { detail: BmfDetail; onEdited?: () => void }) {
-  const [moved, setMoved] = useState<Record<string, Pos>>({});
-  const [selected, setSelected] = useState<string | null>(null);
-  const [relId, setRelId] = useState<string | null>(null);
-  const [pointer, setPointer] = useState<PointerState | null>(null);
+/** 联动画布和独立画布共用真实 BMF；坐标、缩放与滚动从不进入写回操作。 */
+export function MetaCanvas({ detail, onEdited, selection, onSelect, initialState, onStateChange, linked = false, locked = false, onCreateRelation }: {
+  detail: BmfDetail; onEdited?: () => void; selection?: MetaSelection; onSelect?: (selection: MetaSelection) => void;
+  initialState?: MetaCanvasState; onStateChange?: (state: MetaCanvasState) => void; linked?: boolean; locked?: boolean;
+  onCreateRelation?: (source: string, target?: string) => void;
+}) {
+  const [view, setView] = useState(() => initialState ?? newMetaEditorState().canvas);
+  const [localSelection, setLocalSelection] = useState<MetaSelection>({ kind: "component" });
   const [dialog, setDialog] = useState<{ source: string; target: string } | null>(null);
+  const [viewport, setViewport] = useState({ width: 600, height: 320 });
   const wrapRef = useRef<HTMLDivElement>(null);
-  // 保存后按两端找新关系高亮：弹框拿不到后端生成的 GUID，只能用端点回找。
+  const stateRef = useRef(view);
+  const initialRef = useRef(initialState);
+  const callbacks = useRef({ onSelect, onStateChange, onCreateRelation, locked });
+  callbacks.current = { onSelect, onStateChange, onCreateRelation, locked };
   const pendingEdge = useRef<{ source: string; target: string } | null>(null);
-  const markerId = useId().replace(/[:]/g, "");
-
-  const layout = useMemo(() => canvasLayout(detail.entities, detail.relations), [detail.entities, detail.relations]);
+  const markerId = useId().replace(/:/g, "");
+  const active = selection ?? localSelection;
+  const objects = useMemo(() => canvasObjects(detail), [detail]);
+  const current = selectedMetaEntity(detail, active);
+  const activeRel = active.kind === "relation" ? detail.relations.find((r) => r.id === active.relationId) : null;
+  const selectedAttrs = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (active.kind === "attr") map[active.entityId] = active.attrId;
+    if (active.kind === "interfaceAttr") map[active.interfaceId] = active.attrId;
+    if (activeRel) { map[activeRel.source] = activeRel.srcAttrId; map[activeRel.target] = activeRel.targetAttrId; }
+    return map;
+  }, [active, activeRel]);
+  const layout = useMemo(() => canvasLayout(objects, detail.relations), [objects, detail.relations]);
+  const shapes = useMemo(() => layout.shapes.map((shape, index) => {
+    const entity = objects[index];
+    const id = selectedAttrs[entity.id] || selectedAttrs[entity.name];
+    if (!id || shape.rows.some((a) => a.id === id)) return shape;
+    const rows = visibleAttrs(entity, detail.relations, id);
+    return { rows, height: HEAD_H + rows.length * ROW_H + ROW_PAD };
+  }), [layout.shapes, selectedAttrs, objects, detail.relations]);
+  const positions = useMemo(() => layout.pos.map((pos, i) => view.moved[objects[i].id] ?? pos), [layout.pos, view.moved, objects]);
   const indexOf = useMemo(() => {
-    const m: Record<string, number> = {};
-    detail.entities.forEach((e, i) => {
-      m[e.id] = i;
-      m[e.name] = i;
-    });
-    return m;
-  }, [detail.entities]);
-  const positions = useMemo(
-    () => layout.pos.map((p, i) => moved[detail.entities[i].id] ?? p),
-    [layout, moved, detail.entities],
-  );
-  const positionsRef = useRef(positions);
-  positionsRef.current = positions;
-
+    const map: Record<string, number> = {};
+    objects.forEach((e, i) => { map[e.id] = i; map[e.name] = i; });
+    return map;
+  }, [objects]);
+  const geometry = useRef({ positions, indexOf, objects });
+  geometry.current = { positions, indexOf, objects };
+  const remember = useCallback((patch: Partial<MetaCanvasState>, render = true) => {
+    stateRef.current = { ...stateRef.current, ...patch };
+    if (render) setView(stateRef.current);
+    callbacks.current.onStateChange?.(stateRef.current);
+  }, []);
+  const select = useCallback((next: MetaSelection) => {
+    if (callbacks.current.locked) return;
+    setLocalSelection(next);
+    callbacks.current.onSelect?.(next);
+  }, []);
+  const selectEntity = useCallback((id: string) => { const object = geometry.current.objects[geometry.current.indexOf[id]]; if (object) select(canvasSelection(object)); }, [select]);
+  const selectAttr = useCallback((entityId: string, attrId: string) => { const object = geometry.current.objects[geometry.current.indexOf[entityId]]; if (object) select(canvasSelection(object, attrId)); }, [select]);
+  const selectRelation = useCallback((relationId: string) => select({ kind: "relation", relationId }), [select]);
+  const move = useCallback((id: string, pos: Pos) => remember({ moved: { ...stateRef.current.moved, [id]: pos } }), [remember]);
+  const nudge = useCallback((id: string, dx: number, dy: number) => {
+    if (callbacks.current.locked) return;
+    const pos = geometry.current.positions[geometry.current.indexOf[id]];
+    if (!pos) return;
+    selectEntity(id);
+    move(id, { x: Math.max(0, pos.x + dx), y: Math.max(0, pos.y + dy) });
+  }, [move, selectEntity]);
+  const link = useCallback((source: string, target?: string) => {
+    if (callbacks.current.locked) return;
+    if (callbacks.current.onCreateRelation) callbacks.current.onCreateRelation(source, target);
+    else setDialog({ source, target: target ?? "" });
+  }, []);
+  const createLink = useCallback((id: string) => link(id), [link]);
+  const { pointer, startMove, startLink } = useMetaCanvasPointer({
+    wrapRef, positions, shapes, ids: objects.map((e) => e.id), zoom: view.zoom,
+    enabled: !locked, onMove: move, onSelect: selectEntity, onLink: link,
+  });
+  useLayoutEffect(() => {
+    const node = wrapRef.current;
+    if (!node) return;
+    node.scrollLeft = initialRef.current?.left ?? 0;
+    node.scrollTop = initialRef.current?.top ?? 0;
+    const measure = () => setViewport({ width: node.clientWidth || 600, height: node.clientHeight || 320 });
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure); observer.observe(node);
+    return () => observer.disconnect();
+  }, [detail.path]);
   useEffect(() => {
-    if (!pointer) return;
-    const local = (e: PointerEvent) => {
-      const wrap = wrapRef.current;
-      if (!wrap) return null;
-      const rect = wrap.getBoundingClientRect();
-      return {
-        x: e.clientX - rect.left + wrap.scrollLeft,
-        y: e.clientY - rect.top + wrap.scrollTop,
-      };
-    };
-    const move = (e: PointerEvent) => {
-      const pt = local(e);
-      if (!pt) return;
-      if (pointer.mode === "move") {
-        setMoved((prev) => ({ ...prev, [pointer.id]: { x: pt.x - pointer.dx, y: pt.y - pointer.dy } }));
-      } else {
-        setPointer((p) => (p && p.mode === "link" ? { ...p, x: pt.x, y: pt.y } : p));
-      }
-    };
-    const up = (e: PointerEvent) => {
-      if (pointer.mode === "link") {
-        const pt = local(e);
-        const hit = pt ? hitNode(positionsRef.current, layout.shapes, pt) : -1;
-        const target = hit >= 0 ? detail.entities[hit] : null;
-        if (target && target.id !== pointer.from) setDialog({ source: pointer.from, target: target.id });
-      }
-      setPointer(null);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-  }, [pointer, layout, detail.entities]);
+    const pending = pendingEdge.current;
+    if (!pending) return;
+    const hit = [...detail.relations].reverse().find((r) => r.source === pending.source && r.target === pending.target);
+    if (hit) { selectRelation(hit.id); pendingEdge.current = null; }
+  }, [detail.relations, selectRelation]);
 
-  useEffect(() => {
-    const p = pendingEdge.current;
-    if (!p) return;
-    // 取最后一条：同一对实体可能已有旧关系，新加的在末尾。
-    const hit = [...detail.relations].reverse().find((r) => r.source === p.source && r.target === p.target);
-    if (hit) {
-      setRelId(hit.id);
-      pendingEdge.current = null;
-    }
-  }, [detail.relations]);
-
-  const startMove = (e: ReactPointerEvent<SVGGElement>, id: string) => {
-    const wrap = wrapRef.current;
-    const i = indexOf[id];
-    if (!wrap || i === undefined) return;
-    e.preventDefault();
-    const rect = wrap.getBoundingClientRect();
-    const p = positions[i];
-    setPointer({
-      mode: "move",
-      id,
-      dx: e.clientX - rect.left + wrap.scrollLeft - p.x,
-      dy: e.clientY - rect.top + wrap.scrollTop - p.y,
-    });
-    setSelected(id);
+  const selectedId = canvasSelectionId(active) ?? current?.id ?? null;
+  const visible = objects.length > 100 ? visibleCanvasNodes(positions, shapes.map((s) => s.height), { ...viewport, left: view.left, top: view.top }, view.zoom, selectedId ? indexOf[selectedId] : -1) : new Set(objects.map((_, i) => i));
+  if (!objects.length) return <p className="meta-note meta-canvas-empty">这个组件没有可绘制的实体、接口或参照；可以在下方查看枚举。</p>;
+  const width = positions.reduce((max, pos) => Math.max(max, pos.x + NODE_W + PAD), layout.width);
+  const height = positions.reduce((max, pos, i) => Math.max(max, pos.y + shapes[i].height + PAD), layout.height);
+  const zoomTo = (zoom: number) => remember({ zoom: Math.max(0.4, Math.min(1.8, Math.round(zoom * 100) / 100)) });
+  const locate = () => {
+    const node = wrapRef.current;
+    const pos = selectedId ? positions[indexOf[selectedId]] : null;
+    if (!node || !pos) return;
+    node.scrollLeft = Math.max(0, pos.x * view.zoom - (node.clientWidth - NODE_W * view.zoom) / 2);
+    node.scrollTop = Math.max(0, pos.y * view.zoom - 24);
+    remember({ left: node.scrollLeft, top: node.scrollTop }, false);
   };
-
-  const startLink = (e: ReactPointerEvent<SVGGElement>, id: string) => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    e.preventDefault();
-    const rect = wrap.getBoundingClientRect();
-    setPointer({
-      mode: "link",
-      from: id,
-      x: e.clientX - rect.left + wrap.scrollLeft,
-      y: e.clientY - rect.top + wrap.scrollTop,
-    });
-    setSelected(id);
-  };
-
-  const current = selected ? detail.entities.find((e) => e.id === selected || e.name === selected) ?? null : null;
-  const activeRel = relId ? detail.relations.find((r) => r.id === relId) ?? null : null;
-  const activeAttr = (entityId: string) =>
-    !activeRel
-      ? null
-      : activeRel.source === entityId
-        ? activeRel.srcAttrId || null
-        : activeRel.target === entityId
-          ? activeRel.targetAttrId || null
-          : null;
-
-  if (detail.entities.length === 0) {
-    return (
-      <p className="meta-note">
-        这个组件没有实体，没有可画的节点。纯枚举 / 纯接口组件属于正常形态。
-      </p>
-    );
-  }
-
-  const linkSource = pointer?.mode === "link" ? indexOf[pointer.from] : undefined;
-  const linkStart =
-    linkSource !== undefined
-      ? { x: positions[linkSource].x + NODE_W, y: positions[linkSource].y + HEAD_H / 2 }
-      : null;
-
-  return (
-    <div className="meta-canvas-view">
-      <div className="meta-canvas-bar">
-        <span className="meta-note m-0">
-          {detail.entities.length} 实体 · {detail.relations.length} 关系 · 拖节点移动，拖右侧圆点建关系
-        </span>
-        <button
-          type="button"
-          className="meta-link"
-          onClick={() => {
-            setMoved({});
-            setSelected(null);
-            setRelId(null);
-          }}
-          disabled={Object.keys(moved).length === 0}
-        >
-          <Icon name="refresh" size={12} /> 重排
-        </button>
+  const linkIndex = pointer?.mode === "link" ? indexOf[pointer.from] : undefined;
+  const linkStart = linkIndex === undefined ? null : { x: positions[linkIndex].x + NODE_W, y: positions[linkIndex].y + HEAD_H / 2 };
+  return <div className={`meta-canvas-view ${linked ? "is-linked" : ""}`}>
+    <div className="meta-canvas-bar"><span className="meta-note m-0">{detail.entities.length} 实体 · {detail.relations.length} 关系</span>
+      <div className="meta-canvas-tools">
+        <button type="button" className="meta-link" disabled={locked || !detail.entities.length} onClick={() => { const source = current?.id ?? detail.entities[0]?.id; if (source) link(source); }}><Icon name="plus" size={12} />关系</button>
+        <button type="button" className="meta-icon-button" aria-label="缩小模型" onClick={() => zoomTo(view.zoom - 0.1)}><Icon name="minimize" size={12} /></button>
+        <button type="button" className="meta-link meta-zoom-value" onClick={() => zoomTo(1)} aria-label="恢复 100% 缩放">{Math.round(view.zoom * 100)}%</button>
+        <button type="button" className="meta-icon-button" aria-label="放大模型" onClick={() => zoomTo(view.zoom + 0.1)}><Icon name="plus" size={12} /></button>
+        <button type="button" className="meta-link" onClick={() => {
+          const node = wrapRef.current;
+          if (node) { zoomTo(Math.min(node.clientWidth / width, node.clientHeight / height, 1)); node.scrollTop = 0; node.scrollLeft = 0; remember({ top: 0, left: 0 }, false); }
+        }}>适配</button>
+        <button type="button" className="meta-link" onClick={locate} disabled={!selectedId}>定位</button>
+        <button type="button" className="meta-link" onClick={() => remember({ moved: {} })} disabled={!Object.keys(view.moved).length}><Icon name="refresh" size={12} />重排</button>
       </div>
-
-      <div className="meta-canvas-wrap" ref={wrapRef}>
-        <svg
-          className="meta-canvas"
-          width={layout.width}
-          height={layout.height}
-          role="img"
-          aria-label="实体关系画布"
-        >
-          <defs>
-            <marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-              <path d="M0 0 L10 5 L0 10 z" className="meta-canvas-arrow" />
-            </marker>
-          </defs>
-
-          {detail.relations.map((r) => {
-            const ia = indexOf[r.source];
-            const ib = indexOf[r.target];
-            if (ia === undefined || ib === undefined) return null;
-            return (
-              <MetaCanvasEdge
-                key={r.id}
-                id={r.id}
-                label={r.name || kindLabel(r.kind)}
-                from={{
-                  pos: positions[ia],
-                  height: layout.shapes[ia].height,
-                  row: rowIndexOf(layout.shapes[ia], r.srcAttrId),
-                }}
-                to={{
-                  pos: positions[ib],
-                  height: layout.shapes[ib].height,
-                  row: rowIndexOf(layout.shapes[ib], r.targetAttrId),
-                }}
-                markerId={markerId}
-                active={relId === r.id}
-                onSelect={() => {
-                  setRelId(r.id);
-                  setSelected(r.source);
-                }}
-              />
-            );
-          })}
-
-          {pointer?.mode === "link" && linkStart && (
-            <line className="meta-canvas-link" x1={linkStart.x} y1={linkStart.y} x2={pointer.x} y2={pointer.y} />
-          )}
-
-          {detail.entities.map((e, i) => (
-            <MetaCanvasNode
-              key={e.id}
-              entity={e}
-              shape={layout.shapes[i]}
-              pos={positions[i]}
-              active={current?.id === e.id}
-              activeAttrId={activeAttr(e.id)}
-              onMoveStart={startMove}
-              onLinkStart={startLink}
-            />
-          ))}
-        </svg>
-      </div>
-
-      <MetaCanvasInfo
-        detail={detail}
-        current={current}
-        relId={relId}
-        onPick={(id) => setSelected(id)}
-        onPickRelation={(id) => {
-          setRelId(id);
-          const r = detail.relations.find((x) => x.id === id);
-          if (r) setSelected(r.source);
-        }}
-      />
-
-      {dialog && (
-        <MetaRelationDialog
-          path={detail.path}
-          sha={detail.sha256}
-          detail={detail}
-          initial={dialog}
-          onClose={() => setDialog(null)}
-          onSaved={() => {
-            pendingEdge.current = dialog;
-            setDialog(null);
-            onEdited?.();
-          }}
-          onReload={() => {
-            setDialog(null);
-            onEdited?.();
-          }}
-        />
-      )}
     </div>
-  );
+    <div className="meta-canvas-wrap" ref={wrapRef} onScroll={(e) => remember({ left: e.currentTarget.scrollLeft, top: e.currentTarget.scrollTop }, objects.length > 100)}>
+      <svg className="meta-canvas" width={width * view.zoom} height={height * view.zoom} viewBox={`0 0 ${width} ${height}`} role="group" aria-label="实体关系画布">
+        <defs><marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" className="meta-canvas-arrow" /></marker></defs>
+        {detail.relations.map((r) => {
+          const a = indexOf[r.source], b = indexOf[r.target];
+          const inView = a !== undefined && b !== undefined && (visible.has(a) || visible.has(b) || activeRel?.id === r.id
+            || (Math.min(positions[a].x, positions[b].x) * view.zoom <= view.left + viewport.width && Math.max(positions[a].x, positions[b].x) * view.zoom >= view.left
+              && Math.min(positions[a].y, positions[b].y) * view.zoom <= view.top + viewport.height && Math.max(positions[a].y, positions[b].y) * view.zoom >= view.top));
+          return !inView ? null : <MetaCanvasEdge key={r.id} id={r.id} label={`${r.displayName || r.name || kindLabel(r.kind)}${r.sourceConstraint || r.targetConstraint ? ` · ${r.sourceConstraint || "?"}:${r.targetConstraint || "?"}` : ""}`}
+            from={{ pos: positions[a], height: shapes[a].height, row: rowIndexOf(shapes[a], r.srcAttrId) }}
+            to={{ pos: positions[b], height: shapes[b].height, row: rowIndexOf(shapes[b], r.targetAttrId) }}
+            markerId={markerId} active={activeRel?.id === r.id} locked={locked} onSelect={selectRelation} />;
+        })}
+        {pointer?.mode === "link" && linkStart && <line className="meta-canvas-link" x1={linkStart.x} y1={linkStart.y} x2={pointer.x} y2={pointer.y} />}
+        {objects.map((entity, index) => !visible.has(index) ? null : <MetaCanvasNode key={entity.id} entity={entity} shape={shapes[index]} pos={positions[index]}
+          active={active.kind !== "component" && (selectedId === entity.id || activeRel?.source === entity.id || activeRel?.target === entity.id || activeRel?.target === entity.name)} activeAttrId={selectedAttrs[entity.id] || selectedAttrs[entity.name] || null} locked={locked}
+          onMoveStart={startMove} onLinkStart={startLink} onSelect={selectEntity} onSelectAttr={selectAttr} onNudge={nudge} onCreateLink={createLink} />)}
+      </svg>
+    </div>
+    {!linked && <MetaCanvasInfo detail={detail} current={active.kind === "component" ? null : current ?? null} relId={activeRel?.id ?? null} onPick={selectEntity} onPickRelation={selectRelation} />}
+    {dialog && <MetaRelationDialog path={detail.path} sha={detail.sha256} detail={detail} initial={dialog}
+      onClose={() => setDialog(null)} onSaved={() => { pendingEdge.current = dialog; setDialog(null); onEdited?.(); }}
+      onReload={() => { setDialog(null); onEdited?.(); }} />}
+  </div>;
 }

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component conRouterType="手动" createIndustry="0" createTime="2008-02-20 13:38:20" creator="" description="" displayName="public" fromSourceBmf="true" gencodestyle="NC传统样式" help="" id="aa1e1c21-6241-4134-a71a-05624e14140f" industry="0" industryChanged="false" industryIncrease="false" industryName="基础行业" isSource="false" isbizmodel="false" mainEntity="" metaType=".bmf" modifier="developer" modifyIndustry="0" modifyTime="2014-01-06 11:44:48" name="public" namespace="uap" ownModule="baseapp" preLoad="false" programcode="0" resModuleName="public" resid="" version="20" versionType="0">
+    <celllist>
+        <busiIterface bizItfImpClassName="" componentID="aa1e1c21-6241-4134-a71a-05624e14140f" createIndustry="0" createTime="2008-02-20 13:38:36" creator="" description="" displayName="IBDObject" fullClassName="nc.vo.bd.meta.IBDObject" height="171" help="" id="6c8722b9-911a-489b-8d0d-18bd3734fcf6" industryChanged="false" isSource="false" modifier="developer" modifyIndustry="0" modifyTime="2014-01-06 11:44:48" name="IBDObject" resid="" versionType="0" visibility="public" width="140" x="205" y="135">
+            <busiItfAttrs>
+                <busiItAttr classID="6c8722b9-911a-489b-8d0d-18bd3734fcf6" dataType="BS000010000100001001" dataTypeStyle="SINGLE" dbtype="varchar" desc="" displayName="id" id="5dd3c721-22ad-42b1-9c10-4351c236bc77" name="id" sequence="0" typeDisplayName="String" typeName="String"/>
+                <busiItAttr classID="6c8722b9-911a-489b-8d0d-18bd3734fcf6" dataType="BS000010000100001001" dataTypeStyle="SINGLE" dbtype="varchar" desc="" displayName="pid" id="c8334364-7ab9-4266-8d4b-e74537935e46" name="pid" sequence="1" typeDisplayName="String" typeName="String"/>
+                <busiItAttr classID="6c8722b9-911a-489b-8d0d-18bd3734fcf6" dataType="BS000010000100001001" dataTypeStyle="SINGLE" dbtype="varchar" desc="" displayName="pk_org" id="ecf1b76a-6e44-42e2-a55e-87596504775b" name="pk_org" sequence="2" typeDisplayName="String" typeName="String"/>
+                <busiItAttr classID="6c8722b9-911a-489b-8d0d-18bd3734fcf6" dataType="BS000010000100001001" dataTypeStyle="SINGLE" dbtype="varchar" desc="" displayName="code" id="d32cc17b-f415-415a-923f-0764443eb102" name="code" sequence="3" typeDisplayName="String" typeName="String"/>
+                <busiItAttr classID="6c8722b9-911a-489b-8d0d-18bd3734fcf6" dataType="BS000010000100001001" dataTypeStyle="SINGLE" dbtype="varchar" desc="" displayName="name" id="89578a97-42fe-439b-827c-8eabd9e3604c" name="name" sequence="4" typeDisplayName="String" typeName="String"/>
+                <busiItAttr classID="6c8722b9-911a-489b-8d0d-18bd3734fcf6" dataType="BS000010000100001001" dataTypeStyle="SINGLE" dbtype="varchar" desc="" displayName="pk_group" id="a47e6cda-09e4-480b-923f-ec6f41e3e06c" name="pk_group" sequence="5" typeDisplayName="String" typeName="String"/>
+            </busiItfAttrs>
+        </busiIterface>
+        <busiIterface bizItfImpClassName="" componentID="aa1e1c21-6241-4134-a71a-05624e14140f" createIndustry="0" createTime="2008-02-26 15:29:33" creator="" description="" displayName="IBDAttributeGetter" fullClassName="nc.vo.bd.meta.IBDAttributeGetter" height="59" help="" id="268f2adb-864c-4f43-bb38-99cd47bfdb62" industryChanged="false" isSource="false" modifier="developer" modifyIndustry="0" modifyTime="2014-01-06 11:44:48" name="IBDAttributeGetter" resid="" versionType="0" visibility="public" width="168" x="100" y="383">
+            <busiItfAttrs/>
+        </busiIterface>
+    </celllist>
+    <connectlist/>
+    <refdepends/>
+    <refdependLoseIDs/>
+    <cellRemoveLog/>
+    <rulers>
+        <ruler isHorizontal="true" unit="0">
+            <guideList/>
+        </ruler>
+        <ruler isHorizontal="false" unit="0">
+            <guideList/>
+        </ruler>
+    </rulers>
+</component>

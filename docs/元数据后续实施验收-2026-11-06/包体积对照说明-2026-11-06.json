@@ -1,0 +1,99 @@
+{
+  "recordedAt": "2026-11-06T05:02:54.440Z",
+  "baseHead": "244dcc12f201f7acb7c71431a639c1f723655655",
+  "jsBytes": {
+    "head": {
+      "chunks": 46,
+      "rawBytes": 4959941,
+      "gzipBytes": 1409189,
+      "maxRawBytes": 3247203
+    },
+    "metadata": {
+      "chunks": 56,
+      "rawBytes": 5058126,
+      "gzipBytes": 1443801,
+      "maxRawBytes": 3247203
+    }
+  },
+  "cssBytes": {
+    "head": {
+      "rawBytes": 497072,
+      "gzipBytes": 83412
+    },
+    "metadata": {
+      "rawBytes": 515130,
+      "gzipBytes": 86310
+    },
+    "delta": {
+      "raw": 18058,
+      "gzip": 2898
+    }
+  },
+  "deltaBytes": {
+    "raw": 98185,
+    "gzip": 34612
+  },
+  "deltaKB": {
+    "raw": 95.8837890625,
+    "gzip": 33.80078125
+  },
+  "allocationKB": {
+    "raw": 96,
+    "gzip": 34
+  },
+  "baseline": {
+    "totalRawKB": 4844,
+    "totalGzipKB": 1376,
+    "maxChunkRawKB": 3171
+  },
+  "isolatedBudget": {
+    "totalRawKB": 4940,
+    "totalGzipKB": 1410,
+    "maxChunkRawKB": 3171
+  },
+  "workingBudgetBefore": {
+    "totalRawKB": 4952,
+    "totalGzipKB": 1418,
+    "maxChunkRawKB": 3171
+  },
+  "workingBudgetAfter": {
+    "totalRawKB": 5011,
+    "totalGzipKB": 1435,
+    "maxChunkRawKB": 3171
+  },
+  "preservedOtherAllocationKB": {
+    "raw": 71,
+    "gzip": 25
+  },
+  "metadataEntries": {
+    "head": [
+      {
+        "name": "MetaTab-DiOrLxHG.css",
+        "rawBytes": 33235,
+        "gzipBytes": 5197
+      },
+      {
+        "name": "MetaTab-DiaH9msv.js",
+        "rawBytes": 100424,
+        "gzipBytes": 29748
+      }
+    ],
+    "metadata": [
+      {
+        "name": "MetaTab-C1ED055N.css",
+        "rawBytes": 51293,
+        "gzipBytes": 8095
+      },
+      {
+        "name": "MetaTab-DHSwyt1u.js",
+        "rawBytes": 151210,
+        "gzipBytes": 45377
+      }
+    ]
+  },
+  "method": "Sum of individual dist/assets JavaScript chunk sizes and level-9 gzip sizes; metadata named entry excludes additional lazy and shared chunks; CSS recorded separately; both copies explicitly scan only frontend sources",
+  "bundleGate": {
+    "exitCode": 0,
+    "output": "JS 产物：56 个 chunk，1410 KB gzip / 4940 KB raw\n  最大 chunk：monacoSetup-BCipJczX.js（3171 KB raw）\n  预算：totalRawKB=4940KB，totalGzipKB=1410KB，maxChunkRawKB=3171KB\n✅ 体积预算通过\n"
+  }
+}

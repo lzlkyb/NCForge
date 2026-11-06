@@ -1,0 +1,188 @@
+{
+  "date": "2026-11-06",
+  "scope": "生产组件与内存 IPC，等效视口检查不代表真实 Windows DPI 或原生 WebView 验收",
+  "rows": [
+    {
+      "label": "标准窗口",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "theme": "light",
+      "width": 1278,
+      "height": 834,
+      "scrollWidth": 1278,
+      "scrollHeight": 834,
+      "size": "medium",
+      "screenshot": "计划标准窗口浅色-2026-11-06.png",
+      "inspector": "可打开、关闭且边界有效"
+    },
+    {
+      "label": "标准窗口",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "theme": "dark",
+      "width": 1278,
+      "height": 834,
+      "scrollWidth": 1278,
+      "scrollHeight": 834,
+      "size": "medium",
+      "screenshot": "计划标准窗口深色-2026-11-06.png",
+      "inspector": "可打开、关闭且边界有效"
+    },
+    {
+      "label": "常规窗口",
+      "viewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "theme": "light",
+      "width": 1022,
+      "height": 702,
+      "scrollWidth": 1022,
+      "scrollHeight": 702,
+      "size": "small",
+      "screenshot": "计划常规窗口浅色-2026-11-06.png",
+      "inspector": "可打开、关闭且边界有效"
+    },
+    {
+      "label": "常规窗口",
+      "viewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "theme": "dark",
+      "width": 1022,
+      "height": 702,
+      "scrollWidth": 1022,
+      "scrollHeight": 702,
+      "size": "small",
+      "screenshot": "计划常规窗口深色-2026-11-06.png",
+      "inspector": "可打开、关闭且边界有效"
+    },
+    {
+      "label": "低高度窗口",
+      "viewport": {
+        "width": 1024,
+        "height": 540
+      },
+      "theme": "light",
+      "width": 1022,
+      "height": 474,
+      "scrollWidth": 1022,
+      "scrollHeight": 474,
+      "size": "compact",
+      "screenshot": "计划低高度窗口浅色-2026-11-06.png",
+      "inspector": "可打开、关闭且边界有效"
+    },
+    {
+      "label": "低高度窗口",
+      "viewport": {
+        "width": 1024,
+        "height": 540
+      },
+      "theme": "dark",
+      "width": 1022,
+      "height": 474,
+      "scrollWidth": 1022,
+      "scrollHeight": 474,
+      "size": "compact",
+      "screenshot": "计划低高度窗口深色-2026-11-06.png",
+      "inspector": "可打开、关闭且边界有效"
+    },
+    {
+      "label": "缩放窗口",
+      "viewport": {
+        "width": 819,
+        "height": 614
+      },
+      "theme": "light",
+      "width": 817,
+      "height": 548,
+      "scrollWidth": 817,
+      "scrollHeight": 548,
+      "size": "compact",
+      "screenshot": "计划缩放窗口浅色-2026-11-06.png",
+      "inspector": "可打开、关闭且边界有效"
+    },
+    {
+      "label": "缩放窗口",
+      "viewport": {
+        "width": 819,
+        "height": 614
+      },
+      "theme": "dark",
+      "width": 817,
+      "height": 548,
+      "scrollWidth": 817,
+      "scrollHeight": 548,
+      "size": "compact",
+      "screenshot": "计划缩放窗口深色-2026-11-06.png",
+      "inspector": "可打开、关闭且边界有效"
+    },
+    {
+      "label": "高缩放窗口",
+      "viewport": {
+        "width": 683,
+        "height": 512
+      },
+      "theme": "light",
+      "width": 681,
+      "height": 446,
+      "scrollWidth": 681,
+      "scrollHeight": 446,
+      "size": "compact",
+      "screenshot": "计划高缩放窗口浅色-2026-11-06.png",
+      "inspector": "可打开、关闭且边界有效"
+    },
+    {
+      "label": "高缩放窗口",
+      "viewport": {
+        "width": 683,
+        "height": 512
+      },
+      "theme": "dark",
+      "width": 681,
+      "height": 446,
+      "scrollWidth": 681,
+      "scrollHeight": 446,
+      "size": "compact",
+      "screenshot": "计划高缩放窗口深色-2026-11-06.png",
+      "inspector": "可打开、关闭且边界有效"
+    },
+    {
+      "label": "纵向窄窗口",
+      "viewport": {
+        "width": 560,
+        "height": 900
+      },
+      "theme": "light",
+      "width": 558,
+      "height": 834,
+      "scrollWidth": 558,
+      "scrollHeight": 834,
+      "size": "compact",
+      "screenshot": "计划纵向窄窗口浅色-2026-11-06.png",
+      "inspector": "可打开、关闭且边界有效"
+    },
+    {
+      "label": "纵向窄窗口",
+      "viewport": {
+        "width": 560,
+        "height": 900
+      },
+      "theme": "dark",
+      "width": 558,
+      "height": 834,
+      "scrollWidth": 558,
+      "scrollHeight": 834,
+      "size": "compact",
+      "screenshot": "计划纵向窄窗口深色-2026-11-06.png",
+      "inspector": "可打开、关闭且边界有效"
+    }
+  ],
+  "regression": "2000 字段末行筛掉后，清除筛选滚回并显示原选中字段",
+  "errors": []
+}

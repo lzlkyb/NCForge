@@ -1,0 +1,12 @@
+{
+  "gate": "test",
+  "recordedAt": "2026-11-06T03:32:19.361Z",
+  "command": "node node_modules/vitest/vitest.mjs run src/components/meta src/hooks/useMetaDocuments.test.tsx src/hooks/useMetaLayout.test.tsx src/hooks/useMetaGeneration.test.tsx src/hooks/useMetaDraft.test.tsx src/lib/metaEditor.test.ts src/lib/metaBulk.test.ts src/lib/metaCanvasModel.test.ts --maxWorkers=1",
+  "jobs": "1",
+  "startFreeKiB": 3604252,
+  "minimumSampledFreeKiB": 2633588,
+  "endFreeKiB": 3634708,
+  "elapsedSeconds": 69.14,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

@@ -115,6 +115,10 @@ pub struct BmfDetail {
     pub entities: Vec<crate::bmf_model::Entity>,
     pub enums: Vec<crate::bmf_model::EnumDef>,
     pub relations: Vec<crate::bmf_model::Relation>,
+    pub interfaces: Vec<crate::bmf_semantics::BusinessInterface>,
+    pub references: Vec<crate::bmf_semantics::Reference>,
+    pub dependencies: Vec<crate::bmf_semantics::Dependency>,
+    pub issues: Vec<Issue>,
     pub unknown_tags: Vec<String>,
 }
 
@@ -133,11 +137,12 @@ pub async fn bmf_index_scan(
     let list = roots(&primary, &overrides);
     let force = force.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || bmf_index::scan(&list, Some(&cache_dir), force))
-    .await
-    .map_err(|e| format!("索引任务失败：{e}"))
+        .await
+        .map_err(|e| format!("索引任务失败：{e}"))
 }
 
 fn build_detail(path: String, doc: BmfDoc, mtime_ms: u64) -> BmfDetail {
+    let issues = bmf_rules::check_doc(&doc, &path);
     BmfDetail {
         path,
         encoding: serde_json::to_value(doc.encoding)
@@ -156,15 +161,48 @@ fn build_detail(path: String, doc: BmfDoc, mtime_ms: u64) -> BmfDetail {
         entities: doc.entities,
         enums: doc.enums,
         relations: doc.relations,
+        interfaces: doc.interfaces,
+        references: doc.references,
+        dependencies: doc.dependencies,
+        issues,
         unknown_tags: doc.unknown_tags,
     }
 }
 
 /// 解析一份 BMF 并返回语义模型。只读；解析失败时把「哪一行、什么错」原样带回去。
 #[tauri::command]
-pub fn bmf_doc_detail(path: String) -> Result<BmfDetail, String> {
+pub async fn bmf_doc_detail(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<BmfDetail, String> {
+    let search_roots = semantic_roots(&*state.config.read().await);
+    tauri::async_runtime::spawn_blocking(move || read_detail(path, &search_roots))
+        .await
+        .map_err(|e| format!("读取任务失败：{e}"))?
+}
+
+fn semantic_roots(cfg: &AppConfig) -> Vec<PathBuf> {
+    let mut list = primary_root(cfg)
+        .map(|primary| {
+            roots(
+                &primary,
+                &eclipse_cp::active_overrides(&cfg.linked_overrides),
+            )
+            .into_iter()
+            .map(|r| r.path)
+            .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if let Ok(home) = nc_home::resolve(cfg.nc_home.as_deref()) {
+        list.push(PathBuf::from(home.root));
+    }
+    list
+}
+
+fn read_detail(path: String, search_roots: &[PathBuf]) -> Result<BmfDetail, String> {
     let p = PathBuf::from(&path);
-    let doc = BmfDoc::open(&p)?;
+    let mut doc = BmfDoc::open(&p)?;
+    crate::bmf_resolve::enrich(&mut doc, search_roots);
     let meta = std::fs::metadata(&p).map_err(|e| format!("读取文件信息失败：{e}"))?;
     let mtime_ms = meta
         .modified()
@@ -187,9 +225,18 @@ pub fn bmf_detail_text(path: String, text: String) -> Result<BmfDetail, String> 
 /// 结构校验（只读）。不连库：「已发布库结构」的漂移检查要等用户在数据库页连上测试库再做，
 /// 这里不替用户猜。
 #[tauri::command]
-pub fn bmf_validate(path: String) -> Result<Vec<Issue>, String> {
-    let doc = BmfDoc::open(Path::new(&path))?;
-    Ok(bmf_rules::check_doc(&doc, &path))
+pub async fn bmf_validate(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<Vec<Issue>, String> {
+    let search_roots = semantic_roots(&*state.config.read().await);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut doc = BmfDoc::open(Path::new(&path))?;
+        crate::bmf_resolve::enrich(&mut doc, &search_roots);
+        Ok(bmf_rules::check_doc(&doc, &path))
+    })
+    .await
+    .map_err(|e| format!("校验任务失败：{e}"))?
 }
 
 /// 生成 DDL / VO / 注册清单预览（纯内存，不写盘、不执行 SQL）。
@@ -312,45 +359,46 @@ pub async fn bmf_gen_apply(
     let selected = selected.unwrap_or_default();
     let force = force.unwrap_or(false);
 
-    let mut result = tauri::async_runtime::spawn_blocking(move || -> Result<ApplyResult, String> {
-        let prev = bmf_gen_manifest::load(&config_dir, &component)
-            .filter(|m| m.root.is_empty() || m.root.eq_ignore_ascii_case(&root_text));
-        let mut res = bmf_gen_manifest::apply(
-            &plan,
-            prev.as_ref(),
-            &root_path,
-            &selected,
-            force,
-            &backup_dir,
-        )?;
-        // 一个都没写就不动清单：generated_at 不能假装刚生成过。
-        if res.written > 0 {
-            let mut m = bmf_gen_manifest::build_manifest(
-                &bmf_path,
-                &root_text,
-                &bmf_sha,
-                bmf_version,
-                &profile_sha,
+    let mut result =
+        tauri::async_runtime::spawn_blocking(move || -> Result<ApplyResult, String> {
+            let prev = bmf_gen_manifest::load(&config_dir, &component)
+                .filter(|m| m.root.is_empty() || m.root.eq_ignore_ascii_case(&root_text));
+            let mut res = bmf_gen_manifest::apply(
                 &plan,
+                prev.as_ref(),
+                &root_path,
+                &selected,
+                force,
+                &backup_dir,
             )?;
-            // 保留旧清单里本次不再生成的文件（orphan）：它们还在盘上，用户需要
-            // 看到「BMF 已不生成，但是否删除由人决定」。
-            if let Some(old) = prev.as_ref() {
-                let known: HashSet<String> =
-                    m.artifacts.iter().map(|e| e.path.clone()).collect();
-                for e in &old.artifacts {
-                    if !known.contains(&e.path) {
-                        m.artifacts.push(e.clone());
+            // 一个都没写就不动清单：generated_at 不能假装刚生成过。
+            if res.written > 0 {
+                let mut m = bmf_gen_manifest::build_manifest(
+                    &bmf_path,
+                    &root_text,
+                    &bmf_sha,
+                    bmf_version,
+                    &profile_sha,
+                    &plan,
+                )?;
+                // 保留旧清单里本次不再生成的文件（orphan）：它们还在盘上，用户需要
+                // 看到「BMF 已不生成，但是否删除由人决定」。
+                if let Some(old) = prev.as_ref() {
+                    let known: HashSet<String> =
+                        m.artifacts.iter().map(|e| e.path.clone()).collect();
+                    for e in &old.artifacts {
+                        if !known.contains(&e.path) {
+                            m.artifacts.push(e.clone());
+                        }
                     }
                 }
+                let p = bmf_gen_manifest::save(&config_dir, &component, &m)?;
+                res.manifest = nc_home::strip_verbatim(&p).to_string_lossy().into_owned();
             }
-            let p = bmf_gen_manifest::save(&config_dir, &component, &m)?;
-            res.manifest = nc_home::strip_verbatim(&p).to_string_lossy().into_owned();
-        }
-        Ok(res)
-    })
-    .await
-    .map_err(|e| format!("保存任务失败：{e}"))??;
+            Ok(res)
+        })
+        .await
+        .map_err(|e| format!("保存任务失败：{e}"))??;
     result.timings.parse_ms = parse_plan_ms;
     result.timings.total_ms += parse_plan_ms;
     Ok(result)
@@ -397,6 +445,73 @@ pub fn bmf_edit_preview(path: String, ops: Vec<EditOp>) -> Result<String, String
     Ok(diff)
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftPreview {
+    pub detail: BmfDetail,
+    pub diff: String,
+    pub base_sha: String,
+    pub ops: Vec<EditOp>,
+    pub blocking_issues: Vec<Issue>,
+}
+
+/// 文档草稿的完整预检：返回稳定 ID、真实投影和差异；不保存任何文件。
+#[tauri::command]
+pub async fn bmf_draft_preview(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    ops: Vec<EditOp>,
+    expected_sha: String,
+) -> Result<DraftPreview, String> {
+    let search_roots = semantic_roots(&*state.config.read().await);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut doc = BmfDoc::open(Path::new(&path))?;
+        let base_sha = bmf_write::sha256(&doc.bytes);
+        if base_sha != expected_sha {
+            return Err(
+                "CONFLICT: 文件已被外部修改（SHA-256 不一致），草稿已保留，请重新加载并核对".into(),
+            );
+        }
+        crate::bmf_resolve::enrich(&mut doc, &search_roots);
+        let ops = crate::bmf_transaction::stable_ops(&ops);
+        let (bytes, diff) = bmf_write::preview(&doc, &ops)?;
+        let mut projected = BmfDoc::from_bytes(PathBuf::from(&path), bytes)?;
+        crate::bmf_resolve::carry_definitions(&doc, &mut projected);
+        let blocking_issues = bmf_rules::introduced_errors(&doc, &projected, &path);
+        Ok(DraftPreview {
+            detail: build_detail(path, projected, 0),
+            diff,
+            base_sha,
+            ops,
+            blocking_issues,
+        })
+    })
+    .await
+    .map_err(|e| format!("草稿预检失败：{e}"))?
+}
+
+/// 大模型的原始 XML 按需获取；SHA 不一致时拒绝把旧选择定位到新内容。
+#[tauri::command]
+pub async fn bmf_node_source(
+    path: String,
+    id: String,
+    expected_sha: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let doc = BmfDoc::open(Path::new(&path))?;
+        if bmf_write::sha256(&doc.bytes) != expected_sha {
+            return Err("文件已被外部修改，请重新加载后查看源码".into());
+        }
+        let node = doc.find_node(&id).ok_or("找不到此对象的原始 XML")?;
+        if node.end - node.start > 2 * 1024 * 1024 {
+            return Err("此对象源码超过 2 MiB，请从文件页查看完整 BMF".into());
+        }
+        Ok(node.raw(&doc.bytes))
+    })
+    .await
+    .map_err(|e| format!("读取源码失败：{e}"))?
+}
+
 /// 编辑保存：确认后的写回。哈希冲突直接拒绝（提示重载），备份失败不写。
 ///
 /// `expected_sha` 是前端打开组件时拿到的 SHA-256。必须在这里比对：`save()` 内部
@@ -407,20 +522,57 @@ pub async fn bmf_edit_save(
     path: String,
     ops: Vec<EditOp>,
     expected_sha: Option<String>,
+    expected_definitions: Option<std::collections::HashMap<String, String>>,
+    strict: Option<bool>,
 ) -> Result<WriteResult, String> {
-    let (target, backup_dir) = {
+    let (target, backup_dir, search_roots) = {
         let cfg = state.config.read().await;
-        (safe_write_path(&cfg, &path)?, state.config_dir.join("bmf_backup"))
+        (
+            safe_write_path(&cfg, &path)?,
+            state.config_dir.join("bmf_backup"),
+            semantic_roots(&cfg),
+        )
     };
     tauri::async_runtime::spawn_blocking(move || {
         let current = std::fs::read(&target).map_err(|e| format!("读取 BMF 失败：{e}"))?;
         if let Some(expected) = expected_sha {
             if bmf_write::sha256(&current) != expected {
-                return Err("文件已被外部修改（SHA-256 不一致），请重新加载组件后再保存".to_string());
+                return Err(
+                    "文件已被外部修改（SHA-256 不一致），请重新加载组件后再保存".to_string()
+                );
             }
         }
-        let doc = BmfDoc::from_bytes(target.clone(), current)?;
-        bmf_write::save(&doc, &ops, &backup_dir)
+        let mut doc = BmfDoc::from_bytes(target.clone(), current)?;
+        crate::bmf_resolve::enrich(&mut doc, &search_roots);
+        if let Some(stamps) = expected_definitions {
+            for (id, sha) in stamps {
+                if !doc
+                    .interfaces
+                    .iter()
+                    .any(|i| i.id == id && i.external && i.definition_sha == sha)
+                {
+                    return Err("CONFLICT: 接口定义已被外部修改，请重新预览草稿后保存".into());
+                }
+            }
+        }
+        let bytes = bmf_write::apply(&doc, &ops)?;
+        if strict.unwrap_or(false) {
+            let mut projected = BmfDoc::from_bytes(target, bytes.clone())?;
+            crate::bmf_resolve::carry_definitions(&doc, &mut projected);
+            let blocking = bmf_rules::introduced_errors(&doc, &projected, &path);
+            if !blocking.is_empty() {
+                return Err(format!(
+                    "草稿新增校验错误，请修正后保存：{}",
+                    blocking
+                        .iter()
+                        .take(5)
+                        .map(|i| i.title.as_str())
+                        .collect::<Vec<_>>()
+                        .join("；")
+                ));
+            }
+        }
+        bmf_write::save_applied(&doc, bytes, &backup_dir)
     })
     .await
     .map_err(|e| format!("保存任务失败：{e}"))?
@@ -467,7 +619,10 @@ pub async fn bmf_references(
         let cfg = state.config.read().await;
         let primary = primary_root(&cfg)?;
         let overrides = eclipse_cp::active_overrides(&cfg.linked_overrides);
-        roots(&primary, &overrides).into_iter().map(|r| r.path).collect()
+        roots(&primary, &overrides)
+            .into_iter()
+            .map(|r| r.path)
+            .collect()
     };
     let target = PathBuf::from(path);
     tauri::async_runtime::spawn_blocking(move || {
@@ -656,14 +811,20 @@ mod tests {
         assert!(check_scaffold_target(Path::new("D:/w/uapbd/METADATA/demo.bmf"), "demo").is_ok());
         // 索引目录名与扩展名按 Windows 口径大小写不敏感
         assert!(check_scaffold_target(Path::new("D:/w/uapbd/metadata/DEMO.BMF"), "demo").is_ok());
-        assert!(check_scaffold_target(Path::new("D:/w/uapbd/demo.bmf"), "demo")
-            .unwrap_err()
-            .contains("METADATA"));
-        assert!(check_scaffold_target(Path::new("D:/w/uapbd/METADATA/demo.xml"), "demo")
-            .unwrap_err()
-            .contains(".bmf"));
-        assert!(check_scaffold_target(Path::new("D:/w/uapbd/METADATA/other.bmf"), "demo")
-            .unwrap_err()
-            .contains("组件编码"));
+        assert!(
+            check_scaffold_target(Path::new("D:/w/uapbd/demo.bmf"), "demo")
+                .unwrap_err()
+                .contains("METADATA")
+        );
+        assert!(
+            check_scaffold_target(Path::new("D:/w/uapbd/METADATA/demo.xml"), "demo")
+                .unwrap_err()
+                .contains(".bmf")
+        );
+        assert!(
+            check_scaffold_target(Path::new("D:/w/uapbd/METADATA/other.bmf"), "demo")
+                .unwrap_err()
+                .contains("组件编码")
+        );
     }
 }

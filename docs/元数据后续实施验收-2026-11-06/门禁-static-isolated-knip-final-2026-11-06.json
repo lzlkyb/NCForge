@@ -1,0 +1,15 @@
+{
+  "gate": "static-isolated-knip-final",
+  "recordedAt": "2026-11-06T05:06:53.267Z",
+  "command": "node node_modules/.cache/meta-completion/knip-copy.mjs",
+  "jobs": "1",
+  "waitedSeconds": 40,
+  "abortedForMemory": false,
+  "minimumStartFreeKiB": 3145728,
+  "startFreeKiB": 5050208,
+  "minimumSampledFreeKiB": 4572328,
+  "endFreeKiB": 5049204,
+  "elapsedSeconds": 27.19,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

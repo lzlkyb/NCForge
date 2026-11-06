@@ -1,0 +1,10 @@
+{
+  "source": "reviewed mismatch from full Rust regression",
+  "addedFixtures": [
+    "uap-real/exsystem.bmf",
+    "uap-real/general_interface.bmf",
+    "uap-real/matters.bmf",
+    "uap-real/structureorg.bmf"
+  ],
+  "existingFixtureDifferences": []
+}

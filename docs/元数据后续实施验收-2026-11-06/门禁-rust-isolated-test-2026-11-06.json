@@ -1,0 +1,12 @@
+{
+  "gate": "rust-isolated-test",
+  "recordedAt": "2026-11-06T04:07:17.345Z",
+  "command": "node D:\\AItool\\winapp\\nc-workbench\\desktop\\node_modules\\.cache\\meta-completion\\snapshot-1793937675785-metadata\\desktop\\scripts\\rust-gate.mjs test --no-default-features",
+  "jobs": "1",
+  "startFreeKiB": 3876892,
+  "minimumSampledFreeKiB": 2371608,
+  "endFreeKiB": 3831260,
+  "elapsedSeconds": 263.315,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

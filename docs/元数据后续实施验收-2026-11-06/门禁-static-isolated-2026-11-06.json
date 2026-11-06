@@ -1,0 +1,15 @@
+{
+  "gate": "static-isolated",
+  "recordedAt": "2026-11-06T05:02:56.217Z",
+  "command": "node node_modules/.cache/meta-completion/check-static.mjs eslint",
+  "jobs": "1",
+  "waitedSeconds": 20,
+  "abortedForMemory": false,
+  "minimumStartFreeKiB": 2936012.8,
+  "startFreeKiB": 3476100,
+  "minimumSampledFreeKiB": 3026944,
+  "endFreeKiB": 3421248,
+  "elapsedSeconds": 4.752,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

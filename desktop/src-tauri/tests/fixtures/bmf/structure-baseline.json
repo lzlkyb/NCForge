@@ -4,6 +4,731 @@
       "error": true,
       "parse": "error"
     },
+    "uap-real/exsystem.bmf": {
+      "doc": {
+        "component": {
+          "displayName": "exsystem",
+          "genCodeStyle": "NC传统样式",
+          "industry": "",
+          "mainEntity": "94868b72-2445-411a-b8f6-b973a75f87db",
+          "metaType": "",
+          "name": "exsystem",
+          "namespace": "uapeai",
+          "ownModule": "uapeai",
+          "version": 79
+        },
+        "entities": [
+          {
+            "accessor": "nc.md.model.access.javamap.AggVOStyle",
+            "attrs": [
+              {
+                "dataType": "BS000010000100001051",
+                "dbType": "char",
+                "defaultValue": "",
+                "displayName": "外部系统信息主键",
+                "field": "pk_exsystem",
+                "fieldType": "char",
+                "isKey": true,
+                "length": 20,
+                "name": "pk_exsystem",
+                "nullable": false,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 0,
+                "style": "SINGLE",
+                "typeDisplayName": "UFID",
+                "typeName": "UFID"
+              },
+              {
+                "dataType": "BS000010000100001001",
+                "dbType": "varchar",
+                "defaultValue": "",
+                "displayName": "外部系统编码",
+                "field": "exsystemcode",
+                "fieldType": "varchar",
+                "isKey": false,
+                "length": 40,
+                "name": "exsystemcode",
+                "nullable": false,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 1,
+                "style": "SINGLE",
+                "typeDisplayName": "String",
+                "typeName": "String"
+              },
+              {
+                "dataType": "BS000010000100001058",
+                "dbType": "varchar",
+                "defaultValue": "",
+                "displayName": "外部系统名称",
+                "field": "exsystemname",
+                "fieldType": "varchar",
+                "isKey": false,
+                "length": 200,
+                "name": "exsystemname",
+                "nullable": false,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 2,
+                "style": "SINGLE",
+                "typeDisplayName": "多语文本",
+                "typeName": "Multilangtext"
+              },
+              {
+                "dataType": "c3d135a6-f8fd-49d0-8ee7-410fd4ae326c",
+                "dbType": "",
+                "defaultValue": "",
+                "displayName": "基础数据类型信息",
+                "field": "exsystemdoc",
+                "fieldType": "",
+                "isKey": false,
+                "length": null,
+                "name": "exsystemdoc",
+                "nullable": true,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "exsystemdoc",
+                "sequence": 3,
+                "style": "ARRAY",
+                "typeDisplayName": "基础数据类型信息",
+                "typeName": "exsystemdoc"
+              },
+              {
+                "dataType": "e6c91b56-517f-48cb-ad35-790512fa6198",
+                "dbType": "",
+                "defaultValue": "",
+                "displayName": "默认匹配规则",
+                "field": "deftranslator",
+                "fieldType": "decimal",
+                "isKey": false,
+                "length": 1,
+                "name": "deftranslator",
+                "nullable": false,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "enum",
+                "sequence": 4,
+                "style": "SINGLE",
+                "typeDisplayName": "匹配规则",
+                "typeName": "enum"
+              },
+              {
+                "dataType": "985be8a4-3a36-4778-8afe-2d8ed3902659",
+                "dbType": "",
+                "defaultValue": "~",
+                "displayName": "所属组织",
+                "field": "pk_org",
+                "fieldType": "varchar",
+                "isKey": false,
+                "length": 20,
+                "name": "pk_org",
+                "nullable": true,
+                "precision": null,
+                "refModel": "组织（包含全局）",
+                "refTarget": "",
+                "sequence": 5,
+                "style": "REF",
+                "typeDisplayName": "组织",
+                "typeName": "org"
+              }
+            ],
+            "displayName": "外部系统信息",
+            "fullClass": "nc.vo.pfxx.exsystem.ExsystemVO",
+            "isPrimary": true,
+            "keyAttr": "pk_exsystem",
+            "name": "exsystem",
+            "table": "xx_exsystem"
+          },
+          {
+            "accessor": "nc.md.model.access.javamap.NCBeanStyle",
+            "attrs": [
+              {
+                "dataType": "BS000010000100001051",
+                "dbType": "char",
+                "defaultValue": "",
+                "displayName": "基础档案翻译器信息主键",
+                "field": "pk_exsystemdoc",
+                "fieldType": "char",
+                "isKey": true,
+                "length": 20,
+                "name": "pk_exsystemdoc",
+                "nullable": false,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 0,
+                "style": "SINGLE",
+                "typeDisplayName": "UFID",
+                "typeName": "UFID"
+              },
+              {
+                "dataType": "b23f9974-94a4-4c86-bd31-d39e8ee643ef",
+                "dbType": "",
+                "defaultValue": "",
+                "displayName": "基础档案编码",
+                "field": "basicdatatypecode",
+                "fieldType": "varchar",
+                "isKey": false,
+                "length": 36,
+                "name": "basicdatatypecode",
+                "nullable": false,
+                "precision": null,
+                "refModel": "元数据实体",
+                "refTarget": "",
+                "sequence": 1,
+                "style": "REF",
+                "typeDisplayName": "实体",
+                "typeName": "entity"
+              },
+              {
+                "dataType": "e6c91b56-517f-48cb-ad35-790512fa6198",
+                "dbType": "",
+                "defaultValue": "",
+                "displayName": "基础档案匹配规则",
+                "field": "basicdoctranslator",
+                "fieldType": "decimal",
+                "isKey": false,
+                "length": 1,
+                "name": "basicdoctranslator",
+                "nullable": false,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "enum",
+                "sequence": 2,
+                "style": "SINGLE",
+                "typeDisplayName": "匹配规则",
+                "typeName": "enum"
+              }
+            ],
+            "displayName": "基础档案翻译器信息",
+            "fullClass": "nc.vo.pfxx.exsystem.ExsystemDocVO",
+            "isPrimary": false,
+            "keyAttr": "pk_exsystemdoc",
+            "name": "exsystemdoc",
+            "table": "xx_exsystemdoc"
+          }
+        ],
+        "enums": [
+          {
+            "dataType": "BS000010000100001004",
+            "displayName": "匹配规则",
+            "fullClass": "nc.vo.pfxx.exsystem.Matchrule",
+            "items": [
+              {
+                "display": "仅按对照表",
+                "hidden": false,
+                "value": "0"
+              },
+              {
+                "display": "按PK",
+                "hidden": false,
+                "value": "1"
+              },
+              {
+                "display": "按编码",
+                "hidden": false,
+                "value": "2"
+              },
+              {
+                "display": "按名称",
+                "hidden": false,
+                "value": "3"
+              }
+            ],
+            "name": "enum",
+            "typeName": "Integer"
+          }
+        ],
+        "relations": [
+          {
+            "kind": "busiitfconnection",
+            "name": "busiItf connection",
+            "source": "94868b72-2445-411a-b8f6-b973a75f87db",
+            "target": "9dec91eb-8651-4bda-952f-8fc6baaeae61"
+          },
+          {
+            "kind": "AggregationRelation",
+            "name": "Aggregation Relation",
+            "source": "94868b72-2445-411a-b8f6-b973a75f87db",
+            "target": "c3d135a6-f8fd-49d0-8ee7-410fd4ae326c"
+          },
+          {
+            "kind": "relation",
+            "name": "relation",
+            "source": "c3d135a6-f8fd-49d0-8ee7-410fd4ae326c",
+            "target": "94444981-d8ce-447e-ba82-cacdd0c15b88"
+          }
+        ]
+      },
+      "issues": [
+        {
+          "attr": "pk_org",
+          "code": "A012",
+          "entity": "exsystem",
+          "severity": "info"
+        },
+        {
+          "attr": "basicdatatypecode",
+          "code": "A012",
+          "entity": "exsystemdoc",
+          "severity": "info"
+        },
+        {
+          "attr": "basicdatatypecode",
+          "code": "A013",
+          "entity": "exsystemdoc",
+          "severity": "warn"
+        },
+        {
+          "attr": "exsystemcode",
+          "code": "A016",
+          "entity": "exsystem",
+          "severity": "info"
+        },
+        {
+          "attr": "exsystemname",
+          "code": "A016",
+          "entity": "exsystem",
+          "severity": "info"
+        },
+        {
+          "attr": "basicdatatypecode",
+          "code": "A016",
+          "entity": "exsystemdoc",
+          "severity": "info"
+        },
+        {
+          "attr": "basicdoctranslator",
+          "code": "A016",
+          "entity": "exsystemdoc",
+          "severity": "info"
+        },
+        {
+          "attr": "",
+          "code": "E004",
+          "entity": "exsystem",
+          "severity": "warn"
+        },
+        {
+          "attr": "",
+          "code": "E004",
+          "entity": "exsystemdoc",
+          "severity": "warn"
+        },
+        {
+          "attr": "",
+          "code": "I001",
+          "entity": "exsystem",
+          "severity": "info"
+        }
+      ],
+      "parse": "ok"
+    },
+    "uap-real/general_interface.bmf": {
+      "doc": {
+        "component": {
+          "displayName": "public",
+          "genCodeStyle": "NC传统样式",
+          "industry": "0",
+          "mainEntity": "",
+          "metaType": ".bmf",
+          "name": "public",
+          "namespace": "uap",
+          "ownModule": "baseapp",
+          "version": 20
+        },
+        "entities": [],
+        "enums": [],
+        "relations": []
+      },
+      "issues": [
+        {
+          "attr": "",
+          "code": "C003",
+          "entity": "",
+          "severity": "warn"
+        },
+        {
+          "attr": "",
+          "code": "C006",
+          "entity": "",
+          "severity": "info"
+        }
+      ],
+      "parse": "ok"
+    },
+    "uap-real/matters.bmf": {
+      "doc": {
+        "component": {
+          "displayName": "matters",
+          "genCodeStyle": "自定义样式",
+          "industry": "0",
+          "mainEntity": "bdac0325-e0ba-4b23-a621-ad50269fa316",
+          "metaType": "",
+          "name": "matters",
+          "namespace": "cabd",
+          "ownModule": "crm_uapbd",
+          "version": 10
+        },
+        "entities": [
+          {
+            "accessor": "nc.md.model.access.javamap.AggVOStyle",
+            "attrs": [
+              {
+                "dataType": "BS000010000100001051",
+                "dbType": "char",
+                "defaultValue": "",
+                "displayName": "营销事项主键",
+                "field": "pk_matters",
+                "fieldType": "char",
+                "isKey": true,
+                "length": 20,
+                "name": "pk_matters",
+                "nullable": false,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 0,
+                "style": "SINGLE",
+                "typeDisplayName": "UFID",
+                "typeName": "UFID"
+              },
+              {
+                "dataType": "BS000010000100001001",
+                "dbType": "varchar",
+                "defaultValue": "",
+                "displayName": "编码",
+                "field": "vcode",
+                "fieldType": "varchar",
+                "isKey": false,
+                "length": 50,
+                "name": "vcode",
+                "nullable": true,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 1,
+                "style": "SINGLE",
+                "typeDisplayName": "String",
+                "typeName": "String"
+              },
+              {
+                "dataType": "BS000010000100001058",
+                "dbType": "varchar",
+                "defaultValue": "",
+                "displayName": "事项名称",
+                "field": "vname",
+                "fieldType": "varchar",
+                "isKey": false,
+                "length": 200,
+                "name": "vname",
+                "nullable": true,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 2,
+                "style": "SINGLE",
+                "typeDisplayName": "多语文本",
+                "typeName": "Multilangtext"
+              },
+              {
+                "dataType": "3b6dd171-2900-47f3-bfbe-41e4483a2a65",
+                "dbType": "",
+                "defaultValue": "~",
+                "displayName": "所属集团",
+                "field": "pk_group",
+                "fieldType": "varchar",
+                "isKey": false,
+                "length": 20,
+                "name": "pk_group",
+                "nullable": true,
+                "precision": null,
+                "refModel": "集团(所有)",
+                "refTarget": "",
+                "sequence": 3,
+                "style": "REF",
+                "typeDisplayName": "组织_集团",
+                "typeName": "group"
+              },
+              {
+                "dataType": "945f38b6-48ec-43e6-bb09-77ec89a3728f",
+                "dbType": "",
+                "defaultValue": "~",
+                "displayName": "所属组织",
+                "field": "pk_org",
+                "fieldType": "varchar",
+                "isKey": false,
+                "length": 20,
+                "name": "pk_org",
+                "nullable": true,
+                "precision": null,
+                "refModel": "销售组织(所有)",
+                "refTarget": "",
+                "sequence": 4,
+                "style": "REF",
+                "typeDisplayName": "组织_业务单元_销售组织",
+                "typeName": "salesorg"
+              },
+              {
+                "dataType": "df1a50ce-e9d9-418f-b1e8-c406aa067a5c",
+                "dbType": "",
+                "defaultValue": "~",
+                "displayName": "所属组织版本",
+                "field": "pk_org_v",
+                "fieldType": "varchar",
+                "isKey": false,
+                "length": 20,
+                "name": "pk_org_v",
+                "nullable": true,
+                "precision": null,
+                "refModel": "销售组织版本",
+                "refTarget": "",
+                "sequence": 5,
+                "style": "REF",
+                "typeDisplayName": "组织_业务单元_销售组织版本信息",
+                "typeName": "salesorg_v"
+              }
+            ],
+            "displayName": "营销事项",
+            "fullClass": "nc.vo.cabd.mkma.mkmaplan.mkmamatters.MattersVO",
+            "isPrimary": true,
+            "keyAttr": "pk_matters",
+            "name": "matters",
+            "table": "cabd_matters"
+          }
+        ],
+        "enums": [],
+        "relations": [
+          {
+            "kind": "busiitfconnection",
+            "name": "busiItf connection",
+            "source": "bdac0325-e0ba-4b23-a621-ad50269fa316",
+            "target": "69b67ac3-4660-4690-a8f1-e10cbb5c9cc4"
+          }
+        ]
+      },
+      "issues": [
+        {
+          "attr": "pk_group",
+          "code": "A012",
+          "entity": "matters",
+          "severity": "info"
+        },
+        {
+          "attr": "pk_org",
+          "code": "A012",
+          "entity": "matters",
+          "severity": "info"
+        },
+        {
+          "attr": "pk_org_v",
+          "code": "A012",
+          "entity": "matters",
+          "severity": "info"
+        },
+        {
+          "attr": "",
+          "code": "C003",
+          "entity": "",
+          "severity": "warn"
+        },
+        {
+          "attr": "",
+          "code": "I001",
+          "entity": "matters",
+          "severity": "info"
+        }
+      ],
+      "parse": "ok"
+    },
+    "uap-real/structureorg.bmf": {
+      "doc": {
+        "component": {
+          "displayName": "体系组织",
+          "genCodeStyle": "NC传统样式",
+          "industry": "0",
+          "mainEntity": "6c51638f-ad11-491a-b550-8b54b42d6b0a",
+          "metaType": ".bmf",
+          "name": "structureorg",
+          "namespace": "uap",
+          "ownModule": "riaorg",
+          "version": 10
+        },
+        "entities": [
+          {
+            "accessor": "nc.md.model.access.javamap.POJOStyle",
+            "attrs": [
+              {
+                "dataType": "BS000010000100001051",
+                "dbType": "char",
+                "defaultValue": "",
+                "displayName": "体系组织主键",
+                "field": "pk_structure",
+                "fieldType": "char",
+                "isKey": true,
+                "length": 20,
+                "name": "pk_importentity",
+                "nullable": false,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 0,
+                "style": "SINGLE",
+                "typeDisplayName": "UFID",
+                "typeName": "UFID"
+              },
+              {
+                "dataType": "BS000010000100001051",
+                "dbType": "char",
+                "defaultValue": "",
+                "displayName": "上级",
+                "field": "pk_importentityparent",
+                "fieldType": "char",
+                "isKey": false,
+                "length": 20,
+                "name": "pk_importentityparent",
+                "nullable": true,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 1,
+                "style": "SINGLE",
+                "typeDisplayName": "UFID",
+                "typeName": "UFID"
+              },
+              {
+                "dataType": "BS000010000100001051",
+                "dbType": "char",
+                "defaultValue": "",
+                "displayName": "组织",
+                "field": "pk_org",
+                "fieldType": "char",
+                "isKey": false,
+                "length": 20,
+                "name": "pk_org",
+                "nullable": true,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 2,
+                "style": "SINGLE",
+                "typeDisplayName": "UFID",
+                "typeName": "UFID"
+              },
+              {
+                "dataType": "BS000010000100001051",
+                "dbType": "char",
+                "defaultValue": "",
+                "displayName": "集团",
+                "field": "pk_group",
+                "fieldType": "char",
+                "isKey": false,
+                "length": 20,
+                "name": "pk_group",
+                "nullable": true,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 3,
+                "style": "SINGLE",
+                "typeDisplayName": "UFID",
+                "typeName": "UFID"
+              },
+              {
+                "dataType": "BS000010000100001001",
+                "dbType": "varchar",
+                "defaultValue": "",
+                "displayName": "编码",
+                "field": "code",
+                "fieldType": "varchar",
+                "isKey": false,
+                "length": 50,
+                "name": "code",
+                "nullable": true,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 4,
+                "style": "SINGLE",
+                "typeDisplayName": "String",
+                "typeName": "String"
+              },
+              {
+                "dataType": "BS000010000100001001",
+                "dbType": "varchar",
+                "defaultValue": "",
+                "displayName": "名称",
+                "field": "name",
+                "fieldType": "varchar",
+                "isKey": false,
+                "length": 50,
+                "name": "name",
+                "nullable": true,
+                "precision": null,
+                "refModel": "",
+                "refTarget": "",
+                "sequence": 5,
+                "style": "SINGLE",
+                "typeDisplayName": "String",
+                "typeName": "String"
+              }
+            ],
+            "displayName": "体系组织",
+            "fullClass": "nc.vo.corg.StructureOrgVO",
+            "isPrimary": true,
+            "keyAttr": "pk_importentity",
+            "name": "structureorg",
+            "table": "uap_structureorg"
+          }
+        ],
+        "enums": [],
+        "relations": [
+          {
+            "kind": "ExtendConnection",
+            "name": "Extend Connection",
+            "source": "6c51638f-ad11-491a-b550-8b54b42d6b0a",
+            "target": "28416e6c-ae53-4a85-9e22-1ca2b7d31902"
+          },
+          {
+            "kind": "busiitfconnection",
+            "name": "busiItf connection",
+            "source": "6c51638f-ad11-491a-b550-8b54b42d6b0a",
+            "target": "29d245c5-c887-44c0-b97a-3409f5c3d5d1"
+          }
+        ]
+      },
+      "issues": [
+        {
+          "attr": "pk_importentity",
+          "code": "A005",
+          "entity": "structureorg",
+          "severity": "warn"
+        },
+        {
+          "attr": "",
+          "code": "C003",
+          "entity": "",
+          "severity": "warn"
+        },
+        {
+          "attr": "",
+          "code": "E004",
+          "entity": "structureorg",
+          "severity": "warn"
+        },
+        {
+          "attr": "",
+          "code": "I001",
+          "entity": "structureorg",
+          "severity": "info"
+        }
+      ],
+      "parse": "ok"
+    },
     "uapbd/demo_simple.bmf": {
       "doc": {
         "component": {

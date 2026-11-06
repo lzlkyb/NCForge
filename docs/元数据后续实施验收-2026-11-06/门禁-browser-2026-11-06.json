@@ -1,0 +1,12 @@
+{
+  "gate": "browser",
+  "recordedAt": "2026-11-06T03:40:42.792Z",
+  "command": "node scripts/meta-workbench-acceptance.mjs",
+  "jobs": "1",
+  "startFreeKiB": 3543932,
+  "minimumSampledFreeKiB": 2747632,
+  "endFreeKiB": 3489084,
+  "elapsedSeconds": 16.816,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

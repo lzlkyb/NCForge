@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { bmfEditSave } from "../../lib/bmf";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import type { MetaStage } from "../../lib/metaDraft";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 
@@ -15,6 +16,7 @@ export function MetaDeleteButton({
   what,
   onDone,
   onReload,
+  onStage,
 }: {
   path: string;
   sha: string;
@@ -23,6 +25,7 @@ export function MetaDeleteButton({
   what: string;
   onDone: () => void;
   onReload?: () => void;
+  onStage?: MetaStage;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -32,6 +35,10 @@ export function MetaDeleteButton({
     setBusy(true);
     setErr(null);
     try {
+      if (onStage) {
+        if (await onStage(`删除${what}`, [{ op: "deleteNode", id }])) { setOpen(false); onDone(); }
+        return;
+      }
       const r = await bmfEditSave(path, [{ op: "deleteNode", id }], sha);
       toast(r.changed ? `已删除${r.backup ? "（已备份）" : ""}` : "文件没有变化", "success");
       setOpen(false);
@@ -70,7 +77,7 @@ export function MetaDeleteButton({
           zIndex={1300}
           variant="destructive"
           title={`删除${what}？`}
-          description="仍被其它节点引用的对象会被后端拒绝；保存前会自动备份原文件。"
+          description={onStage ? "删除加入草稿，可撤销；保存后生效。仍被引用的对象需要先解除依赖。" : "仍被其它节点引用的对象会被后端拒绝；保存前会自动备份原文件。"}
           confirmLabel="删除"
           onCancel={() => setOpen(false)}
           onConfirm={() => void run()}

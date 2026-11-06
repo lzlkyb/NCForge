@@ -1,0 +1,12 @@
+{
+  "gate": "rust-test",
+  "recordedAt": "2026-11-06T03:53:24.962Z",
+  "command": "node scripts/rust-gate.mjs test --no-default-features",
+  "jobs": "1",
+  "startFreeKiB": 4050968,
+  "minimumSampledFreeKiB": 1852504,
+  "endFreeKiB": 3209080,
+  "elapsedSeconds": 277.208,
+  "exitCode": 101,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

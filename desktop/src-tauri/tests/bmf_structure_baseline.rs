@@ -1,17 +1,19 @@
-//! 结构回归门禁（合成 BMF）。
+//! 结构回归门禁（仓内合成 BMF 与本机原始 UAP BMF）。
 //!
 //! 目的：证明**我们自己不会回归**——解析 → 语义模型 → 校验结论这条链在样本上的输出，
 //! 必须与仓库里签入的基线完全一致。任何解析器/规则改动只要改变了语义结果，这里就会红。
 //!
 //! 边界（必须写清楚，避免把这份门禁当成保真证明）：
-//! - 样本是**仓内合成**的，不是官方 golden 样本；它证明的是「自洽 + 不回归」，
+//! - 合成样本与本机 NC 1909 原始样本都不是官方 Parser 的 golden 结果；它证明的是「自洽 + 不回归」，
 //!   不能证明「与官方 Parser 对任意真实 BMF 的解析结果一致」。
-//! - 官方 golden 样本到位后，把真实样本加入 fixtures、保留同一套规范化与比对逻辑，
+//! - 原始样本的来源与字节 SHA 见 uap-real/provenance.json，另有无损写回集成测试。
+//! - 官方 golden 结果到位后，保留同一套规范化与比对逻辑，
 //!   再补一条「解析结果 == 官方结果」的断言，即可升级为保真门禁。
 //!
 //! 基线更新（只在**确认改动是有意为之**后执行）：
 //! ```text
-//! BMF_BASELINE_UPDATE=1 cargo test --test bmf_structure_baseline
+//! cd desktop
+//! BMF_BASELINE_UPDATE=1 node scripts/rust-gate.mjs test --no-default-features --test bmf_structure_baseline
 //! ```
 //! 然后逐项 review 基线 diff 再提交——盲目更新基线等于关掉门禁。
 
@@ -25,7 +27,10 @@ use serde_json::{json, Value};
 const UPDATE_ENV: &str = "BMF_BASELINE_UPDATE";
 
 fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("bmf")
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("bmf")
 }
 
 fn baseline_path() -> PathBuf {
@@ -206,7 +211,7 @@ fn synthetic_bmf_structure_matches_baseline() {
 
     if actual != expected {
         panic!(
-            "结构回归：合成 BMF 的语义快照与基线不一致。\n\
+            "结构回归：BMF 的语义快照与基线不一致。\n\
              \n=== 期望（基线）===\n{}\n\n=== 实际 ===\n{}\n\n\
              如果这次变化是有意为之，先 review 差异，再运行 \
              BMF_BASELINE_UPDATE=1 cargo test --test bmf_structure_baseline 更新基线。",
@@ -229,7 +234,10 @@ fn normalization_distinguishes_semantic_changes() {
     let original = BmfDoc::open(simple).unwrap();
     let text = String::from_utf8(original.bytes.clone()).unwrap();
     let mutated_text = text.replace("length=\"200\"", "length=\"100\"");
-    assert_ne!(text, mutated_text, "反例注入没有生效：样本里找不到 length=200");
+    assert_ne!(
+        text, mutated_text,
+        "反例注入没有生效：样本里找不到 length=200"
+    );
 
     let mutated = BmfDoc::from_bytes(simple.clone(), mutated_text.into_bytes()).unwrap();
     assert_ne!(
@@ -239,10 +247,7 @@ fn normalization_distinguishes_semantic_changes() {
     );
 
     // 注释/未知节点的变化不应影响语义快照：它们不是结构。
-    let noisy_text = text.replace(
-        "<celllist>",
-        "<celllist><!-- 注释不影响结构 -->",
-    );
+    let noisy_text = text.replace("<celllist>", "<celllist><!-- 注释不影响结构 -->");
     let noisy = BmfDoc::from_bytes(simple.clone(), noisy_text.into_bytes()).unwrap();
     assert_eq!(
         normalize_doc(&original),

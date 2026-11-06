@@ -1,19 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  bmfGenApply,
-  bmfGenDiff,
-  bmfGeneratePlan,
-  bmfValidate,
-  type BmfArtifactStatus,
-  type BmfGenApply,
-  type BmfGenPlan,
-  type BmfGenProfile,
-  type BmfIssue,
-} from "../../lib/bmf";
-import { pickFolder, pickFolderError } from "../../lib/folderPicker";
+import { useEffect, useState } from "react";
+import { useMetaGeneration } from "../../hooks/useMetaGeneration";
+
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
-import { toast } from "../ui/toast";
+
 import { GenArtifacts } from "./GenArtifacts";
 import { GenConfigBar } from "./GenConfigBar";
 import { MetaDdlRun } from "./MetaDdlRun";
@@ -24,11 +14,6 @@ const WRITE_LABEL: Record<string, string> = {
   skipped: "已跳过",
 };
 
-/** BMF 所在目录下的 `gen`：工作区内的默认落盘位置，用户可改。 */
-function suggestDir(bmfPath: string): string {
-  const dir = bmfPath.replace(/[\\/][^\\/]+$/, "");
-  return dir ? `${dir}\\gen` : "";
-}
 
 /**
  * 生成中心（P0）：一次解析出全部产物图，配置即时预览，落盘前先看漂移。
@@ -37,133 +22,17 @@ function suggestDir(bmfPath: string): string {
  * 解析文件、不在前端拼内容，切产物只是切一段已渲染好的文本。
  */
 export function MetaGenerate({ path, component }: { path: string; component?: string }) {
-  const [profile, setProfile] = useState<BmfGenProfile | null>(null);
-  const [plan, setPlan] = useState<BmfGenPlan | null>(null);
-  const [statuses, setStatuses] = useState<Record<string, BmfArtifactStatus>>({});
+  const gen = useMetaGeneration(path);
+  const { profile, plan, statuses, root, force, busy, applying, err, diffErr, diffMs, result, issues, generate, pick, setRoot, setForce } = gen;
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [root, setRoot] = useState(() => suggestDir(path));
-  const [force, setForce] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [applying, setApplying] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [diffErr, setDiffErr] = useState<string | null>(null);
-  const [diffMs, setDiffMs] = useState<number | null>(null);
-  const [result, setResult] = useState<BmfGenApply | null>(null);
-  const [issues, setIssues] = useState<BmfIssue[] | null>(null);
-  const seq = useRef(0);
-
-  const generate = useCallback(
-    async (next: BmfGenProfile | null) => {
-      const mine = ++seq.current;
-      setBusy(true);
-      setErr(null);
-      setResult(null);
-      try {
-        // 校验与产物图并行：校验失败不影响预览（问题列表单独给），但 error 会挡住落盘。
-        const [r, found] = await Promise.all([
-          bmfGeneratePlan(path, next),
-          bmfValidate(path).catch(() => null),
-        ]);
-        if (mine !== seq.current) return;
-        setPlan(r);
-        setIssues(found);
-        setProfile(r.profile);
-        // 注册清单默认不落盘：它是给「贴到别处」的辅助物，不是组件源码。
-        setSelected(new Set(r.artifacts.filter((a) => a.kind !== "registry").map((a) => a.id)));
-        setActiveId(r.artifacts[0]?.id ?? null);
-      } catch (e) {
-        if (mine !== seq.current) return;
-        // 失败时清掉上一轮产物：否则用户会以为这些文件来自当前 BMF。
-        setPlan(null);
-        setProfile(next);
-        setStatuses({});
-        setActiveId(null);
-        setIssues(null);
-        setErr(String(e));
-      } finally {
-        if (mine === seq.current) setBusy(false);
-      }
-    },
-    [path],
-  );
-
   useEffect(() => {
-    void generate(null);
-  }, [generate]);
-
-  const refreshDiff = useCallback(
-    async (target: BmfGenPlan) => {
-      const raw = root.trim();
-      setDiffErr(null);
-      if (!raw) {
-        // 没有落盘根就谈不上漂移：不要给每个产物挂一个假的「新文件」。
-        setStatuses({});
-        setDiffMs(null);
-        return;
-      }
-      try {
-        const d = await bmfGenDiff(path, target.profile, undefined, raw);
-        setStatuses(Object.fromEntries(d.items.map((i) => [i.id, i])));
-        setDiffMs(d.timings.diffMs);
-      } catch (e) {
-        setStatuses({});
-        setDiffMs(null);
-        setDiffErr(String(e));
-      }
-    },
-    [path, root],
-  );
-
-  useEffect(() => {
-    if (plan) void refreshDiff(plan);
-  }, [plan, refreshDiff]);
-
-  const changeProfile = (next: BmfGenProfile) => {
-    setProfile(next);
-    void generate(next);
-  };
-
-  const pick = async () => {
-    try {
-      const dir = await pickFolder({ title: "选择生成物落盘目录", defaultPath: root || undefined });
-      if (dir) setRoot(dir);
-    } catch (e) {
-      setErr(pickFolderError(e));
-    }
-  };
-
+    setSelected(new Set(plan?.artifacts.filter((a) => a.kind !== "registry").map((a) => a.id) ?? []));
+    setActiveId(plan?.artifacts[0]?.id ?? null);
+  }, [plan]);
   const errorCount = issues?.filter((i) => i.severity === "error").length ?? 0;
   const warnCount = issues?.filter((i) => i.severity === "warn").length ?? 0;
-  const blocked = errorCount > 0;
-
-  const apply = async () => {
-    if (!plan || !profile) return;
-    if (blocked) {
-      setErr("存在校验错误，先修复再落盘");
-      return;
-    }
-    const raw = root.trim();
-    if (!raw) {
-      setErr("请先选择落盘目录");
-      return;
-    }
-    setApplying(true);
-    setErr(null);
-    try {
-      const r = await bmfGenApply(path, profile, undefined, raw, [...selected], force);
-      setResult(r);
-      if (r.written > 0) toast(`已写入 ${r.written} 个文件`, "success");
-      else toast("没有需要写入的文件", "info");
-      await refreshDiff(plan);
-    } catch (e) {
-      setResult(null);
-      setErr(String(e));
-    } finally {
-      setApplying(false);
-    }
-  };
-
+  const blocked = issues === null || errorCount > 0;
   const active = plan?.artifacts.find((a) => a.id === activeId);
 
   return (
@@ -182,9 +51,9 @@ export function MetaGenerate({ path, component }: { path: string; component?: st
           <Button
             size="sm"
             variant="outline"
-            onClick={() => void apply()}
+            onClick={() => void gen.apply(selected)}
             disabled={busy || applying || !plan || blocked}
-            title={blocked ? "校验存在错误，先修复再落盘" : undefined}
+            title={blocked ? "先完成规则校验并修复错误，再落盘" : undefined}
           >
             <Icon name="download" size={13} /> {applying ? "写入中…" : "写入磁盘"}
           </Button>
@@ -197,14 +66,15 @@ export function MetaGenerate({ path, component }: { path: string; component?: st
 
       {profile && plan && (
         <>
-          <GenConfigBar profile={profile} disabled={busy || applying} onChange={changeProfile} />
+          <GenConfigBar profile={profile} disabled={busy || applying} onChange={(next) => void generate(next)} />
 
           {issues && (
             <p className={`meta-gen-check${blocked ? " is-bad" : ""}`}>
               规则校验：{errorCount} 错误 · {warnCount} 警告
-              {blocked ? "；错误未清零前禁止落盘（先在「校验」页修复）" : ""}
+              {blocked ? "；错误未清零前禁止落盘（先在「校验问题」中修复）" : ""}
             </p>
           )}
+          {issues === null && !busy && <p className="meta-error">规则校验未完成，请重新生成后再落盘。</p>}
 
           {plan.warnings.length > 0 && (
             <div className="meta-warn-box">
@@ -222,6 +92,7 @@ export function MetaGenerate({ path, component }: { path: string; component?: st
               <input
                 className="meta-export-input"
                 value={root}
+                disabled={applying}
                 onChange={(e) => setRoot(e.target.value)}
                 placeholder="工作区内的目录，如 D:\proj\gen"
                 aria-label="生成物落盘目录"

@@ -1,0 +1,12 @@
+{
+  "gate": "rust-meta",
+  "recordedAt": "2026-11-06T10:49:50.1830759+08:00",
+  "command": "node scripts/rust-gate.mjs test --no-default-features bmf",
+  "jobs": "3",
+  "startFreeKiB": 4537140,
+  "minimumSampledFreeKiB": 1725052,
+  "endFreeKiB": 4369888,
+  "elapsedSeconds": 87.05,
+  "exitCode": 101,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

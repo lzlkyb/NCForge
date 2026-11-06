@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::workspace::{detect_encoding, decode_lossy, Eol, TextEncoding};
+use crate::workspace::{decode_lossy, detect_encoding, Eol, TextEncoding};
 
 /// 一个 XML 属性。`value_span` 指向引号**之间**的原始字节，M2 改属性时只替换这一段。
 #[derive(Debug, Clone)]
@@ -119,7 +119,10 @@ fn skip_misc(b: &[u8], mut i: usize) -> Result<usize, String> {
 }
 
 fn find_after(b: &[u8], from: usize, pat: &[u8]) -> Result<usize, String> {
-    if let Some(k) = b[from.min(b.len())..].windows(pat.len()).position(|w| w == pat) {
+    if let Some(k) = b[from.min(b.len())..]
+        .windows(pat.len())
+        .position(|w| w == pat)
+    {
         Ok(from + k + pat.len())
     } else {
         Err(format!("未闭合的标记，起点字节偏移 {from}"))
@@ -208,7 +211,9 @@ fn parse_element(b: &[u8], start: usize) -> Result<(XmlNode, usize), String> {
             }
             Some(_) => {
                 let astart = i;
-                while i < b.len() && !b[i].is_ascii_whitespace() && !matches!(b[i], b'=' | b'/' | b'>')
+                while i < b.len()
+                    && !b[i].is_ascii_whitespace()
+                    && !matches!(b[i], b'=' | b'/' | b'>')
                 {
                     i += 1;
                 }
@@ -248,7 +253,7 @@ fn parse_element(b: &[u8], start: usize) -> Result<(XmlNode, usize), String> {
     }
 }
 
-fn decode_entities(s: &str) -> String {
+pub(crate) fn decode_entities(s: &str) -> String {
     if !s.contains('&') {
         return s.to_string();
     }
@@ -269,7 +274,9 @@ fn decode_entities(s: &str) -> String {
             "amp" => Some('&'),
             "quot" => Some('"'),
             "apos" => Some('\''),
-            _ if ent.starts_with("#x") => u32::from_str_radix(&ent[2..], 16).ok().and_then(char::from_u32),
+            _ if ent.starts_with("#x") => u32::from_str_radix(&ent[2..], 16)
+                .ok()
+                .and_then(char::from_u32),
             _ if ent.starts_with('#') => ent[1..].parse::<u32>().ok().and_then(char::from_u32),
             _ => None,
         };
@@ -352,6 +359,9 @@ pub struct Entity {
     pub key_attr_id: String,
     pub attrs: Vec<Attr>,
     pub raw: String,
+    pub interface_ids: Vec<String>,
+    pub mappings: Vec<crate::bmf_semantics::InterfaceMapping>,
+    pub accessor_config: crate::bmf_semantics::AccessorConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -386,6 +396,12 @@ pub struct Relation {
     pub target: String,
     pub src_attr_id: String,
     pub target_attr_id: String,
+    pub display_name: String,
+    pub real_source: String,
+    pub real_target: String,
+    pub source_constraint: String,
+    pub target_constraint: String,
+    pub implementation_class: String,
 }
 
 /// 解析成功的一份 BMF。`bytes` 保留原样，写回时以它为底。
@@ -397,10 +413,14 @@ pub struct BmfDoc {
     pub eol: Eol,
     pub has_bom: bool,
     pub root: XmlNode,
+    id_paths: std::collections::HashMap<String, Vec<usize>>,
     pub component: BmfComponent,
     pub entities: Vec<Entity>,
     pub enums: Vec<EnumDef>,
     pub relations: Vec<Relation>,
+    pub interfaces: Vec<crate::bmf_semantics::BusinessInterface>,
+    pub references: Vec<crate::bmf_semantics::Reference>,
+    pub dependencies: Vec<crate::bmf_semantics::Dependency>,
     /// 顶层出现过的、我们不认识的标签（原样保留，只在检查器提示）。
     pub unknown_tags: Vec<String>,
 }
@@ -426,7 +446,11 @@ impl BmfDoc {
             namespace: root.attr_or("namespace", ""),
             own_module: root.attr_or("ownModule", ""),
             gen_code_style: root.attr_or("gencodestyle", ""),
-            version: root.attr("version").and_then(num).map(|v| v as i32).unwrap_or(0),
+            version: root
+                .attr("version")
+                .and_then(num)
+                .map(|v| v as i32)
+                .unwrap_or(0),
             main_entity: root.attr_or("mainEntity", ""),
             industry: root.attr_or("industry", ""),
             meta_type: root.attr_or("metaType", ""),
@@ -435,6 +459,9 @@ impl BmfDoc {
         let mut entities = Vec::new();
         let mut enums = Vec::new();
         let mut relations = Vec::new();
+        let mut interfaces = Vec::new();
+        let mut references = Vec::new();
+        let mut dependencies = Vec::new();
         let mut unknown_tags = Vec::new();
         for child in &root.children {
             match child.name.as_str() {
@@ -443,6 +470,12 @@ impl BmfDoc {
                         match cell.name.as_str() {
                             "entity" => entities.push(read_entity(cell, &bytes)),
                             "Enumerate" => enums.push(read_enum(cell, &bytes)),
+                            "busiIterface" => {
+                                interfaces.push(crate::bmf_semantics::read_interface(cell))
+                            }
+                            "Reference" => {
+                                references.push(crate::bmf_semantics::read_reference(cell))
+                            }
                             other => push_unique(&mut unknown_tags, other),
                         }
                     }
@@ -451,7 +484,11 @@ impl BmfDoc {
                     for c in &child.children {
                         if matches!(
                             c.name.as_str(),
-                            "AggregationRelation" | "busiitfconnection" | "Reference"
+                            "AggregationRelation"
+                                | "busiitfconnection"
+                                | "Reference"
+                                | "relation"
+                                | "ExtendConnection"
                         ) {
                             relations.push(Relation {
                                 id: c.attr_or("id", ""),
@@ -459,22 +496,46 @@ impl BmfDoc {
                                 name: c.attr_or("name", ""),
                                 source: c.attr_or("source", ""),
                                 target: c.attr_or("target", ""),
-                                src_attr_id: c.attr_or("srcAttributeid", c.attr("srcAttributeId").unwrap_or("")),
+                                src_attr_id: c.attr_or(
+                                    "srcAttributeid",
+                                    c.attr("srcAttributeId").unwrap_or(""),
+                                ),
                                 target_attr_id: c.attr_or("targetAttributeid", ""),
+                                display_name: c.attr_or("displayName", ""),
+                                real_source: c
+                                    .attr_or("realsource", c.attr("source").unwrap_or("")),
+                                real_target: c
+                                    .attr_or("realtarget", c.attr("target").unwrap_or("")),
+                                source_constraint: c.attr_or("sourceConstraint", ""),
+                                target_constraint: c.attr_or("targetConstraint", ""),
+                                implementation_class: c.attr_or("bizItfImpClassName", ""),
                             });
                         } else {
                             push_unique(&mut unknown_tags, &c.name);
                         }
                     }
                 }
-                "refdepends" | "refdependLoseIDs" | "cellRemoveLog" | "rulers" => {}
+                "refdepends" => {
+                    dependencies.extend(
+                        child
+                            .children
+                            .iter()
+                            .filter(|n| n.name == "dependfile")
+                            .map(|n| crate::bmf_semantics::Dependency {
+                                entity_id: n.attr_or("entityid", ""),
+                                metadata_path: crate::bmf_semantics::text(n, &bytes),
+                            }),
+                    );
+                }
+                "refdependLoseIDs" | "cellRemoveLog" | "rulers" => {}
                 other => push_unique(&mut unknown_tags, other),
             }
         }
 
         // dataType 指向实体/枚举的，补出可读名字：检查器里只看到一串 GUID 没法判断
         // 「这个参照到底指向谁」。
-        let mut targets: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut targets: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         for e in &entities {
             targets.insert(e.id.clone(), e.name.clone());
         }
@@ -489,6 +550,22 @@ impl BmfDoc {
             }
         }
 
+        let mut id_paths = std::collections::HashMap::new();
+        fn index(
+            n: &XmlNode,
+            path: &mut Vec<usize>,
+            out: &mut std::collections::HashMap<String, Vec<usize>>,
+        ) {
+            if let Some(id) = n.attr("id") {
+                out.entry(id.to_string()).or_insert_with(|| path.clone());
+            }
+            for (i, child) in n.children.iter().enumerate() {
+                path.push(i);
+                index(child, path, out);
+                path.pop();
+            }
+        }
+        index(&root, &mut Vec::new(), &mut id_paths);
         Ok(Self {
             path,
             bytes,
@@ -496,10 +573,14 @@ impl BmfDoc {
             eol,
             has_bom,
             root,
+            id_paths,
             component,
             entities,
             enums,
             relations,
+            interfaces,
+            references,
+            dependencies,
             unknown_tags,
         })
     }
@@ -511,17 +592,24 @@ impl BmfDoc {
     }
 
     pub fn find_node(&self, id: &str) -> Option<&XmlNode> {
-        fn walk<'a>(n: &'a XmlNode, id: &str) -> Option<&'a XmlNode> {
-            if n.attr("id") == Some(id) {
-                return Some(n);
-            }
-            n.children.iter().find_map(|c| walk(c, id))
+        let mut node = &self.root;
+        for i in self.id_paths.get(id)? {
+            node = node.children.get(*i)?;
         }
-        walk(&self.root, id)
+        Some(node)
     }
 
     pub fn node_xml(&self, id: &str) -> Option<String> {
         self.find_node(id).map(|n| n.raw(&self.bytes))
+    }
+}
+
+/// 大文档不重复携带实体与字段整段 XML；原字节仍保存在 doc，源码按需读取。
+fn inline_raw(node: &XmlNode, bytes: &[u8]) -> String {
+    if bytes.len() > 1024 * 1024 || node.end - node.start > 64 * 1024 {
+        String::new()
+    } else {
+        node.raw(bytes)
     }
 }
 
@@ -545,14 +633,20 @@ fn read_entity(n: &XmlNode, bytes: &[u8]) -> Entity {
                 db_type: a.attr_or("dbtype", ""),
                 field_type: a.attr_or("fieldType", ""),
                 length: a.attr("length").and_then(num),
-                precision: a.attr("precise").and_then(num),
+                precision: a
+                    .attr("precise")
+                    .or_else(|| a.attr("precision"))
+                    .and_then(num),
                 is_key: bool_attr(a.attr_or("isKey", "false").as_str()),
                 nullable: bool_attr(a.attr_or("isNullable", "true").as_str()),
                 default_value: a.attr_or("defaultValue", ""),
                 ref_model: a.attr_or("refModelName", ""),
-                sequence: a.attr("sequence").and_then(|s| s.parse::<i32>().ok()).unwrap_or(0),
+                sequence: a
+                    .attr("sequence")
+                    .and_then(|s| s.parse::<i32>().ok())
+                    .unwrap_or(0),
                 ref_target: String::new(),
-                raw: a.raw(bytes),
+                raw: inline_raw(a, bytes),
             });
         }
     }
@@ -563,11 +657,14 @@ fn read_entity(n: &XmlNode, bytes: &[u8]) -> Entity {
         display_name: n.attr_or("displayName", ""),
         full_class: n.attr_or("fullClassName", ""),
         table: n.attr_or("tableName", ""),
-        accessor: n.attr_or("accessorClassName", ""),
+        accessor: n.attr_or("accessorClassName", n.attr("accessor").unwrap_or("")),
         is_primary: bool_attr(n.attr_or("isPrimary", "false").as_str()),
         key_attr_id: n.attr_or("keyAttributeId", ""),
         attrs,
-        raw: n.raw(bytes),
+        raw: inline_raw(n, bytes),
+        interface_ids: crate::bmf_semantics::entity_interfaces(n, bytes),
+        mappings: crate::bmf_semantics::entity_mappings(n),
+        accessor_config: crate::bmf_semantics::entity_accessor(n),
     }
 }
 
@@ -601,7 +698,7 @@ fn read_enum(n: &XmlNode, bytes: &[u8]) -> EnumDef {
         data_type: n.attr_or("dataType", ""),
         full_class: n.attr_or("fullClassName", ""),
         items,
-        raw: n.raw(bytes),
+        raw: inline_raw(n, bytes),
     }
 }
 
@@ -695,7 +792,13 @@ mod tests {
         let node = d.find_node("e1").unwrap();
         let a = node.attr("name").unwrap();
         assert_eq!(a, "Sz02HVO");
-        let at = &d.bytes[node.attrs.iter().find(|x| x.name == "name").unwrap().value_span.clone()];
+        let at = &d.bytes[node
+            .attrs
+            .iter()
+            .find(|x| x.name == "name")
+            .unwrap()
+            .value_span
+            .clone()];
         assert_eq!(std::str::from_utf8(at).unwrap(), "Sz02HVO");
         assert_eq!(d.line_of(node.start), 4);
     }

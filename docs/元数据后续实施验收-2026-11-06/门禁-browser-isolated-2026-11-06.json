@@ -1,0 +1,15 @@
+{
+  "gate": "browser-isolated",
+  "recordedAt": "2026-11-06T04:31:48.046Z",
+  "command": "node D:\\AItool\\winapp\\nc-workbench\\desktop\\node_modules\\.cache\\meta-completion\\snapshot-1793937675785-metadata\\desktop\\scripts\\meta-workbench-acceptance.mjs",
+  "jobs": "1",
+  "waitedSeconds": 0,
+  "abortedForMemory": false,
+  "minimumStartFreeKiB": 3145728,
+  "startFreeKiB": 6295620,
+  "minimumSampledFreeKiB": 4599248,
+  "endFreeKiB": 5101156,
+  "elapsedSeconds": 20.422,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

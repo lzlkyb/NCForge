@@ -1,0 +1,15 @@
+{
+  "gate": "bundle-head",
+  "recordedAt": "2026-11-06T04:41:28.404Z",
+  "command": "node node_modules/.cache/meta-completion/build-snapshot.mjs head",
+  "jobs": "1",
+  "waitedSeconds": 170,
+  "abortedForMemory": true,
+  "minimumStartFreeKiB": 2936012.8,
+  "startFreeKiB": 4100080,
+  "minimumSampledFreeKiB": 924664,
+  "endFreeKiB": 4750980,
+  "elapsedSeconds": 39.667,
+  "exitCode": 1,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

@@ -1,0 +1,11 @@
+{
+  "gate": "types",
+  "recordedAt": "2026-11-06T09:56:37.5903466+08:00",
+  "command": "node node_modules/typescript/bin/tsc --noEmit",
+  "startFreeKiB": 4253928,
+  "minimumSampledFreeKiB": 3487372,
+  "endFreeKiB": 4326020,
+  "elapsedSeconds": 12.14,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

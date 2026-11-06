@@ -298,6 +298,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::bmf_scaffold_preview,
             commands::bmf_scaffold_write,
             commands::bmf_edit_preview,
+            commands::bmf_draft_preview,
+            commands::bmf_node_source,
             commands::bmf_edit_save,
             commands::bmf_publish_probe,
             commands::bmf_excel_template,

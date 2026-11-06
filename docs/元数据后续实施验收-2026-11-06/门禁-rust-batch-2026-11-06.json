@@ -1,0 +1,12 @@
+{
+  "gate": "rust-batch",
+  "recordedAt": "2026-11-06T10:24:36.6048129+08:00",
+  "command": "node scripts/rust-gate.mjs test --no-default-features --test bmf_transactions",
+  "jobs": "1",
+  "startFreeKiB": 3541388,
+  "minimumSampledFreeKiB": 2472396,
+  "endFreeKiB": 3904924,
+  "elapsedSeconds": 95.74,
+  "exitCode": 101,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

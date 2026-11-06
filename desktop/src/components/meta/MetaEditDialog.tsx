@@ -1,5 +1,7 @@
 import { useState } from "react";
-import type { BmfAttr, BmfEditOp, BmfEntity } from "../../lib/bmf";
+import type { BmfAttr, BmfDetail, BmfEditOp, BmfEntity } from "../../lib/bmf";
+import type { MetaStage } from "../../lib/metaDraft";
+import { BMF_BASE_TYPES, baseTypeById, fieldTypeOps } from "../../lib/bmfTypes";
 import { Input } from "../ui/input";
 import { MetaOpDialog } from "./MetaOpDialog";
 
@@ -20,6 +22,9 @@ export function MetaEditDialog({
   onClose,
   onSaved,
   onReload,
+  inline = false,
+  onStage,
+  detail,
 }: {
   path: string;
   /** 打开组件时的 SHA-256：保存前由后端复核，外部改过就拒绝。 */
@@ -29,14 +34,19 @@ export function MetaEditDialog({
   onClose: () => void;
   onSaved: () => void;
   onReload?: () => void;
+  inline?: boolean;
+  onStage?: MetaStage;
+  detail?: BmfDetail;
 }) {
   const adding = attr === null;
+  const [newId] = useState(() => attr?.id ?? crypto.randomUUID());
   const [form, setForm] = useState(() => ({
     name: attr?.name ?? "",
     displayName: attr?.displayName ?? "",
     fieldName: attr?.field ?? "",
     typeName: attr?.typeName ?? "String",
-    style: attr?.style || "SINGLE",
+    typeId: attr ? attr.dataType : BMF_BASE_TYPES[0].id,
+    style: attr ? attr.style : "SINGLE",
     dbType: attr?.dbType || "varchar",
     length: attr?.length == null ? "" : String(attr.length),
     precision: attr?.precision == null ? "" : String(attr.precision),
@@ -53,33 +63,47 @@ export function MetaEditDialog({
   const lengthOk = lenNum === null || (Number.isSafeInteger(lenNum) && lenNum > 0);
   const nonNeg = (n: number | null) => n === null || (Number.isSafeInteger(n) && n >= 0);
   const nameOk = !adding || IDENT.test(form.name.trim());
-  const fieldOk = adding || IDENT.test(form.fieldName.trim());
+  // ARRAY 等已有字段允许没有列映射；原样保留不应阻止编辑显示名。
+  const fieldOk = (adding && !form.fieldName.trim()) || form.fieldName.trim() === attr?.field || IDENT.test(form.fieldName.trim());
   const typeOk = form.typeName.trim() !== "";
-  const valid = lengthOk && nonNeg(precNum) && nonNeg(seqNum) && nameOk && fieldOk && typeOk;
+  let typeError = "";
+  let changedTypeOps: BmfEditOp[] = [];
+  if (attr && (form.typeId !== attr.dataType || form.typeName !== attr.typeName)) {
+    try { changedTypeOps = fieldTypeOps(detail ?? { entities: [entity], enums: [] }, attr, form.typeId); }
+    catch (error) { typeError = (error as Error).message; }
+  }
+  const valid = lengthOk && nonNeg(precNum) && nonNeg(seqNum) && nameOk && fieldOk && typeOk && !typeError
+    && !(lenNum != null && precNum != null && precNum > lenNum) && !(attr?.isKey && form.nullable && !attr.nullable);
 
   const ops = (): BmfEditOp[] => {
     if (adding) {
       const name = form.name.trim();
-      return [
+      const out: BmfEditOp[] = [
         {
           op: "addAttribute",
+          id: newId,
           entity: entity.id,
           name,
           displayName: form.displayName.trim() || name,
           typeName: form.typeName.trim() || "String",
+          dataType: form.typeId,
+          style: "SINGLE",
           dbType: form.dbType.trim() || "varchar",
-          length: lenNum ?? 101,
+          length: lenNum ?? (form.typeName === "String" ? 101 : baseTypeById(form.typeId)?.length ?? null),
           nullable: form.nullable,
           defaultValue: form.defaultValue.trim(),
         },
       ];
+      if (form.fieldName.trim() && form.fieldName.trim() !== name) out.push({ op: "setAttr", id: newId, name: "fieldName", value: form.fieldName.trim() });
+      if (precNum != null) out.push({ op: "setAttr", id: newId, name: "precision", value: String(precNum) });
+      return out;
     }
     const out: BmfEditOp[] = [];
     const a = attr!;
     const set = (name: string, value: string) => out.push({ op: "setAttr", id: a.id, name, value });
     if (form.displayName !== a.displayName) set("displayName", form.displayName);
     if (form.fieldName.trim() !== a.field) set("fieldName", form.fieldName.trim());
-    if (form.typeName.trim() !== a.typeName) set("typeName", form.typeName.trim());
+    out.push(...changedTypeOps);
     if (form.style !== a.style) set("dataTypeStyle", form.style);
     if (lenNum !== a.length) set("length", lenNum == null ? "" : String(lenNum));
     if (precNum !== a.precision) set("precision", precNum == null ? "" : String(precNum));
@@ -105,6 +129,9 @@ export function MetaEditDialog({
       onClose={onClose}
       onSaved={onSaved}
       onReload={onReload}
+      inline={inline}
+      onStage={onStage}
+      draftLabel={`${adding ? "新增" : "修改"}字段 ${form.name}`}
     >
       <div className="meta-form">
         {adding && (
@@ -127,7 +154,7 @@ export function MetaEditDialog({
             placeholder="界面上的中文名"
           />
         </label>
-        {!adding && (
+        {(
           <label>
             <span>列名（fieldName）</span>
             <Input
@@ -141,24 +168,25 @@ export function MetaEditDialog({
         )}
         <label>
           <span>类型（typeName）</span>
-          <Input
-            value={form.typeName}
-            onChange={(e) => patch({ typeName: e.target.value })}
-            placeholder="String / Decimal / UFID"
-            aria-invalid={!typeOk || undefined}
-          />
-          {!typeOk && <span className="meta-field-error">类型不能为空</span>}
+          <select aria-label="字段类型" value={form.typeId || "__current"} disabled={attr?.style === "REF" || attr?.style === "ARRAY"}
+            onChange={(e) => { const type = baseTypeById(e.target.value); if (type) patch({ typeId: type.id, typeName: type.name, style: "SINGLE", dbType: type.dbType,
+              length: type.length == null ? "" : String(type.length), precision: type.precision == null ? "" : String(type.precision) }); }}>
+            {!baseTypeById(form.typeId) && <option value={form.typeId || "__current"}>{form.typeName || "未声明"}（保留原值）</option>}
+            {BMF_BASE_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
+          </select>
+          {typeError && <span className="meta-field-error">{typeError}</span>}
         </label>
-        <label>
+        {!adding && <label>
           <span>数据类型（dataTypeStyle）</span>
-          <select aria-label="数据类型" value={form.style} onChange={(e) => patch({ style: e.target.value })}>
+          <select aria-label="数据类型" value={form.style} disabled>
+            {!STYLES.some((style) => style === form.style) && <option value={form.style}>{form.style || "未声明（保留原值）"}</option>}
             {STYLES.map((s) => (
               <option key={s} value={s}>
                 {s}
               </option>
             ))}
           </select>
-        </label>
+        </label>}
         {adding && (
           <label>
             <span>列类型（dbtype）</span>
@@ -176,7 +204,7 @@ export function MetaEditDialog({
           />
           {!lengthOk && <span className="meta-field-error">长度必须是大于 0 的整数</span>}
         </label>
-        <label>
+        {<label>
           <span>精度（precision）</span>
           <Input
             value={form.precision}
@@ -186,8 +214,8 @@ export function MetaEditDialog({
             aria-invalid={!nonNeg(precNum) || undefined}
           />
           {!nonNeg(precNum) && <span className="meta-field-error">精度必须是非负整数</span>}
-        </label>
-        <label>
+        </label>}
+        {!adding && <label>
           <span>顺序（sequence）</span>
           <Input
             value={form.sequence}
@@ -197,9 +225,9 @@ export function MetaEditDialog({
             aria-invalid={!nonNeg(seqNum) || undefined}
           />
           {!nonNeg(seqNum) && <span className="meta-field-error">顺序必须是非负整数</span>}
-        </label>
+        </label>}
         <label className="meta-check">
-          <input type="checkbox" checked={form.nullable} onChange={(e) => patch({ nullable: e.target.checked })} />
+          <input type="checkbox" checked={form.nullable} disabled={!!attr?.isKey} onChange={(e) => patch({ nullable: e.target.checked })} />
           <span>允许为空（isNullable）</span>
         </label>
         <label>
@@ -211,6 +239,7 @@ export function MetaEditDialog({
           />
         </label>
       </div>
+      {lenNum != null && precNum != null && precNum > lenNum && <p className="meta-field-error">精度不能大于长度</p>}
     </MetaOpDialog>
   );
 }

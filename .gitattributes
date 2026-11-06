@@ -17,3 +17,6 @@
 *.woff2 binary
 # 内置 Java 组件（SVNKit 桥与依赖），文本属性会让 git 试图做行尾转换
 *.jar binary
+
+# 真实 UAP 验收样本以原字节保存，CRLF 与来源 SHA 是测试契约。
+desktop/src-tauri/tests/fixtures/bmf/uap-real/*.bmf -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

@@ -1,0 +1,162 @@
+[
+  {
+    "id": "BS000010000100001001",
+    "name": "String",
+    "label": "String",
+    "dbType": "varchar",
+    "length": 50,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001051",
+    "name": "UFID",
+    "label": "UFID",
+    "dbType": "char",
+    "length": 20,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001004",
+    "name": "Integer",
+    "label": "Integer",
+    "dbType": "int",
+    "length": null,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001031",
+    "name": "UFDouble",
+    "label": "UFDouble",
+    "dbType": "decimal",
+    "length": 28,
+    "precision": 8
+  },
+  {
+    "id": "BS000010000100001032",
+    "name": "UFBoolean",
+    "label": "UFBoolean",
+    "dbType": "char",
+    "length": 1,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001033",
+    "name": "UFDate",
+    "label": "UFDate",
+    "dbType": "char",
+    "length": 19,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001037",
+    "name": "UFDate_begin",
+    "label": "UFDate_begin",
+    "dbType": "char",
+    "length": 19,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001038",
+    "name": "UFDate_end",
+    "label": "UFDate_end",
+    "dbType": "char",
+    "length": 19,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001039",
+    "name": "UFLiteralDate",
+    "label": "UFLiteralDate",
+    "dbType": "char",
+    "length": 10,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001034",
+    "name": "UFDateTime",
+    "label": "UFDateTime",
+    "dbType": "char",
+    "length": 19,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001036",
+    "name": "UFTime",
+    "label": "UFTime",
+    "dbType": "char",
+    "length": 8,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001040",
+    "name": "BigDecimal",
+    "label": "BigDecimal",
+    "dbType": "decimal",
+    "length": 28,
+    "precision": 8
+  },
+  {
+    "id": "BS000010000100001052",
+    "name": "UFMoney",
+    "label": "UFMoney",
+    "dbType": "decimal",
+    "length": 28,
+    "precision": 8
+  },
+  {
+    "id": "BS000010000100001055",
+    "name": "IMAGE",
+    "label": "图片",
+    "dbType": "image",
+    "length": null,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001053",
+    "name": "BLOB",
+    "label": "BLOB",
+    "dbType": "image",
+    "length": null,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001056",
+    "name": "CUSTOM",
+    "label": "自定义项",
+    "dbType": "varchar",
+    "length": 101,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001059",
+    "name": "CUSTOM",
+    "label": "自由项",
+    "dbType": "varchar",
+    "length": 101,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001030",
+    "name": "MEMO",
+    "label": "备注",
+    "dbType": "varchar",
+    "length": 200,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001058",
+    "name": "Multilangtext",
+    "label": "多语文本",
+    "dbType": "varchar",
+    "length": 200,
+    "precision": null
+  },
+  {
+    "id": "BS000010000100001070",
+    "name": "ConversionRate",
+    "label": "换算率",
+    "dbType": "varchar",
+    "length": 200,
+    "precision": null
+  }
+]

@@ -129,5 +129,8 @@ it("编辑实体：主键改选提交 keyAttributeId", async () => {
 
   const call = mocks.invoke.mock.calls.find(([cmd]) => cmd === "bmf_edit_save")!;
   const ops = (call[1] as { ops: Record<string, unknown>[] }).ops;
-  expect(ops).toEqual([{ op: "setAttr", id: "e1", name: "keyAttributeId", value: "" }]);
+  expect(ops).toEqual([
+    { op: "setAttr", id: "e1", name: "keyAttributeId", value: "" },
+    { op: "setAttr", id: "a1", name: "isKey", value: "false" },
+  ]);
 });

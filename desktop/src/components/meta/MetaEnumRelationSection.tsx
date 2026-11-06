@@ -1,20 +1,38 @@
-import { useMemo, useState } from "react";
-import type { BmfDetail, BmfEnum } from "../../lib/bmf";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { RELATION_KINDS, type BmfDetail, type BmfEnum, type RelationshipKind } from "../../lib/bmf";
+import type { MetaSelection } from "../../lib/metaEditor";
+import type { MetaStage } from "../../lib/metaDraft";
 import { Icon } from "../ui/icon";
 import { MetaActionButton, MetaDeleteButton } from "./MetaDeleteButton";
 import { MetaEnumDialog } from "./MetaEnumDialog";
 import { MetaRelationDialog } from "./MetaRelationDialog";
 
-/** 枚举与连接关系：看清结构 + 增删改入口。字段表在 MetaDetails，这里只管右侧语义。 */
+/** 枚举与连接关系共用草稿入口；未经验证的连接类型保留原文。 */
 export function MetaEnumRelationSection({
   detail,
   onEdited,
+  onReload,
+  selection,
+  onSelect,
+  onStage,
+  locked = false,
+  onEditingChange,
 }: {
   detail: BmfDetail;
   onEdited: () => void;
+  onReload?: () => void;
+  selection?: MetaSelection;
+  onSelect?: (selection: MetaSelection) => void;
+  onStage?: MetaStage;
+  locked?: boolean;
+  onEditingChange?: (editing: boolean) => void;
 }) {
   const [enumTarget, setEnumTarget] = useState<{ en: BmfEnum | null } | null>(null);
   const [relationOpen, setRelationOpen] = useState(false);
+  const editingCallback = useRef(onEditingChange);
+  editingCallback.current = onEditingChange;
+  useEffect(() => { editingCallback.current?.(!!enumTarget || relationOpen); return () => editingCallback.current?.(false); }, [enumTarget, relationOpen]);
+  const reload = () => { setEnumTarget(null); setRelationOpen(false); (onReload ?? onEdited)(); };
 
   /** 关系里存的是 GUID；直接显示让用户无法判断两端是谁。 */
   const names = useMemo(() => {
@@ -24,11 +42,13 @@ export function MetaEnumRelationSection({
       entities.set(e.id, e.displayName || e.name);
       for (const a of e.attrs) attrs.set(a.id, a.name);
     }
+    for (const reference of detail.references ?? []) entities.set(reference.id, reference.displayName || reference.name || reference.id);
+    for (const itf of detail.interfaces ?? []) entities.set(itf.id, itf.displayName || itf.name);
     return { entities, attrs };
   }, [detail]);
 
   return (
-    <section className="meta-two-col">
+    <fieldset className="meta-two-col meta-edit-fields" disabled={locked}>
       <div>
         <div className="meta-section-head">
           <h4 className="meta-section-title">枚举（{detail.enums.length}）</h4>
@@ -40,7 +60,7 @@ export function MetaEnumRelationSection({
         {detail.enums.map((en) => (
           <div key={en.id} className="meta-enum">
             <div className="meta-enum-head">
-              <span className="font-medium">{en.name}</span>
+              <button type="button" className="meta-object-link" aria-pressed={selection?.kind === "enum" && selection.enumId === en.id} onClick={() => onSelect?.({ kind: "enum", enumId: en.id })}>{en.name}</button>
               <span className="text-muted-foreground">
                 {en.displayName || "—"} · {en.items.length} 项
               </span>
@@ -54,7 +74,8 @@ export function MetaEnumRelationSection({
                   id={en.id}
                   what={`枚举 ${en.name}`}
                   onDone={onEdited}
-                  onReload={onEdited}
+                  onReload={reload}
+                  onStage={onStage}
                 />
               </span>
             </div>
@@ -79,15 +100,16 @@ export function MetaEnumRelationSection({
         {detail.relations.map((r) => (
           <div key={r.id} className="meta-relation">
             <div className="flex items-center justify-between gap-2">
-              <span className="font-medium">{r.kind}</span>
-              <MetaDeleteButton
+              <button type="button" className="meta-object-link" aria-pressed={selection?.kind === "relation" && selection.relationId === r.id} onClick={() => onSelect?.({ kind: "relation", relationId: r.id })}>{r.name || r.kind}</button>
+              {RELATION_KINDS.includes(r.kind as RelationshipKind) && <MetaDeleteButton
                 path={detail.path}
                 sha={detail.sha256}
                 id={r.id}
                 what={`关系 ${r.name || r.kind}`}
                 onDone={onEdited}
-                onReload={onEdited}
-              />
+                onReload={reload}
+                onStage={onStage}
+              />}
             </div>
             <div className="text-muted-foreground">
               {names.entities.get(r.source) ?? r.source} → {names.entities.get(r.target) ?? r.target}
@@ -95,6 +117,7 @@ export function MetaEnumRelationSection({
                 ? `（${names.attrs.get(r.srcAttrId) ?? r.srcAttrId} → ${names.attrs.get(r.targetAttrId) ?? r.targetAttrId}）`
                 : ""}
             </div>
+            {!RELATION_KINDS.includes(r.kind as RelationshipKind) && <p className="meta-note">未经验证的关系类型 · 只读</p>}
           </div>
         ))}
       </div>
@@ -103,15 +126,13 @@ export function MetaEnumRelationSection({
           path={detail.path}
           sha={detail.sha256}
           en={enumTarget.en}
+          onStage={onStage}
           onClose={() => setEnumTarget(null)}
           onSaved={() => {
             setEnumTarget(null);
             onEdited();
           }}
-          onReload={() => {
-            setEnumTarget(null);
-            onEdited();
-          }}
+          onReload={reload}
         />
       )}
       {relationOpen && (
@@ -119,17 +140,15 @@ export function MetaEnumRelationSection({
           path={detail.path}
           sha={detail.sha256}
           detail={detail}
+          onStage={onStage}
           onClose={() => setRelationOpen(false)}
           onSaved={() => {
             setRelationOpen(false);
             onEdited();
           }}
-          onReload={() => {
-            setRelationOpen(false);
-            onEdited();
-          }}
+          onReload={reload}
         />
       )}
-    </section>
+    </fieldset>
   );
 }

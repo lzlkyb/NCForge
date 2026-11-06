@@ -60,6 +60,9 @@ export interface BmfEntity {
   keyAttrId: string;
   attrs: BmfAttr[];
   raw: string;
+  interfaceIds?: string[];
+  mappings?: BmfInterfaceMapping[];
+  accessorConfig?: BmfAccessorConfig;
 }
 
 export interface BmfEnumItem {
@@ -88,7 +91,35 @@ export interface BmfRelation {
   target: string;
   srcAttrId: string;
   targetAttrId: string;
+  displayName?: string;
+  realSource?: string;
+  realTarget?: string;
+  sourceConstraint?: string;
+  targetConstraint?: string;
+  implementationClass?: string;
 }
+
+export interface BmfInterfaceAttr {
+  id: string; name: string; displayName: string; dataType: string; typeName: string;
+  style: string; dbType: string; sequence: number;
+}
+export interface BmfBusinessInterface {
+  id: string; name: string; displayName: string; fullClass: string; attrs: BmfInterfaceAttr[];
+  external: boolean; sourcePath: string; definitionSha: string;
+}
+export interface BmfInterfaceMapping {
+  interfaceId: string; interfaceAttrId: string; entityId: string; attrId: string;
+  attrPath: string; attrPathId: string;
+}
+export interface BmfAccessorConfig {
+  name: string; displayName: string; fullClass: string;
+  properties: { name: string; displayName: string; value: string; sequence: number }[];
+}
+export interface BmfReference {
+  id: string; refId: string; name: string; displayName: string; fullClass: string;
+  module: string; metadataPath: string; resolution: string;
+}
+export interface BmfDependency { entityId: string; metadataPath: string }
 
 export interface BmfComponent {
   id: string;
@@ -115,6 +146,10 @@ export interface BmfDetail {
   entities: BmfEntity[];
   enums: BmfEnum[];
   relations: BmfRelation[];
+  interfaces?: BmfBusinessInterface[];
+  references?: BmfReference[];
+  dependencies?: BmfDependency[];
+  issues?: BmfIssue[];
   unknownTags: string[];
 }
 
@@ -326,6 +361,8 @@ export interface BmfNewAttr {
 }
 
 export type BmfEditOp =
+  | { op: "setMapping"; entity: string; interfaceId: string; interfaceAttrId: string; attrId: string }
+  | { op: "setAccessorProperty"; entity: string; name: string; value: string }
   | { op: "setAttr"; id: string; name: string; value: string }
   | { op: "setEntityKey"; entity: string; attrId: string }
   | {
@@ -370,7 +407,7 @@ export type BmfEditOp =
     };
 
 /** BMF 连接关系类型（与 UAP MDP 的 connectlist 一致）。 */
-export const RELATION_KINDS = ["AggregationRelation", "Reference", "busiitfconnection"] as const;
+export const RELATION_KINDS = ["AggregationRelation", "relation", "busiitfconnection", "ExtendConnection"] as const;
 export type RelationshipKind = (typeof RELATION_KINDS)[number];
 
 /** 落盘结果里的单条文件：status = written | replaced | skipped。 */
@@ -584,9 +621,15 @@ export const bmfScaffoldWrite = (spec: BmfScaffoldSpec, path: string) =>
   invoke<string>("bmf_scaffold_write", { spec, path });
 export const bmfEditPreview = (path: string, ops: BmfEditOp[]) =>
   invoke<string>("bmf_edit_preview", { path, ops });
+
+export interface BmfDraftPreview { detail: BmfDetail; diff: string; baseSha: string; ops: BmfEditOp[]; blockingIssues?: BmfIssue[] }
+export const bmfDraftPreview = (path: string, ops: BmfEditOp[], expectedSha: string) =>
+  invoke<BmfDraftPreview>("bmf_draft_preview", { path, ops, expectedSha });
+export const bmfNodeSource = (path: string, id: string, expectedSha: string) =>
+  invoke<string>("bmf_node_source", { path, id, expectedSha });
 /** `expectedSha` = 打开时 detail.sha256；外部改过文件会拒绝保存。 */
-export const bmfEditSave = (path: string, ops: BmfEditOp[], expectedSha: string | null = null) =>
-  invoke<BmfWriteResult>("bmf_edit_save", { path, ops, expectedSha });
+export const bmfEditSave = (path: string, ops: BmfEditOp[], expectedSha: string | null = null, expectedDefinitions?: Record<string, string>) =>
+  invoke<BmfWriteResult>("bmf_edit_save", { path, ops, expectedSha, expectedDefinitions: expectedDefinitions ?? null, strict: !!expectedDefinitions });
 /** 跨工程引用扫描（F1）：按类全名找 typeName / refModelName，只读。 */
 export const bmfReferences = (path: string) => invoke<BmfRefScan>("bmf_references", { path });
 export const bmfPublishProbe = (component: string, module: string, bmfPath?: string) =>

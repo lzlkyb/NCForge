@@ -1,0 +1,12 @@
+{
+  "gate": "rust-clippy",
+  "recordedAt": "2026-11-06T03:47:13.076Z",
+  "command": "node scripts/rust-gate.mjs clippy --all-targets --no-default-features -- -D warnings",
+  "jobs": "1",
+  "startFreeKiB": 3692976,
+  "minimumSampledFreeKiB": 2723652,
+  "endFreeKiB": 3772492,
+  "elapsedSeconds": 67.635,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

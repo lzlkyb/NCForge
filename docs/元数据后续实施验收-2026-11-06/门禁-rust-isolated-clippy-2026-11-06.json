@@ -1,0 +1,12 @@
+{
+  "gate": "rust-isolated-clippy",
+  "recordedAt": "2026-11-06T04:02:18.705Z",
+  "command": "node D:\\AItool\\winapp\\nc-workbench\\desktop\\node_modules\\.cache\\meta-completion\\snapshot-1793937675785-metadata\\desktop\\scripts\\rust-gate.mjs clippy --all-targets --no-default-features -- -D warnings",
+  "jobs": "1",
+  "startFreeKiB": 3759324,
+  "minimumSampledFreeKiB": 2784400,
+  "endFreeKiB": 3884880,
+  "elapsedSeconds": 59.42,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

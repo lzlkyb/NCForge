@@ -1,0 +1,12 @@
+{
+  "gate": "rust-baseline-update",
+  "recordedAt": "2026-11-06T03:56:01.003Z",
+  "command": "node ../scripts/rust-gate.mjs test --no-default-features --test bmf_structure_baseline",
+  "jobs": "1",
+  "startFreeKiB": 3850308,
+  "minimumSampledFreeKiB": 3006176,
+  "endFreeKiB": 3796492,
+  "elapsedSeconds": 6.305,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

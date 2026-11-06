@@ -9,12 +9,16 @@ export function MetaHead({
   busy,
   onRevalidate,
   onNew,
+  editing = false,
+  onIssues,
 }: {
   entry: BmfEntry;
   counts: { error: number; warn: number; info: number };
   busy: boolean;
   onRevalidate: () => void;
   onNew: () => void;
+  editing?: boolean;
+  onIssues?: () => void;
 }) {
   return (
     <header className="meta-main-head">
@@ -29,15 +33,15 @@ export function MetaHead({
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <div className="meta-sev-summary">
+        <button type="button" className="meta-sev-summary" disabled={editing} onClick={onIssues} aria-label="查看校验问题">
           <span className="sev-error">{counts.error} 错误</span>
           <span className="sev-warn">{counts.warn} 警告</span>
           <span className="sev-info">{counts.info} 提示</span>
-        </div>
-        <Button size="sm" variant="outline" onClick={onRevalidate} disabled={busy}>
+        </button>
+        <Button size="sm" variant="outline" onClick={onRevalidate} disabled={busy || editing}>
           <Icon name="shield" size={13} /> 校验
         </Button>
-        <Button size="sm" variant="ghost" onClick={onNew}>
+        <Button size="sm" variant="ghost" onClick={onNew} disabled={editing}>
           <Icon name="filePlus" size={13} /> 新建
         </Button>
       </div>

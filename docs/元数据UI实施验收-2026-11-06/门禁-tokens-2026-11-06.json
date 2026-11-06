@@ -1,0 +1,11 @@
+{
+  "gate": "tokens",
+  "recordedAt": "2026-11-06T09:55:46.4130863+08:00",
+  "command": "node scripts/check-design-tokens.mjs",
+  "startFreeKiB": 4299140,
+  "minimumSampledFreeKiB": 4291092,
+  "endFreeKiB": 4291092,
+  "elapsedSeconds": 1.23,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

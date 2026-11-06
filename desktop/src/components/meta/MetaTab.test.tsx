@@ -192,6 +192,6 @@ describe("元数据页", () => {
     await act(async () => validate.click());
     await flush();
     expect(host.textContent).not.toContain("无法解析这个组件");
-    expect(host.textContent).toContain("结构");
+    expect(host.textContent).toContain("属性字段");
   });
 });

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import type { BmfEditOp, BmfEntity } from "../../lib/bmf";
+import type { BmfDetail, BmfEditOp, BmfEntity } from "../../lib/bmf";
+import type { MetaStage } from "../../lib/metaDraft";
 import { Input } from "../ui/input";
 import { MetaOpDialog } from "./MetaOpDialog";
 
@@ -19,6 +20,8 @@ export function MetaEntityDialog({
   onClose,
   onSaved,
   onReload,
+  onStage,
+  detail,
 }: {
   path: string;
   sha: string;
@@ -27,8 +30,11 @@ export function MetaEntityDialog({
   onClose: () => void;
   onSaved: () => void;
   onReload?: () => void;
+  onStage?: MetaStage;
+  detail?: BmfDetail;
 }) {
   const adding = entity === null;
+  const [newId] = useState(() => entity?.id ?? crypto.randomUUID());
   const [form, setForm] = useState(() => ({
     name: entity?.name ?? "",
     displayName: entity?.displayName ?? "",
@@ -49,9 +55,10 @@ export function MetaEntityDialog({
 
   const ops = (): BmfEditOp[] => {
     if (adding) {
-      return [
+      const out: BmfEditOp[] = [
         {
           op: "addEntity",
+          id: newId,
           name: form.name.trim(),
           displayName: form.displayName.trim(),
           table: form.table.trim(),
@@ -60,6 +67,11 @@ export function MetaEntityDialog({
           isPrimary: form.isPrimary,
         },
       ];
+      if (form.isPrimary && detail) {
+        for (const other of detail.entities.filter((e) => e.isPrimary)) out.push({ op: "setAttr", id: other.id, name: "isPrimary", value: "false" });
+        out.push({ op: "setAttr", id: detail.component.id, name: "mainEntity", value: newId });
+      }
+      return out;
     }
     const e = entity!;
     const out: BmfEditOp[] = [];
@@ -68,9 +80,19 @@ export function MetaEntityDialog({
     if (form.displayName !== e.displayName) set("displayName", form.displayName);
     if (form.table.trim() !== e.table) set("tableName", form.table.trim());
     if (form.fullClass.trim() !== e.fullClass) set("fullClassName", form.fullClass.trim());
-    if (accText !== e.accessor) set("accessor", accText);
+    if (accText !== e.accessor) set("accessorClassName", accText);
     if (form.isPrimary !== e.isPrimary) set("isPrimary", form.isPrimary ? "true" : "false");
-    if (form.keyAttrId !== e.keyAttrId) set("keyAttributeId", form.keyAttrId);
+    if (form.keyAttrId !== e.keyAttrId) {
+      set("keyAttributeId", form.keyAttrId);
+      for (const attr of e.attrs) {
+        const key = attr.id === form.keyAttrId;
+        if (attr.isKey !== key) out.push({ op: "setAttr", id: attr.id, name: "isKey", value: String(key) });
+      }
+    }
+    if (detail && form.isPrimary !== e.isPrimary) {
+      if (form.isPrimary) for (const other of detail.entities.filter((x) => x.isPrimary && x.id !== e.id)) out.push({ op: "setAttr", id: other.id, name: "isPrimary", value: "false" });
+      out.push({ op: "setAttr", id: detail.component.id, name: "mainEntity", value: form.isPrimary ? e.id : detail.component.mainEntity === e.id ? "" : detail.component.mainEntity });
+    }
     return out;
   };
 
@@ -92,6 +114,8 @@ export function MetaEntityDialog({
       onClose={onClose}
       onSaved={onSaved}
       onReload={onReload}
+      onStage={onStage}
+      draftLabel={`${adding ? "新增" : "修改"}实体 ${form.name}`}
     >
       <div className="meta-form">
         <label>

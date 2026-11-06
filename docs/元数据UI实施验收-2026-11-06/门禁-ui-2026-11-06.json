@@ -1,0 +1,11 @@
+{
+  "gate": "ui",
+  "recordedAt": "2026-11-06T09:55:49.2331096+08:00",
+  "command": "node scripts/check-ui-contract.mjs",
+  "startFreeKiB": 4289624,
+  "minimumSampledFreeKiB": 4287412,
+  "endFreeKiB": 4287412,
+  "elapsedSeconds": 1.25,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

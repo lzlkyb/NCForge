@@ -1,0 +1,12 @@
+{
+  "gate": "types-isolated",
+  "recordedAt": "2026-11-06T04:11:27.374Z",
+  "command": "node node_modules/typescript/bin/tsc --noEmit --project D:\\AItool\\winapp\\nc-workbench\\desktop\\node_modules\\.cache\\meta-completion\\snapshot-1793937675785-metadata\\desktop\\tsconfig.json",
+  "jobs": "1",
+  "startFreeKiB": 3519948,
+  "minimumSampledFreeKiB": 2747336,
+  "endFreeKiB": 3529216,
+  "elapsedSeconds": 19.538,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

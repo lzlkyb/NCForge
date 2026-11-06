@@ -1,0 +1,144 @@
+{
+  "date": "2026-11-06",
+  "scope": "生产 MetaTab + WorkbenchFrame，IPC 内存隔离数据；不代表真实 BMF 读写性能",
+  "rows": [
+    {
+      "name": "宽屏浅色",
+      "viewport": {
+        "width": 1640,
+        "height": 960
+      },
+      "width": 1638,
+      "height": 894,
+      "scrollWidth": 1638,
+      "scrollHeight": 894,
+      "size": "wide",
+      "theme": "",
+      "card": "0 0% 100%",
+      "screenshot": "宽屏浅色-2026-11-06.png"
+    },
+    {
+      "name": "宽屏深色",
+      "viewport": {
+        "width": 1640,
+        "height": 960
+      },
+      "width": 1638,
+      "height": 894,
+      "scrollWidth": 1638,
+      "scrollHeight": 894,
+      "size": "wide",
+      "theme": "dark",
+      "card": "213.33 12.33% 14.31%",
+      "screenshot": "宽屏深色-2026-11-06.png"
+    },
+    {
+      "name": "中窗口浅色",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "width": 1278,
+      "height": 834,
+      "scrollWidth": 1278,
+      "scrollHeight": 834,
+      "size": "medium",
+      "theme": "",
+      "card": "0 0% 100%",
+      "screenshot": "中窗口浅色-2026-11-06.png"
+    },
+    {
+      "name": "中窗口深色",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "width": 1278,
+      "height": 834,
+      "scrollWidth": 1278,
+      "scrollHeight": 834,
+      "size": "medium",
+      "theme": "dark",
+      "card": "213.33 12.33% 14.31%",
+      "screenshot": "中窗口深色-2026-11-06.png"
+    },
+    {
+      "name": "小窗口浅色",
+      "viewport": {
+        "width": 960,
+        "height": 760
+      },
+      "width": 958,
+      "height": 694,
+      "scrollWidth": 958,
+      "scrollHeight": 694,
+      "size": "small",
+      "theme": "",
+      "card": "0 0% 100%",
+      "screenshot": "小窗口浅色-2026-11-06.png"
+    },
+    {
+      "name": "小窗口深色",
+      "viewport": {
+        "width": 960,
+        "height": 760
+      },
+      "width": 958,
+      "height": 694,
+      "scrollWidth": 958,
+      "scrollHeight": 694,
+      "size": "small",
+      "theme": "dark",
+      "card": "213.33 12.33% 14.31%",
+      "screenshot": "小窗口深色-2026-11-06.png"
+    },
+    {
+      "name": "低窗口",
+      "viewport": {
+        "width": 1280,
+        "height": 580
+      },
+      "width": 1278,
+      "height": 514,
+      "scrollWidth": 1278,
+      "scrollHeight": 514,
+      "size": "compact",
+      "theme": "",
+      "card": "0 0% 100%",
+      "screenshot": "低窗口-2026-11-06.png"
+    },
+    {
+      "name": "窄窗口",
+      "viewport": {
+        "width": 680,
+        "height": 760
+      },
+      "width": 678,
+      "height": 694,
+      "scrollWidth": 678,
+      "scrollHeight": 694,
+      "size": "compact",
+      "theme": "",
+      "card": "0 0% 100%",
+      "screenshot": "窄窗口-2026-11-06.png"
+    }
+  ],
+  "interactions": [
+    "图表检查器同一选中字段",
+    "抽屉转停靠保留输入、预览保存后选中恢复",
+    "筛选保留选中对象",
+    "问题定位真实字段",
+    "引用跳转打开正确文档，切回保留字段选择",
+    "50实体拖动合帧，2000字段可见区与键盘末行编辑"
+  ],
+  "renderedFields": 17,
+  "drag": {
+    "events": 160,
+    "frames": 40,
+    "commits": 40,
+    "medianFrameMs": 16.400000035762787,
+    "p95FrameMs": 18.299999952316284,
+    "transform": "translate(116 76)"
+  },
+  "errors": []
+}

@@ -1,0 +1,11 @@
+{
+  "gate": "build",
+  "recordedAt": "2026-11-06T09:49:00.5917522+08:00",
+  "command": "node node_modules/vite/bin/vite.js build",
+  "startFreeKiB": 4362948,
+  "minimumSampledFreeKiB": 2898508,
+  "endFreeKiB": 4328712,
+  "elapsedSeconds": 21.57,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

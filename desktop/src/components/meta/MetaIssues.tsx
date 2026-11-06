@@ -9,10 +9,14 @@ export function MetaIssues({
   issues,
   loading,
   error,
+  onLocate,
+  canLocate,
 }: {
   issues: BmfIssue[];
   loading: boolean;
   error: string | null;
+  onLocate?: (issue: BmfIssue) => void;
+  canLocate?: (issue: BmfIssue) => boolean;
 }) {
   const [filter, setFilter] = useState<"all" | "error" | "warn" | "info">("all");
   const counts = useMemo(() => severityCounts(issues), [issues]);
@@ -57,6 +61,7 @@ export function MetaIssues({
                     {i.attr ? ` / ${i.attr}` : ""}
                   </span>
                 )}
+                {onLocate && (canLocate?.(i) ?? !!i.entity) && <button type="button" className="meta-link" onClick={() => onLocate(i)}>定位对象</button>}
               </header>
               <p>{i.detail}</p>
               <p className="meta-issue-why">为什么：{i.why}</p>

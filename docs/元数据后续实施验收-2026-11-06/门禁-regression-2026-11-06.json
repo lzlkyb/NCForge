@@ -1,0 +1,12 @@
+{
+  "gate": "regression",
+  "recordedAt": "2026-11-06T03:28:44.290Z",
+  "command": "node node_modules/vitest/vitest.mjs run src/lib/metaBulk.test.ts src/components/meta/MetaCanvas.test.tsx src/components/meta/MetaEntityDialog.test.tsx src/components/meta/MetaExcel.test.tsx src/components/meta/MetaSourcePeek.test.tsx --maxWorkers=1",
+  "jobs": "1",
+  "startFreeKiB": 4723600,
+  "minimumSampledFreeKiB": 4435912,
+  "endFreeKiB": 4710340,
+  "elapsedSeconds": 10.965,
+  "exitCode": 1,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

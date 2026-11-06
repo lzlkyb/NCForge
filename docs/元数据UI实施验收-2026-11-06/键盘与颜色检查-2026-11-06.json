@@ -1,0 +1,26 @@
+{
+  "keyboard": [
+    "资源抽屉焦点循环与 Esc 返回",
+    "字段 Enter 打开属性，Esc 返回字段",
+    "F2 内联编辑与抽屉 Esc 保留输入",
+    "Ctrl+S 预览再保存，改输入后旧预览失效",
+    "工具菜单 portal 与视口边界"
+  ],
+  "contrast": [
+    {
+      "theme": "light",
+      "count": 133,
+      "minRatio": 4.5610906486791105,
+      "minFont": 11,
+      "failures": []
+    },
+    {
+      "theme": "dark",
+      "count": 133,
+      "minRatio": 5.819025046539562,
+      "minFont": 11,
+      "failures": []
+    }
+  ],
+  "errors": []
+}

@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import type { BmfAttr, BmfDetail, BmfEntity, BmfRelation } from "../../lib/bmf";
-import { canvasLayout, visibleAttrs } from "./canvasLayout";
+import { canvasLayout, visibleAttrs, NODE_W, GAP_X, PAD } from "./canvasLayout";
 import { MetaCanvas } from "./MetaCanvas";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -102,8 +102,8 @@ it("方阵布局收敛，50 个实体也不无限变宽", () => {
     Array.from({ length: 50 }, (_, i) => ent(`e${i}`, `H${i}`)),
     [],
   );
-  expect(few.width).toBe(496);
-  expect(many.width).toBeLessThanOrEqual(6 * 188 + 5 * 64 + 56);
+  expect(few.width).toBe(2 * NODE_W + GAP_X + 2 * PAD);
+  expect(many.width).toBeLessThanOrEqual(6 * NODE_W + 5 * GAP_X + 2 * PAD);
   expect(many.height).toBeGreaterThan(few.height);
 });
 
@@ -143,7 +143,7 @@ it("画节点与字段行；无字段的关系落在节点边框，有字段的�
 it("没有实体时给空状态，不画空网格", async () => {
   await act(async () => root.render(<MetaCanvas detail={detail([])} />));
   expect(host.querySelector(".meta-canvas")).toBeNull();
-  expect(host.textContent).toContain("没有可画的节点");
+  expect(host.textContent).toContain("没有可绘制的实体、接口或参照");
 });
 
 it("50 个实体仍可拖拽：节点坐标跟随指针", async () => {

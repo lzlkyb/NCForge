@@ -1,0 +1,11 @@
+{
+  "gate": "bundle",
+  "recordedAt": "2026-11-06T09:55:43.6436167+08:00",
+  "command": "node scripts/check-bundle-size.mjs",
+  "startFreeKiB": 4301448,
+  "minimumSampledFreeKiB": 4298756,
+  "endFreeKiB": 4314304,
+  "elapsedSeconds": 1.24,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

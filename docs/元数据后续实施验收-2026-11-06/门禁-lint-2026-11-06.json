@@ -1,0 +1,12 @@
+{
+  "gate": "lint",
+  "recordedAt": "2026-11-06T03:35:36.654Z",
+  "command": "node node_modules/eslint/bin/eslint.js src/components/meta src/hooks/useMetaCanvasPointer.ts src/hooks/useMetaDocuments.ts src/hooks/useMetaDocuments.test.tsx src/hooks/useMetaDraft.ts src/hooks/useMetaDraft.test.tsx src/hooks/useMetaGeneration.ts src/hooks/useMetaGeneration.test.tsx src/hooks/useMetaLayout.ts src/hooks/useMetaLayout.test.tsx src/lib/bmf.ts src/lib/bmfTypes.ts src/lib/metaDraft.ts src/lib/metaBulk.ts src/lib/metaBulk.test.ts src/lib/metaEditor.ts src/lib/metaEditor.test.ts src/lib/metaCanvasModel.ts src/lib/metaCanvasModel.test.ts src/test/metaFixtures.ts src/test/metaGenerationFixture.ts scripts/meta-workbench-acceptance.mjs",
+  "jobs": "1",
+  "startFreeKiB": 4020620,
+  "minimumSampledFreeKiB": 3516264,
+  "endFreeKiB": 3808076,
+  "elapsedSeconds": 3.642,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

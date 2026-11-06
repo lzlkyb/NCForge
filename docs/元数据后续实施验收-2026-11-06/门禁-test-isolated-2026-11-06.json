@@ -1,0 +1,14 @@
+{
+  "gate": "test-isolated",
+  "recordedAt": "2026-11-06T04:19:41.422Z",
+  "command": "node node_modules/vitest/vitest.mjs run --root D:\\AItool\\winapp\\nc-workbench\\desktop\\node_modules\\.cache\\meta-completion\\snapshot-1793937675785-metadata\\desktop --config D:\\AItool\\winapp\\nc-workbench\\desktop\\node_modules\\.cache\\meta-completion\\snapshot-1793937675785-metadata\\desktop\\vite.config.ts src/components/meta src/hooks/useMetaDocuments.test.tsx src/hooks/useMetaLayout.test.tsx src/hooks/useMetaGeneration.test.tsx src/hooks/useMetaDraft.test.tsx src/lib/metaEditor.test.ts src/lib/metaBulk.test.ts src/lib/metaCanvasModel.test.ts --maxWorkers=1",
+  "jobs": "1",
+  "waitedSeconds": 0,
+  "minimumStartFreeKiB": 2936012.8,
+  "startFreeKiB": 3429820,
+  "minimumSampledFreeKiB": 2354932,
+  "endFreeKiB": 3465376,
+  "elapsedSeconds": 68.712,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

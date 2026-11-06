@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { BmfDetail, BmfEditOp } from "../../lib/bmf";
+import type { MetaStage } from "../../lib/metaDraft";
 import { Input } from "../ui/input";
 import { MetaOpDialog } from "./MetaOpDialog";
 
@@ -16,6 +17,7 @@ export function MetaCopyEntityDialog({
   onClose,
   onSaved,
   onReload,
+  onStage,
 }: {
   path: string;
   sha: string;
@@ -23,6 +25,7 @@ export function MetaCopyEntityDialog({
   onClose: () => void;
   onSaved: () => void;
   onReload?: () => void;
+  onStage?: MetaStage;
 }) {
   const first = detail.entities[0];
   const [sourceId, setSourceId] = useState(first?.id ?? "");
@@ -101,6 +104,8 @@ export function MetaCopyEntityDialog({
       onClose={onClose}
       onSaved={onSaved}
       onReload={onReload}
+      onStage={onStage}
+      draftLabel={`复制实体为 ${form.name}`}
     >
       <div className="meta-form">
         <label>

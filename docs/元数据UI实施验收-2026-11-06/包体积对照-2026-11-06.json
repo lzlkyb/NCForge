@@ -1,0 +1,167 @@
+{
+  "scope": "同一份当前源码快照，升级前仅恢复本批已跟踪的生产元数据组件；其它会话源码保持一致。新文件在旧入口下不被引用。",
+  "date": "2026-11-06T09:52:33.1573716+08:00",
+  "restored": [
+    "MetaCanvas.tsx",
+    "MetaCanvasEdge.tsx",
+    "MetaCanvasNode.tsx",
+    "MetaDetails.tsx",
+    "MetaEditDialog.tsx",
+    "MetaEnumRelationSection.tsx",
+    "MetaGenerate.tsx",
+    "MetaHead.tsx",
+    "MetaIssues.tsx",
+    "MetaOpDialog.tsx",
+    "MetaTab.tsx",
+    "MetaTree.tsx",
+    "MetaViewPanel.tsx",
+    "canvasLayout.ts"
+  ],
+  "head": "244dcc12f201f7acb7c71431a639c1f723655655",
+  "before": {
+    "totalJsRawBytes": 4985514,
+    "totalJsGzipBytes": 1418258,
+    "chunks": 46,
+    "meta": [
+      {
+        "name": "MetaTab-DiOrLxHG.css",
+        "rawBytes": 33235,
+        "gzipBytes": 5197
+      },
+      {
+        "name": "MetaTab-fl25GqEm.js",
+        "rawBytes": 100423,
+        "gzipBytes": 29747
+      }
+    ],
+    "maxJsRawBytes": 3247203
+  },
+  "after": {
+    "totalJsRawBytes": 5023032,
+    "totalJsGzipBytes": 1434940,
+    "chunks": 55,
+    "meta": [
+      {
+        "name": "MetaCompare-FrMvpv1p.js",
+        "rawBytes": 4826,
+        "gzipBytes": 1967
+      },
+      {
+        "name": "MetaDiffRows-DJBcjWDQ.js",
+        "rawBytes": 4783,
+        "gzipBytes": 1743
+      },
+      {
+        "name": "MetaExcel-CZxkcWsf.js",
+        "rawBytes": 6917,
+        "gzipBytes": 2687
+      },
+      {
+        "name": "MetaGenerate-D8ZqFHNt.js",
+        "rawBytes": 15354,
+        "gzipBytes": 5994
+      },
+      {
+        "name": "MetaHistory-Cfy-sEmB.js",
+        "rawBytes": 4869,
+        "gzipBytes": 2015
+      },
+      {
+        "name": "MetaPublish-DpPfQlFo.js",
+        "rawBytes": 7940,
+        "gzipBytes": 2871
+      },
+      {
+        "name": "MetaRefs-C-_t5s2p.js",
+        "rawBytes": 2150,
+        "gzipBytes": 1121
+      },
+      {
+        "name": "MetaTab-B3UWNGUs.js",
+        "rawBytes": 90849,
+        "gzipBytes": 27802
+      },
+      {
+        "name": "MetaTab-BcMa6tmR.css",
+        "rawBytes": 48068,
+        "gzipBytes": 7615
+      }
+    ],
+    "maxJsRawBytes": 3247203
+  },
+  "production": {
+    "totalJsRawBytes": 5023032,
+    "totalJsGzipBytes": 1434904,
+    "chunks": 55,
+    "meta": [
+      {
+        "name": "MetaCompare-C-6C5Xee.js",
+        "rawBytes": 4826,
+        "gzipBytes": 1963
+      },
+      {
+        "name": "MetaDiffRows-DJBcjWDQ.js",
+        "rawBytes": 4783,
+        "gzipBytes": 1743
+      },
+      {
+        "name": "MetaExcel-DiPIq8wd.js",
+        "rawBytes": 6917,
+        "gzipBytes": 2684
+      },
+      {
+        "name": "MetaGenerate-BRdveLjf.js",
+        "rawBytes": 15354,
+        "gzipBytes": 5992
+      },
+      {
+        "name": "MetaHistory-gxp0bEqZ.js",
+        "rawBytes": 4869,
+        "gzipBytes": 2012
+      },
+      {
+        "name": "MetaPublish-BrusZ5qr.js",
+        "rawBytes": 7940,
+        "gzipBytes": 2867
+      },
+      {
+        "name": "MetaRefs-hGWVl8RF.js",
+        "rawBytes": 2150,
+        "gzipBytes": 1120
+      },
+      {
+        "name": "MetaTab-BcMa6tmR.css",
+        "rawBytes": 48068,
+        "gzipBytes": 7615
+      },
+      {
+        "name": "MetaTab-W4xenvMW.js",
+        "rawBytes": 90849,
+        "gzipBytes": 27800
+      }
+    ],
+    "maxJsRawBytes": 3247203
+  },
+  "delta": {
+    "rawBytes": 37518,
+    "gzipBytes": 16682,
+    "rawKB": 36.639,
+    "gzipKB": 16.291
+  },
+  "priorBudget": {
+    "totalRawKB": 4869,
+    "totalGzipKB": 1385,
+    "maxChunkRawKB": 3171
+  },
+  "proposedBudget": {
+    "totalRawKB": 4906,
+    "totalGzipKB": 1402,
+    "maxChunkRawKB": 3171
+  },
+  "measurement": "gzip level 9，KB = 1024 bytes；入口为命名块本身，不含共享依赖；隔离构建与生产构建的路径哈希使 gzip 有数十字节差异。",
+  "finalBudget": {
+    "totalRawKB": 4906,
+    "totalGzipKB": 1402,
+    "maxChunkRawKB": 3171
+  }
+}

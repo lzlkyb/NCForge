@@ -1,0 +1,11 @@
+{
+  "gate": "size",
+  "recordedAt": "2026-11-06T09:56:19.8808922+08:00",
+  "command": "node scripts/check-component-size.mjs",
+  "startFreeKiB": 4003416,
+  "minimumSampledFreeKiB": 3746360,
+  "endFreeKiB": 3746360,
+  "elapsedSeconds": 1.28,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}

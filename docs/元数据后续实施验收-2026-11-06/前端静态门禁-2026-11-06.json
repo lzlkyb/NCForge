@@ -1,0 +1,44 @@
+{
+  "root": "D:\\AItool\\winapp\\nc-workbench\\desktop\\node_modules\\.cache\\meta-completion\\snapshot-1793937675785-metadata\\desktop",
+  "recordedAt": "2026-11-06T05:02:55.412Z",
+  "knipGitignore": "snapshot is inside ignored node_modules; explicit src/scripts project patterns with --no-gitignore",
+  "results": [
+    {
+      "name": "component-size",
+      "exitCode": 0,
+      "output": "✅ 组件体量门禁通过\n"
+    },
+    {
+      "name": "tokens",
+      "exitCode": 0,
+      "output": "ℹ️ 有文件的色值数量低于基线，可运行 --update 下调（不阻断）。\nℹ️ 有文件的实底表面数量低于基线，可运行 --update 下调（不阻断）。\n✅ 设计 token 棘轮通过（5 个文件 33 处裸色值；13 个文件 16 处实底表面，均未超过基线）\n"
+    },
+    {
+      "name": "ui",
+      "exitCode": 0,
+      "output": "✅ UI 约定门禁通过（裸缓动 0 处、<10px 字号 0 处，均未超过基线）\n"
+    },
+    {
+      "name": "command-contract",
+      "exitCode": 0,
+      "output": "✅ 命令契约一致（200 条命令）\n"
+    },
+    {
+      "name": "eslint",
+      "exitCode": 0,
+      "output": ""
+    },
+    {
+      "name": "knip",
+      "exitCode": 0,
+      "output": ""
+    }
+  ],
+  "knipSnapshot": {
+    "root": "D:\\AItool\\winapp\\nc-workbench\\desktop\\src-tauri\\target\\meta-knip-1793941586189",
+    "source": "D:\\AItool\\winapp\\nc-workbench\\desktop\\node_modules\\.cache\\meta-completion\\snapshot-1793937675785-metadata\\desktop",
+    "files": 985,
+    "sourceSha": "88061e9484422f659da43ed3ea3e7a216a7a489dd760a8e8871e327c5cf94e59",
+    "reason": "Knip excludes any absolute node_modules path; byte-identical frontend copy outside node_modules"
+  }
+}

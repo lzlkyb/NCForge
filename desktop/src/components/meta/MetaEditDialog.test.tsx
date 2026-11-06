@@ -140,3 +140,23 @@ it("SHA 冲突时给出内联错误与重新加载入口，而不是只闪一条
   await act(async () => button("重新加载组件").click());
   expect(onReload).toHaveBeenCalled();
 });
+
+it("没有数据库列的已有字段允许原样保留，修改显示名不会产生列名操作", async () => {
+  mocks.invoke.mockResolvedValue("diff");
+  await act(async () => root.render(<MetaEditDialog inline path="D:/w/METADATA/demo.bmf" sha="sha" entity={entity}
+    attr={{ ...attr, field: "", style: "ARRAY" }} onClose={() => {}} onSaved={() => {}} />));
+  await act(async () => setValue(input("界面上的中文名"), "明细集合"));
+  expect(button("预览 diff").disabled).toBe(false);
+  await act(async () => button("预览 diff").click());
+  const ops = mocks.invoke.mock.calls.find(([cmd]) => cmd === "bmf_edit_preview")![1].ops;
+  expect(ops).toEqual([{ op: "setAttr", id: "a1", name: "displayName", value: "明细集合" }]);
+});
+
+it("只改显示名时保留未声明的数据类型样式", async () => {
+  mocks.invoke.mockResolvedValue("diff");
+  await act(async () => root.render(<MetaEditDialog inline path="D:/w/METADATA/demo.bmf" sha="sha" entity={entity}
+    attr={{ ...attr, style: "" }} onClose={() => {}} onSaved={() => {}} />));
+  await act(async () => setValue(input("界面上的中文名"), "新显示名"));
+  await act(async () => button("预览 diff").click());
+  expect(mocks.invoke.mock.calls.find(([cmd]) => cmd === "bmf_edit_preview")![1].ops).toEqual([{ op: "setAttr", id: "a1", name: "displayName", value: "新显示名" }]);
+});

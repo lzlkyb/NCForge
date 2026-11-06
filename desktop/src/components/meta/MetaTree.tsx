@@ -1,9 +1,10 @@
-import { useMemo } from "react";
-import type { BmfEntry } from "../../lib/bmf";
-import { normalizeBmfPath } from "../../lib/bmfPath";
+import type { BmfDetail, BmfEntry } from "../../lib/bmf";
+import type { MetaSelection } from "../../lib/metaEditor";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { Input } from "../ui/input";
+import { MetaResourceList } from "./MetaResourceList";
+import { MetaOutline } from "./MetaOutline";
 
 /**
  * 元数据页左栏：按「来源 → 模块」分组的组件清单。
@@ -23,6 +24,10 @@ export function MetaTree({
   elapsedMs,
   cached,
   warnings,
+  detail,
+  selection,
+  locked = false,
+  onSelectObject,
 }: {
   entries: BmfEntry[];
   selected: string | null;
@@ -35,31 +40,11 @@ export function MetaTree({
   elapsedMs: number;
   cached: number;
   warnings: string[];
+  detail?: BmfDetail | null;
+  selection?: MetaSelection;
+  locked?: boolean;
+  onSelectObject?: (selection: MetaSelection) => void;
 }) {
-  const groups = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const hit = entries.filter(
-      (e) =>
-        !q ||
-        e.name.toLowerCase().includes(q) ||
-        e.displayName.toLowerCase().includes(q) ||
-        e.module.toLowerCase().includes(q),
-    );
-    const map = new Map<string, BmfEntry[]>();
-    for (const e of hit) {
-      const key = `${e.origin}/${e.module || "(未知模块)"}`;
-      const list = map.get(key) ?? [];
-      list.push(e);
-      map.set(key, list);
-    }
-    return [...map.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, list]) => ({
-        key,
-        list: list.sort((a, b) => a.name.localeCompare(b.name)),
-      }));
-  }, [entries, search]);
-
   return (
     <aside className="meta-side">
       <div className="meta-side-head">
@@ -69,10 +54,10 @@ export function MetaTree({
           <span className="meta-count">{entries.length}</span>
         </div>
         <div className="flex items-center gap-1">
-          <Button size="icon" variant="ghost" title="重新索引" onClick={onRefresh} disabled={refreshing}>
+          <Button size="icon" variant="ghost" title="重新索引" onClick={onRefresh} disabled={refreshing || locked}>
             <Icon name="refresh" size={14} className={refreshing ? "animate-spin" : ""} />
           </Button>
-          <Button size="icon" variant="ghost" title="新建组件" onClick={onNew}>
+          <Button size="icon" variant="ghost" title="新建组件" onClick={onNew} disabled={locked}>
             <Icon name="filePlus" size={14} />
           </Button>
         </div>
@@ -80,43 +65,15 @@ export function MetaTree({
       <div className="meta-search">
         <Icon name="search" size={13} className="text-muted-foreground" />
         <Input
-          value={search}
+          value={search} disabled={locked}
           onChange={(e) => onSearch(e.target.value)}
           placeholder="组件名 / 模块"
           aria-label="搜索元数据组件"
           className="h-7 border-0 bg-transparent px-1 text-[12px] focus-visible:ring-0"
         />
       </div>
-      <div className="meta-tree">
-        {groups.length === 0 && (
-          <p className="px-3 py-6 text-center text-[12px] text-muted-foreground">
-            {entries.length === 0 ? "工作区里没有找到 .bmf 文件" : "没有匹配的组件"}
-          </p>
-        )}
-        {groups.map((g) => (
-          <div key={g.key} className="meta-group">
-            <div className="meta-group-head" title={g.key}>
-              {g.key}
-            </div>
-            {g.list.map((e) => (
-              <button
-                key={e.path}
-                type="button"
-                className={`meta-entry ${selected && normalizeBmfPath(selected) === normalizeBmfPath(e.path) ? "is-active" : ""} ${e.error ? "is-broken" : ""}`}
-                aria-current={selected && normalizeBmfPath(selected) === normalizeBmfPath(e.path) ? "true" : undefined}
-                onClick={() => onSelect(e)}
-                title={e.error ? `${e.path}\n${e.error}` : e.path}
-              >
-                <span className="meta-entry-name">{e.name || "(无名)"}</span>
-                <span className="meta-entry-sub">
-                  {e.displayName || "—"}
-                  {e.error ? " · 解析失败" : ` · ${e.entityCount} 实体 / ${e.attrCount} 字段`}
-                </span>
-              </button>
-            ))}
-          </div>
-        ))}
-      </div>
+      <MetaResourceList entries={entries} selected={selected} search={search} locked={locked} onSelect={onSelect} />
+      {detail && selection && onSelectObject && <MetaOutline detail={detail} selection={selection} locked={locked} onSelect={onSelectObject} />}
       {warnings.length > 0 && (
         <details className="meta-warn-list">
           <summary>{warnings.length} 条索引提示</summary>

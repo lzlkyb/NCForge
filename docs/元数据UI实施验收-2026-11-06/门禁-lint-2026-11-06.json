@@ -1,0 +1,11 @@
+{
+  "gate": "lint",
+  "recordedAt": "2026-11-06T09:56:23.9153048+08:00",
+  "command": "node node_modules/eslint/bin/eslint.js src/components/meta src/hooks/useMeta*.ts src/hooks/useMeta*.tsx src/lib/metaEditor*.ts src/test/metaFixtures.ts src/test/metaGenerationFixture.ts",
+  "startFreeKiB": 4275140,
+  "minimumSampledFreeKiB": 4080048,
+  "endFreeKiB": 4252264,
+  "elapsedSeconds": 2.5,
+  "exitCode": 0,
+  "sampling": "每秒采样整机可用内存；非连续峰值、非冷编译上限"
+}
