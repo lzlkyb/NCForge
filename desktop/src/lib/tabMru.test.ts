@@ -1,11 +1,19 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { mruNeighbor, pruneMru, resetMru, touchMru } from "./tabMru";
+import { mruNeighbor, pruneMru, resetMru, touchMru, swapGroupMru, mergeGroupMru } from "./tabMru";
 
 beforeEach(() => {
   resetMru();
 });
 
 describe("标签 MRU", () => {
+  it("共享文件的最近顺序按组隔离，交换及合并保留优先组顺序", () => {
+    touchMru("a", "left"); touchMru("b", "left"); touchMru("shared", "left");
+    touchMru("c", "right"); touchMru("shared", "right"); touchMru("d", "right");
+    expect(mruNeighbor("shared", ["a", "b", "shared"], 1, "left")).toBe("b");
+    expect(mruNeighbor("d", ["c", "shared", "d"], 1, "right")).toBe("shared");
+    swapGroupMru(); expect(mruNeighbor("shared", ["a", "b", "shared"], 1, "right")).toBe("b");
+    mergeGroupMru("right"); expect(mruNeighbor("shared", ["a", "b", "shared", "c", "d"], 1, "left")).toBe("b");
+  });
   it("Ctrl+Tab 回到上一个用过的标签", () => {
     touchMru("a");
     touchMru("b");

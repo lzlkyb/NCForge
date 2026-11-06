@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { listen } from "../../lib/tauri";
+import { handleExternalJavaChanges } from "../../lib/externalJavaChanges";
 
 /** Directory rows refresh immediately. Package indexing coalesces bursts of file events. */
 export function useTreeWatch(
@@ -15,10 +16,17 @@ export function useTreeWatch(
     let indexRefresh: ReturnType<typeof setTimeout> | undefined;
     const changed = new Set<string>();
     let rescan = false;
-    void listen<{ dirs?: string[]; rescan?: boolean }>("fs-changed", (p) => {
+    void listen<{
+      dirs?: string[];
+      rescan?: boolean;
+      javaChanged?: string[];
+      javaOverflow?: boolean;
+    }>("fs-changed", (p) => {
       refreshDirs(p?.dirs ?? [], p?.rescan === true);
       for (const dir of p?.dirs ?? []) changed.add(dir);
       rescan ||= p?.rescan === true;
+      // 外部 .java 改动走保存同一条自动编译队列（内部会挡掉本应用刚保存的文件）
+      handleExternalJavaChanges(p?.javaChanged ?? [], p?.javaOverflow === true);
       clearTimeout(indexRefresh);
       indexRefresh = setTimeout(() => {
         invalidate([...changed], rescan, packageView);

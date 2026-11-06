@@ -44,6 +44,29 @@ pub fn same_target(a_url: &str, a_user: &str, b_url: &str, b_user: &str) -> bool
         && a_user.trim().eq_ignore_ascii_case(b_user.trim())
 }
 
+/// 默认 schema 名的规范化：去空白、转大写（Oracle 里不带引号的标识符一律大写）。
+///
+/// 不做合法性修补（不删字符、不截断）：改名字不如让 `valid_schema` 明确报错，
+/// 否则用户以为设上了 `aier633`，实际存的是别的东西。
+pub fn normalize_schema(s: &str) -> String {
+    s.trim().to_ascii_uppercase()
+}
+
+/// schema 名能不能直接拼进 `alter session set current_schema = …`。
+///
+/// **这个名字绑不进绑定变量**（`alter session` 的标识符位置不接受占位符），只能拼串，
+/// 所以必须只认 Oracle 标识符的字符集：字母开头，其余为字母 / 数字 / `_$#`，最长 128
+/// （12.2 之后的上限；11g 的上限 30 更严，这里按宽的放，超长由数据库自己报错）。
+/// 允许 `$` `#` 是因为 NC 库里真有 `NC$…` 这类对象名。
+pub fn valid_schema(s: &str) -> bool {
+    let b = s.as_bytes();
+    !b.is_empty()
+        && b.len() <= 128
+        && b[0].is_ascii_alphabetic()
+        && b.iter()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'$' | b'#'))
+}
+
 /// 解析 `.properties`：认 `url` / `user` / `pwd`（与 nc-db 工具 `ncdb.sh --conf` 同格式），
 /// 口令键也认 `password`。返回 `(url, user, 口令)`。
 ///
@@ -135,6 +158,7 @@ pub fn migrate_legacy(cfg: &mut AppConfig) -> bool {
         auto_commit: false,
         engine: String::new(),
         note: "旧版配置迁移".to_string(),
+        default_schema: String::new(),
     });
     true
 }
@@ -198,5 +222,30 @@ mod tests {
     #[test]
     fn id_不重复() {
         assert_ne!(new_id(), new_id());
+    }
+
+    /// schema 名会被拼进 `alter session set current_schema = …`（标识符位置不接受绑定
+    /// 变量），所以字符集必须卡死：放过一个分号就等于放开了任意 SQL。
+    #[test]
+    fn schema_名只认_oracle_标识符() {
+        assert!(valid_schema("AIER633"));
+        assert!(valid_schema("NC$DEV"));
+        assert!(valid_schema("A_1#B"));
+        assert!(!valid_schema(""));
+        assert!(!valid_schema("1AIER"), "不能数字开头");
+        assert!(!valid_schema("AIER 633"), "不能有空格");
+        assert!(!valid_schema("x; drop table t"));
+        assert!(!valid_schema("A.B"), "带点是另一条路径，这里不收");
+        assert!(!valid_schema(&"A".repeat(129)), "超过 128 个字符");
+        assert!(valid_schema(&"A".repeat(128)));
+    }
+
+    /// 规范化只做去空白 + 转大写：Oracle 里不带引号的标识符一律大写。
+    /// 不修补非法字符——让 `valid_schema` 明确报错，而不是把 `aie r` 悄悄改成 `AIER`。
+    #[test]
+    fn schema_名统一大写并去空白() {
+        assert_eq!(normalize_schema(" aier633 "), "AIER633");
+        assert_eq!(normalize_schema(""), "");
+        assert_eq!(normalize_schema("aie r"), "AIE R");
     }
 }

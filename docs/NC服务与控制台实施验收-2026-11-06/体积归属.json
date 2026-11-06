@@ -1,0 +1,17 @@
+{
+  "before": {
+    "raw": 5177294,
+    "gzip": 1484440,
+    "max": 3247203
+  },
+  "after": {
+    "raw": 5214490,
+    "gzip": 1499431,
+    "max": 3247203
+  },
+  "delta": {
+    "raw": 37196,
+    "gzip": 14991
+  },
+  "method": "Restore service-owned modules from HEAD in-memory; preserve other workspace changes. Excludes tiny single-call compile skipDeploy parameter changes."
+}

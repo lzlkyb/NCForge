@@ -19,7 +19,6 @@ import { closeSessionPanel, openSessionPanel, sqlTabOf, useDbSelector, type SqlT
 import { useSqlConsoleSplit } from "../../hooks/useSqlConsoleSplit";
 
 /** SQL 控制台：工具条 / 事务条 / 编辑器 / 可拖高度的结果区 / 历史与会话抽屉。 */
-import { DbContextBar } from "./DbContextBar";
 
 export function SqlConsole({ tab }: { tab: SqlTab }) {
   const api = useRef<SqlEditorApi | null>(null);
@@ -81,6 +80,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
     <div className="dbx-console">
       <SqlToolbar
         tab={tab}
+        scope={scope}
         onRun={(m) => void run(m)}
         onStop={onStop}
         onExplain={onExplain}
@@ -109,8 +109,6 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
       {srOpen && tab.connId && (
         <ScriptReplayDialog tab={tab} onClose={() => setSrOpen(false)} />
       )}
-      <DbContextBar connId={tab.connId} independent={!!tab.slot} />
-      <div className="dbx-read-status" aria-live="polite">Ctrl+Enter：{scope} · Alt+X：执行整个脚本</div>
       <TxBar connId={tab.connId} tabId={tab.id} slot={tab.slot} tx={tab.slot ? tab.tx : undefined} />
       <div className="dbx-console-body">
         <div ref={split.bodyRef} className="dbx-console-main">

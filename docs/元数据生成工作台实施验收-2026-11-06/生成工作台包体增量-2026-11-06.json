@@ -1,0 +1,151 @@
+{
+  "at": "2026-11-06T08:22:02.008Z",
+  "scope": "same current frontend source snapshot; baseline restores only the listed generation files; identical explicit Tailwind src scan, Vite production build and gzip level 9; Node old space limit 2048MiB, runtime free memory guard 2GiB",
+  "baselineRef": "d007030ecd197bfef5c35e38a06d571539d053cc",
+  "restored": [
+    "src/components/meta/MetaGenerate.tsx",
+    "src/components/meta/GenArtifacts.tsx",
+    "src/components/meta/GenConfigBar.tsx",
+    "src/components/meta/MetaDdlRun.tsx",
+    "src/components/meta/MetaTab.tsx",
+    "src/components/meta/MetaViewPanel.tsx",
+    "src/components/ui/Modal.tsx",
+    "src/hooks/useMetaGeneration.ts",
+    "src/lib/metaEditor.ts"
+  ],
+  "hashes": {
+    "current": {
+      "src/components/meta/MetaGenerate.tsx": "1e6514d41e50f6cc97d1ce8de5a1a24991f16ceb1a2edd7e5826323cd776ccc4",
+      "src/components/meta/GenArtifacts.tsx": "28babf575e4cf43c880470d71bb7ddb6cf16190e06eb3dcb7b4014d9176c9d92",
+      "src/components/meta/GenConfigBar.tsx": "6721fd1a700a10a078e6337febe4a7a0fe6f21a8247dc806d92937515369c15c",
+      "src/components/meta/MetaDdlRun.tsx": "f076f29ffd30837f1c221ecb655fb34c82d0ea4b5d9c47a677ffc858caecc12e",
+      "src/components/meta/MetaTab.tsx": "ae01b0c74eddd13f48079be494624d7d4314f4d2d7166a811c1951fec6e57d9a",
+      "src/components/meta/MetaViewPanel.tsx": "49eddc35a6ea12cd36ff8088c905c8a6c38faa51f64c3fa00d4650b95138f3a1",
+      "src/components/ui/Modal.tsx": "ca0e6e605c2204331c20a32db06d55adf7588a3c7dff62b07dcf648a2f17bcf0",
+      "src/hooks/useMetaGeneration.ts": "044bb88f8436f7956c7cc177a3a024c0c08318a3e64fc97884cb10d0ca708393",
+      "src/lib/metaEditor.ts": "0bb0678f946796f59f53674371056414cba24b88439b3e5d16a75e1736ec853e"
+    },
+    "baseline": {
+      "src/components/meta/MetaGenerate.tsx": "aefc94f27beb5feba373233c1f473e69e90b99f12ed042a1b6eec7f6b8f17ad2",
+      "src/components/meta/GenArtifacts.tsx": "ad12558ff7a60b55c16e323cea42c41f79ef4aa2a8edefd504e38fee380f5250",
+      "src/components/meta/GenConfigBar.tsx": "04c6f237e56adb79ec769f38ca39eacfbfcf7d17909273645b5cc8dc698cf107",
+      "src/components/meta/MetaDdlRun.tsx": "d5c7f5be4ccfdc5ed919378e97b868f3686241e71224e862c317ab563454a01f",
+      "src/components/meta/MetaTab.tsx": "5f642bddb603fd9b4a4ec3b91973ee23837e3e450ea4471ceb78a3442f3935b8",
+      "src/components/meta/MetaViewPanel.tsx": "534730eeabd7e1ec2ff81bfdaf1b10668e075abc7d4abf20f548b0c394fd45d6",
+      "src/components/ui/Modal.tsx": "417e5b6b05952cd7c0095e9b1d46a823714acd548a313c50cfe774268f4eaaed",
+      "src/hooks/useMetaGeneration.ts": "16f5e44f06a7e951fd2af1f68eddae5f5655945df196f11d54a4dfc7c4f9801e",
+      "src/lib/metaEditor.ts": "ef97b00a2e5eb589a93ce3861d11269a5dd9febfa7765fb0a08e94218145e19e"
+    }
+  },
+  "baseline": {
+    "elapsedSeconds": 14.546,
+    "minFreeMB": 3884.10546875,
+    "js": {
+      "chunks": 60,
+      "raw": 5189568,
+      "gzip": 1491461,
+      "max": {
+        "file": "monacoSetup-7S0kHqaJ.js",
+        "raw": 3247203,
+        "gzip": 827163
+      }
+    },
+    "css": {
+      "chunks": 10,
+      "raw": 553637,
+      "gzip": 92581,
+      "max": {
+        "file": "index-Blx9jTbY.css",
+        "raw": 166412,
+        "gzip": 29608
+      }
+    },
+    "generationChunks": [
+      {
+        "file": "MetaGenerate-DZ9LduZo.js",
+        "raw": 15385,
+        "gzip": 6012
+      }
+    ]
+  },
+  "current": {
+    "elapsedSeconds": 15.533,
+    "minFreeMB": 3760.41796875,
+    "js": {
+      "chunks": 61,
+      "raw": 5214490,
+      "gzip": 1499380,
+      "max": {
+        "file": "monacoSetup-CIfhsN40.js",
+        "raw": 3247203,
+        "gzip": 827164
+      }
+    },
+    "css": {
+      "chunks": 11,
+      "raw": 565848,
+      "gzip": 95123,
+      "max": {
+        "file": "index-Blx9jTbY.css",
+        "raw": 166412,
+        "gzip": 29608
+      }
+    },
+    "generationChunks": [
+      {
+        "file": "GenTextPreview-Dn958mXj.js",
+        "raw": 2899,
+        "gzip": 1502
+      },
+      {
+        "file": "MetaGenerate-DBmWVR-_.js",
+        "raw": 36989,
+        "gzip": 12374
+      },
+      {
+        "file": "MetaGenerate-DLe4a24U.css",
+        "raw": 12211,
+        "gzip": 2542
+      }
+    ]
+  },
+  "delta": {
+    "js": {
+      "raw": 24922,
+      "gzip": 7919
+    },
+    "css": {
+      "raw": 12211,
+      "gzip": 2542
+    }
+  },
+  "budgetBefore": {
+    "totalRawKB": 5048,
+    "totalGzipKB": 1450,
+    "maxChunkRawKB": 3171
+  },
+  "budgetAdjustment": {
+    "before": {
+      "totalRawKB": 5048,
+      "totalGzipKB": 1450,
+      "maxChunkRawKB": 3171
+    },
+    "addition": {
+      "totalRawKB": 25,
+      "totalGzipKB": 8
+    },
+    "after": {
+      "totalRawKB": 5073,
+      "totalGzipKB": 1458,
+      "maxChunkRawKB": 3171
+    }
+  },
+  "wholeRepositoryBudgetResult": {
+    "passed": false,
+    "totalRawKB": 5092,
+    "totalGzipKB": 1464,
+    "maxChunkRawKB": 3171,
+    "remainingOverRawKB": 19,
+    "remainingOverGzipKB": 6
+  }
+}

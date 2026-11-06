@@ -22,6 +22,12 @@ export interface LogLine {
   /** 形如 `nc.bs.framework.server.Server` 的 logger 名；解析不出就是空串。 */
   logger: string;
   text: string;
+  /** 复制与导出保留原文，不能由结构化字段重拼丢掉日期、毫秒或空格。 */
+  raw?: string;
+  structured?: boolean;
+  exception?: boolean;
+  terminated?: boolean;
+  offset?: number;
 }
 
 export interface LogState {
@@ -42,7 +48,9 @@ const LEVEL_RE = /^(INFO|WARN|ERROR|DEBUG|FATAL|TRACE)\b[ \t]*/;
 /** `logger - message` 的分隔。logger 满足「无空格且含点」才认，避免把普通句子切开。 */
 const LOGGER_RE = /^([\w.$]{2,120}) - ([\s\S]*)$/;
 
-/** 把一行原文解析成结构化行；解析不出时间/线程/级别就当异常栈续行。 */
+const STACK_RE = /^\s*(?:at\s+[\w.$/]+\([^\r\n]*\)|Caused by:|Suppressed:|\.\.\.\s+\d+\s+more\b)/;
+const EXCEPTION_RE = /(?:^|\s)(?:[\w$]+\.)*[\w$]*(?:Exception|Error)(?::|$)/;
+/** 没有结构化前缀的 stdout 仍是正文；只有明确 Java 堆栈特征才是续行。 */
 export function parseLine(raw: string, id: number): LogLine {
   const text = raw.replace(/\r$/, "");
   let rest = text;
@@ -67,8 +75,9 @@ export function parseLine(raw: string, id: number): LogLine {
     rest = rest.slice(lv[0].length);
   }
 
-  // 三个都没命中 = 异常栈的一行（`    at nc.bs...`、`Caused by: ...`）
-  const isStack = !time && !thread && !lv;
+  const structured = !!(time || thread || lv);
+  const isStack = !structured && STACK_RE.test(text);
+  const exception = EXCEPTION_RE.test(rest);
 
   let logger = "";
   let body = rest;
@@ -80,7 +89,7 @@ export function parseLine(raw: string, id: number): LogLine {
     }
   }
 
-  return { id, time, thread, level: isStack ? "info" : level, stack: isStack, logger, text: isStack ? text.trimEnd() : body };
+  return { id, time, thread, level: !structured && exception ? "error" : level, stack: isStack, logger, text: isStack ? text : body, raw, structured, exception, terminated: true };
 }
 
 /**
@@ -99,19 +108,24 @@ export function appendChunk(state: LogState, chunk: string, limit = 4000): LogSt
   const lines = state.lines.slice();
   let id = state.nextId;
   for (const raw of parts) {
-    if (raw.length === 0) continue;
     lines.push(parseLine(raw, id++));
   }
   // 半行太长（比如一次刷出一个大 JSON）时强制成行，免得 pending 无限涨
-  if (pending.length > 4096) {
-    lines.push(parseLine(pending, id++));
+  if (pending.length > 256 * 1024) {
+    lines.push({ ...parseLine(pending, id++), terminated: false });
     return { lines: trim(lines, limit), pending: "", nextId: id };
   }
   return { lines: trim(lines, limit), pending, nextId: id };
 }
 
 function trim(lines: LogLine[], limit: number): LogLine[] {
-  return lines.length > limit ? lines.slice(lines.length - limit) : lines;
+  let start = Math.max(0, lines.length - limit), chars = 0;
+  // 行数上限不足以限制巨型 JSON / 命令行；同时保留最多约 8MiB UTF-16 文本。
+  for (let i = lines.length - 1; i >= start; i--) {
+    chars += (lines[i].raw ?? lines[i].text).length;
+    if (chars > 4 * 1024 * 1024) { start = i + 1; break; }
+  }
+  return start ? lines.slice(start) : lines;
 }
 
 export interface LogCounts {
@@ -124,6 +138,7 @@ export function countLevels(lines: LogLine[]): LogCounts {
   let warn = 0;
   let error = 0;
   for (const l of lines) {
+    if (l.stack) continue;
     if (l.level === "warn") warn++;
     else if (l.level === "error") error++;
   }
@@ -140,23 +155,39 @@ export function filterLines(lines: LogLine[], level: "all" | "warn" | "error", k
   const kw = keyword.trim().toLowerCase();
   if (level === "all" && !kw) return lines;
 
-  const out: LogLine[] = [];
-  let stackVisible = false;
+  return groupLogLines(lines).filter(({ line, stack }) =>
+    (level === "all" || line.level === level) &&
+    (!kw || [line, ...stack].some(l => logRaw(l).toLowerCase().includes(kw))),
+  ).flatMap(({ line, stack }) => [line, ...stack]);
+}
+
+export interface LogRecord { line: LogLine; stack: LogLine[]; rootCause: string; }
+/** 分组仅在上一条错误/异常后接受堆栈，孤立的 at 行仍完整显示。 */
+export function groupLogLines(lines: LogLine[]): LogRecord[] {
+  const records: LogRecord[] = [];
   for (const line of lines) {
-    if (line.stack) {
-      if (stackVisible) out.push(line);
-      continue;
-    }
-    const levelOk = level === "all" || (level === "warn" ? line.level === "warn" : line.level === "error");
-    const kwOk =
-      !kw ||
-      line.text.toLowerCase().includes(kw) ||
-      line.logger.toLowerCase().includes(kw) ||
-      line.thread.toLowerCase().includes(kw);
-    stackVisible = levelOk && kwOk;
-    if (stackVisible) out.push(line);
+    const last = records[records.length - 1];
+    if (line.stack && last && (last.line.level === "error" || last.line.exception || last.stack.length)) {
+      last.stack.push(line);
+      if (/^\s*Caused by:/.test(line.text)) last.rootCause = line.text.trim();
+    } else records.push({ line, stack: [], rootCause: "" });
   }
-  return out;
+  return records;
+}
+
+export function logRaw(line: LogLine): string {
+  if (line.raw !== undefined) return line.raw;
+  if (line.stack) return line.text;
+  return [line.time, line.thread ? `[${line.thread}]` : "", line.level.toUpperCase(), line.logger ? `${line.logger} -` : "", line.text].filter(Boolean).join(" ");
+}
+
+export function logsRaw(lines: LogLine[]): string {
+  return lines.map((line, index) => logRaw(line) + (line.terminated !== false && (line.terminated === true || index < lines.length - 1) ? "\n" : "")).join("");
+}
+
+export function flushLogPending(state: LogState): LogState {
+  if (!state.pending) return state;
+  return { lines: trim([...state.lines, { ...parseLine(state.pending, state.nextId), terminated: false }], 4000), nextId: state.nextId + 1, pending: "" };
 }
 
 /** 字节数转人能读的大小（日志页脚用）。 */

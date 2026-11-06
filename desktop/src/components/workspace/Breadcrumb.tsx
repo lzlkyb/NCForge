@@ -10,13 +10,10 @@ import { inLangModule, navigate, useLangView } from "../../lib/lang";
 import { jdtDisplayName } from "../../lib/langConvert";
 import { chainAt, symbolsFor, type FlatSymbol } from "../../lib/symbols";
 import type { TabMeta } from "../../lib/workspaceSession";
-
-/** 路径相对工作区根。不在根下就退回全路径。 */
-function segmentsOf(root: string, path: string): string[] {
-  const r = root.replace(/[\\/]+$/, "");
-  const rel = path.toLowerCase().startsWith(`${r.toLowerCase()}\\`) ? path.slice(r.length + 1) : path;
-  return rel.split(/[\\/]/).filter(Boolean);
-}
+import { breadcrumbParts } from "../../lib/breadcrumbPath";
+import { Icon } from "../ui/icon";
+import { Menu, MenuItem } from "../ui/Menu";
+import { toast } from "../ui/toast";
 
 /**
  * 编辑器上方的面包屑：`模块 › 目录 › 文件 › 类 › 方法`。
@@ -44,18 +41,24 @@ export function Breadcrumb({ root, active }: { root: string; active: TabMeta }) 
     };
   }, [canAsk, javaPath, active.mtimeMs, lang.settled]);
 
-  const parts = active.virtual ? ["jar", jdtDisplayName(active.path)] : segmentsOf(root, active.path);
+  const parts = active.virtual ? ["jar", jdtDisplayName(active.path)] : breadcrumbParts(root, active.path);
+  const middle = parts.length > 3 ? parts.slice(1, -1) : [];
   const chain = chainAt(symbols && symbols.path === javaPath && canAsk ? symbols.list : local, cursor.line);
 
   return (
     <div className="wb-crumb" aria-label="当前位置">
       {parts.map((p, i) => (
+        middle.length && i > 1 && i < parts.length - 1 ? null :
         <Fragment key={`${i}:${p}`}>
           {i > 0 && <WorkspaceGlyph name="right" size={11} className="wb-crumb-sep" />}
           {i === parts.length - 1 ? <span className="wb-crumb-file" title={p}>
             <EditorTabTypeIcon path={active.path} name={active.name} mtimeMs={active.mtimeMs} />
             <WorkspaceFileName name={p} />
-          </span> : <span className="wb-crumb-seg">{p}</span>}
+          </span> : middle.length && i === 1 ? <span className="wb-crumb-middle">
+            <Menu portal align="left" width="w-72" trigger={(open, toggle) => <button type="button" className="wb-icon-btn" aria-label="查看完整文件路径" title={active.path} aria-haspopup="menu" aria-expanded={open} onClick={toggle}><Icon name="more" size={12} /></button>}>
+              {close => <><p className="wb-tree-menu-note" title={active.path}>{parts.join(" / ")}</p><MenuItem label="复制完整路径" icon="copy" onClick={() => { close(); void navigator.clipboard.writeText(active.path).then(() => toast("已复制文件路径", "success"), () => toast("复制文件路径失败", "error")); }} /></>}
+            </Menu>
+          </span> : <span className="wb-crumb-seg" title={p}>{p}</span>}
         </Fragment>
       ))}
       {chain.map((s) => (

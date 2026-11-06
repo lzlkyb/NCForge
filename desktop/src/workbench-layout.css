@@ -29,6 +29,8 @@
    否则右侧被 overflow:hidden 裁掉一截；右侧竖线由 .wb-resize-x 承担，这里去掉重复边框。 */
 .wb-sidebar-host .vc-chg { width:100%; min-width:0; flex:1 1 auto; border-right:0; }
 .wb-main { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.wb-main-with-inspector { display:flex; min-width:0; min-height:0; overflow:hidden; grid-column:3; }
+.wb-main-with-inspector > .wb-main { flex:1; }
 .wb-code-surface,.wb-document-surface { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; overflow:hidden; background:hsl(var(--card)); }
 .wb-document-surface .vc-docked-document { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; }
 .wb-document-surface .md-page { flex:1; min-height:0; min-width:0; }
@@ -41,6 +43,13 @@
 .app-shell .wb-tab[data-active] { background:hsl(var(--card)); border-radius:var(--r-control) var(--r-control) 0 0; box-shadow:inset 0 -1px 0 hsl(var(--primary)); }
 .wb-bottom { display:flex; flex-direction:column; min-height:140px; max-height:65%; overflow:hidden; flex-shrink:0; }
 .wb-bottom .wb-panel { height:100%; border-top:0; }
+.wb-bottom:has(.wb-panel[data-compact]) { height:36px !important; min-height:36px; }
+.wb-resize-y:has(+ .wb-bottom .wb-panel[data-compact]) { display:none; }
+.wb-main[data-panel-expanded] .wb-bottom { flex:1; height:100% !important; min-height:0; max-height:100%; }
+.wb-panel-tool-option { display:flex; align-items:center; gap:3px; }
+.wb-panel-tool-option > button[role="menuitem"] { flex:1; min-width:0; }
+.wb-panel-tool-option > .wb-icon-btn { flex:none; }
+.wb-panel-tool-option > .wb-icon-btn[aria-pressed="true"] { color:hsl(var(--primary)); background:hsl(var(--accent)); }
 .wb-svc-host { display:flex; flex-direction:column; padding:0; }
 .wb-resize-x { position:relative; cursor:col-resize; border-left:1px solid hsl(var(--border)); }
 /* 抓手命中区比视觉宽：4px 的线用鼠标都难按住，触控板上还会先被当成滚动（所以要
@@ -57,9 +66,9 @@
 /* 文件页槽位的宿主：状态栏只做 portal 的落点，自身不能产生盒子。
    文件标签条是例外——它现在是**代码面的第一行**（真身，不再是 transparent wrapper）：
    文件标签只属于代码面，切到工具页时随代码面一起 hidden，从结构上不可能和文档面的
-   工具标签同屏。没有打开任何文件时整条收起，不留 36px 空白。 */
+   工具标签同屏。执行与分组工具也停靠在这里，只在宿主完全为空时收起。 */
 .wb-file-tabs { min-width:0; flex-shrink:0; }
-.wb-file-tabs:not(:has(.wb-tab)) { display:none; }
+.wb-file-tabs:empty { display:none; }
 /* 代码面的正文：文件标签条之外的编辑器区域。 */
 .wb-code-body { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; overflow:hidden; }
 .wb-status-host { display:contents; }
@@ -99,11 +108,19 @@
 .wb-service-tool .sv-alert { flex-shrink:0; }
 .wb-settings-page { height:100%; overflow:auto; }
 .app-shell .wb-status { flex-shrink:0; height:26px; min-height:26px; border:0; background:hsl(var(--chrome)); padding:0 9px; font-size:11px; }
+.wb-status-unsaved { color:hsl(var(--warning-ink)); white-space:nowrap; flex:none; }
+.wb-file-status { display:flex; align-items:center; gap:4px; white-space:nowrap; }
+.wb-file-status-short { display:none; }
+.wb-file-status-list { display:grid; gap:7px; padding:9px 10px; font-size:12px; }
+.wb-file-status-list > div { display:grid; grid-template-columns:46px minmax(0,1fr); gap:9px; }
+.wb-file-status-list dt { color:hsl(var(--muted-foreground)); }
+.wb-file-status-list dd { margin:0; overflow-wrap:anywhere; }
+@media(max-width:850px) { .wb-file-status-details { display:none; } .wb-file-status-short { display:inline; } }
 @media(max-width:1100px) { .wb-toolbar-host :is(.vc-url,.vc-hint,.pk-kv,.dq-kv) { display:none; } }
 @media(max-width:900px) { .wb-toolbar { padding-inline:10px; } .wb-toolbar-host .sv-head .sv-sub { display:none; } .wb-service-tool .sv-metrics { flex-wrap:wrap; } }
 @media(max-width:650px) { .wb-layout { grid-template-columns:0 0 minmax(0,1fr)!important; } .app-shell .wb-tree { position:absolute; inset:0 auto 0 0; width:min(300px,calc(100vw - 80px)); z-index:15; box-shadow:8px 0 24px #0002; border-right:1px solid hsl(var(--border)); } .wb-resize-x { visibility:hidden; } .wb-toolbar { gap:5px; } .wb-toolbar-host :is(.vc-head,.pk-head,.sv-head,.dq-top) { overflow-x:auto; } .wb-toolbar-actions .wb-compile-btn { font-size:11px; padding:0 7px; } .wb-document-surface .vc-file-name { max-width:140px; } .wb-document-surface .pk-tabs { padding:5px; } .wb-document-surface .pk-desc { flex-basis:100%; } .wb-document-surface .pk-zipname { display:none; } }
 /* 窄窗口侧栏脱离网格后，自动排布会把正文前移到零宽列；固定槽位保留正文宽度。 */
-@media(max-width:650px) { .wb-layout > .wb-resize-x { grid-column:2; } .wb-layout > .wb-main { grid-column:3; } }
+@media(max-width:650px) { .wb-layout > .wb-resize-x { grid-column:2; } .wb-layout > :is(.wb-main,.wb-main-with-inspector) { grid-column:3; } }
 @media(max-width:650px) {
   .app-shell .wb-tree { display:flex; flex-direction:column; }
   .wb-tree-heading { display:flex; align-items:center; justify-content:space-between; flex-shrink:0; padding:6px 10px; border-bottom:1px solid hsl(var(--border)); font-size:12px; }

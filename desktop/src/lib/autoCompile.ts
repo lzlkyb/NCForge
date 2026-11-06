@@ -1,4 +1,5 @@
 import type { CompileResult } from "./compile";
+import { mergeCompileSnapshots } from "./compileFreshness";
 
 /**
  * 保存后自动编译的纯逻辑：判断该不该编、结果怎么并回去。
@@ -65,12 +66,94 @@ export function mergeFileResult(
     return true;
   });
 
+  // 模块账本也要按模块合并：单文件编译只带自己那个模块的一条，
+  // 直接 `...next` 会把前不久全量构建留下的其它模块账本整份抹掉。
+  const modules = mergeModuleLedger(prev.modules, next.modules);
+
   return {
     ...next,
+    problems,
+    ...mergeCompileSnapshots(prev, next, path => targets.has(norm(path))),
+    errorCount,
+    warningCount: problems.length - errorCount,
+    ok: errorCount === 0,
+    diagnostics,
+    ...(modules ? { modules } : {}),
+  };
+}
+
+/** 按模块名替换账本；`next` 没有账本时保留 `prev`（老后端 / 测试桩）。 */
+function mergeModuleLedger(
+  prev: CompileResult["modules"],
+  next: CompileResult["modules"],
+): CompileResult["modules"] {
+  if (!next || next.length === 0) return prev;
+  if (!prev || prev.length === 0) return next;
+  const touched = new Set(next.map((m) => m.module));
+  return [...prev.filter((m) => !touched.has(m.module)), ...next];
+}
+
+/**
+ * 把一次**模块级增量**的结果并回上一次的完整结果。
+ *
+ * 与 `mergeFileResult` 的差别：增量的影响面是「受影响的 module 目录」，
+ * 不是「刚保存的那几个文件」——改了方法签名时，引用方模块也会被重编，
+ * 它们的问题必须一起替换，否则问题面板会同时留着新旧两版错误。
+ *
+ * `prev` 为空时直接用 `next`（第一次编译，没有可保留的东西）。
+ */
+export function mergeModuleResult(
+  prev: CompileResult | null,
+  next: CompileResult,
+  root: string,
+): CompileResult {
+  const modules = next.modules ?? [];
+  if (!prev) return next;
+  if (modules.length === 0) return mergeFileResult(prev, next, []);
+
+  // 只有真正重编过的模块才能替换旧问题。`skipped`（没有源码变化）和
+  // `blocked`（依赖失败，没轮到它）都没有产生新信息：把旧问题留着，
+  // 否则一次「跳过」会把上一轮失败的错误从问题面板里抹掉。
+  const rebuilt = new Set(
+    modules
+      .filter((m) => m.status !== "skipped" && m.status !== "blocked")
+      .map((m) => m.module.toLowerCase()),
+  );
+  const prefixes = [...rebuilt].map((m) => `${norm(root)}/${m}/`);
+  const inAffected = (file: string) => {
+    const f = norm(file);
+    return prefixes.some((p) => f.startsWith(p));
+  };
+
+  const problems = [
+    ...prev.problems.filter((p) => !inAffected(p.file)),
+    ...next.problems,
+  ];
+  const errorCount = problems.filter((p) => p.severity === "error").length;
+
+  // `next` 是这次重编模块的新推断；`prev` 里只补未参与本轮推断的模块。
+  // 注意不能因为项目在 `rebuilt` 里就把 `next` 自己的诊断也筛掉——那样重编完
+  // 反而看不到当前状态。
+  const diagnostics = [...next.diagnostics];
+  const seen = new Set(diagnostics.map(diagKey));
+  for (const d of prev.diagnostics) {
+    if (rebuilt.has(d.project.toLowerCase())) continue;
+    const k = diagKey(d);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    diagnostics.push(d);
+  }
+
+  return {
+    ...next,
+    // 未受影响模块的计数还在 prev 里：把它们的错误/警告补回来
+    ...mergeCompileSnapshots(prev, next, inAffected),
     problems,
     errorCount,
     warningCount: problems.length - errorCount,
     ok: errorCount === 0,
     diagnostics,
+    modules: mergeModuleLedger(prev.modules, next.modules),
+    jarCount: Math.max(prev.jarCount, next.jarCount),
   };
 }

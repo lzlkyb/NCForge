@@ -40,9 +40,42 @@ pub struct TypeCatalog {
 pub struct TypeCandidate {
     pub name: String,
     pub kind: u8,
+    /// `ClassIndex.jars` 的下标：打开结果时要落到具体 jar。
+    pub jar: u32,
 }
 fn simple(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
+}
+
+/// 类型名匹配分：0 完全相同、1 前缀、2 驼峰首字母、3 包含；不命中为 `None`。
+///
+/// 前端快速面板以前只能靠 jdt.ls 的 `workspace/symbol` 做模糊匹配；没有语言服务时
+/// 连「VBO → VoucherBillOrder」都做不到。工作区索引与 jar 目录共用这一个打分函数，
+/// 两边的排序规则才不会一个说前缀优先、另一个说短名优先。
+pub(crate) fn type_match_score(query: &str, name: &str) -> Option<u8> {
+    if query.is_empty() || query.len() > 100 {
+        return None;
+    }
+    let q = query.to_lowercase();
+    let n = name.to_lowercase();
+    if n == q {
+        return Some(0);
+    }
+    if n.starts_with(&q) {
+        return Some(1);
+    }
+    if q.chars().count() >= 2 {
+        let initials: String = name
+            .chars()
+            .enumerate()
+            .filter(|(i, c)| *i == 0 || c.is_uppercase())
+            .map(|(_, c)| c.to_lowercase().next().unwrap_or(c))
+            .collect();
+        if initials.starts_with(&q) || initials.contains(&q) {
+            return Some(2);
+        }
+    }
+    n.contains(&q).then_some(3)
 }
 fn type_name(entry: &str) -> Option<String> {
     let name = entry.strip_suffix(".class")?;
@@ -109,6 +142,19 @@ impl TypeCatalog {
         *SHARED.lock().unwrap_or_else(|e| e.into_inner()) =
             Some((std::sync::Arc::downgrade(index), catalog.clone()));
         Some(catalog)
+    }
+
+    /// 已有的进程内目录：不重建、也不校验 jar 指纹。
+    ///
+    /// 给快速面板这类「拿不到就这次先不显示 jar 段」的调用方用；真正要保证
+    /// 与磁盘 jar 同步的路径仍走 `shared_cancellable`。
+    pub fn shared_existing(index: &std::sync::Arc<ClassIndex>) -> Option<std::sync::Arc<Self>> {
+        let guard = SHARED.lock().unwrap_or_else(|e| e.into_inner());
+        guard.as_ref().and_then(|(held, catalog)| {
+            held.upgrade()
+                .filter(|i| std::sync::Arc::ptr_eq(i, index))
+                .map(|_| catalog.clone())
+        })
     }
 
     pub fn load(index: &ClassIndex, cache: &Path, progress: &dyn Fn(usize, usize)) -> Self {
@@ -215,6 +261,47 @@ impl TypeCatalog {
                 found.push(TypeCandidate {
                     name: entry.name.clone(),
                     kind,
+                    jar: entry.jar,
+                });
+                if found.len() >= limit {
+                    break;
+                }
+            }
+        }
+        found
+    }
+
+    /// 前缀 / 包含 / 驼峰首字母三种匹配，按「越精确越靠前」排序。
+    ///
+    /// 和 `search` 一样只收 public 类型：解析访问标记要逐个开 jar，所以先按名字多取
+    /// 一批候选（`limit * 8`），凑够 `limit` 就停，不为一个词打开几万个 jar。
+    pub fn search_fuzzy(
+        &self,
+        index: &ClassIndex,
+        query: &str,
+        limit: usize,
+    ) -> Vec<TypeCandidate> {
+        if query.chars().count() < 2 || query.len() > 100 || limit == 0 {
+            return vec![];
+        }
+        let mut hits: Vec<(u8, &Entry)> = self
+            .entries
+            .iter()
+            .filter_map(|e| type_match_score(query, simple(&e.name)).map(|s| (s, e)))
+            .collect();
+        hits.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(simple(&a.1.name).len().cmp(&simple(&b.1.name).len()))
+                .then(a.1.name.cmp(&b.1.name))
+        });
+        hits.truncate(limit.saturating_mul(8).max(200));
+        let mut found = Vec::new();
+        for (_, entry) in hits {
+            if let Some(kind) = self.kind(index, entry) {
+                found.push(TypeCandidate {
+                    name: entry.name.clone(),
+                    kind,
+                    jar: entry.jar,
                 });
                 if found.len() >= limit {
                     break;
@@ -311,6 +398,16 @@ mod tests {
             assert_eq!(type_name(n), None);
         }
     }
+    #[test]
+    fn type_name_scoring_prefers_prefix_then_camel_then_contains() {
+        assert_eq!(type_match_score("Widget", "Widget"), Some(0));
+        assert_eq!(type_match_score("Wid", "Widget"), Some(1));
+        // 驼峰首字母：VBO → VoucherBillOrder
+        assert_eq!(type_match_score("VBO", "VoucherBillOrder"), Some(2));
+        assert_eq!(type_match_score("rder", "Order"), Some(3));
+        assert_eq!(type_match_score("xyz", "Voucher"), None);
+    }
+
     #[test]
     fn public_class_flags_and_truncated_headers() {
         let mut bytes = vec![0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 52, 0, 1, 0, 1];

@@ -1,0 +1,93 @@
+/* 设置 → 开发 → 「NC 环境」：NC 安装目录配置、自动探测候选、环境自检。 */
+
+/* 安装目录展示行：等宽路径 + 动作按钮。路径可能很长，优先保证路径可读、
+   按钮不换行（窄窗口下按钮先挤扁，路径才截断）。 */
+.settings-ncenv-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-ncenv-path-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+/* 自动探测候选列表：一条 = 路径 + 模块数 + 来源 + 「使用」。 */
+.settings-ncenv-cands {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 8px;
+}
+
+.settings-ncenv-cand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-control, 6px);
+  min-width: 0;
+}
+
+.settings-ncenv-cand-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.settings-ncenv-cand-src {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  padding: 0 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 环境自检行：状态点 + 标签 + 详情 + 尾部动作。 */
+.settings-ncenv-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.settings-ncenv-check + .settings-ncenv-check {
+  border-top: 1px solid hsl(var(--border));
+}
+
+.settings-ncenv-check-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.settings-ncenv-check[data-tone="ok"] .settings-ncenv-check-dot { background: hsl(var(--primary)); }
+.settings-ncenv-check[data-tone="warn"] .settings-ncenv-check-dot { background: #d97706; }
+.settings-ncenv-check[data-tone="bad"] .settings-ncenv-check-dot { background: hsl(var(--destructive)); }
+.settings-ncenv-check[data-tone="idle"] .settings-ncenv-check-dot { background: hsl(var(--muted-foreground)); }
+
+.settings-ncenv-check-k { flex-shrink: 0; font-weight: 500; }
+
+.settings-ncenv-check-d {
+  min-width: 0;
+  color: hsl(var(--muted-foreground));
+  overflow-wrap: anywhere;
+}
+
+.settings-ncenv-check-act { margin-left: auto; flex-shrink: 0; }

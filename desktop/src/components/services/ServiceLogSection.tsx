@@ -1,38 +1,45 @@
 import { useState } from "react";
 import { LogPanel } from "./LogPanel";
-import { clientClearLog, clientLog } from "../../lib/client";
+import type { ServiceLogSource } from "../../lib/logPanelStore";
 
 export interface ServiceLogPane {
   active: boolean;
   generation: number;
   logPath: string;
   logSize: number;
-  onReveal: () => void;
+  onReveal: (previous?: boolean) => void;
   onCleared: () => void;
+  runId?: string | null;
+  projectRoot?: string | null;
+  visible?: boolean;
 }
 
 /**
  * 日志区：中间件 / 客户端两个日志文件共用一个面板，用顶部的来源切换。
  *
  * 不做成两个并排面板：底部停靠区高度有限，两边都看时各剩一半行数；
- * 而排查时几乎总是只看一边。切换时用 `key={source}` 重建 `LogPanel`，
- * 免得把另一份日志的行和 offset 带到这一边。
+ * 而排查时几乎总是只看一边。两个面板保持挂载，切换来源保留各自过滤和滚动位置；
+ * 隐藏面板停止读取，日志数据由来源与运行身份隔离，避免行和 offset 串用。
  */
 export function ServiceLogSection({
   appHidden,
   middleware,
   client,
+  source: selected,
+  onSourceChange,
 }: {
   appHidden: boolean;
   middleware: ServiceLogPane;
   client: ServiceLogPane;
+  source?: ServiceLogSource;
+  onSourceChange?: (source: ServiceLogSource) => void;
 }) {
-  const [source, setSource] = useState<"middleware" | "client">("middleware");
-  const pane = source === "client" ? client : middleware;
+  const [localSource, setSource] = useState<ServiceLogSource>("middleware");
+  const source = selected ?? localSource;
 
   return (
-    <div className="sv-log-wrap">
-      <div className="sv-log-src" role="tablist" aria-label="日志来源">
+    <div className="sc-log-section">
+      {selected === undefined && <div className="sv-log-src" role="tablist" aria-label="日志来源">
         {(
           [
             ["middleware", "中间件日志", "middleware.log"],
@@ -45,26 +52,17 @@ export function ServiceLogSection({
             role="tab"
             aria-selected={source === id}
             data-on={source === id || undefined}
-            onClick={() => setSource(id)}
+            onClick={() => { setSource(id); onSourceChange?.(id); }}
           >
             {text}
             <span className="sv-log-src-file">{file}</span>
           </button>
         ))}
-      </div>
-      <LogPanel
-        key={source}
-        active={pane.active}
-        generation={pane.generation}
-        logPath={pane.logPath}
-        logSize={pane.logSize}
-        appHidden={appHidden}
-        onReveal={pane.onReveal}
-        onCleared={pane.onCleared}
-        target={source}
-        fetchLog={source === "client" ? clientLog : undefined}
-        clearLog={source === "client" ? clientClearLog : undefined}
-      />
+      </div>}
+      {([['middleware', middleware], ['client', client]] as const).map(([target, pane]) => <div className="sc-log-pane" key={target} hidden={source !== target}>
+        <LogPanel active={pane.active} generation={pane.generation} logPath={pane.logPath} logSize={pane.logSize} appHidden={appHidden} visible={source === target && pane.visible !== false}
+          onReveal={pane.onReveal} onCleared={pane.onCleared} target={target} runId={pane.runId} projectRoot={pane.projectRoot} />
+      </div>)}
     </div>
   );
 }

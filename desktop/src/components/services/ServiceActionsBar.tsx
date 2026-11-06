@@ -1,5 +1,4 @@
 import { Icon } from "../ui/icon";
-import { FreshnessBadge } from "../ui/FreshnessBadge";
 import { Menu, MenuItem } from "../ui/Menu";
 import { NccDecodeLauncher } from "./NccDecodeLauncher";
 
@@ -18,6 +17,8 @@ export function ServiceActionsBar({
   known,
   failed,
   onRetryStatus,
+  onDetails,
+  onDeploy,
 }: {
   configOpen: boolean;
   onToggleConfig: () => void;
@@ -28,34 +29,11 @@ export function ServiceActionsBar({
   known: boolean;
   failed: boolean;
   onRetryStatus: () => void;
+  onDetails?: () => void;
+  onDeploy?: () => void;
 }) {
   return (
-    <div className="sv-svc-bar">
-      <span className="sv-svc-name">
-        <Icon name="server" size={13} />
-        NC 中间件
-      </span>
-      <FreshnessBadge
-        // 1 秒轮询是实时流，不显示秒级时间戳；失败时由徽标给出重试。
-        state={failed ? "error" : known ? "live" : "loading"}
-        at={null}
-        label="服务状态"
-        onRefresh={onRetryStatus}
-      />
-      <span className="sv-sp" />
-      <button
-        type="button"
-        className="sv-btn"
-        data-on={configOpen || undefined}
-        aria-expanded={configOpen}
-        onClick={onToggleConfig}
-      >
-        配置
-      </button>
-      <button type="button" className="sv-btn" onClick={onRevealLog}>
-        <Icon name="folder" size={13} />
-        日志位置
-      </button>
+    <div className="sc-service-tools">
       {/* 入口一直挂载，命令面板中的报文解密不会随菜单关闭而消失。 */}
       <NccDecodeLauncher trigger={(onDecode) => (
         <Menu portal trigger={(open, toggle) => (
@@ -74,6 +52,8 @@ export function ServiceActionsBar({
         )}>
           {(close) => (
             <>
+              {onDetails && <MenuItem label="运行详情" icon="info" onClick={() => { close(); onDetails(); }} />}
+              <MenuItem label="启动设置" icon="settings" active={configOpen} onClick={() => { close(); onToggleConfig(); }} />
               <MenuItem
                 label={previewing ? "命令行生成中…" : "启动命令行"}
                 icon="terminal"
@@ -81,6 +61,9 @@ export function ServiceActionsBar({
                 disabled={previewing}
                 onClick={() => { close(); onCommandLine(); }}
               />
+              <MenuItem label="日志位置" icon="folder" onClick={() => { close(); onRevealLog(); }} />
+              {onDeploy && <MenuItem label="元数据投送" icon="layers" onClick={() => { close(); onDeploy(); }} />}
+              {(!known || failed) && <MenuItem label="重试服务状态" icon="refresh" onClick={() => { close(); onRetryStatus(); }} />}
               <MenuItem
                 label="NCC / BIP 报文解密"
                 icon="key"

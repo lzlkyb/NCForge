@@ -69,6 +69,28 @@ it("按分号切语句，注释与字符串里的分号不切", () => {
     "select 2 from dual",
   ]);
 });
+it("含 PL/SQL 块的脚本在确认测试连接后仍禁止逐语句执行", async () => {
+  mocks.invoke.mockImplementation((cmd: string) => cmd === "db_conn_list" ? Promise.resolve([conn("c1", "测试库", "test")]) : Promise.resolve(okUpdate));
+  await act(async () => root.render(<MetaDdlRun ddl="begin null; end;" component="demo" />));
+  await act(async () => setValue(host.querySelector<HTMLSelectElement>("select")!, "c1"));
+  await act(async () => host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+  await act(async () => setValue(host.querySelector<HTMLInputElement>('[aria-label="输入组件名确认 DDL 执行"]')!, "demo"));
+  expect(button("执行 DDL").disabled).toBe(true);
+  expect(mocks.invoke.mock.calls.filter(([cmd]) => cmd === "db_exec")).toHaveLength(0);
+});
+it("执行组件真正卸载后，不再继续提交后续 DDL", async () => {
+  let finish!: (value: typeof okUpdate) => void;
+  const pending = new Promise<typeof okUpdate>((resolve) => { finish = resolve; });
+  mocks.invoke.mockImplementation((cmd: string) => cmd === "db_conn_list" ? Promise.resolve([conn("c1", "测试库", "test")]) : pending);
+  await act(async () => root.render(<MetaDdlRun ddl={DDL} component="demo" />));
+  await act(async () => setValue(host.querySelector<HTMLSelectElement>("select")!, "c1"));
+  await act(async () => host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+  await act(async () => setValue(host.querySelector<HTMLInputElement>('[aria-label="输入组件名确认 DDL 执行"]')!, "demo"));
+  await act(async () => button("执行 DDL").click());
+  act(() => root.render(null));
+  await act(async () => finish(okUpdate));
+  expect(mocks.invoke.mock.calls.filter(([cmd]) => cmd === "db_exec")).toHaveLength(1);
+});
 
 it("生产连接拒绝执行；测试连接需勾选并手打组件名，逐条执行且失败即停", async () => {
   let failSecond = false;

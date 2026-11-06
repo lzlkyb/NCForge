@@ -48,8 +48,12 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
   const [objs, setObjs] = useState<DbObject[] | null>(null);
   const [objErr, setObjErr] = useState<string | null>(null);
   const names = rt.ncNames ?? NO_NAMES;
+  /** 当前生效的 schema：表 / 视图 / 包都按它过滤（后端 SQL 里的 owner 条件）。 */
+  const schema = rt.currentSchema ?? "";
 
-  // 非表对象按需读：包/过程/序列加起来可能上百条，但不像表那样一进连接就要看
+  // 非表对象按需读：包/过程/序列加起来可能上百条，但不像表那样一进连接就要看。
+  // **依赖里必须带 schema**：切换默认 schema 后对象清单完全不同，不重读就会把上一个
+  // schema 的包挂着，点开却报「对象不存在」。
   useEffect(() => {
     setObjs(null);
     setObjErr(null);
@@ -66,7 +70,7 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
     return () => {
       alive = false;
     };
-  }, [connId, rt.status]);
+  }, [connId, rt.status, schema]);
 
   const matched = useMemo(() => {
     const all = rt.tables ?? [];
@@ -126,9 +130,13 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
 
   return (
     <div style={{ paddingLeft: 10 }}>
-      {rt.status === "connected" && rt.tablesAt && (
-        <div className="dbx-tree-note" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span>表结构读取于 {new Date(rt.tablesAt).toLocaleTimeString("zh-CN", { hour12: false })}</span>
+      {rt.status === "connected" && (
+        <div className="dbx-tree-note" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {/* 树是按当前 schema 过滤的：把名字写出来，否则用户看到「表少了一半」不知道是被过滤了 */}
+          <span className="dbx-schema-tag" title="左栏的表 / 视图 / 包都按这个 schema 过滤；写 SQL 时它就是默认前缀">
+            {schema || "登录账号"}
+          </span>
+          {rt.tablesAt && <span>读取于 {new Date(rt.tablesAt).toLocaleTimeString("zh-CN", { hour12: false })}</span>}
           <button type="button" className="dbx-lk" onClick={() => void refreshMeta(connId)}>
             刷新
           </button>
@@ -168,7 +176,7 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
           {groups.obj && !objs && <p className="dbx-tree-note" style={{ paddingLeft: 25 }}>读取对象…</p>}
           {groups.obj && objErr && <p className="dbx-tree-note" style={{ paddingLeft: 25 }}>读不到其它对象：{objErr}</p>}
           {groups.obj && objs && objSections.length === 0 && !objErr && (
-            <p className="dbx-tree-note" style={{ paddingLeft: 25 }}>这个账号下没有包 / 过程 / 序列等对象</p>
+            <p className="dbx-tree-note" style={{ paddingLeft: 25 }}>这个 schema 下没有包 / 过程 / 序列等对象</p>
           )}
           {groups.obj &&
             objSections.map((g) => (

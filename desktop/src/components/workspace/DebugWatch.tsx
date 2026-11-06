@@ -35,7 +35,7 @@ export function DebugWatch({ paused, watches }: { paused: boolean; watches: Watc
           title={full ? `最多 ${MAX_DEBUG_WATCHES} 条监视表达式` : "按 Enter 添加监视"}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
+            if (!e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && e.key === "Enter") submit();
           }}
         />
         <button type="button" className="dbg-icon-btn" disabled={!canAdd} title="添加监视" onClick={submit}>

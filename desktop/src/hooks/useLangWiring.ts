@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { ensureLang, initLang, setNavHandler } from "../lib/lang";
+import { initCompileMarkers } from "../lib/compileMarkers";
 import { initSemanticTokens } from "../lib/semanticTokens";
 
 /**
@@ -20,6 +21,8 @@ export function useLangWiring({
   useEffect(() => {
     void initLang();
     initSemanticTokens();
+    // ecj 标记不依赖 jdt.ls：服务关着时它是编辑器里唯一能看到编译错误的途径
+    initCompileMarkers();
   }, []);
 
   useEffect(() => {

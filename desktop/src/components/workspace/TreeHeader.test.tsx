@@ -51,8 +51,11 @@ function render(onOpen: (path: string) => void) {
   ));
 }
 
-const folderButton = () =>
-  document.querySelector<HTMLButtonElement>('button[aria-label="更换工作区目录"]')!;
+const chooseFolder = async () => {
+  await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="更多资源操作"]')!.click());
+  const item = Array.from(document.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]')).find(button => button.textContent?.includes("更换工作区目录"))!;
+  await act(async () => item.click());
+};
 
 describe("TreeHeader 换目录", () => {
   it("点按钮拉起选择器，从当前目录开始，选中后切过去", async () => {
@@ -62,7 +65,7 @@ describe("TreeHeader 换目录", () => {
 
     // 不再有时间就地展开的手填输入框
     expect(document.querySelector("input")).toBeNull();
-    await act(async () => { folderButton().click(); });
+    await chooseFolder();
     await flush();
 
     expect(h.pickFolder).toHaveBeenCalledWith({
@@ -77,7 +80,7 @@ describe("TreeHeader 换目录", () => {
     const onOpen = vi.fn();
     render(onOpen);
 
-    await act(async () => { folderButton().click(); });
+    await chooseFolder();
     await flush();
 
     expect(onOpen).not.toHaveBeenCalled();
@@ -88,9 +91,18 @@ describe("TreeHeader 换目录", () => {
     h.pickFolder.mockRejectedValueOnce(new Error("boom"));
     render(vi.fn());
 
-    await act(async () => { folderButton().click(); });
+    await chooseFolder();
     await flush();
 
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("无法打开文件夹选择框");
+  });
+  it("选择目录期间显示等待并禁止重复打开，取消后恢复入口", async () => {
+    let finish!: (path: string | null) => void;
+    h.pickFolder.mockImplementation(() => new Promise<string | null>(resolve => { finish = resolve; }));
+    render(vi.fn()); await chooseFolder();
+    const entry = document.querySelector<HTMLButtonElement>('button[aria-label="更多资源操作"]')!;
+    expect(entry.disabled).toBe(true); expect(entry.querySelector(".animate-spin")).toBeTruthy();
+    await act(async () => entry.click()); expect(h.pickFolder).toHaveBeenCalledTimes(1);
+    await act(async () => finish(null)); expect(entry.disabled).toBe(false);
   });
 });

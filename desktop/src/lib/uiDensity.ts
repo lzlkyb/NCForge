@@ -13,7 +13,7 @@ export function getUiDensity(): UiDensity {
   return document.documentElement.dataset.uiDensity === "comfortable" ? "comfortable" : "standard";
 }
 
-/** Density changes only chrome text and controls; editor preferences and virtual row geometry stay independent. */
+/** 编辑器保留自己的字号；虚拟列表接入密度时须同时订阅变化并同步行几何。 */
 export function initializeUiDensity(): void {
   document.documentElement.dataset.uiDensity = getStoredUiDensity();
 }

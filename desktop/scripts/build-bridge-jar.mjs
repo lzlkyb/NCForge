@@ -7,9 +7,10 @@
  * 所以把这件事固化成脚本。
  *
  * 用法：
- *   node scripts/build-bridge-jar.mjs            # 两个桥都编
+ *   node scripts/build-bridge-jar.mjs            # 三个桥都编
  *   node scripts/build-bridge-jar.mjs db         # 只编数据库桥
  *   node scripts/build-bridge-jar.mjs svn        # 只编 SVN 桥
+ *   node scripts/build-bridge-jar.mjs ecj        # 只编常驻 ecj 编译桥
  *   node scripts/build-bridge-jar.mjs db --dry   # 只编译到临时目录并报告，不覆盖 jar
  *
  * javac 的查找顺序：JAVA_HOME → NC_HOME/ufjdk → 几个常见 NC 安装位置 → PATH。
@@ -40,6 +41,13 @@ const BRIDGES = {
       join(ta, 'resources', 'svnkit', f),
     ),
     label: 'NcSvnBridge',
+  },
+  ecj: {
+    src: join(ta, 'ecj-bridge', 'NcEcjBridge.java'),
+    out: join(ta, 'resources', 'ecj-bridge', 'ncecj.jar'),
+    // ecj 的批量编译入口（Main.compile）编桥时要在 classpath 上；运行时也用它
+    cp: [join(ta, 'resources', 'ecj', 'ecj-3.17.jar')],
+    label: 'NcEcjBridge',
   },
 };
 

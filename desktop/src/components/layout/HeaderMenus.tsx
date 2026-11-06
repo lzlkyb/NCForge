@@ -6,6 +6,7 @@ import { requestSettingsSection } from "../../lib/settingsJump";
 import { setSession, useWorkspaceSelector } from "../../lib/workspaceSession";
 import { Menu, MenuItem } from "../ui/Menu";
 import { Icon, type IconName } from "../ui/icon";
+import { restoreWorkbenchLayout, selectWorkbenchLayout, updateWorkbenchLayout, useWorkbenchLayout, WORKBENCH_MODES } from "../../lib/workbenchLayout";
 
 const navigate = (tab: string) => window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: tab }));
 const APPLICATION_ACTIONS: { label: string; icon: IconName; tab: string }[] = [
@@ -38,12 +39,18 @@ export function LayoutMenu({ activeTool = "files" }: { activeTool?: string }) {
   const railExpanded = useRailExpanded();
   const panelOpen = useWorkspaceSelector((s) => s.panelOpen);
   const splitPath = useWorkspaceSelector((s) => s.splitPath);
+  const layout = useWorkbenchLayout();
   const check = (active: boolean) => active ? <Icon name="check" size={13} /> : undefined;
   return <Menu portal trigger={(open, toggle) => <button type="button" className="wb-header-icon" aria-label="工作台布局"
     title="工作台布局" aria-haspopup="menu" aria-expanded={open} onClick={toggle}><Icon name="panel" size={16} /></button>}>
     {(close) => {
       const split = listCommands().find((command) => command.id === (splitPath ? "tab.splitClose" : "tab.split"));
       return <>
+        {WORKBENCH_MODES.map(mode => <MenuItem key={mode.id} label={mode.label} active={layout.mode === mode.id} trailing={check(layout.mode === mode.id)}
+          onClick={() => { close(); selectWorkbenchLayout(mode.id); if (activeTool !== "files") navigate("files"); }} />)}
+        <MenuItem label={layout.locked ? "解除布局锁定" : "锁定当前布局"} active={layout.locked} trailing={check(layout.locked)} onClick={() => { close(); updateWorkbenchLayout({ locked: !layout.locked }); }} />
+        <MenuItem label="恢复默认布局" onClick={() => { close(); restoreWorkbenchLayout(); if (activeTool !== "files") navigate("files"); }} />
+        <div className="wb-menu-separator" role="separator" />
         {activeTool !== "logs" && <MenuItem label={activeTool === "settings" ? "设置分类" : "资源侧栏"} active={sideOpen} trailing={check(sideOpen)} onClick={() => { close(); toggleSide(); }} />}
         <MenuItem label="展开主导航" active={railExpanded} trailing={check(railExpanded)} onClick={() => { close(); toggleRail(); }} />
         <MenuItem label={activeTool === "files" ? "底部面板" : "代码底部面板"} active={panelOpen} trailing={check(panelOpen)} onClick={() => { close(); setSession({ panelOpen: (v) => !v }); if (activeTool !== "files") navigate("files"); }} />

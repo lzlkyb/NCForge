@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir,writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 const origin=process.env.GLASS_PREVIEW_URL || "http://localhost:1420";
 const artifacts=new URL(process.env.UI_ARTIFACT_DIR || "../../docs/db-acceptance-20261104/",import.meta.url);
@@ -66,9 +67,9 @@ test('database workflow: selection, layouts, filters, snapshots, query-only, rel
   await page.getByRole('button',{name:'添加条件',exact:true}).click();await page.getByLabel('条件 1 字段').selectOption('CODE');await page.getByLabel('条件 1 值').fill("O'Brien");await page.getByRole('button',{name:'保存常用筛选',exact:true}).click();await page.getByRole('button',{name:'查询',exact:true}).click();
   await page.waitForFunction(()=>window.dbCalls.some(c=>c.cmd==='db_exec_bound' && c.args.params[0]==="O'Brien"));
   assert.equal(await page.evaluate(()=>window.dbCalls.filter(c=>c.cmd==='db_exec_bound').at(-1).args.sql.includes("O'Brien")),false);
-  await page.getByRole('button',{name:'固定为对照',exact:true}).click();await page.getByRole('button',{name:'结果对比',exact:true}).click();await page.getByRole('dialog',{name:'查询结果对比'}).getByLabel('ID',{exact:true}).check();await page.getByText('新增 0 行 · 删除 0 行 · 变化 0 行',{exact:true}).waitFor();await page.getByRole('dialog',{name:'查询结果对比'}).getByRole('button',{name:'关闭',exact:true}).click();
+  await page.getByRole('button',{name:'结果工具',exact:true}).click();await page.getByRole('menuitem',{name:'固定为对照',exact:true}).click();await page.getByRole('button',{name:'结果工具',exact:true}).click();await page.getByRole('menuitem',{name:'结果对比',exact:true}).click();await page.getByRole('dialog',{name:'查询结果对比'}).getByLabel('ID',{exact:true}).check();await page.getByText('新增 0 行 · 删除 0 行 · 变化 0 行',{exact:true}).waitFor();await page.getByRole('dialog',{name:'查询结果对比'}).getByRole('button',{name:'关闭',exact:true}).click();
   await page.getByRole('button',{name:'开启只读查询',exact:true}).click();await page.getByRole('button',{name:'只读查询已开启',exact:true}).waitFor();await page.locator('#dbx-cell-0-1').dblclick();assert.equal(await page.locator('.dbx-gedit').count(),0);await page.getByRole('button',{name:'只读查询已开启',exact:true}).click();await page.getByRole('button',{name:'开启只读查询',exact:true}).waitFor();
-  await page.locator('#dbx-cell-0-1').click();await page.getByRole('button',{name:'关联记录',exact:true}).click();await page.getByRole('button',{name:'打开关联记录',exact:true}).click();await page.getByRole('button',{name:'返回上一表',exact:true}).waitFor();
+  await page.locator('#dbx-cell-0-1').click();await page.getByRole('button',{name:'结果工具',exact:true}).click();await page.getByRole('menuitem',{name:'关联记录',exact:true}).click();await page.getByRole('button',{name:'打开关联记录',exact:true}).click();await page.getByRole('button',{name:'返回上一表',exact:true}).waitFor();
   await page.getByRole('button',{name:'关闭 test_table 标签 · NC测试库',exact:true}).click();
   await page.getByRole('button',{name:'返回上一表',exact:true}).click();
   await page.locator('.dbx-subtabs .title .dbx-mono').filter({hasText:'test_table'}).waitFor();
@@ -103,12 +104,12 @@ test('database workflow: selection, layouts, filters, snapshots, query-only, rel
    assert.equal(await page.locator('.dbx-filter-body').isVisible(),false);
    assert.ok((await page.locator('.dbx-grid').boundingBox()).height > m.grid,name+' more result space');
    assert.ok(await header.getByRole('button',{name:'查询',exact:true}).isVisible());
-   await page.screenshot({path:new URL(name+'.png',artifacts).pathname.replace(/^\/([A-Za-z]:)/,'$1')});
+   await page.screenshot({path:fileURLToPath(new URL(name+'.png',artifacts))});
    await page.getByRole('button',{name:'展开筛选',exact:true}).click();
   }
   assert.deepEqual(errors,[]);await writeFile(new URL('measurements.json',artifacts),JSON.stringify(measurements,null,2));
  }catch(error){
   await writeFile(new URL('failure.json',artifacts),JSON.stringify(await page.evaluate(()=>({text:document.body.innerText,calls:window.dbCalls,db:window.dbStore?.getDb()})).catch(()=>({errors})),null,2));
-  await page.screenshot({path:new URL('failure.png',artifacts).pathname.replace(/^\/([A-Za-z]:)/,'$1')});throw error;
+  await page.screenshot({path:fileURLToPath(new URL('failure.png',artifacts))});throw error;
  }finally{await context.close();await browser.close();}
 });

@@ -1,5 +1,6 @@
 import { invoke } from "./tauri";
-import { beginOperation, trackOperation } from "./operations";
+import { trackOperation } from "./operations";
+import { markServiceStopping, startServiceOperation } from "./serviceStartup";
 
 /** 与 Rust `server_cmds` 的结构一一对应（camelCase；Option 序列化为 null）。 */
 
@@ -20,6 +21,9 @@ export const UNKNOWN_PROCESS_NAME = "未知进程";
 
 export interface ServerStatus {
   state: ServerState;
+  runId?: string | null;
+  launchPhase?: string | null;
+  launchStartedAtMs?: number | null;
   pid: number | null;
   startedAtMs: number | null;
   uptimeMs: number | null;
@@ -85,6 +89,18 @@ export interface NcHome {
   java: string;
   moduleCount: number;
   hasNcStarter: boolean;
+  /** 中间件监听端口（读自 `ierp/bin/prop.xml`）；读不到为 null——不是「默认 80」。 */
+  httpPort: number | null;
+  /** Tomcat shutdown 端口；读不到为 null。 */
+  servicePort: number | null;
+}
+
+/** 扫描到的 NC home 候选（未经深度校验，用户点了才走 `nc_home_set`）。 */
+export interface HomeCandidate {
+  root: string;
+  moduleCount: number;
+  /** `driveRoot` = 硬盘根目录下扫到的；`workspaceSibling` = 工作区的同级目录。 */
+  source: "driveRoot" | "workspaceSibling";
 }
 
 /**
@@ -101,31 +117,13 @@ export const serverStatus = () => invoke<ServerStatus>("server_status");
  * 启动中间件。`debug` 为 true 时后端给 JVM 加 JDWP（只绑 127.0.0.1，端口由系统分配，
  * 启动后从 `ServerStatus.debugPort` 读回）。
  */
-let startupStopping = false;
-export async function serverStart(debug = false): Promise<void> {
-  const task = beginOperation({ key: "service.start", label: debug ? "启动调试服务" : "启动服务", scope: "NC 中间件", page: "files", panel: "svc",
-    phase: "准备启动命令", cancel: async () => { await invoke<StopOutcome>("server_stop"); startupStopping = true; } });
-  if (!task) throw new Error("服务正在启动，请稍候");
-  startupStopping = false;
-  try {
-    await invoke<void>("server_start", { debug });
-    task.update({ phase: "启动请求已接受，等待监听端口" });
-    // 启动 IPC 只确认请求；跨页之后也要继续观察真实端口状态才可报启动完成。
-    void (async () => {
-      try {
-        for (;;) {
-          const status = await serverStatus();
-          if (status.state === "running") { task.finish("success", `监听端口 ${status.port} 已就绪`); return; }
-          if (status.state === "stopped") { task.finish(startupStopping ? "cancelled" : "failed", status.reason || "服务在监听端口就绪前已停止，请检查日志"); return; }
-          task.update({ phase: startupStopping ? "等待服务停止" : "正在加载模块，等待监听端口" });
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      } catch (error) { task.finish("failed", `无法确认启动结果：${String(error)}，请重新读取服务状态`); }
-    })();
-  } catch (error) { task.finish(String(error).includes("CANCELLED:") ? "cancelled" : "failed", String(error)); throw error; }
+export function serverStart(debug = false, options?: { skipDeploy?: boolean; requestId?: string }): Promise<string> {
+  return startServiceOperation({ target: "server", debug, requestId: options?.requestId,
+    request: requestId => invoke<string>("server_start", { debug, skipDeploy: options?.skipDeploy ?? false, requestId }),
+    status: serverStatus, stop: expectedRunId => invoke<StopOutcome>("server_stop", { expectedRunId }) });
 }
-export const serverStop = () => trackOperation({ key: "service.stop", label: "停止服务", scope: "NC 中间件", page: "files", panel: "svc" },
-  async () => { const outcome = await invoke<StopOutcome>("server_stop"); startupStopping = true; return outcome; }, outcome => ({ state: "success", detail: outcome === "cancelling" ? "停止请求已发送，启动流程仍在退出" : outcome === "idle" ? "服务没有在运行" : "服务已停止" }));
+export const serverStop = (expectedRunId?: string) => trackOperation({ key: `service.stop${expectedRunId ? ':' + expectedRunId : ''}`, label: "停止服务", scope: "NC 中间件", page: "files", panel: "svc" },
+  async () => { const outcome = await invoke<StopOutcome>("server_stop", { expectedRunId: expectedRunId ?? null }); markServiceStopping("server", expectedRunId, outcome); return outcome; }, outcome => ({ state: "success", detail: outcome === "cancelling" ? "停止请求已发送，启动流程仍在退出" : outcome === "idle" ? "对应运行已结束或没有在运行" : "服务已停止" }));
 export const serverLog = (offset: number) => invoke<LogChunk>("server_log", { offset });
 
 /** 清空日志的结果。运行中清空不动磁盘文件，只把读取偏移快进到当前末尾。 */
@@ -136,7 +134,7 @@ export interface LogClearResult {
 }
 export const serverClearLog = () => trackOperation({ key: "service.log.clear", label: "清理服务日志", scope: "NC 中间件", page: "files", panel: "svc" }, () => invoke<LogClearResult>("server_clear_log"));
 export const serverCommandLine = () => trackOperation({ key: "service.command", label: "生成启动命令行", scope: "NC 中间件", page: "files", panel: "svc" }, () => invoke<LaunchPreview>("server_command_line"));
-export const serverRevealLog = () => invoke<void>("server_reveal_log");
+export const serverRevealLog = (previous = false) => invoke<void>("server_reveal_log", { previous });
 /** 结束占用中间件端口的 java 进程（端口取自 NC 配置），返回被结束的 PID。 */
 export const serverKillPortOwner = () => trackOperation({ key: "service.kill", label: "结束端口占用进程", scope: "NC 中间件", page: "files", panel: "svc" }, () => invoke<number>("server_kill_port_owner"));
 
@@ -190,6 +188,12 @@ export function formatHeapMb(mb: number): string {
 export const ncHomeProbe = (path: string | null = null) => invoke<NcHome>("nc_home_probe", { path });
 /** 选择 / 清空（传空串）NC home 并落盘。 */
 export const ncHomeSet = (path: string) => trackOperation({ key: "service.home", label: "验证并保存 NC 目录", scope: "NC 中间件", page: "files", panel: "svc" }, () => invoke<NcHome>("nc_home_set", { path }));
+/**
+ * 扫描本机常见位置的 NC home 候选（只读，不改配置）。
+ *
+ * 给设置 → 开发 → 「NC 环境」的自动探测用。扫不到返回空列表，不是错误。
+ */
+export const ncHomeCandidates = () => invoke<HomeCandidate[]>("nc_home_candidates");
 
 /** 改端口时一处要动的配置（Rust `nc_port::PortEdit`）。 */
 export interface PortEdit {

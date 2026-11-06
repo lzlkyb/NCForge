@@ -11,8 +11,8 @@ use serde_json::Value;
 use tauri::AppHandle;
 
 use super::db_cmds::{
-    bridge_for, call, code_label, connect_args, drop_bridge, find_conn, prop_password_ready,
-    protect, PROBE,
+    bridge_for, call, code_label, connect_args, drop_bridge, find_conn, need_nc_home,
+    prop_password_ready, protect, PROBE,
 };
 use crate::config::{AppConfig, DbConnConfig};
 use crate::db_conns;
@@ -35,6 +35,8 @@ pub struct DbConnView {
     pub has_password: bool,
     /// `java` / `rust`，这个连接用哪个执行引擎。
     pub engine: String,
+    /// 连上后切换到的默认 schema（空 = 用登录账号自己的）。
+    pub default_schema: String,
 }
 
 impl From<&DbConnConfig> for DbConnView {
@@ -53,6 +55,7 @@ impl From<&DbConnConfig> for DbConnView {
             engine: crate::db_engine::EngineKind::parse(&c.engine)
                 .as_str()
                 .to_string(),
+            default_schema: c.default_schema.clone(),
         }
     }
 }
@@ -75,6 +78,9 @@ pub struct DbConnInput {
     /// 不传就是 JVM 桥（老前端 / 老配置都走这条）。
     #[serde(default)]
     pub engine: Option<String>,
+    /// 默认 schema（空 / 不传 = 不切）。写 SQL 时不用带 `aier633.` 前缀。
+    #[serde(default)]
+    pub default_schema: Option<String>,
 }
 
 impl DbConnInput {
@@ -105,6 +111,7 @@ impl DbConnInput {
                 .as_str()
                 .to_string(),
             note: self.note.clone().unwrap_or_default(),
+            default_schema: db_conns::normalize_schema(self.default_schema.as_deref().unwrap_or("")),
         }
     }
 }
@@ -119,7 +126,12 @@ async fn prop_sources(
     st: &Arc<AppState>,
     cfg: &AppConfig,
 ) -> Result<Value, String> {
-    let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
+    let home = crate::nc_home::resolve(cfg.nc_home.as_deref()).map_err(|_| {
+        need_nc_home(
+            "读 NC prop.xml 需要 NC 安装目录。请到设置 → 开发 →「NC 环境」页配置；\
+             也可以直接用「手动填写」或「导入 .properties」添加连接",
+        )
+    })?;
     let b = bridge_for(
         app,
         st,
@@ -195,6 +207,7 @@ fn add_prop_sources(cfg: &mut AppConfig, v: &Value, only: Option<&[String]>) -> 
             auto_commit: false,
             engine: crate::db_engine::EngineKind::Java.as_str().to_string(),
             note: format!("NC prop.xml · {name}"),
+            default_schema: String::new(),
         });
         n += 1;
     }
@@ -268,6 +281,15 @@ pub async fn db_conn_save(
     if conn.source != "prop" && conn.url.trim().is_empty() {
         return Err("连接串不能为空".to_string());
     }
+    // schema 名会被拼进 `alter session set current_schema = …`（标识符绑不进绑定变量），
+    // 所以这里必须挡住怪字符，而不是等到连接时才在库里炸一次。
+    let schema = db_conns::normalize_schema(conn.default_schema.as_deref().unwrap_or(""));
+    if !schema.is_empty() && !db_conns::valid_schema(&schema) {
+        return Err(format!(
+            "默认 schema「{schema}」不是一个合法的 Oracle schema 名：只能字母开头，\
+             其余用字母、数字、下划线，最长 128 个字符"
+        ));
+    }
     let enc = match password.as_deref().filter(|p| !p.is_empty()) {
         Some(p) if remember.unwrap_or(true) => Some(Some(protect(p)?)),
         Some(_) => Some(None),
@@ -297,6 +319,10 @@ pub async fn db_conn_delete(
     id: String,
 ) -> Result<Vec<DbConnView>, String> {
     drop_bridge(&state, &id);
+    // 连接被删掉，「运行期手动切过的 schema」也一起忘掉：否则重建同 id 的连接会继承旧值
+    if let Ok(mut m) = state.db_schemas.lock() {
+        m.remove(&id);
+    }
     let cfg = state
         .update_config(|c| {
             c.db_conns.retain(|x| x.id != id);
@@ -331,8 +357,12 @@ pub struct TestResult {
     pub product: String,
     pub version: String,
     pub ms: u64,
-    /// 账号下可见的表数（让人一眼看出是不是连错了库）。
+    /// 当前默认 schema 下的表数（让人一眼看出是不是连错了库 / schema 写错了）。
     pub tables: Option<u64>,
+    /// 连上后生效的默认 schema（没设 = 登录账号自己的）。
+    pub schema: String,
+    /// 默认 schema 没设成的原因（名字写错 / 没权限）。有值 = 当前用的是登录账号。
+    pub schema_warning: Option<String>,
 }
 
 /// 测试连接：用临时桥连一下就断，不影响任何已开的会话。
@@ -366,7 +396,9 @@ pub async fn db_conn_test(
         b.clone(),
         "exec",
         vec![
-            "select count(*) from user_tables".into(),
+            // 按**当前 schema** 数，不是登录账号：配置里写了 AIER633 时，用户要看的是
+            // 「切过去之后能看到多少张表」。写错 schema 的话这里会掉到 0，一眼就能发现。
+            "select count(*) from all_tables where owner = sys_context('userenv','current_schema')".into(),
             "1".into(),
             "15".into(),
         ],
@@ -389,6 +421,12 @@ pub async fn db_conn_test(
         version: s("version"),
         ms,
         tables: count,
+        schema: s("schema"),
+        schema_warning: out
+            .get("schemaWarning")
+            .and_then(Value::as_str)
+            .filter(|w| !w.is_empty())
+            .map(str::to_string),
     })
 }
 
@@ -421,7 +459,10 @@ pub async fn db_conn_import_props(
         prop_ds: None,
         auto_commit: false,
         note: Some(format!("导入 {file}")),
-        engine: None,
+        // 与「手动填写」新建一致：默认纯 Rust 驱动，不依赖 NC home
+        // （老配置迁移走空串 → JVM 桥的语义在 `migrate_legacy`，这里不动）
+        engine: Some("rust".into()),
+        default_schema: None,
     };
     let cfg = state
         .update_config(|c| {
@@ -476,6 +517,7 @@ mod tests {
             auto_commit: false,
             engine: String::new(),
             note: String::new(),
+            default_schema: String::new(),
         };
         let v = serde_json::to_string(&DbConnView::from(&c)).unwrap();
         assert!(!v.contains("AQAA"), "{v}");
@@ -496,9 +538,32 @@ mod tests {
             auto_commit: true,
             note: None,
             engine: None,
+            default_schema: None,
         };
         let c = i.to_config("id".into(), None);
         assert_eq!(c.name, "ncdev");
         assert_eq!(c.source, "manual", "未知来源按手动处理");
+    }
+
+    #[test]
+    fn 新连接默认_rust_老配置空串仍是_java() {
+        let base = || DbConnInput {
+            id: None,
+            name: "x".into(),
+            env: "dev".into(),
+            source: "manual".into(),
+            url: "jdbc:oracle:thin:@h:1521/a".into(),
+            user: "u".into(),
+            prop_ds: None,
+            auto_commit: false,
+            note: None,
+            engine: None,
+            default_schema: None,
+        };
+        // 新建（手动 / 导入 .properties）：不依赖 NC home
+        let rust_input = DbConnInput { engine: Some("rust".into()), ..base() };
+        assert_eq!(rust_input.to_config("id".into(), None).engine, "rust");
+        // 老配置迁移 / 缺字段：空串 → JVM 桥，行为不变
+        assert_eq!(base().to_config("id".into(), None).engine, "java");
     }
 }

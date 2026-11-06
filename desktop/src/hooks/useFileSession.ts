@@ -1,21 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { closeModel, openModel, renameModel } from "../lib/editorStore";
-import { baseName, encodingMarks, readFile, remapPath, type Eol } from "../lib/workspace";
+import { closeModel, openModel } from "../lib/editorStore";
+import { baseName, encodingMarks, filePathKey, readFile, type Eol } from "../lib/workspace";
 import type { Problem } from "../lib/compile";
 import { consumePendingOpen, onOpenFileRequest, type OpenFileRequest } from "../lib/openFileRequest";
 import { useFileSave } from "./useFileSave";
 import { useJdtOpen } from "./useJdtOpen";
 import { useSplitView } from "./useSplitView";
+import { useFileTabLifecycle } from "./useFileTabLifecycle";
 import { recordRecent } from "../lib/recentFiles";
-import { rememberClosed } from "../lib/closedTabs";
 import { reopenClosed } from "../lib/reopenClosed";
 import {
   addTab,
   applyUnifiedEol,
-  coversPath,
-  pickClosable,
   pinTab,
-  renameTabs,
   tabMetaFromDisk,
 } from "../lib/tabSession";
 import {
@@ -32,6 +29,7 @@ import { workspaceEpoch } from "../lib/workspaceEpoch";
 import { friendlyError } from "../lib/friendlyError";
 import { navAt, navBack, navForward, type NavPoint } from "../lib/navHistory";
 import { captureFileJumpOrigin, recordFileJump } from "../lib/navContext";
+import { emptyEditorGroups, removeGroupView, selectGroupFile } from "../lib/editorGroups";
 
 /** 标签与文件操作共用打开序号，避免异步读盘把较新的选择顶掉。 */
 export function useFileSession() {
@@ -42,11 +40,10 @@ export function useFileSession() {
   const setTabs = (v: Updater<TabMeta[]>) => setSession({ tabs: v });
   const setActivePath = (v: Updater<string | null>) => setSession({ activePath: v });
   // 「等用户决定」的三态放仓库：切页卸载后必须还在（见 workspaceSession 的注释）
-  const setConflictPath = (v: Updater<string | null>) => setSession({ conflictPath: v });
   const setClosingPath = (v: Updater<string | null>) => setSession({ closingPath: v });
 
   // 点问题行/搜索命中要跳到的位置；null = 没有待跳转。
-  const [reveal, setReveal] = useState<{ line: number; column?: number; nonce: number } | null>(null);
+  const [reveal, setReveal] = useState<{ line: number; column?: number; nonce: number; path?: string; group?: "left" | "right" } | null>(null);
   const revealSeq = useRef(0);
   /** 打开 jar 内类：读源码（没有就反编译）、建标签、失败提示都在里面。 */
   const openJdtTab = useJdtOpen(setTabs);
@@ -68,33 +65,37 @@ export function useFileSession() {
    */
   const openFile = useCallback(
     async (path: string, opts?: { preview?: boolean; silent?: boolean }): Promise<boolean> => {
-      const existing = getSession().tabs.find((t) => t.path.toLowerCase() === path.toLowerCase());
+      const existing = getSession().tabs.find((t) => filePathKey(t.path) === filePathKey(path));
       if (existing) {
         path=existing.path;
-        if (existing.preview && !opts?.preview) setTabs((ts) => pinTab(ts, path));
+        const group = getSession().editorGroups?.focused ?? "left";
+        if (existing.preview && (!opts?.preview || !getSession().editorGroups?.[group].includes(path))) setTabs((ts) => pinTab(ts, path));
         // 已有标签是同步命中的，也要占号：它同样是「用户此刻要点的那一个」
         openSeq.current += 1;
         setActivePath(path);
         return true;
       }
       const nonce = ++openSeq.current;
-      const root=getSession().root,epoch=workspaceEpoch();
+      const root=getSession().root,epoch=workspaceEpoch(),group=getSession().editorGroups?.focused ?? "left";
       try {
         const c = opts?.silent ? await readFile(path) : await trackOperation({key:`file.open:${path.toLowerCase()}`,label:`读取 ${baseName(path)}`,scope:path,page:"files",path,phase:"正在读取文件"},()=>readFile(path));
         // 慢读取属于旧工程/旧预览时，不能把它加进当前工作区或顶替最新预览。
         if(epoch!==workspaceEpoch() || root!==getSession().root || opts?.preview && nonce!==openSeq.current) return false;
-        path=getSession().tabs.find(t=>t.path.toLowerCase()===path.toLowerCase())?.path??path;
+        path=getSession().tabs.find(t=>filePathKey(t.path)===filePathKey(path))?.path??path;
         openModel(path, c);
-        const meta = tabMetaFromDisk(path, c);
+        const meta = { ...tabMetaFromDisk(path, c), previewGroup: group };
         // 连点两次时第二次可能已经加过，避免重复标签
-        setTabs((ts) => {
+        setSession({ tabs: (ts) => {
           if (ts.some((t) => t.path === path)) return ts;
           const r = addTab(ts, meta, !!opts?.preview);
           if (r.dropped) closeModel(r.dropped);
           return r.tabs;
-        });
-        // 标签照建（这个文件确实要打开），但激活项只归最后一次点击
-        if (nonce === openSeq.current) setActivePath(path);
+        }, editorGroups: (old) => {
+          const groups = old ?? emptyEditorGroups();
+          // A late read joins its original group, but never takes focus from another group.
+          return nonce === openSeq.current && groups.focused === group ? selectGroupFile(groups, group, path)
+            : { ...groups, [group]: groups[group].includes(path) ? groups[group] : [...groups[group], path] };
+        } });
         recordRecent(getSession().root, path);
         // 从搜索结果打开的文件不在树里，树上那次扫描覆盖不到它，这里补一次，
         // 状态栏的「UTF-8 未登记」才不会只在树里点开时才有。
@@ -133,12 +134,13 @@ export function useFileSession() {
       // （打开是异步的，后点的那个可能先 resolve，旧请求不能把定位抢回去）
       const nonce = ++revealSeq.current;
       const origin = captureFileJumpOrigin();
+      const group = getSession().editorGroups?.focused ?? "left";
       void openFileRef.current(req.path).then((ok) => {
         // 打开失败的文件不进导航历史：否则「后退」过去还是打不开，还多一声报错
-        if (!ok || nonce !== revealSeq.current) return;
+        if (!ok || nonce !== revealSeq.current || group !== (getSession().editorGroups?.focused ?? "left")) return;
         recordFileJump(origin, { path: req.path, line: req.line ?? 1, column: req.column });
         if (req.line == null) return;
-        setReveal({ line: req.line, column: req.column, nonce });
+        setReveal({ line: req.line, column: req.column, nonce, path: req.path, group });
       });
     };
     const off = onOpenFileRequest(handle);
@@ -148,54 +150,15 @@ export function useFileSession() {
   }, []);
 
   const { saving, saveFile, saveAsUtf8, reloadFile } = useFileSave(activePath);
-
+  const lifecycle = useFileTabLifecycle();
+  const { closeMany, handleRenamed, handleDeleted } = lifecycle;
   const closeTab = (path: string, confirmed = false) => {
-    const tab = tabs.find((t) => t.path === path);
-    if (!tab) return;
-    if ((tab.dirty || tab.eolChanged) && !confirmed) {
-      setClosingPath(path);
-      return;
-    }
-    closeModel(path);
-    rememberClosed(path);
-    const idx = tabs.findIndex((t) => t.path === path);
-    const rest = tabs.filter((t) => t.path !== path);
-    setTabs(rest);
-    if (activePath === path) setActivePath(rest[Math.min(idx, rest.length - 1)]?.path ?? null);
-    if (split.splitPath === path) split.setSplitPath(null);
-    if (conflictPath === path) setConflictPath(null);
+    const groups = getSession().editorGroups, other = groups?.focused === "right" ? "left" : "right";
+    if (!confirmed && groups?.[groups.focused].includes(path) && groups[other].includes(path)) { setSession({ editorGroups: removeGroupView(groups, groups.focused, path) }); return; }
+    lifecycle.closeTab(path, confirmed);
   };
 
   const reopenLast = () => reopenClosed(openFile);
-
-  /**
-   * 文件或目录改名：把卡片、model、激活项一并挪到新路径。
-   *
-   * 不先拦未保存的文件——内容在 model 里，跟着搬到新路径后仍然是同一份改动，
-   * 保存时 mtime 也没变，不会误判成冲突。
-   */
-  const handleRenamed = (oldPath: string, newPath: string) => {
-    const affected = tabs.filter((t) => coversPath(t.path, oldPath));
-    if (affected.length === 0) return;
-    affected.forEach((t) => renameModel(t.path, remapPath(t.path, oldPath, newPath)));
-    setTabs((ts) => renameTabs(ts, oldPath, newPath));
-    if (activePath && coversPath(activePath, oldPath)) setActivePath(remapPath(activePath, oldPath, newPath));
-    if (split.splitPath && coversPath(split.splitPath, oldPath)) split.setSplitPath(remapPath(split.splitPath, oldPath, newPath));
-    if (conflictPath && coversPath(conflictPath, oldPath)) setConflictPath(remapPath(conflictPath, oldPath, newPath));
-  };
-
-  /** 删除：直接用后端结果关标签，不再问「未保存要不要保存」——文件已经没了。 */
-  const handleDeleted = (paths: string[]) => {
-    const gone = (p: string) => paths.some((d) => coversPath(p, d));
-    const rest = tabs.filter((t) => !gone(t.path));
-    if (rest.length !== tabs.length) {
-      tabs.filter((t) => gone(t.path)).forEach((t) => closeModel(t.path));
-      setTabs(rest);
-    }
-    if (activePath && gone(activePath)) setActivePath(rest[0]?.path ?? null);
-    if (split.splitPath && gone(split.splitPath)) split.setSplitPath(null);
-    if (conflictPath && gone(conflictPath)) setConflictPath(null);
-  };
 
   /**
    * 打开文件（已在标签里就是切过去）并跳到该行。
@@ -209,11 +172,12 @@ export function useFileSession() {
   const openAt = (path: string, line: number, push = true, column?: number): Promise<void> => {
     const origin = push ? captureFileJumpOrigin() : null;
     const nonce = ++revealSeq.current;
+    const group = getSession().editorGroups?.focused ?? "left";
     // 跳转目标的盘符/大小写可能与标签里的不一致：已有同一文件的标签就复用它，免得开出重复标签
-    return openFile(tabs.find((t) => t.path.toLowerCase() === path.toLowerCase())?.path ?? path).then((ok) => {
-      if (!ok || nonce !== revealSeq.current) return;
+    return openFile(tabs.find((t) => filePathKey(t.path) === filePathKey(path))?.path ?? path).then((ok) => {
+      if (!ok || nonce !== revealSeq.current || group !== (getSession().editorGroups?.focused ?? "left")) return;
       if (push) recordFileJump(origin, { path, line, column });
-      setReveal({ line, column, nonce });
+      setReveal({ line, column, nonce, path, group });
     });
   };
 
@@ -222,13 +186,20 @@ export function useFileSession() {
   /** 打开 jar 内的类（jdt.ls 给出的 `jdt://` 地址）为只读标签页。 */
   const openJdt = async (uri: string, line: number, push = true) => {
     const origin = push ? captureFileJumpOrigin() : null;
+    const group = getSession().editorGroups?.focused ?? "left";
+    const existed = getSession().tabs.some(tab => tab.path === uri);
     // 与 openFile 同一个道理：读源码是异步的，只有最后一次打开有权激活
     const nonce = ++revealSeq.current,openNonce=++openSeq.current;
     if (!(await openJdtTab(uri))) return;
-    if (nonce !== revealSeq.current || openNonce !== openSeq.current) return;
+    if (!getSession().tabs.some(tab => tab.path === uri)) return;
+    setSession({ editorGroups: old => {
+      const groups = old ?? emptyEditorGroups();
+      return { ...groups, left: group === "right" && !existed ? groups.left.filter(path => path !== uri) : groups.left, [group]: groups[group].includes(uri) ? groups[group] : [...groups[group], uri] };
+    } });
+    if (nonce !== revealSeq.current || openNonce !== openSeq.current || group !== (getSession().editorGroups?.focused ?? "left")) return;
     if (push) recordFileJump(origin, { path: uri, line, jdt: true });
     setActivePath(uri);
-    setReveal({ line, nonce });
+    setReveal({ line, nonce, path: uri, group });
   };
 
   /** 回到历史里的某个点。不要走 openAt 的默认参数——那会把它重新记成新历史。 */
@@ -247,20 +218,6 @@ export function useFileSession() {
     if (p) goToNav(p);
   };
 
-  /** 批量关闭（关闭其他 / 右侧 / 已保存）：未保存的保留，返回保留个数供提示。 */
-  const closeMany = (want: (t: TabMeta, index: number) => boolean): number => {
-    const { close, kept } = pickClosable(tabs, want);
-    if (close.length === 0) return kept;
-    close.forEach((p) => closeModel(p));
-    close.forEach(rememberClosed);
-    const rest = tabs.filter((t) => !close.includes(t.path));
-    setTabs(rest);
-    if (activePath && close.includes(activePath)) setActivePath(rest[rest.length - 1]?.path ?? null);
-    if (split.splitPath && close.includes(split.splitPath)) split.setSplitPath(null);
-    if (conflictPath && close.includes(conflictPath)) setConflictPath(null);
-    return kept;
-  };
-
   const pin = (path: string) => setTabs((ts) => pinTab(ts, path));
 
   const unifyEol = (path: string, eol: Eol) => setTabs((ts) => applyUnifiedEol(ts, path, eol));
@@ -272,6 +229,7 @@ export function useFileSession() {
     saving,
     reveal,
     openFile,
+    selectTab: (path: string) => { openSeq.current++; revealSeq.current++; setReveal(null); setActivePath(path); },
     saveFile,
     saveAsUtf8,
     reloadFile,

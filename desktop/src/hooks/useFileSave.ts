@@ -6,6 +6,7 @@ import { getModel, replaceContent } from "../lib/editorStore";
 import { operationActive, trackOperation } from "../lib/operations";
 import { saveOne } from "../lib/fileSave";
 import { workspaceEpoch } from "../lib/workspaceEpoch";
+import { markLocalSave } from "../lib/localSaves";
 import {
   cleanError,
   isConflictError,
@@ -52,6 +53,8 @@ export function useFileSave(activePath: string | null) {
         const latest = getSession().tabs.find(t => t.path === path);
         if (epoch !== workspaceEpoch() || root !== getSession().root || !latest) { task.finish("cancelled", "文件已关闭或工程已切换，未写入"); return; }
         task.update({phase:"归档旧版本并写入文件"});
+        // 先记下「这是我们写的」再落盘：监听事件可能比 saveOne 的返回先到
+        markLocalSave(path);
         const r = await saveOne(latest, { force, encodingOverride });
         if (epoch !== workspaceEpoch() || root !== getSession().root) { task.finish("success", "已写入原工程文件"); return; }
         setTabs((ts) => applySaved(ts, path, r));

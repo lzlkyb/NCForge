@@ -34,4 +34,11 @@ describe("viewOrder", () => {
     expect(w[0]).toBe(320);
     expect(w[1]).toBeGreaterThanOrEqual(64);
   });
+  it("中文名称按显示宽度估算，短值留出单元格内边距",()=>{
+    const columns=[{name:"NAME",type:"VARCHAR2",precision:100,scale:0}];
+    const chinese=initialWidths(columns,[["物料名称 50"]])[0];
+    const latin=initialWidths(columns,[["ABCD 50"]])[0];
+    expect(chinese).toBeGreaterThan(latin);
+    expect(chinese).toBeGreaterThanOrEqual(100);
+  });
 });

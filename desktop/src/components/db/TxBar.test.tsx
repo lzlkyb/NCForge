@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(()=>({txAction:vi.fn()}));
+vi.mock("../../lib/dbStore", async importOriginal=>({...await importOriginal<typeof import("../../lib/dbStore")>(),txAction:mocks.txAction}));
 import { TxBar } from "./TxBar";
 import { __resetDbForTest, setTx } from "../../lib/dbStore";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -15,9 +17,24 @@ it("独立槽状态未知时不展示主会话事务，已知槽与primary各读
   act(() => root.render(<TxBar connId="c1" slot="1" />));
   expect(host.querySelector('[role="status"]')).toBeNull();
   act(() => root.render(<TxBar connId="c1" slot="1" tx={{ ...primary, statements: 3 }} />));
-  expect(host.textContent).toContain("独立会话 1");
+  expect(host.textContent).toContain("独立事务");
+  expect(host.querySelector('.dbx-tx-session')?.getAttribute('title')).toContain("独立会话 1");
   expect(host.querySelector("b")?.textContent).toBe("3");
   act(() => root.render(<TxBar connId="c1" />));
   expect(host.querySelector("b")?.textContent).toBe("2");
   expect(host.textContent).not.toContain("独立会话 1");
+});
+it("同帧提交与回滚只发一次，等待结束后恢复", async()=>{
+  const tx={autoCommit:false,statements:1,rows:1,since:0};
+  let finish!:(value:typeof tx)=>void;
+  mocks.txAction.mockReturnValue(new Promise(resolve=>{finish=resolve;}));
+  act(()=>root.render(<TxBar connId="c1" tabId="sql1" slot="1" tx={tx} />));
+  const buttons=[...host.querySelectorAll<HTMLButtonElement>('button')];
+  act(()=>{buttons[1].click();buttons[0].click();buttons[1].click();});
+  expect(mocks.txAction).toHaveBeenCalledTimes(1);
+  expect(mocks.txAction).toHaveBeenCalledWith("c1","commit","1");
+  expect(buttons.every(b=>b.disabled)).toBe(true);
+  expect(buttons[1].textContent).toContain("提交中");
+  await act(async()=>{finish(tx);await Promise.resolve();});
+  expect(buttons.every(b=>!b.disabled)).toBe(true);
 });

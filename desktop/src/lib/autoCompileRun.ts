@@ -15,8 +15,10 @@ import { isAutoCompileEnabled } from "./appConfig";
 import { compileFile, isCompileCancelled } from "./compile";
 import { isAutoCompileTarget, mergeFileResult } from "./autoCompile";
 import { requeueAutoCompile } from "./autoCompileQueue";
+import { scheduleIncremental } from "./autoCompileIncremental";
 import { toast } from "../components/ui/toast";
 import { missingResourceId } from "./resourceMissing";
+import { captureCompileSources, stampCompileResult } from "./compileFreshness";
 
 const sameFile = (a: string, b: string) =>
   a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
@@ -45,6 +47,7 @@ export async function runAutoCompile(paths: readonly string[]): Promise<void> {
   // 记下进入前的状态：后端返回「跳过」时我们什么都没编，不能顺手把
   // 正在进行的手动编译的「编译中」标志清掉（状态栏会莫名变成已结束）
   const wasCompiling = getSession().compiling;
+  const sourceVersions = captureCompileSources(getSession().tabs);
   setSession({ compiling: true });
   try {
     const outcome = await compileFile([...targets]);
@@ -65,7 +68,11 @@ export async function runAutoCompile(paths: readonly string[]): Promise<void> {
     const before = getSession().compileResult;
     const beforeErrors = errorCountOf(before?.problems ?? [], targets);
     // 用 updater 拿最新值：这一轮跑着的时候手动编译可能刚写完结果
-    setSession({ compileResult: (prev) => mergeFileResult(prev, outcome.result, targets) });
+    const stamped = stampCompileResult(outcome.result, sourceVersions, root, targets);
+    setSession({ compileResult: (prev) => mergeFileResult(prev, stamped, targets) });
+    // 第二阶段：空闲 2.5 秒后按模块做增量，补上「签名变了、引用方也得重编」。
+    // 它不阻塞保存反馈，也不会在用户连续敲代码时反复起 JVM。
+    scheduleIncremental(targets);
     // 同一处错误连续保存只提示第一次：每次 Ctrl+S 弹一下会让人把提示当噪音
     if (outcome.result.errorCount > 0 && beforeErrors === 0) {
       const name = targets.length === 1 ? baseName(targets[0]) : `${targets.length} 个文件`;

@@ -1,14 +1,18 @@
 import { useRef, useState } from "react";
 import "../../db-console.css";
+import "../../db-transfer.css";
 import { Modal } from "../ui/Modal";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { friendlyDbError } from "../../lib/db";
 import { connOf } from "../../lib/dbStore";
-import { dbApi, type ExportInsertResult } from "../../lib/dbApi";
+import { dbApi, type BoundCell, type ExportInsertResult } from "../../lib/dbApi";
 import { beginOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
-import { downloadText } from "../../lib/resultExport";
+import { dbTransferApi } from "../../lib/dbTransferApi";
+import { defaultTransferOptions } from "../../lib/resultTransfer";
+import { clearTransferJob, startTransferJob, stopTransferJob, transferJobKey, useTransferJob } from "../../lib/resultTransferJobs";
+import { TransferJobView } from "./TransferJobView";
 
 /** 每 N 行提交一次的备选值。0 = 全程只在结尾提交。 */
 const COMMITS = [0, 500, 1000, 5000];
@@ -19,8 +23,9 @@ const COMMITS = [0, 500, 1000, 5000];
  * 数据由后端单独开会话取全，前端只负责选项与落盘——结果网格里只有一页（默认 500 行），
  * 在界面上拼 insert 等于「导出你看见的那点数据」。
  */
-export function InsertExportDialog({ connId, table, sql, schema, onClose,tabId }: {
+export function InsertExportDialog({ connId, table, sql, schema, onClose,tabId,params }: {
   connId: string; tabId?:string;
+  params?: BoundCell[];
   /** 默认目标表名（可改）。 */
   table: string;
   /** 取数语句。 */
@@ -40,31 +45,41 @@ export function InsertExportDialog({ connId, table, sql, schema, onClose,tabId }
   const [busy, setBusy] = useState(false);
   const lock=useRef(false);
   const [done, setDone] = useState<ExportInsertResult | null>(null);
+  const [error, setError] = useState("");
+  const source = {connId, resultId:`nc:${tabId || connId}`, tabId, sql, source:conn?.name || "NC 迁移", complete: true};
+  const jobKey = transferJobKey(source), job = useTransferJob(jobKey);
 
   const set = <K extends keyof typeof opt>(k: K, v: (typeof opt)[K]) => setOpt((o) => ({ ...o, [k]: v }));
 
   const run = async () => {
     if(lock.current) return;
+    if(job && ["running","cancelling"].includes(job.state)) return;
     if (!opt.table.trim()) return toast("目标表名不能为空", "warning");
+    clearTransferJob(jobKey);setDone(null);
+    lock.current=true;setBusy(true);setError("");
+    let destination;
+    try { destination = await dbTransferApi.pick("insert",`${opt.table.trim()}.sql`); }
+    catch(e) {setError(`选择保存位置失败：${friendlyDbError(e)}`);}
+    if(!destination) {lock.current=false;setBusy(false);return;}
     const task=beginOperation(dbTaskSpec(`insert.export:${connId}`,"生成 INSERT 导出",connId,"独立导出会话",conn?.name,tabId));
-    if(!task) return;
-    lock.current=true;setBusy(true);
+    if(!task) {lock.current=false;setBusy(false);return;}
     try {
       const r = await dbApi.exportInsert({
         id: connId,
         sql,
+        params,
         table: opt.table.trim(),
         schema: opt.schema.trim() || null,
         multilang: opt.multilang,
         commitEvery: opt.commitEvery,
         maxRows: opt.maxRows,
       });
-      downloadText(r.fileName, r.sqlText, "text/plain", false);
-      task.finish("success",`已生成 ${r.rows} 行${r.truncated ? "（到达上限，非全量）" : ""}，已发出文件保存请求`);
+      task.finish("success",`已生成 ${r.rows} 行${r.truncated ? "（到达上限，非全量）" : ""}，正在保存文件`);
       setDone(r);
-      toast(`已生成 ${r.fileName}（${r.rows} 行）`, r.truncated ? "warning" : "success");
+      await startTransferJob(source,{id:connId,sql:"",format:"insert",fileName:r.fileName,options:defaultTransferOptions("insert"),text:r.sqlText,textRows:r.rows,textTruncated:r.truncated,textWarnings:r.warnings,destinationToken:destination.token},`NC 迁移 · ${r.rows} 行${r.truncated ? " · 到达上限，部分结果" : ""}`);
     } catch (e) {
       task.finish("failed","导出失败，返回导出窗口查看原因");
+      setError(friendlyDbError(e));
       toast(`导出失败：${friendlyDbError(e)}`, "error");
     } finally {
       lock.current=false;setBusy(false);
@@ -72,7 +87,7 @@ export function InsertExportDialog({ connId, table, sql, schema, onClose,tabId }
   };
 
   return (
-    <Modal open onClose={()=>{if(!lock.current) onClose();}} closeOnOverlay={!busy} className="modal-surface dbx-dlg" ariaLabel="导出为 INSERT 脚本">
+    <Modal open onClose={()=>{if(!lock.current) onClose();}} closeOnOverlay={!busy} className="modal-surface dbx-dlg dbx-nc-transfer" ariaLabel="导出为 INSERT 脚本">
       <div className="hd">
         <Icon name="download" size={16} />
         导出为 INSERT 脚本
@@ -142,11 +157,15 @@ export function InsertExportDialog({ connId, table, sql, schema, onClose,tabId }
           {opt.multilang && "　多语判据是「基础列 + X2..X6 至少 3 列」，导出后请核对下面的识别结果。"}
         </div>
 
+        {busy && !job && <div className="dbx-hint" role="status"><Icon name="spinner" size={14} /> 正在独立会话读取并生成 NC 脚本，最多 {opt.maxRows} 行…</div>}
+        {error && <div className="dbx-err" role="alert">{error} · 设置已保留，可重试</div>}
+        {job && <TransferJobView job={job} />}
         {done && <Result r={done} />}
       </div>
       <div className="ft">
         <span className="dbx-muted">主键前置 · blob 写 null · 日期显式 to_date</span>
         <span className="dbx-sp" />
+        {job?.state==="running" && <button type="button" className="dbx-btn" onClick={()=>void stopTransferJob(jobKey).catch(e=>setError(friendlyDbError(e)))}>停止保存</button>}
         <button type="button" className="dbx-btn" disabled={busy} onClick={onClose}>
           关闭
         </button>
@@ -164,7 +183,7 @@ function Result({ r }: { r: ExportInsertResult }) {
   return (
     <div className="dbx-hint" style={{ gridColumn: "1 / -1", marginTop: 6 }}>
       <div style={{ color: "hsl(var(--foreground))", marginBottom: 4 }}>
-        已下载 <b className="dbx-mono">{r.fileName}</b>：{r.rows} 行 · {(r.ms / 1000).toFixed(1)}s
+        脚本已生成 <b className="dbx-mono">{r.fileName}</b>：{r.rows} 行 · {(r.ms / 1000).toFixed(1)}s
         {r.truncated && <b style={{ color: "hsl(var(--destructive-ink))" }}>（非全量）</b>}
       </div>
       {r.multilang.length > 0 && <div>多语列：{r.multilang.join("，")}</div>}

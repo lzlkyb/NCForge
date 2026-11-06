@@ -14,6 +14,7 @@ import { ConfigTransferSettings } from "../settings/ConfigTransferSettings";
 import { KeymapSettings } from "../settings/KeymapSettings";
 import { EditorSettings } from "../settings/EditorSettings";
 import { TaskSettings } from "../settings/TaskSettings";
+import { NcEnvSettings } from "../settings/NcEnvSettings";
 import { AppearanceSettings } from "../settings/AppearanceSettings";
 import { UpdateSettings } from "../settings/UpdateSettings";
 import { AboutSettings } from "../settings/AboutSettings";
@@ -60,6 +61,10 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
       {
         label: "快捷键", group: "工作台", description: "选择熟悉的方案，或为常用操作修改组合键。",
         keywords: ["键位", "方案", "Eclipse", "IDEA", "冲突", "自定义", "keymap", "shortcut"], content: <KeymapSettings />,
+      },
+      {
+        label: "NC 环境", group: "开发", description: "配置 NC 安装目录（NC home）。编译类路径、启动服务、补丁落位都从这里读。",
+        keywords: ["NC", "home", "安装目录", "中间件", "ncc", "1909", "环境", "探测"], content: <NcEnvSettings />,
       },
       {
         label: "开发环境", group: "开发", description: "查看代码智能状态，调整资源使用与索引行为。",

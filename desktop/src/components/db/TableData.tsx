@@ -2,13 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ResultTable } from "./ResultTable";
-import { friendlyDbError, sameCell, thousands } from "../../lib/db";
+import { friendlyDbError, parseDbError, sameCell, thousands, type DbError } from "../../lib/db";
 import { dbApi, dbSourceOf, type BoundCell, type Cell, type ColumnInfo, type ColumnMeta } from "../../lib/dbApi";
-import { confirmProdWrite, ask } from "../../lib/dbConfirm";
+import { confirmProdWrite, ask, reconnectSession } from "../../lib/dbConfirm";
 import { claimCursor, connOf, rtOf, setTx, type TableTab } from "../../lib/dbStore";
 import { beginOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
-import { PAGE, pageSql, stripPage } from "../../lib/tableEdit";
+import { PAGE, pageSql, tableQuerySql, stripPage } from "../../lib/tableEdit";
 
 import { TableRelations } from "./TableRelations";
 import { TableFilterBar } from "./TableFilterBar";
@@ -20,7 +20,7 @@ interface Page {
   columns: ColumnMeta[];
   rows: Cell[][];
   hasNext: boolean;
-  ms: number; at:number; sql:string; pageNumber:number;
+  ms: number; at:number; sql:string; pageNumber:number; exportSql:string; params:BoundCell[];
 }
 
 /**
@@ -44,9 +44,10 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
     catch { setQ({where:"",order:"",params:[],page:0}); }
   },[cols,tab.connId,tab.table,tab.query]);
   const [data, setData] = useState<Page | { error: string } | null>(null);
+  const [connectionError, setConnectionError] = useState<DbError | null>(null);
   const [changed, setChanged] = useState<Map<string, Cell>>(new Map());
 
-  const editable = !isView && pk.length > 0 && readonly === false && !saving && !loading;
+  const editable = !isView && pk.length > 0 && readonly === false && !saving && !loading && !connectionError;
   const order = q?.order || pk.map((p) => p.toLowerCase()).join(", ");
 
   /**
@@ -68,12 +69,19 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
       if (my !== gen.current) {task?.finish("cancelled","已被后续查询取代");return;}
       if (r.kind !== "rows") throw new Error("不是查询结果");
       setTx(tab.connId, r.tx);
-      setData({ ...stripPage(r.columns, r.rows), ms: r.ms, at:Date.now(), sql:pageSql(tab.table.toLowerCase(),q.where,order,q.page), pageNumber:q.page+1 });
+      setData({ ...stripPage(r.columns, r.rows), ms: r.ms, at:Date.now(), sql:pageSql(tab.table.toLowerCase(),q.where,order,q.page), pageNumber:q.page+1, exportSql:tableQuerySql(tab.table.toLowerCase(),q.where,order), params:q.params.map(p=>p && typeof p === "object" ? {...p} : p) });
+      setConnectionError(null);
       setChanged(new Map());
       task?.finish("success",`已读取 ${Math.min(r.rows.length,PAGE)} 行${r.rows.length>PAGE ? "，可继续翻页" : ""}`);
     } catch (e) {
       task?.finish("failed","查询失败，返回数据库页查看详细错误");
       if (my !== gen.current) return;
+      const error = parseDbError(e);
+      if (error.code === "session-lost" || error.code === "probe-failed") {
+        setConnectionError(error);
+        return;
+      }
+      setConnectionError(null);
       setData({ error: friendlyDbError(e) });
       setChanged(new Map());
     } finally { if(my===gen.current) {reading.current=null;setLoading(false);} }
@@ -93,6 +101,19 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
       "丢弃并继续",
       true,
     );
+  };
+
+  const reconnect = async () => {
+    setLoading(true);
+    try {
+      if (await reconnectSession(tab.connId, null)) {
+        setConnectionError({ code: "other", message: "已重新连接，请重新读取表数据。" });
+      }
+    } catch (e) {
+      toast(friendlyDbError(e), "error");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const navTo = async (next: NonNullable<typeof q>) => {
@@ -153,6 +174,12 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
       setPreview(false);
       await load();
     } catch (e) {
+      const error = parseDbError(e);
+      if (error.code === "session-lost" || error.code === "probe-failed") {
+        setConnectionError(error);
+        task.finish("failed", "写回已停止，请核对连接和事务结果");
+        return;
+      }
       const prefix = done > 0
         ? auto
           ? `第 ${done + 1} 条写回失败：${friendlyDbError(e)}（前 ${done} 条已自动提交，无法整体回滚）`
@@ -172,7 +199,19 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
       {loading && data && <div className="dbx-read-status" role="status">正在查询，暂保留上一份结果…</div>}
       {conflict && <div className="dbx-err" role="alert">{conflict} <button type="button" className="dbx-btn" disabled={saving || loading} onClick={() => void (async()=> {if(await confirmDiscard()) {setConflict("");await load();}})()}>重新读取并处理冲突</button></div>}
       {conflict && ui.conflictValues.length>0 && <div className="dbx-change-review"><table><thead><tr><th>字段</th><th>读取时原值</th><th>数据库当前值</th><th>拟写入</th></tr></thead><tbody>{ui.conflictValues.map(c=><tr key={c.name}><td>{c.name}</td><td>{String(c.before ?? "NULL")}</td><td>{String(c.current ?? "NULL")}</td><td>{String(c.after ?? "NULL")}</td></tr>)}</tbody></table></div>}
-      {!data && <div className="dbx-empty"><Icon name="spinner" size={18} />读取中…</div>}
+      {connectionError && (
+        <div className="dbx-err" role="alert">
+          {connectionError.message}
+          {connectionError.code === "session-lost" ? (
+            <button type="button" className="dbx-btn" disabled={saving || loading} onClick={() => void reconnect()}>重新连接</button>
+          ) : (
+            <button type="button" className="dbx-btn" disabled={saving || loading} onClick={() => void (async () => {
+            if (await confirmDiscard()) await load();
+            })()}>重新读取</button>
+          )}
+        </div>
+      )}
+      {!data && !connectionError && <div className="dbx-empty"><Icon name="spinner" size={18} />读取中…</div>}
       {data && "error" in data && (
         // 失败不是终点：给一条可点的下一步，而不是只让用户对着错误文字重进页面。
         <div className="dbx-err">
@@ -191,9 +230,10 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
           layoutKey={`${tab.connId}:${tab.table.toLowerCase()}`}
           snapshot={{source:`${dbSourceOf(connOf(tab.connId))} · ${tab.table} · 第 ${page.pageNumber} 页`,sql:page.sql,at:page.at,complete:false,columns:page.columns,rows:page.rows}}
           connId={tab.connId}
+          transferSource={{connId:tab.connId,resultId:`${tab.id}:${page.at}`,tabId:tab.id,sql:page.exportSql,params:page.params,source:dbSourceOf(connOf(tab.connId)),complete:page.pageNumber===1 && !page.hasNext,table:tab.table,keys:pk,timeoutSec:60}}
           onRelated={row=>setUi(v=>({...v,relationRow:row}))}
           zh={zh}
-          meta={<>第 {q.page + 1} 页 · <b>{thousands(page.rows.length)}</b> 行 · {page.ms} ms</>}
+          meta={<>第 {page.pageNumber} 页 · <b>{thousands(page.rows.length)}</b> 行 · {page.ms} ms</>}
           edit={editable ? {
             canEdit: (c) => !pk.includes(page.columns[c].name) && !/TIME ZONE/i.test(page.columns[c].type) && /^(VARCHAR|NVARCHAR|CHAR|NCHAR|NUMBER|FLOAT|INTEGER|DECIMAL|DATE|TIMESTAMP|CLOB)/i.test(page.columns[c].type),
             changed,

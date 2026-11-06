@@ -16,6 +16,7 @@ export function ServiceConfirms({
   onConfirmStop,
   onConfirmRestart,
   onConfirmKill,
+  target = "middleware",
 }: {
   confirm: "stop" | "restart" | "kill" | null;
   /** 当前端口，仅用于弹窗标题。 */
@@ -26,6 +27,7 @@ export function ServiceConfirms({
   onConfirmStop: () => void;
   onConfirmRestart: () => void;
   onConfirmKill: () => void;
+  target?: "middleware" | "client";
 }) {
   // 读不到进程名时后端给的是「未知进程」：这颗按钮点了多半会被后端挡回来，
   // 与其让它看起来像个确定可用的操作，不如把「我也不知道它是什么」说在前面。
@@ -35,8 +37,8 @@ export function ServiceConfirms({
     <>
       <ConfirmDialog
         open={confirm === "stop"}
-        title="停止 NC 中间件？"
-        description="正在使用这个服务的客户端会立刻断开。停机后要重新加载 200 多个模块，大约 10 秒才能再连上。"
+        title={`停止 NC ${target === "client" ? "客户端" : "中间件"}？`}
+        description={target === "client" ? "将停止当前客户端 JVM，中间件保持运行。" : "将停止当前中间件 JVM，正在使用该服务的客户端会断开。重新启动需要重新加载模块。"}
         variant="destructive"
         confirmLabel="停止"
         onCancel={onCancel}
@@ -47,8 +49,8 @@ export function ServiceConfirms({
           开发时手滑点错的成本是所有人断线十秒，不是本机多等一会儿 */}
       <ConfirmDialog
         open={confirm === "restart"}
-        title="重启 NC 中间件？"
-        description="会先停止再启动：连着的客户端断开约 10 秒（重新加载 200 多个模块）。刚改的代码会在这之后生效。"
+        title={`重启 NC ${target === "client" ? "客户端" : "中间件"}？`}
+        description={target === "client" ? "将停止并重新启动当前客户端 JVM，中间件保持运行。" : "将先停止再启动中间件，当前连接会断开。已编译并加入 classpath 的代码会在重新启动后加载。"}
         variant="destructive"
         confirmLabel="重启"
         onCancel={onCancel}

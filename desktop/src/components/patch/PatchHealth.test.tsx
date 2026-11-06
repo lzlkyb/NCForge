@@ -3,7 +3,9 @@
  * 出包环境健康条：
  * - 只读缓存与模块级状态，不额外发请求（除用户点刷新 SVN）；
  * - 菜单中的四个 chip 各自说明状态（未编译 / 0 模块 / 扫描失败 / 未连库）；
- * - 点编译器 chip 要打开问题面板并跳到文件页。
+ * - 点编译器 chip 要打开问题面板并跳到文件页；
+ * - NC Home chip 必须跳到设置 → 开发 →「NC 环境」（2026-11-06 起 home 的
+ *   唯一配置入口；这里曾经跳服务页，回归容易跳错）。
  */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -14,10 +16,12 @@ import type { CompileResult } from "../../lib/compile";
 const mocks = vi.hoisted(() => ({
   defaults: vi.fn(),
   status: vi.fn(),
+  requestSettingsSection: vi.fn(),
 }));
 
 vi.mock("../../lib/patch", () => ({ patchDefaults: mocks.defaults }));
 vi.mock("../../lib/svn", () => ({ svnStatus: mocks.status }));
+vi.mock("../../lib/settingsJump", () => ({ requestSettingsSection: mocks.requestSettingsSection }));
 
 import { PatchHealth } from "./PatchHealth";
 import { __resetDbForTest } from "../../lib/dbStore";
@@ -77,6 +81,7 @@ beforeEach(() => {
   setSession({ root: "C:/ws", compiling: false, compileResult: null });
   mocks.defaults.mockReset();
   mocks.status.mockReset();
+  mocks.requestSettingsSection.mockReset();
   mocks.defaults.mockResolvedValue({
     workspaceRoot: "C:/ws",
     outDir: "C:/ws/out",
@@ -201,6 +206,21 @@ describe("PatchHealth", () => {
     });
     await mount();
     expect(chip("NC Home · 0 模块")?.dataset.tone).toBe("warn");
+  });
+
+  it("NC Home chip 点击跳到设置 → 开发 →「NC 环境」（home 唯一配置入口）", async () => {
+    await mount();
+    const nav = vi.fn((_: Event) => {});
+    window.addEventListener("ncforge-navigate", nav);
+    try {
+      const target = chip("NC Home · 7 模块");
+      await act(async () => target!.click());
+      expect(mocks.requestSettingsSection).toHaveBeenCalledWith("NC 环境");
+      expect(nav).toHaveBeenCalledTimes(1);
+      expect((nav.mock.calls[0][0] as CustomEvent).detail).toBe("settings");
+    } finally {
+      window.removeEventListener("ncforge-navigate", nav);
+    }
   });
 
   it("SVN 扫描失败时明说失败，点一下会重扫", async () => {

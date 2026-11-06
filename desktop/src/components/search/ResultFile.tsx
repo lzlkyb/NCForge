@@ -3,6 +3,7 @@ import { Icon } from "../ui/icon";
 import type { MatchRange } from "../../lib/search";
 import type { ResultFileGroup, ResultHit } from "../../lib/searchResults";
 import { buildSearchPreview } from "../../lib/searchPreview";
+import { resultHitKey } from "../../lib/searchNavigation";
 
 /** 一个文件的命中组（标题行 + 逐行命中）。当前范围与全部工程共用。 */
 export function ResultFile({
@@ -10,11 +11,15 @@ export function ResultFile({
   collapsed,
   onToggle,
   onOpen,
+  selectedKey,
+  onPreview,
 }: {
   group: ResultFileGroup;
   collapsed: boolean;
   onToggle: () => void;
   onOpen: (hit: ResultHit) => void;
+  selectedKey?: string | null;
+  onPreview?: (hit: ResultHit) => void;
 }) {
   const { path, hits } = group;
   const slash = path.lastIndexOf("/");
@@ -50,12 +55,15 @@ export function ResultFile({
         hits.map((hit) => {
           const preview = buildSearchPreview(hit.text, hit.ranges);
           return (
+            <div key={resultHitKey(group, hit)} className="dw-search-hit-wrap">
             <button
               key={`${group.key}:${hit.line}`}
               type="button"
               onClick={() => onOpen(hit)}
               title={`${abs}:${hit.line}\n${hit.text}`}
-              className="grid w-full grid-cols-[36px_minmax(0,1fr)] gap-x-2 py-[3px] px-3 text-left hover:bg-secondary/55"
+              data-hit-key={resultHitKey(group, hit)}
+              data-selected={selectedKey === resultHitKey(group, hit) || undefined}
+              className="dw-search-hit grid w-full grid-cols-[36px_minmax(0,1fr)] gap-x-2 py-[3px] px-3 text-left hover:bg-secondary/55"
             >
               <span className="text-right font-mono text-[11.5px] text-muted-foreground">
                 {hit.line}
@@ -69,6 +77,8 @@ export function ResultFile({
                 </span>
               )}
             </button>
+            {onPreview && <button type="button" className="wb-icon-btn dw-preview-button" aria-label={`预览 ${name} 第 ${hit.line} 行上下文`} title="预览上下文" onClick={() => onPreview(hit)}><Icon name="eye" size={13} /></button>}
+            </div>
           );
         })}
     </div>

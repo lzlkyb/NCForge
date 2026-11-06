@@ -1,0 +1,336 @@
+{
+  "at": "2026-11-06T09:26:37.407Z",
+  "scope": "All current workspace JS production assets; the old dist snapshot is not a same-source isolated baseline.",
+  "bytes": {
+    "raw": 5252400,
+    "gzip": 1512324,
+    "max": 3247897
+  },
+  "actual": {
+    "totalRawKB": 5129,
+    "totalGzipKB": 1477,
+    "maxChunkRawKB": 3172
+  },
+  "budget": {
+    "totalRawKB": 5073,
+    "totalGzipKB": 1458,
+    "maxChunkRawKB": 3171
+  },
+  "overKB": {
+    "totalRawKB": 56,
+    "totalGzipKB": 19,
+    "maxChunkRawKB": 1
+  },
+  "before": {
+    "raw": 5214490,
+    "gzip": 1499431,
+    "max": 3247203
+  },
+  "differenceBytes": {
+    "raw": 37910,
+    "gzip": 12893,
+    "max": 694
+  },
+  "chunks": [
+    {
+      "name": "appConfig-ButWgdiY.js",
+      "raw": 1230,
+      "gzip": 641
+    },
+    {
+      "name": "buildMaintenance-BkxLdqHm.js",
+      "raw": 6079,
+      "gzip": 2965
+    },
+    {
+      "name": "compile-pfj3HlBr.js",
+      "raw": 1034,
+      "gzip": 545
+    },
+    {
+      "name": "css-D3h14YRZ.js",
+      "raw": 4756,
+      "gzip": 1531
+    },
+    {
+      "name": "csvParse-BgPel8Yp.js",
+      "raw": 1508,
+      "gzip": 743
+    },
+    {
+      "name": "dbActions-B-RPmMJ1.js",
+      "raw": 12385,
+      "gzip": 5577
+    },
+    {
+      "name": "DbTab-DiuhduLH.js",
+      "raw": 245876,
+      "gzip": 79269
+    },
+    {
+      "name": "developmentFlowSession-BdK0ashX.js",
+      "raw": 8695,
+      "gzip": 3864
+    },
+    {
+      "name": "dialog-CxLeufht.js",
+      "raw": 564,
+      "gzip": 328
+    },
+    {
+      "name": "editor.worker-BctYAlYZ.js",
+      "raw": 231288,
+      "gzip": 70711
+    },
+    {
+      "name": "editorStore-DdJboYJy.js",
+      "raw": 2987,
+      "gzip": 1183
+    },
+    {
+      "name": "EmptyState-BSn1sqSh.js",
+      "raw": 740,
+      "gzip": 428
+    },
+    {
+      "name": "fileIndex-a2jTFqHb.js",
+      "raw": 4290,
+      "gzip": 2172
+    },
+    {
+      "name": "fileSave-B5QOORL-.js",
+      "raw": 1297,
+      "gzip": 790
+    },
+    {
+      "name": "FilesTab-C5IbdUNe.js",
+      "raw": 409185,
+      "gzip": 137482
+    },
+    {
+      "name": "folderPicker-BlL5GwVa.js",
+      "raw": 256,
+      "gzip": 244
+    },
+    {
+      "name": "FreshnessBadge-BoqqXc5N.js",
+      "raw": 1715,
+      "gzip": 964
+    },
+    {
+      "name": "GenTextPreview-BeDM-Fmo.js",
+      "raw": 2899,
+      "gzip": 1497
+    },
+    {
+      "name": "historyFormat-DOszwF9V.js",
+      "raw": 318,
+      "gzip": 235
+    },
+    {
+      "name": "html-D5bfmcc2.js",
+      "raw": 5452,
+      "gzip": 1634
+    },
+    {
+      "name": "index-lwvW1LEt.js",
+      "raw": 308182,
+      "gzip": 116537
+    },
+    {
+      "name": "ini-Drc7WvVn.js",
+      "raw": 1347,
+      "gzip": 679
+    },
+    {
+      "name": "input-Baed4Y9I.js",
+      "raw": 339,
+      "gzip": 264
+    },
+    {
+      "name": "java-B_fMsGYe.js",
+      "raw": 3467,
+      "gzip": 1551
+    },
+    {
+      "name": "javascript-sXB5Cin0.js",
+      "raw": 1366,
+      "gzip": 711
+    },
+    {
+      "name": "lang-D4-eYLMn.js",
+      "raw": 8925,
+      "gzip": 3630
+    },
+    {
+      "name": "langConvert-DmPgBTq9.js",
+      "raw": 1734,
+      "gzip": 912
+    },
+    {
+      "name": "linkedProjects-4GhfuLbI.js",
+      "raw": 1381,
+      "gzip": 715
+    },
+    {
+      "name": "LinkedProjectsDialog-CEu5kHgc.js",
+      "raw": 22658,
+      "gzip": 7984
+    },
+    {
+      "name": "logActions-CYy0miYU.js",
+      "raw": 1787,
+      "gzip": 962
+    },
+    {
+      "name": "LogTab-CgKGex8O.js",
+      "raw": 22022,
+      "gzip": 8264
+    },
+    {
+      "name": "markdown-DSZPf7rp.js",
+      "raw": 4034,
+      "gzip": 1534
+    },
+    {
+      "name": "MetaCompare-BiG9SpGJ.js",
+      "raw": 4857,
+      "gzip": 1980
+    },
+    {
+      "name": "MetaDiffRows-DJBcjWDQ.js",
+      "raw": 4783,
+      "gzip": 1743
+    },
+    {
+      "name": "MetaExcel-Cada-0yx.js",
+      "raw": 6948,
+      "gzip": 2702
+    },
+    {
+      "name": "MetaGenerate-D3OKZMNO.js",
+      "raw": 36989,
+      "gzip": 12375
+    },
+    {
+      "name": "MetaHistory-BshpapIt.js",
+      "raw": 4900,
+      "gzip": 2030
+    },
+    {
+      "name": "MetaPublish-DQzLpG3d.js",
+      "raw": 7971,
+      "gzip": 2884
+    },
+    {
+      "name": "MetaRefs-B7A17eJO.js",
+      "raw": 2181,
+      "gzip": 1132
+    },
+    {
+      "name": "MetaTab-CuYJvZDp.js",
+      "raw": 151531,
+      "gzip": 45430
+    },
+    {
+      "name": "monacoSetup-BDSYJHG9.js",
+      "raw": 3247897,
+      "gzip": 827291
+    },
+    {
+      "name": "ncTasks-bQqgKlYZ.js",
+      "raw": 5787,
+      "gzip": 2735
+    },
+    {
+      "name": "openTableFromHover-V6KKVwNa.js",
+      "raw": 535,
+      "gzip": 432
+    },
+    {
+      "name": "patchDraft-DagRMJw6.js",
+      "raw": 4511,
+      "gzip": 2295
+    },
+    {
+      "name": "QuickPalette-D5xmiEs8.js",
+      "raw": 14930,
+      "gzip": 6347
+    },
+    {
+      "name": "ResourceDownloadButton-DaBWOEn4.js",
+      "raw": 638,
+      "gzip": 433
+    },
+    {
+      "name": "resultExport-x5wrevdn.js",
+      "raw": 10593,
+      "gzip": 4666
+    },
+    {
+      "name": "resultTransferWorker-BUhc-HH-.js",
+      "raw": 9737,
+      "gzip": 4305
+    },
+    {
+      "name": "saveAllDirty-DWptKU7w.js",
+      "raw": 1068,
+      "gzip": 737
+    },
+    {
+      "name": "searchEdit-DyZ6d8qS.js",
+      "raw": 1934,
+      "gzip": 1080
+    },
+    {
+      "name": "searchStore-C8oHZizx.js",
+      "raw": 3543,
+      "gzip": 1549
+    },
+    {
+      "name": "SettingsTab-DbNTJRu5.js",
+      "raw": 86031,
+      "gzip": 29326
+    },
+    {
+      "name": "sql-CCSDG5nI.js",
+      "raw": 10543,
+      "gzip": 4009
+    },
+    {
+      "name": "SvnTab-DXpZqwex.js",
+      "raw": 113240,
+      "gzip": 36031
+    },
+    {
+      "name": "tabSession-BV1UaU5l.js",
+      "raw": 1835,
+      "gzip": 864
+    },
+    {
+      "name": "typescript-BOje6G-i.js",
+      "raw": 5845,
+      "gzip": 2408
+    },
+    {
+      "name": "vendor-query-D11jdkVP.js",
+      "raw": 41038,
+      "gzip": 12731
+    },
+    {
+      "name": "vendor-react-CDG6s8c4.js",
+      "raw": 134655,
+      "gzip": 43166
+    },
+    {
+      "name": "vendor-tauri-Chue6t80.js",
+      "raw": 15233,
+      "gzip": 3895
+    },
+    {
+      "name": "xml-CLlLLZ4D.js",
+      "raw": 2851,
+      "gzip": 1202
+    }
+  ]
+}

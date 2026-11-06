@@ -4,8 +4,11 @@ import { treeFileKind, type JavaTreeKind } from "../../lib/treeFileKind";
 import { pathKey } from "../../lib/treeSvn";
 import { WorkspaceGlyph } from "./WorkspaceGlyph";
 import { TreeTypeMarker } from "./TreeTypeMarker";
+import { ProblemBadge } from "./ProblemBadge";
 import { WorkspaceFileName } from "./WorkspaceFileName";
 import type { EncodingMark } from "../../lib/workspace";
+import type { ProblemMark } from "../../lib/compileMarks";
+import type { InspectMark } from "../../lib/inspectMarks";
 
 /**
  * 文件树的一行。目录行与文件行分开：两者的选中/激活语义不同
@@ -31,6 +34,8 @@ export const TreeProjectRow = memo(function TreeProjectRow({
   selected,
   current,
   badge,
+  problem,
+  inspect,
   onToggle,
   onContextMenu,
 }: {
@@ -43,6 +48,10 @@ export const TreeProjectRow = memo(function TreeProjectRow({
   current: boolean;
   /** 非当前工程显示来路（依赖 / 已提前 / 无 .classpath）；当前工程显示「当前」。 */
   badge: string;
+  /** 当前工程根下（含更深层）的编译问题合计。 */
+  problem?: ProblemMark;
+  /** jdt.ls 代码检查（只覆盖打开的文件）；与编译问题分开计数。 */
+  inspect?: InspectMark;
   onToggle: (path: string) => void;
   onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) => void;
 }) {
@@ -73,6 +82,7 @@ export const TreeProjectRow = memo(function TreeProjectRow({
       <span className="wb-project-badge" data-current={current || undefined}>
         {badge}
       </span>
+      <ProblemBadge mark={problem} inspect={inspect} />
     </button>
   );
 });
@@ -89,6 +99,8 @@ export const TreeDirRow = memo(function TreeDirRow({
   bc,
   sourceRoot,
   packageDir,
+  problem,
+  inspect,
   onToggle,
   onContextMenu,
 }: {
@@ -106,6 +118,10 @@ export const TreeDirRow = memo(function TreeDirRow({
   bc?: string;
   sourceRoot?: boolean;
   packageDir?: boolean;
+  /** 这个目录下（含更深层）的编译问题合计。 */
+  problem?: ProblemMark;
+  /** jdt.ls 代码检查（只覆盖打开的文件）；与编译问题分开计数。 */
+  inspect?: InspectMark;
   onToggle: (path: string, parent: string) => void;
   onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) => void;
 }) {
@@ -138,6 +154,7 @@ export const TreeDirRow = memo(function TreeDirRow({
         {split > 0 ? <><span className="wb-row-prefix">{name.slice(0, split)}</span><span className="wb-row-tail">{name.slice(split)}</span></> : name}
       </span>
       {testRoot && <span className="wb-tree-test-badge" title="测试源码根" aria-hidden="true">T</span>}
+      <ProblemBadge mark={problem} inspect={inspect} />
       {bc && (
         // 两个字母足够区分：满屏 60 个模块里，「哪些是 manifest 登记的业务组件」是
         // 唯一需要一眼看出的信息，完整说明放 title。
@@ -162,6 +179,8 @@ export const TreeFileRow = memo(function TreeFileRow({
   selected,
   mark,
   javaKind,
+  problem,
+  inspect,
   memberExpanded,
   onToggleMembers,
   bookmarks,
@@ -178,6 +197,10 @@ export const TreeFileRow = memo(function TreeFileRow({
   selected: boolean;
   mark: EncodingMark | undefined;
   javaKind?: JavaTreeKind;
+  /** 这个文件自己的编译问题。 */
+  problem?: ProblemMark;
+  /** jdt.ls 代码检查（只覆盖打开的文件）；与编译问题分开计数。 */
+  inspect?: InspectMark;
   memberExpanded?: boolean;
   onToggleMembers?: (path: string) => void;
   /** 这个文件里的书签条数（0 = 不打点）。 */
@@ -219,6 +242,7 @@ export const TreeFileRow = memo(function TreeFileRow({
       </span>}
       <TreeTypeMarker kind={kind} />
       <WorkspaceFileName name={name} className="wb-row-name" />
+      <ProblemBadge mark={problem} inspect={inspect} />
       {svn && <span className="wb-svn-mark" data-st={svn} title={`SVN：${({ M: "已修改", A: "新增", D: "已删除", "?": "未纳管", C: "冲突", "!": "缺失", R: "替换", G: "已合并", "~": "类型冲突" })[svn]}`}>{svn}</span>}
       {bookmarks > 0 && (
         <span

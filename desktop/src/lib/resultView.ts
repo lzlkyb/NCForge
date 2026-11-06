@@ -48,12 +48,14 @@ export function nextSort(cur: SortState | null, col: number): SortState | null {
 
 /** 初始列宽：按列名、类型与前 50 行内容估算，夹在 64–320 px。 */
 export function initialWidths(columns: ColumnMeta[], rows: Cell[][]): number[] {
+  // 中文约占两个拉丁字宽；按字符数直接估算会截断常见的 NC 中文名称。
+  const units = (text: string) => [...text.slice(0,80)].reduce((n,c)=>n+(c.charCodeAt(0)>255 ? 2 : 1),0);
   return columns.map((c, k) => {
-    let len = Math.max(c.name.length, c.type.length * 0.85);
+    let len = Math.max(units(c.name), c.type.length * 0.85);
     for (let i = 0; i < Math.min(rows.length, 50); i++) {
       const v = rows[i][k];
-      if (v !== null) len = Math.max(len, String(v).length);
+      if (v !== null) len = Math.max(len, units(String(v)));
     }
-    return Math.round(Math.max(64, Math.min(320, len * 7.4 + 20)));
+    return Math.round(Math.max(64, Math.min(320, len * 7.4 + 28)));
   });
 }

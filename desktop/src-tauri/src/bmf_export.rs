@@ -66,7 +66,11 @@ pub fn plan(gen: &Generation, component: &str, namespace: &str) -> Vec<PlannedFi
         });
     }
     if !gen.upm.trim().is_empty() {
-        let ns = if namespace.is_empty() { component } else { namespace };
+        let ns = if namespace.is_empty() {
+            component
+        } else {
+            namespace
+        };
         out.push(PlannedFile {
             rel_path: format!("upm/{ns}.upm"),
             kind: "upm".into(),
@@ -86,7 +90,9 @@ pub fn plan(gen: &Generation, component: &str, namespace: &str) -> Vec<PlannedFi
 }
 
 fn registry_md(gen: &Generation) -> String {
-    let mut s = String::from("# 注册清单（手工）\n\n以下六处由 UAP 官方工具维护，本工具只列现状与建议，不自动改。\n\n");
+    let mut s = String::from(
+        "# 注册清单（手工）\n\n以下六处由 UAP 官方工具维护，本工具只列现状与建议，不自动改。\n\n",
+    );
     if gen.registry.is_empty() {
         s.push_str("（没有需要注册的条目）\n");
         return s;
@@ -129,7 +135,7 @@ fn unsafe_component(c: std::path::Component<'_>) -> bool {
     }
 }
 
-fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
+pub(crate) fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let p = Path::new(rel);
     if p.is_absolute() {
         return Err(format!("只接受相对路径：{rel}"));
@@ -194,7 +200,11 @@ pub fn write_all(
         items.push(ExportItem {
             rel_path: f.rel_path.clone(),
             kind: f.kind.clone(),
-            status: if overwrite { "replaced".into() } else { "written".into() },
+            status: if overwrite {
+                "replaced".into()
+            } else {
+                "written".into()
+            },
             detail: f.rel_path.clone(),
         });
     }
@@ -245,12 +255,15 @@ mod tests {
     fn plan_covers_all_artifacts() {
         let p = plan(&gen(), "demo", "m");
         let rel: Vec<&str> = p.iter().map(|f| f.rel_path.as_str()).collect();
-        assert_eq!(rel, vec![
-            "sql/demo_ddl.sql",
-            "java/src/public/nc/vo/m/XVO.java",
-            "upm/m.upm",
-            "registry.md",
-        ]);
+        assert_eq!(
+            rel,
+            vec![
+                "sql/demo_ddl.sql",
+                "java/src/public/nc/vo/m/XVO.java",
+                "upm/m.upm",
+                "registry.md",
+            ]
+        );
         assert!(matches!(p[1].encoding, TextEncoding::Gbk));
         assert!(p[1].crlf);
         assert!(p[3].text.contains("| UPM |"));
@@ -288,7 +301,10 @@ mod tests {
                 crlf: false,
             };
             let err = write_all(&d, &[f], false, &d.join("bak")).unwrap_err();
-            assert!(err.contains("相对路径") || err.contains("不能包含"), "{rel} → {err}");
+            assert!(
+                err.contains("相对路径") || err.contains("不能包含"),
+                "{rel} → {err}"
+            );
         }
     }
 }

@@ -1,0 +1,47 @@
+{
+  "checks": [
+    {
+      "theme": "light",
+      "drawer": {
+        "x": 286,
+        "y": 156,
+        "width": 390,
+        "height": 323
+      },
+      "menu": {
+        "x": 407.078125,
+        "y": 231.5,
+        "width": 220,
+        "height": 238
+      },
+      "dialog": {
+        "x": 126.5,
+        "y": 62,
+        "width": 430,
+        "height": 388
+      }
+    },
+    {
+      "theme": "dark",
+      "drawer": {
+        "x": 286,
+        "y": 156,
+        "width": 390,
+        "height": 323
+      },
+      "menu": {
+        "x": 407.078125,
+        "y": 231.5,
+        "width": 220,
+        "height": 238
+      },
+      "dialog": {
+        "x": 126.5,
+        "y": 62,
+        "width": 430,
+        "height": 388
+      }
+    }
+  ],
+  "errors": []
+}

@@ -20,6 +20,7 @@ import {
   type NcTask,
   type TaskStep,
 } from "../../lib/ncTasks";
+import { BuildSettings } from "./BuildSettings";
 import "./settings-development.css";
 
 const ALL_STEPS = Object.keys(STEP_LABELS) as TaskStep[];
@@ -109,6 +110,7 @@ export function TaskSettings() {
         valueText={autoCompile === null ? "读取中" : autoCompile ? "已开启" : "已关闭"}
         onChange={(v) => void toggleAutoCompile(v)}
       />
+      <BuildSettings />
       <details className="settings-task-builtins">
         <summary>内置任务 <span>{BUILTIN_TASKS.length} 个固定流程 · 只读</span></summary>
         <div>

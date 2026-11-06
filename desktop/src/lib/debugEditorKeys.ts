@@ -3,6 +3,7 @@
 // 单独成文件而不是塞进 `debugKeys`：那个模块被服务页与纯逻辑单测引用，
 // 拉进 Monaco 会把整条 editor 依赖链（worker/剪贴板检测）带进 jsdom 用例。
 import { monaco } from "./monacoSetup";
+import { bindEditorCommand } from "./editorCommandBinding";
 import { debugActionForKey, runDebugAction, type DebugKeyCode } from "./debugKeys";
 
 /**
@@ -20,14 +21,14 @@ export function registerDebugEditorKeys(editor: monaco.editor.IStandaloneCodeEdi
     ["F9", monaco.KeyCode.F9],
   ];
   for (const [code, key] of keys) {
-    editor.addCommand(key, () => {
+    bindEditorCommand(editor, key, () => {
       const action = debugActionForKey(code, false);
       if (action) runDebugAction(action);
-    });
+    }, `调试 ${code}`);
   }
   // Shift+F8 只在 IDEA 方案里是「步出」；Eclipse 方案下不接管
-  editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F8, () => {
+  bindEditorCommand(editor, monaco.KeyMod.Shift | monaco.KeyCode.F8, () => {
     const action = debugActionForKey("F8", true);
     if (action) runDebugAction(action);
-  });
+  }, "调试步出");
 }

@@ -1,0 +1,43 @@
+{
+  "label": "门禁-前端生成回归-2026-11-06",
+  "args": [
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "src/hooks/useMetaGeneration.test.tsx",
+    "src/components/meta/MetaGenerate.test.tsx",
+    "src/components/meta/MetaDdlRun.test.tsx",
+    "src/lib/metaGeneration.test.ts",
+    "src/components/ui/Menu.test.tsx",
+    "src/components/meta/MetaTab.test.tsx",
+    "src/components/meta/MetaTabDraft.test.tsx",
+    "--maxWorkers=1",
+    "--no-file-parallelism"
+  ],
+  "exitCode": 0,
+  "elapsedSeconds": 14.206,
+  "startFreeMB": 4590.0390625,
+  "minFreeMB": 4306.50390625,
+  "endFreeMB": 4522.9140625,
+  "samples": [
+    {
+      "at": "2026-11-06T08:04:52.800Z",
+      "freeMB": 4590.0390625,
+      "totalMB": 16151.3046875
+    },
+    {
+      "at": "2026-11-06T08:04:58.395Z",
+      "freeMB": 4306.50390625,
+      "totalMB": 16151.3046875
+    },
+    {
+      "at": "2026-11-06T08:05:03.445Z",
+      "freeMB": 4336.78125,
+      "totalMB": 16151.3046875
+    },
+    {
+      "at": "2026-11-06T08:05:07.008Z",
+      "freeMB": 4522.9140625,
+      "totalMB": 16151.3046875
+    }
+  ]
+}

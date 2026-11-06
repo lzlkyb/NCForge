@@ -6,6 +6,7 @@ import { useTabPersistence, useTabRestore, useTabSessionKeys } from "./useTabSes
 import { getSession, setSession, type TabMeta } from "../lib/workspaceSession";
 import { readTabSnapshot, saveTabSnapshot } from "../lib/tabPersistence";
 import { resetMru } from "../lib/tabMru";
+import { emptyEditorGroups } from "../lib/editorGroups";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -58,7 +59,7 @@ describe("重启恢复标签", () => {
       activePath: "C:\\w\\B.java",
       splitPath: "C:\\w\\A.java",
     });
-    const open = vi.fn(async (_path: string) => true);
+    const open = vi.fn(async (path: string) => { setSession({ tabs: tabs => [...tabs, tab(path)] }); return true; });
     await act(async () => root.render(<RestoreProbe rootPath={rootPath} open={open} />));
     await flush();
     expect(open.mock.calls.map((c) => c[0])).toEqual(["C:\\w\\A.java", "C:\\w\\B.java"]);
@@ -114,7 +115,7 @@ describe("标签快照落盘", () => {
 function KeysProbe({ tabs, activePath, reopenLast }: {
   tabs: TabMeta[]; activePath: string | null; reopenLast: () => Promise<boolean>;
 }) {
-  useTabSessionKeys(tabs, activePath, { reopenLast });
+  useTabSessionKeys(tabs, activePath, { reopenLast, selectTab: path => setSession({ activePath: path }) });
   return null;
 }
 
@@ -124,6 +125,14 @@ const press = (init: KeyboardEventInit) =>
   });
 
 describe("标签快捷键", () => {
+  it("Ctrl+Tab 只切当前组文件，组间快捷键保留各组活动文件", async () => {
+    setSession({ tabs: [tab("a"), tab("b"), tab("c"), tab("d")], editorGroups: { ...emptyEditorGroups(), left: ["a", "b"], right: ["c", "d"], leftActive: "a", rightActive: "d", focused: "right" } });
+    await act(async () => root.render(<KeysProbe tabs={getSession().tabs} activePath="d" reopenLast={async () => true} />));
+    await press({ key: "Tab", ctrlKey: true }); expect(getSession().activePath).toBe("c"); expect(getSession().editorGroups?.right).toEqual(["c", "d"]);
+    await press({ key: "ArrowLeft", ctrlKey: true, altKey: true }); expect(getSession().activePath).toBe("a");
+    await press({ key: "Tab", ctrlKey: true }); expect(getSession().activePath).toBe("b"); expect(getSession().editorGroups?.left).toEqual(["a", "b"]);
+    await press({ key: "ArrowRight", ctrlKey: true, altKey: true }); expect(getSession().activePath).toBe("c");
+  });
   beforeEach(() => {
     const surface = document.createElement("div");
     surface.id = "wb-code-surface";

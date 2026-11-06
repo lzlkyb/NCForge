@@ -201,6 +201,14 @@ export function isReopenTabKey(event: KeyLike, keymap: Keymap): boolean {
   return eventChord(event) === chord;
 }
 
+const TAB_KEYS = { next: "ctrl+tab", previous: "ctrl+shift+tab", left: "ctrl+alt+arrowleft", right: "ctrl+alt+arrowright" } as const;
+export type TabKeyAction = keyof typeof TAB_KEYS;
+export function tabKeyLabel(action: TabKeyAction): string { return prettyChord(getBindingOverride(`tab.${action}`) ?? TAB_KEYS[action]); }
+export function tabKeyAction(event: KeyLike): TabKeyAction | null {
+  if (event.metaKey || event.isComposing) return null;
+  return (Object.keys(TAB_KEYS) as TabKeyAction[]).find(action => eventChord(event) === (getBindingOverride(`tab.${action}`) ?? TAB_KEYS[action])) ?? null;
+}
+
 /* ─── 设置页的键位总表（默认值 + 用户覆盖） ─── */
 
 export type BindingGroup = "快速导航" | "窗口" | "搜索与层级" | "编辑器" | "固定键";
@@ -236,6 +244,7 @@ export function bindingRows(keymap: Keymap): BindingRow[] {
   add("layout.panel", "切换底部面板", "窗口", ["ctrl+j"]);
   add("layout.rail", "展开 / 收起导航栏", "窗口", ["ctrl+shift+b"]);
   add("tab.reopen", "重新打开关闭的标签", "窗口", [keymap === "eclipse" ? "ctrl+alt+t" : "ctrl+shift+t"]);
+  for (const [action, label] of [["next", "当前组最近文件"], ["previous", "当前组较早文件"], ["left", "聚焦左编辑器组"], ["right", "聚焦右编辑器组"]] as const) add(`tab.${action}`, label, "窗口", [TAB_KEYS[action]]);
   const searchCustom = getBindingOverride("search.workspace");
   const searchScheme = keymap === "eclipse" ? "ctrl+h" : "ctrl+shift+f";
   // Ctrl+K 永远有效，所以即使改了方案键，冲突表里也要把它算作占用

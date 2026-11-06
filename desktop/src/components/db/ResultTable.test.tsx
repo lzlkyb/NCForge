@@ -35,6 +35,41 @@ beforeEach(() => {
   document.body.appendChild(host);
 });
 
+it("结果工具菜单保留快照、比较和关联，完整 SQL 可展开读取",async()=>{
+  const onRelated=vi.fn();
+  const rows=[["a",1]],snapshot={source:"测试库 / 表 T",sql:"select * from T",at:1,complete:false,columns,rows};
+  act(()=>{root=createRoot(host);root.render(<ResultTable columns={columns} rows={rows} meta="1 行" table="T" snapshot={snapshot} onRelated={onRelated} />);});
+  const tools=host.querySelector<HTMLButtonElement>('[aria-label="结果工具"]')!;
+  const openTools=()=>act(()=>tools.click());
+  const item=(name:string)=>[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b=>b.textContent===name)!;
+  openTools();expect(item("关联记录").disabled).toBe(true);
+  await act(async()=>item("固定为对照").click());
+  openTools();expect(item("更新对照")).toBeTruthy();
+  await act(async()=>item("结果对比").click());
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("仅比较已读取的数据");
+  await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(b=>b.textContent==="关闭")!.click());
+  act(()=>host.querySelector('#dbx-cell-0-1')!.dispatchEvent(new MouseEvent("mousedown",{bubbles:true})));
+  openTools();expect(item("关联记录").disabled).toBe(false);
+  await act(async()=>item("关联记录").click());
+  expect(onRelated).toHaveBeenCalledWith(rows[0]);
+  const source=host.querySelector<HTMLDetailsElement>('.dbx-result-source')!;
+  expect(source.open).toBe(false);
+  act(()=>source.querySelector('summary')!.click());
+  expect(source.open).toBe(true);expect(source.textContent).toContain(snapshot.sql);
+});
+
+it("没有结果时给出恢复路径，清除本地筛选恢复数据",()=>{
+  act(()=>{root=createRoot(host);root.render(<ResultTable columns={columns} rows={[["可见",1]]} meta="1 行" table="T" />);});
+  act(()=>host.querySelector<HTMLButtonElement>('[aria-label="筛选结果"]')!.click());
+  const input=host.querySelector<HTMLInputElement>('[aria-label="在结果中筛选"]')!;
+  act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,"不存在");input.dispatchEvent(new Event("input",{bubbles:true}));});
+  expect(host.querySelector('[role="status"]')?.textContent).toContain("筛选后没有匹配的行");
+  const clear=[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==="清除结果筛选")!;
+  act(()=>clear.click());
+  expect(host.querySelector('.dbx-grid-empty')).toBeNull();
+  expect(host.querySelector('#dbx-cell-0-0')?.textContent).toBe("可见");
+});
+
 afterEach(() => {
   act(() => root?.unmount());
   root = null;

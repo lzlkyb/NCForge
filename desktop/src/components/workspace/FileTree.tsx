@@ -7,10 +7,12 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { ContextMenu } from "./ContextMenu";
-import { TreeFilterBar, TreeDeleteConfirm } from "./TreeChrome";
+import { TreeDeleteConfirm } from "./TreeChrome";
 import { TreeRows, type TreeRowsCtx } from "./TreeRows";
 import { PackageDependencies } from "./PackageDependencies";
 import { TreeProjectRows } from "./TreeProjectRows";
+import { TreeQuickFilter } from "./TreeQuickFilter";
+import { useTreeFilterState } from "../../lib/treeFilter";
 import { useTreeDelete } from "./useTreeDelete";
 import { useTreeEdit } from "./useTreeEdit";
 import { useTreeMembers } from "../../hooks/useTreeMembers";
@@ -20,9 +22,7 @@ import { packageCompact, packageDepthOffset } from "../../lib/packageTree";
 import { useNcComponents } from "../../hooks/useNcComponents";
 import { useTreeMenu } from "../../hooks/useTreeMenu";
 import { useTreeLocate } from "../../hooks/useTreeLocate";
-import {
-  type NewEntryKind,
-} from "../../lib/workspace";
+import type { NewEntryKind } from "../../lib/workspace";
 import { flattenTree, treeKeyAction, treeRowId as rowId } from "../../lib/treeNav";
 import { countBookmarks, useBookmarks } from "../../lib/bookmarks";
 import { useCompactPackages, useNcStructure, usePackageView, useRevealOnOpen } from "../../lib/treeViewPrefs";
@@ -48,11 +48,11 @@ interface Props {
   onDeleted: (paths: string[]) => void;
   /** 当前已打开的标签，删除确认里要提示会影响几个。 */
   openPaths: string[];
-  /**
-   * 编译某个路径所属的模块（右键菜单「编译模块 X」）。
-   * 与标签栏那个不同：它不依赖活动标签，批量改完一个模块后不用先打开它的文件。
-   */
+  /** 编译某路径所属的模块（右键「编译模块 X」）；不依赖活动标签。 */
   onCompileModule: (path: string) => void;
+  /** 清理模块产物 / 清理并重编（确认框在调用方）。 */
+  onCleanModule?: (path: string, module: string) => void;
+  onRebuildModule?: (path: string, module: string) => void;
 }
 
 export interface FileTreeHandle {
@@ -65,11 +65,11 @@ export interface FileTreeHandle {
  * 文件夹展开态和缓存放在 workspaceSession，切换侧栏后仍可复用。
  */
 export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
-  { root, projects, activePath, onOpen, onPin, onCreated, onRenamed, onDeleted, openPaths, onCompileModule },
+  { root, projects, activePath, onOpen, onPin, onCreated, onRenamed, onDeleted, openPaths, onCompileModule, onCleanModule, onRebuildModule },
   ref,
 ) {
   const [selected, setSelected] = useState<{ path: string; isDir: boolean } | null>(null);
-  const [filter, setFilter] = useState("");
+  const [filter, setFilter] = useTreeFilterState(root);
   const compact = useCompactPackages();
   const ncStructure = useNcStructure();
   const packageView = usePackageView();
@@ -129,7 +129,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   });
 
   // 清筛选的引用要稳定：它进了 locate 的依赖，每帧换新会让自动定位反复触发
-  const clearFilter = useCallback(() => setFilter(""), []);
+  const clearFilter = useCallback(() => setFilter(""), [setFilter]);
   useTreeLocate(reveal, activePath, revealOnOpen, clearFilter);
 
   // ---- 菜单 ----
@@ -139,6 +139,8 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     isEditable,
     onOpen,
     onCompileModule,
+    onCleanModule,
+    onRebuildModule,
     beginCreate,
     beginRename,
     askDelete,
@@ -174,7 +176,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
 
   // 焦点留在容器，方向键按视觉树移动。
   const onKeyDown = (e: ReactKeyboardEvent) => {
-    if (editing) return;
+    if (editing || e.nativeEvent.isComposing) return;
     if (e.key === "Escape" && filter) {
       e.preventDefault();
       setFilter("");
@@ -262,6 +264,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
 
   return (
     <>
+      <TreeQuickFilter root={root} />
       <div
         className="wb-tree-list"
         role="tree"
@@ -274,7 +277,6 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
           if (e.target === e.currentTarget) openMenu(e, root, true);
         }}
       >
-        {filter && <TreeFilterBar filter={filter} count={flat.length} onClear={() => setFilter("")} />}
         {multi || packageView ? (
           <TreeProjectRows projects={multi ? projects : undefined} root={root} ctx={ctx} />
         ) : (

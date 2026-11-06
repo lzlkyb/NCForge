@@ -1,5 +1,6 @@
 import type { BmfDetail, BmfEntity, BmfIssue } from "./bmf";
 import type { MetaView } from "../components/meta/MetaViewPanel";
+import type { GenerationPreferences } from "./bmfGeneration";
 
 export type MetaSelection =
   | { kind: "component" }
@@ -19,6 +20,7 @@ export interface MetaCanvasState {
   top: number;
 }
 export interface MetaEditorState {
+  generation?: GenerationPreferences;
   selection: MetaSelection;
   mode: MetaMode;
   modeChosen: boolean;

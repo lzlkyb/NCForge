@@ -1,0 +1,27 @@
+{
+  "label": "门禁-全仓Rust格式-2026-11-06",
+  "args": [
+    "scripts/rust-gate.mjs",
+    "fmt",
+    "--all",
+    "--",
+    "--check"
+  ],
+  "exitCode": 1,
+  "elapsedSeconds": 3.405,
+  "startFreeMB": 4002.94921875,
+  "minFreeMB": 3985.125,
+  "endFreeMB": 3985.125,
+  "samples": [
+    {
+      "at": "2026-11-06T08:12:54.446Z",
+      "freeMB": 4002.94921875,
+      "totalMB": 16151.3046875
+    },
+    {
+      "at": "2026-11-06T08:12:57.852Z",
+      "freeMB": 3985.125,
+      "totalMB": 16151.3046875
+    }
+  ]
+}

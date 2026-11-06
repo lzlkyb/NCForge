@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BmfDetail, BmfEntry, BmfIndex } from "../../lib/bmf";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
-vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
+vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke, listen: vi.fn(async () => () => {}) }));
 
 import { MetaTab } from "./MetaTab";
 import { WorkbenchFrame } from "../workspace/WorkbenchFrame";

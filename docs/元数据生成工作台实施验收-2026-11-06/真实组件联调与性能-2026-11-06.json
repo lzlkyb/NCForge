@@ -1,0 +1,439 @@
+{
+  "at": "2026-11-06T07:41:54.710Z",
+  "source": "production MetaTab + MetaGenerate + WorkbenchFrame + Monaco, memory IPC, packaged CSP",
+  "windows": [
+    {
+      "theme": "light",
+      "width": 1920,
+      "height": 1080,
+      "mode": "wide",
+      "workspaceWidth": 1918,
+      "editorHeight": 707,
+      "footerBottom": 1053,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(255, 255, 255)",
+      "editorBackground": "rgb(255, 255, 255)"
+    },
+    {
+      "theme": "light",
+      "width": 1366,
+      "height": 768,
+      "mode": "wide",
+      "workspaceWidth": 1364,
+      "editorHeight": 395,
+      "footerBottom": 741,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(255, 255, 255)",
+      "editorBackground": "rgb(255, 255, 255)"
+    },
+    {
+      "theme": "light",
+      "width": 1280,
+      "height": 720,
+      "mode": "wide",
+      "workspaceWidth": 1278,
+      "editorHeight": 347,
+      "footerBottom": 693,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(255, 255, 255)",
+      "editorBackground": "rgb(255, 255, 255)"
+    },
+    {
+      "theme": "light",
+      "width": 1024,
+      "height": 640,
+      "mode": "medium",
+      "workspaceWidth": 1022,
+      "editorHeight": 267,
+      "footerBottom": 613,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(255, 255, 255)",
+      "editorBackground": "rgb(255, 255, 255)"
+    },
+    {
+      "theme": "light",
+      "width": 1024,
+      "height": 480,
+      "mode": "medium",
+      "workspaceWidth": 1022,
+      "editorHeight": 107,
+      "footerBottom": 453,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(255, 255, 255)",
+      "editorBackground": "rgb(255, 255, 255)"
+    },
+    {
+      "theme": "light",
+      "width": 819,
+      "height": 614,
+      "mode": "medium",
+      "workspaceWidth": 817,
+      "editorHeight": 241,
+      "footerBottom": 587,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(255, 255, 255)",
+      "editorBackground": "rgb(255, 255, 255)"
+    },
+    {
+      "theme": "light",
+      "width": 683,
+      "height": 512,
+      "mode": "narrow",
+      "workspaceWidth": 681,
+      "editorHeight": 101.5,
+      "footerBottom": 485,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(255, 255, 255)",
+      "editorBackground": "rgb(255, 255, 255)"
+    },
+    {
+      "theme": "light",
+      "width": 560,
+      "height": 700,
+      "mode": "narrow",
+      "workspaceWidth": 558,
+      "editorHeight": 289.5,
+      "footerBottom": 673,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(255, 255, 255)",
+      "editorBackground": "rgb(255, 255, 255)"
+    },
+    {
+      "theme": "dark",
+      "width": 1920,
+      "height": 1080,
+      "mode": "wide",
+      "workspaceWidth": 1918,
+      "editorHeight": 707,
+      "footerBottom": 1053,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(32, 36, 41)",
+      "editorBackground": "rgb(32, 36, 41)"
+    },
+    {
+      "theme": "dark",
+      "width": 1366,
+      "height": 768,
+      "mode": "wide",
+      "workspaceWidth": 1364,
+      "editorHeight": 395,
+      "footerBottom": 741,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(32, 36, 41)",
+      "editorBackground": "rgb(32, 36, 41)"
+    },
+    {
+      "theme": "dark",
+      "width": 1280,
+      "height": 720,
+      "mode": "wide",
+      "workspaceWidth": 1278,
+      "editorHeight": 347,
+      "footerBottom": 693,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(32, 36, 41)",
+      "editorBackground": "rgb(32, 36, 41)"
+    },
+    {
+      "theme": "dark",
+      "width": 1024,
+      "height": 640,
+      "mode": "medium",
+      "workspaceWidth": 1022,
+      "editorHeight": 267,
+      "footerBottom": 613,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(32, 36, 41)",
+      "editorBackground": "rgb(32, 36, 41)"
+    },
+    {
+      "theme": "dark",
+      "width": 1024,
+      "height": 480,
+      "mode": "medium",
+      "workspaceWidth": 1022,
+      "editorHeight": 107,
+      "footerBottom": 453,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(32, 36, 41)",
+      "editorBackground": "rgb(32, 36, 41)"
+    },
+    {
+      "theme": "dark",
+      "width": 819,
+      "height": 614,
+      "mode": "medium",
+      "workspaceWidth": 817,
+      "editorHeight": 241,
+      "footerBottom": 587,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(32, 36, 41)",
+      "editorBackground": "rgb(32, 36, 41)"
+    },
+    {
+      "theme": "dark",
+      "width": 683,
+      "height": 512,
+      "mode": "narrow",
+      "workspaceWidth": 681,
+      "editorHeight": 101.5,
+      "footerBottom": 485,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(32, 36, 41)",
+      "editorBackground": "rgb(32, 36, 41)"
+    },
+    {
+      "theme": "dark",
+      "width": 560,
+      "height": 700,
+      "mode": "narrow",
+      "workspaceWidth": 558,
+      "editorHeight": 289.5,
+      "footerBottom": 673,
+      "overflowX": false,
+      "overflowY": false,
+      "background": "rgb(32, 36, 41)",
+      "editorBackground": "rgb(32, 36, 41)"
+    }
+  ],
+  "modalWindows": [
+    {
+      "theme": "light",
+      "name": "写入确认",
+      "width": 760,
+      "height": 440,
+      "x": 132,
+      "y": 20
+    },
+    {
+      "theme": "light",
+      "name": "写入确认",
+      "width": 651,
+      "height": 472,
+      "x": 16,
+      "y": 20
+    },
+    {
+      "theme": "light",
+      "name": "写入结果",
+      "width": 760,
+      "height": 440,
+      "x": 132,
+      "y": 20
+    },
+    {
+      "theme": "light",
+      "name": "写入结果",
+      "width": 651,
+      "height": 472,
+      "x": 16,
+      "y": 20
+    },
+    {
+      "theme": "light",
+      "name": "脚本执行中",
+      "width": 760,
+      "height": 225.78125,
+      "x": 132,
+      "y": 127.109375
+    },
+    {
+      "theme": "light",
+      "name": "脚本执行中",
+      "width": 651,
+      "height": 225.78125,
+      "x": 16,
+      "y": 143.109375
+    },
+    {
+      "theme": "dark",
+      "name": "写入确认",
+      "width": 760,
+      "height": 440,
+      "x": 132,
+      "y": 20
+    },
+    {
+      "theme": "dark",
+      "name": "写入确认",
+      "width": 651,
+      "height": 472,
+      "x": 16,
+      "y": 20
+    },
+    {
+      "theme": "dark",
+      "name": "写入结果",
+      "width": 760,
+      "height": 440,
+      "x": 132,
+      "y": 20
+    },
+    {
+      "theme": "dark",
+      "name": "写入结果",
+      "width": 651,
+      "height": 472,
+      "x": 16,
+      "y": 20
+    },
+    {
+      "theme": "dark",
+      "name": "脚本执行中",
+      "width": 760,
+      "height": 225.78125,
+      "x": 132,
+      "y": 127.109375
+    },
+    {
+      "theme": "dark",
+      "name": "脚本执行中",
+      "width": 651,
+      "height": 225.78125,
+      "x": 16,
+      "y": 143.109375
+    }
+  ],
+  "functional": [
+    {
+      "theme": "light",
+      "checks": [
+        "空选择不写入",
+        "配置草稿统一更新",
+        "目录防抖",
+        "真实差异与旧授权撤销",
+        "写入确认锁定",
+        "部分失败与清单错误保留",
+        "重试与定位清单",
+        "独立 SQL 顺序执行与关闭保护",
+        "来源定位与会话恢复",
+        "千项虚拟清单",
+        "单编辑器模型释放"
+      ]
+    },
+    {
+      "theme": "dark",
+      "checks": [
+        "空选择不写入",
+        "配置草稿统一更新",
+        "目录防抖",
+        "真实差异与旧授权撤销",
+        "写入确认锁定",
+        "部分失败与清单错误保留",
+        "重试与定位清单",
+        "独立 SQL 顺序执行与关闭保护",
+        "来源定位与会话恢复",
+        "千项虚拟清单",
+        "单编辑器模型释放"
+      ]
+    }
+  ],
+  "performance": {
+    "light": {
+      "clickMs": [
+        35.60000002384186,
+        30.900000035762787,
+        31.19999998807907,
+        31.099999964237213,
+        30.399999976158142,
+        35.700000047683716,
+        37.59999996423721,
+        33.80000001192093,
+        31.099999964237213,
+        30.900000035762787,
+        31.5,
+        31.399999976158142,
+        44,
+        29,
+        34.30000001192093,
+        32.89999997615814,
+        35.40000003576279,
+        24,
+        39.40000003576279,
+        39.09999996423721,
+        48.40000003576279,
+        46.89999997615814,
+        33.19999998807907,
+        39.90000003576279,
+        35.69999998807907,
+        47.10000002384186,
+        41.69999998807907,
+        36.09999996423721,
+        35.5,
+        69.89999997615814
+      ],
+      "renderedRows": 12,
+      "lastVisible": true,
+      "clickP95Ms": 48.40000003576279,
+      "targetP95Ms": 100,
+      "meetsTarget": true
+    },
+    "dark": {
+      "clickMs": [
+        25.30000001192093,
+        49.69999998807907,
+        37.80000001192093,
+        38,
+        31.69999998807907,
+        37.80000001192093,
+        33.09999996423721,
+        33.10000002384186,
+        35.19999998807907,
+        32,
+        28,
+        31.100000023841858,
+        44,
+        33.89999997615814,
+        44.5,
+        32.10000002384186,
+        34.10000002384186,
+        42.299999952316284,
+        45.200000047683716,
+        36.799999952316284,
+        45.10000002384186,
+        31.19999998807907,
+        44.10000002384186,
+        23.899999976158142,
+        35.10000002384186,
+        31.599999964237213,
+        30.899999976158142,
+        30.80000001192093,
+        31.5,
+        37.30000001192093
+      ],
+      "renderedRows": 12,
+      "lastVisible": true,
+      "clickP95Ms": 45.200000047683716,
+      "targetP95Ms": 100,
+      "meetsTarget": true
+    }
+  },
+  "models": [
+    {
+      "theme": "light",
+      "after30FileSwitches": 1
+    },
+    {
+      "theme": "dark",
+      "after30FileSwitches": 1
+    }
+  ],
+  "errors": [],
+  "cspViolations": [],
+  "passed": true
+}

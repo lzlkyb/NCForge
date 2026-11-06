@@ -1,119 +1,134 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { serverLog, type LogChunk } from "../lib/server";
-import { appendChunk, emptyLogState, type LogLine, type LogState } from "../lib/serverLog";
+import { serviceLogRead, serviceLogTail, type ServiceLogPage, type ServiceLogTarget } from "../lib/serviceConsoleApi";
+import { appendChunk, emptyLogState, flushLogPending, type LogLine, type LogState } from "../lib/serverLog";
 
-/** 取一段日志增量。默认取中间件，客户端日志面板传入 `clientLog`。 */
 export type FetchLog = (offset: number) => Promise<LogChunk>;
+export interface ServiceLogOptions { target: ServiceLogTarget; previous: boolean; runId?: string | null; projectRoot?: string | null; }
+interface Entry {
+  identity: string; state: LogState; history: LogLine[] | null; historyStart: number; historyEnd: number;
+  offset: number; startOffset: number; size: number; fileId?: string; initialized: boolean;
+  pendingOffset: number | null; error: string | null; updatedAt: number | null; truncated: boolean;
+}
+const entries = new Map<string, Entry>();
+function entryFor(key: string, identity: string): Entry {
+  const cached = entries.get(key);
+  if (cached?.identity === identity) return cached;
+  const entry: Entry = { identity, state: emptyLogState(), history: null, historyStart: 0, historyEnd: 0, offset: 0, startOffset: 0, size: 0, initialized: false, pendingOffset: null, error: null, updatedAt: null, truncated: false };
+  entries.set(key, entry);
+  // 两来源 × 两次运行的固定窗口，不随工程切换无限累积。
+  if (entries.size > 4) entries.delete(entries.keys().next().value!);
+  return entry;
+}
+function consumePage(entry: Entry, page: ServiceLogPage) {
+  const before = entry.state;
+  const state = appendChunk(before, page.text);
+  state.lines = state.lines.map(line => line.id < before.nextId ? line : {
+    ...line, offset: line.id === before.nextId && before.pending ? entry.pendingOffset ?? page.startOffset : page.lineOffsets[line.id - before.nextId] ?? page.startOffset,
+  });
+  entry.pendingOffset = state.pending ? page.lineOffsets[page.lineOffsets.length - 1] ?? page.offset : null;
+  entry.state = state; entry.offset = page.offset; entry.startOffset = state.lines[0]?.offset ?? page.startOffset;
+  entry.size = page.size; entry.fileId = page.fileId; entry.initialized = true;
+  entry.truncated ||= page.truncated;
+  if (page.text) entry.updatedAt = Date.now();
+}
 
-/**
- * 服务日志的增量轮询。
- *
- * 抽成 hook 的原因有两个：面板组件要同时管过滤、跟随、换行、复制，
- * 再塞进拉取逻辑会突破「单文件 8 个 useState+useEffect」的体量门禁；
- * 而这套 offset/in-flight 逻辑本身与渲染无关，单独看懂它更容易。
- *
- * `inFlight` 不是可有可无的：日志文件在慢盘上读一次可能超过 500ms，
- * 两个请求都拿着同一个 offset，第二批内容会重复插进列表。
- *
- * `epochRef` 同理：点启动会换一代日志（后端把旧文件轮转成 .1），
- * 而上一代的拉取请求可能还在路上。它回来时若直接落笔，旧内容会插进新一代，
- * offset 还会被旧文件的长度带偏——新一代的头几行就永远对不上了。
- */
-export function useServerLog(
-  active: boolean,
-  generation: number,
-  appHidden = false,
-  fetchLog: FetchLog = serverLog,
-) {
-  const [lines, setLines] = useState<LogLine[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const offsetRef = useRef(0);
-  const stateRef = useRef<LogState>(emptyLogState());
-  const inFlight = useRef(false);
-  /** 日志「代」：reset（换一代 / 用户清空）时 +1，在途回来对不上号就整份丢弃。 */
-  const epochRef = useRef(0);
-  /**
-   * 取数函数放 ref：调用方每次渲染都可能传新闭包（`(o) => clientLog(o)`），
-   * 直接进依赖会让 `tick` 每次重建、两处 effect 跟着重跑，轮询被反复重启。
-   */
-  const fetchRef = useRef(fetchLog);
-  fetchRef.current = fetchLog;
-
+/** 增量单飞 + 文件身份 + 换工程 epoch；暂停跟随不停止数据接收。 */
+export function useServerLog(active: boolean, generation: number, appHidden = false, fetchLog: FetchLog = serverLog, options?: ServiceLogOptions) {
+  const key = options ? `${options.target}:${options.previous}` : "legacy";
+  const instanceId = useId();
+  const identity = `${key}:${options?.projectRoot ?? ""}:${options?.previous ? "previous" : `${generation}:${options?.runId ?? ""}`}:${options ? "" : instanceId}`;
+  const [snapshot, setSnapshot] = useState(() => ({ ...entryFor(key, identity) }));
+  const entryRef = useRef<Entry>(entryFor(key, identity));
+  const epoch = useRef(0), inFlight = useRef<Promise<void> | null>(null), mounted = useRef(true);
+  const invalidate = useCallback(() => { epoch.current++; }, []);
+  const fetchRef = useRef(fetchLog), optionsRef = useRef(options), hiddenRef = useRef(appHidden), activeRef = useRef(active);
+  fetchRef.current = fetchLog; optionsRef.current = options; hiddenRef.current = appHidden; activeRef.current = active;
+  if (entryRef.current.identity !== identity || entryRef.current !== entries.get(key)) { entryRef.current = entryFor(key, identity); invalidate(); }
+  const publish = useCallback(() => { if (mounted.current) setSnapshot({ ...entryRef.current }); }, []);
   const tick = useCallback(async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    const epoch = epochRef.current;
-    try {
-      const chunk = await fetchRef.current(offsetRef.current);
-      // 对不上号 = 这趟是上一代日志的：内容、偏移都不能要
-      if (epoch !== epochRef.current) return;
-      offsetRef.current = chunk.offset;
-      if (chunk.text) {
-        stateRef.current = appendChunk(stateRef.current, chunk.text);
-        setLines(stateRef.current.lines);
-      }
-      setError(null);
-    } catch (e) {
-      // 轮询每 0.5 秒一次，失败时弹 toast 会刷屏；把原因留在面板上
-      if (epoch !== epochRef.current) return;
-      setError(String(e));
-    } finally {
-      inFlight.current = false;
-      // 换代发生在在途期间：新一代的第一次拉取被 inFlight 挡掉了，在这里补上。
-      // 不补的话，停止状态下（没有 interval）新日志一屏都不会出现。
-      if (epoch !== epochRef.current) void tick();
-    }
-  }, []);
-
-  /**
-   * 从 `from` 重读（换一代日志从 0；运行中清空日志时从当前文件末尾）。
-   *
-   * `from` 不能写死 0：服务运行时清空日志不动磁盘文件（java 的 append 句柄会继续写
-   * 旧 inode），偏移归零会把整份旧日志又读回来，看起来像「清空没生效」。
-   */
-  const reset = useCallback((from = 0) => {
-    offsetRef.current = from;
-    stateRef.current = emptyLogState();
-    epochRef.current += 1;
-    setLines([]);
-  }, []);
-
-  // 换一代（点启动）：后端已把旧日志轮转成 .1，这里跟着从头读
-  useEffect(() => {
-    reset();
-    void tick();
-  }, [generation, reset, tick]);
-
-  // 窗口隐藏时也停轮询：本页的统一约定是「隐藏即停」（状态轮询已经这么做了）。
-  // 以前这里只看 active（=running），隐藏后状态停在 running，日志照旧每 0.5 秒
-  // invoke + 读盘——而它恰恰是最贵的那一个。恢复可见时立刻补一拍，不留在屏的是旧内容。
-  useEffect(() => {
-    if (!active || appHidden) return;
-    const id = window.setInterval(() => void tick(), 500);
-    void tick();
-    return () => window.clearInterval(id);
-  }, [active, appHidden, tick]);
-
-  // 停止后补拉尾部。服务崩掉时，最后的堆栈往往写在「最后一次轮询」到「进程消失」
-  // 之间——active 一关就停轮询，那段永远看不见，而排查崩溃偏偏只看那段。
-  // 两拍：立刻一拍（进程可能还在 flush），第一拍**读完之后**再等 800ms 一拍
-  // （落盘慢的机器）。第二拍不能做成固定定时：第一拍还没回来时它会被 inFlight
-  // 整个挡掉，慢盘上等于没有第二拍。
+    if (inFlight.current) { await inFlight.current; return; }
+    if (hiddenRef.current || !mounted.current) return;
+    const stamp = epoch.current, entry = entryRef.current, spec = optionsRef.current;
+    const work = (async () => {
+      try {
+        if (!spec) {
+          const chunk = await fetchRef.current(entry.offset);
+          if (stamp !== epoch.current) return;
+          entry.offset = chunk.offset; entry.state = appendChunk(entry.state, chunk.text); entry.initialized = true;
+          if (chunk.text) entry.updatedAt = Date.now();
+        } else {
+          let page = entry.initialized ? await serviceLogRead(spec.target, spec.previous, entry.offset, entry.fileId) : await serviceLogTail(spec.target, spec.previous);
+          if (stamp !== epoch.current) return;
+          if (page.reset && entry.initialized) {
+            page = await serviceLogTail(spec.target, spec.previous);
+            if (stamp !== epoch.current) return;
+            entry.state = emptyLogState(); entry.history = null; entry.pendingOffset = null;
+          }
+          consumePage(entry, page);
+          if (page.eof && (!activeRef.current || spec.previous)) {
+            const pendingId = entry.state.nextId, pendingOffset = entry.pendingOffset;
+            entry.state = flushLogPending(entry.state);
+            // 文件已结束的半行也需要原始起点，不能把下一块 offset 当成行位置。
+            entry.state.lines = entry.state.lines.map(line => line.id === pendingId ? { ...line, offset: pendingOffset ?? page.offset } : line);
+            entry.pendingOffset = null;
+          }
+        }
+        entry.error = null;
+      } catch (error) { if (stamp === epoch.current) entry.error = String(error); }
+      if (stamp === epoch.current) publish();
+    })();
+    inFlight.current = work;
+    try { await work; } finally { inFlight.current = null; if (stamp !== epoch.current && !hiddenRef.current && mounted.current) void tick(); }
+  }, [publish]);
+  const query = useQuery({ queryKey: ["service-console-log", key, identity], queryFn: async () => { await tick(); return Date.now(); }, enabled: !appHidden, refetchInterval: appHidden || !active || options?.previous ? false : 500, retry: false, staleTime: 0 });
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; invalidate(); }; }, [invalidate]);
+  useEffect(() => { publish(); }, [key, identity, publish]);
   const wasActive = useRef(active);
   useEffect(() => {
-    const prev = wasActive.current;
-    wasActive.current = active;
-    if (!prev || active) return;
-    let cancelled = false;
-    void (async () => {
-      await tick();
-      await new Promise((r) => window.setTimeout(r, 800));
-      if (!cancelled) await tick();
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [active, tick]);
+    const stopped = wasActive.current && !active; wasActive.current = active;
+    if (!stopped || appHidden || options?.previous) return;
+    let disposed = false;
+    void (async () => { await tick(); await new Promise(resolve => setTimeout(resolve, 800)); if (!disposed) await tick(); })();
+    return () => { disposed = true; };
+  }, [active, appHidden, options?.previous, tick]);
 
-  return { lines, error, reset };
+  const currentEntry = entryRef.current;
+  const reset = useCallback((from = 0) => {
+    const entry = currentEntry;
+    if (entry === entryRef.current) invalidate();
+    entry.state = emptyLogState(); entry.history = null; entry.offset = from; entry.startOffset = from;
+    entry.pendingOffset = null; entry.initialized = from > 0; entry.truncated = false; entry.error = null;
+    publish();
+  }, [currentEntry, publish, invalidate]);
+  const [readingOlder, setReadingOlder] = useState(false);
+  const olderLock = useRef(false);
+  const readOlder = useCallback(async () => {
+    const spec = optionsRef.current, entry = entryRef.current;
+    if (!spec || olderLock.current || !(entry.history ? entry.historyStart : entry.startOffset)) return;
+    olderLock.current = true; setReadingOlder(true); const stamp = epoch.current;
+    try {
+      if (inFlight.current) await inFlight.current;
+      if (stamp !== epoch.current || hiddenRef.current) return;
+      const before = entry.history ? entry.historyStart : entry.startOffset;
+      const page = await serviceLogTail(spec.target, spec.previous, before, entry.fileId);
+      if (stamp !== epoch.current) return;
+      if (page.reset) { reset(); await tick(); return; }
+      const state = flushLogPending(appendChunk(emptyLogState(), page.text));
+      entry.history = state.lines.map((line, index) => ({ ...line, id: -(state.lines.length - index), offset: page.lineOffsets[line.id - 1] ?? page.startOffset }));
+      entry.historyStart = entry.history[0]?.offset ?? page.startOffset;
+      entry.historyEnd = page.offset;
+      entry.truncated ||= page.truncated; entry.error = null; publish();
+    } catch (error) { if (stamp === epoch.current) { entry.error = String(error); publish(); } }
+    finally { olderLock.current = false; if (mounted.current) setReadingOlder(false); }
+  }, [publish, reset, tick]);
+  const showLatest = useCallback(() => { entryRef.current.history = null; publish(); }, [publish]);
+  const data = snapshot.identity === identity ? snapshot : entryRef.current;
+  return {
+    lines: data.history ?? data.state.lines, error: data.error, reset, retry: () => void query.refetch(), readOlder, readingOlder,
+    loading: query.isFetching && !data.initialized, updatedAt: data.updatedAt, fileId: data.fileId,
+    startOffset: data.history ? data.historyStart : data.startOffset, endOffset: data.history ? data.historyEnd : data.offset, size: data.size,
+    truncated: data.truncated, historical: data.history !== null, newestId: data.state.nextId - 1, showLatest,
+  };
 }

@@ -11,13 +11,15 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), toast: vi.fn() }));
-vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn(), toast: vi.fn() }));
+vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke, listen: mocks.listen }));
 vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
 vi.mock("../../hooks/usePrefersReducedMotion", () => ({ usePrefersReducedMotion: () => true }));
 vi.mock("../../lib/dbStore", () => ({ connOf: () => ({ id: "c1", name: "测试库", user: "NC65" }) }));
 
 import { InsertExportDialog } from "./InsertExportDialog";
+import { clearTransferJob } from "../../lib/resultTransferJobs";
+import type { BoundCell } from "../../lib/dbApi";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -36,13 +38,24 @@ const RESULT = {
 
 let host: HTMLDivElement;
 let root: Root;
+const saved = {
+  path: "D:/导出/bd_material.sql", fileName: "bd_material.sql", rows: 2, bytes: 120,
+  truncated: true, canceled: false, ms: 50, warnings: RESULT.warnings, destinationToken: "saved",
+};
+const call = (command: string) => mocks.invoke.mock.calls.find(([cmd]) => cmd === command);
 
 beforeEach(() => {
+  clearTransferJob("c1:nc:c1");
   mocks.invoke.mockReset();
+  mocks.listen.mockReset();
   mocks.toast.mockReset();
-  mocks.invoke.mockResolvedValue(RESULT);
-  // 落盘走浏览器下载：jsdom 没有 createObjectURL / appendChild 点击
-  Object.assign(URL, { createObjectURL: vi.fn(() => "blob:x"), revokeObjectURL: vi.fn() });
+  mocks.listen.mockResolvedValue(() => {});
+  mocks.invoke.mockImplementation(async (cmd: string) => {
+    if (cmd === "db_transfer_pick") return { token: "chosen", path: saved.path };
+    if (cmd === "db_export_insert") return RESULT;
+    if (cmd === "db_transfer_file") return saved;
+    throw new Error(`Unexpected command: ${cmd}`);
+  });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -55,7 +68,7 @@ afterEach(() => {
 
 const flush = () => act(async () => {});
 
-async function mount(over: Partial<{ schema: string | null }> = {}) {
+async function mount(over: Partial<{ schema: string | null; params: BoundCell[] }> = {}) {
   await act(async () => {
     root.render(
       <InsertExportDialog
@@ -63,6 +76,7 @@ async function mount(over: Partial<{ schema: string | null }> = {}) {
         table="bd_material"
         sql="select * from bd_material"
         schema={over.schema ?? null}
+        params={over.params}
         onClose={() => {}}
       />,
     );
@@ -75,13 +89,12 @@ const byText = (sel: string, text: string) =>
 
 describe("InsertExportDialog", () => {
   it("默认按 NC 约定导出：多语开、schema 空串传 null、带上限与提交间隔", async () => {
-    await mount();
+    await mount({ schema: "" });
     await act(async () => byText("button", "导出")?.click());
     await flush();
 
-    expect(mocks.invoke).toHaveBeenCalledTimes(1);
-    const [cmd, args] = mocks.invoke.mock.calls[0];
-    expect(cmd).toBe("db_export_insert");
+    expect(mocks.invoke.mock.calls.map(([cmd]) => cmd)).toEqual(["db_transfer_pick", "db_export_insert", "db_transfer_file"]);
+    const [, args] = call("db_export_insert")!;
     expect(args.req).toMatchObject({
       id: "c1",
       sql: "select * from bd_material",
@@ -91,6 +104,11 @@ describe("InsertExportDialog", () => {
       commitEvery: 0,
       maxRows: 5000,
     });
+    expect(call("db_transfer_file")![1].req).toMatchObject({
+      destinationToken: "chosen", text: RESULT.sqlText, textRows: 2,
+      textTruncated: true, textWarnings: RESULT.warnings,
+    });
+    expect(mocks.listen).toHaveBeenCalledWith("db:export-progress", expect.any(Function));
   });
 
   it("取消多语勾选后传 false（决定 X2..X6 导不导）", async () => {
@@ -101,7 +119,7 @@ describe("InsertExportDialog", () => {
     await act(async () => byText("button", "导出")?.click());
     await flush();
 
-    expect(mocks.invoke.mock.calls[0][1].req.multilang).toBe(false);
+    expect(call("db_export_insert")![1].req.multilang).toBe(false);
   });
 
   it("成功后显示非全量与跳过的语种列，不静默截断", async () => {
@@ -117,6 +135,38 @@ describe("InsertExportDialog", () => {
     expect(text).toContain("NAME2");
     expect(text).toContain("行数到了上限");
     // 按钮切成「重新导出」，避免连点重复下载同一份
+    expect(byText("button", "重新导出")).toBeTruthy();
+  });
+
+  it("全量 NC 导出保留查询绑定参数及大数精度", async () => {
+    const params: BoundCell[] = [{ number: "12345678901234567890" }, "中文", null];
+    await mount({ params });
+    await act(async () => byText("button", "导出")?.click());
+    expect(call("db_export_insert")![1].req.params).toEqual(params);
+  });
+
+  it("取消保存位置不会查询或宣称已导出", async () => {
+    mocks.invoke.mockResolvedValue(null);
+    await mount();
+    await act(async () => byText("button", "导出")?.click());
+    expect(mocks.invoke.mock.calls.map(([cmd]) => cmd)).toEqual(["db_transfer_pick"]);
+    expect(mocks.toast).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain("脚本已生成");
+    expect(byText("button", "导出")?.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("原生保存失败显示错误并保留脚本，不宣称文件已保存", async () => {
+    const normal = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((cmd: string, args: unknown) => {
+      if (cmd === "db_transfer_file") return Promise.reject(new Error("磁盘空间不足"));
+      return normal(cmd, args);
+    });
+    await mount();
+    await act(async () => byText("button", "导出")?.click());
+    expect(document.body.textContent).toContain("磁盘空间不足");
+    expect(document.body.textContent).toContain("脚本已生成");
+    expect(document.body.textContent).not.toContain("文件已保存");
+    expect(mocks.toast.mock.calls.some(([, kind]) => kind === "success")).toBe(false);
     expect(byText("button", "重新导出")).toBeTruthy();
   });
 });

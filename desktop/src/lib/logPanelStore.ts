@@ -14,13 +14,34 @@ export interface LogPanelForm {
   keyword: string;
   follow: boolean;
   wrap: boolean;
+  query: string;
+  findOpen: boolean;
+  filterOpen: boolean;
+  scrollTop: number;
+  expanded: ReadonlySet<number>;
+  fontSize: number;
+  seen: number | null;
 }
 
-export const logPanelStore = createSessionStore<LogPanelForm>({
+const initial = (): LogPanelForm => ({
   level: "all",
   keyword: "",
   follow: true,
-  wrap: false,
+  wrap: true,
+  query: "",
+  findOpen: false,
+  filterOpen: false,
+  scrollTop: 0,
+  expanded: new Set(),
+  fontSize: 13,
+  seen: null,
 });
 
-export const useLogPanelForm = (): LogPanelForm => useSessionStore(logPanelStore);
+const stores = {
+  middleware: { current: createSessionStore(initial()), previous: createSessionStore({ ...initial(), follow: false }) },
+  client: { current: createSessionStore(initial()), previous: createSessionStore({ ...initial(), follow: false }) },
+};
+export type ServiceLogSource = keyof typeof stores;
+export const getLogPanelStore = (target: ServiceLogSource = "middleware", previous = false) => stores[target][previous ? "previous" : "current"];
+export const logPanelStore = getLogPanelStore();
+export const useLogPanelForm = (target: ServiceLogSource = "middleware", previous = false): LogPanelForm => useSessionStore(getLogPanelStore(target, previous));

@@ -110,7 +110,7 @@ fn drv_err(e: Error) -> BridgeError {
             "timeout",
             "语句已中断（点了停止，或等待超过超时时间）。会话仍然可用",
         ),
-        ErrorKind::DeadConnection => BridgeError::new("sql", "连接已断开（数据库或网络关闭了它）"),
+        ErrorKind::DeadConnection => BridgeError::new("session-lost", "连接已断开（数据库或网络关闭了它）"),
         _ => BridgeError::new("sql", e.to_string()),
     }
 }
@@ -177,6 +177,8 @@ struct Session {
     tx_statements: i64,
     tx_rows: i64,
     tx_since: i64,
+    /// 登录账号（`select user from dual`）。`setSchema("")` 要切回它。
+    login_user: String,
     /// 连接成功后由这里写入中断句柄（见 `RustEngine.breaker`）。
     breaker: BreakerSlot,
 }
@@ -202,6 +204,7 @@ impl RustEngine {
                 tx_statements: 0,
                 tx_rows: 0,
                 tx_since: 0,
+                login_user: String::new(),
                 breaker: breaker.clone(),
             }),
             breaker,
@@ -284,7 +287,7 @@ impl Session {
         match cmd {
             "connect" => {
                 let auto = a.get(3).map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(false);
-                self.connect(a.first().copied().unwrap_or(""), a.get(1).copied().unwrap_or(""), a.get(2).copied().unwrap_or(""), auto)
+                self.connect(a.first().copied().unwrap_or(""), a.get(1).copied().unwrap_or(""), a.get(2).copied().unwrap_or(""), auto, a.get(4).copied().unwrap_or(""))
             }
             "connectProp" => Err(other_err(
                 "纯 Rust 驱动解不了 NC prop.xml 里加密的口令（那要用 NC 自带的 PropXMLReader，只有 JVM 里能跑）。\
@@ -341,11 +344,23 @@ impl Session {
                 let alive = self.ping().is_ok();
                 Ok(json!({ "alive": alive, "tx": self.tx_json() }))
             }
+            "probe" => {
+                let Some(conn) = self.conn.as_ref() else {
+                    return Ok(json!({ "alive": false, "tx": self.tx_json() }));
+                };
+                conn.set_call_timeout(Some(_timeout)).map_err(drv_err)?;
+                let result = conn.ping();
+                let _ = conn.set_call_timeout(None);
+                result.map_err(drv_err)?;
+                Ok(json!({ "alive": true, "tx": self.tx_json() }))
+            }
             "disconnect" => {
                 self.close();
                 Ok(json!({}))
             }
             "tables" => self.tables(),
+            "schemas" => self.schemas(),
+            "setSchema" => self.set_schema(a.first().copied().unwrap_or("")),
             "ncNames" => self.nc_names(),
             "columnsZh" => self.columns_zh(a.first().copied().unwrap_or("")),
             "columns" => self.columns(a.first().copied().unwrap_or("")),
@@ -435,6 +450,7 @@ impl Session {
         user: &str,
         pass: &str,
         auto: bool,
+        schema: &str,
     ) -> Result<Value, BridgeError> {
         self.close();
         let cs = connect_string_from_jdbc(url).map_err(sql_err)?;
@@ -451,10 +467,20 @@ impl Session {
         let _ = conn.execute("begin dbms_output.enable(1000000); end;", &[]);
         let login_user =
             scalar_string(&conn, "select user from dual").unwrap_or_else(|| user.to_string());
+        // 默认 schema 跟着连接一起设：以后写 `select * from org_orgs` 就不用带 `aier633.`。
+        // 放在「刚连上、还没有任何事务」的时刻最干净（`alter session` 本身也不提交事务）。
+        //
+        // 这里**不让连接失败**：配置里写错 schema 就永远连不上，用户连改配置的入口都没有。
+        // 回落到登录账号 + 带回 `schemaWarning`，由界面标一行黄字——不静默。
+        let (current, schema_warning) = match effective_schema(&conn, schema, &login_user) {
+            Ok(current) => (current, String::new()),
+            Err(e) => (login_user.clone(), e.message),
+        };
         let version = db_version(&conn);
         self.readonly = false;
         self.readonly_started = false;
         self.auto_commit = auto;
+        self.login_user = login_user.clone();
         self.reset_tx();
         // 中断句柄先取出来再交所有权：`cancel()` 要从另一个线程用它
         let breaker = conn.break_handle().ok();
@@ -467,7 +493,42 @@ impl Session {
             "product": "Oracle",
             "version": version,
             "user": login_user,
+            "schema": current,
+            "schemaWarning": schema_warning,
             "autoCommit": auto,
+        }))
+    }
+
+    /// 切换默认 schema。空串 = 回到登录账号自己的 schema。
+    fn set_schema(&mut self, name: &str) -> Result<Value, BridgeError> {
+        // 连接先取出来再放回：`effective_schema` 要 `&Connection`，而这里拿着 `&mut self`。
+        let conn = self.conn.take().ok_or_else(not_connected)?;
+        let result = effective_schema(&conn, name, &self.login_user);
+        self.conn = Some(conn);
+        result.map(|current| json!({"schema": current}))
+    }
+
+    /// 库里的 schema 清单（`all_users`，任何账号都读得到）。
+    ///
+    /// 用独立语句而不是「先 exec 再取游标」：这条查询不能碰「加载更多」的游标，
+    /// 否则结果表里上一页的数据就再也取不到了。
+    fn schemas(&self) -> Result<Value, BridgeError> {
+        let conn = self.conn_ref()?;
+        let cur = conn
+            .query("select username from all_users order by username", &[])
+            .map_err(drv_err)?;
+        let mut list: Vec<String> = Vec::new();
+        for row in cur {
+            let row = row.map_err(drv_err)?;
+            if let Ok(Some(name)) = row.get::<Option<String>>(0) {
+                list.push(name);
+            }
+        }
+        let current = current_schema_of(conn).unwrap_or_else(|| self.login_user.clone());
+        Ok(json!({
+            "schemas": list,
+            "current": current,
+            "user": self.login_user,
         }))
     }
 
@@ -716,8 +777,14 @@ impl Session {
 
     fn tables(&self) -> Result<Value, BridgeError> {
         let conn = self.conn_ref()?;
-        let sql = "select table_name, 'TABLE' from user_tables where table_name not like 'BIN$%' \
-                   union all select view_name, 'VIEW' from user_views order by 1";
+        // 按当前默认 schema 过滤（不是登录账号）：切了 schema 之后树里列的必须和「不带
+        // 前缀能解析到的表」一致，否则会出现「树上有、SQL 报 ORA-00942」。用 all_* 而非
+        // user_*：user_* 永远只有登录账号自己的表，切过去就是空的。没授权的表不显示——
+        // 那正是「能查什么」的真实边界。查询文本与 JVM 桥的 tables() 保持一致。
+        let sql = "select table_name, 'TABLE' from all_tables \
+                   where owner = sys_context('userenv','current_schema') and table_name not like 'BIN$%' \
+                   union all select view_name, 'VIEW' from all_views \
+                   where owner = sys_context('userenv','current_schema') order by 1";
         let cur = conn.query(sql, &[]).map_err(drv_err)?;
         let mut list = Vec::new();
         for row in cur {
@@ -796,9 +863,11 @@ impl Session {
         let sql =
             "select c.column_name, c.data_type, c.char_length, c.data_precision, c.data_scale, \
                    c.nullable, c.data_default, cc.comments \
-                   from user_tab_columns c left join user_col_comments cc \
-                   on cc.table_name = c.table_name and cc.column_name = c.column_name \
-                   where c.table_name = :1 order by c.column_id";
+                   from all_tab_columns c left join all_col_comments cc \
+                   on cc.owner = c.owner and cc.table_name = c.table_name \
+                   and cc.column_name = c.column_name \
+                   where c.owner = sys_context('userenv','current_schema') \
+                   and c.table_name = :1 order by c.column_id";
         let cur = conn.query(sql, &[&t as &dyn ToDbValue]).map_err(drv_err)?;
         let mut out = Vec::new();
         for row in cur {
@@ -862,9 +931,10 @@ impl Session {
     }
 
     fn pk_columns(&self, conn: &Connection, table: &str) -> Result<Vec<String>, BridgeError> {
-        let sql = "select cc.column_name from user_constraints c \
-                   join user_cons_columns cc on cc.constraint_name = c.constraint_name \
-                   where c.table_name = :1 and c.constraint_type = 'P' order by cc.position";
+        let sql = "select cc.column_name from all_constraints c \
+                   join all_cons_columns cc on cc.owner = c.owner and cc.constraint_name = c.constraint_name \
+                   where c.owner = sys_context('userenv','current_schema') \
+                   and c.table_name = :1 and c.constraint_type = 'P' order by cc.position";
         let cur = conn
             .query(sql, &[&table as &dyn ToDbValue])
             .map_err(drv_err)?;
@@ -882,8 +952,10 @@ impl Session {
         let conn = self.conn_ref()?;
         let t = table.to_uppercase();
         let sql = "select i.index_name, i.uniqueness, i.status, ic.column_name \
-                   from user_indexes i join user_ind_columns ic on ic.index_name = i.index_name \
-                   where i.table_name = :1 order by i.index_name, ic.column_position";
+                   from all_indexes i join all_ind_columns ic \
+                   on ic.owner = i.owner and ic.index_name = i.index_name \
+                   where i.owner = sys_context('userenv','current_schema') \
+                   and i.table_name = :1 order by i.index_name, ic.column_position";
         let cur = conn.query(sql, &[&t as &dyn ToDbValue]).map_err(drv_err)?;
         let mut order: Vec<String> = Vec::new();
         let mut idx: std::collections::HashMap<String, (String, String, Vec<String>)> =
@@ -980,14 +1052,16 @@ impl Session {
 
     /// 非表对象：包 / 包体 / 过程 / 函数 / 序列 / 同义词 / 触发器 / 类型。
     ///
-    /// 为什么用 `user_objects` 而不是 `all_objects`：二开账号通常只有自己 schema 的权限，
-    /// `all_objects` 会扫到别人的几千张表、还要额外授权，而对象树只关心「我能改的东西」。
+    /// 过滤在 **owner = 当前默认 schema** 上（不是登录账号）：切了 schema 之后对象树跟着换，
+    /// 与「不带前缀能解析到的对象」一致。用 `all_objects` 而不是 `user_objects`——
+    /// `user_objects` 永远只含登录账号自己的对象，切过去就是空的。
     /// `generated = 'N'` 排掉系统生成的（回收站对象、LOB 索引之类）。
     fn objects(&self) -> Result<Value, BridgeError> {
         let conn = self.conn_ref()?;
         let sql = "select object_name, object_type, status, to_char(created, 'YYYY-MM-DD') \
-                   from user_objects \
-                   where object_type in ('PACKAGE','PACKAGE BODY','PROCEDURE','FUNCTION', \
+                   from all_objects \
+                   where owner = sys_context('userenv','current_schema') \
+                     and object_type in ('PACKAGE','PACKAGE BODY','PROCEDURE','FUNCTION', \
                         'SEQUENCE','SYNONYM','TRIGGER','TYPE','TYPE BODY') \
                      and generated = 'N' \
                    order by object_type, object_name";
@@ -1006,14 +1080,17 @@ impl Session {
         Ok(json!({ "objects": list, "count": n }))
     }
 
-    /// 库内源码（`user_source`）。序列、同义词这类没有源码的对象返回空 `lines`。
+    /// 库内源码（`all_source`，按当前默认 schema 过滤）。序列、同义词这类没有源码的对象
+    /// 返回空 `lines`。
     ///
     /// `order by type, line`：字典序里 `PACKAGE` 排在 `PACKAGE BODY` 之前，
     /// 正好是「规范在前、实现在后」的阅读顺序（`TYPE` / `TYPE BODY` 同理）。
     fn source(&self, name: &str) -> Result<Value, BridgeError> {
         let conn = self.conn_ref()?;
         let n = name.to_uppercase();
-        let sql = "select type, line, text from user_source where name = :1 order by type, line";
+        let sql = "select type, line, text from all_source \
+                   where owner = sys_context('userenv','current_schema') and name = :1 \
+                   order by type, line";
         let cur = conn.query(sql, &[&n as &dyn ToDbValue]).map_err(drv_err)?;
         let mut lines = Vec::new();
         let mut text = String::new();
@@ -1698,6 +1775,55 @@ fn scalar_string(conn: &Connection, sql: &str) -> Option<String> {
         .get::<Option<String>>(0)
         .ok()
         .flatten()
+}
+
+/// 这条会话当前的默认 schema（`sys_context('userenv','current_schema')`）。
+///
+/// 不缓存成字段：用户完全可能自己发一句 `alter session set current_schema`，
+/// 缓存就会和真实会话不一致，界面上显示的名字就成了假的。
+fn current_schema_of(conn: &Connection) -> Option<String> {
+    scalar_string(conn, "select sys_context('userenv','current_schema') from dual")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// 把会话切到 `name`，返回生效后的 schema 名。空串 = 回到登录账号自己的 schema。
+///
+/// **名字绑不进绑定变量**（`alter session` 的标识符位置不接受占位符），只能拼串，所以
+/// 先用 [`crate::db_conns::valid_schema`] 卡字符集——这与 JVM 桥的 `SCHEMA_NAME` 是同一
+/// 条规则，两侧不一致会出现「换个引擎就报错」的怪问题。
+///
+/// 执行后再读一次 `sys_context` 核对：Oracle 对**不存在**的 schema 不报错（它要等到
+/// 下一次名字解析才抛 ORA-00942），不核对的话界面会显示一个假名字。
+///
+/// 事务安全：`alter session` 是会话控制语句，不隐式提交当前事务（Oracle Concepts 的
+/// 隐式提交清单里没有它），所以在有未提交 update 的会话上切 schema 不会提交掉改动。
+fn effective_schema(
+    conn: &Connection,
+    name: &str,
+    login_user: &str,
+) -> Result<String, BridgeError> {
+    let name = name.trim();
+    let target = if name.is_empty() { login_user } else { name };
+    let upper = target.trim().to_ascii_uppercase();
+    if !crate::db_conns::valid_schema(&upper) {
+        return Err(BridgeError::new(
+            "sql",
+            format!(
+                "schema 名不合法：{upper}（只能字母开头，其余用字母、数字、下划线，最长 128 个字符）"
+            ),
+        ));
+    }
+    conn.execute(&format!("alter session set current_schema = {upper}"), &[])
+        .map_err(drv_err)?;
+    let now = current_schema_of(conn).unwrap_or_else(|| upper.clone());
+    if !now.eq_ignore_ascii_case(&upper) {
+        return Err(BridgeError::new(
+            "sql",
+            format!("切换默认 schema 没生效：期望 {upper}，当前仍是 {now}"),
+        ));
+    }
+    Ok(now)
 }
 
 /// 服务端版本。`v$version` 常没权限，退到 `product_component_version`。

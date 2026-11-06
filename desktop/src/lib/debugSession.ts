@@ -9,6 +9,8 @@
 // 路径口径：进出都是真实路径；影子工程只在 Rust 内部，前端永远不该看到。
 import { useEffect, useSyncExternalStore } from "react";
 import { setSession } from "./workspaceSession";
+import { getWorkbenchLayout } from "./workbenchLayout";
+import { prepareDebugSourceNavigation } from "./debugSourceNavigation";
 import { toggleBreakpointAt } from "./breakpoints";
 import {
   DEBUG_TARGETS,
@@ -577,6 +579,7 @@ function onEvent(e: DebugEvent): void {
     case "stopped": {
       const threadId = num(body.threadId);
       const seq = states[target].stopSeq + 1;
+      prepareDebugSourceNavigation(target, seq);
       const reason = typeof body.reason === "string" ? body.reason : null;
       const text =
         typeof body.text === "string"
@@ -597,13 +600,15 @@ function onEvent(e: DebugEvent): void {
       if (target !== active) selectDebugTarget(target);
       clearWatchResults();
       commit();
+      // Stopping clears the old stack and threads; request the new list even without a thread event.
+      void refreshThreads(target);
       if (threadId) {
         void loadStack(target, threadId, seq);
         // 异常停靠：stopped 事件只有一句话，类型和消息要再问适配器
         if (reason === "exception") void loadExceptionInfo(target, threadId, seq);
       }
-      // 断住的瞬间把用户带到「调试」页签：不然调用栈要自己去找
-      setSession({ panelOpen: true, panelTab: "debug" });
+      // The pause indicator still updates while a locked layout keeps the user's current tool.
+      if (!getWorkbenchLayout().locked) setSession({ panelOpen: true, panelTab: "debug" });
       break;
     }
     case "continued":

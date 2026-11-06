@@ -2,26 +2,23 @@ import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
 import type { EncodingMark } from "../../lib/workspace";
 import type { TabMeta } from "../../lib/workspaceSession";
 import { isUnsaved } from "../../lib/tabDirty";
-import { setCursor } from "../../lib/cursorStore";
 import type { FileTreeHandle } from "./FileTree";
 import type { useFileSession } from "../../hooks/useFileSession";
 import { FileTree } from "./FileTree";
 import { TreeHeader } from "./TreeHeader";
 import { TreeSvnProvider } from "./TreeSvnProvider";
-import { TabStrip } from "./TabStrip";
+import { EditorGroupTools } from "./EditorGroupTools";
+import { EditorGroupsPane } from "./EditorGroupsPane";
 import { EditorBanners } from "./EditorBanners";
 import { FileReadFeedback } from "./FileReadFeedback";
 import { EditorReadingLayout } from "./EditorReadingLayout";
-import { EditorPane } from "./EditorPane";
-import { EmptyEditor } from "./EmptyEditor";
 import { ShellStatusBar } from "./ShellStatusBar";
 import { NoWorkspace } from "./NoWorkspace";
 import { ExtractSqlDialog } from "../db/ExtractSqlDialog";
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { useFileSlot } from "./useFileSlot";
-import { LARGE_FILE_LINES } from "../../lib/largeFile";
-import { Icon } from "../ui/icon";
 import { OperationStatus } from "../ui/OperationStatus";
+import { Icon } from "../ui/icon";
 import { SearchTab } from "../tabs/SearchTab";
 import { setSidebarView, useSidebarView } from "../../lib/sidebarView";
 import { ServiceStatusButton } from "./ServiceStatusButton";
@@ -54,7 +51,7 @@ export interface FilePaneModel {
   conflictPath: string | null;
   encodingIssue: { path: string; message: string } | null;
   saving: boolean;
-  reveal: { line: number; column?: number; nonce: number } | null;
+  reveal: { line: number; column?: number; nonce: number; path?: string; group?: "left" | "right" } | null;
   /** 最近工作区（换目录时直接点）。 */
   recentRoots: string[];
   panelOpen: boolean;
@@ -78,6 +75,8 @@ export interface FilePaneActions {
   compileActive: () => void;
   /** 编译指定路径所属的模块：不依赖活动标签，供文件树右键使用。 */
   compileModulePath: (path: string) => void;
+  cleanModulePath: (path: string, module: string) => void;
+  rebuildModulePath: (path: string, module: string) => void;
   onDismissLargeHint: (path: string) => void;
   /** 切到某个标签（写会话的 activePath）。 */
   selectTab: (path: string) => void;
@@ -110,12 +109,12 @@ export function FilePaneSlots({
   } = model;
   const {
     setPanels, setPanelOpen, applyRoot, openPath, compileActive,
-    compileModulePath, onDismissLargeHint, selectTab, openRecentRoot, invalidateIndex,
+    compileModulePath, cleanModulePath, rebuildModulePath,
+    onDismissLargeHint, openRecentRoot, invalidateIndex,
   } = actions;
 
   const sideView = useSidebarView();
   const splitTab = splitPath ? tabs.find((t) => t.path === splitPath) ?? null : null;
-  const splitHeavy = splitTab !== null && splitTab.lines > LARGE_FILE_LINES;
   // NC 服务是底部面板的一个标签；它不依赖当前工具页，用户主动选了这个标签就留着面板
   const servicesPanel = panelTab === "svc";
   /**
@@ -161,18 +160,16 @@ export function FilePaneSlots({
             onRenamed={(a, b) => { invalidateIndex(); session.handleRenamed(a, b); }}
             onDeleted={(ps) => { invalidateIndex(); session.handleDeleted(ps); }}
             openPaths={tabs.map((t) => t.path)}
-            onCompileModule={compileModulePath} />
+            onCompileModule={compileModulePath}
+            onCleanModule={cleanModulePath}
+            onRebuildModule={rebuildModulePath} />
         </>
       )}
     </TreeSvnProvider>
   );
 
   const tabStrip = (
-    <TabStrip root={root} tabs={tabs} activePath={activePath} splitPath={splitTab?.path ?? null}
-      compiling={compiling} canCompile={active !== null && !active.virtual} onSelect={selectTab}
-      onClose={session.closeTab} onCloseMany={session.closeMany} onPin={session.pin}
-      onOpenSplit={(p) => void session.openSplit(p)} onCloseSplit={session.closeSplit}
-      onCompile={() => void compileActive()} />
+    <EditorGroupTools root={root} session={session} compiling={compiling} canCompile={active !== null && !active.virtual} onCompile={() => void compileActive()} />
   );
 
   const editor = (
@@ -200,33 +197,7 @@ export function FilePaneSlots({
             onRestored: p => void session.reloadFile(p),
           },
         } : null}>
-        <div className="wb-editor" data-split={splitTab ? "" : undefined}>
-          <div className="wb-editor-group">
-            <div className="wb-editor-body">
-              <EditorPane activePath={activePath} readOnly={active?.readOnly ?? false} reveal={reveal}
-                heavy={heavyFile} onCursor={setCursor}
-                onSave={(prepare) => activePath && void session.saveFile(activePath, false, undefined, prepare)} />
-            </div>
-          </div>
-          {splitTab && (
-            <section className="wb-editor-group wb-editor-split" aria-label="分屏编辑器">
-              <div className="wb-split-head">
-                <span className="wb-split-name" title={splitTab.path}>{splitTab.name}</span>
-                <button type="button" className="wb-icon-btn" title="关闭分屏" aria-label="关闭分屏"
-                  onClick={session.closeSplit}>
-                  <Icon name="close" size={12} />
-                </button>
-              </div>
-              <div className="wb-editor-body">
-                {/* 光标不回报：状态栏显示的是主编辑器的位置，分屏移动光标不该改它 */}
-                <EditorPane activePath={splitTab.path} readOnly={splitTab.readOnly} reveal={null}
-                  heavy={splitHeavy} onCursor={() => {}}
-                  onSave={(prepare) => void session.saveFile(splitTab.path, false, undefined, prepare)} />
-              </div>
-            </section>
-          )}
-          {!active && <EmptyEditor root={root} onOpen={(p) => void session.openFile(p)} />}
-        </div>
+        <EditorGroupsPane root={root} tabs={tabs} session={session} reveal={reveal} />
       </EditorReadingLayout>
       <ExtractSqlDialog />
     </>

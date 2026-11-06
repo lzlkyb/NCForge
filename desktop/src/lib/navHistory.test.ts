@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { navAt, recordNavJump, navBack, navForward, navSize, pushNav, resetNav } from "./navHistory";
+import { navAt, recordNavJump, navBack, navForward, navSize, pushNav, resetNav, swapGroupNavigation, mergeGroupNavigation } from "./navHistory";
+import { getSession, setSession, type TabMeta } from "./workspaceSession";
+import { emptyEditorGroups, selectGroupFile } from "./editorGroups";
 
-beforeEach(() => resetNav());
+beforeEach(() => { resetNav(); setSession({ tabs: [], editorGroups: emptyEditorGroups() }); });
 
 describe("导航历史", () => {
   it("同一位置连记两次只留一个（连点同一条引用不该出现两个「上一处」）", () => {
@@ -62,4 +64,20 @@ it("跳到任一历史位置时保留前进分支与列号", () => {
   expect(navForward()).toEqual(middle);
   expect(navAt(2)).toEqual(end);
   expect(navAt(2)).toBeNull();
+});
+
+it("左右组各自后退前进，交换及合并导航保留当前组位置", () => {
+  setSession({ tabs: ["A.java", "B.java"].map(path => ({ path }) as TabMeta), editorGroups: { ...emptyEditorGroups(), left: ["A.java"], leftActive: "A.java" } });
+  pushNav({ path: "A.java", line: 1 }); pushNav({ path: "A.java", line: 8 });
+  setSession({ editorGroups: old => selectGroupFile(old!, "right", "B.java") });
+  pushNav({ path: "B.java", line: 3 }); pushNav({ path: "B.java", line: 20 });
+  expect(navBack()).toEqual({ path: "B.java", line: 3 });
+  setSession({ editorGroups: old => ({ ...old!, focused: "left" }) });
+  expect(navBack()).toEqual({ path: "A.java", line: 1 });
+  swapGroupNavigation();
+  expect(navForward()).toEqual({ path: "B.java", line: 20 });
+  mergeGroupNavigation("left");
+  expect(navBack()).toEqual({ path: "B.java", line: 3 });
+  expect(navBack()).toEqual({ path: "A.java", line: 1 });
+  expect(getSession().editorGroups?.focused).toBe("left");
 });

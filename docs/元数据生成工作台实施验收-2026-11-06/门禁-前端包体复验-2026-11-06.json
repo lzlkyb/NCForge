@@ -1,0 +1,23 @@
+{
+  "label": "门禁-前端包体复验-2026-11-06",
+  "args": [
+    "scripts/check-bundle-size.mjs"
+  ],
+  "exitCode": 1,
+  "elapsedSeconds": 2.285,
+  "startFreeMB": 4440.92578125,
+  "minFreeMB": 4440.92578125,
+  "endFreeMB": 4532.7421875,
+  "samples": [
+    {
+      "at": "2026-11-06T08:25:37.813Z",
+      "freeMB": 4440.92578125,
+      "totalMB": 16151.3046875
+    },
+    {
+      "at": "2026-11-06T08:25:40.100Z",
+      "freeMB": 4532.7421875,
+      "totalMB": 16151.3046875
+    }
+  ]
+}

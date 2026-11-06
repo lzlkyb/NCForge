@@ -14,6 +14,8 @@ interface ModalProps {
   overlayClassName?: string;
   /** 点击遮罩是否关闭，默认 true */
   closeOnOverlay?: boolean;
+  /** 执行会话在工具页切后台时保留子组件，弹层隐藏且释放焦点；关闭后仍正常卸载。 */
+  keepMountedWhenInactive?: boolean;
   /** 进出场动画：scale（弹簧缩放，默认）| fade（纯淡入） */
   animation?: "scale" | "fade";
   /** 层级，默认 1000（原 UpdateNotesDialog/VersionHistoryModal 用 1000，Dialog 用 50） */
@@ -41,12 +43,14 @@ export function Modal({
   className = "",
   overlayClassName = "",
   closeOnOverlay = true,
+  keepMountedWhenInactive = false,
   animation = "scale",
   zIndex = 1000,
   ariaLabel,
 }: ModalProps) {
   const active = useViewActive();
   const visible = open && active;
+  const retained = open && !active && keepMountedWhenInactive;
   const { mounted, entered } = usePresence(visible);
   // 焦点陷阱（a11y）：Tab 环绕在弹窗内、关闭后焦点归还触发元素。
   // enabled 跟 mounted 走：内容延迟挂载/退场延迟卸载，陷阱只在内容真正存在时生效。
@@ -60,16 +64,17 @@ export function Modal({
    * 确认框，会因为在框里拖选文字、手松到外面就「莫名关掉」，用户还以为已经执行了。
    */
   const downOnOverlay = useRef(false);
-  useFocusTrap(surfaceRef, { enabled: mounted, onEscape: visible ? onClose : undefined });
+  useFocusTrap(surfaceRef, { enabled: mounted && !retained, onEscape: visible ? onClose : undefined });
 
-  if (!mounted) return null;
+  if (!mounted && !retained) return null;
 
   return createPortal(
     <div
       className={`ui-overlay fixed inset-0 flex items-center justify-center bg-black/45 ${overlayClassName}`}
       data-state={entered ? "open" : "closed"}
       data-exiting={!visible || undefined}
-      style={{ zIndex }}
+      style={{ zIndex, display: retained ? "none" : undefined }}
+      aria-hidden={retained || undefined}
       onMouseDown={(e) => {
         downOnOverlay.current = e.target === e.currentTarget;
       }}

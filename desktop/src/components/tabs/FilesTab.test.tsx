@@ -47,6 +47,9 @@ vi.mock("../../lib/editorStore", () => ({
   getModel: vi.fn(() => undefined),
   getText: vi.fn(() => ""),
   replaceContent: vi.fn(),
+  // ecj 标记接线会订阅打开/关闭；jsdom 里没有 model，空实现就够了
+  forEachModel: () => {},
+  onModelLifecycle: () => () => {},
 }));
 // 代码智能依赖 Monaco 与后端事件，jsdom 里起不来；这里只验证文件页没有因它挂掉
 vi.mock("../../lib/lang", () => ({
@@ -70,7 +73,13 @@ vi.mock("../../lib/lang", () => ({
 }));
 vi.mock("../../lib/compile", () => ({
   compileModule: vi.fn(),
+  compileAllModules: vi.fn(),
+  compileCancel: vi.fn(),
+  compileFileOrThrow: vi.fn(),
   onCompileLog: vi.fn(async () => () => {}),
+  onBuildProgress: vi.fn(async () => () => {}),
+  buildRebuildAll: vi.fn(),
+  buildRebuildModule: vi.fn(),
 }));
 
 const ROOT = "C:\\w\\newar";
@@ -113,6 +122,7 @@ const buttonByText = (text: string) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   mocks.invoke.mockImplementation(async (cmd: string) => {
     if (cmd === "get_workspace") return null;
     if (cmd === "fs_list_dir") return [];
@@ -128,9 +138,10 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
   // 侧栏视图与底部标签都是模块级仓库：不还原，后面的用例会互相污染
   setSidebarView("files");
-  setSession({ panelTab: "problems", panelOpen: true });
+  setSession({ panelTab: "problems", panelOpen: true, serviceExpanded: false });
 });
 
 describe("文件页", () => {
@@ -189,7 +200,11 @@ describe("文件页", () => {
     await render("files");
     await act(async () => setSession({ panelOpen: true, panelTab: "svc" }));
     expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
-    expect(container.querySelector(".wb-svc-host")?.textContent).toContain("NC 中间件");
+    expect(container.querySelector(".sc-run-heading strong")?.textContent).toBe("中间件");
+    await act(async () => buttonByText("展开阅读")!.click());
+    expect((container.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(true);
+    expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
+    await act(async () => buttonByText("恢复布局")!.click());
     expect((container.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(false);
   });
 
@@ -226,10 +241,14 @@ describe("文件页", () => {
     });
     await render();
 
-    // 标题栏三个动作
-    expect(container.querySelector('[aria-label="新建文件"]')).toBeTruthy();
-    expect(container.querySelector('[aria-label="新建文件夹"]')).toBeTruthy();
-    expect(container.querySelector('[aria-label="更换工作区目录"]')).toBeTruthy();
+    // 资源操作集中在 portal 菜单，打开后仍可访问三个既有动作。
+    const resourceMenu = container.querySelector<HTMLButtonElement>('[aria-label="更多资源操作"]')!;
+    await act(async () => resourceMenu.click());
+    const resourceActions = Array.from(document.querySelectorAll('[role="menuitem"]')).map(item => item.textContent);
+    expect(resourceActions).toContain("新建文件");
+    expect(resourceActions).toContain("新建文件夹");
+    expect(resourceActions).toContain("更换工作区目录");
+    await act(async () => resourceMenu.click());
     // 标签 + 只读徽标 + 编译按钮
     expect(container.querySelector(".wb-tab-name")?.textContent).toBe("A.java");
     expect(container.querySelector(".wb-status-warn")?.textContent).toBe("只读");
@@ -241,6 +260,6 @@ describe("文件页", () => {
     expect(container.querySelector(".wb-status-path")?.textContent).toBe(
       `${ROOT}\\modules\\ic\\A.java`,
     );
-    expect(container.textContent).toContain("第 1 行，第 1 列");
+    expect(container.querySelector('[aria-label="当前文件状态"]')?.textContent).toContain("1:1");
   });
 });

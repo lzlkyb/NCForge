@@ -41,6 +41,21 @@ pub struct ConfigPatch {
     /// 保存 `.java` 后自动编译该文件（只编这一个文件，不编整模块）。
     #[serde(default)]
     pub auto_compile: Option<bool>,
+    /// 自动链路里的空闲增量（签名变化时补齐引用方）。
+    #[serde(default)]
+    pub auto_compile_incremental: Option<bool>,
+    /// 外部 `.java` 改动也触发自动编译。
+    #[serde(default)]
+    pub auto_compile_external: Option<bool>,
+    /// 打开工作区后后台预热类索引。
+    #[serde(default)]
+    pub prewarm_index: Option<bool>,
+    /// 复用常驻 ecj JVM（关掉 = 每次编译单独起进程）。
+    #[serde(default)]
+    pub persistent_worker: Option<bool>,
+    /// 独立模块并行上限（1~4）。
+    #[serde(default)]
+    pub build_parallel: Option<u8>,
 }
 
 /// 落盘并返回改完的**完整配置**：调用方据此回填表单，不用再 get 一次。
@@ -50,7 +65,8 @@ pub async fn patch_config(
     state: tauri::State<'_, Arc<AppState>>,
     patch: ConfigPatch,
 ) -> Result<AppConfig, String> {
-    state
+    let stop_workers = patch.persistent_worker == Some(false);
+    let cfg = state
         .update_config(move |cfg| {
             if let Some(v) = patch.autostart_enabled {
                 cfg.autostart_enabled = v;
@@ -61,10 +77,30 @@ pub async fn patch_config(
             if let Some(v) = patch.auto_compile {
                 cfg.auto_compile = v;
             }
+            if let Some(v) = patch.auto_compile_incremental {
+                cfg.auto_compile_incremental = v;
+            }
+            if let Some(v) = patch.auto_compile_external {
+                cfg.auto_compile_external = v;
+            }
+            if let Some(v) = patch.prewarm_index {
+                cfg.prewarm_index = v;
+            }
+            if let Some(v) = patch.persistent_worker {
+                cfg.persistent_worker = v;
+            }
+            if let Some(v) = patch.build_parallel {
+                cfg.build_parallel = v.clamp(1, 4);
+            }
             Ok(())
         })
         .await
-        .map(AppConfig::redacted)
+        .map(AppConfig::redacted)?;
+    if stop_workers {
+        // 关开关时立刻释放空闲 JVM；正在编译的会在归还时按换代丢弃
+        crate::ecj_worker::shutdown_all();
+    }
+    Ok(cfg)
 }
 
 /// 导出配置：返回 JSON 文本（前端 `downloadText` 落盘，不经文件系统）。

@@ -38,6 +38,16 @@ export interface AppConfig {
   deploy_on_start: boolean;
   /** 保存 `.java` 后自动编译该文件（默认开）。只编这一个文件，不编整模块。 */
   auto_compile: boolean;
+  /** 单文件编译后空闲一段时间，再跑一次模块级增量（补上签名变更的引用方，默认开）。 */
+  auto_compile_incremental: boolean;
+  /** 工作区外的 `.java` 被其他程序改动时也自动编译（默认开）。 */
+  auto_compile_external: boolean;
+  /** 打开工作区时后台预热类索引（默认开）。 */
+  prewarm_index: boolean;
+  /** 复用常驻 ecj JVM（默认开）。关掉 = 每次编译单独起进程，慢但内存最低。 */
+  persistent_worker: boolean;
+  /** 独立模块并行构建的上限（1 = 串行，默认 2，后端夹在 1~4）。 */
+  build_parallel: number;
 }
 
 /** 代码智能设置的局部更新。`lang_xmx_mb: 0` = 恢复默认；越界（512~4096 之外）后端会明确报错。 */
@@ -63,28 +73,64 @@ export interface ConfigPatch {
   autostart_enabled?: boolean;
   deploy_on_start?: boolean;
   auto_compile?: boolean;
+  auto_compile_incremental?: boolean;
+  auto_compile_external?: boolean;
+  prewarm_index?: boolean;
+  persistent_worker?: boolean;
+  build_parallel?: number;
 }
 
 export const getConfig = () => invoke<AppConfig>("get_config");
 
 /**
- * 「保存后自动编译」开关的进程内缓存。
+ * 自动编译几个开关的进程内缓存。
  *
- * 保存是高频动作，每次 Ctrl+S 都发一次 `get_config` 不值得；而这个开关只在设置页
- * 变（那里写完会调 `rememberAutoCompile`），所以缓存一份就够。
+ * 保存是高频动作，每次 Ctrl+S 都发一次 `get_config` 不值得；这些开关只在设置页
+ * 变（那里写完会调 `remember*`），所以缓存一份就够。三个开关共用一次 `get_config`，
+ * 避免首轮保存连发三次 IPC。
  * 读不到配置时按默认（开）走——真正的兜底在 `compile_file` 那侧，多编一次不会坏事。
  */
-let autoCompile: boolean | null = null;
+interface BuildFlags {
+  autoCompile: boolean;
+  autoIncremental: boolean;
+  autoExternal: boolean;
+}
+
+const DEFAULT_FLAGS: BuildFlags = {
+  autoCompile: true,
+  autoIncremental: true,
+  autoExternal: true,
+};
+let flags: BuildFlags | null = null;
+let flagsPromise: Promise<BuildFlags> | null = null;
+
+function flagsFrom(c: AppConfig): BuildFlags {
+  return {
+    autoCompile: c.auto_compile ?? true,
+    autoIncremental: c.auto_compile_incremental ?? true,
+    autoExternal: c.auto_compile_external ?? true,
+  };
+}
+
+async function loadFlags(): Promise<BuildFlags> {
+  if (flags) return flags;
+  if (!flagsPromise) {
+    flagsPromise = getConfig()
+      .then((c) => (flags = flagsFrom(c)))
+      .catch(() => (flags = { ...DEFAULT_FLAGS }));
+  }
+  return flagsPromise;
+}
 
 export async function isAutoCompileEnabled(): Promise<boolean> {
-  if (autoCompile !== null) return autoCompile;
-  try {
-    autoCompile = (await getConfig()).auto_compile;
-  } catch {
-    autoCompile = true;
-  }
-  return autoCompile;
+  return (await loadFlags()).autoCompile;
 }
+
+/** 单文件编译后是否要再跑模块级增量。 */
+export const isAutoIncrementalEnabled = async () => (await loadFlags()).autoIncremental;
+
+/** 工作区外的 `.java` 改动是否也要触发自动编译。 */
+export const isAutoExternalEnabled = async () => (await loadFlags()).autoExternal;
 
 /** 同步读开关缓存；还没读过配置时按默认（开）处理，与 `isAutoCompileEnabled` 一致。
  *
@@ -92,12 +138,29 @@ export async function isAutoCompileEnabled(): Promise<boolean> {
  * 一次 IPC，而开关本来就有缓存。
  */
 export function autoCompileCached(): boolean {
-  return autoCompile ?? true;
+  return flags?.autoCompile ?? true;
+}
+
+/** 文件监听回调里不能 await：外部改动是否编译用同步缓存判断。 */
+export function autoExternalCached(): boolean {
+  return flags?.autoExternal ?? true;
+}
+
+function remember(patch: Partial<BuildFlags>) {
+  flags = { ...(flags ?? DEFAULT_FLAGS), ...patch };
 }
 
 /** 设置页改完开关时同步缓存（否则要重启才生效）。 */
 export function rememberAutoCompile(on: boolean) {
-  autoCompile = on;
+  remember({ autoCompile: on });
+}
+
+export function rememberAutoIncremental(on: boolean) {
+  remember({ autoIncremental: on });
+}
+
+export function rememberAutoExternal(on: boolean) {
+  remember({ autoExternal: on });
 }
 
 /**

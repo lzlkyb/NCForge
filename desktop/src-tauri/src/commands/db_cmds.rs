@@ -49,7 +49,7 @@ const SLOT_IDLE: Duration = Duration::from_secs(600);
 pub(crate) fn slot_key(id: &str, slot: Option<&str>) -> Result<String, String> {
     match slot.map(str::trim).filter(|s| !s.is_empty()) {
         None => Ok(id.to_string()),
-        Some(s) if s.chars().all(|c| c.is_ascii_digit()) && s.len() <= 2 => Ok(format!("{id}#{s}")),
+        Some(s) if s.chars().all(|c| c.is_ascii_digit()) && s.parse::<u64>().is_ok() => Ok(format!("{id}#{s}")),
         Some(s) => Err(code_label("sql", &format!("会话槽名不合法：{s}"))),
     }
 }
@@ -116,7 +116,7 @@ fn live_slots(state: &AppState, id: &str) -> Vec<String> {
         .map(|m| {
             m.keys()
                 .filter_map(|k| k.strip_prefix(&prefix).map(str::to_string))
-                .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) && s.len() <= 2)
+                .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) && s.parse::<u64>().is_ok())
                 .collect()
         })
         .unwrap_or_default();
@@ -184,7 +184,7 @@ async fn sweep_idle_slots(state: &AppState, id: &str) {
         let key = format!("{id}#{n}");
         async move {
             match existing_bridge(state, &key) {
-                Ok(h) => (key, Some(call(h, "ping", Vec::new(), SLOT_PING).await)),
+                Ok(h) => (key, Some(call(h, "idlePing", Vec::new(), SLOT_PING).await)),
                 Err(_) => (key, None),
             }
         }
@@ -200,9 +200,15 @@ async fn sweep_idle_slots(state: &AppState, id: &str) {
             touch_slot(&key);
             continue;
         }
-        drop_bridge(state, &key);
-        drop_bridge(state, &java_key(&key));
-        forget_slot(&key);
+        let Ok(mut touched) = slot_touch().lock() else {
+            continue;
+        };
+        // 探测期间若有人开始使用旧槽，取消这轮回收。
+        if touched.get(&key).is_some_and(|last| *last < now) {
+            drop_bridge(state, &key);
+            drop_bridge(state, &java_key(&key));
+            touched.remove(&key);
+        }
     }
 }
 
@@ -335,7 +341,12 @@ fn bridge_env(
     state: &AppState,
     cfg: &AppConfig,
 ) -> Result<db_bridge::BridgeEnv, String> {
-    let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
+    let home = crate::nc_home::resolve(cfg.nc_home.as_deref()).map_err(|_| {
+        need_nc_home(
+            "JVM 桥需要 NC 安装目录：它用 NC 自带的 Java 1.8 与 Oracle 驱动。\
+             请到设置 → 开发 →「NC 环境」页配置；没有 NC home 也可以把这条连接的引擎改成「纯 Rust 驱动」",
+        )
+    })?;
     let (jar, _) = db_bridge::find_jar(&resource_dirs(app))
         .ok_or_else(|| "找不到内置的 ncdb.jar，安装包可能不完整".to_string())?;
     let root = Path::new(&home.root);
@@ -527,23 +538,63 @@ pub(crate) async fn call(
     })
     .await
     .map_err(|e| format!("调用数据库桥失败：{e}"))?
-    .map_err(|e| {
-        if e.code == "timeout" || e.code == "spawn" {
-            code_label("bridge", &e.message)
-        } else {
-            map_sql_error(&e.message)
-        }
+    .map_err(engine_error)
+}
+
+fn engine_error(e: db_bridge::BridgeError) -> String {
+    match e.code.as_str() {
+        "timeout" | "spawn" => code_label("bridge", &e.message),
+        "session-lost" | "probe-failed" | "need-password" | "auth" => code_label(&e.code, &e.message),
+        _ => map_sql_error(&e.message),
+    }
+}
+
+pub(super) async fn call_with_reconnect(
+    state: &AppState,
+    id: &str,
+    engine: Arc<EngineHandle>,
+    cmd: &'static str,
+    args: Vec<String>,
+    timeout: Duration,
+    password: Option<String>,
+) -> Result<Value, String> {
+    let cfg = state.config.read().await.clone();
+    // 重连后要回到用户手动切过的 schema（新会话不会继承上一条会话的 alter session）
+    let conn = conn_with_runtime_schema(state, &find_conn(&cfg, id)?);
+    tauri::async_runtime::spawn_blocking(move || {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        engine.call_guarded(cmd, &refs, timeout, |auto_commit| {
+            connect_args(&cfg, &conn, password.as_deref(), auto_commit, engine.kind())
+                .map(Some)
+                .map_err(|e| {
+                    let (code, message) = e.split_once('|').unwrap_or(("sql", &e));
+                    db_bridge::BridgeError::new(code, message)
+                })
+        })
     })
+    .await
+    .map_err(|e| format!("调用数据库桥失败：{e}"))?
+    .map_err(engine_error)
 }
 
 pub(crate) fn code_label(code: &str, message: &str) -> String {
     format!("{code}|{message}")
 }
 
+/// 「需要 NC home」的结构化错误码。
+///
+/// 数据库工具里真需要 NC 安装目录的只有两类功能：JVM 桥（java、Oracle 驱动、
+/// prop.xml 解密 jar 全部来自 NC 安装包）与 prop.xml 口令解密。**纯 Rust 引擎
+/// 不碰 NC 任何文件**。发码而不是发裸文案：前端据此显示引导（换引擎 / 去设置
+/// 配置），不靠字符串匹配错误文本。
+pub(crate) fn need_nc_home(why: &str) -> String {
+    code_label("need-nc-home", why)
+}
+
 /// 桥的 SQL 错误翻译成前端好用的码：认证失败要弹输口令框，网络不通单独提示。
 pub(crate) fn map_sql_error(message: &str) -> String {
     let m = message.to_lowercase();
-    if m.contains("ora-01017") || m.contains("invalid username/password") || m.contains("登录被拒")
+    if m.contains("ora-01017") || m.starts_with("ora 1017：") || m.contains("invalid username/password") || m.contains("登录被拒")
     {
         return code_label("auth", message);
     }
@@ -592,9 +643,31 @@ pub(crate) fn protect(password: &str) -> Result<String, String> {
     )?))
 }
 
+/// 这次建会话该用的连接配置：**运行期手动切过的 schema 优先**于配置里的初始值。
+///
+/// 为什么需要：切 schema 是 `alter session`，只作用于那一条会话。新申请的会话槽 / JVM
+/// 兜底会话 / 断线重连 / 临时会话都是「新会话」，不套用这个覆盖就会悄悄回到配置值——
+/// 而左栏表树（primary）已经是新 schema 了，界面自相矛盾。
+///
+/// 表里**有键就是权威**（包括空串 = 用户明确切回登录账号）：不能用「空串当没设过」，
+/// 否则配置里写了 `AIER633` 时，用户切回登录账号后新开标签又跳回 `AIER633`。
+pub(crate) fn conn_with_runtime_schema(state: &AppState, conn: &DbConnConfig) -> DbConnConfig {
+    let mut c = conn.clone();
+    if let Ok(m) = state.db_schemas.lock() {
+        if let Some(s) = m.get(&conn.id) {
+            c.default_schema = s.clone();
+        }
+    }
+    c
+}
+
 /// 连接参数：prop 来源 + JVM 桥走 `connectProp`（口令在 JVM 里现解），
 /// 其余一律走 `connect`（Rust 引擎拿不到 NC 的 Java 类，口令必须先由
 /// [`prop_password_ready`] 解好存进 DPAPI）。
+///
+/// **最后一个参数永远是默认 schema**（空串 = 不切）：连上之后要立刻
+/// `alter session set current_schema`，所以它跟着连接参数走而不是事后单独发一条命令——
+/// 这样初始连接、申请会话槽、断线重连、JVM 兜底会话四条路都自动带上，没有一处会漏。
 pub(crate) fn connect_args(
     cfg: &AppConfig,
     conn: &DbConnConfig,
@@ -603,18 +676,24 @@ pub(crate) fn connect_args(
     engine: EngineKind,
 ) -> Result<(&'static str, Vec<String>), String> {
     let auto = auto_commit.to_string();
+    let schema = crate::db_conns::normalize_schema(&conn.default_schema);
     if conn.source == "prop" && engine == EngineKind::Java {
-        let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
+        let home = crate::nc_home::resolve(cfg.nc_home.as_deref()).map_err(|_| {
+            need_nc_home(
+                "prop.xml 数据源的口令由 NC 自带的 PropXMLReader 解密，需要 NC 安装目录。\
+                 请到设置 → 开发 →「NC 环境」页配置；或把这个连接改成手动来源、用纯 Rust 驱动直连",
+            )
+        })?;
         let ds = conn
             .prop_ds
             .clone()
             .ok_or_else(|| "这个连接缺数据源名".to_string())?;
-        return Ok(("connectProp", vec![home.root, ds, auto]));
+        return Ok(("connectProp", vec![home.root, ds, auto, schema]));
     }
     let pass = resolve_password(conn, password)?;
     Ok((
         "connect",
-        vec![conn.url.clone(), conn.user.clone(), pass, auto],
+        vec![conn.url.clone(), conn.user.clone(), pass, auto, schema],
     ))
 }
 
@@ -646,7 +725,12 @@ pub(crate) async fn prop_password_ready(
         .prop_ds
         .clone()
         .ok_or_else(|| "这个连接缺数据源名".to_string())?;
-    let home = crate::nc_home::resolve(cfg.nc_home.as_deref())?;
+    let home = crate::nc_home::resolve(cfg.nc_home.as_deref()).map_err(|_| {
+        need_nc_home(
+            "prop.xml 数据源的口令由 NC 自带的 PropXMLReader 解密，需要 NC 安装目录。\
+             请到设置 → 开发 →「NC 环境」页配置；或把这个连接改成手动来源、用纯 Rust 驱动直连",
+        )
+    })?;
     let b = bridge_for(app, st, cfg, probe, EngineKind::Java, probe)?;
     let v = call(b, "propCred", vec![home.root, ds], T_CONNECT).await?;
     let pwd = v.get("password").and_then(Value::as_str).unwrap_or("");
@@ -790,13 +874,19 @@ pub async fn db_slot_acquire(
             ),
         ));
     }
-    let n = (1..=MAX_SLOTS)
-        .find(|i| !used.contains(&i.to_string()))
-        .ok_or_else(|| code_label("slots-full", "没有空闲的会话槽"))?;
-    let slot = n.to_string();
+    // 已回收的标签仍可能带着旧编号，不能把它的下一条 SQL 发到别人的新会话。
+    static NEXT_SLOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let slot = NEXT_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed).to_string();
     let key = slot_key(&id, Some(&slot))?;
     let engine = EngineKind::parse(&conn.engine);
-    let (cmd, args) = connect_args(&cfg, &conn, None, conn.auto_commit, engine)?;
+    // 新槽必须继承用户手动切过的 schema（`alter session` 不会跨会话继承）
+    let (cmd, args) = connect_args(
+        &cfg,
+        &conn_with_runtime_schema(&st, &conn),
+        None,
+        conn.auto_commit,
+        engine,
+    )?;
     let handle = bridge_for(&app, &st, &cfg, &key, engine, &id)?;
     match call(handle, cmd, args, T_CONNECT).await {
         Ok(_) => {
@@ -932,6 +1022,10 @@ pub async fn db_disconnect(
         forget_slot(&key);
     }
     drop_bridge(&state, &java_key(&id));
+    // 断开就是把「临时切过的 schema」忘掉：下次连上按配置里的初始值来
+    if let Ok(mut m) = state.db_schemas.lock() {
+        m.remove(&id);
+    }
     let Ok(b) = existing_bridge(&state, &id) else {
         return Ok(());
     };
@@ -981,11 +1075,14 @@ pub async fn db_exec(
             .await;
         }
     }
-    match call(
+    match call_with_reconnect(
+        &state,
+        &id,
         b.clone(),
         "exec",
         vec![sql.clone(), rows.to_string(), timeout.to_string()],
         limit,
+        None,
     )
     .await
     {
@@ -1004,7 +1101,13 @@ pub async fn db_exec(
                 need: crate::db_engine::RefcursorNeed::OutBind,
             })
             .await
-            .map_err(|又| format!("{e}\n（自动改走 JVM 桥也没成：{又}）"))
+            .map_err(|fallback| {
+                if fallback.starts_with("fallback-session-lost|") || fallback.starts_with("probe-failed|") {
+                    fallback
+                } else {
+                    format!("{e}\n（自动改走 JVM 桥也没成：{fallback}）")
+                }
+            })
         }
         Err(e) => Err(e),
     }
@@ -1053,19 +1156,37 @@ async fn exec_via_java(f: JavaFallback<'_>) -> Result<Value, String> {
     // 用一个 ping 探活，顺带能拿到「这条会话有没有未提交写入」。
     if call(handle.clone(), "ping", Vec::new(), T_META)
         .await
-        .is_err()
+        .is_ok_and(|v| v.get("alive").and_then(Value::as_bool) == Some(false))
     {
-        let (cmd, args) = connect_args(&cfg, &conn, None, false, EngineKind::Java)?;
+        // 兜底会话也是新会话：跟着当前生效的 schema 走，否则这条 SQL 里的无前缀表名
+        // 会解析到登录账号的 schema，和同一条语句在槽里执行的结果对不上。
+        let (cmd, args) = connect_args(
+            &cfg,
+            &conn_with_runtime_schema(st, &conn),
+            None,
+            false,
+            EngineKind::Java,
+        )?;
         call(handle.clone(), cmd, args, T_CONNECT).await?;
     }
     let limit = Duration::from_secs(u64::from(timeout) + 30);
-    let mut v = call(
+    let mut v = call_with_reconnect(
+        st,
+        id,
         handle.clone(),
         "exec",
         vec![sql.to_string(), rows.to_string(), timeout.to_string()],
         limit,
+        None,
     )
-    .await?;
+    .await
+    .map_err(|e| {
+        if let Some(message) = e.strip_prefix("session-lost|") {
+            code_label("fallback-session-lost", message)
+        } else {
+            e
+        }
+    })?;
     let pending = call(handle.clone(), "ping", Vec::new(), T_META)
         .await
         .ok()
@@ -1118,8 +1239,18 @@ pub async fn db_tx(
     id: String,
     action: String,
     slot: Option<String>,
+    password: Option<String>,
+    fallback: Option<bool>,
 ) -> Result<Value, String> {
     let b = slot_bridge(&state, &id, slot.as_deref())?;
+    if action == "reconnect" {
+        let target = if fallback == Some(true) {
+            existing_bridge(&state, &java_key(&slot_key(&id, slot.as_deref())?))?
+        } else {
+            b
+        };
+        return call_with_reconnect(&state, &id, target, "reconnect", Vec::new(), T_CONNECT, password).await;
+    }
     let (cmd, args): (&'static str, Vec<String>) = match action.as_str() {
         "commit" => ("commit", vec![]),
         "rollback" => ("rollback", vec![]),
@@ -1129,6 +1260,71 @@ pub async fn db_tx(
         other => return Err(format!("未知事务操作：{other}")),
     };
     call(b, cmd, args, Duration::from_secs(60)).await
+}
+
+/// 切换**这条会话**的默认 schema（`alter session set current_schema = …`）。
+///
+/// 为什么不干脆让前端把 `alter session` 当普通 SQL 发下来：那条路会被只读策略拦
+/// （`readonly_query` 明确拒绝 alter session），还会算进事务条与执行历史。这条命令走
+/// 引擎的专用入口，不碰游标、不计事务。
+///
+/// 安全性：schema 名是标识符，**绑不进绑定变量**，只能拼串，所以先按 Oracle 标识符的
+/// 字符集校验（`db_conns::valid_schema`）。空串 = 回到登录账号自己的 schema。
+///
+/// 事务安全：`alter session` 是会话控制语句，不隐式提交当前事务（Oracle Concepts），
+/// 所以在有未提交 update 的会话上切 schema 不会把那些改动提交掉。
+#[tauri::command]
+pub async fn db_set_schema(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+    schema: String,
+    slot: Option<String>,
+) -> Result<Value, String> {
+    let name = crate::db_conns::normalize_schema(&schema);
+    if !name.is_empty() && !crate::db_conns::valid_schema(&name) {
+        return Err(code_label(
+            "sql",
+            &format!(
+                "「{name}」不是一个合法的 schema 名：只能字母开头，其余用字母、数字、下划线，最长 128 个字符"
+            ),
+        ));
+    }
+    let b = slot_bridge(&state, &id, slot.as_deref())?;
+    let out = call(b, "setSchema", vec![name.clone()], Duration::from_secs(30)).await?;
+    // schema 在界面上是**连接级**概念（左栏表树走 primary、SQL 走各自的槽），所以这条连接
+    // 上其它活着的会话一起切。只切一条会让「树里是 A、执行时解析到 B」这种错位重新出现。
+    //
+    // 其它会话切失败不让整次操作失败：那条会话可能正好断线，重新连上时会按下面记下的
+    // 值自动切回来。把原因带回去让调用方决定要不要提示。
+    let mut warnings: Vec<String> = Vec::new();
+    let target = slot_key(&id, slot.as_deref())?;
+    let mut keys: Vec<String> = vec![id.clone(), java_key(&id)];
+    for n in live_slots(&state, &id) {
+        let k = format!("{id}#{n}");
+        keys.push(java_key(&k));
+        keys.push(k);
+    }
+    for key in keys {
+        if key == target {
+            continue;
+        }
+        if let Ok(h) = existing_bridge(&state, &key) {
+            if let Err(e) = call(h, "setSchema", vec![name.clone()], Duration::from_secs(30)).await {
+                warnings.push(format!("{key}: {e}"));
+            }
+        }
+    }
+    // 记住这次选择：新槽 / 兜底会话 / 重连都按它建。空串也要记（= 明确切回登录账号）。
+    if let Ok(mut m) = state.db_schemas.lock() {
+        m.insert(id, name);
+    }
+    let mut v = out;
+    if !warnings.is_empty() {
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert("warnings".to_string(), serde_json::json!(warnings));
+        }
+    }
+    Ok(v)
 }
 
 /// 元数据：`tables` / `ncNames` / `columnsZh` / `columns` / `indexes` / `ddl` / `explain` /
@@ -1169,6 +1365,7 @@ pub async fn db_meta(
         "sessions" => "sessions",
         "objects" => "objects",
         "source" => "source",
+        "schemas" => "schemas",
         other => return Err(format!("未知元数据类型：{other}")),
     };
     if arg2.is_some() && arg.is_none() {
@@ -1176,7 +1373,7 @@ pub async fn db_meta(
     }
     let args: Vec<String> = arg.into_iter().chain(arg2).collect();
     // 这几个不需要参数。加新 kind 时别忘了把「无参」的也列进来，否则会被下面这段拦掉
-    if !matches!(cmd, "tables" | "ncNames" | "sessions" | "objects") && args.is_empty() {
+    if !matches!(cmd, "tables" | "ncNames" | "sessions" | "objects" | "schemas") && args.is_empty() {
         return Err(format!("{cmd} 需要参数"));
     }
     call(b, cmd, args, T_META).await
@@ -1648,6 +1845,16 @@ mod tests {
 </root>"#;
 
     #[test]
+    fn need_nc_home_发的是_code_竖线_文案() {
+        let e = need_nc_home("JVM 桥需要 NC 安装目录");
+        let (code, message) = e.split_once('|').expect("要是 code|message 形式");
+        assert_eq!(code, "need-nc-home");
+        assert_eq!(message, "JVM 桥需要 NC 安装目录");
+        // 文案必须原样到达前端：friendlyDbError 对未知码走 default 分支直接回 message
+        assert!(message.contains("NC 安装目录"));
+    }
+
+    #[test]
     fn 取_isbase_那个数据源() {
         let p = parse_prop(SAMPLE.as_bytes(), "t").expect("应能解析");
         assert_eq!(p.url, "jdbc:oracle:thin:@10.200.22.145:1521/aier");
@@ -1692,6 +1899,7 @@ mod tests {
             auto_commit: false,
             engine: String::new(),
             note: String::new(),
+            default_schema: String::new(),
         }
     }
 
@@ -1750,7 +1958,8 @@ mod tests {
         // 槽名会拼进桥的会话名：允许任意字符串等于把前端输入当标识符用
         assert!(slot_key("c1", Some("2#3")).is_err());
         assert!(slot_key("c1", Some("abc")).is_err());
-        assert!(slot_key("c1", Some("123")).is_err(), "两位以上不收");
+        assert_eq!(slot_key("c1", Some("123")).unwrap(), "c1#123");
+        assert!(slot_key("c1", Some("18446744073709551616")).is_err());
     }
 
     #[test]

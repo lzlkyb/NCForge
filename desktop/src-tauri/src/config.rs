@@ -109,6 +109,33 @@ pub struct AppConfig {
     /// 整模块一次几十秒，绑在保存上等于编辑器卡死。见 `docs/NCForge-自动编译-调研与方案-20261104.md`。
     #[serde(default = "default_true")]
     pub auto_compile: bool,
+    /// 保存/外部改动后的「空闲增量」：除编当前文件外，再按 ABI 与反向依赖补齐引用方。
+    ///
+    /// 单文件编译发现不了签名变更（见 `compile_file` 注释）。默认开：改 public 方法
+    /// 参数后不补引用方，运行期才会炸；关掉只影响自动链路，手动「编译本模块」不受影响。
+    #[serde(default = "default_true")]
+    pub auto_compile_incremental: bool,
+    /// 外部 `.java` 改动（SVN 更新、其它编辑器保存）也触发一次自动编译。
+    ///
+    /// 与「保存当前文件」分开：外部改动往往是一批文件，走模块增量而不是单文件。
+    #[serde(default = "default_true")]
+    pub auto_compile_external: bool,
+    /// 打开工作区后在后台预热类索引（首次冷扫 10~100 秒，预热后第一次保存就能编上）。
+    #[serde(default = "default_true")]
+    pub prewarm_index: bool,
+    /// 复用常驻 ecj JVM（默认开）。
+    ///
+    /// 一次一进程每次要付 0.6~0.9 秒的 JVM 启动；常驻后同一条命令 30~50 毫秒。
+    /// 关掉的场景：内存紧张、或怀疑常驻进程状态异常要对照排查——关掉后行为与加常驻之前
+    /// 完全一致（见 `ecj_worker` 的回退语义）。
+    #[serde(default = "default_true")]
+    pub persistent_worker: bool,
+    /// 独立模块编译的并行上限。1 = 串行，默认 2。
+    ///
+    /// 不按 CPU 核数放开：开发机有过重负载蓝屏记录（见项目记忆），
+    /// 两个模块同时跑 ecj 已能明显缩短 `compile_all`，更多收益递减。
+    #[serde(default = "default_parallel")]
+    pub build_parallel: u8,
     /// 工程关联的覆盖表（见 `eclipse_cp::LinkedOverride`）。
     ///
     /// 为什么要有它：依赖顺序的真源是 `.classpath`（那是 Eclipse 写的），但真实工作里
@@ -139,6 +166,10 @@ pub struct LinkedOverrideConfig {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_parallel() -> u8 {
+    2
 }
 
 /// 一条数据库连接。
@@ -177,6 +208,15 @@ pub struct DbConnConfig {
     /// 来源说明（界面显示「导入 xxx.properties」之类）。
     #[serde(default)]
     pub note: String,
+    /// 默认 schema：连上后立刻 `alter session set current_schema`，写 SQL 不用带 `aier633.` 前缀。
+    ///
+    /// **空串 = 不切**（用登录账号自己的 schema）。存字符串而不是 `Option<String>`：
+    /// 老配置里没有这个字段，反序列化出空串正好就是「不切」，不用写迁移。
+    ///
+    /// 注意它只影响**不带前缀的名字解析**，不改变权限：查询别人 schema 的表仍然需要
+    /// 那个账号给了 SELECT。`alter session` 是会话控制语句，不会隐式提交当前事务。
+    #[serde(default)]
+    pub default_schema: String,
 }
 
 impl AppConfig {
@@ -228,6 +268,11 @@ impl Default for AppConfig {
             lang_xmx_mb: None,
             deploy_on_start: true,
             auto_compile: true,
+            auto_compile_incremental: true,
+            auto_compile_external: true,
+            prewarm_index: true,
+            persistent_worker: true,
+            build_parallel: 2,
             linked_overrides: Vec::new(),
         }
     }
@@ -310,5 +355,16 @@ mod tests {
         // 其余字段原样（redacted 只碰两个口令字段）
         assert_eq!(r.svn_user, cfg.svn_user);
         assert_eq!(r.workspace_root, cfg.workspace_root);
+    }
+
+    /// 常驻 ecj worker 默认开；老配置文件里没有这个键时也必须是开——
+    /// 否则升级后用户会在不知情的情况下退回每次起 JVM。
+    #[test]
+    fn persistent_worker_defaults_on() {
+        assert!(AppConfig::default().persistent_worker);
+        let mut v = serde_json::to_value(AppConfig::default()).unwrap();
+        v.as_object_mut().unwrap().remove("persistent_worker");
+        let cfg: AppConfig = serde_json::from_value(v).unwrap();
+        assert!(cfg.persistent_worker);
     }
 }

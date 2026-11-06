@@ -8,6 +8,7 @@
 // 1. 命令面板里的中文条目 —— 用户记不住快捷键时唯一的出路是「敲中文找」；
 // 2. `Alt+Enter` —— 从 IDEA 迁过来的人就是这个键，Monaco 内置是 Ctrl+. 。
 import { monaco } from "./monacoSetup";
+import { bindEditorCommand } from "./editorCommandBinding";
 import { pathOfModel } from "./editorStore";
 
 /**
@@ -277,21 +278,20 @@ export function setGenerateRequest(fn: (() => void) | null): void {
  * 给编辑器补 `Alt+Enter` 与 `F2`。
  *
  * 只补这一个键：Monaco 内置 `Ctrl+.` 也能触发快速修复，两条路都能到，不占用户记忆。
- * `addCommand` 返回的是 command id 而不是 disposable，所以没有返回值——
- * 编辑器实例销毁时这条绑定跟着没了，不留悬挂。
+ * 每个快捷键作用于拥有焦点的编辑器，销毁时释放绑定。
  */
 export function registerEditorKeys(ed: monaco.editor.IStandaloneCodeEditor): void {
-  ed.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.Enter, () => {
+  bindEditorCommand(ed, monaco.KeyMod.Alt | monaco.KeyCode.Enter, () => {
     // 有代码智能时走 jdt.ls 的 quick fix；没有 provider 时 Monaco 自己什么都不做，不会报错
     ed.trigger("ncforge-editor-key", "editor.action.quickFix", null);
-  });
+  }, "快速修复");
   // F2 = 重命名，IDEA 的老习惯。Monaco 自己那个 rename 只改打开的 model，
   // 跨文件会改一半，所以这里接自己的流程（见 lib/renameSymbol.ts）
-  ed.addCommand(monaco.KeyCode.F2, () => renameRequest?.());
+  bindEditorCommand(ed, monaco.KeyCode.F2, () => renameRequest?.(), "重命名");
   // Alt+Insert = 生成代码（构造器 / getter / setter / toString…），IDEA 同键
-  ed.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.Insert, () => generateRequest?.());
+  bindEditorCommand(ed, monaco.KeyMod.Alt | monaco.KeyCode.Insert, () => generateRequest?.(), "生成代码");
   // 多光标：IDEA 用 Alt+J 逐个选中下一个相同词，Monaco 的内置动作就是这个
-  ed.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.KeyJ, () => {
+  bindEditorCommand(ed, monaco.KeyMod.Alt | monaco.KeyCode.KeyJ, () => {
     ed.trigger("ncforge-generate", "editor.action.addSelectionToNextFindMatch", null);
-  });
+  }, "选择下一个相同词");
 }

@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { patchDefaults, type PatchDefaults } from "../../lib/patch";
 import { svnStatus, type StatusResult } from "../../lib/svn";
 import type { CompileResult } from "../../lib/compile";
+import { requestSettingsSection } from "../../lib/settingsJump";
 import { setSession, useWorkspaceRoot, useWorkspaceSelector } from "../../lib/workspaceSession";
 import { useDbSelector } from "../../lib/dbStore";
 import { Menu } from "../ui/Menu";
@@ -13,7 +14,7 @@ type Tone = "ok" | "warn" | "bad" | "busy" | "idle";
  * 补丁页的环境健康条：编译器 / NC Home / SVN / 数据库。
  *
  * 出包失败时用户最常问的是「到底哪一环没准备好」。这四项散在四个页面里
- * （编译在底部面板、NC Home 在服务配置、SVN 在版本控制、数据库在连接页），
+ * （编译在底部面板、NC Home 在设置的「NC 环境」页、SVN 在版本控制、数据库在连接页），
  * 出包本来就要等几十秒，来回翻页只会让人放弃核对。这里只**读**现有缓存与模块级
  * 状态，不额外发起 SVN 扫描——扫描本身就是这里最贵的一步，补丁页已经在扫了。
  */
@@ -39,6 +40,12 @@ export function PatchHealth() {
 
   const go = (tab: string) =>
     window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: tab }));
+
+  /** NC home 的统一配置入口：设置 → 开发 →「NC 环境」（2026-11-06 起全应用唯一）。 */
+  const goNcEnv = () => {
+    requestSettingsSection("NC 环境");
+    go("settings");
+  };
 
   const db: Chip =
     dbOn > 0
@@ -82,7 +89,7 @@ export function PatchHealth() {
             <ChipView chip={home} onClick={() => {
               close();
               if (defaults.isError) void defaults.refetch();
-              go("services");
+              goNcEnv();
             }} />
             <ChipView chip={svn} onClick={() => {
               close();
@@ -150,7 +157,7 @@ function homeChip(d: PatchDefaults | undefined, failed: boolean): Chip {
     return {
       tone: "bad",
       text: "NC Home · 读不到",
-      title: "读取补丁默认值失败：点一下重试，并到服务页核对 NC Home",
+      title: "读取补丁默认值失败：点一下重试，并到设置 → 开发 →「NC 环境」核对 NC Home",
     };
   }
   if (!d) return { tone: "idle", text: "NC Home · 读取中", title: "正在读取补丁默认值" };
@@ -158,20 +165,20 @@ function homeChip(d: PatchDefaults | undefined, failed: boolean): Chip {
     return {
       tone: "bad",
       text: "NC Home · 未配置",
-      title: "没定位到 NC Home：hotwebs / 客户端类改动无法落位 · 点一下去服务页配置",
+      title: "没定位到 NC Home：hotwebs / 客户端类改动无法落位 · 点一下去设置的「NC 环境」页配置",
     };
   }
   if (d.ncHomeModules === 0) {
     return {
       tone: "warn",
       text: "NC Home · 0 模块",
-      title: `${d.ncHome} 下一个模块都没数到，路径可能不对 · 点一下去服务页核对`,
+      title: `${d.ncHome} 下一个模块都没数到，路径可能不对 · 点一下去设置的「NC 环境」页核对`,
     };
   }
   return {
     tone: "ok",
     text: `NC Home · ${d.ncHomeModules} 模块`,
-    title: `${d.ncHome} · 点一下去服务页查看`,
+    title: `${d.ncHome} · 点一下去设置的「NC 环境」页查看`,
   };
 }
 

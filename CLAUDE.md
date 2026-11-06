@@ -214,6 +214,22 @@ cd desktop && npm run release -- --patch      # 或 --minor / --major / version 
 
 **CHANGELOG 结构（CI 与脚本都依赖）**：版本段顶部先写 `### 更新摘要`（一句话人话，会渲成更新弹框顶部高亮卡片；禁止代码符号/根因），再按 `### 新增` / `### 修复` / `### 变更` / `### 优化` / `### 安全` 写 1~3 条用户能看懂的点；`### 技术细节` / `### 实现说明` / `### 开发者` 小节不进弹框（`build.yml` 正则会剔除）。
 
+### Gitee 镜像（发版成功后做，只能本地执行）
+
+GitHub Release 出包后，把同一批产物镜像到 Gitee（客户端更新端点的兜底源）：
+
+```bash
+cd desktop
+HTTPS_PROXY=http://127.0.0.1:7897 NO_PROXY=gitee.com,localhost,127.0.0.1 \
+  GITEE_TOKEN=<token> npm run mirror:gitee -- vX.Y.Z
+```
+
+1. 🔴 **必须带 `HTTPS_PROXY`**：脚本用 `gh release download` 拉资产，直连 GitHub 只有 ~25KB/s（85MB 要跑一小时，现场表现为「卡在 2/6 下载」）；走代理 2.4MB/s。Gitee 侧上传反而是直连更快（3.5~7MB/s），所以用 `NO_PROXY=gitee.com` 把它排除在代理外。
+2. 🔴 **中断后重跑前先删 `<TEMP>/ncforge-gitee-mirror-<tag>/assets`**：脚本按 `existsSync` 判断「已下载」，被 kill 留下的半截文件会被当成完整文件上传，镜像出去就是坏包——而脚本自检只看 raw 版本号和附件是否 200，不重新比对源文件，所以不会报错。
+3. 🔴 **不要在 CI 里做**：境外 runner 到 Gitee 只有 ~50KB/s，实测 13 分钟被断连（`send-pack: unexpected disconnect`）。raw 的 `releases` 分支只放几 KB 清单；大文件走发行版附件——Gitee raw 对 >50MB 返回 403 `large file require login for access`（jdtls.zip 56MB 正好踩线）。
+4. **令牌只从环境变量传**，不写进任何入库文件、不落 `.env`。
+5. **验收（脚本自检之外再抽查一次）**：`raw/releases/latest/updater-gitee.json` 跟随重定向后 200、`version` 与 tag 一致、`url` 指向 `gitee.com/<repo>/releases/download/<tag>/...`；各附件 `Content-Length` 与本地 `assets/` 内文件大小逐个相等。
+
 > CI 说明：main push 跑 `frontend`（体量/eslint/tsc/vitest/vite build）、Windows `test`、macOS `check`；**tag 时 `test` job 被 `if` 跳过**，改由 `build-macos` → `build-windows` 串联，Windows 内先 `cargo test --release` 再打包。tag 前确认测试可过。
 
 > ⚠️ **pre-push 钩子会自己跑全部门禁，push 前不要手动起独立 `cargo test`**。当前 **7 项**，顺序按"失败越快越靠前"排：组件体量 → `cargo fmt --check` → `eslint` → `tsc --noEmit` → `vitest` → `cargo clippy` → `cargo test`。**清单以 `.githooks/pre-push` 的实际输出为准，本节不维护它。**

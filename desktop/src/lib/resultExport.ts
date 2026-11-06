@@ -1,9 +1,11 @@
 import type { Cell, ColumnMeta } from "./dbApi";
+import { defaultTransferOptions, serializeTransfer } from "./resultTransfer";
+import { transferSqlLiteral } from "./resultTransferSql";
 
 /**
  * 结果表的「复制为…」与导出。
  *
- * NULL 的处理每种格式各有讲究：TSV / CSV 写空（粘进 Excel 才不会变成字符串 `NULL`），
+ * 旧入口复用统一序列化引擎，TSV / CSV 默认 NULL 写空，
  * INSERT 写 `null` 关键字，IN 列表直接跳过（`in (null)` 永远不命中，放进去只会误导）。
  */
 
@@ -11,8 +13,6 @@ import type { Cell, ColumnMeta } from "./dbApi";
 export function isNumericType(type: string): boolean {
   return /^(NUMBER|FLOAT|INTEGER|INT|DECIMAL|NUMERIC|BINARY_DOUBLE|BINARY_FLOAT)/i.test(type);
 }
-
-const plain = (v: Cell) => (v === null || v === undefined ? "" : String(v));
 
 /**
  * Excel / Sheets 会把以 `=` `@` 开头的格当公式执行（CSV 注入，CWE-1236）。
@@ -30,33 +30,22 @@ function formulaRisk(s: string): boolean {
 export const spreadsheetCell = (s: string) => (formulaRisk(s) ? `'${s}` : s);
 
 export function toTsv(columns: ColumnMeta[], rows: Cell[][], header = true): string {
-  const body = rows.map((r) => r.map((v) => spreadsheetCell(plain(v)).replace(/[\t\r\n]+/g, " ")).join("\t"));
-  return (header ? [columns.map((c) => c.name).join("\t"), ...body] : body).join("\n");
-}
-
-function csvField(s: string): string {
-  const g = spreadsheetCell(s);
-  return g !== s || /[",\r\n]/.test(s) ? `"${g.replace(/"/g, '""')}"` : s;
+  if (!columns.length) return "";
+  return serializeTransfer({ columns, rows }, { ...defaultTransferOptions("tsv"), header: header ? "name" : "none" });
 }
 
 export function toCsv(columns: ColumnMeta[], rows: Cell[][]): string {
-  const lines = [columns.map((c) => csvField(c.name)), ...rows.map((r) => r.map((v) => csvField(plain(v))))];
-  return lines.map((l) => l.join(",")).join("\r\n");
+  if (!columns.length) return "";
+  // downloadText owns the BOM in this legacy file path.
+  return serializeTransfer({ columns, rows }, { ...defaultTransferOptions("csv"), bom: false });
 }
 
 /** SQL 字面量：数字列不加引号，其余加单引号并转义。 */
 export function sqlLiteral(v: Cell, type: string): string {
-  if (v === null || v === undefined) return "null";
-  // 桥里日期统一格式化成 yyyy-MM-dd HH:mm:ss，写回 DATE 列要转回来。
-  // 纯日期（用户双击改成 `2026-11-01`）必须用短格式：套 hh24:mi:ss 会 ORA-01840
-  // （输入值对格式来说太短），而下面这条正则本来就允许不带时分秒的值。
-  if (/^(DATE|TIMESTAMP)/i.test(type) && /^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$/.test(String(v))) {
-    const s = String(v);
-    const fmt = /^\d{4}-\d{2}-\d{2}$/.test(s) ? "yyyy-mm-dd" : "yyyy-mm-dd hh24:mi:ss";
-    return `to_date('${s}', '${fmt}')`;
-  }
-  if (typeof v === "number" || (isNumericType(type) && /^-?\d+(\.\d+)?$/.test(String(v)))) return String(v);
-  return `'${String(v).replace(/'/g, "''")}'`;
+  // Keep the legacy boolean and lowercase SQL-token contract used by tableEdit.
+  if (typeof v === "boolean") return `'${String(v)}'`;
+  const literal = transferSqlLiteral(v, type);
+  return literal === "NULL" ? "null" : literal.replace(/^TO_(?:TIMESTAMP_TZ|TIMESTAMP|DATE)/, name => name.toLowerCase());
 }
 
 export function toInsert(table: string, columns: ColumnMeta[], rows: Cell[][]): string {
@@ -87,11 +76,8 @@ export function toInList(columns: ColumnMeta[], rows: Cell[][], col: number): st
 }
 
 export function toMarkdown(columns: ColumnMeta[], rows: Cell[][]): string {
-  const esc = (s: string) => s.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
-  const head = `| ${columns.map((c) => esc(c.name)).join(" | ")} |`;
-  const sep = `| ${columns.map((c) => (isNumericType(c.type) ? "---:" : "---")).join(" | ")} |`;
-  const body = rows.map((r) => `| ${r.map((v) => (v === null ? "NULL" : esc(String(v)))).join(" | ")} |`);
-  return [head, sep, ...body].join("\n");
+  if (!columns.length) return "";
+  return serializeTransfer({ columns, rows }, { ...defaultTransferOptions("markdown"), nullText: "NULL" });
 }
 
 /** 从 SQL 里猜单表查询的表名（生成 INSERT 用）；猜不出给 `表名`。 */

@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   createArgs: [] as Record<string, unknown>[],
   editor: {
     addCommand: vi.fn(),
+    addAction: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidDispose: vi.fn(),
     onKeyDown: vi.fn(() => ({ dispose: vi.fn() })),
     onDidChangeCursorPosition: vi.fn(),
     // 自动保存（内容变化）与 Error Lens（装饰集合 + 切 model）也要有人应答，
@@ -76,6 +78,7 @@ vi.mock("../../lib/editorStore", () => ({
   // 预览模型的保活入口（EditorPane 切 model 时调）；当前用例 getModel 恒为 undefined，
   // 这个分支不会真的走到，但 mock 必须给全，否则哪天渲染带上 activePath 就直接炸
   touchModel: vi.fn(),
+  pathOfModel: () => undefined,
 }));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -102,6 +105,7 @@ const renderPane = async (heavy: boolean) => {
 const lastOptions = () => mocks.editor.updateOptions.mock.lastCall?.[0] as Record<string, unknown>;
 
 beforeEach(() => {
+  mocks.editor.getModel.mockReturnValue(null);
   setEditorPrefs({ ...DEFAULT_PREFS, minimap: true });
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -113,6 +117,21 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.useRealTimers(); vi.restoreAllMocks();
+});
+
+it("共享模型的非焦点视图不重复自动保存；切模型后旧计时器不保存新文件", async () => {
+  vi.useFakeTimers(); setEditorPrefs({ autoSave: true, autoSaveDelayMs: 500 });
+  const save = vi.fn();
+  await act(async () => root.render(<EditorPane activePath={null} focused={false} readOnly={false} heavy={false} onCursor={() => {}} onSave={save} />));
+  mocks.editor.getModel.mockReturnValue({} as never);
+  const changed = (mocks.editor.onDidChangeModelContent.mock.lastCall as unknown as [() => void])[0];
+  const timer = vi.spyOn(window, "setTimeout"); timer.mockClear();
+  act(() => changed()); expect(timer).not.toHaveBeenCalled();
+  await act(async () => root.render(<EditorPane activePath={null} focused readOnly={false} heavy={false} onCursor={() => {}} onSave={save} />));
+  act(() => changed()); expect(timer).toHaveBeenCalled();
+  mocks.editor.getModel.mockReturnValue({} as never);
+  await act(async () => vi.advanceTimersByTime(500)); expect(save).not.toHaveBeenCalled();
 });
 
 describe("行号槽", () => {

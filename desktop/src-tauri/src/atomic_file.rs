@@ -72,6 +72,14 @@ impl AtomicTarget {
             .map(|_| ())
             .map_err(|e| format!("替换原文件失败（文件可能只读或被占用）: {}", e.error))
     }
+
+    /// 创建产物时保留检查后新出现的文件；各平台由 tempfile 的 no-clobber 契约保证。
+    pub fn commit_new(self) -> Result<(), String> {
+        self.tmp
+            .persist_noclobber(&self.dest)
+            .map(|_| ())
+            .map_err(|e| format!("创建文件失败（目标可能已出现）: {}", e.error))
+    }
 }
 
 #[cfg(test)]

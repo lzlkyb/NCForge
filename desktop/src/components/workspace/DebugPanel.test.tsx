@@ -4,6 +4,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DebugPanel } from "./DebugPanel";
 import { setSession } from "../../lib/workspaceSession";
+import type { DapStackFrame } from "../../lib/debug";
+import { prepareDebugSourceNavigation } from "../../lib/debugSourceNavigation";
+const mocks = vi.hoisted(() => ({ paused: false, stopSeq: 0, frames: [] as DapStackFrame[], frameId: null as number | null }));
 
 vi.mock("../../lib/debugSession", () => ({
   useDebugSnapshot: () => ({
@@ -19,15 +22,15 @@ vi.mock("../../lib/debugSession", () => ({
       message: "",
       exceptionFilters: [{ filter: "caught", label: "Caught Exceptions", default: false }],
     },
-    paused: false,
+    paused: mocks.paused,
     threadId: null,
     threads: [],
-    frames: [],
-    frameId: null,
+    frames: mocks.frames,
+    frameId: mocks.frameId,
     scopes: [],
     variables: {},
     watches: [],
-    stopSeq: 0,
+    stopSeq: mocks.stopSeq,
     busy: null,
     error: null,
     targets: {
@@ -70,6 +73,7 @@ let root: Root;
 let container: HTMLDivElement;
 
 beforeEach(() => {
+  mocks.paused = false; mocks.stopSeq = 0; mocks.frames = []; mocks.frameId = null;
   localStorage.clear();
   localStorage.setItem(
     KEY,
@@ -78,7 +82,8 @@ beforeEach(() => {
       { path: "C:/p2-ws/b.java", line: 8 },
     ]),
   );
-  setSession({ root: "C:/p2-ws" });
+  const tabs = ["a", "b"].map(name => ({ path: `C:/p2-ws/${name}.java`, name: `${name}.java`, encoding: "UTF-8" as const, hasBom: false, eol: "LF" as const, mtimeMs: 1, dirty: false, eolChanged: false, readOnly: false, readOnlyReason: null, lines: 2 }));
+  setSession({ root: "C:/p2-ws", tabs, activePath: "C:/p2-ws/a.java" });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -89,6 +94,23 @@ afterEach(async () => {
 });
 
 describe("调试面板的断点清单", () => {
+  it("异步栈帧只定位一次，切工具页签重新挂载不重放旧暂停", async () => {
+    const open = vi.fn(); prepareDebugSourceNavigation("server", 11);
+    mocks.paused = true; mocks.stopSeq = 11;
+    await act(async () => root.render(<DebugPanel onOpenAt={open} />)); expect(open).not.toHaveBeenCalled();
+    mocks.frameId = 2; mocks.frames = [{ id: 2, name: "method", line: 8, column: 1, source: { path: "C:/p2-ws/b.java" } }];
+    await act(async () => root.render(<DebugPanel onOpenAt={open} />)); expect(open).toHaveBeenCalledWith("C:/p2-ws/b.java", 8);
+    await act(async () => root.render(null));
+    await act(async () => root.render(<DebugPanel onOpenAt={open} />)); expect(open).toHaveBeenCalledTimes(1);
+  });
+  it("暂停后主动切换源码时，晚到栈帧不抢回旧文件", async () => {
+    const open = vi.fn(); prepareDebugSourceNavigation("server", 12);
+    mocks.paused = true; mocks.stopSeq = 12;
+    await act(async () => root.render(<DebugPanel onOpenAt={open} />));
+    setSession({ activePath: "C:/p2-ws/b.java" });
+    mocks.frameId = 2; mocks.frames = [{ id: 2, name: "method", line: 3, column: 1, source: { path: "C:/p2-ws/a.java" } }];
+    await act(async () => root.render(<DebugPanel onOpenAt={open} />)); expect(open).not.toHaveBeenCalled();
+  });
   it("显示当前断点数，点一下清空并落盘", async () => {
     await act(async () => root.render(<DebugPanel onOpenAt={vi.fn()} />));
     const header = document.querySelector(".dbg-bp-col .dbg-col-h");

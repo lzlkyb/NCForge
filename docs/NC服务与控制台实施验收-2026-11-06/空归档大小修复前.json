@@ -1,0 +1,155 @@
+{
+  "text": "NCForge\n验收工程\n转到文件、类型、命令…\nCtrl+Shift+R\n代码\n版本\n数据库\n元数据\n设置\n4\n资源管理器\n文件\n包\n（空目录）\nSVN · 非当前工作副本\n刷新\n验收工程\n\nD:/验收工程\n\n快捷键\n转到文件\nCtrl+Shift+R / Ctrl+P\n转到类型\nCtrl+Shift+T\n命令面板\nCtrl+Shift+P\n全工程搜索\nCtrl+K\n切换侧栏 / 底部面板\nCtrl+B / Ctrl+J\n转到文件…\n问题\n编译输出\nNC 服务\n调用层级\n类型层级\n待办\n书签\n调试\n开始开发\n展开阅读\n服务\n中间件\n已停止\n127.0.0.1:80\n客户端\n已停止\n连接 10.0.0.8:9080\n运行详情\n元数据投送\n启动设置\n中间件\n已停止\n下次启动使用当前工程配置\n启动\n全部0\n警告0\n错误0\n过滤\n查找\n已暂停\n换行\n没有上次运行日志\n\n首次启动前没有归档；启动新的运行后可在这里回看上一次输出。\n\n重新读取日志\n已加载 0 行\n文件 195.3 KB\n本次运行\n上次运行\n上次运行 · 不跟随\n日志位置：D:/config/logs/middleware.log\nD:/验收工程\n轻量模式 · 恢复代码智能\n工程关联\nNC 服务 · 已停止\n隐藏面板\n已复制完整启动命令",
+  "calls": [
+    {
+      "cmd": "plugin:window|is_maximized",
+      "args": {
+        "label": "main"
+      }
+    },
+    {
+      "cmd": "db_cached_tables",
+      "args": {}
+    },
+    {
+      "cmd": "get_app_info",
+      "args": {}
+    },
+    {
+      "cmd": "check_update",
+      "args": {}
+    },
+    {
+      "cmd": "resources_status",
+      "args": {}
+    },
+    {
+      "cmd": "debug_status",
+      "args": {
+        "target": "server"
+      }
+    },
+    {
+      "cmd": "debug_status",
+      "args": {
+        "target": "client"
+      }
+    },
+    {
+      "cmd": "debug_status",
+      "args": {
+        "target": "remote"
+      }
+    },
+    {
+      "cmd": "server_status",
+      "args": {}
+    },
+    {
+      "cmd": "client_status",
+      "args": {}
+    },
+    {
+      "cmd": "get_workspace",
+      "args": {}
+    },
+    {
+      "cmd": "nc_manifest",
+      "args": {
+        "root": "D:/验收工程"
+      }
+    },
+    {
+      "cmd": "nc_manifest",
+      "args": {
+        "root": "D:/验收工程"
+      }
+    },
+    {
+      "cmd": "fs_list_dir",
+      "args": {
+        "path": "D:/验收工程"
+      }
+    },
+    {
+      "cmd": "svn_info",
+      "args": {}
+    },
+    {
+      "cmd": "svn_status",
+      "args": {}
+    },
+    {
+      "cmd": "tree_projects",
+      "args": {}
+    },
+    {
+      "cmd": "lang_status",
+      "args": {}
+    },
+    {
+      "cmd": "get_config",
+      "args": {}
+    },
+    {
+      "cmd": "service_log_tail",
+      "args": {
+        "target": "middleware",
+        "previous": false,
+        "before": null,
+        "fileId": null
+      }
+    },
+    {
+      "cmd": "server_status",
+      "args": {}
+    },
+    {
+      "cmd": "client_status",
+      "args": {}
+    },
+    {
+      "cmd": "service_log_tail",
+      "args": {
+        "target": "client",
+        "previous": false,
+        "before": null,
+        "fileId": null
+      }
+    },
+    {
+      "cmd": "service_log_read",
+      "args": {
+        "target": "middleware",
+        "previous": false,
+        "offset": 226829,
+        "fileId": "middleware-initial"
+      }
+    },
+    {
+      "cmd": "service_log_tail",
+      "args": {
+        "target": "middleware",
+        "previous": true,
+        "before": null,
+        "fileId": null
+      }
+    },
+    {
+      "cmd": "server_reveal_log",
+      "args": {
+        "previous": true
+      }
+    },
+    {
+      "cmd": "service_log_tail",
+      "args": {
+        "target": "middleware",
+        "previous": true,
+        "before": null,
+        "fileId": null
+      }
+    }
+  ],
+  "errors": []
+}

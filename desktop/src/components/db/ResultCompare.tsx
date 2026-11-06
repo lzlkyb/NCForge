@@ -2,17 +2,25 @@ import { useState } from "react";
 import { compareResults, type ResultSnapshot } from "../../lib/dbResultTools";
 import { Modal } from "../ui/Modal";
 import { downloadText, toTsv } from "../../lib/resultExport";
+import { Icon } from "../ui/icon";
+import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
+import { toast } from "../ui/toast";
 
 // 同一工作台可比较不同标签/连接的结果；快照不落盘，避免把业务数据隐式持久化。
 let baseline: ResultSnapshot | null = null;
-export function ResultCompare({ snapshot }: { snapshot: ResultSnapshot }) {
+export function ResultCompare({ snapshot, related }: { snapshot: ResultSnapshot; related?: ContextMenuItem }) {
   const [open,setOpen] = useState(false), [keys,setKeys] = useState<string[]>([]), [saved,setSaved] = useState(false);
   const [reference,setReference] = useState<ResultSnapshot | null>(null);
+  const [menu,setMenu] = useState<{x:number;y:number}|null>(null);
   let error = "", diff: ReturnType<typeof compareResults> | null = null;
   if (open && reference) { try { diff = compareResults(reference,snapshot,keys); } catch(e) { error = String(e instanceof Error ? e.message : e); } }
   return <>
-    <button type="button" className="dbx-btn" onClick={() => { baseline = {...snapshot,columns:snapshot.columns.map(c => ({...c})),rows:snapshot.rows.map(r => [...r])}; setSaved(true); }}>{saved ? "更新对照" : "固定为对照"}</button>
-    <button type="button" className="dbx-btn" onClick={() => { setReference(baseline); setOpen(true); }}>结果对比</button>
+    <button type="button" className="dbx-btn ghost" aria-label="结果工具" aria-haspopup="menu" aria-expanded={!!menu} title="固定对照、结果对比与关联记录" onClick={e => {const r=e.currentTarget.getBoundingClientRect();setMenu({x:r.left,y:r.bottom+4});}}><Icon name="more" size={14} /><span className="dbx-action-label">结果工具</span></button>
+    {menu && <ContextMenu x={menu.x} y={menu.y} onClose={()=>setMenu(null)} items={[
+      {label:saved ? "更新对照" : "固定为对照",icon:"copy",onSelect:()=>{baseline={...snapshot,columns:snapshot.columns.map(c=>({...c})),rows:snapshot.rows.map(r=>[...r])};setSaved(true);toast(`已固定对照 · ${snapshot.rows.length} 行`,"success");}},
+      {label:"结果对比",icon:"layers",onSelect:()=>{setReference(baseline);setOpen(true);}},
+      ...(related ? [{...related,separator:true}] : []),
+    ]} />}
     {open && <Modal open ariaLabel="查询结果对比" onClose={() => setOpen(false)} className="modal-surface dbx-compare-dialog">
       <h2>查询结果对比</h2>
       {!reference ? <p>先在另一份结果上点击「固定为对照」。</p> : <>

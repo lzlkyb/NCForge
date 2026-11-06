@@ -2,27 +2,25 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import "../../workspace.css";
 import { Skeleton } from "../ui/Skeleton";
-import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { BottomPanel } from "../workspace/BottomPanel";
-import { GenerateDialog } from "../workspace/GenerateDialog";
-import { RenameDialog } from "../workspace/RenameDialog";
 import { EmptyProjectSlots, FilePaneSlots } from "../workspace/FilePaneSlots";
 import { useFileSlot } from "../workspace/useFileSlot";
-import { SwitchProjectDialog } from "../workspace/SwitchProjectDialog";
 import { ServicesTab } from "./ServicesTab";
+import { FilesTabDialogs } from "./FilesTabDialogs";
 import type { FileTreeHandle } from "../workspace/FileTree";
-import { baseName, getWorkspace } from "../../lib/workspace";
+import { getWorkspace } from "../../lib/workspace";
 import { useTreeProjects } from "../../hooks/useTreeProjects";
 import { useProjectSwitch } from "../../hooks/useProjectSwitch";
 import { useWorkspacePicker } from "../../hooks/useWorkspacePicker";
 import { compileCancel } from "../../lib/compile";
 import { useFileSession } from "../../hooks/useFileSession";
 import { useModuleCompile } from "../../hooks/useModuleCompile";
+import { useBuildMaintenance } from "../../hooks/useBuildMaintenance";
+import { useBuildCommands } from "../../hooks/useBuildCommands";
 import { useFilesTabCommands } from "../../hooks/useFilesTabCommands";
 import { useLocalHistorySweep } from "../../hooks/useLocalHistorySweep";
 import { useTabPersistence, useTabRestore, useTabSessionKeys } from "../../hooks/useTabSession";
 import { getRecentRoots } from "../../lib/recentRoots";
-import { isUnsaved } from "../../lib/tabDirty";
 import { useLangWiring } from "../../hooks/useLangWiring";
 import { useProblemJump } from "../../hooks/useProblemJump";
 import { useBreakpointsRoot } from "../../hooks/useBreakpointsRoot";
@@ -107,7 +105,9 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   useLocalHistorySweep(activePath);
   const codeDiags = useCodeDiags();
   const nav = useNav();
-  const { compileActive, compilePath, compileActiveFile } = useModuleCompile();
+  const { compileActive, compileAll, compilePath, compileActiveFile, rebuildModule, rebuildAll } = useModuleCompile();
+  const build = useBuildMaintenance({ rebuildModule, rebuildAll });
+  useBuildCommands(build);
   const jumpToProblem = useProblemJump(compileResult?.problems, activePath, openAt);
 
   // 临时弹层随文件关闭，固定的结构面板则跟随当前文件。
@@ -171,7 +171,8 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
       inspect={codeDiags}
       onNextProblem={() => jumpToProblem(1)}
       onPrevProblem={() => jumpToProblem(-1)}
-      onCancel={() => void compileCancel()} onClose={() => setPanelOpen(false)} />
+      onCancel={() => void compileCancel()} onClose={() => setPanelOpen(false)}
+      activePath={activePath} build={build} compileAll={() => compileAll(true)} />
   );
 
   // NC 服务既是底部面板的一个标签，又要能在没打开工程时使用，所以跟着文件页常驻，
@@ -247,6 +248,8 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           openPath,
           compileActive,
           compileModulePath: (p) => void compilePath(p),
+          cleanModulePath: (p, m) => void build.askClean(p, m),
+          rebuildModulePath: (p, m) => void build.askRebuild(p, m),
           onDismissLargeHint: (p) => setSession({ largeHintDismissed: (v) => [...v, p] }),
           selectTab: (p) => setSession({ activePath: p }),
           openRecentRoot: (p) => void applyRoot(p),
@@ -256,29 +259,21 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
 
       {services}
 
-      <RenameDialog open={renameOpen} path={activePath} onClose={() => setRenameOpen(false)} />
-      <GenerateDialog open={panels.generate} onClose={() => setPanels((p) => ({ ...p, generate: false }))} />
-
-      <ConfirmDialog
-        open={closingPath !== null}
-        title="放弃未保存的修改？"
-        description={`${baseName(closingPath ?? "")} 有未保存的修改，关闭后将丢失。`}
-        variant="destructive"
-        confirmLabel="放弃并关闭"
-        onCancel={session.cancelClose}
-        onConfirm={() => {
-          if (closingPath) session.closeTab(closingPath, true);
-          session.cancelClose();
-        }}
-      />
-
-      <SwitchProjectDialog
-        open={switchTarget !== null}
-        from={root}
-        to={switchTarget?.project ?? null}
-        unsavedCount={tabs.filter(isUnsaved).length}
-        onCancel={() => setSwitchTarget(null)}
-        onConfirm={() => {
+      <FilesTabDialogs
+        root={root}
+        activePath={activePath}
+        tabs={tabs}
+        switchTarget={switchTarget}
+        closingPath={closingPath}
+        renameOpen={renameOpen}
+        generateOpen={panels.generate}
+        build={build}
+        onCloseRename={() => setRenameOpen(false)}
+        onCloseGenerate={() => setPanels((p) => ({ ...p, generate: false }))}
+        onCancelClose={session.cancelClose}
+        onCloseTab={session.closeTab}
+        onCancelSwitch={() => setSwitchTarget(null)}
+        onConfirmSwitch={() => {
           if (switchTarget) void switchAndOpen(switchTarget);
         }}
       />

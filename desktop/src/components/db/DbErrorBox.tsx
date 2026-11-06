@@ -1,6 +1,7 @@
 import { Icon } from "../ui/icon";
+import { useRef, useState } from "react";
 import { toast } from "../ui/toast";
-import { oraCode, similarTo, tableRefs } from "../../lib/db";
+import { friendlyDbError, oraCode, similarTo, tableRefs } from "../../lib/db";
 import { copyText } from "../../lib/utils";
 
 /**
@@ -9,19 +10,37 @@ import { copyText } from "../../lib/utils";
  * ORA-00942（表不存在）是最常见的错，而且往往只是手滑：给出库里相近的表名，
  * 点一下复制。其它错误原样给 ORA 文案，保留错误号给 DBA。
  */
-import { openTable, disconnectConn } from "../../lib/dbActions";
-import { ensureConnected } from "../../lib/dbConfirm";
-import { openSessionPanel, rtOf } from "../../lib/dbStore";
+import { openTable } from "../../lib/dbActions";
+import { reconnectSession } from "../../lib/dbConfirm";
+import { openSessionPanel, type ResultEntry } from "../../lib/dbStore";
 
-export function DbErrorBox({ error, sql, knownTables, index, connId, onLocate }: {
+export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot, errorCode, onLocate }: {
   error: string;
   connId?:string|null; onLocate?:()=>void;
+  tabId?: string;
+  slot?: string | null;
+  errorCode?: ResultEntry["errorCode"];
   sql: string;
   knownTables: string[];
   /** 脚本里的第几条。 */
   index?: number;
 }) {
   const ora = oraCode(error);
+  const lock = useRef(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const reconnect = async () => {
+    if (!connId || lock.current) return;
+    lock.current = true;
+    setReconnecting(true);
+    try {
+      await reconnectSession(connId, slot ?? null, tabId, errorCode === "fallback-session-lost");
+    } catch (e) {
+      toast(friendlyDbError(e), "error");
+    } finally {
+      lock.current = false;
+      setReconnecting(false);
+    }
+  };
   const suggestions =
     ora === "ORA-00942" ? [...new Set(tableRefs(sql).flatMap((t) => similarTo(t, knownTables, 2)))].slice(0, 3) : [];
   return (
@@ -47,9 +66,9 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, onLocate }:
         {onLocate && <button type="button" className="dbx-btn" onClick={onLocate}>定位 SQL 行</button>}
         {connId && ["ORA-00942","ORA-00904"].includes(ora ?? "") && tableRefs(sql).slice(0,1).map(t=><button key={t} type="button" className="dbx-btn" onClick={()=>void openTable(connId,t,"struct")}>查看 {t} 结构</button>)}
         {connId && ["ORA-00054","ORA-00060","ORA-01013"].includes(ora ?? "") && <button type="button" className="dbx-btn" onClick={()=>openSessionPanel(connId)}>查看会话与锁</button>}
-        {connId && ["ORA-03113","ORA-03114","ORA-01012","ORA-17002"].includes(ora ?? "") && <button type="button" className="dbx-btn" onClick={()=>void (async()=>{try{await disconnectConn(connId);if(rtOf(connId).status!=="connected" && await ensureConnected(connId)) toast("已重新连接，请核对 SQL 后手动执行","success");}catch(e){toast(String(e),"error");}})()}>重新连接（不重放 SQL）</button>}
+        {connId && (errorCode === "session-lost" || errorCode === "fallback-session-lost") && <button type="button" className="dbx-btn" disabled={reconnecting} onClick={() => void reconnect()}>{reconnecting ? "正在重新连接…" : "重新连接"}</button>}
       </div>
-      <pre>{sql}</pre>
+      {sql && <pre>{sql}</pre>}
     </div>
   );
 }

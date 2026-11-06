@@ -20,6 +20,8 @@ vi.mock("../../lib/appConfig", () => ({
   getConfig: vi.fn(async () => ({ auto_compile: true })),
   patchConfig: vi.fn(async () => ({})),
   rememberAutoCompile: vi.fn(),
+  rememberAutoIncremental: vi.fn(),
+  rememberAutoExternal: vi.fn(),
 }));
 import { TaskSettings } from "./TaskSettings";
 

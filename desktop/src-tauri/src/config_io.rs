@@ -220,6 +220,12 @@ pub fn apply_import(cfg: &mut AppConfig, imported: &ExportableConfig) -> Result<
                 c.id = crate::db_conns::new_id();
                 seen.insert(c.id.clone());
             }
+            // 默认 schema 是外部文件里的字符串，会被拼进 `alter session set current_schema`。
+            // 导入物不可信：不合法的直接清空（= 不切），而不是留着等连接时才炸。
+            c.default_schema = crate::db_conns::normalize_schema(&c.default_schema);
+            if !c.default_schema.is_empty() && !crate::db_conns::valid_schema(&c.default_schema) {
+                c.default_schema.clear();
+            }
             deduped.push(c);
         }
         cfg.db_conns = deduped;
@@ -267,6 +273,7 @@ mod tests {
                 auto_commit: false,
                 engine: "java".to_string(),
                 note: String::new(),
+                default_schema: "nc".to_string(),
             }],
             db_active: Some("c1".to_string()),
             lang_enabled: true,
@@ -346,6 +353,24 @@ mod tests {
             cfg.db_conns[0].password_dpapi.is_none(),
             "连接口令必须被丢弃"
         );
+    }
+
+    /// 导入物里的默认 schema 会被拼进 `alter session set current_schema`：
+    /// 不合法的一律清空（= 不切），绝不留下等待连接时才炸的字符串。
+    #[test]
+    fn 导入时清掉不合法的默认schema() {
+        let text = r#"{
+            "app":"ncforge","schema":1,
+            "config":{"db_conns":[
+                {"id":"a","name":"a","source":"manual","url":"u","user":"u","defaultSchema":"aier633"},
+                {"id":"b","name":"b","source":"manual","url":"u","user":"u","defaultSchema":"x; drop table t"}
+            ]}
+        }"#;
+        let export = parse_import(text).expect("应能解析");
+        let mut cfg = AppConfig::default();
+        apply_import(&mut cfg, &export.config).unwrap();
+        assert_eq!(cfg.db_conns[0].default_schema, "AIER633", "合法名字统一大写");
+        assert_eq!(cfg.db_conns[1].default_schema, "", "非法名字清空而不是留着");
     }
 
     /// 缺字段不动本机值（老版本 / 手改文件少了字段时不清空本机设置）。

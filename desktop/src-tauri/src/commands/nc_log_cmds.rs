@@ -298,7 +298,7 @@ fn in_window(record: &LogRecord, since: Option<&str>, until: Option<&str>) -> bo
 /// 「一个日志文件都没有」时的说法：告诉人去哪看，而不是只报「空」。
 fn no_files_msg(root: &str) -> String {
     format!(
-        "还没找到 NC 日志文件。先确认「NC 服务」里配的安装目录对不对，\
+        "还没找到 NC 日志文件。先确认设置 → 开发 →「NC 环境」里配的安装目录对不对，\
          以及服务是否启动过（日志在 {root}/nclogs/ 下）。"
     )
 }

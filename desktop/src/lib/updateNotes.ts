@@ -46,9 +46,16 @@ export function parseUpdateNotes(body?: string | null): ReleaseContent {
     if (heading) { section = heading[1].trim(); last = undefined; continue; }
     if (PRIVATE.has(section)) continue;
     const item = /^[-*]\s+(.+)$/.exec(line);
-    if (section === "更新摘要") last = result.summary;
-    else if (section === "亮点" || section === "Highlights") last = result.highlights;
-    else if (item) {
+    const text = item?.[1] ?? line;
+    // 更新摘要按约定是「一句话人话」，渲染成弹窗顶部高亮卡片；允许非列表写法，续行并入上一条。
+    const target = section === "更新摘要" ? result.summary : section === "亮点" || section === "Highlights" ? result.highlights : null;
+    if (target) {
+      if (item || last !== target || !target.length) target.push(text);
+      else target[target.length - 1] += " " + text;
+      last = target;
+      continue;
+    }
+    if (item) {
       const label = LABELS[section] ?? (section || "更新内容");
       let group = result.groups.find((entry) => entry.label === label);
       if (!group) { group = { label, items: [] }; result.groups.push(group); }
@@ -57,7 +64,7 @@ export function parseUpdateNotes(body?: string | null): ReleaseContent {
       last[last.length - 1] += " " + line;
       continue;
     } else last = result.paragraphs;
-    last.push(item?.[1] ?? line);
+    last.push(text);
   }
   return result;
 }
@@ -71,7 +78,7 @@ function bundledRelease(entry: ChangelogEntry): UpdateRelease {
     if (!group) { group = { label, items: [] }; groups.push(group); }
     group.items.push(item.text);
   }
-  return { version: entry.version, date: entry.date, groups, summary: [], paragraphs: [], highlights: entry.highlights ?? [] };
+  return { version: entry.version, date: entry.date, groups, summary: entry.summary ?? [], paragraphs: [], highlights: entry.highlights ?? [] };
 }
 
 function readHistory(body?: string | null): UpdateRelease[] {
@@ -89,6 +96,9 @@ function readHistory(body?: string | null): UpdateRelease[] {
 
 const hasContent = (entry: ReleaseContent) => entry.groups.length || entry.summary.length || entry.paragraphs.length || entry.highlights.length;
 export const countReleaseItems = (entry: ReleaseContent) => entry.groups.reduce((sum, group) => sum + group.items.length, 0);
+/** 「### 亮点」缺省时把「### 更新摘要」当高亮卡片——CHANGELOG 约定摘要就是弹窗顶部那张卡。 */
+const withHighlights = (entry: UpdateRelease): UpdateRelease =>
+  entry.highlights.length ? entry : { ...entry, highlights: entry.summary.slice(0, 3) };
 
 export function createUpdateNotesModel(update: UpdateNotesInfo, bundled: ChangelogEntry[] = CHANGELOG) {
   const version = (update.version ?? "").replace(/^v/, "");
@@ -96,18 +106,18 @@ export function createUpdateNotesModel(update: UpdateNotesInfo, bundled: Changel
   const history = remote.length ? remote : bundled.map(bundledRelease);
   const matching = history.find((entry) => compareReleaseVersions(entry.version, version) === 0);
   const body = parseUpdateNotes(update.body);
-  const latest: UpdateRelease = {
+  const latest = withHighlights({
     ...(matching ?? body), version, date: update.date ?? matching?.date,
     // Explicit server notes remain authoritative; metadata fills out the full history only.
     ...(hasContent(body) ? body : {}),
     highlights: body.highlights.length ? body.highlights : matching?.highlights ?? [],
-  };
+  });
   const current = update.currentVersion;
   const canAggregate = current && compareReleaseVersions(version, current) !== null && compareReleaseVersions(version, current)! > 0;
   const previous = canAggregate ? history.filter((entry) =>
     (compareReleaseVersions(entry.version, current) ?? -1) > 0 &&
     (compareReleaseVersions(entry.version, version) ?? 1) < 0,
-  ) : [];
+  ).map(withHighlights) : [];
   const releases = [latest, ...previous].sort((a, b) => compareReleaseVersions(b.version, a.version) ?? 0);
   const counts: Record<string, number> = {};
   for (const release of releases) for (const group of release.groups) counts[group.label] = (counts[group.label] ?? 0) + group.items.length;

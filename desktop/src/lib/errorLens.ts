@@ -9,11 +9,10 @@ import { monaco } from "./monacoSetup";
 import { pathOfModel } from "./editorStore";
 import { getCodeDiags, subscribeCodeDiags } from "./diagStore";
 import { getEditorPrefs, PREFS_EVENT } from "./editorPrefs";
+import { diagnosticSummaries } from "./diagnosticSummary";
 
 /** 一次最多画多少条：超长文件被全量报错时，几千个装饰会把渲染拖住（面板仍有完整清单）。 */
 const MAX_DECORATIONS = 300;
-/** 行尾文案上限：一条长报错会把行撑到看不见代码。完整内容仍在悬停与问题面板里。 */
-const MAX_TEXT = 140;
 
 const samePath = (a: string, b: string) =>
   a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
@@ -41,7 +40,7 @@ export function attachErrorLens(editor: Editor): () => void {
     if (!model || !getEditorPrefs().errorLens) return;
     const path = pathOfModel(model);
     if (!path) return;
-    const list = getCodeDiags().filter((d) => samePath(d.path, path)).slice(0, MAX_DECORATIONS);
+    const list = diagnosticSummaries(getCodeDiags().filter((d) => samePath(d.path, path)), MAX_DECORATIONS);
     if (list.length === 0) return;
     const decorations = list.map((d) => ({
       range: new monaco.Range(d.line, 1, d.line, 1),
@@ -49,10 +48,10 @@ export function attachErrorLens(editor: Editor): () => void {
         // 不整行高亮：NC 代码里注释和语句挤在一行的情况很常见，整行染红反而看不清哪句错
         isWholeLine: false,
         after: {
-          content: `  ${d.message.length > MAX_TEXT ? `${d.message.slice(0, MAX_TEXT)}…` : d.message}`,
+          content: `  ${d.summary}`,
           inlineClassName: `ncforge-lens ncforge-lens-${d.severity}`,
         },
-        hoverMessage: { value: d.message },
+        hoverMessage: { value: d.detail },
         overviewRuler: undefined,
         zIndex: 1,
       },

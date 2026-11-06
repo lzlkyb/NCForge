@@ -16,6 +16,7 @@ use std::sync::Arc;
 use crate::config::AppConfig;
 use crate::launch::{self, MIDDLEWARE_MAIN_CLASS};
 use crate::nc_home::{self, NcHome, ServerEndpoints};
+use crate::nc_home_scan::HomeCandidate;
 use crate::nc_port::{self, PortApplied, PortPlan};
 use crate::server::{self, PortOwner, ServerProcess, ServerRun, StopOutcome};
 use crate::state::AppState;
@@ -33,6 +34,9 @@ pub struct ServerStatus {
     pub state: &'static str,
     pub pid: Option<u32>,
     pub started_at_ms: Option<u64>,
+    pub run_id: Option<String>,
+    pub launch_phase: Option<String>,
+    pub launch_started_at_ms: Option<u64>,
     pub uptime_ms: Option<u64>,
     /// 中间件的监听端口（读自 `ierp/bin/prop.xml`，不是写死的 80）。
     pub port: u16,
@@ -122,6 +126,11 @@ struct Snap {
     exit_code: Option<i32>,
     reason: Option<String>,
     debug_port: Option<u16>,
+    run_id: Option<String>,
+    launch_phase: Option<String>,
+    launch_started_at_ms: Option<u64>,
+    project_root: Option<String>,
+    nc_home: Option<String>,
 }
 
 fn snapshot(run: &mut ServerRun) -> Snap {
@@ -137,6 +146,17 @@ fn snapshot(run: &mut ServerRun) -> Snap {
         exit_code: run.exit_code,
         reason: run.reason.clone(),
         debug_port: run.debug_port,
+        run_id: run.run_id.clone(),
+        launch_phase: run.launch_phase.clone(),
+        launch_started_at_ms: run.launch_started_at_ms,
+        project_root: run
+            .project_root
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned()),
+        nc_home: run
+            .nc_home
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned()),
     }
 }
 
@@ -172,6 +192,13 @@ fn build_status(
         state,
         pid: s.pid,
         started_at_ms: s.started_at_ms,
+        run_id: s.run_id,
+        launch_phase: if state == "starting" {
+            s.launch_phase.or_else(|| Some("等待监听端口".into()))
+        } else {
+            None
+        },
+        launch_started_at_ms: s.launch_started_at_ms,
         uptime_ms: s.started_at_ms.map(|t| now_ms().saturating_sub(t)),
         port,
         port_address: ep.http_address.clone(),
@@ -187,8 +214,16 @@ fn build_status(
         command_line: s.command_line,
         exit_code: s.exit_code,
         reason: s.reason,
-        project_root: cfg.workspace_root.clone(),
-        nc_home: cfg.nc_home.clone(),
+        project_root: if s.alive || s.starting {
+            s.project_root
+        } else {
+            cfg.workspace_root.clone()
+        },
+        nc_home: if s.alive || s.starting {
+            s.nc_home
+        } else {
+            cfg.nc_home.clone()
+        },
         heap_mb: launch::effective_heap_mb(cfg.server_heap_mb),
         default_heap_mb: launch::DEFAULT_HEAP_MB,
         debug_port: s.debug_port,
@@ -216,8 +251,13 @@ pub async fn server_status(state: tauri::State<'_, Arc<AppState>>) -> Result<Ser
         // 稳态下不再每秒数几百个模块目录、每秒 fork 一次 netstat。
         let now = std::time::Instant::now();
         let mut probe = status_probe::lock();
-        let root = probe.home_root(cfg.nc_home.as_deref(), now, || {
-            nc_home::resolve(cfg.nc_home.as_deref())
+        let configured_home = if snap.alive || snap.starting {
+            snap.nc_home.as_deref().or(cfg.nc_home.as_deref())
+        } else {
+            cfg.nc_home.as_deref()
+        };
+        let root = probe.home_root(configured_home, now, || {
+            nc_home::resolve(configured_home)
                 .ok()
                 .map(|h| PathBuf::from(h.root))
         });
@@ -242,36 +282,59 @@ pub async fn server_status(state: tauri::State<'_, Arc<AppState>>) -> Result<Ser
 /// `debug` 为 true 时给 JVM 加 JDWP 监听（**只绑 127.0.0.1**，端口由系统分配）：
 /// 调试器要靠它 attach，但 JDWP 无鉴权，绑到 0.0.0.0 等于把整台机器的代码执行权
 /// 敞开；默认不加，只有用户显式开调试才带。
+fn launch_phase(state: &AppState, log: &Path, phase: &str) -> Result<(), String> {
+    {
+        let mut run = state
+            .server
+            .lock()
+            .map_err(|_| "服务状态异常".to_string())?;
+        if run.stop_requested {
+            return Err("CANCELLED:启动已取消".into());
+        }
+        run.launch_phase = Some(phase.to_string());
+    }
+    let _ = server::append_log(log, &format!("[nc-forge] {phase}\n"));
+    Ok(())
+}
 #[tauri::command]
 pub async fn server_start(
     state: tauri::State<'_, Arc<AppState>>,
     debug: Option<bool>,
-) -> Result<(), String> {
+    skip_deploy: Option<bool>,
+    request_id: Option<String>,
+) -> Result<String, String> {
+    let st = state.inner().clone();
+    // Reserve before any await/worker queue: an immediate cancellation can identify this preparation.
+    let run_id = {
+        let mut run = st.server.lock().map_err(|_| "服务状态异常".to_string())?;
+        run.begin_start(request_id.as_deref())?
+    };
     let cfg = state.config.read().await.clone();
     let config_dir = state.config_dir.clone();
-    let st = state.inner().clone();
 
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+    st.server
+        .lock()
+        .map_err(|_| "服务状态异常".to_string())?
+        .project_root = cfg.workspace_root.as_ref().map(PathBuf::from);
+
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let log = log_path(&config_dir);
+        let result = (|| -> Result<(), String> {
+        rotate_log(&log)?;
+        launch_phase(&st, &log, "检查环境")?;
         let home = nc_home::resolve(cfg.nc_home.as_deref())?;
         let nc_home = PathBuf::from(&home.root);
+        st.server.lock().map_err(|_| "服务状态异常".to_string())?.nc_home = Some(nc_home.clone());
         let java = PathBuf::from(&home.java);
-        // 端口在置「启动中」之前分配：失败时没有半启动状态要回滚
+        // 回环端口由系统选择；失败统一结束本次准备并保留失败日志。
         let debug_port = if debug == Some(true) {
             Some(server::free_loopback_port()?)
         } else {
             None
         };
 
-        // 锁只圈住「检查 + 置启动中」：写 jar 要 0.6 秒，持锁会让状态轮询一起卡住
+        launch_phase(&st, &log, "检查监听端口")?;
         {
-            let mut run = st.server.lock().map_err(|_| "服务状态异常".to_string())?;
-            if run.is_alive() {
-                return Err("服务已在运行，先停止再启动".to_string());
-            }
-            if run.starting {
-                return Err("上一次启动还没完成，稍等一下".to_string());
-            }
             // 端口以 NC 自己的配置为准（ierp/bin/prop.xml），不是写死的 80
             let port = nc_home::read_endpoints(&nc_home).http_port;
             if let Some(owner) = server::port_owner(port) {
@@ -281,9 +344,6 @@ pub async fn server_start(
                     owner.name, owner.pid
                 ));
             }
-            run.starting = true;
-            run.stop_requested = false;
-            run.reason = None;
         }
 
         // 没选工程也要能起服务：此时只用 NC home 自带的 jar（改代码不生效，界面会提示），
@@ -304,7 +364,7 @@ pub async fn server_start(
 
         // 启动前把工程元数据（META-INF/*.upm）投送到 NCHOME：NC 按文件路径读组件注册表，
         // 不落地就是「改了 upm 不生效」。失败只记日志、不阻断启动（先让人能干活）。
-        if cfg.deploy_on_start {
+        if cfg.deploy_on_start && !skip_deploy.unwrap_or(false) {
             if let Some(root) = cfg
                 .workspace_root
                 .as_deref()
@@ -313,6 +373,7 @@ pub async fn server_start(
                 .map(Path::new)
                 .filter(|p| p.is_dir())
             {
+                launch_phase(&st, &log, "投送元数据")?;
                 match crate::nchome_deploy::deploy_for_workspace(
                     &config_dir,
                     root,
@@ -335,6 +396,7 @@ pub async fn server_start(
             }
         }
 
+        launch_phase(&st, &log, "准备 classpath")?;
         let prepared = launch::middleware_spec(
             &nc_home,
             &java,
@@ -350,12 +412,6 @@ pub async fn server_start(
         let (spec, entry_count) = match prepared {
             Ok(v) => v,
             Err(e) => {
-                if let Ok(mut run) = st.server.lock() {
-                    run.starting = false;
-                    run.debug_port = None;
-                    run.reason = Some(e.clone());
-                }
-                let _ = server::append_log(&log, &format!("[nc-forge] 启动失败：{e}\n"));
                 return Err(e);
             }
         };
@@ -363,17 +419,22 @@ pub async fn server_start(
         // 起进程很快（fork 几十毫秒），但必须在锁内**复查一次停止请求**：
         // 写 jar 的那一秒里用户可能已经点了停止，那时 proc 还不存在，
         // 只靠 proc.take() 的停止拦不住，服务会在他以为停掉之后照样起来。
+        launch_phase(&st, &log, "创建 JVM")?;
+        // The preparation reservation still owns this log; a new run cannot rotate it yet.
+        let debug_note = debug_port
+            .map(|p| format!("，JDWP 监听 127.0.0.1:{p}"))
+            .unwrap_or_default();
+        let _ = server::append_log(&log, &format!(
+            "[nc-forge] classpath 条目 {entry_count} 个（清单见 {}），堆上限 -Xmx{heap_mb}m{debug_note}\n",
+            spec.classpath_jar.display()
+        ));
+        let _ = server::append_log(&log, &format!("[nc-forge] web 应用 {} 个：{}\n", hotwebs.len(), hotwebs.join(",")));
         let mut run = st.server.lock().map_err(|_| "服务状态异常".to_string())?;
         if run.stop_requested {
-            run.starting = false;
-            run.stop_requested = false;
             run.debug_port = None;
-            run.reason = Some("启动已取消".to_string());
             drop(run);
-            let _ = server::append_log(&log, "[nc-forge] 启动已取消（准备期间收到停止请求）\n");
-            return Err("启动已取消：准备期间点了停止".to_string());
+            return Err("CANCELLED:启动已取消：准备期间点了停止".to_string());
         }
-        rotate_log(&log);
         match ServerProcess::spawn(&spec, &log) {
             Ok(proc) => {
                 run.starting = false;
@@ -385,38 +446,23 @@ pub async fn server_start(
                 run.exit_code = None;
                 run.debug_port = debug_port;
                 run.proc = Some(proc);
+                run.launch_phase = Some("等待监听端口".into());
                 drop(run);
-                let debug_note = debug_port
-                    .map(|p| format!("，JDWP 监听 127.0.0.1:{p}"))
-                    .unwrap_or_default();
-                let _ = server::append_log(
-                    &log,
-                    &format!(
-                        "[nc-forge] classpath 条目 {entry_count} 个（清单见 {}），堆上限 -Xmx{heap_mb}m{debug_note}\n",
-                        spec.classpath_jar.display()
-                    ),
-                );
-                // 把挂载的 webapp 写进日志：排查「某个前端 404」「某个上下文启动失败」时，
-                // 第一件要确认的就是它到底在不在白名单里
-                let _ = server::append_log(
-                    &log,
-                    &format!(
-                        "[nc-forge] web 应用 {} 个：{}\n",
-                        hotwebs.len(),
-                        hotwebs.join(",")
-                    ),
-                );
                 Ok(())
             }
             Err(e) => {
-                run.starting = false;
                 run.debug_port = None;
-                run.reason = Some(e.clone());
                 drop(run);
-                let _ = server::append_log(&log, &format!("[nc-forge] 启动失败：{e}\n"));
                 Err(e)
             }
         }
+        })();
+        if let Err(e) = &result {
+            // Retain the reservation until the final line is written, so it cannot enter a newer run.
+            let _ = server::append_log(&log, &format!("[nc-forge] 启动未完成：{e}\n"));
+            if let Ok(mut run) = st.server.lock() { if run.run_id.as_deref() == Some(&run_id) { run.starting = false; run.launch_phase = None; run.reason = Some(e.clone()); } }
+        }
+        result.map(|_| run_id)
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
@@ -430,18 +476,33 @@ pub async fn server_start(
 pub async fn server_stop(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
+    expected_run_id: Option<String>,
 ) -> Result<StopOutcome, String> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let outcome = {
+        let (outcome, debug_session) = {
             let mut run = st.server.lock().map_err(|_| "服务状态异常".to_string())?;
-            run.stop()
-        };
-        // 服务没了，附着在 JDWP 上的调试会话也就没有意义：主动收掉，
-        // 别等适配器发 terminated（进程被硬杀时它可能一个事件都来不及发）。
-        let debug_session = {
-            let mut run = st.debug.lock().map_err(|_| "调试状态异常".to_string())?;
-            crate::debug::take_session(&mut run, crate::debug::DebugTarget::Server)
+            let Some(outcome) = run.stop_for_run(expected_run_id.as_deref()) else {
+                return Ok(StopOutcome::Idle);
+            };
+            // Capture only this run's session/log before a new launch can acquire the service slot.
+            let session = {
+                let mut debug = st.debug.lock().map_err(|_| "调试状态异常".to_string())?;
+                crate::debug::take_session(&mut debug, crate::debug::DebugTarget::Server)
+            };
+            match outcome {
+                StopOutcome::Stopped => {
+                    let _ = server::append_log(&log_path(&st.config_dir), "[nc-forge] 已停止\n");
+                }
+                StopOutcome::Cancelling => {
+                    let _ = server::append_log(
+                        &log_path(&st.config_dir),
+                        "[nc-forge] 收到停止请求（启动还在准备，已取消）\n",
+                    );
+                }
+                StopOutcome::Idle => {}
+            }
+            (outcome, session)
         };
         if let Some(s) = debug_session {
             s.client.close();
@@ -453,18 +514,6 @@ pub async fn server_stop(
                     crate::debug::DebugStatus::stopped(crate::debug::DebugTarget::Server)
                 });
             let _ = app.emit("debug-status", status);
-        }
-        match outcome {
-            StopOutcome::Stopped => {
-                let _ = server::append_log(&log_path(&st.config_dir), "[nc-forge] 已停止\n");
-            }
-            StopOutcome::Cancelling => {
-                let _ = server::append_log(
-                    &log_path(&st.config_dir),
-                    "[nc-forge] 收到停止请求（启动还在准备，已取消）\n",
-                );
-            }
-            StopOutcome::Idle => {}
         }
         Ok(outcome)
     })
@@ -626,9 +675,14 @@ pub async fn server_command_line(
 pub fn server_reveal_log(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
+    previous: Option<bool>,
 ) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
-    let path = log_path(&state.config_dir);
+    let path = crate::service_log::source_path(
+        &state.config_dir,
+        crate::service_log::LogTarget::Middleware,
+        previous.unwrap_or(false),
+    )?;
     if path.exists() {
         return app
             .opener()
@@ -734,6 +788,22 @@ pub async fn nc_home_set(
         })
         .await?;
     Ok(home)
+}
+
+/// 扫描本机可能存在的 NC home 候选（只读，不改配置）。
+///
+/// 给设置页「NC 环境」的「自动探测」用：用户没配 home 或配错了时，
+/// 不用手敲路径，从扫到的候选里点一条即可（点完仍走 `nc_home_set` 深度校验）。
+/// 扫不到就返回空列表，**不报错**——扫不到是常态，界面转成「手动浏览」引导。
+#[tauri::command]
+pub async fn nc_home_candidates(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<HomeCandidate>, String> {
+    // 只需要工作区路径（定位「同级目录」那一路），读完马上放锁
+    let workspace = state.config.read().await.workspace_root.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::nc_home_scan::candidates(workspace.as_deref()))
+        .await
+        .map_err(|e| format!("后台任务失败: {e}"))
 }
 
 /// 设置中间件堆上限（MB）。传 `None` = 恢复默认 4G。返回生效值。
@@ -942,11 +1012,14 @@ pub async fn nc_port_apply(
 }
 
 /// 把上次日志轮转掉，给本次启动一个干净文件。
-fn rotate_log(path: &Path) {
-    let _ = std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")));
+fn rotate_log(path: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))
+        .map_err(|e| format!("建立日志目录失败：{e}"))?;
     if path.exists() {
-        let _ = std::fs::rename(path, path.with_extension("log.1"));
+        std::fs::rename(path, path.with_extension("log.1"))
+            .map_err(|e| format!("归档上次日志失败：{e}"))?;
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -972,5 +1045,27 @@ mod tests {
         };
         let why = port_edit_blocked(&mut run).expect("准备阶段同样会造成端口错位");
         assert!(why.contains("停止"), "要说清该怎么办：{why}");
+    }
+    #[test]
+    fn status_keeps_launch_workspace_and_nc_home_after_configuration_switch() {
+        let cfg = AppConfig {
+            workspace_root: Some("new-project".into()),
+            nc_home: Some("new-nc".into()),
+            ..AppConfig::default()
+        };
+        let mut run = ServerRun {
+            starting: true,
+            project_root: Some(PathBuf::from("old-project")),
+            nc_home: Some(PathBuf::from("old-nc")),
+            ..ServerRun::default()
+        };
+        let ep = ServerEndpoints::fallback("prop.xml");
+        let status = build_status(&cfg, Path::new("config"), snapshot(&mut run), &ep, None);
+        assert_eq!(status.project_root.as_deref(), Some("old-project"));
+        assert_eq!(status.nc_home.as_deref(), Some("old-nc"));
+        run.starting = false;
+        let stopped = build_status(&cfg, Path::new("config"), snapshot(&mut run), &ep, None);
+        assert_eq!(stopped.project_root, cfg.workspace_root);
+        assert_eq!(stopped.nc_home, cfg.nc_home);
     }
 }

@@ -4,6 +4,26 @@
 > 证据基线：本机 UAP Studio 6.5（`D:\NC65\yonyou_studio_nc65_wending`，Eclipse 4.3.2）+ `D:\tool\eclipsehy` dropins 里的 `NCMDP_6.5.0.201405291435.jar` / `com.yonyou.mdp.middleware.jar` + NC 1909 运行时配置 `D:\ncc\1909home\ierp\metadata`。
 > 学习边界：只学流程契约、产物形状和可观察行为；不反编译业务实现，不复制用友 jar、模板、代码或资产。
 
+## 进度（2026-11-06）
+
+P0 的产品功能已落地（`244dcc1` BMF 生成中心，2026-11-06），P1、P2 未开始。依据为 git 提交、`desktop/src-tauri/src/bmf_gen_*.rs` 与 `docs/元数据生成工作台实施验收-2026-11-06.md`。
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| P0-1 `GenProfile` + 产物图 | ✅ | 一次解析生成全部产物；预览与落盘共用一份产物图 |
+| P0-2 Java | ✅ | 三档风格（传统 / 标准 / 自定义）；VO、AggVO、EnumVO、SelVO、业务 / 操作接口、测试桩；本地化与 `UFBoolean -> Boolean` 开关。SuperVO 继承字段合并未单独核实 |
+| P0-3 DDL | ✅ | 8 种方言、外键选项、「只生成扩展表」选项 |
+| P0-4 预览 / diff / 清单 / 漂移 | ✅ | 清单记录 BMF / 配置 / 产物哈希；手改文件默认跳过，逐项授权覆盖并备份；未变化不重写；预览绑定源 BMF、配置、目标路径与原始字节 SHA；规则校验 error 未清零时禁用写入 |
+| P0-5 性能底座 | ✅ | `timings` 分阶段耗时；release 性能门禁 `benchmarks/bmf-gen-budget.json` 已接入 CI；真实 20 个 BMF 实测 P95 15.9 ms、max 55 ms；病态样本（100 实体 × 50 属性）整链 91 ms |
+| P0-6 官方输出门禁（15 样本逐行 diff） | ⬜ 未见记录 | — |
+| P0 验收：DDL 在 Oracle / PostgreSQL 空 schema 实际建表 | ⬜ 未见记录 | 8 种方言目前都未在真实库验证 |
+| 计划外：SQL 执行 | ✅ | 生成中心带独立执行弹层，沿用测试库限制与执行确认 |
+| P1 单据注册脚本 + 元数据发布 SQL | ⬜ 未开始 | 只有「注册建议清单」（`meta/<组件>.registry.json`）；产物分组 `bill` / `format` 已预留但还没有产物 |
+| P2 格式导出、批量、`gen check`、golden | ⬜ 未开始 | — |
+| P3 RIA 前端 | ⬜ 未做（条件触发） | — |
+
+§11 的实际走向：第 1 条三档风格已一起做完；第 4 条已允许执行，限测试库并需确认；第 2、3、5、6 条未见结论。
+
 ## 0. 结论先行
 
 1. **官方不是「一个生成按钮」，而是四条产物线共用一套元数据模型**：

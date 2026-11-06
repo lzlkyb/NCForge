@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
@@ -13,7 +13,7 @@ import {
   type DeployReport,
 } from "../../lib/deploy";
 
-type Busy = "preview" | "apply" | "cleanup" | null;
+type Busy = "preview" | "apply" | "cleanup" | "auto" | null;
 
 /** 把后端报告拆成几行给人看的话（详情面板里逐条列文件）。 */
 function summarize(r: DeployReport): string[] {
@@ -41,12 +41,13 @@ function summarize(r: DeployReport): string[] {
  * NC 按文件路径读组件注册表，改了 upm 不落地，运行时读到的还是 NCHOME 里的旧版本。
  * 「编译/启动前自动投送」默认开；卡片提供手动预览、立即投送与清理（还原备份）。
  */
-export function MetaDeployCard() {
+export function MetaDeployCard({ defaultOpen = false }: { defaultOpen?: boolean }) {
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [busy, setBusy] = useState<Busy>(null);
   const [report, setReport] = useState<DeployReport | null>(null);
   const [cleaned, setCleaned] = useState<CleanupReport | null>(null);
+  const actionLock = useRef(false);
 
   const status = useQuery({
     queryKey: ["deploy-status"],
@@ -56,7 +57,9 @@ export function MetaDeployCard() {
   });
   const cfg = useQuery({ queryKey: ["app-config"], queryFn: getConfig, retry: false });
 
-  const run = async (kind: Exclude<Busy, null>) => {
+  const run = async (kind: "preview" | "apply" | "cleanup") => {
+    if (actionLock.current) return;
+    actionLock.current = true;
     setBusy(kind);
     try {
       if (kind === "cleanup") {
@@ -76,11 +79,15 @@ export function MetaDeployCard() {
     } catch (e) {
       toast(failureText(kind === "cleanup" ? "清理元数据" : "投送元数据", e), "error");
     } finally {
+      actionLock.current = false;
       setBusy(null);
     }
   };
 
   const toggleAuto = async (next: boolean) => {
+    if (actionLock.current) return;
+    actionLock.current = true;
+    setBusy("auto");
     const old = cfg.data;
     if (old) queryClient.setQueryData(["app-config"], { ...old, deploy_on_start: next });
     try {
@@ -88,6 +95,9 @@ export function MetaDeployCard() {
     } catch (e) {
       if (old) queryClient.setQueryData(["app-config"], old);
       toast(failureText("保存自动投送设置", e), "error");
+    } finally {
+      actionLock.current = false;
+      setBusy(null);
     }
   };
 
@@ -116,7 +126,7 @@ export function MetaDeployCard() {
           <input
             type="checkbox"
             checked={auto}
-            disabled={cfg.isLoading}
+            disabled={cfg.isLoading || busy !== null}
             onChange={(e) => void toggleAuto(e.target.checked)}
           />
           自动投送

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pageSql, stripPage, updateSql, PAGE } from "./tableEdit";
+import { pageSql, tableQuerySql, stripPage, updateSql, PAGE } from "./tableEdit";
 
 const cols = [
   { name: "PK_ID", type: "CHAR(20)", precision: 20, scale: 0 },
@@ -8,6 +8,11 @@ const cols = [
 ];
 
 describe("表页分页", () => {
+  it("全量导出使用相同绑定筛选及排序，不含分页包装或行号", () => {
+    expect(tableQuerySql("bd_x", " pk_id = ? ", " name desc ")).toBe("select * from bd_x where pk_id = ? order by name desc");
+    expect(tableQuerySql("bd_x", "", "")).toBe("select * from bd_x");
+    expect(pageSql("bd_x", "pk_id = ?", "name desc", 3)).toContain(`(${tableQuerySql("bd_x", "pk_id = ?", "name desc")})`);
+  });
   it("第二页多取一行判断下一页", () => {
     const s = pageSql("bd_x", "dr = 0", "pk_id", 1);
     expect(s).toContain("where dr = 0 order by pk_id");

@@ -36,6 +36,16 @@ describe("数据库用户任务反馈",()=>{
     const run=runStatements("t",[{text:"select 1",startLine:1}]);mocks.tab.connId="other";ready(true);await run;
     expect(mocks.exec).not.toHaveBeenCalled();expect(latest().state).toBe("cancelled");
   });
+  it("会话断线时保留已显示结果，并阻止脚本继续发送下一条", async () => {
+    const previous = { ...success, id: "previous", rows: [[1]] };
+    mocks.tab.results = [previous];
+    mocks.exec.mockResolvedValueOnce({
+      ...success, kind: "error", errorCode: "session-lost", error: "数据库会话已断开",
+    });
+    await runStatements("t", [{ text: "update t set v = 1", startLine: 1 }, { text: "commit", startLine: 2 }], { ignoreErrors: true });
+    expect(mocks.exec).toHaveBeenCalledTimes(1);
+    expect(mocks.tab.results).toEqual([previous, expect.objectContaining({ errorCode: "session-lost" })]);
+  });
   it("连接尚在等待时请求停止，连接完成后不再发送 SQL",async()=>{
     let ready!:(v:boolean)=>void;mocks.ensure.mockReturnValue(new Promise<boolean>(r=>{ready=r;}));
     const run=runStatements("t",[{text:"select 1",startLine:1}]);await cancelOperation(latest().id);

@@ -73,6 +73,7 @@ describe("buildResultView", () => {
     expect(first).toMatchObject({ project: "newar", projectRoot: "C:\\w\\newar", path: "modules/ic/A.java" });
     expect(first.hits).toHaveLength(2);
     expect(second).toMatchObject({ project: "lib", projectRoot: "C:\\w\\lib" });
+    expect(second.hits[0]).toMatchObject({ root: "C:\\w\\lib", project: "lib", path: "modules/ic/A.java" });
     expect(view.summary).toMatchObject({
       hits: 3,
       filesMatched: 2,

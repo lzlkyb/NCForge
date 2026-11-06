@@ -12,11 +12,15 @@ export function buildTreeMenu({
   module = null,
   onOpen,
   onCompileModule,
+  onCleanModule,
+  onRebuildModule,
   onBeginCreate,
   onBeginRename,
   onDelete,
   onCopyPath,
   onRefresh,
+  problemCount = 0,
+  onShowProblems,
 }: {
   target: { path: string; isDir: boolean };
   root: string;
@@ -33,11 +37,19 @@ export function buildTreeMenu({
   onOpen: (path: string) => void;
   /** 编译这个模块。**不依赖活动标签**：批量替换完想验证某个模块能不能编时用。 */
   onCompileModule?: (path: string) => void;
+  /** 清理这个模块的编译产物（会先弹确认框）。 */
+  onCleanModule?: (path: string, module: string) => void;
+  /** 清理并重编这个模块（会先弹确认框）。 */
+  onRebuildModule?: (path: string, module: string) => void;
   onBeginCreate: (target: { path: string; isDir: boolean }, kind: NewEntryKind) => void;
   onBeginRename: (target: { path: string; isDir: boolean }) => void;
   onDelete: (target: { path: string; isDir: boolean }) => void;
   onCopyPath: (path: string) => void;
   onRefresh: (target: { path: string; isDir: boolean }) => void;
+  /** 这个文件（含更深层不适用）的编译问题数；0 时不显示入口。 */
+  problemCount?: number;
+  /** 打开「问题」面板并只看这个文件。 */
+  onShowProblems?: (path: string) => void;
 }): ContextMenuItem[] {
   const atRoot = target.path === root;
   const items: ContextMenuItem[] = [];
@@ -57,17 +69,42 @@ export function buildTreeMenu({
     }
   } else {
     items.push({ label: "打开", icon: "file", onSelect: () => onOpen(target.path) });
+    // 问题入口紧跟「打开」：右键一个飘红的文件，最常见的诉求就是逐个看它错在哪
+    if (onShowProblems && problemCount > 0) {
+      items.push({
+        label: `查看该文件的 ${problemCount} 个问题`,
+        icon: "alertTriangle",
+        onSelect: () => onShowProblems(target.path),
+      });
+    }
   }
   // 编译项紧跟在「打开/新建」之后：它是对这个模块整体做的事，与后面的改名删除不是一类。
   // 标出模块名（`编译模块 bill`）而不是只写「编译」——右键的是 `src/public` 时，
   // 用户得知道这一下编的是整个模块。
-  if (module && onCompileModule) {
-    items.push({
-      label: `编译模块 ${module}`,
-      icon: "hammer",
-      separator: items.length > 0,
-      onSelect: () => onCompileModule(target.path),
-    });
+  if (module && (onCompileModule || onRebuildModule || onCleanModule)) {
+    const sep = items.length > 0;
+    if (onCompileModule) {
+      items.push({
+        label: `编译模块 ${module}`,
+        icon: "hammer",
+        separator: sep,
+        onSelect: () => onCompileModule(target.path),
+      });
+    }
+    if (onRebuildModule) {
+      items.push({
+        label: `清理并重编模块 ${module}`,
+        icon: "refresh",
+        onSelect: () => onRebuildModule(target.path, module),
+      });
+    }
+    if (onCleanModule) {
+      items.push({
+        label: `清理模块产物 ${module}`,
+        icon: "trash",
+        onSelect: () => onCleanModule(target.path, module),
+      });
+    }
   }
   items.push({
     label: "重命名",

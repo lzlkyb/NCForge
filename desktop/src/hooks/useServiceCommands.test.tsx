@@ -22,7 +22,13 @@ describe("服务动作重复点击", () => {
     await act(async () => { void commands.start(); void commands.start(); void commands.killOwner(); });
     expect(mock.start).toHaveBeenCalledOnce(); expect(mock.kill).not.toHaveBeenCalled(); expect(commands.busy).toBe("start");
     await act(async () => { finish(); }); expect(commands.busy).toBe(null);
-    expect(mock.toast).toHaveBeenCalledWith(expect.stringContaining("等待监听端口就绪"), "success");
+    expect(mock.toast).toHaveBeenCalledWith(expect.stringContaining("请求已接受，正在等待运行状态"), "info");
+  });
+  it("结束占用请求同帧去重，进行中不启动新服务", async () => {
+    let finish!: (pid: number) => void; mock.kill.mockImplementation(() => new Promise<number>(resolve => { finish = resolve; }));
+    await act(async () => { void commands.killOwner(); void commands.killOwner(); void commands.start(); });
+    expect(mock.kill).toHaveBeenCalledOnce(); expect(mock.start).not.toHaveBeenCalled();
+    await act(async () => { finish(123); }); expect(commands.busy).toBeNull();
   });
   it("上一次启动取消中不发送第二次启动；失败后释放锁", async () => {
     mock.stop.mockResolvedValueOnce("cancelling");

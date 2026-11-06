@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
-import { getSession, setSession, type TabMeta } from "../lib/workspaceSession";
+import { getSession, setSession, useWorkspaceSelector, type TabMeta } from "../lib/workspaceSession";
 import { readTabSnapshot, saveTabSnapshot } from "../lib/tabPersistence";
 import { mruNeighbor, pruneMru, touchMru } from "../lib/tabMru";
-import { getKeymap, isReopenTabKey } from "../lib/keymap";
+import { getKeymap, isReopenTabKey, tabKeyAction } from "../lib/keymap";
+import { activeOfGroup } from "../lib/editorGroups";
 import type { useFileSession } from "./useFileSession";
 
 /**
@@ -74,19 +75,20 @@ export function useTabPersistence(
 export function useTabSessionKeys(
   tabs: TabMeta[],
   activePath: string | null,
-  session: Pick<ReturnType<typeof useFileSession>, "reopenLast">,
+  session: Pick<ReturnType<typeof useFileSession>, "reopenLast" | "selectTab">,
 ): void {
+  const groups = useWorkspaceSelector(s => s.editorGroups);
   const live = useRef({ tabs, activePath, session });
   live.current = { tabs, activePath, session };
 
   useEffect(() => {
-    touchMru(activePath);
-    pruneMru(tabs.map((t) => t.path));
-  }, [tabs, activePath]);
+    touchMru(groups ? activeOfGroup(groups, groups.focused) : activePath, groups?.focused);
+    pruneMru(tabs.map((t) => t.path), groups?.focused);
+  }, [tabs, activePath, groups]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || !e.ctrlKey || e.metaKey) return;
+      if (e.defaultPrevented || e.metaKey || e.isComposing) return;
       if (document.querySelector('[role="dialog"][aria-modal="true"]:not([data-exiting]), dialog[open]')) return;
       // 文件页被工具页盖住时，Ctrl+Tab 不该去动隐藏的标签
       if (document.querySelector("#wb-code-surface[hidden]")) return;
@@ -102,13 +104,23 @@ export function useTabSessionKeys(
         void live.current.session.reopenLast();
         return;
       }
-      if (e.altKey) return;
-      if (e.key === "Tab") {
+      const action = tabKeyAction(e);
+      if (action) {
+        const groupState = getSession().editorGroups;
+        if (action === "left" || action === "right") {
+          if (!groupState?.[action].length) return;
+          e.preventDefault(); e.stopPropagation();
+          setSession({ editorGroups: { ...groupState, focused: action } });
+          const path = activeOfGroup(groupState, action); if (path) live.current.session.selectTab(path);
+          requestAnimationFrame(() => document.getElementById(`wb-editor-${action}-surface`)?.querySelector<HTMLElement>('.monaco-editor textarea')?.focus());
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
         const { tabs: open, activePath: current } = live.current;
-        const next = mruNeighbor(current, open.map((t) => t.path), e.shiftKey ? -1 : 1);
-        if (next) setSession({ activePath: next });
+        const focused = groupState?.focused, paths = focused ? groupState[focused] : open.map((t) => t.path);
+        const next = mruNeighbor(focused ? activeOfGroup(groupState!, focused) : current, paths, action === "previous" ? -1 : 1, focused);
+        if (next) live.current.session.selectTab(next);
       }
     };
     window.addEventListener("keydown", onKey, true);

@@ -211,6 +211,34 @@ html[data-ui-density="comfortable"] .wb-tree-list .wb-row { height:30px; }
   background: hsl(var(--primary) / 0.14);
   color: hsl(var(--primary));
 }
+/* 编译问题徽标：文件 / 包 / 模块行与标签共用；有错误时红色，只有警告时黄色 */
+.wb-problem-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 14px;
+  margin-left: 4px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: hsl(var(--destructive) / 0.14);
+  color: hsl(var(--destructive-ink));
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.wb-problem-badge[data-sev="warning"] {
+  background: hsl(var(--warning) / 0.18);
+  color: hsl(var(--warning-ink));
+}
+/* 代码检查（jdt.ls）：中性色，明确它和编译错误不是同一来源、也不是同一个数 */
+.wb-problem-badge[data-sev="inspect"] {
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-weight: 600;
+}
 /* manifest.xml 登记的业务组件（BusinessComponet）：紧贴目录名，靠右的 SVN 计数不受影响 */
 .wb-bc-badge {
   flex-shrink: 0;
@@ -596,6 +624,29 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-pfilter:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 .wb-pfilter[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
 .wb-pfilter-n { font-size: 10.5px; color: hsl(var(--muted-foreground)); }
+/* 问题行来源：ecj 编译结果 / jdt.ls 代码检查，数字分开数，不混成一条 */
+.wb-prow-src {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  letter-spacing: 0.02em;
+}
+.wb-prow-src[data-source="inspect"] { background: hsl(var(--primary) / 0.1); color: hsl(var(--primary)); }
+/* 树右键「查看该文件的 N 个问题」后显示：明确当前列表只看一个文件 */
+.wb-problems-scope {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px 6px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+.wb-problems-scope b { color: hsl(var(--foreground)); font-weight: 600; }
 .wb-problems-sp { flex: 1; }
 .wb-pgroup-head { display: flex; align-items: center; gap: 8px; padding: 6px 14px 2px; font-size: 11.5px; font-weight: 600; color: hsl(var(--muted-foreground)); }
 .wb-pgroup-n { font-weight: 500; }
@@ -621,6 +672,19 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-log-link { display: block; width: 100%; text-align: left; font: inherit; line-height: inherit; color: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; white-space: pre-wrap; word-break: break-all; }
 .wb-log-link:hover { background: hsl(var(--secondary)); text-decoration: underline; }
 .wb-log-link:focus-visible { outline: 1px solid hsl(var(--ring)); outline-offset: -1px; }
+/* 编译输出：模块账本 + 工具条。账本限高，日志仍占满剩余空间。 */
+.wb-build { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.wb-build-bar { display: flex; align-items: center; gap: 6px; padding: 0 10px 4px; flex: 0 0 auto; }
+.wb-build-bar-title { font-size: 11.5px; font-weight: 600; color: hsl(var(--muted-foreground)); }
+.wb-build-ledger { flex: 0 0 auto; max-height: 96px; overflow: auto; margin: 0 10px 4px; padding: 3px 8px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--secondary) / 0.35); font-size: 11.5px; }
+.wb-build-row { display: flex; align-items: center; gap: 8px; height: 20px; white-space: nowrap; }
+.wb-build-mod { flex: 0 0 110px; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.wb-build-state { flex: 0 0 46px; color: hsl(var(--muted-foreground)); }
+.wb-build-row[data-status="ok"] .wb-build-state { color: hsl(var(--success-ink)); }
+.wb-build-row[data-status="failed"] .wb-build-state { color: hsl(var(--destructive-ink)); }
+.wb-build-row[data-status="blocked"] .wb-build-state { color: hsl(var(--warning-ink)); }
+.wb-build-meta { color: hsl(var(--muted-foreground)); }
+.wb-build-reason { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: hsl(var(--muted-foreground)); font-style: italic; }
 .wb-tabs-sp { flex: 1; }
 .wb-tabs-all-wrap { display: flex; align-items: center; align-self: center; flex-shrink: 0; margin: 0 2px; }
 .wb-compile-btn { align-self: center; margin: 0 8px; flex-shrink: 0; }

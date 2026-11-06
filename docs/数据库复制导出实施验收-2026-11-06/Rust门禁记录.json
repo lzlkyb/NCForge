@@ -1,0 +1,47 @@
+{
+  "verifiedAt": "2026-11-06T13:13:25+08:00",
+  "jobs": 1,
+  "testThreads": 2,
+  "clippy": {
+    "command": "node scripts/rust-gate.mjs clippy --all-targets --no-default-features -- -D warnings",
+    "exitCode": 0,
+    "seconds": 60
+  },
+  "integration": {
+    "command": "node scripts/rust-gate.mjs test --no-default-features --test db_transfer_formats",
+    "exitCode": 0,
+    "passed": 19,
+    "failed": 0,
+    "compileSeconds": 80,
+    "testSeconds": 13.34
+  },
+  "targetDebugGB": 4.99,
+  "tempDirectoryWarnings": false,
+  "memory": {
+    "sampling": "Discrete whole-machine free-memory samples across retries; not a continuous peak or cold-build limit. Last sample was taken after the subsequent frontend test started.",
+    "samples": [
+      {
+        "at": "clippy-start",
+        "freeKiB": 5105672
+      },
+      {
+        "at": "2026-11-06T13:08:07.1032263+08:00",
+        "freeKiB": 4529880
+      },
+      {
+        "at": "2026-11-06T13:11:26.1091207+08:00",
+        "freeKiB": 4496640
+      },
+      {
+        "at": "2026-11-06T13:12:46.7279498+08:00",
+        "freeKiB": 4046344,
+        "phase": "integration"
+      },
+      {
+        "at": "2026-11-06T13:13:58.2938628+08:00",
+        "freeKiB": 4005944,
+        "phase": "after-rust"
+      }
+    ]
+  }
+}

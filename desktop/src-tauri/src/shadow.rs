@@ -20,7 +20,9 @@ use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use std::process::Command;
 
+use crate::build_layout::{dedupe_paths, eq_path, ModuleLayout};
 use crate::compile;
+use crate::eclipse_cp::ProjectCp;
 use crate::launch::project_class_dirs;
 use crate::nc_index::ClassIndex;
 use crate::workspace::{detect_encoding, TextEncoding};
@@ -253,6 +255,36 @@ fn src_jar_of(jar: &Path) -> Option<PathBuf> {
     candidate.is_file().then_some(candidate)
 }
 
+/// 当前模块自己的产物目录：这些是它源码的旧产物，进影子工程只会让跳转偏到旧 class。
+///
+/// 不能只认 `<模块>/classes`：newar 的 `.classpath` 写在**工程根**，`baseapp` 的产物是
+/// `out/baseapp`；漏掉它时同一个类会以「源码 + 已编译」两份出现在符号搜索里。
+///
+/// 只排除该模块**明确声明**的 output，以及模块级 `.classpath` 的全部产物；工程根的
+/// 默认输出（`out/bin`）保留——别的源码根（如 `ia/src`）也往那里编译，剪掉就没有
+/// 它们的类了。重复条目交给上层按全限定名去重。
+fn own_output_dirs(workspace_root: &Path, module: &str) -> Vec<PathBuf> {
+    let mut dirs = ModuleLayout::resolve(workspace_root, module).outputs;
+    dirs.push(workspace_root.join(module).join("classes"));
+    if let Some(cp) = ProjectCp::load(workspace_root) {
+        for src in &cp.srcs {
+            let rel = src.path.to_string_lossy().replace('\\', "/");
+            let rel = rel.trim_matches('/');
+            let b = rel.as_bytes();
+            let m = module.as_bytes();
+            let under_module = b.len() >= m.len()
+                && b[..m.len()].eq_ignore_ascii_case(m)
+                && (b.len() == m.len() || b[m.len()] == b'/');
+            if under_module {
+                if let Some(o) = &src.output {
+                    dirs.push(workspace_root.join(o));
+                }
+            }
+        }
+    }
+    dedupe_paths(dirs)
+}
+
 /// 为 `spec.module` 生成（或更新）影子工程。幂等：内容没变就什么都不写，`changed` 为 false。
 pub fn generate(spec: &ShadowSpec) -> Result<ShadowProject, String> {
     let module_dir = spec.workspace_root.join(spec.module);
@@ -276,13 +308,13 @@ pub fn generate(spec: &ShadowSpec) -> Result<ShadowProject, String> {
         .map(|d| format!("{}/{d}", spec.module))
         .collect();
 
-    // 2. 类目录：规则与编译/启动服务共用。当前模块自己的 classes 要排除——那是它自己源码的
-    //    旧产物，与源码重复，留着只会让跳转偏到旧 class。
-    let own_classes = spec.workspace_root.join(spec.module).join("classes");
+    // 2. 类目录：规则与编译/启动服务共用。当前模块自己的产物要排除——那是它自己源码的
+    //    旧产物，与源码重复，留着只会让跳转偏到旧 class。产物目录可能不止 `<模块>/classes`。
+    let own = own_output_dirs(spec.workspace_root, spec.module);
     let class_dirs: Vec<PathBuf> =
         project_class_dirs(spec.workspace_root, spec.nc_home, spec.overrides)
             .into_iter()
-            .filter(|d| *d != own_classes)
+            .filter(|d| !own.iter().any(|o| eq_path(d, o)))
             .collect();
 
     // 3. jar：按当前模块全部源文件的 import / 同包 / 父类型链精选 + 公共库 + 上次编译的 jar 集
@@ -376,6 +408,52 @@ mod tests {
         let pos = |s: &str| xml.find(s).unwrap();
         assert!(pos("gl/src/private") < pos("JRE_CONTAINER"));
         assert!(pos("out/uapbd") < pos("plain.jar"));
+    }
+
+    #[test]
+    fn own_outputs_cover_explicit_root_outputs_and_module_classpath() {
+        let root = temp("own");
+        let m = root.join("baseapp");
+        std::fs::create_dir_all(m.join("src/public")).unwrap();
+        std::fs::write(
+            root.join(".classpath"),
+            r#"<classpath>
+              <classpathentry kind="src" path="baseapp/src/public" output="out/baseapp"/>
+              <classpathentry kind="src" path="baseapp/src/client"/>
+              <classpathentry kind="src" path="ia/src"/>
+              <classpathentry kind="output" path="out/bin"/>
+            </classpath>"#,
+        )
+        .unwrap();
+        let own = own_output_dirs(&root, "baseapp");
+        assert!(
+            own.iter().any(|p| eq_path(p, &root.join("out/baseapp"))),
+            "工程根 .classpath 给当前模块声明的专属产物要排除"
+        );
+        assert!(
+            !own.iter().any(|p| eq_path(p, &root.join("out/bin"))),
+            "共享默认输出是别的源码根的产物，不能剪"
+        );
+        assert!(
+            own.iter().any(|p| eq_path(p, &m.join("classes"))),
+            "旧约定的 <模块>/classes 仍要排除"
+        );
+
+        // 模块自带 .classpath 时，它的全部产物同样属于自己
+        let gl = root.join("gl");
+        std::fs::create_dir_all(gl.join("src")).unwrap();
+        std::fs::write(
+            gl.join(".classpath"),
+            r#"<classpath>
+              <classpathentry kind="src" path="src" output="out/gl"/>
+              <classpathentry kind="output" path="bin"/>
+            </classpath>"#,
+        )
+        .unwrap();
+        let own = own_output_dirs(&root, "gl");
+        assert!(own.iter().any(|p| eq_path(p, &gl.join("out/gl"))));
+        assert!(!own.iter().any(|p| eq_path(p, &gl.join("bin"))), "没写 output 的 src 才用默认输出");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

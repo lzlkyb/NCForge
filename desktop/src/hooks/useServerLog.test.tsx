@@ -20,6 +20,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const h = vi.hoisted(() => {
   type Call = { offset: number; resolve: (v: { text: string; offset: number }) => void };
@@ -34,6 +35,7 @@ vi.mock("../lib/server", () => ({
       h.calls.push({ offset, resolve });
     }),
 }));
+vi.mock("../lib/serviceConsoleApi", () => ({ serviceLogRead: vi.fn(), serviceLogTail: vi.fn() }));
 
 import { useServerLog } from "./useServerLog";
 
@@ -47,14 +49,16 @@ function Probe({ active, generation }: { active: boolean; generation: number }) 
 const texts = () => latest.lines.map((l) => l.text);
 
 let root: Root | null = null;
+let queryClient: QueryClient;
 const mount = (active: boolean, generation: number) => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  root.render(<Probe active={active} generation={generation} />);
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  root.render(<QueryClientProvider client={queryClient}><Probe active={active} generation={generation} /></QueryClientProvider>);
 };
 const update = (active: boolean, generation: number) => {
-  root?.render(<Probe active={active} generation={generation} />);
+  root?.render(<QueryClientProvider client={queryClient}><Probe active={active} generation={generation} /></QueryClientProvider>);
 };
 
 beforeEach(() => {
@@ -67,6 +71,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root?.unmount());
   root = null;
+  queryClient?.clear();
   document.body.innerHTML = "";
   vi.useRealTimers();
 });

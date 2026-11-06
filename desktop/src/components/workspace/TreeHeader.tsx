@@ -5,6 +5,10 @@ import { baseName } from "../../lib/workspace";
 import { useOperations } from "../../lib/operations";
 import { setPackageView, usePackageView } from "../../lib/treeViewPrefs";
 import { TreeViewOptions } from "./TreeViewOptions";
+import { Icon } from "../ui/icon";
+import { Menu, MenuItem } from "../ui/Menu";
+import { treeFilterFor, useTreeFilter } from "../../lib/treeFilter";
+import "../../reading-tools.css";
 
 /**
  * 左栏顶部：资源管理器标题 + 三个动作（新建文件 / 新建文件夹 / 换目录）。
@@ -38,11 +42,14 @@ export function TreeHeader({
   const tasks = useOperations();
   const switching = tasks.some((o) => o.key === "workspace.switch" && !o.endedAt);
   const [error, setError] = useState<string | null>(null);
+  const [choosing, setChoosing] = useState(false);
+  const filter = useTreeFilter(root);
   const picking = useRef(false);
 
   const choose = async () => {
     if (picking.current || switching) return;
     picking.current = true;
+    setChoosing(true);
     setError(null);
     try {
       const path = await pickFolder({ title: "更换工作区目录", defaultPath: root });
@@ -52,6 +59,7 @@ export function TreeHeader({
       setError(pickFolderError(e));
     } finally {
       picking.current = false;
+      setChoosing(false);
     }
   };
 
@@ -69,6 +77,8 @@ export function TreeHeader({
         </div>
         <div className="wb-pane-acts">
           <TreeViewOptions root={root} />
+          <button type="button" className="wb-icon-btn" aria-label="过滤资源树入口" title="过滤文件名和包名" aria-expanded={filter.open} aria-pressed={!!filter.text}
+            onClick={() => treeFilterFor(root).set({ open: !filter.open, ...(!filter.open ? {} : { text: "" }) })}><Icon name="sliders" size={14} /></button>
           <button
             type="button"
             className="wb-icon-btn"
@@ -78,34 +88,15 @@ export function TreeHeader({
           >
             <WorkspaceGlyph name="search" size={14} />
           </button>
-          <button
-            type="button"
-            className="wb-icon-btn"
-            title="新建文件（建在选中的文件夹下；没选中就建在根目录）"
-            aria-label="新建文件"
-            onClick={onCreateFile}
-          >
-            <WorkspaceGlyph name="newFile" size={14} />
-          </button>
-          <button
-            type="button"
-            className="wb-icon-btn"
-            title="新建文件夹（建在选中的文件夹下；没选中就建在根目录）"
-            aria-label="新建文件夹"
-            onClick={onCreateDir}
-          >
-            <WorkspaceGlyph name="newFolder" size={14} />
-          </button>
-          <button
-            type="button"
-            className="wb-icon-btn"
-            title="更换工作区目录（系统文件夹选择器）"
-            aria-label="更换工作区目录"
-            disabled={switching}
-            onClick={() => void choose()}
-          >
-            <WorkspaceGlyph name="openWorkspace" size={14} />
-          </button>
+          <Menu portal width="w-72" trigger={(open, toggle) => <button type="button" className="wb-icon-btn" aria-label="更多资源操作" title="新建与工程操作" disabled={switching || choosing} aria-haspopup="menu" aria-expanded={open} onClick={toggle}><Icon name={choosing ? "spinner" : "more"} className={choosing ? "animate-spin" : undefined} size={14} /></button>}>
+            {close => <>
+              <MenuItem label="新建文件" icon="filePlus" onClick={() => { close(); onCreateFile(); }} />
+              <MenuItem label="新建文件夹" icon="folderPlus" onClick={() => { close(); onCreateDir(); }} />
+              <MenuItem label="更换工作区目录" icon="folder" onClick={() => { close(); void choose(); }} />
+              {recents.length > 0 && <p className="wb-tree-menu-note">最近工程</p>}
+              {recents.map(path => <MenuItem key={path} label={<span title={path}>{baseName(path)}</span>} hint={path === root ? "当前" : undefined} onClick={() => { close(); onOpenRecent(path); }} />)}
+            </>}
+          </Menu>
         </div>
       </div>
       {projectCount > 1 && (
@@ -116,17 +107,6 @@ export function TreeHeader({
       {error && (
         <div className="wb-row-note" data-tone="bad" role="alert">
           {error}
-        </div>
-      )}
-      {recents.length > 0 && (
-        <div className="wb-root-recent">
-          <span className="wb-root-recent-label">最近</span>
-          {recents.map((p) => (
-            <button key={p} type="button" className="wb-root-recent-item" title={p} disabled={switching}
-              onClick={() => onOpenRecent(p)}>
-              {baseName(p)}
-            </button>
-          ))}
         </div>
       )}
     </>

@@ -653,7 +653,19 @@ export interface JdtSource {
  * 现场补丁包更是几乎全裸，所以「桩 → 反编译」是常态路径而不是兜底。
  * 反编译失败不抛错：降级成桩，并把原因带回去由界面提示一次（见 `useFileSession`）。
  */
+/** 本地类型索引给 jar 类合成的地址标记：见到它就不问语言服务，直接让后端反编译。 */
+const DIRECT_DECOMPILE = "?=ncforge-decompile";
+
 async function fetchJdtSource(uri: string): Promise<JdtSource> {
+  if (uri.includes(DIRECT_DECOMPILE)) {
+    // 合成地址不是 jdt.ls 认识的 URI，问它只会得到错误；直接走 CFR。
+    try {
+      const r = await decompileClass(uri);
+      return { text: decompileHeader(r.jar) + r.source, decompiled: true };
+    } catch (e) {
+      throw new Error(friendlyError(e));
+    }
+  }
   const text = await langRequest<string>("java/classFileContents", null, { uri }, 60_000);
   if (!isStubSource(text)) return { text, decompiled: false };
   try {

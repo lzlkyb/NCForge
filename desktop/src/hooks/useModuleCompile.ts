@@ -7,6 +7,8 @@ import {
   type WorkspaceSession,
 } from "../lib/workspaceSession";
 import {
+  buildRebuildAll,
+  buildRebuildModule,
   compileModule,
   compileAllModules,
   compileFileOrThrow,
@@ -14,6 +16,7 @@ import {
   onCompileLog,
   type CompileResult,
 } from "../lib/compile";
+import { useBuildProgress } from "./useBuildProgress";
 import { isJavaFile, mergeFileResult } from "../lib/autoCompile";
 import { setAutoCompileRunner } from "../lib/autoCompileQueue";
 import { runAutoCompile } from "../lib/autoCompileRun";
@@ -25,6 +28,8 @@ import {
   setTaskRuntime,
 } from "../lib/ncTasks";
 import { beginOperation } from "../lib/operations";
+import { captureCompileSources, stampCompileResult } from "../lib/compileFreshness";
+import { getWorkbenchLayout } from "../lib/workbenchLayout";
 import { compileCancel } from "../lib/compile";
 import { toast } from "../components/ui/toast";
 import { missingResourceId } from "../lib/resourceMissing";
@@ -51,6 +56,7 @@ function appendLog(prev: string[], batch: string[]): string[] {
  * 状态本身还在 `lib/workspaceSession`（切页不该丢），这里只放动作与订阅。
  */
 export function useModuleCompile() {
+  useBuildProgress();
   const activePath = useWorkspaceSelector((s) => s.activePath);
   const tabs = useWorkspaceSelector((s) => s.tabs);
   const setCompiling = (v: Updater<boolean>) => setSession({ compiling: v });
@@ -120,15 +126,17 @@ export function useModuleCompile() {
     if (unsavedHint && tabs.some((t) => t.dirty || t.eolChanged)) {
       toast("有未保存的文件，编译读取的是磁盘版本，请先保存（Ctrl+S）", "warning");
     }
-    setSession({ panelOpen: true, panelTab: "build", compileResourceMissing: false });
+    // 开始构建**不**清空上一轮结果：新结果要过几秒才回来，期间问题面板空掉
+    // 会让人以为错误都修好了。日志仍然清空（那是本轮的过程输出）。
+    setSession({ panelOpen: true, panelTab: "build", compileResourceMissing: false, buildProgress: null });
     setCompiling(true);
-    if (!mergeFiles) setCompileResult(null);
     flushLog.current();
     setCompileLog([]);
     // 编译可能跑半分钟，期间用户可能切了工作区：结果不能写进新工程的面板
     const root = getSession().root ?? null;
+    const sourceVersions = captureCompileSources(getSession().tabs);
     try {
-      const r = await run();
+      const r = stampCompileResult(await run(), sourceVersions, root, mergeFiles);
       if ((getSession().root ?? null) !== root) {
         operation.finish("cancelled", "工程已切换，未应用旧工程的编译结果");
         return false;
@@ -139,7 +147,7 @@ export function useModuleCompile() {
         : r;
       operation.finish(r.ok ? "success" : "failed", `编译 ${r.sourceCount} 个源文件，${r.errorCount} 个错误、${r.warningCount} 个警告`);
       setCompileResult(merged);
-      setSession({ panelTab: merged.errorCount > 0 ? "problems" : "build" });
+      if (!getWorkbenchLayout().locked) setSession({ panelTab: merged.errorCount > 0 ? "problems" : "build" });
       // 任务链据此决定要不要继续投送/重启：编不过就不该把旧产物推上去
       return r.ok && merged.errorCount === 0;
     } catch (e) {
@@ -158,6 +166,7 @@ export function useModuleCompile() {
       return false;
     } finally {
       setCompiling(false);
+      setSession({ buildProgress: null });
     }
   };
 
@@ -171,8 +180,8 @@ export function useModuleCompile() {
   };
 
   /** 编译全部模块：不需要活动文件，所以没打开任何标签时也能用。 */
-  const compileAll = async (): Promise<boolean> => {
-    return start(() => compileAllModules(), true);
+  const compileAll = async (skipDeploy = false): Promise<boolean> => {
+    return start(() => compileAllModules(undefined, skipDeploy), true);
   };
 
   /**
@@ -211,6 +220,19 @@ export function useModuleCompile() {
       return false;
     }
     return start(() => compileFileOrThrow([path]), true, [path]);
+  };
+
+  /**
+   * 清理并重编。清理的确认与 dry-run 在 `useBuildMaintenance`，这里只跑真正的构建：
+   * 日志、取消、面板切换、工作区切换保护必须和普通编译完全一致。
+   */
+  const rebuildModule = (path: string) => {
+    if (!path) return;
+    void start(() => buildRebuildModule(path), true);
+  };
+
+  const rebuildAll = () => {
+    void start(() => buildRebuildAll(), true);
   };
 
   // 保存后自动编译的消费者：队列在 `lib/autoCompileQueue`（防抖 + 串行 + 被占则重排），
@@ -253,5 +275,5 @@ export function useModuleCompile() {
     };
   }, []);
 
-  return { compileActive, compileAll, compilePath, compileActiveFile };
+  return { compileActive, compileAll, compilePath, compileActiveFile, rebuildModule, rebuildAll };
 }

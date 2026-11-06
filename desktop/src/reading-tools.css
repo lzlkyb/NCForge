@@ -1,0 +1,33 @@
+/* 代码工作台的阅读工具：稳定正文，常用动作可达，次要工具按空间披露。 */
+.app-shell .wb-code-tree-title .wb-pane-acts { display:flex; justify-content:flex-end; flex-wrap:nowrap; gap:2px; }
+.app-shell .wb-code-tree-title .wb-icon-btn { flex:0 0 28px; width:28px; max-width:28px; min-height:28px; }
+.wb-tree-menu-note { margin:5px 10px; color:hsl(var(--muted-foreground)); font-size:12px; line-height:1.5; }
+.wb-tree-quick-filter { flex:none; padding:7px 8px; border-bottom:1px solid hsl(var(--border)); }
+.wb-tree-quick-filter > div { display:flex; align-items:center; gap:5px; min-width:0; padding-left:7px; border:1px solid hsl(var(--border)); border-radius:var(--r-control); background:hsl(var(--card)); }
+.wb-tree-quick-filter input { flex:1; min-width:0; height:28px; color:hsl(var(--foreground)); outline:0; background:transparent; font-size:12px; }
+.wb-tree-quick-filter > div:focus-within { outline:2px solid hsl(var(--ring)); outline-offset:1px; }
+.wb-tree-quick-filter small { display:block; margin-top:5px; font-size:11px; line-height:1.4; color:hsl(var(--muted-foreground)); }
+.wb-crumb-row { container-type:inline-size; container-name:reading-tools; gap:2px; padding-inline:5px; }
+.wb-crumb-overflow { margin-left:auto; display:none; }
+.wb-crumb-row .wb-outline-btn { min-height:28px; white-space:nowrap; flex-shrink:0; }
+.wb-crumb-row .wb-nav-btn { flex-shrink:0; }
+.wb-crumb .wb-crumb-middle { display:inline-flex; align-items:center; flex:none; }
+.wb-banner-summary { display:flex; align-items:center; gap:7px; min-width:0; font-size:12px; }
+.wb-banner-summary > span { flex:1; min-width:0; }
+.wb-banner-summary details { flex:none; }
+.wb-banner-summary summary { cursor:pointer; color:hsl(var(--primary)); }
+.wb-banner-summary details[open] { flex:1; }
+.wb-banner-summary details p { margin-top:5px; color:hsl(var(--muted-foreground)); line-height:1.5; }
+@container reading-tools (max-width:640px) {
+  .wb-reading-secondary { display:none!important; }
+  .wb-crumb-overflow { display:flex; }
+  .wb-crumb-row .wb-crumb { padding-inline:3px; }
+}
+@container reading-tools (max-width:410px) {
+  .wb-reading-outline { display:none!important; }
+  .wb-crumb-row .wb-nav-btn { width:24px; }
+}
+.monaco-editor .suggest-widget,.monaco-editor .monaco-hover,.monaco-editor .parameter-hints-widget { border-radius:var(--r-control); }
+.monaco-editor .suggest-widget .monaco-list-row { min-height:24px; }
+.wb-status .relative:has(.wb-lang) { min-width:0; flex-shrink:1; }
+.wb-status .relative:has(.wb-lang) .wb-lang { max-width:100%; }

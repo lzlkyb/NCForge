@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import type { BoundCell, ColumnInfo } from "../../lib/dbApi";
 import { compileFilter, emptyFilter, loadFilter, saveFilter, type TableFilter } from "../../lib/dbConditions";
 import { toast } from "../ui/toast";
+import { Icon } from "../ui/icon";
 
 export function TableFilterBar({ connId, table, cols, disabled, onApply }: {
   connId: string; table: string; cols: ColumnInfo[]; disabled: boolean;
@@ -27,13 +28,13 @@ export function TableFilterBar({ connId, table, cols, disabled, onApply }: {
     : `${filter.conditions.length ? `${filter.conditions.length} 项条件 · ${filter.join === "and" ? "全部满足" : "任一满足"}` : "无筛选条件"} · ${filter.sort || "主键"}${filter.descending ? "降序" : "升序"}`;
   return <div className="dbx-filterbar" data-expanded={expanded}>
     <div className="dbx-filter-header">
-      <button type="button" className="dbx-btn" aria-expanded={expanded} aria-controls={bodyId} onClick={() => setExpanded(v => !v)}>{expanded ? "收起筛选" : "展开筛选"}</button>
+      <button type="button" className="dbx-btn ghost" aria-expanded={expanded} aria-controls={bodyId} onClick={() => setExpanded(v => !v)}><Icon name={expanded ? "chevronDown" : "sliders"} size={14} />{expanded ? "收起筛选" : "展开筛选"}</button>
       <span className="dbx-filter-summary" title={`待查询：${summary}`}>待查询：{summary}</span>
-      <button type="button" className="dbx-btn pri" disabled={disabled} onClick={apply}>查询</button>
+      <button type="button" className="dbx-btn pri" disabled={disabled} aria-busy={disabled} onClick={apply}><Icon name={disabled ? "spinner" : "play"} size={12} />查询</button>
     </div>
     <div id={bodyId} className="dbx-filter-body" hidden={!expanded}>
     <div className="dbx-filter-actions" role="group" aria-label="筛选方式">
-      <button type="button" className="dbx-btn" aria-pressed={advanced} onClick={() => setAdvanced(!advanced)}>{advanced ? "切换可视化条件" : "手写 WHERE"}</button>
+      <button type="button" className="dbx-btn ghost" aria-pressed={advanced} onClick={() => setAdvanced(!advanced)}>{advanced ? "切换可视化条件" : "手写 WHERE"}</button>
     </div>
     {!advanced && <div className="dbx-filter-actions" role="group" aria-label="编辑筛选条件">
       <button type="button" className="dbx-btn" disabled={!cols.length || disabled} onClick={() => quick(cols[0].name, "")}>添加条件</button>
@@ -56,14 +57,14 @@ export function TableFilterBar({ connId, table, cols, disabled, onApply }: {
           <select aria-label={`条件 ${i+1} 运算符`} value={c.op} onChange={e => update({op:e.target.value as typeof c.op})}><option value="eq">等于</option><option value="contains">包含</option><option value="between">区间</option><option value="null">为空 NULL</option></select>
           {c.op !== "null" && <input aria-label={`条件 ${i+1} 值`} className="dbx-inp" type={input} value={c.value} onChange={e => update({value:e.target.value})} onKeyDown={e => e.key === "Enter" && apply()} />}
           {c.op === "between" && <input aria-label={`条件 ${i+1} 区间终点`} className="dbx-inp" type={input} value={c.end} onChange={e => update({end:e.target.value})} />}
-          <button type="button" className="dbx-btn" aria-label={`删除条件 ${i+1}`} onClick={() => setFilter({...filter,conditions:filter.conditions.filter((_,k) => k!==i)})}>删除</button>
+          <button type="button" className="dbx-ibtn" title={`删除条件 ${i+1}`} aria-label={`删除条件 ${i+1}`} onClick={() => setFilter({...filter,conditions:filter.conditions.filter((_,k) => k!==i)})}><Icon name="trash" size={14} /></button>
         </div>;
       })}
       <div className="dbx-condition"><label>排序<select aria-label="排序字段" value={filter.sort} onChange={e => setFilter({...filter,sort:e.target.value})}><option value="">默认主键排序</option>{options}</select></label><select aria-label="排序方向" value={filter.descending ? "desc" : "asc"} onChange={e => setFilter({...filter,descending:e.target.value === "desc"})}><option value="asc">升序</option><option value="desc">降序</option></select></div>
     </>}
     <div className="dbx-filter-actions dbx-filter-secondary" role="group" aria-label="筛选管理">
-      <button type="button" className="dbx-btn" onClick={() => { setFilter(emptyFilter()); setRaw({where:"",order:""}); setError(""); }}>清空条件</button>
-      {!advanced && <button type="button" className="dbx-btn" onClick={() => { try { compileFilter(filter,cols); saveFilter(connId,table,filter); toast("已保存常用筛选", "success"); } catch(e) { setError(String(e instanceof Error ? e.message : e)); } }}>保存常用筛选</button>}
+      <button type="button" className="dbx-btn ghost" onClick={() => { setFilter(emptyFilter()); setRaw({where:"",order:""}); setError(""); }}>清空条件</button>
+      {!advanced && <button type="button" className="dbx-btn ghost" onClick={() => { try { compileFilter(filter,cols); saveFilter(connId,table,filter); toast("已保存常用筛选", "success"); } catch(e) { setError(String(e instanceof Error ? e.message : e)); } }}>保存常用筛选</button>}
     </div>
     <details className="dbx-filter-sql"><summary>查看查询 SQL 与绑定参数</summary><pre>{sql || "请先补全条件"}</pre>{params && <code>绑定参数：{params}</code>}</details>
     </div>

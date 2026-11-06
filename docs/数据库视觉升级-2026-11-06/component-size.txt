@@ -1,0 +1,5 @@
+❌ 组件体量门禁未通过（规则 7）：
+   - src/components/settings/BuildSettings.tsx：315 行，超过上限 300
+
+   拆分思路：复杂状态逻辑 → hooks/useXxx.ts，独立 UI 区块 → 子组件，纯计算 → lib/。
+   注意：把代码搬进 hook 只为了降行数不算拆分，本脚本同样扫 `.ts`。

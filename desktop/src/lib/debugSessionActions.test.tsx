@@ -8,6 +8,8 @@ vi.mock("./debugSync", () => ({ applyBreakpointEvent: vi.fn(), resetBreakpointSy
 import { getDebugSnapshot, resumeDebug, stepDebug, useDebugSnapshot } from "./debugSession";
 import { debugStart } from "./debug";
 import { clearCompletedOperations, getOperations } from "./operations";
+import { updateWorkbenchLayout } from "./workbenchLayout";
+import { getSession, setSession } from "./workspaceSession";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root, host: HTMLDivElement;
 function Probe() { useDebugSnapshot(); return null; }
@@ -20,6 +22,17 @@ beforeAll(async () => {
 });
 afterAll(async () => { await act(async () => root.unmount()); host.remove(); });
 describe("调试动作失败恢复", () => {
+  it("锁定布局后新暂停仅更新目标和暂停指示，不抢工具页签", async () => {
+    updateWorkbenchLayout({ locked: true });
+    setSession({ panelTab: "build", panelOpen: false });
+    const seq = getDebugSnapshot().stopSeq;
+    await emit("debug-event", { event: "stopped", body: {} });
+    expect(getDebugSnapshot()).toMatchObject({ paused: true, stopSeq: seq + 1 });
+    expect(getSession()).toMatchObject({ panelTab: "build", panelOpen: false });
+    updateWorkbenchLayout({ locked: false });
+    await emit("debug-event", { event: "stopped", body: {} });
+    expect(getSession()).toMatchObject({ panelTab: "debug", panelOpen: true });
+  });
   it("附加返回未建立时失败，不能显示附加成功", async () => {
     mock.invoke.mockResolvedValueOnce({ state: "stopped", message: "JDWP不可用" });
     await expect(debugStart()).rejects.toThrow("JDWP不可用");
@@ -42,5 +55,11 @@ describe("调试动作失败恢复", () => {
     await emit("debug-event", { event: "continued", body: {} });
     await act(async () => { fail(new Error("late failure")); });
     expect(getDebugSnapshot().paused).toBe(false);
+  });
+  it("新暂停清除旧栈后重新读取线程，不能一直显示读取线程", async () => {
+    mock.invoke.mockImplementation(async cmd => cmd === "debug_threads" ? { threads: [{ id: 7, name: "main" }] } : {});
+    await pause();
+    expect(getDebugSnapshot().threads).toEqual([{ id: 7, name: "main" }]);
+    mock.invoke.mockImplementation(async cmd => cmd === "debug_status" ? { state: "stopped" } : {});
   });
 });

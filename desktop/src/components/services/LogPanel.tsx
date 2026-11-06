@@ -1,255 +1,105 @@
-import { useViewActive } from "../../lib/viewActivity";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Icon } from "../ui/icon";
-import { toast } from "../ui/toast";
-import { serverClearLog, type LogClearResult } from "../../lib/server";
-import { countLevels, filterLines, formatBytes, type LogLine } from "../../lib/serverLog";
-import { useServerLog, type FetchLog } from "../../hooks/useServerLog";
-import { logPanelStore, useLogPanelForm } from "../../lib/logPanelStore";
-
-/** 一次最多渲染多少行。日志保留 4000 行，DOM 只挂最后这些—— */
-/** 每 500ms 追加时若 diff 4000 个节点，界面会明显掉帧，而用户只看最新几百行。 */
-const MAX_RENDER = 500;
+import { countLevels, filterLines, logsRaw, type LogRecord } from "../../lib/serverLog";
+import { getLogPanelStore, useLogPanelForm, type ServiceLogSource } from "../../lib/logPanelStore";
+import { serviceLogMatches, serviceLogRows, isLaunchCommand } from "../../lib/serviceLogRows";
+import { useViewActive } from "../../lib/viewActivity";
+import { useServerLog } from "../../hooks/useServerLog";
+import { useServiceLogVirtual } from "../../hooks/useServiceLogVirtual";
+import { useServiceLogActions } from "../../hooks/useServiceLogActions";
+import { ServiceLogToolbar } from "./ServiceLogToolbar";
+import { ServiceLogFooter } from "./ServiceLogFooter";
+import { ServiceLogRowView } from "./ServiceLogRows";
+import { ServiceLogDetails } from "./ServiceLogDetails";
+import "../../service-console-log.css";
 
 interface Props {
-  /** 运行中/启动中才轮询；停止后只拉一次收尾。 */
-  active: boolean;
-  /** 每次启动 +1：换一代日志（后端启动时已把旧日志轮转掉）。 */
-  generation: number;
-  logPath: string;
-  logSize: number;
-  /** 窗口隐藏：停掉日志轮询（本页约定「隐藏即停」）。 */
-  appHidden: boolean;
-  onReveal: () => void;
-  onCleared: () => void;
-  /** 日志来源：只影响文案与默认取数（中间件 / 客户端各一个日志文件）。 */
-  target?: "middleware" | "client";
-  /** 自定义取数（客户端传 `clientLog`）；不传 = 中间件日志。 */
-  fetchLog?: FetchLog;
-  /** 自定义清空（客户端传 `clientClearLog`）；不传 = 中间件日志。 */
-  clearLog?: () => Promise<LogClearResult>;
+  active: boolean; generation: number; appHidden: boolean; logPath: string; logSize: number;
+  onReveal: (previous?: boolean) => void; onCleared: () => void; target?: ServiceLogSource;
+  visible?: boolean; runId?: string | null; projectRoot?: string | null;
 }
-
-/**
- * 日志面板：增量轮询 + 级别/关键字过滤 + 跟随 + 复制/清空。
- *
- * 为什么轮询而不是订阅事件：日志是「按 offset 拉增量」，重复拉同一段不会出错，
- * 漏一拍只是晚 0.5 秒；事件方式丢一条就永久缺行，而排查问题时少的偏偏是那条。
- */
-export function LogPanel({
-  active,
-  generation,
-  logPath,
-  logSize,
-  appHidden,
-  onReveal,
-  onCleared,
-  target = "middleware",
-  fetchLog,
-  clearLog,
-}: Props) {
+export function LogPanel({ active, generation, appHidden, logPath, logSize, onReveal, onCleared, target = "middleware", visible = true, runId, projectRoot }: Props) {
+  const [previous, setPrevious] = useState(false);
+  const [matchIndex, setMatchIndex] = useState(0);
+  const [selected, setSelected] = useState("");
+  const [details, setDetails] = useState<LogRecord | null>(null);
   const viewActive = useViewActive();
-  const { lines, error, reset } = useServerLog(active, generation, appHidden, fetchLog);
-  const who = target === "client" ? "客户端" : "中间件";
-  const archiveName = target === "client" ? "client.log.1" : "middleware.log.1";
-  // P2-9：级别/关键字过滤与跟随/换行进模块级仓库——「服务页看日志 → 文件页
-  // 改代码 → 回来看新日志」是排查动线，过滤器不能随切页重置。
-  const { level, keyword, follow, wrap } = useLogPanelForm();
-
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // 跟随最新：只在用户没往上翻时贴底
+  const available = visible && !appHidden && viewActive;
+  const reader = useServerLog(active, generation, !available, undefined, { target, previous, runId, projectRoot });
+  const form = useLogPanelForm(target, previous), store = getLogPanelStore(target, previous);
+  const filtered = useMemo(() => filterLines(reader.lines, form.level, form.keyword), [reader.lines, form.level, form.keyword]);
+  const counts = useMemo(() => countLevels(reader.lines), [reader.lines]);
+  const matches = useMemo(() => serviceLogMatches(filtered, form.query), [filtered, form.query]);
+  const index = matches.length ? Math.min(matchIndex, matches.length - 1) : 0;
+  const rows = useMemo(() => serviceLogRows(filtered, form.expanded, form.query), [filtered, form.expanded, form.query]);
+  const body = useRef<HTMLDivElement>(null), find = useRef<HTMLInputElement>(null);
+  const virtual = useServiceLogVirtual(rows, body, form.follow && !previous && !reader.historical, available, form.wrap, form.fontSize, form.scrollTop);
+  const { jumpTo } = virtual;
+  const actions = useServiceLogActions({ target, previous, fileId: reader.fileId, reset: reader.reset, onCleared });
+  const search = useRef({ matches, rows, index }); search.current = { matches, rows, index };
+  const moveMatch = (direction: number) => { store.set({ follow: false }); setMatchIndex(matches.length ? (index + direction + matches.length) % matches.length : 0); };
+  const searchReady = matches.length > 0;
   useEffect(() => {
-    const el = bodyRef.current;
-    if (el && follow) el.scrollTop = el.scrollHeight;
-  }, [lines, follow]);
-
-  /**
-   * 用户往上翻就自动暂停跟随。
-   *
-   * 以前只有工具栏那颗按钮能暂停：一边刷日志一边翻历史，每 0.5 秒被拽回底部，
-   * 根本没法读。回底部不自动恢复——恢复与否交给那颗按钮，避免「翻一眼又被粘住」。
-   */
-  const onBodyScroll = () => {
-    const el = bodyRef.current;
-    if (!el || !follow) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8;
-    if (!atBottom) logPanelStore.set({ follow: false });
-  };
-
-  // Ctrl+F 聚焦过滤框（服务页独占，不影响其他页）
+    if (!available || !form.query.trim() || !searchReady) return;
+    const { matches, index, rows } = search.current, match = matches[index];
+    if (!match) return;
+    const row = rows.find(row => row.line.id === match.id);
+    jumpTo(row && isLaunchCommand(row.line) ? `command-${match.id}` : String(match.id));
+  }, [available, form.query, index, searchReady, jumpTo]);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!viewActive || e.defaultPrevented || document.activeElement?.closest(".monaco-editor")) return;
-      if (!e.ctrlKey || e.altKey || e.key.toLowerCase() !== "f") return;
-      // 有弹窗打开时不抢：焦点会被从遮罩后面拽进过滤框，和弹窗的焦点陷阱互相拉扯，
-      // 用户看到的是一按 Ctrl+F 弹窗就"卡住"了（其实焦点跑到看不见的输入框里）。
-      if (document.querySelector('[role="dialog"][aria-modal="true"]:not([data-exiting])')) return;
-      e.preventDefault();
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [viewActive]);
-
-  const counts = useMemo(() => countLevels(lines), [lines]);
-  const filtered = useMemo(() => filterLines(lines, level, keyword), [lines, level, keyword]);
-  const shown = filtered.length > MAX_RENDER ? filtered.slice(filtered.length - MAX_RENDER) : filtered;
-  const omitted = filtered.length - shown.length;
-
-  // 复制的是「已加载的全部匹配行」，不是屏幕上渲染的那 500 行：
-  // 大日志里关键报错往往在被窗口截掉的更早位置，只拷可见部分等于悄悄丢内容。
-  const onCopy = useCallback(async () => {
-    if (!filtered.length) return;
-    try {
-      await navigator.clipboard.writeText(filtered.map(toRaw).join("\n"));
-      const hidden = filtered.length - shown.length;
-      toast(`已复制 ${filtered.length} 行日志${hidden > 0 ? `（含 ${hidden} 行未显示）` : ""}`, "success");
-    } catch (e) {
-      toast(`复制失败：${e}`, "error");
-    }
-  }, [filtered, shown.length]);
-
-  const onClear = async () => {
-    try {
-      const result = await (clearLog ?? serverClearLog)();
-      // 运行中清空只是「从现在开始看」：文件没动，偏移要快进到末尾，
-      // 否则归零后旧内容会被整份读回来。
-      reset(result.offset);
-      if (!result.rotated) {
-        toast("运行中：已清屏，磁盘上的日志文件未删除", "info");
+    if (previous) return;
+    if (form.follow || form.seen === null || reader.newestId < form.seen) store.set({ seen: reader.newestId });
+  }, [previous, form.follow, form.seen, reader.newestId, store]);
+  useEffect(() => {
+    if (!available) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || document.querySelector('[role="dialog"][aria-modal="true"]:not([data-exiting])')) return;
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f") {
+        if (document.activeElement?.closest(".monaco-editor")) return;
+        event.preventDefault(); store.set({ findOpen: true }); requestAnimationFrame(() => { find.current?.focus(); find.current?.select(); });
+      } else if (event.key === "F3" || (event.key === "Enter" && document.activeElement === find.current)) {
+        if (!search.current.matches.length) return;
+        event.preventDefault(); store.set({ follow: false });
+        setMatchIndex(value => (value + (event.shiftKey ? -1 : 1) + search.current.matches.length) % search.current.matches.length);
+      } else if (event.key === "Escape" && document.activeElement === find.current) {
+        event.preventDefault(); store.set({ query: "", findOpen: false });
       }
-      onCleared();
-    } catch (e) {
-      toast(`清空日志失败：${e}`, "error");
-    }
+    };
+    window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
+  }, [available, store]);
+
+  const followLatest = () => { reader.showLatest(); store.set({ follow: true, seen: reader.newestId }); };
+  const toggle = (id: number) => { const expanded = new Set(form.expanded); if (expanded.has(id)) expanded.delete(id); else expanded.add(id); store.set({ expanded }); };
+  const onScroll = () => {
+    virtual.onScroll(); const element = body.current; if (!element) return;
+    const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 8;
+    store.set({ scrollTop: element.scrollTop, ...(form.follow && !atBottom ? { follow: false } : {}) });
   };
-
-  return (
-    <section className="sv-log">
-      <div className="sv-log-bar">
-        <div className="sv-lv">
-          <button type="button" data-on={level === "all" || undefined} onClick={() => logPanelStore.set({ level: "all" })}>
-            全部<span className="sv-n">{counts.all}</span>
-          </button>
-          <button type="button" data-on={level === "warn" || undefined} onClick={() => logPanelStore.set({ level: "warn" })}>
-            警告<span className="sv-n">{counts.warn}</span>
-          </button>
-          <button type="button" data-on={level === "error" || undefined} onClick={() => logPanelStore.set({ level: "error" })}>
-            错误<span className="sv-n">{counts.error}</span>
-          </button>
-        </div>
-        <span className="sv-divider" />
-        <label className="sv-search" data-focus-container>
-          <Icon name="search" size={12} />
-          <input
-            ref={inputRef}
-            aria-label="过滤服务日志"
-            value={keyword}
-            placeholder="过滤日志…"
-            onChange={(e) => logPanelStore.set({ keyword: e.target.value })}
-          />
-          <span className="sv-kbd">Ctrl F</span>
-        </label>
-        <span className="sv-sp" />
-        <button
-          type="button"
-          className="sv-icon-btn"
-          data-on={follow || undefined}
-          title={follow ? "正在跟随最新（点一下暂停）" : "已暂停跟随（点一下回到底部）"}
-          onClick={() => {
-            // 恢复跟随时立即贴底（原 setFollow updater 里的副作用，语义不变）
-            if (!follow) {
-              const el = bodyRef.current;
-              if (el) el.scrollTop = el.scrollHeight;
-            }
-            logPanelStore.set({ follow: !follow });
-          }}
-        >
-          <Icon name="download" size={14} />
-        </button>
-        <button
-          type="button"
-          className="sv-icon-btn"
-          data-on={wrap || undefined}
-          title={wrap ? "自动换行：开" : "自动换行：关"}
-          onClick={() => logPanelStore.set({ wrap: !wrap })}
-        >
-          <Icon name="log" size={14} />
-        </button>
-        <button type="button" className="sv-icon-btn" title="复制当前显示的行" onClick={() => void onCopy()}>
-          <Icon name="copy" size={14} />
-        </button>
-        <button
-          type="button"
-          className="sv-icon-btn"
-          title={
-            active
-              ? `${who}运行中：已清屏，磁盘文件不动，只是从现在开始看；旧内容还在日志文件里`
-              : `清空日志（旧的存为 ${archiveName}）`
-          }
-          onClick={() => void onClear()}
-        >
-          <Icon name="trash" size={14} />
-        </button>
+  const captureSelection = () => {
+    const selection = window.getSelection();
+    setSelected(selection && body.current?.contains(selection.anchorNode) && body.current?.contains(selection.focusNode) ? selection.toString() : "");
+  };
+  const unseen = Math.max(0, reader.newestId - (form.seen ?? reader.newestId));
+  const style = { "--sc-log-font": `${form.fontSize}px` } as CSSProperties;
+  return <section className="sc-log" style={style} aria-label={`${target === 'client' ? '客户端' : '中间件'}控制台`}>
+    <ServiceLogToolbar form={form} set={patch => { store.set(patch); if (patch.query !== undefined) setMatchIndex(0); }} counts={counts} matchedCount={filtered.length} matchIndex={index} matchCount={matches.length} onMatch={moveMatch} findRef={find} previous={previous} busy={actions.busy} selected={selected}
+      onCopy={() => actions.copy(logsRaw(filtered), `${filtered.length} 行已加载匹配日志`)} onCopySelection={() => actions.copy(selected, "日志选区")} onClear={actions.clear}
+      onExport={complete => actions.exportLog(complete ? undefined : logsRaw(filtered))} onReload={() => { reader.reset(); reader.retry(); }}
+      onFollow={() => form.follow ? store.set({ follow: false }) : followLatest()} />
+    {actions.busy && <div className="sc-log-operation" role="status"><Icon name="spinner" size={12} className="animate-spin" /><span>{actions.busy}中…</span>{actions.busy === '导出日志' && <button type="button" className="sc-log-button" onClick={actions.cancel}>取消</button>}</div>}
+    {reader.error && <div className="sc-log-error" role="alert"><Icon name="alertTriangle" size={13} /><span>读取日志失败：{reader.error}。已加载内容仍可查看。</span><button type="button" className="sc-log-button" onClick={reader.retry}>重试</button></div>}
+    {reader.truncated && <div className="sc-log-range-note">部分超长内容未加载，导出完整日志文件可保留全部原文。</div>}
+    <div className="sc-log-container">
+      <div ref={body} className="sc-log-body" data-wrap={form.wrap} onScroll={onScroll} onMouseUp={captureSelection} onKeyUp={captureSelection} tabIndex={0} aria-label="日志正文">
+        {!reader.lines.length ? <div className="sc-log-empty"><strong>{reader.loading ? '正在读取日志…' : previous ? '没有上次运行日志' : '尚无控制台输出'}</strong><p>{reader.loading ? '正在读取当前日志的尾部片段。' : previous ? '首次启动前没有归档；启动新的运行后可在这里回看上一次输出。' : '启动后将显示准备过程和运行输出；清屏后新输出会继续显示。'}</p>{!reader.loading && <button type="button" className="sc-log-button" onClick={() => { reader.reset(); reader.retry(); }}>重新读取日志</button>}</div>
+          : !filtered.length ? <div className="sc-log-empty"><strong>没有匹配的日志</strong><p>清除过滤可恢复上下文。</p><button type="button" className="sc-log-button" onClick={() => store.set({ level: 'all', keyword: '' })}>清除过滤</button></div>
+          : <div className="sc-log-virtual" style={{ height: virtual.height }}>{rows.slice(virtual.start, virtual.end).map((row, offset) => <ServiceLogRowView key={row.key} row={row} top={virtual.offsets[virtual.start + offset]} rowRef={virtual.rowRef} query={form.query} currentMatch={matches[index]?.id ?? null} expanded={form.expanded} toggle={toggle} copy={actions.copy} details={setDetails} />)}</div>}
       </div>
-
-      <div ref={bodyRef} className="sv-log-body" data-wrap={wrap || undefined} onScroll={onBodyScroll}>
-        {error && <div className="sv-log-empty">读日志失败：{error}</div>}
-        {!error && shown.length === 0 && (
-          <div className="sv-log-empty">
-            {lines.length === 0
-              ? `还没有输出。点「启动」后这里会跟随${who}的控制台输出。`
-              : "没有匹配的行。"}
-          </div>
-        )}
-        {omitted > 0 && <div className="sv-log-more">前 {omitted} 行未渲染（只显示最新 {MAX_RENDER} 行）</div>}
-        {shown.map((line) => (
-          <div key={line.id} className="sv-ln" data-lv={line.level} data-stack={line.stack || undefined}>
-            <span className="sv-ts">{line.time}</span>
-            <span className="sv-th">{line.stack ? "" : line.thread}</span>
-            <span className="sv-lvl">{line.stack ? "" : line.level.toUpperCase()}</span>
-            {line.logger && (
-              <span className="sv-obj" title={line.logger}>
-                {line.logger}
-              </span>
-            )}
-            <span className="sv-msg">{line.text}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="sv-log-foot">
-        {/* 这里必须是「已加载」而不是「N 行」：面板只在内存里留最近 4000 行，
-            而右边是磁盘文件的真实大小。写成「4000 行 · 312.4 MB」会让用户以为
-            整个日志只有 4000 行，从而漏掉更早的关键报错。 */}
-        <span title="面板只加载最近 4000 行（内存保留上限）；完整内容在日志文件里，点「日志位置」打开">
-          {counts.all} 行已加载{logSize > 0 ? ` · 日志文件 ${formatBytes(logSize)}` : ""}
-        </span>
-        <span>·</span>
-        <button type="button" className="sv-link" onClick={onReveal} title={logPath}>
-          日志位置
-        </button>
-        <span className="sv-sp" />
-        <span className="sv-follow">
-          <span className="sv-follow-dot" data-off={!follow || undefined} />
-          {active ? (follow ? "跟随中 · 每 0.5 秒刷新" : "已暂停跟随") : "未在运行，不再刷新"}
-        </span>
-      </div>
-    </section>
-  );
-}
-
-/** 把结构化行还原成可粘贴的原文（复制给人贴到聊天里排查用）。 */
-function toRaw(l: LogLine): string {
-  if (l.stack) return l.text;
-  const parts: string[] = [];
-  if (l.time) parts.push(l.time);
-  if (l.thread) parts.push(`[${l.thread}]`);
-  parts.push(l.level.toUpperCase());
-  if (l.logger) parts.push(l.logger, "-");
-  parts.push(l.text);
-  return parts.join(" ");
+      {!previous && !form.follow && <button className="sc-log-new" type="button" onClick={followLatest}><Icon name="stepInto" size={12} />{unseen ? `新增 ${unseen} 行 · ` : ''}回到最新</button>}
+    </div>
+    <ServiceLogFooter count={reader.lines.length} size={previous ? reader.size : reader.size || logSize} previous={previous} onPrevious={value => { setPrevious(value); setMatchIndex(0); setSelected(''); setDetails(null); }} start={reader.startOffset} end={reader.endOffset} historical={reader.historical} updatedAt={reader.updatedAt} active={active} hasOlder={reader.startOffset > 0} readingOlder={reader.readingOlder}
+      onOlder={() => { store.set({ follow: false, scrollTop: 0 }); void reader.readOlder(); }} onLatest={followLatest} onReveal={() => onReveal(previous)} />
+    <ServiceLogDetails record={details} onClose={() => setDetails(null)} onCopy={actions.copy} />
+    <span className="sr-only">日志位置：{logPath}</span>
+  </section>;
 }

@@ -126,7 +126,7 @@ pub fn probe(nc_home_cfg: Option<&str>, component: &str, module: &str, bmf_path:
                 "NC 安装目录",
                 "block",
                 e,
-                "到「NC 服务」页选择目标环境的 NC home（POC 请选测试环境）。",
+                "到设置 → 开发 →「NC 环境」页选择目标环境的 NC home（POC 请选测试环境）。",
             ));
         }
     }

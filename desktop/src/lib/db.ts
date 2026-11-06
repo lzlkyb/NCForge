@@ -87,6 +87,9 @@ const KNOWN_CODES = new Set([
   "sql",
   "need-password",
   "not-connected",
+  "session-lost",
+  "fallback-session-lost",
+  "probe-failed",
   "bridge",
   "dup",
   "need-schema",
@@ -94,6 +97,9 @@ const KNOWN_CODES = new Set([
   "slot-gone",
   // 一条连接上的独立会话用满了（最多 3 个）
   "slots-full",
+  // 这个操作需要 NC 安装目录（JVM 桥 / prop.xml 口令）。纯 Rust 引擎不需要——
+  // 界面据此引导「换引擎」或「去设置配置」，不靠字符串匹配错误文本
+  "need-nc-home",
 ]);
 
 export interface DbError {
@@ -103,11 +109,15 @@ export interface DbError {
     | "sql"
     | "need-password"
     | "not-connected"
+    | "session-lost"
+    | "fallback-session-lost"
+    | "probe-failed"
     | "bridge"
     | "dup"
     | "need-schema"
     | "slot-gone"
     | "slots-full"
+    | "need-nc-home"
     | "other";
   message: string;
 }

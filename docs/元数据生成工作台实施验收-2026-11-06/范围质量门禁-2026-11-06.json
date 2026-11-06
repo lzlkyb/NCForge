@@ -1,0 +1,75 @@
+{
+  "checkedAt": "2026-11-06T08:35:40.011Z",
+  "scope": "generation workbench static checks; eight generation Rust files; full repository formatting and remaining bundle growth recorded separately",
+  "checks": [
+    {
+      "name": "组件体量",
+      "exitCode": 0,
+      "output": "✅ 组件体量门禁通过\n"
+    },
+    {
+      "name": "UI约定",
+      "exitCode": 0,
+      "output": "✅ UI 约定门禁通过（裸缓动 0 处、<10px 字号 0 处，均未超过基线）\n"
+    },
+    {
+      "name": "设计token",
+      "exitCode": 0,
+      "output": "ℹ️ 有文件的色值数量低于基线，可运行 --update 下调（不阻断）。\nℹ️ 有文件的实底表面数量低于基线，可运行 --update 下调（不阻断）。\n✅ 设计 token 棘轮通过（5 个文件 33 处裸色值；13 个文件 16 处实底表面，均未超过基线）\n"
+    },
+    {
+      "name": "命令契约",
+      "exitCode": 0,
+      "output": "✅ 命令契约一致（224 条命令）\n"
+    },
+    {
+      "name": "本批Rust格式",
+      "exitCode": 0,
+      "output": ""
+    }
+  ],
+  "externalChecks": [
+    {
+      "label": "门禁-生成范围ESLint-2026-11-06",
+      "exitCode": 0,
+      "elapsedSeconds": 1.974,
+      "minFreeMB": 4551.63671875
+    },
+    {
+      "label": "门禁-前端生成回归-2026-11-06",
+      "exitCode": 0,
+      "elapsedSeconds": 14.206,
+      "minFreeMB": 4306.50390625
+    },
+    {
+      "label": "门禁-Rust最终检查-2026-11-06",
+      "exitCode": 0,
+      "elapsedSeconds": 82.54,
+      "minFreeMB": 3878.58203125
+    },
+    {
+      "label": "门禁-前端生产构建-2026-11-06",
+      "exitCode": 0,
+      "elapsedSeconds": 30.822,
+      "minFreeMB": 1958.75390625
+    }
+  ],
+  "diffWhitespace": {
+    "passed": true
+  },
+  "documentationLinks": {
+    "checked": 30,
+    "missing": 0
+  },
+  "wholeRepositoryLimits": {
+    "rustFormatting": "existing differences",
+    "bundle": {
+      "passed": false,
+      "totalRawKB": 5092,
+      "totalGzipKB": 1464,
+      "maxChunkRawKB": 3171,
+      "remainingOverRawKB": 19,
+      "remainingOverGzipKB": 6
+    }
+  }
+}

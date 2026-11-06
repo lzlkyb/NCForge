@@ -5,7 +5,7 @@
 .app-shell .wb-global-search > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .app-shell .wb-main { container-name:workbench-document; container-type:inline-size; }
 .app-shell .dbx-dd .li:focus-visible { background:hsl(var(--accent)); outline:2px solid hsl(var(--ring)); outline-offset:-2px; }
-.dbx-dlg .bd > .dbx-form-label { color:hsl(var(--muted-foreground)); text-align:right; }
+.dbx-dlg .bd > .dbx-form-label { color:hsl(var(--muted-foreground)); text-align:left; }
 .dbx-dlg .bd > div.dbx-form-label { font-size:var(--dbx-fs-meta); }
 .app-shell .lg-chips { flex-wrap:wrap; overflow-x:hidden; overflow-y:auto; max-height:112px; }
 html[data-ui-density="comfortable"] { --dbx-fs-body:13px; --dbx-fs-meta:12px; --dbx-h-control:32px; }
@@ -19,15 +19,11 @@ html[data-ui-density="comfortable"] .app-shell :is(.wb-settings-search input,.lg
 html[data-ui-density="comfortable"] .app-shell :is(.settings-choice button,.srow-control input:not([type="checkbox"],[type="radio"],[type="range"]),.srow-control select) { min-height:32px; }
 html[data-ui-density="comfortable"] .app-shell .wb-settings-nav button { padding-block:9px; }
 @container workbench-document (max-width:720px) {
-  .dbx-sqlbar .dbx-connpick { max-width:100%; }
-  .dbx-sqlbar .dbx-sp { flex-basis:100%; height:0; }
   .lg-head .lg-sub { flex-basis:100%; overflow-wrap:anywhere; }
   .dbx-txbar { flex-wrap:wrap; }
   .vc-file-head :is(.vc-path,.vc-url) { min-width:0; overflow-wrap:anywhere; }
 }
 @container workbench-document (max-width:440px) {
-  .dbx-sqlbar .dbx-connpick { flex-basis:100%; }
-  .dbx-sqlbar .dbx-connpick > b { flex:1; }
   .dbx-sqlbar .k { display:none; }
   .lg-head { gap:6px; padding-inline:10px; }
 }

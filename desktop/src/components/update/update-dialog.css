@@ -1,7 +1,7 @@
 /* The shared Modal owns entry/exit; state updates retain the same surface and focus. */
 .update-dialog {
   position:relative;display:grid;grid-template-columns:200px minmax(0,1fr);width:740px;
-  max-width:calc(100vw - 32px);height:min(650px,calc(100dvh - 48px));max-height:calc(100dvh - 48px);
+  max-width:calc(100vw - 32px);height:auto;max-height:min(650px,calc(100dvh - 48px));
   overflow:hidden;border-radius:var(--r-dialog,12px);background:hsl(var(--card));color:hsl(var(--foreground));
 }
 .update-dialog.modal-surface,html:root[data-ui-style] .update-dialog { border:0;background:hsl(var(--card));box-shadow:var(--shadow-pop); }
@@ -15,7 +15,7 @@
 .update-hero-version[data-long] { font-size:27px; }
 .update-brand-caption { margin:21px 0 0;font-size:13px;line-height:1.85;color:hsl(var(--foreground)); }
 .update-brand-bottom { margin-top:auto;padding-top:28px;font-size:11px;line-height:1.8;color:hsl(var(--muted-foreground)); }
-.update-dialog-main { display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden; }
+.update-dialog-main { display:flex;flex-direction:column;min-height:0;min-width:0;max-height:inherit;overflow:hidden; }
 .update-dialog-header { flex-shrink:0;padding:28px 46px 19px 30px; }
 .update-dialog-header h2 { margin:0;font-size:24px;font-weight:650;line-height:1.4;letter-spacing:-.025em;text-wrap:balance; }
 .update-dialog-header p { margin:7px 0 0;font-size:12px;line-height:1.8;color:hsl(var(--muted-foreground)); }

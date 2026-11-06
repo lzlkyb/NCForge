@@ -1,0 +1,245 @@
+{
+  "checks": [
+    "原始输出左对齐，无空时间级别列",
+    "查找保留上下文，匹配导航及异常展开",
+    "过滤无匹配可恢复，来源保留各自设置",
+    "暂停后追加不抢阅读位置，新增行可回到底部",
+    "复制与导出范围明确，清屏保留恢复入口",
+    "未知状态可重试，不提供启动；读日志失败保留已加载内容",
+    "冲突与失败有定位和恢复操作",
+    "启动可取消，没有晚到完成状态；客户端独立启停",
+    "异常详情、源码定位、展开与恢复",
+    "组合启动遇到端口冲突不启动客户端",
+    "取消组合准备不执行后续步骤",
+    "取消组合中正在启动的 JVM 不产生晚到完成",
+    "组合启动成功，实际连接目标不一致时中断",
+    "运行详情区分工作台数据库与未验证业务健康"
+  ],
+  "layouts": [
+    {
+      "theme": "light",
+      "material": "glass",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "body": {
+        "width": 966,
+        "height": 220
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "viewport": {
+        "width": 1024,
+        "height": 540
+      },
+      "body": {
+        "width": 602,
+        "height": 220
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "viewport": {
+        "width": 683,
+        "height": 512
+      },
+      "body": {
+        "width": 493,
+        "height": 220
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "viewport": {
+        "width": 390,
+        "height": 700
+      },
+      "body": {
+        "width": 376,
+        "height": 151
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "light",
+      "material": "solid",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "body": {
+        "width": 966,
+        "height": 220
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "light",
+      "material": "solid",
+      "viewport": {
+        "width": 1024,
+        "height": 540
+      },
+      "body": {
+        "width": 602,
+        "height": 220
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "light",
+      "material": "solid",
+      "viewport": {
+        "width": 683,
+        "height": 512
+      },
+      "body": {
+        "width": 493,
+        "height": 220
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "light",
+      "material": "solid",
+      "viewport": {
+        "width": 390,
+        "height": 700
+      },
+      "body": {
+        "width": 376,
+        "height": 151
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "body": {
+        "width": 966,
+        "height": 220
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "viewport": {
+        "width": 1024,
+        "height": 540
+      },
+      "body": {
+        "width": 602,
+        "height": 220
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "viewport": {
+        "width": 683,
+        "height": 512
+      },
+      "body": {
+        "width": 493,
+        "height": 220
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "viewport": {
+        "width": 390,
+        "height": 700
+      },
+      "body": {
+        "width": 376,
+        "height": 151
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "dark",
+      "material": "solid",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "body": {
+        "width": 966,
+        "height": 220
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "dark",
+      "material": "solid",
+      "viewport": {
+        "width": 1024,
+        "height": 540
+      },
+      "body": {
+        "width": 602,
+        "height": 220
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "dark",
+      "material": "solid",
+      "viewport": {
+        "width": 683,
+        "height": 512
+      },
+      "body": {
+        "width": 493,
+        "height": 220
+      },
+      "overflow": [],
+      "horizontal": 0
+    },
+    {
+      "theme": "dark",
+      "material": "solid",
+      "viewport": {
+        "width": 390,
+        "height": 700
+      },
+      "body": {
+        "width": 376,
+        "height": 151
+      },
+      "overflow": [],
+      "horizontal": 0
+    }
+  ],
+  "errors": []
+}

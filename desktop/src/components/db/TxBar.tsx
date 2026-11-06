@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
-import { friendlyDbError, thousands } from "../../lib/db";
+import { friendlyDbError, parseDbError, thousands } from "../../lib/db";
+import { reconnectSession } from "../../lib/dbConfirm";
 import { useAppHidden } from "../../lib/appVisibility";
 import { type TxInfo } from "../../lib/dbApi";
 import { patchTab, txAction, useConnRt, type SqlTab } from "../../lib/dbStore";
@@ -31,7 +32,10 @@ export function TxBar({ connId, tabId, slot, tx: override }: {
   const tx = slot ? override : primaryTx;
   const [, tick] = useState(0);
   /** 正在提交 / 回滚哪一边：大事务要好几秒，只把按钮置灰看不出点没点上。 */
-  const [acting, setActing] = useState<null | "commit" | "rollback">(null);
+  const [acting, setActing] = useState<null | "commit" | "rollback" | "reconnect">(null);
+  const [lostSession, setLostSession] = useState<string | null>(null);
+  const session = `${connId}:${slot ?? ""}`;
+  const actionLock = useRef(false);
   const appHidden = useAppHidden();
   const open = !!tx && !tx.autoCommit && tx.statements > 0;
   // 持续时间每秒刷新；窗口不可见时不刷（CLAUDE.md 8.1：不可见必须停轮询）
@@ -42,10 +46,15 @@ export function TxBar({ connId, tabId, slot, tx: override }: {
   }, [open, appHidden]);
   if (!open || !connId) return null;
 
-  const act = async (a: "commit" | "rollback") => {
+  const act = async (a: "commit" | "rollback" | "reconnect") => {
+    if (actionLock.current) return;
+    actionLock.current = true;
     setActing(a);
     try {
-      if (slot && tabId) {
+      if (a === "reconnect") {
+        if (await reconnectSession(connId, slot ?? null, tabId)) setLostSession(null);
+        return;
+      } else if (slot && tabId) {
         const tx = await txAction(connId, a, slot);
         patchTab<SqlTab>(tabId, { tx });
       } else {
@@ -53,11 +62,25 @@ export function TxBar({ connId, tabId, slot, tx: override }: {
       }
       toast(a === "commit" ? "已提交" : "已回滚", "success");
     } catch (e) {
-      toast(`${a === "commit" ? "提交" : "回滚"}失败：${friendlyDbError(e)}`, "error");
+      if (parseDbError(e).code === "session-lost") setLostSession(session);
+      const label = a === "commit" ? "提交" : a === "rollback" ? "回滚" : "重连";
+      toast(`${label}失败：${friendlyDbError(e)}`, "error");
     } finally {
+      actionLock.current = false;
       setActing(null);
     }
   };
+
+  if (lostSession === session) return (
+    <div className="dbx-txbar" role="status">
+      <Icon name="alertTriangle" size={14} />
+      <span>数据库会话已断开，事务结果需核对。</span>
+      <span className="dbx-sp" />
+      <button type="button" className="dbx-btn" disabled={acting !== null} onClick={() => void act("reconnect")}>
+        {acting === "reconnect" ? "正在重新连接…" : "重新连接"}
+      </button>
+    </div>
+  );
 
   return (
     <div className="dbx-txbar" role="status">
@@ -65,7 +88,7 @@ export function TxBar({ connId, tabId, slot, tx: override }: {
       <span>
         未提交事务：<b>{tx.statements}</b> 条写语句 · 影响 <b>{thousands(tx.rows)}</b> 行
         {tx.since > 0 && <> · 已持续 {since(tx.since)}</>}
-        {slot && <span className="dbx-muted">（独立会话 {slot}，与其它标签各自独立）</span>}
+        {slot && <span className="dbx-tx-session" title={`独立会话 ${slot}，与其它标签各自独立`}> · 独立事务</span>}
       </span>
       <span className="dbx-sp" />
       <button type="button" className="dbx-btn" disabled={acting !== null} onClick={() => void act("rollback")}>

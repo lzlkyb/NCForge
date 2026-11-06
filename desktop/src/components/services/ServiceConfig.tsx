@@ -9,15 +9,19 @@ import { HotwebsField } from "./HotwebsField";
 import { beginOperation } from "../../lib/operations";
 import { applyWorkspace } from "../../lib/switchWorkspace";
 import { ensureFilesSaved } from "../../lib/terminatePreflight";
-import { hotwebsProbe, hotwebsSet, ncHomeProbe, ncHomeSet, serverHeapSet, type ServerStatus } from "../../lib/server";
+import { requestSettingsSection } from "../../lib/settingsJump";
+import { hotwebsProbe, hotwebsSet, ncHomeProbe, serverHeapSet, type ServerStatus } from "../../lib/server";
 import { clientHeapSet, type ClientStatus } from "../../lib/client";
 
 /**
- * 服务页配置栏：NC home / 工程 / 堆上限。
+ * 服务页配置栏：工程 / 堆上限 / webapp 名单。
+ *
+ * NC home 不在这改（2026-11-06 起）：唯一编辑入口已收到设置 → 开发 →
+ * 「NC 环境」页，这里只读展示 + 跳转，避免两处可写导致分叉。
  *
  * 这三个字段有个共同前提——**改配置不会改变已经在跑的那个 JVM**。端口和堆只能启动时
- * 决定（后端会拒或提示重启），而 NC home / 工程更阴：运行中换了 home，状态轮询按新
- * home 的 prop.xml 取端口，我们的 java 不在新端口上监听 → `portOwnedBySelf=false`
+ * 决定（后端会拒或提示重启），工程更阴：运行中换了工程，状态轮询按新
+ * 工程的配置取端口，我们的 java 不在新端口上监听 → `portOwnedBySelf=false`
  * → 界面永远「启动中」，用户无从得知服务其实还在跑；若新端口恰被另一个 java 占着，
  * 界面还会提供「结束该进程」，一点就误杀别人的进程。所以运行中改这两项必须先确认。
  */
@@ -74,31 +78,41 @@ export function ServiceConfig({
     setPending(null);
   };
 
+  /**
+   * home 的唯一编辑入口已收到设置 → 开发 →「NC 环境」（2026-11-06）。
+   * 这里只读展示 + 跳转：全应用能改 home 的地方只能有一个，
+   * 否则「在服务页改了一半、在设置页又改了一份」的分叉没法排查。
+   */
+  const goNcEnv = () => {
+    requestSettingsSection("NC 环境");
+    window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "settings" }));
+  };
+
   return (
     <>
       {probe.error && (
         <div className="sv-alert" data-tone="warn">
           <Icon name="info" size={14} />
-          <span className="sv-alert-text">找不到 NC 安装目录：{String(probe.error)}</span>
+          <span className="sv-alert-text">
+            找不到 NC 安装目录：{String(probe.error)}（到设置 → 开发 →「NC 环境」里配置，可自动探测）
+          </span>
         </div>
       )}
 
       <div className="sv-cfg">
-        <PathField
-          label="NC home"
-          value={probe.data?.root ?? status?.ncHome ?? ""}
-          placeholder="D:\ncc\1909home"
-          hint={probe.data ? `${probe.data.moduleCount} 个模块` : undefined}
-          onSave={async (v) => {
-            if (running && !(await confirmRunning("NC home", v))) return "cancelled";
-            const home = await ncHomeSet(v);
-            queryClient.setQueryData(["nc-home"], home);
-            // 换了安装目录，hotwebs/ 下的候选和生效名单都变了
-            void queryClient.invalidateQueries({ queryKey: ["hotwebs"] });
-            toast(running ? "NC home 已保存，重启服务后生效" : "NC home 已切换", "success");
-            onRefetch();
-          }}
-        />
+        <div className="sv-cfg-item">
+          <span className="sv-cfg-k">NC home</span>
+          <span className="sv-cfg-v" title={probe.data?.root ?? "未配置"}>
+            {probe.data?.root ?? <span className="sv-cfg-empty">D:\ncc\1909home</span>}
+          </span>
+          <span className="sv-cfg-hint" title={probe.data ? "已在设置的「NC 环境」页识别" : "未配置，去设置的「NC 环境」页指定"}>
+            {probe.data ? `${probe.data.moduleCount} 个模块` : "未配置"}
+          </span>
+          <span className="sv-sp" />
+          <button type="button" className="sv-link" onClick={goNcEnv}>
+            去设置更改
+          </button>
+        </div>
         <span className="sv-cfg-sep" />
         {/* 启动时挂哪些 webapp 是 JVM 参数（-Duap.hotwebs），默认与 Eclipse 的
             启动配置一致；多挂的插件 webapp 可能在共享 classpath 下启动失败。 */}

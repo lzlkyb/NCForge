@@ -1,0 +1,100 @@
+/* 控制台正文使用稳定实底；材质效果由工作台外壳承担。 */
+.sc-log-section, .sc-log-pane, .sc-log { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; background: hsl(var(--card)); }
+.sc-log-pane[hidden] { display: none; }
+.sc-log-spacer { flex: 1; min-width: 0; }
+.sc-log-button, .sc-log-icon { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 27px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--r-control); background: transparent; color: hsl(var(--foreground)); font: 12px/1.4 var(--font-ui, "Segoe UI", "Microsoft YaHei UI", sans-serif); white-space: nowrap; cursor: pointer; flex-shrink: 0; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.sc-log-icon { width: 27px; padding: 0; color: hsl(var(--muted-foreground)); }
+.sc-log-button:hover:not(:disabled), .sc-log-icon:hover:not(:disabled) { background: hsl(var(--foreground) / .06); }
+.sc-log-button[aria-pressed="true"] { color: hsl(var(--primary)); }
+.sc-log-button:disabled, .sc-log-icon:disabled { opacity: .5; cursor: not-allowed; }
+.sc-log-toolbar { display: flex; align-items: center; gap: 4px; flex-shrink: 0; min-height: 36px; padding: 3px 10px; border-bottom: 1px solid hsl(var(--border)); }
+.sc-log-levels { display: flex; align-items: center; gap: 2px; }
+.sc-log-levels button { height: 26px; padding: 0 7px; border: 0; border-radius: var(--r-control); background: transparent; color: hsl(var(--foreground)); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.sc-log-levels button:hover { background: hsl(var(--foreground) / .05); }
+.sc-log-levels button[aria-pressed="true"] { background: hsl(var(--accent)); color: hsl(var(--primary)); }
+.sc-log-levels button > span { margin-left: 4px; color: hsl(var(--muted-foreground)); font: 11px Consolas, monospace; }
+.sc-log-filter-dot { width: 5px; height: 5px; border-radius: 50%; background: hsl(var(--primary)); }
+.sc-log-filter-row, .sc-log-find-row { display: flex; align-items: center; gap: 6px; padding: 3px 12px; min-height: 35px; flex-shrink: 0; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--background)); color: hsl(var(--muted-foreground)); font-size: 11px; }
+.sc-log-filter-row input, .sc-log-find-row input { flex: 1; min-width: 65px; height: 27px; padding: 0 7px; border: 1px solid hsl(var(--border)); border-radius: var(--r-control); background: hsl(var(--card)); color: hsl(var(--foreground)); font-size: 12px; caret-color: hsl(var(--primary)); }
+.sc-log-filter-row input::placeholder, .sc-log-find-row input::placeholder { color: hsl(var(--muted-foreground)); opacity: 1; }
+.sc-log-find-count { min-width: 64px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sc-log-container { position: relative; flex: 1; min-height: 0; min-width: 0; }
+.sc-log-body { width: 100%; height: 100%; overflow: auto; overflow-anchor: none; font: var(--sc-log-font, 13px)/1.75 Consolas, "Cascadia Mono", "Microsoft YaHei UI", monospace; font-variant-numeric: tabular-nums; scrollbar-width: thin; scrollbar-color: hsl(var(--muted-foreground) / .4) transparent; }
+.sc-log-body:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: -2px; }
+.sc-log-body::-webkit-scrollbar { width: 8px; height: 8px; }
+.sc-log-body::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / .35); border-radius: 4px; border: 2px solid hsl(var(--card)); }
+.sc-log-body::selection, .sc-log-body *::selection { background: hsl(var(--primary) / .22); color: hsl(var(--foreground)); }
+.sc-log-virtual { position: relative; min-width: 100%; }
+.sc-log-row { position: absolute; left: 0; width: 100%; min-height: calc(var(--sc-log-font, 13px) * 1.75); padding: 0 14px; overflow-wrap: anywhere; }
+.sc-log-row.current-match { background: hsl(var(--primary) / .08); }
+.sc-log-row mark { background: hsl(var(--warning-ink) / .17); color: hsl(var(--foreground)); border-radius: 2px; }
+.sc-log-structured { display: grid; grid-template-columns: 71px 47px minmax(0, 1fr); gap: 8px; }
+.sc-log-time, .sc-log-level { color: hsl(var(--muted-foreground)); font-size: 11px; line-height: calc(var(--sc-log-font, 13px) * 1.75); }
+.sc-log-message, .sc-log-raw { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sc-log-row.warn .sc-log-level { color: hsl(var(--warning-ink)); }
+.sc-log-row.error .sc-log-level, .sc-log-exception { color: hsl(var(--destructive-ink)); }
+.sc-log-command, .sc-log-exception { display: block; text-align: left; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; border: 0; background: transparent; cursor: pointer; padding: 0; max-width: 100%; }
+.sc-log-command { display: flex; align-items: center; gap: 6px; color: hsl(var(--muted-foreground)); }
+.sc-log-command svg, .sc-log-exception > svg { display: inline-block; flex-shrink: 0; vertical-align: -1px; margin-right: 5px; }
+.sc-log-command[aria-expanded="true"] > svg, .sc-log-exception[aria-expanded="true"] > svg { transform: rotate(90deg); }
+.sc-log-command:hover, .sc-log-exception:hover { background: hsl(var(--foreground) / .04); }
+.sc-log-stack-count { color: hsl(var(--muted-foreground)); font-size: 11px; }
+.sc-log-root { display: block; color: hsl(var(--destructive-ink)); white-space: pre-wrap; overflow-wrap: anywhere; }
+.sc-log-exception .sc-log-root { padding-left: 17px; }
+.sc-log-stack { padding-left: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sc-log-source { display: inline-flex; align-items: baseline; gap: 4px; font: inherit; text-decoration: underline; text-underline-offset: 3px; color: hsl(var(--primary)); background: transparent; border: 0; padding: 0; cursor: pointer; }
+.sc-log-source:disabled { cursor: wait; opacity: .7; }
+.sc-log-stack-actions { display: flex; gap: 5px; padding-left: 14px; }
+.sc-log-row.commandText { background: hsl(var(--background)); }
+.sc-log-row.commandText .sc-log-button { display: flex; margin: 4px 0; }
+.sc-log-body[data-wrap="false"] .sc-log-row { width: max-content; min-width: 100%; }
+.sc-log-body[data-wrap="false"] :is(.sc-log-message, .sc-log-raw, .sc-log-stack, .sc-log-exception) { white-space: pre; overflow-wrap: normal; }
+.sc-log-body[data-wrap="false"] .sc-log-structured { grid-template-columns: 71px 47px auto; }
+.sc-log-empty { padding: 18px 14px; color: hsl(var(--foreground)); font: 13px/1.6 "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+.sc-log-empty strong { font-size: 14px; }
+.sc-log-empty p { margin: 5px 0 10px; color: hsl(var(--muted-foreground)); font-size: 12px; }
+.sc-log-new { position: absolute; right: 12px; bottom: 9px; display: flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid hsl(var(--primary) / .3); border-radius: var(--r-control); color: hsl(var(--primary)); background: hsl(var(--card)); font-size: 12px; cursor: pointer; }
+.sc-log-new:hover { background: hsl(var(--accent)); }
+.sc-log-error, .sc-log-operation { display: flex; align-items: center; gap: 7px; padding: 4px 12px; flex-shrink: 0; min-height: 30px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; }
+.sc-log-error { color: hsl(var(--destructive-ink)); }
+.sc-log-error > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.sc-log-operation { background: hsl(var(--background)); }
+.sc-log-operation > span { flex: 1; }
+.sc-log-range-note { padding: 4px 12px; border-bottom: 1px solid hsl(var(--border)); font-size: 11px; color: hsl(var(--warning-ink)); }
+.sc-log-footer { display: flex; align-items: center; gap: 8px; height: 27px; flex-shrink: 0; padding: 0 12px; border-top: 1px solid hsl(var(--border)); font-size: 11px; white-space: nowrap; }
+.sc-log-footer select { height: 23px; padding: 0 4px; border: 1px solid transparent; border-radius: var(--r-control); color: hsl(var(--foreground)); background: hsl(var(--card)); font-size: 11px; }
+.sc-log-footer .sc-log-button { font-size: 11px; height: 23px; padding: 0 3px; }
+.sc-log-file-size { border: 0; background: transparent; color: hsl(var(--muted-foreground)); cursor: pointer; font-size: 11px; }
+.sc-log-file-size:hover { text-decoration: underline; text-underline-offset: 3px; }
+.sc-log-freshness { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: hsl(var(--muted-foreground)); }
+.sc-log-menu-divider { height: 1px; background: hsl(var(--border)); margin: 4px 6px; }
+@container (max-width:600px) { .sc-log-toolbar .sc-log-filter-toggle, .sc-log-toolbar .sc-log-wrap-toggle { display:none; } }
+.sc-log-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 16px 20px; display: flex; flex-direction: column; min-height: 0; }
+.sc-log-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sc-log-dialog-head strong { font-size: 16px; }
+.sc-log-dialog > p { margin: 10px 0; font-size: 12px; }
+.sc-log-dialog pre { padding: 12px; margin: 0; min-height: 0; max-height: 60vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: hsl(var(--background)); color: hsl(var(--foreground)); font: 12px/1.75 Consolas, "Microsoft YaHei UI", monospace; }
+.sc-log-dialog-actions { margin-top: 12px; display: flex; justify-content: flex-end; gap: 7px; }
+.sc-log-source-choices { overflow: auto; min-height: 0; }
+.sc-log-source-choices > button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 9px 10px; width: 100%; text-align: left; border: 0; border-bottom: 1px solid hsl(var(--border)); background: transparent; font-size: 12px; cursor: pointer; }
+.sc-log-source-choices > button:hover { background: hsl(var(--accent)); }
+.sc-log-source-choices > button span { color: hsl(var(--muted-foreground)); overflow-wrap: anywhere; }
+@media (max-width: 750px) {
+  .sc-log-toolbar { gap: 3px; padding: 3px 6px; }
+  .sc-log-levels button { padding: 0 5px; }
+  .sc-log-button { gap: 4px; padding: 0 5px; }
+  .sc-log-filter-row > span { display: none; }
+  .sc-log-file-size { display: none; }
+  .sc-log-footer { padding: 0 8px; gap: 6px; }
+  .sc-log-row { padding: 0 10px; }
+  .sc-log-structured { grid-template-columns: 66px 41px minmax(0,1fr); gap: 5px; }
+}
+@media (max-width: 600px) {
+  .sc-log-toolbar { flex-wrap: wrap; }
+  .sc-log-toolbar > .sc-log-spacer { display: none; }
+  .sc-log-toolbar .sc-log-button, .sc-log-levels button { font-size: 11px; }
+  .sc-log-freshness { max-width: 100px; }
+  .sc-log-footer > .sc-log-spacer { min-width: 0; }
+  .sc-log-structured { grid-template-columns: 60px 37px minmax(0,1fr); gap: 4px; }
+}
+@media (prefers-reduced-motion: reduce) { .sc-log-button, .sc-log-icon { transition: none; } }

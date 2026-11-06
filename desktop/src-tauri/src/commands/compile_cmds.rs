@@ -6,9 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use tauri::Emitter;
-
-use crate::compile::{self, CompileEnv, CompileJob, CompileResult};
+use crate::compile::{self, CompileResult};
 use crate::nc_home;
 use crate::nc_index::{classpath_jars, ClassIndex};
 use crate::security::path::{display_path, resolve_safe_path_async};
@@ -25,7 +23,7 @@ static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
 
 /// ecj 候选顺序：外部资源包（按需下载安装）→ 安装包资源目录（v0.1.0 及以前的
 /// 旧安装兜底）→ 源码树资源（开发模式）。
-fn find_ecj(config_dir: &Path) -> Result<PathBuf, String> {
+pub(super) fn find_ecj(config_dir: &Path) -> Result<PathBuf, String> {
     let mut cands = Vec::new();
     if let Some(dir) = crate::resource_pack::active_dir(config_dir, crate::resource_pack::PACK_ECJ)
     {
@@ -41,6 +39,22 @@ fn find_ecj(config_dir: &Path) -> Result<PathBuf, String> {
         "找不到 Java 编译器组件（ecj）。请点击下载按钮，或到设置 → 维护 → 组件与更新下载，然后重新编译"
             .to_string()
     })
+}
+
+/// 常驻 ecj 桥 jar（可选）：安装包资源目录 → 源码树（开发模式）。
+/// 找不到不算错误——编译会退回一次一进程，只是每次多花 0.6~0.9 秒。
+pub(super) fn find_ecj_bridge(app: &tauri::AppHandle) -> Option<PathBuf> {
+    use tauri::Manager;
+    let mut dirs = Vec::new();
+    if let Ok(dir) = app.path().resource_dir() {
+        dirs.push(dir.join("ecj-bridge"));
+    }
+    dirs.push(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("ecj-bridge"),
+    );
+    crate::ecj_worker::find_jar(&dirs)
 }
 
 /// 首建索引的串行化闸门。
@@ -64,10 +78,10 @@ static COMPILING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool:
 static WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// 编译闸的 RAII 凭据（drop 即释放，异常路径也不会漏）。
-struct CompileSlot;
+pub(super) struct CompileSlot;
 
 impl CompileSlot {
-    fn acquire() -> Option<Self> {
+    pub(super) fn acquire() -> Option<Self> {
         COMPILING
             .compare_exchange(
                 false,
@@ -90,7 +104,7 @@ impl Drop for CompileSlot {
 type IndexHit = (Arc<ClassIndex>, Vec<u32>);
 
 /// 已有这个 home 的索引就取出来（短锁），没有则 `None`。
-fn lookup_index(nc_home: &Path, module: &str) -> Result<Option<IndexHit>, String> {
+pub(super) fn lookup_index(nc_home: &Path, module: &str) -> Result<Option<IndexHit>, String> {
     let guard = CACHE.lock().map_err(|_| "内部状态异常".to_string())?;
     let Some(c) = guard.as_ref() else {
         return Ok(None);
@@ -141,6 +155,66 @@ pub(super) fn cached_index(
         c.index.clone(),
         c.seeds.get(module).cloned().unwrap_or_default(),
     ))
+}
+
+/// 把一次编译最终用到的 jar 记回内存 seed：下一次同模块编译直接带上，少跑几轮「按报错补 jar」。
+pub(super) fn cache_seed(module: &str, jars: Vec<u32>) {
+    if jars.is_empty() {
+        return;
+    }
+    if let Ok(mut guard) = CACHE.lock() {
+        if let Some(c) = guard.as_mut() {
+            c.seeds.insert(module.to_string(), jars);
+        }
+    }
+}
+
+/// 类索引是否已就绪（保存触发的自动编译据此决定「先跳过并预热」还是直接编）。
+pub(super) fn index_ready(nc_home: &Path) -> bool {
+    lookup_index(nc_home, "")
+        .map(|hit| hit.is_some())
+        .unwrap_or(false)
+}
+
+/// 后台建一次类索引；已有索引或已有任务在飞时直接返回。
+pub(super) fn warm_index(nc_home: PathBuf, cache_path: PathBuf) {
+    if index_ready(&nc_home) {
+        return;
+    }
+    if WARMING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = cached_index(&nc_home, &cache_path, "", &|_| {});
+        WARMING.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+}
+
+/// 清进程内类索引与 jar 指纹缓存。`build_reindex` 与换 NC home 后调用。
+pub(crate) fn invalidate_index() {
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = None;
+    }
+    crate::build_state::invalidate_config_cache();
+}
+
+/// 打开工作区后预热类索引（P2：消掉「第一次保存遇到 index-cold」的空窗）。
+pub fn spawn_prewarm(state: Arc<AppState>) {
+    tauri::async_runtime::spawn(async move {
+        let (enabled, home_cfg) = {
+            let cfg = state.config.read().await;
+            (cfg.prewarm_index, cfg.nc_home.clone())
+        };
+        if !enabled {
+            return;
+        }
+        let Ok(home) = nc_home::resolve(home_cfg.as_deref()) else {
+            return;
+        };
+        let nc_home = PathBuf::from(home.root);
+        let cache = super::build_engine::index_cache_path(&state.config_dir, &nc_home);
+        warm_index(nc_home, cache);
+    });
 }
 
 /// 工作区根的两个写法：`raw` 是配置里的原值（`resolve_safe_path` 的白名单要它），
@@ -218,7 +292,7 @@ pub(super) async fn resolve_module(
 
 /// 编译成功后投送工程元数据（META-INF → NCHOME）。失败只写一行编译日志，
 /// 不影响本次编译结果——投送是「让下次启动读到新 upm」，不是编译的前置条件。
-fn deploy_after_compile(
+pub(super) fn deploy_after_compile(
     enabled: bool,
     config_dir: &Path,
     root: &Path,
@@ -247,70 +321,26 @@ pub async fn compile_module(
     state: tauri::State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<CompileResult, String> {
-    let (root, module, _target) = resolve_module(&state, &path).await?;
-    // NC home 由配置决定（见 nc_home::resolve），编译与启动服务共用同一份解析结果
-    let home = nc_home::resolve(state.config.read().await.nc_home.as_deref())?;
-    let nc_home = PathBuf::from(&home.root);
-    let java = PathBuf::from(&home.java);
-    let ecj = find_ecj(&state.config_dir)?;
-    let cache_path = state.config_dir.join("class-index.bin");
-    let work_dir = state.config_dir.join("tmp");
-    let config_dir = state.config_dir.clone();
-    let st = state.inner().clone();
-    // 覆盖表在这里取（async 上下文里读配置），进 spawn_blocking 后只管用
-    let (overrides, deploy_on_start) = {
-        let cfg = state.config.read().await;
-        (
-            crate::eclipse_cp::active_overrides(&cfg.linked_overrides),
-            cfg.deploy_on_start,
-        )
-    };
-
+    let (_, module, _target) = resolve_module(&state, &path).await?;
+    let ctx = super::build_engine::context(app, state.inner()).await?;
     tauri::async_runtime::spawn_blocking(move || {
         // 同进程只允许一轮编译（前端标志挡不住切页/双击/命令重入）
         let _slot = CompileSlot::acquire()
             .ok_or_else(|| "已有一次编译在进行，等它完成再试（或点「取消」）".to_string())?;
         // 清取消标志必须在**拿到槽之后**：在命令入口清的话，第二个请求（双击/重入）
         // 会把用户刚点给正在跑的那一轮的「取消」悄悄吞掉。
-        st.compile_cancel
+        ctx.st
+            .compile_cancel
             .store(false, std::sync::atomic::Ordering::SeqCst);
-        let log = |s: &str| {
-            let _ = app.emit("compile-log", s.to_string());
-        };
-        let (index, seed) = cached_index(&nc_home, &cache_path, &module, &log)?;
-        let env = CompileEnv {
-            nc_home: &nc_home,
-            java_exe: &java,
-            ecj_jar: &ecj,
-            project_root: &root,
-            index: &index,
-            work_dir: &work_dir,
-            cancel: Some(&st.compile_cancel),
-            overrides: &overrides,
-        };
-        let job = CompileJob {
-            out_dir: root.join(&module).join("classes"),
-            module: module.clone(),
-            files: None,
-            seed_jars: seed,
-        };
-        let result = compile::compile(&env, &job, &log)?;
-        if let Ok(mut guard) = CACHE.lock() {
-            if let Some(c) = guard.as_mut() {
-                c.seeds.insert(module, result.resolved_jars.clone());
-            }
-        }
-        if result.error_count == 0 {
-            deploy_after_compile(
-                deploy_on_start,
-                &config_dir,
-                &root,
-                &nc_home,
-                &overrides,
-                &log,
-            );
-        }
-        Ok(result)
+        // 手动「编译」始终全量：用户点它就是不相信产物是最新的。
+        super::build_engine::build_one(
+            &ctx,
+            &module,
+            super::build_engine::Mode::Full,
+            true,
+            0,
+        )
+        .map(|b| b.result)
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
@@ -329,48 +359,6 @@ pub enum CompileFileOutcome {
     Skipped { code: &'static str, message: String },
 }
 
-/// 把同一轮里几个模块的单文件编译结果并成一份。
-///
-/// 不合并的话前端要处理「一次保存返回多份 CompileResult」，问题面板、错误计数、
-/// 状态栏全都得知道这个形状；合并成一份后，它和 `compile_module` 的返回值同构，
-/// 前端只有一条路径。
-fn merge_results(results: Vec<CompileResult>, files: usize) -> CompileResult {
-    let modules = results.len();
-    // 单模块时给真实产物目录（面板上「输出」那一栏要看得出 class 落在哪）；
-    // 跨模块只能给一句汇总——列第一个模块的目录会让人以为只编了那个模块
-    let out_dir = match results.first() {
-        Some(r) if modules == 1 => r.out_dir.clone(),
-        _ => format!("{modules} 个模块 · {files} 个文件"),
-    };
-    let mut total = CompileResult {
-        ok: true,
-        duration_ms: 0,
-        source_count: 0,
-        error_count: 0,
-        warning_count: 0,
-        problems: Vec::new(),
-        jar_count: 0,
-        rounds: 0,
-        out_dir,
-        diagnostics: Vec::new(),
-        resolved_jars: Vec::new(),
-    };
-    for r in results {
-        total.duration_ms += r.duration_ms;
-        total.source_count += r.source_count;
-        total.error_count += r.error_count;
-        total.warning_count += r.warning_count;
-        // jar 数是「这一轮挂了多少」，取最大值才是真实峰值；加起来只会得到一个
-        // 没有意义的数（几轮各挂 16 个 jar 不等于挂了 48 个）
-        total.jar_count = total.jar_count.max(r.jar_count);
-        total.rounds += r.rounds;
-        total.problems.extend(r.problems);
-        total.diagnostics.extend(r.diagnostics);
-    }
-    total.ok = total.error_count == 0;
-    total
-}
-
 /// 编译**一批文件**（编辑器保存后自动编译走这条；手动「编译当前文件」传一个）。
 ///
 /// 一批里可能跨模块，按模块分组后**每组一轮 JVM**：ecj 启动约 0.9 s，一个文件一轮
@@ -379,13 +367,14 @@ fn merge_results(results: Vec<CompileResult>, files: usize) -> CompileResult {
 ///
 /// 代价见 `docs/NCForge-自动编译-调研与方案-20261104.md` §4.1：**发现不了跨文件的
 /// 签名变更**——改了方法参数只重编当前文件，引用方仍是旧字节码，运行期才炸。
-/// 所以它只是第一道网，改签名仍要手动「编译模块」。
+/// 所以它只是第一道网，签名传播由随后的 `compile_incremental` 补（含跨模块引用方）。
 ///
 /// **不看 `auto_compile` 开关**：那个开关是「保存后要不要自动编」的前端偏好，
 /// 由 `autoCompileQueue` 在入队前判；命令本身必须无条件可用，否则手动
 /// 「编译当前文件」在关掉自动编译后就永远失败了。
 #[tauri::command]
 pub async fn compile_file(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     paths: Vec<String>,
 ) -> Result<CompileFileOutcome, String> {
@@ -422,31 +411,14 @@ pub async fn compile_file(
             message: skip_message.unwrap_or_else(|| "没有可编译的 .java 文件".to_string()),
         });
     }
-    let total_files: usize = groups.iter().map(|(_, f)| f.len()).sum();
-
-    let home = nc_home::resolve(state.config.read().await.nc_home.as_deref())?;
-    let nc_home = PathBuf::from(&home.root);
-    let java = PathBuf::from(&home.java);
-    let ecj = find_ecj(&state.config_dir)?;
-    let cache_path = state.config_dir.join("class-index.bin");
-    let work_dir = state.config_dir.join("tmp");
-    let st = state.inner().clone();
-    let overrides =
-        crate::eclipse_cp::active_overrides(&state.config.read().await.linked_overrides);
+    let ctx = super::build_engine::context(app, state.inner()).await?;
 
     tauri::async_runtime::spawn_blocking(move || {
         // 索引还没建好就先跳过：首次冷扫 10~100 秒，把它挂在「保存」上会一直亮着
         // 「编译中」（期间命令面板里的编译项全灰），而自动编译这条链路又刻意不写
         // 编译日志，用户只会看到编辑器卡住。顺手在后台起一次建索引，下次保存就能编上。
-        if lookup_index(&nc_home, "")?.is_none() {
-            // 同一时刻只让一个后台任务去建：连按保存不该排出十个等闸的线程
-            if !WARMING.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                let (h, c) = (nc_home.clone(), cache_path.clone());
-                tauri::async_runtime::spawn_blocking(move || {
-                    let _ = cached_index(&h, &c, "", &|_| {});
-                    WARMING.store(false, std::sync::atomic::Ordering::SeqCst);
-                });
-            }
+        if !index_ready(&ctx.nc_home) {
+            warm_index(ctx.nc_home.clone(), ctx.cache_path.clone());
             return Ok(CompileFileOutcome::Skipped {
                 code: "index-cold",
                 message:
@@ -463,38 +435,89 @@ pub async fn compile_file(
         };
         // 能拿到闸说明此刻没有别的编译，上一轮的取消标志已经过期，必须清掉，
         // 否则用户上次点过「取消」，从此每次保存都立刻 CANCELLED
-        st.compile_cancel
+        ctx.st
+            .compile_cancel
             .store(false, std::sync::atomic::Ordering::SeqCst);
-        // 自动编译**不写 compile-log**：那是手动编译的输出面板，每次保存往里塞几行
-        // 会把它淹掉。真要排查，后端 log 里有。
-        let log = |_: &str| {};
-        let mut results = Vec::with_capacity(groups.len());
-        for (module, files) in groups {
-            let (index, seed) = cached_index(&nc_home, &cache_path, &module, &log)?;
-            let env = CompileEnv {
-                nc_home: &nc_home,
-                java_exe: &java,
-                ecj_jar: &ecj,
-                project_root: &root,
-                index: &index,
-                work_dir: &work_dir,
-                cancel: Some(&st.compile_cancel),
-                overrides: &overrides,
-            };
-            let job = CompileJob {
-                out_dir: root.join(&module).join("classes"),
-                module,
-                files: Some(files),
-                seed_jars: seed,
-            };
-            // 不写回模块 seed：单文件挑出的 jar 是整模块 seed 的子集，写回去会让下一次
-            // 整模块编译少挂 jar、多跑几轮「按报错补 jar」。也**不投送元数据**——单个 class
-            // 与 upm 无关，投送只在整模块编译成功后做。
-            results.push(compile::compile(&env, &job, &log)?);
+        // 自动编译不写 compile-log（那是手动编译的输出面板）；fast=true 让 JVM 参数
+        // 偏向「起得快」。也**不投送元数据**：单个 class 与 upm 无关。
+        let result = super::build_engine::compile_files(&ctx, groups, true, true)?;
+        Ok(CompileFileOutcome::Done { result })
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 对一批文件所在的模块跑一次**模块级增量**（空闲补齐 / 外部改动）。
+///
+/// 与 `compile_file` 的分工：`compile_file` 是保存后的 1 秒快速反馈，只编改动文件；
+/// 本命令按清单判断 ABI 是否变了、哪些引用方要跟着编。两者串起来才是
+/// 「保存先出 class，空闲再修复签名传播」。
+///
+/// 清单里保留了单文件编译前的 ABI（见 `build_engine::compile_files`），所以这里
+/// 能看见「签名变了」；如果单文件编译把新 ABI 也写进去，这一步会永远 Skip。
+/// 签名变化还会按源码引用传播到其它模块（`build_engine::propagate_abi`）。
+#[tauri::command]
+pub async fn compile_incremental(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    paths: Vec<String>,
+) -> Result<CompileResult, String> {
+    let (root_raw, root) = workspace_roots(&state).await?;
+    let mut modules: Vec<String> = Vec::new();
+    for p in paths {
+        if !p.to_ascii_lowercase().ends_with(".java") {
+            continue;
         }
-        Ok(CompileFileOutcome::Done {
-            result: merge_results(results, total_files),
-        })
+        if let Some((_, module, _)) = resolve_in_root(&root_raw, &root, &p).await? {
+            if !modules.iter().any(|m| m.eq_ignore_ascii_case(&module)) {
+                modules.push(module);
+            }
+        }
+    }
+    if modules.is_empty() {
+        return Err("这些文件不在工作区的任何模块里，没有可增量编译的内容".to_string());
+    }
+    let ctx = super::build_engine::context(app, state.inner()).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _slot = CompileSlot::acquire()
+            .ok_or_else(|| "已有一次编译在进行，跳过这次空闲增量".to_string())?;
+        ctx.st
+            .compile_cancel
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let mut results = Vec::with_capacity(modules.len());
+        let mut files = 0usize;
+        // 做过签名传播的模块：`build_one` 已把模块内引用方一起编了，不必再走一遍。
+        // 其余「本轮编过但没有签名变化」的模块不能跳过——它们可能含有别的模块的引用方。
+        let mut abi_modules: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // 签名变了的源文件（只有编成功才算数：失败时旧产物仍在使用，传播没有意义）
+        let mut abi_changed_files: Vec<PathBuf> = Vec::new();
+        for module in modules {
+            let built = super::build_engine::build_one(
+                &ctx,
+                &module,
+                super::build_engine::Mode::Auto,
+                false,
+                0,
+            )?;
+            if built.abi_changed && built.result.error_count == 0 {
+                abi_modules.insert(module.to_ascii_lowercase());
+                for p in &built.changed_files {
+                    if !abi_changed_files.contains(p) {
+                        abi_changed_files.push(p.clone());
+                    }
+                }
+            }
+            files += built.result.source_count;
+            results.push(built.result);
+        }
+        // 保存后的快速编译发现不了跨模块签名变化，这里补上引用方
+        if let Some(propagated) =
+            super::build_engine::propagate_abi(&ctx, &abi_changed_files, &abi_modules)?
+        {
+            files += propagated.source_count;
+            results.push(propagated);
+        }
+        Ok(super::build_engine::merge_compile_results(results, files))
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
@@ -520,152 +543,16 @@ pub fn compile_cancel(state: tauri::State<'_, Arc<AppState>>) {
 pub async fn compile_all_modules(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
+    force_full: Option<bool>,
+    skip_deploy: Option<bool>,
 ) -> Result<CompileResult, String> {
-    let (root, nc_home_cfg, overrides, deploy_on_start) = {
-        let cfg = state.config.read().await;
-        let root = cfg
-            .workspace_root
-            .clone()
-            .ok_or_else(|| "尚未选择工作区目录".to_string())?;
-        (
-            root,
-            cfg.nc_home.clone(),
-            crate::eclipse_cp::active_overrides(&cfg.linked_overrides),
-            cfg.deploy_on_start,
-        )
-    };
-    // 与 compile_module 同一套规整：工作区根是去掉 `\\?\` 前缀的写法。
-    // canonicalize 是同步磁盘操作，丢进 spawn_blocking（审查报告 D2）。
-    let root_canon = tauri::async_runtime::spawn_blocking(move || {
-        std::fs::canonicalize(&root).map_err(|e| format!("工作区目录不可用: {e}"))
-    })
-    .await
-    .map_err(|e| format!("后台任务失败: {e}"))??;
-    let root = PathBuf::from(display_path(&root_canon));
-    let home = nc_home::resolve(nc_home_cfg.as_deref())?;
-    let nc_home = PathBuf::from(&home.root);
-    let java = PathBuf::from(&home.java);
-    let ecj = find_ecj(&state.config_dir)?;
-    let cache_path = state.config_dir.join("class-index.bin");
-    let work_dir = state.config_dir.join("tmp");
-    let config_dir = state.config_dir.clone();
-    let st = state.inner().clone();
-
+    let mut ctx = super::build_engine::context(app, state.inner()).await?;
+    // 组合开发流程显式投送一次；这里只覆盖本次上下文，不改变用户的自动投送配置。
+    if skip_deploy.unwrap_or(false) {
+        ctx.deploy_on_start = false;
+    }
     tauri::async_runtime::spawn_blocking(move || {
-        let _slot = CompileSlot::acquire()
-            .ok_or_else(|| "已有一次编译在进行，等它完成再试（或点「取消」）".to_string())?;
-        st.compile_cancel
-            .store(false, std::sync::atomic::Ordering::SeqCst);
-        let log = |s: &str| {
-            let _ = app.emit("compile-log", s.to_string());
-        };
-
-        // 顺序来自类路径：类路径是「主工程 → 直接依赖 → 传递依赖」，反过来就是「底层先编」
-        let dirs = crate::eclipse_cp::class_roots_with(&root, &nc_home, &overrides);
-        let mut modules = crate::eclipse_cp::compile_order(&dirs, &root);
-        if modules.is_empty() {
-            modules = crate::eclipse_cp::module_dirs_of(&root);
-        }
-        if modules.is_empty() {
-            return Err(
-                "工作区里没有找到可编译的模块（子目录里应有 src 或 .classpath）".to_string(),
-            );
-        }
-        log(&format!(
-            "按依赖顺序编译 {} 个模块：{}",
-            modules.len(),
-            modules.join(" → ")
-        ));
-
-        let mut total = CompileResult {
-            ok: true,
-            duration_ms: 0,
-            source_count: 0,
-            error_count: 0,
-            warning_count: 0,
-            problems: Vec::new(),
-            jar_count: 0,
-            rounds: 0,
-            out_dir: format!("{} 个模块", modules.len()),
-            diagnostics: Vec::new(),
-            resolved_jars: Vec::new(),
-        };
-        let mut seeds: Vec<u32> = Vec::new();
-        let mut failed: Option<String> = None;
-
-        for (i, module) in modules.iter().enumerate() {
-            if st.compile_cancel.load(std::sync::atomic::Ordering::SeqCst) {
-                return Err("CANCELLED: 编译已取消".to_string());
-            }
-            log(&format!("=== {}/{} {} ===", i + 1, modules.len(), module));
-            let (index, cached_seed) = cached_index(&nc_home, &cache_path, module, &log)?;
-            let seed = if cached_seed.is_empty() {
-                seeds.clone()
-            } else {
-                cached_seed
-            };
-            let env = CompileEnv {
-                nc_home: &nc_home,
-                java_exe: &java,
-                ecj_jar: &ecj,
-                project_root: &root,
-                index: &index,
-                work_dir: &work_dir,
-                cancel: Some(&st.compile_cancel),
-                overrides: &overrides,
-            };
-            let job = CompileJob {
-                out_dir: root.join(module).join("classes"),
-                module: module.clone(),
-                files: None,
-                seed_jars: seed,
-            };
-            let r = compile::compile(&env, &job, &log)?;
-            seeds = r.resolved_jars.clone();
-            if let Ok(mut guard) = CACHE.lock() {
-                if let Some(c) = guard.as_mut() {
-                    c.seeds.insert(module.clone(), r.resolved_jars.clone());
-                }
-            }
-            total.duration_ms += r.duration_ms;
-            total.source_count += r.source_count;
-            total.error_count += r.error_count;
-            total.warning_count += r.warning_count;
-            total.jar_count = total.jar_count.max(r.jar_count);
-            total.rounds += r.rounds;
-            total.problems.extend(r.problems);
-            total.diagnostics.extend(r.diagnostics);
-            log(&format!(
-                "{}：{} 个源文件，{} 个错误，{:.1}s",
-                module,
-                r.source_count,
-                r.error_count,
-                r.duration_ms as f64 / 1000.0
-            ));
-            if r.error_count > 0 {
-                failed = Some(module.clone());
-                break;
-            }
-        }
-
-        total.ok = total.error_count == 0;
-        match failed {
-            Some(m) => log(&format!(
-                "{m} 编不过，后续模块依赖它的产物，已停止（修完再点一次「编译全部」）"
-            )),
-            None => {
-                log("全部模块编译完成");
-                deploy_after_compile(
-                    deploy_on_start,
-                    &config_dir,
-                    &root,
-                    &nc_home,
-                    &overrides,
-                    &log,
-                );
-            }
-        }
-        Ok(total)
+        super::build_engine::build_all(&ctx, force_full.unwrap_or(false))
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
@@ -695,12 +582,16 @@ mod tests {
             out_dir: "C:/w/m/classes".to_string(),
             diagnostics: Vec::new(),
             resolved_jars: jars_in,
+            modules: Vec::new(),
         }
     }
 
     #[test]
     fn 多模块结果按字段合并而不是相加_jar_数() {
-        let merged = merge_results(vec![result(0, 16, vec![1, 2]), result(2, 40, vec![3])], 3);
+        let merged = super::super::build_engine::merge_compile_results(
+            vec![result(0, 16, vec![1, 2]), result(2, 40, vec![3])],
+            3,
+        );
         assert_eq!(merged.source_count, 2);
         assert_eq!(merged.error_count, 2);
         assert_eq!(merged.problems.len(), 2);
@@ -717,13 +608,19 @@ mod tests {
 
     #[test]
     fn 单模块时保留真实产物目录() {
-        let merged = merge_results(vec![result(0, 16, vec![])], 1);
+        let merged = super::super::build_engine::merge_compile_results(
+            vec![result(0, 16, vec![])],
+            1,
+        );
         assert_eq!(merged.out_dir, "C:/w/m/classes");
     }
 
     #[test]
     fn 全部无错才算_ok() {
-        let merged = merge_results(vec![result(0, 1, vec![]), result(0, 1, vec![])], 2);
+        let merged = super::super::build_engine::merge_compile_results(
+            vec![result(0, 1, vec![]), result(0, 1, vec![])],
+            2,
+        );
         assert!(merged.ok);
         assert_eq!(merged.error_count, 0);
     }

@@ -235,10 +235,10 @@ function PasswordBody({ p, onCancel }: { p: Extract<Pending, { kind: "password" 
           </button>
         </span>
         <span />
-        <label className="dbx-chk" style={{ justifySelf: "start" }}>
+        {!p.temporary && <label className="dbx-chk" style={{ justifySelf: "start" }}>
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
           记住口令（Windows 加密存本机）
-        </label>
+        </label>}
         {p.error && (
           <div className="dbx-badline">
             <Icon name="alert" size={13} />

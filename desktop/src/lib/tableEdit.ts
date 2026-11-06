@@ -11,11 +11,14 @@ import { sqlLiteral } from "./resultExport";
 export const PAGE = 200;
 export const RN = "RN__";
 
-export function pageSql(table: string, where: string, order: string, page: number): string {
+export function tableQuerySql(table: string, where: string, order: string): string {
   const w = where.trim() ? ` where ${where.trim()}` : "";
   const o = order.trim() ? ` order by ${order.trim()}` : "";
+  return `select * from ${table}${w}${o}`;
+}
+export function pageSql(table: string, where: string, order: string, page: number): string {
   const lo = page * PAGE;
-  return `select * from (select a.*, rownum ${RN} from (select * from ${table}${w}${o}) a where rownum <= ${lo + PAGE + 1}) where ${RN} > ${lo}`;
+  return `select * from (select a.*, rownum ${RN} from (${tableQuerySql(table, where, order)}) a where rownum <= ${lo + PAGE + 1}) where ${RN} > ${lo}`;
 }
 
 /** 去掉分页用的行号列；多取的一行只用来判断还有没有下一页。 */

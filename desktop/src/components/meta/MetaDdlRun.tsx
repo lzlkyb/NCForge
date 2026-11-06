@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { dbApi, ENV_LABEL, type DbConn } from "../../lib/dbApi";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
@@ -71,7 +71,7 @@ function hasBlockSyntax(stmts: string[]): boolean {
  * 执行按语句顺序来，第一条失败就停，并把已经执行成功的语句列出来——Oracle 的 DDL
  * 自动提交，失败后库里会留下前面建好的表，这一点必须明说，不能假装能回滚。
  */
-export function MetaDdlRun({ ddl, component }: { ddl: string; component: string }) {
+export function MetaDdlRun({ ddl, component, onRunning }: { ddl: string; component: string; onRunning?: (running: boolean) => void }) {
   const [conns, setConns] = useState<DbConn[]>([]);
   const [connId, setConnId] = useState("");
   const [ack, setAck] = useState(false);
@@ -79,8 +79,11 @@ export function MetaDdlRun({ ddl, component }: { ddl: string; component: string 
   const [busy, setBusy] = useState(false);
   const [logs, setLogs] = useState<DdlStepResult[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const running = useRef(false);
+  const mounted = useRef(true);
 
   useEffect(() => {
+    mounted.current = true;
     let alive = true;
     dbApi
       .list()
@@ -92,6 +95,7 @@ export function MetaDdlRun({ ddl, component }: { ddl: string; component: string 
       });
     return () => {
       alive = false;
+      mounted.current = false;
     };
   }, []);
 
@@ -99,21 +103,27 @@ export function MetaDdlRun({ ddl, component }: { ddl: string; component: string 
   const conn = conns.find((c) => c.id === connId) ?? null;
   const isProd = conn?.env === "prod";
   const blockSyntax = hasBlockSyntax(stmts);
-  const ready = !!conn && !isProd && ack && typed.trim() === component && !busy && stmts.length > 0;
+  const ready = !!conn && !isProd && !blockSyntax && ack && typed.trim() === component && !busy && stmts.length > 0;
 
   const run = async () => {
-    if (!conn) return;
+    if (!ready || !conn || running.current) return;
+    running.current = true;
+    onRunning?.(true);
     setBusy(true);
     setErr(null);
     setLogs([]);
     const done: DdlStepResult[] = [];
     try {
       for (const stmt of stmts) {
+        // 被工作区切换等操作卸载后不再推进下一条；已经提交的 DDL 不能回滚。
+        if (!mounted.current) return;
         try {
           const r = await dbApi.exec(conn.id, stmt, 50, 120);
+          if (!mounted.current) return;
           const detail = r.kind === "update" ? `${r.ms} ms · 影响 ${r.updateCount}` : `${r.ms} ms · ${r.rowCount} 行`;
           done.push({ sql: stmt, ok: true, detail });
         } catch (e) {
+          if (!mounted.current) return;
           done.push({ sql: stmt, ok: false, detail: String(e) });
           setLogs([...done]);
           return;
@@ -121,7 +131,11 @@ export function MetaDdlRun({ ddl, component }: { ddl: string; component: string 
         setLogs([...done]);
       }
     } finally {
-      setBusy(false);
+      running.current = false;
+      if (mounted.current) {
+        setBusy(false);
+        onRunning?.(false);
+      }
     }
   };
 

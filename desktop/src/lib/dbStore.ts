@@ -39,6 +39,15 @@ export interface ConnRuntime {
   tablesAt?: number;
   /** NC 表中文名：小写表名 → 显示名。 */
   ncNames?: Record<string, string>;
+  /**
+   * 这条连接**当前实际生效**的默认 schema（primary 会话的 `sys_context`）。
+   *
+   * 不是配置里的 `defaultSchema`：用户可能手动切过，配置值那一刻就不准了。界面上
+   * 那个胶囊显示的是这个值。
+   */
+  currentSchema?: string;
+  /** 库里能看到的 schema 清单（胶囊下拉用）。连上后读一次，切库时重读。 */
+  schemas?: string[];
   schema?: SchemaCacheData | null;
   /**
    * 这个连接实际用的引擎能力（连上后由后端报回来）。
@@ -68,7 +77,9 @@ export interface ResultEntry {
   stats?: ExecStats | null;
   error?: string;
   cancelled?: boolean;
+  errorCode?: ReturnType<typeof parseDbError>["code"];
   loadingMore?: boolean;
+  moreError?: string;
 }
 
 export interface OutputLine {
@@ -400,15 +411,22 @@ export async function loadMeta(id: string, observed=false): Promise<void> {
   const task=observed ? beginOperation(dbTaskSpec(`meta:${id}`,"刷新数据库对象",id,"主会话",connOf(id)?.name)) : null;
   if(observed && !task) return;
   setRt(id, { tablesLoading: true });
-  const [t, n, s] = await Promise.allSettled([dbApi.tables(id), dbApi.ncNames(id), dbApi.schemaCache(id)]);
+  const [t, n, s, sc] = await Promise.allSettled([
+    dbApi.tables(id),
+    dbApi.ncNames(id),
+    dbApi.schemaCache(id),
+    dbApi.schemas(id),
+  ]);
   setRt(id, {
     tablesLoading: false,
     tablesAt: t.status === "fulfilled" ? Date.now() : rtOf(id).tablesAt,
     tables: t.status === "fulfilled" ? t.value.tables : rtOf(id).tables,
     ncNames: n.status === "fulfilled" ? n.value.names : rtOf(id).ncNames,
     schema: s.status === "fulfilled" ? s.value : rtOf(id).schema,
+    schemas: sc.status === "fulfilled" ? sc.value.schemas : rtOf(id).schemas,
+    currentSchema: sc.status === "fulfilled" ? sc.value.current : rtOf(id).currentSchema,
   });
-  const failed=[t,n,s].filter(r=>r.status==="rejected").length;
+  const failed=[t,n,s,sc].filter(r=>r.status==="rejected").length;
   task?.finish(failed ? "failed" : "success",failed ? `有 ${failed} 项未读取成功；已保留可用清单，返回数据库页核对` : "对象清单与缓存已刷新");
 }
 
@@ -428,6 +446,27 @@ export function columnsOf(id: string, table: string): Promise<ColumnInfo[]> {
 
 export function forgetColumns(id: string) {
   for (const k of [...colCache.keys()]) if (k.startsWith(`${id}|`)) colCache.delete(k);
+}
+
+/**
+ * 切这条连接默认的 schema（Oracle 侧是 `alter session set current_schema`）。
+ *
+ * 为什么是「连接级」而不是「标签级」：左栏表树走 primary 会话，SQL 执行走标签自己的
+ * 槽，两者必须是同一个 schema，否则会出现「树上点开是这张表、执行时 ORA-00942」。
+ * 后端会把这条连接上所有活着的会话一起切（见 `db_set_schema`）。
+ *
+ * 切完必须重拉元数据：表树、对象树都按当前 schema 过滤。列缓存也要清——它按
+ * 「连接 + 表名」存，不清就会把 A schema 的字段显示到 B schema 的同名表上。
+ */
+export async function changeSchema(id: string, schema: string): Promise<string> {
+  const r = await trackOperation(
+    dbTaskSpec(`schema:${id}`, "切换默认 schema", id, "全部会话", connOf(id)?.name),
+    () => dbApi.setSchema(id, schema),
+  );
+  forgetColumns(id);
+  setRt(id, { currentSchema: r.schema });
+  void loadMeta(id);
+  return r.schema;
 }
 
 export function setTx(id: string, tx: TxInfo) {
@@ -681,7 +720,7 @@ export async function execOne(tabId: string, sql: string, index: number): Promis
   } catch (e) {
     const { code, message } = parseDbError(e);
     if (code === "bridge") setRt(connId, { status: "error", error: message });
-    entry = { ...base, kind: "error", error: friendlyDbError(e), cancelled:dbCancelled(e), ms: Date.now() - t0 };
+    entry = { ...base, kind: "error", error: friendlyDbError(e), errorCode: code, cancelled:dbCancelled(e), ms: Date.now() - t0 };
   }
   appendOutput(tabId, [{
     at: Date.now(),
@@ -707,8 +746,10 @@ export async function loadMore(tabId: string, resultId: string): Promise<void> {
     const cur = sqlTabOf(tabId)?.results.find((r) => r.id === resultId);
     upd({ rows: [...(cur?.rows ?? []), ...m.rows], hasMore: m.hasMore, loadingMore: false });
   } catch (e) {
-    upd({ loadingMore: false });
-    appendOutput(tabId, [{ at: Date.now(), text: `[${now()}] 加载更多失败：${friendlyDbError(e)}`, tone: "bad" }]);
+    const expired = ["session-lost", "slot-gone"].includes(parseDbError(e).code);
+    const message = expired ? "旧结果游标已失效，已加载的行仍可查看。请重新执行查询。" : friendlyDbError(e);
+    upd({ loadingMore: false, ...(expired ? { moreError: message } : {}) });
+    appendOutput(tabId, [{ at: Date.now(), text: `[${now()}] 加载更多失败：${message}`, tone: "bad" }]);
   }
 }
 

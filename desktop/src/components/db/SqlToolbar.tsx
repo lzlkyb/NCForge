@@ -9,10 +9,12 @@ import { useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
 import { useDbReadOnly } from "../../lib/dbReadOnly";
 import { useOperations } from "../../lib/operations";
 import { setSqlTransactionMode } from "../../lib/dbTransactionMode";
+import { DbContextBar } from "./DbContextBar";
 
-/** SQL 控制台工具条：连接胶囊 · 执行 / 脚本 / 计划 / 格式化 · 事务模式 · 历史。生产库整条淡红。 */
-export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, onValueSearch, onScriptReplay, historyOpen, onHistory, snipsOpen, onSnips, sessionsOpen, onSessions }: {
+/** 连接上下文与执行工具条共用事务切换锁，切换模式时不能换库。 */
+export function SqlToolbar({ tab, scope = "执行当前语句", onRun, onStop, onExplain, onFormat, onExport, onValueSearch, onScriptReplay, historyOpen, onHistory, snipsOpen, onSnips, sessionsOpen, onSessions }: {
   tab: SqlTab;
+  scope?: string;
   onRun: (mode: "current" | "script") => void;
   onStop: () => void;
   onExplain: () => void;
@@ -65,13 +67,9 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
   };
 
   return (
-    <div className="dbx-sqlbar" data-prod={conn?.env === "prod" || undefined}>
-      <ConnPicker connId={tab.connId} disabled={changingMode} onPick={(id) => { if (!modeBusy.current) void switchConn(tab.id, id); }} />
-      {conn?.env === "prod" && (
-        <span className="dbx-prodchip" title="生产环境：写操作会二次确认">
-          生产
-        </span>
-      )}
+    <>
+    <DbContextBar connId={tab.connId} independent={!!tab.slot} connectionControl={<ConnPicker connId={tab.connId} compact disabled={changingMode || tab.running} onPick={(id) => { if (!modeBusy.current) void switchConn(tab.id, id); }} />} />
+    <div className="dbx-sqlbar">
       {tab.running ? (
         // 执行中把「执行」换成「停止」：以前只能干等 30 秒超时，或者杀掉整个应用。
         // 能不能停按 `Caps.cancel` 决定（两个引擎现在都支持，但要留出按能力降级的路）：
@@ -114,6 +112,7 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
           </button>
         </div>
       )}
+      <span className="dbx-scope" aria-live="polite" title="Ctrl+Enter 执行当前语句或选中 SQL；Alt+X 执行整个脚本">{scope.replace(/^执行/, "")}</span>
       <button
         type="button"
         className="dbx-txchip"
@@ -143,7 +142,7 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
         aria-pressed={historyOpen}
       >
         <Icon name="history" size={15} />
-        历史
+        <span className="dbx-action-label">历史</span>
       </button>
       <button
         type="button"
@@ -156,7 +155,7 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
         aria-pressed={snipsOpen}
       >
         <Icon name="code" size={15} />
-        片段
+        <span className="dbx-action-label">片段</span>
       </button>
       <button
         type="button"
@@ -189,9 +188,10 @@ export function SqlToolbar({ tab, onRun, onStop, onExplain, onFormat, onExport, 
         }
       >
         <Icon name="more" size={15} />
-        工具
+        <span className="dbx-action-label">工具</span>
       </button>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
+    </>
   );
 }

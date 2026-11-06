@@ -45,6 +45,9 @@ const MAX_DIRS: usize = 64;
 /// 待发目录上限：到顶改为全量重读，不再继续积累路径。
 const MAX_PENDING: usize = 256;
 
+/// 一批最多带多少个外部改动的 `.java`：再多就让前端按「全工作区」处理。
+const MAX_JAVA: usize = 64;
+
 /// 一批最多攒多久：持续写入时每来一个事件都会重置 DEBOUNCE，没有这个上限
 /// 编译期间目录变化可能几十秒都送不到前端。
 const MAX_WAIT: Duration = Duration::from_millis(1000);
@@ -54,8 +57,30 @@ const EVENT_QUEUE: usize = 4096;
 
 /// 这个事件值不值得送进队列：内容 / 属性变更、全在元数据目录里的，回调里就丢掉。
 /// 平台的「可能丢事件」信号无论如何都要送。
+///
+/// **`.java` 内容变更是例外**：树不用刷新，但构建引擎要知道「外部改了源码」。
+/// 只放行 `.java`，编译写出的 `.class` 仍然在回调里丢掉。
 pub fn worth_queueing(ev: &notify::Event) -> bool {
-    ev.need_rescan() || (needs_tree_refresh(&ev.kind) && ev.paths.iter().any(|p| !is_ignored(p)))
+    ev.need_rescan()
+        || (needs_tree_refresh(&ev.kind) && ev.paths.iter().any(|p| !is_ignored(p)))
+        || (is_java_change(&ev.kind) && ev.paths.iter().any(|p| is_java_path(p)))
+}
+
+/// 外部源码改动：内容变更 + 增删改名（新增/删除会让模块走全量）。
+pub fn is_java_change(kind: &notify::EventKind) -> bool {
+    use notify::{event::ModifyKind, EventKind};
+    matches!(
+        kind,
+        EventKind::Create(_)
+            | EventKind::Remove(_)
+            | EventKind::Modify(ModifyKind::Data(_))
+            | EventKind::Modify(ModifyKind::Any)
+            | EventKind::Modify(ModifyKind::Name(_))
+    )
+}
+
+pub fn is_java_path(path: &Path) -> bool {
+    !is_ignored(path) && path.extension().is_some_and(|x| x.eq_ignore_ascii_case("java"))
 }
 
 /// 合并状态机（纯逻辑，时间由调用方传入，便于单测）。
@@ -63,6 +88,10 @@ pub fn worth_queueing(ev: &notify::Event) -> bool {
 struct Batcher {
     pending: BTreeSet<PathBuf>,
     rescan: bool,
+    /// 外部改动的 `.java`（绝对路径，已去重）
+    java: BTreeSet<PathBuf>,
+    /// `.java` 太多，下一批让前端按全工作区处理
+    java_overflow: bool,
     /// 这一批第一个事件到达的时间；空批为 None。
     since: Option<Instant>,
 }
@@ -74,7 +103,20 @@ impl Batcher {
             affected_dirs(root, &ev.paths, &mut self.pending);
             self.rescan |= self.pending.len() >= MAX_PENDING;
         }
-        if self.since.is_none() && (self.rescan || !self.pending.is_empty()) {
+        if is_java_change(&ev.kind) {
+            for p in &ev.paths {
+                if p.starts_with(root) && is_java_path(p) {
+                    if self.java.len() < MAX_JAVA {
+                        self.java.insert(p.clone());
+                    } else {
+                        self.java_overflow = true;
+                    }
+                }
+            }
+        }
+        if self.since.is_none()
+            && (self.rescan || !self.pending.is_empty() || !self.java.is_empty())
+        {
             self.since = Some(now);
         }
     }
@@ -85,17 +127,19 @@ impl Batcher {
         self.since.get_or_insert(now);
     }
 
-    /// 重扫也要合并一个窗口：持续队列溢出不能退化成逐事件触发整棵树重读。
+    /// 重扫 / 源码改动都要尽快送：持续队列溢出不能退化成逐事件触发整棵树重读。
     fn due(&self, now: Instant) -> bool {
+        let urgent = self.rescan || !self.java.is_empty();
         self.since
-            .is_some_and(|t| now.duration_since(t) >= if self.rescan { DEBOUNCE } else { MAX_WAIT })
+            .is_some_and(|t| now.duration_since(t) >= if urgent { DEBOUNCE } else { MAX_WAIT })
     }
 
     /// 下一次 recv 最多等多久：平时 DEBOUNCE，但不能越过这一批的 MAX_WAIT 截止点。
     fn wait(&self, now: Instant) -> Duration {
+        let urgent = self.rescan || !self.java.is_empty();
         match self.since {
             Some(t) => DEBOUNCE.min(
-                (if self.rescan { DEBOUNCE } else { MAX_WAIT })
+                (if urgent { DEBOUNCE } else { MAX_WAIT })
                     .saturating_sub(now.duration_since(t)),
             ),
             None => DEBOUNCE,
@@ -104,7 +148,13 @@ impl Batcher {
 
     fn flush(&mut self, emit: &Arc<dyn Fn(WatchBatch) + Send + Sync>) {
         self.since = None;
-        flush(&mut self.pending, &mut self.rescan, emit);
+        flush(
+            &mut self.pending,
+            &mut self.rescan,
+            &mut self.java,
+            &mut self.java_overflow,
+            emit,
+        );
     }
 }
 
@@ -161,6 +211,11 @@ pub struct WatchBatch {
     pub dirs: Vec<String>,
     /// 平台报告事件可能丢失（缓冲区溢出 / 改动太快）：前端应把**所有**已读目录重读一遍。
     pub rescan: bool,
+    /// 外部改动的 `.java`（绝对路径）。前端据此触发一次自动编译；
+    /// 与 `dirs` 分开：树刷新和「源码变了」是两件事，不能互相冒充。
+    pub java: Vec<String>,
+    /// 改动的 `.java` 太多：前端应按「全工作区」处理，不要逐个文件编。
+    pub java_overflow: bool,
 }
 
 /// 一个工作区的文件监听。拿到即活，`Drop` 即停（换工作区 / 退出应用）。
@@ -245,9 +300,11 @@ impl Drop for WorkspaceWatcher {
 fn flush(
     pending: &mut BTreeSet<PathBuf>,
     rescan: &mut bool,
+    java: &mut BTreeSet<PathBuf>,
+    java_overflow: &mut bool,
     emit: &Arc<dyn Fn(WatchBatch) + Send + Sync>,
 ) {
-    if pending.is_empty() && !*rescan {
+    if pending.is_empty() && !*rescan && java.is_empty() && !*java_overflow {
         return;
     }
     // 超过单批上限时列表只带得走前 MAX_DIRS 个。剩下的不能就这么丢了——
@@ -256,9 +313,13 @@ fn flush(
     let batch = WatchBatch {
         dirs: dirs_payload(pending),
         rescan: *rescan || overflow,
+        java: java.iter().map(|p| display_path(p)).collect(),
+        java_overflow: *java_overflow,
     };
     *rescan = false;
     pending.clear();
+    java.clear();
+    *java_overflow = false;
     emit(batch);
 }
 
@@ -364,7 +425,8 @@ mod tests {
             pending.insert(root().join(format!("m{i}")));
         }
         let mut rescan = false;
-        flush(&mut pending, &mut rescan, &emit);
+        let (mut java, mut java_overflow) = (BTreeSet::new(), false);
+        flush(&mut pending, &mut rescan, &mut java, &mut java_overflow, &emit);
         let batch = rx.try_recv().expect("应当发了一批");
         assert_eq!(batch.dirs.len(), MAX_DIRS);
         // 装不下的目录不能静默丢掉，否则它们会一直停在旧内容
@@ -373,7 +435,7 @@ mod tests {
 
         // 没超上限时不该无谓地全量重扫
         pending.insert(root().join("one"));
-        flush(&mut pending, &mut rescan, &emit);
+        flush(&mut pending, &mut rescan, &mut java, &mut java_overflow, &emit);
         assert!(!rx.try_recv().expect("应当又发了一批").rescan);
     }
 
@@ -393,6 +455,11 @@ mod tests {
             K::Modify(ModifyKind::Data(DataChange::Content)),
             src.join("A.class")
         )));
+        // 外部改 .java 内容：树不用刷新，但必须送进队列让构建引擎知道
+        assert!(worth_queueing(&ev(
+            K::Modify(ModifyKind::Data(DataChange::Content)),
+            src.join("A.java")
+        )));
         assert!(!worth_queueing(&ev(
             K::Create(CreateKind::File),
             root().join(".svn").join("tmp")
@@ -407,13 +474,14 @@ mod tests {
         let t0 = Instant::now();
         let mut b = Batcher::default();
         let src = root().join("newar").join("src");
-        // 每 100ms 来一个事件（比 DEBOUNCE 短，旧逻辑永远等不到超时）
+        // 每 100ms 来一个事件（比 DEBOUNCE 短，旧逻辑永远等不到超时）。
+        // 用非 .java 的普通文件：.java 改动是 urgent，350ms 就会发（见下一个断言）。
         let mut now = t0;
         let mut flushed_at = None;
         for i in 0..30 {
             b.add(
                 &root(),
-                &ev(K::Create(CreateKind::File), src.join(format!("F{i}.java"))),
+                &ev(K::Create(CreateKind::File), src.join(format!("F{i}.xml"))),
                 now,
             );
             if b.due(now) {

@@ -1,8 +1,9 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import type { PanelTab } from "../components/workspace/BottomPanel";
-import type { CompileResult } from "./compile";
+import type { BuildProgress, CompileResult } from "./compile";
 import { onDirtyChange } from "./dirtyBus";
 import type { DirItem, EncodingMark, Eol, TextEncoding } from "./workspace";
+import { reconcileEditorGroups, type EditorGroups, type EditorGroupId } from "./editorGroups";
 
 /** 单个目录的加载结果：加载中 / 条目 / 错误信息。 */
 export type TreeDirState =
@@ -40,6 +41,9 @@ export interface TreeState {
  * viewState 负责，滚动位置同理）。
  */
 export interface TabMeta {
+  /** 长期钉住，与预览标签转正分别表达。 */
+  pinned?: boolean;
+  previewGroup?: EditorGroupId;
   path: string;
   name: string;
   encoding: TextEncoding;
@@ -71,6 +75,7 @@ export interface TabMeta {
 }
 
 export interface WorkspaceSession {
+  editorGroups?: EditorGroups;
   /**
    * 当前工作区根目录。`undefined` = 还在读取配置，`null` = 尚未选择。
    * 放这里是为了切回文件页时不必等一次 IPC 才画出文件树（否则每切回来都闪一下空屏）。
@@ -88,8 +93,17 @@ export interface WorkspaceSession {
   tree: TreeState;
   panelOpen: boolean;
   panelTab: PanelTab;
+  /** NC 控制台临时展开阅读；恢复时保留用户原来的停靠高度。 */
+  serviceExpanded?: boolean;
+  /**
+   * 「问题」面板只看某个文件（树右键「查看该文件的 N 个问题」设置）。
+   * 放会话里而不是面板本地 state：设置入口在文件树，面板可能还没挂载/被切走。
+   */
+  problemsPath: string | null;
   /** 编译在跑。放这里是因为编译可能在切页期间结束，回调要写回仓库。 */
   compiling: boolean;
+  /** 模块级进度（`build-progress`）；单模块编译没有这个事件，值为 null。 */
+  buildProgress: BuildProgress | null;
   compileResult: CompileResult | null;
   compileLog: string[];
   compileResourceMissing?: boolean;
@@ -122,7 +136,10 @@ let state: WorkspaceSession = {
   tree: { root: null, expanded: new Set<string>(), dirs: {}, marks: {} },
   panelOpen: true,
   panelTab: "problems",
+  serviceExpanded: false,
+  problemsPath: null,
   compiling: false,
+  buildProgress: null,
   compileResult: null,
   compileLog: [],
   largeHintDismissed: [],
@@ -173,7 +190,9 @@ export function setSession(patch: SessionPatch): void {
     }
   }
   if (touched) {
-    state = { ...state, ...changes };
+    const next = { ...state, ...changes };
+    state = ["tabs", "root", "activePath", "splitPath", "editorGroups"].some(key => key in changes)
+      ? reconcileEditorGroups(state, next, changes) : next;
     emit();
   }
 }

@@ -37,6 +37,16 @@ pub struct NcHome {
     /// 仅作信息展示：开发态启动走 `StartDirectServer`，用不着 NCStarter。
     /// 判它有没有，是为了在界面上区分「这是完整安装」还是「被裁剪过」。
     pub has_nc_starter: bool,
+    /// 中间件监听端口（`ierp/bin/prop.xml` 的 `<http><port>`）；读不到为 `None`。
+    ///
+    /// 只放真实读到的值，**不给回落默认 80**：「没读到配置」和「端口就是 80」
+    /// 在界面上必须是两回事——否则用户会看到「80 空闲」的假警报
+    /// （实际监听在别处），或对着一个根本不存在的 80 排查占用。
+    pub http_port: Option<u16>,
+    /// Tomcat shutdown 端口（`<servicePort>`）；读不到为 `None`。
+    ///
+    /// 与监听端口是两回事：8005 被占时中间件同样起不来，排查时用得上。
+    pub service_port: Option<u16>,
 }
 
 /// 找一个目录下的 java.exe。
@@ -94,11 +104,17 @@ pub fn probe(root: &Path) -> Result<NcHome, String> {
         return Err(format!("{} 是空的，没有任何业务模块", modules.display()));
     }
 
+    // 顺手把中间件端口读出来：设置页的「环境自检」要一次看全，不让前端再调一次。
+    // 读不到就留 None（见字段注释），不影响 home 判定本身。
+    let endpoints = read_endpoints(&root);
+
     Ok(NcHome {
         root: root.to_string_lossy().to_string(),
         java: java.to_string_lossy().to_string(),
         module_count,
         has_nc_starter: startup_bat_has_nc_starter(&root),
+        http_port: endpoints.from_config.then_some(endpoints.http_port),
+        service_port: endpoints.service_port,
     })
 }
 
@@ -106,7 +122,8 @@ pub fn probe(root: &Path) -> Result<NcHome, String> {
 ///
 /// 只在「没配置」时当候选，**不参与判定**——判定始终看内容（`probe`），
 /// 所以把 NC 装在别处时，改配置即可，代码里不需要再加一个目录名。
-/// 试不通就交给「NC 服务」页让用户自己选，不在这里堆盘符。
+/// 试不通就交给设置 → 开发 →「NC 环境」页（可自动探测、可浏览），
+/// 不在这里堆盘符。
 pub const DEFAULT_NC_HOME: &str = r"D:\ncc\1909home";
 
 /// 解析本次要用的 NC home：配置优先，没配就试默认位置。
@@ -117,7 +134,7 @@ pub fn resolve(configured: Option<&str>) -> Result<NcHome, String> {
     match configured {
         Some(path) => probe(Path::new(path)),
         None => probe(Path::new(DEFAULT_NC_HOME)).map_err(|e| {
-            format!("{e}。还没有设置 NC 安装目录，请在「NC 服务」页选择（选含 ufjdk/bin/java.exe 的那一层）")
+            format!("{e}。还没有设置 NC 安装目录，请到设置 → 开发 →「NC 环境」页配置（可自动探测，也可浏览选择含 ufjdk/bin/java.exe 的那一层）")
         }),
     }
 }
@@ -294,7 +311,8 @@ pub fn strip_verbatim(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
-fn count_subdirs(dir: &Path) -> usize {
+/// 数一级子目录数（读不动 / 不存在都算 0）。`pub(crate)` 供 `nc_home_scan` 复用。
+pub(crate) fn count_subdirs(dir: &Path) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };

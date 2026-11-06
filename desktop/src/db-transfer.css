@@ -1,0 +1,104 @@
+/* Approved database transfer window: opaque surfaces keep dense previews readable in both materials. */
+.dbx-transfer-dialog { width: min(1000px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; overflow: hidden; background: hsl(var(--card)); color: hsl(var(--foreground)); border: 1px solid hsl(var(--border)); border-radius: var(--r-dialog); font-size: 13px; }
+html[data-ui-style="glass"] :is(.dbx-transfer-dialog,.dbx-nc-transfer).modal-surface.ui-surface { background: hsl(var(--card)) !important; backdrop-filter: none !important; }
+html[data-ui-style="glass"] .dbx-transfer-dialog :is(input, select) { background-color: hsl(var(--background)) !important; }
+/* Inline feedback remains visible; background notifications cannot cover a modal of any height. */
+body:has(:is(.dbx-transfer-dialog,.dbx-nc-transfer):not([data-exiting])) .toast-stack { z-index: 999; }
+.dbx-transfer-feedback { flex-shrink: 0; padding: 8px 24px; color: hsl(var(--success-ink)); background: hsl(var(--success) / .08); font-size: 12px; }
+.dbx-transfer-preview-jump { display: none; }
+.dbx-transfer-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 24px 16px; border-bottom: 1px solid hsl(var(--border)); flex-shrink: 0; }
+.dbx-transfer-head h2 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 17px; font-weight: 600; }
+.dbx-transfer-head p { margin: 5px 0 0; color: hsl(var(--muted-foreground)); font-size: 12px; overflow-wrap: anywhere; }
+.dbx-transfer-scroll { overflow: auto; overscroll-behavior: contain; min-height: 0; }
+.dbx-transfer-settings { display: grid; grid-template-columns: minmax(280px, 370px) minmax(0, 1fr); }
+.dbx-transfer-config { padding: 20px 24px; border-right: 1px solid hsl(var(--border)); min-width: 0; }
+.dbx-transfer-presets { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+.dbx-transfer-presets label { white-space: nowrap; color: hsl(var(--muted-foreground)); font-size: 12px; }
+.dbx-transfer-presets select { flex: 1; min-width: 0; }
+.dbx-transfer-dialog select, .dbx-transfer-dialog input:not([type="checkbox"]):not([type="radio"]) { height: 32px; padding: 0 9px; border: 1px solid hsl(var(--input)); border-radius: var(--r-control); background: hsl(var(--background)); color: hsl(var(--foreground)); font: inherit; min-width: 0; width: 100%; }
+.dbx-transfer-dialog input[type="checkbox"], .dbx-transfer-dialog input[type="radio"] { accent-color: hsl(var(--primary)); width: 14px; height: 14px; flex-shrink: 0; margin: 3px 0 0; }
+.dbx-transfer-dialog input:disabled, .dbx-transfer-dialog select:disabled { opacity: .55; }
+.dbx-transfer-dialog :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.dbx-transfer-dialog .dbx-btn, .dbx-transfer-dialog .dbx-ibtn { transition: background-color 120ms ease, color 120ms ease; }
+.dbx-transfer-dialog .dbx-btn:active:not(:disabled), .dbx-transfer-split button:active:not(:disabled) { transform: translateY(1px); }
+.dbx-transfer-save-preset { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.dbx-transfer-save-preset label { width: 100%; font-size: 12px; }
+.dbx-transfer-save-preset input { flex: 1; }
+.dbx-transfer-group + .dbx-transfer-group, .dbx-transfer-advanced { margin-top: 20px; padding-top: 18px; border-top: 1px solid hsl(var(--border)); }
+.dbx-transfer-group h3, .dbx-transfer-preview h3 { margin: 0 0 12px; font-size: 13px; font-weight: 600; }
+.dbx-transfer-choice { display: flex; gap: 9px; align-items: flex-start; margin: 11px 0; cursor: pointer; }
+.dbx-transfer-choice span { min-width: 0; }
+.dbx-transfer-choice small { display: block; margin-top: 2px; color: hsl(var(--muted-foreground)); font-size: 12px; line-height: 1.6; }
+.dbx-transfer-choice[data-disabled] { opacity: .6; cursor: default; }
+.dbx-transfer-field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; margin: 12px 0; }
+.dbx-transfer-row { display: flex; gap: 12px; }
+.dbx-transfer-row > * { flex: 1; min-width: 0; }
+.dbx-transfer-tags { display: flex; gap: 6px; margin: 8px 0 12px; }
+.dbx-transfer-tags button { padding: 3px 10px; border: 1px solid hsl(var(--border)); border-radius: var(--r-control); color: hsl(var(--muted-foreground)); }
+.dbx-transfer-tags button[aria-pressed="true"] { color: hsl(var(--accent-foreground)); border-color: hsl(var(--primary) / .4); background: hsl(var(--accent)); }
+.dbx-transfer-tags button:disabled { opacity: .4; }
+.dbx-transfer-help { margin: 8px 0 0; color: hsl(var(--muted-foreground)); font-size: 12px; line-height: 1.7; }
+.dbx-transfer-note { padding: 10px 12px; margin: 12px 0; border-radius: var(--r-control); background: hsl(var(--warning) / .1); color: hsl(var(--warning-ink)); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.dbx-transfer-note p { margin: 3px 0; }
+.dbx-transfer-advanced summary, .dbx-transfer-source-query summary { cursor: pointer; font-size: 12px; font-weight: 500; color: hsl(var(--muted-foreground)); }
+.dbx-transfer-key-list { display: flex; gap: 8px 12px; flex-wrap: wrap; margin: 12px 0; }
+.dbx-transfer-key-list > span { flex-basis: 100%; font-size: 12px; }
+.dbx-transfer-key-list label { display: flex; gap: 6px; align-items: center; overflow-wrap: anywhere; }
+.dbx-transfer-path { display: flex; gap: 8px; }
+.dbx-transfer-path input { flex: 1; font-size: 12px !important; }
+.dbx-transfer-preview { padding: 20px 24px; min-width: 0; }
+.dbx-transfer-preview-head, .dbx-transfer-cols-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dbx-transfer-preview-head h3 { margin: 0; }
+.dbx-transfer-preview-head > span, .dbx-transfer-cols-title h3 span { color: hsl(var(--muted-foreground)); font-weight: 400; font-size: 12px; }
+.dbx-transfer-preview-data { height: 220px; overflow: auto; margin: 14px 0 8px; border: 1px solid hsl(var(--border)); border-radius: var(--r-control); background: hsl(var(--background)); }
+.dbx-transfer-preview-data pre { margin: 0; padding: 12px; font: 12px/1.7 "Cascadia Mono", Consolas, monospace; white-space: pre; }
+.dbx-transfer-preview-empty { padding: 20px; color: hsl(var(--muted-foreground)); }
+.dbx-transfer-preview-data table { border-collapse: collapse; font-size: 12px; white-space: pre; min-width: 100%; }
+.dbx-transfer-preview-data th, .dbx-transfer-preview-data td { border-bottom: 1px solid hsl(var(--border)); border-right: 1px solid hsl(var(--border)); padding: 7px 10px; text-align: left; }
+.dbx-transfer-preview-data th { background: hsl(var(--secondary)); font-weight: 500; }
+.dbx-transfer-preview-data td.null { color: hsl(var(--muted-foreground)); font-style: italic; }
+.dbx-transfer-cols-title { margin-top: 24px; }
+.dbx-transfer-cols-title h3 { margin: 0; }
+.dbx-transfer-cols { margin-top: 10px; border-top: 1px solid hsl(var(--border)); }
+.dbx-transfer-col { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid hsl(var(--border)); }
+.dbx-transfer-col label { flex: 1; min-width: 0; display: flex; gap: 9px; align-items: flex-start; }
+.dbx-transfer-col label > span { min-width: 0; overflow-wrap: anywhere; }
+.dbx-transfer-col small { display: block; font-size: 11px; color: hsl(var(--muted-foreground)); }
+.dbx-transfer-col code { font-size: 12px; }
+.dbx-transfer-type { font: 11px "Cascadia Mono", Consolas, monospace; color: hsl(var(--muted-foreground)); max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-transfer-source-query { margin-top: 16px; }
+.dbx-transfer-source-query pre { font: 12px/1.6 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: hsl(var(--muted-foreground)); }
+.dbx-transfer-foot { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--card)); }
+.dbx-transfer-summary { min-width: 0; font-size: 12px; }
+.dbx-transfer-summary strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
+.dbx-transfer-summary small { display: block; margin-top: 3px; color: hsl(var(--muted-foreground)); }
+.dbx-transfer-foot-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.dbx-transfer-validation { flex-shrink: 0; padding: 8px 24px; background: hsl(var(--destructive) / .08); color: hsl(var(--destructive-ink)); font-size: 12px; overflow-wrap: anywhere; }
+.dbx-transfer-split { display: flex; border: 1px solid hsl(var(--border)); border-radius: var(--r-control); flex-shrink: 0; }
+.dbx-transfer-split > .dbx-btn { height: 28px; color: hsl(var(--foreground)); }
+.dbx-transfer-split > .dbx-ibtn { width: 22px; border-left: 1px solid hsl(var(--border)); border-radius: 0 var(--r-control) var(--r-control) 0; }
+.dbx-transfer-job-link { display: inline-flex; align-items: center; gap: 5px; color: hsl(var(--primary)); font-size: 12px; flex-shrink: 0; }
+.dbx-transfer-job { padding: 32px 40px; max-width: 720px; margin: auto; }
+.dbx-dlg .dbx-transfer-job, .dbx-dlg .dbx-transfer-error { grid-column: 1 / -1; }
+.dbx-transfer-job h3 { font-size: 19px; font-weight: 600; margin: 14px 0 8px; }
+.dbx-transfer-job > p { color: hsl(var(--muted-foreground)); font-size: 12px; }
+.dbx-transfer-job-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: var(--r-dialog); background: hsl(var(--accent)); color: hsl(var(--primary)); }
+.dbx-transfer-job-icon[data-warning] { color: hsl(var(--warning-ink)); background: hsl(var(--warning) / .12); }
+.dbx-transfer-progress-area { margin: 26px 0; }
+.dbx-transfer-progress-label { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 8px; font-size: 12px; }
+.dbx-transfer-progress { height: 6px; border-radius: var(--r-control); overflow: hidden; background: hsl(var(--secondary)); }
+.dbx-transfer-progress > span { display: block; height: 100%; background: hsl(var(--primary)); transition: width 180ms ease; }
+.dbx-transfer-progress[data-unknown] > span { animation: dbx-transfer-indeterminate 1.6s ease-in-out infinite; }
+.dbx-transfer-metrics { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.dbx-transfer-error { padding: 14px; color: hsl(var(--destructive-ink)); background: hsl(var(--destructive) / .08); border-radius: var(--r-control); overflow-wrap: anywhere; }
+.dbx-transfer-error small { display: block; margin-top: 6px; }
+.dbx-transfer-file-info { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 12px; margin: 24px 0; font-size: 12px; }
+.dbx-transfer-file-info dt { color: hsl(var(--muted-foreground)); }
+.dbx-transfer-file-info dd { margin: 0; overflow-wrap: anywhere; }
+.dbx-transfer-file-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0; }
+@keyframes dbx-transfer-indeterminate { 0% { transform: translateX(-100%); } 100% { transform: translateX(440%); } }
+@media (max-width: 1100px) { .dbx-rbar .dbx-transfer-action-label, .dbx-transfer-job-link span { display: none; } .dbx-transfer-split > .dbx-btn { width: 28px; padding: 0; } }
+@media (max-width: 740px) { .dbx-transfer-settings { grid-template-columns: minmax(0, 1fr); } .dbx-transfer-config { border-right: 0; border-bottom: 1px solid hsl(var(--border)); } .dbx-transfer-head, .dbx-transfer-config, .dbx-transfer-preview { padding: 16px; } .dbx-transfer-foot { padding: 12px 16px; flex-wrap: wrap; gap: 10px; } .dbx-transfer-foot-actions { margin-left: auto; } .dbx-transfer-job { padding: 24px 20px; } }
+@media (max-width: 740px) { .dbx-transfer-preview-jump { display: inline-flex; margin-left: auto; } }
+@media (max-height: 560px) { .dbx-transfer-head { padding-top: 12px; padding-bottom: 12px; } .dbx-transfer-head p { display: none; } .dbx-transfer-foot { padding-top: 10px; padding-bottom: 10px; } }
+@media (prefers-reduced-motion: reduce) { .dbx-transfer-dialog *, .dbx-transfer-progress > span { transition: none !important; animation: none !important; } }

@@ -1,6 +1,7 @@
 import { useOperations } from "../../lib/operations";
 import { Icon } from "../ui/icon";
-import { restartLang, startLangNow, useLangView } from "../../lib/lang";
+import { inLangModule, restartLang, startLangNow, useLangView } from "../../lib/lang";
+import { Menu, MenuItem } from "../ui/Menu";
 import { setLightMode } from "../../lib/lightMode";
 import { toast } from "../ui/toast";
 import { missingResourceId } from "../../lib/resourceMissing";
@@ -80,14 +81,22 @@ export function LangBadge({ activePath }: { activePath: string | null }) {
     v.state === "starting"
       ? "代码智能：准备中…"
       : v.state === "indexing"
-        ? "代码智能：正在建立索引（首次约 40 秒）…"
+        ? "代码智能：正在建立索引…"
         : v.settled
           ? "jdt.ls 就绪"
           : "代码智能：就绪，错误提示稍后显示…";
   return (
-    <span className="wb-lang" data-tone={v.state === "ready" && v.settled ? "ok" : "busy"} title={detail}>
-      <span className="wb-lang-dot" />
-      <span className="wb-lang-text">{text}</span>
-    </span>
+    <Menu portal align="left" width="w-72" trigger={(open, toggle) => <button type="button" className="wb-status-btn wb-lang" aria-label="代码智能状态详情" aria-haspopup="menu" aria-expanded={open} data-tone={v.state === "ready" && v.settled ? "ok" : "busy"} title={detail} onClick={toggle}>
+      <span className="wb-lang-dot" /><span className="wb-lang-text">{text}</span>
+    </button>}>
+      {close => <>
+        <p className="wb-tree-menu-note">{text}</p>
+        <p className="wb-tree-menu-note">{v.module ? `当前模块：${v.module}` : "尚未建立模块上下文"}</p>
+        <p className="wb-tree-menu-note">{activePath && inLangModule(activePath) ? "当前文件在代码智能范围内" : "当前文件不在已启动模块范围内；打开 Java 文件后可建立对应模块索引。"}</p>
+        {v.message && <p className="wb-tree-menu-note">{v.message}</p>}
+        <MenuItem label="为当前文件重新建立索引" icon="refresh" disabled={requesting || v.state !== "ready" || !activePath?.toLowerCase().endsWith(".java")}
+          onClick={() => { close(); if (activePath) void restartLang(activePath).catch(e => toast(`重新建立索引失败：${String(e)}`, "error")); }} />
+      </>}
+    </Menu>
   );
 }

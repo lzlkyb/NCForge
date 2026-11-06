@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::bmf_export::{self, PlannedFile};
+use crate::bmf_export;
 use crate::bmf_gen_types::{sha256_hex, Artifact, GenPlan, Timings};
 use crate::workspace::TextEncoding;
 
@@ -69,12 +69,17 @@ pub struct DiffResult {
     pub timings: Timings,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplyResult {
+    pub root: String,
     pub written: usize,
     pub skipped: usize,
+    pub failed: usize,
     pub items: Vec<bmf_export::ExportItem>,
+    pub backups: HashMap<String, String>,
+    pub paths: HashMap<String, String>,
+    pub manifest_error: Option<String>,
     /// 命令层写完清单后回填，供前端显示落点。
     pub manifest: String,
     pub timings: Timings,
@@ -166,23 +171,18 @@ fn encoding_of(a: &Artifact) -> TextEncoding {
 /// 产物按目标编码/换行编码后的字节哈希。清单与磁盘比较必须用这个口径；
 /// 用 `Artifact::sha256`（UTF-8/LF 文本）比会把所有 GBK/CRLF 文件误判成「被手改」。
 pub fn disk_sha(a: &Artifact) -> Result<String, String> {
-    let bytes = bmf_export::encode(
-        &a.text,
-        encoding_of(a),
-        a.eol.eq_ignore_ascii_case("CRLF"),
-    )?;
+    let bytes = bmf_export::encode(&a.text, encoding_of(a), a.eol.eq_ignore_ascii_case("CRLF"))?;
     Ok(sha256_hex(&bytes))
 }
 
 /// 对比「计划产物」与「清单 + 磁盘」。`root` 为空时只看清单（不读盘）。
-pub fn diff(plan: &GenPlan, manifest: Option<&Manifest>, root: Option<&Path>) -> Vec<ArtifactStatus> {
+pub fn diff(
+    plan: &GenPlan,
+    manifest: Option<&Manifest>,
+    root: Option<&Path>,
+) -> Vec<ArtifactStatus> {
     let by_path: HashMap<&str, &ManifestEntry> = manifest
-        .map(|m| {
-            m.artifacts
-                .iter()
-                .map(|e| (e.path.as_str(), e))
-                .collect()
-        })
+        .map(|m| m.artifacts.iter().map(|e| (e.path.as_str(), e)).collect())
         .unwrap_or_default();
     let mut out = Vec::new();
     let mut planned: HashMap<&str, ()> = HashMap::new();
@@ -195,7 +195,10 @@ pub fn diff(plan: &GenPlan, manifest: Option<&Manifest>, root: Option<&Path>) ->
             .map(|b| sha256_hex(&b));
         let (status, detail) = match disk {
             None if root.is_some() => ("new".to_string(), "文件不存在".to_string()),
-            None => ("new".to_string(), "未指定落盘根目录，未检查磁盘".to_string()),
+            None => (
+                "new".to_string(),
+                "未指定落盘根目录，未检查磁盘".to_string(),
+            ),
             Some(h) if h == expected => ("unchanged".to_string(), "与计划一致".to_string()),
             Some(h) => match entry {
                 None => (
@@ -252,48 +255,25 @@ pub fn apply(
     force: bool,
     backup_dir: &Path,
 ) -> Result<ApplyResult, String> {
-    let t0 = std::time::Instant::now();
-    let statuses = diff(plan, manifest, Some(root));
-    let status_by_id: HashMap<&str, &ArtifactStatus> =
-        statuses.iter().map(|s| (s.id.as_str(), s)).collect();
-    let mut files = Vec::new();
-    for a in &plan.artifacts {
-        if !selected.is_empty() && !selected.iter().any(|s| s == &a.id) {
-            continue;
-        }
-        let Some(st) = status_by_id.get(a.id.as_str()) else {
-            continue;
-        };
-        if !st.can_write(force) {
-            // unchanged 也交给 write_all 报「跳过」：用户需要看到「这些文件已经一致」，
-            // 而不是写入结果里凭空少了几项。force 时不必重写一模一样的字节。
-            if st.status != "unchanged" || force {
-                continue;
-            }
-        }
-        files.push(PlannedFile {
-            rel_path: a.path_hint.clone(),
-            kind: a.kind.clone(),
-            text: a.text.clone(),
-            encoding: encoding_of(a),
-            crlf: a.eol.eq_ignore_ascii_case("CRLF"),
-        });
+    if selected.is_empty() {
+        return Ok(ApplyResult::default());
     }
-    let t1 = std::time::Instant::now();
-    let res = bmf_export::write_all(root, &files, force, backup_dir)?;
-    let t2 = std::time::Instant::now();
-    Ok(ApplyResult {
-        written: res.written,
-        skipped: res.skipped,
-        items: res.items,
-        manifest: String::new(),
-        timings: Timings {
-            diff_ms: (t1 - t0).as_secs_f64() * 1000.0,
-            write_ms: (t2 - t1).as_secs_f64() * 1000.0,
-            total_ms: (t2 - t0).as_secs_f64() * 1000.0,
-            ..Default::default()
-        },
-    })
+    let snapshot = crate::bmf_gen_snapshot::describe(plan, "", "")?;
+    let expected =
+        crate::bmf_gen_snapshot::inspect(snapshot, root, manifest, |p| Ok(p.to_path_buf()))?
+            .snapshot
+            .ok_or("目录检查未完成")?;
+    let overrides = if force { selected.to_vec() } else { Vec::new() };
+    crate::bmf_gen_write::apply(
+        plan,
+        manifest,
+        root,
+        selected,
+        &overrides,
+        &expected,
+        backup_dir,
+        |p| Ok(p.to_path_buf()),
+    )
 }
 
 #[cfg(test)]
@@ -335,11 +315,21 @@ mod tests {
         assert!(statuses.iter().all(|s| s.status == "new"));
 
         // a 按计划写盘 → unchanged；b 手写成别的内容 → conflict（无清单）
-        std::fs::write(root.join("src/A.java"), bmf_export::encode(&a.text, TextEncoding::Gbk, true).unwrap()).unwrap();
+        std::fs::write(
+            root.join("src/A.java"),
+            bmf_export::encode(&a.text, TextEncoding::Gbk, true).unwrap(),
+        )
+        .unwrap();
         std::fs::write(root.join("src/B.java"), b"handwritten").unwrap();
         let statuses = diff(&plan, None, Some(&root));
-        assert_eq!(statuses.iter().find(|s| s.id == "a").unwrap().status, "unchanged");
-        assert_eq!(statuses.iter().find(|s| s.id == "b").unwrap().status, "conflict");
+        assert_eq!(
+            statuses.iter().find(|s| s.id == "a").unwrap().status,
+            "unchanged"
+        );
+        assert_eq!(
+            statuses.iter().find(|s| s.id == "b").unwrap().status,
+            "conflict"
+        );
 
         // 清单记录 b 的「旧内容」→ b 变成 modified
         let mut m = Manifest::default();
@@ -354,7 +344,10 @@ mod tests {
             sha256: sha256_hex(b"gone"),
         });
         let statuses = diff(&plan, Some(&m), Some(&root));
-        assert_eq!(statuses.iter().find(|s| s.id == "b").unwrap().status, "modified");
+        assert_eq!(
+            statuses.iter().find(|s| s.id == "b").unwrap().status,
+            "modified"
+        );
         assert!(statuses.iter().any(|s| s.status == "orphan"));
     }
 
@@ -367,13 +360,35 @@ mod tests {
         let plan = plan_of(vec![a.clone()]);
         std::fs::write(root.join("src/A.java"), b"handwritten").unwrap();
 
-        let r = apply(&plan, None, &root, &[], false, &dir.path().join("bak")).unwrap();
+        let r = apply(
+            &plan,
+            None,
+            &root,
+            &["a".into()],
+            false,
+            &dir.path().join("bak"),
+        )
+        .unwrap();
         assert_eq!(r.written, 0);
-        assert_eq!(std::fs::read(root.join("src/A.java")).unwrap(), b"handwritten");
+        assert_eq!(
+            std::fs::read(root.join("src/A.java")).unwrap(),
+            b"handwritten"
+        );
 
-        let r = apply(&plan, None, &root, &[], true, &dir.path().join("bak")).unwrap();
+        let r = apply(
+            &plan,
+            None,
+            &root,
+            &["a".into()],
+            true,
+            &dir.path().join("bak"),
+        )
+        .unwrap();
         assert_eq!(r.written, 1);
         // 覆盖后应是计划内容（GBK + CRLF），不是手写的那份。
-        assert_ne!(std::fs::read(root.join("src/A.java")).unwrap(), b"handwritten");
+        assert_ne!(
+            std::fs::read(root.join("src/A.java")).unwrap(),
+            b"handwritten"
+        );
     }
 }

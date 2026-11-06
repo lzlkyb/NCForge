@@ -1,5 +1,5 @@
 import type { Cell, ColumnMeta } from "./dbApi";
-import { spreadsheetCell } from "./resultExport";
+import { defaultTransferOptions, serializeTransfer } from "./resultTransfer";
 import type { CellPos } from "../components/db/ResultGrid";
 
 export interface Selection { anchor: CellPos; end: CellPos }
@@ -13,8 +13,11 @@ export function selectedCols(visible: number[], sel: Selection): number[] {
 }
 export function selectionText(rows: Cell[][], order: number[], visible: number[], sel: Selection, value = (r: number, c: number) => rows[r][c]): string {
   const cols = selectedCols(visible, sel);
-  const text=(v:Cell)=>{const s=spreadsheetCell(v===null?"":String(v));return /[\t\r\n"]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;};
-  return selectedRows(order, sel).map(r => cols.map(c => text(value(r, c))).join("\t")).join("\r\n");
+  if (!cols.length) return "";
+  // This legacy callback has no column metadata; copy numeric cells as their supplied text.
+  const columns = cols.map((_, i) => ({ name: `COLUMN_${i}`, type: "VARCHAR2", precision: 0, scale: 0 }));
+  const selected = selectedRows(order, sel).map(r => cols.map(c => { const cell = value(r, c); return typeof cell === "number" ? String(cell) : cell; }));
+  return serializeTransfer({ columns, rows: selected }, { ...defaultTransferOptions("tsv"), header: "none", lineEnding: "crlf" });
 }
 export interface GridLayout { order: string[]; hidden: string[]; frozen: string[]; widths: Record<string, number> }
 export const defaultLayout = (): GridLayout => ({ order: [], hidden: [], frozen: [], widths: {} });

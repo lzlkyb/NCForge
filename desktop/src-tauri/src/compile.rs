@@ -60,12 +60,54 @@ pub struct CompileResult {
     /// 本次最终用到的 jar 序号（调用方缓存后下次作为 seed，省掉分轮补 jar）。
     #[serde(skip)]
     pub resolved_jars: Vec<u32>,
+    /// 按模块的结果账本。单模块编译只有一条；`compile_all` 会带上 blocked / skipped。
+    ///
+    /// 前端的 `compileResult` 仍保留为派生视图（合并后的 problems / 计数），
+    /// 但面板与状态栏要能显示「哪个模块失败、哪个模块被阻断」，不能再从错误里猜。
+    #[serde(default)]
+    pub modules: Vec<ModuleBuildResult>,
+}
+
+/// 一个模块在一轮构建里的结果。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleBuildResult {
+    pub module: String,
+    /// `ok` / `failed` / `blocked` / `skipped` / `cleaned`
+    pub status: String,
+    pub error_count: usize,
+    pub warning_count: usize,
+    pub duration_ms: u64,
+    pub source_count: usize,
+    pub out_dir: String,
+    /// 本轮清理掉的 class 数（重编时）
+    pub cleaned: usize,
+    /// 跳过 / 阻断的原因（给用户看的一句话）
+    pub reason: Option<String>,
+}
+
+impl ModuleBuildResult {
+    pub fn ok(module: &str, r: &CompileResult) -> Self {
+        Self {
+            module: module.to_string(),
+            status: if r.error_count == 0 { "ok" } else { "failed" }.to_string(),
+            error_count: r.error_count,
+            warning_count: r.warning_count,
+            duration_ms: r.duration_ms,
+            source_count: r.source_count,
+            out_dir: r.out_dir.clone(),
+            cleaned: 0,
+            reason: None,
+        }
+    }
 }
 
 pub struct CompileEnv<'a> {
     pub nc_home: &'a Path,
     pub java_exe: &'a Path,
     pub ecj_jar: &'a Path,
+    /// 常驻编译桥 jar（`ncecj.jar`）。`None` = 退回一次一进程（测试 / 资源缺失）。
+    pub worker_jar: Option<&'a Path>,
     /// 工程根（如 newar），其下每个子目录是一个模块。
     pub project_root: &'a Path,
     pub index: &'a ClassIndex,
@@ -101,10 +143,16 @@ pub struct CompileJob {
     pub module: String,
     /// 只编译这些文件；None = 整个模块。
     pub files: Option<Vec<PathBuf>>,
-    /// 产物目录（正式使用时是 `<模块>/classes`，和 Eclipse 一致）。
+    /// 产物目录。`output_map` 为空时所有文件都写这里（兼容老调用点与单文件编译）。
     pub out_dir: PathBuf,
+    /// `.classpath` 声明的源根；None = 按 `SRC_DIRS` 回落。
+    pub source_roots: Option<Vec<PathBuf>>,
+    /// 源根 → 产物目录（按最长前缀匹配）。一个模块多个 output 时分组各跑一轮 ecj。
+    pub output_map: Vec<(PathBuf, PathBuf)>,
     /// 上次编译用到的 jar，省掉分轮补 jar 的时间。
     pub seed_jars: Vec<u32>,
+    /// 快速模式（保存后的单文件编译）：启动参数偏向「起得快」。
+    pub fast: bool,
 }
 
 /// 从文件路径推出所属模块名（工程根下的第一级目录）。
@@ -155,8 +203,12 @@ pub fn collect_sources(module_dir: &Path) -> Vec<PathBuf> {
 /// 提取 import：返回 (名字, 是否通配符)。只看行首是 `import` 的行，不做完整语法分析。
 pub fn extract_imports(text: &str) -> Vec<(String, bool)> {
     let mut out = Vec::new();
-    for line in text.lines() {
-        let Some(rest) = line.trim_start().strip_prefix("import ") else {
+    // 按语句而不是按行切：一行里写 `package p; import q.*;` 也是合法 Java，
+    // 行首匹配会漏掉后面的 import（反向依赖会因此少编引用方）。
+    // 最后一段没有分号收尾，不是完整语句（例如注释残缺 / 文件被截断），跳过。
+    let parts: Vec<&str> = text.split(';').collect();
+    for stmt in parts.iter().take(parts.len().saturating_sub(1)) {
+        let Some(rest) = stmt.trim_start().strip_prefix("import ") else {
             continue;
         };
         let rest = rest.trim_start();
@@ -164,8 +216,7 @@ pub fn extract_imports(text: &str) -> Vec<(String, bool)> {
             .strip_prefix("static ")
             .map(str::trim_start)
             .unwrap_or(rest);
-        let Some(end) = rest.find(';') else { continue };
-        let name = rest[..end].trim();
+        let name = rest.trim();
         if name.is_empty()
             || !name
                 .chars()
@@ -503,10 +554,48 @@ fn discover_hierarchy(index: &ClassIndex, output: &str, jars: &mut BTreeSet<u32>
     jars.len() - before
 }
 
-fn run_ecj(env: &CompileEnv, args: &Path) -> Result<(bool, String), String> {
+/// 跑一次 ecj。
+///
+/// 优先走常驻 worker（省掉每次 0.6~0.9 秒的 JVM 启动）；worker 缺 jar / 启动失败 /
+/// 协议错误时**静默退回**一次一进程，行为与以前完全一致。取消与超时不能回退重跑：
+/// 那会让用户等两遍。
+fn run_ecj(env: &CompileEnv, args: &Path, fast: bool) -> Result<(bool, String), String> {
+    if let Some(jar) = env.worker_jar {
+        if let Some((ok, output)) = crate::ecj_worker::compile(
+            env.java_exe,
+            env.ecj_jar,
+            jar,
+            args,
+            TIMEOUT,
+            env.cancel,
+        )? {
+            return Ok((ok, clean_ecj_output(output)));
+        }
+    }
+    let started = Instant::now();
+    let (ok, output) = run_ecj_oneshot(env, args, fast)?;
+    crate::ecj_worker::note_oneshot(started.elapsed().as_millis() as u64);
+    Ok((ok, clean_ecj_output(output)))
+}
+
+/// JAR 清单里常见的噪声行：不是编译问题，混进问题面板只会添乱。
+fn clean_ecj_output(text: String) -> String {
+    text.lines()
+        .filter(|l| !l.contains("invalid Class-Path header"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn run_ecj_oneshot(env: &CompileEnv, args: &Path, fast: bool) -> Result<(bool, String), String> {
     let mut cmd = Command::new(env.java_exe);
     // ecj 的输出与参数文件都按 UTF-8，避免依赖系统默认编码（中文 Windows 是 GBK）
-    cmd.args(["-Dfile.encoding=UTF-8", "-Xmx1024m", "-cp"])
+    cmd.args(["-Dfile.encoding=UTF-8", "-Xmx1024m"]);
+    if fast {
+        // 保存后的单文件编译只有 1~2 个类，JIT 分层编译的收益为零，启动时间才是全部。
+        // 整模块编译仍用默认参数：TieredStopAtLevel=1 会让长时间编译明显变慢。
+        cmd.args(["-XX:TieredStopAtLevel=1", "-XX:+UseSerialGC"]);
+    }
+    cmd.arg("-cp")
         .arg(env.ecj_jar)
         .arg(ECJ_MAIN)
         .arg(format!("@{}", args.display()))
@@ -555,12 +644,6 @@ fn run_ecj(env: &CompileEnv, args: &Path) -> Result<(bool, String), String> {
     };
     let mut text = String::from_utf8_lossy(&h_out.join().unwrap_or_default()).into_owned();
     text.push_str(&String::from_utf8_lossy(&h_err.join().unwrap_or_default()));
-    // JAR 清单里常见的噪声行
-    let text = text
-        .lines()
-        .filter(|l| !l.contains("invalid Class-Path header"))
-        .collect::<Vec<_>>()
-        .join("\n");
     Ok((status.success(), text))
 }
 
@@ -592,6 +675,9 @@ fn write_args(
 }
 
 /// 编译一个模块（或模块里的指定文件）。`log` 收到阶段性进展文字，供界面显示。
+///
+/// 一个模块可能有多个产物目录（`.classpath` 给单条 src 写了 `output=`）：
+/// `-d` 只能一个目录，所以按输出分组，每组跑一轮 ecj，共享 jar 集合与源码读取。
 pub fn compile(
     env: &CompileEnv,
     job: &CompileJob,
@@ -601,7 +687,10 @@ pub fn compile(
     let module_dir = env.project_root.join(&job.module);
     let files = match &job.files {
         Some(f) => f.clone(),
-        None => collect_sources(&module_dir),
+        None => match &job.source_roots {
+            Some(roots) => collect_sources_in(roots),
+            None => collect_sources(&module_dir),
+        },
     };
     if files.is_empty() {
         return Err(format!(
@@ -610,13 +699,107 @@ pub fn compile(
             SRC_DIRS.join("、")
         ));
     }
-    std::fs::create_dir_all(&job.out_dir).map_err(|e| format!("无法创建输出目录: {e}"))?;
+
+    // 按输出目录分组。`output_map` 为空 / 文件不在任何源根下 → 落到主输出。
+    let mut groups: Vec<(PathBuf, Vec<PathBuf>)> = Vec::new();
+    for f in files {
+        let out = job
+            .output_map
+            .iter()
+            .filter(|(root, _)| path_starts_with(&f, root))
+            .max_by_key(|(root, _)| root.components().count())
+            .map(|(_, out)| out.clone())
+            .unwrap_or_else(|| job.out_dir.clone());
+        match groups.iter_mut().find(|(o, _)| path_eq(o, &out)) {
+            Some((_, list)) => list.push(f),
+            None => groups.push((out, vec![f])),
+        }
+    }
+    if groups.len() > 1 {
+        log(&format!(
+            "模块 {} 有 {} 个产物目录，按输出分组各编译一轮",
+            job.module,
+            groups.len()
+        ));
+    }
+
+    let mut results = Vec::with_capacity(groups.len());
+    let total = groups.len();
+    for (i, (out, files)) in groups.into_iter().enumerate() {
+        if total > 1 {
+            log(&format!(
+                "输出组 {}/{} → {}（{} 个文件）",
+                i + 1,
+                total,
+                out.display(),
+                files.len()
+            ));
+        }
+        results.push(compile_group(
+            env,
+            &job.module,
+            &files,
+            &out,
+            &job.seed_jars,
+            job.fast,
+            log,
+        )?);
+    }
+    if results.len() == 1 {
+        return Ok(results.pop().expect("刚判断过只有一个结果"));
+    }
+    let mut merged = CompileResult {
+        ok: true,
+        duration_ms: started.elapsed().as_millis() as u64,
+        source_count: 0,
+        error_count: 0,
+        warning_count: 0,
+        problems: Vec::new(),
+        jar_count: 0,
+        rounds: 0,
+        out_dir: results
+            .iter()
+            .map(|r| r.out_dir.clone())
+            .collect::<Vec<_>>()
+            .join("；"),
+        diagnostics: Vec::new(),
+        resolved_jars: Vec::new(),
+        modules: Vec::new(),
+    };
+    let mut jars: BTreeSet<u32> = BTreeSet::new();
+    for r in results {
+        merged.source_count += r.source_count;
+        merged.error_count += r.error_count;
+        merged.warning_count += r.warning_count;
+        merged.jar_count = merged.jar_count.max(r.jar_count);
+        merged.rounds += r.rounds;
+        merged.problems.extend(r.problems);
+        merged.diagnostics.extend(r.diagnostics);
+        jars.extend(r.resolved_jars);
+    }
+    merged.ok = merged.error_count == 0;
+    merged.resolved_jars = jars.into_iter().collect();
+    Ok(merged)
+}
+
+/// 编译一组写到同一个目录的文件。
+fn compile_group(
+    env: &CompileEnv,
+    module: &str,
+    files: &[PathBuf],
+    out_dir: &Path,
+    seed_jars: &[u32],
+    fast: bool,
+    log: &dyn Fn(&str),
+) -> Result<CompileResult, String> {
+    let started = Instant::now();
+    std::fs::create_dir_all(out_dir).map_err(|e| format!("无法创建输出目录: {e}"))?;
     std::fs::create_dir_all(env.work_dir).map_err(|e| format!("无法创建工作目录: {e}"))?;
 
     // 读源码：定编码 + 提取 import
-    let mut jars: BTreeSet<u32> = job.seed_jars.iter().copied().collect();
+    let mut jars: BTreeSet<u32> = seed_jars.iter().copied().collect();
     let mut sources: Vec<(PathBuf, TextEncoding)> = Vec::with_capacity(files.len());
-    for f in &files {
+    for f in files {
         let bytes = std::fs::read(f).map_err(|e| format!("读取 {} 失败: {e}", f.display()))?;
         let text = decode_lossy(&bytes);
         if let Some(pkg) = extract_package(&text) {
@@ -629,7 +812,7 @@ pub fn compile(
     }
     log(&format!(
         "模块 {} · {} 个源文件 · 按 import 挑出 {} 个 jar",
-        job.module,
+        module,
         sources.len(),
         jars.len()
     ));
@@ -660,10 +843,10 @@ pub fn compile(
             .iter()
             .map(|&i| env.index.jars[i as usize].clone())
             .collect();
-        write_args(&args_path, &class_dirs, &jar_paths, &job.out_dir, &sources)
+        write_args(&args_path, &class_dirs, &jar_paths, out_dir, &sources)
             .map_err(|e| format!("写参数文件失败: {e}"))?;
         log(&format!("第 {rounds} 轮编译（{} 个 jar）…", jars.len()));
-        (ok, output) = run_ecj(env, &args_path)?;
+        (ok, output) = run_ecj(env, &args_path, fast)?;
         if ok || rounds >= MAX_ROUNDS {
             break;
         }
@@ -708,10 +891,52 @@ pub fn compile(
         problems,
         jar_count: jars.len(),
         rounds,
-        out_dir: job.out_dir.to_string_lossy().into_owned(),
+        out_dir: out_dir.to_string_lossy().into_owned(),
         diagnostics,
         resolved_jars: jars.into_iter().collect(),
+        modules: Vec::new(),
     })
+}
+
+/// 按多个源码根收集 `.java`（不跟随 symlink/junction）。
+fn collect_sources_in(roots: &[PathBuf]) -> Vec<PathBuf> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            let Ok(md) = std::fs::symlink_metadata(&p) else {
+                continue;
+            };
+            if crate::build_layout::is_reparse(&md) {
+                continue;
+            }
+            if md.is_dir() {
+                walk(&p, out);
+            } else if p
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("java"))
+            {
+                out.push(p);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for r in roots {
+        walk(r, &mut out);
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn path_starts_with(path: &Path, base: &Path) -> bool {
+    crate::build_layout::path_starts_with(path, base)
+}
+
+fn path_eq(a: &Path, b: &Path) -> bool {
+    crate::build_layout::eq_path(a, b)
 }
 
 #[cfg(test)]
@@ -846,6 +1071,11 @@ import a.B;"
         if !file.is_file() || !java.is_file() || !ecj.is_file() {
             return;
         }
+        // 有桥 jar 就走常驻 worker（正是打包版的行为）；没有则自动退回一次一进程
+        let bridge = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("ecj-bridge")
+            .join(crate::ecj_worker::BRIDGE_JAR);
 
         // 首次清冷要扫 7000 个 jar；这里不落缓存文件，避免测试污染用户配置目录
         let index = crate::nc_index::ClassIndex::load_or_build(
@@ -861,6 +1091,7 @@ import a.B;"
             nc_home: home,
             java_exe: &java,
             ecj_jar: &ecj,
+            worker_jar: bridge.exists().then_some(bridge.as_path()),
             project_root: root,
             index: &index,
             work_dir: &work,
@@ -871,17 +1102,35 @@ import a.B;"
             out_dir: out.clone(),
             module: "gl".to_string(),
             files: Some(vec![file]),
+            source_roots: None,
+            output_map: Vec::new(),
             seed_jars: Vec::new(),
+            fast: true,
         };
         let started = Instant::now();
         let r = compile(&env, &job, &|s| println!("{s}")).unwrap();
         let ms = started.elapsed().as_millis();
+        // 第二次：worker 已预热，这才是保存后自动编译的稳态成本
+        let again = Instant::now();
+        let r2 = compile(&env, &job, &|_| {}).unwrap();
+        let warm = again.elapsed().as_millis();
+        // 对照：同一条命令退回一次一进程（老行为）
+        let oneshot_env = CompileEnv {
+            worker_jar: None,
+            ..env
+        };
+        let oneshot_at = Instant::now();
+        let r3 = compile(&oneshot_env, &job, &|_| {}).unwrap();
+        let oneshot = oneshot_at.elapsed().as_millis();
         println!(
-            "单文件编译：{ms} ms · {} 个 jar · {} 轮 · {} 错误",
+            "单文件编译：首次 {ms} ms · 预热 {warm} ms · 一次一进程 {oneshot} ms · {} 个 jar · {} 轮 · {} 错误",
             r.jar_count, r.rounds, r.error_count
         );
+        crate::ecj_worker::shutdown_all();
         assert_eq!(r.source_count, 1);
         assert_eq!(r.error_count, 0, "问题：{:?}", r.problems);
+        assert_eq!(r2.error_count, 0, "第二次编译出错：{:?}", r2.problems);
+        assert_eq!(r3.error_count, 0, "一次一进程出错：{:?}", r3.problems);
         assert!(
             out.join("nc")
                 .join("bs")
@@ -891,5 +1140,191 @@ import a.B;"
                 .is_file(),
             "产物没落到 out_dir"
         );
+    }
+
+    /// 差分门禁（真机、`#[ignore]`）：**增量编出来的 class 必须与全量编出来的一致**。
+    ///
+    /// 两个阶段对应保存后的两条路径：
+    /// 1. 只改方法体 → 只编改动文件；
+    /// 2. 改字段类型 → 编改动文件 + 引用它的其它模块源文件（签名传播）。
+    ///
+    /// 对照组是「同一份最终源码从空产物目录全量编一遍」，逐字节比较全部 class。
+    ///
+    /// 合成工作区只引用自己的类，不依赖 NC home；用的是仓库自带的 ecj。
+    /// 运行：`node scripts/rust-gate.mjs test --lib -- --ignored incremental_matches_full_live --nocapture`
+    #[test]
+    #[ignore]
+    fn incremental_matches_full_live() {
+        use std::collections::BTreeMap;
+        use std::sync::atomic::AtomicBool;
+
+        fn write_src(p: &Path, s: &str) {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, s).unwrap();
+        }
+
+        /// 收集目录下全部 class：`前缀/相对路径` → 字节。
+        fn snapshot(dir: &Path, prefix: &str, out: &mut BTreeMap<String, Vec<u8>>) {
+            fn walk(cur: &Path, base: &Path, prefix: &str, out: &mut BTreeMap<String, Vec<u8>>) {
+                let Ok(rd) = std::fs::read_dir(cur) else { return };
+                for e in rd.flatten() {
+                    let p = e.path();
+                    if p.is_dir() {
+                        walk(&p, base, prefix, out);
+                    } else if p.extension().is_some_and(|x| x == "class") {
+                        let rel = p
+                            .strip_prefix(base)
+                            .unwrap()
+                            .to_string_lossy()
+                            .replace('\\', "/");
+                        out.insert(format!("{prefix}/{rel}"), std::fs::read(&p).unwrap());
+                    }
+                }
+            }
+            walk(dir, dir, prefix, out);
+        }
+
+        fn compile_into(
+            env: &CompileEnv,
+            module: &str,
+            files: Vec<PathBuf>,
+            out: &Path,
+            fast: bool,
+        ) {
+            let job = CompileJob {
+                module: module.to_string(),
+                files: Some(files),
+                out_dir: out.to_path_buf(),
+                source_roots: None,
+                output_map: Vec::new(),
+                seed_jars: Vec::new(),
+                fast,
+            };
+            let r = compile(env, &job, &|_| {}).unwrap();
+            assert_eq!(r.error_count, 0, "{module} 编译错误：{:?}", r.problems);
+        }
+
+        let java = Path::new(r"D:\ncc\1909home").join("ufjdk").join("bin").join("java.exe");
+        let ecj = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("ecj")
+            .join("ecj-3.17.jar");
+        if !java.is_file() || !ecj.is_file() {
+            return;
+        }
+
+        let base = std::env::temp_dir().join(format!("ncwb-diff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        // 每个工作区单独一层父目录：类路径启发式会看「兄弟目录/模块/classes」，
+        // 不能让两个对照工作区互相看见对方的产物
+        let inc = base.join("inc").join("ws");
+        let st1 = base.join("stage1").join("ws");
+        let st2 = base.join("stage2").join("ws");
+        let work = base.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+
+        let a_src = |root: &Path| root.join("a").join("src").join("public").join("p").join("A.java");
+        let b_src = |root: &Path| root.join("b").join("src").join("public").join("q").join("B.java");
+
+        // 初始源码：B 读 A 的 int 字段（int → long 会改字节码里的字段描述符）
+        let a_v1 = "package p;\npublic class A {\n    public int x = 1;\n    public int f(int v) { return v + x; }\n}\n";
+        // 阶段 1：只改方法体，ABI 不变
+        let a_v2 = "package p;\npublic class A {\n    public int x = 1;\n    public int f(int v) { return v * x; }\n}\n";
+        // 阶段 2：改字段类型，ABI 变了但 B 的源码不用改（int → long 扩大转换）
+        let a_v3 = "package p;\npublic class A {\n    public long x = 1;\n    public int f(int v) { return v * (int) x; }\n}\n";
+        let b_java = "package q;\nimport p.A;\npublic class B {\n    public long g(A a) { return a.x; }\n}\n";
+
+        for root in [inc.as_path(), st1.as_path(), st2.as_path()] {
+            let a = if root == st2.as_path() { a_v3 } else { a_v1 };
+            write_src(&a_src(root), a);
+            write_src(&b_src(root), b_java);
+        }
+        write_src(&a_src(&st1), a_v2);
+
+        let index = crate::nc_index::ClassIndex::build(Vec::new());
+        let cancel = AtomicBool::new(false);
+        let home = base.join("nchome");
+        fn make_env<'a>(
+            root: &'a Path,
+            home: &'a Path,
+            java: &'a Path,
+            ecj: &'a Path,
+            index: &'a crate::nc_index::ClassIndex,
+            work: &'a Path,
+            cancel: &'a AtomicBool,
+        ) -> CompileEnv<'a> {
+            CompileEnv {
+                nc_home: home,
+                java_exe: java,
+                ecj_jar: ecj,
+                worker_jar: None,
+                project_root: root,
+                index,
+                work_dir: work,
+                cancel: Some(cancel),
+                overrides: &[],
+            }
+        }
+        // 只测编译器行为是否等价，不走常驻 bridge：两条路径产物应当一致，
+        // worker 本身另有 `single_file_compile_live` 覆盖
+        let a_out = |root: &Path| root.join("a").join("classes");
+        let b_out = |root: &Path| root.join("b").join("classes");
+        let all_sources = |root: &Path, module: &str| {
+            crate::build_layout::ModuleLayout::resolve(root, module).collect_sources()
+        };
+
+        // 对照组：每个阶段从空产物目录全量编一遍
+        let full_state = |root: &Path| {
+            let env = make_env(root, &home, &java, &ecj, &index, &work, &cancel);
+            for module in ["a", "b"] {
+                let out = root.join(module).join("classes");
+                compile_into(&env, module, all_sources(root, module), &out, false);
+            }
+            let mut snap = BTreeMap::new();
+            snapshot(&a_out(root), "a", &mut snap);
+            snapshot(&b_out(root), "b", &mut snap);
+            snap
+        };
+
+        // 增量组：先按初始源码全量编一遍，再模拟保存后的增量编译
+        let env = make_env(&inc, &home, &java, &ecj, &index, &work, &cancel);
+        for module in ["a", "b"] {
+            let out = inc.join(module).join("classes");
+            compile_into(&env, module, all_sources(&inc, module), &out, true);
+        }
+
+        // 阶段 1：只编改动的 A.java（保存路径 compile_file）
+        write_src(&a_src(&inc), a_v2);
+        compile_into(&env, "a", vec![a_src(&inc)], &a_out(&inc), true);
+        let mut got = BTreeMap::new();
+        snapshot(&a_out(&inc), "a", &mut got);
+        snapshot(&b_out(&inc), "b", &mut got);
+        let want = full_state(&st1);
+        assert_eq!(
+            got, want,
+            "阶段 1（只改方法体）：增量产物与全量不一致"
+        );
+
+        // 阶段 2：先编 A.java，再按引用关系补编 B（签名传播）
+        write_src(&a_src(&inc), a_v3);
+        compile_into(&env, "a", vec![a_src(&inc)], &a_out(&inc), true);
+        let b_all = all_sources(&inc, "b");
+        let refs = crate::build_state::referrers(&[a_src(&inc)], &b_all)
+            .expect("A 的类型声明应当能解析");
+        assert!(
+            refs.iter().any(|p| p.ends_with("B.java")),
+            "反向依赖没找到 B.java：{refs:?}"
+        );
+        compile_into(&env, "b", refs, &b_out(&inc), true);
+        let mut got = BTreeMap::new();
+        snapshot(&a_out(&inc), "a", &mut got);
+        snapshot(&b_out(&inc), "b", &mut got);
+        let want = full_state(&st2);
+        assert_eq!(
+            got, want,
+            "阶段 2（签名变化 + 传播）：增量产物与全量不一致"
+        );
+        crate::ecj_worker::shutdown_all();
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

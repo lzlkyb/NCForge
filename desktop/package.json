@@ -9,6 +9,7 @@
     "vite:build": "node scripts/patch-monaco.mjs && tsc && vite build",
     "test": "vitest run",
     "test:meta-workbench": "node scripts/meta-workbench-acceptance.mjs",
+    "test:meta-generation": "node scripts/meta-generation-acceptance.mjs",
     "pretest": "npm run test:scripts",
     "motion:check": "node --test scripts/check-motion.mjs",
     "test:scripts": "node --test scripts/lib/*.test.mjs",

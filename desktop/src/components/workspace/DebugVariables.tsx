@@ -87,10 +87,11 @@ function VarRow({
             spellCheck={false}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
               if (e.key === "Enter") save();
               if (e.key === "Escape") setEditing(false);
             }}
-            onBlur={save}
+            onBlur={event => { if (!event.currentTarget.closest('[data-relocating="true"]')) save(); }}
           />
         </div>
       )}

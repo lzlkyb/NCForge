@@ -14,6 +14,7 @@
 // 选中版本的详情（diff / 恢复）在 HistoryDetail 里：它按选中版本重挂，
 // 预览与恢复进度只属于那一版。这里只管列表、磁盘快照与「恢复中不许关」。
 import { useEffect, useRef, useState } from "react";
+import { focusReadingTrigger } from "../../lib/readingFocus";
 import { Icon } from "../ui/icon";
 import { readFile, type FileContent } from "../../lib/workspace";
 import { formatBytes } from "../../lib/utils";
@@ -62,10 +63,10 @@ export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) 
       })
       .catch((e) => alive && setError(String(e)));
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.isComposing || e.defaultPrevented) return;
       e.preventDefault();
       // 恢复写盘中不关：关了用户就不知道结果了
-      if (!live.current.busy) live.current.onClose();
+      if (!live.current.busy) { live.current.onClose(); focusReadingTrigger(panelRef.current, "history"); }
     };
     // 点面板外面关。挂 document 而不是全屏遮罩：遮罩会盖住整个编辑区，
     // 想滚动代码、点别处对照都会被它吃掉。触发按钮（data-popover="history"）排除——

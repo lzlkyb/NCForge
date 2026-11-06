@@ -74,7 +74,8 @@ export function UpdateDialogContent({ update, process = AVAILABLE_PROCESS, onClo
         <div className="update-benefits-heading"><h3>{cross ? "这次升级，值得关注的变化" : "本次更新亮点"}</h3><span>精选 {highlights.length} 项</span></div>
         <ul className="update-benefits">{highlights.map(({ version, text }) => {
           const plain = text.replace(/\*\*/g, "");
-          const split = plain.search(/：|:\s/);
+          // 摘要常写成一句带分号的话：前半句当卡片标题，后半句留作说明，避免整句挤进标题。
+          const split = plain.search(/：|:\s|；/);
           const title = split < 0 ? plain : plain.slice(0, split);
           const description = split < 0 ? "" : plain.slice(split + 1).trim();
           return <li key={`${version}-${text}`}>

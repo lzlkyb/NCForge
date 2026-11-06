@@ -1,5 +1,6 @@
 import { invoke } from "./tauri";
-import { beginOperation, trackOperation } from "./operations";
+import { trackOperation } from "./operations";
+import { markServiceStopping, startServiceOperation } from "./serviceStartup";
 import type { LaunchPreview, LogChunk, LogClearResult, ServerState, StopOutcome } from "./server";
 
 /**
@@ -13,6 +14,9 @@ import type { LaunchPreview, LogChunk, LogClearResult, ServerState, StopOutcome 
 
 export interface ClientStatus {
   state: ServerState;
+  runId?: string | null;
+  launchPhase?: string | null;
+  launchStartedAtMs?: number | null;
   pid: number | null;
   startedAtMs: number | null;
   uptimeMs: number | null;
@@ -43,66 +47,24 @@ export type ClientPreview = LaunchPreview;
 
 export const clientStatus = () => invoke<ClientStatus>("client_status");
 
-let startupStopping = false;
-
 /**
  * 启动客户端。`debug` 为 true 时给 JVM 加 JDWP（只绑 127.0.0.1，端口由系统分配）。
  *
  * 判成功的标准与中间件不同：客户端没有监听端口，进程活着就算启动成功；
  * 窗口出现还要几秒，所以文案说「进程已启动」而不是「界面已就绪」。
  */
-export async function clientStart(debug = false): Promise<void> {
-  const task = beginOperation({
-    key: "client.start",
-    label: debug ? "启动调试客户端" : "启动客户端",
-    scope: "NC 客户端",
-    page: "files",
-    panel: "svc",
-    phase: "准备客户端 classpath",
-    cancel: async () => {
-      await invoke<StopOutcome>("client_stop");
-      startupStopping = true;
-    },
-  });
-  if (!task) throw new Error("客户端正在启动，请稍候");
-  startupStopping = false;
-  try {
-    await invoke<void>("client_start", { debug });
-    task.update({ phase: "启动请求已接受，等待客户端进程" });
-    void (async () => {
-      try {
-        for (;;) {
-          const status = await clientStatus();
-          if (status.state === "running") {
-            task.finish("success", "客户端进程已启动；登录窗口出现后即可连服务");
-            return;
-          }
-          if (status.state === "stopped") {
-            task.finish(
-              startupStopping ? "cancelled" : "failed",
-              status.reason || "客户端在进程就绪前已退出，请检查日志",
-            );
-            return;
-          }
-          task.update({ phase: startupStopping ? "等待客户端停止" : "正在准备 classpath 并启动 JVM" });
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-      } catch (error) {
-        task.finish("failed", `无法确认启动结果：${String(error)}，请重新读取客户端状态`);
-      }
-    })();
-  } catch (error) {
-    task.finish(String(error).includes("CANCELLED:") ? "cancelled" : "failed", String(error));
-    throw error;
-  }
+export function clientStart(debug = false, options?: { requestId?: string }): Promise<string> {
+  return startServiceOperation({ target: "client", debug, requestId: options?.requestId,
+    request: requestId => invoke<string>("client_start", { debug, requestId }),
+    status: clientStatus, stop: expectedRunId => invoke<StopOutcome>("client_stop", { expectedRunId }) });
 }
 
-export const clientStop = () =>
+export const clientStop = (expectedRunId?: string) =>
   trackOperation(
-    { key: "client.stop", label: "停止客户端", scope: "NC 客户端", page: "files", panel: "svc" },
+    { key: `client.stop${expectedRunId ? ':' + expectedRunId : ''}`, label: "停止客户端", scope: "NC 客户端", page: "files", panel: "svc" },
     async () => {
-      const outcome = await invoke<StopOutcome>("client_stop");
-      startupStopping = true;
+      const outcome = await invoke<StopOutcome>("client_stop", { expectedRunId: expectedRunId ?? null });
+      markServiceStopping("client", expectedRunId, outcome);
       return outcome;
     },
     (outcome) => ({
@@ -130,7 +92,7 @@ export const clientCommandLine = () =>
     () => invoke<ClientPreview>("client_command_line"),
   );
 
-export const clientRevealLog = () => invoke<void>("client_reveal_log");
+export const clientRevealLog = (previous = false) => invoke<void>("client_reveal_log", { previous });
 
 /** 改客户端堆上限（MB），传 null 恢复默认 768。返回后端收口后的生效值。 */
 export const clientHeapSet = (heapMb: number | null) =>

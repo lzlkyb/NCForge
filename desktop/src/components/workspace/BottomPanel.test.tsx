@@ -5,15 +5,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BottomPanel, type PanelTab } from "./BottomPanel";
 import type { CompileResult, Problem } from "../../lib/compile";
 import type { CodeDiag } from "../../lib/diagStore";
+import { restoreWorkbenchLayout } from "../../lib/workbenchLayout";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // 底部面板的每个内容块都挂着各自的 store / 后端订阅；这里只验证面板自己的语义。
 // ProblemsView 仍 mock，但把入参摆到 data-* 上：合并/去重是面板算的，不是它算的。
 vi.mock("./WorkbenchDock", () => ({ useWorkbenchDock: () => null }));
+vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
 vi.mock("../../lib/debugSession", () => ({ useDebugSnapshot: () => ({ paused: false }) }));
 vi.mock("../../lib/workspaceSession", () => ({
   useWorkspaceSelector: (sel: (s: { compileLog: string[] }) => unknown) => sel({ compileLog: [] }),
+  setSession: vi.fn(),
 }));
 vi.mock("./ProblemsView", () => ({
   ProblemsView: (p: { problems: Problem[]; diags: CodeDiag[]; compiled: boolean }) => (
@@ -36,6 +39,7 @@ let root: Root;
 let container: HTMLDivElement;
 
 beforeEach(() => {
+  restoreWorkbenchLayout();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -80,6 +84,13 @@ function render(tab: PanelTab, opts: RenderOpts = {}) {
 const tab = (name: string) => container.querySelector<HTMLButtonElement>(`[role=tab][id=wb-ptab-${name}]`);
 
 describe("BottomPanel 页签条", () => {
+  it("默认空问题保留紧凑入口，用户主动打开后保持正文", () => {
+    render("problems");
+    expect(container.querySelector(".wb-panel")?.getAttribute("data-compact")).toBe("true");
+    expect(container.querySelector<HTMLElement>("#wb-panel-body")?.hidden).toBe(true);
+    act(() => tab("problems")!.click());
+    expect(container.querySelector<HTMLElement>("#wb-panel-body")?.hidden).toBe(false);
+  });
   it("用 tablist/tab 语义，只有当前页签可被 Tab 键停靠", () => {
     render("build");
     expect(container.querySelector("[role=tablist]")).not.toBeNull();
@@ -111,9 +122,9 @@ describe("BottomPanel 页签条", () => {
 
   it("点击页签仍按原路径切换", () => {
     const onTab = render("problems");
-    act(() => {
-      tab("todo")?.click();
-    });
+    expect(tab("todo")).toBeNull();
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="更多底部工具"]')!.click());
+    act(() => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent === "待办")!.click());
     expect(onTab).toHaveBeenCalledWith("todo");
   });
 });
@@ -130,6 +141,14 @@ describe("BottomPanel 的编译日志", () => {
       render("build", { log: ["其他编译错误"] });
       expect(container.textContent).not.toContain("下载 Java 编译器");
     } finally { window.removeEventListener("ncforge-resource-download", requested); }
+  });
+  it("编译失败无结果时，问题页保持缺组件下载入口和输出可见", () => {
+    render("problems", { log: ["编译失败：找不到 Java 编译器组件（ecj）"] });
+    expect(container.querySelector<HTMLElement>("#wb-panel-body")?.hidden).toBe(false);
+    expect(container.querySelector(".wb-panel")?.hasAttribute("data-compact")).toBe(false);
+    expect(container.textContent).toContain("下载 Java 编译器");
+    render("problems", { log: ["编译失败：Java 配置无效"] });
+    expect(container.querySelector<HTMLElement>("#wb-panel-body")?.hidden).toBe(false);
   });
   it("报错行能点开对应文件的那一行", () => {
     const log = [

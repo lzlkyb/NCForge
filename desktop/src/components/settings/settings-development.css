@@ -21,3 +21,4 @@
 .settings-task-steps input { flex-shrink:0; accent-color:hsl(var(--primary)); }
 .settings-task-sequence { font-size:12px; line-height:1.6; color:hsl(var(--muted-foreground)); overflow-wrap:anywhere; }
 .settings-task-form-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.settings-build-caption { padding:12px 0 0; font-size:12px; font-weight:600; color:hsl(var(--muted-foreground)); }

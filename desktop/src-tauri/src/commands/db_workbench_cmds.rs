@@ -1,5 +1,5 @@
 //! Bound queries and connection-wide query-only policy.
-use super::db_cmds::{call, slot_bridge};
+use super::db_cmds::{call_with_reconnect, slot_bridge};
 use crate::state::AppState;
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
@@ -34,7 +34,7 @@ pub async fn db_exec_bound(
         args.extend([kind.to_string(), text]);
     }
     let timeout = Duration::from_secs(timeout_sec.unwrap_or(30).clamp(1, 3600) as u64 + 30);
-    call(engine, "execBound", args, timeout).await
+    call_with_reconnect(&state, &id, engine, "execBound", args, timeout, None).await
 }
 
 #[tauri::command]

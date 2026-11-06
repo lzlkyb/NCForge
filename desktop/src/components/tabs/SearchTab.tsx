@@ -176,12 +176,14 @@ export function SearchTab({
     pickScope("component", name);
   };
 
+  const resolvePath = (hit: ResultHit) => {
+    const hitRoot = hit.root ?? (form.outcomeRoot !== null && form.outcomeRoot !== root ? null : root);
+    return hitRoot ? joinPath(hitRoot, hit.path.replace(/\//g, "\\")) : null;
+  };
   const open = (hit: ResultHit) => {
     // 全部工程的结果自带工程根；当前工作区结果要拿搜索时记下的 root 拼。
-    const hitRoot =
-      hit.root ??
-      (form.outcomeRoot !== null && form.outcomeRoot !== root ? null : root);
-    if (!hitRoot) {
+    const path = resolvePath(hit);
+    if (!path) {
       if (!root) toast("尚未打开工作区：先在代码页选一个目录再搜", "warning");
       // 结果来自别的工作区：拿旧相对路径拼新 root 只会被白名单拒掉，报一串英文
       else toast("工作区已变更，请重新搜索", "warning");
@@ -190,7 +192,7 @@ export function SearchTab({
     // 后端回的是相对路径 + `/`，读写文件要绝对路径 + Windows 分隔符。
     // ranges 是行内 UTF-16 偏移，+1 换成 1 基列号——只跳到行首的话长行还要肉眼找。
     onOpenFile(
-      joinPath(hitRoot, hit.path.replace(/\//g, "\\")),
+      path,
       hit.line,
       (hit.ranges[0]?.start ?? 0) + 1,
     );
@@ -260,6 +262,7 @@ export function SearchTab({
           update={update}
           loading={loading}
           onOpen={open}
+          resolvePath={resolvePath}
           onEdit={
             single && root && !stale && form.outcome ? () => setEditing(true) : undefined
           }

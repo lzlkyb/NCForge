@@ -1,192 +1,77 @@
 import { useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
-import { baseName } from "../../lib/workspace";
+import { baseName, dirName } from "../../lib/workspace";
 import { copyText } from "../../lib/utils";
-import { openLinkedDialog, type LinkedSection } from "../../lib/linkedDialog";
-import type { CompileDiagnostic, Problem } from "../../lib/compile";
-import {
-  filterProblems,
-  formatProblems,
-  groupProblems,
-  type ProblemFilter,
-  type UnifiedProblem,
-} from "../../lib/problemList";
+import { moduleOf } from "../../lib/ncModule";
+import { useWorkspaceSelector } from "../../lib/workspaceSession";
+import type { CompileDiagnostic, CompileResult, Problem } from "../../lib/compile";
+import { filterProblems, formatProblems, groupProblems, type ProblemFilter, type UnifiedProblem } from "../../lib/problemList";
+import { diagnosticPathKey, scopeProblems, type DiagnosticScope } from "../../lib/diagnosticScope";
+import { ProblemRow } from "./ProblemRow";
+import { ProblemDiagnostics } from "./ProblemDiagnostics";
+import { SourceContextPreview } from "./SourceContextPreview";
+import "../../diagnostic-workspace.css";
 
 interface Props {
-  /** 编译问题 + jdt.ls 代码检查合并去重后的列表（已按 路径→行号 排好）。 */
   problems: UnifiedProblem[];
-  /** D4 诊断：ecj 原文之外的推断，不算错误数，不参与筛选。 */
+  /** Cross-project build explanations remain independent of the error count and severity filter. */
   diags: CompileDiagnostic[];
   running: boolean;
-  /** 是否编译过（决定空状态文案：没编译 vs 没问题）。 */
   compiled: boolean;
+  pathFilter?: string | null;
+  onClearPathFilter?: () => void;
+  root?: string | null;
+  activePath?: string | null;
+  result?: CompileResult | null;
   onOpenProblem: (p: Problem) => void;
   onOpenAt: (path: string, line: number) => void;
 }
+const FILTERS: { key: ProblemFilter; label: string }[] = [{ key: "all", label: "全部" }, { key: "error", label: "错误" }, { key: "warning", label: "警告" }, { key: "info", label: "提示" }];
 
-const FILTERS: { key: ProblemFilter; label: string }[] = [
-  { key: "all", label: "全部" },
-  { key: "error", label: "错误" },
-  { key: "warning", label: "警告" },
-  { key: "info", label: "提示" },
-];
-
-const severityClass = (s: UnifiedProblem["severity"]) =>
-  s === "error" ? "wb-prow-err" : s === "info" ? "wb-prow-info" : "wb-prow-warn";
-
-/**
- * 诊断行上「去处理」的落点：停用要去覆盖表取消停用；没产物 / 产物旧要先看依赖链
- * 是怎么排的。其余档（工程级 stale / no-output）不来自编译，不在这里给入口。
- */
-const diagTarget = (kind: CompileDiagnostic["kind"]): LinkedSection | null =>
-  kind === "disabled" ? "overrides" : kind === "uncompiled" || kind === "stale-class" ? "chain" : null;
-
-/**
- * 「问题」页的主体：筛选、按文件分组、复制全部，以及编译诊断与代码检查行。
- *
- * 行语义保持拆出去之前的样子：ecj 编译问题点开跳到源码（onOpenProblem），
- * jdt.ls 代码检查虽然也跳（onOpenAt），但来源不同——只在打开的文件上有，
- * 所以行上带 title 写明来源，避免误以为「编译器也报了这条」。
- */
-export function ProblemsView({ problems, diags, running, compiled, onOpenProblem, onOpenAt }: Props) {
+export function ProblemsView({ problems, diags, running, compiled, pathFilter = null, onClearPathFilter, root = null, activePath = null, result, onOpenProblem, onOpenAt }: Props) {
   const [filter, setFilter] = useState<ProblemFilter>("all");
   const [grouped, setGrouped] = useState(false);
-  const shown = filterProblems(problems, filter);
-  const groups = groupProblems(shown);
-
+  const [scope, setScope] = useState<DiagnosticScope>("project");
+  const [selection, setSelection] = useState<{ problem: UnifiedProblem; root: string | null } | null>(null);
+  const selected = selection?.root === root ? selection.problem : null;
+  const setSelected = (problem: UnifiedProblem | null) => setSelection(problem ? { problem, root } : null);
+  const tabs = useWorkspaceSelector(s => s.tabs);
+  const currentModule = root && activePath ? moduleOf(root, dirName(activePath)) : null;
+  const scoped = pathFilter ? problems.filter(p => diagnosticPathKey(p.path) === diagnosticPathKey(pathFilter)) : scopeProblems(problems, scope, root, activePath);
+  const shown = filterProblems(scoped, filter), groups = groupProblems(shown);
+  const preview = selected && shown.includes(selected) ? selected : null;
+  const changed = tabs.filter(t => t.dirty || t.eolChanged || result?.sourceSnapshots?.[diagnosticPathKey(t.path)] && result.sourceSnapshots[diagnosticPathKey(t.path)].mtimeMs !== t.mtimeMs);
   const open = (p: UnifiedProblem) => {
     if (p.source === "inspect") onOpenAt(p.path, p.line);
-    // 统一列表里的 info 只来自 jdt.ls；编译问题没有 info 档
     else onOpenProblem({ file: p.path, line: p.line, severity: p.severity === "info" ? "warning" : p.severity, message: p.message });
   };
-
-  const row = (p: UnifiedProblem, key: string) => (
-    <button
-      type="button"
-      key={key}
-      className="wb-prow"
-      onClick={() => open(p)}
-      title={`${p.path}:${p.line}${p.source === "inspect" ? "（jdt.ls 代码检查）" : ""}`}
-    >
-      <Icon
-        name={p.severity === "info" ? "info" : "alertTriangle"}
-        size={14}
-        className={severityClass(p.severity)}
-      />
-      <span className="wb-prow-msg">{p.message}</span>
-      <span className="wb-prow-loc">
-        {baseName(p.path)}:{p.line}
-      </span>
-    </button>
-  );
-
-  return (
-    <div className="wb-panel-body">
-      {problems.length > 0 && (
-        <div className="wb-problems-bar">
-          {FILTERS.map((f) => {
-            const n = f.key === "all" ? problems.length : problems.filter((p) => p.severity === f.key).length;
-            return (
-              <button
-                key={f.key}
-                type="button"
-                className="wb-pfilter"
-                data-active={filter === f.key || undefined}
-                onClick={() => setFilter(f.key)}
-              >
-                {f.label}
-                {n > 0 && <span className="wb-pfilter-n">{n}</span>}
-              </button>
-            );
-          })}
-          <span className="wb-problems-sp" />
-          <button
-            type="button"
-            className="wb-status-btn"
-            data-active={grouped || undefined}
-            title="按文件分组显示"
-            onClick={() => setGrouped((g) => !g)}
-          >
-            按文件分组
-          </button>
-          <button
-            type="button"
-            className="wb-status-btn"
-            title={`复制当前列表（${shown.length} 条）`}
-            disabled={shown.length === 0}
-            onClick={() =>
-              void copyText(
-                formatProblems(shown),
-                () => toast(`已复制 ${shown.length} 条问题`, "success"),
-                () => toast("复制失败：剪贴板不可用", "error"),
-              )
-            }
-          >
-            复制全部
-          </button>
-        </div>
-      )}
-
-      {running && <div className="wb-panel-note">正在编译…</div>}
-      {!running && !compiled && problems.length === 0 && (
-        <div className="wb-panel-note">还没有编译过。点「编译」后这里列出问题。</div>
-      )}
-      {compiled && problems.length === 0 && diags.length === 0 && (
-        <div className="wb-panel-note">没有发现问题</div>
-      )}
-      {problems.length > 0 && shown.length === 0 && (
-        <div className="wb-panel-note">
-          没有符合筛选的问题
-          <button type="button" className="wb-status-btn" onClick={() => setFilter("all")}>
-            显示全部
-          </button>
-        </div>
-      )}
-
-      {grouped
-        ? groups.map((g) => (
-            <div key={g.path}>
-              <div className="wb-pgroup-head" title={g.path}>
-                {baseName(g.path)}
-                <span className="wb-pgroup-n">{g.items.length}</span>
-              </div>
-              {g.items.map((p, i) => row(p, `${g.path}|${p.line}|${i}`))}
-            </div>
-          ))
-        : shown.map((p, i) => row(p, `${p.path}|${p.line}|${i}`))}
-
-      {diags.map((d, i) => {
-        const target = diagTarget(d.kind);
-        return (
-          // 行本身不可点：源码可能在关联工程里（工作区之外），点开会被路径守卫挡住，
-          // 与其弹个错不如把路径摆出来让人自己去看；能去工程关联里处理的给一个去处。
-          <div key={`d${i}`} className="wb-prow wb-diag" data-kind={d.kind}>
-            <Icon name="info" size={14} className="wb-prow-warn" />
-            <span className="wb-prow-msg">
-              {d.message}
-              {d.file && <span className="wb-diag-path">{d.file}</span>}
-            </span>
-            <span className="wb-prow-loc">{d.project}</span>
-            {target && (
-              <button
-                type="button"
-                className="wb-diag-act"
-                title="在「工程关联」里处理"
-                onClick={() => openLinkedDialog(target)}
-              >
-                {target === "overrides" ? "覆盖规则" : "依赖链"}
-              </button>
-            )}
-          </div>
-        );
-      })}
-
-      {problems.some((p) => p.source === "inspect") && (
-        <div className="wb-panel-note">
-          代码检查来自 jdt.ls，只覆盖打开着的文件（{problems.filter((p) => p.source === "inspect").length} 条）
-        </div>
-      )}
+  const row = (p: UnifiedProblem, key: string) => <ProblemRow key={key} problem={p} selected={preview === p} onOpen={() => open(p)} onPreview={() => setSelected(selected === p ? null : p)} />;
+  return <div className="dw-problems-shell">
+    <div className="dw-problem-scopes">
+      <label>范围 <select aria-label="问题范围" value={scope} disabled={!!pathFilter} onChange={event => { setScope(event.target.value as DiagnosticScope); setSelected(null); }}>
+        <option value="project">工程结果</option><option value="module" disabled={!currentModule}>当前模块{currentModule ? ` · ${currentModule}` : ""}</option><option value="file" disabled={!activePath}>当前文件</option>
+      </select></label>
+      <span className="dw-problem-freshness">{compiled ? result?.completedAtMs ? `编译结果 ${new Date(result.completedAtMs).toLocaleTimeString()}` : "最近一次编译结果" : "代码检查与编译问题"}</span>
+      {changed.length > 0 && compiled && <span className="dw-problem-stale" title="编译读取磁盘版本；未保存草稿或编译后再次保存的文件需要重新编译确认。">{changed.length} 个文件需核对新版本</span>}
     </div>
-  );
+    <div className="wb-panel-body">
+      {pathFilter && <div className="wb-problems-scope"><Icon name="file" size={12} /><span className="wb-prow-msg">仅看 <b title={pathFilter}>{baseName(pathFilter)}</b> 的问题</span><span className="wb-pfilter-n">{scoped.length}</span><span className="wb-problems-sp" /><button type="button" className="wb-status-btn" title="清除文件过滤，显示整个工程的问题" onClick={onClearPathFilter}>显示全部文件</button></div>}
+      {problems.length > 0 && <div className="wb-problems-bar">
+        {FILTERS.map(f => { const n = f.key === "all" ? scoped.length : scoped.filter(p => p.severity === f.key).length; return <button key={f.key} type="button" className="wb-pfilter" data-active={filter === f.key || undefined} onClick={() => setFilter(f.key)}>{f.label}{n > 0 && <span className="wb-pfilter-n">{n}</span>}</button>; })}
+        <span className="wb-problems-sp" /><button type="button" className="wb-status-btn" data-active={grouped || undefined} title="按文件分组显示" onClick={() => setGrouped(g => !g)}>按文件分组</button>
+        <button type="button" className="wb-status-btn" title={`复制当前列表（${shown.length} 条）`} disabled={!shown.length} onClick={() => void copyText(formatProblems(shown), () => toast(`已复制 ${shown.length} 条问题`, "success"), () => toast("复制失败：剪贴板不可用", "error"))}>复制全部</button>
+      </div>}
+      {running && <div className="wb-panel-note" role="status">正在编译…上次结果保留供查看</div>}
+      {!running && !compiled && !problems.length && !pathFilter && <div className="wb-panel-note">还没有编译过。点「编译」后这里列出问题。</div>}
+      {compiled && !problems.length && !diags.length && !pathFilter && <div className="wb-panel-note">没有发现问题</div>}
+      {pathFilter && !scoped.length && <div className="wb-panel-note">该文件没有问题了<button type="button" className="wb-status-btn" onClick={onClearPathFilter}>显示全部文件</button></div>}
+      {!pathFilter && problems.length > 0 && !scoped.length && <div className="wb-panel-note">当前范围没有问题<button type="button" className="wb-status-btn" onClick={() => setScope("project")}>查看工程结果</button></div>}
+      {scoped.length > 0 && !shown.length && <div className="wb-panel-note">没有符合筛选的问题<button type="button" className="wb-status-btn" onClick={() => setFilter("all")}>显示全部</button></div>}
+      {grouped ? groups.map(g => <div key={g.path}><div className="wb-pgroup-head" title={g.path}>{baseName(g.path)}<span className="wb-pgroup-n">{g.items.length}</span></div>{g.items.map((p, i) => row(p, `${g.path}|${p.line}|${i}`))}</div>) : shown.map((p, i) => row(p, `${p.path}|${p.line}|${i}`))}
+      <ProblemDiagnostics diags={diags} />
+      {problems.some(p => p.source === "inspect") && <div className="wb-panel-note">代码检查来自 jdt.ls，只覆盖打开着的文件（{problems.filter(p => p.source === "inspect").length} 条）</div>}
+    </div>
+    {preview && <SourceContextPreview path={preview.path} line={preview.line} identity={root} onOpen={() => open(preview)} onClose={() => setSelected(null)} />}
+  </div>;
 }

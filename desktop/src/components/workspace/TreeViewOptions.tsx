@@ -1,4 +1,6 @@
 import { WorkspaceGlyph } from "./WorkspaceGlyph";
+import { Icon } from "../ui/icon";
+import { Menu, MenuItem } from "../ui/Menu";
 import {
   toggleCompactPackages,
   usePackageView,
@@ -49,51 +51,15 @@ export function TreeViewOptions({ root }: { root?: string }) {
       >
         <WorkspaceGlyph name="locate" size={14} />
       </button>
-      <button
-        type="button"
-        className="wb-icon-btn"
-        aria-pressed={compact}
-        aria-label="压缩中间包"
-        title={
-          compact
-            ? "压缩中间包：单链目录合成一行（点击改为逐层显示）"
-            : "逐层显示目录（点击改为压缩中间包）"
-        }
-        onClick={toggleCompactPackages}
-      >
-        <WorkspaceGlyph name="compact" size={14} />
-      </button>
-      <button
-        type="button"
-        className="wb-icon-btn"
-        aria-pressed={nc}
-        aria-label="NC 结构视图"
-        disabled={!ncReady || packageView}
-        title={
-          packageView ? "切换到文件视图后可调整 NC 结构视图" : ncReady
-            ? nc
-              ? "NC 结构视图：业务组件模块下直接列 public/client/private/test/resources，不再多一层 src（点击关闭）"
-              : "按目录层级显示，模块下先看到 src（点击改为 NC 结构视图）"
-            : "NC 结构视图不可用：工程根的 manifest.xml 里没有登记业务组件"
-        }
-        onClick={toggleNcStructure}
-      >
-        <WorkspaceGlyph name="ncStructure" size={14} />
-      </button>
-      <button
-        type="button"
-        className="wb-icon-btn"
-        aria-pressed={direct}
-        aria-label="跨工程直接切换"
-        title={
-          direct
-            ? "跨工程打开文件时直接切换工作区，不再确认（点击恢复确认）"
-            : "跨工程打开文件时先确认：会关闭全部标签并重建索引（点击改为直接切换）"
-        }
-        onClick={toggleDirectSwitch}
-      >
-        <WorkspaceGlyph name="switchProject" size={14} />
-      </button>
+      <Menu portal width="w-72" trigger={(open, toggle) => <button type="button" className="wb-icon-btn" aria-label="资源树视图选项" title="资源树视图选项" aria-haspopup="menu" aria-expanded={open} onClick={toggle}><Icon name="sliders" size={14} /></button>}>
+        {close => <>
+          <MenuItem label="压缩中间包" checked={compact} onClick={() => { toggleCompactPackages(); close(); }} />
+          <MenuItem label="NC 结构视图" checked={nc} disabled={!ncReady || packageView} onClick={() => { toggleNcStructure(); close(); }} />
+          {(!ncReady || packageView) && <p className="wb-tree-menu-note">{packageView ? "切换文件视图后可使用 NC 结构" : "当前工程未登记 NC 业务组件"}</p>}
+          <MenuItem label="跨工程直接切换" checked={direct} onClick={() => { toggleDirectSwitch(); close(); }} />
+          <p className="wb-tree-menu-note">跨工程切换会关闭当前标签并重建代码索引。</p>
+        </>}
+      </Menu>
     </>
   );
 }

@@ -26,6 +26,19 @@ pub struct CpRef {
     pub exported: bool,
 }
 
+/// 一条本地源码根（`kind="src"` 且 `path` 不是 `/工程名`）。
+///
+/// 保留「源根 → 输出目录」的对应关系：Eclipse 允许一条 src 单独写 `output=`，
+/// 同一个工程因此可能有多个产物目录。编译与清理都必须按这个映射分组，
+/// 否则会把 `src/test` 的产物和主代码混到一个目录里。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CpSrc {
+    /// 相对工程根
+    pub path: PathBuf,
+    /// 该条声明的输出（相对工程根）；`None` = 用工程默认输出
+    pub output: Option<PathBuf>,
+}
+
 /// 解析后的 `.classpath`。`outputs` 是**相对工程根**的路径，保序、已去重。
 #[derive(Debug, Clone)]
 pub struct ProjectCp {
@@ -33,6 +46,8 @@ pub struct ProjectCp {
     pub default_output: Option<PathBuf>,
     pub outputs: Vec<PathBuf>,
     pub refs: Vec<CpRef>,
+    /// 本地源码根（按 `.classpath` 顺序，已排除 `/其它工程` 引用）
+    pub srcs: Vec<CpSrc>,
 }
 
 impl ProjectCp {
@@ -48,6 +63,7 @@ impl ProjectCp {
         // 先只收集「每条 src 的 output 声明」，**不立刻算**最终目录：默认 output
         // （`kind="output"`）在文件里是最后一行，边扫边算会让前面所有 src 拿到 None。
         let mut src_outputs: Vec<Option<PathBuf>> = Vec::new();
+        let mut srcs: Vec<CpSrc> = Vec::new();
         let mut refs: Vec<CpRef> = Vec::new();
 
         for tag in classpathentry_tags(xml) {
@@ -67,11 +83,14 @@ impl ProjectCp {
                             exported: attr(tag, "exported") == Some("true"),
                         });
                     } else {
-                        src_outputs.push(
-                            attr(tag, "output")
-                                .filter(|o| !o.is_empty())
-                                .map(PathBuf::from),
-                        );
+                        let output = attr(tag, "output")
+                            .filter(|o| !o.is_empty())
+                            .map(PathBuf::from);
+                        srcs.push(CpSrc {
+                            path: PathBuf::from(path),
+                            output: output.clone(),
+                        });
+                        src_outputs.push(output);
                     }
                 }
                 // kind="con"（容器）/ "lib"（jar）与类目录无关：jar 由
@@ -104,6 +123,7 @@ impl ProjectCp {
             default_output,
             outputs,
             refs,
+            srcs,
         }
     }
 }

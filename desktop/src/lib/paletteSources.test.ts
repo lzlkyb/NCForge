@@ -1,12 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const lang = vi.hoisted(() => ({ ready: false, request: vi.fn(), symbols: vi.fn() }));
+const lang = vi.hoisted(() => ({ ready: false, state: "stopped", request: vi.fn(), symbols: vi.fn() }));
 const files = vi.hoisted(() => ({ list: [] as string[] }));
 const search = vi.hoisted(() => ({ run: vi.fn() }));
+const types = vi.hoisted(() => ({ search: vi.fn() }));
 
 // lang / symbols 会间接拉起 Monaco，这里只验证「每种模式怎么选数据源」
-vi.mock("./lang", () => ({ langReady: () => lang.ready, langRequest: lang.request, flushDoc: vi.fn() }));
+vi.mock("./lang", () => ({
+  langReady: () => lang.ready,
+  langRequest: lang.request,
+  flushDoc: vi.fn(),
+  getLangView: () => ({ state: lang.state }),
+}));
 vi.mock("./symbols", async (orig) => ({ ...(await orig<typeof import("./symbols")>()), fetchSymbols: lang.symbols }));
+vi.mock("./typeSearch", () => ({
+  searchTypes: types.search,
+  jarTypeUri: (h: { jar: string; name: string }) => {
+    const name = h.jar.split(/[\\/]/).pop() ?? h.jar;
+    return `jdt://contents/${encodeURIComponent(name)}/${h.name.replace(/\./g, "/")}.class?=ncforge-decompile`;
+  },
+}));
 vi.mock("./fileIndex", async () => {
   const { toEntry } = await vi.importActual<typeof import("./fileIndex")>("./fileIndex");
   return { getFileIndex: async (root: string) => files.list.map((f) => toEntry(root, f)) };
@@ -22,7 +35,11 @@ const ctx = (over: Partial<PaletteCtx> = {}): PaletteCtx => ({ root: "C:\\w", ac
 
 beforeEach(() => {
   lang.ready = false;
+  lang.state = "stopped";
   lang.request.mockReset();
+  types.search.mockReset();
+  // 默认没有后端（单测环境没有 Tauri）：各用例若要验证本地索引再覆盖
+  types.search.mockRejectedValue(new Error("没有后端"));
   lang.symbols.mockReset();
   search.run.mockReset();
   run.file.mockReset();
@@ -67,11 +84,97 @@ describe("类型模式", () => {
     ]);
     const r = await buildItems("type", "IVouch", ctx());
     expect(r.items.map((i) => i.title)).toEqual(["IVoucher", "IVoucherConst"]);
-    expect(r.items[1].badge).toBe("jar");
+    expect(r.items[1].badge).toBe("依赖");
     r.items[0].run();
     expect(run.file).toHaveBeenCalledWith("C:\\w\\gl\\IVoucher.java", 5, 8);
     r.items[1].run();
     expect(run.jdt).toHaveBeenCalledWith("jdt://contents/a.jar/nc.vo/IVoucherConst.class", 1, 1);
+  });
+
+  it("类目录里的副本标「已编译」，不与 jar 混为一谈", async () => {
+    lang.ready = true;
+    lang.request.mockResolvedValue([
+      {
+        name: "BaseDaoUtils",
+        kind: 5,
+        containerName: "nc.itf.ia",
+        location: {
+          uri: "jdt://contents/C%3A/work/aier/newar/out/baseapp/nc.itf.ia/BaseDaoUtils.class",
+          range: { start: { line: 0, character: 0 } },
+        },
+      },
+    ]);
+    const r = await buildItems("type", "BaseDao", ctx());
+    expect(r.items[0].badge).toBe("已编译");
+  });
+
+  it("同一个类只留一份：源码优先，副本折成一句说明", async () => {
+    lang.ready = true;
+    const at = { start: { line: 0, character: 0 } };
+    lang.request.mockResolvedValue([
+      { name: "BaseDaoUtils", kind: 5, containerName: "nc.itf.ia", location: { uri: "jdt://contents/C%3A/work/aier/newar/out/baseapp/nc.itf.ia/BaseDaoUtils.class", range: at } },
+      { name: "BaseDaoUtils", kind: 5, containerName: "nc.itf.ia", location: { uri: "jdt://contents/a.jar/nc.itf.ia/BaseDaoUtils.class", range: at } },
+      { name: "BaseDaoUtils", kind: 5, containerName: "nc.itf.ia", location: { uri: "file:///C:/w/gl/nc/itf/ia/BaseDaoUtils.java", range: { start: { line: 3, character: 6 } } } },
+    ]);
+    const r = await buildItems("type", "BaseDao", ctx());
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0].badge).toBeUndefined();
+    expect(r.items[0].detail).toContain("另有");
+    r.items[0].run();
+    expect(run.file).toHaveBeenCalledWith("C:\\w\\gl\\nc\\itf\\ia\\BaseDaoUtils.java", 4, 7);
+  });
+
+  it("索引中：先给文件名结果并说明不全，不等语言服务", async () => {
+    lang.state = "indexing";
+    const r = await buildItems("type", "vbo", ctx());
+    expect(r.items.map((i) => i.title)).toEqual(["VoucherBO"]);
+    expect(r.note).toContain("索引中");
+    expect(r.note).toContain("可能不全");
+    expect(lang.request).not.toHaveBeenCalled();
+  });
+
+  it("本地索引优先：工作区源码与依赖 jar 分组，不碰语言服务", async () => {
+    types.search.mockResolvedValue({
+      workspace: [
+        {
+          name: "nc.itf.ia.BaseDaoUtils",
+          simple: "BaseDaoUtils",
+          package: "nc.itf.ia",
+          kind: 11,
+          file: "C:\\w\\baseapp\\src\\x\\BaseDaoUtils.java",
+          module: "baseapp",
+          jar: "",
+          line: 7,
+          column: 18,
+        },
+      ],
+      jars: [
+        {
+          name: "nc.vo.Foo",
+          simple: "Foo",
+          package: "nc.vo",
+          kind: 5,
+          file: "",
+          module: "",
+          jar: "D:\\ncc\\lib\\a.jar",
+          line: 1,
+          column: 1,
+        },
+      ],
+      jarsPending: true,
+      elapsedMs: 8,
+    });
+    const r = await buildItems("type", "BaseDao", ctx());
+    expect(r.items.map((i) => i.title)).toEqual(["BaseDaoUtils", "Foo"]);
+    expect(r.items[0].badge).toBe("工作区");
+    expect(r.items[1].badge).toBe("依赖");
+    expect(r.note).toContain("依赖 jar 目录准备中");
+    expect(r.note).toContain("8ms");
+    r.items[0].run();
+    expect(run.file).toHaveBeenCalledWith("C:\\w\\baseapp\\src\\x\\BaseDaoUtils.java", 7, 18);
+    r.items[1].run();
+    expect(run.jdt).toHaveBeenCalledWith(expect.stringContaining("?=ncforge-decompile"), 1, 1);
+    expect(lang.request).not.toHaveBeenCalled();
   });
 
   it("空查询只给提示，不发请求", async () => {
@@ -137,11 +240,11 @@ describe("工作区符号模式（方法 / 字段级）", () => {
     expect(run.file).toHaveBeenCalledWith("C:\\w\\gl\\A.java", 5, 9);
   });
 
-  it("jar 里的符号标记为 jar 并走 jdt 打开", async () => {
+  it("jar 里的符号标记为依赖并走 jdt 打开", async () => {
     lang.ready = true;
-    lang.request.mockResolvedValue([sym("getStatus", 6, "BillVO", "jdt://contents/x.class")]);
+    lang.request.mockResolvedValue([sym("getStatus", 6, "BillVO", "jdt://contents/x.jar/BillVO/getStatus.class")]);
     const r = await buildItems("sym", "status", ctx());
-    expect(r.items[0].badge).toBe("jar");
+    expect(r.items[0].badge).toBe("依赖");
     r.items[0].run();
     expect(run.jdt).toHaveBeenCalled();
     expect(run.file).not.toHaveBeenCalled();

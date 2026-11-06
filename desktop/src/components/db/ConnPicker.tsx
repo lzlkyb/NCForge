@@ -6,7 +6,7 @@ import { dbNameOf, ENV_LABEL } from "../../lib/dbApi";
 import { connOf, openConnDialog, rtOf, useDbConns, useDbRt } from "../../lib/dbStore";
 
 /** 工具条上的连接胶囊：点开切换这个标签用的连接。 */
-export function ConnPicker({ connId, onPick, disabled = false }: { connId: string | null; onPick: (id: string) => void; disabled?: boolean }) {
+export function ConnPicker({ connId, onPick, disabled = false, compact = false }: { connId: string | null; onPick: (id: string) => void; disabled?: boolean; compact?: boolean }) {
   // 列表里每个连接都按状态分组：订阅连接清单 + 运行态，不订标签（查询结果变化与它无关）
   useDbRt();
   const db = { conns: useDbConns() };
@@ -123,9 +123,9 @@ export function ConnPicker({ connId, onPick, disabled = false }: { connId: strin
       >
         {c ? (
           <>
-            <EnvDot env={c.env} />
+            {!compact && <EnvDot env={c.env} />}
             <b>{c.name}</b>
-            <span className="u">{dbNameOf(c.url)}</span>
+            {!compact && <span className="u">{dbNameOf(c.url)}</span>}
             {rt.status === "connecting" && <Icon name="spinner" size={11} />}
             {rt.status === "error" && <Icon name="alert" size={11} />}
           </>

@@ -93,6 +93,7 @@ export function MetaTab() {
   };
   const entity = detail && doc ? selectedMetaEntity(detail, doc.ui.selection) : null;
   return <DockRegion region="document"><div className="meta-page meta-workbench" ref={layout.ref}
+    data-generation={doc?.ui.view === "generate" || undefined}
     data-size={layout.compact ? "compact" : layout.resourceDrawer ? "small" : layout.inspectorDrawer ? "medium" : "wide"}
     style={{ "--meta-resource-width": `${layout.widths.resource}px`, "--meta-inspector-width": `${layout.widths.inspector}px` } as CSSProperties}
     onKeyDown={(e) => { if (!e.nativeEvent.isComposing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); if (!locked) void reviewDraft(); } }}>
@@ -116,6 +117,9 @@ export function MetaTab() {
           onState={updateState} onResources={() => setPanels((s) => ({ ...s, resources: true, inspector: false }))} onInspector={() => onInspectorOpen(true)} />
         <MetaDraftBar draft={doc.draft} locked={locked || doc.busy} onUndo={() => void draftActions.undo()} onRedo={() => void draftActions.redo()} onReview={() => void reviewDraft()} onDiscard={draftActions.discard} />
         <MetaViewPanel view={doc.ui.view} detail={detail} error={doc.error} busy={doc.busy} entries={idx.data?.entries ?? []} onEdited={() => void refreshAfterEdit()}
+          generationPreferences={doc.ui.generation} onGenerationPreferences={(generation) => docs.updateUi(doc.key, { generation }, false)} onGenerationApplying={onEditingChange}
+          onGenerationBack={(showIssues) => updateState({ view: "detail", ...(showIssues ? { pane: "issues", mode: "linked" } : {}) })}
+          onGenerationLocate={(selection) => updateState({ selection, view: "detail", pane: semanticPane(selection), fieldScroll: { top: 0, left: 0 } })}
           editor={detail && <MetaEditor key={doc.key} detail={detail} sourceSha={doc.detail?.sha256} state={doc.ui} mode={mode} issues={issues} issueBusy={doc.issueBusy} issueError={doc.issueError}
             inspectorDrawer={layout.inspectorDrawer} inspectorOpen={panels.inspector} inspectorWidth={layout.widths.inspector}
             onInspectorOpen={onInspectorOpen} onInspectorWidth={(inspector) => layout.setWidths((s) => ({ ...s, inspector }))}

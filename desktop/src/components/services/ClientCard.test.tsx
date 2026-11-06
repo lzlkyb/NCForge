@@ -11,6 +11,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientCard } from "./ClientCard";
+import { ServiceDetails } from "./ServiceDetails";
 import type { ClientStatus } from "../../lib/client";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -51,7 +52,6 @@ const mount = async (s: ClientStatus, debugAttached = false) => {
         status={s}
         busy={null}
         debugMode={false}
-        onToggleDebugMode={vi.fn()}
         debugAttached={debugAttached}
         debugBusy={false}
         onAttachDebug={vi.fn()}
@@ -59,8 +59,7 @@ const mount = async (s: ClientStatus, debugAttached = false) => {
         onStart={vi.fn()}
         onStop={vi.fn()}
         onRestart={vi.fn()}
-        onCommandLine={vi.fn()}
-        previewing={false}
+        onRetry={vi.fn()}
       />,
     );
   });
@@ -79,37 +78,39 @@ describe("ClientCard", () => {
   it("停止状态只给启动，不显示停止/重启", async () => {
     await mount(status());
     expect(button("启动")).toBeTruthy();
-    expect(button("调试模式")).toBeTruthy();
+    expect(container.querySelector('[aria-label="客户端启动方式"]')).toBeTruthy();
     expect(button("停止")).toBeUndefined();
     expect(button("重启")).toBeUndefined();
   });
 
   it("运行中且中间件未就绪时明确标出", async () => {
     await mount(status({ state: "running", pid: 4321, serverReachable: false, classpathEntries: 4701 }));
-    expect(container.textContent).toContain("中间件 127.0.0.1:80 还没就绪");
-    expect(container.textContent).toContain("未就绪");
-    expect(container.textContent).toContain("4701");
-    // 调试开关只在停止时可点
-    expect(button("调试模式")).toBeUndefined();
+    expect(container.textContent).toContain("进程运行中");
+    expect(container.textContent).toContain("127.0.0.1:80");
+    expect(container.querySelector('[aria-label="客户端启动方式"]')).toBeNull();
     expect(button("停止")).toBeTruthy();
     expect(button("重启")).toBeTruthy();
+    await act(async () => root.render(<ServiceDetails source="client" status={status({ state: "running", pid: 4321, serverReachable: false, classpathEntries: 4701 })} failed={false} onCommandLine={vi.fn()} onEditPort={vi.fn()} />));
+    expect(container.textContent).toContain("未就绪");
+    expect(container.textContent).toContain("4701 项");
+    expect(container.textContent).toContain("NC 业务健康未验证");
   });
 
   it("JDWP 端口只显示回环地址", async () => {
     await mount(status({ state: "running", pid: 1, debugPort: 61539 }));
-    expect(container.textContent).toContain("127.0.0.1:61539");
+    expect(button("附加调试")?.title).toContain("127.0.0.1:61539");
     // 能在工作台内附加，不再是「只许 IDE/jdb」
-    expect(button("附加调试器")).toBeTruthy();
+    expect(button("附加调试")).toBeTruthy();
   });
 
   it("已附加时给断开入口", async () => {
     await mount(status({ state: "running", pid: 1, debugPort: 61539 }), true);
     expect(button("断开调试")).toBeTruthy();
-    expect(button("附加调试器")).toBeUndefined();
+    expect(button("附加调试")).toBeUndefined();
   });
 
   it("本次没开调试时附加按钮禁用并说明原因", async () => {
     await mount(status({ state: "running", pid: 1 }));
-    expect(button("附加调试器")?.disabled).toBe(true);
+    expect(button("附加调试")?.disabled).toBe(true);
   });
 });

@@ -1,0 +1,385 @@
+{
+  "checkedAt": "2026-11-06T06:11:57.565Z",
+  "sources": [
+    {
+      "name": "IntelliJ IDEA Run",
+      "url": "https://www.jetbrains.com/help/idea/run-tool-window.html",
+      "terms": [
+        "rerun",
+        "stop",
+        "pin",
+        "soft wrap",
+        "scroll",
+        "stack trace",
+        "console"
+      ],
+      "status": 200,
+      "finalUrl": "https://www.jetbrains.com/help/idea/run-tool-window.html",
+      "title": "Run tool window | IntelliJ IDEA Documentation",
+      "length": 5055,
+      "snippets": [
+        {
+          "term": "rerun",
+          "found": true,
+          "text": "group. When you close or move the last tab of a group, the group is automatically removed.Run toolbarThe main toolbar of the Run tool window lets you rerun, stop, pause, or terminate an application.ItemTooltip and shortcutDescriptionRerun Ctrl+F5Click this button to stop the current application and run it again.Rerun automaticallyUse this icon to enable the autotest-like runner: any test in the current run configuration restarts automatically after you change the related source code.For Maven projects, if you click this icon and change the source code (in your Java or POM files), the goal you are currently running, will rerun automatically af"
+        },
+        {
+          "term": "stop",
+          "found": true,
+          "text": "When you close or move the last tab of a group, the group is automatically removed.Run toolbarThe main toolbar of the Run tool window lets you rerun, stop, pause, or terminate an application.ItemTooltip and shortcutDescriptionRerun Ctrl+F5Click this button to stop the current application and run it again.Rerun automaticallyUse this icon to enable the autotest-like runner: any test in the current run configuration restarts automatically after you change the related source code.For Maven projects, if you click this icon and change the source code (in your Java or POM files), the goal you are currently running, will rerun automatically after eac"
+        },
+        {
+          "term": "pin",
+          "found": true,
+          "text": "oolboxes and panes.This page describes the Run tool window. For general information on how to run programs, refer to Run applications.Tool window tabsPin tabsIf you are running multiple applications, each one is displayed in a tab named after the run/debug configuration applied. To preserve the output of an application, even if you re-run it, pin the output tab.Right-click the tab and select Pin Tab.To pin tabs by default, press Ctrl+Alt+S to open the IDE settings, select Advanced Settings and enable the Make configurations pinned by default option.Split tabsIntelliJ IDEA enables you to split the active Run tool window vertically or horizonta"
+        },
+        {
+          "term": "soft wrap",
+          "found": true,
+          "text": "Ctrl+Alt+DownClick this button to navigate up or down in the stack trace and have the caret jump to the corresponding location in the source code.Use Soft WrapsClick this button to toggle the soft wrap mode of the output.Scroll to the endClick this button to navigate to the bottom of the stack trace and have the caret jump to the corresponding location in the source code.PrintClick this button to send the console text to the default printer.Clear AllClick this button to remove all text from the console. This function is also available from the context menu of the console.Toggle tasks executions/text modeClick this button to view Gradle task e"
+        },
+        {
+          "term": "scroll",
+          "found": true,
+          "text": "e and have the caret jump to the corresponding location in the source code.Use Soft WrapsClick this button to toggle the soft wrap mode of the output.Scroll to the endClick this button to navigate to the bottom of the stack trace and have the caret jump to the corresponding location in the source code.PrintClick this button to send the console text to the default printer.Clear AllClick this button to remove all text from the console. This function is also available from the context menu of the console.Toggle tasks executions/text modeClick this button to view Gradle task execution in a tree mode.04 November 2026Run shebang scriptsDeployment c"
+        },
+        {
+          "term": "stack trace",
+          "found": true,
+          "text": "stChoose this command to open the Create Gist dialog.Clear AllClears the output window.Console toolbarItemTooltip and shortcutDescription Up/down the Stack Trace Ctrl+Alt+Up &#xa0; &#xa0; Ctrl+Alt+DownClick this button to navigate up or down in the stack trace and have the caret jump to the corresponding location in the source code.Use Soft WrapsClick this button to toggle the soft wrap mode of the output.Scroll to the endClick this button to navigate to the bottom of the stack trace and have the caret jump to the corresponding location in the source code.PrintClick this button to send the console text to the default printer.Clear AllClick th"
+        },
+        {
+          "term": "console",
+          "found": true,
+          "text": "enables you to copy the line at caret to the clipboard, find text, navigate between differences and manage white spaces.Fold Lines Like ThisOpens the Console dialog that allows you defining the lines to be folded to hide extraneous information.Copy URLChoose this command to copy the current URL to the system clipboard. This command only shows on a URL, if it is included in an application's output.Create GistChoose this command to open the Create Gist dialog.Clear AllClears the output window.Console toolbarItemTooltip and shortcutDescription Up/down the Stack Trace Ctrl+Alt+Up &#xa0; &#xa0; Ctrl+Alt+DownClick this button to navigate up or down"
+        }
+      ]
+    },
+    {
+      "name": "IntelliJ IDEA Services",
+      "url": "https://www.jetbrains.com/help/idea/services-tool-window.html",
+      "terms": [
+        "run configuration",
+        "group",
+        "console",
+        "service",
+        "restart"
+      ],
+      "status": 200,
+      "finalUrl": "https://www.jetbrains.com/help/idea/services-tool-window.html",
+      "title": "Services tool window | IntelliJ IDEA Documentation",
+      "length": 35781,
+      "snippets": [
+        {
+          "term": "run configuration",
+          "found": true,
+          "text": "he Services windowSelect View | Tool Windows | Services from the main menu or press Alt+8.In the Services tool window, click Add service, then select Run Configuration.Select a run/debug configuration type from the list to add all configurations of this type to the window.If you have already created one or more configurations of the selected type, IntelliJ IDEA displays them in a dedicated node. If there are no configurations of the selected type yet, the IDE opens the Add New Configuration dialog, where you can create a new run/debug configuration.Buttons on the toolbar depend on the selected type of the run/debug configuration and can inclu"
+        },
+        {
+          "term": "group",
+          "found": true,
+          "text": ".The main toolbar contains the following buttons and menus that are common for all service types: Add Service Alt+InsertChoose a service type to add. Group ByChoose how you want to organize the list of services:Group Services by Type: arrange services by type, such as Run Dashboard, Docker, or Database Open in New TabMove the selected items to a separate tab. Expand All Ctrl+NumPad +Expand all items in the list. Collapse All Ctrl+NumPad -Collapse all items in the list.Display services in separate tool windowsYou can adjust the layout of the Services tool window by moving services to their own separate tool windows.Right-clicking a service and"
+        },
+        {
+          "term": "console",
+          "found": true,
+          "text": " toolbar.Left toolbarButtons on the toolbar depend on the selected item and can include the following:IconAction and shortcutDescriptionJump to Query Console Ctrl+Shift+F10Open the Query Consoles popup. In the Query Consoles popup, you can select a query console that you want to open in the editor.Deactivate Ctrl+F2Close the database connection for the selected data source or data sources. (The data sources with connected sessions are indicated with a green dot in the corner of their icon.)TxTransaction ModeandTransaction IsolationSelect the isolation level for database transactions and the way the transactions are committed.Auto: the current"
+        },
+        {
+          "term": "service",
+          "found": true,
+          "text": "Services tool windowThe Services tool window lets you manage various services used in your development workflow, such as run/debug configurations, application servers, database sessions, connections to Kubernetes clusters and Docker. Plugin developers can add other services through the IntelliJ platform API.The main toolbar contains the following buttons and menus that are common for all service types: Add Service Alt+InsertChoose a service type to add. Group ByChoose how you want to organize th"
+        },
+        {
+          "term": "restart",
+          "found": true,
+          "text": "ill be available in the list of services.IconActionDescriptionRun Ctrl+Shift+F10Run the selected application server configuration.Rerun Ctrl+Shift+F10Restart the selected application server configuration.Debug ⌃ ⇧ DDebug the selected application server configuration.Stop Ctrl+F2Stop the selected application server configuration.Deploy AllDeploy all artifacts of the selected application server configuration.ArtifactsConfigure which artifacts to deploy for the selected application server configuration.Update Running Application Ctrl+F10Update a running application after modifying the source code.Cloud providersThis type of service is available "
+        }
+      ]
+    },
+    {
+      "name": "VS Code Debugging",
+      "url": "https://code.visualstudio.com/docs/editor/debugging",
+      "terms": [
+        "debug console",
+        "filter",
+        "launch configuration",
+        "compound",
+        "stop",
+        "restart"
+      ],
+      "status": 200,
+      "finalUrl": "https://code.visualstudio.com/docs/debugtest/debugging",
+      "title": "Debug code with Visual Studio Code",
+      "length": 9919,
+      "snippets": [
+        {
+          "term": "debug console",
+          "found": true,
+          "text": " the current execution line, set breakpoints, and inspect values inline or by hovering over code. Debug toolbar: control the flow of the application. Debug Console: view debugger output and evaluate expressions. Debug status: select the active debug configuration from the Status Bar. Debug actions The Debug toolbar appears when a debugging session starts. The available actions can vary by debugger. Action Description Continue or Pause F5 Resume execution until the next breakpoint, or pause a running program. Step Over F10 Run the current line without stepping into function calls on that line. Step Into F11 Step into the function called on the"
+        },
+        {
+          "term": "filter",
+          "found": true,
+          "text": "add an expression that accesses it. CALL STACK shows the active function calls. Select a stack frame to inspect its source location and variables. To filter variables by name or value, focus the VARIABLES section, use ⌥⌘F (Windows, Linux Ctrl+Alt+F), and enter a search term. You can also hover over an expression in the editor to inspect its current value. Debug console REPL The Debug Console is a REPL (Read-Eval-Print Loop) for the active debugging session. It shows debugger output and lets you evaluate expressions in the context of the selected stack frame. Open it with View: Debug Console (⇧⌘Y (Windows, Linux Ctrl+Shift+Y)). Enter an expres"
+        },
+        {
+          "term": "launch configuration",
+          "found": true,
+          "text": "ing sessions. Debug actions apply to the active session. For a repeatable setup that starts multiple debug configurations together, create a compound launch configuration. Remote debugging Remote debugging support depends on the debugger extension. Review the extension's documentation for connection requirements and supported environments. The built-in Node.js debugger supports remote debugging. For setup details, see Remote debugging with Node.js. Debugger extensions VS Code includes debugging support for Node.js and for JavaScript, TypeScript, and languages that compile to JavaScript. For other languages and runtimes, install an extension f"
+        },
+        {
+          "term": "compound",
+          "found": true,
+          "text": "or switching sessions. Debug actions apply to the active session. For a repeatable setup that starts multiple debug configurations together, create a compound launch configuration. Remote debugging Remote debugging support depends on the debugger extension. Review the extension's documentation for connection requirements and supported environments. The built-in Node.js debugger supports remote debugging. For setup details, see Remote debugging with Node.js. Debugger extensions VS Code includes debugging support for Node.js and for JavaScript, TypeScript, and languages that compile to JavaScript. For other languages and runtimes, install an ex"
+        },
+        {
+          "term": "stop",
+          "found": true,
+          "text": " and review the function calls in the CALL STACK section. Use the Debug toolbar to continue execution, step through code, restart the application, or stop debugging. Debugger user interface During a debugging session, use these areas of the interface: Run and Debug view: inspect variables and expressions, manage breakpoints, and navigate the call stack. Editor: see the current execution line, set breakpoints, and inspect values inline or by hovering over code. Debug toolbar: control the flow of the application. Debug Console: view debugger output and evaluate expressions. Debug status: select the active debug configuration from the Status Bar"
+        },
+        {
+          "term": "restart",
+          "found": true,
+          "text": "ues in the VARIABLES section and review the function calls in the CALL STACK section. Use the Debug toolbar to continue execution, step through code, restart the application, or stop debugging. Debugger user interface During a debugging session, use these areas of the interface: Run and Debug view: inspect variables and expressions, manage breakpoints, and navigate the call stack. Editor: see the current execution line, set breakpoints, and inspect values inline or by hovering over code. Debug toolbar: control the flow of the application. Debug Console: view debugger output and evaluate expressions. Debug status: select the active debug confi"
+        }
+      ]
+    },
+    {
+      "name": "VS Code Terminal",
+      "url": "https://code.visualstudio.com/docs/terminal/basics",
+      "terms": [
+        "find",
+        "tab",
+        "maximize",
+        "scroll",
+        "split",
+        "clear",
+        "command"
+      ],
+      "status": 200,
+      "finalUrl": "https://code.visualstudio.com/docs/terminal/basics",
+      "title": "Terminal Basics",
+      "length": 22882,
+      "snippets": [
+        {
+          "term": "find",
+          "found": true,
+          "text": "tion key on macOS but requires enabling the terminal.integrated.macOptionClickForcesSelection Open in VS Code Open in VS Code Insiders setting first. Find The integrated terminal has find functionality that can be triggered with ⌘F (Windows, Linux Ctrl+F). Tip Ctrl+F can be sent to the shell by removing the workbench.action.terminal.focusFind command from commands to skip shell. Run selected text To use the runSelectedText command, select text in an editor and run the command Terminal: Run Selected Text in Active Terminal via the Command Palette (⇧⌘P (Windows, Linux Ctrl+Shift+P)), the terminal will attempt to run the selected text. If no tex"
+        },
+        {
+          "term": "tab",
+          "found": true,
+          "text": "he terminal profiles dropdown. You can learn more about configuring terminal shells in the terminal profiles article. Managing terminals The terminal tabs UI is on the right side of the terminal view. Each terminal has an entry with its name, icon, color, and group decoration (if any). Add terminal instances by selecting the + icon on the top-right of the TERMINAL panel, selecting a profile from the terminal dropdown, or by triggering the ⌃⇧` (Windows, Linux Ctrl+Shift+`) command. This action creates another entry in the tab list associated with that terminal. Remove terminal instances by hovering a tab and selecting the Trash Can button, sel"
+        },
+        {
+          "term": "maximize",
+          "found": true,
+          "text": "he terminal. Tip Also run the active file using the command workbench.action.terminal.runActiveFile. Maximizing the terminal The terminal view can be maximized by clicking the maximize panel size button with the upwards chevron icon. This will temporarily hide the editors and maximize the panel. This is useful to temporarily focus on a large amount of output. Some developers use VS Code as a standalone terminal by opening a new window, maximizing the panel, and hiding the side bar. Note that the panel can only be maximized if its alignment option is set to Center. Select all There is a Terminal: Select All command, which is bound to Cmd+A on "
+        },
+        {
+          "term": "scroll",
+          "found": true,
+          "text": "erminal has additional functionality called shell integration that tracks where commands are run with decorations on the left of a command and in the scrollbar: Note If you prefer to work outside VS Code, open an external terminal with the ⇧⌘C (Windows, Linux Ctrl+Shift+C) keyboard shortcut Terminal shells The integrated terminal can use various shells installed on your machine, with the default being pulled from your system defaults. Shells are detected and presented in the terminal profiles dropdown. You can learn more about configuring terminal shells in the terminal profiles article. Managing terminals The terminal tabs UI is on the right"
+        },
+        {
+          "term": "split",
+          "found": true,
+          "text": "s, displaying a check mark when there are no errors and an X otherwise. Hover the icon to read status information, which may contain actions. Groups (split panes) Place multiple terminals side-by-side and create a group by splitting a terminal: Hover over an entry in the list of terminals on the right and select the inline split button. Right-click the context menu and select the Split menu option. Alt and click on a tab, the + button, or the single tab on the terminal panel. Trigger the ⌘\\ (Windows, Linux Ctrl+Shift+5) command. Tip The working directory for the new terminal depends on the terminal.integrated.splitCwd Open in VS Code Open in "
+        },
+        {
+          "term": "clear",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "command",
+          "found": true,
+          "text": "e root of your workspace. It provides integration with the editor to support features like links and error detection. The integrated terminal can run commands such as mkdir and git just like a standalone terminal. Note Opening a terminal is blocked when a workspace is in Restricted Mode to prevent shells from automatically executing code based on workspace contents. You can open a terminal as follows: From the menu, use the Terminal > New Terminal or View > Terminal menu commands. From the Command Palette (⇧⌘P (Windows, Linux Ctrl+Shift+P)), use the View: Toggle Terminal command. In the Explorer, you can use the Open in Integrated Terminal co"
+        }
+      ]
+    },
+    {
+      "name": "Eclipse Console",
+      "url": "https://help.eclipse.org/latest/topic/org.eclipse.platform.doc.user/reference/views/console_view.htm",
+      "terms": [
+        "pin",
+        "scroll lock",
+        "word wrap",
+        "standard error",
+        "console",
+        "terminate"
+      ],
+      "status": 200,
+      "finalUrl": "https://help.eclipse.org/latest/topic/org.eclipse.platform.doc.user/reference/views/console_view.htm",
+      "title": "Page not found",
+      "length": 233,
+      "snippets": [
+        {
+          "term": "pin",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "scroll lock",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "word wrap",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "standard error",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "console",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "terminate",
+          "found": false,
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "Docker Desktop Containers",
+      "url": "https://docs.docker.com/desktop/use-desktop/container/",
+      "terms": [
+        "logs",
+        "start",
+        "stop",
+        "restart",
+        "search",
+        "wrap",
+        "timestamp"
+      ],
+      "status": 200,
+      "finalUrl": "https://docs.docker.com/desktop/use-desktop/container/",
+      "title": "Explore the Containers view in Docker Desktop | Docker Docs",
+      "length": 5138,
+      "snippets": [
+        {
+          "term": "logs",
+          "found": true,
+          "text": "er when you select it.From here, you can use the quick action buttons to perform various actions such as pause, resume, start or stop, or explore the Logs, Inspect, Bind mounts, Debug, Files, and Stats tabs.LogsSelect Logs to view output from the container in real time. While viewing logs, you can:Use Cmd + f/Ctrl + f to open the search bar and find specific entries. Search matches are highlighted in yellow.Press Enter or Shift + Enter to jump to the next or previous search match respectively.Use the Copy icon in the top right-hand corner to copy all the logs to your clipboard.Show timestampsUse the Clear terminal icon in the top right-hand c"
+        },
+        {
+          "term": "start",
+          "found": true,
+          "text": "Back Manuals Get started Guides ReferenceExplore the Containers view in Docker Desktop Ask Gordon Copy Markdown View MarkdownTable of contentsThe Containers view lists all running and stopped containers and applications. It provides a clean interface to manage the lifecycle of your containers, interact with running applications, and inspect Docker objects—including Docker Compose apps.Toolbar and gridUse the Search field to find a specific container or Compose project by name.The toolbar also lets you:Toggle Onl"
+        },
+        {
+          "term": "stop",
+          "found": true,
+          "text": "ferenceExplore the Containers view in Docker Desktop Ask Gordon Copy Markdown View MarkdownTable of contentsThe Containers view lists all running and stopped containers and applications. It provides a clean interface to manage the lifecycle of your containers, interact with running applications, and inspect Docker objects—including Docker Compose apps.Toolbar and gridUse the Search field to find a specific container or Compose project by name.The toolbar also lets you:Toggle Only show running containers to hide stopped containers from the grid.Customize the grid using the Columns button. You can show, hide, or reorder columns, including live "
+        },
+        {
+          "term": "restart",
+          "found": true,
+          "text": "s together.Container actionsUse the Search field to find a specific container by name.From the Containers view you can:Start, stop, pause, resume, or restart containersView image packages and CVEsDelete containersOpen a terminal in the containerOpen the port exposed by the container in a browserCopy the docker run command for reuse or modificationUse Docker DebugFrom a Compose project's row, you get a similar set of actions scoped to the whole project: start/stop, pause, restart, view details, delete, and if VS Code is set as your default editor, Open in VS Code.If Gordon is available, each row can surface AI-suggested diagnostic questions an"
+        },
+        {
+          "term": "search",
+          "found": true,
+          "text": "he lifecycle of your containers, interact with running applications, and inspect Docker objects—including Docker Compose apps.Toolbar and gridUse the Search field to find a specific container or Compose project by name.The toolbar also lets you:Toggle Only show running containers to hide stopped containers from the grid.Customize the grid using the Columns button. You can show, hide, or reorder columns, including live stats like CPU %, memory usage/limit, memory %, disk read/write, network I/O, PIDs, and last-started time. Column choices persist between sessions.Select multiple containers or Compose projects using the row checkboxes, then use"
+        },
+        {
+          "term": "wrap",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "timestamp",
+          "found": true,
+          "text": " to jump to the next or previous search match respectively.Use the Copy icon in the top right-hand corner to copy all the logs to your clipboard.Show timestampsUse the Clear terminal icon in the top right-hand corner to clear the logs terminal.Select and view external links that may be in your logs.You can refine your view by:Filtering logs for specific containers, if you're running a multi-container application.Using regular expressions or exact match search termsInspectSelect Inspect to view low-level information about the container. It displays the local path, version number of the image, SHA-256, port mapping, and other details.Exec/Debug"
+        }
+      ]
+    }
+  ],
+  "eclipseFollowup": [
+    {
+      "name": "Eclipse Console",
+      "url": "https://help.eclipse.org/latest/topic/org.eclipse.jdt.doc.user/reference/views/console/ref-console_view.htm",
+      "status": 200,
+      "title": "Console View",
+      "length": 1294,
+      "snippets": [
+        {
+          "term": "pin",
+          "found": true,
+          "text": "on Open Console Opens a new console of the selected type. View action Pin Pins the current console to remain on top of all other consoles. View action Scroll Lock Changes if scroll lock should be enabled or not in the current console. Context menu and view action Related Concepts Java views Java perspectives Related Tasks Changing the appearance of the console view Views and editors Related References Console Preferences CVS Console Process Console Stacktrace Console Views and editors"
+        },
+        {
+          "term": "scroll lock",
+          "found": true,
+          "text": "e current console to remain on top of all other consoles. View action Scroll Lock Changes if scroll lock should be enabled or not in the current console. Context menu and view action Related Concepts Java views Java perspectives Related Tasks Changing the appearance of the console view Views and editors Related References Console Preferences CVS Console Process Console Stacktrace Console Views and editors"
+        },
+        {
+          "term": "word wrap",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "standard error",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "terminate",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "console",
+          "found": true,
+          "text": "Java Development User Guide > Reference > Views Console View The Console View displays a variety of console types depending on the type of development and the current set of user settings. The three consoles that are provided by default with the Eclipse Platform are: The Process Console The Stacktrace Console The CVS Console You can change settings for consoles on the Run/Debug > Console preference page. The commands available in the Console View are listed below. Console View Commands Command Name Description Av"
+        }
+      ]
+    },
+    {
+      "name": "Eclipse Console",
+      "url": "https://help.eclipse.org/latest/topic/org.eclipse.platform.doc.user/reference/ref-console_view.htm",
+      "status": 200,
+      "title": "Page not found",
+      "length": 233,
+      "snippets": [
+        {
+          "term": "pin",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "scroll lock",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "word wrap",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "standard error",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "terminate",
+          "found": false,
+          "text": ""
+        },
+        {
+          "term": "console",
+          "found": false,
+          "text": ""
+        }
+      ]
+    }
+  ]
+}

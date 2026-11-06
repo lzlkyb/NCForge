@@ -1,8 +1,9 @@
 import { EditorTabTypeIcon } from "./EditorTabTypeIcon";
+import { ProblemBadge } from "./ProblemBadge";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
-import { Menu, MenuItem } from "../ui/Menu";
+import { AllEditorTabs } from "./AllEditorTabs";
 import { TaskMenu } from "./TaskMenu";
 import { Button } from "../ui/button";
 import { WorkspaceGlyph } from "./WorkspaceGlyph";
@@ -12,7 +13,11 @@ import { tabPathLabels } from "../../lib/tabPathLabels";
 import { relativeTo } from "../../lib/compile";
 import { revealInTree } from "../../lib/revealInTree";
 import { setSession } from "../../lib/workspaceSession";
+import { useCompileMarks } from "../../hooks/useCompileMarks";
+import { markOf } from "../../lib/compileMarks";
+import { inspectMarkOf, useInspectMarks } from "../../lib/inspectMarks";
 import type { TabMeta } from "../../lib/workspaceSession";
+import { emptyEditorGroups, type EditorGroupId } from "../../lib/editorGroups";
 
 /**
  * 编辑器上方的标签条 + 编译按钮。
@@ -35,6 +40,9 @@ export function TabStrip({
   onOpenSplit,
   onCloseSplit,
   onCompile,
+  groupId,
+  compactTools = false,
+  onMoveGroup,
 }: {
   root: string;
   tabs: TabMeta[];
@@ -51,9 +59,15 @@ export function TabStrip({
   onOpenSplit: (path: string) => void;
   onCloseSplit: () => void;
   onCompile: () => void;
+  groupId?: EditorGroupId;
+  compactTools?: boolean;
+  onMoveGroup?: (path: string) => void;
 }) {
   const dock = useWorkbenchDock();
   const pathLabels = tabPathLabels(root, tabs);
+  // 编译结果按文件落到标签上：开着五个文件时不用逐个点开找哪个有错
+  const marks = useCompileMarks();
+  const inspectMarks = useInspectMarks();
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   const tabRefs = useRef(new Map<string, HTMLDivElement>());
   /** 正在被拖的标签路径（HTML5 拖放只在 start 时给，dragover 时读不到）。 */
@@ -110,6 +124,13 @@ export function TabStrip({
     const from = dragFrom.current;
     dragFrom.current = null;
     if (!from || from === target) return;
+    if (groupId) {
+      setSession({ editorGroups: old => {
+        const groups = old ?? emptyEditorGroups(), next = groups[groupId].slice();
+        const i = next.indexOf(from), j = next.indexOf(target); if (i < 0 || j < 0) return groups;
+        next.splice(i, 1); next.splice(next.indexOf(target), 0, from); return { ...groups, [groupId]: next };
+      } }); return;
+    }
     setSession({
       tabs: (prev) => {
         const i = prev.findIndex((t) => t.path === from);
@@ -117,7 +138,7 @@ export function TabStrip({
         if (i < 0 || j < 0) return prev;
         const next = prev.slice();
         const [moved] = next.splice(i, 1);
-        next.splice(j, 0, moved);
+        next.splice(next.findIndex(tab => tab.path === target), 0, moved);
         return next;
       },
     });
@@ -136,7 +157,9 @@ export function TabStrip({
       { label: "关闭其他", disabled: tabs.length < 2, onSelect: () => closeMany((x) => x.path !== path) },
       { label: "关闭右侧", disabled: i === tabs.length - 1, onSelect: () => closeMany((_, j) => j > i) },
       { label: "关闭已保存的", onSelect: () => closeMany(() => true) },
-      { label: "固定标签", separator: true, disabled: !t?.preview, onSelect: () => onPin(path) },
+      { label: "保留预览标签", separator: true, disabled: !t?.preview, onSelect: () => onPin(path) },
+      { label: t?.pinned ? "取消钉住文件" : "钉住文件", onSelect: () => setSession({ tabs: prev => prev.map(tab => tab.path === path ? { ...tab, pinned: !tab.pinned, preview: false } : tab) }) },
+      ...(onMoveGroup ? [{ label: groupId === "right" ? "移动到左组" : "移动到右组", onSelect: () => onMoveGroup(path) }] : []),
       {
         label: splitPath === path ? "已在右侧分屏" : "在右侧打开",
         disabled: splitPath === path,
@@ -150,8 +173,10 @@ export function TabStrip({
   };
 
   return (
-    <div className="wb-tabs" role="tablist">
-      {tabs.map((t, i) => (
+    <div className="wb-tabs" role="tablist" aria-label={groupId ? `${groupId === 'left' ? '左' : '右'}编辑器组文件` : '打开的文件'}>
+      {tabs.map((t, i) => {
+        const problem = markOf(marks, t.path);
+        return (
         <div
           key={t.path}
           ref={(node) => {
@@ -160,12 +185,13 @@ export function TabStrip({
           }}
           role="tab"
           aria-selected={!dock?.documentOpen && t.path === activePath}
-          aria-controls="wb-code-surface"
+          aria-controls={groupId ? `wb-editor-${groupId}-surface` : "wb-code-surface"}
           aria-label={pathLabels.has(t.path) ? `${t.name} · ${pathLabels.get(t.path)}` : t.name}
           aria-description={t.readOnly ? "只读" : undefined}
           className="wb-tab"
           data-active={(!dock?.documentOpen && t.path === activePath) || undefined}
           data-preview={t.preview || undefined}
+          data-pinned={t.pinned || undefined}
           title={t.preview ? `${t.path}\n（预览标签，双击或开始编辑后固定）` : t.path}
           tabIndex={i === rovingIndex ? 0 : -1}
           draggable
@@ -197,8 +223,10 @@ export function TabStrip({
           }}
         >
           <EditorTabTypeIcon path={t.path} name={t.name} mtimeMs={t.mtimeMs} />
+          {t.pinned && <span className="wb-tab-pinned" title="已钉住"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M16 3H8l1 6-4 4v3h14v-3l-4-4 1-6Z M12 16v6" /></svg></span>}
           <WorkspaceFileName name={t.name} className="wb-tab-name" />
           {pathLabels.has(t.path) && <span className="wb-tab-scope">· {pathLabels.get(t.path)}</span>}
+          <ProblemBadge mark={problem} inspect={inspectMarkOf(inspectMarks, t.path)} />
           {t.readOnly && <span className="wb-status-warn">只读</span>}
           <button
             type="button"
@@ -220,41 +248,13 @@ export function TabStrip({
             )}
           </button>
         </div>
-      ))}
+        );
+      })}
       {/* 标签太多时横向滚动条不好找：给一个「所有标签」下拉，键盘用户也能到这里 */}
-      <div className="wb-tabs-all-wrap">
-        <Menu portal width="w-72" trigger={(open, toggle) => (
-          <button
-            type="button"
-            className="wb-icon-btn"
-            aria-label="所有标签"
-            aria-expanded={open}
-            title="所有标签（标签太多时从这里选）"
-            disabled={tabs.length === 0}
-            onClick={toggle}
-          >
-            <WorkspaceGlyph name="down" size={14} />
-          </button>
-        )}>
-          {(close) => tabs.map((t) => (
-            <MenuItem
-              key={t.path}
-              label={t.name}
-              hint={[pathLabels.get(t.path), t.path === splitPath ? "分屏中" : ""].filter(Boolean).join(" · ") || undefined}
-              active={t.path === activePath}
-              trailing={t.dirty ? <span className="wb-dirty-dot" /> : undefined}
-              onClick={() => {
-                onSelect(t.path);
-                dock?.showCode();
-                close();
-              }}
-            />
-          ))}
-        </Menu>
-      </div>
+      <AllEditorTabs root={root} tabs={tabs} activePath={activePath} onSelect={path => { onSelect(path); dock?.showCode(); }} />
       <span className="wb-tabs-sp" />
-      {!dock?.documentOpen && <TaskMenu root={root} compiling={compiling} />}
-      {!dock?.documentOpen && (
+      {!compactTools && !dock?.documentOpen && <TaskMenu root={root} compiling={compiling} />}
+      {!compactTools && !dock?.documentOpen && (
         <Button
           size="sm"
           variant="outline"

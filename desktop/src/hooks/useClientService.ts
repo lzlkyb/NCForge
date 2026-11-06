@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   clientCommandLine,
@@ -14,7 +14,7 @@ import { toast } from "../components/ui/toast";
 import { failureText } from "../lib/friendlyError";
 import { readClientDebugModePref, writeClientDebugModePref } from "../lib/debugKeys";
 
-type Busy = "start" | "stop" | "restart" | null;
+import { useServiceActions } from "./useServiceActions";
 
 interface Options {
   /** 面板可见：不可见时不轮询（与中间件状态同一条约定）。 */
@@ -59,79 +59,10 @@ export function useClientService({ visible, appHidden }: Options) {
     [queryClient],
   );
 
-  const [busy, setBusy] = useState<Busy>(null);
-  const lock = useRef(false);
-
-  const start = useCallback(async () => {
-    if (lock.current) return;
-    lock.current = true;
-    setBusy("start");
-    try {
-      await clientStart(debugMode);
-      bumpGeneration();
-      patchState("starting");
-      toast("客户端启动请求已接受，正在准备 classpath", "success");
-    } catch (e) {
-      toast(failureText("启动客户端", e), "error");
-      // 失败原因写进了日志：换一代才看得到（与中间件同一条处理）
-      bumpGeneration();
-    } finally {
-      lock.current = false;
-      setBusy(null);
-      void refetch();
-    }
-  }, [bumpGeneration, debugMode, patchState, refetch]);
-
-  const stop = useCallback(async () => {
-    if (lock.current) return;
-    lock.current = true;
-    setBusy("stop");
-    try {
-      const outcome = await clientStop();
-      if (outcome === "stopped") {
-        patchState("stopped");
-        toast("客户端已停止", "success");
-      } else if (outcome === "cancelling") {
-        toast("正在取消客户端启动…", "info");
-      } else {
-        toast("客户端没有在运行", "info");
-      }
-    } catch (e) {
-      toast(failureText("停止客户端", e), "error");
-    } finally {
-      lock.current = false;
-      setBusy(null);
-      void refetch();
-    }
-  }, [patchState, refetch]);
-
-  const restart = useCallback(async () => {
-    if (lock.current) return;
-    lock.current = true;
-    setBusy("restart");
-    try {
-      const outcome = await clientStop();
-      if (outcome === "cancelling") {
-        toast("正在取消上一次启动，等一秒再点重启", "warning");
-        return;
-      }
-      await clientStart(debugMode);
-      bumpGeneration();
-      patchState("starting");
-      toast(
-        outcome === "idle" ? "客户端先前已退出，本次启动请求已接受" : "重启请求已接受，正在启动客户端",
-        "success",
-      );
-    } catch (e) {
-      toast(failureText("重启客户端", e), "error");
-      bumpGeneration();
-    } finally {
-      lock.current = false;
-      setBusy(null);
-      void refetch();
-    }
-  }, [bumpGeneration, debugMode, patchState, refetch]);
-
+  const { busy, start, stop, restart } = useServiceActions({
+    name: "客户端", debugMode, startRequest: clientStart, stopRequest: clientStop,
+    refetch, patchState, onGeneration: bumpGeneration,
+  });
   const [preview, setPreview] = useState<ClientPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
@@ -146,8 +77,8 @@ export function useClientService({ visible, appHidden }: Options) {
     }
   }, []);
 
-  const revealLog = useCallback(() => {
-    void clientRevealLog().catch((e) => toast(failureText("打开客户端日志位置", e), "error"));
+  const revealLog = useCallback((previous = false) => {
+    void clientRevealLog(previous).catch((e) => toast(failureText("打开客户端日志位置", e), "error"));
   }, []);
 
   return {
@@ -156,7 +87,10 @@ export function useClientService({ visible, appHidden }: Options) {
     error,
     refetch,
     busy,
-    start,
+    start: (forceDebug?: boolean) => {
+      if (forceDebug !== undefined) { setDebugMode(forceDebug); writeClientDebugModePref(forceDebug); }
+      return start(forceDebug);
+    },
     stop,
     restart,
     preview,

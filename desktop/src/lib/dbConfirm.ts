@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { connOf, connect, getDb, rtOf, txAction } from "./dbStore";
-import { friendlyDbError } from "./db";
+import { claimCursor, connOf, connect, getDb, patchTab, rtOf, setTx, sqlTabOf, txAction, type SqlTab } from "./dbStore";
+import { friendlyDbError, parseDbError } from "./db";
 import type { DbEnv, TxInfo } from "./dbApi";
 import { dbApi } from "./dbApi";
 import type { SaveFailure, UnsavedFile } from "./saveAllDirty";
@@ -58,7 +58,7 @@ export type Pending =
       resolve: (c: FileQuitChoice) => void;
     }
   | { kind: "prod"; connId: string; tabId: string; sql: string; resolve: (ok: boolean, quiet: boolean) => void }
-  | { kind: "password"; connId: string; error: string | null; resolve: (r: { password: string; remember: boolean } | null) => void }
+  | { kind: "password"; connId: string; error: string | null; temporary?: boolean; resolve: (r: { password: string; remember: boolean } | null) => void }
   | { kind: "ask"; title: string; message: string; ok: string; danger: boolean; resolve: (ok: boolean) => void };
 
 let pending: Pending | null = null;
@@ -240,4 +240,34 @@ export async function ensureConnected(connId: string): Promise<boolean> {
     r = await connect(connId, input.password, input.remember);
   }
   return r === "ok";
+}
+
+/** 重连只替换出故障的会话。旧事务的结果要先由用户核对。 */
+export async function reconnectSession(connId: string, slot: string | null, tabId?: string, fallback = false): Promise<boolean> {
+  const current = () => {
+    if (!tabId) return true;
+    const tab = sqlTabOf(tabId);
+    return tab?.connId === connId && (tab.slot ?? null) === slot && !tab.running;
+  };
+  if (!(await ask("重新连接数据库", "请先核对上一次操作和未提交事务的结果。重连后请确认当前 Schema 等会话设置，原 SQL 和已显示的结果仍可查看。", "重新连接")) || !current()) return false;
+  let result;
+  try {
+    result = await dbApi.reconnect(connId, slot, undefined, fallback);
+  } catch (e) {
+    const { code } = parseDbError(e);
+    if (code !== "need-password" && code !== "auth") throw e;
+    const input = await new Promise<{ password: string } | null>((resolve) =>
+      show({ kind: "password", connId, error: code === "auth" ? friendlyDbError(e) : null, temporary: true, resolve }),
+    );
+    if (!input || !current()) return false;
+    result = await dbApi.reconnect(connId, slot, input.password, fallback);
+  }
+  const tx = { autoCommit: result.autoCommit, statements: 0, rows: 0, since: 0 };
+  if (!fallback) {
+    claimCursor(connId, slot, "reconnect");
+    if (!slot) setTx(connId, tx);
+    else if (tabId && current()) patchTab<SqlTab>(tabId, { tx });
+  }
+  toast("已重新连接，请按需手动执行 SQL", "success");
+  return true;
 }

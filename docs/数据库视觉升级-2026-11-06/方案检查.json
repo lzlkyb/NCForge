@@ -1,0 +1,84 @@
+{
+  "errors": [],
+  "measurements": [
+    {
+      "name": "方案-SQL-浅色",
+      "width": 1440,
+      "externalOverflow": false,
+      "mainWidth": 1100,
+      "gridHeight": 287,
+      "gridScrollWidth": 1100,
+      "cardWidth": 1406
+    },
+    {
+      "name": "方案-SQL-深色",
+      "width": 1440,
+      "externalOverflow": false,
+      "mainWidth": 1100,
+      "gridHeight": 287,
+      "gridScrollWidth": 1100,
+      "cardWidth": 1406
+    },
+    {
+      "name": "方案-表数据-浅色",
+      "width": 1440,
+      "externalOverflow": false,
+      "mainWidth": 1100,
+      "gridHeight": 500,
+      "gridScrollWidth": 1100,
+      "cardWidth": 1406
+    },
+    {
+      "name": "方案-表数据-深色",
+      "width": 1440,
+      "externalOverflow": false,
+      "mainWidth": 1100,
+      "gridHeight": 500,
+      "gridScrollWidth": 1100,
+      "cardWidth": 1406
+    },
+    {
+      "name": "方案-深色窄窗",
+      "width": 560,
+      "externalOverflow": false,
+      "mainWidth": 494,
+      "gridHeight": 308,
+      "gridScrollWidth": 784,
+      "cardWidth": 542
+    },
+    {
+      "name": "方案-浅色低窗",
+      "width": 1024,
+      "externalOverflow": false,
+      "mainWidth": 718,
+      "gridHeight": 100,
+      "gridScrollWidth": 784,
+      "cardWidth": 990
+    }
+  ],
+  "contrast": [
+    {
+      "theme": "light",
+      "text": 5.270598370080873,
+      "muted": 5.270598370080873,
+      "code": 5.396314658681252
+    },
+    {
+      "theme": "dark",
+      "text": 6.9449628478245495,
+      "muted": 6.9449628478245495,
+      "code": 7.363727025554195
+    }
+  ],
+  "passed": [
+    "浅深主题",
+    "玻璃实色",
+    "低窗与窄窗",
+    "筛选与空结果恢复",
+    "等待与停止反馈",
+    "错误重试",
+    "事务状态",
+    "历史搜索",
+    "弹窗键盘与焦点"
+  ]
+}

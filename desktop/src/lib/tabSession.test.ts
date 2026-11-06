@@ -6,6 +6,12 @@ const tab = (path: string, extra: Partial<TabMeta> = {}): TabMeta =>
   ({ path, dirty: false, eolChanged: false, ...extra }) as TabMeta;
 
 describe("addTab", () => {
+  it("预览仅替换同组预览，长期钉住的文件保留", () => {
+    const tabs = [tab("left", { preview: true, previewGroup: "left" }), tab("pin", { preview: true, previewGroup: "right", pinned: true }), tab("right", { preview: true, previewGroup: "right" })];
+    const r = addTab(tabs, tab("new", { previewGroup: "right" }), true);
+    expect(r.tabs.map(t => t.path)).toEqual(["left", "pin", "new"]);
+    expect(r.dropped).toBe("right");
+  });
   it("非预览直接追加", () => {
     const r = addTab([tab("a")], tab("b"), false);
     expect(r.tabs.map((t) => t.path)).toEqual(["a", "b"]);
@@ -35,6 +41,9 @@ describe("pinTab", () => {
 });
 
 describe("pickClosable", () => {
+  it("批量关闭跳过钉住文件，不把它误报为未保存", () => {
+    expect(pickClosable([tab("pin", { pinned: true }), tab("dirty", { dirty: true }), tab("saved")], () => true)).toEqual({ close: ["saved"], kept: 1 });
+  });
   it("跳过有未保存改动的标签并计数", () => {
     const tabs = [tab("a"), tab("b", { dirty: true }), tab("c"), tab("d", { eolChanged: true })];
     const r = pickClosable(tabs, (t) => t.path !== "a");

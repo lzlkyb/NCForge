@@ -321,6 +321,13 @@ pub enum StopOutcome {
 #[derive(Default)]
 pub struct ServerRun {
     pub proc: Option<ServerProcess>,
+    /// Stable across prepare, running and exit; a cancelled old request cannot stop a newer run.
+    pub run_id: Option<String>,
+    pub launch_started_at_ms: Option<u64>,
+    pub launch_phase: Option<String>,
+    /// Captured for this launch; switching workspaces must not relabel an already-running JVM.
+    pub project_root: Option<PathBuf>,
+    pub nc_home: Option<PathBuf>,
     /// 「正在准备启动」：已通过检查、正在写 pathing jar / 暖索引，进程还没出来。
     ///
     /// 没有它的话，用户在 0.6 秒内连点两次「启动」，两个请求都能通过「当前没在跑」的
@@ -344,6 +351,43 @@ pub struct ServerRun {
 }
 
 impl ServerRun {
+    pub fn begin_start(&mut self, request_id: Option<&str>) -> Result<String, String> {
+        if self.is_alive() {
+            return Err("进程已在运行，先停止再启动".into());
+        }
+        if self.starting {
+            return Err("上一次启动还没完成，请稍候".into());
+        }
+        let id = match request_id {
+            Some(id)
+                if !id.is_empty()
+                    && id.len() <= 100
+                    && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') =>
+            {
+                id.to_string()
+            }
+            Some(_) => return Err("启动请求标识无效".into()),
+            None => {
+                static SEQUENCE: std::sync::atomic::AtomicU64 =
+                    std::sync::atomic::AtomicU64::new(0);
+                format!(
+                    "{}-{}",
+                    now_ms(),
+                    SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                )
+            }
+        };
+        self.run_id = Some(id.clone());
+        self.launch_started_at_ms = Some(now_ms());
+        self.launch_phase = Some("检查环境".into());
+        self.project_root = None;
+        self.nc_home = None;
+        self.starting = true;
+        self.stop_requested = false;
+        self.reason = None;
+        self.exit_code = None;
+        Ok(id)
+    }
     /// 是否还在跑。顺带回收已退出的进程，把退出码与原因记下来。
     ///
     /// `try_wait` 必须被调用，否则 `Child` 不会释放句柄、也拿不到退出码。
@@ -360,6 +404,7 @@ impl ServerRun {
         self.exit_code = Some(code.unwrap_or(-1));
         self.proc = None;
         self.debug_port = None;
+        self.launch_phase = None;
         if self.reason.is_none() {
             self.reason = Some(match self.exit_code {
                 Some(c) if c != 0 => format!("进程已退出（退出码 {c}）"),
@@ -369,12 +414,22 @@ impl ServerRun {
         false
     }
 
+    /// 仅停止对应运行；None 表示身份已被替换，调用方不得做后续收尾。
+    /// A mismatched request must return before detaching a debugger or writing this run's log.
+    pub fn stop_for_run(&mut self, expected: Option<&str>) -> Option<StopOutcome> {
+        if expected.is_some_and(|id| self.run_id.as_deref() != Some(id)) {
+            return None;
+        }
+        Some(self.stop())
+    }
+
     /// 停止并清空进程槽位。
     pub fn stop(&mut self) -> StopOutcome {
         let Some(mut p) = self.proc.take() else {
             // 进程还没出来（还在写 pathing jar）：记下请求，启动流程 fork 前会复查
             if self.starting {
                 self.stop_requested = true;
+                self.launch_phase = Some("正在取消启动".into());
                 return StopOutcome::Cancelling;
             }
             return StopOutcome::Idle;
@@ -382,6 +437,7 @@ impl ServerRun {
         p.stop();
         self.exit_code = p.exit_code();
         self.debug_port = None;
+        self.launch_phase = None;
         self.reason = Some("已手动停止".to_string());
         StopOutcome::Stopped
     }
@@ -696,5 +752,55 @@ mod tests {
         };
         assert_eq!(run.stop(), StopOutcome::Cancelling);
         assert!(run.stop_requested, "启动流程要能看到这个请求");
+    }
+    #[test]
+    fn startup_reserves_identity_before_process_exists_and_rejects_duplicate() {
+        let mut run = ServerRun::default();
+        assert_eq!(run.begin_start(Some("request-one")).unwrap(), "request-one");
+        assert!(run.starting);
+        assert!(run.proc.is_none());
+        assert!(run.launch_started_at_ms.is_some());
+        assert_eq!(run.launch_phase.as_deref(), Some("检查环境"));
+        assert!(run.begin_start(Some("request-two")).is_err());
+        assert_eq!(run.run_id.as_deref(), Some("request-one"));
+        assert_eq!(run.stop(), StopOutcome::Cancelling);
+        assert_eq!(run.launch_phase.as_deref(), Some("正在取消启动"));
+        assert!(run.starting);
+    }
+    #[test]
+    fn invalid_identity_does_not_reserve_startup_and_generated_ids_are_unique() {
+        let mut run = ServerRun::default();
+        for id in ["", "../bad", "请求", "bad_id"] {
+            assert!(run.begin_start(Some(id)).is_err());
+            assert!(!run.starting);
+            assert!(run.run_id.is_none());
+        }
+        assert!(run.begin_start(Some(&"x".repeat(101))).is_err());
+        let first = run.begin_start(None).unwrap();
+        run.starting = false;
+        run.stop_requested = true;
+        run.reason = Some("previous failure".into());
+        run.exit_code = Some(1);
+        let second = run.begin_start(None).unwrap();
+        assert_ne!(first, second);
+        assert!(!run.stop_requested);
+        assert!(run.reason.is_none());
+        assert!(run.exit_code.is_none());
+    }
+    #[test]
+    fn late_conditional_stop_cannot_cancel_or_relabel_replacement_run() {
+        let mut run = ServerRun::default();
+        run.begin_start(Some("new-run")).unwrap();
+        run.debug_port = Some(5005);
+        assert!(run.stop_for_run(Some("old-run")).is_none());
+        assert!(!run.stop_requested);
+        assert_eq!(run.launch_phase.as_deref(), Some("检查环境"));
+        assert_eq!(run.debug_port, Some(5005));
+        assert_eq!(
+            run.stop_for_run(Some("new-run")),
+            Some(StopOutcome::Cancelling)
+        );
+        assert!(run.stop_requested);
+        assert!(run.begin_start(Some("next-run")).is_err());
     }
 }

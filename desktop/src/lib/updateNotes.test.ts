@@ -47,3 +47,29 @@ describe("updateNotes 历史标记协议（跨前后端契约）", () => {
     expect(model.counts["修复"]).toBe(1);
   });
 });
+
+describe("更新摘要 → 弹窗高亮卡片（CHANGELOG 约定）", () => {
+  // 回归：摘要写成一句话（非列表）时曾被当成普通段落，顶部卡片区整块消失，弹窗只剩空白。
+  it("单句更新摘要进 summary，并被模型当成亮点", () => {
+    const body = "### 更新摘要\n标签栏各归其页，关于页一并改进\n\n### 修复\n- 修好了";
+    const parsed = parseUpdateNotes(body);
+    expect(parsed.summary).toEqual(["标签栏各归其页，关于页一并改进"]);
+    expect(parsed.paragraphs).toEqual([]);
+    const model = createUpdateNotesModel({ version: "1.2.3", body }, []);
+    expect(model.highlights.map((item) => item.text)).toEqual(["标签栏各归其页，关于页一并改进"]);
+  });
+
+  it("显式「亮点」优先于摘要，摘要不会重复占卡", () => {
+    const body = "### 更新摘要\n一句话摘要\n\n### 亮点\n- **更稳定**：可靠复制\n\n### 修复\n- 修好了";
+    const model = createUpdateNotesModel({ version: "1.2.3", body }, []);
+    expect(model.highlights.map((item) => item.text)).toEqual(["**更稳定**：可靠复制"]);
+  });
+
+  it("随包 CHANGELOG 的摘要不再被丢弃，离线也能出卡片", () => {
+    const model = createUpdateNotesModel({ version: "9.9.9", body: "" }, [
+      { version: "9.9.9", date: "2026-11-06", summary: ["随包摘要"], items: [{ category: "fix", text: "修好了" }] },
+    ]);
+    expect(model.latest.summary).toEqual(["随包摘要"]);
+    expect(model.highlights.map((item) => item.text)).toEqual(["随包摘要"]);
+  });
+});

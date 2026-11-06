@@ -11,7 +11,7 @@ import { dbPanelId, dbTabId, dbTabLabel } from "../../lib/dbPendingSessions";
  *
  * 以前它停进文件标签条的同一条 flex 行，于是数据库页里「查询 1 / 数据字典」和一堆
  * `.java` 标签并列，看着像两套文档混在一起。现在文档面和代码面互斥显示，数据库标签
- * 只可能出现在数据库页。标签底边是连接的环境色；中键关闭；「+」新开控制台。
+ * 只可能出现在数据库页。选中统一深青，环境使用文字；中键关闭；「+」新开控制台。
  */
 export function DbDocTabs() {
   // 标签栏要标签清单、活动标签和连接名（connOf 读的就是订阅的这份）；连接运行态变化不重画
@@ -82,7 +82,6 @@ export function DbDocTabs() {
                   {c && ` · ${ENV_LABEL[c.env]}`}
                 </span>
               </span>
-              {c && <span className={`dbx-edot e-${c.env}`} />}
               <button
                 type="button"
                 className="wb-tab-x"

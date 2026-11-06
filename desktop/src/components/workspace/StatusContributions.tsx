@@ -25,6 +25,7 @@ import { PrimarySessionSummary } from "../db/PrimarySessionSummary";
 export function StatusContributions({ activeTool }: { activeTool: string }) {
   const [primaryConn, setPrimaryConn] = useState<string | null>(null);
   const compiling = useWorkspaceSelector((s) => s.compiling);
+  const progress = useWorkspaceSelector((s) => s.buildProgress);
   const compileResult = useWorkspaceSelector((s) => s.compileResult);
   const diags = useCodeDiags();
   const root = useWorkspaceRoot();
@@ -76,6 +77,10 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
   const errors = countErrors(problems);
   const warnings = problems.filter((p) => p.severity === "warning").length;
   const ready = svn.data;
+  // 模块账本：错误数会加总，但「哪些模块没过」只能从账本读。
+  // 只要失败就常驻一个入口，别让用户靠翻日志找哪个模块没编出来。
+  const failedModules = (compileResult?.modules ?? []).filter((m) => m.status === "failed");
+  const blockedModules = (compileResult?.modules ?? []).filter((m) => m.status === "blocked");
 
   return (
     <>
@@ -84,11 +89,32 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
           type="button"
           className="wb-status-chip"
           data-tone="busy"
-          title="编译进行中 · 点击查看编译输出"
+          title={
+            progress
+              ? `${progress.phase}${progress.module ? ` · ${progress.module}` : ""} · 点击查看编译输出`
+              : "编译进行中 · 点击查看编译输出"
+          }
           onClick={() => openPanel("build")}
         >
           <span className="wb-status-dot" data-tone="busy" />
-          编译中…
+          {progress && progress.total > 0 ? `编译中 ${progress.done}/${progress.total}` : "编译中…"}
+        </button>
+      )}
+      {!compiling && (failedModules.length > 0 || blockedModules.length > 0) && (
+        <button
+          type="button"
+          className="wb-status-chip"
+          data-tone="bad"
+          title={
+            failedModules.length > 0
+              ? `编译失败：${failedModules.map((m) => m.module).join("、")}`
+              : `被依赖模块阻断：${blockedModules.map((m) => m.module).join("、")}`
+          }
+          onClick={() => openPanel("build")}
+        >
+          {failedModules.length > 0
+            ? `${failedModules.length} 个模块失败`
+            : `${blockedModules.length} 个模块被阻断`}
         </button>
       )}
       {(errors > 0 || warnings > 0) && (

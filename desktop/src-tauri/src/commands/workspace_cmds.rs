@@ -23,7 +23,13 @@ pub fn restart_watcher(app: &tauri::AppHandle, state: &AppState, root: &str) {
     let emit: Arc<dyn Fn(crate::watcher::WatchBatch) + Send + Sync> = Arc::new(move |batch| {
         if let Err(e) = handle.emit(
             "fs-changed",
-            serde_json::json!({ "dirs": batch.dirs, "rescan": batch.rescan }),
+            serde_json::json!({
+                "dirs": batch.dirs,
+                "rescan": batch.rescan,
+                // 外部源码改动单独一栏：树刷新与「要不要重编」是两条消费链
+                "javaChanged": batch.java,
+                "javaOverflow": batch.java_overflow,
+            }),
         ) {
             log::warn!("推送 fs-changed 失败：{e}");
         }
@@ -209,6 +215,8 @@ pub async fn set_workspace(
         })
         .await?;
     restart_watcher(&app, &state, &shown);
+    // 预处理：工作区打开后就开始建类索引，第一次保存不至于撞上 index-cold
+    super::compile_cmds::spawn_prewarm(state.inner().clone());
     Ok(shown)
 }
 

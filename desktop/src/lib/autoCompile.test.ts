@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isAutoCompileTarget, mergeFileResult } from "./autoCompile";
-import type { CompileResult } from "./compile";
+import { isAutoCompileTarget, mergeFileResult, mergeModuleResult } from "./autoCompile";
+import type { CompileResult, ModuleBuildResult } from "./compile";
 
 const result = (over: Partial<CompileResult> = {}): CompileResult => ({
   ok: true,
@@ -104,6 +104,76 @@ describe("mergeFileResult", () => {
     const next = result({ problems: [err("C:/w/B.java", "b2")] });
     const merged = mergeFileResult(prev, next, ["C:/w/A.java", "C:/w/B.java"]);
     expect(merged.problems.map((p) => p.message).sort()).toEqual(["b2", "c"]);
+    expect(merged.errorCount).toBe(2);
+  });
+});
+
+describe("mergeModuleResult", () => {
+  const err = (file: string, message: string) => ({ severity: "error" as const, file, line: 1, message });
+  const mod = (name: string, status: ModuleBuildResult["status"]): ModuleBuildResult => ({
+    module: name,
+    status,
+    errorCount: 0,
+    warningCount: 0,
+    durationMs: 1,
+    sourceCount: 1,
+    outDir: `C:/w/${name}/classes`,
+    cleaned: 0,
+    reason: null,
+  });
+  const root = "C:\\w";
+
+  it("编过的模块替换旧问题，没参与的模块保留", () => {
+    const prev = result({
+      ok: false,
+      errorCount: 2,
+      problems: [err("C:/w/gl/src/A.java", "旧 gl"), err("C:/w/aim/src/B.java", "aim")],
+      modules: [mod("gl", "failed"), mod("aim", "ok")],
+    });
+    const next = result({ problems: [], modules: [mod("gl", "ok")] });
+    const merged = mergeModuleResult(prev, next, root);
+    expect(merged.problems.map((p) => p.message)).toEqual(["aim"]);
+    expect(merged.errorCount).toBe(1);
+    expect(merged.ok).toBe(false);
+    expect(merged.modules?.map((m) => `${m.module}:${m.status}`)).toEqual(["aim:ok", "gl:ok"]);
+  });
+
+  it("跳过 / 被阻断不产生新信息，不能抹掉上一轮的错误", () => {
+    const prev = result({
+      ok: false,
+      errorCount: 2,
+      problems: [err("C:/w/gl/src/A.java", "gl"), err("C:/w/aim/src/B.java", "aim")],
+      modules: [mod("gl", "failed"), mod("aim", "failed")],
+    });
+    const next = result({
+      problems: [],
+      modules: [mod("gl", "skipped"), mod("aim", "blocked")],
+    });
+    const merged = mergeModuleResult(prev, next, root);
+    expect(merged.problems.map((p) => p.message).sort()).toEqual(["aim", "gl"]);
+    expect(merged.errorCount).toBe(2);
+    expect(merged.ok).toBe(false);
+  });
+
+  it("诊断只替换重编过的模块，跳过的保留", () => {
+    const d = (project: string, message: string) => ({
+      kind: "uncompiled" as const,
+      project,
+      message,
+      file: `C:/w/${project}/src/X.java`,
+    });
+    const prev = result({ diagnostics: [d("gl", "旧"), d("aim", "旧")] });
+    const next = result({ diagnostics: [d("gl", "新")], modules: [mod("gl", "ok"), mod("aim", "skipped")] });
+    const merged = mergeModuleResult(prev, next, root);
+    expect(merged.diagnostics.map((x) => `${x.project}:${x.message}`).sort()).toEqual(["aim:旧", "gl:新"]);
+  });
+
+  it("没有上一轮结果时直接用本次；没有模块账本时一个文件都不替换", () => {
+    const next = result({ modules: [mod("gl", "ok")] });
+    expect(mergeModuleResult(null, next, root)).toBe(next);
+
+    const prev = result({ problems: [err("C:/w/A.java", "a"), err("C:/w/B.java", "b")] });
+    const merged = mergeModuleResult(prev, result({ problems: [] }), root);
     expect(merged.errorCount).toBe(2);
   });
 });

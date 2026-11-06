@@ -4,12 +4,13 @@ import { getFileIndex } from "./fileIndex";
 import { fuzzyMatch, rankFiles, type FileEntry, type Range } from "./fuzzy";
 import { matchText } from "./pinyin";
 import { parseLineQuery, rankFilesRecent, recentFirst } from "./gotoAnything";
-import { langReady, langRequest } from "./lang";
+import { getLangView, langReady, langRequest } from "./lang";
 import { uriToPath } from "./langConvert";
 import type { PaletteMode } from "./keymap";
 import { getRecent } from "./recentFiles";
 import { searchWorkspace } from "./search";
 import { fetchSymbols, kindLetter } from "./symbols";
+import { jarTypeUri, searchTypes, type TypeHit } from "./typeSearch";
 
 /** 快速面板 `#内容` 搜索在后端的来源标识：同来源新搜索顺带取消旧的。 */
 export const PALETTE_SEARCH_SOURCE = "palette";
@@ -155,12 +156,42 @@ interface RawSymbolInfo {
   location?: { uri?: string; range?: { start?: { line: number; character: number } } };
 }
 
+/** 一条语言服务命中，附带按全限定名去重时用的优先级。 */
+interface LangHit {
+  item: PaletteItem;
+  /** 包名 + 类名；同名的已编译副本 / jar 副本靠它合并。 */
+  fq: string;
+  /** 0 = 工作区源码，1 = 工作区已编译产物，2 = 依赖 jar。 */
+  rank: number;
+}
+
+/**
+ * `jdt://contents/<容器>/...` 的容器是 jar 时是「依赖」，否则是工作区里已编译的类目录。
+ *
+ * 以前一律标 `jar`，而 `BaseDaoUtils` 其实来自 `out/baseapp` 这类类目录——用户据此
+ * 以为工程里没有这个类。容器里的百分号转义（盘符、空格）先解开再判断。
+ */
+function jdtBadge(uri: string): { badge: string; rank: number } {
+  const path = uri.split("?")[0];
+  const prefix = "jdt://contents/";
+  const container = path.startsWith(prefix) ? path.slice(prefix.length).split("/")[0] : "";
+  let decoded = container;
+  try {
+    decoded = decodeURIComponent(container);
+  } catch {
+    // 不合法转义：按原文判断
+  }
+  return decoded.toLowerCase().endsWith(".jar")
+    ? { badge: "依赖", rank: 2 }
+    : { badge: "已编译", rank: 1 };
+}
+
 /** 语言服务的符号搜索（连依赖 jar 里的类一起搜）。失败 / 没结果返回 null，由调用方退回工作区扫描。 */
-async function langSymbols(
+async function langHits(
   query: string,
   ctx: PaletteCtx,
   accept: (kind: number) => boolean,
-): Promise<PaletteItem[] | null> {
+): Promise<LangHit[] | null> {
   if (!langReady()) return null;
   let res: unknown;
   try {
@@ -170,7 +201,7 @@ async function langSymbols(
   }
   if (!Array.isArray(res)) return null;
   const seen = new Set<string>();
-  const items: PaletteItem[] = [];
+  const hits: LangHit[] = [];
   for (const s of res as RawSymbolInfo[]) {
     const uri = s.location?.uri;
     const pos = s.location?.range?.start;
@@ -182,37 +213,141 @@ async function langSymbols(
     const column = pos.character + 1;
     const path = uriToPath(uri);
     const hit = fuzzyMatch(query, s.name);
-    items.push({
-      key,
-      title: s.name,
-      ranges: hit?.ranges,
-      detail: s.containerName,
-      kind: kindLetter(s.kind ?? 0),
-      badge: path ? undefined : "jar",
-      run: () => (path ? ctx.run.file(path, line, column) : ctx.run.jdt(uri, line, column)),
+    const kind = path ? { badge: undefined, rank: 0 } : jdtBadge(uri);
+    hits.push({
+      fq: `${s.containerName ?? ""}#${s.name}`,
+      rank: kind.rank,
+      item: {
+        key,
+        title: s.name,
+        ranges: hit?.ranges,
+        detail: s.containerName,
+        kind: kindLetter(s.kind ?? 0),
+        badge: kind.badge,
+        run: () => (path ? ctx.run.file(path, line, column) : ctx.run.jdt(uri, line, column)),
+      },
     });
-    if (items.length >= LIMIT) break;
+    if (hits.length >= LIMIT) break;
   }
-  return items.length ? items : null;
+  return hits.length ? hits : null;
+}
+
+async function langSymbols(
+  query: string,
+  ctx: PaletteCtx,
+  accept: (kind: number) => boolean,
+): Promise<PaletteItem[] | null> {
+  return (await langHits(query, ctx, accept))?.map((h) => h.item) ?? null;
+}
+
+/** 同一个类只留一份：工作区源码 > 工作区已编译产物 > 依赖 jar，其余副本折成一句说明。 */
+function dedupeTypes(hits: LangHit[]): PaletteItem[] {
+  const groups = new Map<string, { at: number; hit: LangHit; copies: Set<string> }>();
+  const out: LangHit[] = [];
+  for (const h of hits) {
+    const prev = groups.get(h.fq);
+    if (!prev) {
+      groups.set(h.fq, { at: out.length, hit: h, copies: new Set() });
+      out.push(h);
+      continue;
+    }
+    if (h.rank < prev.hit.rank) {
+      if (prev.hit.item.badge) prev.copies.add(prev.hit.item.badge);
+      prev.hit = h;
+      out[prev.at] = h;
+    } else if (h.item.badge && h.item.badge !== prev.hit.item.badge) {
+      prev.copies.add(h.item.badge);
+    }
+  }
+  for (const g of groups.values()) {
+    if (!g.copies.size) continue;
+    const note =
+      g.copies.size === 1
+        ? `另有${[...g.copies][0]}副本`
+        : `另有 ${g.copies.size} 个其它副本`;
+    const detail = g.hit.item.detail;
+    g.hit.item.detail = detail ? `${detail} · ${note}` : note;
+  }
+  return out.map((h) => h.item);
+}
+
+async function typeFileItems(query: string, ctx: PaletteCtx): Promise<PaletteItem[]> {
+  if (!ctx.root) return [];
+  const javas = (await getFileIndex(ctx.root)).filter((e) => e.name.endsWith(".java"));
+  return rankFiles(javas, query, LIMIT)
+    .filter((r) => r.on === "name")
+    .map((r) =>
+      fileItem(r.entry, ctx, {
+        title: r.entry.name.replace(/\.java$/, ""),
+        ranges: r.ranges,
+        kind: "C",
+        badge: undefined,
+      }),
+    );
+}
+
+function typeHitItem(hit: TypeHit, ctx: PaletteCtx, query: string): PaletteItem {
+  const ranges = fuzzyMatch(query, hit.simple)?.ranges;
+  if (hit.file) {
+    return {
+      key: `type:ws:${hit.file}:${hit.line}:${hit.name}`,
+      title: hit.simple,
+      ranges,
+      detail: [hit.package, hit.module].filter(Boolean).join(" · "),
+      badge: "工作区",
+      kind: kindLetter(hit.kind),
+      run: () => ctx.run.file(hit.file, hit.line, hit.column),
+    };
+  }
+  const jarName = hit.jar.split(/[\\/]/).pop();
+  return {
+    key: `type:jar:${hit.jar}:${hit.name}`,
+    title: hit.simple,
+    ranges,
+    detail: [hit.package, jarName].filter(Boolean).join(" · "),
+    badge: "依赖",
+    kind: kindLetter(hit.kind),
+    run: () => ctx.run.jdt(jarTypeUri(hit), hit.line, hit.column),
+  };
 }
 
 async function typesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult> {
   const q = query.trim();
   if (!q) return { items: [], note: "输入类名（支持驼峰首字母，如 VBO）" };
-  const fromLang = await langSymbols(q, ctx, (k) => TYPE_KINDS.has(k));
-  if (fromLang) return { items: fromLang, note: `工作区与依赖 jar 中的类型 · ${fromLang.length} 项` };
+  // 本地索引不依赖语言服务：第一次搜类也不用等 jdt.ls 建索引
+  let local = null;
+  try {
+    local = await searchTypes(q, LIMIT);
+  } catch {
+    // 后端不可用（未打开工程 / 命令失败）：继续走语言服务
+  }
+  if (local && (local.workspace.length || local.jars.length)) {
+    const items = [...local.workspace, ...local.jars].map((h) => typeHitItem(h, ctx, q));
+    const parts = [
+      local.workspace.length ? `工作区 ${local.workspace.length}` : "",
+      local.jars.length ? `依赖 jar ${local.jars.length}` : "",
+      local.jarsPending ? "依赖 jar 目录准备中" : "",
+      `${local.elapsedMs}ms`,
+    ].filter(Boolean);
+    return { items, note: `类型 · ${parts.join(" · ")}` };
+  }
+  const langState = getLangView().state;
+  if (langState === "starting" || langState === "indexing") {
+    // 本地没有结果、语言服务又在建索引：先给文件名结果，别让输入框空等。
+    const items = await typeFileItems(q, ctx);
+    const what = langState === "indexing" ? "索引中" : "启动中";
+    return { items, note: `${what}，先按文件名匹配，结果可能不全` };
+  }
+  const hits = await langHits(q, ctx, (k) => TYPE_KINDS.has(k));
+  if (hits) {
+    const items = dedupeTypes(hits);
+    return { items, note: `工作区与依赖 jar 中的类型 · ${items.length} 项` };
+  }
   // 退回：只在工作区里找「文件名 = 类名」的 .java（代码智能未就绪、或它没给结果）
   if (!ctx.root) return { items: [], note: "尚未打开工程" };
-  const javas = (await getFileIndex(ctx.root)).filter((e) => e.name.endsWith(".java"));
-  const ranked = rankFiles(javas, q, LIMIT).filter((r) => r.on === "name");
+  const items = await typeFileItems(q, ctx);
   const note = langReady() ? "语言服务没有结果，已退回工作区文件名搜索" : "代码智能未就绪，只搜工作区里的类";
-  return {
-    items: ranked.map((r) => {
-      const stem = r.entry.name.replace(/\.java$/, "");
-      return fileItem(r.entry, ctx, { title: stem, ranges: r.ranges, kind: "C", badge: undefined });
-    }),
-    note: ranked.length ? note : "没有匹配的类",
-  };
+  return { items, note: items.length ? note : "没有匹配的类" };
 }
 
 async function symbolsMode(query: string, ctx: PaletteCtx): Promise<PaletteResult> {

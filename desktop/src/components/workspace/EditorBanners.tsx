@@ -2,6 +2,7 @@ import { Button } from "../ui/button";
 import { missingResourceId } from "../../lib/resourceMissing";
 import { ResourceDownloadButton } from "../resource/ResourceDownloadButton";
 import { Icon } from "../ui/icon";
+import { ReadingNotice } from "./ReadingNotice";
 import { useOperations } from "../../lib/operations";
 import type { Eol } from "../../lib/workspace";
 import type { TabMeta } from "../../lib/workspaceSession";
@@ -90,33 +91,14 @@ export function EditorBanners({
         </div>
       )}
       {active?.virtual && (
-        <div className="wb-banner">
-          <Icon name="info" size={14} />
-          {active.virtual === "source"
-            ? "NC 标准库 jar 里的类，配有源码，只读"
-            : active.virtual === "decompiled"
-              ? "这个类没有配套源码（_src.jar），以下是 CFR 反编译出来的近似实现，只读——局部变量名可能丢失、语法糖被展开，与原始源码不逐字一致"
-              : "这个类没有配套源码（_src.jar），反编译也没成功，只显示方法签名，只读"}
+        <ReadingNotice summary={active.virtual === "source" ? "依赖库源码 · 只读" : active.virtual === "decompiled" ? "反编译源码 · 只读" : "类方法签名 · 只读"}
+          detail={active.virtual === "source" ? "NC 标准库 jar 已附带源码，可阅读和导航。" : active.virtual === "decompiled" ? "这个类没有配套源码（_src.jar），显示 CFR 的近似实现；局部变量名可能丢失，语法糖可能展开，与原始源码不逐字一致。" : "这个类没有配套源码，反编译也未成功；当前仅显示方法签名。"}>
           {active.virtual === "stub" && missingResourceId(active.decompileError) === "cfr" && <div className="wb-banner-actions"><ResourceDownloadButton id="cfr" /><span>下载完成后再次打开这个类即可重试</span></div>}
-        </div>
+        </ReadingNotice>
       )}
       {showLargeHint && active && (
-        <div className="wb-banner">
-          <Icon name="info" size={14} />
-          <span className="wb-banner-text">
-            <b>{active.lines}</b> 行的大文件：为保证打字流畅，已关掉括号对着色、代码折叠与小地图；
-            语法高亮、搜索、编译与<b>代码补全仍可用</b>，语言服务首次分析大文件可能较慢
-          </span>
-          <button
-            type="button"
-            className="wb-banner-x"
-            title="关闭提示"
-            aria-label="关闭提示"
-            onClick={() => onDismissLargeHint(active.path)}
-          >
-            <Icon name="close" size={12} />
-          </button>
-        </div>
+        <ReadingNotice summary={`${active.lines} 行大文件 · 阅读优化已启用`}
+          detail="已暂停括号对着色、代码折叠和小地图；语法高亮、搜索、编译和补全仍可用。代码智能首次分析可能较慢。" dismiss={() => onDismissLargeHint(active.path)} />
       )}
     </>
   );

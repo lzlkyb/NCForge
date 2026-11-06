@@ -1,0 +1,27 @@
+{
+  "label": "门禁-后端生成测试-2026-11-06",
+  "args": [
+    "scripts/rust-gate.mjs",
+    "test",
+    "--no-default-features",
+    "--lib",
+    "bmf_gen"
+  ],
+  "exitCode": 0,
+  "elapsedSeconds": 3.214,
+  "startFreeMB": 4070.5703125,
+  "minFreeMB": 3929.6171875,
+  "endFreeMB": 3929.6171875,
+  "samples": [
+    {
+      "at": "2026-11-06T07:53:24.526Z",
+      "freeMB": 4070.5703125,
+      "totalMB": 16151.3046875
+    },
+    {
+      "at": "2026-11-06T07:53:27.742Z",
+      "freeMB": 3929.6171875,
+      "totalMB": 16151.3046875
+    }
+  ]
+}

@@ -54,6 +54,8 @@ pub struct ExportInsertReq {
     pub commit_every: Option<usize>,
     pub max_rows: Option<usize>,
     pub timeout_sec: Option<u32>,
+    /// Frozen table-filter bindings; numeric string wrappers retain Oracle precision.
+    pub params: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -97,8 +99,11 @@ pub async fn db_export_insert(
         .unwrap_or(MAX_ROWS_DEFAULT)
         .clamp(1, MAX_ROWS_LIMIT);
     let sql = req.sql.trim().to_string();
-    if sql.is_empty() {
-        return Err("取数语句是空的".to_string());
+    if !crate::db_engine::readonly_query(&sql) {
+        return Err("NC 导出只允许单条只读 SELECT 查询".to_string());
+    }
+    for value in req.params.as_deref().unwrap_or(&[]) {
+        super::db_transfer_cmds::bound_param(value)?;
     }
 
     // 优先独立会话；拿不到口令就退回现有句柄（见模块文档）
@@ -110,7 +115,14 @@ pub async fn db_export_insert(
         })?,
     };
 
-    let res = fetch(&handle, &sql, max_rows, timeout).await;
+    let res = fetch(
+        &handle,
+        &sql,
+        req.params.as_deref().unwrap_or(&[]),
+        max_rows,
+        timeout,
+    )
+    .await;
     // 元数据必须赶在断开临时会话之前读：它走的是同一个句柄，先断再读只会恒为 None
     let meta = match &res {
         Ok(_) => table_meta(&handle, &req.table).await,
@@ -211,14 +223,24 @@ struct Fetched {
 async fn fetch(
     handle: &Arc<EngineHandle>,
     sql: &str,
+    params: &[Value],
     max_rows: usize,
     timeout: u32,
 ) -> Result<Fetched, String> {
     let page = PAGE.min(max_rows).to_string();
+    let mut args = vec![sql.to_string(), page, timeout.to_string()];
+    for value in params {
+        let (kind, text) = super::db_transfer_cmds::bound_param(value)?;
+        args.extend([kind.to_string(), text]);
+    }
     let mut body = call(
         handle.clone(),
-        "exec",
-        vec![sql.to_string(), page, timeout.to_string()],
+        if params.is_empty() {
+            "exec"
+        } else {
+            "execBound"
+        },
+        args,
         Duration::from_secs(u64::from(timeout) + 30),
     )
     .await?;
@@ -479,8 +501,8 @@ pub async fn db_export_file(
     let t0 = Instant::now();
     let fmt = Format::parse(&req.format)?;
     let sql = req.sql.trim().to_string();
-    if sql.is_empty() {
-        return Err("取数语句是空的".to_string());
+    if !crate::db_engine::readonly_query(&sql) {
+        return Err("文件导出只允许单条只读 SELECT 查询".to_string());
     }
     let mut conn = find_conn(&cfg, &req.id)?;
     let engine = EngineKind::parse(&conn.engine);

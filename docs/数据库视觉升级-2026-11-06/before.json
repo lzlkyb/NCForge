@@ -1,0 +1,35 @@
+{
+  "errors": [],
+  "measurements": [
+    {
+      "view": "table",
+      "theme": "light",
+      "context": 43,
+      "grid": 517.5,
+      "cellFont": "12px"
+    },
+    {
+      "view": "table",
+      "theme": "dark",
+      "context": 43,
+      "grid": 517.5,
+      "cellFont": "12px"
+    },
+    {
+      "view": "sql",
+      "theme": "light",
+      "toolbar": 37,
+      "context": 43,
+      "grid": 199.5,
+      "cellFont": "12px"
+    },
+    {
+      "view": "sql",
+      "theme": "dark",
+      "toolbar": 37,
+      "context": 43,
+      "grid": 199.5,
+      "cellFont": "12px"
+    }
+  ]
+}

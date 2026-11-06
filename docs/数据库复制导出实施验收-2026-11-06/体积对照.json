@@ -1,0 +1,614 @@
+{
+  "at": "2026-11-06T05:17:15.213Z",
+  "method": "Vite load overlay: remove only transfer integration from current ResultTable/TableData; legacy RowsEntryView/InsertExportDialog/resultExport/tableEdit; keep other working source and visual styling; final dist untouched",
+  "overlays": [
+    {
+      "path": "D:/AItool/winapp/nc-workbench/desktop/src/components/db/ResultTable.tsx",
+      "sha256": "939d2d77039ff98fce2d71cc66ea2c160c2f4115aeeb9ef987ba09834772025c"
+    },
+    {
+      "path": "D:/AItool/winapp/nc-workbench/desktop/src/components/db/RowsEntryView.tsx",
+      "sha256": "541589d09ff43275e595cf30e50e2ca1b76f8fb05493024f410f7fbed67016ae"
+    },
+    {
+      "path": "D:/AItool/winapp/nc-workbench/desktop/src/components/db/InsertExportDialog.tsx",
+      "sha256": "4db41c05cba03c9922338a17df11c0ad11022e41ff39a0682f9cba37c3036c47"
+    },
+    {
+      "path": "D:/AItool/winapp/nc-workbench/desktop/src/lib/resultExport.ts",
+      "sha256": "a33bc28f1c775f8bc6ba3673cc9420cc1df3ef2f1ed3a7034834324892457e70"
+    },
+    {
+      "path": "D:/AItool/winapp/nc-workbench/desktop/src/lib/tableEdit.ts",
+      "sha256": "9de071d647f8e3c0be4bfb51f378b2948f8f527ba3612045642e20e054d6443e"
+    },
+    {
+      "path": "D:/AItool/winapp/nc-workbench/desktop/src/components/db/TableData.tsx",
+      "sha256": "f648df5efdd02b45cf73601e18916151801804e76597149e7d4c962b6b0d6ba9"
+    }
+  ],
+  "before": {
+    "raw": 5101527,
+    "gzip": 1459597,
+    "max": 3247203,
+    "chunks": [
+      {
+        "file": "appConfig-BgBgb-rA.js",
+        "raw": 1230,
+        "gzip": 641
+      },
+      {
+        "file": "buildMaintenance-MkbSeVvZ.js",
+        "raw": 6991,
+        "gzip": 3339
+      },
+      {
+        "file": "css-D3h14YRZ.js",
+        "raw": 4756,
+        "gzip": 1531
+      },
+      {
+        "file": "csvParse-BgPel8Yp.js",
+        "raw": 1508,
+        "gzip": 743
+      },
+      {
+        "file": "dbActions-uuY-xWFu.js",
+        "raw": 12385,
+        "gzip": 5579
+      },
+      {
+        "file": "DbTab-C1GMU_Dw.js",
+        "raw": 217624,
+        "gzip": 71372
+      },
+      {
+        "file": "dialog-NhZyOeup.js",
+        "raw": 564,
+        "gzip": 329
+      },
+      {
+        "file": "editor.worker-BctYAlYZ.js",
+        "raw": 231288,
+        "gzip": 70711
+      },
+      {
+        "file": "editorStore-DFX3UNcd.js",
+        "raw": 2689,
+        "gzip": 1046
+      },
+      {
+        "file": "EmptyState-BmX_HVuS.js",
+        "raw": 740,
+        "gzip": 430
+      },
+      {
+        "file": "fileIndex-B61TUDIY.js",
+        "raw": 4070,
+        "gzip": 2059
+      },
+      {
+        "file": "fileSave-DfbBva1Z.js",
+        "raw": 1271,
+        "gzip": 773
+      },
+      {
+        "file": "FilesTab-1AGtU90J.js",
+        "raw": 354946,
+        "gzip": 118342
+      },
+      {
+        "file": "folderPicker-Cjo5pyQc.js",
+        "raw": 256,
+        "gzip": 243
+      },
+      {
+        "file": "FreshnessBadge-GJazcig7.js",
+        "raw": 1715,
+        "gzip": 965
+      },
+      {
+        "file": "historyFormat-DXNEScVz.js",
+        "raw": 318,
+        "gzip": 238
+      },
+      {
+        "file": "html-BwfpDfjx.js",
+        "raw": 5452,
+        "gzip": 1631
+      },
+      {
+        "file": "index-BmTZbgCU.js",
+        "raw": 278258,
+        "gzip": 106192
+      },
+      {
+        "file": "ini-Drc7WvVn.js",
+        "raw": 1347,
+        "gzip": 679
+      },
+      {
+        "file": "input-Baed4Y9I.js",
+        "raw": 339,
+        "gzip": 264
+      },
+      {
+        "file": "java-B_fMsGYe.js",
+        "raw": 3467,
+        "gzip": 1551
+      },
+      {
+        "file": "javascript-TGBmg_yl.js",
+        "raw": 1366,
+        "gzip": 712
+      },
+      {
+        "file": "lang-CCIz8mwd.js",
+        "raw": 8925,
+        "gzip": 3630
+      },
+      {
+        "file": "langConvert-DmPgBTq9.js",
+        "raw": 1734,
+        "gzip": 912
+      },
+      {
+        "file": "linkedProjects-CSbWceev.js",
+        "raw": 1381,
+        "gzip": 716
+      },
+      {
+        "file": "LinkedProjectsDialog-B4A9gmxk.js",
+        "raw": 22658,
+        "gzip": 7984
+      },
+      {
+        "file": "LogTab-kr2cxWgQ.js",
+        "raw": 23513,
+        "gzip": 8838
+      },
+      {
+        "file": "markdown-DSZPf7rp.js",
+        "raw": 4034,
+        "gzip": 1534
+      },
+      {
+        "file": "MetaCompare-BCDlVf0o.js",
+        "raw": 4857,
+        "gzip": 1982
+      },
+      {
+        "file": "MetaDiffRows-DJBcjWDQ.js",
+        "raw": 4783,
+        "gzip": 1743
+      },
+      {
+        "file": "MetaExcel-Fixpj_7O.js",
+        "raw": 6948,
+        "gzip": 2703
+      },
+      {
+        "file": "MetaGenerate-bnyNSgph.js",
+        "raw": 15385,
+        "gzip": 6009
+      },
+      {
+        "file": "MetaHistory-DfvCQEUP.js",
+        "raw": 4900,
+        "gzip": 2032
+      },
+      {
+        "file": "MetaPublish-DzSNircx.js",
+        "raw": 7971,
+        "gzip": 2887
+      },
+      {
+        "file": "MetaRefs-Pb7VBHur.js",
+        "raw": 2181,
+        "gzip": 1134
+      },
+      {
+        "file": "MetaTab-YouLmv06.js",
+        "raw": 151209,
+        "gzip": 45371
+      },
+      {
+        "file": "monacoSetup-Q0I62V0g.js",
+        "raw": 3247203,
+        "gzip": 827164
+      },
+      {
+        "file": "ncTasks-Bi6RI0IE.js",
+        "raw": 20373,
+        "gzip": 7759
+      },
+      {
+        "file": "openTableFromHover-5i6W_dIv.js",
+        "raw": 535,
+        "gzip": 431
+      },
+      {
+        "file": "patchDraft-D5nFFZBU.js",
+        "raw": 4511,
+        "gzip": 2297
+      },
+      {
+        "file": "QuickPalette-DNtSSISa.js",
+        "raw": 15174,
+        "gzip": 6450
+      },
+      {
+        "file": "ResourceDownloadButton-CsOq7nj1.js",
+        "raw": 638,
+        "gzip": 433
+      },
+      {
+        "file": "resultExport-uok9HG_c.js",
+        "raw": 2208,
+        "gzip": 1164
+      },
+      {
+        "file": "saveAllDirty-1itg9QdR.js",
+        "raw": 1068,
+        "gzip": 735
+      },
+      {
+        "file": "searchEdit-DYsbilnX.js",
+        "raw": 1910,
+        "gzip": 1066
+      },
+      {
+        "file": "searchStore-CPVBdZu3.js",
+        "raw": 3543,
+        "gzip": 1552
+      },
+      {
+        "file": "SettingsTab-0gR_f0yT.js",
+        "raw": 86033,
+        "gzip": 29332
+      },
+      {
+        "file": "sql-CCSDG5nI.js",
+        "raw": 10543,
+        "gzip": 4009
+      },
+      {
+        "file": "SvnTab-BmbHc7Bg.js",
+        "raw": 113281,
+        "gzip": 36051
+      },
+      {
+        "file": "tabSession-pP5JuDrC.js",
+        "raw": 1768,
+        "gzip": 837
+      },
+      {
+        "file": "typescript-BMk7zxGX.js",
+        "raw": 5845,
+        "gzip": 2407
+      },
+      {
+        "file": "vendor-query-D11jdkVP.js",
+        "raw": 41038,
+        "gzip": 12731
+      },
+      {
+        "file": "vendor-react-CDG6s8c4.js",
+        "raw": 134655,
+        "gzip": 43166
+      },
+      {
+        "file": "vendor-tauri-Chue6t80.js",
+        "raw": 15233,
+        "gzip": 3895
+      },
+      {
+        "file": "workspaceEpoch-DPpoUXij.js",
+        "raw": 58,
+        "gzip": 72
+      },
+      {
+        "file": "xml-C-Yo5TLF.js",
+        "raw": 2851,
+        "gzip": 1201
+      }
+    ]
+  },
+  "after": {
+    "raw": 5147901,
+    "gzip": 1475271,
+    "max": 3247203,
+    "chunks": [
+      {
+        "file": "appConfig-DWB4hWm-.js",
+        "raw": 1230,
+        "gzip": 642
+      },
+      {
+        "file": "buildMaintenance-BRxtFpdK.js",
+        "raw": 6991,
+        "gzip": 3335
+      },
+      {
+        "file": "css-D3h14YRZ.js",
+        "raw": 4756,
+        "gzip": 1531
+      },
+      {
+        "file": "csvParse-BgPel8Yp.js",
+        "raw": 1508,
+        "gzip": 743
+      },
+      {
+        "file": "dbActions-BLg7Phiu.js",
+        "raw": 12385,
+        "gzip": 5576
+      },
+      {
+        "file": "DbTab-CVxp3cWw.js",
+        "raw": 245876,
+        "gzip": 79266
+      },
+      {
+        "file": "dialog-DfGbH0ga.js",
+        "raw": 564,
+        "gzip": 328
+      },
+      {
+        "file": "editor.worker-BctYAlYZ.js",
+        "raw": 231288,
+        "gzip": 70711
+      },
+      {
+        "file": "editorStore-CC79pihC.js",
+        "raw": 2689,
+        "gzip": 1043
+      },
+      {
+        "file": "EmptyState-BXQznyFI.js",
+        "raw": 740,
+        "gzip": 427
+      },
+      {
+        "file": "fileIndex-VmyihX2d.js",
+        "raw": 4070,
+        "gzip": 2058
+      },
+      {
+        "file": "fileSave-DuB14RAq.js",
+        "raw": 1271,
+        "gzip": 771
+      },
+      {
+        "file": "FilesTab-DyffDdNO.js",
+        "raw": 354946,
+        "gzip": 118345
+      },
+      {
+        "file": "folderPicker-D94DEaLf.js",
+        "raw": 256,
+        "gzip": 243
+      },
+      {
+        "file": "FreshnessBadge-26ETZdYI.js",
+        "raw": 1715,
+        "gzip": 965
+      },
+      {
+        "file": "historyFormat-Cm8zsJ61.js",
+        "raw": 318,
+        "gzip": 237
+      },
+      {
+        "file": "html-ywM7_wfL.js",
+        "raw": 5452,
+        "gzip": 1634
+      },
+      {
+        "file": "index-DliXTFOe.js",
+        "raw": 278258,
+        "gzip": 106184
+      },
+      {
+        "file": "ini-Drc7WvVn.js",
+        "raw": 1347,
+        "gzip": 679
+      },
+      {
+        "file": "input-Baed4Y9I.js",
+        "raw": 339,
+        "gzip": 264
+      },
+      {
+        "file": "java-B_fMsGYe.js",
+        "raw": 3467,
+        "gzip": 1551
+      },
+      {
+        "file": "javascript-DzaCJECN.js",
+        "raw": 1366,
+        "gzip": 712
+      },
+      {
+        "file": "lang-lZJu3KGF.js",
+        "raw": 8925,
+        "gzip": 3628
+      },
+      {
+        "file": "langConvert-DmPgBTq9.js",
+        "raw": 1734,
+        "gzip": 912
+      },
+      {
+        "file": "linkedProjects-BTatAtT1.js",
+        "raw": 1381,
+        "gzip": 718
+      },
+      {
+        "file": "LinkedProjectsDialog-BvsTaCGV.js",
+        "raw": 22658,
+        "gzip": 7983
+      },
+      {
+        "file": "LogTab-DXH4hX37.js",
+        "raw": 23513,
+        "gzip": 8838
+      },
+      {
+        "file": "markdown-DSZPf7rp.js",
+        "raw": 4034,
+        "gzip": 1534
+      },
+      {
+        "file": "MetaCompare-6xBrpWpP.js",
+        "raw": 4857,
+        "gzip": 1982
+      },
+      {
+        "file": "MetaDiffRows-DJBcjWDQ.js",
+        "raw": 4783,
+        "gzip": 1743
+      },
+      {
+        "file": "MetaExcel-XB-4AFie.js",
+        "raw": 6948,
+        "gzip": 2704
+      },
+      {
+        "file": "MetaGenerate-Ez-xgL8y.js",
+        "raw": 15385,
+        "gzip": 6010
+      },
+      {
+        "file": "MetaHistory-B9MvErzx.js",
+        "raw": 4900,
+        "gzip": 2031
+      },
+      {
+        "file": "MetaPublish-gPV0cwQ4.js",
+        "raw": 7971,
+        "gzip": 2887
+      },
+      {
+        "file": "MetaRefs-CssErpLU.js",
+        "raw": 2181,
+        "gzip": 1135
+      },
+      {
+        "file": "MetaTab-CJKCnRZA.js",
+        "raw": 151209,
+        "gzip": 45376
+      },
+      {
+        "file": "monacoSetup-DUxvuVVP.js",
+        "raw": 3247203,
+        "gzip": 827166
+      },
+      {
+        "file": "ncTasks-BbH5pHbD.js",
+        "raw": 20373,
+        "gzip": 7756
+      },
+      {
+        "file": "openTableFromHover-BHZ_kX_W.js",
+        "raw": 535,
+        "gzip": 430
+      },
+      {
+        "file": "patchDraft-B8PjX1rf.js",
+        "raw": 4511,
+        "gzip": 2294
+      },
+      {
+        "file": "QuickPalette-CLEJeP29.js",
+        "raw": 15174,
+        "gzip": 6450
+      },
+      {
+        "file": "ResourceDownloadButton-BHOMBMiS.js",
+        "raw": 638,
+        "gzip": 430
+      },
+      {
+        "file": "resultExport-x5wrevdn.js",
+        "raw": 10593,
+        "gzip": 4666
+      },
+      {
+        "file": "resultTransferWorker-BUhc-HH-.js",
+        "raw": 9737,
+        "gzip": 4305
+      },
+      {
+        "file": "saveAllDirty-DIaBkFcq.js",
+        "raw": 1068,
+        "gzip": 734
+      },
+      {
+        "file": "searchEdit-CbSMs9t2.js",
+        "raw": 1910,
+        "gzip": 1065
+      },
+      {
+        "file": "searchStore-C_EubGt9.js",
+        "raw": 3543,
+        "gzip": 1549
+      },
+      {
+        "file": "SettingsTab-DQSSkJSd.js",
+        "raw": 86033,
+        "gzip": 29332
+      },
+      {
+        "file": "sql-CCSDG5nI.js",
+        "raw": 10543,
+        "gzip": 4009
+      },
+      {
+        "file": "SvnTab-rCBRZAah.js",
+        "raw": 113281,
+        "gzip": 36050
+      },
+      {
+        "file": "tabSession-Dnvx9CIg.js",
+        "raw": 1768,
+        "gzip": 836
+      },
+      {
+        "file": "typescript-BG_4y6Ul.js",
+        "raw": 5845,
+        "gzip": 2407
+      },
+      {
+        "file": "vendor-query-D11jdkVP.js",
+        "raw": 41038,
+        "gzip": 12731
+      },
+      {
+        "file": "vendor-react-CDG6s8c4.js",
+        "raw": 134655,
+        "gzip": 43166
+      },
+      {
+        "file": "vendor-tauri-Chue6t80.js",
+        "raw": 15233,
+        "gzip": 3895
+      },
+      {
+        "file": "workspaceEpoch-DPpoUXij.js",
+        "raw": 58,
+        "gzip": 72
+      },
+      {
+        "file": "xml-BMgBaJlH.js",
+        "raw": 2851,
+        "gzip": 1202
+      }
+    ]
+  },
+  "delta": {
+    "raw": 46374,
+    "gzip": 15674,
+    "max": 0
+  }
+}

@@ -1,16 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { cellText, sameCell } from "../../lib/db";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { isNumericType } from "../../lib/resultExport";
 import { initialWidths, type SortState } from "../../lib/resultView";
 import { copyText } from "../../lib/utils";
 import { toast } from "../ui/toast";
+import { getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
 
-const ROW_H = 26;
-const HEAD_H = 34;
 /** 可视区上下多渲染的行数，滚得快时不露白。 */
 const OVERSCAN = 12;
-
 import { selectedRows, selectedCols, selectionText, type Selection } from "../../lib/dbResultTools";
 
 export interface CellPos {
@@ -32,11 +30,12 @@ export interface GridEdit {
  * 排序 / 筛选的结果由父组件以 `order` 传入（复制 / 导出要用同一个顺序）。
  * NULL 斜体灰字与空串区分；数字右对齐。
  */
-export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onOpen, edit, zh, visible, frozen, widthOverrides, onWidths, selection }: {
+export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onOpen, edit, zh, visible, frozen, widthOverrides, onWidths, selection, empty, onCopy, onCellMenu }: {
   columns: ColumnMeta[];
   rows: Cell[][];
   order: number[];
   sort: SortState | null;
+  empty?: ReactNode; onCopy?: () => void; onCellMenu?: (r:number,c:number,x:number,y:number) => void;
   onSort: (col: number) => void;
   /** 表头右键（A3：让数据库重排整表）。不传就没有这个入口。 */
   onHeaderMenu?: (col: number, x: number, y: number) => void;
@@ -49,7 +48,11 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   /** 列名（小写）→ NC 中文名，表头悬停显示。 */
   zh?: Record<string, string>;
 }) {
+  const density = useSyncExternalStore(subscribeUiDensity, getUiDensity);
+  const ROW_H = density === "comfortable" ? 30 : 26;
+  const HEAD_H = density === "comfortable" ? 44 : 40;
   const boxRef = useRef<HTMLDivElement>(null);
+  const previousRowHeight = useRef(ROW_H);
   /** 拖拽中的清理函数：组件卸载（切标签、结果清空）时也要摘掉 window 上的监听。 */
   const dragCleanup = useRef<(() => void) | null>(null);
   useEffect(() => () => dragCleanup.current?.(), []);
@@ -59,6 +62,17 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const [widths, setWidths] = useState<number[]>(() => initialWidths(columns, rows));
   const [scroll, setScroll] = useState({ top: 0, h: 400 });
   const [editing, setEditing] = useState<{ pos: CellPos; value: string } | null>(null);
+
+  // 切密度保留当前首行；CSS 与虚拟滚动共用几何，不能只把可见行拉高。
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (el && previousRowHeight.current !== ROW_H) {
+      // DOM 高度缩短时浏览器会先夹紧 scrollTop；用上一帧状态避免再缩短一次。
+      el.scrollTop = scroll.top / previousRowHeight.current * ROW_H;
+      setScroll({ top: el.scrollTop, h: el.clientHeight });
+    }
+    previousRowHeight.current = ROW_H;
+  }, [ROW_H, scroll.top]);
 
   // 列变了（新的一次查询）才重算列宽；加载更多行不动用户拖过的宽度
   const colKey = columns.map((c) => c.name).join("|");
@@ -169,6 +183,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
       startEdit(sel);
     } else if (sel && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && !window.getSelection()?.toString()) {
       e.preventDefault();
+      if (onCopy) { onCopy(); return; }
       const text=selection ? selectionText(rows,order,visible,selection,valueAt) : String(valueAt(sel.r,sel.c) ?? "");
       void copyText(text, () => toast("已复制选区", "success"), (e) => toast(`复制失败：${e}`, "error"));
     }
@@ -178,6 +193,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     <div
       ref={boxRef}
       className="dbx-grid"
+      style={{ "--dbx-row-h": `${ROW_H}px`, "--dbx-head-h": `${HEAD_H}px` } as CSSProperties}
       tabIndex={0}
       role="grid"
       aria-multiselectable
@@ -195,6 +211,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
             <div
               key={k}
               className="dbx-gh"
+              data-description={!!zh?.[c.name.toLowerCase()] || undefined}
               style={cellStyle(k)}
               role="columnheader"
               aria-colindex={vi + 2}
@@ -209,7 +226,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
             >
               <span className="nm">{c.name.toLowerCase()}</span>
               {sort?.col === k && <span className="so">{sort.dir === "asc" ? "▲" : "▼"}</span>}
-              <span className="t">{zh?.[c.name.toLowerCase()] ?? c.type}</span>
+              {zh?.[c.name.toLowerCase()] && <span className="t">{zh[c.name.toLowerCase()]}</span>}
               <span className="rz" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); resize(k, e.clientX); }} />
             </div>
           );})}
@@ -265,6 +282,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
                     onMouseDown={e=>{e.preventDefault();boxRef.current?.focus();onSel({r,c:k},e.shiftKey);}}
                     onMouseEnter={e=>{if(e.buttons===1 && !editing) onSel({r,c:k},true);}}
                     onDoubleClick={() => startEdit({ r, c: k })}
+                    onContextMenu={e=>{if(onCellMenu){e.preventDefault();onCellMenu(r,k,e.clientX,e.clientY);}}}
                   >
                     {cellText(v, 300)}
                   </div>
@@ -274,6 +292,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
           );
         })}
       </div>
+      {order.length === 0 && <div className="dbx-grid-empty" role="status" style={{top:HEAD_H}}>{empty ?? "没有匹配的行"}</div>}
     </div>
   );
 }

@@ -160,7 +160,7 @@ export function FavoriteSection({ filter, onLocate }: { filter: string; onLocate
 
   if (visible.length === 0 && !q) {
     if (db.conns.length === 0) return null;
-    return <p className="dbx-fav-empty">在表或对象上点 ★ 收藏，常用对象会出现在这里</p>;
+    return <p className="dbx-fav-empty" title="在表或对象上点 ★，常用对象会出现在这里">点 ★ 收藏常用对象</p>;
   }
   if (shown.length === 0) return null;
 

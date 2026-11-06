@@ -1,0 +1,36 @@
+[gate] cargo clippy --all-targets --no-default-features -- -D warnings
+[gate] TEMP → D:\AItool\winapp\nc-workbench\desktop\src-tauri\target\test-tmp   jobs=1
+    Checking nc-forge v0.1.2 (D:\AItool\winapp\nc-workbench\desktop\src-tauri)
+error: this function has too many arguments (8/7)
+  --> src\bmf_gen_write.rs:14:1
+   |
+14 | / pub fn apply(
+15 | |     plan: &GenPlan,
+16 | |     previous: Option<&Manifest>,
+17 | |     root: &Path,
+...  |
+22 | |     verify: impl Fn(&Path) -> Result<PathBuf, String>,
+23 | | ) -> Result<ApplyResult, String> {
+   | |________________________________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.96.0/index.html#too_many_arguments
+   = note: `-D clippy::too-many-arguments` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::too_many_arguments)]`
+
+error: this function has too many arguments (9/7)
+   --> src\commands\bmf_generation_cmds.rs:172:1
+    |
+172 | / pub async fn bmf_gen_apply(
+173 | |     state: State<'_, Arc<AppState>>,
+174 | |     path: String,
+175 | |     profile: Option<GenProfile>,
+...   |
+181 | |     overrides: Option<Vec<String>>,
+182 | | ) -> Result<ApplyResult, String> {
+    | |________________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.96.0/index.html#too_many_arguments
+
+error: could not compile `nc-forge` (lib) due to 2 previous errors
+[gate] 收尾：清掉本轮产生的 0 个临时目录（0.0 MB）——不清理的话这些就会永久堆在系统盘的 %TEMP% 里
+[gate] ⚠️ target/debug 已 10.08 GB（预算 6GB）——先查 deps 里的 .pdb 占比，多半是依赖的 debuginfo 被打开了，见 CLAUDE.md §8.3.3

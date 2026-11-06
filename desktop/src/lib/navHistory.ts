@@ -8,7 +8,8 @@
 // 文件页切走再回来，历史不该清空（与 workspaceSession 同一个理由）。
 import { useSyncExternalStore } from "react";
 import { getCursor } from "./cursorStore";
-import { getSession } from "./workspaceSession";
+import { getSession, subscribe as subscribeWorkspace } from "./workspaceSession";
+import type { EditorGroupId } from "./editorGroups";
 
 export interface NavPoint {
   /** 文件路径（`jdt://` 开头的表示 jar 里的类）。 */
@@ -28,9 +29,6 @@ export interface NavPoint {
  */
 const MAX = 60;
 
-let stack: NavPoint[] = [];
-/** 当前所在的点。栈为空时是 -1。 */
-let cursor = -1;
 
 interface NavView {
   canBack: boolean;
@@ -38,21 +36,26 @@ interface NavView {
   points: readonly NavPoint[];
   cursor: number;
 }
-let view: NavView = { canBack: false, canForward: false, points: stack, cursor };
+const empty = () => ({ stack: [] as NavPoint[], cursor: -1, view: { canBack: false, canForward: false, points: [] as readonly NavPoint[], cursor: -1 } });
+const histories = { left: empty(), right: empty() };
+const history = () => histories[getSession().editorGroups?.focused ?? "left"];
 const listeners = new Set<() => void>();
 
 const subscribe = (cb: () => void): (() => void) => {
   listeners.add(cb);
+  const off = subscribeWorkspace(cb);
   return () => {
     listeners.delete(cb);
+    off();
   };
 };
 
-const snapshot = (): NavView => view;
+const snapshot = (): NavView => history().view;
 
 function recompute(): void {
-  if (view.points === stack && view.cursor === cursor) return;
-  view = { canBack: cursor > 0, canForward: cursor >= 0 && cursor < stack.length - 1, points: stack, cursor };
+  const h = history(), { stack, cursor } = h;
+  if (h.view.points === stack && h.view.cursor === cursor) return;
+  h.view = { canBack: cursor > 0, canForward: cursor >= 0 && cursor < stack.length - 1, points: stack, cursor };
   listeners.forEach((l) => l());
 }
 
@@ -63,23 +66,24 @@ function recompute(): void {
  * - 记新点会砍掉游标之后的所有点（浏览器语义）：退两步再跳一下，前进那一支就作废了。
  */
 export function pushNav(p: NavPoint): void {
-  const cur = stack[cursor];
+  const h = history(), cur = h.stack[h.cursor];
   if (cur && cur.jdt === p.jdt && cur.path.toLowerCase() === p.path.toLowerCase() && cur.line === p.line) return;
-  stack = [...stack.slice(0, cursor + 1), p].slice(-MAX);
-  cursor = stack.length - 1;
+  h.stack = [...h.stack.slice(0, h.cursor + 1), p].slice(-MAX);
+  h.cursor = h.stack.length - 1;
   recompute();
 }
 
 /** 回到栈内某个位置，保留它之后可前进的记录。 */
 export function navAt(index: number): NavPoint | null {
-  if (!Number.isInteger(index) || index < 0 || index >= stack.length || index === cursor) return null;
-  cursor = index;
+  const h = history();
+  if (!Number.isInteger(index) || index < 0 || index >= h.stack.length || index === h.cursor) return null;
+  h.cursor = index;
   recompute();
-  return stack[cursor];
+  return h.stack[h.cursor];
 }
 
-export function navBack(): NavPoint | null { return navAt(cursor - 1); }
-export function navForward(): NavPoint | null { return navAt(cursor + 1); }
+export function navBack(): NavPoint | null { return navAt(history().cursor - 1); }
+export function navForward(): NavPoint | null { return navAt(history().cursor + 1); }
 
 export function captureNavOrigin(): NavPoint | null {
   const path = getSession().activePath;
@@ -93,13 +97,25 @@ export function recordNavJump(origin: NavPoint | null, target: NavPoint): void {
 
 /** 清空（换工作区时）。旧工作区的路径在新区里点开只会被守卫挡住。 */
 export function resetNav(): void {
-  stack = [];
-  cursor = -1;
-  recompute();
+  histories.left = empty(); histories.right = empty(); listeners.forEach(l => l());
 }
 
 export function navSize(): number {
-  return stack.length;
+  return history().stack.length;
+}
+
+export function swapGroupNavigation(): void {
+  const left = histories.left; histories.left = histories.right; histories.right = left;
+  listeners.forEach(l => l());
+}
+export function mergeGroupNavigation(target: EditorGroupId, preferSource = false): void {
+  const source = target === "left" ? "right" : "left";
+  const active = histories[preferSource ? source : target], other = histories[preferSource ? target : source];
+  const prefix = other.stack.slice(0, other.cursor + 1), all = [...prefix, ...active.stack], trim = Math.max(0, all.length - MAX);
+  histories[target] = { ...empty(), stack: all.slice(trim), cursor: Math.max(-1, prefix.length + active.cursor - trim) };
+  histories[source] = empty();
+  const h = histories[target]; h.view = { canBack: h.cursor > 0, canForward: h.cursor >= 0 && h.cursor < h.stack.length - 1, points: h.stack, cursor: h.cursor };
+  listeners.forEach(l => l());
 }
 
 export function useNav(): NavView {

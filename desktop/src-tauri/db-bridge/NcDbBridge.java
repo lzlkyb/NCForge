@@ -130,8 +130,19 @@ public class NcDbBridge {
     private static final Set<String> CMDS = new HashSet<String>(Arrays.asList(
             "hello", "propList", "propCred", "connect", "connectProp", "exec", "execBound", "readOnly", "more", "commit",
             "rollback", "autocommit", "tables", "ncNames", "query", "columns", "indexes", "ddl",
-            "explain", "sessions", "objects", "source", "schema", "ping", "disconnect", "quit",
-            "cancel"));
+            "explain", "sessions", "objects", "source", "schema", "schemas", "setSchema", "ping", "probe",
+            "disconnect", "quit", "cancel"));
+
+    /**
+     * 能直接拼进 `alter session set current_schema = …` 的名字。
+     *
+     * <p>schema 名在 SQL 里是<b>标识符</b>，JDBC 的绑定变量只能替字面量，替不了标识符，
+     * 所以只能拼串。这里按 Oracle 标识符的字符集卡死（字母开头，其余字母/数字/_$#，
+     * 最长 128），与 Rust 侧 {@code db_conns::valid_schema} 完全一致 —— 两侧不一致会出现
+     * 「Rust 引擎能过、JVM 桥报错」这种只在某个引擎上复现的怪问题。
+     */
+    private static final java.util.regex.Pattern SCHEMA_NAME =
+            java.util.regex.Pattern.compile("[A-Za-z][A-Za-z0-9_$#]{0,127}");
 
     /**
      * 对象树里的非表对象类型（`user_objects.object_type` 的取值）。
@@ -357,14 +368,19 @@ public class NcDbBridge {
 
         private void dispatch(String id, String cmd, List<String> a) throws Exception {
             if ("connect".equals(cmd)) {
-                ok(id, connect(a.get(0), a.get(1), a.size() > 2 ? a.get(2) : "", flag(a, 3)));
+                // 第 5 参是默认 schema（老调用没有 → 空串 = 不切），连上就 alter session，
+                // 之后写 `select * from org_orgs` 不用再带 `aier633.` 前缀。
+                ok(id, connect(a.get(0), a.get(1), a.size() > 2 ? a.get(2) : "", flag(a, 3),
+                        a.size() > 4 ? a.get(4) : "", true));
             } else if ("connectProp".equals(cmd)) {
                 Hashtable<?, ?> ds = readDataSource(a.get(0), a.get(1));
                 String url = str(ds.get("databaseUrl"));
                 if (url == null) {
                     throw new SQLException("prop.xml 里没有数据源 " + a.get(1));
                 }
-                ok(id, connect(url, str(ds.get("user")), str(ds.get("password")), flag(a, 2)));
+                // 第 4 参才是 schema（第 3 参是 autoCommit，见 connect_args 的构造顺序）
+                ok(id, connect(url, str(ds.get("user")), str(ds.get("password")), flag(a, 2),
+                        a.size() > 3 ? a.get(3) : "", true));
             } else if ("exec".equals(cmd)) {
                 ok(id, exec(a.get(0), intArg(a, 1, 500), intArg(a, 2, 30)));
             } else if ("execBound".equals(cmd)) {
@@ -412,8 +428,24 @@ public class NcDbBridge {
                 ok(id, sessions());
             } else if ("schema".equals(cmd)) {
                 ok(id, schema(Integer.parseInt(a.get(0)), Integer.parseInt(a.get(1))));
+            } else if ("schemas".equals(cmd)) {
+                ok(id, schemas());
+            } else if ("setSchema".equals(cmd)) {
+                ok(id, setSchema(a.size() > 0 ? a.get(0) : ""));
             } else if ("ping".equals(cmd)) {
                 boolean alive = conn != null && !conn.isClosed();
+                ok(id, "{\"alive\":" + alive + ",\"tx\":" + txJson() + "}");
+            } else if ("probe".equals(cmd)) {
+                boolean alive = conn != null && !conn.isClosed();
+                if (alive) {
+                    // isClosed() only checks the local handle. Check the wire without replacing the user's cursor.
+                    try (Statement s = conn.createStatement()) {
+                        s.setQueryTimeout(2);
+                        try (ResultSet rs = s.executeQuery("select 1 from dual")) {
+                            alive = rs.next();
+                        }
+                    }
+                }
                 ok(id, "{\"alive\":" + alive + ",\"tx\":" + txJson() + "}");
             } else if ("disconnect".equals(cmd)) {
                 closeQuietly();
@@ -426,7 +458,8 @@ public class NcDbBridge {
 
         // ───────────────────── 连接与事务 ─────────────────────
 
-        private String connect(String url, String user, String pass, boolean autoCommit) throws Exception {
+        private String connect(String url, String user, String pass, boolean autoCommit, String schema,
+                boolean strictSchema) throws Exception {
             closeQuietly();
             // ojdbc6 没带 META-INF/services/java.sql.Driver，JDBC 4 的自动加载认不到它，必须显式注册
             try {
@@ -452,11 +485,125 @@ public class NcDbBridge {
                 // 没有权限也不影响连库
             }
             DatabaseMetaData md = conn.getMetaData();
+            // 默认 schema 跟着连接一起设（严格模式）：配置里写错名字就别假装连好了 ——
+            // 用户看到的「已连接」必须等于「prefix 真能省掉」，否则他会以为工具坏了。
+            String warning = "";
+            if (strictSchema) {
+                try {
+                    applySchema(schema);
+                } catch (SQLException e) {
+                    // 连接过程里失败不抛（抛了连会话都不会建，用户连改配置的入口都没有），
+                    // 把原因带回去，前端在连接卡片上标一行黄字。
+                    warning = e.getMessage();
+                }
+            } else {
+                applySchema(schema);
+            }
+            String current = currentSchema();
             return "{\"url\":\"" + esc(url)
                     + "\",\"product\":\"" + esc(md.getDatabaseProductName())
                     + "\",\"version\":\"" + esc(md.getDatabaseProductVersion())
                     + "\",\"user\":\"" + esc(md.getUserName())
+                    + "\",\"schema\":\"" + esc(current)
+                    + "\",\"schemaWarning\":\"" + esc(warning)
                     + "\",\"autoCommit\":" + conn.getAutoCommit() + "}";
+        }
+
+        /**
+         * 切默认 schema。空串 = 回到登录账号自己的 schema。
+         *
+         * <p>名字校验在拼串之前（见 {@link #SCHEMA_NAME}）；执行后再读一次
+         * {@code sys_context} 核对，因为 Oracle 对不存在的 schema 不报错（它只在下一次
+         * 名字解析时抛 ORA-00942），不核对的话界面上会显示一个假的当前 schema。
+         *
+         * <p>事务安全：{@code alter session} 是会话控制语句，<b>不隐式提交</b>当前事务
+         * （Oracle Concepts「Implicit Commit」列出的语句里没有它），所以在有未提交 update
+         * 的会话上切 schema 不会把那些改动提交掉。
+         */
+        private void applySchema(String name) throws SQLException {
+            requireConn();
+            String target = name == null ? "" : name.trim();
+            if (target.isEmpty()) {
+                target = conn.getMetaData().getUserName();
+            }
+            if (target == null || !SCHEMA_NAME.matcher(target).matches()) {
+                throw new SQLException("schema 名不合法：" + target
+                        + "（只能字母开头，其余用字母、数字、下划线，最长 128 个字符）");
+            }
+            target = target.toUpperCase(java.util.Locale.ROOT);
+            Statement st = conn.createStatement();
+            try {
+                st.execute("alter session set current_schema = " + target);
+            } finally {
+                st.close();
+            }
+            String now = currentSchema();
+            if (now != null && !now.equalsIgnoreCase(target)) {
+                throw new SQLException("切换默认 schema 没生效：期望 " + target + "，当前仍是 " + now);
+            }
+        }
+
+        /** 当前会话的默认 schema；读不到返回 null（调用方自己决定回落到什么）。 */
+        private String currentSchema() {
+            if (conn == null) {
+                return null;
+            }
+            Statement st = null;
+            try {
+                st = conn.createStatement();
+                ResultSet rs = st.executeQuery("select sys_context('userenv','current_schema') from dual");
+                try {
+                    return rs.next() ? rs.getString(1) : null;
+                } finally {
+                    rs.close();
+                }
+            } catch (SQLException e) {
+                return null;
+            } finally {
+                if (st != null) {
+                    try { st.close(); } catch (SQLException ignore) { /* 关不掉也没别的办法 */ }
+                }
+            }
+        }
+
+        /** 库里能看到的 schema 清单（{@code all_users}，任何账号都读得到）。 */
+        private String schemas() throws SQLException {
+            requireConn();
+            // 独立 Statement，不走 exec()：那条路会 closeCursor()，把「加载更多」的游标毁掉
+            Statement st = conn.createStatement();
+            StringBuilder sb = new StringBuilder("[");
+            int n = 0;
+            try {
+                ResultSet rs = st.executeQuery("select username from all_users order by username");
+                try {
+                    while (rs.next()) {
+                        String name = rs.getString(1);
+                        if (name == null) {
+                            continue;
+                        }
+                        if (n++ > 0) {
+                            sb.append(',');
+                        }
+                        sb.append('"').append(esc(name)).append('"');
+                    }
+                } finally {
+                    rs.close();
+                }
+            } finally {
+                st.close();
+            }
+            String now = currentSchema();
+            String user = conn.getMetaData().getUserName();
+            return "{\"schemas\":" + sb.append(']')
+                    + ",\"current\":\"" + esc(now == null ? user : now)
+                    + "\",\"user\":\"" + esc(user) + "\"}";
+        }
+
+        /** 切 schema 的命令入口：切完把生效后的名字回给前端（界面上那个胶囊显示它）。 */
+        private String setSchema(String name) throws SQLException {
+            applySchema(name);
+            String now = currentSchema();
+            return "{\"schema\":\"" + esc(now == null ? name : now) + "\"}";
         }
 
         private void resetTx() {
@@ -951,8 +1098,15 @@ public class NcDbBridge {
 
         private String tables() throws SQLException {
             requireConn();
-            String q = "select table_name, 'TABLE' from user_tables where table_name not like 'BIN$%'"
-                    + " union all select view_name, 'VIEW' from user_views order by 1";
+            // 按**当前默认 schema** 过滤，不是登录账号：切了 schema 之后树里列的必须和
+            // 「不带前缀能解析到的表」一致，否则会出现「树上有、SQL 报 ORA-00942」。
+            // 用 all_* 而不是 user_*：user_* 永远只有登录账号自己的表，切过去就是空的。
+            // 代价是没授权的表不显示 —— 那正是「能查什么」的真实边界，不是缺陷。
+            String q = "select table_name, 'TABLE' from all_tables"
+                    + " where owner = sys_context('userenv','current_schema')"
+                    + " and table_name not like 'BIN$%'"
+                    + " union all select view_name, 'VIEW' from all_views"
+                    + " where owner = sys_context('userenv','current_schema') order by 1";
             Statement st = conn.createStatement();
             StringBuilder sb = new StringBuilder("[");
             int n = 0;
@@ -1172,9 +1326,11 @@ public class NcDbBridge {
             List<String> pk = pkColumns(t);
             String q = "select c.column_name, c.data_type, c.char_length, c.data_precision, c.data_scale,"
                     + " c.nullable, c.data_default, cc.comments"
-                    + " from user_tab_columns c left join user_col_comments cc"
-                    + " on cc.table_name = c.table_name and cc.column_name = c.column_name"
-                    + " where c.table_name = ? order by c.column_id";
+                    + " from all_tab_columns c left join all_col_comments cc"
+                    + " on cc.owner = c.owner and cc.table_name = c.table_name"
+                    + " and cc.column_name = c.column_name"
+                    + " where c.owner = sys_context('userenv','current_schema')"
+                    + " and c.table_name = ? order by c.column_id";
             PreparedStatement ps = conn.prepareStatement(q);
             StringBuilder sb = new StringBuilder("[");
             int n = 0;
@@ -1240,9 +1396,11 @@ public class NcDbBridge {
 
         private List<String> pkColumns(String table) throws SQLException {
             List<String> out = new ArrayList<String>();
-            PreparedStatement ps = conn.prepareStatement("select cc.column_name from user_constraints c"
-                    + " join user_cons_columns cc on cc.constraint_name = c.constraint_name"
-                    + " where c.table_name = ? and c.constraint_type = 'P' order by cc.position");
+            PreparedStatement ps = conn.prepareStatement("select cc.column_name from all_constraints c"
+                    + " join all_cons_columns cc on cc.owner = c.owner"
+                    + " and cc.constraint_name = c.constraint_name"
+                    + " where c.owner = sys_context('userenv','current_schema')"
+                    + " and c.table_name = ? and c.constraint_type = 'P' order by cc.position");
             try {
                 ps.setString(1, table);
                 ResultSet rs = ps.executeQuery();
@@ -1259,8 +1417,10 @@ public class NcDbBridge {
         private String indexes(String table) throws SQLException {
             requireConn();
             String q = "select i.index_name, i.uniqueness, i.status, ic.column_name"
-                    + " from user_indexes i join user_ind_columns ic on ic.index_name = i.index_name"
-                    + " where i.table_name = ? order by i.index_name, ic.column_position";
+                    + " from all_indexes i join all_ind_columns ic"
+                    + " on ic.owner = i.owner and ic.index_name = i.index_name"
+                    + " where i.owner = sys_context('userenv','current_schema')"
+                    + " and i.table_name = ? order by i.index_name, ic.column_position";
             PreparedStatement ps = conn.prepareStatement(q);
             Map<String, String[]> idx = new LinkedHashMap<String, String[]>();
             try {
@@ -1336,15 +1496,17 @@ public class NcDbBridge {
         /**
          * 非表对象：包 / 包体 / 过程 / 函数 / 序列 / 同义词 / 触发器 / 类型。
          *
-         * 用 `user_objects` 而不是 `all_objects`：二开账号通常只有自己 schema 的权限，
-         * `all_objects` 会扫到别人的几千张表、还要额外授权，而对象树只关心「我能改的东西」。
+         * 过滤在 **owner = 当前默认 schema** 上（不是登录账号）：切了 schema 之后对象树跟着换，
+         * 与「不带前缀能解析到的对象」一致。用 `all_objects` 而不是 `user_objects`——
+         * `user_objects` 永远只含登录账号自己的对象，切过去就是空的。
          * `generated = 'N'` 排掉系统生成的（回收站对象、LOB 索引之类）。
          */
         private String objects() throws SQLException {
             requireConn();
             PreparedStatement ps = conn.prepareStatement(
                     "select object_name, object_type, status, to_char(created, 'YYYY-MM-DD')"
-                    + " from user_objects where object_type in (" + OBJECT_TYPES_IN + ")"
+                    + " from all_objects where owner = sys_context('userenv','current_schema')"
+                    + " and object_type in (" + OBJECT_TYPES_IN + ")"
                     + " and generated = 'N' order by object_type, object_name");
             try {
                 ResultSet rs = ps.executeQuery();
@@ -1370,7 +1532,8 @@ public class NcDbBridge {
         }
 
         /**
-         * 库内源码（`user_source`）。序列、同义词这类没有源码的对象返回空 `lines`。
+         * 库内源码（`all_source`，按当前默认 schema 过滤）。序列、同义词这类没有源码的对象
+         * 返回空 `lines`。
          *
          * `order by type, line`：字典序里 PACKAGE 排在 PACKAGE BODY 之前，正好是
          * 「规范在前、实现在后」的阅读顺序（TYPE / TYPE BODY 同理）。
@@ -1378,7 +1541,9 @@ public class NcDbBridge {
         private String source(String name) throws SQLException {
             requireConn();
             PreparedStatement ps = conn.prepareStatement(
-                    "select type, line, text from user_source where name = ? order by type, line");
+                    "select type, line, text from all_source"
+                    + " where owner = sys_context('userenv','current_schema') and name = ?"
+                    + " order by type, line");
             try {
                 ps.setString(1, name.toUpperCase());
                 ResultSet rs = ps.executeQuery();

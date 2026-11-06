@@ -10,6 +10,7 @@
 // 说明清单和我们对不上，半改比不改更糟。
 import { beginOperation } from "./operations";
 import { monaco } from "./monacoSetup";
+import { bindEditorCommand } from "./editorCommandBinding";
 import { context } from "./langProviders";
 import { langRequest } from "./lang";
 import { pathOfModel } from "./editorStore";
@@ -167,6 +168,6 @@ export function registerRefactorKeys(ed: monaco.editor.IStandaloneCodeEditor): v
     [monaco.KeyCode.KeyC, "extractConstant"],
   ] as const;
   for (const [key, kind] of keys) {
-    ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | key, () => void runRefactor(kind));
+    bindEditorCommand(ed, monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | key, () => void runRefactor(kind), REFACTOR_KINDS[kind].label);
   }
 }

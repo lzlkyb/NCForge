@@ -6,12 +6,11 @@ import { ResultGrid, type GridEdit } from "./ResultGrid";
 import { CellDetail } from "./CellDetail";
 import { thousands } from "../../lib/db";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
-import { downloadText, toCsv, toInList, toInsert, toMarkdown, toTsv } from "../../lib/resultExport";
+import { ResultTransfer } from "./ResultTransfer";
+import { freezeTransferFrame, type TransferFrame, type TransferSource } from "../../lib/resultTransferContext";
+import { quickCopyTransfer } from "../../lib/resultTransferQuick";
 import { nextSort, viewOrder, type SortState } from "../../lib/resultView";
 import { serverSortLabel } from "../../lib/serverSort";
-
-/** 流式导出的三种格式（A4）。 */
-export type ExportFormat = "csv" | "tsv" | "insert";
 
 /**
  * 结果表 + 工具条（筛选 / 复制为… / 导出 / 详情）+ 底栏。SQL 控制台与表页共用。
@@ -24,9 +23,9 @@ export type ExportFormat = "csv" | "tsv" | "insert";
  */
 import { GridColumns } from "./GridColumns";
 import { ResultCompare } from "./ResultCompare";
-import { loadLayout, saveLayout, gridColumns, selectedRows, selectedCols, selectionText, type Selection, type GridLayout, type ResultSnapshot } from "../../lib/dbResultTools";
+import { loadLayout, saveLayout, gridColumns, selectedRows, selectedCols, type Selection, type GridLayout, type ResultSnapshot } from "../../lib/dbResultTools";
 
-export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot, tabs, subbar, settings, running, onServerSort, onExportFile, layoutKey, snapshot, onRelated }: {
+export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated }: {
   columns: ColumnMeta[];
   layoutKey?:string; snapshot?:ResultSnapshot; connId?:string|null; onRelated?:(row:Cell[])=>void;
   rows: Cell[][];
@@ -49,8 +48,7 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
   running?: boolean;
   /** 让数据库重排整表并重查；不传 = 这个结果不支持（表页 / 非 SELECT）。 */
   onServerSort?: (col: number, dir: "asc" | "desc") => void;
-  /** 后端流式导出整条查询；不传 = 只提供「导出当前显示的行」。 */
-  onExportFile?: (format: ExportFormat) => void;
+  transferSource?: TransferSource;
 }) {
   const [filter, setFilter] = useState("");
 
@@ -72,32 +70,23 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
   const order = useMemo(() => viewOrder(rows, columns, filter, sort), [rows, columns, filter, sort]);
 
   const valueAt=(r:number,c:number)=>edit?.changed.has(`${r}:${c}`) ? edit.changed.get(`${r}:${c}`)! : rows[r][c];
-  const shown = () => order.map(i=>visible.map(c=>valueAt(i,c)));
-  const shownColumns=visible.map(c=>columns[c]);
-  const copySelection=()=>{if(selection) void copy("选区",selectionText(rows,order,visible,selection,valueAt),selectedRows(order,selection).length);};
-  const copy = (label: string, text: string, count=order.length) =>
-    navigator.clipboard.writeText(text).then(
-      () => toast(`已复制为 ${label}（${thousands(count)} 行）`, "success"),
-      (e) => toast(`复制失败：${e}`, "error"),
-    );
-
-  const copyMenu = (x: number, y: number) => {
-    const col = Math.max(0,visible.indexOf(sel?.c ?? visible[0]));
-    setMenu({
-      x,
-      y,
-      items: [
-        {label:"复制选区（无表头）",icon:"copy",disabled:!selection,onSelect:copySelection},
-        { label: "当前显示 · TSV（贴 Excel）", icon: "copy", onSelect: () => void copy("TSV", toTsv(shownColumns, shown())) },
-        { label: "CSV", icon: "copy", onSelect: () => void copy("CSV", toCsv(shownColumns, shown())) },
-        { label: `INSERT 语句（${table || "表名"}）`, icon: "copy", onSelect: () => void copy("INSERT", toInsert(table || "table_name", shownColumns, shown())) },
-        { label: `in (…) 列表（${shownColumns[col]?.name.toLowerCase() ?? ""}）`, icon: "copy", disabled: columns.length === 0, onSelect: () => void copy("in 列表", toInList(shownColumns, shown(), col)) },
-        { label: "Markdown 表格", icon: "copy", onSelect: () => void copy("Markdown", toMarkdown(shownColumns, shown())) },
-      ],
-    });
+  const frame: TransferFrame = { data: { columns, rows }, order, visible, selection,
+    labels: columns.map(c => zh?.[c.name.toLowerCase()] || c.name),
+    source: transferSource ?? { connId: null, resultId: layoutKey || "result", sql: snapshot?.sql ?? "", source: snapshot?.source ?? "当前结果", complete: snapshot?.complete ?? true, table, canRequery: false } };
+  const copySelection = () => void quickCopyTransfer(freezeTransferFrame(frame,valueAt));
+  const cellMenu = (r:number,c:number,x:number,y:number) => {
+    const frozen = freezeTransferFrame({...frame,selection:{anchor:{r,c},end:{r,c}}},valueAt);
+    const column = {...frozen,selection:null,visible:[c]};
+    setMenu({x,y,items:[
+      {label:"复制原始值",icon:"copy",onSelect:()=>void quickCopyTransfer(frozen,"tsv",true)},
+      {label:"复制列名",onSelect:()=>void navigator.clipboard.writeText(columns[c].name).then(()=>toast("列名已复制","success"),e=>toast(`复制失败：${String(e)}`,"error"))},
+      {label:"复制唯一值（当前筛选列）",onSelect:()=>{const seen=new Set<string>();const order=column.order.filter(i=>{const key=JSON.stringify([typeof valueAt(i,c),valueAt(i,c)]);if(seen.has(key)) return false;seen.add(key);return true;});void quickCopyTransfer({...column,order},"tsv");}},
+      {label:"复制为 IN 条件（当前筛选列）",icon:"code",onSelect:()=>void quickCopyTransfer(column,"where")},
+    ]});
   };
 
   const selValue = sel ? valueAt(sel.r,sel.c) : undefined;
+  const source = snapshot && <details className="dbx-result-source"><summary>查询来源 · {snapshot.complete ? "完整查询结果" : "已读取部分数据"}</summary><div>{snapshot.source} · {new Date(snapshot.at).toLocaleString()}</div><pre>{snapshot.sql}</pre></details>;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
@@ -120,9 +109,9 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
         <span className="dbx-sp" />
         {selection && <span className="meta">选区 {selectedRows(order,selection).length} 行 × {selectedCols(visible,selection).length} 列</span>}
         {tools}
-        {snapshot && <ResultCompare snapshot={snapshot} />}
-        {onRelated && <button type="button" className="dbx-btn" disabled={!sel} onClick={()=>sel && onRelated(rows[sel.r])}>关联记录</button>}
-        <button type="button" className="dbx-btn" aria-label="结果列布局" onClick={()=>setColumnOpen(true)}>列布局</button>
+        {snapshot && <ResultCompare snapshot={snapshot} related={onRelated ? {label:"关联记录",icon:"external",disabled:!sel,onSelect:()=>sel && onRelated(rows[sel.r])} : undefined} />}
+        {!snapshot && onRelated && <button type="button" className="dbx-btn ghost" disabled={!sel} onClick={()=>sel && onRelated(rows[sel.r])}>关联记录</button>}
+        <button type="button" className="dbx-btn ghost" title="显示、隐藏、冻结列与恢复布局" aria-label="结果列布局" onClick={()=>setColumnOpen(true)}><Icon name="sliders" size={14} /><span className="dbx-action-label">列布局</span></button>
         {running && (
           <span className="dbx-busy">
             <Icon name="spinner" size={12} />
@@ -150,55 +139,7 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
             onChange={(e) => setFilter(e.target.value)}
           />
         )}
-        <button
-          type="button"
-          className="dbx-ibtn"
-          title="复制为…"
-          aria-label="复制为"
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            copyMenu(r.left, r.bottom + 4);
-          }}
-        >
-          <Icon name="copy" size={14} />
-        </button>
-        <button
-          type="button"
-          className="dbx-ibtn"
-          title="导出：默认「全部」由后端流式写文件（内存只占一页），当前页是浏览器下载"
-          aria-label="导出"
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            const items: ContextMenuItem[] = [
-              {
-                label: "CSV（全部，后端流式）",
-                icon: "download",
-                disabled: !onExportFile,
-                onSelect: () => onExportFile?.("csv"),
-              },
-              {
-                label: "TSV（全部，后端流式）",
-                icon: "download",
-                disabled: !onExportFile,
-                onSelect: () => onExportFile?.("tsv"),
-              },
-              {
-                label: "INSERT 脚本（全部，后端流式）",
-                icon: "download",
-                disabled: !onExportFile,
-                onSelect: () => onExportFile?.("insert"),
-              },
-              {
-                label: `CSV（当前显示 ${thousands(order.length)} 行）`,
-                icon: "copy",
-                onSelect: () => downloadText(`${table || "result"}.csv`, toCsv(shownColumns, shown())),
-              },
-            ];
-            setMenu({ x: r.left, y: r.bottom + 4, items });
-          }}
-        >
-          <Icon name="download" size={14} />
-        </button>
+        <ResultTransfer frame={frame} valueAt={valueAt} />
         <button
           type="button"
           className="dbx-ibtn"
@@ -217,6 +158,7 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
         <ResultGrid
           columns={columns}
           rows={rows}
+          empty={<><strong>{filter ? "筛选后没有匹配的行" : "没有匹配的行"}</strong><span>{filter ? "结果筛选只作用于已读取的数据。" : "可调整查询条件后重新执行。"}</span>{filter && <button type="button" className="dbx-btn ghost" onClick={()=>setFilter("")}>清除结果筛选</button>}</>}
           order={order}
           sort={sort}
           onSort={(c) => setSort(nextSort(sort, c))}
@@ -224,6 +166,8 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
           sel={sel}
           onSel={select}
           selection={selection}
+          onCopy={copySelection}
+          onCellMenu={cellMenu}
           visible={visible}
           frozen={layout.frozen}
           widthOverrides={layout.widths}
@@ -243,8 +187,7 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
           />
         )}
       </div>
-      {snapshot && <div className="dbx-read-status" title={snapshot.sql}>{snapshot.source} · {new Date(snapshot.at).toLocaleString()} · {snapshot.complete ? "完整查询结果" : "已读取部分数据"}</div>}
-      {foot}
+      {foot ? <div className="dbx-result-footer">{source}{foot}</div> : source}
       {columnOpen && <GridColumns columns={columns} layout={layout} onChange={setColumns} onClose={()=>setColumnOpen(false)} />}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       {head && (

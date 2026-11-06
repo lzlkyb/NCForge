@@ -223,8 +223,10 @@ function AppContent() {
       if (svcBusy) return;
       svcBusy = true;
       try {
+        const { isDevelopmentFlowRunning } = await import("./lib/developmentFlowSession");
+        if (isDevelopmentFlowRunning()) { toast("开发流程正在运行，请在 NC 服务面板查看或取消", "info"); return; }
         await serverStart();
-        toast("已发出启动指令，正在加载模块（通常 10 秒左右）", "success");
+        toast("中间件启动请求已接受，请在 NC 服务面板查看真实进度", "info");
       } catch (e) {
         toast(failureText("启动 NC 服务", e), "error");
       } finally {

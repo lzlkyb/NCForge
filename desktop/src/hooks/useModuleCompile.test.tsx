@@ -10,7 +10,7 @@ vi.mock("../lib/workspaceSession", () => ({
 }));
 vi.mock("../lib/compile", async importOriginal => {
   const actual = await importOriginal<typeof import("../lib/compile")>();
-  return { ...actual, compileAllModules: mocks.all, compileModule: mocks.module, compileCancel: mocks.cancel, onCompileLog: () => Promise.resolve(() => {}) };
+  return { ...actual, compileAllModules: mocks.all, compileModule: mocks.module, compileCancel: mocks.cancel, onCompileLog: () => Promise.resolve(() => {}), onBuildProgress: () => Promise.resolve(() => {}) };
 });
 vi.mock("../lib/commandRegistry", () => ({ registerCommands: () => () => {} }));
 vi.mock("../lib/ncTasks", () => ({ BUILTIN_TASKS: [], buildNcTaskRuntime: () => ({}), runTask: vi.fn(), setTaskRuntime: vi.fn() }));
@@ -19,6 +19,7 @@ vi.mock("../lib/autoCompileRun", () => ({ runAutoCompile: vi.fn() }));
 vi.mock("../components/ui/toast", () => ({ toast: mocks.toast }));
 import { useModuleCompile } from "./useModuleCompile";
 import { getOperations, clearCompletedOperations, cancelOperation } from "../lib/operations";
+import { updateWorkbenchLayout } from "../lib/workbenchLayout";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root, host: HTMLDivElement, api: ReturnType<typeof useModuleCompile>;
@@ -26,6 +27,7 @@ function Harness() { api = useModuleCompile(); return null; }
 const last = () => { const list = getOperations(); return list[list.length - 1]; };
 const RESULT = { ok: true, durationMs: 1, sourceCount: 1, errorCount: 0, warningCount: 0, problems: [], jarCount: 0, rounds: 1, outDir: "classes", diagnostics: [] };
 beforeEach(async () => {
+  updateWorkbenchLayout({ locked: false });
   clearCompletedOperations(); mocks.all.mockReset(); mocks.module.mockReset(); mocks.cancel.mockReset(); mocks.toast.mockReset();
   mocks.cancel.mockResolvedValue(undefined);
   mocks.state = { root: "D:/p", activePath: "D:/p/X.java", tabs: [{ path: "D:/p/X.java", dirty: false }], compiling: false, compileResult: null, compileLog: [] };
@@ -35,6 +37,27 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); clearCompletedOperations(); });
 
 describe("手动编译任务", () => {
+  it("编译期间保存不把诊断版本改成结束时的磁盘版本", async () => {
+    mocks.state.tabs = [{ path: "D:/p/X.java", dirty: false, mtimeMs: 10 }];
+    let done!: (value: typeof RESULT) => void;
+    mocks.all.mockImplementation(() => new Promise(resolve => { done = resolve; }));
+    const running = api.compileAll();
+    mocks.state.tabs = [{ path: "D:/p/X.java", dirty: false, mtimeMs: 20 }];
+    done(RESULT); await running;
+    expect(mocks.state.compileResult).toMatchObject({ completedAtMs: expect.any(Number), sourceSnapshots: { "d:/p/x.java": { mtimeMs: 10, atMs: expect.any(Number) } } });
+  });
+  it("锁定布局时编译失败保留用户当前工具", async () => {
+    updateWorkbenchLayout({ locked: true });
+    mocks.all.mockImplementation(async () => { mocks.state.panelTab = "svc"; return { ...RESULT, ok: false, errorCount: 1 }; });
+    expect(await api.compileAll()).toBe(false);
+    expect(mocks.state.panelTab).toBe("svc");
+  });
+  it("组合开发只关闭本次隐式投送，下一次普通编译仍沿用自动设置", async () => {
+    mocks.all.mockResolvedValue(RESULT);
+    expect(await api.compileAll(true)).toBe(true);
+    expect(await api.compileAll()).toBe(true);
+    expect(mocks.all.mock.calls).toEqual([[undefined, true], [undefined, false]]);
+  });
   it("缺 ecj 保留下载引导，新一轮成功后清除", async () => {
     mocks.all.mockRejectedValue(new Error("找不到 Java 编译器组件（ecj）"));
     expect(await api.compileAll()).toBe(false);

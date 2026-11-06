@@ -7,6 +7,8 @@ import {
   formatBytes,
   formatUptime,
   parseLine,
+  groupLogLines,
+  logsRaw,
 } from "./serverLog";
 
 describe("parseLine", () => {
@@ -45,6 +47,22 @@ describe("parseLine", () => {
     expect(line.logger).toBe("");
     expect(line.text).toBe("加载模块 gl 已完成");
   });
+  it("启动标记、命令、普通 stdout 不误判成栈", () => {
+    for (const raw of ["===== 启动 =====", "D:\\jdk\\java.exe -cp app.jar", "正在启动服务", "[nc-forge] pid=82064"]) {
+      expect(parseLine(raw, 1).stack).toBe(false);
+    }
+  });
+  it("明确续行可识别，但普通缩进正文不会变成栈", () => {
+    expect(parseLine("Caused by: java.sql.SQLException: 错误", 1).stack).toBe(true);
+    expect(parseLine("    Suppressed: java.io.IOException", 2).stack).toBe(true);
+    expect(parseLine("    ... 12 more", 3).stack).toBe(true);
+    expect(parseLine("    module loading", 4).stack).toBe(false);
+  });
+  it("保留原始日期、毫秒、空格及 CRLF", () => {
+    const text = "2026-11-06 09:31:02,123 [main] INFO  foo.Bar - 内容  \r\n\r\n";
+    const state = appendChunk(emptyLogState(), text);
+    expect(logsRaw(state.lines)).toBe(text);
+  });
 });
 
 describe("appendChunk", () => {
@@ -73,10 +91,15 @@ describe("appendChunk", () => {
   });
 
   it("半行超长时强制成行，pending 不会无限涨", () => {
-    const big = "x".repeat(5000);
+    const big = "x".repeat(256 * 1024 + 1);
     const s = appendChunk(emptyLogState(), `INFO ${big}`);
     expect(s.pending).toBe("");
     expect(s.lines).toHaveLength(1);
+  });
+  it("长启动命令不在 4096 字符处分裂", () => {
+    const state = appendChunk(emptyLogState(), `java.exe ${"x".repeat(6000)}`);
+    expect(state.lines).toHaveLength(0);
+    expect(state.pending).toHaveLength(6009);
   });
 });
 
@@ -113,6 +136,15 @@ describe("filterLines", () => {
 
   it("无过滤条件时原样返回（不复制数组）", () => {
     expect(filterLines(state.lines, "all", "  ")).toBe(state.lines);
+  });
+  it("根因或栈关键字匹配时保留错误父记录和整个栈", () => {
+    const s = appendChunk(emptyLogState(), "ERROR 查询失败\n    at foo.Bar.run(Bar.java:42)\nCaused by: java.sql.SQLException: ORA-00942\nINFO 收尾\n");
+    expect(filterLines(s.lines, "error", "ORA-00942")).toHaveLength(3);
+    expect(groupLogLines(s.lines)[0].rootCause).toContain("ORA-00942");
+  });
+  it("孤立续行不挂到之前的普通 stdout 后面", () => {
+    const s = appendChunk(emptyLogState(), "普通输出\n    at foo.Bar.run(Bar.java:42)\n");
+    expect(groupLogLines(s.lines)).toHaveLength(2);
   });
 });
 

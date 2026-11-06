@@ -4,7 +4,6 @@
 //! 写：仅编辑保存与向导新建两处，都先过工作区白名单，且必须由前端显式调用。
 //! 这里不做「打开文件就顺手格式化」之类的隐式写入：BMF 里未知节点的字节要原样活着。
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -14,7 +13,7 @@ use tauri::State;
 
 use crate::bmf_export;
 use crate::bmf_gen::{self, Generation};
-use crate::bmf_gen_manifest::{self, ApplyResult, DiffResult};
+use crate::bmf_gen_manifest::{self, DiffResult};
 use crate::bmf_gen_plan;
 use crate::bmf_gen_types::{GenPlan, GenProfile, Timings};
 use crate::bmf_index::{self, BmfIndex, RootSpec};
@@ -181,7 +180,7 @@ pub async fn bmf_doc_detail(
         .map_err(|e| format!("读取任务失败：{e}"))?
 }
 
-fn semantic_roots(cfg: &AppConfig) -> Vec<PathBuf> {
+pub(super) fn semantic_roots(cfg: &AppConfig) -> Vec<PathBuf> {
     let mut list = primary_root(cfg)
         .map(|primary| {
             roots(
@@ -248,7 +247,7 @@ pub fn bmf_generate(path: String, entities: Option<Vec<String>>) -> Result<Gener
 
 /// 解析落盘根：必须在工作区或链接工程内（与写 BMF 同一套白名单），返回
 /// canonical 路径（供读写）+ 去 `\\?\` 前缀的展示串（供清单比对与 UI）。
-async fn safe_root(
+pub(super) async fn safe_root(
     state: &State<'_, Arc<AppState>>,
     raw: &str,
 ) -> Result<(PathBuf, String), String> {
@@ -329,79 +328,6 @@ pub async fn bmf_gen_diff(
             ..Default::default()
         },
     })
-}
-
-/// 落盘：只写选中且允许写的产物。`force` 才覆盖「生成后被手改」的文件，
-/// 覆盖前会备份到 config 目录下。清单在写成功后更新，供下次漂移对比。
-#[tauri::command]
-pub async fn bmf_gen_apply(
-    state: State<'_, Arc<AppState>>,
-    path: String,
-    profile: Option<GenProfile>,
-    entities: Option<Vec<String>>,
-    root: String,
-    selected: Option<Vec<String>>,
-    force: Option<bool>,
-) -> Result<ApplyResult, String> {
-    let t0 = Instant::now();
-    let doc = BmfDoc::open(Path::new(&path))?;
-    let bmf_path = doc.path.clone();
-    let component = doc.component.name.clone();
-    let bmf_sha = bmf_write::sha256(&doc.bytes);
-    let bmf_version = doc.component.version;
-    let profile = profile.unwrap_or_else(|| GenProfile::from_bmf(&doc));
-    let plan = bmf_gen_plan::plan(&doc, &profile, entities.as_deref().unwrap_or(&[]));
-    let parse_plan_ms = t0.elapsed().as_secs_f64() * 1000.0;
-    let profile_sha = plan.profile_sha256.clone();
-    let (root_path, root_text) = safe_root(&state, &root).await?;
-    let config_dir = state.config_dir.clone();
-    let backup_dir = config_dir.join("bmf_backup").join("gen");
-    let selected = selected.unwrap_or_default();
-    let force = force.unwrap_or(false);
-
-    let mut result =
-        tauri::async_runtime::spawn_blocking(move || -> Result<ApplyResult, String> {
-            let prev = bmf_gen_manifest::load(&config_dir, &component)
-                .filter(|m| m.root.is_empty() || m.root.eq_ignore_ascii_case(&root_text));
-            let mut res = bmf_gen_manifest::apply(
-                &plan,
-                prev.as_ref(),
-                &root_path,
-                &selected,
-                force,
-                &backup_dir,
-            )?;
-            // 一个都没写就不动清单：generated_at 不能假装刚生成过。
-            if res.written > 0 {
-                let mut m = bmf_gen_manifest::build_manifest(
-                    &bmf_path,
-                    &root_text,
-                    &bmf_sha,
-                    bmf_version,
-                    &profile_sha,
-                    &plan,
-                )?;
-                // 保留旧清单里本次不再生成的文件（orphan）：它们还在盘上，用户需要
-                // 看到「BMF 已不生成，但是否删除由人决定」。
-                if let Some(old) = prev.as_ref() {
-                    let known: HashSet<String> =
-                        m.artifacts.iter().map(|e| e.path.clone()).collect();
-                    for e in &old.artifacts {
-                        if !known.contains(&e.path) {
-                            m.artifacts.push(e.clone());
-                        }
-                    }
-                }
-                let p = bmf_gen_manifest::save(&config_dir, &component, &m)?;
-                res.manifest = nc_home::strip_verbatim(&p).to_string_lossy().into_owned();
-            }
-            Ok(res)
-        })
-        .await
-        .map_err(|e| format!("保存任务失败：{e}"))??;
-    result.timings.parse_ms = parse_plan_ms;
-    result.timings.total_ms += parse_plan_ms;
-    Ok(result)
 }
 
 /// 新建向导：只预览，不落盘。返回骨架、字段表与自校验结果。

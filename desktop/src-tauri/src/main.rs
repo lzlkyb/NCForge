@@ -142,11 +142,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let startup_root = app_config.workspace_root.clone();
             let app_state = AppState::new(app_config, config_dir.clone());
             app.manage(app_state.clone());
+            app.manage(db_transfer_destination::DestinationRegistry::default());
 
             // 上次的工作区在启动时就挂上文件监听：树第一次列目录后，外部改动立即自动刷新。
             // 失败只记日志（没有自动刷新，展开 / 手动刷新照常可用）。
             if let Some(root) = startup_root {
                 commands::restart_watcher(app.handle(), &app_state, &root);
+                // 上次的工作区直接预热类索引：用户打开就能保存编译
+                commands::spawn_prewarm(app_state.clone());
             }
 
             // 资源只在用户选择组件或功能提示中请求下载；启动读取本地状态，不联网置备。
@@ -246,7 +249,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::compile_module,
             commands::compile_file,
             commands::compile_all_modules,
+            commands::compile_incremental,
             commands::compile_cancel,
+            // 构建维护：清理 / 清理并重编 / 重建索引 / 缓存统计
+            commands::build_clean_module,
+            commands::build_clean_all,
+            commands::build_rebuild_module,
+            commands::build_rebuild_all,
+            commands::build_reindex,
+            commands::build_clean_tmp,
+            commands::build_cache_info,
+            commands::build_history,
             commands::decompile_class,
             commands::lang_start,
             commands::lang_stop,
@@ -275,6 +288,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::search_workspace,
             commands::search_projects,
             commands::search_list_files,
+            commands::search_types,
             commands::search_replace,
             commands::search_cancel,
             commands::local_history_capture,
@@ -291,6 +305,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::bmf_validate,
             commands::bmf_generate,
             commands::bmf_generate_plan,
+            commands::bmf_gen_preview,
+            commands::bmf_gen_check,
+            commands::bmf_gen_target,
+            commands::bmf_gen_reveal,
             commands::bmf_gen_diff,
             commands::bmf_gen_apply,
             commands::bmf_gen_export,
@@ -324,6 +342,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::server_start,
             commands::server_stop,
             commands::server_log,
+            commands::service_log_read,
+            commands::service_log_tail,
+            commands::service_log_clear,
+            commands::service_log_export,
+            commands::service_log_cancel_export,
             commands::server_clear_log,
             commands::server_command_line,
             commands::server_reveal_log,
@@ -339,6 +362,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::client_heap_set,
             commands::nc_home_probe,
             commands::nc_home_set,
+            commands::nc_home_candidates,
             commands::export_config,
             commands::import_config,
             commands::server_heap_set,
@@ -394,6 +418,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::db_tx,
             commands::db_tx_all,
             commands::db_meta,
+            // 会话级默认 schema（写 SQL 不带前缀）
+            commands::db_set_schema,
             // 数据库：独立会话槽（多标签各跑各的，A0）
             commands::db_slot_acquire,
             commands::db_slot_release,
@@ -401,6 +427,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::db_export_insert,
             // 数据导出（流式写文件：CSV / TSV / INSERT，A4）
             commands::db_export_file,
+            commands::db_transfer_pick,
+            commands::db_transfer_file,
+            commands::db_transfer_open,
             commands::db_export_cancel,
             commands::db_export_reveal,
             // 导入（B3）：CSV/TSV → 表，走独立会话的事务
@@ -486,6 +515,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     for b in bridges {
                         b.shutdown();
                     }
+                    // 常驻 ecj worker：不留孤儿 JVM（点 X 即退出，没有托盘）。
+                    ecj_worker::shutdown_all();
                 }
             }
         });

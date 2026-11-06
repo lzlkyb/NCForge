@@ -119,4 +119,10 @@ describe("update dialog behavior", () => {
     await act(async () => button("本次发布").click());
     expect(document.querySelector('.update-release-notes')?.textContent).toContain("第五项");
   });
+  it("没有「亮点」小节时用更新摘要撑起顶部卡片，不留空白", async () => {
+    await mount({ version: "99.0.0", body: "### 更新摘要\n标签栏各归其页，关于页一并改进\n\n### 修复\n- 修好了" });
+    const cards = document.querySelectorAll('.update-benefits>li');
+    expect(cards).toHaveLength(1);
+    expect(cards[0].textContent).toContain("标签栏各归其页，关于页一并改进");
+  });
 });

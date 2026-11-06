@@ -241,6 +241,7 @@ export async function runStatements(
   catch {task.finish("failed","连接未建立，返回数据库页查看原因");return outcome;}
   if(stopRequested) {task.finish("cancelled","执行请求尚未发出，语句未执行");outcome.stoppedByUser=true;return outcome;}
   if(sqlTabOf(tabId)?.connId!==connId) {task.finish("cancelled","来源标签或连接已切换，语句未执行");return outcome;}
+  const previousResults = tab.results;
   patchTab<SqlTab>(tabId, { running: true, results: [], view: null });
   const kept: ResultEntry[] = [];
   let ddl = false;
@@ -257,12 +258,16 @@ export async function runStatements(
       }
       if(stopRequested) {outcome.stoppedByUser=true;break;}
       const r = await execOne(tabId, s.text, i + 1);
+      const connectionInterrupted = r.errorCode === "session-lost" || r.errorCode === "fallback-session-lost" || r.errorCode === "probe-failed";
       r.startLine=s.startLine;
       if(r.cancelled) {outcome.stoppedByUser=true;task.finish("cancelled",`数据库已返回取消；已执行 ${i+1} 条，写入状态请核对事务`);}
       outcome.done = i + 1;
       task.update({progress:{done:i+1,total:stmts.length}});
       if (r.kind !== "error" && stmtKind(s.text) === "ddl") ddl = true;
       if (r.kind !== "update" || stmts.length === 1) {
+        if (kept.length === 0 && connectionInterrupted) {
+          kept.push(...previousResults.filter((result) => result.kind !== "error"));
+        }
         kept.push(r);
         patchTab<SqlTab>(tabId, { results: [...kept], view: r.id });
       }
@@ -274,7 +279,7 @@ export async function runStatements(
           error: r.error ?? "执行失败",
         });
         if (outcome.failLine === null) outcome.failLine = s.startLine;
-        if (r.cancelled || !opts.ignoreErrors) break;
+        if (r.cancelled || connectionInterrupted || !opts.ignoreErrors) break;
       }
     }
   } catch(error) {

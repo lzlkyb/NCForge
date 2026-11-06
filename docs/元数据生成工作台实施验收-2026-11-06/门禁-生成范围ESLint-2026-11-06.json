@@ -1,0 +1,44 @@
+{
+  "label": "门禁-生成范围ESLint-2026-11-06",
+  "args": [
+    "node_modules/eslint/bin/eslint.js",
+    "src/components/meta/MetaGenerate.tsx",
+    "src/components/meta/MetaGenerate.test.tsx",
+    "src/components/meta/GenArtifacts.tsx",
+    "src/components/meta/GenConfigBar.tsx",
+    "src/components/meta/GenFilePreview.tsx",
+    "src/components/meta/GenTextPreview.tsx",
+    "src/components/meta/GenWriteDialogs.tsx",
+    "src/components/meta/MetaDdlRun.tsx",
+    "src/components/meta/MetaDdlRun.test.tsx",
+    "src/components/meta/MetaViewPanel.tsx",
+    "src/components/meta/MetaTab.tsx",
+    "src/components/ui/Modal.tsx",
+    "src/hooks/useMetaGeneration.ts",
+    "src/hooks/useMetaGeneration.test.tsx",
+    "src/hooks/useGenerationLayout.ts",
+    "src/lib/bmfGeneration.ts",
+    "src/lib/metaGeneration.ts",
+    "src/lib/metaGeneration.test.ts",
+    "src/lib/metaEditor.ts",
+    "src/test/generationWorkbenchFixture.ts",
+    "scripts/meta-generation-acceptance.mjs"
+  ],
+  "exitCode": 0,
+  "elapsedSeconds": 1.974,
+  "startFreeMB": 4588.99609375,
+  "minFreeMB": 4551.63671875,
+  "endFreeMB": 4551.63671875,
+  "samples": [
+    {
+      "at": "2026-11-06T08:06:25.456Z",
+      "freeMB": 4588.99609375,
+      "totalMB": 16151.3046875
+    },
+    {
+      "at": "2026-11-06T08:06:27.431Z",
+      "freeMB": 4551.63671875,
+      "totalMB": 16151.3046875
+    }
+  ]
+}

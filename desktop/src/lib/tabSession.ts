@@ -28,7 +28,7 @@ export function addTab(
 ): { tabs: TabMeta[]; dropped: string | null } {
   if (!preview) return { tabs: [...tabs, meta], dropped: null };
   const next = { ...meta, preview: true };
-  const i = tabs.findIndex((t) => t.preview && !t.dirty && !t.eolChanged);
+  const i = tabs.findIndex((t) => t.preview && t.previewGroup === meta.previewGroup && !t.pinned && !t.dirty && !t.eolChanged);
   if (i < 0) return { tabs: [...tabs, next], dropped: null };
   const out = tabs.slice();
   out[i] = next;
@@ -45,7 +45,7 @@ export function pickClosable(
   tabs: TabMeta[],
   want: (t: TabMeta, index: number) => boolean,
 ): { close: string[]; kept: number } {
-  const hit = tabs.filter(want);
+  const hit = tabs.filter((tab, index) => !tab.pinned && want(tab, index));
   const close = hit.filter((t) => !t.dirty && !t.eolChanged).map((t) => t.path);
   return { close, kept: hit.length - close.length };
 }

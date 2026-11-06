@@ -49,7 +49,7 @@
   height: 30px;
   padding: 0 9px;
   border-radius: var(--r-control);
-  font-size: 12px;
+  font-size: var(--dbx-fs-body, 13px);
   color: hsl(var(--muted-foreground));
   white-space: nowrap;
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
@@ -75,7 +75,7 @@
   flex: 1;
 }
 .md-hint {
-  font-size: 11.5px;
+  font-size: var(--dbx-fs-meta, 12px);
   color: hsl(var(--muted-foreground));
   min-width: 0;
   white-space: nowrap;
@@ -100,7 +100,7 @@
   max-width: 100%;
   height: 30px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--dbx-fs-body, 13px);
   font-family: var(--font-mono, ui-monospace, monospace);
   border: 1px solid hsl(var(--border));
   border-radius: var(--r-control);
@@ -115,7 +115,7 @@
   gap: 6px;
   padding: 8px 12px;
   border-bottom: 1px solid hsl(var(--border));
-  font-size: 11.5px;
+  font-size: var(--dbx-fs-meta, 12px);
   line-height: 1.5;
   flex: none;
 }
@@ -149,7 +149,7 @@
   width: 100%;
   height: 30px;
   padding: 0 9px;
-  font-size: 12px;
+  font-size: var(--dbx-fs-body, 13px);
   border: 1px solid hsl(var(--border));
   border-radius: var(--r-control);
   background: hsl(var(--card));
@@ -161,7 +161,7 @@
   gap: 6px;
   min-height: 28px;
   padding: 0 8px 4px;
-  font-size: 11px;
+  font-size: var(--dbx-fs-meta, 12px);
   color: hsl(var(--muted-foreground));
   flex: none;
 }
@@ -184,7 +184,7 @@
   padding: 3px 6px;
   border-radius: var(--r-control);
   text-align: left;
-  font-size: 12px;
+  font-size: var(--dbx-fs-body, 13px);
 }
 .md-pick-item:hover {
   background: hsl(var(--secondary));
@@ -216,7 +216,7 @@
 }
 .md-name {
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 11.5px;
+  font-size: var(--dbx-fs-meta, 12px);
   min-width: 0;
   max-width: 55%;
   white-space: nowrap;
@@ -225,7 +225,7 @@
 }
 .md-cn {
   flex: 1;
-  font-size: 11px;
+  font-size: var(--dbx-fs-meta, 12px);
   color: hsl(var(--muted-foreground));
   white-space: nowrap;
   overflow: hidden;
@@ -239,14 +239,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 10.5px;
+  font-size: var(--dbx-fs-meta, 12px);
   color: hsl(var(--muted-foreground));
 }
 .md-tag-ext {
   flex: none;
   padding: 0 4px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: var(--dbx-fs-badge, 11px);
   background: hsl(var(--warning) / 0.14);
   color: hsl(var(--warning-ink));
 }
@@ -255,7 +255,7 @@
   margin-left: auto;
   padding: 0 4px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: var(--dbx-fs-badge, 11px);
   background: hsl(var(--destructive) / 0.12);
   color: hsl(var(--destructive-ink));
 }
@@ -275,13 +275,13 @@
   gap: 4px 10px;
   min-height: 36px;
   padding: 6px 12px;
-  font-size: 11.5px;
+  font-size: var(--dbx-fs-meta, 12px);
   color: hsl(var(--muted-foreground));
   border-bottom: 1px solid hsl(var(--border));
   flex: none;
 }
 .md-sum b {
-  font-size: 12.5px;
+  font-size: var(--dbx-fs-body, 13px);
   font-weight: 600;
   color: hsl(var(--foreground));
   font-variant-numeric: tabular-nums;
@@ -289,7 +289,7 @@
 .md-sum-src {
   margin-left: auto;
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 10.5px;
+  font-size: var(--dbx-fs-meta, 12px);
   max-width: 45%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -307,7 +307,7 @@
   border-bottom: 1px solid hsl(var(--border));
   background: hsl(var(--chrome));
   color: hsl(var(--muted-foreground));
-  font-size: 11.5px;
+  font-size: var(--dbx-fs-meta, 12px);
   flex: none;
 }
 .md-acts-sp {
@@ -322,7 +322,7 @@
   height: 30px;
   padding: 0 8px;
   border-radius: var(--r-control);
-  font-size: 12px;
+  font-size: var(--dbx-fs-body, 13px);
   color: hsl(var(--primary));
   transition: background var(--dur-fast) var(--ease);
 }
@@ -336,14 +336,14 @@
 }
 .md-act-busy {
   margin-left: 4px;
-  font-size: 11px;
+  font-size: var(--dbx-fs-meta, 12px);
   color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
 }
 /* 提示条里的行内链接（打开所在文件夹） */
 .md-lk {
   margin-left: 6px;
-  font-size: 11.5px;
+  font-size: var(--dbx-fs-meta, 12px);
   color: hsl(var(--primary));
   text-decoration: underline;
   text-decoration-color: hsl(var(--primary) / 0.35);
@@ -372,8 +372,8 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 36px;
-  padding: 7px 12px;
+  min-height: 44px;
+  padding: 10px 12px;
   text-align: left;
   background: hsl(var(--card));
 }
@@ -394,7 +394,7 @@
 }
 .md-tname {
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: var(--dbx-fs-body, 13px);
   font-weight: 600;
   min-width: 0;
   overflow: hidden;
@@ -402,7 +402,7 @@
   white-space: nowrap;
 }
 .md-tcn {
-  font-size: 11.5px;
+  font-size: var(--dbx-fs-meta, 12px);
   color: hsl(var(--muted-foreground));
   min-width: 0;
   overflow: hidden;
@@ -414,7 +414,7 @@
   flex: 0 1 auto;
   max-width: 45%;
   min-width: 0;
-  font-size: 10.5px;
+  font-size: var(--dbx-fs-meta, 12px);
   color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
   overflow: hidden;
@@ -423,7 +423,7 @@
 }
 .md-notes {
   padding: 5px 12px;
-  font-size: 11px;
+  font-size: var(--dbx-fs-meta, 12px);
   line-height: 1.55;
   color: hsl(var(--warning-ink));
   background: hsl(var(--warning) / 0.07);
@@ -432,7 +432,7 @@
 
 /* 列行：列名 / 中文名 / 类型 / 键 / 属性 */
 .md-cols {
-  font-size: 11.5px;
+  font-size: var(--dbx-fs-meta, 12px);
   overflow-x: auto;
 }
 .md-col {
@@ -447,8 +447,8 @@
 }
 .md-col[data-h] {
   border-top: none;
-  min-height: 28px;
-  font-size: 10.5px;
+  min-height: 40px;
+  font-size: var(--dbx-fs-meta, 12px);
   color: hsl(var(--muted-foreground));
   background: hsl(var(--chrome));
 }
@@ -465,7 +465,7 @@
 }
 .md-pk {
   color: hsl(var(--warning-ink));
-  font-size: 10.5px;
+  font-size: var(--dbx-fs-meta, 12px);
   font-weight: 600;
 }
 .md-none {
@@ -484,7 +484,7 @@
   padding: 24px;
   text-align: center;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--dbx-fs-body, 13px);
   line-height: 1.6;
 }
 .md-fill p {

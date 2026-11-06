@@ -1,13 +1,12 @@
 // 底部面板的「调试」标签：控制栏 + 线程/调用栈 + 监视/变量 + 断点 + 控制台。
 //
 // 数据全在 `lib/debugSession`（事件驱动）：这里不做轮询，也不自己拼状态。
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { failureText } from "../../lib/friendlyError";
 import { baseName } from "../../lib/workspace";
-import { DebugVariables } from "./DebugVariables";
-import { DebugWatch } from "./DebugWatch";
+import { DebugInspectorContent } from "./DebugInspectorDock";
 import { DebugStack } from "./DebugStack";
 import { DebugBreakpoints } from "./DebugBreakpoints";
 import { DebugConsole } from "./DebugConsole";
@@ -24,6 +23,7 @@ import {
 } from "../../lib/debugSession";
 import { DEBUG_TARGETS, debugTargetLabel } from "../../lib/debug";
 import { debugKeyLabels } from "../../lib/debugKeys";
+import { claimDebugSourceNavigation } from "../../lib/debugSourceNavigation";
 import "../../debug.css";
 
 export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number) => void }) {
@@ -35,14 +35,12 @@ export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number
   const threadName = snap.threads.find((t) => t.id === snap.threadId)?.name ?? (snap.threadId ? `线程 ${snap.threadId}` : "");
 
   // stopped 之后栈是异步拉回来的：等 frames 到位再定位一次（只认最新的那一停）
-  const revealed = useRef(0);
   useEffect(() => {
-    if (!snap.stopSeq || snap.stopSeq === revealed.current) return;
+    if (!snap.paused || !snap.stopSeq) return;
     const f = snap.frames.find((x) => x.id === snap.frameId);
     if (!f?.source?.path) return;
-    revealed.current = snap.stopSeq;
-    onOpenAt(f.source.path, f.line);
-  }, [snap.stopSeq, snap.frames, snap.frameId, onOpenAt]);
+    if (claimDebugSourceNavigation(snap.target, snap.stopSeq)) onOpenAt(f.source.path, f.line);
+  }, [snap.paused, snap.target, snap.stopSeq, snap.frames, snap.frameId, onOpenAt]);
 
   const attach = () =>
     void attachDebugger().catch((e) => toast(failureText("附加调试器", e), "error"));
@@ -214,14 +212,7 @@ export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number
           <div className="dbg-col">
             <DebugStack snap={snap} onOpenAt={onOpenAt} />
           </div>
-          <div className="dbg-col">
-            <div className="dbg-col-h">监视</div>
-            <DebugWatch paused={snap.paused} watches={snap.watches} />
-            <div className="dbg-col-h">变量{frame ? <span>· {frame.name}</span> : null}</div>
-            <div className="dbg-list">
-              <DebugVariables paused={snap.paused} scopes={snap.scopes} variables={snap.variables} />
-            </div>
-          </div>
+          <DebugInspectorContent snap={snap} />
           <div className="dbg-col">
             <DebugBreakpoints
               availableFilters={snap.status.exceptionFilters ?? []}

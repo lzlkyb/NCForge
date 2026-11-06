@@ -1,0 +1,35 @@
+{
+  "label": "门禁-真实BMF流程复验-2026-11-06",
+  "args": [
+    "scripts/rust-gate.mjs",
+    "test",
+    "--no-default-features",
+    "--test",
+    "bmf_generation_acceptance",
+    "--",
+    "--test-threads=1",
+    "--nocapture"
+  ],
+  "exitCode": 0,
+  "elapsedSeconds": 6.41,
+  "startFreeMB": 4243.6796875,
+  "minFreeMB": 4243.6796875,
+  "endFreeMB": 4671.73828125,
+  "samples": [
+    {
+      "at": "2026-11-06T08:04:15.734Z",
+      "freeMB": 4243.6796875,
+      "totalMB": 16151.3046875
+    },
+    {
+      "at": "2026-11-06T08:04:21.452Z",
+      "freeMB": 4611.7578125,
+      "totalMB": 16151.3046875
+    },
+    {
+      "at": "2026-11-06T08:04:22.145Z",
+      "freeMB": 4671.73828125,
+      "totalMB": 16151.3046875
+    }
+  ]
+}

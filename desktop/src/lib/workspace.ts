@@ -118,6 +118,9 @@ export function baseName(path: string): string {
   return i < 0 ? path : path.slice(i + 1);
 }
 
+/** Windows file identity ignores slash style and casing; keep the original path for I/O. */
+export const filePathKey = (path: string): string => path.replace(/\\/g, "/").toLowerCase();
+
 /** 父目录（工作区根这类没有分隔符的返回空串）。 */
 export function dirName(path: string): string {
   const i = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));

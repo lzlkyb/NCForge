@@ -10,6 +10,7 @@ import { inLangModule, useLangView } from "../../lib/lang";
 import { trackOperation } from "../../lib/operations";
 import { chainAt, symbolsFor, type FlatSymbol } from "../../lib/symbols";
 import { buildOutline, filterOutline, moveActive, outlineRows } from "../../lib/outline";
+import { focusReadingTrigger } from "../../lib/readingFocus";
 
 interface Props {
   open: boolean;
@@ -34,6 +35,7 @@ export function OutlinePanel({ open, onClose, path, mtimeMs, onJump, pinned = fa
   const [data, setData] = useState<{ path: string; list: FlatSymbol[] } | null>(null);
   const [request,setRequest]=useState({loading:false,error:"",revision:0});
   const panelRef = useRef<HTMLDivElement|null>(null);
+  const tracked = useRef("");
   const {mounted,entered}=usePresence(open);
   // onClose 每次渲染都是新身份：监听只在开屏时注册一次，用 ref 穿透闭包读最新值
   const live = useRef({ onClose });
@@ -95,7 +97,7 @@ export function OutlinePanel({ open, onClose, path, mtimeMs, onJump, pinned = fa
       if (e.isComposing || e.key !== "Escape") return;
       e.preventDefault();
       live.current.onClose();
-      panelRef.current?.closest(".wb-reading-layout")?.querySelector<HTMLButtonElement>('[data-popover="outline"]')?.focus();
+      focusReadingTrigger(panelRef.current, "outline");
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKey);
@@ -162,6 +164,15 @@ export function OutlinePanel({ open, onClose, path, mtimeMs, onJump, pinned = fa
             className="wb-outline-row"
             data-active={i === active || undefined}
             data-current={current === r.sym || undefined}
+            ref={node => {
+              if (!node || !pinned || current !== r.sym || tracked.current === `${path}:${r.sym.line}`) return;
+              tracked.current = `${path}:${r.sym.line}`;
+              const list = node.parentElement;
+              if (!list) return;
+              const rowBox = node.getBoundingClientRect(), listBox = list.getBoundingClientRect();
+              if (rowBox.top < listBox.top) list.scrollTop += rowBox.top - listBox.top;
+              else if (rowBox.bottom > listBox.bottom) list.scrollTop += rowBox.bottom - listBox.bottom;
+            }}
             aria-current={current === r.sym || undefined}
             style={{ paddingLeft: 8 + r.depth * 14 }}
             title={`第 ${r.sym.line} 行 · ${r.sym.container ? `${r.sym.container}.` : ""}${r.sym.name}`}

@@ -157,8 +157,15 @@ pub async fn db_import_rows(
         prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE).await?;
     }
 
-    // 写操作：autoCommit=false，自己管事务；跑完断开，不留未提交状态
-    let (cmd, args) = connect_args(&cfg, &conn, None, false, engine)?;
+    // 写操作：autoCommit=false，自己管事务；跑完断开，不留未提交状态。
+    // 目标表名不带 schema 时按「当前生效 schema」解析（用户切过就跟随，别悄悄回到配置值）。
+    let (cmd, args) = connect_args(
+        &cfg,
+        &super::db_cmds::conn_with_runtime_schema(&st, &conn),
+        None,
+        false,
+        engine,
+    )?;
     let key = format!(
         "__import:{}:{}",
         conn.id,

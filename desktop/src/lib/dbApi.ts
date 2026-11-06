@@ -28,6 +28,13 @@ export interface DbConn {
   hasPassword: boolean;
   /** 执行引擎：`java` = 常驻 JVM + JDBC（默认），`rust` = 纯 Rust 驱动（省内存、不常驻 JVM）。 */
   engine: DbEngine;
+  /**
+   * 连上后立刻切到的默认 schema（空串 = 用登录账号自己的）。
+   *
+   * 切过去之后写 SQL 不用再带 `aier633.` 前缀；它只影响**不带前缀的名字解析**，
+   * 不改变权限（查别人 schema 的表仍然要那边给了 SELECT）。
+   */
+  defaultSchema?: string;
 }
 
 /**
@@ -49,6 +56,8 @@ export interface DbConnInput {
   /** 不传就是 JVM 桥。
    * prop 来源的连接也能选纯 Rust：第一次连接时后端会用 JVM 解一次口令并加密存本机。 */
   engine?: DbEngine;
+  /** 默认 schema（空 / 不传 = 不切）。写 SQL 时不用带 `aier633.` 前缀。 */
+  defaultSchema?: string | null;
 }
 
 /** 这个连接用哪个引擎、那个引擎能做什么。界面按它决定按钮能不能用。 */
@@ -207,6 +216,7 @@ export interface MoreResult {
 /** 导出 insert 脚本的请求：取数语句 + 目标表 + 三条 NC 规则的开关。 */
 export interface ExportInsertReq {
   id: string;
+  params?: BoundCell[];
   /** 取数语句（整表导出就是 `select * from <表>`）。 */
   sql: string;
   /** 写进 `insert into` 的目标表名。 */
@@ -243,6 +253,10 @@ export interface ConnectInfo {
   product: string;
   version: string;
   autoCommit: boolean;
+  /** 连上后生效的默认 schema（没设就是登录账号自己的）。 */
+  schema?: string;
+  /** 默认 schema 没设成时的原因（配置写错 / 没权限）。有值 = 当前用的是登录账号。 */
+  schemaWarning?: string;
 }
 
 export interface PropSource {
@@ -341,7 +355,12 @@ export interface TestResult {
   product: string;
   version: string;
   ms: number;
+  /** 当前默认 schema 下的表数（写错 schema 会掉到 0，一眼能看出）。 */
   tables: number | null;
+  /** 连上后生效的默认 schema（空 = 登录账号自己的）。 */
+  schema: string;
+  /** 默认 schema 没设成的原因。有值 = 当前用的是登录账号。 */
+  schemaWarning?: string | null;
 }
 
 /** 本地表结构缓存：小写表名 → [字段名, 类型][]（补全用）。 */
@@ -529,6 +548,8 @@ export const dbApi = {
     invoke<MoreResult>("db_more", { id, maxRows, slot: slot || null }),
   tx: (id: string, action: "commit" | "rollback" | "autocommit-on" | "autocommit-off" | "status", slot?: string | null) =>
     invoke<{ tx: TxInfo; alive?: boolean }>("db_tx", { id, action, slot: slot || null }),
+  reconnect: (id: string, slot: string | null, password?: string, fallback = false) =>
+    invoke<{ autoCommit: boolean }>("db_tx", { id, action: "reconnect", slot, password, fallback }),
   /**
    * 退出前用：primary + 这条连接上所有独立会话槽一起提交/回滚。
    * 前端不知道有哪些槽（那是后端的记账），所以必须由后端枚举。
@@ -536,6 +557,22 @@ export const dbApi = {
   txAll: (id: string, action: "commit" | "rollback") => invoke<void>("db_tx_all", { id, action }),
 
   tables: (id: string) => invoke<{ tables: TableInfo[] }>("db_meta", { id, kind: "tables" }),
+  /**
+   * 库里的 schema 清单（`all_users`，任何账号都读得到）+ 当前会话的默认 schema。
+   *
+   * `current` 是会话的**真实值**（`sys_context`），不是连接配置里的值——用户完全可能
+   * 自己发一句 `alter session set current_schema`，配置值那时刻就不准了。
+   */
+  schemas: (id: string) =>
+    invoke<{ schemas: string[]; current: string; user: string }>("db_meta", { id, kind: "schemas" }),
+  /**
+   * 切这条**会话**的默认 schema（`alter session set current_schema = …`）。
+   *
+   * `slot` 为空 = primary 会话。每个 SQL 标签本来就是一条独立会话，所以 A 标签切
+   * schema 不影响 B。空串 = 回到登录账号自己的 schema。
+   */
+  setSchema: (id: string, schema: string, slot?: string | null) =>
+    invoke<{ schema: string }>("db_set_schema", { id, schema, slot: slot || null }),
   ncNames: (id: string) => invoke<{ names: Record<string, string> }>("db_meta", { id, kind: "ncNames" }),
   /**
    * 一批表的**列**中文名，键是 `表名|列名`（都小写）。

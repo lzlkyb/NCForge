@@ -73,7 +73,7 @@ export function NccDecodeDialog({ open, onClose }: { open: boolean; onClose: () 
     ? "正在读取服务端开关…"
     : cfg.data?.found
       ? `服务端开关：AES ${cfg.data.aes ? "开" : "关"} · GZIP ${cfg.data.gzip ? "开" : "关"} · 加签 ${cfg.data.mark ? "开" : "关"}`
-      : "没读到 miscellaneous.xml（NC home 未配置或文件不存在），按默认全开；请按实际配置调整";
+      : "没读到 miscellaneous.xml（NC home 未配置或文件不存在，到设置 → 开发 →「NC 环境」配置），按默认全开；请按实际配置调整";
 
   return (
     <Modal

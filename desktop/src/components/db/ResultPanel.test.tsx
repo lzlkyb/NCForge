@@ -159,7 +159,7 @@ describe("ResultPanel 列中文名", () => {
     spy.mockRestore();
   });
 
-  it("查不到中文名（非 NC 库 / 计算列）：表头照旧显示类型", async () => {
+  it("查不到中文名时只显示列名，类型在表头提示中仍可读取", async () => {
     forgetColumnZh("c1");
     const spy = vi.spyOn(dbApi, "columnNamesZh").mockResolvedValue({ names: {} });
     const cols = [{ name: "CNT", type: "NUMBER", precision: 10, scale: 0 }];
@@ -167,7 +167,8 @@ describe("ResultPanel 列中文名", () => {
     await flush();
 
     const sub = [...host.querySelectorAll(".dbx-gh .t")].map((e) => e.textContent);
-    expect(sub).toEqual(["NUMBER"]);
+    expect(sub).toEqual([]);
+    expect(host.querySelector('.dbx-gh[aria-colindex="2"]')?.getAttribute('title')).toContain("NUMBER");
     spy.mockRestore();
   });
 });

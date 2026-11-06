@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react";
 import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { javaSuggestOptions } from "../../lib/javaSuggestOptions";
-import { getModel, getViewState, saveViewState, touchModel } from "../../lib/editorStore";
+import { bindEditorCommand } from "../../lib/editorCommandBinding";
+import { getModel, touchModel } from "../../lib/editorStore";
+import { readGroupView, storeGroupView } from "../../lib/editorGroupViews";
+import type { EditorGroupId } from "../../lib/editorGroups";
 import { registerLangProviders } from "../../lib/langProviders";
 import { registerExtraLangProviders } from "../../lib/langProvidersExtra";
 import { registerEditorKeys, releaseCurrentEditor, setCurrentEditor } from "../../lib/editorActions";
@@ -32,6 +35,9 @@ import "../../bookmark-gutter.css";
 import "../../debug.css";
 
 interface Props {
+  groupId?: EditorGroupId;
+  focused?: boolean;
+  onFocus?: () => void;
   /** 当前显示的文件；null = 没有打开的文件。 */
   activePath: string | null;
   readOnly: boolean;
@@ -55,7 +61,7 @@ type Editor = ReturnType<typeof monaco.editor.create>;
  * Monaco 编辑器。整个组件只创建一个编辑器实例，切换标签页 = 换 model（见 lib/editorStore），
  * 光标、滚动位置、撤销栈都随 model 保留。
  */
-export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSave }: Props) {
+export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSave, groupId, focused = true, onFocus }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Editor | null>(null);
   const shownRef = useRef<string | null>(null);
@@ -64,6 +70,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
   const onCursorRef = useRef(onCursor);
   onSaveRef.current = onSave;
   onCursorRef.current = onCursor;
+  const focusRef = useRef({ focused, onFocus, groupId }); focusRef.current = { focused, onFocus, groupId };
 
   // 创建一次
   useEffect(() => {
@@ -97,22 +104,25 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     });
     // Ctrl+S 与自动保存共用：先按偏好格式化，再落盘
     const saveNow = () => onSaveRef.current(() => formatBeforeSave(editor));
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveNow());
+    const bind = (key: number, run: () => void, label: string) => bindEditorCommand(editor, key, run, label);
+    bind(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveNow(), "保存当前文件");
     // Ctrl+Alt+O = 组织导入（IDEA 同键）。走命令而不是 provider：
     // 它是一次性的整文件动作，不是「编辑器要显示什么」。
-    editor.addCommand(
+    bind(
       monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyO,
       () => void organizeImportsCommand(),
+      "组织导入",
     );
     // Ctrl+Alt+H = 调用层级（IDEA 同键）。结果落在底部面板的「调用层级」标签。
-    editor.addCommand(
+    bind(
       monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyH,
       () => void runCallHierarchy(),
+      "调用层级",
     );
     // 提取类重构（IDEA 同键：Ctrl+Alt+M/V/F/C）。键位与命令面板共用 lib/refactor 里的清单
     registerRefactorKeys(editor);
     // F11 = 加/去书签（IDEA 同键）；Shift+F11 = 打开书签面板
-    editor.addCommand(monaco.KeyCode.F11, () => {
+    bind(monaco.KeyCode.F11, () => {
       const model = editor.getModel();
       const pos = editor.getPosition();
       if (!model || !pos) return;
@@ -123,10 +133,10 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       }
       const r = toggleBookmark(path, pos.lineNumber, model.getLineContent(pos.lineNumber));
       toast(r === "added" ? `已加书签（第 ${pos.lineNumber} 行）` : "已移除书签", "success");
-    });
-    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F11, () => setSession({ panelOpen: true, panelTab: "bookmarks" }));
+    }, "切换当前行书签");
+    bind(monaco.KeyMod.Shift | monaco.KeyCode.F11, () => setSession({ panelOpen: true, panelTab: "bookmarks" }), "查看书签");
     // Ctrl+F8 = 当前行加/去断点（IDEA 同键）。与书签 F11 互不挤占。
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.F8, () => {
+    bind(monaco.KeyMod.CtrlCmd | monaco.KeyCode.F8, () => {
       const model = editor.getModel();
       const pos = editor.getPosition();
       if (!model || !pos) return;
@@ -137,11 +147,11 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       }
       const r = toggleBreakpointHere(path, pos.lineNumber);
       toast(r === "added" ? `已加断点（第 ${pos.lineNumber} 行）` : "已移除断点", "success");
-    });
+    }, "切换当前行断点");
     // 调试步进键：F5–F9 的含义由当前 keymap 决定（见 lib/debugKeys）
     registerDebugEditorKeys(editor);
     // Ctrl+Shift+Backspace = 回到上一个编辑位置（与「后退」不同：它记的是打字，不是跳转）
-    editor.addCommand(
+    bind(
       monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Backspace,
       () => {
         const pos = editor.getPosition();
@@ -153,6 +163,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
         }
         navigate({ kind: "file", path: spot.path, line: spot.line, column: 1 });
       },
+      "返回上一个编辑位置",
     );
     const keyboard = editor.onKeyDown(event => {
       if (!editor.hasTextFocus()) return;
@@ -182,11 +193,11 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       const pos = editor.getPosition();
       if (path && pos) noteEdit(path, pos.lineNumber);
       const prefs = getEditorPrefs();
-      if (!prefs.autoSave) return;
+      if (!prefs.autoSave || !focusRef.current.focused) return;
       if (autoSaveTimer !== undefined) window.clearTimeout(autoSaveTimer);
       autoSaveTimer = window.setTimeout(() => {
         // 触发时再读一次：这期间用户可能刚关掉开关
-        if (getEditorPrefs().autoSave) void saveNow();
+        if (getEditorPrefs().autoSave && focusRef.current.focused && editor.getModel() === model) void saveNow();
       }, Math.max(500, prefs.autoSaveDelayMs));
     });
     const sqlActions = registerJavaSqlActions(editor);
@@ -198,9 +209,9 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     const debugOff = attachDebugGutter(editor);
     // Alt+Enter 绑快速修复；命令面板要靠这个引用找到「当前在编辑哪个文件」
     registerEditorKeys(editor);
-    setCurrentEditor(editor);
+    if (focusRef.current.focused) setCurrentEditor(editor);
     // 分屏时有两个编辑器：命令面板 / F2 / 快速修复必须跟着焦点走。
-    const focusSub = editor.onDidFocusEditorText(() => setCurrentEditor(editor));
+    const focusSub = editor.onDidFocusEditorText(() => { focusRef.current.onFocus?.(); setCurrentEditor(editor); const pos = editor.getPosition(); if (pos) onCursorRef.current(pos.lineNumber, pos.column); });
     editorRef.current = editor;
     return () => {
       sqlActions.forEach((d) => d.dispose());
@@ -212,7 +223,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       focusSub.dispose();
       releaseCurrentEditor(editor);
       // 注意只销毁编辑器实例，model 留在 editorStore（切到别的页签再回来还在）。
-      if (shownRef.current) saveViewState(shownRef.current, editor.saveViewState());
+      if (shownRef.current) storeGroupView(focusRef.current.groupId, shownRef.current, editor.saveViewState());
       keyboard.dispose();
       editor.dispose();
       editorRef.current = null;
@@ -225,7 +236,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     const editor = editorRef.current;
     if (!editor) return;
     if (shownRef.current && shownRef.current !== activePath) {
-      saveViewState(shownRef.current, editor.saveViewState());
+      storeGroupView(focusRef.current.groupId, shownRef.current, editor.saveViewState());
     }
     const model = activePath ? getModel(activePath) : undefined;
     editor.setModel(model ?? null);
@@ -234,15 +245,22 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       // 预览身份（peek 队列里）的模型被显示时保活：转正路径已摘牌，这里是二道网，
       // 免得正在看的这个正好是下一个被淘汰的
       touchModel(activePath);
-      const vs = getViewState(activePath);
+      const vs = readGroupView(focusRef.current.groupId, activePath);
       if (vs) editor.restoreViewState(vs);
       // 恢复视图不会触发 onDidChangeCursorPosition，切页回来时状态栏会停在「第 1 行」。
       // 这里主动把恢复后的位置报上去。
       const pos = editor.getPosition();
-      if (pos) onCursorRef.current(pos.lineNumber, pos.column);
-      editor.focus();
+      if (pos && focusRef.current.focused) onCursorRef.current(pos.lineNumber, pos.column);
+      if (focusRef.current.focused) editor.focus();
     }
   }, [activePath]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!focused || !editor) return;
+    setCurrentEditor(editor);
+    const pos = editor.getPosition(); if (pos) onCursorRef.current(pos.lineNumber, pos.column);
+  }, [focused, activePath]);
 
   // 只读状态随标签变化
   useEffect(() => {

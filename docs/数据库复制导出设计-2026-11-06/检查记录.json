@@ -1,0 +1,261 @@
+{
+  "matrix": [
+    {
+      "theme": "light",
+      "material": "glass",
+      "width": 1280,
+      "height": 840,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "width": 1024,
+      "height": 540,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "width": 560,
+      "height": 700,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "width": 683,
+      "height": 512,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "light",
+      "material": "classic",
+      "width": 1280,
+      "height": 840,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "light",
+      "material": "classic",
+      "width": 1024,
+      "height": 540,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "light",
+      "material": "classic",
+      "width": 560,
+      "height": 700,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "light",
+      "material": "classic",
+      "width": 683,
+      "height": 512,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "width": 1280,
+      "height": 840,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "width": 1024,
+      "height": 540,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "width": 560,
+      "height": 700,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "width": 683,
+      "height": 512,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "dark",
+      "material": "classic",
+      "width": 1280,
+      "height": 840,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "dark",
+      "material": "classic",
+      "width": 1024,
+      "height": 540,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "dark",
+      "material": "classic",
+      "width": 560,
+      "height": 700,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    },
+    {
+      "theme": "dark",
+      "material": "classic",
+      "width": 683,
+      "height": 512,
+      "footerVisible": true,
+      "overflow": false,
+      "scrollTop": 0
+    }
+  ],
+  "checks": [
+    {
+      "name": "JSON selection and long key",
+      "pass": true
+    },
+    {
+      "name": "Clipboard matches preview after Windows newline normalization",
+      "pass": true
+    },
+    {
+      "name": "tsv preview",
+      "pass": true
+    },
+    {
+      "name": "csv preview",
+      "pass": true
+    },
+    {
+      "name": "jsonl preview",
+      "pass": true
+    },
+    {
+      "name": "markdown preview",
+      "pass": true
+    },
+    {
+      "name": "html preview",
+      "pass": true
+    },
+    {
+      "name": "insert preview",
+      "pass": true
+    },
+    {
+      "name": "where preview",
+      "pass": true
+    },
+    {
+      "name": "update preview",
+      "pass": true
+    },
+    {
+      "name": "Nonunique UPDATE disabled",
+      "pass": true
+    },
+    {
+      "name": "Unknown no percent or aria-valuenow",
+      "pass": true
+    },
+    {
+      "name": "Partial filename and warning",
+      "pass": true
+    },
+    {
+      "name": "Retry keeps settings",
+      "pass": true
+    },
+    {
+      "name": "Filename preserved when format changes",
+      "pass": true
+    },
+    {
+      "name": "Focus trap",
+      "pass": true
+    },
+    {
+      "name": "Escape close",
+      "pass": true
+    },
+    {
+      "name": "Menu visible within viewport",
+      "pass": true
+    },
+    {
+      "name": "Menu keyboard navigation",
+      "pass": true
+    },
+    {
+      "name": "Advanced copy from menu",
+      "pass": true
+    },
+    {
+      "name": "Background task entry",
+      "pass": true
+    },
+    {
+      "name": "Cancel completes as partial",
+      "pass": true
+    }
+  ],
+  "contrasts": [
+    {
+      "theme": "light",
+      "colors": {
+        "body": "rgb(41, 49, 58)",
+        "muted": "rgb(99, 109, 119)",
+        "paper": "rgb(255, 255, 255)"
+      },
+      "bodyContrast": 13.168570402520123,
+      "mutedContrast": 5.270598370080873
+    },
+    {
+      "theme": "dark",
+      "colors": {
+        "body": "rgb(227, 231, 235)",
+        "muted": "rgb(165, 174, 184)",
+        "paper": "rgb(32, 36, 41)"
+      },
+      "bodyContrast": 12.55488661553887,
+      "mutedContrast": 6.9449628478245495
+    }
+  ],
+  "pageErrors": []
+}

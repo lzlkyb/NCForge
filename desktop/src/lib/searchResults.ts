@@ -1,4 +1,4 @@
-import type { ProjectSearchHit, SearchHit } from "./search";
+import type { SearchHit } from "./search";
 import type { SearchForm } from "./searchStore";
 import { fallbackNote, missingNote } from "./searchScope";
 
@@ -88,7 +88,9 @@ export function buildResultView(form: SearchForm): SearchResultView | null {
     filesScanned += p.outcome.filesScanned;
     truncated = truncated || p.outcome.truncated;
     const map = new Map<string, ResultFileGroup>();
-    for (const hit of p.outcome.hits as ProjectSearchHit[]) {
+    for (const source of p.outcome.hits) {
+      // Rust supplies the project root on the containing group, not on individual hits.
+      const hit: ResultHit = { ...source, root: p.root, project: p.project };
       const key = `${p.root.toLowerCase()}\u0000${hit.path}`;
       const g = map.get(key);
       if (g) g.hits.push(hit);

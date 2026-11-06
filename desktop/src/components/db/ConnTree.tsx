@@ -3,11 +3,10 @@ import { Icon } from "../ui/icon";
 import { EmptyState } from "../ui/EmptyState";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { useWorkbenchDock } from "../workspace/WorkbenchDock";
-import { EnvDot } from "./EnvChips";
 import { ConnObjects } from "./ConnObjects";
 import { FavoriteSection } from "./FavoriteSection";
 import { PasswordResetDialog } from "./PasswordResetDialog";
-import { dbNameOf, type DbConn } from "../../lib/dbApi";
+import { dbNameOf, ENV_LABEL, type DbConn } from "../../lib/dbApi";
 import { ensureConnected } from "../../lib/dbConfirm";
 import { deleteConn, disconnectConn, duplicateConn, moveConn, newConsole, refreshMeta } from "../../lib/dbActions";
 import { defaultConnId, loadConns, openConnDialog, openDictTab, rtOf, useDbConns, useDbRt, useDbSelector } from "../../lib/dbStore";
@@ -182,9 +181,8 @@ export function ConnTree() {
                 }}
               >
                 <Icon name={expanded ? "chevronDown" : "chevronRight"} size={12} />
-                <EnvDot env={c.env} />
-                <b>{c.name}</b>
-                <span className="u">{dbNameOf(c.url)}</span>
+                <span className="dbx-conn-label"><b>{c.name}</b><span className="u">{c.user}@{dbNameOf(c.url)}</span></span>
+                <span className="dbx-conn-env" data-prod={c.env === "prod" || undefined}>{ENV_LABEL[c.env]}</span>
                 <ConnStatus status={rt.status} />
               </button>
               {expanded && <div id={`dbx-objects-${c.id}`}>

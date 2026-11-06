@@ -6,18 +6,27 @@ import { ConnManualForm } from "./ConnManualForm";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
 let host: HTMLDivElement;
-beforeEach(() => { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); act(() => root.render(<ConnManualForm conn={null} />)); });
+beforeEach(async () => {
+  host = document.createElement("div");
+  document.body.appendChild(host);
+  root = createRoot(host);
+  // 用 `await act(async …)` 而不是同步 act：全量跑时 worker 里还有其它文件的更新在排队，
+  // 同步 act 不保证这次渲染已经 flush，后面的断言会读到上一帧（表现为偶发 aria-pressed=false）。
+  await act(async () => {
+    root.render(<ConnManualForm conn={null} />);
+  });
+});
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 describe("连接表单可访问名称", () => {
-  it("八个可见字段标签各关联真实输入，并且端口不会与主机共用名称", () => {
+  it("九个可见字段标签各关联真实输入，并且端口不会与主机共用名称", () => {
     const labels = [...host.querySelectorAll<HTMLLabelElement>("label[for]")];
-    expect(labels).toHaveLength(8);
+    expect(labels).toHaveLength(9);
     for (const label of labels) {
       expect(label.control).toBeInstanceOf(HTMLInputElement);
       act(() => label.control!.focus());
       expect(document.activeElement).toBe(label.control);
     }
-    expect(labels.map((label) => label.textContent)).toEqual(["名称", "主机", "端口", "服务名", "JDBC URL", "用户", "口令", "备注"]);
+    expect(labels.map((label) => label.textContent)).toEqual(["名称", "主机", "端口", "服务名", "JDBC URL", "用户", "口令", "默认 schema", "备注"]);
   });
   it("引擎与事务模式将当前选中状态暴露给辅助技术，并随点击更新", () => {
     const groups = [...host.querySelectorAll<HTMLElement>('[role="group"]')];

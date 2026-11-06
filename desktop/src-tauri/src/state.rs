@@ -63,6 +63,13 @@ pub struct AppState {
     pub db_procs: std::sync::Mutex<
         std::collections::HashMap<String, std::sync::Weak<crate::java_bridge::Bridge>>,
     >,
+    /// 连接上**临时切换过**的默认 schema（连接 id → schema 名，空串不入表）。
+    ///
+    /// 与配置里的 `default_schema` 分开记：配置是「每次连上都切的初始值」，
+    /// 这里是「这一次运行里用户手动切到的值」。申请新会话槽、起 JVM 兜底会话都要按它
+    /// 建，否则切完 schema 再开一个 SQL 标签会悄悄回到配置值，而左栏表树已经是新 schema。
+    /// 断开连接 / 重新配置默认值后整条删掉。
+    pub db_schemas: std::sync::Mutex<std::collections::HashMap<String, String>>,
     /// 代码智能（jdt.ls）会话与状态。同样在 `spawn_blocking` 里持锁，用 std Mutex。
     pub lang: std::sync::Mutex<crate::lang::LangRun>,
     /// 调试会话（java-debug 的 DAP 连接）。与语言服务是两条独立连接。
@@ -128,6 +135,7 @@ impl AppState {
             db: std::sync::Mutex::new(Default::default()),
             db_policies: std::sync::Mutex::new(std::collections::HashMap::new()),
             db_procs: std::sync::Mutex::new(Default::default()),
+            db_schemas: std::sync::Mutex::new(Default::default()),
             lang: std::sync::Mutex::new(Default::default()),
             debug: std::sync::Mutex::new(Default::default()),
             compile_cancel: std::sync::atomic::AtomicBool::new(false),

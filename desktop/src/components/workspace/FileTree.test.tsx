@@ -3,7 +3,7 @@ import { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileTree, type FileTreeHandle } from "./FileTree";
-import { setSession } from "../../lib/workspaceSession";
+import { getSession, setSession } from "../../lib/workspaceSession";
 import {
   setCompactPackages,
   setNcStructure,
@@ -13,6 +13,8 @@ import {
 import { ViewActivityContext } from "../../lib/viewActivity";
 import { clearBookmarks, loadBookmarks, toggleBookmark } from "../../lib/bookmarks";
 import type { LinkedProject } from "../../lib/linkedProjects";
+import type { CompileResult } from "../../lib/compile";
+import { setCodeDiags } from "../../lib/diagStore";
 
 const mocks = vi.hoisted(() => {
   const fsChanged: {
@@ -120,12 +122,15 @@ const pressEnter = async (el: HTMLInputElement) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setCodeDiags([]);
   setCompactPackages(true);
   setRevealOnOpen(true);
   setNcStructure(false);
   setPackageView(false);
   // 预置一棵已展开的树，免得每次渲染都去 listDir
   setSession({
+    compileResult: null,
+    problemsPath: null,
     tree: {
       root: ROOT,
       expanded: new Set([ROOT]),
@@ -1124,5 +1129,129 @@ describe("包资源管理器", () => {
     await act(async () => setPackageView(false));
     expect(rowByExact("Bill/src/private")).toBeNull();
     expect(rowByExact("A.java")).toBeTruthy();
+  });
+});
+
+describe("编译问题标记", () => {
+  it("文件、包、模块行各自显示计数，上级目录加总", async () => {
+    setCompactPackages(false);
+    const mod = `${ROOT}\\modules`;
+    const pkg = `${mod}\\p`;
+    const result: CompileResult = {
+      ok: false,
+      durationMs: 0,
+      sourceCount: 2,
+      errorCount: 1,
+      warningCount: 1,
+      problems: [
+        { severity: "error", file: `${pkg}\\A.java`, line: 1, message: "x" },
+        { severity: "warning", file: `${pkg}\\B.java`, line: 2, message: "y" },
+      ],
+      jarCount: 0,
+      rounds: 1,
+      outDir: "",
+      diagnostics: [],
+      modules: [],
+    };
+    setSession({
+      root: ROOT,
+      compileResult: result,
+      tree: {
+        root: ROOT,
+        expanded: new Set([ROOT, mod, pkg]),
+        marks: {},
+        dirs: {
+          [ROOT]: { status: "ok", items: [{ name: "modules", isDir: true, size: 0 }] },
+          [mod]: { status: "ok", items: [{ name: "p", isDir: true, size: 0 }] },
+          [pkg]: {
+            status: "ok",
+            items: [
+              { name: "A.java", isDir: false, size: 1 },
+              { name: "B.java", isDir: false, size: 1 },
+            ],
+          },
+        },
+      },
+    });
+    await render();
+    const badge = (name: string) =>
+      rowByExact(name)?.querySelector(".wb-problem-badge") ?? null;
+    // 有错误时徽标只显示错误数，警告数进 title；模块 / 包行拿到的是整棵子树的合计
+    expect(badge("modules")?.textContent).toBe("1");
+    expect(badge("modules")?.getAttribute("title")).toContain("1 个编译错误，1 个编译警告");
+    expect(badge("p")?.textContent).toBe("1");
+    expect(badge("A.java")?.textContent).toBe("1");
+    expect(badge("A.java")?.getAttribute("data-sev")).toBe("error");
+    expect(badge("B.java")?.textContent).toBe("1");
+    expect(badge("B.java")?.getAttribute("data-sev")).toBe("warning");
+    expect(badge("B.java")?.getAttribute("title")).toContain("1 个编译警告");
+  });
+
+  it("右键文件可把问题面板过滤到该文件", async () => {
+    setCompactPackages(false);
+    const mod = `${ROOT}\\modules`;
+    const pkg = `${mod}\\p`;
+    const file = `${pkg}\\A.java`;
+    const result: CompileResult = {
+      ok: false,
+      durationMs: 0,
+      sourceCount: 1,
+      errorCount: 1,
+      warningCount: 0,
+      problems: [{ severity: "error", file, line: 1, message: "x" }],
+      jarCount: 0,
+      rounds: 1,
+      outDir: "",
+      diagnostics: [],
+      modules: [],
+    };
+    setSession({
+      root: ROOT,
+      compileResult: result,
+      tree: {
+        root: ROOT,
+        expanded: new Set([ROOT, mod, pkg]),
+        marks: {},
+        dirs: {
+          [ROOT]: { status: "ok", items: [{ name: "modules", isDir: true, size: 0 }] },
+          [mod]: { status: "ok", items: [{ name: "p", isDir: true, size: 0 }] },
+          [pkg]: { status: "ok", items: [{ name: "A.java", isDir: false, size: 1 }] },
+        },
+      },
+    });
+    await render();
+    await rightClick(rowByExact("A.java")!);
+    const item = menuItem("查看该文件的 1 个问题");
+    expect(item).toBeTruthy();
+    await click(item);
+    expect(getSession().problemsPath).toBe(file);
+    expect(getSession().panelTab).toBe("problems");
+    expect(getSession().panelOpen).toBe(true);
+  });
+
+  it("jdt.ls 代码检查在文件行用独立徽标，title 写明来源", async () => {
+    setCompactPackages(false);
+    const mod = `${ROOT}\\modules`;
+    const pkg = `${mod}\\p`;
+    setCodeDiags([
+      { path: `${pkg}\\A.java`, line: 1, column: 1, severity: "warning", message: "未使用" },
+    ]);
+    setSession({
+      root: ROOT,
+      tree: {
+        root: ROOT,
+        expanded: new Set([ROOT, mod, pkg]),
+        marks: {},
+        dirs: {
+          [ROOT]: { status: "ok", items: [{ name: "modules", isDir: true, size: 0 }] },
+          [mod]: { status: "ok", items: [{ name: "p", isDir: true, size: 0 }] },
+          [pkg]: { status: "ok", items: [{ name: "A.java", isDir: false, size: 1 }] },
+        },
+      },
+    });
+    await render();
+    const badge = rowByExact("A.java")?.querySelector('.wb-problem-badge[data-sev="inspect"]');
+    expect(badge?.textContent).toBe("1");
+    expect(badge?.getAttribute("title")).toContain("代码检查（jdt.ls）");
   });
 });

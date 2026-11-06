@@ -72,7 +72,8 @@ describe("侧栏收藏区", () => {
   it("有连接但没收藏时只给一行提示", () => {
     setConns([conn("c1", "dev_a")]);
     render();
-    expect(text()).toContain("在表或对象上点");
+    expect(text()).toContain("点 ★ 收藏常用对象");
+    expect(host.querySelector('.dbx-fav-empty')?.getAttribute('title')).toContain("在表或对象上点");
     expect(rows()).toHaveLength(0);
   });
 
