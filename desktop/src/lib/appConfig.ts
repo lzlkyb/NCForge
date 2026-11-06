@@ -17,6 +17,11 @@ export interface AppConfig {
   nc_home: string | null;
   /** 中间件堆上限（MB）；null = 默认 4G。改它走 `server_heap_set`，不要走 patchConfig。 */
   server_heap_mb: number | null;
+  /**
+   * 启动时挂载的 web 应用（`hotwebs/` 目录名）；null = 默认名单（与 Eclipse 一致）。
+   * 改它走 `hotwebs_set`（要校验目录存在），不要走 patchConfig。
+   */
+  hotwebs: string[] | null;
   /** 代码智能总开关 / 打开新模块时自动启动 / jdt.ls 内存上限（MB，null = 默认 1024）。改它们走 `langConfigSet`。 */
   lang_enabled: boolean;
   lang_auto_start: boolean;

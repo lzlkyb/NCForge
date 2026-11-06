@@ -5,10 +5,11 @@ import { toast } from "../ui/toast";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { PathField } from "./PathField";
 import { HeapField } from "./HeapField";
+import { HotwebsField } from "./HotwebsField";
 import { beginOperation } from "../../lib/operations";
 import { applyWorkspace } from "../../lib/switchWorkspace";
 import { ensureFilesSaved } from "../../lib/terminatePreflight";
-import { ncHomeProbe, ncHomeSet, serverHeapSet, type ServerStatus } from "../../lib/server";
+import { hotwebsProbe, hotwebsSet, ncHomeProbe, ncHomeSet, serverHeapSet, type ServerStatus } from "../../lib/server";
 import { clientHeapSet, type ClientStatus } from "../../lib/client";
 
 /**
@@ -51,6 +52,16 @@ export function ServiceConfig({
     retry: false,
   });
 
+  // webapp 名单依赖 NC home：home 还没探测出来时不查（会白跑一次 resolve），
+  // 换 home 后由下面的 onSave 主动失效
+  const hotwebs = useQuery({
+    queryKey: ["hotwebs"],
+    queryFn: hotwebsProbe,
+    enabled: !!probe.data,
+    staleTime: 30_000,
+    retry: false,
+  });
+
   /** 运行中切换先问一句；false = 用户取消，PathField 保持编辑态。 */
   const confirmRunning = useCallback(
     (label: string, value: string) =>
@@ -82,8 +93,25 @@ export function ServiceConfig({
             if (running && !(await confirmRunning("NC home", v))) return "cancelled";
             const home = await ncHomeSet(v);
             queryClient.setQueryData(["nc-home"], home);
+            // 换了安装目录，hotwebs/ 下的候选和生效名单都变了
+            void queryClient.invalidateQueries({ queryKey: ["hotwebs"] });
             toast(running ? "NC home 已保存，重启服务后生效" : "NC home 已切换", "success");
             onRefetch();
+          }}
+        />
+        <span className="sv-cfg-sep" />
+        {/* 启动时挂哪些 webapp 是 JVM 参数（-Duap.hotwebs），默认与 Eclipse 的
+            启动配置一致；多挂的插件 webapp 可能在共享 classpath 下启动失败。 */}
+        <HotwebsField
+          info={hotwebs.data ?? null}
+          error={hotwebs.error ? String(hotwebs.error) : null}
+          running={running}
+          onSave={async (list) => {
+            const saved = await hotwebsSet(list);
+            queryClient.setQueryData(["hotwebs"], saved);
+            // 配置页别的地方（导入导出、设置页）读的是同一份 AppConfig
+            void queryClient.invalidateQueries({ queryKey: ["app-config"] });
+            return saved;
           }}
         />
         <span className="sv-cfg-sep" />

@@ -42,6 +42,7 @@ gen-changelog.mjs 当成真实版本段解析；代码围栏中的示例会被�
 
 ### 修复
 - 元数据长字段表清除筛选后能定位原选中字段；切换文档、引用跳转和保存刷新保留正确对象，调整窗口及保存失败时保留编辑输入与草稿，外部文件冲突阻止覆盖。
+- 启动服务不再默认挂载安装目录下的全部 web 应用：默认名单与 Eclipse 启动配置一致，需要 iwebap、eyeapp 等前端时可在服务页按需勾选；修复 HR 插件 web 应用在共享类路径下启动失败导致的整屏报错。
 
 ### 技术细节
 - 元数据字段表与来源列表只渲染可见范围，500 节点模型按视区裁剪，原始 XML 按需读取；节点拖动按帧合并，详情缓存限制数量与原文件大小，事务草稿继续使用预览、SHA-256 核对与备份链路。
@@ -49,6 +50,7 @@ gen-changelog.mjs 当成真实版本段解析；代码围栏中的示例会被�
 - 生成链一次解析、一次建产物图，渲染与落盘分离；清单记录 BMF/配置/产物哈希，重复生成时未变化的文件直接跳过。
 - 性能门禁进入 CI（`benchmarks/bmf-gen-budget.json`）：release 下 20 个真实 BMF 生成中心 P95 约 16ms，100 实体×50 属性病态样本约 91ms，预算为 1s 反馈 / 10s 硬顶。
 - 规则校验行号定位改为一次建索引 + 二分查找，病态样本校验耗时从 2.9s 降到 10ms。
+- `-Duap.hotwebs` 默认改为 `nccloud,uapws,lfw,portal,fs`（Eclipse `*_Server.launch` 的取值），显式名单经 `hotwebs_names` 过滤掉不存在的目录并可在服务页调整。根因是 `hotwebs/ncchr` 的 spring-data-redis 2.1.6 调 Spring 5 的 `Assert.isTrue(boolean, Supplier)`，而 classpath 里 `spring-core-4.3.12` 排在 `5.1.6` 之前（与官方 bootstrap 同序）⇒ `NoSuchMethodError`、`Context [/ncchr] startup failed`。
 
 ## [0.1.2] - 2026-11-05
 

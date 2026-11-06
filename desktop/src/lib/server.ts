@@ -150,6 +150,34 @@ export const serverHeapSet = (heapMb: number | null) =>
   trackOperation({ key: "service.heap", label: "保存服务内存设置", scope: "NC 中间件", page: "files", panel: "svc" }, () => invoke<number>("server_heap_set", { heapMb }));
 
 /**
+ * 服务页「Web 应用」的数据（Rust `HotwebsInfo`）。
+ *
+ * `active` 是本次启动真正会写进 `-Duap.hotwebs` 的名单（已过滤掉不存在的目录），
+ * 不是勾选状态：两者在配置过期时会不一样，界面显示生效值才不会骗人。
+ */
+export interface HotwebsInfo {
+  /** `hotwebs/` 下全部子目录（排序）。 */
+  all: string[];
+  /** 本次启动实际会挂载的名单。 */
+  active: string[];
+  /** 默认名单，与 Eclipse 启动配置一致。 */
+  default: string[];
+  /** 配置里的显式名单；null = 用默认。 */
+  configured: string[] | null;
+}
+
+/** 读 webapp 候选与当前生效名单（只读）。 */
+export const hotwebsProbe = () => invoke<HotwebsInfo>("hotwebs_probe");
+/**
+ * 保存要挂载的 web 应用，传 null 恢复默认（与 Eclipse 一致的 5 个）。
+ *
+ * 只写配置、不动正在跑的 JVM（`-Duap.hotwebs` 是启动参数），改完要重启服务才生效。
+ * 名字不存在、空名单都由后端报错，前端不自己猜。
+ */
+export const hotwebsSet = (hotwebs: string[] | null) =>
+  trackOperation({ key: "service.hotwebs", label: "保存 Web 应用设置", scope: "NC 中间件", page: "files", panel: "svc" }, () => invoke<HotwebsInfo>("hotwebs_set", { hotwebs }));
+
+/**
  * 堆上限的显示文案：整 G 显示成 `4 GB`，非整数 G 保留 MB（如 `3072 MB` 不写 `3 GB`，
  * 免得用户以为自己填的 3072 被悄悄改成了 3G）。
  */

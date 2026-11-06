@@ -342,6 +342,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::export_config,
             commands::import_config,
             commands::server_heap_set,
+            commands::hotwebs_probe,
+            commands::hotwebs_set,
             commands::nc_port_preview,
             commands::nc_port_apply,
             commands::svn_info,

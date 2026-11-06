@@ -40,6 +40,17 @@ pub struct AppConfig {
     /// 与中间件分开存：客户端只画 Swing 界面，768M 就够；跟着 4G 走纯属浪费。
     #[serde(default)]
     pub client_heap_mb: Option<u32>,
+    /// 启动时挂载的 web 应用（`hotwebs/` 下的目录名）。`None` = 默认名单，
+    /// 与 Eclipse 启动配置一致（`nccloud,uapws,lfw,portal,fs`，见 `launch::DEFAULT_HOTWEBS`）。
+    ///
+    /// 为什么要能选：`develop` 模式下 `uap.hotwebs` 是**白名单**，多挂一个目录就多
+    /// 初始化一个 Spring 上下文，而它们共用同一条 classpath。实测把 `hotwebs/ncchr`
+    /// （HR 插件）一起挂上时，它自带的 spring-data-redis 2.1.6 会去调 Spring 5 的
+    /// `Assert.isTrue(boolean, Supplier)`，而 classpath 里排前的是 spring-core 4.3.12
+    /// （官方 bootstrap 也是这个顺序）⇒ `NoSuchMethodError`、`Context [/ncchr] startup
+    /// failed`。Eclipse 不挂它，所以开发态看不到这条报错。
+    #[serde(default)]
+    pub hotwebs: Option<Vec<String>>,
     /// SVN 用户名。存在这里是为了「下次不用再输一遍」；密码见下一个字段。
     #[serde(default)]
     pub svn_user: Option<String>,
@@ -201,6 +212,7 @@ impl Default for AppConfig {
             nc_home: None,
             server_heap_mb: None,
             client_heap_mb: None,
+            hotwebs: None,
             svn_user: None,
             svn_password_dpapi: None,
             patch_out_dir: None,

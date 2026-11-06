@@ -1,11 +1,13 @@
 //! 真机快照：中间件启动参数与类路径的**段序**（E2 / E3 / E5）。
 //!
 //! 默认不跑（`#[ignore]`）：依赖本机 NC 安装目录与一份真实工程。
-//! 它验的是三个「以前静默错、看不出来」的地方：
+//! 它验的是三个「以前静态错、看不出来」的地方：
 //!
-//! 1. `-Duap.hotwebs` 必须是 `hotwebs/` 的**实扫结果**。以前写死 5 个，本机 18 个目录里
-//!    有 13 个被 `log.warn("ignore hotwebs webapp …")` 静默跳过（含 NCC 主前端 `iwebap`
-//!    与业务前端 `eyeapp`）——服务照样"启动成功"，只是页面 404。
+//! 1. `-Duap.hotwebs` 的**默认名单只含 Eclipse 启动配置里的 5 个**。`develop` 模式下
+//!    它是白名单：全挂会把 `hotwebs/ncchr` 这类插件 webapp 也拉起来，而它们与 NC 共用
+//!    同一条 classpath——实测 `ncchr` 因 spring-data-redis 2.1.6 调 Spring 5 API、
+//!    classpath 里却是 spring-core 4.3.12 而 `Context [/ncchr] startup failed`。
+//!    配置里显式追加的目录必须真的进参数（否则用户勾了也白勾）。
 //! 2. `-Dnc.server.name` 必须等于 `ierp/bin/prop.xml` 的 `<domain><server><name>`。
 //!    以前不传，运行时退回默认 `server` ⇒ `work/<name>/` 与配置分叉，官方
 //!    `stopServer.bat` 停不掉我们起的服务。本机实测值 `xuyserver`，`work/` 下却只有 `server/`。
@@ -18,7 +20,10 @@
 //!
 //! NC home 用 `NC_HOME` 覆盖（默认 `D:\ncc\1909home`），工程用 `NC_WORKSPACE`。
 
-use nc_forge::launch::{hotwebs_names, middleware_classpath, middleware_vm_args, DEFAULT_HEAP_MB};
+use nc_forge::launch::{
+    all_hotwebs, hotwebs_names, middleware_classpath, middleware_vm_args, DEFAULT_HEAP_MB,
+    DEFAULT_HOTWEBS,
+};
 use nc_forge::nc_home;
 use std::path::PathBuf;
 
@@ -59,41 +64,52 @@ fn pos_where(cp: &[PathBuf], f: impl Fn(&str) -> bool) -> Option<usize> {
 
 #[test]
 #[ignore = "要本机 NC 安装目录"]
-fn hotwebs_实扫覆盖_目录下全部_webapp() {
+fn hotwebs_默认与_eclipse_一致且可按配置追加() {
     let home = nc_home_dir();
     let dir = home.join("hotwebs");
     if !dir.is_dir() {
         eprintln!("跳过：{} 下没有 hotwebs", home.display());
         return;
     }
-    let scanned = hotwebs_names(&home);
-    let on_disk = std::fs::read_dir(&dir).unwrap().flatten().count();
-    eprintln!(
-        "hotwebs 实扫 {} 个（目录下共 {on_disk} 项）：{}",
-        scanned.len(),
-        scanned.join(",")
-    );
+    let all = all_hotwebs(&home);
+    eprintln!("hotwebs/ 下 {} 个目录：{}", all.len(), all.join(","));
 
-    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None);
+    let active = hotwebs_names(&home, None);
+    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &active);
     let arg = args
         .iter()
         .find(|a| a.starts_with("-Duap.hotwebs="))
         .expect("必须传 uap.hotwebs");
-    eprintln!("{arg}");
+    eprintln!("默认名单：{arg}");
 
     // 空串在白名单语义下等于「全不挂」，比少挂几个更糟
     assert!(
         arg.len() > "-Duap.hotwebs=".len(),
         "hotwebs 名单不能为空：{arg}"
     );
-    for must in ["nccloud", "iwebap", "eyeapp"] {
-        if dir.join(must).is_dir() {
-            assert!(
-                arg.contains(must),
-                "{must} 在 hotwebs/ 下存在却没进白名单，它会被静默跳过：{arg}"
-            );
-        }
+    // 默认必须就是 Eclipse 那 5 个（排序后），不能「目录里有几个挂几个」
+    let mut want = DEFAULT_HOTWEBS.to_vec();
+    want.sort_unstable();
+    assert_eq!(
+        arg,
+        &format!("-Duap.hotwebs={}", want.join(",")),
+        "默认名单必须与 Eclipse 启动配置一致，否则插件 webapp 会被一起拉起来"
+    );
+    if dir.join("ncchr").is_dir() {
+        assert!(
+            !arg.contains("ncchr"),
+            "ncchr 默认不能挂：它的 Spring 版本冲突会让上下文启动失败：{arg}"
+        );
     }
+
+    // 显式追加必须真的进参数（否则服务页勾了也白勾）
+    let extra = vec!["ncchr".to_string()];
+    let configured = hotwebs_names(&home, Some(&extra));
+    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &configured);
+    assert!(
+        args.iter().any(|a| a == "-Duap.hotwebs=ncchr"),
+        "显式名单没进启动参数：{args:?}"
+    );
 }
 
 #[test]
@@ -103,7 +119,8 @@ fn 服务名与_prop_xml_一致() {
     let configured = nc_home::read_server_name(&home);
     eprintln!("prop.xml 里的服务名：{configured:?}");
 
-    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None);
+    let hotwebs = hotwebs_names(&home, None);
+    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &hotwebs);
     let arg = args
         .iter()
         .find(|a| a.starts_with("-Dnc.server.name="))

@@ -116,6 +116,8 @@ export const TAURI_COMMANDS = [
   "get_autostart",
   "get_config",
   "get_workspace",
+  "hotwebs_probe",
+  "hotwebs_set",
   "import_config",
   "install_update",
   "lang_config_set",

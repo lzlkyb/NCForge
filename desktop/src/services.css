@@ -897,6 +897,68 @@
   font-size: 11px;
 }
 
+/* ── Web 应用选择（HotwebsField）── */
+/* 内容只有「5 个 + 与 Eclipse 一致」，不参与收缩，让路径去缩 */
+.sv-cfg-item.sv-cfg-hotwebs {
+  flex: 0 0 auto;
+}
+.sv-hw-note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: hsl(var(--muted-foreground));
+}
+.sv-hw-note code {
+  font-size: 11px;
+}
+.sv-hw-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 12px;
+  margin-top: 12px;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-card);
+  padding: 8px 12px;
+  background: hsl(var(--card));
+}
+.sv-hw-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 2px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: var(--r-control);
+  min-width: 0;
+}
+.sv-hw-item:hover {
+  background: hsl(var(--accent));
+}
+.sv-hw-item input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: hsl(var(--primary));
+  flex-shrink: 0;
+}
+.sv-hw-name {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sv-hw-badge {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--accent));
+  flex-shrink: 0;
+}
+
 /* ── 元数据投送（MetaDeployCard）── */
 .sv-deploy {
   display: flex;

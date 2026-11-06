@@ -76,11 +76,23 @@ const HOME_CP: [(&str, CpKind); 6] = [
 /// `hotwebs/` 下的子目录就是可挂载的 webapp。
 const HOTWEBS_DIR: &str = "hotwebs";
 
-/// 扫不到 `hotwebs/` 时用的名单（等于改动前写死的那 5 个）。
+/// 默认挂载的 web 应用，与 Eclipse 启动配置（`*-_Server.launch`）里的
+/// `-Duap.hotwebs` 完全一致。
 ///
-/// **不能传空串**：`develop` 模式下 `uap.hotwebs` 是白名单，空串会被解析成空集合
-/// ⇒ 所有 hotwebs 全部跳过，服务「启动成功」但一个前端页面都打不开。
-const FALLBACK_HOTWEBS: [&str; 5] = ["nccloud", "uapws", "lfw", "portal", "fs"];
+/// 为什么默认不是「目录里有几个挂几个」：`develop` 模式下 `uap.hotwebs` 是白名单，
+/// 多挂一个目录就多初始化一个 Spring 上下文，而所有 webapp 共用同一条 classpath。
+/// 实测把 `hotwebs/ncchr`（HR 插件）一起挂上时，它依赖的 spring-data-redis 2.1.6
+/// 会去调 Spring 5 的 `Assert.isTrue(boolean, Supplier)`，而 classpath 里排前的是
+/// `external/lib/spring-core-4.3.12`（官方 bootstrap 也是这个顺序）⇒
+/// `NoSuchMethodError: org.springframework.util.Assert.isTrue(ZLjava/util/function/Supplier;)V`
+/// ⇒ `Context [/ncchr] startup failed`。Eclipse 只挂这 5 个，所以开发态看不到这条报错；
+/// 工作台默认也挂这 5 个，「在 Eclipse 里能起、在工作台里也能起」才是可预期的。
+///
+/// 需要 iwebap / eyeapp 等其它前端时在服务页勾选，见 [`hotwebs_names`]。
+///
+/// **不能传空串**：空串会被解析成空集合 ⇒ 所有 hotwebs 全部跳过，
+/// 服务「启动成功」但一个前端页面都打不开。
+pub const DEFAULT_HOTWEBS: [&str; 5] = ["nccloud", "uapws", "lfw", "portal", "fs"];
 
 /// manifest 单行字节上限（JAR 规范）。中文路径一个字 3 字节，很容易超，所以必须按字节切。
 const MANIFEST_LINE_LIMIT: usize = 72;
@@ -125,19 +137,8 @@ pub fn validate_heap_mb(mb: Option<u32>) -> Result<(), String> {
     Ok(())
 }
 
-/// 该挂载哪些 hotwebs：`hotwebs/` 下**每个子目录都算**，按名字排序。
-///
-/// 为什么不是写死名单：`develop` 模式下 `uap.hotwebs` 是**白名单**，没列进去的 webapp
-/// 会被 `log.warn("ignore hotwebs webapp " + name)` 静默跳过——服务照样显示启动成功，
-/// 只是那个前端 404。原先写死 `nccloud,uapws,lfw,portal,fs`，本机 18 个目录里有 13 个
-/// 被静默丢弃，其中 `iwebap` 是 NCC 主前端、`eyeapp` 是业务前端（实证 §4.3）。
-///
-/// 不按 `WEB-INF` 过滤：`eyeapp`（纯静态）、`bqchart`、`help` 都没有 `WEB-INF`，
-/// 但 Tomcat 对没有 `WEB-INF` 的目录照样按静态 webapp 部署——按 `WEB-INF` 筛会正好把
-/// 业务前端筛掉，等于换个方式复现同一个 bug。
-///
-/// 目录不存在或为空时回落 `FALLBACK_HOTWEBS`：宁可少挂也不要挂空，空集合等于全不挂。
-pub fn hotwebs_names(home: &Path) -> Vec<String> {
+/// `hotwebs/` 下真实存在的子目录（排序）；目录缺失时返回空。
+pub fn all_hotwebs(home: &Path) -> Vec<String> {
     let mut names: Vec<String> = match std::fs::read_dir(home.join(HOTWEBS_DIR)) {
         Ok(rd) => rd
             .flatten()
@@ -147,20 +148,52 @@ pub fn hotwebs_names(home: &Path) -> Vec<String> {
         Err(_) => Vec::new(),
     };
     names.sort();
+    names
+}
+
+/// 本次启动要挂载的 webapp 名单。
+///
+/// `configured` 是配置里的显式名单：`None` / 空 = 默认名单（与 Eclipse 一致，
+/// 理由见 [`DEFAULT_HOTWEBS`]）。
+///
+/// 显式名单只保留安装目录里**真实存在**的目录：手改配置写错一个字母时，宁可少挂
+/// 一个，也不要让 Tomcat 拿着一个不存在的名字去初始化（那种偏差在日志里很难找）。
+/// 过滤后一个都不剩（例如换了 NC 安装）时回落默认名单——空集合等于全不挂，比多挂
+/// 一个坏 webapp 更难发现。
+pub fn hotwebs_names(home: &Path, configured: Option<&[String]>) -> Vec<String> {
+    let all = all_hotwebs(home);
+    // 没有 hotwebs/ 目录时无法校验任何显式名单，一律用默认：此时显式名单多半是
+    // 从另一台机器抄来的，照着挂反而会挂空。
+    let mut names: Vec<String> = match configured {
+        Some(list) if !list.is_empty() && !all.is_empty() => list
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && all.contains(s))
+            .collect(),
+        _ => DEFAULT_HOTWEBS.iter().map(|s| s.to_string()).collect(),
+    };
+    names.sort();
+    names.dedup();
     if names.is_empty() {
-        return FALLBACK_HOTWEBS.iter().map(|s| s.to_string()).collect();
+        return DEFAULT_HOTWEBS.iter().map(|s| s.to_string()).collect();
     }
     names
 }
 
-/// 中间件 VM 参数（`heap_mb` 为堆上限，调用方传 `effective_heap_mb(配置值)`）。
+/// 中间件 VM 参数（`heap_mb` 为堆上限，调用方传 `effective_heap_mb(配置值)`；
+/// `hotwebs` 传 `hotwebs_names` 的返回值）。
 ///
 /// 只有一个入口、一个必填的 `heap_mb`：留一个「默认值版本」的重载，迟早会有人
 /// 在启动路径上调它，于是「预览显示 8G、真起的是 4G」。
 ///
 /// `-Dnc.server.location` / `-DEJBConfigDir` / `-DExtServiceConfigDir` 三个必须是
 /// 绝对路径，且工作目录也得是 NC home——中间件会用相对路径去开 `ejbXMLs` 与日志。
-pub fn middleware_vm_args(home: &Path, heap_mb: u32, debug_port: Option<u16>) -> Vec<String> {
+pub fn middleware_vm_args(
+    home: &Path,
+    heap_mb: u32,
+    debug_port: Option<u16>,
+    hotwebs: &[String],
+) -> Vec<String> {
     let h = home.to_string_lossy();
     // 服务名必须与 prop.xml 一致：我们跳过 `Main` 直接起 `StartDirectServer`，
     // 没人替我们补 `-Dnc.server.name`（实证 §5 E3），缺了就退回默认 `server`。
@@ -180,8 +213,8 @@ pub fn middleware_vm_args(home: &Path, heap_mb: u32, debug_port: Option<u16>) ->
         "-XX:MaxMetaspaceSize=768m".into(),
         // 栈 2m：NC 的递归调用（尤其在单据转换里）用默认 512k 会 StackOverflow
         "-Xss2m".into(),
-        // 白名单语义，必须覆盖 hotwebs/ 下全部子目录（理由见 hotwebs_names）
-        format!("-Duap.hotwebs={}", hotwebs_names(home).join(",")),
+        // 白名单语义；名单由服务页决定，默认与 Eclipse 启动配置一致（理由见 DEFAULT_HOTWEBS）
+        format!("-Duap.hotwebs={}", hotwebs.join(",")),
         "-Djava.net.preferIPv4Stack=true".into(),
         "-DforceUseRedis=true".into(),
         // 别让 JVM 去读机器上别的 java 配置，行为才可复现
@@ -269,20 +302,30 @@ pub fn project_class_dirs(
     crate::eclipse_cp::class_roots_with(project_root, nc_home, overrides)
 }
 
+/// 中间件启动时可调的三项（都在服务页可改）。
+///
+/// 打成一个结构既压住 `middleware_spec` 的参数个数，也让「堆 + 调试端口 + web 应用」
+/// 始终成组传递：启动与命令行预览各拼一套参数，迟早会出现「预览显示 8G、真起的是 4G」
+/// 或「预览说挂了 5 个、实际挂了 18 个」。
+#[derive(Clone, Copy)]
+pub struct MiddlewareTuning<'a> {
+    /// 堆上限（调用方传 `effective_heap_mb(配置值)`）。
+    pub heap_mb: u32,
+    pub debug_port: Option<u16>,
+    /// `hotwebs_names` 的返回值。
+    pub hotwebs: &'a [String],
+}
+
 /// 拼出中间件的完整启动要素（写好 pathing jar，返回可直接起进程的 `ServerSpec`）。
 ///
 /// `work_dir` 只用来放 pathing jar：**不要写进 NC home**。安装目录是同事共用的，
 /// 往里塞 `*.jar` 既可能被 `middleware/*.jar` 的扫描收进去，也可能被当成脏文件清掉。
-///
-/// `heap_mb` 是堆上限（调用方传 `effective_heap_mb(配置值)`），不传默认值——
-/// 参数留在调用点，启动与「命令行预览」两条路径才不会各拼一套参数。
 pub fn middleware_spec(
     nc_home: &Path,
     java: &Path,
     project_root: &Path,
     work_dir: &Path,
-    heap_mb: u32,
-    debug_port: Option<u16>,
+    tuning: MiddlewareTuning<'_>,
     overrides: &[crate::eclipse_cp::LinkedOverride],
 ) -> Result<(ServerSpec, usize), String> {
     middleware_spec_inner(
@@ -290,7 +333,7 @@ pub fn middleware_spec(
         java,
         project_root,
         work_dir,
-        middleware_vm_args(nc_home, heap_mb, debug_port),
+        middleware_vm_args(nc_home, tuning.heap_mb, tuning.debug_port, tuning.hotwebs),
         overrides,
         true,
     )
@@ -308,8 +351,7 @@ pub fn middleware_spec_preview(
     java: &Path,
     project_root: &Path,
     work_dir: &Path,
-    heap_mb: u32,
-    debug_port: Option<u16>,
+    tuning: MiddlewareTuning<'_>,
     overrides: &[crate::eclipse_cp::LinkedOverride],
 ) -> Result<(ServerSpec, usize), String> {
     middleware_spec_inner(
@@ -317,7 +359,7 @@ pub fn middleware_spec_preview(
         java,
         project_root,
         work_dir,
-        middleware_vm_args(nc_home, heap_mb, debug_port),
+        middleware_vm_args(nc_home, tuning.heap_mb, tuning.debug_port, tuning.hotwebs),
         overrides,
         false,
     )
@@ -455,9 +497,7 @@ pub fn client_classpath(
 
     // Product_Common_Library：NC home 根 + external
     out.extend(crate::nc_index::stand_cp(home));
-    out.extend(crate::nc_index::stand_cp(
-        &home.join("external"),
-    ));
+    out.extend(crate::nc_index::stand_cp(&home.join("external")));
 
     let modules = home.join("modules");
     let names = crate::nc_index::module_names(home);
@@ -473,10 +513,14 @@ pub fn client_classpath(
             || current_module.is_some_and(|m| name.eq_ignore_ascii_case(m))
     };
     for name in names.iter().filter(|n| accessible(n)) {
-        out.extend(crate::nc_index::stand_cp(&modules.join(name).join("client")));
+        out.extend(crate::nc_index::stand_cp(
+            &modules.join(name).join("client"),
+        ));
     }
     for name in names.iter().filter(|n| !accessible(n)) {
-        out.extend(crate::nc_index::stand_cp(&modules.join(name).join("client")));
+        out.extend(crate::nc_index::stand_cp(
+            &modules.join(name).join("client"),
+        ));
     }
 
     // Module_Lang_Library：langlib 下的 jar 直接放在目录里，没有 lib/ 这一层
@@ -502,7 +546,10 @@ pub fn client_spec(
         java,
         project_root,
         work_dir,
-        LaunchTuning { heap_mb, debug_port },
+        LaunchTuning {
+            heap_mb,
+            debug_port,
+        },
         overrides,
         true,
     )
@@ -523,7 +570,10 @@ pub fn client_spec_preview(
         java,
         project_root,
         work_dir,
-        LaunchTuning { heap_mb, debug_port },
+        LaunchTuning {
+            heap_mb,
+            debug_port,
+        },
         overrides,
         false,
     )
@@ -725,6 +775,14 @@ mod tests {
         }
     }
 
+    /// 默认 webapp 名单（与 `hotwebs_names(home, None)` 一样是排序后的）。只关心其它
+    /// 参数的用例可以直接传它。
+    fn default_hotwebs() -> Vec<String> {
+        let mut names: Vec<String> = DEFAULT_HOTWEBS.iter().map(|s| s.to_string()).collect();
+        names.sort();
+        names
+    }
+
     #[test]
     fn 工程_classes_排在_nc_home_之前() {
         let home = temp_dir("order-home");
@@ -864,7 +922,12 @@ mod tests {
 
     #[test]
     fn 中间件_vm_参数里带绝对路径() {
-        let args = middleware_vm_args(Path::new(r"D:\ncc\1909home"), DEFAULT_HEAP_MB, None);
+        let args = middleware_vm_args(
+            Path::new(r"D:\ncc\1909home"),
+            DEFAULT_HEAP_MB,
+            None,
+            &default_hotwebs(),
+        );
         assert!(args
             .iter()
             .any(|a| a == r"-Dnc.server.location=D:\ncc\1909home"));
@@ -878,7 +941,12 @@ mod tests {
 
     #[test]
     fn 堆上限按配置改且只出现一次() {
-        let args = middleware_vm_args(Path::new(r"D:\ncc\1909home"), 8192, None);
+        let args = middleware_vm_args(
+            Path::new(r"D:\ncc\1909home"),
+            8192,
+            None,
+            &default_hotwebs(),
+        );
         let xmx: Vec<&String> = args.iter().filter(|a| a.starts_with("-Xmx")).collect();
         assert_eq!(
             xmx.len(),
@@ -894,13 +962,23 @@ mod tests {
     /// 绑 0.0.0.0 则等于把无鉴权的 JDWP 敞开给同网段任何人。
     #[test]
     fn 调试参数默认关闭_开启时只绑回环() {
-        let off = middleware_vm_args(Path::new(r"D:\ncc\1909home"), DEFAULT_HEAP_MB, None);
+        let off = middleware_vm_args(
+            Path::new(r"D:\ncc\1909home"),
+            DEFAULT_HEAP_MB,
+            None,
+            &default_hotwebs(),
+        );
         assert!(
             !off.iter().any(|a| a.contains("jdwp")),
             "没开调试不该带 JDWP：{off:?}"
         );
 
-        let on = middleware_vm_args(Path::new(r"D:\ncc\1909home"), DEFAULT_HEAP_MB, Some(61539));
+        let on = middleware_vm_args(
+            Path::new(r"D:\ncc\1909home"),
+            DEFAULT_HEAP_MB,
+            Some(61539),
+            &default_hotwebs(),
+        );
         let jdwp: Vec<&String> = on
             .iter()
             .filter(|a| a.starts_with("-agentlib:jdwp"))
@@ -983,31 +1061,62 @@ mod tests {
         cleanup(&base);
     }
 
+    /// 默认名单必须与 Eclipse 一致：多挂一个目录就多初始化一个 Spring 上下文，
+    /// 而它们共用同一条 classpath（`ncchr` 就是这么撞上 Spring 版本冲突的）。
     #[test]
-    fn hotwebs_按目录实扫而不是写死名单() {
-        let home = temp_dir("hotwebs");
-        for name in ["eyeapp", "iwebap", "nccloud"] {
+    fn hotwebs_默认名单与_eclipse_一致而不是全挂() {
+        let home = temp_dir("hotwebs-default");
+        for name in [
+            "eyeapp", "fs", "iwebap", "lfw", "ncchr", "nccloud", "portal", "uapws",
+        ] {
             fs::create_dir_all(home.join("hotwebs").join(name)).unwrap();
         }
         // 不是目录的同名文件不算 webapp
         fs::write(home.join("hotwebs").join("readme.txt"), b"x").unwrap();
 
-        let names = hotwebs_names(&home);
         assert_eq!(
-            names,
-            vec!["eyeapp", "iwebap", "nccloud"],
-            "hotwebs/ 下每个子目录都要挂载，iwebap 与 eyeapp 曾因写死白名单被静默丢弃"
+            hotwebs_names(&home, None),
+            vec!["fs", "lfw", "nccloud", "portal", "uapws"],
+            "默认只挂 Eclipse 那 5 个；全挂会把 ncchr 这类插件 webapp 也拉起来"
+        );
+        assert_eq!(
+            all_hotwebs(&home),
+            vec!["eyeapp", "fs", "iwebap", "lfw", "ncchr", "nccloud", "portal", "uapws"],
+            "界面上仍要能看到全部候选，供用户按需勾选"
+        );
+        cleanup(&home);
+    }
+
+    /// 显式名单：只保留安装目录里真实存在的名字，并排序去重。
+    #[test]
+    fn hotwebs_显式名单按实扫结果过滤并排序() {
+        let home = temp_dir("hotwebs-explicit");
+        for name in ["nccloud", "iwebap", "eyeapp"] {
+            fs::create_dir_all(home.join("hotwebs").join(name)).unwrap();
+        }
+        let configured = vec![
+            "iwebap".to_string(),
+            "nccloud".to_string(),
+            "iwebap".to_string(),
+            "typo".to_string(),
+        ];
+        assert_eq!(
+            hotwebs_names(&home, Some(&configured)),
+            vec!["iwebap", "nccloud"],
+            "写错的名字要忽略，重复项要去重"
         );
         cleanup(&home);
     }
 
     #[test]
-    fn hotwebs_目录缺失时回落默认名单而不是空串() {
+    fn hotwebs_目录缺失或名单全失效时回落默认且不为空() {
         let home = temp_dir("hotwebs-none");
-        let names = hotwebs_names(&home);
-        assert_eq!(names, FALLBACK_HOTWEBS.to_vec());
+        assert_eq!(hotwebs_names(&home, None), default_hotwebs());
+        // 显式名单里的目录一个都不存在（换过安装目录）：回落默认，绝不能全不挂
+        let stale = vec!["gone".to_string()];
+        assert_eq!(hotwebs_names(&home, Some(&stale)), default_hotwebs());
         // 空串在白名单语义下等于「全不挂」，比少挂几个更糟
-        assert!(!names.is_empty(), "绝不能返回空集合");
+        assert!(!hotwebs_names(&home, None).is_empty(), "绝不能返回空集合");
         cleanup(&home);
     }
 
@@ -1026,7 +1135,7 @@ mod tests {
         )
         .unwrap();
 
-        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None);
+        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &default_hotwebs());
         assert!(
             args.iter().any(|a| a == "-Dnc.server.name=xuyserver"),
             "要从 prop.xml 的 <server><name> 取服务名：{args:?}"
@@ -1037,7 +1146,7 @@ mod tests {
     #[test]
     fn prop_xml_缺失时服务名回落_server() {
         let home = temp_dir("prop-none");
-        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None);
+        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &default_hotwebs());
         let want = format!("-Dnc.server.name={}", crate::nc_home::DEFAULT_SERVER_NAME);
         assert!(
             args.contains(&want),
@@ -1047,11 +1156,12 @@ mod tests {
     }
 
     #[test]
-    fn vm_参数里的_hotwebs_是实扫结果() {
+    fn vm_参数里的_hotwebs_用调用方给的名单() {
         let home = temp_dir("vm-hotwebs");
         fs::create_dir_all(home.join("hotwebs").join("uapws")).unwrap();
         fs::create_dir_all(home.join("hotwebs").join("iwebap")).unwrap();
-        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None);
+        let hotwebs = hotwebs_names(&home, Some(&["iwebap".to_string(), "uapws".to_string()]));
+        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &hotwebs);
         assert!(
             args.iter().any(|a| a == "-Duap.hotwebs=iwebap,uapws"),
             "{args:?}"
@@ -1109,8 +1219,19 @@ mod tests {
         fs::create_dir_all(java.parent().unwrap()).unwrap();
         fs::write(&java, b"stub").unwrap();
 
-        let err =
-            middleware_spec(&home, &java, &home, &base, DEFAULT_HEAP_MB, None, &[]).unwrap_err();
+        let err = middleware_spec(
+            &home,
+            &java,
+            &home,
+            &base,
+            MiddlewareTuning {
+                heap_mb: DEFAULT_HEAP_MB,
+                debug_port: None,
+                hotwebs: &default_hotwebs(),
+            },
+            &[],
+        )
+        .unwrap_err();
         assert!(
             err.contains("目录条目") && err.contains("start tomcat error"),
             "错误要解释清楚为什么起不来：{err}"
@@ -1126,8 +1247,19 @@ mod tests {
         fs::create_dir_all(java.parent().unwrap()).unwrap();
         fs::write(&java, b"stub").unwrap();
 
-        let err =
-            middleware_spec(&home, &java, &home, &home, DEFAULT_HEAP_MB, None, &[]).unwrap_err();
+        let err = middleware_spec(
+            &home,
+            &java,
+            &home,
+            &home,
+            MiddlewareTuning {
+                heap_mb: DEFAULT_HEAP_MB,
+                debug_port: None,
+                hotwebs: &default_hotwebs(),
+            },
+            &[],
+        )
+        .unwrap_err();
         assert!(err.contains("没找到任何 jar"), "错误要指出缺 jar：{err}");
         cleanup(&home);
     }
@@ -1140,8 +1272,11 @@ mod tests {
             &home.join("nope").join("java.exe"),
             &home,
             &home,
-            DEFAULT_HEAP_MB,
-            None,
+            MiddlewareTuning {
+                heap_mb: DEFAULT_HEAP_MB,
+                debug_port: None,
+                hotwebs: &default_hotwebs(),
+            },
             &[],
         )
         .unwrap_err();
@@ -1178,7 +1313,10 @@ mod tests {
         assert_eq!(jdwp.len(), 1, "JDWP 参数只能有一个：{args:?}");
         assert!(jdwp[0].contains("address=127.0.0.1:61539"), "{jdwp:?}");
         assert!(!jdwp[0].contains("0.0.0.0"), "JDWP 不能敞开给同网段");
-        assert!(jdwp[0].contains("suspend=n"), "suspend=y 会让客户端卡在启动前");
+        assert!(
+            jdwp[0].contains("suspend=n"),
+            "suspend=y 会让客户端卡在启动前"
+        );
     }
 
     /// 通配监听地址（`0.0.0.0` / `::`）下客户端应连回环，而不是拿通配地址去 connect。
@@ -1191,13 +1329,22 @@ mod tests {
             config_path: "ierp/bin/prop.xml".into(),
             from_config: true,
         };
-        assert_eq!(client_endpoint_host_port(&ep(Some("0.0.0.0"), 8081)), ("127.0.0.1".into(), 8081));
-        assert_eq!(client_endpoint_host_port(&ep(Some("::"), 80)), ("127.0.0.1".into(), 80));
+        assert_eq!(
+            client_endpoint_host_port(&ep(Some("0.0.0.0"), 8081)),
+            ("127.0.0.1".into(), 8081)
+        );
+        assert_eq!(
+            client_endpoint_host_port(&ep(Some("::"), 80)),
+            ("127.0.0.1".into(), 80)
+        );
         assert_eq!(
             client_endpoint_host_port(&ep(Some("192.168.1.20"), 8081)),
             ("192.168.1.20".into(), 8081)
         );
-        assert_eq!(client_endpoint_host_port(&ep(None, 80)), ("127.0.0.1".into(), 80));
+        assert_eq!(
+            client_endpoint_host_port(&ep(None, 80)),
+            ("127.0.0.1".into(), 80)
+        );
     }
 
     /// classpath 必须复刻 Eclipse 客户端 provider 的五段顺序，并排除中间件/私有库。
@@ -1236,19 +1383,34 @@ mod tests {
         };
 
         assert_eq!(cp.first(), Some(&out), "工程输出目录必须排第一");
-        assert!(cp.iter().any(|p| p.ends_with("public.jar") && p.to_string_lossy().contains("modules")));
+        assert!(cp
+            .iter()
+            .any(|p| p.ends_with("public.jar") && p.to_string_lossy().contains("modules")));
         assert!(
-            cp.iter().any(|p| p.ends_with("classes") || p.ends_with("resources")),
+            cp.iter()
+                .any(|p| p.ends_with("classes") || p.ends_with("resources")),
             "computeStandCP 的 classes/resources 目录应被收进来：{cp:?}"
         );
         // 五段顺序：产品公共库 → 模块 public → 客户端 client → langlib
-        assert!(pos("product.jar") < pos("public.jar"), "产品公共库先于模块 public");
-        assert!(pos("ext.jar") < pos("public.jar"), "external 同属产品公共库");
-        assert!(pos("public.jar") < pos("aa-client.jar"), "模块 public 先于 client");
+        assert!(
+            pos("product.jar") < pos("public.jar"),
+            "产品公共库先于模块 public"
+        );
+        assert!(
+            pos("ext.jar") < pos("public.jar"),
+            "external 同属产品公共库"
+        );
+        assert!(
+            pos("public.jar") < pos("aa-client.jar"),
+            "模块 public 先于 client"
+        );
         assert!(pos("aa-client.jar") < pos("lang.jar"), "langlib 最后");
         // accessible（uap* / 当前模块）排在其它模块之前
         assert!(pos("aa-client.jar") < pos("uap-client.jar"), "当前模块排前");
-        assert!(pos("uap-client.jar") < pos("zz-client.jar"), "uap* 排在普通模块前");
+        assert!(
+            pos("uap-client.jar") < pos("zz-client.jar"),
+            "uap* 排在普通模块前"
+        );
 
         let joined = cp
             .iter()

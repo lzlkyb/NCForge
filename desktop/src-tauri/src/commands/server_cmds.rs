@@ -295,6 +295,9 @@ pub async fn server_start(
             .unwrap_or_else(|| nc_home.clone());
         // 堆上限取生效值（配置可能没设或被手改坏）；启动与命令行预览必须用同一份
         let heap_mb = launch::effective_heap_mb(cfg.server_heap_mb);
+        // 挂哪些 web 应用同样以配置为准（None = 与 Eclipse 一致的 5 个）。
+        // 名单决定 JVM 参数 -Duap.hotwebs，启动与预览必须共用同一份判断。
+        let hotwebs = launch::hotwebs_names(&nc_home, cfg.hotwebs.as_deref());
         // 慢的一步放锁外：写 7000 多条清单的 pathing jar 实测约 0.6 秒，
         // 持锁会让每秒一次的状态轮询一起卡住
         let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
@@ -337,8 +340,11 @@ pub async fn server_start(
             &java,
             &project_root,
             &config_dir.join("tmp"),
-            heap_mb,
-            debug_port,
+            launch::MiddlewareTuning {
+                heap_mb,
+                debug_port,
+                hotwebs: &hotwebs,
+            },
             &overrides,
         );
         let (spec, entry_count) = match prepared {
@@ -390,6 +396,16 @@ pub async fn server_start(
                         spec.classpath_jar.display()
                     ),
                 );
+                // 把挂载的 webapp 写进日志：排查「某个前端 404」「某个上下文启动失败」时，
+                // 第一件要确认的就是它到底在不在白名单里
+                let _ = server::append_log(
+                    &log,
+                    &format!(
+                        "[nc-forge] web 应用 {} 个：{}\n",
+                        hotwebs.len(),
+                        hotwebs.join(",")
+                    ),
+                );
                 Ok(())
             }
             Err(e) => {
@@ -433,7 +449,9 @@ pub async fn server_stop(
                 .debug
                 .lock()
                 .map(|run| run.server.status.clone())
-                .unwrap_or_else(|_| crate::debug::DebugStatus::stopped(crate::debug::DebugTarget::Server));
+                .unwrap_or_else(|_| {
+                    crate::debug::DebugStatus::stopped(crate::debug::DebugTarget::Server)
+                });
             let _ = app.emit("debug-status", status);
         }
         match outcome {
@@ -559,6 +577,13 @@ pub async fn server_command_line(
             .map(PathBuf::from)
             .unwrap_or_else(|| nc_home.clone());
         let heap_mb = launch::effective_heap_mb(cfg.server_heap_mb);
+        // 与启动同一份 webapp 名单：预览里的 -Duap.hotwebs 必须就是下次真起时的那串
+        let hotwebs = launch::hotwebs_names(&nc_home, cfg.hotwebs.as_deref());
+        let tuning = launch::MiddlewareTuning {
+            heap_mb,
+            debug_port,
+            hotwebs: &hotwebs,
+        };
         // 预览必须用与启动完全相同的覆盖表，否则「命令行里看到的顺序」和真起的不一样
         let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
         let prepared = if reuse {
@@ -567,8 +592,7 @@ pub async fn server_command_line(
                 &java,
                 &project_root,
                 &work_dir,
-                heap_mb,
-                debug_port,
+                tuning,
                 &overrides,
             )
         } else {
@@ -577,8 +601,7 @@ pub async fn server_command_line(
                 &java,
                 &project_root,
                 &work_dir,
-                heap_mb,
-                debug_port,
+                tuning,
                 &overrides,
             )
         };
@@ -731,6 +754,110 @@ pub async fn server_heap_set(
         })
         .await?;
     Ok(launch::effective_heap_mb(heap_mb))
+}
+
+/// 服务页「Web 应用」一栏的数据。
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HotwebsInfo {
+    /// `hotwebs/` 下全部子目录（排序）。界面据此渲染勾选项。
+    pub all: Vec<String>,
+    /// 本次启动实际会挂载的名单（已过滤掉不存在的目录）。
+    pub active: Vec<String>,
+    /// 默认名单（与 Eclipse 启动配置一致）。
+    pub default: Vec<String>,
+    /// 配置里的显式名单；`None` = 用默认。
+    pub configured: Option<Vec<String>>,
+}
+
+fn hotwebs_info(home: &Path, configured: Option<&[String]>) -> HotwebsInfo {
+    HotwebsInfo {
+        all: launch::all_hotwebs(home),
+        active: launch::hotwebs_names(home, configured),
+        default: launch::DEFAULT_HOTWEBS
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        configured: configured.map(|v| v.to_vec()),
+    }
+}
+
+/// 读 webapp 候选与当前生效名单（只读）。
+#[tauri::command]
+pub async fn hotwebs_probe(state: tauri::State<'_, Arc<AppState>>) -> Result<HotwebsInfo, String> {
+    let cfg = state.config.read().await.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = nc_home::resolve(cfg.nc_home.as_deref())?;
+        Ok(hotwebs_info(Path::new(&home.root), cfg.hotwebs.as_deref()))
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+/// 校验并规范化界面传来的名单。返回 `None` 表示「与默认名单一致，不单独存」。
+///
+/// 不夹边、不猜：名字写错就报错并列出不存在的那些。静默丢一个目录的后果是
+/// 「我明明勾了，前端还是 404」，而那正是这次要修掉的那类问题。
+fn normalize_hotwebs(
+    home: &Path,
+    hotwebs: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, String> {
+    let Some(list) = hotwebs else {
+        return Ok(None);
+    };
+    let mut names: Vec<String> = list
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    names.sort();
+    names.dedup();
+    if names.is_empty() {
+        return Err("至少要挂载一个 web 应用；想恢复默认就点「恢复默认」".to_string());
+    }
+    let all = launch::all_hotwebs(home);
+    if all.is_empty() {
+        return Err(format!(
+            "在 {} 下没找到 hotwebs/ 目录，无法设置 web 应用",
+            home.display()
+        ));
+    }
+    let unknown: Vec<&str> = names
+        .iter()
+        .map(String::as_str)
+        .filter(|n| !all.iter().any(|a| a == n))
+        .collect();
+    if !unknown.is_empty() {
+        return Err(format!("hotwebs/ 下没有这些目录：{}", unknown.join(", ")));
+    }
+    let mut default: Vec<String> = launch::DEFAULT_HOTWEBS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    default.sort();
+    Ok(if names == default { None } else { Some(names) })
+}
+
+/// 保存要挂载的 web 应用。`None` = 恢复默认（与 Eclipse 一致的 5 个）。
+///
+/// 只写配置，不动正在跑的 JVM：`-Duap.hotwebs` 是启动参数，改完要重启服务才生效。
+#[tauri::command]
+pub async fn hotwebs_set(
+    state: tauri::State<'_, Arc<AppState>>,
+    hotwebs: Option<Vec<String>>,
+) -> Result<HotwebsInfo, String> {
+    let cfg = state.config.read().await.clone();
+    let home = nc_home::resolve(cfg.nc_home.as_deref())?;
+    let root = PathBuf::from(&home.root);
+    // 读目录 + 校验在锁外；写配置走 update_config（全局串行，见 state.rs）
+    let normalized = normalize_hotwebs(&root, hotwebs)?;
+    let cfg = state
+        .update_config(move |cfg| {
+            cfg.hotwebs = normalized;
+            Ok(())
+        })
+        .await?;
+    Ok(hotwebs_info(&root, cfg.hotwebs.as_deref()))
 }
 
 /// 改端口前的运行中检查，**预览与执行共用同一句判断与文案**。
