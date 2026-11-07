@@ -48,8 +48,16 @@ function main() {
   const update = process.argv.includes("--update");
 
   if (update || !exists(BUDGET)) {
-    writeFileSync(BUDGET, `${JSON.stringify(actual, null, 2)}\n`, "utf8");
-    console.log(`✅ 体积预算已写入 scripts/bundle-budget.json（${actual.totalGzipKB} KB gzip / ${actual.totalRawKB} KB raw / 最大 chunk ${actual.maxChunkRawKB} KB）`);
+    // 预算 = 实际 + 5% 余量（向上取整到 10KB）。别贴着实际值写：曾经每次都恰好
+    // 等于上次产物，正常开发涨 1~2KB 就把发版构建打红，追着改预算文件。
+    // 余量只防「日常增长误伤」；真拖进大依赖（动辄几百 KB）依然会被拦住。
+    const budget = withHeadroom(actual);
+    writeFileSync(BUDGET, `${JSON.stringify(budget, null, 2)}\n`, "utf8");
+    console.log(
+      `✅ 体积预算已写入 scripts/bundle-budget.json（${budget.totalGzipKB} KB gzip / ` +
+        `${budget.totalRawKB} KB raw / 最大 chunk ${budget.maxChunkRawKB} KB；` +
+        `实际 ${actual.totalGzipKB}/${actual.totalRawKB}/${actual.maxChunkRawKB} KB + 5% 余量）`,
+    );
     return;
   }
 
@@ -78,6 +86,13 @@ function exists(p) {
   } catch {
     return false;
   }
+}
+
+/** 实际值 × 1.05，向上取整到 10 的倍数（KB）。 */
+function withHeadroom(actual) {
+  const out = {};
+  for (const [k, v] of Object.entries(actual)) out[k] = Math.ceil((v * 1.05) / 10) * 10;
+  return out;
 }
 
 main();

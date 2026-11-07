@@ -95,6 +95,8 @@ node scripts/gate.mjs --only rust-test   # = rust-gate test --no-default-feature
 
 内存占用、二进制体积（体积预算红线：**程序本体** NSIS ≤ 15MB，不含随包外部资源；壳子实测约 3.2MB，引依赖前先评估增量。随包资源（放 `src-tauri/resources/`，如 jdt.ls 0.57.0 约 53.5MB）单独计，整包预计约 75MB）、前端加载速度、轮询频率（窗口不可见时必须停轮询，统一用 `useAppHidden` + `refetchInterval: false`，不要自己起 `setInterval` 轮询）。
 
+**JS 产物体积预算**（`scripts/check-bundle-size.mjs` + `bundle-budget.json`）带 **5% 余量**：`--update` 自动按「实际 × 1.05 向上取整到 10KB」写预算，**不要手工贴着实际值写**——那会让正常开发涨 1~2KB 就把发版构建打红（2026-11-05 v0.1.2 与 11-07 的 mac 补发构建两次踩中）。余量只防日常增长误伤，真拖进大依赖（几百 KB 级）依然会被拦住。
+
 ### 8.1 常驻循环 / 后台任务的硬性检查项（每新增一个就过一遍）
 
 新增或修改任何 `loop` / 周期任务 / 事件消费循环时，**逐条回答**：
