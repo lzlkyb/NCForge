@@ -142,7 +142,8 @@ fn scan_tree(roots: &[(PathBuf, CandidateSource)]) -> Vec<HomeCandidate> {
                 // 两个），以及 `candidates` 的去重按字符串比较会失效。
                 // canonicalize 失败时保留原路径——读得到目录却解析不了是极端情况，
                 // 宁可给出一个「可能带短名」的候选，也不要凭空丢掉。
-                let real = strip_verbatim(&std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone()));
+                let real =
+                    strip_verbatim(&std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone()));
                 out.push(HomeCandidate {
                     root: real.to_string_lossy().to_string(),
                     module_count: count_subdirs(&real.join("modules")),
@@ -198,7 +199,10 @@ mod tests {
         fs::rename(&home, &nested).unwrap();
         let hits = scan_tree(&[(root.clone(), CandidateSource::DriveRoot)]);
         assert_eq!(hits.len(), 1);
-        assert_eq!(PathBuf::from(&hits[0].root), strip_verbatim(&fs::canonicalize(&nested).unwrap()));
+        assert_eq!(
+            PathBuf::from(&hits[0].root),
+            strip_verbatim(&fs::canonicalize(&nested).unwrap())
+        );
         assert_eq!(hits[0].module_count, 3);
         assert_eq!(hits[0].source, CandidateSource::DriveRoot);
         cleanup(&root);
@@ -215,7 +219,10 @@ mod tests {
         fs::rename(&home, &nested).unwrap();
         let hits = scan_tree(&[(root.clone(), CandidateSource::DriveRoot)]);
         assert_eq!(hits.len(), 1, "D:\\ncc\\1909home 这种放法必须能扫到");
-        assert_eq!(PathBuf::from(&hits[0].root), strip_verbatim(&fs::canonicalize(&nested).unwrap()));
+        assert_eq!(
+            PathBuf::from(&hits[0].root),
+            strip_verbatim(&fs::canonicalize(&nested).unwrap())
+        );
         cleanup(&root);
     }
 
@@ -259,7 +266,10 @@ mod tests {
         let home = fake_home("toobig-home");
         fs::rename(&home, many.join("1909home")).unwrap();
         let hits = scan_tree(&[(root.clone(), CandidateSource::DriveRoot)]);
-        assert!(hits.is_empty(), "超过 {MAX_CHILDREN_PER_DIR} 个条目的目录不展开");
+        assert!(
+            hits.is_empty(),
+            "超过 {MAX_CHILDREN_PER_DIR} 个条目的目录不展开"
+        );
         cleanup(&root);
     }
 
@@ -276,7 +286,10 @@ mod tests {
         fs::rename(&home, &nested).unwrap();
         let hits = scan_tree(&[(root.clone(), CandidateSource::DriveRoot)]);
         // 根本身花掉 1 次预算，剩 499 次给 d000…d498；zzz-home 排最后，扫不到
-        assert!(hits.is_empty(), "预算 {MAX_SCAN_DIRS} 用完后必须停：{hits:?}");
+        assert!(
+            hits.is_empty(),
+            "预算 {MAX_SCAN_DIRS} 用完后必须停：{hits:?}"
+        );
         cleanup(&root);
     }
 
@@ -323,7 +336,9 @@ mod tests {
         // 传 None / 空串 / 不存在路径都不该 panic
         assert!(candidates(None).iter().all(|h| !h.root.is_empty()));
         assert!(candidates(Some("   ")).iter().all(|h| !h.root.is_empty()));
-        assert!(candidates(Some("Z:\\__ncforge_no_such__")).iter().all(|h| !h.root.is_empty()));
+        assert!(candidates(Some("Z:\\__ncforge_no_such__"))
+            .iter()
+            .all(|h| !h.root.is_empty()));
     }
 
     #[test]

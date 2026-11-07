@@ -9,6 +9,7 @@
     "scripts/eclipse-completion-baseline.mjs",
     "scripts/java-completion-qa/verify.mjs",
     "scripts/check-component-size.mjs",
+    "scripts/check-rust-tempdir.mjs",
     "scripts/fake-update-server.mjs",
     "scripts/update-release-notes.d.mts"
   ],

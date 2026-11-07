@@ -430,7 +430,12 @@ pub fn initialize_args() -> Value {
 ///
 /// `projectName` 必须是 jdt.ls 里的工程名（影子工程，见 `shadow::PROJECT_NAME`）：
 /// java-debug 靠它向语言服务要 classpath，拿不到就解析不出类与源码的对应关系。
-pub fn attach_args(host: &str, jdwp_port: u16, project_name: &str, source_paths: &[String]) -> Value {
+pub fn attach_args(
+    host: &str,
+    jdwp_port: u16,
+    project_name: &str,
+    source_paths: &[String],
+) -> Value {
     json!({
         "request": "attach",
         "hostName": host,
@@ -446,7 +451,10 @@ pub fn attach_args(host: &str, jdwp_port: u16, project_name: &str, source_paths:
 /// 只做「能不能作为 socket 主机名」的基本检查：是否真的连得通由 attach 决定。
 /// 端口不接受 0——那是让操作系统随机分配，对「连一个已经在跑的 JVM」没有意义。
 pub fn remote_endpoint(host: Option<&str>, port: Option<u16>) -> Result<(String, u16), String> {
-    let host = host.map(str::trim).filter(|h| !h.is_empty()).unwrap_or("127.0.0.1");
+    let host = host
+        .map(str::trim)
+        .filter(|h| !h.is_empty())
+        .unwrap_or("127.0.0.1");
     if host.len() > 253 || host.chars().any(char::is_whitespace) {
         return Err(format!("远程主机地址不合法：「{host}」"));
     }
@@ -564,7 +572,12 @@ mod tests {
 
     #[test]
     fn attach_带主机并默认回环() {
-        let a = attach_args("127.0.0.1", 61539, "nc-forge-shadow", &[r"D:\shadow\gl".to_string()]);
+        let a = attach_args(
+            "127.0.0.1",
+            61539,
+            "nc-forge-shadow",
+            &[r"D:\shadow\gl".to_string()],
+        );
         assert_eq!(a["hostName"], "127.0.0.1");
         assert_eq!(a["port"], 61539);
         assert_eq!(a["request"], "attach");
@@ -583,8 +596,14 @@ mod tests {
         let b = set_breakpoints_args(
             r"D:\ws\gl\src\A.java",
             &[
-                BreakpointSpec { line: 3, ..Default::default() },
-                BreakpointSpec { line: 9, ..Default::default() },
+                BreakpointSpec {
+                    line: 3,
+                    ..Default::default()
+                },
+                BreakpointSpec {
+                    line: 9,
+                    ..Default::default()
+                },
             ],
         );
         assert_eq!(b["source"]["path"], r"D:\ws\gl\src\A.java");
@@ -670,21 +689,32 @@ mod tests {
         assert_eq!(DebugTarget::parse("client"), Ok(DebugTarget::Client));
         assert_eq!(DebugTarget::parse("remote"), Ok(DebugTarget::Remote));
         assert!(DebugTarget::parse("ui").unwrap_err().contains("server"));
-        assert_eq!(serde_json::to_value(DebugTarget::Client).unwrap(), json!("client"));
-        assert_eq!(serde_json::to_value(DebugTarget::Remote).unwrap(), json!("remote"));
+        assert_eq!(
+            serde_json::to_value(DebugTarget::Client).unwrap(),
+            json!("client")
+        );
+        assert_eq!(
+            serde_json::to_value(DebugTarget::Remote).unwrap(),
+            json!("remote")
+        );
     }
 
     #[test]
     fn 远程地址校验() {
         // 不填主机 = SSH 隧道到本机；端口必须有
-        assert_eq!(remote_endpoint(None, Some(5005)), Ok(("127.0.0.1".into(), 5005)));
+        assert_eq!(
+            remote_endpoint(None, Some(5005)),
+            Ok(("127.0.0.1".into(), 5005))
+        );
         assert_eq!(
             remote_endpoint(Some("  10.1.2.3  "), Some(5005)),
             Ok(("10.1.2.3".into(), 5005))
         );
         assert!(remote_endpoint(None, None).unwrap_err().contains("端口"));
         assert!(remote_endpoint(None, Some(0)).unwrap_err().contains("端口"));
-        assert!(remote_endpoint(Some("a b"), Some(5005)).unwrap_err().contains("不合法"));
+        assert!(remote_endpoint(Some("a b"), Some(5005))
+            .unwrap_err()
+            .contains("不合法"));
     }
 
     #[test]

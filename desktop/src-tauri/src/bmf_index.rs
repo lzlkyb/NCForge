@@ -83,7 +83,11 @@ pub fn scan(roots: &[RootSpec], cache_dir: Option<&Path>, force: bool) -> BmfInd
             files.push((p, r.origin.clone()));
         }
         if files.len() == before {
-            warnings.push(format!("{} 下没有找到 METADATA/*.bmf：{}", r.origin, r.path.display()));
+            warnings.push(format!(
+                "{} 下没有找到 METADATA/*.bmf：{}",
+                r.origin,
+                r.path.display()
+            ));
         }
     }
     files.sort_by(|a, b| a.0.cmp(&b.0));
@@ -140,7 +144,10 @@ pub fn scan(roots: &[RootSpec], cache_dir: Option<&Path>, force: bool) -> BmfInd
 
     BmfIndex {
         entries,
-        roots: roots.iter().map(|r| r.path.to_string_lossy().to_string()).collect(),
+        roots: roots
+            .iter()
+            .map(|r| r.path.to_string_lossy().to_string())
+            .collect(),
         warnings,
         elapsed_ms: t0.elapsed().as_millis(),
         cached,
@@ -191,7 +198,11 @@ fn module_of(path: &Path) -> String {
     let mut it = path.ancestors();
     let _ = it.next();
     let parent = it.next();
-    if parent.map(|p| p.file_name().map(|n| n.eq_ignore_ascii_case("METADATA")).unwrap_or(false)) == Some(true)
+    if parent.map(|p| {
+        p.file_name()
+            .map(|n| n.eq_ignore_ascii_case("METADATA"))
+            .unwrap_or(false)
+    }) == Some(true)
     {
         return it
             .next()
@@ -286,7 +297,12 @@ mod tests {
             r#"<component name="a" displayName="A" namespace="uapbd" version="2"><celllist><entity name="H"><attributelist><attribute name="pk"/></attributelist></entity><Enumerate name="e"/></celllist></component>"#,
         );
         write_bmf(&d, "baseapp", "broken.bmf", "<component><celllist>");
-        write_bmf(&d, "baseapp", "empty.bmf", r#"<component name="empty"><celllist/></component>"#);
+        write_bmf(
+            &d,
+            "baseapp",
+            "empty.bmf",
+            r#"<component name="empty"><celllist/></component>"#,
+        );
         let idx = scan(
             &[RootSpec {
                 origin: "工作区".into(),
@@ -302,7 +318,11 @@ mod tests {
         assert_eq!(a.attr_count, 1);
         assert_eq!(a.enum_count, 1);
         assert_eq!(a.module, "uapbd");
-        let broken = idx.entries.iter().find(|e| e.path.contains("broken")).unwrap();
+        let broken = idx
+            .entries
+            .iter()
+            .find(|e| e.path.contains("broken"))
+            .unwrap();
         assert!(broken.error.is_some(), "解析失败要留在索引里并带原因");
         let empty = idx.entries.iter().find(|e| e.name == "empty").unwrap();
         assert_eq!(empty.entity_count, 0);
@@ -341,7 +361,12 @@ mod tests {
     fn cache_is_invalidated_when_file_changes() {
         let d = tmpdir("inval");
         let root = d.join("root");
-        let p = write_bmf(&root, "m1", "x.bmf", r#"<component name="x"><celllist/></component>"#);
+        let p = write_bmf(
+            &root,
+            "m1",
+            "x.bmf",
+            r#"<component name="x"><celllist/></component>"#,
+        );
         let cache = d.join("cache");
         std::fs::create_dir_all(&cache).unwrap();
         let roots = [RootSpec {

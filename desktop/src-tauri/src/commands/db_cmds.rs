@@ -49,7 +49,9 @@ const SLOT_IDLE: Duration = Duration::from_secs(600);
 pub(crate) fn slot_key(id: &str, slot: Option<&str>) -> Result<String, String> {
     match slot.map(str::trim).filter(|s| !s.is_empty()) {
         None => Ok(id.to_string()),
-        Some(s) if s.chars().all(|c| c.is_ascii_digit()) && s.parse::<u64>().is_ok() => Ok(format!("{id}#{s}")),
+        Some(s) if s.chars().all(|c| c.is_ascii_digit()) && s.parse::<u64>().is_ok() => {
+            Ok(format!("{id}#{s}"))
+        }
         Some(s) => Err(code_label("sql", &format!("会话槽名不合法：{s}"))),
     }
 }
@@ -116,7 +118,11 @@ fn live_slots(state: &AppState, id: &str) -> Vec<String> {
         .map(|m| {
             m.keys()
                 .filter_map(|k| k.strip_prefix(&prefix).map(str::to_string))
-                .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) && s.parse::<u64>().is_ok())
+                .filter(|s| {
+                    !s.is_empty()
+                        && s.chars().all(|c| c.is_ascii_digit())
+                        && s.parse::<u64>().is_ok()
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -544,7 +550,9 @@ pub(crate) async fn call(
 fn engine_error(e: db_bridge::BridgeError) -> String {
     match e.code.as_str() {
         "timeout" | "spawn" => code_label("bridge", &e.message),
-        "session-lost" | "probe-failed" | "need-password" | "auth" => code_label(&e.code, &e.message),
+        "session-lost" | "probe-failed" | "need-password" | "auth" => {
+            code_label(&e.code, &e.message)
+        }
         _ => map_sql_error(&e.message),
     }
 }
@@ -594,7 +602,10 @@ pub(crate) fn need_nc_home(why: &str) -> String {
 /// 桥的 SQL 错误翻译成前端好用的码：认证失败要弹输口令框，网络不通单独提示。
 pub(crate) fn map_sql_error(message: &str) -> String {
     let m = message.to_lowercase();
-    if m.contains("ora-01017") || m.starts_with("ora 1017：") || m.contains("invalid username/password") || m.contains("登录被拒")
+    if m.contains("ora-01017")
+        || m.starts_with("ora 1017：")
+        || m.contains("invalid username/password")
+        || m.contains("登录被拒")
     {
         return code_label("auth", message);
     }
@@ -876,7 +887,9 @@ pub async fn db_slot_acquire(
     }
     // 已回收的标签仍可能带着旧编号，不能把它的下一条 SQL 发到别人的新会话。
     static NEXT_SLOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    let slot = NEXT_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed).to_string();
+    let slot = NEXT_SLOT
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        .to_string();
     let key = slot_key(&id, Some(&slot))?;
     let engine = EngineKind::parse(&conn.engine);
     // 新槽必须继承用户手动切过的 schema（`alter session` 不会跨会话继承）
@@ -1102,7 +1115,9 @@ pub async fn db_exec(
             })
             .await
             .map_err(|fallback| {
-                if fallback.starts_with("fallback-session-lost|") || fallback.starts_with("probe-failed|") {
+                if fallback.starts_with("fallback-session-lost|")
+                    || fallback.starts_with("probe-failed|")
+                {
                     fallback
                 } else {
                     format!("{e}\n（自动改走 JVM 桥也没成：{fallback}）")
@@ -1249,7 +1264,16 @@ pub async fn db_tx(
         } else {
             b
         };
-        return call_with_reconnect(&state, &id, target, "reconnect", Vec::new(), T_CONNECT, password).await;
+        return call_with_reconnect(
+            &state,
+            &id,
+            target,
+            "reconnect",
+            Vec::new(),
+            T_CONNECT,
+            password,
+        )
+        .await;
     }
     let (cmd, args): (&'static str, Vec<String>) = match action.as_str() {
         "commit" => ("commit", vec![]),
@@ -1309,7 +1333,8 @@ pub async fn db_set_schema(
             continue;
         }
         if let Ok(h) = existing_bridge(&state, &key) {
-            if let Err(e) = call(h, "setSchema", vec![name.clone()], Duration::from_secs(30)).await {
+            if let Err(e) = call(h, "setSchema", vec![name.clone()], Duration::from_secs(30)).await
+            {
                 warnings.push(format!("{key}: {e}"));
             }
         }
@@ -1373,7 +1398,11 @@ pub async fn db_meta(
     }
     let args: Vec<String> = arg.into_iter().chain(arg2).collect();
     // 这几个不需要参数。加新 kind 时别忘了把「无参」的也列进来，否则会被下面这段拦掉
-    if !matches!(cmd, "tables" | "ncNames" | "sessions" | "objects" | "schemas") && args.is_empty() {
+    if !matches!(
+        cmd,
+        "tables" | "ncNames" | "sessions" | "objects" | "schemas"
+    ) && args.is_empty()
+    {
         return Err(format!("{cmd} 需要参数"));
     }
     call(b, cmd, args, T_META).await

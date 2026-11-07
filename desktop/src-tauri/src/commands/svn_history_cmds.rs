@@ -312,11 +312,7 @@ pub async fn bmf_revision_text(
         let value = bridge
             .call(
                 "revision_diff",
-                &[
-                    &display_path(&wc),
-                    &repository_path,
-                    &revision.to_string(),
-                ],
+                &[&display_path(&wc), &repository_path, &revision.to_string()],
                 svn::T_NET,
             )
             .map_err(|e| svn::split_code_label(e.code, e.message))?;

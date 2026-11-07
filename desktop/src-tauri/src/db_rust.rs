@@ -110,7 +110,9 @@ fn drv_err(e: Error) -> BridgeError {
             "timeout",
             "语句已中断（点了停止，或等待超过超时时间）。会话仍然可用",
         ),
-        ErrorKind::DeadConnection => BridgeError::new("session-lost", "连接已断开（数据库或网络关闭了它）"),
+        ErrorKind::DeadConnection => {
+            BridgeError::new("session-lost", "连接已断开（数据库或网络关闭了它）")
+        }
         _ => BridgeError::new("sql", e.to_string()),
     }
 }
@@ -1782,9 +1784,12 @@ fn scalar_string(conn: &Connection, sql: &str) -> Option<String> {
 /// 不缓存成字段：用户完全可能自己发一句 `alter session set current_schema`，
 /// 缓存就会和真实会话不一致，界面上显示的名字就成了假的。
 fn current_schema_of(conn: &Connection) -> Option<String> {
-    scalar_string(conn, "select sys_context('userenv','current_schema') from dual")
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    scalar_string(
+        conn,
+        "select sys_context('userenv','current_schema') from dual",
+    )
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty())
 }
 
 /// 把会话切到 `name`，返回生效后的 schema 名。空串 = 回到登录账号自己的 schema。

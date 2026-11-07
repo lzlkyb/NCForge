@@ -801,9 +801,11 @@ pub async fn nc_home_candidates(
 ) -> Result<Vec<HomeCandidate>, String> {
     // 只需要工作区路径（定位「同级目录」那一路），读完马上放锁
     let workspace = state.config.read().await.workspace_root.clone();
-    tauri::async_runtime::spawn_blocking(move || crate::nc_home_scan::candidates(workspace.as_deref()))
-        .await
-        .map_err(|e| format!("后台任务失败: {e}"))
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::nc_home_scan::candidates(workspace.as_deref())
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))
 }
 
 /// 设置中间件堆上限（MB）。传 `None` = 恢复默认 4G。返回生效值。

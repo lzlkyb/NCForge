@@ -53,8 +53,12 @@ pub fn find_candidates(
         return Err("组件编码为空，先打开一个 BMF".to_string());
     }
     let modules = home.join("modules");
-    let read = std::fs::read_dir(&modules)
-        .map_err(|e| format!("读不到 {}：{e}（NC 安装目录是否还在这个位置？）", modules.display()))?;
+    let read = std::fs::read_dir(&modules).map_err(|e| {
+        format!(
+            "读不到 {}：{e}（NC 安装目录是否还在这个位置？）",
+            modules.display()
+        )
+    })?;
     let mut module_dirs: Vec<PathBuf> = read
         .flatten()
         .filter(|e| e.path().is_dir())
@@ -102,7 +106,10 @@ pub fn find_candidates(
 
 /// 选一个候选：没指定就用第一个；指定了必须命中候选（前端只能从列表里选，
 /// 不接受任意路径，这样「只读范围」永远限定在刚扫出来的那批文件里）。
-pub fn pick(candidates: &[Candidate], requested: Option<&str>) -> Result<Option<Candidate>, String> {
+pub fn pick(
+    candidates: &[Candidate],
+    requested: Option<&str>,
+) -> Result<Option<Candidate>, String> {
     let Some(req) = requested.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(candidates.first().cloned());
     };
@@ -210,7 +217,11 @@ mod tests {
         let list = find_candidates(&home, "demo", None).unwrap();
         assert_eq!(pick(&list, None).unwrap().unwrap().path, list[0].path);
         assert!(pick(&list, Some(&list[0].path)).unwrap().is_some());
-        let outside = home.join("modules").join("uapbd").join("METADATA").join("other.bmf");
+        let outside = home
+            .join("modules")
+            .join("uapbd")
+            .join("METADATA")
+            .join("other.bmf");
         fs::write(&outside, b"<component/>").unwrap();
         let err = pick(&list, Some(&outside.to_string_lossy())).unwrap_err();
         assert!(err.contains("不在"), "{err}");

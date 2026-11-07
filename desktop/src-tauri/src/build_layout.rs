@@ -290,7 +290,9 @@ pub fn strip_prefix_ci(path: &Path, base: &Path) -> Option<PathBuf> {
     let p = slash(path);
     let b = slash(base);
     let rest = p[b.len()..].trim_start_matches('/');
-    Some(PathBuf::from(rest.replace('/', std::path::MAIN_SEPARATOR_STR)))
+    Some(PathBuf::from(
+        rest.replace('/', std::path::MAIN_SEPARATOR_STR),
+    ))
 }
 
 pub fn slash(p: &Path) -> String {
@@ -298,7 +300,10 @@ pub fn slash(p: &Path) -> String {
 }
 
 fn clean_rel(p: &Path) -> String {
-    slash(p).trim_start_matches('/').trim_end_matches('/').to_string()
+    slash(p)
+        .trim_start_matches('/')
+        .trim_end_matches('/')
+        .to_string()
 }
 
 /// `src/test`（以及 `test`）默认不参与编译：与现状一致，先不把测试产物混进主产物。
@@ -358,10 +363,7 @@ mod tests {
     use super::*;
 
     fn tmp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "ncwb-layout-{tag}-{}",
-            std::process::id()
-        ));
+        let d = std::env::temp_dir().join(format!("ncwb-layout-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -460,10 +462,7 @@ mod tests {
         let m = root.join("gl");
         std::fs::create_dir_all(m.join("src/public")).unwrap();
         let l = ModuleLayout::resolve(&root, "gl");
-        assert!(l.matches_manifest(
-            &["src/public".to_string()],
-            &["classes".to_string()]
-        ));
+        assert!(l.matches_manifest(&["src/public".to_string()], &["classes".to_string()]));
         assert!(!l.matches_manifest(&["src/client".to_string()], &["classes".to_string()]));
     }
 

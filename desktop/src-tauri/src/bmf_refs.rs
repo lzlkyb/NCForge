@@ -66,7 +66,10 @@ pub fn references(target: &BmfDoc, others: &[BmfDoc]) -> RefScan {
     'docs: for doc in others {
         for ent in &doc.entities {
             for attr in &ent.attrs {
-                for (field, value) in [("typeName", &attr.type_name), ("refModelName", &attr.ref_model)] {
+                for (field, value) in [
+                    ("typeName", &attr.type_name),
+                    ("refModelName", &attr.ref_model),
+                ] {
                     let v = value.trim();
                     if v.is_empty() || !keys.contains_key(&v.to_lowercase()) {
                         continue;
@@ -93,7 +96,9 @@ pub fn references(target: &BmfDoc, others: &[BmfDoc]) -> RefScan {
 /// 连同解析失败计数一起扫描一组文件。目标文件自身会被跳过。
 pub fn scan_files(target_path: &std::path::Path, files: &[PathBuf]) -> Result<RefScan, String> {
     let target = BmfDoc::open(target_path)?;
-    let target_norm = target_path.canonicalize().unwrap_or_else(|_| target_path.to_path_buf());
+    let target_norm = target_path
+        .canonicalize()
+        .unwrap_or_else(|_| target_path.to_path_buf());
     let mut docs = Vec::new();
     let mut skipped = 0;
     for f in files {
@@ -127,9 +132,18 @@ mod tests {
         let scan = references(&doc("c.bmf", TARGET), &[doc("d.bmf", OTHER)]);
         assert_eq!(scan.scanned, 1);
         assert_eq!(scan.hits.len(), 3, "{:?}", scan.hits);
-        assert!(scan.hits.iter().all(|h| h.component == "d" && h.entity == "B"));
-        assert!(scan.hits.iter().any(|h| h.attr == "h2" && h.field == "refModelName" && h.value == "NC.VO.M.C.H"));
-        assert!(scan.hits.iter().any(|h| h.attr == "e" && h.value == "nc.vo.m.c.StEnum"));
+        assert!(scan
+            .hits
+            .iter()
+            .all(|h| h.component == "d" && h.entity == "B"));
+        assert!(scan
+            .hits
+            .iter()
+            .any(|h| h.attr == "h2" && h.field == "refModelName" && h.value == "NC.VO.M.C.H"));
+        assert!(scan
+            .hits
+            .iter()
+            .any(|h| h.attr == "e" && h.value == "nc.vo.m.c.StEnum"));
         assert!(!scan.hits.iter().any(|h| h.attr == "s" || h.attr == "a3"));
     }
 

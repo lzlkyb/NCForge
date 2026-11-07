@@ -162,12 +162,25 @@ pub(crate) fn connection_lost(message: &str) -> bool {
         .strip_prefix("ora ")
         .and_then(|rest| rest.split_once('：'))
         .and_then(|(code, _)| code.parse::<u32>().ok());
-    matches!(jdbc_code, Some(3113 | 3114 | 1012 | 2396 | 28 | 17008 | 17410))
-        || [
-            "os error 10054", "os error 10053", "connection reset", "broken pipe",
-            "ora-03113", "ora-03114", "ora-01012", "ora-02396", "ora-00028",
-            "ora-17008", "ora-17410", "no more data to read from socket",
-        ].iter().any(|code| text.contains(code))
+    matches!(
+        jdbc_code,
+        Some(3113 | 3114 | 1012 | 2396 | 28 | 17008 | 17410)
+    ) || [
+        "os error 10054",
+        "os error 10053",
+        "connection reset",
+        "broken pipe",
+        "ora-03113",
+        "ora-03114",
+        "ora-01012",
+        "ora-02396",
+        "ora-00028",
+        "ora-17008",
+        "ora-17410",
+        "no more data to read from socket",
+    ]
+    .iter()
+    .any(|code| text.contains(code))
 }
 
 type ReconnectArgs = (&'static str, Vec<String>);
@@ -300,17 +313,30 @@ impl EngineHandle {
         }
         let connecting = matches!(cmd, "connect" | "connectProp");
         if state.lost && !connecting {
-            return Err(BridgeError::new("session-lost", "数据库会话已断开，请重新连接并核对事务状态"));
+            return Err(BridgeError::new(
+                "session-lost",
+                "数据库会话已断开，请重新连接并核对事务状态",
+            ));
         }
         let execution = matches!(cmd, "exec" | "execBound");
-        if execution && state.last_success.is_some_and(|t| t.elapsed() >= PROBE_AFTER) {
+        if execution
+            && state
+                .last_success
+                .is_some_and(|t| t.elapsed() >= PROBE_AFTER)
+        {
             match self.raw_call("probe", &[], PROBE_TIMEOUT) {
                 Ok(v) if v.get("alive").and_then(Value::as_bool) == Some(true) => {}
                 Ok(v) if v.get("alive").and_then(Value::as_bool).is_none() => {
-                    return Err(BridgeError::new("probe-failed", "连接探测未返回有效状态，SQL 尚未发送"));
+                    return Err(BridgeError::new(
+                        "probe-failed",
+                        "连接探测未返回有效状态，SQL 尚未发送",
+                    ));
                 }
                 Err(e) if e.code != "session-lost" && !connection_lost(&e.message) => {
-                    return Err(BridgeError::new("probe-failed", format!("连接探测失败，SQL 尚未发送。{}", e.message)));
+                    return Err(BridgeError::new(
+                        "probe-failed",
+                        format!("连接探测失败，SQL 尚未发送。{}", e.message),
+                    ));
                 }
                 _ => {
                     state.lost = true;
@@ -318,20 +344,40 @@ impl EngineHandle {
                         return Err(BridgeError::new("session-lost", "数据库会话已断开，当前 SQL 尚未发送。请核对旧会话的事务和设置后重新连接"));
                     }
                     self.reopen(&mut state, Duration::from_secs(15), reconnect)
-                        .map_err(|e| BridgeError::new("session-lost", format!("数据库会话已断开，当前 SQL 尚未发送。重连失败：{}", e.message)))?;
+                        .map_err(|e| {
+                            BridgeError::new(
+                                "session-lost",
+                                format!(
+                                    "数据库会话已断开，当前 SQL 尚未发送。重连失败：{}",
+                                    e.message
+                                ),
+                            )
+                        })?;
                 }
             }
         }
         if self.closed.load(Ordering::Acquire) {
-            return Err(BridgeError::new("session-lost", "该会话已经关闭，SQL 尚未发送"));
+            return Err(BridgeError::new(
+                "session-lost",
+                "该会话已经关闭，SQL 尚未发送",
+            ));
         }
         if execution && self.cancel_epoch.load(Ordering::Relaxed) != epoch {
-            return Err(BridgeError::new("sql", "ORA-01013：执行已取消，SQL 尚未发送"));
+            return Err(BridgeError::new(
+                "sql",
+                "ORA-01013：执行已取消，SQL 尚未发送",
+            ));
         }
         if readonly
             && !matches!(
                 cmd,
-                "connect" | "connectProp" | "disconnect" | "hello" | "propList" | "propCred" | "ping"
+                "connect"
+                    | "connectProp"
+                    | "disconnect"
+                    | "hello"
+                    | "propList"
+                    | "propCred"
+                    | "ping"
             )
         {
             if let Err(e) = self.raw_call("readOnly", &["true"], timeout) {
@@ -339,9 +385,14 @@ impl EngineHandle {
             }
         }
         if execution && self.cancel_epoch.load(Ordering::Relaxed) != epoch {
-            return Err(BridgeError::new("sql", "ORA-01013：执行已取消，SQL 尚未发送"));
+            return Err(BridgeError::new(
+                "sql",
+                "ORA-01013：执行已取消，SQL 尚未发送",
+            ));
         }
-        if cmd == "setSchema" || (execution && !stateless_query(args.first().copied().unwrap_or(""))) {
+        if cmd == "setSchema"
+            || (execution && !stateless_query(args.first().copied().unwrap_or("")))
+        {
             state.session_used = true;
         }
         let result = match &self.inner {
@@ -357,7 +408,10 @@ impl EngineHandle {
         let result = result.map_err(|e| Self::record_loss(&mut state, e, !connecting))?;
         if connecting {
             *state = Recovery {
-                auto_commit: result.get("autoCommit").and_then(Value::as_bool).unwrap_or(false),
+                auto_commit: result
+                    .get("autoCommit")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
                 ..Recovery::default()
             };
         } else if cmd == "autocommit" {
@@ -382,7 +436,10 @@ impl EngineHandle {
             return Err(BridgeError::new("session-lost", "该会话已经关闭"));
         }
         let Some((cmd, args)) = reconnect(state.auto_commit)? else {
-            return Err(BridgeError::new("session-lost", "数据库会话已断开，当前 SQL 尚未发送，请重新连接"));
+            return Err(BridgeError::new(
+                "session-lost",
+                "数据库会话已断开，当前 SQL 尚未发送，请重新连接",
+            ));
         };
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         self.raw_call(cmd, &args, timeout)?;
@@ -591,7 +648,9 @@ fn stateless_query(sql: &str) -> bool {
     let code = strip_literals(sql).to_ascii_lowercase();
     let identifier = |c: char| c.is_alphanumeric() || matches!(c, '_' | '$' | '#');
     if !readonly_query(sql)
-        || code.split(|c| !identifier(c)).any(|word| matches!(word, "currval" | "nextval"))
+        || code
+            .split(|c| !identifier(c))
+            .any(|word| matches!(word, "currval" | "nextval"))
     {
         return false;
     }
@@ -606,8 +665,20 @@ fn stateless_query(sql: &str) -> bool {
         }
         matches!(
             &prefix[start..],
-            "" | "select" | "from" | "in" | "exists" | "where" | "and" | "or"
-                | "not" | "as" | "count" | "sum" | "avg" | "min" | "max"
+            "" | "select"
+                | "from"
+                | "in"
+                | "exists"
+                | "where"
+                | "and"
+                | "or"
+                | "not"
+                | "as"
+                | "count"
+                | "sum"
+                | "avg"
+                | "min"
+                | "max"
         )
     })
 }
@@ -681,11 +752,13 @@ mod tests {
                 state.auto_commit = true;
             }
             let mut reconnects = 0;
-            let error = engine.call_guarded("exec", &["select 1 from dual"], PROBE_TIMEOUT, |auto| {
-                assert!(auto, "恢复时沿用当前会话的事务模式");
-                reconnects += 1;
-                Err(BridgeError::new("need-password", "测试：需要口令"))
-            }).unwrap_err();
+            let error = engine
+                .call_guarded("exec", &["select 1 from dual"], PROBE_TIMEOUT, |auto| {
+                    assert!(auto, "恢复时沿用当前会话的事务模式");
+                    reconnects += 1;
+                    Err(BridgeError::new("need-password", "测试：需要口令"))
+                })
+                .unwrap_err();
             assert_eq!(error.code, "session-lost");
             assert!(error.message.contains("尚未发送"));
             assert_eq!(reconnects, usize::from(!session_used));
@@ -704,7 +777,8 @@ mod tests {
         assert_eq!(error.code, "session-lost");
         assert!(error.message.contains("结果需核对"));
         for cmd in ["exec", "commit", "more"] {
-            let error = engine.call_guarded(cmd, &[], PROBE_TIMEOUT, |_| panic!("不可重连并重放"))
+            let error = engine
+                .call_guarded(cmd, &[], PROBE_TIMEOUT, |_| panic!("不可重连并重放"))
                 .unwrap_err();
             assert_eq!(error.code, "session-lost");
         }
@@ -712,7 +786,9 @@ mod tests {
 
     #[test]
     fn recovery_distinguishes_pagination_from_session_bound_expressions() {
-        assert!(stateless_query("select * from (select a.* from (select * from t) a where rownum <= 201) where rn > 0"));
+        assert!(stateless_query(
+            "select * from (select a.* from (select * from t) a where rownum <= 201) where rn > 0"
+        ));
         assert!(stateless_query("select count(*) from t where id in (1, 2)"));
         assert!(!stateless_query("select pkg.count(*) from dual"));
         assert!(!stateless_query("select sequence_1.nextval from dual"));

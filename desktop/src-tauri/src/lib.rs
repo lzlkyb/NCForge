@@ -17,8 +17,8 @@ pub mod bmf_gen;
 pub mod bmf_gen_java;
 pub mod bmf_gen_manifest;
 pub mod bmf_gen_plan;
-pub mod bmf_gen_sql;
 pub mod bmf_gen_snapshot;
+pub mod bmf_gen_sql;
 pub mod bmf_gen_types;
 pub mod bmf_gen_write;
 pub mod bmf_index;
@@ -45,23 +45,23 @@ pub mod db_bridge;
 pub mod db_conns;
 pub mod db_engine;
 pub mod db_file_export;
+pub mod db_rust;
+pub mod db_schema;
 pub mod db_transfer;
 pub mod db_transfer_destination;
 pub mod db_transfer_job;
 pub mod db_transfer_xlsx;
-pub mod db_rust;
-pub mod db_schema;
 pub mod db_value_search;
 pub mod db_zh;
 pub mod debug;
 pub mod decompile;
-pub mod eclipse_cp;
 pub mod ecj_worker;
+pub mod eclipse_cp;
 pub mod encoding_reg;
 pub mod java_bridge;
+mod java_tree;
 pub mod java_type_completion;
 pub mod java_types;
-mod java_tree;
 pub mod lang;
 pub mod launch;
 pub mod local_history;
@@ -101,6 +101,11 @@ pub mod svn_view;
 pub mod watcher;
 pub mod workspace;
 pub mod workspace_types;
+
+/// 测试专用工具（临时目录等）。只在 `cfg(test)` 下编译：unit test 用
+/// `crate::test_support::tmp("tag")`，它就藏在这里。
+#[cfg(test)]
+pub mod test_support;
 
 // main.rs 用 `use nc_forge::*;` 一把引入；AppState 是最常被引用的托管状态，
 // 在根上再导出，避免 main.rs 里写 `use nc_forge::state::AppState` 的长路径。

@@ -173,8 +173,8 @@ pub async fn build_clean_tmp(state: State<'_, Arc<AppState>>) -> Result<CleanTmp
                 continue;
             }
             let name = e.file_name().to_string_lossy().to_ascii_lowercase();
-            let ours = (name.starts_with("ecj-") && name.ends_with(".args"))
-                || name.contains(".tmp");
+            let ours =
+                (name.starts_with("ecj-") && name.ends_with(".args")) || name.contains(".tmp");
             if !ours {
                 continue;
             }
@@ -214,9 +214,7 @@ pub struct BuildCacheInfo {
 
 /// 设置页「维护」卡片：缓存占用、上次构建、未跟踪产物。
 #[tauri::command]
-pub async fn build_cache_info(
-    state: State<'_, Arc<AppState>>,
-) -> Result<BuildCacheInfo, String> {
+pub async fn build_cache_info(state: State<'_, Arc<AppState>>) -> Result<BuildCacheInfo, String> {
     let (_, root) = super::compile_cmds::workspace_roots(&state).await?;
     let config_dir = state.config_dir.clone();
     let parallel = {
@@ -276,9 +274,7 @@ pub async fn build_cache_info(
 
 /// 构建历史（最近 50 条模块结果）。
 #[tauri::command]
-pub async fn build_history(
-    state: State<'_, Arc<AppState>>,
-) -> Result<Vec<HistoryEntry>, String> {
+pub async fn build_history(state: State<'_, Arc<AppState>>) -> Result<Vec<HistoryEntry>, String> {
     let (_, root) = super::compile_cmds::workspace_roots(&state).await?;
     let config_dir: PathBuf = state.config_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {

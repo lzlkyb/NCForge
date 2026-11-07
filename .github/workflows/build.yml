@@ -62,42 +62,53 @@ jobs:
       - name: Install frontend deps
         run: npm ci
         working-directory: desktop
+      # 门禁清单的唯一真源是 desktop/scripts/lib/gate-plan.mjs。这一步断言
+      # 「workflow 里的步骤序列 == 清单里 frontend scope 的序列」：少了、多了、
+      # 顺序漂了，或者谁又在这里手写了一遍命令，都在这里红。秒级，放最前。
+      - name: 门禁清单 ↔ workflow 一致
+        run: node scripts/gate.mjs --verify-ci
+        working-directory: desktop
       - name: 组件体量门禁（行数 + 状态数）
-        run: node scripts/check-component-size.mjs
+        run: node scripts/gate.mjs --only component-size
         working-directory: desktop
       # 孤立文件 / 依赖：knip 只看 files + dependencies（export/type 存量多，暂不收紧）。
       - name: 孤立文件 / 依赖（knip）
-        run: npm run orphans:check
+        run: node scripts/gate.mjs --only knip
         working-directory: desktop
       # Rust generate_handler! 是命令真源；生成物过期、前端拼错命令名都在这里拦。
       - name: Tauri 命令契约（Rust ↔ TS）
-        run: npm run contract:check
+        run: node scripts/gate.mjs --only contract
         working-directory: desktop
       # 裸 hex 色值只许减不许增；新增颜色必须落到 :root token。
       - name: 设计 token 棘轮
-        run: npm run tokens:check
+        run: node scripts/gate.mjs --only tokens
         working-directory: desktop
       # 缓动必须走 token、字号不得低于 10px；存量违规记基线，只许减。
       - name: UI 约定棘轮
-        run: npm run ui:check
+        run: node scripts/gate.mjs --only ui-contract
+        working-directory: desktop
+      # 测试里裸用 std::env::temp_dir() 只许减不许增。纯文件扫描，不需要 Rust 工具链，
+      # 所以放前端 job：这些路径问题正是「本地绿、CI 红」的主因之一。
+      - name: Rust 测试临时目录棘轮
+        run: node scripts/gate.mjs --only rust-tempdir
         working-directory: desktop
       # 存量违规记在 eslint-suppressions.json（棘轮，只许减少），新违规直接拦。
       - name: eslint
-        run: npm run lint
+        run: node scripts/gate.mjs --only eslint
         working-directory: desktop
       - name: tsc --noEmit
-        run: npx tsc --noEmit
+        run: node scripts/gate.mjs --only tsc
         working-directory: desktop
       - name: vitest
-        run: npm test
+        run: node scripts/gate.mjs --only vitest
         working-directory: desktop
       # vite:build 自带 tsc，上面单跑一次是为了让类型错误早一步、单独报出来。
       - name: vite build
-        run: npm run vite:build
+        run: node scripts/gate.mjs --only vite-build
         working-directory: desktop
       # 体积预算必须基于真实产物，所以放在 build 之后；预算文件是棘轮。
       - name: JS 产物体积预算
-        run: npm run bundle:check
+        run: node scripts/gate.mjs --only bundle-budget
         working-directory: desktop
 
   # 轻量测试：仅 PR / 非 tag 的 push / 手动触发时跑，保护合入质量（用 dev 编译，快）。
@@ -118,18 +129,22 @@ jobs:
       # 未使用依赖：误报登记在 src-tauri/Cargo.toml 的 cargo-machete.metadata。
       - name: cargo-machete（未使用依赖）
         uses: taiki-e/install-action@cargo-machete
+      # cargo fmt --check 在本轮之前 CI 里根本不存在（只有那个从未安装过的钩子跑它），
+      # 于是格式可以连着十次 push 都没人管。最便宜的检查，放最前。
+      - name: cargo fmt --check
+        run: node scripts/gate.mjs --only fmt
+        working-directory: desktop
       - name: cargo machete
-        run: cargo machete
-        working-directory: desktop/src-tauri
-      - name: cargo test
-        run: cargo test --no-default-features
-        working-directory: desktop/src-tauri
-      # clippy 齐平：macOS 侧（check-macos）跑 `--all-targets -D warnings`，
-      # Windows 侧原先只有 test —— 注释却声称"两边齐平"。lint 漏一边等于没门禁
-      # （Windows 主力平台上的警告永远没人看见）。
+        run: node scripts/gate.mjs --only machete
+        working-directory: desktop
+      # clippy 排在 test 之前：lint 比跑测试快，失败早一步暴露。
+      # 齐平：macOS 侧（check-macos）跑同一项，两边都 --all-targets -D warnings。
       - name: cargo clippy (与 macOS 侧同等严格)
-        run: cargo clippy --all-targets --no-default-features -- -D warnings
-        working-directory: desktop/src-tauri
+        run: node scripts/gate.mjs --only clippy
+        working-directory: desktop
+      - name: cargo test
+        run: node scripts/gate.mjs --only rust-test
+        working-directory: desktop
 
   # macOS 编译门禁。为何需要它：多数桌面项目主力平台是 Windows、开发机也是
   # Windows，而平台差异（平台专属 crate feature、缺失的 cfg(not(windows)) 分支）
@@ -150,14 +165,14 @@ jobs:
         with:
           workspaces: desktop/src-tauri
       - name: clippy (与 Windows 侧同等严格)
-        run: cargo clippy --all-targets --no-default-features -- -D warnings
-        working-directory: desktop/src-tauri
+        run: node scripts/gate.mjs --only clippy
+        working-directory: desktop
       # 真实跑测试，而不只是编译。壳子的 Rust 侧（config 持久化、路径白名单、
       # 更新错误分类）**不依赖 GUI**，完全能在 CI 的 mac 上验证。
       # 仍验不到的只有 GUI：托盘外观与交互、窗口行为、Gatekeeper、自动更新。
       - name: cargo test（真实执行，非仅编译）
-        run: cargo test --no-default-features
-        working-directory: desktop/src-tauri
+        run: node scripts/gate.mjs --only rust-test
+        working-directory: desktop
 
   # ── macOS 打包 / 发版（默认不发，需手动触发）──────────────────────────
   # 产出 .app.tar.gz + .sig + 平台片段（updater-macos.json），

@@ -39,7 +39,13 @@ pub struct Probe {
     pub manual: String,
 }
 
-fn check(id: &str, label: &str, status: &str, detail: impl Into<String>, hint: impl Into<String>) -> Check {
+fn check(
+    id: &str,
+    label: &str,
+    status: &str,
+    detail: impl Into<String>,
+    hint: impl Into<String>,
+) -> Check {
     Check {
         id: id.to_string(),
         label: label.to_string(),
@@ -53,7 +59,12 @@ fn check(id: &str, label: &str, status: &str, detail: impl Into<String>, hint: i
 ///
 /// `component` / `module` 只用于文案与路径提示，不做存在性推断：
 /// 自定义模块的目录名不一定等于 ownModule。
-pub fn probe(nc_home_cfg: Option<&str>, component: &str, module: &str, bmf_path: Option<&str>) -> Probe {
+pub fn probe(
+    nc_home_cfg: Option<&str>,
+    component: &str,
+    module: &str,
+    bmf_path: Option<&str>,
+) -> Probe {
     let mut checks = Vec::new();
     let mut root: Option<PathBuf> = None;
 
@@ -185,8 +196,16 @@ pub fn probe(nc_home_cfg: Option<&str>, component: &str, module: &str, bmf_path:
 
 /// 操作手册：直接给用户照做，不要求他再回来读代码或猜顺序。
 pub fn manual(component: &str, module: &str, nc_home: Option<&Path>) -> String {
-    let comp = if component.trim().is_empty() { "<组件编码>" } else { component.trim() };
-    let module = if module.trim().is_empty() { "<模块>" } else { module.trim() };
+    let comp = if component.trim().is_empty() {
+        "<组件编码>"
+    } else {
+        component.trim()
+    };
+    let module = if module.trim().is_empty() {
+        "<模块>"
+    } else {
+        module.trim()
+    };
     let home = nc_home
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<NC home>".to_string());
@@ -414,8 +433,9 @@ pub fn plan(
         label: "官方发布入口（UAP Studio）".into(),
         status: "unknown".into(),
         path: None,
-        note: "UAP Studio 是独立安装，无法从 NC home 判断是否存在；发布入口需人工确认，本工具不调用"
-            .into(),
+        note:
+            "UAP Studio 是独立安装，无法从 NC home 判断是否存在；发布入口需人工确认，本工具不调用"
+                .into(),
     });
 
     let install_copy = root
@@ -425,7 +445,12 @@ pub fn plan(
     tools.push(Tool {
         id: "install-copy".into(),
         label: "安装目录同名组件".into(),
-        status: if install_copy.is_some() { "found" } else { "missing" }.into(),
+        status: if install_copy.is_some() {
+            "found"
+        } else {
+            "missing"
+        }
+        .into(),
         path: install_copy.as_ref().map(|c| c.path.clone()),
         note: if install_copy.is_some() {
             "覆盖发布前先备份这一份；结构差异可在「对比」页查看"
@@ -446,10 +471,7 @@ pub fn plan(
         title: "前置检查".into(),
         mode: "auto".into(),
         status: if probe.ready { "ready" } else { "blocked" }.into(),
-        detail: format!(
-            "{} 项阻断，{} 项需人工确认",
-            probe.blockers, probe.warnings
-        ),
+        detail: format!("{} 项阻断，{} 项需人工确认", probe.blockers, probe.warnings),
         hint: "工具只读检查；阻断项解决前不要继续。".into(),
     });
     steps.push(Step {
@@ -581,7 +603,16 @@ fn evidence_markdown_raw(
         .steps
         .iter()
         .enumerate()
-        .map(|(i, s)| format!("{}. [{}] {}（{}）— {}", i + 1, s.status, s.title, s.mode, s.detail))
+        .map(|(i, s)| {
+            format!(
+                "{}. [{}] {}（{}）— {}",
+                i + 1,
+                s.status,
+                s.title,
+                s.mode,
+                s.detail
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     format!(
@@ -613,7 +644,10 @@ fn evidence_markdown_raw(
 "#,
         comp = plan.component,
         module = plan.module,
-        wsha = plan.workspace_sha256.as_deref().unwrap_or("（未提供工作区文件）"),
+        wsha = plan
+            .workspace_sha256
+            .as_deref()
+            .unwrap_or("（未提供工作区文件）"),
         isha = plan.install_sha256.as_deref().unwrap_or("—"),
         blockers = plan.blockers,
         warnings = plan.warnings,
@@ -698,7 +732,10 @@ mod tests {
         assert!(p.blockers >= 1);
         assert!(p.manual.contains("SZ02") || p.manual.contains("sz02"));
         assert!(p.manual.contains("回滚"));
-        assert!(p.checks.iter().any(|c| c.id == "official-tool" && c.status == "warn"));
+        assert!(p
+            .checks
+            .iter()
+            .any(|c| c.id == "official-tool" && c.status == "warn"));
     }
 
     #[test]
@@ -711,7 +748,10 @@ mod tests {
         std::fs::write(root.join("ufjdk").join("bin").join("java.exe"), b"x").unwrap();
         let p = probe(Some(root.to_string_lossy().as_ref()), "sz02", "uapbd", None);
         assert!(!p.ready, "缺 prop.xml 必须阻挡");
-        assert!(p.checks.iter().any(|c| c.id == "server-prop" && c.status == "block"));
+        assert!(p
+            .checks
+            .iter()
+            .any(|c| c.id == "server-prop" && c.status == "block"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -727,7 +767,10 @@ mod tests {
         std::fs::write(root.join("ierp").join("bin").join("prop.xml"), b"<x/>").unwrap();
         let p = probe(Some(root.to_string_lossy().as_ref()), "sz02", "uapbd", None);
         assert!(p.ready, "{:?}", p.checks);
-        assert!(p.checks.iter().any(|c| c.id == "server-prop" && c.status == "warn"));
+        assert!(p
+            .checks
+            .iter()
+            .any(|c| c.id == "server-prop" && c.status == "warn"));
         assert!(p.manual.contains("测试库"));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -736,8 +779,11 @@ mod tests {
         let root = tmp(tag);
         let module = root.join("modules").join("uapbd");
         std::fs::create_dir_all(module.join("METADATA")).unwrap();
-        std::fs::write(module.join("METADATA").join("demo.bmf"), b"<component name=\"demo\"/>")
-            .unwrap();
+        std::fs::write(
+            module.join("METADATA").join("demo.bmf"),
+            b"<component name=\"demo\"/>",
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("middleware")).unwrap();
         std::fs::write(root.join("middleware").join("mw.jar"), b"x").unwrap();
         std::fs::create_dir_all(root.join("ufjdk").join("bin")).unwrap();
@@ -758,7 +804,11 @@ mod tests {
         let canon_root = nc_home::strip_verbatim(&std::fs::canonicalize(&root).unwrap());
         let ws = tmp("plan-ws");
         let ws_file = ws.join("demo.bmf");
-        std::fs::write(&ws_file, b"<component name=\"demo\"><celllist/></component>").unwrap();
+        std::fs::write(
+            &ws_file,
+            b"<component name=\"demo\"><celllist/></component>",
+        )
+        .unwrap();
 
         let p = plan(
             Some(canon_root.to_string_lossy().as_ref()),
@@ -775,7 +825,10 @@ mod tests {
                 p.tools
             );
         }
-        assert!(p.tools.iter().any(|t| t.id == "studio" && t.status == "unknown"));
+        assert!(p
+            .tools
+            .iter()
+            .any(|t| t.id == "studio" && t.status == "unknown"));
         assert!(p
             .tools
             .iter()
@@ -783,10 +836,20 @@ mod tests {
         let ids: Vec<&str> = p.steps.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(
             ids,
-            ["preflight", "backup", "ddl", "publish", "verify", "rollback"]
+            [
+                "preflight",
+                "backup",
+                "ddl",
+                "publish",
+                "verify",
+                "rollback"
+            ]
         );
         assert_eq!(p.steps[0].status, "ready");
-        assert!(p.steps.iter().any(|s| s.id == "publish" && s.mode == "manual"));
+        assert!(p
+            .steps
+            .iter()
+            .any(|s| s.id == "publish" && s.mode == "manual"));
         assert!(p.evidence_template.contains("不表示发布已由工具执行"));
         let expect_install = canon_root
             .join("modules")
@@ -835,7 +898,8 @@ mod tests {
             "uapbd",
             Some(ws_file.to_string_lossy().as_ref()),
         );
-        let md = evidence_markdown(&p, 0, "conditional", "张三", "VOMeta 正常，字段少一个").unwrap();
+        let md =
+            evidence_markdown(&p, 0, "conditional", "张三", "VOMeta 正常，字段少一个").unwrap();
         assert!(md.contains("# 发布证据：demo"));
         assert!(md.contains("1970-01-01 00:00:00 UTC"));
         assert!(md.contains("有条件通过"));

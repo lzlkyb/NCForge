@@ -478,7 +478,10 @@ mod tests {
         match resolve(Some("   ")) {
             Ok(_) => {}
             Err(e) => {
-                assert!(e.contains("还没有设置 NC 安装目录"), "要说明是没配而不是别的错：{e}");
+                assert!(
+                    e.contains("还没有设置 NC 安装目录"),
+                    "要说明是没配而不是别的错：{e}"
+                );
                 assert!(e.contains("设置"), "要告诉用户下一步去哪配：{e}");
             }
         }

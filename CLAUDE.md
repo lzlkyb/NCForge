@@ -66,7 +66,7 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd desktop; npm r
 
 **前端组件体量限制**（硬性规则，**已由机器执行**）：
 
-门禁在 `desktop/scripts/check-component-size.mjs`，跑在 pre-push 钩子与 CI 的 frontend job 里。两个指标，扫 `src/components/**` 与 `src/hooks/**`：
+门禁在 `desktop/scripts/check-component-size.mjs`，以 `component-size` 项挂在 `gate.mjs` 清单里（pre-push 与 CI 都调它）。两个指标，扫 `src/components/**` 与 `src/hooks/**`：
 
 - **行数 ≤ 300**，且**同时管 `.tsx` 与 `.ts`**（只管 `.tsx` 会让复杂度搬家到 hooks 里躲计数器）。
 - **单文件里 `useState` + `useEffect` 总数 ≤ 8**（比行数准：100 行 JSX 与 100 行异步状态逻辑的阅读成本差一个数量级）。
@@ -75,15 +75,15 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd desktop; npm r
 
 **ESLint**（`desktop/eslint.config.mjs`）：为 `react-hooks` 两条规则（`rules-of-hooks` / `exhaustive-deps`）而上——依赖数组不全导致的"闭包拿陈旧值" tsc 完全看不出来。壳子基线**零豁免**；若确需存量豁免，用 `eslint . --suppress-all` 生成 `eslint-suppressions.json`（棘轮，只许减少），修好后跑 `npm run lint:prune` 收紧。
 
-**Rust 后端规则**——提交前跑这三条，保持零警告：
+**Rust 后端规则**——提交前跑 `node scripts/gate.mjs`，保持零警告。三项已在清单里，想单独复现时：
 
 ```bash
-cd desktop/src-tauri && cargo fmt --check
-cd desktop && node scripts/rust-gate.mjs clippy --all-targets --no-default-features -- -D warnings
-cd desktop && node scripts/rust-gate.mjs test --no-default-features   # 含 tests/update_flow.rs：本地假源无头跑通更新链路
+node scripts/gate.mjs --only fmt         # = cargo fmt --check
+node scripts/gate.mjs --only clippy      # = rust-gate clippy --all-targets --no-default-features -- -D warnings
+node scripts/gate.mjs --only rust-test   # = rust-gate test --no-default-features（含 tests/update_flow.rs：本地假源无头跑通更新链路）
 ```
 
-`--no-default-features` 与 `--all-targets` 不是可选项。三项都已进 pre-push 钩子，不靠记性。
+`--no-default-features` 与 `--all-targets` 不是可选项——已经写死在清单里，不靠记性。
 
 🔴 **不要手敲裸 `cargo test` / `cargo clippy`**，走 `scripts/rust-gate.mjs`（`npm run gate:rust` 亦可）。它把 `TEMP`/`TMP` 指到 `desktop/src-tauri/target/test-tmp`（跑完清空）、把编译并发压到 3 路，并在跑完自检「有没有临时文件漏回 C 盘 / target 有没有涨破 6GB」。完整规则与实测数据见 **§8.3**。
 
@@ -189,7 +189,7 @@ powershell.exe -NoProfile -Command "Get-ChildItem $env:TEMP -Directory | Where-O
 用户说「提交 / commit」后，**先不要直接 `git add`**。按顺序执行：
 
 1. **逐文件审 diff**（`git diff` + 新增文件通读），重点查：逻辑错误、边界条件（空值/越界/极端输入）、安全问题（凭据泄漏、路径/注入）、遗漏的接线点（改了 A 却没改调用方）、与既有约定的冲突。
-2. **有问题当场修复**，修复后重跑受影响的门禁（cargo fmt/clippy/test + eslint/tsc/vitest/体量棘轮），再进入提交流程。
+2. **有问题当场修复**，修复后重跑 `node scripts/gate.mjs`（全量、与 CI 同源），再进入提交流程。只想重跑某一项时用 `--only <id>`，别凭记忆拼命令。
 3. **确认无问题才提交**；审查发现但「决定不修」的点，须在 commit message 或回复里向用户说明。
 4. 工作区混有并行会话改动时，按批次归属分开处理，只审查并提交本批文件，绝不 `git add -A`。
 
@@ -230,11 +230,19 @@ HTTPS_PROXY=http://127.0.0.1:7897 NO_PROXY=gitee.com,localhost,127.0.0.1 \
 4. **令牌只从环境变量传**，不写进任何入库文件、不落 `.env`。
 5. **验收（脚本自检之外再抽查一次）**：`raw/releases/latest/updater-gitee.json` 跟随重定向后 200、`version` 与 tag 一致、`url` 指向 `gitee.com/<repo>/releases/download/<tag>/...`；各附件 `Content-Length` 与本地 `assets/` 内文件大小逐个相等。
 
-> CI 说明：main push 跑 `frontend`（体量/eslint/tsc/vitest/vite build）、Windows `test`、macOS `check`；**tag 时 `test` job 被 `if` 跳过**，改由 `build-macos` → `build-windows` 串联，Windows 内先 `cargo test --release` 再打包。tag 前确认测试可过。
+> CI 说明：main push 跑 `frontend`（体量/knip/契约/token/UI/Rust 临时目录棘轮/eslint/tsc/vitest/vite build/体积预算）、Windows `test`（fmt/machete/clippy/test）、macOS `check`（clippy/test）；**tag 时 `test` job 被 `if` 跳过**，改由 `build-macos` → `build-windows` 串联，Windows 内先 `cargo test --release` 再打包。tag 前确认测试可过。
 
-> ⚠️ **pre-push 钩子会自己跑全部门禁，push 前不要手动起独立 `cargo test`**。当前 **7 项**，顺序按"失败越快越靠前"排：组件体量 → `cargo fmt --check` → `eslint` → `tsc --noEmit` → `vitest` → `cargo clippy` → `cargo test`。**清单以 `.githooks/pre-push` 的实际输出为准，本节不维护它。**
+> ⚠️ **pre-push 钩子会自己跑全部门禁，push 前不要手动起独立 `cargo test`**（会争抢 `target/` 构建锁导致钩子失败）。
 >
-> 🔴 改完 `.githooks/pre-push` 必须重新启用。推荐 `git config core.hooksPath .githooks`（免复制、自动同步，本仓库入库即带可执行位）；若用传统 `cp` 方式，记得 `chmod +x`——没有可执行位的钩子会被 git 静默跳过，一项门禁都不跑。
+> 🔴 **门禁清单只有一处真源：`desktop/scripts/lib/gate-plan.mjs`**。增删门禁只改那里的 `STEPS`，`pre-push` 与 CI 都只引用它：
+> - 本地全量：`node scripts/gate.mjs`（钩子就是这一句，也等价于 `npm run gate`）
+> - CI 每步：`node scripts/gate.mjs --only <id>` —— 工作流里**不许再写命令本身**
+> - 一致性：`node scripts/gate.mjs --verify-ci` —— 断言每个 job 的 id 序列 == 清单里该 scope 的序列；少了、多了、顺序漂了、或谁又手写了一遍命令都会红（本地 `npm test` 的 `pretest` 也会跑这条断言）
+> - 看清单：`node scripts/gate.mjs --list`
+>
+> 当前 15 项，按「失败越快越靠前」排。历史教训（11-06）：清单原先抄在三处（钩子 + build.yml 的两个 job），`cargo fmt --check` 因此从 11-05 起在 CI 里一次都没跑过；按记忆手动跑又漏了 knip / 设计 token / UI 约定 / 体积预算四项，push 后 CI 三个 job 全红。
+>
+> 🔴 钩子靠 `core.hooksPath` 生效：`npm install`（postinstall）与 `npm run dev`（predev）会自动设好，手工修复是 `git config core.hooksPath .githooks`。用传统 `cp` 方式装的话记得 `chmod +x`——没有可执行位的钩子会被 git 静默跳过，一项门禁都不跑。钩子没启用时 `node scripts/gate.mjs` 会打印一行提醒。
 
 ### Commit 前缀规范
 

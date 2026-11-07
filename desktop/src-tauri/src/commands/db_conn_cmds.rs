@@ -111,7 +111,9 @@ impl DbConnInput {
                 .as_str()
                 .to_string(),
             note: self.note.clone().unwrap_or_default(),
-            default_schema: db_conns::normalize_schema(self.default_schema.as_deref().unwrap_or("")),
+            default_schema: db_conns::normalize_schema(
+                self.default_schema.as_deref().unwrap_or(""),
+            ),
         }
     }
 }
@@ -398,7 +400,8 @@ pub async fn db_conn_test(
         vec![
             // 按**当前 schema** 数，不是登录账号：配置里写了 AIER633 时，用户要看的是
             // 「切过去之后能看到多少张表」。写错 schema 的话这里会掉到 0，一眼就能发现。
-            "select count(*) from all_tables where owner = sys_context('userenv','current_schema')".into(),
+            "select count(*) from all_tables where owner = sys_context('userenv','current_schema')"
+                .into(),
             "1".into(),
             "15".into(),
         ],
@@ -561,7 +564,10 @@ mod tests {
             default_schema: None,
         };
         // 新建（手动 / 导入 .properties）：不依赖 NC home
-        let rust_input = DbConnInput { engine: Some("rust".into()), ..base() };
+        let rust_input = DbConnInput {
+            engine: Some("rust".into()),
+            ..base()
+        };
         assert_eq!(rust_input.to_config("id".into(), None).engine, "rust");
         // 老配置迁移 / 缺字段：空串 → JVM 桥，行为不变
         assert_eq!(base().to_config("id".into(), None).engine, "java");

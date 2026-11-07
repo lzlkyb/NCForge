@@ -167,12 +167,7 @@ fn build(root: &Path, cache_dir: &Path) -> WorkspaceTypes {
 
     let cache_path = cache_path(cache_dir, root);
     let mut cached: HashMap<String, CachedFile> = load_cache(&cache_path, root)
-        .map(|c| {
-            c.files
-                .into_iter()
-                .map(|f| (f.path.clone(), f))
-                .collect()
-        })
+        .map(|c| c.files.into_iter().map(|f| (f.path.clone(), f)).collect())
         .unwrap_or_default();
 
     let mut saved: Vec<CachedFile> = Vec::with_capacity(files.len());
@@ -366,8 +361,7 @@ fn write_cache(path: &Path, root: &Path, files: &[CachedFile]) {
     };
     let temp = path.with_extension("json.tmp");
     let result = std::fs::File::create(&temp).and_then(|file| {
-        serde_json::to_writer(std::io::BufWriter::new(file), &cache)
-            .map_err(std::io::Error::other)
+        serde_json::to_writer(std::io::BufWriter::new(file), &cache).map_err(std::io::Error::other)
     });
     if result.is_ok() {
         let _ = std::fs::rename(&temp, path);
@@ -395,10 +389,7 @@ mod tests {
     use super::*;
 
     fn tmp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "ncforge-ws-types-{tag}-{}",
-            std::process::id()
-        ));
+        let d = std::env::temp_dir().join(format!("ncforge-ws-types-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -455,7 +446,11 @@ mod tests {
         let dao = idx.search("BaseDao", 20);
         assert_eq!(dao.len(), 1, "测试目录的副本不应出现");
         assert_eq!(dao[0].kind, 11);
-        assert!(dao[0].file.replace('\\', "/").to_lowercase().contains("gl/src/client"));
+        assert!(dao[0]
+            .file
+            .replace('\\', "/")
+            .to_lowercase()
+            .contains("gl/src/client"));
 
         let kind = idx.search("Kind", 20);
         assert_eq!(kind[0].kind, 10);
@@ -488,14 +483,21 @@ mod tests {
 
         std::fs::remove_file(root.join("m/src/public/p/Old.java")).unwrap();
         let third = build(&root, &cache);
-        assert!(third.search("Old", 10).is_empty(), "删掉的文件不能留在索引里");
+        assert!(
+            third.search("Old", 10).is_empty(),
+            "删掉的文件不能留在索引里"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn module_level_classpath_and_legacy_dirs_are_both_found() {
         let root = tmp("mods");
-        write(&root, "own/.classpath", "<classpath><classpathentry kind=\"src\" path=\"src/main\"/></classpath>");
+        write(
+            &root,
+            "own/.classpath",
+            "<classpath><classpathentry kind=\"src\" path=\"src/main\"/></classpath>",
+        );
         write(
             &root,
             "own/src/main/p/FromOwn.java",

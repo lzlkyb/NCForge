@@ -8,20 +8,20 @@
 //! - 新增命令：在子模块写 `#[tauri::command]` → 此处 `mod` + `pub use` →
 //!   `main.rs` 的 `invoke_handler!` 加一行。三处，缺一不可。
 
-mod client_cmds;
 mod bmf_cmds;
+mod bmf_excel_cmds;
 mod bmf_generation_cmds;
 mod build_cmds;
 mod build_engine;
-mod bmf_excel_cmds;
+mod client_cmds;
 mod compile_cmds;
 mod db_cmds;
 mod db_conn_cmds;
 mod db_export_cmds;
-mod db_transfer_cmds;
 mod db_import_cmds;
 mod db_relations_cmds;
 mod db_search_cmds;
+mod db_transfer_cmds;
 mod db_user_cmds;
 mod db_workbench_cmds;
 mod debug_cmds;
@@ -48,20 +48,20 @@ mod update;
 mod upm_cmds;
 mod workspace_cmds;
 
-pub use client_cmds::*;
 pub use bmf_cmds::*;
+pub use bmf_excel_cmds::*;
 pub use bmf_generation_cmds::*;
 pub use build_cmds::*;
-pub use bmf_excel_cmds::*;
-pub use compile_cmds::*;
+pub use client_cmds::*;
 pub use compile_cmds::spawn_prewarm;
+pub use compile_cmds::*;
 pub use db_cmds::*;
 pub use db_conn_cmds::*;
 pub use db_export_cmds::*;
-pub use db_transfer_cmds::*;
 pub use db_import_cmds::*;
 pub use db_relations_cmds::*;
 pub use db_search_cmds::*;
+pub use db_transfer_cmds::*;
 pub use db_user_cmds::*;
 pub use db_workbench_cmds::*;
 pub use debug_cmds::*;

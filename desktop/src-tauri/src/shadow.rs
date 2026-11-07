@@ -452,7 +452,10 @@ mod tests {
         .unwrap();
         let own = own_output_dirs(&root, "gl");
         assert!(own.iter().any(|p| eq_path(p, &gl.join("out/gl"))));
-        assert!(!own.iter().any(|p| eq_path(p, &gl.join("bin"))), "没写 output 的 src 才用默认输出");
+        assert!(
+            !own.iter().any(|p| eq_path(p, &gl.join("bin"))),
+            "没写 output 的 src 才用默认输出"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -80,7 +80,10 @@ pub fn is_java_change(kind: &notify::EventKind) -> bool {
 }
 
 pub fn is_java_path(path: &Path) -> bool {
-    !is_ignored(path) && path.extension().is_some_and(|x| x.eq_ignore_ascii_case("java"))
+    !is_ignored(path)
+        && path
+            .extension()
+            .is_some_and(|x| x.eq_ignore_ascii_case("java"))
 }
 
 /// 合并状态机（纯逻辑，时间由调用方传入，便于单测）。
@@ -139,8 +142,7 @@ impl Batcher {
         let urgent = self.rescan || !self.java.is_empty();
         match self.since {
             Some(t) => DEBOUNCE.min(
-                (if urgent { DEBOUNCE } else { MAX_WAIT })
-                    .saturating_sub(now.duration_since(t)),
+                (if urgent { DEBOUNCE } else { MAX_WAIT }).saturating_sub(now.duration_since(t)),
             ),
             None => DEBOUNCE,
         }
@@ -426,7 +428,13 @@ mod tests {
         }
         let mut rescan = false;
         let (mut java, mut java_overflow) = (BTreeSet::new(), false);
-        flush(&mut pending, &mut rescan, &mut java, &mut java_overflow, &emit);
+        flush(
+            &mut pending,
+            &mut rescan,
+            &mut java,
+            &mut java_overflow,
+            &emit,
+        );
         let batch = rx.try_recv().expect("应当发了一批");
         assert_eq!(batch.dirs.len(), MAX_DIRS);
         // 装不下的目录不能静默丢掉，否则它们会一直停在旧内容
@@ -435,7 +443,13 @@ mod tests {
 
         // 没超上限时不该无谓地全量重扫
         pending.insert(root().join("one"));
-        flush(&mut pending, &mut rescan, &mut java, &mut java_overflow, &emit);
+        flush(
+            &mut pending,
+            &mut rescan,
+            &mut java,
+            &mut java_overflow,
+            &emit,
+        );
         assert!(!rx.try_recv().expect("应当又发了一批").rescan);
     }
 

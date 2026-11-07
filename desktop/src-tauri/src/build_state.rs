@@ -55,7 +55,11 @@ pub struct SourceStamp {
 
 impl SourceStamp {
     pub(crate) fn key(&self) -> String {
-        format!("{}\u{0}{}", self.root.to_ascii_lowercase(), self.rel.to_ascii_lowercase())
+        format!(
+            "{}\u{0}{}",
+            self.root.to_ascii_lowercase(),
+            self.rel.to_ascii_lowercase()
+        )
     }
 }
 
@@ -131,9 +135,19 @@ pub fn build_dir(config_dir: &Path, root: &Path) -> PathBuf {
 fn safe_module_name(module: &str) -> String {
     let cleaned: String = module
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
-    format!("{}-{}", cleaned, &sha(&[module.to_ascii_lowercase().as_bytes()])[..8])
+    format!(
+        "{}-{}",
+        cleaned,
+        &sha(&[module.to_ascii_lowercase().as_bytes()])[..8]
+    )
 }
 
 pub fn manifest_path(config_dir: &Path, root: &Path, module: &str) -> PathBuf {
@@ -148,7 +162,8 @@ pub fn read_manifest(path: &Path, root: &Path, module: &str) -> Option<Manifest>
     if m.schema != SCHEMA {
         return None;
     }
-    if !path_eq(&m.workspace, &build_layout::slash(root)) || !m.module.eq_ignore_ascii_case(module) {
+    if !path_eq(&m.workspace, &build_layout::slash(root)) || !m.module.eq_ignore_ascii_case(module)
+    {
         return None;
     }
     Some(m)
@@ -197,8 +212,12 @@ pub fn list_manifests(dir: &Path) -> Vec<Manifest> {
         if !p.extension().is_some_and(|x| x.eq_ignore_ascii_case("bin")) {
             continue;
         }
-        let Ok(bytes) = std::fs::read(&p) else { continue };
-        let Some(body) = bytes.strip_prefix(MAGIC) else { continue };
+        let Ok(bytes) = std::fs::read(&p) else {
+            continue;
+        };
+        let Some(body) = bytes.strip_prefix(MAGIC) else {
+            continue;
+        };
         if let Ok(m) = serde_json::from_slice::<Manifest>(body) {
             if m.schema == SCHEMA {
                 out.push(m);
@@ -263,8 +282,12 @@ pub fn config_fingerprints(
     java: &Path,
 ) -> (String, String) {
     let mut cp: Vec<Vec<u8>> = vec![
-        build_layout::slash(nc_home).to_ascii_lowercase().into_bytes(),
-        build_layout::slash(&layout.module_dir).to_ascii_lowercase().into_bytes(),
+        build_layout::slash(nc_home)
+            .to_ascii_lowercase()
+            .into_bytes(),
+        build_layout::slash(&layout.module_dir)
+            .to_ascii_lowercase()
+            .into_bytes(),
         classpath_xml(&layout.module_dir),
         dependencies_blob(root, overrides),
         overrides_blob(overrides).into_bytes(),
@@ -311,7 +334,14 @@ fn dependencies_blob(root: &Path, overrides: &[LinkedOverride]) -> Vec<u8> {
 fn overrides_blob(overrides: &[LinkedOverride]) -> String {
     overrides
         .iter()
-        .map(|o| format!("{}:{}:{}", o.action.as_str(), o.target, o.dir.as_deref().unwrap_or("")))
+        .map(|o| {
+            format!(
+                "{}:{}:{}",
+                o.action.as_str(),
+                o.target,
+                o.dir.as_deref().unwrap_or("")
+            )
+        })
         .collect::<Vec<_>>()
         .join("|")
 }
@@ -346,7 +376,8 @@ fn sha(parts: &[&[u8]]) -> String {
 }
 
 pub fn path_eq(a: &str, b: &str) -> bool {
-    a.replace('\\', "/").eq_ignore_ascii_case(&b.replace('\\', "/"))
+    a.replace('\\', "/")
+        .eq_ignore_ascii_case(&b.replace('\\', "/"))
 }
 
 // ───────────────────────────── 源码 / ABI ─────────────────────────────
@@ -533,10 +564,8 @@ fn declared_types(clean: &str) -> Vec<String> {
 pub(crate) fn typed_declarations(clean: &str) -> Vec<(String, &'static str, usize)> {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        regex::Regex::new(
-            r"\b(class|interface|enum|record)\s+([A-Za-z_$][A-Za-z0-9_$]*)",
-        )
-        .expect("静态正则不会编译失败")
+        regex::Regex::new(r"\b(class|interface|enum|record)\s+([A-Za-z_$][A-Za-z0-9_$]*)")
+            .expect("静态正则不会编译失败")
     });
     re.captures_iter(clean)
         .map(|c| {
@@ -588,7 +617,9 @@ pub fn referrers(changed: &[PathBuf], all: &[PathBuf]) -> Option<Vec<PathBuf>> {
         if changed_set.contains(&build_layout::slash(p).to_ascii_lowercase()) {
             continue;
         }
-        let Ok(bytes) = std::fs::read(p) else { continue };
+        let Ok(bytes) = std::fs::read(p) else {
+            continue;
+        };
         // 快速预筛：正文字节里连类名都没出现（注释/字符串也算），不可能有引用。
         // 全工作区扫描时这一步省掉 95% 以上的解码与解析。
         if !may_mention(&bytes, &simple) {
@@ -606,9 +637,10 @@ pub fn referrers(changed: &[PathBuf], all: &[PathBuf]) -> Option<Vec<PathBuf>> {
         }
         // 显式 import 直接命中
         if !edge
-            && deps.imports.iter().any(|(name, wild)| {
-                !*wild && changed_fq.contains(&name.to_ascii_lowercase())
-            })
+            && deps
+                .imports
+                .iter()
+                .any(|(name, wild)| !*wild && changed_fq.contains(&name.to_ascii_lowercase()))
         {
             edge = true;
         }
@@ -623,7 +655,11 @@ pub fn referrers(changed: &[PathBuf], all: &[PathBuf]) -> Option<Vec<PathBuf>> {
             edge = true;
         }
         // 签名里直接写了 FQCN（不 import）
-        if !edge && changed_fq.iter().any(|f| clean.to_ascii_lowercase().contains(f)) {
+        if !edge
+            && changed_fq
+                .iter()
+                .any(|f| clean.to_ascii_lowercase().contains(f))
+        {
             edge = true;
         }
         if edge {
@@ -745,7 +781,8 @@ pub fn decide(
     }
     if m.classpath_fp != classpath_fp {
         return Decision::Full {
-            reason: "类路径发生了变化（.classpath / 依赖工程 / NC home / jar / 覆盖表）".to_string(),
+            reason: "类路径发生了变化（.classpath / 依赖工程 / NC home / jar / 覆盖表）"
+                .to_string(),
         };
     }
     if m.compiler_fp != compiler_fp {
@@ -829,7 +866,11 @@ pub fn decide(
             };
         }
         return Decision::Incremental {
-            reason: format!("{} 个文件签名变化，连带 {} 个引用方", modified.len(), files.len() - modified.len()),
+            reason: format!(
+                "{} 个文件签名变化，连带 {} 个引用方",
+                modified.len(),
+                files.len() - modified.len()
+            ),
             files,
             changed: modified,
             abi_changed: true,
@@ -864,10 +905,8 @@ pub fn updated_manifest(
         if let Some(prev) = previous {
             for s in &prev.sources {
                 // 保留未参与本轮的文件；本轮编过的会被下面重新扫一遍
-                let abs = build_layout::safe_join(
-                    &layout.module_dir,
-                    &format!("{}/{}", s.root, s.rel),
-                );
+                let abs =
+                    build_layout::safe_join(&layout.module_dir, &format!("{}/{}", s.root, s.rel));
                 let key = abs
                     .as_deref()
                     .map(build_layout::slash)
@@ -934,7 +973,11 @@ pub fn classes_for_source(out_dir: &Path, package: &str, source: &Path) -> Vec<S
             continue;
         }
         let base = &name[..name.len() - 6];
-        if base.eq_ignore_ascii_case(stem) || base.to_ascii_lowercase().starts_with(&format!("{}$", stem.to_ascii_lowercase())) {
+        if base.eq_ignore_ascii_case(stem)
+            || base
+                .to_ascii_lowercase()
+                .starts_with(&format!("{}$", stem.to_ascii_lowercase()))
+        {
             let rel = if package.is_empty() {
                 name
             } else {
@@ -979,7 +1022,8 @@ pub fn stale_classes(layout: &ModuleLayout, previous: &Manifest, next: &Manifest
                 continue;
             }
             if let Some(p) = build_layout::safe_join(&out_dir, c) {
-                if p.is_file() && !build_layout::has_reparse_component_under(&p, &layout.module_dir) {
+                if p.is_file() && !build_layout::has_reparse_component_under(&p, &layout.module_dir)
+                {
                     out.push(p);
                 }
             }
@@ -1044,9 +1088,8 @@ pub fn clean_module(
         notes: Vec::new(),
     };
 
-    let trusted = manifest.filter(|m| {
-        m.schema == SCHEMA && layout.matches_manifest(&m.source_roots, &m.outputs)
-    });
+    let trusted = manifest
+        .filter(|m| m.schema == SCHEMA && layout.matches_manifest(&m.source_roots, &m.outputs));
     let mut targets: Vec<PathBuf> = Vec::new();
     if let Some(m) = trusted {
         report.had_manifest = true;
@@ -1069,12 +1112,17 @@ pub fn clean_module(
                     continue;
                 }
                 let Some(p) = build_layout::safe_join(&out_dir, c) else {
-                    report.failed.push(format!("非法 class 路径：{}/{}", s.out, c));
+                    report
+                        .failed
+                        .push(format!("非法 class 路径：{}/{}", s.out, c));
                     continue;
                 };
                 if p.is_file() {
                     if build_layout::has_reparse_component_under(&p, &layout.module_dir) {
-                        report.failed.push(format!("拒绝跟随重解析点：{}", crate::security::path::display_path(&p)));
+                        report.failed.push(format!(
+                            "拒绝跟随重解析点：{}",
+                            crate::security::path::display_path(&p)
+                        ));
                     } else {
                         targets.push(p);
                     }
@@ -1087,7 +1135,9 @@ pub fn clean_module(
         report.unknown = unknown.sample;
         targets = mapped;
         if manifest.is_some() {
-            report.notes.push("构建清单与当前布局不符，按源码映射推断可删集合".to_string());
+            report
+                .notes
+                .push("构建清单与当前布局不符，按源码映射推断可删集合".to_string());
         }
     }
     targets.sort();
@@ -1105,7 +1155,10 @@ pub fn clean_module(
 
     for p in targets {
         if build_layout::has_reparse_component_under(&p, &layout.module_dir) {
-            report.failed.push(format!("拒绝跟随重解析点：{}", crate::security::path::display_path(&p)));
+            report.failed.push(format!(
+                "拒绝跟随重解析点：{}",
+                crate::security::path::display_path(&p)
+            ));
             break;
         }
         match std::fs::remove_file(&p) {
@@ -1135,10 +1188,14 @@ pub fn clean_module(
             report.manifest_removed = delete_manifest(mp);
         }
     } else {
-        report.notes.push("有文件删不掉，已停止；清单保留，修好锁定后可以再清一次".to_string());
+        report
+            .notes
+            .push("有文件删不掉，已停止；清单保留，修好锁定后可以再清一次".to_string());
     }
     if report.svn_detected {
-        report.notes.push("产物目录在 SVN 工作副本里：这些 class 被版本控制时，清理后会显示为删除".to_string());
+        report.notes.push(
+            "产物目录在 SVN 工作副本里：这些 class 被版本控制时，清理后会显示为删除".to_string(),
+        );
     }
     report
 }
@@ -1147,11 +1204,17 @@ pub fn clean_module(
 fn infer_classes(layout: &ModuleLayout) -> (Vec<PathBuf>, UnknownClasses) {
     let mut sources: HashSet<String> = HashSet::new();
     for p in layout.collect_sources() {
-        let Ok(bytes) = std::fs::read(&p) else { continue };
+        let Ok(bytes) = std::fs::read(&p) else {
+            continue;
+        };
         let text = decode_lossy(&bytes);
         let pkg = crate::compile::extract_package(&text).unwrap_or_default();
         if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
-            sources.insert(format!("{}|{}", pkg.to_ascii_lowercase(), stem.to_ascii_lowercase()));
+            sources.insert(format!(
+                "{}|{}",
+                pkg.to_ascii_lowercase(),
+                stem.to_ascii_lowercase()
+            ));
         }
     }
     let mut out = Vec::new();
@@ -1167,7 +1230,11 @@ fn infer_classes(layout: &ModuleLayout) -> (Vec<PathBuf>, UnknownClasses) {
                 .rsplit_once('/')
                 .map(|(d, _)| d.replace('/', "."))
                 .unwrap_or_default();
-            let key = format!("{}|{}", pkg.to_ascii_lowercase(), outer.to_ascii_lowercase());
+            let key = format!(
+                "{}|{}",
+                pkg.to_ascii_lowercase(),
+                outer.to_ascii_lowercase()
+            );
             if sources.contains(&key) {
                 out.push(p.to_path_buf());
             } else {
@@ -1347,7 +1414,11 @@ pub fn untracked_classes(layout: &ModuleLayout, manifest: Option<&Manifest>) -> 
             continue;
         };
         walk_classes(out_dir, &mut |p, rel| {
-            let key = format!("{}|{}", out_rel.to_ascii_lowercase(), rel.to_ascii_lowercase());
+            let key = format!(
+                "{}|{}",
+                out_rel.to_ascii_lowercase(),
+                rel.to_ascii_lowercase()
+            );
             if !tracked.contains(&key) && out.len() < 100 {
                 out.push(crate::security::path::display_path(p));
             }
@@ -1433,7 +1504,10 @@ mod tests {
     fn clean_without_manifest_only_deletes_source_mapped_classes() {
         let root = tmp("clean-infer");
         let m = root.join("gl");
-        write(&m.join("src/public/p/A.java"), "package p; public class A {}");
+        write(
+            &m.join("src/public/p/A.java"),
+            "package p; public class A {}",
+        );
         write(&m.join("classes/p/A.class"), "x");
         write(&m.join("classes/p/A$1.class"), "x");
         write(&m.join("classes/p/HandMade.class"), "x");
@@ -1454,7 +1528,10 @@ mod tests {
     fn clean_with_manifest_deletes_only_recorded_classes() {
         let root = tmp("clean-manifest");
         let m = root.join("gl");
-        write(&m.join("src/public/p/A.java"), "package p; public class A {}");
+        write(
+            &m.join("src/public/p/A.java"),
+            "package p; public class A {}",
+        );
         write(&m.join("classes/p/A.class"), "x");
         write(&m.join("classes/p/Other.class"), "x");
         let l = ModuleLayout::resolve(&root, "gl");
@@ -1491,7 +1568,10 @@ mod tests {
     fn clean_dry_run_changes_nothing() {
         let root = tmp("clean-dry");
         let m = root.join("gl");
-        write(&m.join("src/public/p/A.java"), "package p; public class A {}");
+        write(
+            &m.join("src/public/p/A.java"),
+            "package p; public class A {}",
+        );
         write(&m.join("classes/p/A.class"), "x");
         let l = ModuleLayout::resolve(&root, "gl");
         let r = clean_module(&l, None, None, true);
@@ -1503,7 +1583,10 @@ mod tests {
     fn manifest_layout_mismatch_is_not_trusted() {
         let root = tmp("mismatch");
         let m = root.join("gl");
-        write(&m.join("src/public/p/A.java"), "package p; public class A {}");
+        write(
+            &m.join("src/public/p/A.java"),
+            "package p; public class A {}",
+        );
         write(&m.join("classes/p/A.class"), "x");
         let l = ModuleLayout::resolve(&root, "gl");
         let man = Manifest {
@@ -1528,8 +1611,14 @@ mod tests {
     fn decision_skips_unchanged_and_increments_body_only_changes() {
         let root = tmp("decide");
         let m = root.join("gl");
-        write(&m.join("src/public/p/A.java"), "package p; public class A { public void f() {} }");
-        write(&m.join("src/public/p/B.java"), "package p; public class B { A a; }");
+        write(
+            &m.join("src/public/p/A.java"),
+            "package p; public class A { public void f() {} }",
+        );
+        write(
+            &m.join("src/public/p/B.java"),
+            "package p; public class B { A a; }",
+        );
         // 留几个不相关文件，让「签名变化影响 2 个」低于 30% 全量阈值
         for i in 0..5 {
             write(
@@ -1543,7 +1632,10 @@ mod tests {
         assert_eq!(decide(&l, Some(&man), "cp", "cc", false), Decision::Skip);
 
         // 只改方法体：只编 A
-        write(&m.join("src/public/p/A.java"), "package p; public class A { public void f() { int x = 1; } }");
+        write(
+            &m.join("src/public/p/A.java"),
+            "package p; public class A { public void f() { int x = 1; } }",
+        );
         match decide(&l, Some(&man), "cp", "cc", false) {
             Decision::Incremental { files, .. } => {
                 assert_eq!(files.len(), 1);
@@ -1553,25 +1645,43 @@ mod tests {
         }
 
         // 改签名：B 被连带
-        write(&m.join("src/public/p/A.java"), "package p; public class A { public void f(int x) {} }");
+        write(
+            &m.join("src/public/p/A.java"),
+            "package p; public class A { public void f(int x) {} }",
+        );
         match decide(&l, Some(&man), "cp", "cc", false) {
             Decision::Incremental { files, .. } => assert_eq!(files.len(), 2),
             other => panic!("expected incremental with referrer, got {other:?}"),
         }
 
         // 新增文件：全量
-        write(&m.join("src/public/p/C.java"), "package p; public class C {}");
-        assert!(matches!(decide(&l, Some(&man), "cp", "cc", false), Decision::Full { .. }));
+        write(
+            &m.join("src/public/p/C.java"),
+            "package p; public class C {}",
+        );
+        assert!(matches!(
+            decide(&l, Some(&man), "cp", "cc", false),
+            Decision::Full { .. }
+        ));
         // 配置变化：全量
-        assert!(matches!(decide(&l, Some(&man), "other", "cc", false), Decision::Full { .. }));
+        assert!(matches!(
+            decide(&l, Some(&man), "other", "cc", false),
+            Decision::Full { .. }
+        ));
     }
 
     #[test]
     fn stale_classes_are_removed_after_source_delete() {
         let root = tmp("stale");
         let m = root.join("gl");
-        write(&m.join("src/public/p/A.java"), "package p; public class A {}");
-        write(&m.join("src/public/p/B.java"), "package p; public class B {}");
+        write(
+            &m.join("src/public/p/A.java"),
+            "package p; public class A {}",
+        );
+        write(
+            &m.join("src/public/p/B.java"),
+            "package p; public class B {}",
+        );
         // 真实流程里清单是在一轮成功编译之后写的：那时 class 已经存在并记进清单
         write(&m.join("classes/p/A.class"), "x");
         write(&m.join("classes/p/B.class"), "x");
@@ -1579,7 +1689,15 @@ mod tests {
         let prev = updated_manifest(&l, None, &l.collect_sources(), "cp", "cc", vec![], true);
         assert_eq!(prev.sources.len(), 2);
         std::fs::remove_file(m.join("src/public/p/B.java")).unwrap();
-        let next = updated_manifest(&l, Some(&prev), &l.collect_sources(), "cp", "cc", vec![], true);
+        let next = updated_manifest(
+            &l,
+            Some(&prev),
+            &l.collect_sources(),
+            "cp",
+            "cc",
+            vec![],
+            true,
+        );
         let stale = stale_classes(&l, &prev, &next);
         assert_eq!(stale.len(), 1);
         assert!(build_layout::slash(&stale[0]).ends_with("p/B.class"));
@@ -1589,10 +1707,22 @@ mod tests {
     fn reverse_dependency_handles_same_package_and_wildcard_import() {
         let root = tmp("deps");
         let m = root.join("gl");
-        write(&m.join("src/public/p/A.java"), "package p; public class A { public void f(int x) {} }");
-        write(&m.join("src/public/p/Same.java"), "package p; public class Same { A a; }");
-        write(&m.join("src/public/q/Wild.java"), "package q; import p.*; public class Wild { A a; }");
-        write(&m.join("src/public/q/Unrelated.java"), "package q; public class Unrelated {}");
+        write(
+            &m.join("src/public/p/A.java"),
+            "package p; public class A { public void f(int x) {} }",
+        );
+        write(
+            &m.join("src/public/p/Same.java"),
+            "package p; public class Same { A a; }",
+        );
+        write(
+            &m.join("src/public/q/Wild.java"),
+            "package q; import p.*; public class Wild { A a; }",
+        );
+        write(
+            &m.join("src/public/q/Unrelated.java"),
+            "package q; public class Unrelated {}",
+        );
         let l = ModuleLayout::resolve(&root, "gl");
         let all = l.collect_sources();
         let changed = vec![m.join("src/public/p/A.java")];
@@ -1635,7 +1765,10 @@ mod tests {
         let root = tmp("changed-ab");
         let m = root.join("gl");
         let a = m.join("src/public/p/A.java");
-        write(&a, "package p; public class A { public int f() { return 1; } }");
+        write(
+            &a,
+            "package p; public class A { public int f() { return 1; } }",
+        );
         let l = ModuleLayout::resolve(&root, "gl");
         let files = l.collect_sources();
         let prev = updated_manifest(&l, None, &files, "cp", "cc", vec![], true);
@@ -1644,13 +1777,19 @@ mod tests {
         assert!(changed.is_empty() && !abi, "没改不该报变化");
 
         // 只改方法体：有改动、签名没变
-        write(&a, "package p; public class A { public int f() { return 10; } }");
+        write(
+            &a,
+            "package p; public class A { public int f() { return 10; } }",
+        );
         let (changed, abi) = changed_against_manifest(&l, Some(&prev), &files);
         assert_eq!(changed.len(), 1);
         assert!(!abi);
 
         // 改返回类型：签名变了
-        write(&a, "package p; public class A { public long f() { return 10; } }");
+        write(
+            &a,
+            "package p; public class A { public long f() { return 10; } }",
+        );
         let (changed, abi) = changed_against_manifest(&l, Some(&prev), &files);
         assert_eq!(changed.len(), 1);
         assert!(abi);
@@ -1660,7 +1799,10 @@ mod tests {
     fn clean_refuses_path_escape_in_manifest() {
         let root = tmp("escape");
         let m = root.join("gl");
-        write(&m.join("src/public/p/A.java"), "package p; public class A {}");
+        write(
+            &m.join("src/public/p/A.java"),
+            "package p; public class A {}",
+        );
         let l = ModuleLayout::resolve(&root, "gl");
         let man = Manifest {
             schema: SCHEMA,

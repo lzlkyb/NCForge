@@ -84,6 +84,9 @@ gen-changelog.mjs 当成真实版本段解析；代码围栏中的示例会被�
 - 规则校验行号定位改为一次建索引 + 二分查找，病态样本校验耗时从 2.9s 降到 10ms。
 - `-Duap.hotwebs` 默认改为 `nccloud,uapws,lfw,portal,fs`（Eclipse `*_Server.launch` 的取值），显式名单经 `hotwebs_names` 过滤掉不存在的目录并可在服务页调整。根因是 `hotwebs/ncchr` 的 spring-data-redis 2.1.6 调 Spring 5 的 `Assert.isTrue(boolean, Supplier)`，而 classpath 里 `spring-core-4.3.12` 排在 `5.1.6` 之前（与官方 bootstrap 同序）⇒ `NoSuchMethodError`、`Context [/ncchr] startup failed`。
 - 需要 NC home 的操作（JVM 桥启动、prop.xml 读取与口令解密）统一发 `need-nc-home` 结构化错误码（`db_cmds::need_nc_home`），前端 `KNOWN_CODES` 识别后按码给引导，不再靠字符串匹配错误文本；`ConnManualForm` 的红条解析原始错误而非友好化后的文案（修复一键切换按钮不出现的 bug，有测试守）。`db_conn_import_props` 默认引擎改 rust，`migrate_legacy` 空串 → JVM 桥的老语义不动（Rust 单测守）。新增 `ConnManualFormHome.test.tsx` / `ConnImportPanes.test.tsx` 共 9 个用例。
+- 门禁清单收敛为单一真源 `desktop/scripts/lib/gate-plan.mjs`：每项声明 id、命令、工作目录、scope 与「为什么有这一项」。`pre-push` 缩成一句 `exec node scripts/gate.mjs`，CI 三个 job 的每一步改成 `node scripts/gate.mjs --only <id>`，不再各自抄一份命令。新增 `--verify-ci`：断言每个 job 的 id 序列等于清单里该 scope 的序列，少了、多了、顺序漂了、或又在工作流里手写命令都会立刻红（本地 `npm test` 的 `pretest` 也跑这条断言）。`postinstall` / `predev` 幂等执行 `git config core.hooksPath .githooks`，克隆完装依赖即生效；钩子未启用时 gate 会打印提醒。
+- 补上 `cargo fmt --check`：它此前在 CI 里根本不存在，唯一跑它的是那个从未安装过的钩子，于是 36 个源文件长期不符合 rustfmt 格式而无人知晓（本轮一次性格式化，纯格式变化）。顺带补一条 Rust 测试临时目录棘轮（`check-rust-tempdir.mjs`，基线模块内 87 处 / integration 12 处）：测试里裸用 `std::env::temp_dir()` 只许减不许增，新增改用 `crate::test_support::tmp(tag)`——它返回 canonicalize 过的路径，能消掉 macOS `/var` → `/private/var` 与 Windows CI `RUNNER~1` 短名造成的「本地绿、CI 红」。
+- `node scripts/gate.mjs` 提供五个入口：全量（本地 pre-push）、`--scope frontend|win|mac`、`--only <id>`、`--list`、`--verify-ci`。失败即停并打印单项复现命令，不让人等完 `cargo test` 才知道是 eslint 挂了。`knip.json` 的 entry 补上新脚本（它只被清单的 argv 字符串引用，knip 追不到）。
 
 ## [0.1.2] - 2026-11-05
 

@@ -72,7 +72,11 @@ fn measure_generation_pipeline() {
     let release = !cfg!(debug_assertions);
     println!(
         "\n[perf] 模式 = {}；预算按 release 口径（典型 P95 ≤ 800ms 打开 / ≤ 3s 生成）",
-        if release { "release" } else { "debug（仅跑通，数字不作承诺）" }
+        if release {
+            "release"
+        } else {
+            "debug（仅跑通，数字不作承诺）"
+        }
     );
 
     let root = real_root();
@@ -98,14 +102,21 @@ fn measure_generation_pipeline() {
         }
     }
     if !samples.is_empty() {
-        report("真实 BMF（读+解析 / 校验 / 旧生成 / 生成中心）", &samples, release);
+        report(
+            "真实 BMF（读+解析 / 校验 / 旧生成 / 生成中心）",
+            &samples,
+            release,
+        );
     }
 
     // 病态样本：100 实体 × 50 属性 = 5000 属性。用它验证不存在 O(n²) 爆炸。
     let big = synthetic_large(100, 50);
     let mut big_samples = Vec::new();
     for _ in 0..3 {
-        big_samples.push(measure_bytes(PathBuf::from("<synthetic-large>.bmf"), big.as_bytes()));
+        big_samples.push(measure_bytes(
+            PathBuf::from("<synthetic-large>.bmf"),
+            big.as_bytes(),
+        ));
     }
     report("合成大样本 100×50（5000 属性）", &big_samples, release);
     let big_max = big_samples.iter().map(|s| s.center()).fold(0.0, f64::max);
@@ -127,7 +138,10 @@ fn measure_generation_pipeline() {
     let typical = synthetic_typical();
     let mut typical_samples = Vec::new();
     for _ in 0..ROUNDS {
-        typical_samples.push(measure_bytes(PathBuf::from("<synthetic-typical>.bmf"), typical.as_bytes()));
+        typical_samples.push(measure_bytes(
+            PathBuf::from("<synthetic-typical>.bmf"),
+            typical.as_bytes(),
+        ));
     }
     let s = report("合成典型主子表", &typical_samples, release);
     if release {

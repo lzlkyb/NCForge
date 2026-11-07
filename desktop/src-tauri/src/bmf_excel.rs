@@ -24,8 +24,18 @@ use crate::bmf_write::{is_field_ident, sha256, EditOp};
 pub const SHEET: &str = "字段";
 const NOTE_SHEET: &str = "说明";
 const HEADERS: [&str; 12] = [
-    "实体", "字段名", "列名", "显示名", "类型", "数据类型", "数据库类型", "长度", "精度", "可空",
-    "默认值", "主键",
+    "实体",
+    "字段名",
+    "列名",
+    "显示名",
+    "类型",
+    "数据类型",
+    "数据库类型",
+    "长度",
+    "精度",
+    "可空",
+    "默认值",
+    "主键",
 ];
 const MAX_PART: u64 = 32 * 1024 * 1024;
 /// Excel 的列上限（XFD = 16384）。`r="ZZZZZZ1"` 这类畸形引用不能按真实值去分配。
@@ -108,7 +118,12 @@ fn cell_xml(row: usize, col: usize, cell: &Cell, header: bool) -> String {
             esc(t)
         ),
         Cell::Int(Some(v)) => {
-            format!(r#"<c r="{}{}"{}><v>{v}</v></c>"#, col_letters(col), row, style)
+            format!(
+                r#"<c r="{}{}"{}><v>{v}</v></c>"#,
+                col_letters(col),
+                row,
+                style
+            )
         }
         Cell::Int(None) => String::new(),
     }
@@ -210,7 +225,10 @@ fn read_part(zip: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Vec<u8>,
         .by_name(name)
         .map_err(|_| format!("xlsx 里缺少 {name}"))?;
     if f.size() > MAX_PART {
-        return Err(format!("{name} 解压后超过 {} MB，拒绝读取", MAX_PART / 1024 / 1024));
+        return Err(format!(
+            "{name} 解压后超过 {} MB，拒绝读取",
+            MAX_PART / 1024 / 1024
+        ));
     }
     // 头里的 size 是压缩包自报的，可以撒谎；真正解压时再按上限截断，避免 32MB
     // 的 zip 声明 1KB、实际解出几个 GB 把内存顶满。
@@ -219,7 +237,10 @@ fn read_part(zip: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Vec<u8>,
         .read_to_end(&mut buf)
         .map_err(|e| format!("读取 {name} 失败：{e}"))?;
     if buf.len() as u64 > MAX_PART {
-        return Err(format!("{name} 解压后超过 {} MB，拒绝读取", MAX_PART / 1024 / 1024));
+        return Err(format!(
+            "{name} 解压后超过 {} MB，拒绝读取",
+            MAX_PART / 1024 / 1024
+        ));
     }
     Ok(buf)
 }
@@ -229,7 +250,11 @@ fn node_text(n: &XmlNode, bytes: &[u8]) -> String {
         return String::new();
     }
     let close = n.name.len() + 3;
-    let end = n.end.saturating_sub(close).max(n.start_tag_end).min(bytes.len());
+    let end = n
+        .end
+        .saturating_sub(close)
+        .max(n.start_tag_end)
+        .min(bytes.len());
     String::from_utf8_lossy(&bytes[n.start_tag_end.min(bytes.len())..end]).into_owned()
 }
 
@@ -240,27 +265,26 @@ fn unescape(s: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         let tail = &rest[i..];
-        let decoded = tail
-            .find(';')
-            .filter(|n| *n <= 12)
-            .and_then(|semi| {
-                let ent = &tail[1..semi];
-                let ch = match ent {
-                    "lt" => Some('<'),
-                    "gt" => Some('>'),
-                    "quot" => Some('"'),
-                    "apos" => Some('\''),
-                    "amp" => Some('&'),
-                    _ => ent
-                        .strip_prefix('#')
-                        .and_then(|n| match n.strip_prefix('x').or_else(|| n.strip_prefix('X')) {
+        let decoded = tail.find(';').filter(|n| *n <= 12).and_then(|semi| {
+            let ent = &tail[1..semi];
+            let ch = match ent {
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                "amp" => Some('&'),
+                _ => ent
+                    .strip_prefix('#')
+                    .and_then(
+                        |n| match n.strip_prefix('x').or_else(|| n.strip_prefix('X')) {
                             Some(hex) => u32::from_str_radix(hex, 16).ok(),
                             None => n.parse::<u32>().ok(),
-                        })
-                        .and_then(char::from_u32),
-                };
-                ch.map(|c| (c, semi))
-            });
+                        },
+                    )
+                    .and_then(char::from_u32),
+            };
+            ch.map(|c| (c, semi))
+        });
         match decoded {
             Some((ch, semi)) => {
                 out.push(ch);
@@ -321,11 +345,7 @@ fn cell_col(cell: &XmlNode, fallback: usize) -> Result<(usize, u32), String> {
     }
 }
 
-fn cell_value(
-    cell: &XmlNode,
-    bytes: &[u8],
-    shared: &[String],
-) -> Result<String, String> {
+fn cell_value(cell: &XmlNode, bytes: &[u8], shared: &[String]) -> Result<String, String> {
     match cell.attr_or("t", "").as_str() {
         "inlineStr" => {
             let mut s = String::new();
@@ -442,7 +462,10 @@ pub fn read_sheet(bytes: &[u8]) -> Result<SheetRows, String> {
         }
         rows.push((row_no, values));
     }
-    Ok(SheetRows { name: sheet_name, rows })
+    Ok(SheetRows {
+        name: sheet_name,
+        rows,
+    })
 }
 
 // ───────────────────────────── 导入规划 ─────────────────────────────
@@ -527,7 +550,10 @@ fn change(field: &str, before: String, after: String) -> ImportChange {
     }
 }
 
-fn plan_row(doc: &BmfDoc, get: &dyn Fn(&str) -> String) -> Result<(String, Vec<ImportChange>, Vec<EditOp>), String> {
+fn plan_row(
+    doc: &BmfDoc,
+    get: &dyn Fn(&str) -> String,
+) -> Result<(String, Vec<ImportChange>, Vec<EditOp>), String> {
     let entity_name = get("实体");
     let name = get("字段名");
     if entity_name.is_empty() {
@@ -557,7 +583,9 @@ fn plan_row(doc: &BmfDoc, get: &dyn Fn(&str) -> String) -> Result<(String, Vec<I
 
     let Some(attr) = ent.attrs.iter().find(|a| a.name == name) else {
         if !is_field_ident(&name) {
-            return Err(format!("字段名只能以小写字母开头，且只含小写字母、数字、下划线：{name}"));
+            return Err(format!(
+                "字段名只能以小写字母开头，且只含小写字母、数字、下划线：{name}"
+            ));
         }
         if desired.is_key == Some(true) {
             return Err("新增字段不能直接设主键；先新增，再到结构页改主键".to_string());
@@ -596,7 +624,10 @@ fn plan_row(doc: &BmfDoc, get: &dyn Fn(&str) -> String) -> Result<(String, Vec<I
             name: name.clone(),
             display_name: desired.display_name.clone().unwrap_or_else(|| name.clone()),
             style: "SINGLE".to_string(),
-            type_name: desired.type_name.clone().unwrap_or_else(|| "String".to_string()),
+            type_name: desired
+                .type_name
+                .clone()
+                .unwrap_or_else(|| "String".to_string()),
             data_type: desired.data_type.clone().unwrap_or_default(),
             db_type: desired.db_type.clone().unwrap_or_default(),
             length: desired.length,
@@ -622,7 +653,9 @@ fn plan_row(doc: &BmfDoc, get: &dyn Fn(&str) -> String) -> Result<(String, Vec<I
     };
     if let Some(v) = &desired.name {
         if !is_field_ident(v) {
-            return Err(format!("字段名只能以小写字母开头，且只含小写字母、数字、下划线：{v}"));
+            return Err(format!(
+                "字段名只能以小写字母开头，且只含小写字母、数字、下划线：{v}"
+            ));
         }
         set("字段名", attr.name.clone(), v.clone(), "name");
     }
@@ -630,7 +663,12 @@ fn plan_row(doc: &BmfDoc, get: &dyn Fn(&str) -> String) -> Result<(String, Vec<I
         set("列名", attr.field.clone(), v.clone(), "fieldName");
     }
     if let Some(v) = &desired.display_name {
-        set("显示名", attr.display_name.clone(), v.clone(), "displayName");
+        set(
+            "显示名",
+            attr.display_name.clone(),
+            v.clone(),
+            "displayName",
+        );
     }
     if let Some(v) = &desired.type_name {
         set("类型", attr.type_name.clone(), v.clone(), "typeName");
@@ -642,7 +680,12 @@ fn plan_row(doc: &BmfDoc, get: &dyn Fn(&str) -> String) -> Result<(String, Vec<I
         set("数据库类型", attr.db_type.clone(), v.clone(), "dbtype");
     }
     if let Some(v) = desired.length {
-        set("长度", attr.length.map(|n| n.to_string()).unwrap_or_default(), v.to_string(), "length");
+        set(
+            "长度",
+            attr.length.map(|n| n.to_string()).unwrap_or_default(),
+            v.to_string(),
+            "length",
+        );
     }
     if let Some(v) = desired.precision {
         set(
@@ -661,7 +704,12 @@ fn plan_row(doc: &BmfDoc, get: &dyn Fn(&str) -> String) -> Result<(String, Vec<I
         );
     }
     if let Some(v) = &desired.default_value {
-        set("默认值", attr.default_value.clone(), v.clone(), "defaultValue");
+        set(
+            "默认值",
+            attr.default_value.clone(),
+            v.clone(),
+            "defaultValue",
+        );
     }
     if let Some(v) = desired.is_key {
         if v && !attr.is_key {
@@ -729,7 +777,12 @@ pub fn plan_import(doc: &BmfDoc, file: &str, bytes: &[u8]) -> Result<ImportPrevi
         let (status, changes, message, row_ops) = match plan_row(doc, &get) {
             Ok((status, changes, row_ops)) => {
                 if status != "same" && !seen.insert(key) {
-                    ("error".to_string(), Vec::new(), "模板里同一实体的同一字段出现了多次".to_string(), Vec::new())
+                    (
+                        "error".to_string(),
+                        Vec::new(),
+                        "模板里同一实体的同一字段出现了多次".to_string(),
+                        Vec::new(),
+                    )
                 } else {
                     (status, changes, String::new(), row_ops)
                 }
@@ -841,19 +894,46 @@ mod tests {
         let rows: Vec<Vec<Cell>> = vec![
             HEADERS.iter().map(|h| text(h)).collect(),
             vec![
-                text("H"), text("pk"), text("pk"), text("主键"), text("String"), text("char"),
-                text("char"), Cell::Int(Some(32)), Cell::Int(None), text("否"), text(""),
+                text("H"),
+                text("pk"),
+                text("pk"),
+                text("主键"),
+                text("String"),
+                text("char"),
+                text("char"),
+                Cell::Int(Some(32)),
+                Cell::Int(None),
+                text("否"),
+                text(""),
                 text("是"),
             ],
             vec![
-                text("H"), text("new_field"), text("new_field"), text("新字段"), text("Integer"),
-                Cell::Int(None), Cell::Int(None), Cell::Int(Some(8)), Cell::Int(None), text("否"),
-                text("0"), text("否"),
+                text("H"),
+                text("new_field"),
+                text("new_field"),
+                text("新字段"),
+                text("Integer"),
+                Cell::Int(None),
+                Cell::Int(None),
+                Cell::Int(Some(8)),
+                Cell::Int(None),
+                text("否"),
+                text("0"),
+                text("否"),
             ],
             vec![
-                text("H"), text("new_field"), text("new_field"), text("重复"), text("Integer"),
-                Cell::Int(None), Cell::Int(None), Cell::Int(Some(8)), Cell::Int(None), text("否"),
-                text("0"), text("否"),
+                text("H"),
+                text("new_field"),
+                text("new_field"),
+                text("重复"),
+                text("Integer"),
+                Cell::Int(None),
+                Cell::Int(None),
+                Cell::Int(Some(8)),
+                Cell::Int(None),
+                text("否"),
+                text("0"),
+                text("否"),
             ],
             vec![text("Missing"), text("x")],
         ];
@@ -923,7 +1003,10 @@ mod tests {
         let bytes = zip.finish().unwrap().into_inner();
         let sheet = read_sheet(&bytes).unwrap();
         assert_eq!(sheet.name, "字段");
-        assert_eq!(sheet.rows[0].1, vec!["实体".to_string(), "字段名".to_string()]);
+        assert_eq!(
+            sheet.rows[0].1,
+            vec!["实体".to_string(), "字段名".to_string()]
+        );
     }
 
     #[test]

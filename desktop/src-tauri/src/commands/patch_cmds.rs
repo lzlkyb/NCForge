@@ -300,7 +300,10 @@ pub async fn patch_defaults(
             } else if let Some(r) = &root {
                 // 建议放在工作副本的同级（不是里面）：补丁包不该混进工程目录
                 let base = r.parent().unwrap_or(r);
-                (Some(display_path(&base.join(PATCH_DIR_NAMES[0]))), "suggest")
+                (
+                    Some(display_path(&base.join(PATCH_DIR_NAMES[0]))),
+                    "suggest",
+                )
             } else {
                 (None, "none")
             }

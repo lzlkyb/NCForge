@@ -52,9 +52,24 @@ pub struct Generation {
 }
 
 const KNOWN: [&str; 18] = [
-    "String", "UFID", "Integer", "UFDouble", "UFBoolean", "UFDate", "UFDateTime",
-    "UFLiteralDate", "UFTime", "UFMoney", "BigDecimal", "Multilangtext", "MEMO", "IMAGE",
-    "BLOB", "CLOB", "CUSTOM", "user",
+    "String",
+    "UFID",
+    "Integer",
+    "UFDouble",
+    "UFBoolean",
+    "UFDate",
+    "UFDateTime",
+    "UFLiteralDate",
+    "UFTime",
+    "UFMoney",
+    "BigDecimal",
+    "Multilangtext",
+    "MEMO",
+    "IMAGE",
+    "BLOB",
+    "CLOB",
+    "CUSTOM",
+    "user",
 ];
 
 /// 生成整套预览。`only` 为空 = 所有实体。
@@ -90,7 +105,11 @@ pub fn ddl(doc: &BmfDoc, entities: &[&Entity], warnings: &mut Vec<String>) -> St
             warnings.push(format!("实体 {} 没有表名，跳过 DDL", e.name));
             continue;
         }
-        let cols: Vec<&Attr> = e.attrs.iter().filter(|a| a.style != "ARRAY" && !a.field.is_empty()).collect();
+        let cols: Vec<&Attr> = e
+            .attrs
+            .iter()
+            .filter(|a| a.style != "ARRAY" && !a.field.is_empty())
+            .collect();
         if cols.is_empty() {
             warnings.push(format!("实体 {} 没有可落库的列，跳过 DDL", e.name));
             continue;
@@ -102,7 +121,10 @@ pub fn ddl(doc: &BmfDoc, entities: &[&Entity], warnings: &mut Vec<String>) -> St
             let ty = match oracle_type(a) {
                 Ok(t) => t,
                 Err(t) => {
-                    warnings.push(format!("{}.{} 类型未识别（{} / {}），DDL 里标成 {}", e.table, a.name, a.type_name, a.data_type, t));
+                    warnings.push(format!(
+                        "{}.{} 类型未识别（{} / {}），DDL 里标成 {}",
+                        e.table, a.name, a.type_name, a.data_type, t
+                    ));
                     format!("{t} /* 未识别类型：{} */", a.type_name)
                 }
             };
@@ -126,7 +148,11 @@ pub fn ddl(doc: &BmfDoc, entities: &[&Entity], warnings: &mut Vec<String>) -> St
             warnings.push(format!("实体 {} 没有主键列，DDL 无法建主键约束", e.name));
         }
         for k in keys {
-            lines.push(format!("  constraint pk_{} primary key ({})", short_name(&e.table), k));
+            lines.push(format!(
+                "  constraint pk_{} primary key ({})",
+                short_name(&e.table),
+                k
+            ));
         }
         s.push_str(&lines.join(",\n"));
         s.push_str("\n);\n");
@@ -156,10 +182,20 @@ pub fn ddl(doc: &BmfDoc, entities: &[&Entity], warnings: &mut Vec<String>) -> St
         if r.kind != "AggregationRelation" {
             continue;
         }
-        let child = doc.entities.iter().find(|e| e.id == r.source || e.name == r.source);
-        let parent = doc.entities.iter().find(|e| e.id == r.target || e.name == r.target);
-        let (Some(c), Some(p)) = (child, parent) else { continue };
-        let Some(attr) = c.attrs.iter().find(|a| a.id == r.src_attr_id) else { continue };
+        let child = doc
+            .entities
+            .iter()
+            .find(|e| e.id == r.source || e.name == r.source);
+        let parent = doc
+            .entities
+            .iter()
+            .find(|e| e.id == r.target || e.name == r.target);
+        let (Some(c), Some(p)) = (child, parent) else {
+            continue;
+        };
+        let Some(attr) = c.attrs.iter().find(|a| a.id == r.src_attr_id) else {
+            continue;
+        };
         if let Some(pk) = p.attrs.iter().find(|a| a.is_key) {
             s.push_str(&format!(
                 "-- 聚合关系：{}.{} → {}.{}（NC 默认不建外键约束；需要时人工执行）\n",
@@ -293,27 +329,40 @@ pub fn registry(doc: &BmfDoc, entities: &[&Entity]) -> Registry {
         "系统类型",
         "功能注册节点 / 单据类型定义",
         c.name.clone(),
-        format!("注册组件 {}（{}）到目标模块 {}", c.display_name, c.name, c.own_module),
+        format!(
+            "注册组件 {}（{}）到目标模块 {}",
+            c.display_name, c.name, c.own_module
+        ),
         "六处注册里最容易被漏掉的一处；漏了菜单里看不到。",
     );
     push(
         "功能节点",
         "功能注册 XML / 菜单配置",
         String::new(),
-        format!("新增功能：{} → 主实体 {}", c.display_name, entities.first().map(|e| e.name.as_str()).unwrap_or("")),
+        format!(
+            "新增功能：{} → 主实体 {}",
+            c.display_name,
+            entities.first().map(|e| e.name.as_str()).unwrap_or("")
+        ),
         "功能编码通常等于组件名；权限点与它绑定。",
     );
     push(
         "单据类型",
         "bd_billtype（发布后在库中）",
         String::new(),
-        format!("为 {} 建单据类型（pk_billtypeid / pk_billtypecode）", c.name),
+        format!(
+            "为 {} 建单据类型（pk_billtypeid / pk_billtypecode）",
+            c.name
+        ),
         "表头带 pk_billtypeid/ctrantypeid 的组件必须有对应单据类型，否则审批流走不通。",
     );
     push(
         "VO 对照",
         &format!("nc.vo.{}.{}", c.namespace, c.name),
-        entities.first().map(|e| e.full_class.clone()).unwrap_or_default(),
+        entities
+            .first()
+            .map(|e| e.full_class.clone())
+            .unwrap_or_default(),
         entities
             .iter()
             .map(|e| format!("{} → {}", e.name, e.full_class))
@@ -377,7 +426,10 @@ fn infer_oracle(a: &Attr) -> Result<String, String> {
     Ok(match ty {
         "UFID" => "char(20)".into(),
         "String" | "CUSTOM" | "Multilangtext" | "MEMO" => {
-            format!("varchar2({})", a.length.filter(|l| *l > 0).unwrap_or(default_len(ty)))
+            format!(
+                "varchar2({})",
+                a.length.filter(|l| *l > 0).unwrap_or(default_len(ty))
+            )
         }
         "Integer" => "number(10)".into(),
         "UFDouble" | "UFMoney" | "BigDecimal" => format!(
@@ -458,7 +510,10 @@ fn capitalize(s: &str) -> String {
 }
 
 fn short_name(table: &str) -> String {
-    let s: String = table.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+    let s: String = table
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
     if s.len() > 24 {
         s[s.len() - 24..].to_string()
     } else {
@@ -516,7 +571,11 @@ mod tests {
             sql.contains("constraint pk_uapbd_sz02_h primary key (pk_head)"),
             "{sql}"
         );
-        assert_eq!(sql.matches("pk_head char(20)").count(), 1, "ARRAY 不能落成列");
+        assert_eq!(
+            sql.matches("pk_head char(20)").count(),
+            1,
+            "ARRAY 不能落成列"
+        );
         assert!(sql.contains("number(28,8)"));
         assert!(sql.contains("comment on table"));
         assert!(sql.contains("聚合关系"), "子表外键以提示形式出现");
@@ -561,7 +620,10 @@ mod tests {
         assert!(f.text.starts_with("package nc.vo.uapbd.sz02;"));
         assert!(f.text.contains("public class Sz02HVO extends SuperVO"));
         assert!(f.text.contains("public String pk_head;"));
-        assert!(f.text.contains("public Integer fstatusflag;"), "枚举落 Integer");
+        assert!(
+            f.text.contains("public Integer fstatusflag;"),
+            "枚举落 Integer"
+        );
         assert!(f.text.contains("public UFDouble mny;"));
         assert!(!f.text.contains("public Sz02BVO"), "ARRAY 不进 VO 字段");
         assert!(f.text.contains("public String getPk_head()"));
@@ -571,7 +633,9 @@ mod tests {
         assert!(f.text.contains("import nc.vo.pub.lang.UFDouble;"));
         assert!(f.text.contains("import nc.vo.pub.lang.UFDateTime;"));
         assert_eq!(f.eol, "CRLF");
-        assert!(f.path_hint.ends_with("src/public/nc/vo/uapbd/sz02/Sz02HVO.java"));
+        assert!(f
+            .path_hint
+            .ends_with("src/public/nc/vo/uapbd/sz02/Sz02HVO.java"));
     }
 
     #[test]

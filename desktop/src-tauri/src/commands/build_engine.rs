@@ -48,7 +48,14 @@ impl Ctx {
         self.log(&format!("[{module}] {s}"));
     }
 
-    fn progress(&self, phase: &str, done: usize, total: usize, module: Option<&str>, elapsed_ms: u64) {
+    fn progress(
+        &self,
+        phase: &str,
+        done: usize,
+        total: usize,
+        module: Option<&str>,
+        elapsed_ms: u64,
+    ) {
         let _ = self.app.emit(
             "build-progress",
             serde_json::json!({
@@ -74,12 +81,8 @@ impl Ctx {
     }
 
     fn index(&self, module: &str) -> Result<(Arc<ClassIndex>, Vec<u32>), String> {
-        let (index, seed) = cached_index(
-            &self.nc_home,
-            &self.cache_path,
-            module,
-            &|s| self.log(s),
-        )?;
+        let (index, seed) =
+            cached_index(&self.nc_home, &self.cache_path, module, &|s| self.log(s))?;
         Ok((index, seed))
     }
 
@@ -110,10 +113,7 @@ impl Ctx {
 }
 
 /// 取上下文。`root` 取配置里的工作区；NC home / ecj / java 与单模块编译同一套解析。
-pub(super) async fn context(
-    app: tauri::AppHandle,
-    state: &Arc<AppState>,
-) -> Result<Ctx, String> {
+pub(super) async fn context(app: tauri::AppHandle, state: &Arc<AppState>) -> Result<Ctx, String> {
     let (_root_raw, root) = super::compile_cmds::workspace_roots(state).await?;
     let (nc_home_cfg, overrides, deploy_on_start, parallel, persistent) = {
         let cfg = state.config.read().await;
@@ -237,9 +237,18 @@ pub(super) fn build_one(
                 build_state::changed_against_manifest(&layout, previous.as_ref(), &files);
             (files, true, reason.clone(), changed, abi_changed)
         }
-        Decision::Incremental { files, reason, changed, abi_changed } => {
-            (files.clone(), false, reason.clone(), changed.clone(), *abi_changed)
-        }
+        Decision::Incremental {
+            files,
+            reason,
+            changed,
+            abi_changed,
+        } => (
+            files.clone(),
+            false,
+            reason.clone(),
+            changed.clone(),
+            *abi_changed,
+        ),
         Decision::Skip => unreachable!(),
     };
     if files.is_empty() {
@@ -257,7 +266,10 @@ pub(super) fn build_one(
 
     let (index, cached_seed) = ctx.index(module)?;
     let seed = if cached_seed.is_empty() {
-        previous.as_ref().map(|m| m.seed_jars.clone()).unwrap_or_default()
+        previous
+            .as_ref()
+            .map(|m| m.seed_jars.clone())
+            .unwrap_or_default()
     } else {
         cached_seed
     };
@@ -274,7 +286,11 @@ pub(super) fn build_one(
         output_map: layout
             .groups
             .iter()
-            .flat_map(|g| g.source_roots.iter().map(|r| (r.clone(), g.out_dir.clone())))
+            .flat_map(|g| {
+                g.source_roots
+                    .iter()
+                    .map(|r| (r.clone(), g.out_dir.clone()))
+            })
             .collect(),
         seed_jars: seed,
         fast: false,
@@ -283,7 +299,12 @@ pub(super) fn build_one(
     let mut result = compile::compile(&env, &job, &|s| ctx.log(s))?;
     result.modules.push(ModuleBuildResult {
         module: module.to_string(),
-        status: if result.error_count == 0 { "ok" } else { "failed" }.to_string(),
+        status: if result.error_count == 0 {
+            "ok"
+        } else {
+            "failed"
+        }
+        .to_string(),
         error_count: result.error_count,
         warning_count: result.warning_count,
         duration_ms: result.duration_ms,
@@ -308,7 +329,10 @@ pub(super) fn build_one(
             let stale = build_state::stale_classes(&layout, prev, &next);
             let removed = delete_stale(&stale, &layout.module_dir);
             if removed > 0 {
-                ctx.log_module(module, &format!("清理 {removed} 个上次有、这次没有的 class"));
+                ctx.log_module(
+                    module,
+                    &format!("清理 {removed} 个上次有、这次没有的 class"),
+                );
             }
         }
         if let Err(e) = build_state::write_manifest(&ctx.manifest_file(module), &next) {
@@ -380,10 +404,7 @@ fn empty_result(module: &str, out_dir: &str) -> CompileResult {
 }
 
 /// 模块依赖：`module -> 它 .classpath 里引用的工作区模块`（只认工作区内部）。
-pub(super) fn module_deps(
-    root: &Path,
-    modules: &[String],
-) -> HashMap<String, Vec<String>> {
+pub(super) fn module_deps(root: &Path, modules: &[String]) -> HashMap<String, Vec<String>> {
     let lower: HashMap<String, String> = modules
         .iter()
         .map(|m| (m.to_ascii_lowercase(), m.clone()))
@@ -394,7 +415,9 @@ pub(super) fn module_deps(
         if let Some(cp) = crate::eclipse_cp::ProjectCp::load(&root.join(m)) {
             for r in &cp.refs {
                 if let Some(target) = lower.get(&r.name.to_ascii_lowercase()) {
-                    if !target.eq_ignore_ascii_case(m) && !deps.iter().any(|d| d.eq_ignore_ascii_case(target)) {
+                    if !target.eq_ignore_ascii_case(m)
+                        && !deps.iter().any(|d| d.eq_ignore_ascii_case(target))
+                    {
                         deps.push(target.clone());
                     }
                 }
@@ -501,7 +524,11 @@ pub(super) fn build_all_impl(
                 &format!(
                     "已清理 {} 个 class{}",
                     r.removed,
-                    if r.failed.is_empty() { "" } else { "（有文件删不掉，见清理报告）" }
+                    if r.failed.is_empty() {
+                        ""
+                    } else {
+                        "（有文件删不掉，见清理报告）"
+                    }
                 ),
             );
         }
@@ -524,7 +551,11 @@ pub(super) fn build_all_impl(
     let mode = if force_full { Mode::Full } else { Mode::Auto };
 
     for level in levels {
-        if ctx.st.compile_cancel.load(std::sync::atomic::Ordering::SeqCst) {
+        if ctx
+            .st
+            .compile_cancel
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
             return Err(compile::CANCELLED.to_string());
         }
         // 先把依赖已失败 / 被阻断的模块标成 blocked，不启动 JVM
@@ -591,9 +622,12 @@ pub(super) fn build_all_impl(
             for (module, outcome) in batch {
                 match outcome {
                     Ok(b) => {
-                        let led = b.result.modules.last().cloned().unwrap_or_else(|| {
-                            ModuleBuildResult::ok(&module, &b.result)
-                        });
+                        let led = b
+                            .result
+                            .modules
+                            .last()
+                            .cloned()
+                            .unwrap_or_else(|| ModuleBuildResult::ok(&module, &b.result));
                         if led.status == "failed" {
                             failed.insert(module.to_ascii_lowercase());
                         }
@@ -667,10 +701,18 @@ pub(super) fn build_all_impl(
     let mut led = std::mem::take(&mut ledgers);
     // 同一模块只会有一条（失败路径与成功路径互斥），按模块名排序即可稳定显示
     led.sort_by(|a, b| a.module.cmp(&b.module));
-    let has_bad = led.iter().any(|l| l.status == "failed" || l.status == "blocked");
+    let has_bad = led
+        .iter()
+        .any(|l| l.status == "failed" || l.status == "blocked");
     total_result.ok = total_result.error_count == 0 && !has_bad;
     total_result.modules = led;
-    ctx.progress("done", total, total, None, started.elapsed().as_millis() as u64);
+    ctx.progress(
+        "done",
+        total,
+        total,
+        None,
+        started.elapsed().as_millis() as u64,
+    );
 
     if total_result.ok {
         ctx.log("全部模块编译完成");
@@ -694,7 +736,8 @@ fn propagate_blocked(
                 continue;
             }
             if ds.iter().any(|d| {
-                failed.contains(&d.to_ascii_lowercase()) || blocked.contains(&d.to_ascii_lowercase())
+                failed.contains(&d.to_ascii_lowercase())
+                    || blocked.contains(&d.to_ascii_lowercase())
             }) {
                 blocked.insert(m.to_ascii_lowercase());
                 changed = true;
@@ -741,7 +784,10 @@ pub(super) fn compile_files(
         let previous = ctx.manifest(&module);
         let (index, cached_seed) = ctx.index(&module)?;
         let seed = if cached_seed.is_empty() {
-            previous.as_ref().map(|m| m.seed_jars.clone()).unwrap_or_default()
+            previous
+                .as_ref()
+                .map(|m| m.seed_jars.clone())
+                .unwrap_or_default()
         } else {
             cached_seed
         };
@@ -758,7 +804,11 @@ pub(super) fn compile_files(
             output_map: layout
                 .groups
                 .iter()
-                .flat_map(|g| g.source_roots.iter().map(|r| (r.clone(), g.out_dir.clone())))
+                .flat_map(|g| {
+                    g.source_roots
+                        .iter()
+                        .map(|r| (r.clone(), g.out_dir.clone()))
+                })
                 .collect(),
             seed_jars: seed,
             fast,
@@ -936,9 +986,10 @@ pub(super) fn clean_one(ctx: &Ctx, module: &str, dry_run: bool) -> CleanReport {
         .map(|mut g| g.is_alive())
         .unwrap_or(false);
     if running {
-        report
-            .notes
-            .push("NC 服务正在运行：本次只清理，不会停止服务；运行中的进程可能仍在使用已删的 class".to_string());
+        report.notes.push(
+            "NC 服务正在运行：本次只清理，不会停止服务；运行中的进程可能仍在使用已删的 class"
+                .to_string(),
+        );
     }
     report
 }
@@ -1007,7 +1058,12 @@ mod tests {
         let groups = cross_module_groups(&root, &names(&["a", "b", "c"]), &changed, &skip);
         assert_eq!(groups.len(), 1, "只应命中 b：{groups:?}");
         assert_eq!(groups[0].0, "b");
-        assert_eq!(groups[0].1.len(), 1, "只应带引用方 B.java：{:?}", groups[0].1);
+        assert_eq!(
+            groups[0].1.len(),
+            1,
+            "只应带引用方 B.java：{:?}",
+            groups[0].1
+        );
         assert!(groups[0].1[0].ends_with("B.java"));
     }
 

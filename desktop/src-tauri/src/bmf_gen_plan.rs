@@ -27,10 +27,7 @@ pub fn plan(doc: &BmfDoc, profile: &GenProfile, only: &[String]) -> GenPlan {
         .filter(|e| only.is_empty() || only.iter().any(|id| id == &e.id || id == &e.name))
         .collect();
     if !only.is_empty() && picked.is_empty() {
-        warnings.push(format!(
-            "筛选条件没有匹配任何实体：{}",
-            only.join(", ")
-        ));
+        warnings.push(format!("筛选条件没有匹配任何实体：{}", only.join(", ")));
     }
     let main = doc
         .entities
@@ -224,7 +221,12 @@ mod tests {
         assert_eq!(ids.len(), g.artifacts.len());
         for a in &g.artifacts {
             for dep in &a.depends_on {
-                assert!(ids.contains(dep.as_str()), "{} 依赖了不存在的 {}", a.id, dep);
+                assert!(
+                    ids.contains(dep.as_str()),
+                    "{} 依赖了不存在的 {}",
+                    a.id,
+                    dep
+                );
             }
             assert_eq!(a.sha256.len(), 64);
         }
@@ -236,7 +238,11 @@ mod tests {
         let p = GenProfile::from_bmf(&d);
         let g = plan(&d, &p, &[]);
         let agg = g.artifacts.iter().find(|a| a.kind == "aggvo").unwrap();
-        assert!(agg.text.contains("extends AggregatedValueObject"), "{}", agg.text);
+        assert!(
+            agg.text.contains("extends AggregatedValueObject"),
+            "{}",
+            agg.text
+        );
         assert!(agg.text.contains("getChildrenVO"));
         assert!(agg.text.contains("Sz02HVO"), "{}", agg.text);
     }
@@ -252,11 +258,21 @@ mod tests {
             .iter()
             .find(|a| a.kind == "vo" && a.name.starts_with("Sz02HVO"))
             .unwrap();
-        assert!(vo.text.contains("getAttributeValue(\"pk_head\")"), "{}", vo.text);
-        assert!(vo.text.contains("public static final String PK_HEAD = \"pk_head\""));
+        assert!(
+            vo.text.contains("getAttributeValue(\"pk_head\")"),
+            "{}",
+            vo.text
+        );
+        assert!(vo
+            .text
+            .contains("public static final String PK_HEAD = \"pk_head\""));
         assert!(vo.text.contains("public String getPKFieldName()"));
         assert!(vo.text.contains("getTableName()"));
-        assert!(vo.text.contains("getVOMeta(\"uapbd.uapbd_sz02_h\")"), "{}", vo.text);
+        assert!(
+            vo.text.contains("getVOMeta(\"uapbd.uapbd_sz02_h\")"),
+            "{}",
+            vo.text
+        );
         let agg = g.artifacts.iter().find(|a| a.kind == "aggvo").unwrap();
         assert!(agg.text.contains("extends AbstractBill"), "{}", agg.text);
         assert!(agg.text.contains("@nc.vo.annotation.AggVoInfo"));
@@ -267,12 +283,13 @@ mod tests {
         let d = sample();
         let p = GenProfile::from_bmf(&d);
         let g = plan(&d, &p, &["e2".to_string()]);
-        let vos: Vec<&Artifact> = g
-            .artifacts
-            .iter()
-            .filter(|a| a.kind == "vo")
-            .collect();
-        assert_eq!(vos.len(), 1, "{:?}", g.artifacts.iter().map(|a| &a.name).collect::<Vec<_>>());
+        let vos: Vec<&Artifact> = g.artifacts.iter().filter(|a| a.kind == "vo").collect();
+        assert_eq!(
+            vos.len(),
+            1,
+            "{:?}",
+            g.artifacts.iter().map(|a| &a.name).collect::<Vec<_>>()
+        );
         assert!(vos[0].text.contains("class Sz02BVO"));
         assert!(g.artifacts.iter().all(|a| a.kind != "aggvo"));
     }
@@ -283,6 +300,9 @@ mod tests {
         let mut p = GenProfile::from_bmf(&d);
         p.style = CodeStyle::Custom;
         let g = plan(&d, &p, &[]);
-        assert!(g.warnings.iter().any(|w| w.contains("自定义样式未指定包根")));
+        assert!(g
+            .warnings
+            .iter()
+            .any(|w| w.contains("自定义样式未指定包根")));
     }
 }

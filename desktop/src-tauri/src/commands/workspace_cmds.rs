@@ -126,9 +126,7 @@ pub async fn pick_folder(
             Some(t) => dialog.set_title(t),
             None => dialog,
         };
-        let dialog = match default_path
-            .filter(|p| PathBuf::from(p.as_str()).is_dir())
-        {
+        let dialog = match default_path.filter(|p| PathBuf::from(p.as_str()).is_dir()) {
             Some(p) => dialog.set_directory(p),
             None => dialog,
         };
@@ -171,9 +169,7 @@ pub async fn pick_file(
             let refs: Vec<&str> = exts.iter().map(String::as_str).collect();
             dialog = dialog.add_filter("支持的文件", &refs);
         }
-        let dialog = match default_path
-            .filter(|p| PathBuf::from(p.as_str()).is_dir())
-        {
+        let dialog = match default_path.filter(|p| PathBuf::from(p.as_str()).is_dir()) {
             Some(p) => dialog.set_directory(p),
             None => dialog,
         };
@@ -285,17 +281,23 @@ pub async fn fs_java_outline_source(
     path: String,
 ) -> Result<String, String> {
     let roots = allowed_read_roots(&state).await;
-    let file = crate::security::path::resolve_safe_path_async(path, roots, Vec::new(), true).await?;
+    let file =
+        crate::security::path::resolve_safe_path_async(path, roots, Vec::new(), true).await?;
     tauri::async_runtime::spawn_blocking(move || {
         if !encoding_reg::is_java_source(&file) || !file.is_file() {
             return Err("只支持 Java 源文件".into());
         }
-        let size = file.metadata().map_err(|e| format!("读取 Java 文件失败：{e}"))?.len();
+        let size = file
+            .metadata()
+            .map_err(|e| format!("读取 Java 文件失败：{e}"))?
+            .len();
         if size > 512 * 1024 {
             return Err("文件过大，请在编辑器中查看结构".into());
         }
         workspace::read_text_file(&file).map(|doc| doc.text)
-    }).await.map_err(|e| format!("后台任务失败: {e}"))?
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
 }
 
 /// 读文本文件（识别编码/换行，校验能否无损往返）。

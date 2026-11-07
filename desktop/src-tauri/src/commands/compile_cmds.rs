@@ -333,14 +333,8 @@ pub async fn compile_module(
             .compile_cancel
             .store(false, std::sync::atomic::Ordering::SeqCst);
         // 手动「编译」始终全量：用户点它就是不相信产物是最新的。
-        super::build_engine::build_one(
-            &ctx,
-            &module,
-            super::build_engine::Mode::Full,
-            true,
-            0,
-        )
-        .map(|b| b.result)
+        super::build_engine::build_one(&ctx, &module, super::build_engine::Mode::Full, true, 0)
+            .map(|b| b.result)
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
@@ -608,10 +602,8 @@ mod tests {
 
     #[test]
     fn 单模块时保留真实产物目录() {
-        let merged = super::super::build_engine::merge_compile_results(
-            vec![result(0, 16, vec![])],
-            1,
-        );
+        let merged =
+            super::super::build_engine::merge_compile_results(vec![result(0, 16, vec![])], 1);
         assert_eq!(merged.out_dir, "C:/w/m/classes");
     }
 

@@ -1,0 +1,5 @@
+{
+  "_note": "Rust 测试里裸用 std::env::temp_dir() 的处数（#[cfg(test)] 之后 / tests 目录）。只许减不许增：新测试请用 crate::test_support::tmp(\"tag\")，它返回规范化路径，能消掉 macOS /var 与 Windows 8.3 短名的平台差异。",
+  "unit": 87,
+  "integration": 12
+}

@@ -54,9 +54,11 @@ fn logical_type(a: &Attr) -> Option<Logical> {
     match dt.trim() {
         "" => infer(a),
         "char" | "nchar" => Some(Logical::Char(if len > 0 { len } else { 20 })),
-        "varchar" | "varchar2" | "nvarchar" | "nvarchar2" => {
-            Some(Logical::Varchar(if len > 0 { len } else { default_len(&a.type_name) }))
-        }
+        "varchar" | "varchar2" | "nvarchar" | "nvarchar2" => Some(Logical::Varchar(if len > 0 {
+            len
+        } else {
+            default_len(&a.type_name)
+        })),
         "decimal" | "number" | "numeric" => Some(Logical::Decimal(
             if len > 0 { len } else { 28 },
             a.precision.unwrap_or(8),
@@ -370,7 +372,9 @@ pub fn ddl(doc: &BmfDoc, p: &GenProfile, only: &[String], warnings: &mut Vec<Str
                 .entities
                 .iter()
                 .find(|e| e.id == r.target || e.name == r.target);
-            let (Some(pt), Some(c)) = (parent, child) else { continue };
+            let (Some(pt), Some(c)) = (parent, child) else {
+                continue;
+            };
             let Some(pk) = pt.attrs.iter().find(|a| a.is_key) else {
                 warnings.push(format!(
                     "聚合关系 {} → {} 找不到父表主键，外键未生成",
@@ -436,7 +440,9 @@ pub fn ddl(doc: &BmfDoc, p: &GenProfile, only: &[String], warnings: &mut Vec<Str
                 .entities
                 .iter()
                 .find(|e| e.id == r.target || e.name == r.target);
-            let (Some(pt), Some(c)) = (parent, child) else { continue };
+            let (Some(pt), Some(c)) = (parent, child) else {
+                continue;
+            };
             if let Some(pk) = pt.attrs.iter().find(|a| a.is_key) {
                 s.push_str(&format!(
                     "-- 聚合关系：{}.{} → {}.{}（NC 默认不建外键约束；需要时打开「带外键」）\n",

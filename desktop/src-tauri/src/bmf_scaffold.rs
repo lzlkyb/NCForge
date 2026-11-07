@@ -149,9 +149,16 @@ fn fld(
 }
 
 fn head_fields(body_class: &str, body_id: &str, with_body: bool, tree: bool) -> Vec<Field> {
-    let mut v = vec![
-        fld("pk_head", "主键", UFID, "SINGLE", "char", Some(20), true, false),
-    ];
+    let mut v = vec![fld(
+        "pk_head",
+        "主键",
+        UFID,
+        "SINGLE",
+        "char",
+        Some(20),
+        true,
+        false,
+    )];
     if with_body {
         v.push(Field {
             name: "pk_body".into(),
@@ -168,41 +175,284 @@ fn head_fields(body_class: &str, body_id: &str, with_body: bool, tree: bool) -> 
         });
     }
     if tree {
-        v.push(fld("pk_parent", "上级", UFID, "REF", "char", Some(20), false, true));
+        v.push(fld(
+            "pk_parent",
+            "上级",
+            UFID,
+            "REF",
+            "char",
+            Some(20),
+            false,
+            true,
+        ));
     }
     v.extend([
-        fld("pk_group", "集团", ("group", ""), "REF", "varchar", Some(20), false, true),
-        fld("pk_org_v", "组织版本", ("org_v", ""), "REF", "varchar", Some(20), false, true),
-        fld("pk_org", "组织", ("org", ""), "REF", "varchar", Some(20), false, true),
-        fld("vbillcode", "单据号", STRING, "SINGLE", "varchar", Some(40), false, true),
-        fld("busitype", "业务类型", ("BusitypeVO", ""), "REF", "varchar", Some(20), false, true),
-        fld("pk_billtypecode", "单据类型编码", STRING, "SINGLE", "varchar", Some(50), false, true),
-        fld("pk_billtypeid", "单据类型", ("BilltypeVO", ""), "REF", "varchar", Some(20), false, true),
-        fld("vtrantypecode", "交易类型编码", STRING, "SINGLE", "varchar", Some(50), false, true),
-        fld("ctrantypeid", "交易类型", ("BilltypeVO", ""), "REF", "varchar", Some(20), false, true),
-        fld("dbilldate", "单据日期", DATE, "SINGLE", "char", Some(19), false, true),
-        fld("fstatusflag", "单据状态", ("BillstatusEnum", ""), "SINGLE", "int", None, false, true),
-        fld("creator", "制单人", ("user", ""), "REF", "varchar", Some(20), false, true),
-        fld("creationtime", "制单时间", DATETIME, "SINGLE", "char", Some(19), false, true),
-        fld("modifier", "修改人", ("user", ""), "REF", "varchar", Some(20), false, true),
-        fld("modifiedtime", "修改时间", DATETIME, "SINGLE", "char", Some(19), false, true),
-        fld("approver", "审批人", ("user", ""), "REF", "varchar", Some(20), false, true),
-        fld("taudittime", "审批时间", DATETIME, "SINGLE", "char", Some(19), false, true),
-        fld("vapprovenote", "审批意见", STRING, "SINGLE", "varchar", Some(181), false, true),
-        fld("enablestate", "启用状态", ("enablestate", ""), "SINGLE", "int", None, false, true),
-        fld("vnote", "备注", STRING, "SINGLE", "varchar", Some(181), false, true),
+        fld(
+            "pk_group",
+            "集团",
+            ("group", ""),
+            "REF",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "pk_org_v",
+            "组织版本",
+            ("org_v", ""),
+            "REF",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "pk_org",
+            "组织",
+            ("org", ""),
+            "REF",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "vbillcode",
+            "单据号",
+            STRING,
+            "SINGLE",
+            "varchar",
+            Some(40),
+            false,
+            true,
+        ),
+        fld(
+            "busitype",
+            "业务类型",
+            ("BusitypeVO", ""),
+            "REF",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "pk_billtypecode",
+            "单据类型编码",
+            STRING,
+            "SINGLE",
+            "varchar",
+            Some(50),
+            false,
+            true,
+        ),
+        fld(
+            "pk_billtypeid",
+            "单据类型",
+            ("BilltypeVO", ""),
+            "REF",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "vtrantypecode",
+            "交易类型编码",
+            STRING,
+            "SINGLE",
+            "varchar",
+            Some(50),
+            false,
+            true,
+        ),
+        fld(
+            "ctrantypeid",
+            "交易类型",
+            ("BilltypeVO", ""),
+            "REF",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "dbilldate",
+            "单据日期",
+            DATE,
+            "SINGLE",
+            "char",
+            Some(19),
+            false,
+            true,
+        ),
+        fld(
+            "fstatusflag",
+            "单据状态",
+            ("BillstatusEnum", ""),
+            "SINGLE",
+            "int",
+            None,
+            false,
+            true,
+        ),
+        fld(
+            "creator",
+            "制单人",
+            ("user", ""),
+            "REF",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "creationtime",
+            "制单时间",
+            DATETIME,
+            "SINGLE",
+            "char",
+            Some(19),
+            false,
+            true,
+        ),
+        fld(
+            "modifier",
+            "修改人",
+            ("user", ""),
+            "REF",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "modifiedtime",
+            "修改时间",
+            DATETIME,
+            "SINGLE",
+            "char",
+            Some(19),
+            false,
+            true,
+        ),
+        fld(
+            "approver",
+            "审批人",
+            ("user", ""),
+            "REF",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "taudittime",
+            "审批时间",
+            DATETIME,
+            "SINGLE",
+            "char",
+            Some(19),
+            false,
+            true,
+        ),
+        fld(
+            "vapprovenote",
+            "审批意见",
+            STRING,
+            "SINGLE",
+            "varchar",
+            Some(181),
+            false,
+            true,
+        ),
+        fld(
+            "enablestate",
+            "启用状态",
+            ("enablestate", ""),
+            "SINGLE",
+            "int",
+            None,
+            false,
+            true,
+        ),
+        fld(
+            "vnote",
+            "备注",
+            STRING,
+            "SINGLE",
+            "varchar",
+            Some(181),
+            false,
+            true,
+        ),
     ]);
     v
 }
 
 fn body_fields() -> Vec<Field> {
     vec![
-        fld("pk_body", "主键", UFID, "SINGLE", "char", Some(20), true, false),
-        fld("pk_group", "集团", ("group", ""), "REF", "varchar", Some(20), false, true),
-        fld("pk_org_v", "组织版本", ("org_v", ""), "REF", "varchar", Some(20), false, true),
-        fld("pk_org", "组织", ("org", ""), "REF", "varchar", Some(20), false, true),
-        fld("crowno", "行号", STRING, "SINGLE", "varchar", Some(20), false, true),
-        fld("vbnote", "行备注", STRING, "SINGLE", "varchar", Some(181), false, true),
+        fld(
+            "pk_body",
+            "主键",
+            UFID,
+            "SINGLE",
+            "char",
+            Some(20),
+            true,
+            false,
+        ),
+        fld(
+            "pk_group",
+            "集团",
+            ("group", ""),
+            "REF",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "pk_org_v",
+            "组织版本",
+            ("org_v", ""),
+            "REF",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "pk_org",
+            "组织",
+            ("org", ""),
+            "REF",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "crowno",
+            "行号",
+            STRING,
+            "SINGLE",
+            "varchar",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "vbnote",
+            "行备注",
+            STRING,
+            "SINGLE",
+            "varchar",
+            Some(181),
+            false,
+            true,
+        ),
     ]
 }
 
@@ -226,18 +476,81 @@ fn def_fields(prefix: &str, n: u32) -> Vec<Field> {
 
 fn tail_fields() -> Vec<Field> {
     vec![
-        fld("code", "编码", STRING, "SINGLE", "varchar", Some(40), false, true),
-        fld("name", "名称", STRING, "SINGLE", "varchar", Some(200), false, true),
-        fld("dr", "删除标志", INTEGER, "SINGLE", "int", None, false, true),
-        fld("ts", "时间戳", DATETIME, "SINGLE", "char", Some(19), false, true),
+        fld(
+            "code",
+            "编码",
+            STRING,
+            "SINGLE",
+            "varchar",
+            Some(40),
+            false,
+            true,
+        ),
+        fld(
+            "name",
+            "名称",
+            STRING,
+            "SINGLE",
+            "varchar",
+            Some(200),
+            false,
+            true,
+        ),
+        fld(
+            "dr",
+            "删除标志",
+            INTEGER,
+            "SINGLE",
+            "int",
+            None,
+            false,
+            true,
+        ),
+        fld(
+            "ts",
+            "时间戳",
+            DATETIME,
+            "SINGLE",
+            "char",
+            Some(19),
+            false,
+            true,
+        ),
     ]
 }
 
 fn source_fields() -> Vec<Field> {
     vec![
-        fld("csrcid", "来源单据主键", UFID, "SINGLE", "char", Some(20), false, true),
-        fld("csrcbid", "来源单据表体主键", UFID, "SINGLE", "char", Some(20), false, true),
-        fld("csrctype", "来源单据类型", STRING, "SINGLE", "varchar", Some(50), false, true),
+        fld(
+            "csrcid",
+            "来源单据主键",
+            UFID,
+            "SINGLE",
+            "char",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "csrcbid",
+            "来源单据表体主键",
+            UFID,
+            "SINGLE",
+            "char",
+            Some(20),
+            false,
+            true,
+        ),
+        fld(
+            "csrctype",
+            "来源单据类型",
+            STRING,
+            "SINGLE",
+            "varchar",
+            Some(50),
+            false,
+            true,
+        ),
     ]
 }
 
@@ -245,7 +558,12 @@ fn source_fields() -> Vec<Field> {
 pub fn build(spec: &ScaffoldSpec) -> Result<Scaffold, String> {
     let code = normalize_ident(&spec.code, "组件编码")?;
     let module = normalize_ident(&spec.module, "模块编码")?;
-    let ns = match spec.namespace.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let ns = match spec
+        .namespace
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(n) => normalize_ident(n, "命名空间")?,
         None => module.clone(),
     };
@@ -350,7 +668,13 @@ pub fn build(spec: &ScaffoldSpec) -> Result<Scaffold, String> {
         "    <connectlist/>\r\n".to_string()
     };
 
-    let main_entity = if with_head { head_id.clone() } else if with_body { body_id.clone() } else { String::new() };
+    let main_entity = if with_head {
+        head_id.clone()
+    } else if with_body {
+        body_id.clone()
+    } else {
+        String::new()
+    };
     let text = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<component conRouterType=\"手动\" createIndustry=\"0\" createTime=\"{stamp}\" creator=\"\" description=\"\" displayName=\"{name}\" fromSourceBmf=\"true\" gencodestyle=\"NC传统样式\" help=\"\" id=\"{component_id}\" industry=\"0\" industryChanged=\"false\" industryIncrease=\"false\" industryName=\"综合控股集团\" isSource=\"false\" isbizmodel=\"false\" mainEntity=\"{main_entity}\" metaType=\".bmf\" modifier=\"\" modifyIndustry=\"0\" modifyTime=\"{stamp}\" name=\"{code}\" namespace=\"{ns}\" ownModule=\"{module}\" preLoad=\"false\" programcode=\"0\" resModuleName=\"{module}\" resid=\"\" version=\"1\" versionType=\"0\">\r\n    <celllist>\r\n{cell_xml}    </celllist>\r\n{connect}    <refdepends/>\r\n    <refdependLoseIDs/>\r\n    <cellRemoveLog/>\r\n    <rulers>\r\n        <ruler isHorizontal=\"true\" unit=\"0\">\r\n            <guideList/>\r\n        </ruler>\r\n        <ruler isHorizontal=\"false\" unit=\"0\">\r\n            <guideList/>\r\n        </ruler>\r\n    </rulers>\r\n</component>\r\n",
         name = xml(spec.name.trim()),
@@ -360,14 +684,27 @@ pub fn build(spec: &ScaffoldSpec) -> Result<Scaffold, String> {
     );
 
     // 生成后立刻按自己的解析器过一遍：结构与 ID 引用图在这里就验证，不把坏文件交给用户。
-    let doc = BmfDoc::from_bytes(std::path::PathBuf::from(format!("{code}.bmf")), text.clone().into_bytes())
-        .map_err(|e| format!("生成的骨架解析失败（这是程序缺陷，请反馈）：{e}"))?;
+    let doc = BmfDoc::from_bytes(
+        std::path::PathBuf::from(format!("{code}.bmf")),
+        text.clone().into_bytes(),
+    )
+    .map_err(|e| format!("生成的骨架解析失败（这是程序缺陷，请反馈）：{e}"))?;
     check_refs(&doc)?;
 
     let tables = entities.iter().map(|e| e.table.clone()).collect();
     let vo_files = entities
         .iter()
-        .map(|e| format!("src/public/{}/{}.java", e.full_class.rsplit_once('.').map(|(p, _)| p).unwrap_or("").replace('.', "/"), e.name))
+        .map(|e| {
+            format!(
+                "src/public/{}/{}.java",
+                e.full_class
+                    .rsplit_once('.')
+                    .map(|(p, _)| p)
+                    .unwrap_or("")
+                    .replace('.', "/"),
+                e.name
+            )
+        })
         .collect();
 
     Ok(Scaffold {
@@ -521,7 +858,10 @@ pub fn normalize_ident(s: &str, what: &str) -> Result<String, String> {
     if !t.as_bytes()[0].is_ascii_alphabetic() {
         return Err(format!("{what}必须以字母开头：{t}"));
     }
-    if !t.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
+    if !t
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    {
         return Err(format!("{what}只能包含小写字母、数字、下划线：{t}"));
     }
     Ok(t)
@@ -601,7 +941,11 @@ mod tests {
             Skeleton::Free,
         ] {
             let s = build(&spec(sk)).unwrap();
-            let d = BmfDoc::from_bytes(std::path::PathBuf::from("x.bmf"), s.text.clone().into_bytes()).unwrap();
+            let d = BmfDoc::from_bytes(
+                std::path::PathBuf::from("x.bmf"),
+                s.text.clone().into_bytes(),
+            )
+            .unwrap();
             assert_eq!(d.component.name, "demo");
             assert_eq!(d.component.version, 1);
             // ID 全文件唯一
@@ -691,7 +1035,14 @@ mod tests {
         sp.defs = Some(5);
         let s = build(&sp).unwrap();
         let d = BmfDoc::from_bytes(std::path::PathBuf::new(), s.text.into_bytes()).unwrap();
-        assert_eq!(d.entities[0].attrs.iter().filter(|a| a.name.starts_with("def")).count(), 5);
+        assert_eq!(
+            d.entities[0]
+                .attrs
+                .iter()
+                .filter(|a| a.name.starts_with("def"))
+                .count(),
+            5
+        );
         sp.defs = Some(999);
         // 以前是静默截断到 50：用户填 999、界面说 999，文件里只有 50，且不告知。
         assert!(build(&sp).unwrap_err().contains("最多 50"));
@@ -730,7 +1081,9 @@ mod tests {
     fn output_is_crlf_and_utf8_declared() {
         let s = build(&spec(Skeleton::HeadBody)).unwrap();
         assert!(s.text.contains("\r\n"));
-        assert!(s.text.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assert!(s
+            .text
+            .starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
         assert!(!s.text.contains("\n\n"));
         assert!(s.text.ends_with("</component>\r\n"));
     }

@@ -58,10 +58,9 @@ pub async fn search_types(
     .map_err(|e| format!("工作区类型索引任务失败：{e}"))?;
 
     let (mut jars, jars_pending) = match jar_catalog(&state).await {
-        Some((index, Some(catalog))) => (
-            search_jars(&index, &catalog, &q, limit, &workspace),
-            false,
-        ),
+        Some((index, Some(catalog))) => {
+            (search_jars(&index, &catalog, &q, limit, &workspace), false)
+        }
         Some((_, None)) => (Vec::new(), true),
         None => (Vec::new(), true),
     };
@@ -77,9 +76,7 @@ pub async fn search_types(
 }
 
 /// 找一份可用于 jar 搜索的类目录。第三种返回值：目录正在后台构建。
-async fn jar_catalog(
-    state: &Arc<AppState>,
-) -> Option<(Arc<ClassIndex>, Option<Arc<TypeCatalog>>)> {
+async fn jar_catalog(state: &Arc<AppState>) -> Option<(Arc<ClassIndex>, Option<Arc<TypeCatalog>>)> {
     {
         let run = state.lang.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((index, catalog, _)) = run

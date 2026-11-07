@@ -561,14 +561,9 @@ fn discover_hierarchy(index: &ClassIndex, output: &str, jars: &mut BTreeSet<u32>
 /// 那会让用户等两遍。
 fn run_ecj(env: &CompileEnv, args: &Path, fast: bool) -> Result<(bool, String), String> {
     if let Some(jar) = env.worker_jar {
-        if let Some((ok, output)) = crate::ecj_worker::compile(
-            env.java_exe,
-            env.ecj_jar,
-            jar,
-            args,
-            TIMEOUT,
-            env.cancel,
-        )? {
+        if let Some((ok, output)) =
+            crate::ecj_worker::compile(env.java_exe, env.ecj_jar, jar, args, TIMEOUT, env.cancel)?
+        {
             return Ok((ok, clean_ecj_output(output)));
         }
     }
@@ -1166,7 +1161,9 @@ import a.B;"
         /// 收集目录下全部 class：`前缀/相对路径` → 字节。
         fn snapshot(dir: &Path, prefix: &str, out: &mut BTreeMap<String, Vec<u8>>) {
             fn walk(cur: &Path, base: &Path, prefix: &str, out: &mut BTreeMap<String, Vec<u8>>) {
-                let Ok(rd) = std::fs::read_dir(cur) else { return };
+                let Ok(rd) = std::fs::read_dir(cur) else {
+                    return;
+                };
                 for e in rd.flatten() {
                     let p = e.path();
                     if p.is_dir() {
@@ -1204,7 +1201,10 @@ import a.B;"
             assert_eq!(r.error_count, 0, "{module} 编译错误：{:?}", r.problems);
         }
 
-        let java = Path::new(r"D:\ncc\1909home").join("ufjdk").join("bin").join("java.exe");
+        let java = Path::new(r"D:\ncc\1909home")
+            .join("ufjdk")
+            .join("bin")
+            .join("java.exe");
         let ecj = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
             .join("ecj")
@@ -1223,8 +1223,20 @@ import a.B;"
         let work = base.join("work");
         std::fs::create_dir_all(&work).unwrap();
 
-        let a_src = |root: &Path| root.join("a").join("src").join("public").join("p").join("A.java");
-        let b_src = |root: &Path| root.join("b").join("src").join("public").join("q").join("B.java");
+        let a_src = |root: &Path| {
+            root.join("a")
+                .join("src")
+                .join("public")
+                .join("p")
+                .join("A.java")
+        };
+        let b_src = |root: &Path| {
+            root.join("b")
+                .join("src")
+                .join("public")
+                .join("q")
+                .join("B.java")
+        };
 
         // 初始源码：B 读 A 的 int 字段（int → long 会改字节码里的字段描述符）
         let a_v1 = "package p;\npublic class A {\n    public int x = 1;\n    public int f(int v) { return v + x; }\n}\n";
@@ -1300,17 +1312,14 @@ import a.B;"
         snapshot(&a_out(&inc), "a", &mut got);
         snapshot(&b_out(&inc), "b", &mut got);
         let want = full_state(&st1);
-        assert_eq!(
-            got, want,
-            "阶段 1（只改方法体）：增量产物与全量不一致"
-        );
+        assert_eq!(got, want, "阶段 1（只改方法体）：增量产物与全量不一致");
 
         // 阶段 2：先编 A.java，再按引用关系补编 B（签名传播）
         write_src(&a_src(&inc), a_v3);
         compile_into(&env, "a", vec![a_src(&inc)], &a_out(&inc), true);
         let b_all = all_sources(&inc, "b");
-        let refs = crate::build_state::referrers(&[a_src(&inc)], &b_all)
-            .expect("A 的类型声明应当能解析");
+        let refs =
+            crate::build_state::referrers(&[a_src(&inc)], &b_all).expect("A 的类型声明应当能解析");
         assert!(
             refs.iter().any(|p| p.ends_with("B.java")),
             "反向依赖没找到 B.java：{refs:?}"
@@ -1320,10 +1329,7 @@ import a.B;"
         snapshot(&a_out(&inc), "a", &mut got);
         snapshot(&b_out(&inc), "b", &mut got);
         let want = full_state(&st2);
-        assert_eq!(
-            got, want,
-            "阶段 2（签名变化 + 传播）：增量产物与全量不一致"
-        );
+        assert_eq!(got, want, "阶段 2（签名变化 + 传播）：增量产物与全量不一致");
         crate::ecj_worker::shutdown_all();
         let _ = std::fs::remove_dir_all(&base);
     }

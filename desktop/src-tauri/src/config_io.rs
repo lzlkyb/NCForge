@@ -369,7 +369,10 @@ mod tests {
         let export = parse_import(text).expect("应能解析");
         let mut cfg = AppConfig::default();
         apply_import(&mut cfg, &export.config).unwrap();
-        assert_eq!(cfg.db_conns[0].default_schema, "AIER633", "合法名字统一大写");
+        assert_eq!(
+            cfg.db_conns[0].default_schema, "AIER633",
+            "合法名字统一大写"
+        );
         assert_eq!(cfg.db_conns[1].default_schema, "", "非法名字清空而不是留着");
     }
 

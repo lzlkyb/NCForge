@@ -52,7 +52,10 @@ fn emit_status(app: &tauri::AppHandle, state: &AppState, target: DebugTarget) {
 fn jdwp_port_for(state: &AppState, target: DebugTarget) -> Result<u16, String> {
     match target {
         DebugTarget::Server => {
-            let mut run = state.server.lock().map_err(|_| "服务状态异常".to_string())?;
+            let mut run = state
+                .server
+                .lock()
+                .map_err(|_| "服务状态异常".to_string())?;
             if !run.is_alive() {
                 return Err("中间件没在运行：请先在服务页用「调试模式」启动".to_string());
             }
@@ -60,7 +63,10 @@ fn jdwp_port_for(state: &AppState, target: DebugTarget) -> Result<u16, String> {
                 .ok_or_else(|| "这次启动没开调试：先停止服务，勾选「调试模式」再启动".to_string())
         }
         DebugTarget::Client => {
-            let mut run = state.client.lock().map_err(|_| "客户端状态异常".to_string())?;
+            let mut run = state
+                .client
+                .lock()
+                .map_err(|_| "客户端状态异常".to_string())?;
             if !run.is_alive() {
                 return Err("客户端没在运行：请先在服务页的客户端卡用「调试模式」启动".to_string());
             }

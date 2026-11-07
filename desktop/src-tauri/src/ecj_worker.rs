@@ -427,14 +427,17 @@ fn map_outcome(
     match outcome {
         Ok(v) => {
             let exit = v.get("exit").and_then(|x| x.as_i64()).unwrap_or(1);
-            let output = v.get("output").and_then(|x| x.as_str()).unwrap_or("").to_string();
+            let output = v
+                .get("output")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
             Ok(Some((exit == 0, output)))
         }
         Err(_) if cancelled(cancel) => Err(CANCELLED.to_string()),
-        Err(e) if e.code == "timeout" => Err(format!(
-            "编译超时（超过 {} 秒），已终止",
-            timeout.as_secs()
-        )),
+        Err(e) if e.code == "timeout" => {
+            Err(format!("编译超时（超过 {} 秒），已终止", timeout.as_secs()))
+        }
         // 包括 oom：worker 这条路的错误一律回退一次一进程
         Err(_) => Ok(None),
     }
@@ -442,7 +445,9 @@ fn map_outcome(
 
 /// 在某组目录里找编译桥 jar；找不到返回 `None`（调用方退回一次一进程）。
 pub fn find_jar(dirs: &[PathBuf]) -> Option<PathBuf> {
-    dirs.iter().map(|d| d.join(BRIDGE_JAR)).find(|p| p.is_file())
+    dirs.iter()
+        .map(|d| d.join(BRIDGE_JAR))
+        .find(|p| p.is_file())
 }
 
 #[cfg(test)]
@@ -597,7 +602,11 @@ mod tests {
         std::fs::create_dir_all(&src).unwrap();
         std::fs::create_dir_all(&out).unwrap();
         let good = src.join("Good.java");
-        std::fs::write(&good, "public class Good { public static int one() { return 1; } }\n").unwrap();
+        std::fs::write(
+            &good,
+            "public class Good { public static int one() { return 1; } }\n",
+        )
+        .unwrap();
         let bad = src.join("Bad.java");
         std::fs::write(&bad, "public class Bad { int x = ; }\n").unwrap();
 
@@ -618,8 +627,15 @@ mod tests {
         let good_args = args("good.args", &good);
 
         let t0 = Instant::now();
-        let cold = compile(&java, &ecj, &bridge, &bad_args, Duration::from_secs(60), None)
-            .expect("worker 不应报错");
+        let cold = compile(
+            &java,
+            &ecj,
+            &bridge,
+            &bad_args,
+            Duration::from_secs(60),
+            None,
+        )
+        .expect("worker 不应报错");
         let cold_ms = t0.elapsed().as_millis();
         let Some((ok, text)) = cold else {
             panic!("桥 jar 存在却没走常驻 worker");
@@ -629,8 +645,15 @@ mod tests {
 
         // 第二次：已预热的 JVM，同时验证第一次的失败不会污染下一次编译
         let t1 = Instant::now();
-        let warm = compile(&java, &ecj, &bridge, &good_args, Duration::from_secs(60), None)
-            .expect("worker 不应报错");
+        let warm = compile(
+            &java,
+            &ecj,
+            &bridge,
+            &good_args,
+            Duration::from_secs(60),
+            None,
+        )
+        .expect("worker 不应报错");
         let warm_ms = t1.elapsed().as_millis();
         let (ok, text) = warm.expect("桥 jar 存在却没走常驻 worker");
         assert!(ok, "合法源码应编过：{text}");
@@ -639,8 +662,15 @@ mod tests {
         // 关掉后还能重新拉起（应用退出清理 / 切换工作区走这条）
         shutdown_all();
         let t2 = Instant::now();
-        let again = compile(&java, &ecj, &bridge, &good_args, Duration::from_secs(60), None)
-            .expect("重启后不应报错");
+        let again = compile(
+            &java,
+            &ecj,
+            &bridge,
+            &good_args,
+            Duration::from_secs(60),
+            None,
+        )
+        .expect("重启后不应报错");
         let again_ms = t2.elapsed().as_millis();
         assert!(again.map(|(ok, _)| ok).unwrap_or(false), "重启后编译失败");
 
@@ -658,8 +688,15 @@ mod tests {
             "1ms 超时应报超时：{timed_out:?}"
         );
         // 超时杀掉的 worker 不能留在池里：下一次冷启动一次仍应成功
-        let after_timeout = compile(&java, &ecj, &bridge, &good_args, Duration::from_secs(60), None)
-            .expect("超时后不应报错");
+        let after_timeout = compile(
+            &java,
+            &ecj,
+            &bridge,
+            &good_args,
+            Duration::from_secs(60),
+            None,
+        )
+        .expect("超时后不应报错");
         let (ok, text) = after_timeout.expect("超时后仍应走常驻 worker");
         assert!(ok, "超时后重新拉起的 worker 编译失败：{text}");
 
@@ -694,8 +731,15 @@ mod tests {
             "取消后应返回 CANCELLED：{cancelled_run:?}"
         );
         // 被杀的 worker 不能留在池里：下一次编译仍要成功
-        let after_cancel = compile(&java, &ecj, &bridge, &good_args, Duration::from_secs(60), None)
-            .expect("取消后不应报错");
+        let after_cancel = compile(
+            &java,
+            &ecj,
+            &bridge,
+            &good_args,
+            Duration::from_secs(60),
+            None,
+        )
+        .expect("取消后不应报错");
         assert!(
             after_cancel.map(|(ok, _)| ok).unwrap_or(false),
             "取消后重新拉起的 worker 编译失败"

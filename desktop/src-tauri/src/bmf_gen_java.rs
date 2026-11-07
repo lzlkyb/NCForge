@@ -94,7 +94,9 @@ pub fn java_type(doc: &BmfDoc, p: &GenProfile, a: &Attr) -> (String, Option<&'st
         "UFID" | "String" | "CUSTOM" | "Multilangtext" | "MEMO" | "user" | "group" | "org"
         | "org_v" | "admin" => ("String".into(), None),
         "Integer" => ("Integer".into(), None),
-        "UFDouble" | "UFMoney" | "BigDecimal" => ("UFDouble".into(), Some("nc.vo.pub.lang.UFDouble")),
+        "UFDouble" | "UFMoney" | "BigDecimal" => {
+            ("UFDouble".into(), Some("nc.vo.pub.lang.UFDouble"))
+        }
         "UFBoolean" => {
             if p.options.uf_boolean_to_boolean && p.style != CodeStyle::Traditional {
                 ("Boolean".into(), None)
@@ -231,7 +233,11 @@ fn vo_imports_and_fields(
             format!("{ind}/** {} */\n", a.display_name.replace("*/", "* /"))
         };
         if constants {
-            let field = if a.field.trim().is_empty() { &name } else { &a.field };
+            let field = if a.field.trim().is_empty() {
+                &name
+            } else {
+                &a.field
+            };
             body.push_str(&format!(
                 "{ind}public static final String {} = \"{}\";\n\n",
                 constant_name(field),
@@ -271,7 +277,11 @@ fn traditional_vo(doc: &BmfDoc, p: &GenProfile, e: &Entity, package: &str, class
     imports.push("import nc.vo.pubapp.pattern.model.meta.entity.vo.VOMetaFactory;".into());
     let meta = meta_key_for(doc, p, e, class);
 
-    let display = if e.display_name.is_empty() { &e.name } else { &e.display_name };
+    let display = if e.display_name.is_empty() {
+        &e.name
+    } else {
+        &e.display_name
+    };
     let mut text = String::new();
     text.push_str(&format!("package {package};\n\n"));
     text.push_str(&imports.join("\n"));
@@ -318,15 +328,13 @@ fn standard_vo(doc: &BmfDoc, p: &GenProfile, e: &Entity, package: &str, class: &
             }
         })
         .unwrap_or_default();
-    let parent_pk = parent_of(doc, e)
-        .and_then(key_attr)
-        .map(|a| {
-            if a.field.trim().is_empty() {
-                ident(&a.name)
-            } else {
-                ident(&a.field)
-            }
-        });
+    let parent_pk = parent_of(doc, e).and_then(key_attr).map(|a| {
+        if a.field.trim().is_empty() {
+            ident(&a.name)
+        } else {
+            ident(&a.field)
+        }
+    });
 
     let mut accessor_text = String::new();
     for (name, _, ty) in &accessors {
@@ -344,7 +352,11 @@ fn standard_vo(doc: &BmfDoc, p: &GenProfile, e: &Entity, package: &str, class: &
     // 上一段里 set 用了 tab，统一成 4 空格，避免同一个文件混排。
     accessor_text = accessor_text.replace('\t', "    ");
 
-    let display = if e.display_name.is_empty() { &e.name } else { &e.display_name };
+    let display = if e.display_name.is_empty() {
+        &e.name
+    } else {
+        &e.display_name
+    };
     let mut text = String::new();
     text.push_str(&format!("package {package};\n\n"));
     text.push_str(&imports.join("\n"));
@@ -486,7 +498,11 @@ pub fn enum_vo(doc: &BmfDoc, p: &GenProfile, en: &EnumDef) -> String {
          @SuppressWarnings(\"serial\")\npublic class {class} extends MDEnum {{\n\n\
          \tprivate static final long serialVersionUID = 1L;\n\n\
          \tpublic {class}(IEnumValue enumvalue) {{\n\t\tsuper(enumvalue);\n\t}}\n\n",
-        display = if en.display_name.is_empty() { &en.name } else { &en.display_name }
+        display = if en.display_name.is_empty() {
+            &en.name
+        } else {
+            &en.display_name
+        }
     ));
     let mut used: HashSet<String> = HashSet::new();
     for item in &en.items {
@@ -537,18 +553,17 @@ pub fn bean_itf(doc: &BmfDoc, p: &GenProfile, e: &Entity) -> String {
          \tvoid insert({class} vo) throws BusinessException;\n\n\
          \tvoid update({class} vo) throws BusinessException;\n\n\
          \tvoid delete({class} vo) throws BusinessException;\n}}\n",
-        display = if e.display_name.is_empty() { &e.name } else { &e.display_name }
+        display = if e.display_name.is_empty() {
+            &e.name
+        } else {
+            &e.display_name
+        }
     ));
     text
 }
 
 /// 操作接口：组件级保存/删除，主子表时入参用 AggVO。
-pub fn op_itf(
-    doc: &BmfDoc,
-    p: &GenProfile,
-    main: &Entity,
-    agg_class: Option<&str>,
-) -> String {
+pub fn op_itf(doc: &BmfDoc, p: &GenProfile, main: &Entity, agg_class: Option<&str>) -> String {
     let package = package_of(doc, main, p);
     let itf = format!("I{}OPItf", pascal(&doc.component.name));
     let class = class_of(main);
@@ -608,7 +623,11 @@ pub fn sel_vo(
             }
             fields.push_str(&format!(
                 "\t/** {} */\n\tpublic {ty} {name};\n",
-                if a.display_name.is_empty() { &a.name } else { &a.display_name }
+                if a.display_name.is_empty() {
+                    &a.name
+                } else {
+                    &a.display_name
+                }
             ));
             let cap = pascal(&name);
             accessors.push_str(&format!(
