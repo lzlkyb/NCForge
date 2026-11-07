@@ -1,0 +1,24 @@
+#!/bin/sh
+# ──────────────────────────────────────────────────
+#  pre-commit — 提交前只跑「30 秒内」的三项
+#
+#  清单的唯一真源：desktop/scripts/lib/gate-plan.mjs 的 PRECOMMIT。
+#  本文件故意只做一件事：调用它。
+#
+#  为什么只有三项：commit 比 push 频繁一个量级，钩子一旦超过半分钟就会被
+#  --no-verify 绕过，等于没有。所以这里只留 设计 token / cargo fmt / tsc，
+#  eslint、vitest、clippy、cargo test 全部留给 pre-push。
+#  只改文档的提交会自动跳过（--precommit 按暂存文件后缀挑，并打印跳了哪几项）。
+#
+#  安装：git config core.hooksPath .githooks
+#        （npm install / npm run dev 会自动装，见 scripts/ensure-hooks.mjs）
+#  跳过：git commit --no-verify
+#        （典型场景：同工作树里别人的半成品把 tsc 弄红了，别去改代码迁就它）
+# ──────────────────────────────────────────────────
+
+set -e
+
+# 钩子由 git 从仓库根调用，但 cwd 不保证是仓库根。
+cd "$(dirname "$0")/.."
+
+exec node desktop/scripts/gate.mjs --precommit
