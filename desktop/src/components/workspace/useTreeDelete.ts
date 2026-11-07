@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { baseName, countFiles, deleteEntry, dirName } from "../../lib/workspace";
 import { toast } from "../ui/toast";
-import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 import { checkReferences } from "../../lib/safeDelete";
 import { isUnsaved } from "../../lib/tabDirty";
 import { getSession, setTree, type TreeDirState } from "../../lib/workspaceSession";
@@ -47,7 +47,7 @@ export function useTreeDelete({
       try {
         files = await countFiles(target.path);
       } catch (e) {
-        toast(failureText("读取文件数", e), "error");
+        errorToast("读取文件数", e);
         return;
       }
     }
@@ -110,7 +110,7 @@ export function useTreeDelete({
       await load(dirName(d.path));
       toast(`已删除 ${baseName(d.path)}`, "success");
     } catch (e) {
-      toast(failureText("删除", e), "error");
+      errorToast("删除", e);
     }
   };
 

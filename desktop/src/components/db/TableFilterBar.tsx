@@ -1,11 +1,12 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import type { BoundCell, ColumnInfo } from "../../lib/dbApi";
 import { compileFilter, emptyFilter, loadFilter, saveFilter, type TableFilter } from "../../lib/dbConditions";
 import { toast } from "../ui/toast";
 import { Icon } from "../ui/icon";
 
-export function TableFilterBar({ connId, table, cols, disabled, onApply }: {
+export function TableFilterBar({ connId, table, cols, disabled, busy = disabled, transactions, onApply }: {
   connId: string; table: string; cols: ColumnInfo[]; disabled: boolean;
+  busy?: boolean; transactions?: ReactNode;
   onApply: (where: string, order: string, params: BoundCell[]) => void;
 }) {
   const [filter, setFilter] = useState<TableFilter>(() => loadFilter(connId, table));
@@ -30,7 +31,8 @@ export function TableFilterBar({ connId, table, cols, disabled, onApply }: {
     <div className="dbx-filter-header">
       <button type="button" className="dbx-btn ghost" aria-expanded={expanded} aria-controls={bodyId} onClick={() => setExpanded(v => !v)}><Icon name={expanded ? "chevronDown" : "sliders"} size={14} />{expanded ? "收起筛选" : "展开筛选"}</button>
       <span className="dbx-filter-summary" title={`待查询：${summary}`}>待查询：{summary}</span>
-      <button type="button" className="dbx-btn pri" disabled={disabled} aria-busy={disabled} onClick={apply}><Icon name={disabled ? "spinner" : "play"} size={12} />查询</button>
+      <button type="button" className="dbx-btn pri" disabled={disabled} aria-busy={busy} onClick={apply}><Icon name={busy ? "spinner" : "play"} size={12} />查询</button>
+      {transactions}
     </div>
     <div id={bodyId} className="dbx-filter-body" hidden={!expanded}>
     <div className="dbx-filter-actions" role="group" aria-label="筛选方式">

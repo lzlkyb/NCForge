@@ -2,11 +2,13 @@ import { invoke, listen } from "./tauri";
 import { trackOperation } from "./operations";
 import { dbTaskSpec } from "./dbOperations";
 import { dbApi, type PendingTxRow } from "./dbApi";
-import { askQuit, askUnsavedFiles, type QuitChoice, type QuitRow } from "./dbConfirm";
+import { askQuit, askUnsavedFiles, askUnknownTx, type QuitChoice, type QuitRow } from "./dbConfirm";
 import { connOf, getDb, loadConns, rtOf } from "./dbStore";
 import { friendlyDbError } from "./db";
 import { requestOpenFile } from "./openFileRequest";
 import type { UnsavedFile } from "./saveAllDirty";
+import { isUnsaved } from "./tabDirty";
+import { getSession } from "./workspaceSession";
 import { toast } from "../components/ui/toast";
 
 /**
@@ -115,8 +117,13 @@ function revealFailed(path: string) {
 }
 
 async function handleQuitRequest() {
-  // 连点 X / 事件重投：同一轮只处理一次
-  if (inFlight) return;
+  // 同一轮的重投（确认框还开着时用户又点了一次 X）：后端只重发事件、不再起计时器。
+  // 这里**必须重发 ack**——静默 return 会让 5 秒兜底误判「界面没回话」而强退，
+  // 把未保存的 model 与全部未提交事务一起丢掉（P0-1）。
+  if (inFlight) {
+    await invoke("quit_check_acked").catch(() => undefined);
+    return;
+  }
   inFlight = true;
 
   /** 事务阶段选了什么（失败时用来报对话）；null = 还没走到事务阶段。 */
@@ -138,9 +145,21 @@ async function handleQuitRequest() {
     try {
       files = (await loadSaveAll()).collectUnsaved();
     } catch (e) {
-      // 编辑器模块没起来（打包异常等）：这时不可能有编辑中的文件，
-      // 更不能因为查不了就把应用卡住关不掉——跳过这一项继续走。
-      console.error("[quitGuard] 未保存文件检查不可用，跳过：", e);
+      // 「检查跑不起来」不等于「没有未保存文件」：tab/model 是 workspaceSession
+      // 的模块级状态，跟这个动态 chunk 能不能加载成功无关（打包异常 / HMR 中断
+      // 时照样存在脏标签）。用不依赖 Monaco 的静态 isUnsaved 再扫一遍，只要有
+      // 脏标签就中止退出，绝不静默放行（P0-2）。
+      const dirty = getSession().tabs.filter(isUnsaved).length;
+      console.error("[quitGuard] 未保存文件检查不可用：", e);
+      if (dirty > 0) {
+        toast(
+          `未保存文件检查失败（当前有 ${dirty} 个未保存文件），已取消退出。请手动保存后重试：${e}`,
+          "error",
+        );
+        await invoke("quit_cancel");
+        return;
+      }
+      // 静态扫描确认一个脏标签都没有：这次加载失败不会丢东西，继续查事务。
     }
     if (files.length > 0) {
       // 保存动作也走同一个已缓存的 import：能列文件说明它已经加载成功了
@@ -177,12 +196,20 @@ async function handleQuitRequest() {
       return;
     }
 
-    // 只动探测到状态的连接。`unknown` 的提交/回滚都可能失败，弹框里已经
-    // 说明「退出后会回滚」，这里不再假装成功。
+    // 只动探测到状态的连接。这里必须显式收集 unknown：整批探测超时时 rows
+    // 可能全是 unknown，下面 filter 之后循环体一次都不执行，直接 app_quit
+    // 会让用户以为「全部提交」成功了，实际一条都没提交（P0-4）。
+    const unknown = rows.filter((x) => x.kind === "unknown");
     for (const r of rows.filter((x) => x.kind === "pending")) {
       // 一个连接上可能有多条独立会话（A0 的槽）：必须由后端把 primary 与全部槽
       // 一起处理。只提交 primary 等于把槽里的写入静默回滚——那正是这个守卫存在的原因。
       await trackOperation(dbTaskSpec(`quit.txAll:${r.connId}`, `退出前${txChoice === "rollback" ? "回滚" : "提交"}事务`, r.connId, "全部会话"),()=>dbApi.txAll(r.connId, txChoice as "commit"|"rollback"));
+    }
+    // 状态未知的连接无法提交也无法回滚，退出后必然被数据库回滚：必须再问一次，
+    // 不能让「全部提交」这个按钮替用户做出他不知情的决定。
+    if (unknown.length > 0 && !(await askUnknownTx(unknown))) {
+      await invoke("quit_cancel");
+      return;
     }
     await invoke("app_quit");
   } catch (e) {
@@ -207,17 +234,36 @@ export function wireQuitGuard(): () => void {
   wired = true;
 
   let un: (() => void) | undefined;
+  let unGuardError: (() => void) | undefined;
   let disposed = false;
-  listen("app:quit-request", () => void handleQuitRequest())
-    .then((fn) => {
-      if (disposed) fn();
-      else un = fn;
-    })
-    .catch(() => {});
+  const attach = (event: string, handler: () => void, set: (fn: () => void) => void) => {
+    listen(event, handler)
+      .then((fn) => {
+        if (disposed) fn();
+        else set(fn);
+      })
+      .catch(() => {});
+  };
+  attach("app:quit-request", () => void handleQuitRequest(), (fn) => {
+    un = fn;
+  });
+  // Rust 侧 emit 失败时会保持窗口（不再静默放行退出）。这里把「点了 X 没反应」
+  // 的原因与代价讲清楚，否则用户只会以为应用卡死。
+  attach(
+    "app:quit-guard-error",
+    () => toast(
+      "退出前检查无法启动，已阻止关闭窗口。请先手动保存文件并提交或回滚事务后重试；若强制结束进程，未提交事务会被数据库回滚。",
+      "error",
+    ),
+    (fn) => {
+      unGuardError = fn;
+    },
+  );
 
   return () => {
     disposed = true;
     un?.();
+    unGuardError?.();
     wired = false;
   };
 }

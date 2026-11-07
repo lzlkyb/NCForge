@@ -3,19 +3,36 @@ import { Modal } from "../ui/Modal";
 import { Icon } from "../ui/icon";
 import { registerCommands } from "../../lib/commandRegistry";
 import { bindingRows, getKeymap, type BindingRow } from "../../lib/keymap";
+import { PAGES } from "../../lib/pages";
 import { requestSettingsSection } from "../../lib/settingsJump";
 import { matchText } from "../../lib/pinyin";
 
+/**
+ * 一览里的行：group 放宽为 string，好让「页面切换」组不依赖 lib/keymap.ts 的
+ * BindingGroup 联合（那文件由别的子代理独占，不改它）。
+ */
+type SheetRow = Omit<BindingRow, "group"> & { group: string };
+
 /** 不在 bindingRows 里、但确实固定的键（见 KeymapSettings 的说明）。 */
-const FIXED: BindingRow[] = [
+const FIXED: SheetRow[] = [
   { id: "fixed.save", label: "保存当前文件", group: "固定键", keys: ["ctrl+s"], display: ["Ctrl+S"], overridden: false },
   { id: "fixed.callHierarchy", label: "调用层级", group: "固定键", keys: ["ctrl+alt+h"], display: ["Ctrl+Alt+H"], overridden: false },
   { id: "fixed.thisSheet", label: "打开 / 关闭快捷键一览", group: "固定键", keys: ["?"], display: ["?"], overridden: false },
 ];
 
-const GROUP_ORDER = ["快速导航", "窗口", "搜索与层级", "编辑器", "固定键"] as const;
+/** 页面切换组：由 PAGES 派生（含 hotkey），? 搜「代码」「Ctrl+3」都能命中（P1-16）。 */
+const PAGE_ROWS: SheetRow[] = PAGES.filter((p) => p.hotkey != null).map((p) => ({
+  id: `page.${p.key}`,
+  label: `转到：${p.label}`,
+  group: "页面切换",
+  keys: [`ctrl+${p.hotkey}`],
+  display: [`Ctrl+${p.hotkey}`],
+  overridden: false,
+}));
 
-function groupRows(rows: BindingRow[]): { label: string; rows: BindingRow[] }[] {
+const GROUP_ORDER = ["快速导航", "窗口", "搜索与层级", "编辑器", "页面切换", "固定键"] as const;
+
+function groupRows(rows: SheetRow[]): { label: string; rows: SheetRow[] }[] {
   return GROUP_ORDER.map((label) => ({ label, rows: rows.filter((r) => r.group === label) })).filter(
     (g) => g.rows.length > 0,
   );
@@ -24,7 +41,7 @@ function groupRows(rows: BindingRow[]): { label: string; rows: BindingRow[] }[] 
 const KBD = "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground";
 
 /** 同一个组合键被多个动作占用时，这些动作的冲突键（展示串）。 */
-function conflictKeys(rows: BindingRow[]): Map<string, string[]> {
+function conflictKeys(rows: SheetRow[]): Map<string, string[]> {
   const owners = new Map<string, number>();
   for (const row of rows) for (const key of row.keys) owners.set(key, (owners.get(key) ?? 0) + 1);
   const out = new Map<string, string[]>();
@@ -72,7 +89,7 @@ export function ShortcutSheet() {
   }, []);
 
   const keymap = getKeymap();
-  const all = [...bindingRows(keymap), ...FIXED];
+  const all: SheetRow[] = [...bindingRows(keymap), ...FIXED, ...PAGE_ROWS];
   const conflicts = conflictKeys(all);
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   // 中英文都可搜：动作名（含拼音首字母）与按键串都参与匹配
@@ -154,7 +171,8 @@ export function ShortcutSheet() {
                 <h3 className="text-xs font-semibold text-muted-foreground">{group.label}</h3>
                 {group.rows.map((row) => {
                   const dup = conflicts.get(row.id);
-                  const editable = !row.id.startsWith("fixed.");
+                  // 固定键与页面切换键都是系统保留映射，不提供「修改」入口。
+                  const editable = !row.id.startsWith("fixed.") && !row.id.startsWith("page.");
                   return (
                     <div
                       key={row.id}

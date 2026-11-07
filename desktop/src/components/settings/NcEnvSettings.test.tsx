@@ -194,6 +194,6 @@ describe("NC 环境：保存的前置守卫", () => {
     mocks.pickFolder.mockResolvedValue("D:\\bad");
     await render();
     await act(async () => { btn("浏览…")!.click(); });
-    expect(mocks.toast).toHaveBeenCalledWith(expect.stringContaining("ufjdk"), "error");
+    expect(mocks.toast).toHaveBeenCalledWith(expect.stringContaining("ufjdk"), "error", { raw: "D:\\ncc 下没有 ufjdk/bin/java.exe" });
   });
 });

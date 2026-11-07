@@ -8,6 +8,7 @@ import { ResourceProvider } from "./contexts/ResourceContext";
 // 不挂就是彻底的空操作——所有成功/失败提示都静默消失（曾经就是这样，
 // 保存配置失败、复制成功、端口改完都在「无声」进行，排查时完全看不出发生过什么）。
 import { ToastProvider } from "./components/ui/toast";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { getStoredTheme } from "./lib/theme";
 import { initializeAppearance } from "./lib/appearance";
 import { initializeUiDensity } from "./lib/uiDensity";
@@ -44,7 +45,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             否则首启对话框会晚一个渲染周期才出现。 */}
         <ResourceProvider>
           <ToastProvider>
-            <App />
+            {/* 外壳级兜底：Header / SideNav / WorkbenchFrame 任一渲染期抛错时，
+                App 内部那层边界管不到，原来会卸载整个 root 变白屏（P1-8）。 */}
+            <ErrorBoundary>
+              <App />
+            </ErrorBoundary>
           </ToastProvider>
         </ResourceProvider>
       </UpdateProvider>

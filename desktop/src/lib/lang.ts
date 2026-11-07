@@ -24,6 +24,8 @@ export interface LangStatus {
   message: string;
   sourceFiles: number;
   jarCount: number;
+  /** 读取 lang_status 失败：state 是上次的值、不是确定结论，UI 应显示「状态未知」。 */
+  unknown?: boolean;
 }
 
 /** 状态 + 诊断是否已稳定。 */
@@ -475,9 +477,31 @@ export async function initLang(): Promise<void> {
       if (e.method === "textDocument/publishDiagnostics") onDiagnostics(e.params);
     },
   );
-  const cur = await invoke<LangStatus>("lang_status").catch(() => STOPPED);
-  if (cur.state !== "stopped") onStatus(cur);
+  await refreshLangStatus();
   void getConfig().then(applyLangPrefs).catch(() => {});
+}
+
+/**
+ * 重新拉一次后端状态。
+ *
+ * `unknown` 只会在 `lang_status` 失败时出现：读不到不等于「已停止」，jdt.ls 可能仍在跑，
+ * 所以保留上次状态并标记不确定，由状态栏显示「状态未知」并提供重试入口。
+ * 拿到确定结论后必须把标记清掉，否则那条「不确定」会一直挂在状态栏上。
+ */
+export async function refreshLangStatus(): Promise<boolean> {
+  try {
+    const cur = await invoke<LangStatus>("lang_status");
+    if (cur.state === "stopped") {
+      // 后端明确说没在跑：这是确定结论，直接如实反映（并清掉上次的模块 / 报错残留）
+      setView({ ...STOPPED, settled: false });
+    } else {
+      onStatus(cur);
+    }
+    return true;
+  } catch (e) {
+    setView({ ...view, unknown: true, message: friendlyError(e), settled: false });
+    return false;
+  }
 }
 
 // ───────────────────── 启动与请求 ─────────────────────

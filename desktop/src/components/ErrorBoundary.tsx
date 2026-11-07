@@ -49,10 +49,16 @@ export class ErrorBoundary extends Component<Props, State> {
     window.location.reload();
   };
 
+  /** 错误信息要能发给同事排障：只显示一段 pre 没法选中长堆栈。 */
+  handleCopyError = () => {
+    const text = [this.state.error?.message, this.state.error?.stack].filter(Boolean).join("\n");
+    void navigator.clipboard?.writeText(text).catch(() => undefined);
+  };
+
   render() {
     if (this.state.hasError) {
       return (
-        <div className="eb-mask flex h-screen flex-col items-center justify-center gap-4 bg-background p-8 text-center">
+        <div className="eb-mask flex h-full min-h-0 flex-col items-center justify-center gap-4 overflow-auto bg-background p-8 text-center">
           <div className="eb flex flex-col items-center gap-4 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10 eb-ico">
               <Icon name="alertTriangle" size={32} className="text-destructive-ink" />
@@ -77,6 +83,11 @@ export class ErrorBoundary extends Component<Props, State> {
                 <Icon name="refresh" size={16} />
                 完全刷新
               </Button>
+              {this.state.error && (
+                <Button variant="outline" onClick={this.handleCopyError}>
+                  复制错误信息
+                </Button>
+              )}
             </div>
           </div>
         </div>

@@ -75,7 +75,7 @@ describe("常驻 ecj 编译进程开关", () => {
     patchConfig.mockRejectedValueOnce(new Error("磁盘只读"));
     await act(async () => { switchOf().click(); });
     expect(row().textContent).toContain("已开启");
-    expect(toast).toHaveBeenCalledWith(expect.stringContaining("保存构建设置失败"), "error");
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("保存构建设置失败"), "error", { raw: "磁盘只读" });
   });
 
   it("统计行显示回退、冷启动与耗时分布", async () => {

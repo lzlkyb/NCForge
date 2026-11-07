@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 
 /** 像绝对路径就行——真正的落盘校验在后端 `patch_set_out_dir`。 */
 function looksAbsolute(v: string): boolean {
@@ -69,7 +69,7 @@ export function PatchActions({
       return;
     }
     savingDirRef.current = true; setSavingDir(true);
-    void onSaveDir(v).catch((x) => toast(failureText("保存输出目录", x), "error")).finally(() => { savingDirRef.current = false; setSavingDir(false); });
+    void onSaveDir(v).catch((x) => errorToast("保存输出目录", x)).finally(() => { savingDirRef.current = false; setSavingDir(false); });
   };
 
   return (

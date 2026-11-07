@@ -237,3 +237,6 @@ export function groupBreakpoints(list: Breakpoint[]): Map<string, BreakpointGrou
   for (const g of groups.values()) g.breakpoints.sort((a, b) => a.line - b.line);
   return groups;
 }
+
+/* 响应式布局断点已迁到 `lib/layoutBreakpoints.ts`：本文件是「Java 调试断点
+   （文件 + 行）」，两者同名会让 import 时反复看错模块。 */

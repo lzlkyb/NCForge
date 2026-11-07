@@ -6,5 +6,5 @@ import type { CSSProperties } from "react";
  *  - className: 尺寸/布局（如 "h-3.5 w-full"）
  *  - style?:    可选内联样式 */
 export function Skeleton({ className = "", style }: { className?: string; style?: CSSProperties }) {
-  return <div className={`skeleton ${className}`} style={style} aria-hidden="true" />;
+  return <div className={`skeleton ${className}`} style={style} role="status" aria-label="加载中" />;
 }

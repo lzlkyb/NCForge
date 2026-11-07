@@ -572,6 +572,12 @@ pub(super) async fn call_with_reconnect(
     tauri::async_runtime::spawn_blocking(move || {
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
         engine.call_guarded(cmd, &refs, timeout, |auto_commit| {
+            // A deliberate reconnect adopts the saved setting. Transparent retries preserve the session's mode.
+            let auto_commit = if matches!(cmd, "reconnect" | "reconnectConfigured") {
+                conn.auto_commit
+            } else {
+                auto_commit
+            };
             connect_args(&cfg, &conn, password.as_deref(), auto_commit, engine.kind())
                 .map(Some)
                 .map_err(|e| {
@@ -1258,22 +1264,19 @@ pub async fn db_tx(
     fallback: Option<bool>,
 ) -> Result<Value, String> {
     let b = slot_bridge(&state, &id, slot.as_deref())?;
-    if action == "reconnect" {
+    if matches!(action.as_str(), "reconnect" | "reconnect-configured") {
         let target = if fallback == Some(true) {
             existing_bridge(&state, &java_key(&slot_key(&id, slot.as_deref())?))?
         } else {
             b
         };
-        return call_with_reconnect(
-            &state,
-            &id,
-            target,
-            "reconnect",
-            Vec::new(),
-            T_CONNECT,
-            password,
-        )
-        .await;
+        let cmd = if action == "reconnect-configured" {
+            "reconnectConfigured"
+        } else {
+            "reconnect"
+        };
+        return call_with_reconnect(&state, &id, target, cmd, Vec::new(), T_CONNECT, password)
+            .await;
     }
     let (cmd, args): (&'static str, Vec<String>) = match action.as_str() {
         "commit" => ("commit", vec![]),

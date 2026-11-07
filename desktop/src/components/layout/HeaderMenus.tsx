@@ -1,5 +1,6 @@
 import { listCommands } from "../../lib/commandRegistry";
 import { APP_INFO } from "../../lib/about";
+import { PAGES } from "../../lib/pages";
 import { toggleRail, toggleSide, useRailExpanded, useSideOpen } from "../../lib/layoutStore";
 import { openPalette } from "../../lib/paletteStore";
 import { requestSettingsSection } from "../../lib/settingsJump";
@@ -9,14 +10,18 @@ import { Icon, type IconName } from "../ui/icon";
 import { restoreWorkbenchLayout, selectWorkbenchLayout, updateWorkbenchLayout, useWorkbenchLayout, WORKBENCH_MODES } from "../../lib/workbenchLayout";
 
 const navigate = (tab: string) => window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: tab }));
-const APPLICATION_ACTIONS: { label: string; icon: IconName; tab: string }[] = [
+
+/** 历史视图 / 弹框 key：不是页面，由 App 的 ncforge-navigate 兼容分支映射到具体视图。 */
+const VIEW_ACTIONS: { label: string; icon: IconName; tab: string }[] = [
   { label: "全工程搜索", icon: "search", tab: "search" },
   { label: "NC 服务", icon: "power", tab: "services" },
   { label: "补丁打包", icon: "package", tab: "patch" },
   { label: "工程关联", icon: "plug", tab: "linked" },
   { label: "数据字典", icon: "database", tab: "dict" },
-  { label: "日志排查", icon: "log", tab: "logs" },
 ];
+/** 隐藏入口的页面（日志排查）由 PAGES 派生，不在菜单里再抄一份页面表（P1-15）。 */
+const PAGE_ACTIONS = PAGES.filter((p) => p.railMore).map((p) => ({ label: p.label, icon: p.icon, tab: p.key }));
+const APPLICATION_ACTIONS: { label: string; icon: IconName; tab: string }[] = [...VIEW_ACTIONS, ...PAGE_ACTIONS];
 
 export function ApplicationMenu() {
   const settings = (section: string) => { requestSettingsSection(section); navigate("settings"); };

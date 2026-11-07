@@ -59,6 +59,7 @@ pub mod ecj_worker;
 pub mod eclipse_cp;
 pub mod encoding_reg;
 pub mod java_bridge;
+mod java_members;
 mod java_tree;
 pub mod java_type_completion;
 pub mod java_types;

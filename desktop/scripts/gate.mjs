@@ -12,6 +12,7 @@
  *   node scripts/gate.mjs                    # 全量（pre-push 就是这一条）
  *   node scripts/gate.mjs --scope frontend   # 只跑某个 scope（可多次）
  *   node scripts/gate.mjs --only clippy      # 只跑某项（CI 每步用这个，可逗号分隔）
+ *   node scripts/gate.mjs --precommit        # 提交前的三项（pre-commit 钩子用）
  *   node scripts/gate.mjs --list             # 打印清单，不执行
  *   node scripts/gate.mjs --verify-ci        # 断言 workflow 与清单一致
  *
@@ -24,7 +25,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CI_JOBS, STEPS, SCOPES, stepById, verifyWorkflow } from "./lib/gate-plan.mjs";
+import { CI_JOBS, PRECOMMIT, STEPS, SCOPES, stepById, verifyWorkflow } from "./lib/gate-plan.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url)); // desktop/scripts
 const desktopDir = resolve(here, ".."); // desktop
@@ -54,7 +55,7 @@ const fmtDuration = (ms) => (ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000
 
 /** 极简参数解析：只认长选项，值紧跟在后面或逗号分隔。 */
 function parseArgs(argv) {
-  const opts = { scopes: [], only: [], list: false, verifyCi: false, help: false };
+  const opts = { scopes: [], only: [], precommit: false, list: false, verifyCi: false, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     const takeValue = () => {
@@ -68,6 +69,7 @@ function parseArgs(argv) {
     };
     if (a === "--scope") opts.scopes.push(...takeValue().split(",").filter(Boolean));
     else if (a === "--only") opts.only.push(...takeValue().split(",").filter(Boolean));
+    else if (a === "--precommit") opts.precommit = true;
     else if (a === "--list") opts.list = true;
     else if (a === "--verify-ci") opts.verifyCi = true;
     else if (a === "--help" || a === "-h") opts.help = true;
@@ -82,9 +84,10 @@ function parseArgs(argv) {
 function printHelp() {
   console.log(`门禁 CLI（清单真源：scripts/lib/gate-plan.mjs）
 
-  node scripts/gate.mjs                   全量（14 项，pre-push 用的就是这个）
+  node scripts/gate.mjs                   全量（${STEPS.length} 项，pre-push 用的就是这个）
   node scripts/gate.mjs --scope frontend  只跑某 scope：${SCOPES.join(" / ")}
   node scripts/gate.mjs --only clippy     只跑某项，可逗号分隔
+  node scripts/gate.mjs --precommit       提交前三项（${PRECOMMIT.map((p) => p.id).join(" / ")}，按暂存文件后缀挑）
   node scripts/gate.mjs --list            打印清单
   node scripts/gate.mjs --verify-ci       断言 workflow 与清单一致
 
@@ -99,6 +102,7 @@ function printList(scopes) {
     console.log(`${"".padEnd(16)}   ${s.why}`);
   }
   console.log(`\n共 ${picked.length} 项；scope：${SCOPES.join(" / ")}；不带参数跑全部 ${STEPS.length} 项。`);
+  console.log(`pre-commit（提交前，按暂存文件后缀挑）：${PRECOMMIT.map((p) => p.id).join(" → ")}`);
 }
 
 /**
@@ -117,8 +121,49 @@ function warnIfHooksOff() {
   console.log("");
 }
 
-/** 选出要跑的步骤：--only 优先，其次 --scope，都没有则全量。 */
+/** 暂存区里的文件（相对仓库根）。不在 git 仓库里返回 null —— 那时保守全跑。 */
+function stagedFiles() {
+  const r = spawnSync("git", ["diff", "--cached", "--name-only", "--diff-filter=ACMR"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  if (r.status !== 0) return null;
+  return (r.stdout || "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * 选出要跑的步骤：--precommit 优先，其次 --only、--scope，都没有则全量。
+ *
+ * --precommit 只跑清单里 PRECOMMIT 声明的三项，并按「暂存文件后缀」跳过无关项：
+ * 只改文档的提交不该花 20 秒等 tsc。跳过项会打印出来，免得让人以为三项都验过。
+ */
 function pickSteps(opts) {
+  if (opts.precommit) {
+    if (opts.only.length || opts.scopes.length) {
+      console.error("❌ --precommit 不能与 --only / --scope 一起用");
+      process.exit(2);
+    }
+    const staged = stagedFiles();
+    const picked = [];
+    const skipped = [];
+    for (const item of PRECOMMIT) {
+      const step = stepById(item.id);
+      if (!step) {
+        console.error(`❌ PRECOMMIT 引用了清单里不存在的 id：${item.id}`);
+        process.exit(2);
+      }
+      if (!staged || staged.some((f) => item.match.test(f))) picked.push(step);
+      else skipped.push(item.id);
+    }
+    if (staged) {
+      const tail = skipped.length ? `；无相关改动，跳过：${skipped.join(", ")}` : "";
+      console.log(`暂存 ${staged.length} 个文件${tail}`);
+    }
+    return picked;
+  }
   if (opts.only.length) {
     const unknown = opts.only.filter((id) => !stepById(id));
     if (unknown.length) {
@@ -166,16 +211,28 @@ function main() {
 
   const steps = pickSteps(opts);
   if (!steps.length) {
+    if (opts.precommit) {
+      // 只改了文档/图片之类：三项都与它无关，别拿一个空跑当失败。
+      console.log("✅ 暂存改动不涉及设计 token / fmt / tsc，pre-commit 无需跑");
+      return;
+    }
     console.error("❌ 没有选中任何步骤");
     process.exit(2);
   }
 
-  const label = opts.only.length ? `--only ${opts.only.join(",")}` : opts.scopes.length ? `--scope ${opts.scopes.join(",")}` : "全量";
+  const label = opts.precommit
+    ? "pre-commit"
+    : opts.only.length
+      ? `--only ${opts.only.join(",")}`
+      : opts.scopes.length
+        ? `--scope ${opts.scopes.join(",")}`
+        : "全量";
   console.log("");
   console.log("══════════════════════════════════════════════");
   console.log(`  门禁（${label}）：${steps.length} 项`);
   console.log("══════════════════════════════════════════════");
-  warnIfHooksOff();
+  // 本文件正被钩子调用时不必提醒「钩子没装」——那正是它跑起来的原因。
+  if (!opts.precommit) warnIfHooksOff();
 
   const totalStart = Date.now();
   const failures = [];
@@ -195,6 +252,10 @@ function main() {
       console.error(`❌ [${i + 1}/${steps.length}] ${step.name} 失败（${fmtDuration(took)}，${reason}）`);
       console.error(`   为什么有这一项：${step.why}`);
       console.error(`   单独复现：node scripts/gate.mjs --only ${step.id}`);
+      if (opts.precommit) {
+        console.error("   确实要跳过这次提交：git commit --no-verify");
+        console.error("   （同工作树里别人的半成品把这项弄红时用它，别改自己的代码去迁就）");
+      }
       failures.push(step.id);
       break; // fail-fast：第一个失败就停
     }

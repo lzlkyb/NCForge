@@ -95,8 +95,9 @@ describe("快速导航浮层的查询状态", () => {
     expect(Array.from(container.querySelectorAll("button")).some((b) => b.textContent === "重试")).toBe(false);
   });
 
-  it("换查询先清空旧结果：加载期间不留下会回车误开的条目", async () => {
-    deps.buildItems.mockResolvedValueOnce({ items: [{ key: "a", title: "旧结果", run: vi.fn() }], note: "命令" });
+  it("换查询保留旧结果，加载中回车不误开上一轮的条目", async () => {
+    const oldRun = vi.fn();
+    deps.buildItems.mockResolvedValueOnce({ items: [{ key: "a", title: "旧结果", run: oldRun }], note: "命令" });
     openPalette("cmd");
     act(() => root.render(<QuickPalette activeTab="files" onNavigate={vi.fn()} />));
     await flush();
@@ -106,9 +107,17 @@ describe("快速导航浮层的查询状态", () => {
     deps.buildItems.mockReturnValueOnce(new Promise((r) => { resolveNext = r; }));
     type("新查询");
     await flush();
-    expect(container.textContent).not.toContain("旧结果");
-    expect(container.textContent).toContain("查询中");
+    // 不清空列表：慢查询时才不会「闪成空白 + 一直查询中」的假死观感
+    expect(container.textContent).toContain("旧结果");
+    expect(container.textContent).toContain("更新中");
     expect(listbox()?.getAttribute("aria-busy")).toBe("true");
+
+    // 但列表里是上一轮的条目：加载期间按回车不能把它打开
+    act(() => {
+      document.querySelector<HTMLInputElement>('input[aria-label="快速导航输入"]')!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(oldRun).not.toHaveBeenCalled();
 
     await act(async () => {
       resolveNext({ items: [{ key: "b", title: "新结果", run: vi.fn() }], note: "命令" });
@@ -116,5 +125,32 @@ describe("快速导航浮层的查询状态", () => {
     });
     expect(container.textContent).toContain("新结果");
     expect(listbox()?.getAttribute("aria-busy")).toBe("false");
+  });
+
+  it("#内容 分批到达就先显示命中，不必等全量扫完", async () => {
+    let resolveFinal: (value: unknown) => void = () => {};
+    deps.buildItems.mockImplementationOnce(
+      (_mode: string, _q: string, _ctx: unknown, onPartial?: (r: unknown) => void) => {
+        onPartial?.({ items: [{ key: "a", title: "先到的命中", run: vi.fn() }], note: "内容 · 已找到 1 条，还在扫…" });
+        return new Promise((r) => {
+          resolveFinal = r;
+        });
+      },
+    );
+    openPalette("file");
+    act(() => root.render(<QuickPalette activeTab="files" onNavigate={vi.fn()} />));
+    await flush();
+
+    // 扫描还没结束，但列表里已经有东西了，且可以回车打开（都是本次查询的真实命中）
+    expect(container.textContent).toContain("先到的命中");
+    expect(container.textContent).toContain("还在扫");
+    expect(listbox()?.getAttribute("aria-busy")).toBe("false");
+    expect(container.textContent).not.toContain("查询中");
+
+    await act(async () => {
+      resolveFinal({ items: [{ key: "a", title: "先到的命中", run: vi.fn() }], note: "内容 · 1 项" });
+      await tick();
+    });
+    expect(container.textContent).toContain("内容 · 1 项");
   });
 });

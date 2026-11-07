@@ -59,7 +59,7 @@
 .wb-icon-btn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 .wb-icon-btn[aria-pressed="true"] { background: hsl(var(--secondary)); color: hsl(var(--primary)); }
 /* 不可用时（如没有 manifest 的 NC 结构视图）要能看出点不了，而不是 hover 高亮后没反应 */
-.wb-icon-btn:disabled { opacity: 0.4; cursor: default; }
+.wb-icon-btn:disabled { opacity: var(--disabled-opacity, .62); cursor: not-allowed; }
 .wb-pane-acts { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .wb-root-recent {
   display: flex;
@@ -151,23 +151,16 @@
 .wb-row[data-active][data-selected] { box-shadow: inset 0 0 0 1px hsl(var(--ring) / .60); }
 .wb-row-project { font-weight: 650; height: 30px; margin-block: 2px; }
 .wb-row-project[data-current]:not([data-selected]) { background: hsl(var(--primary) / .08); }
+/* 7.5：图标色由主题 token 派生。--foreground 在 .dark 翻转（深墨 ↔ 亮字），
+   故 color-mix 自动得到浅色深墨 / 深色亮字，不再需要第二份 .dark hex 块。 */
 :root {
-  --wb-icon-blue: #2e61ab;
-  --wb-icon-teal: #24776e;
-  --wb-icon-violet: #754b9b;
-  --wb-icon-amber: #965018;
-  --wb-icon-slate: #516a84;
-  --wb-icon-green: #39744d;
-  --wb-icon-cut: #fff;
-}
-.dark {
-  --wb-icon-blue: #92baff;
-  --wb-icon-teal: #82d2c4;
-  --wb-icon-violet: #c5a9ef;
-  --wb-icon-amber: #f1b77e;
-  --wb-icon-slate: #a4b9d3;
-  --wb-icon-green: #9ad2a9;
-  --wb-icon-cut: #19262e;
+  --wb-icon-blue:   color-mix(in srgb, hsl(var(--foreground)) 55%, hsl(216 58% 42%));
+  --wb-icon-teal:   color-mix(in srgb, hsl(var(--foreground)) 45%, hsl(var(--primary)));
+  --wb-icon-violet: color-mix(in srgb, hsl(var(--foreground)) 55%, hsl(270 36% 45%));
+  --wb-icon-amber:  color-mix(in srgb, hsl(var(--foreground)) 55%, hsl(27 70% 40%));
+  --wb-icon-slate:  color-mix(in srgb, hsl(var(--foreground)) 55%, hsl(210 24% 42%));
+  --wb-icon-green:  color-mix(in srgb, hsl(var(--foreground)) 55%, hsl(142 34% 38%));
+  --wb-icon-cut:    hsl(var(--card));
 }
 .wb-workspace-icon { display:block; flex:none; }
 :is(.wb-workspace-icon,.wb-tree-type-badge)[data-tone="blue"] { color:var(--wb-icon-blue); }
@@ -350,7 +343,7 @@ html[data-ui-density="comfortable"] .wb-tree-list .wb-row { height:30px; }
   cursor: pointer;
 }
 .wb-ctx-item:hover { background: hsl(var(--secondary)); }
-.wb-ctx-item:disabled { opacity: 0.4; cursor: not-allowed; }
+.wb-ctx-item:disabled { opacity: var(--disabled-opacity, .62); cursor: not-allowed; }
 .wb-ctx-item:disabled:hover { background: none; }
 .wb-ctx-icon { flex-shrink: 0; color: hsl(var(--muted-foreground)); }
 .wb-ctx-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -786,12 +779,12 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-outline-btn[data-active] { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 
 /* 本地历史弹层：比结构弹层宽（要放 diff），列表 + 详情两段。z-index 同结构弹层 */
-.wb-hist { position: absolute; top: 26px; right: 8px; z-index: 45; display: flex; flex-direction: column; width: 460px; max-height: 72vh; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--popover, var(--card))); box-shadow: 0 8px 24px hsl(var(--foreground) / 0.16); }
+.wb-hist { position: absolute; top: 26px; right: 8px; z-index: 45; display: flex; flex-direction: column; width: min(460px, calc(100vw - 32px)); max-height: 72vh; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--popover, var(--card))); box-shadow: 0 8px 24px hsl(var(--foreground) / 0.16); }
 .wb-hist-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; color: hsl(var(--muted-foreground)); }
 .wb-hist-count { margin-left: auto; }
 .wb-hist-x { display: inline-flex; align-items: center; padding: 2px; border-radius: 4px; color: hsl(var(--muted-foreground)); }
 .wb-hist-x:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
-.wb-hist-x:disabled { opacity: 0.4; cursor: default; }
+.wb-hist-x:disabled { opacity: var(--disabled-opacity, .62); cursor: not-allowed; }
 .wb-hist-x:disabled:hover { background: none; color: hsl(var(--muted-foreground)); }
 .wb-hist-list { flex-shrink: 0; max-height: 30%; overflow-y: auto; padding: 2px 4px 4px; }
 .wb-hist-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 8px; border-radius: 4px; font-size: 12px; color: hsl(var(--foreground)); text-align: left; }
@@ -803,16 +796,17 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-hist-diffhead { display: flex; align-items: center; gap: 8px; padding: 6px 10px 4px; font-size: 12px; color: hsl(var(--muted-foreground)); }
 .wb-hist-changes { margin-left: auto; font-style: normal; }
 .wb-hist-changes em { margin-left: 6px; font-style: normal; font-weight: 600; }
-.wb-hist-add { color: hsl(142, 70%, 36%); }
-.wb-hist-del { color: hsl(0, 72%, 50%); }
+/* P2-5：历史 diff 全组改主题 token 空格式，修掉逗号+斜杠的无效声明。 */
+.wb-hist-add { color: hsl(var(--success-ink)); }
+.wb-hist-del { color: hsl(var(--destructive-ink)); }
 .wb-hist-diff { flex: 1; min-height: 0; overflow: auto; padding: 2px 0 6px; font: 11.5px/1.55 "Cascadia Mono", Consolas, monospace; }
 .wb-hist-line { display: flex; align-items: baseline; gap: 6px; padding: 0 10px; white-space: pre; }
-.wb-hist-line.add { background: hsl(142, 70%, 36% / 0.10); }
-.wb-hist-line.del { background: hsl(0, 72%, 50% / 0.10); }
+.wb-hist-line.add { background: hsl(var(--success) / .1); }
+.wb-hist-line.del { background: hsl(var(--destructive) / .1); }
 .wb-hist-ln { flex-shrink: 0; width: 34px; text-align: right; color: hsl(var(--muted-foreground)); user-select: none; }
 .wb-hist-sign { flex-shrink: 0; width: 8px; }
-.wb-hist-line.add .wb-hist-sign { color: hsl(142, 70%, 36%); }
-.wb-hist-line.del .wb-hist-sign { color: hsl(0, 72%, 50%); }
+.wb-hist-line.add .wb-hist-sign { color: hsl(var(--success-ink)); }
+.wb-hist-line.del .wb-hist-sign { color: hsl(var(--destructive-ink)); }
 .wb-hist-text { min-width: 0; }
 .wb-hist-gap { padding: 2px 10px; font-size: 11px; color: hsl(var(--muted-foreground)); background: hsl(var(--secondary) / 0.5); }
 .wb-hist-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding: 8px 10px; border-top: 1px solid hsl(var(--border)); }
@@ -821,7 +815,7 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-hist-cancel { padding: 4px 10px; border-radius: 5px; font-size: 12px; color: hsl(var(--muted-foreground)); }
 .wb-hist-cancel:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 .wb-hist-warn { font-size: 12px; color: hsl(var(--muted-foreground)); }
-.wb-hist-error { margin: 0 10px 6px; padding: 6px 8px; border-radius: 5px; background: hsl(0, 72%, 50% / 0.10); font-size: 12px; color: hsl(0, 72%, 45%); }
+.wb-hist-error { margin: 0 10px 6px; padding: 6px 8px; border-radius: 5px; background: hsl(var(--destructive) / .1); font-size: 12px; color: hsl(var(--destructive-ink)); }
 .wb-hist-foot { flex-shrink: 0; padding: 8px 10px; border-top: 1px solid hsl(var(--border)); font-size: 11px; color: hsl(var(--muted-foreground)); }
 
 /* 空编辑器页：最近打开 + 快捷键 */
@@ -841,3 +835,7 @@ button.wb-empty-row:hover { background: hsl(var(--secondary)); }
 .wb-root-recent-empty .wb-root-recent-item {display:flex;flex-direction:column;align-items:flex-start;max-width:none;min-width:0;padding:8px 12px;border-radius:var(--r-control);text-align:left;white-space:normal;}
 .wb-root-recent-name {font-size:13px;font-weight:600;overflow-wrap:anywhere;}
 .wb-root-recent-path {font-size:12px;font-weight:400;line-height:1.5;color:hsl(var(--muted-foreground));overflow-wrap:anywhere;}
+
+/* P1-22：柔光玻璃下历史/结构/右键浮层用统一材质阅读面，消除与半透壳的接缝。 */
+html[data-ui-style="glass"] :is(.wb-hist, .wb-outline, .wb-ctx) { background: var(--glass-reading); }
+html[data-ui-style="glass"] :is(.wb-hist, .wb-outline) :is(input, select, textarea) { background-color: var(--glass-inset); }

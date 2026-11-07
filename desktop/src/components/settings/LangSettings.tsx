@@ -13,6 +13,7 @@ import { toast } from "../ui/toast";
 import { InlineNotice } from "../ui/notice";
 import { Skeleton } from "../ui/Skeleton";
 import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 import "./settings-development.css";
 
 /** 与 Rust `lang::DEFAULT_XMX_MB` 一致。后端是权威，这里只用来显示。 */
@@ -101,7 +102,7 @@ export function LangSettings() {
       await langRegenerate();
       toast("工程已重新生成，代码智能索引仍在准备", "success");
     } catch (e) {
-      toast(failureText("重新生成影子工程", e), "error");
+      errorToast("重新生成影子工程", e);
     } finally {
       rebuildingRef.current = false;
       if (mounted.current) setRebuilding(false);

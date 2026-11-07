@@ -128,6 +128,8 @@ export function resetSymbolCache(): void {
 export async function fetchSymbols(path: string): Promise<FlatSymbol[]> {
   // 与补全 / 跳转同理：先把还没发出去的修改发给服务端，否则算的是改动前的文本
   await flushDoc(path);
-  const res = await langRequest<unknown>("textDocument/documentSymbol", path, { textDocument: {} }, 15_000);
+  // 5 秒。单文件的 documentSymbol 正常是几十毫秒；15 秒只会在服务端卡住时
+  // 让面包屑/结构面板一起僵着，宁可先空一次（下一次保存就会重取）。
+  const res = await langRequest<unknown>("textDocument/documentSymbol", path, { textDocument: {} }, 5_000);
   return flattenSymbols(res);
 }

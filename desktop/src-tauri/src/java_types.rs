@@ -52,30 +52,85 @@ fn simple(name: &str) -> &str {
 /// 前端快速面板以前只能靠 jdt.ls 的 `workspace/symbol` 做模糊匹配；没有语言服务时
 /// 连「VBO → VoucherBillOrder」都做不到。工作区索引与 jar 目录共用这一个打分函数，
 /// 两边的排序规则才不会一个说前缀优先、另一个说短名优先。
+///
+/// **不用 `to_lowercase()`**：工作区索引有十几万条成员，逐条分配字符串实测 200ms
+/// 起；这里全是 ASCII 标识符，按字节做大小写无关比较即可，零分配。
 pub(crate) fn type_match_score(query: &str, name: &str) -> Option<u8> {
+    type_match_score_with(query, name, None)
+}
+
+/// 同 [`type_match_score`]，但可以带上预先算好的驼峰首字母（索引里存着）。
+///
+/// 首字母串是「VBO → VoucherBillOrder」这类查法的关键，逐条现算同样要分配一个
+/// String；存在索引里就把这条也省掉。
+pub(crate) fn type_match_score_with(query: &str, name: &str, initials: Option<&str>) -> Option<u8> {
     if query.is_empty() || query.len() > 100 {
         return None;
     }
-    let q = query.to_lowercase();
-    let n = name.to_lowercase();
-    if n == q {
+    if eq_ignore_case(name, query) {
         return Some(0);
     }
-    if n.starts_with(&q) {
+    if starts_with_ignore_case(name, query) {
         return Some(1);
     }
-    if q.chars().count() >= 2 {
-        let initials: String = name
-            .chars()
-            .enumerate()
-            .filter(|(i, c)| *i == 0 || c.is_uppercase())
-            .map(|(_, c)| c.to_lowercase().next().unwrap_or(c))
-            .collect();
-        if initials.starts_with(&q) || initials.contains(&q) {
+    if query.len() >= 2 {
+        let owned;
+        let ini = match initials {
+            Some(s) => s,
+            None => {
+                owned = initials_of(name);
+                &owned
+            }
+        };
+        if starts_with_ignore_case(ini, query) || contains_ignore_case(ini, query) {
             return Some(2);
         }
     }
-    n.contains(&q).then_some(3)
+    contains_ignore_case(name, query).then_some(3)
+}
+
+/// 驼峰首字母（小写）：`VoucherBillOrder` → `vbo`。
+pub(crate) fn initials_of(name: &str) -> String {
+    let mut out = String::with_capacity(8);
+    for (i, c) in name.chars().enumerate() {
+        if i == 0 || c.is_uppercase() {
+            out.push(c.to_ascii_lowercase());
+        }
+    }
+    out
+}
+
+fn eq_ignore_case(a: &str, b: &str) -> bool {
+    a.len() == b.len()
+        && a.as_bytes()
+            .iter()
+            .zip(b.as_bytes())
+            .all(|(x, y)| x.eq_ignore_ascii_case(y))
+}
+
+fn starts_with_ignore_case(s: &str, prefix: &str) -> bool {
+    s.len() >= prefix.len()
+        && s.as_bytes()[..prefix.len()]
+            .iter()
+            .zip(prefix.as_bytes())
+            .all(|(x, y)| x.eq_ignore_ascii_case(y))
+}
+
+fn contains_ignore_case(s: &str, needle: &str) -> bool {
+    let (n, h) = (needle.len(), s.len());
+    if n == 0 {
+        return true;
+    }
+    if n > h {
+        return false;
+    }
+    let (sb, nb) = (s.as_bytes(), needle.as_bytes());
+    (0..=h - n).any(|i| {
+        sb[i..i + n]
+            .iter()
+            .zip(nb)
+            .all(|(x, y)| x.eq_ignore_ascii_case(y))
+    })
 }
 fn type_name(entry: &str) -> Option<String> {
     let name = entry.strip_suffix(".class")?;

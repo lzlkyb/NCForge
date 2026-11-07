@@ -246,6 +246,7 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
             自动提交
           </button>
         </div>
+        <p className="dbx-hint">新会话采用此设置。已打开的会话在处理完待提交写入、重新连接后生效。</p>
         <label htmlFor={fieldId("note")}>备注</label>
         <input id={fieldId("note")} className="dbx-inp" value={f.note} onChange={(e) => put({ note: e.target.value })} />
         {test.ok && (

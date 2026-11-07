@@ -5,8 +5,8 @@ import { getKeymap, paletteKeyLabel, PALETTE_MODES, type PaletteMode } from "../
 import { navigate } from "../../lib/lang";
 import { requestOpenFile } from "../../lib/openFileRequest";
 import { closePalette, openPalette, usePalette } from "../../lib/paletteStore";
-import { buildItems, PALETTE_SEARCH_SOURCE, type PaletteCtx, type PaletteResult, type Runner } from "../../lib/paletteSources";
-import { cancelSearch } from "../../lib/search";
+import type { Runner } from "../../lib/paletteSources";
+import { usePaletteSearch } from "../../hooks/usePaletteSearch";
 import type { Range } from "../../lib/fuzzy";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
 
@@ -17,6 +17,14 @@ const PLACEHOLDER: Record<PaletteMode, string> = {
   sym: "输入方法 / 字段名…（整个工作区，含依赖 jar）",
   cmd: "输入命令…",
 };
+
+/**
+ * 切模式时 `>` / `@` 前缀后的内容。openPalette 会改 nonce 让 PaletteBody 重挂载、查询归零，
+ * 输入法一次性上屏「>停止服务」就只剩空面板；这里先把内容种下，重挂载时作为初始查询。
+ * 由 PaletteBody 挂载后清空，避免污染下一次从快捷键打开的面板。
+ */
+let paletteSeed = "";
+const seedQuery = (v: string) => { paletteSeed = v; };
 
 /** 把命中区间用 <mark> 圈出来。 */
 function Marked({ text, ranges }: { text: string; ranges?: Range[] }) {
@@ -47,16 +55,13 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
   const root = useWorkspaceSelector((s) => s.root);
   const activePath = useWorkspaceSelector((s) => s.activePath);
   const tabs = useWorkspaceSelector((s) => s.tabs);
-  const [query, setQuery] = useState("");
-  const [sel, setSel] = useState(0);
-  const [result, setResult] = useState<PaletteResult>({ items: [], note: "" });
-  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
-  const [retryTick, setRetryTick] = useState(0);
-  const lastKey = useRef("");
-  const listRef = useRef<HTMLDivElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  // 打开前的焦点（通常是编辑器）：Esc 关掉后要还给它；执行了某一项则不还，由目标（编辑器）自己拿焦点
+  const [query, setQuery] = useState(() => paletteSeed);
   const restore = useRef<{ el: Element | null; on: boolean }>({ el: document.activeElement, on: true });
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // 遮罩关闭要求按下与抬起都落在遮罩上：mousedown 在弹窗内、mouseup 在遮罩（或反过来）
+  // 时 click 的 target 都是公共祖先遮罩，只判 down 会反方向误关、丢掉已输入的长查询。
+  const downOnScrim = useRef(false);
+  const upOnScrim = useRef(false);
 
   const goFiles = () => {
     if (activeTab !== "files") onNavigate("files");
@@ -71,52 +76,15 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
       goFiles();
     },
   };
-  const ctx: PaletteCtx = { root: root ?? null, activePath, openPaths: tabs.map((t) => t.path), run: runner };
-  // 查询变化很频繁，异步查询的闭包用 ref 拿最新的 ctx，不把它列进 effect 依赖
-  const ctxRef = useRef(ctx);
-  ctxRef.current = ctx;
+  const { result, sel, setSel, loadState, retry, listRef } = usePaletteSearch({
+    mode,
+    query,
+    ctx: { root: root ?? null, activePath, openPaths: tabs.map((t) => t.path), run: runner },
+  });
+  // 本次挂载消费完 seed 后清空，避免下次正常打开面板还带着上一次的前缀内容。
+  useEffect(() => { paletteSeed = ""; }, []);
 
-  useEffect(() => {
-    let alive = true;
-    // 查询一变就先清空：不把上一次的结果留在列表里，回车就不会打开已经不匹配的条目。
-    const key = `${mode}\u0000${query}`;
-    if (lastKey.current !== key) {
-      lastKey.current = key;
-      setResult({ items: [], note: "" });
-      setSel(0);
-    }
-    setLoadState("loading");
-    // 类型搜索要问语言服务、`#` 内容搜索要扫整个工程：输入时稍等一下再发，
-    // 免得每个字符一个请求（`:行号` 是本地解析，不延迟）
-    const slow = mode === "type" || (mode === "file" && query.trim().startsWith("#"));
-    const t = setTimeout(() => {
-      buildItems(mode, query, ctxRef.current)
-        .then((r) => {
-          if (!alive) return;
-          setResult(r);
-          setSel(0);
-          setLoadState("ready");
-        })
-        .catch((e) => {
-          // 不能吞：工程根读不到、语言服务挂了都会走到这里，静默空列表会被当成「没有这个类」
-          if (!alive) return;
-          setResult({ items: [], note: `查询失败：${e instanceof Error ? e.message : String(e)}` });
-          setSel(0);
-          setLoadState("error");
-        });
-    }, slow && query ? 200 : 0);
-    return () => {
-      alive = false;
-      clearTimeout(t);
-      // 换词 / 关面板：旧的 `#` 内容搜索结果已经没人要了，让后端停掉扫描、让出磁盘
-      if (mode === "file" && query.trim().startsWith("#")) void cancelSearch(PALETTE_SEARCH_SOURCE);
-    };
-  }, [mode, query, retryTick]);
-
-  useEffect(() => {
-    listRef.current?.querySelector('[data-sel="true"]')?.scrollIntoView({ block: "nearest" });
-  }, [sel, result]);
-
+  // 打开前的焦点（通常是编辑器）：Esc 关掉后要还给它；执行了某一项则不还，由目标（编辑器）自己拿焦点
   useEffect(() => {
     const r = restore.current;
     return () => {
@@ -134,9 +102,10 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
   };
 
   const onChange = (v: string) => {
-    // 输入框里第一个字符敲 > / @ 直接切模式（和 VS Code 一样）
-    if (mode !== "cmd" && v.startsWith(">")) return openPalette("cmd");
-    if (mode !== "symbol" && v.startsWith("@")) return openPalette("symbol");
+    // 输入框里第一个字符敲 > / @ 直接切模式（和 VS Code 一样）；前缀后的内容要带过去，
+    // 否则输入法一次性上屏「>停止服务」切到命令模式后查询被清空、面板空白。
+    if (mode !== "cmd" && v.startsWith(">")) { seedQuery(v.slice(1)); return openPalette("cmd"); }
+    if (mode !== "symbol" && v.startsWith("@")) { seedQuery(v.slice(1)); return openPalette("symbol"); }
     setQuery(v);
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -152,6 +121,9 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
       setSel((s) => (s - 1 + n) % n);
     } else if (e.key === "Enter" && !e.nativeEvent.isComposing) {
       e.preventDefault();
+      // 列表里可能还是上一轮的结果（输入改了、新结果没到）：这时候回车会打开
+      // 一个已经不匹配的条目，比「按了没反应」更糟。
+      if (loadState === "loading") return;
       runAt(sel);
     } else if (e.key === "Backspace" && query === "" && mode !== "file") {
       // 在空的命令 / 符号模式里退格，回到最常用的「文件」模式
@@ -184,7 +156,16 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
 
   const keymap = getKeymap();
   return (
-    <div className="qp-scrim" onMouseDown={(e) => e.target === e.currentTarget && close()}>
+    <div
+      className="qp-scrim"
+      onMouseDown={(e) => { downOnScrim.current = e.target === e.currentTarget; upOnScrim.current = false; }}
+      onMouseUp={(e) => { upOnScrim.current = e.target === e.currentTarget; }}
+      onClick={(e) => {
+        if (!downOnScrim.current || !upOnScrim.current || e.target !== e.currentTarget) return;
+        downOnScrim.current = false; upOnScrim.current = false;
+        close();
+      }}
+    >
       <div ref={dialogRef} className="qp" role="dialog" aria-modal="true" aria-label="快速导航" data-palette onKeyDown={onDialogKeyDown}>
         <div className="qp-in" data-focus-container>
           <Icon name="search" size={15} />
@@ -217,11 +198,14 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
           aria-live="polite"
         >
           {loadState === "loading" && (
-            <span className="qp-busy"><Icon name="spinner" size={12} className="animate-spin" aria-hidden="true" />查询中…</span>
+            <span className="qp-busy">
+              <Icon name="spinner" size={12} className="animate-spin" aria-hidden="true" />
+              {result.items.length > 0 ? "更新中…" : "查询中…"}
+            </span>
           )}
           {result.note && <span>{result.note}</span>}
           {loadState === "error" && (
-            <button type="button" className="qp-retry" onClick={() => setRetryTick((n) => n + 1)}>重试</button>
+            <button type="button" className="qp-retry" onClick={retry}>重试</button>
           )}
         </div>
         <div className="qp-list" id="qp-listbox" ref={listRef} role="listbox" aria-label="候选" aria-busy={loadState === "loading"}>

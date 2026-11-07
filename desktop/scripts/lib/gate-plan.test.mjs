@@ -4,7 +4,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CI_JOBS, STEPS, SCOPES, stepById, stepsForScope, verifyWorkflow } from "./gate-plan.mjs";
+import { execFileSync } from "node:child_process";
+
+import { CI_JOBS, PRECOMMIT, STEPS, SCOPES, stepById, stepsForScope, verifyWorkflow } from "./gate-plan.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../../..");
@@ -106,5 +108,43 @@ test("CI_JOBS 的键就是 workflow 里真实存在的 job", () => {
   const text = readFileSync(resolve(repoRoot, ".github/workflows/build.yml"), "utf8");
   for (const job of Object.keys(CI_JOBS)) {
     assert.ok(new RegExp(`^  ${job}:\\s*$`, "m").test(text), `workflow 里没有 job「${job}」`);
+  }
+});
+
+test("pre-commit 只有三项、都来自清单、且不含慢项", () => {
+  const ids = PRECOMMIT.map((p) => p.id);
+  assert.deepEqual(ids, ["tokens", "fmt", "tsc"], "顺序按「快 → 慢」，别随手调");
+  for (const id of ids) assert.ok(stepById(id), `${id} 不在 STEPS 里，pre-commit 会跑空`);
+  const slow = ["eslint", "vitest", "clippy", "rust-test", "vite-build", "bundle-budget", "knip", "contract", "machete", "component-size", "ui-contract", "rust-tempdir"];
+  for (const id of slow) assert.ok(!ids.includes(id), `${id} 太慢，不该进 pre-commit（钩子超 30 秒就会被 --no-verify 绕过）`);
+  for (const p of PRECOMMIT) assert.ok(p.match instanceof RegExp, `${p.id} 缺少 match：无法按暂存文件挑`);
+});
+
+test("pre-commit 的后缀匹配：改文档不跑，改代码按类型跑", () => {
+  const hit = (file) => PRECOMMIT.filter((p) => p.match.test(file)).map((p) => p.id);
+  assert.deepEqual(hit("docs/x.md"), [], "只改文档时三项都不跑");
+  assert.deepEqual(hit("CHANGELOG.md"), []);
+  assert.deepEqual(hit("desktop/src/components/db/X.tsx"), ["tokens", "tsc"]);
+  assert.deepEqual(hit("desktop/src/lib/db.ts"), ["tsc"]);
+  assert.deepEqual(hit("desktop/src-tauri/src/lib.rs"), ["fmt"]);
+  assert.deepEqual(hit("desktop/src/db-console.css"), ["tokens"]);
+});
+
+test("两个钩子都走 gate.mjs，且以可执行位入库", () => {
+  for (const [hook, needle] of [
+    ["pre-commit", /gate\.mjs --precommit/],
+    ["pre-push", /gate\.mjs\b/],
+  ]) {
+    const file = resolve(repoRoot, ".githooks", hook);
+    assert.ok(existsSync(file), `缺 .githooks/${hook}`);
+    assert.match(readFileSync(file, "utf8"), needle, `${hook} 没有调 gate.mjs（清单真源在 gate-plan.mjs）`);
+
+    // Windows 的 core.filemode=false 让 git add 不记录权限位；钩子一旦以 100644
+    // 入库，Linux/macOS clone 出来 git 会**静默跳过**它，一项门禁都不跑。
+    const staged = execFileSync("git", ["ls-files", "-s", `.githooks/${hook}`], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    }).trim();
+    if (staged) assert.ok(staged.startsWith("100755"), `${hook} 的索引模式是 ${staged.split(" ")[0]}，必须 100755`);
   }
 });

@@ -116,9 +116,16 @@ export const STEPS = [
     id: "tsc",
     name: "前端类型 tsc --noEmit",
     cwd: "desktop",
-    argv: ["npx", "tsc", "--noEmit"],
+    argv: [
+      "npx",
+      "tsc",
+      "--noEmit",
+      "--incremental",
+      "--tsBuildInfoFile",
+      "node_modules/.cache/tsc.tsbuildinfo",
+    ],
     scopes: ["frontend"],
-    why: "vite:build 自带 tsc，但单独跑一次能让类型错误早一步、单独报出来，而不是混在打包失败里。",
+    why: "vite:build 自带 tsc，但单独跑一次能让类型错误早一步、单独报出来，而不是混在打包失败里。带增量缓存是为了它也能进 pre-commit：冷跑 ~23s，热跑 ~6s（tsbuildinfo 在 node_modules 下，不入库）。",
   },
   {
     id: "vitest",
@@ -173,6 +180,26 @@ export const STEPS = [
 
 /** 清单里声明的 CI scope 集合。 */
 export const SCOPES = [...new Set(Object.values(CI_JOBS))];
+
+/**
+ * pre-commit 的三项：提交前只跑「秒级到十几秒」的检查，重的留给 pre-push。
+ *
+ * 为什么只有三项：commit 比 push 频繁一个量级，钩子一旦超过 30 秒就会被
+ * `--no-verify` 绕过，等于没有。这里只留「改错了必然想立刻知道、且跑得快」的：
+ *   tokens  <1s   裸 hex 只许减，写样式时最容易顺手加
+ *   fmt    ~2s    格式错在 CI 里红一次要等 4 分钟
+ *   tsc    ~20s   类型错是提交前最该拦住的一类
+ * eslint / vitest / clippy / cargo test 一律不进：加起来十分钟，属于 pre-push。
+ *
+ * match 只按「暂存文件的后缀」判断这项要不要跑：没有相关改动就跳过，并在
+ * 输出里说明跳了哪几项（免得让人以为三项都验过了）。故意不做依赖分析——
+ * 宁可多跑一项，也不做会漏的判断。
+ */
+export const PRECOMMIT = [
+  { id: "tokens", match: /\.(css|tsx)$/ },
+  { id: "fmt", match: /\.rs$/ },
+  { id: "tsc", match: /\.(ts|tsx|json)$/ },
+];
 
 /** 某个 scope 要跑的步骤（保持清单顺序）。 */
 export function stepsForScope(scope) {

@@ -52,10 +52,13 @@ export async function ensureFilesSaved(action = "退出", required = false): Pro
   try {
     files = (await loadSaveAll()).collectUnsaved();
   } catch (e) {
-    // 编辑器模块没起来时不可能有编辑中的文件；不能因为预检不可用而卡住动作。
-    console.error("[preflight] 未保存文件检查不可用，跳过：", e);
-    if (required) toast("未保存文件检查失败，请先保存工作后再更新", "error");
-    return !required;
+    // 能走到这里，说明上面第 49 行的静态扫描已经确认**有脏标签**（没有的话
+    // 早就走快路径返回 true 了）。检查模块加载失败不等于「没有问题」：一律
+    // 中止，不区分 required——过去 `return !required` 让切工程直接放行，
+    // applyWorkspace 随即清空 tabs，未保存内容静默丢失（P0-2）。
+    console.error("[preflight] 未保存文件检查不可用：", e);
+    toast(`未保存文件检查失败，已中止${action}。请先手动保存后重试：${e}`, "error");
+    return false;
   }
   if (files.length === 0) return true;
 

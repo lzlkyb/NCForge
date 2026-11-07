@@ -32,7 +32,7 @@
 .settings-about-details dt { color:hsl(var(--muted-foreground)); }
 .settings-about-details dd { margin:0; overflow-wrap:anywhere; }
 .settings-about-skeleton { display:inline-block; height:16px; width:70px; border-radius:4px; background:hsl(var(--secondary)); animation:settings-about-loading 1.3s ease-in-out infinite; }
-.settings-about :is([data-settings-item]):focus { outline:none; }
+.settings-about :is([data-settings-item]):focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
 .settings-about-dialog { display:flex; flex-direction:column; width:min(800px,calc(100vw - 32px)); max-height:min(720px,calc(100dvh - 48px)); padding:0; overflow:hidden; }
 /* Long release notes need stable ink: keep the reading surface opaque within the glass shell. */
 html[data-ui-style="glass"] .settings-about-dialog .settings-about-history-body,
@@ -45,11 +45,12 @@ html[data-ui-style="glass"] .settings-about-dialog .settings-about-license-text 
 .settings-about-history-tools > select { min-width:170px; height:32px; font-size:12px; }
 .settings-about-search { flex:1; min-width:180px; display:flex; align-items:center; gap:7px; height:32px; padding:0 9px; border:1px solid hsl(var(--input)); border-radius:var(--r-control); color:hsl(var(--muted-foreground)); background:transparent; }
 .settings-about-search input { flex:1; min-width:0; height:30px; border:0; outline:0; background:transparent; font-size:12px; color:hsl(var(--foreground)); }
-.settings-about-search input:focus { outline:none; box-shadow:none; }
+.settings-about-search input:focus { box-shadow:none; }
+.settings-about-search input:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
 .settings-about-search .ui-button { width:22px; height:22px; }
 .settings-about-filters { display:flex; flex-wrap:wrap; gap:5px; flex-basis:100%; }
 .settings-about-filters button { min-height:28px; padding:5px 10px; border-radius:var(--r-control); color:hsl(var(--muted-foreground)); font-size:12px; transition:background var(--dur-fast) var(--ease); }
-.settings-about-filters button:hover { background:hsl(var(--secondary)); }
+.settings-about-filters button:is(:hover,:focus-visible) { background:hsl(var(--secondary)); }
 .settings-about-filters button[aria-pressed="true"] { background:hsl(var(--accent)); color:hsl(var(--primary)); font-weight:600; }
 .settings-about-history-body { min-height:0; overflow:auto; padding:20px 24px; flex:1; }
 .settings-about-history-meta { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; align-items:baseline; margin-bottom:14px; }

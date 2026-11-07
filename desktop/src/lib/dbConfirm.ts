@@ -1,10 +1,12 @@
 import { useSyncExternalStore } from "react";
-import { claimCursor, connOf, connect, getDb, patchTab, rtOf, setTx, sqlTabOf, txAction, type SqlTab } from "./dbStore";
+import { claimCursor, connOf, connect, getDb, patchTab, rtOf, setTx, setTxNotice, sqlTabOf, txAction, type SqlTab } from "./dbStore";
 import { friendlyDbError, parseDbError } from "./db";
 import type { DbEnv, TxInfo } from "./dbApi";
 import { dbApi } from "./dbApi";
 import type { SaveFailure, UnsavedFile } from "./saveAllDirty";
 import { toast } from "../components/ui/toast";
+import { operationActive } from "./operations";
+import { dbTxKey } from "./dbOperations";
 
 /**
  * 几个「要停下来问一句」的地方，统一成 Promise：
@@ -40,7 +42,17 @@ export interface QuitRow {
 }
 
 export type Pending =
-  | { kind: "tx"; connId: string; reason: string; tx: TxInfo; resolve: (c: TxChoice) => void }
+  | {
+      kind: "tx";
+      connId: string;
+      reason: string;
+      tx: TxInfo;
+      /** A0 独立会话槽：`guardSlotTx` 传槽，primary 走 `guardTx` 不传。 */
+      slot?: string | null;
+      /** 提交/回滚进行中：留在框里显示进度，期间禁止取消或关闭。 */
+      busy?: TxChoice | null;
+      resolve: (c: TxChoice) => void;
+    }
   | { kind: "quit"; rows: QuitRow[]; resolve: (c: QuitChoice) => void }
   | {
       kind: "unsavedFiles";
@@ -83,8 +95,34 @@ export function usePending(): Pending | null {
 export function settle(run: (p: Pending) => void) {
   const p = pending;
   if (p?.kind === "unsavedFiles" && p.saving) return;
+  // 提交/回滚进行中不允许「取消」「点遮罩」「ESC」把框关掉：动作还在跑，
+  // 调用方却已经 resolve 成 cancel，用户会以为事务没动过。
+  if (p?.kind === "tx" && p.busy) return;
   show(null);
   if (p) run(p);
+}
+
+/**
+ * 提交 / 回滚按钮的统一入口：**留在框里**显示进行中，动作完成后才关闭并 resolve。
+ *
+ * 原先 `settle` 立即关框、调用方在框外 `await txAction`，生产库大事务几十秒里
+ * 界面没有任何东西在动，用户以为没点上而重复触发关标签 / 退出（P1-12）。
+ * 失败时也不关框：给出错误，让用户可以重试或改选回滚。
+ */
+export async function settleTx(choice: "commit" | "rollback"): Promise<void> {
+  const p = pending;
+  if (!p || p.kind !== "tx" || p.busy) return;
+  p.busy = choice;
+  listeners.forEach((fn) => fn());
+  try {
+    await txAction(p.connId, choice, p.slot ?? undefined);
+    show(null);
+    p.resolve(choice);
+  } catch (e) {
+    p.busy = null;
+    listeners.forEach((fn) => fn());
+    toast(`${choice === "commit" ? "提交" : "回滚"}失败：${friendlyDbError(e)}`, "error");
+  }
 }
 
 /** 普通的是 / 否确认（删除连接等）。 */
@@ -130,6 +168,24 @@ export function askQuit(rows: QuitRow[]): Promise<QuitChoice> {
   return new Promise((resolve) => show({ kind: "quit", rows, resolve }));
 }
 
+/**
+ * 退出时还有状态未知的连接，必须**再问一次**。
+ *
+ * 整批探测超时时 rows 可能全是 `unknown`，`askQuit` 的「全部提交」按钮会让人
+ * 以为事务都提交了，实际循环体一次都不执行。这里把「无法提交、退出即回滚」
+ * 摆到用户面前，由他决定是否接受（P0-4）。
+ */
+export function askUnknownTx(rows: QuitRow[]): Promise<boolean> {
+  const names = [...new Set(rows.map((r) => r.name))];
+  const list = `${names.slice(0, 8).join("、")}${names.length > 8 ? " 等" : ""}`;
+  return ask(
+    "有连接的事务状态未知",
+    `${list} 的未提交事务现在无法确认，也无法在这里提交或回滚；退出后会被数据库回滚，等同于没执行过。确定仍要退出吗？`,
+    "仍要退出",
+    true,
+  );
+}
+
 const hasOpenTx = (connId: string) => (rtOf(connId).tx?.statements ?? 0) > 0;
 
 /**
@@ -137,18 +193,18 @@ const hasOpenTx = (connId: string) => (rtOf(connId).tx?.statements ?? 0) > 0;
  * 返回 false = 用户取消或提交失败，调用方应当停下。
  */
 export async function guardTx(connId: string | null, reason: string): Promise<boolean> {
+  if (connId && operationActive("db." + dbTxKey(connId))) {
+    toast("等待主会话事务操作结束", "info");
+    return false;
+  }
   if (!connId || !hasOpenTx(connId)) return true;
   const choice = await new Promise<TxChoice>((resolve) =>
     show({ kind: "tx", connId, reason, tx: rtOf(connId).tx!, resolve }),
   );
   if (choice === "cancel") return false;
-  try {
-    await txAction(connId, choice);
-    return true;
-  } catch (e) {
-    toast(`${choice === "commit" ? "提交" : "回滚"}失败：${friendlyDbError(e)}`, "error");
-    return false;
-  }
+  // 提交/回滚已由 `settleTx` 在弹框内执行完毕（失败则留在框里重试），
+  // 这里不再重复执行一次 `txAction`。
+  return true;
 }
 
 /**
@@ -169,32 +225,48 @@ export function isLastTabOn(connId: string | null, tabId: string): boolean {
  * 而 SQL 标签跑在自己的槽里——primary 干净不代表槽里没有没提交的 update。
  * 漏了这一问，关标签就是静默回滚。
  *
- * 槽已经没了（空闲回收 / 连接断开）时直接放行：没有会话就没有可丢的事务。
+ * 探测失败时**只有**错误码能证明「会话确实不存在」才放行；IPC 超时、bridge 忙、
+ * SQL 异常、权限不足都可能是槽里还挂着未提交的 update，一律保守停下（P0-5）。
  */
+const SAFE_TO_RELEASE_TX = new Set([
+  "slot-gone",
+  "session-lost",
+  "fallback-session-lost",
+  "not-connected",
+]);
+
 export async function guardSlotTx(
   connId: string | null,
   slot: string | null | undefined,
   reason: string,
 ): Promise<boolean> {
   if (!connId || !slot) return true;
+  if (operationActive("db." + dbTxKey(connId, slot))) {
+    toast("等待独立会话事务操作结束", "info");
+    return false;
+  }
   let tx: TxInfo;
   try {
     tx = (await dbApi.tx(connId, "status", slot)).tx;
-  } catch {
-    return true;
+  } catch (e) {
+    // 空 catch 会把「检查不了」当成「没有事务」：网络闪断 / 后端忙 / 桥异常时
+    // 槽里可能还有未提交的 update，关标签就是静默回滚。同仓 terminatePreflight
+    // 与 quit_cmds 在探测失败时都保守停下，这里必须一致（P0-5）。
+    const { code } = parseDbError(e);
+    if (SAFE_TO_RELEASE_TX.has(code)) return true;
+    toast(
+      `${reason}前检查事务状态失败：${friendlyDbError(e)}。已中止操作，请稍后重试或先到数据库页手动核对未提交写入。`,
+      "error",
+    );
+    return false;
   }
   if (!tx || tx.autoCommit || tx.statements <= 0) return true;
   const choice = await new Promise<TxChoice>((resolve) =>
-    show({ kind: "tx", connId, reason, tx, resolve }),
+    show({ kind: "tx", connId, reason, tx, slot, resolve }),
   );
   if (choice === "cancel") return false;
-  try {
-    await txAction(connId, choice, slot);
-    return true;
-  } catch (e) {
-    toast(`${choice === "commit" ? "提交" : "回滚"}失败：${friendlyDbError(e)}`, "error");
-    return false;
-  }
+  // 动作已由 `settleTx` 在弹框内完成（含槽参数），这里不再重复执行。
+  return true;
 }
 
 const quietUntil = new Map<string, number>();
@@ -242,17 +314,43 @@ export async function ensureConnected(connId: string): Promise<boolean> {
   return r === "ok";
 }
 
+/**
+ * 「按连接设置重连」的判定收敛在这里（P2-22）。
+ *
+ * 过去只有 TxBar 传 `configured`，DbErrorBox / TableData 走默认值，同一个重连
+ * 动作两条入口的确认文案与后端参数不一致。判据用客观的「连接设置的提交方式
+ * 与当前会话不一致」，跟 TxBar 的 `modeChanged` 同一口径；Java 兜底重连一律
+ * 不按配置。`configured` 参数保留为可选覆盖，老调用方不用改。
+ */
+function shouldUseConfigured(
+  connId: string,
+  slot: string | null,
+  tabId?: string,
+  fallback = false,
+): boolean {
+  if (fallback) return false;
+  const conn = connOf(connId);
+  const tx = slot ? (tabId ? sqlTabOf(tabId)?.tx : undefined) : rtOf(connId).tx;
+  return !!conn && !!tx && tx.autoCommit !== conn.autoCommit;
+}
+
 /** 重连只替换出故障的会话。旧事务的结果要先由用户核对。 */
-export async function reconnectSession(connId: string, slot: string | null, tabId?: string, fallback = false): Promise<boolean> {
+export async function reconnectSession(connId: string, slot: string | null, tabId?: string, fallback = false, configured?: boolean): Promise<boolean> {
   const current = () => {
     if (!tabId) return true;
     const tab = sqlTabOf(tabId);
     return tab?.connId === connId && (tab.slot ?? null) === slot && !tab.running;
   };
-  if (!(await ask("重新连接数据库", "请先核对上一次操作和未提交事务的结果。重连后请确认当前 Schema 等会话设置，原 SQL 和已显示的结果仍可查看。", "重新连接")) || !current()) return false;
+  const useConfigured = configured ?? shouldUseConfigured(connId, slot, tabId, fallback);
+  const detail = useConfigured ? "当前会话将采用连接设置中的提交方式，其他会话各自保留原设置。请先核对上一次操作和未提交事务的结果。"
+    : "请先核对上一次操作和未提交事务的结果。重连后请确认当前 Schema 等会话设置，原 SQL 和已显示的结果仍可查看。";
+  if (!(await ask("重新连接数据库", detail, "重新连接")) || !current()) return false;
+  const reconnect = (password?: string) => useConfigured
+    ? dbApi.reconnect(connId, slot, password, fallback, true)
+    : dbApi.reconnect(connId, slot, password, fallback);
   let result;
   try {
-    result = await dbApi.reconnect(connId, slot, undefined, fallback);
+    result = await reconnect();
   } catch (e) {
     const { code } = parseDbError(e);
     if (code !== "need-password" && code !== "auth") throw e;
@@ -260,14 +358,15 @@ export async function reconnectSession(connId: string, slot: string | null, tabI
       show({ kind: "password", connId, error: code === "auth" ? friendlyDbError(e) : null, temporary: true, resolve }),
     );
     if (!input || !current()) return false;
-    result = await dbApi.reconnect(connId, slot, input.password, fallback);
+    result = await reconnect(input.password);
   }
   const tx = { autoCommit: result.autoCommit, statements: 0, rows: 0, since: 0 };
   if (!fallback) {
     claimCursor(connId, slot, "reconnect");
     if (!slot) setTx(connId, tx);
     else if (tabId && current()) patchTab<SqlTab>(tabId, { tx });
+    setTxNotice(connId, slot, tabId);
   }
-  toast("已重新连接，请按需手动执行 SQL", "success");
+  if (!useConfigured) toast("已重新连接，请按需手动执行 SQL", "success");
   return true;
 }

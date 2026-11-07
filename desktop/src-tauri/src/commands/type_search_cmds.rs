@@ -25,11 +25,35 @@ pub struct TypeSearchOut {
     pub jars: Vec<TypeHit>,
     /// 依赖 jar 目录还没建好（首次建类索引很慢，或语言服务刚拉起）。本次先只给工作区结果。
     pub jars_pending: bool,
+    /// 工作区索引还在后台建（首次查询）：本次结果为空，界面应退回文件名匹配。
+    pub indexing: bool,
     pub elapsed_ms: u64,
 }
 
 /// 「已经有人在后台建 jar 目录」的在飞标记：连续敲键时不要排一队重复构建。
 static CATALOG_WARMING: AtomicBool = AtomicBool::new(false);
+
+/// 打开工作区后预热类型索引。
+///
+/// 第一次搜类要遍历七千多个 `.java`（未命中缓存时还要逐个解析），几百毫秒到几秒。
+/// 放在打开工作区后后台做掉，用户第一次找类就是毫秒级——「查询要快」的前提是
+/// 别把建索引的那一下留给正在等结果的输入框。
+pub fn spawn_prewarm_types(state: Arc<AppState>) {
+    tauri::async_runtime::spawn(async move {
+        let root = {
+            let cfg = state.config.read().await;
+            cfg.workspace_root.clone()
+        };
+        let Some(root) = root else { return };
+        // 目录必须与查询时一致：写 `config_dir` 根、读 `config_dir/type-index` 的话，
+        // 预热等于白跑，下一次查询仍从头建索引。
+        let cache_dir = state.config_dir.join("type-index");
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            let _ = crate::workspace_types::shared(&PathBuf::from(root), &cache_dir);
+        })
+        .await;
+    });
+}
 
 #[tauri::command]
 pub async fn search_types(
@@ -45,17 +69,21 @@ pub async fn search_types(
             workspace: Vec::new(),
             jars: Vec::new(),
             jars_pending: false,
+            indexing: false,
             elapsed_ms: 0,
         });
     }
     let (_, root) = workspace_roots(&state).await?;
     let cache_dir = state.config_dir.join("type-index");
     let query_for_index = q.clone();
-    let workspace = tauri::async_runtime::spawn_blocking(move || {
-        crate::workspace_types::shared(&root, &cache_dir).search(&query_for_index, limit)
+    let index = tauri::async_runtime::spawn_blocking(move || {
+        // 不阻塞：一份索引都没有时先回「正在建」，别让输入框等几十秒
+        crate::workspace_types::shared_opt(&root, &cache_dir)
     })
     .await
     .map_err(|e| format!("工作区类型索引任务失败：{e}"))?;
+    let indexing = index.is_none();
+    let workspace = index.map_or_else(Vec::new, |i| i.search(&query_for_index, limit));
 
     let (mut jars, jars_pending) = match jar_catalog(&state).await {
         Some((index, Some(catalog))) => {
@@ -71,6 +99,65 @@ pub async fn search_types(
         workspace,
         jars,
         jars_pending,
+        indexing,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+/// 工作区符号搜索的结果。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SymbolSearchOut {
+    pub items: Vec<crate::workspace_types::SymbolHit>,
+    /// 索引里一共多少条成员（用于说明「搜的是多大范围」）。
+    pub total: usize,
+    /// 工作区索引还在后台建（首次查询）：本次结果为空，界面应退回语言服务或提示。
+    pub indexing: bool,
+    pub elapsed_ms: u64,
+}
+
+/// 方法 / 字段级搜索（快速面板「工作区符号」）。
+///
+/// 与 `search_types` 共用同一份索引：它本来就要读每个 `.java` 才能拿到类声明，
+/// 顺手把成员解析出来不额外扫盘。这样「搜方法名」不再依赖 jdt.ls——语言服务只
+/// 剩「依赖 jar 里的成员」这一段需要用，而那是本地索引覆盖不到的少数场景。
+#[tauri::command]
+pub async fn search_workspace_symbols(
+    state: tauri::State<'_, Arc<AppState>>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<SymbolSearchOut, String> {
+    let started = Instant::now();
+    let q = query.trim().to_string();
+    let limit = limit.unwrap_or(50).clamp(1, 200);
+    if q.is_empty() {
+        return Ok(SymbolSearchOut {
+            items: Vec::new(),
+            total: 0,
+            indexing: false,
+            elapsed_ms: 0,
+        });
+    }
+    let (_, root) = workspace_roots(&state).await?;
+    let cache_dir = state.config_dir.join("type-index");
+    let query_for_index = q.clone();
+    let found = tauri::async_runtime::spawn_blocking(move || {
+        crate::workspace_types::shared_opt(&root, &cache_dir).map(|index| {
+            (
+                index.search_symbols(&query_for_index, limit),
+                index.symbol_len(),
+            )
+        })
+    })
+    .await
+    .map_err(|e| format!("工作区符号索引任务失败：{e}"))?;
+    let indexing = found.is_none();
+    let (items, total) = found.unwrap_or_default();
+
+    Ok(SymbolSearchOut {
+        items,
+        total,
+        indexing,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
 }

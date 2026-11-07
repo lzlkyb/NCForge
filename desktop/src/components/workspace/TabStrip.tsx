@@ -1,6 +1,6 @@
 import { EditorTabTypeIcon } from "./EditorTabTypeIcon";
 import { ProblemBadge, problemDescription } from "./ProblemBadge";
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { AllEditorTabs } from "./AllEditorTabs";
@@ -42,6 +42,7 @@ export function TabStrip({
   groupId,
   compactTools = false,
   onMoveGroup,
+  tools,
 }: {
   root: string;
   tabs: TabMeta[];
@@ -61,6 +62,8 @@ export function TabStrip({
   groupId?: EditorGroupId;
   compactTools?: boolean;
   onMoveGroup?: (path: string) => void;
+  /** 由外壳并入这一行的执行/分组工具，省掉主区顶部再叠一条 36px 工具条。 */
+  tools?: ReactNode;
 }) {
   const dock = useWorkbenchDock();
   const pathLabels = tabPathLabels(root, tabs);
@@ -250,6 +253,8 @@ export function TabStrip({
       {/* 标签太多时横向滚动条不好找：给一个「所有标签」下拉，键盘用户也能到这里 */}
       <AllEditorTabs root={root} tabs={tabs} activePath={activePath} onSelect={path => { onSelect(path); dock?.showCode(); }} />
       <span className="wb-tabs-sp" />
+      {/* 执行/分组工具与文件标签同一行：600px 高窗口净增约 36px 正文 */}
+      {tools && <span className="wb-tabs-tools">{tools}</span>}
       {!compactTools && !dock?.documentOpen && <TaskMenu root={root} compiling={compiling} />}
       {!compactTools && !dock?.documentOpen && (
         <Button

@@ -9,18 +9,25 @@
 //! 及时地知道刚执行完的那条语句），两边取并集。
 //!
 //! 时序（`CloseRequested` 是同步回调，不能 await）：
-//! 1. 拦一次关窗 → 发 `app:quit-request` → 起 5 秒兜底计时；
+//! 1. 拦一次关窗 → 发 `app:quit-request`（带本轮 `round`）→ 起 5 秒兜底计时；
 //! 2. 前端第一件事发 `quit_check_acked`（表示「我活着，正在查」），再查事务；
+//!    收到同一轮的重投时也重发 ack，不重新跑一遍检查；
 //! 3. 干净 → `app_quit`（放行，窗口关闭，进程退出）；
 //!    有事务 → 弹框，用户选提交/回滚，做完再 `app_quit`；
-//! 4. 用户取消 → `quit_cancel` 复位，下次点 X 重新走一遍；
-//! 5. 5 秒没 ack → 认为界面已卡死，直接退（这种状态下也弹不出框，只能靠
-//!    Oracle 回滚）。
+//! 4. 用户取消 → `quit_cancel` 复位并作废旧轮，下次点 X 重新走一遍；
+//! 5. 5 秒没 ack 且轮次仍匹配 → 认为界面已卡死，直接退（这种状态下也弹不出框）。
+//!
+//! **两处不能放行的地方**：emit 失败时保持窗口（放行会跳过整个守卫，静默丢数据）；
+//! 事务探测结果要逐项保留（整体超时把已成功的 pending 一起丢掉，会让「提交」空转）。
+//!
+//! `quit_checking` 只由 `quit_cancel` / `app_quit` / 强退复位，计时器不碰它——
+//! 确认框还开着时再点一次 X 曾因此启动第二轮、5 秒后强退，丢掉全部未保存内容。
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 
@@ -44,7 +51,11 @@ const ACK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 关窗回调里调用：返回 `true` 表示这次关闭已被拦住，正在等前端确认。
 ///
-/// 放行条件只有一个：`quit_approved` 已置位（前端完成确认，或兜底超时）。
+/// 放行条件只有一个：`quit_approved` 已置位（前端完成确认）。emit 失败**不再**
+/// 放行——那会跳过未保存检查与事务确认，静默丢掉编辑内容与未提交写入。
+///
+/// 一轮一 id：`quit_round` 每轮递增，兜底计时器只在 round 仍匹配且本轮没收到
+/// ack 时才强退。连点 X 只重发事件让前端补 ack，不重置 `quit_acked`、不起新计时器。
 pub fn begin_quit_check(window: &tauri::Window) -> bool {
     let app = window.app_handle().clone();
     let st = app.state::<Arc<AppState>>().inner().clone();
@@ -52,29 +63,51 @@ pub fn begin_quit_check(window: &tauri::Window) -> bool {
     if st.quit_approved.load(Ordering::SeqCst) {
         return false;
     }
-    // 连点 X：已经拦住一次并在等回话了，别再发事件、再起计时器
-    if st.quit_checking.swap(true, Ordering::SeqCst) {
+
+    let is_new_round = !st.quit_checking.swap(true, Ordering::SeqCst);
+    let round = if is_new_round {
+        // 只有真正开始新一轮才清 ack：确认框未决时连点 X 不能把已置位的 ack 抹掉。
+        st.quit_acked.store(false, Ordering::SeqCst);
+        st.quit_round.fetch_add(1, Ordering::SeqCst) + 1
+    } else {
+        st.quit_round.load(Ordering::SeqCst)
+    };
+
+    if let Err(e) = window.emit("app:quit-request", json!({ "round": round })) {
+        // 事件通道异常时前端收不到确认请求。保持窗口并给出降级提示；再点一次 X
+        // 会重试。本轮作废，旧计时器（若已起）不会再强退。
+        log::error!("发送退出确认事件失败，保持窗口：{e}");
+        let _ = window.emit("app:quit-guard-error", ());
+        if is_new_round {
+            st.quit_checking.store(false, Ordering::SeqCst);
+            st.quit_round.fetch_add(1, Ordering::SeqCst);
+        }
         return true;
     }
 
-    st.quit_acked.store(false, Ordering::SeqCst);
-    if let Err(e) = window.emit("app:quit-request", ()) {
-        // 发不出去就等于没人能确认：直接放行，别把用户关在应用里
-        log::warn!("发送退出确认事件失败，直接退出：{e}");
-        st.quit_approved.store(true, Ordering::SeqCst);
-        return false;
+    if !is_new_round {
+        // 同一轮的重投：计时器已经在跑，只需让前端补一次 ack，不再起第二个。
+        return true;
     }
 
     let app2 = app.clone();
     let st2 = st.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(ACK_TIMEOUT).await;
-        if !st2.quit_acked.load(Ordering::SeqCst) {
-            log::warn!("退出确认 {ACK_TIMEOUT:?} 内没有回话，界面可能已卡死，直接退出");
-            st2.quit_approved.store(true, Ordering::SeqCst);
-            app2.exit(0);
+        // 轮次已变（取消后重新点 X / emit 失败作废 / 已经强退）→ 这是上一轮的计时器。
+        if st2.quit_round.load(Ordering::SeqCst) != round {
+            return;
         }
+        if st2.quit_acked.load(Ordering::SeqCst) {
+            // 前端活着并且已经确认收到，确认框可能还开着：本轮绝不强退。
+            // quit_checking 由 quit_cancel / app_quit / 强退复位，计时器不碰它。
+            return;
+        }
+        log::warn!("退出确认 {ACK_TIMEOUT:?} 内没有回话，界面可能已卡死，直接退出");
+        st2.quit_approved.store(true, Ordering::SeqCst);
         st2.quit_checking.store(false, Ordering::SeqCst);
+        st2.quit_round.fetch_add(1, Ordering::SeqCst);
+        app2.exit(0);
     });
     true
 }
@@ -85,13 +118,16 @@ pub fn begin_quit_check(window: &tauri::Window) -> bool {
 /// 5 秒计时到点会把人直接踢出去。
 #[tauri::command]
 pub fn quit_check_acked(state: tauri::State<'_, Arc<AppState>>) {
+    // 本轮置位后不再重置（重置只发生在 begin_quit_check 的新一轮）。
+    // 前端对重复事件也会重发这个命令，重复置位是幂等的。
     state.quit_acked.store(true, Ordering::SeqCst);
 }
 
-/// 用户在退出确认框里点了「取消」：复位状态，下次点 X 重新走一遍。
+/// 用户在退出确认框里点了「取消」：复位状态并作废旧轮计时器，下次点 X 重新走一遍。
 #[tauri::command]
 pub fn quit_cancel(state: tauri::State<'_, Arc<AppState>>) {
     state.quit_checking.store(false, Ordering::SeqCst);
+    state.quit_round.fetch_add(1, Ordering::SeqCst);
 }
 
 /// 真正退出：置放行位，再关一次窗。
@@ -102,6 +138,8 @@ pub fn quit_cancel(state: tauri::State<'_, Arc<AppState>>) {
 #[tauri::command]
 pub fn app_quit(app: tauri::AppHandle, state: tauri::State<'_, Arc<AppState>>) {
     state.quit_approved.store(true, Ordering::SeqCst);
+    state.quit_checking.store(false, Ordering::SeqCst);
+    state.quit_round.fetch_add(1, Ordering::SeqCst);
     match app.get_webview_window("main") {
         Some(w) => {
             if let Err(e) = w.close() {
@@ -134,20 +172,35 @@ pub async fn db_pending_tx(state: tauri::State<'_, Arc<AppState>>) -> Result<Val
     let all_keys: Vec<String> = handles.iter().map(|(k, _)| k.clone()).collect();
 
     // 并行探测：串行时最坏是「连接数 × PING_TIMEOUT」——五个卡住的连接就是十秒
-    // 关不掉窗口，用户会以为自己又点了一次 X。每条自带 PING_TIMEOUT，外面再包
-    // 一个总 deadline 兜住「某条把整个退出流程拖住」。
-    let futs = handles.into_iter().map(|(key, h)| async move {
-        let kind = h.kind();
-        // A0 的独立会话槽（`c1#2`）属于同一条连接：按连接 id 归并，
-        // 否则确认框里会出现「prod」「prod#2」两条同名连接，用户不知道该点哪个。
-        let (id, _) = split_slot_key(&key);
-        let row = pending_row(id, kind, call(h, "ping", Vec::new(), PING_TIMEOUT).await);
-        (key, row)
-    });
-    let done: Vec<(String, Value)> =
-        tokio::time::timeout(PENDING_TX_DEADLINE, futures_util::future::join_all(futs))
-            .await
-            .unwrap_or_default();
+    // 关不掉窗口。每条自带 timeout，外面再用总 deadline 兜住「某条把整个流程拖住」。
+    //
+    // **必须逐条收集**：原先用 `join_all(...).unwrap_or_default()`，总 deadline 一超时
+    // 就把已经成功返回的 pending 结果一起丢掉，全部补成 unknown，前端「提交」循环
+    // 一次都不执行却照样 app_quit —— 用户看到「已提交并退出」，实际全部隐式回滚。
+    let mut futs = futures_util::stream::FuturesUnordered::new();
+    for (key, h) in handles {
+        futs.push(async move {
+            let kind = h.kind();
+            // A0 的独立会话槽（`c1#2`）属于同一条连接：按连接 id 归并，
+            // 否则确认框里会出现「prod」「prod#2」两条同名连接，用户不知道该点哪个。
+            let (id, _) = split_slot_key(&key);
+            let probed =
+                tokio::time::timeout(PING_TIMEOUT, call(h, "ping", Vec::new(), PING_TIMEOUT))
+                    .await
+                    .unwrap_or_else(|_| Err("退出探测超时".to_string()));
+            // 先算出结果行再 move `key`：`id` 借用了 `key`，同一个表达式里
+            // move 会与借用冲突（E0505）。拆两句对语义没有影响。
+            let row = pending_row(id, kind, probed);
+            (key, row)
+        });
+    }
+    let mut done: Vec<(String, Value)> = Vec::new();
+    let _ = tokio::time::timeout(PENDING_TX_DEADLINE, async {
+        while let Some(row) = futs.next().await {
+            done.push(row);
+        }
+    })
+    .await;
     // 按原始 key 补行，不能按连接 id：同一条连接的 primary 与槽是不同的 future，
     // 只探完 primary 不能替槽说「干净」——merge_sessions 的规则是「任一条 unknown
     // 整条 unknown」，漏掉槽的 unknown 正好把可能丢数据的那个藏起来。

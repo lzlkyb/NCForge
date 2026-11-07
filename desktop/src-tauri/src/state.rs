@@ -115,8 +115,12 @@ pub struct AppState {
     /// 应用就永远关不掉。起一个 5 秒计时，没等到这个位就说明界面起不来了，直接退
     /// （这种状态下也弹不出确认框，未提交事务只能由 Oracle 回滚）。
     pub quit_acked: std::sync::atomic::AtomicBool,
-    /// 正在走一次退出确认。挡住用户连点 X 时重复发事件、重复起计时器。
+    /// 正在走一次退出确认。只在 `quit_cancel` / `app_quit` / 兜底强退三处复位：
+    /// 计时器**不能**无条件清它，否则确认框还开着时连点 X 会启动第二轮。
     pub quit_checking: std::sync::atomic::AtomicBool,
+    /// 退出检查轮次 id。每轮 `begin_quit_check` 递增；兜底计时器只在 round 仍匹配
+    /// 且本轮没收到 ack 时才强退，避免上一轮的计时器把新一轮踢出去。
+    pub quit_round: std::sync::atomic::AtomicU64,
     /// 供 notifications feature 关闭时也能注入的 AppHandle 存根。
     /// 需要发桌面通知的代码统一走 main.rs 的 `notify_toast`（那里按 feature 门控），
     /// 不要直接持有 AppHandle 到处发。
@@ -146,6 +150,7 @@ impl AppState {
             quit_approved: std::sync::atomic::AtomicBool::new(false),
             quit_acked: std::sync::atomic::AtomicBool::new(false),
             quit_checking: std::sync::atomic::AtomicBool::new(false),
+            quit_round: std::sync::atomic::AtomicU64::new(0),
             app_handle: std::sync::Mutex::new(None),
         })
     }

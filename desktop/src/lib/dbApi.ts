@@ -548,8 +548,8 @@ export const dbApi = {
     invoke<MoreResult>("db_more", { id, maxRows, slot: slot || null }),
   tx: (id: string, action: "commit" | "rollback" | "autocommit-on" | "autocommit-off" | "status", slot?: string | null) =>
     invoke<{ tx: TxInfo; alive?: boolean }>("db_tx", { id, action, slot: slot || null }),
-  reconnect: (id: string, slot: string | null, password?: string, fallback = false) =>
-    invoke<{ autoCommit: boolean }>("db_tx", { id, action: "reconnect", slot, password, fallback }),
+  reconnect: (id: string, slot: string | null, password?: string, fallback = false, configured = false) =>
+    invoke<{ autoCommit: boolean }>("db_tx", { id, action: configured ? "reconnect-configured" : "reconnect", slot, password, fallback }),
   /**
    * 退出前用：primary + 这条连接上所有独立会话槽一起提交/回滚。
    * 前端不知道有哪些槽（那是后端的记账），所以必须由后端枚举。

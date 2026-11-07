@@ -1,9 +1,9 @@
+import { errorToast } from "../../lib/errorToast";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { Modal } from "../ui/Modal";
 import { ncPortApply, ncPortPreview, type PortPlan } from "../../lib/server";
-import { failureText } from "../../lib/friendlyError";
 
 /**
  * 改中间件监听端口。
@@ -116,7 +116,7 @@ export function PortDialog({
       onApplied();
       onClose();
     } catch (e) {
-      toast(failureText("改端口", e), "error");
+      errorToast("改端口", e);
     } finally {
       writing.current = false;
       setApplying(false);

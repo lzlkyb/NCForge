@@ -18,7 +18,7 @@
 .wb-settings-pages > section:not([hidden]) { animation:settings-page-in var(--dur-page) var(--ease); }
 .wb-settings-page-header { display:flex; flex-direction:column; gap:7px; }
 .wb-settings-page-header h1 { font-size:18px; line-height:1.4; font-weight:600; color:hsl(var(--foreground)); }
-.wb-settings-page-header h1:focus { outline:none; }
+.wb-settings-page-header h1:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
 .wb-settings-page-header p { font-size:13px; line-height:1.6; color:hsl(var(--muted-foreground)); }
 .wb-settings-section-content { display:flex; flex-direction:column; gap:24px; min-width:0; }
 .wb-settings-body .ui-card { padding:0; border:0; border-radius:0; box-shadow:none; background:transparent; }
@@ -39,7 +39,7 @@
 .wb-settings-body .srow.stack { align-items:stretch; }
 .wb-settings-body .srow.stack > .grow { flex-basis:auto; }
 .wb-settings-body .settings-row-feedback { flex-basis:100%; line-height:1.6; overflow-wrap:anywhere; }
-.wb-settings-body .srow[data-settings-item]:focus { outline:none; }
+.wb-settings-body .srow[data-settings-item]:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
 .wb-settings-body .settings-group { min-width:0; border-bottom:1px solid hsl(var(--border)); }
 .wb-settings-body .settings-group-head { padding:14px 0; gap:9px; flex-wrap:wrap; border-radius:var(--r-control); }
 .wb-settings-body .settings-group-title { font-size:14px; line-height:1.5; white-space:nowrap; }
@@ -54,7 +54,7 @@
 .settings-keybinding-actions { text-align:right; }
 .wb-settings-result-list { display:flex; flex-direction:column; }
 .wb-settings-result { width:100%; display:flex; align-items:center; gap:16px; padding:16px 8px; border-bottom:1px solid hsl(var(--border)); text-align:left; border-radius:var(--r-control); }
-.wb-settings-result:hover { background:hsl(var(--secondary)); }
+.wb-settings-result:is(:hover,:focus-visible) { background:hsl(var(--secondary)); }
 .wb-settings-result-main { display:flex; flex:1; min-width:0; flex-direction:column; gap:5px; }
 .wb-settings-result-main strong { font-size:13px; font-weight:600; }
 .wb-settings-result-main > span { font-size:12px; line-height:1.6; color:hsl(var(--muted-foreground)); }
@@ -80,6 +80,14 @@
   .wb-settings-body .wb-keymap-table .settings-keybinding-actions { text-align:left; }
 }
 @media(max-width:900px) { .wb-settings-body { padding:22px 20px; } }
+/* 窄窗口：左侧页签退化成横向/纵向堆叠，正文让出整宽。原先这三条写在工作台布局文件里，
+   与本文件的设置页规则分家，改任一处都不确定是否生效 —— 收归这里（唯一真源）。 */
+@media(max-width:640px) {
+  .wb-settings-layout { flex-direction:column; }
+  .wb-settings-menu { width:100%; flex-direction:column; overflow:auto; padding:12px; border:0; }
+  .wb-settings-menu button { white-space:nowrap; }
+  .wb-settings-body { padding:18px; }
+}
 @media(prefers-reduced-motion:reduce) {
   .wb-settings-pages > section:not([hidden]) { animation:none; }
   .wb-settings-flash { animation:none !important; background:hsl(var(--accent)); }

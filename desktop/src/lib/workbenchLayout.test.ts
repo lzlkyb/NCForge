@@ -17,11 +17,14 @@ describe("工作台布局偏好", () => {
     const layout = parseWorkbenchLayout(JSON.stringify({ side: 999, mode: "unknown", heights: { problems: -1, svc: 400, injected: 100 }, pinned: ["calls", "calls", "svc", "injected"], expanded: "svc", compact: false }));
     expect(layout).toMatchObject({ side: 420, mode: "code", pinned: ["calls"], expanded: null, compact: true });
     expect(layout.heights).toEqual({ problems: 140, svc: 400 });
-    expect(panelHeight(layout, "svc", 400)).toBe(300);
+    // 400px 高的窗口：服务面板按 75% 会给 300，但主区只剩 100px（Monaco 会被裁到不能滚）。
+    // 上限保留主区 220px ⇒ 面板最多 180。
+    expect(panelHeight(layout, "svc", 400)).toBe(180);
   });
   it("低窗口服务保留默认阅读高度，同时尊重独立缩小的偏好", () => {
     const layout = parseWorkbenchLayout(null);
-    expect(panelHeight(layout, "svc", 540)).toBe(360);
+    // 默认 360 在 540 高窗口里同样受「主区至少 220」约束：最多 320。
+    expect(panelHeight(layout, "svc", 540)).toBe(320);
     expect(panelHeight({ ...layout, heights: { svc: 200 } }, "svc", 540)).toBe(200);
     expect(panelHeight(layout, "problems", 540)).toBe(200);
   });

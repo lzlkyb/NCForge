@@ -67,7 +67,7 @@
 .vc-chg :is(.vc-row,.vc-chip,.vc-grp):active,.vc-head .vc-btn:active:not(:disabled) { background:hsl(var(--accent)); }
 html[data-ui-density="comfortable"] .vc-file-row .vc-row { min-height:46px;font-size:13px; }
 html[data-ui-density="comfortable"] :is(.vc-chip,.vc-group-head .vc-grp) { min-height:30px; }
-@media(max-width:1180px) { .vc-context-trigger { max-width:120px; }.vc-head .vc-scan-freshness { display:none; } }
+@media(max-width:1200px) { .vc-context-trigger { max-width:120px; }.vc-head .vc-scan-freshness { display:none; } }
 @media(max-width:900px) { .vc-context-trigger span { display:none; }.vc-heading-rev { display:none; }.vc-head .vc-hint { display:none; } }
-@media(max-width:650px) { .app-shell .wb-toolbar-host .vc-head { gap:5px; }.vc-head .vc-btn { padding:0 7px; }.vc-head .vc-heading h1 { font-size:12px; }.vc-outcome { flex-wrap:wrap; }.vc-outcome-message { flex-basis:100%; }.vc-commit-overlay { padding:42px 8px 12px; } }
+@media(max-width:640px) { .app-shell .wb-toolbar-host .vc-head { gap:5px; }.vc-head .vc-btn { padding:0 7px; }.vc-head .vc-heading h1 { font-size:12px; }.vc-outcome { flex-wrap:wrap; }.vc-outcome-message { flex-basis:100%; }.vc-commit-overlay { padding:42px 8px 12px; } }
 @media(prefers-reduced-motion:reduce) { .vc-commit-drawer { transition:none; }.vc-review-document .animate-spin,.vc-head .animate-spin,.vc-chg .animate-spin { animation:none; } }

@@ -52,7 +52,7 @@ export function DbObjectFinder({ connId, onClose }: { connId:string|null; onClos
     try { if (await ensureConnected(scope)) await refreshMeta(scope); } catch(e) { toast(friendlyDbError(e),"error"); } finally { actionLock.current=false;setLoading(false); }
   };
   useEffect(()=>{document.getElementById(`dbx-object-${index}`)?.scrollIntoView?.({block:"nearest"});},[index,query,scope]);
-  return <Modal open onClose={onClose} ariaLabel="查找数据库对象" className="modal-surface dbx-object-dialog">
+  return <Modal keepMountedWhenInactive open onClose={onClose} ariaLabel="查找数据库对象" className="modal-surface dbx-object-dialog">
     <h2>查找数据库对象</h2>
     <select aria-label="对象查找连接" value={scope} onChange={e => {setScope(e.target.value);setIndex(0);}}>{db.conns.map(c => <option key={c.id} value={c.id}>{c.name} · {ENV_LABEL[c.env]}</option>)}</select>
     <input className="dbx-inp" autoFocus aria-label="查找表名或中文名" role="combobox" aria-expanded aria-controls="dbx-object-options" aria-activedescendant={chosen ? `dbx-object-${Math.min(index,hits.length-1)}` : undefined} placeholder="表名 / 中文名 / 拼音首字母" value={query} onChange={e => {setQuery(e.target.value);setIndex(0);}} onKeyDown={e => {

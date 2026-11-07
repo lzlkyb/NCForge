@@ -1,16 +1,17 @@
 import { listCommands, type Command } from "./commandRegistry";
 import { recentCommandIds, recordCommandUse } from "./commandUsage";
-import { getFileIndex } from "./fileIndex";
+import { getFileIndex, peekFileIndex } from "./fileIndex";
 import { fuzzyMatch, rankFiles, type FileEntry, type Range } from "./fuzzy";
 import { matchText } from "./pinyin";
 import { parseLineQuery, rankFilesRecent, recentFirst } from "./gotoAnything";
 import { getLangView, langReady, langRequest } from "./lang";
 import { uriToPath } from "./langConvert";
+import { failureText } from "./friendlyError";
 import type { PaletteMode } from "./keymap";
 import { getRecent } from "./recentFiles";
-import { searchWorkspace } from "./search";
+import { searchWorkspaceStream, type SearchHit, type SearchOutcome } from "./search";
 import { fetchSymbols, kindLetter } from "./symbols";
-import { jarTypeUri, searchTypes, type TypeHit } from "./typeSearch";
+import { jarTypeUri, searchSymbols, searchTypes, type SymbolHit, type SymbolSearchResult, type TypeHit } from "./typeSearch";
 
 /** 快速面板 `#内容` 搜索在后端的来源标识：同来源新搜索顺带取消旧的。 */
 export const PALETTE_SEARCH_SOURCE = "palette";
@@ -72,12 +73,12 @@ function fileItem(e: FileEntry, ctx: PaletteCtx, extra: Partial<PaletteItem>): P
   };
 }
 
-async function filesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult> {
+async function filesMode(query: string, ctx: PaletteCtx, onPartial?: (r: PaletteResult) => void): Promise<PaletteResult> {
   if (!ctx.root) return { items: [], note: "尚未打开工程" };
   const q = query.trim();
   // `#` 搜内容、`:` 跳行号：和 VS Code 的「转到任意位置」同一套前缀，
   // 不必为它们再占一个入口键，也不用离开这个输入框。
-  if (q.startsWith("#")) return contentMode(q.slice(1).trim(), ctx);
+  if (q.startsWith("#")) return contentMode(q.slice(1).trim(), ctx, onPartial);
   if (q.startsWith(":")) return lineMode(q, ctx);
   const entries = await getFileIndex(ctx.root);
   if (!q) {
@@ -99,20 +100,62 @@ async function filesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult>
 }
 
 /** `#内容`：在工作区文件里找文本，最近打开过的文件排前面。 */
-async function contentMode(text: string, ctx: PaletteCtx): Promise<PaletteResult> {
+async function contentMode(text: string, ctx: PaletteCtx, onPartial?: (r: PaletteResult) => void): Promise<PaletteResult> {
   if (!text) return { items: [], note: "输入要在工程里找的内容（# 开头）" };
-  let out;
+  const base = (ctx.root ?? "").replace(/[\\/]+$/, "");
+  const recent = getRecent(ctx.root);
+  // 先扫谁：最近打开的文件 + 文件名里就带关键词的文件（见下面的注释）
+  const priority = [
+    ...new Set([
+      // 最近打开的文件：用户多半在找刚看过的
+      ...recent
+        .map((p) => (p.toLowerCase().startsWith(`${base.toLowerCase()}\\`) ? p.slice(base.length + 1) : null))
+        .filter((p): p is string => !!p),
+      // 文件名里就带关键词的文件：`#VoucherBillOrder` 这类搜法里，它们几乎必然含这个词，
+      // 排到队首比按目录顺序撞运气快一个数量级。清单只认内存里已有的那份，
+      // 不让搜索倒过来等一次全树扫描（`peekFileIndex` 不会触发加载）。
+      ...(ctx.root ? (peekFileIndex(ctx.root) ?? []) : [])
+        .filter((e) => e.name.toLowerCase().includes(text.toLowerCase()))
+        .slice(0, 30)
+        .map((e) => e.rel),
+    ]),
+  ].slice(0, 50);
+  const item = (h: SearchHit): PaletteItem => {
+    const path = `${base}\\${h.path.replace(/\//g, "\\")}`;
+    return {
+      key: `${path}:${h.line}`,
+      title: h.text.trim() || "（空行）",
+      detail: `${h.path}:${h.line}`,
+      run: () => ctx.run.file(path, h.line, (h.ranges[0]?.start ?? 0) + 1),
+    };
+  };
+  // 增量结果只用于「列表先长出来」：顺序按发现顺序（最近文件本来就在最前），
+  // 最终结果仍用完整数据按最近优先重排一次。
+  const seen = new Map<string, PaletteItem>();
+  let out: SearchOutcome;
   try {
     // 每改一次词就是一次全量扫描：按来源登记，新的一发出，后端就停掉旧的
-    out = await searchWorkspace({ text, maxResults: LIMIT }, false, PALETTE_SEARCH_SOURCE);
+    out = await searchWorkspaceStream(
+      { text, maxResults: LIMIT, priority },
+      (hits) => {
+        if (!onPartial) return;
+        for (const h of hits) {
+          const it = item(h);
+          if (!seen.has(it.key)) seen.set(it.key, it);
+        }
+        if (seen.size) {
+          onPartial({ items: [...seen.values()].slice(0, LIMIT), note: `内容 · 已找到 ${seen.size} 条，还在扫…` });
+        }
+      },
+      PALETTE_SEARCH_SOURCE,
+    );
   } catch (e) {
-    return { items: [], note: `搜索失败：${e instanceof Error ? e.message : String(e)}` };
+    return { items: [], note: failureText("搜索", e) };
   }
-  const base = (ctx.root ?? "").replace(/[\\/]+$/, "");
   const hits = out.hits.map((h) => ({ hit: h, path: `${base}\\${h.path.replace(/\//g, "\\")}` }));
-  const ordered = recentFirst(hits, (h) => h.path, getRecent(ctx.root));
+  const ordered = recentFirst(hits, (h) => h.path, recent);
   const items: PaletteItem[] = ordered.map(({ hit, path }) => ({
-    key: `${path}:${hit.line}:${hit.ranges[0]?.start ?? 0}`,
+    key: `${path}:${hit.line}`,
     title: hit.text.trim() || "（空行）",
     detail: `${hit.path}:${hit.line}`,
     run: () => ctx.run.file(path, hit.line, (hit.ranges[0]?.start ?? 0) + 1),
@@ -120,7 +163,7 @@ async function contentMode(text: string, ctx: PaletteCtx): Promise<PaletteResult
   const note = out.truncated
     ? `内容命中 ${items.length} 条（已到上限，缩小关键词可看到更精确的结果）`
     : items.length
-      ? `内容 · ${items.length} 项`
+      ? `内容 · ${items.length} 项 · ${out.elapsedMs}ms`
       : "没有匹配的内容";
   return { items, note };
 }
@@ -195,7 +238,9 @@ async function langHits(
   if (!langReady()) return null;
   let res: unknown;
   try {
-    res = await langRequest<unknown>("workspace/symbol", null, { query }, 20_000);
+    // 4 秒。以前是 20 秒：面板上就一行「查询中…」，用户体感是卡死；而 jdt.ls 一旦
+    // 索引没建完，等到 20 秒也只是拿到空结果。宁可早退回本地/文件名，也别让人干等。
+    res = await langRequest<unknown>("workspace/symbol", null, { query }, 4_000);
   } catch {
     return null;
   }
@@ -331,6 +376,11 @@ async function typesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult>
     ].filter(Boolean);
     return { items, note: `类型 · ${parts.join(" · ")}` };
   }
+  if (local?.indexing && !langReady()) {
+    // 首次建索引要读完整个源码树（这台机器上近百秒），不能把用户扣在输入框前
+    const items = await typeFileItems(q, ctx);
+    return { items, note: items.length ? "正在建类索引，先按文件名匹配" : "正在建类索引，稍后再搜" };
+  }
   const langState = getLangView().state;
   if (langState === "starting" || langState === "indexing") {
     // 本地没有结果、语言服务又在建索引：先给文件名结果，别让输入框空等。
@@ -360,7 +410,7 @@ async function symbolsMode(query: string, ctx: PaletteCtx): Promise<PaletteResul
   try {
     symbols = await fetchSymbols(path);
   } catch (e) {
-    return { items: [], note: `取符号失败：${String(e)}` };
+    return { items: [], note: failureText("取符号", e) };
   }
   const q = query.trim();
   const items: PaletteItem[] = [];
@@ -383,10 +433,39 @@ async function symbolsMode(query: string, ctx: PaletteCtx): Promise<PaletteResul
 async function workspaceSymbolsMode(query: string, ctx: PaletteCtx): Promise<PaletteResult> {
   const q = query.trim();
   if (!q) return { items: [], note: "输入方法名或字段名（整个工作区 + 依赖 jar）" };
-  if (!langReady()) return { items: [], note: "代码智能未就绪，工作区符号搜索需要它" };
+  // 本地索引优先：它和类型索引是同一份，扫一次 `.java` 就把类声明和方法/字段都记下了，
+  // 不用等 jdt.ls 建索引（那是 10 秒级）。依赖 jar 里的成员仍要语言服务，所以本地没
+  // 结果时才问它——绝大多数「找方法」的目标都在工作区源码里。
+  let local: SymbolSearchResult | null = null;
+  try {
+    local = await searchSymbols(q, LIMIT);
+  } catch {
+    // 后端不可用（未打开工程 / 索引损坏）：继续走语言服务
+  }
+  if (local && local.items.length) {
+    const items = local.items.map((h) => symbolHitItem(h, ctx, q));
+    const scope = local.total >= 200_000 ? "工作区" : `工作区 ${local.total} 个成员`;
+    return { items, note: `方法与字段 · ${scope} · ${local.elapsedMs}ms` };
+  }
+  if (local?.indexing) {
+    if (!langReady()) return { items: [], note: "正在建工作区符号索引，稍后再搜" };
+  } else if (!langReady()) {
+    return { items: [], note: local ? "工作区里没有匹配的方法或字段（依赖 jar 需要代码智能）" : "代码智能未就绪，暂时列不出符号" };
+  }
   const items = await langSymbols(q, ctx, (k) => MEMBER_KINDS.has(k));
   if (!items) return { items: [], note: "没有匹配的方法或字段" };
-  return { items, note: `方法与字段 · ${items.length} 项` };
+  return { items, note: `方法与字段 · ${items.length} 项（含依赖 jar）` };
+}
+
+function symbolHitItem(hit: SymbolHit, ctx: PaletteCtx, query: string): PaletteItem {
+  return {
+    key: `sym:${hit.file}:${hit.line}:${hit.name}`,
+    title: hit.name,
+    ranges: fuzzyMatch(query, hit.name)?.ranges,
+    detail: [hit.container, hit.module].filter(Boolean).join(" · "),
+    kind: kindLetter(hit.kind),
+    run: () => ctx.run.file(hit.file, hit.line, hit.column),
+  };
 }
 
 function commandItem(c: Command, extra: Partial<PaletteItem> = {}): PaletteItem {
@@ -431,10 +510,19 @@ function commandsMode(query: string): PaletteResult {
   return { items: items.map((x) => x.item), note: items.length ? "命令" : "没有匹配的命令" };
 }
 
-export async function buildItems(mode: PaletteMode, query: string, ctx: PaletteCtx): Promise<PaletteResult> {
+/**
+ * 生成浮层条目。`onPartial` 只有 `#内容` 用得上：扫描是全工程的，先送几批让
+ * 列表长出来，返回的 Promise 仍给最终结果。
+ */
+export async function buildItems(
+  mode: PaletteMode,
+  query: string,
+  ctx: PaletteCtx,
+  onPartial?: (r: PaletteResult) => void,
+): Promise<PaletteResult> {
   switch (mode) {
     case "file":
-      return filesMode(query, ctx);
+      return filesMode(query, ctx, onPartial);
     case "type":
       return typesMode(query, ctx);
     case "symbol":

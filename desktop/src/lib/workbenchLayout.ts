@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { PanelTab } from "../components/workspace/BottomPanel";
+import { PAGES } from "./pages";
 import { setSideOpen } from "./layoutStore";
 import { setSession } from "./workspaceSession";
 
@@ -21,6 +22,15 @@ export const PRIMARY_PANELS: PanelTab[] = ["problems", "build", "svc", "debug"];
 export const SECONDARY_PANELS: PanelTab[] = ["calls", "types", "todo", "bookmarks"];
 const KEY = "ncforge-workbench-layout";
 const DEFAULTS: WorkbenchLayout = { mode: "code", locked: false, side: 240, sides: {}, heights: {}, pinned: [], expanded: null, compact: true };
+/**
+ * sides 白名单：由 PAGES 的 side 字段派生并校验 key（P1-15）。
+ * 遍历这个集合而不是硬编码数组，顺带补上以前漏掉的 meta / logs 宽度记忆；
+ * "search" 是文件页「全工程搜索」视图的伪 key（useWorkbenchGeometry 会用到），不是页面，单独补。
+ */
+const SIDE_KEYS = new Set<string>([
+  ...PAGES.filter((p) => p.side).map((p) => p.key),
+  "search",
+]);
 const listeners = new Set<() => void>();
 const clamp = (value: unknown, min: number, max: number, fallback: number) => typeof value === "number" && Number.isFinite(value) ? Math.round(Math.min(max, Math.max(min, value))) : fallback;
 
@@ -30,7 +40,7 @@ export function parseWorkbenchLayout(raw: string | null, legacy: string | null =
     const old = !raw && legacy ? JSON.parse(legacy) : {};
     const heights: WorkbenchLayout["heights"] = {};
     const sides: WorkbenchLayout["sides"] = {};
-    for (const key of ["files", "search", "svn", "db", "settings"]) if (typeof value.sides?.[key] === "number") sides[key] = clamp(value.sides[key], 180, 420, 240);
+    for (const key of SIDE_KEYS) if (typeof value.sides?.[key] === "number") sides[key] = clamp(value.sides[key], 180, 420, 240);
     for (const panel of [...PRIMARY_PANELS, ...SECONDARY_PANELS]) {
       if (typeof value.heights?.[panel] === "number") heights[panel] = clamp(value.heights[panel], 140, 1200, 200);
     }
@@ -82,8 +92,12 @@ export function togglePinnedPanel(panel: PanelTab): void {
   updateWorkbenchLayout({ pinned: snapshot.pinned.includes(panel) ? snapshot.pinned.filter(p => p !== panel) : [...snapshot.pinned, panel] });
 }
 export function panelMaxHeight(panel: PanelTab, viewportHeight: number): number {
-  // Service controls need more space in short windows; other output preserves the code area.
-  return Math.max(140, Math.round(viewportHeight * (panel === "svc" ? .75 : .65)));
+  // 面板不得吃掉主区至少 220px：600px 高窗口原来允许 390px，Monaco 只剩约 104px，
+  // 且被 overflow:hidden 裁掉还不能滚。与 workbench-layout.css 的
+  // max-height:min(65%, calc(100% - 220px)) 同一口径（P2-15 / 7.7 序 3）。
+  // 服务控制台仍需更高，但同样受这条下限约束。
+  const ratio = panel === "svc" ? .75 : .65;
+  return Math.max(140, Math.min(Math.round(viewportHeight * ratio), Math.max(140, viewportHeight - 220)));
 }
 export function panelHeight(layout: WorkbenchLayout, panel: PanelTab, viewportHeight: number): number {
   const preferred = layout.heights[panel] ?? (panel === "svc" ? 360 : panel === "debug" ? 260 : 200);

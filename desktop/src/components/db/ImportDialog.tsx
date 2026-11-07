@@ -162,7 +162,7 @@ export function ImportDialog({ connId, table, cols, onClose, onDone,tabId }: {
   };
 
   return (
-    <Modal open onClose={requestClose} closeOnOverlay={!busy} className="modal-surface dbx-dlg wide" ariaLabel={`导入数据到 ${table}`}>
+    <Modal keepMountedWhenInactive open onClose={requestClose} closeOnOverlay={!busy} className="modal-surface dbx-dlg wide" ariaLabel={`导入数据到 ${table}`}>
       <div className="hd">
         <Icon name="upload" size={16} />
         导入数据

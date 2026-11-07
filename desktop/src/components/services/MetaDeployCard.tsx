@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
-import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 import { getConfig, patchConfig } from "../../lib/appConfig";
 import {
   deployApply,
@@ -77,7 +77,7 @@ export function MetaDeployCard({ defaultOpen = false }: { defaultOpen?: boolean 
       }
       void status.refetch();
     } catch (e) {
-      toast(failureText(kind === "cleanup" ? "清理元数据" : "投送元数据", e), "error");
+      errorToast(kind === "cleanup" ? "清理元数据" : "投送元数据", e);
     } finally {
       actionLock.current = false;
       setBusy(null);
@@ -94,7 +94,7 @@ export function MetaDeployCard({ defaultOpen = false }: { defaultOpen?: boolean 
       await patchConfig({ deploy_on_start: next });
     } catch (e) {
       if (old) queryClient.setQueryData(["app-config"], old);
-      toast(failureText("保存自动投送设置", e), "error");
+      errorToast("保存自动投送设置", e);
     } finally {
       actionLock.current = false;
       setBusy(null);

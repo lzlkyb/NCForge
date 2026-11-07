@@ -10,8 +10,7 @@ import {
   type ClientStatus,
 } from "../lib/client";
 import type { ServerState } from "../lib/server";
-import { toast } from "../components/ui/toast";
-import { failureText } from "../lib/friendlyError";
+import { errorToast } from "../lib/errorToast";
 import { readClientDebugModePref, writeClientDebugModePref } from "../lib/debugKeys";
 
 import { useServiceActions } from "./useServiceActions";
@@ -71,14 +70,14 @@ export function useClientService({ visible, appHidden }: Options) {
     try {
       setPreview(await clientCommandLine());
     } catch (e) {
-      toast(failureText("生成客户端命令行", e), "error");
+      errorToast("生成客户端命令行", e);
     } finally {
       setPreviewing(false);
     }
   }, []);
 
   const revealLog = useCallback((previous = false) => {
-    void clientRevealLog(previous).catch((e) => toast(failureText("打开客户端日志位置", e), "error"));
+    void clientRevealLog(previous).catch((e) => errorToast("打开客户端日志位置", e));
   }, []);
 
   return {

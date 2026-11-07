@@ -13,16 +13,48 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+/// 与 `workspace::mtime_ms` 同口径：取不到就当 0（新建文件），由调用方判定。
+fn mtime_ms(path: &Path) -> Option<u64> {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+}
+
+/// rename 之后尽量把目录项也刷盘。Windows 上无法用普通方式打开目录，
+/// 打开失败直接忽略（文件内容已 fsync，最坏只是极端断电下目录项回退）。
+fn sync_parent_dir(dir: &Path) {
+    if let Ok(f) = std::fs::File::open(dir) {
+        let _ = f.sync_all();
+    }
+}
+
 /// 把一个已完整的字节串原子写到 `path`。
 ///
 /// 适合「内存里已经拼好整份内容」的场景（保存源文件、改写配置）。
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    write_atomic_checked(path, bytes, None)
+}
+
+/// 同 [`write_atomic`]，但在 `persist` 前再校验一次目标 mtime（P1-6 的 TOCTOU）。
+pub fn write_atomic_checked(
+    path: &Path,
+    bytes: &[u8],
+    expected_mtime_ms: Option<u64>,
+) -> Result<(), String> {
     let mut target = AtomicTarget::create(path)?;
     target
         .as_file_mut()
         .write_all(bytes)
         .map_err(|e| format!("写临时文件失败: {e}"))?;
-    target.commit()
+    // 内容先刷盘再 rename：只靠 persist 的原子性，断电可能得到长度正确、
+    // 数据却仍是旧页（全 0）的文件（审查报告 P1-6）。
+    target
+        .as_file_mut()
+        .sync_all()
+        .map_err(|e| format!("刷新临时文件失败: {e}"))?;
+    target.commit_checked(expected_mtime_ms)
 }
 
 /// 「边写边算」场景（大结果集导出、zip 打包）：先拿临时文件，写完再提交。
@@ -67,18 +99,50 @@ impl AtomicTarget {
 
     /// 落到目标路径。Windows 上 `persist` 会覆盖同名目标（`MoveFileEx` 带 replace）。
     pub fn commit(self) -> Result<(), String> {
+        self.commit_checked(None)
+    }
+
+    /// 与 `commit` 相同，但在 `persist` 前再校验一次目标 mtime，把「冲突检查 →
+    /// 落盘」之间的 TOCTOU 窗口收到最小（审查报告 P1-6）：检查与 `persist`
+    /// 之间不再插入任何用户代码，不匹配返回以 `CONFLICT` 开头的错误。
+    pub fn commit_checked(self, expected_mtime_ms: Option<u64>) -> Result<(), String> {
+        // 先刷数据：外部 writer 走 `path()` 写临时文件时用的是另一个句柄，
+        // 但脏页属于同一个文件，这里的 sync_all 一样能把它刷下去。
+        self.tmp
+            .as_file()
+            .sync_all()
+            .map_err(|e| format!("刷新临时文件失败: {e}"))?;
+        if let Some(expect) = expected_mtime_ms {
+            if mtime_ms(&self.dest).unwrap_or(0) != expect {
+                return Err("CONFLICT: 文件在写入前又被其他程序修改".to_string());
+            }
+        }
+        let parent = self.dest.parent().map(Path::to_path_buf);
         self.tmp
             .persist(&self.dest)
             .map(|_| ())
-            .map_err(|e| format!("替换原文件失败（文件可能只读或被占用）: {}", e.error))
+            .map_err(|e| format!("替换原文件失败（文件可能只读或被占用）: {}", e.error))?;
+        if let Some(dir) = parent {
+            sync_parent_dir(&dir);
+        }
+        Ok(())
     }
 
     /// 创建产物时保留检查后新出现的文件；各平台由 tempfile 的 no-clobber 契约保证。
     pub fn commit_new(self) -> Result<(), String> {
         self.tmp
+            .as_file()
+            .sync_all()
+            .map_err(|e| format!("刷新临时文件失败: {e}"))?;
+        let parent = self.dest.parent().map(Path::to_path_buf);
+        self.tmp
             .persist_noclobber(&self.dest)
             .map(|_| ())
-            .map_err(|e| format!("创建文件失败（目标可能已出现）: {}", e.error))
+            .map_err(|e| format!("创建文件失败（目标可能已出现）: {}", e.error))?;
+        if let Some(dir) = parent {
+            sync_parent_dir(&dir);
+        }
+        Ok(())
     }
 }
 

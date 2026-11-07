@@ -7,9 +7,11 @@
 .dbx-context-env {font-size:var(--dbx-fs-meta);color:hsl(var(--muted-foreground));}
 .dbx-context[data-prod] .dbx-context-env {color:hsl(var(--destructive-ink));font-weight:600;}
 .dbx-context-account {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);}
-.dbx-context-status {display:inline-flex;align-items:center;gap:4px;font-size:var(--dbx-fs-meta);color:hsl(var(--muted-foreground));}
-.dbx-context-status[data-connected] {color:hsl(var(--success-ink));}
-.dbx-context-session {color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);white-space:nowrap;}
+.dbx-connection-detail { position:relative; font-size:var(--dbx-fs-meta); }
+.dbx-connection-detail summary { cursor:pointer; color:hsl(var(--muted-foreground)); }
+.dbx-connection-detail-body { position:absolute; z-index:4; inset-inline-end:0; display:grid; gap:5px; min-width:max-content; padding:8px 10px; border:1px solid hsl(var(--border)); border-radius:var(--r-control); background:hsl(var(--card)); }
+
+.dbx-context-session {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);}
 /* ── 默认 schema 胶囊：切了之后写 SQL 不用带 `aier633.` 前缀 ── */
 .dbx-schema {position:relative;display:inline-flex;flex-shrink:0;}
 /* 左栏表树顶部那行：当前 schema + 读取时刻 */
@@ -41,7 +43,7 @@
 .dbx-result-footer > :is(.dbx-change-review,pre) {flex-basis:100%;}
 .dbx-filterbar {flex:none; padding:8px 12px; border-bottom:1px solid hsl(var(--border)); max-height:240px; display:flex; flex-direction:column; min-height:0; overflow:hidden; background:hsl(var(--card));}
 /* 查询入口不随条件区域滚动，窄窗也保留在固定的头部右侧。 */
-.dbx-filter-header {display:flex;align-items:center;justify-content:space-between;gap:8px;flex:none;}
+.dbx-filter-header {display:flex;align-items:center;flex-wrap:wrap;justify-content:space-between;gap:8px;flex:none;}
 .dbx-filter-body {min-height:0;overflow:auto;padding-top:6px;}
 .dbx-filter-summary {flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--dbx-fs-body);color:hsl(var(--muted-foreground));}
 .dbx-filterbar[data-expanded="false"] {padding-block:5px;}
@@ -88,8 +90,8 @@
 }
 
 /* 只在数据库作用域内统一反馈，沿用全局焦点和减弱动效规则。 */
-:is(.dbx-btn,.dbx-ibtn,.dbx-txchip,.dbx-connpick,.dbx-crow,.dbx-trow) {transition:background-color 160ms ease,color 160ms ease,box-shadow 160ms ease;}
-:is(.dbx-btn,.dbx-ibtn,.dbx-txchip,.dbx-connpick):active:not(:disabled) {box-shadow:inset 0 1px 3px hsl(var(--foreground) / .16);transition-duration:70ms;}
+:is(.dbx-btn,.dbx-ibtn,.dbx-connpick,.dbx-crow,.dbx-trow) {transition:background-color var(--dur) ease,color var(--dur) ease,box-shadow var(--dur) ease;}
+:is(.dbx-btn,.dbx-ibtn,.dbx-connpick):active:not(:disabled) {box-shadow:inset 0 1px 3px hsl(var(--foreground) / .16);transition-duration:var(--dur-press);}
 .dbx-inp:focus {border-color:hsl(var(--primary));}
 .dbx-form-label {color:hsl(var(--muted-foreground));}
 .dbx-form-section {grid-column:1 / -1;font-size:var(--dbx-fs-title);font-weight:600;margin:8px 0 0;padding-top:12px;border-top:1px solid hsl(var(--border));}
@@ -101,6 +103,12 @@
 .dbx-console-main {background:hsl(var(--card));}
 /* 表单和长文读取使用实底，玻璃材质下也不能透出背后的 SQL 与数据。 */
 html[data-ui-style="glass"] :is(.dbx-dlg,.dbx-object-dialog,.dbx-column-dialog,.dbx-compare-dialog,.dbx-relations-dialog).modal-surface {background:hsl(var(--card));backdrop-filter:none;}
+@container workbench-document (max-width:760px) {
+ .dbx-context .dbx-connpick {max-width:168px;}
+ .dbx-context-account {max-width:90px;}
+ .dbx-rbar .dbx-action-label {display:none;}
+ .dbx-rbar .dbx-btn.ghost {width:var(--dbx-h-control);padding:0;}
+}
 @container workbench-document (max-width:620px) {
  :is(.dbx-sqlbar,.dbx-rbar) .dbx-action-label {display:none;}
  :is(.dbx-sqlbar,.dbx-rbar) .dbx-btn.ghost {width:var(--dbx-h-control);padding:0;}
@@ -119,5 +127,5 @@ html[data-ui-style="glass"] :is(.dbx-dlg,.dbx-object-dialog,.dbx-column-dialog,.
  .dbx-mapgrid {grid-template-columns:100px minmax(80px,1fr) minmax(110px,1fr);overflow:auto;}
 }
 @media(prefers-reduced-motion:reduce) {
- :is(.dbx-btn,.dbx-ibtn,.dbx-txchip,.dbx-connpick,.dbx-crow,.dbx-trow,.dbx-vs-bar>i,.dbx-sr-bar>i) {transition:none;}
+ :is(.dbx-btn,.dbx-ibtn,.dbx-connpick,.dbx-crow,.dbx-trow,.dbx-vs-bar>i,.dbx-sr-bar>i) {transition:none;}
 }

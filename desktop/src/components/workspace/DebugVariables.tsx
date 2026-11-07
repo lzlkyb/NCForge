@@ -8,8 +8,7 @@
 // 暂停时也可以改写变量的值（只改 JVM 现场，不改源码）。
 import { useState } from "react";
 import { Icon } from "../ui/icon";
-import { toast } from "../ui/toast";
-import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 import { expandVariables, setVariableValue } from "../../lib/debugSession";
 import type { DapScope, DapVariable } from "../../lib/debug";
 
@@ -51,7 +50,7 @@ function VarRow({
     setEditing(false);
     if (!value || value === v.value) return;
     void setVariableValue(parentRef, v.name, value).catch((e) =>
-      toast(failureText(`修改变量 ${v.name}`, e), "error"),
+      errorToast(`修改变量 ${v.name}`, e),
     );
   };
 

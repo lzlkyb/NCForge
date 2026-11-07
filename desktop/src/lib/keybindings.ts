@@ -82,8 +82,21 @@ export function chordOfEvent(
   return `${e.ctrlKey ? "ctrl+" : ""}${e.altKey ? "alt+" : ""}${e.shiftKey ? "shift+" : ""}${key}`;
 }
 
-/** 保存由 Monaco/固定流程接管，不允许在设置页改成一个实际不生效的键。 */
-export const RESERVED_CHORDS = new Set(["ctrl+s"]);
+/**
+ * 被固定流程占用的组合，不允许在设置页改成一个实际不生效的键。
+ *
+ * - `ctrl+s` 由保存流程接管；
+ * - `ctrl+1`~`ctrl+9` 由 App 的捕获阶段监听消费（页面切换），设置页的冲突表覆盖不到它们，
+ *   登记上来只会得到一个「显示已绑定、按下去切页面」的假绑定。
+ */
+export const RESERVED_CHORDS = new Set(["ctrl+s", ...Array.from({ length: 9 }, (_, i) => `ctrl+${i + 1}`)]);
+
+/** 保留键的说明文案；不在保留集合里返回 undefined。 */
+function reservedReason(chord: string): string | undefined {
+  if (chord === "ctrl+s") return "Ctrl+S 固定用于保存，不能占用";
+  if (/^ctrl\+[1-9]$/.test(chord)) return `${chord.replace("ctrl+", "Ctrl+")} 固定用于页面切换，不能占用`;
+  return undefined;
+}
 
 export type BindingResult = { ok: true; chord: string } | { ok: false; error: string };
 
@@ -119,7 +132,8 @@ export function getBindingOverride(id: string): string | undefined {
 export function setBindingOverride(id: string, raw: string): BindingResult {
   const chord = normalizeChord(raw);
   if (!chord) return { ok: false, error: "需要 Ctrl 或 Alt 加一个键" };
-  if (RESERVED_CHORDS.has(chord)) return { ok: false, error: "Ctrl+S 固定用于保存，不能占用" };
+  const reserved = reservedReason(chord);
+  if (reserved) return { ok: false, error: reserved };
   const all = { ...read(), [id]: chord };
   try {
     localStorage.setItem(KEY, JSON.stringify(all));

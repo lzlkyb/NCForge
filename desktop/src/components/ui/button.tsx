@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type ButtonHTMLAttributes } from "react";
 
-const base = "ui-button inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[12px] font-medium disabled:pointer-events-none disabled:opacity-50";
+const base = "ui-button inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[12px] font-medium disabled:pointer-events-none disabled:opacity-[var(--disabled-opacity,.62)]";
 
 const variants = {
   default: "bg-primary text-primary-foreground hover:bg-primary/90",
@@ -12,10 +12,10 @@ const variants = {
 };
 
 const sizes = {
-  default: "h-[30px] px-3 py-1",
-  sm: "h-7 px-2.5 text-xs",
+  default: "h-[var(--h-control,30px)] px-3 py-1",
+  sm: "h-[var(--h-icon,28px)] px-2.5 text-xs",
   lg: "h-9 px-5",
-  icon: "h-7 w-7",
+  icon: "h-[var(--h-icon,28px)] w-[var(--h-icon,28px)]",
 };
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -58,7 +58,7 @@ export function Button({
         <svg aria-hidden="true" className="animate-spin shrink-0" viewBox="0 0 24 24" width={size === "sm" ? 14 : 16} height={size === "sm" ? 14 : 16} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
           <path d="M21 12a9 9 0 1 1-6.22-8.56" />
         </svg>
-        {size === "icon" ? <span className="sr-only">{loadingText ?? "处理中"}</span> : <span className="truncate">{loadingText ?? children}</span>}
+        {size === "icon" ? <span className="sr-only">{loadingText ?? "处理中"}</span> : <span className="truncate">{loadingText ?? `${children}中…`}</span>}
       </span>}
     </button>
   );

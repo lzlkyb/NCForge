@@ -20,7 +20,7 @@ export function ConnDialog() {
   const dialog = useDbSelector((s) => s.dialog);
   const editing = useConnOf(dialog?.connId ?? null);
   return (
-    <Modal open={dialog !== null} onClose={closeConnDialog} className="modal-surface dbx-dlg" ariaLabel="数据库连接">
+    <Modal keepMountedWhenInactive open={dialog !== null} onClose={closeConnDialog} className="modal-surface dbx-dlg" ariaLabel="数据库连接">
       {dialog && (
         <>
           <div className="hd">

@@ -35,6 +35,8 @@ export interface DockSlots {
   showDocument: () => void;
   showCode: () => void;
   documentOpen: boolean;
+  /** 底部面板展开态：文件页据此保证底部一定有内容，避免两个面都让位后主区纯白。 */
+  panelExpanded?: boolean;
   toolTab: DockToolTab | null;
 }
 export const WorkbenchDockContext = createContext<DockSlots | null>(null);

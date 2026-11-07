@@ -86,12 +86,14 @@
 .dbx-runsplit .dbx-btn.pri:first-child { border-radius: var(--r-control) 0 0 var(--r-control); }
 .dbx-runsplit .dbx-btn.pri + .dbx-btn { border-radius: 0 var(--r-control) var(--r-control) 0; border-left: 1px solid hsl(var(--primary-foreground) / .25); padding: 0 6px; }
 /* 事务模式收成一枚胶囊：点开才是两个选项，平时只占一个控件的宽度 */
-.dbx-txchip { display: inline-flex; align-items: center; gap: 5px; height: var(--dbx-h-control); padding: 0 9px; border-radius: var(--r-control); border: 1px solid transparent; background: none; font-size: var(--dbx-fs-body); color: hsl(var(--muted-foreground)); white-space: nowrap; flex-shrink: 0; }
-.dbx-txchip:hover:not(:disabled) { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
-.dbx-txchip[data-auto] { color: hsl(var(--success-ink)); }
-.dbx-txchip .dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--muted-foreground)); }
-.dbx-txchip[data-auto] .dot { background: hsl(var(--success)); }
-.dbx-txchip:disabled { opacity: .5; cursor: default; }
+.dbx-tx-actions { display:inline-flex; gap:4px; flex:none; align-items:center; padding-inline-start:6px; border-inline-start:1px solid hsl(var(--border)); }
+.dbx-tx-actions .dbx-btn { width:76px; padding-inline:4px; }
+.dbx-tx-actions .dbx-btn[aria-busy="true"] { opacity:1; color:hsl(var(--primary)); }
+.dbx-run-controls { width:145px; flex:none; }
+.dbx-run-controls .dbx-runsplit > :first-child { flex:1; }
+.dbx-run-controls > .dbx-run-action { width:100%; }
+.dbx-run-action[data-running] { color:hsl(var(--destructive-ink)); }
+
 /* 连接设置里的分段控件（新建/编辑连接对话框）仍用两段按钮 */
 .dbx-txmode { display: inline-flex; border: 1px solid hsl(var(--border)); border-radius: var(--r-control); height: var(--dbx-h-control); flex-shrink: 0; }
 .dbx-txmode button { white-space: nowrap; padding: 0 10px; font-size: var(--dbx-fs-body); color: hsl(var(--muted-foreground)); }
@@ -112,7 +114,11 @@
 
 /* ── 事务条 ── */
 .dbx-txbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: var(--dbx-h-bar); padding: 5px 12px; background: hsl(var(--warning) / .1); border-bottom: 1px solid hsl(var(--warning) / .3); color: hsl(var(--warning-ink)); font-size: var(--dbx-fs-body); flex-shrink: 0; }
-.dbx-txbar b { font-weight: 700; }
+.dbx-txbar b { font-weight:700; font-variant-numeric:tabular-nums; }
+.dbx-txbar[data-tone="bad"] { background:hsl(var(--destructive) / .08); border-color:hsl(var(--destructive) / .25); color:hsl(var(--destructive-ink)); }
+.dbx-txbar[data-tone="ok"] { background:hsl(var(--success) / .08); border-color:hsl(var(--success) / .25); color:hsl(var(--success-ink)); }
+.dbx-txbar[data-tone="busy"] { background:hsl(var(--accent)); border-color:hsl(var(--border)); color:hsl(var(--accent-foreground)); }
+.dbx-txbar[data-tone="warn"] { background:hsl(var(--warning) / .1); border-color:hsl(var(--warning) / .3); color:hsl(var(--warning-ink)); }
 
 /* ── 侧栏：连接树 ── */
 .dbx-side { display: flex; flex-direction: column; height: 100%; min-height: 0; background: hsl(var(--chrome)); }
@@ -128,10 +134,11 @@
 .dbx-conn-env { color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-badge); }
 .dbx-conn-env[data-prod] { color: hsl(var(--destructive-ink)); }
 /* 连接状态只留一个小圆点（含义在 title）：右侧再写「已连接」会和左侧环境点挤成一排字 */
-.dbx-stdot { width: 6px; height: 6px; border-radius: 50%; margin-left: 2px; flex-shrink: 0; background: hsl(var(--muted-foreground) / .45); }
-.dbx-stdot.ok { background: hsl(var(--success)); }
-.dbx-stdot.busy { background: hsl(var(--warning)); }
-.dbx-stdot.bad { background: hsl(var(--destructive)); }
+.dbx-conn-status { display:inline-flex; align-items:center; flex:none; gap:3px; white-space:nowrap; color:hsl(var(--muted-foreground)); font-size:var(--dbx-fs-meta); }
+.dbx-conn-status[data-state="connected"] { color:hsl(var(--success-ink)); }
+.dbx-conn-status[data-state="connecting"] { color:hsl(var(--primary)); }
+.dbx-conn-status[data-state="error"] { color:hsl(var(--destructive-ink)); }
+
 .dbx-crow[data-drop] { box-shadow: inset 0 2px 0 hsl(var(--primary)); }
 .dbx-sgroup { font-size: var(--dbx-fs-meta); font-weight: 600; color: hsl(var(--muted-foreground)); padding: 6px 6px 2px; display: flex; align-items: center; gap: 4px; width: 100%; text-align: left; }
 .dbx-trow { display: flex; align-items: center; gap: 6px; width: 100%; height: var(--dbx-h-icon); border-radius: var(--r-control); padding-right: 6px; white-space: nowrap; text-align: left; }
@@ -478,3 +485,14 @@
 .dbx-pr-result { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .dbx-pr-sum { display: flex; align-items: center; gap: 8px; font-size: var(--dbx-fs-body); }
 .dbx-pr-sql { margin: 0; padding: 10px; border: 1px solid hsl(var(--border)); border-radius: 8px; background: hsl(var(--secondary) / .45); font-size: var(--dbx-fs-meta); line-height: 1.6; max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+
+.dbx-execution-feedback { position:relative; display:flex; align-items:center; gap:6px; padding:5px 12px; border-bottom:1px solid hsl(var(--border)); font-size:var(--dbx-fs-meta); font-variant-numeric:tabular-nums; flex:none; }
+.dbx-execution-feedback[data-busy] { color:hsl(var(--primary)); }
+.dbx-execution-feedback[data-state="failed"] { color:hsl(var(--destructive-ink)); }
+.dbx-execution-track { position:absolute; inset:auto 0 -1px; height:2px; overflow:hidden; background:hsl(var(--accent)); }
+.dbx-execution-track i { display:block; height:100%; background:hsl(var(--primary)); }
+.dbx-execution-track[data-indeterminate] i { width:24%; animation:dbx-query-scan 1.4s ease-in-out infinite; }
+@keyframes dbx-query-scan { from {transform:translateX(-100%);} to {transform:translateX(420%);} }
+@media (prefers-reduced-motion:reduce) {
+  .dbx-execution-track[data-indeterminate] i { animation:none; }
+}

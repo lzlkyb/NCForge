@@ -310,11 +310,29 @@ pub fn rename_entry(old: &Path, new_name: &str) -> Result<PathBuf, String> {
             return Err("已存在同名文件或文件夹".to_string());
         }
         // 只改大小写：Windows 不允许一步 rename 到「同名但大小写不同」的路径，
-        // 先落到一个中转名，再改成目标名。失败时尽量还原，别把文件丢在中转名上。
-        let tmp = parent.join(format!(".ncforge-renaming-{}", std::process::id()));
+        // 先落到一个中转名，再改成目标名。
+        // 中转名用 tempfile 的随机名，避免同进程并发重命名撞到同一个 pid 名（P1-5）。
+        // old 可能是目录，rename 的目标必须不存在：建临时文件取到唯一名后立即删掉，
+        // 落盘前再确认这个名字没被别人占用，绝不覆盖别人的文件。
+        let tmp = {
+            let probe = tempfile::Builder::new()
+                .prefix(".ncforge-renaming-")
+                .suffix(".tmp")
+                .tempfile_in(parent)
+                .map_err(|e| format!("重命名失败：{e}"))?;
+            let path = probe.path().to_path_buf();
+            drop(probe);
+            path
+        };
+        if std::fs::symlink_metadata(&tmp).is_ok() {
+            return Err("重命名失败：中转名被占用，请重试".to_string());
+        }
         std::fs::rename(old, &tmp).map_err(|e| format!("重命名失败：{e}"))?;
         if let Err(e) = std::fs::rename(&tmp, &target) {
-            let _ = std::fs::rename(&tmp, old);
+            // 只把本次移走的 tmp 搬回 old；若 old 已被别人重建，不覆盖它（P1-5）。
+            if std::fs::symlink_metadata(old).is_err() {
+                let _ = std::fs::rename(&tmp, old);
+            }
             return Err(format!("重命名失败：{e}"));
         }
         return Ok(target);
@@ -557,8 +575,11 @@ fn read_stable(path: &Path) -> Result<(Vec<u8>, u64), String> {
 /// 写文本文件，返回写入后的修改时间。
 ///
 /// - `expected_mtime_ms`：读取时记下的修改时间；磁盘上已变（别的程序/AI 改过）则返回以
-///   `CONFLICT` 开头的错误，不覆盖。
-/// - 先写同目录临时文件再 rename，写到一半断电不会留下半截源码。
+///   `CONFLICT` 开头的错误，不覆盖。落盘前会在 `commit_checked` 里再校验一次，把
+///   「冲突检查 → persist」之间的 TOCTOU 窗口收到最小（P1-6）。
+/// - 同目录临时文件 + rename 保证目标不会被写成旧新混合的半截内容；临时文件在
+///   commit 时先 `sync_all` 刷盘、再尽量 fsync 父目录，降低断电后目录项/数据回退的
+///   概率。但 rename 本身只保证原子性、不保证持久性，极端断电仍可能丢本次写入。
 pub fn write_text_file(
     path: &Path,
     text: &str,
@@ -574,9 +595,10 @@ pub fn write_text_file(
     }
     let bytes = encode(&apply_eol(text, eol)?, encoding, has_bom)?;
 
-    // 原子替换：临时文件与目标同目录，写完 rename 覆盖。失败不会留下半份新内容，
-    // 临时文件由 `AtomicTarget` 析构时清掉（不再手写 `.nc-tmp` 名字）。
-    crate::atomic_file::write_atomic(path, &bytes)?;
+    // 原子替换：临时文件与目标同目录，写完 rename 覆盖。`write_all` 后刷盘，
+    // `commit_checked` 在 persist 前再取一次 mtime 与落盘绑定（P1-6）；
+    // 失败时临时文件由 `AtomicTarget` 析构时清掉。
+    crate::atomic_file::write_atomic_checked(path, &bytes, expected_mtime_ms)?;
     mtime_ms(path)
 }
 

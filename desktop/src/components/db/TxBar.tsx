@@ -1,104 +1,106 @@
-import { useEffect, useRef, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Icon } from "../ui/icon";
-import { toast } from "../ui/toast";
 import { friendlyDbError, parseDbError, thousands } from "../../lib/db";
 import { reconnectSession } from "../../lib/dbConfirm";
-import { useAppHidden } from "../../lib/appVisibility";
-import { type TxInfo } from "../../lib/dbApi";
-import { patchTab, txAction, useConnRt, type SqlTab } from "../../lib/dbStore";
+import { dbTaskSpec, dbTxKey } from "../../lib/dbOperations";
+import { getOperations, operationActive, subscribeOperations, trackOperation } from "../../lib/operations";
+import { patchTab, setTx, setTxNotice, sqlTabOf, txAction, useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
+import { dbApi, type TxInfo } from "../../lib/dbApi";
 
-function since(ms: number): string {
-  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  return s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分 ${s % 60} 秒`;
-}
-
-/**
- * 手动提交模式下有未提交的写语句时：黄条显示几条 / 几行 / 多久，点提交或回滚。
- *
- * **槽各自独立事务**（A0）：SQL 标签跑在自己的会话槽里，所以带 `slot` 时看的是
- * `tab.tx`、提交/回滚也发到那条槽上；不带 `slot` 的是 primary（表页 / 元数据那条会话）。
- * 只显示 primary 的事务条会让人以为「没有未提交的改动」，而槽里正压着一条 update。
- */
-export function TxBar({ connId, tabId, slot, tx: override }: {
+type TxTarget = {
   connId: string | null;
-  /** 槽级事务操作完成后要把结果写回标签（只有 SQL 标签有）。 */
   tabId?: string;
   slot?: string | null;
-  /** 槽的事务状态；primary 不传（统一看连接的 `rt.tx`）。 */
   tx?: TxInfo;
-}) {
-  const primaryTx = useConnRt(connId).tx;
-  // 独立槽刚创建时状态尚未知；不能把另一条主会话的未提交写入显示为它的事务。
-  const tx = slot ? override : primaryTx;
-  const [, tick] = useState(0);
-  /** 正在提交 / 回滚哪一边：大事务要好几秒，只把按钮置灰看不出点没点上。 */
-  const [acting, setActing] = useState<null | "commit" | "rollback" | "reconnect">(null);
-  const [lostSession, setLostSession] = useState<string | null>(null);
-  const session = `${connId}:${slot ?? ""}`;
-  const actionLock = useRef(false);
-  const appHidden = useAppHidden();
-  const open = !!tx && !tx.autoCommit && tx.statements > 0;
-  // 持续时间每秒刷新；窗口不可见时不刷（CLAUDE.md 8.1：不可见必须停轮询）
-  useEffect(() => {
-    if (!open || appHidden) return;
-    const t = setInterval(() => tick((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, [open, appHidden]);
-  if (!open || !connId) return null;
+  notice?: SqlTab["txNotice"];
+  blocked?: boolean;
+  readOnly?: boolean | null;
+};
 
-  const act = async (a: "commit" | "rollback" | "reconnect") => {
-    if (actionLock.current) return;
-    actionLock.current = true;
-    setActing(a);
+export function useDbTransaction({ connId, tabId, slot, tx: slotTx, notice: slotNotice, blocked, readOnly }: TxTarget) {
+  const conn = useConnOf(connId);
+  const rt = useConnRt(connId);
+  const tx = slot ? slotTx : rt.tx;
+  const notice = slot ? slotNotice : rt.txNotice;
+  const key = dbTxKey(connId, slot);
+  const active = useSyncExternalStore(subscribeOperations, () =>
+    getOperations().find(op => op.key === 'db.' + key && op.endedAt === undefined));
+  const pending = !!tx && !tx.autoCommit && tx.statements > 0;
+  const lost = notice?.kind === "lost";
+  const modeChanged = !readOnly && !!conn && !!tx && tx.autoCommit !== conn.autoCommit;
+  const connected = rt.status === "connected";
+  const disabled = !connected || !!active || !!blocked || !!readOnly || !pending || lost;
+  const canReconnect = connected && !active && !blocked && (lost || modeChanged && !pending);
+
+  const act = async (action: "commit" | "rollback" | "reconnect") => {
+    if (!connId || operationActive('db.' + key) || (action === "reconnect" ? !canReconnect : disabled)) return;
+    const label = action === "commit" ? "提交" : action === "rollback" ? "回滚" : notice?.verify ? "核对事务" : "重新连接";
+    const applySlotTx = (next: TxInfo) => {
+      const tab = sqlTabOf(tabId);
+      if (slot && tab && tab.connId === connId && tab.slot === slot) patchTab<SqlTab>(tab.id, {tx:next});
+    };
     try {
-      if (a === "reconnect") {
-        if (await reconnectSession(connId, slot ?? null, tabId)) setLostSession(null);
-        return;
-      } else if (slot && tabId) {
-        const tx = await txAction(connId, a, slot);
-        patchTab<SqlTab>(tabId, { tx });
+      if (action === "reconnect" && notice?.verify) {
+        const status = await trackOperation(dbTaskSpec(key,label,connId,slot ? "独立会话" : "主会话",conn?.name,tabId),
+          () => dbApi.tx(connId,"status",slot));
+        if (status.alive === false) throw new Error("session-lost|数据库会话已断开");
+        if (slot) applySlotTx(status.tx);
+        else setTx(connId,status.tx);
+        setTxNotice(connId,slot,tabId,{kind:"success",text:"事务状态已刷新 · 请核对上一次写入结果"});
+      } else if (action === "reconnect") {
+        const ok = await trackOperation(dbTaskSpec(key,"重新连接",connId,slot ? "独立会话" : "主会话",conn?.name,tabId),
+          () => reconnectSession(connId, slot ?? null, tabId, false, !lost),
+          value => ({state:value ? "success" : "cancelled"}));
+        if (ok) setTxNotice(connId, slot, tabId, {kind:"success",text:"已重新连接 · 连接设置已生效"});
       } else {
-        await txAction(connId, a);
+        const next = await txAction(connId, action, slot);
+        applySlotTx(next);
+        setTxNotice(connId, slot, tabId, {kind:"success",text:'已' + label + ' · ' + thousands(tx?.rows ?? 0) + ' 行'});
       }
-      toast(a === "commit" ? "已提交" : "已回滚", "success");
-    } catch (e) {
-      if (parseDbError(e).code === "session-lost") setLostSession(session);
-      const label = a === "commit" ? "提交" : a === "rollback" ? "回滚" : "重连";
-      toast(`${label}失败：${friendlyDbError(e)}`, "error");
-    } finally {
-      actionLock.current = false;
-      setActing(null);
+    } catch (error) {
+      const code = parseDbError(error).code;
+      const unknown = lost || code === "session-lost" || action !== "reconnect" && code === "bridge";
+      setTxNotice(connId, slot, tabId, unknown
+        ? {kind:"lost",verify:code !== "session-lost" && (notice?.verify || action !== "reconnect" && code === "bridge"),
+            text:action === "reconnect" ? label + '失败 · ' + friendlyDbError(error) : label + '结果待核对 · 数据库未返回确认'}
+        : {kind:"error",text:label + '失败 · ' + friendlyDbError(error)});
     }
   };
 
-  if (lostSession === session) return (
-    <div className="dbx-txbar" role="status">
-      <Icon name="alertTriangle" size={14} />
-      <span>数据库会话已断开，事务结果需核对。</span>
-      <span className="dbx-sp" />
-      <button type="button" className="dbx-btn" disabled={acting !== null} onClick={() => void act("reconnect")}>
-        {acting === "reconnect" ? "正在重新连接…" : "重新连接"}
-      </button>
-    </div>
-  );
+  return { tx, slot, pending, notice, lost, active, disabled, canReconnect, modeChanged, connected, act,
+    mode: readOnly ? "只读查询" : tx ? tx.autoCommit ? "自动提交" : "手动提交" : undefined };
+}
 
-  return (
-    <div className="dbx-txbar" role="status">
-      <Icon name="alertTriangle" size={14} />
-      <span>
-        未提交事务：<b>{tx.statements}</b> 条写语句 · 影响 <b>{thousands(tx.rows)}</b> 行
-        {tx.since > 0 && <> · 已持续 {since(tx.since)}</>}
-        {slot && <span className="dbx-tx-session" title={`独立会话 ${slot}，与其它标签各自独立`}> · 独立事务</span>}
-      </span>
-      <span className="dbx-sp" />
-      <button type="button" className="dbx-btn" disabled={acting !== null} onClick={() => void act("rollback")}>
-        <Icon name={acting === "rollback" ? "spinner" : "refresh"} size={12} />
-        {acting === "rollback" ? "回滚中…" : "回滚"}
-      </button>
-      <button type="button" className="dbx-btn ok" disabled={acting !== null} onClick={() => void act("commit")}>
-        <Icon name={acting === "commit" ? "spinner" : "check"} size={12} />
-        {acting === "commit" ? "提交中…" : "提交"}
-      </button>
-    </div>
-  );
+type Transaction = ReturnType<typeof useDbTransaction>;
+
+export function TransactionButtons({ transaction: t }: { transaction: Transaction }) {
+  const title = t.lost ? "当前会话的事务结果待核对" : t.mode === "自动提交" ? "当前会话使用自动提交"
+    : t.pending ? "处理当前会话的事务" : "当前会话没有待提交的写入";
+  return <div className="dbx-tx-actions" role="group" aria-label="当前会话事务">
+    <button type="button" className={t.disabled ? "dbx-btn" : "dbx-btn ok"} title={title}
+      disabled={t.disabled} aria-busy={t.active?.label === "提交事务"} onClick={() => void t.act("commit")}>
+      <Icon name={t.active?.label === "提交事务" ? "clock" : "check"} size={12} />
+      {t.active?.label === "提交事务" ? "提交中…" : "提交"}
+    </button>
+    <button type="button" className="dbx-btn" title={title}
+      disabled={t.disabled} aria-busy={t.active?.label === "回滚事务"} onClick={() => void t.act("rollback")}>
+      <Icon name={t.active?.label === "回滚事务" ? "clock" : "stepOut"} size={12} />
+      {t.active?.label === "回滚事务" ? "回滚中…" : "回滚"}
+    </button>
+  </div>;
+}
+
+export function TxBar({ transaction: t }: { transaction: Transaction }) {
+  const tone = t.active ? "busy" : t.lost || t.notice?.kind === "error" ? "bad"
+    : t.pending || t.modeChanged ? "warn" : "ok";
+  if (!t.active && !t.notice && !t.pending && !t.modeChanged) return null;
+  return <div className="dbx-txbar" data-tone={tone} role="status">
+    <Icon name={tone === "busy" ? "clock" : tone === "ok" ? "check" : "alertTriangle"} size={14} />
+    {t.active ? <span>{t.active.label}中…等待数据库确认</span> : <>
+      {t.notice && <span>{t.notice.text}</span>}
+      {!t.lost && t.pending && <span>未提交事务 · <b>{t.tx?.statements}</b> 条写入 · 影响 <b>{thousands(t.tx?.rows ?? 0)}</b> 行</span>}
+      {!t.lost && t.modeChanged && <span>{t.pending ? "提交方式已更新 · 处理事务后可重连" : "提交方式已更新 · 重连后生效"}</span>}
+    </>}
+    {(t.lost || t.modeChanged) && <button type="button" className="dbx-btn" disabled={!t.canReconnect} onClick={() => void t.act("reconnect")}>{t.notice?.verify ? "核对事务" : "重新连接"}</button>}
+  </div>;
 }

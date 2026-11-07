@@ -34,7 +34,6 @@ export function RowsEntryView({ tab, entry, isLast, tabs }: { tab: SqlTab; entry
       <ResultTable
         key={at}
         tabs={tabs}
-        running={tab.running}
         subbar={subbar}
         settings={<QuerySettings tab={tab} />}
         columns={columns}

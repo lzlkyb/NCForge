@@ -4,6 +4,7 @@ import { EmptyState } from "../ui/EmptyState";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { useWorkbenchDock } from "../workspace/WorkbenchDock";
 import { ConnObjects } from "./ConnObjects";
+import { ConnectionStatus } from "./ConnectionStatus";
 import { FavoriteSection } from "./FavoriteSection";
 import { PasswordResetDialog } from "./PasswordResetDialog";
 import { dbNameOf, ENV_LABEL, type DbConn } from "../../lib/dbApi";
@@ -183,7 +184,7 @@ export function ConnTree() {
                 <Icon name={expanded ? "chevronDown" : "chevronRight"} size={12} />
                 <span className="dbx-conn-label"><b>{c.name}</b><span className="u">{c.user}@{dbNameOf(c.url)}</span></span>
                 <span className="dbx-conn-env" data-prod={c.env === "prod" || undefined}>{ENV_LABEL[c.env]}</span>
-                <ConnStatus status={rt.status} />
+                <ConnectionStatus status={rt.status} />
               </button>
               {expanded && <div id={`dbx-objects-${c.id}`}>
                 {rt.status === "connected" && <ConnObjects connId={c.id} filter={q} />}
@@ -197,12 +198,4 @@ export function ConnTree() {
       {resetConn && <PasswordResetDialog connId={resetConn} onClose={() => setResetConn(null)} />}
     </div>
   );
-}
-
-/** 状态只画一个点，文字进 title：侧栏一行里名称 + 库名已经够挤。 */
-function ConnStatus({ status }: { status: string }) {
-  const tone = status === "connected" ? "ok" : status === "connecting" ? "busy" : status === "error" ? "bad" : undefined;
-  const label =
-    status === "connected" ? "已连接" : status === "connecting" ? "连接中" : status === "error" ? "连接失败" : "未连接";
-  return <span className={`dbx-stdot${tone ? ` ${tone}` : ""}`} role="img" title={label} aria-label={label} />;
 }

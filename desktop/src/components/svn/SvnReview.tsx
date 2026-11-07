@@ -41,8 +41,14 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
   const eligible = items.filter(isSvnCommittable), pickedCount = eligible.filter(it => isSvnPicked(draft.picked,it.path)).length;
   const locked = !!writeBusy || busy !== null, selectionLocked = locked || !!draft.unknown;
   const queue = svnVisibleGroups(view,prefs.filter,prefs.search,prefs.sort,showIgnored,reviewed,draft.picked).filter(g => !prefs.closed.includes(g.module)).flatMap(g => g.items);
-  const openFile = (path: string) => { dock?.showCode(); onOpenFile(path); };
-  const pick = (it: ChangeItem) => { dock?.showDocument(); svnSession.set({selectedPath:it.path,mode:"diff"}); if (window.matchMedia?.("(max-width:650px)").matches) setSideOpen(false); };
+  const openFile = (path: string) => {
+    // 不能只 showCode()：那会把代码面露出来却不变 activeTab，SVN 工具条、
+    // 变更列表侧栏与文件页状态栏混屏，文档标签随 surface hidden 后根本没有
+    // 入口回到 SVN 文档面（P1-19）。与 MetaGenerate 一致，显式导航到文件页。
+    window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "files" }));
+    onOpenFile(path);
+  };
+  const pick = (it: ChangeItem) => { dock?.showDocument(); svnSession.set({selectedPath:it.path,mode:"diff"}); if (window.matchMedia?.("(max-width:640px)").matches) setSideOpen(false); };
   const refreshNow = () => { void refresh().catch(error => toast(friendlySvnError(error),"error")); };
   const showHistory = () => { svnSession.set({mode:"log",selectedPath:null}); dock?.showDocument(); };
   const closeCommit = () => { svnSession.set({commitOpen:false}); document.querySelector<HTMLButtonElement>("[data-commit-trigger]")?.focus(); };

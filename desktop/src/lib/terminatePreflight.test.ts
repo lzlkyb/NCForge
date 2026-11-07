@@ -59,10 +59,12 @@ describe("更新安装前的工作保护", () => {
     expect(await prepareRestart()).toBe(false);
     expect(h.toast).toHaveBeenCalledWith(expect.stringContaining("状态已变化"), "warning");
   });
-  it("严格保存检查加载失败时停止，普通退出沿用既有行为", async () => {
+  it("保存检查加载失败一律中止，不区分是否严格", async () => {
     h.session.tabs = [{ dirty: true }]; h.collect.mockImplementation(() => { throw new Error("save unavailable"); });
     expect(await ensureFilesSaved("安装更新", true)).toBe(false);
-    expect(await ensureFilesSaved("退出")).toBe(true);
+    // 普通退出同样中止：检查不可用不等于「没有未保存文件」。过去这里放行，
+    // 退出守卫随即清掉 tabs，未保存内容静默丢失（P0-2）。
+    expect(await ensureFilesSaved("退出")).toBe(false);
   });
   it("事务探测失败或状态未知均不能安装", async () => {
     h.pendingTx.mockRejectedValueOnce(new Error("timeout"));

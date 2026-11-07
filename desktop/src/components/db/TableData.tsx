@@ -5,12 +5,13 @@ import { ResultTable } from "./ResultTable";
 import { friendlyDbError, parseDbError, sameCell, thousands, type DbError } from "../../lib/db";
 import { dbApi, dbSourceOf, type BoundCell, type Cell, type ColumnInfo, type ColumnMeta } from "../../lib/dbApi";
 import { confirmProdWrite, ask, reconnectSession } from "../../lib/dbConfirm";
-import { claimCursor, connOf, rtOf, setTx, type TableTab } from "../../lib/dbStore";
-import { beginOperation } from "../../lib/operations";
-import { dbTaskSpec } from "../../lib/dbOperations";
+import { claimCursor, connOf, rtOf, setTx, setTxNotice, type TableTab } from "../../lib/dbStore";
+import { beginOperation, operationActive, useOperations } from "../../lib/operations";
+import { dbTaskSpec, dbTxKey } from "../../lib/dbOperations";
 import { PAGE, pageSql, tableQuerySql, stripPage } from "../../lib/tableEdit";
 
 import { TableRelations } from "./TableRelations";
+import { TransactionButtons, TxBar, useDbTransaction } from "./TxBar";
 import { TableFilterBar } from "./TableFilterBar";
 import { ChangeReview } from "./ChangeReview";
 import { compileFilter, loadFilter } from "../../lib/dbConditions";
@@ -38,6 +39,9 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   const setPreview=(preview:boolean)=>setUi(v=>({...v,preview}));
   const setSaving=(saving:boolean)=>setUi(v=>({...v,saving}));
   const readonly = useDbReadOnly(tab.connId);
+  const writing = useOperations().some(op => op.key === "db.table.save:" + tab.id && op.endedAt === undefined);
+  const transaction = useDbTransaction({connId:tab.connId, blocked:saving || loading || writing, readOnly:readonly});
+  const txLocked = !!transaction.active || transaction.lost;
   useEffect(() => {
     if (!cols) return;
     try { setQ({...tab.query ?? compileFilter(loadFilter(tab.connId,tab.table),cols),page:0}); }
@@ -47,7 +51,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   const [connectionError, setConnectionError] = useState<DbError | null>(null);
   const [changed, setChanged] = useState<Map<string, Cell>>(new Map());
 
-  const editable = !isView && pk.length > 0 && readonly === false && !saving && !loading && !connectionError;
+  const editable = !isView && pk.length > 0 && readonly === false && !saving && !loading && !connectionError && !txLocked;
   const order = q?.order || pk.map((p) => p.toLowerCase()).join(", ");
 
   /**
@@ -135,10 +139,11 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   const sqls=changes.map(c=>c.sql);
 
   const save = async () => {
-    if (!page || readonly !== false || sqls.length === 0) return;
+    if (!page || readonly !== false || sqls.length === 0 || operationActive("db." + dbTxKey(tab.connId)) || transaction.lost) return;
     const task=beginOperation(dbTaskSpec(`table.save:${tab.id}`,"写回表数据",tab.connId,tab.table,connOf(tab.connId)?.name,tab.id));
     if(!task) return;
     if (!(await confirmProdWrite(tab.id, tab.connId, sqls.join(";\n")))) {task.finish("cancelled","未确认写回，未执行写入");return;}
+    setTxNotice(tab.connId, null, undefined);
     const auto = rtOf(tab.connId).tx?.autoCommit ?? connOf(tab.connId)?.autoCommit ?? false;
     setSaving(true);
     let done = 0;
@@ -195,7 +200,9 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   return (
     <>
       {ui.relationRow && page && <TableRelations tab={tab} columns={page.columns} row={ui.relationRow} onClose={()=>setUi(v=>({...v,relationRow:null}))} />}
-      {cols && <TableFilterBar connId={tab.connId} table={tab.table} cols={cols} disabled={saving || loading} onApply={apply} />}
+      {cols && <TableFilterBar connId={tab.connId} table={tab.table} cols={cols} disabled={saving || loading || txLocked} busy={loading}
+        transactions={<TransactionButtons transaction={transaction} />} onApply={apply} />}
+      <TxBar transaction={transaction} />
       {loading && data && <div className="dbx-read-status" role="status">正在查询，暂保留上一份结果…</div>}
       {conflict && <div className="dbx-err" role="alert">{conflict} <button type="button" className="dbx-btn" disabled={saving || loading} onClick={() => void (async()=> {if(await confirmDiscard()) {setConflict("");await load();}})()}>重新读取并处理冲突</button></div>}
       {conflict && ui.conflictValues.length>0 && <div className="dbx-change-review"><table><thead><tr><th>字段</th><th>读取时原值</th><th>数据库当前值</th><th>拟写入</th></tr></thead><tbody>{ui.conflictValues.map(c=><tr key={c.name}><td>{c.name}</td><td>{String(c.before ?? "NULL")}</td><td>{String(c.current ?? "NULL")}</td><td>{String(c.after ?? "NULL")}</td></tr>)}</tbody></table></div>}

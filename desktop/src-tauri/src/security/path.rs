@@ -7,12 +7,20 @@ pub fn display_path(p: &Path) -> String {
     s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
 }
 
-/// 把一组 root 字符串 canonicalize 为 PathBuf 集合。
-/// 对每个 root：能解析就用 canonicalize 后的真实路径，失败（根不存在等）则 fallback 原路径。
-pub(crate) fn canonicalize_roots(roots: &[String]) -> Vec<PathBuf> {
+/// 把一组 root 字符串 canonicalize 为 PathBuf 集合，统一施加 `strip_verbatim`
+/// 前缀处理（与 `local_history::stable_key` 同一套）。
+///
+/// canonicalize 失败返回明确错误，不再 fallback 原路径：原串与 `resolved` 的
+/// `\\?\` / `/private/var` 前缀不一致会让 `starts_with` 全部失配，把所有合法路径
+/// 误判成 `Access denied`（审查报告 P1-7，跨平台可用性问题，非逃逸漏洞）。
+pub(crate) fn canonicalize_roots(roots: &[String]) -> Result<Vec<PathBuf>, String> {
     roots
         .iter()
-        .map(|r| std::fs::canonicalize(r).unwrap_or_else(|_| PathBuf::from(r)))
+        .map(|r| {
+            std::fs::canonicalize(r)
+                .map(|p| crate::nc_home::strip_verbatim(&p))
+                .map_err(|e| format!("无法解析白名单根目录 {r}: {e}"))
+        })
         .collect()
 }
 
@@ -31,7 +39,6 @@ pub fn resolve_safe_path(
     // 曾经另有一个 `resolve_safe_path_cached`，声称吃「AppState 预 canonicalize 的
     //  roots 缓存」——那个缓存从未存在，零调用方，注释与代码有两套说法。
     // 已合并回本函数：canonicalize 逻辑唯一来源在 canonicalize_roots。
-    let allowed_roots = canonicalize_roots(allowed_roots);
     let requested_path = PathBuf::from(requested);
 
     // For existing paths, use canonicalize to resolve symlinks
@@ -59,6 +66,10 @@ pub fn resolve_safe_path(
                             requested_path.display()
                         ));
                     }
+                    // 加固（审查报告第 8 节第 1 条）：remainder 中已存在的部分若是
+                    // reparse point（符号链接 / junction），解析层直接拒绝，不必依赖
+                    // 下游 create_dir_all 在链接目标处写失败。
+                    reject_existing_reparse_points(&real_parent, remainder)?;
                     break real_parent.join(remainder);
                 }
                 ancestor = parent.to_path_buf();
@@ -74,9 +85,17 @@ pub fn resolve_safe_path(
     if !enforce_whitelist {
         return Ok(resolved);
     }
+    // 白名单根只在这里才需要：关闭白名单时不该因为某个根临时不可解析而拒绝访问。
+    let allowed_roots = canonicalize_roots(allowed_roots)?;
+    // 比对两侧施加同一套前缀处理（roots 已 strip_verbatim，resolved 由 canonicalize
+    // 得来可能带 `\\?\`），否则同一路径的前缀不一致会让 starts_with 全部失配（P1-7）。
+    // 返回值仍用原始 resolved，不改变调用方拿到的路径形态。
+    let resolved_cmp = crate::nc_home::strip_verbatim(&resolved);
 
     // Check if the resolved path is within any allowed root（roots 已预 canonicalize）
-    let is_allowed = allowed_roots.iter().any(|root| is_within(&resolved, root));
+    let is_allowed = allowed_roots
+        .iter()
+        .any(|root| is_within(&resolved_cmp, root));
 
     if !is_allowed {
         // 报错时附上白名单，远程 Claude Code 一次撞墙即可得知可访问范围，无需盲猜。
@@ -100,8 +119,11 @@ pub fn resolve_safe_path(
     // 排除检查（在「根目录允许」判定通过之后追加）：相对命中的根取相对路径，
     // 任一模式命中即拒绝。空模式零开销直通——绝大多数用户不配置排除。
     if !exclude_patterns.is_empty() {
-        if let Some(root) = allowed_roots.iter().find(|root| is_within(&resolved, root)) {
-            if let Ok(rel) = resolved.strip_prefix(root) {
+        if let Some(root) = allowed_roots
+            .iter()
+            .find(|root| is_within(&resolved_cmp, root))
+        {
+            if let Ok(rel) = resolved_cmp.strip_prefix(root) {
                 if is_excluded(&rel.to_string_lossy(), exclude_patterns) {
                     return Err(format!(
                         "Access denied: {} matches an exclude pattern ({}). Remove the pattern in the app settings to allow access.",
@@ -231,6 +253,33 @@ fn contains_dotdot(p: &Path) -> bool {
             std::path::Component::ParentDir | std::path::Component::CurDir
         )
     })
+}
+
+/// 拒绝 remainder 中已存在的 reparse point（符号链接 / junction）。
+///
+/// remainder 是尚未 canonicalize 的原始尾部：其中若已有目录是链接，把它原样拼到
+/// real_parent 后面会绕开前缀校验。逐段检查，遇到链接即拒绝；遇到第一个不存在的
+/// 组件即可停止（后面的都还不存在，不可能是链接）。这是解析层自身的加固，
+/// 不依赖下游 `create_dir_all` 在链接目标处写失败（审查报告第 8 节第 1 条）。
+fn reject_existing_reparse_points(base: &Path, remainder: &Path) -> Result<(), String> {
+    let mut cur = base.to_path_buf();
+    for comp in remainder.components() {
+        let std::path::Component::Normal(seg) = comp else {
+            continue;
+        };
+        cur.push(seg);
+        match std::fs::symlink_metadata(&cur) {
+            Ok(md) if md.file_type().is_symlink() => {
+                return Err(format!(
+                    "Path traverses a reparse point (symlink/junction): {}",
+                    cur.display()
+                ));
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

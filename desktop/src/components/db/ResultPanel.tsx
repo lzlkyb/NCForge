@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Icon } from "../ui/icon";
+import { SqlExecutionFeedback } from "./SqlExecutionFeedback";
 import { DbErrorBox } from "./DbErrorBox";
 import { PlanView } from "./PlanView";
 import { RowsEntryView } from "./RowsEntryView";
@@ -14,24 +15,19 @@ export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: nu
   const setView = (v: string) => patchTab<SqlTab>(tab.id, { view: v });
   const rt = rtOf(tab.connId);
   const tables = (rt.tables ?? []).map((t) => t.name);
-  // 槽各自独立事务：带槽的标签把事务状态写在标签上，primary 才看连接的 `rt.tx`
-  // （见 `dbStore` 的 txAction / 结果写回）。这里读错对象就会出现「上方黄条说
-  // 未提交 1 条，结果页说自动提交已生效」——同屏两个相反的结论。
-  // 读不到时保持 undefined：宁可说「未知」，也不要替用户断言「已生效」。
-  const autoCommit = (tab.slot ? tab.tx : rt.tx)?.autoCommit ?? rt.info?.autoCommit;
-
   const tabs = <ResultTabs tab={tab} view={view} setView={setView} />;
 
   return (
     <div className="dbx-res" style={{ height }}>
+      <SqlExecutionFeedback executionId={tab.executionId} previousAt={cur?.kind === "rows" ? cur.completedAt ?? 0 : undefined} />
       {view === "plan" && tab.plan ? (
         <>
-          <ViewBar tabs={tabs} running={tab.running} />
+          <ViewBar tabs={tabs} />
           <PlanView plan={tab.plan} connId={tab.connId} />
         </>
       ) : view === "output" || !cur ? (
         <>
-          <ViewBar tabs={tabs} running={tab.running} />
+          <ViewBar tabs={tabs} />
           <OutputView tab={tab} />
         </>
       ) : cur.kind === "rows" ? (
@@ -44,8 +40,8 @@ export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: nu
         />
       ) : (
         <>
-          <ViewBar tabs={tabs} running={tab.running} />
-          <EntryView tab={tab} entry={cur} tables={tables} autoCommit={autoCommit} onLocate={onLocate} />
+          <ViewBar tabs={tabs} />
+          <EntryView tab={tab} entry={cur} tables={tables} autoCommit={cur.autoCommit} onLocate={onLocate} />
         </>
       )}
     </div>
@@ -58,9 +54,9 @@ function ResultTabs({ tab, view, setView }: { tab: SqlTab; view: string; setView
     <div className="dbx-rtabs" role="tablist">
       {tab.results.map((r) => (
         <button key={r.id} type="button" role="tab" className="dbx-rtab" data-on={view === r.id || undefined} title={r.sql} onClick={() => setView(r.id)}>
-          {r.kind === "error" ? <Icon name="alert" size={12} /> : <Icon name={r.kind === "rows" ? "database" : "check"} size={12} />}
+          <Icon name={r.cancelled ? "stop" : r.kind === "error" ? "alert" : r.kind === "rows" ? "database" : "check"} size={12} />
           {tab.results.length > 1 ? `${r.index}·` : "结果"}
-          <span className={r.kind === "error" ? "bad" : undefined}>{summaryOf(r)}</span>
+          <span className={r.kind === "error" && !r.cancelled ? "bad" : undefined}>{summaryOf(r)}</span>
         </button>
       ))}
       {tab.plan && (
@@ -79,23 +75,19 @@ function ResultTabs({ tab, view, setView }: { tab: SqlTab; view: string; setView
 }
 
 /** 非表格视图（计划 / 输出 / 错误 / 更新）的结果条：只有标签与执行中状态。 */
-function ViewBar({ tabs, running }: { tabs: ReactNode; running: boolean }) {
+function ViewBar({ tabs }: { tabs: ReactNode }) {
   return (
     <div className="dbx-rbar">
       {tabs}
       <span className="dbx-sp" />
-      {running && (
-        <span className="dbx-busy">
-          <Icon name="spinner" size={12} />
-          执行中…
-        </span>
-      )}
     </div>
   );
 }
 
 function EntryView({ tab, entry, tables, autoCommit, onLocate }: { tab: SqlTab; entry: ResultEntry; tables: string[]; autoCommit?: boolean; onLocate?:(line:number)=>void }) {
-  if (entry.kind === "error") return <div style={{ overflow: "auto" }}><DbErrorBox error={entry.error ?? ""} errorCode={entry.errorCode} sql={entry.sql} knownTables={tables} connId={tab.connId} tabId={tab.id} slot={tab.slot} onLocate={()=>onLocate?.(entry.startLine ?? 1)} index={tab.results.length > 1 ? entry.index : undefined} /></div>;
+  // 取消执行也要把错误码、相似表建议和「重新连接」入口留在页面上；
+  // 只在摘要上标注「已停止」，不能整个吞掉 DbErrorBox（P1-3）。
+  if (entry.kind === "error") return <div style={{ overflow: "auto" }}><DbErrorBox error={entry.error ?? ""} errorCode={entry.errorCode} sql={entry.sql} knownTables={tables} connId={tab.connId} tabId={tab.id} slot={tab.slot} cancelled={entry.cancelled} onLocate={()=>onLocate?.(entry.startLine ?? 1)} index={tab.results.length > 1 ? entry.index : undefined} /></div>;
   if (entry.kind === "update")
     return (
       <div className="dbx-update">
@@ -103,10 +95,10 @@ function EntryView({ tab, entry, tables, autoCommit, onLocate }: { tab: SqlTab; 
         <span className="dbx-muted">
           {entry.ms} ms ·{" "}
           {autoCommit === undefined
-            ? "提交状态未知：看上方有没有未提交事务黄条"
+            ? "提交状态待核对"
             : autoCommit
-              ? "自动提交模式，已生效"
-              : "手动提交模式：上方黄条里提交或回滚"}
+              ? "已自动提交"
+              : "执行时为手动提交 · 当前状态以连接详情与提交/回滚按钮为准"}
         </span>
         <StatsLine stats={entry.stats} />
       </div>

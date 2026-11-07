@@ -18,14 +18,14 @@ export function GenWriteDialogs({ plan, statuses, review, result, resultOpen, ro
   onCloseReview, onConfirm, onCloseResult, onOpen, onReveal }: Props) {
   const counts = generationCounts(plan, statuses, review?.selected ?? [], review?.overrides ?? []);
   return <>
-    <Modal open={!!review} onClose={() => { if (!applying) onCloseReview(); }} closeOnOverlay={!applying} ariaLabel="确认写入生成产物" className="gen-modal modal-surface">
+    <Modal keepMountedWhenInactive open={!!review} onClose={() => { if (!applying) onCloseReview(); }} closeOnOverlay={!applying} ariaLabel="确认写入生成产物" className="gen-modal modal-surface">
       <header className="gen-modal-head"><h3>确认写入生成产物</h3><Button size="sm" variant="ghost" disabled={applying} onClick={onCloseReview} aria-label="关闭写入确认"><Icon name="close" size={16} /></Button></header>
       <p className="gen-modal-path">{review?.snapshot.root}</p><p>已选 {counts.selected} 个 · 新建 {counts.create} · 更新 {counts.update} · 保留 {counts.keep} · 已一致 {counts.same}</p>
       <div className="gen-review-list">{plan?.artifacts.filter((a) => review?.selected.includes(a.id)).map((a) => <div key={a.id}><span>{a.pathHint}</span><small className={review?.overrides.includes(a.id) ? "gen-warning" : ""}>{review?.overrides.includes(a.id) ? "覆盖并备份" : GENERATION_STATUSES[statuses[a.id]?.status ?? ""] ?? "待检查"}</small></div>)}</div>
       <p className="gen-note">写入前再次核对源、配置与目标版本。已有文件更新前保留备份。</p>
       <footer className="gen-modal-actions"><Button size="sm" variant="outline" disabled={applying} onClick={onCloseReview}>返回检查</Button><Button size="sm" disabled={applying} onClick={onConfirm}>{applying ? "写入中…" : "确认写入"}</Button></footer>
     </Modal>
-    <Modal open={!!result && resultOpen} onClose={onCloseResult} ariaLabel="生成写入结果" className="gen-modal modal-surface">
+    <Modal keepMountedWhenInactive open={!!result && resultOpen} onClose={onCloseResult} ariaLabel="生成写入结果" className="gen-modal modal-surface">
       <header className="gen-modal-head"><h3>生成写入结果</h3><Button size="sm" variant="ghost" onClick={onCloseResult} aria-label="关闭写入结果"><Icon name="close" size={16} /></Button></header>
       <p>已写入 <strong>{result?.written ?? 0}</strong> · 跳过 {result?.skipped ?? 0} · 失败 {result?.failed ?? 0}</p>
       <div className="gen-review-list">{result?.items.map((item) => <div className={`gen-result-row is-${item.status}`} key={item.relPath}><span><strong>{WRITE_LABELS[item.status]}</strong> {item.relPath}<small>{item.detail}</small></span>

@@ -59,6 +59,45 @@ pub async fn search_workspace(
     .map_err(|e| format!("后台任务失败: {e}"))?
 }
 
+/// 流式搜索：每扫到一批就推一次事件，边扫边出结果。
+///
+/// 快速面板的 `#内容` 用它：以前是「点完等到扫完才一次性返回」，newar 上要 1~3 秒，
+/// 面板上只有一行「查询中…」。现在第一批命中几十毫秒就到，用户能看到列表在长。
+///
+/// `stream` 是调用方生成的标识：前端拿它把事件分给对应的那次查询（连续敲键会有
+/// 多个搜索在飞，旧的被 `source` 取消）。最终结果仍由命令返回值给出，事件只是预览。
+#[tauri::command]
+pub async fn search_workspace_stream(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    options: SearchOptions,
+    source: Option<String>,
+    stream: String,
+) -> Result<SearchOutcome, String> {
+    use tauri::Emitter;
+    let request = gate().register(source.as_deref());
+    let root = state
+        .config
+        .read()
+        .await
+        .workspace_root
+        .clone()
+        .ok_or_else(|| "尚未选择工作区目录".to_string())?;
+    let root = PathBuf::from(root);
+    tauri::async_runtime::spawn_blocking(move || {
+        request.run(|cancel| {
+            search::search_stream(&root, &options, search::TIME_BUDGET_MS, cancel, &|batch| {
+                let _ = app.emit(
+                    "search:batch",
+                    serde_json::json!({ "stream": stream, "hits": batch }),
+                );
+            })
+        })
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
 /// 在工作区内替换全部命中。范围与 `search_workspace` 完全一致（同一套候选收集）。
 ///
 /// 为什么不让前端逐个文件改：编码与换行必须按原文件还原（NC 工程 GBK/UTF-8 混放、
@@ -101,12 +140,22 @@ pub async fn search_list_files(state: tauri::State<'_, Arc<AppState>>) -> Result
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
     let root = PathBuf::from(root);
+    let cache_dir = state.config_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let (files, truncated) = search::list_files(&root);
+        // 带缓存：面板打开时立即出结果，全树扫描只在缓存全空或后台校准时发生
+        let (files, truncated) = search::list_files_cached(&root, &cache_dir);
         FileList { files, truncated }
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))
+}
+
+/// 丢掉文件清单缓存（文件树里新建 / 改名 / 删除后调用）。
+///
+/// 只清进程内那份：磁盘缓存会由下一次取清单的后台校准覆盖，不值得在这里同步写盘。
+#[tauri::command]
+pub fn search_invalidate_files() {
+    search::invalidate_list_cache();
 }
 
 /// 一个工程的搜索结果。`path` 仍是相对该工程根的路径，打开时要配上 `root`。

@@ -3,7 +3,7 @@ import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { Modal } from "../ui/Modal";
 import type { HotwebsInfo } from "../../lib/server";
-import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 
 /** 两份名单是否同集合（顺序、重复都不算差异）。 */
 function sameSet(a: string[], b: string[]): boolean {
@@ -91,7 +91,7 @@ export function HotwebsField({
       setOpen(false);
     } catch (e) {
       // 不吞错：后端会说清哪个目录不存在、或者为什么空名单不行
-      toast(failureText("保存 Web 应用", e), "error");
+      errorToast("保存 Web 应用", e);
     } finally {
       savingRef.current = false;
       setSaving(false);

@@ -15,8 +15,8 @@ import {
   type TableInfo,
   type TxInfo,
 } from "./dbApi";
-import { beginOperation, trackOperation } from "./operations";
-import { dbCancelled, dbTaskSpec } from "./dbOperations";
+import { beginOperation, operationActive, trackOperation } from "./operations";
+import { dbCancelled, dbTaskSpec, dbTxKey } from "./dbOperations";
 import { addHistory } from "./dbHistory";
 import type { MdDictOut, PickRow, ScopeKind } from "./mdDict";
 
@@ -33,6 +33,7 @@ export interface ConnRuntime {
   info?: ConnectInfo;
   error?: string;
   tx?: TxInfo;
+  txNotice?: TxNotice;
   tables?: TableInfo[];
   tablesLoading?: boolean;
   /** 表 / 视图清单读到的时刻。只记成功那次：失败后还标「刚刚」等于骗人。 */
@@ -58,6 +59,8 @@ export interface ConnRuntime {
   caps?: EngineCaps;
 }
 
+export type TxNotice = { kind: "success" | "error" | "lost"; text: string; verify?: boolean };
+
 export interface ResultEntry {
   completedAt?:number;
   startLine?:number;
@@ -72,6 +75,7 @@ export interface ResultEntry {
   /** 多个结果集（`dbms_sql.return_result`）。>1 时结果区给一排小标签。 */
   sets?: ResultSet[];
   updateCount: number;
+  autoCommit?: boolean;
   ms: number;
   /** 实际执行开销；`null` / 缺省 = 这个账号读不到 `v$mystat`（界面不显示统计行）。 */
   stats?: ExecStats | null;
@@ -102,6 +106,7 @@ export interface SqlTab {
   output: OutputLine[];
   plan: { sql: string; rows: PlanRow[]; error?: string } | null;
   running: boolean;
+  executionId?: number;
   /**
    * 这个标签的独立会话槽（A0）。`null` = 还走 primary（还没执行过，或申请失败）。
    *
@@ -111,6 +116,7 @@ export interface SqlTab {
   slot?: string | null;
   /** 这个标签所在会话的事务状态。primary 标签不用它（统一看连接的 `rt.tx`）。 */
   tx?: TxInfo;
+  txNotice?: TxNotice;
 }
 
 export type TableSub = "data" | "struct" | "idx" | "ddl" | "source";
@@ -388,7 +394,7 @@ export async function connect(id: string, password?: string, remember?: boolean)
   setRt(id, { status: "connecting", error: undefined });
   try {
     const info = await trackOperation(dbTaskSpec(`connect:${id}`,"连接数据库",id,"连接",connOf(id)?.name),()=>dbApi.connect(id, password, remember));
-    setRt(id, { status: "connected", info, tx: { autoCommit: info.autoCommit, statements: 0, rows: 0, since: 0 } });
+    setRt(id, { status: "connected", info, txNotice: undefined, tx: { autoCommit: info.autoCommit, statements: 0, rows: 0, since: 0 } });
     // 能力位问一次就够（连接期间不会变）；失败不影响已连上的状态，只是按钮按保守处理
     void dbApi.caps(id).then((caps) => setRt(id, { caps })).catch(() => undefined);
     void loadMeta(id);
@@ -403,7 +409,14 @@ export async function connect(id: string, password?: string, remember?: boolean)
 
 export async function disconnect(id: string): Promise<void> {
   await trackOperation(dbTaskSpec(`disconnect:${id}`,"断开数据库",id,"全部会话",connOf(id)?.name),()=>dbApi.disconnect(id));
-  setRt(id, { status: "idle", info: undefined, tx: undefined, error: undefined });
+  setRt(id, { status: "idle", info: undefined, tx: undefined, txNotice: undefined, error: undefined });
+  // 连接已失效：清掉这条连接上所有标签的执行反馈与旧结果，避免「执行已停止」一直挂着。
+  const tabs = state.tabs.map((t) =>
+    t.kind === "sql" && t.connId === id
+      ? { ...t, executionId: undefined, results: [], plan: null, view: null }
+      : t,
+  );
+  set({ tabs });
 }
 
 /** 连上之后拉表清单、NC 中文名、本地表结构缓存（补全用）。任一失败不影响其它。 */
@@ -473,6 +486,15 @@ export function setTx(id: string, tx: TxInfo) {
   setRt(id, { tx });
 }
 
+export function setTxNotice(connId: string, slot: string | null | undefined, tabId: string | undefined, notice?: TxNotice) {
+  if (!slot) {
+    setRt(connId, { txNotice: notice });
+    return;
+  }
+  const tab = sqlTabOf(tabId);
+  if (tab && tab.connId === connId && tab.slot === slot) patchTab<SqlTab>(tab.id, { txNotice: notice });
+}
+
 /**
  * 切换/提交/回滚事务。`slot` 为空 = primary；带槽时只动那条会话。
  *
@@ -485,8 +507,9 @@ export async function txAction(
   action: "commit" | "rollback" | "autocommit-on" | "autocommit-off",
   slot?: string | null,
 ): Promise<TxInfo> {
+  if (operationActive("db." + dbTxKey(id, slot))) throw new Error("当前会话有事务操作正在进行");
   const label={commit:"提交事务",rollback:"回滚事务","autocommit-on":"开启自动提交","autocommit-off":"关闭自动提交"}[action];
-  const r = await trackOperation(dbTaskSpec(`tx:${id}:${slot || "primary"}`,label,id,slot ? `独立会话 ${slot}` : "主会话",connOf(id)?.name,slot ? state.tabs.find(t=>t.kind==="sql" && t.connId===id && t.slot===slot)?.id : undefined),()=>dbApi.tx(id, action, slot));
+  const r = await trackOperation(dbTaskSpec(dbTxKey(id, slot),label,id,slot ? `独立会话 ${slot}` : "主会话",connOf(id)?.name,slot ? state.tabs.find(t=>t.kind==="sql" && t.connId===id && t.slot===slot)?.id : undefined),()=>dbApi.tx(id, action, slot));
   if (!slot) setTx(id, r.tx);
   return r.tx;
 }
@@ -598,6 +621,7 @@ export function appendOutput(tabId: string, lines: OutputLine[]) {
 }
 
 export function summaryOf(r: ResultEntry): string {
+  if (r.cancelled) return "已停止";
   if (r.kind === "error") return /ORA-\d{5}/.exec(r.error ?? "")?.[0] ?? "失败";
   if (r.kind === "rows") {
     // 多结果集时报个数（行数按第一个算会让用户以为其它结果集也是这么点）
@@ -669,8 +693,13 @@ export async function releaseSlot(connId: string | null, slot: string | null | u
  * 报「会话已回收」——而用户明明刚连上。
  */
 export function clearSlots(connId: string): void {
+  // 结果一并清掉是有意的：断开 / 删除连接后，槽与游标在后端已经收掉，
+  // 留着旧结果会让「加载更多」「转移到表」打到不存在的会话上（报 ORA-01000 那一类），
+  // 而把它们标成「已完整」又是对导出数据的谎报。宁可让用户重跑一次。
   const tabs = state.tabs.map((t) =>
-    t.kind === "sql" && t.connId === connId ? { ...t, slot: null, tx: undefined } : t,
+    t.kind === "sql" && t.connId === connId
+      ? { ...t, slot: null, tx: undefined, txNotice: undefined, executionId: undefined, results: [], plan: null, view: null }
+      : t,
   );
   for (const k of [...cursorOwner.keys()]) if (k.startsWith(`${connId}#`)) cursorOwner.delete(k);
   set({ tabs });
@@ -706,7 +735,7 @@ export async function execOne(tabId: string, sql: string, index: number): Promis
     else setTx(connId, r.tx);
     entry = r.kind === "rows"
       ? { ...base, completedAt:Date.now(), kind: "rows", columns: r.columns, rows: r.rows, hasMore: r.hasMore, ms: r.ms, sets: r.sets, stats: r.stats }
-      : { ...base, kind: "update", updateCount: r.updateCount, ms: r.ms, stats: r.stats };
+      : { ...base, kind: "update", updateCount: r.updateCount, autoCommit: r.fallback ? undefined : r.tx.autoCommit, ms: r.ms, stats: r.stats };
     if (r.output.length) appendOutput(tabId, r.output.map((text) => ({ at: Date.now(), text, tone: "dbms" as const })));
     // P0 能力路由：这条语句其实是在 JVM 桥的临时会话上跑的。必须说出来——
     // 那条会话不在下面的事务条管辖范围里，用户若以为「回滚能撤掉它」会出事。

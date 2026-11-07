@@ -19,7 +19,7 @@
 .dw-preview-error { color:hsl(var(--destructive-ink)); overflow-wrap:anywhere; }
 .dw-problems-shell { display:flex; flex:1; min-height:0; flex-direction:column; overflow:hidden; }
 .dw-problems-shell > .wb-panel-body { flex:1; min-height:0; }
-.dw-debug-dock { width:280px; flex:0 0 280px; min-height:0; overflow:hidden; border-left:1px solid hsl(var(--border)); background:hsl(var(--card)); }
+.dw-debug-dock { width:clamp(180px,30vw,280px); flex:0 0 clamp(180px,30vw,280px); min-height:0; overflow:hidden; border-left:1px solid hsl(var(--border)); background:hsl(var(--card)); }
 .dw-debug-dock[hidden] { display:none; }
 .dw-debug-dock header { display:flex; align-items:center; justify-content:space-between; gap:6px; padding:8px 10px; min-height:36px; border-bottom:1px solid hsl(var(--border)); font-size:12px; }
 .dw-debug-dock-body { height:calc(100% - 36px); min-height:0; overflow:auto; }

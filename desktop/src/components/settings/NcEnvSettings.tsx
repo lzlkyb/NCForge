@@ -7,6 +7,7 @@ import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { SettingsRow } from "../ui/SettingsRow";
 import { SettingsGroup } from "./SettingsGroup";
 import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 import { pickFolder, pickFolderError } from "../../lib/folderPicker";
 import {
   ncHomeCandidates,
@@ -79,7 +80,7 @@ export function NcEnvSettings() {
       void qc.invalidateQueries({ queryKey: ["server-status"] });
       void qc.invalidateQueries({ queryKey: ["patch-defaults"] });
     } catch (e) {
-      toast(failureText("保存 NC 安装目录", e), "error");
+      errorToast("保存 NC 安装目录", e);
     } finally {
       setSaving(false);
     }
@@ -101,7 +102,7 @@ export function NcEnvSettings() {
       setCands(list);
       if (list.length === 0) toast("没扫到 NC 安装目录：换「浏览」手动指定", "info");
     } catch (e) {
-      toast(failureText("扫描候选目录", e), "error");
+      errorToast("扫描候选目录", e);
     } finally {
       setScanning(false);
     }
@@ -171,7 +172,7 @@ export function NcEnvSettings() {
             probe.isLoading
               ? "正在识别…"
               : probe.error
-                ? String(probe.error)
+                ? failureText("探测 NC 环境", probe.error)
                 : probeSummary
           }
           last

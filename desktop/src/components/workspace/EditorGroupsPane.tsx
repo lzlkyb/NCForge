@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { getSession, setSession, useWorkspaceSelector, type TabMeta } from "../../lib/workspaceSession";
 import { activeOfGroup, emptyEditorGroups, moveGroupFile, removeGroupView, type EditorGroupId } from "../../lib/editorGroups";
 import { setCursor } from "../../lib/cursorStore";
@@ -10,9 +10,11 @@ import { EmptyEditor } from "./EmptyEditor";
 import type { useFileSession } from "../../hooks/useFileSession";
 import "../../editor-groups.css";
 
-export function EditorGroupsPane({ root, tabs, session, reveal }: {
+export function EditorGroupsPane({ root, tabs, session, reveal, tools }: {
   root: string; tabs: TabMeta[]; session: ReturnType<typeof useFileSession>;
   reveal: { line: number; column?: number; nonce: number; path?: string; group?: EditorGroupId } | null;
+  /** 并入左组文件标签条的执行/分组工具（分屏时右组不放，避免出现两套）。 */
+  tools?: ReactNode;
 }) {
   const groups = useWorkspaceSelector(s => s.editorGroups) ?? emptyEditorGroups();
   const host = useRef<HTMLDivElement>(null), cleanup = useRef<(() => void) | null>(null);
@@ -45,6 +47,7 @@ export function EditorGroupsPane({ root, tabs, session, reveal }: {
       const focused = groups.focused === group;
       return <div key={group} className="wb-editor-group-slot" data-group={group} data-focused={focused || undefined} hidden={split && compact && !focused} style={{ flexBasis: !split || compact ? '100%' : `${(index ? 1 - groups.ratio : groups.ratio) * 100}%` }}>
         <TabStrip root={root} tabs={groupTabs} activePath={activePath} splitPath={groups.rightActive} groupId={group} compactTools
+          tools={group === "left" ? tools : undefined}
           compiling={false} canCompile={false} onCompile={() => {}} onSelect={path => { focus(group); session.selectTab(path); }}
           onClose={path => closeView(group, path)} onCloseMany={want => {
             focus(group); let kept = 0;

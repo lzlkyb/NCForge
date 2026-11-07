@@ -153,7 +153,41 @@ struct Recovery {
     last_success: Option<Instant>,
     auto_commit: bool,
     session_used: bool,
+    may_have_transaction: bool,
     lost: bool,
+}
+
+/// 一条命令**执行成功后**更新「可能有未提交事务」标志。
+///
+/// 只在 `call_guarded` 的成功路径调用：执行失败的 DML 走 `map_err` 提前返回，
+/// 不该把会话锁成「有未提交事务」（否则改连接设置后的重新连接会被永久误拒，P1-1）。
+/// 判定前把 SQL 归一（去字面量/注释 + 小写化），手写大写 `COMMIT;` 也能清掉标志。
+fn settle_transaction_flag(
+    state: &mut Recovery,
+    cmd: &str,
+    sql: &str,
+    stateful_execution: bool,
+    readonly: bool,
+) {
+    // PL/SQL and SELECT FOR UPDATE can open transactions outside the DML counter.
+    if stateful_execution && !state.auto_commit && !readonly {
+        state.may_have_transaction = true;
+    }
+    if matches!(cmd, "commit" | "rollback")
+        || state.auto_commit
+        || stateful_execution
+            && matches!(
+                strip_literals(sql)
+                    .trim()
+                    .trim_end_matches(';')
+                    .trim_end()
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "commit" | "rollback"
+            )
+    {
+        state.may_have_transaction = false;
+    }
 }
 
 pub(crate) fn connection_lost(message: &str) -> bool {
@@ -300,9 +334,27 @@ impl EngineHandle {
                 return Err(BridgeError::new("readonly", "只读查询模式不允许此操作"));
             }
         }
-        if cmd == "reconnect" {
-            if !state.lost {
+        if matches!(cmd, "reconnect" | "reconnectConfigured") {
+            if !state.lost && cmd == "reconnect" {
                 return Err(BridgeError::new("sql", "该会话未确认断开"));
+            }
+            if !state.lost {
+                // Check under the session lock so a write cannot slip in before reconnect.
+                if state.may_have_transaction {
+                    return Err(BridgeError::new(
+                        "sql",
+                        "请先提交或回滚当前会话（可执行 COMMIT 或 ROLLBACK），再重新连接",
+                    ));
+                }
+                let status = self
+                    .raw_call("ping", &[], PROBE_TIMEOUT)
+                    .map_err(|e| Self::record_loss(&mut state, e, false))?;
+                if status.pointer("/tx/statements").and_then(Value::as_u64) != Some(0) {
+                    return Err(BridgeError::new(
+                        "sql",
+                        "请先提交或回滚当前会话的事务，再重新连接",
+                    ));
+                }
             }
             self.reopen(&mut state, timeout, reconnect)?;
             if readonly {
@@ -390,9 +442,9 @@ impl EngineHandle {
                 "ORA-01013：执行已取消，SQL 尚未发送",
             ));
         }
-        if cmd == "setSchema"
-            || (execution && !stateless_query(args.first().copied().unwrap_or("")))
-        {
+        let sql = args.first().copied().unwrap_or("");
+        let stateful_execution = execution && !stateless_query(sql);
+        if cmd == "setSchema" || stateful_execution {
             state.session_used = true;
         }
         let result = match &self.inner {
@@ -417,6 +469,9 @@ impl EngineHandle {
         } else if cmd == "autocommit" {
             state.auto_commit = args.first() == Some(&"true");
         }
+        // 只在执行成功之后更新事务标志：失败的 DML 走上面的 `?` 提前返回，
+        // 不该把会话锁成「有未提交事务」（否则重新连接会被永久误拒，P1-1）。
+        settle_transaction_flag(&mut state, cmd, sql, stateful_execution, readonly);
         if readonly && connecting {
             self.raw_call("readOnly", &["true"], timeout)?;
         }
@@ -442,9 +497,12 @@ impl EngineHandle {
             ));
         };
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        self.raw_call(cmd, &args, timeout)?;
+        let result = self.raw_call(cmd, &args, timeout)?;
         *state = Recovery {
-            auto_commit: state.auto_commit,
+            auto_commit: result
+                .get("autoCommit")
+                .and_then(Value::as_bool)
+                .unwrap_or(state.auto_commit),
             last_success: Some(Instant::now()),
             ..Recovery::default()
         };
@@ -740,6 +798,72 @@ fn word_boundary(s: &str, at: usize, len: usize) -> bool {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn configured_reconnect_refuses_potentially_untracked_transaction() {
+        let engine = EngineHandle::rust();
+        engine.recovery.lock().unwrap().may_have_transaction = true;
+        let error = engine
+            .call_guarded("reconnectConfigured", &[], PROBE_TIMEOUT, |_| {
+                panic!("不能替换可能有未提交写入的会话")
+            })
+            .unwrap_err();
+        assert_eq!(error.code, "sql");
+        assert!(error.message.contains("请先提交或回滚"));
+    }
+
+    // ── P1-1：手写大写 COMMIT / 执行失败的 DML 不该把会话锁成「有未提交事务」 ──
+
+    #[test]
+    fn uppercase_commit_clears_pending_transaction_flag() {
+        for sql in ["COMMIT", "RoLlBaCk"] {
+            let mut st = Recovery {
+                may_have_transaction: true,
+                ..Recovery::default()
+            };
+            settle_transaction_flag(&mut st, "exec", sql, true, false);
+            assert!(!st.may_have_transaction, "大写 {sql:?} 应清掉标志");
+        }
+    }
+
+    #[test]
+    fn commit_with_trailing_semicolons_clears_flag() {
+        for sql in ["commit;", "COMMIT;;;", "COMMIT ;"] {
+            let mut st = Recovery {
+                may_have_transaction: true,
+                ..Recovery::default()
+            };
+            settle_transaction_flag(&mut st, "exec", sql, true, false);
+            assert!(!st.may_have_transaction, "带分号的 {sql:?} 应清掉标志");
+        }
+    }
+
+    #[test]
+    fn commit_with_comments_clears_flag() {
+        for sql in ["-- 说明\nCOMMIT;", "/* c */ ROLLBACK;", "COMMIT; -- 说明"] {
+            let mut st = Recovery {
+                may_have_transaction: true,
+                ..Recovery::default()
+            };
+            settle_transaction_flag(&mut st, "exec", sql, true, false);
+            assert!(!st.may_have_transaction, "带注释的 {sql:?} 应清掉标志");
+        }
+    }
+
+    #[test]
+    fn failed_dml_does_not_set_transaction_flag() {
+        let engine = EngineHandle::rust();
+        // 空引擎执行必然失败；关键是失败路径不能把标志置起来
+        let err = engine
+            .call_guarded("exec", &["UPDATE t SET x = 1"], PROBE_TIMEOUT, |_| {
+                panic!("失败的 DML 不该触发重连")
+            })
+            .unwrap_err();
+        assert!(
+            !engine.recovery.lock().unwrap().may_have_transaction,
+            "执行失败的 DML 不该把会话锁成有未提交事务：{err}"
+        );
+    }
 
     #[test]
     fn expired_session_is_checked_before_sql_and_only_safe_sessions_can_reopen() {

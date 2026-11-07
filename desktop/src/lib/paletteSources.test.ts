@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const lang = vi.hoisted(() => ({ ready: false, state: "stopped", request: vi.fn(), symbols: vi.fn() }));
-const files = vi.hoisted(() => ({ list: [] as string[] }));
-const search = vi.hoisted(() => ({ run: vi.fn() }));
-const types = vi.hoisted(() => ({ search: vi.fn() }));
+const files = vi.hoisted(() => ({ list: [] as string[], peek: false }));
+const search = vi.hoisted(() => ({ run: vi.fn(), batches: [] as { path: string; line: number; text: string; ranges: { start: number; end: number }[] }[][] }));
+const types = vi.hoisted(() => ({ search: vi.fn(), symbols: vi.fn() }));
 
 // lang / symbols 会间接拉起 Monaco，这里只验证「每种模式怎么选数据源」
 vi.mock("./lang", () => ({
@@ -15,6 +15,7 @@ vi.mock("./lang", () => ({
 vi.mock("./symbols", async (orig) => ({ ...(await orig<typeof import("./symbols")>()), fetchSymbols: lang.symbols }));
 vi.mock("./typeSearch", () => ({
   searchTypes: types.search,
+  searchSymbols: types.symbols,
   jarTypeUri: (h: { jar: string; name: string }) => {
     const name = h.jar.split(/[\\/]/).pop() ?? h.jar;
     return `jdt://contents/${encodeURIComponent(name)}/${h.name.replace(/\./g, "/")}.class?=ncforge-decompile`;
@@ -22,10 +23,21 @@ vi.mock("./typeSearch", () => ({
 }));
 vi.mock("./fileIndex", async () => {
   const { toEntry } = await vi.importActual<typeof import("./fileIndex")>("./fileIndex");
-  return { getFileIndex: async (root: string) => files.list.map((f) => toEntry(root, f)) };
+  return {
+    getFileIndex: async (root: string) => files.list.map((f) => toEntry(root, f)),
+    // 同名清单的「同步看一眼」：测试里按需给出，默认没有
+    peekFileIndex: (root: string) => (files.peek ? files.list.map((f) => toEntry(root, f)) : null),
+  };
 });
 vi.mock("./recentFiles", () => ({ getRecent: () => ["C:\\w\\gl\\B.java"] }));
-vi.mock("./search", () => ({ searchWorkspace: search.run }));
+vi.mock("./search", () => ({
+  searchWorkspace: search.run,
+  // 流式：先把预设的批次喂给 onBatch，再返回同一次「完整结果」
+  searchWorkspaceStream: (opts: unknown, onBatch: (hits: unknown[]) => void, source: unknown) => {
+    for (const batch of search.batches) onBatch(batch);
+    return search.run(opts, false, source);
+  },
+}));
 
 import { registerCommands } from "./commandRegistry";
 import { buildItems, type PaletteCtx } from "./paletteSources";
@@ -38,13 +50,17 @@ beforeEach(() => {
   lang.state = "stopped";
   lang.request.mockReset();
   types.search.mockReset();
+  types.symbols.mockReset();
   // 默认没有后端（单测环境没有 Tauri）：各用例若要验证本地索引再覆盖
   types.search.mockRejectedValue(new Error("没有后端"));
+  types.symbols.mockRejectedValue(new Error("没有后端"));
+  search.batches = [];
   lang.symbols.mockReset();
   search.run.mockReset();
   run.file.mockReset();
   run.jdt.mockReset();
   files.list = ["gl/A.java", "gl/B.java", "gl/VoucherBO.java", "gl/voucher.xml"];
+  files.peek = false;
 });
 
 describe("文件模式", () => {
@@ -240,6 +256,25 @@ describe("工作区符号模式（方法 / 字段级）", () => {
     expect(run.file).toHaveBeenCalledWith("C:\\w\\gl\\A.java", 5, 9);
   });
 
+  it("本地索引有命中就直接给结果，不惊动语言服务", async () => {
+    lang.ready = true;
+    types.symbols.mockResolvedValue({
+      items: [{ name: "saveBo", container: "BillVO", kind: 6, file: "C:\\w\\gl\\BillVO.java", module: "gl", line: 12, column: 18 }],
+      total: 4321,
+      elapsedMs: 3,
+    });
+    const r = await buildItems("sym", "saveBo", ctx());
+    expect(lang.request).not.toHaveBeenCalled();
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0].title).toBe("saveBo");
+    expect(r.items[0].kind).toBe("M");
+    expect(r.items[0].detail).toBe("BillVO · gl");
+    expect(r.note).toContain("3ms");
+    expect(r.note).toContain("4321");
+    r.items[0].run();
+    expect(run.file).toHaveBeenCalledWith("C:\\w\\gl\\BillVO.java", 12, 18);
+  });
+
   it("jar 里的符号标记为依赖并走 jdt 打开", async () => {
     lang.ready = true;
     lang.request.mockResolvedValue([sym("getStatus", 6, "BillVO", "jdt://contents/x.jar/BillVO/getStatus.class")]);
@@ -290,7 +325,7 @@ describe("转到任意位置：内容与行号", () => {
     });
     const r = await buildItems("file", "#saveBo", ctx());
     // 带来源标识：后端据此取消同一面板上一次还在跑的扫描
-    expect(search.run).toHaveBeenCalledWith({ text: "saveBo", maxResults: 50 }, false, "palette");
+    expect(search.run).toHaveBeenCalledWith({ text: "saveBo", maxResults: 50, priority: ["gl\\B.java"] }, false, "palette");
     // 最近打开的是 B.java（见 recentFiles mock），它的命中排第一
     expect(r.items.map((i) => i.detail)).toEqual(["gl/B.java:3", "gl/A.java:10"]);
     r.items[0].run();
@@ -301,6 +336,37 @@ describe("转到任意位置：内容与行号", () => {
     expect((await buildItems("file", "#  ", ctx())).note).toContain("输入");
     search.run.mockRejectedValue(new Error("扫描超时"));
     expect((await buildItems("file", "#abc", ctx())).note).toContain("扫描超时");
+  });
+
+  it("#内容：分批到达就先铺到列表，不必等全量扫完", async () => {
+    search.batches = [[{ path: "gl/B.java", line: 3, text: "  saveBo();", ranges: [{ start: 2, end: 6 }] }]];
+    search.run.mockResolvedValue({
+      hits: [
+        { path: "gl/A.java", line: 10, text: "  saveBo();", ranges: [{ start: 2, end: 6 }] },
+        { path: "gl/B.java", line: 3, text: "  saveBo();", ranges: [{ start: 2, end: 6 }] },
+      ],
+      filesScanned: 2,
+      filesMatched: 2,
+      truncated: false,
+      elapsedMs: 40,
+    });
+    const partials: { items: { detail?: string }[]; note: string }[] = [];
+    const r = await buildItems("file", "#saveBo", ctx(), (p) => partials.push(p));
+    expect(partials).toHaveLength(1);
+    expect(partials[0].items[0].detail).toBe("gl/B.java:3");
+    expect(partials[0].note).toContain("还在扫");
+    // 最终结果仍是完整的一份，且按最近打开优先重排
+    expect(r.items.map((i) => i.detail)).toEqual(["gl/B.java:3", "gl/A.java:10"]);
+    expect(r.note).toContain("40ms");
+  });
+
+  it("#内容：文件名里带关键词的文件排到扫描队首，不必等扫到它", async () => {
+    files.peek = true;
+    search.run.mockResolvedValue({ hits: [], filesScanned: 0, filesMatched: 0, truncated: false, elapsedMs: 1 });
+    await buildItems("file", "#VoucherBO", ctx());
+    const opts = search.run.mock.calls[0][0] as { priority: string[] };
+    // 最近打开的在最前，文件名命中的紧随其后（清单只认内存里那份，不额外加载）
+    expect(opts.priority).toEqual(["gl\\B.java", "gl/VoucherBO.java"]);
   });
 
   it(":行号 跳到当前文件的指定位置；带列号时按列落点", async () => {

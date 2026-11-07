@@ -170,7 +170,7 @@ html[data-ui-style="glass"] .update-slot .header-badge {
   transform: none;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  transition: box-shadow var(--dur-exit) var(--ease), filter var(--dur-exit) var(--ease);
+  transition: box-shadow var(--dur-enter) var(--ease), filter var(--dur-enter) var(--ease);
 }
 html.dark[data-ui-style="glass"] .update-slot .header-badge {
   --badge-depth: inset 0 1px 0 rgb(215 232 255 / .22), inset 0 -1px 0 rgb(0 4 20 / .22), 0 1px 2px rgb(0 4 20 / .22), 0 4px 8px -4px rgb(0 4 20 / .48);
@@ -297,8 +297,8 @@ html[data-ui-style="glass"] [data-cc-panel] [class*="text-warning-ink"] {
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  html:root[data-ui-style="glass"] .update-slot .header-badge { background: hsl(var(--card)); }
-  html:root[data-ui-style="glass"] {
+  html[data-ui-style="glass"] .update-slot .header-badge { background: hsl(var(--card)); }
+  html[data-ui-style="glass"] {
     --glass-status-panel: hsl(var(--card));
     --glass-reading: hsl(var(--card));
     --glass-inset: hsl(var(--muted));
@@ -309,22 +309,22 @@ html[data-ui-style="glass"] [data-cc-panel] [class*="text-warning-ink"] {
     /* 工作台树面板也用 panel，不补会在该模式下仍半透。 */
     --glass-panel: hsl(var(--card));
   }
-  html:root[data-ui-style="glass"] :is(.app-shell, .app-side, .app-topbar, .ui-card, .bento-card, .metric-card, .terminal-tabs-header, .terminal-pane-head, .modal-surface, .ui-surface, [role="listbox"], [role="dialog"].bg-card, .toast),
+  html[data-ui-style="glass"] :is(.app-shell, .app-side, .app-topbar, .ui-card, .bento-card, .metric-card, .terminal-tabs-header, .terminal-pane-head, .modal-surface, .ui-surface, [role="listbox"], [role="dialog"].bg-card, .toast),
   html[data-ui-style="glass"] .terminal-workspace .terminal-pane-frame[data-focused] > .terminal-pane-head {
     background: hsl(var(--card));
     backdrop-filter: none;
   }
 }
 @media (forced-colors: active) {
-  html:root[data-ui-style="glass"] .update-slot .header-badge {
+  html[data-ui-style="glass"] .update-slot .header-badge {
     background: ButtonFace;
     color: ButtonText;
     box-shadow: none;
     filter: none;
     outline: 1px solid ButtonText;
   }
-  html:root[data-ui-style="glass"] .update-slot .header-badge-uptodate > svg { color: ButtonText; }
-  html:root[data-ui-style="glass"] {
+  html[data-ui-style="glass"] .update-slot .header-badge-uptodate > svg { color: ButtonText; }
+  html[data-ui-style="glass"] {
     --glass-status-panel: Canvas;
     --glass-status-ink: CanvasText;
     --glass-status-muted: CanvasText;
@@ -335,14 +335,14 @@ html[data-ui-style="glass"] [data-cc-panel] [class*="text-warning-ink"] {
     --glass-panel: Canvas;
   }
   /* 对话页的壳与实体件在强制配色下同样要退回系统色，暖白审批卡尤其不能留。 */
-  html:root[data-ui-style="glass"] [data-cc-panel] :is([data-cc-entity], [data-cc-bubble], [data-cc-composer], [data-cc-inset], [data-cc-data]),
-  html:root[data-ui-style="glass"] [data-cc-panel] {
+  html[data-ui-style="glass"] [data-cc-panel] :is([data-cc-entity], [data-cc-bubble], [data-cc-composer], [data-cc-inset], [data-cc-data]),
+  html[data-ui-style="glass"] [data-cc-panel] {
     background: Canvas;
     border-color: CanvasText;
     box-shadow: none;
   }
-  html:root[data-ui-style="glass"] .sw:not(.on) { background: ButtonFace; box-shadow: none; outline: 1px solid ButtonText; }
-  html:root[data-ui-style="glass"] :is(.app-shell, .app-side, .app-topbar, .ui-card, .bento-card, .metric-card, .status-card, .terminal-tabs-header, .terminal-pane-head, .modal-surface, .ui-surface, [role="listbox"], [role="dialog"].bg-card, .toast),
+  html[data-ui-style="glass"] .sw:not(.on) { background: ButtonFace; box-shadow: none; outline: 1px solid ButtonText; }
+  html[data-ui-style="glass"] :is(.app-shell, .app-side, .app-topbar, .ui-card, .bento-card, .metric-card, .status-card, .terminal-tabs-header, .terminal-pane-head, .modal-surface, .ui-surface, [role="listbox"], [role="dialog"].bg-card, .toast),
   html[data-ui-style="glass"] .terminal-workspace .terminal-pane-frame[data-focused] > .terminal-pane-head {
     background: Canvas;
     border-color: CanvasText;

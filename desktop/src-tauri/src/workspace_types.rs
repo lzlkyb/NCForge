@@ -12,6 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
@@ -20,14 +21,18 @@ use serde::{Deserialize, Serialize};
 use crate::build_layout::{self, ModuleLayout};
 use crate::eclipse_cp::ProjectCp;
 
-/// 缓存版式：字段变了就加一，旧缓存自然失效。
-const CACHE_VERSION: u32 = 1;
+/// 缓存版式：字段变了就加一，旧缓存自然失效。（2：加入成员声明）
+const CACHE_VERSION: u32 = 2;
 /// 一份缓存的上限。正常工程是几 MB；坏文件不能换来无界分配。
 const CACHE_CAP: u64 = 64 * 1024 * 1024;
 /// 单文件上限：源码不该有这么大，超了多半不是源码。
 const MAX_SOURCE: u64 = 4 * 1024 * 1024;
-/// 进程内结果的有效期。5 秒足够覆盖一次连续输入，又能在保存后很快看到新类。
-const TTL: Duration = Duration::from_secs(5);
+/// 进程内结果的有效期。过期不阻塞查询（见 [`shared`]）：先返回旧索引、后台重建。
+///
+/// 取 30 分钟而不是几十秒：这台机器上遍历七千多个 `.java` + 逐个 stat 要十几秒
+/// （机械盘 + 杀毒扫描），定时校准等于隔一会儿就和搜索抢一次磁盘。文件改动改由
+/// 文件监听显式标记（见 [`mark_dirty`]），不需要靠定时纠偏。
+const TTL: Duration = Duration::from_secs(30 * 60);
 
 /// 一条类型命中。工作区条目 `file` 有值，jar 条目不经过本模块（见 `commands::type_search_cmds`）。
 #[derive(Debug, Clone, Serialize)]
@@ -51,11 +56,49 @@ pub struct TypeHit {
 #[derive(Debug)]
 struct IndexedType {
     hit: TypeHit,
+    /// 驼峰首字母（小写）。预先算好，查询时零分配——十几万条逐条现算要 200ms 起。
+    initials: String,
+}
+
+/// 一条成员命中（方法 / 字段级）。工作区符号搜索用它，不再等 jdt.ls。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SymbolHit {
+    pub name: String,
+    /// 所属类型（嵌套类是 `Outer.Inner`）。
+    pub container: String,
+    /// LSP SymbolKind：6 方法 / 8 字段 / 9 构造器 / 14 常量 / 22 枚举成员
+    pub kind: u8,
+    pub file: String,
+    pub module: String,
+    pub line: u32,
+    pub column: u32,
+}
+
+/// 成员条目按文件下标引用路径：七千多个文件、十万级成员，逐条存 String 太重。
+#[derive(Debug)]
+struct IndexedSymbol {
+    name: String,
+    initials: String,
+    container: String,
+    kind: u8,
+    file: u32,
+    line: u32,
+    column: u32,
+}
+
+#[derive(Debug)]
+struct SourceFile {
+    path: String,
+    module: String,
 }
 
 #[derive(Debug)]
 pub struct WorkspaceTypes {
     entries: Vec<IndexedType>,
+    /// 与 `symbols.file` 一一对应。
+    files: Vec<SourceFile>,
+    symbols: Vec<IndexedSymbol>,
     built_at: Instant,
 }
 
@@ -68,7 +111,8 @@ impl WorkspaceTypes {
             .entries
             .iter()
             .filter_map(|e| {
-                crate::java_types::type_match_score(query, &e.hit.simple).map(|s| (s, e))
+                crate::java_types::type_match_score_with(query, &e.hit.simple, Some(&e.initials))
+                    .map(|s| (s, e))
             })
             .collect();
         scored.sort_by(|a, b| {
@@ -88,39 +132,173 @@ impl WorkspaceTypes {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// 按名字匹配方法 / 字段。打分规则与类型搜索同一份（`type_match_score`）：
+    /// 完全相同 > 前缀 > 驼峰首字母 > 包含，两类结果的排序口径才不会分叉。
+    pub fn search_symbols(&self, query: &str, limit: usize) -> Vec<SymbolHit> {
+        if query.is_empty() || query.len() > 100 || limit == 0 {
+            return Vec::new();
+        }
+        let mut scored: Vec<(u8, &IndexedSymbol)> = self
+            .symbols
+            .iter()
+            .filter_map(|s| {
+                crate::java_types::type_match_score_with(query, &s.name, Some(&s.initials))
+                    .map(|sc| (sc, s))
+            })
+            .collect();
+        scored.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(a.1.name.len().cmp(&b.1.name.len()))
+                .then(a.1.container.cmp(&b.1.container))
+                .then(a.1.file.cmp(&b.1.file))
+                .then(a.1.line.cmp(&b.1.line))
+        });
+        scored.truncate(limit);
+        scored
+            .into_iter()
+            .filter_map(|(_, s)| {
+                let f = self.files.get(s.file as usize)?;
+                Some(SymbolHit {
+                    name: s.name.clone(),
+                    container: s.container.clone(),
+                    kind: s.kind,
+                    file: f.path.clone(),
+                    module: f.module.clone(),
+                    line: s.line,
+                    column: s.column,
+                })
+            })
+            .collect()
+    }
+
+    pub fn symbol_len(&self) -> usize {
+        self.symbols.len()
+    }
 }
 
 struct Shared {
     key: String,
     index: Arc<WorkspaceTypes>,
+    /// 是不是经过全树 stat 校准过。只从磁盘缓存读出来的那份是 false：
+    /// 它可能已经过期，下一次查询要触发后台校准。
+    verified: bool,
 }
 
 static SHARED: Mutex<Option<Shared>> = Mutex::new(None);
 /// 建索引的闸门：同一时刻只有一份在扫盘，后来的等它建完直接用。
 static BUILD: Mutex<()> = Mutex::new(());
+/// 后台重建的单飞标志（见 [`spawn_rebuild`]）。
+static REBUILDING: AtomicBool = AtomicBool::new(false);
+/// 源码刚被改过的标记：下一次查询触发后台重建。
+static DIRTY: AtomicBool = AtomicBool::new(false);
 
-/// 取（必要时重建）工作区索引。TTL 内直接复用进程内那份。
+/// 有人改了源码：让下一次查询触发后台重建。
+///
+/// 由文件监听（`watcher`）在 `.java` 变化时调用。它与 TTL 是两条独立路径：
+/// 定时校准太贵（一次全树 stat 十几秒），按事件标记才能既不漏改动又不空转。
+pub fn mark_dirty() {
+    DIRTY.store(true, Ordering::SeqCst);
+}
+
+/// 取（必要时重建）工作区索引。
+///
+/// **过期的索引也照给**：重建要遍历七千多个 `.java` 并逐个 stat，几百毫秒起，
+/// 而快速面板每敲一个字母都会问一次。让用户按键时等重建，远比「晚半秒看到新建
+/// 的类」代价大。所以过期就先把旧的返回，后台再校准一次（stale-while-revalidate）。
+///
+/// 只有在**一份都没有**（首次查询、刚换工作区）时才同步建。
 pub fn shared(root: &Path, cache_dir: &Path) -> Arc<WorkspaceTypes> {
     let key = norm(root);
-    let fresh = || {
-        let guard = SHARED.lock().unwrap_or_else(|e| e.into_inner());
-        guard.as_ref().and_then(|s| {
-            (s.key == key && s.index.built_at.elapsed() < TTL).then(|| s.index.clone())
-        })
-    };
-    if let Some(index) = fresh() {
+    if let Some((index, fresh)) = peek(&key) {
+        if !fresh {
+            spawn_rebuild(key, root.to_path_buf(), cache_dir.to_path_buf());
+        }
         return index;
     }
+    // 磁盘上有缓存就先给出去（读 JSON 几百毫秒），全树 stat 交给后台
+    if let Some(index) = load_cached_only(root, cache_dir) {
+        let index = Arc::new(index);
+        store(&key, index.clone(), false);
+        spawn_rebuild(key, root.to_path_buf(), cache_dir.to_path_buf());
+        return index;
+    }
+    rebuild_now(&key, root, cache_dir)
+}
+
+/// 同 [`shared`]，但一份索引都没有时**不阻塞**：起后台构建，先返回 `None`。
+///
+/// 冷建要读完整个源码树（newar 上 61MB，实测近百秒）。把它放进查询路径，用户
+/// 第一次搜类就卡在那里；返回「正在建索引」、界面退回文件名匹配反而即时。
+/// 已经有一份（哪怕过期）就照 [`shared`] 的 SWR 逻辑给旧索引。
+pub fn shared_opt(root: &Path, cache_dir: &Path) -> Option<Arc<WorkspaceTypes>> {
+    let key = norm(root);
+    if let Some((index, fresh)) = peek(&key) {
+        if !fresh {
+            spawn_rebuild(key, root.to_path_buf(), cache_dir.to_path_buf());
+        }
+        return Some(index);
+    }
+    if let Some(index) = load_cached_only(root, cache_dir) {
+        let index = Arc::new(index);
+        store(&key, index.clone(), false);
+        spawn_rebuild(key, root.to_path_buf(), cache_dir.to_path_buf());
+        return Some(index);
+    }
+    spawn_rebuild(key, root.to_path_buf(), cache_dir.to_path_buf());
+    None
+}
+
+/// 取当前索引并说明是否还在 TTL 内。
+fn peek(key: &str) -> Option<(Arc<WorkspaceTypes>, bool)> {
+    let guard = SHARED.lock().unwrap_or_else(|e| e.into_inner());
+    let s = guard.as_ref()?;
+    if s.key != key {
+        return None;
+    }
+    let fresh = s.verified && !DIRTY.load(Ordering::SeqCst) && s.index.built_at.elapsed() < TTL;
+    Some((s.index.clone(), fresh))
+}
+
+/// 同步重建（占住 `BUILD` 闸门）。期间别的线程会等在同一把锁上，建完直接复用。
+fn rebuild_now(key: &str, root: &Path, cache_dir: &Path) -> Arc<WorkspaceTypes> {
     let _gate = BUILD.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(index) = fresh() {
-        return index;
+    if let Some((index, fresh)) = peek(key) {
+        if fresh {
+            return index;
+        }
     }
+    // 建之前清标记：构建期间再有改动，watcher 会重新置位，下一轮再校准
+    DIRTY.store(false, Ordering::SeqCst);
     let index = Arc::new(build(root, cache_dir));
-    *SHARED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Shared {
-        key,
-        index: index.clone(),
-    });
+    store(key, index.clone(), true);
     index
+}
+
+fn store(key: &str, index: Arc<WorkspaceTypes>, verified: bool) {
+    *SHARED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Shared {
+        key: key.to_string(),
+        index,
+        verified,
+    });
+}
+
+/// 后台校准一次索引。单飞：已经有一个在跑就不再起（连续敲键不要排一队扫盘）。
+fn spawn_rebuild(key: String, root: PathBuf, cache_dir: PathBuf) {
+    if REBUILDING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        // panic 也要放掉标志，否则这个进程内再也不会自动校准
+        struct Release;
+        impl Drop for Release {
+            fn drop(&mut self) {
+                REBUILDING.store(false, Ordering::SeqCst);
+            }
+        }
+        let _release = Release;
+        rebuild_now(&key, &root, &cache_dir);
+    });
 }
 
 // ───────────────────────── 建索引 ─────────────────────────
@@ -136,10 +314,40 @@ struct CachedIndex {
 struct CachedFile {
     /// 规整过的绝对路径（`/` 分隔、小写比较键），与发现阶段一致。
     path: String,
+    /// 原始大小写的绝对路径：打开文件与界面展示都用它（小写路径在 Linux 上打不开）。
+    #[serde(default)]
+    raw: String,
+    /// 所属模块。存进缓存而不是每次从 `.classpath` 重算，模块被删改后仍能显示归属。
+    #[serde(default)]
+    module: String,
     size: u64,
     modified: u128,
     package: String,
     types: Vec<CachedType>,
+    /// 方法 / 字段 / 构造器 / 枚举常量。空 = 这个文件里没解析到（不是文件没有）。
+    #[serde(default)]
+    members: Vec<CachedMember>,
+}
+
+impl CachedFile {
+    fn display_path(&self) -> &str {
+        if self.raw.is_empty() {
+            &self.path
+        } else {
+            &self.raw
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct CachedMember {
+    name: String,
+    /// 所属类型（嵌套类是 `Outer.Inner`）。
+    container: String,
+    /// LSP SymbolKind
+    kind: u8,
+    line: u32,
+    column: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -149,6 +357,72 @@ struct CachedType {
     kind: u8,
     line: u32,
     column: u32,
+}
+
+/// 把一批**已解析**的文件组装成可查询的索引。
+fn assemble(files: Vec<CachedFile>) -> WorkspaceTypes {
+    let mut entries: Vec<IndexedType> = Vec::new();
+    let mut sources: Vec<SourceFile> = Vec::new();
+    let mut symbols: Vec<IndexedSymbol> = Vec::new();
+    for entry in files {
+        let file_text = entry.display_path().to_string();
+        let module = entry.module.clone();
+        for t in &entry.types {
+            entries.push(IndexedType {
+                initials: crate::java_types::initials_of(&t.name),
+                hit: TypeHit {
+                    name: if entry.package.is_empty() {
+                        t.name.clone()
+                    } else {
+                        format!("{}.{}", entry.package, t.name)
+                    },
+                    simple: t.name.clone(),
+                    package: entry.package.clone(),
+                    kind: t.kind,
+                    file: file_text.clone(),
+                    module: module.clone(),
+                    jar: String::new(),
+                    line: t.line,
+                    column: t.column,
+                },
+            });
+        }
+        // 成员表按文件引用路径：只有真有成员的文件才占一个下标
+        if !entry.members.is_empty() {
+            let idx = sources.len() as u32;
+            sources.push(SourceFile {
+                path: file_text.clone(),
+                module,
+            });
+            for m in &entry.members {
+                symbols.push(IndexedSymbol {
+                    name: m.name.clone(),
+                    initials: crate::java_types::initials_of(&m.name),
+                    container: m.container.clone(),
+                    kind: m.kind,
+                    file: idx,
+                    line: m.line,
+                    column: m.column,
+                });
+            }
+        }
+    }
+    WorkspaceTypes {
+        entries,
+        files: sources,
+        symbols,
+        built_at: Instant::now(),
+    }
+}
+
+/// 只读磁盘缓存、**不做任何文件系统校验**。
+///
+/// 启动后第一件事就是它：读十几 MB JSON 几百毫秒，而「逐个 stat 七千个文件」在这台
+/// 机器上要十几秒（机械盘 + 杀毒）。先给旧的、后台校准——`verified = false` 会让下一次
+/// 查询触发重建，所以旧数据最多用一次。
+fn load_cached_only(root: &Path, cache_dir: &Path) -> Option<WorkspaceTypes> {
+    let cache = load_cache(&cache_path(cache_dir, root), root)?;
+    Some(assemble(cache.files))
 }
 
 fn build(root: &Path, cache_dir: &Path) -> WorkspaceTypes {
@@ -171,7 +445,6 @@ fn build(root: &Path, cache_dir: &Path) -> WorkspaceTypes {
         .unwrap_or_default();
 
     let mut saved: Vec<CachedFile> = Vec::with_capacity(files.len());
-    let mut entries: Vec<IndexedType> = Vec::new();
     let mut changed = false;
     for (file, module) in files {
         let Ok(md) = std::fs::metadata(&file) else {
@@ -190,47 +463,27 @@ fn build(root: &Path, cache_dir: &Path) -> WorkspaceTypes {
             Some(c) if c.size == md.len() && c.modified == modified => c,
             _ => {
                 changed = true;
-                parse_file(&file, &key, md.len(), modified)
+                parse_file(&file, &key, md.len(), modified, &module)
             }
         };
-        let file_text = file.to_string_lossy().to_string();
-        for t in &entry.types {
-            entries.push(IndexedType {
-                hit: TypeHit {
-                    name: if entry.package.is_empty() {
-                        t.name.clone()
-                    } else {
-                        format!("{}.{}", entry.package, t.name)
-                    },
-                    simple: t.name.clone(),
-                    package: entry.package.clone(),
-                    kind: t.kind,
-                    file: file_text.clone(),
-                    module: module.clone(),
-                    jar: String::new(),
-                    line: t.line,
-                    column: t.column,
-                },
-            });
-        }
         saved.push(entry);
     }
     if changed || !cached.is_empty() {
         write_cache(&cache_path, root, &saved);
     }
-    WorkspaceTypes {
-        entries,
-        built_at: Instant::now(),
-    }
+    assemble(saved)
 }
 
-fn parse_file(path: &Path, key: &str, size: u64, modified: u128) -> CachedFile {
+fn parse_file(path: &Path, key: &str, size: u64, modified: u128, module: &str) -> CachedFile {
     let empty = || CachedFile {
         path: key.to_string(),
+        raw: path.to_string_lossy().to_string(),
+        module: module.to_string(),
         size,
         modified,
         package: String::new(),
         types: Vec::new(),
+        members: Vec::new(),
     };
     let Ok(bytes) = std::fs::read(path) else {
         return empty();
@@ -254,12 +507,43 @@ fn parse_file(path: &Path, key: &str, size: u64, modified: u128) -> CachedFile {
             }
         })
         .collect();
+    // 成员位置：先记一遍行首偏移再二分。逐个从文首数换行是 O(成员数 × 文件长度)，
+    // 大文件上累积起来能到几百毫秒，而这些开销每次改文件都要付一次。
+    let decls = crate::java_members::members(&clean);
+    let members = if decls.is_empty() {
+        Vec::new()
+    } else {
+        let mut starts = vec![0usize];
+        for (i, b) in clean.bytes().enumerate() {
+            if b == b'\n' {
+                starts.push(i + 1);
+            }
+        }
+        decls
+            .into_iter()
+            .map(|m| {
+                let at = m.offset.min(clean.len());
+                let line = starts.partition_point(|s| *s <= at).saturating_sub(1);
+                let column = clean[starts[line]..at].chars().count() as u32 + 1;
+                CachedMember {
+                    name: m.name,
+                    container: m.container,
+                    kind: m.kind,
+                    line: line as u32 + 1,
+                    column,
+                }
+            })
+            .collect()
+    };
     CachedFile {
         path: key.to_string(),
+        raw: path.to_string_lossy().to_string(),
+        module: module.to_string(),
         size,
         modified,
         package,
         types,
+        members,
     }
 }
 
@@ -488,6 +772,126 @@ mod tests {
             "删掉的文件不能留在索引里"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn indexes_members_for_symbol_search() {
+        let root = tmp("sym");
+        write(
+            &root,
+            "m/src/public/p/Bill.java",
+            "package p;\npublic class Bill {\n    private String no;\n    public String getNo() { return no; }\n    void setNo(String n) { this.no = n; }\n}\n",
+        );
+        let idx = build(&root, &root.join("cache"));
+        let hits = idx.search_symbols("getNo", 10);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].name, "getNo");
+        assert_eq!(hits[0].container, "Bill");
+        assert_eq!(hits[0].kind, 6);
+        assert_eq!((hits[0].line, hits[0].column), (4, 19));
+        assert_eq!(hits[0].module, "m");
+        assert!(hits[0].file.replace('\\', "/").ends_with("p/Bill.java"));
+
+        // 驼峰首字母与字段名都要能搜到：这是「找方法」的主要用法
+        assert!(idx
+            .search_symbols("gn", 10)
+            .iter()
+            .any(|h| h.name == "getNo"));
+        assert_eq!(
+            idx.search_symbols("no", 10)
+                .iter()
+                .filter(|h| h.name == "no")
+                .count(),
+            1
+        );
+
+        // 缓存往返：成员不能因为读缓存就丢掉
+        let again = build(&root, &root.join("cache"));
+        assert_eq!(again.symbol_len(), idx.symbol_len());
+        assert_eq!(again.search_symbols("getNo", 10)[0].name, "getNo");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 真机：在 newar 上量一遍成员索引的规模与耗时。手动跑：
+    /// `cargo test --lib -- 真机_成员索引 --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn 真机_成员索引规模与耗时() {
+        let root = PathBuf::from(r"C:\work\aier\newar");
+        if !root.is_dir() {
+            return;
+        }
+        let cache = crate::test_support::tmp("wt-bench");
+        let t = Instant::now();
+        let cold = build(&root, &cache);
+        let cold_ms = t.elapsed().as_millis();
+        let t = Instant::now();
+        let warm = build(&root, &cache);
+        let warm_ms = t.elapsed().as_millis();
+        let t = Instant::now();
+        let fast = load_cached_only(&root, &cache).expect("刚写过缓存");
+        let fast_ms = t.elapsed().as_millis();
+        let t = Instant::now();
+        let hits = warm.search_symbols("getBillNo", 20);
+        let q_us = t.elapsed().as_micros();
+        println!(
+            "冷建 {cold_ms} ms / 热建 {warm_ms} ms / 只读缓存 {fast_ms} ms，类型 {} 条，成员 {} 条",
+            cold.len(),
+            warm.symbol_len()
+        );
+        assert_eq!(
+            fast.symbol_len(),
+            warm.symbol_len(),
+            "缓存路径与全树校验结果一致"
+        );
+        println!("搜 getBillNo：{} 条 / {q_us} µs", hits.len());
+        for h in hits.iter().take(3) {
+            println!("  {} · {}:{},{}", h.name, h.file, h.line, h.column);
+        }
+    }
+
+    /// 真机：分解「读文件 / 解码 / 去注释 / 找类型 / 找成员」各占多少。手动跑：
+    /// `cargo test --lib -- 真机_解析耗时分解 --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn 真机_解析耗时分解() {
+        let root = PathBuf::from(r"C:\work\aier\newar");
+        if !root.is_dir() {
+            return;
+        }
+        let mut files = Vec::new();
+        for (dir, _) in source_roots(&root) {
+            crate::build_layout::walk_java(&dir, &mut files);
+        }
+        let n = files.len().min(300);
+        let (mut read, mut decode, mut strip, mut types, mut members) =
+            (0f64, 0f64, 0f64, 0f64, 0f64);
+        let mut bytes_total = 0usize;
+        for f in files.iter().take(n) {
+            let t = Instant::now();
+            let Ok(bytes) = std::fs::read(f) else {
+                continue;
+            };
+            read += t.elapsed().as_secs_f64() * 1000.0;
+            bytes_total += bytes.len();
+            let t = Instant::now();
+            let text = crate::workspace::decode_lossy(&bytes);
+            decode += t.elapsed().as_secs_f64() * 1000.0;
+            let t = Instant::now();
+            let clean = crate::build_state::strip_comments_and_literals(&text);
+            strip += t.elapsed().as_secs_f64() * 1000.0;
+            let t = Instant::now();
+            let _ = crate::build_state::typed_declarations(&clean);
+            types += t.elapsed().as_secs_f64() * 1000.0;
+            let t = Instant::now();
+            let m = crate::java_members::members(&clean);
+            members += t.elapsed().as_secs_f64() * 1000.0;
+            std::hint::black_box(m);
+        }
+        println!(
+            "{n} 个文件 / {:.1} MB：读 {read:.0}ms 解码 {decode:.0}ms 去注释 {strip:.0}ms 类型 {types:.0}ms 成员 {members:.0}ms",
+            bytes_total as f64 / 1048576.0
+        );
     }
 
     #[test]

@@ -74,7 +74,7 @@
 .lnk-btn {
   display: inline-flex; align-items: center; gap: 5px;
   height: 30px; padding: 0 10px; flex-shrink: 0;
-  border: 1px solid hsl(var(--border)); border-radius: var(--r-control);
+  border: 1px solid hsl(var(--border-strong, 205 12% 55%)); border-radius: var(--r-control);
   background: hsl(var(--card)); font-size: 12px; white-space: nowrap;
   color: hsl(var(--foreground));
   transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
@@ -171,7 +171,7 @@
 /* ── 覆盖表 ── */
 .lnk-ovs { display: flex; flex-direction: column; gap: 2px; }
 .lnk-ov { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 3px 0; border-radius: 0; border-bottom: 1px solid hsl(var(--border)); }
-.lnk-ov:hover { background: hsl(var(--secondary) / .6); }
+.lnk-ov:is(:hover,:focus-visible) { background: hsl(var(--secondary) / .6); }
 .lnk-ov-target { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
 .lnk-dirty {
   padding: 0 6px; border-radius: var(--r-control); line-height: 16px;
@@ -222,5 +222,6 @@
   color: hsl(var(--foreground));
   font-size: 12px; font-family: inherit;
 }
-.lnk-input:focus { outline: none; border-color: hsl(var(--primary) / .5); }
+.lnk-input:focus { border-color: hsl(var(--primary) / .5); }
+.lnk-input:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 .lnk-input::placeholder { color: hsl(var(--muted-foreground)); }

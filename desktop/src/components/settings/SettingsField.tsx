@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
-import { errorTextOf } from "../../lib/friendlyError";
+import { failureText } from "../../lib/friendlyError";
 import "../../settings-previews.css";
 
 /** Keep an editable draft until a complete, valid value has been saved. */
@@ -56,7 +56,7 @@ export function SettingsField({
         setSaved(true);
       }
     } catch (e) {
-      setError(errorTextOf(e));
+      setError(failureText("保存", e));
       dirty.current = true;
     } finally {
       saving.current = false;

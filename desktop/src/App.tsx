@@ -1,5 +1,5 @@
 import { ActivityPanel } from "./components/ui/ActivityPanel";
-import { useEffect, useRef, useState, useCallback, useMemo, lazy, Suspense } from "react";
+import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, lazy, Suspense, memo, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "./lib/tauri";
 import { CHANGELOG } from "./lib/about";
@@ -9,7 +9,8 @@ import {
   CHANGELOG_SEEN_EVENT,
 } from "./lib/utils";
 import { transitionPage } from "./lib/pageTransition";
-import { navigateRail } from "./lib/railNavigation";
+import { navigateRail, pageSideEffect } from "./lib/railNavigation";
+import { PAGES, PAGES_BY_KEY, HOTKEY_TABS } from "./lib/pages";
 import { requestOpenFile } from "./lib/openFileRequest";
 import { getKeymap, isWorkspaceSearch, layoutKeyOf, paletteModeOf, RAIL_KEY, WORKSPACE_SEARCH_KEY } from "./lib/keymap";
 import { setSideOpen, toggleRail, toggleSide, useRailExpanded } from "./lib/layoutStore";
@@ -29,7 +30,7 @@ import { defaultConnId, openDictTab } from "./lib/dbStore";
 import { toggleTheme } from "./lib/theme";
 import { serverStart, serverStop } from "./lib/server";
 import { toast } from "./components/ui/toast";
-import { failureText } from "./lib/friendlyError";
+import { errorToast } from "./lib/errorToast";
 import { ConfirmDialog } from "./components/ui/ConfirmDialog";
 import { Header } from "./components/layout/Header";
 import { SideNav, WORKSPACE_NAV } from "./components/layout/SideNav";
@@ -45,45 +46,26 @@ import { DbConfirmHost } from "./components/db/DbConfirmHost";
 import { LinkedDialogHost } from "./components/linked/LinkedDialogHost";
 import { wireQuitGuard } from "./lib/quitGuard";
 
-// 非首屏 Tab 懒加载：减小首屏 JS，切到对应 Tab 时才加载（fallback 用骨架屏）。
-// 业务页照此模式追加：lazy(() => import("./components/tabs/XxxTab").then(m => ({ default: m.XxxTab })))
-const SettingsTab = lazy(() =>
-  import("./components/tabs/SettingsTab").then((m) => ({ default: m.SettingsTab })),
-);
-// 文件页（带 Monaco）由 WorkbenchShell 自己懒加载：外壳不依赖编辑器，
-// 「进设置也要先下载数 MB 的编辑器」这个问题就是在这儿解决的。
-// 全工程搜索与 NC 服务已并进文件页（侧栏视图 / 底部面板），不再单独成页。
-// 版本控制页带一份独立的 svn.css 与 Monaco diff editor，同样懒加载。
-// 补丁打包已并进这一页的「打包补丁」视图（读的是同一份工作副本改动）。
-const SvnTab = lazy(() =>
-  import("./components/tabs/SvnTab").then((m) => ({ default: m.SvnTab })),
-);
-const DbTab = lazy(() => import("./components/tabs/DbTab").then((m) => ({ default: m.DbTab })));
-// 元数据页带自己的解析/校验/生成视图与 meta.css，低频但体量不小，懒加载。
-const MetaTab = lazy(() => import("./components/meta/MetaTab").then((m) => ({ default: m.MetaTab })));
-// 工程关联不再是页签：入口在代码页状态栏 / 问题面板 / 命令面板，弹框本身懒加载。
-// 低频日志排查从菜单按需打开；首次使用才加载，主导航不常驻入口。
-const LogTab = lazy(() => import("./components/tabs/LogTab").then((m) => ({ default: m.LogTab })));
+/**
+ * 页组件：由 lib/pages.ts 的 PAGES 惰性加载器统一包装。
+ * 以前这里手写 5 个 lazy 组件、renderTab 又手写一份 switch 组件清单，
+ * 新增页面时 renderTab 走 default 返回 null → 空白页（P1-15）。
+ * 现在 renderTab 由 PAGES_BY_KEY + 本表派生，页面只登记一次。
+ */
+const PAGE_COMPONENTS: Record<string, ReturnType<typeof lazy>> = {};
+for (const page of PAGES) {
+  if (page.component) PAGE_COMPONENTS[page.key] = lazy(page.component);
+}
+
 // 数据字典已并进数据库页的字典标签（见 DbTab / DictWorkspace），不再单独成页。
 // 快速导航浮层要查语言服务（间接依赖 Monaco），首次打开时才加载，和文件页共用同一个 chunk。
 const QuickPalette = lazy(() =>
   import("./components/workspace/QuickPalette").then((m) => ({ default: m.QuickPalette })),
 );
 
-/**
- * Ctrl+1~N 快捷键的完整序列：WORKSPACE_NAV 注册项 + 设置（追加在尾部）。
- * 低频日志工具只隐藏主导航入口，保留 Ctrl+4 与设置 Ctrl+5 的既有位置。
- *
- * settings 不在 WORKSPACE_NAV 里——它在侧栏 foot 单独渲染（带更新未读红点），
- * 但键盘用户同样需要一键直达，故快捷键序列在 App 层追加，不动侧栏数据源。
- * 加导航项会把它往后挤一位（补丁 / 数据字典 / 工程关联并入别处后，设置从 Ctrl+10 变 Ctrl+5）。
- * 元数据页是新加的：顺序上排在设置之后（Ctrl+6），否则会把日志 / 设置的既有键位挤动。
- */
-const HOTKEY_TABS: string[] = [
-  ...WORKSPACE_NAV.map((n) => n.key).filter((key) => key !== "meta"),
-  "settings",
-  "meta",
-];
+// Ctrl+1~N 的页面序列来自 lib/pages.ts 的 HOTKEY_TABS（按 hotkey 字段排序）。
+// 键位是历史映射（Ctrl+1 代码 / 2 版本控制 / 3 数据库 / 4 日志 / 5 设置 / 6 元数据），
+// 报告 9.7 明确不重排；不要在 App 层再写一份快捷键清单。
 
 /**
  * 服务启停正在路上：连按 Enter 会把同一条指令发好几遍。
@@ -105,11 +87,25 @@ async function stopServerWithFeedback(): Promise<void> {
     else if (outcome === "cancelling") toast("正在取消启动…", "info");
     else toast("服务没有在运行", "info");
   } catch (e) {
-    toast(failureText("停止 NC 服务", e), "error");
+    // 「复制全部错误」要能拿到可搜索的英文原文，而不只是中文人话（UI 反馈组约定）。
+    errorToast("停止 NC 服务", e);
   } finally {
     svcBusy = false;
   }
 }
+
+/**
+ * 切页只更新 context，不重建已挂载工具页的元素树（P2-20）。
+ *
+ * 原来 `toolPanels` 的 useMemo 依赖 `activeTab`，每切一次页就对所有已访问过的
+ * 工具页重跑 `renderTab`，与「隐藏页面保活」的预期正好相反。现在 children 由
+ * 外层 useMemo 一次性构造，HostedTab 只从 context 读 active 决定显隐。
+ */
+const ActiveTabContext = createContext<string>("files");
+const HostedTab = memo(function HostedTab({ tab, children }: { tab: string; children: ReactNode }) {
+  const activeTab = useContext(ActiveTabContext);
+  return <ActivityPanel active={activeTab === tab}>{children}</ActivityPanel>;
+});
 
 /**
  * 应用外壳（壳子版）。
@@ -176,6 +172,13 @@ function AppContent() {
 
   // ── 页面切换过渡 ──
   const navigate = useCallback((tab: string) => {
+    // 三条切页入口（侧栏点击 / ncforge-navigate 事件 / Ctrl+1~N）共用同一套侧栏语义：
+    // 切到别的页时展开资源侧栏；日志页及其返回代码页保留原开合偏好（见 railNavigation）。
+    // 同页收侧栏只属于侧栏点击（navigateRail），这里不处理，避免 openSearch 等
+    // 「同页带动作」入口把刚展开的侧栏又收回去。
+    pageSideEffect(activeTab, tab);
+    // 日志页始终翻出工具文档面：同页重入时 WorkbenchFrame 的切页 effect 不会跑。
+    if (tab === "logs") showWorkbenchDocument();
     // View Transition 动画：update 回调里同步切 tab；当前页已是目标页时不动画
     transitionPage(() => setActiveTab(tab), activeTab !== tab);
   }, [activeTab]);
@@ -216,7 +219,6 @@ function AppContent() {
   }, []);
   /** 服务启停正在路上：连按 Enter 会把同一条指令发好几遍。 */
   useEffect(() => {
-    const go = (key: string, title: string, hint?: string) => ({ id: `go.${key}`, title: `转到：${title}`, hint, run: () => navRef.current(key) });
     // 命令面板跑的是一条命令，没有页面上的按钮态可看，所以每个动作都要自己给反馈：
     // 成功报真实结果，失败报人话（以前是把 Rust 英文原文直接弹出来）。
     const runStart = async () => {
@@ -228,23 +230,29 @@ function AppContent() {
         await serverStart();
         toast("中间件启动请求已接受，请在 NC 服务面板查看真实进度", "info");
       } catch (e) {
-        toast(failureText("启动 NC 服务", e), "error");
+        // 「复制全部错误」要能拿到可搜索的英文原文，而不只是中文人话（UI 反馈组约定）。
+        errorToast("启动 NC 服务", e);
       } finally {
         svcBusy = false;
       }
     };
+    // 页面导航项由 PAGES 生成（P1-15 / 7.3-4）：删掉硬编码的 go("files") 等，
+    // 新增页面自动出现在命令面板，且带上可见的 Ctrl+N 提示。
+    const pageCommands = PAGES.map((p) => ({
+      id: `go.${p.key}`,
+      title: `转到：${p.label}`,
+      hint: p.hotkey != null ? `Ctrl+${p.hotkey}` : undefined,
+      run: () => (p.key === "logs" ? openLogs() : navRef.current(p.key)),
+    }));
     return registerCommands([
-      go("files", "代码"),
+      ...pageCommands,
       { id: "view.search", title: "全工程搜索", hint: WORKSPACE_SEARCH_KEY, run: openSearch },
-      go("svn", "版本控制"),
       {
         id: "go.patch",
         title: "转到：补丁打包",
         hint: "版本控制 · 打包补丁",
         run: openPatchPage,
       },
-      go("db", "数据库"),
-      go("meta", "元数据"),
       {id:"db.objects",title:"查找数据库对象",hint:"Ctrl+Alt+O",run:()=>{navRef.current("db");showObjectFinder();}},
       {
         id: "go.linked",
@@ -258,9 +266,7 @@ function AppContent() {
         hint: "工程关联 · 产物检查",
         run: () => openLinkedDialog("artifacts"),
       },
-      { id: "go.logs", title: "打开：日志排查", hint: "按需工具 · Ctrl+4", run: openLogs },
       { id: "go.dict", title: "转到：数据字典", hint: "数据库 · 数据字典", run: openDict },
-      go("settings", "设置"),
       { id: "view.side", title: "切换侧栏", hint: "Ctrl+B", run: toggleSide },
       { id: "view.rail", title: "展开 / 收起左侧导航栏", hint: RAIL_KEY, run: toggleRail },
       { id: "view.panel", title: "切换底部面板", hint: "Ctrl+J", run: () => setSession({ panelOpen: (v) => !v }) },
@@ -274,16 +280,19 @@ function AppContent() {
   // 其它页（如 Java 编辑器里「在数据库中执行此 SQL」）要切页时发这个事件，detail 是页 key。
   // 老的 "search" / "services" / "patch" / "dict" / "linked" 页 key 仍然兼容：
   // 转到文件页的对应视图 / 面板、版本控制页的打包视图、数据库页的字典标签，或工程关联弹框。
+  // 其余一律用 PAGES_BY_KEY 校验：未知 key 不再切到空白页（P1-15）。
   useEffect(() => {
     const go = (e: Event) => {
       const tab = (e as CustomEvent<string>).detail;
-      if (tab === "search") openSearch();
-      else if (tab === "services") openServicePanel();
-      else if (tab === "patch") openPatchPage();
-      else if (tab === "dict") openDict();
-      else if (tab === "linked") openLinkedDialog("chain");
-      else if (tab === "logs") openLogs();
-      else navRef.current(tab);
+      if (tab === "search") { openSearch(); return; }
+      if (tab === "services") { openServicePanel(); return; }
+      if (tab === "patch") { openPatchPage(); return; }
+      if (tab === "dict") { openDict(); return; }
+      if (tab === "linked") { openLinkedDialog("chain"); return; }
+      const page = PAGES_BY_KEY[tab];
+      if (!page) return;
+      if (page.key === "logs") { openLogs(); return; }
+      navRef.current(page.key);
     };
     window.addEventListener("ncforge-navigate", go);
     return () => window.removeEventListener("ncforge-navigate", go);
@@ -322,6 +331,11 @@ function AppContent() {
         openSearch();
         return;
       }
+      // P1-9：模态框（生产库写语句确认 / 删除连接 / 快捷键一览）打开时，
+      // Ctrl+1~N 与 Ctrl+K 会把背后页面切走或开搜索，浮层却还挂在 body 上。
+      // 统一在这里早退；otherDialog 的 :not([data-palette]) 例外保留——
+      // 命令面板自己内部的快捷键仍由它处理。
+      if (otherDialog) return;
       if (!e.ctrlKey || e.altKey || e.metaKey) return;
       // 输入框 / 编辑区内不抢键：Monaco 的 textarea、各页搜索框在焦点中时，
       // Ctrl+1~N 与 Ctrl+K 都可能是编辑器/浏览器惯例（书签跳转、快速命令）。
@@ -352,34 +366,30 @@ function AppContent() {
   const navItems = useMemo(() => WORKSPACE_NAV, []);
 
   /**
-   * 挂在外壳里的工具页：由 `WORKSPACE_NAV` 派生，不再手写第二份页面表。
-   *
-   * 以前这里是一个 7 项字面量，加导航项时侧栏与 Ctrl+N 自动生效、这个数组不会——
-   * 点进去只看到文件页，编译器也不报错。`hosted: false`（文件页）不进这里：
-   * 它由 WorkbenchShell 自己渲染。
-   *
-   * 设置页不在 `WORKSPACE_NAV` 里（它是侧栏底部的独立入口，不进 Ctrl+1~N 的导航
-   * 序号），但同样得有面板——漏了它，点「设置」就是一片空白。
+   * 挂在外壳里的工具页：由 PAGES 派生（hosted 字段），不再手写页面表。
+   * `hosted: false`（文件页）不进这里：它由 WorkbenchShell 自己渲染。
+   * 设置页虽不在侧栏主导航，但同样登记在 PAGES 里，自动进这个清单。
    */
   const hostedTabs = useMemo(
-    () => [...WORKSPACE_NAV.filter((n) => n.hosted !== false).map((n) => n.key), "settings"],
+    () => PAGES.filter((p) => p.hosted).map((p) => p.key),
     [],
   );
+  // renderTab 需要 navigate，但 toolPanels 不能依赖它（navigate 随 activeTab 变，
+  // 会让所有已访问工具页重跑 renderTab）——转发到 navRef，引用恒定（P2-20）。
+  const navigateViaRef = useCallback((tab: string) => navRef.current(tab), []);
+  // children 一次性构造、不再随 activeTab 重建；HostedTab 只从 context 读 active 决定显隐。
   const toolPanels = useMemo(
     () =>
       hostedTabs.map((tab) => (
-        <ActivityPanel
-          key={tab}
-          active={activeTab === tab}
-        >
+        <HostedTab key={tab} tab={tab}>
           {/* 每页一个边界 + 自己的 Suspense：谁崩了卸谁，谁在加载谁显示骨架，
               不再共用最外层那一个（那样任一工具页出错会把整个工作台卸掉）。 */}
           <ErrorBoundary resetKey={tab}>
-            <Suspense fallback={<Skeleton className="m-4 h-40" />}>{renderTab(tab, refreshStatus, navigate)}</Suspense>
+            <Suspense fallback={<Skeleton className="m-4 h-40" />}>{renderTab(tab, refreshStatus, navigateViaRef)}</Suspense>
           </ErrorBoundary>
-        </ActivityPanel>
+        </HostedTab>
       )),
-    [activeTab, hostedTabs, refreshStatus, navigate],
+    [hostedTabs, refreshStatus, navigateViaRef],
   );
 
   return (
@@ -399,7 +409,10 @@ function AppContent() {
           navItems={navItems}
         />
         <main className="app-main page-transition flex min-h-0 min-w-0 flex-col">
-          <WorkbenchShell activeTab={activeTab} tool={toolPanels} />
+          {/* active 只经 context 下发：切页不重建 toolPanels（P2-20）。 */}
+          <ActiveTabContext.Provider value={activeTab}>
+            <WorkbenchShell activeTab={activeTab} tool={toolPanels} />
+          </ActiveTabContext.Provider>
         </main>
       </div>
       {paletteOpen && (
@@ -431,34 +444,42 @@ function AppContent() {
   );
 }
 
-/** 页面表：tab key → 组件。业务把这里换成自家页面。 */
+/** 未在 PAGES 登记的页面：给一个可见空态，而不是静默返回 null（P1-15）。 */
+function UnregisteredPage({ tabKey }: { tabKey: string }) {
+  return (
+    <div role="alert" className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center text-sm text-muted-foreground">
+      <p className="text-base font-medium text-foreground">页面未注册</p>
+      <p>没有找到页面「{tabKey}」对应的组件。</p>
+      <p className="text-xs">请在 lib/pages.ts 的 PAGES 中登记该页面（key / label / component）。</p>
+    </div>
+  );
+}
+
+/** 页面表：由 PAGES_BY_KEY + PAGE_COMPONENTS 派生，新增页面只改 lib/pages.ts。 */
 function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: string) => void) {
+  const page = PAGES_BY_KEY[tab];
+  const Comp = page?.component ? PAGE_COMPONENTS[tab] : undefined;
+  if (!Comp) {
+    // 以前 default 只 console.warn + return null → 整块主区空白（P1-15）。
+    console.warn(`[NCForge] 页面「${tab}」未在 PAGES 登记或没有 component`);
+    return <UnregisteredPage tabKey={tab} />;
+  }
   switch (tab) {
     case "svn":
       // 「在文件中打开」：和搜索同一条管道，先记请求再切页（SvnTab 是懒加载）。
       // 补丁打包是这一页的第二个视图，共用同一条渲染通道。
       return (
-        <SvnTab
+        <Comp
           onNavigate={navigate}
-          onOpenFile={(path) => {
+          onOpenFile={(path: string) => {
             requestOpenFile({ path, line: 1 });
           }}
         />
       );
-    case "db":
-      return <DbTab />;
-    case "meta":
-      return <MetaTab />;
-    case "logs":
-      return <LogTab />;
     case "settings":
-      return <SettingsTab onChanged={refreshStatus} />;
+      return <Comp onChanged={refreshStatus} />;
     default:
-      // 到这儿说明导航项没有对应页面（加了导航忘了加页面表）。以前 default 返回
-      // <FilesTab/>，「看着能用」——点进去只看到文件页，还不报错；更糟的是
-      // 一旦有人把 "files" 塞进工具页数组，这里就是「宿主里再套一个宿主」。
-      console.warn(`[NCForge] 导航项「${tab}」没有注册页面`);
-      return null;
+      return <Comp />;
   }
 }
 

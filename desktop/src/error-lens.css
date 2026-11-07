@@ -1,21 +1,21 @@
-/* Error Lens 的行尾诊断文字。颜色取自主题 token，深浅色自动跟随。 */
+/* Error Lens 的行尾诊断文字。颜色取自主题 token（HSL 三元组，须经 hsl() 包裹），深浅色自动跟随。 */
 .ncforge-lens {
   font-style: italic;
-  opacity: 0.85;
+  opacity: 0.92;
   /* 行尾文字不参与折行宽度计算，避免它把行撑出横向滚动 */
   white-space: pre;
 }
 
 .ncforge-lens-error {
-  color: var(--destructive-ink, #d9534f);
+  color: hsl(var(--destructive-ink, 0 72% 40%));
 }
 
 .ncforge-lens-warning {
-  color: var(--warning-ink, #c98a00);
+  color: hsl(var(--warning-ink, 27 90% 35%));
 }
 
 .ncforge-lens-info {
-  color: var(--muted-foreground, #888);
+  color: hsl(var(--muted-foreground, 210 9% 43%));
 }
 
 /* 行尾文字后面留一点空隙，与代码本身分开 */

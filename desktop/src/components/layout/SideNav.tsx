@@ -1,17 +1,17 @@
 import { useLayoutEffect, useState, memo } from "react";
 import type { StaticStatus } from "../../lib/types";
 import { railAriaKey, railKeyLabel } from "../../lib/keymap";
+import { PAGES, PAGES_BY_KEY } from "../../lib/pages";
 import { Icon, type IconName } from "../ui/icon";
 import { Collapse } from "../ui/Collapse";
 import { UpdateBadge } from "./UpdateBadge";
 import { UpdateRailItem } from "./UpdateRailItem";
 
 /**
- * 一项导航。
+ * 一项导航。数据源是 lib/pages.ts 的 PAGES（单一真源），本类型只是侧栏渲染所需的投影。
  *
  * `hosted`：这一页是不是「挂在工作台外壳里的工具页」（有 ActivityPanel、可以保活）。
- * 页面表以前在 App 里另写了一份 7 项字面量，加导航项时侧栏与快捷键会自动生效、
- * 而那份数组不会——点进去只看到文件页，编译器也不报错。现在页面由本数组派生。
+ * `showInRail`：是否在主导航显示；`hotkey`：Ctrl+N 的数字，渲染成按钮上的 <kbd>。
  */
 export type NavItem = {
   key: string;
@@ -21,38 +21,36 @@ export type NavItem = {
   hosted?: boolean;
   /** 低频工具保留页面与既有快捷键，只从主导航隐藏。 */
   showInRail?: boolean;
+  /** Ctrl+N 的数字（由 PAGES.hotkey 派生，供 <kbd> 显示）。 */
+  hotkey?: number;
 };
 
+/** 页面 key → 中文名（状态栏等共享位置用），由 PAGES 派生。 */
+export const WORKSPACE_LABELS: Record<string, string> = Object.fromEntries(
+  PAGES.map((p) => [p.key, p.label]),
+);
+
 /**
- * 壳子示例导航项。业务把这里换成自家页面即可。
+ * 侧栏主导航项：由 PAGES 派生（P1-15），不再手写第二份页面表。
+ * 设置在侧栏 foot 单独渲染（带更新未读红点），不进这里；
+ * 隐藏的 logs 由 PAGES.railMore 在「更多」分组露出。
  *
- * 🔴 数组顺序即 Ctrl+1~N 的映射顺序 —— App.tsx 以本数组顺序为前 N 位、追加
- *    settings 生成 Ctrl+1~N+1 快捷键表，改顺序/增删项只改这一处，避免
- *    「侧栏顺序」与「快捷键顺序」两处漂移。
- * 🔴 新项只能追加在末尾：插到中间会把既有 Ctrl+2/3/4 全改一遍，是破坏性变更
- *    （「工程关联」从页签改成弹框后，它空出的 Ctrl+4 由 NC 日志接上）。
+ * 🔴 顺序即侧栏展示顺序；Ctrl+1~N 的映射改为读 PAGES.hotkey（HOTKEY_TABS），
+ *    不再由数组顺序推断（历史键位见 lib/pages.ts，报告 9.7 明确不重排）。
  */
-/** 页面 key → 中文名（状态栏等共享位置用，避免再抄一份页面表）。 */
-export const WORKSPACE_LABELS: Record<string, string> = { settings: "设置" };
+export const WORKSPACE_NAV: NavItem[] = PAGES.filter((p) => p.key !== "settings").map((p) => ({
+  key: p.key,
+  label: p.label,
+  icon: p.icon,
+  hosted: p.hosted,
+  showInRail: p.showInRail,
+  hotkey: p.hotkey,
+}));
 
-export const WORKSPACE_NAV: NavItem[] = [
-  // 「代码」是主工作台，也是全工程搜索与 NC 服务的宿主：
-  // 搜索是侧栏里的一个视图，服务是底部面板里的一个标签，都不再单独占主导航位。
-  { key: "files", label: "代码", icon: "code", hosted: false },
-  // 补丁打包不再是独立页签：它是版本控制页里的「打包补丁」视图（同一份工作副本改动）。
-  { key: "svn", label: "版本控制", icon: "gitBranch" },
-  { key: "db", label: "数据库", icon: "database" },
-  { key: "logs", label: "日志排查", icon: "log", showInRail: false },
-  // 元数据（BMF）独立成页：读/校验/生成/发布 POC 与数据库连接是两件事，
-  // 并进数据库页会让「我在改结构」和「我在看库」混在同一套侧栏里。
-  // 它在 rail 上紧跟数据库（logs 隐藏时不占位）；Ctrl 序号另见 App.tsx 的
-  // HOTKEY_TABS——为不挤动日志 Ctrl+4 / 设置 Ctrl+5，元数据排在设置之后。
-  { key: "meta", label: "元数据", icon: "layers" },
-  // 工程关联不是页签：入口在代码页状态栏、问题面板诊断行与命令面板（弹框）。
-  // 数据字典不再是主导航项：它是数据库页的一种文档标签（读的就是连接树选中的库）。
-];
-
-for (const item of WORKSPACE_NAV) WORKSPACE_LABELS[item.key] = item.label;
+/** rail 按钮上的 Ctrl+N 提示（KBD 风格，内联 utility，不改 CSS）。 */
+const KBD = "ml-auto shrink-0 rounded border border-border bg-muted px-1 font-mono text-[10px] leading-4 text-muted-foreground";
+/** 设置行右端还有未读红点，kbd 不抢 margin-left:auto，紧跟文字即可。 */
+const KBD_INLINE = "shrink-0 rounded border border-border bg-muted px-1 font-mono text-[10px] leading-4 text-muted-foreground";
 
 /**
  * 左侧主导航栏（壳子版）：品牌区（拖拽区）+ 导航项 + 设置入口（带更新未读红点）
@@ -86,6 +84,9 @@ function SideNavImpl({
   statusPill?: { tone: string; text: string; target?: string | null; title: string } | null;
 }) {
   const items = (navItems ?? WORKSPACE_NAV).filter((item) => item.showInRail !== false);
+  // 隐藏入口（logs）不再让一个看不见的页面独占 Ctrl+4：在「更多」分组露出（P1-16）。
+  const moreItems = PAGES.filter((p) => p.railMore);
+  const settingsHotkey = PAGES_BY_KEY.settings?.hotkey;
 
   // 状态口径：startupError 升红；running 但业务报异常 = warn。壳子只演示范式。
   const startupError = status?.startupError ?? null;
@@ -138,9 +139,34 @@ function SideNavImpl({
           >
             <Icon name={item.icon} size={collapsed ? 19 : 16} className="app-side-icon" />
             <span className="app-side-label">{collapsed && item.key === "svn" ? "版本" : collapsed && item.key === "logs" ? "日志" : item.label}</span>
+            {!collapsed && item.hotkey != null && <kbd className={KBD}>Ctrl+{item.hotkey}</kbd>}
           </button>
         ))}
       </nav>
+      {/* 「更多」分组放在主导航 nav 之外：nav 内保持恰好 4 个常用项（既有测试断言），
+          隐藏页在这里露出并带 Ctrl+N，避免一个看不见的页面占用 Ctrl+4（P1-16）。
+          aria-label 带上快捷键描述，读屏能念出「日志排查 · Ctrl+4」。 */}
+      {moreItems.length > 0 && (
+        <div className="mt-1 flex flex-col gap-1 border-t border-border/60 px-2 pt-1">
+          {!collapsed && <div className="px-2 py-0.5 text-[11px] font-medium text-muted-foreground">更多</div>}
+          {moreItems.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              className="app-side-item"
+              data-active={activeTab === p.key || undefined}
+              aria-current={activeTab === p.key ? "page" : undefined}
+              aria-label={`${p.label} · Ctrl+${p.hotkey}`}
+              title={collapsed ? p.label : undefined}
+              onClick={() => onNavigate(p.key)}
+            >
+              <Icon name={p.icon} size={collapsed ? 19 : 16} className="app-side-icon" />
+              <span className="app-side-label">{collapsed ? "日志" : p.label}</span>
+              {!collapsed && p.hotkey != null && <kbd className={KBD}>Ctrl+{p.hotkey}</kbd>}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="app-side-foot">
         {/* 折叠态更新入口：独立一行 rail 项（图标在上、文字在下），与设置同构。
@@ -161,6 +187,7 @@ function SideNavImpl({
           >
             <Icon name="settings" size={16} className="app-side-icon" />
             <span className="app-side-label">设置</span>
+            {!collapsed && settingsHotkey != null && <kbd className={KBD_INLINE}>Ctrl+{settingsHotkey}</kbd>}
             {/* changelog-dot：沿用更新未读红点的脉冲动画 + hover 放大。
                 无未读时也渲染（--off 缩为零宽），出现/消失都是 scale 过渡。 */}
             <span

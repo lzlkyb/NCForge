@@ -101,7 +101,9 @@ export function FilePaneSlots({
 }) {
   const slot = useFileSlot();
   // 底部面板要不要让位给文档页，取决于外壳当前的文档槽有没有被占
-  const documentOpen = useWorkbenchDock()?.documentOpen ?? false;
+  const dock = useWorkbenchDock();
+  const documentOpen = dock?.documentOpen ?? false;
+  const panelExpanded = dock?.panelExpanded ?? false;
   const {
     root, projects, activeTool, tabs, activePath, active, splitPath, activeMark,
     showLargeHint, heavyFile, conflictPath, encodingIssue, saving, reveal,
@@ -120,8 +122,9 @@ export function FilePaneSlots({
   /**
    * 底部面板要不要显示，与拆开之前同一条规则：设置页不要；打开文档页（补丁 /
    * 数据库）时让位，除非当前是 NC 服务（它的日志就住在底部面板里）。
+   * 展开态必须保留内容：两个面在展开时都由 CSS 让位，底部一旦为空就整块纯白（P1-18）。
    */
-  const wantPanel = panelOpen && activeTool !== "settings" && (!documentOpen || servicesPanel);
+  const wantPanel = panelOpen && activeTool !== "settings" && (!documentOpen || servicesPanel || panelExpanded);
 
   const tree = (
     <TreeSvnProvider root={root}>
@@ -197,7 +200,7 @@ export function FilePaneSlots({
             onRestored: p => void session.reloadFile(p),
           },
         } : null}>
-        <EditorGroupsPane root={root} tabs={tabs} session={session} reveal={reveal} />
+        <EditorGroupsPane root={root} tabs={tabs} session={session} reveal={reveal} tools={tabStrip} />
       </EditorReadingLayout>
       <ExtractSqlDialog />
     </>
@@ -212,7 +215,8 @@ export function FilePaneSlots({
   return (
     <>
       {slot("tree", tree)}
-      {slot("tabs", tabStrip)}
+      {/* 执行/分组工具已并入文件标签条（EditorGroupsPane → TabStrip），
+          不再单独占一行 36px 的 `.wb-code-tools`。 */}
       {slot("editor", editor)}
       {slot("status", status)}
       {slot("output", wantPanel ? output : null)}

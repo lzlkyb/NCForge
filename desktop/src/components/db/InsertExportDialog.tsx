@@ -87,7 +87,7 @@ export function InsertExportDialog({ connId, table, sql, schema, onClose,tabId,p
   };
 
   return (
-    <Modal open onClose={()=>{if(!lock.current) onClose();}} closeOnOverlay={!busy} className="modal-surface dbx-dlg dbx-nc-transfer" ariaLabel="导出为 INSERT 脚本">
+    <Modal keepMountedWhenInactive open onClose={()=>{if(!lock.current) onClose();}} closeOnOverlay={!busy} className="modal-surface dbx-dlg dbx-nc-transfer" ariaLabel="导出为 INSERT 脚本">
       <div className="hd">
         <Icon name="download" size={16} />
         导出为 INSERT 脚本

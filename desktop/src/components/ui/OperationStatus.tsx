@@ -1,3 +1,4 @@
+import { errorToast } from "../../lib/errorToast";
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useOperations, cancelOperation, canCancelOperation, retryOperation, canRetryOperation, clearCompletedOperations, revealOperation } from "../../lib/operations";
@@ -6,7 +7,6 @@ import { setSession } from "../../lib/workspaceSession";
 import { Icon } from "./icon";
 import { Button } from "./button";
 import { usePresence } from "../../hooks/usePresence";
-import { toast } from "./toast";
 import "../../operation-feedback.css";
 const stateText={running:"处理中",cancelling:"停止中",success:"已完成",failed:"失败",cancelled:"已取消"};
 export function OperationStatus({compact=false}:{compact?:boolean}) {
@@ -48,7 +48,7 @@ export function OperationStatus({compact=false}:{compact?:boolean}) {
           <div className="op-actions">{(o.page || o.path) && <Button size="sm" variant="outline" onClick={returnTo}>返回来源</Button>}
             {o.endedAt===undefined && canCancelOperation(o.id) && <Button size="sm" variant="outline" disabled={o.state==="cancelling"} onClick={()=>void cancelOperation(o.id)}>请求停止</Button>}
             {o.endedAt===undefined && !canCancelOperation(o.id) && <span className="op-note">此操作不支持中途停止</span>}
-            {o.state==="failed" && canRetryOperation(o.id) && <Button size="sm" variant="outline" disabled={active.some(a=>a.key===o.key)} onClick={()=>void retryOperation(o.id).catch(e=>toast(String(e),"error"))}>重试</Button>}
+            {o.state==="failed" && canRetryOperation(o.id) && <Button size="sm" variant="outline" disabled={active.some(a=>a.key===o.key)} onClick={()=>void retryOperation(o.id).catch(e=>errorToast("重试", e))}>重试</Button>}
           </div>
         </article>;
       })}</div>

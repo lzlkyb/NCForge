@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getSideOpen, setSideOpen } from "./layoutStore";
-import { navigateRail } from "./railNavigation";
+import { navigateRail, pageSideEffect } from "./railNavigation";
 
 let original: boolean;
 beforeEach(() => { original = getSideOpen(); });
@@ -19,10 +19,14 @@ describe("主导航与侧栏偏好", () => {
     expect(getSideOpen()).toBe(false);
     expect(go.mock.calls).toEqual([["logs"], ["files"]]);
   });
-  it("打开其他工具仍展开其实际侧栏", () => {
+  it("打开其他工具仍展开其实际侧栏（切页副作用统一在 pageSideEffect）", () => {
     setSideOpen(false); const go = vi.fn();
     navigateRail("logs", "db", go);
-    expect(getSideOpen()).toBe(true); expect(go).toHaveBeenCalledWith("db");
+    // navigateRail 只负责转发切页，侧栏开合由 App.navigate 里的 pageSideEffect 统一处理；
+    // 两条入口（侧栏点击 / 命令面板 / Ctrl+1~N）共用这一份规则，不会分叉。
+    expect(go).toHaveBeenCalledWith("db");
+    pageSideEffect("logs", "db");
+    expect(getSideOpen()).toBe(true);
   });
   it("重复点击代码继续切换可见资源侧栏", () => {
     setSideOpen(true); const go = vi.fn(); navigateRail("files", "files", go);

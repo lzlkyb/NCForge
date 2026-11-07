@@ -60,7 +60,7 @@ export function PasswordResetDialog({ connId, onClose }: { connId: string; onClo
   };
 
   return (
-    <Modal open onClose={onClose} className="modal-surface dbx-dlg wide dbx-pr" ariaLabel="重置操作员密码">
+    <Modal keepMountedWhenInactive open onClose={onClose} className="modal-surface dbx-dlg wide dbx-pr" ariaLabel="重置操作员密码">
       <div className="hd">
         <Icon name="key" size={16} />
         重置操作员密码

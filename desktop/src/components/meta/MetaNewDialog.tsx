@@ -8,6 +8,7 @@ import {
 } from "../../lib/bmf";
 import { BMF_IDENT } from "../../lib/bmfPath";
 import { getConfig } from "../../lib/appConfig";
+import { errorToast } from "../../lib/errorToast";
 import { toast } from "../ui/toast";
 import { Button } from "../ui/button";
 import { Dialog, DialogHeader, DialogTitle } from "../ui/dialog";
@@ -119,7 +120,7 @@ export function MetaNewDialog({
       setScaffold(r);
       setPreviewKey(key);
     } catch (e) {
-      toast(String(e), "error");
+      errorToast("预览骨架", e);
     } finally {
       setBusy(false);
     }
@@ -148,7 +149,7 @@ export function MetaNewDialog({
       toast("组件已创建", "success");
       onCreated(p);
     } catch (e) {
-      toast(String(e), "error");
+      errorToast("创建组件", e);
     } finally {
       setBusy(false);
     }

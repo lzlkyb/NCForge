@@ -15,9 +15,9 @@ body:has(:is(.dbx-transfer-dialog,.dbx-nc-transfer):not([data-exiting])) .toast-
 .dbx-transfer-presets { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
 .dbx-transfer-presets label { white-space: nowrap; color: hsl(var(--muted-foreground)); font-size: 12px; }
 .dbx-transfer-presets select { flex: 1; min-width: 0; }
-.dbx-transfer-dialog select, .dbx-transfer-dialog input:not([type="checkbox"]):not([type="radio"]) { height: 32px; padding: 0 9px; border: 1px solid hsl(var(--input)); border-radius: var(--r-control); background: hsl(var(--background)); color: hsl(var(--foreground)); font: inherit; min-width: 0; width: 100%; }
+.dbx-transfer-dialog select, .dbx-transfer-dialog input:not([type="checkbox"]):not([type="radio"]) { height: 32px; padding: 0 9px; border: 1px solid hsl(var(--border-strong, 205 12% 55%)); border-radius: var(--r-control); background: hsl(var(--background)); color: hsl(var(--foreground)); font: inherit; min-width: 0; width: 100%; }
 .dbx-transfer-dialog input[type="checkbox"], .dbx-transfer-dialog input[type="radio"] { accent-color: hsl(var(--primary)); width: 14px; height: 14px; flex-shrink: 0; margin: 3px 0 0; }
-.dbx-transfer-dialog input:disabled, .dbx-transfer-dialog select:disabled { opacity: .55; }
+.dbx-transfer-dialog input:disabled, .dbx-transfer-dialog select:disabled { opacity: var(--disabled-opacity, .62); cursor: not-allowed; }
 .dbx-transfer-dialog :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 .dbx-transfer-dialog .dbx-btn, .dbx-transfer-dialog .dbx-ibtn { transition: background-color 120ms ease, color 120ms ease; }
 .dbx-transfer-dialog .dbx-btn:active:not(:disabled), .dbx-transfer-split button:active:not(:disabled) { transform: translateY(1px); }
@@ -29,14 +29,14 @@ body:has(:is(.dbx-transfer-dialog,.dbx-nc-transfer):not([data-exiting])) .toast-
 .dbx-transfer-choice { display: flex; gap: 9px; align-items: flex-start; margin: 11px 0; cursor: pointer; }
 .dbx-transfer-choice span { min-width: 0; }
 .dbx-transfer-choice small { display: block; margin-top: 2px; color: hsl(var(--muted-foreground)); font-size: 12px; line-height: 1.6; }
-.dbx-transfer-choice[data-disabled] { opacity: .6; cursor: default; }
+.dbx-transfer-choice[data-disabled] { opacity: var(--disabled-opacity, .62); cursor: not-allowed; }
 .dbx-transfer-field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; margin: 12px 0; }
 .dbx-transfer-row { display: flex; gap: 12px; }
 .dbx-transfer-row > * { flex: 1; min-width: 0; }
 .dbx-transfer-tags { display: flex; gap: 6px; margin: 8px 0 12px; }
 .dbx-transfer-tags button { padding: 3px 10px; border: 1px solid hsl(var(--border)); border-radius: var(--r-control); color: hsl(var(--muted-foreground)); }
 .dbx-transfer-tags button[aria-pressed="true"] { color: hsl(var(--accent-foreground)); border-color: hsl(var(--primary) / .4); background: hsl(var(--accent)); }
-.dbx-transfer-tags button:disabled { opacity: .4; }
+.dbx-transfer-tags button:disabled { opacity: var(--disabled-opacity, .62); cursor: not-allowed; }
 .dbx-transfer-help { margin: 8px 0 0; color: hsl(var(--muted-foreground)); font-size: 12px; line-height: 1.7; }
 .dbx-transfer-note { padding: 10px 12px; margin: 12px 0; border-radius: var(--r-control); background: hsl(var(--warning) / .1); color: hsl(var(--warning-ink)); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
 .dbx-transfer-note p { margin: 3px 0; }

@@ -242,6 +242,8 @@ HTTPS_PROXY=http://127.0.0.1:7897 NO_PROXY=gitee.com,localhost,127.0.0.1 \
 >
 > 当前 15 项，按「失败越快越靠前」排。历史教训（11-06）：清单原先抄在三处（钩子 + build.yml 的两个 job），`cargo fmt --check` 因此从 11-05 起在 CI 里一次都没跑过；按记忆手动跑又漏了 knip / 设计 token / UI 约定 / 体积预算四项，push 后 CI 三个 job 全红。
 >
+> **pre-commit（提交前，30 秒内）**：只有三项 —— 设计 token / `cargo fmt` / `tsc`，清单同样在 `gate-plan.mjs` 的 `PRECOMMIT`。它按**暂存文件后缀**挑：只改文档时三项都跳过并打印「跳过：…」，改 `.rs` 跑 fmt、改 `.ts/.tsx` 跑 tsc、改 `.css/.tsx` 跑 token。eslint / vitest / clippy / cargo test 一律不进——钩子一旦超过半分钟就会被 `--no-verify` 绕过，等于没有。tsc 带增量缓存（`node_modules/.cache/tsc.tsbuildinfo`）：冷跑 ~23s，热跑 ~8s。同工作树里别人的半成品把 tsc 弄红时，用 `git commit --no-verify` 跳过，不要改自己的代码去迁就它。
+>
 > 🔴 钩子靠 `core.hooksPath` 生效：`npm install`（postinstall）与 `npm run dev`（predev）会自动设好，手工修复是 `git config core.hooksPath .githooks`。用传统 `cp` 方式装的话记得 `chmod +x`——没有可执行位的钩子会被 git 静默跳过，一项门禁都不跑。钩子没启用时 `node scripts/gate.mjs` 会打印一行提醒。
 
 ### Commit 前缀规范

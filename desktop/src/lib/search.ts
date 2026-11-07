@@ -1,4 +1,4 @@
-import { invoke } from "./tauri";
+import { invoke, listen } from "./tauri";
 import { trackOperation } from "./operations";
 import { getSession } from "./workspaceSession";
 
@@ -55,6 +55,13 @@ export interface SearchOptions {
    */
   dirs?: string[];
   maxResults?: number;
+  /**
+   * 优先扫描的文件（**相对工作区根**、`/` 或 `\` 分隔）。
+   *
+   * 只影响扫描顺序、不影响范围与结果集：快速面板把它设成最近打开的那些文件，
+   * 用户多半在找刚看过的东西，第一条命中就能在几十毫秒内出现。
+   */
+  priority?: string[];
 }
 
 /**
@@ -63,6 +70,43 @@ export interface SearchOptions {
  */
 export const searchWorkspace = (options: SearchOptions, report = false, source?: string) =>
   !report ? invoke<SearchOutcome>("search_workspace", source ? { options, source } : { options }) : trackOperation({ key: `search.workspace:${getSession().root}:${JSON.stringify(options)}`, label: "搜索当前工程", errorDetail: () => "搜索失败，请查看搜索页错误详情", scope: getSession().root ?? "工作区", page: "search", phase: "扫描所选范围，保留已有结果" }, () => invoke<SearchOutcome>("search_workspace", { options }), r => ({ state: "success", detail: `扫描 ${r.filesScanned} 个文件，命中 ${r.filesMatched} 个${r.truncated ? "；达到上限，结果不完整" : ""}${r.scopeFallback ? "；指定范围不存在，已回落到整个工作区" : ""}` }));
+
+/** 一批流式结果。`stream` 是查询标识：连续敲键会有多次查询同时在飞。 */
+interface SearchBatch {
+  stream: string;
+  hits: SearchHit[];
+}
+
+let streamSeq = 0;
+
+/**
+ * 流式搜索：边扫边把新命中交给 `onBatch`，返回值仍是完整结果。
+ *
+ * 为什么要分批：快速面板的 `#内容` 以前是「发出去就一直等到扫完」，newar 上要
+ * 1~3 秒，列表始终空着，看起来像卡死。现在第一批命中几十毫秒就到，用户能看到
+ * 列表在长；`onBatch` 收到的是**增量**，最终以返回值为准（事件可能在返回之后才到，
+ * 所以调用方拿到 Promise 结果后要整体替换列表，而不是继续追加）。
+ */
+export async function searchWorkspaceStream(
+  options: SearchOptions,
+  onBatch: (hits: SearchHit[]) => void,
+  source?: string,
+): Promise<SearchOutcome> {
+  const stream = `s${++streamSeq}`;
+  let un: (() => void) | undefined;
+  try {
+    un = await listen<SearchBatch>("search:batch", (p) => {
+      if (p.stream === stream) onBatch(p.hits);
+    });
+  } catch {
+    // 浏览器里跑 vite dev 时 listen 会失败：退化成「只拿最终结果」
+  }
+  try {
+    return await invoke<SearchOutcome>("search_workspace_stream", { options, source, stream });
+  } finally {
+    un?.();
+  }
+}
 
 /** 单个工程的搜索结果（`search_projects` 的一项）。`outcome` 里的路径相对 `root`。 */
 export interface ProjectSearch {

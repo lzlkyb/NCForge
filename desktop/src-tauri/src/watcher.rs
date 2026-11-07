@@ -149,6 +149,11 @@ impl Batcher {
     }
 
     fn flush(&mut self, emit: &Arc<dyn Fn(WatchBatch) + Send + Sync>) {
+        // 源码变了：让工作区索引在下一次查询时后台校准。索引构建要遍历整棵树
+        // （慢盘上十几秒），绝不能跟着查询同步做，也不能靠定时校准空转。
+        if !self.java.is_empty() || self.java_overflow {
+            crate::workspace_types::mark_dirty();
+        }
         self.since = None;
         flush(
             &mut self.pending,

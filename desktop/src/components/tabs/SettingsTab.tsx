@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { SettingsLayout } from "../settings/SettingsLayout";
 import { DockRegion } from "../workspace/WorkbenchDock";
 import { patchConfig, type ConfigPatch } from "../../lib/appConfig";
-import { toast } from "../ui/toast";
-import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 import { CHANGELOG } from "../../lib/about";
 import { markChangelogSeen } from "../../lib/utils";
 import { VersionHistoryDialog } from "../settings/VersionHistoryDialog";
@@ -42,7 +41,7 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
       await patchConfig(patch);
       onChanged?.();
     } catch (e) {
-      toast(failureText("保存设置", e), "error");
+      errorToast("保存设置", e);
     }
   };
 

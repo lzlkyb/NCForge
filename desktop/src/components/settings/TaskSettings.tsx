@@ -8,9 +8,10 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SettingsRow } from "../ui/SettingsRow";
 import { ToggleRow } from "../ui/ToggleRow";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { toast } from "../ui/toast";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
-import { getConfig, patchConfig, rememberAutoCompile } from "../../lib/appConfig";
+import { useAutoCompilePref } from "../../hooks/useAutoCompilePref";
 import {
   addTask,
   BUILTIN_TASKS,
@@ -34,44 +35,13 @@ export function TaskSettings() {
   // 默认就是最常见的「编全部 → 投送」；勾选顺序即执行顺序
   const [steps, setSteps] = useState<TaskStep[]>(["compileAll", "deploy"]);
   const createRef = useRef<HTMLDetailsElement>(null);
-  /**
-   * 「保存时自动编译」开关。`null` = 还没读到（读不到就按默认开，与后端一致）。
-   *
-   * 不用 react-query：这一页只有这一个值要读，为它把整页拴在 QueryClientProvider 上
-   * 不划算（测试里也得跟着起一个 provider）。开关只在保存时读一次，`useState` 足够。
-   */
-  const [autoCompile, setAutoCompile] = useState<boolean | null>(null);
+  // 「保存时自动编译」的读取 / 写回 / 失败回滚都在这个 hook 里（读写约定见文件头注释）
+  const auto = useAutoCompilePref();
+  const [removeTarget, setRemoveTarget] = useState<NcTask | null>(null);
 
   useEffect(() => {
     setCustom(loadCustomTasks(root));
   }, [root]);
-
-  useEffect(() => {
-    let alive = true;
-    getConfig()
-      .then((c) => alive && setAutoCompile(c.auto_compile))
-      .catch(() => alive && setAutoCompile(true));
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  /**
-   * 开关写回：乐观置值 + 失败回滚。
-   * `rememberAutoCompile` 必须同步更新——保存流程读的是那份进程内缓存，
-   * 不更新的话要等重启才生效（用户会以为开关坏了）。
-   */
-  const toggleAutoCompile = async (next: boolean) => {
-    setAutoCompile(next);
-    rememberAutoCompile(next);
-    try {
-      await patchConfig({ auto_compile: next });
-    } catch (e) {
-      setAutoCompile(!next);
-      rememberAutoCompile(!next);
-      toast(`保存「自动编译」设置失败：${e}`, "error");
-    }
-  };
 
   const toggle = (s: TaskStep) =>
     setSteps((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
@@ -88,7 +58,12 @@ export function TaskSettings() {
     toast(`已添加任务「${r.task.name}」`, "success");
   };
 
-  const remove = (t: NcTask) => {
+  // 删除是不可逆操作：先弹 destructive 确认框，别一点就删掉。
+  const remove = (t: NcTask) => setRemoveTarget(t);
+  const confirmRemove = () => {
+    const t = removeTarget;
+    setRemoveTarget(null);
+    if (!t) return;
     if (!removeTask(root, t.id)) {
       toast("删除失败：本机存储不可用", "error");
       return;
@@ -105,11 +80,15 @@ export function TaskSettings() {
         keywords={["编译", "保存", "auto compile", "自动"]}
         sub="只编刚保存的这一个文件，约 1~3 秒；产物写到模块的 classes"
         info="Eclipse 里保存即出 class，靠的是常驻进程 + 整工程依赖图，我们拿不到那份能力（实测 jdt.ls 每次启动要重建工作区，整工程 152 秒）。所以这里只编保存的那一个文件，够挡语法、拼写、import 这类错误。改了方法签名或继承关系时它发现不了引用方——那种改动请手动「编译模块」。"
-        checked={autoCompile ?? true}
-        disabled={autoCompile === null}
-        valueText={autoCompile === null ? "读取中" : autoCompile ? "已开启" : "已关闭"}
-        onChange={(v) => void toggleAutoCompile(v)}
+        checked={auto.value ?? true}
+        disabled={auto.value === null}
+        valueText={auto.value === null ? "读取中" : auto.value ? "已开启" : "已关闭"}
+        onChange={(v) => void auto.save(v)}
       />
+      {auto.error && <p role="alert" className="flex items-center gap-2 px-2 py-1 text-xs text-destructive-ink">
+        <span className="min-w-0 flex-1">{auto.error}</span>
+        <Button size="sm" variant="ghost" onClick={auto.retry}>重试</Button>
+      </p>}
       <BuildSettings />
       <details className="settings-task-builtins">
         <summary>内置任务 <span>{BUILTIN_TASKS.length} 个固定流程 · 只读</span></summary>
@@ -186,6 +165,16 @@ export function TaskSettings() {
           </div>
         </form>
       </details>
+
+      <ConfirmDialog
+        open={removeTarget !== null}
+        variant="destructive"
+        title="删除自定义任务？"
+        description={removeTarget ? `将删除任务「${removeTarget.name}」，此操作不可撤销。` : undefined}
+        confirmLabel="删除"
+        onCancel={() => setRemoveTarget(null)}
+        onConfirm={confirmRemove}
+      />
     </Card>
   );
 }

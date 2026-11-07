@@ -1,10 +1,10 @@
+import { errorToast } from "./errorToast";
 import { beginOperation } from "./operations";
 // NC 任务（run configuration）：把「编译 → 投送 → 重启 → 打补丁」串成一条可复用动作。
 //
 // 刻意只提供固定步骤，不开放任意 shell：这些动作都会读写 NC 安装目录或起 JVM，
 // 让用户在这里敲命令行等于把安全边界交给一个 localStorage 输入框。
 import { toast } from "../components/ui/toast";
-import { failureText } from "./friendlyError";
 import { deployApply } from "./deploy";
 import { serverStart, serverStop } from "./server";
 import { readDebugModePref } from "./debugKeys";
@@ -164,7 +164,7 @@ export function buildNcTaskRuntime(
         );
         return true;
       } catch (e) {
-        toast(failureText("投送元数据", e), "error");
+        errorToast("投送元数据", e);
         return false;
       }
     },
@@ -179,7 +179,7 @@ export function buildNcTaskRuntime(
         toast(outcome === "idle" ? "服务先前已退出，本次启动请求已接受" : "重启请求已接受，正在加载模块", "success");
         return true;
       } catch (e) {
-        toast(failureText("重启服务", e), "error");
+        errorToast("重启服务", e);
         return false;
       }
     },

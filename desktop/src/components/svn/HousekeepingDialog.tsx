@@ -97,7 +97,7 @@ export function HousekeepingDialog({
 
   return (
     <>
-      <Modal open={open} onClose={onClose} ariaLabel="维护" className="vc-dialog vc-dialog-hk">
+      <Modal keepMountedWhenInactive open={open} onClose={onClose} ariaLabel="维护" className="vc-dialog vc-dialog-hk">
         <h3>
           <Icon name="shield" size={14} /> 维护
           <span className="vc-hk-sub">撤销备份与审查标记</span>

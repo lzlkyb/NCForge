@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { failureText } from "../lib/friendlyError";
+import { errorToast } from "../lib/errorToast";
 import { traceCall, type LogEntry, type TraceResult } from "../lib/ncLog";
-import { toast } from "../components/ui/toast";
 
 /** 详情保留记录快照；追踪响应必须仍属于当前选中的请求。 */
 export function useLogSelection() {
@@ -36,7 +35,7 @@ export function useLogSelection() {
       if (mine !== sequence.current || selectedRef.current?.callId !== callId) return;
       setTrace(result);
     } catch (error) {
-      if (mine === sequence.current) toast(failureText("追踪这次请求", error), "error");
+      if (mine === sequence.current) errorToast("追踪这次请求", error);
     } finally {
       if (mine === sequence.current) setTracing(false);
     }

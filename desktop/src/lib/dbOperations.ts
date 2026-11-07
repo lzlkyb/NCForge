@@ -1,4 +1,6 @@
 import type { OperationSpec } from "./operations";
+
+export const dbTxKey = (connId: string | null, slot?: string | null) => `tx:${connId ?? ""}:${slot || "primary"}`;
 import { activateTab, connOf, tabOf } from "./dbStore";
 import { toast } from "../components/ui/toast";
 

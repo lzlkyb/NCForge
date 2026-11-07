@@ -21,13 +21,17 @@ describe("工作台任务布局", () => {
     act(() => { updateWorkbenchLayout({ heights: { problems: 180, svc: 390 } }); setSession({ panelTab: "svc" }); });
     expect(host.querySelector<HTMLElement>(".wb-bottom")?.style.height).toBe("390px");
     act(() => updateWorkbenchLayout({ expanded: "svc" }));
-    expect(host.querySelector<HTMLElement>(".wb-code-surface")?.hidden).toBe(true);
+    // 展开态由 `.wb-main[data-panel-expanded]` + CSS 收起两个面；`hidden` 只留给
+    // 「文档面占位」这一件事，混进来会同时隐藏代码面与文档面（主区纯白）。
+    expect(host.querySelector<HTMLElement>(".wb-main")?.hasAttribute("data-panel-expanded")).toBe(true);
+    expect(host.querySelector<HTMLElement>(".wb-code-surface")?.hidden).toBe(false);
     act(() => { updateWorkbenchLayout({ expanded: null }); setSession({ panelTab: "problems" }); });
     expect(host.querySelector<HTMLElement>(".wb-bottom")?.style.height).toBe("180px");
     expect(host.querySelector("textarea")).toBe(editor); expect(editor.value).toBe("unsaved");
     act(() => updateWorkbenchLayout({ expanded: "problems" }));
-    expect(host.querySelector<HTMLElement>(".wb-code-surface")?.hidden).toBe(true);
+    expect(host.querySelector<HTMLElement>(".wb-main")?.hasAttribute("data-panel-expanded")).toBe(true);
     act(() => updateWorkbenchLayout({ expanded: null }));
+    expect(host.querySelector<HTMLElement>(".wb-main")?.hasAttribute("data-panel-expanded")).toBe(false);
     expect(host.querySelector<HTMLElement>(".wb-code-surface")?.hidden).toBe(false);
   });
   it("编码布局正常输出默认200px，切换调试布局后可恢复", () => {

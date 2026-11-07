@@ -29,9 +29,15 @@ export function getKeymap(): Keymap {
   catch { return "eclipse"; }
 }
 
-export function setKeymap(value: Keymap): void {
-  localStorage.setItem(KEY, value);
-  window.dispatchEvent(new Event("ncforge-keymap-change"));
+/** 返回是否写入成功；失败（本地存储被禁 / 配额满）时 UI 据此回滚单选态。 */
+export function setKeymap(value: Keymap): boolean {
+  try {
+    localStorage.setItem(KEY, value);
+    window.dispatchEvent(new Event("ncforge-keymap-change"));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Only claim shortcuts whose operations actually exist in the workbench. */

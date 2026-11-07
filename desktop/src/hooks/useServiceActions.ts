@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "../components/ui/toast";
 import { failureText } from "../lib/friendlyError";
+import { errorToast } from "../lib/errorToast";
 import { useWorkspaceSelector } from "../lib/workspaceSession";
 import type { ServerState, StopOutcome } from "../lib/server";
 
@@ -59,7 +60,7 @@ export function useServiceActions({ name, debugMode, startRequest, stopRequest, 
       if (outcome === "stopped") patchState("stopped");
       toast(outcome === "cancelling" ? `正在取消${name}启动…` : outcome === "idle" ? `${name}没有在运行` : `${name}已停止`, "info");
     } catch (e) {
-      if (alive.current && context.current === generation) toast(failureText(`停止${name}`, e), "error");
+      if (alive.current && context.current === generation) errorToast(`停止${name}`, e);
     } finally {
       stopLock.current = false;
       if (alive.current && context.current === generation) { setBusy(startLock.current ? "stop" : null); void refetch(); }

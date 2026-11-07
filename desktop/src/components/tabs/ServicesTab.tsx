@@ -25,7 +25,7 @@ import { useServiceCommands } from "../../hooks/useServiceCommands";
 import { useClientService } from "../../hooks/useClientService";
 import { useAppHidden } from "../../lib/appVisibility";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
-import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 import { attachDebugger, detachDebugger, useDebugSnapshot } from "../../lib/debugSession";
 import { readDebugModePref, writeDebugModePref } from "../../lib/debugKeys";
 import { serviceNames, type ServiceSource } from "../../lib/servicePresentation";
@@ -70,18 +70,18 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
 
   const attachDebug = (detach: boolean) => {
     const target = ui.source === "client" ? "client" : "server";
-    void (detach ? detachDebugger(target) : attachDebugger(target)).then(() => toast(`${serviceNames[ui.source]}调试已${detach ? "断开" : "附加"}`, "success")).catch(e => toast(failureText(`${detach ? "断开" : "附加"}调试器`, e), "error"));
+    void (detach ? detachDebugger(target) : attachDebugger(target)).then(() => toast(`${serviceNames[ui.source]}调试已${detach ? "断开" : "附加"}`, "success")).catch(e => errorToast(`${detach ? "断开" : "附加"}调试器`, e));
   };
   const showCommandLine = async () => {
     if (ui.source === "client") { await client.showCommandLine(); return; }
     changeUi({ previewing: true });
     try { changeUi({ preview: await serverCommandLine() }); }
-    catch (e) { toast(failureText("生成启动命令行", e), "error"); }
+    catch (e) { errorToast("生成启动命令行", e); }
     finally { changeUi({ previewing: false }); }
   };
-  const revealLog = (previous = false) => { void serverRevealLog(previous).catch(e => toast(failureText("打开日志位置", e), "error")); };
+  const revealLog = (previous = false) => { void serverRevealLog(previous).catch(e => errorToast("打开日志位置", e)); };
   const requestStop = () => {
-    if (flow.running) void cancelDevelopmentFlow().catch(e => toast(failureText("取消开发流程", e), "error"));
+    if (flow.running) void cancelDevelopmentFlow().catch(e => errorToast("取消开发流程", e));
     // 准备期间直接取消；已有运行进程的停止保留对象明确的确认。
     if (selectedBusy === "start" || selectedBusy === "restart" || selected?.state === "starting") { void (ui.source === "client" ? client.stop() : commands.stop()); return; }
     changeUi({ confirm: { kind: "stop", source: ui.source } });

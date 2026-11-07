@@ -5,7 +5,7 @@ import { Icon } from "../ui/icon";
 import { Input } from "../ui/input";
 import { Modal } from "../ui/Modal";
 import { toast } from "../ui/toast";
-import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 import { patchSetOutRoot } from "../../lib/patch";
 
 /**
@@ -48,7 +48,7 @@ export function OutRootField({
       toast(dir ? "产物根已指定，已按新目录重扫" : "已恢复自动探测产物根", "success");
       setOpen(false);
     } catch (e) {
-      toast(failureText("保存产物根", e), "error");
+      errorToast("保存产物根", e);
     } finally {
       savingRef.current = false;
       setSaving(false);

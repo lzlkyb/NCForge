@@ -46,6 +46,7 @@ gen-changelog.mjs 当成真实版本段解析；代码围栏中的示例会被�
 - 数据库工具没有 NC 安装目录也能用：prop.xml 导入页在缺少 NC home 时显示引导卡片，说明这一页要什么、给出一键去「NC 环境」设置的入口，并指出不配 home 也能连库的另一条路；测试连接遇到需要 NC home的场景时，红条提供「换成纯 Rust 驱动」一键切换。
 
 ### 变更
+- 数据库连接状态在树行内直接显示，提交与回滚固定在当前会话工具栏。提交方式在连接设置中配置，新会话直接采用，已有会话在处理事务并重连后生效。慢查询保留上次结果，并显示等待、停止与用时反馈。
 - 文件树和编辑器标签统一显示去重后的错误与警告。点击徽标可查看对应文件、包或模块的问题并定位到源码，文件树支持「只看问题」与恢复原展开状态。
 - 文件树动作与过滤、代码执行工具、阅读入口和文件状态按任务归组；浅深主题同步统一补全、悬浮提示与定义预览，窄区保留主操作与代码空间。
 - BMF 生成中心升级为整套产物工作台：配置统一更新，文件清单支持搜索、筛选和分组选择，内容、真实差异与来源联动查看，低窗口可展开配置抽屉并保留底部写入操作。
@@ -54,6 +55,9 @@ gen-changelog.mjs 当成真实版本段解析；代码围栏中的示例会被�
 - 元数据资源与属性面板按可用空间停靠或收成抽屉；支持方向键选择字段、F2 编辑、Ctrl+S 预览保存，对比、历史和生成等工具按需加载。
 - 生成前自动做规则校验，存在错误时禁止写入磁盘；写入前显示每个文件相对上次生成的漂移状态，手改过的文件默认跳过，确认覆盖时先备份。
 - 数据连接页默认引擎改为「纯 Rust 驱动」并排在引擎选择首位（导入 .properties 同样默认纯 Rust 驱动）：它不依赖 NC home，适合只用数据库工具的用户；没有 NC home 的机器上，JVM 桥按钮会标注「需要 NC 安装目录」。已有连接的引擎不变。
+- 快速导航（找文件、找类）不再每次都等一遍全盘扫描：文件名清单与类型索引改为「先用上次结果立刻出列表、后台再校准」，打开面板就能直接输入；符号搜索在语言服务长时间没响应时先退回本地结果，输入框不再一直转圈。
+- 「工作区符号」（找方法 / 字段）不再等语言服务建索引：改由工作区本地索引回答，第一次打开就能搜，结果里仍注明所属类与模块；依赖 jar 里的成员照旧由语言服务补充。
+- 快速导航里 `#` 搜内容改成边扫边出：先扫最近打开的文件和文件名里带关键词的文件，第一批命中最快几十毫秒就出现，列表不再空着等全量扫完。
 
 ### 修复
 - 数据库空闲后执行 SQL 会检查当前会话，断开的干净会话可按需恢复。执行中断线时保留已显示的结果并提示核对事务。
@@ -71,6 +75,13 @@ gen-changelog.mjs 当成真实版本段解析；代码围栏中的示例会被�
 - 修复自动探测 NC 安装目录时同一个目录出现两种写法（Windows 的短名 `RUNNER~1`、macOS 的 `/var` 与 `/private/var`）导致候选重复、与已配置路径对不上的问题。
 
 ### 技术细节
+- 新增工作区成员索引（`java_members`）：与类型索引同一次读盘顺带解析方法 / 字段 / 构造器 / 枚举常量（newar 上 7348 个文件 → 13.2 万条成员），`search_workspace_symbols` 毫秒级返回，`workspace/symbol` 从主路径退为「依赖 jar 兜底」。缓存版式 +1（`CachedFile` 增 `raw` / `module` / `members`）。
+- 索引构建不再跟查询抢磁盘：`workspace_types` 的 TTL 30s → 30min，源码改动由文件监听 `mark_dirty()` 触发校准；首次无索引时走 `shared_opt`（起后台构建、立即返回「正在建索引」），磁盘缓存可读时走 `load_cached_only`（只读 JSON 约 1s，全树 stat 交给后台）。顺带修掉 `spawn_prewarm_types` 把缓存在 `config_dir` 根写、查询却读 `config_dir/type-index` 导致预热白跑的问题。
+- 名字匹配去掉逐条 `to_lowercase()` 分配，改为字节级大小写无关比较，驼峰首字母在索引里预算：13.2 万条成员上查询耗时 209ms → 59ms（debug 构建），`type_match_score_with` 让 jar 目录与工作区索引共用同一份打分规则。
+- `#内容` 搜索新增流式通道 `search_stream`：生产者线程走目录、worker 线程并行读（队列 4096），命中到上限即停；`options.priority` 让调用方指定先扫哪些文件（最近打开 + 文件名命中，最多 50 个），每 16 条经 `search:batch` 事件推给前端，命令 `search_workspace_stream` 的返回值仍是完整结果。newar 上 `getBillNo` 首批 909ms / 完成 1255ms（此前 20 秒预算跑满也只是部分结果）。
+- 面板 `#内容` 改用 `searchWorkspaceStream`，增量结果直接铺进列表（按 `key` 去重），加载中即可回车打开当前条目；`peekFileIndex` 只读内存里的文件清单，不让搜索倒过来等一次全树扫描。
+- JS 体积预算按本地 `vite build` 实测上调到 5165KB raw / 1489KB gzip（最大块仍是 3172KB 的 Monaco 装配）：增量来自本批快速导航的流式搜索客户端与工作区符号接口（`search.ts` / `paletteSources.ts` / `typeSearch.ts` / `fileIndex.ts` 共约 280 行新代码），以及同一工作树里并行进行的数据库/工作台界面改动。
+- 快速导航的查询链路去掉三处「每次按键都重算」：① 文件清单 `search_list_files` 加进程内 60 秒 + 磁盘 24 小时缓存，过期走 stale-while-revalidate（先回旧表、后台单飞重扫），新增 `search_invalidate_files` 供文件树增删改后主动失效；② 工作区类型索引 TTL 5s→30s 且同样 SWR，打开工作区时用 `spawn_prewarm_types` 预热；③ `workspace/symbol` 超时 20s→4s、`documentSymbol` 15s→5s。面板换查询不再清空列表（加载中回车不执行），消掉「闪成空白 + 查询中…」的假死观感。
 - BMF 生成工作台同源构建对照增加约 24.34KB raw / 7.73KB gzip 的 JS，CSS 另增 11.92KB raw / 2.48KB gzip；预算仅按本批增加 25KB / 8KB，最大块保持 3171KB，全仓剩余超额见实施验收记录。
 - 重解析点检查增加「基准目录」版本（`has_reparse_component_under`）：路径在模块目录之内才逐层检查到模块目录为止，更上层交给系统；原 `has_reparse_component` 保留完整链语义供没有基准的场景使用。新增单测在类 Unix 平台真建符号链接验证「基准之上不算逃逸、基准之内必须拒绝」。
 - JS 体积预算按本地 `vite build` 实测上调到 5148KB raw / 1483KB gzip / 最大块 3172KB，增量来自上一批工作台、服务控制台与元数据工作台的界面。
@@ -87,6 +98,7 @@ gen-changelog.mjs 当成真实版本段解析；代码围栏中的示例会被�
 - 门禁清单收敛为单一真源 `desktop/scripts/lib/gate-plan.mjs`：每项声明 id、命令、工作目录、scope 与「为什么有这一项」。`pre-push` 缩成一句 `exec node scripts/gate.mjs`，CI 三个 job 的每一步改成 `node scripts/gate.mjs --only <id>`，不再各自抄一份命令。新增 `--verify-ci`：断言每个 job 的 id 序列等于清单里该 scope 的序列，少了、多了、顺序漂了、或又在工作流里手写命令都会立刻红（本地 `npm test` 的 `pretest` 也跑这条断言）。`postinstall` / `predev` 幂等执行 `git config core.hooksPath .githooks`，克隆完装依赖即生效；钩子未启用时 gate 会打印提醒。
 - 补上 `cargo fmt --check`：它此前在 CI 里根本不存在，唯一跑它的是那个从未安装过的钩子，于是 36 个源文件长期不符合 rustfmt 格式而无人知晓（本轮一次性格式化，纯格式变化）。顺带补一条 Rust 测试临时目录棘轮（`check-rust-tempdir.mjs`，基线模块内 87 处 / integration 12 处）：测试里裸用 `std::env::temp_dir()` 只许减不许增，新增改用 `crate::test_support::tmp(tag)`——它返回 canonicalize 过的路径，能消掉 macOS `/var` → `/private/var` 与 Windows CI `RUNNER~1` 短名造成的「本地绿、CI 红」。
 - `node scripts/gate.mjs` 提供五个入口：全量（本地 pre-push）、`--scope frontend|win|mac`、`--only <id>`、`--list`、`--verify-ci`。失败即停并打印单项复现命令，不让人等完 `cargo test` 才知道是 eslint 挂了。`knip.json` 的 entry 补上新脚本（它只被清单的 argv 字符串引用，knip 追不到）。
+- 新增 pre-commit 钩子，只跑 30 秒内的三项（设计 token / `cargo fmt --check` / `tsc`），清单与 pre-push、CI 同源（`gate-plan.mjs` 的 `PRECOMMIT`）：按暂存文件后缀挑，只改文档时不跑并打印跳过了哪几项。`tsc` 加增量缓存（`node_modules/.cache/tsc.tsbuildinfo`，冷跑 23s → 热跑 8s）。eslint / vitest / clippy / cargo test 仍只在 pre-push，避免日常提交被拖到十分钟。
 
 ## [0.1.2] - 2026-11-05
 

@@ -4,7 +4,7 @@
   max-width:calc(100vw - 32px);height:auto;max-height:min(650px,calc(100dvh - 48px));
   overflow:hidden;border-radius:var(--r-dialog,12px);background:hsl(var(--card));color:hsl(var(--foreground));
 }
-.update-dialog.modal-surface,html:root[data-ui-style] .update-dialog { border:0;background:hsl(var(--card));box-shadow:var(--shadow-pop); }
+.update-dialog.modal-surface,html[data-ui-style="glass"] .update-dialog { border:0;background:hsl(var(--card));box-shadow:var(--shadow-pop); }
 .update-brand { display:flex;flex-direction:column;min-width:0;padding:28px 24px;background:hsl(var(--accent)); }
 .update-brand-name { font-size:14px;font-weight:650; }
 .update-brand>img { width:76px;height:76px;object-fit:contain;margin:44px 0 39px; }

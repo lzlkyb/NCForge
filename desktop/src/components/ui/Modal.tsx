@@ -57,13 +57,15 @@ export function Modal({
   // Esc 在内容节点处理并停止冒泡，嵌套弹窗优先关闭自己。
   const surfaceRef = useRef<HTMLDivElement>(null);
   /**
-   * 按下时指针是否就在遮罩上。
+   * 按下 / 抬起时指针是否都在遮罩上。
    *
-   * 只看 click 的 target 不够：mousedown 在弹窗内、mouseup 落在遮罩上时，click 的
-   * target 是两者的公共祖先——也就是遮罩本身。导入配置、全部替换这类含不可逆操作的
-   * 确认框，会因为在框里拖选文字、手松到外面就「莫名关掉」，用户还以为已经执行了。
+   * 只看 click 的 target 不够：mousedown 在弹窗内、mouseup 落在遮罩上（或反过来），
+   * click 的 target 都是两者的公共祖先——也就是遮罩本身。导入配置、全部替换这类含
+   * 不可逆操作的确认框，会因为在框里拖选文字、手松到外面就「莫名关掉」。
+   * 两个方向都要求按下与抬起同时落在遮罩上，才允许关闭。
    */
   const downOnOverlay = useRef(false);
+  const upOnOverlay = useRef(false);
   useFocusTrap(surfaceRef, { enabled: mounted && !retained, onEscape: visible ? onClose : undefined });
 
   if (!mounted && !retained) return null;
@@ -75,12 +77,18 @@ export function Modal({
       data-exiting={!visible || undefined}
       style={{ zIndex, display: retained ? "none" : undefined }}
       aria-hidden={retained || undefined}
+      // 页面切后台保留的弹层：display:none 之外再置 inert，确保它不接收焦点、不进读屏。
+      ref={(node) => { if (node) node.inert = retained; }}
       onMouseDown={(e) => {
         downOnOverlay.current = e.target === e.currentTarget;
+        upOnOverlay.current = false;
+      }}
+      onMouseUp={(e) => {
+        upOnOverlay.current = e.target === e.currentTarget;
       }}
       onClick={(e) => {
         if (!visible || !closeOnOverlay) return;
-        if (!downOnOverlay.current || e.target !== e.currentTarget) return;
+        if (!downOnOverlay.current || !upOnOverlay.current || e.target !== e.currentTarget) return;
         onClose();
       }}
     >

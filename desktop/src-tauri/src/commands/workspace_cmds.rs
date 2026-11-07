@@ -213,6 +213,8 @@ pub async fn set_workspace(
     restart_watcher(&app, &state, &shown);
     // 预处理：工作区打开后就开始建类索引，第一次保存不至于撞上 index-cold
     super::compile_cmds::spawn_prewarm(state.inner().clone());
+    // 类型索引同步预热：换工程后第一次「找类」也要秒开
+    super::type_search_cmds::spawn_prewarm_types(state.inner().clone());
     Ok(shown)
 }
 

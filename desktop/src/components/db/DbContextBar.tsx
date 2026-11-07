@@ -9,8 +9,11 @@ import { dbTaskSpec } from "../../lib/dbOperations";
 import { Icon } from "../ui/icon";
 import { useDbReadOnly } from "../../lib/dbReadOnly";
 import { SchemaChip } from "./SchemaChip";
+import { ConnectionStatus } from "./ConnectionStatus";
 
-export function DbContextBar({ connId, independent = false, connectionControl }: { connId: string | null; independent?: boolean; connectionControl?: ReactNode }) {
+export function DbContextBar({ connId, independent = false, connectionControl, transactionMode }: {
+  connId: string | null; independent?: boolean; connectionControl?: ReactNode; transactionMode?: string;
+}) {
   const conn = useConnOf(connId), rt = useConnRt(connId);
   const readOnly = useDbReadOnly(connId); const [busy,setBusy] = useState(false); const lock=useRef(false);
   const toggle = async () => {
@@ -26,8 +29,15 @@ export function DbContextBar({ connId, independent = false, connectionControl }:
     {/* 默认 schema 就挂在上下文这一行：它和「哪个库、哪个账号」是同一层的会话属性，
         放在执行按钮旁边会让人以为是每条语句的选项。 */}
     <SchemaChip connId={connId} />
-    <span className="dbx-context-status" data-connected={rt.status === "connected" || undefined}>{rt.status === "connected" ? "已连接" : rt.status === "connecting" ? <><Icon name="spinner" size={12} />连接中…</> : rt.status === "error" ? "连接失败" : "未连接"}</span>
+    <ConnectionStatus status={rt.status} />
     <span title="只读查询模式使用 Oracle 只读事务并限制执行语句。账号权限仍由数据库配置；具有自治事务的函数须使用只读账号限制。" className="dbx-context-session">{independent ? "独立事务" : "共享事务"}</span>
+    {conn && rt.status === "connected" && <details className="dbx-connection-detail">
+      <summary>连接详情</summary>
+      <div className="dbx-connection-detail-body">
+        <span>当前会话 · {readOnly ? "只读查询" : transactionMode ?? "待确认"}</span>
+        <span>连接设置 · {conn.autoCommit ? "自动提交" : "手动提交"}</span>
+      </div>
+    </details>}
     <button type="button" className="dbx-btn ghost" disabled={busy || rt.status !== "connected" || readOnly === null} aria-pressed={readOnly ?? false} title="只读模式应用于此连接的全部会话" onClick={() => void toggle()}><Icon name={busy ? "spinner" : "lock"} size={12} />{busy ? "切换中…" : readOnly === null && rt.status === "connected" ? "只读状态待验证" : readOnly ? "只读查询已开启" : "开启只读查询"}</button>
   </div>;
 }

@@ -82,7 +82,19 @@ export async function saveAllDirty(
     // 每次从最新会话取标签：上一条保存会改掉 mtime / readOnly / eolChanged，
     // 用循环外面那份快照会带着过期的 mtime 触发误判冲突
     const tab = getSession().tabs.find((t) => t.path === f.path);
-    if (!tab || !isUnsaved(tab)) {
+    if (!tab) {
+      // 批量保存期间标签被关闭、或会话被 applyWorkspace() 清空：model 已经
+      // dispose，内容并没有落盘。计入 saved 会让弹框显示「已保存 N 个文件」，
+      // 用户据此放心退出/切工程，实际内容已丢（P0-2）。
+      failed.push({
+        path: f.path,
+        name: f.name,
+        reason: "标签已关闭，内容未保存（请重新打开文件再保存）",
+      });
+      continue;
+    }
+    if (!isUnsaved(tab)) {
+      // 上一条保存或别处已经把它落盘了：这个才算真的成功。
       saved.push(f.path);
       continue;
     }

@@ -46,7 +46,7 @@ export function ScriptReplayDialog({ tab, onClose }: { tab: SqlTab; onClose: () 
   };
 
   return (
-    <Modal
+    <Modal keepMountedWhenInactive
       open
       onClose={close}
       closeOnOverlay={!running}

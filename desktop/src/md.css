@@ -201,7 +201,7 @@
   height: 14px;
   flex: none;
   border: 1px solid hsl(var(--border));
-  border-radius: 3px;
+  border-radius: var(--r-chip, 3px);
   background: hsl(var(--card));
   display: grid;
   place-items: center;
@@ -245,7 +245,7 @@
 .md-tag-ext {
   flex: none;
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: var(--r-chip, 3px);
   font-size: var(--dbx-fs-badge, 11px);
   background: hsl(var(--warning) / 0.14);
   color: hsl(var(--warning-ink));
@@ -254,7 +254,7 @@
   flex: none;
   margin-left: auto;
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: var(--r-chip, 3px);
   font-size: var(--dbx-fs-badge, 11px);
   background: hsl(var(--destructive) / 0.12);
   color: hsl(var(--destructive-ink));

@@ -17,10 +17,28 @@
   --dur-page: 170ms;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);
-  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-standard: var(--ease);
   --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring-soft: cubic-bezier(0.34, 1.4, 0.64, 1);
   --ease-spring-subtle: cubic-bezier(0.34, 1.3, 0.64, 1);
+  /* P2-8：循环 / 光晕 / 采样三类语义时长，按语义映射硬编码值 */
+  --dur-loop: 1.15s;
+  --dur-halo: 2.1s;
+  --dur-sample: 250ms;
+  /* 7.5 组件间距与一致性 token：引用处一律带 fallback，缺失不会破坏既有样式 */
+  --h-control: 30px;
+  --h-icon: 28px;
+  --gap-control: 8px;
+  --disabled-opacity: .62;
+  --border-strong: 205 12% 55%;
+  --fs-h1: 18px;
+  --lh-h1: 1.4;
+  --fs-h2: 14px;
+  --lh-h2: 1.5;
+  --lh-body: 1.6;
+  --r-chip: 3px;
+  /* P1-23：渐变徽章上的文字色（浅色白、深色深墨，随主题翻转） */
+  --badge-on-gradient: 0 0% 100%;
 }
 
 @theme inline {
@@ -135,19 +153,19 @@
   --header-start: #ffffff;
   --header-end: #eef1f2;
 
-  /* 图表/数据可视化固定调色板（PerfCharts / TimingBreakdown 共用；主题无关、深浅一致，
-     改配色只动此处）。SVG fill 与 inline style background 均直接引用 var()。 */
-  --chart-1: #24766e;  /* primary */
-  --chart-2: #14b8a6;  /* teal */
-  --chart-3: #f59e0b;  /* amber */
-  --chart-4: #ef4444;  /* rose */
-  --chart-5: #10b981;  /* emerald */
-  --chart-6: #8b5cf6;  /* violet */
-  --chart-7: #0ea5e9;  /* sky */
-  --chart-8: #ec4899;  /* pink */
-  --chart-9: #84cc16;  /* lime */
-  --chart-10: #f97316; /* orange */
-  --chart-compare: #94a3b8; /* 对比柱（P95）/ 中性灰 */
+  /* 图表/数据可视化调色板（PerfCharts / TimingBreakdown 共用）。主色跟随 --primary，
+     其余保留固定色相但统一改用 hsl() 空格式表达（主题无关、深浅一致，改配色只动此处）。 */
+  --chart-1: hsl(var(--primary));
+  --chart-2: hsl(173 80% 40%);  /* teal */
+  --chart-3: hsl(38 92% 50%);   /* amber */
+  --chart-4: hsl(0 84% 60%);    /* rose */
+  --chart-5: hsl(160 84% 39%);  /* emerald */
+  --chart-6: hsl(258 90% 66%);  /* violet */
+  --chart-7: hsl(199 89% 48%);  /* sky */
+  --chart-8: hsl(330 81% 60%);  /* pink */
+  --chart-9: hsl(84 81% 44%);   /* lime */
+  --chart-10: hsl(25 95% 53%);  /* orange */
+  --chart-compare: hsl(215 20% 65%); /* 对比柱（P95）/ 中性灰 */
 
   /* 浅色下卡片阴影 */
   --card-primary-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 0 0 1px color-mix(in srgb, hsl(var(--primary)) 12%, transparent);
@@ -156,16 +174,17 @@
   --logo-icon-bg-shadow: none;
   --logo-img-shadow: drop-shadow(0 1px 2px rgba(0,0,0,0.15));
 
-  /* 浅色下徽章渐变（默认色） */
-  --badge-update-bg: linear-gradient(135deg, #3B82F6, #2563EB);
-  --badge-update-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
-  --badge-update-shadow-hover: 0 4px 14px rgba(37, 99, 235, 0.45);
-  --badge-ready-bg: linear-gradient(135deg, #22C55E, #16A34A);
-  --badge-ready-shadow: 0 2px 8px rgba(22, 163, 74, 0.35);
-  --badge-ready-shadow-hover: 0 4px 14px rgba(22, 163, 74, 0.45);
-  --badge-error-bg: linear-gradient(135deg, #EF4444, #DC2626);
-  --badge-error-shadow: 0 2px 8px rgba(220, 38, 38, 0.35);
-  --badge-error-shadow-hover: 0 4px 14px rgba(220, 38, 38, 0.45);
+  /* 徽章渐变：从语义色 token 派生，深浅主题自动跟随（P1-23 + 7.5）。
+     文字色由 --badge-on-gradient 在 .dark 翻转，删去 .dark 里的重复 hex 块。 */
+  --badge-update-bg: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary) / .78));
+  --badge-update-shadow: 0 2px 8px hsl(var(--primary) / .35);
+  --badge-update-shadow-hover: 0 4px 14px hsl(var(--primary) / .45);
+  --badge-ready-bg: linear-gradient(135deg, hsl(var(--success)), hsl(var(--success) / .78));
+  --badge-ready-shadow: 0 2px 8px hsl(var(--success) / .35);
+  --badge-ready-shadow-hover: 0 4px 14px hsl(var(--success) / .45);
+  --badge-error-bg: linear-gradient(135deg, hsl(var(--destructive)), hsl(var(--destructive) / .78));
+  --badge-error-shadow: 0 2px 8px hsl(var(--destructive) / .35);
+  --badge-error-shadow-hover: 0 4px 14px hsl(var(--destructive) / .45);
 
   /* ── P1-3 阴影 token（中性三档 + 品牌辉光 + 聚焦环，浅色）── */
   --sh-card: 0 1px 2px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
@@ -208,6 +227,9 @@
   --destructive-ink: 0 72% 76%;
   --border: 210 11.67% 23.53%;
   --input: 208.42 11.66% 31.96%;
+  /* P2-2 / P1-23：深色下强边框与渐变徽章文字（浅色对应见 :root） */
+  --border-strong: 205 14% 48%;
+  --badge-on-gradient: 222 6% 10%;
 
   --hero-text: #fff;
   --header-start: #202429;
@@ -220,16 +242,7 @@
   --logo-icon-bg-shadow: none;
   --logo-img-shadow: drop-shadow(0 1px 2px rgba(255,255,255,0.1));
 
-  /* 暗色下徽章渐变：提高亮度增强对比 */
-  --badge-update-bg: linear-gradient(135deg, #60A5FA, #3B82F6);
-  --badge-update-shadow: 0 2px 8px rgba(96, 165, 250, 0.35);
-  --badge-update-shadow-hover: 0 4px 14px rgba(96, 165, 250, 0.5);
-  --badge-ready-bg: linear-gradient(135deg, #4ADE80, #22C55E);
-  --badge-ready-shadow: 0 2px 8px rgba(74, 222, 128, 0.35);
-  --badge-ready-shadow-hover: 0 4px 14px rgba(74, 222, 128, 0.5);
-  --badge-error-bg: linear-gradient(135deg, #F87171, #EF4444);
-  --badge-error-shadow: 0 2px 8px rgba(248, 113, 113, 0.35);
-  --badge-error-shadow-hover: 0 4px 14px rgba(248, 113, 113, 0.5);
+  /* 徽章渐变已统一由 :root 的语义 token 派生，此处不再重复定义（P1-23 / 7.5）。 */
 
   /* ── P1-3 阴影 token（深浅主题自适应）── */
   --sh-card: 0 1px 2px rgba(0,0,0,0.4);
@@ -327,8 +340,7 @@ body {
   border-radius: inherit;
   background: currentColor;
   opacity: 0;
-  will-change: transform, opacity;
-  animation: notice-pulse 2.4s ease-in-out infinite;
+  animation: notice-pulse var(--dur-halo, 2.1s) ease-in-out infinite;
   pointer-events: none;
   z-index: -1;
 }
@@ -518,12 +530,12 @@ body {
   padding: 2px 10px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--hero-text);
+  color: hsl(var(--badge-on-gradient, 0 0% 100%));
   border: none;
   white-space: nowrap;
   -webkit-app-region: no-drag;
   transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
-  animation: badge-in 0.22s ease;
+  animation: badge-in var(--dur-enter) var(--ease);
 }
 @keyframes badge-in {
   from { opacity: 0; transform: scale(0.9); }
@@ -618,29 +630,44 @@ body {
 }
 
 /* 更新红点：可点击入口 + 脉冲提示（引导查看更新历史） */
-.changelog-dot { cursor: pointer; transition: transform var(--dur-fast); }
+.changelog-dot { cursor: pointer; position: relative; isolation: isolate; transition: transform var(--dur-fast); }
 .changelog-dot:hover { transform: scale(1.12); }
+/* P2-7：点状涟漪改用伪元素 scale+opacity，不再逐帧动画 box-shadow spread。 */
 @keyframes reddot-ring {
-  0% { box-shadow: 0 0 0 0 rgba(239,68,68,.45); }
-  70% { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
-  100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+  0%       { transform: scale(1);   opacity: .5; }
+  70%,100% { transform: scale(2.3); opacity: 0; }
 }
-.changelog-dot { animation: reddot-ring 2s infinite; }
-.dark .tag-purple { background: rgba(129,140,248,0.15); color: #A5B4FC; }
-.dark .tag-green  { background: rgba(74,222,128,0.15); color: #6EE7B7; }
-.dark .tag-orange { background: rgba(251,191,36,0.15); color: #FCD34D; }
+.changelog-dot::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: hsl(var(--destructive)); opacity: 0;
+  animation: reddot-ring var(--dur-halo, 2.1s) ease-out infinite;
+  pointer-events: none; z-index: -1;
+}
+.app-side-badge--off::after,
+.app-side[data-collapsed] .app-side-badge--off::after { animation: none; }
 
-/* ═══ 更新历史 分类标签 ═══ */
-/* 更新历史分类徽章：浅色侧原 2.95–4.24:1 不达标，压暗后 4.72–4.80:1（深色侧不动）*/
-.dark .cl-badge-feat    { background: rgba(129,140,248,0.18); color: #A5B4FC; }
-.dark .cl-badge-improve { background: rgba(6,182,212,0.18); color: #22D3EE; }
-.dark .cl-badge-fix     { background: rgba(251,191,36,0.18); color: #FCD34D; }
-.dark .cl-badge-sec     { background: rgba(248,113,113,0.18); color: #FCA5A5; }
-
-/* ═══ 更新历史 头条亮点条（C）═══ */
+/* P2-1：更新历史分类标签补浅色分支并 token 化；深色分支随后覆盖。 */
+.tag-purple    { background: hsl(var(--primary) / .12); color: hsl(var(--primary)); }
+.tag-green     { background: hsl(var(--success) / .14); color: hsl(var(--success-ink)); }
+.tag-orange    { background: hsl(var(--warning) / .16); color: hsl(var(--warning-ink)); }
+.cl-badge-feat    { background: hsl(var(--primary) / .14); color: hsl(var(--primary)); }
+.cl-badge-improve { background: hsl(var(--accent-foreground) / .12); color: hsl(var(--accent-foreground)); }
+.cl-badge-fix     { background: hsl(var(--warning) / .16); color: hsl(var(--warning-ink)); }
+.cl-badge-sec     { background: hsl(var(--destructive) / .12); color: hsl(var(--destructive-ink)); }
+.cl-highlight-bar {
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent-foreground)));
+  box-shadow: 0 2px 10px hsl(var(--primary) / .4);
+}
+.dark .tag-purple    { background: hsl(var(--primary) / .15); color: hsl(var(--primary)); }
+.dark .tag-green     { background: hsl(var(--success) / .15); color: hsl(var(--success-ink)); }
+.dark .tag-orange    { background: hsl(var(--warning) / .15); color: hsl(var(--warning-ink)); }
+.dark .cl-badge-feat    { background: hsl(var(--primary) / .18); color: hsl(var(--primary)); }
+.dark .cl-badge-improve { background: hsl(var(--accent-foreground) / .18); color: hsl(var(--accent-foreground)); }
+.dark .cl-badge-fix     { background: hsl(var(--warning) / .18); color: hsl(var(--warning-ink)); }
+.dark .cl-badge-sec     { background: hsl(var(--destructive) / .18); color: hsl(var(--destructive-ink)); }
 .dark .cl-highlight-bar {
-  background: linear-gradient(135deg, #5B54E8, #7C3AED);
-  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.4);
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent-foreground)));
+  box-shadow: 0 2px 10px hsl(var(--primary) / .4);
 }
 @keyframes modal-fade-in {
   from { opacity: 0; }
@@ -718,7 +745,7 @@ body {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 10px; border-radius: 8px; transition: background var(--dur-fast);
 }
-.s-row:hover { background: hsl(var(--muted)); }
+.s-row:is(:hover,:focus-visible) { background: hsl(var(--muted)); }
 .s-input {
   width: 68px; height: 32px; padding: 0 8px; border-radius: 8px;
   border: 1px solid hsl(var(--input)); background: hsl(var(--card));
@@ -769,43 +796,33 @@ body {
   to { opacity: 1; transform: none; }
 }
 
-/* ═══ 窗口不可见（收进托盘 / 最小化）时暂停全部动画与过渡 ═══
-
-   为何必要：WebView2 **不会**像浏览器隐藏标签页那样自动节流宿主窗口隐藏后的动画。
-   实测：窗口收进托盘前后，webview CPU 从 61.7% → 60.4% 单核（几乎没变）。
-   cc-bridge 是常驻托盘应用，绝大多数时间窗口不可见，这部分开销全是白烧。
-
-   `data-app-hidden` 由 `useAppHiddenFlag()` 根据 Rust 侧发的 `app:visibility` 事件置于 <html>。
-   用 `animation-play-state: paused` 而不是 `animation: none`：后者会让元素回到未动画状态
-   并在重新显示时跳一下；paused 只是冻住当前帧。
-
-   ⚠ **只能暂停这几个列举出来的 `infinite` 动画，切勿回到 `*`**。
-   2026-08-03 踩过的坑：原先写成 `:root[data-app-hidden] *` 加
-   `transition: none !important`，结果**整页白屏**——`transition: none` 会把正在做
-   入场过渡的元素永久冻在初始状态（`opacity: 0`），`paused` 同样会把一次性
-   入场 keyframe 停在第一帧。而暂停的初衷只是省 CPU，L4 实测也证明烧 CPU 的是
-   **常驻无限动画**；一次性动画与 transition 本来跑完即停，暂停它们只有坏处。
-   新增 infinite 动画时记得往下面补一行。 */
-:root[data-app-hidden] .chain-ripple,
-:root[data-app-hidden] .indet-fill,
-:root[data-app-hidden] .changelog-dot,
-:root[data-app-hidden] .app-side-update[data-status="available"] .app-side-update-icon::after,
-:root[data-app-hidden] .update-glow::after,
-:root[data-app-hidden] .vh-skel,
-:root[data-app-hidden] .skeleton,
-/* 2026-10-16 更新体验新增（见文件尾「更新体验」一节）：
-   读数扫光、槽位呼吸光圈、重启过渡层扫光，以及所有 spinner。
-   （原通栏进度线 .update-line-sweep 已随组件于 2026-10-18 删除。） */
-:root[data-app-hidden] .ur-sweep,
-:root[data-app-hidden] .ro-bar > i,
-:root[data-app-hidden] .update-slot .header-badge-update::after,
-:root[data-app-hidden] .update-slot .header-badge-ready::after,
-:root[data-app-hidden] .animate-spin,
-/* 2026-10-29 P2-3 补漏：通知呼吸圈 / 服务启动脉冲点 / 代码智能 busy 点。
-   （补丁页转圈 .pk-spin 已于 P2-13 并入 animate-spin，归上面「所有 spinner」管。） */
-:root[data-app-hidden] .notice-pulse,
-:root[data-app-hidden] .sv-card[data-state="starting"] .sv-dot,
-:root[data-app-hidden] .wb-lang[data-tone="busy"] .wb-lang-dot {
+/* ═══ 窗口不可见（收进托盘 / 最小化）时暂停全部「常驻」动画 ═══
+   data-app-hidden 由 useAppHiddenFlag() 置于 <html>。WebView2 不会自动节流隐藏窗口的动画，
+   故用 animation-play-state:paused（不是 animation:none 会回跳；也不是 transition:none，
+   曾导致整页白屏）。P2-6：改为属性驱动——类名/状态含常驻动画语义关键词的自动暂停，
+   新增同类动画无需再手工补清单；paused 对无动画元素无副作用，且刻意不匹配
+   fade/scale/tab-in/pop-in 等一次性入场关键词，避免把入场动画冻在首帧。 */
+:root[data-app-hidden] :is(
+  [class*="pulse"], [class*="sweep"], [class*="spin"], [class*="halo"],
+  [class*="breathe"], [class*="shimmer"], [class*="ripple"], [class*="skel"],
+  [class*="dot"], [class*="glow"], [class*="indet"], [class*="progress"],
+  [class*="track"], [class*="badge"], [class*="update"], [class*="bar"],
+  [data-tone="busy"], [data-state="starting"], [data-indeterminate],
+  [data-unknown], [data-status="available"]
+),
+:root[data-app-hidden] :is(
+  [class*="pulse"], [class*="sweep"], [class*="spin"], [class*="halo"],
+  [class*="breathe"], [class*="shimmer"], [class*="ripple"], [class*="skel"],
+  [class*="dot"], [class*="glow"], [class*="indet"], [class*="progress"],
+  [class*="track"], [class*="badge"], [class*="update"], [class*="bar"],
+  [data-tone="busy"], [data-state="starting"], [data-indeterminate],
+  [data-unknown], [data-status="available"]
+)::after,
+/* 属性选择器够不到的少数：无 class 的 <i>/<span> 子元素由宿主状态属性反查。 */
+:root[data-app-hidden] :is(
+  [data-tone="busy"], [data-state="starting"], [data-indeterminate],
+  [data-unknown], [class*="track"], [class*="progress"], [class*="bar"]
+) > :is(i, span) {
   animation-play-state: paused;
 }
 
@@ -913,7 +930,7 @@ body {
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
-.app-side-item:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.app-side-item:is(:hover,:focus-visible) { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 /* 选中态：淡靛蓝底 + 靛蓝字。accent-foreground on accent 实测浅色 ≈6.8:1、深色 ≈5.5:1，均过 AA。 */
 .app-side-item[data-active] {
   background: hsl(var(--accent));
@@ -939,7 +956,7 @@ body {
   padding: 0 4px;
   border-radius: 999px;
   background: hsl(var(--destructive));
-  color: #fff;
+  color: hsl(var(--destructive-foreground));
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
@@ -1025,9 +1042,10 @@ body {
 /* available / ready 在槽位里只剩两个字，用呼吸光圈把「醒目度」补回来（2.1s）。
    走伪元素而不是 badge 自身的 box-shadow：后者已承载立体阴影与 hover 变化，
    被动画覆盖会丢。 */
+/* P2-7：光晕改伪元素 transform:scale()+opacity，不再逐帧重绘 box-shadow spread。 */
 @keyframes upd-breathe {
-  0%, 100% { box-shadow: 0 0 0 0 var(--upd-glow); }
-  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--upd-glow) 0%, transparent); }
+  0%, 100% { transform: scale(1);   opacity: .55; }
+  50%      { transform: scale(1.15); opacity: 0; }
 }
 .update-slot .header-badge-update::after,
 .update-slot .header-badge-ready::after {
@@ -1035,8 +1053,9 @@ body {
   position: absolute;
   inset: 0;
   border-radius: inherit;
+  background: var(--upd-glow);
   pointer-events: none;
-  animation: upd-breathe 2.1s ease-in-out infinite;
+  animation: upd-breathe var(--dur-halo, 2.1s) ease-in-out infinite;
 }
 .update-slot .header-badge-update { --upd-glow: color-mix(in srgb, hsl(var(--primary)) 42%, transparent); }
 .update-slot .header-badge-ready  { --upd-glow: color-mix(in srgb, hsl(var(--success)) 46%, transparent); }
@@ -1167,7 +1186,7 @@ body {
 .upd-readout .ur-fill {
   width: 100%;
   transform-origin: left center;
-  transition: transform 250ms linear;
+  transition: transform var(--dur-sample, 250ms) linear;
 }
 @keyframes upd-sweep {
   from { transform: translateX(-100%); }
@@ -1175,7 +1194,7 @@ body {
 }
 .upd-readout .ur-sweep {
   width: 34%;
-  animation: upd-sweep 1.15s var(--ease-standard) infinite;
+  animation: upd-sweep var(--dur-loop, 1.15s) var(--ease-standard) infinite;
 }
 /* 速率段：等宽数字 + 定宽 68px。250ms 一跳的数字若不定宽，整条会左右抽动 ——
    68px 是实测值：最短态「—」与最长态「↓ 999.9 MB/s」(66.9px) 同宽。 */
@@ -1325,7 +1344,7 @@ body {
   width: 22px;
   height: 22px;
   border-radius: 7px;
-  color: var(--hero-text);
+  color: hsl(var(--badge-on-gradient, 0 0% 100%));
   background: var(--version-gradient);
   box-shadow: 0 2px 6px var(--version-shadow);
 }
@@ -1347,7 +1366,7 @@ body {
   border-radius: 8px;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--hero-text);
+  color: hsl(var(--badge-on-gradient, 0 0% 100%));
   background: var(--version-gradient);
   cursor: pointer;
   transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
@@ -1373,4 +1392,17 @@ body {
 .upgrade-welcome .uw-close:hover {
   color: hsl(var(--foreground));
   background: hsl(var(--muted));
+}
+
+/* ═══ P2-13：触屏 / 高 DPI / 无 hover 命中区适配 ═══
+   刻意放在文件末尾，避免被后面的普通规则覆盖；hover 反馈另由
+   :is(:hover,:focus-visible) 镜像规则保证键盘与触屏可见。 */
+@media (hover:none),(pointer:coarse) {
+  .wb-nav-btn, .wb-icon-btn, .wb-tab-x, .wb-outline-btn, .wb-hist-x {
+    min-width: 40px; min-height: 40px;
+  }
+  .qp-li, .qp-mode, .wb-row, .wb-hist-row, .lnk-ov, .wb-settings-result {
+    min-height: 44px;
+  }
+  ::-webkit-scrollbar { width: 12px; height: 12px; }
 }

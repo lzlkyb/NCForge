@@ -4,7 +4,8 @@ import { SettingsRow } from "../ui/SettingsRow";
 import { SettingsChoice } from "../ui/SettingsChoice";
 import { ToggleRow } from "../ui/ToggleRow";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import { toast } from "../ui/toast";
+import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 import { WorkerStatsRow } from "./WorkerStatsRow";
 import {
   buildCacheInfo,
@@ -53,6 +54,8 @@ export function BuildSettings() {
   const [history, setHistory] = useState<BuildHistoryEntry[]>([]);
   const [confirmReindex, setConfirmReindex] = useState(false);
   const [working, setWorking] = useState(false);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
 
   const loadStats = async () => {
     const [c, h] = await Promise.all([buildCacheInfo(), buildHistory()]);
@@ -62,22 +65,17 @@ export function BuildSettings() {
 
   useEffect(() => {
     let alive = true;
+    setLoadErr(null);
+    // 读失败不再回落默认配置 / 静默吞掉统计错误：那会把「未知」显示成「已开启」、
+    // 或让统计一直停在「—」却没有任何解释。统一记录错误并给重试入口。
     getConfig()
       .then((c) => alive && setCfg(pick(c)))
-      .catch(() => alive && setCfg(pick({
-        auto_compile_incremental: true,
-        auto_compile_external: true,
-        prewarm_index: true,
-        persistent_worker: true,
-        build_parallel: 2,
-      })));
-    void loadStats().catch(() => {
-      // 没打开工作区 / 统计不可用：维护卡显示为「—」，开关仍可用
-    });
+      .catch((e) => alive && setLoadErr(failureText("读取构建设置", e)));
+    void loadStats().catch((e) => alive && setLoadErr(failureText("读取构建统计", e)));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [retry]);
 
   const update = async (patch: Partial<BuildCfg>) => {
     const before = cfg;
@@ -90,7 +88,7 @@ export function BuildSettings() {
       setCfg(before);
       if (patch.auto_compile_incremental !== undefined) rememberAutoIncremental(!patch.auto_compile_incremental);
       if (patch.auto_compile_external !== undefined) rememberAutoExternal(!patch.auto_compile_external);
-      toast(`保存构建设置失败：${e}`, "error");
+      errorToast("保存构建设置", e);
     }
   };
 
@@ -117,6 +115,10 @@ export function BuildSettings() {
 
   return (
     <>
+      {loadErr && <div role="alert" className="flex items-center gap-2 px-2 py-1 text-xs text-destructive-ink">
+        <span className="min-w-0 flex-1">{loadErr}</span>
+        <Button size="sm" variant="ghost" onClick={() => setRetry((n) => n + 1)}>重试</Button>
+      </div>}
       <ToggleRow
         id="build-auto-incremental"
         label="保存后补一次模块级增量"
@@ -194,7 +196,7 @@ export function BuildSettings() {
         info="索引与清单都在本机配置目录，不写进工作区。删掉它们不会删源码；下次编译会重新计算。"
         valueText={cache ? formatBytes(cache.indexBytes + cache.manifestBytes + cache.tmpBytes) : "—"}
         control={
-          <Button size="sm" variant="ghost" disabled={working} onClick={() => void loadStats().catch((e) => toast(`刷新统计失败：${e}`, "error"))}>
+          <Button size="sm" variant="ghost" disabled={working} onClick={() => void loadStats().catch((e) => errorToast("刷新构建统计", e))}>
             刷新
           </Button>
         }
@@ -217,7 +219,7 @@ export function BuildSettings() {
         sub={history.length ? lastBuildText(history[history.length - 1]) : "还没有构建记录"}
         valueText={cache?.lastSuccessMs ? `上次成功 ${new Date(cache.lastSuccessMs).toLocaleString()}` : "—"}
         control={
-          <Button size="sm" variant="ghost" disabled={working} onClick={() => setConfirmReindex(true)}>
+          <Button size="sm" variant="ghost" disabled={working} isLoading={working} onClick={() => setConfirmReindex(true)}>
             重建类索引
           </Button>
         }
@@ -244,7 +246,7 @@ export function BuildSettings() {
         valueText={cache ? `${formatBytes(cache.tmpBytes)}` : "—"}
         last
         control={
-          <Button size="sm" variant="ghost" disabled={working} onClick={() => void runCleanTmp()}>
+          <Button size="sm" variant="ghost" disabled={working} isLoading={working} onClick={() => void runCleanTmp()}>
             清理
           </Button>
         }

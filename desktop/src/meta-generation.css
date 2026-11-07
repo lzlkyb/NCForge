@@ -9,7 +9,7 @@
 .gen-workbench ::selection { background: hsl(var(--primary) / .22); }
 .gen-workbench :focus-visible, .gen-modal :focus-visible, .gen-config-modal :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }
 .gen-workbench input { caret-color: hsl(var(--primary)); }
-.gen-workbench button:disabled, .gen-modal button:disabled { opacity: .55; cursor: default; }
+.gen-workbench button:disabled, .gen-modal button:disabled { opacity: var(--disabled-opacity, .62); cursor: not-allowed; }
 .gen-workbench small, .gen-modal small, .gen-config-modal small { font-size: 12px; color: hsl(var(--muted-foreground)); }
 .gen-workbench h3, .gen-config-modal h3 { margin: 0; font-size: 13px; font-weight: 600; }
 .gen-workbench-head { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid hsl(var(--border)); flex: none; min-height: 58px; }
@@ -20,7 +20,7 @@
 .gen-steps li + li::before { content: "›"; margin-right: 14px; color: hsl(var(--muted-foreground)); }
 .gen-steps .is-current { color: hsl(var(--primary)); font-weight: 600; }
 .gen-workbench[data-layout="medium"] .gen-steps, .gen-workbench[data-layout="narrow"] .gen-steps { display: none; }
-.gen-workbench-body { display: grid; grid-template-columns: 240px minmax(0, 1fr) 272px; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.gen-workbench-body { display: grid; grid-template-columns: minmax(160px, 240px) minmax(0, 1fr) minmax(200px, 272px); flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .gen-workbench-body > .gen-empty { grid-column: 1 / -2; }
 .gen-workbench[data-layout="medium"] .gen-workbench-body { grid-template-columns: 230px minmax(0, 1fr); }
 .gen-workbench[data-layout="narrow"] .gen-workbench-body { display: flex; flex-direction: column; }
@@ -127,3 +127,12 @@ body:has(.gen-workbench[data-active="true"]) .toast-stack { bottom: 148px; }
 .gen-note { font-size: 12px; color: hsl(var(--muted-foreground)); line-height: 1.7; }
 .gen-workbench ::-webkit-scrollbar, .gen-modal ::-webkit-scrollbar { width: 8px; height: 8px; }
 .gen-workbench ::-webkit-scrollbar-thumb, .gen-modal ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: var(--r-control); }
+
+/* P2-12 / P2-14：JS data-layout 之外的 CSS 兜底——首帧 ResizeObserver 未测量时
+   三栏在 560px 窗口碎裂。优先用已建立的容器查询，@media 作为无容器支持时的兜底。 */
+@container workbench-document (max-width: 900px) {
+  .gen-workbench-body { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .gen-workbench-body { grid-template-columns: minmax(0, 1fr); }
+}

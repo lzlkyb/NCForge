@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { serviceLogClear, serviceLogExport, serviceLogExportText, type ServiceLogTarget } from "../lib/serviceConsoleApi";
+import { errorToast } from "../lib/errorToast";
 import { toast } from "../components/ui/toast";
 
 interface Options { target: ServiceLogTarget; previous: boolean; fileId?: string; reset: (offset: number) => void; onCleared: () => void; }
@@ -10,7 +11,7 @@ export function useServiceLogActions({ target, previous, fileId, reset, onCleare
   const run = async (label: string, action: () => Promise<void>) => {
     if (lock.current) return;
     lock.current = true; setBusy(label);
-    try { await action(); } catch (error) { toast(`${label}失败：${String(error)}`, "error"); }
+    try { await action(); } catch (error) { errorToast(label, error); }
     finally { lock.current = false; controller.current = null; setBusy(null); }
   };
   const copy = (text: string, label: string) => {

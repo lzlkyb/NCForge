@@ -14,12 +14,14 @@ import { openTable } from "../../lib/dbActions";
 import { reconnectSession } from "../../lib/dbConfirm";
 import { openSessionPanel, type ResultEntry } from "../../lib/dbStore";
 
-export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot, errorCode, onLocate }: {
+export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot, errorCode, cancelled, onLocate }: {
   error: string;
   connId?:string|null; onLocate?:()=>void;
   tabId?: string;
   slot?: string | null;
   errorCode?: ResultEntry["errorCode"];
+  /** 用户主动停止：仍显示完整错误框，只在标题上标注「已停止」。 */
+  cancelled?: boolean;
   sql: string;
   knownTables: string[];
   /** 脚本里的第几条。 */
@@ -47,7 +49,7 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
     <div className="dbx-err">
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
         <Icon name="alert" size={13} />
-        {index ? `第 ${index} 条执行失败` : "执行失败"}
+        {index ? `第 ${index} 条${cancelled ? "已停止" : "执行失败"}` : cancelled ? "执行已停止" : "执行失败"}
         {ora && <span className="dbx-mono">{ora}</span>}
       </div>
       <div style={{ marginTop: 4, wordBreak: "break-all" }}>{error}</div>

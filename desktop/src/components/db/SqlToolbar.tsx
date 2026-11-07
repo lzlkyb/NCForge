@@ -1,14 +1,12 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Icon } from "../ui/icon";
-import { toast } from "../ui/toast";
 import { ConnPicker } from "./ConnPicker";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
-import { friendlyDbError } from "../../lib/db";
 import { switchConn } from "../../lib/dbActions";
 import { useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
 import { useDbReadOnly } from "../../lib/dbReadOnly";
 import { useOperations } from "../../lib/operations";
-import { setSqlTransactionMode } from "../../lib/dbTransactionMode";
+import { TransactionButtons, TxBar, useDbTransaction } from "./TxBar";
 import { DbContextBar } from "./DbContextBar";
 
 /** 连接上下文与执行工具条共用事务切换锁，切换模式时不能换库。 */
@@ -37,46 +35,30 @@ export function SqlToolbar({ tab, scope = "执行当前语句", onRun, onStop, o
   const conn = useConnOf(tab.connId);
   const rt = useConnRt(tab.connId);
   const readonly=useDbReadOnly(tab.connId);
-  const connected = rt.status === "connected";
-  const stopping=useOperations().some(o=>o.key===`db.sql:${tab.id}` && o.state==="cancelling");
-  // 有槽看槽、没槽看 primary：SQL 标签执行一次之后所有语句都跑在独立槽里，
-  // 只读 primary 会把「另一条会话」的模式显示成这个标签的模式。
-  const tx = tab.slot ? tab.tx : rt.tx;
-  const auto = tx?.autoCommit ?? conn?.autoCommit ?? false;
+  const operation = useOperations().find(o => o.key === 'db.sql:' + tab.id && o.endedAt === undefined);
+  const stopping = operation?.state === "cancelling";
+  const transaction = useDbTransaction({connId:tab.connId, tabId:tab.id, slot:tab.slot, tx:tab.tx, notice:tab.txNotice,
+    blocked:tab.running || !!operation, readOnly:readonly});
+  const locked = !!transaction.active || transaction.lost;
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
-  const [changingMode, setChangingMode] = useState(false);
-  const modeBusy = useRef(false);
 
   const popup = (el: HTMLElement, items: ContextMenuItem[]) => {
     const r = el.getBoundingClientRect();
     setMenu({ x: r.left, y: r.bottom + 4, items });
   };
 
-  const setMode = async (on: boolean) => {
-    if (!tab.connId || !connected || tab.running || on === auto || modeBusy.current) return;
-    modeBusy.current = true;
-    setChangingMode(true);
-    try {
-      await setSqlTransactionMode(tab.id, tab.connId, on);
-    } catch (e) {
-      toast(`切换失败：${friendlyDbError(e)}`, "error");
-    } finally {
-      modeBusy.current = false;
-      setChangingMode(false);
-    }
-  };
-
   return (
     <>
-    <DbContextBar connId={tab.connId} independent={!!tab.slot} connectionControl={<ConnPicker connId={tab.connId} compact disabled={changingMode || tab.running} onPick={(id) => { if (!modeBusy.current) void switchConn(tab.id, id); }} />} />
+    <DbContextBar connId={tab.connId} independent={!!tab.slot} transactionMode={transaction.mode} connectionControl={<ConnPicker connId={tab.connId} compact disabled={!!transaction.active || tab.running || !!operation} onPick={(id) => void switchConn(tab.id, id)} />} />
     <div className="dbx-sqlbar">
+      <div className="dbx-run-controls">
       {tab.running ? (
         // 执行中把「执行」换成「停止」：以前只能干等 30 秒超时，或者杀掉整个应用。
         // 能不能停按 `Caps.cancel` 决定（两个引擎现在都支持，但要留出按能力降级的路）：
         // 让它可点再报错，用户会以为语句已经在库里停了。
         <button
           type="button"
-          className="dbx-btn bad"
+          className="dbx-btn dbx-run-action" data-running
           disabled={stopping || (rt.caps ? !rt.caps.cancel : false)}
           onClick={onStop}
           title={
@@ -90,14 +72,14 @@ export function SqlToolbar({ tab, scope = "执行当前语句", onRun, onStop, o
         </button>
       ) : (
         <div className="dbx-runsplit">
-          <button type="button" className="dbx-btn pri" disabled={!conn || changingMode} onClick={() => { if (!modeBusy.current) onRun("current"); }} title="执行光标所在的语句（有选中则执行选中部分）">
+          <button type="button" className="dbx-btn pri dbx-run-action" disabled={!conn || locked || !!operation} onClick={() => onRun("current")} title="执行光标所在的语句（有选中则执行选中部分）">
             <Icon name="play" size={12} />
             执行 <span className="k">Ctrl+Enter</span>
           </button>
           <button
             type="button"
             className="dbx-btn pri"
-            disabled={!conn || changingMode}
+            disabled={!conn || locked || !!operation}
             aria-label="更多执行方式"
             title="更多执行方式"
             onClick={(e) =>
@@ -112,24 +94,9 @@ export function SqlToolbar({ tab, scope = "执行当前语句", onRun, onStop, o
           </button>
         </div>
       )}
+      </div>
+      <TransactionButtons transaction={transaction} />
       <span className="dbx-scope" aria-live="polite" title="Ctrl+Enter 执行当前语句或选中 SQL；Alt+X 执行整个脚本">{scope.replace(/^执行/, "")}</span>
-      <button
-        type="button"
-        className="dbx-txchip"
-        data-auto={auto || undefined}
-        disabled={!connected || tab.running || changingMode || readonly === true}
-        aria-busy={changingMode}
-        title={connected ? `事务模式：${auto ? "自动提交" : "手动提交"}（临时切换，默认值在连接设置里）` : "连上后可切换"}
-        onClick={(e) =>
-          popup(e.currentTarget, [
-            { label: "手动提交", icon: "lock", onSelect: () => void setMode(false) },
-            { label: "自动提交", icon: "check", onSelect: () => void setMode(true) },
-          ])
-        }
-      >
-        <span className="dot" />
-        {readonly ? "只读事务" : changingMode ? "切换中…" : auto ? "自动提交" : "手动提交"}
-      </button>
       <span className="dbx-sp" />
       <button
         type="button"
@@ -169,13 +136,13 @@ export function SqlToolbar({ tab, scope = "执行当前语句", onRun, onStop, o
             {
               label: "导出 INSERT（光标处查询）",
               icon: "download",
-              disabled: tab.running || !conn,
+              disabled: tab.running || locked || !!operation || !conn,
               onSelect: onExport,
             },
             {
               label: "按值反查（只读）",
               icon: "search",
-              disabled: tab.running || !conn,
+              disabled: tab.running || locked || !!operation || !conn,
               onSelect: onValueSearch,
             },
             {
@@ -192,6 +159,7 @@ export function SqlToolbar({ tab, scope = "执行当前语句", onRun, onStop, o
       </button>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </div>
+    <TxBar transaction={transaction} />
     </>
   );
 }

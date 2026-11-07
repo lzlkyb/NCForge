@@ -44,7 +44,7 @@ export function AuthDialog({
   const canSubmit = !busy && user.trim().length > 0 && password.length > 0;
 
   return (
-    <Modal open={open} onClose={onClose} ariaLabel="SVN 账号" className="vc-dialog">
+    <Modal keepMountedWhenInactive open={open} onClose={onClose} ariaLabel="SVN 账号" className="vc-dialog">
       <form
         onSubmit={(e) => {
           e.preventDefault();

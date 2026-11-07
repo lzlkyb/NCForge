@@ -92,6 +92,8 @@ describe("OutRootField", () => {
     expect(mocks.toast).toHaveBeenCalledWith(
       expect.stringContaining("产物根不存在"),
       "error",
+      // 第三参是给「复制全部错误」用的英文原文，默认视图不显示
+      { raw: "产物根不存在：C:/nope" },
     );
     expect(document.querySelector('[role="dialog"]')).toBeTruthy();
   });

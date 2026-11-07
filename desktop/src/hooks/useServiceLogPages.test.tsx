@@ -136,7 +136,8 @@ describe("生产控制台日志分段读取", () => {
     expect(reader.endOffset).toBe(5);
     expect(actions.busy).toBeNull();
     expect(mocks.cleared).not.toHaveBeenCalled();
-    expect(mocks.toast).toHaveBeenCalledWith("清屏失败：Error: clear denied", "error");
+    // 中文人话 + 英文原文（raw 只参与「复制全部错误」，默认不显示）
+    expect(mocks.toast).toHaveBeenCalledWith("清屏失败：clear denied", "error", { raw: "clear denied" });
   });
 
   it("切工程时丢弃在途旧响应并补拉新工程，offset 从新 tail 开始", async () => {

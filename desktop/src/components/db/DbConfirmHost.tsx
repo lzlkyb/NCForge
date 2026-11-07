@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import "../../db-console.css";
 import { Modal } from "../ui/Modal";
 import { Icon } from "../ui/icon";
-import { settle, usePending, type Pending } from "../../lib/dbConfirm";
+import { settle, settleTx, usePending, type Pending } from "../../lib/dbConfirm";
 import { connOf } from "../../lib/dbStore";
 import { dbNameOf, ENV_LABEL } from "../../lib/dbApi";
 import { FilesBody } from "./QuitFilesBody";
@@ -35,9 +35,10 @@ export function DbConfirmHost() {
       className="modal-surface dbx-dlg sm"
       ariaLabel={p?.kind === "unsavedFiles" ? "未保存文件确认" : "数据库确认"}
       zIndex={1100}
-      // 退出确认不靠点遮罩关：用户想点「保存」却点到旁边，框没了、应用还在，
-      // 他多半会以为「取消成功了」而不知道刚才那一下什么都没决定。ESC 仍然可以取消。
-      closeOnOverlay={p?.kind !== "unsavedFiles"}
+      // 危险确认一律不靠点遮罩关：用户想点「提交 / 执行」却点到旁边，框没了、
+      // 应用还在，他多半以为「取消成功了」而不知道刚才那一下什么都没决定。
+      // 只有非破坏性的普通询问与口令框允许点遮罩取消；ESC 始终可以取消。
+      closeOnOverlay={p?.kind === "ask" ? !p.danger : p?.kind === "password"}
     >
       {p?.kind === "tx" && <TxBody p={p} />}
       {p?.kind === "quit" && <QuitBody p={p} />}
@@ -95,15 +96,25 @@ function TxBody({ p }: { p: Extract<Pending, { kind: "tx" }> }) {
         <p className="dbx-muted" style={{ marginTop: 6 }}>不处理的话行锁会一直挂着，别人改同一批数据会卡住。</p>
       </div>
       <div className="ft">
+        {p.busy && (
+          <span className="dbx-muted" role="status">
+            {p.busy === "commit" ? "正在提交…" : "正在回滚…"}
+          </span>
+        )}
         <span className="dbx-sp" />
-        <button type="button" className="dbx-btn" onClick={() => settle((x) => x.kind === "tx" && x.resolve("cancel"))}>
+        <button
+          type="button"
+          className="dbx-btn"
+          disabled={!!p.busy}
+          onClick={() => settle((x) => x.kind === "tx" && x.resolve("cancel"))}
+        >
           取消
         </button>
-        <button type="button" className="dbx-btn" onClick={() => settle((x) => x.kind === "tx" && x.resolve("rollback"))}>
-          回滚
+        <button type="button" className="dbx-btn" disabled={!!p.busy} onClick={() => void settleTx("rollback")}>
+          {p.busy === "rollback" ? "回滚中…" : "回滚"}
         </button>
-        <button type="button" className="dbx-btn pri" onClick={() => settle((x) => x.kind === "tx" && x.resolve("commit"))}>
-          提交
+        <button type="button" className="dbx-btn pri" disabled={!!p.busy} onClick={() => void settleTx("commit")}>
+          {p.busy === "commit" ? "提交中…" : "提交"}
         </button>
       </div>
     </>

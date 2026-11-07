@@ -3,8 +3,7 @@
 // 数据全在 `lib/debugSession`（事件驱动）：这里不做轮询，也不自己拼状态。
 import { useEffect, useState } from "react";
 import { Icon } from "../ui/icon";
-import { toast } from "../ui/toast";
-import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 import { baseName } from "../../lib/workspace";
 import { DebugInspectorContent } from "./DebugInspectorDock";
 import { DebugStack } from "./DebugStack";
@@ -43,13 +42,13 @@ export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number
   }, [snap.paused, snap.target, snap.stopSeq, snap.frames, snap.frameId, onOpenAt]);
 
   const attach = () =>
-    void attachDebugger().catch((e) => toast(failureText("附加调试器", e), "error"));
+    void attachDebugger().catch((e) => errorToast("附加调试器", e));
   const attachRemote = (host: string, port: number) =>
     void attachDebugger("remote", { host, port }).catch((e) =>
-      toast(failureText("附加远程 JVM", e), "error"),
+      errorToast("附加远程 JVM", e),
     );
   const detach = () =>
-    void detachDebugger().catch((e) => toast(failureText("断开调试", e), "error"));
+    void detachDebugger().catch((e) => errorToast("断开调试", e));
 
   // 远程目标没填地址前不显示附加按钮：走下面的表单，避免点了才报「缺端口」。
   const showLocalAttach = !attached && snap.target !== "remote";

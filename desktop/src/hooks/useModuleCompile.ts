@@ -28,6 +28,8 @@ import {
   setTaskRuntime,
 } from "../lib/ncTasks";
 import { beginOperation } from "../lib/operations";
+import { failureText } from "../lib/friendlyError";
+import { errorToast } from "../lib/errorToast";
 import { captureCompileSources, stampCompileResult } from "../lib/compileFreshness";
 import { getWorkbenchLayout } from "../lib/workbenchLayout";
 import { compileCancel } from "../lib/compile";
@@ -160,8 +162,8 @@ export function useModuleCompile() {
         toast("已取消编译", "info");
       } else {
         setSession({ compileResourceMissing: missingResourceId(e) === "ecj" });
-        setCompileLog((l) => [...l, `编译失败：${e}`]);
-        toast(`编译失败：${e}`, "error");
+        setCompileLog((l) => [...l, failureText("编译", e)]);
+        errorToast("编译", e);
       }
       return false;
     } finally {

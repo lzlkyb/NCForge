@@ -89,9 +89,9 @@ describe("workbench docking", () => {
     const editor = host.querySelector("textarea");
     expect(host.querySelector(".wb-sidebar-host")?.textContent).toBe("Changes");
     expect(host.querySelector(".wb-toolbar-host")?.textContent).toBe("Tool header");
-    // 文件标签条属于代码面：切到工具页后它随代码面一起收起，工具标签独占文档面的标签条，
-    // 两套标签在 DOM 上就不在同一个容器里（以前它们是同一个 .wb-tabs 的兄弟节点）。
-    expect(host.querySelector<HTMLElement>(".wb-file-tabs")?.closest<HTMLElement>(".wb-code-surface")?.hidden).toBe(true);
+    // 文件标签条属于代码面（宿主类名 `.wb-code-tools`）：切到工具页后它随代码面一起收起，
+    // 工具标签独占文档面的标签条，两套标签在 DOM 上就不在同一个容器里。
+    expect(host.querySelector<HTMLElement>(".wb-code-tools")?.closest<HTMLElement>(".wb-code-surface")?.hidden).toBe(true);
     expect(host.querySelector(".wb-doc-tabs .wb-tabs")?.textContent).toBe("版本控制");
     await act(async () => (host.querySelector(".wb-tool-tab") as HTMLElement).click());
     expect((host.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(true);
@@ -116,7 +116,7 @@ describe("workbench docking", () => {
     await render("db");
     const dbTab = host.querySelector(".db-tab")!;
     const dbStrip = host.querySelector(".wb-doc-tabs")!;
-    const fileStrip = host.querySelector(".wb-file-tabs")!;
+    const fileStrip = host.querySelector(".wb-code-tools")!;
     // 数据库标签只出现在文档面自己的标签条里；文件标签条随代码面一起收起。
     expect(dbTab.closest(".wb-doc-tabs")).toBe(dbStrip);
     expect(dbStrip.textContent).toContain("查询 1");

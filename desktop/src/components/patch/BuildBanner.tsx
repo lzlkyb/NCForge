@@ -3,7 +3,7 @@ import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { patchRestoreBackup, patchReveal, type PatchBuildResult } from "../../lib/patch";
-import { failureText } from "../../lib/friendlyError";
+import { errorToast } from "../../lib/errorToast";
 
 /**
  * 出包结果横幅。
@@ -26,7 +26,7 @@ export function BuildBanner({ result }: { result: PatchBuildResult }) {
       setRolledBack(true);
       toast("已回滚：补丁包恢复成出包前的那一份", "success");
     } catch (e) {
-      toast(failureText("回滚补丁包", e), "error");
+      errorToast("回滚补丁包", e);
     } finally {
       setRollingBack(false);
     }
@@ -68,7 +68,7 @@ export function BuildBanner({ result }: { result: PatchBuildResult }) {
         <button
           type="button"
           className="pk-link"
-          onClick={() => void patchReveal(result.zipPath).catch((e) => toast(failureText("打开补丁包位置", e), "error"))}
+          onClick={() => void patchReveal(result.zipPath).catch((e) => errorToast("打开补丁包位置", e))}
         >
           打开位置
         </button>

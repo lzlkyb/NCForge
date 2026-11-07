@@ -52,7 +52,7 @@ export function ExtractSqlDialog() {
   };
 
   return (
-    <Modal open onClose={close} className="modal-surface dbx-dlg" ariaLabel={TITLE[req.mode]}>
+    <Modal keepMountedWhenInactive open onClose={close} className="modal-surface dbx-dlg" ariaLabel={TITLE[req.mode]}>
       <div className="hd">
         <Icon name="database" size={16} />
         {TITLE[req.mode]}

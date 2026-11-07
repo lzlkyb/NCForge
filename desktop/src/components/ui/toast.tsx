@@ -6,14 +6,20 @@ import { useAppHidden } from "../../lib/appVisibility";
 
 type ToastVariant = "success" | "error" | "warning" | "info";
 
+/** 附加信息：英文原文等可复制的调试细节，默认视图不显示，「复制全部错误」时附上。 */
+interface ToastOptions {
+  raw?: string;
+}
+
 interface ToastItem {
   id: number;
   message: string;
   variant: ToastVariant;
+  raw?: string;
 }
 
 interface ToastContextValue {
-  toast: (message: string, variant?: ToastVariant) => void;
+  toast: (message: string, variant?: ToastVariant, options?: ToastOptions) => void;
 }
 
 const ToastContext = createContext<ToastContextValue>({ toast: () => {} });
@@ -36,11 +42,31 @@ export function useToast() {
 
 // 模块级单例：供非组件代码（如 lib/tauri.ts 的 invokeOrToast）直接调用 toast。
 // 由 ToastProvider 挂载时写入实现；未挂载时调用为 no-op。
-let toastImpl: ((message: string, variant?: ToastVariant) => void) | null = null;
+type ToastFn = {
+  (message: string, variant?: ToastVariant, options?: ToastOptions): void;
+  error: (message: string, options?: ToastOptions) => void;
+  success: (message: string, options?: ToastOptions) => void;
+  warning: (message: string, options?: ToastOptions) => void;
+  info: (message: string, options?: ToastOptions) => void;
+};
 
-export function toast(message: string, variant: ToastVariant = "info") {
-  toastImpl?.(message, variant);
+let toastImpl: ((message: string, variant?: ToastVariant, options?: ToastOptions) => void) | null = null;
+
+function emitToast(message: string, variant: ToastVariant = "info", options?: ToastOptions) {
+  toastImpl?.(message, variant, options);
 }
+
+/**
+ * 统一出口。保留 `toast(message, variant)` 老调用方式（options 可选、向后兼容），
+ * 另提供 `toast.error(中文文案, { raw: String(e) })` 便捷方法，把可搜索的英文原文
+ * 一并带进 toast——「复制全部错误」时会附在中文文案之后。
+ */
+export const toast: ToastFn = Object.assign(emitToast, {
+  error: (m: string, o?: ToastOptions) => emitToast(m, "error", o),
+  success: (m: string, o?: ToastOptions) => emitToast(m, "success", o),
+  warning: (m: string, o?: ToastOptions) => emitToast(m, "warning", o),
+  info: (m: string, o?: ToastOptions) => emitToast(m, "info", o),
+}) as ToastFn;
 
 let toastId = 0;
 const TOAST_LIFETIME = 3500;
@@ -85,13 +111,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [showErrors, setShowErrors] = useState(false);
   const stackRef = useAutoAnimateRM<HTMLDivElement>();
 
-  const addToast = useCallback((message: string, variant: ToastVariant = "info") => {
+  const addToast = useCallback((message: string, variant: ToastVariant = "info", options?: ToastOptions) => {
     const id = ++toastId;
     setToasts((prev) => {
       // 同一条消息只留最新一份（连点「重试」会刷出一屏一模一样的通知）；
       // 换新 id 让倒计时与进场动画重新开始，而不是静默续期
       const rest = prev.filter((t) => t.message !== message || t.variant !== variant);
-      const next = [...rest, { id, message, variant }];
+      const next = [...rest, { id, message, variant, raw: options?.raw }];
       // 显示上限不能删除未处理错误；普通通知仅保留最近几条。
       const ordinary = next.filter(t => t.variant !== "error").slice(-MAX_TOASTS);
       return next.filter(t => t.variant === "error" || ordinary.includes(t));
@@ -104,9 +130,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   // 批量失败时用户最想要的是「把这一串贴给同事/日志」，逐条复制不现实。
   const errors = toasts.filter((t) => t.variant === "error");
-  const visibleToasts = showErrors && errors.length > 0 ? errors : toasts.slice(-MAX_TOASTS);
+  // 默认视图最多 MAX_TOASTS 张卡，但**错误优先占位**：先放最近几条错误，剩余名额才给
+  // 普通通知。反过来（普通通知先占满、错误被 slice 挤掉）会让「出错」这件事消失在屏幕外，
+  // 只剩一个计数按钮——而错误恰恰是最需要被看见的。全部错误仍可在「查看错误」里翻。
+  const ordinary = toasts.filter((t) => t.variant !== "error").slice(-MAX_TOASTS);
+  const recentErrors = errors.slice(-MAX_TOASTS);
+  // 注意 `slice(-0)` 等于 `slice(0)`（整段），名额为 0 时必须显式给空数组
+  const room = MAX_TOASTS - recentErrors.length;
+  const fill = room > 0 ? ordinary.slice(-room) : [];
+  const visibleToasts = showErrors && errors.length > 0
+    ? errors
+    : toasts.filter((t) => recentErrors.includes(t) || fill.includes(t));
   const copyAllErrors = useCallback(() => {
-    const text = errors.map((t) => t.message).join("\n");
+    const text = errors.map((t) => t.raw ? `${t.message}\n--- raw ---\n${t.raw}` : t.message).join("\n");
     navigator.clipboard.writeText(text).then(
       () => addToast(`已复制 ${errors.length} 条错误`, "success"),
       () => addToast("复制失败：剪贴板不可用", "error"),

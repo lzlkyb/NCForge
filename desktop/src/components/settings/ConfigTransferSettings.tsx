@@ -159,7 +159,7 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
         }}
       />
 
-      <Modal
+      <Modal keepMountedWhenInactive
         open={pending !== null}
         onClose={() => { if (!importing) setPending(null); }}
         ariaLabel="导入配置预览"

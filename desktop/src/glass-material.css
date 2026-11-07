@@ -96,7 +96,7 @@ html[data-ui-style="glass"] :is(.modal-surface, .ui-surface, [role="listbox"], .
 html[data-material-transitions]::view-transition-group(root) { animation-duration: var(--dur); animation-timing-function: var(--ease); }
 
 @media (prefers-reduced-transparency: reduce) {
-  :is(html:root[data-ui-style="glass"], .settings-appearance-preview[data-material="glass"][data-theme]) {
+  :is(html[data-ui-style="glass"], .settings-appearance-preview[data-material="glass"][data-theme]) {
     --glass-stage: hsl(var(--chrome));
     --glass-backdrop: none;
     --glass-sheen: none;
@@ -114,7 +114,7 @@ html[data-material-transitions]::view-transition-group(root) { animation-duratio
   html[data-material-transitions]::view-transition-new(root) { animation: none; }
 }
 @media (forced-colors: active) {
-  :is(html:root[data-ui-style="glass"], .settings-appearance-preview[data-material="glass"][data-theme]) {
+  :is(html[data-ui-style="glass"], .settings-appearance-preview[data-material="glass"][data-theme]) {
     --glass-stage: Canvas;
     --glass-backdrop: none;
     --glass-sheen: none;
@@ -128,6 +128,26 @@ html[data-material-transitions]::view-transition-group(root) { animation-duratio
     --glass-chrome-edge: CanvasText;
     --glass-depth: none;
   }
-  html:root[data-ui-style="glass"] :is(.app-header, .wb-tree, .modal-surface, .ui-surface, [role="listbox"], .toast) { box-shadow: none; backdrop-filter: none; }
-  html:root[data-ui-style="glass"] :is(.app-side-item[data-active], .wb-settings-nav-group > button[aria-current]) { background: Highlight; color: HighlightText; }
+  html[data-ui-style="glass"] :is(.app-header, .wb-tree, .modal-surface, .ui-surface, [role="listbox"], .toast) { box-shadow: none; backdrop-filter: none; }
+  html[data-ui-style="glass"] :is(.app-side-item[data-active], .wb-settings-nav-group > button[aria-current]) { background: Highlight; color: HighlightText; }
+}
+
+/* ── P1-22：未覆盖业务模块补齐柔光玻璃阅读面 ────────────────────────────
+   统一前缀 html[data-ui-style="glass"]，集中在材质总入口，避免 15 个业务文件
+   各写一遍。--glass-reading 与实底 card 同值，classic 零变化；表单下沉 L2 inset。
+   选择器带 html + 属性前缀，特异性高于各业务文件的裸类规则，加载顺序无关。 */
+html[data-ui-style="glass"] :is(
+  .sv-body, .sv-card, .sv-cfg, .sv-log, .pk-page,
+  .vc-page, .vc-compare, .vc-history-detail, .vc-review-document,
+  .meta-page, .meta-workbench, .meta-editor-toolbar, .gen-workbench, .lg-page,
+  .lnk-panel, .lnk-sec, .sc-panel, .sc-log-section, .sc-log-pane, .sc-log,
+  .dq-check, .dw-debug-dock, .dw-source-preview, .dw-search-expanded, .dbg-body
+) { background: var(--glass-reading); }
+html[data-ui-style="glass"] :is(
+  .sv-body, .pk-page, .vc-page, .vc-compare, .vc-review-document, .vc-history-detail,
+  .meta-page, .meta-workbench, .gen-workbench, .lg-page, .lnk-panel, .sc-panel,
+  .dq-check, .dw-debug-dock
+) :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+  background-color: var(--glass-inset);
+  border-color: var(--glass-chrome-edge);
 }

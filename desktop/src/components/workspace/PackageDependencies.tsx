@@ -1,9 +1,9 @@
+import { errorToast } from "../../lib/errorToast";
 import { useEffect, useState } from "react";
 import { WorkspaceGlyph, type WorkspaceGlyphName } from "./WorkspaceGlyph";
 import { invoke } from "../../lib/tauri";
 import { baseName } from "../../lib/workspace";
 import { failureText } from "../../lib/friendlyError";
-import { toast } from "../ui/toast";
 import type { TreeRoot } from "../../lib/treeNav";
 
 type Kind = "project" | "library" | "container" | "variable";
@@ -79,7 +79,7 @@ function DependencyList({ project }: { project: string }) {
           {entry.source && <div className="wb-dependency-path">源码 · {entry.sourcePath ?? `${entry.source}（未找到或无法解析）`}</div>}
           {entry.sourcePath && <button type="button" className="wb-dependency-locate" onClick={() => {
             void invoke("reveal_dependency_source", { root: project, path: entry.sourcePath })
-              .catch(e => toast(failureText("定位源码", e), "error"));
+              .catch(e => errorToast("定位源码", e));
           }}>定位源码</button>}
         </li>)}</ul>
       </details>;

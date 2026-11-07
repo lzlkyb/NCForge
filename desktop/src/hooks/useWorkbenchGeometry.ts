@@ -18,14 +18,38 @@ export function useWorkbenchGeometry(panel: PanelTab, sideKey = "files") {
   const setSize = (axis: "side" | "bottom", value: number) => axis === "side"
     ? updateWorkbenchLayout({ sides: { ...getWorkbenchLayout().sides, [sideKey]: Math.max(180, Math.min(420, value)) } })
     : updateWorkbenchLayout({ compact: false, heights: { ...getWorkbenchLayout().heights, [panel]: Math.max(140, Math.min(bottomMax, value)) } });
-  const resize = (axis: "side" | "bottom", start: number, value: number) => {
+  /**
+   * `capture` 来自手柄的 pointerdown：指针捕获保证拖出 WebView 之后仍能收到
+   * pointermove / pointerup。原先只监听 window，指针在窗口外松手会丢掉 pointerup，
+   * `pointermove` 常驻，回到窗口后继续改宽度（幽灵拖拽）。
+   */
+  const resize = (axis: "side" | "bottom", start: number, value: number, capture?: { id: number; element: HTMLElement }) => {
     cleanup.current?.();
-    const move = (event: PointerEvent) => setSize(axis, value + (axis === "side" ? event.clientX - start : start - event.clientY));
-    const finish = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", finish); window.removeEventListener("pointercancel", finish); cleanup.current = null; };
-    cleanup.current = finish;
+    const captureEl = capture?.element;
+    if (capture) {
+      try { captureEl?.setPointerCapture(capture.id); } catch { /* 指针已释放，退回 window 监听 */ }
+    }
+    const move = (event: PointerEvent) => {
+      if (capture && event.pointerId !== capture.id) return;
+      setSize(axis, value + (axis === "side" ? event.clientX - start : start - event.clientY));
+    };
+    const finish = (event?: Event) => {
+      const pe = event instanceof PointerEvent ? event : undefined;
+      if (capture && pe && pe.pointerId !== capture.id) return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("lostpointercapture", finish);
+      if (capture) {
+        try { captureEl?.releasePointerCapture(capture.id); } catch { /* 已自动释放 */ }
+      }
+      cleanup.current = null;
+    };
+    cleanup.current = () => finish();
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", finish, { once: true });
-    window.addEventListener("pointercancel", finish, { once: true });
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    window.addEventListener("lostpointercapture", finish);
   };
   const onSeparatorKey = (event: KeyboardEvent, axis: "side" | "bottom") => {
     if (event.key === "Enter") {

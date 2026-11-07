@@ -150,6 +150,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 commands::restart_watcher(app.handle(), &app_state, &root);
                 // 上次的工作区直接预热类索引：用户打开就能保存编译
                 commands::spawn_prewarm(app_state.clone());
+                // 类型索引也一起建：第一次 Ctrl+T 找类不该让用户等扫盘
+                commands::spawn_prewarm_types(app_state.clone());
             }
 
             // 资源只在用户选择组件或功能提示中请求下载；启动读取本地状态，不联网置备。
@@ -286,9 +288,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::debug_exception_info,
             commands::debug_evaluate,
             commands::search_workspace,
+            commands::search_workspace_stream,
             commands::search_projects,
             commands::search_list_files,
+            commands::search_invalidate_files,
             commands::search_types,
+            commands::search_workspace_symbols,
             commands::search_replace,
             commands::search_cancel,
             commands::local_history_capture,

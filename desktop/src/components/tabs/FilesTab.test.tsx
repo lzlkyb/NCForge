@@ -202,10 +202,13 @@ describe("文件页", () => {
     expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
     expect(container.querySelector(".sc-run-heading strong")?.textContent).toBe("中间件");
     await act(async () => buttonByText("展开阅读")!.click());
-    expect((container.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(true);
+    // 展开底部面板不再给代码面加 `hidden`（那会让两个面同时隐藏、主区纯白），
+    // 改由 `.wb-main[data-panel-expanded]` 在 CSS 里收起两个面；
+    // 编辑器节点本身仍然留在 DOM 里（不重挂、草稿不丢）。
+    expect((container.querySelector(".wb-main") as HTMLElement).hasAttribute("data-panel-expanded")).toBe(true);
     expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
     await act(async () => buttonByText("恢复布局")!.click());
-    expect((container.querySelector(".wb-code-surface") as HTMLElement).hidden).toBe(false);
+    expect((container.querySelector(".wb-main") as HTMLElement).hasAttribute("data-panel-expanded")).toBe(false);
   });
 
   it("有工作区时渲染标题栏动作、标签条、编译按钮与状态栏", async () => {

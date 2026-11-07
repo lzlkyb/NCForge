@@ -6,6 +6,7 @@
  * 一句能直接看的总结；确认框的数据来自同一组命令的 dry-run。
  */
 import {
+  buildCacheInfo,
   buildCleanAll,
   buildCleanModule,
   buildCleanTmp,
@@ -15,6 +16,8 @@ import {
 } from "./compile";
 import { getSession, setSession } from "./workspaceSession";
 import { trackOperation } from "./operations";
+import { ask } from "./dbConfirm";
+import { errorToast } from "./errorToast";
 import { toast } from "../components/ui/toast";
 
 const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase();
@@ -46,7 +49,7 @@ export async function applyClean(path?: string): Promise<CleanReport[]> {
       return out;
     },
   ).catch((e) => {
-    toast(`清理失败：${e}`, "error");
+    errorToast("清理产物", e);
     return null;
   });
   if (!reports) return [];
@@ -74,22 +77,64 @@ export async function reindexBuild(): Promise<void> {
     );
     toast(msg, "success");
   } catch (e) {
-    toast(`重建索引失败：${e}`, "error");
+    errorToast("重建索引", e);
   }
 }
 
+/** 防连点：命令面板是高频入口，一次点击可能重复下发两轮删除。 */
+let cleanTmpBusy = false;
+
 /** 清理编译临时文件（只动配置目录下的 ecj 参数文件与原子写残留）。 */
 export async function cleanTmpBuild(): Promise<void> {
+  if (cleanTmpBusy) {
+    toast("正在清理编译临时文件，请稍候", "info");
+    return;
+  }
+  cleanTmpBusy = true;
   try {
-    const r = await buildCleanTmp();
+    // trackOperation 既有进度 / 结果反馈，也用 spec.key 的 flights 挡同帧连点。
+    const r = await trackOperation(
+      {
+        key: "build.cleanTmp",
+        label: "清理编译临时文件",
+        scope: getSession().root ?? "工作区",
+        page: "files",
+        phase: "删除 ecj 参数文件与原子写残留",
+      },
+      () => buildCleanTmp(),
+    );
     const text = r.removed
       ? `已清理 ${r.removed} 个编译临时文件（${formatBytes(r.bytes)}）`
       : "没有需要清理的编译临时文件";
     setSession({ compileLog: (l) => [...l, text] });
     toast(text, "success");
   } catch (e) {
-    toast(`清理临时文件失败：${e}`, "error");
+    errorToast("清理编译临时文件", e);
+  } finally {
+    cleanTmpBusy = false;
   }
+}
+
+/** dry-run 计数：只读统计临时文件占用，供确认框显示「将清理多少」，不执行删除。 */
+export async function dryRunCleanTmp(): Promise<{ bytes: number }> {
+  const info = await buildCacheInfo();
+  return { bytes: info.tmpBytes };
+}
+
+/**
+ * 命令面板入口：先 dry-run 统计、再二次确认、最后带进度执行。
+ * 统计失败不挡确认（仍给出「占用未知」的提示），危险动作本身由 cleanTmpBuild 防连点。
+ */
+export async function askCleanTmp(): Promise<void> {
+  let desc = "将清理配置目录下的 ecj 参数文件与原子写残留，不会碰工作区源码；当前统计不到占用。";
+  try {
+    const { bytes } = await dryRunCleanTmp();
+    if (bytes > 0) desc = `将清理配置目录下约 ${formatBytes(bytes)} 的 ecj 参数文件与原子写残留，不会碰工作区源码。`;
+  } catch {
+    desc = "无法统计临时文件占用，仍要继续清理吗？不会碰工作区源码。";
+  }
+  const ok = await ask("清理编译临时文件？", desc, "清理", true);
+  if (ok) await cleanTmpBuild();
 }
 
 function writeSummary(reports: CleanReport[]): void {

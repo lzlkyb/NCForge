@@ -49,7 +49,7 @@ export function ValueSearchDialog({ connId, onClose,tabId }: { connId: string; t
   const pct = prog && prog.total > 0 ? Math.round((prog.done / prog.total) * 100) : 0;
 
   return (
-    <Modal open onClose={close} className="modal-surface dbx-dlg wide dbx-vs" ariaLabel="全库按值反查">
+    <Modal keepMountedWhenInactive open onClose={close} className="modal-surface dbx-dlg wide dbx-vs" ariaLabel="全库按值反查">
       <div className="hd">
         <Icon name="search" size={16} />
         全库按值反查

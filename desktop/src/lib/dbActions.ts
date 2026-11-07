@@ -1,8 +1,8 @@
 import { toast } from "../components/ui/toast";
 import { friendlyDbError } from "./db";
 import { dbApi } from "./dbApi";
-import { beginOperation } from "./operations";
-import { dbTaskSpec } from "./dbOperations";
+import { beginOperation, operationActive } from "./operations";
+import { dbTaskSpec, dbTxKey } from "./dbOperations";
 import { forgetColumnZh } from "./dbColumnZh";
 import { ask, confirmProdWrite, ensureConnected, guardSlotTx, guardTx, isLastTabOn } from "./dbConfirm";
 import { clearFavorites } from "./dbFavorites";
@@ -23,7 +23,9 @@ import {
   openTableTab,
   patchTab,
   releaseSlot,
+  rtOf,
   setConns,
+  setTxNotice,
   sqlTabOf,
   tabOf,
   type ResultEntry,
@@ -58,6 +60,10 @@ export async function openTable(connId: string, table: string, sub: TableSub = "
  * 卡在服务端等待的语句受块边界支配），所以文案不能承诺「一定没执行」。
  */
 async function guardRunning(tab: SqlTab | null | undefined, reason: string): Promise<boolean> {
+  if (tab && operationActive("db." + dbTxKey(tab.connId, tab.slot))) {
+    toast("等待当前事务操作结束后再" + reason, "info");
+    return false;
+  }
   if (!tab?.running) return true;
   const ok = await ask(
     `${reason}正在执行的语句？`,
@@ -87,7 +93,7 @@ export async function switchConn(tabId: string, connId: string) {
   await releaseSlot(tab.connId, tab.slot);
   // 结果必须一起清掉：留着上一个库的行，而「导出 / 复制为 insert」用的是**新**连接，
   // 两库同名表时导出的就是错数据，全程没有任何提示。计划同理（属于旧连接的执行计划）。
-  patchTab<SqlTab>(tabId, { connId, slot: null, tx: undefined, results: [], view: null, plan: null });
+  patchTab<SqlTab>(tabId, { connId, slot: null, tx: undefined, txNotice: undefined, results: [], view: null, plan: null, running: false, executionId: undefined });
   void ensureConnected(connId);
 }
 
@@ -144,7 +150,7 @@ export async function deleteConn(connId: string) {
     clearSlots(connId);
     for (const t of getDb().tabs) {
       if (t.connId !== connId) continue;
-      if (t.kind === "sql") patchTab<SqlTab>(t.id, { connId: null, slot: null, tx: undefined });
+      if (t.kind === "sql") patchTab<SqlTab>(t.id, { connId: null, slot: null, tx: undefined, executionId: undefined, results: [], plan: null, view: null });
       else closeTab(t.id);
     }
   } catch (e) {
@@ -234,38 +240,60 @@ export async function runStatements(
     toast("先在工具条左边选一个连接", "warning");
     return outcome;
   }
-  const connId = tab.connId;let stopRequested=false;
+  if (operationActive("db." + dbTxKey(tab.connId, tab.slot)) ||
+    (tab.slot ? tab.txNotice : rtOf(tab.connId).txNotice)?.kind === "lost") return outcome;
+  const connId = tab.connId;const originSlot = tab.slot ?? null;let stopRequested=false;
   const task=beginOperation({...dbTaskSpec(`sql:${tabId}`,"执行 SQL",connId,tab.slot ? `独立会话 ${tab.slot}` : `SQL 标签 ${tab.title}`,connOf(connId)?.name,tabId),phase:"检查连接与执行范围",cancel:async()=>{const active=sqlTabOf(tabId);if(active?.connId!==connId) throw new Error("来源标签已关闭或切换");stopRequested=true;try {if(active.running) await dbApi.cancel(connId,active.slot);}catch(e){stopRequested=false;throw e;}}});
   if(!task) return outcome;
+  patchTab<SqlTab>(tabId, { executionId:task.id });
+  // 本次执行的身份 / epoch：executionId 唯一，切连接、断开或发起新执行都会让它失效。
+  // 之后所有写回（含 previousResults）都先复核，避免旧库的行落到新连接的标签上。
+  const sameRun = () => {
+    const cur = sqlTabOf(tabId);
+    if (!cur || cur.connId !== connId || cur.executionId !== task.id) return false;
+    // 发起时已有槽就不许被换掉；全新标签首次执行会懒申请槽，不能拿 null 去比。
+    return originSlot === null || (cur.slot ?? null) === originSlot;
+  };
   try {if (!(await ensureConnected(connId))) {task.finish("cancelled","连接未建立，语句未执行");return outcome;}}
   catch {task.finish("failed","连接未建立，返回数据库页查看原因");return outcome;}
   if(stopRequested) {task.finish("cancelled","执行请求尚未发出，语句未执行");outcome.stoppedByUser=true;return outcome;}
   if(sqlTabOf(tabId)?.connId!==connId) {task.finish("cancelled","来源标签或连接已切换，语句未执行");return outcome;}
   const previousResults = tab.results;
-  patchTab<SqlTab>(tabId, { running: true, results: [], view: null });
+  setTxNotice(connId, tab.slot, tab.id);
+  patchTab<SqlTab>(tabId, { running: true });
   const kept: ResultEntry[] = [];
   let ddl = false;
+  let lastProgress = -Infinity;
   try {
     for (let i = 0; i < stmts.length; i++) {
       if(stopRequested) {outcome.stoppedByUser=true;break;}
+      // 每条开始前重取标签：执行期间切连接 / 换槽 / 起了新执行，旧结果一律不再写回。
+      if (!sameRun()) break;
       const s = stmts[i];
-      task.update({phase:`执行第 ${i+1} / ${stmts.length} 条`,progress:{done:i,total:stmts.length}});
+      // 回放进度每条都推进；节流只作用于任务中心的 task.update，避免频繁改 store。
       opts.onProgress?.({ done: i, total: stmts.length, line: s.startLine, text: s.text });
+      const now = performance.now();
+      if (now - lastProgress >= 125) {
+        lastProgress = now;
+        task.update({phase:`执行第 ${i+1} / ${stmts.length} 条`,progress:{done:i,total:stmts.length}});
+      }
       if (isWrite(s.text) && !(await confirmProdWrite(tabId, connId, s.text))) {
+        if (!sameRun()) break;
         appendOutput(tabId, [{ at: Date.now(), text: `第 ${i + 1} 条未执行：已取消`, tone: "info" }]);
         outcome.stoppedByUser = true;
         break;
       }
       if(stopRequested) {outcome.stoppedByUser=true;break;}
       const r = await execOne(tabId, s.text, i + 1);
+      // await 期间可能已经切连接：这条结果属于旧库，丢弃且不继续写回。
+      if (!sameRun()) break;
       const connectionInterrupted = r.errorCode === "session-lost" || r.errorCode === "fallback-session-lost" || r.errorCode === "probe-failed";
       r.startLine=s.startLine;
-      if(r.cancelled) {outcome.stoppedByUser=true;task.finish("cancelled",`数据库已返回取消；已执行 ${i+1} 条，写入状态请核对事务`);}
+      if(r.cancelled) outcome.stoppedByUser = true;
       outcome.done = i + 1;
-      task.update({progress:{done:i+1,total:stmts.length}});
       if (r.kind !== "error" && stmtKind(s.text) === "ddl") ddl = true;
       if (r.kind !== "update" || stmts.length === 1) {
-        if (kept.length === 0 && connectionInterrupted) {
+        if (kept.length === 0 && (connectionInterrupted || r.cancelled)) {
           kept.push(...previousResults.filter((result) => result.kind !== "error"));
         }
         kept.push(r);
@@ -286,8 +314,9 @@ export async function runStatements(
     task.finish("failed",`执行中断；已执行 ${outcome.done} 条，返回数据库页核对`);
     throw error;
   } finally {
-    task.finish(outcome.stoppedByUser ? "cancelled" : outcome.failures.length ? "failed" : "success",`已执行 ${outcome.done} / ${stmts.length} 条${outcome.failures.length ? `，失败 ${outcome.failures.length} 条` : ""}；写入状态以事务条为准`);
-    patchTab<SqlTab>(tabId, { running: false, ...(kept.length === 0 ? { view: "output" } : {}) });
+    task.update({progress:{done:outcome.done,total:stmts.length}});
+    task.finish(outcome.stoppedByUser ? "cancelled" : outcome.failures.length ? "failed" : "success",`已执行 ${outcome.done} / ${stmts.length} 条${outcome.failures.length ? `，失败 ${outcome.failures.length} 条` : ""}；写入状态以连接详情与提交/回滚按钮为准`);
+    if (sameRun()) patchTab<SqlTab>(tabId, { running: false, ...(kept.length === 0 && !outcome.stoppedByUser ? { results: [], view: "output" } : {}) });
   }
   // 建表 / 改表之后侧栏与补全要跟上
   if (ddl) void loadMeta(connId);
@@ -296,7 +325,7 @@ export async function runStatements(
 
 export async function explain(tabId: string, sql: string) {
   const tab = sqlTabOf(tabId);
-  if (!tab?.connId || !sql.trim()) return;
+  if (!tab?.connId || !sql.trim() || operationActive("db." + dbTxKey(tab.connId, tab.slot))) return;
   if (!(await ensureConnected(tab.connId))) return;
   await explainInto(tabId, sql);
 }

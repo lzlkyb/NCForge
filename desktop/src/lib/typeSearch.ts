@@ -26,11 +26,43 @@ export interface TypeSearchResult {
   jars: TypeHit[];
   /** jar 目录还没建好（首次建索引较慢）：本次结果只有工作区部分 */
   jarsPending: boolean;
+  /** 工作区索引还在后台建（首次查询）：本次结果为空，调用方应退回文件名匹配 */
+  indexing: boolean;
   elapsedMs: number;
 }
 
 export const searchTypes = (query: string, limit = 30) =>
   invoke<TypeSearchResult>("search_types", { query, limit });
+
+/**
+ * 工作区里的一条成员（方法 / 字段 / 构造器 / 枚举常量），行列为 1 基。
+ *
+ * 与 `TypeHit` 不同，这条**不依赖语言服务**：来自同一份工作区索引，语言服务建索引
+ * 期间也能秒回。
+ */
+export interface SymbolHit {
+  name: string;
+  /** 所属类型，嵌套类是 `Outer.Inner`。 */
+  container: string;
+  /** LSP SymbolKind：6 方法 / 8 字段 / 9 构造器 / 14 常量 / 22 枚举成员 */
+  kind: number;
+  file: string;
+  module: string;
+  line: number;
+  column: number;
+}
+
+export interface SymbolSearchResult {
+  items: SymbolHit[];
+  /** 索引里一共多少条成员：说明「搜的是多大范围」，也便于判断索引是否还没建好。 */
+  total: number;
+  /** 工作区索引还在后台建（首次查询）：本次结果为空 */
+  indexing: boolean;
+  elapsedMs: number;
+}
+
+export const searchSymbols = (query: string, limit = 50) =>
+  invoke<SymbolSearchResult>("search_workspace_symbols", { query, limit });
 
 /**
  * jar 内类型的打开地址。查询串是标记而不是 jdt.ls 的真实附件：

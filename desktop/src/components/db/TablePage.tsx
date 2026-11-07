@@ -4,7 +4,6 @@ import { toast } from "../ui/toast";
 import { ImportDialog } from "./ImportDialog";
 import { SourceView } from "./SourceView";
 import { TableData } from "./TableData";
-import { TxBar } from "./TxBar";
 import { TableMoreActions } from "./TableMoreActions";
 import { InsertExportDialog } from "./InsertExportDialog";
 import { friendlyDbError } from "../../lib/db";
@@ -58,7 +57,7 @@ export function TablePage({ tab }: { tab: TableTab }) {
 
   return (
     <div className="dbx-page">
-      <DbContextBar connId={tab.connId} />
+      <DbContextBar connId={tab.connId} transactionMode={rt.tx ? rt.tx.autoCommit ? "自动提交" : "手动提交" : undefined} />
       {tab.trail?.length ? <nav className="dbx-read-status" aria-label="关联浏览路径">{tab.trail.map((step,i)=><button type="button" className="dbx-lk" key={`${step.tabId}:${i}`} onClick={()=>returnTo(step)}>{step.label} → </button>)}{tab.table}<button type="button" className="dbx-btn" onClick={()=>returnTo(tab.trail![tab.trail!.length-1])}>返回上一表</button></nav>:null}
       <div className="dbx-subtabs" role="tablist" aria-label="数据库对象视图">
         <span className="title">
@@ -102,12 +101,7 @@ export function TablePage({ tab }: { tab: TableTab }) {
       {rt.status !== "connected" && <div className="dbx-empty">连接已断开，先在左侧连上</div>}
       {err && <div className="dbx-err">{err}</div>}
       {rt.status === "connected" && !isObj && tab.sub === "data" && (
-        <>
-          {/* 表数据走 primary 会话；手动提交模式下这里必须能看到并提交/回滚，
-              不能只让 SQL 控制台拥有事务条。 */}
-          <TxBar connId={tab.connId} />
-          <TableData tab={tab} cols={cols} isView={isView} zh={zh} />
-        </>
+        <TableData tab={tab} cols={cols} isView={isView} zh={zh} />
       )}
       {rt.status === "connected" && !isObj && tab.sub === "struct" && <StructView cols={cols} />}
       {rt.status === "connected" && isObj && tab.sub === "source" && <SourceView tab={tab} />}

@@ -1,6 +1,6 @@
 import { useOperations } from "../../lib/operations";
 import { Icon } from "../ui/icon";
-import { inLangModule, restartLang, startLangNow, useLangView } from "../../lib/lang";
+import { inLangModule, refreshLangStatus, restartLang, startLangNow, useLangView } from "../../lib/lang";
 import { Menu, MenuItem } from "../ui/Menu";
 import { setLightMode } from "../../lib/lightMode";
 import { toast } from "../ui/toast";
@@ -32,6 +32,29 @@ export function LangBadge({ activePath }: { activePath: string | null }) {
       >
         <span className="wb-lang-dot" />
         <span className="wb-lang-text">轻量模式 · 恢复代码智能</span>
+      </button>
+    );
+  }
+  if (v.unknown) {
+    // 读不到后端状态：不能把上次的「就绪」当事实，也不能当成「已停止」（那会让用户
+    // 以为可以安全重启 / 退出）。显示不确定并给一个重试入口，点一下重新查。
+    return (
+      <button
+        type="button"
+        className="wb-status-btn wb-lang"
+        data-tone="busy"
+        title={`${v.message ? `${v.message}\n\n` : ""}读不到代码智能状态：服务可能仍在运行，也可能已经停止。点击重新查询`}
+        disabled={requesting}
+        aria-busy={requesting}
+        onClick={() => {
+          void refreshLangStatus().then((ok) => {
+            if (!ok) toast("仍读不到代码智能状态，稍后再试", "warning");
+          });
+        }}
+      >
+        {requesting && <Icon name="spinner" size={11} className="animate-spin" />}
+        <span className="wb-lang-dot" />
+        <span className="wb-lang-text">代码智能：状态未知 · 重试</span>
       </button>
     );
   }

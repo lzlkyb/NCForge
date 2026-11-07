@@ -128,21 +128,20 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Windows 上 `canonicalize` 会返回 `\\?\C:\...` 这种扩展长度路径。
-/// 它只在slug/展示里出现，去掉前缀才是用户认识的那个路径。
-fn display_path(p: &Path) -> String {
-    let s = p.to_string_lossy().to_string();
-    s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
-}
-
 /// 稳定键：同一文件的多次调用必须得到同一个 slug。
-/// 优先 canonicalize（解析符号链接/大小写差异），失败则用原路径——读得到内容却
-/// canonicalize 失败的情况（权限等）很少，退化为原路径也好过没有历史。
-fn stable_key(path: &Path) -> String {
-    match path.canonicalize() {
-        Ok(p) => display_path(&p),
-        Err(_) => display_path(path),
-    }
+///
+/// 统一走项目既有的 `canonicalize` + `strip_verbatim` 前缀处理（与
+/// `security::path::canonicalize_roots` 同一套），保证 Windows 的 `\\?\` 与
+/// macOS 的 `/var`→`/private/var` 不会让同一个文件算出两个 slug。
+/// canonicalize 失败返回明确错误，不再退回原串——退回原串正是「历史分裂」
+/// （同一文件两个 slug、另一份被整目录淘汰）的根源（审查报告 P1-7）。
+fn stable_key(path: &Path) -> Result<String, String> {
+    let real = path
+        .canonicalize()
+        .map_err(|e| format!("无法规范化历史路径 {}: {e}", path.display()))?;
+    Ok(crate::nc_home::strip_verbatim(&real)
+        .to_string_lossy()
+        .into_owned())
 }
 
 /// 版本 id 只允许 `[0-9a-f-]`：它会拼进文件路径，放行 `/`、`..` 就是任意文件读。
@@ -231,7 +230,12 @@ fn capture_limited(
         Err(_) => return Ok(None),
     };
     let sha = hex(&Sha256::digest(&bytes));
-    let key = stable_key(path);
+    // canonicalize 失败时跳过本次归档：历史是兜底，不该挡住保存；更不能退回
+    // 原路径造出第二个 slug（P1-7）。既有历史仍完整，只是这次不新增版本。
+    let key = match stable_key(path) {
+        Ok(k) => k,
+        Err(_) => return Ok(None),
+    };
     let dir = history_dir(config_dir).join(slug(&key));
 
     // 只保护「这个文件」的索引读-改-写；不同文件的归档互不阻塞
@@ -401,7 +405,7 @@ fn evict_over_budget(
 pub fn list(config_dir: &Path, path: &Path) -> Result<Vec<HistoryVersion>, String> {
     // stable_key 里有一次 canonicalize（磁盘 IO），放在锁外：它不决定索引内容，
     // 只决定用哪个槽位的锁与哪个目录
-    let key = stable_key(path);
+    let key = stable_key(path)?;
     let _g = file_lock(&key).lock().unwrap_or_else(|e| e.into_inner());
     let dir = history_dir(config_dir).join(slug(&key));
     Ok(read_index(&dir).versions)
@@ -412,7 +416,7 @@ pub fn read_version(config_dir: &Path, path: &Path, id: &str) -> Result<Vec<u8>,
     if !valid_id(id) {
         return Err("非法的版本号".to_string());
     }
-    let key = stable_key(path);
+    let key = stable_key(path)?;
     let _g = file_lock(&key).lock().unwrap_or_else(|e| e.into_inner());
     let dir = history_dir(config_dir).join(slug(&key));
     let blob = dir.join(format!("{id}.bin"));
@@ -437,7 +441,7 @@ pub fn restore(
     }
     // 先取旧版内容再锁外归档：capture 自己会拿锁（std Mutex 不可重入）
     let old = {
-        let key = stable_key(path);
+        let key = stable_key(path)?;
         let _g = file_lock(&key).lock().unwrap_or_else(|e| e.into_inner());
         let dir = history_dir(config_dir).join(slug(&key));
         let blob = dir.join(format!("{id}.bin"));
@@ -461,24 +465,13 @@ pub fn restore(
     }
     capture(config_dir, path, KEEP_PER_FILE)?;
     // 直接写字节：历史版本是原样复制，不需要也不该经过编码/换行转换。
-    // 但要走临时文件 + rename——恢复的是用户唯一信任的旧内容，写到一半断电
-    // 不能把文件变成半截（那时连「再恢复一次」的原料都没了）。
+    // 走统一的原子写：同目录随机临时名（并发恢复不撞名，P1-5）+ 写完 sync_all
+    // 再 rename，保证目标不会变成旧新混合的半截内容；rename 只保证原子性、
+    // 不保证持久性，刷盘由 `write_atomic` 负责（P1-6 的注释口径）。
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
     }
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or("无效的文件名")?;
-    let tmp = path.with_file_name(format!(".{file_name}.{}.nc-hist-tmp", std::process::id()));
-    if let Err(e) = fs::write(&tmp, &old) {
-        let _ = fs::remove_file(&tmp);
-        return Err(format!("写临时文件失败: {e}"));
-    }
-    if let Err(e) = fs::rename(&tmp, path) {
-        let _ = fs::remove_file(&tmp);
-        return Err(format!("恢复失败（文件可能只读或被占用）: {e}"));
-    }
+    crate::atomic_file::write_atomic(path, &old)?;
     Ok(())
 }
 
@@ -539,7 +532,7 @@ mod tests {
         // 留下的应是最新的三版（5/4/3），最旧两版的 blob 已删
         let bytes = read_version(&cfg, &f, &vs[0].id).unwrap();
         assert_eq!(bytes, b"5");
-        let dir = history_dir(&cfg).join(slug(&stable_key(&f)));
+        let dir = history_dir(&cfg).join(slug(&stable_key(&f).unwrap()));
         let blobs = fs::read_dir(&dir).unwrap().flatten().count();
         assert_eq!(blobs, 3 + 1); // 3 个 bin + index.json
     }
@@ -617,15 +610,15 @@ mod tests {
         capture(&cfg, &a, KEEP_PER_FILE).unwrap();
         capture(&cfg, &b, KEEP_PER_FILE).unwrap();
         capture(&cfg, &c, KEEP_PER_FILE).unwrap();
-        let dir_c = root.join(slug(&stable_key(&c)));
+        let dir_c = root.join(slug(&stable_key(&c).unwrap()));
         // 写坏 C 的索引：模拟磁盘坏字节 / 被杀软工具改坏
         fs::write(dir_c.join("index.json"), "{ 坏了").unwrap();
 
         // 预算卡到 4 字节，只有 A 放得下。B 应被整份淘汰，C 原样保留，A 不动
-        evict_over_budget(&root, &root.join(slug(&stable_key(&a))), 4, 500).unwrap();
+        evict_over_budget(&root, &root.join(slug(&stable_key(&a).unwrap())), 4, 500).unwrap();
 
         assert!(
-            !root.join(slug(&stable_key(&b))).exists(),
+            !root.join(slug(&stable_key(&b).unwrap())).exists(),
             "最早不动的 B 应被淘汰"
         );
         assert!(dir_c.exists(), "索引读不懂的目录不能删");
@@ -671,7 +664,7 @@ mod tests {
         let f = cfg.join("A.java");
         fs::write(&f, "v1").unwrap();
         capture(&cfg, &f, KEEP_PER_FILE).unwrap();
-        let dir = history_dir(&cfg).join(slug(&stable_key(&f)));
+        let dir = history_dir(&cfg).join(slug(&stable_key(&f).unwrap()));
         fs::write(dir.join("1699999999-deadbeef.bin"), "没人引用").unwrap();
         fs::write(&f, "v2").unwrap();
         capture(&cfg, &f, KEEP_PER_FILE).unwrap();
@@ -682,7 +675,7 @@ mod tests {
         );
     }
 
-    /// 恢复走临时文件 + rename：成功不该留下 `.nc-hist-tmp`。
+    /// 恢复走统一的原子写：成功不该留下 `AtomicTarget` 的临时文件。
     #[test]
     fn 恢复后不留临时文件() {
         let cfg = tmp("notmp");
@@ -697,7 +690,7 @@ mod tests {
             .unwrap()
             .flatten()
             .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| n.contains("nc-hist-tmp"))
+            .filter(|n| n.starts_with(".ncforge-") && n.ends_with(".tmp"))
             .collect();
         assert!(leftovers.is_empty(), "恢复不该留下临时文件: {leftovers:?}");
     }

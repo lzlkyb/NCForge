@@ -15,7 +15,7 @@
 //! - 每行额外回 `ranges`（命中区间）。正则模式下前端无法自己 `indexOf` 出高亮位置，
 //!   所以高亮一律由后端给，纯文本模式也走同一字段，前端只写一份渲染逻辑。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -218,6 +218,13 @@ pub struct SearchOptions {
     /// 结果条数上限；0 或超过 `HARD_MAX_RESULTS` 时按上限处理。
     #[serde(default)]
     pub max_results: usize,
+    /// 优先扫描的文件（**工作区相对**、`/` 或 `\` 分隔，非法项忽略）。
+    ///
+    /// 快速面板把它设成最近打开的那些文件：用户多半在找刚看过的东西，
+    /// 先扫这一小撮，第一条命中就能在几十毫秒内出现在列表里。
+    /// 它只影响扫描顺序，不影响范围与结果集。
+    #[serde(default)]
+    pub priority: Vec<String>,
 }
 
 /// 一条命中里的高亮区间。
@@ -720,6 +727,368 @@ pub fn search_cancellable(
     })
 }
 
+/// 流式搜索时每次推给前端的条数。太小会把 IPC 打满，太大则第一批出现得晚。
+const STREAM_BATCH: usize = 16;
+/// 候选队列上限：生产者走得比 worker 快时压住内存，满了就等一等（不丢候选）。
+const FEED_CAP: usize = 4096;
+
+/// 生产者 / 消费者之间的候选队列。
+struct Feed {
+    state: Mutex<FeedState>,
+    cv: Condvar,
+}
+
+struct FeedState {
+    queue: VecDeque<(PathBuf, String)>,
+    /// 目录已经走完，不再有新候选。
+    done: bool,
+    /// 提前停（命中到上限 / 取消 / 超时）。
+    stop: bool,
+}
+
+/// 走目录这一侧需要的全部输入。参数一多 clippy 会拦，打包成一个结构。
+struct Walk<'a> {
+    feed: &'a Feed,
+    root: &'a Path,
+    dirs: &'a [PathBuf],
+    filter: &'a FileFilter,
+    started: Instant,
+    budget_ms: u128,
+    cancel: &'a AtomicBool,
+    stop: &'a AtomicBool,
+    /// 已经在优先阶段扫过的文件（小写相对路径）：走目录时不要再扫第二遍。
+    skip: &'a HashSet<String>,
+}
+
+/// 流式搜索：边扫边把新命中交给 `sink`，返回值与 [`search_cancellable`] 同口径。
+///
+/// 与一次性搜索的两处差别，都是为了「面板上一敲键就能看到东西」：
+///
+/// 1. **目录枚举与文件读取重叠**。以前先把整棵树走完（newar 上实测 1~3 秒）才开始
+///    读第一个文件，用户看到的是「列表一直空着」；现在生产者线程边走边投喂，worker
+///    立刻开读，命中到 `max_results` 就整体停下，不必等走完。
+/// 2. **`options.priority` 里的文件先扫**（调用方传最近打开的那些）。第一条命中
+///    通常几十毫秒内就能出现。
+///
+/// 结果集与一次性搜索完全一致：流式只改变「看到结果的节奏」，`hits` 仍按
+/// (路径, 行号) 排序，条数上限、时间预算、取消语义也都相同。
+pub fn search_stream(
+    root: &Path,
+    opts: &SearchOptions,
+    budget_ms: u128,
+    cancel: &AtomicBool,
+    sink: &(dyn Fn(&[SearchHit]) + Sync),
+) -> Result<SearchOutcome, String> {
+    let needle = if opts.regex {
+        opts.text.as_str()
+    } else {
+        opts.text.trim()
+    };
+    if needle.trim().is_empty() {
+        return Err("搜索词为空".to_string());
+    }
+    let matcher = Matcher::build(opts)?;
+    let filter = FileFilter::parse(&opts.include);
+    let scope = plan_scope(root, &opts.dirs);
+
+    let started = Instant::now();
+    let limit = match opts.max_results {
+        0 => HARD_MAX_RESULTS,
+        n => n.min(HARD_MAX_RESULTS),
+    };
+
+    let scanned = AtomicUsize::new(0);
+    let collected = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    let mut hits: Vec<SearchHit> = Vec::new();
+
+    // ── 优先文件：最近打开的那些先来，让第一条结果几乎立刻可见 ──
+    // 记下扫过谁：等下走目录时不能再扫一遍，否则同一行会出现两条。
+    let mut scanned_first: HashSet<String> = HashSet::new();
+    for rel in &opts.priority {
+        if stop.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let Some(rel) = normalize_rel_dir(rel) else {
+            continue;
+        };
+        if !scanned_first.insert(rel.to_ascii_lowercase()) {
+            continue;
+        }
+        let path = root.join(&rel);
+        if !accept_candidate(&path, &rel, &filter) {
+            continue;
+        }
+        let room = limit.saturating_sub(collected.load(Ordering::Relaxed));
+        if room == 0 {
+            break;
+        }
+        let before = hits.len();
+        if scan_file(&path, &rel, &matcher, room, &mut hits) {
+            scanned.fetch_add(1, Ordering::Relaxed);
+        }
+        let added = hits.len() - before;
+        if added > 0 {
+            sink(&hits[before..]);
+            if collected.fetch_add(added, Ordering::Relaxed) + added >= limit {
+                stop.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+
+    // ── 其余文件：生产者走目录、worker 并行读，两边同时跑 ──
+    let feed = Feed {
+        state: Mutex::new(FeedState {
+            queue: VecDeque::new(),
+            done: false,
+            stop: false,
+        }),
+        cv: Condvar::new(),
+    };
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .clamp(2, 8);
+
+    let mut panicked = false;
+    let (mut batches, walk_truncated) = std::thread::scope(|sc| {
+        let walker = Walk {
+            feed: &feed,
+            root,
+            dirs: &scope.abs,
+            filter: &filter,
+            started,
+            budget_ms,
+            cancel,
+            stop: &stop,
+            skip: &scanned_first,
+        };
+        let producer = sc.spawn(move || feed_candidates(&walker));
+        let mut handles = Vec::with_capacity(threads);
+        for _ in 0..threads {
+            handles.push(sc.spawn(|| {
+                let mut local: Vec<SearchHit> = Vec::new();
+                // 攒够一小批再推：每命中一行就 emit 一次会把 IPC 打满
+                let mut pending: Vec<SearchHit> = Vec::new();
+                loop {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    if cancel.load(Ordering::Relaxed) {
+                        stop.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    let Some((path, rel)) = next_candidate(&feed, &stop) else {
+                        break;
+                    };
+                    if started.elapsed().as_millis() > budget_ms {
+                        stop.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    let room = limit.saturating_sub(collected.load(Ordering::Relaxed));
+                    if room == 0 {
+                        stop.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    let before = local.len();
+                    let was_text = scan_file(&path, &rel, &matcher, room, &mut local);
+                    if was_text {
+                        scanned.fetch_add(1, Ordering::Relaxed);
+                    }
+                    let added = local.len() - before;
+                    if added > 0 {
+                        // 这一批先给前端看，最终结果仍按下标排好再返回
+                        pending.extend(local[before..].iter().cloned());
+                        if collected.fetch_add(added, Ordering::Relaxed) + added >= limit {
+                            stop.store(true, Ordering::Relaxed);
+                        }
+                    }
+                    if pending.len() >= STREAM_BATCH {
+                        sink(&pending);
+                        pending.clear();
+                    }
+                }
+                if !pending.is_empty() {
+                    sink(&pending);
+                }
+                local
+            }));
+        }
+        let walk_truncated = producer.join().unwrap_or(true);
+        let batches: Vec<Vec<SearchHit>> = handles
+            .into_iter()
+            .map(|h| {
+                h.join().unwrap_or_else(|_| {
+                    panicked = true;
+                    Vec::new()
+                })
+            })
+            .collect();
+        (batches, walk_truncated)
+    });
+
+    for batch in batches.iter_mut() {
+        hits.append(batch);
+    }
+    hits.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
+    let capped = hits.len() > limit;
+    hits.truncate(limit);
+    let files_matched = {
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for h in &hits {
+            seen.insert(h.path.as_str());
+        }
+        seen.len()
+    };
+
+    Ok(SearchOutcome {
+        hits,
+        files_scanned: scanned.load(Ordering::Relaxed),
+        files_matched,
+        truncated: capped
+            || stop.load(Ordering::Relaxed)
+            || walk_truncated
+            || panicked
+            || cancel.load(Ordering::Relaxed),
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        scope_dirs: scope.rel,
+        missing_dirs: scope.missing,
+        scope_fallback: scope.fallback,
+        cancelled: cancel.load(Ordering::Relaxed),
+    })
+}
+
+/// 取一个候选；队列空且生产者已收工时返回 `None`。
+fn next_candidate(feed: &Feed, stop: &AtomicBool) -> Option<(PathBuf, String)> {
+    let mut guard = feed.state.lock().unwrap_or_else(|e| e.into_inner());
+    loop {
+        if guard.stop || stop.load(Ordering::Relaxed) {
+            return None;
+        }
+        if let Some(item) = guard.queue.pop_front() {
+            // 空出一个位置要叫醒可能正在等的生产者
+            drop(guard);
+            feed.cv.notify_one();
+            return Some(item);
+        }
+        if guard.done {
+            return None;
+        }
+        guard = feed
+            .cv
+            .wait_timeout(guard, Duration::from_millis(50))
+            .unwrap_or_else(|e| e.into_inner())
+            .0;
+    }
+}
+
+/// 走目录、把候选投进队列。返回是否因预算 / 取消提前结束。
+fn feed_candidates(walk: &Walk) -> bool {
+    let feed = walk.feed;
+    let mut stack: Vec<PathBuf> = if walk.dirs.is_empty() {
+        vec![walk.root.to_path_buf()]
+    } else {
+        walk.dirs.to_vec()
+    };
+    let mut truncated = false;
+    'walk: while let Some(dir) = stack.pop() {
+        if walk.started.elapsed().as_millis() > walk.budget_ms
+            || walk.cancel.load(Ordering::Relaxed)
+            || walk.stop.load(Ordering::Relaxed)
+        {
+            truncated = true;
+            break;
+        }
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let Ok(ft) = entry.file_type() else { continue };
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if ft.is_dir() {
+                if !SKIP_DIRS.contains(&name.as_str()) {
+                    stack.push(entry.path());
+                }
+                continue;
+            }
+            if !ft.is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let rel = relative_slash(walk.root, &path);
+            if walk.skip.contains(&rel.to_ascii_lowercase()) {
+                continue;
+            }
+            if !accept_candidate(&path, &rel, walk.filter) {
+                continue;
+            }
+            if !push_candidate(
+                feed,
+                &walk.started,
+                walk.budget_ms,
+                walk.cancel,
+                walk.stop,
+                path,
+                rel,
+            ) {
+                truncated = true;
+                break 'walk;
+            }
+        }
+    }
+
+    let mut guard = feed.state.lock().unwrap_or_else(|e| e.into_inner());
+    guard.done = true;
+    drop(guard);
+    feed.cv.notify_all();
+    truncated
+}
+
+/// 投递一个候选；队列满时等 worker 消化。返回 `false` 表示该停了。
+fn push_candidate(
+    feed: &Feed,
+    started: &Instant,
+    budget_ms: u128,
+    cancel: &AtomicBool,
+    stop: &AtomicBool,
+    path: PathBuf,
+    rel: String,
+) -> bool {
+    let mut guard = feed.state.lock().unwrap_or_else(|e| e.into_inner());
+    while guard.queue.len() >= FEED_CAP {
+        if guard.stop || stop.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
+            return false;
+        }
+        if started.elapsed().as_millis() > budget_ms {
+            return false;
+        }
+        guard = feed
+            .cv
+            .wait_timeout(guard, Duration::from_millis(20))
+            .unwrap_or_else(|e| e.into_inner())
+            .0;
+    }
+    if guard.stop || stop.load(Ordering::Relaxed) {
+        return false;
+    }
+    guard.queue.push_back((path, rel));
+    drop(guard);
+    feed.cv.notify_one();
+    true
+}
+
+/// 候选准入：掩码、二进制扩展名、大小。枚举与投喂两侧共用同一套判断。
+fn accept_candidate(path: &Path, rel: &str, filter: &FileFilter) -> bool {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if name.is_empty() || !filter.accepts(rel, &name) || has_binary_ext(&name) {
+        return false;
+    }
+    std::fs::metadata(path).is_ok_and(|md| md.is_file() && md.len() <= MAX_SEARCH_BYTES)
+}
+
 /// 走一遍工作区，返回通过掩码、大小合适的候选文件 `(绝对路径, 相对路径)`。
 ///
 /// `dirs` 是收窄后的范围（绝对路径）；空表示整个工作区。多入口时每个入口各走一遍，
@@ -818,6 +1187,174 @@ pub fn list_files(root: &Path) -> (Vec<String>, bool) {
     }
     out.sort_unstable();
     (out, truncated)
+}
+
+// ───────────────────── 文件清单缓存 ─────────────────────
+//
+// 「转到文件」每次打开面板都要一份完整文件名清单。全树 1.7 万个文件读一遍目录项在
+// 机械盘/杀毒环境下要 1~3 秒，而这棵树半分钟内基本不会变——把它当成「每次按键都要
+// 重算」是纯浪费，用户看到的就是输入框里一直转「查询中…」。
+//
+// 三层：进程内 60 秒直接返回 → 磁盘缓存（重启后仍然有效）→ 真扫。过期不阻塞：
+// 先把手上的旧清单给出去，后台再校准一次（stale-while-revalidate）。文件树的新建 /
+// 改名 / 删除由前端 `invalidateFileIndex` 触发一次强制重扫，不需要靠 TTL 保证实时。
+
+/// 进程内清单的有效期。这段时间内连目录都不读。
+const LIST_SOFT_TTL: Duration = Duration::from_secs(60);
+/// 磁盘清单的有效期：覆盖「重启应用」这个最常见的冷启动场景。
+const LIST_DISK_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+/// 磁盘缓存版式。格式改了要加一，旧文件自然失效。
+const LIST_CACHE_VERSION: &str = "v1";
+
+struct ListCache {
+    root: String,
+    at: Instant,
+    files: Vec<String>,
+    truncated: bool,
+}
+
+static LIST_CACHE: Mutex<Option<ListCache>> = Mutex::new(None);
+/// 后台校准的单飞标志：连续打开面板不要排一队全量扫描。
+static LIST_REFRESHING: AtomicBool = AtomicBool::new(false);
+
+/// 带缓存的 [`list_files`]，供「转到文件」用。
+///
+/// `cache_dir` 是应用的配置目录（`{config_dir}`）；缓存文件放在其下的 `file-index/`。
+/// 除非真的一个缓存都没有，否则**不会**让调用方等全树扫描。
+pub fn list_files_cached(root: &Path, cache_dir: &Path) -> (Vec<String>, bool) {
+    let key = norm_root(root);
+    if let Some((files, truncated, fresh)) = list_memory_hit(&key) {
+        if !fresh {
+            spawn_list_refresh(root.to_path_buf(), cache_dir.to_path_buf());
+        }
+        return (files, truncated);
+    }
+    let cache_path = list_cache_path(cache_dir, &key);
+    if let Some((files, truncated)) = read_list_cache(&cache_path, &key) {
+        // 磁盘那份是上次退出前扫的：先给用户，后台校准
+        store_list_memory(&key, &files, truncated);
+        spawn_list_refresh(root.to_path_buf(), cache_dir.to_path_buf());
+        return (files, truncated);
+    }
+    let (files, truncated) = list_files(root);
+    store_list_memory(&key, &files, truncated);
+    write_list_cache(&cache_path, &key, &files, truncated);
+    (files, truncated)
+}
+
+/// 丢掉缓存（前端在文件树里新建 / 改名 / 删除后调用，让下一次取清单重新扫）。
+pub fn invalidate_list_cache() {
+    *LIST_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+fn list_memory_hit(key: &str) -> Option<(Vec<String>, bool, bool)> {
+    let guard = LIST_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let c = guard.as_ref()?;
+    if c.root != key {
+        return None;
+    }
+    let fresh = c.at.elapsed() < LIST_SOFT_TTL;
+    Some((c.files.clone(), c.truncated, fresh))
+}
+
+fn store_list_memory(key: &str, files: &[String], truncated: bool) {
+    *LIST_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some(ListCache {
+        root: key.to_string(),
+        at: Instant::now(),
+        files: files.to_vec(),
+        truncated,
+    });
+}
+
+/// 后台重扫一次清单。单飞：已经有一个在跑就不再起。
+fn spawn_list_refresh(root: PathBuf, cache_dir: PathBuf) {
+    if LIST_REFRESHING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        // panic 也要把标志放掉，否则这一进程内再也不会刷新（比崩溃更难查）
+        struct Release;
+        impl Drop for Release {
+            fn drop(&mut self) {
+                LIST_REFRESHING.store(false, Ordering::SeqCst);
+            }
+        }
+        let _release = Release;
+        let key = norm_root(&root);
+        let (files, truncated) = list_files(&root);
+        write_list_cache(&list_cache_path(&cache_dir, &key), &key, &files, truncated);
+        store_list_memory(&key, &files, truncated);
+    });
+}
+
+fn norm_root(root: &Path) -> String {
+    root.to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
+}
+
+fn list_cache_path(cache_dir: &Path, key: &str) -> PathBuf {
+    cache_dir
+        .join("file-index")
+        .join(format!("{:016x}.lst", fnv(key)))
+}
+
+/// 磁盘清单格式：四行头部（版式 / 根 / 截断标志 / 条数）+ 每行一个相对路径。
+///
+/// 不用 JSON：8144 条路径的 JSON 要解析 10ms 级，纯按行切分是微秒级，且人眼可核对。
+fn read_list_cache(path: &Path, key: &str) -> Option<(Vec<String>, bool)> {
+    let md = std::fs::metadata(path).ok()?;
+    let old = md.modified().ok()?.elapsed().unwrap_or_default();
+    if old > LIST_DISK_TTL {
+        return None;
+    }
+    let text = std::fs::read_to_string(path).ok()?;
+    let mut lines = text.lines();
+    if lines.next()? != LIST_CACHE_VERSION || lines.next()? != key {
+        return None;
+    }
+    let truncated = lines.next()? == "1";
+    let count: usize = lines.next()?.parse().ok()?;
+    let files: Vec<String> = lines.map(str::to_string).collect();
+    // 条数对不上说明文件被截断（上次写到一半被杀），宁可重扫
+    (files.len() == count).then_some((files, truncated))
+}
+
+fn write_list_cache(path: &Path, key: &str, files: &[String], truncated: bool) {
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let mut out = String::with_capacity(files.iter().map(|f| f.len() + 1).sum::<usize>() + 64);
+    out.push_str(LIST_CACHE_VERSION);
+    out.push('\n');
+    out.push_str(key);
+    out.push('\n');
+    out.push_str(if truncated { "1" } else { "0" });
+    out.push('\n');
+    out.push_str(&files.len().to_string());
+    out.push('\n');
+    for f in files {
+        out.push_str(f);
+        out.push('\n');
+    }
+    let temp = path.with_extension("lst.tmp");
+    if std::fs::write(&temp, out).is_ok() && std::fs::rename(&temp, path).is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+}
+
+/// FNV-1a：缓存文件名要跨进程稳定，不能依赖 `DefaultHasher`。
+fn fnv(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100_0000_01b3);
+    }
+    h
 }
 
 /// 扩展名是否属于「必然是二进制」的那一类。
@@ -967,6 +1504,7 @@ mod tests {
             include: String::new(),
             dirs: Vec::new(),
             max_results: 0,
+            priority: Vec::new(),
         }
     }
 
@@ -1349,6 +1887,140 @@ mod tests {
         );
         assert!(!truncated);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 流式搜索要「先出结果」：优先文件的第一批必须最先到，最终结果与一次性搜索一致。
+    #[test]
+    fn 流式搜索先推优先文件且结果与一次性一致() {
+        let root = crate::test_support::tmp("stream-priority");
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::create_dir_all(root.join("b")).unwrap();
+        std::fs::write(root.join("a/one.txt"), "needle 1\n").unwrap();
+        std::fs::write(root.join("b/two.txt"), "needle 2\n").unwrap();
+        std::fs::write(root.join("z.txt"), "nothing\n").unwrap();
+
+        let mut o = opts("needle");
+        o.max_results = 10;
+        o.priority = vec!["b/two.txt".to_string()];
+        let batches: Mutex<Vec<Vec<SearchHit>>> = Mutex::new(Vec::new());
+        let out = search_stream(&root, &o, 5_000, &AtomicBool::new(false), &|batch| {
+            batches.lock().unwrap().push(batch.to_vec());
+        })
+        .unwrap();
+
+        {
+            let seen = batches.lock().unwrap();
+            assert!(!seen.is_empty(), "至少要推一批");
+            assert_eq!(seen[0][0].path, "b/two.txt", "优先文件必须第一批出来");
+        }
+
+        assert_eq!(out.hits.len(), 2);
+        assert_eq!(out.hits[0].path, "a/one.txt", "最终结果按路径排序");
+        assert!(!out.cancelled);
+
+        // 与一次性搜索同口径：流式只改节奏，不改结果集
+        let one = search(&root, &o).unwrap();
+        assert_eq!(one.hits.len(), out.hits.len());
+        for (a, b) in one.hits.iter().zip(&out.hits) {
+            assert_eq!((a.path.as_str(), a.line), (b.path.as_str(), b.line));
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn 流式搜索命中上限后立即停() {
+        let root = crate::test_support::tmp("stream-cap");
+        for i in 0..50 {
+            std::fs::write(root.join(format!("f{i:02}.txt")), "needle\n").unwrap();
+        }
+        let mut o = opts("needle");
+        o.max_results = 3;
+        let out = search_stream(&root, &o, 5_000, &AtomicBool::new(false), &|_| {}).unwrap();
+        assert_eq!(out.hits.len(), 3);
+        assert!(out.truncated, "到上限要标截断");
+        // 多线程各在飞一个文件，最多多看几个；扫完 50 个说明没提前停
+        assert!(out.files_scanned < 50, "到上限就该停，不该扫完整棵树");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 真机：newar 上量首批延迟。手动跑：
+    /// `cargo test --lib -- 真机_流式搜索首批延迟 --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn 真机_流式搜索首批延迟() {
+        let root = PathBuf::from(r"C:\work\aier\newar");
+        if !root.is_dir() {
+            return;
+        }
+        let mut o = opts("getBillNo");
+        o.max_results = 50;
+        // 用户真正会传的两类：刚打开过的文件 + 文件名就带关键词的文件
+        o.priority = vec!["gl/src/private/nc/bs/gl/voucher/VoucherBO.java".to_string()];
+        let first = Mutex::new(None::<u128>);
+        let started = Instant::now();
+        let out = search_stream(&root, &o, TIME_BUDGET_MS, &AtomicBool::new(false), &|_b| {
+            let mut f = first.lock().unwrap();
+            if f.is_none() {
+                *f = Some(started.elapsed().as_millis());
+            }
+        })
+        .unwrap();
+        let elapsed = started.elapsed().as_millis();
+        println!(
+            "首批 {} ms / 完成 {elapsed} ms，{} 条，扫了 {} 个文件",
+            first.lock().unwrap().unwrap_or(0),
+            out.hits.len(),
+            out.files_scanned
+        );
+    }
+
+    #[test]
+    fn 文件清单缓存_内存命中与磁盘往返() {
+        let root = crate::test_support::tmp("list-cache-root");
+        std::fs::create_dir_all(root.join("m/src")).unwrap();
+        std::fs::write(root.join("m/src/A.java"), "x").unwrap();
+        let cache_dir = crate::test_support::tmp("list-cache-dir");
+
+        invalidate_list_cache();
+        let (files, truncated) = list_files_cached(&root, &cache_dir);
+        assert_eq!(files, vec!["m/src/A.java"]);
+        assert!(!truncated);
+
+        // 软 TTL 内：磁盘上新增了文件也不重扫，直接给同一份（这才是「秒开」的来源）
+        std::fs::write(root.join("m/src/B.java"), "x").unwrap();
+        let (again, _) = list_files_cached(&root, &cache_dir);
+        assert_eq!(again, files, "软 TTL 内不该重新扫盘");
+
+        // 清掉进程内的那份 → 从磁盘读回，冷启动（重启应用）走的就是这条路
+        invalidate_list_cache();
+        let (from_disk, _) = list_files_cached(&root, &cache_dir);
+        assert_eq!(from_disk, files, "磁盘缓存应与上次扫描一致");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&cache_dir);
+        invalidate_list_cache();
+    }
+
+    #[test]
+    fn 清单磁盘缓存_版式与条数不符时丢弃() {
+        let cache_dir = crate::test_support::tmp("list-cache-parse");
+        let key = norm_root(Path::new("C:/proj"));
+        let path = list_cache_path(&cache_dir, &key);
+        write_list_cache(&path, &key, &["a/A.java".into(), "b/B.java".into()], false);
+        assert_eq!(read_list_cache(&path, &key).unwrap().0.len(), 2);
+
+        // 别的工程 → 不认（缓存文件名已按根哈希，这里是第二道保险）
+        assert!(read_list_cache(&path, &norm_root(Path::new("C:/other"))).is_none());
+
+        // 上次写到一半被杀：条数对不上，宁可重扫也别给出半份清单
+        std::fs::write(&path, format!("{LIST_CACHE_VERSION}\n{key}\n0\n9\na\nb\n")).unwrap();
+        assert!(read_list_cache(&path, &key).is_none());
+
+        // 版式变了（升级后）同样丢弃
+        std::fs::write(&path, format!("v0\n{key}\n0\n0\n")).unwrap();
+        assert!(read_list_cache(&path, &key).is_none());
+
+        let _ = std::fs::remove_dir_all(&cache_dir);
     }
 
     #[test]
@@ -1977,6 +2649,7 @@ mod replace_tests {
             include: String::new(),
             dirs: Vec::new(),
             max_results: 0,
+            priority: Vec::new(),
         }
     }
 
@@ -2217,6 +2890,7 @@ mod live_tests {
             include: "*.java".to_string(),
             dirs: dirs.iter().map(|d| d.to_string()).collect(),
             max_results: 0,
+            priority: Vec::new(),
         }
     }
 

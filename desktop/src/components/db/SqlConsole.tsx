@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "../ui/toast";
 import { SqlToolbar } from "./SqlToolbar";
 import { SqlEditor, type SqlEditorApi } from "./SqlEditor";
-import { TxBar } from "./TxBar";
 import { ResultPanel } from "./ResultPanel";
 import { HistoryDrawer } from "./HistoryDrawer";
 import { SnippetDrawer } from "./SnippetDrawer";
@@ -109,7 +108,6 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
       {srOpen && tab.connId && (
         <ScriptReplayDialog tab={tab} onClose={() => setSrOpen(false)} />
       )}
-      <TxBar connId={tab.connId} tabId={tab.id} slot={tab.slot} tx={tab.slot ? tab.tx : undefined} />
       <div className="dbx-console-body">
         <div ref={split.bodyRef} className="dbx-console-main">
           <SqlEditor tabId={tab.id} initial={tab.sql} onRun={(m) => void run(m)} apiRef={api} onScope={setScope} />
