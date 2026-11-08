@@ -214,6 +214,9 @@
 
 /* ── 结果表（手写虚拟滚动） ── */
 .dbx-grid { flex: 1; min-width: 0; overflow: auto; position: relative; font: var(--dbx-fs-body) system-ui, "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; outline: none; scrollbar-gutter: stable; }
+/* `outline:none` 必须给替代：全局只有 `outline-color`，在 style:none 下等于没有焦点环。
+   空选区时网格内没有任何颜色变化，纯键盘用户 Tab 进来会完全失去位置感。 */
+.dbx-grid:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }
 .dbx-grid-inner { position: relative; }
 .dbx-grid-empty {position:sticky;left:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:0;height:calc(100% - var(--dbx-head-h));padding:12px;color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);text-align:center;}
 .dbx-grid-empty strong {color:hsl(var(--foreground));font-size:var(--dbx-fs-body);font-weight:600;}
@@ -255,11 +258,16 @@
 }
 .dbx-gh { flex-shrink: 0; position: relative; height: var(--dbx-head-h); padding: 4px 10px 0; border-bottom: 1px solid hsl(var(--border)); font: 600 var(--dbx-fs-body) system-ui, "Segoe UI", sans-serif; white-space: nowrap; overflow: hidden; text-align: left; background: hsl(var(--chrome)); }
 .dbx-gh .t { display: block; font-size: var(--dbx-fs-meta); line-height: 17px; color: hsl(var(--muted-foreground)); font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
-.dbx-gh:not([data-description]) {padding-top:calc((var(--dbx-head-h) - 20px) / 2);}
-.dbx-gh .nm { overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: calc(100% - 14px); vertical-align: top; }
+.dbx-gh .nm { overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: calc(100% - 14px); line-height: 17px; vertical-align: top; }
+/* 列名后面那个点：空心 = 抽样判定为编码列，实心 = 正在显示解码后的值。
+   开关在列头右键菜单，这里只做标识——点它仍然是排序，别抢列名的动作。 */
+.dbx-gh .dbx-codec { display: inline-block; width: 4px; height: 4px; margin-left: 4px; border: 1px solid hsl(var(--primary) / .7); border-radius: 50%; vertical-align: middle; }
+.dbx-gh .dbx-codec[data-on] { background: hsl(var(--primary)); }
 .dbx-gh .so { float: right; color: hsl(var(--primary)); }
 .dbx-gh.rn { position: sticky; left: 0; z-index: 3; }
-.dbx-gh .rz { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 1; }
+/* 手柄要压在本列右边缘内侧：`right:-3px` 会让右半截被上面的 `overflow:hidden` 裁掉，
+   实际只剩 3px 可命中（WCAG 2.5.8 要求至少 24px 目标，拖拽类至少 10px 才好点）。 */
+.dbx-gh .rz { position: absolute; top: 0; right: 0; width: 10px; height: 100%; cursor: col-resize; z-index: 1; }
 .dbx-gedit { width: 100%; height: calc(var(--dbx-row-h) - 2px); border: 0; outline: none; padding: 0 9px; font: inherit; background: hsl(var(--card)); color: hsl(var(--foreground)); }
 .dbx-detail { width: 270px; max-width: 55%; border-left: 1px solid hsl(var(--border)); background: hsl(var(--card)); display: flex; flex-direction: column; flex-shrink: 0; font-size: var(--dbx-fs-body); min-height: 0; }
 .dbx-detail .hd { display: flex; align-items: flex-start; gap: 6px; padding: 8px 10px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); }

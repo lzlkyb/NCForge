@@ -1,17 +1,18 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useResultOrder } from "../../hooks/useResultOrder";
 import { selectionBounds } from "../../lib/gridViewport";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { ResultGrid, type GridEdit, type ResultGridApi } from "./ResultGrid";
-import { CellDetail } from "./CellDetail";
+import { CellDetail, type LobLoader } from "./CellDetail";
 import { thousands } from "../../lib/db";
-import type { Cell, ColumnMeta } from "../../lib/dbApi";
+import { decodeCell } from "../../lib/cellCodec";
+import { dbApi, type Cell, type ColumnMeta } from "../../lib/dbApi";
 import { ResultTransfer } from "./ResultTransfer";
 import { freezeTransferFrame, type TransferFrame, type TransferSource } from "../../lib/resultTransferContext";
 import { quickCopyTransfer } from "../../lib/resultTransferQuick";
-import { nextSort, type SortState } from "../../lib/resultView";
+import { fitWidth, nextSort, type SortState } from "../../lib/resultView";
 import { serverSortLabel } from "../../lib/serverSort";
 
 /**
@@ -28,9 +29,24 @@ import { ResultCompare } from "./ResultCompare";
 import { ResultSource } from "./ResultSource";
 import { loadLayout, saveLayout, gridColumns, type Selection, type GridLayout, type ResultSnapshot } from "../../lib/dbResultTools";
 
-export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated }: {
+/**
+ * 取大文本完整值需要的上下文。结果集只带 8K 预览，用户点「加载完整值」时
+ * 后端按 `sql` 重查第 `row_index` 行、取 `column` 那一列。
+ *
+ * `slot` 必须与执行这条 SQL 时是同一条会话，否则默认 schema / 事务上下文对不上。
+ */
+export interface LobSource {
+  connId: string;
+  slot?: string | null;
+  sql: string;
+  timeoutSec?: number;
+}
+
+export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated, lob }: {
   columns: ColumnMeta[];
   layoutKey?:string; snapshot?:ResultSnapshot; connId?:string|null; onRelated?:(row:Cell[])=>void;
+  /** 大文本「加载完整值」的上下文；不传 = 这个结果不支持（表页 / 非查询结果）。 */
+  lob?: LobSource;
   rows: Cell[][];
   /** 结果条左侧的说明：行数 / 耗时。 */
   meta: ReactNode;
@@ -65,6 +81,10 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
   const visible=gridColumns(columns,layout);
   const setColumns=(value:GridLayout)=>{setLayout(value);setSelection(null);try{saveLayout(layoutKey,value);}catch{toast("列布局未能保存，当前布局仍可使用","error");}};
   const select=(p:{r:number;c:number},extend=false)=>setSelection(current=>({anchor:extend && current ? current.anchor : p,end:p}));
+  // 自适应列宽：全部 = 清空手调值，回到 `fitWidth` 的测量结果；
+  // 单列 = 只把这一列记成手调宽度，其余列保持用户已经调好的样子。
+  const fitAll=()=>setColumns({...layout,widths:{}});
+  const fitOne=(c:number)=>{const name=columns[c]?.name; if(name) setColumns({...layout,widths:{...layout.widths,[name]:fitWidth(columns[c],rows,c)}});};
   const [ui,setUi] = useState<{filterOpen:boolean;columnOpen:boolean;detail:boolean;menu:{x:number;y:number;items:ContextMenuItem[]}|null;head:{x:number;y:number;col:number}|null}>({filterOpen:false,columnOpen:false,detail:false,menu:null,head:null});
   const {filterOpen,columnOpen,detail,menu,head}=ui;
   const setFilterOpen=(value:boolean|((v:boolean)=>boolean))=>setUi(v=>({...v,filterOpen:typeof value==="function"?value(v.filterOpen):value}));
@@ -92,7 +112,32 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
   };
 
   const selValue = sel ? valueAt(sel.r,sel.c) : undefined;
+  // 详情面板要显示网格里那个「第 N 行」（排序/筛选后的显示序号）。
+  // 直接用 `sel.r + 1` 是原始下标，筛选后会和网格对不上。
+  const selRowNo = sel ? (order.indexOf(sel.r) >= 0 ? order.indexOf(sel.r) + 1 : sel.r + 1) : null;
+  // 详情面板的「加载完整值」：行号用 `sel.r`（`rows` 下标，不是显示顺序），
+  // 列名用原始列名——后端要靠它在外层子查询里定位这一格。
+  const lobLoader: LobLoader | undefined = lob && sel ? {
+    canLoad: true,
+    load: async () => {
+      const r = await dbApi.lobValue(lob.connId, lob.sql, sel.r, columns[sel.c].name, lob.slot ?? null);
+      return { value: r.value, chars: r.chars, truncated: r.truncated };
+    },
+  } : undefined;
   const selectionSummary = bounds && <span className="dbx-selection-summary">选区 {bounds.rowEnd-bounds.rowStart+1} 行 × {bounds.colEnd-bounds.colStart+1} 列</span>;
+  // 解码开关按列名存进布局：下次查同一张表同一列还是这个状态。
+  // 不走 `setColumns`：那个会清选区，而切换显示方式不该把用户的选择扔掉。
+  const toggleDecode=(c:number)=>{
+    const name=columns[c]?.name; if(!name) return;
+    const decoded=layout.decoded.includes(name)?layout.decoded.filter(n=>n!==name):[...layout.decoded,name];
+    const value={...layout,decoded};
+    setLayout(value);
+    try{saveLayout(layoutKey,value);}catch{toast("解码开关未能保存，本次仍然生效","error");}
+  };
+  // 右键菜单要提前知道「这列能不能解」，否则点了没反应。只抽前 50 行，够判断也不拖慢渲染。
+  const headName = head ? columns[head.col]?.name ?? "" : "";
+  const headDecoded = layout.decoded.includes(headName);
+  const headDecodable = useMemo(() => head ? rows.slice(0,50).some(r=>decodeCell(r[head.col],{auto:true})) : false, [head, rows]);
 
   return (
     <div className="dbx-result-table" onKeyDown={event=>{
@@ -110,6 +155,7 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
           placeholder="输入关键字" aria-label="在结果中筛选" onChange={e=>setFilter(e.target.value)} autoFocus={filterOpen}
           onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();setFilter("");setFilterOpen(false);gridApi.current?.focusActive();}}} />}
         <button type="button" className="dbx-btn ghost" title="显示、隐藏、冻结列与恢复布局" aria-label="结果列布局" onClick={()=>setColumnOpen(true)}><Icon name="sliders" size={14} /><span className="dbx-action-label">显示列 {visible.length} / {columns.length}</span></button>
+        <button type="button" className="dbx-ibtn" title="按内容自适应全部列宽" aria-label="自适应列宽" onClick={fitAll}><Icon name="columns" size={14} /></button>
         {snapshot && <ResultCompare snapshot={snapshot} related={onRelated ? {label:"关联记录",icon:"external",disabled:!sel,onSelect:()=>sel && onRelated(rows[sel.r])} : undefined} />}
         {!snapshot && onRelated && <button type="button" className="dbx-btn ghost" disabled={!sel} onClick={()=>sel && onRelated(rows[sel.r])}>关联记录</button>}
         <span className="dbx-sp" />
@@ -156,6 +202,7 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
           visible={visible}
           frozen={layout.frozen}
           widthOverrides={layout.widths}
+          decoded={layout.decoded}
           onWidths={w=>setColumns({...layout,widths:Object.fromEntries(columns.map((c,i)=>[c.name,w[i]]))})}
           onOpen={() => setDetail(true)}
           edit={edit}
@@ -165,9 +212,11 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
           <CellDetail
             column={sel ? columns[sel.c] : null}
             zh={sel ? zh?.[columns[sel.c]?.name.toLowerCase()] : undefined}
-            row={sel ? sel.r + 1 : null}
+            row={selRowNo}
             value={selValue === undefined ? null : selValue}
             empty={!sel}
+            lob={lobLoader}
+            sql={lob?.sql ?? snapshot?.sql}
             onClose={() => {setDetail(false);requestAnimationFrame(()=>gridApi.current?.focusActive());}}
           />
         )}
@@ -183,6 +232,13 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
           items={[
             { label: "本地升序（只排已取的行）", onSelect: () => setSort({ col: head.col, dir: "asc" }) },
             { label: "本地降序（只排已取的行）", onSelect: () => setSort({ col: head.col, dir: "desc" }) },
+            { label: "本列自适应宽度", onSelect: () => fitOne(head.col) },
+            { label: "全部列自适应宽度", onSelect: fitAll },
+            {
+              label: headDecoded ? "恢复原始值（关闭解码）" : "显示解码后的值（Hex / Base64）",
+              disabled: !headDecoded && !headDecodable,
+              onSelect: () => toggleDecode(head.col),
+            },
             {
               label: onServerSort ? serverSortLabel(columns[head.col]?.name ?? "", "asc") : "重排并重查（这条结果不支持）",
               disabled: !onServerSort,

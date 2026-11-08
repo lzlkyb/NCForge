@@ -213,6 +213,19 @@ export interface MoreResult {
   ms: number;
 }
 
+/**
+ * 按需取回来的一格大文本。
+ *
+ * 结果集里 CLOB 只带预览（前 8K 字符），用户点「加载完整值」才走这条。
+ * `truncated` = 到了 1MB 上限还没读完，`value` 仍不是全部。
+ */
+export interface LobValueOut {
+  value: string;
+  chars: number;
+  truncated: boolean;
+  ms: number;
+}
+
 /** 导出 insert 脚本的请求：取数语句 + 目标表 + 三条 NC 规则的开关。 */
 export interface ExportInsertReq {
   id: string;
@@ -237,6 +250,8 @@ export interface ExportInsertResult {
   /** 到行数上限还有剩余：脚本不是全量。 */
   truncated: boolean;
   blobNulls: number;
+  /** RAW 列取不到完整值、脚本里只能写 null 的个数（老后端没有这个字段）。 */
+  rawNulls?: number;
   mlTildes: number;
   /** 识别到的多语列族，如 `name（跳过 name2..name6）`。 */
   multilang: string[];
@@ -421,6 +436,8 @@ export interface ExportFileOut {
   truncated: boolean;
   /** 用户中途取消：文件里是已写入的合法前缀，但不是全量。 */
   canceled: boolean;
+  /** 被截断到 8K 预览的大文本格子数。>0 说明文件里的长文本不完整（老后端没有这个字段）。 */
+  longValues?: number;
   ms: number;
 }
 
@@ -553,6 +570,14 @@ export const dbApi = {
   caps: (id: string) => invoke<EngineCaps>("db_caps", { id }),
   more: (id: string, maxRows: number, slot?: string | null) =>
     invoke<MoreResult>("db_more", { id, maxRows, slot: slot || null }),
+  /**
+   * 取一格大文本的完整值（网格里只有 8K 预览）。
+   *
+   * `rowIndex` 是 `rows` 数组下标（不是显示顺序）；`column` 是列名。后端用
+   * 「外层编号 + 取第 N 行」重新定位，所以带绑定参数的查询会明确报错。
+   */
+  lobValue: (id: string, sql: string, rowIndex: number, column: string, slot?: string | null, maxChars?: number) =>
+    invoke<LobValueOut>("db_lob_value", { id, sql, rowIndex, column, slot: slot || null, maxChars: maxChars ?? null }),
   tx: (id: string, action: "commit" | "rollback" | "autocommit-on" | "autocommit-off" | "status", slot?: string | null) =>
     invoke<{ tx: TxInfo; alive?: boolean }>("db_tx", { id, action, slot: slot || null }),
   reconnect: (id: string, slot: string | null, password?: string, fallback = false, configured = false) =>

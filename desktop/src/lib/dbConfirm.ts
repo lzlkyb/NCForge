@@ -274,7 +274,10 @@ const quietUntil = new Map<string, number>();
 /** 生产库执行写语句前确认。「10 分钟内不再询问」按标签记。 */
 export async function confirmProdWrite(tabId: string, connId: string, sql: string): Promise<boolean> {
   if (connOf(connId)?.env !== "prod") return true;
-  if ((quietUntil.get(tabId) ?? 0) > Date.now()) return true;
+  // 静默期按「标签 + 连接」记：只记标签的话，同一个 SQL 标签切到另一个生产库后
+  // 会继承上一个库的免确认，对着第二个生产库写也不问了。
+  const quietKey = `${tabId}:${connId}`;
+  if ((quietUntil.get(quietKey) ?? 0) > Date.now()) return true;
   return new Promise<boolean>((resolve) =>
     show({
       kind: "prod",
@@ -282,7 +285,7 @@ export async function confirmProdWrite(tabId: string, connId: string, sql: strin
       tabId,
       sql,
       resolve: (ok, quiet) => {
-        if (ok && quiet) quietUntil.set(tabId, Date.now() + 10 * 60_000);
+        if (ok && quiet) quietUntil.set(quietKey, Date.now() + 10 * 60_000);
         resolve(ok);
       },
     }),

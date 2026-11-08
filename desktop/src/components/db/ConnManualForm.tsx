@@ -8,7 +8,7 @@ import { initialConnForm, mergeConnForm, type DbConnForm } from "../../lib/dbCon
 import { ncHomeProbe } from "../../lib/server";
 import { beginOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
-import { closeConnDialog, disconnect, loadConns, rtOf } from "../../lib/dbStore";
+import { closeConnDialog, loadConns, rtOf } from "../../lib/dbStore";
 
 /**
  * 手动填写（新建或编辑）。主机 / 端口 / 服务名与 JDBC URL 两种写法互相同步
@@ -95,14 +95,27 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
     if(!task) return;lock.current=true;setSaving(true);
     try {
       const target = conn && (conn.url !== f.url.trim() || conn.user !== f.user.trim() || conn.engine !== input().engine || (conn.defaultSchema ?? "") !== f.defaultSchema.trim());
+      // 连接串、用户或引擎变了：旧会话已经不是这个连接了，必须先断开。
+      //
+      // 🔴 不能直接调 store 的 `disconnect`：那会绕过 `guardAllSessions`，primary 和
+      // 每个槽里未提交的写入会被桥静默回滚，而界面只弹一句绿色「配置已保存」。
+      // 先问、再存：用户点取消时配置也不落地，避免「配置是新的、会话还是旧的」。
+      if (target && conn && rtOf(conn.id).status === "connected") {
+        // 动态 import：`dbActions` 会顺着 sqlModels 把整个 Monaco 拉进来，
+        // 而这只在「改地址后保存」时用得上。静态引入会让所有渲染表单的地方都背上 Monaco。
+        const { disconnectConn } = await import("../../lib/dbActions");
+        const closed = await disconnectConn(conn.id);
+        if (!closed) {
+          task.finish("cancelled", "未断开旧会话，配置没有保存");
+          return;
+        }
+      }
       const saved = await dbApi.save(input(), f.password || undefined, f.remember);
       // 本机存不下口令（例如 macOS 钥匙串被拒）时后端只降级、不报错：这里必须说出来，
       // 否则用户以为「记住」生效了，下次连接却又要口令。
       if (f.password && f.remember && saved.hasPassword === false) {
         toast("口令没存到本机，下次连接需要重新输入", "warning");
       }
-      // 连接串、用户或引擎变了：旧会话已经不是这个连接了，断掉重连
-      if (target && conn && rtOf(conn.id).status === "connected") await disconnect(conn.id);
       await loadConns();
       task.finish("success","配置已保存");closeConnDialog();
     } catch (e) {

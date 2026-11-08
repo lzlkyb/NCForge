@@ -129,14 +129,19 @@ export async function exportResultFile(
       exportId,
     });
     task.update({progress:{done:out.rows}});
-    task.finish(out.canceled ? "cancelled" : "success",`已写出 ${out.rows} 行${out.canceled ? "，已停止，文件保留已写内容" : out.truncated ? "，到达读取上限，文件不是全量" : "，文件已保存"}`);
+    const lobCut = out.longValues ?? 0;
+    task.finish(out.canceled ? "cancelled" : "success",`已写出 ${out.rows} 行${out.canceled ? "，已停止，文件保留已写内容" : out.truncated ? "，到达读取上限，文件不是全量" : "，文件已保存"}${lobCut > 0 ? `，${lobCut} 个长文本只写了前 8K` : ""}`);
     toast(
       out.canceled
         ? `已取消导出：文件里只有前 ${out.rows} 行`
         : out.truncated
           ? `已导出 ${out.rows} 行（到了上限，文件不是全量）`
-          : `已导出 ${out.rows} 行到 ${out.fileName}`,
-      out.canceled || out.truncated ? "warning" : "success",
+          : lobCut > 0
+            // 长文本被截断比行数不全更隐蔽：文件看起来"导完了"，
+            // 实际 CLOB 只有前 8192 个字符（还带一句中文提示），不能直接拿去迁移。
+            ? `已导出 ${out.rows} 行，但有 ${lobCut} 个长文本只写了前 8K 字符，文件不是完整数据`
+            : `已导出 ${out.rows} 行到 ${out.fileName}`,
+      out.canceled || out.truncated || lobCut > 0 ? "warning" : "success",
     );
     return out;
   } catch (e) {

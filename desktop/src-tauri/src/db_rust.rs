@@ -46,8 +46,18 @@ use serde_json::{json, Map, Value};
 
 use crate::java_bridge::BridgeError;
 
-/// CLOB 一次最多读这么多字符（与 JVM 桥一致：再长也不展开，避免一条记录撑爆前端）。
+/// 按需取完整 CLOB 时的上限（与 JVM 桥一致）。结果集里只带 `LOB_PREVIEW` 的预览，
+/// 用户点「加载完整值」才走这个上限。
 const CLOB_MAX: usize = 1024 * 1024;
+/// 结果集里一格大文本最多带这么多字符。
+///
+/// 为什么不给 1MB：500 行 × 2 个 CLOB × 1MB 会直接把前端 16MB 的结果预算撑爆
+/// （`lib/dbResultBudget.ts::fitRows` 按**整行**裁），后面的行根本进不来，
+/// 用户看到的是「查出来 500 行，但一大半没了」。完整值走 `lobValue` 按需取。
+///
+/// 🔴 导出/传输也走这条预览通道，它们必须用 [`is_lob_preview`] 判断截断，
+/// **不能**再用 1MB 当阈值 —— 8K 的预览永远够不到 1MB，会静默写出残缺数据。
+pub(crate) const LOB_PREVIEW: usize = 8 * 1024;
 /// DBMS_OUTPUT 一次最多取这么多行。
 const OUTPUT_MAX: usize = 5000;
 /// `columnsZh` 一次最多认几张表（Oracle `in (...)` 的参数上限是 1000）。
@@ -337,6 +347,12 @@ impl Session {
             }
             "readOnly" => self.set_readonly(a.first() == Some(&"true")),
             "more" => self.more(int_arg(a, 0, 500)),
+            "lobValue" => self.lob_value(
+                a.first().copied().unwrap_or(""),
+                int_arg(a, 1, 0),
+                a.get(2).copied().unwrap_or(""),
+                int_arg(a, 3, CLOB_MAX),
+            ),
             "commit" => {
                 let conn = self.conn_ref()?;
                 conn.commit().map_err(drv_err)?;
@@ -362,20 +378,18 @@ impl Session {
                 self.reset_tx();
                 Ok(json!({ "tx": self.tx_json() }))
             }
+            // 两个命令走同一套探测。`conn.ping()` 不能用：Oracle thin 的 ping 在部分服务端
+            // 会返回无法解析的 TTC 消息，本文件 `probe` 早就因此改成 `select 1 from dual`；
+            // 而 `db_read_only` 与重连前置校验走的是 `ping`，两套口径必须统一。
             "ping" => {
-                let alive = self.ping().is_ok();
+                let alive = self.probe_conn(_timeout).is_ok();
                 Ok(json!({ "alive": alive, "tx": self.tx_json() }))
             }
             "probe" => {
-                let Some(conn) = self.conn.as_ref() else {
+                if self.conn.is_none() {
                     return Ok(json!({ "alive": false, "tx": self.tx_json() }));
-                };
-                conn.set_call_timeout(Some(_timeout)).map_err(drv_err)?;
-                // Oracle thin ping 在部分服务端返回无法解析的 TTC 消息；
-                // 使用普通只读查询探测网络，且不关闭用户现有的分页游标。
-                let result = conn.query_row("select 1 from dual", &[]);
-                let _ = conn.set_call_timeout(None);
-                result.map_err(drv_err)?;
+                }
+                self.probe_conn(_timeout)?;
                 Ok(json!({ "alive": true, "tx": self.tx_json() }))
             }
             "disconnect" => {
@@ -641,6 +655,9 @@ impl Session {
             None
         };
 
+        // 先把输出缓冲取空：`out?` 走错误分支时若还没取，本次语句已写入的
+        // `put_line` 会留在缓冲里，被下一条成功语句一起取走 —— 输出就张冠李戴了。
+        let output = self.take_output();
         let mut body = out?;
         body.insert("ms".into(), json!(t0.elapsed().as_millis() as u64));
         body.insert(
@@ -650,7 +667,7 @@ impl Session {
                 _ => Value::Null,
             },
         );
-        body.insert("output".into(), json!(self.take_output()));
+        body.insert("output".into(), json!(output));
         body.insert("tx".into(), self.tx_json());
         Ok(Value::Object(body))
     }
@@ -679,17 +696,15 @@ impl Session {
     ) -> Result<Map<String, Value>, BridgeError> {
         let mut body = Map::new();
         if is_query(head, sql) {
-            // 一页及一行前瞻尽量随首包返回；128 行上限避免宽表放大驱动缓冲。
-            let fetch = (max_rows + 1).min(128) as u32;
-            let mut cur = conn
-                .statement(sql)
-                .map_err(drv_err)?
-                .prefetch_rows(fetch)
-                .fetch_array_size(fetch)
-                .build()
-                .map_err(drv_err)?
-                .query(params)
-                .map_err(drv_err)?;
+            // 🔴 不要在这里设 `prefetch_rows` / `fetch_array_size`。
+            // vendor `oracledb 26.0.0-beta.5` 在「上一条同 SQL 的分页游标还没取完」
+            // 时会命中语句缓存走 `TTC_RPC_REEXECUTE_AND_FETCH`（num_iters = prefetch_rows），
+            // 服务端预取的行包与新响应交错，驱动把残留字节当消息头读，报
+            // `unknown TTC message type <随机值> at packet 1, offset …`，且连接从此永久错位。
+            // 真库复现：大表取 500 行留游标，再执行同一 SQL 必炸；换一条 SQL 就正常。
+            // 驱动默认 prefetch_rows=2 / fetch_array_size=100 没有这个问题，别为省几次
+            // 往返把它调大（真要调，先确认 vendor 的重执行路径已修）。
+            let mut cur = conn.query(sql, params).map_err(drv_err)?;
             let columns: Vec<Value> = cur.columns().iter().map(column_json).collect();
             let types: Vec<String> = cur
                 .columns()
@@ -748,14 +763,24 @@ impl Session {
             .iter()
             .map(|c| base_type(c.get("type").and_then(Value::as_str).unwrap_or("")))
             .collect();
-        let Some(cur) = self.cursor.as_mut() else {
+        // 取出游标再取数：失败时不能把坏游标留在 `self.cursor` 里 —— 继续在它上面
+        // `next()` 只会重复同一个报错，或者给出错位的行（TTC 那条坑尤其如此）。
+        let Some(mut cur) = self.cursor.take() else {
             return Err(sql_err(
                 "没有可以继续读取的结果（游标已关闭，重新执行一次）",
             ));
         };
-        let (rows, has_more) = page(cur, &types, max_rows)?;
-        if !has_more {
-            self.cursor = None;
+        let next = match page(&mut cur, &types, max_rows) {
+            Ok(v) => v,
+            Err(e) => {
+                // 游标已在上一行被 take 走，这里随作用域结束关闭；用户再点「加载更多」
+                // 会收到「游标已关闭」，重新执行一次即可。
+                return Err(e);
+            }
+        };
+        let (rows, has_more) = next;
+        if has_more {
+            self.cursor = Some(cur);
         }
         let count = rows.len();
         Ok(json!({
@@ -764,6 +789,49 @@ impl Session {
             "hasMore": has_more,
             "ms": t0.elapsed().as_millis() as u64,
         }))
+    }
+
+    /// 按需取一格大文本的完整值（结果集里只带 `LOB_PREVIEW` 的预览）。
+    ///
+    /// 不重跑原 SQL：外面套一层「编号 + 取第 N 行」，服务端只回一行一列；而且 SQL
+    /// 文本变了，不会命中驱动按语句文本走的缓存 —— 同一条 SQL 重执行遇上没取完的
+    /// 游标会触发 vendor 的 TTC 错位（见 `run_with` 的注释），那条路不能碰。
+    fn lob_value(
+        &mut self,
+        raw: &str,
+        row_index: usize,
+        column: &str,
+        max_chars: usize,
+    ) -> Result<Value, BridgeError> {
+        if self.conn.is_none() {
+            return Err(not_connected());
+        }
+        let sql = normalize(raw);
+        if sql.is_empty() {
+            return Err(sql_err("SQL 是空的"));
+        }
+        if !is_query(&leading_keywords(&sql), &sql) {
+            return Err(sql_err("只有查询结果才能按需取大文本"));
+        }
+        let probe = lob_probe_sql(&sql, column, row_index)?;
+        let conn = self.conn.take().ok_or_else(not_connected)?;
+        let out = lob_value_with(&conn, &probe, row_index, max_chars.clamp(1, CLOB_MAX));
+        self.conn = Some(conn);
+        out
+    }
+
+    /// 探活：一条只读查询，不碰用户现有的分页游标。
+    ///
+    /// `conn.ping()` 不能用 —— thin 驱动在部分服务端会返回无法解析的 TTC 消息，
+    /// 而这里的失败会被上层当成「连接已死」，误判代价比多一次往返大得多。
+    fn probe_conn(&mut self, timeout: std::time::Duration) -> Result<(), BridgeError> {
+        let Some(conn) = self.conn.as_ref() else {
+            return Err(not_connected());
+        };
+        conn.set_call_timeout(Some(timeout)).map_err(drv_err)?;
+        let result = conn.query_row("select 1 from dual", &[]);
+        let _ = conn.set_call_timeout(None);
+        result.map(|_| ()).map_err(drv_err)
     }
 
     fn track_tx(&mut self, head: &str, update_count: i64) {
@@ -775,7 +843,16 @@ impl Session {
             self.reset_tx();
             return;
         }
-        if is_write(head) {
+        // 编辑器里手写 `commit;` / `rollback;` 也是真的结束了事务。不认这两个词的话，
+        // 计数永远清不掉，之后切只读会被「有未提交写入」永久挡住，而库里其实早提交了。
+        if starts_any(head, &["commit", "rollback"]) {
+            self.reset_tx();
+            return;
+        }
+        // `for update` 也在事务里（并且拿着行锁），PL/SQL 块里的 DML 同理 —— 这两类
+        // 首关键字都不是 DML，按白名单判会漏计，随后切只读 / 重连 / 关标签的 rollback
+        // 就会静默丢掉锁和写入。宁可多计一次（用户点一次提交即可），不能少计。
+        if opens_transaction(head) {
             if self.tx_statements == 0 {
                 self.tx_since = now_ms() as i64;
             }
@@ -835,15 +912,9 @@ impl Session {
                    where owner = sys_context('userenv','current_schema') and table_name not like 'BIN$%' \
                    union all select view_name, 'VIEW' from all_views \
                    where owner = sys_context('userenv','current_schema') order by 1";
-        let cur = conn
-            .statement(sql)
-            .map_err(drv_err)?
-            .prefetch_rows(512)
-            .fetch_array_size(512)
-            .build()
-            .map_err(drv_err)?
-            .query(&[])
-            .map_err(drv_err)?;
+        // 与 `run_with` 同理：下面若某行转换失败会提前 `return`，游标未必取完，
+        // 放大 prefetch 就有把行包留在 TTC 流里的风险。用驱动默认取数。
+        let cur = conn.query(sql, &[]).map_err(drv_err)?;
         let mut list = Vec::new();
         for row in cur {
             let row = row.map_err(drv_err)?;
@@ -860,13 +931,10 @@ impl Session {
     fn nc_names(&self) -> Result<Value, BridgeError> {
         let conn = self.conn_ref()?;
         let mut map = Map::new();
-        if let Ok(cur) = conn
-            .statement(
-                "select lower(name), displayname from md_table where displayname is not null",
-            )
-            .and_then(|s| s.prefetch_rows(512).fetch_array_size(512).build())
-            .and_then(|s| s.query(&[]))
-        {
+        if let Ok(cur) = conn.query(
+            "select lower(name), displayname from md_table where displayname is not null",
+            &[],
+        ) {
             for row in cur {
                 let Ok(row) = row else { continue };
                 let k: Option<String> = row.get(0).ok().flatten();
@@ -1549,31 +1617,40 @@ fn cell_json(row: &Row, i: usize, base: &str) -> Value {
         if let Ok(Some(ts)) = row.get::<Option<oracledb::OracleTimestamp>>(i) {
             return json!(fmt_timestamp(&ts, with_frac));
         }
-        return Value::Null;
+        // `TIMESTAMP WITH TIME ZONE` / `WITH LOCAL TIME ZONE` 驱动不给 `OracleTimestamp`，
+        // 也可能给了个字符串。退一步用字符串 —— 绝不把「取不出来」降级成 NULL，
+        // 那会让网格、详情、导出、排序全把真实值当成空值（对照下面 BLOB 分支的同一条原则）。
+        if let Ok(Some(s)) = row.get::<Option<String>>(i) {
+            return json!(s);
+        }
+        return json!("<TIMESTAMP 取值失败：驱动未返回可识别的值>");
     }
     if base == "BLOB" {
-        if let Ok(Some(b)) = row.get::<Option<Vec<u8>>>(i) {
-            return json!(format!("<BLOB {}B>", b.len()));
+        // 只为了显示「多少字节」就用 `Vec<u8>` 会把整个 BLOB 读进内存：
+        // NC 附件表一次 select * 就是 500 行 × 几十 MB，主进程直接 OOM 被杀。
+        if let Ok(Some(mut lob)) = row.get::<Option<Lob>>(i) {
+            return match lob.get_size() {
+                Ok(n) => json!(format!("<BLOB {n}B>")),
+                Err(e) => json!(format!("<BLOB 取值失败：{e}>")),
+            };
         }
+        return match row.get::<Option<Vec<u8>>>(i) {
+            Ok(Some(b)) => json!(format!("<BLOB {}B>", b.len())),
+            Ok(None) => Value::Null,
+            // 不能落回下面的字符串分支：那里的 `None` 会被当成 NULL，
+            // 而「取不出来」显示成「NULL，数据库空值」是最误导的一种失败。
+            Err(e) => json!(format!("<BLOB 取值失败：{e}>")),
+        };
     }
     if base == "RAW" || base == "LONG RAW" {
-        if let Ok(Some(b)) = row.get::<Option<Vec<u8>>>(i) {
-            return json!(hex(&b, 64));
-        }
+        return match row.get::<Option<Vec<u8>>>(i) {
+            Ok(Some(b)) => json!(hex(&b, 64)),
+            Ok(None) => Value::Null,
+            Err(e) => json!(format!("<RAW 取值失败：{e}>")),
+        };
     }
     if base == "CLOB" || base == "NCLOB" || base == "LONG" {
-        if let Ok(Some(mut lob)) = row.get::<Option<Lob>>(i) {
-            let size = lob.get_size().unwrap_or(0);
-            let mut buf = String::new();
-            let mut taken = Vec::new();
-            if lob.read_to_end(&mut taken).is_ok() {
-                buf = String::from_utf8_lossy(&taken[..taken.len().min(CLOB_MAX)]).to_string();
-                if size > CLOB_MAX {
-                    buf.push_str(&format!("…（共 {size} 字节，只取前 1M）"));
-                }
-            }
-            return json!(buf);
-        }
+        return clob_json(row, i);
     }
     // BINARY_FLOAT / BINARY_DOUBLE 在 JDBC 那边是 Float/Double，JVM 桥给的是 JSON 数字。
     // 这两个类型没有精度可丢，按数字给才对得上。
@@ -1600,6 +1677,88 @@ fn cell_json(row: &Row, i: usize, base: &str) -> Value {
     }
 }
 
+/// CLOB / NCLOB / LONG 一列 → JSON（只带 `LOB_PREVIEW` 个字符）。
+///
+/// 取值顺序：`Lob` → `String`（驱动对某些 LONG 列会直接给字符串）。
+/// 两条路都 `None` 才是真 NULL；任一条**报错**、另一条也拿不到时给显式占位，
+/// 绝不把「取不出来」降级成 NULL —— 那会让网格和详情面板都显示「数据库空值」，
+/// 是 CLOB 明明有内容却看起来是空的最误导的一种失败。
+fn clob_json(row: &Row, i: usize) -> Value {
+    let mut saw_null = false;
+    match row.get::<Option<Lob>>(i) {
+        Ok(Some(mut lob)) => {
+            let size = lob.get_size().unwrap_or(0);
+            // 字符 LOB 的 amount 是 UCS-2 单位，一个字符最多编成 4 字节 UTF-8：
+            // 按 4 倍字节数取，保证够 `LOB_PREVIEW` 个字符；多出来的按字符裁掉。
+            let cap = (LOB_PREVIEW as u64).saturating_mul(4);
+            let mut raw = Vec::new();
+            if let Err(e) = (&mut lob).take(cap).read_to_end(&mut raw) {
+                return json!(format!("<CLOB 读取失败：{e}>"));
+            }
+            let text = String::from_utf8_lossy(&raw);
+            // 读满自建的字节上限、而 LOB 还有剩余 ⇒ 确实被切了，此时**字符总数未知**
+            // （`get_size` 给的是字节数，中文 3 字节/字，拿它当字符数会多报 3 倍）。
+            // 没读满 = 全文都在手里，字符数就是准的。
+            let cut = raw.len() as u64 >= cap && size > raw.len();
+            let total = if cut {
+                None
+            } else {
+                Some(text.chars().count())
+            };
+            return json!(preview_text(&text, total));
+        }
+        Ok(None) => saw_null = true,
+        Err(_) => {}
+    }
+    match row.get::<Option<String>>(i) {
+        Ok(Some(s)) => {
+            let total = Some(s.chars().count());
+            return json!(preview_text(&s, total));
+        }
+        Ok(None) => saw_null = true,
+        Err(_) => {}
+    }
+    if saw_null {
+        Value::Null
+    } else {
+        json!("<CLOB 取值失败：驱动既没返回 Lob 也没返回字符串>")
+    }
+}
+
+/// 预览文本：超过 `LOB_PREVIEW` 个字符就截断，并在尾部标明总数与下一步。
+///
+/// `total` 是**字符**总数：`None` = 只读到字节上限、字符数无法确定（中文 3 字节/字，
+/// 拿字节数当字符数会多报几倍，而且会让「本来没截断」的值也被贴上截断标记 ——
+/// 那句中文提示是**值的一部分**，导出/复制会把它一起带走）。
+///
+/// 🔴 尾部文案是前端判断「要不要显示『加载完整值』」的依据
+/// （`lib/db.ts::isLobPreview`），改这里必须同步改那边。
+fn preview_text(text: &str, total: Option<usize>) -> String {
+    let mut out: String = text.chars().take(LOB_PREVIEW).collect();
+    match total {
+        // 字符数已知：只有真的超了才加提示
+        Some(n) if n <= LOB_PREVIEW => {}
+        _ => {
+            // 未知时写「8192+」：前端 `lobPreviewChars` 解析不出数字会退回 null，
+            // 界面上就不显示具体总数，好过显示一个错的。
+            let n = total.map_or_else(|| format!("{LOB_PREVIEW}+"), |n| n.to_string());
+            out.push_str(&format!(
+                " …（共 {n} 个字符，只显示前 {LOB_PREVIEW}，点「加载完整值」查看）"
+            ));
+        }
+    }
+    out
+}
+
+/// 这个值是不是「被截断的 LOB 预览」。
+///
+/// 导出与传输都复用网格的取数通道，拿到的就是预览文本。判据只能看文案标记：
+/// 拿长度比 `LOB_PREVIEW` 会把「刚好 8192 字符的正常值」误判，拿 1MB 比则永远判不出来
+/// （预览最长就 8K），后者会让脚本里出现「正文 + 一句中文提示」而零告警。
+pub(crate) fn is_lob_preview(s: &str) -> bool {
+    s.contains("个字符，只显示前") || s.contains("个字符，只取前 1M")
+}
+
 fn fmt_timestamp(ts: &oracledb::OracleTimestamp, with_frac: bool) -> String {
     let mut s = format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
@@ -1617,6 +1776,94 @@ fn fmt_timestamp(ts: &oracledb::OracleTimestamp, with_frac: bool) -> String {
         s.push_str(frac.trim_end_matches('0'));
     }
     s
+}
+
+/// 列名 → 安全的双引号标识符。
+///
+/// 列名来自数据库元数据或查询别名，但这里仍当不可信输入处理：一律加双引号并转义
+/// 内部引号（引号内部无法再逃逸出 SQL 结构），只额外限制长度。
+fn quote_ident(name: &str) -> Result<String, BridgeError> {
+    let t = name.trim();
+    if t.is_empty() || t.chars().count() > 128 {
+        return Err(sql_err("列名不合法，无法定位大文本"));
+    }
+    Ok(format!("\"{}\"", t.replace('"', "\"\"")))
+}
+
+/// 「按需取一格大文本」的探测 SQL：外层给子查询编号，只取第 N+1 行的目标列。
+///
+/// 抽成函数是为了能单测：列名转义与行号 off-by-one 是这里最容易错的两处。
+fn lob_probe_sql(sql: &str, column: &str, row_index: usize) -> Result<String, BridgeError> {
+    let ident = quote_ident(column)?;
+    Ok(format!(
+        "select {ident} as \"__nc_lob\" from \
+         (select t.*, rownum as \"__ncforge_rn\" from ({sql}) t) \
+         where \"__ncforge_rn\" = {}",
+        row_index.saturating_add(1)
+    ))
+}
+
+/// 取一格大文本的完整值。`probe` 由调用方拼好（外层编号后取第 N 行）。
+fn lob_value_with(
+    conn: &Connection,
+    probe: &str,
+    row_index: usize,
+    max_chars: usize,
+) -> Result<Value, BridgeError> {
+    let t0 = Instant::now();
+    let mut cur = conn.query(probe, &[]).map_err(drv_err)?;
+    let Some(row) = cur.next().transpose().map_err(drv_err)? else {
+        return Err(sql_err(format!(
+            "第 {} 行已经不存在（结果可能已变化，请重新执行查询）",
+            row_index + 1
+        )));
+    };
+    let base = base_type(&type_label(&cur.columns()[0]));
+    let text = match base.as_str() {
+        "CLOB" | "NCLOB" | "LONG" => clob_full(&row, max_chars)?,
+        _ => row
+            .get::<Option<String>>(0)
+            .map_err(drv_err)?
+            .unwrap_or_default(),
+    };
+    let chars = text.chars().count();
+    Ok(json!({
+        "value": text,
+        "chars": chars,
+        "truncated": chars >= max_chars,
+        "ms": t0.elapsed().as_millis() as u64,
+    }))
+}
+
+/// 完整读一格 CLOB（最多 `max_chars` 个字符）。取不到时返回空串由调用方呈现，
+/// 「驱动报错」则显式失败——这两件事不能混。
+fn clob_full(row: &Row, max_chars: usize) -> Result<String, BridgeError> {
+    let mut saw_null = false;
+    match row.get::<Option<Lob>>(0) {
+        Ok(Some(mut lob)) => {
+            let mut raw = Vec::new();
+            (&mut lob)
+                .take((max_chars as u64).saturating_mul(4))
+                .read_to_end(&mut raw)
+                .map_err(|e| sql_err(format!("读 CLOB 失败：{e}")))?;
+            return Ok(String::from_utf8_lossy(&raw)
+                .chars()
+                .take(max_chars)
+                .collect());
+        }
+        Ok(None) => saw_null = true,
+        Err(_) => {}
+    }
+    match row.get::<Option<String>>(0) {
+        Ok(Some(s)) => return Ok(s.chars().take(max_chars).collect()),
+        Ok(None) => saw_null = true,
+        Err(_) => {}
+    }
+    if saw_null {
+        Ok(String::new())
+    } else {
+        Err(sql_err("CLOB 取值失败：驱动既没返回 Lob 也没返回字符串"))
+    }
 }
 
 fn hex(b: &[u8], max: usize) -> String {
@@ -1815,6 +2062,15 @@ fn is_write(head: &str) -> bool {
     starts_any(head, &["insert", "update", "delete", "merge", "replace"])
 }
 
+/// 这条语句会不会开启/延续事务。`for update` 用 `head = "lock"` 表示。
+///
+/// DML 之外还有三类必须算进来，否则事务条与「切只读前先提交」的守卫全部失效：
+/// `select … for update`（拿着行锁）、PL/SQL 块（`begin`/`declare` 里的 DML）、
+/// 存储过程调用（`call`）。
+fn opens_transaction(head: &str) -> bool {
+    head == "lock" || is_write(head) || starts_any(head, &["begin", "declare", "call"])
+}
+
 /// 是不是返回结果集的语句。没有 `DatabaseMetaData` 可问，只能看首个关键字。
 ///
 /// 判错的代价不对称：把查询当更新执行会丢掉结果（用户还得重跑），把更新当查询执行会
@@ -1954,6 +2210,81 @@ fn body_len(m: &Map<String, Value>) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 预览文案必须能被 `is_lob_preview` 认出来，而且不能把正常值误判成截断。
+    ///
+    /// 这条守住 P0：导出/传输复用网格的取数通道，它们只能靠文案判断截断。
+    /// 一旦 `preview_text` 的措辞改了却没同步 `is_lob_preview`，导出的脚本里就会出现
+    /// 「正文 + 一句中文提示」而零告警。
+    #[test]
+    fn 预览文案可判别且不误伤正常值() {
+        let long = "字".repeat(LOB_PREVIEW + 1);
+        let preview = preview_text(&long, Some(long.chars().count()));
+        assert!(is_lob_preview(&preview), "截断后的预览必须能判出来");
+
+        // 刚好到上限但没截断：文案里不该有提示，也不该被判成截断
+        let exact = "字".repeat(LOB_PREVIEW);
+        let same = preview_text(&exact, Some(exact.chars().count()));
+        assert!(!is_lob_preview(&same), "没截断的值不能被误判");
+        assert_eq!(same, exact);
+
+        // 中文 CLOB 的字节数远大于字符数（3 字节/字）：必须按**字符**判，
+        // 否则 3000 个汉字（9 KB）会被当成「共 9000 个字符、只显示前 8192」——
+        // 提示既没发生也被写进值本身，导出脚本就带上了这句中文。
+        let cjk = "凭".repeat(3000);
+        let whole = preview_text(&cjk, Some(cjk.chars().count()));
+        assert_eq!(whole, cjk, "全文都在手里就不能加截断提示");
+        assert!(!is_lob_preview(&whole));
+
+        // 字符总数未知（只读到字节上限）：照实说「8192+」，不当成确切数字
+        let unknown = preview_text(&long, None);
+        assert!(is_lob_preview(&unknown));
+        assert!(unknown.contains(&format!("{LOB_PREVIEW}+")), "{unknown}");
+
+        // 普通短值
+        assert!(!is_lob_preview("普通文本"));
+    }
+
+    /// 事务计数要认 `commit` / `rollback` / `for update` / PL/SQL 块。
+    ///
+    /// 少计一次的代价是：切只读、重连、关标签触发的 rollback 会静默丢掉写入与行锁，
+    /// 而界面一直显示「0 条未提交」。
+    #[test]
+    fn 事务计数认锁与plsql块() {
+        for head in [
+            "insert", "update", "merge", "lock", "begin", "declare", "call",
+        ] {
+            assert!(opens_transaction(head), "{head} 应该算开启事务");
+        }
+        for head in [
+            "select", "with", "create", "alter", "commit", "rollback", "truncate",
+        ] {
+            assert!(!opens_transaction(head), "{head} 不应该算开启事务");
+        }
+    }
+
+    /// 大文本探测 SQL：行号是 N+1（Oracle 的 rownum 从 1 起），列名原样加引号。
+    #[test]
+    fn 大文本探测sql_行号与列名都正确() {
+        let sql = lob_probe_sql("select a, b from t where x = 1", "MY_COL", 0).unwrap();
+        assert!(sql.contains("(select a, b from t where x = 1) t"), "{sql}");
+        assert!(sql.contains("where \"__ncforge_rn\" = 1"), "{sql}");
+        assert!(
+            sql.starts_with("select \"MY_COL\" as \"__nc_lob\""),
+            "{sql}"
+        );
+
+        let sql = lob_probe_sql("select 1 from dual", "c", 499).unwrap();
+        assert!(sql.contains("= 500"), "{sql}");
+    }
+
+    /// 列名带引号要转义；空列名直接拒绝，绝不拼进 SQL。
+    #[test]
+    fn 大文本探测sql_列名按标识符转义() {
+        let sql = lob_probe_sql("select 1 from dual", "A\"B", 0).unwrap();
+        assert!(sql.contains("\"A\"\"B\""), "{sql}");
+        assert!(lob_probe_sql("select 1 from dual", "  ", 0).is_err());
+    }
 
     /// 连接阶段的 TCP 超时是「连不上库」，不是「语句已中断、会话仍然可用」。
     ///

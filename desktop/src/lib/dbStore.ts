@@ -434,9 +434,11 @@ export async function disconnect(id: string): Promise<void> {
   metadataVersions.set(id, (metadataVersions.get(id) ?? 0) + 1);
   setRt(id, { status: "idle", info: undefined, tx: undefined, txNotice: undefined, error: undefined, tablesLoading: false });
   // 连接已失效：清掉这条连接上所有标签的执行反馈与旧结果，避免「执行已停止」一直挂着。
+  // `running` 必须一起复位：执行中的标签被断开时，`runStatements` 的 finally 会因为
+  // `sameRun()` 变 false 而跳过复位，标签就永久停在「正在执行」，执行按钮全灰。
   const tabs = state.tabs.map((t) =>
     t.kind === "sql" && t.connId === id
-      ? { ...t, executionId: undefined, results: [], plan: null, view: null }
+      ? { ...t, executionId: undefined, results: [], plan: null, view: null, running: false }
       : t,
   );
   set({ tabs });
@@ -775,7 +777,17 @@ export function clearSlots(connId: string): void {
   // 而把它们标成「已完整」又是对导出数据的谎报。宁可让用户重跑一次。
   const tabs = state.tabs.map((t) =>
     t.kind === "sql" && t.connId === connId
-      ? { ...t, slot: null, tx: undefined, txNotice: undefined, executionId: undefined, results: [], plan: null, view: null }
+      ? {
+          ...t,
+          slot: null,
+          tx: undefined,
+          txNotice: undefined,
+          executionId: undefined,
+          results: [],
+          plan: null,
+          view: null,
+          running: false,
+        }
       : t,
   );
   for (const k of [...cursorOwner.keys()]) if (k.startsWith(`${connId}#`)) cursorOwner.delete(k);
@@ -854,7 +866,16 @@ export async function loadMore(tabId: string, resultId: string): Promise<void> {
     const m = await trackOperation({...dbTaskSpec(`more:${tabId}:${resultId}`,"加载后续结果",tab.connId,tab.slot ? `独立会话 ${tab.slot}` : "主会话",connOf(tab.connId)?.name,tabId),cancel:()=>dbApi.cancel(tab.connId!,tab.slot),cancelled:dbCancelled},()=>dbApi.more(tab.connId!, tab.maxRows, tab.slot));
     const cur = sqlTabOf(tabId)?.results.find((r) => r.id === resultId);
     // The tab may have closed, switched connection or re-executed during the request.
-    if (!cur || sqlTabOf(tabId)?.connId !== tab.connId || !ownsCursor(tab.connId, tab.slot, resultId)) return;
+    if (!cur || sqlTabOf(tabId)?.connId !== tab.connId || !ownsCursor(tab.connId, tab.slot, resultId)) {
+      // 早退也必须复位 `loadingMore`：否则按钮永久转圈，而且函数开头的
+      // `res.loadingMore` 守卫会让这条结果再也续读不了（连重试都点不动）。
+      upd({
+        loadingMore: false,
+        moreError: "游标已失效（查询已重新执行或连接已切换），请重新执行一次查询",
+        moreRetryable: false,
+      });
+      return;
+    }
     const appended = appendResultRows(cur.rows, m.rows, TOTAL_RESULT_BYTES - retainedResultBytes(state.tabs) + resultBytes(cur));
     upd({ rows: appended.rows, hasMore: m.hasMore || appended.limited, moreError: appended.limited ? RESULT_LIMIT_NOTICE : undefined, moreRetryable: false, loadingMore: false });
   } catch (e) {

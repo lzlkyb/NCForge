@@ -50,9 +50,11 @@ export function getHistoryMap(): Readonly<Record<string, HistoryEntry[]>> {
 export function addHistory(connId: string, entry: HistoryEntry): void {
   const all = readAll();
   const list = [entry, ...(all[connId] ?? []).filter((e) => e.sql !== entry.sql)].slice(0, MAX);
-  all[connId] = list;
+  // 不能就地改 `all`：`getHistoryMap()` 把同一个对象直接交给 useSyncExternalStore，
+  // 引用不变就被判成「没变化」，历史抽屉里的列表永远不刷新。每次换一个新对象。
+  cache = { ...all, [connId]: list };
   try {
-    localStorage.setItem(KEY, JSON.stringify(all));
+    localStorage.setItem(KEY, JSON.stringify(cache));
   } catch {
     // 存不下就算了
   }
@@ -61,9 +63,12 @@ export function addHistory(connId: string, entry: HistoryEntry): void {
 
 export function clearHistory(connId: string): void {
   const all = readAll();
-  delete all[connId];
+  if (!(connId in all)) return;
+  const next = { ...all };
+  delete next[connId];
+  cache = next;
   try {
-    localStorage.setItem(KEY, JSON.stringify(all));
+    localStorage.setItem(KEY, JSON.stringify(next));
   } catch {
     // 忽略
   }

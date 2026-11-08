@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cellText, friendlyDbError, oraCode, parseDbError, similarTables, tableRefs, thousands } from "./db";
+import { cellText, friendlyDbError, isLobPreview, lobPreviewChars, oraCode, parseDbError, similarTables, tableRefs, thousands } from "./db";
 
 /**
  * 数据库页的纯函数。
@@ -110,5 +110,17 @@ describe("单元格", () => {
 
   it("千分位", () => {
     expect(thousands(3128)).toBe("3,128");
+  });
+
+  it("识别后端的大文本预览标记", () => {
+    // 与 Rust `preview_text` / Java `clobText` 的文案一致；改文案必须同步三处。
+    const preview = `{"k":"${"x".repeat(10)}"} …（共 20000 个字符，只显示前 8192，点「加载完整值」查看）`;
+    expect(isLobPreview(preview)).toBe(true);
+    expect(lobPreviewChars(preview)).toBe(20_000);
+    // 超过 1MB 时后端给的是「只取前 1M」的旧文案，不该被当成可加载的预览。
+    expect(isLobPreview("abcdef …（共 3000000 个字符，只取前 1M）")).toBe(false);
+    expect(isLobPreview("普通文本")).toBe(false);
+    expect(isLobPreview(null)).toBe(false);
+    expect(lobPreviewChars("普通文本")).toBeNull();
   });
 });

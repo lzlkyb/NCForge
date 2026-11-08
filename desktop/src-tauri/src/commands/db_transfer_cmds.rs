@@ -473,7 +473,8 @@ fn run_transfer(
     }
     if stats.long_values > 0 {
         stats.warnings.push(format!(
-            "{} 个值达到数据库桥的 1MB 读取上限，可能已被源读取截断",
+            "{} 个超长文本超过 8K 预览上限，目标文件里这些值只有前 8192 个字符（含一句中文提示）。\
+             需要完整内容请缩小范围后分段导出，或先把这些列单独导出",
             stats.long_values
         ));
     }
@@ -589,9 +590,11 @@ struct Stats {
     warnings: Vec<String>,
 }
 fn count_long(row: &[Value], stats: &mut Stats) {
+    // 判据看预览文案，不看长度：结果集里的 CLOB 最长只有 8K 预览，
+    // 用 1MB 当阈值永远判不出来，导出的文件里就会是「8K 正文 + 一句中文提示」。
     stats.long_values += row
         .iter()
-        .filter(|v| v.as_str().is_some_and(|s| s.len() >= 1024 * 1024))
+        .filter(|v| v.as_str().is_some_and(crate::db_rust::is_lob_preview))
         .count();
 }
 

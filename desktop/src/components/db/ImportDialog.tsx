@@ -5,7 +5,9 @@ import { Icon } from "../ui/icon";
 import { friendlyDbError } from "../../lib/db";
 import { autoMap, decodeCsvBytes, parseCsv, type ParsedCsv } from "../../lib/csvParse";
 import { planImport } from "../../lib/csvImport";
-import { dbApi, type ColumnInfo, type ImportFail } from "../../lib/dbApi";
+import { dbApi, dbSourceOf, type ColumnInfo, type ImportFail } from "../../lib/dbApi";
+import { connOf } from "../../lib/dbStore";
+import { confirmProdWrite } from "../../lib/dbConfirm";
 import { beginOperation, cancelOperation, type OperationHandle } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
 import { MapGrid } from "./ImportColumnMap";
@@ -101,6 +103,9 @@ export function ImportDialog({ connId, table, cols, onClose, onDone,tabId }: {
 
   const run = async () => {
     if (!parsed || !target || picked.length === 0 || taskRef.current || out) return;
+    // 生产库写入必须二次确认，且带着目标表与行数；导入按批独立提交，落库后只剩人工收拾。
+    const prodText = `-- 导入 ${parsed.rows.length} 行到 ${table}（${picked.length} 列）`;
+    if (!(await confirmProdWrite(tabId ?? connId, connId, prodText))) return;
     const task=beginOperation({...dbTaskSpec(`import:${connId}:${table}`,"导入表数据",connId,`${table} · 独立导入会话`,undefined,tabId),cancel:async()=>{cancelRef.current=true;setBusy(v=>v ? {...v,canceling:true} : v);}});
     if(!task) return;taskRef.current=task;
     setErr(null);
@@ -169,6 +174,8 @@ export function ImportDialog({ connId, table, cols, onClose, onDone,tabId }: {
         <span className="dbx-muted" style={{ fontWeight: 400, fontSize: 12 }}>
           → {table.toLowerCase()}
         </span>
+        {/* 导入写的是哪个库必须一直看得见：只看表名，跨账套时很容易导错地方 */}
+        <span className="dbx-muted" style={{ fontWeight: 400, fontSize: 12, marginLeft: "auto" }}>{dbSourceOf(connOf(connId))}</span>
       </div>
       <div className="bd one">
         <div className="dbx-hint">

@@ -75,6 +75,7 @@ export const TAURI_COMMANDS = [
   "db_export_insert",
   "db_export_reveal",
   "db_import_rows",
+  "db_lob_value",
   "db_meta",
   "db_more",
   "db_password_reset_sql",

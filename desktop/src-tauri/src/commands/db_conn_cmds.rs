@@ -329,7 +329,9 @@ pub async fn db_conn_delete(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<Vec<DbConnView>, String> {
-    drop_bridge(&state, &id);
+    // 不能只 `drop_bridge(&id)`：槽键是 `id#1`…、兜底会话是 `id#java`，只删主键会把它们
+    // 留到进程退出，槽里未提交的写入会一直挂着行锁。
+    super::db_cmds::drop_all_sessions(&state, &id);
     // 连接被删掉，「运行期手动切过的 schema」也一起忘掉：否则重建同 id 的连接会继承旧值
     if let Ok(mut m) = state.db_schemas.lock() {
         m.remove(&id);

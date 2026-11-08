@@ -6,6 +6,9 @@
 .dbx-gh:hover .dbx-header-menu,.dbx-gh:focus-within .dbx-header-menu { opacity:1; }
 .dbx-header-menu:hover { color:hsl(var(--foreground));background:hsl(var(--secondary)); }
 .dbx-grid .dbx-value-placeholder { color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);font-style:italic;user-select:none; }
+/* 大文本角标：真值超过 4K（或后端只带了预览）时提示「还有内容」。
+   绝对定位的小圆点，不占文字宽度；复制走 rows 数据而不是 DOM，不会带上它。 */
+.dbx-grid .dbx-lob-mark { position:absolute;right:2px;bottom:2px;width:4px;height:4px;border-radius:50%;background:hsl(var(--primary) / .55);pointer-events:none; }
 /* The explanatory marker is generated content, so selecting/copying text cannot include it. */
 .dbx-grid .dbx-value-placeholder::before { content:attr(data-placeholder); }
 .dbx-rbody:has(> .dbx-detail) { position:relative;container-type:inline-size;container-name:dbx-result-body; }
@@ -17,10 +20,15 @@
 .dbx-detail pre:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:-2px; }
 .dbx-detail .ft { align-items:center; }
 .dbx-detail-note { padding:6px 10px;border-bottom:1px solid hsl(var(--border));color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);line-height:1.5; }
+/* 说明行里的行内按钮（复制解码 SQL）：不能像独立按钮那样占一行高 */
+.dbx-detail-note .dbx-lk { margin-left:4px;padding:0;border:0;background:none;font-size:inherit;text-decoration:underline; }
 @container dbx-result-body (max-width:1059px) {
   .dbx-detail { position:absolute;inset-block:0;inset-inline-end:0;z-index:6;width:min(380px,100%);max-width:100%; }
 }
 @media (forced-colors:active) {
   .dbx-header-action:focus-visible,.dbx-detail pre:focus-visible { outline-color:Highlight; }
   .dbx-grid .dbx-value-placeholder { color:CanvasText; }
+  .dbx-grid .dbx-lob-mark { background:CanvasText; }
+  .dbx-gh .dbx-codec { border-color:CanvasText; }
+  .dbx-gh .dbx-codec[data-on] { background:CanvasText; }
 }

@@ -84,6 +84,8 @@ public class NcDbBridge {
             "^\\s*(create|alter|drop|truncate|rename|comment|grant|revoke)\\b");
     private static final Pattern WRITES = Pattern.compile(
             "^\\s*(insert|update|delete|merge|replace)\\b");
+    /** 事务显式结束：编辑器里手写 commit/rollback 也要清计数。 */
+    private static final Pattern TX_END = Pattern.compile("^\\s*(commit|rollback)\\b");
     private static final Pattern FOR_UPDATE = Pattern.compile("\\bfor\\s+update\\b");
     /**
      * PL/SQL 里「游标 OUT 参数」的写法：`open :1 for select …`。
@@ -107,6 +109,13 @@ public class NcDbBridge {
     private static final int CURSOR_TYPE = cursorType();
 
     private static final int CLOB_MAX = 1024 * 1024;
+    /**
+     * 结果集里一格大文本只带这么多字符，完整值由 `lobValue` 按需取。
+     *
+     * 与 Rust 侧 `LOB_PREVIEW` 必须一致：两个引擎同一个查询要显示成一样的长度，
+     * 否则换个引擎就看到「内容突然变多/变少」。
+     */
+    private static final int CLOB_PREVIEW = 8 * 1024;
 
     private static int cursorType() {
         try {
@@ -390,6 +399,8 @@ public class NcDbBridge {
                 ok(id, setReadOnly(flag(a,0)));
             } else if ("more".equals(cmd)) {
                 ok(id, more(intArg(a, 0, 500)));
+            } else if ("lobValue".equals(cmd)) {
+                ok(id, lobValue(a.get(0), intArg(a, 1, 0), a.get(2), intArg(a, 3, CLOB_MAX)));
             } else if ("commit".equals(cmd)) {
                 requireConn();
                 conn.commit();
@@ -951,7 +962,20 @@ public class NcDbBridge {
                 resetTx(); // Oracle 的 DDL 前后各隐式提交一次
                 return;
             }
-            if (WRITES.matcher(head).find()) {
+            // 手写 commit/rollback 也是真的结束了事务。不认它，计数永远清不掉，
+            // 之后 setReadOnly 会被「有未提交写入」永久挡住，而库里其实早提交完了。
+            if (TX_END.matcher(head).find()) {
+                resetTx();
+                return;
+            }
+            // `for update`（head 传 "lock"）与 PL/SQL 块里的 DML，首关键字都不是 DML，
+            // 只按 WRITES 判会漏计：界面一直显示「0 条未提交」，随后 setReadOnly、
+            // 切 schema、关标签触发的 rollback 会静默丢掉行锁与写入。
+            // 宁可多计一次（用户点一下提交即可），也不能少计。
+            boolean opensTx = WRITES.matcher(head).find()
+                    || PLSQL.matcher(head).find()
+                    || "lock".equals(head);
+            if (opensTx) {
                 if (txStatements == 0) {
                     txSince = System.currentTimeMillis();
                 }
@@ -1050,6 +1074,52 @@ public class NcDbBridge {
             long t0 = System.currentTimeMillis();
             String page = page(maxRows);
             return "{" + page + ",\"ms\":" + (System.currentTimeMillis() - t0) + "}";
+        }
+
+        /**
+         * 按需取一格大文本的完整值（结果集里只有 {@link #CLOB_PREVIEW} 的预览）。
+         *
+         * 与 Rust 侧 `Session::lob_value` 同一套写法：外面套一层「编号 + 取第 N 行」，
+         * 服务端只回一行一列，也不碰「加载更多」那条游标。
+         */
+        private String lobValue(String raw, int rowIndex, String column, int maxChars) throws Exception {
+            requireConn();
+            String sql = normalize(raw);
+            if (sql.isEmpty()) {
+                throw new SQLException("SQL 是空的");
+            }
+            int max = Math.max(1, Math.min(CLOB_MAX, maxChars));
+            String ident = "\"" + column.replace("\"", "\"\"") + "\"";
+            String probe = "select " + ident + " as \"__nc_lob\" from "
+                    + "(select t.*, rownum as \"__ncforge_rn\" from (" + sql + ") t) "
+                    + "where \"__ncforge_rn\" = " + (rowIndex + 1);
+            long t0 = System.currentTimeMillis();
+            try (Statement st = conn.createStatement()) {
+                st.setQueryTimeout(120);
+                try (ResultSet rs = st.executeQuery(probe)) {
+                    if (!rs.next()) {
+                        throw new SQLException("第 " + (rowIndex + 1)
+                                + " 行已经不存在（结果可能已变化，请重新执行查询）");
+                    }
+                    Object o = rs.getObject(1);
+                    String text;
+                    if (o instanceof Clob) {
+                        text = clobText((Clob) o, max);
+                    } else if (o == null || rs.wasNull()) {
+                        String s = rs.getString(1);
+                        text = s == null ? "" : s;
+                    } else {
+                        text = String.valueOf(o);
+                    }
+                    if (text == null) {
+                        text = "";
+                    }
+                    int chars = text.length();
+                    return "{\"value\":\"" + esc(text) + "\",\"chars\":" + chars
+                            + ",\"truncated\":" + (chars >= max)
+                            + ",\"ms\":" + (System.currentTimeMillis() - t0) + "}";
+                }
+            }
         }
 
         private void closeCursor() {
@@ -1590,7 +1660,7 @@ public class NcDbBridge {
             try {
                 ps.setString(1, name);
                 ResultSet rs = ps.executeQuery();
-                String s = rs.next() ? clobText(rs.getClob(1)) : "";
+                String s = rs.next() ? clobText(rs.getClob(1), CLOB_MAX) : "";
                 rs.close();
                 return s == null ? "" : s;
             } finally {
@@ -1811,34 +1881,69 @@ public class NcDbBridge {
 
     // ───────────────────── 取值与 JSON（无连接状态，静态） ─────────────────────
 
-    private static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+    /**
+     * 一个 Session 一个 worker 线程，而 {@link #value} 是 static —— 多个会话会并发调它。
+     * {@code SimpleDateFormat} 内部共享 {@code Calendar}，并发 format 会产出年月日错位的
+     * 字符串，或者直接抛 {@code ArrayIndexOutOfBoundsException} 让整页查询失败。
+     * 所以每线程一份。
+     *
+     * 用 ThreadLocal 而不是 java.time：桥要能在 NC 自带的 Java 7 上跑。
+     */
+    private static final ThreadLocal<SimpleDateFormat> DATE_FMT =
+            new ThreadLocal<SimpleDateFormat>() {
+                @Override
+                protected SimpleDateFormat initialValue() {
+                    return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                }
+            };
 
     private static String value(ResultSet rs, int i) throws SQLException {
         int type = rs.getMetaData().getColumnType(i);
-        if (type == Types.DATE || type == Types.TIMESTAMP || type == -101 || type == -102) {
+        // -101 / -102 = TIMESTAMP WITH TIME ZONE / WITH LOCAL TIME ZONE。
+        // `getTimestamp` 会静默换算成 JVM 默认时区并丢掉偏移量：库里 `09:00 +00:00`
+        // 在 +08:00 的客户机上显示成 `17:00`，用户复制这段文本回写就是错的数据。
+        // 这两种一律取驱动的原文（自带 +08:00），与 Rust 引擎取字符串的口径一致。
+        if (type == -101 || type == -102) {
+            String s = rs.getString(i);
+            return s == null ? "null" : "\"" + esc(s) + "\"";
+        }
+        if (type == Types.DATE || type == Types.TIMESTAMP) {
             Timestamp ts = rs.getTimestamp(i);
             if (ts == null) {
                 return "null";
             }
-            String s = DATE_FMT.format(ts);
+            String s = DATE_FMT.get().format(ts);
             if (type != Types.DATE && ts.getNanos() != 0) {
                 s += "." + String.format("%09d", ts.getNanos()).replaceAll("0+$", "");
             }
             return "\"" + s + "\"";
         }
         Object o = rs.getObject(i);
-        if (o == null || rs.wasNull()) {
-            return "null";
+        boolean wasNull = o == null || rs.wasNull();
+        if (wasNull) {
+            // 有驱动对 LOB / 长文本列 `getObject` 给 null：再用 `getString` 确认一次。
+            // 少了这一步，库里有值也会显示成 NULL，而详情面板同样看不到（值真的是 null）。
+            String s = rs.getString(i);
+            return s == null ? "null" : "\"" + esc(s) + "\"";
         }
         if (o instanceof BigDecimal) {
             // 金额字段转 double 会掉精度：一律给字符串
             return "\"" + ((BigDecimal) o).toPlainString() + "\"";
         }
         if (o instanceof Number) {
+            // NaN / Infinity 会拼出 `NaN`、`Infinity` 这种非法 JSON 字面量，读取端
+            // 按「非协议输出」整行丢弃，命令就干等到超时（与 columnsZh 那次同型）。
+            boolean notFinite = (o instanceof Double && (((Double) o).isNaN() || ((Double) o).isInfinite()))
+                    || (o instanceof Float && (((Float) o).isNaN() || ((Float) o).isInfinite()));
+            if (notFinite) {
+                return "\"" + String.valueOf(o) + "\"";
+            }
             return String.valueOf(o);
         }
         if (o instanceof Clob) {
-            return "\"" + esc(clobText((Clob) o)) + "\"";
+            // 结果集只带预览：整段 1MB 会让 500 行 × 2 个 CLOB 撑爆前端的 16MB 结果预算，
+            // 后面的行被整行裁掉。完整值走「加载完整值」→ lobValue。
+            return "\"" + esc(clobText((Clob) o, CLOB_PREVIEW)) + "\"";
         }
         if (o instanceof byte[]) {
             byte[] b = (byte[]) o;
@@ -1853,27 +1958,43 @@ public class NcDbBridge {
         return "\"" + esc(String.valueOf(o)) + "\"";
     }
 
-    private static String clobText(Clob c) throws SQLException {
+    private static String clobText(Clob c, int max) throws SQLException {
         if (c == null) {
             return null;
         }
         long len = c.length();
+        Reader r = null;
         try {
-            Reader r = c.getCharacterStream();
-            StringBuilder sb = new StringBuilder((int) Math.min(len, CLOB_MAX));
+            r = c.getCharacterStream();
+            StringBuilder sb = new StringBuilder((int) Math.min(len, max));
             char[] buf = new char[8192];
             int k;
-            while ((k = r.read(buf)) > 0 && sb.length() < CLOB_MAX) {
+            while ((k = r.read(buf)) > 0 && sb.length() < max) {
                 sb.append(buf, 0, k);
             }
-            r.close();
-            if (len > CLOB_MAX) {
-                sb.setLength(CLOB_MAX);
-                sb.append("…（共 ").append(len).append(" 字符，只取前 1M）");
+            if (len > max) {
+                sb.setLength(max);
+                if (max < CLOB_MAX) {
+                    // 文案与 Rust 的 `preview_text` / 前端 `isLobPreview` 对齐。
+                    sb.append(" …（共 ").append(len).append(" 个字符，只显示前 ").append(max)
+                      .append("，点「加载完整值」查看）");
+                } else {
+                    sb.append(" …（共 ").append(len).append(" 个字符，只取前 1M）");
+                }
             }
             return sb.toString();
         } catch (java.io.IOException e) {
             throw new SQLException("读 CLOB 失败：" + e.getMessage());
+        } finally {
+            // 中途断网 / ORA-22920 / 追加时 OOM 都会跳过 close()，Reader 持有 LOB 定位符，
+            // 反复触发会累积到 ORA-01000（maximum open cursors），整条连接就废了。
+            if (r != null) {
+                try {
+                    r.close();
+                } catch (java.io.IOException ignore) {
+                    // 关闭失败没有补救手段，不覆盖上面真正的错误
+                }
+            }
         }
     }
 

@@ -512,6 +512,25 @@ pub(crate) fn drop_bridge(state: &AppState, key: &str) {
     }
 }
 
+/// 关掉一条连接的**全部**会话：primary、每个 SQL 槽（`id#N`）以及 JVM 兜底（`id#java`）。
+///
+/// `drop_bridge(&id)` 只删主键，槽与兜底句柄会活到进程退出：槽里未提交的写入一直挂着
+/// 行锁，而用户已经认为「删了连接就等于断开了」。删连接与断开连接必须共用这一条路径。
+pub(crate) fn drop_all_sessions(state: &AppState, id: &str) {
+    let prefix = format!("{id}#");
+    let keys: Vec<String> = match state.db.lock() {
+        Ok(m) => m
+            .keys()
+            .filter(|k| k.as_str() == id || k.starts_with(&prefix))
+            .cloned()
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    for key in keys {
+        drop_bridge(state, &key);
+    }
+}
+
 /// 一次性任务的临时会话序号：导出与按值反查各用各的前缀，但序号共用一个池，
 /// 避免两次操作（甚至两个入口同时点）撞上同一个会话名。
 static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -530,7 +549,12 @@ pub(crate) async fn open_temp_session(
     kind: &str,
 ) -> Option<(String, Arc<EngineHandle>)> {
     // 读操作不需要事务：自动提交，跑完断开也不留未提交状态
-    let (cmd, args) = connect_args(cfg, conn, None, true, engine).ok()?;
+    //
+    // 🔴 必须带上「运行期切过的 schema」：导出、按值反查、账号列表、关系图都是
+    // 「在用户当前看到的那个库里跑」。直接拿配置里的 `default_schema` 会安静地
+    // 读到另一个 schema 的同名表 —— 界面显示 B 的数据，文件里是 A 的。
+    let runtime = conn_with_runtime_schema(state, conn);
+    let (cmd, args) = connect_args(cfg, &runtime, None, true, engine).ok()?;
     let key = format!(
         "__{kind}:{}:{}",
         conn.id,
@@ -1376,6 +1400,37 @@ pub async fn db_more(
     call(b, "more", vec![rows.to_string()], T_META).await
 }
 
+/// 按需取一格大文本的完整值。
+///
+/// 查询结果里 CLOB 只带前 8K 字符的预览（见 `db_rust::LOB_PREVIEW`）：整段 1MB 会让
+/// 「500 行 × 2 个 CLOB」撑爆前端 16MB 结果预算，后面的行被整行裁掉。用户点
+/// 「加载完整值」时才走这条命令，后端用「外层编号 + 取第 N 行」重新定位该行。
+///
+/// `row_index` 是 `rows` 数组下标（不是显示顺序），前端直接给 `sel.r`。
+/// 带绑定参数的查询暂不支持（会明确报错，不会猜）。
+#[tauri::command]
+pub async fn db_lob_value(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+    sql: String,
+    row_index: u32,
+    column: String,
+    slot: Option<String>,
+    max_chars: Option<u32>,
+) -> Result<Value, String> {
+    let b = slot_bridge(&state, &id, slot.as_deref())?;
+    let chars = max_chars
+        .unwrap_or(1024 * 1024)
+        .clamp(1024, 4 * 1024 * 1024);
+    call(
+        b,
+        "lobValue",
+        vec![sql, row_index.to_string(), column, chars.to_string()],
+        Duration::from_secs(180),
+    )
+    .await
+}
+
 /// 事务操作：`commit` / `rollback` / `autocommit-on` / `autocommit-off` / `status`。
 ///
 /// 槽各自独立事务：带 `slot` 时只影响那条会话。`status` 走 `ping`，返回里带 `tx`。
@@ -1756,12 +1811,16 @@ pub async fn db_schema_sync(
 }
 
 fn schema_batch_sql(table: &str, column: &str) -> String {
+    // 不能查 `user_tab_columns`：那是**登录账号**的字典，而表树、查询、补全都跟着
+    // `current_schema` 走。切过 schema 之后两边不一致 —— 补全给错列，
+    // 出包前的字段核对会大量误报「表不存在」。
+    const SRC: &str = "all_tab_columns where owner = sys_context('userenv','current_schema')";
     if table.is_empty() {
-        return "select * from (select table_name, column_name, data_type, nvl(nullif(char_length,0),nvl(data_precision,0)) sz from user_tab_columns order by table_name,column_name) where rownum <= 1000".into();
+        return format!("select * from (select table_name, column_name, data_type, nvl(nullif(char_length,0),nvl(data_precision,0)) sz from {SRC} order by table_name,column_name) where rownum <= 1000");
     }
     let table = table.replace('\'', "''");
     let column = column.replace('\'', "''");
-    format!("select * from (select table_name, column_name, data_type, nvl(nullif(char_length,0),nvl(data_precision,0)) sz from user_tab_columns where (table_name > '{table}' or (table_name = '{table}' and column_name > '{column}')) order by table_name,column_name) where rownum <= 1000")
+    format!("select * from (select table_name, column_name, data_type, nvl(nullif(char_length,0),nvl(data_precision,0)) sz from {SRC} where (table_name > '{table}' or (table_name = '{table}' and column_name > '{column}')) order by table_name,column_name) where rownum <= 1000")
 }
 
 /// A single application timer owns reclamation; no timer/thread per connection.

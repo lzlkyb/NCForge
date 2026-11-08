@@ -88,6 +88,8 @@ pub struct Plan {
 pub struct Stats {
     pub rows: usize,
     pub blob_nulls: usize,
+    /// RAW 列取不到完整十六进制、只能写 null 的个数（被 64 字节预览截断）。
+    pub raw_nulls: usize,
     pub ml_tildes: usize,
 }
 
@@ -134,6 +136,21 @@ fn is_blob_type(ty: &str) -> bool {
 
 fn is_raw_type(ty: &str) -> bool {
     base_type(ty) == "RAW"
+}
+
+/// RAW → `hextoraw('…')`。第二个返回值 = 这个值没能完整拿到（只能写 `null`）。
+///
+/// 判据必须是「整串都是十六进制且长度为偶数」。桥对超过 64 字节的 RAW 会截断并拼上
+/// `…`，这种串落到 `literal()` 的 else 分支会静默变成 `null` —— 主键列变 NULL 是
+/// 最难发现的一种数据损坏，所以单独拎出来计数。
+fn raw_literal(v: Option<&str>) -> (String, bool) {
+    let Some(text) = v.filter(|s| !s.is_empty()) else {
+        return ("null".to_string(), false);
+    };
+    if text.len() % 2 == 0 && text.chars().all(|c| c.is_ascii_hexdigit()) {
+        return (format!("hextoraw('{}')", text.to_uppercase()), false);
+    }
+    ("null".to_string(), true)
 }
 
 // ───────────────────────── 多语判定 ─────────────────────────
@@ -433,6 +450,15 @@ pub fn render(plan: &Plan, rows: &[Vec<String>], commit_every: usize) -> (String
             } else if c.blob {
                 out.push_str("null");
                 st.blob_nulls += 1;
+            } else if is_raw_type(&c.ty) {
+                // RAW 单独走：桥只给前 64 字节并拼上 `…`，这种值不能当成完整二进制。
+                // 以前它落到 `literal()` 的非 hex 分之直接写 null，脚本里主键就成 NULL 了，
+                // 而且一个字的告警都没有。现在至少计数，由命令层报出来。
+                let (sql, lost) = raw_literal(row.get(c.src).map(String::as_str));
+                if lost {
+                    st.raw_nulls += 1;
+                }
+                out.push_str(&sql);
             } else {
                 out.push_str(&literal(row.get(c.src).map(String::as_str), &c.ty));
             }
@@ -630,5 +656,20 @@ mod tests {
         assert_eq!(qualified(Some("ncdb"), "bd_material"), "ncdb.bd_material");
         assert_eq!(qualified(None, "my table"), "\"my table\"");
         assert_eq!(qualified(None, "select"), "select");
+    }
+
+    /// 被桥截断过的 RAW（尾部带 `…`）必须报「拿不到完整值」，不能静默写成 NULL。
+    ///
+    /// 这条是 P0 的守卫：桥对 >64 字节的 RAW 只回前 64 字节 + `…`，它落到
+    /// `literal()` 的非 hex 分支会变成 `null` —— 主键列静默变 NULL，重放才知道。
+    #[test]
+    fn truncated_raw_is_flagged_not_silently_null() {
+        assert_eq!(
+            raw_literal(Some("A1B2")),
+            ("hextoraw('A1B2')".to_string(), false)
+        );
+        assert_eq!(raw_literal(Some("A1B2…")), ("null".to_string(), true));
+        assert_eq!(raw_literal(Some("")), ("null".to_string(), false));
+        assert_eq!(raw_literal(None), ("null".to_string(), false));
     }
 }

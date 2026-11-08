@@ -457,3 +457,32 @@ fn 纯rust引擎能在语句执行中途取消() {
     println!("[cancel 后复用] ok");
     call(&e, "disconnect", &[]);
 }
+
+/// 回归：同一条 SQL 在上一页游标未取完时重执行，不许把 TTC 流弄脏。
+///
+/// 2026-11-08 的 `fe83580` 曾把 `prefetch_rows` / `fetch_array_size` 拉到 128。
+/// vendor `oracledb 26.0.0-beta.5` 命中语句缓存的重执行
+/// （`TTC_RPC_REEXECUTE_AND_FETCH`，num_iters 取 prefetch_rows）时，会把服务端
+/// 预取的行包与新响应交错，第二次执行必报
+/// `internal error: unknown TTC message type <随机值> at packet 1, offset …`，
+/// 且连接从此永久错位。**换一条 SQL 反而正常**，很容易误判成偶发网络问题。
+/// 小结果集不会触发（服务端一次就发完），所以这里必须用大表且留着分页游标。
+#[test]
+#[ignore = "要连真实数据库"]
+fn same_sql_rerun_with_unfinished_cursor_keeps_stream_clean() {
+    let e = RustEngine::new();
+    call(&e, "connect", &[&url(), &user(), &pass(), "false"]);
+    let sql = "select * from bd_material";
+    for i in 0..3 {
+        let r = call(&e, "exec", &[sql, "500", "30"]);
+        assert_eq!(r["hasMore"], true, "第 {} 次应仍有下一页", i + 1);
+    }
+    // 换一条 SQL（不命中缓存重执行）也必须正常
+    let r = call(
+        &e,
+        "exec",
+        &["select count(*) from bd_material", "500", "30"],
+    );
+    assert_eq!(r["hasMore"], false);
+    call(&e, "disconnect", &[]);
+}

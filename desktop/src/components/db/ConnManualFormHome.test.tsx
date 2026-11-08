@@ -27,6 +27,10 @@ vi.mock("../../lib/dbStore", () => ({
   loadConns: vi.fn(),
   rtOf: () => ({ status: "idle" }),
 }));
+// 表单在「改了地址要断开旧会话」时会调 `disconnectConn`（它带未提交事务确认）。
+// dbActions 会顺着 sqlModels 把整个 Monaco 拉进 jsdom（queryCommandSupported 不存在），
+// 这个用例只关心表单接线，整块替掉。
+vi.mock("../../lib/dbActions", () => ({ disconnectConn: async () => true }));
 
 import { ConnManualForm } from "./ConnManualForm";
 

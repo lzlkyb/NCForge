@@ -46,7 +46,8 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
   const suggestions =
     ora === "ORA-00942" ? [...new Set(tableRefs(sql).flatMap((t) => similarTo(t, knownTables, 2)))].slice(0, 3) : [];
   return (
-    <div className="dbx-err">
+    // 执行失败是异步替换进来的状态：焦点还在编辑器里，不给 role 读屏用户什么都听不到。
+    <div className="dbx-err" role="alert">
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
         <Icon name="alert" size={13} />
         {index ? `第 ${index} 条${cancelled ? "已停止" : "执行失败"}` : cancelled ? "执行已停止" : "执行失败"}

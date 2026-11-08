@@ -127,14 +127,21 @@ async function guardAllSessions(connId: string, reason: string): Promise<boolean
   return true;
 }
 
-export async function disconnectConn(connId: string) {
+/**
+ * 断开连接：先问 primary + 每个槽有没有未提交写入。
+ *
+ * 返回 `false` = 用户在「提交 / 回滚 / 取消」里点了取消，会话仍然活着。
+ * 调用方（如编辑连接后保存）必须据此中止后续动作。
+ */
+export async function disconnectConn(connId: string): Promise<boolean> {
   // 只问 primary 会漏掉槽里的未提交写入——后端断开时会把槽一起收掉。
-  if (!(await guardAllSessions(connId, "断开连接"))) return;
+  if (!(await guardAllSessions(connId, "断开连接"))) return false;
   await disconnect(connId);
   // 后端已经把槽一并收掉；前端要把标签上的槽名清掉，否则下次执行会打到不存在的会话
   clearSlots(connId);
   forgetColumns(connId);
   forgetColumnZh(connId);
+  return true;
 }
 
 export async function deleteConn(connId: string) {
@@ -245,7 +252,7 @@ export async function runStatements(
   }
   if (operationActive("db." + dbTxKey(tab.connId, tab.slot)) ||
     (tab.slot ? tab.txNotice : rtOf(tab.connId).txNotice)?.kind === "lost") return outcome;
-  const connId = tab.connId;const originSlot = tab.slot ?? null;let stopRequested=false;
+  const connId = tab.connId;let stopRequested=false;
   const task=beginOperation({...dbTaskSpec(`sql:${tabId}`,"执行 SQL",connId,tab.slot ? `独立会话 ${tab.slot}` : `SQL 标签 ${tab.title}`,connOf(connId)?.name,tabId),phase:"检查连接与执行范围",cancel:async()=>{const active=sqlTabOf(tabId);if(active?.connId!==connId) throw new Error("来源标签已关闭或切换");stopRequested=true;try {if(active.running) await dbApi.cancel(connId,active.slot);}catch(e){stopRequested=false;throw e;}}});
   if(!task) return outcome;
   patchTab<SqlTab>(tabId, { executionId:task.id });
@@ -254,8 +261,10 @@ export async function runStatements(
   const sameRun = () => {
     const cur = sqlTabOf(tabId);
     if (!cur || cur.connId !== connId || cur.executionId !== task.id) return false;
-    // 发起时已有槽就不许被换掉；全新标签首次执行会懒申请槽，不能拿 null 去比。
-    return originSlot === null || (cur.slot ?? null) === originSlot;
+    // 不再比 slot：`execOne` 自己会在槽被空闲回收（`slot-gone`）后重开一条，那是合法换槽。
+    // 拿换槽判「本次执行已失效」会把已经成功的结果整批丢掉、后续语句也不再跑，
+    // 界面上是「已执行 0 / N 条」，而语句其实都执行了（历史与输出区里都有）。
+    return true;
   };
   try {if (!(await ensureConnected(connId))) {task.finish("cancelled","连接未建立，语句未执行");return outcome;}}
   catch {task.finish("failed","连接未建立，返回数据库页查看原因");return outcome;}

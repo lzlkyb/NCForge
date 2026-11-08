@@ -105,6 +105,11 @@ const KNOWN_CODES = new Set([
   // `ncdb` 资源包或系统 Java 提供——所以它和 `need-nc-home` 是两件事：
   // 前者要 NC 的类，后者只要一个 JVM。界面据此给出「下载组件」或「换引擎」。
   "need-jvm",
+  // 同一个重活已经有一个在跑（如两条表结构同步），稍后再试即可
+  "busy",
+  // Rust 引擎跑不了这条语句，已改在 JVM 桥的临时会话里执行；那条会话已经回滚，
+  // 写入没有生效。这个码必须能认出来，否则界面会把「写入被回滚」显示成内部错误。
+  "fallback-tx",
 ]);
 
 export interface DbError {
@@ -125,6 +130,8 @@ export interface DbError {
     | "slots-full"
     | "need-nc-home"
     | "need-jvm"
+    | "busy"
+    | "fallback-tx"
     | "other";
   message: string;
 }
@@ -163,6 +170,12 @@ export function friendlyDbError(e: unknown): string {
       return message;
     case "bridge":
       return `数据库进程异常（超时或已退出），重新连接即可：${message}`;
+    case "busy":
+      // 后端给的是「已有表结构同步正在进行」，换个说法也别再让人以为是自己点坏了
+      return `上一个同类操作还没结束，稍等再试：${message}`;
+    case "fallback-tx":
+      // 这条最容易被误读成普通报错：必须让人看到「写入没有生效」
+      return `这条语句只能在 JVM 桥的临时会话里执行，写入已被回滚、没有生效：${message}`;
     default:
       return message;
   }
@@ -257,6 +270,38 @@ export function cellText(v: Cell, max = 400): string {
   const s = typeof v === "string" ? v : String(v);
   if (s.length <= max) return s;
   return `${s.slice(0, max)}…`;
+}
+
+/**
+ * 后端「大文本预览」的尾部标记。
+ *
+ * 🔴 与 Rust `db_rust.rs::preview_text`、Java `NcDbBridge.java::clobText` 是同一份文案：
+ * 改一边必须改三边，否则「加载完整值」按钮会认不出来。
+ */
+const LOB_PREVIEW_RE = / …（共 ([^）]*) 个字符，只显示前 \d+，点「加载完整值」查看）$/;
+
+/** 这格是不是被后端截断的大文本预览（结果集里 CLOB 只带前 8K 字符）。 */
+export function isLobPreview(v: Cell): v is string {
+  return typeof v === "string" && LOB_PREVIEW_RE.test(v);
+}
+
+/**
+ * 去掉预览尾部那段中文说明，只留正文。
+ *
+ * 解码前必须走这一步：`7B22…307D …（共 39 个字符，只显示前 8192…）` 里混着中文，
+ * 直接判「是不是全 hex 字符」永远失败，看着就像「这列不是编码」。
+ */
+export function lobPreviewBody(v: Cell): string {
+  return typeof v === "string" ? v.replace(LOB_PREVIEW_RE, "") : "";
+}
+
+/** 大文本预览里的总字符数（原值长度）；不是预览返回 null。 */
+export function lobPreviewChars(v: Cell): number | null {
+  if (typeof v !== "string") return null;
+  const m = LOB_PREVIEW_RE.exec(v);
+  if (!m) return null;
+  const n = Number(m[1].replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
 }
 
 /**

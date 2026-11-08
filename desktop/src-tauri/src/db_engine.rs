@@ -212,6 +212,10 @@ pub(crate) fn connection_lost(message: &str) -> bool {
         "ora-17008",
         "ora-17410",
         "no more data to read from socket",
+        // thin 驱动的 TTC 流一旦错位就是**永久性**的：后续每条语句都会继续
+        // 把上次残留的字节当消息头读（`unknown TTC message type 32/0/50/1…`）。
+        // 必须按「连接丢失」处理，否则界面会一直复用这条坏连接。
+        "unknown ttc message type",
     ]
     .iter()
     .any(|code| text.contains(code))
@@ -848,6 +852,19 @@ mod tests {
             settle_transaction_flag(&mut st, "exec", sql, true, false);
             assert!(!st.may_have_transaction, "带注释的 {sql:?} 应清掉标志");
         }
+    }
+
+    /// thin 驱动 TTC 错位是永久性的，必须判成连接丢失，不能让界面继续复用坏连接。
+    #[test]
+    fn unknown_ttc_message_type_is_connection_lost() {
+        for message in [
+            "internal error: unknown TTC message type 32 at packet 1, offset 11",
+            "internal error: unknown TTC message type 0 at packet 1, offset 2482",
+            "internal error: unknown TTC message type 50 at packet 1, offset 11",
+        ] {
+            assert!(connection_lost(message), "{message}");
+        }
+        assert!(!connection_lost("ORA-00942: table or view does not exist"));
     }
 
     #[test]

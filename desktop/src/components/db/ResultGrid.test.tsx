@@ -181,3 +181,20 @@ it("Menu 键使用活动格的原始索引，空字符串和空白的展示不�
   expect(copied.mock.calls[1][0]).toBe("");
   expect(host.querySelector('#dbx-cell-0-1')?.textContent).toBe("");
 });
+
+it("列级解码：未开启时原样显示，开启后显示明文并出编码标记",()=>{
+  const HEX='7b226f72674e6f223a22313030373839227d';
+  const cols=[{name:"PK",type:"VARCHAR2",precision:20,scale:0},{name:"JSON",type:"CLOB",precision:0,scale:0}];
+  const data=[["1",HEX],["2",HEX]];
+  const render=(decoded?:string[])=>act(()=>root.render(
+    <ResultGrid columns={cols} rows={data} order={[0,1]} sort={null} onSort={()=>{}} sel={null} onSel={()=>{}}
+      selection={null} visible={[0,1]} frozen={[]} widthOverrides={{}} onWidths={()=>{}} decoded={decoded} />));
+  render();
+  expect(host.querySelector('#dbx-cell-0-1')?.textContent).toBe(HEX);
+  // 抽样判定成编码列 ⇒ 列头出小圆点（空心），提示「右键可解码」
+  expect(host.querySelector('.dbx-gh .dbx-codec')).toBeTruthy();
+  expect(host.querySelector('.dbx-gh .dbx-codec')?.hasAttribute('data-on')).toBe(false);
+  render(["JSON"]);
+  expect(host.querySelector('#dbx-cell-0-1')?.textContent).toBe('{"orgNo":"100789"}');
+  expect(host.querySelector('.dbx-gh .dbx-codec')?.hasAttribute('data-on')).toBe(true);
+});

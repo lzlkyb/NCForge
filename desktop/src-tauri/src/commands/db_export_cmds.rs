@@ -34,8 +34,6 @@ const PAGE: usize = 5000;
 /// 行数默认上限。整表几十万行的场景要走 `exp`，不是这里。
 const MAX_ROWS_DEFAULT: usize = 5000;
 const MAX_ROWS_LIMIT: usize = 100_000;
-/// 与 `db_rust` / Java 桥的 CLOB 读取上限一致：到了这个长度说明值被截断了。
-const CLOB_LIMIT: usize = 1024 * 1024;
 /// 会话名的序号，避免两次导出撞同一个临时会话。
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -67,6 +65,8 @@ pub struct ExportInsertOut {
     /// 达到行数上限还有剩余（脚本不是全量）。
     pub truncated: bool,
     pub blob_nulls: usize,
+    /// RAW 列取不到完整值、脚本里只能写 null 的个数。
+    pub raw_nulls: usize,
     pub ml_tildes: usize,
     /// 识别到的多语列族，如 `name（跳过 name2..name6）`。
     pub multilang: Vec<String>,
@@ -163,12 +163,26 @@ pub async fn db_export_insert(
     }
     if fetched.long_values > 0 {
         warnings.push(format!(
-            "有 {} 个值达到 1MB 读取上限被截断，脚本里的这些值不完整",
+            "有 {} 个超长文本超过 8K 预览上限，脚本里的这些值只有前 8192 个字符（含一句中文提示），\
+             不能直接用于数据迁移。请缩小 where 范围后按行分段导出，或先把这些列单独导出",
             fetched.long_values
         ));
     }
     if plan.ml.is_empty() && req.multilang.unwrap_or(true) && meta.is_some() {
         warnings.push("没识别到多语列（基础列 + X2..X6 至少 3 列才算）".to_string());
+    }
+    if stats.raw_nulls > 0 {
+        warnings.push(format!(
+            "有 {} 个 RAW 值超过 64 字节（桥只回前 64 字节的十六进制），脚本里这些位置写的是 null。\
+             如果它们是主键，重放会在 ORA-01400 处失败；请改用文件导出或分段取全值",
+            stats.raw_nulls
+        ));
+    }
+    if stats.blob_nulls > 0 {
+        warnings.push(format!(
+            "有 {} 个 BLOB 列只能写 null（二进制内容不进 INSERT 脚本）",
+            stats.blob_nulls
+        ));
     }
     if meta.is_none() {
         // 没有元数据 = 没有主键、也没有多语判据，脚本会「看起来正常」但少了 '~'。
@@ -185,6 +199,7 @@ pub async fn db_export_insert(
         rows: stats.rows,
         truncated: fetched.truncated,
         blob_nulls: stats.blob_nulls,
+        raw_nulls: stats.raw_nulls,
         ml_tildes: stats.ml_tildes,
         multilang: plan
             .ml
@@ -324,7 +339,9 @@ fn collect_rows(
                     .iter()
                     .map(|c| {
                         let s = cell_text(c);
-                        if s.as_ref().is_some_and(|v| v.len() >= CLOB_LIMIT) {
+                        if s.as_ref()
+                            .is_some_and(|v| crate::db_rust::is_lob_preview(v))
+                        {
                             *long_values += 1;
                         }
                         s.unwrap_or_default()
@@ -480,6 +497,8 @@ pub struct ExportFileOut {
     pub truncated: bool,
     /// 用户中途取消：已写入的行保留在文件里（是合法前缀，但不是全量）。
     pub canceled: bool,
+    /// 被截断的大文本格子数（只带 8K 预览）。>0 说明文件里的长文本不完整。
+    pub long_values: usize,
     pub ms: u64,
 }
 
@@ -525,6 +544,8 @@ pub async fn db_export_file(
     std::fs::create_dir_all(&dir).map_err(|e| format!("建导出目录失败 {}: {e}", dir.display()))?;
     let name = safe_file_name(req.file_name.as_deref(), table, fmt);
     let path = dir.join(&name);
+    // 目标本来就存在 = 上一份可能是完整的导出。取消/触顶的产物绝不能把它顶掉。
+    let existed_before = path.exists();
 
     let (key, handle) = open_session(&app, &st, &cfg, &conn, engine)
         .await
@@ -544,7 +565,18 @@ pub async fn db_export_file(
         .unwrap_or_else(|e| e.into_inner())
         .insert(export_id, cancel.clone());
     let res = stream_to_file(
-        &app, &handle, &req.id, &sql, &path, fmt, table, limit, timeout, export_id, &cancel,
+        &app,
+        &handle,
+        &req.id,
+        &sql,
+        &path,
+        existed_before,
+        fmt,
+        table,
+        limit,
+        timeout,
+        export_id,
+        &cancel,
     )
     .await;
     st.export_cancels
@@ -554,16 +586,20 @@ pub async fn db_export_file(
     // 导出会话用完就断，不留在服务端占连接
     let _ = call(handle, "disconnect", vec![], Duration::from_secs(10)).await;
     drop_bridge(&st, &key);
-    let rows = res?;
+    let (rows, saved) = res?;
 
-    let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let bytes = std::fs::metadata(&saved).map(|m| m.len()).unwrap_or(0);
     Ok(ExportFileOut {
-        path: path.to_string_lossy().to_string(),
-        file_name: name,
+        path: saved.to_string_lossy().to_string(),
+        file_name: saved
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or(name),
         rows: rows.rows,
         bytes,
         truncated: rows.truncated,
         canceled: rows.canceled,
+        long_values: rows.long_values,
         ms: t0.elapsed().as_millis() as u64,
     })
 }
@@ -587,6 +623,8 @@ struct Streamed {
     rows: usize,
     truncated: bool,
     canceled: bool,
+    /// 大文本被截断到 8K 预览的格子数。
+    long_values: usize,
 }
 
 /// 取第一页 → 逐页写盘 → 每页发一次进度；先写同目录临时文件，成功后再原子改名。
@@ -601,13 +639,14 @@ async fn stream_to_file(
     conn_id: &str,
     sql: &str,
     path: &Path,
+    existed_before: bool,
     fmt: Format,
     table: &str,
     limit: usize,
     timeout: u32,
     export_id: u64,
     cancel: &std::sync::atomic::AtomicBool,
-) -> Result<Streamed, String> {
+) -> Result<(Streamed, std::path::PathBuf), String> {
     // 临时名由 `AtomicTarget` 生成（随机名 + 同目录），写完再原子替换。
     // 失败/取消路径不用手写 `remove_file`：不 commit 就析构 = 自动删除。
     let target = crate::atomic_file::AtomicTarget::create(path)?;
@@ -638,6 +677,7 @@ async fn stream_to_file(
         let mut written = 0usize;
         let mut truncated = false;
         let mut canceled = false;
+        let mut long_values = 0usize;
         loop {
             // 已取回的这一页照常写完再停：请求已经发出去，必须知道它成功没有。
             if cancel.load(Ordering::SeqCst) {
@@ -662,6 +702,11 @@ async fn stream_to_file(
                     .as_array()
                     .map(|a| a.iter().map(cell_text).collect())
                     .unwrap_or_default();
+                long_values += cells
+                    .iter()
+                    .flatten()
+                    .filter(|s| crate::db_rust::is_lob_preview(s))
+                    .count();
                 w.push(&cells).map_err(|e| format!("写文件失败：{e}"))?;
                 written += 1;
             }
@@ -694,6 +739,7 @@ async fn stream_to_file(
             rows: written,
             truncated,
             canceled,
+            long_values,
         })
     }
     .await;
@@ -706,10 +752,44 @@ async fn stream_to_file(
                     path.display()
                 ));
             }
-            Ok(v)
+            // 取消 / 触顶 / 长文本被截断 —— 这三种产物都只是「合法前缀」，不是全量。
+            // 直接顶掉同名的完整旧文件，用户看到文件名一样就会当完整数据用掉。
+            // 改成「…-部分结果.ext」，把真实落盘路径回给前端。
+            let mut saved = path.to_path_buf();
+            if (v.canceled || v.truncated || v.long_values > 0) && existed_before {
+                let alt = partial_path(path);
+                if std::fs::rename(path, &alt).is_ok() {
+                    saved = alt;
+                }
+            }
+            Ok((v, saved))
         }
         Err(e) => Err(e),
     }
+}
+
+/// 部分结果的落盘名：`x.csv` → `x-部分结果.csv`（重名再编号，不覆盖）。
+fn partial_path(path: &Path) -> std::path::PathBuf {
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let ext = path.extension().unwrap_or_default().to_string_lossy();
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    for n in 0..1000 {
+        let suffix = if n == 0 {
+            String::new()
+        } else {
+            format!("-{n}")
+        };
+        let name = if ext.is_empty() {
+            format!("{stem}-部分结果{suffix}")
+        } else {
+            format!("{stem}-部分结果{suffix}.{ext}")
+        };
+        let candidate = dir.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!("{stem}-部分结果.{ext}"))
 }
 
 fn parse_cols(body: &Value) -> Result<Vec<ResultCol>, String> {

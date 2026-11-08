@@ -1,20 +1,20 @@
 import { useEffect, useId, useMemo, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type Ref } from "react";
 import { columnViewport, selectionBounds } from "../../lib/gridViewport";
 import { gridSelectionCell, gridSelectionHeading } from "../../lib/gridSelection";
-import { cellText, sameCell } from "../../lib/db";
+import { isLobPreview, sameCell } from "../../lib/db";
+import { gridCodec } from "../../lib/cellCodec";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { isNumericType } from "../../lib/resultExport";
-import { initialWidths, type SortState } from "../../lib/resultView";
+import { fitWidth, initialWidths, rowNumberWidth, type SortState } from "../../lib/resultView";
 import { copyText } from "../../lib/utils";
 import { toast } from "../ui/toast";
 import { ResultGridHeader } from "./ResultGridHeader";
 import { useResultGridNavigation } from "../../hooks/useResultGridNavigation";
 import { getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
+import { selectionText, type Selection } from "../../lib/dbResultTools";
 import "../../db-grid-inspector.css";
 
-/** 可视区上下多渲染的行数，滚得快时不露白。 */
-const OVERSCAN = 12;
-import { selectionText, type Selection } from "../../lib/dbResultTools";
+const OVERSCAN = 12; // 可视区上下多渲染的行数，滚得快时不露白
 
 export interface CellPos {
   /** 原始行号（rows 下标），不是显示顺序。 */
@@ -32,12 +32,12 @@ export interface GridEdit {
 export interface ResultGridApi { focusActive: () => void }
 
 /**
- * 结果表：手写虚拟滚动（只渲染可视行）、表头排序、拖列宽、单元格选择与编辑。
+ * 结果表：手写虚拟滚动（只渲染可视行）、表头排序、拖/双击自适应列宽、单元格选择与编辑。
  *
  * 排序 / 筛选的结果由父组件以 `order` 传入（复制 / 导出要用同一个顺序）。
  * NULL 斜体灰字与空串区分；数字右对齐。
  */
-export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onOpen, edit, zh, visible, frozen, widthOverrides, onWidths, selection, empty, onCopy, onCellMenu, apiRef }: {
+export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onOpen, edit, zh, visible, frozen, widthOverrides, onWidths, selection, empty, onCopy, onCellMenu, apiRef, decoded }: {
   apiRef?: Ref<ResultGridApi>;
   columns: ColumnMeta[];
   rows: Cell[][];
@@ -50,6 +50,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   sel: CellPos | null;
   onSel: (p: CellPos, extend?:boolean) => void;
   visible: number[]; frozen: string[]; widthOverrides: Record<string,number>; onWidths: (w:number[])=>void; selection:Selection|null;
+  decoded?: string[]; // 已开启「按编码解码显示」的列名，开关在列头右键菜单
   /** 双击不可编辑的格子：打开详情。 */
   onOpen?: () => void;
   edit?: GridEdit;
@@ -75,20 +76,21 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   // 切密度保留当前首行；CSS 与虚拟滚动共用几何，不能只把可见行拉高。
   useLayoutEffect(() => {
     const el = boxRef.current;
+    // DOM 高度缩短时浏览器会先夹紧 scrollTop；用上一帧状态避免再缩短一次。
     if (el && previousRowHeight.current !== ROW_H) {
-      // DOM 高度缩短时浏览器会先夹紧 scrollTop；用上一帧状态避免再缩短一次。
       el.scrollTop = preciseTop.current / previousRowHeight.current * ROW_H; preciseTop.current=el.scrollTop;
       setScroll(s => ({ ...s, top: el.scrollTop, h: el.clientHeight }));
     }
     previousRowHeight.current = ROW_H;
   }, [ROW_H, scroll.top]);
 
-  // 列变了（新的一次查询）才重算列宽；加载更多行不动用户拖过的宽度
   const colKey = columns.map((c) => c.name).join("|");
+  const colKeyRef = useRef(colKey);
+  // 只有列变了才回顶并结束编辑；拖列宽也会换 widthOverrides 引用，无差别重置会丢滚动位置和编辑中的值
   useEffect(() => {
-    setWidths(initialWidths(columns,rows).map((w,c)=>widthOverrides[columns[c].name] ?? w));
-    setEditing(null);
-    boxRef.current?.scrollTo({ top: 0 });
+    setWidths(initialWidths(columns, rows).map((w, c) => widthOverrides[columns[c].name] ?? w));
+    if (colKeyRef.current === colKey) return;
+    colKeyRef.current = colKey; setEditing(null); boxRef.current?.scrollTo({ top: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [colKey, widthOverrides]);
 
@@ -100,15 +102,13 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     return () => ro.disconnect();
   }, []);
 
-  // 兜底：编辑框被别的原因卸掉（结果刷新）时，标记不能留到下一轮
-  useEffect(() => {
-    if (!editing) cancelEdit.current = false;
-  }, [editing]);
+  useEffect(() => { if (!editing) cancelEdit.current = false; }, [editing]);
 
   // 新结果的第一帧里 effect 还没重算列宽：先按新列现算一份，避免宽度对不上
   const ws = widths.length === columns.length ? widths : initialWidths(columns, rows);
+  const codec = useMemo(() => gridCodec(columns, rows, order, decoded ?? []), [columns, rows, order, decoded]);
   const numeric = columns.map((c) => isNumericType(c.type));
-  const rnW = Math.max(40, String(rows.length).length * 8 + 18);
+  const rnW = rowNumberWidth(rows.length);
   const total = rnW + visible.reduce((n,c)=>n+ws[c],0);
   const bounds = useMemo(() => selectionBounds(order,visible,selection), [order,visible,selection]);
   const viewport = columnViewport(visible,ws,new Set(visible.filter(c=>frozen.includes(columns[c].name))),scroll.left,scroll.w,rnW);
@@ -117,7 +117,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const first = Math.max(0, Math.floor(scroll.top / ROW_H) - OVERSCAN);
   const last = Math.min(order.length, Math.ceil((scroll.top + scroll.h) / ROW_H) + OVERSCAN);
   const selIndex = sel ? order.indexOf(sel.r) : -1;
-  // 虚拟滚动只渲染可视行：活动单元格一旦滚出可视区，aria-activedescendant 会指向不存在的 id
+  // 活动格滚出可视区时 aria-activedescendant 会指向不存在的 id
   const activeCell = sel && viewport.some(c=>c.column===sel.c) && selIndex >= first && selIndex < last ? `dbx-cell-${sel.r}-${sel.c}` : undefined;
 
   const syncScroll = () => {
@@ -153,7 +153,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
       dragCleanup.current = null;
-      if(widthRef.current.length) onWidths(widthRef.current);
+      // 宽度没变（误点、双击 fit 的第一下）就别写布局，否则自动宽度会被固化成手调值。
+      if (widthRef.current.length && widthRef.current[k] !== start) onWidths(widthRef.current);
     };
     const move = (e: PointerEvent) => {
       // 指针被系统取消（Alt+Tab、触控笔离开、拖出窗口）时 pointerup 不触发；
@@ -166,6 +167,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     window.addEventListener("pointerup", finish, { once: true });
     window.addEventListener("pointercancel", finish, { once: true });
   };
+  /** 双击列分隔线 = 本列贴到内容（列名优先），顺手记成手调宽度。 */
+  const fit = (k: number) => { if (!columns[k]) return; const next = ws.map((w, i) => (i === k ? fitWidth(columns[k], rows, k) : w)); setWidths(next); onWidths(next); };
 
   const valueAt = (r: number, c: number): Cell => {
     const key = `${r}:${c}`;
@@ -222,7 +225,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
       <div className="dbx-grid-inner" style={{ width: total, height: HEAD_H + order.length * ROW_H }}>
         <ResultGridHeader columns={columns} sort={sort} zh={zh} order={order} visible={visible} viewport={viewport}
           bounds={bounds} total={total} rnW={rnW} cellStyle={cellStyle} navigation={navigation}
-          onSel={onSel} onSort={onSort} onHeaderMenu={onHeaderMenu} resize={resize} />
+          onSel={onSel} onSort={onSort} onHeaderMenu={onHeaderMenu} resize={resize} fit={fit} codec={codec} />
         {order.slice(first, last).map((r, j) => {
           const i = first + j;
           return (
@@ -235,7 +238,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
               aria-rowindex={i + 2}
             >
               <div className="dbx-gc rn" data-range-heading={gridSelectionHeading(bounds,i,"row")} style={{ width: rnW }} role="rowheader" aria-colindex={1} onMouseDown={()=> {if(visible.length) {onSel({r,c:visible[0]});onSel({r,c:visible[visible.length-1]},true);}}}>{i + 1}</div>
-              {viewport.map(({column:k,index:vi}) => {
+              {viewport.map(({column:k,index:vi,width}) => {
                 const v = valueAt(r, k);
                 const selected = gridSelectionCell(bounds,i,vi,sel?.r===r && sel?.c===k), isSel=!!selected["data-cell"];
                 if (isSel && editing && editing.pos.r === r && editing.pos.c === k) {
@@ -261,6 +264,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
                 }
                 const cls = ["dbx-gc", numeric[k] && "n", v === null && "null", edit?.changed.has(`${r}:${k}`) && "chg"].filter(Boolean).join(" ");
                 const valueKind=v===null ? "null" : v==="" ? "empty" : typeof v==="string" && !/\S/.test(v) ? "whitespace" : undefined;
+                // 大文本（>4K 或后端标了预览）在网格里只露开头：给角标提示「双击看完整值」
+                const longText = typeof v === "string" && (v.length >= 4096 || isLobPreview(v));
                 return (
                   <div
                     key={k}
@@ -270,6 +275,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
                     role="gridcell"
                     aria-colindex={vi + 2}
                     data-value-kind={valueKind}
+                    title={codec.title(v, k, width)}
                     aria-label={valueKind==="null" ? "NULL，数据库空值" : valueKind==="empty" ? "空字符串，0 字符" : valueKind==="whitespace" ? `仅空白字符，${String(v).length} 字符` : undefined}
                     {...selected}
                     onMouseDown={e=>{e.preventDefault();boxRef.current?.focus();onSel({r,c:k},e.shiftKey);}}
@@ -278,7 +284,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
                     onContextMenu={e=>{if(onCellMenu){e.preventDefault();onCellMenu(r,k,e.clientX,e.clientY);}}}
                   >
                     {(valueKind==="empty" || valueKind==="whitespace") && <span className="dbx-value-placeholder" data-placeholder={valueKind==="empty" ? "空字符串" : "空白"} aria-hidden="true" />}
-                    {cellText(v, 300)}
+                    {longText && <span className="dbx-lob-mark" aria-hidden="true" />}
+                    {codec.text(v, k, 300)}
                   </div>
                 );
               })}

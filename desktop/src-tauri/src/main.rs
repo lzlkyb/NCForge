@@ -435,6 +435,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::db_cancel,
             commands::db_caps,
             commands::db_more,
+            commands::db_lob_value,
             commands::db_tx,
             commands::db_tx_all,
             commands::db_meta,

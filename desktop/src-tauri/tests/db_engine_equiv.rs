@@ -87,6 +87,9 @@ fn 两个引擎的取值规则一致() {
         "select date '2026-10-30' as 日期 from dual",
         "select timestamp '2026-10-30 12:34:56.789' as 时间戳 from dual",
         "select to_clob('大文本内容') as clob  from dual",
+        // 超过预览上限（8K）：两边都要截在同一个长度、带同一句提示。
+        "select rpad(to_clob('x'), 20000, 'y') as 大clob from dual",
+        "select cast(null as clob) as 空clob from dual",
         "select hextoraw('4f4b') as raw值 from dual",
         "select cast(1 as binary_double) as bd, cast(2 as binary_float) as bf from dual",
         "select count(*) as 表数 from user_tables",
@@ -145,6 +148,27 @@ fn 两个引擎的取值规则一致() {
         }
     }
     assert_eq!(diffs, 0, "{diffs} 条 SQL 两个引擎结果不同");
+
+    // 按需取完整值：结果集里只带 8K 预览，`lobValue` 要能用「外层编号 + 第 N 行」
+    // 取回全部 2 万字符。两个引擎都要过，否则「加载完整值」在某个引擎上会空手而归。
+    let big = "select rpad(to_clob('x'), 20000, 'y') as big_clob from dual";
+    let aj = jvm
+        .call(
+            "lobValue",
+            &[big, "0", "BIG_CLOB", "1048576"],
+            Duration::from_secs(60),
+        )
+        .expect("JVM 桥 lobValue 失败");
+    let ar = rust
+        .call(
+            "lobValue",
+            &[big, "0", "BIG_CLOB", "1048576"],
+            Duration::from_secs(60),
+        )
+        .expect("Rust 引擎 lobValue 失败");
+    assert_eq!(aj["chars"], ar["chars"], "lobValue 字符数不同");
+    assert_eq!(aj["value"], ar["value"], "lobValue 内容不同");
+    assert_eq!(ar["chars"].as_u64(), Some(20_000), "lobValue 没取全");
 
     // 分页：一次只取 7 行，连取三页。验证 Rust 侧的游标续取没有漏行/重行，
     // 且「还有没有更多」的判定与 JVM 桥一致（这是最容易差一行的地方）。

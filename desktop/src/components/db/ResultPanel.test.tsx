@@ -179,15 +179,16 @@ describe("ResultPanel 列中文名", () => {
     spy.mockRestore();
   });
 
-  it("查不到中文名时只显示列名，类型在表头提示中仍可读取", async () => {
+  it("查不到中文名时第二行退回数据类型", async () => {
     forgetColumnZh("c1");
     const spy = vi.spyOn(dbApi, "columnNamesZh").mockResolvedValue({ names: {} });
     const cols = [{ name: "CNT", type: "NUMBER", precision: 10, scale: 0 }];
     await mount(entry({ sql: "select count(*) as cnt from dual", columns: cols, rows: [["1"]] }));
     await flush();
 
+    // 第二行空着就是白扔 17px：列名一挤只剩省略号，而类型本来就得从 tooltip 里翻
     const sub = [...host.querySelectorAll(".dbx-gh .t")].map((e) => e.textContent);
-    expect(sub).toEqual([]);
+    expect(sub).toEqual(["NUMBER"]);
     expect(host.querySelector('.dbx-gh[aria-colindex="2"]')?.getAttribute('title')).toContain("NUMBER");
     spy.mockRestore();
   });

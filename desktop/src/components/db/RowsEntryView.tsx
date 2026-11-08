@@ -46,6 +46,7 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
         table={guessTable(entry.sql)}
         layoutKey={`${tab.connId}:${guessTable(entry.sql) || columns.map(c=>c.name).join("|")}`}
         snapshot={{source:entry.context?.source ?? "执行来源未记录",schema:entry.context?.schema,originTabId:tab.id,sql:entry.sql,at:entry.completedAt ?? entry.context?.startedAt ?? 0,complete,columns,rows}}
+        lob={tab.connId ? {connId:tab.connId,slot:tab.slot,sql:entry.sql,timeoutSec:tab.timeoutSec} : undefined}
         meta={
           <>
             {sets.length > 1 && <>第 {at + 1}/{sets.length} 个结果集 · </>}
