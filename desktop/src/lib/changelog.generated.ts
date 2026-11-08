@@ -4,6 +4,249 @@ import type { ChangelogEntry } from "./about";
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "0.2.0",
+    "date": "2026-11-08",
+    "items": [
+      {
+        "category": "feat",
+        "text": "设置 → 组件新增「数据库 JVM 组件」（Java 运行时 + Oracle 驱动，按需下载约 41MB）：没有 NC 安装目录的机器装上它也能用 JVM 桥连数据库，不必为了一份驱动去装整套 NC。"
+      },
+      {
+        "category": "feat",
+        "text": "代码页的中间件与客户端控制台新增「清除日志文件」：真正清空磁盘上的日志内容（原「清屏」只清视图），可选连同上次运行的归档一并删除；运行中的进程继续写同一个文件，之后的新输出照常显示。"
+      },
+      {
+        "category": "feat",
+        "text": "代码工作台新增编码、排错、调试布局，可锁定与恢复，分别记忆侧栏宽度及各底部工具高度；问题、编译、服务与调试常驻，次要工具可固定。"
+      },
+      {
+        "category": "feat",
+        "text": "双编辑器组各自保留标签、活动文件、光标与导航历史，支持移动、交换、合并和比例调整；所有标签支持搜索、最近使用、未保存筛选与长期钉住。"
+      },
+      {
+        "category": "feat",
+        "text": "问题页新增工程、模块与文件范围和源码上下文；搜索支持展开阅读与连续定位，编译输出分为模块摘要、问题定位和有界原始日志，调试变量与监视可随窗口停靠。"
+      },
+      {
+        "category": "feat",
+        "text": "NC 服务新增可配置的「开始开发」流程：编译、单次投送、启动或复用中间件、等待客户端实际连接目标、启动客户端及可选调试附加，支持真实阶段、用时、失败和取消反馈。"
+      },
+      {
+        "category": "feat",
+        "text": "控制台新增查找高亮与跳转、异常分组和源码定位、4000 行虚拟阅读、按需历史片段，以及原生选址的完整文件或已加载匹配日志导出。"
+      },
+      {
+        "category": "feat",
+        "text": "数据库复制与导出统一为范围、格式、字段和预览窗口；支持 JSON、JSONL、Markdown、HTML、SQL 条件与带原值校验的 UPDATE，常用输出可保存预设。"
+      },
+      {
+        "category": "feat",
+        "text": "数据库连接可设置默认 schema：连上就切过去，写 SQL 不必再带 `aier633.` 前缀；工具条上可随时切换或恢复登录账号，左侧表与对象清单跟着刷新，测试连接会指出 schema 是否设置成功。"
+      },
+      {
+        "category": "feat",
+        "text": "新增原生文件保存与 XLSX 工作簿：保留长主键、前导零和数值精度，多结果集分工作表；支持写入进度、吞吐、停止、后台运行和部分结果提醒。"
+      },
+      {
+        "category": "feat",
+        "text": "元数据页升级为模型、字段表与属性检查器联动的工作台，支持多文档标签、字段筛选、校验问题定位，以及业务接口、属性映射、参照和关系语义校验。"
+      },
+      {
+        "category": "feat",
+        "text": "元数据编辑新增文档草稿、撤销重做、字段快改、批量设置、粘贴整批预检与字段模板；所有修改统一预览后保存。"
+      },
+      {
+        "category": "feat",
+        "text": "元数据页新增生成中心：从 BMF 一次生成 Java 源码（VO、聚合 VO、枚举 VO、接口与测试）、多种数据库的建表脚本和注册清单，可勾选产物、预览全文并按目录写入。"
+      },
+      {
+        "category": "feat",
+        "text": "数据库工具没有 NC 安装目录也能用：prop.xml 导入页在缺少 NC home 时显示引导卡片，说明这一页要什么、给出一键去「NC 环境」设置的入口，并指出不配 home 也能连库的另一条路；测试连接遇到需要 NC home的场景时，红条提供「换成纯 Rust 驱动」一键切换。"
+      },
+      {
+        "category": "improve",
+        "text": "连接配置写着 JVM 桥、但这台机器没有可用的 Java 运行时时不再直接失败：改用纯 Rust 驱动照样连上，并在连接提示、测试连接和错误信息里说明原因（REF CURSOR 暂不支持）；装了 NC 或下载了组件的机器行为完全不变。"
+      },
+      {
+        "category": "improve",
+        "text": "代码编辑器的右键菜单与速览子菜单改为中文，保留原有快捷键及命令行为。"
+      },
+      {
+        "category": "improve",
+        "text": "自动定位恢复为资源树顶部的常驻开关，直接显示开关状态并独立保存；低频视图设置继续收在更多菜单。"
+      },
+      {
+        "category": "improve",
+        "text": "优化代码工作台的资源树和阅读区：树头合为单行，低频视图设置集中收纳，工具图标清晰区分；窄分屏保留执行入口，最近文件与快捷键按空间重排。"
+      },
+      {
+        "category": "improve",
+        "text": "服务来源并入运行工具栏，元数据实体与字段操作合并并提供专注模式；补丁文件详情按需展开，数据库对象查找收入连接栏，设置表单扩宽并减少重复留白。"
+      },
+      {
+        "category": "improve",
+        "text": "版本控制审查优先展示代码：合并文件与差异工具条、收起重复说明和低频操作，新增专注对比及文件切换；首次打开定位差异，长段未修改代码可折叠，阅读位置与提交选择独立保留。"
+      },
+      {
+        "category": "improve",
+        "text": "同步收敛数据库、元数据、历史、日志和补丁页面的工具区：宽屏合并连接与执行栏，元数据合并文档与视图操作，历史说明、日志记录详情及打包设置按需展开，保留错误、冲突、事务与未保存提醒。"
+      },
+      {
+        "category": "improve",
+        "text": "统一搜索框、列表、菜单、标签与设置项的选择和焦点样式；数据库选区改用连续底色与外轮廓，保留活动格、修改及错误标记，schema 选择支持方向键、回车和 Escape。"
+      },
+      {
+        "category": "improve",
+        "text": "数据库控制台的执行按钮不再印 Ctrl+Enter：三条键位（执行当前语句 / 执行整个脚本 / 格式化）改在编辑器右键菜单与 ? 快捷键一览里查看。"
+      },
+      {
+        "category": "improve",
+        "text": "侧栏不再在每个入口上标注 Ctrl+N 快捷键：键位照旧生效，界面更素净。"
+      },
+      {
+        "category": "improve",
+        "text": "优化大结果集的筛选、排序、宽表滚动与复制；查询结果增加内存预算及主动释放入口，超限数据明确标为部分结果。"
+      },
+      {
+        "category": "improve",
+        "text": "表数据相邻翻页在非空主键条件下采用游标分页，表结构同步改为分批读取与后台缓存构建；服务日志减少空闲轮询和重复扫描，空闲数据库会话统一安全回收。"
+      },
+      {
+        "category": "improve",
+        "text": "开始落实原生工作台设计：统一实色与玻璃界面的工具栏和阅读面，收敛外壳染色与更新记录动画；公共按钮采用一致的加载文案和克制的悬停反馈。"
+      },
+      {
+        "category": "improve",
+        "text": "数据库连接状态在树行内直接显示，提交与回滚固定在当前会话工具栏。提交方式在连接设置中配置，新会话直接采用，已有会话在处理事务并重连后生效。慢查询保留上次结果，并显示等待、停止与用时反馈。"
+      },
+      {
+        "category": "improve",
+        "text": "文件树和编辑器标签统一显示去重后的错误与警告。点击徽标可查看对应文件、包或模块的问题并定位到源码，文件树支持「只看问题」与恢复原展开状态。"
+      },
+      {
+        "category": "improve",
+        "text": "文件树动作与过滤、代码执行工具、阅读入口和文件状态按任务归组；浅深主题同步统一补全、悬浮提示与定义预览，窄区保留主操作与代码空间。"
+      },
+      {
+        "category": "improve",
+        "text": "BMF 生成中心升级为整套产物工作台：配置统一更新，文件清单支持搜索、筛选和分组选择，内容、真实差异与来源联动查看，低窗口可展开配置抽屉并保留底部写入操作。"
+      },
+      {
+        "category": "improve",
+        "text": "NC 服务采用服务列表与大控制台布局，启停绑定当前服务；运行详情、启动配置和元数据投送按需展开，浅深主题兼容玻璃与实色，支持展开阅读与恢复布局。"
+      },
+      {
+        "category": "improve",
+        "text": "数据库浅深主题同步优化：连接上下文与执行工具条分层，结果工具归组，表格、筛选、历史、连接弹窗与数据字典统一排版；阅读区保持稳定底色，兼容玻璃与实色材质。"
+      },
+      {
+        "category": "improve",
+        "text": "元数据资源与属性面板按可用空间停靠或收成抽屉；支持方向键选择字段、F2 编辑、Ctrl+S 预览保存，对比、历史和生成等工具按需加载。"
+      },
+      {
+        "category": "improve",
+        "text": "生成前自动做规则校验，存在错误时禁止写入磁盘；写入前显示每个文件相对上次生成的漂移状态，手改过的文件默认跳过，确认覆盖时先备份。"
+      },
+      {
+        "category": "improve",
+        "text": "数据连接页默认引擎改为「纯 Rust 驱动」并排在引擎选择首位（导入 .properties 同样默认纯 Rust 驱动）：它不依赖 NC home，适合只用数据库工具的用户；没有 NC home 的机器上，JVM 桥按钮会标注「需要 NC 安装目录」。已有连接的引擎不变。"
+      },
+      {
+        "category": "improve",
+        "text": "快速导航（找文件、找类）不再每次都等一遍全盘扫描：文件名清单与类型索引改为「先用上次结果立刻出列表、后台再校准」，打开面板就能直接输入；符号搜索在语言服务长时间没响应时先退回本地结果，输入框不再一直转圈。"
+      },
+      {
+        "category": "improve",
+        "text": "「工作区符号」（找方法 / 字段）不再等语言服务建索引：改由工作区本地索引回答，第一次打开就能搜，结果里仍注明所属类与模块；依赖 jar 里的成员照旧由语言服务补充。"
+      },
+      {
+        "category": "improve",
+        "text": "快速导航里 `#` 搜内容改成边扫边出：先扫最近打开的文件和文件名里带关键词的文件，第一批命中最快几十毫秒就出现，列表不再空着等全量扫完。"
+      },
+      {
+        "category": "fix",
+        "text": "修复 macOS 上保存数据库连接报「DPAPI 只在 Windows 上可用」的问题：口令改存系统钥匙串（Windows 仍用 DPAPI，已有密文继续可用），钥匙串存不下时只失去「记住」并提示，不再让整条连接存不下来；SVN 记住密码同样可用。"
+      },
+      {
+        "category": "fix",
+        "text": "修复连不上数据库时给出无关提示的问题：现在直接说明是「15 秒内没建立 TCP 连接」「连接被拒绝」还是库返回的错误，不再显示「语句已中断」或「数据库进程异常」。"
+      },
+      {
+        "category": "fix",
+        "text": "修复 macOS 上模块编译、代码智能与数据库导入导出都起不来的问题：Java 类路径分隔符与 java 可执行文件名此前按 Windows 写法拼装，Mac 上 JVM 找不到主类，也认不出 NC 安装目录。"
+      },
+      {
+        "category": "fix",
+        "text": "macOS 上端口被占用时能看到是哪个进程，也能结束残留的中间件；此前这块只实现了 Windows 分支，Mac 上既看不到占用者也无法结束。"
+      },
+      {
+        "category": "fix",
+        "text": "修复代码智能在影子目录被外部程序改写成普通文件夹后无法重启的问题：现在自动重建，旧副本改名保留，不再要求手工删目录。"
+      },
+      {
+        "category": "fix",
+        "text": "数据库空闲后执行 SQL 会检查当前会话，断开的干净会话可按需恢复。执行中断线时保留已显示的结果并提示核对事务。"
+      },
+      {
+        "category": "fix",
+        "text": "修复双编辑器快捷键可能保存另一组文件、路径分隔符差异导致重复模型及无法跳转的问题；共享未保存文件关闭视图和慢读取返回保留正确对象。"
+      },
+      {
+        "category": "fix",
+        "text": "修复多标签菜单受滚动关闭、新执行栏被旧样式隐藏，以及短窗口服务日志被通用面板高度上限挤压的问题；调试暂停后重新刷新线程，展开恢复保留编辑器、日志阅读位置及监视输入。"
+      },
+      {
+        "category": "fix",
+        "text": "生成写入绑定预览、配置和目标版本，空选择不写入，手改文件按逐项授权覆盖并备份；部分失败保留实际结果，切换 BMF 隔离配置，SQL 执行中切页保留会话。"
+      },
+      {
+        "category": "fix",
+        "text": "统一选区和工具栏的复制保真规则，保留换行、制表符与 NULL 语义；全量导出冻结来源查询及绑定条件，NC 迁移也可选择原生保存位置并核对转换告警。"
+      },
+      {
+        "category": "fix",
+        "text": "普通启动输出不再误用堆栈缩进；服务状态读取失败明确显示未知，取消及晚到响应按运行身份隔离，清屏保留磁盘日志，上次运行可打开对应归档文件。"
+      },
+      {
+        "category": "fix",
+        "text": "修复 SQL 低窗口中辅助按钮强制换行挤压结果区；表格密度切换同步虚拟滚动并保留首行，避免末尾滚动二次缩短；中文列宽按显示宽度估算，空结果增加查询和筛选恢复提示。"
+      },
+      {
+        "category": "fix",
+        "text": "元数据长字段表清除筛选后能定位原选中字段；切换文档、引用跳转和保存刷新保留正确对象，调整窗口及保存失败时保留编辑输入与草稿，外部文件冲突阻止覆盖。"
+      },
+      {
+        "category": "fix",
+        "text": "更新弹窗顶部恢复「更新摘要」高亮卡片；内容较少时弹窗按内容收缩，不再留出大片空白。"
+      },
+      {
+        "category": "fix",
+        "text": "启动服务不再默认挂载安装目录下的全部 web 应用：默认名单与 Eclipse 启动配置一致，需要 iwebap、eyeapp 等前端时可在服务页按需勾选；修复 HR 插件 web 应用在共享类路径下启动失败导致的整屏报错。"
+      },
+      {
+        "category": "fix",
+        "text": "修复没有配置 NC 安装目录时数据库工具多处直接报错、用户无从下手的问题：新建连接、侧边栏加载与 prop.xml 导入不再抛裸错误，而是说明缺什么、能怎么办（换纯 Rust 驱动或去设置配置 NC home）。"
+      },
+      {
+        "category": "fix",
+        "text": "修复 macOS 上「清理编译产物」点了没反应的问题：系统目录里的 `/var`、`/tmp` 本身就是符号链接，清理把它们误判成不安全的链接路径，于是一个文件都不删。现在只在模块目录内部检查链接，模块目录之外不再误拦。"
+      },
+      {
+        "category": "fix",
+        "text": "修复自动探测 NC 安装目录时同一个目录出现两种写法（Windows 的短名 `RUNNER~1`、macOS 的 `/var` 与 `/private/var`）导致候选重复、与已配置路径对不上的问题。"
+      }
+    ],
+    "summary": [
+      "数据库不再要求先装 NC：装「数据库 JVM 组件」后 JVM 桥照常可用；macOS 上保存连接口令也不再报错。代码、数据库、元数据与服务页面的布局与操作一并收敛。"
+    ],
+    "technical": [
+      {
+        "heading": "技术细节",
+        "text": "- 密钥存储统一成 `svn_cred::secret`（`seal` / `open` / `forget`）：Windows 仍是 DPAPI（无前缀 base64，存量密文继续可解），macOS 改走 `/usr/bin/security` 钥匙串（`kc:<uuid>`），其它平台明确报「不支持保存口令」。调用点收口后，存不下口令一律降级成「清掉旧密文 + 一条警告」，不再让保存/连接整体失败（`db_conn_save`、`db_connect`、`prop_password_ready`、`.properties` 导入、SVN 保存五处）；删连接/换密文时回收钥匙串条目。\n- 连接阶段与语句阶段的超时拆开：驱动把 `io::ErrorKind::TimedOut` 也塞进 `CallTimeoutExceeded`（`vendor/oracledb/src/error.rs` 的 `From<io::Error>`），`db_rust::connect_err` 把连接期映射成 `unreachable`，`drv_err` 保留语句期的 `timeout`（会话确实还在）；`engine_error` 不再把 `timeout` 打成 `bridge`，前端新增 `timeout` 码，「数据库进程异常」只留给 JVM 桥。\n- 平台差异从散落的字符串收敛成三个常量/函数：`java_bridge::CLASSPATH_SEP`（Windows `;` / POSIX `:`，JVM 桥的 `-cp` 与 ECJ 的 `@argfile` 共用）、`nc_home::JAVA_BIN_NAME` 与按平台分表的 `JAVA_CANDIDATES`（补上 macOS 的 `<jdk>/Contents/Home/bin/java` 布局）。macOS 的端口占用改走系统自带的 `lsof -nP -iTCP:<port> -sTCP:LISTEN -t` + `ps -o comm=` + `kill`；`ps` 给的是完整路径，必须截成文件名，否则 `is_java_name` 会把真实的残留中间件判成「不是 java」。lsof / ps 的解析与调用拆成可在 Windows 测试构建里编译的 `query_lsof` / `query_ps_comm`，这样 mac 分支不再只能等 CI 编译才发现写错。\n- 新增工作区成员索引（`java_members`）：与类型索引同一次读盘顺带解析方法 / 字段 / 构造器 / 枚举常量（newar 上 7348 个文件 → 13.2 万条成员），`search_workspace_symbols` 毫秒级返回，`workspace/symbol` 从主路径退为「依赖 jar 兜底」。缓存版式 +1（`CachedFile` 增 `raw` / `module` / `members`）。\n- 索引构建不再跟查询抢磁盘：`workspace_types` 的 TTL 30s → 30min，源码改动由文件监听 `mark_dirty()` 触发校准；首次无索引时走 `shared_opt`（起后台构建、立即返回「正在建索引」），磁盘缓存可读时走 `load_cached_only`（只读 JSON 约 1s，全树 stat 交给后台）。顺带修掉 `spawn_prewarm_types` 把缓存在 `config_dir` 根写、查询却读 `config_dir/type-index` 导致预热白跑的问题。\n- 名字匹配去掉逐条 `to_lowercase()` 分配，改为字节级大小写无关比较，驼峰首字母在索引里预算：13.2 万条成员上查询耗时 209ms → 59ms（debug 构建），`type_match_score_with` 让 jar 目录与工作区索引共用同一份打分规则。\n- `#内容` 搜索新增流式通道 `search_stream`：生产者线程走目录、worker 线程并行读（队列 4096），命中到上限即停；`options.priority` 让调用方指定先扫哪些文件（最近打开 + 文件名命中，最多 50 个），每 16 条经 `search:batch` 事件推给前端，命令 `search_workspace_stream` 的返回值仍是完整结果。newar 上 `getBillNo` 首批 909ms / 完成 1255ms（此前 20 秒预算跑满也只是部分结果）。\n- 面板 `#内容` 改用 `searchWorkspaceStream`，增量结果直接铺进列表（按 `key` 去重），加载中即可回车打开当前条目；`peekFileIndex` 只读内存里的文件清单，不让搜索倒过来等一次全树扫描。\n- JS 体积预算按本地 `vite build` 实测上调到 5165KB raw / 1489KB gzip（最大块仍是 3172KB 的 Monaco 装配）：增量来自本批快速导航的流式搜索客户端与工作区符号接口（`search.ts` / `paletteSources.ts` / `typeSearch.ts` / `fileIndex.ts` 共约 280 行新代码），以及同一工作树里并行进行的数据库/工作台界面改动。\n- 快速导航的查询链路去掉三处「每次按键都重算」：① 文件清单 `search_list_files` 加进程内 60 秒 + 磁盘 24 小时缓存，过期走 stale-while-revalidate（先回旧表、后台单飞重扫），新增 `search_invalidate_files` 供文件树增删改后主动失效；② 工作区类型索引 TTL 5s→30s 且同样 SWR，打开工作区时用 `spawn_prewarm_types` 预热；③ `workspace/symbol` 超时 20s→4s、`documentSymbol` 15s→5s。面板换查询不再清空列表（加载中回车不执行），消掉「闪成空白 + 查询中…」的假死观感。\n- BMF 生成工作台同源构建对照增加约 24.34KB raw / 7.73KB gzip 的 JS，CSS 另增 11.92KB raw / 2.48KB gzip；预算仅按本批增加 25KB / 8KB，最大块保持 3171KB，全仓剩余超额见实施验收记录。\n- 重解析点检查增加「基准目录」版本（`has_reparse_component_under`）：路径在模块目录之内才逐层检查到模块目录为止，更上层交给系统；原 `has_reparse_component` 保留完整链语义供没有基准的场景使用。新增单测在类 Unix 平台真建符号链接验证「基准之上不算逃逸、基准之内必须拒绝」。\n- JS 体积预算按本地 `vite build` 实测上调到 5148KB raw / 1483KB gzip / 最大块 3172KB，增量来自上一批工作台、服务控制台与元数据工作台的界面。\n- 「NC 环境」页检查点的警示色原先写裸值 `#d97706`，改用 `--warning` token，通过设计 token 棘轮。\n- 数据库复制导出采用生产 Worker、统一格式协议和原生原子落盘；保留其它工作区源码与视觉的隔离构建对照增加 45.29 KB raw / 15.31 KB gzip，预算仅增加 46 KB raw / 16 KB gzip，最大块上限保持 3171 KB。\n- NC 控制台采用 256KB 字节分页、最多 4000 行 / 约 8MiB 文本缓存、动态测高虚拟列表与按可见性暂停轮询；完整导出按磁盘快照流式写入。服务模块的同源隔离构建增量约 36.32KB raw / 14.64KB gzip，预算仅增加 37KB / 15KB；全仓剩余超额与 Rust 门禁阻塞另列验收报告。\n- 元数据字段表与来源列表只渲染可见范围，500 节点模型按视区裁剪，原始 XML 按需读取；节点拖动按帧合并，详情缓存限制数量与原文件大小，事务草稿继续使用预览、SHA-256 核对与备份链路。\n- 元数据工作台三阶段同源对照累计增加 95.88 KB raw / 33.80 KB gzip 的 JS，CSS 另增 17.63 KB raw / 2.83 KB gzip；JS 预算仅按本批增量增加 96 KB raw / 34 KB gzip，最大块保持 3171 KB，详情见累计实施验收记录。\n- 生成链一次解析、一次建产物图，渲染与落盘分离；清单记录 BMF/配置/产物哈希，重复生成时未变化的文件直接跳过。\n- 性能门禁进入 CI（`benchmarks/bmf-gen-budget.json`）：release 下 20 个真实 BMF 生成中心 P95 约 16ms，100 实体×50 属性病态样本约 91ms，预算为 1s 反馈 / 10s 硬顶。\n- 规则校验行号定位改为一次建索引 + 二分查找，病态样本校验耗时从 2.9s 降到 10ms。\n- `-Duap.hotwebs` 默认改为 `nccloud,uapws,lfw,portal,fs`（Eclipse `*_Server.launch` 的取值），显式名单经 `hotwebs_names` 过滤掉不存在的目录并可在服务页调整。根因是 `hotwebs/ncchr` 的 spring-data-redis 2.1.6 调 Spring 5 的 `Assert.isTrue(boolean, Supplier)`，而 classpath 里 `spring-core-4.3.12` 排在 `5.1.6` 之前（与官方 bootstrap 同序）⇒ `NoSuchMethodError`、`Context [/ncchr] startup failed`。\n- 需要 NC home 的操作（JVM 桥启动、prop.xml 读取与口令解密）统一发 `need-nc-home` 结构化错误码（`db_cmds::need_nc_home`），前端 `KNOWN_CODES` 识别后按码给引导，不再靠字符串匹配错误文本；`ConnManualForm` 的红条解析原始错误而非友好化后的文案（修复一键切换按钮不出现的 bug，有测试守）。`db_conn_import_props` 默认引擎改 rust，`migrate_legacy` 空串 → JVM 桥的老语义不动（Rust 单测守）。新增 `ConnManualFormHome.test.tsx` / `ConnImportPanes.test.tsx` 共 9 个用例。\n- 门禁清单收敛为单一真源 `desktop/scripts/lib/gate-plan.mjs`：每项声明 id、命令、工作目录、scope 与「为什么有这一项」。`pre-push` 缩成一句 `exec node scripts/gate.mjs`，CI 三个 job 的每一步改成 `node scripts/gate.mjs --only <id>`，不再各自抄一份命令。新增 `--verify-ci`：断言每个 job 的 id 序列等于清单里该 scope 的序列，少了、多了、顺序漂了、或又在工作流里手写命令都会立刻红（本地 `npm test` 的 `pretest` 也跑这条断言）。`postinstall` / `predev` 幂等执行 `git config core.hooksPath .githooks`，克隆完装依赖即生效；钩子未启用时 gate 会打印提醒。\n- 补上 `cargo fmt --check`：它此前在 CI 里根本不存在，唯一跑它的是那个从未安装过的钩子，于是 36 个源文件长期不符合 rustfmt 格式而无人知晓（本轮一次性格式化，纯格式变化）。顺带补一条 Rust 测试临时目录棘轮（`check-rust-tempdir.mjs`，基线模块内 87 处 / integration 12 处）：测试里裸用 `std::env::temp_dir()` 只许减不许增，新增改用 `crate::test_support::tmp(tag)`——它返回 canonicalize 过的路径，能消掉 macOS `/var` → `/private/var` 与 Windows CI `RUNNER~1` 短名造成的「本地绿、CI 红」。\n- `node scripts/gate.mjs` 提供五个入口：全量（本地 pre-push）、`--scope frontend|win|mac`、`--only <id>`、`--list`、`--verify-ci`。失败即停并打印单项复现命令，不让人等完 `cargo test` 才知道是 eslint 挂了。`knip.json` 的 entry 补上新脚本（它只被清单的 argv 字符串引用，knip 追不到）。\n- 新增 pre-commit 钩子，只跑 30 秒内的三项（设计 token / `cargo fmt --check` / `tsc`），清单与 pre-push、CI 同源（`gate-plan.mjs` 的 `PRECOMMIT`）：按暂存文件后缀挑，只改文档时不跑并打印跳过了哪几项。`tsc` 加增量缓存（`node_modules/.cache/tsc.tsbuildinfo`，冷跑 23s → 热跑 8s）。eslint / vitest / clippy / cargo test 仍只在 pre-push，避免日常提交被拖到十分钟。"
+      }
+    ]
+  },
+  {
     "version": "0.1.2",
     "date": "2026-11-05",
     "items": [
