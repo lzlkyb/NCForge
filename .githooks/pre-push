@@ -1,6 +1,17 @@
 #!/bin/sh
 # ──────────────────────────────────────────────────
-#  pre-push — push 前跑门禁
+#  pre-push — push 前跑门禁（**默认关闭，按需开启**）
+#
+#  2026-11-08 起默认不跑：整套门禁 15 项要 9~12 分钟（vitest 一项就 9 分钟），
+#  而每次 push 都重跑一遍没有增量，把「推一下」变成「等一刻钟」。
+#  改为按需开启：
+#
+#      NCFORGE_PUSH_GATE=1 git push origin main
+#
+#  仍然保留的兜底：
+#   - pre-commit：tokens / fmt / tsc（每次提交都跑，秒级）
+#   - CI（.github/workflows/build.yml）：完整的 gate.mjs，push 后必跑
+#  所以「本地不跑 = 没人管」不成立；只是把重活从「推送当场」挪到了「CI」。
 #
 #  清单的唯一真源：desktop/scripts/lib/gate-plan.mjs（增删门禁只改那里）。
 #  本文件故意只做一件事：调用它。
@@ -11,9 +22,9 @@
 #
 #  安装：git config core.hooksPath .githooks
 #        （npm install / npm run dev 会自动装，见 scripts/ensure-hooks.mjs）
-#  跳过：git push --no-verify
+#  完全跳过：git push --no-verify
 #
-#  ⚠️ 本钩子会跑 cargo clippy + cargo test，push 前别另外手动起 cargo，
+#  ⚠️ 开启后本钩子会跑 cargo clippy + cargo test，push 前别另外手动起 cargo，
 #      否则会争抢 target/ 构建锁导致钩子失败。
 #  ⚠️ cargo-machete 需要一次性安装：cargo install cargo-machete --locked。
 # ──────────────────────────────────────────────────
@@ -22,5 +33,10 @@ set -e
 
 # 钩子由 git 从仓库根调用，但 cwd 不保证是仓库根。
 cd "$(dirname "$0")/.."
+
+if [ "${NCFORGE_PUSH_GATE:-0}" != "1" ]; then
+  echo "pre-push：跳过门禁（默认关闭）。要跑完整门禁：NCFORGE_PUSH_GATE=1 git push，或 cd desktop && node scripts/gate.mjs"
+  exit 0
+fi
 
 exec node desktop/scripts/gate.mjs
