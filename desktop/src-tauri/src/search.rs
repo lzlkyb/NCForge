@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use regex::RegexBuilder;
 use serde::{Deserialize, Serialize};
 
+use crate::content_pack;
 use crate::workspace;
 
 /// 递归时不进入的目录。
@@ -188,7 +189,7 @@ impl Drop for SearchRequest<'_> {
 }
 
 /// 搜索选项。前端传 camelCase（与 `serde(rename_all)` 对齐）。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchOptions {
     /// 搜索词。正则模式下按原样使用（不 trim：`^\s+$` 这类模式的前后空格有意义）。
@@ -225,6 +226,23 @@ pub struct SearchOptions {
     /// 它只影响扫描顺序，不影响范围与结果集。
     #[serde(default)]
     pub priority: Vec<String>,
+    /// 未保存的编辑器内容（overlay）。
+    ///
+    /// 搜索语料 ≠ 磁盘内容：用户正在编辑、还没保存的文件，磁盘上还是旧的。前端把
+    /// dirty 的 Monaco model 传上来，这里**先用 overlay 扫、再从文件清单里跳过这些
+    /// 路径**，否则「搜自己刚写的那行」搜不到——这比慢更让人怀疑工具坏了。
+    ///
+    /// 只接受工作区内路径；单文件与总量上限由前端控制（大文件不进 overlay）。
+    #[serde(default)]
+    pub overlay: Vec<OverlayDoc>,
+}
+
+/// 一份未保存的文档内容。`path` 是工作区相对路径（`/` 分隔）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverlayDoc {
+    pub path: String,
+    pub text: String,
 }
 
 /// 一条命中里的高亮区间。
@@ -403,7 +421,14 @@ enum Matcher {
         case_sensitive: bool,
         whole_word: bool,
     },
-    Re(regex::Regex),
+    /// `re` 逐行匹配（高亮与替换都用它）；`file` 是同一模式加 `(?m)` 的整文件版本，
+    /// 只用来做「这个文件一个命中都没有」的先行否决（见 `file_may_match`）。
+    /// `lits` 是抽出的一组「至少出现一个」的必需字面量，能用 memmem 再挡一层。
+    Re {
+        re: regex::Regex,
+        file: Option<regex::Regex>,
+        lits: Option<Vec<Vec<u8>>>,
+    },
 }
 
 impl Matcher {
@@ -420,7 +445,28 @@ impl Matcher {
                     "该正则可以匹配空串（例如 a*、x?），会让每一行都命中，请加上限定条件".into(),
                 );
             }
-            return Ok(Matcher::Re(re));
+            // 整文件预判必须与「逐行 find」等价：逐行时 `^` / `$` 落在行边界上，
+            // 所以预判版要加 `(?m)` 才能把行边界算进去（否则 `^foo` 只在文件开头成立，
+            // 中间行的命中会被误否决——那是漏结果，不是慢）。
+            // `\A` / `\z` / `\Z` 锚的是整段文本，加 `(?m)` 也不等价；用户自己写
+            // `(?-m)` 关掉多行同样会让锚点回到文件级。这些模式一律**放弃预判**，
+            // 老老实实逐行扫——漏结果是不能用「只是慢一点」来换的。
+            let anchored = ["\\A", "\\z", "\\Z", "(?-"]
+                .iter()
+                .any(|a| opts.text.contains(a));
+            let file = if anchored {
+                None
+            } else {
+                RegexBuilder::new(&format!("(?m){}", opts.text))
+                    .case_insensitive(!opts.case_sensitive)
+                    .build()
+                    .ok()
+            };
+            return Ok(Matcher::Re {
+                re,
+                file,
+                lits: required_literals(&opts.text, opts.case_sensitive),
+            });
         }
         Ok(Matcher::Plain {
             needle: opts.text.trim().to_string(),
@@ -448,7 +494,7 @@ impl Matcher {
                 }
                 plain_spans(line, needle, *case_sensitive, *whole_word, cap)
             }
-            Matcher::Re(re) => re
+            Matcher::Re { re, .. } => re
                 .find_iter(line)
                 // 零宽命中（`\b`、`(?=x)` 之类）没有可高亮的字符，丢掉，
                 // 免得渲染成一堆看不见的空 `<mark>` 还把 cap 占满。
@@ -457,6 +503,128 @@ impl Matcher {
                 .map(|m| (m.start(), m.end()))
                 .collect(),
         }
+    }
+}
+
+/// 从正则里抽一组「匹配时至少出现一个」的字面量，供整文件 memmem 预筛。
+///
+/// HIR 必须用**与 `RegexBuilder` 相同的大小写默认标志**解析：忽略大小写走的是
+/// Unicode 折叠（`ſ` 能匹配 `s`、`K` 能匹配 `k`），解析出的字面量集合会包含这些
+/// 变体；一旦集合太大变成无限集就返回 `None`，绝不会拿 ASCII 字节去赌。
+/// 前瞻/后顾与绝对锚点也一律放弃——抽出来的字节可能不是必要条件。
+/// 任何拿不准的情况返回 `None`（不预筛），慢一点可以，漏结果不行。
+fn required_literals(pattern: &str, case_sensitive: bool) -> Option<Vec<Vec<u8>>> {
+    let unsafe_tokens = ["(?=", "(?!", "(?<=", "(?<!", "\\A", "\\z", "\\Z", "(?-"];
+    if unsafe_tokens.iter().any(|a| pattern.contains(a)) {
+        return None;
+    }
+    let mut pb = regex_syntax::ParserBuilder::new();
+    if !case_sensitive {
+        pb.case_insensitive(true);
+    }
+    let hir = pb.build().parse(pattern).ok()?;
+    let seq = regex_syntax::hir::literal::Extractor::new().extract(&hir);
+    // `literals()` 返回 None = 无限集合，等于没有任何可用信息
+    let lits = seq.literals()?;
+    if lits.is_empty() || lits.len() > 8 {
+        return None;
+    }
+    let out: Vec<Vec<u8>> = lits.iter().map(|l| l.as_bytes().to_vec()).collect();
+    // 太短的字面量候选密度高，省不了多少；太长的多半是被截断的片段，也别赌
+    if out.iter().any(|b| b.len() < 2 || b.len() > 64) {
+        return None;
+    }
+    Some(out)
+}
+
+/// 文件级快速否决（必要条件）：判 false 就保证这个文件里一行都不会命中。
+///
+/// 三档都等价于逐行扫的结果，因为它们只是「子串/模式必须出现在这个文件里」这层
+/// 必要条件——**整词与忽略大小写同样适用**，那是早期版本的漏做，不是设计取舍：
+/// 默认档（`caseSensitive: false`）此前没有预筛，只能逐字节比对，newar 上全量
+/// 74 MB 要 337 ms，而区分大小写只要 13 ms。
+enum Prefilter<'a> {
+    /// 区分大小写：整文件查这段字节。
+    Exact(&'a str),
+    /// 忽略大小写：只折 ASCII（与 `plain_spans` 的 `eq_ignore_ascii_case` 同一口径，
+    /// 多字节 UTF-8 字节不动）。首字节的两种大小写变体做 SIMD 候选定位，再逐位验证。
+    Fold { needle: &'a str, first: [u8; 2] },
+}
+
+impl<'a> Prefilter<'a> {
+    fn of(matcher: &'a Matcher) -> Option<Self> {
+        match matcher {
+            Matcher::Plain {
+                needle,
+                case_sensitive: true,
+                ..
+            } => Some(Prefilter::Exact(needle.as_str())),
+            Matcher::Plain {
+                needle,
+                case_sensitive: false,
+                ..
+            } => {
+                let b = *needle.as_bytes().first()?;
+                Some(Prefilter::Fold {
+                    needle: needle.as_str(),
+                    first: [b.to_ascii_lowercase(), b.to_ascii_uppercase()],
+                })
+            }
+            Matcher::Re { .. } => None,
+        }
+    }
+
+    fn maybe_match(&self, hay: &[u8]) -> bool {
+        match self {
+            Prefilter::Exact(n) => memchr::memmem::find(hay, n.as_bytes()).is_some(),
+            Prefilter::Fold { needle, first } => {
+                let pb = needle.as_bytes();
+                let n = pb.len();
+                if n == 0 || hay.len() < n {
+                    return false;
+                }
+                let mut start = 0usize;
+                while start + n <= hay.len() {
+                    let Some(off) = memchr::memchr2(first[0], first[1], &hay[start..]) else {
+                        return false;
+                    };
+                    let pos = start + off;
+                    if pos + n > hay.len() {
+                        return false;
+                    }
+                    if hay[pos..pos + n].eq_ignore_ascii_case(pb) {
+                        return true;
+                    }
+                    start = pos + 1;
+                }
+                false
+            }
+        }
+    }
+}
+
+/// 这个文件里还有可能有命中吗？没有就整块跳过，省掉逐行切分与匹配器调用。
+fn file_may_match(matcher: &Matcher, prefilter: Option<&Prefilter<'_>>, text: &str) -> bool {
+    match matcher {
+        // 正则走整文件 `(?m)` 预判：一次 DFG/SIMD 扫描，比按行调 500 次 `find_iter` 便宜一个量级。
+        Matcher::Re { file, lits, .. } => {
+            if let Some(lits) = lits {
+                if !lits
+                    .iter()
+                    .any(|l| memchr::memmem::find(text.as_bytes(), l).is_some())
+                {
+                    return false;
+                }
+            }
+            match file {
+                Some(f) => f.is_match(text),
+                None => true,
+            }
+        }
+        _ => match prefilter {
+            Some(p) => p.maybe_match(text.as_bytes()),
+            None => true,
+        },
     }
 }
 
@@ -614,6 +782,19 @@ pub fn search_cancellable(
         n => n.min(HARD_MAX_RESULTS),
     };
 
+    // ── 内容包就绪就直接走包：免掉「走树 + 8 千次 open」──
+    // 包未就绪 / 属于别的工作区时回落磁盘路径（完整扫描，只是慢）；
+    // `current_for` 顺带把「磁盘上有包但还没加载」的情况加载起来。
+    if let Some(pack) = content_pack::current_for(root) {
+        return Ok(search_pack(
+            &pack, opts, &matcher, &filter, &scope, limit, started, budget_ms, cancel, None,
+        ));
+    }
+
+    // 未保存内容：磁盘路径也要先用 overlay 覆盖，否则包还没建好的那几分钟里，
+    // 「搜自己刚写的那行」会读到磁盘上的旧内容。
+    let overlay: HashMap<String, &str> = overlay_docs(opts);
+
     // ── 第一段：收集候选（目录枚举也是 I/O，但只做一遍）──
     let (candidates, walk_truncated) =
         collect_candidates(root, &scope.abs, &filter, started, budget_ms, cancel);
@@ -665,7 +846,7 @@ pub fn search_cancellable(
                     }
 
                     let before = local.len();
-                    let was_text = scan_file(path, rel, &matcher, room, &mut local);
+                    let was_text = scan_candidate(path, rel, &overlay, &matcher, room, &mut local);
                     if was_text {
                         scanned.fetch_add(1, Ordering::Relaxed);
                     }
@@ -732,6 +913,9 @@ const STREAM_BATCH: usize = 16;
 /// 候选队列上限：生产者走得比 worker 快时压住内存，满了就等一等（不丢候选）。
 const FEED_CAP: usize = 4096;
 
+/// 流式结果回调。包路径只在最后推一次，磁盘路径按批推。
+type HitSink<'a> = &'a (dyn Fn(&[SearchHit]) + Sync);
+
 /// 生产者 / 消费者之间的候选队列。
 struct Feed {
     state: Mutex<FeedState>,
@@ -797,6 +981,25 @@ pub fn search_stream(
         n => n.min(HARD_MAX_RESULTS),
     };
 
+    // 包就绪时不必「边扫边推」：整次查询只有几十毫秒，一次性把结果推过去即可。
+    // 仍然调 sink 是给前端保持「同一套事件流」的心智模型（最终结果仍以返回值为准）。
+    if let Some(pack) = content_pack::current_for(root) {
+        return Ok(search_pack(
+            &pack,
+            opts,
+            &matcher,
+            &filter,
+            &scope,
+            limit,
+            started,
+            budget_ms,
+            cancel,
+            Some(sink),
+        ));
+    }
+
+    let overlay: HashMap<String, &str> = overlay_docs(opts);
+
     let scanned = AtomicUsize::new(0);
     let collected = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
@@ -824,7 +1027,7 @@ pub fn search_stream(
             break;
         }
         let before = hits.len();
-        if scan_file(&path, &rel, &matcher, room, &mut hits) {
+        if scan_candidate(&path, &rel, &overlay, &matcher, room, &mut hits) {
             scanned.fetch_add(1, Ordering::Relaxed);
         }
         let added = hits.len() - before;
@@ -891,7 +1094,8 @@ pub fn search_stream(
                         break;
                     }
                     let before = local.len();
-                    let was_text = scan_file(&path, &rel, &matcher, room, &mut local);
+                    let was_text =
+                        scan_candidate(&path, &rel, &overlay, &matcher, room, &mut local);
                     if was_text {
                         scanned.fetch_add(1, Ordering::Relaxed);
                     }
@@ -1152,6 +1356,273 @@ fn collect_candidates(
     (out, false)
 }
 
+/// 建内容包时要收录的文件（与内容搜索同一套跳过规则）。
+pub struct PackSource {
+    pub path: PathBuf,
+    /// 工作区相对、`/` 分隔。
+    pub rel: String,
+    pub size: u64,
+    /// 毫秒时间戳，增量建包的判据。
+    pub mtime: u64,
+}
+
+/// 走一遍工作区，收集「会被内容搜索读到」的文件及其 size/mtime。
+///
+/// 跳过规则必须与 [`collect_candidates`] 完全一致（目录、二进制扩展名、4 MB 上限），
+/// 否则包里会多出搜索根本不会读的文件，或者少掉本该能搜到的文件。
+/// 这里刻意**不**套用范围与掩码：包是整工作区的快照，范围在查询时按相对路径过滤，
+/// 否则换个组件搜就得重新建包。
+pub fn pack_sources(root: &Path, cancel: &AtomicBool) -> Vec<PackSource> {
+    let mut out: Vec<PackSource> = Vec::new();
+    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let Ok(ft) = entry.file_type() else { continue };
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if ft.is_dir() {
+                if !SKIP_DIRS.contains(&name.as_str()) {
+                    stack.push(entry.path());
+                }
+                continue;
+            }
+            if !ft.is_file() || has_binary_ext(&name) {
+                continue;
+            }
+            let Ok(md) = entry.metadata() else { continue };
+            if md.len() > MAX_SEARCH_BYTES {
+                continue;
+            }
+            let path = entry.path();
+            out.push(PackSource {
+                rel: relative_slash(root, &path),
+                size: md.len(),
+                mtime: mtime_ms(&md),
+                path,
+            });
+        }
+    }
+    // 排序：块划分与增量复用都按这个顺序对齐
+    out.sort_by(|a, b| a.rel.cmp(&b.rel));
+    out
+}
+
+fn mtime_ms(md: &std::fs::Metadata) -> u64 {
+    md.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// 文件是否落在本次生效范围内（范围是工作区相对的目录）。
+fn in_scope(scope: &Scope, rel: &str) -> bool {
+    if scope.rel.is_empty() {
+        return true;
+    }
+    scope.rel.iter().any(|d| {
+        // 逐字节前缀比较，但要先保证切在字符边界上（`get` 会挡住非边界切片）
+        rel.get(..d.len())
+            .map(|p| p.eq_ignore_ascii_case(d))
+            .unwrap_or(false)
+            && rel.as_bytes().get(d.len()) == Some(&b'/')
+    })
+}
+
+fn file_name(rel: &str) -> &str {
+    rel.rsplit('/').next().unwrap_or(rel)
+}
+
+/// 用内容包搜。首次与再次搜索都走这条路，磁盘路径只在包未就绪时兜底。
+///
+/// 与磁盘路径的差别只有「候选与正文从哪来」：范围、掩码、条数上限、排序、切行与
+/// 高亮口径全部复用同一份 [`scan_text`]，所以两条路的结果逐条相同。
+///
+/// 并行粒度是**块**（1 MB 未压缩）：每块解压一次，块内按 `files[]` 切片，命中才切行。
+/// `priority` 在包路径上没有意义（没有逐文件 I/O 的顺序问题），忽略。
+#[allow(clippy::too_many_arguments)]
+fn search_pack(
+    pack: &content_pack::Pack,
+    opts: &SearchOptions,
+    matcher: &Matcher,
+    filter: &FileFilter,
+    scope: &Scope,
+    limit: usize,
+    started: Instant,
+    budget_ms: u128,
+    cancel: &AtomicBool,
+    sink: Option<HitSink<'_>>,
+) -> SearchOutcome {
+    let mut hits: Vec<SearchHit> = Vec::new();
+    let scanned = AtomicUsize::new(0);
+    let collected = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    let chunk_failed = AtomicBool::new(false);
+
+    // ── overlay：未保存内容先扫，并从包里跳过这些路径（否则同一行会出现两次，且一次是旧的）──
+    let overlay: HashMap<String, &str> = opts
+        .overlay
+        .iter()
+        .filter_map(|d| normalize_rel_dir(&d.path).map(|p| (p, d.text.as_str())))
+        .collect();
+    for (rel, text) in &overlay {
+        if stop.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        if !in_scope(scope, rel) || !filter.accepts(rel, file_name(rel)) {
+            continue;
+        }
+        let room = limit.saturating_sub(collected.load(Ordering::Relaxed));
+        if room == 0 {
+            break;
+        }
+        let before = hits.len();
+        scan_text(rel, text, matcher, room, &mut hits);
+        scanned.fetch_add(1, Ordering::Relaxed);
+        let added = hits.len() - before;
+        if added > 0 && collected.fetch_add(added, Ordering::Relaxed) + added >= limit {
+            stop.store(true, Ordering::Relaxed);
+        }
+    }
+
+    // ── 分块候选：只保留通过范围/掩码、且不在 overlay 里的文件 ──
+    let table = pack.table();
+    let mut per_chunk: Vec<Vec<&content_pack::FileMeta>> = vec![Vec::new(); table.chunks.len()];
+    for f in &table.files {
+        if overlay.contains_key(&f.path) || !in_scope(scope, &f.path) {
+            continue;
+        }
+        if !filter.accepts(&f.path, file_name(&f.path)) {
+            continue;
+        }
+        if let Some(slot) = per_chunk.get_mut(f.chunk as usize) {
+            slot.push(f);
+        }
+    }
+    let work: Vec<(usize, &Vec<&content_pack::FileMeta>)> = per_chunk
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| !v.is_empty())
+        .collect();
+
+    let threads = work.len().clamp(1, 8);
+    let cursor = AtomicUsize::new(0);
+    let prefilter = Prefilter::of(matcher);
+
+    let mut panicked = false;
+    let mut batches: Vec<Vec<SearchHit>> = std::thread::scope(|sc| {
+        let mut handles = Vec::with_capacity(threads);
+        for _ in 0..threads {
+            handles.push(sc.spawn(|| {
+                let mut local: Vec<SearchHit> = Vec::new();
+                loop {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    if cancel.load(Ordering::Relaxed) {
+                        stop.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    if started.elapsed().as_millis() > budget_ms {
+                        stop.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    let idx = cursor.fetch_add(1, Ordering::Relaxed);
+                    let Some((chunk_idx, files)) = work.get(idx) else {
+                        break;
+                    };
+                    let Some(bytes) = pack.chunk(*chunk_idx) else {
+                        // 解压失败：不能当成「这些文件没有命中」，否则会静默漏结果
+                        chunk_failed.store(true, Ordering::Relaxed);
+                        continue;
+                    };
+                    let Ok(text) = std::str::from_utf8(bytes) else {
+                        chunk_failed.store(true, Ordering::Relaxed);
+                        continue;
+                    };
+                    for f in files.iter() {
+                        if stop.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let room = limit.saturating_sub(collected.load(Ordering::Relaxed));
+                        if room == 0 {
+                            stop.store(true, Ordering::Relaxed);
+                            break;
+                        }
+                        let start = f.off as usize;
+                        let Some(slice) = text.get(start..start + f.len as usize) else {
+                            continue;
+                        };
+                        scanned.fetch_add(1, Ordering::Relaxed);
+                        if !file_may_match(matcher, prefilter.as_ref(), slice) {
+                            continue;
+                        }
+                        let before = local.len();
+                        scan_text(&f.path, slice, matcher, room, &mut local);
+                        let added = local.len() - before;
+                        if added > 0
+                            && collected.fetch_add(added, Ordering::Relaxed) + added >= limit
+                        {
+                            stop.store(true, Ordering::Relaxed);
+                        }
+                    }
+                }
+                local
+            }));
+        }
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join().unwrap_or_else(|_| {
+                    panicked = true;
+                    Vec::new()
+                })
+            })
+            .collect()
+    });
+
+    for batch in batches.iter_mut() {
+        hits.append(batch);
+    }
+    hits.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
+    let capped = hits.len() > limit;
+    hits.truncate(limit);
+    let files_matched = {
+        let mut seen: HashSet<&str> = HashSet::new();
+        for h in &hits {
+            seen.insert(h.path.as_str());
+        }
+        seen.len()
+    };
+
+    if let Some(sink) = sink {
+        if !hits.is_empty() {
+            sink(&hits);
+        }
+    }
+
+    SearchOutcome {
+        hits,
+        files_scanned: scanned.load(Ordering::Relaxed),
+        files_matched,
+        truncated: capped
+            || stop.load(Ordering::Relaxed)
+            || panicked
+            || chunk_failed.load(Ordering::Relaxed)
+            || cancel.load(Ordering::Relaxed),
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        scope_dirs: scope.rel.clone(),
+        missing_dirs: scope.missing.clone(),
+        scope_fallback: scope.fallback,
+        cancelled: cancel.load(Ordering::Relaxed),
+    }
+}
+
 /// 「转到文件」用的文件名清单上限。newar 全量约一万六，留足余量；超了说明选错了目录。
 const LIST_FILES_CAP: usize = 200_000;
 
@@ -1369,10 +1840,48 @@ fn has_binary_ext(name: &str) -> bool {
 ///
 /// 返回是否把它当作文本读过——二进制探测和读取失败都不算「扫过」，
 /// 这样界面上「扫描 N 个文件」指的是真正比过的文件数。
+/// 扫一个候选：未保存内容优先，其余读磁盘。
+///
+/// 返回是否真的按文本处理过（二进制/读失败算「没扫」，与 `scan_file` 同口径）。
+fn scan_candidate(
+    path: &Path,
+    rel: &str,
+    overlay: &HashMap<String, &str>,
+    matcher: &Matcher,
+    room: usize,
+    out: &mut Vec<SearchHit>,
+) -> bool {
+    match overlay.get(rel) {
+        Some(text) => {
+            scan_text(rel, text, matcher, room, out);
+            true
+        }
+        // 预筛是每次搜索同一份（只是借 matcher 里的字面量），这里就地建一次即可，
+        // 不用把参数穿过 Walk / 优先文件那两层。
+        None => scan_file(
+            path,
+            rel,
+            matcher,
+            Prefilter::of(matcher).as_ref(),
+            room,
+            out,
+        ),
+    }
+}
+
+/// 把前端传来的未保存文档归一成「工作区相对路径 → 文本」。
+fn overlay_docs(opts: &SearchOptions) -> HashMap<String, &str> {
+    opts.overlay
+        .iter()
+        .filter_map(|d| normalize_rel_dir(&d.path).map(|p| (p, d.text.as_str())))
+        .collect()
+}
+
 fn scan_file(
     path: &Path,
     rel: &str,
     matcher: &Matcher,
+    prefilter: Option<&Prefilter<'_>>,
     room: usize,
     out: &mut Vec<SearchHit>,
 ) -> bool {
@@ -1384,6 +1893,18 @@ fn scan_file(
         return false;
     }
     let text = workspace::decode_lossy(&bytes);
+    if !file_may_match(matcher, prefilter, &text) {
+        return true;
+    }
+    scan_text(rel, &text, matcher, room, out);
+    true
+}
+
+/// 在一份已经解码好的文本里找出命中行。
+///
+/// 磁盘路径（`scan_file`）与内容包路径共用这一份：切行口径、`MAX_LINE_CHARS` 截断、
+/// UTF-16 区间换算必须完全一致，否则「同样的关键词在两条路上结果不同」。
+fn scan_text(rel: &str, text: &str, matcher: &Matcher, room: usize, out: &mut Vec<SearchHit>) {
     let before = out.len();
     for (idx, line_text) in text.split('\n').enumerate() {
         if out.len() - before >= room {
@@ -1401,7 +1922,6 @@ fn scan_file(
             ranges,
         });
     }
-    true
 }
 
 /// 纯文本模式的所有命中位置（字节偏移）。
@@ -1505,6 +2025,7 @@ mod tests {
             dirs: Vec::new(),
             max_results: 0,
             priority: Vec::new(),
+            overlay: Vec::new(),
         }
     }
 
@@ -1513,6 +2034,117 @@ mod tests {
         SearchOptions {
             dirs: dirs.iter().map(|d| d.to_string()).collect(),
             ..opts(text)
+        }
+    }
+
+    /// 文件级预筛是**必要条件**：逐行能命中的，整文件预筛绝不能判否。
+    /// 尤其要守住「默认忽略大小写」与「整词」两档——以前只有区分大小写有预筛，
+    /// 默认档全量扫 74MB 要 337ms。
+    #[test]
+    fn 预筛不漏命中() {
+        let hay = "// 凭证查询\nclass BillQueryServiceImpl {\n  String VOUCHER = \"凭证\";\n  int x$y = 1;\n}\n";
+        let cases = [
+            ("凭证", false, false),
+            ("凭证", true, false),
+            ("billquery", false, false),
+            ("billquery", true, false),
+            ("BILLQUERY", false, true),
+            ("voucher", false, false),
+            ("x$y", true, false),
+        ];
+        for (needle, cs, ww) in cases {
+            let o = SearchOptions {
+                case_sensitive: cs,
+                whole_word: ww,
+                ..opts(needle)
+            };
+            let m = Matcher::build(&o).unwrap();
+            let pf = Prefilter::of(&m).expect("纯文本必须有预筛");
+            let line_hit = hay.split('\n').any(|l| !m.spans(l, 8).is_empty());
+            if line_hit {
+                assert!(
+                    pf.maybe_match(hay.as_bytes()),
+                    "{needle} (cs={cs}, ww={ww}) 逐行有命中却被预筛否决"
+                );
+            }
+        }
+        // 预筛真的能干活：无关词必须被挡在逐行扫描之前
+        let m = Matcher::build(&opts("zzzznotexist")).unwrap();
+        assert!(!Prefilter::of(&m).unwrap().maybe_match(hay.as_bytes()));
+        let m = Matcher::build(&opts("BILLQUERY")).unwrap();
+        assert!(Prefilter::of(&m).unwrap().maybe_match(hay.as_bytes()));
+    }
+
+    /// 正则预判用 `(?m)` 版本：逐行 `^` / `$` 是**行边界**，直接拿原正则扫整文件
+    /// 会把中间行的命中误判成「没命中」。`\A` 这类绝对锚点则必须放弃预判。
+    #[test]
+    fn 正则预判不漏行首锚点() {
+        let hay = "// note\nclass Bill {}\n";
+        for pat in [
+            r"^class",
+            r"^Bill",
+            r"Bill$",
+            r"\bbill\b",
+            r"Bill\{\}",
+            r"\Aclass",
+        ] {
+            let o = SearchOptions {
+                regex: true,
+                ..opts(pat)
+            };
+            let m = Matcher::build(&o).unwrap();
+            let line_hit = hay.split('\n').any(|l| !m.spans(l, 8).is_empty());
+            if line_hit {
+                assert!(
+                    file_may_match(&m, None, hay),
+                    "{pat} 逐行有命中却被预判否决"
+                );
+            }
+        }
+        // 无关模式仍然能被整文件预判挡掉
+        let o = SearchOptions {
+            regex: true,
+            ..opts(r"zzzznotexist")
+        };
+        let m = Matcher::build(&o).unwrap();
+        assert!(!file_may_match(&m, None, hay));
+    }
+
+    /// 字面量预筛只放行区分大小写的模式；放行了的也必须是**必要条件**——
+    /// 逐行能命中的整文件不许被判否，尤其 `^` / 前后缀截断 / 选择分支。
+    #[test]
+    fn 正则字面量预筛不漏命中() {
+        let hay = "// note\nclass BillQueryServiceImpl {}\n  String VOUCHER = \"凭证\";\n";
+        let cases = [
+            r"BillQuery\w+Service",
+            r"凭证|发票",
+            r"VOUCHER|nope",
+            r"class\s+\w+",
+            r"^class",
+            r"ServiceImpl$",
+            r"\bBillQuery",
+            r"(?i)billquery", // 内联忽略大小写：字面量集合会膨胀，应自动放弃预筛
+        ];
+        for cs in [true, false] {
+            for pat in cases {
+                let o = SearchOptions {
+                    regex: true,
+                    case_sensitive: cs,
+                    ..opts(pat)
+                };
+                let m = Matcher::build(&o).unwrap();
+                let line_hit = hay.split('\n').any(|l| !m.spans(l, 8).is_empty());
+                if line_hit {
+                    assert!(
+                        file_may_match(&m, None, hay),
+                        "{pat} (cs={cs}) 逐行有命中却被字面量预筛否决"
+                    );
+                }
+                assert!(
+                    !file_may_match(&m, None, "完全无关的一行\n"),
+                    "{pat} (cs={cs}) 没能挡住无关文件"
+                );
+            }
         }
     }
 
@@ -2297,7 +2929,7 @@ impl Matcher {
                 out.push_str(&line[last..]);
                 Some((out, n))
             }
-            Matcher::Re(re) => {
+            Matcher::Re { re, .. } => {
                 if !re.is_match(line) {
                     return None;
                 }
@@ -2313,7 +2945,7 @@ impl Matcher {
     fn escape_replacement(&self, rep: &str) -> String {
         match self {
             Matcher::Plain { .. } => rep.to_string(),
-            Matcher::Re(re) => escape_replacement(re, rep),
+            Matcher::Re { re, .. } => escape_replacement(re, rep),
         }
     }
 }
@@ -2650,6 +3282,7 @@ mod replace_tests {
             dirs: Vec::new(),
             max_results: 0,
             priority: Vec::new(),
+            overlay: Vec::new(),
         }
     }
 
@@ -2891,6 +3524,7 @@ mod live_tests {
             dirs: dirs.iter().map(|d| d.to_string()).collect(),
             max_results: 0,
             priority: Vec::new(),
+            overlay: Vec::new(),
         }
     }
 
@@ -2999,5 +3633,120 @@ mod live_tests {
         );
         assert!(fallen.scope_dirs.is_empty(), "回落时生效范围就是整个工作区");
         assert_eq!(lines(&fallen), lines(&full), "回落不能丢结果");
+    }
+}
+
+/// 内容包路径与磁盘路径必须给出**逐条相同**的结果。
+///
+/// 这是整个改造的正确性底线：两条路共用 `scan_text`，但候选来源、编码（包内已归一成
+/// UTF-8）、范围过滤方式都不同，任何一处口径漂移都会变成「同一个词搜两次结果不一样」。
+#[cfg(test)]
+mod pack_parity {
+    use super::*;
+    use std::fs;
+
+    fn opt(text: &str) -> SearchOptions {
+        SearchOptions {
+            text: text.to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// 一条命中的可比签名：路径 / 行号 / 行文本 / 高亮区间。
+    type HitSig = (String, u32, String, Vec<(u32, u32)>);
+
+    fn sig(o: &SearchOutcome) -> Vec<HitSig> {
+        o.hits
+            .iter()
+            .map(|h| {
+                (
+                    h.path.clone(),
+                    h.line,
+                    h.text.clone(),
+                    h.ranges.iter().map(|r| (r.start, r.end)).collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn pack_and_disk_agree() {
+        let root = crate::test_support::tmp("pack-parity");
+        fs::create_dir_all(root.join("bill")).unwrap();
+        fs::write(
+            root.join("bill/A.java"),
+            "class A {\n  // 凭证查询\n  String s = \"凭证\";\n}\n".as_bytes(),
+        )
+        .unwrap();
+        fs::write(
+            root.join("bill/B.java"),
+            "class B { int Voucher = 1; }\n".as_bytes(),
+        )
+        .unwrap();
+        let (gbk, _, _) = encoding_rs::GBK.encode("凭证 发票\nvoucher");
+        fs::write(root.join("bill/C.xml"), &gbk).unwrap();
+        fs::write(root.join("doc.txt"), "凭证\nvoucher BAR\n").unwrap();
+
+        let cases = [
+            opt("凭证"),
+            opt("voucher"),
+            SearchOptions {
+                case_sensitive: true,
+                ..opt("Voucher")
+            },
+            SearchOptions {
+                whole_word: true,
+                ..opt("voucher")
+            },
+            SearchOptions {
+                regex: true,
+                ..opt("凭.*查询")
+            },
+            SearchOptions {
+                include: "*.java".to_string(),
+                ..opt("凭证")
+            },
+            SearchOptions {
+                dirs: vec!["bill".to_string()],
+                ..opt("voucher")
+            },
+            SearchOptions {
+                overlay: vec![OverlayDoc {
+                    path: "bill/A.java".to_string(),
+                    text: "class A {\n  String s = \"未保存的凭证\";\n}\n".to_string(),
+                }],
+                ..opt("未保存")
+            },
+        ];
+
+        // ① 磁盘路径：把包目录指到一个不存在的位置
+        crate::content_pack::set_cache_dir(&root.join("no-pack"));
+        let disk: Vec<Vec<_>> = cases
+            .iter()
+            .map(|o| {
+                sig(&search_cancellable(&root, o, TIME_BUDGET_MS, &AtomicBool::new(false)).unwrap())
+            })
+            .collect();
+
+        // ② 建包后同一条路走包（按新布局写进 `<base>/<根哈希>/`）
+        let base = root.join("search-pack");
+        let pack_dir = crate::content_pack::dir_for(&base, &root);
+        crate::content_pack::build(&root, &pack_dir, &AtomicBool::new(false)).unwrap();
+        crate::content_pack::set_cache_dir(&root);
+        assert!(
+            crate::content_pack::current_for(&root).is_some(),
+            "建完包必须能加载"
+        );
+
+        for (i, o) in cases.iter().enumerate() {
+            let packed =
+                search_cancellable(&root, o, TIME_BUDGET_MS, &AtomicBool::new(false)).unwrap();
+            assert_eq!(
+                disk[i],
+                sig(&packed),
+                "第 {i} 组（{:?}）两条路结果不同",
+                o.text
+            );
+        }
     }
 }

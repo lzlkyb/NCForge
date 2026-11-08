@@ -191,6 +191,7 @@ export const TAURI_COMMANDS = [
   "search_cancel",
   "search_invalidate_files",
   "search_list_files",
+  "search_pack_status",
   "search_projects",
   "search_replace",
   "search_types",

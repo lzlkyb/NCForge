@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { installSearchOverlay } from "../../lib/searchOverlay";
 import { useEffect, useRef, useState } from "react";
 import "../../workspace.css";
 import { Skeleton } from "../ui/Skeleton";
@@ -37,6 +38,9 @@ import {
   type TabMeta,
   type Updater,
 } from "../../lib/workspaceSession";
+
+// 未保存文件只可能来自代码工作台；此时注册，避免把 Monaco 拉进应用启动入口。
+installSearchOverlay();
 
 /**
  * 文件页：状态与编排都在这里，画面在 `workspace/FilePaneSlots`。

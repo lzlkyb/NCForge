@@ -84,6 +84,18 @@ export function forEachModel(cb: (path: string, model: Model) => void): void {
   entries.forEach((e, path) => cb(path, e.model));
 }
 
+/**
+ * 只遍历「未保存」的 model。
+ *
+ * 搜索要把这些内容作为 overlay 传给后端：磁盘上还是旧内容，不覆盖的话
+ * 「搜自己刚写的那行」搜不到——这比慢更让人以为工具坏了。
+ */
+export function forEachDirtyModel(cb: (path: string, model: Model) => void): void {
+  entries.forEach((e, path) => {
+    if (e.lastDirty) cb(path, e.model);
+  });
+}
+
 function register(path: string, entry: Entry): void {
   entries.set(path, entry);
   pathByUri.set(entry.model.uri.toString(), path);

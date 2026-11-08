@@ -62,14 +62,44 @@ export interface SearchOptions {
    * 用户多半在找刚看过的东西，第一条命中就能在几十毫秒内出现。
    */
   priority?: string[];
+  /**
+   * 未保存的文档内容（overlay）。**不要手填**：`searchWorkspace` / `searchWorkspaceStream`
+   * 会通过 `installSearchOverlay` 注册的 provider 自动注入。
+   */
+  overlay?: OverlayDoc[];
+}
+
+/** 一份未保存的文档。`path` 是**工作区相对**路径（`/` 分隔）。 */
+export interface OverlayDoc {
+  path: string;
+  text: string;
+}
+
+/**
+ * overlay 数据源。用「注册」而不是直接 import `editorStore`：后者会把 Monaco 拖进
+ * 任何 import 了本模块的 jsdom 测试（见 `docs/` 里组件测试的 mock 约定）。
+ */
+let overlayProvider: (() => OverlayDoc[]) | null = null;
+
+/** 由 `lib/searchOverlay.ts` 在应用启动时调用一次。 */
+export function setOverlayProvider(fn: (() => OverlayDoc[]) | null): void {
+  overlayProvider = fn;
+}
+
+function withOverlay(options: SearchOptions): SearchOptions {
+  if (!overlayProvider) return options;
+  const docs = overlayProvider();
+  return docs.length ? { ...options, overlay: docs } : options;
 }
 
 /**
  * `source`：调用方标识。同来源的新搜索会让后端取消旧的那次扫描（旧结果带 `cancelled`）；
  * 不传则与其它搜索互不影响。
  */
-export const searchWorkspace = (options: SearchOptions, report = false, source?: string) =>
-  !report ? invoke<SearchOutcome>("search_workspace", source ? { options, source } : { options }) : trackOperation({ key: `search.workspace:${getSession().root}:${JSON.stringify(options)}`, label: "搜索当前工程", errorDetail: () => "搜索失败，请查看搜索页错误详情", scope: getSession().root ?? "工作区", page: "search", phase: "扫描所选范围，保留已有结果" }, () => invoke<SearchOutcome>("search_workspace", { options }), r => ({ state: "success", detail: `扫描 ${r.filesScanned} 个文件，命中 ${r.filesMatched} 个${r.truncated ? "；达到上限，结果不完整" : ""}${r.scopeFallback ? "；指定范围不存在，已回落到整个工作区" : ""}` }));
+export const searchWorkspace = (options: SearchOptions, report = false, source?: string) => {
+  const opts = withOverlay(options);
+  return !report ? invoke<SearchOutcome>("search_workspace", source ? { options: opts, source } : { options: opts }) : trackOperation({ key: `search.workspace:${getSession().root}:${JSON.stringify(opts)}`, label: "搜索当前工程", errorDetail: () => "搜索失败，请查看搜索页错误详情", scope: getSession().root ?? "工作区", page: "search", phase: "扫描所选范围，保留已有结果" }, () => invoke<SearchOutcome>("search_workspace", { options: opts }), r => ({ state: "success", detail: `扫描 ${r.filesScanned} 个文件，命中 ${r.filesMatched} 个${r.truncated ? "；达到上限，结果不完整" : ""}${r.scopeFallback ? "；指定范围不存在，已回落到整个工作区" : ""}` }));
+};
 
 /** 一批流式结果。`stream` 是查询标识：连续敲键会有多次查询同时在飞。 */
 interface SearchBatch {
@@ -93,6 +123,7 @@ export async function searchWorkspaceStream(
   source?: string,
 ): Promise<SearchOutcome> {
   const stream = `s${++streamSeq}`;
+  const opts = withOverlay(options);
   let un: (() => void) | undefined;
   try {
     un = await listen<SearchBatch>("search:batch", (p) => {
@@ -102,7 +133,7 @@ export async function searchWorkspaceStream(
     // 浏览器里跑 vite dev 时 listen 会失败：退化成「只拿最终结果」
   }
   try {
-    return await invoke<SearchOutcome>("search_workspace_stream", { options, source, stream });
+    return await invoke<SearchOutcome>("search_workspace_stream", { options: opts, source, stream });
   } finally {
     un?.();
   }

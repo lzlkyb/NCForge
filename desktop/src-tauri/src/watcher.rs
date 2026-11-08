@@ -154,6 +154,11 @@ impl Batcher {
         if !self.java.is_empty() || self.java_overflow {
             crate::workspace_types::mark_dirty();
         }
+        // 搜索内容包也要跟着变：它收录的不止 .java（xml/js/配置都算），所以看 pending 全集。
+        // mark_dirty 只置个标志，真正的增量重建由 content_pack 的后台线程在静默 1.5s 后做。
+        if !self.pending.is_empty() || self.rescan {
+            crate::content_pack::mark_dirty();
+        }
         self.since = None;
         flush(
             &mut self.pending,

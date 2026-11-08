@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SearchTab } from "./SearchTab";
 import { setSession } from "../../lib/workspaceSession";
+import { setSidebarView } from "../../lib/sidebarView";
 import { resetSearchForm, setSearchForm } from "../../lib/searchStore";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -90,6 +91,7 @@ afterEach(async () => {
   container.remove();
   // 会话仓库是模块级的：本文件里写过的 root 要还回去，否则同文件后续用例走不到兜底分支
   setSession({ root: undefined });
+  setSidebarView("files");
 });
 
 describe("搜索页", () => {
@@ -368,5 +370,46 @@ describe("搜索页", () => {
     const chip = buttonByText("组件") as HTMLButtonElement;
     expect(chip.disabled).toBe(true);
     expect(chip.getAttribute("title")).toContain("没有登记业务组件");
+  });
+});
+
+describe("搜索内容包提示", () => {
+  const pack = (building: boolean) => ({
+    ready: !building,
+    building,
+    root: ROOT,
+    files: building ? 0 : 8225,
+    chunks: building ? 0 : 75,
+    builtAt: 0,
+    bytes: building ? 0 : 77_894_985,
+    pending: building ? 2 : 0,
+    packedRoots: building ? 0 : 1,
+    lastError: null,
+  });
+
+  const mockStatus = (building: boolean) => {
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_workspace") return ROOT;
+      if (cmd === "search_pack_status") return pack(building);
+      if (cmd === "nc_manifest") return [];
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+  };
+
+  it("建包中显示提示，说明本次搜索仍走磁盘", async () => {
+    setSidebarView("search");
+    mockStatus(true);
+    await render();
+    const notice = container.querySelector('[data-testid="search-pack-notice"]');
+    expect(notice).not.toBeNull();
+    expect(notice?.textContent).toContain("正在建立搜索索引");
+    expect(notice?.textContent).toContain("逐个读文件");
+  });
+
+  it("包就绪后不再显示提示", async () => {
+    setSidebarView("search");
+    mockStatus(false);
+    await render();
+    expect(container.querySelector('[data-testid="search-pack-notice"]')).toBeNull();
   });
 });

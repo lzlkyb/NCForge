@@ -50,6 +50,10 @@ pub async fn search_workspace(
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
     let root = PathBuf::from(root);
+    // 没有包就在这里排一次后台建包：本次搜索仍走磁盘，下一次开始走包。
+    // 放在命令入口而不是 `search` 模块里——建包要 config_dir，纯逻辑模块不碰配置。
+    // 主工作区要登记成 primary：文件监听只重建它，依赖工程的包各自排队。
+    crate::content_pack::ensure_primary(&root, &state.config_dir);
     tauri::async_runtime::spawn_blocking(move || {
         request.run(|cancel| {
             search::search_cancellable(&root, &options, search::TIME_BUDGET_MS, cancel)
@@ -84,6 +88,7 @@ pub async fn search_workspace_stream(
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
     let root = PathBuf::from(root);
+    crate::content_pack::ensure_primary(&root, &state.config_dir);
     tauri::async_runtime::spawn_blocking(move || {
         request.run(|cancel| {
             search::search_stream(&root, &options, search::TIME_BUDGET_MS, cancel, &|batch| {
@@ -158,6 +163,36 @@ pub fn search_invalidate_files() {
     search::invalidate_list_cache();
 }
 
+/// 搜索内容包的状态（状态栏 / 排查用）。
+///
+/// `ready == false && building == true` 表示首次建包还在跑，此时搜索走磁盘完整扫描。
+#[tauri::command]
+pub fn search_pack_status(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> crate::content_pack::PackStatus {
+    crate::content_pack::set_cache_dir(&state.config_dir);
+    crate::content_pack::status()
+}
+
+/// 启动预热内容包：磁盘上有包就加载，没有就排一次后台建包。
+///
+/// 不阻塞窗口显示：`ensure` 只加载索引 + 排任务，真正的建包在 `content_pack` 的
+/// 后台线程里做（首次两分钟左右，期间搜索走磁盘路径）。
+pub fn spawn_prewarm_search_pack(state: Arc<AppState>) {
+    tauri::async_runtime::spawn(async move {
+        let root = {
+            let cfg = state.config.read().await;
+            cfg.workspace_root.clone()
+        };
+        let Some(root) = root else { return };
+        let cache = state.config_dir.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            crate::content_pack::ensure_primary(&PathBuf::from(root), &cache);
+        })
+        .await;
+    });
+}
+
 /// 一个工程的搜索结果。`path` 仍是相对该工程根的路径，打开时要配上 `root`。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -207,7 +242,11 @@ pub async fn search_projects(
     if !primary_path.is_dir() {
         return Err(format!("工作区目录不存在：{primary}"));
     }
+    // 每个工程根都有自己的包：`ensure` 把没建好的排进串行队列，本次仍走磁盘。
+    // 只在命令入口登记 primary，队列里的都是依赖工程，不会同时开几次全量读盘。
+    crate::content_pack::ensure_primary(&primary_path, &state.config_dir);
     let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
+    let cache = state.config_dir.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
         request.run(|cancel| {
@@ -229,6 +268,12 @@ pub async fn search_projects(
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| primary.clone());
                 roots.insert(0, (name, primary.clone()));
+            }
+
+            // 给每个工程排队：第一次「全部工程」搜索付一次建包成本，之后都是毫秒级。
+            // 放循环前，搜索过程中不再改队列状态。
+            for (_, root) in &roots {
+                crate::content_pack::ensure(Path::new(root), &cache);
             }
 
             let started = Instant::now();

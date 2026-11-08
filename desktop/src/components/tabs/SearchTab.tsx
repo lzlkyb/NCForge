@@ -9,6 +9,9 @@ import { componentOptions, isSingleScope, toSearchOptions } from "../../lib/sear
 import { useNcManifest, useNcManifestAudit } from "../../hooks/useNcManifest";
 import { getWorkspace, joinPath } from "../../lib/workspace";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
+import { useSidebarView } from "../../lib/sidebarView";
+import { useSearchPackStatus } from "../../lib/searchPackStatus";
+import { SearchPackNotice } from "../search/SearchPackNotice";
 import { toast } from "../ui/toast";
 import type { LinkedProject } from "../../lib/linkedProjects";
 import {
@@ -78,6 +81,16 @@ export function SearchTab({
     };
   }, [sessionRoot]);
   const root = sessionRoot ?? fallbackRoot;
+
+  // 建包提示：首次打开/换工作区时在后台建内容包，这段时间搜索仍走磁盘。
+  // 面板不见时连轮询都不启动；换工作区与每次搜索各唤醒一次。
+  const sideView = useSidebarView();
+  const { status: packStatus, refresh: refreshPackStatus } = useSearchPackStatus(
+    sideView === "search",
+  );
+  useEffect(() => {
+    void refreshPackStatus();
+  }, [root, refreshPackStatus]);
 
   // 业务组件清单（manifest）：既是「按组件」的范围来源，也是那个范围可不可用的判据。
   // 读不到就是空数组 → 范围芯片置灰，不让用户选到一个会静默变成全工程的范围。
@@ -152,6 +165,8 @@ export function SearchTab({
         error: String(e),
       });
     } finally {
+      // 这次搜索可能刚给一个新工作区排了建包任务，重新问一次状态把提示点亮
+      void refreshPackStatus();
       if (mine === currentSearchSeq()) update({ running: false });
     }
   };
@@ -238,6 +253,7 @@ export function SearchTab({
         onSearch={() => void run()}
         onKeyDown={onSearchKey}
       />
+      <SearchPackNotice status={packStatus} />
       {single && (
         <ReplaceBar
           form={form}

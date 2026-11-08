@@ -152,6 +152,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 commands::spawn_prewarm(app_state.clone());
                 // 类型索引也一起建：第一次 Ctrl+T 找类不该让用户等扫盘
                 commands::spawn_prewarm_types(app_state.clone());
+                // 搜索内容包：有包就加载，没有就后台建（首次两分钟，期间搜索仍可用）
+                commands::spawn_prewarm_search_pack(app_state.clone());
             }
 
             // 资源只在用户选择组件或功能提示中请求下载；启动读取本地状态，不联网置备。
@@ -310,6 +312,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::search_workspace_symbols,
             commands::search_replace,
             commands::search_cancel,
+            commands::search_pack_status,
             commands::local_history_capture,
             commands::local_history_list,
             commands::local_history_read,

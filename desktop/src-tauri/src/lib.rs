@@ -41,6 +41,8 @@ pub mod compile;
 pub mod compile_diag;
 pub mod config;
 pub mod config_io;
+// 搜索内容包：工作区文本的压缩快照（`search.rs` 的首选数据源）
+pub mod content_pack;
 pub mod db_bridge;
 pub mod db_conns;
 pub mod db_engine;
