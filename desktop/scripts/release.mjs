@@ -238,8 +238,12 @@ async function main() {
   if (unrelMatch) {
     const body = unrelMatch[0];
     const skipSec = new Set([
-      "用户摘要", "技术", "技术细节", "说明", "实现说明", "开发者", "亮点", "Highlights",
+      "用户摘要", "技术", "说明", "亮点", "Highlights",
     ]);
+    // 开发者小节（技术细节 / 实现说明 / 开发者）**不在这里跳过**：它们要留在 CHANGELOG
+    // 的版本段里（关于页也读同一份），「不进更新弹窗」那件事由 `update-release-notes.mjs`
+    // 自己按小节名过滤。此前把 技术细节 也塞进上面这个集合，后果是 [Unreleased] 整段被删、
+    // 开发记录一条没进版本段 —— v0.2.0 发版前的 27 条技术细节就是这样丢的。
     const secRe = /###\s+([^\n]+)\n([\s\S]*?)(?=\n###\s+|\n##\s+|$)/g;
     let m;
     let collected = 0;

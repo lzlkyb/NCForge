@@ -45,7 +45,7 @@ test("service console production: four themes, dock/expand, 4000 lines, scopes, 
       try {
         await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: "domcontentloaded" });
         await page.getByRole("tab", { name: "NC 服务", exact: true }).click();
-        const panel = page.locator(".sc-console"), log = panel.locator(".sc-log-pane:not([hidden])"), body = log.locator(".sc-log-body");
+        const panel = page.locator(".sc-panel"), log = panel.locator(".sc-log-pane:not([hidden])"), body = log.locator(".sc-log-body");
         await panel.getByText("已加载 4000 行", { exact: true }).waitFor();
         for (const [name, width, height] of [["wide",1440,900],["low",1024,540],["scale150",683,512],["narrow",560,700]]) {
           await page.setViewportSize({ width, height });
@@ -96,11 +96,12 @@ test("service console production: four themes, dock/expand, 4000 lines, scopes, 
           await page.waitForFunction(() => window.serviceStatus.client.state === 'stopped');
           assert.equal(await page.evaluate(() => window.serviceStatus.middleware.runId), serverRun);
           assert.equal(await page.evaluate(() => window.serviceStatus.middleware.state), 'running');
-          await page.locator('.sc-side-tools').getByRole('button', { name: '运行详情', exact: true }).click();
+          await page.getByRole('button', { name: '更多服务工具', exact: true }).click();
+          await page.getByRole('menuitem', { name: '运行详情', exact: true }).click();
           await page.locator('.sc-drawer').getByText('10.0.0.8:9080', { exact: true }).waitFor(); await page.locator('.sc-drawer').getByText('未验证', { exact: true }).waitFor();
-          await page.keyboard.press('Escape'); assert.equal(await page.locator('.sc-side-tools').getByRole('button', { name: '运行详情', exact: true }).evaluate(el => document.activeElement === el), true);
+          await page.keyboard.press('Escape'); assert.equal(await page.getByRole('button', { name: '更多服务工具', exact: true }).evaluate(el => document.activeElement === el), true);
           await page.locator('#sc-service-middleware').click();
-          await page.evaluate(() => { window.serviceErrors = true; }); await panel.getByText('状态未知', { exact: true }).waitFor(); assert.equal(await panel.getByText('端口监听中', { exact: true }).count(), 0); await shot('status-error');
+          await page.evaluate(() => { window.serviceErrors = true; }); await page.locator('#sc-service-middleware .sc-service-state').getByText('状态未知', { exact: true }).waitFor(); assert.equal(await panel.getByText('端口监听中', { exact: true }).count(), 0); await shot('status-error');
           await page.evaluate(() => { window.serviceErrors = false; }); await panel.locator('.sc-run-toolbar').getByRole('button', { name: '重试状态', exact: true }).click(); await panel.getByText('端口监听中', { exact: true }).waitFor();
           await page.evaluate(() => { window.logReadError = true; }); await panel.getByRole('alert').filter({ hasText: '读取日志失败' }).waitFor(); await panel.getByText('已加载 4000 行', { exact: true }).waitFor();
           await page.evaluate(() => { window.logReadError = false; }); await panel.locator('.sc-log-error').getByRole('button', { name: '重试', exact: true }).click(); await panel.locator('.sc-log-error').waitFor({ state: 'hidden' });

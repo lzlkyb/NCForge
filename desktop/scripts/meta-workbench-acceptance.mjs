@@ -16,7 +16,7 @@ await mkdir(join(cacheBase,"meta-workbench-acceptance"), {recursive:true});
 const cache = await realpath(join(cacheBase,"meta-workbench-acceptance"));
 const output = join(cache, "dist");
 const artifacts = process.env.META_ACCEPTANCE_ARTIFACTS ? resolve(process.env.META_ACCEPTANCE_ARTIFACTS)
-  : resolve(desktop, "../docs/元数据后续实施验收-2026-11-06");
+  : resolve(desktop, "../docs/全局内容空间优化验收-2026-11-07/元数据");
 assert.ok(!relative(await realpath(cacheBase), output).startsWith(".."));
 await mkdir(cache, { recursive: true });
 await mkdir(artifacts, { recursive: true });
@@ -40,6 +40,7 @@ import ${source("interaction-refinements.css")};
 import ${source("appearance.css")};
 import ${source("glass-material.css")};
 import ${source("interaction-density.css")};
+import ${source("content-first.css")};
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const type = BMF_BASE_TYPES[0];
@@ -217,7 +218,8 @@ try {
   assert.equal(await page.evaluate(() => window.metaAcceptance.disk().entities[0].attrs[0].displayName), "报销单编码");
   result.functional.push("图表与接口属性定位", "快改加入草稿", "撤销重做", "关闭保护", "失败保留与重新预览重试", "严格 SHA 保存");
 
-  await page.getByRole("button", { name:"粘贴字段", exact:true }).click();
+  await page.getByRole("button", { name:/^字段操作/ }).click();
+  await page.getByRole("menuitem", { name:"粘贴字段", exact:true }).click();
   await page.getByRole("textbox", { name:"粘贴字段内容", exact:true }).fill("字段名\t长度\nnewfield\t40\nsecond\t-1");
   assert.equal(await page.getByRole("button", { name:"加入草稿", exact:true }).isDisabled(), true);
   assert.ok((await page.getByRole("alert").textContent()).includes("第 3 行"));

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { patchMonaco, patchStickyScroll, patchWordHighlighter } from "./patch-monaco.mjs";
+import { patchEditorNls, patchMonaco, patchStickyScroll, patchWordHighlighter } from "./patch-monaco.mjs";
 
 const source = "this.runDelayer.trigger(() => { this._onPositionChanged(e); });\nthis.runDelayer.trigger(() => { this._run(); });";
 test("delayed highlight cancellation is observed at both call sites, preserving other errors", async () => {
@@ -16,6 +16,7 @@ test("delayed highlight cancellation is observed at both call sites, preserving 
 test("upstream source drift fails visibly instead of silently skipping a fix", () => {
   assert.throws(() => patchWordHighlighter("different implementation"), /changed/);
   assert.throws(() => patchStickyScroll("different implementation"), /changed/);
+  assert.throws(() => patchEditorNls("different implementation"), /changed/);
 });
 
 // Run the actual installed Monaco method so the regression covers its await boundary.
@@ -68,4 +69,38 @@ test("sticky scroll keeps real folding failures visible", async () => {
   const h = startStickyUpdate(), error = new Error("real folding failure");
   h.reject(error);
   await assert.rejects(h.pending, e => e === error);
+});
+
+const { localize, localize2 } = await import(new URL("../node_modules/monaco-editor/esm/vs/nls.js", import.meta.url));
+test("editor localization is applied by the startup patch and remains idempotent", async () => {
+  const nlsSource = await readFile(new URL("../node_modules/monaco-editor/esm/vs/nls.js", import.meta.url), "utf8");
+  assert.equal(patchEditorNls(nlsSource), nlsSource);
+  assert.equal(nlsSource.split("const ncforgeEditorNls =").length, 2);
+});
+
+test("installed editor context menus and peek submenus display Chinese", () => {
+  for (const [english, chinese] of [
+    ["Go to Definition", "转到定义"], ["Go to Declaration", "转到声明"],
+    ["Go to Type Definition", "转到类型定义"], ["Go to Implementations", "转到实现"],
+    ["Go to References", "转到引用"], ["Peek", "速览"],
+    ["Peek Definition", "速览定义"], ["Peek Declaration", "速览声明"],
+    ["Peek Type Definition", "速览类型定义"], ["Peek Implementations", "速览实现"],
+    ["Peek References", "速览引用"], ["Change All Occurrences", "更改所有匹配项"],
+    ["Format Document", "格式化文档"], ["Format Selection", "格式化选定内容"],
+    ["Cut", "剪切"], ["Copy", "复制"], ["Paste", "粘贴"], ["Copy As", "复制为"],
+  ]) assert.equal(localize("menu.label", english), chinese);
+});
+
+test("localized commands retain their original English aliases and access keys", () => {
+  assert.deepEqual(localize2("actions.goToDecl.label", "Go to Definition"), {
+    value: "转到定义", original: "Go to Definition",
+  });
+  assert.equal(localize({ key: "miCut", comment: ["&& denotes a mnemonic"] }, "Cu&&t"), "剪切(&&T)");
+});
+
+test("editor messages preserve interpolation and untranslated or numeric fallbacks", () => {
+  assert.equal(localize("noResultWord", "No definition found for '{0}'", "Customer"), "未找到“Customer”的定义");
+  assert.equal(localize("unknown", "Unknown message {0}", 3), "Unknown message 3");
+  assert.equal(localize("unknown", "__proto__"), "__proto__");
+  assert.equal(localize(99999, "Numeric fallback {0}", 4), "Numeric fallback 4");
 });
