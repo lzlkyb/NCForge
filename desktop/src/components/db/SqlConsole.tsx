@@ -44,7 +44,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   useEffect(()=>{const insert=(e:Event)=>{const v=(e as CustomEvent<{tabId:string;text:string}>).detail;if(v.tabId===tab.id) api.current?.insert(v.text);};window.addEventListener("ncforge-db-insert-name",insert);return()=>window.removeEventListener("ncforge-db-insert-name",insert);},[tab.id]);
 
   const run = useCallback(
-    async (mode: "current" | "script") => {
+    async (mode: "current" | "script", collectStats = false) => {
       const stmts = api.current?.target(mode) ?? [];
       if (stmts.length === 0) {
         toast(mode === "script" ? "编辑器里没有可执行的语句" : "光标处没有语句", "info");
@@ -53,7 +53,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
       const executionScope = { tabId, selected: mode === "current" && scopeRef.current?.tabId === tabId && scopeRef.current.selected, statements: stmts };
       executingScopes.current.set(tabId, executionScope);
       try {
-        const outcome = await runStatements(tabId, stmts);
+        const outcome = await runStatements(tabId, stmts, { collectStats });
         if (outcome.failLine && activeRef.current && activeTabId.current === tabId) api.current?.reveal(outcome.failLine);
       } finally {
         if (executingScopes.current.get(tabId) === executionScope) executingScopes.current.delete(tabId);
@@ -104,7 +104,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         scope={tab.running ? executingScopes.current.get(tab.id) ?? null : scope}
         focusMode={split.focus}
         onFocusChange={focus}
-        onRun={(m) => void run(m)}
+        onRun={(m, collectStats) => void run(m, collectStats)}
         onStop={onStop}
         onExplain={onExplain}
         onFormat={() => api.current?.format()}

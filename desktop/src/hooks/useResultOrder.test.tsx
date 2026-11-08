@@ -21,7 +21,8 @@ it("debounces requests and rejects late messages from cancelled workers",()=>{
   expect(workers).toHaveLength(0);act(()=>vi.advanceTimersByTime(120));expect(workers).toHaveLength(1);
   act(()=>root.render(<Test filter="2"/>));expect(workers[0].terminate).toHaveBeenCalled();
   act(()=>workers[0].onmessage?.({data:{order:[1]}} as MessageEvent));expect(latest.pending).toBe(true);expect(latest.order).toEqual([]);
-  act(()=>vi.advanceTimersByTime(120));act(()=>workers[1].onmessage?.({data:{order:[2]}} as MessageEvent));
+  act(()=>vi.advanceTimersByTime(120));act(()=>workers[0].onerror?.());expect(workers[1].terminate).not.toHaveBeenCalled();
+  act(()=>workers[1].onmessage?.({data:{order:[2]}} as MessageEvent));
   expect(latest.order).toEqual([2]);expect(latest.pending).toBe(false);
 });
 it("exposes worker failures and retries without running the expensive calculation synchronously",()=>{
@@ -38,4 +39,16 @@ it("splits worker input into bounded messages and stops pumping when cancelled",
   const count=workers[0].postMessage.mock.calls.length;
   await act(async()=>{await vi.advanceTimersByTimeAsync(10);});
   expect(workers[0].postMessage).toHaveBeenCalledTimes(count);
+});
+it("reuses completed data without another clone and releases it after idle",()=>{
+  act(()=>root.render(<Test filter="1"/>));act(()=>vi.advanceTimersByTime(120));
+  act(()=>workers[0].onmessage?.({data:{order:[1]}} as MessageEvent));
+  const transferred=workers[0].postMessage.mock.calls.filter(([m])=>m.kind==="rows").length;
+  act(()=>root.render(<Test filter="2"/>));act(()=>vi.advanceTimersByTime(0));
+  expect(workers).toHaveLength(1);
+  expect(workers[0].postMessage).toHaveBeenLastCalledWith({kind:"run",filter:"2",sort:null});
+  expect(workers[0].postMessage.mock.calls.filter(([m])=>m.kind==="rows")).toHaveLength(transferred);
+  act(()=>workers[0].onmessage?.({data:{order:[2]}} as MessageEvent));
+  expect(latest.order).toEqual([2]);
+  act(()=>vi.advanceTimersByTime(5000));expect(workers[0].terminate).toHaveBeenCalled();
 });

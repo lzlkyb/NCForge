@@ -192,6 +192,7 @@ struct Session {
     auto_commit: bool,
     readonly: bool,
     readonly_started: bool,
+    stats_unavailable: bool,
     previous_auto: bool,
     tx_statements: i64,
     tx_rows: i64,
@@ -219,6 +220,7 @@ impl RustEngine {
                 auto_commit: false,
                 readonly: false,
                 readonly_started: false,
+                stats_unavailable: false,
                 previous_auto: false,
                 tx_statements: 0,
                 tx_rows: 0,
@@ -316,6 +318,7 @@ impl Session {
                 a.first().copied().unwrap_or(""),
                 int_arg(a, 1, 500),
                 int_arg(a, 2, 30),
+                a.get(3).is_some_and(|v| v.eq_ignore_ascii_case("true")),
             ),
             "execBound" => {
                 if a.len()<3 || !(a.len()-3).is_multiple_of(2) {return Err(sql_err("绑定参数协议不完整"));}
@@ -330,7 +333,7 @@ impl Session {
                 }).collect();
                 let params = params?;
                 let refs: Vec<&dyn ToDbValue> = params.iter().map(|p| p.as_ref()).collect();
-                self.exec_params(a[0],int_arg(a,1,500),int_arg(a,2,30),&refs)
+                self.exec_params(a[0],int_arg(a,1,500),int_arg(a,2,30),&refs,false)
             }
             "readOnly" => self.set_readonly(a.first() == Some(&"true")),
             "more" => self.more(int_arg(a, 0, 500)),
@@ -368,7 +371,9 @@ impl Session {
                     return Ok(json!({ "alive": false, "tx": self.tx_json() }));
                 };
                 conn.set_call_timeout(Some(_timeout)).map_err(drv_err)?;
-                let result = conn.ping();
+                // Oracle thin ping 在部分服务端返回无法解析的 TTC 消息；
+                // 使用普通只读查询探测网络，且不关闭用户现有的分页游标。
+                let result = conn.query_row("select 1 from dual", &[]);
                 let _ = conn.set_call_timeout(None);
                 result.map_err(drv_err)?;
                 Ok(json!({ "alive": true, "tx": self.tx_json() }))
@@ -497,6 +502,7 @@ impl Session {
             Err(e) => (login_user.clone(), e.message),
         };
         let version = db_version(&conn);
+        self.stats_unavailable = false;
         self.readonly = false;
         self.readonly_started = false;
         self.auto_commit = auto;
@@ -583,8 +589,9 @@ impl Session {
         raw: &str,
         max_rows: usize,
         timeout_sec: usize,
+        collect_stats: bool,
     ) -> Result<Value, BridgeError> {
-        self.exec_params(raw, max_rows, timeout_sec, &[])
+        self.exec_params(raw, max_rows, timeout_sec, &[], collect_stats)
     }
     fn exec_params(
         &mut self,
@@ -592,6 +599,7 @@ impl Session {
         max_rows: usize,
         timeout_sec: usize,
         params: &[&dyn ToDbValue],
+        collect_stats: bool,
     ) -> Result<Value, BridgeError> {
         if self.conn.is_none() {
             return Err(not_connected());
@@ -611,15 +619,27 @@ impl Session {
             let _ =
                 conn.set_call_timeout(Some(Duration::from_secs(timeout_sec.max(1) as u64 + 10)));
         }
-        // A2 Autotrace：执行前后各读一次 `v$mystat`，差值才是这条语句的真实开销。
+        // 仅显式请求 Autotrace 时前后读取 `v$mystat`；普通执行避免这两次往返。
         // 读不到（低权限账号没有 V_$MYSTAT 授权）就是 None，界面据此**不显示这一行**，
         // 而不是给一排 0 让人以为「这条 SQL 一次逻辑读都没花」。
-        let before = self.conn_ref().ok().and_then(stat_snapshot);
+        // 不可用的统计只探测一次，重连后重试；避免低权限账号每条 SQL 多走两次网络。
+        let before = if !collect_stats || self.stats_unavailable {
+            None
+        } else {
+            self.conn_ref().ok().and_then(stat_snapshot)
+        };
+        if collect_stats && before.is_none() {
+            self.stats_unavailable = true;
+        }
         let out = self.run(&sql, &head, max_rows, params);
         if let Ok(conn) = self.conn_ref() {
             let _ = conn.set_call_timeout(None);
         }
-        let after = self.conn_ref().ok().and_then(stat_snapshot);
+        let after = if before.is_some() {
+            self.conn_ref().ok().and_then(stat_snapshot)
+        } else {
+            None
+        };
 
         let mut body = out?;
         body.insert("ms".into(), json!(t0.elapsed().as_millis() as u64));
@@ -659,7 +679,17 @@ impl Session {
     ) -> Result<Map<String, Value>, BridgeError> {
         let mut body = Map::new();
         if is_query(head, sql) {
-            let mut cur = conn.query(sql, params).map_err(drv_err)?;
+            // 一页及一行前瞻尽量随首包返回；128 行上限避免宽表放大驱动缓冲。
+            let fetch = (max_rows + 1).min(128) as u32;
+            let mut cur = conn
+                .statement(sql)
+                .map_err(drv_err)?
+                .prefetch_rows(fetch)
+                .fetch_array_size(fetch)
+                .build()
+                .map_err(drv_err)?
+                .query(params)
+                .map_err(drv_err)?;
             let columns: Vec<Value> = cur.columns().iter().map(column_json).collect();
             let types: Vec<String> = cur
                 .columns()
@@ -805,7 +835,15 @@ impl Session {
                    where owner = sys_context('userenv','current_schema') and table_name not like 'BIN$%' \
                    union all select view_name, 'VIEW' from all_views \
                    where owner = sys_context('userenv','current_schema') order by 1";
-        let cur = conn.query(sql, &[]).map_err(drv_err)?;
+        let cur = conn
+            .statement(sql)
+            .map_err(drv_err)?
+            .prefetch_rows(512)
+            .fetch_array_size(512)
+            .build()
+            .map_err(drv_err)?
+            .query(&[])
+            .map_err(drv_err)?;
         let mut list = Vec::new();
         for row in cur {
             let row = row.map_err(drv_err)?;
@@ -822,10 +860,13 @@ impl Session {
     fn nc_names(&self) -> Result<Value, BridgeError> {
         let conn = self.conn_ref()?;
         let mut map = Map::new();
-        if let Ok(cur) = conn.query(
-            "select lower(name), displayname from md_table where displayname is not null",
-            &[],
-        ) {
+        if let Ok(cur) = conn
+            .statement(
+                "select lower(name), displayname from md_table where displayname is not null",
+            )
+            .and_then(|s| s.prefetch_rows(512).fetch_array_size(512).build())
+            .and_then(|s| s.query(&[]))
+        {
             for row in cur {
                 let Ok(row) = row else { continue };
                 let k: Option<String> = row.get(0).ok().flatten();
@@ -1401,7 +1442,7 @@ impl StatSnap {
 
 /// 读一次会话统计。**读不到就返回 `None`**（无 `V_$MYSTAT` 授权、或结果里一项都没有）。
 ///
-/// 成本是每次执行多两次往返（~1 ms 级）。差值里**包含**这两次统计查询自己的开销
+/// 可用时每次执行多两次往返，实际成本取决于网络延迟。差值里**包含**这两次统计查询自己的开销
 /// （约十几次逻辑读），与 PL/SQL Developer 的 autotrace 同口径，不额外剔除。
 fn stat_snapshot(conn: &Connection) -> Option<StatSnap> {
     let sql = format!(
@@ -1865,8 +1906,13 @@ fn effective_schema(
     Ok(now)
 }
 
-/// 服务端版本。`v$version` 常没权限，退到 `product_component_version`。
+/// 优先使用认证握手里已有的版本，避免每次建连额外查询系统视图。
 fn db_version(conn: &Connection) -> String {
+    if let Ok(version) = conn.version() {
+        if version.0 > 0 {
+            return version.to_string();
+        }
+    }
     for sql in [
         "select version_full from product_component_version where product like 'Oracle Database%' and rownum = 1",
         "select version from product_component_version where product like 'Oracle Database%' and rownum = 1",

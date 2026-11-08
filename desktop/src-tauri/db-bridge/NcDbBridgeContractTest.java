@@ -8,6 +8,8 @@ public class NcDbBridgeContractTest {
     static boolean auto=true, failReadOnly=false;
     static int readonlyStatements=0;
     static int probes=0;
+    static int statQueries=0;
+    static int fetchSize=0;
     static String executed="";
     /** 最近一次 `alter session set current_schema = …` 的原文（默认 schema 契约用）。 */
     static String schemaSql="";
@@ -23,6 +25,7 @@ public class NcDbBridgeContractTest {
                 if (n.equals("getAutoCommit")) return auto;
                 if (n.equals("setAutoCommit")) {auto=(Boolean)a[0];return null;}
                 if (n.equals("createStatement")) return proxy(Statement.class);
+                if (n.equals("setFetchSize")) {fetchSize=(Integer)a[0];return null;}
                 // 默认 schema 契约要读登录账号名（空串 = 切回它）
                 if (n.equals("getMetaData")) return proxy(DatabaseMetaData.class);
                 if (n.equals("getUserName")) return "AIER633";
@@ -31,6 +34,7 @@ public class NcDbBridgeContractTest {
                 if (n.equals("prepareStatement")) {executed=(String)a[0];return proxy(PreparedStatement.class);}
                 if (n.equals("prepareCall")) return proxy(CallableStatement.class);
                 if (n.equals("executeQuery")) {
+                    if (a != null && a.length > 0 && String.valueOf(a[0]).contains("v$mystat")) statQueries++;
                     boolean probe = a != null && a.length == 1 && "select 1 from dual".equals(a[0]);
                     if (probe) probes++;
                     return proxy(ResultSet.class, probe);
@@ -85,6 +89,13 @@ public class NcDbBridgeContractTest {
         exec.invoke(s,"update T set CODE=:1, AMOUNT=:2 where ID=:3",1,30,Arrays.asList("string",text,"number",number,"null",""));
         check(executed.equals("update T set CODE=?, AMOUNT=? where ID=?"),"values are never concatenated");
         check(text.equals(bound.get(1)),"quoted text stays bound");check(new BigDecimal(number).equals(bound.get(2)),"38 digit precision preserved");check(bound.containsKey(3) && bound.get(3)==null,"NULL bound separately");
+          exec.invoke(s,"update T set CODE=:1",1,30,Arrays.asList("string",text));
+          check(statQueries == 0,"ordinary queries do not collect optional statistics");
+          Method profiled=c.getDeclaredMethod("execParams",String.class,int.class,int.class,List.class,boolean.class);profiled.setAccessible(true);
+          profiled.invoke(s,"update T set CODE=:1",1,30,Arrays.asList("string",text),true);
+          profiled.invoke(s,"update T set CODE=:1",1,30,Arrays.asList("string",text),true);
+          check(statQueries == 1,"unavailable statistics are probed once per connection, not twice per query");
+          check(fetchSize==2,"single-row operations keep bounded lookahead fetches");
         failReadOnly=true;
         try {ro.invoke(s,true);throw new AssertionError("unverified read-only must fail");}catch(InvocationTargetException expected){check(expected.getCause() instanceof SQLException,"unsupported server rejected");}
         // 默认 schema：名字是标识符、绑不进绑定变量，只能拼串 —— 所以拼之前必须卡字符集，

@@ -851,11 +851,15 @@ pub struct DbConnectResult {
     pub user: String,
     pub product: String,
     pub version: String,
+    pub schema: String,
+    pub schema_warning: Option<String>,
     pub auto_commit: bool,
     /// **实际**在用的引擎（配置写 JVM 桥但本机没有运行时，这里会是 `rust`）。
     pub engine: String,
     /// 被降级时的原因，界面直接显示；没降级为 `None`。
     pub engine_note: Option<String>,
+    /// 首个 SQL 会话与主会话并行登录，避免首次查询串行承担两次握手。
+    pub prepared_slot: Option<String>,
 }
 
 /// 连库。手动来源 `password` 为空时用存过的；`remember` 为真时把这次输入的口令存起来。
@@ -866,6 +870,7 @@ pub async fn db_connect(
     id: String,
     password: Option<String>,
     remember: Option<bool>,
+    prepare_sql: Option<bool>,
 ) -> Result<DbConnectResult, String> {
     let st = state.inner().clone();
     let cfg = st.config.read().await.clone();
@@ -885,7 +890,29 @@ pub async fn db_connect(
          想用 JVM 桥：到「设置 → 组件」下载「数据库 JVM 组件」"
             .to_string()
     });
-    let out = call(bridge, cmd, args, T_CONNECT).await?;
+    let prepare = async {
+        if prepare_sql.unwrap_or(false) && live_slots(&st, &id).is_empty() {
+            acquire_sql_slot(&app, &st, &id, password.as_deref())
+                .await
+                .ok()
+        } else {
+            None
+        }
+    };
+    let (out, prepared) = tokio::join!(call(bridge, cmd, args, T_CONNECT), prepare);
+    let out = match out {
+        Ok(value) => value,
+        Err(error) => {
+            // 只有两条会话都属于成功连接时才交给界面，不能遗留失败连接的预热槽。
+            if let Some(slot) = prepared {
+                if let Ok(key) = slot_key(&id, Some(&slot.slot)) {
+                    drop_bridge(&st, &key);
+                    forget_slot(&key);
+                }
+            }
+            return Err(error);
+        }
+    };
 
     // 连上之后才落盘口令：存不下只是失去「记住」，不能把已经连好的会话判成失败
     let (enc, warn) = seal_remembered(password.as_deref(), remember.unwrap_or(true));
@@ -911,12 +938,19 @@ pub async fn db_connect(
         user: s("user"),
         product: s("product"),
         version: s("version"),
+        schema: s("schema"),
+        schema_warning: out
+            .get("schemaWarning")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         auto_commit: out
             .get("autoCommit")
             .and_then(Value::as_bool)
             .unwrap_or(false),
         engine: actual.as_str().to_string(),
         engine_note,
+        prepared_slot: prepared.map(|slot| slot.slot),
     })
 }
 
@@ -935,14 +969,22 @@ pub async fn db_slot_acquire(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<SlotOut, String> {
-    let st = state.inner().clone();
+    acquire_sql_slot(&app, state.inner(), &id, None).await
+}
+
+async fn acquire_sql_slot(
+    app: &AppHandle,
+    st: &Arc<AppState>,
+    id: &str,
+    password: Option<&str>,
+) -> Result<SlotOut, String> {
     let cfg = st.config.read().await.clone();
-    let conn = find_conn(&cfg, &id)?;
+    let conn = find_conn(&cfg, id)?;
     // 槽是「再加一条会话」，不是「从零连库」：primary 都没连上就没什么可加的
-    existing_bridge(&st, &id)
+    existing_bridge(st, id)
         .map_err(|_| code_label("not-connected", "先连上这个库，再开独立会话"))?;
-    sweep_idle_slots(&st, &id).await;
-    let used = live_slots(&st, &id);
+    sweep_idle_slots(st, id).await;
+    let used = live_slots(st, id);
     if used.len() >= MAX_SLOTS {
         return Err(code_label(
             "slots-full",
@@ -958,17 +1000,17 @@ pub async fn db_slot_acquire(
     let slot = NEXT_SLOT
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         .to_string();
-    let key = slot_key(&id, Some(&slot))?;
+    let key = slot_key(id, Some(&slot))?;
     let engine = EngineKind::parse(&conn.engine);
     // 新槽必须继承用户手动切过的 schema（`alter session` 不会跨会话继承）
     let (cmd, args) = connect_args(
         &cfg,
-        &conn_with_runtime_schema(&st, &conn),
-        None,
+        &conn_with_runtime_schema(st, &conn),
+        password,
         conn.auto_commit,
         engine,
     )?;
-    let handle = bridge_for(&app, &st, &cfg, &key, engine, &id)?;
+    let handle = bridge_for(app, st, &cfg, &key, engine, id)?;
     match call(handle, cmd, args, T_CONNECT).await {
         Ok(_) => {
             touch_slot(&key);
@@ -976,7 +1018,7 @@ pub async fn db_slot_acquire(
         }
         Err(e) => {
             // 连不上就把半成品收掉，否则下次申请会以为这条槽还在用
-            drop_bridge(&st, &key);
+            drop_bridge(st, &key);
             forget_slot(&key);
             Err(e)
         }
@@ -1124,6 +1166,7 @@ pub async fn db_disconnect(
 /// **P0 能力路由**：纯 Rust 引擎遇到 REF CURSOR 形态（`open :1 for …`，或打开游标却不
 /// `return_result`）时，不在这里报错，而是把这条语句改到同一连接的 JVM 桥临时会话上执行。
 /// 判定见 `db_engine::refcursor_need`，落点在 [`exec_via_java`]。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn db_exec(
     app: AppHandle,
@@ -1133,6 +1176,7 @@ pub async fn db_exec(
     max_rows: Option<u32>,
     timeout_sec: Option<u32>,
     slot: Option<String>,
+    collect_stats: Option<bool>,
 ) -> Result<Value, String> {
     if sql.trim().is_empty() {
         return Err(code_label("sql", "SQL 是空的"));
@@ -1151,6 +1195,7 @@ pub async fn db_exec(
                 sql: &sql,
                 rows,
                 timeout,
+                collect_stats: collect_stats.unwrap_or(false),
                 need,
             })
             .await;
@@ -1161,7 +1206,12 @@ pub async fn db_exec(
         &id,
         b.clone(),
         "exec",
-        vec![sql.clone(), rows.to_string(), timeout.to_string()],
+        vec![
+            sql.clone(),
+            rows.to_string(),
+            timeout.to_string(),
+            collect_stats.unwrap_or(false).to_string(),
+        ],
         limit,
         None,
     )
@@ -1179,6 +1229,7 @@ pub async fn db_exec(
                 sql: &sql,
                 rows,
                 timeout,
+                collect_stats: collect_stats.unwrap_or(false),
                 need: crate::db_engine::RefcursorNeed::OutBind,
             })
             .await
@@ -1208,6 +1259,7 @@ struct JavaFallback<'a> {
     sql: &'a str,
     rows: u32,
     timeout: u32,
+    collect_stats: bool,
     need: crate::db_engine::RefcursorNeed,
 }
 
@@ -1229,6 +1281,7 @@ async fn exec_via_java(f: JavaFallback<'_>) -> Result<Value, String> {
         sql,
         rows,
         timeout,
+        collect_stats,
         need,
     } = f;
     let cfg = st.config.read().await.clone();
@@ -1263,7 +1316,12 @@ async fn exec_via_java(f: JavaFallback<'_>) -> Result<Value, String> {
         id,
         handle.clone(),
         "exec",
-        vec![sql.to_string(), rows.to_string(), timeout.to_string()],
+        vec![
+            sql.to_string(),
+            rows.to_string(),
+            timeout.to_string(),
+            collect_stats.to_string(),
+        ],
         limit,
         None,
     )
@@ -1604,8 +1662,13 @@ pub async fn db_schema_status(
 ) -> Result<SchemaStatus, String> {
     let cfg = state.config.read().await.clone();
     let (id, url, user) = current_db(&cfg)?;
-    let cache = load_cache(&state.config_dir, &url, &user);
-    Ok(status_of(cache.as_ref(), id, &url, &user))
+    let config_dir = state.config_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let cache = load_cache(&config_dir, &url, &user);
+        status_of(cache.as_ref(), id, &url, &user)
+    })
+    .await
+    .map_err(|e| format!("读取缓存状态失败：{e}"))
 }
 
 /// 从库里把表结构整个拉一遍落盘。要求当前连接已经连上（不偷偷连库）。
@@ -1804,21 +1867,26 @@ pub async fn db_cached_tables(
 ) -> Result<CachedTables, String> {
     let cfg = state.config.read().await.clone();
     let (_, url, user) = current_db(&cfg)?;
-    let cache = load_cache(&state.config_dir, &url, &user);
-    Ok(match cache {
-        Some(c) => CachedTables {
-            tables: c.tables.keys().cloned().collect(),
-            fetched_at: c.fetched_at,
-            url,
-            user,
-        },
-        None => CachedTables {
-            tables: Vec::new(),
-            fetched_at: 0,
-            url,
-            user,
-        },
+    let config_dir = state.config_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let cache = load_cache(&config_dir, &url, &user);
+        match cache {
+            Some(c) => CachedTables {
+                tables: c.tables.keys().cloned().collect(),
+                fetched_at: c.fetched_at,
+                url,
+                user,
+            },
+            None => CachedTables {
+                tables: Vec::new(),
+                fetched_at: 0,
+                url,
+                user,
+            },
+        }
     })
+    .await
+    .map_err(|e| format!("读取缓存表清单失败：{e}"))
 }
 
 /// 指定连接的表结构缓存（SQL 补全用：表名 → 字段名与类型）。没缓存返回 null。
@@ -1829,21 +1897,27 @@ pub async fn db_schema_cache(
 ) -> Result<Option<Value>, String> {
     let cfg = state.config.read().await.clone();
     let c = find_conn(&cfg, &id)?;
-    let Some(cache) = load_cache(&state.config_dir, &c.url, &c.user) else {
-        return Ok(None);
-    };
-    let mut tables = serde_json::Map::new();
-    for (name, t) in &cache.tables {
-        let cols: Vec<Value> = t
-            .columns
-            .iter()
-            .map(|(n, ty)| serde_json::json!([n, ty]))
-            .collect();
-        tables.insert(name.clone(), Value::Array(cols));
-    }
-    Ok(Some(
-        serde_json::json!({ "fetchedAt": cache.fetched_at, "tables": tables }),
-    ))
+    let config_dir = state.config_dir.clone();
+    // 大库缓存的读盘、JSON 解析及组装不占用异步命令线程。
+    tauri::async_runtime::spawn_blocking(move || -> Result<Option<Value>, String> {
+        let Some(cache) = load_cache(&config_dir, &c.url, &c.user) else {
+            return Ok(None);
+        };
+        let mut tables = serde_json::Map::new();
+        for (name, t) in &cache.tables {
+            let cols: Vec<Value> = t
+                .columns
+                .iter()
+                .map(|(n, ty)| serde_json::json!([n, ty]))
+                .collect();
+            tables.insert(name.clone(), Value::Array(cols));
+        }
+        Ok(Some(
+            serde_json::json!({ "fetchedAt": cache.fetched_at, "tables": tables }),
+        ))
+    })
+    .await
+    .map_err(|e| format!("读取表结构缓存失败：{e}"))?
 }
 
 #[derive(Debug, Serialize)]

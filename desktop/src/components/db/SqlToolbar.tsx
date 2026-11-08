@@ -17,7 +17,7 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   scope: SqlExecutionScope | null;
   focusMode?: SqlConsoleFocus;
   onFocusChange?: (mode: SqlConsoleFocus) => void;
-  onRun: (mode: "current" | "script") => void;
+  onRun: (mode: "current" | "script", collectStats?: boolean) => void;
   onStop: () => void;
   onExplain: () => void;
   onFormat: () => void;
@@ -155,6 +155,7 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
         onClick={(e) =>
           popup(e.currentTarget, [
             { label: "格式化 SQL", icon: "paintbrush", hint: "Ctrl+Shift+F", onSelect: onFormat },
+            { label: "执行当前语句并采集统计", icon: "activity", disabled: tab.running || locked || !!operation || !conn, onSelect: () => onRun("current", true) },
             {
               label: "导出 INSERT（光标处查询）",
               icon: "download",

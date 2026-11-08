@@ -214,6 +214,8 @@ export interface RunOutcome {
 }
 
 export interface RunOptions {
+  /** 诊断操作才采集会话统计；普通查询不增加两次统计往返。 */
+  collectStats?: boolean;
   /** 出错后继续执行剩余语句（回放迁移脚本用）；默认出错即停。 */
   ignoreErrors?: boolean;
   /** 每条开始前回调（回放进度用）。 */
@@ -287,7 +289,7 @@ export async function runStatements(
         break;
       }
       if(stopRequested) {outcome.stoppedByUser=true;break;}
-      const r = await execOne(tabId, s.text, i + 1, contexts[i]);
+      const r = await execOne(tabId, s.text, i + 1, contexts[i], opts.collectStats);
       // await 期间可能已经切连接：这条结果属于旧库，丢弃且不继续写回。
       if (!sameRun()) break;
       const connectionInterrupted = r.errorCode === "session-lost" || r.errorCode === "fallback-session-lost" || r.errorCode === "probe-failed";

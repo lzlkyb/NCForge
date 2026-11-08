@@ -7,7 +7,7 @@ import {createHash} from "node:crypto";
 import {readFile,mkdir,writeFile} from "node:fs/promises";
 import {fileURLToPath} from "node:url";
 import {chromium} from "playwright";
-const dist=new URL("../dist/",import.meta.url), artifacts=new URL("../../docs/数据库复制导出实施验收-2026-11-06/",import.meta.url);
+const dist=new URL("../dist/",import.meta.url), artifacts=new URL("../../docs/数据库性能验收-2026-11-08/复制导出/",import.meta.url);
 const html=await readFile(new URL("index.html",dist),"utf8"),entry=html.match(/<script type="module"[^>]*src="([^"]+)"[^>]*><\/script>/)?.[1];
 assert.ok(entry,"Build production assets first");
 const base=(await readFile(new URL("db-workbench-acceptance.test.mjs",import.meta.url),"utf8")).match(/const bootstrap=`([\s\S]*?)`;/)[1];
@@ -74,7 +74,7 @@ test("database transfer production: themes, scopes, formats, workers, native sav
    await page.evaluate(()=>window.transferReject(Error("写入文件失败：目录不可写")));await dlg.getByRole("alert").filter({hasText:"目录不可写"}).waitFor();await shot("error");await dlg.getByRole("button",{name:"修改设置并重试",exact:true}).click();assert.equal(await dlg.getByLabel("输出格式",{exact:true}).inputValue(),"jsonl");
    const failedId=await page.evaluate(()=>window.transferRequest.exportId);await dlg.getByRole("button",{name:"保存文件",exact:true}).click();await page.waitForFunction(id=>window.transferRequest.exportId!==id,failedId);await page.evaluate(()=>window.transferResolve(false));await dlg.getByText("文件已保存",{exact:true}).waitFor();await shot("success");await dlg.getByRole("button",{name:"关闭",exact:true}).click();
    // Large copy uses the production Worker under the exact installed CSP.
-   await page.getByRole("button",{name:"复制为",exact:true}).click();await page.getByRole("menuitem",{name:"高级复制…",exact:true}).click();await copy.locator('input[type="radio"]').nth(1).check();await copy.getByRole("button",{name:"全部列",exact:true}).click();await copy.getByLabel("输出格式",{exact:true}).selectOption("json");await copy.getByRole("button",{name:"复制",exact:true}).click();await page.waitForFunction(async()=>{try{return JSON.parse(await navigator.clipboard.readText()).length===200;}catch{return false;}});await copy.getByRole("button",{name:"关闭",exact:true}).click();
+   await page.getByRole("button",{name:"复制为",exact:true}).click();await page.getByRole("menuitem",{name:"高级复制…",exact:true}).click();await copy.locator('input[type="radio"]').nth(1).check();await copy.locator('.dbx-transfer-column-settings > summary').click();await copy.getByRole("button",{name:"全部列",exact:true}).click();await copy.getByLabel("输出格式",{exact:true}).selectOption("json");await copy.getByRole("button",{name:"复制",exact:true}).click();await page.waitForFunction(async()=>{try{return JSON.parse(await navigator.clipboard.readText()).length===200;}catch{return false;}});await copy.getByRole("button",{name:"关闭",exact:true}).click();
    assert.deepEqual(await page.evaluate(()=>window.cspViolations),[]);await context.close();
   }
   assert.deepEqual(errors,[]);await writeFile(new URL("检查记录.json",artifacts),JSON.stringify({at:new Date().toISOString(),errors,measurements},null,2));

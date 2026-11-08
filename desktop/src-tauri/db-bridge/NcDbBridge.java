@@ -305,6 +305,7 @@ public class NcDbBridge {
         long txRows;
         long txSince;
         boolean readOnly, readOnlyStarted, previousAuto;
+        boolean statsUnavailable;
 
         volatile boolean closed;
 
@@ -382,7 +383,7 @@ public class NcDbBridge {
                 ok(id, connect(url, str(ds.get("user")), str(ds.get("password")), flag(a, 2),
                         a.size() > 3 ? a.get(3) : "", true));
             } else if ("exec".equals(cmd)) {
-                ok(id, exec(a.get(0), intArg(a, 1, 500), intArg(a, 2, 30)));
+                ok(id, exec(a.get(0), intArg(a, 1, 500), intArg(a, 2, 30), flag(a, 3)));
             } else if ("execBound".equals(cmd)) {
                 ok(id, execParams(a.get(0), intArg(a,1,500), intArg(a,2,30), a.subList(3,a.size())));
             } else if ("readOnly".equals(cmd)) {
@@ -475,6 +476,7 @@ public class NcDbBridge {
             p.setProperty("oracle.net.CONNECT_TIMEOUT", "15000");
             DriverManager.setLoginTimeout(15);
             conn = DriverManager.getConnection(url, p);
+            statsUnavailable = false;
             readOnly = false; readOnlyStarted = false;
             conn.setAutoCommit(autoCommit);
             resetTx();
@@ -638,10 +640,13 @@ public class NcDbBridge {
             }
             return "{\"readOnly\":" + readOnly + ",\"tx\":" + txJson() + "}";
         }
-        private String exec(String raw, int maxRows, int timeout) throws Exception {
-            return execParams(raw,maxRows,timeout,null);
+        private String exec(String raw, int maxRows, int timeout, boolean collectStats) throws Exception {
+            return execParams(raw,maxRows,timeout,null,collectStats);
         }
         private String execParams(String raw, int maxRows, int timeout, List<String> binds) throws Exception {
+            return execParams(raw,maxRows,timeout,binds,false);
+        }
+        private String execParams(String raw, int maxRows, int timeout, List<String> binds, boolean collectStats) throws Exception {
             requireConn();
             closeCursor();
             String sql = normalize(raw);
@@ -650,9 +655,11 @@ public class NcDbBridge {
                 throw new SQLException("空语句");
             }
             long t0 = System.currentTimeMillis();
-            // A2 Autotrace：执行前后各读一次 v$mystat，差值才是这条语句的真实开销。
+            // 仅显式请求 Autotrace 时前后读取 v$mystat；普通执行避免这两次往返。
             // 读不到（低权限账号没有 V_$MYSTAT 授权）时为 null，界面据此不显示统计行。
-            long[] statBefore = statSnapshot();
+            // Optional statistics are probed once per connection when unavailable.
+            long[] statBefore = !collectStats || statsUnavailable ? null : statSnapshot();
+            if (collectStats && statBefore == null) statsUnavailable = true;
             // 游标 OUT 参数要走 CallableStatement（见 CURSOR_OPEN 注释）；
             // 其余语句仍是普通 Statement，行为一字不改。
             int[] cursorBinds = cursorOutBinds(sql);
@@ -663,6 +670,7 @@ public class NcDbBridge {
                 if (cursorBinds.length > 0) {
                     CallableStatement cs = prepareCursorCall(sql, cursorBinds);
                     st = cs;
+                    st.setFetchSize(Math.max(2, Math.min(127, maxRows) + 1));
                     st.setQueryTimeout(timeout);
                     running = st; // 让 cancel 能找到它
                     cs.execute();
@@ -696,6 +704,7 @@ public class NcDbBridge {
                         }
                     }
                     st.setQueryTimeout(timeout);
+                    st.setFetchSize(Math.max(2, Math.min(127, maxRows) + 1));
                     running = st; // 让 cancel 能找到它
                     boolean hasRs = binds == null ? st.execute(sql) : ((PreparedStatement)st).execute();
                     if (hasRs) {
@@ -716,7 +725,7 @@ public class NcDbBridge {
                 }
                 long ms = System.currentTimeMillis() - t0;
                 // 必须在 dbmsOutput() 之前取快照：那段 get_line 循环也会产生逻辑读
-                long[] statAfter = statSnapshot();
+                long[] statAfter = statBefore == null ? null : statSnapshot();
                 return "{" + body + ",\"ms\":" + ms + ",\"stats\":" + statsJson(statBefore, statAfter)
                         + ",\"output\":" + dbmsOutput() + ",\"tx\":" + txJson() + "}";
             } finally {
@@ -1110,6 +1119,7 @@ public class NcDbBridge {
                     + " union all select view_name, 'VIEW' from all_views"
                     + " where owner = sys_context('userenv','current_schema') order by 1";
             Statement st = conn.createStatement();
+            st.setFetchSize(512);
             StringBuilder sb = new StringBuilder("[");
             int n = 0;
             try {
@@ -1271,6 +1281,7 @@ public class NcDbBridge {
             StringBuilder sb = new StringBuilder("{");
             int n = 0;
             Statement st = conn.createStatement();
+            st.setFetchSize(512);
             try {
                 ResultSet rs = st.executeQuery("select lower(name), displayname from md_table where displayname is not null");
                 while (rs.next()) {

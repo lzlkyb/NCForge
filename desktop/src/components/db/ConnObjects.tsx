@@ -57,7 +57,9 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
   useEffect(() => {
     setObjs(null);
     setObjErr(null);
-    if (rt.status !== "connected") return;
+  }, [connId, rt.status, schema]);
+  useEffect(() => {
+    if (rt.status !== "connected" || !groups.obj || objs !== null) return;
     let alive = true;
     dbApi.objects(connId).then(
       (r) => alive && setObjs(r.objects),
@@ -70,7 +72,7 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
     return () => {
       alive = false;
     };
-  }, [connId, rt.status, schema]);
+  }, [connId, rt.status, schema, groups.obj, objs]);
 
   const matched = useMemo(() => {
     const all = rt.tables ?? [];
@@ -168,10 +170,10 @@ export function ConnObjects({ connId, filter }: { connId: string; filter: string
       })}
       {rt.status === "connected" && (
         <div>
-          <button type="button" className="dbx-sgroup" onClick={() => setGroups({ ...groups, obj: !groups.obj })}>
+          <button type="button" className="dbx-sgroup" aria-expanded={groups.obj} onClick={() => setGroups({ ...groups, obj: !groups.obj })}>
             <Icon name={groups.obj ? "chevronDown" : "chevronRight"} size={11} />
             其它对象
-            <span className="dbx-cnt">{thousands((objs ?? []).length)}</span>
+            <span className="dbx-cnt">{objs === null ? "—" : thousands(objs.length)}</span>
           </button>
           {groups.obj && !objs && <p className="dbx-tree-note" style={{ paddingLeft: 25 }}>读取对象…</p>}
           {groups.obj && objErr && <p className="dbx-tree-note" style={{ paddingLeft: 25 }}>读不到其它对象：{objErr}</p>}

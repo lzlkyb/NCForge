@@ -28,6 +28,13 @@ function render(overrides: Partial<Props> = {}) {
 }
 
 describe("SQL 执行范围", () => {
+  it("执行统计由工具菜单单次开启", () => {
+    const props = render();
+    act(() => button("工具").click());
+    act(() => button("执行当前语句并采集统计").click());
+    expect(props.onRun).toHaveBeenCalledWith("current", true);
+  });
+
   it("执行名称、行范围和语句数来自当前文档的真实目标", () => {
     const props = render();
     expect(host.querySelector(".dbx-scope")?.textContent).toBe("第 2–6 行 · 1 条");

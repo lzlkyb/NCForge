@@ -112,7 +112,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const total = rnW + visible.reduce((n,c)=>n+ws[c],0);
   const bounds = useMemo(() => selectionBounds(order,visible,selection), [order,visible,selection]);
   const viewport = columnViewport(visible,ws,new Set(visible.filter(c=>frozen.includes(columns[c].name))),scroll.left,scroll.w,rnW);
-  const cellStyle = (c:number) => { const col=viewport.find(v=>v.column===c)!; return {width:col.width,position:col.frozen ? "sticky" as const : "absolute" as const,left:col.frozen ? col.sticky : col.left,...(col.frozen ? {zIndex:2} : {})}; };
+  const viewportByColumn = new Map(viewport.map(col => [col.column, col]));
+  const cellStyle = (c:number) => { const col=viewportByColumn.get(c)!; return {width:col.width,position:col.frozen ? "sticky" as const : "absolute" as const,left:col.frozen ? col.sticky : col.left,...(col.frozen ? {zIndex:2} : {})}; };
   const first = Math.max(0, Math.floor(scroll.top / ROW_H) - OVERSCAN);
   const last = Math.min(order.length, Math.ceil((scroll.top + scroll.h) / ROW_H) + OVERSCAN);
   const selIndex = sel ? order.indexOf(sel.r) : -1;

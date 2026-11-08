@@ -383,6 +383,8 @@ export function setConns(conns: DbConn[]) {
  * 用例读到（表现为"莫名多出一条事务"）。`setConns([])` 只清连接表，清不掉 rt。
  */
 export function __resetDbForTest() {
+  metadataFlights.clear();
+  for (const [id, version] of metadataVersions) metadataVersions.set(id, version + 1);
   set({ conns: [], loaded: false, loadError: null, rt: {}, tabs: [], active: null, dialog: null, sessionPanel: null });
 }
 
@@ -396,16 +398,27 @@ export async function loadConns(): Promise<void> {
 
 /** 连库。返回 `need-password` 时界面弹口令框。 */
 export async function connect(id: string, password?: string, remember?: boolean): Promise<"ok" | "need-password" | "error"> {
+  const requested = sqlTabOf(state.active);
+  const prepareSql = requested?.connId === id && !requested.slot;
   setRt(id, { status: "connecting", error: undefined });
   try {
-    const info = await trackOperation(dbTaskSpec(`connect:${id}`,"连接数据库",id,"连接",connOf(id)?.name),()=>dbApi.connect(id, password, remember));
+    const info = await trackOperation(dbTaskSpec(`connect:${id}`,"连接数据库",id,"连接",connOf(id)?.name),()=>dbApi.connect(id, password, remember, prepareSql));
+    if (info.preparedSlot) {
+      const current = requested && sqlTabOf(requested.id);
+      const owned = state.tabs.some(t => t.kind === "sql" && t.connId === id && t.slot === info.preparedSlot);
+      if (!owned && current?.connId === id && !current.slot) patchTab<SqlTab>(current.id, { slot: info.preparedSlot });
+      else if (!owned) void releaseSlot(id, info.preparedSlot);
+    }
     // 配置写的是 JVM 桥、本机却没有 Java 运行时：后端已自动改用纯 Rust，
     // 但必须在界面上说出来 —— 否则用户以为自己在用 JVM 桥，撞上 REF CURSOR 时更困惑。
     if (info.engineNote) toast(info.engineNote, "warning");
-    setRt(id, { status: "connected", info, txNotice: undefined, tx: { autoCommit: info.autoCommit, statements: 0, rows: 0, since: 0 } });
+    setRt(id, { status: "connected", info, currentSchema: info.schema ?? rtOf(id).currentSchema, txNotice: undefined, tx: { autoCommit: info.autoCommit, statements: 0, rows: 0, since: 0 } });
     // 能力位问一次就够（连接期间不会变）；失败不影响已连上的状态，只是按钮按保守处理
     void dbApi.caps(id).then((caps) => setRt(id, { caps })).catch(() => undefined);
-    void loadMeta(id);
+    // 查询会话先启动；首次执行复用 trackOperation 的同一申请，不再等元数据抢先排队。
+    const active = sqlTabOf(state.active);
+    if (active?.connId === id) void ensureSlot(active.id, id).then(() => { if (rtOf(id).status === "connected") void loadMeta(id); });
+    else void loadMeta(id);
     if (password && remember !== false) void loadConns();
     return "ok";
   } catch (e) {
@@ -417,7 +430,9 @@ export async function connect(id: string, password?: string, remember?: boolean)
 
 export async function disconnect(id: string): Promise<void> {
   await trackOperation(dbTaskSpec(`disconnect:${id}`,"断开数据库",id,"全部会话",connOf(id)?.name),()=>dbApi.disconnect(id));
-  setRt(id, { status: "idle", info: undefined, tx: undefined, txNotice: undefined, error: undefined });
+  metadataFlights.delete(id);
+  metadataVersions.set(id, (metadataVersions.get(id) ?? 0) + 1);
+  setRt(id, { status: "idle", info: undefined, tx: undefined, txNotice: undefined, error: undefined, tablesLoading: false });
   // 连接已失效：清掉这条连接上所有标签的执行反馈与旧结果，避免「执行已停止」一直挂着。
   const tabs = state.tabs.map((t) =>
     t.kind === "sql" && t.connId === id
@@ -428,17 +443,39 @@ export async function disconnect(id: string): Promise<void> {
 }
 
 /** 连上之后拉表清单、NC 中文名、本地表结构缓存（补全用）。任一失败不影响其它。 */
-export async function loadMeta(id: string, observed=false): Promise<void> {
+const metadataFlights = new Map<string, { key: string; promise: Promise<void> }>();
+const metadataVersions = new Map<string, number>();
+export function loadMeta(id: string, observed=false): Promise<void> {
+  const conn = connOf(id);
+  const key = JSON.stringify([conn?.url, conn?.user, rtOf(id).currentSchema]);
+  const existing = metadataFlights.get(id);
+  if (existing?.key === key) return existing.promise;
+  const version = (metadataVersions.get(id) ?? 0) + 1;
+  metadataVersions.set(id, version);
+  const promise = fetchMeta(id, observed, () => metadataVersions.get(id) === version).finally(() => {
+    if (metadataFlights.get(id)?.promise === promise) metadataFlights.delete(id);
+  });
+  metadataFlights.set(id, { key, promise });
+  return promise;
+}
+
+async function fetchMeta(id: string, observed: boolean, current: () => boolean): Promise<void> {
+  const publish = (patch: Partial<ConnRuntime>) => { if (current()) setRt(id, patch); };
   const task=observed ? beginOperation(dbTaskSpec(`meta:${id}`,"刷新数据库对象",id,"主会话",connOf(id)?.name)) : null;
   if(observed && !task) return;
-  setRt(id, { tablesLoading: true });
+  publish({ tablesLoading: true });
   const [t, n, s, sc] = await Promise.allSettled([
-    dbApi.tables(id),
-    dbApi.ncNames(id),
-    dbApi.schemaCache(id),
-    dbApi.schemas(id),
+    dbApi.tables(id).then(value => { publish({ tablesLoading: false, tablesAt: Date.now(), tables: value.tables }); return value; }),
+    dbApi.ncNames(id).then(value => { publish({ ncNames: value.names }); return value; }),
+    dbApi.schemaCache(id).then(value => { publish({ schema: value }); return value; }),
+    dbApi.schemas(id).then(value => {
+      publish({ schemas: value.schemas, currentSchema: value.current });
+      const flight = metadataFlights.get(id);
+      if (current() && flight) flight.key = JSON.stringify([connOf(id)?.url, connOf(id)?.user, value.current]);
+      return value;
+    }),
   ]);
-  setRt(id, {
+  publish({
     tablesLoading: false,
     tablesAt: t.status === "fulfilled" ? Date.now() : rtOf(id).tablesAt,
     tables: t.status === "fulfilled" ? t.value.tables : rtOf(id).tables,
@@ -746,7 +783,7 @@ export function clearSlots(connId: string): void {
 }
 
 /** 执行一条语句，结果记进标签、事务状态更新到连接（或标签的槽）、写入历史。不抛异常。 */
-export async function execOne(tabId: string, sql: string, index: number, context?: ResultExecutionContext): Promise<ResultEntry> {
+export async function execOne(tabId: string, sql: string, index: number, context?: ResultExecutionContext, collectStats = false): Promise<ResultEntry> {
   const tab = sqlTabOf(tabId);
   const identity = context ?? (tab?.connId ? captureResultContext(tab.connId, connOf(tab.connId), rtOf(tab.connId).currentSchema ?? rtOf(tab.connId).info?.schema, sql) : undefined);
   const base = { id: newId("r"), index, sql, context: identity, startLine: identity?.target?.startLine, columns: [], rows: [], hasMore: false, updateCount: -1, ms: 0 };
@@ -759,14 +796,14 @@ export async function execOne(tabId: string, sql: string, index: number, context
     claimCursor(connId, slot, base.id);
     let r;
     try {
-      r = await dbApi.exec(connId, sql, tab.maxRows, tab.timeoutSec, slot);
+      r = await dbApi.exec(connId, sql, tab.maxRows, tab.timeoutSec, slot, collectStats);
     } catch (e) {
       // 槽被空闲回收（10 分钟没动过）：重开一条再试一次，别让用户点一次就看见红字
       if (slot && parseDbError(e).code === "slot-gone") {
         patchTab<SqlTab>(tabId, { slot: null, tx: undefined });
         slot = await ensureSlot(tabId, connId);
         claimCursor(connId, slot, base.id);
-        r = await dbApi.exec(connId, sql, tab.maxRows, tab.timeoutSec, slot);
+        r = await dbApi.exec(connId, sql, tab.maxRows, tab.timeoutSec, slot, collectStats);
       } else {
         throw e;
       }
@@ -793,9 +830,10 @@ export async function execOne(tabId: string, sql: string, index: number, context
     entry = { ...base, kind: "error", error: friendlyDbError(e), errorCode: code, cancelled:dbCancelled(e), ms: Date.now() - t0 };
   }
   entry = fitResult(entry, TOTAL_RESULT_BYTES - retainedResultBytes(state.tabs));
+  const clientMs = Date.now() - t0;
   appendOutput(tabId, [{
     at: Date.now(),
-    text: `[${now()}] 第 ${index} 条 · ${summaryOf(entry)} · ${entry.ms} ms${entry.error ? ` · ${entry.error}` : ""}`,
+    text: `[${now()}] 第 ${index} 条 · ${summaryOf(entry)} · ${entry.ms} ms${clientMs > entry.ms+50 ? ` · 语句调用用时（含会话申请）${clientMs} ms` : ""}${entry.error ? ` · ${entry.error}` : ""}`,
     tone: entry.kind === "error" ? "bad" : "ok",
   }]);
   addHistory(connId, { at: Date.now(), sql, ms: entry.ms, summary: summaryOf(entry), ok: entry.kind !== "error" });

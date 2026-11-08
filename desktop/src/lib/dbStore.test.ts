@@ -4,7 +4,68 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("./tauri", () => ({ invoke: mocks.invoke }));
 
-import { __resetDbForTest, closeTab, ensureSlot, execOne, openSqlTab, patchTab, sqlTabOf, summaryOf, type ResultEntry, type SqlTab } from "./dbStore";
+import { __resetDbForTest, closeTab, connect, disconnect, ensureSlot, execOne, getDb, loadMeta, openSqlTab, patchTab, sqlTabOf, summaryOf, type ResultEntry, type SqlTab } from "./dbStore";
+
+describe("首次查询优先", () => {
+  beforeEach(()=>{__resetDbForTest();mocks.invoke.mockReset();});
+  it("后端并行准备好的槽直接复用，首查不再次申请会话",async()=>{
+    mocks.invoke.mockImplementation(()=>Promise.resolve({autoCommit:false,schema:"TARGET",preparedSlot:"ready",tables:[],names:{},schemas:[],current:"TARGET"}));
+    const tab=openSqlTab("c1");await connect("c1");
+    expect(await ensureSlot(tab,"c1")).toBe("ready");
+    expect(getDb().rt.c1.currentSchema).toBe("TARGET");
+    expect(mocks.invoke.mock.calls.find(([cmd])=>cmd==="db_connect")?.[1]).toMatchObject({prepareSql:true});
+    expect(mocks.invoke.mock.calls.some(([cmd])=>cmd==="db_slot_acquire")).toBe(false);
+    await new Promise(resolve=>setTimeout(resolve,0));
+  });
+  it("并行建连期间关闭标签会释放返回的槽",async()=>{
+    let release!: (value:unknown)=>void;
+    mocks.invoke.mockImplementation((cmd:string)=>cmd==="db_connect" ? new Promise(resolve=>{release=resolve;}) : Promise.resolve({tables:[],names:{},schemas:[],current:"NC"}));
+    const tab=openSqlTab("c1");const connecting=connect("c1");
+    await new Promise(resolve=>setTimeout(resolve,0));closeTab(tab);
+    release({autoCommit:false,preparedSlot:"unused"});await connecting;
+    expect(mocks.invoke.mock.calls.find(([cmd])=>cmd==="db_slot_release")?.[1]).toMatchObject({slot:"unused"});
+    await new Promise(resolve=>setTimeout(resolve,0));
+  });
+  it("同一连接的并发元数据加载合并为一轮",async()=>{
+    mocks.invoke.mockImplementation(()=>Promise.resolve({tables:[],names:{},schemas:[],current:"NC"}));
+    await Promise.all([loadMeta("c1"),loadMeta("c1"),loadMeta("c1")]);
+    expect(mocks.invoke.mock.calls.filter(([cmd,args])=>cmd==="db_meta" && args.kind==="tables")).toHaveLength(1);
+  });
+  it("断开后迟到的元数据不能恢复旧表清单或留下加载状态",async()=>{
+    let release!: (value:unknown)=>void;
+    const tables=new Promise(resolve=>{release=resolve;});
+    mocks.invoke.mockImplementation((cmd:string,args:{kind?:string})=>cmd==="db_meta" && args.kind==="tables" ? tables : Promise.resolve({names:{},schemas:[],current:"NC"}));
+    const loading=loadMeta("c1");await disconnect("c1");
+    release({tables:[{name:"STALE",kind:"TABLE"}]});await loading;
+    expect(getDb().rt.c1.status).toBe("idle");
+    expect(getDb().rt.c1.tablesLoading).toBe(false);
+    expect((getDb().rt.c1.tables ?? []).some(t=>t.name==="STALE")).toBe(false);
+  });
+  it("连接后先准备当前 SQL 会话，执行与预热共享申请，元数据不抢先", async()=>{
+    let release!: (value:{slot:string})=>void;
+    const slot=new Promise<{slot:string}>(resolve=>{release=resolve;});
+    mocks.invoke.mockImplementation((cmd:string)=>cmd==="db_slot_acquire" ? slot : Promise.resolve({autoCommit:false,tables:[],names:{},schemas:[],current:"NC"}));
+    const tab=openSqlTab("c1");
+    await connect("c1");
+    const executionSlot=ensureSlot(tab,"c1");
+    expect(mocks.invoke.mock.calls.filter(([cmd])=>cmd==="db_slot_acquire")).toHaveLength(1);
+    expect(mocks.invoke.mock.calls.some(([cmd])=>cmd==="db_meta")).toBe(false);
+    release({slot:"warm"});
+    expect(await executionSlot).toBe("warm");
+    await new Promise(resolve=>setTimeout(resolve,0));
+    expect(mocks.invoke.mock.calls.some(([cmd])=>cmd==="db_meta")).toBe(true);
+  });
+  it("中文名尚未返回时，表清单已经可见",async()=>{
+    let release!: (value:{names:Record<string,string>})=>void;
+    const names=new Promise<{names:Record<string,string>}>(resolve=>{release=resolve;});
+    mocks.invoke.mockImplementation((cmd:string,args:{kind?:string})=>cmd==="db_meta" && args.kind==="ncNames" ? names : Promise.resolve({tables:[{name:"T",kind:"TABLE"}],schemas:[],current:"NC"}));
+    const loading=loadMeta("c1");
+    await new Promise(resolve=>setTimeout(resolve,0));
+    expect(getDb().rt.c1.tables?.[0].name).toBe("T");
+    expect(getDb().rt.c1.tablesLoading).toBe(false);
+    release({names:{t:"测试"}});await loading;
+  });
+});
 
 /**
  * 结果摘要（结果标签上那截小字）。
@@ -110,8 +171,17 @@ describe("execOne 把 sets 带到结果条目上", () => {
     await execOne(tabId, "select 1 from dual", 1);
     // A0 的核心：执行必须落到自己那条会话上，否则长查询还是会把别的标签堵住
     const exec = mocks.invoke.mock.calls.find((c) => c[0] === "db_exec");
-    expect(exec?.[1]).toMatchObject({ id: "c1", slot: "2" });
+    expect(exec?.[1]).toMatchObject({ id: "c1", slot: "2", collectStats: false });
     expect(mocks.invoke.mock.calls.filter((c) => c[0] === "db_slot_acquire")).toHaveLength(1);
+  });
+
+  it("只有明确请求诊断的执行才采集统计", async () => {
+    mocks.invoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "db_slot_acquire" ? { slot: "2" } : rowsBody),
+    );
+    const tabId = openSqlTab("c1", "select 1 from dual");
+    await execOne(tabId, "select 1 from dual", 1, undefined, true);
+    expect(mocks.invoke.mock.calls.find((c) => c[0] === "db_exec")?.[1]).toMatchObject({ collectStats: true });
   });
 
   it("申请不到槽时退回 primary，执行不失败", async () => {

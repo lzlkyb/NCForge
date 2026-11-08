@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const dist=new URL("../dist/",import.meta.url);
-const artifacts=new URL("../../docs/数据库视觉升级-2026-11-06/正式-production/",import.meta.url);
+const artifacts=new URL("../../docs/数据库性能验收-2026-11-08/界面回归/",import.meta.url);
 const html=await readFile(new URL("index.html",dist),"utf8");
 const entry=html.match(/<script type="module"[^>]*src="([^"]+)"[^>]*><\/script>/)?.[1];
 assert.ok(entry,"Build production frontend before running acceptance");

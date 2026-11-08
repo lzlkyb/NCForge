@@ -74,14 +74,14 @@ export interface EngineCaps {
   multiSession: boolean;
   /** 能列会话与锁（`v$session` / `v$locked_object`）。权限不够由返回的 `granted` 表达。 */
   sessions: boolean;
-  /** 执行时能回实际统计（逻辑读/物理读）。账号读不到统计视图时响应里 `stats` 为 null。 */
+  /** 支持按需采集实际统计（逻辑读/物理读）；未采集或账号无权限时 `stats` 为 null。 */
   stats: boolean;
 }
 
 /**
- * 一次执行的实际开销（Autotrace）。由后端在执行前后各读一次 `v$mystat` 取差值。
+ * 一次诊断执行的实际开销（Autotrace）。显式开启时才前后读取 `v$mystat` 取差值。
  *
- * `null` = 这个账号读不到统计视图（没有 `V_$MYSTAT` 授权），**不是 0**：
+ * `null` = 未采集或账号读不到统计视图（没有 `V_$MYSTAT` 授权），**不是 0**：
  * 界面必须整行不显示，而不是显示一排 0 让人以为这条 SQL 没花成本。
  */
 export interface ExecStats {
@@ -256,11 +256,12 @@ export interface ConnectInfo {
   /** 连上后生效的默认 schema（没设就是登录账号自己的）。 */
   schema?: string;
   /** 默认 schema 没设成时的原因（配置写错 / 没权限）。有值 = 当前用的是登录账号。 */
-  schemaWarning?: string;
+  schemaWarning?: string | null;
   /** **实际**在用的引擎：配置写 JVM 桥但本机没有运行时，这里会是 `rust`。 */
   engine?: DbEngine;
   /** 被降级时的原因。界面要显示出来，否则用户以为自己在用 JVM 桥。 */
   engineNote?: string | null;
+  preparedSlot?: string | null;
 }
 
 export interface PropSource {
@@ -505,15 +506,15 @@ export const dbApi = {
   propSources: () => invoke<{ source: string; sources: PropSource[] }>("db_prop_sources"),
   propImport: (names: string[], env: DbEnv) => invoke<DbConn[]>("db_prop_import", { names, env }),
 
-  connect: (id: string, password?: string, remember?: boolean) =>
-    invoke<ConnectInfo>("db_connect", { id, password: password || null, remember: remember ?? null }),
+  connect: (id: string, password?: string, remember?: boolean, prepareSql = false) =>
+      invoke<ConnectInfo>("db_connect", { id, password: password || null, remember: remember ?? null, prepareSql }),
   disconnect: (id: string) => invoke<void>("db_disconnect", { id }),
   /**
    * 执行一条语句。`slot` 为空 = primary（元数据 / 表页 / 事务条那条会话）；
    * SQL 标签申请到槽之后，执行、加载更多、取消、事务都必须带同一个槽名。
    */
-  exec: (id: string, sql: string, maxRows: number, timeoutSec: number, slot?: string | null) =>
-    invoke<ExecResult>("db_exec", { id, sql, maxRows, timeoutSec, slot: slot || null }),
+    exec: (id: string, sql: string, maxRows: number, timeoutSec: number, slot?: string | null, collectStats = false) =>
+      invoke<ExecResult>("db_exec", { id, sql, maxRows, timeoutSec, slot: slot || null, collectStats }),
   /** 给一个 SQL 标签再开一条独立会话。最多 3 个/连接，超出报 `slots-full`。 */
   slotAcquire: (id: string) => invoke<SlotOut>("db_slot_acquire", { id }),
   /** 关标签时释放；断开连接时后端会连带收掉全部槽。 */

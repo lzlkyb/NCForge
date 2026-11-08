@@ -45,6 +45,25 @@ fn call(e: &RustEngine, cmd: &str, args: &[&str]) -> Value {
 
 #[test]
 #[ignore = "要连真实数据库"]
+fn probe_preserves_open_result_cursor() {
+    let e = RustEngine::new();
+    call(&e, "connect", &[&url(), &user(), &pass(), "false"]);
+    let first = call(
+        &e,
+        "exec",
+        &["select level from dual connect by level <= 5", "2", "30"],
+    );
+    assert_eq!(first["hasMore"], true);
+    for _ in 0..3 {
+        assert_eq!(call(&e, "probe", &[])["alive"], true);
+    }
+    let more = call(&e, "more", &["2"]);
+    assert_eq!(more["rowCount"], 2);
+    call(&e, "disconnect", &[]);
+}
+
+#[test]
+#[ignore = "要连真实数据库"]
 fn 纯rust引擎全命令真库核对() {
     let e = RustEngine::new();
 

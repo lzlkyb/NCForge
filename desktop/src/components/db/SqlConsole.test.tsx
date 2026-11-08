@@ -25,9 +25,10 @@ vi.mock("./InsertExportDialog", () => ({ InsertExportDialog: () => null }));
 vi.mock("./ValueSearchDialog", () => ({ ValueSearchDialog: () => null }));
 vi.mock("./ScriptReplayDialog", () => ({ ScriptReplayDialog: () => null }));
 vi.mock("./SqlToolbar", () => ({ SqlToolbar: ({ scope, onRun, onStop, focusMode, onFocusChange }: {
-  scope: SqlExecutionScope | null; onRun: (mode: "current" | "script") => void; onStop: () => void; focusMode: SqlConsoleFocus; onFocusChange: (mode: SqlConsoleFocus) => void;
+  scope: SqlExecutionScope | null; onRun: (mode: "current" | "script", collectStats?: boolean) => void; onStop: () => void; focusMode: SqlConsoleFocus; onFocusChange: (mode: SqlConsoleFocus) => void;
 }) => <div data-scope={JSON.stringify(scope)} data-focus-mode={focusMode}>
   <button onClick={() => onRun("current")}>执行当前</button><button onClick={() => onRun("script")}>执行脚本</button><button onClick={onStop}>停止</button>
+  <button onClick={() => onRun("current", true)}>执行并采集统计</button>
   <button onClick={() => onFocusChange("results")}>专注结果</button><button onClick={() => onFocusChange("editor")}>专注编辑器</button><button onClick={() => onFocusChange("split")}>还原布局</button>
 </div> }));
 vi.mock("./SqlEditor", async () => {
@@ -67,7 +68,13 @@ const shown = () => JSON.parse(host.querySelector("[data-scope]")!.getAttribute(
 it("工具条范围与实际交给执行器的目标一致", async () => {
   render(); expect(shown()?.statements).toEqual(mocks.targets.a.current);
   await act(async () => click("执行当前"));
-  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", mocks.targets.a.current);
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", mocks.targets.a.current, { collectStats: false });
+});
+
+it("诊断执行将采集选项传入执行器", async () => {
+  render();
+  await act(async () => click("执行并采集统计"));
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", mocks.targets.a.current, { collectStats: true });
 });
 
 it("脚本执行中冻结实际执行范围，随后修改编辑器不会把范围改成下一条 SQL", async () => {
