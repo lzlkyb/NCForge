@@ -745,7 +745,11 @@ mod tests {
         std::fs::create_dir_all(root.join("middleware")).unwrap();
         std::fs::write(root.join("middleware").join("mw.jar"), b"x").unwrap();
         std::fs::create_dir_all(root.join("ufjdk").join("bin")).unwrap();
-        std::fs::write(root.join("ufjdk").join("bin").join("java.exe"), b"x").unwrap();
+        std::fs::write(
+            root.join("ufjdk").join("bin").join(nc_home::JAVA_BIN_NAME),
+            b"x",
+        )
+        .unwrap();
         let p = probe(Some(root.to_string_lossy().as_ref()), "sz02", "uapbd", None);
         assert!(!p.ready, "缺 prop.xml 必须阻挡");
         assert!(p
@@ -762,7 +766,11 @@ mod tests {
         std::fs::create_dir_all(root.join("middleware")).unwrap();
         std::fs::write(root.join("middleware").join("mw.jar"), b"x").unwrap();
         std::fs::create_dir_all(root.join("ufjdk").join("bin")).unwrap();
-        std::fs::write(root.join("ufjdk").join("bin").join("java.exe"), b"x").unwrap();
+        std::fs::write(
+            root.join("ufjdk").join("bin").join(nc_home::JAVA_BIN_NAME),
+            b"x",
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("ierp").join("bin")).unwrap();
         std::fs::write(root.join("ierp").join("bin").join("prop.xml"), b"<x/>").unwrap();
         let p = probe(Some(root.to_string_lossy().as_ref()), "sz02", "uapbd", None);
@@ -787,7 +795,11 @@ mod tests {
         std::fs::create_dir_all(root.join("middleware")).unwrap();
         std::fs::write(root.join("middleware").join("mw.jar"), b"x").unwrap();
         std::fs::create_dir_all(root.join("ufjdk").join("bin")).unwrap();
-        std::fs::write(root.join("ufjdk").join("bin").join("java.exe"), b"x").unwrap();
+        std::fs::write(
+            root.join("ufjdk").join("bin").join(nc_home::JAVA_BIN_NAME),
+            b"x",
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("ierp").join("bin")).unwrap();
         std::fs::write(root.join("ierp").join("bin").join("prop.xml"), b"<x/>").unwrap();
         std::fs::create_dir_all(root.join("bin")).unwrap();

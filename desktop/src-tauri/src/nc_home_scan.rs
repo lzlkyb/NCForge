@@ -177,7 +177,15 @@ mod tests {
     fn fake_home(tag: &str) -> PathBuf {
         let d = temp_dir(tag);
         fs::create_dir_all(d.join("ufjdk").join("bin")).unwrap();
-        fs::write(d.join("ufjdk").join("bin").join("java.exe"), b"stub").unwrap();
+        // 平台可执行名：Windows 是 java.exe，macOS 是 java。写死 java.exe 会让 mac 上的
+        // 构造全部判成「没有 java」，扫描与就绪检查跟着一起红（0.2.0 CI 踩过）。
+        fs::write(
+            d.join("ufjdk")
+                .join("bin")
+                .join(crate::nc_home::JAVA_BIN_NAME),
+            b"stub",
+        )
+        .unwrap();
         fs::create_dir_all(d.join("middleware")).unwrap();
         fs::write(d.join("middleware").join("mw.jar"), b"stub").unwrap();
         for m in ["gl", "ic", "pu"] {
