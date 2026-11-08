@@ -1,0 +1,208 @@
+{
+  "source": "production MetaTab + WorkbenchFrame + application CSS, isolated memory IPC",
+  "sourceRoot": "D:\\AItool\\winapp\\nc-workbench\\desktop",
+  "windows": [
+    {
+      "width": 1640,
+      "height": 960,
+      "theme": "light",
+      "fieldHeight": 740,
+      "workbenchWidth": 1638,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 16,
+      "mode": "wide"
+    },
+    {
+      "width": 1640,
+      "height": 960,
+      "theme": "dark",
+      "fieldHeight": 740,
+      "workbenchWidth": 1638,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 16,
+      "mode": "wide"
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "theme": "light",
+      "fieldHeight": 680,
+      "workbenchWidth": 1278,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 16,
+      "mode": "medium"
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "theme": "dark",
+      "fieldHeight": 680,
+      "workbenchWidth": 1278,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 16,
+      "mode": "medium"
+    },
+    {
+      "width": 1024,
+      "height": 768,
+      "theme": "light",
+      "fieldHeight": 548,
+      "workbenchWidth": 1022,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "small"
+    },
+    {
+      "width": 1024,
+      "height": 768,
+      "theme": "dark",
+      "fieldHeight": 548,
+      "workbenchWidth": 1022,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "small"
+    },
+    {
+      "width": 1024,
+      "height": 540,
+      "theme": "light",
+      "fieldHeight": 295.5,
+      "workbenchWidth": 1022,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 1024,
+      "height": 540,
+      "theme": "dark",
+      "fieldHeight": 295.5,
+      "workbenchWidth": 1022,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 819,
+      "height": 614,
+      "theme": "light",
+      "fieldHeight": 369.5,
+      "workbenchWidth": 817,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 819,
+      "height": 614,
+      "theme": "dark",
+      "fieldHeight": 369.5,
+      "workbenchWidth": 817,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 683,
+      "height": 512,
+      "theme": "light",
+      "fieldHeight": 267.5,
+      "workbenchWidth": 681,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 683,
+      "height": 512,
+      "theme": "dark",
+      "fieldHeight": 267.5,
+      "workbenchWidth": 681,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 560,
+      "height": 900,
+      "theme": "light",
+      "fieldHeight": 615.5,
+      "workbenchWidth": 558,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    },
+    {
+      "width": 560,
+      "height": 900,
+      "theme": "dark",
+      "fieldHeight": 615.5,
+      "workbenchWidth": 558,
+      "overflowX": false,
+      "overflowY": false,
+      "resourceRows": 13,
+      "mode": "compact"
+    }
+  ],
+  "functional": [
+    "图表与接口属性定位",
+    "快改加入草稿",
+    "撤销重做",
+    "关闭保护",
+    "失败保留与重新预览重试",
+    "严格 SHA 保存",
+    "错误粘贴整批阻断",
+    "外部修改不覆盖"
+  ],
+  "performance": {
+    "largeModel": {
+      "nodes": 15,
+      "fields": 19,
+      "resources": 14,
+      "entities": 500,
+      "relations": 100,
+      "fieldsInPrimary": 1000,
+      "resourcesInIndex": 1500,
+      "feedback": {
+        "samples": 60,
+        "medianMs": 29,
+        "p95Ms": 41.30000001192093,
+        "method": "DOM keydown to next requestAnimationFrame, includes scheduling"
+      }
+    },
+    "drag": {
+      "entities": 50,
+      "relations": 100,
+      "samples": 45,
+      "medianIntervalMs": 16.899999991059303,
+      "p95IntervalMs": 19.099999994039536,
+      "p95InputToFrameMs": 19,
+      "initialTransform": "translate(28 28)",
+      "finalTransform": "translate(118 73)",
+      "method": "headless Edge with GPU disabled, includes frame scheduling; does not measure native WebView render CPU time",
+      "mainThread": {
+        "samples": 45,
+        "medianMs": 9.826,
+        "p95Ms": 18.647,
+        "tasks": 288,
+        "method": "CDP renderer-main RunTask duration union within pointer-frame performance marks; includes scripting/layout/paint and driver overhead, excludes scheduling idle and native/GPU work"
+      }
+    }
+  },
+  "errors": [],
+  "passed": false,
+  "failure": "AssertionError [ERR_ASSERTION]: 50 entities / 100 relations main-thread work P95 <=16.7ms"
+}

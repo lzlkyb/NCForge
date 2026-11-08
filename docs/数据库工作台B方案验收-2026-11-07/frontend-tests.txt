@@ -1,0 +1,16 @@
+
+ RUN  v4.1.12 D:/AItool/winapp/nc-workbench/desktop
+
+ ❯ src/lib/dbOperationFeedback.test.ts (6 tests | 6 failed) 36ms
+     × 连接等待期间重复执行只处理一次，失败以数量汇总且不复制 SQL 18ms
+     × 取消请求不提前结束，真实取消返回后即使忽略错误也不执行下一条 2ms
+     × 连接选择已经改变时旧执行请求不运行新连接上的 SQL 4ms
+     × 会话断线时保留已显示结果，并阻止脚本继续发送下一条 2ms
+     × 连接尚在等待时请求停止，连接完成后不再发送 SQL 2ms
+     × 意外失败也释放运行态并保持安全摘要 5ms
+
+ Test Files  1 failed | 66 passed (67)
+      Tests  6 failed | 393 passed (399)
+   Start at  21:34:29
+   Duration  153.78s (transform 5.87s, setup 0ms, import 13.08s, tests 10.10s, environment 109.60s)
+

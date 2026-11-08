@@ -1,0 +1,57 @@
+{
+  "date": "2026-11-07",
+  "status": "implemented; browser verification blocked",
+  "validation": {
+    "unitTestFiles": 11,
+    "unitTests": 55,
+    "unitResult": "passed",
+    "unitRunner": "Vitest thread pool + in-process TypeScript; temporary sandbox configuration",
+    "typescript": "passed",
+    "eslint": "passed",
+    "componentSize": "passed",
+    "designTokens": "passed",
+    "uiContract": "passed",
+    "knip": "passed",
+    "layoutDetector": "zero findings",
+    "prototype": "5 pages, before/after, focus, themes passed DOM checks",
+    "cssSyntax": "passed",
+    "browser": "not executed: automatic approval service content-blocked / review failure",
+    "productionBuild": "not verified"
+  },
+  "estimates": {
+    "kind": "source rules, not rendered measurements",
+    "serviceSidebarWidth": [
+      186,
+      170,
+      136
+    ],
+    "metaFocusDefaultWidth": 514,
+    "patchDetailMaximumHeight": 232,
+    "patchCollapsedMinimumHeight": 37,
+    "settingsWidthLimitBefore": 800,
+    "settingsWidthLimitAfter": 1120,
+    "settingsVerticalPaddingSavedPerRow": 8
+  },
+  "css": [
+    {
+      "file": "src/meta-editor.css",
+      "sha256": "ff1cdb0983117f7031f81548976a67274826511b4362a6f05b119f69cb1c5224"
+    },
+    {
+      "file": "src/patch.css",
+      "sha256": "c643f48bfeb631adf569da29d65cb75ac2fac8b29e0dd095677b9bac463ed2b9"
+    },
+    {
+      "file": "src/service-console.css",
+      "sha256": "56479f591e8e17c2d30151aedb8da90ff0b72b19d394bbfef26289483c2a4aac"
+    },
+    {
+      "file": "src/settings-center.css",
+      "sha256": "3eb8f0e5f4d50e87a0e2c59211c0df37a3f3efe57e515771b2dd8ed1efb6c436"
+    },
+    {
+      "file": "src/db-workbench.css",
+      "sha256": "0e1647ea8b6c346e4a27d179c65e70f0bb6730d1679828c5bd1379a58008ba61"
+    }
+  ]
+}

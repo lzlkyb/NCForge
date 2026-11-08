@@ -1,0 +1,9 @@
+
+ RUN  v4.1.12 D:/AItool/winapp/nc-workbench/desktop
+
+
+ Test Files  4 passed (4)
+      Tests  23 passed (23)
+   Start at  21:41:38
+   Duration  13.25s (transform 1.63s, setup 0ms, import 2.20s, tests 524ms, environment 9.24s)
+

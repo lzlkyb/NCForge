@@ -1,0 +1,339 @@
+{
+  "error": "Error: locator.waitFor: Error: strict mode violation: locator('.wb-settings-page-header h1') resolved to 9 elements:\n    1) <h1 tabindex=\"-1\">外观与常规</h1> aka getByRole('heading', { name: '外观与常规' })\n    2) <h1 tabindex=\"-1\">编辑器</h1> aka locator('h1').filter({ hasText: '编辑器' })\n    3) <h1 tabindex=\"-1\">快捷键</h1> aka getByRole('tabpanel', { name: '设置' }).getByText('快捷键', { exact: true })\n    4) <h1 tabindex=\"-1\">NC 环境</h1> aka getByRole('tabpanel', { name: '设置' }).getByText('NC 环境')\n    5) <h1 tabindex=\"-1\">开发环境</h1> aka getByRole('tabpanel', { name: '设置' }).getByText('开发环境')\n    6) <h1 tabindex=\"-1\">任务</h1> aka getByRole('tabpanel', { name: '设置' }).getByText('任务', { exact: true })\n    7) <h1 tabindex=\"-1\">组件与更新</h1> aka getByRole('tabpanel', { name: '设置' }).getByText('组件与更新')\n    8) <h1 tabindex=\"-1\">配置迁移</h1> aka getByRole('tabpanel', { name: '设置' }).getByText('配置迁移')\n    9) <h1 tabindex=\"-1\">关于</h1> aka getByRole('tabpanel', { name: '设置' }).getByText('关于')\n\nCall log:\n\u001b[2m  - waiting for locator('.wb-settings-page-header h1') to be visible\u001b[22m\n",
+  "errors": [
+    "Cannot read properties of undefined (reading 'replace')",
+    "Cannot read properties of undefined (reading 'replace')",
+    "Cannot read properties of null (reading 'length')"
+  ],
+  "errorDetails": [
+    {
+      "message": "Cannot read properties of undefined (reading 'replace')",
+      "stack": "TypeError: Cannot read properties of undefined (reading 'replace')\n    at NcEnvSettings (http://localhost:1420/src/components/settings/NcEnvSettings.tsx:366:106)\n    at renderWithHooks (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:11596:26)\n    at updateFunctionComponent (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:14630:28)\n    at beginWork (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:15972:22)\n    at HTMLUnknownElement.callCallback2 (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:3680:22)\n    at Object.invokeGuardedCallbackDev (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:3705:24)\n    at invokeGuardedCallback (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:3739:39)\n    at beginWork$1 (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:19818:15)\n    at performUnitOfWork (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:19251:20)\n    at workLoopSync (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:19190:13)"
+    },
+    {
+      "message": "Cannot read properties of undefined (reading 'replace')",
+      "stack": "TypeError: Cannot read properties of undefined (reading 'replace')\n    at NcEnvSettings (http://localhost:1420/src/components/settings/NcEnvSettings.tsx:366:106)\n    at renderWithHooks (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:11596:26)\n    at updateFunctionComponent (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:14630:28)\n    at beginWork (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:15972:22)\n    at HTMLUnknownElement.callCallback2 (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:3680:22)\n    at Object.invokeGuardedCallbackDev (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:3705:24)\n    at invokeGuardedCallback (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:3739:39)\n    at beginWork$1 (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:19818:15)\n    at performUnitOfWork (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:19251:20)\n    at workLoopSync (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:19190:13)"
+    },
+    {
+      "message": "Cannot read properties of null (reading 'length')",
+      "stack": "TypeError: Cannot read properties of null (reading 'length')\n    at BuildSettings (http://localhost:1420/src/components/settings/BuildSettings.tsx:304:22)\n    at renderWithHooks (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:11596:26)\n    at updateFunctionComponent (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:14630:28)\n    at beginWork (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:15972:22)\n    at HTMLUnknownElement.callCallback2 (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:3680:22)\n    at Object.invokeGuardedCallbackDev (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:3705:24)\n    at invokeGuardedCallback (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:3739:39)\n    at beginWork$1 (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:19818:15)\n    at performUnitOfWork (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:19251:20)\n    at workLoopSync (http://localhost:1420/node_modules/.vite/deps/chunk-G77WQXIU.js?v=6ab9b205:19190:13)"
+    }
+  ],
+  "body": "svn-acceptance\n代码\n版本\n数据库\n元数据\n日志\n设置\n4\n设置分类\n设置\nC:/svn-acceptance\n设置\nNC 服务 · 已停止\n隐藏面板\n应用遇到错误\n\n页面渲染过程中发生了异常。可以尝试重新加载，如果问题持续请重启应用。\n\nCannot read properties of null (reading 'length')\n重新加载\n完全刷新\n复制错误信息\n服务器已确认 r12，提交 4 个文件",
+  "commands": [
+    {
+      "cmd": "plugin:window|is_maximized",
+      "args": {
+        "label": "main"
+      }
+    },
+    {
+      "cmd": "debug_status",
+      "args": {
+        "target": "server"
+      }
+    },
+    {
+      "cmd": "debug_status",
+      "args": {
+        "target": "client"
+      }
+    },
+    {
+      "cmd": "debug_status",
+      "args": {
+        "target": "remote"
+      }
+    },
+    {
+      "cmd": "db_cached_tables",
+      "args": {}
+    },
+    {
+      "cmd": "get_app_info",
+      "args": {}
+    },
+    {
+      "cmd": "plugin:window|is_maximized",
+      "args": {
+        "label": "main"
+      }
+    },
+    {
+      "cmd": "db_cached_tables",
+      "args": {}
+    },
+    {
+      "cmd": "check_update",
+      "args": {}
+    },
+    {
+      "cmd": "resources_status",
+      "args": {}
+    },
+    {
+      "cmd": "server_status",
+      "args": {}
+    },
+    {
+      "cmd": "client_status",
+      "args": {}
+    },
+    {
+      "cmd": "get_workspace",
+      "args": {}
+    },
+    {
+      "cmd": "get_workspace",
+      "args": {}
+    },
+    {
+      "cmd": "nc_manifest",
+      "args": {
+        "root": "C:/svn-acceptance"
+      }
+    },
+    {
+      "cmd": "nc_manifest",
+      "args": {
+        "root": "C:/svn-acceptance"
+      }
+    },
+    {
+      "cmd": "fs_list_dir",
+      "args": {
+        "path": "C:/svn-acceptance"
+      }
+    },
+    {
+      "cmd": "svn_info",
+      "args": {}
+    },
+    {
+      "cmd": "svn_status",
+      "args": {}
+    },
+    {
+      "cmd": "svn_status",
+      "args": {}
+    },
+    {
+      "cmd": "svn_info",
+      "args": {}
+    },
+    {
+      "cmd": "tree_projects",
+      "args": {}
+    },
+    {
+      "cmd": "nc_manifest",
+      "args": {
+        "root": "C:/svn-acceptance"
+      }
+    },
+    {
+      "cmd": "nc_manifest",
+      "args": {
+        "root": "C:/svn-acceptance"
+      }
+    },
+    {
+      "cmd": "lang_status",
+      "args": {}
+    },
+    {
+      "cmd": "get_config",
+      "args": {}
+    },
+    {
+      "cmd": "svn_diff",
+      "args": {
+        "path": "C:/svn-acceptance/module/src/A.java"
+      }
+    },
+    {
+      "cmd": "svn_diff",
+      "args": {
+        "path": "C:/svn-acceptance/module/src/B.java"
+      }
+    },
+    {
+      "cmd": "svn_diff",
+      "args": {
+        "path": "C:/svn-acceptance/module/src/A.java"
+      }
+    },
+    {
+      "cmd": "svn_blame_snapshot",
+      "args": {
+        "root": "C:/svn-acceptance",
+        "path": "C:/svn-acceptance/module/src/A.java",
+        "revision": 0
+      }
+    },
+    {
+      "cmd": "svn_diff",
+      "args": {
+        "path": "C:/svn-acceptance/module/src/A.java"
+      }
+    },
+    {
+      "cmd": "svn_history",
+      "args": {
+        "root": "C:/svn-acceptance",
+        "path": "C:/svn-acceptance/module/src/A.java",
+        "limit": 30,
+        "from": 0
+      }
+    },
+    {
+      "cmd": "svn_revision_diff",
+      "args": {
+        "root": "C:/svn-acceptance",
+        "repositoryPath": "/module/src/A.java",
+        "revision": 12
+      }
+    },
+    {
+      "cmd": "svn_conflict_snapshot",
+      "args": {
+        "root": "C:/svn-acceptance",
+        "path": "C:/svn-acceptance/module/src/Conflict.java"
+      }
+    },
+    {
+      "cmd": "svn_status",
+      "args": {}
+    },
+    {
+      "cmd": "svn_commit",
+      "args": {
+        "paths": [
+          "C:/svn-acceptance/module/src/A.java",
+          "C:/svn-acceptance/module/src/B.java",
+          "C:/svn-acceptance/module/src/Deleted.java",
+          "C:/svn-acceptance/module/src/New.java"
+        ],
+        "message": "修复保存流程",
+        "expectedRoot": "C:/svn-acceptance"
+      }
+    },
+    {
+      "cmd": "svn_info",
+      "args": {}
+    },
+    {
+      "cmd": "svn_status",
+      "args": {}
+    },
+    {
+      "cmd": "patch_defaults",
+      "args": {}
+    },
+    {
+      "cmd": "svn_status",
+      "args": {}
+    },
+    {
+      "cmd": "patch_scan",
+      "args": {
+        "files": [
+          "C:/svn-acceptance/module/src/Conflict.java"
+        ],
+        "forceHyext": [],
+        "forceStd": []
+      }
+    },
+    {
+      "cmd": "nc_log_sources",
+      "args": {}
+    },
+    {
+      "cmd": "nc_log_query",
+      "args": {
+        "args": {
+          "loggers": null,
+          "sinceTs": "2026-10-31 18:51:12",
+          "onlyProblems": true,
+          "minCostMs": 1000,
+          "limit": 300
+        }
+      }
+    },
+    {
+      "cmd": "nc_log_search",
+      "args": {
+        "args": {
+          "loggers": null,
+          "sinceTs": "2026-10-31 18:51:12",
+          "query": "save",
+          "regex": false,
+          "caseSensitive": false,
+          "limit": 500
+        }
+      }
+    },
+    {
+      "cmd": "get_autostart",
+      "args": {}
+    },
+    {
+      "cmd": "nc_home_probe",
+      "args": {
+        "path": null
+      }
+    },
+    {
+      "cmd": "server_status",
+      "args": {}
+    },
+    {
+      "cmd": "get_config",
+      "args": {}
+    },
+    {
+      "cmd": "get_config",
+      "args": {}
+    },
+    {
+      "cmd": "build_cache_info",
+      "args": {}
+    },
+    {
+      "cmd": "build_history",
+      "args": {}
+    },
+    {
+      "cmd": "get_config",
+      "args": {}
+    },
+    {
+      "cmd": "resources_status",
+      "args": {}
+    },
+    {
+      "cmd": "get_config",
+      "args": {}
+    },
+    {
+      "cmd": "get_config",
+      "args": {}
+    },
+    {
+      "cmd": "build_cache_info",
+      "args": {}
+    },
+    {
+      "cmd": "build_history",
+      "args": {}
+    },
+    {
+      "cmd": "get_config",
+      "args": {}
+    },
+    {
+      "cmd": "resources_status",
+      "args": {}
+    }
+  ]
+}

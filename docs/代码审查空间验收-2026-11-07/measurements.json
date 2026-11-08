@@ -1,0 +1,148 @@
+{
+  "measurements": [
+    {
+      "standardHeight": 851.5,
+      "focusHeight": 852.5,
+      "standardWidth": 1570,
+      "focusWidth": 1854
+    },
+    {
+      "width": 1280,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "commitRight": 1218,
+      "panelLeft": 848,
+      "panelRight": 1268,
+      "diffCount": 1,
+      "dark": false,
+      "comfortable": false
+    },
+    {
+      "width": 1280,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "commitRight": 1218,
+      "panelLeft": 848,
+      "panelRight": 1268,
+      "diffCount": 1,
+      "dark": false,
+      "comfortable": true
+    },
+    {
+      "width": 1280,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "commitRight": 1218,
+      "panelLeft": 848,
+      "panelRight": 1268,
+      "diffCount": 1,
+      "dark": true,
+      "comfortable": false
+    },
+    {
+      "width": 1280,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "commitRight": 1218,
+      "panelLeft": 848,
+      "panelRight": 1268,
+      "diffCount": 1,
+      "dark": true,
+      "comfortable": true
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "commitRight": 962,
+      "panelLeft": 592,
+      "panelRight": 1012,
+      "diffCount": 1,
+      "dark": false,
+      "comfortable": false
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "commitRight": 962,
+      "panelLeft": 592,
+      "panelRight": 1012,
+      "diffCount": 1,
+      "dark": false,
+      "comfortable": true
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "commitRight": 962,
+      "panelLeft": 592,
+      "panelRight": 1012,
+      "diffCount": 1,
+      "dark": true,
+      "comfortable": false
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "commitRight": 962,
+      "panelLeft": 592,
+      "panelRight": 1012,
+      "diffCount": 1,
+      "dark": true,
+      "comfortable": true
+    },
+    {
+      "width": 560,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "commitRight": 511,
+      "panelLeft": 132,
+      "panelRight": 552,
+      "diffCount": 1,
+      "dark": false,
+      "comfortable": false
+    },
+    {
+      "width": 560,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "commitRight": 511,
+      "panelLeft": 132,
+      "panelRight": 552,
+      "diffCount": 1,
+      "dark": false,
+      "comfortable": true
+    },
+    {
+      "width": 560,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "commitRight": 511,
+      "panelLeft": 132,
+      "panelRight": 552,
+      "diffCount": 1,
+      "dark": true,
+      "comfortable": false
+    },
+    {
+      "width": 560,
+      "overflow": false,
+      "toolbarOverflow": false,
+      "commitRight": 511,
+      "panelLeft": 132,
+      "panelRight": 552,
+      "diffCount": 1,
+      "dark": true,
+      "comfortable": true
+    },
+    {
+      "logHeaderHeight": 41,
+      "logNarrowOverflow": false
+    }
+  ],
+  "errors": [],
+  "commitCalls": 1
+}

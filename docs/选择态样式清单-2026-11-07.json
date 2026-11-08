@@ -1,0 +1,2142 @@
+{
+  "scope": "desktop/src CSS and TSX; excludes tests and historical design-preview",
+  "files": 143,
+  "matches": 427,
+  "entries": [
+    {
+      "file": "appearance.css",
+      "line": 27,
+      "text": "html[data-ui-style=\"glass\"] .app-shell .wb-tab[data-active] { background: var(--glass-reading); }"
+    },
+    {
+      "file": "appearance.css",
+      "line": 93,
+      "text": "html[data-ui-style=\"glass\"] .app-side-item[data-active] {"
+    },
+    {
+      "file": "appearance.css",
+      "line": 124,
+      "text": "html.dark[data-ui-style=\"glass\"] .selection-card[aria-pressed=\"true\"] .selection-card-title { color: #c1c4ff; }"
+    },
+    {
+      "file": "appearance.css",
+      "line": 209,
+      "text": "html[data-ui-style=\"glass\"] .update-slot button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 3px; }"
+    },
+    {
+      "file": "appearance.css",
+      "line": 253,
+      "text": "html[data-ui-style=\"glass\"] [data-cc-panel] [data-cc-composer]:focus-within {"
+    },
+    {
+      "file": "appearance.css",
+      "line": 280,
+      "text": "html[data-ui-style=\"glass\"] [data-cc-seg] button[aria-pressed=\"true\"] {"
+    },
+    {
+      "file": "components/db/CellDetail.tsx",
+      "line": 54,
+      "text": "<button type=\"button\" className=\"dbx-btn ghost\" data-on={json || undefined} disabled={!prettyJson(text)} onClick={() => setJson(!json)}>"
+    },
+    {
+      "file": "components/db/ConnDialog.tsx",
+      "line": 41,
+      "text": "aria-selected={dialog.tab === t.key}"
+    },
+    {
+      "file": "components/db/ConnDialog.tsx",
+      "line": 42,
+      "text": "data-on={dialog.tab === t.key || undefined}"
+    },
+    {
+      "file": "components/db/ConnManualForm.tsx",
+      "line": 216,
+      "text": "<button type=\"button\" aria-pressed={f.engine === \"rust\"} data-on={f.engine === \"rust\" || undefined} onClick={() => put({ engine: \"rust\" })}>"
+    },
+    {
+      "file": "components/db/ConnManualForm.tsx",
+      "line": 221,
+      "text": "aria-pressed={f.engine === \"java\"}"
+    },
+    {
+      "file": "components/db/ConnManualForm.tsx",
+      "line": 222,
+      "text": "data-on={f.engine === \"java\" || undefined}"
+    },
+    {
+      "file": "components/db/ConnManualForm.tsx",
+      "line": 242,
+      "text": "<button type=\"button\" aria-pressed={!f.autoCommit} data-on={!f.autoCommit || undefined} onClick={() => put({ autoCommit: false })}>"
+    },
+    {
+      "file": "components/db/ConnManualForm.tsx",
+      "line": 245,
+      "text": "<button type=\"button\" aria-pressed={f.autoCommit} data-on={f.autoCommit || undefined} onClick={() => put({ autoCommit: true })}>"
+    },
+    {
+      "file": "components/db/ConnPicker.tsx",
+      "line": 81,
+      "text": "aria-selected={x.id === connId}"
+    },
+    {
+      "file": "components/db/ConnPicker.tsx",
+      "line": 85,
+      "text": "data-sel={x.id === connId || undefined}"
+    },
+    {
+      "file": "components/db/ConnTableRow.tsx",
+      "line": 33,
+      "text": "data-active={active || undefined}"
+    },
+    {
+      "file": "components/db/ConnTableRow.tsx",
+      "line": 87,
+      "text": "data-on={fav || undefined}"
+    },
+    {
+      "file": "components/db/ConnTree.tsx",
+      "line": 161,
+      "text": "data-active={activeConn === c.id || undefined}"
+    },
+    {
+      "file": "components/db/DbContextBar.tsx",
+      "line": 41,
+      "text": "<button type=\"button\" className=\"dbx-btn ghost\" disabled={busy || rt.status !== \"connected\" || readOnly === null} aria-pressed={readOnly ?? false} title=\"只读模式应用于此连接的全部会话\" onClick={() => void toggle()}><Icon name={busy ? \"spinner\" : \"lock\"} size={12} />{busy ? \"切换中…\" : readOnly === null && rt.status === \"connected\" ? \"只读状态待验证\" : readOnly ? \"只读查询已开启\" : \"开启只读查询\"}</button>"
+    },
+    {
+      "file": "components/db/DbDocTabs.tsx",
+      "line": 68,
+      "text": "aria-selected={on}"
+    },
+    {
+      "file": "components/db/DbDocTabs.tsx",
+      "line": 71,
+      "text": "data-active={on || undefined}"
+    },
+    {
+      "file": "components/db/DbDocTabs.tsx",
+      "line": 100,
+      "text": "<div id=\"dbx-tab-empty\" role=\"tab\" tabIndex={0} aria-selected={docOpen} aria-controls=\"dbx-panel-empty\" className=\"wb-tab\" data-active={docOpen || undefined} onClick={() => dock?.showDocument()} onKeyDown={(e) => { if (e.key === \"Enter\" || e.key === \" \") { e.preventDefault(); dock?.showDocument(); } }}>"
+    },
+    {
+      "file": "components/db/DbObjectFinder.tsx",
+      "line": 67,
+      "text": "<div id=\"dbx-object-options\" className=\"dbx-object-options\" role=\"listbox\" aria-label=\"数据库对象结果\">{hits.map((t,i) => <button key={`${t.kind}:${t.name}`} id={`dbx-object-${i}`} role=\"option\" type=\"button\" aria-selected={chosen?.name === t.name && chosen?.kind === t.kind} onClick={() => setIndex(i)} onDoubleClick={() => void pick(\"data\",t)}><strong>{t.name.toLowerCase()}</strong><span>{t.zh}</span><small>{connOf(scope)?.name} · {t.kind}</small></button>)}</div>"
+    },
+    {
+      "file": "components/db/EnvChips.tsx",
+      "line": 12,
+      "text": "aria-checked={value === e}"
+    },
+    {
+      "file": "components/db/EnvChips.tsx",
+      "line": 14,
+      "text": "data-on={value === e || undefined}"
+    },
+    {
+      "file": "components/db/PasswordResetDialog.tsx",
+      "line": 141,
+      "text": "<tr key={u.cuserid} data-on={reset.selected[u.cuserid] ? \"\" : undefined}>"
+    },
+    {
+      "file": "components/db/PlanView.tsx",
+      "line": 70,
+      "text": "data-on={(compare && !!saved) || undefined}"
+    },
+    {
+      "file": "components/db/QuerySettings.tsx",
+      "line": 73,
+      "text": "data-on={pos ? \"\" : undefined}"
+    },
+    {
+      "file": "components/db/ResultGrid.tsx",
+      "line": 243,
+      "text": "data-sel={sel?.r === r || undefined}"
+    },
+    {
+      "file": "components/db/ResultGrid.tsx",
+      "line": 253,
+      "text": "<div key={k} id={`dbx-cell-${r}-${k}`} className=\"dbx-gc\" data-cell data-focus-container role=\"gridcell\" aria-colindex={vi + 2} aria-selected style={{...cellStyle(k),padding:0}}>"
+    },
+    {
+      "file": "components/db/ResultGrid.tsx",
+      "line": 281,
+      "text": "aria-selected={isSel || undefined}"
+    },
+    {
+      "file": "components/db/ResultPanel.tsx",
+      "line": 58,
+      "text": "<button key={r.id} type=\"button\" role=\"tab\" className=\"dbx-rtab\" data-on={view === r.id || undefined} title={r.sql} onClick={() => setView(r.id)}>"
+    },
+    {
+      "file": "components/db/ResultPanel.tsx",
+      "line": 65,
+      "text": "<button type=\"button\" role=\"tab\" className=\"dbx-rtab\" data-on={view === \"plan\" || undefined} onClick={() => setView(\"plan\")}>"
+    },
+    {
+      "file": "components/db/ResultPanel.tsx",
+      "line": 70,
+      "text": "<button type=\"button\" role=\"tab\" className=\"dbx-rtab\" data-on={view === \"output\" || undefined} onClick={() => setView(\"output\")}>"
+    },
+    {
+      "file": "components/db/ResultTable.tsx",
+      "line": 127,
+      "text": "data-on={filterOpen || filter ? \"\" : undefined}"
+    },
+    {
+      "file": "components/db/ResultTable.tsx",
+      "line": 149,
+      "text": "data-on={detail || undefined}"
+    },
+    {
+      "file": "components/db/ResultTable.tsx",
+      "line": 152,
+      "text": "aria-pressed={detail}"
+    },
+    {
+      "file": "components/db/RowsEntryView.tsx",
+      "line": 30,
+      "text": "const subbar = sets.length > 1 ? <div className=\"dbx-settabs\" role=\"tablist\" aria-label=\"结果集\">{sets.map((s,i)=><button key={i} type=\"button\" role=\"tab\" aria-selected={i===at} className=\"dbx-settab\" data-on={i===at || undefined} onClick={()=>setPick(i)}>结果集 {i+1}<span className=\"dbx-cnt\">{thousands(s.rows.length)}{s.hasMore ? \"+\" : \"\"}</span></button>)}</div> : undefined;"
+    },
+    {
+      "file": "components/db/SchemaChip.tsx",
+      "line": 134,
+      "text": "aria-selected={s === current}"
+    },
+    {
+      "file": "components/db/SessionDrawer.tsx",
+      "line": 88,
+      "text": "data-on={auto || undefined}"
+    },
+    {
+      "file": "components/db/SqlToolbar.tsx",
+      "line": 104,
+      "text": "data-on={historyOpen ? \"\" : undefined}"
+    },
+    {
+      "file": "components/db/SqlToolbar.tsx",
+      "line": 109,
+      "text": "aria-pressed={historyOpen}"
+    },
+    {
+      "file": "components/db/SqlToolbar.tsx",
+      "line": 117,
+      "text": "data-on={snipsOpen ? \"\" : undefined}"
+    },
+    {
+      "file": "components/db/SqlToolbar.tsx",
+      "line": 122,
+      "text": "aria-pressed={snipsOpen}"
+    },
+    {
+      "file": "components/db/TableData.tsx",
+      "line": 266,
+      "text": "<button type=\"button\" className=\"dbx-btn ghost\" data-on={preview || undefined} disabled={saving} onClick={() => setPreview(!preview)}>复核修改 / SQL</button>"
+    },
+    {
+      "file": "components/db/TableFilterBar.tsx",
+      "line": 39,
+      "text": "<button type=\"button\" className=\"dbx-btn ghost\" aria-pressed={advanced} onClick={() => setAdvanced(!advanced)}>{advanced ? \"切换可视化条件\" : \"手写 WHERE\"}</button>"
+    },
+    {
+      "file": "components/db/TablePage.tsx",
+      "line": 69,
+      "text": "<button key={s.key} type=\"button\" role=\"tab\" className=\"t\" aria-selected={tab.sub === s.key} data-on={tab.sub === s.key || undefined} onClick={() => patchTab<TableTab>(tab.id, { sub: s.key })}>"
+    },
+    {
+      "file": "components/db/TransferFormatFields.tsx",
+      "line": 23,
+      "text": "<div className=\"dbx-transfer-tags\">{([\"xlsx\", \"json\", \"insert\"] as const).map((format, i) => <button type=\"button\" key={format} aria-pressed={o.format === format} disabled={mode === \"copy\" && format === \"xlsx\"} onClick={() => c.format(format)}>{[\"Excel\", \"JSON\", \"SQL\"][i]}</button>)}</div>"
+    },
+    {
+      "file": "components/layout/ShortcutSheet.tsx",
+      "line": 133,
+      "text": "<div className=\"flex items-center gap-2 rounded-md border border-border bg-card px-2 text-muted-foreground focus-within:border-ring\">"
+    },
+    {
+      "file": "components/layout/SideNav.tsx",
+      "line": 134,
+      "text": "data-active={activeTab === item.key || undefined}"
+    },
+    {
+      "file": "components/layout/SideNav.tsx",
+      "line": 157,
+      "text": "data-active={activeTab === p.key || undefined}"
+    },
+    {
+      "file": "components/layout/SideNav.tsx",
+      "line": 182,
+      "text": "data-active={activeTab === \"settings\" || undefined}"
+    },
+    {
+      "file": "components/linked/ProjectChain.tsx",
+      "line": 174,
+      "text": "data-on={drafted(\"disable\") || undefined}"
+    },
+    {
+      "file": "components/linked/ProjectChain.tsx",
+      "line": 184,
+      "text": "data-on={drafted(\"front\") || undefined}"
+    },
+    {
+      "file": "components/log/LogList.tsx",
+      "line": 61,
+      "text": "aria-selected={selectedKey === key}"
+    },
+    {
+      "file": "components/log/LogList.tsx",
+      "line": 65,
+      "text": "data-active={selectedKey === key || undefined}"
+    },
+    {
+      "file": "components/log/LogSourcePicker.tsx",
+      "line": 28,
+      "text": "<button type=\"button\" className=\"lg-chip\" data-on={loggers.length === 0 || undefined}"
+    },
+    {
+      "file": "components/log/LogSourcePicker.tsx",
+      "line": 29,
+      "text": "aria-pressed={loggers.length === 0} onClick={onClear}>"
+    },
+    {
+      "file": "components/log/LogSourcePicker.tsx",
+      "line": 35,
+      "text": "data-on={loggers.includes(name) || undefined} aria-pressed={loggers.includes(name)}"
+    },
+    {
+      "file": "components/md/MdScopeBar.tsx",
+      "line": 40,
+      "text": "data-on={(mode === \"picked\") || undefined}"
+    },
+    {
+      "file": "components/md/MdScopeBar.tsx",
+      "line": 41,
+      "text": "aria-pressed={mode === \"picked\"}"
+    },
+    {
+      "file": "components/md/MdScopeBar.tsx",
+      "line": 50,
+      "text": "data-on={(mode === \"prefix\") || undefined}"
+    },
+    {
+      "file": "components/md/MdScopeBar.tsx",
+      "line": 51,
+      "text": "aria-pressed={mode === \"prefix\"}"
+    },
+    {
+      "file": "components/md/MdScopeBar.tsx",
+      "line": 59,
+      "text": "data-on={(mode === \"patch\") || undefined}"
+    },
+    {
+      "file": "components/md/MdScopeBar.tsx",
+      "line": 60,
+      "text": "aria-pressed={mode === \"patch\"}"
+    },
+    {
+      "file": "components/md/MdTablePicker.tsx",
+      "line": 93,
+      "text": "data-on={on || undefined}"
+    },
+    {
+      "file": "components/md/MdTablePicker.tsx",
+      "line": 96,
+      "text": "aria-pressed={on}"
+    },
+    {
+      "file": "components/meta/GenArtifacts.tsx",
+      "line": 67,
+      "text": "<button type=\"button\" key={filter} disabled={disabled} aria-pressed={filter === prefs.filter} onClick={() => { onPreferences({ filter, listTop: 0 }); if (host.current) host.current.scrollTop = 0; setWindow((s) => ({ ...s, top: 0 })); }}>{label}</button>)}</div>"
+    },
+    {
+      "file": "components/meta/GenArtifacts.tsx",
+      "line": 75,
+      "text": "</div> : row.kind === \"old\" ? <div key={row.item.id} className=\"gen-file gen-old-file\"><button type=\"button\" disabled={disabled} onClick={() => onOpenOld(row.item.path)} title={row.item.path}><span>{row.item.path.split(/[\\\\/]/).pop()}</span><small>{row.item.path}</small></button><span className=\"gen-file-status\">保留</span></div> : <div key={row.item.id} className={`gen-file${row.item.id === prefs.activeId ? \" is-active\" : \"\"}`}>"
+    },
+    {
+      "file": "components/meta/GenArtifacts.tsx",
+      "line": 77,
+      "text": "<button type=\"button\" data-file-id={row.item.id} disabled={disabled} aria-pressed={row.item.id === prefs.activeId} title={row.item.pathHint} onClick={() => onPreferences({ activeId: row.item.id })}"
+    },
+    {
+      "file": "components/meta/GenConfigBar.tsx",
+      "line": 20,
+      "text": "checking: boolean; checked: boolean; dirty: boolean; checkError: string | null;"
+    },
+    {
+      "file": "components/meta/GenFilePreview.tsx",
+      "line": 39,
+      "text": "<button type=\"button\" key={pane} disabled={disabled} aria-pressed={prefs.pane === pane} onClick={() => onPreferences({ pane })}>{label}</button>)}</nav>"
+    },
+    {
+      "file": "components/meta/MetaCanvasEdge.tsx",
+      "line": 27,
+      "text": "className={`meta-canvas-rel ${g.field ? \"is-field\" : \"\"} ${active ? \"is-active\" : \"\"}`}"
+    },
+    {
+      "file": "components/meta/MetaCanvasEdge.tsx",
+      "line": 29,
+      "text": "role=\"button\" tabIndex={locked ? -1 : 0} aria-label={`关系 ${label}`} aria-pressed={active}"
+    },
+    {
+      "file": "components/meta/MetaCanvasInfo.tsx",
+      "line": 56,
+      "text": "className={current?.id === e.id ? \"is-active\" : \"\"}"
+    },
+    {
+      "file": "components/meta/MetaCanvasInfo.tsx",
+      "line": 91,
+      "text": "className={relId === r.id ? \"is-active\" : \"\"}"
+    },
+    {
+      "file": "components/meta/MetaCanvasNode.tsx",
+      "line": 16,
+      "text": "return <g className={`meta-canvas-node ${active ? \"is-active\" : \"\"}`} data-entity={entity.id} data-kind={entity.modelKind || \"entity\"}"
+    },
+    {
+      "file": "components/meta/MetaCanvasNode.tsx",
+      "line": 18,
+      "text": "role=\"button\" tabIndex={locked ? -1 : 0} aria-pressed={active} aria-label={`${kind} ${entity.name}`}"
+    },
+    {
+      "file": "components/meta/MetaCanvasNode.tsx",
+      "line": 35,
+      "text": "{shape.rows.map((attr, index) => <g key={attr.id} className={`meta-canvas-field ${attr.isKey ? \"is-key\" : \"\"} ${activeAttrId === attr.id ? \"is-active\" : \"\"}`}"
+    },
+    {
+      "file": "components/meta/MetaCanvasNode.tsx",
+      "line": 36,
+      "text": "data-attr={attr.id} role=\"button\" tabIndex={locked || activeAttrId !== attr.id ? -1 : 0} aria-label={`字段 ${attr.name}`} aria-pressed={activeAttrId === attr.id}"
+    },
+    {
+      "file": "components/meta/MetaDocumentTabs.tsx",
+      "line": 10,
+      "text": "{documents.map((doc) => <div key={doc.key} className={`meta-document-tab ${doc.key === active ? \"is-active\" : \"\"}`}>"
+    },
+    {
+      "file": "components/meta/MetaEditor.tsx",
+      "line": 96,
+      "text": "<nav className=\"meta-data-tabs\" aria-label=\"元数据内容\">{PANES.map(([key, title]) => <button type=\"button\" key={key} disabled={locked} className={state.pane === key ? \"is-active\" : \"\"} aria-pressed={state.pane === key} onClick={() => pane(key)}>{title}{key === \"issues\" && issues.length > 0 && <span>{issues.length}</span>}</button>)}</nav>"
+    },
+    {
+      "file": "components/meta/MetaEnumRelationSection.tsx",
+      "line": 63,
+      "text": "<button type=\"button\" className=\"meta-object-link\" aria-pressed={selection?.kind === \"enum\" && selection.enumId === en.id} onClick={() => onSelect?.({ kind: \"enum\", enumId: en.id })}>{en.name}</button>"
+    },
+    {
+      "file": "components/meta/MetaEnumRelationSection.tsx",
+      "line": 103,
+      "text": "<button type=\"button\" className=\"meta-object-link\" aria-pressed={selection?.kind === \"relation\" && selection.relationId === r.id} onClick={() => onSelect?.({ kind: \"relation\", relationId: r.id })}>{r.name || r.kind}</button>"
+    },
+    {
+      "file": "components/meta/MetaFieldTable.tsx",
+      "line": 149,
+      "text": "aria-selected={selectedAttrId === attr.id || selected.has(attr.id)} className={selectedAttrId === attr.id ? \"is-active\" : selected.has(attr.id) ? \"is-selected\" : \"\"}"
+    },
+    {
+      "file": "components/meta/MetaGenerate.tsx",
+      "line": 58,
+      "text": "return <div className=\"gen-workbench\" ref={layout.ref} data-layout={layout.mode} data-active={viewActive || undefined} aria-busy={gen.busy || working}>"
+    },
+    {
+      "file": "components/meta/MetaGenerate.tsx",
+      "line": 68,
+      "text": "{layout.mode === \"narrow\" && <div className=\"gen-mobile-tabs\"><button type=\"button\" disabled={working} aria-pressed={panels.list} onClick={() => setPanels({ list: true })}>产物清单</button><button type=\"button\" disabled={working} aria-pressed={!panels.list} onClick={() => setPanels({ list: false })}>内容预览</button></div>}"
+    },
+    {
+      "file": "components/meta/MetaHistory.tsx",
+      "line": 139,
+      "text": "className={`meta-history-item${rev.revision === e.revision ? \" is-active\" : \"\"}`}"
+    },
+    {
+      "file": "components/meta/MetaHistory.tsx",
+      "line": 140,
+      "text": "aria-pressed={rev.revision === e.revision}"
+    },
+    {
+      "file": "components/meta/MetaIssues.tsx",
+      "line": 35,
+      "text": "className={`meta-sev ${filter === k ? \"is-active\" : \"\"} sev-${k}`}"
+    },
+    {
+      "file": "components/meta/MetaNewDialog.tsx",
+      "line": 206,
+      "text": "className={`meta-skeleton ${form.skeleton === s.key ? \"is-active\" : \"\"}`}"
+    },
+    {
+      "file": "components/meta/MetaOutline.tsx",
+      "line": 64,
+      "text": "className={`meta-outline-row ${row.key === selectionKey(selection) ? \"is-active\" : \"\"}`} aria-pressed={row.key === selectionKey(selection)}"
+    },
+    {
+      "file": "components/meta/MetaResourceList.tsx",
+      "line": 68,
+      "text": "className={`meta-entry ${selected && normalizeBmfPath(selected) === normalizeBmfPath(row.entry.path) ? \"is-active\" : \"\"} ${row.entry.error ? \"is-broken\" : \"\"}`}"
+    },
+    {
+      "file": "components/meta/MetaSemanticPanel.tsx",
+      "line": 101,
+      "text": "aria-rowindex={range.start + offset + 2} className={selection.kind === \"interfaceAttr\" && selection.interfaceId === active.id && selection.attrId === row.expected.id ? \"is-active\" : \"\"}>"
+    },
+    {
+      "file": "components/meta/MetaSemanticPanel.tsx",
+      "line": 128,
+      "text": "aria-pressed={selection.kind === \"reference\" && selection.referenceId === reference.id} onClick={() => onSelect({ kind: \"reference\", referenceId: reference.id })}>{reference.displayName || reference.name || reference.id}</button>"
+    },
+    {
+      "file": "components/meta/MetaToolbar.tsx",
+      "line": 19,
+      "text": "disabled={locked} aria-pressed={state.view === \"detail\" && mode === key} className={state.view === \"detail\" && mode === key ? \"is-active\" : \"\"}"
+    },
+    {
+      "file": "components/meta/MetaTree.tsx",
+      "line": 72,
+      "text": "className=\"h-7 border-0 bg-transparent px-1 text-[12px] focus-visible:ring-0\""
+    },
+    {
+      "file": "components/patch/ItemDetail.tsx",
+      "line": 85,
+      "text": "data-on={override === v || undefined}"
+    },
+    {
+      "file": "components/patch/PatchList.tsx",
+      "line": 97,
+      "text": "data-on={filter === c.key || undefined}"
+    },
+    {
+      "file": "components/patch/PatchList.tsx",
+      "line": 256,
+      "text": "<div className=\"pk-row\" data-on={on || undefined} data-active={active || undefined}>"
+    },
+    {
+      "file": "components/patch/PatchList.tsx",
+      "line": 260,
+      "text": "data-on={on || undefined}"
+    },
+    {
+      "file": "components/search/ReplaceBar.tsx",
+      "line": 93,
+      "text": "className=\"h-7 w-52 rounded-md border border-input bg-background px-2 text-[12px] outline-none placeholder:text-muted-foreground focus:border-ring disabled:opacity-50\""
+    },
+    {
+      "file": "components/search/ResultFile.tsx",
+      "line": 65,
+      "text": "data-selected={selectedKey === resultHitKey(group, hit) || undefined}"
+    },
+    {
+      "file": "components/search/ScopeChip.tsx",
+      "line": 32,
+      "text": "aria-pressed={on}"
+    },
+    {
+      "file": "components/search/SearchBar.tsx",
+      "line": 185,
+      "text": "className=\"h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 font-mono text-[11.5px] outline-none placeholder:text-muted-foreground focus:border-ring\""
+    },
+    {
+      "file": "components/search/SearchBar.tsx",
+      "line": 197,
+      "text": "aria-pressed={on}"
+    },
+    {
+      "file": "components/search/SearchBar.tsx",
+      "line": 245,
+      "text": "aria-pressed={on}"
+    },
+    {
+      "file": "components/search/SearchEditPanel.tsx",
+      "line": 204,
+      "text": "className=\"w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 font-mono text-[12px] outline-none hover:border-border focus:border-primary focus:bg-background\""
+    },
+    {
+      "file": "components/search/SearchResults.tsx",
+      "line": 109,
+      "text": "<button type=\"button\" className=\"dw-search-expand\" aria-pressed={expanded} onClick={() => setExpandedIdentity(expanded ? null : identity)}>{expanded ? \"恢复侧栏\" : \"展开结果\"}</button>"
+    },
+    {
+      "file": "components/services/DevelopmentFlowControl.tsx",
+      "line": 20,
+      "text": "const change = (field: keyof DevelopmentOptions, checked: boolean) => setDraft((old) => ({ ...old, [field]: checked, ...(field === \"debug\" && !checked ? { autoAttach: false } : {}) }));"
+    },
+    {
+      "file": "components/services/HeapField.tsx",
+      "line": 109,
+      "text": "<button key={mb} type=\"button\" disabled={saving} data-active={Number(draft) === mb} onClick={() => setDraft(String(mb))}>"
+    },
+    {
+      "file": "components/services/HotwebsField.tsx",
+      "line": 170,
+      "text": "<label className=\"sv-hw-item\" key={name} data-on={checked || undefined}>"
+    },
+    {
+      "file": "components/services/NccDecodeDialog.tsx",
+      "line": 11,
+      "text": "\"w-full rounded-md border border-input bg-background px-2 py-1 font-mono text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring\";"
+    },
+    {
+      "file": "components/services/PortDialog.tsx",
+      "line": 163,
+      "text": "data-active={port === p}"
+    },
+    {
+      "file": "components/services/ServiceActionsBar.tsx",
+      "line": 43,
+      "text": "data-on={open || undefined}"
+    },
+    {
+      "file": "components/services/ServiceLogSection.tsx",
+      "line": 53,
+      "text": "aria-selected={source === id}"
+    },
+    {
+      "file": "components/services/ServiceLogSection.tsx",
+      "line": 54,
+      "text": "data-on={source === id || undefined}"
+    },
+    {
+      "file": "components/services/ServiceLogToolbar.tsx",
+      "line": 16,
+      "text": "<div className=\"sc-log-levels\" aria-label=\"日志级别\">{([['all', '全部'], ['warn', '警告'], ['error', '错误']] as const).map(([level, label]) => <button type=\"button\" key={level} aria-pressed={form.level === level} onClick={() => set({ level, scrollTop: 0 })}>{label}<span>{counts[level]}</span></button>)}</div>"
+    },
+    {
+      "file": "components/services/ServiceLogToolbar.tsx",
+      "line": 20,
+      "text": "<button type=\"button\" className=\"sc-log-button\" aria-pressed={form.follow} disabled={previous} onClick={onFollow}><Icon name=\"stepInto\" size={13} />{form.follow ? '跟随最新' : '已暂停'}</button>"
+    },
+    {
+      "file": "components/services/ServiceLogToolbar.tsx",
+      "line": 21,
+      "text": "<button type=\"button\" className=\"sc-log-button sc-log-wrap-toggle\" aria-pressed={form.wrap} onClick={() => set({ wrap: !form.wrap })}><Icon name=\"log\" size={12} />换行</button>"
+    },
+    {
+      "file": "components/services/ServiceNavigator.tsx",
+      "line": 25,
+      "text": "return <button key={id} ref={el => { if (el) buttons.current[id] = el; }} id={`sc-service-${id}`} role=\"tab\" type=\"button\" aria-selected={source === id} aria-controls=\"sc-service-console\" tabIndex={source === id ? 0 : -1} onClick={() => onSource(id)}>"
+    },
+    {
+      "file": "components/settings/settings-about.css",
+      "line": 35,
+      "text": ".settings-about :is([data-settings-item]):focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }"
+    },
+    {
+      "file": "components/settings/settings-about.css",
+      "line": 48,
+      "text": ".settings-about-search input:focus { box-shadow:none; }"
+    },
+    {
+      "file": "components/settings/settings-about.css",
+      "line": 49,
+      "text": ".settings-about-search input:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }"
+    },
+    {
+      "file": "components/settings/settings-about.css",
+      "line": 53,
+      "text": ".settings-about-filters button:is(:hover,:focus-visible) { background:hsl(var(--secondary)); }"
+    },
+    {
+      "file": "components/settings/settings-about.css",
+      "line": 54,
+      "text": ".settings-about-filters button[aria-pressed=\"true\"] { background:hsl(var(--accent)); color:hsl(var(--primary)); font-weight:600; }"
+    },
+    {
+      "file": "components/settings/settings-development.css",
+      "line": 10,
+      "text": ".settings-lang-capabilities summary:focus-visible,.settings-task-create > summary:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; border-radius:var(--r-control); }"
+    },
+    {
+      "file": "components/settings/settings-development.css",
+      "line": 21,
+      "text": ".settings-task-steps input { flex-shrink:0; accent-color:hsl(var(--primary)); }"
+    },
+    {
+      "file": "components/settings/VersionHistoryDialog.tsx",
+      "line": 50,
+      "text": "<button type=\"button\" aria-pressed={category === \"all\"} onClick={() => { setCategory(\"all\"); resetScroll(); }}>全部</button>"
+    },
+    {
+      "file": "components/settings/VersionHistoryDialog.tsx",
+      "line": 51,
+      "text": "{CATEGORIES.map(value => <button key={value} type=\"button\" aria-pressed={category === value} onClick={() => { setCategory(value); resetScroll(); }}>{CATEGORY_LABELS[value]}</button>)}"
+    },
+    {
+      "file": "components/svn/ChangeList.tsx",
+      "line": 25,
+      "text": "{(Object.keys(SVN_FILTERS) as (keyof typeof SVN_FILTERS)[]).map(f => <button key={f} type=\"button\" className=\"vc-chip\" aria-pressed={prefs.filter === f} data-on={prefs.filter === f || undefined} onClick={() => setSvnListPrefs(root,{filter:f})}>{SVN_FILTERS[f]}<span className=\"n\">{counts[f]}</span></button>)}"
+    },
+    {
+      "file": "components/svn/ChangeList.tsx",
+      "line": 39,
+      "text": "<button type=\"button\" className=\"vc-chip\" aria-pressed={showIgnored} onClick={onToggleIgnored}>{showIgnored ? \"隐藏构建产物\" : `显示 ${view.ignored} 条构建产物`}</button>"
+    },
+    {
+      "file": "components/svn/ConflictPane.tsx",
+      "line": 39,
+      "text": "<div className=\"vc-conflict-options\">{([\"mine\", \"base\", \"theirs\"] as Choice[]).map(role => { const version = data[role]; return <div className=\"vc-conflict-option\" key={role}><button className=\"vc-btn\" data-on={preview === role || undefined} disabled={!version || version.binary} onClick={() => setPreview(role)}>{tags[role]}{version && version.revision > 0 ? ` · r${version.revision}` : \"\"}</button><span className=\"vc-hint\" title={version?.name}>{version?.name ?? \"无此副本\"}</span><button className=\"vc-btn\" aria-pressed={choice === role} disabled={locked || !supported || !version} onClick={() => setChoice(role)}>{choice === role ? \"已选作最终内容\" : \"选作最终内容\"}</button></div>; })}</div>"
+    },
+    {
+      "file": "components/svn/DiffPane.tsx",
+      "line": 38,
+      "text": "<button type=\"button\" className=\"vc-review-toggle\" aria-pressed={reviewed} data-on={reviewed || undefined} disabled={disabled || !markable} onClick={onToggleReviewed}><Icon name=\"check\" size={12} />{reviewed ? \"已审\" : \"标记已审\"}</button>"
+    },
+    {
+      "file": "components/svn/DiffPane.tsx",
+      "line": 39,
+      "text": "{onTogglePicked && <button type=\"button\" className=\"vc-btn vc-btn-sm\" aria-pressed={picked ?? false} disabled={disabled} onClick={onTogglePicked}>{picked ? \"已加入提交\" : \"加入提交\"}</button>}"
+    },
+    {
+      "file": "components/svn/HistoryView.tsx",
+      "line": 57,
+      "text": "{entries.map(entry => <button type=\"button\" className=\"vc-history-record\" data-on={revision === entry.revision || undefined} key={entry.revision} onClick={() => { setRevision(entry.revision); setSelectedPath(entry.paths[0]?.path ?? null); }}><span className=\"vc-log-hd\"><b className=\"vc-log-rev\">r{entry.revision}</b><span>{entry.author || \"无作者\"}</span><span className=\"vc-hint\">{formatRevTime(entry.date)}</span></span><span className=\"vc-log-msg\">{entry.message.split(\"\\n\")[0] || \"无提交说明\"}</span><span className=\"vc-hint\">{entry.paths.length} 个改动路径</span></button>)}"
+    },
+    {
+      "file": "components/svn/HistoryView.tsx",
+      "line": 64,
+      "text": "<div className=\"vc-history-paths\">{selected.paths.map(change => <div className=\"vc-history-path\" key={change.path}><button className=\"vc-btn\" data-on={selectedPath === change.path || undefined} title={change.path} onClick={() => setSelectedPath(change.path)}><b>{change.action}</b><span>{change.path}</span></button><button className=\"vc-btn\" aria-label={`复制路径 ${change.path}`} onClick={() => void copy(change.path)}><Icon name=\"copy\" size={12} /></button>{change.copyFromPath && <span className=\"vc-hint\">来自 {change.copyFromPath} @ r{change.copyFromRevision}</span>}</div>)}</div>"
+    },
+    {
+      "file": "components/svn/SvnCheckbox.tsx",
+      "line": 2,
+      "text": "export function SvnCheckbox({ label, checked, mixed = false, disabled = false, onChange }: { label: string; checked: boolean; mixed?: boolean; disabled?: boolean; onChange: () => void }) {"
+    },
+    {
+      "file": "components/svn/SvnCheckbox.tsx",
+      "line": 5,
+      "text": "return <input ref={ref} type=\"checkbox\" className=\"vc-checkbox\" aria-label={label} aria-checked={mixed ? \"mixed\" : checked} checked={checked} disabled={disabled} onChange={onChange} />;"
+    },
+    {
+      "file": "components/svn/SvnFileRows.tsx",
+      "line": 23,
+      "text": "return <div className=\"vc-file-row\" key={it.path} data-selected={selected !== null && keyOf(selected) === keyOf(it.path) || undefined}>"
+    },
+    {
+      "file": "components/svn/SvnFileRows.tsx",
+      "line": 25,
+      "text": "<button type=\"button\" className=\"vc-row\" data-file-row aria-pressed={selected !== null && keyOf(selected) === keyOf(it.path)} data-reviewed={done || undefined} title={it.rel} onClick={() => onSelect(it)} onDoubleClick={() => !it.isDir && onOpenFile?.(it.path)} onKeyDown={e => {"
+    },
+    {
+      "file": "components/svn/SvnPageSwitch.tsx",
+      "line": 24,
+      "text": "aria-selected={page === it.key}"
+    },
+    {
+      "file": "components/svn/SvnPageSwitch.tsx",
+      "line": 26,
+      "text": "data-on={page === it.key || undefined}"
+    },
+    {
+      "file": "components/svn/SvnToolbar.tsx",
+      "line": 111,
+      "text": "data-on={open || hkOpen || undefined}"
+    },
+    {
+      "file": "components/tabs/PatchWorkspace.tsx",
+      "line": 207,
+      "text": "<button type=\"button\" className=\"pk-tab\" data-on={tab === \"stage\" || undefined} onClick={() => setTab(\"stage\")}>"
+    },
+    {
+      "file": "components/tabs/PatchWorkspace.tsx",
+      "line": 211,
+      "text": "<button type=\"button\" className=\"pk-tab\" data-on={tab === \"md\" || undefined} onClick={() => setTab(\"md\")}>"
+    },
+    {
+      "file": "components/tabs/PatchWorkspace.tsx",
+      "line": 218,
+      "text": "data-on={tab === \"check\" || undefined}"
+    },
+    {
+      "file": "components/ui/FreshnessBadge.tsx",
+      "line": 97,
+      "text": "className=\"ml-0.5 rounded px-1 font-medium underline-offset-2 hover:underline focus-visible:underline\""
+    },
+    {
+      "file": "components/ui/Menu.tsx",
+      "line": 129,
+      "text": "aria-checked={checked}"
+    },
+    {
+      "file": "components/ui/notice.tsx",
+      "line": 220,
+      "text": "className=\"absolute inset-0 z-0 cursor-pointer rounded-[inherit] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary\""
+    },
+    {
+      "file": "components/ui/SettingsChoice.tsx",
+      "line": 14,
+      "text": "aria-checked={value === option.value} disabled={disabled}"
+    },
+    {
+      "file": "components/ui/switch.tsx",
+      "line": 17,
+      "text": "checked: boolean;"
+    },
+    {
+      "file": "components/ui/switch.tsx",
+      "line": 31,
+      "text": "aria-checked={checked}"
+    },
+    {
+      "file": "components/ui/ToggleRow.tsx",
+      "line": 33,
+      "text": "checked: boolean;"
+    },
+    {
+      "file": "components/update/update-badge.css",
+      "line": 22,
+      "text": ".update-slot button.header-badge:focus-visible,.app-side-update:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:2px; }"
+    },
+    {
+      "file": "components/update/update-dialog.css",
+      "line": 28,
+      "text": ".update-dialog :is(button,[tabindex],summary):focus-visible { outline:2px solid hsl(var(--ring));outline-offset:3px; }"
+    },
+    {
+      "file": "components/update/update-dialog.css",
+      "line": 29,
+      "text": ".update-dialog-scroll:focus-visible { outline-offset:-3px; }"
+    },
+    {
+      "file": "components/workspace/AllEditorTabs.tsx",
+      "line": 20,
+      "text": "<div className=\"wb-tabs-filter-options\"><button type=\"button\" aria-pressed={recentFirst} onClick={() => setRecentFirst(value => !value)}>最近使用</button><button type=\"button\" aria-pressed={dirtyOnly} onClick={() => setDirtyOnly(value => !value)}>仅未保存</button><span>{shown.length} / {tabs.length}</span></div>"
+    },
+    {
+      "file": "components/workspace/BottomPanel.tsx",
+      "line": 95,
+      "text": "<button type=\"button\" className=\"wb-status-btn sc-expand-button\" aria-pressed={expanded} onClick={toggleExpanded}><Icon name={expanded ? \"restore\" : \"maximize\"} size={13} />{expanded ? \"恢复布局\" : \"展开阅读\"}</button>"
+    },
+    {
+      "file": "components/workspace/BuildOutputView.tsx",
+      "line": 26,
+      "text": "<button type=\"button\" aria-pressed={section === \"summary\"} onClick={() => setSection(\"summary\")}>模块摘要{modules.length > 0 ? ` · ${modules.length}` : \"\"}</button>"
+    },
+    {
+      "file": "components/workspace/BuildOutputView.tsx",
+      "line": 27,
+      "text": "<button type=\"button\" aria-pressed={section === \"problems\"} onClick={() => setSection(\"problems\")}>问题定位{result?.problems.length ? ` · ${result.problems.length}` : \"\"}</button>"
+    },
+    {
+      "file": "components/workspace/BuildOutputView.tsx",
+      "line": 28,
+      "text": "<button type=\"button\" aria-pressed={section === \"raw\"} onClick={() => setSection(\"raw\")}>原始输出 · {log.length}</button>"
+    },
+    {
+      "file": "components/workspace/DebugBreakpoints.tsx",
+      "line": 104,
+      "text": "data-on={enabledFilters.length > 0 || undefined}"
+    },
+    {
+      "file": "components/workspace/DebugPanel.tsx",
+      "line": 76,
+      "text": "aria-selected={snap.target === t}"
+    },
+    {
+      "file": "components/workspace/DebugPanel.tsx",
+      "line": 78,
+      "text": "data-on={snap.target === t || undefined}"
+    },
+    {
+      "file": "components/workspace/DebugPanel.tsx",
+      "line": 154,
+      "text": "data-on={consoleOpen || undefined}"
+    },
+    {
+      "file": "components/workspace/DebugStack.tsx",
+      "line": 58,
+      "text": "data-active={t.id === snap.threadId || undefined}"
+    },
+    {
+      "file": "components/workspace/DebugStack.tsx",
+      "line": 76,
+      "text": "<div key={f.id} className=\"dbg-frame-row\" data-active={f.id === snap.frameId || undefined}>"
+    },
+    {
+      "file": "components/workspace/EditorGroupTools.tsx",
+      "line": 19,
+      "text": "{([['left', '左组'], ['right', '右组']] as const).map(([id, name]) => <button key={id} type=\"button\" disabled={!groups?.[id].length} aria-pressed={groups?.focused === id} title={`聚焦${name} · ${tabKeyLabel(id)}`} onClick={() => focus(id)}>{name}</button>)}"
+    },
+    {
+      "file": "components/workspace/EditorNavRow.tsx",
+      "line": 74,
+      "text": "<button type=\"button\" className=\"wb-outline-btn wb-minimap-toggle wb-reading-secondary\" aria-pressed={minimap && !heavy}"
+    },
+    {
+      "file": "components/workspace/EditorNavRow.tsx",
+      "line": 83,
+      "text": "data-active={outlineOpen || undefined}"
+    },
+    {
+      "file": "components/workspace/EditorNavRow.tsx",
+      "line": 94,
+      "text": "data-active={history.open || undefined}"
+    },
+    {
+      "file": "components/workspace/HistoryPanel.tsx",
+      "line": 123,
+      "text": "data-active={v.id === sel || undefined}"
+    },
+    {
+      "file": "components/workspace/JavaMemberRows.tsx",
+      "line": 24,
+      "text": "aria-level={depth + member.depth + 1} aria-selected={selected === member.id}"
+    },
+    {
+      "file": "components/workspace/JavaMemberRows.tsx",
+      "line": 27,
+      "text": "data-selected={selected === member.id || undefined}"
+    },
+    {
+      "file": "components/workspace/OutlinePanel.tsx",
+      "line": 125,
+      "text": "{onTogglePin && <button type=\"button\" className=\"wb-outline-option\" aria-pressed={pinned}"
+    },
+    {
+      "file": "components/workspace/OutlinePanel.tsx",
+      "line": 150,
+      "text": "<button type=\"button\" className=\"wb-outline-option\" aria-pressed={methodsOnly}"
+    },
+    {
+      "file": "components/workspace/OutlinePanel.tsx",
+      "line": 165,
+      "text": "data-active={i === active || undefined}"
+    },
+    {
+      "file": "components/workspace/PanelTabs.tsx",
+      "line": 33,
+      "text": "role=\"tab\" id={`wb-ptab-${panel}`} aria-selected={tab === panel} aria-controls=\"wb-panel-body\" tabIndex={tab === panel ? 0 : -1}"
+    },
+    {
+      "file": "components/workspace/PanelTabs.tsx",
+      "line": 34,
+      "text": "className=\"wb-ptab\" data-active={tab === panel || undefined} onClick={() => select(panel)}>"
+    },
+    {
+      "file": "components/workspace/PanelTabs.tsx",
+      "line": 42,
+      "text": "<button type=\"button\" className=\"wb-icon-btn\" aria-label={`${layout.pinned.includes(panel) ? \"取消固定\" : \"固定\"}${PANEL_NAMES[panel]}`} title={layout.pinned.includes(panel) ? \"取消固定\" : \"固定到页签条\"} aria-pressed={layout.pinned.includes(panel)} onClick={() => togglePinnedPanel(panel)}><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth=\"1.8\" strokeLinecap=\"round\" strokeLinejoin=\"round\" aria-hidden=\"true\"><path d=\"M16 3 21 8l-3 1-4 4 1 4-2 2-5-5-5-5 2-2 4 1 4-4zM8 16l-5 5\" /></svg></button>"
+    },
+    {
+      "file": "components/workspace/ProblemRow.tsx",
+      "line": 8,
+      "text": "return <div className=\"dw-problem-row\" data-selected={selected || undefined}>"
+    },
+    {
+      "file": "components/workspace/ProblemRow.tsx",
+      "line": 13,
+      "text": "<button type=\"button\" className=\"wb-icon-btn dw-preview-button\" aria-label={`预览 ${baseName(p.path)} 第 ${p.line} 行上下文`} aria-pressed={selected} title=\"预览上下文，保留当前编辑器\" onClick={onPreview}><Icon name=\"eye\" size={13} /></button>"
+    },
+    {
+      "file": "components/workspace/ProblemsView.tsx",
+      "line": 64,
+      "text": "{FILTERS.map(f => { const n = f.key === \"all\" ? scoped.length : scoped.filter(p => p.severity === f.key).length; return <button key={f.key} type=\"button\" className=\"wb-pfilter\" data-active={filter === f.key || undefined} onClick={() => setFilter(f.key)}>{f.label}{n > 0 && <span className=\"wb-pfilter-n\">{n}</span>}</button>; })}"
+    },
+    {
+      "file": "components/workspace/ProblemsView.tsx",
+      "line": 65,
+      "text": "<span className=\"wb-problems-sp\" /><button type=\"button\" className=\"wb-status-btn\" data-active={grouped || undefined} title=\"按文件分组显示\" onClick={() => setGrouped(g => !g)}>按文件分组</button>"
+    },
+    {
+      "file": "components/workspace/QuickPalette.tsx",
+      "line": 189,
+      "text": "<button key={m.mode} type=\"button\" className=\"qp-mode\" data-on={m.mode === mode || undefined} aria-pressed={m.mode === mode} onClick={() => openPalette(m.mode)}>"
+    },
+    {
+      "file": "components/workspace/QuickPalette.tsx",
+      "line": 213,
+      "text": "<div key={it.key} id={`qp-opt-${i}`} role=\"option\" aria-selected={i === sel} data-sel={i === sel} className=\"qp-li\" onMouseMove={() => i !== sel && setSel(i)} onClick={() => runAt(i)}>"
+    },
+    {
+      "file": "components/workspace/TabStrip.tsx",
+      "line": 187,
+      "text": "aria-selected={!dock?.documentOpen && t.path === activePath}"
+    },
+    {
+      "file": "components/workspace/TabStrip.tsx",
+      "line": 192,
+      "text": "data-active={(!dock?.documentOpen && t.path === activePath) || undefined}"
+    },
+    {
+      "file": "components/workspace/ToolTab.tsx",
+      "line": 23,
+      "text": "aria-selected={dock.documentOpen}"
+    },
+    {
+      "file": "components/workspace/ToolTab.tsx",
+      "line": 25,
+      "text": "data-active={dock.documentOpen || undefined}"
+    },
+    {
+      "file": "components/workspace/TreeChrome.tsx",
+      "line": 47,
+      "text": "<button type=\"button\" className=\"wb-status-btn\" aria-pressed={active}"
+    },
+    {
+      "file": "components/workspace/TreeHeader.tsx",
+      "line": 74,
+      "text": "<button type=\"button\" aria-label=\"文件视图\" aria-pressed={!packageView} onClick={() => setPackageView(false)}>文件</button>"
+    },
+    {
+      "file": "components/workspace/TreeHeader.tsx",
+      "line": 75,
+      "text": "<button type=\"button\" aria-label=\"包视图\" aria-pressed={packageView} onClick={() => setPackageView(true)}>包</button>"
+    },
+    {
+      "file": "components/workspace/TreeHeader.tsx",
+      "line": 80,
+      "text": "<button type=\"button\" className=\"wb-icon-btn\" aria-label=\"过滤资源树入口\" title=\"过滤文件名和包名\" aria-expanded={filter.open} aria-pressed={!!filter.text}"
+    },
+    {
+      "file": "components/workspace/TreeRow.tsx",
+      "line": 14,
+      "text": "* （目录只有 data-selected，文件还有 data-active = 编辑器里正打开的那个）。"
+    },
+    {
+      "file": "components/workspace/TreeRow.tsx",
+      "line": 62,
+      "text": "aria-selected={selected}"
+    },
+    {
+      "file": "components/workspace/TreeRow.tsx",
+      "line": 67,
+      "text": "data-selected={selected || undefined}"
+    },
+    {
+      "file": "components/workspace/TreeRow.tsx",
+      "line": 134,
+      "text": "aria-selected={selected}"
+    },
+    {
+      "file": "components/workspace/TreeRow.tsx",
+      "line": 136,
+      "text": "data-selected={selected || undefined}"
+    },
+    {
+      "file": "components/workspace/TreeRow.tsx",
+      "line": 215,
+      "text": "aria-selected={selected}"
+    },
+    {
+      "file": "components/workspace/TreeRow.tsx",
+      "line": 221,
+      "text": "data-active={active || undefined}"
+    },
+    {
+      "file": "components/workspace/TreeRow.tsx",
+      "line": 222,
+      "text": "data-selected={selected || undefined}"
+    },
+    {
+      "file": "components/workspace/TreeViewOptions.tsx",
+      "line": 43,
+      "text": "aria-pressed={reveal}"
+    },
+    {
+      "file": "components/workspace/WorkbenchFrame.tsx",
+      "line": 90,
+      "text": "'.wb-code-tools [role=\"tab\"][aria-selected=\"true\"], .app-side-item[aria-label=\"代码\"]',"
+    },
+    {
+      "file": "db-console.css",
+      "line": 38,
+      "text": ".dbx-doctab[data-active][class*=\"e-\"]::before { content: \"\"; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: hsl(var(--primary)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 53,
+      "text": ".dbx-btn.ghost[data-on] { color: hsl(var(--accent-foreground)); background: hsl(var(--accent)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 57,
+      "text": ".dbx-ibtn[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 75,
+      "text": ".dbx-splitbar:focus-visible { outline-offset: -2px; background: hsl(var(--primary) / .4); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 102,
+      "text": ".dbx-txmode button[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 110,
+      "text": ".dbx-dd .li:hover, .dbx-dd .li[data-sel] { background: hsl(var(--accent)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 130,
+      "text": ".dbx-crow[data-active] { background: hsl(var(--accent)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 146,
+      "text": ".dbx-trow[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 152,
+      "text": ".dbx-trow:hover .dbx-favbtn, .dbx-trow:focus-within .dbx-favbtn, .dbx-favbtn[data-on] { opacity: 1; }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 155,
+      "text": ".dbx-favbtn[data-on] { color: hsl(var(--dbx-fav)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 156,
+      "text": ".dbx-favbtn[data-on] svg { fill: hsl(var(--dbx-fav)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 157,
+      "text": ".dbx-favbtn:focus-visible { opacity: 1; }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 175,
+      "text": ".dbx-rtab[data-on] { color: hsl(var(--primary)); font-weight: 600; }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 176,
+      "text": ".dbx-rtab[data-on]::after { content: \"\"; position: absolute; left: 7px; right: 7px; bottom: 0; height: 2px; background: hsl(var(--primary)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 213,
+      "text": ".dbx-settab[data-on] { color: hsl(var(--primary)); font-weight: 600; }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 214,
+      "text": ".dbx-settab[data-on]::after { content: \"\"; position: absolute; left: 6px; right: 6px; bottom: 0; height: 2px; background: hsl(var(--primary)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 231,
+      "text": ".dbx-grow[data-sel] .dbx-gc, .dbx-grow[data-sel] .dbx-gc.rn { background: hsl(var(--accent)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 233,
+      "text": ".dbx-gc[data-focus-container]:focus-within { outline-offset: -2px; }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 303,
+      "text": ".dbx-hitem.snip:hover .dbx-snipacts, .dbx-hitem.snip:focus-within .dbx-snipacts { opacity: 1; }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 339,
+      "text": ".dbx-subtabs .t[data-on] { color: hsl(var(--primary)); font-weight: 600; }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 340,
+      "text": ".dbx-subtabs .t[data-on]::after { content: \"\"; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; background: hsl(var(--primary)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 382,
+      "text": ".dbx-dlg .tabs button[data-on] { color: hsl(var(--foreground)); font-weight: 600; }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 383,
+      "text": ".dbx-dlg .tabs button[data-on]::after { content: \"\"; position: absolute; left: 6px; right: 6px; bottom: -1px; height: 2px; background: hsl(var(--primary)); }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 391,
+      "text": ".dbx-envs > button[data-on] { border-color: hsl(var(--env)); background: hsl(var(--env) / .12); color: hsl(var(--env-ink)); font-weight: 600; }"
+    },
+    {
+      "file": "db-console.css",
+      "line": 483,
+      "text": ".dbx-pr-table tr[data-on] td { background: hsl(var(--primary) / .07); }"
+    },
+    {
+      "file": "db-transfer.css",
+      "line": 19,
+      "text": ".dbx-transfer-dialog input[type=\"checkbox\"], .dbx-transfer-dialog input[type=\"radio\"] { accent-color: hsl(var(--primary)); width: 14px; height: 14px; flex-shrink: 0; margin: 3px 0 0; }"
+    },
+    {
+      "file": "db-transfer.css",
+      "line": 21,
+      "text": ".dbx-transfer-dialog :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }"
+    },
+    {
+      "file": "db-transfer.css",
+      "line": 38,
+      "text": ".dbx-transfer-tags button[aria-pressed=\"true\"] { color: hsl(var(--accent-foreground)); border-color: hsl(var(--primary) / .4); background: hsl(var(--accent)); }"
+    },
+    {
+      "file": "db-workbench.css",
+      "line": 30,
+      "text": ".dbx-schema-item[aria-selected=\"true\"] {color:hsl(var(--primary));font-weight:600;}"
+    },
+    {
+      "file": "db-workbench.css",
+      "line": 67,
+      "text": ".dbx-object-options button[aria-selected=\"true\"] {background:hsl(var(--accent));color:hsl(var(--accent-foreground));}"
+    },
+    {
+      "file": "db-workbench.css",
+      "line": 95,
+      "text": ".dbx-inp:focus {border-color:hsl(var(--primary));}"
+    },
+    {
+      "file": "db.css",
+      "line": 21,
+      "text": ".dq-conn .dot[data-on] {"
+    },
+    {
+      "file": "debug.css",
+      "line": 6,
+      "text": ".sv-btn[data-on] {"
+    },
+    {
+      "file": "debug.css",
+      "line": 13,
+      "text": ".sv-jdwp[data-on] {"
+    },
+    {
+      "file": "debug.css",
+      "line": 94,
+      "text": ".dbg-target[data-on] {"
+    },
+    {
+      "file": "debug.css",
+      "line": 319,
+      "text": ".dbg-remote-row input:focus-visible {"
+    },
+    {
+      "file": "debug.css",
+      "line": 377,
+      "text": ".dbg-frame[data-active] {"
+    },
+    {
+      "file": "debug.css",
+      "line": 477,
+      "text": ".dbg-watch-input:focus {"
+    },
+    {
+      "file": "debug.css",
+      "line": 564,
+      "text": ".dbg-watch:focus-within .dbg-watch-del {"
+    },
+    {
+      "file": "debug.css",
+      "line": 580,
+      "text": ".dbg-hd-btn[data-on] {"
+    },
+    {
+      "file": "debug.css",
+      "line": 586,
+      "text": ".dbg-btn[data-on] {"
+    },
+    {
+      "file": "debug.css",
+      "line": 635,
+      "text": ".dbg-thread[data-active] {"
+    },
+    {
+      "file": "debug.css",
+      "line": 670,
+      "text": ".dbg-frame-row[data-active] {"
+    },
+    {
+      "file": "debug.css",
+      "line": 674,
+      "text": ".dbg-frame-row[data-active] .dbg-frame {"
+    },
+    {
+      "file": "debug.css",
+      "line": 686,
+      "text": ".dbg-frame-row:focus-within .dbg-frame-copy {"
+    },
+    {
+      "file": "debug.css",
+      "line": 806,
+      "text": "accent-color: hsl(var(--destructive));"
+    },
+    {
+      "file": "debug.css",
+      "line": 849,
+      "text": ".dbg-bp-row:focus-within .dbg-bp-act {"
+    },
+    {
+      "file": "debug.css",
+      "line": 884,
+      "text": ".dbg-bp-edit input:focus {"
+    },
+    {
+      "file": "debug.css",
+      "line": 926,
+      "text": "accent-color: hsl(var(--warning));"
+    },
+    {
+      "file": "debug.css",
+      "line": 971,
+      "text": ".dbg-var-row:focus-within .dbg-var-edit {"
+    },
+    {
+      "file": "development-flow.css",
+      "line": 10,
+      "text": ".development-option input, .development-steps input { accent-color: hsl(var(--primary)); width: 14px; height: 14px; margin: 0; flex-shrink: 0; }"
+    },
+    {
+      "file": "diagnostic-workspace.css",
+      "line": 3,
+      "text": ".dw-problem-row[data-selected] { background:hsl(var(--accent)); }"
+    },
+    {
+      "file": "diagnostic-workspace.css",
+      "line": 34,
+      "text": ".dw-build-nav button[aria-pressed=\"true\"] { color:hsl(var(--accent-foreground)); background:hsl(var(--accent)); }"
+    },
+    {
+      "file": "diagnostic-workspace.css",
+      "line": 51,
+      "text": ".dw-search-hit[data-selected] { background:hsl(var(--accent)); }"
+    },
+    {
+      "file": "diagnostic-workspace.css",
+      "line": 59,
+      "text": ".dw-search-actions button:focus-visible,.dw-search-hit:focus-visible,.dw-build-nav button:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:-2px; }"
+    },
+    {
+      "file": "editor-groups.css",
+      "line": 6,
+      "text": ".wb-group-switch button[aria-pressed=true] { color:hsl(var(--primary)); background:hsl(var(--accent)); font-weight:600; }"
+    },
+    {
+      "file": "editor-groups.css",
+      "line": 12,
+      "text": ".wb-editor-group-slot[data-focused] .wb-tab[data-active] { box-shadow:inset 0 -2px hsl(var(--primary)); }"
+    },
+    {
+      "file": "editor-groups.css",
+      "line": 17,
+      "text": ".wb-editor-divider:hover,.wb-editor-divider:focus-visible { background:hsl(var(--ring) / .35); outline:0; }"
+    },
+    {
+      "file": "editor-groups.css",
+      "line": 24,
+      "text": ".wb-tabs-filter-options button[aria-pressed=true] { background:hsl(var(--accent)); color:hsl(var(--primary)); }"
+    },
+    {
+      "file": "glass-material.css",
+      "line": 79,
+      "text": "html[data-ui-style=\"glass\"] .settings-choice button[aria-checked=\"true\"] { background: var(--glass-inset); }"
+    },
+    {
+      "file": "glass-material.css",
+      "line": 80,
+      "text": "html[data-ui-style=\"glass\"] :is(.app-side-item[data-active], .wb-settings-nav-group > button[aria-current]) {"
+    },
+    {
+      "file": "glass-material.css",
+      "line": 132,
+      "text": "html[data-ui-style=\"glass\"] :is(.app-side-item[data-active], .wb-settings-nav-group > button[aria-current]) { background: Highlight; color: HighlightText; }"
+    },
+    {
+      "file": "index.css",
+      "line": 264,
+      "text": "accent-color: hsl(var(--primary));"
+    },
+    {
+      "file": "index.css",
+      "line": 292,
+      "text": ".info-trigger:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }"
+    },
+    {
+      "file": "index.css",
+      "line": 748,
+      "text": ".s-row:is(:hover,:focus-visible) { background: hsl(var(--muted)); }"
+    },
+    {
+      "file": "index.css",
+      "line": 756,
+      "text": ".s-input:focus { outline: none; border-color: hsl(var(--primary)); box-shadow: 0 0 0 2px color-mix(in srgb, hsl(var(--primary)) 20%, transparent); }"
+    },
+    {
+      "file": "index.css",
+      "line": 761,
+      "text": ":is(button, a, summary, [tabindex]):not(.monaco-editor *, input, textarea, select):focus-visible,"
+    },
+    {
+      "file": "index.css",
+      "line": 762,
+      "text": ":is(input[type=\"checkbox\"], input[type=\"radio\"], input[type=\"range\"]):focus-visible {"
+    },
+    {
+      "file": "index.css",
+      "line": 769,
+      "text": ":is(input, textarea, select):not(.monaco-editor *, [type=\"checkbox\"], [type=\"radio\"], [type=\"range\"]):focus {"
+    },
+    {
+      "file": "index.css",
+      "line": 774,
+      "text": "[data-focus-container]:focus-within {"
+    },
+    {
+      "file": "index.css",
+      "line": 779,
+      "text": "[data-focus-container] :is(input, textarea, select):focus {"
+    },
+    {
+      "file": "index.css",
+      "line": 933,
+      "text": ".app-side-item:is(:hover,:focus-visible) { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }"
+    },
+    {
+      "file": "index.css",
+      "line": 935,
+      "text": ".app-side-item[data-active] {"
+    },
+    {
+      "file": "index.css",
+      "line": 1399,
+      "text": ":is(:hover,:focus-visible) 镜像规则保证键盘与触屏可见。 */"
+    },
+    {
+      "file": "interaction-density.css",
+      "line": 7,
+      "text": ".app-shell .dbx-dd .li:focus-visible { background:hsl(var(--accent)); outline:2px solid hsl(var(--ring)); outline-offset:-2px; }"
+    },
+    {
+      "file": "linked.css",
+      "line": 86,
+      "text": ".lnk-btn[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); border-color: transparent; font-weight: 600; }"
+    },
+    {
+      "file": "linked.css",
+      "line": 99,
+      "text": ".lnk-inp:focus { border-color: hsl(var(--ring)); }"
+    },
+    {
+      "file": "linked.css",
+      "line": 174,
+      "text": ".lnk-ov:is(:hover,:focus-visible) { background: hsl(var(--secondary) / .6); }"
+    },
+    {
+      "file": "linked.css",
+      "line": 225,
+      "text": ".lnk-input:focus { border-color: hsl(var(--primary) / .5); }"
+    },
+    {
+      "file": "linked.css",
+      "line": 226,
+      "text": ".lnk-input:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }"
+    },
+    {
+      "file": "log.css",
+      "line": 138,
+      "text": ".lg-chip[data-on] {"
+    },
+    {
+      "file": "log.css",
+      "line": 202,
+      "text": ".lg-row[data-active] {"
+    },
+    {
+      "file": "md.css",
+      "line": 61,
+      "text": ".md-chip[data-on] {"
+    },
+    {
+      "file": "md.css",
+      "line": 70,
+      "text": ".md-chip[data-on] .md-chip-num {"
+    },
+    {
+      "file": "md.css",
+      "line": 192,
+      "text": ".md-pick-item[data-on] {"
+    },
+    {
+      "file": "md.css",
+      "line": 209,
+      "text": ".md-pick-item[data-on] .md-ck {"
+    },
+    {
+      "file": "md.css",
+      "line": 386,
+      "text": ".md-tcard-h:focus-visible { outline-offset: -2px; }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 3,
+      "text": ".meta-workbench ::selection { background: hsl(var(--primary) / .2); }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 4,
+      "text": ".meta-workbench :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 14,
+      "text": ".meta-workbench .meta-entry.is-active { box-shadow: none; }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 15,
+      "text": ".meta-workbench .meta-entry.is-active .meta-entry-sub { color: hsl(var(--foreground)); }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 31,
+      "text": ".meta-splitter:hover::after, .meta-splitter:focus-visible::after { background: hsl(var(--primary)); }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 36,
+      "text": ".meta-document-tab.is-active { color: hsl(var(--foreground)); background: hsl(var(--card)); box-shadow: inset 0 2px hsl(var(--primary)); }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 50,
+      "text": ".meta-mode-switch button.is-active { background: hsl(var(--card)); color: hsl(var(--foreground)); font-weight: 600; }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 65,
+      "text": ".meta-data-tabs button.is-active { color: hsl(var(--foreground)); font-weight: 600; border-bottom-color: hsl(var(--primary)); }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 92,
+      "text": ".meta-field-table tbody tr.is-active { background: hsl(var(--primary) / .1); }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 93,
+      "text": ".meta-field-table tbody tr.is-active td:first-child { font-weight: 600; color: hsl(var(--primary)); }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 154,
+      "text": ".meta-field-check input { accent-color: hsl(var(--primary)); vertical-align: middle; }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 155,
+      "text": ".meta-field-table tbody tr.is-selected { background: hsl(var(--primary) / .06); }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 177,
+      "text": ".meta-outline-row.is-active, .meta-object-link[aria-pressed=\"true\"] { background: hsl(var(--primary) / .1); }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 187,
+      "text": ".meta-canvas-node .meta-canvas-field.is-active rect { fill: hsl(var(--primary) / .12); }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 190,
+      "text": ".meta-canvas-rel.is-active .meta-edge-hit { stroke: transparent; stroke-width: 14px; }"
+    },
+    {
+      "file": "meta-editor.css",
+      "line": 191,
+      "text": ".meta-workbench .meta-canvas-node:focus-visible .meta-node-surface { stroke: hsl(var(--ring)); stroke-width: 2px; }"
+    },
+    {
+      "file": "meta-generation.css",
+      "line": 9,
+      "text": ".gen-workbench ::selection { background: hsl(var(--primary) / .22); }"
+    },
+    {
+      "file": "meta-generation.css",
+      "line": 10,
+      "text": ".gen-workbench :focus-visible, .gen-modal :focus-visible, .gen-config-modal :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }"
+    },
+    {
+      "file": "meta-generation.css",
+      "line": 32,
+      "text": ".gen-mobile-tabs button[aria-pressed=\"true\"] { background: hsl(var(--card)); color: hsl(var(--foreground)); font-weight: 600; }"
+    },
+    {
+      "file": "meta-generation.css",
+      "line": 39,
+      "text": ".gen-file-search:focus-within { outline: 2px solid hsl(var(--ring)); outline-offset: -1px; }"
+    },
+    {
+      "file": "meta-generation.css",
+      "line": 43,
+      "text": ".gen-filters button[aria-pressed=\"true\"] { background: hsl(var(--secondary)); color: hsl(var(--foreground)); font-weight: 600; }"
+    },
+    {
+      "file": "meta-generation.css",
+      "line": 51,
+      "text": ".gen-file.is-active { background: hsl(var(--primary) / .1); }"
+    },
+    {
+      "file": "meta-generation.css",
+      "line": 58,
+      "text": ".gen-file input, .gen-file-group input, .gen-checkbox input { width: 14px; height: 14px; accent-color: hsl(var(--primary)); flex: none; }"
+    },
+    {
+      "file": "meta-generation.css",
+      "line": 68,
+      "text": ".gen-preview-tabs button[aria-pressed=\"true\"] { border-bottom-color: hsl(var(--primary)); color: hsl(var(--foreground)); font-weight: 600; }"
+    },
+    {
+      "file": "meta-generation.css",
+      "line": 106,
+      "text": "body:has(.gen-workbench[data-active=\"true\"]) .toast-stack { bottom: 148px; }"
+    },
+    {
+      "file": "meta.css",
+      "line": 85,
+      "text": ".meta-entry.is-active {"
+    },
+    {
+      "file": "meta.css",
+      "line": 190,
+      "text": ".meta-tabs button.is-active {"
+    },
+    {
+      "file": "meta.css",
+      "line": 267,
+      "text": ".meta-entity-tab.is-active {"
+    },
+    {
+      "file": "meta.css",
+      "line": 343,
+      "text": "button.meta-attr-row.is-active {"
+    },
+    {
+      "file": "meta.css",
+      "line": 450,
+      "text": ".meta-sev.is-active {"
+    },
+    {
+      "file": "meta.css",
+      "line": 454,
+      "text": ".meta-sev.sev-error.is-active { color: hsl(var(--destructive-ink)); }"
+    },
+    {
+      "file": "meta.css",
+      "line": 455,
+      "text": ".meta-sev.sev-warn.is-active { color: hsl(var(--warning-ink)); }"
+    },
+    {
+      "file": "meta.css",
+      "line": 549,
+      "text": ".meta-seg button.is-active {"
+    },
+    {
+      "file": "meta.css",
+      "line": 579,
+      "text": ".meta-vo-tabs button.is-active {"
+    },
+    {
+      "file": "meta.css",
+      "line": 683,
+      "text": ".meta-gen-field select:focus-visible,"
+    },
+    {
+      "file": "meta.css",
+      "line": 684,
+      "text": ".meta-gen-field input:focus-visible {"
+    },
+    {
+      "file": "meta.css",
+      "line": 776,
+      "text": ".meta-gen-item:focus-visible { box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.5); }"
+    },
+    {
+      "file": "meta.css",
+      "line": 777,
+      "text": ".meta-gen-item.is-active { background: hsl(var(--primary) / 0.1); }"
+    },
+    {
+      "file": "meta.css",
+      "line": 859,
+      "text": ".meta-export-input:focus-visible {"
+    },
+    {
+      "file": "meta.css",
+      "line": 988,
+      "text": ".meta-canvas-node.is-active rect {"
+    },
+    {
+      "file": "meta.css",
+      "line": 1009,
+      "text": ".meta-canvas-rel.is-active path {"
+    },
+    {
+      "file": "meta.css",
+      "line": 1018,
+      "text": ".meta-canvas-rel.is-active text {"
+    },
+    {
+      "file": "meta.css",
+      "line": 1042,
+      "text": ".meta-canvas-field.is-active text {"
+    },
+    {
+      "file": "meta.css",
+      "line": 1086,
+      "text": ".meta-canvas-chips button.is-active {"
+    },
+    {
+      "file": "meta.css",
+      "line": 1359,
+      "text": ".meta-history-item.is-active { background: hsl(var(--accent)); }"
+    },
+    {
+      "file": "meta.css",
+      "line": 1692,
+      "text": ".meta-skeleton.is-active {"
+    },
+    {
+      "file": "native-workbench.css",
+      "line": 17,
+      "text": ".app-shell .app-side-item[data-active] {"
+    },
+    {
+      "file": "operation-feedback.css",
+      "line": 19,
+      "text": ".op-progress progress { flex:1;min-width:0;accent-color:hsl(var(--primary)); }"
+    },
+    {
+      "file": "operation-feedback.css",
+      "line": 22,
+      "text": ".app-shell :is(.wb-icon-btn,.wb-nav-btn,.wb-outline-btn,.wb-tab-x,.sv-icon-btn):focus-visible { outline:2px solid hsl(var(--ring));outline-offset:-2px; }"
+    },
+    {
+      "file": "palette.css",
+      "line": 11,
+      "text": ".qp-mode[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }"
+    },
+    {
+      "file": "palette.css",
+      "line": 18,
+      "text": ".qp-retry:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }"
+    },
+    {
+      "file": "palette.css",
+      "line": 21,
+      "text": ".qp-li[data-sel=\"true\"] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }"
+    },
+    {
+      "file": "patch.css",
+      "line": 236,
+      "text": ".pk-chip[data-on] {"
+    },
+    {
+      "file": "patch.css",
+      "line": 241,
+      "text": ".pk-chip:hover:not([data-on]) {"
+    },
+    {
+      "file": "patch.css",
+      "line": 340,
+      "text": ".pk-row[data-on] {"
+    },
+    {
+      "file": "patch.css",
+      "line": 343,
+      "text": ".pk-row[data-active]::before {"
+    },
+    {
+      "file": "patch.css",
+      "line": 369,
+      "text": ".pk-cbx[data-on] {"
+    },
+    {
+      "file": "patch.css",
+      "line": 559,
+      "text": ".pk-tab[data-on] {"
+    },
+    {
+      "file": "patch.css",
+      "line": 587,
+      "text": ".pk-desc input:focus {"
+    },
+    {
+      "file": "patch.css",
+      "line": 838,
+      "text": ".pk-edit:focus {"
+    },
+    {
+      "file": "patch.css",
+      "line": 901,
+      "text": ".pk-out input:focus {"
+    },
+    {
+      "file": "reading-tools.css",
+      "line": 8,
+      "text": ".wb-tree-quick-filter > div:focus-within { outline:2px solid hsl(var(--ring)); outline-offset:1px; }"
+    },
+    {
+      "file": "service-console-log.css",
+      "line": 8,
+      "text": ".sc-log-button[aria-pressed=\"true\"] { color: hsl(var(--primary)); }"
+    },
+    {
+      "file": "service-console-log.css",
+      "line": 14,
+      "text": ".sc-log-levels button[aria-pressed=\"true\"] { background: hsl(var(--accent)); color: hsl(var(--primary)); }"
+    },
+    {
+      "file": "service-console-log.css",
+      "line": 23,
+      "text": ".sc-log-body:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: -2px; }"
+    },
+    {
+      "file": "service-console-log.css",
+      "line": 26,
+      "text": ".sc-log-body::selection, .sc-log-body *::selection { background: hsl(var(--primary) / .22); color: hsl(var(--foreground)); }"
+    },
+    {
+      "file": "service-console.css",
+      "line": 13,
+      "text": ".sc-service-tabs > button[aria-selected=\"true\"] { background:hsl(var(--accent)); border-color:hsl(var(--primary) / .18); }"
+    },
+    {
+      "file": "service-console.css",
+      "line": 62,
+      "text": ".sc-start-options input { accent-color:hsl(var(--primary)); }"
+    },
+    {
+      "file": "service-console.css",
+      "line": 71,
+      "text": ".sc-services button:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:1px; }"
+    },
+    {
+      "file": "services.css",
+      "line": 31,
+      "text": ".sv-btn[data-on] {"
+    },
+    {
+      "file": "services.css",
+      "line": 111,
+      "text": ".sv-icon-btn[data-on] {"
+    },
+    {
+      "file": "services.css",
+      "line": 437,
+      "text": ".sv-log-src button[data-on] {"
+    },
+    {
+      "file": "services.css",
+      "line": 490,
+      "text": ".sv-lv button[data-on] {"
+    },
+    {
+      "file": "services.css",
+      "line": 713,
+      "text": ".sv-k-edit:focus-visible svg {"
+    },
+    {
+      "file": "services.css",
+      "line": 741,
+      "text": ".sv-port-input input:focus {"
+    },
+    {
+      "file": "services.css",
+      "line": 764,
+      "text": ".sv-port-quick button[data-active=\"true\"] {"
+    },
+    {
+      "file": "services.css",
+      "line": 943,
+      "text": "accent-color: hsl(var(--primary));"
+    },
+    {
+      "file": "settings-center.css",
+      "line": 21,
+      "text": ".wb-settings-page-header h1:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }"
+    },
+    {
+      "file": "settings-center.css",
+      "line": 42,
+      "text": ".wb-settings-body .srow[data-settings-item]:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }"
+    },
+    {
+      "file": "settings-center.css",
+      "line": 57,
+      "text": ".wb-settings-result:is(:hover,:focus-visible) { background:hsl(var(--secondary)); }"
+    },
+    {
+      "file": "settings-choice.css",
+      "line": 3,
+      "text": ".settings-choice button[aria-checked=true] {background:hsl(var(--card));color:hsl(var(--foreground));font-weight:600;box-shadow:0 1px 3px rgb(30 45 80/.12)}"
+    },
+    {
+      "file": "settings-choice.css",
+      "line": 5,
+      "text": ".settings-choice button[aria-checked=true]:hover {background:hsl(var(--card))}"
+    },
+    {
+      "file": "settings-choice.css",
+      "line": 6,
+      "text": ".settings-choice button:focus-visible {outline:2px solid hsl(var(--primary));outline-offset:3px}"
+    },
+    {
+      "file": "svn-diff.css",
+      "line": 11,
+      "text": ".vc-reading-menu input { accent-color:hsl(var(--primary)); }"
+    },
+    {
+      "file": "svn-history.css",
+      "line": 9,
+      "text": ".vc-history-record[data-on] { background:hsl(var(--accent)); }"
+    },
+    {
+      "file": "svn-history.css",
+      "line": 28,
+      "text": ".vc-history :is(button,input,select):focus-visible,.vc-conflict-view button:focus-visible,.vc-blame-view button:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:-2px; }"
+    },
+    {
+      "file": "svn-workbench.css",
+      "line": 30,
+      "text": ".vc-checkbox { flex-shrink:0;width:16px;height:16px;accent-color:hsl(var(--primary));cursor:pointer; }"
+    },
+    {
+      "file": "svn-workbench.css",
+      "line": 32,
+      "text": ".vc-checkbox:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:2px; }"
+    },
+    {
+      "file": "svn-workbench.css",
+      "line": 35,
+      "text": ".vc-file-row[data-selected] { background:hsl(var(--accent)); }"
+    },
+    {
+      "file": "svn-workbench.css",
+      "line": 36,
+      "text": ".vc-file-row[data-selected] .vc-row { background:transparent;color:hsl(var(--accent-foreground)); }"
+    },
+    {
+      "file": "svn-workbench.css",
+      "line": 41,
+      "text": ".vc-review-progress { width:100%;height:5px;accent-color:hsl(var(--success));border:0; }"
+    },
+    {
+      "file": "svn-workbench.css",
+      "line": 65,
+      "text": ".vc-review-document :is(button,input,select,textarea):focus-visible { outline:2px solid hsl(var(--ring));outline-offset:-2px; }"
+    },
+    {
+      "file": "svn-workbench.css",
+      "line": 66,
+      "text": ".vc-head :is(button):focus-visible,.vc-chg :is(button,select):focus-visible { outline:2px solid hsl(var(--ring));outline-offset:-2px; }"
+    },
+    {
+      "file": "svn.css",
+      "line": 60,
+      "text": ".vc-mode-btn[data-on] {"
+    },
+    {
+      "file": "svn.css",
+      "line": 164,
+      "text": ".vc-chip:hover:not([data-on]) {"
+    },
+    {
+      "file": "svn.css",
+      "line": 167,
+      "text": ".vc-chip[data-on] {"
+    },
+    {
+      "file": "svn.css",
+      "line": 237,
+      "text": ".vc-row[data-on] {"
+    },
+    {
+      "file": "svn.css",
+      "line": 240,
+      "text": ".vc-row[data-on]::before {"
+    },
+    {
+      "file": "svn.css",
+      "line": 367,
+      "text": ".vc-review-toggle[data-on] {"
+    },
+    {
+      "file": "svn.css",
+      "line": 413,
+      "text": ".vc-msg:focus {"
+    },
+    {
+      "file": "svn.css",
+      "line": 565,
+      "text": ".vc-input:focus {"
+    },
+    {
+      "file": "svn.css",
+      "line": 608,
+      "text": ".vc-ver .vc-btn-sm[data-on] {"
+    },
+    {
+      "file": "svn.css",
+      "line": 705,
+      "text": ".vc-btn[data-on] {"
+    },
+    {
+      "file": "workbench-layout.css",
+      "line": 43,
+      "text": ".app-shell .wb-tab[data-active] { background:hsl(var(--card)); border-radius:var(--r-control) var(--r-control) 0 0; box-shadow:inset 0 -1px 0 hsl(var(--primary)); }"
+    },
+    {
+      "file": "workbench-layout.css",
+      "line": 57,
+      "text": ".wb-panel-tool-option > .wb-icon-btn[aria-pressed=\"true\"] { color:hsl(var(--primary)); background:hsl(var(--accent)); }"
+    },
+    {
+      "file": "workbench-layout.css",
+      "line": 172,
+      "text": ".settings-group-head:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:-2px; }"
+    },
+    {
+      "file": "workbench-layout.css",
+      "line": 182,
+      "text": "html[data-ui-style=\"glass\"] .app-shell .app-side-item[data-active] { background:hsl(var(--accent)); box-shadow:none; }"
+    },
+    {
+      "file": "workbench-layout.css",
+      "line": 214,
+      "text": ".app-side[data-collapsed] .app-side-item[data-active] { font-weight:600; }"
+    },
+    {
+      "file": "workbench-layout.css",
+      "line": 238,
+      "text": ".app-shell .wb-window-button:focus-visible { outline-offset:-2px; }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 47,
+      "text": ".wb-tree-view-switch button[aria-pressed=\"true\"] { background:hsl(var(--card)); color:hsl(var(--primary)); box-shadow:0 1px 2px hsl(var(--foreground) / .08); }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 60,
+      "text": ".wb-icon-btn[aria-pressed=\"true\"] { background: hsl(var(--secondary)); color: hsl(var(--primary)); }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 117,
+      "text": ".wb-tree-list:focus-visible { outline: 2px solid hsl(var(--ring) / 0.5); outline-offset: -2px; }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 148,
+      "text": ".wb-row[data-selected] { background: hsl(var(--ring) / .10); }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 149,
+      "text": ".wb-row[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 650; }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 150,
+      "text": ".wb-tree-list:focus-visible .wb-row[data-selected],"
+    },
+    {
+      "file": "workspace.css",
+      "line": 151,
+      "text": ".wb-row[data-active][data-selected] { box-shadow: inset 0 0 0 1px hsl(var(--ring) / .60); }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 153,
+      "text": ".wb-row-project[data-current]:not([data-selected]) { background: hsl(var(--primary) / .08); }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 179,
+      "text": ".wb-member-row:hover, .wb-member-row[data-selected] { color:hsl(var(--foreground)); }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 220,
+      "text": ".wb-tree-problem-tools .wb-status-btn[aria-pressed=\"true\"] {"
+    },
+    {
+      "file": "workspace.css",
+      "line": 244,
+      "text": ".wb-problem-badge:focus-visible { outline: 1px solid hsl(var(--ring)); outline-offset: -1px; }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 371,
+      "text": ".wb-row[data-active] .wb-row-icon { color: inherit; }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 395,
+      "text": ":is(.wb-row,.wb-tab)[data-active] .wb-file-ext { color:var(--wb-icon-teal); }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 420,
+      "text": ".wb-row[data-active] .wb-enc-badge { background: hsl(var(--warning) / 0.26); }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 466,
+      "text": ".wb-tab[data-active] {"
+    },
+    {
+      "file": "workspace.css",
+      "line": 489,
+      "text": ".wb-tab-x:focus-visible .wb-tab-close { display: block; }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 491,
+      "text": ".wb-tab-x:focus-visible .wb-dirty-dot { display: none; }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 615,
+      "text": ".wb-ptab[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 629,
+      "text": ".wb-pfilter[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 657,
+      "text": ".wb-status-btn[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 678,
+      "text": ".wb-log-link:focus-visible { outline: 1px solid hsl(var(--ring)); outline-offset: -1px; }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 762,
+      "text": ".wb-outline-option[aria-pressed=\"true\"],.wb-outline-row[data-current],.wb-minimap-toggle[aria-pressed=\"true\"] { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 774,
+      "text": ".wb-outline-row[data-active] { background: hsl(var(--secondary)); }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 779,
+      "text": ".wb-outline-btn[data-active] { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }"
+    },
+    {
+      "file": "workspace.css",
+      "line": 791,
+      "text": ".wb-hist-row[data-active] { background: hsl(var(--secondary)); }"
+    }
+  ]
+}

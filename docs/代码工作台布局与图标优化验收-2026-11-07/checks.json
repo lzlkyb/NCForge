@@ -1,0 +1,97 @@
+{
+  "date": "2026-11-07",
+  "scope": "代码工作台布局与工具图标优化",
+  "testSummary": "test-summary.json",
+  "checks": [
+    {
+      "name": "types",
+      "exitCode": 0,
+      "command": "node --max-old-space-size=768 node_modules/typescript/bin/tsc --noEmit",
+      "output": ""
+    },
+    {
+      "name": "lint",
+      "exitCode": 0,
+      "command": "node --max-old-space-size=384 node_modules/eslint/bin/eslint.js 'src/components/ui/icon.tsx' 'src/components/workspace/AllEditorTabs.tsx' 'src/components/workspace/BottomPanel.tsx' 'src/components/workspace/Breadcrumb.tsx' 'src/components/workspace/Breadcrumb.test.tsx' 'src/components/workspace/EditorGroupTools.tsx' 'src/components/workspace/EditorGroupTools.test.tsx' 'src/components/workspace/EditorGroupsPane.tsx' 'src/components/workspace/EditorGroupsPane.test.tsx' 'src/components/workspace/EditorNavRow.tsx' 'src/components/workspace/EditorReadingLayout.tsx' 'src/components/workspace/EditorReadingLayout.test.tsx' 'src/components/workspace/EmptyEditor.tsx' 'src/components/workspace/EmptyEditor.test.tsx' 'src/components/workspace/FilePaneSlots.tsx' 'src/components/workspace/TabStrip.tsx' 'src/components/workspace/TaskMenu.tsx' 'src/components/workspace/TreeHeader.tsx' 'src/components/workspace/TreeHeader.test.tsx' 'src/components/workspace/TreeQuickFilter.tsx' 'src/components/workspace/TreeViewOptions.tsx' 'src/components/workspace/TreeViewOptions.test.tsx' 'src/hooks/useFileSession.test.tsx'",
+      "output": ""
+    },
+    {
+      "name": "knip",
+      "exitCode": 0,
+      "command": "node --max-old-space-size=768 node_modules/knip/bin/knip.js --include files,dependencies --no-progress",
+      "output": ""
+    },
+    {
+      "name": "component-size",
+      "exitCode": 0,
+      "command": "node scripts/check-component-size.mjs",
+      "output": "✅ 组件体量门禁通过\n"
+    },
+    {
+      "name": "design-tokens",
+      "exitCode": 0,
+      "command": "node scripts/check-design-tokens.mjs",
+      "output": "ℹ️ 有文件的色值数量低于基线，可运行 --update 下调（不阻断）。\nℹ️ 有文件的实底表面数量低于基线，可运行 --update 下调（不阻断）。\n✅ 设计 token 棘轮通过（4 个文件 20 处裸色值；13 个文件 16 处实底表面，均未超过基线）\n"
+    },
+    {
+      "name": "ui-contract",
+      "exitCode": 0,
+      "command": "node scripts/check-ui-contract.mjs",
+      "output": "✅ UI 约定门禁通过（裸缓动 0 处、<10px 字号 0 处，均未超过基线）\n"
+    },
+    {
+      "name": "css",
+      "exitCode": 0,
+      "command": "node node_modules/.cache/code-ui-check/check-css.mjs",
+      "output": "CSS parsed: 4 application sheets + design sheet. Design script and SVG references checked.\n"
+    },
+    {
+      "name": "layout-detect",
+      "exitCode": 0,
+      "command": "& 'C:/Users/19145/.agents/skills/impeccable/scripts/impeccable.cmd' detect --json --scope layout desktop/src/components/workspace/TreeHeader.tsx desktop/src/components/workspace/EditorGroupsPane.tsx desktop/src/components/workspace/EmptyEditor.tsx desktop/src/reading-tools.css desktop/src/editor-groups.css",
+      "output": "[]\n"
+    },
+    {
+      "name": "diff-check",
+      "exitCode": 0,
+      "command": "git diff --check",
+      "output": "warning: in the working copy of 'desktop/src-tauri/db-bridge/NcDbBridge.java', CRLF will be replaced by LF the next time Git touches it\nwarning: in the working copy of 'desktop/src/components/db/ResultCompare.tsx', CRLF will be replaced by LF the next time Git touches it\nwarning: in the working copy of 'desktop/src/components/services/ServiceLogToolbar.tsx', CRLF will be replaced by LF the next time Git touches it\nwarning: in the working copy of 'desktop/src/lib/dbResultActions.ts', CRLF will be replaced by LF the next time Git touches it\n"
+    }
+  ],
+  "changedFiles": [
+    "desktop/src/components/ui/icon.tsx",
+    "desktop/src/components/workspace/AllEditorTabs.tsx",
+    "desktop/src/components/workspace/BottomPanel.tsx",
+    "desktop/src/components/workspace/Breadcrumb.tsx",
+    "desktop/src/components/workspace/Breadcrumb.test.tsx",
+    "desktop/src/components/workspace/EditorGroupTools.tsx",
+    "desktop/src/components/workspace/EditorGroupTools.test.tsx",
+    "desktop/src/components/workspace/EditorGroupsPane.tsx",
+    "desktop/src/components/workspace/EditorGroupsPane.test.tsx",
+    "desktop/src/components/workspace/EditorNavRow.tsx",
+    "desktop/src/components/workspace/EditorReadingLayout.tsx",
+    "desktop/src/components/workspace/EditorReadingLayout.test.tsx",
+    "desktop/src/components/workspace/EmptyEditor.tsx",
+    "desktop/src/components/workspace/EmptyEditor.test.tsx",
+    "desktop/src/components/workspace/FilePaneSlots.tsx",
+    "desktop/src/components/workspace/TabStrip.tsx",
+    "desktop/src/components/workspace/TaskMenu.tsx",
+    "desktop/src/components/workspace/TreeHeader.tsx",
+    "desktop/src/components/workspace/TreeHeader.test.tsx",
+    "desktop/src/components/workspace/TreeQuickFilter.tsx",
+    "desktop/src/components/workspace/TreeViewOptions.tsx",
+    "desktop/src/components/workspace/TreeViewOptions.test.tsx",
+    "desktop/src/editor-groups.css",
+    "desktop/src/reading-tools.css",
+    "desktop/src/workbench-layout.css",
+    "desktop/src/workspace.css",
+    "design/代码工作台布局与图标优化-2026-11-07.html",
+    "desktop/src/hooks/useFileSession.test.tsx",
+    "CHANGELOG.md"
+  ],
+  "visualAcceptance": {
+    "status": "not_run",
+    "reason": "此前本地浏览器重试被自动审批服务以 content-blocked / review failure 中断。本轮使用用户截图、源码、CSS解析和模拟交互验收，未声称实机像素或缩放验收通过。",
+    "reference": "../../design/代码工作台布局与图标优化-2026-11-07.html"
+  }
+}

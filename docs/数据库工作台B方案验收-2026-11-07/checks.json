@@ -1,0 +1,33 @@
+{
+  "recordedAt": "2026-11-07T21:42:25+08:00",
+  "scope": "数据库工作台 B 方案：主工作台、比对、输出",
+  "frontend": {
+    "initialFiles": 67,
+    "initialTests": 399,
+    "initialPassed": 393,
+    "initialFailed": 6,
+    "initialFailureCause": "dbOperationFeedback 测试桩未声明新增执行来源所需的 rtOf 与 dbSourceOf 依赖",
+    "correctedRecheckFiles": 4,
+    "correctedRecheckTests": 18,
+    "correctedRecheckPassed": 18,
+    "backgroundRecheckFiles": 4,
+    "backgroundRecheckTests": 23,
+    "backgroundRecheckPassed": 23,
+    "newBackgroundTest": 1,
+    "uniqueRelatedTestsPassed": 400,
+    "logs": ["frontend-tests.txt", "frontend-recheck.txt", "background-query-recheck.txt"]
+  },
+  "rust": {
+    "command": "cargo test --offline --lib commands::db_transfer_cmds::tests --no-default-features",
+    "passed": 5,
+    "evidence": "会话中已运行并通过；本文件归纳调用结果，不冒充原始运行日志"
+  },
+  "checksPassed": ["最终全局 TypeScript", "全局 ESLint 与补改文件复查", "组件体量", "设计 tokens", "UI 约定", "230 条命令契约", "孤立文件与依赖", "本次 Rust 文件 rustfmt", "git diff --check"],
+  "browserAcceptance": {
+    "status": "未完成",
+    "reason": "自动审批服务 content-blocked / review failure",
+    "currentScreenshots": false,
+    "areaIncreaseMeasured": false,
+    "realDatabaseIntegration": false
+  }
+}

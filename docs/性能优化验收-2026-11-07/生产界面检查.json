@@ -1,0 +1,116 @@
+{
+  "passed": true,
+  "measurements": {
+    "rows": 21,
+    "headers": 17,
+    "commandHeader": {
+      "height": 41,
+      "overflow": false
+    },
+    "selection": {
+      "focused": {
+        "interiorOutline": "none",
+        "interiorBorder": "0px",
+        "activeBorder": "2px",
+        "edgeBorder": "1px",
+        "fill": "rgb(226, 238, 234)"
+      },
+      "inactive": {
+        "interiorOutline": "none",
+        "interiorBorder": "0px",
+        "activeBorder": "1px",
+        "edgeBorder": "1px",
+        "fill": "rgb(233, 236, 235)"
+      },
+      "field": {
+        "outline": "none",
+        "parentBorder": "1px",
+        "parentRadius": "6px"
+      },
+      "variants": [
+        {
+          "dark": false,
+          "material": "classic",
+          "density": "standard",
+          "interiorOutline": "none",
+          "interiorBorder": "0px",
+          "activeBorder": "2px",
+          "edgeBorder": "1px",
+          "fill": "rgb(226, 238, 234)"
+        },
+        {
+          "dark": false,
+          "material": "classic",
+          "density": "comfortable",
+          "interiorOutline": "none",
+          "interiorBorder": "0px",
+          "activeBorder": "2px",
+          "edgeBorder": "1px",
+          "fill": "rgb(226, 238, 234)"
+        },
+        {
+          "dark": false,
+          "material": "glass",
+          "density": "standard",
+          "interiorOutline": "none",
+          "interiorBorder": "0px",
+          "activeBorder": "2px",
+          "edgeBorder": "1px",
+          "fill": "rgb(226, 238, 234)"
+        },
+        {
+          "dark": false,
+          "material": "glass",
+          "density": "comfortable",
+          "interiorOutline": "none",
+          "interiorBorder": "0px",
+          "activeBorder": "2px",
+          "edgeBorder": "1px",
+          "fill": "rgb(226, 238, 234)"
+        },
+        {
+          "dark": true,
+          "material": "classic",
+          "density": "standard",
+          "interiorOutline": "none",
+          "interiorBorder": "0px",
+          "activeBorder": "2px",
+          "edgeBorder": "1px",
+          "fill": "rgb(46, 71, 63)"
+        },
+        {
+          "dark": true,
+          "material": "classic",
+          "density": "comfortable",
+          "interiorOutline": "none",
+          "interiorBorder": "0px",
+          "activeBorder": "2px",
+          "edgeBorder": "1px",
+          "fill": "rgb(46, 71, 63)"
+        },
+        {
+          "dark": true,
+          "material": "glass",
+          "density": "standard",
+          "interiorOutline": "none",
+          "interiorBorder": "0px",
+          "activeBorder": "2px",
+          "edgeBorder": "1px",
+          "fill": "rgb(46, 71, 63)"
+        },
+        {
+          "dark": true,
+          "material": "glass",
+          "density": "comfortable",
+          "interiorOutline": "none",
+          "interiorBorder": "0px",
+          "activeBorder": "2px",
+          "edgeBorder": "1px",
+          "fill": "rgb(46, 71, 63)"
+        }
+      ]
+    },
+    "workerFilterMs": 333
+  },
+  "errors": []
+}
