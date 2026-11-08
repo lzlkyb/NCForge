@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { activateTab, patchTab, useDbSelector } from "../../lib/dbStore";
-import { buildComparison, comparisonCell, comparisonColumns, comparisonTsv, filterComparisonRows, type CompareTab } from "../../lib/dbCompareState";
+import { comparisonCell, comparisonColumns, comparisonTsv, filterComparisonRows, type CompareTab } from "../../lib/dbCompareState";
+import { useComparison } from "../../hooks/useComparison";
 import { downloadText } from "../../lib/resultExport";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
@@ -13,11 +14,7 @@ export function ComparisonWorkspace({ tab }: { tab:CompareTab }) {
   const [detail,setDetail]=useState<{r:number;c:number}|null>(null);
   const gridRef=useRef<ComparisonGridApi>(null);
   const sourceId=useDbSelector(state=>[tab.after.originTabId,tab.before.originTabId].find(id=>id && state.tabs.some(t=>t.id===id)));
-  const comparison=useMemo(()=>{
-    if(!tab.keys.length) return {model:null,error:""};
-    try {return {model:buildComparison(tab.before,tab.after,tab.keys),error:""};}
-    catch(error) {return {model:null,error:error instanceof Error ? error.message : String(error)};}
-  },[tab.before,tab.after,tab.keys]);
+  const comparison=useComparison(tab.before,tab.after,tab.keys);
   const model=comparison.model;
   const order=useMemo(()=>model ? filterComparisonRows(model,tab.filter,tab.query) : [],[model,tab.filter,tab.query]);
   const columns=useMemo(()=>model ? comparisonColumns(model,order,tab.onlyChanged) : [],[model,order,tab.onlyChanged]);
@@ -53,6 +50,7 @@ export function ComparisonWorkspace({ tab }: { tab:CompareTab }) {
     <div className="dbx-compare-scope" data-partial={partial || undefined}>
       <Icon name={partial ? "alertTriangle" : "layers"} size={14} /><span>{partial ? "仅比较已加载数据，不能代表全表差异" : "比较两份查询结果的全部已加载数据，包含隐藏列"}{partial && "；包含隐藏列。新增、删除仅表示这两份样本的差异。"}</span>
     </div>
+    {comparison.pending && <div role="status">正在比对数据…</div>}
     <fieldset className="dbx-compare-keys">
       <legend>唯一键 <span>手动选择，可多选组成复合键</span></legend>
       <div className="dbx-compare-key-options">{tab.before.columns.map((column,index)=><label key={`${column.name}-${index}`}><input type="checkbox" checked={tab.keys.some(key=>key.toUpperCase()===column.name.toUpperCase())} onChange={event=>update({keys:event.target.checked ? [...tab.keys,column.name] : tab.keys.filter(key=>key.toUpperCase()!==column.name.toUpperCase())})} />{column.name}</label>)}</div>

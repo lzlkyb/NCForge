@@ -22,6 +22,8 @@ export function SchemaChip({ connId }: { connId: string | null }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [extra, setExtra] = useState<string[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const listId = useId();
   const box = useRef<HTMLDivElement>(null);
@@ -37,6 +39,7 @@ export function SchemaChip({ connId }: { connId: string | null }) {
     const generation = epoch.current;
     asked.current = false;
     setExtra(null);
+    setListError(null);
     setQ("");
     setOpen(false);
     setBusy(false);
@@ -68,12 +71,13 @@ export function SchemaChip({ connId }: { connId: string | null }) {
   useEffect(() => {
     if (!open || !connId || !connected || rt.schemas?.length || asked.current) return;
     asked.current = true;
+    setExtra(null); setListError(null);
     const generation = epoch.current;
     void dbApi
       .schemas(connId)
       .then((r) => { if (generation === epoch.current) setExtra(r.schemas); })
-      .catch(() => { if (generation === epoch.current) setExtra([]); });
-  }, [open, connId, connected, rt.schemas]);
+      .catch((error) => { if (generation === epoch.current) { setExtra([]); setListError(friendlyDbError(error)); } });
+  }, [open, connId, connected, rt.schemas, revision]);
 
   const all = useMemo(
     () => (rt.schemas?.length ? rt.schemas : extra ?? []),
@@ -158,7 +162,7 @@ export function SchemaChip({ connId }: { connId: string | null }) {
           </div>
           <div className="dbx-schema-list" id={listId} role="listbox" aria-label="选择默认 schema">
             {list.length === 0 ? (
-              <div className="dbx-schema-empty">{all.length ? "没有匹配的 schema" : "正在读取 schema 清单…"}</div>
+              <div className="dbx-schema-empty">{listError ? `读取 schema 失败：${listError}` : all.length ? "没有匹配的 schema" : extra === null ? "正在读取 schema 清单…" : "无可切换的 schema"}</div>
             ) : (
               list.map((s, i) => (
                 <button
@@ -179,6 +183,7 @@ export function SchemaChip({ connId }: { connId: string | null }) {
               ))
             )}
           </div>
+          {listError && <button type="button" className="dbx-btn" onClick={() => { asked.current = false; setRevision(v => v + 1); }}>重新读取 schema</button>}
           <button
             type="button"
             className="dbx-schema-reset"

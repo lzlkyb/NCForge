@@ -1,3 +1,4 @@
+import { QueryElapsed } from "./SqlExecutionFeedback";
 import { useEffect, useId, useState } from "react";
 import { Icon } from "../ui/icon";
 import { ConnPicker } from "./ConnPicker";
@@ -85,6 +86,7 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
         >
           <Icon name={stopping ? "spinner" : "stop"} size={12} />
           {stopping ? "等待数据库停止…" : "停止"}
+          {operation && <QueryElapsed startedAt={operation.startedAt} />}
         </button>
       ) : (
         <div className="dbx-runsplit">

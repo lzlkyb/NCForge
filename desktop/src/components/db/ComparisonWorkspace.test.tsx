@@ -2,6 +2,14 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+vi.mock("../../hooks/useComparison", async () => {
+  const { buildComparison } = await import("../../lib/comparisonModel");
+  return { useComparison: (before: ResultSnapshot, after: ResultSnapshot, keys: string[]) => {
+    if (!keys.length) return { model: null, error: "", pending: false };
+    try { return { model: buildComparison(before, after, keys), error: "", pending: false }; }
+    catch (error) { return { model: null, error: String(error), pending: false }; }
+  } };
+});
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import type { ResultSnapshot } from "../../lib/dbResultTools";
 import { __resetDbForTest, getDb, openCompareTab, openSqlTab, patchTab, useDbSelector } from "../../lib/dbStore";

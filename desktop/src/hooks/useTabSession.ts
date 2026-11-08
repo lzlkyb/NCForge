@@ -32,11 +32,18 @@ export function useTabRestore(
     let cancelled = false;
     void (async () => {
       const opened: string[] = [];
-      for (const path of snap.tabs) {
+      const priority = [...new Set([snap.activePath, snap.splitPath].filter((path): path is string => !!path))];
+      for (const path of priority) {
         if (cancelled) return;
         if (await openRef.current(path, { silent: true })) opened.push(path);
       }
       if (cancelled || opened.length === 0) return;
+      const shells: TabMeta[] = snap.tabs.filter(path => !opened.includes(path)).map(path => ({
+        path, name: path.split(/[\\/]/).pop() ?? path, deferred: true,
+        encoding: "UTF-8", hasBom: false, eol: "LF", mtimeMs: 0, dirty: false,
+        eolChanged: false, readOnly: false, readOnlyReason: null, lines: 0,
+      }));
+      setSession({ tabs: tabs => [...tabs, ...shells] });
       const match = (want: string | null) =>
         want ? opened.find((p) => p.toLowerCase() === want.toLowerCase()) : undefined;
       const active = match(snap.activePath);

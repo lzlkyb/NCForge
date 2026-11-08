@@ -2,13 +2,13 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ change: vi.fn(), schemas: vi.fn() }));
+const mocks = vi.hoisted(() => ({ change: vi.fn(), schemas: vi.fn(), list: ["AIER633", "OTHER"] as string[] }));
 vi.mock("../../lib/dbStore", () => ({
   useConnOf: () => ({ id: "c1", name: "测试库", env: "test", user: "AIER633", url: "jdbc:oracle:thin:@h:1521/x", autoCommit: false, defaultSchema: "" }),
   useConnRt: () => ({
     status: "connected",
     currentSchema: "AIER633",
-    schemas: ["AIER633", "OTHER"],
+    schemas: mocks.list,
     info: { user: "AIER633" },
   }),
   changeSchema: mocks.change,
@@ -20,6 +20,8 @@ import { SchemaChip } from "./SchemaChip";
 let root: Root;
 let host: HTMLDivElement;
 beforeEach(() => {
+  mocks.list = ["AIER633", "OTHER"];
+  mocks.schemas.mockReset();
   mocks.change.mockReset();
   mocks.change.mockResolvedValue("OTHER");
   host = document.createElement("div");
@@ -84,4 +86,17 @@ describe("默认 schema 胶囊", () => {
     await act(async () => host.querySelector<HTMLButtonElement>(".dbx-schema-reset")!.click());
     expect(mocks.change).toHaveBeenCalledWith("c1", "");
   });
+});
+
+it("shows schema fetch failure and retries to an explicit empty state", async () => {
+  mocks.list = [];
+  mocks.schemas.mockRejectedValueOnce(new Error("network")).mockResolvedValueOnce({ schemas: [] });
+  await act(async () => root.render(<SchemaChip connId="c1" />));
+  await act(async () => host.querySelector<HTMLButtonElement>("button")!.click());
+  expect(host.textContent).toContain("读取 schema 失败");
+  const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "重新读取 schema")!;
+  await act(async () => retry.click());
+  expect(mocks.schemas).toHaveBeenCalledTimes(2);
+  expect(host.textContent).toContain("无可切换的 schema");
+  expect(host.textContent).not.toContain("正在读取 schema 清单");
 });

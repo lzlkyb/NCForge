@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import type { ColumnInfo, TableInfo } from "../../lib/dbApi";
 import { openTable } from "../../lib/dbActions";
@@ -14,6 +14,8 @@ export function TableRow({ connId, table, zh, fav, onToggleFav, onMenu }: {
   onMenu: (t: TableInfo, x: number, y: number) => void;
 }) {
   const [cols, setCols] = useState<ColumnInfo[] | "loading" | null>(null);
+  const request = useRef(0);
+  const [error, setError] = useState(false);
   // 只订阅「自己是不是当前打开的那张表」这一个布尔值：几百行表各自订阅整库的话，
   // 任何连接状态、查询结果的变化都会把整棵对象树重画一遍
   const active = useDbSelector((s) => {
@@ -21,9 +23,11 @@ export function TableRow({ connId, table, zh, fav, onToggleFav, onMenu }: {
     return cur?.kind === "table" && cur.connId === connId && cur.table === table.name.toUpperCase();
   });
   const expand = () => {
+    const generation = ++request.current;
+    setError(false);
     if (cols) return setCols(null);
     setCols("loading");
-    columnsOf(connId, table.name).then(setCols, () => setCols(null));
+    columnsOf(connId, table.name).then(value => { if (generation === request.current) setCols(value); }, () => { if (generation === request.current) { setCols(null); setError(true); } });
   };
   return (
     <>
@@ -31,6 +35,7 @@ export function TableRow({ connId, table, zh, fav, onToggleFav, onMenu }: {
         type="button"
         className="dbx-trow"
         data-active={active || undefined}
+        aria-expanded={cols !== null}
         aria-label={`${table.name.toLowerCase()}${zh ? ` ${zh}` : ""}${fav ? "，已收藏" : ""}`}
         title={zh ? `${table.name.toLowerCase()} · ${zh}` : table.name.toLowerCase()}
         onClick={() => void openTable(connId, table.name)}
@@ -39,6 +44,11 @@ export function TableRow({ connId, table, zh, fav, onToggleFav, onMenu }: {
           onMenu(table, e.clientX, e.clientY);
         }}
         onKeyDown={(e) => {
+          if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+            e.preventDefault();
+            if ((e.key === "ArrowRight") === (cols === null)) expand();
+            return;
+          }
           if (e.key !== "ContextMenu" && !(e.shiftKey && e.key === "F10")) return;
           e.preventDefault();
           const r = e.currentTarget.getBoundingClientRect();
@@ -46,9 +56,7 @@ export function TableRow({ connId, table, zh, fav, onToggleFav, onMenu }: {
         }}
       >
         <span
-          role="button"
-          tabIndex={-1}
-          aria-label="展开字段"
+          aria-hidden="true"
           onClick={(e) => {
             e.stopPropagation();
             expand();
@@ -62,6 +70,7 @@ export function TableRow({ connId, table, zh, fav, onToggleFav, onMenu }: {
         {zh && <span className="zh">{zh}</span>}
         <FavStar fav={fav} name={table.name.toLowerCase()} onToggle={onToggleFav} />
       </button>
+      {error && <p className="dbx-tree-note" role="alert">读取字段失败 <button type="button" onClick={expand}>重试</button></p>}
       {cols === "loading" && <p className="dbx-tree-note" style={{ paddingLeft: 28 }}>读取字段…</p>}
       {Array.isArray(cols) &&
         cols.map((c) => (

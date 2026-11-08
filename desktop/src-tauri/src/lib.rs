@@ -143,3 +143,7 @@ pub fn notify_toast(handle: &tauri::AppHandle, body: &str) {
 
 #[cfg(not(feature = "notifications"))]
 pub fn notify_toast(_handle: &tauri::AppHandle, _body: &str) {}
+
+pub mod prewarm_budget;
+
+pub mod process_budget;

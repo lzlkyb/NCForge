@@ -149,3 +149,15 @@ describe("数据库连接表单：没有 NC home 也能用", () => {
     expect(saveConn.mock.calls[0][0].engine).toBe("rust");
   });
 });
+
+it("ignores a test reply after the connection fields change", async () => {
+  let done!: (value: unknown) => void;
+  testConn.mockImplementation(() => new Promise(resolve => { done = resolve; }));
+  await render();
+  setField("JDBC URL", "jdbc:oracle:thin:@old:1521/orcl"); setField("用户", "nc");
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "测试连接")!.click());
+  setField("JDBC URL", "jdbc:oracle:thin:@new:1521/orcl");
+  expect([...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "测试中…")?.disabled).toBe(true);
+  await act(async () => done({ product: "Oracle", version: "11g", ms: 1, tables: 1 }));
+  expect(host.querySelector(".dbx-okline")).toBeNull();
+});

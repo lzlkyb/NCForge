@@ -106,6 +106,38 @@ pub fn pick_jar(jar_name: &str, candidates: &[PathBuf]) -> Option<PathBuf> {
 /// 参数形式是 `<jar> <jar 内条目>`：给条目而只给类名，CFR 才会只输出那一个类
 /// （只给类名时它会把整个 jar 打出来——实测 8 个类的 jar 就是 8 份源码拼在一起）。
 pub fn run_cfr(java: &Path, cfr: &Path, jar: &Path, entry: &str) -> Result<String, String> {
+    // A single CFR JVM bounds heap and pipe buffers across simultaneous navigation requests.
+    static CFR_SLOT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _slot = CFR_SLOT.lock().unwrap_or_else(|e| e.into_inner());
+    // The process slot also coalesces identical concurrent requests through this bounded cache.
+    type Cache = std::collections::VecDeque<(String, String)>;
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<Cache>> = std::sync::OnceLock::new();
+    let fingerprint = |p: &Path| -> Result<String, String> {
+        let m = std::fs::metadata(p).map_err(|e| e.to_string())?;
+        Ok(format!(
+            "{:?}:{}:{:?}",
+            p,
+            m.len(),
+            m.modified().map_err(|e| e.to_string())?
+        ))
+    };
+    let cache_key = format!(
+        "{}|{}|{}|{}",
+        fingerprint(java)?,
+        fingerprint(cfr)?,
+        fingerprint(jar)?,
+        entry
+    );
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(Cache::new()));
+    if let Some((_, source)) = cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .find(|(key, _)| key == &cache_key)
+    {
+        return Ok(source.clone());
+    }
+    let _reservation = crate::process_budget::Reservation::acquire(512)?;
     let mut cmd = Command::new(java);
     // CFR 走 stdout 输出，`file.encoding` 决定它写出的编码；中文注释不能变乱码。
     cmd.args(["-Dfile.encoding=UTF-8", "-Xmx512m", "-jar"])
@@ -128,12 +160,14 @@ pub fn run_cfr(java: &Path, cfr: &Path, jar: &Path, entry: &str) -> Result<Strin
     // 两个管道都要排空，否则输出量大时子进程会卡在写管道上等我们读
     let h_out = std::thread::spawn(move || {
         let mut b = Vec::new();
-        let _ = out.read_to_end(&mut b);
+        let _ = (&mut out).take(8 * 1024 * 1024 + 1).read_to_end(&mut b);
+        let _ = std::io::copy(&mut out, &mut std::io::sink());
         b
     });
     let h_err = std::thread::spawn(move || {
         let mut b = Vec::new();
-        let _ = err.read_to_end(&mut b);
+        let _ = (&mut err).take(1024 * 1024 + 1).read_to_end(&mut b);
+        let _ = std::io::copy(&mut err, &mut std::io::sink());
         b
     });
     let start = Instant::now();
@@ -148,6 +182,8 @@ pub fn run_cfr(java: &Path, cfr: &Path, jar: &Path, entry: &str) -> Result<Strin
                 // kill 之后必须 wait 回收：不 wait 的话子进程句柄留到 Child 被 drop，
                 // 而两个读管道线程还在等 EOF，句柄关不掉就成了看不见的残留
                 let _ = child.wait();
+                let _ = h_out.join();
+                let _ = h_err.join();
                 return Err(format!(
                     "反编译超时（超过 {} 秒），已终止",
                     TIMEOUT.as_secs()
@@ -158,6 +194,9 @@ pub fn run_cfr(java: &Path, cfr: &Path, jar: &Path, entry: &str) -> Result<Strin
     };
     let source = String::from_utf8_lossy(&h_out.join().unwrap_or_default()).into_owned();
     let stderr = String::from_utf8_lossy(&h_err.join().unwrap_or_default()).into_owned();
+    if source.len() > 8 * 1024 * 1024 || stderr.len() > 1024 * 1024 {
+        return Err("反编译输出超过内存上限，请缩小输入范围".into());
+    }
     if !status.success() && source.trim().is_empty() {
         let tail: String = stderr.lines().rev().take(3).collect::<Vec<_>>().join("；");
         return Err(if tail.is_empty() {
@@ -173,6 +212,18 @@ pub fn run_cfr(java: &Path, cfr: &Path, jar: &Path, entry: &str) -> Result<Strin
             entry,
             jar.file_name().unwrap_or_default().to_string_lossy()
         ));
+    }
+    {
+        let mut cached = cache.lock().unwrap_or_else(|e| e.into_inner());
+        while cached.iter().map(|(_, text)| text.len()).sum::<usize>() + source.len()
+            > 16 * 1024 * 1024
+            || cached.len() >= 32
+        {
+            if cached.pop_front().is_none() {
+                break;
+            }
+        }
+        cached.push_back((cache_key, source.clone()));
     }
     Ok(source)
 }

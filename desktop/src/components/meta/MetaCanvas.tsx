@@ -1,6 +1,7 @@
+import { spatialIndex } from "../../lib/spatialIndex";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BmfDetail } from "../../lib/bmf";
-import { canvasObjects, canvasSelection, canvasSelectionId, visibleCanvasNodes } from "../../lib/metaCanvasModel";
+import { canvasObjects, canvasSelection, canvasSelectionId } from "../../lib/metaCanvasModel";
 import { newMetaEditorState, selectedMetaEntity, type MetaCanvasState, type MetaSelection } from "../../lib/metaEditor";
 import { useMetaCanvasPointer } from "../../hooks/useMetaCanvasPointer";
 import { Icon } from "../ui/icon";
@@ -52,6 +53,15 @@ export function MetaCanvas({ detail, onEdited, selection, onSelect, initialState
     objects.forEach((e, i) => { map[e.id] = i; map[e.name] = i; });
     return map;
   }, [objects]);
+  const nodeIndex = useMemo(() => spatialIndex(positions.map((p, id) => ({ id, left: p.x, top: p.y, right: p.x + NODE_W, bottom: p.y + shapes[id].height }))), [positions, shapes]);
+  const edgeIndex = useMemo(() => spatialIndex(detail.relations.flatMap((r, id) => {
+    const a = positions[indexOf[r.source]], b = positions[indexOf[r.target]];
+    return a && b ? [{ id, left: Math.min(a.x, b.x), top: Math.min(a.y, b.y), right: Math.max(a.x, b.x) + NODE_W, bottom: Math.max(a.y + shapes[indexOf[r.source]].height, b.y + shapes[indexOf[r.target]].height) }] : [];
+  })), [detail.relations, positions, indexOf, shapes]);
+  const extent = useMemo(() => ({
+    width: positions.reduce((max, pos) => Math.max(max, pos.x + NODE_W + PAD), layout.width),
+    height: positions.reduce((max, pos, i) => Math.max(max, pos.y + shapes[i].height + PAD), layout.height),
+  }), [positions, shapes, layout.width, layout.height]);
   const geometry = useRef({ positions, indexOf, objects });
   geometry.current = { positions, indexOf, objects };
   const remember = useCallback((patch: Partial<MetaCanvasState>, render = true) => {
@@ -104,10 +114,13 @@ export function MetaCanvas({ detail, onEdited, selection, onSelect, initialState
   }, [detail.relations, selectRelation]);
 
   const selectedId = canvasSelectionId(active) ?? current?.id ?? null;
-  const visible = objects.length > 100 ? visibleCanvasNodes(positions, shapes.map((s) => s.height), { ...viewport, left: view.left, top: view.top }, view.zoom, selectedId ? indexOf[selectedId] : -1) : new Set(objects.map((_, i) => i));
+  const bounds = { left: view.left / view.zoom - 300, top: view.top / view.zoom - 220, right: (view.left + viewport.width) / view.zoom + 300, bottom: (view.top + viewport.height) / view.zoom + 220 };
+  const visible = objects.length > 100 ? nodeIndex(bounds) : new Set(objects.map((_, i) => i));
+  if (selectedId && indexOf[selectedId] !== undefined) visible.add(indexOf[selectedId]);
+  const visibleEdges = edgeIndex(bounds);
+  if (activeRel) visibleEdges.add(detail.relations.indexOf(activeRel));
   if (!objects.length) return <p className="meta-note meta-canvas-empty">这个组件没有可绘制的实体、接口或参照；可以在下方查看枚举。</p>;
-  const width = positions.reduce((max, pos) => Math.max(max, pos.x + NODE_W + PAD), layout.width);
-  const height = positions.reduce((max, pos, i) => Math.max(max, pos.y + shapes[i].height + PAD), layout.height);
+  const { width, height } = extent;
   const zoomTo = (zoom: number) => remember({ zoom: Math.max(0.4, Math.min(1.8, Math.round(zoom * 100) / 100)) });
   const locate = () => {
     const node = wrapRef.current;
@@ -137,7 +150,8 @@ export function MetaCanvas({ detail, onEdited, selection, onSelect, initialState
     <div className="meta-canvas-wrap" ref={wrapRef} onScroll={(e) => remember({ left: e.currentTarget.scrollLeft, top: e.currentTarget.scrollTop }, objects.length > 100)}>
       <svg className="meta-canvas" width={width * view.zoom} height={height * view.zoom} viewBox={`0 0 ${width} ${height}`} role="group" aria-label="实体关系画布">
         <defs><marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" className="meta-canvas-arrow" /></marker></defs>
-        {detail.relations.map((r) => {
+        {[...visibleEdges].map((edgeId) => {
+          const r = detail.relations[edgeId];
           const a = indexOf[r.source], b = indexOf[r.target];
           const inView = a !== undefined && b !== undefined && (visible.has(a) || visible.has(b) || activeRel?.id === r.id
             || (Math.min(positions[a].x, positions[b].x) * view.zoom <= view.left + viewport.width && Math.max(positions[a].x, positions[b].x) * view.zoom >= view.left
@@ -148,9 +162,9 @@ export function MetaCanvas({ detail, onEdited, selection, onSelect, initialState
             markerId={markerId} active={activeRel?.id === r.id} locked={locked} onSelect={selectRelation} />;
         })}
         {pointer?.mode === "link" && linkStart && <line className="meta-canvas-link" x1={linkStart.x} y1={linkStart.y} x2={pointer.x} y2={pointer.y} />}
-        {objects.map((entity, index) => !visible.has(index) ? null : <MetaCanvasNode key={entity.id} entity={entity} shape={shapes[index]} pos={positions[index]}
+        {[...visible].map((index) => { const entity = objects[index]; return <MetaCanvasNode key={entity.id} entity={entity} shape={shapes[index]} pos={positions[index]}
           active={active.kind !== "component" && (selectedId === entity.id || activeRel?.source === entity.id || activeRel?.target === entity.id || activeRel?.target === entity.name)} activeAttrId={selectedAttrs[entity.id] || selectedAttrs[entity.name] || null} locked={locked}
-          onMoveStart={startMove} onLinkStart={startLink} onSelect={selectEntity} onSelectAttr={selectAttr} onNudge={nudge} onCreateLink={createLink} />)}
+          onMoveStart={startMove} onLinkStart={startLink} onSelect={selectEntity} onSelectAttr={selectAttr} onNudge={nudge} onCreateLink={createLink} />; })}
       </svg>
     </div>
     {!linked && <MetaCanvasInfo detail={detail} current={active.kind === "component" ? null : current ?? null} relId={activeRel?.id ?? null} onPick={selectEntity} onPickRelation={selectRelation} />}

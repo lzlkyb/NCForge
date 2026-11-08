@@ -560,3 +560,22 @@
 .dbx-diff-stmt[data-destructive] { border-left-color:hsl(var(--destructive)); }
 .dbx-diff-stmt-why { display:flex; align-items:center; gap:6px; font-size:var(--dbx-fs-meta); color:hsl(var(--muted-foreground)); }
 .dbx-diff-stmt pre { margin:2px 0 0; padding:6px 8px; border-radius:6px; background:hsl(var(--secondary) / .5); font-size:var(--dbx-fs-meta); white-space:pre-wrap; word-break:break-all; }
+
+.dbx-history-content { display: block; width: 100%; text-align: left; margin-bottom: 6px; }
+
+/* Query feedback shares the existing header; the canvas owns no layout space. */
+.dbx-query-surface {position:relative;isolation:isolate;}
+.dbx-query-field {position:absolute;inset:0;width:100%;height:100%;z-index:4;pointer-events:none;}
+.dbx-query-status {display:inline-flex;align-items:center;gap:5px;min-width:0;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:auto;font-size:var(--dbx-fs-meta);color:hsl(var(--muted-foreground));}
+.dbx-query-status svg {flex-shrink:0;color:hsl(var(--primary));}
+.dbx-query-status[data-state=failed] svg {color:hsl(var(--destructive-ink));}
+.dbx-query-time {font-variant-numeric:tabular-nums;}
+.dbx-query-surface .dbx-grid {transition:opacity 160ms ease;}
+.dbx-query-surface[data-query-field=previous] .dbx-grid {opacity:.62;}
+.dbx-query-surface[data-query-field=previous]:hover .dbx-grid,.dbx-query-surface[data-query-field=previous]:focus-within .dbx-grid {opacity:1;}
+.dbx-query-surface[data-query-outcome=success] .dbx-grid {animation:dbx-result-land 220ms cubic-bezier(.16,1,.3,1);}
+.dbx-query-surface[data-query-outcome=success]::after {content:"";position:absolute;inset:0;pointer-events:none;z-index:3;animation:dbx-result-wash 850ms ease-out both;}
+@keyframes dbx-result-land {from{opacity:.55;transform:translateY(3px)}to{opacity:1;transform:none}}
+@keyframes dbx-result-wash {from{background-color:hsl(var(--primary)/.12)}to{background-color:transparent}}
+@media(prefers-reduced-motion:reduce){.dbx-query-surface .dbx-grid,.dbx-query-surface::after {animation:none!important;transform:none!important;transition:none!important;}}
+html[data-reduced=true] .dbx-query-surface .dbx-grid,html[data-reduced=true] .dbx-query-surface::after {animation:none!important;transform:none!important;transition:none!important;}

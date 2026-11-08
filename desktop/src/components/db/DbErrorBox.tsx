@@ -59,9 +59,9 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
         <div style={{ marginTop: 4 }}>
           库里相近的表名（点击复制）：
           {suggestions.map((s) => (
-            <code key={s} onClick={() => void copyText(s.toLowerCase(), () => toast(`已复制 ${s.toLowerCase()}`, "success"), (e) => toast(`复制失败：${e}`, "error"))}>
-              {s.toLowerCase()}
-            </code>
+            <button type="button" className="dbx-btn ghost" key={s} aria-label={`复制表名 ${s.toLowerCase()}`} onClick={() => void copyText(s.toLowerCase(), () => toast(`已复制 ${s.toLowerCase()}`, "success"), (e) => toast(`复制失败：${e}`, "error"))}>
+              <code>{s.toLowerCase()}</code>
+            </button>
           ))}
         </div>
       )}

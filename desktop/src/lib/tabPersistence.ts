@@ -15,10 +15,17 @@ export interface TabSnapshot {
 
 type Store = Record<string, TabSnapshot>;
 
+let cachedRaw: string | null | undefined;
+let cachedStore: Store = {};
+
 function load(): Store {
   try {
-    const v = JSON.parse(localStorage.getItem(KEY) ?? "{}");
-    return v && typeof v === "object" ? (v as Store) : {};
+    const raw = localStorage.getItem(KEY);
+    if (raw === cachedRaw) return { ...cachedStore };
+    const v = JSON.parse(raw ?? "{}");
+    cachedRaw = raw;
+    cachedStore = v && typeof v === "object" && !Array.isArray(v) ? v as Store : {};
+    return { ...cachedStore };
   } catch {
     return {};
   }
@@ -43,6 +50,10 @@ export function readTabSnapshot(root: string): TabSnapshot | null {
 
 export function saveTabSnapshot(root: string, snap: TabSnapshot): void {
   const store = load();
+  // Bound retained workspace snapshots as well as tabs within one workspace.
+  delete store[root.toLowerCase()];
+  const roots = Object.keys(store);
+  for (const old of roots.slice(0, Math.max(0, roots.length - 19))) delete store[old];
   const tabs = validPaths(snap.tabs);
   store[root.toLowerCase()] =
     tabs.length === 0
@@ -53,7 +64,10 @@ export function saveTabSnapshot(root: string, snap: TabSnapshot): void {
           splitPath: snap.splitPath && tabs.includes(snap.splitPath) ? snap.splitPath : null,
         };
   try {
-    localStorage.setItem(KEY, JSON.stringify(store));
+    const raw = JSON.stringify(store);
+    localStorage.setItem(KEY, raw);
+    cachedRaw = raw;
+    cachedStore = store;
   } catch {
     /* 配额 / 隐私模式：只是不记 */
   }

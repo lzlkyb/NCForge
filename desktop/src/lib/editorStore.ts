@@ -130,11 +130,13 @@ export function openVirtualModel(
     if (opts?.peek) touchPeek(uri);
     else unqueuePeek(uri);
     if (opts?.replace && existing.model.getValue() !== text) {
+      admitModel(text, existing.model);
       existing.model.setValue(text);
       existing.savedVersion = existing.model.getAlternativeVersionId();
     }
     return existing.model;
   }
+  admitModel(text);
   const model = monaco.editor.createModel(text, "java", monaco.Uri.parse(uri));
   const entry: Entry = {
     model,
@@ -163,9 +165,18 @@ export function touchModel(path: string): void {
  * workspaceSession 拖进 Monaco。 */
 
 /** 打开（或复用）一个文件的 model。 */
+const MODEL_TEXT_BUDGET = 64 * 1024 * 1024;
+function admitModel(text: string, replacing?: Model): void {
+  let bytes = text.length * 2;
+  entries.forEach(entry => { if (entry.model !== replacing) bytes += entry.model.getValueLength() * 2; });
+  // Admission preserves dirty buffers and undo history rather than silently discarding them.
+  if (bytes > MODEL_TEXT_BUDGET) throw new Error("编辑器正文已达到 64 MiB 预算，请保存并关闭部分标签后重试");
+}
+
 export function openModel(path: string, content: FileContent): Model {
   const existing = entries.get(path);
   if (existing) return existing.model;
+  admitModel(content.text);
   const model = monaco.editor.createModel(content.text, languageOf(path, content.text), monaco.Uri.file(path));
   const entry: Entry = {
     model,

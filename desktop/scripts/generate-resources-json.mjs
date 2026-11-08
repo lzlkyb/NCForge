@@ -68,6 +68,7 @@ function buildDownloadUrl(tag, fileName) {
     : `${GITHUB_RELEASE_BASE}/${tag}/${fileName}`;
 }
 
+const variantKey = p => `${p.id}|${(p.platforms || []).slice().sort().join(",")}|${(p.architectures || []).slice().sort().join(",")}`;
 function loadMergeBase() {
   if (!MERGE_INTO) return { packs: {} };
   if (!fs.existsSync(MERGE_INTO)) {
@@ -77,7 +78,7 @@ function loadMergeBase() {
   try {
     const base = JSON.parse(fs.readFileSync(MERGE_INTO, "utf-8"));
     const packs = {};
-    for (const p of base.packs || []) packs[p.id] = p;
+    for (const p of base.packs || []) packs[variantKey(p)] = p;
     info(`已从 ${MERGE_INTO} 读入 ${Object.keys(packs).length} 个已有条目：${Object.keys(packs).join(", ") || "(空)"}`);
     return { packs };
   } catch (e) {
@@ -116,17 +117,18 @@ function main() {
     if (!/^[0-9a-f]{64}$/.test(p.sha256)) fail(`${p.id} 的 sha256 不是 64 位十六进制：${p.sha256}`);
     if (!(p.size > 0)) fail(`${p.id} 的 size 非法：${p.size}`);
     if (!p.version) fail(`${p.id} 缺少 version（内容寻址串）`);
-    merged[p.id] = {
+    merged[variantKey(p)] = {
       id: p.id,
       version: p.version,
       title: p.title,
       notes: p.notes,
       ...(p.platforms && p.platforms.length ? { platforms: p.platforms } : {}),
+      ...(p.architectures?.length ? { architectures: p.architectures } : {}),
       size: p.size,
       sha256: p.sha256,
       url: buildDownloadUrl(tag, p.file),
     };
-    success(`${p.id}: v${p.version}（${(p.size / 1024 / 1024).toFixed(1)}MB）→ ${merged[p.id].url}`);
+    success(`${p.id}: v${p.version}（${(p.size / 1024 / 1024).toFixed(1)}MB）→ ${merged[variantKey(p)].url}`);
   }
 
   const out = { packs: Object.values(merged) };

@@ -77,7 +77,7 @@ export function buildZip(entries, { deflate = false } = {}) {
     const useDeflate = packed !== null && packed.length < raw.length;
     const data = useDeflate ? packed : raw;
     const method = useDeflate ? 8 : 0;
-    const externalAttrs = isDir ? ((0o040755 << 16) | 0x10) >>> 0 : ((0o0100644 << 16) | 0x20) >>> 0;
+    const externalAttrs = isDir ? ((0o040755 << 16) | 0x10) >>> 0 : (((0o0100644 | ((entry.mode ?? 0) & 0o111)) << 16) | 0x20) >>> 0;
     const localOffset = offset;
 
     // Local file header（version needed 20 = 2.0，store / deflate 都够）
@@ -172,7 +172,7 @@ export function zipEntriesFromDir(rootDir, skip = () => false) {
         dirs.push({ name: `${rel}/`, dir: true });
         walk(full);
       } else {
-        files.push({ name: rel, data: readFileSync(full) });
+        files.push({ name: rel, data: readFileSync(full), mode: statSync(full).mode });
       }
     }
   };

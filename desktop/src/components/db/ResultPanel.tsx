@@ -1,4 +1,6 @@
-import { useEffect, useRef } from "react";
+import { QueryField } from "./QueryField";
+import { useOperations } from "../../lib/operations";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { SqlExecutionFeedback } from "./SqlExecutionFeedback";
 import { DbErrorBox } from "./DbErrorBox";
@@ -12,9 +14,14 @@ import { ownsCursor, patchTab, rtOf, summaryOf, type ResultEntry, type SqlTab } 
 
 /** SQL 控制台下半：每条语句一个结果标签 + 执行计划 + 输出。 */
 export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: number; onLocate?:(line:number)=>void }) {
+  const [motionHost, setMotionHost] = useState<HTMLDivElement | null>(null);
+  const operation = useOperations().find(op => op.id === tab.executionId);
+  const active = !!operation && operation.endedAt === undefined;
   const valid = tab.view === "output" || tab.view === "plan" && tab.plan || tab.results.some(r => r.id === tab.view);
   const view = valid ? tab.view! : tab.results[tab.results.length - 1]?.id ?? "output";
   const cur = tab.results.find((r) => r.id === view);
+  const previous = !!cur && active && (!cur.completedAt || cur.completedAt < operation.startedAt);
+  const motionState = active ? operation.state : operation?.state ?? "idle";
   const setView = (v: string) => patchTab<SqlTab>(tab.id, { view: v });
   const rt = rtOf(tab.connId);
   const tables = (rt.tables ?? []).map((t) => t.name);
@@ -31,15 +38,16 @@ export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: nu
   ];
   const tabs = <><ResultTabList prefix={prefix} label="查询结果" items={items} value={view} onSelect={setView} />
     <ResultBaselineSummary />
-    {cur && <span className="dbx-result-runmeta">{cur.completedAt && <time>{new Date(cur.completedAt).toLocaleTimeString()}</time>}<span>{cur.ms} ms</span></span>}
+    <SqlExecutionFeedback executionId={tab.executionId} previousAt={cur ? cur.completedAt ?? 0 : undefined} />
+    {cur && !active && <span className="dbx-result-runmeta" title={cur.completedAt ? `执行完成于 ${new Date(cur.completedAt).toLocaleTimeString()}` : undefined}><span>{cur.kind === "rows" ? `${thousands(cur.rows.length)} 行 · ` : ""}{cur.ms} ms</span></span>}
     {tab.results.length > 0 && <button type="button" className="dbx-ibtn" disabled={tab.running} aria-label="释放查询结果" title="释放已读取结果，保留 SQL 和事务" onClick={()=>patchTab<SqlTab>(tab.id,{results:[],plan:null,view:"output"})}><Icon name="close" size={14}/></button>}
   </>;
 
   return (
     <div className="dbx-res" style={{ height }}>
-      <SqlExecutionFeedback executionId={tab.executionId} previousAt={cur?.kind === "rows" ? cur.completedAt ?? 0 : undefined} />
       <div className="dbx-result-head">{tabs}</div>
-      <div className="dbx-result-view" id={`${prefix}-panel`} role="tabpanel" tabIndex={0} aria-labelledby={resultTabId(prefix, view)}>
+      <div className="dbx-result-view dbx-query-surface" ref={setMotionHost} id={`${prefix}-panel`} role="tabpanel" tabIndex={0} aria-labelledby={resultTabId(prefix, view)}>
+      {motionHost && <QueryField key={tab.executionId ?? "idle"} host={motionHost} state={motionState} previous={previous} />}
       {view === "plan" && tab.plan ? (
         <PlanView plan={tab.plan} connId={tab.connId} />
       ) : view === "output" || !cur ? (

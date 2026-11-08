@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Modal } from "../ui/Modal";
 import { Icon } from "../ui/icon";
 import { ConnManualForm } from "./ConnManualForm";
@@ -47,11 +48,18 @@ export function ConnDialog() {
               ))}
             </div>
           )}
-          {(editing || dialog.tab === "manual") && <ConnManualForm key={editing?.id ?? "new"} conn={editing} />}
-          {!editing && dialog.tab === "prop" && <PropImportPane />}
-          {!editing && dialog.tab === "file" && <PropsFileImportPane />}
+          <ConnectionPanels key={editing?.id ?? "new"} editing={editing} tab={dialog.tab} />
         </>
       )}
     </Modal>
   );
+}
+
+function ConnectionPanels({ editing, tab }: { editing: Parameters<typeof ConnManualForm>[0]["conn"]; tab: string }) {
+  const [visited, setVisited] = useState(() => new Set([editing ? "manual" : tab]));
+  useEffect(() => { setVisited(current => new Set([...current, tab])); }, [tab]);
+  const panels = { manual: <ConnManualForm conn={editing} />, prop: <PropImportPane />, file: <PropsFileImportPane /> };
+  return <>{Object.entries(panels).filter(([key]) => visited.has(key)).map(([key, panel]) =>
+    <div key={key} hidden={(editing ? "manual" : tab) !== key} style={{ display: (editing ? "manual" : tab) === key ? "contents" : "none" }}>{panel}</div>
+  )}</>;
 }

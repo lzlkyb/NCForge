@@ -35,6 +35,7 @@ import { emptyEditorGroups, removeGroupView, selectGroupFile } from "../lib/edit
 export function useFileSession() {
   const tabs = useWorkspaceSelector((s) => s.tabs);
   const activePath = useWorkspaceSelector((s) => s.activePath);
+  const splitPath = useWorkspaceSelector((s) => s.splitPath);
   const conflictPath = useWorkspaceSelector((s) => s.conflictPath);
   const closingPath = useWorkspaceSelector((s) => s.closingPath);
   const setTabs = (v: Updater<TabMeta[]>) => setSession({ tabs: v });
@@ -66,7 +67,7 @@ export function useFileSession() {
   const openFile = useCallback(
     async (path: string, opts?: { preview?: boolean; silent?: boolean }): Promise<boolean> => {
       const existing = getSession().tabs.find((t) => filePathKey(t.path) === filePathKey(path));
-      if (existing) {
+      if (existing && !existing.deferred) {
         path=existing.path;
         const group = getSession().editorGroups?.focused ?? "left";
         if (existing.preview && (!opts?.preview || !getSession().editorGroups?.[group].includes(path))) setTabs((ts) => pinTab(ts, path));
@@ -86,7 +87,7 @@ export function useFileSession() {
         const meta = { ...tabMetaFromDisk(path, c), previewGroup: group };
         // 连点两次时第二次可能已经加过，避免重复标签
         setSession({ tabs: (ts) => {
-          if (ts.some((t) => t.path === path)) return ts;
+          if (ts.some((t) => t.path === path)) return ts.map(t => t.path === path && t.deferred ? meta : t);
           const r = addTab(ts, meta, !!opts?.preview);
           if (r.dropped) closeModel(r.dropped);
           return r.tabs;
@@ -118,6 +119,12 @@ export function useFileSession() {
     },
     [],
   );
+  useEffect(() => {
+    const current = getSession();
+    for (const path of [current.activePath, current.splitPath]) {
+      if (path && current.tabs.some(tab => tab.path === path && tab.deferred)) void openFile(path);
+    }
+  }, [activePath, splitPath, openFile]);
   const split = useSplitView(openFile);
 
   // 别的页面（搜索页）请求「打开这个文件的第 N 行」：

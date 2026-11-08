@@ -72,6 +72,7 @@ vi.mock("../../lib/langProviders", () => ({ registerLangProviders: vi.fn() }));
 vi.mock("../../lib/javaSqlActions", () => ({ registerJavaSqlActions: () => [] }));
 
 vi.mock("../../lib/editorStore", () => ({
+  onModelLifecycle: () => () => {},
   getModel: () => undefined,
   getViewState: () => null,
   saveViewState: vi.fn(),

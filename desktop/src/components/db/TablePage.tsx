@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ImportDialog } from "./ImportDialog";
@@ -33,6 +33,8 @@ const OBJ_SUBS: { key: TableSub; label: string }[] = [
 
 /** 表页：数据 / 结构（含 NC 中文名）/ 索引 / DDL。对象页（`tab.otype` 有值）只保留源码与 DDL。 */
 export function TablePage({ tab }: { tab: TableTab }) {
+  const tabRefs = useRef(new Map<TableSub, HTMLButtonElement>());
+  const panelId = `dbx-object-${tab.id}-panel`;
   const rt = useConnRt(tab.connId);
   const lower = tab.table.toLowerCase();
   const isObj = !!tab.otype;
@@ -68,7 +70,13 @@ export function TablePage({ tab }: { tab: TableTab }) {
           <span className="dbx-muted" style={{ fontWeight: 400 }}>{tab.otype ?? rt.ncNames?.[lower]}</span>
         </span>
         {subs.map((s) => (
-          <button key={s.key} type="button" role="tab" className="t" aria-selected={tab.sub === s.key} data-on={tab.sub === s.key || undefined} onClick={() => patchTab<TableTab>(tab.id, { sub: s.key })}>
+          <button key={s.key} ref={node => { if (node) tabRefs.current.set(s.key, node); else tabRefs.current.delete(s.key); }} id={`dbx-object-${tab.id}-${s.key}`} aria-controls={panelId} tabIndex={tab.sub === s.key ? 0 : -1} onKeyDown={event => {
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            const i = subs.findIndex(item => item.key === s.key);
+            const next = subs[event.key === "Home" ? 0 : event.key === "End" ? subs.length - 1 : (i + (event.key === "ArrowRight" ? 1 : -1) + subs.length) % subs.length].key;
+            patchTab<TableTab>(tab.id, { sub: next }); tabRefs.current.get(next)?.focus();
+          }} type="button" role="tab" className="t" aria-selected={tab.sub === s.key} data-on={tab.sub === s.key || undefined} onClick={() => patchTab<TableTab>(tab.id, { sub: s.key })}>
             {s.label}
           </button>
         ))}
@@ -108,6 +116,7 @@ export function TablePage({ tab }: { tab: TableTab }) {
       {dlg === "move" && (
         <TransferRowsDialog tabId={tab.id} connId={tab.connId} table={lower} onClose={() => setDlg(null)} />
       )}
+      <div id={panelId} role="tabpanel" aria-labelledby={`dbx-object-${tab.id}-${tab.sub}`} style={{ display: "contents" }}>
       {rt.status !== "connected" && <div className="dbx-empty">连接已断开，先在左侧连上</div>}
       {err && <div className="dbx-err">{err}</div>}
       {rt.status === "connected" && !isObj && tab.sub === "data" && (
@@ -117,6 +126,7 @@ export function TablePage({ tab }: { tab: TableTab }) {
       {rt.status === "connected" && isObj && tab.sub === "source" && <SourceView tab={tab} />}
       {rt.status === "connected" && tab.sub === "ddl" && <MetaText key={`ddl:${tab.otype ?? ""}`} tab={tab} />}
       {rt.status === "connected" && !isObj && tab.sub === "idx" && <MetaText key="idx" tab={tab} />}
+      </div>
     </div>
   );
 }

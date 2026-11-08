@@ -236,6 +236,22 @@ jobs:
         run: cargo test --release --no-default-features
         working-directory: desktop/src-tauri
 
+      - name: Package macOS database runtimes
+        working-directory: desktop
+        env:
+          RESOURCES_PLATFORMS: macos
+          RESOURCES_ONLY: ncdb
+          GITHUB_RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -e
+          for arch in arm64 x64; do
+            export NCFORGE_NCDB_ARCH=$arch
+            node scripts/fetch-ncdb.mjs --force
+            node scripts/pack-resources.mjs
+            if [ -f dist/resources.json ]; then cp dist/resources.json dist/resources-previous.json; export RESOURCES_MERGE_INTO="$PWD/dist/resources-previous.json"; fi
+            node scripts/generate-resources-json.mjs
+          done
+
       - name: Build macOS .app
         run: |
           npm run prebuild
@@ -296,6 +312,8 @@ jobs:
           cp nc-forge_*_aarch64-apple-darwin.zip dist-out/ 2>/dev/null || true
           # 平台片段只作为 artifact 传给 build-windows 合并，**不** attach 到 Release
           cp dist/updater-macos.json dist-out/ 2>/dev/null || true
+          cp dist/resource-packs/ncdb-macos-*.zip dist-out/
+          cp dist/resources.json dist-out/resources-macos.json
           ls -l dist-out
 
       - uses: actions/upload-artifact@v5
@@ -427,7 +445,9 @@ jobs:
 
       - name: 生成 resources.json（ghproxy 镜像 URL）
         shell: pwsh
-        run: npm run resources:json
+        run: |
+          if (Test-Path "${{ github.workspace }}\mac-artifact\resources-macos.json") { $env:RESOURCES_MERGE_INTO = "${{ github.workspace }}\mac-artifact\resources-macos.json" }
+          npm run resources:json
         working-directory: desktop
         env:
           GITHUB_RELEASE_TAG: ${{ github.ref_name }}
@@ -531,6 +551,7 @@ jobs:
           # 漏了 zip 的后果不是报错而是静默：resources.json 在 Release 上，
           # 客户端按 url 下载 404 → 首启组件下载全部失败（event error）。
           Copy-Item desktop\dist\resource-packs\*.zip dist-out\ -ErrorAction SilentlyContinue
+          Copy-Item mac-artifact\ncdb-macos-*.zip dist-out\ -ErrorAction SilentlyContinue
           Copy-Item desktop\dist\resources.json dist-out\ -ErrorAction SilentlyContinue
 
       - uses: actions/upload-artifact@v5

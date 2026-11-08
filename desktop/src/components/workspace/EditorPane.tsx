@@ -1,8 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { javaSuggestOptions } from "../../lib/javaSuggestOptions";
 import { bindEditorCommand } from "../../lib/editorCommandBinding";
-import { getModel, touchModel } from "../../lib/editorStore";
+import { getModel, touchModel, onModelLifecycle } from "../../lib/editorStore";
 import { readGroupView, storeGroupView } from "../../lib/editorGroupViews";
 import type { EditorGroupId } from "../../lib/editorGroups";
 import { registerLangProviders } from "../../lib/langProviders";
@@ -231,6 +231,12 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     };
   }, []);
 
+  const [modelGeneration, setModelGeneration] = useState(0);
+  useEffect(() => onModelLifecycle(
+    path => { if (path === activePath) setModelGeneration(value => value + 1); },
+    path => { if (path === activePath) setModelGeneration(value => value + 1); },
+  ), [activePath]);
+
   // 切换文件
   useEffect(() => {
     const editor = editorRef.current;
@@ -253,7 +259,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       if (pos && focusRef.current.focused) onCursorRef.current(pos.lineNumber, pos.column);
       if (focusRef.current.focused) editor.focus();
     }
-  }, [activePath]);
+  }, [activePath, modelGeneration]);
 
   useEffect(() => {
     const editor = editorRef.current;

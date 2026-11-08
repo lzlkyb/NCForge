@@ -13,7 +13,9 @@ export function ResultFile({
   onOpen,
   selectedKey,
   onPreview,
+  row,
 }: {
+  row?: "header" | ResultHit;
   group: ResultFileGroup;
   collapsed: boolean;
   onToggle: () => void;
@@ -30,7 +32,7 @@ export function ResultFile({
 
   return (
     <div className="sr-group border-b border-border">
-      <button
+      {(!row || row === "header") && <button
         type="button"
         onClick={onToggle}
         aria-expanded={!collapsed}
@@ -50,9 +52,9 @@ export function ResultFile({
         <span className="ml-auto grid h-4 min-w-[18px] flex-shrink-0 place-items-center rounded-full bg-muted px-1.5 text-[10.5px] font-bold text-muted-foreground">
           {hits.length}
         </span>
-      </button>
-      {!collapsed &&
-        hits.map((hit) => {
+      </button>}
+      {!collapsed && row !== "header" &&
+        (row ? [row] : hits).map((hit) => {
           const preview = buildSearchPreview(hit.text, hit.ranges);
           return (
             <div key={resultHitKey(group, hit)} className="dw-search-hit-wrap">

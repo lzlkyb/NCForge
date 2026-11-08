@@ -136,7 +136,7 @@ function main() {
   mkdirSync(outDir, { recursive: true });
 
   const packs = [];
-  for (const pack of PACKS) {
+  for (const pack of PACKS.filter(p => !process.env.RESOURCES_ONLY || p.id === process.env.RESOURCES_ONLY)) {
     // jdtls 未就绪时先拉取裁剪（与构建时同一份逻辑）；ecj/svnkit 是仓库里的小 jar，
     // 目录缺失就是仓库被动了，直接红。ensureJdtlsReady 内部有 exists 短路，已就绪时零成本。
     if (pack.id === "jdtls") ensureJdtlsReady(pack.dir);
@@ -147,7 +147,8 @@ function main() {
     if (entries.length === 0) fail(`${pack.dir} 是空目录，拒绝打出空包（打出去了客户端全部 signature 失败）`);
     const zip = buildZip(entries, { deflate: Boolean(pack.deflate) });
     const digest = sha256(zip);
-    const fileName = `${pack.id}.zip`;
+    const architecture = (process.env.NCFORGE_NCDB_ARCH || process.arch) === "arm64" ? "aarch64" : "x86_64";
+    const fileName = pack.id === "ncdb" && platforms.includes("macos") ? `${pack.id}-macos-${architecture}.zip` : `${pack.id}.zip`;
     const zipPath = join(outDir, fileName);
     writeFileSync(zipPath, zip);
 
@@ -161,6 +162,7 @@ function main() {
       size: zip.length,
       sha256: digest,
       platforms,
+      ...(pack.id === "ncdb" ? { architectures: [architecture] } : {}),
     });
     success(`${pack.id}: ${fileName}（${(zip.length / 1024 / 1024).toFixed(1)}MB, ${entries.length} 项, v${digest.slice(0, 12)}）`);
   }

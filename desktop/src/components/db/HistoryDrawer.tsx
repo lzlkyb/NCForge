@@ -11,7 +11,7 @@ import {
 } from "../../lib/dbHistory";
 import { useDbConns } from "../../lib/dbStore";
 
-/** 执行历史：单击填回编辑器，双击填回并执行。 */
+/** 阅读或填回历史不会执行；执行必须选择独立操作。 */
 export function HistoryDrawer({ connId, onPick, onClose }: {
   connId: string;
   onPick: (sql: string, run: boolean) => void;
@@ -84,14 +84,8 @@ export function HistoryDrawer({ connId, onPick, onClose }: {
           </p>
         )}
         {shown.map(({ connId: id, entry }) => (
-          <button
-            key={`${id}-${entry.at}-${entry.sql.length}`}
-            type="button"
-            className="dbx-hitem"
-            title="单击填回编辑器，双击填回并执行"
-            onClick={() => onPick(entry.sql, false)}
-            onDoubleClick={() => onPick(entry.sql, true)}
-          >
+          <div key={`${id}-${entry.at}-${entry.sql.length}`} className="dbx-hitem">
+            <button type="button" className="dbx-history-content" title="填回编辑器，不执行" onClick={() => onPick(entry.sql, false)}>
             <span className="m">
               {all && <span className="dbx-hconn">{conns.find((c) => c.id === id)?.name ?? "已删除的连接"}</span>}
               {historyTime(entry.at)} · {entry.ms} ms
@@ -102,7 +96,9 @@ export function HistoryDrawer({ connId, onPick, onClose }: {
             <code>
               <Highlight text={entry.sql} query={q} />
             </code>
-          </button>
+            </button>
+            <button type="button" className="dbx-btn ghost" title={`在当前连接 ${conns.find(c => c.id === connId)?.name ?? connId} 中执行`} onClick={() => onPick(entry.sql, true)}>填入并执行</button>
+          </div>
         ))}
       </div>
     </div>

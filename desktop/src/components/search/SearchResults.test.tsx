@@ -70,3 +70,11 @@ it("bounds large-result DOM and reveals a keyboard-selected last hit", async () 
   await act(async () => button("全部折叠").click());
   expect(host.querySelectorAll("[data-hit-key]")).toHaveLength(0);
 }, 30000);
+
+it("bounds DOM for ten thousand hits while keeping keyboard navigation", async () => {
+  const many = Array.from({ length: 10000 }, (_, i) => ({ path: "large.java", line: i + 1, text: "match", ranges: [{ start: 0, end: 5 }] }));
+  form = { ...form, outcome: { ...outcome(), hits: many, filesMatched: 1 }, collapsed: [] };
+  await act(async () => render());
+  expect(host.querySelectorAll("[data-hit-key]").length).toBeLessThan(40);
+  expect(host.querySelectorAll("[data-hit-key]").length).toBeGreaterThan(0);
+});

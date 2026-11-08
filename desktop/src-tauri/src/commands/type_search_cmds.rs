@@ -49,6 +49,11 @@ pub fn spawn_prewarm_types(state: Arc<AppState>) {
         // 预热等于白跑，下一次查询仍从头建索引。
         let cache_dir = state.config_dir.join("type-index");
         let _ = tauri::async_runtime::spawn_blocking(move || {
+            let _budget = crate::prewarm_budget::acquire();
+            // A queued warmup must not build an obsolete workspace after a switch.
+            if state.config.blocking_read().workspace_root.as_deref() != Some(root.as_str()) {
+                return;
+            }
             let _ = crate::workspace_types::shared(&PathBuf::from(root), &cache_dir);
         })
         .await;

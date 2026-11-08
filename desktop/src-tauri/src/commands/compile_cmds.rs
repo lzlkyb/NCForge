@@ -185,6 +185,7 @@ pub(super) fn warm_index(nc_home: PathBuf, cache_path: PathBuf) {
         return;
     }
     tauri::async_runtime::spawn_blocking(move || {
+        let _budget = crate::prewarm_budget::acquire();
         let _ = cached_index(&nc_home, &cache_path, "", &|_| {});
         WARMING.store(false, std::sync::atomic::Ordering::SeqCst);
     });

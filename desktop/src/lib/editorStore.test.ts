@@ -13,6 +13,7 @@ interface FakeModel {
   version: number;
   disposed: boolean;
   getValue(): string;
+  getValueLength(): number;
   getAlternativeVersionId(): number;
   setValue(v: string): void;
   pushStackElement(): void;
@@ -32,6 +33,7 @@ const h = vi.hoisted(() => {
       version: 1,
       disposed: false,
       getValue: () => m.value,
+      getValueLength: () => m.value.length,
       getAlternativeVersionId: () => m.version,
       setValue: (v: string) => {
         m.value = v;
@@ -186,4 +188,11 @@ describe("保存版本不会抹掉后续输入",()=>{
     const path="C:\\w\\A.java";const model=store.openModel(path,{text:"old",encoding:"UTF-8",hasBom:false,eol:"LF",mtimeMs:1,lossless:true} as Parameters<typeof store.openModel>[1]);
     fake(model).version=2;store.markSaved(path,1);expect(events).toEqual([true]);fake(model).version=1;store.markSaved(path,1);expect(events).toEqual([true,false]);off();
   });
+});
+
+it("rejects model admission beyond the text budget without closing retained buffers", () => {
+  const retained = store.openVirtualModel("jdt://retained", "keep");
+  expect(() => store.openVirtualModel("jdt://large", "x".repeat(32 * 1024 * 1024))).toThrow("64 MiB");
+  expect(fake(retained).disposed).toBe(false);
+  expect(store.getModel("jdt://large")).toBeUndefined();
 });

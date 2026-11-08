@@ -62,7 +62,7 @@ describe("重启恢复标签", () => {
     const open = vi.fn(async (path: string) => { setSession({ tabs: tabs => [...tabs, tab(path)] }); return true; });
     await act(async () => root.render(<RestoreProbe rootPath={rootPath} open={open} />));
     await flush();
-    expect(open.mock.calls.map((c) => c[0])).toEqual(["C:\\w\\A.java", "C:\\w\\B.java"]);
+    expect(open.mock.calls.map((c) => c[0])).toEqual(["C:\\w\\B.java", "C:\\w\\A.java"]);
     expect(getSession().activePath).toBe("C:\\w\\B.java");
     expect(getSession().splitPath).toBe("C:\\w\\A.java");
   });
@@ -178,4 +178,14 @@ describe("标签快捷键", () => {
     await press({ key: "Tab", ctrlKey: true });
     expect(getSession().activePath).toBe("a");
   });
+});
+
+it("restores inactive files as shells without reading their bodies", async () => {
+  const rootPath = "C:/shell-test";
+  saveTabSnapshot(rootPath, { tabs: ["C:/inactive.java", "C:/active.java"], activePath: "C:/active.java", splitPath: null });
+  const open = vi.fn(async (path: string) => { setSession({ tabs: tabs => [...tabs, tab(path)] }); return true; });
+  await act(async () => root.render(<RestoreProbe rootPath={rootPath} open={open} />));
+  await flush();
+  expect(open.mock.calls.map(call => call[0])).toEqual(["C:/active.java"]);
+  expect(getSession().tabs.find(tab => tab.path === "C:/inactive.java")?.deferred).toBe(true);
 });

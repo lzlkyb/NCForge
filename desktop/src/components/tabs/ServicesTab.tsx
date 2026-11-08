@@ -1,3 +1,5 @@
+import { servicePollInterval } from "../../lib/servicePolling";
+import { useMemo } from "react";
 import { DockRegion } from "../workspace/WorkbenchDock";
 import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -51,7 +53,8 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const bumpGeneration = useCallback(() => setGeneration(g => g + 1), []);
   const [debugMode, setDebugMode] = useState(readDebugModePref);
   const debug = useDebugSnapshot();
-  const query = useQuery({ queryKey: ["server-status"], queryFn: serverStatus, refetchInterval: appHidden || !svcVisible ? false : 1000, retry: false });
+  const pollInterval = useMemo(servicePollInterval, []);
+  const query = useQuery({ queryKey: ["server-status"], queryFn: serverStatus, refetchInterval: appHidden || !svcVisible ? false : pollInterval, retry: false });
   const { data: status, refetch, isError, error } = query;
   const patchState = useCallback((next: ServerState) => {
     queryClient.setQueryData<ServerStatus>(["server-status"], old => old ? { ...old, state: next } : old);

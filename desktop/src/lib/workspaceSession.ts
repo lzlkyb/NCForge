@@ -41,6 +41,7 @@ export interface TreeState {
  * viewState 负责，滚动位置同理）。
  */
 export interface TabMeta {
+  deferred?: boolean;
   /** 长期钉住，与预览标签转正分别表达。 */
   pinned?: boolean;
   previewGroup?: EditorGroupId;

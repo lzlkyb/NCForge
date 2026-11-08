@@ -102,12 +102,25 @@ pub struct Pack {
 impl Pack {
     /// 从目录打开。任何不一致都返回 `None`（调用方据此回落磁盘路径）。
     pub fn open(dir: &Path) -> Option<Pack> {
+        if fs::metadata(dir.join(IDX_NAME)).ok()?.len() > 16 * 1024 * 1024 {
+            return None;
+        }
         let idx = fs::read(dir.join(IDX_NAME)).ok()?;
         let table: Table = serde_json::from_slice(&idx).ok()?;
         if table.version != FORMAT_VERSION {
             return None;
         }
-        let data = fs::read(dir.join(BIN_NAME)).ok()?;
+        if table.bin_len > MAX_OPEN_BYTES {
+            return None;
+        }
+        // Validate the actual file as well as its untrusted index before allocating.
+        let file = fs::File::open(dir.join(BIN_NAME)).ok()?;
+        if file.metadata().ok()?.len() != table.bin_len {
+            return None;
+        }
+        let mut data = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::Read::take(file, table.bin_len + 1), &mut data)
+            .ok()?;
         if data.len() as u64 != table.bin_len {
             return None;
         }
@@ -174,7 +187,12 @@ pub fn build(root: &Path, dir: &Path, cancel: &AtomicBool) -> Result<BuildReport
     let root_key = root_key(root);
 
     // 旧包只在「同根 + 同版本」时用于复用；否则全量重建。
-    let old = Pack::open(dir).filter(|p| p.root() == root_key).map(|p| {
+    let old_pack = if self::dir().is_some() {
+        current_for(root)
+    } else {
+        Pack::open(dir).map(Arc::new)
+    };
+    let old = old_pack.filter(|p| p.root() == root_key).map(|p| {
         let mut by_chunk: HashMap<u32, Vec<FileMeta>> = HashMap::new();
         for f in &p.table.files {
             by_chunk.entry(f.chunk).or_default().push(f.clone());
@@ -198,7 +216,9 @@ pub fn build(root: &Path, dir: &Path, cancel: &AtomicBool) -> Result<BuildReport
         groups.push(cur);
     }
 
-    let mut bin: Vec<u8> = Vec::with_capacity(groups.len().saturating_mul(64 << 10));
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let mut bin = tempfile::NamedTempFile::new_in(dir).map_err(|e| e.to_string())?;
+    let mut bin_len = 0u64;
     let mut chunks: Vec<ChunkMeta> = Vec::with_capacity(groups.len());
     let mut files: Vec<FileMeta> = Vec::new();
     let mut report = BuildReport::default();
@@ -209,9 +229,10 @@ pub fn build(root: &Path, dir: &Path, cancel: &AtomicBool) -> Result<BuildReport
         }
         // 复用：旧块的文件集合与大小/mtime 完全一致 → 直接搬字节
         if let Some((bytes, olds)) = reuse_chunk(group, old.as_ref()) {
-            let off = bin.len() as u64;
+            let off = bin_len;
             let len = bytes.len() as u32;
-            bin.extend_from_slice(&bytes);
+            std::io::Write::write_all(&mut bin, &bytes).map_err(|e| e.to_string())?;
+            bin_len += bytes.len() as u64;
             chunks.push(ChunkMeta { off, len });
             let real_idx = chunks.len() as u32 - 1;
             for (s, o) in group.iter().zip(olds.iter()) {
@@ -265,9 +286,10 @@ pub fn build(root: &Path, dir: &Path, cancel: &AtomicBool) -> Result<BuildReport
         if buf.is_empty() {
             continue;
         }
-        let off = bin.len() as u64;
+        let off = bin_len;
         let len = buf.len() as u32;
-        bin.extend_from_slice(&buf);
+        std::io::Write::write_all(&mut bin, &buf).map_err(|e| e.to_string())?;
+        bin_len += buf.len() as u64;
         chunks.push(ChunkMeta { off, len });
         report.bytes += len as u64;
         report.files += metas.len();
@@ -289,7 +311,7 @@ pub fn build(root: &Path, dir: &Path, cancel: &AtomicBool) -> Result<BuildReport
         version: FORMAT_VERSION,
         root: root_key,
         built_at: now_ms(),
-        bin_len: bin.len() as u64,
+        bin_len,
         chunks,
         files,
         skipped: report.skipped,
@@ -298,7 +320,8 @@ pub fn build(root: &Path, dir: &Path, cancel: &AtomicBool) -> Result<BuildReport
     fs::create_dir_all(dir).map_err(|e| format!("建包目录失败：{e}"))?;
     let idx = serde_json::to_vec(&table).map_err(|e| format!("序列化包表失败：{e}"))?;
     // 先 bin 后 idx：idx 是权威，bin 长度对不上会被 open 挡掉
-    crate::atomic_file::write_atomic(&dir.join(BIN_NAME), &bin)?;
+    bin.as_file().sync_all().map_err(|e| e.to_string())?;
+    bin.persist(dir.join(BIN_NAME)).map_err(|e| e.to_string())?;
     crate::atomic_file::write_atomic(&dir.join(IDX_NAME), &idx)?;
     Ok(report)
 }
@@ -365,6 +388,7 @@ const MAX_PACK_DIRS: usize = 8;
 struct State {
     /// 根键 → 已加载的包。包目录本身按根分，所以不会把别人的包读进来。
     packs: HashMap<String, Arc<Pack>>,
+    stale: std::collections::HashSet<String>,
     /// LRU：前 = 最久没用。
     lru: std::collections::VecDeque<String>,
     /// 根键 → 原始路径（重建、排队都要用它，不能用归一化后的键）。
@@ -473,10 +497,21 @@ fn insert_pack(g: &mut State, key: String, pack: Arc<Pack>) {
 
 /// 已加载的包（同根才返回）。未加载但磁盘上有包时顺手加载。
 pub fn current_for(root: &Path) -> Option<Arc<Pack>> {
+    // Serialize cold loads so concurrent searches never allocate duplicate packs.
+    static LOAD: Mutex<()> = Mutex::new(());
+    let _load = LOAD.lock().unwrap_or_else(|e| e.into_inner());
     let key = root_key(root);
     let base = dir()?;
     {
         let mut g = state().lock().unwrap_or_else(|e| e.into_inner());
+        if g.stale.contains(&key) {
+            if g.packs.get(&key).is_some_and(|p| Arc::strong_count(p) > 1) {
+                return None; // Search falls back to disk until existing borrowers release the old snapshot.
+            }
+            g.packs.remove(&key);
+            g.lru.retain(|k| k != &key);
+            g.stale.remove(&key);
+        }
         if let Some(p) = g.packs.get(&key).cloned() {
             touch(&mut g.lru, &key);
             return Some(p);
@@ -485,6 +520,22 @@ pub fn current_for(root: &Path) -> Option<Arc<Pack>> {
     let dir = dir_for(&base, root);
     if !dir.join(IDX_NAME).exists() {
         adopt_legacy(&base, &key, &dir);
+    }
+    let incoming = fs::metadata(dir.join(BIN_NAME)).ok()?.len();
+    if incoming > MAX_OPEN_BYTES {
+        return None;
+    }
+    {
+        let mut g = state().lock().unwrap_or_else(|e| e.into_inner());
+        while g.packs.values().map(|p| p.data_bytes()).sum::<u64>() + incoming > MAX_OPEN_BYTES {
+            let old = g
+                .lru
+                .iter()
+                .find(|k| g.packs.get(*k).is_some_and(|p| Arc::strong_count(p) == 1))
+                .cloned()?;
+            g.packs.remove(&old);
+            g.lru.retain(|k| k != &old);
+        }
     }
     let pack = Pack::open(&dir)?;
     if pack.root() != key {
@@ -515,6 +566,12 @@ pub fn ensure_primary(root: &Path, config_dir: &Path) {
 }
 
 fn enqueue(root: &Path) {
+    if let Some(base) = dir() {
+        let path = dir_for(&base, root).join(BIN_NAME);
+        if fs::metadata(path).is_ok_and(|m| m.len() > MAX_OPEN_BYTES) {
+            return;
+        }
+    }
     if current_for(root).is_some() || dir().is_none() {
         return;
     }
@@ -641,12 +698,14 @@ fn run(root: &Path, out_dir: &Path) {
                 report.rebuilt,
                 report.elapsed_ms
             );
-            match Pack::open(out_dir) {
-                Some(p) => {
-                    insert_pack(&mut g, key.clone(), Arc::new(p));
-                    g.last_error = None;
-                }
-                None => g.last_error = Some("建包后仍无法打开（包损坏）".to_string()),
+            // Do not overlap a replacement allocation with a borrowed old pack.
+            if g.packs.get(&key).is_some_and(|p| Arc::strong_count(p) > 1) {
+                g.stale.insert(key.clone());
+                g.last_error = None;
+            } else {
+                g.packs.remove(&key);
+                g.lru.retain(|k| k != &key);
+                g.last_error = None;
             }
         }
         Err(e) => {
@@ -655,6 +714,8 @@ fn run(root: &Path, out_dir: &Path) {
         }
     }
     drop(g);
+    // Reuse the cold-load reservation and single-flight path for rebuilt packs too.
+    let _ = current_for(root);
     if let Some(base) = dir() {
         prune(&base, &key);
     }
@@ -819,6 +880,23 @@ mod tests {
         table.version = FORMAT_VERSION + 1;
         fs::write(dir.join(IDX_NAME), serde_json::to_vec(&table).unwrap()).unwrap();
         assert!(Pack::open(&dir).is_none());
+    }
+
+    #[test]
+    fn oversized_actual_bin_rejected_before_read() {
+        let root = crate::test_support::tmp("pack-large-bin-root");
+        let dir = crate::test_support::tmp("pack-large-bin");
+        write(&root, "a.txt", b"hello");
+        build(&root, &dir, &AtomicBool::new(false)).unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join(BIN_NAME))
+            .unwrap()
+            .set_len(MAX_OPEN_BYTES + 1)
+            .unwrap();
+        assert!(Pack::open(&dir).is_none());
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(dir).unwrap();
     }
 
     /// bin 被截断（模拟「新 bin + 旧 idx」的崩溃窗口）也要拒绝。

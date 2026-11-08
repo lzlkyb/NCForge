@@ -48,3 +48,16 @@ describe("标签快照", () => {
     expect(readTabSnapshot("C:\\w\\a")).toBeNull();
   });
 });
+
+it("retains only the latest twenty workspaces", () => {
+  for (let i = 0; i < 30; i++) saveTabSnapshot(`root${i}`, { tabs: ["a"], activePath: "a", splitPath: null });
+  expect(readTabSnapshot("root0")).toBeNull();
+  expect(readTabSnapshot("root9")).toBeNull();
+  expect(readTabSnapshot("root10")).not.toBeNull();
+  expect(Object.keys(JSON.parse(localStorage.getItem("ncforge-open-tabs")!))).toHaveLength(20);
+});
+it("observes snapshots changed outside the module cache", () => {
+  saveTabSnapshot("root", { tabs: ["a"], activePath: "a", splitPath: null });
+  localStorage.setItem("ncforge-open-tabs", JSON.stringify({ root: { tabs: ["b"], activePath: "b", splitPath: null } }));
+  expect(readTabSnapshot("root")?.tabs).toEqual(["b"]);
+});

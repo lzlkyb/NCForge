@@ -1,3 +1,5 @@
+import { servicePollInterval } from "../lib/servicePolling";
+import { useMemo } from "react";
 import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -41,10 +43,11 @@ export function useClientService({ visible, appHidden }: Options) {
     });
   }, []);
   const queryClient = useQueryClient();
+  const pollInterval = useMemo(servicePollInterval, []);
   const query = useQuery({
     queryKey: ["client-status"],
     queryFn: clientStatus,
-    refetchInterval: appHidden || !visible ? false : 1000,
+    refetchInterval: appHidden || !visible ? false : pollInterval,
     retry: false,
   });
   const { refetch, isError, error } = query;

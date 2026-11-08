@@ -143,6 +143,7 @@ pub struct Bridge {
     shared: Arc<Shared>,
     /// 只保护「拉起进程」这一步，避免并发首次调用各起一个 JVM。
     spawn_lock: Mutex<()>,
+    budget: Mutex<Option<crate::process_budget::Reservation>>,
     /// 桥进程 stderr 的尾巴，出错时一并返回，省得用户只能看到「调用失败」。
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
 }
@@ -166,6 +167,7 @@ impl Bridge {
             env,
             shared: Arc::new(Shared::new()),
             spawn_lock: Mutex::new(()),
+            budget: Mutex::new(None),
             stderr_tail: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
@@ -395,6 +397,7 @@ impl Bridge {
         if let Some(mut child) = self.shared.lock_child().take() {
             let _ = child.kill();
             let _ = child.wait();
+            self.budget.lock().unwrap_or_else(|e| e.into_inner()).take();
         }
         self.shared.clear_pending_for(gen);
     }
@@ -442,6 +445,8 @@ impl Bridge {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
+        let budget = crate::process_budget::Reservation::acquire(self.env.xmx_mb)
+            .map_err(|e| BridgeError::new("budget", e))?;
         let mut child = cmd.spawn().map_err(|e| {
             BridgeError::new(
                 "spawn",
@@ -470,6 +475,7 @@ impl Bridge {
 
         *self.shared.lock_stdin() = Some(stdin);
         *self.shared.lock_child() = Some(child);
+        *self.budget.lock().unwrap_or_else(|e| e.into_inner()) = Some(budget);
         Ok(())
     }
 

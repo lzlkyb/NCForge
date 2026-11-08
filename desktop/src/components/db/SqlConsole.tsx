@@ -162,7 +162,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
             onClose={() => setSide(null)}
             onPick={(sql, runNow) => {
               api.current?.setText(sql);
-              // 双击：填回后整段执行（可能是脚本）
+              // 显式选择「填入并执行」后整段执行（可能是脚本）
               if (runNow && sqlTabOf(tabId)) void run("script");
             }}
           />

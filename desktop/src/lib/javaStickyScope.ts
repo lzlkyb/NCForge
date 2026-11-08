@@ -1,5 +1,5 @@
 import type { editor } from "monaco-editor";
-import { currentDocumentOutline } from "./documentOutlineModel";
+import { currentDocumentOutline, OUTLINE_READY } from "./documentOutlineModel";
 import { getEditorPrefs, PREFS_EVENT } from "./editorPrefs";
 import type { FlatSymbol } from "./symbols";
 
@@ -45,9 +45,12 @@ export function attachJavaStickyScope(view: editor.IStandaloneCodeEditor, path: 
       timer = window.setTimeout(() => { symbols = currentDocumentOutline(path); render(); }, 180);
     }),
   ];
+  const refreshOutline = () => { symbols = currentDocumentOutline(path); render(); };
+  window.addEventListener(OUTLINE_READY, refreshOutline);
   window.addEventListener(PREFS_EVENT, render);
   render();
   return () => {
+    window.removeEventListener(OUTLINE_READY, refreshOutline);
     window.removeEventListener(PREFS_EVENT, render);
     window.clearTimeout(timer);
     for (const listener of listeners) listener.dispose();

@@ -373,6 +373,8 @@ export function closeSessionPanel() {
 }
 
 export function setConns(conns: DbConn[]) {
+  const retained = new Set(conns.map(c => c.id));
+  for (const old of state.conns) if (!retained.has(old.id)) forgetColumns(old.id);
   set({ conns, loaded: true, loadError: null });
 }
 
@@ -383,6 +385,8 @@ export function setConns(conns: DbConn[]) {
  * 用例读到（表现为"莫名多出一条事务"）。`setConns([])` 只清连接表，清不掉 rt。
  */
 export function __resetDbForTest() {
+  colCache.clear();
+  colCacheBytes.clear();
   metadataFlights.clear();
   for (const [id, version] of metadataVersions) metadataVersions.set(id, version + 1);
   set({ conns: [], loaded: false, loadError: null, rt: {}, tabs: [], active: null, dialog: null, sessionPanel: null });
@@ -430,6 +434,7 @@ export async function connect(id: string, password?: string, remember?: boolean)
 
 export async function disconnect(id: string): Promise<void> {
   await trackOperation(dbTaskSpec(`disconnect:${id}`,"断开数据库",id,"全部会话",connOf(id)?.name),()=>dbApi.disconnect(id));
+  forgetColumns(id);
   metadataFlights.delete(id);
   metadataVersions.set(id, (metadataVersions.get(id) ?? 0) + 1);
   setRt(id, { status: "idle", info: undefined, tx: undefined, txNotice: undefined, error: undefined, tablesLoading: false });
@@ -491,21 +496,42 @@ async function fetchMeta(id: string, observed: boolean, current: () => boolean):
 }
 
 const colCache = new Map<string, Promise<ColumnInfo[]>>();
+const colCacheBytes = new Map<string, number>();
+const MAX_COLUMN_CACHE_BYTES = 8 * 1024 * 1024;
+function dropColumns(key: string) { colCache.delete(key); colCacheBytes.delete(key); }
+function trimColumns() {
+  let bytes = [...colCacheBytes.values()].reduce((a, b) => a + b, 0);
+  while (colCache.size > 256 || bytes > MAX_COLUMN_CACHE_BYTES) {
+    const key = colCache.keys().next().value!;
+    bytes -= colCacheBytes.get(key) ?? 0;
+    dropColumns(key);
+  }
+}
 
 /** 单表字段（含 NC 中文名、主键）。按连接 + 表名缓存，失败不缓存。 */
 export function columnsOf(id: string, table: string): Promise<ColumnInfo[]> {
   const key = `${id}|${table.toUpperCase()}`;
   let p = colCache.get(key);
   if (!p) {
-    p = dbApi.columns(id, table).then((r) => r.columns);
-    p.catch(() => colCache.delete(key));
+    p = dbApi.columns(id, table).then((r) => {
+      if (colCache.get(key) === p) {
+        colCacheBytes.set(key, JSON.stringify(r.columns).length * 2);
+        trimColumns();
+      }
+      return r.columns;
+    });
+    p.catch(() => { if (colCache.get(key) === p) dropColumns(key); });
     colCache.set(key, p);
   }
+  // Refresh insertion order so frequently visited tables survive eviction.
+  colCache.delete(key);
+  colCache.set(key, p);
+  trimColumns();
   return p;
 }
 
 export function forgetColumns(id: string) {
-  for (const k of [...colCache.keys()]) if (k.startsWith(`${id}|`)) colCache.delete(k);
+  for (const k of [...colCache.keys()]) if (k.startsWith(`${id}|`)) dropColumns(k);
 }
 
 /**

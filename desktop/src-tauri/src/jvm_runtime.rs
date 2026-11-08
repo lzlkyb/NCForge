@@ -78,10 +78,13 @@ pub fn find(config_dir: &Path, nc: Option<&NcHome>) -> Option<JvmRuntime> {
 fn source_java(nc: Option<&NcHome>, pack: Option<&Path>) -> Option<(PathBuf, RuntimeSource)> {
     // NC 的 java 由 `nc_home::probe` 保证存在（没有 java 的目录过不了「是不是 NC home」），
     // 但配置可能是手改过的，所以照旧判一次 is_file。
-    if let Some(p) = nc.map(|h| PathBuf::from(&h.java)).filter(|p| p.is_file()) {
+    if let Some(p) = nc
+        .map(|h| PathBuf::from(&h.java))
+        .filter(|p| java_usable(p))
+    {
         return Some((p, RuntimeSource::NcHome));
     }
-    if let Some(p) = pack.and_then(java_in_pack) {
+    if let Some(p) = pack.and_then(java_in_pack).filter(|p| java_usable(p)) {
         return Some((p, RuntimeSource::Pack));
     }
     java_on_system().map(|p| (p, RuntimeSource::System))
@@ -134,28 +137,156 @@ fn is_ojdbc_jar(p: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn java_usable(path: &Path) -> bool {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (Instant, bool)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((at, ok)) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(path) {
+        if at.elapsed() < Duration::from_secs(30) {
+            return *ok;
+        }
+    }
+    let ok = probe_java(path);
+    let mut entries = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if entries.len() >= 32 {
+        entries.clear();
+    }
+    entries.insert(path.to_path_buf(), (Instant::now(), ok));
+    ok
+}
+
+fn probe_java(path: &Path) -> bool {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    if !path.is_file() {
+        return false;
+    }
+    let Ok(out) = tempfile::tempfile() else {
+        return false;
+    };
+    let Ok(err) = out.try_clone() else {
+        return false;
+    };
+    let Ok(read) = out.try_clone() else {
+        return false;
+    };
+    let mut cmd = Command::new(path);
+    cmd.arg("-version")
+        .stdin(Stdio::null())
+        .stdout(out)
+        .stderr(err);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let Ok(mut child) = cmd.spawn() else {
+        return false;
+    };
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return false;
+                }
+                use std::io::{Read, Seek, SeekFrom};
+                let mut read = read;
+                if read.seek(SeekFrom::Start(0)).is_err() {
+                    return false;
+                }
+                let mut text = String::new();
+                if read.take(4096).read_to_string(&mut text).is_err() {
+                    return false;
+                }
+                return supported_version(&text);
+            }
+            Ok(None) if start.elapsed() < Duration::from_secs(3) => {
+                std::thread::sleep(Duration::from_millis(20))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
+fn supported_version(output: &str) -> bool {
+    output
+        .lines()
+        .filter(|line| line.contains("version"))
+        .any(|line| {
+            let Some(version) = line.split('"').nth(1) else {
+                return false;
+            };
+            let mut parts = version.split('.');
+            let first = parts
+                .next()
+                .and_then(|p| p.parse::<u32>().ok())
+                .unwrap_or(0);
+            let major = if first == 1 {
+                parts
+                    .next()
+                    .and_then(|p| p.parse::<u32>().ok())
+                    .unwrap_or(0)
+            } else {
+                first
+            };
+            major >= 8
+        })
+}
+
 /// 系统里的 Java：先 `JAVA_HOME`，再按 `PATH` 顺序找第一个。
 ///
-/// 不跑 `java -version` 探版本：那是一次 fork（Windows 上还要压住控制台窗口），
-/// 而这一步在每次建桥时都会走。版本不对的表现是桥启动失败并带出明确报错，
-/// 比在这里猜更诚实。
+/// 实际探测并短期缓存，避免把 macOS 的占位启动器当成已安装的 JVM。
 pub fn java_on_system() -> Option<PathBuf> {
     if let Some(home) = std::env::var_os("JAVA_HOME") {
         let p = PathBuf::from(home).join("bin").join(nc_home::JAVA_BIN_NAME);
-        if p.is_file() {
+        if java_usable(&p) {
             return Some(p);
         }
     }
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|d| d.join(nc_home::JAVA_BIN_NAME))
-        .find(|p| p.is_file())
+        .find(|p| java_usable(p))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::tmp;
+
+    #[test]
+    fn java_version_requires_real_supported_runtime() {
+        assert!(supported_version("java version \"1.8.0_512\""));
+        assert!(supported_version("openjdk version \"21.0.1\""));
+        assert!(!supported_version("java version \"1.7.0\""));
+        assert!(!supported_version("Unable to locate a Java Runtime"));
+        assert!(!probe_java(&tmp("java-probe-missing").join("java")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn invalid_launcher_is_rejected_and_executable_is_verified() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmp("java-probe-executable");
+        let java = dir.join("java");
+        std::fs::write(&java, "#!/bin/sh\necho 'openjdk version \"17.0.1\"' >&2\n").unwrap();
+        assert!(!probe_java(&java));
+        std::fs::set_permissions(&java, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(probe_java(&java));
+        std::fs::write(
+            &java,
+            "#!/bin/sh\necho 'Unable to locate a Java Runtime' >&2\nexit 1\n",
+        )
+        .unwrap();
+        assert!(!probe_java(&java));
+    }
 
     fn touch(p: &Path) {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -241,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn nc_home_的_java_优先于资源包() {
+    fn nc_home_的无效_java_不会阻止系统回退() {
         let (root, _dir) = pack_fixture("jvm-nc-first", true);
         let nc_root = tmp("jvm-nc-root");
         let nc_java = nc_root
@@ -259,9 +390,10 @@ mod tests {
             http_port: None,
             service_port: None,
         };
-        let got = find(&root, Some(&home)).expect("NC home 在就该有运行时");
-        assert_eq!(got.source, RuntimeSource::NcHome);
-        assert_eq!(got.java, nc_java);
-        assert_eq!(got.driver, nc_driver);
+        assert_eq!(source_driver(Some(&home), None), Some(nc_driver));
+        if let Some(got) = find(&root, Some(&home)) {
+            assert_eq!(got.source, RuntimeSource::System);
+            assert_ne!(got.java, nc_java);
+        }
     }
 }

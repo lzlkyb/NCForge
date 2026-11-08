@@ -14,6 +14,53 @@ use serde::Serialize;
 use crate::search::{self, ReplaceOutcome, SearchGate, SearchOptions, SearchOutcome};
 use crate::state::AppState;
 
+#[derive(serde::Deserialize)]
+pub struct OverlayRef {
+    path: String,
+    key: String,
+}
+fn resolve_overlay(
+    root: &Path,
+    options: &mut SearchOptions,
+    refs: Option<Vec<OverlayRef>>,
+) -> Result<(), String> {
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+    static CACHE: OnceLock<Mutex<BTreeMap<(PathBuf, String), String>>> = OnceLock::new();
+    let mut cache = CACHE
+        .get_or_init(|| Mutex::new(BTreeMap::new()))
+        .lock()
+        .map_err(|_| "overlay cache lock")?;
+    let refs = refs.unwrap_or_default();
+    // Resolve into request-owned strings while locked: later edits cannot alter an in-flight search.
+    for reference in refs {
+        let key = (root.to_path_buf(), reference.key);
+        if let Some(doc) = options
+            .overlay
+            .iter()
+            .find(|doc| doc.path == reference.path)
+        {
+            cache.insert(key, doc.text.clone());
+        } else {
+            let text = cache.get(&key).ok_or("OVERLAY_CACHE_MISS")?.clone();
+            options.overlay.push(search::OverlayDoc {
+                path: reference.path,
+                text,
+            });
+        }
+    }
+    let mut bytes: usize = cache.values().map(|text| text.len()).sum();
+    while bytes > 16 * 1024 * 1024 {
+        let Some(key) = cache.keys().next().cloned() else {
+            break;
+        };
+        if let Some(text) = cache.remove(&key) {
+            bytes -= text.len();
+        }
+    }
+    Ok(())
+}
+
 /// 同时运行的全量扫描上限。单次扫描已经 8 线程，2 个足够让「搜索页 + 快速面板」
 /// 互不阻塞，又不至于几个积压的旧搜索一起抢磁盘。
 const SCAN_SLOTS: usize = 2;
@@ -38,7 +85,8 @@ const PER_PROJECT_BUDGET_MS: u128 = 20_000;
 #[tauri::command]
 pub async fn search_workspace(
     state: tauri::State<'_, Arc<AppState>>,
-    options: SearchOptions,
+    mut options: SearchOptions,
+    overlay_refs: Option<Vec<OverlayRef>>,
     source: Option<String>,
 ) -> Result<SearchOutcome, String> {
     let request = gate().register(source.as_deref());
@@ -50,6 +98,7 @@ pub async fn search_workspace(
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
     let root = PathBuf::from(root);
+    resolve_overlay(&root, &mut options, overlay_refs)?;
     // 没有包就在这里排一次后台建包：本次搜索仍走磁盘，下一次开始走包。
     // 放在命令入口而不是 `search` 模块里——建包要 config_dir，纯逻辑模块不碰配置。
     // 主工作区要登记成 primary：文件监听只重建它，依赖工程的包各自排队。
@@ -74,7 +123,8 @@ pub async fn search_workspace(
 pub async fn search_workspace_stream(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
-    options: SearchOptions,
+    mut options: SearchOptions,
+    overlay_refs: Option<Vec<OverlayRef>>,
     source: Option<String>,
     stream: String,
 ) -> Result<SearchOutcome, String> {
@@ -88,6 +138,7 @@ pub async fn search_workspace_stream(
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
     let root = PathBuf::from(root);
+    resolve_overlay(&root, &mut options, overlay_refs)?;
     crate::content_pack::ensure_primary(&root, &state.config_dir);
     tauri::async_runtime::spawn_blocking(move || {
         request.run(|cancel| {
@@ -187,6 +238,11 @@ pub fn spawn_prewarm_search_pack(state: Arc<AppState>) {
         let Some(root) = root else { return };
         let cache = state.config_dir.clone();
         let _ = tauri::async_runtime::spawn_blocking(move || {
+            let _budget = crate::prewarm_budget::acquire();
+            // A queued warmup must not build an obsolete workspace after a switch.
+            if state.config.blocking_read().workspace_root.as_deref() != Some(root.as_str()) {
+                return;
+            }
             crate::content_pack::ensure_primary(&PathBuf::from(root), &cache);
         })
         .await;
@@ -314,4 +370,38 @@ pub async fn search_projects(
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))
+}
+
+#[cfg(test)]
+mod overlay_cache_tests {
+    use super::*;
+    #[test]
+    fn references_resolve_to_independent_request_snapshots() {
+        let root = Path::new("overlay-cache-test");
+        let mut initial = SearchOptions::default();
+        initial.overlay.push(search::OverlayDoc {
+            path: "A.java".into(),
+            text: "old".into(),
+        });
+        let reference = || {
+            Some(vec![OverlayRef {
+                path: "A.java".into(),
+                key: "v1".into(),
+            }])
+        };
+        resolve_overlay(root, &mut initial, reference()).unwrap();
+        let mut next = SearchOptions::default();
+        resolve_overlay(root, &mut next, reference()).unwrap();
+        assert_eq!(next.overlay[0].text, "old");
+        initial.overlay[0].text = "new".into();
+        assert_eq!(next.overlay[0].text, "old");
+        let missing = Some(vec![OverlayRef {
+            path: "A.java".into(),
+            key: "missing".into(),
+        }]);
+        assert_eq!(
+            resolve_overlay(root, &mut SearchOptions::default(), missing).unwrap_err(),
+            "OVERLAY_CACHE_MISS"
+        );
+    }
 }

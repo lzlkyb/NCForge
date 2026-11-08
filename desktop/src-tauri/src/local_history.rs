@@ -290,8 +290,36 @@ fn capture_limited(
     }
     // 文件锁在这里就可以放了：全局淘汰有自己的锁，别让它把别的保存堵住
     drop(_g);
-    enforce_global_cap(config_dir, &dir)?;
+    schedule_global_cap(config_dir, &dir);
     Ok(Some(id))
+}
+
+// Archive/index writes stay synchronous: a successful save must retain its predecessor.
+// Only unrelated global maintenance moves off the critical path, with one task at most.
+static SWEEP_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn schedule_global_cap(config_dir: &Path, keep_dir: &Path) {
+    if SWEEP_PENDING.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        return;
+    }
+    let config_dir = config_dir.to_path_buf();
+    let keep_dir = keep_dir.to_path_buf();
+    let result = std::thread::Builder::new()
+        .name("history-maintenance".into())
+        .spawn(move || {
+            struct Reset;
+            impl Drop for Reset {
+                fn drop(&mut self) {
+                    SWEEP_PENDING.store(false, std::sync::atomic::Ordering::Release);
+                }
+            }
+            let _reset = Reset;
+            if let Err(error) = enforce_global_cap(&config_dir, &keep_dir) {
+                log::warn!("历史全局清理失败: {error}");
+            }
+        });
+    if result.is_err() {
+        SWEEP_PENDING.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// 全局上限：按「最早不动的文件」整份淘汰。
@@ -649,6 +677,9 @@ mod tests {
             fs::write(&f, format!("a{i}")).unwrap();
             LAST_CAP_SWEEP_MS.store(0, std::sync::atomic::Ordering::Relaxed);
             capture(&cfg, &f, KEEP_PER_FILE).unwrap();
+            while SWEEP_PENDING.load(std::sync::atomic::Ordering::Acquire) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
             if !orphan.exists() {
                 return;
             }

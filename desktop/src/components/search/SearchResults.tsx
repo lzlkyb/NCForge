@@ -6,6 +6,7 @@ import {
   getSearchScrollTop,
 } from "../../lib/searchStore";
 import { buildResultView, groupByProject, type ResultHit } from "../../lib/searchResults";
+import { VirtualSearchRows } from "./VirtualSearchRows";
 import { ResultFile } from "./ResultFile";
 import { nextSearchEntry, resultHitKey, searchEntries } from "../../lib/searchNavigation";
 import { SourceContextPreview } from "../workspace/SourceContextPreview";
@@ -228,6 +229,7 @@ export function SearchResults({
           </div>
         )}
 
+        {entries.length > 200 ? <VirtualSearchRows groups={groups} all={all} collapsed={form.collapsed} listRef={listRef} selectedKey={selected?.key} onToggle={toggleCollapse} onOpen={(g,h) => { choose(g,h); onOpen(h); }} onPreview={resolvePath ? (g,h) => choose(g,h,true) : undefined} /> : <>
         {all &&
           sections.map((sec) => (
             <section key={sec.root} aria-label={`工程 ${sec.project}`}>
@@ -269,6 +271,7 @@ export function SearchResults({
               onPreview={resolvePath ? hit => choose(g, hit, true) : undefined}
             />
           ))}
+        </>}
       </div>
       {previewPath && selected && <SourceContextPreview path={previewPath} line={selected.hit.line} identity={identity} originLabel="搜索结果" onOpen={() => onOpen(selected.hit)} onClose={() => setSelection({ identity, key: selected.key, preview: false })} />}
       {selected && selection?.preview && !previewPath && <div className="wb-panel-note" role="status">结果所属的工作区已变更，请重新搜索后预览。</div>}

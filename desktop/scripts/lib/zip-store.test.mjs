@@ -159,3 +159,12 @@ test("bsdtar 互操作：列目录 + 取内容", { skip: findBsdtar() ? false : 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("executable modes survive ZIP creation without privilege bits", () => {
+  const zip = buildZip([{ name: "bin/java", data: Buffer.from("java"), mode: 0o104755 }]);
+  const cd = zip.readUInt32LE(zip.length - 22 + 16);
+  assert.equal(zip.readUInt32LE(cd + 38) >>> 16, 0o100755);
+  const plain = buildZip([{ name: "driver.jar", data: Buffer.from("jar") }]);
+  const plainCd = plain.readUInt32LE(plain.length - 22 + 16);
+  assert.equal(plain.readUInt32LE(plainCd + 38) >>> 16, 0o100644);
+});

@@ -114,9 +114,24 @@ pub struct ResourcePack {
     /// 适用平台；`None` = 全平台。取值同 `std::env::consts::OS`（windows/macos/linux）。
     #[serde(default)]
     pub platforms: Option<Vec<String>>,
+    /// Rust architecture names: aarch64 / x86_64. Missing means portable.
+    #[serde(default)]
+    pub architectures: Option<Vec<String>>,
     pub size: u64,
     pub sha256: String,
     pub url: String,
+}
+
+impl ResourcePack {
+    fn supports(&self, os: &str, arch: &str) -> bool {
+        self.platforms
+            .as_ref()
+            .is_none_or(|values| values.iter().any(|v| v == os))
+            && self
+                .architectures
+                .as_ref()
+                .is_none_or(|values| values.iter().any(|v| v == arch))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,20 +171,16 @@ impl ResourcesManifest {
     }
 
     pub fn pack(&self, id: &str) -> Option<&ResourcePack> {
-        self.packs.iter().find(|p| p.id == id)
+        self.packs
+            .iter()
+            .find(|p| p.id == id && p.supports(std::env::consts::OS, std::env::consts::ARCH))
     }
 
     /// 当前平台适用的包（platforms 为 None 或含本平台）。
     pub fn packs_for_current_platform(&self) -> Vec<&ResourcePack> {
-        let os = std::env::consts::OS;
         self.packs
             .iter()
-            .filter(|p| {
-                p.platforms
-                    .as_ref()
-                    .map(|ps| ps.iter().any(|x| x == os))
-                    .unwrap_or(true)
-            })
+            .filter(|p| p.supports(std::env::consts::OS, std::env::consts::ARCH))
             .collect()
     }
 }
@@ -527,10 +538,17 @@ pub async fn fetch_manifest(
     if !resp.status().is_success() {
         return Err(format!("资源清单返回 HTTP {}", resp.status()));
     }
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| format!("读取资源清单失败: {e}"))?;
+    const MAX_MANIFEST: usize = 1024 * 1024;
+    let mut stream = resp.bytes_stream();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("读取资源清单失败: {e}"))?;
+        if bytes.len().saturating_add(chunk.len()) > MAX_MANIFEST {
+            return Err("资源清单超过 1 MiB 上限".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let text = String::from_utf8(bytes).map_err(|e| format!("资源清单编码错误: {e}"))?;
     ResourcesManifest::parse(&text)
 }
 
@@ -544,12 +562,13 @@ pub async fn download_pack(
     max_bytes: u64,
     mut on_progress: impl FnMut(usize, u64, Option<u64>),
 ) -> Result<Vec<u8>, String> {
-    download_pack_events(client, url, expected_sha256, max_bytes, |event| {
+    let file = download_pack_events(client, url, expected_sha256, max_bytes, |event| {
         if let DownloadEvent::Progress(chunk, downloaded, total) = event {
             on_progress(chunk, downloaded, total);
         }
     })
-    .await
+    .await?;
+    std::fs::read(file.path()).map_err(|e| format!("读取下载文件失败: {e}"))
 }
 
 enum DownloadEvent {
@@ -563,7 +582,7 @@ async fn download_pack_events(
     expected_sha256: &str,
     max_bytes: u64,
     mut on_event: impl FnMut(DownloadEvent),
-) -> Result<Vec<u8>, String> {
+) -> Result<tempfile::NamedTempFile, String> {
     let resp = client
         .get(url.clone())
         .send()
@@ -574,10 +593,8 @@ async fn download_pack_events(
     }
     let total = resp.content_length();
     let mut stream = resp.bytes_stream();
-    // 预分配上限 64MB：当前最大的 jdtls 约 54MB，留了增长余量。上限的用意是
-    // 防「源声明一个超大 Content-Length（或损坏的长度字段）时一次性吃满内存」——
-    // 超出后 Vec 自然增长，只是多几次 realloc，正确性与下载都不受影响。
-    let mut buf: Vec<u8> = Vec::with_capacity(total.unwrap_or(8 << 20).min(64 << 20) as usize);
+    let mut buf =
+        tempfile::NamedTempFile::new().map_err(|e| format!("创建下载临时文件失败: {e}"))?;
     let mut hasher = Sha256::new();
     let mut downloaded: u64 = 0;
     loop {
@@ -593,13 +610,14 @@ async fn download_pack_events(
             }
         };
         hasher.update(&chunk);
-        buf.extend_from_slice(&chunk);
         downloaded += chunk.len() as u64;
         if downloaded > max_bytes {
             return Err(format!(
                 "下载量超过上限（已收 {downloaded} 字节，上限 {max_bytes}）——源可能声明了错误的大小，或根本不是预期的包"
             ));
         }
+        std::io::Write::write_all(&mut buf, &chunk)
+            .map_err(|e| format!("写下载临时文件失败: {e}"))?;
         on_event(DownloadEvent::Progress(chunk.len(), downloaded, total));
     }
     on_event(DownloadEvent::Verifying);
@@ -651,7 +669,13 @@ const EXTRACT_MAX_ENTRIES: usize = 100_000;
 /// 不用 `archive.extract()`：它按条目原样落盘（含符号链接语义）。这里逐条自己写，
 /// 符号链接条目也只会落成普通文件（内容是链接目标文本），没有链接语义可利用。
 pub fn extract_zip(bytes: &[u8], dest: &Path) -> Result<usize, String> {
-    let reader = std::io::Cursor::new(bytes);
+    extract_zip_reader(std::io::Cursor::new(bytes), dest)
+}
+
+fn extract_zip_reader(
+    reader: impl std::io::Read + std::io::Seek,
+    dest: &Path,
+) -> Result<usize, String> {
     let mut archive = zip::ZipArchive::new(reader).map_err(|e| format!("zip 解析失败: {e}"))?;
     // 第一遍：条目名合法性 + 头部声明总量预检
     let mut declared_total: u64 = 0;
@@ -697,6 +721,14 @@ pub fn extract_zip(bytes: &[u8], dest: &Path) -> Result<usize, String> {
         let mut f = std::fs::File::create(&out).map_err(|e| format!("建文件失败 {out:?}: {e}"))?;
         let n =
             std::io::copy(&mut entry, &mut f).map_err(|e| format!("写文件失败 {out:?}: {e}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Preserve only executable bits; never restore setuid or world-write flags.
+            let mode = 0o644 | (entry.unix_mode().unwrap_or(0) & 0o111);
+            std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode))
+                .map_err(|e| format!("恢复文件权限失败 {out:?}: {e}"))?;
+        }
         // 第二遍：按实际落盘字节核对（头部大小可撒谎，写入字节不会）。
         // 到这里已写了部分文件，由调用方（install_pack）清理临时目录。
         written += n;
@@ -718,6 +750,15 @@ pub fn install_pack(
     version: &str,
     bytes: &[u8],
 ) -> Result<PathBuf, String> {
+    install_pack_reader(config_dir, id, version, std::io::Cursor::new(bytes))
+}
+
+fn install_pack_reader(
+    config_dir: &Path,
+    id: &str,
+    version: &str,
+    reader: impl std::io::Read + std::io::Seek,
+) -> Result<PathBuf, String> {
     let final_dir = pack_dir(config_dir, id, version);
     if final_dir.is_dir() && pack_probe_ok(&final_dir, id) {
         return Ok(final_dir);
@@ -732,7 +773,7 @@ pub fn install_pack(
     std::fs::create_dir_all(&tmp).map_err(|e| format!("建临时目录失败: {e}"))?;
 
     let result = (|| -> Result<(), String> {
-        let n = extract_zip(bytes, &tmp)?;
+        let n = extract_zip_reader(reader, &tmp)?;
         if n == 0 {
             return Err("包内没有任何文件".to_string());
         }
@@ -1193,9 +1234,18 @@ pub async fn ensure_selected_packs(
             let cfg = cfg_owned.clone();
             let install_id = pack.id.clone();
             let install_ver = pack.version.clone();
-            let bytes_len = bytes.len() as u64; // bytes 随后被移进闭包，长度先记下
+            let bytes_len = bytes
+                .as_file()
+                .metadata()
+                .map(|m| m.len())
+                .unwrap_or(pack.size); // bytes 随后被移进闭包，长度先记下
             let installed = tokio::task::spawn_blocking(move || {
-                install_pack(&cfg, &install_id, &install_ver, &bytes)
+                install_pack_reader(
+                    &cfg,
+                    &install_id,
+                    &install_ver,
+                    bytes.reopen().map_err(|e| e.to_string())?,
+                )
             })
             .await;
             let installed = match installed {
@@ -2044,5 +2094,44 @@ mod tests {
         assert!(!locally_ready(&config_dir, Some(&legacy_root), &st));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+    #[test]
+    fn manifest_filters_cpu_variants_and_keeps_portable_legacy_packs() {
+        let manifest = ResourcesManifest::parse(&sample_manifest_json()).unwrap();
+        let mut pack = manifest.packs[0].clone();
+        assert!(pack.supports("macos", "aarch64"));
+        pack.platforms = Some(vec!["macos".into()]);
+        pack.architectures = Some(vec!["aarch64".into()]);
+        assert!(pack.supports("macos", "aarch64"));
+        assert!(!pack.supports("macos", "x86_64"));
+        assert!(!pack.supports("windows", "aarch64"));
+        let mut wrong = pack.clone();
+        wrong.architectures = Some(vec!["wrong".into()]);
+        let choices = ResourcesManifest {
+            packs: vec![wrong, pack],
+        };
+        assert_eq!(
+            choices.pack("ecj").is_some(),
+            cfg!(all(target_os = "macos", target_arch = "aarch64"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn extract_restores_executable_bits_without_privileged_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("unix-executable");
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default().unix_permissions(0o4755);
+        writer.start_file("jre/bin/java", options).unwrap();
+        std::io::Write::write_all(&mut writer, b"#!/bin/sh\nexit 0\n").unwrap();
+        let bytes = writer.finish().unwrap().into_inner();
+        extract_zip(&bytes, &dir).unwrap();
+        let mode = std::fs::metadata(dir.join("jre/bin/java"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o7777, 0o755);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

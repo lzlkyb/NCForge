@@ -1,3 +1,5 @@
+import { servicePollInterval } from "../../lib/servicePolling";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAppHidden } from "../../lib/appVisibility";
 import { serverStatus, type ServerState } from "../../lib/server";
@@ -18,10 +20,11 @@ const LABELS: Record<ServerState, string> = {
  */
 export function ServiceStatusButton() {
   const appHidden = useAppHidden();
+  const pollInterval = useMemo(servicePollInterval, []);
   const { data } = useQuery({
     queryKey: ["server-status"],
     queryFn: serverStatus,
-    refetchInterval: appHidden ? false : 5000,
+    refetchInterval: appHidden ? false : pollInterval,
     retry: false,
   });
   const state = data?.state;

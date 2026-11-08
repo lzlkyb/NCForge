@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { Cell, ColumnMeta } from "./dbApi";
-import { compareResults, type ResultSnapshot } from "./dbResultTools";
+import { type ResultSnapshot } from "./dbResultTools";
 import { RESULT_BYTES, RESULT_ROWS, rowsBytes } from "./dbResultBudget";
 import { toTsv } from "./resultExport";
 
@@ -34,13 +34,7 @@ export const compareKindLabel={changed:"修改",added:"新增",removed:"删除"}
 export interface ComparisonRecord {kind:Exclude<CompareTab["filter"],"all">;key:string;before:Cell[]|null;after:Cell[]|null}
 export interface ComparisonModel {columns:ColumnMeta[];keyColumns:number[];records:ComparisonRecord[];counts:Record<ComparisonRecord["kind"],number>}
 export interface ComparisonColumn {kind:"type"|"key"|"value";name:string;sourceIndex:number;side?:"A"|"B";width:number}
-export function buildComparison(before:ResultSnapshot,after:ResultSnapshot,keys:string[]):ComparisonModel {
-  const diff=compareResults(before,after,keys);
-  const keyColumns=keys.map(key=>before.columns.findIndex(c=>c.name.toUpperCase()===key.toUpperCase()));
-  const record=(kind:ComparisonRecord["kind"],a:Cell[]|null,b:Cell[]|null):ComparisonRecord=>({kind,before:a,after:b,key:keyColumns.map(c=>String((b ?? a)![c])).join(" · ")});
-  return {columns:before.columns,keyColumns,counts:{changed:diff.changed.length,added:diff.added.length,removed:diff.removed.length},
-    records:[...diff.changed.map(r=>record("changed",r.before,r.after)),...diff.added.map(r=>record("added",null,r)),...diff.removed.map(r=>record("removed",r,null))]};
-}
+export { buildComparison } from "./comparisonModel";
 export function filterComparisonRows(model:ComparisonModel,filter:CompareTab["filter"],query:string):number[] {
   const search=query.trim().toLocaleLowerCase();
   return model.records.flatMap((row,index)=>(filter==="all" || row.kind===filter) && (!search || row.key.toLocaleLowerCase().includes(search)) ? [index] : []);

@@ -399,6 +399,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 pub struct LspClient {
+    _budget: crate::process_budget::Reservation,
     child: Mutex<Child>,
     stdin: Arc<Mutex<ChildStdin>>,
     next_id: AtomicI64,
@@ -454,6 +455,16 @@ impl LspClient {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW：不弹控制台窗口
         }
+        let heap = cmd
+            .get_args()
+            .filter_map(|arg| arg.to_str())
+            .find_map(|arg| {
+                arg.strip_prefix("-Xmx")
+                    .and_then(|v| v.strip_suffix('m'))
+                    .and_then(|v| v.parse::<u32>().ok())
+            })
+            .unwrap_or(512);
+        let budget = crate::process_budget::Reservation::acquire(heap)?;
         let mut child = cmd.spawn().map_err(|e| format!("无法启动语言服务: {e}"))?;
         let stdin = Arc::new(Mutex::new(
             child.stdin.take().ok_or("无法取得语言服务的输入管道")?,
@@ -499,6 +510,7 @@ impl LspClient {
         });
 
         Ok(Self {
+            _budget: budget,
             child: Mutex::new(child),
             stdin,
             next_id: AtomicI64::new(1),

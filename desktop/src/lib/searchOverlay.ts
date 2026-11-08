@@ -24,6 +24,9 @@ function toWorkspaceRel(path: string, root: string): string | null {
   return p.slice(r.length + 1);
 }
 
+// Weak keys avoid retaining closed editor models or their cached text.
+const textCache = new WeakMap<object, { version: number; text: string; revision: string }>();
+
 function collect(): OverlayDoc[] {
   const root = getSession().root;
   if (!root) return [];
@@ -33,10 +36,17 @@ function collect(): OverlayDoc[] {
     if (budget <= 0) return;
     const rel = toWorkspaceRel(abs, root);
     if (!rel) return;
-    const text = model.getValue();
+    if (model.getValueLength() > Math.min(MAX_DOC_CHARS, budget)) return;
+    const version = model.getVersionId();
+    let cached = textCache.get(model);
+    if (!cached || cached.version !== version) {
+      cached = { version, text: model.getValue(), revision: crypto.randomUUID() };
+      textCache.set(model, cached);
+    }
+    const text = cached.text;
     if (text.length > MAX_DOC_CHARS || text.length > budget) return;
     budget -= text.length;
-    docs.push({ path: rel, text });
+    docs.push({ path: rel, text, revision: cached.revision });
   });
   return docs;
 }

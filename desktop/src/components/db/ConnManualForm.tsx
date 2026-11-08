@@ -23,6 +23,9 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
   const [f, setF] = useState<DbConnForm>(() => initialConnForm(conn));
   const [test, setTest] = useState<{ ok?: TestResult; err?: string; busy?: boolean }>({});
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const formVersion = useRef(0);
+  useEffect(() => () => { formVersion.current++; }, []);
   const fromProp = conn?.source === "prop";
   /**
    * 这台机器有没有可用的 NC home。`null` = 还没探明。
@@ -43,6 +46,7 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
   }, []);
 
   const put = (patch: Partial<DbConnForm>) => {
+    formVersion.current++;
     setF((cur) => mergeConnForm(cur, patch));
     setTest({});
   };
@@ -78,15 +82,17 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
     if(lock.current) return;
     const task=beginOperation(dbTaskSpec(`connection.form:${conn?.id || "new"}`,"测试数据库连接",conn?.id ?? null,"连接配置"));
     if(!task) return;lock.current=true;
+    const version = formVersion.current;
+    setTesting(true);
     setTest({ busy: true });
     try {
       const ok=await dbApi.test(input(), f.password || undefined);
-      task.finish("success","连接测试已通过");setTest({ok});
+      task.finish("success","连接测试已通过");if (version === formVersion.current) setTest({ok});
     } catch (e) {
       task.finish("failed","连接测试失败，返回连接配置查看原因");
       // 存原始错误（带 `code|` 前缀）：needHome 要解析它，显示时再 friendlyDbError
-      setTest({ err: e instanceof Error ? e.message : String(e) });
-    } finally {lock.current=false;}
+      if (version === formVersion.current) setTest({ err: e instanceof Error ? e.message : String(e) });
+    } finally {lock.current=false;setTesting(false);}
   };
 
   const save = async () => {
@@ -266,9 +272,9 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
         )}
       </div>
       <div className="ft">
-        <button type="button" className="dbx-btn" disabled={!!missing || test.busy} onClick={() => void runTest()}>
-          <Icon name={test.busy ? "spinner" : "plug"} size={12} />
-          {test.busy ? "测试中…" : "测试连接"}
+        <button type="button" className="dbx-btn" disabled={!!missing || testing} onClick={() => void runTest()}>
+          <Icon name={testing ? "spinner" : "plug"} size={12} />
+          {testing ? "测试中…" : "测试连接"}
         </button>
         {missing && <span className="dbx-muted">还缺{missing}</span>}
         <span className="dbx-sp" />

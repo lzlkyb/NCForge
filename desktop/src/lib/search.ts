@@ -73,6 +73,7 @@ export interface SearchOptions {
 export interface OverlayDoc {
   path: string;
   text: string;
+  revision?: string;
 }
 
 /**
@@ -92,13 +93,33 @@ function withOverlay(options: SearchOptions): SearchOptions {
   return docs.length ? { ...options, overlay: docs } : options;
 }
 
+const acknowledgedOverlays = new Set<string>();
+async function invokeOverlay(command: string, args: { options: SearchOptions; [key: string]: unknown }): Promise<SearchOutcome> {
+  const docs = args.options.overlay ?? [];
+  const overlayRefs = docs.filter(doc => doc.revision).map(doc => ({ path: doc.path, key: doc.revision! }));
+  const full = overlayRefs.length ? { ...args, overlayRefs } : args;
+  const reduced = docs.length ? { ...full, options: { ...args.options, overlay: docs.filter(doc => !doc.revision || !acknowledgedOverlays.has(doc.revision)) } } : full;
+  const send = (payload: Record<string, unknown>) => command === "search_workspace"
+    ? invoke<SearchOutcome>("search_workspace", payload)
+    : invoke<SearchOutcome>("search_workspace_stream", payload);
+  let result: SearchOutcome;
+  try { result = await send(reduced); }
+  catch (error) {
+    if (!String(error).includes("OVERLAY_CACHE_MISS")) throw error;
+    result = await send(full);
+  }
+  for (const doc of docs) if (doc.revision) acknowledgedOverlays.add(doc.revision);
+  if (acknowledgedOverlays.size > 256) acknowledgedOverlays.clear();
+  return result;
+}
+
 /**
  * `source`：调用方标识。同来源的新搜索会让后端取消旧的那次扫描（旧结果带 `cancelled`）；
  * 不传则与其它搜索互不影响。
  */
 export const searchWorkspace = (options: SearchOptions, report = false, source?: string) => {
   const opts = withOverlay(options);
-  return !report ? invoke<SearchOutcome>("search_workspace", source ? { options: opts, source } : { options: opts }) : trackOperation({ key: `search.workspace:${getSession().root}:${JSON.stringify(opts)}`, label: "搜索当前工程", errorDetail: () => "搜索失败，请查看搜索页错误详情", scope: getSession().root ?? "工作区", page: "search", phase: "扫描所选范围，保留已有结果" }, () => invoke<SearchOutcome>("search_workspace", { options: opts }), r => ({ state: "success", detail: `扫描 ${r.filesScanned} 个文件，命中 ${r.filesMatched} 个${r.truncated ? "；达到上限，结果不完整" : ""}${r.scopeFallback ? "；指定范围不存在，已回落到整个工作区" : ""}` }));
+  return !report ? invokeOverlay("search_workspace", source ? { options: opts, source } : { options: opts }) : trackOperation({ key: `search.workspace:${getSession().root}:${JSON.stringify(opts)}`, label: "搜索当前工程", errorDetail: () => "搜索失败，请查看搜索页错误详情", scope: getSession().root ?? "工作区", page: "search", phase: "扫描所选范围，保留已有结果" }, () => invokeOverlay("search_workspace", { options: opts }), r => ({ state: "success", detail: `扫描 ${r.filesScanned} 个文件，命中 ${r.filesMatched} 个${r.truncated ? "；达到上限，结果不完整" : ""}${r.scopeFallback ? "；指定范围不存在，已回落到整个工作区" : ""}` }));
 };
 
 /** 一批流式结果。`stream` 是查询标识：连续敲键会有多次查询同时在飞。 */
@@ -133,7 +154,7 @@ export async function searchWorkspaceStream(
     // 浏览器里跑 vite dev 时 listen 会失败：退化成「只拿最终结果」
   }
   try {
-    return await invoke<SearchOutcome>("search_workspace_stream", { options: opts, source, stream });
+    return await invokeOverlay("search_workspace_stream", { options: opts, source, stream });
   } finally {
     un?.();
   }
