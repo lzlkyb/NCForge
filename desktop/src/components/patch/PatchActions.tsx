@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { Menu } from "../ui/Menu";
 import { errorToast } from "../../lib/errorToast";
 
 /** 像绝对路径就行——真正的落盘校验在后端 `patch_set_out_dir`。 */
@@ -74,7 +75,9 @@ export function PatchActions({
 
   return (
     <div className="pk-actions">
-      <div className="pk-action-meta"><div className="pk-out">
+      <div className="pk-action-meta">
+      <Menu portal width="w-96" trigger={(open,toggle)=><button type="button" className="pk-btn" aria-haspopup="menu" aria-expanded={open} onClick={toggle}>打包设置 · {sqls.length} SQL</button>}>
+      {()=><div className="pk-action-meta pk-settings-menu"><div className="pk-out">
         <span>输出目录</span>
         <input
           aria-label="补丁输出目录"
@@ -128,7 +131,8 @@ export function PatchActions({
         <SqlAdder onAdd={(p) => onSqls(sqls.includes(p) ? sqls : [...sqls, p])} />
       </div>
 
-      <span className="pk-sp" />
+      </div>}
+      </Menu><span className="pk-sp" />
 
       {blockedCount > 0 && (
         <span className="pk-pill" data-tone="bad">

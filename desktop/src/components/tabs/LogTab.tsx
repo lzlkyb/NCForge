@@ -128,6 +128,7 @@ export function LogTab() {
     <DockRegion region="document">
     <div className="lg-page">
       <LogToolbar
+        onClose={dock?.toolTab?.onClose}
         advanced={advanced}
         onToggleAdvanced={() => setAdvanced((value) => !value)}
         sources={sourcesQ.data}

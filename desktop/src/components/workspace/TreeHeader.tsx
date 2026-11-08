@@ -1,9 +1,8 @@
 import { useRef, useState } from "react";
-import { WorkspaceGlyph } from "./WorkspaceGlyph";
 import { pickFolder, pickFolderError } from "../../lib/folderPicker";
 import { baseName } from "../../lib/workspace";
 import { useOperations } from "../../lib/operations";
-import { setPackageView, usePackageView } from "../../lib/treeViewPrefs";
+import { setPackageView, toggleRevealOnOpen, usePackageView, useRevealOnOpen } from "../../lib/treeViewPrefs";
 import { TreeViewOptions } from "./TreeViewOptions";
 import { Icon } from "../ui/icon";
 import { Menu, MenuItem } from "../ui/Menu";
@@ -11,7 +10,7 @@ import { treeFilterFor, useTreeFilter } from "../../lib/treeFilter";
 import "../../reading-tools.css";
 
 /**
- * 左栏顶部：资源管理器标题 + 三个动作（新建文件 / 新建文件夹 / 换目录）。
+ * 左栏顶部保留视图切换、自动定位、名称过滤和搜索；低频设置与工程操作合并到菜单。
  *
  * 换目录走系统文件夹选择器：手打路径的斜杠方向、大小写、目录不存在都会失败，
  * 而选择器至少保证选中的是一个真实存在的文件夹。最近工作区仍保留一键切换。
@@ -39,6 +38,7 @@ export function TreeHeader({
   onSearch: () => void;
 }) {
   const packageView = usePackageView();
+  const reveal = useRevealOnOpen();
   const tasks = useOperations();
   const switching = tasks.some((o) => o.key === "workspace.switch" && !o.endedAt);
   const [error, setError] = useState<string | null>(null);
@@ -66,19 +66,22 @@ export function TreeHeader({
   return (
     <>
       <div className="wb-pane-title wb-code-tree-title">
-        {/* 原样显示目录名：`toUpperCase` 会把 `nc-workbench` 改成另一串字，
-            含中文时又只改到其中几个字母，用户核对路径时反而找不到对应目录。 */}
         <div className="wb-code-tree-heading">
-          <span title={root}>{packageView ? "包资源管理器" : "资源管理器"}</span>
+          <span className="wb-code-tree-name" title={root}>
+            <span className="wb-code-tree-full">{packageView ? "包资源管理器" : "资源管理器"}</span>
+            <span className="wb-code-tree-short">资源</span>
+          </span>
           <div className="wb-tree-view-switch" role="group" aria-label="资源树视图">
             <button type="button" aria-label="文件视图" aria-pressed={!packageView} onClick={() => setPackageView(false)}>文件</button>
             <button type="button" aria-label="包视图" aria-pressed={packageView} onClick={() => setPackageView(true)}>包</button>
           </div>
         </div>
         <div className="wb-pane-acts">
-          <TreeViewOptions root={root} />
+          <button type="button" className="wb-icon-btn" aria-label="自动定位" aria-pressed={reveal}
+            title={`自动定位${reveal ? "已开启，点击关闭" : "已关闭，点击开启"}：打开文件时在资源树中展开并定位；手动定位不受影响`}
+            onClick={toggleRevealOnOpen}><Icon name="target" size={16} /></button>
           <button type="button" className="wb-icon-btn" aria-label="过滤资源树入口" title="过滤文件名和包名" aria-expanded={filter.open} aria-pressed={!!filter.text}
-            onClick={() => treeFilterFor(root).set({ open: !filter.open, ...(!filter.open ? {} : { text: "" }) })}><Icon name="sliders" size={14} /></button>
+            onClick={() => treeFilterFor(root).set({ open: !filter.open, ...(!filter.open ? {} : { text: "" }) })}><Icon name="filter" size={16} /></button>
           <button
             type="button"
             className="wb-icon-btn"
@@ -86,13 +89,16 @@ export function TreeHeader({
             aria-label="全工程搜索"
             onClick={onSearch}
           >
-            <WorkspaceGlyph name="search" size={14} />
+            <Icon name="search" size={16} />
           </button>
-          <Menu portal width="w-72" trigger={(open, toggle) => <button type="button" className="wb-icon-btn" aria-label="更多资源操作" title="新建与工程操作" disabled={switching || choosing} aria-haspopup="menu" aria-expanded={open} onClick={toggle}><Icon name={choosing ? "spinner" : "more"} className={choosing ? "animate-spin" : undefined} size={14} /></button>}>
+          <Menu portal width="w-72" trigger={(open, toggle) => <button type="button" className="wb-icon-btn" aria-label="更多资源操作" title="资源树设置、新建与工程操作" disabled={switching || choosing} aria-haspopup="menu" aria-expanded={open} onClick={toggle}><Icon name={choosing ? "spinner" : "more"} className={choosing ? "animate-spin" : undefined} size={16} /></button>}>
             {close => <>
               <MenuItem label="新建文件" icon="filePlus" onClick={() => { close(); onCreateFile(); }} />
               <MenuItem label="新建文件夹" icon="folderPlus" onClick={() => { close(); onCreateDir(); }} />
               <MenuItem label="更换工作区目录" icon="folder" onClick={() => { close(); void choose(); }} />
+              <div className="wb-menu-separator" role="separator" />
+              <p className="wb-menu-caption">视图设置</p>
+              <TreeViewOptions root={root} onClose={close} />
               {recents.length > 0 && <p className="wb-tree-menu-note">最近工程</p>}
               {recents.map(path => <MenuItem key={path} label={<span title={path}>{baseName(path)}</span>} hint={path === root ? "当前" : undefined} onClick={() => { close(); onOpenRecent(path); }} />)}
             </>}

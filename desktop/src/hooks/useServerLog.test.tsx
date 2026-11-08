@@ -77,6 +77,24 @@ afterEach(() => {
 });
 
 describe("useServerLog", () => {
+  it("空轮询保持行引用并退避，出现新内容后恢复快速读取", async () => {
+    mount(true, 0); await act(async () => {});
+    await act(async () => { h.calls[0].resolve({text:"",offset:0}); });
+    const previous = latest.lines;
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(h.calls).toHaveLength(1);
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(h.calls).toHaveLength(2);
+    await act(async () => { h.calls[1].resolve({text:"",offset:0}); });
+    expect(latest.lines).toBe(previous);
+    await act(async () => { vi.advanceTimersByTime(2000); });
+    expect(h.calls).toHaveLength(3);
+    await act(async () => { h.calls[2].resolve({text:"新内容\n",offset:9}); });
+    expect(texts()).toEqual(["新内容"]);
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(h.calls).toHaveLength(4);
+  });
+
   it("挂载即拉第一屏，之后按返回的 offset 续拉", async () => {
     mount(true, 0);
     await act(async () => {});

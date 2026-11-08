@@ -2,10 +2,11 @@
 /**
  * 换工作区走系统文件夹选择器：工具栏按钮不再展开手填输入框。
  */
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TreeHeader } from "./TreeHeader";
+import { treeFilterFor } from "../../lib/treeFilter";
 
 const h = vi.hoisted(() => ({ pickFolder: vi.fn() }));
 vi.mock("../../lib/folderPicker", () => ({
@@ -21,6 +22,7 @@ let root: Root;
 beforeEach(() => {
   localStorage.clear();
   h.pickFolder.mockReset();
+  treeFilterFor("C:\\w\\newar").set({ text: "", open: false });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -37,7 +39,7 @@ const flush = async () => {
   }
 };
 
-function render(onOpen: (path: string) => void) {
+function render(onOpen: (path: string) => void, actions: Partial<ComponentProps<typeof TreeHeader>> = {}) {
   act(() => root.render(
     <TreeHeader
       root={"C:\\w\\newar"}
@@ -47,6 +49,7 @@ function render(onOpen: (path: string) => void) {
       onCreateFile={noop}
       onCreateDir={noop}
       onSearch={noop}
+      {...actions}
     />,
   ));
 }
@@ -58,6 +61,22 @@ const chooseFolder = async () => {
 };
 
 describe("TreeHeader 换目录", () => {
+  it("收纳后名称过滤、全工程搜索和新建文件仍分别执行自己的操作", async () => {
+    const onSearch = vi.fn(), onCreateFile = vi.fn(), onCreateDir = vi.fn();
+    render(vi.fn(), { onSearch, onCreateFile, onCreateDir });
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="过滤资源树入口"]')!.click());
+    expect(treeFilterFor("C:\\w\\newar").get().open).toBe(true);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="全工程搜索"]')!.click());
+    expect(onSearch).toHaveBeenCalledTimes(1);
+    expect(onCreateFile).not.toHaveBeenCalled();
+    for (const label of ["新建文件", "新建文件夹"]) {
+      await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="更多资源操作"]')!.click());
+      const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(button => button.textContent === label)!;
+      await act(async () => item.click());
+    }
+    expect(onCreateFile).toHaveBeenCalledTimes(1);
+    expect(onCreateDir).toHaveBeenCalledTimes(1);
+  });
   it("点按钮拉起选择器，从当前目录开始，选中后切过去", async () => {
     h.pickFolder.mockResolvedValueOnce("D:\\w\\other");
     const onOpen = vi.fn();

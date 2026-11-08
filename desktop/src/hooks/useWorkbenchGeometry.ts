@@ -14,7 +14,7 @@ export function useWorkbenchGeometry(panel: PanelTab, sideKey = "files") {
   }, []);
   const bottomMax = panelMaxHeight(panel, viewport);
   const bottomHeight = panelHeight(layout, panel, viewport);
-  const sideWidth = layout.sides[sideKey] ?? (sideKey === "search" ? 320 : layout.side);
+  const sideWidth = layout.sides[sideKey] ?? (sideKey === "search" ? 320 : sideKey === "svn" ? 280 : sideKey === "db" ? 236 : layout.side);
   const setSize = (axis: "side" | "bottom", value: number) => axis === "side"
     ? updateWorkbenchLayout({ sides: { ...getWorkbenchLayout().sides, [sideKey]: Math.max(180, Math.min(420, value)) } })
     : updateWorkbenchLayout({ compact: false, heights: { ...getWorkbenchLayout().heights, [panel]: Math.max(140, Math.min(bottomMax, value)) } });
@@ -54,7 +54,7 @@ export function useWorkbenchGeometry(panel: PanelTab, sideKey = "files") {
   const onSeparatorKey = (event: KeyboardEvent, axis: "side" | "bottom") => {
     if (event.key === "Enter") {
       event.preventDefault(); const now = performance.now();
-      if (now - enterAt.current[axis] < 600) { setSize(axis, axis === "side" ? sideKey === "search" ? 320 : 240 : panel === "svc" ? 360 : panel === "debug" ? 260 : 200); enterAt.current[axis] = -Infinity; }
+      if (now - enterAt.current[axis] < 600) { setSize(axis, axis === "side" ? sideKey === "search" ? 320 : sideKey === "db" ? 236 : 240 : panel === "svc" ? 360 : panel === "debug" ? 260 : 200); enterAt.current[axis] = -Infinity; }
       else enterAt.current[axis] = now;
       return;
     }

@@ -1,0 +1,33 @@
+/* Content surfaces share space priorities, while critical states stay with their owner. */
+.dbx-console { container-type:inline-size; }
+/* These surfaces already name their document; the generic tool tab repeats it. */
+.wb-root[data-tool="meta"]:has(.meta-document-tabs) .wb-document-surface>.wb-doc-tabs,
+.wb-root[data-tool="settings"]:has(.wb-settings-page) .wb-document-surface>.wb-doc-tabs,
+.wb-root[data-tool="logs"]:has(.lg-page) .wb-document-surface>.wb-doc-tabs { display:none; }
+.meta-document-tools { display:flex;align-items:center;flex-wrap:wrap;flex-shrink:0;border-bottom:1px solid hsl(var(--border)); }
+.meta-workbench .meta-document-tools .meta-main-head { flex:1;min-width:300px;min-height:40px;padding:4px 10px;border:0; }
+.meta-document-tools .meta-editor-toolbar { min-height:40px;padding:4px 10px;border:0;gap:8px; }
+.meta-workbench[data-generation="true"] .meta-document-tools { display:none; }
+.meta-file-info { padding:10px;overflow-wrap:anywhere;font-size:11px;line-height:1.5;color:hsl(var(--muted-foreground)); }
+.lg-page .lg-head-wrap { display:flex;flex-wrap:wrap;align-items:center; }
+.lg-head-wrap>.lg-head { flex:1 1 520px;min-width:0;gap:8px;padding-block:4px; }
+.lg-head-wrap>.lg-head>.lg-sub { max-width:180px; }
+.lg-head-wrap>.lg-search { flex:1 1 380px;min-width:0;padding-block:4px;border:0; }
+.lg-head-wrap>div[id] { flex-basis:100%;order:3; }
+.lg-record-metadata { border-bottom:1px solid hsl(var(--border));font-size:11px;color:hsl(var(--muted-foreground)); }
+.lg-record-metadata>summary { padding:6px 12px;cursor:pointer; }
+.vc-history-contextbar { display:flex;align-items:center;gap:8px;padding:4px 10px;min-height:36px;flex-shrink:0;border-bottom:1px solid hsl(var(--border)); }
+.vc-history-contextbar>select { min-width:0;flex:1;height:28px;border:1px solid hsl(var(--input));border-radius:var(--r-control);background:hsl(var(--card));color:hsl(var(--foreground));font-size:12px; }
+.vc-history-filter-options { display:grid;gap:10px;padding:10px;font-size:12px; }
+.vc-history-filter-options label { display:flex;align-items:center;justify-content:space-between;gap:10px; }
+.vc-history-filter-options :is(input,select) { min-width:0;padding:5px;border:1px solid hsl(var(--input));border-radius:var(--r-control);background:hsl(var(--card));color:hsl(var(--foreground)); }
+.pk-settings-menu { display:flex;flex-direction:column;gap:12px;padding:12px; }
+.pk-settings-menu .pk-out { width:100%;min-width:0;flex-wrap:wrap;flex:none; }
+.pk-settings-menu .pk-out input { flex:1;min-width:150px;width:auto; }
+.pk-settings-menu .pk-sql { flex-wrap:wrap;min-width:0;flex:none; }
+@media(max-width:650px) {
+  .lg-head-wrap>.lg-head { flex-basis:100%; }
+  .lg-head-wrap>.lg-head>.lg-sub { display:none; }
+  .meta-workbench .meta-document-tools .meta-main-head { min-width:0;flex-basis:100%; }
+  .vc-history-contextbar { flex-wrap:wrap; }
+}

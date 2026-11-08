@@ -37,12 +37,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.wb-code-tree-title { height:auto; display:grid; grid-template-columns:minmax(0,1fr); gap:5px; padding:8px 8px 5px; border-bottom:1px solid hsl(var(--border)); }
-.wb-code-tree-heading { display:flex; align-items:center; justify-content:space-between; gap:6px; min-width:0; color:hsl(var(--foreground)); font-size:12px; letter-spacing:0; }
-.wb-code-tree-title .wb-pane-acts { flex-wrap:wrap; gap:0; }
-.app-shell .wb-code-tree-title .wb-icon-btn { flex:0 0 12.5%; min-width:24px; max-width:28px; }
+.wb-code-tree-title { height:36px; display:flex; gap:6px; padding:2px 8px; border-bottom:1px solid hsl(var(--border)); }
+.wb-code-tree-heading { display:flex; flex:1; align-items:center; gap:6px; min-width:0; color:hsl(var(--foreground)); font-size:12px; letter-spacing:0; }
+.wb-code-tree-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wb-code-tree-short { display:none; }
 .wb-tree-view-switch { display:flex; flex:none; gap:2px; padding:2px; border:1px solid hsl(var(--border)); border-radius:var(--r-control); background:hsl(var(--muted) / .5); }
-.wb-tree-view-switch button { min-height:22px; min-width:29px; padding-inline:5px; border-radius:calc(var(--r-control) - 2px); color:hsl(var(--muted-foreground)); font-size:11px; font-weight:600; }
+.wb-tree-view-switch button { min-height:24px; min-width:29px; padding-inline:5px; border-radius:calc(var(--r-control) - 2px); color:hsl(var(--muted-foreground)); font-size:11px; font-weight:600; }
 .wb-tree-view-switch button:hover { color:hsl(var(--foreground)); }
 .wb-tree-view-switch button[aria-pressed="true"] { background:hsl(var(--card)); color:hsl(var(--primary)); box-shadow:0 1px 2px hsl(var(--foreground) / .08); }
 
@@ -541,7 +541,7 @@ html[data-ui-density="comfortable"] .wb-tree-list .wb-row { height:30px; }
 .wb-split-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-split-head .wb-icon-btn { margin-left: auto; }
 .wb-editor-host { position: absolute; inset: 0; }
-.wb-editor-empty { position: absolute; inset: 0; display: grid; place-items: center; }
+.wb-editor-empty { position:absolute; inset:0; display:flex; overflow:auto; padding:28px 32px; container-type:inline-size; container-name:empty-editor; }
 
 .wb-status {
   display: flex;
@@ -689,7 +689,6 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-build-row[data-status="blocked"] .wb-build-state { color: hsl(var(--warning-ink)); }
 .wb-build-meta { color: hsl(var(--muted-foreground)); }
 .wb-build-reason { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: hsl(var(--muted-foreground)); font-style: italic; }
-.wb-tabs-sp { flex: 1; }
 .wb-tabs-all-wrap { display: flex; align-items: center; align-self: center; flex-shrink: 0; margin: 0 2px; }
 .wb-compile-btn { align-self: center; margin: 0 8px; flex-shrink: 0; }
 .wb-task-btn { align-self: center; margin-left: 8px; flex-shrink: 0; }
@@ -819,15 +818,27 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-hist-foot { flex-shrink: 0; padding: 8px 10px; border-top: 1px solid hsl(var(--border)); font-size: 11px; color: hsl(var(--muted-foreground)); }
 
 /* 空编辑器页：最近打开 + 快捷键 */
-.wb-empty-box { width: min(420px, calc(100% - 32px)); }
-.wb-empty-box h2 { font-size: 15px; font-weight: 600; }
-.wb-empty-sub { margin: 2px 0 14px; font-size: 12px; color: hsl(var(--muted-foreground)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wb-empty-h { margin: 12px 0 4px; font-size: 11px; font-weight: 600; color: hsl(var(--muted-foreground)); }
-.wb-empty-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 8px; border-radius: 6px; font-size: 12.5px; text-align: left; }
+.wb-empty-box { flex:none; width:min(780px,100%); margin:auto; }
+.wb-empty-head { display:flex; align-items:center; flex-wrap:wrap; gap:16px; margin-bottom:24px; }
+.wb-empty-project { flex:1; min-width:0; }
+.wb-empty-box h2 { font-size:var(--fs-h1,18px); font-weight:600; overflow-wrap:anywhere; }
+.wb-empty-sub { margin:4px 0 0; font-size:12px; line-height:1.5; color:hsl(var(--muted-foreground)); overflow-wrap:anywhere; }
+.wb-empty-layout { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(0,1fr); gap:32px; }
+.wb-empty-section { min-width:0; border-top:1px solid hsl(var(--border)); padding-top:12px; }
+.wb-empty-h { margin:0 0 8px; font-size:12px; font-weight:600; color:hsl(var(--muted-foreground)); }
+.wb-empty-row { display:flex; align-items:center; gap:8px; width:100%; min-height:32px; padding:6px 8px; border-radius:var(--r-control); font-size:12.5px; text-align:left; }
 button.wb-empty-row:hover { background: hsl(var(--secondary)); }
-.wb-empty-mu { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: hsl(var(--muted-foreground)); }
-.wb-empty-key kbd { margin-left: auto; font: 11px Consolas, monospace; padding: 1px 5px; border: 1px solid hsl(var(--border)); border-radius: 4px; color: hsl(var(--muted-foreground)); }
-.wb-empty-go { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; height: 28px; padding: 0 12px; border-radius: 7px; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); font-size: 12px; }
+.wb-empty-file { min-height:44px; gap:10px; }
+.wb-empty-file > svg { flex:none; color:hsl(var(--muted-foreground)); }
+.wb-empty-file-meta { display:grid; flex:1; min-width:0; gap:2px; }
+.wb-empty-name,.wb-empty-mu { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wb-empty-mu { font-size:11px; color:hsl(var(--muted-foreground)); }
+.wb-empty-key { flex-wrap:wrap; row-gap:4px; padding-inline:0; }
+.wb-empty-key kbd { margin-left:auto; font:11px Consolas,monospace; padding:1px 5px; border:1px solid hsl(var(--border)); border-radius:4px; color:hsl(var(--muted-foreground)); white-space:nowrap; }
+.wb-empty-go { display:inline-flex; flex:none; align-items:center; gap:6px; min-height:30px; padding:0 12px; border-radius:var(--r-control); background:hsl(var(--primary)); color:hsl(var(--primary-foreground)); font-size:12px; }
+.wb-empty-note { font-size:12px; line-height:1.6; color:hsl(var(--muted-foreground)); }
+@container empty-editor (max-width:780px) { .wb-empty-layout { grid-template-columns:minmax(0,1fr); gap:24px; } }
+@container editor-group (max-width:440px) { .wb-editor-empty { padding:20px 16px; } }
 
 .wb-sedit-row[data-changed] { background: hsl(var(--warning) / 0.09); }
 

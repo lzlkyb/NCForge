@@ -9,9 +9,8 @@ const ITEMS: { key: SvnPage; label: string; icon: IconName }[] = [
 /**
  * 版本控制页顶部的视图切换：审查改动 / 打包补丁。
  *
- * 放在侧栏最上方而不是页面工具条里：工具条已经排了 5 个动作按钮，宽度收窄时
- * 连 URL 都要让位；侧栏固定 240px，两个等宽段刚好，而且切换后的列表就在下面，
- * 视线不用来回跳。
+ * 低频工作副本操作收进菜单后，视图切换可与工作区工具条共用一行，
+ * 文件清单不再为页面切换单独损失一行空间。
  */
 export function SvnPageSwitch({ page }: { page: SvnPage }) {
   return (

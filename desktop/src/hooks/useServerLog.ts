@@ -24,7 +24,7 @@ function entryFor(key: string, identity: string): Entry {
 function consumePage(entry: Entry, page: ServiceLogPage) {
   const before = entry.state;
   const state = appendChunk(before, page.text);
-  state.lines = state.lines.map(line => line.id < before.nextId ? line : {
+  if (page.text) state.lines = state.lines.map(line => line.id < before.nextId ? line : {
     ...line, offset: line.id === before.nextId && before.pending ? entry.pendingOffset ?? page.startOffset : page.lineOffsets[line.id - before.nextId] ?? page.startOffset,
   });
   entry.pendingOffset = state.pending ? page.lineOffsets[page.lineOffsets.length - 1] ?? page.offset : null;
@@ -42,15 +42,22 @@ export function useServerLog(active: boolean, generation: number, appHidden = fa
   const [snapshot, setSnapshot] = useState(() => ({ ...entryFor(key, identity) }));
   const entryRef = useRef<Entry>(entryFor(key, identity));
   const epoch = useRef(0), inFlight = useRef<Promise<void> | null>(null), mounted = useRef(true);
+  const idleReads = useRef(0);
   const invalidate = useCallback(() => { epoch.current++; }, []);
   const fetchRef = useRef(fetchLog), optionsRef = useRef(options), hiddenRef = useRef(appHidden), activeRef = useRef(active);
   fetchRef.current = fetchLog; optionsRef.current = options; hiddenRef.current = appHidden; activeRef.current = active;
   if (entryRef.current.identity !== identity || entryRef.current !== entries.get(key)) { entryRef.current = entryFor(key, identity); invalidate(); }
-  const publish = useCallback(() => { if (mounted.current) setSnapshot({ ...entryRef.current }); }, []);
+  const publish = useCallback(() => {
+    if (mounted.current) setSnapshot(previous => {
+      const current = entryRef.current;
+      return (Object.keys(current) as (keyof Entry)[]).every(key => previous[key] === current[key]) ? previous : { ...current };
+    });
+  }, []);
   const tick = useCallback(async () => {
     if (inFlight.current) { await inFlight.current; return; }
     if (hiddenRef.current || !mounted.current) return;
     const stamp = epoch.current, entry = entryRef.current, spec = optionsRef.current;
+    const previousOffset = entry.offset, previousState = entry.state;
     const work = (async () => {
       try {
         if (!spec) {
@@ -67,7 +74,7 @@ export function useServerLog(active: boolean, generation: number, appHidden = fa
             entry.state = emptyLogState(); entry.history = null; entry.pendingOffset = null;
           }
           consumePage(entry, page);
-          if (page.eof && (!activeRef.current || spec.previous)) {
+          if (page.eof && entry.state.pending && (!activeRef.current || spec.previous)) {
             const pendingId = entry.state.nextId, pendingOffset = entry.pendingOffset;
             entry.state = flushLogPending(entry.state);
             // 文件已结束的半行也需要原始起点，不能把下一块 offset 当成行位置。
@@ -77,12 +84,17 @@ export function useServerLog(active: boolean, generation: number, appHidden = fa
         }
         entry.error = null;
       } catch (error) { if (stamp === epoch.current) entry.error = String(error); }
-      if (stamp === epoch.current) publish();
+      if (stamp === epoch.current) {
+        idleReads.current = entry.offset !== previousOffset || entry.state !== previousState ? 0 : Math.min(3, idleReads.current + 1);
+        publish();
+      }
     })();
     inFlight.current = work;
     try { await work; } finally { inFlight.current = null; if (stamp !== epoch.current && !hiddenRef.current && mounted.current) void tick(); }
   }, [publish]);
-  const query = useQuery({ queryKey: ["service-console-log", key, identity], queryFn: async () => { await tick(); return Date.now(); }, enabled: !appHidden, refetchInterval: appHidden || !active || options?.previous ? false : 500, retry: false, staleTime: 0 });
+  const query = useQuery({ queryKey: ["service-console-log", key, identity], queryFn: async () => { await tick(); return entryRef.current.updatedAt ?? 0; }, enabled: !appHidden,
+    refetchInterval: () => appHidden || !active || options?.previous ? false : 500 * 2 ** idleReads.current,
+    notifyOnChangeProps: ["data", "error"], retry: false, staleTime: 0 });
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; invalidate(); }; }, [invalidate]);
   useEffect(() => { publish(); }, [key, identity, publish]);
   const wasActive = useRef(active);
@@ -97,6 +109,7 @@ export function useServerLog(active: boolean, generation: number, appHidden = fa
   const currentEntry = entryRef.current;
   const reset = useCallback((from = 0) => {
     const entry = currentEntry;
+    idleReads.current = 0;
     if (entry === entryRef.current) invalidate();
     entry.state = emptyLogState(); entry.history = null; entry.offset = from; entry.startOffset = from;
     entry.pendingOffset = null; entry.initialized = from > 0; entry.truncated = false; entry.error = null;
@@ -127,7 +140,7 @@ export function useServerLog(active: boolean, generation: number, appHidden = fa
   const data = snapshot.identity === identity ? snapshot : entryRef.current;
   return {
     lines: data.history ?? data.state.lines, error: data.error, reset, retry: () => void query.refetch(), readOlder, readingOlder,
-    loading: query.isFetching && !data.initialized, updatedAt: data.updatedAt, fileId: data.fileId,
+    loading: query.isPending && !data.initialized, updatedAt: data.updatedAt, fileId: data.fileId,
     startOffset: data.history ? data.historyStart : data.startOffset, endOffset: data.history ? data.historyEnd : data.offset, size: data.size,
     truncated: data.truncated, historical: data.history !== null, newestId: data.state.nextId - 1, showLatest,
   };

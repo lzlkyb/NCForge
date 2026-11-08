@@ -25,3 +25,27 @@
 html[data-ui-density="comfortable"] :is(.vc-compare,.vc-local-diff) :is(.vc-btn,.vc-reading-select,.vc-review-toggle) { min-height:32px; }
 @media(max-width:650px) { .vc-file-name { flex:1;max-width:calc(100% - 56px); }.vc-reading-stats { margin-left:0; }.vc-reading-warning { flex-basis:100%; } }
 @media(prefers-reduced-motion:reduce) { .vc-reading-stats .animate-spin { animation:none; } }
+
+/* Reading owns the space; file metadata and infrequent commands live in menus. */
+.vc-compare { container-type:inline-size; }
+.vc-reading-bar { gap:6px;min-height:40px;padding:4px 10px; }
+.vc-diff-file { display:flex;align-items:center;gap:7px;flex:1;min-width:100px; }
+.vc-diff-file b { min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px; }
+.vc-diff-file [aria-label="已审"] { color:hsl(var(--success-ink)); }
+.vc-diff-navigation { display:flex;align-items:center;gap:4px;flex-shrink:0; }
+.vc-diff-navigation .vc-hint { white-space:nowrap;min-width:70px;font-variant-numeric:tabular-nums;font-size:11px; }
+.vc-compare[data-compact] .vc-diff-jump-label { display:none; }
+.vc-compare[data-compact] .vc-reading-stats { margin-left:0;font-size:11px; }
+.vc-compare[data-compact] .vc-reading-stats>span:last-child { display:none; }
+.vc-compare[data-compact] .vc-reading-tools { flex-wrap:nowrap; }
+.vc-compare-sources { min-height:24px;padding:4px 10px; }
+.vc-file-info { display:flex;flex-direction:column;gap:6px;padding:10px;font-size:11px;line-height:1.5;color:hsl(var(--muted-foreground));overflow-wrap:anywhere;border-top:1px solid hsl(var(--border)); }
+@container(max-width:1100px) {
+  .vc-compare[data-compact] .vc-reading-stats,.vc-compare[data-compact] .vc-open-code span,.vc-compare[data-compact] .vc-focus-label,.vc-compare[data-compact] .vc-display-label { display:none; }
+}
+@container(max-width:650px) {
+  .vc-compare[data-compact] .vc-diff-file { flex-basis:100%;min-height:24px; }
+  .vc-compare[data-compact] .vc-reading-bar { column-gap:5px;row-gap:4px; }
+  .vc-compare[data-compact] .vc-reading-tools { margin-left:auto; }
+  .vc-compare[data-compact] .vc-reading-warning { display:none; }
+}

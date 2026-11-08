@@ -1,0 +1,188 @@
+/* Selection says what is current; focus says where the keyboard acts. */
+:root {
+  --selection-bg: 160 28% 91%;
+  --selection-fg: 164 39% 24%;
+  --selection-hover: 160 12% 95%;
+  --selection-inactive: 160 7% 92%;
+  --selection-marker: 164 48% 31%;
+  --focus-border: 164 48% 31%;
+  --focus-halo: 164 48% 31%;
+}
+.dark {
+  --selection-bg: 160 21% 23%;
+  --selection-fg: 158 31% 82%;
+  --selection-hover: 160 9% 20%;
+  --selection-inactive: 160 6% 24%;
+  --selection-marker: 158 33% 67%;
+  --focus-border: 158 33% 67%;
+  --focus-halo: 158 33% 67%;
+}
+/* Shared controls keep geometry and error borders when focus changes. */
+html :is(input,textarea,select):not(.monaco-editor *,[type="checkbox"],[type="radio"],[type="range"]):focus {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--focus-halo) / .18);
+}
+html :is(input,textarea,select):not(.monaco-editor *,[type="checkbox"],[type="radio"],[type="range"],[aria-invalid="true"],[data-invalid],:invalid,[class*="border-destructive"]):focus {
+  border-color: hsl(var(--focus-border));
+}
+html [data-focus-container]:not(.dbx-gc):focus-within {
+  outline: 2px solid hsl(var(--focus-halo) / .18);
+  outline-offset: 0;
+  box-shadow: none;
+}
+html [data-focus-container]:not(.dbx-gc,[aria-invalid="true"],[data-invalid],:has([aria-invalid="true"],[data-invalid],:invalid)):focus-within {
+  border-color: hsl(var(--focus-border));
+}
+html [data-focus-container]:not(.dbx-gc) :is(input:not([type="checkbox"],[type="radio"],[type="range"]),textarea):focus {
+  outline: none;
+  box-shadow: none;
+}
+html [data-focus-container]:not(.dbx-gc) :is(button,[tabindex]):not(.monaco-editor *):focus-visible {
+  outline: 1px solid hsl(var(--focus-border));
+  outline-offset: -2px;
+  background: hsl(var(--selection-bg));
+}
+html :is(input[type="checkbox"],input[type="radio"]) {
+  accent-color: hsl(var(--selection-marker));
+}
+html :is(button,a,summary,[tabindex]):not(.monaco-editor *,input,textarea,select):focus-visible,
+html :is(input[type="checkbox"],input[type="radio"],input[type="range"]):focus-visible {
+  outline-color: hsl(var(--focus-border));
+}
+
+/* Explicit families, not every data-active: errors and execution indicators differ. */
+.app-shell :is(.wb-row,.wb-member-row,.wb-outline-row,.wb-outline-btn,.wb-hist-row)[data-active],
+.app-shell :is(.wb-row,.vc-file-row,.dw-problem-row,.dw-search-hit)[data-selected],
+.app-shell :is(.dbx-crow,.dbx-trow,.lg-row,.dbg-frame,.dbg-thread,.dbg-frame-row)[data-active],
+.app-shell :is(.vc-row,.vc-history-record,.pk-row,.md-pick-item)[data-on],
+.app-shell :is(.meta-entry,.meta-attr-row,.meta-gen-item,.meta-history-item,.gen-file).is-active {
+  background: hsl(var(--selection-bg));
+  color: hsl(var(--selection-fg));
+  box-shadow: none;
+}
+.app-shell .vc-file-row[data-selected] .vc-row {
+  background: transparent;
+  color: hsl(var(--selection-fg));
+}
+.app-shell .wb-tree-list:not(:focus-within) .wb-row[data-selected] {
+  background: hsl(var(--selection-inactive));
+  color: hsl(var(--foreground));
+}
+.app-shell .wb-tree-list:focus-visible .wb-row[data-selected],
+.app-shell .wb-row[data-active][data-selected] {
+  box-shadow: none;
+}
+.app-shell .wb-tree-list:focus-visible {
+  outline-color: hsl(var(--focus-border));
+}
+.app-shell .wb-row-project[data-current]:not([data-selected]) {
+  background: hsl(var(--selection-hover));
+}
+html .app-shell .app-side-item[data-active],
+html[data-ui-style="glass"] .app-shell .app-side-item[data-active],
+.app-shell .wb-settings-nav-group > button[aria-current]:not([aria-current="false"]) {
+  background: hsl(var(--selection-bg));
+  color: hsl(var(--selection-fg));
+  font-weight: 500;
+  box-shadow: none;
+}
+
+/* Labels share an understated bottom marker; no duplicate top highlight. */
+.app-shell .wb-tab[data-active],
+html[data-ui-style="glass"] .app-shell .wb-tab[data-active],
+.app-shell .wb-editor-group-slot[data-focused] .wb-tab[data-active] {
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-weight: 500;
+  box-shadow: inset 0 -2px hsl(var(--selection-marker));
+}
+.app-shell :is(.wb-ptab,.wb-pfilter,.wb-status-btn)[data-active],
+.app-shell :is(.qp-mode,.pk-chip,.pk-tab,.vc-mode-btn,.vc-chip,.vc-btn,.lnk-btn,.sv-btn,.sv-icon-btn,.sv-log-src button,.sv-lv button)[data-on],
+.app-shell :is(.meta-entity-tab,.meta-seg button,.meta-vo-tabs button).is-active,
+.app-shell :is(.wb-group-switch,.wb-tabs-filter-options,.wb-tree-view-switch,.dw-build-nav,.sc-log-levels) button[aria-pressed="true"] {
+  background: hsl(var(--selection-bg));
+  color: hsl(var(--selection-fg));
+  border-color: transparent;
+  font-weight: 500;
+  box-shadow: none;
+}
+html .app-shell .settings-choice button[aria-checked="true"],
+html[data-ui-style="glass"] .app-shell .settings-choice button[aria-checked="true"],
+html .app-shell .settings-choice button[aria-checked="true"]:hover {
+  background: hsl(var(--selection-bg));
+  color: hsl(var(--selection-fg));
+  font-weight: 500;
+  box-shadow: none;
+}
+html .sc-service-tabs > button[aria-selected="true"],
+html .settings-about-filters button[aria-pressed="true"] {
+  background: hsl(var(--selection-bg));
+  color: hsl(var(--selection-fg));
+  border-color: transparent;
+  box-shadow: none;
+}
+/* Portals live outside .app-shell, and must use the same choices. */
+html .qp-li[data-sel="true"],
+html .dbx-object-options button[aria-selected="true"] {
+  background: hsl(var(--selection-bg));
+  color: hsl(var(--selection-fg));
+}
+html :is([role="menu"],[role="listbox"]) :is([role="menuitem"],[role="option"]):hover:not(:disabled):not([aria-selected="true"]),
+.app-shell :is(.wb-row,.vc-file-row,.dw-problem-row,.dw-search-hit):hover:not([data-active]):not([data-selected]),
+html .dbx-dd .li:hover:not([data-sel]) {
+  background: hsl(var(--selection-hover));
+}
+html .dbx-dd .li[data-sel] {
+  background: hsl(var(--selection-bg));
+  color: hsl(var(--selection-fg));
+}
+html .pk-cbx[data-on], html .md-pick-item[data-on] .md-ck {
+  background: hsl(var(--selection-marker));
+  border-color: hsl(var(--selection-marker));
+  color: hsl(var(--primary-foreground));
+}
+/* Canvas selection stays geometric; never color invisible edge hit targets. */
+html .meta-workbench .meta-canvas-node.is-active .meta-node-surface {
+  stroke: hsl(var(--selection-marker));
+  stroke-width: 1.8;
+  filter: none;
+}
+html .meta-workbench .meta-canvas-node .meta-canvas-field.is-active rect {
+  fill: hsl(var(--selection-bg));
+}
+html .meta-workbench .meta-canvas-field.is-active text,
+html .meta-workbench .meta-canvas-rel.is-active text {
+  fill: hsl(var(--selection-fg));
+}
+html .meta-workbench .meta-canvas-rel.is-active path:not(.meta-edge-hit) {
+  stroke: hsl(var(--selection-marker));
+}
+
+@media (forced-colors: active) {
+  html :is(input,textarea,select):not(.monaco-editor *,[type="checkbox"],[type="radio"],[type="range"]):focus,
+  html [data-focus-container]:not(.dbx-gc):focus-within {
+    outline: 2px solid Highlight;
+    border-color: Highlight;
+    box-shadow: none;
+  }
+  html [data-focus-container]:not(.dbx-gc) :is(input:not([type="checkbox"],[type="radio"],[type="range"]),textarea):focus { outline: none; }
+  .app-shell :is(.wb-row,.vc-file-row,.dw-problem-row,.dw-search-hit)[data-selected],
+  .app-shell :is(.wb-row,.wb-outline-row,.dbx-crow,.dbx-trow,.lg-row,.dbg-frame-row)[data-active],
+  .app-shell :is(.meta-entry,.meta-attr-row,.meta-gen-item,.gen-file).is-active,
+  .app-shell :is(.vc-row,.vc-history-record,.pk-row,.md-pick-item)[data-on],
+  html .app-shell .app-side-item[data-active],
+  html[data-ui-style="glass"] .app-shell .app-side-item[data-active],
+  html .app-shell .settings-choice button[aria-checked="true"],
+  html[data-ui-style="glass"] .app-shell .settings-choice button[aria-checked="true"],
+  html .qp-li[data-sel="true"] {
+    background: Highlight;
+    color: HighlightText;
+    outline: 1px solid Highlight;
+  }
+  .app-shell .wb-tab[data-active] { border-bottom: 2px solid Highlight; }
+  html :is(button,a,summary,[tabindex]):not(.monaco-editor *):focus-visible {
+    outline-color: Highlight;
+  }
+  html .meta-workbench .meta-canvas-node.is-active .meta-node-surface,
+  html .meta-workbench .meta-canvas-rel.is-active path:not(.meta-edge-hit) { stroke: Highlight; }
+}

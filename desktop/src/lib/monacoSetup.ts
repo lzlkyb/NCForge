@@ -1,7 +1,7 @@
 // Monaco 编辑器初始化：只引入编辑器核心 + NC 用得到的语言，不走 CDN，不带 TS/JSON/CSS 的语言服务 worker。
 // 语言智能（补全/跳转/诊断）由之后 M4 的 jdt.ls 提供，这里只负责显示与编辑。
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
-import "monaco-editor/esm/vs/editor/editor.all";
+import "./monacoContributions";
 import "monaco-editor/esm/vs/basic-languages/java/java.contribution";
 import "monaco-editor/esm/vs/basic-languages/xml/xml.contribution";
 import "monaco-editor/esm/vs/basic-languages/sql/sql.contribution";

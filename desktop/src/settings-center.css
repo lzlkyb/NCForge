@@ -12,21 +12,24 @@
 .wb-settings-nav-group > button { display:block; width:100%; min-width:0; min-height:34px; padding:7px 10px; text-align:left; font-size:13px; border-radius:var(--r-control); white-space:nowrap; transition:background var(--dur-fast) var(--ease); }
 .wb-settings-nav-group > button:hover { background:hsl(var(--secondary)); }
 .wb-settings-nav-group > button[aria-current] { background:hsl(var(--accent)); color:hsl(var(--accent-foreground)); font-weight:600; }
-.wb-settings-body { flex:1; min-width:0; min-height:0; overflow:auto; padding:28px 32px; container:settings-pane / inline-size; }
-.wb-settings-pages > section,.wb-settings-body > .wb-settings-results { max-width:800px; min-width:0; display:flex; flex-direction:column; gap:24px; }
+.wb-settings-body { flex:1; min-width:0; min-height:0; overflow:auto; padding:20px 24px; container:settings-pane / inline-size; }
+.wb-settings-pages > section,.wb-settings-body > .wb-settings-results { max-width:1120px; min-width:0; display:flex; flex-direction:column; gap:20px; }
+/* 路径、快捷键与任务表单用足横向空间，说明文字仍保持可读行长。 */
+.wb-settings-pages > section[data-settings-section="关于"] { max-width:800px; }
+.wb-settings-page-header p,.wb-settings-body .srow .d { max-width:70ch; }
 .wb-settings-pages > section[hidden] { display:none !important; }
 .wb-settings-pages > section:not([hidden]) { animation:settings-page-in var(--dur-page) var(--ease); }
 .wb-settings-page-header { display:flex; flex-direction:column; gap:7px; }
 .wb-settings-page-header h1 { font-size:18px; line-height:1.4; font-weight:600; color:hsl(var(--foreground)); }
 .wb-settings-page-header h1:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
 .wb-settings-page-header p { font-size:13px; line-height:1.6; color:hsl(var(--muted-foreground)); }
-.wb-settings-section-content { display:flex; flex-direction:column; gap:24px; min-width:0; }
+.wb-settings-section-content { display:flex; flex-direction:column; gap:20px; min-width:0; }
 .wb-settings-body .ui-card { padding:0; border:0; border-radius:0; box-shadow:none; background:transparent; }
 .settings-section-block { border-top:1px solid hsl(var(--border)); padding-top:20px; }
 .wb-settings-body .wb-setting-meta { flex-wrap:wrap; padding:0; gap:8px; font-size:12px; }
 .wb-settings-body .wb-setting-meta button { min-height:28px; border-radius:var(--r-control); font-size:12px; }
 .wb-settings-body h2 { font-size:14px; font-weight:600; line-height:1.5; }
-.wb-settings-body .srow { min-width:0; padding:16px 0; gap:16px; align-items:center; flex-wrap:wrap; scroll-margin:24px; }
+.wb-settings-body .srow { min-width:0; padding:12px 0; gap:16px; align-items:center; flex-wrap:wrap; scroll-margin:20px; }
 .wb-settings-body .srow > .grow { flex:1 1 220px; min-width:0; }
 .wb-settings-body .srow-heading { flex-wrap:wrap; row-gap:4px; }
 .wb-settings-body .srow .t { font-size:13px; line-height:1.5; }
@@ -79,14 +82,14 @@
   .wb-settings-body .wb-keymap-table tr[data-settings-item] { padding:10px 0; border-bottom:1px solid hsl(var(--border)); }
   .wb-settings-body .wb-keymap-table .settings-keybinding-actions { text-align:left; }
 }
-@media(max-width:900px) { .wb-settings-body { padding:22px 20px; } }
+@media(max-width:900px) { .wb-settings-body { padding:16px 20px; } }
 /* 窄窗口：左侧页签退化成横向/纵向堆叠，正文让出整宽。原先这三条写在工作台布局文件里，
    与本文件的设置页规则分家，改任一处都不确定是否生效 —— 收归这里（唯一真源）。 */
 @media(max-width:640px) {
   .wb-settings-layout { flex-direction:column; }
   .wb-settings-menu { width:100%; flex-direction:column; overflow:auto; padding:12px; border:0; }
   .wb-settings-menu button { white-space:nowrap; }
-  .wb-settings-body { padding:18px; }
+  .wb-settings-body { padding:16px; }
 }
 @media(prefers-reduced-motion:reduce) {
   .wb-settings-pages > section:not([hidden]) { animation:none; }

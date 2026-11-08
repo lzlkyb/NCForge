@@ -13,7 +13,7 @@ export function AllEditorTabs({ root, tabs, activePath, onSelect }: { root: stri
     const rank = (path: string) => { const index = recent?.indexOf(path) ?? -1; return index < 0 ? Number.MAX_SAFE_INTEGER : index; };
     return recentFirst ? found.sort((a, b) => rank(a.path) - rank(b.path)) : found;
   }, [tabs, query, dirtyOnly, recentFirst, recent]);
-  return <div className="wb-tabs-all-wrap"><Menu portal width="w-80" trigger={(open, toggle) => <button type="button" className="wb-icon-btn" aria-label="所有标签" aria-haspopup="menu" aria-expanded={open} title="所有标签：搜索、最近使用与未保存筛选" disabled={!tabs.length} onClick={toggle}><WorkspaceGlyph name="down" size={14} /></button>}>
+  return <div className="wb-tabs-all-wrap"><Menu portal width="w-80" trigger={(open, toggle) => <button type="button" className="wb-icon-btn" aria-label="所有标签" aria-haspopup="menu" aria-expanded={open} title="所有标签：搜索、最近使用与未保存筛选" disabled={!tabs.length} onClick={toggle}><WorkspaceGlyph name="down" size={16} /></button>}>
     {close => <>
       <div className="wb-tabs-filter">
         <input autoFocus aria-label="搜索打开的文件" value={query} onChange={event => setQuery(event.target.value)} placeholder="文件名或路径" />

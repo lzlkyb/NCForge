@@ -12,6 +12,7 @@ import { EditorGroupsPane } from "./EditorGroupsPane";
 import { EditorBanners } from "./EditorBanners";
 import { FileReadFeedback } from "./FileReadFeedback";
 import { EditorReadingLayout } from "./EditorReadingLayout";
+import type { EditorNavigation } from "./EditorNavRow";
 import { ShellStatusBar } from "./ShellStatusBar";
 import { NoWorkspace } from "./NoWorkspace";
 import { ExtractSqlDialog } from "../db/ExtractSqlDialog";
@@ -175,6 +176,20 @@ export function FilePaneSlots({
     <EditorGroupTools root={root} session={session} compiling={compiling} canCompile={active !== null && !active.virtual} onCompile={() => void compileActive()} />
   );
 
+  const navigation: EditorNavigation | null = active ? {
+    active, root, canBack, canForward, heavy: heavyFile,
+    onBack: session.goBack, onForward: session.goForward, onJumpHistory: session.goToHistory,
+    outlineOpen: panels.outline,
+    onToggleOutline: () => setPanels(p => ({ ...p, outline: !p.outline })),
+    history: {
+      open: panels.history,
+      onToggle: () => setPanels(p => ({ ...p, history: !p.history })),
+      onClose: () => setPanels(p => ({ ...p, history: false })),
+      dirty: isUnsaved(active),
+      onRestored: p => void session.reloadFile(p),
+    },
+  } : null;
+
   const editor = (
     <>
       <FileReadFeedback root={root} onOpen={p=>p.startsWith("jdt://")?session.openJdt(p,1):session.openFile(p)}/>
@@ -187,20 +202,8 @@ export function FilePaneSlots({
         onTogglePin={() => setPanels(p => ({ ...p, outlinePinned: !p.outlinePinned }))}
         onCloseOutline={() => setPanels(p => ({ ...p, outline: false }))}
         onJump={(line, column) => { if (active) void session.openAt(active.path, line, true, column); }}
-        nav={active ? {
-          active, root, canBack, canForward, heavy: heavyFile,
-          onBack: session.goBack, onForward: session.goForward, onJumpHistory: session.goToHistory,
-          outlineOpen: panels.outline,
-          onToggleOutline: () => setPanels(p => ({ ...p, outline: !p.outline })),
-          history: {
-            open: panels.history,
-            onToggle: () => setPanels(p => ({ ...p, history: !p.history })),
-            onClose: () => setPanels(p => ({ ...p, history: false })),
-            dirty: isUnsaved(active),
-            onRestored: p => void session.reloadFile(p),
-          },
-        } : null}>
-        <EditorGroupsPane root={root} tabs={tabs} session={session} reveal={reveal} tools={tabStrip} />
+        nav={navigation}>
+        <EditorGroupsPane root={root} tabs={tabs} session={session} reveal={reveal} tools={tabStrip} nav={navigation} />
       </EditorReadingLayout>
       <ExtractSqlDialog />
     </>

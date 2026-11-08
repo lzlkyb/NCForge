@@ -5,7 +5,7 @@ const base = "ui-button inline-flex shrink-0 items-center justify-center gap-1.5
 const variants = {
   default: "bg-primary text-primary-foreground hover:bg-primary/90",
   destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-  outline: "border border-input bg-transparent hover:bg-accent hover:text-accent-foreground hover:border-primary",
+  outline: "border border-input bg-transparent hover:bg-accent hover:text-accent-foreground",
   secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
   ghost: "hover:bg-accent hover:text-accent-foreground",
   link: "text-primary underline-offset-4 hover:underline",
@@ -58,7 +58,7 @@ export function Button({
         <svg aria-hidden="true" className="animate-spin shrink-0" viewBox="0 0 24 24" width={size === "sm" ? 14 : 16} height={size === "sm" ? 14 : 16} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
           <path d="M21 12a9 9 0 1 1-6.22-8.56" />
         </svg>
-        {size === "icon" ? <span className="sr-only">{loadingText ?? "处理中"}</span> : <span className="truncate">{loadingText ?? `${children}中…`}</span>}
+        {size === "icon" ? <span className="sr-only">{loadingText ?? "处理中"}</span> : <span className="truncate">{loadingText ?? "处理中…"}</span>}
       </span>}
     </button>
   );

@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Icon } from "../ui/icon";
 import { Menu, MenuItem } from "../ui/Menu";
+import { ServiceLogPurgeDialog } from "./ServiceLogPurgeDialog";
 import type { LogPanelForm } from "../../lib/logPanelStore";
 import type { LogCounts } from "../../lib/serverLog";
 import type { RefObject } from "react";
@@ -9,8 +11,13 @@ interface Props {
   matchIndex: number; matchCount: number; onMatch: (direction: number) => void; findRef: RefObject<HTMLInputElement>;
   previous: boolean; busy: string | null; selected: string; onCopy: () => void; onCopySelection: () => void;
   onClear: () => void; onExport: (complete: boolean) => void; onReload: () => void; onFollow: () => void;
+  /** 清空磁盘日志内容；`archive` 为真时连上次运行的归档一起删。 */
+  target: "middleware" | "client"; logSize: number; onPurge: (archive: boolean) => void;
 }
-export function ServiceLogToolbar({ form, set, counts, matchedCount, matchIndex, matchCount, onMatch, findRef, previous, busy, selected, onCopy, onCopySelection, onClear, onExport, onReload, onFollow }: Props) {
+export function ServiceLogToolbar({ form, set, counts, matchedCount, matchIndex, matchCount, onMatch, findRef, previous, busy, selected, onCopy, onCopySelection, onClear, onExport, onReload, onFollow, target, logSize, onPurge }: Props) {
+  // 确认框的开合状态放在工具栏：日志面板本身已有 7 个 useState/useEffect，
+  // 而门禁上限是 8。工具栏此前零状态，放这里不挤占面板余量。
+  const [purgeOpen, setPurgeOpen] = useState(false);
   return <>
     <div className="sc-log-toolbar">
       <div className="sc-log-levels" aria-label="日志级别">{([['all', '全部'], ['warn', '警告'], ['error', '错误']] as const).map(([level, label]) => <button type="button" key={level} aria-pressed={form.level === level} onClick={() => set({ level, scrollTop: 0 })}>{label}<span>{counts[level]}</span></button>)}</div>
@@ -28,6 +35,7 @@ export function ServiceLogToolbar({ form, set, counts, matchedCount, matchIndex,
           <MenuItem icon="upload" label="导出完整日志文件…" hint={previous ? '上次运行' : '本次运行快照'} disabled={!!busy} onClick={() => { close(); onExport(true); }} />
           <div className="sc-log-menu-divider" />
           <MenuItem icon="trash" label="清屏 · 磁盘文件保留" disabled={!!busy || previous} onClick={() => { close(); onClear(); }} />
+          <MenuItem icon="trash" label="清除日志文件…" hint={logSize > 0 ? "含磁盘内容" : "已是空的"} disabled={!!busy || previous} onClick={() => { close(); setPurgeOpen(true); }} />
           <MenuItem icon="refresh" label="重新读取当前日志" disabled={!!busy} onClick={() => { close(); onReload(); }} />
           <div className="sc-log-menu-divider" />
           <MenuItem label="增大字号" hint={`${form.fontSize}px`} disabled={form.fontSize >= 18} onClick={() => { close(); set({ fontSize: form.fontSize + 1 }); }} />
@@ -37,5 +45,6 @@ export function ServiceLogToolbar({ form, set, counts, matchedCount, matchIndex,
     </div>
     {form.filterOpen && <div className="sc-log-filter-row"><Icon name="sliders" size={12} /><input aria-label="过滤日志内容" placeholder="只显示包含此内容的日志" value={form.keyword} onChange={event => set({ keyword: event.target.value, scrollTop: 0 })} /><span>过滤会隐藏其他行</span><button type="button" className="sc-log-button" onClick={() => set({ level: 'all', keyword: '' })}>清除过滤</button></div>}
     {form.findOpen && <div className="sc-log-find-row"><Icon name="search" size={12} /><input ref={findRef} aria-label="查找日志内容" placeholder="查找，不隐藏上下文" value={form.query} onChange={event => set({ query: event.target.value, follow: false })} /><span className="sc-log-find-count">{!form.query.trim() ? '输入关键字' : matchCount ? `${matchIndex + 1} / ${matchCount} 行` : '无匹配'}</span><button type="button" className="sc-log-icon" aria-label="上一个匹配" disabled={!matchCount} onClick={() => onMatch(-1)}><Icon name="arrowUp" size={13} /></button><button type="button" className="sc-log-icon" aria-label="下一个匹配" disabled={!matchCount} onClick={() => onMatch(1)}><Icon name="stepInto" size={13} /></button><button type="button" className="sc-log-icon" aria-label="关闭查找" onClick={() => { set({ query: '', findOpen: false }); findRef.current?.blur(); }}><Icon name="close" size={13} /></button></div>}
+    <ServiceLogPurgeDialog open={purgeOpen} target={target} size={logSize} onCancel={() => setPurgeOpen(false)} onConfirm={archive => { setPurgeOpen(false); onPurge(archive); }} />
   </>;
 }

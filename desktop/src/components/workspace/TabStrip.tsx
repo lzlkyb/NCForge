@@ -7,6 +7,7 @@ import { AllEditorTabs } from "./AllEditorTabs";
 import { TaskMenu } from "./TaskMenu";
 import { Button } from "../ui/button";
 import { WorkspaceGlyph } from "./WorkspaceGlyph";
+import { Icon } from "../ui/icon";
 import { WorkspaceFileName } from "./WorkspaceFileName";
 import { toast } from "../ui/toast";
 import { tabPathLabels } from "../../lib/tabPathLabels";
@@ -174,6 +175,7 @@ export function TabStrip({
 
   return (
     <div className="wb-tabs" role="tablist" aria-label={groupId ? `${groupId === 'left' ? '左' : '右'}编辑器组文件` : '打开的文件'}>
+      <div className="wb-tabs-scroll">
       {tabs.map((t, i) => {
         const problem = marks.get(diagnosticPathKey(t.path));
         return (
@@ -250,9 +252,9 @@ export function TabStrip({
         </div>
         );
       })}
+      </div>
       {/* 标签太多时横向滚动条不好找：给一个「所有标签」下拉，键盘用户也能到这里 */}
       <AllEditorTabs root={root} tabs={tabs} activePath={activePath} onSelect={path => { onSelect(path); dock?.showCode(); }} />
-      <span className="wb-tabs-sp" />
       {/* 执行/分组工具与文件标签同一行：600px 高窗口净增约 36px 正文 */}
       {tools && <span className="wb-tabs-tools">{tools}</span>}
       {!compactTools && !dock?.documentOpen && <TaskMenu root={root} compiling={compiling} />}
@@ -266,7 +268,7 @@ export function TabStrip({
           title="用 ecj 编译当前文件所在模块，产物写到该模块的 classes 目录"
           onClick={onCompile}
         >
-          <WorkspaceGlyph name="play" size={12} />
+          <Icon name="hammer" size={16} />
           {compiling ? "编译中…" : "编译"}
         </Button>
       )}

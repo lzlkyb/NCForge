@@ -71,3 +71,26 @@ html[data-ui-density="comfortable"] :is(.vc-chip,.vc-group-head .vc-grp) { min-h
 @media(max-width:900px) { .vc-context-trigger span { display:none; }.vc-heading-rev { display:none; }.vc-head .vc-hint { display:none; } }
 @media(max-width:640px) { .app-shell .wb-toolbar-host .vc-head { gap:5px; }.vc-head .vc-btn { padding:0 7px; }.vc-head .vc-heading h1 { font-size:12px; }.vc-outcome { flex-wrap:wrap; }.vc-outcome-message { flex-basis:100%; }.vc-commit-overlay { padding:42px 8px 12px; } }
 @media(prefers-reduced-motion:reduce) { .vc-commit-drawer { transition:none; }.vc-review-document .animate-spin,.vc-head .animate-spin,.vc-chg .animate-spin { animation:none; } }
+
+/* Scope shell changes to the SVN document: other tools and code tabs keep their layout. */
+.wb-root[data-tool="svn"] .wb-document-surface>.wb-doc-tabs { display:none; }
+.wb-root[data-tool="svn"] .wb-toolbar-host .vc-mode { padding:0 8px 0 0;min-height:0;border:0;background:transparent;gap:2px; }
+.wb-root[data-tool="svn"] .wb-toolbar-host .vc-mode .vc-mode-btn { padding:0 8px;font-size:12px; }
+.wb-root[data-tool="svn"] .wb-toolbar-host .vc-head { flex:1;min-width:0; }
+.vc-chg .vc-chg-top { padding:8px 10px;gap:7px; }
+.vc-chg .vc-chg-foot { padding:4px 8px;gap:0; }
+.vc-focus-bar,.vc-focus-files { display:flex;align-items:center;gap:6px; }
+.vc-focus-bar { min-height:34px;justify-content:space-between;padding:2px 10px;border-bottom:1px solid hsl(var(--border)); }
+.vc-focus-search { padding:6px; }
+.vc-focus-search input { width:100%;padding:6px 8px;border:1px solid hsl(var(--input));border-radius:var(--r-control);background:hsl(var(--card));color:hsl(var(--foreground)); }
+.wb-root[data-tool="svn"]:has(.wb-document-surface:not([hidden]) .vc-review-document[data-focus]) .wb-toolbar { display:none; }
+.wb-root[data-tool="svn"]:has(.wb-document-surface:not([hidden]) .vc-review-document[data-focus]) .wb-layout { grid-template-columns:0 0 minmax(0,1fr)!important; }
+.wb-root[data-tool="svn"]:has(.wb-document-surface:not([hidden]) .vc-review-document[data-focus]) :is(.wb-tree,.wb-resize-x,.wb-side-backdrop) { visibility:hidden;pointer-events:none; }
+@media(max-width:1100px) { .wb-root[data-tool="svn"] .vc-heading { display:none; } }
+@media(max-width:640px) {
+  .wb-root[data-tool="svn"] .wb-toolbar { padding-inline:6px; }
+  .wb-root[data-tool="svn"] .vc-context-trigger { display:none; }
+  .wb-root[data-tool="svn"] .wb-toolbar-host .vc-mode .vc-mode-btn { padding:0 5px;font-size:11px;gap:4px; }
+  .wb-root[data-tool="svn"] .vc-head .vc-btn { padding:0 6px; }
+  .vc-focus-bar { padding-inline:6px; }
+}

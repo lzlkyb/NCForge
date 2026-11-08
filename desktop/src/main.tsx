@@ -20,6 +20,9 @@ import "./workbench-layout.css";
 // 材质在布局之后接入：外层实底不能遮住共享柔光背景。
 import "./glass-material.css";
 import "./interaction-density.css";
+import "./native-workbench.css";
+import "./selection-states.css";
+import "./content-first.css";
 
 // 启动即应用已保存的主题，避免首帧闪烁。
 document.documentElement.classList.toggle("dark", getStoredTheme() === "dark");

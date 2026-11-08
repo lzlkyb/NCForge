@@ -6,9 +6,10 @@ import type { MetaView } from "./MetaViewPanel";
 const MODES: [MetaMode, string][] = [["linked", "联动"], ["model", "模型"], ["fields", "字段"]];
 const TOOLS: [MetaView, string, string, IconName][] = [["compare", "对比", "字段差异", "copy"], ["history", "历史", "SVN", "clock"], ["generate", "生成中心", "DDL / VO", "code"], ["excel", "导入导出", "Excel", "file"], ["publish", "发布 POC", "实验功能", "upload"]];
 
-export function MetaToolbar({ state, mode, locked, dirty = false, resourceDrawer, inspectorDrawer, resourceOpen, inspectorOpen, onState, onResources, onInspector }: {
+export function MetaToolbar({ state, mode, locked, dirty = false, resourceDrawer, inspectorDrawer, resourceOpen, inspectorOpen, focused, onState, onResources, onInspector, onFocus }: {
   state: MetaEditorState; mode: MetaMode; locked: boolean; resourceDrawer: boolean; inspectorDrawer: boolean;
   resourceOpen: boolean; inspectorOpen: boolean;
+  focused: boolean; onFocus: () => void;
   dirty?: boolean;
   onState: (patch: Partial<MetaEditorState>) => void; onResources: () => void; onInspector: () => void;
 }) {
@@ -21,6 +22,10 @@ export function MetaToolbar({ state, mode, locked, dirty = false, resourceDrawer
     {tool && <span className="meta-active-tool">{tool[1]}</span>}
     {locked && <span className="meta-edit-status" role="status">编辑中 · 预览后保存</span>}
     <div className="meta-toolbar-spacer" />
+    <button type="button" className="meta-link" disabled={locked} onClick={onFocus} aria-pressed={focused}
+      aria-label={focused ? "退出元数据专注模式" : "进入元数据专注模式"} title={focused ? "恢复资源栏和属性栏" : "专注当前文档：收起资源栏和属性栏"}>
+      <Icon name={focused ? "collapse" : "expand"} size={14} />
+    </button>
     <Menu portal trigger={(open, toggle) => <button type="button" className="meta-link" disabled={locked} onClick={toggle} aria-expanded={open} aria-haspopup="menu"><Icon name="sliders" size={13} />工具<Icon name="chevronDown" size={11} /></button>}>
       {(close) => <>{TOOLS.map(([key, label, hint, icon]) => <MenuItem key={key} label={label} hint={dirty && ["generate", "excel", "publish"].includes(key) ? "先保存草稿" : hint} icon={icon} active={state.view === key}
         disabled={dirty && ["generate", "excel", "publish"].includes(key)} onClick={() => { onState({ view: key }); close(); }} />)}

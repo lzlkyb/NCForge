@@ -1,7 +1,7 @@
 import { useLayoutEffect, useState, memo } from "react";
 import type { StaticStatus } from "../../lib/types";
 import { railAriaKey, railKeyLabel } from "../../lib/keymap";
-import { PAGES, PAGES_BY_KEY } from "../../lib/pages";
+import { PAGES } from "../../lib/pages";
 import { Icon, type IconName } from "../ui/icon";
 import { Collapse } from "../ui/Collapse";
 import { UpdateBadge } from "./UpdateBadge";
@@ -11,7 +11,8 @@ import { UpdateRailItem } from "./UpdateRailItem";
  * 一项导航。数据源是 lib/pages.ts 的 PAGES（单一真源），本类型只是侧栏渲染所需的投影。
  *
  * `hosted`：这一页是不是「挂在工作台外壳里的工具页」（有 ActivityPanel、可以保活）。
- * `showInRail`：是否在主导航显示；`hotkey`：Ctrl+N 的数字，渲染成按钮上的 <kbd>。
+ * `showInRail`：是否在主导航显示；`hotkey`：Ctrl+N 的数字（只给读屏与快捷键表用，
+ * 侧栏本身不再把快捷键印在按钮上）。
  */
 export type NavItem = {
   key: string;
@@ -21,7 +22,7 @@ export type NavItem = {
   hosted?: boolean;
   /** 低频工具保留页面与既有快捷键，只从主导航隐藏。 */
   showInRail?: boolean;
-  /** Ctrl+N 的数字（由 PAGES.hotkey 派生，供 <kbd> 显示）。 */
+  /** Ctrl+N 的数字（由 PAGES.hotkey 派生）。 */
   hotkey?: number;
 };
 
@@ -47,10 +48,8 @@ export const WORKSPACE_NAV: NavItem[] = PAGES.filter((p) => p.key !== "settings"
   hotkey: p.hotkey,
 }));
 
-/** rail 按钮上的 Ctrl+N 提示（KBD 风格，内联 utility，不改 CSS）。 */
-const KBD = "ml-auto shrink-0 rounded border border-border bg-muted px-1 font-mono text-[10px] leading-4 text-muted-foreground";
-/** 设置行右端还有未读红点，kbd 不抢 margin-left:auto，紧跟文字即可。 */
-const KBD_INLINE = "shrink-0 rounded border border-border bg-muted px-1 font-mono text-[10px] leading-4 text-muted-foreground";
+/** rail 按钮上不再显示 Ctrl+N 提示：快捷键仍生效（HOTKEY_TABS），只是侧栏保持素净。 */
+
 
 /**
  * 左侧主导航栏（壳子版）：品牌区（拖拽区）+ 导航项 + 设置入口（带更新未读红点）
@@ -86,7 +85,6 @@ function SideNavImpl({
   const items = (navItems ?? WORKSPACE_NAV).filter((item) => item.showInRail !== false);
   // 隐藏入口（logs）不再让一个看不见的页面独占 Ctrl+4：在「更多」分组露出（P1-16）。
   const moreItems = PAGES.filter((p) => p.railMore);
-  const settingsHotkey = PAGES_BY_KEY.settings?.hotkey;
 
   // 状态口径：startupError 升红；running 但业务报异常 = warn。壳子只演示范式。
   const startupError = status?.startupError ?? null;
@@ -139,7 +137,6 @@ function SideNavImpl({
           >
             <Icon name={item.icon} size={collapsed ? 19 : 16} className="app-side-icon" />
             <span className="app-side-label">{collapsed && item.key === "svn" ? "版本" : collapsed && item.key === "logs" ? "日志" : item.label}</span>
-            {!collapsed && item.hotkey != null && <kbd className={KBD}>Ctrl+{item.hotkey}</kbd>}
           </button>
         ))}
       </nav>
@@ -162,7 +159,6 @@ function SideNavImpl({
             >
               <Icon name={p.icon} size={collapsed ? 19 : 16} className="app-side-icon" />
               <span className="app-side-label">{collapsed ? "日志" : p.label}</span>
-              {!collapsed && p.hotkey != null && <kbd className={KBD}>Ctrl+{p.hotkey}</kbd>}
             </button>
           ))}
         </div>
@@ -187,7 +183,6 @@ function SideNavImpl({
           >
             <Icon name="settings" size={16} className="app-side-icon" />
             <span className="app-side-label">设置</span>
-            {!collapsed && settingsHotkey != null && <kbd className={KBD_INLINE}>Ctrl+{settingsHotkey}</kbd>}
             {/* changelog-dot：沿用更新未读红点的脉冲动画 + hover 放大。
                 无未读时也渲染（--off 缩为零宽），出现/消失都是 scale 过渡。 */}
             <span

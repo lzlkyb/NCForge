@@ -14,7 +14,7 @@ describe("SVN 差异阅读偏好与差异统计", () => {
 
   it("无效持久化值不进入 Monaco 配置", () => {
     localStorage.setItem("ncforge.svn.diff:c:/prefs/invalid", JSON.stringify({ layout: "bad", wrap: "yes", ignoreWhitespace: "false", fontSize: 1 }));
-    expect(getSvnDiffPrefs("C:/prefs/invalid")).toEqual({ layout: "auto", wrap: true, ignoreWhitespace: false, fontSize: 12 });
+    expect(getSvnDiffPrefs("C:/prefs/invalid")).toEqual({ layout: "auto", wrap: true, ignoreWhitespace: false, fontSize: 12, collapseUnchanged: true });
   });
 
   it("纯新增或删除不会把空的另一侧计成一行", () => {

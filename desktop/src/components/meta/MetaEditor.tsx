@@ -3,6 +3,7 @@ import type { BmfDetail, BmfIssue } from "../../lib/bmf";
 import { locateMetaIssue, selectedMetaEntity, semanticPane, type MetaCanvasState, type MetaEditorState, type MetaMode, type MetaPane, type MetaSelection } from "../../lib/metaEditor";
 import type { MetaStage } from "../../lib/metaDraft";
 import { Icon } from "../ui/icon";
+import { Menu, MenuItem } from "../ui/Menu";
 import { MetaCanvas } from "./MetaCanvas";
 import { MetaEditorDialogs, type MetaEditSession } from "./MetaEditorDialogs";
 import { MetaEditDialog } from "./MetaEditDialog";
@@ -85,6 +86,12 @@ export function MetaEditor({ detail, sourceSha = detail.sha256, state, mode, iss
   </> : <MetaInspector detail={detail} sourceSha={sourceSha} selection={state.selection} issues={issues} onEdit={begin} onEdited={edited} onSelect={select} onStage={onStage} locked={readBusy}
     onEditingChange={setSubEditing} onOpenRefs={onOpenRefs} onReload={reload} />;
 
+  const entityControl = <div className="meta-entity-switch"><label>实体<select aria-label="当前实体" value={entity?.id ?? ""} disabled={locked} onChange={(e) => select({ kind: "entity", entityId: e.target.value })}>
+    {!detail.entities.length && <option value="">没有实体</option>}{detail.entities.map((e) => <option key={e.id} value={e.id}>{e.displayName || e.name} · {e.name}{e.isPrimary ? " · 主" : ""}</option>)}
+    </select></label><Menu portal trigger={(open, toggle) => <button type="button" className="meta-link" disabled={locked} onClick={toggle} aria-label="实体操作" title="新增实体 / 实体属性" aria-haspopup="menu" aria-expanded={open}><Icon name="more" size={14} /></button>}>
+      {close => <><MenuItem label="新增实体" icon="plus" onClick={() => { close(); begin("addEntity"); }} />
+        <MenuItem label="实体属性" icon="sliders" disabled={!entity} onClick={() => { close(); if (entity) { select({ kind: "entity", entityId: entity.id }); inspect(); } }} /></>}
+    </Menu></div>;
   return <div className={`meta-editor meta-mode-${mode}`} data-editing={!!edit || undefined}>
     <div className="meta-editor-content">
       {mode !== "fields" && <div className="meta-model-region" style={mode === "linked" ? { flexBasis: `${state.split * 100}%` } : undefined}>
@@ -95,11 +102,8 @@ export function MetaEditor({ detail, sourceSha = detail.sha256, state, mode, iss
       {mode !== "model" && <div className="meta-data-region">
         <nav className="meta-data-tabs" aria-label="元数据内容">{PANES.map(([key, title]) => <button type="button" key={key} disabled={locked} className={state.pane === key ? "is-active" : ""} aria-pressed={state.pane === key} onClick={() => pane(key)}>{title}{key === "issues" && issues.length > 0 && <span>{issues.length}</span>}</button>)}</nav>
         {state.pane === "fields" && <>
-          <div className="meta-entity-switch"><label>实体<select aria-label="当前实体" value={entity?.id ?? ""} disabled={locked} onChange={(e) => select({ kind: "entity", entityId: e.target.value })}>
-            {!detail.entities.length && <option value="">没有实体</option>}{detail.entities.map((e) => <option key={e.id} value={e.id}>{e.displayName || e.name} · {e.name}{e.isPrimary ? " · 主" : ""}</option>)}
-          </select></label><button type="button" className="meta-link" disabled={locked} onClick={() => begin("addEntity")}><Icon name="plus" size={12} />实体</button>
-          <button type="button" className="meta-link" disabled={!entity || locked} onClick={() => { if (entity) { select({ kind: "entity", entityId: entity.id }); inspect(); } }}>实体属性</button></div>
-          {entity ? <MetaFieldTable entity={entity} selectedAttrId={attrId} filter={state.filter} scroll={state.fieldScroll} locked={locked}
+          {!entity && <div className="meta-fields-head">{entityControl}</div>}
+          {entity ? <MetaFieldTable entity={entity} entityControl={entityControl} selectedAttrId={attrId} filter={state.filter} scroll={state.fieldScroll} locked={locked}
             onFilter={(filter) => onState({ filter, fieldScroll: { top: 0, left: 0 } })} onSelect={(id) => select({ kind: "attr", entityId: entity.id, attrId: id })}
             onInspect={inspect} onEdit={editField} onAdd={() => begin("addField")} onScroll={rememberScroll} detail={detail} onStage={onStage}
             selectedIds={state.selectedFields} onSelectedIds={(selectedFields) => onState({ selectedFields })} onEditingChange={setSubEditing}

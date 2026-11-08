@@ -122,7 +122,7 @@ export function LogDetail({
         </div>
       )}
 
-      <div className="lg-meta">
+      <details className="lg-record-metadata"><summary>记录详情 · {entry.ts || entry.logger}</summary><div className="lg-meta">
         <Meta label="时间" value={entry.ts} />
         <Meta label="来源" value={`${entry.logger} · ${entry.file}:${entry.lineNo}`} />
         <Meta label="线程" value={entry.thread} />
@@ -135,7 +135,7 @@ export function LogDetail({
             value={`${entry.costMs}ms${entry.rowCount !== null ? ` · ${entry.rowCount} 行` : ""}`}
           />
         )}
-      </div>
+      </div></details>
 
       <pre className="lg-msg">{entry.msg || "(无消息)"}</pre>
 

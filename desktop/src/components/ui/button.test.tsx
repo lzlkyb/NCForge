@@ -19,6 +19,12 @@ afterEach(() => {
 });
 
 describe("公共操作按钮", () => {
+  it("图标与文字混排时使用可读的默认加载文案", () => {
+    act(() => root.render(<Button isLoading><svg aria-hidden="true" />写入文件</Button>));
+    expect(host.querySelector('[role="status"]')?.textContent).toBe("处理中…");
+    expect(host.textContent).not.toContain("[object Object]");
+  });
+
   it("长标签在忙碌切换时保留，忙碌期间阻止重复操作，结束后恢复", () => {
     const click = vi.fn();
     const render = (busy: boolean) => act(() => root.render(

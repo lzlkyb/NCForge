@@ -23,20 +23,29 @@ export function ItemDetail({
   const pair = pairState(item);
   // 只有「要查 jar 判层」的 java 才有层可选：upm / hotwebs 是整文件替换
   const canForce = item.section !== "upm" && item.section !== "hotwebs" && item.pkgRel.endsWith(".java");
+  const needsAttention = pair.kind !== "ok" || item.blocked || item.problems.length > 0 || override !== null;
+  const problemTitle = item.problems.map((p) => p.text).join("；");
   return (
-    <div className="pk-detail">
-      <h4>
+    // 同一文件刷新保留手动开合；切换文件按其异常/改判状态重新给出默认值。
+    <details key={item.path} className="pk-detail" open={needsAttention}>
+      <summary className="pk-detail-summary">
         <span className="pk-badge" data-st="M">
           {item.section === "upm" ? "U" : item.section === "hotwebs" ? "W" : "J"}
         </span>
         <span className="pk-detail-name" title={item.label}>
           {item.label}
         </span>
-        <span className="pk-sp" />
+        <span className="pk-detail-module" title={item.module}>{item.module}</span>
         <span className="pk-lay" data-l={layerText(item) === "hyext" ? "hy" : "std"}>
           {layerText(item)}
         </span>
-      </h4>
+        <span className="pk-detail-pair" data-k={pair.kind} title={pair.title}>{pair.text}</span>
+        {(item.blocked || item.problems.length > 0) && <span className="pk-detail-issue" data-tone={item.blocked || item.problems.some((p) => p.level === "error") ? "bad" : "warn"} title={problemTitle}>
+          {item.blocked ? "阻断" : `${item.problems.length} 项问题`}
+        </span>}
+        {override !== null && <span className="pk-detail-override" title={`手动指定为${override === "hy" ? "hyext" : "标准层"}`}>手动改判</span>}
+        <span className="pk-detail-disclosure">详情<Icon name="chevronDown" size={13} /></span>
+      </summary>
 
       <dl className="pk-map">
         <dt>模块</dt>
@@ -102,6 +111,6 @@ export function ItemDetail({
           </span>
         </div>
       )}
-    </div>
+    </details>
   );
 }

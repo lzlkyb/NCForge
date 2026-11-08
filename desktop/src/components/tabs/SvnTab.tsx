@@ -5,7 +5,6 @@ import { SvnPageSwitch } from "../svn/SvnPageSwitch";
 import { SvnReview } from "../svn/SvnReview";
 import { PatchWorkspace } from "./PatchWorkspace";
 import { useSvnView } from "../../lib/svnSession";
-import { svnSession } from "../../lib/svnSession";
 
 /**
  * 版本控制页。
@@ -37,11 +36,9 @@ export function SvnTab({
 
   return (
     <div className="vc-page" data-page={page}>
-      <DockRegion region="sidebar">
-        <SvnPageSwitch page={page} />
-      </DockRegion>
+      <DockRegion region="toolbar"><SvnPageSwitch page={page} /></DockRegion>
       {page === "patch"
-        ? <><DockRegion region="toolbar"><button type="button" className="pk-btn vc-back-review" onClick={() => svnSession.set({page:"review"})}>返回审查</button></DockRegion><PatchWorkspace onNavigate={onNavigate} /></>
+        ? <PatchWorkspace onNavigate={onNavigate} />
         : <SvnReview onOpenFile={onOpenFile} />}
     </div>
   );

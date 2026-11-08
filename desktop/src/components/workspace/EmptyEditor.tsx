@@ -22,31 +22,40 @@ export function EmptyEditor({ root, onOpen }: { root: string; onOpen: (path: str
   return (
     <div className="wb-editor-empty">
       <div className="wb-empty-box">
-        <h2>{baseName(root)}</h2>
-        <p className="wb-empty-sub">{root}</p>
-        {recent.length > 0 && (
-          <>
-            <div className="wb-empty-h">最近打开</div>
+        <div className="wb-empty-head">
+          <div className="wb-empty-project">
+            <h2>{baseName(root)}</h2>
+            <p className="wb-empty-sub" title={root}>{root}</p>
+          </div>
+          <button type="button" className="wb-empty-go" onClick={() => openPalette("file")}>
+            <Icon name="search" size={16} />
+            转到文件…
+          </button>
+        </div>
+        <div className="wb-empty-layout">
+          <section className="wb-empty-section" aria-label="最近打开的文件">
+            <h3 className="wb-empty-h">最近打开</h3>
             {recent.map((p) => (
-              <button key={p} type="button" className="wb-empty-row" onClick={() => onOpen(p)} title={p}>
-                <Icon name="file" size={14} />
-                <span>{baseName(p)}</span>
-                <span className="wb-empty-mu">{rel(p)}</span>
+              <button key={p} type="button" className="wb-empty-row wb-empty-file" onClick={() => onOpen(p)} title={p}>
+                <Icon name="file" size={16} />
+                <span className="wb-empty-file-meta">
+                  <span className="wb-empty-name">{baseName(p)}</span>
+                  <span className="wb-empty-mu">{rel(p) || "工作区根目录"}</span>
+                </span>
               </button>
             ))}
-          </>
-        )}
-        <div className="wb-empty-h">快捷键</div>
-        {keys.map(([label, k]) => (
-          <div key={label} className="wb-empty-row wb-empty-key">
-            {label}
-            <kbd>{k}</kbd>
-          </div>
-        ))}
-        <button type="button" className="wb-empty-go" onClick={() => openPalette("file")}>
-          <Icon name="search" size={13} />
-          转到文件…
-        </button>
+            {recent.length === 0 && <p className="wb-empty-note">暂无最近文件。从左侧资源树打开文件，或使用“转到文件”。</p>}
+          </section>
+          <section className="wb-empty-section" aria-label="编辑器快捷键">
+            <h3 className="wb-empty-h">快捷键</h3>
+            {keys.map(([label, k]) => (
+              <div key={label} className="wb-empty-row wb-empty-key">
+                {label}
+                <kbd>{k}</kbd>
+              </div>
+            ))}
+          </section>
+        </div>
       </div>
     </div>
   );

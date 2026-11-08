@@ -34,8 +34,8 @@ export function RightPane({
   onMarkAndNext,
   onResolve,
   onLater,
-  picked,
-  onTogglePicked,
+  focused,
+  onFocus,
   disabled = false,
 }: {
   file: ChangeItem | null;
@@ -48,8 +48,8 @@ export function RightPane({
   onMarkAndNext: () => void;
   onResolve: (choice: "mine" | "theirs" | "base") => void;
   onLater: () => void;
-  picked?: boolean;
-  onTogglePicked?: () => void;
+  focused?: boolean;
+  onFocus?: () => void;
   disabled?: boolean;
 }) {
   const root = useWorkspaceRoot(); const epoch = workspaceEpoch();
@@ -251,8 +251,8 @@ export function RightPane({
       onShowLog={() => onMode("log")}
       onShowBlame={() => onMode("blame")}
       onMarkAndNext={onMarkAndNext}
-      picked={picked}
-      onTogglePicked={onTogglePicked}
+      focused={focused}
+      onFocus={onFocus}
       disabled={disabled || diff.isFetching}
     />
   );

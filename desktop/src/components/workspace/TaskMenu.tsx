@@ -1,6 +1,7 @@
 import { Menu, MenuItem } from "../ui/Menu";
 import { Button } from "../ui/button";
 import { WorkspaceGlyph } from "./WorkspaceGlyph";
+import { Icon } from "../ui/icon";
 import { useOperations } from "../../lib/operations";
 import { listTasks, runTask, STEP_SHORT } from "../../lib/ncTasks";
 
@@ -20,13 +21,15 @@ export function TaskMenu({ root, compiling }: { root: string; compiling: boolean
           variant="outline"
           className="wb-task-btn"
           disabled={compiling || running || !root}
+          aria-label="运行 NC 任务"
+          aria-haspopup="menu"
           aria-expanded={open}
           title="运行 NC 任务（编译 / 投送 / 重启 / 补丁）"
           onClick={toggle}
         >
-          <WorkspaceGlyph name="play" size={12} />
-          任务
-          <WorkspaceGlyph name="down" size={12} />
+          <Icon name="terminal" size={16} />
+          <span className="wb-task-label">任务</span>
+          <WorkspaceGlyph name="down" size={12} className="wb-task-chevron" />
         </Button>
       )}
     >

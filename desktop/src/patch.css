@@ -698,7 +698,6 @@
 .pk-detail {
   border-top: 1px solid hsl(var(--border));
   background: hsl(var(--card));
-  padding: 10px 12px;
   flex-shrink: 0;
   max-height: 232px;
   overflow: auto;
@@ -707,18 +706,48 @@
   display: flex;
   align-items: center;
   gap: 7px;
+  padding: 10px 12px;
   font-size: 11px;
   color: hsl(var(--muted-foreground));
 }
-.pk-detail h4 {
+.pk-detail-summary {
   font-size: 11px;
   font-weight: 650;
-  margin-bottom: 7px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
+  min-height: 36px;
+  padding: 6px 12px;
+  cursor: pointer;
+  list-style: none;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: hsl(var(--card));
 }
+.pk-detail-summary::-webkit-details-marker { display: none; }
+.pk-detail-summary:hover { background: hsl(var(--secondary)); }
+.pk-detail-summary:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }
+details.pk-detail > :not(summary) { margin-inline: 12px; }
+details.pk-detail > :last-child { margin-bottom: 10px; }
+.pk-detail .pk-note { flex-wrap: wrap; overflow-wrap: anywhere; }
+.pk-detail-module {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: hsl(var(--muted-foreground));
+  font-weight: 400;
+}
+.pk-detail-pair, .pk-detail-issue, .pk-detail-override, .pk-detail-disclosure { flex-shrink: 0; }
+.pk-detail-issue[data-tone="bad"] { color: hsl(var(--destructive-ink)); }
+.pk-detail-issue[data-tone="warn"], .pk-detail-override { color: hsl(var(--warning-ink)); }
+.pk-detail-disclosure { display: inline-flex; align-items: center; gap: 4px; }
+.pk-detail[open] > .pk-detail-summary .pk-detail-disclosure > svg { transform: rotate(180deg); }
 .pk-detail-name {
+  flex: 1;
+  min-width: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -741,10 +770,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pk-map dd[data-k="miss"] {
+.pk-map dd[data-k="miss"], .pk-detail-pair[data-k="miss"] {
   color: hsl(var(--destructive-ink));
 }
-.pk-map dd[data-k="old"] {
+.pk-map dd[data-k="old"], .pk-detail-pair[data-k="old"] {
   color: hsl(var(--warning-ink));
 }
 .pk-problems {

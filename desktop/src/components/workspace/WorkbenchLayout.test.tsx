@@ -48,11 +48,12 @@ describe("工作台任务布局", () => {
     act(() => setSidebarView("search")); expect(width()).toBe(320);
     grow(); expect(width()).toBe(330);
     act(() => setSidebarView("files")); expect(width()).toBe(250);
-    act(() => renderFrame("db")); expect(width()).toBe(240);
-    grow(); expect(width()).toBe(250);
+    // 数据库对象侧栏默认 236px（方案定的口径，比通用 240 窄一点给 SQL 与网格让位）
+    act(() => renderFrame("db")); expect(width()).toBe(236);
+    grow(); expect(width()).toBe(246);
     act(() => renderFrame()); expect(width()).toBe(250);
     act(() => setSidebarView("search")); expect(width()).toBe(330);
-    expect(getWorkbenchLayout().sides).toEqual({ files: 250, search: 330, db: 250 });
+    expect(getWorkbenchLayout().sides).toEqual({ files: 250, search: 330, db: 246 });
   });
   it("启动后第一次 Enter 不复位尺寸，连续两次 Enter 才复位", () => {
     updateWorkbenchLayout({ sides: { files: 280 } });

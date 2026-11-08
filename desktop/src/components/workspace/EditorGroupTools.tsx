@@ -15,12 +15,17 @@ export function EditorGroupTools({ root, session, compiling, canCompile, onCompi
   const groups = useWorkspaceSelector(s => s.editorGroups), split = !!groups?.right.length;
   const focus = (group: EditorGroupId) => { setSession({ editorGroups: old => ({ ...(old ?? emptyEditorGroups()), focused: group }) }); const path = getSession().activePath; if (path) session.selectTab(path); };
   return <div className="wb-editor-tools" aria-label="代码执行与分组工具">
-    {split ? <div className="wb-group-switch" aria-label="活动编辑器组">
+    {split ? <div className="wb-group-switch" role="group" aria-label="活动编辑器组">
       {([['left', '左组'], ['right', '右组']] as const).map(([id, name]) => <button key={id} type="button" disabled={!groups?.[id].length} aria-pressed={groups?.focused === id} title={`聚焦${name} · ${tabKeyLabel(id)}`} onClick={() => focus(id)}>{name}</button>)}
     </div> : <span className="wb-editor-tools-label">代码</span>}
     <span className="wb-editor-tools-spacer" />
-    <Menu portal width="w-64" trigger={(open, toggle) => <button type="button" className="wb-outline-btn" aria-label="编辑器组操作" aria-expanded={open} aria-haspopup="menu" onClick={toggle}><Icon name="panel" size={13} />分组</button>}>
+    <Menu portal width="w-64" trigger={(open, toggle) => <button type="button" className="wb-outline-btn" aria-label="编辑器组操作" title="编辑器分组与布局" aria-expanded={open} aria-haspopup="menu" onClick={toggle}><Icon name="columns" size={16} /><span className="wb-group-tool-label">分组</span></button>}>
       {close => <>
+        {split && <>
+          <MenuItem label="聚焦左编辑器组" disabled={!groups?.left.length} active={groups?.focused === "left"} onClick={() => { close(); focus("left"); }} />
+          <MenuItem label="聚焦右编辑器组" disabled={!groups?.right.length} active={groups?.focused === "right"} onClick={() => { close(); focus("right"); }} />
+          <div className="wb-menu-separator" role="separator" />
+        </>}
         <MenuItem label="在右组打开当前文件" disabled={!getSession().activePath} onClick={() => { close(); const path = getSession().activePath; if (path) void session.openSplit(path); }} />
         <MenuItem label="交换左右编辑器组" disabled={!split} onClick={() => { close(); swapGroupNavigation(); swapGroupMru(); setSession({ tabs: tabs => tabs.map(tab => tab.previewGroup ? { ...tab, previewGroup: tab.previewGroup === "left" ? "right" : "left" } : tab), editorGroups: old => swapEditorGroups(old ?? emptyEditorGroups()) }); }} />
         <MenuItem label="恢复等宽比例" disabled={!split} onClick={() => { close(); setSession({ editorGroups: old => ({ ...(old ?? emptyEditorGroups()), ratio: .5 }) }); }} />
@@ -28,6 +33,6 @@ export function EditorGroupTools({ root, session, compiling, canCompile, onCompi
       </>}
     </Menu>
     <TaskMenu root={root} compiling={compiling} />
-    <Button size="sm" variant="outline" className="wb-compile-btn" disabled={!canCompile || compiling} isLoading={compiling} loadingText="编译中" onClick={onCompile} title="编译活动编辑器组文件所属模块"><Icon name="play" size={12} />{compiling ? "编译中…" : "编译"}</Button>
+    <Button size="sm" variant="outline" className="wb-compile-btn" disabled={!canCompile || compiling} isLoading={compiling} loadingText="编译中" onClick={onCompile} title="编译活动编辑器组文件所属模块"><Icon name="hammer" size={16} />{compiling ? "编译中…" : "编译"}</Button>
   </div>;
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -64,6 +64,20 @@ const computed = async (value = changes) => { await act(async () => { mocks.chan
 const button = (text: string) => [...host.querySelectorAll("button")].find(e => e.textContent?.includes(text))!;
 
 describe("SVN 只读差异比较器", () => {
+  it("StrictMode 的预清理不缓存空初始视图，首次打开仍定位首处", async () => {
+    await act(async()=>root.render(<StrictMode><SvnDiffEditor original="old" modified="new" sourceKey="strict-first-open"/></StrictMode>));
+    await computed();
+    expect(mocks.restore).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("第 1 / 2 处");
+  });
+  it("初始空差异事件不抢先定位，等待 worker 完成后定位首处", async () => {
+    await render("initial-worker-result");
+    await act(async () => { mocks.changes = []; mocks.changed(); });
+    expect(mocks.reveal).not.toHaveBeenCalled();
+    await computed();
+    expect(mocks.reveal).toHaveBeenLastCalledWith(1);
+    expect(host.textContent).toContain("第 1 / 2 处");
+  });
   it("计算挂起时卸载保留模型，让已排队的 worker 同步先启动，收尾后再释放", async () => {
     await render("pending-disposal");
     const pair = mocks.models.slice();
@@ -104,11 +118,11 @@ describe("SVN 只读差异比较器", () => {
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ readOnly: true, originalEditable: false }));
     await computed();
     expect(host.textContent).toContain("+3"); expect(host.textContent).toContain("−2");
-    expect(host.textContent).toContain("尚未定位 · 2 处");
+    expect(host.textContent).toContain("第 1 / 2 处");
+    expect(mocks.reveal).toHaveBeenLastCalledWith(1);
     expect(button("上一处").disabled).toBe(true);
     await act(async () => button("下一处").click());
-    expect(host.textContent).toContain("第 1 / 2 处");
-    await act(async () => button("下一处").click());
+    expect(host.textContent).toContain("第 2 / 2 处");
     expect(mocks.position).toHaveBeenLastCalledWith({ lineNumber: 4, column: 1 });
     expect(button("下一处").disabled).toBe(true);
     expect(button("上一处").disabled).toBe(false);
@@ -124,9 +138,12 @@ describe("SVN 只读差异比较器", () => {
 
   it("改变阅读偏好只更新选项，空白重算期间不展示旧统计", async () => {
     await render("preferences", "C:/compare/prefs"); await computed();
-    await act(async () => setSvnDiffPrefs("C:/compare/prefs", { fontSize: 14, wrap: false, layout: "inline" }));
+    const reveals = mocks.reveal.mock.calls.length;
+    await act(async () => setSvnDiffPrefs("C:/compare/prefs", { fontSize: 14, wrap: false, layout: "inline", collapseUnchanged: false }));
     expect(mocks.create).toHaveBeenCalledTimes(1); expect(mocks.models).toHaveLength(2);
     expect(mocks.options).toHaveBeenLastCalledWith(expect.objectContaining({ fontSize: 14, lineHeight: 22, diffWordWrap: "off", renderSideBySide: false }));
+    expect(mocks.options).toHaveBeenLastCalledWith(expect.objectContaining({ hideUnchangedRegions: expect.objectContaining({ enabled: false }) }));
+    expect(mocks.reveal).toHaveBeenCalledTimes(reveals);
     await act(async () => setSvnDiffPrefs("C:/compare/prefs", { ignoreWhitespace: true }));
     expect(host.textContent).toContain("计算差异中");
     expect(host.textContent).toContain("已忽略行首尾空白");
@@ -142,11 +159,11 @@ describe("SVN 只读差异比较器", () => {
     await render("restore-b");
     initial.forEach(model => expect(model.dispose).toHaveBeenCalledTimes(1));
     await computed();
-    expect(host.textContent).toContain("尚未定位");
+    expect(host.textContent).toContain("第 1 / 2 处");
     await render("restore-a"); await computed();
     expect(mocks.create).toHaveBeenCalledTimes(1);
     expect(mocks.restore).toHaveBeenCalledWith(mocks.saved);
-    expect(host.textContent).toContain("第 1 / 2 处");
+    expect(host.textContent).toContain("第 2 / 2 处");
     await act(async () => root.unmount());
     mocks.models.forEach(model => expect(model.dispose).toHaveBeenCalledTimes(1));
     expect(mocks.dispose).toHaveBeenCalledTimes(1); expect(mocks.detach).toHaveBeenCalledTimes(1);
@@ -159,7 +176,8 @@ describe("SVN 只读差异比较器", () => {
     await render("responsive", "C:/compare/narrow");
     await act(async () => resize([{ contentRect: { width: 450 } }]));
     expect(mocks.options).toHaveBeenLastCalledWith(expect.objectContaining({ renderSideBySide: false }));
-    expect(host.querySelector("select")?.textContent).toContain("自动 · 单栏");
+    await act(async () => button("显示设置").click());
+    expect(document.querySelector('[aria-label="差异显示方式"]')?.textContent).toContain("自动 · 单栏");
     await act(async () => setSvnDiffPrefs("C:/compare/narrow", { layout: "sideBySide" }));
     await act(async () => resize([{ contentRect: { width: 300 } }]));
     expect(mocks.options).toHaveBeenLastCalledWith(expect.objectContaining({ renderSideBySide: true }));

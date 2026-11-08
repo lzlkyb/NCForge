@@ -32,6 +32,21 @@ beforeEach(async () => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
+it("合并后的实体选择仍切换字段，实体操作菜单仍能打开属性检查器", async () => {
+  drawer = true;
+  await act(async () => render());
+  const select = host.querySelector<HTMLSelectElement>('.meta-fields-head [aria-label="当前实体"]')!;
+  await act(async () => { select.value = "body"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  expect(ui.selection).toEqual({ kind: "entity", entityId: "body" });
+  expect(host.querySelector('.meta-field-table [data-attr="item"]')).not.toBeNull();
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="实体操作"]')!.click());
+  const properties = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent?.includes("实体属性"))!;
+  await act(async () => properties.click());
+  expect(open).toBe(true);
+  expect(host.querySelector('.meta-inspector-panel[role="dialog"]')).not.toBeNull();
+  expect(ui.selection).toEqual({ kind: "entity", entityId: "body" });
+});
+
 it("图、表和检查器联动，选关系后两端与来源字段保持一致", async () => {
   await act(async () => host.querySelector<HTMLElement>('.meta-field-table [data-attr="amount"]')!.click());
   expect(host.querySelector('.meta-canvas-field[data-attr="amount"]')!.getAttribute("aria-pressed")).toBe("true");

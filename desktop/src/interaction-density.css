@@ -24,7 +24,6 @@ html[data-ui-density="comfortable"] .app-shell .wb-settings-nav button { padding
   .vc-file-head :is(.vc-path,.vc-url) { min-width:0; overflow-wrap:anywhere; }
 }
 @container workbench-document (max-width:440px) {
-  .dbx-sqlbar .k { display:none; }
   .lg-head { gap:6px; padding-inline:10px; }
 }
 @media(max-width:650px) {

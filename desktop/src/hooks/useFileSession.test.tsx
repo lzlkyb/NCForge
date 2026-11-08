@@ -14,6 +14,9 @@ import { EditorGroupsPane } from "../components/workspace/EditorGroupsPane";
 import { useTabSessionKeys } from "./useTabSession";
 vi.mock("../components/workspace/EditorPane", () => ({ EditorPane: () => null }));
 vi.mock("../components/workspace/EmptyEditor", () => ({ EmptyEditor: () => null }));
+// 阅读组件另有测试；会话并发测试不应初始化真实 Monaco 或剪贴板贡献。
+vi.mock("../components/workspace/Breadcrumb", () => ({ Breadcrumb: () => null }));
+vi.mock("../components/workspace/EditorNavRow", () => ({ EditorNavRow: () => null }));
 vi.mock("../components/workspace/TabStrip", () => ({ TabStrip: ({ tabs, groupId, onSelect }: { tabs: { path: string }[]; groupId: string; onSelect: (path: string) => void }) => <div data-tab-group={groupId}>{tabs.map(tab => <button key={tab.path} data-path={tab.path} onClick={() => onSelect(tab.path)}>{tab.path}</button>)}</div> }));
 const h=vi.hoisted(()=>({readFile:vi.fn(),openModel:vi.fn(),closeModel:vi.fn()}));
 vi.mock("../lib/editorStore",()=>({openModel:h.openModel,closeModel:h.closeModel,renameModel:vi.fn(),getModel:()=>undefined}));

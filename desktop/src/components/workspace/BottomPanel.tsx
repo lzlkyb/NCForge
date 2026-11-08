@@ -92,7 +92,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
         <PanelTabs tab={tab} onTab={onTab} errors={errors} paused={debug.anyPaused} />
         <span className="wb-status-sp" />
         {tab === "svc" && <DevelopmentFlowControl compileAll={compileAll} onChanged={() => { void queryClient.invalidateQueries({ queryKey: ["server-status"] }); void queryClient.invalidateQueries({ queryKey: ["client-status"] }); void queryClient.invalidateQueries({ queryKey: ["deploy-status"] }); }} />}
-        <button type="button" className="wb-status-btn sc-expand-button" aria-pressed={expanded} onClick={toggleExpanded}><Icon name={expanded ? "restore" : "maximize"} size={13} />{expanded ? "恢复布局" : "展开阅读"}</button>
+        <button type="button" className="wb-status-btn sc-expand-button" aria-pressed={expanded} onClick={toggleExpanded}><Icon name={expanded ? "collapse" : "expand"} size={16} />{expanded ? "恢复布局" : "展开阅读"}</button>
         {tab === "problems" && merged.length > 0 && (
           <>
             <button type="button" className="wb-status-btn" title="跳到上一处问题" onClick={onPrevProblem}>
@@ -114,7 +114,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
           </button>
         )}
         <button type="button" className="wb-icon-btn" title="关闭面板" aria-label="关闭面板" onClick={() => { updateWorkbenchLayout({ expanded: null }); setSession({ serviceExpanded: false }); onClose(); }}>
-          <Icon name="close" size={14} />
+          <Icon name="close" size={16} />
         </button>
       </div>
 

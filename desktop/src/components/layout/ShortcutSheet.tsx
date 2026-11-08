@@ -13,11 +13,18 @@ import { matchText } from "../../lib/pinyin";
  */
 type SheetRow = Omit<BindingRow, "group"> & { group: string };
 
-/** 不在 bindingRows 里、但确实固定的键（见 KeymapSettings 的说明）。 */
+/**
+ * 不在 bindingRows 里、但确实固定的键（见 KeymapSettings 的说明）。
+ * SQL 控制台那三条是 Monaco 里 `addAction` 直接绑的（`components/db/SqlEditor.tsx`），
+ * 不参与换方案、也不能改键，所以归到这里而不是 keymap 的可配置表。
+ */
 const FIXED: SheetRow[] = [
   { id: "fixed.save", label: "保存当前文件", group: "固定键", keys: ["ctrl+s"], display: ["Ctrl+S"], overridden: false },
   { id: "fixed.callHierarchy", label: "调用层级", group: "固定键", keys: ["ctrl+alt+h"], display: ["Ctrl+Alt+H"], overridden: false },
   { id: "fixed.thisSheet", label: "打开 / 关闭快捷键一览", group: "固定键", keys: ["?"], display: ["?"], overridden: false },
+  { id: "fixed.sqlRunCurrent", label: "SQL：执行当前语句", group: "SQL 控制台", keys: ["ctrl+enter"], display: ["Ctrl+Enter"], overridden: false },
+  { id: "fixed.sqlRunScript", label: "SQL：执行整个脚本", group: "SQL 控制台", keys: ["alt+x"], display: ["Alt+X"], overridden: false },
+  { id: "fixed.sqlFormat", label: "SQL：格式化", group: "SQL 控制台", keys: ["ctrl+shift+f"], display: ["Ctrl+Shift+F"], overridden: false },
 ];
 
 /** 页面切换组：由 PAGES 派生（含 hotkey），? 搜「代码」「Ctrl+3」都能命中（P1-16）。 */
@@ -30,7 +37,7 @@ const PAGE_ROWS: SheetRow[] = PAGES.filter((p) => p.hotkey != null).map((p) => (
   overridden: false,
 }));
 
-const GROUP_ORDER = ["快速导航", "窗口", "搜索与层级", "编辑器", "页面切换", "固定键"] as const;
+const GROUP_ORDER = ["快速导航", "窗口", "搜索与层级", "编辑器", "SQL 控制台", "页面切换", "固定键"] as const;
 
 function groupRows(rows: SheetRow[]): { label: string; rows: SheetRow[] }[] {
   return GROUP_ORDER.map((label) => ({ label, rows: rows.filter((r) => r.group === label) })).filter(

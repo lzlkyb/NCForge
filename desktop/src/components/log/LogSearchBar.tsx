@@ -91,7 +91,7 @@ export function LogSearchBar({
           {bad}
         </div>
       )}
-      {done && (
+      {done && (advanced || stale || done.result.truncatedFiles > 0 || done.result.stoppedEarly) && (
         <div className="lg-search-info" data-tone={stale ? "warn" : undefined}>
           <Icon name="search" size={12} />
           命中 {done.result.entries.length} 条 · 扫了 {done.result.scannedFiles.length} 个文件 /{" "}

@@ -81,13 +81,13 @@ export function SvnToolbar({
         <Icon name="refresh" size={13} className={fetching ? "animate-spin" : undefined} />
         {fetching ? (scanned === null ? "扫描中…" : `已扫 ${scanned} 条…`) : "刷新"}
       </button>
-      <button type="button" className="vc-btn" disabled={busy !== null} onClick={onUpdate}>
+      {busy === "update" && <button type="button" className="vc-btn" disabled onClick={onUpdate}>
         <Icon name={busy === "update" ? "spinner" : "download"} size={13} className={busy === "update" ? "animate-spin" : undefined} />
         {busy === "update" ? "更新中…" : "更新"}
-      </button>
+      </button>}
       <button
         type="button"
-        className="vc-btn vc-btn-primary"
+        className="vc-btn"
         data-commit-trigger
         // 有冲突时不再禁用：提交面板本来就会把冲突文件从清单里剔掉
         //（「将提交 N 个文件（不含 M 个冲突）」），按钮一禁，那套逻辑全成了不可达。
@@ -120,6 +120,7 @@ export function SvnToolbar({
       )}>
         {(close) => (
           <>
+            <MenuItem label="更新工作副本" icon="download" disabled={busy !== null} onClick={()=>{close();onUpdate();}} />
             {onHistory && <MenuItem label="工作副本历史" icon="history" onClick={() => { close(); onHistory(); }} />}
             <MenuItem label="打包 NC 补丁" icon="package" onClick={() => { close(); openPatchPage(); }} />
             <MenuItem

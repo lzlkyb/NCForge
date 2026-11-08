@@ -1,6 +1,6 @@
+import type { ComponentProps } from "react";
 import { WorkspaceGlyph } from "./WorkspaceGlyph";
 import { Breadcrumb } from "./Breadcrumb";
-import { HistoryPanel } from "./HistoryPanel";
 import { NavigationHistoryMenu } from "./NavigationHistoryMenu";
 import { setEditorPrefs, useEditorPrefs } from "../../lib/editorPrefs";
 import type { TabMeta } from "../../lib/workspaceSession";
@@ -18,6 +18,8 @@ export interface HistorySlot {
   /** 恢复成功后父组件重载文件 */
   onRestored: (path: string) => void;
 }
+
+export type EditorNavigation = ComponentProps<typeof EditorNavRow>;
 
 /** 阅读区工具栏。跳转记录和本地版本历史分别使用各自的数据源。 */
 export function EditorNavRow({
@@ -47,7 +49,7 @@ export function EditorNavRow({
 }) {
   const { minimap } = useEditorPrefs();
   return (
-    <div className="wb-crumb-row">
+    <div className="wb-crumb-row" role="group" aria-label="文件路径与阅读工具">
       {/* 后退 / 前进：找引用、跳实现之后一定要有，否则只能靠自己记「刚才在哪儿」 */}
       <button
         type="button"
@@ -57,7 +59,7 @@ export function EditorNavRow({
         aria-label="后退"
         onClick={onBack}
       >
-        <WorkspaceGlyph name="back" size={13} />
+        <WorkspaceGlyph name="back" size={16} />
       </button>
       <button
         type="button"
@@ -67,7 +69,7 @@ export function EditorNavRow({
         aria-label="前进"
         onClick={onForward}
       >
-        <WorkspaceGlyph name="forward" size={13} />
+        <WorkspaceGlyph name="forward" size={16} />
       </button>
       <NavigationHistoryMenu root={root} onSelect={onJumpHistory} />
       <Breadcrumb root={root} active={active} />
@@ -85,7 +87,7 @@ export function EditorNavRow({
             title="查看当前文件的声明结构"
             onClick={onToggleOutline}
           >
-            <WorkspaceGlyph name="outline" size={13} />
+            <WorkspaceGlyph name="outline" size={16} />
             <span>结构</span>
           </button>
           <button
@@ -97,13 +99,13 @@ export function EditorNavRow({
             title="本地历史（自动归档的旧版本，可恢复）"
             onClick={history.onToggle}
           >
-            <WorkspaceGlyph name="history" size={13} />
+            <WorkspaceGlyph name="history" size={16} />
             <span>本地历史</span>
           </button>
         </>
       )}
       <div className="wb-crumb-overflow">
-        <Menu portal width="w-64" trigger={(open, toggle) => <button type="button" className="wb-icon-btn" aria-label="更多阅读工具" title="结构、小地图与本地历史" aria-expanded={open} aria-haspopup="menu" onClick={toggle}><Icon name="more" size={14} /></button>}>
+        <Menu portal width="w-64" trigger={(open, toggle) => <button type="button" className="wb-icon-btn" aria-label="更多阅读工具" title="结构、小地图与本地历史" aria-expanded={open} aria-haspopup="menu" onClick={toggle}><Icon name="more" size={16} /></button>}>
           {close => <>
             {!active.virtual && <MenuItem label="文件结构" checked={outlineOpen} onClick={() => { close(); onToggleOutline(); }} />}
             <MenuItem label="小地图" checked={minimap && !heavy} disabled={heavy} onClick={() => { close(); setEditorPrefs({ minimap: !minimap }); }} />
@@ -111,13 +113,6 @@ export function EditorNavRow({
           </>}
         </Menu>
       </div>
-      <HistoryPanel
-        open={history.open && !active.virtual}
-        onClose={history.onClose}
-        path={active.path}
-        dirty={history.dirty}
-        onRestored={history.onRestored}
-      />
     </div>
   );
 }

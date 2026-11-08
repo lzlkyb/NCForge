@@ -14,6 +14,14 @@ export const serviceLogTail = (target: ServiceLogTarget, previous: boolean, befo
   invoke<ServiceLogPage>("service_log_tail", { target, previous, before: before ?? null, fileId: fileId ?? null });
 export const serviceLogClear = (target: ServiceLogTarget) =>
   invoke<{ offset: number; rotated: false }>("service_log_clear", { target });
+export interface ServiceLogPurgeResult { bytes: number; archiveBytes: number }
+/**
+ * 真正清空磁盘日志（截断当前文件），`archive` 为真时连上次运行的 `*.log.1` 一起删。
+ *
+ * 与 `serviceLogClear` 分开：那个只是把视图推到末尾，磁盘原样保留；这个不可撤销。
+ */
+export const serviceLogPurge = (target: ServiceLogTarget, archive: boolean) =>
+  invoke<ServiceLogPurgeResult>("service_log_purge", { target, archive });
 
 /** Picker grants only the selected destination; streaming export never loads the entire file into JS. */
 export async function serviceLogExport(target: ServiceLogTarget, previous: boolean, fileId?: string, signal?: AbortSignal): Promise<ServiceLogExportResult | null> {

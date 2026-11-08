@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn(), unlisten: vi.fn() }));
 vi.mock("./tauri", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
-import { serviceLogClear, serviceLogExport, serviceLogExportText, serviceLogRead, serviceLogTail } from "./serviceConsoleApi";
+import { serviceLogClear, serviceLogExport, serviceLogExportText, serviceLogPurge, serviceLogRead, serviceLogTail } from "./serviceConsoleApi";
 import { clearCompletedOperations, getOperations } from "./operations";
 beforeEach(() => { mocks.invoke.mockReset(); mocks.listen.mockReset(); mocks.unlisten.mockReset(); mocks.listen.mockResolvedValue(mocks.unlisten); clearCompletedOperations(); });
 afterEach(() => vi.restoreAllMocks());
@@ -10,6 +10,14 @@ describe("控制台日志读取与原生导出合约", () => {
   it("读取只传固定来源、历史标识与字节范围，不接受任意路径", async () => {
     await serviceLogRead("middleware", false, 1024, "file-one"); await serviceLogTail("client", true, 2048, "file-two"); await serviceLogClear("client");
     expect(mocks.invoke.mock.calls).toEqual([["service_log_read",{target:"middleware",previous:false,offset:1024,fileId:"file-one"}],["service_log_tail",{target:"client",previous:true,before:2048,fileId:"file-two"}],["service_log_clear",{target:"client"}]]);
+  });
+  it("清屏与清除日志是两个命令：前者只推视图位，后者带归档意图且不收路径", async () => {
+    mocks.invoke.mockResolvedValue({bytes:12,archiveBytes:34});
+    expect(await serviceLogPurge("middleware", false)).toEqual({bytes:12,archiveBytes:34});
+    await serviceLogPurge("client", true);
+    expect(mocks.invoke.mock.calls).toEqual([["service_log_purge",{target:"middleware",archive:false}],["service_log_purge",{target:"client",archive:true}]]);
+    // 日志位置由后端从 config_dir 拼，前端连路径参数都不该存在
+    for (const [, args] of mocks.invoke.mock.calls) expect(Object.keys(args as object).sort()).toEqual(["archive","target"]);
   });
   it("全文导出不把原文传入IPC，匹配导出明确传有限文本", async () => {
     mocks.invoke.mockResolvedValue({path:"D:/日志.log",bytes:6,canceled:false,ms:2});

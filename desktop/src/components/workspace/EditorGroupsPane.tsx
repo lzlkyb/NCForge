@@ -7,14 +7,17 @@ import { filePathKey } from "../../lib/workspace";
 import { EditorPane } from "./EditorPane";
 import { TabStrip } from "./TabStrip";
 import { EmptyEditor } from "./EmptyEditor";
+import { Breadcrumb } from "./Breadcrumb";
+import { EditorNavRow, type EditorNavigation } from "./EditorNavRow";
 import type { useFileSession } from "../../hooks/useFileSession";
 import "../../editor-groups.css";
 
-export function EditorGroupsPane({ root, tabs, session, reveal, tools }: {
+export function EditorGroupsPane({ root, tabs, session, reveal, tools, nav }: {
   root: string; tabs: TabMeta[]; session: ReturnType<typeof useFileSession>;
   reveal: { line: number; column?: number; nonce: number; path?: string; group?: EditorGroupId } | null;
-  /** 并入左组文件标签条的执行/分组工具（分屏时右组不放，避免出现两套）。 */
+  /** 只显示一套执行工具；窄分屏中跟随可见组，避免藏到另一组里。 */
   tools?: ReactNode;
+  nav?: EditorNavigation | null;
 }) {
   const groups = useWorkspaceSelector(s => s.editorGroups) ?? emptyEditorGroups();
   const host = useRef<HTMLDivElement>(null), cleanup = useRef<(() => void) | null>(null);
@@ -47,7 +50,7 @@ export function EditorGroupsPane({ root, tabs, session, reveal, tools }: {
       const focused = groups.focused === group;
       return <div key={group} className="wb-editor-group-slot" data-group={group} data-focused={focused || undefined} hidden={split && compact && !focused} style={{ flexBasis: !split || compact ? '100%' : `${(index ? 1 - groups.ratio : groups.ratio) * 100}%` }}>
         <TabStrip root={root} tabs={groupTabs} activePath={activePath} splitPath={groups.rightActive} groupId={group} compactTools
-          tools={group === "left" ? tools : undefined}
+          tools={group === (compact ? groups.focused : "left") ? tools : undefined}
           compiling={false} canCompile={false} onCompile={() => {}} onSelect={path => { focus(group); session.selectTab(path); }}
           onClose={path => closeView(group, path)} onCloseMany={want => {
             focus(group); let kept = 0;
@@ -59,6 +62,10 @@ export function EditorGroupsPane({ root, tabs, session, reveal, tools }: {
           }}
           onPin={session.pin} onOpenSplit={path => void session.openSplit(path)} onCloseSplit={session.closeSplit}
           onMoveGroup={path => setSession({ tabs: tabs => tabs.map(tab => tab.path === path && tab.preview ? { ...tab, previewGroup: group === "left" ? "right" : "left" } : tab), editorGroups: old => moveGroupFile(old ?? emptyEditorGroups(), group, path) })} />
+        {(active || split) && (focused && active && nav ? <EditorNavRow {...nav} active={active} heavy={(active.lines ?? 0) > LARGE_FILE_LINES} /> :
+          <div className="wb-crumb-row wb-group-path" role="group" aria-label={`${group === "left" ? "左" : "右"}编辑器组路径`}>
+            {active ? <Breadcrumb root={root} active={active} showSymbols={false} /> : <span className="wb-group-path-empty">尚未打开文件</span>}
+          </div>)}
         <div id={`wb-editor-${group}-surface`} role="tabpanel" aria-label={`${group === "left" ? "左" : "右"}编辑器组内容`} className="wb-editor-body">
           <EditorPane groupId={group} focused={focused} onFocus={() => focus(group)} activePath={activePath} readOnly={active?.readOnly ?? false} heavy={(active?.lines ?? 0) > LARGE_FILE_LINES}
             reveal={focused && (!reveal?.group || reveal.group === group) && (!reveal?.path || filePathKey(reveal.path) === filePathKey(activePath ?? "")) ? reveal : null} onCursor={(line, column) => { if (getSession().editorGroups?.focused === group) setCursor(line, column); }}

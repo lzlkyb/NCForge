@@ -82,8 +82,8 @@ export function LogPanel({ active, generation, appHidden, logPath, logSize, onRe
   const unseen = Math.max(0, reader.newestId - (form.seen ?? reader.newestId));
   const style = { "--sc-log-font": `${form.fontSize}px` } as CSSProperties;
   return <section className="sc-log" style={style} aria-label={`${target === 'client' ? '客户端' : '中间件'}控制台`}>
-    <ServiceLogToolbar form={form} set={patch => { store.set(patch); if (patch.query !== undefined) setMatchIndex(0); }} counts={counts} matchedCount={filtered.length} matchIndex={index} matchCount={matches.length} onMatch={moveMatch} findRef={find} previous={previous} busy={actions.busy} selected={selected}
-      onCopy={() => actions.copy(logsRaw(filtered), `${filtered.length} 行已加载匹配日志`)} onCopySelection={() => actions.copy(selected, "日志选区")} onClear={actions.clear}
+    <ServiceLogToolbar form={form} set={patch => { store.set(patch); if (patch.query !== undefined) setMatchIndex(0); }} counts={counts} matchedCount={filtered.length} matchIndex={index} matchCount={matches.length} onMatch={moveMatch} findRef={find} previous={previous} busy={actions.busy} selected={selected} target={target} logSize={reader.size || logSize}
+      onCopy={() => actions.copy(logsRaw(filtered), `${filtered.length} 行已加载匹配日志`)} onCopySelection={() => actions.copy(selected, "日志选区")} onClear={actions.clear} onPurge={actions.purge}
       onExport={complete => actions.exportLog(complete ? undefined : logsRaw(filtered))} onReload={() => { reader.reset(); reader.retry(); }}
       onFollow={() => form.follow ? store.set({ follow: false }) : followLatest()} />
     {actions.busy && <div className="sc-log-operation" role="status"><Icon name="spinner" size={12} className="animate-spin" /><span>{actions.busy}中…</span>{actions.busy === '导出日志' && <button type="button" className="sc-log-button" onClick={actions.cancel}>取消</button>}</div>}

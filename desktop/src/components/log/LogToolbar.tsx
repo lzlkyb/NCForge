@@ -34,6 +34,7 @@ export function LogToolbar({
   onSlowMs,
   onRefresh,
   children,
+  onClose,
 }: {
   advanced: boolean;
   onToggleAdvanced: () => void;
@@ -56,6 +57,7 @@ export function LogToolbar({
   onRefresh: () => void;
   /** 检索条等：放在同一个头部容器里，才不会多出一条多余的边框。 */
   children?: ReactNode;
+  onClose?: () => void;
 }) {
   const groups = sources?.loggers ?? [];
   const advancedId = useId();
@@ -64,7 +66,7 @@ export function LogToolbar({
     <div className="lg-head-wrap">
       <div className="lg-head">
         <h1>日志排查</h1>
-        <span className="lg-sub">{summary}</span>
+        <span className="lg-sub" title={summary}>{summary}</span>
         <FreshnessBadge
           state={busy ? "loading" : error ? "error" : "live"}
           at={updatedAt}
@@ -91,9 +93,9 @@ export function LogToolbar({
           <Icon name="refresh" size={14} className={busy ? "lg-spin" : undefined} />
           {searchMode ? "重新检索" : "刷新"}
         </button>
+        {onClose && <button type="button" className="lg-btn" aria-label="关闭日志排查" title="关闭日志排查" onClick={onClose}><Icon name="close" size={13}/></button>}
       </div>
 
-      {filterHint && !advanced && <p className="lg-empty-hint px-3 pb-2">筛选：{filterHint}</p>}
       <div id={advancedId} hidden={!advanced}>
       <div className="lg-head">
         <label className="lg-field" title="warningsql 里 NC 自己登记的耗时超过这个值才算慢 SQL">

@@ -6,8 +6,7 @@ import "../../service-console.css";
 import { Icon } from "../ui/icon";
 import { ServiceActionsBar } from "../services/ServiceActionsBar";
 import { toast } from "../ui/toast";
-import { ServiceCard } from "../services/ServiceCard";
-import { ClientCard } from "../services/ClientCard";
+import { ServiceRunToolbar } from "../services/ServiceRunToolbar";
 import { ServiceLogSection } from "../services/ServiceLogSection";
 import { ServiceConfig } from "../services/ServiceConfig";
 import { CommandLineDialog } from "../services/CommandLineDialog";
@@ -108,10 +107,10 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const drawerTitle = ui.drawer === "details" ? `${serviceNames[ui.source]} · 运行详情` : ui.drawer === "config" ? "中间件与客户端 · 启动设置" : "元数据投送";
   return <>
     <DockRegion region="bottom"><div className="sc-panel">
-      <ServiceNavigator source={ui.source} onSource={source => changeUi({ source, drawer: null })} onDrawer={drawer => changeUi({ drawer })}
-        middleware={{ status: status ?? null, busy: commands.busy, failed: isError }} client={{ status: client.status, busy: client.busy, failed: client.isError }} />
+      {/* 保持工具栏与来源按钮挂载，方向键切换后焦点仍留在当前来源。 */}
+      <ServiceRunToolbar {...toolbarProps} source={ui.source} navigator={<ServiceNavigator source={ui.source} onSource={source => changeUi({ source, drawer: null })}
+        middleware={{ status: status ?? null, busy: commands.busy, failed: isError }} client={{ status: client.status, busy: client.busy, failed: client.isError }} />} />
       <section className="sc-console" id="sc-service-console" role="tabpanel" aria-labelledby={`sc-service-${ui.source}`}>
-        {ui.source === "client" ? <ClientCard {...toolbarProps} /> : <ServiceCard {...toolbarProps} />}
         <DevelopmentFlowProgress />
         {selectedFailed && <div className="sc-feedback" data-tone="warn"><Icon name="alertTriangle" size={14} /><span title={String(selectedError)}>读取服务状态失败，当前运行状态未知。请重试或查看日志。</span><button type="button" className="sv-btn" onClick={toolbarProps.onRetry}>重试</button></div>}
         {!selectedFailed && selected?.state === "starting" && <div className="sc-feedback" data-tone="waiting"><Icon name="spinner" className="animate-spin" size={13} /><span>{selected.launchPhase || (selected.pid ? "JVM 已创建，正在等待运行状态" : "正在准备启动")}</span>{launchElapsed !== null && launchElapsed !== undefined && <small>已用 {Math.floor(launchElapsed / 1000)} 秒</small>}<button type="button" className="sv-btn" onClick={() => changeUi({ drawer: "details" })}>运行详情</button></div>}

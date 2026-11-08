@@ -10,7 +10,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ClientCard } from "./ClientCard";
+import { ServiceRunToolbar } from "./ServiceRunToolbar";
 import { ServiceDetails } from "./ServiceDetails";
 import type { ClientStatus } from "../../lib/client";
 
@@ -48,7 +48,8 @@ const mount = async (s: ClientStatus, debugAttached = false) => {
   root = createRoot(container);
   await act(async () => {
     root.render(
-      <ClientCard
+      <ServiceRunToolbar
+        source="client"
         status={s}
         busy={null}
         debugMode={false}
@@ -74,7 +75,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
 });
 
-describe("ClientCard", () => {
+describe("客户端运行工具栏", () => {
   it("停止状态只给启动，不显示停止/重启", async () => {
     await mount(status());
     expect(button("启动")).toBeTruthy();

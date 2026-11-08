@@ -28,10 +28,13 @@ import "../../meta-editor.css";
 export function MetaTab() {
   const [idx, setIdx] = useState<{ data: BmfIndex | null; loading: boolean }>({ data: null, loading: false });
   const [search, setSearch] = useState("");
-  const [panels, setPanels] = useState({ resources: false, inspector: false, new: false, editing: false, review: false, closing: null as string | null, closeAfterSave: null as string | null });
+  const [panels, setPanels] = useState({ resources: false, inspector: false, focused: false, new: false, editing: false, review: false, closing: null as string | null, closeAfterSave: null as string | null });
   const scanSeq = useRef({ value: 0 });
   const docs = useMetaDocuments();
   const layout = useMetaLayout();
+  // 专注只改变停靠方式；复用同一棵内容树，保留文档草稿和表格位置。
+  const resourceDrawer = layout.resourceDrawer || panels.focused;
+  const inspectorDrawer = layout.inspectorDrawer || panels.focused;
   const doc = docs.active;
   const detail = doc?.draft.preview?.detail ?? doc?.detail ?? null;
   const issues = doc?.draft.preview?.detail.issues ?? doc?.issues ?? [];
@@ -94,10 +97,11 @@ export function MetaTab() {
   const entity = detail && doc ? selectedMetaEntity(detail, doc.ui.selection) : null;
   return <DockRegion region="document"><div className="meta-page meta-workbench" ref={layout.ref}
     data-generation={doc?.ui.view === "generate" || undefined}
+    data-focused={panels.focused || undefined}
     data-size={layout.compact ? "compact" : layout.resourceDrawer ? "small" : layout.inspectorDrawer ? "medium" : "wide"}
     style={{ "--meta-resource-width": `${layout.widths.resource}px`, "--meta-inspector-width": `${layout.widths.inspector}px` } as CSSProperties}
     onKeyDown={(e) => { if (!e.nativeEvent.isComposing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); if (!locked) void reviewDraft(); } }}>
-    <MetaPanel side="resource" label="元数据资源" drawer={layout.resourceDrawer} open={panels.resources} onClose={() => setPanels((s) => ({ ...s, resources: false }))}>
+    <MetaPanel side="resource" label="元数据资源" drawer={resourceDrawer} open={panels.resources} onClose={() => setPanels((s) => ({ ...s, resources: false }))}>
       <MetaTree entries={idx.data?.entries ?? []} selected={doc?.entry.path ?? null} search={search} onSearch={setSearch}
         onSelect={(entry) => { if (!locked) { docs.open(entry); setPanels((s) => ({ ...s, resources: false })); } }}
         onRefresh={() => void scan(true)} onNew={() => setPanels((s) => ({ ...s, new: true }))} refreshing={idx.loading}
@@ -105,23 +109,25 @@ export function MetaTab() {
         detail={detail} selection={doc?.ui.selection} locked={locked}
         onSelectObject={(selection) => updateState({ selection, view: "detail", fieldScroll: { top: 0, left: 0 }, pane: semanticPane(selection) })} />
     </MetaPanel>
-    {!layout.resourceDrawer && <MetaSplitter label="调整资源栏宽度" value={layout.widths.resource} min={190} max={320} onChange={(resource) => layout.setWidths((s) => ({ ...s, resource }))} onReset={() => layout.setWidths((s) => ({ ...s, resource: 224 }))} />}
+    {!resourceDrawer && <MetaSplitter label="调整资源栏宽度" value={layout.widths.resource} min={190} max={320} onChange={(resource) => layout.setWidths((s) => ({ ...s, resource }))} onReset={() => layout.setWidths((s) => ({ ...s, resource: 224 }))} />}
     <section className="meta-main">
       {!doc ? <><div className="meta-empty-toolbar"><button type="button" className="meta-link" onClick={() => setPanels((s) => ({ ...s, resources: true }))}>打开元数据资源</button></div>
         <EmptyState icon="layers" bigIconSize={72} iconSize={24} description="选一个 BMF 组件开始。索引只扫工作区与链接工程，不会碰 NC 安装目录。" className="h-full" /></> : <>
         <MetaDocumentTabs documents={docs.documents} active={doc.key} locked={locked} onSelect={(item) => docs.open(item.entry)} onClose={closeDocument} />
-        <MetaHead entry={doc.entry} counts={severityCounts(issues)} busy={doc.busy} editing={locked}
+        <div className="meta-document-tools"><MetaHead entry={doc.entry} counts={severityCounts(issues)} busy={doc.busy} editing={locked}
           onRevalidate={() => void docs.refresh(doc.entry, true)} onNew={() => setPanels((s) => ({ ...s, new: true }))}
           onIssues={() => updateState({ view: "detail", pane: "issues", mode: mode === "model" ? "linked" : doc.ui.mode })} />
-        <MetaToolbar state={doc.ui} mode={mode} locked={locked} dirty={draftChanged(doc.draft)} resourceDrawer={layout.resourceDrawer} inspectorDrawer={layout.inspectorDrawer} resourceOpen={panels.resources} inspectorOpen={panels.inspector}
+        <MetaToolbar state={doc.ui} mode={mode} locked={locked} dirty={draftChanged(doc.draft)} resourceDrawer={resourceDrawer} inspectorDrawer={inspectorDrawer} resourceOpen={panels.resources} inspectorOpen={panels.inspector} focused={panels.focused}
+          onFocus={() => setPanels((s) => ({ ...s, focused: !s.focused, resources: false, inspector: false }))}
           onState={updateState} onResources={() => setPanels((s) => ({ ...s, resources: true, inspector: false }))} onInspector={() => onInspectorOpen(true)} />
+        </div>
         <MetaDraftBar draft={doc.draft} locked={locked || doc.busy} onUndo={() => void draftActions.undo()} onRedo={() => void draftActions.redo()} onReview={() => void reviewDraft()} onDiscard={draftActions.discard} />
         <MetaViewPanel view={doc.ui.view} detail={detail} error={doc.error} busy={doc.busy} entries={idx.data?.entries ?? []} onEdited={() => void refreshAfterEdit()}
           generationPreferences={doc.ui.generation} onGenerationPreferences={(generation) => docs.updateUi(doc.key, { generation }, false)} onGenerationApplying={onEditingChange}
           onGenerationBack={(showIssues) => updateState({ view: "detail", ...(showIssues ? { pane: "issues", mode: "linked" } : {}) })}
           onGenerationLocate={(selection) => updateState({ selection, view: "detail", pane: semanticPane(selection), fieldScroll: { top: 0, left: 0 } })}
           editor={detail && <MetaEditor key={doc.key} detail={detail} sourceSha={doc.detail?.sha256} state={doc.ui} mode={mode} issues={issues} issueBusy={doc.issueBusy} issueError={doc.issueError}
-            inspectorDrawer={layout.inspectorDrawer} inspectorOpen={panels.inspector} inspectorWidth={layout.widths.inspector}
+            inspectorDrawer={inspectorDrawer} inspectorOpen={panels.inspector} inspectorWidth={layout.widths.inspector}
             onInspectorOpen={onInspectorOpen} onInspectorWidth={(inspector) => layout.setWidths((s) => ({ ...s, inspector }))}
             onState={updateState} onEdited={() => void refreshAfterEdit()} onOpenRefs={openRefs} onEditingChange={onEditingChange} readBusy={doc.busy || doc.draft.busy} onStage={draftActions.stage} />} />
         <footer className="meta-document-status"><span>{doc.entry.origin} · {doc.entry.module || "未知模块"}</span><span>{doc.detail ? `${doc.detail.encoding} · ${doc.detail.eol}${doc.detail.bom ? " · BOM" : ""}` : ""}</span>

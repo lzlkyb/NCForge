@@ -5,9 +5,10 @@ export interface SvnDiffPrefs {
   ignoreWhitespace: boolean;
   wrap: boolean;
   fontSize: number;
+  collapseUnchanged: boolean;
 }
 
-const defaults: SvnDiffPrefs = { layout: "auto", ignoreWhitespace: false, wrap: true, fontSize: 12 };
+const defaults: SvnDiffPrefs = { layout: "auto", ignoreWhitespace: false, wrap: true, fontSize: 12, collapseUnchanged: true };
 const stores = new Map<string, SessionStore<SvnDiffPrefs>>();
 const keyOf = (root: string | null) => (root ?? "none").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 const storageKey = (root: string | null) => `ncforge.svn.diff:${keyOf(root)}`;
@@ -24,6 +25,7 @@ function storeOf(root: string | null): SessionStore<SvnDiffPrefs> {
       ignoreWhitespace: typeof value.ignoreWhitespace === "boolean" ? value.ignoreWhitespace : defaults.ignoreWhitespace,
       wrap: typeof value.wrap === "boolean" ? value.wrap : defaults.wrap,
       fontSize: [12, 13, 14, 16].includes(value.fontSize) ? value.fontSize : defaults.fontSize,
+      collapseUnchanged: typeof value.collapseUnchanged === "boolean" ? value.collapseUnchanged : defaults.collapseUnchanged,
     };
   } catch { /* 存储不可用时仍能阅读和临时调整。 */ }
   const store = createSessionStore<SvnDiffPrefs>({ ...prefs });

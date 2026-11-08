@@ -1,19 +1,21 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { BmfDetail, BmfEditOp, BmfEntity } from "../../lib/bmf";
 import { BMF_BASE_TYPES, baseTypeById, fieldTypeOps } from "../../lib/bmfTypes";
 import type { MetaStage } from "../../lib/metaDraft";
 import { fieldWindow } from "../../lib/metaEditor";
 import { Icon } from "../ui/icon";
 import { Input } from "../ui/input";
+import { Menu, MenuItem } from "../ui/Menu";
 
 type CellColumn = "displayName" | "fieldName" | "length" | "type";
 export function MetaFieldTable({ entity, selectedAttrId, filter, scroll, locked, onFilter, onSelect, onInspect, onEdit, onAdd, onScroll,
-  selectedIds = [], onSelectedIds, onBulk, detail, onStage, onEditingChange }: {
+  selectedIds = [], onSelectedIds, onBulk, detail, onStage, onEditingChange, entityControl }: {
   entity: BmfEntity; selectedAttrId: string | null; filter: string; scroll: { left: number; top: number }; locked: boolean;
   onFilter: (filter: string) => void; onSelect: (attrId: string) => void;
   onInspect: () => void; onEdit: (attrId: string) => void; onAdd: () => void;
   onScroll: (scroll: { left: number; top: number }) => void;
   selectedIds?: string[]; onSelectedIds?: (ids: string[]) => void; detail?: BmfDetail; onStage?: MetaStage;
+  entityControl?: ReactNode;
   onBulk?: (kind: "paste" | "batch" | "template", ids: string[], text?: string) => void; onEditingChange?: (editing: boolean) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -115,14 +117,13 @@ export function MetaFieldTable({ entity, selectedAttrId, filter, scroll, locked,
     : <span className="meta-cell-value" onDoubleClick={(e) => { e.stopPropagation(); editCell(id, column); }}>{content}</span>;
   return <div className="meta-fields">
     <div className="meta-fields-head">
-      <div className="meta-fields-identity"><strong>{entity.displayName || entity.name}</strong><span>{entity.table || "无表名"} · {attrs.length}/{entity.attrs.length} 字段</span></div>
-      <div className="meta-attr-search"><Icon name="search" size={13} /><Input value={filter} disabled={locked} onChange={(e) => onFilter(e.target.value)} placeholder="过滤字段" aria-label="过滤字段" /></div>
+      <div className="meta-fields-identity">{entityControl ?? <strong>{entity.displayName || entity.name}</strong>}<span title={`${entity.table || "无表名"} · ${attrs.length}/${entity.attrs.length} 字段`}>{entity.table || "无表名"} · {attrs.length}/{entity.attrs.length} 字段</span></div>
+      <div className="meta-attr-search" data-focus-container><Icon name="search" size={13} /><Input value={filter} disabled={locked} onChange={(e) => onFilter(e.target.value)} placeholder="过滤字段" aria-label="过滤字段" /></div>
       <button type="button" className="meta-link" disabled={locked} onClick={onAdd}><Icon name="plus" size={13} />加字段</button>
+      {onBulk && <Menu portal trigger={(open,toggle)=><button type="button" className="meta-link" disabled={locked} aria-haspopup="menu" aria-expanded={open} onClick={toggle}>字段操作{selected.size > 0 ? ` · 已选 ${selected.size}` : ""}<Icon name="chevronDown" size={12}/></button>}>
+        {close=><><MenuItem label="批量设置" disabled={locked || !selected.size} onClick={()=>{close();onBulk("batch",[...selected]);}}/><MenuItem label="粘贴字段" disabled={locked} onClick={()=>{close();onBulk("paste",[]);}}/><MenuItem label="字段模板" disabled={locked} onClick={()=>{close();onBulk("template",[]);}}/></>}
+      </Menu>}
     </div>
-    {onBulk && <div className="meta-bulk-toolbar"><span>{selected.size ? `已选 ${selected.size} 字段` : "勾选字段进行批量操作"}</span>
-      <button type="button" className="meta-link" disabled={locked || !selected.size} onClick={() => onBulk("batch", [...selected])}>批量设置</button>
-      <button type="button" className="meta-link" disabled={locked} onClick={() => onBulk("paste", [])}>粘贴字段</button>
-      <button type="button" className="meta-link" disabled={locked} onClick={() => onBulk("template", [])}>字段模板</button></div>}
     {cell?.error && <div className="meta-filter-note meta-draft-error" role="alert">{cell.error}</div>}
     {cell && <div className="meta-bulk-toolbar"><span>正在快速编辑 {entity.attrs.find((a) => a.id === cell.id)?.name}</span><button type="button" className="meta-link" disabled={cell.busy} onClick={() => setCell(null)}>取消快改</button></div>}
     {selectedAttrId && selectedIndex < 0 && <div className="meta-filter-note" role="status">当前字段不在筛选结果中。
@@ -164,6 +165,6 @@ export function MetaFieldTable({ entity, selectedAttrId, filter, scroll, locked,
       </table>
       {attrs.length === 0 && <p className="meta-note meta-fields-empty">{entity.attrs.length ? "没有匹配字段，试试更短的名称。" : "实体还没有字段，点击「加字段」开始。"}</p>}
     </div>
-    <div className="meta-fields-foot"><span>{cell ? "Enter 应用 · Esc 取消" : "方向键选择 · Enter 属性 · F2 编辑"}</span><span>{selectedAttrId ? entity.attrs.find((a) => a.id === selectedAttrId)?.name : "请选择一个字段"}</span></div>
+    {cell && <div className="meta-fields-foot"><span>Enter 应用 · Esc 取消</span><span>{entity.attrs.find((a) => a.id === cell.id)?.name}</span></div>}
   </div>;
 }

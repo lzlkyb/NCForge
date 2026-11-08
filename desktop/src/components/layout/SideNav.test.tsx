@@ -42,3 +42,17 @@ it("未读提示保留数量说明，设置和版本按钮分别触发各自操�
     expect(navigate).toHaveBeenCalledTimes(1);
   } finally { act(() => root.unmount()); host.remove(); }
 });
+
+// 用户明确要求侧栏不要印快捷键（2026-11-07）：快捷键照旧生效，只是不显示。
+// 用 querySelectorAll("kbd") 守住，别哪天又加回来。
+it("侧栏任何形态都不再显示 Ctrl+N 提示", () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  try {
+    for (const collapsed of [false, true]) {
+      act(() => root.render(<SideNav activeTab="files" onNavigate={vi.fn()} unreadCount={0} collapsed={collapsed} />));
+      expect(host.querySelectorAll("kbd")).toHaveLength(0);
+      expect(host.textContent).not.toMatch(/Ctrl\+\d/);
+    }
+  } finally { act(() => root.unmount()); host.remove(); }
+});

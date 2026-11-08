@@ -59,6 +59,29 @@ async function quickEdit() {
   await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
 }
 
+it("专注模式收起侧栏且保留草稿、选中字段和同一个表格滚动容器", async () => {
+  await quickEdit();
+  const fields = host.querySelector<HTMLElement>(".meta-field-scroll")!;
+  fields.scrollTop = 64;
+  await act(async () => fields.dispatchEvent(new Event("scroll", { bubbles: true })));
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="进入元数据专注模式"]')!.click());
+  expect(host.querySelector(".meta-workbench")?.getAttribute("data-focused")).toBe("true");
+  expect(host.querySelector<HTMLElement>(".meta-resource-panel")!.hidden).toBe(true);
+  expect(host.querySelector<HTMLElement>(".meta-inspector-panel")!.hidden).toBe(true);
+  expect(host.querySelector(".meta-field-scroll")).toBe(fields);
+  expect(fields.scrollTop).toBe(64);
+  expect(currentLabel()).toBe("新单据编码");
+  expect(host.querySelector('.meta-field-table [data-attr="billcode"]')?.getAttribute("aria-selected")).toBe("true");
+  await act(async () => button("属性").click());
+  expect(host.querySelector('.meta-inspector-panel[role="dialog"]')).not.toBeNull();
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="收起属性检查器"]')!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="退出元数据专注模式"]')!.click());
+  expect(host.querySelector(".meta-workbench")?.hasAttribute("data-focused")).toBe(false);
+  expect(host.querySelector<HTMLElement>(".meta-resource-panel")!.hidden).toBe(false);
+  expect(currentLabel()).toBe("新单据编码");
+  expect(mocks.invoke.mock.calls.some(([command]) => command === "bmf_edit_save")).toBe(false);
+});
+
 it("F2 快改只加入草稿；撤销和重做同步图、表、检查器且不写盘", async () => {
   await quickEdit();
   expect(currentLabel()).toBe("新单据编码");
@@ -112,6 +135,7 @@ it("保存失败保留草稿和输入，重新预览可重试成功", async () =
   expect(disk.entities[0].attrs[0].displayName).toBe("新单据编码");
 });
 it("非法粘贴不生成部分草稿；修正后端确认前没有写盘", async () => {
+  await act(async () => button("字段操作").click());
   await act(async () => button("粘贴字段").click());
   const input = document.querySelector<HTMLTextAreaElement>('[aria-label="粘贴字段内容"]')!;
   await act(async () => value(input, "字段名\t长度\nnewfield\t40\nsecond\t-1"));

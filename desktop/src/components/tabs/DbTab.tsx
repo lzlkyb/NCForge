@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import "../../db-console.css";
 import "../../db-workbench.css";
+import "../../db-result-workbench.css";
 import { DbObjectFinder } from "../db/DbObjectFinder";
 import { DockRegion } from "../workspace/WorkbenchDock";
 import { Icon } from "../ui/icon";
@@ -11,6 +12,8 @@ import { DbDocTabs } from "../db/DbDocTabs";
 import { DictWorkspace } from "../md/DictWorkspace";
 import { SqlConsole } from "../db/SqlConsole";
 import { TablePage } from "../db/TablePage";
+import { ComparisonWorkspace } from "../db/ComparisonWorkspace";
+import { ViewActivityContext, useViewActive } from "../../lib/viewActivity";
 import { newConsole } from "../../lib/dbActions";
 import { showObjectFinder, defaultConnId, loadConns, openConnDialog, openDictTab, openSqlTab, useActiveDbTab, useDbSelector } from "../../lib/dbStore";
 import { dbPanelId, dbTabId } from "../../lib/dbPendingSessions";
@@ -28,6 +31,12 @@ import { dbPanelId, dbTabId } from "../../lib/dbPendingSessions";
 export function DbTab() {
   // 整页只跟着「当前标签」和几个计数走：别的标签跑查询、连接状态变化不重画整页
   const tab = useActiveDbTab();
+  const active = useViewActive();
+  const retainedId = useRef<string | null>(null);
+  if (tab?.kind === "sql" || tab?.kind === "table") retainedId.current = tab.id;
+  // Comparison is a temporary document beside the query. Keep its source mounted so returning
+  // preserves the editor, local grid filter, selection and exact scroll position without a requery.
+  const retained = useDbSelector(s => s.tabs.find(t => t.id === retainedId.current) ?? null);
   const db = {
     loaded: useDbSelector((s) => s.loaded),
     tabs: { length: useDbSelector((s) => s.tabs.length) },
@@ -59,13 +68,17 @@ export function DbTab() {
       ) : (
         <>
           <DockRegion region="sidebar">
-<div className="dbx-finder-entry"><button type="button" className="dbx-btn" onClick={()=>showObjectFinder()}>查找数据库对象</button></div>
             <ConnTree />
           </DockRegion>
           <DockRegion region="document">
             <div className="dbx-page" role="tabpanel" id={tab ? dbPanelId(tab.id) : "dbx-panel-empty"} aria-labelledby={tab ? dbTabId(tab.id) : "dbx-tab-empty"}>
-              {tab?.kind === "sql" && <SqlConsole tab={tab} />}
-              {tab?.kind === "table" && <TablePage key={tab.id} tab={tab} />}
+              <div className="dbx-document-host" hidden={tab?.kind === "compare" || !tab}>
+                <ViewActivityContext.Provider value={active && tab?.kind !== "compare"}>
+                  {retained?.kind === "sql" && <SqlConsole tab={retained} />}
+                  {retained?.kind === "table" && <TablePage key={retained.id} tab={retained} />}
+                </ViewActivityContext.Provider>
+              </div>
+              {tab?.kind === "compare" && <ComparisonWorkspace tab={tab} />}
               {!tab && (
                 <EmptyState
                   icon="database"

@@ -74,8 +74,10 @@
 .wb-code-tools { min-width:0; flex-shrink:0; }
 .wb-code-tools:empty { display:none; }
 /* 执行/分组工具与文件标签合并成一条 36px：600px 高窗口正文净增约 36px。 */
-.app-shell .wb-tabs { display:flex; align-items:center; gap:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
-.app-shell .wb-tabs > .wb-tab { flex-shrink:0; }
+.app-shell .wb-tabs { display:flex; align-items:center; gap:0; overflow:hidden; }
+/* 只滚动文件标签，所有标签入口和执行工具始终留在可操作区。 */
+.app-shell .wb-tabs-scroll { display:flex; align-items:center; align-self:stretch; flex:1; min-width:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
+.app-shell .wb-tabs-scroll > .wb-tab { flex-shrink:0; }
 .app-shell .wb-tabs-tools { display:flex; align-items:center; flex-shrink:0; min-width:0; }
 .app-shell .wb-tabs-tools .wb-editor-tools { gap:6px; padding:0 4px; min-height:0; border:0; background:transparent; }
 .app-shell .wb-tabs-tools :is(.wb-editor-tools-label,.wb-editor-tools-spacer) { display:none; }
@@ -239,7 +241,7 @@ html .app-side[data-collapsed] .app-side-label { display:block; max-width:100%; 
 .app-shell :is(.wb-nav-btn,.wb-icon-btn) { width:28px; height:28px; border-radius:var(--r-control); }
 .app-shell .wb-outline-btn { height:28px; border-radius:var(--r-control); }
 .app-shell .wb-pane-title { min-height:36px; }
-.app-shell .wb-crumb-row { min-height:36px; }
+.app-shell .wb-crumb-row { height:32px; min-height:32px; border-bottom:1px solid hsl(var(--border)); }
 @media(max-width:1200px) { .wb-workspace-pick { max-width:150px; } }
 @media(max-width:900px) { .wb-window-button { width:32px; } .wb-workspace-pick { max-width:120px; } .app-topbar .wb-global-search { width:clamp(150px,24vw,300px); } .wb-global-search kbd { display:none; } }
 @media(max-width:640px) { .app-brand-name,.wb-header-divider { display:none; } .wb-workspace-pick { max-width:110px; } }

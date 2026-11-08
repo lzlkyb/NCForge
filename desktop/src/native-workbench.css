@@ -1,0 +1,60 @@
+/* Native workbench chrome shares the same semantic colors in both materials.
+   Reading surfaces remain opaque so syntax, tables and logs stay predictable. */
+.app-shell .wb-content-frame {
+  border-radius: 0;
+  border-top: 0;
+  border-right: 0;
+}
+.app-shell .wb-toolbar {
+  background: hsl(var(--card));
+}
+.app-shell .wb-tabbar {
+  background: hsl(var(--chrome));
+}
+.app-shell .wb-tree {
+  background: hsl(var(--chrome));
+}
+.app-shell .app-side-item[data-active] {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+  box-shadow: none;
+}
+
+/* Material belongs to the window frame, never to an editor or a result grid. */
+html[data-ui-style="glass"],
+html.dark[data-ui-style="glass"] {
+  --glass-stage: hsl(var(--chrome));
+  --glass-backdrop: none;
+  --glass-panel: hsl(var(--chrome));
+  --glass-wash: transparent;
+  --glass-sheen: none;
+  --glass-document: hsl(var(--card));
+  --glass-depth: none;
+}
+html[data-ui-style="glass"] .app-shell .wb-content-frame {
+  border-radius: 0;
+}
+html[data-ui-style="glass"] .app-shell .wb-toolbar {
+  background: hsl(var(--card));
+}
+html[data-ui-style="glass"] .app-shell .wb-tabbar {
+  background: hsl(var(--chrome));
+}
+
+/* An unread changelog is available information, not an urgent incident. */
+.app-shell .changelog-dot {
+  animation: none;
+}
+.app-shell .ui-button {
+  transition: background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.app-shell .ui-button:active:not(:disabled) {
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .ui-button {
+    transition: none;
+  }
+}

@@ -200,7 +200,8 @@ describe("文件页", () => {
     await render("files");
     await act(async () => setSession({ panelOpen: true, panelTab: "svc" }));
     expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
-    expect(container.querySelector(".sc-run-heading strong")?.textContent).toBe("中间件");
+    expect(container.querySelector('.sc-run-toolbar [role="tablist"]')?.getAttribute("aria-orientation")).toBe("horizontal");
+    expect(container.querySelector('.sc-run-toolbar [role="tab"][aria-selected="true"] strong')?.textContent).toBe("中间件");
     await act(async () => buttonByText("展开阅读")!.click());
     // 展开底部面板不再给代码面加 `hidden`（那会让两个面同时隐藏、主区纯白），
     // 改由 `.wb-main[data-panel-expanded]` 在 CSS 里收起两个面；

@@ -53,6 +53,10 @@ describe("快捷键一览", () => {
     expect(text).toContain("编辑器");
     expect(text).toContain("保存当前文件");
     expect(text).toContain("Eclipse");
+    // 执行按钮上不再印 Ctrl+Enter 之后，这里成了用户唯一能查到它的地方，别被顺手删掉
+    expect(text).toContain("SQL 控制台");
+    expect(text).toContain("执行当前语句");
+    expect(text).toContain("Ctrl+Enter");
   });
 
   it("输入框与编辑器里按 ? 不抢键（代码里的三元符要能打出来）", () => {

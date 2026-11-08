@@ -5,6 +5,7 @@ import { ChangeList } from "./ChangeList";
 import { CommitPanel } from "./CommitPanel";
 import { RightPane } from "./RightPane";
 import { SvnToolbar } from "./SvnToolbar";
+import { SvnReviewFiles } from "./SvnReviewFiles";
 import { SvnCommitDrawer } from "./SvnCommitDrawer";
 import { SvnCommitOutcome } from "./SvnCommitOutcome";
 import { SvnScanNotice } from "./SvnScanNotice";
@@ -16,7 +17,7 @@ import { friendlySvnError, isMarkable, keyOf, type ChangeItem } from "../../lib/
 import { getSession, useWorkspaceRoot } from "../../lib/workspaceSession";
 import { nextSvnUnreviewed, svnVisibleGroups } from "../../lib/svnList";
 import { useSvnListPrefs } from "../../lib/svnListPrefs";
-import { isSvnCommittable, isSvnPicked, syncSvnDraft, toggleSvnPicked, useSvnDraft } from "../../lib/svnDraft";
+import { isSvnCommittable, isSvnPicked, syncSvnDraft, useSvnDraft } from "../../lib/svnDraft";
 import { workspaceEpoch } from "../../lib/workspaceEpoch";
 import { setSideOpen } from "../../lib/layoutStore";
 import "../../svn-workbench.css";
@@ -32,6 +33,7 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
   const [busy,setBusy] = useState<SvnBusy>(null), [auth,setAuth] = useState<SvnAuth>({open:false,error:null});
   const [revertTarget,setRevertTarget] = useState<ChangeItem | null>(null), [hkOpen,setHkOpen] = useState(false), [marking,setMarking] = useState(false);
   const markLock = useRef(false);
+  const [focused,setFocused] = useState(false);
   const {info,status,reviewed,mark,refresh,scanProgress} = useSvnStatus();
   const {doUpdate,doCommit,doRevert,doResolve,writeBusy} = useSvnChanges({setBusy,setAuth,refresh,onCommitted:() => svnSession.set({commitOpen:false,selectedPath:null}),onReverted:() => svnSession.set({selectedPath:null})});
   const view = status.data?.changes ?? {groups:[],shown:0,total:0,ignored:0};
@@ -73,11 +75,12 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
   return <>
     <DockRegion region="toolbar"><SvnToolbar rev={info.data?.revision ?? 0} info={info.data} url={info.data?.url ?? null} generatedAtMs={status.data?.generatedAtMs ?? null} shown={status.data?.changes.shown ?? null} fetching={status.isFetching} scanned={scanProgress} busy={writeBusy?.kind ?? busy} canRevert={!!selected && !selected.isDir && !locked} revertTitle={selected ? `备份并撤销 ${selected.rel}` : "先选择文件"} committable={eligible.length} pickedCount={pickedCount} conflicts={items.filter(it => it.letter === "C").length} hkOpen={hkOpen} onRefresh={refreshNow} onUpdate={() => void doUpdate()} onRevert={() => setRevertTarget(selected)} onCommit={() => { svnSession.set({commitOpen:!commitOpen}); dock?.showDocument(); }} onHousekeeping={() => setHkOpen(true)} onHistory={showHistory} onFiles={() => setSideOpen(true)} /></DockRegion>
     <DockRegion region="sidebar"><ChangeList view={view} root={root} reviewed={reviewed} picked={draft.picked} busy={selectionLocked} selected={selectedPath} loading={status.isFetching} error={status.error ? friendlySvnError(status.error) : null} onSelect={pick} onOpenFile={openFile} showIgnored={showIgnored} onToggleIgnored={() => svnSession.set({showIgnored:!showIgnored})} /></DockRegion>
-    <DockRegion region="document"><div className="vc-review-document">
+    <DockRegion region="document"><div className="vc-review-document" data-focus={focused || undefined}>
+      {focused && <div className="vc-focus-bar"><SvnReviewFiles items={queue.length ? queue : items.filter(it=>showIgnored || !it.ignored)} selected={selectedPath} onSelect={pick}/><button type="button" className="vc-btn vc-btn-sm vc-focus-exit" onClick={()=>{setFocused(false);requestAnimationFrame(()=>workarea.current?.querySelector<HTMLButtonElement>('[aria-label="专注对比"]')?.focus());}}>退出专注对比</button></div>}
       <SvnScanNotice error={status.error} fetching={status.isFetching} onAuth={() => setAuth({open:true,error:null})} onRefresh={refreshNow} />
       <SvnCommitOutcome root={root} onHistory={showHistory} onRefresh={refreshNow} />
       <div className="vc-review-workarea" ref={workarea}>
-        <div className="vc-review-main"><RightPane file={selected} mode={mode} onMode={next => svnSession.set({mode:next})} reviewed={selected ? reviewed.has(keyOf(selected.path)) : false} busy={locked} disabled={locked || marking} picked={selected ? isSvnPicked(draft.picked,selected.path) : false} onTogglePicked={() => selected && !selectionLocked && toggleSvnPicked(root,selected.path)} onToggleReviewed={toggleReviewed} onOpenFile={openFile} onMarkAndNext={markAndNext} onResolve={choice => selected && void doResolve(selected.path,choice)} onLater={() => svnSession.set({selectedPath:null})} /></div>
+        <div className="vc-review-main"><RightPane file={selected} mode={mode} onMode={next => svnSession.set({mode:next})} reviewed={selected ? reviewed.has(keyOf(selected.path)) : false} busy={locked} disabled={locked || marking} focused={focused} onFocus={()=>{setFocused(true);requestAnimationFrame(()=>workarea.current?.parentElement?.querySelector<HTMLButtonElement>('.vc-focus-exit')?.focus());}} onToggleReviewed={toggleReviewed} onOpenFile={openFile} onMarkAndNext={markAndNext} onResolve={choice => selected && void doResolve(selected.path,choice)} onLater={() => svnSession.set({selectedPath:null})} /></div>
         <SvnCommitDrawer host={workarea} open={commitOpen} onClose={closeCommit}><CommitPanel items={items} root={root} reviewed={reviewed} busy={locked} onSubmit={(message,paths) => { void doCommit(message,paths); }} onCancel={closeCommit} onSelect={pick} /></SvnCommitDrawer>
       </div>
     </div></DockRegion>
