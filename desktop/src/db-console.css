@@ -230,6 +230,11 @@
 .dbx-gc.null { color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); }
 .dbx-gc.rn { text-align: right; color: hsl(var(--muted-foreground)); background: hsl(var(--chrome)); position: sticky; left: 0; z-index: 1; }
 .dbx-grow[data-odd] .dbx-gc.rn { background: hsl(var(--chrome)); }
+/* 行级增删：底色之外行号列还有 +/− 标记（ResultGrid 渲染），色盲与高对比主题下同样能分辨 */
+.dbx-grow[data-state="added"] .dbx-gc { background: color-mix(in srgb, hsl(var(--success)) 9%, hsl(var(--card))); }
+.dbx-grow[data-state="added"] .dbx-gc.rn { background: color-mix(in srgb, hsl(var(--success)) 16%, hsl(var(--chrome))); color: hsl(var(--success-ink)); font-weight: 600; }
+.dbx-grow[data-state="deleted"] .dbx-gc { background: color-mix(in srgb, hsl(var(--destructive)) 8%, hsl(var(--card))); color: hsl(var(--muted-foreground)); text-decoration: line-through; }
+.dbx-grow[data-state="deleted"] .dbx-gc.rn { background: color-mix(in srgb, hsl(var(--destructive)) 14%, hsl(var(--chrome))); color: hsl(var(--destructive-ink)); text-decoration: none; font-weight: 600; }
 .dbx-grid { --grid-selection-fill: hsl(var(--selection-inactive)); --grid-selection-edge: hsl(var(--muted-foreground)); }
 .dbx-grid:focus-within { --grid-selection-fill: hsl(var(--selection-bg)); --grid-selection-edge: hsl(var(--selection-marker)); }
 .dbx-grid .dbx-gc[data-cell] { outline: none; background: var(--grid-selection-fill); }
@@ -525,3 +530,33 @@
 @media (prefers-reduced-motion:reduce) {
   .dbx-execution-track[data-indeterminate] i { animation:none; }
 }
+
+/* ── 表结构对比（DDL diff） ───────────────────────────────────────────── */
+.dbx-diff-sides { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.dbx-diff-side { display:flex; align-items:center; gap:6px; min-width:0; }
+.dbx-diff-side-label { font-size:var(--dbx-fs-meta); color:hsl(var(--muted-foreground)); }
+.dbx-diff { display:flex; flex-direction:column; gap:8px; margin-top:10px; min-height:0; overflow:auto; }
+.dbx-diff-sum { display:flex; align-items:center; gap:8px; font-size:var(--dbx-fs-meta); flex-wrap:wrap; }
+.dbx-diff-chip { padding:2px 8px; border-radius:999px; background:hsl(var(--secondary)); color:hsl(var(--muted-foreground)); font-variant-numeric:tabular-nums; }
+.dbx-diff-chip[data-tone="warn"] { background:hsl(var(--warning) / .14); color:hsl(var(--warning-ink)); }
+.dbx-diff-chip[data-tone="danger"] { background:hsl(var(--destructive) / .12); color:hsl(var(--destructive-ink)); }
+.dbx-diff-chip[data-tone="info"] { background:hsl(var(--primary) / .12); color:hsl(var(--primary)); }
+.dbx-diff-toggle { display:flex; align-items:center; gap:6px; color:hsl(var(--muted-foreground)); }
+.dbx-diff-note { display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:8px; background:hsl(var(--secondary) / .6); font-size:var(--dbx-fs-meta); }
+.dbx-diff-note[data-tone="warn"] { background:hsl(var(--warning) / .1); color:hsl(var(--warning-ink)); }
+.dbx-diff-note[data-tone="info"] { background:hsl(var(--primary) / .08); color:hsl(var(--foreground)); }
+.dbx-diff-badge { padding:1px 7px; border-radius:999px; font-size:var(--dbx-fs-meta); background:hsl(var(--secondary)); color:hsl(var(--muted-foreground)); }
+.dbx-diff-badge[data-status="onlyLeft"] { background:hsl(var(--warning) / .16); color:hsl(var(--warning-ink)); }
+.dbx-diff-badge[data-status="onlyRight"] { background:hsl(var(--destructive) / .14); color:hsl(var(--destructive-ink)); }
+.dbx-diff-badge[data-status="changed"] { background:hsl(var(--primary) / .14); color:hsl(var(--primary)); }
+.dbx-diff .dbx-meta tr[data-status="onlyLeft"] td:first-child { box-shadow:inset 3px 0 hsl(var(--warning)); }
+.dbx-diff .dbx-meta tr[data-status="onlyRight"] td:first-child { box-shadow:inset 3px 0 hsl(var(--destructive)); }
+.dbx-diff .dbx-meta tr[data-status="changed"] td:first-child { box-shadow:inset 3px 0 hsl(var(--primary)); }
+.dbx-diff-idx { display:flex; flex-direction:column; gap:6px; }
+.dbx-diff-sql { border:1px solid hsl(var(--border)); border-radius:8px; overflow:hidden; }
+.dbx-diff-sql-hd { display:flex; align-items:center; gap:6px; padding:6px 10px; background:hsl(var(--chrome)); font-size:var(--dbx-fs-meta); font-weight:600; }
+.dbx-diff-sql-body { max-height:260px; overflow:auto; padding:8px 10px; display:flex; flex-direction:column; gap:8px; }
+.dbx-diff-stmt { border-left:3px solid hsl(var(--border)); padding-left:8px; }
+.dbx-diff-stmt[data-destructive] { border-left-color:hsl(var(--destructive)); }
+.dbx-diff-stmt-why { display:flex; align-items:center; gap:6px; font-size:var(--dbx-fs-meta); color:hsl(var(--muted-foreground)); }
+.dbx-diff-stmt pre { margin:2px 0 0; padding:6px 8px; border-radius:6px; background:hsl(var(--secondary) / .5); font-size:var(--dbx-fs-meta); white-space:pre-wrap; word-break:break-all; }

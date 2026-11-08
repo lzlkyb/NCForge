@@ -190,6 +190,27 @@ fn settle_transaction_flag(
     }
 }
 
+/// 重连前「有没有未提交事务」的唯一裁决。
+///
+/// `confirmed` 是 `v$transaction` 给的真源：`Some(false)` = 数据库确认这条会话没有事务，
+/// 可以直接放行；`Some(true)` = 确认有事务；`None` = 字典不可读（低权限账号、连接已坏），
+/// 退回本地标志与 DML 计数。
+///
+/// 🔴 真源优先而不是「两者取或」：手写大写 COMMIT、PL/SQL 内部提交、别的工具回滚之后，
+/// 本地计数会一直是脏的。若让本地标志有一票否决权，用户会被永久锁在
+/// 「请先提交或回滚」，只能杀进程重开 —— 这正是老工具比我们确定的那一层。
+pub(crate) fn reconnect_blocked(
+    confirmed: Option<bool>,
+    local_flag: bool,
+    local_statements: u64,
+) -> bool {
+    match confirmed {
+        Some(false) => false,
+        Some(true) => true,
+        None => local_flag || local_statements > 0,
+    }
+}
+
 pub(crate) fn connection_lost(message: &str) -> bool {
     let text = message.to_ascii_lowercase();
     let jdbc_code = text
@@ -326,8 +347,10 @@ impl EngineHandle {
             };
         }
         if readonly {
-            if matches!(cmd, "exec" | "execBound" | "query")
-                && !readonly_query(args.first().copied().unwrap_or(""))
+            if matches!(
+                cmd,
+                "exec" | "execBound" | "execFull" | "execFullBound" | "query"
+            ) && !readonly_query(args.first().copied().unwrap_or(""))
             {
                 return Err(BridgeError::new(
                     "readonly",
@@ -344,20 +367,29 @@ impl EngineHandle {
             }
             if !state.lost {
                 // Check under the session lock so a write cannot slip in before reconnect.
-                if state.may_have_transaction {
+                // 先问数据库真源（`v$transaction`）。查不到（低权限 / 连接已坏）时
+                // confirmed=None，自动退回原来那套保守的本地判定。
+                let confirmed = self
+                    .raw_call("txActive", &[], PROBE_TIMEOUT)
+                    .ok()
+                    .and_then(|v| v.get("active").and_then(Value::as_bool));
+                // ping 的失败仍要按「连接丢失」记账，不能因为真源可用就吞掉。
+                let status = self
+                    .raw_call("ping", &[], PROBE_TIMEOUT)
+                    .map_err(|e| Self::record_loss(&mut state, e, false))?;
+                let local_statements = status
+                    .pointer("/tx/statements")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                if reconnect_blocked(confirmed, state.may_have_transaction, local_statements) {
                     return Err(BridgeError::new(
                         "sql",
                         "请先提交或回滚当前会话（可执行 COMMIT 或 ROLLBACK），再重新连接",
                     ));
                 }
-                let status = self
-                    .raw_call("ping", &[], PROBE_TIMEOUT)
-                    .map_err(|e| Self::record_loss(&mut state, e, false))?;
-                if status.pointer("/tx/statements").and_then(Value::as_u64) != Some(0) {
-                    return Err(BridgeError::new(
-                        "sql",
-                        "请先提交或回滚当前会话的事务，再重新连接",
-                    ));
+                // 数据库确认没有事务：把本地的脏标志一起清掉，别让下一次重连再撞同一堵墙。
+                if confirmed == Some(false) {
+                    state.may_have_transaction = false;
                 }
             }
             self.reopen(&mut state, timeout, reconnect)?;
@@ -374,7 +406,9 @@ impl EngineHandle {
                 "数据库会话已断开，请重新连接并核对事务状态",
             ));
         }
-        let execution = matches!(cmd, "exec" | "execBound");
+        // execFull / execFullBound 是导出与搬运的取数通道，语义上就是执行：
+        // 少了它们会绕过只读策略、取消 epoch、以及「会话被用过」的标记。
+        let execution = matches!(cmd, "exec" | "execBound" | "execFull" | "execFullBound");
         if execution
             && state
                 .last_success
@@ -818,6 +852,19 @@ mod tests {
 
     // ── P1-1：手写大写 COMMIT / 执行失败的 DML 不该把会话锁成「有未提交事务」 ──
 
+    /// 真源裁决的四种组合：本地脏计数不能压过数据库的「没有事务」。
+    #[test]
+    fn db_truth_overrides_stale_local_transaction_counter() {
+        // 真源说没有：本地两个计数器都脏着，也必须放行
+        assert!(!reconnect_blocked(Some(false), true, 7));
+        // 真源说有：即使本地一条都没记（PL/SQL 内部开的事务），也要拦
+        assert!(reconnect_blocked(Some(true), false, 0));
+        // 真源不可读：完全退回本地判定，两种脏状态都拦、干净状态放行
+        assert!(reconnect_blocked(None, true, 0));
+        assert!(reconnect_blocked(None, false, 3));
+        assert!(!reconnect_blocked(None, false, 0));
+    }
+
     #[test]
     fn uppercase_commit_clears_pending_transaction_flag() {
         for sql in ["COMMIT", "RoLlBaCk"] {
@@ -1159,7 +1206,7 @@ mod readonly_tests {
         let primary = EngineHandle::rust().with_policy(policy.clone());
         let slot = EngineHandle::rust().with_policy(policy);
         for h in [&primary, &slot] {
-            for cmd in ["exec", "execBound", "query"] {
+            for cmd in ["exec", "execBound", "execFull", "execFullBound", "query"] {
                 assert_eq!(
                     h.call(cmd, &["delete from t"], Duration::from_secs(1))
                         .unwrap_err()

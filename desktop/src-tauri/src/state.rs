@@ -88,6 +88,10 @@ pub struct AppState {
     /// 取消后保留已经写入的部分文件（合法前缀）。
     pub export_cancels:
         std::sync::Mutex<std::collections::HashMap<u64, Arc<std::sync::atomic::AtomicBool>>>,
+    /// 表 → 表 直连搬运的取消标志（按前端给的 `transferId`）。
+    /// 与导出分开一张表：同一次会话里可能一边导出、一边搬运，两者不能被彼此的取消串台。
+    pub transfer_cancels:
+        std::sync::Mutex<std::collections::HashMap<u64, Arc<std::sync::atomic::AtomicBool>>>,
     /// 全库按值反查：按搜索实例登记「取消标志 + 它正在用的临时会话」。
     ///
     /// 为什么带上引擎句柄：一批表扫下来，单张表的全表扫描可能要几十秒到几分钟。
@@ -144,6 +148,7 @@ impl AppState {
             debug: std::sync::Mutex::new(Default::default()),
             compile_cancel: std::sync::atomic::AtomicBool::new(false),
             export_cancels: std::sync::Mutex::new(Default::default()),
+            transfer_cancels: std::sync::Mutex::new(Default::default()),
             search_cancels: std::sync::Mutex::new(Default::default()),
             patch_cancel: std::sync::atomic::AtomicBool::new(false),
             watcher: std::sync::Mutex::new(None),

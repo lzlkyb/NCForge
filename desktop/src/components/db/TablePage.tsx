@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ImportDialog } from "./ImportDialog";
+import { StructDiffDialog } from "./StructDiffDialog";
+import { TransferRowsDialog } from "./TransferRowsDialog";
 import { SourceView } from "./SourceView";
 import { TableData } from "./TableData";
 import { TableMoreActions } from "./TableMoreActions";
@@ -37,7 +39,7 @@ export function TablePage({ tab }: { tab: TableTab }) {
   const isView = rt.tables?.find((t) => t.name === tab.table)?.kind === "VIEW";
   const [cols, setCols] = useState<ColumnInfo[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [dlg, setDlg] = useState<"exp" | "imp" | null>(null);
+  const [dlg, setDlg] = useState<"exp" | "imp" | "diff" | "move" | null>(null);
 
   useEffect(() => {
     setCols(null);
@@ -78,6 +80,8 @@ export function TablePage({ tab }: { tab: TableTab }) {
             disabled={rt.status !== "connected"}
             onExport={() => setDlg("exp")}
             onImport={() => setDlg("imp")}
+            onStructDiff={() => setDlg("diff")}
+            onMove={() => setDlg("move")}
           />
         )}
       </div>
@@ -97,6 +101,12 @@ export function TablePage({ tab }: { tab: TableTab }) {
           onClose={() => setDlg(null)}
           onDone={() => toast("已有数据写入；关闭此窗口后点击查询刷新表数据，当前编辑尚未丢弃", "info")}
         />
+      )}
+      {dlg === "diff" && (
+        <StructDiffDialog tabId={tab.id} connId={tab.connId} table={lower} onClose={() => setDlg(null)} />
+      )}
+      {dlg === "move" && (
+        <TransferRowsDialog tabId={tab.id} connId={tab.connId} table={lower} onClose={() => setDlg(null)} />
       )}
       {rt.status !== "connected" && <div className="dbx-empty">连接已断开，先在左侧连上</div>}
       {err && <div className="dbx-err">{err}</div>}

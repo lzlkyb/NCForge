@@ -7,7 +7,7 @@ import type { Cell, ColumnInfo, TableInfo } from "../../lib/dbApi";
 const mocks=vi.hoisted(()=>({invoke:vi.fn(),confirm:vi.fn(),ask:vi.fn()}));
 vi.mock("../../lib/tauri",()=>({invoke:mocks.invoke}));
 vi.mock("../../lib/dbConfirm",()=>({confirmProdWrite:mocks.confirm,ask:mocks.ask}));
-vi.mock("./ResultTable",()=>({ResultTable:({edit,rows,tools,foot}:{edit?:GridEdit;rows:Cell[][];tools:ReactNode;foot:ReactNode})=><><output>{JSON.stringify(rows)}</output><button onClick={()=>edit?.onEdit(0,1,"new-A")}>edit A</button><button onClick={()=>edit?.onEdit(1,1,"new-B")}>edit B</button>{tools}{foot}</>}));
+vi.mock("./ResultTable",()=>({ResultTable:({edit,rows,tools,foot}:{edit?:GridEdit;rows:Cell[][];tools:ReactNode;foot:ReactNode})=><><output>{JSON.stringify(rows)}</output><button onClick={()=>edit?.onEdit(0,1,"new-A")}>edit A</button><button onClick={()=>edit?.onEdit(1,1,"new-B")}>edit B</button><button onClick={()=>edit?.onEdit(2,0,"900")}>fill draft id</button><button onClick={()=>edit?.onEdit(2,1,"new-row")}>fill draft code</button><button onClick={()=>edit?.onDeleteRow?.(0)}>delete row 0</button>{tools}{foot}</>}));
 import { TableData } from "./TableData";
 import { __resetDbForTest, connect, setConns, type TableTab } from "../../lib/dbStore";
 (globalThis as unknown as {IS_REACT_ACT_ENVIRONMENT:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
@@ -23,7 +23,7 @@ beforeEach(async()=>{
   if(cmd==="db_read_only") return Promise.resolve({readOnly:false,tx});
   if(cmd==="db_meta") return Promise.resolve(args.kind==="tables"?{tables:[] as TableInfo[]}:{names:{}});
   if(cmd==="db_exec_bound") {
-   const sql=String(args.sql);if(sql.startsWith("update")) {const params=args.params as Cell[];return Promise.resolve({kind:"update",updateCount:params[0]==="new-A"?1:0,tx:{...tx,statements:1,rows:1},ms:1});}
+   const sql=String(args.sql);if(sql.startsWith("update")||sql.startsWith("insert")||sql.startsWith("delete")) {const params=args.params as Cell[];return Promise.resolve({kind:"update",updateCount:sql.startsWith("update")&&params[0]!=="new-A"?0:1,tx:{...tx,statements:1,rows:1},ms:1});}
    return Promise.resolve({kind:"rows",columns:cols,rows:sql.startsWith("select * from TEST where")?[[2,"changed-by-other"]]:[[1,"old-A"],[2,"old-B"]],hasMore:false,tx,ms:1});
   }
   return Promise.resolve(null);
@@ -95,4 +95,26 @@ it("shows changed source identity beside retained table rows and blocks writing 
  expect(host.querySelector("output")?.textContent).toContain("old-A");
  await act(async()=>button("写回 1 行").click());
  expect(mocks.invoke.mock.calls.filter(([cmd,args])=>cmd==="db_exec_bound" && String(args.sql).startsWith("update"))).toHaveLength(0);
+});
+it("adds rows as insert and deletes rows as delete, running delete before insert",async()=>{
+ act(()=>button("delete row 0").click());
+ act(()=>button("+ 新增行").click());
+ act(()=>button("fill draft id").click());act(()=>button("fill draft code").click());
+ act(()=>button("复核修改").click());
+ expect(host.textContent).toContain("待写回");
+ expect(button("写回 2 行").disabled).toBe(false);
+ await act(async()=>button("写回 2 行").click());
+ const writes=mocks.invoke.mock.calls.map(([,args])=>String(args?.sql ?? "")).filter(sql=>/^(delete|insert)/.test(sql));
+ expect(writes[0]).toBe("delete from TEST where ID = :1");
+ expect(writes[1]).toBe("insert into TEST (ID, CODE) values (:1, :2)");
+});
+
+it("blocks writing a new row when a non-null column without default is empty",async()=>{
+ act(()=>button("+ 新增行").click());
+ act(()=>button("fill draft code").click());
+ act(()=>button("复核修改").click());
+ await act(async()=>button("写回 1 行").click());
+ expect(mocks.invoke.mock.calls.filter(([,args])=>String(args?.sql ?? "").startsWith("insert"))).toHaveLength(0);
+ // 被本地必填校验拦下：一条 insert 都没发，待写回清单保持原样。
+ expect(button("写回 1 行")).toBeTruthy();
 });

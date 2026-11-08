@@ -8,7 +8,7 @@
  * 所以把它从组件里拆出来做纯函数，配单测锁住——组件里那些 hook 只是壳。
  */
 
-import type { ParsedCsv } from "./csvParse";
+import type { ParsedRows } from "./csvParse";
 
 /** 一条映射：文件第 `from` 列 → 目标表第 `to` 列。`to < 0` 表示这一列不导入。 */
 export interface Mapping {
@@ -42,7 +42,7 @@ export interface ImportPlan {
  * 只有**行比映射列短**（文件某行少了几格）才补 `null`。
  */
 export function planImport(
-  csv: ParsedCsv,
+  csv: ParsedRows,
   target: TargetCol[],
   picked: Mapping[],
   batch: number,

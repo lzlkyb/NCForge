@@ -9,6 +9,7 @@ import { fitWidth, initialWidths, rowNumberWidth, type SortState } from "../../l
 import { copyText } from "../../lib/utils";
 import { toast } from "../ui/toast";
 import { ResultGridHeader } from "./ResultGridHeader";
+import { GridCellEditor } from "./GridCellEditor";
 import { useResultGridNavigation } from "../../hooks/useResultGridNavigation";
 import { getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
 import { selectionText, type Selection } from "../../lib/dbResultTools";
@@ -16,20 +17,8 @@ import "../../db-grid-inspector.css";
 
 const OVERSCAN = 12; // 可视区上下多渲染的行数，滚得快时不露白
 
-export interface CellPos {
-  /** 原始行号（rows 下标），不是显示顺序。 */
-  r: number;
-  c: number;
-}
-
-export interface GridEdit {
-  canEdit: (col: number) => boolean;
-  /** 改过的格子：`行:列` → 新值。 */
-  changed: Map<string, Cell>;
-  onEdit: (row: number, col: number, value: Cell) => void;
-}
-
-export interface ResultGridApi { focusActive: () => void }
+export type { CellPos, GridEdit, ResultGridApi } from "./gridEdit";
+import type { CellPos, GridEdit, ResultGridApi } from "./gridEdit";
 
 /**
  * 结果表：手写虚拟滚动（只渲染可视行）、表头排序、拖/双击自适应列宽、单元格选择与编辑。
@@ -176,7 +165,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   };
 
   const startEdit = (pos: CellPos) => {
-    if (!edit?.canEdit(pos.c)) return onOpen?.();
+    if (!edit?.canEdit(pos.c, pos.r)) return onOpen?.();
     const v = valueAt(pos.r, pos.c);
     setEditing({ pos, value: v === null ? "" : String(v) });
   };
@@ -228,38 +217,35 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
           onSel={onSel} onSort={onSort} onHeaderMenu={onHeaderMenu} resize={resize} fit={fit} codec={codec} />
         {order.slice(first, last).map((r, j) => {
           const i = first + j;
+          const state = edit?.rowState?.(r);
           return (
             <div
               key={r}
               className="dbx-grow"
               style={{ top: HEAD_H + i * ROW_H, width: total }}
               data-odd={i % 2 === 1 || undefined}
+              data-state={state}
               role="row"
               aria-rowindex={i + 2}
             >
-              <div className="dbx-gc rn" data-range-heading={gridSelectionHeading(bounds,i,"row")} style={{ width: rnW }} role="rowheader" aria-colindex={1} onMouseDown={()=> {if(visible.length) {onSel({r,c:visible[0]});onSel({r,c:visible[visible.length-1]},true);}}}>{i + 1}</div>
+              <div className="dbx-gc rn" data-range-heading={gridSelectionHeading(bounds,i,"row")} style={{ width: rnW }} role="rowheader" aria-colindex={1} title={state === "added" ? "未写回的新增行" : state === "deleted" ? "待删除，写回时执行" : undefined} onMouseDown={()=> {if(visible.length) {onSel({r,c:visible[0]});onSel({r,c:visible[visible.length-1]},true);}}}>{state === "added" ? "+ " : state === "deleted" ? "− " : ""}{i + 1}</div>
               {viewport.map(({column:k,index:vi,width}) => {
                 const v = valueAt(r, k);
                 const selected = gridSelectionCell(bounds,i,vi,sel?.r===r && sel?.c===k), isSel=!!selected["data-cell"];
                 if (isSel && editing && editing.pos.r === r && editing.pos.c === k) {
                   return (
-                    <div key={k} id={`dbx-cell-${r}-${k}`} className={`dbx-gc${edit?.changed.has(`${r}:${k}`) ? " chg" : ""}`} {...selected} data-editing data-focus-container role="gridcell" aria-colindex={vi + 2} style={{...cellStyle(k),padding:0}}>
-                      <input
-                        className="dbx-gedit"
-                        autoFocus
-                        value={editing.value}
-                        onChange={(e) => setEditing({ ...editing, value: e.target.value })}
-                        onBlur={commitEdit}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") commitEdit();
-                          if (e.key === "Escape") {
-                            cancelEdit.current = true;
-                            setEditing(null);
-                            boxRef.current?.focus();
-                          }
-                        }}
-                      />
-                    </div>
+                    <GridCellEditor
+                      key={k}
+                      id={`dbx-cell-${r}-${k}`}
+                      colIndex={vi + 2}
+                      style={cellStyle(k)}
+                      value={editing.value}
+                      changed={edit?.changed.has(`${r}:${k}`) ?? false}
+                      selected={selected}
+                      onChange={v => setEditing({ ...editing, value: v })}
+                      onCommit={commitEdit}
+                      onCancel={() => { cancelEdit.current = true; setEditing(null); boxRef.current?.focus(); }}
+                    />
                   );
                 }
                 const cls = ["dbx-gc", numeric[k] && "n", v === null && "null", edit?.changed.has(`${r}:${k}`) && "chg"].filter(Boolean).join(" ");

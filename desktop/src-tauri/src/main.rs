@@ -456,8 +456,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::db_transfer_open,
             commands::db_export_cancel,
             commands::db_export_reveal,
-            // 导入（B3）：CSV/TSV → 表，走独立会话的事务
+            // 导入（B3）：CSV/TSV/JSON/XLSX → 表，走独立会话的事务
+            commands::db_xlsx_read,
             commands::db_import_rows,
+            // 表结构对比（DDL diff）：只生成脚本，绝不执行
+            commands::db_struct_diff,
+            // 表 → 表 直连搬运（A 库 → B 库，不落文件中转）
+            commands::db_transfer_plan,
+            commands::db_transfer_rows,
+            commands::db_transfer_rows_cancel,
             // 全库按值反查（只读；每表一条查询 + 进度/取消）
             commands::db_value_search,
             commands::db_value_search_cancel,

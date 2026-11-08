@@ -277,6 +277,8 @@ export function cellText(v: Cell, max = 400): string {
  *
  * 🔴 与 Rust `db_rust.rs::preview_text`、Java `NcDbBridge.java::clobText` 是同一份文案：
  * 改一边必须改三边，否则「加载完整值」按钮会认不出来。
+ * 导出 / 搬运走的是另一条全量通道（`execFull`），截断尾巴是「只取前 1M」，
+ * 由 Rust `is_lob_preview` 在后端判定，网格里不会出现那种值，这里不必认它。
  */
 const LOB_PREVIEW_RE = / …（共 ([^）]*) 个字符，只显示前 \d+，点「加载完整值」查看）$/;
 

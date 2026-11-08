@@ -100,6 +100,13 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
     labels: columns.map(c => zh?.[c.name.toLowerCase()] || c.name),
     source: transferSource ?? { connId: null, resultId: layoutKey || "result", sql: snapshot?.sql ?? "", source: snapshot?.source ?? "当前结果", complete: snapshot?.complete ?? true, table, canRequery: false } };
   const copySelection = () => void quickCopyTransfer(freezeTransferFrame(frame,valueAt));
+  const rowActions = (r: number): ContextMenuItem[] => {
+    if (!edit?.rowState) return [];
+    if (edit.isDraftRow?.(r)) return [{ label: "撤销这行新增", icon: "restore", separator: true, onSelect: () => edit.onRestoreRow?.(r) }];
+    if (edit.rowState(r) === "deleted") return [{ label: "恢复此行（取消删除）", icon: "restore", separator: true, onSelect: () => edit.onRestoreRow?.(r) }];
+    if (!edit.onDeleteRow) return [];
+    return [{ label: "删除此行", icon: "trash", danger: true, separator: true, hint: "写回时执行", onSelect: () => edit.onDeleteRow!(r) }];
+  };
   const cellMenu = (r:number,c:number,x:number,y:number) => {
     const frozen = freezeTransferFrame({...frame,selection:{anchor:{r,c},end:{r,c}}},valueAt);
     const column = {...frozen,selection:null,visible:[c]};
@@ -108,6 +115,9 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
       {label:"复制列名",onSelect:()=>void navigator.clipboard.writeText(columns[c].name).then(()=>toast("列名已复制","success"),e=>toast(`复制失败：${String(e)}`,"error"))},
       {label:"复制唯一值（当前筛选列）",onSelect:()=>{const seen=new Set<string>();const order=column.order.filter(i=>{const key=JSON.stringify([typeof valueAt(i,c),valueAt(i,c)]);if(seen.has(key)) return false;seen.add(key);return true;});void quickCopyTransfer({...column,order},"tsv");}},
       {label:"复制为 IN 条件（当前筛选列）",icon:"code",onSelect:()=>void quickCopyTransfer(column,"where")},
+      // 行级增删只挂在能定位唯一行的结果上（表页有主键、且不是只读）。
+      // 放在单元格右键而不是工具条：删除是「对着这一行」的动作，选中态会随排序/筛选漂移。
+      ...rowActions(r),
     ]});
   };
 

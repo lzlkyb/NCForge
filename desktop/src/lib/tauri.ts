@@ -3,8 +3,17 @@ import { listen as tauriListen } from "@tauri-apps/api/event";
 import { toast } from "../components/ui/toast";
 import type { TauriCommand } from "./commandContract.generated";
 
-export async function invoke<T>(cmd: TauriCommand, args?: Record<string, unknown>): Promise<T> {
-  return tauriInvoke<T>(cmd, args);
+/**
+ * `args` 允许直接传 `Uint8Array` / `ArrayBuffer`：Tauri 会把整个载荷当**裸字节**投递给
+ * Rust（命令侧用 `tauri::ipc::Request` 取 `InvokeBody::Raw`）。几 MB 的文件如果按
+ * `{ bytes: [...] }` 传，会被编成上千万个数字字符——这条路省掉那次编解码。
+ * 代价：裸载荷时命令**不能带其它参数**（载荷就是参数本身）。
+ */
+export async function invoke<T>(
+  cmd: TauriCommand,
+  args?: Record<string, unknown> | ArrayBuffer | Uint8Array,
+): Promise<T> {
+  return tauriInvoke<T>(cmd, args as Record<string, unknown>);
 }
 
 /**

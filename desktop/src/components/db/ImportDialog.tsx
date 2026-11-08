@@ -3,14 +3,16 @@ import "../../db-console.css";
 import { Modal } from "../ui/Modal";
 import { Icon } from "../ui/icon";
 import { friendlyDbError } from "../../lib/db";
-import { autoMap, decodeCsvBytes, parseCsv, type ParsedCsv } from "../../lib/csvParse";
+import { autoMap, type ParsedRows } from "../../lib/csvParse";
 import { planImport } from "../../lib/csvImport";
+import { readImportFile } from "../../lib/importFile";
 import { dbApi, dbSourceOf, type ColumnInfo, type ImportFail } from "../../lib/dbApi";
 import { connOf } from "../../lib/dbStore";
 import { confirmProdWrite } from "../../lib/dbConfirm";
 import { beginOperation, cancelOperation, type OperationHandle } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
 import { MapGrid } from "./ImportColumnMap";
+import { ImportProgress, type ImportBusy, type ImportResult } from "./ImportProgress";
 
 /** 一批多少行。太小则往返多，太大则一条命令里全是拼出来的 SQL。 */
 const BATCH = 200;
@@ -18,7 +20,7 @@ const BATCH = 200;
 const PREVIEW = 5;
 
 /**
- * CSV / TSV 导入到表。
+ * CSV / TSV / JSON 导入到表。
  *
  * 三段式：选文件 → 对列（自动按列名匹配，可改，可忽略）→ 执行（分批、逐批报结果）。
  * **列映射是这里唯一的判断点**：对错了不会报错，只会把名字写进日期列。所以自动只匹配
@@ -35,17 +37,17 @@ export function ImportDialog({ connId, table, cols, onClose, onDone,tabId }: {
 }) {
   const [target, setTarget] = useState<ColumnInfo[] | null>(cols);
   /** 文件名与解析结果绑在一起：换文件时不会出现"新名字 + 旧列映射"。 */
-  const [src, setSrc] = useState<{ name: string; csv: ParsedCsv | null; encoding: string; reading:boolean }>({
+  const [src, setSrc] = useState<{ name: string; csv: ParsedRows | null; encoding: string; reading:boolean; sheet:string }>({
     name: "",
     csv: null,
-    encoding: "", reading:false,
+    encoding: "", reading:false, sheet: "",
   });
   const [map, setMap] = useState<number[]>([]);
   const [skip, setSkip] = useState(false);
   /** `canceling` 并进 busy：多一个 useState 就撞组件体量门禁（8 个）的上限，
    *  而它本来就是「这次导入进行到哪一步」的一部分。 */
-  const [busy, setBusy] = useState<{ done: number; total: number; canceling: boolean } | null>(null);
-  const [out, setOut] = useState<{ inserted: number; failed: ImportFail[]; ms: number; canceled: boolean } | null>(null);
+  const [busy, setBusy] = useState<ImportBusy | null>(null);
+  const [out, setOut] = useState<ImportResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
   /** 取消只置标志：正在飞的那一批必须写完，否则请求发出去了却不知道结果。 */
   const cancelRef = useRef(false);
@@ -81,23 +83,22 @@ export function ImportDialog({ connId, table, cols, onClose, onDone,tabId }: {
     setErr(null);
     setOut(null);
     const seq=++readSeq.current;
-    setSrc({ name: f.name, csv: null, encoding: "",reading:true });
+    setSrc({ name: f.name, csv: null, encoding: "",reading:true, sheet:"" });
     const task=beginOperation(dbTaskSpec(`import.read:${connId}:${table}:${seq}`,"读取导入文件",connId,table,undefined,tabId));
     try {
-      const { text, encoding } = await decodeCsvBytes(f);
+      const { rows: r, encoding, sheet } = await readImportFile(f);
       if(seq!==readSeq.current) {task?.finish("cancelled","已选择其它文件");return;}
-      const r = parseCsv(text);
       if (r.headers.length === 0 || r.rows.length === 0) {
         task?.finish("failed","文件没有可导入数据");
         setErr("这个文件里没有读到数据（是不是只有表头？）");
         return;
       }
-      setSrc({ name: f.name, csv: r, encoding,reading:false });
+      setSrc({ name: f.name, csv: r, encoding,reading:false, sheet });
       task?.finish("success",`已读取 ${r.rows.length} 行，尚未写入数据库`);
       setMap(autoMap(r.headers, target ?? []));
     } catch (e) {
       task?.finish("failed","文件读取失败，返回导入窗口查看原因");
-      if(seq===readSeq.current) setErr(`读不了这个文件：${String(e)}`);
+      if(seq===readSeq.current) setErr(`读不了这个文件：${e instanceof Error ? e.message : String(e)}`);
     } finally {if(seq===readSeq.current) setSrc(v=>({...v,reading:false}));}
   };
 
@@ -179,8 +180,9 @@ export function ImportDialog({ connId, table, cols, onClose, onDone,tabId }: {
       </div>
       <div className="bd one">
         <div className="dbx-hint">
-          读本机的 CSV / TSV 文本，UTF-8 与 Excel 默认的 GBK/GB18030 都能自动识别（文件名旁会标出实际编码）。空单元格写成 <b>NULL</b>（Oracle 里空串本来就是 NULL）；
-          日期按 <span className="dbx-mono">YYYY-MM-DD HH24:MI:SS</span> 转。每批 {BATCH} 行自成事务，走独立会话——
+          读本机的 CSV / TSV / JSON / XLSX 文件：CSV 的 UTF-8 与 Excel 默认的 GBK/GB18030 自动识别（文件名旁会标出实际编码）；JSON 支持对象数组、二维数组与单对象；
+          XLSX 只读<b>第一张工作表</b>（合并单元格只取值、公式只取缓存结果，超过 20 万行报错而不是截断）。空单元格写成 <b>NULL</b>（Oracle 里空串本来就是 NULL）；
+          日期按 <span className="dbx-mono">YYYY-MM-DD HH24:MI:SS</span> 转——<b>XLSX 里的日期列请先在 Excel 中设成「文本」</b>，否则读到的是 45900 这样的天数序列。每批 {BATCH} 行自成事务，走独立会话——
           不会把你在这个连接上未提交的改动一起提交。
         </div>
 
@@ -195,7 +197,7 @@ export function ImportDialog({ connId, table, cols, onClose, onDone,tabId }: {
             选择文件
             <input
               type="file"
-              accept=".csv,.tsv,.txt"
+              accept=".csv,.tsv,.txt,.json,.xlsx,.xlsm"
               disabled={!!busy}
               style={{ display: "none" }}
               onChange={(e) => {
@@ -210,6 +212,7 @@ export function ImportDialog({ connId, table, cols, onClose, onDone,tabId }: {
             <span className="dbx-mono dbx-muted">
               {fileName}
               {src.encoding && ` · ${src.encoding}`}
+              {src.sheet && ` · 工作表 ${src.sheet}`}
             </span>
           )}
           {parsed && (
@@ -237,33 +240,7 @@ export function ImportDialog({ connId, table, cols, onClose, onDone,tabId }: {
           </label>
         )}
 
-        {busy && (
-          <div className="dbx-hint" style={{ marginTop: 8 }}>
-            {busy.canceling
-              ? "已请求取消，等当前批写完就停（已经在飞的那批必须写完，否则不知道结果）…"
-              : `正在写：${busy.done} / ${busy.total} 行…（点「取消导入」会在当前批写完后停下）`}
-          </div>
-        )}
-        {err && <div className="dbx-err" style={{ marginTop: 8 }}>{err}</div>}
-        {out && (
-          <div className="dbx-hint" style={{ marginTop: 8 }}>
-            <div style={{ color: "hsl(var(--foreground))" }}>
-              {out.canceled ? "已取消 · 已写进 " : "写进 "}
-              <b>{out.inserted}</b> 行 · {(out.ms / 1000).toFixed(1)}s
-              {out.failed.length > 0 && (
-                <b style={{ color: "hsl(var(--destructive-ink))" }}> · 失败 {out.failed.length} 行</b>
-              )}
-            </div>
-            {out.failed.length > 0 && (
-              <div className="dbx-mono" style={{ maxHeight: 120, overflow: "auto", marginTop: 4 }}>
-                {out.failed.slice(0, 20).map((f) => (
-                  <div key={`${f.line}:${f.error}`}>第 {f.line} 行：{f.error}</div>
-                ))}
-                {out.failed.length > 20 && <div>……还有 {out.failed.length - 20} 条</div>}
-              </div>
-            )}
-          </div>
-        )}
+        <ImportProgress busy={busy} err={err} out={out} />
       </div>
       <div className="ft">
         <span className="dbx-muted">

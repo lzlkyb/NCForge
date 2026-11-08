@@ -1,5 +1,8 @@
 import { invoke } from "./tauri";
 import type { SchemaStatus } from "./db";
+import type { XlsxSheet } from "./xlsxRows";
+import type { StructDiff, StructSideReq } from "./dbStructDiff";
+import type { TransferEndpoint, TransferPlan, TransferRowsOut } from "./transferPlan";
 
 /**
  * 数据库页的后端命令封装与类型（多连接版）。
@@ -131,6 +134,12 @@ export interface TxInfo {
   rows: number;
   /** 开始时刻（毫秒时间戳），没有事务时为 0。 */
   since: number;
+  /**
+   * 数据库真源（`v$transaction`）的结论，只有点过「核对事务」才有值：
+   * true = 确实有未提交事务，false = 确实没有，null = 字典不可读（低权限），
+   * undefined = 还没核对（普通 exec 返回的 tx 不带这个字段）。
+   */
+  active?: boolean | null;
 }
 
 export type BoundCell = Cell | {number:string};
@@ -436,7 +445,7 @@ export interface ExportFileOut {
   truncated: boolean;
   /** 用户中途取消：文件里是已写入的合法前缀，但不是全量。 */
   canceled: boolean;
-  /** 被截断到 8K 预览的大文本格子数。>0 说明文件里的长文本不完整（老后端没有这个字段）。 */
+  /** 超过全量通道 1M 上限的大文本格子数。>0 说明文件里的长文本不完整（老后端没有这个字段）。 */
   longValues?: number;
   ms: number;
 }
@@ -564,6 +573,35 @@ export const dbApi = {
    * 就整批回滚。走独立会话，不会把用户自己未提交的改动一起提交。
    */
   importRows: (req: ImportReq) => invoke<ImportOut>("db_import_rows", { req }),
+  /**
+   * 读 XLSX 的第一张工作表（后端零依赖解析，所有值一律给文本，日期不会变成 1900 序列号）。
+   *
+   * 字节走 IPC 裸载荷——直接传 `Uint8Array`，**不要**包成 `{ bytes }`：包成对象就退化成
+   * JSON 数字数组，一个 5MB 的表要编出几千万个字符，读一次文件就卡几秒。
+   */
+  readXlsx: (bytes: Uint8Array) => invoke<XlsxSheet>("db_xlsx_read", bytes),
+  /**
+   * 表结构对比（DDL diff）：两侧各开一条临时只读会话读数据字典，返回差异 + 「把右侧改成
+   * 左侧」的 DDL。**只生成脚本，不执行**——改表结构必须由人看过、挑着跑。
+   */
+  structDiff: (left: StructSideReq, right: StructSideReq) =>
+    invoke<StructDiff>("db_struct_diff", { left, right }),
+  /** 表 → 表 直连搬运的列映射（只读）：搬之前要把「哪些列搬、哪些不搬」给人看。 */
+  transferPlan: (from: TransferEndpoint, to: TransferEndpoint) =>
+    invoke<TransferPlan>("db_transfer_plan", { from, to }),
+  /**
+   * 执行直连搬运：源只读、逐批提交到目标。走 `db:transfer-progress` 事件报进度，
+   * `transferId` 用来区分同一次会话里的多次搬运（也可用于取消）。
+   */
+  transferRows: (req: {
+    from: TransferEndpoint;
+    to: TransferEndpoint;
+    filter?: string | null;
+    mode?: "append" | "replace";
+    transferId: number;
+  }) => invoke<TransferRowsOut>("db_transfer_rows", { req }),
+  /** 停止一次搬运：只置标志，当前批写完才停（在飞的 insert 必须知道结果）。 */
+  cancelTransferRows: (id: number) => invoke<void>("db_transfer_rows_cancel", { id }),
   /** 取消这个连接上正在执行的语句（不等执行返回，立即生效）。能不能用先看 `caps.cancel`。 */
   cancel: (id: string, slot?: string | null) => invoke<void>("db_cancel", { id, slot: slot || null }),
   /** 这个连接用哪个引擎、那个引擎能做什么。 */
@@ -579,7 +617,7 @@ export const dbApi = {
   lobValue: (id: string, sql: string, rowIndex: number, column: string, slot?: string | null, maxChars?: number) =>
     invoke<LobValueOut>("db_lob_value", { id, sql, rowIndex, column, slot: slot || null, maxChars: maxChars ?? null }),
   tx: (id: string, action: "commit" | "rollback" | "autocommit-on" | "autocommit-off" | "status", slot?: string | null) =>
-    invoke<{ tx: TxInfo; alive?: boolean }>("db_tx", { id, action, slot: slot || null }),
+    invoke<{ tx: TxInfo; alive?: boolean; active?: boolean | null }>("db_tx", { id, action, slot: slot || null }),
   reconnect: (id: string, slot: string | null, password?: string, fallback = false, configured = false) =>
     invoke<{ autoCommit: boolean }>("db_tx", { id, action: configured ? "reconnect-configured" : "reconnect", slot, password, fallback }),
   /**

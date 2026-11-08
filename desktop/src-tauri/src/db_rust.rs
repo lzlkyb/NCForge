@@ -55,9 +55,18 @@ const CLOB_MAX: usize = 1024 * 1024;
 /// （`lib/dbResultBudget.ts::fitRows` 按**整行**裁），后面的行根本进不来，
 /// 用户看到的是「查出来 500 行，但一大半没了」。完整值走 `lobValue` 按需取。
 ///
-/// 🔴 导出/传输也走这条预览通道，它们必须用 [`is_lob_preview`] 判断截断，
-/// **不能**再用 1MB 当阈值 —— 8K 的预览永远够不到 1MB，会静默写出残缺数据。
+/// 🔴 网格走预览通道；导出 / 表间搬运走 `execFull`（`CLOB_MAX` 的全量通道）。
+/// 两条路都可能截断，判据一律用 [`is_lob_preview`]（按**尾部文案**认，不按长度）：
+/// 8K 预览永远够不到 1MB，拿 1MB 当阈值会静默写出「正文 + 一句中文提示」。
 pub(crate) const LOB_PREVIEW: usize = 8 * 1024;
+
+/// 「这条会话有没有未提交事务」的数据库真源判据。
+///
+/// 两引擎（Rust / JVM 桥）必须用**同一条 SQL**：本地 DML 计数看不见手写 COMMIT、
+/// PL/SQL 内部提交、别的工具做的回滚，只有 `v$transaction` 里那条记录才是真。
+/// 读不到（账号没有 `V_$TRANSACTION` / `V_$SESSION` 授权）时返回 null 降级，
+/// 绝不把「查不了」当成「没有事务」。
+pub(crate) const TX_ACTIVE_SQL: &str = "select count(*) from v$transaction where ses_addr = (select saddr from v$session where sid = sys_context('userenv','sid'))";
 /// DBMS_OUTPUT 一次最多取这么多行。
 const OUTPUT_MAX: usize = 5000;
 /// `columnsZh` 一次最多认几张表（Oracle `in (...)` 的参数上限是 1000）。
@@ -199,10 +208,15 @@ struct Session {
     cursor: Option<Cursor>,
     /// 结果集的列（`columns` 字段原样），分页时复用。
     columns: Vec<Value>,
+    /// 当前游标是否按「全量 CLOB」取值（`execFull`）。跟着游标走，`more` 沿用；
+    /// 每次 `exec` / `execBound` 都会重设，不会串到下一个查询。
+    full_lob: bool,
     auto_commit: bool,
     readonly: bool,
     readonly_started: bool,
     stats_unavailable: bool,
+    /// `v$transaction` 读不到（低权限）：只探测一次，别每次状态刷新都白跑一趟字典。
+    tx_unavailable: bool,
     previous_auto: bool,
     tx_statements: i64,
     tx_rows: i64,
@@ -227,10 +241,12 @@ impl RustEngine {
                 conn: None,
                 cursor: None,
                 columns: Vec::new(),
+                full_lob: false,
                 auto_commit: false,
                 readonly: false,
                 readonly_started: false,
                 stats_unavailable: false,
+                tx_unavailable: false,
                 previous_auto: false,
                 tx_statements: 0,
                 tx_rows: 0,
@@ -309,13 +325,34 @@ fn panic_msg(p: &Box<dyn std::any::Any + Send>) -> String {
 }
 
 impl Session {
-    fn dispatch(
-        &mut self,
-        cmd: &str,
-        a: &[&str],
-        _timeout: Duration,
-    ) -> Result<Value, BridgeError> {
-        match cmd {
+    fn dispatch(&mut self, cmd: &str, a: &[&str], timeout: Duration) -> Result<Value, BridgeError> {
+        // 元数据命令同样要读超时：字典视图被别的会话 DDL 锁住时，没有超时就是无限期持锁，
+        // 界面上表现为「结构页永远转圈」，只能杀进程。exec / more / lobValue 各自已经设过，
+        // 这里只兜这一族（它们跑的是固定的小查询，用调用方给的整体超时即可）。
+        let bounded = matches!(
+            cmd,
+            "tables"
+                | "schemas"
+                | "columns"
+                | "indexes"
+                | "columnsZh"
+                | "ncNames"
+                | "ddl"
+                | "objects"
+                | "source"
+                | "explain"
+                | "sessions"
+                | "schema"
+                | "schemaBatch"
+                | "txActive"
+                | "txStatus"
+        );
+        if bounded {
+            if let Ok(conn) = self.conn_ref() {
+                let _ = conn.set_call_timeout(Some(timeout));
+            }
+        }
+        let out = match cmd {
             "connect" => {
                 let auto = a.get(3).map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(false);
                 self.connect(a.first().copied().unwrap_or(""), a.get(1).copied().unwrap_or(""), a.get(2).copied().unwrap_or(""), auto, a.get(4).copied().unwrap_or(""))
@@ -324,13 +361,18 @@ impl Session {
                 "纯 Rust 驱动解不了 NC prop.xml 里加密的口令（那要用 NC 自带的 PropXMLReader，只有 JVM 里能跑）。\
                  这个连接请改用「JVM 桥」，或者导入 .properties / 手工填连接参数",
             )),
-            "exec" => self.exec(
+            // `execFull` = 同一条查询，但结果集里 CLOB 给完整值（导出 / 表间搬运用）。
+            // 网格绝不发这个命令：500 行 × 2 个 1MB CLOB 会撑爆前端的 16MB 结果预算。
+            "exec" | "execFull" => self.exec(
                 a.first().copied().unwrap_or(""),
                 int_arg(a, 1, 500),
                 int_arg(a, 2, 30),
                 a.get(3).is_some_and(|v| v.eq_ignore_ascii_case("true")),
+                cmd == "execFull",
             ),
-            "execBound" => {
+            // `execFullBound` 与 execBound 同协议，只是 CLOB 走全量（导出带绑定变量时用）。
+            // 不能靠在参数尾部加一个开关：a[3..] 是成对的 (类型, 值)，加单参数会破坏配对。
+            "execBound" | "execFullBound" => {
                 if a.len()<3 || !(a.len()-3).is_multiple_of(2) {return Err(sql_err("绑定参数协议不完整"));}
                 let params: Result<Vec<Box<dyn ToDbValue>>, BridgeError> = a[3..].as_chunks::<2>().0.iter().map(|pair| {
                     Ok(match pair[0] {
@@ -343,15 +385,16 @@ impl Session {
                 }).collect();
                 let params = params?;
                 let refs: Vec<&dyn ToDbValue> = params.iter().map(|p| p.as_ref()).collect();
-                self.exec_params(a[0],int_arg(a,1,500),int_arg(a,2,30),&refs,false)
+                self.exec_params(a[0],int_arg(a,1,500),int_arg(a,2,30),&refs,false,cmd == "execFullBound")
             }
             "readOnly" => self.set_readonly(a.first() == Some(&"true")),
-            "more" => self.more(int_arg(a, 0, 500)),
+            "more" => self.more(int_arg(a, 0, 500), timeout),
             "lobValue" => self.lob_value(
                 a.first().copied().unwrap_or(""),
                 int_arg(a, 1, 0),
                 a.get(2).copied().unwrap_or(""),
                 int_arg(a, 3, CLOB_MAX),
+                timeout,
             ),
             "commit" => {
                 let conn = self.conn_ref()?;
@@ -382,14 +425,29 @@ impl Session {
             // 会返回无法解析的 TTC 消息，本文件 `probe` 早就因此改成 `select 1 from dual`；
             // 而 `db_read_only` 与重连前置校验走的是 `ping`，两套口径必须统一。
             "ping" => {
-                let alive = self.probe_conn(_timeout).is_ok();
+                let alive = self.probe_conn(timeout).is_ok();
                 Ok(json!({ "alive": alive, "tx": self.tx_json() }))
+            }
+            // 重连前给 `db_engine.rs` 校准本地脏标志用：只问字典，不探活、不改计数。
+            "txActive" => Ok(json!({
+                "active": self.tx_active().map(Value::Bool).unwrap_or(Value::Null)
+            })),
+            // 前端「核对事务」用：探活 + 真源 + 本地计数，一次往返都给齐。
+            // `active` 同时放进 tx 与顶层：TxBar 拿 `status.tx` 就能显示核对结果。
+            "txStatus" => {
+                let alive = self.probe_conn(timeout).is_ok();
+                let flag = self.tx_active().map(Value::Bool).unwrap_or(Value::Null);
+                let mut tx = self.tx_json();
+                if let Some(m) = tx.as_object_mut() {
+                    m.insert("active".into(), flag.clone());
+                }
+                Ok(json!({ "alive": alive, "tx": tx, "active": flag }))
             }
             "probe" => {
                 if self.conn.is_none() {
                     return Ok(json!({ "alive": false, "tx": self.tx_json() }));
                 }
-                self.probe_conn(_timeout)?;
+                self.probe_conn(timeout)?;
                 Ok(json!({ "alive": true, "tx": self.tx_json() }))
             }
             "disconnect" => {
@@ -416,7 +474,13 @@ impl Session {
             // 真正的中断走 `RustEngine::cancel()`（不经过会话锁），这条命令只是占位
             "cancel" => Err(other_err("请用引擎层的 cancel，不要发 cancel 命令")),
             other => Err(other_err(format!("纯 Rust 引擎不认识这个命令：{other}"))),
+        };
+        if bounded {
+            if let Ok(conn) = self.conn_ref() {
+                let _ = conn.set_call_timeout(None);
+            }
         }
+        out
     }
 
     fn conn_ref(&self) -> Result<&Connection, BridgeError> {
@@ -517,6 +581,7 @@ impl Session {
         };
         let version = db_version(&conn);
         self.stats_unavailable = false;
+        self.tx_unavailable = false;
         self.readonly = false;
         self.readonly_started = false;
         self.auto_commit = auto;
@@ -604,8 +669,9 @@ impl Session {
         max_rows: usize,
         timeout_sec: usize,
         collect_stats: bool,
+        full_lob: bool,
     ) -> Result<Value, BridgeError> {
-        self.exec_params(raw, max_rows, timeout_sec, &[], collect_stats)
+        self.exec_params(raw, max_rows, timeout_sec, &[], collect_stats, full_lob)
     }
     fn exec_params(
         &mut self,
@@ -614,11 +680,14 @@ impl Session {
         timeout_sec: usize,
         params: &[&dyn ToDbValue],
         collect_stats: bool,
+        full_lob: bool,
     ) -> Result<Value, BridgeError> {
         if self.conn.is_none() {
             return Err(not_connected());
         }
         self.close_cursor();
+        // 必须在 close_cursor 之后：标志是一次查询（含它后续所有 `more`）的属性。
+        self.full_lob = full_lob;
         let sql = normalize(raw);
         if sql.is_empty() {
             return Err(sql_err("空语句"));
@@ -712,7 +781,7 @@ impl Session {
                 .map(|m| base_type(&type_label(m)))
                 .collect();
             self.columns = columns.clone();
-            let (rows, has_more) = page(&mut cur, &types, max_rows)?;
+            let (rows, has_more) = page(&mut cur, &types, max_rows, self.full_lob)?;
             body.insert("kind".into(), json!("rows"));
             body.insert("columns".into(), Value::Array(columns));
             body.insert("rows".into(), json!(rows));
@@ -730,7 +799,7 @@ impl Session {
             let n = res.rows_affected();
             // 隐式结果集（`dbms_sql.return_result`）：PL/SQL 块自己开的 ref cursor，
             // 服务端按 TTC 27 号消息下发，驱动侧已解析（vendor 补丁四）。
-            let sets = implicit_sets(&mut res, max_rows)?;
+            let sets = implicit_sets(&mut res, max_rows, self.full_lob)?;
             if sets.is_empty() {
                 body.insert("kind".into(), json!("update"));
                 body.insert("updateCount".into(), json!(n));
@@ -755,7 +824,7 @@ impl Session {
         Ok(body)
     }
 
-    fn more(&mut self, max_rows: usize) -> Result<Value, BridgeError> {
+    fn more(&mut self, max_rows: usize, timeout: Duration) -> Result<Value, BridgeError> {
         let max_rows = max_rows.clamp(1, 10_000);
         let t0 = Instant::now();
         let types: Vec<String> = self
@@ -770,7 +839,16 @@ impl Session {
                 "没有可以继续读取的结果（游标已关闭，重新执行一次）",
             ));
         };
-        let next = match page(&mut cur, &types, max_rows) {
+        // 「加载更多」以前没有超时：服务端黑洞时这里会一直持着会话锁，
+        // 同一连接上的提交 / 断开全部排队，用户只能强杀进程。
+        if let Some(conn) = self.conn.as_ref() {
+            conn.set_call_timeout(Some(timeout)).map_err(drv_err)?;
+        }
+        let next = page(&mut cur, &types, max_rows, self.full_lob);
+        if let Some(conn) = self.conn.as_ref() {
+            let _ = conn.set_call_timeout(None);
+        }
+        let next = match next {
             Ok(v) => v,
             Err(e) => {
                 // 游标已在上一行被 take 走，这里随作用域结束关闭；用户再点「加载更多」
@@ -802,6 +880,7 @@ impl Session {
         row_index: usize,
         column: &str,
         max_chars: usize,
+        timeout: Duration,
     ) -> Result<Value, BridgeError> {
         if self.conn.is_none() {
             return Err(not_connected());
@@ -815,7 +894,10 @@ impl Session {
         }
         let probe = lob_probe_sql(&sql, column, row_index)?;
         let conn = self.conn.take().ok_or_else(not_connected)?;
+        // 大字段读取同样要有上限：对方数据库卡住时，这条命令会一直占着会话锁。
+        conn.set_call_timeout(Some(timeout)).map_err(drv_err)?;
         let out = lob_value_with(&conn, &probe, row_index, max_chars.clamp(1, CLOB_MAX));
+        let _ = conn.set_call_timeout(None);
         self.conn = Some(conn);
         out
     }
@@ -832,6 +914,50 @@ impl Session {
         let result = conn.query_row("select 1 from dual", &[]);
         let _ = conn.set_call_timeout(None);
         result.map(|_| ()).map_err(drv_err)
+    }
+
+    /// 查 `v$transaction`：`Some(true/false)` 是数据库真源，`None` 是查不了（降级）。
+    fn tx_active(&mut self) -> Option<bool> {
+        if self.tx_unavailable {
+            return None;
+        }
+        // 取出所有权再借：失败分支要写 `self.tx_unavailable`，不能同时借用 `self.conn`。
+        let conn = self.conn.take()?;
+        let mut unavailable = false;
+        // 字典视图可能被别的会话的 DDL 锁住。这里不能靠调用方给的超时：
+        // `txStatus` 里的 probe_conn 会顺手把 call_timeout 清成 None。
+        let _ = conn.set_call_timeout(Some(Duration::from_secs(3)));
+        let out = match conn.query(TX_ACTIVE_SQL, &[]) {
+            Ok(mut cur) => {
+                let first = cur.next();
+                // 取干净：vendor 的语句缓存按 SQL 文本重执行，留着未取完的游标会让
+                // 下一次同 SQL 命中 TTC 预取交错，连接从此永久错位（见 run_with）。
+                while cur.next().is_some() {}
+                match first {
+                    Some(Ok(row)) => row
+                        .get::<Option<String>>(0)
+                        .ok()
+                        .flatten()
+                        .and_then(|s| s.trim().parse::<u64>().ok())
+                        .map(|n| n > 0),
+                    _ => {
+                        unavailable = true;
+                        None
+                    }
+                }
+            }
+            Err(_) => {
+                unavailable = true;
+                None
+            }
+        };
+        let _ = conn.set_call_timeout(None);
+        self.conn = Some(conn);
+        if unavailable {
+            // 与 stats 同口径：只探测一次，重连成功时重置（换账号后还能重试）。
+            self.tx_unavailable = true;
+        }
+        out
     }
 
     fn track_tx(&mut self, head: &str, update_count: i64) {
@@ -1563,7 +1689,11 @@ fn stat_snapshot(conn: &Connection) -> Option<StatSnap> {
 /// `max_rows` 行，取满就给 `hasMore: true`（前端提示调大「每次取」再执行），然后让游标
 /// 随 `Cursor` 一起 drop —— `Statement::new` 的 `return_on_drop` 会把它还给客户端，
 /// 否则会话游标会一路漏到 `open_cursors` 上限（探针 R11 验过）。
-fn implicit_sets(res: &mut ExecResult, max_rows: usize) -> Result<Vec<Value>, BridgeError> {
+fn implicit_sets(
+    res: &mut ExecResult,
+    max_rows: usize,
+    full_lob: bool,
+) -> Result<Vec<Value>, BridgeError> {
     let mut sets = Vec::new();
     for mut cur in res.implicit_resultsets() {
         let columns: Vec<Value> = cur.columns().iter().map(column_json).collect();
@@ -1572,7 +1702,7 @@ fn implicit_sets(res: &mut ExecResult, max_rows: usize) -> Result<Vec<Value>, Br
             .iter()
             .map(|m| base_type(&type_label(m)))
             .collect();
-        let (rows, has_more) = page(&mut cur, &types, max_rows)?;
+        let (rows, has_more) = page(&mut cur, &types, max_rows, full_lob)?;
         let count = rows.len();
         sets.push(json!({
             "columns": columns,
@@ -1588,11 +1718,12 @@ fn page(
     cur: &mut Cursor,
     types: &[String],
     max_rows: usize,
+    full_lob: bool,
 ) -> Result<(Vec<Value>, bool), BridgeError> {
     let mut rows = Vec::with_capacity(max_rows.min(64));
     for _ in 0..max_rows {
         match cur.next() {
-            Some(Ok(row)) => rows.push(row_json(&row, types)),
+            Some(Ok(row)) => rows.push(row_json(&row, types, full_lob)),
             Some(Err(e)) => return Err(drv_err(e)),
             // 取不满 = 确实没有更多了
             None => return Ok((rows, false)),
@@ -1602,16 +1733,16 @@ fn page(
     Ok((rows, true))
 }
 
-fn row_json(row: &Row, types: &[String]) -> Value {
+fn row_json(row: &Row, types: &[String], full_lob: bool) -> Value {
     let mut out = Vec::with_capacity(types.len());
     for (i, ty) in types.iter().enumerate() {
-        out.push(cell_json(row, i, ty));
+        out.push(cell_json(row, i, ty, full_lob));
     }
     Value::Array(out)
 }
 
 /// 一列 → JSON。约定与 JVM 桥的 `value()` 逐条对齐（日期格式、大数字保精度、CLOB 截断…）。
-fn cell_json(row: &Row, i: usize, base: &str) -> Value {
+fn cell_json(row: &Row, i: usize, base: &str, full_lob: bool) -> Value {
     if base.starts_with("DATE") || base.starts_with("TIMESTAMP") {
         let with_frac = base.starts_with("TIMESTAMP");
         if let Ok(Some(ts)) = row.get::<Option<oracledb::OracleTimestamp>>(i) {
@@ -1650,7 +1781,7 @@ fn cell_json(row: &Row, i: usize, base: &str) -> Value {
         };
     }
     if base == "CLOB" || base == "NCLOB" || base == "LONG" {
-        return clob_json(row, i);
+        return clob_json(row, i, full_lob);
     }
     // BINARY_FLOAT / BINARY_DOUBLE 在 JDBC 那边是 Float/Double，JVM 桥给的是 JSON 数字。
     // 这两个类型没有精度可丢，按数字给才对得上。
@@ -1677,20 +1808,25 @@ fn cell_json(row: &Row, i: usize, base: &str) -> Value {
     }
 }
 
-/// CLOB / NCLOB / LONG 一列 → JSON（只带 `LOB_PREVIEW` 个字符）。
+/// CLOB / NCLOB / LONG 一列 → JSON。
+///
+/// `full_lob` = 导出 / 搬运专用的全量通道：给到 `CLOB_MAX` 个字符（不是网格的 8K 预览）。
+/// 超过 `CLOB_MAX` 仍会截断，但**必须**带上能被 [`is_lob_preview`] 认出的尾部文案，
+/// 否则导出会把「正文 + 半句话」当完整值写进文件，而「部分结果」告警也不会亮。
 ///
 /// 取值顺序：`Lob` → `String`（驱动对某些 LONG 列会直接给字符串）。
 /// 两条路都 `None` 才是真 NULL；任一条**报错**、另一条也拿不到时给显式占位，
 /// 绝不把「取不出来」降级成 NULL —— 那会让网格和详情面板都显示「数据库空值」，
 /// 是 CLOB 明明有内容却看起来是空的最误导的一种失败。
-fn clob_json(row: &Row, i: usize) -> Value {
+fn clob_json(row: &Row, i: usize, full_lob: bool) -> Value {
+    let limit = if full_lob { CLOB_MAX } else { LOB_PREVIEW };
     let mut saw_null = false;
     match row.get::<Option<Lob>>(i) {
         Ok(Some(mut lob)) => {
             let size = lob.get_size().unwrap_or(0);
             // 字符 LOB 的 amount 是 UCS-2 单位，一个字符最多编成 4 字节 UTF-8：
             // 按 4 倍字节数取，保证够 `LOB_PREVIEW` 个字符；多出来的按字符裁掉。
-            let cap = (LOB_PREVIEW as u64).saturating_mul(4);
+            let cap = (limit as u64).saturating_mul(4);
             let mut raw = Vec::new();
             if let Err(e) = (&mut lob).take(cap).read_to_end(&mut raw) {
                 return json!(format!("<CLOB 读取失败：{e}>"));
@@ -1700,6 +1836,9 @@ fn clob_json(row: &Row, i: usize) -> Value {
             // （`get_size` 给的是字节数，中文 3 字节/字，拿它当字符数会多报 3 倍）。
             // 没读满 = 全文都在手里，字符数就是准的。
             let cut = raw.len() as u64 >= cap && size > raw.len();
+            if full_lob {
+                return json!(full_lob_text(&text, cut));
+            }
             let total = if cut {
                 None
             } else {
@@ -1712,6 +1851,9 @@ fn clob_json(row: &Row, i: usize) -> Value {
     }
     match row.get::<Option<String>>(i) {
         Ok(Some(s)) => {
+            if full_lob {
+                return json!(full_lob_text(&s, s.chars().count() > CLOB_MAX));
+            }
             let total = Some(s.chars().count());
             return json!(preview_text(&s, total));
         }
@@ -1723,6 +1865,18 @@ fn clob_json(row: &Row, i: usize) -> Value {
     } else {
         json!("<CLOB 取值失败：驱动既没返回 Lob 也没返回字符串>")
     }
+}
+
+/// 全量通道的文本：最多 `CLOB_MAX` 个字符，超限就挂上可识别的截断标记。
+///
+/// 文案里必须有「个字符，只取前 1M」——导出侧 `is_lob_preview` 靠它把文件标成
+/// 「部分结果」，也和 JVM 桥 `clobText(c, CLOB_MAX)` 的措辞一致。
+fn full_lob_text(text: &str, cut: bool) -> String {
+    let mut out: String = text.chars().take(CLOB_MAX).collect();
+    if cut || text.chars().count() > CLOB_MAX {
+        out.push_str(" …（共 1M+ 个字符，只取前 1M）");
+    }
+    out
 }
 
 /// 预览文本：超过 `LOB_PREVIEW` 个字符就截断，并在尾部标明总数与下一步。
@@ -1750,11 +1904,11 @@ fn preview_text(text: &str, total: Option<usize>) -> String {
     out
 }
 
-/// 这个值是不是「被截断的 LOB 预览」。
+/// 这个值是不是「被截断的 LOB」（网格的 8K 预览，或全量通道的 1M 上限）。
 ///
-/// 导出与传输都复用网格的取数通道，拿到的就是预览文本。判据只能看文案标记：
-/// 拿长度比 `LOB_PREVIEW` 会把「刚好 8192 字符的正常值」误判，拿 1MB 比则永远判不出来
-/// （预览最长就 8K），后者会让脚本里出现「正文 + 一句中文提示」而零告警。
+/// 判据只能看文案标记：拿长度比 `LOB_PREVIEW` 会把「刚好 8192 字符的正常值」误判，
+/// 拿 1MB 比则永远判不出来（8K 预览够不到 1MB），后者会让导出的脚本里出现
+/// 「正文 + 一句中文提示」而零告警。两种截断的尾部措辞都由这里统一认。
 pub(crate) fn is_lob_preview(s: &str) -> bool {
     s.contains("个字符，只显示前") || s.contains("个字符，只取前 1M")
 }
@@ -1820,7 +1974,7 @@ fn lob_value_with(
     };
     let base = base_type(&type_label(&cur.columns()[0]));
     let text = match base.as_str() {
-        "CLOB" | "NCLOB" | "LONG" => clob_full(&row, max_chars)?,
+        "CLOB" | "NCLOB" | "LONG" => clob_full_at(&row, 0, max_chars)?,
         _ => row
             .get::<Option<String>>(0)
             .map_err(drv_err)?
@@ -1837,9 +1991,9 @@ fn lob_value_with(
 
 /// 完整读一格 CLOB（最多 `max_chars` 个字符）。取不到时返回空串由调用方呈现，
 /// 「驱动报错」则显式失败——这两件事不能混。
-fn clob_full(row: &Row, max_chars: usize) -> Result<String, BridgeError> {
+fn clob_full_at(row: &Row, i: usize, max_chars: usize) -> Result<String, BridgeError> {
     let mut saw_null = false;
-    match row.get::<Option<Lob>>(0) {
+    match row.get::<Option<Lob>>(i) {
         Ok(Some(mut lob)) => {
             let mut raw = Vec::new();
             (&mut lob)
@@ -1854,7 +2008,7 @@ fn clob_full(row: &Row, max_chars: usize) -> Result<String, BridgeError> {
         Ok(None) => saw_null = true,
         Err(_) => {}
     }
-    match row.get::<Option<String>>(0) {
+    match row.get::<Option<String>>(i) {
         Ok(Some(s)) => return Ok(s.chars().take(max_chars).collect()),
         Ok(None) => saw_null = true,
         Err(_) => {}
@@ -2243,6 +2397,32 @@ mod tests {
 
         // 普通短值
         assert!(!is_lob_preview("普通文本"));
+    }
+
+    /// 全量通道（导出 / 搬运）超限时的标记也必须能被 `is_lob_preview` 认出来，
+    /// 否则文件会被当成完整数据，「部分结果」改名与告警都不会触发。
+    #[test]
+    fn 全量通道的截断标记也能被导出识别() {
+        let long = "字".repeat(CLOB_MAX + 1);
+        let full = full_lob_text(&long, false);
+        assert!(is_lob_preview(&full), "超限文本必须带截断标记");
+        assert!(full.chars().count() > CLOB_MAX);
+        let exact = "字".repeat(CLOB_MAX);
+        let same = full_lob_text(&exact, false);
+        assert!(!is_lob_preview(&same), "刚好到上限不能被误判");
+        assert_eq!(same.chars().count(), CLOB_MAX);
+        assert_eq!(full_lob_text("普通文本", false), "普通文本");
+        // JVM 桥 `clobText(c, CLOB_MAX)` 用的是这句措辞，两边都要能认
+        assert!(is_lob_preview("正文 …（共 123 个字符，只取前 1M）"));
+    }
+
+    /// 事务真源必须按会话 sid 问 `v$transaction`；`audsid` 对共享会话不可靠。
+    #[test]
+    fn 事务真源_sql_判据不跑偏() {
+        assert!(TX_ACTIVE_SQL.contains("v$transaction"));
+        assert!(TX_ACTIVE_SQL.contains("ses_addr"));
+        assert!(TX_ACTIVE_SQL.contains("sys_context('userenv','sid')"));
+        assert!(!TX_ACTIVE_SQL.contains("audsid"));
     }
 
     /// 事务计数要认 `commit` / `rollback` / `for update` / PL/SQL 块。

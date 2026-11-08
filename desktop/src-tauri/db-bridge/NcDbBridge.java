@@ -110,12 +110,19 @@ public class NcDbBridge {
 
     private static final int CLOB_MAX = 1024 * 1024;
     /**
-     * 结果集里一格大文本只带这么多字符，完整值由 `lobValue` 按需取。
+     * 网格通道：一格大文本只带这么多字符，完整值由 `lobValue` 按需取。
      *
-     * 与 Rust 侧 `LOB_PREVIEW` 必须一致：两个引擎同一个查询要显示成一样的长度，
-     * 否则换个引擎就看到「内容突然变多/变少」。
+     * 与 Rust 侧 `LOB_PREVIEW` 必须一致：两个引擎同一个查询要显示成一样的长度。
+     * 导出 / 表间搬运走 `execFull` → 用 `CLOB_MAX` 而不是这里（见 `fullLob`）。
      */
     private static final int CLOB_PREVIEW = 8 * 1024;
+
+    /**
+     * 「这条会话有没有未提交事务」的数据库真源，与 Rust `db_rust.rs::TX_ACTIVE_SQL`
+     * 必须一字不差：两个引擎问同一条字典视图，界面上才不会出现「换个引擎结论就变」。
+     * 低权限账号读不到时返回 null 降级，绝不把「查不了」当成「没有事务」。
+     */
+    private static final String TX_ACTIVE_SQL = "select count(*) from v$transaction where ses_addr = (select saddr from v$session where sid = sys_context('userenv','sid'))";
 
     private static int cursorType() {
         try {
@@ -308,6 +315,8 @@ public class NcDbBridge {
         Statement cursorStmt;
         ResultSet cursor;
         int cursorCols;
+        /** 当前这条查询（含后续 more）是否按全量 CLOB 取值；每次 exec 重设。 */
+        boolean fullLob;
 
         /** 手动提交模式下的未提交事务：写语句条数、影响行数、开始时刻。 */
         int txStatements;
@@ -315,6 +324,8 @@ public class NcDbBridge {
         long txSince;
         boolean readOnly, readOnlyStarted, previousAuto;
         boolean statsUnavailable;
+        /** `v$transaction` 读不到（低权限）：只探测一次，重连时重置。 */
+        boolean txUnavailable;
 
         volatile boolean closed;
 
@@ -391,10 +402,13 @@ public class NcDbBridge {
                 // 第 4 参才是 schema（第 3 参是 autoCommit，见 connect_args 的构造顺序）
                 ok(id, connect(url, str(ds.get("user")), str(ds.get("password")), flag(a, 2),
                         a.size() > 3 ? a.get(3) : "", true));
-            } else if ("exec".equals(cmd)) {
-                ok(id, exec(a.get(0), intArg(a, 1, 500), intArg(a, 2, 30), flag(a, 3)));
-            } else if ("execBound".equals(cmd)) {
-                ok(id, execParams(a.get(0), intArg(a,1,500), intArg(a,2,30), a.subList(3,a.size())));
+            } else if ("exec".equals(cmd) || "execFull".equals(cmd)) {
+                // execFull：导出 / 表间搬运的全量取数通道，CLOB 给到 1M 而不是网格的 8K 预览。
+                ok(id, exec(a.get(0), intArg(a, 1, 500), intArg(a, 2, 30), flag(a, 3),
+                        "execFull".equals(cmd)));
+            } else if ("execBound".equals(cmd) || "execFullBound".equals(cmd)) {
+                ok(id, execParams(a.get(0), intArg(a,1,500), intArg(a,2,30), a.subList(3,a.size()),
+                        false, "execFullBound".equals(cmd)));
             } else if ("readOnly".equals(cmd)) {
                 ok(id, setReadOnly(flag(a,0)));
             } else if ("more".equals(cmd)) {
@@ -446,6 +460,27 @@ public class NcDbBridge {
                 ok(id, schemas());
             } else if ("setSchema".equals(cmd)) {
                 ok(id, setSchema(a.size() > 0 ? a.get(0) : ""));
+            } else if ("txActive".equals(cmd)) {
+                // 重连前置校验用：只问字典，不探活、不改本地计数。
+                Boolean txFlag = txActive();
+                ok(id, "{\"active\":" + (txFlag == null ? "null" : txFlag.toString()) + "}");
+            } else if ("txStatus".equals(cmd)) {
+                // 前端「核对事务」：探活 + 数据库真源 + 本地计数一次给齐。
+                boolean alive = conn != null && !conn.isClosed();
+                if (alive) {
+                    try (Statement s = conn.createStatement()) {
+                        s.setQueryTimeout(2);
+                        try (ResultSet rs = s.executeQuery("select 1 from dual")) {
+                            alive = rs.next();
+                        }
+                    } catch (SQLException e) {
+                        alive = false;
+                    }
+                }
+                Boolean txFlag = txActive();
+                String aj = txFlag == null ? "null" : txFlag.toString();
+                ok(id, "{\"alive\":" + alive + ",\"tx\":" + txJson(txFlag, true)
+                        + ",\"active\":" + aj + "}");
             } else if ("ping".equals(cmd)) {
                 boolean alive = conn != null && !conn.isClosed();
                 ok(id, "{\"alive\":" + alive + ",\"tx\":" + txJson() + "}");
@@ -488,6 +523,7 @@ public class NcDbBridge {
             DriverManager.setLoginTimeout(15);
             conn = DriverManager.getConnection(url, p);
             statsUnavailable = false;
+            txUnavailable = false;
             readOnly = false; readOnlyStarted = false;
             conn.setAutoCommit(autoCommit);
             resetTx();
@@ -629,9 +665,41 @@ public class NcDbBridge {
         }
 
         private String txJson() throws SQLException {
+            return txJson(null, false);
+        }
+
+        /** `active` 只由 `txStatus` 带出去：网格每次 exec 拿到的 tx 不带它，等于「尚未核对」。 */
+        private String txJson(Boolean active, boolean includeActive) throws SQLException {
             boolean auto = conn == null || conn.isClosed() || conn.getAutoCommit();
-            return "{\"autoCommit\":" + auto + ",\"statements\":" + txStatements
-                    + ",\"rows\":" + txRows + ",\"since\":" + txSince + "}";
+            StringBuilder b = new StringBuilder("{\"autoCommit\":").append(auto)
+                    .append(",\"statements\":").append(txStatements)
+                    .append(",\"rows\":").append(txRows)
+                    .append(",\"since\":").append(txSince);
+            if (includeActive) {
+                b.append(",\"active\":").append(active == null ? "null" : active.toString());
+            }
+            return b.append('}').toString();
+        }
+
+        /** `v$transaction` 真源；null = 查不了（没连上 / 没授权 / 字典被锁），调用方须降级。 */
+        private Boolean txActive() {
+            if (txUnavailable || conn == null) {
+                return null;
+            }
+            boolean bad = false;
+            Boolean out = null;
+            try (Statement s = conn.createStatement()) {
+                s.setQueryTimeout(3);
+                try (ResultSet rs = s.executeQuery(TX_ACTIVE_SQL)) {
+                    out = rs.next() && rs.getInt(1) > 0;
+                }
+            } catch (SQLException e) {
+                bad = true;
+            }
+            if (bad) {
+                txUnavailable = true;
+            }
+            return out;
         }
 
         // ───────────────────── 执行 ─────────────────────
@@ -651,15 +719,21 @@ public class NcDbBridge {
             }
             return "{\"readOnly\":" + readOnly + ",\"tx\":" + txJson() + "}";
         }
-        private String exec(String raw, int maxRows, int timeout, boolean collectStats) throws Exception {
-            return execParams(raw,maxRows,timeout,null,collectStats);
+        private String exec(String raw, int maxRows, int timeout, boolean collectStats, boolean fullLob) throws Exception {
+            return execParams(raw,maxRows,timeout,null,collectStats,fullLob);
         }
         private String execParams(String raw, int maxRows, int timeout, List<String> binds) throws Exception {
-            return execParams(raw,maxRows,timeout,binds,false);
+            return execParams(raw,maxRows,timeout,binds,false,false);
         }
         private String execParams(String raw, int maxRows, int timeout, List<String> binds, boolean collectStats) throws Exception {
+            return execParams(raw,maxRows,timeout,binds,collectStats,false);
+        }
+        private String execParams(String raw, int maxRows, int timeout, List<String> binds,
+                                  boolean collectStats, boolean fullLob) throws Exception {
             requireConn();
             closeCursor();
+            // 必须在 closeCursor 之后：标志跟着这条查询（含后续所有 more）走。
+            this.fullLob = fullLob;
             String sql = normalize(raw);
             String head = leadingKeywords(sql);
             if (sql.isEmpty()) {
@@ -876,7 +950,7 @@ public class NcDbBridge {
             ResultSetMetaData md = rs.getMetaData();
             // 同上：先取列信息再取行，顺序反了会撞「关闭的语句」
             String cols = columnsJson(md);
-            Page p = pageOf(rs, md.getColumnCount(), maxRows);
+            Page p = pageOf(rs, md.getColumnCount(), maxRows, fullLob);
             return "{\"columns\":" + cols + ",\"rows\":" + p.rows
                     + ",\"rowCount\":" + p.count + ",\"hasMore\":" + p.hasMore + "}";
         }
@@ -1028,7 +1102,7 @@ public class NcDbBridge {
             }
         }
 
-        static Page pageOf(ResultSet rs, int cols, int maxRows) throws SQLException {
+        static Page pageOf(ResultSet rs, int cols, int maxRows, boolean fullLob) throws SQLException {
             StringBuilder rows = new StringBuilder("[");
             int count = 0;
             boolean hasMore = false;
@@ -1044,7 +1118,7 @@ public class NcDbBridge {
                     if (i > 1) {
                         rows.append(',');
                     }
-                    rows.append(value(rs, i));
+                    rows.append(value(rs, i, fullLob));
                 }
                 rows.append(']');
                 count++;
@@ -1060,7 +1134,7 @@ public class NcDbBridge {
 
         /** 从当前游标再取最多 maxRows 行；取完就关游标。 */
         private String page(int maxRows) throws SQLException {
-            Page p = pageOf(cursor, cursorCols, maxRows);
+            Page p = pageOf(cursor, cursorCols, maxRows, fullLob);
             if (!p.hasMore) {
                 closeCursor();
             }
@@ -1391,7 +1465,8 @@ public class NcDbBridge {
                     ResultSetMetaData md = rs.getMetaData();
                     int n = md.getColumnCount();
                     String cols = columnsJson(md);
-                    Page p = pageOf(rs, n, maxRows);
+                    // 内部元数据 / 探针查询：跟导出通道无关，保持网格的预览口径。
+                    Page p = pageOf(rs, n, maxRows, false);
                     return "{\"columns\":" + cols + ",\"rows\":" + p.rows
                             + ",\"rowCount\":" + p.count + ",\"hasMore\":" + p.hasMore + "}";
                 } finally {
@@ -1897,7 +1972,7 @@ public class NcDbBridge {
                 }
             };
 
-    private static String value(ResultSet rs, int i) throws SQLException {
+    private static String value(ResultSet rs, int i, boolean fullLob) throws SQLException {
         int type = rs.getMetaData().getColumnType(i);
         // -101 / -102 = TIMESTAMP WITH TIME ZONE / WITH LOCAL TIME ZONE。
         // `getTimestamp` 会静默换算成 JVM 默认时区并丢掉偏移量：库里 `09:00 +00:00`
@@ -1941,9 +2016,10 @@ public class NcDbBridge {
             return String.valueOf(o);
         }
         if (o instanceof Clob) {
-            // 结果集只带预览：整段 1MB 会让 500 行 × 2 个 CLOB 撑爆前端的 16MB 结果预算，
-            // 后面的行被整行裁掉。完整值走「加载完整值」→ lobValue。
-            return "\"" + esc(clobText((Clob) o, CLOB_PREVIEW)) + "\"";
+            // 网格只带 8K 预览：整段 1MB 会让 500 行 × 2 个 CLOB 撑爆前端的 16MB 结果预算。
+            // 导出 / 搬运（execFull）改走 CLOB_MAX，超过仍由 clobText 挂「只取前 1M」标记，
+            // 与 Rust 的 full_lob_text / is_lob_preview 同一套措辞。
+            return "\"" + esc(clobText((Clob) o, fullLob ? CLOB_MAX : CLOB_PREVIEW)) + "\"";
         }
         if (o instanceof byte[]) {
             byte[] b = (byte[]) o;

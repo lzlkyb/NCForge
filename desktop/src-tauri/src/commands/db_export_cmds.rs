@@ -248,12 +248,15 @@ async fn fetch(
         let (kind, text) = super::db_transfer_cmds::bound_param(value)?;
         args.extend([kind.to_string(), text]);
     }
+    // 🔴 导出走全量取数通道：CLOB 给到 1M，不是网格的 8K 预览。
+    // 网格自己绝不发 execFull / execFullBound —— 500 行 × 1MB 会撑爆前端结果预算。
+    // 标志跟着游标走，下面的 `more` 不用改，自然沿用全量口径。
     let mut body = call(
         handle.clone(),
         if params.is_empty() {
-            "exec"
+            "execFull"
         } else {
-            "execBound"
+            "execFullBound"
         },
         args,
         Duration::from_secs(u64::from(timeout) + 30),
@@ -653,9 +656,10 @@ async fn stream_to_file(
     let tmp = target.path().to_path_buf();
 
     let res: Result<Streamed, String> = async {
+        // 流式导出同样走全量通道（上面 fetch 的注释解释了为什么）。
         let mut body = call(
             handle.clone(),
-            "exec",
+            "execFull",
             vec![
                 sql.to_string(),
                 STREAM_PAGE.to_string(),

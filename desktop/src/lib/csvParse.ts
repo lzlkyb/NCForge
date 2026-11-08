@@ -11,16 +11,25 @@
 
 export type Delimiter = "," | "\t" | ";";
 
-export interface ParsedCsv {
+/**
+ * 导入流程真正需要的形状：表头 + 行 + 行数。
+ *
+ * CSV / TSV / JSON / XLSX 四种来源共用它——`delimiter` 只有分隔符文本类才有，
+ * 让 xlsx 去假造一个 `","` 会把「这个字段一定有意义」这句谎话写进类型里。
+ */
+export interface ParsedRows {
   /** 第一行（已去 BOM 与首尾空白）。空文件是空数组。 */
   headers: string[];
   /** 数据行，长度与 headers 不一定相等（短行补空串，长行截断由调用方决定）。 */
   rows: string[][];
-  delimiter: Delimiter;
   /** 去掉空行后的总行数（含表头），用于把失败行号对回文件。 */
   lineCount: number;
   /** 被跳过的空行条数（用来解释"行数怎么少了"）。 */
   blankLines: number;
+}
+
+export interface ParsedCsv extends ParsedRows {
+  delimiter: Delimiter;
 }
 
 /** 按首行猜分隔符：制表符优先（TSV 里几乎不会有逗号当分隔），其次分号（部分欧洲区 CSV）。 */

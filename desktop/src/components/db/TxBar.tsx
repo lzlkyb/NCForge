@@ -6,6 +6,7 @@ import { dbTaskSpec, dbTxKey } from "../../lib/dbOperations";
 import { getOperations, operationActive, subscribeOperations, trackOperation } from "../../lib/operations";
 import { patchTab, setTx, setTxNotice, sqlTabOf, txAction, useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
 import { dbApi, type TxInfo } from "../../lib/dbApi";
+import { txPending } from "../../lib/txState";
 import { ContextMenu } from "../workspace/ContextMenu";
 
 type TxTarget = {
@@ -26,12 +27,14 @@ export function useDbTransaction({ connId, tabId, slot, tx: slotTx, notice: slot
   const key = dbTxKey(connId, slot);
   const active = useSyncExternalStore(subscribeOperations, () =>
     getOperations().find(op => op.key === 'db.' + key && op.endedAt === undefined));
-  const pending = !!tx && !tx.autoCommit && tx.statements > 0;
+  // 真源优先：`v$transaction` 说没有事务时，本地那条脏计数不再算数。
+  const { pending, dbConfirmed } = txPending(tx);
+  const dbNoTx = dbConfirmed === false;
   const lost = notice?.kind === "lost";
   const modeChanged = !readOnly && !!conn && !!tx && tx.autoCommit !== conn.autoCommit;
   const connected = rt.status === "connected";
   const disabled = !connected || !!active || !!blocked || !!readOnly || !pending || lost;
-  const canReconnect = connected && !active && !blocked && (lost || modeChanged && !pending);
+  const canReconnect = connected && !active && !blocked && (lost || dbNoTx || modeChanged && !pending);
 
   const act = async (action: "commit" | "rollback" | "reconnect") => {
     if (!connId || operationActive('db.' + key) || (action === "reconnect" ? !canReconnect : disabled)) return;
@@ -47,7 +50,10 @@ export function useDbTransaction({ connId, tabId, slot, tx: slotTx, notice: slot
         if (status.alive === false) throw new Error("session-lost|数据库会话已断开");
         if (slot) applySlotTx(status.tx);
         else setTx(connId,status.tx);
-        setTxNotice(connId,slot,tabId,{kind:"success",text:"事务状态已刷新 · 请核对上一次写入结果"});
+        const verdict = status.active === true ? "数据库确认有未提交事务"
+          : status.active === false ? "数据库确认没有未提交事务"
+          : "字典不可读，按本地记录核对";
+        setTxNotice(connId,slot,tabId,{kind:"success",text:`事务状态已刷新 · ${verdict}`});
       } else if (action === "reconnect") {
         const ok = await trackOperation(dbTaskSpec(key,"重新连接",connId,slot ? "独立会话" : "主会话",conn?.name,tabId),
           () => reconnectSession(connId, slot ?? null, tabId, false, !lost),
@@ -68,7 +74,7 @@ export function useDbTransaction({ connId, tabId, slot, tx: slotTx, notice: slot
     }
   };
 
-  return { tx, slot, pending, notice, lost, active, disabled, canReconnect, modeChanged, connected, blocked, act,
+  return { tx, slot, pending, dbConfirmed, notice, lost, active, disabled, canReconnect, modeChanged, connected, blocked, act,
     mode: readOnly ? "只读查询" : tx ? tx.autoCommit ? "自动提交" : "手动提交" : undefined };
 }
 
@@ -78,6 +84,7 @@ function transactionReason(t: Transaction) {
   return !t.connected ? "当前连接尚未建立" : t.lost ? "当前会话的事务结果待核对"
     : t.active ? `${t.active.label}中，等待数据库确认` : t.blocked ? "正在执行 SQL，等待返回后处理事务"
     : t.mode === "只读查询" ? "当前连接全部会话使用只读查询" : t.mode === "自动提交" ? "当前会话使用自动提交"
+    : t.dbConfirmed !== null ? (t.dbConfirmed ? "数据库确认当前会话有未提交事务" : "数据库确认当前会话没有未提交事务")
     : t.pending ? "处理当前会话的事务" : "当前会话没有待提交的写入";
 }
 
@@ -119,12 +126,13 @@ export function TransactionButtons({ transaction: t }: { transaction: Transactio
 export function TxBar({ transaction: t, actions = false }: { transaction: Transaction; actions?: boolean }) {
   const tone = t.active ? "busy" : t.lost || t.notice?.kind === "error" ? "bad"
     : t.pending || t.modeChanged ? "warn" : "ok";
-  if (!t.active && !t.notice && !t.pending && !t.modeChanged) return null;
+  if (!t.active && !t.notice && !t.pending && !t.modeChanged && t.dbConfirmed === null) return null;
   return <div className="dbx-txbar" data-tone={tone} role="status">
     <Icon name={tone === "busy" ? "clock" : tone === "ok" ? "check" : "alertTriangle"} size={14} />
     {actions && <span className="dbx-tx-owner">{t.slot ? "独立会话" : "共享会话"}</span>}
     {t.active ? <span>{t.active.label}中…等待数据库确认</span> : <>
       {t.notice && <span>{t.notice.text}</span>}
+      {!t.notice && t.dbConfirmed !== null && <span>{t.dbConfirmed ? "数据库确认：有未提交事务" : "数据库确认：没有未提交事务"}</span>}
       {!t.lost && t.pending && <span>未提交事务 · <b>{t.tx?.statements}</b> 条写入 · 影响 <b>{thousands(t.tx?.rows ?? 0)}</b> 行</span>}
       {!t.lost && t.modeChanged && <span>{t.pending ? "提交方式已更新 · 处理事务后可重连" : "提交方式已更新 · 重连后生效"}</span>}
     </>}

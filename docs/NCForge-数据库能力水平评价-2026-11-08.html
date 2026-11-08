@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>NCForge 数据库能力水平评价 · 2026-11-08</title>
+<style>
+  :root{
+    --ink:#28353c; --ink2:#586773; --ink3:#7b8894;
+    --brand:#246c61; --brand-soft:#e8f2ef; --brand-line:#bcd8d2;
+    --bg:#f0f3f4; --card:#ffffff; --line:#dde4e7; --line2:#eef2f4;
+    --warn:#a8531f; --warn-bg:#fdf1e8; --bad:#a33a34; --bad-bg:#fbeeed;
+    --ok:#246c61; --ok-bg:#eaf3f0;
+    --mono:"Cascadia Mono",Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:system-ui,"Segoe UI","Microsoft YaHei UI",sans-serif;
+    font-size:13px; line-height:1.65;
+  }
+  .page{max-width:1140px;margin:0 auto;padding:28px 24px 64px}
+  header.mast{
+    background:var(--card); border:1px solid var(--line); border-radius:10px;
+    padding:22px 26px; margin-bottom:18px;
+  }
+  .kicker{font-size:11px;letter-spacing:.12em;color:var(--brand);font-weight:700;text-transform:uppercase}
+  h1{margin:6px 0 4px;font-size:24px;letter-spacing:-.01em;font-weight:700}
+  .sub{color:var(--ink2);font-size:12.5px}
+  .meta{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--ink2)}
+  .meta span{background:var(--bg);border:1px solid var(--line2);border-radius:4px;padding:2px 8px}
+
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:14px 16px}
+  .kpi b{display:block;font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--brand)}
+  .kpi small{display:block;color:var(--ink2);font-size:11.5px;margin-top:2px}
+  .kpi.plain b{color:var(--ink)}
+
+  section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px 24px;margin-bottom:16px}
+  h2{font-size:16px;margin:0 0 4px;font-weight:700;display:flex;align-items:baseline;gap:8px}
+  h2 i{font-style:normal;color:var(--brand-line);font-variant-numeric:tabular-nums;font-size:14px}
+  h3{font-size:13px;margin:18px 0 6px;font-weight:700;color:var(--ink)}
+  p{margin:8px 0}
+  .lead{color:var(--ink2);font-size:12.5px;margin:0 0 14px}
+
+  table{width:100%;border-collapse:collapse;font-size:12.3px;margin:10px 0 4px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line2);vertical-align:top}
+  th{background:var(--bg);color:var(--ink2);font-weight:600;font-size:11.5px;border-bottom:1px solid var(--line);white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .c{text-align:center}
+  code{font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 4px;border-radius:3px;color:#33514b}
+
+  table.matrix td:last-child{min-width:240px;color:var(--ink2);font-size:12px}
+  table.matrix th:first-child{width:132px}
+  table.matrix th:nth-child(n+2):not(:last-child){width:80px}
+  table.matrix .dot{font-size:15px}
+  table.adv td:nth-child(3){min-width:200px}
+  table.adv td:first-child{font-weight:600}
+  .dot{font-size:14px;letter-spacing:1px}
+  .d2{color:var(--brand)}
+  .d1{color:#b08a4a}
+  .d0{color:#c9d2d6}
+
+  .bar{display:inline-block;vertical-align:middle;margin-left:10px;height:6px;background:var(--line2);border-radius:3px;overflow:hidden;width:72px}
+  .bar>span{display:block;height:100%;background:var(--brand)}
+  .bar>span.mid{background:#7fa79f}
+  .bar>span.low{background:#c9a06a}
+
+  .verdict{border-left:3px solid var(--brand);background:var(--brand-soft);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0}
+  .verdict b{color:var(--brand)}
+
+  ul{margin:8px 0;padding-left:20px}
+  li{margin:4px 0}
+  .tag{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:3px;letter-spacing:.04em;white-space:nowrap}
+  .t-s{background:#eee9f6;color:#5b4a8a}
+  .t-a{background:var(--warn-bg);color:var(--warn)}
+  .t-b{background:var(--bg);color:var(--ink2)}
+  .t-win{background:var(--ok-bg);color:var(--ok)}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .card-sm{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#fcfdfd}
+  .card-sm h4{margin:0 0 6px;font-size:12.5px}
+  .card-sm p{margin:0;color:var(--ink2);font-size:12px}
+
+  .note{font-size:11.5px;color:var(--ink3);margin-top:10px}
+  footer{color:var(--ink3);font-size:11.5px;text-align:center;padding-top:8px}
+  @media (max-width:900px){.kpis{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.page{padding:16px}}
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="mast">
+  <div class="kicker">能力评价 · Database Module</div>
+  <h1>NCForge 数据库模块水平评价</h1>
+  <div class="sub">评价对象：v0.2.0 数据库工作台（Oracle 单体）。参照：PL/SQL Developer 17、DataGrip 2026、DBeaver 25、Navicat 18 for Oracle、dbForge Studio for Oracle、Oracle SQL Developer。</div>
+  <div class="meta">
+    <span>评价日期 2026-11-08</span>
+    <span>代码基线 约 3 万行（前端 14.3k / Rust 13.7k / Java 桥 2.3k）</span>
+    <span>测试 前端 68 文件 / Rust 105 单测</span>
+    <span>方法 源码核对 + 既有审查记录 + 公开文档比对</span>
+  </div>
+</header>
+
+<div class="kpis">
+  <div class="kpi"><b>8.3</b><small>作为 NC 专用工作台（10 分制）</small></div>
+  <div class="kpi plain"><b>6.0</b><small>作为通用 Oracle 客户端</small></div>
+  <div class="kpi plain"><b>5 / 10</b><small>对标行业头部的能力覆盖项</small></div>
+  <div class="kpi plain"><b>7 项</b><small>对手普遍不具备的独占能力</small></div>
+</div>
+
+<section>
+  <h2><i>01</i>一句话结论</h2>
+  <div class="verdict">
+    <b>它不是一个通用数据库客户端，而是一台「NC 现场作业机」。</b>
+    在 Oracle 单库的日常读写、结果阅读、事务安全和 NC 语义理解上，已经达到或超过 PL/SQL Developer 的日常使用面；
+    但在通用客户端的三大标配（多数据库、PL/SQL 调试、结构与数据同步）上仍是空白。
+    判断它好不好，取决于你拿它跟谁比——拿它替 PL/SQL Developer 做 NC 开发，它是升级；拿它替 DBeaver 做通用取数，它是降级。
+  </div>
+  <p class="lead">这个定位不是缺陷，是取舍。真正需要警惕的不是「少功能」，而是「功能多但数据正确性还没沉淀到行业老工具的确定性水平」——v0.2.0 一轮审查就暴露出 8 个 P0 级数据正确性问题（导出截断、RAW 变 null、事务漏计等），全部集中在「预览通道被当成全量通道」这一条结构性设计上。</p>
+</section>
+
+<section>
+  <h2><i>02</i>能力矩阵</h2>
+  <p class="lead">● 完整可用　◐ 部分/有短板　○ 缺失。对手列按公开文档的公认能力概览；NCForge 列按源码逐项核对。</p>
+  <table class="matrix">
+    <thead><tr>
+      <th>能力维度</th><th class="c">NCForge</th><th class="c">PL/SQL Dev</th><th class="c">DataGrip</th><th class="c">DBeaver</th><th class="c">Navicat</th><th class="c">dbForge</th><th>判据摘要</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>多数据库支持</td><td class="c dot d0">○</td><td class="c dot d0">○</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d1">◐</td><td>仅 Oracle（双引擎，非双库）</td></tr>
+      <tr><td>NC 生态接入</td><td class="c dot d2">●</td><td class="c dot d0">○</td><td class="c dot d0">○</td><td class="c dot d0">○</td><td class="c dot d0">○</td><td class="c dot d0">○</td><td>prop.xml 导入、口令解密、md_* 中文字典</td></tr>
+      <tr><td>SQL 编辑与补全</td><td class="c dot d1">◐</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d1">◐</td><td class="c dot d1">◐</td><td class="c dot d2">●</td><td>表/列/关键字 + 中文名；无签名、无重构</td></tr>
+      <tr><td>执行与事务</td><td class="c dot d2">●</td><td class="c dot d1">◐</td><td class="c dot d1">◐</td><td class="c dot d1">◐</td><td class="c dot d1">◐</td><td class="c dot d1">◐</td><td>会话级事务条 + 只读守卫 + 兜底回滚</td></tr>
+      <tr><td>结果集阅读</td><td class="c dot d2">●</td><td class="c dot d1">◐</td><td class="c dot d1">◐</td><td class="c dot d1">◐</td><td class="c dot d1">◐</td><td class="c dot d1">◐</td><td>双层表头、canvas 列宽、二次编码解码</td></tr>
+      <tr><td>表格数据编辑</td><td class="c dot d1">◐</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td><b>只支持 UPDATE</b>，无行增删</td></tr>
+      <tr><td>对象浏览与 DDL</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td>表/视图/过程、结构/索引/DDL、对象搜索</td></tr>
+      <tr><td>ER 图 / 关系可视化</td><td class="c dot d0">○</td><td class="c dot d0">○</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d1">◐</td><td class="c dot d2">●</td><td>只有「关联记录跳转」，无图</td></tr>
+      <tr><td>结果/计划对比</td><td class="c dot d2">●</td><td class="c dot d1">◐</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td>A/B 快照按唯一键对齐；计划成本条对比</td></tr>
+      <tr><td>结构对比 / 数据同步</td><td class="c dot d0">○</td><td class="c dot d1">◐</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td>无 schema diff、无跨库传输</td></tr>
+      <tr><td>PL/SQL 调试</td><td class="c dot d0">○</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d1">◐</td><td class="c dot d0">○</td><td class="c dot d2">●</td><td>无断点、单步、变量观察</td></tr>
+      <tr><td>导入能力</td><td class="c dot d1">◐</td><td class="c dot d1">◐</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td>仅 CSV/TSV + .sql 回放</td></tr>
+      <tr><td>导出能力</td><td class="c dot d2">●</td><td class="c dot d1">◐</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td>10 种格式、流式 XLSX、任务中心</td></tr>
+      <tr><td>性能诊断</td><td class="c dot d1">◐</td><td class="c dot d2">●</td><td class="c dot d1">◐</td><td class="c dot d1">◐</td><td class="c dot d0">○</td><td class="c dot d2">●</td><td>计划 + v$mystat 统计；无 profiler/AWR</td></tr>
+      <tr><td>网络与部署形态</td><td class="c dot d0">○</td><td class="c dot d1">◐</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d1">◐</td><td>无 SSH 隧道（已明确否决）</td></tr>
+      <tr><td>扩展与 AI</td><td class="c dot d0">○</td><td class="c dot d1">◐</td><td class="c dot d2">●</td><td class="c dot d2">●</td><td class="c dot d1">◐</td><td class="c dot d1">◐</td><td>无插件、无 AI 辅助</td></tr>
+    </tbody>
+  </table>
+  <p class="note">16 项里 NCForge 满格 7 项、部分 5 项、缺失 4 项。与「Oracle 单库老牌工具」PL/SQL Developer 相比：满格项 7:4 反超，但缺的 4 项（调试、结构对比、ER 图、网络形态）恰好是它吃饭的本事。</p>
+</section>
+
+<section>
+  <h2><i>03</i>逐维评分与理由</h2>
+  <table>
+    <thead><tr><th style="width:150px">维度</th><th class="num" style="width:110px">得分</th><th>判断依据（源码核对）</th></tr></thead>
+    <tbody>
+      <tr><td>执行与事务</td><td class="num">9.0 <div class="bar"><span style="width:90%"></span></div></td>
+        <td>事务条按「会话 × 标签」建模，`TxBar` 常驻显示未提交语句数；只读连接是<b>连接级</b>而非标签级；`fallback-tx` 在兜底会话有写入时强制回滚而不是静默提交；生产库写操作有环境标记 + 二次确认 + 按连接记忆的免打扰窗口。这套东西比 DBeaver/Navicat 的「事务模式下拉框」细一档，是行业里少见的「不让你手滑」设计。</td></tr>
+      <tr><td>结果集阅读</td><td class="num">8.5 <div class="bar"><span style="width:85%"></span></div></td>
+        <td>虚拟滚动 + 双层表头（技术字段名 / NC 中文名 ?? 数据类型）+ canvas 精确列宽（扣 52px 表头 chrome）+ CLOB 8K 预览与「加载完整值」+ 二次编码自动解码（hex/base64→UTF-8/GBK）+ 16MB 结果内存预算 + 隐式结果集多 tab。单看「读数据」这一件事，体验在 PL/SQL Developer 之上，接近 TablePlus 的手感。</td></tr>
+      <tr><td>连接与环境管理</td><td class="num">8.5 <div class="bar"><span style="width:85%"></span></div></td>
+        <td>从 NC `prop.xml` 直接导入连接并解出加密口令（对手全无）；口令走 DPAPI / macOS 钥匙串；只读连接、默认 schema、环境标签（测试/生产）、连接排序、运行时切换 schema 会同步到所有槽与兜底会话。缺的是连接分组、颜色、跨环境配置同步。</td></tr>
+      <tr><td>诊断与对比</td><td class="num">8.5 <div class="bar"><span style="width:85%"></span></div></td>
+        <td>执行计划树 + 成本条 +「保存为对照 / 与上次对比」直接给「加索引前后」的结论；结果 A/B 比对按复合键对齐、区分 NULL 键与重复键；按值反查全库（找这个单据号落在哪张表）；会话与锁面板。对比能力密度超过 Navicat，接近 DataGrip。</td></tr>
+      <tr><td>对象与元数据</td><td class="num">7.5 <div class="bar"><span style="width:75%"></span></div></td>
+        <td>表/视图/过程/序列按需展开，结构/索引/DDL 子页，对象搜索 + 收藏 + 中文名 + NC 类引用（非外键的元数据引用）。缺 ER 图、权限管理、依赖树、对象 DDL 差异。</td></tr>
+      <tr><td>导入导出</td><td class="num">7.5 <div class="bar"><span style="width:75%"></span></div></td>
+        <td>导出 10 种格式（TSV/CSV/XLSX/JSON/JSONL/HTML/Markdown/INSERT/WHERE/UPDATE + NC INSERT），原生流式写 XLSX、后台任务 + 进度 + 停止 + 原子替换 + 部分结果改名。扣分在导入只有 CSV/TSV（无 XLSX/JSON/SQL 文件导入），以及 CLOB 全量导出仍未打通（8K 截断，只做到「明确告警」）。</td></tr>
+      <tr><td>SQL 编辑</td><td class="num">7.0 <div class="bar"><span style="width:70%"></span></div></td>
+        <td>补全带中文名与主键标记、Ctrl+点击表名开 DDL 页（对标 PL/SQL Developer 的跳转）、格式化、按光标/选区精确执行并显示行范围与语句数、PL/SQL 块与 `q'[…]'` 的语句分割正确。缺函数签名帮助、JOIN 条件推导、代码检查/重构、SQL 方言级 lint。</td></tr>
+      <tr><td>工程质量</td><td class="num">7.5 <div class="bar"><span style="width:75%"></span></div></td>
+        <td>前端 68 个测试文件 / Rust 105 个单测 / 231 条命令契约检查 / 五路并行静态审查 + 主审逐条回源码核对行号。这套自审强度超过大多数商业小工具。但 P0 缺陷密度说明「正确性沉淀」还在一轮轮补课（见第 6 节）。</td></tr>
+      <tr><td>生态与扩展</td><td class="num">3.5 <div class="bar"><span class="low" style="width:35%"></span></div></td>
+        <td>只有 Oracle，无 SSH 隧道（已论证否决）、无插件体系、无 AI、无云同步、无跨库。这三项是被对手拉开代差的地方。</td></tr>
+    </tbody>
+  </table>
+  <p class="note">加权口径：通用 Oracle 客户端（生态 25% / 编辑 15% / 诊断 15% / 导入导出 15% / 数据编辑 15% / 其他 15%）≈ 6.0；NC 开发工作台（事务 20% / 结果 20% / 连接 15% / 诊断 15% / 元数据 15% / 导入导出 15%）≈ 8.3。</p>
+</section>
+
+<section>
+  <h2><i>04</i>真实优势：别人做不到的</h2>
+  <p class="lead">这几条不是「做得更好」，是「别人没有」。护城河在 NC 语义，不在通用数据库能力。</p>
+  <table class="adv">
+    <thead><tr><th style="width:180px">优势</th><th>为什么对手做不到</th><th style="width:200px">证据</th></tr></thead>
+    <tbody>
+      <tr><td>prop.xml 一键接账套</td><td>要读 NC 私有的加密格式并解口令，还得跟本地 JVM 配合；通用客户端只能让用户手填 IP/端口/账号/口令。</td><td><code>ConnImportPanes</code> / <code>PropFileImportPane</code> / <code>prop_password_ready</code></td></tr>
+      <tr><td>NC 中文字段语义</td><td>表头第二行就是中文名、补全项带中文描述、数据字典三入口。这要求把 <code>md_*</code> 元数据表当一等公民，通用工具不会为一个 ERP 做这种适配。</td><td><code>dbColumnZh.ts</code> / <code>db_zh.rs</code> / <code>md_dict</code></td></tr>
+      <tr><td>NC 类引用关系</td><td>NC 的关联大量存在于元数据配置而非数据库外键，通用工具的 FK 图看不到，这里点一下就能沿引用链查记录。</td><td><code>dbRelations.ts</code>（外键 + NC 类引用）</td></tr>
+      <tr><td>NC 迁移导出格式</td><td>NC INSERT / WHERE / UPDATE 三种脚本 + 绑定参数复核 + 转义规则，是给「跨账套搬数据」准备的，不是通用 CSV 能替代。</td><td><code>db_transfer.rs</code>（10 种 TransferFormat）</td></tr>
+      <tr><td>生产库防误写</td><td>环境标记 + 按「标签×连接」记忆的免确认窗口 + 连接级只读 + 兜底会话强制回滚。商业工具多是「一个 Safe Mode 开关」，粒度粗得多。</td><td><code>dbConfirm.ts</code> / <code>dbReadOnly.ts</code> / <code>fallback-tx</code></td></tr>
+      <tr><td>双引擎可切换</td><td>JDBC 常驻 JVM（能力全）与纯 Rust thin 驱动（省内存、启动快）并存，还能在能力不足时自动路由到 JVM 兜底。业界没有第二个这样做的 Oracle 客户端。</td><td><code>db_engine.rs</code> <code>Caps</code> / <code>exec_via_java</code></td></tr>
+      <tr><td>二次编码自动解码</td><td>NC 的 CLOB 里常塞 hex 编码的 JSON 报文。这里在显示层识别并解码（含 GBK 兜底），还能一键生成解码 SQL。极冷门，但现场天天遇到。</td><td><code>cellCodec.ts</code>（80% 命中 + JSON 校验）</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><i>05</i>差距：分三类，别混着排期</h2>
+
+  <h3><span class="tag t-s">S 战略不追</span>　追了会输，因为不是我们的战场</h3>
+  <table>
+    <tbody>
+      <tr><td style="width:170px">多数据库支持</td><td>DataGrip/DBeaver/Navicat 的护城河。NC 只跑 Oracle，做多库是给别人的场景付费。真要通用，成本是「每个库一套元数据 SQL + 方言 + 类型映射」，等于重写三遍。</td></tr>
+      <tr><td>SSH 隧道</td><td>已论证否决（系统 ssh.exe 不可用、自研成本高于收益）。NC 现场多是内网直连或 VPN，隧道不是高频路径。</td></tr>
+      <tr><td>插件体系 / AI</td><td>插件是生态生意，v0.2.0 做等于给空生态建市场。AI 可以后置——先把「结构化上下文」（表、中文名、计划）做干净，比接个大模型有用。</td></tr>
+    </tbody>
+  </table>
+
+  <h3><span class="tag t-a">A 必须补</span>　对手标配，且是 NC 现场高频</h3>
+  <table>
+    <thead><tr><th style="width:170px">缺口</th><th>现状</th><th style="width:96px">难度</th></tr></thead>
+    <tbody>
+      <tr><td>行级 INSERT / DELETE</td><td>表页只能改单元格（UPDATE + 原值校验 + 冲突停止）。新增/删除记录得手写 SQL。这是与 DBeaver/Navicat/DataGrip 差距最大、感知最强的一项。</td><td>中</td></tr>
+      <tr><td>跨连接数据传输</td><td>有导出/导入两段，中间靠文件。缺「A 库表 → B 库表」直连搬运与「结构+数据一起搬」。NC 建账套/搬基础数据时正好要这个。</td><td>中高</td></tr>
+      <tr><td>表结构对比（DDL diff）</td><td>完全没有。跨环境核对表结构现在只能人工看 DDL。对手（dbForge/Navicat/DataGrip）都是标配。</td><td>中</td></tr>
+      <tr><td>CLOB 全量导出</td><td>8K 预览通道被复用为导出通道，&#62;8K 的 CLOB 写不全（当前只做到「告警 + 文件名标部分结果」）。正解是给引擎加全量取数命令族。</td><td>中</td></tr>
+      <tr><td>XLSX / JSON 导入</td><td>只有 CSV/TSV/TXT + .sql 逐条回放。实施顾问手里最常见的输入是 Excel。</td><td>低中</td></tr>
+    </tbody>
+  </table>
+
+  <h3><span class="tag t-b">B 打磨</span>　有，但离「老工具的确定性」还差一层</h3>
+  <table>
+    <thead><tr><th style="width:170px">问题</th><th>现状</th></tr></thead>
+    <tbody>
+      <tr><td>事务状态判据</td><td>仍靠「首关键字 + 乐观计数」猜 <code>for update</code> / PL&#47;SQL 块 / 手写 COMMIT；正解是查 <code>v$transaction</code> 做真源，关键字只当降级。</td></tr>
+      <tr><td>执行身份状态机</td><td><code>running</code> / <code>executionId</code> / <code>slot</code> 三处各自复位，历史上一处漏写就出现「永久 loading」「结果落错连接」。该收敛成单一 <code>runToken</code>。</td></tr>
+      <tr><td>超时覆盖</td><td>只有 <code>exec</code> 有 <code>call_timeout</code>；<code>more</code> / <code>lobValue</code> / 元数据命令遇对端黑洞会无限期持锁。</td></tr>
+      <tr><td>可访问性</td><td>网格焦点环、错误播报、确认框默认焦点（当前落在「10 分钟不再询问」上）等一批硬伤；键盘流不完整（Home/End 无行为、Ctrl+A 选整页）。</td></tr>
+      <tr><td>凭证与隐私</td><td>执行历史明文存完整 SQL（含 <code>identified by</code>、证件号），每连接 500 条无脱敏。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><i>06</i>最该警惕的：成熟度差在「确定性」，不在功能数</h2>
+  <p>v0.2.0 的一轮静态审查（五路并行 + 主审回源码核行号）挖出 8 个 P0：导出把 CLOB 预览文案当正文写进文件且零告警、RAW 超 64 字节静默变 <code>null</code>、临时会话不继承运行期 schema 导致导出读错账套、BLOB 全量读内存致 OOM、编辑连接绕过未提交事务确认、静态 <code>SimpleDateFormat</code> 跨线程共享导致日期错位、事务漏计、导入无生产确认。</p>
+  <div class="verdict">
+    <b>这些缺陷的共同点不是「粗心」，而是同一个结构性错误：把「给人看的预览」和「要落盘的全量」压在一条取数通道上，把「事务状态」建立在关键字猜测上。</b>
+    老工具（PL/SQL Developer 二十多年）的确定感，来自这些边界被无数现场事故磨过一遍。功能可以补，这类「静默错数据」的免疫只能靠架构收敛 + 回归测试沉淀。
+  </div>
+  <p class="lead">好消息是：这一轮已修 7 个 P0 + 9 个 P1，并补了 3 个守卫测试（预览文案契约、事务计数判据、RAW 不静默 null）。坏消息是：3 个结构性设计缺陷（全量取数通道、事务真源、runToken）明确「未修，需单独排期」。</p>
+</section>
+
+<section>
+  <h2><i>07</i>该往哪走</h2>
+  <table>
+    <thead><tr><th style="width:110px">批次</th><th>内容</th><th style="width:270px">理由</th></tr></thead>
+    <tbody>
+      <tr><td><b>第一批</b><br><span class="note">把「确定性」补齐</span></td>
+        <td>全量取数命令族（导出/传输只走它）· 事务真源改 <code>v$transaction</code> · 统一 <code>runToken</code> · 全覆盖 <code>call_timeout</code></td>
+        <td>这三件是 P0 的生产者。不修，功能越多、错数据的面越大。用户不会因为「少个 ER 图」弃用，但会因为「导出少一半字」再也不信它。</td></tr>
+      <tr><td><b>第二批</b><br><span class="note">补对手标配</span></td>
+        <td>行级 INSERT/DELETE · XLSX/JSON 导入 · 表结构对比（DDL diff）</td>
+        <td>这三项是「换掉 PL/SQL Developer / Navicat」的最后门槛，也是 NC 建账套、跨环境核对的高频动作。</td></tr>
+      <tr><td><b>第三批</b><br><span class="note">做别人做不到</span></td>
+        <td>跨连接数据传输（结构 + 数据 + NC 类引用一起搬）· NC 专用数据体检（脏数据/孤儿引用/编码异常扫描）</td>
+        <td>这才是真正的差异化：通用工具即使愿意做，也缺 NC 元数据语义。把护城河从「读得舒服」推到「搬得对、查得出问题」。</td></tr>
+    </tbody>
+  </table>
+  <p class="note">不建议排期：多数据库、SSH 隧道、插件市场、AI 助手。至少在 NC 场景的数据库链路做到「零静默错」之前，这些只会摊薄注意力。</p>
+</section>
+
+<section>
+  <h2><i>08</i>结论</h2>
+  <div class="grid2">
+    <div class="card-sm">
+      <h4>已经超越的地方</h4>
+      <p>事务可视化与写保护、结果阅读手感、计划对比、NC 语义（中文名/类引用/迁移格式）、双引擎架构、生产环境防误操作。这些是「用过就回不去」的部分。</p>
+    </div>
+    <div class="card-sm">
+      <h4>还被压着的地方</h4>
+      <p>数据编辑只到 UPDATE、无结构对比、无跨库传输、无 PL/SQL 调试、无 ER 图、导入格式单一。前四项是日常高频，不是锦上添花。</p>
+    </div>
+    <div class="card-sm">
+      <h4>真实水平</h4>
+      <p>在「NC 开发者用的 Oracle 客户端」这个细分里，已经是国内能拿到的最完整的一个（没有第二个做 NC 语义适配的竞品）。放到通用 Oracle 工具货架上，属于「有特色但覆盖不全的中量级选手」。</p>
+    </div>
+    <div class="card-sm">
+      <h4>一句话建议</h4>
+      <p>把「不静默错数据」当第一优先级，把「行增删 + 结构对比 + 跨库搬运」当第二优先级。其余功能在 v0.2.0 阶段都是噪声。</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  证据基线：<code>desktop/src-tauri/src/db_*.rs</code>（7,735 行）· <code>desktop/src-tauri/src/commands/db_*.rs</code>（5,970 行）·
+  <code>desktop/src-tauri/db-bridge/NcDbBridge.java</code>（2,338 行）· <code>desktop/src/lib/db*</code> 等（6,516 行）·
+  <code>desktop/src/components/db</code>（7,825 行）· <code>docs/数据库功能与UI审查-2026-11-08.md</code>。<br>
+  对手能力按公开文档与产品页概览（PL/SQL Developer 17 / DataGrip 2026 / DBeaver / Navicat 18 / dbForge），具体版本间存在差异，未逐版实测。
+</footer>
+
+</div>
+</body>
+</html>

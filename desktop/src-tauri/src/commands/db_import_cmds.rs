@@ -10,7 +10,8 @@
 //! [`crate::sql_export::literal`]，与「导出 INSERT」同一个实现，日期/数字/RAW 的写法
 //! 才不会两边不一致。
 //!
-//! 只做**格式化后的文本**导入：xlsx 请另存为 csv（前端也只收 csv/tsv/txt）。
+//! 文件解析在前端（csv/tsv/json 是文本）或 [`crate::xlsx_read`]（xlsx 是 zip，必须有后端
+//! 解压），这里只收**已解析成字符串矩阵**的行——后端不再关心源文件的格式。
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -229,6 +230,65 @@ pub async fn db_import_rows(
     })
 }
 
+/// 一张工作表读出来的样子（行优先的纯文本矩阵，第一行通常就是表头）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct XlsxSheetOut {
+    /// 工作表显示名，界面上要告诉用户"读的是哪张表"（多 sheet 的文件很常见）。
+    pub sheet: String,
+    pub rows: Vec<Vec<String>>,
+}
+
+/// 从 IPC 载荷里取文件字节。
+///
+/// 正路是裸载荷（`InvokeBody::Raw`）。`Json` 分支是兜底：万一某个平台/版本上二进制
+/// 载荷被序列化成 `{ bytes: [...] }`，这里还能读下去，总比在导入窗口里给一句
+/// 「需要把文件字节作为原始载荷传入」让用户无路可走强。
+fn payload_bytes(body: &tauri::ipc::InvokeBody) -> Result<Vec<u8>, String> {
+    match body {
+        tauri::ipc::InvokeBody::Raw(bytes) => Ok(bytes.clone()),
+        tauri::ipc::InvokeBody::Json(value) => {
+            let list = value
+                .get("bytes")
+                .and_then(|b| b.as_array())
+                .ok_or("读取 XLSX 需要把文件字节作为原始载荷传入")?;
+            list.iter()
+                .map(|v| {
+                    v.as_u64()
+                        .filter(|n| *n <= u8::MAX as u64)
+                        .map(|n| n as u8)
+                        .ok_or_else(|| "文件字节里有非法数值".to_string())
+                })
+                .collect()
+        }
+    }
+}
+
+/// 读前端选中的 XLSX，返回文本矩阵。
+///
+/// **字节走 IPC 裸载荷**（`invoke(cmd, uint8Array)`），不走 `{ bytes: [...] }`：一个 5MB 的
+/// 表按 JSON 数字数组要编出几千万个字符，编码和解析都在白等，而裸载荷是一次内存拷贝。
+/// 代价是命令不能带别的参数，所以行数上限用 [`crate::xlsx_read::MAX_ROWS`] 而不是入参。
+///
+/// 解析放 `spawn_blocking`：zip 解压 + 扫描是纯 CPU 活，几百毫秒到几秒，钉在异步运行时
+/// 的 worker 上会连带拖慢同一时刻的数据库命令。
+#[tauri::command]
+pub async fn db_xlsx_read(request: tauri::ipc::Request<'_>) -> Result<XlsxSheetOut, String> {
+    let bytes = payload_bytes(request.body())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let sheet = crate::xlsx_read::read_xlsx_from(
+            std::io::Cursor::new(bytes),
+            crate::xlsx_read::MAX_ROWS,
+        )?;
+        Ok(XlsxSheetOut {
+            sheet: sheet.sheet,
+            rows: sheet.rows,
+        })
+    })
+    .await
+    .map_err(|e| format!("读取 XLSX 的后台任务失败：{e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,5 +348,29 @@ mod tests {
         // 宁可让 Oracle 报类型错（用户能看见是哪一行），也不要拼出 `values (abc, …)` 这种语法错误
         let sql = build_insert("T", &cols(), &[Some("abc".into()), Some("x".into()), None]);
         assert!(sql.contains("values ('abc', 'x', null)"), "{sql}");
+    }
+
+    #[test]
+    fn 裸载荷直接取字节_对象载荷也能兜底() {
+        let raw = payload_bytes(&tauri::ipc::InvokeBody::Raw(vec![1, 2, 3])).unwrap();
+        assert_eq!(raw, vec![1, 2, 3]);
+        let json = payload_bytes(&tauri::ipc::InvokeBody::Json(
+            serde_json::json!({ "bytes": [80, 75, 3, 4] }),
+        ))
+        .unwrap();
+        assert_eq!(json, vec![80, 75, 3, 4]);
+    }
+
+    #[test]
+    fn 载荷形状不对时报错而不是给空表() {
+        // 空表会让界面说「文件里没有数据」，把前端接错伪装成文件问题
+        let e = payload_bytes(&tauri::ipc::InvokeBody::Json(serde_json::json!({ "x": 1 })))
+            .unwrap_err();
+        assert!(e.contains("原始载荷"), "{e}");
+        let e = payload_bytes(&tauri::ipc::InvokeBody::Json(
+            serde_json::json!({ "bytes": [1, 300] }),
+        ))
+        .unwrap_err();
+        assert!(e.contains("非法数值"), "{e}");
     }
 }

@@ -50,7 +50,7 @@ const flush = () => act(async () => {});
 const btn = (text: string) =>
   Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes(text));
 
-async function mountWithCsv() {
+async function mountWith(name: string, content: string) {
   await act(async () => {
     root.render(
       <ImportDialog connId="c1" table="bd_material" cols={COLS} onClose={() => {}} onDone={() => {}} />,
@@ -60,12 +60,14 @@ async function mountWithCsv() {
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
   await act(async () => {
     // jsdom 的 input.files 只读，定义 setter 让 React 的 onChange 能读到文件
-    Object.defineProperty(input, "files", { value: [new File([CSV], "a.csv", { type: "text/csv" })], configurable: true });
+    Object.defineProperty(input, "files", { value: [new File([content], name)], configurable: true });
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
   });
   await flush();
 }
+
+const mountWithCsv = () => mountWith("a.csv", CSV);
 
 /** 手动控制 resolve 时机的 deferred：模拟「一批还在飞」。 */
 function deferred<T>() {
@@ -143,5 +145,40 @@ describe("ImportDialog 取消语义", () => {
     // ③ 已写的批不会因异常消失：摘要 + 错误都要在
     expect(document.body.textContent ?? "").toContain("5");
     expect(document.body.textContent ?? "").toContain("ORA-00001");
+  });
+});
+
+describe("ImportDialog 选 XLSX", () => {
+  it("字节作为裸载荷送给后端解压，读回的表头与行照常走映射与导入", async () => {
+    mocks.invoke.mockImplementationOnce((cmd: string) => {
+      expect(cmd).toBe("db_xlsx_read");
+      return Promise.resolve({ sheet: "基础数据", rows: [["ID", "NAME"], ["1", "甲"], ["2", "乙"]] });
+    });
+    await mountWith("b.xlsx", "PK\u0003\u0004fake");
+    await flush();
+
+    // 裸载荷：第二个参数是字节本身，不是 { bytes: [...] }（后者会退化成 JSON 数字数组）
+    const payload = mocks.invoke.mock.calls[0][1];
+    expect(payload).toBeInstanceOf(Uint8Array);
+
+    // 读的是哪张表必须看得见：多 sheet 的文件读错表不会报错，只会导错数据
+    expect(document.body.textContent ?? "").toContain("基础数据");
+    expect(document.body.textContent ?? "").toContain("2 列 · 2 行");
+
+    await act(async () => {
+      btn("开始导入")?.click();
+    });
+    await flush();
+    const call = mocks.invoke.mock.calls.find((c) => c[0] === "db_import_rows");
+    expect(call).toBeTruthy();
+    const req = (call?.[1] as { req: { rows: (string | null)[][]; columns: { name: string }[] } }).req;
+    expect(req.columns.map((c) => c.name)).toEqual(["ID", "NAME"]);
+    expect(req.rows).toEqual([["1", "甲"], ["2", "乙"]]);
+  });
+
+  it("旧版 .xls 给「另存为」的明路，不是一句读不了", async () => {
+    await mountWith("c.xls", "not a zip");
+    await flush();
+    expect(document.body.textContent ?? "").toContain("不支持旧版 .xls");
   });
 });

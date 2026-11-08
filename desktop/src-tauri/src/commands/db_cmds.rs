@@ -549,12 +549,29 @@ pub(crate) async fn open_temp_session(
     kind: &str,
 ) -> Option<(String, Arc<EngineHandle>)> {
     // 读操作不需要事务：自动提交，跑完断开也不留未提交状态
-    //
+    open_temp_session_tx(app, state, cfg, conn, engine, kind, true).await
+}
+
+/// 同 [`open_temp_session`]，但允许关掉自动提交。
+///
+/// 🔴 写操作（表 → 表 搬运的**目标**会话）必须传 `auto_commit=false`：自动提交下
+/// 每条 insert 落地就是一个事务，后端的 `commit` / `rollback` 全是空操作，「逐批提交」
+/// 与「本批已回滚」都会变成假话；`replace` 的 `delete` 更是立刻落库，搬运中途失败
+/// 就只剩一张空表。只有源表 / 元数据这种纯读会话才用默认的 true。
+pub(crate) async fn open_temp_session_tx(
+    app: &AppHandle,
+    state: &AppState,
+    cfg: &AppConfig,
+    conn: &DbConnConfig,
+    engine: EngineKind,
+    kind: &str,
+    auto_commit: bool,
+) -> Option<(String, Arc<EngineHandle>)> {
     // 🔴 必须带上「运行期切过的 schema」：导出、按值反查、账号列表、关系图都是
     // 「在用户当前看到的那个库里跑」。直接拿配置里的 `default_schema` 会安静地
     // 读到另一个 schema 的同名表 —— 界面显示 B 的数据，文件里是 A 的。
     let runtime = conn_with_runtime_schema(state, conn);
-    let (cmd, args) = connect_args(cfg, &runtime, None, true, engine).ok()?;
+    let (cmd, args) = connect_args(cfg, &runtime, None, auto_commit, engine).ok()?;
     let key = format!(
         "__{kind}:{}:{}",
         conn.id,
@@ -1463,7 +1480,9 @@ pub async fn db_tx(
         "rollback" => ("rollback", vec![]),
         "autocommit-on" => ("autocommit", vec!["true".into()]),
         "autocommit-off" => ("autocommit", vec!["false".into()]),
-        "status" => ("ping", vec![]),
+        // 用 `txStatus` 而不是 `ping`：除了探活，还回 `v$transaction` 的真源结论，
+        // 让界面能纠正本地 DML 计数（手写 COMMIT / PL/SQL 内部提交会留下脏计数）。
+        "status" => ("txStatus", vec![]),
         other => return Err(format!("未知事务操作：{other}")),
     };
     call(b, cmd, args, Duration::from_secs(60)).await

@@ -49,6 +49,7 @@ pub mod db_engine;
 pub mod db_file_export;
 pub mod db_rust;
 pub mod db_schema;
+pub mod db_struct;
 pub mod db_transfer;
 pub mod db_transfer_destination;
 pub mod db_transfer_job;
@@ -105,6 +106,7 @@ pub mod svn_view;
 pub mod watcher;
 pub mod workspace;
 pub mod workspace_types;
+pub mod xlsx_read;
 
 /// 测试专用工具（临时目录等）。只在 `cfg(test)` 下编译：unit test 用
 /// `crate::test_support::tmp("tag")`，它就藏在这里。
