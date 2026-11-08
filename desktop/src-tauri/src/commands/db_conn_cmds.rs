@@ -12,7 +12,7 @@ use tauri::AppHandle;
 
 use super::db_cmds::{
     bridge_for, call, code_label, connect_args, drop_bridge, find_conn, need_nc_home,
-    prop_password_ready, protect, PROBE,
+    prop_password_ready, protect, seal_remembered, PROBE,
 };
 use crate::config::{AppConfig, DbConnConfig};
 use crate::db_conns;
@@ -292,17 +292,26 @@ pub async fn db_conn_save(
              其余用字母、数字、下划线，最长 128 个字符"
         ));
     }
-    let enc = match password.as_deref().filter(|p| !p.is_empty()) {
-        Some(p) if remember.unwrap_or(true) => Some(Some(protect(p)?)),
-        Some(_) => Some(None),
-        None => None, // 没输口令：保持原样
-    };
+    // 口令存不下（macOS 钥匙串被拒等）只失去「记住」，不能让整条连接存不下来
+    let (enc, warn) = seal_remembered(password.as_deref(), remember.unwrap_or(true));
+    if let Some(w) = warn {
+        log::warn!("{w}");
+    }
     let id = conn.id.clone().unwrap_or_else(db_conns::new_id);
     let cfg = state
         .update_config(|c| {
             let old = c.db_conns.iter().position(|x| x.id == id);
             let keep = old.and_then(|i| c.db_conns[i].password_dpapi.clone());
+            let before = keep.clone();
             let next = conn.to_config(id.clone(), enc.clone().unwrap_or(keep));
+            // 换了密文就把旧的钥匙串条目回收掉，别在主目录里留孤儿
+            if let (Some(old_enc), Some(new_enc)) =
+                (before.as_deref(), next.password_dpapi.as_deref())
+            {
+                if old_enc != new_enc {
+                    crate::svn_cred::secret::forget(old_enc);
+                }
+            }
             match old {
                 Some(i) => c.db_conns[i] = next,
                 None => c.db_conns.push(next),
@@ -327,6 +336,15 @@ pub async fn db_conn_delete(
     }
     let cfg = state
         .update_config(|c| {
+            // 删连接时把口令的外部副本（macOS 钥匙串条目）一起回收
+            if let Some(enc) = c
+                .db_conns
+                .iter()
+                .find(|x| x.id == id)
+                .and_then(|x| x.password_dpapi.as_deref())
+            {
+                crate::svn_cred::secret::forget(enc);
+            }
             c.db_conns.retain(|x| x.id != id);
             if c.db_active.as_deref() == Some(id.as_str()) {
                 c.db_active = None;
@@ -365,6 +383,9 @@ pub struct TestResult {
     pub schema: String,
     /// 默认 schema 没设成的原因（名字写错 / 没权限）。有值 = 当前用的是登录账号。
     pub schema_warning: Option<String>,
+    /// 表单选了 JVM 桥但本机没有运行时、实际用纯 Rust 连上的原因。
+    /// 不回传的话用户会以为测试通过＝JVM 桥可用，真连时才在 REF CURSOR 上撞墙。
+    pub engine_note: Option<String>,
 }
 
 /// 测试连接：用临时桥连一下就断，不影响任何已开的会话。
@@ -391,6 +412,15 @@ pub async fn db_conn_test(
     }
     let (cmd, args) = connect_args(&cfg, &draft, password.as_deref(), true, engine)?;
     let b = bridge_for(&app, &st, &cfg, PROBE, engine, PROBE)?;
+    // 表单选 JVM 桥但本机没有运行时：`bridge_for` 已经把句柄降级成 Rust。
+    // 不把这件事说出来，用户会以为「测试通过＝JVM 桥可用」，真连时才在 REF CURSOR 上撞墙。
+    let actual_note = (engine == crate::db_engine::EngineKind::Java
+        && b.kind() == crate::db_engine::EngineKind::Rust)
+        .then(|| {
+            "本机没有可用的 Java 运行时与 Oracle 驱动，这次测试实际用的是「纯 Rust 驱动」。\
+             想测 JVM 桥：到「设置 → 组件」下载「数据库 JVM 组件」"
+                .to_string()
+        });
     let t0 = Instant::now();
     let out = call(b.clone(), cmd, args, Duration::from_secs(60)).await?;
     let ms = t0.elapsed().as_millis() as u64;
@@ -430,6 +460,7 @@ pub async fn db_conn_test(
             .and_then(Value::as_str)
             .filter(|w| !w.is_empty())
             .map(str::to_string),
+        engine_note: actual_note,
     })
 }
 
@@ -446,10 +477,11 @@ pub async fn db_conn_import_props(
     env: String,
 ) -> Result<DbConnView, String> {
     let (url, user, pwd) = db_conns::parse_properties(&text)?;
+    // 存不下口令不阻断导入：连接照样建好，只是下次连接要手输
     let enc = if pwd.is_empty() {
         None
     } else {
-        Some(protect(&pwd)?)
+        protect(&pwd).ok()
     };
     let id = db_conns::new_id();
     let input = DbConnInput {

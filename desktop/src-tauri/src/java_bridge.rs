@@ -24,6 +24,15 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// JVM classpath 的分隔符。
+///
+/// Windows 是 `;`，POSIX（macOS / Linux）是 `:`。写死 `;` 时 JVM 会把整串当成**一个**
+/// 路径，报 `Could not find or load main class`——这条错误看起来像「jar 没找到」，
+/// 与真正的平台差异毫无关系，排查时极易走错方向。
+///
+/// ECJ 的 `@argfile` 里 `-cp` 遵循同一套规则，`compile.rs` 复用这个常量。
+pub const CLASSPATH_SEP: &str = if cfg!(windows) { ";" } else { ":" };
+
 /// 桥的一次调用结果。
 #[derive(Debug)]
 pub struct BridgeError {
@@ -408,7 +417,7 @@ impl Bridge {
             .iter()
             .map(|p| p.display().to_string())
             .collect::<Vec<_>>()
-            .join(";");
+            .join(CLASSPATH_SEP);
         if self.env.jars.is_empty() {
             return Err(BridgeError::new(
                 "spawn",

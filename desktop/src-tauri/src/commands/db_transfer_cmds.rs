@@ -192,6 +192,13 @@ pub async fn db_transfer_file(
         return Ok(None);
     }
     let mut conn = find_conn(&cfg, &req.id)?;
+    validate_source_connection(req.source_connection_key.as_deref(), &conn)?;
+    if let Some(schema) = req.source_schema.as_deref() {
+        let normalized = crate::db_conns::normalize_schema(schema);
+        if !normalized.is_empty() && !crate::db_conns::valid_schema(&normalized) {
+            return Err("查询来源 schema 无效，请重新执行查询后导出".into());
+        }
+    }
     let engine = EngineKind::parse(&conn.engine);
     if engine != EngineKind::Java && conn.source == "prop" {
         prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE).await?;
@@ -206,6 +213,17 @@ pub async fn db_transfer_file(
     let result = async {
         if cancel.token.load(Ordering::SeqCst) {
             return Ok(None);
+        }
+        // The export owns a fresh session. Pin the result's schema instead of inheriting a later
+        // connection-level schema change, which could otherwise export same-shaped data from another tenant.
+        if let Some(schema) = req.source_schema.as_deref() {
+            call(
+                handle.clone(),
+                "setSchema",
+                vec![schema.to_string()],
+                Duration::from_secs(30),
+            )
+            .await?;
         }
         call(
             handle.clone(),
@@ -241,6 +259,30 @@ enum Source {
         handle: Arc<EngineHandle>,
         timeout: u32,
     },
+}
+
+fn validate_source_connection(
+    expected: Option<&str>,
+    conn: &crate::config::DbConnConfig,
+) -> Result<(), String> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let actual = json!([
+        conn.url,
+        conn.user,
+        if conn.engine.is_empty() {
+            "java"
+        } else {
+            &conn.engine
+        },
+        conn.source,
+        conn.prop_ds
+    ]);
+    if serde_json::from_str::<Value>(expected).ok().as_ref() != Some(&actual) {
+        return Err("连接目标已变化，请重新执行查询后导出；已加载的数据仍可导出".into());
+    }
+    Ok(())
 }
 struct Progress {
     app: AppHandle,
@@ -851,6 +893,21 @@ fn write_remote(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn frozen_connection_target_survives_renames_but_rejects_other_accounts() {
+        let mut conn: crate::config::DbConnConfig = serde_json::from_value(
+            json!({"id":"c","name":"测试","source":"manual","url":"jdbc:test","user":"NC"}),
+        )
+        .unwrap();
+        let expected = json!(["jdbc:test", "NC", "java", "manual", null]).to_string();
+        assert!(validate_source_connection(Some(&expected), &conn).is_ok());
+        conn.name = "已改名".into();
+        assert!(validate_source_connection(Some(&expected), &conn).is_ok());
+        conn.user = "OTHER".into();
+        assert!(validate_source_connection(Some(&expected), &conn).is_err());
+        assert!(validate_source_connection(Some("invalid"), &conn).is_err());
+        assert!(validate_source_connection(None, &conn).is_ok());
+    }
     #[test]
     fn bound_precision_preserved_and_complex_values_rejected() {
         let v = json!({"number":"123456789012345678901234567890.1234"});

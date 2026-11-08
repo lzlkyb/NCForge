@@ -46,10 +46,84 @@ pub const SERVER_DIR: &str = "server";
 /// 「有人在生产环境留了个 500MB 的日志」时不要把内存和 UI 一起拖死。
 pub const DEFAULT_MAX_BYTES: usize = 6 * 1024 * 1024;
 
-/// 统计行号时最多回扫多少字节（只为把 `file:line` 显示准）。
-///
-/// 读一遍前缀只为数换行，比「整份解析」便宜得多；上限避免超大文件拖慢一次点击。
-const LINE_COUNT_CAP: u64 = 64 * 1024 * 1024;
+/// Bounded per-file checkpoints keep repeated tail reads incremental. The initial
+/// pass counts the complete prefix so files beyond 64 MiB still have correct lines.
+#[derive(Clone)]
+struct LineCheckpoint {
+    path: PathBuf,
+    created: Option<std::time::SystemTime>,
+    modified: Option<std::time::SystemTime>,
+    len: u64,
+    offset: u64,
+    lines: u64,
+    head: Vec<u8>,
+    anchor: Vec<u8>,
+}
+static LINE_CHECKPOINTS: std::sync::Mutex<Vec<LineCheckpoint>> = std::sync::Mutex::new(Vec::new());
+
+fn sample(file: &mut std::fs::File, at: u64, size: usize) -> std::io::Result<Vec<u8>> {
+    file.seek(SeekFrom::Start(at))?;
+    let mut bytes = vec![0; size];
+    file.read_exact(&mut bytes)?;
+    Ok(bytes)
+}
+
+fn prefix_lines(file: &mut std::fs::File, path: &Path, target: u64) -> std::io::Result<u64> {
+    let md = file.metadata()?;
+    let head = sample(file, 0, md.len().min(64) as usize)?;
+    let previous = LINE_CHECKPOINTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .find(|c| c.path == path)
+        .cloned();
+    let mut offset = 0;
+    let mut lines = 0;
+    if let Some(c) = previous {
+        // Append-only growth can reuse a checkpoint. Same-size rewrites, truncation,
+        // rotation and changed prefix samples invalidate it before any count is reused.
+        if c.created == md.created().ok()
+            && c.head == head
+            && c.offset <= target
+            && (c.len == md.len() && c.modified == md.modified().ok() || md.len() > c.len)
+            && sample(
+                file,
+                c.offset.saturating_sub(c.anchor.len() as u64),
+                c.anchor.len(),
+            )? == c.anchor
+        {
+            offset = c.offset;
+            lines = c.lines;
+        }
+    }
+    file.seek(SeekFrom::Start(offset))?;
+    let mut buf = [0u8; 64 * 1024];
+    while offset < target {
+        let size = (target - offset).min(buf.len() as u64) as usize;
+        file.read_exact(&mut buf[..size])?;
+        lines += buf[..size].iter().filter(|b| **b == b'\n').count() as u64;
+        offset += size as u64;
+    }
+    let anchor_len = target.min(64) as usize;
+    let anchor = sample(file, target - anchor_len as u64, anchor_len)?;
+    let next = LineCheckpoint {
+        path: path.to_owned(),
+        created: md.created().ok(),
+        modified: md.modified().ok(),
+        len: md.len(),
+        offset: target,
+        lines,
+        head,
+        anchor,
+    };
+    let mut cache = LINE_CHECKPOINTS.lock().unwrap_or_else(|e| e.into_inner());
+    cache.retain(|c| c.path != path);
+    if cache.len() >= 32 {
+        cache.remove(0);
+    }
+    cache.push(next);
+    Ok(lines)
+}
 
 /// 一条记录最多保留多少行续行（堆栈）。超出的丢弃并置 `stackTruncated`。
 const MAX_STACK_LINES: usize = 80;
@@ -410,19 +484,7 @@ pub fn read_tail(path: &Path, max_bytes: usize) -> std::io::Result<RawChunk> {
     }
 
     let start = len - max_bytes;
-    // 数出 start 之前的换行数（分块读，不把前缀整个装进内存）
-    let mut skipped: u64 = 0;
-    let mut read: u64 = 0;
-    let mut buf64k = vec![0u8; 64 * 1024];
-    while read < start.min(LINE_COUNT_CAP) {
-        let want = ((start.min(LINE_COUNT_CAP) - read) as usize).min(buf64k.len());
-        let n = file.read(&mut buf64k[..want])?;
-        if n == 0 {
-            break;
-        }
-        skipped += buf64k[..n].iter().filter(|b| **b == b'\n').count() as u64;
-        read += n as u64;
-    }
+    let skipped = prefix_lines(&mut file, path, start)?;
 
     file.seek(SeekFrom::Start(start))?;
     let mut tail = Vec::with_capacity(max_bytes as usize);
@@ -722,6 +784,27 @@ broken.key.no.file=1
             assert_eq!(r.line_no, n + 1, "行号错位: {}", r.msg);
         }
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn prefix_checkpoint_survives_append_but_not_replacement() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("append.log");
+        std::fs::write(&path, b"a\nb\nc\n").unwrap();
+        let mut file = std::fs::File::open(&path).unwrap();
+        assert_eq!(prefix_lines(&mut file, &path, 4).unwrap(), 2);
+        let mut writer = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writer.write_all(b"d\ne\n").unwrap();
+        assert_eq!(prefix_lines(&mut file, &path, 8).unwrap(), 4);
+        drop(file);
+        drop(writer);
+        std::fs::write(&path, b"longer\nx\n").unwrap();
+        let mut file = std::fs::File::open(&path).unwrap();
+        assert_eq!(prefix_lines(&mut file, &path, 8).unwrap(), 1);
     }
 
     #[test]

@@ -107,6 +107,50 @@ pub fn identity(file: &File, meta: &Metadata) -> Result<String, String> {
         Ok(created.to_string())
     }
 }
+/// 清空日志内容但**不换文件**：返回清掉的字节数。文件不存在返回 0（不凭空建出来）。
+///
+/// 用 `set_len(0)` 而不是「删了再建」：中间件/客户端的 stdout 直接接在这个文件上
+/// （`ServerSpec::spawn` 用 `Stdio::from` 传的是同一句柄），删掉重建会让运行中的进程
+/// 继续写进那个「已删除」的旧句柄——界面读新文件永远是空的，之后的日志等于全丢。
+/// 截断则两边落在同一个文件对象上：进程下一次写从 0 开始，读取端也会因
+/// `offset > size` 判定 `reset` 自动重读。
+pub fn truncate(path: &Path) -> Result<u64, String> {
+    if !path
+        .try_exists()
+        .map_err(|e| format!("日志路径无法访问：{e}"))?
+    {
+        return Ok(0);
+    }
+    if !path.is_file() {
+        return Err("日志来源不是普通文件".into());
+    }
+    let file = File::options()
+        .write(true)
+        .open(path)
+        .map_err(|e| format!("打开日志失败：{e}"))?;
+    let len = file
+        .metadata()
+        .map_err(|e| format!("读取日志信息失败：{e}"))?
+        .len();
+    file.set_len(0).map_err(|e| format!("清空日志失败：{e}"))?;
+    Ok(len)
+}
+
+/// 删掉上次运行的归档（`*.log.1`）。不存在视为已清，返回是否真的删了。
+pub fn remove_archive(path: &Path) -> Result<bool, String> {
+    if !path
+        .try_exists()
+        .map_err(|e| format!("日志路径无法访问：{e}"))?
+    {
+        return Ok(false);
+    }
+    if !path.is_file() {
+        return Err("日志来源不是普通文件".into());
+    }
+    std::fs::remove_file(path).map_err(|e| format!("删除上次运行日志失败：{e}"))?;
+    Ok(true)
+}
+
 pub fn open_source(path: &Path) -> Result<(File, u64, String), String> {
     let file = File::open(path).map_err(|e| format!("打开日志失败：{e}"))?;
     let meta = file
@@ -388,6 +432,36 @@ mod tests {
         assert!(new.reset);
         assert_eq!(new.start_offset, 0);
         assert_eq!(new.text, "new\n");
+    }
+    #[test]
+    fn truncate_keeps_file_identity_and_open_writer() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("x.log");
+        std::fs::write(&path, "第一行\n").unwrap();
+        let before = read_page(&path, 0, None, None, false).unwrap();
+        // 模拟正在跑的中间件：它拿着同一个文件的 append 句柄
+        let mut appender = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        assert_eq!(truncate(&path).unwrap(), "第一行\n".len() as u64);
+        appender.write_all(b"after\n").unwrap();
+        let after = read_page(&path, before.offset, None, Some(&before.file_id), false).unwrap();
+        assert!(after.reset, "截断后旧 offset 必须触发重读");
+        assert_eq!(after.text, "after\n", "截断之后的新输出要能读到");
+        assert_eq!(before.file_id, after.file_id, "换文件会丢日志，只准截断");
+    }
+    #[test]
+    fn truncating_missing_file_is_noop_and_archive_removal_repeats_safely() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("x.log");
+        assert_eq!(truncate(&path).unwrap(), 0);
+        assert!(!path.exists(), "不存在的日志不该被凭空创建");
+        let archive = path.with_extension("log.1");
+        std::fs::write(&archive, "old\n").unwrap();
+        assert!(remove_archive(&archive).unwrap());
+        assert!(!archive.exists());
+        assert!(!remove_archive(&archive).unwrap(), "已清过再删不报错");
     }
     #[test]
     fn successful_snapshot_preserves_original_bytes_and_initial_size() {

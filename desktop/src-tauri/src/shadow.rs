@@ -158,43 +158,96 @@ fn is_link(p: &Path) -> bool {
     std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink())
 }
 
+/// 站到一边去的旧副本的后缀（`aert` → `aert.orphan-20261107-160012`）。
+const ORPHAN_MARK: &str = ".orphan-";
+
+/// 把影子目录里挡路的实体改名挪开（**不删**）。
+///
+/// 影子目录是纯派生数据区（工作副本里才是本体），但真出现异常时删除仍是不必要的风险：
+/// 改名留下一份证据，用户能自己翻、也能自己删。
+fn move_aside(path: &Path) -> Result<PathBuf, String> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| format!("影子目录条目没有文件名: {}", path.display()))?;
+    // 复用现成的 UTC 时间戳格式化，别为这点事写第三份日期数学
+    let stamp = crate::bmf_publish::utc_stamp_compact(crate::build_state::now_ms());
+    let mut dest = path.with_file_name(format!("{name}{ORPHAN_MARK}{stamp}"));
+    for n in 2..100 {
+        if std::fs::symlink_metadata(&dest).is_err() {
+            break;
+        }
+        dest = path.with_file_name(format!("{name}{ORPHAN_MARK}{stamp}-{n}"));
+    }
+    std::fs::rename(path, &dest).map_err(|e| {
+        format!(
+            "影子目录里的 {} 不是链接，改名挪开也失败了（{e}）；请手工删除它后重试",
+            path.display()
+        )
+    })?;
+    Ok(dest)
+}
+
 /// 确保 `link` 是指向 `target` 的链接。返回是否有改动。
-/// 已存在但不是链接的真目录/文件一律拒绝覆盖。
-pub fn ensure_link(link: &Path, target: &Path) -> Result<bool, String> {
+///
+/// 已存在但不是链接的实体（备份/复制工具会把 junction **展开**成真目录再还原），
+/// 不再中止整个语言服务：改名挪开（见 [`move_aside`]）后照常建链接，
+/// 挪到哪记进 `displaced`，由调用方记日志。以前这里直接报错，用户只看到
+/// 「影子目录不是链接」，除了手工删目录没有出路。
+pub fn ensure_link(
+    link: &Path,
+    target: &Path,
+    displaced: &mut Vec<(PathBuf, PathBuf)>,
+) -> Result<bool, String> {
     if std::fs::symlink_metadata(link).is_ok() {
         if !is_link(link) {
-            return Err(format!(
-                "影子目录里的 {} 不是链接，拒绝覆盖（请检查是否手工改过影子目录）",
-                link.display()
-            ));
+            displaced.push((link.to_path_buf(), move_aside(link)?));
+        } else {
+            let same = matches!(
+                (std::fs::canonicalize(link), std::fs::canonicalize(target)),
+                (Ok(a), Ok(b)) if a == b
+            );
+            if same {
+                return Ok(false);
+            }
+            remove_link(link)?;
         }
-        let same = matches!(
-            (std::fs::canonicalize(link), std::fs::canonicalize(target)),
-            (Ok(a), Ok(b)) if a == b
-        );
-        if same {
-            return Ok(false);
-        }
-        remove_link(link)?;
     }
     create_link(link, target)?;
     Ok(true)
 }
 
-/// 清掉影子目录里除 `keep` 之外的所有链接（切模块时旧模块的链接）。真目录和文件不碰。
-fn remove_other_links(shadow: &Path, keep: &str) -> Result<bool, String> {
-    let mut removed = false;
+/// 清掉影子目录里不属于当前工程的东西，返回是否有改动。
+///
+/// - 链接：直接摘（切模块时旧模块的链接，目标目录原样不动）
+/// - 非链接的普通目录（被外部工具展开的副本）：改名挪开，不删
+/// - 文件、点开头的目录（`.settings/`、`.classpath`、`.project`、`*.orphan-*`）：不碰
+fn sweep_shadow(
+    shadow: &Path,
+    keep: &str,
+    displaced: &mut Vec<(PathBuf, PathBuf)>,
+) -> Result<bool, String> {
+    let mut changed = false;
     for e in std::fs::read_dir(shadow)
         .map_err(|e| format!("读取影子目录失败: {e}"))?
         .flatten()
     {
         let p = e.path();
-        if is_link(&p) && p.file_name().is_some_and(|n| n != keep) {
+        let Some(name) = p.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        if name == keep {
+            continue;
+        }
+        if is_link(&p) {
             remove_link(&p)?;
-            removed = true;
+            changed = true;
+        } else if p.is_dir() && !name.starts_with('.') && !name.contains(ORPHAN_MARK) {
+            displaced.push((p.clone(), move_aside(&p)?));
+            changed = true;
         }
     }
-    Ok(removed)
+    Ok(changed)
 }
 
 /// 内容没变就不写：不然 jdt.ls 会每次都重新导入工程。返回是否写了。
@@ -228,6 +281,9 @@ pub struct ShadowProject {
     pub root: PathBuf,
     /// 本次是否有文件或链接发生变化。没变就不用让 jdt.ls 重新导入。
     pub changed: bool,
+    /// 被改名挪开的非链接实体（原路径 → 新路径）。正常应为空，非空说明影子目录
+    /// 被外部工具（备份/复制/还原）展开过，调用方该记一条日志。
+    pub displaced: Vec<(PathBuf, PathBuf)>,
     pub source_files: usize,
     pub jar_count: usize,
     pub utf8_files: usize,
@@ -299,8 +355,13 @@ pub fn generate(spec: &ShadowSpec) -> Result<ShadowProject, String> {
         .map_err(|e| format!("无法创建影子目录: {e}"))?;
 
     // 1. 源码链接：只链当前模块，切模块时摘掉旧的
-    let mut changed = ensure_link(&spec.shadow_dir.join(spec.module), &module_dir)?;
-    changed |= remove_other_links(spec.shadow_dir, spec.module)?;
+    let mut displaced: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut changed = ensure_link(
+        &spec.shadow_dir.join(spec.module),
+        &module_dir,
+        &mut displaced,
+    )?;
+    changed |= sweep_shadow(spec.shadow_dir, spec.module, &mut displaced)?;
 
     let src_dirs: Vec<String> = SRC_DIRS
         .iter()
@@ -358,6 +419,7 @@ pub fn generate(spec: &ShadowSpec) -> Result<ShadowProject, String> {
     Ok(ShadowProject {
         root: root.to_path_buf(),
         changed,
+        displaced,
         source_files: files.len(),
         jar_count: jars.len(),
         utf8_files: utf8_files.len(),
@@ -493,27 +555,79 @@ mod tests {
         let link = base.join("shadow").join("m");
         std::fs::create_dir_all(link.parent().unwrap()).unwrap();
 
-        assert!(ensure_link(&link, &t1).unwrap(), "首次创建");
+        let mut none = Vec::new();
+        assert!(ensure_link(&link, &t1, &mut none).unwrap(), "首次创建");
         assert_eq!(
             std::fs::read_to_string(link.join("f.txt")).unwrap(),
             "甲",
             "通过链接能读到目标文件"
         );
-        assert!(!ensure_link(&link, &t1).unwrap(), "指向未变就不动");
-        assert!(ensure_link(&link, &t2).unwrap(), "指向变了要重建");
+        assert!(
+            !ensure_link(&link, &t1, &mut none).unwrap(),
+            "指向未变就不动"
+        );
+        assert!(
+            ensure_link(&link, &t2, &mut none).unwrap(),
+            "指向变了要重建"
+        );
         assert!(t1.join("f.txt").is_file(), "摘链接绝不能删到目标里的文件");
+        assert!(none.is_empty(), "正常路径不该有挪开的副本");
 
-        // 切模块：只摘链接，真目录和文件留着
+        // 切模块：旧链接摘掉，文件与点开头的元数据不碰
         let shadow = base.join("shadow");
-        std::fs::create_dir_all(shadow.join("real-dir")).unwrap();
+        std::fs::create_dir_all(shadow.join(".settings")).unwrap();
         std::fs::write(shadow.join("real-file.txt"), "x").unwrap();
-        assert!(remove_other_links(&shadow, "other").unwrap());
+        let mut displaced = Vec::new();
+        assert!(sweep_shadow(&shadow, "other", &mut displaced).unwrap());
         assert!(std::fs::symlink_metadata(&link).is_err(), "旧链接应被摘掉");
-        assert!(shadow.join("real-dir").is_dir() && shadow.join("real-file.txt").is_file());
+        assert!(shadow.join("real-file.txt").is_file());
+        assert!(shadow.join(".settings").is_dir());
+        assert!(displaced.is_empty(), "文件与 .settings 不该被挪走");
         assert!(t2.is_dir() && t1.join("f.txt").is_file());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
-        // 已存在的真目录一律拒绝覆盖
-        assert!(ensure_link(&shadow.join("real-dir"), &t1).is_err());
+    /// 备份/复制工具会把 junction **展开**成真目录再还原（2026-11-05 现场：影子里的
+    /// `aert` 变成 68 文件全等的真副本）。以前这里直接报错，语言服务再也起不来，
+    /// 用户唯一的出路是手工删目录。现在改名挪开后照常建链接。
+    #[test]
+    fn 被展开的真目录会改名挪开而不是拒绝重启() {
+        let base = temp("orphan");
+        let shadow = base.join("shadow");
+        let link = shadow.join("m");
+        // 假扮「被展开的副本」：真目录 + 里面有源码
+        std::fs::create_dir_all(link.join("src")).unwrap();
+        std::fs::write(link.join("src/A.java"), "class A {}").unwrap();
+        let target = base.join("real");
+        std::fs::create_dir_all(target.join("src")).unwrap();
+        std::fs::write(target.join("src/A.java"), "class A {}").unwrap();
+
+        let mut displaced = Vec::new();
+        assert!(
+            ensure_link(&link, &target, &mut displaced).unwrap(),
+            "该建链接而不是报错"
+        );
+        assert!(is_link(&link), "挡路的真目录应被换成链接");
+        assert_eq!(displaced.len(), 1, "挪开的路径要报给调用方");
+        let (from, to) = &displaced[0];
+        assert_eq!(from, &link);
+        assert!(
+            to.to_string_lossy().contains(ORPHAN_MARK),
+            "新名字应带 {} 后缀：{}",
+            ORPHAN_MARK,
+            to.display()
+        );
+        assert!(
+            to.join("src/A.java").is_file(),
+            "挪开的副本内容必须还在（不删）"
+        );
+
+        // 再跑一次：链接已在，什么都不该动；已挪开的副本也不能被反复改名
+        let mut again = Vec::new();
+        assert!(!ensure_link(&link, &target, &mut again).unwrap());
+        assert!(!sweep_shadow(&shadow, "m", &mut again).unwrap());
+        assert!(again.is_empty(), "orphan 目录不该每轮都被再挪一次");
+        let _ = remove_link(&link);
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -681,7 +795,7 @@ mod tests {
         assert_eq!(walk_names(&ws), ws_before, "工作副本里出现了多余文件");
         let _ = std::fs::remove_dir_all(base.join("jdtls-data"));
         // 不对 base 做 remove_dir_all：shadow 里有指向 ws 的 junction，先摘链接再清理
-        remove_other_links(&shadow, "").unwrap();
+        sweep_shadow(&shadow, "", &mut Vec::new()).unwrap();
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -725,7 +839,7 @@ mod tests {
             return;
         }
         let base = PathBuf::from(r"D:\AItool\aiwork\nc-workbench-m0\m4v\real-gl");
-        let _ = remove_other_links(&base.join("shadow"), "");
+        let _ = sweep_shadow(&base.join("shadow"), "", &mut Vec::new());
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).unwrap();
 
@@ -930,7 +1044,7 @@ mod tests {
         std::thread::sleep(Duration::from_secs(8));
 
         client.shutdown();
-        let _ = remove_other_links(&shadow, "");
+        let _ = sweep_shadow(&shadow, "", &mut Vec::new());
         let _ = std::fs::remove_dir_all(&base);
     }
 

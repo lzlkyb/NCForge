@@ -169,7 +169,7 @@ fn 类型层级在影子工程下返回父类子类与真实路径() {
     write_project(&real);
     let shadow = base.join("shadow");
     std::fs::create_dir_all(&shadow).unwrap();
-    nc_forge::shadow::ensure_link(&shadow.join("src"), &real.join("src")).unwrap();
+    nc_forge::shadow::ensure_link(&shadow.join("src"), &real.join("src"), &mut Vec::new()).unwrap();
     for name in [".project", ".classpath"] {
         std::fs::copy(real.join(name), shadow.join(name)).unwrap();
     }

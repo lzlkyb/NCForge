@@ -520,6 +520,36 @@ fn launch(
         extra_jars: &seed,
         overrides: &overrides,
     })?;
+    // 影子目录被外部工具（备份/复制/还原）展开成真目录时，上面已把旧副本改名挪开。
+    // 必须留痕：用户会奇怪自己的目录怎么换了名字。
+    if !project.displaced.is_empty() {
+        let names: Vec<String> = project
+            .displaced
+            .iter()
+            .map(|(_, to)| {
+                to.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        log::warn!(
+            "影子目录里有非链接条目（备份/复制工具会把 junction 展开成真目录），已改名保留：{}",
+            names.join("、")
+        );
+        let _ = app.emit(
+            "lang-status",
+            LangStatus {
+                state: "starting".into(),
+                module: Some(module.to_string()),
+                message: format!(
+                    "影子目录已重建，旧副本保留为 {}",
+                    names.first().cloned().unwrap_or_default()
+                ),
+                ..LangStatus::stopped()
+            },
+        );
+    }
     // 同一份类索引（同一 NC home）在进程内只建一次类名目录，切模块 / 重启语言服务直接复用
     let catalog = crate::java_types::TypeCatalog::shared_cancellable(
         &index,

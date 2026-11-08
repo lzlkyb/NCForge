@@ -123,6 +123,8 @@ pub struct TransferReq {
     pub data: Option<TransferData>,
     pub sheets: Option<Vec<TransferSheet>>,
     pub expected_columns: Option<Vec<String>>,
+    pub source_schema: Option<String>,
+    pub source_connection_key: Option<String>,
     pub params: Option<Vec<Value>>,
     pub context: Option<TransferContext>,
     pub text: Option<String>,

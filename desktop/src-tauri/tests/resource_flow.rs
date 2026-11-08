@@ -12,7 +12,7 @@
 use nc_forge::commands::{ensure_resources_async, ensure_selected_resources_async};
 use nc_forge::resource_pack::{
     external_root, pack_dir, InstalledPack, PacksState, ALL_PACKS, PACK_CFR, PACK_ECJ, PACK_JDTLS,
-    PACK_SVNKIT,
+    PACK_NCDB, PACK_SVNKIT,
 };
 use nc_forge::state::AppState;
 use std::sync::mpsc::{channel, Receiver};
@@ -472,6 +472,11 @@ fn local_source_drives_install_failures_and_failover() {
             PACK_CFR => {
                 std::fs::create_dir_all(&dir).unwrap();
                 std::fs::write(dir.join("cfr.jar"), b"x").unwrap();
+            }
+            PACK_NCDB => {
+                // 探测只要求驱动（JRE 可以由系统 Java 提供）
+                std::fs::create_dir_all(dir.join("ojdbc")).unwrap();
+                std::fs::write(dir.join("ojdbc").join("ojdbc6.jar"), b"x").unwrap();
             }
             _ => unreachable!(),
         }

@@ -117,8 +117,25 @@ fn drv_err(e: Error) -> BridgeError {
     }
 }
 
-// ───────────────────────── 连接串 ─────────────────────────
+/// 连接阶段的错误 → 前端码。
+///
+/// 为什么不能复用 [`drv_err`]：驱动把关不上 TCP（`io::ErrorKind::TimedOut`）也归到
+/// `CallTimeoutExceeded`（见 `vendor/oracledb/src/error.rs` 的 `From<io::Error>`），
+/// 复用就会把「连不上库」说成「语句已中断、会话仍然可用」——连接阶段根本没有会话。
+fn connect_err(e: Error) -> BridgeError {
+    match e.kind() {
+        // 只说事实，不在这里堆建议：文案由前端统一补（JVM 桥的 ORA-12541 走同一条路）
+        ErrorKind::CallTimeoutExceeded => {
+            BridgeError::new("unreachable", "15 秒内没建立 TCP 连接（对端没响应）")
+        }
+        ErrorKind::StreamOperation | ErrorKind::DeadConnection => {
+            BridgeError::new("unreachable", format!("连接被拒绝或网络中断：{e}"))
+        }
+        _ => drv_err(e),
+    }
+}
 
+// ───────────────────────── 连接串 ─────────────────────────
 /// 把 JDBC 的 URL 换成驱动认的 connect string。
 ///
 /// 支持 NC `prop.xml` 里最常见的几种写法（`jdbc:oracle:thin:@host:port/service`、
@@ -376,6 +393,7 @@ impl Session {
             "explain" => self.explain(a.first().copied().unwrap_or("")),
             "sessions" => self.sessions(),
             "schema" => self.schema(int_arg(a, 0, 0), int_arg(a, 1, 2000)),
+            "schemaBatch" => self.schema_batch(a.first().copied().unwrap_or("")),
             // 真正的中断走 `RustEngine::cancel()`（不经过会话锁），这条命令只是占位
             "cancel" => Err(other_err("请用引擎层的 cancel，不要发 cancel 命令")),
             other => Err(other_err(format!("纯 Rust 引擎不认识这个命令：{other}"))),
@@ -463,7 +481,7 @@ impl Session {
             .set_transport_connect_timeout(Some(Duration::from_secs(15)))
             .set_connect_string(&cs)
             .map_err(drv_err)?;
-        let conn = oracledb::connect(cfg).map_err(drv_err)?;
+        let conn = oracledb::connect(cfg).map_err(connect_err)?;
         // DBMS_OUTPUT 默认关着：打开后 PL/SQL 里的 put_line 才能在「输出」标签看到。
         // 没权限也不影响连库。
         let _ = conn.execute("begin dbms_output.enable(1000000); end;", &[]);
@@ -1298,6 +1316,22 @@ impl Session {
     /// JVM 桥走 JDBC 的 `DatabaseMetaData.getColumns`，这里直接查 `user_tab_columns`——
     /// 字段与语义对齐（`TYPE_NAME` 对应 `data_type`，`COLUMN_SIZE` 对字符类型取
     /// `char_length`、数字取 `data_precision`）。
+    fn schema_batch(&self, sql: &str) -> Result<Value, BridgeError> {
+        // Metadata has its own local cursor: do not replace the user's active SQL cursor.
+        let cur = self.conn_ref()?.query(sql, &[]).map_err(drv_err)?;
+        let mut rows = Vec::new();
+        for row in cur.take(1000) {
+            let row = row.map_err(drv_err)?;
+            rows.push(json!([
+                row.get::<Option<String>>(0).map_err(drv_err)?,
+                row.get::<Option<String>>(1).map_err(drv_err)?,
+                row.get::<Option<String>>(2).map_err(drv_err)?,
+                row.get::<Option<i64>>(3).map_err(drv_err)?,
+            ]));
+        }
+        Ok(json!({"rows": rows}))
+    }
+
     fn schema(&self, offset: usize, limit: usize) -> Result<Value, BridgeError> {
         let conn = self.conn_ref()?;
         // 别名只能用 `sz`：`SIZE` 在 19c 是保留字，`as size` 直接 ORA-00923
@@ -1875,6 +1909,21 @@ fn body_len(m: &Map<String, Value>) -> usize {
 mod tests {
     use super::*;
 
+    /// 连接阶段的 TCP 超时是「连不上库」，不是「语句已中断、会话仍然可用」。
+    ///
+    /// 驱动把 `io::ErrorKind::TimedOut` 也塞进 `CallTimeoutExceeded`（见
+    /// `vendor/oracledb/src/error.rs` 的 `From<io::Error>`），两条路必须分开映射，
+    /// 否则用户看到的是一个跟真实原因毫无关系的提示（实测 macOS 连不上 1521 就报这个）。
+    #[test]
+    fn 连接超时说连不上_语句超时才说被中断() {
+        let e = connect_err(std::io::Error::from(std::io::ErrorKind::TimedOut).into());
+        assert_eq!(e.code, "unreachable");
+        assert!(e.message.contains("TCP"), "{}", e.message);
+
+        let e = drv_err(std::io::Error::from(std::io::ErrorKind::TimedOut).into());
+        assert_eq!(e.code, "timeout", "语句阶段的超时不能跟着改码");
+        assert!(e.message.contains("会话仍然可用"));
+    }
     /// 对象类型会被拼进 `get_ddl('<type>', ?)`，所以「认不出来就 None」是安全边界，
     /// 这条用例是它的守门人：任何放宽都必须先过这里。
     #[test]

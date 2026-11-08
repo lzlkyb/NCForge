@@ -170,7 +170,7 @@ fn 语义高亮命令返回标准五元组并且认影子路径() {
     write_project(&real);
     let shadow = base.join("shadow");
     std::fs::create_dir_all(&shadow).unwrap();
-    nc_forge::shadow::ensure_link(&shadow.join("src"), &real.join("src")).unwrap();
+    nc_forge::shadow::ensure_link(&shadow.join("src"), &real.join("src"), &mut Vec::new()).unwrap();
     for name in [".project", ".classpath"] {
         std::fs::copy(real.join(name), shadow.join(name)).unwrap();
     }

@@ -67,16 +67,17 @@ pub fn name_unknown(name: &str) -> bool {
     name == UNKNOWN_PROCESS
 }
 
-/// 查谁在 LISTEN 这个端口。查不到返回 None（端口空闲，或 netstat 不可用）。
+/// 查谁在 LISTEN 这个端口。查不到返回 None（端口空闲，或系统查询工具不可用）。
 ///
 /// 为什么不用「connect 成功即占用」：连接成功只能说明有人接，拿不到 PID，
-/// 而用户要的正是「是哪个进程占着，能不能关掉」。netstat -ano 是 Windows 自带的，
-/// 不需要额外进程或权限。
+/// 而用户要的正是「是哪个进程占着，能不能关掉」。
 ///
-/// 进程名走 `process_name_cached`：一次 `tasklist` 实测 170ms（netstat 才 30ms），
+/// 平台差异收在 `port_pid` / `process_name` 两个函数里：Windows 用系统自带的
+/// `netstat -ano` + `tasklist`，macOS 用同样自带的 `lsof` + `ps`，都不需要装东西。
+///
+/// 进程名走 `process_name_cached`：一次查询实测 170ms（`netstat` 才 30ms），
 /// 而状态是每秒轮询的——不缓存等于每秒空转掉小半个核。**要拿它做安全判定
 /// （比如杀进程）时必须重新实时查**，见 `server_kill_port_owner`。
-#[cfg(windows)]
 pub fn port_owner(port: u16) -> Option<PortOwner> {
     let pid = port_pid(port)?;
     Some(PortOwner {
@@ -85,12 +86,7 @@ pub fn port_owner(port: u16) -> Option<PortOwner> {
     })
 }
 
-#[cfg(not(windows))]
-pub fn port_owner(_port: u16) -> Option<PortOwner> {
-    None
-}
-
-/// 只查占着端口的 PID，不查进程名（省掉 tasklist 那次 fork）。查不到返回 None。
+/// 只查占着端口的 PID，不查进程名（省掉查进程名那次 fork）。查不到返回 None。
 #[cfg(windows)]
 pub fn port_pid(port: u16) -> Option<u32> {
     use std::os::windows::process::CommandExt;
@@ -118,20 +114,56 @@ pub fn port_pid(port: u16) -> Option<u32> {
     None
 }
 
-#[cfg(not(windows))]
-pub fn port_pid(_port: u16) -> Option<u32> {
+/// macOS / Linux：`lsof -t` 直接只输出 PID，比 `netstat` 好解析。
+///
+/// `-nP` 关掉主机名与服务名反查（不查 DNS 才不会卡十几秒）；`-sTCP:LISTEN`
+/// 只要监听态——同一端口上已建立的连接也会被 `lsof` 列出来，不过滤会拿到客户端 PID。
+#[cfg(unix)]
+pub fn port_pid(port: u16) -> Option<u32> {
+    query_lsof(port)
+}
+
+/// `lsof` 查询的实现主体。
+///
+/// 单独抽出来是为了让它在 **Windows 的测试构建里也能编译**：`cfg(unix)` 的函数在
+/// 开发机（Windows）上一次都不会被 rustc 看到，写错类型要等 CI 的 mac job 才发现。
+/// 放在 `any(test, unix)` 下，本地 `cargo test` 就会把它编进去并跑到。
+#[cfg(any(test, unix))]
+fn query_lsof(port: u16) -> Option<u32> {
+    // lsof 的 `-i` 是「选项 + 值」连写的一个参数，拆成两个会被当成文件路径
+    let spec = format!("-iTCP:{port}");
+    for exe in ["/usr/sbin/lsof", "lsof"] {
+        let Ok(out) = Command::new(exe)
+            .args(["-nP", &spec, "-sTCP:LISTEN", "-t"])
+            .output()
+        else {
+            continue;
+        };
+        if let Some(pid) = parse_lsof_pid(&String::from_utf8_lossy(&out.stdout)) {
+            return Some(pid);
+        }
+        // 命令跑起来了但没有输出 ⇒ 端口确实空闲，别再换路径重试
+        if out.status.success() {
+            return None;
+        }
+    }
     None
 }
 
-/// 进程名缓存的有效期。状态是 1 秒一轮，10 秒意味着稳态下几乎不查 tasklist；
+/// `lsof -t` 的输出：每行一个 PID。空行与解析失败的行跳过。
+#[cfg(any(test, unix))]
+fn parse_lsof_pid(text: &str) -> Option<u32> {
+    text.lines()
+        .filter_map(|l| l.trim().parse::<u32>().ok())
+        .next()
+}
+
+/// 进程名缓存的有效期。状态是 1 秒一轮，10 秒意味着稳态下几乎不查进程名；
 /// 而 PID 在这段时间内被系统复用给另一个程序的可能性足够低——真要做安全判定时
 /// 调用方会绕过缓存重查（见 `server_kill_port_owner`）。
-// 只被 Windows 的 process_name_cached 用；非 Windows 平台连函数都没有，留着就是死代码
-#[cfg(windows)]
 const PROCESS_NAME_TTL: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// 带缓存的进程名查询。**只用于显示**；决定「能不能杀」必须用 `process_name`。
-#[cfg(windows)]
 fn process_name_cached(pid: u32) -> Option<String> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
@@ -156,9 +188,6 @@ fn process_name_cached(pid: u32) -> Option<String> {
     Some(name)
 }
 
-// 没有 `#[cfg(not(windows))]` 的桩：唯一调用方 port_owner 就是 Windows 专属，
-// 非 Windows 平台留桩反而触发 dead_code（2026-10-28 CI 实测）。
-
 /// 取进程名（不含路径）。查不到返回 None。
 #[cfg(windows)]
 pub fn process_name(pid: u32) -> Option<String> {
@@ -179,9 +208,35 @@ pub fn process_name(pid: u32) -> Option<String> {
     }
 }
 
-#[cfg(not(windows))]
-pub fn process_name(_pid: u32) -> Option<String> {
-    None
+/// macOS / Linux：`ps -o comm=` 给的是**完整路径**（`/usr/libexec/java_home` 起出来的
+/// JVM 就是 `/Library/Java/.../bin/java`），必须截成文件名——`is_java_name` 按
+/// `java` 前缀判断，带路径会全部认不出来，进而把真实的中间件判成「不是 java」。
+#[cfg(unix)]
+pub fn process_name(pid: u32) -> Option<String> {
+    query_ps_comm(pid)
+}
+
+/// `ps` 查询的实现主体。与 [`query_lsof`] 同理：放进 `any(test, unix)`，
+/// 让 Windows 上的 `cargo test` 也能编译并跑到这条路径。
+#[cfg(any(test, unix))]
+fn query_ps_comm(pid: u32) -> Option<String> {
+    let out = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .ok()?;
+    parse_comm(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// `ps -o comm=` 的输出 → 文件名。取第一条非空行，再取最后一段路径。
+#[cfg(any(test, unix))]
+fn parse_comm(text: &str) -> Option<String> {
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let name = line.rsplit(['/', '\\']).next().unwrap_or(line).trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
 }
 
 /// 端口上是否有人在 listen（连得上就算）。
@@ -508,6 +563,20 @@ pub fn kill_tree(pid: u32, force: bool) {
     let _ = cmd.output();
 }
 
+/// macOS / Linux：`kill` 没有 `taskkill /T` 的等价物。
+///
+/// 但这里要杀的 java 就是我们自己 spawn 的直接子进程，`kill <pid>` 足以让它退出；
+/// 中间件自己没有需要先通知的子进程（Eclipse 的停止按钮同样是直接杀）。
+/// `force=false` 发 `-TERM` 让它跑 shutdown hook，`force=true` 发 `-KILL`。
+#[cfg(unix)]
+pub fn kill_tree(pid: u32, force: bool) {
+    let signal = if force { "-KILL" } else { "-TERM" };
+    // 进程已退出时 kill 会返回非零，不是问题，静默
+    let _ = Command::new("kill")
+        .args([signal, &pid.to_string()])
+        .output();
+}
+
 /// 追加一行到日志。失败只记 warn，不影响服务运行。
 ///
 /// **写入用 GBK**：同一个日志文件里混着 NC 中间件自己输出的 GBK 和本模块写的分隔行，
@@ -595,6 +664,47 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `lsof -t` 每行一个 PID；空行、提示语、被截断的日志都不能当成 PID。
+    #[test]
+    fn lsof_pid_取第一行有效值() {
+        assert_eq!(parse_lsof_pid("4321\n"), Some(4321));
+        assert_eq!(parse_lsof_pid("  4321  \n9876\n"), Some(4321));
+        assert_eq!(parse_lsof_pid(""), None);
+        assert_eq!(parse_lsof_pid("lsof: no pwd entry\n"), None);
+    }
+
+    /// `ps -o comm=` 在 macOS 给的是完整路径。截不干净的话 `is_java_name` 会判成
+    /// 「不是 java」，于是真正的残留中间件杀不掉、而提示语说它不是 java。
+    #[test]
+    fn ps_comm_截成文件名后仍认得出_java() {
+        assert_eq!(parse_comm("/usr/bin/java\n").as_deref(), Some("java"));
+        assert_eq!(
+            parse_comm(
+                "/Library/Java/JavaVirtualMachines/jdk1.8.0_202.jdk/Contents/Home/bin/java\n"
+            )
+            .as_deref(),
+            Some("java")
+        );
+        assert_eq!(parse_comm("java\n").as_deref(), Some("java"));
+        assert_eq!(parse_comm("\n  \n"), None);
+        let name = parse_comm("/usr/bin/java\n").expect("应解析出名字");
+        assert!(
+            is_java_name(&name),
+            "截断后的名字必须能通过 java 判定：{name}"
+        );
+    }
+
+    /// 两条查询路径都必须在「工具不存在 / 进程不存在」时安静返回 None。
+    ///
+    /// 这条在 Windows 上跑的是 `Command::new("lsof")` 直接失败那条路，在 macOS 上
+    /// 跑的是「查一个不存在的 PID」。两边都不能 panic —— 状态是每秒轮询的，
+    /// 一次 panic 就等于整个服务面板挂掉。
+    #[test]
+    fn 端口与进程查询失败时安静返回_none() {
+        assert_eq!(query_lsof(1), None, "1 号端口不该有监听者");
+        assert_eq!(query_ps_comm(4_194_304), None, "这个 PID 不该存在");
+    }
 
     fn temp_dir(tag: &str) -> PathBuf {
         let mut d = std::env::temp_dir();

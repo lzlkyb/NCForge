@@ -180,17 +180,13 @@ enum Cred {
 /// 就应该用那份（他可能特意为工作台设了不同的账号）。
 fn lookup_cred(cfg: &AppConfig, host: &str) -> Cred {
     if let (Some(user), Some(pw)) = (cfg.svn_user.as_deref(), cfg.svn_password_dpapi.as_deref()) {
-        if let Some(bytes) = svn_cred::b64_decode(pw) {
-            if let Ok(plain) = svn_cred::dpapi_unprotect(&bytes) {
-                if let Ok(pass) = String::from_utf8(plain) {
-                    return Cred::Full {
-                        user: user.to_string(),
-                        pass,
-                        source: "saved",
-                    };
-                }
-            }
-            // 解不开（换了用户/机器）：当作没存过
+        // 解不开（换了用户/机器、钥匙串被拒）：当作没存过，往下去翻 SVN 自己的缓存
+        if let Ok(pass) = svn_cred::secret::open(pw) {
+            return Cred::Full {
+                user: user.to_string(),
+                pass,
+                source: "saved",
+            };
         }
     }
     let Some(dir) = svn_cred::user_auth_dir() else {
@@ -969,12 +965,21 @@ pub async fn svn_auth_set(
         });
     }
 
-    let enc = svn_cred::dpapi_protect(password.as_bytes())?;
-    let encoded = svn_cred::b64_encode(&enc);
+    // 账号已经验证通过，存不下口令只失去「记住」，不该让这次登录失败
+    let encoded = match svn_cred::secret::seal(&password) {
+        Ok(e) => Some(e),
+        Err(e) => {
+            log::warn!("SVN 口令没能存到本机，下次要重新输入：{e}");
+            None
+        }
+    };
     state
         .update_config(|c| {
+            if let Some(prev) = c.svn_password_dpapi.take() {
+                svn_cred::secret::forget(&prev);
+            }
             c.svn_user = Some(user.clone());
-            c.svn_password_dpapi = Some(encoded.clone());
+            c.svn_password_dpapi = encoded.clone();
             Ok(())
         })
         .await?;

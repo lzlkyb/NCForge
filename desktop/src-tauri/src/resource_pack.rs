@@ -44,6 +44,9 @@ pub const PACK_JDTLS: &str = "jdtls";
 pub const PACK_ECJ: &str = "ecj";
 pub const PACK_SVNKIT: &str = "svnkit";
 pub const PACK_CFR: &str = "cfr";
+/// 没有 NC 安装目录时，用 JVM 桥连数据库所需的 Java 运行时 + Oracle 驱动。
+/// 查找逻辑见 `crate::jvm_runtime`（NC home → 本包 → 系统 Java）。
+pub const PACK_NCDB: &str = "ncdb";
 
 /// 全部包 + 展示元信息。顺序即 UI 展示顺序（大的在前，先给用户体积预期）。
 /// 清单里带的 title/notes 优先；缺失时回落这里，保证旧清单也能显示。
@@ -67,6 +70,11 @@ pub const ALL_PACKS: &[PackMeta] = &[
         id: PACK_CFR,
         title: "Java 反编译器（CFR）",
         notes: "反编译 jar 里的类，看不到源码时也能读实现",
+    },
+    PackMeta {
+        id: PACK_NCDB,
+        title: "数据库 JVM 组件",
+        notes: "没有 NC 安装目录时用 JVM 桥连数据库（Java 运行时 + Oracle 驱动）",
     },
 ];
 
@@ -362,6 +370,9 @@ pub fn pack_probe_ok(dir: &Path, id: &str) -> bool {
             .iter()
             .all(|name| dir.join(name).is_file()),
         PACK_CFR => contains_jar(dir),
+        // 只认驱动：JRE 可以来自系统 Java，有驱动就能配上一套运行时；
+        // 反过来「只有 JRE 没有驱动」起不了 JVM 桥，包不算装好。
+        PACK_NCDB => crate::jvm_runtime::driver_in_pack(dir).is_some(),
         _ => dir.is_dir(),
     }
 }
@@ -1328,6 +1339,8 @@ mod tests {
                 .map(|name| name.to_string())
                 .collect(),
             PACK_CFR => vec!["cfr-0.152.jar".into()],
+            // 只写驱动：JRE 可以由系统 Java 提供，探测不要求它
+            PACK_NCDB => vec!["ojdbc/ojdbc6.jar".into()],
             _ => unreachable!(),
         };
         for name in names {
@@ -1351,6 +1364,7 @@ mod tests {
                 PACK_ECJ => "ecj-3.17.jar",
                 PACK_SVNKIT => "ncsvn.jar",
                 PACK_CFR => "cfr-0.152.jar",
+                PACK_NCDB => "ojdbc/ojdbc6.jar",
                 _ => unreachable!(),
             };
             std::fs::remove_file(dir.join(key)).unwrap();

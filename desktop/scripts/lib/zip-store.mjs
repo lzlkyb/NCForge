@@ -15,7 +15,7 @@
  *  - 无 zip64：单个包 < 4GB，jdtls 54MB 远低于门槛。
  */
 
-import { crc32 } from "node:zlib";
+import { crc32, deflateRawSync } from "node:zlib";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
@@ -48,9 +48,14 @@ function u32(value) {
  * @param {{ name: string; data?: Buffer; dir?: boolean }[]} entries
  *   name 用正斜杠相对路径；dir: true 时 name 应以 "/" 结尾（自动补齐）。
  *   目录条目必须排在它的文件之前（调用方排序）。
+ * @param {{ deflate?: boolean }} [opts]
+ *   `deflate: true` 时对文件条目用 deflate（method 8），压不动的小文件自动退回 store。
+ *   **默认 store**：jar 本身已是 deflate，再压一遍收益接近零，却让版本号受
+ *   zlib 版本影响。只有「大量未压缩内容」的包（JRE 里的 dll / rt.jar 之外的资源）
+ *   才值得开。
  * @returns {Buffer}
  */
-export function buildZip(entries) {
+export function buildZip(entries, { deflate = false } = {}) {
   const chunks = [];
   const central = [];
   let offset = 0;
@@ -64,23 +69,29 @@ export function buildZip(entries) {
     const isDir = Boolean(entry.dir);
     const name = isDir && !entry.name.endsWith("/") ? `${entry.name}/` : entry.name;
     const nameBuf = Buffer.from(name, "utf8");
-    const data = isDir ? Buffer.alloc(0) : (entry.data ?? Buffer.alloc(0));
-    const crc = crc32(data) >>> 0;
+    const raw = isDir ? Buffer.alloc(0) : (entry.data ?? Buffer.alloc(0));
+    // CRC 永远按原始数据算（解压端校验的是解压后的字节）
+    const crc = crc32(raw) >>> 0;
+    // 压了反而更大就别压：几个 KB 的配置文件很常见
+    const packed = deflate && !isDir && raw.length > 0 ? deflateRawSync(raw, { level: 9 }) : null;
+    const useDeflate = packed !== null && packed.length < raw.length;
+    const data = useDeflate ? packed : raw;
+    const method = useDeflate ? 8 : 0;
     const externalAttrs = isDir ? ((0o040755 << 16) | 0x10) >>> 0 : ((0o0100644 << 16) | 0x20) >>> 0;
     const localOffset = offset;
 
-    // Local file header（version needed 20 = 2.0，store 模式最低要求）
+    // Local file header（version needed 20 = 2.0，store / deflate 都够）
     push(
       Buffer.concat([
         u32(SIG_LOCAL),
         u16(20),
         u16(0x0800), // general purpose bit 11：文件名是 UTF-8
-        u16(0), // method: stored
+        u16(method),
         u16(DOS_TIME),
         u16(DOS_DATE),
         u32(crc),
-        u32(data.length), // compressed size（store 模式 = 原大小）
-        u32(data.length), // uncompressed size
+        u32(data.length), // compressed size
+        u32(raw.length), // uncompressed size
         u16(nameBuf.length),
         u16(0), // extra length
         nameBuf,
@@ -91,7 +102,9 @@ export function buildZip(entries) {
     central.push({
       nameBuf,
       crc,
-      size: data.length,
+      method,
+      compressed: data.length,
+      uncompressed: raw.length,
       localOffset,
       externalAttrs,
     });
@@ -105,12 +118,12 @@ export function buildZip(entries) {
         u16(VERSION_MADE_BY),
         u16(20),
         u16(0x0800),
-        u16(0),
+        u16(c.method),
         u16(DOS_TIME),
         u16(DOS_DATE),
         u32(c.crc),
-        u32(c.size),
-        u32(c.size),
+        u32(c.compressed),
+        u32(c.uncompressed),
         u16(c.nameBuf.length),
         u16(0), // extra
         u16(0), // comment

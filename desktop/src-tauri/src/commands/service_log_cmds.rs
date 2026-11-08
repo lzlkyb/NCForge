@@ -106,6 +106,44 @@ pub async fn service_log_clear(
     .await
     .map_err(|e| format!("清屏任务失败：{e}"))?
 }
+#[derive(serde::Serialize)]
+pub struct LogPurge {
+    pub bytes: u64,
+    pub archive_bytes: u64,
+}
+/// 真正清掉磁盘上的控制台日志：截断当前文件，可选删掉上次运行的归档。
+///
+/// 和 `service_log_clear` 分两个命令：那个只把读取位置推到文件末尾（「我不想再看旧行」），
+/// 这个会销毁磁盘内容（「该腾地方了」）。混成一个会让清屏这种无风险动作也带上破坏性。
+#[tauri::command]
+pub async fn service_log_purge(
+    state: tauri::State<'_, Arc<AppState>>,
+    target: LogTarget,
+    archive: bool,
+) -> Result<LogPurge, String> {
+    let root = state.config_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = service_log::source_path(&root, target, false)?;
+        let bytes = service_log::truncate(&path)?;
+        let archive_bytes = if archive {
+            let archived = service_log::source_path(&root, target, true)?;
+            let size = archived.metadata().map(|m| m.len()).unwrap_or(0);
+            if service_log::remove_archive(&archived)? {
+                size
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        Ok(LogPurge {
+            bytes,
+            archive_bytes,
+        })
+    })
+    .await
+    .map_err(|e| format!("清除日志任务失败：{e}"))?
+}
 #[tauri::command]
 pub fn service_log_cancel_export(job_id: String) -> Result<(), String> {
     if let Some(token) = JOBS

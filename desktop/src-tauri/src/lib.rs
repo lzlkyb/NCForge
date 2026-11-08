@@ -63,6 +63,7 @@ mod java_members;
 mod java_tree;
 pub mod java_type_completion;
 pub mod java_types;
+pub mod jvm_runtime;
 pub mod lang;
 pub mod launch;
 pub mod local_history;

@@ -172,6 +172,148 @@ pub fn dpapi_protect(_data: &[u8]) -> Result<Vec<u8>, String> {
     Err("DPAPI 只在 Windows 上可用".to_string())
 }
 
+// ──────────────────── 我们自己存的口令（跨平台） ────────────────────
+
+/// 配置里 `svn_password_dpapi` / `db_password_dpapi` / `password_dpapi` 的密文，
+/// **一律**经这里加解密。
+///
+/// 两种落盘形态，靠前缀区分（不是靠平台判断，老密文才能继续解）：
+/// - 无前缀 = `base64(DPAPI 密文)`：Windows 历史格式，继续沿用；
+/// - `kc:<id>` = macOS 钥匙串里的一条通用密码，`id` 是随机键名。
+///
+/// 为什么不全都换成钥匙串：Windows 上 DPAPI 零交互、且存量配置全是这个格式；换掉等于
+/// 让所有已存口令失效。macOS 上没有 DPAPI（原来那段是直接 `Err` 的桩，勾「记住」就报错）。
+pub mod secret {
+    const KC_PREFIX: &str = "kc:";
+
+    /// 加密成可以直接写进配置的字符串。明文不进日志、不进错误信息。
+    pub fn seal(plain: &str) -> Result<String, String> {
+        #[cfg(windows)]
+        {
+            Ok(super::b64_encode(&super::dpapi_protect(plain.as_bytes())?))
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let id = new_key_id();
+            keychain::store(&id, &super::b64_encode(plain.as_bytes()))?;
+            Ok(format!("{KC_PREFIX}{id}"))
+        }
+        #[cfg(not(any(windows, target_os = "macos")))]
+        {
+            let _ = plain;
+            Err(unsupported())
+        }
+    }
+
+    /// 解回明文。任何失败都要能被上层降级成「让用户重输」，不要吞成空串。
+    pub fn open(stored: &str) -> Result<String, String> {
+        if let Some(id) = stored.strip_prefix(KC_PREFIX) {
+            #[cfg(target_os = "macos")]
+            {
+                let b64 = keychain::load(id)?;
+                let raw = super::b64_decode(&b64)
+                    .ok_or_else(|| "钥匙串里的口令不是合法 base64".to_string())?;
+                return String::from_utf8(raw).map_err(|e| format!("口令解码失败：{e}"));
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = id;
+                return Err("这条口令存在 macOS 钥匙串里，本机解不开（换机器请重输）".to_string());
+            }
+        }
+        let raw =
+            super::b64_decode(stored).ok_or_else(|| "存着的口令已损坏，请重输".to_string())?;
+        #[cfg(windows)]
+        {
+            let plain = super::dpapi_unprotect(&raw)?;
+            String::from_utf8(plain).map_err(|e| format!("口令解码失败：{e}"))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = raw;
+            Err(unsupported())
+        }
+    }
+
+    /// 丢掉一条密文对应的外部副本（macOS 钥匙串条目）。Windows 的 DPAPI 密文就是
+    /// 密文本身，没有外部状态。失败不报错：顶多留一条孤儿条目。
+    pub fn forget(stored: &str) {
+        if let Some(id) = stored.strip_prefix(KC_PREFIX) {
+            #[cfg(target_os = "macos")]
+            keychain::delete(id);
+            #[cfg(not(target_os = "macos"))]
+            let _ = id;
+        }
+    }
+
+    /// Windows 上不会走到（DPAPI 那条分支把它编译掉了），macOS/Linux 才有调用点。
+    #[cfg_attr(windows, allow(dead_code))]
+    fn unsupported() -> String {
+        "这台系统还不支持保存口令（Windows 用 DPAPI、macOS 用钥匙串）：每次连接请手动输入"
+            .to_string()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn new_key_id() -> String {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        format!("{}-{nanos}", std::process::id())
+    }
+
+    /// macOS 钥匙串。走 `security` 命令行而不是引依赖：这个项目只在两处用到密钥存储，
+    /// 多一个 crate（keyring 会连带拉一堆）不划算。密钥以 base64 存，避免命令行转义问题。
+    #[cfg(target_os = "macos")]
+    mod keychain {
+        use std::process::Command;
+
+        const SECURITY: &str = "/usr/bin/security";
+        /// 钥匙串条目按 service 分组，卸载时用户能在「钥匙串访问」里一眼找到。
+        const SERVICE: &str = "io.github.lzlkyb.ncforge";
+
+        fn run(args: &[&str]) -> Result<String, String> {
+            let out = Command::new(SECURITY)
+                .args(args)
+                .output()
+                .map_err(|e| format!("调用 security 失败：{e}"))?;
+            if out.status.success() {
+                Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            } else {
+                Err(format!(
+                    "钥匙串操作失败（可能被拒绝访问）：{}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ))
+            }
+        }
+
+        /// 写入或覆盖。同名条目要 `-U`，否则第二次保存会失败。
+        pub fn store(id: &str, secret_b64: &str) -> Result<(), String> {
+            run(&[
+                "add-generic-password",
+                "-U",
+                "-s",
+                SERVICE,
+                "-a",
+                id,
+                "-w",
+                secret_b64,
+            ])
+            .map(|_| ())
+        }
+
+        pub fn load(id: &str) -> Result<String, String> {
+            run(&["find-generic-password", "-s", SERVICE, "-a", id, "-w"])
+                .map_err(|e| format!("从钥匙串取口令失败：{e}"))
+        }
+
+        pub fn delete(id: &str) {
+            let _ = run(&["delete-generic-password", "-s", SERVICE, "-a", id]);
+        }
+    }
+}
+
 /// base64 解码（认证文件里的密文是 base64）。自己写，省一个依赖。
 pub fn b64_decode(s: &str) -> Option<Vec<u8>> {
     const INVALID: u8 = 0xFF;
@@ -298,5 +440,26 @@ mod tests {
         assert_ne!(enc, secret.to_vec());
         let dec = dpapi_unprotect(&enc).expect("解密应成功");
         assert_eq!(dec, secret.to_vec());
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn 自存口令能加解密回来且密文里没有明文() {
+        let stored = secret::seal("p@ss 中文 word").expect("本机应支持保存口令");
+        assert!(!stored.contains("p@ss"), "密文里不能出现明文：{stored}");
+        assert_eq!(secret::open(&stored).expect("应能解回"), "p@ss 中文 word");
+        // 存量配置全是 Windows 的老格式（无前缀 base64 DPAPI），必须还能解
+        #[cfg(windows)]
+        {
+            let legacy = b64_encode(&dpapi_protect(b"legacy").unwrap());
+            assert_eq!(secret::open(&legacy).unwrap(), "legacy");
+        }
+        secret::forget(&stored);
+    }
+
+    #[test]
+    fn 坏密文提示重输而不是给空串() {
+        let e = secret::open("!!!!not-base64").unwrap_err();
+        assert!(e.contains("重输"), "{e}");
     }
 }

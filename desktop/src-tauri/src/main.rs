@@ -208,7 +208,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
             }
 
-            Ok(())
+              {
+                  let state = app_state.clone();
+                  spawn_supervised("数据库空闲会话回收", move || {
+                      let state = state.clone();
+                      Box::pin(async move {
+                          let mut timer = tokio::time::interval(std::time::Duration::from_secs(60));
+                          timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                          loop {
+                              timer.tick().await;
+                              commands::reclaim_idle_db_slots(&state).await;
+                          }
+                      })
+                  });
+              }
+              Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
@@ -350,6 +364,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::service_log_read,
             commands::service_log_tail,
             commands::service_log_clear,
+            commands::service_log_purge,
             commands::service_log_export,
             commands::service_log_cancel_export,
             commands::server_clear_log,

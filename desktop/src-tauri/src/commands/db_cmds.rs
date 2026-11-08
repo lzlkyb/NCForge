@@ -341,36 +341,41 @@ fn resource_dirs(app: &AppHandle) -> Vec<PathBuf> {
     dirs
 }
 
-/// 桥的环境：自带 ncdb.jar + NC home 的 Oracle 驱动 + 解 prop.xml 口令要的两个 NC jar。
+/// 找不到 JVM 运行时时给的出路。三条都写清，因为用户手上有的东西不一样：
+/// 装了 NC 的配目录、没装的下组件、不想装 Java 的换引擎。
+pub(crate) const NO_JVM_HINT: &str = "JVM 桥需要 Java 运行时与 Oracle 驱动：\
+     装了 NC 的话到「设置 → 开发 → NC 环境」配一下安装目录；\
+     没装 NC 就到「设置 → 组件」下载「数据库 JVM 组件」；\
+     也可以把这条连接的引擎改成「纯 Rust 驱动」（不需要 Java）";
+
+/// 这台机器能不能起 JVM 桥：有 java 与 ojdbc 就算能（几个 stat，不启动进程）。
+pub(crate) fn jvm_ready(state: &AppState, cfg: &AppConfig) -> bool {
+    let home = crate::nc_home::resolve(cfg.nc_home.as_deref()).ok();
+    crate::jvm_runtime::find(&state.config_dir, home.as_ref()).is_some()
+}
+
+/// 桥的环境：自带 ncdb.jar + 一套 Java 运行时 + Oracle 驱动。
+///
+/// 运行时**不再强制来自 NC home**：按 `jvm_runtime` 的顺序找（NC → `ncdb` 组件 →
+/// 系统 Java）。只用数据库、机器上没装 NC 的用户靠下载组件也能用 JVM 桥。
 fn bridge_env(
     app: &AppHandle,
     state: &AppState,
     cfg: &AppConfig,
 ) -> Result<db_bridge::BridgeEnv, String> {
-    let home = crate::nc_home::resolve(cfg.nc_home.as_deref()).map_err(|_| {
-        need_nc_home(
-            "JVM 桥需要 NC 安装目录：它用 NC 自带的 Java 1.8 与 Oracle 驱动。\
-             请到设置 → 开发 →「NC 环境」页配置；没有 NC home 也可以把这条连接的引擎改成「纯 Rust 驱动」",
-        )
-    })?;
     let (jar, _) = db_bridge::find_jar(&resource_dirs(app))
         .ok_or_else(|| "找不到内置的 ncdb.jar，安装包可能不完整".to_string())?;
-    let root = Path::new(&home.root);
-    let driver = db_bridge::find_driver(root).ok_or_else(|| {
-        format!(
-            "{} 下没有 Oracle 驱动（driver/oracle_11g/ojdbc6.jar）",
-            home.root
-        )
-    })?;
+    let home = crate::nc_home::resolve(cfg.nc_home.as_deref()).ok();
+    let rt = crate::jvm_runtime::find(&state.config_dir, home.as_ref())
+        .ok_or_else(|| code_label("need-jvm", NO_JVM_HINT))?;
+    // 解 prop.xml 口令要 NC 的类：只在真有 NC home 时挂上，缺了不影响手动连接
+    let extra = home
+        .as_ref()
+        .map(|h| db_bridge::nc_decrypt_jars(Path::new(&h.root)))
+        .unwrap_or_default();
     let cfg_dir = state.config_dir.join("db");
     std::fs::create_dir_all(&cfg_dir).map_err(|e| format!("建目录失败 {cfg_dir:?}: {e}"))?;
-    Ok(db_bridge::env(
-        PathBuf::from(&home.java),
-        jar,
-        driver,
-        db_bridge::nc_decrypt_jars(root),
-        cfg_dir,
-    ))
+    Ok(db_bridge::env(rt.java, jar, rt.driver, extra, cfg_dir))
 }
 
 /// 取（没有就建）某个连接的引擎句柄。`key` 是连接 id，同时用作桥里的会话名；
@@ -397,6 +402,16 @@ pub(crate) fn bridge_for(
         .clone();
     // Registration holds the same read lock as execution, so a toggle cannot miss a new handle.
     let _registration = policy.read().map_err(|_| "数据库只读状态异常")?;
+    // 要 JVM 桥、但这台机器既没 NC home 也没 `ncdb` 组件、系统也没 Java 时，降级到
+    // 纯 Rust：直接报错会让「本来能连的库」整条打不开，而降级只少 REF CURSOR 一项。
+    // 真正**必须**走 JVM 的路径（`exec_via_java` 兜底、prop.xml 解口令）会自己先检查，
+    // 不会走到这里 —— 它们的错误信息比「静默换成 Rust 再失败」有用得多。
+    let engine = if engine == EngineKind::Java && !jvm_ready(state, cfg) {
+        log::warn!("本机没有可用的 JVM 运行时与 Oracle 驱动，这条连接改用纯 Rust 驱动");
+        EngineKind::Rust
+    } else {
+        engine
+    };
     if engine == EngineKind::Rust {
         // 纯 Rust 引擎连 config_dir 都不用建：它不读 NC 的任何文件
         let old = {
@@ -549,8 +564,10 @@ pub(crate) async fn call(
 
 fn engine_error(e: db_bridge::BridgeError) -> String {
     match e.code.as_str() {
-        "timeout" | "spawn" => code_label("bridge", &e.message),
-        "session-lost" | "probe-failed" | "need-password" | "auth" => {
+        // 只有 JVM 桥有「子进程没了」这件事；`timeout` 是语句没跑完，会话还在
+        "spawn" => code_label("bridge", &e.message),
+        "timeout" => code_label("timeout", &e.message),
+        "session-lost" | "probe-failed" | "need-password" | "auth" | "unreachable" => {
             code_label(&e.code, &e.message)
         }
         _ => map_sql_error(&e.message),
@@ -635,7 +652,7 @@ pub(crate) fn find_conn(cfg: &AppConfig, id: &str) -> Result<DbConnConfig, Strin
         .ok_or_else(|| "这个连接已经不存在（可能刚被删除）".to_string())
 }
 
-/// 手动来源的口令：本次输入优先，否则解 DPAPI；都没有就要求输入。
+/// 手动来源的口令：本次输入优先，否则解存着的那份；都没有就要求输入。
 pub(crate) fn resolve_password(conn: &DbConnConfig, typed: Option<&str>) -> Result<String, String> {
     if let Some(t) = typed.filter(|t| !t.is_empty()) {
         return Ok(t.to_string());
@@ -643,21 +660,51 @@ pub(crate) fn resolve_password(conn: &DbConnConfig, typed: Option<&str>) -> Resu
     let Some(enc) = conn.password_dpapi.as_deref() else {
         return Err(code_label("need-password", "还没输入这个连接的口令"));
     };
-    let raw = svn_cred::b64_decode(enc)
-        .ok_or_else(|| code_label("need-password", "存着的口令已损坏，请重输"))?;
-    let plain = svn_cred::dpapi_unprotect(&raw).map_err(|e| {
+    svn_cred::secret::open(enc).map_err(|e| {
         code_label(
             "need-password",
             &format!("存着的口令解不开（换机器/换用户会这样）：{e}"),
         )
-    })?;
-    String::from_utf8(plain).map_err(|e| format!("口令解码失败：{e}"))
+    })
 }
 
 pub(crate) fn protect(password: &str) -> Result<String, String> {
-    Ok(svn_cred::b64_encode(&svn_cred::dpapi_protect(
-        password.as_bytes(),
-    )?))
+    svn_cred::secret::seal(password)
+}
+
+/// 「这次输入的口令 + 记住」→ 配置里的密文，**存不下也不让整个操作失败**。
+///
+/// 返回 `(字段更新, 警告)`：`None` = 不动原来那份；`Some(None)` = 清掉；
+/// `Some(Some(密文))` = 换成新的。
+///
+/// 新口令存不下时选择**清掉旧的**：旧密文对应的是旧口令，留着只会让下次连接认证失败，
+/// 而「没有存口令」至少能让界面提示用户重输。
+pub(crate) fn seal_remembered(
+    typed: Option<&str>,
+    remember: bool,
+) -> (Option<Option<String>>, Option<String>) {
+    seal_with(typed, remember, protect)
+}
+
+fn seal_with(
+    typed: Option<&str>,
+    remember: bool,
+    seal: impl FnOnce(&str) -> Result<String, String>,
+) -> (Option<Option<String>>, Option<String>) {
+    match typed.filter(|p| !p.is_empty()) {
+        Some(p) if remember => match seal(p) {
+            Ok(enc) => (Some(Some(enc)), None),
+            Err(e) => {
+                log::warn!("口令没能存到本机（不影响本次使用）：{e}");
+                (
+                    Some(None),
+                    Some(format!("本机没存下口令（{e}），下次连接要重新输入")),
+                )
+            }
+        },
+        Some(_) => (Some(None), None),
+        None => (None, None),
+    }
 }
 
 /// 这次建会话该用的连接配置：**运行期手动切过的 schema 优先**于配置里的初始值。
@@ -732,7 +779,8 @@ pub(crate) async fn prop_password_ready(
 ) -> Result<(), String> {
     // 本次手输的口令优先（用户可能在表单里覆盖了 prop.xml 里的）
     if let Some(p) = typed.filter(|p| !p.is_empty()) {
-        conn.password_dpapi = Some(protect(p)?);
+        // 存不下也照常往下走：本次连接用明文，只是下次还得再解一遍
+        conn.password_dpapi = protect(p).ok();
         return Ok(());
     }
     if resolve_password(conn, None).is_ok() {
@@ -772,7 +820,8 @@ pub(crate) async fn prop_password_ready(
     {
         conn.user = u.to_string();
     }
-    conn.password_dpapi = Some(protect(pwd)?);
+    // 存不下（例如 macOS 上用户拒绝了钥匙串）不影响本次连接，下次再解一遍
+    conn.password_dpapi = protect(pwd).ok();
 
     // 落盘：下次连这个连接不用再叫 JVM。写失败不算致命（只是下次再解一遍）
     let id = conn.id.clone();
@@ -803,6 +852,10 @@ pub struct DbConnectResult {
     pub product: String,
     pub version: String,
     pub auto_commit: bool,
+    /// **实际**在用的引擎（配置写 JVM 桥但本机没有运行时，这里会是 `rust`）。
+    pub engine: String,
+    /// 被降级时的原因，界面直接显示；没降级为 `None`。
+    pub engine_note: Option<String>,
 }
 
 /// 连库。手动来源 `password` 为空时用存过的；`remember` 为真时把这次输入的口令存起来。
@@ -824,20 +877,27 @@ pub async fn db_connect(
     }
     let (cmd, args) = connect_args(&cfg, &conn, password.as_deref(), conn.auto_commit, engine)?;
     let bridge = bridge_for(&app, &st, &cfg, &id, engine, &id)?;
+    // `bridge_for` 可能已经降级成 Rust，实际类型以句柄为准（不是上面那个 engine）
+    let actual = bridge.kind();
+    let engine_note = (engine == EngineKind::Java && actual == EngineKind::Rust).then(|| {
+        "这台机器没有可用的 Java 运行时与 Oracle 驱动（也没有 NC 安装目录），\
+         这条连接已改用「纯 Rust 驱动」；REF CURSOR 语句暂不支持。\
+         想用 JVM 桥：到「设置 → 组件」下载「数据库 JVM 组件」"
+            .to_string()
+    });
     let out = call(bridge, cmd, args, T_CONNECT).await?;
 
-    let typed = password.filter(|p| !p.is_empty());
-    let keep = remember.unwrap_or(true);
-    let enc = match (&typed, keep) {
-        (Some(p), true) => Some(protect(p)?),
-        _ => None,
-    };
+    // 连上之后才落盘口令：存不下只是失去「记住」，不能把已经连好的会话判成失败
+    let (enc, warn) = seal_remembered(password.as_deref(), remember.unwrap_or(true));
+    if let Some(w) = warn {
+        log::warn!("{w}");
+    }
     let _ = st
         .update_config(|c| {
             c.db_active = Some(id.clone());
             if let Some(e) = enc {
                 if let Some(x) = c.db_conns.iter_mut().find(|x| x.id == id) {
-                    x.password_dpapi = Some(e);
+                    x.password_dpapi = e;
                 }
             }
             Ok(())
@@ -855,6 +915,8 @@ pub async fn db_connect(
             .get("autoCommit")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        engine: actual.as_str().to_string(),
+        engine_note,
     })
 }
 
@@ -1171,6 +1233,11 @@ async fn exec_via_java(f: JavaFallback<'_>) -> Result<Value, String> {
     } = f;
     let cfg = st.config.read().await.clone();
     let conn = find_conn(&cfg, id)?;
+    // 兜底会话明确要 JVM：没有运行时就直接说，不要降级回 Rust —— 那条路执行
+    // `open :1 for` 必然报 PLS-00707，比「去下载组件」难懂得多。
+    if !jvm_ready(st, &cfg) {
+        return Err(code_label("need-jvm", NO_JVM_HINT));
+    }
     let key = java_key(&slot_key(id, slot)?);
     let handle = bridge_for(app, st, &cfg, &key, EngineKind::Java, id)?;
     // 连过一次就复用：桥的 `connect` 会先把旧连接关掉，等于每条语句重连一次库。
@@ -1543,12 +1610,16 @@ pub async fn db_schema_status(
 
 /// 从库里把表结构整个拉一遍落盘。要求当前连接已经连上（不偷偷连库）。
 ///
-/// 一次拉完而不是分页：Java 侧每页都要把 `getColumns` 的结果从头 skip 一遍（O(n²)）。
+/// 使用有序键续读字典，每批最多 1000 列；不再让 JDBC 从头 skip 或生成整库 JSON。
 #[tauri::command]
 pub async fn db_schema_sync(
     state: tauri::State<'_, Arc<AppState>>,
     id: Option<String>,
 ) -> Result<SchemaStatus, String> {
+    static SYNC: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    let _permit = SYNC
+        .try_acquire()
+        .map_err(|_| code_label("busy", "已有表结构同步正在进行"))?;
     let st = state.inner().clone();
     let cfg = st.config.read().await.clone();
     let (active, url, user) = match id.as_deref() {
@@ -1563,41 +1634,87 @@ pub async fn db_schema_sync(
         .ok_or_else(|| code_label("not-connected", "先在数据库页添加并连上一个连接"))?;
     let bridge = existing_bridge(&st, &key)
         .map_err(|_| code_label("not-connected", "先在数据库页连上这个库，再拉表结构"))?;
-    let out = call(
-        bridge,
-        "schema",
-        vec!["0".into(), "2000000".into()],
-        Duration::from_secs(300),
-    )
-    .await?;
+    // Both supported engines expose bounded, read-only schemaBatch. Keyset batches avoid
+    // JDBC getColumns repeatedly skipping its entire prefix or one enormous JSON reply.
+    tauri::async_runtime::spawn_blocking(move || {
+        // A dropped invoke future cannot release single-flight while its blocking work continues.
+        let _permit = _permit;
+        let mut cache =
+            db_schema::SchemaCache::build(&url, &user.to_lowercase(), db_schema::now_secs(), &[]);
+        let mut after = (String::new(), String::new());
+        let deadline = std::time::Instant::now() + Duration::from_secs(300);
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(code_label("timeout", "表结构同步超时，原缓存保持不变"));
+            }
+            let sql = schema_batch_sql(&after.0, &after.1);
+            let out = bridge
+                .call("schemaBatch", &[&sql, "1000"], remaining)
+                .map_err(|e| code_label(&e.code, &e.message))?;
+            let rows = out
+                .get("rows")
+                .and_then(Value::as_array)
+                .ok_or_else(|| code_label("sql", "表结构批次响应无效"))?;
+            if rows.is_empty() {
+                break;
+            }
+            for row in rows {
+                let table = row.get(0).and_then(Value::as_str).ok_or("表名缺失")?;
+                let column = row.get(1).and_then(Value::as_str).ok_or("列名缺失")?;
+                let ty = row.get(2).and_then(Value::as_str).unwrap_or("");
+                let size = row
+                    .get(3)
+                    .and_then(|v| v.as_i64().or_else(|| v.as_str()?.parse().ok()))
+                    .unwrap_or(0);
+                cache
+                    .tables
+                    .entry(table.to_lowercase())
+                    .or_insert_with(|| db_schema::CachedTable {
+                        kind: "TABLE".into(),
+                        columns: Default::default(),
+                    })
+                    .columns
+                    .insert(column.to_lowercase(), db_schema::fmt_type(ty, size as i32));
+                after = (table.to_owned(), column.to_owned());
+            }
+            if rows.len() < 1000 {
+                break;
+            }
+        }
+        if cache.tables.is_empty() {
+            return Err(code_label("sql", "库里没读到任何列定义，请检查账号权限"));
+        }
+        db_schema::save(&cache_file(&st.config_dir, &url, &user), &cache)?;
+        Ok(status_of(Some(&cache), active, &url, &user))
+    })
+    .await
+    .map_err(|e| format!("表结构同步任务失败：{e}"))?
+}
 
-    let rows: Vec<(String, String, String)> = out
-        .get("rows")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|r| {
-                    let t = r.get("table")?.as_str()?.to_string();
-                    let c = r.get("column")?.as_str()?.to_string();
-                    let ty = db_schema::fmt_type(
-                        r.get("type").and_then(Value::as_str).unwrap_or(""),
-                        r.get("size").and_then(Value::as_i64).unwrap_or(0) as i32,
-                    );
-                    Some((t, c, ty))
-                })
+fn schema_batch_sql(table: &str, column: &str) -> String {
+    if table.is_empty() {
+        return "select * from (select table_name, column_name, data_type, nvl(nullif(char_length,0),nvl(data_precision,0)) sz from user_tab_columns order by table_name,column_name) where rownum <= 1000".into();
+    }
+    let table = table.replace('\'', "''");
+    let column = column.replace('\'', "''");
+    format!("select * from (select table_name, column_name, data_type, nvl(nullif(char_length,0),nvl(data_precision,0)) sz from user_tab_columns where (table_name > '{table}' or (table_name = '{table}' and column_name > '{column}')) order by table_name,column_name) where rownum <= 1000")
+}
+
+/// A single application timer owns reclamation; no timer/thread per connection.
+pub async fn reclaim_idle_db_slots(state: &AppState) {
+    let ids: std::collections::BTreeSet<String> = slot_touch()
+        .lock()
+        .map(|slots| {
+            slots
+                .keys()
+                .filter_map(|k| k.split_once('#').map(|(id, _)| id.to_owned()))
                 .collect()
         })
         .unwrap_or_default();
-    if rows.is_empty() {
-        return Err(code_label(
-            "sql",
-            "库里没读到任何列定义——账号可能没有数据字典权限，或者连错了库",
-        ));
+    for id in ids {
+        sweep_idle_slots(state, &id).await;
     }
-    let lower = user.to_lowercase();
-    let cache = db_schema::SchemaCache::build(&url, &lower, db_schema::now_secs(), &rows);
-    db_schema::save(&cache_file(&st.config_dir, &url, &user), &cache)?;
-    Ok(status_of(Some(&cache), active, &url, &user))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1852,6 +1969,16 @@ fn rel_of(abs: &str, root: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn schema_batches_seek_instead_of_skipping() {
+        let first = super::schema_batch_sql("", "");
+        assert!(!first.contains("table_name >"));
+        let next = super::schema_batch_sql("A'TABLE", "COL");
+        assert!(next.contains("table_name > 'A''TABLE'"));
+        assert!(next.contains("column_name > 'COL'"));
+        assert!(next.contains("order by table_name,column_name"));
+        assert!(next.ends_with("rownum <= 1000"));
+    }
     use super::*;
 
     use serde_json::json;
@@ -1916,6 +2043,30 @@ mod tests {
         );
         assert!(map_sql_error("ORA-12541: TNS:no listener").starts_with("unreachable|"));
         assert!(map_sql_error("ORA 17002：IO 错误: Connection refused").starts_with("unreachable|"));
+    }
+
+    /// 存不下口令（macOS 钥匙串被拒、系统不支持…）只能降级成「不记住」。
+    ///
+    /// 以前这里是 `protect(p)?`：勾着「记住」点添加，整条连接都存不下来。
+    #[test]
+    fn 口令存不下只降级不阻断保存() {
+        let (enc, warn) = seal_with(Some("pw"), true, |_| Err("钥匙串被拒".into()));
+        assert_eq!(
+            enc,
+            Some(None),
+            "存不下就把旧密文清掉，别留着对不上的旧口令"
+        );
+        assert!(
+            warn.expect("必须回一条警告").contains("下次连接"),
+            "警告要说清后果"
+        );
+        // 不勾「记住」= 清掉旧的；没输口令 = 不动原来那份
+        assert_eq!(
+            seal_with(Some("pw"), false, |_| unreachable!()),
+            (Some(None), None)
+        );
+        assert_eq!(seal_with(None, true, |_| unreachable!()), (None, None));
+        assert_eq!(seal_with(Some(""), true, |_| unreachable!()), (None, None));
     }
 
     fn conn(id: &str, url: &str) -> DbConnConfig {

@@ -426,6 +426,8 @@ public class NcDbBridge {
                 ok(id, explain(a.get(0)));
             } else if ("sessions".equals(cmd)) {
                 ok(id, sessions());
+            } else if ("schemaBatch".equals(cmd)) {
+                ok(id, query(a.get(0), 1000));
             } else if ("schema".equals(cmd)) {
                 ok(id, schema(Integer.parseInt(a.get(0)), Integer.parseInt(a.get(1))));
             } else if ("schemas".equals(cmd)) {

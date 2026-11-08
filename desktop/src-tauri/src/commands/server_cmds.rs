@@ -726,15 +726,8 @@ pub async fn server_kill_port_owner(state: tauri::State<'_, Arc<AppState>>) -> R
                 owner.pid
             ));
         }
-        #[cfg(windows)]
-        {
-            server::kill_tree(owner.pid, true);
-            Ok(owner.pid)
-        }
-        #[cfg(not(windows))]
-        {
-            Err("此操作只支持 Windows".to_string())
-        }
+        server::kill_tree(owner.pid, true);
+        Ok(owner.pid)
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?

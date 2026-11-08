@@ -55,6 +55,7 @@ pub use build_cmds::*;
 pub use client_cmds::*;
 pub use compile_cmds::spawn_prewarm;
 pub use compile_cmds::*;
+pub use db_cmds::reclaim_idle_db_slots;
 pub use db_cmds::*;
 pub use db_conn_cmds::*;
 pub use db_export_cmds::*;

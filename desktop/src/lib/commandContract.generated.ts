@@ -208,6 +208,7 @@ export const TAURI_COMMANDS = [
   "service_log_cancel_export",
   "service_log_clear",
   "service_log_export",
+  "service_log_purge",
   "service_log_read",
   "service_log_tail",
   "set_autostart",

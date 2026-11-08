@@ -48,6 +48,10 @@ desktop/src-tauri/db-bridge/out/
 # jdt.ls：构建前由 desktop/scripts/fetch-jdtls.mjs 下载、校验、裁剪生成，不入库（约 55MB）；只留占位 README
 desktop/src-tauri/resources/jdtls/*
 !desktop/src-tauri/resources/jdtls/README.md
+# 数据库 JVM 组件（Zulu 8 JRE + ojdbc6）：由 desktop/scripts/fetch-ncdb.mjs 下载，解压后约 100MB，不入库。
+# 注意与 resources/ncdb/ 区分：那里只有随安装包发的桥本体 ncdb.jar（30KB），是入库的。
+desktop/src-tauri/resources/ncdb-runtime/*
+!desktop/src-tauri/resources/ncdb-runtime/README.md
 desktop/.cache/
 
 # jdt.ls 扩展 bundle 的临时编译目录（成品 resources/jdtls-ext/ncforge-jdt-ext.jar 入库，约 6KB）

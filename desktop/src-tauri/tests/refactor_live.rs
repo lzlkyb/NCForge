@@ -251,7 +251,7 @@ fn 影子工程映射下提取变量返回真实路径() {
     let shadow = base.join("shadow");
     std::fs::create_dir_all(&shadow).unwrap();
     // 真实形态：源码用 junction 链过去，工程描述文件写在影子目录里
-    nc_forge::shadow::ensure_link(&shadow.join("src"), &real.join("src")).unwrap();
+    nc_forge::shadow::ensure_link(&shadow.join("src"), &real.join("src"), &mut Vec::new()).unwrap();
     for name in [".project", ".classpath"] {
         std::fs::copy(real.join(name), shadow.join(name)).unwrap();
     }

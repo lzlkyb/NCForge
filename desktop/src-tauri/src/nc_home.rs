@@ -12,14 +12,36 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
+/// 当前平台 java 可执行文件名。
+///
+/// Windows 是 `java.exe`，macOS / Linux 就是 `java` —— 测试造桩文件时必须用它，
+/// 写死 `.exe` 会让 mac CI 上的用例造出一个候选表里根本不存在的文件。
+pub const JAVA_BIN_NAME: &str = if cfg!(windows) { "java.exe" } else { "java" };
+
 /// 中间件启动时按顺序找 java 的相对位置。第一个存在的胜出。
 ///
 /// 只用 NC 自带的 ufjdk：NC65/1909 的中间件是 1.8 编译的，用机器上别处的
 /// JDK 11/17 起不来（`UnsupportedClassVersionError` 或 Nashorn 缺失）。
-const JAVA_CANDIDATES: [&str; 3] = [
+#[cfg(windows)]
+const JAVA_CANDIDATES: &[&str] = &[
     "ufjdk/bin/java.exe",
     "jdk/bin/java.exe",
     "jdk1.8/bin/java.exe",
+];
+
+/// 非 Windows 的候选。
+///
+/// `Contents/Home` 是 macOS 的 JDK bundle 布局（下载的 Oracle/Temurin 包都是这样），
+/// NC 在 mac 上若直接放一份 unix 版 jdk 则是 `bin/java`。两种都要认，否则选目录时
+/// 会把一个完全正常的安装判成「不是 NC home」。
+#[cfg(not(windows))]
+const JAVA_CANDIDATES: &[&str] = &[
+    "ufjdk/bin/java",
+    "ufjdk/Contents/Home/bin/java",
+    "jdk/bin/java",
+    "jdk/Contents/Home/bin/java",
+    "jdk1.8/bin/java",
+    "jdk1.8/Contents/Home/bin/java",
 ];
 
 /// 识别到的 NC home。
@@ -28,7 +50,7 @@ const JAVA_CANDIDATES: [&str; 3] = [
 pub struct NcHome {
     /// 规范化后的根目录。
     pub root: String,
-    /// 启动服务用的 java.exe（绝对路径）。
+    /// 启动服务用的 java 可执行文件（绝对路径）。
     pub java: String,
     /// `modules` 下的一级子目录数（业务模块数量）。
     pub module_count: usize,
@@ -49,7 +71,7 @@ pub struct NcHome {
     pub service_port: Option<u16>,
 }
 
-/// 找一个目录下的 java.exe。
+/// 找一个目录下的 java 可执行文件（Windows `java.exe`，其它平台 `java`）。
 pub fn find_java(root: &Path) -> Option<PathBuf> {
     JAVA_CANDIDATES
         .iter()
@@ -80,8 +102,9 @@ pub fn probe(root: &Path) -> Result<NcHome, String> {
 
     let java = find_java(&root).ok_or_else(|| {
         format!(
-            "{} 下没有 ufjdk/bin/java.exe：这不是 NC 安装目录，或者安装包被裁剪过（NC 服务必须用自带的 1.8）",
-            root.display()
+            "{} 下没有 ufjdk/bin/{}：这不是 NC 安装目录，或者安装包被裁剪过（NC 服务必须用自带的 1.8）",
+            root.display(),
+            JAVA_BIN_NAME
         )
     })?;
 
@@ -134,7 +157,7 @@ pub fn resolve(configured: Option<&str>) -> Result<NcHome, String> {
     match configured {
         Some(path) => probe(Path::new(path)),
         None => probe(Path::new(DEFAULT_NC_HOME)).map_err(|e| {
-            format!("{e}。还没有设置 NC 安装目录，请到设置 → 开发 →「NC 环境」页配置（可自动探测，也可浏览选择含 ufjdk/bin/java.exe 的那一层）")
+            format!("{e}。还没有设置 NC 安装目录，请到设置 → 开发 →「NC 环境」页配置（可自动探测，也可浏览选择含 ufjdk/bin/{JAVA_BIN_NAME} 的那一层）")
         }),
     }
 }
@@ -346,7 +369,7 @@ mod tests {
     fn fake_home(tag: &str) -> PathBuf {
         let d = temp_dir(tag);
         fs::create_dir_all(d.join("ufjdk").join("bin")).unwrap();
-        fs::write(d.join("ufjdk").join("bin").join("java.exe"), b"stub").unwrap();
+        fs::write(d.join("ufjdk").join("bin").join(JAVA_BIN_NAME), b"stub").unwrap();
         fs::create_dir_all(d.join("middleware")).unwrap();
         fs::write(d.join("middleware").join("mw.jar"), b"stub").unwrap();
         for m in ["gl", "ic", "pu"] {
@@ -364,8 +387,37 @@ mod tests {
         let d = fake_home("ok");
         let home = probe(&d).expect("应当识别成功");
         assert_eq!(home.module_count, 3);
-        assert!(home.java.ends_with("java.exe"));
+        assert!(home.java.ends_with(JAVA_BIN_NAME));
         assert!(!home.has_nc_starter, "没写 startup.bat 时应当是 false");
+        cleanup(&d);
+    }
+
+    /// 守卫：候选表的**第一顺位**必须以当前平台的 java 可执行名结尾。
+    ///
+    /// 为什么只认第一项：`find_java` 取的是「第一个存在的」，而真实安装里
+    /// `ufjdk/bin/java*` 一定存在。第一项写错（比如 Windows 上漏了 `.exe`），
+    /// 后面几项就算对也救不回来——用户看到的就是「这不是 NC 安装目录」。
+    /// 在 macOS 上，这条守的是「别把 `.exe` 写回来」。
+    #[test]
+    fn java_候选表第一顺位与平台可执行名一致() {
+        let suffix = format!("/{JAVA_BIN_NAME}");
+        let first = JAVA_CANDIDATES.first().expect("候选表不能为空");
+        assert!(
+            first.ends_with(&suffix),
+            "第一顺位 {first} 必须以 {suffix} 结尾（当前平台候选表：{JAVA_CANDIDATES:?}）"
+        );
+    }
+
+    /// macOS 下载的 JDK 是 `<jdk>/Contents/Home/bin/java` 的 bundle 布局，
+    /// 不认这个层级的话，一个完全正常的 JDK 会被判成「没有 java」。
+    #[cfg(not(windows))]
+    #[test]
+    fn 认识_mac_的_jdk_bundle_布局() {
+        let d = temp_dir("mac-jdk");
+        let bin = d.join("jdk").join("Contents").join("Home").join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join(JAVA_BIN_NAME), b"stub").unwrap();
+        assert_eq!(find_java(&d), Some(bin.join(JAVA_BIN_NAME)));
         cleanup(&d);
     }
 

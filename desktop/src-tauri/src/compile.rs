@@ -657,7 +657,10 @@ fn write_args(
         .collect();
     let mut s = String::new();
     s.push_str("-1.8 -g -nowarn -proc:none -preserveAllLocals\n");
-    s.push_str(&format!("-cp \"{}\"\n", cp.join(";")));
+    s.push_str(&format!(
+        "-cp \"{}\"\n",
+        cp.join(crate::java_bridge::CLASSPATH_SEP)
+    ));
     s.push_str(&format!("-d \"{}\"\n", fwd(out_dir)));
     for (p, enc) in sources {
         let tag = match enc {
@@ -937,6 +940,39 @@ fn path_eq(a: &Path, b: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// classpath 的连接符必须跟 JVM 走：Windows 是 `;`，macOS / Linux 是 `:`。
+    ///
+    /// 这条在 Windows 上恒绿（两边都是 `;`），真正的守卫点是在 macOS CI 上跑：
+    /// 实现若写死 `;`，mac 上会把整串当成一个不存在的路径，报「找不到主类」。
+    #[test]
+    fn args_file_joins_classpath_with_platform_separator() {
+        let dir = crate::test_support::tmp("cp-sep");
+        let classes = dir.join("classes");
+        let jar = dir.join("lib.jar");
+        let out = dir.join("out");
+        let args = dir.join("args.txt");
+        write_args(
+            &args,
+            std::slice::from_ref(&classes),
+            std::slice::from_ref(&jar),
+            &out,
+            &[],
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&args).expect("args 文件应写出");
+        let fwd = |p: &Path| p.to_string_lossy().replace('\\', "/");
+        let expect = format!(
+            "{}{}{}",
+            fwd(&classes),
+            crate::java_bridge::CLASSPATH_SEP,
+            fwd(&jar)
+        );
+        assert!(
+            text.contains(&expect),
+            "-cp 必须用平台分隔符连接（期望包含 {expect}）：\n{text}"
+        );
+    }
 
     #[test]
     fn imports_cover_plain_static_wildcard_and_skip_noise() {
