@@ -207,8 +207,11 @@ async function main() {
     (await ask(`填写「更新摘要」（用户向，回车用默认）:`, `v${next} 版本更新`)) ||
     `v${next} 版本更新`;
 
-  // 把 git log 按前缀分类成 CHANGELOG 小节草稿
-  const sections = { 新增: [], 变更: [], 修复: [], 优化: [], 安全: [] };
+  // 把 git log 按前缀分类成 CHANGELOG 小节草稿。
+  // 🔴 它只是**草稿/兜底**：`[Unreleased]` 里有人写过的条目才是权威。两者的区别在
+  // 「谁看得见」——git log 标题是开发者向的（`feat(db): …` 原样进更新弹窗），而
+  // `[Unreleased]` 是写给用户的。所以下面只有在 Unreleased 一条都没收集到时才回退用它。
+  const draft = { 新增: [], 变更: [], 修复: [], 优化: [], 安全: [] };
   const mapPrefix = (line) => {
     if (/^feat/i.test(line)) return "新增";
     if (/^fix/i.test(line)) return "修复";
@@ -220,9 +223,11 @@ async function main() {
   for (const line of logEntries) {
     const sec = mapPrefix(line);
     const msg = line.replace(/^(feat|fix|chg|change|refactor|perf|sec)(\(.*?\))?:\s*/i, "");
-    sections[sec].push(`- ${msg}`);
+    draft[sec].push(`- ${msg}`);
   }
   const fallbackSections = `### 变更\n- 见 git 提交历史`;
+  /** 最终进版本段的内容：Unreleased 手写条目（或回退用的 git log 草稿）。 */
+  const sections = {};
 
   // 4. 插入 CHANGELOG.md
   let changelog = readTextNormalized(CHANGELOG_PATH);
@@ -235,6 +240,8 @@ async function main() {
   // 整段 Unreleased 内容被孤零零留在文件抬头（不属于任何版本段），
   // 而新版本段只包含 git log 自动分类出的那几条。v2.5.0 发版时就踩上了。
   const unrelMatch = changelog.match(/^##\s+\[Unreleased\][\s\S]*?(?=\n##\s+\[|$(?![\s\S]))/m);
+  /** Unreleased 里手写条目总数：>0 说明本次有权威内容，git log 草稿不参与。 */
+  let unrelCollected = 0;
   if (unrelMatch) {
     const body = unrelMatch[0];
     const skipSec = new Set([
@@ -272,13 +279,29 @@ async function main() {
       process.exit(1);
     }
     changelog = changelog.replace(unrelMatch[0] + "\n", "");
+    unrelCollected = collected;
     console.log(
       `\x1b[32m[4/7]\x1b[0m 已消费并归档 ## [Unreleased]（并入 ${collected} 条）`,
     );
   }
+  // 有手写条目就只用手写条目（`sections` 已由上面填好），否则回退到 git log 草稿。
+  if (!unrelCollected) {
+    for (const [name, items] of Object.entries(draft)) if (items.length) sections[name] = items;
+    console.log(
+      `\x1b[33m[4/7]\x1b[0m [Unreleased] 无条目，改用 ${logEntries.length} 条 git log 标题当草稿`,
+    );
+  }
 
+  // 小节顺序固定成「新增 → 变更 → 修复 → 优化 → 安全 → 其它（技术细节 等）」，
+  // 不跟 `[Unreleased]` 里的书写顺序走：那段是边写边补的，顺序通常很乱。
+  const SECTION_ORDER = ["新增", "变更", "修复", "优化", "安全"];
+  const rank = (name) => {
+    const i = SECTION_ORDER.indexOf(name);
+    return i < 0 ? SECTION_ORDER.length : i;
+  };
   const sectionLines = Object.entries(sections)
     .filter(([, items]) => items.length)
+    .sort(([a], [b]) => rank(a) - rank(b))
     .map(([name, items]) => `### ${name}\n${items.join("\n")}`)
     // 用两个 \n：单个 \n 会让下一个 "###" 紧贴上一条列表项，Markdown 渲染成一整段。
     .join("\n\n");
