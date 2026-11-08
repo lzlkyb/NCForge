@@ -1,0 +1,107 @@
+/* 执行范围、连接上下文与辅助操作各占一组；缩窄时整组换行。 */
+.dbx-console .dbx-execution-bar {
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  grid-template-areas:"execution context auxiliary";
+  align-items:center;
+  gap:8px 14px;
+  min-height:48px;
+  padding:6px 12px;
+  border-bottom:1px solid hsl(var(--border));
+  background:hsl(var(--card));
+}
+.dbx-console .dbx-execution-primary {
+  grid-area:execution;
+  display:flex;
+  flex-wrap:nowrap;
+  gap:10px;
+  min-width:0;
+  min-height:0;
+  padding:0;
+  border:0;
+  background:none;
+}
+.dbx-execution-primary .dbx-run-controls { width:auto; }
+.dbx-execution-primary .dbx-run-action { min-width:142px; }
+.dbx-console .dbx-execution-bar .dbx-scope {
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:88px;
+  max-width:240px;
+  line-height:1.4;
+  white-space:normal;
+  color:hsl(var(--muted-foreground));
+  font-variant-numeric:tabular-nums;
+}
+.dbx-scope .dbx-run-reason { color:hsl(var(--warning-ink)); }
+.dbx-console .dbx-execution-bar > .dbx-context {
+  grid-area:context;
+  flex-wrap:nowrap;
+  gap:8px;
+  min-width:0;
+  padding:0 10px;
+  border:0;
+  border-inline:1px solid hsl(var(--border));
+  background:none;
+}
+.dbx-context-connection { grid-area:connection; min-width:0; }
+.dbx-context .dbx-context-connection strong { max-width:100%; }
+.dbx-execution-bar .dbx-context-connection .dbx-connpick { max-width:154px; font-size:var(--dbx-fs-body); }
+.dbx-execution-bar .dbx-context-env { grid-area:environment; flex:none; color:hsl(var(--foreground)); }
+.dbx-execution-bar .dbx-schema { grid-area:schema; }
+.dbx-execution-bar .dbx-schema-chip { max-width:142px; }
+.dbx-execution-bar .dbx-conn-status { grid-area:status; flex:none; }
+.dbx-execution-bar .dbx-context-session { grid-area:session; overflow:visible; flex:none; }
+.dbx-context .dbx-session-trigger { margin:0; padding-inline:4px; color:hsl(var(--foreground)); }
+.dbx-session-trigger span { white-space:normal; text-align:left; }
+.dbx-context .dbx-connection-readonly {
+  grid-area:readonly;
+  height:auto;
+  min-height:32px;
+  margin:0;
+  padding:2px 5px;
+  color:hsl(var(--foreground));
+}
+.dbx-connection-readonly > span { display:flex; flex-direction:column; gap:1px; text-align:left; line-height:1.35; }
+.dbx-connection-readonly small { color:hsl(var(--muted-foreground)); font-size:var(--dbx-fs-badge); }
+.dbx-context .dbx-connection-detail { grid-area:details; flex:none; margin-left:auto; }
+.dbx-connection-detail > summary { display:grid; place-items:center; width:28px; height:28px; list-style:none; border-radius:var(--r-control); }
+.dbx-connection-detail > summary::-webkit-details-marker { display:none; }
+.dbx-connection-detail > summary:hover { background:hsl(var(--secondary)); }
+.dbx-connection-detail .dbx-connection-detail-body { z-index:20; min-width:260px; max-width:min(480px,calc(100vw - 32px)); white-space:normal; overflow-wrap:anywhere; }
+.dbx-execution-aux { grid-area:auxiliary; display:flex; align-items:center; gap:4px; }
+.dbx-execution-aux .dbx-btn { padding-inline:6px; }
+.dbx-focus-controls { display:flex; align-items:center; margin-left:6px; padding-left:6px; border-left:1px solid hsl(var(--border)); }
+.dbx-tx-owner { font-weight:600; }
+.dbx-txbar .dbx-tx-actions { margin-left:auto; border:0; padding:0; }
+.dbx-console-main > .dbx-editor[hidden],
+.dbx-console-main > .dbx-splitbar[hidden],
+.dbx-console-main[data-focus="editor"] > .dbx-res { display:none; }
+.dbx-console-main[data-focus="results"] { overflow:hidden; }
+
+@container (max-width:1420px) {
+  .dbx-console .dbx-execution-bar {
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:"context context" "execution auxiliary";
+    row-gap:6px;
+  }
+  .dbx-console .dbx-execution-bar > .dbx-context { padding:0; border:0; }
+}
+@container (max-width:820px) {
+  .dbx-console .dbx-execution-bar { grid-template-columns:minmax(0,1fr); grid-template-areas:"execution" "context" "auxiliary"; }
+  .dbx-execution-aux { justify-content:flex-end; }
+  .dbx-console .dbx-execution-bar > .dbx-context {
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto auto;
+    grid-template-areas:"connection environment status" "schema session details" "readonly readonly readonly";
+  }
+  .dbx-context .dbx-connection-readonly { justify-self:start; }
+}
+@container (max-width:440px) {
+  .dbx-console .dbx-execution-bar { padding-inline:8px; }
+  .dbx-console .dbx-execution-primary { align-items:flex-start; }
+  .dbx-console .dbx-execution-bar .dbx-scope { min-width:0; }
+  .dbx-execution-aux { display:grid; grid-template-columns:repeat(3,auto); justify-content:start; }
+  .dbx-focus-controls { grid-column:1 / -1; margin:0; padding:0; border:0; }
+}

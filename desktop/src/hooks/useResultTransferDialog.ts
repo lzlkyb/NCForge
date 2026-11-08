@@ -6,6 +6,8 @@ import { dbTransferApi, type TransferDestination } from "../lib/dbTransferApi";
 import { startTransferJob } from "../lib/resultTransferJobs";
 import { builtinTransferPresets, lastTransferFormat, rememberTransferFormat, readTransferPresets, saveTransferPreset } from "../lib/resultTransferPresets";
 import { toast } from "../components/ui/toast";
+import { useDbSelector } from "../lib/dbStore";
+import { connectionKey } from "../lib/dbResultContext";
 
 export type { TransferDialogSeed } from "../lib/resultTransferContext";
 function stamp() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}-${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}${String(d.getSeconds()).padStart(2, "0")}`; }
@@ -23,6 +25,9 @@ export function useResultTransferDialog(frame: TransferFrame, mode: "copy" | "fi
       busy: "" as "" | "pick" | "copy", error: "", notice:"", ncOpen: false, allSets: seed?.allSets ?? false, presets: readTransferPresets(), preset: "", presetName: "", savingPreset: false };
   };
   const [state, set] = useState(initial);
+  const sourceConn = useDbSelector(s => s.conns.find(conn => conn.id === frame.source.connId) ?? null);
+  const currentSchema = useDbSelector(s => frame.source.connId ? s.rt[frame.source.connId]?.currentSchema ?? s.rt[frame.source.connId]?.info?.schema : undefined);
+  const sourceError = frame.source.connectionKey && connectionKey(sourceConn) !== frame.source.connectionKey ? "连接目标已变化，请重新执行查询后导出；已加载的数据仍可导出" : null;
   const lock = useRef(false);
   const patch = (value: Partial<typeof state>) => set(s => ({ ...s, ...value, ...(value.fileName !== undefined ? { destination: null } : {}) }));
   const allSets = (value: boolean) => set(s => ({ ...s, allSets: value, scope: "loaded", edited: false, columnOrder:frame.data.columns.map((_,i)=>i), options: { ...s.options, columnIndices: frame.data.columns.map((_,i)=>i), header: "name", transpose: false }, error: "" }));
@@ -45,13 +50,16 @@ export function useResultTransferDialog(frame: TransferFrame, mode: "copy" | "fi
     set(s => ({ ...s, options: { ...s.options, ...preset.options, format: mode === "copy" && chosen === "xlsx" ? "tsv" : chosen, transpose:s.scope==="query" || s.allSets ? false : preset.options.transpose ?? s.options.transpose }, preset: String(index), error: "" }));
   };
   const data = scopedTransferData(frame, state.scope, state.edited);
-  const canRequery = transferCanRequery(frame.source);
+  const canRequery = transferCanRequery(frame.source) && !sourceError;
   const sql = ["insert", "update", "where"].includes(state.options.format);
   let error = state.options.columnIndices.length ? validateTransfer(data, state.options) : "请选择至少一个输出字段";
   if (state.options.nc) error = canRequery && mode === "file" ? null : "NC 迁移需要可重新查询的连接，请使用文件导出";
   if (state.scope === "query" && (!canRequery || ["where", "update"].includes(state.options.format))) error = "此来源或格式只能导出已加载数据";
   if (mode === "copy" && state.scope === "query") error = "全部重查请使用文件导出";
   if (state.allSets) error = frame.source.sheets?.length && state.options.format === "xlsx" ? null : "请选择 Excel 格式导出多个结果集";
+  if (state.scope === "query" && sourceError) error = sourceError;
+  if (state.options.nc && sourceError) error = sourceError;
+  if (state.options.nc && frame.source.schema !== undefined && currentSchema !== frame.source.schema) error = `NC 迁移需要使用读取结果时的 schema ${frame.source.schema || "登录账号"}；请切回该 schema 或重新执行查询`;
   const rows = state.allSets ? frame.source.sheets?.reduce((n, s) => n + s.data.rows.length, 0) ?? 0 : scopeIndices(frame, state.scope).length;
   const summary = state.allSets ? `全部已加载结果集 · ${rows} 行` : `${transferScopeLabel[state.scope]} · ${state.scope === "query" ? "总行数未知" : `${rows} 行`} × ${state.options.columnIndices.length} 列`;
   const pick = async () => {
@@ -71,12 +79,13 @@ export function useResultTransferDialog(frame: TransferFrame, mode: "copy" | "fi
         format: state.options.format, fileName: state.fileName, options: state.options,
         destinationToken: state.destination?.token, timeoutSec: frame.source.timeoutSec ?? 300, maxRows: 0,
         expectedColumns: state.allSets ? undefined : frame.data.columns.map(c => c.name), params: state.scope === "query" ? frame.source.params : undefined,
-        context: { source: frame.source.source, scope: summary },
+        sourceSchema: state.scope === "query" ? frame.source.schema : undefined, sourceConnectionKey: state.scope === "query" ? frame.source.connectionKey : undefined,
+        context: { source: `${frame.source.source}${frame.source.schema !== undefined ? ` · schema ${frame.source.schema || "登录账号"}` : ""}`, scope: summary },
         data: state.scope === "query" || state.allSets ? undefined : data,
         sheets: state.allSets ? frame.source.sheets : undefined,
       }, summary, {frame,seed:{options:{...state.options},scope:state.scope,edited:state.edited,columnOrder:[...state.columnOrder],allSets:state.allSets,fileName:state.fileName,destination:state.destination ? {...state.destination} : null}});
     } finally { lock.current = false; patch({ busy: "" }); }
   };
   const savePreset = () => { try { patch({ presets: saveTransferPreset(state.presetName, state.options), savingPreset: false, presetName: "" }); toast("输出预设已保存", "success"); } catch (e) { patch({ error: String(e) }); } };
-  return { state, patch, opt, format, scope, allSets, columns, move, applyPreset, savePreset, pick, run, data, error, canRequery, sql, summary, rows };
+  return { state, patch, opt, format, scope, allSets, columns, move, applyPreset, savePreset, pick, run, data, error, canRequery, sourceError, sql, summary, rows };
 }

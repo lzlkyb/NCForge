@@ -32,6 +32,31 @@ afterEach(() => {
 });
 
 describe("默认 schema 胶囊", () => {
+  it("组合搜索只设置一个焦点容器，方向键与 Enter 选择后回到触发器", async () => {
+    act(() => root.render(<SchemaChip connId="c1" />));
+    const trigger = host.querySelector<HTMLButtonElement>(".dbx-schema-chip")!;
+    act(() => trigger.click());
+    const filter = host.querySelector<HTMLInputElement>('[role="combobox"]')!;
+    expect(filter.parentElement?.hasAttribute("data-focus-container")).toBe(true);
+    expect(filter.getAttribute("aria-controls")).toBe(host.querySelector('[role="listbox"]')?.id);
+    act(() => filter.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown",bubbles:true})));
+    expect(host.querySelector('[data-highlighted]')?.textContent).toBe("OTHER");
+    expect(document.getElementById(filter.getAttribute("aria-activedescendant")!)?.textContent).toBe("OTHER");
+    await act(async () => filter.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true})));
+    expect(mocks.change).toHaveBeenCalledWith("c1","OTHER");
+    expect(document.activeElement).toBe(trigger);
+  });
+  it("Esc 关闭并恢复焦点，输入法确认键不切换 Schema", () => {
+    act(() => root.render(<SchemaChip connId="c1" />));
+    const trigger = host.querySelector<HTMLButtonElement>(".dbx-schema-chip")!;
+    act(() => trigger.click());
+    const filter = host.querySelector<HTMLInputElement>('[role="combobox"]')!;
+    act(() => filter.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true,isComposing:true})));
+    expect(mocks.change).not.toHaveBeenCalled();
+    act(() => filter.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));
+    expect(host.querySelector(".dbx-schema-pop")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
   it("显示当前生效的 schema，点开可筛选并切换", async () => {
     act(() => root.render(<SchemaChip connId="c1" />));
     expect(host.querySelector(".dbx-schema-name")?.textContent).toBe("AIER633");

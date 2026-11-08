@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef } from "react";
 import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { sqlModel, tabIdOfModel } from "../../lib/sqlModels";
 import { registerSqlProviders } from "../../lib/sqlProviders";
-import { isPlsql, pickStatement, splitStatements } from "../../lib/sqlSplit";
+import { isPlsql, pickStatement, splitStatements, type Stmt } from "../../lib/sqlSplit";
 import { statementsOf } from "../../lib/sqlStmtCache";
 import { formatSql } from "../../lib/sqlFormat";
 import { setSqlDraft } from "../../lib/dbStore";
@@ -10,6 +10,17 @@ import { setSqlDraft } from "../../lib/dbStore";
 export interface RunStmt {
   text: string;
   startLine: number;
+  endLine?: number;
+  editorVersion?: number;
+  editorSql?: string;
+  startOffset?: number;
+  endOffset?: number;
+}
+
+export interface SqlExecutionScope {
+  tabId: string;
+  selected: boolean;
+  statements: RunStmt[];
 }
 
 /** SqlConsole 拿到的编辑器句柄。 */
@@ -28,18 +39,37 @@ type Editor = monaco.editor.IStandaloneCodeEditor;
 /** 大于这个长度就不再实时高亮当前语句（每次光标移动都要切一遍）。 */
 const HL_LIMIT = 200_000;
 
+/**
+ * 右键菜单里的分组。用 Monaco 内置的 `navigation`（「转到定义」那一组）而不是自造分组：
+ * 自造分组的排序依赖 group id 的字典序，会飘到剪切/粘贴后面去。
+ */
+const CONTEXT_GROUP = "navigation";
+const modelSources = new WeakMap<monaco.editor.ITextModel, { editorVersion: number; editorSql: string }>();
+
 function targetOf(editor: Editor, mode: "current" | "script"): RunStmt[] {
   const model = editor.getModel();
   if (!model) return [];
+  const editorVersion = model.getVersionId();
+  let source = modelSources.get(model);
+  // 范围随光标更新，整篇 SQL 只随版本更新，避免每次移动都重新读取大脚本。
+  if (!source || source.editorVersion !== editorVersion) {
+    source = { editorVersion, editorSql: model.getValue() };
+    modelSources.set(model, source);
+  }
+  const statement = (stmt: Stmt, offset = 0, lineOffset = 0): RunStmt => ({
+    ...source, text: stmt.text, startLine: stmt.startLine + lineOffset, endLine: stmt.endLine + lineOffset,
+    startOffset: stmt.start + offset, endOffset: stmt.end + offset,
+  });
   const sel = editor.getSelection();
   if (mode === "current" && sel && !sel.isEmpty()) {
     const part = model.getValueInRange(sel);
-    return splitStatements(part).map((s) => ({ text: s.text, startLine: sel.startLineNumber + s.startLine - 1 }));
+    const offset = model.getOffsetAt(sel.getStartPosition());
+    return splitStatements(part).map((s) => statement(s, offset, sel.startLineNumber - 1));
   }
-  if (mode === "script") return statementsOf(model).map((s) => ({ text: s.text, startLine: s.startLine }));
+  if (mode === "script") return statementsOf(model).map((s) => statement(s));
   const pos = editor.getPosition();
   const s = pos ? pickStatement(statementsOf(model), model.getOffsetAt(pos)) : null;
-  return s ? [{ text: s.text, startLine: s.startLine }] : [];
+  return s ? [statement(s)] : [];
 }
 
 /** 格式化选中部分，或光标所在的语句；PL/SQL 块不动。走 executeEdits 保留撤销。 */
@@ -68,17 +98,23 @@ function formatAt(editor: Editor) {
 /**
  * SQL 编辑器（Monaco，与源码编辑器同一套）。整个控制台只有一个实例，切标签 = 换 model。
  * Ctrl+Enter 执行当前语句 / Alt+X 执行脚本 / Ctrl+Shift+F 格式化；光标所在语句浅色高亮。
+ * 这三条同时挂在编辑器右键菜单里（`addAction`），所以工具条的主按钮上不再印键位。
  * Ctrl+点击表名打开它的 DDL——链接由 `lib/sqlProviders.ts` 里的 LinkProvider 挂上。
  */
-export function SqlEditor({ tabId, initial, onRun, apiRef, onScope }: {
+export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = true }: {
   tabId: string;
   initial: string;
   onRun: (mode: "current" | "script") => void;
   apiRef: { current: SqlEditorApi | null };
-  onScope?:(label:string)=>void;
+  onScope?: (scope: SqlExecutionScope) => void;
+  visible?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Editor | null>(null);
+  const views = useRef(new Map<string, monaco.editor.ICodeEditorViewState>());
+  const refreshScope = useRef<(() => void) | null>(null);
+  const visibleRef = useRef(visible); visibleRef.current = visible;
+  const previousVisible = useRef(visible);
   const onScopeRef=useRef(onScope);onScopeRef.current=onScope;
   const onRunRef = useRef(onRun);
   onRunRef.current = onRun;
@@ -104,14 +140,54 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope }: {
       fixedOverflowWidgets: true,
     });
     editorRef.current = editor;
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => onRunRef.current("current"));
-    editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.KeyX, () => onRunRef.current("script"));
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF, () => formatAt(editor));
+    // 用 addAction 而不是 addCommand：前者能带 label 进编辑器右键菜单（键位由 Monaco 自动渲染在
+    // 菜单项右侧），工具条按钮上就不必再印 Ctrl+Enter。id 会同时出现在 F1 命令面板里。
+    editor.addAction({
+      id: "ncforge.sql.runCurrent",
+      label: "执行当前语句",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      contextMenuGroupId: CONTEXT_GROUP,
+      contextMenuOrder: 0.1,
+      run: () => onRunRef.current("current"),
+    });
+    editor.addAction({
+      id: "ncforge.sql.runScript",
+      label: "执行整个脚本",
+      keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyX],
+      contextMenuGroupId: CONTEXT_GROUP,
+      contextMenuOrder: 0.2,
+      run: () => onRunRef.current("script"),
+    });
+    editor.addAction({
+      id: "ncforge.sql.format",
+      label: "格式化 SQL",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF],
+      contextMenuGroupId: CONTEXT_GROUP,
+      contextMenuOrder: 0.3,
+      run: () => formatAt(editor),
+    });
 
+    const target = (mode: "current" | "script") => targetOf(editor, mode);
+    const rememberView = () => {
+      const model = editor.getModel(), view = editor.saveViewState();
+      const id = model && tabIdOfModel(model);
+      if (id && view) views.current.set(id, view);
+    };
     const deco = editor.createDecorationsCollection();
     let raf = 0;
+    let previousScope: SqlExecutionScope | null = null;
     const highlight = () => {
-      onScopeRef.current?.(editor.getSelection()?.isEmpty() === false ? "执行选中 SQL" : "执行当前语句");
+      const model = editor.getModel(), id = model && tabIdOfModel(model);
+      // 与按钮/快捷键最终调用的 target() 共用语句列表，范围不能另行猜测或切分。
+      if (id) {
+        const next = { tabId: id, selected: editor.getSelection()?.isEmpty() === false, statements: target("current") };
+        // 语句内移动光标不必让整块结果网格跟随重绘。
+        if (!previousScope || previousScope.tabId !== id || previousScope.selected !== next.selected || previousScope.statements.length !== next.statements.length
+          || next.statements.some((stmt, index) => { const previous = previousScope!.statements[index]; return stmt.text !== previous.text || stmt.startLine !== previous.startLine || stmt.endLine !== previous.endLine; })) {
+          previousScope = next;
+          onScopeRef.current?.(next);
+        }
+      }
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         const model = editor.getModel();
@@ -128,6 +204,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope }: {
         }]);
       });
     };
+    refreshScope.current = highlight;
     const subs = [
       editor.onDidChangeCursorPosition(highlight),
       editor.onDidChangeCursorSelection(highlight),
@@ -135,49 +212,73 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope }: {
         const model = editor.getModel();
         const id = model && tabIdOfModel(model);
         if (model && id) setSqlDraft(id, model.getValue());
+        if (!visibleRef.current) rememberView();
         highlight();
       }),
     ];
     apiRef.current = {
-      insert:(text)=>{const range=editor.getSelection();if(range) editor.executeEdits("ncforge-object-name",[{range,text,forceMoveMarkers:true}]);editor.focus();},
-      target: (mode) => targetOf(editor, mode),
+      insert:(text)=>{const range=editor.getSelection();if(range) editor.executeEdits("ncforge-object-name",[{range,text,forceMoveMarkers:true}]);if (visibleRef.current) editor.focus();},
+      target,
       format: () => formatAt(editor),
       reveal: (line) => {
         editor.revealLineInCenter(line);
         editor.setPosition({ lineNumber: line, column: 1 });
-        editor.focus();
+        rememberView();
+        if (visibleRef.current) editor.focus();
       },
-      focus: () => editor.focus(),
+      focus: () => { if (visibleRef.current) editor.focus(); },
       setText: (text) => {
         const model = editor.getModel();
         if (!model) return;
         editor.executeEdits("ncforge-history", [{ range: model.getFullModelRange(), text }]);
-        editor.focus();
+        if (visibleRef.current) editor.focus();
       },
     };
     return () => {
       cancelAnimationFrame(raf);
       subs.forEach((d) => d.dispose());
       apiRef.current = null;
+      refreshScope.current = null;
       editor.dispose();
       editorRef.current = null;
     };
   }, [apiRef]);
 
-  // 切标签：换 model（撤销栈与光标都跟着 model 走）
+  // Monaco 的 model 保存草稿/撤销栈，光标、选区与滚动须按文档单独保存。
   useLayoutEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
+    const previous = editor.getModel(), previousView = editor.saveViewState();
+    const previousId = previous && tabIdOfModel(previous);
+    if (previousId && previousView && previousVisible.current) views.current.set(previousId, previousView);
     editor.setModel(sqlModel(tabId, initial));
-    // 绑定 model 后按当前容器重新布局，首次打开/切页不能沿用隐藏时的行号与光标位置。
-    editor.layout();
-    editor.focus();
+    const view = views.current.get(tabId);
+    if (view) editor.restoreViewState(view);
+    if (visibleRef.current) { editor.layout(); editor.focus(); }
+    refreshScope.current?.();
     // initial 只在第一次建 model 时有用，之后以 model 为准
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId]);
 
+  useLayoutEffect(() => {
+    const editor = editorRef.current, model = editor?.getModel();
+    const id = model && tabIdOfModel(model);
+    previousVisible.current = visible;
+    if (!editor || !id) return;
+    if (!visible) {
+      const view = editor.saveViewState();
+      if (view) views.current.set(id, view);
+    } else {
+      editor.layout();
+      const view = views.current.get(id);
+      if (view) editor.restoreViewState(view);
+      editor.focus();
+    }
+    refreshScope.current?.();
+  }, [visible]);
+
   return (
-    <div className="dbx-editor">
+    <div className="dbx-editor" hidden={!visible}>
       <div ref={hostRef} className="wb-editor-host" />
     </div>
   );

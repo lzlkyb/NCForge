@@ -10,6 +10,7 @@ export interface TransferFileReq {
   maxRows?: number; timeoutSec?: number; destinationToken?: string;
   options: TransferOptions; data?: TransferData; sheets?: TransferSheet[];
   expectedColumns?: string[]; params?: BoundCell[];
+  sourceSchema?: string; sourceConnectionKey?: string;
   context?: { source: string; scope: string }; text?: string; textRows?: number;
   textTruncated?: boolean; textWarnings?: string[];
 }

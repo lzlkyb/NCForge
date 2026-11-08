@@ -5,8 +5,9 @@ import { beginOperation, cancelOperation, getOperations } from "./operations";
 import { dbTaskSpec } from "./dbOperations";
 import { listen } from "./tauri";
 import { ensureConnected } from "./dbConfirm";
-import { execOne, patchTab, sqlTabOf, type SqlTab } from "./dbStore";
+import { connOf, execOne, patchTab, rtOf, sqlTabOf, type SqlTab } from "./dbStore";
 import { orderBySql } from "./serverSort";
+import { resultTargetIssue, type ResultExecutionContext } from "./dbResultContext";
 
 /**
  * 结果表上那两个「动数据」的动作：服务端重排（A3）与流式导出（A4）。
@@ -29,9 +30,12 @@ export async function reSortOnServer(
   sql: string,
   column: string,
   dir: "asc" | "desc",
+  context?: ResultExecutionContext,
 ): Promise<void> {
   const tab = sqlTabOf(tabId);
   if (!tab?.connId || tab.running) return;
+  const issue = context && resultTargetIssue(context, connOf(tab.connId), rtOf(tab.connId).currentSchema ?? rtOf(tab.connId).info?.schema);
+  if (issue) { toast(issue, "warning"); return; }
   const wrapped = orderBySql(sql, column, dir);
   if (!wrapped) {
     toast("只有单条 SELECT 能让数据库重排（DML / 多语句 / for update 不行）", "warning");

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from "vitest";
-import { copyTransfer } from "./resultTransferClipboard";
+import { copyTransfer, serializeTransferAsync } from "./resultTransferClipboard";
 import { defaultTransferOptions } from "./resultTransfer";
 vi.mock("./operations",()=>({beginOperation:()=>({finish:vi.fn()})}));
 vi.mock("./dbOperations",()=>({dbTaskSpec:()=>({})}));
@@ -24,4 +24,24 @@ it("5MiB以上先拒绝复制并保持剪贴板，失败不宣称成功",async()
   const options={...defaultTransferOptions("json"),columnIndices:[0]};
   expect(await copyTransfer({columns:[column],rows:[["字".repeat(2*1024*1024)]]},options,source)).toBe(false);expect(writeText).not.toHaveBeenCalled();
   writeText.mockRejectedValue(Error("权限拒绝"));expect(await copyTransfer({columns:[column],rows:[["内容"]]},options,source)).toBe(false);
+});
+it("默认全部列走Worker，分批且不克隆无关列值",async()=>{
+  const messages:Record<string,unknown>[]=[];const terminate=vi.fn();
+  vi.stubGlobal("Worker",class {
+    onmessage:((event:{data:{text:string}})=>void)|null=null;
+    terminate=terminate;
+    postMessage(message:Record<string,unknown>){messages.push(message);if(message.kind==="serialize")this.onmessage?.({data:{text:"done"}});}
+  });
+  const columns=Array.from({length:4},(_,i)=>({...column,name:`C${i}`}));
+  const rows=Array.from({length:600},()=>["a","b","c","d"]);
+  expect(await serializeTransferAsync({columns,rows},defaultTransferOptions())).toBe("done");
+  expect(messages.filter(m=>m.kind==="rows")).toHaveLength(5);
+  expect((messages.find(m=>m.kind==="init")?.data as {rows:unknown[]}).rows).toEqual([]);
+  expect(terminate).toHaveBeenCalledTimes(1);
+  messages.length=0;
+  const large=Array.from({length:2200},()=>["a","not copied","key","not copied"]);
+  await serializeTransferAsync({columns,rows:large},{...defaultTransferOptions(),columnIndices:[0],keys:[2]});
+  const chunk=messages.find(m=>m.kind==="rows")!.rows as unknown[][];
+  expect(chunk[0]).toEqual(["a",null,"key",null]);
+  expect(chunk.length).toBeLessThanOrEqual(128);
 });

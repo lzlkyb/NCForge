@@ -56,7 +56,7 @@ export function DbDocTabs() {
           const label = dbTabLabel(t);
           const sameName = t.kind === "table" && db.tabs.some((other) => other.id !== t.id && other.kind === "table" && other.table.toUpperCase() === t.table.toUpperCase());
           const shortConn = c && c.name.length > 12 ? `${c.name.slice(0, 11)}…` : c?.name;
-          const icon = t.kind === "sql" ? "terminal" : t.kind === "dict" ? "clipboard" : "database";
+          const icon = t.kind === "sql" ? "terminal" : t.kind === "dict" ? "clipboard" : t.kind === "compare" ? "layers" : "database";
           const on = docOpen && db.active === t.id;
           return (
             <div
@@ -69,7 +69,7 @@ export function DbDocTabs() {
               aria-controls={dbPanelId(t.id)}
               className={`wb-tab dbx-doctab${c ? ` e-${c.env}` : ""}`}
               data-active={on || undefined}
-              title={c ? `${label} · ${c.name} · ${ENV_LABEL[c.env]}（${c.user}）` : label}
+              title={t.kind === "compare" ? `${label} · A ${t.before.source} → B ${t.after.source}` : c ? `${label} · ${c.name} · ${ENV_LABEL[c.env]}（${c.user}）` : label}
               onClick={() => show(t.id)}
               onAuxClick={(e) => e.button === 1 && void close(t.id)}
               onKeyDown={(e) => onKey(e, i, t.id)}
@@ -78,7 +78,7 @@ export function DbDocTabs() {
               <span className="wb-tab-name">
                 {label}
                 <span className="dbx-muted">
-                  {(t.kind !== "table" || sameName) && ` · ${shortConn ?? "未选连接"}`}
+                  {t.kind !== "compare" && (t.kind !== "table" || sameName) && ` · ${shortConn ?? "未选连接"}`}
                   {c && ` · ${ENV_LABEL[c.env]}`}
                 </span>
               </span>

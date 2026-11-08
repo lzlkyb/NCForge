@@ -15,6 +15,7 @@ import type { ResultSet } from "../../lib/dbApi";
 import { dbApi } from "../../lib/dbApi";
 import { forgetColumnZh } from "../../lib/dbColumnZh";
 import type { ResultEntry, SqlTab } from "../../lib/dbStore";
+import { claimCursor } from "../../lib/dbStore";
 import { ResultPanel } from "./ResultPanel";
 
 // 本测试验证结果集接线，错误区的跳转动作不应把 Monaco 加载到 jsdom。
@@ -92,7 +93,7 @@ async function mount(e: ResultEntry) {
 
 const text = () => host.textContent ?? "";
 const click = async (label: string) => {
-  const btn = [...host.querySelectorAll<HTMLElement>(".dbx-settab")].find((b) => b.textContent?.includes(label));
+  const btn = [...host.querySelectorAll<HTMLElement>('[role="tablist"][aria-label="结果集"] [role="tab"]')].find((b) => b.textContent?.includes(label));
   if (!btn) throw new Error(`找不到「${label}」小标签`);  await act(async () => btn!.click());
   await flush();
 };
@@ -113,28 +114,47 @@ describe("ResultPanel 多结果集", () => {
     const heads = [...host.querySelectorAll(".dbx-gh .nm")].map((e) => e.textContent);
     // 切到第二个结果集要换成它的列（不是同一张表换个标题）
     expect(heads).toEqual(["s"]);
-    expect(text()).toContain("第 2/2 个结果集");
+    expect(host.querySelector('[role="tablist"][aria-label="结果集"] [aria-selected="true"]')?.textContent).toContain("结果集 2");
+    expect(host.querySelector('.dbx-rfoot')?.textContent).toContain("已加载 2 行");
   });
 
   it("只有一个结果集：不出小标签，按普通结果处理", async () => {
     const sets = [set("A", [["1"]])];
     await mount(entry({ sets, columns: sets[0].columns, rows: sets[0].rows }));
-    expect(host.querySelector(".dbx-settab")).toBeNull();
+    expect(host.querySelector('[role="tablist"][aria-label="结果集"]')).toBeNull();
     expect(host.querySelector(".dbx-gh .nm")?.textContent).toBe("a");
   });
 
   it("取到上限截断：提示调大行数重跑，且不给「加载下 N 行」", async () => {
     const sets = [set("A", [["1"]], true)];
     await mount(entry({ sets, columns: sets[0].columns, rows: sets[0].rows }));
-    expect(text()).toContain("调大");
+    expect(text()).toContain("调整查询设置后重新执行");
     expect(text()).not.toContain("加载下");
   });
 
   it("普通查询仍给「加载下 N 行」入口（没有被多结果集改动带坏）", async () => {
     const cols = [{ name: "N", type: "NUMBER", precision: 10, scale: 0 }];
+    claimCursor("c1", null, "r1");
     await mount(entry({ columns: cols, rows: [["1"]], hasMore: true }));
-    expect(host.querySelector(".dbx-settab")).toBeNull();
+    expect(host.querySelector('[role="tablist"][aria-label="结果集"]')).toBeNull();
     expect(text()).toContain("加载下");
+  });
+
+  it("过期游标保留行与原因，不能继续读取其他查询的游标", async () => {
+    claimCursor("c1", null, "newer-result");
+    await mount(entry({ ...set("N", [[1]]), hasMore: true }));
+    expect(text()).toContain("游标已失效");
+    expect(text()).toContain("已加载 1 行");
+    expect(text()).not.toContain("加载下");
+  });
+
+  it("已失效的结果视图回退到现有结果，并保持标签与面板关联", async () => {
+    const e = entry({ ...set("N", [[1]]) });
+    await act(async () => root.render(<ResultPanel tab={{ ...tabWith(e), view: "removed" }} height={300} />));
+    const active = host.querySelector('[role="tablist"][aria-label="查询结果"] [aria-selected="true"]')!;
+    const panel = document.getElementById(active.getAttribute("aria-controls")!)!;
+    expect(active.textContent).toContain("数据 1");
+    expect(panel.getAttribute("aria-labelledby")).toBe(active.id);
   });
 });
 

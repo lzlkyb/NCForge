@@ -8,6 +8,7 @@ import { splitStatements, isWrite } from "./sqlSplit";
 export type TransferScope = "selection" | "filtered" | "loaded" | "query";
 export interface TransferSource {
   connId: string | null; resultId: string; tabId?: string; sql: string; source: string;
+  schema?: string; connectionKey?: string;
   complete: boolean; canRequery?: boolean; params?: BoundCell[]; timeoutSec?: number; table?: string;
   keys?: string[]; sheets?: TransferSheet[];
 }

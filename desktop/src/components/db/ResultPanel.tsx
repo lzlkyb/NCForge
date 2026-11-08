@@ -1,85 +1,61 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef } from "react";
 import { Icon } from "../ui/icon";
 import { SqlExecutionFeedback } from "./SqlExecutionFeedback";
 import { DbErrorBox } from "./DbErrorBox";
 import { PlanView } from "./PlanView";
 import { RowsEntryView } from "./RowsEntryView";
+import { ResultTabList, resultTabId } from "./ResultTabList";
+import { ResultBaselineSummary } from "./ResultCompare";
 import { thousands } from "../../lib/db";
 import { statsText, statsTitle } from "../../lib/dbStats";
 import { ownsCursor, patchTab, rtOf, summaryOf, type ResultEntry, type SqlTab } from "../../lib/dbStore";
 
 /** SQL 控制台下半：每条语句一个结果标签 + 执行计划 + 输出。 */
 export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: number; onLocate?:(line:number)=>void }) {
-  const view = tab.view ?? tab.results[tab.results.length - 1]?.id ?? "output";
+  const valid = tab.view === "output" || tab.view === "plan" && tab.plan || tab.results.some(r => r.id === tab.view);
+  const view = valid ? tab.view! : tab.results[tab.results.length - 1]?.id ?? "output";
   const cur = tab.results.find((r) => r.id === view);
   const setView = (v: string) => patchTab<SqlTab>(tab.id, { view: v });
   const rt = rtOf(tab.connId);
   const tables = (rt.tables ?? []).map((t) => t.name);
-  const tabs = <ResultTabs tab={tab} view={view} setView={setView} />;
+  const prefix = `dbx-results-${tab.id}`;
+  const items = [
+    ...tab.results.map(r => ({ id: r.id, title: r.sql, label: <>
+      <Icon name={r.cancelled ? "stop" : r.kind === "error" ? "alert" : r.kind === "rows" ? "database" : "check"} size={13} />
+      {r.kind === "rows" ? `数据 ${r.index}` : `语句 ${r.index}`}
+      {r.kind === "rows" && (r.sets?.length ?? 0) > 1 && <span className="dbx-cnt">{r.sets!.length} 个结果集</span>}
+      {r.kind !== "rows" && <span className={r.kind === "error" && !r.cancelled ? "bad" : undefined}>{summaryOf(r)}</span>}
+    </> })),
+    ...(tab.plan ? [{ id: "plan", label: <><Icon name="activity" size={13} />执行计划</> }] : []),
+    { id: "output", label: <><Icon name="terminal" size={13} />输出{tab.output.length > 0 && <span className="dbx-cnt">{tab.output.length}</span>}</> },
+  ];
+  const tabs = <><ResultTabList prefix={prefix} label="查询结果" items={items} value={view} onSelect={setView} />
+    <ResultBaselineSummary />
+    {cur && <span className="dbx-result-runmeta">{cur.completedAt && <time>{new Date(cur.completedAt).toLocaleTimeString()}</time>}<span>{cur.ms} ms</span></span>}
+    {tab.results.length > 0 && <button type="button" className="dbx-ibtn" disabled={tab.running} aria-label="释放查询结果" title="释放已读取结果，保留 SQL 和事务" onClick={()=>patchTab<SqlTab>(tab.id,{results:[],plan:null,view:"output"})}><Icon name="close" size={14}/></button>}
+  </>;
 
   return (
     <div className="dbx-res" style={{ height }}>
       <SqlExecutionFeedback executionId={tab.executionId} previousAt={cur?.kind === "rows" ? cur.completedAt ?? 0 : undefined} />
+      <div className="dbx-result-head">{tabs}</div>
+      <div className="dbx-result-view" id={`${prefix}-panel`} role="tabpanel" tabIndex={0} aria-labelledby={resultTabId(prefix, view)}>
       {view === "plan" && tab.plan ? (
-        <>
-          <ViewBar tabs={tabs} />
-          <PlanView plan={tab.plan} connId={tab.connId} />
-        </>
+        <PlanView plan={tab.plan} connId={tab.connId} />
       ) : view === "output" || !cur ? (
-        <>
-          <ViewBar tabs={tabs} />
-          <OutputView tab={tab} />
-        </>
+        <OutputView tab={tab} />
       ) : cur.kind === "rows" ? (
         <RowsEntryView
           key={cur.id}
           tab={tab}
           entry={cur}
           isLast={ownsCursor(tab.connId, tab.slot, cur.id)}
-          tabs={tabs}
+          onLocate={onLocate}
         />
       ) : (
-        <>
-          <ViewBar tabs={tabs} />
-          <EntryView tab={tab} entry={cur} tables={tables} autoCommit={cur.autoCommit} onLocate={onLocate} />
-        </>
+        <EntryView tab={tab} entry={cur} tables={tables} autoCommit={cur.autoCommit} onLocate={onLocate} />
       )}
-    </div>
-  );
-}
-
-/** 结果标签：多个语句各自一个，计划与输出常驻在最后。 */
-function ResultTabs({ tab, view, setView }: { tab: SqlTab; view: string; setView: (v: string) => void }) {
-  return (
-    <div className="dbx-rtabs" role="tablist">
-      {tab.results.map((r) => (
-        <button key={r.id} type="button" role="tab" className="dbx-rtab" data-on={view === r.id || undefined} title={r.sql} onClick={() => setView(r.id)}>
-          <Icon name={r.cancelled ? "stop" : r.kind === "error" ? "alert" : r.kind === "rows" ? "database" : "check"} size={12} />
-          {tab.results.length > 1 ? `${r.index}·` : "结果"}
-          <span className={r.kind === "error" && !r.cancelled ? "bad" : undefined}>{summaryOf(r)}</span>
-        </button>
-      ))}
-      {tab.plan && (
-        <button type="button" role="tab" className="dbx-rtab" data-on={view === "plan" || undefined} onClick={() => setView("plan")}>
-          <Icon name="activity" size={12} />
-          执行计划
-        </button>
-      )}
-      <button type="button" role="tab" className="dbx-rtab" data-on={view === "output" || undefined} onClick={() => setView("output")}>
-        <Icon name="terminal" size={12} />
-        输出
-        {tab.output.length > 0 && <span className="dbx-cnt">{tab.output.length}</span>}
-      </button>
-    </div>
-  );
-}
-
-/** 非表格视图（计划 / 输出 / 错误 / 更新）的结果条：只有标签与执行中状态。 */
-function ViewBar({ tabs }: { tabs: ReactNode }) {
-  return (
-    <div className="dbx-rbar">
-      {tabs}
-      <span className="dbx-sp" />
+      </div>
     </div>
   );
 }

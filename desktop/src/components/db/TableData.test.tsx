@@ -52,3 +52,47 @@ it("restores saved bound conditions on reopening and issues real refresh for ide
  expect(queryCalls()[queryCalls().length-1][1].params).toEqual(["O'Brien"]);expect(queryCalls()[queryCalls().length-1][1].sql).not.toContain("O'Brien");
  const count=queryCalls().length;await act(async()=>button("查询").click());expect(queryCalls().length).toBe(count+1);
 });
+it("uses bound primary-key seeks for next and previous pages and restores ascending display",async()=>{
+ const base=mocks.invoke.getMockImplementation()!;
+ mocks.invoke.mockImplementation((cmd:string,args:Record<string,unknown>)=>{
+  if(cmd!=="db_exec_bound") return base(cmd,args);
+  const sql=String(args.sql).toLowerCase(), descending=sql.includes("id desc");
+  const start=sql.includes("id > ?")?201:1;
+  const rows=Array.from({length:201},(_,i)=>[descending?200-i:start+i,"value"]);
+  return Promise.resolve({kind:"rows",columns:cols,rows,hasMore:true,tx,ms:1});
+ });
+ await act(async()=>button("查询").click());
+ await act(async()=>button("下一页").click());
+ const calls=()=>mocks.invoke.mock.calls.filter(([cmd])=>cmd==="db_exec_bound");
+ expect(calls()[calls().length-1][1].sql.toLowerCase()).toContain("id > ?");
+ expect(calls()[calls().length-1][1].params).toEqual([{number:"200"}]);
+ await act(async()=>button("上一页").click());
+ expect(calls()[calls().length-1][1].sql.toLowerCase()).toContain("id < ?");
+ expect(JSON.parse(host.querySelector("output")!.textContent!)[0]).toEqual([1,"value"]);
+});
+it("keeps loaded counts visible and never calls the final page a complete table result",async()=>{
+ expect(host.querySelector(".dbx-rfoot")?.textContent).toContain("已加载 2 行");
+ expect(host.querySelector(".dbx-completeness")?.textContent).toBe("完整结果");
+ const base=mocks.invoke.getMockImplementation()!;
+ mocks.invoke.mockImplementation((cmd:string,args:Record<string,unknown>)=>{
+  if(cmd!=="db_exec_bound") return base(cmd,args);
+  const next=String(args.sql).toLowerCase().includes("id > ?");
+  return Promise.resolve({kind:"rows",columns:cols,rows:next ? [[201,"last"]] : Array.from({length:201},(_,i)=>[i+1,"value"]),hasMore:!next,tx,ms:1});
+ });
+ await act(async()=>button("查询").click());
+ expect(host.querySelector(".dbx-rfoot")?.textContent).toContain("已加载 200 行");
+ expect(host.querySelector(".dbx-completeness")?.hasAttribute("data-partial")).toBe(true);
+ await act(async()=>button("下一页").click());
+ expect(host.querySelector(".dbx-rfoot")?.textContent).toContain("已加载 1 行");
+ expect(host.querySelector(".dbx-rfoot")?.textContent).toContain("第 2 页");
+ expect(host.querySelector(".dbx-completeness")?.textContent).toBe("当前页数据");
+ expect(button("下一页").disabled).toBe(true);
+});
+it("shows changed source identity beside retained table rows and blocks writing them to another account",async()=>{
+ act(()=>button("edit A").click());act(()=>button("复核修改").click());
+ await act(async()=>setConns([{id:"c",name:"Test",env:"test",source:"manual",url:"jdbc:oracle:thin:@host:1521/test",user:"other",propDs:null,autoCommit:false,note:"",hasPassword:false,engine:"rust"}]));
+ expect(host.querySelector(".dbx-result-context-note")?.textContent).toContain("连接目标已变化");
+ expect(host.querySelector("output")?.textContent).toContain("old-A");
+ await act(async()=>button("写回 1 行").click());
+ expect(mocks.invoke.mock.calls.filter(([cmd,args])=>cmd==="db_exec_bound" && String(args.sql).startsWith("update"))).toHaveLength(0);
+});

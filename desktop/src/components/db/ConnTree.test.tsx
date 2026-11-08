@@ -6,17 +6,24 @@ vi.mock("../../lib/dbActions", () => ({ deleteConn: vi.fn(), disconnectConn: vi.
 vi.mock("../../lib/dbConfirm", () => ({ ensureConnected: vi.fn() }));
 vi.mock("../../lib/dbStore", () => {
   const S = { conns: [{ id: "c1", name: "开发库", env: "dev", url: "", user: "u" }], tabs: [], active: null, loaded: true, loadError: null, rt: {} };
-  return { useDbSelector: (sel: (s: typeof S) => unknown) => sel(S), useDbConns: () => S.conns, useDbRt: () => S.rt, rtOf: () => ({ status: "connected" }), defaultConnId: vi.fn(), loadConns: vi.fn(), openConnDialog: vi.fn(), openDictTab: vi.fn() };
+  return { useDbSelector: (sel: (s: typeof S) => unknown) => sel(S), useDbConns: () => S.conns, useDbRt: () => S.rt, rtOf: () => ({ status: "connected" }), defaultConnId: vi.fn(), loadConns: vi.fn(), openConnDialog: vi.fn(), openDictTab: vi.fn(), showObjectFinder: vi.fn() };
 });
 vi.mock("./ConnObjects", () => ({ ConnObjects: () => <span>连接对象</span> }));
 vi.mock("./FavoriteSection", () => ({ FavoriteSection: () => null }));
 vi.mock("./PasswordResetDialog", () => ({ PasswordResetDialog: () => null }));
 import { ConnTree } from "./ConnTree";
+import { showObjectFinder } from "../../lib/dbStore";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
 let host: HTMLDivElement;
 beforeEach(() => { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); act(() => root.render(<ConnTree />)); });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
+it("连接栏内的查找图标仍打开对象查找器", () => {
+  const find = host.querySelector<HTMLButtonElement>('.dbx-side-head [aria-label="查找数据库对象"]')!;
+  expect(find.title).toContain("Ctrl+Alt+O");
+  act(() => find.click());
+  expect(showObjectFinder).toHaveBeenCalledOnce();
+});
 it("连接行明确报告展开状态并关联真实对象区域", () => {
   const row = host.querySelector<HTMLButtonElement>(".dbx-crow")!;
   expect(row.getAttribute("aria-expanded")).toBe("false");

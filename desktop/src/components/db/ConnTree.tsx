@@ -10,7 +10,7 @@ import { PasswordResetDialog } from "./PasswordResetDialog";
 import { dbNameOf, ENV_LABEL, type DbConn } from "../../lib/dbApi";
 import { ensureConnected } from "../../lib/dbConfirm";
 import { deleteConn, disconnectConn, duplicateConn, moveConn, newConsole, refreshMeta } from "../../lib/dbActions";
-import { defaultConnId, loadConns, openConnDialog, openDictTab, rtOf, useDbConns, useDbRt, useDbSelector } from "../../lib/dbStore";
+import { defaultConnId, loadConns, openConnDialog, openDictTab, rtOf, showObjectFinder, useDbConns, useDbRt, useDbSelector } from "../../lib/dbStore";
 
 /**
  * 侧栏：连接列表 + 已连上连接下的对象（收藏 / 表 / 视图）。
@@ -90,8 +90,11 @@ export function ConnTree() {
   return (
     <div className="dbx-side">
       <div className="dbx-side-head">
-        数据库连接
+        <span className="min-w-0 truncate" title="数据库连接">数据库连接</span>
         <span className="dbx-sp" />
+        <button type="button" className="dbx-ibtn" title="查找数据库对象 · Ctrl+Alt+O" aria-label="查找数据库对象" onClick={() => showObjectFinder()}>
+          <Icon name="search" size={14} />
+        </button>
         <button type="button" className="dbx-ibtn" title="新建连接" aria-label="新建连接" onClick={() => openConnDialog(null)}>
           <Icon name="plus" size={14} />
         </button>

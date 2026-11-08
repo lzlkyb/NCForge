@@ -1,5 +1,5 @@
 /* Operate surfaces retain opaque reading backgrounds inside the glass shell. */
-.dbx-context, .dbx-read-status, .dbx-finder-entry { flex: none; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 10px; border-bottom:1px solid hsl(var(--border)); font-size:var(--dbx-fs-body); }
+.dbx-context, .dbx-read-status { flex: none; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:6px 10px; border-bottom:1px solid hsl(var(--border)); font-size:var(--dbx-fs-body); }
 .dbx-context { line-height:1.5; background:hsl(var(--card)); padding:5px 12px; min-width:0; }
 .dbx-context strong {font-size:var(--dbx-fs-title);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:35%;}
 .dbx-context .dbx-connpick {border-color:transparent;background:none;padding-left:0;font-size:var(--dbx-fs-title);}
@@ -22,12 +22,16 @@
 .dbx-schema-chip[data-warn] {border-color:hsl(var(--warning) / .6);color:hsl(var(--warning-ink));}
 .dbx-schema-name {min-width:0;overflow:hidden;text-overflow:ellipsis;max-width:150px;}
 .dbx-schema-pop {position:absolute;top:calc(100% + 4px);left:0;z-index:1200;display:flex;flex-direction:column;width:250px;max-height:320px;border:1px solid hsl(var(--border));border-radius:var(--r-menu);background:hsl(var(--popover));box-shadow:var(--sh-pop);font-size:var(--dbx-fs-body);}
-.dbx-schema-filter {display:flex;align-items:center;gap:6px;flex-shrink:0;padding:6px 8px;border-bottom:1px solid hsl(var(--border));color:hsl(var(--muted-foreground));}
-.dbx-schema-filter input {flex:1;min-width:0;height:24px;border:0;background:none;color:hsl(var(--foreground));font-size:var(--dbx-fs-body);}
+.dbx-schema-filter {display:flex;align-items:center;gap:6px;flex-shrink:0;margin:8px;padding:0 8px;min-height:32px;border:1px solid hsl(var(--input));border-radius:var(--r-control);color:hsl(var(--muted-foreground));}
+.dbx-schema-filter input {flex:1;min-width:0;width:0;height:28px;border:0;background:none;color:hsl(var(--foreground));font-size:var(--dbx-fs-body);}
+.dbx-schema-clear {display:inline-flex;align-items:center;justify-content:center;flex:none;width:20px;height:24px;border:0;border-radius:var(--r-control);background:transparent;color:hsl(var(--muted-foreground));}
+.dbx-schema-clear:disabled {visibility:hidden;}
+.dbx-schema-clear:hover:not(:disabled) {background:hsl(var(--secondary));color:hsl(var(--foreground));}
 .dbx-schema-list {flex:1;min-height:0;overflow:auto;padding:4px;}
 .dbx-schema-item {display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:28px;padding:0 8px;border-radius:var(--r-control);color:hsl(var(--foreground));font-family:"Cascadia Mono",Consolas,monospace;font-size:var(--dbx-fs-meta);text-align:left;}
-.dbx-schema-item:hover {background:hsl(var(--accent));}
-.dbx-schema-item[aria-selected="true"] {color:hsl(var(--primary));font-weight:600;}
+.dbx-schema-item:hover {background:hsl(var(--selection-hover,var(--secondary)));}
+.dbx-schema-item[aria-selected="true"] {background:hsl(var(--selection-bg,var(--accent)));color:hsl(var(--foreground));font-weight:500;}
+.dbx-schema-item[data-highlighted] {outline:1px solid hsl(var(--selection-marker,var(--primary)));outline-offset:-1px;}
 .dbx-schema-empty {padding:10px 8px;color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);}
 .dbx-schema-reset {flex-shrink:0;padding:7px 10px;border-top:1px solid hsl(var(--border));color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);text-align:left;}
 .dbx-schema-reset:hover {background:hsl(var(--accent));color:hsl(var(--foreground));}
@@ -112,14 +116,12 @@ html[data-ui-style="glass"] :is(.dbx-dlg,.dbx-object-dialog,.dbx-column-dialog,.
 @container workbench-document (max-width:620px) {
  :is(.dbx-sqlbar,.dbx-rbar) .dbx-action-label {display:none;}
  :is(.dbx-sqlbar,.dbx-rbar) .dbx-btn.ghost {width:var(--dbx-h-control);padding:0;}
- .dbx-sqlbar .dbx-btn .k {display:none;}
  .dbx-sqlbar {gap:4px;padding-inline:8px;}
 }
 @media(max-width:600px) {
  .dbx-context {gap:4px 8px;}
  .dbx-context-account {max-width:100%;}
  .dbx-sqlbar {gap:4px;padding:4px 8px;}
- .dbx-sqlbar .dbx-btn .k {display:none;}
  .dbx-dlg .bd {grid-template-columns:minmax(0,1fr);gap:6px;padding:14px;}
  .dbx-dlg .bd > :is(label,.dbx-form-label) {margin-top:6px;}
  .dbx-dlg .bd .dbx-hint {grid-column:1;margin-top:0;}

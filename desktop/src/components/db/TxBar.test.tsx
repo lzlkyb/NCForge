@@ -32,10 +32,10 @@ beforeEach(async () => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); __resetDbForTest(); });
 
-function Harness({id, slot}: {id?: string; slot?: string}) {
+function Harness({id, slot, actions = false}: {id?: string; slot?: string; actions?: boolean}) {
   const tab = useDbSelector(s => s.tabs.find((t):t is SqlTab => t.kind === "sql" && t.id === id));
   const transaction = useDbTransaction({connId:conn.id, tabId:id, slot, tx:tab?.tx, notice:tab?.txNotice});
-  return <><TransactionButtons transaction={transaction}/><TxBar transaction={transaction}/></>;
+  return <>{!actions && <TransactionButtons transaction={transaction}/>}<TxBar transaction={transaction} actions={actions}/></>;
 }
 
 const button = (text: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === text)!;
@@ -99,5 +99,31 @@ it("提交超时先核对现存会话，状态回读前锁定提交与回滚", a
   await act(async () => button("核对事务").click());
   expect(mocks.invoke).toHaveBeenLastCalledWith("db_tx",{id:"c1",action:"status",slot:null});
   expect(host.textContent).toContain("事务状态已刷新");
+  expect(button("回滚").disabled).toBe(false);
+});
+
+it("SQL 原位事务条沿用当前槽的回滚和数据库确认反馈", async () => {
+  const id = openSqlTab(conn.id);
+  patchTab<SqlTab>(id, {slot:"slot-a",tx:pending});
+  mocks.invoke.mockResolvedValue({tx:empty});
+  act(() => root.render(<Harness id={id} slot="slot-a" actions/>));
+  expect(host.querySelector(".dbx-txbar .dbx-tx-actions")).not.toBeNull();
+  await act(async () => button("回滚").click());
+  expect(mocks.invoke).toHaveBeenLastCalledWith("db_tx",{id:"c1",slot:"slot-a",action:"rollback"});
+  expect(host.textContent).toContain("已回滚 · 240 行");
+  expect(host.querySelector(".dbx-tx-actions")).toBeNull();
+});
+
+it("SQL 原位提交确认未知时替换为核对入口，不能重复提交", async () => {
+  setTx(conn.id,pending);
+  mocks.invoke.mockRejectedValueOnce("bridge|等待提交超时");
+  act(() => root.render(<Harness actions/>));
+  await act(async () => button("提交").click());
+  expect(host.querySelector(".dbx-tx-actions")).toBeNull();
+  expect(button("核对事务").disabled).toBe(false);
+  mocks.invoke.mockResolvedValueOnce({tx:pending,alive:true});
+  await act(async () => button("核对事务").click());
+  expect(mocks.invoke).toHaveBeenLastCalledWith("db_tx",{id:"c1",action:"status",slot:null});
+  expect(button("提交").disabled).toBe(false);
   expect(button("回滚").disabled).toBe(false);
 });

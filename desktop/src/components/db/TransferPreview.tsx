@@ -1,9 +1,9 @@
 import { serializeTransfer, transferJsonKeys, type TransferOptions, type TransferData } from "../../lib/resultTransfer";
 import { Icon } from "../ui/icon";
 
-export function TransferPreview({ data, options: o, order, onColumns, onMove, query, disabled }: {
+export function TransferPreview({ data, options: o, order, onColumns, onMove, query, disabled, summary }: {
   data: TransferData; options: TransferOptions; order: number[]; onColumns: (indices: number[]) => void;
-  onMove: (index: number, direction: number) => void; query: boolean; disabled?: boolean;
+  onMove: (index: number, direction: number) => void; query: boolean; disabled?: boolean; summary?: string;
 }) {
   const selected = o.columnIndices;
   const clipped = data.rows.slice(0, 10).some(r => r.some(v => typeof v === "string" && v.length > 300));
@@ -23,14 +23,17 @@ export function TransferPreview({ data, options: o, order, onColumns, onMove, qu
   let matrix = [...headers, ...sample.rows.map(r => selected.map(i => r[i]))];
   if (o.transpose) matrix = matrix[0]?.map((_, i) => matrix.map(r => r[i])) ?? [];
   return <div className="dbx-transfer-preview" tabIndex={-1} role="region" aria-label="输出预览与字段">
-    <div className="dbx-transfer-preview-head"><h3>输出预览</h3><span>{Math.min(10, data.rows.length)} 行 × {selected.length} 列{o.format === "xlsx" ? " · 工作表 1" : ""}</span></div>
-    <div className="dbx-transfer-preview-data">{!selected.length ? <p className="dbx-transfer-preview-empty">请选择至少一个输出字段。</p> : o.format === "xlsx" ? <table aria-label="Excel 输出预览"><tbody>{matrix.map((r, i) => <tr key={i}>{r.map((v, j) => i < headers.length && !o.transpose ? <th key={j}>{String(v)}</th> : <td key={j} title={String(v ?? "NULL")} className={v === null ? "null" : ""}>{String(v ?? o.nullText)}</td>)}</tr>)}</tbody></table> : <pre aria-label="输出文本预览">{text}</pre>}</div>
-    <p className="dbx-transfer-help">{query ? "当前结果样本，重新查询的数据可能变化。" : "预览前 10 行，输出使用所选范围的全部记录。"}{clipped && !sql && " 长值预览最多 300 字，文件保留原值。"}{textClipped && " SQL 只展示前 20000 字，复制与导出使用完整脚本。"}</p>
+    <div className="dbx-transfer-preview-head"><div><h3>输出预览</h3>{summary && <p className="dbx-transfer-preview-scope">{summary}</p>}</div><span className="dbx-transfer-preview-format">{o.format.toUpperCase()}</span></div>
+    <div className="dbx-transfer-preview-sample">样本 {Math.min(10, data.rows.length)} 行 × {selected.length} 列{disabled ? " · 当前结果集" : o.format === "xlsx" ? " · 工作表 1" : ""}</div>
+    <div className="dbx-transfer-preview-data" tabIndex={0} role="region" aria-label="预览内容">{!selected.length ? <p className="dbx-transfer-preview-empty">请选择至少一个输出字段。</p> : o.format === "xlsx" ? <table aria-label="Excel 输出预览"><tbody>{matrix.map((r, i) => <tr key={i}>{r.map((v, j) => i < headers.length && !o.transpose ? <th key={j}>{String(v)}</th> : <td key={j} title={String(v ?? "NULL")} className={v === null ? "null" : ""}>{String(v ?? o.nullText)}</td>)}</tr>)}</tbody></table> : <pre aria-label="输出文本预览">{text}</pre>}</div>
+    <p className="dbx-transfer-help">{query ? "当前结果样本，重新查询的数据可能变化。" : disabled ? "各结果集分别保留全部字段，此处仅预览当前结果集的前 10 行。" : "预览前 10 行，输出使用所选范围的全部记录。"}{clipped && !sql && " 长值预览最多 300 字，文件保留原值。"}{textClipped && " SQL 只展示前 20000 字，复制与导出使用完整脚本。"}</p>
     {duplicates && ["json", "jsonl"].includes(o.format) && o.jsonStructure === "objects" && <p className="dbx-transfer-note">重名键已映射为：{transferJsonKeys(selected.map(i => data.columns[i])).join("、")}，也可选择保留原始列名结构。</p>}
     {o.format === "xlsx" && <p className="dbx-transfer-note">长主键、前导零和超出 15 位精度的数值按文本保留；字符串不会作为公式执行。</p>}
-    <div className="dbx-transfer-cols-title"><h3>输出字段 <span>{selected.length} / {data.columns.length}</span></h3><button type="button" className="dbx-btn ghost" disabled={disabled} onClick={() => onColumns([...order])}>全部列</button></div>
+    <details className="dbx-transfer-column-settings"><summary><span>调整输出列</span><span className="dbx-transfer-column-count">{selected.length} / {data.columns.length} 列</span><Icon name="chevronDown" size={14} /></summary>
+    <div className="dbx-transfer-cols-title"><h3>输出字段</h3><button type="button" className="dbx-btn ghost" disabled={disabled} onClick={() => onColumns([...order])}>全部列</button></div>
     <div className="dbx-transfer-cols">{order.map((i, position) => <div className="dbx-transfer-col" key={i}><label><input type="checkbox" disabled={disabled} checked={selected.includes(i)} onChange={e => onColumns(e.target.checked ? order.filter(c => selected.includes(c) || c === i) : selected.filter(c => c !== i))} /><span><code>{data.columns[i].name}</code><small>{o.columnLabels[i]}</small></span></label><span className="dbx-transfer-type">{data.columns[i].type}</span><button type="button" className="dbx-ibtn" disabled={disabled || !position} aria-label={`上移 ${data.columns[i].name}`} onClick={() => onMove(i, -1)}><Icon name="arrowUp" size={12} /></button><button type="button" className="dbx-ibtn" disabled={disabled || position === order.length - 1} aria-label={`下移 ${data.columns[i].name}`} onClick={() => onMove(i, 1)}><Icon name="chevronDown" size={12} /></button></div>)}</div>
     <p className="dbx-transfer-help">{disabled ? "全部结果集分别保留各自的全部字段，此处展示当前结果集样本。" : "未勾选字段不会导出；上移、下移调整输出顺序。"}</p>
+    </details>
     {data.query && <details className="dbx-transfer-source-query"><summary>来源 SQL</summary><pre>{data.query}</pre></details>}
   </div>;
 }

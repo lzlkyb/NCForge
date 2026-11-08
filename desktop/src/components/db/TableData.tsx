@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ResultTable } from "./ResultTable";
 import { friendlyDbError, parseDbError, sameCell, thousands, type DbError } from "../../lib/db";
-import { dbApi, dbSourceOf, type BoundCell, type Cell, type ColumnInfo, type ColumnMeta } from "../../lib/dbApi";
+import { dbApi, type BoundCell, type Cell, type ColumnInfo, type ColumnMeta } from "../../lib/dbApi";
 import { confirmProdWrite, ask, reconnectSession } from "../../lib/dbConfirm";
 import { claimCursor, connOf, rtOf, setTx, setTxNotice, type TableTab } from "../../lib/dbStore";
 import { beginOperation, operationActive, useOperations } from "../../lib/operations";
 import { dbTaskSpec, dbTxKey } from "../../lib/dbOperations";
 import { PAGE, pageSql, tableQuerySql, stripPage } from "../../lib/tableEdit";
+import { seekPage, type PageAnchor } from "../../lib/tablePaging";
+import { captureResultContext, resultTargetIssue, type ResultExecutionContext } from "../../lib/dbResultContext";
+import { useCompareBaseline } from "../../lib/dbCompareState";
+import { ResultBaselineSummary } from "./ResultCompare";
+import { ResultContextNotice } from "./ResultContextNotice";
+import { TableDataFooter } from "./TableDataFooter";
 
 import { TableRelations } from "./TableRelations";
 import { TransactionButtons, TxBar, useDbTransaction } from "./TxBar";
@@ -22,6 +28,7 @@ interface Page {
   rows: Cell[][];
   hasNext: boolean;
   ms: number; at:number; sql:string; pageNumber:number; exportSql:string; params:BoundCell[];
+  context:ResultExecutionContext;
 }
 
 /**
@@ -30,7 +37,8 @@ interface Page {
  * 没有主键的表或视图不给编辑入口——定位不到唯一行。
  */
 export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: ColumnInfo[] | null; isView: boolean; zh: Record<string, string> }) {
-  const pk = (cols ?? []).filter((c) => c.pk).map((c) => c.name);
+  const baseline = useCompareBaseline();
+  const pk = useMemo(() => (cols ?? []).filter((c) => c.pk).map((c) => c.name), [cols]);
   const [q, setQ] = useState<{where:string;order:string;params:BoundCell[];page:number} | null>(null);
   const [ui,setUi] = useState({loading:false,conflict:"",preview:false,saving:false,relationRow:null as Cell[]|null, conflictValues:[] as {name:string;before:Cell;current:Cell;after:Cell}[]});
   const {loading,conflict,preview,saving}=ui;
@@ -61,6 +69,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
    */
   const gen = useRef(0);
   const reading = useRef<typeof q>(null);
+  const anchor = useRef<PageAnchor | null>(null);
 
   const load = useCallback(async () => {
     if (!q || reading.current===q) return;
@@ -69,11 +78,18 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
     const task=beginOperation(dbTaskSpec(`table:${tab.id}:${my}`,"查询表数据",tab.connId,`${tab.table} · 第 ${q.page+1} 页`,connOf(tab.connId)?.name,tab.id));
     try {
       claimCursor(tab.connId, null, tab.id);
-      const r = await dbApi.execBound(tab.connId, pageSql(tab.table.toLowerCase(), q.where, order, q.page), q.params, PAGE + 1, 60);
+      const key = JSON.stringify([tab.connId,tab.table,q.where,q.params,order]);
+      const seek = !isView && !q.order && cols?.filter(c=>c.pk).every(c=>c.nullable===false) ? seekPage(tab.table.toLowerCase(),q.where,pk,key,q.page,anchor.current) : null;
+      const sql = seek?.sql ?? pageSql(tab.table.toLowerCase(), q.where, order, q.page);
+      const context = captureResultContext(tab.connId,connOf(tab.connId),rtOf(tab.connId).currentSchema ?? rtOf(tab.connId).info?.schema,sql);
+      const r = await dbApi.execBound(tab.connId, sql, [...q.params,...(seek?.params ?? [])], PAGE + 1, 60);
       if (my !== gen.current) {task?.finish("cancelled","已被后续查询取代");return;}
       if (r.kind !== "rows") throw new Error("不是查询结果");
       setTx(tab.connId, r.tx);
-      setData({ ...stripPage(r.columns, r.rows), ms: r.ms, at:Date.now(), sql:pageSql(tab.table.toLowerCase(),q.where,order,q.page), pageNumber:q.page+1, exportSql:tableQuerySql(tab.table.toLowerCase(),q.where,order), params:q.params.map(p=>p && typeof p === "object" ? {...p} : p) });
+      const result = stripPage(r.columns, r.rows);
+      if (seek?.reverse) { result.rows.reverse(); result.hasNext = true; }
+      anchor.current = {key,page:q.page,columns:result.columns,rows:result.rows};
+      setData({ ...result, context, ms: r.ms, at:Date.now(), sql, pageNumber:q.page+1, exportSql:tableQuerySql(tab.table.toLowerCase(),q.where,order), params:q.params.map(p=>p && typeof p === "object" ? {...p} : p) });
       setConnectionError(null);
       setChanged(new Map());
       task?.finish("success",`已读取 ${Math.min(r.rows.length,PAGE)} 行${r.rows.length>PAGE ? "，可继续翻页" : ""}`);
@@ -89,7 +105,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
       setData({ error: friendlyDbError(e) });
       setChanged(new Map());
     } finally { if(my===gen.current) {reading.current=null;setLoading(false);} }
-  }, [tab.id, tab.connId, tab.table, q, order]);
+  }, [tab.id, tab.connId, tab.table, q, order, isView, cols, pk]);
 
   // 等字段（主键）读到再查，否则默认排序会先空后有，多查一次
   useEffect(() => {
@@ -140,6 +156,8 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
 
   const save = async () => {
     if (!page || readonly !== false || sqls.length === 0 || operationActive("db." + dbTxKey(tab.connId)) || transaction.lost) return;
+    const issue = resultTargetIssue(page.context,connOf(tab.connId),rtOf(tab.connId).currentSchema ?? rtOf(tab.connId).info?.schema);
+    if (issue) { toast(issue,"warning"); return; }
     const task=beginOperation(dbTaskSpec(`table.save:${tab.id}`,"写回表数据",tab.connId,tab.table,connOf(tab.connId)?.name,tab.id));
     if(!task) return;
     if (!(await confirmProdWrite(tab.id, tab.connId, sqls.join(";\n")))) {task.finish("cancelled","未确认写回，未执行写入");return;}
@@ -228,16 +246,18 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
           </button>
         </div>
       )}
+      {page && <ResultContextNotice tabId={tab.id} context={page.context} />}
       {page && q && (
         <ResultTable
+          tabs={baseline ? <ResultBaselineSummary /> : undefined}
           key={`${q.where}|${order}|${q.page}|${page.at}`}
           columns={page.columns}
           rows={page.rows}
           table={tab.table.toLowerCase()}
           layoutKey={`${tab.connId}:${tab.table.toLowerCase()}`}
-          snapshot={{source:`${dbSourceOf(connOf(tab.connId))} · ${tab.table} · 第 ${page.pageNumber} 页`,sql:page.sql,at:page.at,complete:false,columns:page.columns,rows:page.rows}}
+          snapshot={{source:`${page.context.source} · ${tab.table} · 第 ${page.pageNumber} 页`,schema:page.context.schema,originTabId:tab.id,sql:page.sql,at:page.at,complete:page.pageNumber===1 && !page.hasNext,columns:page.columns,rows:page.rows}}
           connId={tab.connId}
-          transferSource={{connId:tab.connId,resultId:`${tab.id}:${page.at}`,tabId:tab.id,sql:page.exportSql,params:page.params,source:dbSourceOf(connOf(tab.connId)),complete:page.pageNumber===1 && !page.hasNext,table:tab.table,keys:pk,timeoutSec:60}}
+          transferSource={{connId:tab.connId,resultId:`${tab.id}:${page.at}`,tabId:tab.id,sql:page.exportSql,params:page.params,source:page.context.source,schema:page.context.schema,connectionKey:page.context.connectionKey,complete:page.pageNumber===1 && !page.hasNext,table:tab.table,keys:pk,timeoutSec:60}}
           onRelated={row=>setUi(v=>({...v,relationRow:row}))}
           zh={zh}
           meta={<>第 {page.pageNumber} 页 · <b>{thousands(page.rows.length)}</b> 行 · {page.ms} ms</>}
@@ -266,13 +286,10 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
             <>
               {preview && changes.length > 0 && <ChangeReview changes={changes} columns={page.columns} rows={page.rows} pk={pk} disabled={saving} onUndo={key=>setChanged(current=>{const next=new Map(current);next.delete(key);return next;})} />}
               {preview && sqls.length > 0 && <pre className="dbx-ddl" style={{ flex: "none", maxHeight: 140, borderTop: "1px solid hsl(var(--border))" }}>{changes.map(c=>`${c.sql};\n-- 绑定参数: ${JSON.stringify(c.params)}`).join("\n")}</pre>}
-              <div className="dbx-rfoot">
-                <button type="button" className="dbx-lk" disabled={saving || loading || q.page === 0} onClick={() => void navTo({ ...q, page: q.page - 1 })}>上一页</button>
-                <span>第 {q.page + 1} 页</span>
-                <button type="button" className="dbx-lk" disabled={saving || loading || !page.hasNext} onClick={() => void navTo({ ...q, page: q.page + 1 })}>下一页</button>
-                <span className="dbx-sp" />
-                <span>{readonly ? "只读查询模式" : editable ? "双击单元格编辑（主键列不可改）" : isView ? "视图只读" : "没有主键，只读（定位不到唯一行）"}</span>
-              </div>
+              <TableDataFooter rows={page.rows.length} pageNumber={page.pageNumber} complete={page.pageNumber===1 && !page.hasNext}
+                previousDisabled={saving || loading || q.page===0} nextDisabled={saving || loading || !page.hasNext}
+                onPrevious={()=>void navTo({...q,page:q.page-1})} onNext={()=>void navTo({...q,page:q.page+1})}
+                hint={readonly ? "只读查询模式" : editable ? "双击单元格编辑（主键列不可改）" : isView ? "视图只读" : "没有主键，只读（定位不到唯一行）"} />
             </>
           }
         />

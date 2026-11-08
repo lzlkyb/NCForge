@@ -1,0 +1,125 @@
+/* Range and actions stay visible while settings and the real preview scroll independently. */
+.dbx-transfer-dialog {
+  width:min(1120px,calc(100vw - 32px));
+  height:min(820px,calc(100dvh - 32px));
+}
+.dbx-transfer-dialog:has(.dbx-transfer-job) { height:auto; }
+.dbx-transfer-head { padding:18px 22px 14px; }
+.dbx-transfer-head > div { min-width:0; }
+.dbx-transfer-head > .dbx-ibtn { flex:none; }
+.dbx-transfer-head .dbx-transfer-source { display:flex; flex-wrap:wrap; gap:3px 14px; line-height:1.5; }
+.dbx-transfer-source code { font-size:inherit; color:hsl(var(--foreground)); }
+.dbx-transfer-range {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px 20px;
+  flex:none;
+  padding:14px 22px;
+  border-bottom:1px solid hsl(var(--border));
+  background:hsl(var(--accent) / .65);
+}
+.dbx-transfer-range > div { display:flex; align-items:baseline; gap:12px; min-width:0; }
+.dbx-transfer-range-label { flex:none; color:hsl(var(--muted-foreground)); font-size:12px; }
+.dbx-transfer-range strong { font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.dbx-transfer-range-hint { color:hsl(var(--muted-foreground)); font-size:12px; line-height:1.5; }
+.dbx-transfer-scroll { flex:1; overflow:hidden; }
+.dbx-transfer-scroll[data-job] { overflow:auto; }
+.dbx-transfer-settings { height:100%; min-height:0; grid-template-columns:minmax(300px,360px) minmax(0,1fr); }
+.dbx-transfer-config, .dbx-transfer-preview { min-height:0; padding:18px 22px; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.dbx-transfer-range-options { min-inline-size:0; margin:0; padding:0; border:0; }
+.dbx-transfer-range-options legend { padding:0; margin-bottom:8px; font-size:13px; font-weight:600; }
+.dbx-transfer-scope-choice { margin:0; padding:9px 10px; border-left:2px solid transparent; }
+.dbx-transfer-scope-choice[data-selected] { border-left-color:hsl(var(--primary)); background:hsl(var(--accent)); }
+.dbx-transfer-scope-choice[data-selected] .dbx-transfer-scope-caption { font-weight:600; }
+.dbx-transfer-scope-content { flex:1; }
+.dbx-transfer-scope-caption { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.dbx-transfer-scope-count { flex:none; white-space:nowrap; color:hsl(var(--muted-foreground)); font-size:12px; font-weight:400; font-variant-numeric:tabular-nums; }
+.dbx-transfer-scope-choice small { line-height:1.5; }
+.dbx-transfer-config .dbx-transfer-group + .dbx-transfer-group { margin-top:16px; padding-top:16px; }
+.dbx-transfer-config .dbx-transfer-note { padding:8px 10px; margin:10px 0 0; }
+.dbx-transfer-config .dbx-transfer-field { margin:10px 0; }
+.dbx-transfer-config .dbx-transfer-group h3 { margin-bottom:8px; }
+.dbx-transfer-config .dbx-transfer-tags { margin:8px 0; }
+.dbx-transfer-advanced { margin-top:16px; padding-top:0; }
+.dbx-transfer-advanced > summary,
+.dbx-transfer-column-settings > summary {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height:38px;
+  list-style:none;
+  cursor:pointer;
+  font-size:13px;
+  font-weight:500;
+  color:hsl(var(--foreground));
+}
+.dbx-transfer-advanced > summary::-webkit-details-marker,
+.dbx-transfer-column-settings > summary::-webkit-details-marker { display:none; }
+.dbx-transfer-advanced > summary > svg { margin-left:auto; }
+.dbx-transfer-column-settings > summary > svg,
+.dbx-transfer-advanced > summary > svg { flex:none; }
+.dbx-transfer-column-settings[open] > summary > svg,
+.dbx-transfer-advanced[open] > summary > svg { transform:rotate(180deg); }
+.dbx-transfer-preset-settings { margin-top:16px; padding-top:14px; border-top:1px solid hsl(var(--border)); }
+.dbx-transfer-preset-settings .dbx-transfer-presets { margin-bottom:0; }
+.dbx-transfer-save-preset { margin-top:12px; margin-bottom:0; }
+.dbx-transfer-preview { display:flex; flex-direction:column; background:hsl(var(--background) / .45); }
+.dbx-transfer-preview > * { flex-shrink:0; }
+.dbx-transfer-preview-head { align-items:flex-start; }
+.dbx-transfer-preview-head > div { min-width:0; }
+.dbx-transfer-preview-scope { margin:5px 0 0; font-size:12px; line-height:1.5; color:hsl(var(--muted-foreground)); font-variant-numeric:tabular-nums; }
+.dbx-transfer-preview-head > .dbx-transfer-preview-format { color:hsl(var(--foreground)); font-weight:600; font-size:12px; }
+.dbx-transfer-preview-sample { margin-top:12px; color:hsl(var(--muted-foreground)); font-size:12px; font-variant-numeric:tabular-nums; }
+.dbx-transfer-preview-data { flex:1 0 180px; height:auto; min-height:180px; margin:8px 0 0; }
+.dbx-transfer-preview-data pre { font-size:13px; }
+.dbx-transfer-preview-data table { font-size:13px; }
+.dbx-transfer-preview .dbx-transfer-note { margin:10px 0 0; padding:8px 10px; }
+.dbx-transfer-column-settings { margin-top:16px; border-block:1px solid hsl(var(--border)); }
+.dbx-transfer-column-count { margin-left:auto; color:hsl(var(--muted-foreground)); font-weight:400; font-size:12px; font-variant-numeric:tabular-nums; }
+.dbx-transfer-column-settings .dbx-transfer-cols-title { margin-top:8px; }
+.dbx-transfer-column-settings .dbx-transfer-cols { margin-top:8px; }
+.dbx-transfer-column-settings .dbx-transfer-help { margin-bottom:12px; }
+.dbx-transfer-col > .dbx-ibtn { width:26px; height:26px; flex:none; }
+.dbx-transfer-source-query { margin-top:12px; }
+.dbx-transfer-source-query summary { min-height:26px; }
+.dbx-transfer-foot { padding:14px 22px; }
+.dbx-transfer-summary strong { font-weight:600; font-variant-numeric:tabular-nums; }
+.dbx-transfer-foot-actions { align-items:center; }
+.dbx-transfer-foot-actions > .pri { min-width:94px; }
+/* Copy counts are part of the action, including when surrounding toolbar labels collapse. */
+.dbx-rbar .dbx-transfer-split .dbx-transfer-action-label { display:inline; }
+.dbx-rbar .dbx-transfer-split > .dbx-btn { width:auto; min-width:0; padding-inline:8px; }
+.dbx-transfer-action-count { font-variant-numeric:tabular-nums; white-space:nowrap; }
+.dbx-transfer-split > .dbx-ibtn { width:26px; }
+@media (max-width:860px) {
+  .dbx-transfer-dialog { width:calc(100vw - 24px); height:calc(100dvh - 24px); max-height:calc(100dvh - 24px); }
+  .dbx-transfer-range { flex-wrap:wrap; gap:5px; padding:12px 16px; }
+  .dbx-transfer-range > div { flex-wrap:wrap; gap:3px 10px; }
+  .dbx-transfer-range-hint { flex-basis:100%; }
+  .dbx-transfer-scroll { overflow:auto; }
+  .dbx-transfer-settings { height:auto; grid-template-columns:minmax(0,1fr); }
+  .dbx-transfer-config { border-right:0; border-bottom:1px solid hsl(var(--border)); }
+  .dbx-transfer-config, .dbx-transfer-preview { overflow:visible; scrollbar-gutter:auto; padding:16px; }
+  .dbx-transfer-preview { display:block; }
+  .dbx-transfer-preview-data { height:260px; }
+  .dbx-transfer-preview-jump { display:inline-flex; margin-left:auto; white-space:nowrap; }
+  .dbx-transfer-foot { padding:12px 16px; }
+}
+@media (max-height:620px) {
+  .dbx-transfer-head { padding-block:10px; }
+  .dbx-transfer-head .dbx-transfer-source { display:flex; }
+  .dbx-transfer-range { padding-block:8px; }
+  .dbx-transfer-foot { padding-block:10px; }
+}
+@media (max-width:520px) {
+  .dbx-transfer-head { flex-wrap:wrap; gap:8px; padding-inline:16px; }
+  .dbx-transfer-head > div { flex:1 1 calc(100% - 36px); }
+  .dbx-transfer-head > .dbx-ibtn { order:-1; }
+  .dbx-transfer-head .dbx-transfer-preview-jump { padding:0; min-height:26px; }
+  .dbx-transfer-foot { flex-wrap:wrap; gap:10px; }
+  .dbx-transfer-foot-actions { flex-wrap:wrap; margin-left:auto; }
+}
+@media (forced-colors:active) {
+  .dbx-transfer-scope-choice[data-selected] { border-left-color:Highlight; outline:1px solid Highlight; }
+}

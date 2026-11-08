@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ResultTransferDialog } from "./ResultTransferDialog";
@@ -20,7 +20,7 @@ let root:Root, host:HTMLDivElement, c:ReturnType<typeof useResultTransferDialog>
 const frame:TransferFrame={data:{columns:[{name:"ID",type:"CHAR",precision:20,scale:0},{name:"NAME",type:"VARCHAR2",precision:80,scale:0}],rows:[["0001","甲"],["0002","乙"]]},order:[1,0],visible:[1,0],selection:{anchor:{r:1,c:1},end:{r:1,c:1}},labels:["主键","名称"],source:{connId:"c",resultId:"r",sql:"select * from T where ID = ?",params:["0002"],source:"测试库",complete:false,table:"T",sheets:[{name:"一",data:{columns:[{name:"A",type:"CHAR",precision:20,scale:0}],rows:[["a"]]}},{name:"二",data:{columns:[{name:"B",type:"CHAR",precision:20,scale:0},{name:"C",type:"CHAR",precision:20,scale:0}],rows:[["b","c"]]}}]}};
 function Harness({mode="file"}:{mode?:"copy"|"file"}){c=useResultTransferDialog(frame,mode);return null;}
 beforeEach(()=>{vi.clearAllMocks();localStorage.clear();host=document.createElement("div");document.body.append(host);root=createRoot(host);});
-afterEach(()=>{act(()=>root.unmount());host.remove();});
+afterEach(()=>{act(()=>root.unmount());host.remove();vi.useRealTimers();});
 it("选区默认一列一行，取消全部列阻止输出",async()=>{
   act(()=>root.render(<Harness mode="copy"/>));expect(c.summary).toContain("1 行 × 1 列");expect(c.state.options.columnIndices).toEqual([1]);
   act(()=>c.columns([]));expect(c.error).toContain("至少一个");await act(async()=>c.run());expect(copyTransfer).not.toHaveBeenCalled();
@@ -62,4 +62,63 @@ it("真实窗口提供范围、固定底栏、预览、禁用空选区与只读�
   expect(document.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("导出查询结果");
   const radios=[...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')];expect(radios[0].disabled).toBe(true);expect(radios[3].disabled).toBe(true);
   expect(document.querySelector(".dbx-transfer-foot")?.textContent).toContain("保存文件");expect(document.querySelector(".dbx-transfer-preview")?.textContent).toContain("前 10 行");
+});
+it("范围摘要、预览与主动作一致，切换格式不扩大选区",()=>{
+  act(()=>root.render(<ResultTransferDialog frame={{...frame,source:{...frame.source,schema:"NC_FROZEN"}}} mode="file" open onClose={()=>{}} onFile={()=>{}}/>));
+  const dialog=document.querySelector<HTMLElement>('[role="dialog"]')!;
+  expect(dialog.querySelector(".dbx-transfer-head")?.textContent).toContain("NC_FROZEN");
+  const summary=()=>[".dbx-transfer-range strong",".dbx-transfer-preview-scope",".dbx-transfer-summary strong"].map(selector=>dialog.querySelector(selector)?.textContent);
+  expect(summary()).toEqual(Array(3).fill("当前选区 · 1 行 × 1 列"));
+  const format=dialog.querySelector<HTMLSelectElement>('[aria-label="输出格式"]')!;
+  for(const value of ["csv","json","markdown","html","insert","where","update","tsv","jsonl","xlsx"]){
+    act(()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,"value")!.set!.call(format,value);format.dispatchEvent(new Event("change",{bubbles:true}));});
+    expect(summary()).toEqual(Array(3).fill("当前选区 · 1 行 × 1 列"));
+    expect([...dialog.querySelectorAll<HTMLInputElement>('.dbx-transfer-col input:checked')]).toHaveLength(1);
+    const action=dialog.querySelector<HTMLButtonElement>(".dbx-transfer-foot-actions .pri")!;
+    expect(document.getElementById(action.getAttribute("aria-describedby")!)?.textContent).toBe("当前选区 · 1 行 × 1 列");
+  }
+  const scopes=[...dialog.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+  act(()=>scopes[2].click());
+  expect(summary()).toEqual(Array(3).fill("已加载全部行 · 2 行 × 1 列"));
+  act(()=>scopes[3].click());
+  expect(summary()).toEqual(Array(3).fill("重新查询导出全部 · 总行数未知 × 1 列"));
+  expect(dialog.querySelector(".dbx-transfer-preview")?.textContent).toContain("当前结果样本");
+});
+it("折叠的字段设置可展开修改，Esc 关闭后归还触发点焦点",async()=>{
+  vi.useFakeTimers();
+  function Window(){const [open,setOpen]=useState(false);return <><button onClick={()=>setOpen(true)}>打开输出</button><ResultTransferDialog frame={frame} mode="file" open={open} onClose={()=>setOpen(false)} onFile={()=>{}}/></>;}
+  act(()=>root.render(<Window/>));
+  const trigger=host.querySelector<HTMLButtonElement>("button")!;trigger.focus();act(()=>trigger.click());
+  const dialog=document.querySelector<HTMLElement>('[role="dialog"]')!;
+  const fields=dialog.querySelector<HTMLDetailsElement>(".dbx-transfer-column-settings")!;
+  expect(fields).not.toBeNull();expect(fields.open).toBe(false);
+  const toggle=fields.querySelector<HTMLElement>("summary")!;
+  act(()=>toggle.click());expect(fields.open).toBe(true);
+  const id=[...fields.querySelectorAll<HTMLElement>(".dbx-transfer-col")].find(row=>row.querySelector("code")?.textContent==="ID")!;
+  act(()=>id.querySelector<HTMLInputElement>("input")!.click());
+  expect(dialog.querySelector(".dbx-transfer-range strong")?.textContent).toBe("当前选区 · 1 行 × 2 列");
+  act(()=>id.querySelector<HTMLButtonElement>('[aria-label="上移 ID"]')!.click());
+  expect([...dialog.querySelectorAll(".dbx-transfer-preview-data th")].map(cell=>cell.textContent)).toEqual(["ID","NAME"]);
+  const advanced=dialog.querySelector<HTMLDetailsElement>(".dbx-transfer-advanced")!;
+  expect(advanced.open).toBe(false);act(()=>advanced.querySelector<HTMLElement>("summary")!.click());expect(advanced.open).toBe(true);
+  const values=advanced.querySelector<HTMLSelectElement>('[aria-label="输出值来源"]')!;expect(values.disabled).toBe(false);
+  toggle.focus();act(()=>toggle.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));
+  await act(async()=>{vi.advanceTimersByTime(500);});
+  expect(document.querySelector('[role="dialog"]')).toBeNull();expect(document.activeElement).toBe(trigger);
+});
+it("两个保留中的输出窗口使用独立的原生范围单选组",()=>{
+  act(()=>root.render(<><ResultTransferDialog frame={frame} mode="copy" open onClose={()=>{}} onFile={()=>{}}/><ResultTransferDialog frame={frame} mode="file" open onClose={()=>{}} onFile={()=>{}}/></>));
+  const dialogs=[...document.querySelectorAll<HTMLElement>('[role="dialog"]')];
+  const groups=dialogs.map(dialog=>[...dialog.querySelectorAll<HTMLInputElement>('input[type="radio"]')]);
+  expect(groups[0]).toHaveLength(4);expect(groups[1]).toHaveLength(4);
+  expect(new Set(groups[0].map(radio=>radio.name)).size).toBe(1);
+  expect(groups[0][0].name).not.toBe(groups[1][0].name);
+  act(()=>groups[1][2].click());expect(groups[0][0].checked).toBe(true);expect(groups[1][2].checked).toBe(true);
+});
+it("重查询范围显示冻结来源不匹配的原因，已加载范围仍可输出",()=>{
+  act(()=>root.render(<ResultTransferDialog frame={{...frame,source:{...frame.source,connectionKey:"previous-target"}}} mode="file" open onClose={()=>{}} onFile={()=>{}}/>));
+  const dialog=document.querySelector<HTMLElement>('[role="dialog"]')!;
+  const requery=dialog.querySelector<HTMLInputElement>('input[type="radio"][value="query"]')!;
+  expect(requery.disabled).toBe(true);expect(requery.closest("label")?.textContent).toContain("连接目标已变化");
+  expect(dialog.querySelector<HTMLButtonElement>(".dbx-transfer-foot-actions .pri")!.disabled).toBe(false);
 });

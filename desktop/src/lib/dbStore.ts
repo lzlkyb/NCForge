@@ -16,9 +16,17 @@ import {
   type TxInfo,
 } from "./dbApi";
 import { beginOperation, operationActive, trackOperation } from "./operations";
+import { toast } from "../components/ui/toast";
 import { dbCancelled, dbTaskSpec, dbTxKey } from "./dbOperations";
 import { addHistory } from "./dbHistory";
+import { persistentTab, persistentTabsChanged } from "./dbTabPersistence";
+import { appendResultRows, fitResult, fitResults, retainedResultBytes, resultBytes, TOTAL_RESULT_BYTES, RESULT_LIMIT_NOTICE } from "./dbResultBudget";
 import type { MdDictOut, PickRow, ScopeKind } from "./mdDict";
+import { captureResultContext, type ResultExecutionContext } from "./dbResultContext";
+import { cloneCompareSnapshot, type CompareTab } from "./dbCompareState";
+import { rowsBytes } from "./dbResultBudget";
+import type { ResultSnapshot } from "./dbResultTools";
+export type { CompareTab } from "./dbCompareState";
 
 /**
  * 数据库页的模块级状态：连接列表、每个连接的运行态、SQL / 表标签页与结果。
@@ -62,6 +70,7 @@ export interface ConnRuntime {
 export type TxNotice = { kind: "success" | "error" | "lost"; text: string; verify?: boolean };
 
 export interface ResultEntry {
+  context?: ResultExecutionContext;
   completedAt?:number;
   startLine?:number;
   id: string;
@@ -84,6 +93,7 @@ export interface ResultEntry {
   errorCode?: ReturnType<typeof parseDbError>["code"];
   loadingMore?: boolean;
   moreError?: string;
+  moreRetryable?: boolean;
 }
 
 export interface OutputLine {
@@ -174,7 +184,7 @@ export interface DictTab {
   state: DictState;
 }
 
-export type DbTabItem = SqlTab | TableTab | DictTab;
+export type DbTabItem = SqlTab | TableTab | DictTab | CompareTab;
 
 export const EMPTY_DICT_STATE: DictState = {
   mode: "picked",
@@ -241,6 +251,7 @@ function loadTabs(): Pick<DbState, "tabs" | "active"> {
 
 let state: DbState = { conns: [], loaded: false, loadError: null, rt: {}, dialog: null, sessionPanel: null, ...loadTabs() };
 const listeners = new Set<() => void>();
+const draftListeners = new Map<string, Set<() => void>>();
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function persist() {
@@ -248,15 +259,7 @@ function persist() {
   persistTimer = setTimeout(() => {
     // 字典标签不落盘：它的 state 里有整份生成的字典（可能几千列），而且重开应用后
     // 也读不到对应连接上的结果，恢复出来只会是个空壳。表标签原样存。
-    const tabs: Partial<DbTabItem>[] = [];
-    for (const t of state.tabs) {
-      if (t.kind === "sql") {
-        tabs.push({ kind: t.kind, id: t.id, title: t.title, connId: t.connId, sql: t.sql, maxRows: t.maxRows, timeoutSec: t.timeoutSec });
-      } else if (t.kind === "table") {
-        tabs.push({...t,query:undefined,trail:undefined});
-      }
-      // dict 不落盘（见上）
-    }
+    const tabs = state.tabs.map(persistentTab).filter(t => t !== null);
     try {
       localStorage.setItem(TABS_KEY, JSON.stringify({ tabs, active: state.active }));
     } catch {
@@ -266,8 +269,10 @@ function persist() {
 }
 
 function set(patch: Partial<DbState>) {
+  const shouldPersist = (patch.active !== undefined && patch.active !== state.active)
+    || (patch.tabs !== undefined && persistentTabsChanged(state.tabs, patch.tabs));
   state = { ...state, ...patch };
-  if ("tabs" in patch || "active" in patch) persist();
+  if (shouldPersist) persist();
   listeners.forEach((fn) => fn());
 }
 
@@ -394,6 +399,9 @@ export async function connect(id: string, password?: string, remember?: boolean)
   setRt(id, { status: "connecting", error: undefined });
   try {
     const info = await trackOperation(dbTaskSpec(`connect:${id}`,"连接数据库",id,"连接",connOf(id)?.name),()=>dbApi.connect(id, password, remember));
+    // 配置写的是 JVM 桥、本机却没有 Java 运行时：后端已自动改用纯 Rust，
+    // 但必须在界面上说出来 —— 否则用户以为自己在用 JVM 桥，撞上 REF CURSOR 时更困惑。
+    if (info.engineNote) toast(info.engineNote, "warning");
     setRt(id, { status: "connected", info, txNotice: undefined, tx: { autoCommit: info.autoCommit, statements: 0, rows: 0, since: 0 } });
     // 能力位问一次就够（连接期间不会变）；失败不影响已连上的状态，只是按钮按保守处理
     void dbApi.caps(id).then((caps) => setRt(id, { caps })).catch(() => undefined);
@@ -529,6 +537,18 @@ export function openSqlTab(connId: string | null, sql = ""): string {
   return tab.id;
 }
 
+/** One comparison document holds two immutable snapshots; replacing it is an explicit comparison action. */
+export function openCompareTab(before: ResultSnapshot, after: ResultSnapshot): string {
+  const existing = state.tabs.find(t => t.kind === "compare");
+  if (retainedResultBytes(state.tabs, existing?.id) + rowsBytes(before.rows) + rowsBytes(after.rows) > TOTAL_RESULT_BYTES) {
+    throw new Error("结果工作台内存不足以保留两份比较快照，请释放旧查询结果后重试；未截断数据。");
+  }
+  const tab: CompareTab = { kind:"compare", id:existing?.id ?? newId("compare"), connId:null, title:"结果比对",
+    before:cloneCompareSnapshot(before), after:cloneCompareSnapshot(after), keys:[], filter:"all", query:"", onlyChanged:true };
+  set({ tabs:existing ? state.tabs.map(t => t.id === existing.id ? tab : t) : [...state.tabs,tab], active:tab.id });
+  return tab.id;
+}
+
 export function openTableTab(connId: string, table: string, sub: TableSub = "data", otype?: string): string {
   // 同名不同类要分开：本来「包 PKG_X」和「表 PKG_X」可能共存，认 tab 时不能只看名字
   const hit = state.tabs.find(
@@ -586,7 +606,9 @@ export function closeTab(id: string) {
   const i = state.tabs.findIndex((t) => t.id === id);
   if (i < 0) return;
   const tabs = state.tabs.filter((t) => t.id !== id);
-  const active = state.active === id ? (tabs[i] ?? tabs[i - 1])?.id ?? null : state.active;
+  const closing = state.tabs[i];
+  const origin = closing.kind === "compare" ? [closing.after.originTabId,closing.before.originTabId].find(source => tabs.some(t => t.id === source)) : undefined;
+  const active = state.active === id ? origin ?? (tabs[i] ?? tabs[i - 1])?.id ?? null : state.active;
   set({ tabs, active });
 }
 
@@ -595,7 +617,12 @@ export function activateTab(id: string) {
 }
 
 export function patchTab<T extends DbTabItem>(id: string, patch: Partial<T>) {
-  set({ tabs: state.tabs.map((t) => (t.id === id ? ({ ...t, ...patch } as DbTabItem) : t)) });
+  set({ tabs: state.tabs.map((t) => {
+    if (t.id !== id) return t;
+    const next = { ...t, ...patch } as DbTabItem;
+    if (next.kind === "sql" && "results" in patch) next.results = fitResults(next.results, TOTAL_RESULT_BYTES - retainedResultBytes(state.tabs, id));
+    return next;
+  }) });
 }
 
 /**
@@ -604,7 +631,20 @@ export function patchTab<T extends DbTabItem>(id: string, patch: Partial<T>) {
  */
 export function setSqlDraft(tabId: string, sql: string) {
   state = { ...state, tabs: state.tabs.map((t) => (t.id === tabId && t.kind === "sql" ? { ...t, sql } : t)) };
+  draftListeners.get(tabId)?.forEach(listener => listener());
   persist();
+}
+
+/** Only provenance notices subscribe to keystrokes; the grid and object tree keep their stable data. */
+export function useSqlDraft(tabId: string): string {
+  const subscribe = useCallback((listener: () => void) => {
+    const group = draftListeners.get(tabId) ?? new Set<() => void>();
+    draftListeners.set(tabId, group); group.add(listener);
+    const unsubscribe = subscribeDb(listener);
+    return () => { unsubscribe(); group.delete(listener); if (!group.size) draftListeners.delete(tabId); };
+  }, [tabId]);
+  const snapshot = useCallback(() => sqlTabOf(tabId)?.sql ?? "", [tabId]);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 // ──────────────────────── 执行 ────────────────────────
@@ -706,9 +746,10 @@ export function clearSlots(connId: string): void {
 }
 
 /** 执行一条语句，结果记进标签、事务状态更新到连接（或标签的槽）、写入历史。不抛异常。 */
-export async function execOne(tabId: string, sql: string, index: number): Promise<ResultEntry> {
+export async function execOne(tabId: string, sql: string, index: number, context?: ResultExecutionContext): Promise<ResultEntry> {
   const tab = sqlTabOf(tabId);
-  const base = { id: newId("r"), index, sql, columns: [], rows: [], hasMore: false, updateCount: -1, ms: 0 };
+  const identity = context ?? (tab?.connId ? captureResultContext(tab.connId, connOf(tab.connId), rtOf(tab.connId).currentSchema ?? rtOf(tab.connId).info?.schema, sql) : undefined);
+  const base = { id: newId("r"), index, sql, context: identity, startLine: identity?.target?.startLine, columns: [], rows: [], hasMore: false, updateCount: -1, ms: 0 };
   if (!tab?.connId) return { ...base, kind: "error", error: "这个标签还没选连接" };
   const connId = tab.connId;
   const t0 = Date.now();
@@ -751,6 +792,7 @@ export async function execOne(tabId: string, sql: string, index: number): Promis
     if (code === "bridge") setRt(connId, { status: "error", error: message });
     entry = { ...base, kind: "error", error: friendlyDbError(e), errorCode: code, cancelled:dbCancelled(e), ms: Date.now() - t0 };
   }
+  entry = fitResult(entry, TOTAL_RESULT_BYTES - retainedResultBytes(state.tabs));
   appendOutput(tabId, [{
     at: Date.now(),
     text: `[${now()}] 第 ${index} 条 · ${summaryOf(entry)} · ${entry.ms} ms${entry.error ? ` · ${entry.error}` : ""}`,
@@ -764,20 +806,23 @@ export async function execOne(tabId: string, sql: string, index: number): Promis
 export async function loadMore(tabId: string, resultId: string): Promise<void> {
   const tab = sqlTabOf(tabId);
   const res = tab?.results.find((r) => r.id === resultId);
-  if (!tab?.connId || !res || res.loadingMore || !ownsCursor(tab.connId, tab.slot, resultId)) return;
+  if (!tab?.connId || !res || res.moreError && !res.moreRetryable || res.loadingMore || tab.running || !ownsCursor(tab.connId, tab.slot, resultId)) return;
   const upd = (p: Partial<ResultEntry>) => {
     const cur = sqlTabOf(tabId);
     if (cur) patchTab<SqlTab>(tabId, { results: cur.results.map((r) => (r.id === resultId ? { ...r, ...p } : r)) });
   };
-  upd({ loadingMore: true });
+  upd({ loadingMore: true, moreError: undefined, moreRetryable: undefined });
   try {
     const m = await trackOperation({...dbTaskSpec(`more:${tabId}:${resultId}`,"加载后续结果",tab.connId,tab.slot ? `独立会话 ${tab.slot}` : "主会话",connOf(tab.connId)?.name,tabId),cancel:()=>dbApi.cancel(tab.connId!,tab.slot),cancelled:dbCancelled},()=>dbApi.more(tab.connId!, tab.maxRows, tab.slot));
     const cur = sqlTabOf(tabId)?.results.find((r) => r.id === resultId);
-    upd({ rows: [...(cur?.rows ?? []), ...m.rows], hasMore: m.hasMore, loadingMore: false });
+    // The tab may have closed, switched connection or re-executed during the request.
+    if (!cur || sqlTabOf(tabId)?.connId !== tab.connId || !ownsCursor(tab.connId, tab.slot, resultId)) return;
+    const appended = appendResultRows(cur.rows, m.rows, TOTAL_RESULT_BYTES - retainedResultBytes(state.tabs) + resultBytes(cur));
+    upd({ rows: appended.rows, hasMore: m.hasMore || appended.limited, moreError: appended.limited ? RESULT_LIMIT_NOTICE : undefined, moreRetryable: false, loadingMore: false });
   } catch (e) {
     const expired = ["session-lost", "slot-gone"].includes(parseDbError(e).code);
     const message = expired ? "旧结果游标已失效，已加载的行仍可查看。请重新执行查询。" : friendlyDbError(e);
-    upd({ loadingMore: false, ...(expired ? { moreError: message } : {}) });
+    upd({ loadingMore: false, moreError: message, moreRetryable: !expired });
     appendOutput(tabId, [{ at: Date.now(), text: `[${now()}] 加载更多失败：${message}`, tone: "bad" }]);
   }
 }

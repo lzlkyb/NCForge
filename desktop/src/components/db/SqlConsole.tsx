@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "../ui/toast";
 import { SqlToolbar } from "./SqlToolbar";
-import { SqlEditor, type SqlEditorApi } from "./SqlEditor";
+import { SqlEditor, type SqlEditorApi, type SqlExecutionScope } from "./SqlEditor";
 import { ResultPanel } from "./ResultPanel";
 import { HistoryDrawer } from "./HistoryDrawer";
 import { SnippetDrawer } from "./SnippetDrawer";
@@ -15,14 +15,21 @@ import { dbApi } from "../../lib/dbApi";
 import { friendlyDbError } from "../../lib/db";
 import { guessTable } from "../../lib/resultExport";
 import { closeSessionPanel, openSessionPanel, sqlTabOf, useDbSelector, type SqlTab } from "../../lib/dbStore";
-import { useSqlConsoleSplit } from "../../hooks/useSqlConsoleSplit";
+import { useSqlConsoleSplit, type SqlConsoleFocus } from "../../hooks/useSqlConsoleSplit";
+import { useViewActive } from "../../lib/viewActivity";
+import "../../db-execution.css";
 
 /** SQL 控制台：工具条 / 事务条 / 编辑器 / 可拖高度的结果区 / 历史与会话抽屉。 */
 
 export function SqlConsole({ tab }: { tab: SqlTab }) {
+  const active = useViewActive();
+  const activeRef = useRef(active); activeRef.current = active;
   const api = useRef<SqlEditorApi | null>(null);
-  const split = useSqlConsoleSplit();
-  const [scope,setScope]=useState("执行当前语句");
+  const split = useSqlConsoleSplit(tab.id);
+  const [scope,setScope]=useState<SqlExecutionScope | null>(null);
+  const scopeRef = useRef(scope); scopeRef.current = scope;
+  const executingScopes = useRef(new Map<string, SqlExecutionScope>());
+  const activeTabId = useRef(tab.id); activeTabId.current = tab.id;
   /** 右侧抽屉：历史与片段互斥（同一列位置，同时开就挤成两栏了）。 */
   const [side, setSide] = useState<"history" | "snips" | null>(null);
   // 会话面板是页级状态（按钮在工具条、抽屉在 body 里），放 store 才不用层层回调
@@ -43,8 +50,14 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         toast(mode === "script" ? "编辑器里没有可执行的语句" : "光标处没有语句", "info");
         return;
       }
-      const outcome = await runStatements(tabId, stmts);
-      if (outcome.failLine) api.current?.reveal(outcome.failLine);
+      const executionScope = { tabId, selected: mode === "current" && scopeRef.current?.tabId === tabId && scopeRef.current.selected, statements: stmts };
+      executingScopes.current.set(tabId, executionScope);
+      try {
+        const outcome = await runStatements(tabId, stmts);
+        if (outcome.failLine && activeRef.current && activeTabId.current === tabId) api.current?.reveal(outcome.failLine);
+      } finally {
+        if (executingScopes.current.get(tabId) === executionScope) executingScopes.current.delete(tabId);
+      }
     },
     [tabId],
   );
@@ -75,11 +88,22 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
     else void dbApi.cancel(tab.connId, tab.slot).catch((e) => toast(`取消失败：${friendlyDbError(e)}`, "error"));
   }, [tab.id,tab.connId, tab.slot]);
 
+  const focus = (mode: SqlConsoleFocus) => {
+    split.setFocus(mode);
+    requestAnimationFrame(() => {
+      if (!activeRef.current || activeTabId.current !== tab.id) return;
+      if (mode === "results") split.bodyRef.current?.querySelector<HTMLElement>('[role="grid"]')?.focus({ preventScroll: true });
+      else api.current?.focus();
+    });
+  };
+
   return (
     <div className="dbx-console">
       <SqlToolbar
         tab={tab}
-        scope={scope}
+        scope={tab.running ? executingScopes.current.get(tab.id) ?? null : scope}
+        focusMode={split.focus}
+        onFocusChange={focus}
         onRun={(m) => void run(m)}
         onStop={onStop}
         onExplain={onExplain}
@@ -109,10 +133,11 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         <ScriptReplayDialog tab={tab} onClose={() => setSrOpen(false)} />
       )}
       <div className="dbx-console-body">
-        <div ref={split.bodyRef} className="dbx-console-main">
-          <SqlEditor tabId={tab.id} initial={tab.sql} onRun={(m) => void run(m)} apiRef={api} onScope={setScope} />
+        <div ref={split.bodyRef} className="dbx-console-main" data-focus={split.focus}>
+          <SqlEditor tabId={tab.id} initial={tab.sql} onRun={(m) => void run(m)} apiRef={api} onScope={setScope} visible={active && split.focus !== "results"} />
           <div
             className="dbx-splitbar"
+            hidden={split.focus !== "split"}
             role="separator"
             aria-orientation="horizontal"
             aria-label="调整结果区高度"
@@ -126,7 +151,10 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
               split.startDrag(e.clientY);
             }}
           />
-          <ResultPanel tab={tab} height={split.height} onLocate={line=>api.current?.reveal(line)} />
+          <ResultPanel tab={tab} height={split.resultHeight} onLocate={line => {
+            if (split.focus === "results") split.setFocus("split");
+            api.current?.reveal(line);
+          }} />
         </div>
         {side === "history" && tab.connId && (
           <HistoryDrawer

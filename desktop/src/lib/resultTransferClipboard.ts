@@ -3,41 +3,46 @@ import { beginOperation } from "./operations";
 import { dbTaskSpec } from "./dbOperations";
 import { toast } from "../components/ui/toast";
 import type { TransferSource } from "./resultTransferContext";
+import { estimateTransferBytesAsync, MAX_CLIPBOARD_BYTES } from "./transferSize";
+export { estimateTransferBytes } from "./transferSize";
 
-const MAX_CLIPBOARD_BYTES = 5 * 1024 * 1024;
 const encoder = new TextEncoder();
-export function estimateTransferBytes(data: TransferData, options: TransferOptions): number {
-  const indices = options.columnIndices.length ? options.columnIndices : data.columns.map((_, i) => i);
-  let bytes = 0;
-  // Bound the estimate too: scanning a giant selection must not freeze the UI before its warning.
-  for (const row of data.rows) {
-    for (const i of indices) { bytes += encoder.encode(String(row[i] ?? "")).length + 24; if (bytes > MAX_CLIPBOARD_BYTES) return bytes; }
-    bytes += 8;
-  }
-  return bytes;
-}
 export async function serializeTransferAsync(data: TransferData, options: TransferOptions): Promise<string> {
-  if (data.rows.length * options.columnIndices.length < 2000 || typeof Worker === "undefined") {
+  const indices = options.columnIndices.length ? options.columnIndices : data.columns.map((_, i) => i);
+  if (data.rows.length * indices.length < 2000 || typeof Worker === "undefined") {
     await new Promise(resolve => setTimeout(resolve, 0));
     return serializeTransfer(data, options);
   }
   const worker = new Worker(new URL("./resultTransferWorker.ts", import.meta.url), { type: "module" });
+  let active = true;
   try {
     return await new Promise<string>((resolve, reject) => {
       worker.onmessage = (event: MessageEvent<{ text?: string; error?: string }>) => event.data.error ? reject(new Error(event.data.error)) : resolve(event.data.text ?? "");
       worker.onerror = () => reject(new Error("生成复制内容失败，请改用文件导出"));
-      worker.postMessage({ data, options });
+      // Only the chosen columns and SQL keys cross the worker boundary. Small messages
+      // bound each structured-clone pause; yielding lets the busy indicator paint.
+      const needed = new Set([...indices, ...options.keys]);
+      const project = (row: TransferData["rows"][number]) => row.map((v, i) => needed.has(i) ? v : null);
+      void (async () => {
+        worker.postMessage({ kind: "init", data: { ...data, rows: [], originalRows: data.originalRows ? [] : undefined }, options });
+        for (let i = 0; i < data.rows.length; i += 128) {
+          if (!active) return;
+          worker.postMessage({ kind: "rows", rows: data.rows.slice(i, i + 128).map(project), originalRows: data.originalRows?.slice(i, i + 128).map(project) });
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        if (active) worker.postMessage({ kind: "serialize" });
+      })().catch(reject);
     });
-  } finally { worker.terminate(); }
+  } finally { active = false; worker.terminate(); }
 }
 export async function copyTransfer(data: TransferData, options: TransferOptions, source: TransferSource, raw = false): Promise<boolean> {
   const error = validateTransfer(data, options);
   if (error) { toast(error, "warning"); return false; }
   if (!data.rows.length && options.header === "none") { toast("没有可复制的数据，可先调整筛选", "info"); return false; }
-  if (estimateTransferBytes(data, options) > MAX_CLIPBOARD_BYTES) { toast("复制内容超过 5 MiB，请使用文件导出", "warning"); return false; }
   const task = beginOperation(dbTaskSpec(`copy:${source.resultId}`, "生成复制内容", source.connId, "查询结果", undefined, source.tabId));
   if (!task) return false;
   try {
+    if (await estimateTransferBytesAsync(data, options) > MAX_CLIPBOARD_BYTES) throw new Error("复制内容超过 5 MiB，请使用文件导出");
     const text = raw ? String(data.rows[0]?.[options.columnIndices[0]] ?? "") : await serializeTransferAsync(data, { ...options, bom: false });
     if (encoder.encode(text).length > MAX_CLIPBOARD_BYTES) throw new Error("复制内容超过 5 MiB，请使用文件导出");
     if (options.format === "html" && typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {

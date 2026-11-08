@@ -257,6 +257,10 @@ export interface ConnectInfo {
   schema?: string;
   /** 默认 schema 没设成时的原因（配置写错 / 没权限）。有值 = 当前用的是登录账号。 */
   schemaWarning?: string;
+  /** **实际**在用的引擎：配置写 JVM 桥但本机没有运行时，这里会是 `rust`。 */
+  engine?: DbEngine;
+  /** 被降级时的原因。界面要显示出来，否则用户以为自己在用 JVM 桥。 */
+  engineNote?: string | null;
 }
 
 export interface PropSource {
@@ -361,6 +365,8 @@ export interface TestResult {
   schema: string;
   /** 默认 schema 没设成的原因。有值 = 当前用的是登录账号。 */
   schemaWarning?: string | null;
+  /** 表单选了 JVM 桥但本机没运行时、实际用纯 Rust 测通的原因。 */
+  engineNote?: string | null;
 }
 
 /** 本地表结构缓存：小写表名 → [字段名, 类型][]（补全用）。 */

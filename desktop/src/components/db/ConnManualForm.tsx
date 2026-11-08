@@ -1,53 +1,18 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
+import { toast } from "../ui/toast";
 import { EnvChips } from "./EnvChips";
 import { friendlyDbError, parseDbError, thousands } from "../../lib/db";
-import { buildOracleUrl, dbApi, parseOracleUrl, type DbConn, type DbConnInput, type DbEngine, type DbEnv, type TestResult } from "../../lib/dbApi";
+import { dbApi, type DbConn, type DbConnInput, type TestResult } from "../../lib/dbApi";
+import { initialConnForm, mergeConnForm, type DbConnForm } from "../../lib/dbConnForm";
 import { ncHomeProbe } from "../../lib/server";
 import { beginOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
 import { closeConnDialog, disconnect, loadConns, rtOf } from "../../lib/dbStore";
 
-interface Form {
-  name: string;
-  env: DbEnv;
-  host: string;
-  port: string;
-  service: string;
-  sid: boolean;
-  url: string;
-  user: string;
-  password: string;
-  remember: boolean;
-  autoCommit: boolean;
-  note: string;
-  engine: DbEngine;
-  /** 默认 schema：连上就切过去，写 SQL 不用带 `aier633.` 前缀。空 = 登录账号自己的。 */
-  defaultSchema: string;
-}
-
-function initial(conn: DbConn | null): Form {
-  const p = conn ? parseOracleUrl(conn.url) : null;
-  return {
-    name: conn?.name ?? "",
-    env: conn?.env ?? "test",
-    host: p?.host ?? "",
-    port: p?.port ?? "1521",
-    service: p?.service ?? "",
-    sid: p?.sid ?? false,
-    url: conn?.url ?? "",
-    user: conn?.user ?? "",
-    password: "",
-    remember: true,
-    autoCommit: conn?.autoCommit ?? false,
-    note: conn?.note ?? "",
-    engine: conn?.engine ?? "rust",
-    defaultSchema: conn?.defaultSchema ?? "",
-  };
-}
-
 /**
- * 手动填写（新建或编辑）。主机 / 端口 / 服务名与 JDBC URL 两种写法互相同步。
+ * 手动填写（新建或编辑）。主机 / 端口 / 服务名与 JDBC URL 两种写法互相同步
+ * （同步规则在 `lib/dbConnForm.ts`，可单独测）。
  *
  * 来自 prop.xml 的连接只能改名称 / 环境 / 事务模式 / 引擎：连接串与口令跟着 prop.xml 走。
  * 选纯 Rust 驱动时，口令会在第一次连接时由 JVM 桥解一次并加密存本机（之后不再需要 JVM）。
@@ -55,15 +20,17 @@ function initial(conn: DbConn | null): Form {
 export function ConnManualForm({ conn }: { conn: DbConn | null }) {
   const formId = useId();
   const fieldId = (field: string) => `${formId}-${field}`;
-  const [f, setF] = useState<Form>(() => initial(conn));
+  const [f, setF] = useState<DbConnForm>(() => initialConnForm(conn));
   const [test, setTest] = useState<{ ok?: TestResult; err?: string; busy?: boolean }>({});
   const [saving, setSaving] = useState(false);
   const fromProp = conn?.source === "prop";
   /**
    * 这台机器有没有可用的 NC home。`null` = 还没探明。
    *
-   * 只用来给 JVM 桥加标注（它要用 NC 自带的 Java 与 Oracle 驱动）——**不拦用户选**：
-   * 配没配 home 是运行时的事，选错了也有 `need-nc-home` 错误接着，那条路给一键换引擎。
+   * 只用来给 JVM 桥加标注——**不拦用户选**，也**不等于「JVM 桥不可用」**：
+   * JVM 桥要的是「一套 Java + Oracle 驱动」，NC home 只是最省事的来源，
+   * `ncdb` 资源包或系统 Java 也能顶上（见后端 `jvm_runtime`）。选错了还有
+   * `need-nc-home` / `need-jvm` 兜底，那条路给一键换引擎。
    */
   const [hasHome, setHasHome] = useState<boolean | null>(null);
   useEffect(() => {
@@ -75,15 +42,8 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
     return () => { alive = false; };
   }, []);
 
-  const put = (patch: Partial<Form>) => {
-    const next = { ...f, ...patch };
-    if ("host" in patch || "port" in patch || "service" in patch || "sid" in patch) {
-      next.url = next.host && next.service ? buildOracleUrl(next.host, next.port, next.service, next.sid) : "";
-    } else if ("url" in patch) {
-      const p = parseOracleUrl(next.url);
-      if (p) Object.assign(next, { host: p.host, port: p.port, service: p.service, sid: p.sid });
-    }
-    setF(next);
+  const put = (patch: Partial<DbConnForm>) => {
+    setF((cur) => mergeConnForm(cur, patch));
     setTest({});
   };
 
@@ -108,7 +68,10 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
    * 解析的是**原始错误**（`code|message`），不是 `friendlyDbError` 之后的文案——那一步会把
    * `code|` 前缀剥掉，再解析就只剩 `other` 了（测试 `need-nc-home 红条给出一键出路` 守这条）。
    */
-  const needHome = !!test.err && parseDbError(test.err).code === "need-nc-home" && f.engine !== "rust";
+  const needHome =
+    !!test.err &&
+    ["need-nc-home", "need-jvm"].includes(parseDbError(test.err).code) &&
+    f.engine !== "rust";
 
   const lock=useRef(false);
   const runTest = async () => {
@@ -132,7 +95,12 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
     if(!task) return;lock.current=true;setSaving(true);
     try {
       const target = conn && (conn.url !== f.url.trim() || conn.user !== f.user.trim() || conn.engine !== input().engine || (conn.defaultSchema ?? "") !== f.defaultSchema.trim());
-      await dbApi.save(input(), f.password || undefined, f.remember);
+      const saved = await dbApi.save(input(), f.password || undefined, f.remember);
+      // 本机存不下口令（例如 macOS 钥匙串被拒）时后端只降级、不报错：这里必须说出来，
+      // 否则用户以为「记住」生效了，下次连接却又要口令。
+      if (f.password && f.remember && saved.hasPassword === false) {
+        toast("口令没存到本机，下次连接需要重新输入", "warning");
+      }
       // 连接串、用户或引擎变了：旧会话已经不是这个连接了，断掉重连
       if (target && conn && rtOf(conn.id).status === "connected") await disconnect(conn.id);
       await loadConns();
@@ -220,7 +188,7 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
             type="button"
             aria-pressed={f.engine === "java"}
             data-on={f.engine === "java" || undefined}
-            title={hasHome === false ? "需要 NC 安装目录（这台机器还没配置）" : undefined}
+            title={hasHome === false ? "这台机器还没配 NC 安装目录（JVM 桥也可以靠下载「数据库 JVM 组件」）" : undefined}
             onClick={() => put({ engine: "java" })}
           >
             JVM 桥
@@ -234,7 +202,7 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
             : fromProp
               ? "JVM 桥：prop.xml 的口令每次现解、不落盘，这是默认选项。"
               : hasHome === false
-                ? "JVM 桥：能力最全（REF CURSOR、解 prop.xml 口令），但它要用 NC 自带的 Java 1.8 与 Oracle 驱动——这台机器还没配置 NC home，现在选它连不上。没有 NC home 的话用「纯 Rust 驱动」即可。"
+                ? "JVM 桥：能力最全（REF CURSOR、解 prop.xml 口令），需要一套 Java 运行时与 Oracle 驱动。装了 NC 就到「设置 → 开发 → NC 环境」配一下目录；没装 NC 就到「设置 → 组件」下载「数据库 JVM 组件」。两样都没有也不影响用库——选「纯 Rust 驱动」即可，只是没有 REF CURSOR。"
                 : "JVM 桥：能力最全（支持 REF CURSOR、能解 prop.xml 口令），多条连接共用一个 JVM；要用 NC 自带的 Java 与驱动，先在设置里配置 NC home。"}
         </p>
         <span className="dbx-form-label" id={fieldId("tx")}>事务</span>
@@ -264,6 +232,12 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
           <div className="dbx-badline">
             <Icon name="alert" size={13} />
             <span>默认 schema 没生效，当前用的是登录账号：{test.ok.schemaWarning}</span>
+          </div>
+        )}
+        {test.ok?.engineNote && (
+          <div className="dbx-badline">
+            <Icon name="alert" size={13} />
+            <span>{test.ok.engineNote}</span>
           </div>
         )}
         {test.err && (

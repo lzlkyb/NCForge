@@ -26,6 +26,29 @@ describe("parseDbError / friendlyDbError", () => {
     expect(friendlyDbError("unreachable|x")).toContain("VPN");
     expect(friendlyDbError("sql|ORA-00942: 表或视图不存在")).toBe("ORA-00942: 表或视图不存在");
   });
+
+  it("timeout 是语句没跑完，不能说成「数据库进程异常」", () => {
+    const msg = "语句已中断（点了停止，或等待超过超时时间）。会话仍然可用";
+    const text = friendlyDbError(`timeout|${msg}`);
+    expect(parseDbError(`timeout|${msg}`).code).toBe("timeout");
+    expect(text).toBe(msg);
+    // bridge 只留给 JVM 桥的「子进程没了」
+    expect(friendlyDbError(`bridge|${msg}`)).toContain("进程异常");
+  });
+
+  it("need-password 的存储说明不能只写 Windows（macOS 走钥匙串）", () => {
+    const text = friendlyDbError("need-password|x");
+    expect(text).toContain("钥匙串");
+    expect(text).not.toMatch(/^.*Windows 加密存本机.*$/);
+  });
+
+  it("need-jvm 是「缺 Java 运行时」，不能和 need-nc-home 混成一个码", () => {
+    // 两者要分开：need-nc-home 是「要 NC 的类」（prop.xml 解密），
+    // need-jvm 只是「要一个 JVM」——下载组件就能解决，不必装 NC。
+    expect(parseDbError("need-jvm|缺少 Java 运行时").code).toBe("need-jvm");
+    expect(parseDbError("need-nc-home|需要 NC 安装目录").code).toBe("need-nc-home");
+    expect(friendlyDbError("need-jvm|缺少 Java 运行时")).toBe("缺少 Java 运行时");
+  });
 });
 
 describe("oraCode", () => {

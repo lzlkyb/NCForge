@@ -1,0 +1,43 @@
+/* A result keeps its identity, actions, data and status on separate, stable lines. */
+.dbx-document-host { display:flex;flex-direction:column;flex:1;min-height:0;min-width:0; }
+.dbx-document-host[hidden] { display:none; }
+.dbx-result-table,.dbx-result-view { display:flex;flex-direction:column;flex:1;min-width:0;min-height:0; }
+.dbx-result-view:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:-2px; }
+.dbx-result-head { display:flex;align-items:center;gap:8px;min-width:0;min-height:40px;padding:0 10px 0 4px;flex:none;border-bottom:1px solid hsl(var(--border));background:hsl(var(--card)); }
+.dbx-result-head .dbx-rtabs { flex:1;max-width:100%;height:40px; }
+.dbx-result-head .dbx-rtab { height:40px; }
+.dbx-result-runmeta { display:flex;align-items:center;gap:10px;flex:none;color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);font-variant-numeric:tabular-nums; }
+.dbx-rset > .dbx-rtabs { flex:none;max-width:100%;height:32px;border-bottom:1px solid hsl(var(--border));background:hsl(var(--chrome)); }
+.dbx-rset > .dbx-rtabs .dbx-rtab { height:32px;font-size:var(--dbx-fs-meta); }
+.dbx-rbar.dbx-result-tools { gap:4px;min-height:36px;padding:3px 8px;background:hsl(var(--card)); }
+.dbx-result-tools .dbx-filter-trigger { width:auto;padding-inline:7px; }
+.dbx-result-tools .dbx-result-filter { width:160px;max-width:100%; }
+.dbx-result-tools .dbx-btn.ghost { width:auto;padding-inline:7px; }
+.dbx-result-view-state { display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;flex:none;padding:5px 10px;border-bottom:1px solid hsl(var(--border));font-size:var(--dbx-fs-meta);background:hsl(var(--chrome));color:hsl(var(--muted-foreground)); }
+.dbx-result-view-state .dbx-localhint { color:hsl(var(--muted-foreground));white-space:normal; }
+.dbx-result-view-state .dbx-lk { margin-left:auto; }
+.dbx-result-context-note { display:flex;align-items:flex-start;gap:8px;flex:none;padding:6px 10px;background:hsl(var(--warning) / .09);color:hsl(var(--warning-ink));font-size:var(--dbx-fs-meta);border-bottom:1px solid hsl(var(--border)); }
+.dbx-result-context-note > svg { flex:none;margin-top:2px; }
+.dbx-result-footer .dbx-rfoot { min-height:30px;padding-block:4px;gap:4px 10px; }
+.dbx-rfoot > strong { color:hsl(var(--foreground));font-weight:600;font-variant-numeric:tabular-nums; }
+.dbx-completeness { display:inline-flex;align-items:center;gap:5px;color:hsl(var(--success-ink)); }
+.dbx-completeness::before { content:"";width:5px;height:5px;border-radius:50%;background:currentColor; }
+.dbx-completeness[data-partial] { color:hsl(var(--warning-ink)); }
+.dbx-selection-summary { color:hsl(var(--foreground));font-size:var(--dbx-fs-meta);font-variant-numeric:tabular-nums;white-space:nowrap; }
+.dbx-source-popover { position:fixed;z-index:80;display:flex;flex-direction:column;width:min(520px,calc(100vw - 24px));max-height:min(420px,calc(100vh - 24px));padding:14px;gap:10px;border-radius:var(--r-control);background:hsl(var(--card));box-shadow:0 8px 28px hsl(var(--foreground) / .18);font-size:var(--dbx-fs-body);color:hsl(var(--foreground)); }
+.dbx-source-popover header { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+.dbx-source-meta { display:flex;flex-wrap:wrap;gap:4px 12px;color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);overflow-wrap:anywhere; }
+.dbx-source-popover pre { margin:0;min-height:0;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:var(--dbx-fs-body)/1.6 "Cascadia Mono",Consolas,monospace;scrollbar-gutter:stable; }
+.dbx-source-popover pre:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:2px; }
+@container workbench-document (max-width:900px) {
+  .dbx-result-tools .dbx-action-label { display:none; }
+  .dbx-result-tools .dbx-btn.ghost:has(.dbx-action-label) { width:var(--dbx-h-control);padding:0; }
+}
+@container workbench-document (max-width:620px) {
+  .dbx-result-runmeta time { display:none; }
+  .dbx-result-tools .dbx-result-filter { order:1;flex:1 0 100%; }
+  .dbx-result-head { gap:4px;padding-right:6px; }
+}
+@media (forced-colors:active) {
+  .dbx-source-popover { border:1px solid CanvasText; }
+}

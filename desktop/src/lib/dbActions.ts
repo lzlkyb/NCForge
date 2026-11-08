@@ -34,6 +34,7 @@ import {
 } from "./dbStore";
 import { disposeSqlModel } from "./sqlModels";
 import { isWrite, stmtKind } from "./sqlSplit";
+import { captureResultContext, type SqlRunTarget } from "./dbResultContext";
 
 /**
  * 数据库页的用户动作：把 store（状态）与 dbConfirm（要问一句的地方）串起来。
@@ -101,7 +102,7 @@ export async function requestCloseTab(tabId: string) {
   const tab = tabOf(tabId);
   if (!tab) return;
   // 字典标签不占会话、没有可丢的事务，关它不该顺带问连接上别的事务
-  if (tab.kind === "dict") {
+  if (tab.kind === "dict" || tab.kind === "compare") {
     closeTab(tabId);
     return;
   }
@@ -230,7 +231,7 @@ export interface RunOptions {
  */
 export async function runStatements(
   tabId: string,
-  stmts: { text: string; startLine: number }[],
+  stmts: SqlRunTarget[],
   opts: RunOptions = {},
 ): Promise<RunOutcome> {
   const outcome: RunOutcome = { failLine: null, failures: [], done: 0, stoppedByUser: false };
@@ -259,6 +260,8 @@ export async function runStatements(
   if(stopRequested) {task.finish("cancelled","执行请求尚未发出，语句未执行");outcome.stoppedByUser=true;return outcome;}
   if(sqlTabOf(tabId)?.connId!==connId) {task.finish("cancelled","来源标签或连接已切换，语句未执行");return outcome;}
   const previousResults = tab.results;
+  const runConn = connOf(connId), runSchema = rtOf(connId).currentSchema ?? rtOf(connId).info?.schema;
+  const contexts = stmts.map(statement => captureResultContext(connId, runConn, runSchema, statement.text, statement));
   setTxNotice(connId, tab.slot, tab.id);
   patchTab<SqlTab>(tabId, { running: true });
   const kept: ResultEntry[] = [];
@@ -284,7 +287,7 @@ export async function runStatements(
         break;
       }
       if(stopRequested) {outcome.stoppedByUser=true;break;}
-      const r = await execOne(tabId, s.text, i + 1);
+      const r = await execOne(tabId, s.text, i + 1, contexts[i]);
       // await 期间可能已经切连接：这条结果属于旧库，丢弃且不继续写回。
       if (!sameRun()) break;
       const connectionInterrupted = r.errorCode === "session-lost" || r.errorCode === "fallback-session-lost" || r.errorCode === "probe-failed";
@@ -298,6 +301,9 @@ export async function runStatements(
         }
         kept.push(r);
         patchTab<SqlTab>(tabId, { results: [...kept], view: r.id });
+        // Keep the script's own references bounded too, not just the store snapshot.
+        const retained = sqlTabOf(tabId)?.results;
+        if (retained) kept.splice(0, kept.length, ...retained);
       }
       if (r.kind === "error") {
         outcome.failures.push({

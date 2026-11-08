@@ -78,6 +78,23 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
 describe("复制与导出独立快照", () => {
+  it.each([true, false])("快捷复制显示真实行列数，换格式保留范围（选区：%s）", async selected => {
+    if (!selected) { frame.selection = null; frame.order = [1]; frame.visible = [2, 0]; act(render); }
+    const rows = selected ? 2 : 1, label = selected ? "复制选区" : "复制当前结果";
+    const primary = host.querySelector<HTMLButtonElement>(".dbx-transfer-split > button")!;
+    expect(primary.textContent).toBe(`${label} ${rows} × 2`);
+    expect(primary.getAttribute("aria-label")).toBe(`${label} ${rows} 行 × 2 列`);
+    for (const format of ["CSV", "JSON"]) {
+      await click("复制为");
+      expect(host.querySelector('[role="menuitem"]')?.textContent).toBe(`${selected ? "选区" : "当前筛选结果"} ${rows} 行 × 2 列`);
+      await click(format);
+      const [data, options] = mocks.copy.mock.calls[mocks.copy.mock.calls.length - 1];
+      expect(data.rows).toEqual(selected ? [["0002", "edited-1", "B"], ["0001", "edited-0", "A"]] : [["0002", "edited-1", "B"]]);
+      expect(options.columnIndices).toEqual([2, 0]);
+      expect(options.format).toBe(format.toLowerCase());
+      expect(primary.textContent).toBe(`${label} ${rows} × 2`);
+    }
+  });
   it.each(["cancelling", "finalizing"] as const)("后台文件任务处于 %s 时仍能独立复制", async phase => {
     await click("导出"); await click("保存文件", dialog());
     const job = mocks.jobs.get(key)!;

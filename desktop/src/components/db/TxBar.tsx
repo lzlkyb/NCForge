@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Icon } from "../ui/icon";
 import { friendlyDbError, parseDbError, thousands } from "../../lib/db";
 import { reconnectSession } from "../../lib/dbConfirm";
@@ -6,6 +6,7 @@ import { dbTaskSpec, dbTxKey } from "../../lib/dbOperations";
 import { getOperations, operationActive, subscribeOperations, trackOperation } from "../../lib/operations";
 import { patchTab, setTx, setTxNotice, sqlTabOf, txAction, useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
 import { dbApi, type TxInfo } from "../../lib/dbApi";
+import { ContextMenu } from "../workspace/ContextMenu";
 
 type TxTarget = {
   connId: string | null;
@@ -67,15 +68,40 @@ export function useDbTransaction({ connId, tabId, slot, tx: slotTx, notice: slot
     }
   };
 
-  return { tx, slot, pending, notice, lost, active, disabled, canReconnect, modeChanged, connected, act,
+  return { tx, slot, pending, notice, lost, active, disabled, canReconnect, modeChanged, connected, blocked, act,
     mode: readOnly ? "只读查询" : tx ? tx.autoCommit ? "自动提交" : "手动提交" : undefined };
 }
 
 type Transaction = ReturnType<typeof useDbTransaction>;
 
-export function TransactionButtons({ transaction: t }: { transaction: Transaction }) {
-  const title = t.lost ? "当前会话的事务结果待核对" : t.mode === "自动提交" ? "当前会话使用自动提交"
+function transactionReason(t: Transaction) {
+  return !t.connected ? "当前连接尚未建立" : t.lost ? "当前会话的事务结果待核对"
+    : t.active ? `${t.active.label}中，等待数据库确认` : t.blocked ? "正在执行 SQL，等待返回后处理事务"
+    : t.mode === "只读查询" ? "当前连接全部会话使用只读查询" : t.mode === "自动提交" ? "当前会话使用自动提交"
     : t.pending ? "处理当前会话的事务" : "当前会话没有待提交的写入";
+}
+
+export function TransactionMenu({ transaction: t }: { transaction: Transaction }) {
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const label = `${t.slot ? "独立会话" : "共享会话"} · ${t.mode ?? "状态待确认"}`;
+  return <>
+    <button type="button" className="dbx-btn ghost dbx-session-trigger" aria-label={`当前会话：${label}`} aria-haspopup="menu" aria-expanded={!!menu} onClick={event => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      setMenu({ x: rect.left, y: rect.bottom + 4 });
+    }}>
+      <span>{label}</span><Icon name="chevronDown" size={12} />
+    </button>
+    {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} items={[
+      { label: transactionReason(t), disabled: true, onSelect: () => {} },
+      { label: "提交", icon: "check", disabled: t.disabled, onSelect: () => void t.act("commit") },
+      { label: "回滚", icon: "stepOut", disabled: t.disabled, onSelect: () => void t.act("rollback") },
+      ...((t.lost || t.modeChanged) ? [{ label: t.notice?.verify ? "核对事务" : "重新连接", icon: "refresh" as const, disabled: !t.canReconnect, onSelect: () => void t.act("reconnect") }] : []),
+    ]} />}
+  </>;
+}
+
+export function TransactionButtons({ transaction: t }: { transaction: Transaction }) {
+  const title = transactionReason(t);
   return <div className="dbx-tx-actions" role="group" aria-label="当前会话事务">
     <button type="button" className={t.disabled ? "dbx-btn" : "dbx-btn ok"} title={title}
       disabled={t.disabled} aria-busy={t.active?.label === "提交事务"} onClick={() => void t.act("commit")}>
@@ -90,17 +116,19 @@ export function TransactionButtons({ transaction: t }: { transaction: Transactio
   </div>;
 }
 
-export function TxBar({ transaction: t }: { transaction: Transaction }) {
+export function TxBar({ transaction: t, actions = false }: { transaction: Transaction; actions?: boolean }) {
   const tone = t.active ? "busy" : t.lost || t.notice?.kind === "error" ? "bad"
     : t.pending || t.modeChanged ? "warn" : "ok";
   if (!t.active && !t.notice && !t.pending && !t.modeChanged) return null;
   return <div className="dbx-txbar" data-tone={tone} role="status">
     <Icon name={tone === "busy" ? "clock" : tone === "ok" ? "check" : "alertTriangle"} size={14} />
+    {actions && <span className="dbx-tx-owner">{t.slot ? "独立会话" : "共享会话"}</span>}
     {t.active ? <span>{t.active.label}中…等待数据库确认</span> : <>
       {t.notice && <span>{t.notice.text}</span>}
       {!t.lost && t.pending && <span>未提交事务 · <b>{t.tx?.statements}</b> 条写入 · 影响 <b>{thousands(t.tx?.rows ?? 0)}</b> 行</span>}
       {!t.lost && t.modeChanged && <span>{t.pending ? "提交方式已更新 · 处理事务后可重连" : "提交方式已更新 · 重连后生效"}</span>}
     </>}
+    {actions && !t.lost && (t.pending || t.active) && <TransactionButtons transaction={t} />}
     {(t.lost || t.modeChanged) && <button type="button" className="dbx-btn" disabled={!t.canReconnect} onClick={() => void t.act("reconnect")}>{t.notice?.verify ? "核对事务" : "重新连接"}</button>}
   </div>;
 }

@@ -1,15 +1,17 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { useResultOrder } from "../../hooks/useResultOrder";
+import { selectionBounds } from "../../lib/gridViewport";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
-import { ResultGrid, type GridEdit } from "./ResultGrid";
+import { ResultGrid, type GridEdit, type ResultGridApi } from "./ResultGrid";
 import { CellDetail } from "./CellDetail";
 import { thousands } from "../../lib/db";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { ResultTransfer } from "./ResultTransfer";
 import { freezeTransferFrame, type TransferFrame, type TransferSource } from "../../lib/resultTransferContext";
 import { quickCopyTransfer } from "../../lib/resultTransferQuick";
-import { nextSort, viewOrder, type SortState } from "../../lib/resultView";
+import { nextSort, type SortState } from "../../lib/resultView";
 import { serverSortLabel } from "../../lib/serverSort";
 
 /**
@@ -23,7 +25,8 @@ import { serverSortLabel } from "../../lib/serverSort";
  */
 import { GridColumns } from "./GridColumns";
 import { ResultCompare } from "./ResultCompare";
-import { loadLayout, saveLayout, gridColumns, selectedRows, selectedCols, type Selection, type GridLayout, type ResultSnapshot } from "../../lib/dbResultTools";
+import { ResultSource } from "./ResultSource";
+import { loadLayout, saveLayout, gridColumns, type Selection, type GridLayout, type ResultSnapshot } from "../../lib/dbResultTools";
 
 export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated }: {
   columns: ColumnMeta[];
@@ -37,7 +40,7 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
   zh?: Record<string, string>;
   /** 结果条右侧额外的按钮（表页的保存 / 预览 SQL）。 */
   tools?: ReactNode;
-  foot?: ReactNode;
+  foot?: ReactNode | ((selection: ReactNode) => ReactNode);
   /** 结果标签（SQL 控制台传；表页没有），放在结果条最左边。 */
   tabs?: ReactNode;
   /** 条件出现的副条：多结果集 / 导出进度。 */
@@ -51,6 +54,8 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
   transferSource?: TransferSource;
 }) {
   const [filter, setFilter] = useState("");
+  const gridApi = useRef<ResultGridApi | null>(null);
+  const filterInput = useRef<HTMLInputElement>(null);
 
   const [sort, setSort] = useState<SortState | null>(null);
   const [selection,setSelection] = useState<Selection|null>(null);
@@ -67,7 +72,8 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
   const setDetail=(detail:boolean)=>setUi(v=>({...v,detail}));
   const setMenu=(menu:typeof ui.menu)=>setUi(v=>({...v,menu}));
   const setHead=(head:typeof ui.head)=>setUi(v=>({...v,head}));
-  const order = useMemo(() => viewOrder(rows, columns, filter, sort), [rows, columns, filter, sort]);
+  const { order, pending, error: orderError, retry } = useResultOrder(rows, columns, filter, sort);
+  const bounds = selectionBounds(order,visible,selection);
 
   const valueAt=(r:number,c:number)=>edit?.changed.has(`${r}:${c}`) ? edit.changed.get(`${r}:${c}`)! : rows[r][c];
   const frame: TransferFrame = { data: { columns, rows }, order, visible, selection,
@@ -86,15 +92,38 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
   };
 
   const selValue = sel ? valueAt(sel.r,sel.c) : undefined;
-  const source = snapshot && <details className="dbx-result-source"><summary>查询来源 · {snapshot.complete ? "完整查询结果" : "已读取部分数据"}</summary><div>{snapshot.source} · {new Date(snapshot.at).toLocaleString()}</div><pre>{snapshot.sql}</pre></details>;
+  const selectionSummary = bounds && <span className="dbx-selection-summary">选区 {bounds.rowEnd-bounds.rowStart+1} 行 × {bounds.colEnd-bounds.colStart+1} 列</span>;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-      <div className="dbx-rbar">
-        {tabs}
-        <span className="meta">{meta}</span>
-        {filter && order.length !== rows.length && <span className="meta">筛出 <b>{thousands(order.length)}</b> 行</span>}
-        {(sort || filter) && (
+    <div className="dbx-result-table" onKeyDown={event=>{
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase()==="f" &&
+        event.target instanceof HTMLElement && event.target.closest('[role="grid"]') && !event.target.closest('input,textarea,[contenteditable="true"]')) {
+        event.preventDefault();setFilterOpen(true);requestAnimationFrame(()=>filterInput.current?.focus());
+      }
+    }}>
+      {tabs && <div className="dbx-result-head">{tabs}</div>}
+      <div className="dbx-rbar dbx-result-tools">
+        <button type="button" className="dbx-btn ghost dbx-filter-trigger" data-on={filterOpen || filter || undefined}
+          title="筛选已加载数据 · 网格中 Ctrl+F" aria-label="筛选结果" aria-expanded={filterOpen || !!filter}
+          onClick={()=>setFilterOpen(v=>!v)}><Icon name="search" size={14} /><span>筛选已加载数据</span></button>
+        {(filterOpen || filter) && <input ref={filterInput} className="dbx-inp sm dbx-result-filter" value={filter}
+          placeholder="输入关键字" aria-label="在结果中筛选" onChange={e=>setFilter(e.target.value)} autoFocus={filterOpen}
+          onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();setFilter("");setFilterOpen(false);gridApi.current?.focusActive();}}} />}
+        <button type="button" className="dbx-btn ghost" title="显示、隐藏、冻结列与恢复布局" aria-label="结果列布局" onClick={()=>setColumnOpen(true)}><Icon name="sliders" size={14} /><span className="dbx-action-label">显示列 {visible.length} / {columns.length}</span></button>
+        {snapshot && <ResultCompare snapshot={snapshot} related={onRelated ? {label:"关联记录",icon:"external",disabled:!sel,onSelect:()=>sel && onRelated(rows[sel.r])} : undefined} />}
+        {!snapshot && onRelated && <button type="button" className="dbx-btn ghost" disabled={!sel} onClick={()=>sel && onRelated(rows[sel.r])}>关联记录</button>}
+        <span className="dbx-sp" />
+        {!snapshot && <span className="meta">{meta}</span>}
+        {typeof foot !== "function" && selectionSummary}
+        {tools}
+        {(running || pending) && <span className="dbx-busy" role="status"><Icon name="spinner" size={12} />{running ? "执行中…" : "正在整理结果…"}</span>}
+        <ResultTransfer frame={frame} valueAt={valueAt} />
+        <button type="button" className="dbx-ibtn" data-on={detail || undefined} title="单元格详情" aria-label="单元格详情" aria-pressed={detail} onClick={()=>setDetail(!detail)}><Icon name="info" size={14} /></button>
+        {snapshot && <ResultSource snapshot={snapshot} meta={meta} />}
+        {settings}
+      </div>
+      {(sort || filter) && <div className="dbx-result-view-state" role="status">
+        {filter && <span>筛出 <b>{thousands(order.length)}</b> 行</span>}
           <span
             className="dbx-localhint"
             title={
@@ -105,60 +134,16 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
           >
             仅作用于已取的 {thousands(rows.length)} 行{onServerSort ? " · 右键表头可整表重排" : ""}
           </span>
-        )}
-        <span className="dbx-sp" />
-        {selection && <span className="meta">选区 {selectedRows(order,selection).length} 行 × {selectedCols(visible,selection).length} 列</span>}
-        {tools}
-        {snapshot && <ResultCompare snapshot={snapshot} related={onRelated ? {label:"关联记录",icon:"external",disabled:!sel,onSelect:()=>sel && onRelated(rows[sel.r])} : undefined} />}
-        {!snapshot && onRelated && <button type="button" className="dbx-btn ghost" disabled={!sel} onClick={()=>sel && onRelated(rows[sel.r])}>关联记录</button>}
-        <button type="button" className="dbx-btn ghost" title="显示、隐藏、冻结列与恢复布局" aria-label="结果列布局" onClick={()=>setColumnOpen(true)}><Icon name="sliders" size={14} /><span className="dbx-action-label">列布局</span></button>
-        {running && (
-          <span className="dbx-busy">
-            <Icon name="spinner" size={12} />
-            执行中…
-          </span>
-        )}
-        <button
-          type="button"
-          className="dbx-ibtn"
-          data-on={filterOpen || filter ? "" : undefined}
-          title="在结果中筛选"
-          aria-label="筛选结果"
-          aria-expanded={filterOpen || !!filter}
-          onClick={() => setFilterOpen((v) => !v)}
-        >
-          <Icon name="search" size={14} />
-        </button>
-        {(filterOpen || filter) && (
-          <input
-            className="dbx-inp sm"
-            value={filter}
-            placeholder="在结果中筛选"
-            aria-label="在结果中筛选"
-            autoFocus={filterOpen}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-        )}
-        <ResultTransfer frame={frame} valueAt={valueAt} />
-        <button
-          type="button"
-          className="dbx-ibtn"
-          data-on={detail || undefined}
-          title="单元格详情"
-          aria-label="单元格详情"
-          aria-pressed={detail}
-          onClick={() => setDetail(!detail)}
-        >
-          <Icon name="info" size={14} />
-        </button>
-        {settings}
-      </div>
+        <button type="button" className="dbx-lk" onClick={()=>{setFilter("");setSort(null);}}>清除筛选与排序</button>
+      </div>}
+      {orderError && <div role="alert">{orderError}<button type="button" onClick={retry}>重试计算</button><button type="button" onClick={()=>{setFilter("");setSort(null);}}>清除筛选与排序</button></div>}
       {subbar && <div className="dbx-rsub">{subbar}</div>}
       <div className="dbx-rbody">
         <ResultGrid
+          apiRef={gridApi}
           columns={columns}
           rows={rows}
-          empty={<><strong>{filter ? "筛选后没有匹配的行" : "没有匹配的行"}</strong><span>{filter ? "结果筛选只作用于已读取的数据。" : "可调整查询条件后重新执行。"}</span>{filter && <button type="button" className="dbx-btn ghost" onClick={()=>setFilter("")}>清除结果筛选</button>}</>}
+          empty={pending ? "正在计算结果…" : orderError ? "结果计算失败" : <><strong>{filter ? "筛选后没有匹配的行" : "没有匹配的行"}</strong><span>{filter ? "结果筛选只作用于已读取的数据。" : "可调整查询条件后重新执行。"}</span>{filter && <button type="button" className="dbx-btn ghost" onClick={()=>setFilter("")}>清除结果筛选</button>}</>}
           order={order}
           sort={sort}
           onSort={(c) => setSort(nextSort(sort, c))}
@@ -183,11 +168,11 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
             row={sel ? sel.r + 1 : null}
             value={selValue === undefined ? null : selValue}
             empty={!sel}
-            onClose={() => setDetail(false)}
+            onClose={() => {setDetail(false);requestAnimationFrame(()=>gridApi.current?.focusActive());}}
           />
         )}
       </div>
-      {foot ? <div className="dbx-result-footer">{source}{foot}</div> : source}
+      {foot && <div className="dbx-result-footer">{typeof foot === "function" ? foot(selectionSummary) : foot}</div>}
       {columnOpen && <GridColumns columns={columns} layout={layout} onChange={setColumns} onClose={()=>setColumnOpen(false)} />}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       {head && (

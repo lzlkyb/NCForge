@@ -51,7 +51,6 @@
 .dbx-btn.ghost { border-color: transparent; background: none; color: hsl(var(--muted-foreground)); }
 .dbx-btn.ghost:hover:not(:disabled) { color: hsl(var(--foreground)); background: hsl(var(--secondary)); }
 .dbx-btn.ghost[data-on] { color: hsl(var(--accent-foreground)); background: hsl(var(--accent)); }
-.dbx-btn .k { opacity: .65; font-size: var(--dbx-fs-meta); }
 .dbx-ibtn { width: var(--dbx-h-icon); height: var(--dbx-h-icon); border-radius: var(--r-control); display: grid; place-items: center; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
 .dbx-ibtn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
 .dbx-ibtn[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
@@ -228,10 +227,32 @@
 .dbx-gc.null { color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); }
 .dbx-gc.rn { text-align: right; color: hsl(var(--muted-foreground)); background: hsl(var(--chrome)); position: sticky; left: 0; z-index: 1; }
 .dbx-grow[data-odd] .dbx-gc.rn { background: hsl(var(--chrome)); }
-.dbx-grow[data-sel] .dbx-gc, .dbx-grow[data-sel] .dbx-gc.rn { background: hsl(var(--accent)); }
-.dbx-gc[data-cell] { outline: 2px solid hsl(var(--primary)); outline-offset: -2px; background: hsl(var(--accent)) !important; }
-.dbx-gc[data-focus-container]:focus-within { outline-offset: -2px; }
-.dbx-gc.chg { background: hsl(var(--warning) / .18); }
+.dbx-grid { --grid-selection-fill: hsl(var(--selection-inactive)); --grid-selection-edge: hsl(var(--muted-foreground)); }
+.dbx-grid:focus-within { --grid-selection-fill: hsl(var(--selection-bg)); --grid-selection-edge: hsl(var(--selection-marker)); }
+.dbx-grid .dbx-gc[data-cell] { outline: none; background: var(--grid-selection-fill); }
+/* One logical perimeter, not a new rectangle at every virtualized slice. */
+.dbx-gc[data-range-edges]::after,.dbx-gc[data-active-cell]::after,.dbx-gc[data-editing]::after { content:"";position:absolute;inset:0;pointer-events:none;border:0 solid var(--grid-selection-edge); }
+.dbx-gc[data-range-edges~="top"]::after { border-top-width:1px; }
+.dbx-gc[data-range-edges~="bottom"]::after { border-bottom-width:1px; }
+.dbx-gc[data-range-edges~="left"]::after { border-left-width:1px; }
+.dbx-gc[data-range-edges~="right"]::after { border-right-width:1px; }
+.dbx-gc[data-active-cell]::after { border-width:1px; }
+.dbx-grid:focus-within .dbx-gc[data-active-cell]::after,.dbx-gc[data-editing]::after { border-width:2px; }
+.dbx-grid .dbx-gc[data-focus-container]:focus-within { outline:none; }
+.dbx-grid .dbx-gh[data-range-heading],.dbx-grid .dbx-gc.rn[data-range-heading] { background:color-mix(in srgb,var(--grid-selection-fill) 65%,hsl(var(--chrome))); }
+/* Changed/error values retain their semantic surface and NULL retains its text treatment. */
+.dbx-grid .dbx-gc.chg { background:color-mix(in srgb,hsl(var(--warning)) 18%,hsl(var(--card))); }
+.dbx-grid .dbx-gc.chg::before { content:"";position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:hsl(var(--warning-ink));pointer-events:none; }
+.dbx-grid .dbx-gc:is(.error,[data-error]) { background:color-mix(in srgb,hsl(var(--destructive)) 12%,hsl(var(--card))); }
+.dbx-grid .dbx-gc:is(.error,[data-error]) { text-decoration:underline wavy hsl(var(--destructive-ink));text-underline-offset:3px; }
+@media (forced-colors:active) {
+  .dbx-grid { --grid-selection-fill:Canvas; --grid-selection-edge:GrayText; }
+  .dbx-grid:focus-within { --grid-selection-fill:Highlight; --grid-selection-edge:Highlight; }
+  .dbx-grid .dbx-gc[data-cell] { forced-color-adjust:none;background:var(--grid-selection-fill);color:CanvasText; }
+  .dbx-grid:focus-within .dbx-gc[data-cell] { color:HighlightText; }
+  .dbx-grid:focus-within .dbx-gc[data-active-cell]::after { border-color:HighlightText; }
+  .dbx-grid .dbx-gc.chg::before { background:CanvasText;outline:1px solid Canvas; }
+}
 .dbx-gh { flex-shrink: 0; position: relative; height: var(--dbx-head-h); padding: 4px 10px 0; border-bottom: 1px solid hsl(var(--border)); font: 600 var(--dbx-fs-body) system-ui, "Segoe UI", sans-serif; white-space: nowrap; overflow: hidden; text-align: left; background: hsl(var(--chrome)); }
 .dbx-gh .t { display: block; font-size: var(--dbx-fs-meta); line-height: 17px; color: hsl(var(--muted-foreground)); font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
 .dbx-gh:not([data-description]) {padding-top:calc((var(--dbx-head-h) - 20px) / 2);}

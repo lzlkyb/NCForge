@@ -8,6 +8,7 @@ export interface SortState {
   dir: "asc" | "desc";
 }
 
+const collator = new Intl.Collator("zh-CN");
 function cmp(a: Cell, b: Cell, numeric: boolean): number {
   // NULL 永远排最后，不论升降序（与 PL/SQL Developer 一致）
   if (a === null && b === null) return 0;
@@ -18,7 +19,7 @@ function cmp(a: Cell, b: Cell, numeric: boolean): number {
     const y = Number(b);
     if (!Number.isNaN(x) && !Number.isNaN(y)) return x - y;
   }
-  return String(a).localeCompare(String(b), "zh-CN");
+  return collator.compare(String(a), String(b));
 }
 
 export function viewOrder(rows: Cell[][], columns: ColumnMeta[], filter: string, sort: SortState | null): number[] {

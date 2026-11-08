@@ -98,10 +98,13 @@ describe("数据库连接表单：没有 NC home 也能用", () => {
     expect(engines[0].getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("这台机器没有 NC home 时，JVM 桥按钮带「需要 NC 安装目录」标注；有 home 就没有", async () => {
+  it("这台机器没有 NC home 时，JVM 桥按钮的提示要指出「可以下载组件」，有 home 就没有", async () => {
     probe.mockResolvedValue({ root: null });
     await render();
-    expect(engineButtons()[1].title).toContain("需要 NC 安装目录");
+    const title = engineButtons()[1].title;
+    expect(title).toContain("还没配 NC 安装目录");
+    // JVM 桥不再只有「配 NC home」一条路：没装 NC 的用户可以下组件
+    expect(title).toContain("数据库 JVM 组件");
 
     probe.mockResolvedValue({ root: "D:\\ncc\\1909home" });
     await render();

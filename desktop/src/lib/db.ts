@@ -88,6 +88,8 @@ const KNOWN_CODES = new Set([
   "need-password",
   "not-connected",
   "session-lost",
+  // 语句没跑完（点了停止或超过等待超时），会话还在——不要跟 `bridge` 混为一谈
+  "timeout",
   "fallback-session-lost",
   "probe-failed",
   "bridge",
@@ -97,9 +99,12 @@ const KNOWN_CODES = new Set([
   "slot-gone",
   // 一条连接上的独立会话用满了（最多 3 个）
   "slots-full",
-  // 这个操作需要 NC 安装目录（JVM 桥 / prop.xml 口令）。纯 Rust 引擎不需要——
-  // 界面据此引导「换引擎」或「去设置配置」，不靠字符串匹配错误文本
+  // 这个操作需要 NC 安装目录（prop.xml 口令要 NC 的类）
   "need-nc-home",
+  // 这个操作需要一套 Java 运行时 + Oracle 驱动。装了 NC 就有，没装的话可以由
+  // `ncdb` 资源包或系统 Java 提供——所以它和 `need-nc-home` 是两件事：
+  // 前者要 NC 的类，后者只要一个 JVM。界面据此给出「下载组件」或「换引擎」。
+  "need-jvm",
 ]);
 
 export interface DbError {
@@ -110,6 +115,7 @@ export interface DbError {
     | "need-password"
     | "not-connected"
     | "session-lost"
+    | "timeout"
     | "fallback-session-lost"
     | "probe-failed"
     | "bridge"
@@ -118,6 +124,7 @@ export interface DbError {
     | "slot-gone"
     | "slots-full"
     | "need-nc-home"
+    | "need-jvm"
     | "other";
   message: string;
 }
@@ -140,13 +147,20 @@ export function friendlyDbError(e: unknown): string {
   const { code, message } = parseDbError(e);
   switch (code) {
     case "need-password":
-      return "这个连接还没存口令：输一次，之后会记住（Windows 加密存本机，换机器要重输）";
+      return "这个连接还没存口令：输一次就行（Windows 用 DPAPI、macOS 用钥匙串加密存本机，换机器要重输）";
     case "auth":
       return `用户名或口令不对：检查连接里的用户名，或让 DBA 确认账号没被锁（${message}）`;
     case "unreachable":
-      return `连不上数据库：检查网络 / VPN 是否通、服务名或 SID 是否写对（${message}）`;
+      // 后端只说事实（TCP 超时 / 被拒 / ORA-12541），建议统一在这里给
+      return `连不上数据库：${message}（检查网络 / VPN 是否通、端口与服务名是否写对）`;
     case "not-connected":
       return "这个连接还没连上：先在左侧点一下连接";
+    case "timeout":
+      // 只是不该落到 `bridge` 的「进程异常」文案上：原文「语句已中断…会话仍然可用」就是对的
+      return message;
+    case "need-jvm":
+      // 后端已经把三条出路写全（配 NC / 下组件 / 换引擎），这里不再重复
+      return message;
     case "bridge":
       return `数据库进程异常（超时或已退出），重新连接即可：${message}`;
     default:

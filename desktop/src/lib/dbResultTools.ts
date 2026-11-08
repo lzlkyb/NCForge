@@ -34,13 +34,15 @@ export function gridColumns(columns: ColumnMeta[], layout: GridLayout): number[]
   const names = [...new Set([...layout.frozen, ...layout.order, ...columns.map(c => c.name)])];
   return names.filter(n => byName.has(n) && !layout.hidden.includes(n)).map(n => byName.get(n)!);
 }
-export interface ResultSnapshot { source: string; sql: string; at: number; complete: boolean; columns: ColumnMeta[]; rows: Cell[][] }
+export interface ResultSnapshot { source: string; schema?: string; originTabId?: string; sql: string; at: number; complete: boolean; columns: ColumnMeta[]; rows: Cell[][] }
 export interface ResultDiff { added: Cell[][]; removed: Cell[][]; changed: { before: Cell[]; after: Cell[] }[] }
 export function compareResults(before: ResultSnapshot, after: ResultSnapshot, keys: string[]): ResultDiff {
   if (!keys.length) throw new Error("请选择能唯一标识记录的字段");
   const names = before.columns.map(c => c.name.toUpperCase());
-  if (names.length !== new Set(names).size || new Set(after.columns.map(c=>c.name.toUpperCase())).size !== after.columns.length || after.columns.length !== names.length || names.some(n => !after.columns.some(c => c.name.toUpperCase() === n))) throw new Error("两份结果的字段必须一致且不能重名");
-  const aligned = after.rows.map(r => names.map(n => r[after.columns.findIndex(c => c.name.toUpperCase() === n)]));
+  const afterIndices = new Map(after.columns.map((column,index) => [column.name.toUpperCase(),index]));
+  if (names.length !== new Set(names).size || afterIndices.size !== after.columns.length || after.columns.length !== names.length || names.some(n => !afterIndices.has(n))) throw new Error("两份结果的字段必须一致且不能重名");
+  const alignment = names.map(name => afterIndices.get(name)!);
+  const aligned = after.rows.map(r => alignment.map(index => r[index]));
   const indexes = keys.map(k => names.indexOf(k.toUpperCase()));
   if (indexes.some(i => i < 0)) throw new Error("对比键不在两份结果中");
   const map = (rows: Cell[][]) => {

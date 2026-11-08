@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks=vi.hoisted(()=>({tab:{id:"t",kind:"sql",title:"SQL 1",connId:"c",slot:"7",running:false,results:[] as unknown[]},ensure:vi.fn(),exec:vi.fn(),cancel:vi.fn(),activate:vi.fn(),patch:vi.fn()}));
-vi.mock("./dbApi",()=>({dbApi:{cancel:mocks.cancel}}));
-vi.mock("./dbStore",()=>({tabOf:()=>mocks.tab,activateTab:mocks.activate,sqlTabOf:()=>mocks.tab,connOf:()=>({name:"测试连接"}),patchTab:(_id:string,patch:Record<string,unknown>)=>{Object.assign(mocks.tab,patch);mocks.patch(patch);},execOne:mocks.exec,setTxNotice:vi.fn(),appendOutput:vi.fn(),loadMeta:vi.fn()}));
+vi.mock("./dbApi",async importOriginal=>({...await importOriginal<typeof import("./dbApi")>(),dbApi:{cancel:mocks.cancel}}));
+vi.mock("./dbStore",()=>({tabOf:()=>mocks.tab,activateTab:mocks.activate,sqlTabOf:()=>mocks.tab,connOf:()=>({name:"测试连接",env:"test",source:"manual",url:"jdbc:test",user:"NC",engine:"java",propDs:null}),rtOf:()=>({currentSchema:"SCHEMA_A"}),patchTab:(_id:string,patch:Record<string,unknown>)=>{Object.assign(mocks.tab,patch);mocks.patch(patch);},execOne:mocks.exec,setTxNotice:vi.fn(),appendOutput:vi.fn(),loadMeta:vi.fn()}));
 vi.mock("./dbConfirm",()=>({ensureConnected:mocks.ensure,confirmProdWrite:vi.fn(async()=>true)}));
 vi.mock("./sqlModels",()=>({disposeSqlModel:vi.fn()}));
 vi.mock("../components/ui/toast",()=>({toast:vi.fn()}));
@@ -18,6 +18,8 @@ describe("数据库用户任务反馈",()=>{
     const stmts=[{text:"select secret",startLine:1},{text:"select password",startLine:2}];
     const first=runStatements("t",stmts);await runStatements("t",stmts);expect(mocks.ensure).toHaveBeenCalledTimes(1);
     ready(true);const out=await first;expect(mocks.exec).toHaveBeenCalledTimes(2);expect(out.failures).toHaveLength(1);
+    expect(mocks.exec.mock.calls[0][3]).toMatchObject({connId:"c",schema:"SCHEMA_A",sql:stmts[0].text,target:stmts[0]});
+    expect(Object.isFrozen(mocks.exec.mock.calls[0][3])).toBe(true);
     expect(latest().state).toBe("failed");expect(latest().progress).toEqual({done:2,total:2});
     expect(JSON.stringify(latest())).not.toMatch(/secret|password|bind-value/);expect(latest().scope).toContain("独立会话 7");
     revealOperation(latest().id);expect(mocks.activate).toHaveBeenCalledWith("t");
