@@ -54,3 +54,19 @@ it("previews use the source result's project root, do not open an editor, and di
   form = { ...form, projectOutcome: { projects: [], errors: [], elapsedMs: 2, truncated: false } }; await act(async () => render());
   expect(host.querySelector('[aria-label="源码上下文预览"]')).toBeNull();
 });
+
+// 10000 条命中在单跑时 0.35s，但整套并行跑 jsdom 抢 CPU 会顶到默认 5s 超时（实测 pre-push 偶发红）。
+// 这里显式放宽：用例要验的是「大结果只渲染窗口内节点」，不是性能。
+it("bounds large-result DOM and reveals a keyboard-selected last hit", async () => {
+  const many = Array.from({ length: 10000 }, (_, i) => ({ ...hits[0], line: i + 1 }));
+  form = { ...form, outcome: { ...outcome(), hits: many } };
+  await act(async () => render());
+  expect(host.querySelectorAll("[data-hit-key]").length).toBeLessThan(40);
+  const list = host.querySelector<HTMLElement>('[aria-label="搜索结果列表"]')!;
+  await press(list, "ArrowUp");
+  expect(host.querySelector('[data-selected="true"]')?.getAttribute("data-hit-key")).toContain("10000");
+  await press(list, "Enter");
+  expect(open).toHaveBeenLastCalledWith(many[9999]);
+  await act(async () => button("全部折叠").click());
+  expect(host.querySelectorAll("[data-hit-key]")).toHaveLength(0);
+}, 30000);
