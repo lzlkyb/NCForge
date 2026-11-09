@@ -1,35 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { javaSuggestOptions } from "../../lib/javaSuggestOptions";
-import { bindEditorCommand } from "../../lib/editorCommandBinding";
-import { getModel, touchModel, onModelLifecycle } from "../../lib/editorStore";
+import { getModel, pathOfModel, touchModel, onModelLifecycle } from "../../lib/editorStore";
 import { readGroupView, storeGroupView } from "../../lib/editorGroupViews";
 import type { EditorGroupId } from "../../lib/editorGroups";
 import { registerLangProviders } from "../../lib/langProviders";
 import { registerExtraLangProviders } from "../../lib/langProvidersExtra";
 import { registerEditorKeys, releaseCurrentEditor, setCurrentEditor } from "../../lib/editorActions";
-import { editorCommand, getKeymap, isTypeHierarchyKey } from "../../lib/keymap";
 import { registerJavaSqlActions } from "../../lib/javaSqlActions";
 import { registerJavaTemplates } from "../../lib/liveTemplates";
-import { organizeImportsCommand } from "../../lib/javaActions";
-import { registerRefactorKeys } from "../../lib/refactor";
-import { runCallHierarchy } from "../../lib/callHierarchy";
-import { runTypeHierarchy } from "../../lib/typeHierarchy";
 import { attachErrorLens } from "../../lib/errorLens";
 import { attachBookmarkGutter } from "../../lib/bookmarkGutter";
 import { attachDebugGutter } from "../../lib/debugGutter";
 import { wireDebugHover } from "../../lib/debugHover";
-import { toggleBreakpointHere } from "../../lib/debugSession";
-import { registerDebugEditorKeys } from "../../lib/debugEditorKeys";
 import { getEditorPrefs, monacoOptionsOf, PREFS_EVENT } from "../../lib/editorPrefs";
 import { attachJavaStickyScope } from "../../lib/javaStickyScope";
 import { formatBeforeSave } from "../../lib/formatOnSave";
-import { noteEdit, previousEditSpot } from "../../lib/editHistory";
-import { pathOfModel } from "../../lib/editorStore";
-import { toggleBookmark } from "../../lib/bookmarks";
-import { setSession } from "../../lib/workspaceSession";
-import { toast } from "../ui/toast";
-import { navigate } from "../../lib/lang";
+import { registerEditorBindings } from "../../lib/editorBindings";
+import { noteEdit } from "../../lib/editHistory";
 import "../../error-lens.css";
 import "../../bookmark-gutter.css";
 import "../../debug.css";
@@ -104,84 +92,8 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     });
     // Ctrl+S 与自动保存共用：先按偏好格式化，再落盘
     const saveNow = () => onSaveRef.current(() => formatBeforeSave(editor));
-    const bind = (key: number, run: () => void, label: string) => bindEditorCommand(editor, key, run, label);
-    bind(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveNow(), "保存当前文件");
-    // Ctrl+Alt+O = 组织导入（IDEA 同键）。走命令而不是 provider：
-    // 它是一次性的整文件动作，不是「编辑器要显示什么」。
-    bind(
-      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyO,
-      () => void organizeImportsCommand(),
-      "组织导入",
-    );
-    // Ctrl+Alt+H = 调用层级（IDEA 同键）。结果落在底部面板的「调用层级」标签。
-    bind(
-      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyH,
-      () => void runCallHierarchy(),
-      "调用层级",
-    );
-    // 提取类重构（IDEA 同键：Ctrl+Alt+M/V/F/C）。键位与命令面板共用 lib/refactor 里的清单
-    registerRefactorKeys(editor);
-    // F11 = 加/去书签（IDEA 同键）；Shift+F11 = 打开书签面板
-    bind(monaco.KeyCode.F11, () => {
-      const model = editor.getModel();
-      const pos = editor.getPosition();
-      if (!model || !pos) return;
-      const path = pathOfModel(model);
-      if (!path) {
-        toast("jar 内的类不能加书签", "info");
-        return;
-      }
-      const r = toggleBookmark(path, pos.lineNumber, model.getLineContent(pos.lineNumber));
-      toast(r === "added" ? `已加书签（第 ${pos.lineNumber} 行）` : "已移除书签", "success");
-    }, "切换当前行书签");
-    bind(monaco.KeyMod.Shift | monaco.KeyCode.F11, () => setSession({ panelOpen: true, panelTab: "bookmarks" }), "查看书签");
-    // Ctrl+F8 = 当前行加/去断点（IDEA 同键）。与书签 F11 互不挤占。
-    bind(monaco.KeyMod.CtrlCmd | monaco.KeyCode.F8, () => {
-      const model = editor.getModel();
-      const pos = editor.getPosition();
-      if (!model || !pos) return;
-      const path = pathOfModel(model);
-      if (!path) {
-        toast("jar 内的类不能加断点", "info");
-        return;
-      }
-      const r = toggleBreakpointHere(path, pos.lineNumber);
-      toast(r === "added" ? `已加断点（第 ${pos.lineNumber} 行）` : "已移除断点", "success");
-    }, "切换当前行断点");
-    // 调试步进键：F5–F9 的含义由当前 keymap 决定（见 lib/debugKeys）
-    registerDebugEditorKeys(editor);
-    // Ctrl+Shift+Backspace = 回到上一个编辑位置（与「后退」不同：它记的是打字，不是跳转）
-    bind(
-      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Backspace,
-      () => {
-        const pos = editor.getPosition();
-        const path = editor.getModel() ? pathOfModel(editor.getModel()!) : undefined;
-        const spot = previousEditSpot(path && pos ? { path, line: pos.lineNumber } : null);
-        if (!spot) {
-          toast("没有更早的编辑位置了", "info");
-          return;
-        }
-        navigate({ kind: "file", path: spot.path, line: spot.line, column: 1 });
-      },
-      "返回上一个编辑位置",
-    );
-    const keyboard = editor.onKeyDown(event => {
-      if (!editor.hasTextFocus()) return;
-      const keymap = getKeymap();
-      // 类型层级：两套方案各占一个键。不匹配的键原样放行——Eclipse 下 Ctrl+H 是全工程搜索，
-      // 由 App 的 window 监听处理，这里拦住就搜不到了。
-      if (isTypeHierarchyKey(event.browserEvent, keymap)) {
-        event.preventDefault();
-        event.stopPropagation();
-        void runTypeHierarchy();
-        return;
-      }
-      const action = editorCommand(event.browserEvent, keymap);
-      if (!action) return;
-      event.preventDefault();
-      event.stopPropagation();
-      editor.trigger("ncforge-keymap", action, undefined);
-    });
+    // 键位表与按键分发在创建时装配一次，独立成模块；这里只管订阅与清理。
+    const keyboard = registerEditorBindings(editor, saveNow);
     editor.onDidChangeCursorPosition((e) => onCursorRef.current(e.position.lineNumber, e.position.column));
     // 记录编辑位置（Ctrl+Shift+Backspace 用）+ 自动保存（可关，默认关）。
     // 两件事都在内容变化时触发，合并一个订阅：拆成两个会让每次按键多一次回调。

@@ -37,7 +37,7 @@ export function QueryField({ host, state, previous, reduced = false }: {host:Ele
     if(previous){const rect=node.getBoundingClientRect();const cells=[...box.querySelectorAll('[role="columnheader"]')];left=Math.max(0,...cells.map(cell=>cell.getBoundingClientRect().right-rect.left))+16;if(left>width-80)left=width-20;}
     const available=width-left;
     const teal=getComputedStyle(box).getPropertyValue("--primary").trim();
-    const color=teal?`hsl(${teal})`:"#218780";
+    const color=teal?`hsl(${teal})`:getComputedStyle(box).color;
     const fade=active?state==="cancelling"?.35:1:Math.max(0,1-age/.24);
     ctx.save();ctx.beginPath();ctx.rect(left,0,available,height);ctx.clip();
     ctx.globalAlpha=fade*(previous?(hover?.2:.65):.75);ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=1;

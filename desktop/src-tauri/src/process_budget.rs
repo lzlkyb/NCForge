@@ -13,10 +13,22 @@ impl Reservation {
             })
     }
 }
+/// 不直接用 `AtomicU64::fetch_update`：新版 stable 已把它标记 deprecated（改名
+/// `try_update`），`-D warnings` 下弃用警告会变成编译错误；而本地工具链较旧时
+/// 又不能直接换成新名字。手写 CAS 循环在两边都稳定，语义与 fetch_update 一致：
+/// 成功返回加之前的旧值，超预算（含溢出）返回当前值。
 fn reserve(counter: &AtomicU64, amount: u64) -> Result<u64, u64> {
-    counter.fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
-        used.checked_add(amount).filter(|next| *next <= LIMIT_MB)
-    })
+    let mut used = counter.load(Ordering::Acquire);
+    loop {
+        let next = match used.checked_add(amount) {
+            Some(next) if next <= LIMIT_MB => next,
+            _ => return Err(used),
+        };
+        match counter.compare_exchange_weak(used, next, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return Ok(used),
+            Err(actual) => used = actual,
+        }
+    }
 }
 impl Drop for Reservation {
     fn drop(&mut self) {

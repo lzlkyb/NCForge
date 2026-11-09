@@ -8,6 +8,7 @@ config.json
 
 # Build output
 dist/
+.vite/
 *.blob
 *.tsbuildinfo
 

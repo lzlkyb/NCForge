@@ -22,6 +22,10 @@
     "@tauri-apps/plugin-opener",
     "@tauri-apps/plugin-updater"
   ],
+  "ignore": [
+    "src/design-preview/query-controls.tsx",
+    "src/design-preview/QueryField.tsx"
+  ],
   "include": [
     "files",
     "dependencies"

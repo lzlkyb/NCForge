@@ -82,4 +82,20 @@ export default tseslint.config(
       },
     },
   },
+  {
+    // 查询交互走查页的裸脚本由 query-preview.html 直接 <script> 加载，跑在浏览器里，
+    // 不经过 Vite 的 TS 规则。补上它实际用到的浏览器全局，别用逐文件 /* global */ 注释
+    // 把「这是浏览器代码」这件事散落在每个文件头部。
+    files: ["src/design-preview/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        window: "readonly",
+        localStorage: "readonly",
+        performance: "readonly",
+        CustomEvent: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+      },
+    },
+  },
 );
