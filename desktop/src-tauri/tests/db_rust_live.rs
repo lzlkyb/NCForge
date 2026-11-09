@@ -45,6 +45,34 @@ fn call(e: &RustEngine, cmd: &str, args: &[&str]) -> Value {
 
 #[test]
 #[ignore = "要连真实数据库"]
+fn 表页大结果集留游标后重查同一_sql_不能打坏连接() {
+    let e = RustEngine::new();
+    call(&e, "connect", &[&url(), &user(), &pass(), "false"]);
+    // 必须用「行宽大」的真实表：窄表单列（`select level from dual connect by …`）
+    // 即使取 201 行也会被驱动一次取完，流上没有残余，测不出问题。
+    // `uapbd_log_h` 是 NC 标准日志表，62 列，201 行就会留下真实的分页游标。
+    let sql = "select * from uapbd_log_h";
+    let first = call(&e, "exec", &[sql, "201", "60"]);
+    assert_eq!(first["hasMore"], true, "要留一个没取完的游标才测得到");
+    assert_eq!(first["rowCount"], 201);
+
+    // 同一条 SQL 再执行。以前会命中语句缓存里那条「还挂着未关闭游标」的 slot：
+    // clone 出来的语句带着旧 cursor_id，驱动直接走 REEXECUTE_AND_FETCH，
+    // 服务端按旧游标回预取行，客户端把残留字节当消息头读，
+    // 报 `unknown TTC message type <随机值> at packet 1, offset …`，
+    // 而且这条连接从此永久错位（之后每条语句都炸）。
+    // 真实症状：打开一张大表的数据页，几秒后提示「数据库会话已断开」。
+    let again = call(&e, "exec", &[sql, "201", "60"]);
+    assert_eq!(again["kind"], "rows");
+    assert_eq!(again["rowCount"], 201);
+
+    // 连接必须还能用：错位是永久性的，probe 活着才算真修好
+    assert_eq!(call(&e, "probe", &[])["alive"], true);
+    call(&e, "disconnect", &[]);
+}
+
+#[test]
+#[ignore = "要连真实数据库"]
 fn probe_preserves_open_result_cursor() {
     let e = RustEngine::new();
     call(&e, "connect", &[&url(), &user(), &pass(), "false"]);

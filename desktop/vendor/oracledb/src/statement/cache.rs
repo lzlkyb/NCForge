@@ -73,27 +73,37 @@ impl StatementCache {
         cache_statement: bool,
         options: &StatementOptions,
     ) -> CachedStatement {
-        let cached_info =
-            self.cached_statements[slot_num - 1].as_ref().unwrap();
-        let mut info = cached_info.clone_with_options(options);
-        let fetch_lobs_changed =
-            cached_info.options().fetch_lobs() != options.fetch_lobs();
+        // 先把要用的东西从 `cached_statements` 里取出来（下面要 `&mut self` 关游标，
+        // 不能同时持着那里的不可变借用）。
+        let (mut info, fetch_lobs_changed, cached_sql) = {
+            let cached_info =
+                self.cached_statements[slot_num - 1].as_ref().unwrap();
+            (
+                cached_info.clone_with_options(options),
+                cached_info.options().fetch_lobs() != options.fetch_lobs(),
+                cached_info.sql().to_string(),
+            )
+        };
+        // 复用 slot 之前一律先把这个 slot 上可能还挂着的游标关掉并清 id
+        // （`clone_with_options` 会把 cursor_id 一起复制过来）。不这么做，
+        // 语句就会带着旧游标执行，驱动走 REEXECUTE_AND_FETCH 拿到错位的行包。
+        // 详见 `return_statement` 的注释。
+        self.close_cursor(&info);
+        info.clear_cursor();
         if let Some(index) =
             self.free_used_slots.iter().position(|x| *x == slot_num)
         {
             self.free_used_slots.remove(index);
             if !cache_statement {
-                self.slots_by_name.remove(cached_info.sql());
+                self.slots_by_name.remove(&cached_sql);
                 self.cached_statements[slot_num - 1] = None;
                 self.empty_slots.push_back(slot_num);
                 info.set_cache_slot_num(0);
             }
         } else {
             info.set_cache_slot_num(0);
-            info.clear_cursor();
         }
         if fetch_lobs_changed {
-            self.close_cursor(&info);
             info.clear_cursor();
         }
         info
@@ -187,7 +197,17 @@ impl StatementCache {
     pub(crate) fn return_statement(&mut self, info: &CachedStatement) {
         if info.is_cached() {
             let slot_num = info.cache_slot_num();
-            self.cached_statements[slot_num - 1] = Some(info.clone());
+            // 🔴 语句带着没取完的分页游标回缓存时，必须先把游标记进「待关闭」队列
+            // 再把 id 清掉。少了这一步，下一次同一条 SQL 命中这个 slot 时会带着
+            // 旧 cursor_id 直接走 TTC_RPC_REEXECUTE_AND_FETCH：服务端按旧游标回
+            // 预取行，客户端把残留字节当消息头读，报
+            // `unknown TTC message type <随机值> at packet 1, offset …`，
+            // 而且这条连接从此永久错位（`select * from 大表` 取一页再点查询必炸）。
+            // 不同 SQL 的 slot 没有活游标，所以只有「同一条 SQL 重执行」才复现。
+            let mut stored = info.clone();
+            self.close_cursor(&stored);
+            stored.clear_cursor();
+            self.cached_statements[slot_num - 1] = Some(stored);
             self.free_used_slots.push_back(slot_num);
         } else {
             self.close_cursor(info);

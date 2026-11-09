@@ -1216,9 +1216,11 @@ impl Session {
     fn indexes(&self, table: &str) -> Result<Value, BridgeError> {
         let conn = self.conn_ref()?;
         let t = table.to_uppercase();
+        // `all_ind_columns` 没有 `owner` 列，只认 `index_owner`（写 `ic.owner`
+        // 会让每一张表的「索引」页签都报 ORA-00904）。
         let sql = "select i.index_name, i.uniqueness, i.status, ic.column_name \
                    from all_indexes i join all_ind_columns ic \
-                   on ic.owner = i.owner and ic.index_name = i.index_name \
+                   on ic.index_owner = i.owner and ic.index_name = i.index_name \
                    where i.owner = sys_context('userenv','current_schema') \
                    and i.table_name = :1 order by i.index_name, ic.column_position";
         let cur = conn.query(sql, &[&t as &dyn ToDbValue]).map_err(drv_err)?;

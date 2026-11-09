@@ -1,11 +1,11 @@
 # vendored `oracledb`（Oracle 官方纯 Rust 驱动）
 
 这里是 [`oracledb` 26.0.0-beta.5](https://github.com/oracle/rust-oracledb) 的源码副本，
-上游有四处硬伤挡住我们用它做数据库引擎，所以打了补丁。`desktop/src-tauri/Cargo.toml`
+上游有五处硬伤挡住我们用它做数据库引擎，所以打了补丁。`desktop/src-tauri/Cargo.toml`
 用 `[patch.crates.io]` 把这份副本挂上去（版本号不变，所以依赖里写的
 `oracledb = "=26.0.0-beta.5"` 会自动用到这里）。
 
-升级驱动时：把新版本的 crate 源码整个覆盖进来，然后**重新应用下面四组补丁**，
+升级驱动时：把新版本的 crate 源码整个覆盖进来，然后**重新应用下面五组补丁**，
 再跑一遍本文件末尾的验证。
 
 ## 补丁一：11G 密码验证器（对应上游 issue #63）
@@ -182,6 +182,40 @@ ub4   结果集个数
 **已知限制**：隐式结果集的子语句没有走 `Response::resolve_object_types`，
 所以列里含用户自定义对象类型时取值会失败（普通标量/LOB/日期都没问题）。
 真遇到再补，注意要同时处理 `pending_values` 与 `implicit_results` 两处。
+
+## 补丁五：语句缓存把未关闭的游标一起存回，同 SQL 重执行必炸连接
+
+**症状**：对一张大表执行 `select * from T`（只取一页，游标留在引擎里），**再执行同一条 SQL**
+立刻报 `internal error: unknown TTC message type 32 at packet 1, offset …`，并且这条连接
+从此永久错位 —— 之后每条语句都炸。界面上表现为「刚打开一张表几秒就提示数据库会话已断开」。
+换成**另一条** SQL 就完全正常。
+
+**根因**（`src/statement/cache.rs`）：
+
+1. `return_statement` 把语句还回缓存时直接 `info.clone()` 存回 slot —— `clone` 连同
+   `cursor_id` 一起复制，既没把游标记进 `cursors_to_close` 让服务端关掉，也没清 id。
+2. 下次命中这个 slot 时，`get_statement_from_entry` 又用
+   `cached_info.clone_with_options(options)` 把那个**旧 cursor_id 带出去**
+   （`clone_with_options` 就是 `self.clone()` 再换 options）。
+3. 驱动看到 `cursor_id != 0`，按「游标还活着」处理，走 `TTC_RPC_REEXECUTE_AND_FETCH`；
+   而服务端那边游标早已和客户端缓冲对不上，于是把预取的行包当消息头读 → TTC 错位。
+
+不同 SQL 撞不到这个 slot，所以只有「同一条 SQL 重执行」复现 —— 这也解释了为什么
+「翻页、换成另一条查询都好好的」。
+
+**改法**：
+
+- `return_statement`：归还前把 `stored` 里挂着的游标 push 进 `cursors_to_close`
+  并 `clear_cursor()`，再存回 slot。
+- `get_statement_from_entry`：`clone_with_options` 之后**一律**先
+  `close_cursor(&info)` + `info.clear_cursor()`（顺手把原来只在部分分支才 `clear_cursor`
+  的写法统一掉）。这样即使 slot 上还挂着活游标（同一个 `Cursor` 还没 Drop），
+  复用它之前也一定先把旧游标关掉。
+
+**回归**：`tests/db_rust_live.rs::表页大结果集留游标后重查同一_sql_不能打坏连接`。
+注意必须用**行宽大**的真实表（`uapbd_log_h`，62 列）；窄表单列
+（`select level from dual connect by level <= 50000`）即使取 201 行也会被驱动一次取完，
+流上不留残余，测不出来 —— 这一点踩过，别再用它写回归。
 
 ## 其它小改动
 
