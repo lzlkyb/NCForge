@@ -4,6 +4,9 @@ name: Build
 # 推 tag 后只跑 build-windows（约占发版总时长的全部）。要 mac 包时，**不要再推一次
 # tag**，直接在已有 tag 上手动触发：
 #   gh workflow run build.yml --ref v0.1.2 -f with_macos=true
+# 如果问题出在工作流本身（例如 v0.3.0 的 mac 资源包被 vite build 清掉），用 main 上
+# 的修复版重建同一个 tag，不必移动 tag：
+#   gh workflow run build.yml --ref main -f with_macos=true -f release_tag=v0.3.0
 # 为什么默认关：mac 作业实测 25m50s，且与 Windows 串行（Windows 要合并 mac 的
 # updater 平台片段）——v0.1.1 因此跑满 53 分钟。mac 用户占比低，每次发版陪跑不值。
 #
@@ -35,6 +38,13 @@ on:
         description: '同时构建 macOS 包（默认不发，构建期间 Windows 要等它 ~26 分钟）'
         type: boolean
         default: false
+      # 修 CI 脚本但不想动已发布 tag 时用：从 main 触发，把 tag 作为**代码检查点**
+      # 去构建并发布到该 tag 的 Release。不填则照旧按 github.ref 判断。
+      #   gh workflow run build.yml --ref main -f with_macos=true -f release_tag=v0.3.0
+      release_tag:
+        description: '要重建的已有版本 tag（从分支触发时填，如 v0.3.0；留空=用当前 ref）'
+        type: string
+        default: ''
 
 # 共享编译缓存：sccache 把每个 crate 的编译对象按 hash 存到 GitHub Actions Cache，
 # 跨发版 / 跨 PR 命中（依赖不变时基本秒级）；第一次或改了大段 Rust 仍要全编。
@@ -186,12 +196,16 @@ jobs:
   # 手动触发：gh workflow run build.yml --ref v0.1.2 -f with_macos=true
   build-macos:
     name: Build macOS app (arm64)
-    if: startsWith(github.ref, 'refs/tags/v') && github.event.inputs.with_macos == 'true'
+    # 两种入口：在 tag 上手动触发；或从分支（通常是 main 上的 CI 修复）触发并
+    # 用 release_tag 指定要重建的 tag——代码按 tag 检出，工作流定义按分支执行。
+    if: github.event.inputs.with_macos == 'true' && (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag)
     runs-on: macos-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.sha }}
 
       - name: 🔑 准备签名密钥（文件路径方式）
         run: |
@@ -236,12 +250,23 @@ jobs:
         run: cargo test --release --no-default-features
         working-directory: desktop/src-tauri
 
+      - name: Build macOS .app
+        run: |
+          npm run prebuild
+          # bundle.targets 固定为 nsis（Windows 发版用），mac 用 --bundles 覆盖。
+          npx tauri build --bundles app
+        working-directory: desktop
+
+      # 🔴 必须放在 `npm run prebuild` 之后：prebuild 里的 `vite build` 会清空
+      # desktop/dist，把这里打好的资源包与 resources.json 一起删掉。放前面的
+      # 后果是 Build macOS 步骤成功、Collect artifacts 才报 `No such file`。
+      # 资源包只作为 Release 资产，不参与 tauri 打包（conf 只收 ncdb.jar）。
       - name: Package macOS database runtimes
         working-directory: desktop
         env:
           RESOURCES_PLATFORMS: macos
           RESOURCES_ONLY: ncdb
-          GITHUB_RELEASE_TAG: ${{ github.ref_name }}
+          GITHUB_RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
         run: |
           set -e
           for arch in arm64 x64; do
@@ -252,13 +277,6 @@ jobs:
             node scripts/generate-resources-json.mjs
           done
 
-      - name: Build macOS .app
-        run: |
-          npm run prebuild
-          # bundle.targets 固定为 nsis（Windows 发版用），mac 用 --bundles 覆盖。
-          npx tauri build --bundles app
-        working-directory: desktop
-
       # 平台片段由 build-windows 合并进 updater.json（它要 darwin-aarch64 那条）。
       # 片段里的 version/notes 不重要：合并时只取 platforms，顶层字段由 Windows 侧提供。
       # Gitee 变体的片段不再在 CI 生成——镜像已挪到本地（见文件顶部说明）。
@@ -268,7 +286,7 @@ jobs:
           UPDATER_OUTPUT_FILENAME=updater-macos.json npm run updater:generate
         working-directory: desktop
         env:
-          GITHUB_RELEASE_TAG: ${{ github.ref_name }}
+          GITHUB_RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
           UPDATER_DOWNLOAD_BASE: "https://gh-proxy.com/https://github.com/${{ github.repository }}/releases/download"
 
       - name: 校验 darwin-aarch64 签名非空
@@ -335,6 +353,7 @@ jobs:
           # 同 upload：uses: 步骤 cwd 是仓库根，产物在 desktop/dist-out/。
           # 少了 desktop/ 前缀时 fail_on_unmatched_files: false 会让 attach
           # 静默跳过，Release 上永远看不到 mac 产物而 job 全绿。
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
           files: |
             desktop/dist-out/*.app.tar.gz
             desktop/dist-out/*.app.tar.gz.sig
@@ -353,12 +372,14 @@ jobs:
     #     不应被 mac 拖累）；此时下载片段会被跳过，generate 脚本对缺失的
     #     UPDATER_MERGE_INTO 只 warn，于是降级为只发 Windows 条目。
     needs: [build-macos]
-    if: always() && startsWith(github.ref, 'refs/tags/v')
+    if: always() && (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag)
     runs-on: windows-latest
     permissions:
       contents: write   # 创建 GitHub Release 需要写权限（默认 token 只读）
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.sha }}
 
       # 拉 mac 的平台片段与产物。mac 默认不发（job 被 skipped），此时不必去下载：
       # download-artifact 找不到 artifact 会红色报错（靠 continue-on-error 兜住），
@@ -450,7 +471,7 @@ jobs:
           npm run resources:json
         working-directory: desktop
         env:
-          GITHUB_RELEASE_TAG: ${{ github.ref_name }}
+          GITHUB_RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
           # 与 updater.json 同口径：zip 下载走 ghproxy 镜像；元数据检查另有
           # tauri.conf.json 的 GitHub Release 端点兜底（两个端点，见 resource_pack.rs）。
           RESOURCES_DOWNLOAD_BASE: "https://gh-proxy.com/https://github.com/${{ github.repository }}/releases/download"
@@ -480,7 +501,7 @@ jobs:
         run: npm run updater:generate
         working-directory: desktop
         env:
-          GITHUB_RELEASE_TAG: ${{ github.ref_name }}
+          GITHUB_RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
           # 合并 mac 片段：不接这一句的后果是 mac 条目根本不进 updater.json，
           # mac 用户永远检测不到更新且不报错。指向不存在的文件时脚本只 warn，
           # 所以 mac job 挂了也不会把 Windows 发版带倒。
@@ -562,6 +583,7 @@ jobs:
       - name: Attach to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
           files: dist-out/*
           fail_on_unmatched_files: false
         env:
