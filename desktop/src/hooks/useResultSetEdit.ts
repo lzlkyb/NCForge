@@ -102,7 +102,7 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows }: {
     const update = (fn: (next: Map<string, Cell>) => void) =>
       setChanged(current => { const next = new Map(current); fn(next); return next; });
     const keys = keyInfo.keys;
-    const base = rows.length;
+    const base = baseline.length;
     return {
       canEdit: (col, row) => {
         const meta = columns[col];
@@ -137,7 +137,7 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows }: {
       // 用户要的就是「照着抄一行再改」。
       onCloneRow: (row) => {
         const values = new Map<number, Cell>();
-        rows[row]?.forEach((cell, c) => {
+        baseline[row]?.forEach((cell, c) => {
           if (cell === null || keys.includes(columns[c]?.name.toUpperCase() ?? "")) return;
           values.set(c, cell);
         });
