@@ -21,10 +21,16 @@
  *   5. 重新生成 changelog.generated.ts
  *   6. cargo test + cargo clippy --no-default-features 门禁（不过不提交）
  *   7. git add 相关文件 → commit → push origin main → tag vX.Y.Z → push tag
- *   8. 打印两条后续命令（都不在 CI 里做）：要 mac 包怎么触发、Gitee 镜像怎么补
+ *   8. 打印两条后续命令（都不在 CI 里做）：要 mac 包怎么触发
+ *   9. Gitee 镜像自动做：轮询等 GitHub CI 出完 Release（最长 45 分钟），随后
+ *      自动跑 mirror-gitee.mjs（token 从环境变量或 .gitee-token 读）。--no-mirror 跳过。
  *
  * Gitee 镜像也是本地做的：CI 的境外 runner 到 Gitee 只有 ~50KB/s（推 13 分钟被断连），
- * 本地直连 2.2MB/s。等 CI 出完 Release 后跑 `npm run mirror:gitee -- vX.Y.Z`。
+ * 本地直连 2.2MB/s。以前靠人肉记得跑（发版脚本只打印提醒），v0.2.0 就忘了，导致
+ * 老版本用户走 Gitee 兜底源收不到更新——所以现在第 9 步默认自动跑，别再 --no-mirror。
+ *
+ * 另有兜底：.github/workflows/gitee-mirror-check.yml 每小时对账 GitHub latest 与
+ * Gitee raw 的版本号，落后就开 issue 报警（镜像补齐后自动关闭）。
  *
  * 发版口径（2026-11-05 起）：推 tag 的 CI **只构建 Windows**（约 28 分钟）。
  * mac 默认不发——它的作业 26 分钟且与 Windows 串行，v0.1.1 为此跑了 53 分钟。
@@ -65,6 +71,7 @@ const YES = hasFlag("--yes");
 // 想让更新弹窗顶部那句是人话而不是 `vX.Y.Z 版本更新`，走这个参数。
 const SUMMARY = getOpt("--summary");
 const SKIP_TESTS = hasFlag("--skip-tests");
+const NO_MIRROR = hasFlag("--no-mirror");
 let bumpType = null;
 let explicitVersion = getOpt("--version");
 if (hasFlag("--patch")) bumpType = "patch";
@@ -172,6 +179,11 @@ async function main() {
     if (!SKIP_TESTS) console.log("  6. cargo test + cargo clippy --no-default-features 门禁");
     else console.log("  6. [--skip-tests] 仅 cargo check --no-default-features 保底");
     console.log(`  7. semver/tag 预检 → git add 版本文件+CHANGELOG+README+generated.ts → commit → push → tag ${tagName} → push tag`);
+    console.log(
+      NO_MIRROR
+        ? `  9. [--no-mirror] 跳过 Gitee 镜像（记得手动跑：npm run mirror:gitee -- ${tagName}）`
+        : "  9. 等 GitHub CI 出完 Release（最长 45 分钟）→ 自动跑 Gitee 镜像",
+    );
     return;
   }
 
@@ -443,10 +455,97 @@ async function main() {
   // mac 默认不发（见文件头说明）：把"要 mac 时敲什么"直接打出来，省得回头翻 workflow。
   console.log(`\x1b[36m   需要 macOS 包（+约 26 分钟，别重推 tag）：\x1b[0m`);
   console.log(`   gh workflow run build.yml --ref ${tagName} -f with_macos=true`);
-  // Gitee 镜像只能在本地做：CI 的境外 runner 到 Gitee 只有 ~50KB/s，实测推 13 分钟
-  // 被断连（见 build.yml 顶部）。本地直连 2.2MB/s，一条命令 72 秒。
-  console.log(`\x1b[36m   Gitee 镜像（等 CI 出完 Release 之后跑，别在 CI 里等）：\x1b[0m`);
-  console.log(`   GITEE_TOKEN=<token> npm run mirror:gitee -- ${tagName}`);
+
+  if (NO_MIRROR) {
+    console.log(`\x1b[33m[--no-mirror] 跳过 Gitee 镜像。\x1b[0m 等 CI 出完 Release 后手动跑（别忘——v0.2.0 就是忘在这）：`);
+    console.log(`   NO_PROXY=gitee.com npm run mirror:gitee -- ${tagName}`);
+    return;
+  }
+  await autoMirror(tagName);
+}
+
+// ── 第 9 步：等 Release 出来，自动跑 Gitee 镜像 ──────────────────────────────
+// 背景：更新器三个端点里 Gitee 是国内用户的兜底源（gh-pages 404、github.com 常超时），
+// 镜像没补的话老版本用户永远收不到更新提示（v0.2.0 实测）。所以默认自动跑。
+
+function resolveGithubRepo() {
+  const url = execSync("git remote get-url origin", { cwd: ROOT, stdio: "pipe" }).toString().trim();
+  const m = url.match(/github\.com[:/]+([^/]+)\/([^/\s]+?)(?:\.git)?$/);
+  if (!m) throw new Error(`无法从 git remote 推断 GitHub 仓库（${url || "空"}）`);
+  return `${m[1]}/${m[2]}`;
+}
+
+/** token：环境变量优先，其次 gitignore 的 .gitee-token（与 mirror-gitee.mjs 同一套解析）。 */
+function findGiteeToken() {
+  const env = (process.env.GITEE_TOKEN || "").trim();
+  if (env) return env;
+  for (const p of [path.join(ROOT, ".gitee-token"), path.join(DESKTOP, ".gitee-token")]) {
+    try {
+      const t = fs.readFileSync(p, "utf-8").split(/\r?\n/)[0].trim();
+      if (t) return t;
+    } catch {
+      /* 文件不存在 */
+    }
+  }
+  return "";
+}
+
+/** 每 60s 探一次 Release：已发布且 updater.json 资产出现 = CI 完成。超时返回 false。 */
+async function waitForReleaseAssets(tagName, timeoutMin = 45) {
+  const ghRepo = resolveGithubRepo();
+  const deadline = Date.now() + timeoutMin * 60_000;
+  console.log(`\x1b[35m[9] 等待 GitHub Release ${tagName} 出全产物（updater.json 出现即算完成，最长 ${timeoutMin} 分钟）…\x1b[0m`);
+  while (Date.now() < deadline) {
+    try {
+      const out = execSync(`gh release view ${tagName} -R ${ghRepo} --json isDraft,assets`, {
+        cwd: ROOT,
+        stdio: "pipe",
+        encoding: "utf-8",
+      });
+      const rel = JSON.parse(out);
+      const names = (rel.assets || []).map((a) => a.name);
+      if (!rel.isDraft && names.includes("updater.json")) return true;
+    } catch {
+      /* Release 还没建出来（CI 还在跑），等下一轮 */
+    }
+    await new Promise((r) => setTimeout(r, 60_000));
+    process.stdout.write(".");
+  }
+  return false;
+}
+
+async function autoMirror(tagName) {
+  const ghRepo = resolveGithubRepo();
+  if (!(await waitForReleaseAssets(tagName))) {
+    console.error(
+      `\x1b[31m[GITEE MIRROR ERROR]\x1b[0m 等了 45 分钟 Release 还没出全（CI 挂了或很慢）。\n` +
+        `发版本身已完成；镜像请手动补（可先查 CI：gh run list -R ${ghRepo} -L 3）：\n` +
+        `  NO_PROXY=gitee.com npm run mirror:gitee -- ${tagName}`,
+    );
+    process.exit(1);
+  }
+  const token = findGiteeToken();
+  if (!token) {
+    console.log(`\x1b[33m[9] 未找到 GITEE_TOKEN（环境变量或 .gitee-token 都没有）。\x1b[0m CI Release 已就绪，手动跑：`);
+    console.log(`   NO_PROXY=gitee.com npm run mirror:gitee -- ${tagName}`);
+    return;
+  }
+  console.log(`\x1b[35m[9] Release 已就绪，自动跑 Gitee 镜像（NO_PROXY=gitee.com）…\x1b[0m`);
+  try {
+    execSync(`node ${JSON.stringify(path.join(__dirname, "mirror-gitee.mjs"))} ${tagName}`, {
+      cwd: DESKTOP,
+      stdio: "inherit",
+      env: { ...process.env, GITEE_TOKEN: token, NO_PROXY: "gitee.com", no_proxy: "gitee.com" },
+    });
+    console.log(`\x1b[32m✅ Gitee 镜像完成，更新器兜底源已是 ${tagName}。\x1b[0m`);
+  } catch {
+    console.error(
+      `\x1b[31m[GITEE MIRROR ERROR]\x1b[0m 镜像脚本失败（发版本身已成功）。\n` +
+        `重跑是幂等的（已上传附件会跳过）：\n` +
+        `  NO_PROXY=gitee.com npm run mirror:gitee -- ${tagName}`,
+    );
+    process.exit(1);
+  }
 }
 
 main().catch((e) => {

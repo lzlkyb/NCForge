@@ -1,0 +1,87 @@
+# ── Gitee 镜像对账（每小时）─────────────────────────────────────────────────
+# 为什么要有这个：Gitee 镜像只能本地做（境外 runner 到 Gitee 上传 ~50KB/s，13 分钟
+# 被断连，见 build.yml 顶部），正常流程是 release.mjs 第 9 步发版后自动跑。但如果
+# 本机关机/断网/token 失效，镜像就会漏——v0.2.0 就漏过一次，老版本用户走 Gitee 兜底
+# 源永远收不到更新提示。本 workflow 只做「读」不做「写」：对比 GitHub latest release
+# 与 Gitee raw 清单的版本号，落后就开 issue 报警，镜像补齐后自动关闭。
+
+name: gitee-mirror-check
+
+on:
+  schedule:
+    - cron: "0 * * * *" # 每小时整点
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 对账 GitHub latest 与 Gitee raw 版本号
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITEE_REPO: lzul/NCForge
+        run: |
+          set -euo pipefail
+
+          gh_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)
+          gh_ver=${gh_tag#v}
+          echo "GitHub latest: ${gh_tag}"
+
+          # Gitee 读不到（网络抖动等）只告警不报警，避免误报
+          raw=$(curl -fsSL --max-time 30 "https://gitee.com/${GITEE_REPO}/raw/releases/latest/updater-gitee.json" 2>/dev/null || true)
+          if [ -z "$raw" ]; then
+            echo "::warning::Gitee raw 清单读取失败（网络或 Gitee 侧问题），本次跳过对账"
+            exit 0
+          fi
+          gitee_ver=$(printf '%s' "$raw" | jq -r '.version // empty')
+          echo "Gitee raw version: ${gitee_ver:-<空>}"
+
+          ISSUE_TITLE_PREFIX="Gitee 镜像落后"
+          find_issue() {
+            # // empty：空数组时 .[0].number 是 null，jq -r 会打印字符串 "null"，
+            # 后面 [ -n "$issue_no" ] 会误判成「已有 issue」去 edit 一个不存在的编号。
+            gh issue list -R "$GITHUB_REPOSITORY" --state open \
+              --search "${ISSUE_TITLE_PREFIX} in:title" --json number --jq '.[0].number // empty' 2>/dev/null || echo ""
+          }
+
+          if [ -z "$gitee_ver" ] || [ "$gitee_ver" != "$gh_ver" ]; then
+            title="${ISSUE_TITLE_PREFIX}：GitHub 已发 v${gh_ver}，Gitee 还是 ${gitee_ver:-无}"
+            # 逐行 printf 拼接：多行字面量在 run 块里会被 YAML 缩进污染
+            body=$(printf '%s\n' \
+              "自动对账发现 Gitee 兜底更新源落后于 GitHub：" \
+              "" \
+              "- GitHub latest: v${gh_ver}" \
+              "- Gitee raw \`updater-gitee.json\` version: ${gitee_ver:-（读不到）}" \
+              "" \
+              "老版本用户走 Gitee 端点会误判「已是最新」，收不到更新提示。" \
+              "" \
+              "修复（本地一条命令，幂等）：" \
+              "" \
+              '```' \
+              "cd desktop && NO_PROXY=gitee.com npm run mirror:gitee -- v${gh_ver}" \
+              '```' \
+              "" \
+              "镜像补齐后本 workflow 会自动关闭本 issue。")
+            issue_no=$(find_issue)
+            if [ -n "$issue_no" ]; then
+              gh issue edit "$issue_no" -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+              echo "已更新报警 issue #${issue_no}"
+            else
+              gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+              echo "已创建报警 issue"
+            fi
+            exit 0
+          fi
+
+          # 版本一致：关闭遗留的报警 issue（如有）
+          issue_no=$(find_issue)
+          if [ -n "$issue_no" ]; then
+            gh issue close "$issue_no" -R "$GITHUB_REPOSITORY" \
+              -c "自动对账：Gitee 已是 ${gitee_ver}，与 GitHub latest（v${gh_ver}）一致，关闭报警。"
+            echo "已关闭报警 issue #${issue_no}"
+          fi
+          echo "OK: Gitee 镜像与 GitHub 一致（v${gh_ver}）"

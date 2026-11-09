@@ -16,7 +16,8 @@
  *   GITEE_TOKEN=xxx node scripts/mirror-gitee.mjs v0.1.2
  *
  * 环境变量：
- *   GITEE_TOKEN       必需。Gitee 私人令牌（需 projects 写权限）
+ *   GITEE_TOKEN       可选。Gitee 私人令牌（需 projects 写权限）；不给就从
+ *                     仓库根或 desktop/.gitee-token（gitignore，首行）读。
  *   GITEE_REPOSITORY  默认 lzul/NCForge
  *   GH_BIN            gh 可执行文件路径（默认走 PATH，Windows 上会回退到安装目录）
  *   HTTPS_PROXY       gh 下载 GitHub 资产时用它（能快 100 倍，强烈建议设）
@@ -30,9 +31,28 @@ import os from "node:os";
 import path from "node:path";
 
 const API = "https://gitee.com/api/v5";
-const TOKEN = (process.env.GITEE_TOKEN || "").trim();
 const REPO = (process.env.GITEE_REPOSITORY || "lzul/NCForge").trim();
 const TAG = (process.argv[2] || "").trim();
+
+// 仓库根：脚本在 desktop/scripts/ 下，往上两级。
+const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
+
+// token 解析：环境变量优先，其次仓库根/desktop 下 gitignore 的 .gitee-token（首行）。
+// 落文件是为了 release.mjs 自动镜像也能拿到——发版脚本不该在命令行里明文传 token。
+function resolveToken() {
+  const env = (process.env.GITEE_TOKEN || "").trim();
+  if (env) return env;
+  for (const p of [path.join(REPO_ROOT, ".gitee-token"), path.join(REPO_ROOT, "desktop", ".gitee-token")]) {
+    try {
+      const t = fs.readFileSync(p, "utf-8").split(/\r?\n/)[0].trim();
+      if (t) return t;
+    } catch {
+      /* 文件不存在，继续找下一个 */
+    }
+  }
+  return "";
+}
+const TOKEN = resolveToken();
 
 function fail(msg) {
   console.error(`\x1b[31m[ERROR]\x1b[0m ${msg}`);
@@ -45,10 +65,12 @@ const step = (m) => console.log(`\n\x1b[1m▸ ${m}\x1b[0m`);
 
 if (!TAG) fail("用法: GITEE_TOKEN=xxx node scripts/mirror-gitee.mjs v1.2.3");
 if (!/^v\d/.test(TAG)) fail(`tag 必须以 v 开头（${TAG}）`);
-if (!TOKEN) fail("缺 GITEE_TOKEN 环境变量（Gitee 私人令牌，需 projects 写权限）");
-
-// 仓库根：脚本在 desktop/scripts/ 下，往上两级。
-const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
+if (!TOKEN) {
+  fail(
+    "缺 GITEE_TOKEN：设环境变量，或把私人令牌写进 .gitee-token（仓库根，首行，已 gitignore）。\n" +
+      "  令牌需 projects 写权限：https://gitee.com/profile/personal_access_tokens",
+  );
+}
 
 // ── gh 可执行文件 ─────────────────────────────────────────────────────────────
 function findGh() {

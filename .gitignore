@@ -57,3 +57,7 @@ desktop/.cache/
 
 # jdt.ls 扩展 bundle 的临时编译目录（成品 resources/jdtls-ext/ncforge-jdt-ext.jar 入库，约 6KB）
 desktop/src-tauri/.jdtls-ext-build/
+
+# Gitee 私人令牌（发版镜像用，仅本机）
+.gitee-token
+desktop/.gitee-token
