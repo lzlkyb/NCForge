@@ -29,15 +29,26 @@ it("写回按钮不需要先展开复核", async () => {
  expect(save.disabled).toBe(false);
  await act(async () => root.unmount());
 });
-it("Tab / Enter 提交时按方向移动，Shift 反向", async () => {
+it("Tab / Enter 提交时按方向移动，Shift+Tab 反向；Shift+Enter 打开大文本编辑框", async () => {
  const host = document.createElement("div"); const root = createRoot(host);
- const move = vi.fn();
- await act(async () => root.render(<GridCellEditor id="t" colIndex={1} style={{}} value="v" changed={false} selected={{}} onChange={() => {}} onCommit={() => {}} onCancel={() => {}} onCommitMove={move} />));
+ const move = vi.fn(), expand = vi.fn();
+ await act(async () => root.render(<GridCellEditor id="t" colIndex={1} style={{}} value="v" changed={false} selected={{}} onChange={() => {}} onCommit={() => {}} onCancel={() => {}} onCommitMove={move} onExpand={expand} />));
  const input = host.querySelector("input")!;
- const press = async (key: string, shiftKey = false) => { await act(async () => { input.dispatchEvent(new KeyboardEvent("keydown", { key, shiftKey, bubbles: true })); }); };
+ const press = async (key: string, opts: { shiftKey?: boolean; altKey?: boolean } = {}) => { await act(async () => { input.dispatchEvent(new KeyboardEvent("keydown", { key, ...opts, bubbles: true })); }); };
  await press("Enter"); expect(move).toHaveBeenLastCalledWith(1, 0);
  await press("Tab"); expect(move).toHaveBeenLastCalledWith(0, 1);
- await press("Tab", true); expect(move).toHaveBeenLastCalledWith(0, -1);
- await press("Enter", true); expect(move).toHaveBeenLastCalledWith(-1, 0);
+ await press("Tab", { shiftKey: true }); expect(move).toHaveBeenLastCalledWith(0, -1);
+ // Shift+Enter 不再上移：改成打开大文本编辑框（单元格里改长文本等于盲打），且不提交、不移动。
+ await press("Enter", { shiftKey: true });
+ expect(expand).toHaveBeenCalledOnce();
+ expect(move).toHaveBeenLastCalledWith(0, -1);
+ // Alt+Enter 与 F2 是备路（Shift+Enter 被输入法占了的键盘）。Alt+Enter 必须在 Enter
+ // 分支里判：放到 else if 会被先截走，实际变成「提交并下移」——这条断言钉的就是这个。
+ await press("Enter", { altKey: true });
+ expect(expand).toHaveBeenCalledTimes(2);
+ expect(move).toHaveBeenLastCalledWith(0, -1);
+ await press("F2");
+ expect(expand).toHaveBeenCalledTimes(3);
+ expect(move).toHaveBeenLastCalledWith(0, -1);
  await act(async () => root.unmount());
 });

@@ -32,7 +32,7 @@ let latest: ReturnType<typeof useResultSetEdit>;
 let tableArg: string | null = null;
 
 function Probe({ sql }: { sql: string }) {
-  latest = useResultSetEdit({ tabId: "s1", connId: "c", sql, columns, rows, onApplied: () => {} });
+  latest = useResultSetEdit({ tabId: "s1", connId: "c", sql, columns, rows });
   return null;
 }
 
@@ -131,4 +131,95 @@ it("多表关联 / 聚合 / 子查询一律拒绝，并给出面向用户的原�
     expect(latest.edit, sql).toBeUndefined();
     expect(latest.blocked, sql).toContain(hint);
   }
+});
+
+it("行级增删：草稿行用虚拟行号，主键列可填、可撤销、可标记待删", async () => {
+  await act(async () => root.render(<Probe sql="select * from bd_material" />));
+  await flush();
+  // 调用用捕获的 edit；读状态要重新取 `latest.edit`——它是每次渲染的快照。
+  const edit = latest.edit!;
+  // rows.length = 1，所以第 1 个虚拟行号是 1。
+  edit.onCloneRow!(0);
+  await act(async () => {});
+  expect(latest.rows.length).toBe(2);
+  expect(latest.rows[1]).toEqual([null, "a"]);   // 主键留空，其余列照抄
+  expect(latest.edit!.isDraftRow!(1)).toBe(true);
+  expect(latest.edit!.rowState!(1)).toBe("added");
+  // 草稿行的主键列要能填：新行的定位靠它。
+  expect(latest.edit!.canEdit(0, 1)).toBe(true);
+  edit.onEdit(1, 0, 9);
+  await act(async () => {});
+  expect(latest.rows[1][0]).toBe(9);
+  // 撤销这行新增：草稿消失，回到只有真实行。
+  edit.onRestoreRow!(1);
+  await act(async () => {});
+  expect(latest.rows.length).toBe(1);
+
+  // 删除只做标记，行还在显示里；恢复则撤标记。
+  edit.onDeleteRow!(0);
+  await act(async () => {});
+  expect(latest.edit!.rowState!(0)).toBe("deleted");
+  expect(latest.rows.length).toBe(1);
+  expect(latest.count).toBe(1);                   // 待删计入待写回条数
+  edit.onRestoreRow!(0);
+  await act(async () => {});
+  expect(latest.edit!.rowState!(0)).toBeUndefined();
+  expect(latest.count).toBe(0);
+});
+
+it("批量赋值与单格撤回都按虚拟行号分流：草稿行进草稿，真实行进 changed", async () => {
+  await act(async () => root.render(<Probe sql="select * from bd_material" />));
+  await flush();
+  const edit = latest.edit!;
+  edit.onCloneRow!(0);
+  await act(async () => {});
+  edit.onEditMany!([
+    { row: 0, col: 1, value: "x" },     // 真实行 → changed
+    { row: 1, col: 1, value: "y" },     // 草稿行 → drafts
+  ]);
+  await act(async () => {});
+  expect(latest.edit!.changed.get("0:1")).toBe("x");
+  expect(latest.rows[1][1]).toBe("y");
+  // 撤回真实行走「删键」，草稿行走「置 NULL 等于没填」。
+  edit.onResetCell!(0, 1);
+  edit.onResetCell!(1, 1);
+  await act(async () => {});
+  expect(latest.edit!.changed.has("0:1")).toBe(false);
+  expect(latest.rows[1][1]).toBe(null);
+});
+
+it("同一格连改两次：第二次的原值守卫用第一次写回后的值，不是初始快照", async () => {
+  const calls: { sql: string; params: unknown[] }[] = [];
+  mocks.invoke.mockImplementation((cmd: string, args: Record<string, unknown>) => {
+    if (cmd === "db_connect") return Promise.resolve({ url: "jdbc:oracle:thin:@h:1521/t", user: "u", autoCommit: false });
+    if (cmd === "db_read_only") return Promise.resolve({ readOnly: false, tx: { autoCommit: false, statements: 0, rows: 0, since: 0 } });
+    if (cmd === "db_meta" && args.kind === "columns") {
+      return Promise.resolve({ columns: columns.map((c, i) => ({ ...c, pk: i === 0, size: 0, full: c.type, nullable: true, default: null, comment: null, zh: null })) });
+    }
+    if (cmd === "db_exec_bound") {
+      calls.push({ sql: String(args.sql), params: (args.params as unknown[]) ?? [] });
+      return Promise.resolve({ kind: "update", updateCount: 1 });
+    }
+    return Promise.resolve(null);
+  });
+  await act(async () => root.render(<Probe sql="select * from bd_material" />));
+  await flush();
+  const save = async () => { await act(async () => { latest.save(); await new Promise(r => setTimeout(r, 0)); }); };
+
+  // 第一次把 CODE 从 a 改成 b 并落库。
+  latest.edit!.onEdit(0, 1, "b");
+  await act(async () => {});
+  await save();
+  expect(latest.rows[0][1]).toBe("b");   // 写回成功的值就地覆盖显示行
+  expect(latest.count).toBe(0);
+
+  // 同一格再改成 c：原值守卫必须拿 b（库里现在的值），拿初始快照的 a 会 0 行命中。
+  latest.edit!.onEdit(0, 1, "c");
+  await act(async () => {});
+  expect(latest.count).toBe(1);
+  await save();
+  expect(calls.length).toBe(2);
+  expect(calls[1].params).toContain("b");
+  expect(calls[1].params).toContain("c");
+  expect(calls[1].params).not.toContain("a");
 });

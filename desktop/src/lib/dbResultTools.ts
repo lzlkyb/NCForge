@@ -19,15 +19,16 @@ export function selectionText(rows: Cell[][], order: number[], visible: number[]
   const selected = selectedRows(order, sel).map(r => cols.map(c => { const cell = value(r, c); return typeof cell === "number" ? String(cell) : cell; }));
   return serializeTransfer({ columns, rows: selected }, { ...defaultTransferOptions("tsv"), header: "none", lineEnding: "crlf" });
 }
-export interface GridLayout { order: string[]; hidden: string[]; frozen: string[]; widths: Record<string, number>; decoded: string[] }
-export const defaultLayout = (): GridLayout => ({ order: [], hidden: [], frozen: [], widths: {}, decoded: [] });
+export interface GridLayout { order: string[]; hidden: string[]; frozen: string[]; widths: Record<string, number>; decoded: string[]; wrap: boolean }
+export const defaultLayout = (): GridLayout => ({ order: [], hidden: [], frozen: [], widths: {}, decoded: [], wrap: false });
 export function loadLayout(key?: string): GridLayout {
   try {
     const v = JSON.parse(localStorage.getItem(`ncforge-db-grid:${key}`) ?? "null");
     if (key && v && [v.order,v.hidden,v.frozen].every(a=>Array.isArray(a) && a.every(n=>typeof n==="string")) && v.widths && typeof v.widths==="object" && Object.values(v.widths).every(w=>typeof w==="number" && Number.isFinite(w) && w>=40 && w<=900))
-      // `decoded` 是后加的：老布局里没有这个字段，缺省补空数组，别让下游 `.includes` 崩掉。
+      // `decoded` 与 `wrap` 都是后加的：老布局里没有这些字段，缺省补空数组 / false，别让下游 `.includes` 崩掉。
       return { order:v.order, hidden:v.hidden, frozen:v.frozen, widths:v.widths,
-        decoded: Array.isArray(v.decoded) ? v.decoded.filter((n: unknown) => typeof n === "string") : [] };
+        decoded: Array.isArray(v.decoded) ? v.decoded.filter((n: unknown) => typeof n === "string") : [],
+        wrap: typeof v.wrap === "boolean" ? v.wrap : false };
   } catch { /* 不影响结果读取。 */ }
   return defaultLayout();
 }

@@ -232,6 +232,10 @@
 .dbx-ghead { display: flex; position: sticky; top: 0; z-index: 4; height: var(--dbx-head-h); background: hsl(var(--chrome)); }
 /* 只留横线 + 隔行底色：竖线一多，宽表就像一张 Excel 格纸，读数反而跳 */
 .dbx-gc { flex-shrink: 0; height: var(--dbx-row-h); line-height: calc(var(--dbx-row-h) - 1px); padding: 0 10px; border-bottom: 1px solid hsl(var(--border) / .55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: hsl(var(--card)); cursor: default; }
+/* 自动换行：高度由 JS 按「这一行折了几行」算出来写进 inline style，这里只改排布。
+   `pre-wrap` 保留用户数据里的换行与连续空格——不然折行之后原文的格式也丢了。 */
+.dbx-grow[data-wrap] .dbx-gc { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; line-height: calc(var(--dbx-row-h) - 6px); padding-block: 3px; }
+.dbx-grow[data-wrap] .dbx-gc.n { text-align: right; }
 .dbx-grow[data-odd] .dbx-gc { background: color-mix(in srgb, hsl(var(--chrome)) 22%, hsl(var(--card))); }
 .dbx-grow:hover .dbx-gc:not([data-cell]):not(.chg) { background: color-mix(in srgb, hsl(var(--accent)) 45%, hsl(var(--card))); }
 .dbx-gc.n { text-align: right; }
@@ -260,6 +264,15 @@
 .dbx-grid .dbx-gc.chg { background:color-mix(in srgb,hsl(var(--warning)) 18%,hsl(var(--card))); }
 .dbx-grid .dbx-gc.chg::before { content:"";position:absolute;right:3px;top:3px;width:4px;height:4px;border-radius:50%;background:hsl(var(--warning-ink));pointer-events:none; }
 .dbx-grid .dbx-gc:is(.error,[data-error]) { background:color-mix(in srgb,hsl(var(--destructive)) 12%,hsl(var(--card))); }
+
+/* ── 大文本编辑框（Shift+Enter） ── */
+.dbx-textedit-mask { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45); padding: 24px; }
+.dbx-textedit { display: flex; flex-direction: column; width: min(720px, 100%); height: min(460px, 100%); background: hsl(var(--popover)); border: 1px solid hsl(var(--border)); border-radius: var(--radius, 8px); box-shadow: var(--sh-pop); overflow: hidden; }
+.dbx-textedit-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid hsl(var(--border)); font-size: var(--dbx-fs-meta); }
+.dbx-textedit-col { font-weight: 600; color: hsl(var(--foreground)); }
+.dbx-textedit-head .dbx-muted { margin-left: auto; }
+.dbx-textedit-area { flex: 1; min-height: 0; resize: none; border: 0; outline: none; padding: 12px; background: transparent; color: hsl(var(--foreground)); font: var(--dbx-fs-body) ui-monospace, "Cascadia Mono", Consolas, monospace; line-height: 1.5; }
+.dbx-textedit-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid hsl(var(--border)); font-size: var(--dbx-fs-meta); }
 .dbx-grid .dbx-gc:is(.error,[data-error]) { text-decoration:underline wavy hsl(var(--destructive-ink));text-underline-offset:3px; }
 @media (forced-colors:active) {
   .dbx-grid { --grid-selection-fill:Canvas; --grid-selection-edge:GrayText; }

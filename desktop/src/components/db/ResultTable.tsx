@@ -29,6 +29,7 @@ import { GridColumns } from "./GridColumns";
 import { ResultCompare } from "./ResultCompare";
 import { ResultSource } from "./ResultSource";
 import { loadLayout, saveLayout, gridColumns, type Selection, type GridLayout, type ResultSnapshot } from "../../lib/dbResultTools";
+import { rowActionItems } from "../../lib/dbRowActions";
 
 /**
  * 取大文本完整值需要的上下文。结果集只带 8K 预览，用户点「加载完整值」时
@@ -43,7 +44,7 @@ export interface LobSource {
   timeoutSec?: number;
 }
 
-export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated, lob }: {
+export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated, lob, hasMore, loadingMore, onLoadMore }: {
   columns: ColumnMeta[];
   layoutKey?:string; snapshot?:ResultSnapshot; connId?:string|null; onRelated?:(row:Cell[])=>void;
   /** 大文本「加载完整值」的上下文；不传 = 这个结果不支持（表页 / 非查询结果）。 */
@@ -71,6 +72,10 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   /** 让数据库重排整表并重查；不传 = 这个结果不支持（表页 / 非 SELECT）。 */
   onServerSort?: (col: number, dir: "asc" | "desc") => void;
   transferSource?: TransferSource;
+  /** 还有更多行没取（分页结果）：滚到底自动续取，工具条显示加载态。 */
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
   const [filter, setFilter] = useState("");
   const gridApi = useRef<ResultGridApi | null>(null);
@@ -103,13 +108,6 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
     labels: columns.map(c => zh?.[c.name.toLowerCase()] || c.name),
     source: transferSource ?? { connId: null, resultId: layoutKey || "result", sql: snapshot?.sql ?? "", source: snapshot?.source ?? "当前结果", complete: snapshot?.complete ?? true, table, canRequery: false } };
   const copySelection = () => void quickCopyTransfer(freezeTransferFrame(frame,valueAt));
-  const rowActions = (r: number): ContextMenuItem[] => {
-    if (!edit?.rowState) return [];
-    if (edit.isDraftRow?.(r)) return [{ label: "撤销这行新增", icon: "restore", separator: true, onSelect: () => edit.onRestoreRow?.(r) }];
-    if (edit.rowState(r) === "deleted") return [{ label: "恢复此行（取消删除）", icon: "restore", separator: true, onSelect: () => edit.onRestoreRow?.(r) }];
-    if (!edit.onDeleteRow) return [];
-    return [{ label: "删除此行", icon: "trash", danger: true, separator: true, hint: "写回时执行", onSelect: () => edit.onDeleteRow!(r) }];
-  };
   /** 选区里的可编辑格；没有选区就是当前格。 */
   const selectedCells = () => edit && bounds ? selectedEditableCells(bounds, order, visible, edit.canEdit) : [];
   const cellMenu = (r:number,c:number,x:number,y:number) => {
@@ -144,7 +142,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
       ...(edit?.onCloneRow ? [{ label: "复制此行（新增）", icon: "copy" as const, hint: "主键列留空", onSelect: () => edit.onCloneRow!(r) }] : []),
       // 行级增删只挂在能定位唯一行的结果上（表页有主键、且不是只读）。
       // 放在单元格右键而不是工具条：删除是「对着这一行」的动作，选中态会随排序/筛选漂移。
-      ...rowActions(r),
+      ...rowActionItems(edit, r),
     ]});
   };
 
@@ -192,6 +190,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
           placeholder="输入关键字" aria-label="在结果中筛选" onChange={e=>setFilter(e.target.value)} autoFocus={filterOpen}
           onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();setFilter("");setFilterOpen(false);gridApi.current?.focusActive();}}} />}
         <button type="button" className="dbx-btn ghost" title="显示、隐藏、冻结列与恢复布局" aria-label="结果列布局" onClick={()=>setColumnOpen(true)}><Icon name="sliders" size={14} /><span className="dbx-action-label">显示列 {visible.length} / {columns.length}</span></button>
+        <button type="button" className="dbx-btn ghost" title="长文本自动换行 · 行高随内容增减" aria-label="长文本自动换行" aria-pressed={layout.wrap} data-on={layout.wrap || undefined} onClick={()=>setColumns({...layout,wrap:!layout.wrap})}>自动换行</button>
         <button type="button" className="dbx-ibtn" title="按内容自适应全部列宽" aria-label="自适应列宽" onClick={fitAll}><Icon name="columns" size={14} /></button>
         {snapshot && <ResultCompare snapshot={snapshot} related={onRelated ? {label:"关联记录",icon:"external",disabled:!sel,onSelect:()=>sel && onRelated(rows[sel.r])} : undefined} />}
         {!snapshot && onRelated && <button type="button" className="dbx-btn ghost" disabled={!sel} onClick={()=>sel && onRelated(rows[sel.r])}>关联记录</button>}
@@ -241,6 +240,10 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
           frozen={layout.frozen}
           widthOverrides={layout.widths}
           decoded={layout.decoded}
+          wrap={layout.wrap}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+          onLoadMore={onLoadMore}
           onWidths={w=>setColumns({...layout,widths:Object.fromEntries(columns.map((c,i)=>[c.name,w[i]]))})}
           onDetail={() => setDetail(true)}
           edit={edit}

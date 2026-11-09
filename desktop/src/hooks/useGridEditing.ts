@@ -38,11 +38,14 @@ export function useGridEditing({ rows, order, visible, edit, onSel, reveal, boxR
     });
   };
 
-  /** 进入编辑；这一格不可编辑时返回 false，调用方据此改走「打开详情」。 */
-  const startEdit = (pos: CellPos): boolean => {
+  /** 进入编辑；这一格不可编辑时返回 false，调用方据此改走「打开详情」。
+   *
+   *  `seed` 用于两种「先给个值」的入口：选区批量赋值（打字即填入整个选区）
+   *  与大文本编辑（Shift+Enter 打开编辑框时带上原值）。 */
+  const startEdit = (pos: CellPos, seed?: string): boolean => {
     if (!edit?.canEdit(pos.c, pos.r)) return false;
-    const v = valueAt(pos.r, pos.c);
-    setEditing({ pos, value: v === null ? "" : String(v) });
+    const v = seed ?? valueAt(pos.r, pos.c);
+    setEditing({ pos, value: v === null || v === undefined ? "" : String(v) });
     return true;
   };
 

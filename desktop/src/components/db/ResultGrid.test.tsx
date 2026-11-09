@@ -237,3 +237,85 @@ it("双击可编辑的格子进入编辑，既不弹提示也不开详情", () =
   expect(detail).not.toHaveBeenCalled();
   expect(vi.mocked(toast)).not.toHaveBeenCalled();
 });
+
+/**
+ * 选区批量赋值（DBeaver / Excel 的肌肉记忆）。关键在「先填满选区、再停在活动格」：
+ * 直接逐个 onEdit 会让每格都进入编辑态，只有最后一格留下输入框，用户无法接着打。
+ */
+it("选区里直接打字：先填满整个选区，再停在活动格继续输入", () => {
+  const edited = vi.fn();
+  function MultiSelect() {
+    const [selection, setSelection] = useState<Selection>({ anchor: { r: 0, c: 1 }, end: { r: 2, c: 1 } });
+    return <ResultGrid columns={columns} rows={rows} order={order} sort={null} onSort={() => {}}
+      sel={selection.end} onSel={(p, extend) => setSelection(s => ({ anchor: extend && s ? s.anchor : p, end: p }))}
+      selection={selection} visible={[0, 1]} frozen={[]} widthOverrides={{}} onWidths={() => {}}
+      edit={{ canEdit: c => c === 1, changed: new Map(), onEdit: edited, onEditMany: edited }} />;
+  }
+  act(() => root.render(<MultiSelect />));
+  key(host.querySelector<HTMLElement>('[role="grid"]')!, "x");
+  expect(edited).toHaveBeenCalledTimes(1);
+  expect(edited.mock.calls[0][0]).toEqual([
+    { row: 0, col: 1, value: "x" },
+    { row: 1, col: 1, value: "x" },
+    { row: 2, col: 1, value: "x" },
+  ]);
+  // 活动格进入编辑且值就是键入的字符：接着打不会把刚才那字冲掉
+  const input = host.querySelector<HTMLInputElement>(".dbx-gedit")!;
+  expect(input.value).toBe("x");
+});
+
+/**
+ * Shift+Enter 大文本编辑框。「应用」只把值写回单元格编辑框、不直接提交：
+ * 多一层确认是故意的——长文本改错一次的代价比多按一次 Enter 大得多。
+ */
+it("Shift+Enter 打开大文本编辑框：带上原值，Ctrl+Enter 应用不进提交，Esc 取消", () => {
+  const edited = vi.fn();
+  function TextGrid() {
+    const [selection, setSelection] = useState<Selection>({ anchor: { r: 0, c: 1 }, end: { r: 0, c: 1 } });
+    return <ResultGrid columns={columns} rows={rows} order={order} sort={null} onSort={() => {}}
+      sel={selection.end} onSel={p => setSelection({ anchor: p, end: p })}
+      selection={selection} visible={[0, 1]} frozen={[]} widthOverrides={{}} onWidths={() => {}}
+      edit={{ canEdit: c => c === 1, changed: new Map(), onEdit: edited }} />;
+  }
+  act(() => root.render(<TextGrid />));
+  const grid = host.querySelector<HTMLElement>('[role="grid"]')!;
+  key(grid, "Enter", { shiftKey: true });
+  // 大文本编辑框用 createPortal 挂到 body：查它要从 document 根找，不在 host 里。
+  const area = document.querySelector<HTMLTextAreaElement>(".dbx-textedit-area")!;
+  expect(area.value).toBe("名称 0");   // 非编辑态打开也带上原值
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(area, "第一行\n第二行");
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  key(area, "Enter", { ctrlKey: true });
+  expect(document.querySelector(".dbx-textedit")).toBeNull();
+  // 网格里那个 input 是单行控件，DOM 会把换行洗掉；但编辑态里的值是完整的——
+  // 提交时交出去的必须还是两行，这一步才是「应用」的意义。
+  expect(host.querySelector<HTMLInputElement>(".dbx-gedit")!.value).toBe("第一行第二行");
+  key(host.querySelector<HTMLInputElement>(".dbx-gedit")!, "Enter");
+  expect(edited).toHaveBeenCalledTimes(1);
+  expect(edited).toHaveBeenCalledWith(0, 1, "第一行\n第二行");
+
+  // Esc 取消：文本框里的改动被丢弃，也绝不多提交一次
+  key(host.querySelector<HTMLElement>('[role="grid"]')!, "Enter", { shiftKey: true });
+  const area2 = document.querySelector<HTMLTextAreaElement>(".dbx-textedit-area")!;
+  expect(area2.value).toBe("名称 1");   // Enter 提交后焦点下移了一行，这回编辑的是第 2 行
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(area2, "作废的改动");
+    area2.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  key(area2, "Escape");
+  expect(document.querySelector(".dbx-textedit")).toBeNull();
+  expect(edited).toHaveBeenCalledTimes(1);
+
+  // Esc 收起单元格编辑态（不提交），选区还在第 2 行；Alt+Enter 与 Shift+Enter 同效——
+  // 网格层也要认这条备路（Shift+Enter 被输入法占了的键盘）。
+  key(host.querySelector<HTMLInputElement>(".dbx-gedit")!, "Escape");
+  expect(edited).toHaveBeenCalledTimes(1);
+  key(host.querySelector<HTMLElement>('[role="grid"]')!, "Enter", { altKey: true });
+  const area3 = document.querySelector<HTMLTextAreaElement>(".dbx-textedit-area")!;
+  expect(area3.value).toBe("名称 1");
+  key(area3, "Escape");
+  expect(document.querySelector(".dbx-textedit")).toBeNull();
+  expect(edited).toHaveBeenCalledTimes(1);
+});
