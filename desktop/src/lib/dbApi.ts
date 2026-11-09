@@ -298,6 +298,47 @@ export interface PropSource {
   added: boolean;
 }
 
+/** 导入来源：DataGrip 的 XML / settings.zip，或 PL/SQL Developer 的 user.prefs / tnsnames.ora。 */
+export type ImportTool = "datagrip" | "plsql";
+
+/** 预览里的一条候选连接。口令不会出现在这里（两家都不导出可用的口令）。 */
+export interface ImportCandidate {
+  /** 勾选用的稳定键，同一批扫描内唯一。 */
+  key: string;
+  name: string;
+  url: string;
+  user: string;
+  tool: ImportTool;
+  /** 来自哪个文件 / 哪个节点，界面用 title 显示。 */
+  origin: string;
+  warning: string | null;
+  /** 连接列表里已有同一个库 + 同一个用户。 */
+  duplicate: boolean;
+  /** 同一个库但写法 / 用户不同：提示，但不禁用。 */
+  near: string | null;
+}
+
+export interface ImportScan {
+  /** 读了哪些文件（界面「来源」一行）。 */
+  source: string;
+  items: ImportCandidate[];
+  warnings: string[];
+}
+
+/** 点「添加」时交回后端的一条。只带必要字段，整份扫描结果不过桥。 */
+export interface ImportWant {
+  name: string;
+  url: string;
+  user: string;
+  tool: ImportTool;
+}
+
+export interface ImportApplyOut {
+  added: number;
+  /** 没能加进来的（已存在 / 连接串无法识别），带原因。 */
+  skipped: string[];
+}
+
 export interface TableInfo {
   name: string;
   kind: "TABLE" | "VIEW";
@@ -536,6 +577,18 @@ export const dbApi = {
     invoke<DbConn>("db_conn_import_props", { text, file, name: name || null, env }),
   propSources: () => invoke<{ source: string; sources: PropSource[] }>("db_prop_sources"),
   propImport: (names: string[], env: DbEnv) => invoke<DbConn[]>("db_prop_import", { names, env }),
+  /** 解析 DataGrip 的 dataSources.xml（`local` 是并排的 dataSources.local.xml，含用户名）。 */
+  importDataGrip: (main: string, mainName: string | null, local: string | null) =>
+    invoke<ImportScan>("db_import_datagrip", { main, mainName, local }),
+  /** 解析 DataGrip 导出的 settings.zip。裸字节载荷，与读 XLSX 同一条路。 */
+  importDataGripZip: (bytes: Uint8Array) =>
+    invoke<ImportScan>("db_import_datagrip_zip", bytes),
+  /** 扫描本机 PL/SQL Developer 配置，或解析手选的 user.prefs / tnsnames.ora。 */
+  importPlsql: (scan: boolean, prefs: string | null, prefsName: string | null, tns: string | null, tnsName: string | null) =>
+    invoke<ImportScan>("db_import_plsql", { scan, prefs, prefsName, tns, tnsName }),
+  /** 把预览里勾中的连接写进配置（不存口令，口令留给首次连接时输入）。 */
+  importApply: (wants: ImportWant[], env: DbEnv) =>
+    invoke<ImportApplyOut>("db_conn_import_apply", { wants, env }),
 
   connect: (id: string, password?: string, remember?: boolean, prepareSql = false) =>
       invoke<ConnectInfo>("db_connect", { id, password: password || null, remember: remember ?? null, prepareSql }),

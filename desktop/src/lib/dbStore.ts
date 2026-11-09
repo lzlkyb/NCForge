@@ -201,7 +201,7 @@ export const EMPTY_DICT_STATE: DictState = {
 /** 连接对话框：新建 / 编辑某个连接（`tab` 决定打开哪一页）。 */
 export interface ConnDialogState {
   connId: string | null;
-  tab: "manual" | "prop" | "file";
+  tab: "manual" | "prop" | "file" | "other";
 }
 
 export interface DbState {

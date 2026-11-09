@@ -4,12 +4,14 @@ import { Icon } from "../ui/icon";
 import { ConnManualForm } from "./ConnManualForm";
 import { PropImportPane } from "./ConnImportPanes";
 import { PropsFileImportPane } from "./PropsFileImportPane";
+import { OtherToolsPane } from "./ConnOtherToolsPane";
 import { closeConnDialog, openConnDialog, useConnOf, useDbSelector } from "../../lib/dbStore";
 
 const TABS = [
   { key: "manual", label: "手动填写" },
   { key: "prop", label: "从 NC prop.xml 导入" },
   { key: "file", label: "导入 .properties" },
+  { key: "other", label: "从其他工具导入" },
 ] as const;
 
 /**
@@ -58,7 +60,7 @@ export function ConnDialog() {
 function ConnectionPanels({ editing, tab }: { editing: Parameters<typeof ConnManualForm>[0]["conn"]; tab: string }) {
   const [visited, setVisited] = useState(() => new Set([editing ? "manual" : tab]));
   useEffect(() => { setVisited(current => new Set([...current, tab])); }, [tab]);
-  const panels = { manual: <ConnManualForm conn={editing} />, prop: <PropImportPane />, file: <PropsFileImportPane /> };
+  const panels = { manual: <ConnManualForm conn={editing} />, prop: <PropImportPane />, file: <PropsFileImportPane />, other: <OtherToolsPane /> };
   return <>{Object.entries(panels).filter(([key]) => visited.has(key)).map(([key, panel]) =>
     <div key={key} hidden={(editing ? "manual" : tab) !== key} style={{ display: (editing ? "manual" : tab) === key ? "contents" : "none" }}>{panel}</div>
   )}</>;

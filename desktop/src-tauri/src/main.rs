@@ -432,6 +432,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::db_conn_import_props,
             commands::db_prop_sources,
             commands::db_prop_import,
+            // 数据库连接：从 DataGrip / PL/SQL Developer 导入（只导结构）
+            commands::db_import_datagrip,
+            commands::db_import_datagrip_zip,
+            commands::db_import_plsql,
+            commands::db_conn_import_apply,
             // 数据库：会话、执行、事务、元数据
             commands::db_connect,
             commands::db_disconnect,

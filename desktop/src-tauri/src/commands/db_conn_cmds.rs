@@ -16,6 +16,7 @@ use super::db_cmds::{
 };
 use crate::config::{AppConfig, DbConnConfig};
 use crate::db_conns;
+use crate::db_import::{self, ImportScan, ImportWant};
 use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
@@ -523,6 +524,125 @@ pub async fn db_conn_import_props(
         })
         .await?;
     Ok(DbConnView::from(&find_conn(&cfg, &id)?))
+}
+
+// ─── 从 DataGrip / PL/SQL Developer 导入（只导结构，口令留给首次连接） ─────
+
+/// 给扫描结果标上「已存在 / 近似重复」，界面据此禁用复选框并给出提示。
+fn finish_scan(mut scan: ImportScan, cfg: &AppConfig) -> ImportScan {
+    let existing: Vec<(String, String, String)> = cfg
+        .db_conns
+        .iter()
+        .map(|c| (c.url.clone(), c.user.clone(), c.name.clone()))
+        .collect();
+    db_import::mark_existing(&mut scan.items, &existing);
+    scan
+}
+
+fn raw_payload(body: &tauri::ipc::InvokeBody) -> Result<Vec<u8>, String> {
+    match body {
+        tauri::ipc::InvokeBody::Raw(bytes) => Ok(bytes.clone()),
+        _ => Err("settings.zip 需要把文件字节作为原始载荷传入".to_string()),
+    }
+}
+
+/// 解析 DataGrip 的 `dataSources.xml`（项目 `.idea` 里那份，或粘贴的 XML 片段）。
+#[tauri::command]
+pub async fn db_import_datagrip(
+    state: tauri::State<'_, Arc<AppState>>,
+    main: String,
+    main_name: Option<String>,
+    local: Option<String>,
+) -> Result<ImportScan, String> {
+    if main.trim().is_empty() {
+        return Err("没读到 dataSources.xml 的内容".to_string());
+    }
+    let cfg = state.config.read().await.clone();
+    let origin = main_name
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "dataSources.xml".to_string());
+    let scan = db_import::scan_datagrip(&main, local.as_deref(), &origin);
+    Ok(finish_scan(scan, &cfg))
+}
+
+/// 解析 DataGrip 导出的 `settings.zip`。字节走 IPC 裸载荷（与读 XLSX 同一条路）。
+#[tauri::command]
+pub async fn db_import_datagrip_zip(
+    state: tauri::State<'_, Arc<AppState>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ImportScan, String> {
+    let bytes = raw_payload(request.body())?;
+    let cfg = state.config.read().await.clone();
+    let scan = tauri::async_runtime::spawn_blocking(move || db_import::scan_datagrip_zip(&bytes))
+        .await
+        .map_err(|e| format!("解析 settings.zip 的后台任务失败：{e}"))??;
+    Ok(finish_scan(scan, &cfg))
+}
+
+/// 扫描本机 PL/SQL Developer 配置，或解析前端手选的 `user.prefs` / `tnsnames.ora`。
+#[tauri::command]
+pub async fn db_import_plsql(
+    state: tauri::State<'_, Arc<AppState>>,
+    scan: bool,
+    prefs: Option<String>,
+    prefs_name: Option<String>,
+    tns: Option<String>,
+    tns_name: Option<String>,
+) -> Result<ImportScan, String> {
+    let cfg = state.config.read().await.clone();
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        db_import::scan_plsql(scan, prefs, prefs_name, tns, tns_name)
+    })
+    .await
+    .map_err(|e| format!("扫描 PL/SQL Developer 配置的后台任务失败：{e}"))??;
+    Ok(finish_scan(out, &cfg))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportApplyOut {
+    pub added: usize,
+    /// 没能加进来的（已存在 / 连接串无法识别），带原因。
+    pub skipped: Vec<String>,
+}
+
+/// 把预览里勾中的连接一次写进配置。**不存口令**；来源只记在 note 里。
+#[tauri::command]
+pub async fn db_conn_import_apply(
+    state: tauri::State<'_, Arc<AppState>>,
+    wants: Vec<ImportWant>,
+    env: String,
+) -> Result<ImportApplyOut, String> {
+    if wants.is_empty() {
+        return Err("没有选中任何连接".to_string());
+    }
+    let env = db_conns::normalize_env(&env);
+    let mut out = ImportApplyOut {
+        added: 0,
+        skipped: Vec::new(),
+    };
+    state
+        .update_config(|c| {
+            for w in &wants {
+                match db_import::make_conn(w, &env, &c.db_conns) {
+                    Ok(conn) => {
+                        c.db_conns.push(conn);
+                        out.added += 1;
+                    }
+                    Err(e) => {
+                        let label = if w.name.trim().is_empty() {
+                            w.url.trim()
+                        } else {
+                            w.name.trim()
+                        };
+                        out.skipped.push(format!("{label}：{e}"));
+                    }
+                }
+            }
+            Ok(())
+        })
+        .await?;
+    Ok(out)
 }
 
 #[cfg(test)]
