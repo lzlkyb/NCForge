@@ -197,6 +197,16 @@ impl StatementCache {
     pub(crate) fn return_statement(&mut self, info: &CachedStatement) {
         if info.is_cached() {
             let slot_num = info.cache_slot_num();
+            // 🔴 缓存可能已经被整体作废过（[`Self::clear`]，`resync` 之后调）：那时
+            // `slots_by_name` 清空了、slot 回到了 `empty_slots`。这条语句若是「清空时
+            // 还在用」的那一条，归还时照旧塞回去就会让同一个 slot 同时被 `empty_slots`
+            // 和 `free_used_slots` 认为可用，下一次取用直接拿到一份作废状态——比不清更糟。
+            // 判据用名字映射：正常路径归还前一定还登记着。
+            // 它的游标也一并放弃，不再排队关闭：流被 RESET 过，这些 id 在服务端已无意义，
+            // 再拿它们发 piggyback 关闭请求只会引出新的错位。
+            if self.slots_by_name.get(info.sql()).copied() != Some(slot_num) {
+                return;
+            }
             // 🔴 语句带着没取完的分页游标回缓存时，必须先把游标记进「待关闭」队列
             // 再把 id 清掉。少了这一步，下一次同一条 SQL 命中这个 slot 时会带着
             // 旧 cursor_id 直接走 TTC_RPC_REEXECUTE_AND_FETCH：服务端按旧游标回
@@ -217,5 +227,29 @@ impl StatementCache {
     /// Returns the cursors that need to be closed and clears the list.
     pub(crate) fn take_cursors_to_close(&mut self) -> Vec<u16> {
         std::mem::take(&mut self.cursors_to_close)
+    }
+
+    /// 整张缓存作废（只给「对齐过的会话」用）。
+    ///
+    /// 🔴 `resync` 只是把字节流拉回消息边界，**缓存里的 slot 还是坏的**：它留着
+    /// 上一次半途而废的 `cursor_id`、以及可能已经过期的 describe info（列定义）。
+    /// 只要那条 SQL 再被命中，驱动的重执行路径就把同一份坏状态再发一次，于是
+    /// 同一个位置再错一次——表现出来就是「自动恢复之后，过一会儿又报
+    /// `unknown TTC message type`」。
+    ///
+    /// 全部丢掉的代价只是下一条语句重新 parse 一次（错位本来就是异常路径，不在
+    /// 热路径上）。语义与 python-oracledb 的 `clear()`（会话状态变了缓存不能跨着用）
+    /// 一致；另一个纯 Rust 驱动 `oracle-rs` 的 `StatementCache::clear()` 也是这个用途。
+    ///
+    /// `cursors_to_close` 一并清掉：流刚被 RESET，这些 id 在服务端已经没有意义，
+    /// 再用它们发 piggyback 关闭请求只会引出新的错位。
+    pub(crate) fn clear(&mut self) {
+        for slot in self.cached_statements.iter_mut() {
+            *slot = None;
+        }
+        self.slots_by_name.clear();
+        self.free_used_slots.clear();
+        self.cursors_to_close.clear();
+        self.empty_slots = (1..=self.max_size).collect();
     }
 }

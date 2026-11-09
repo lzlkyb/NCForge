@@ -221,6 +221,16 @@ impl Connection {
         self.get_impl()?.ping()
     }
 
+    /// 把已经错位的响应流丢掉，让连接回到「可以继续发语句」的状态。
+    ///
+    /// 只在解析出 `unknown TTC message type` 之后用：那种错误意味着流里剩下的字节
+    /// 已经没法按消息边界拆开，继续在这条连接上发语句只会一直错位。发 RESET 标记、
+    /// 读到服务端回的重置标记为止，流就重新对齐了（和超时恢复走同一条路）。
+    /// 调用方负责决定要不要重发那条语句——**写语句的结果是未知的，不能自动重发**。
+    pub fn resync(&self) -> Result<(), Error> {
+        self.get_impl()?.resync()
+    }
+
     /// Executes a query against the database.
     pub fn query(
         &self,

@@ -69,6 +69,12 @@ pub(crate) struct Response {
     flush_out_binds: bool,
     /// 隐式结果集（TTC 消息 27）解析出来的子语句，由 execute 消息填充。
     implicit_results: Vec<CachedStatement>,
+    /// 【NCForge 补丁六】已经解析过的 TTC 消息类型（只留最近 16 条）。
+    ///
+    /// 错位报错时把它带进错误消息：真的错位时，靠「解析到哪一类消息之后开始读错」
+    /// 才能判断是行数据解码少读/多读字节，还是消息边界本身算错了。
+    /// 现场只有一个 `unknown TTC message type 0 at packet 1, offset 2906` 没法定位。
+    message_types: Vec<u8>,
 }
 
 impl Response {
@@ -121,6 +127,15 @@ impl Response {
         self.end_of_fetch = false;
         self.flush_out_binds = false;
         self.implicit_results.clear();
+        self.message_types.clear();
+    }
+
+    /// 记录一条已经解析过的 TTC 消息类型（补丁六，只保留最近 16 条）。
+    pub(crate) fn record_message_type(&mut self, message_type: u8) {
+        if self.message_types.len() >= 16 {
+            self.message_types.remove(0);
+        }
+        self.message_types.push(message_type);
     }
 
     /// Records one pending value position while deserializing rows.
@@ -201,7 +216,11 @@ impl Response {
             packet_num += 1;
             offset -= packet.buf.len();
         }
-        ResponseLocation { packet_num, offset }
+        ResponseLocation {
+            packet_num,
+            offset,
+            recent: self.message_types.clone(),
+        }
     }
 
     pub(crate) fn deserialize_bit_vector(&mut self) -> Result<(), Error> {
@@ -463,6 +482,7 @@ impl Response {
             end_of_fetch: false,
             flush_out_binds: false,
             implicit_results: Vec::new(),
+            message_types: Vec::new(),
         }
     }
 
@@ -694,10 +714,46 @@ impl Response {
 pub struct ResponseLocation {
     packet_num: usize,
     offset: usize,
+    /// 出错前刚解析过的 TTC 消息类型（补丁六）。空 = 还没解析过任何消息。
+    recent: Vec<u8>,
 }
 
 impl std::fmt::Display for ResponseLocation {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(fmt, "packet {}, offset {}", self.packet_num, self.offset)
+        write!(fmt, "packet {}, offset {}", self.packet_num, self.offset)?;
+        if !self.recent.is_empty() {
+            let names: Vec<String> = self
+                .recent
+                .iter()
+                .map(|t| format!("{t}/{}", ttc_message_name(*t)))
+                .collect();
+            write!(fmt, "；已解析消息 {}", names.join(","))?;
+        }
+        Ok(())
+    }
+}
+
+/// 把 TTC 消息类型翻成名字，只用于错位报错，认不出的直接写数字。
+fn ttc_message_name(message_type: u8) -> &'static str {
+    match message_type {
+        constants::TTC_MSG_TYPE_PROTOCOL => "协议",
+        constants::TTC_MSG_TYPE_DATA_TYPES => "数据类型",
+        constants::TTC_MSG_TYPE_FUNCTION => "执行",
+        constants::TTC_MSG_TYPE_ERROR => "错误",
+        constants::TTC_MSG_TYPE_ROW_HEADER => "行头",
+        constants::TTC_MSG_TYPE_ROW_DATA => "行",
+        constants::TTC_MSG_TYPE_PARAMETER => "返回参数",
+        constants::TTC_MSG_TYPE_STATUS => "状态",
+        constants::TTC_MSG_TYPE_IO_VECTOR => "IO",
+        constants::TTC_MSG_TYPE_LOB_DATA => "LOB",
+        constants::TTC_MSG_TYPE_WARNING => "警告",
+        constants::TTC_MSG_TYPE_DESCRIBE_INFO => "列信息",
+        constants::TTC_MSG_TYPE_PIGGYBACK => "piggyback",
+        constants::TTC_MSG_TYPE_FLUSH_OUT_BINDS => "flush",
+        constants::TTC_MSG_TYPE_BIT_VECTOR => "空值位图",
+        constants::TTC_MSG_TYPE_SERVER_SIDE_PIGGYBACK => "服务端piggyback",
+        constants::TTC_MSG_TYPE_IMPLICIT_RESULTSET => "隐式结果集",
+        constants::TTC_MSG_TYPE_END_OF_RESPONSE => "响应结束",
+        _ => "?",
     }
 }

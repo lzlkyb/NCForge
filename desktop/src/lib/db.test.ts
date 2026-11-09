@@ -36,6 +36,17 @@ describe("parseDbError / friendlyDbError", () => {
     expect(friendlyDbError(`bridge|${msg}`)).toContain("进程异常");
   });
 
+  it("session-desync 是「会话还在、结果未确认」，不能说成会话断开", () => {
+    const msg = "写入可能已经生效——请提交前先到库里核对";
+    const text = friendlyDbError(`session-desync|${msg}`);
+    // 码要认出来：归成 other 会把 `session-desync|` 前缀直接怼给用户
+    expect(parseDbError(`session-desync|${msg}`).code).toBe("session-desync");
+    // 文案不能提重连，也不能提「已断开」——会话是对齐过的、能继续用
+    expect(text).toBe(msg);
+    expect(text).not.toContain("重新连接");
+    expect(text).not.toContain("已断开");
+  });
+
   it("need-password 的存储说明不能只写 Windows（macOS 走钥匙串）", () => {
     const text = friendlyDbError("need-password|x");
     expect(text).toContain("钥匙串");

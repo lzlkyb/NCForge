@@ -615,9 +615,11 @@ fn engine_error(e: db_bridge::BridgeError) -> String {
         // 只有 JVM 桥有「子进程没了」这件事；`timeout` 是语句没跑完，会话还在
         "spawn" => code_label("bridge", &e.message),
         "timeout" => code_label("timeout", &e.message),
-        "session-lost" | "probe-failed" | "need-password" | "auth" | "unreachable" => {
-            code_label(&e.code, &e.message)
-        }
+        // `session-desync` 必须原样透传：它说的是「会话还在、这句的结果没确认」
+        // （写入可能已经生效）。归成 `sql` 的话界面只会显示成一条普通执行失败，
+        // 用户顺手再点一次写回就可能重复落库。前端据这个码给「请先到库里核对」。
+        "session-lost" | "session-desync" | "probe-failed" | "need-password" | "auth"
+        | "unreachable" => code_label(&e.code, &e.message),
         _ => map_sql_error(&e.message),
     }
 }
@@ -2225,6 +2227,20 @@ mod tests {
         );
         assert!(map_sql_error("ORA-12541: TNS:no listener").starts_with("unreachable|"));
         assert!(map_sql_error("ORA 17002：IO 错误: Connection refused").starts_with("unreachable|"));
+    }
+
+    /// `session-desync` 必须原样透传到前端。
+    ///
+    /// 它携带的语义是「会话还在、这句的结果没确认（写入可能已生效）」，界面靠这个码
+    /// 提示「先到库里核对再重试」。若落进 `map_sql_error` 被归成 `sql`，用户看到的
+    /// 只是一条普通执行失败，顺手再点一次写回就可能重复落库。
+    #[test]
+    fn 错位后的结果未确认要原样发码() {
+        let e = super::engine_error(db_bridge::BridgeError::new(
+            "session-desync",
+            "响应解析错位",
+        ));
+        assert_eq!(e, "session-desync|响应解析错位");
     }
 
     /// 存不下口令（macOS 钥匙串被拒、系统不支持…）只能降级成「不记住」。

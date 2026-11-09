@@ -495,6 +495,36 @@ impl EngineHandle {
             },
             Engine::Rust(eng) => eng.call(cmd, args, timeout),
         };
+        // 兜底：任何命令撞上「响应流错位」都先把连接对齐。
+        //
+        // `db_rust` 里的执行与取数已经自己处理了（查询重发、写入只提示）；这里补的是
+        // 其余命令——列名、索引、DDL、会话列表这些元数据查询一旦错位，以前会让整条
+        // 会话永久失效，用户只看到红条。**只对齐不重发**：写语句的结果未知，
+        // 重发可能重复落库，所以错误码改成 `session-desync` 交给调用方决定。
+        let result = match result {
+            Err(e)
+                if e.code != "session-desync" && e.message.contains("unknown TTC message type") =>
+            {
+                if self
+                    .raw_call("resync", &[], Duration::from_secs(15))
+                    .is_err()
+                {
+                    Err(BridgeError::new(
+                        "session-lost",
+                        "响应流错位，且自动对齐失败，请重新连接后核对事务状态",
+                    ))
+                } else {
+                    Err(BridgeError::new(
+                        "session-desync",
+                        format!(
+                            "响应解析错位，连接已自动恢复；这条命令的结果未确认，请重试一次。{}",
+                            e.message
+                        ),
+                    ))
+                }
+            }
+            other => other,
+        };
         let result = result.map_err(|e| Self::record_loss(&mut state, e, !connecting))?;
         if connecting {
             *state = Recovery {
@@ -548,6 +578,11 @@ impl EngineHandle {
     }
 
     fn record_loss(state: &mut Recovery, error: BridgeError, sent: bool) -> BridgeError {
+        // 响应流错位已经由 `RustEngine` 自己 resync 对齐，会话仍然可用：既不能把
+        // 连接标成「已断开」，也不该让用户去重连。那条语句结果未知由它自己的文案讲。
+        if error.code == "session-desync" {
+            return error;
+        }
         if error.code != "session-lost" && !connection_lost(&error.message) {
             return error;
         }

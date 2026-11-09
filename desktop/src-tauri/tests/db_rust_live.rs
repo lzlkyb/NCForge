@@ -73,6 +73,32 @@ fn 表页大结果集留游标后重查同一_sql_不能打坏连接() {
 
 #[test]
 #[ignore = "要连真实数据库"]
+fn 流错位对齐之后会话仍然可用() {
+    let e = RustEngine::new();
+    call(&e, "connect", &[&url(), &user(), &pass(), "false"]);
+    // 留一个没取完的游标，再发 RESET 对齐：服务端会在重置标记之后补一个
+    // ORA-01013（「用户请求取消当前的操作」）的响应，必须一并读掉。只读到标记
+    // 就停的话，这个包会留给下一条语句 —— 下一条先报 01013，然后二次错位。
+    let sql = "select * from uapbd_log_h";
+    assert_eq!(call(&e, "exec", &[sql, "201", "60"])["rowCount"], 201);
+    assert_eq!(call(&e, "resync", &[])["resynced"], true);
+    assert_eq!(call(&e, "probe", &[])["alive"], true);
+    // 连跑三次：对齐时整张语句缓存被作废（补丁七），第一次是重新 parse 建 slot，
+    // 第二、三次走「命中缓存 → 归还」——这一步专门防 `return_statement` 的作废校验
+    // 误伤正常路径（校验写错会把语句永久丢掉或把同一 slot 注册两次）。
+    for _ in 0..3 {
+        assert_eq!(call(&e, "exec", &[sql, "201", "60"])["rowCount"], 201);
+    }
+
+    // 空闲状态下也要能对齐：这时服务端没有半截响应可丢，只能靠短超时收尾，
+    // 不能把「没有后续包」当成失败。
+    assert_eq!(call(&e, "resync", &[])["resynced"], true);
+    assert_eq!(call(&e, "probe", &[])["alive"], true);
+    call(&e, "disconnect", &[]);
+}
+
+#[test]
+#[ignore = "要连真实数据库"]
 fn probe_preserves_open_result_cursor() {
     let e = RustEngine::new();
     call(&e, "connect", &[&url(), &user(), &pass(), "false"]);

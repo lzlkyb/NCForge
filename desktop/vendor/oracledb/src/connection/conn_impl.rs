@@ -70,6 +70,11 @@ impl ConnImpl {
         Ok(self.client_ref.lock()?.break_handle())
     }
 
+    /// 丢掉错位的响应流，让连接回到可继续发语句的状态（见 `Connection::resync`）。
+    pub(crate) fn resync(&self) -> Result<(), Error> {
+        self.client_ref.lock()?.resync()
+    }
+
     /// Changes the password of the logged on user.
     pub(crate) fn change_password(
         &self,

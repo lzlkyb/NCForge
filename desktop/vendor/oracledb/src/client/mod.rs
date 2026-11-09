@@ -273,6 +273,46 @@ impl Client {
         self.send_message(&mut message)
     }
 
+    /// 【NCForge 补丁六】丢掉已经错位的响应流，把连接拉回可用状态。
+    ///
+    /// 命中条件只有「解析时读到不认识的 TTC 消息类型」：那一刻流里的字节已经
+    /// 没法再按消息边界拆，`receive_response` 也补不回来。RESET 标记正是为此存在
+    /// ——超时恢复（`recover_from_error`）走的是同一条路。
+    ///
+    /// 与 [`Client::reset`] 的区别：这里不返回「标记之后的第一个包」，而是把标记
+    /// 之后的残留一并读干净再返回。真错位的现场，服务端在重置标记后面还会补一个
+    /// 被中止操作的错误响应（实测是 ORA-01013「用户请求取消当前的操作」）——只读到
+    /// 标记就停的话，这个包会留给下一条语句，于是下一条语句先报 01013、再错位一次。
+    pub(crate) fn resync(&mut self) -> Result<(), Error> {
+        let previous_timeout = self.transport.get_read_timeout()?;
+        self.send_marker(constants::MARKER_TYPE_RESET)?;
+        // 残留量不确定，只能靠「读不到更多了」收尾：钉一个短超时，读完就恢复。
+        self.transport
+            .set_read_timeout(Some(std::time::Duration::from_millis(1500)))?;
+        let mut seen_marker = false;
+        let result = loop {
+            match self.transport.receive_packet() {
+                Ok(packet) => {
+                    if packet.has_reset_marker() {
+                        seen_marker = true;
+                    }
+                }
+                // 短超时到期 = 服务端已经没有更多要发的了，流到这里是干净的。
+                Err(e) if seen_marker && e.is_call_timeout_exceeded() => {
+                    break Ok(());
+                }
+                Err(e) => break Err(e),
+            }
+        };
+        let _ = self.transport.set_read_timeout(previous_timeout);
+        // 🔴【补丁七】对齐只修好了「流」，缓存里的 slot 还是坏的：`cursor_id` 指向
+        // 已经对不上的服务端游标，describe info 也可能是旧的。留着它，同一条 SQL
+        // 下次命中会照着坏状态再发一次，于是又错位一次（「自动恢复后过一会儿又报」）。
+        // 整张缓存作废，下一条语句重新 parse——错位是异常路径，多一次往返不要紧。
+        self.statement_cache.clear();
+        result
+    }
+
     /// Sends a message to the database.
     fn send_message(
         &mut self,

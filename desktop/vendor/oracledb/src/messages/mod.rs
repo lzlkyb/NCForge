@@ -64,6 +64,8 @@ pub(crate) trait Message {
     {
         loop {
             let message_type = resp.read_u8()?;
+            // 补丁六：记下解析轨迹，错位报错时能看出是「读完哪类消息之后开始读错」。
+            resp.record_message_type(message_type);
             self.deserialize_ttc_message(client, resp, message_type)?;
             if self.is_final_ttc_message_type(client, message_type) {
                 break;

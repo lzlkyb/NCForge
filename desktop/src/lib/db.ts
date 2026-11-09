@@ -88,6 +88,9 @@ const KNOWN_CODES = new Set([
   "need-password",
   "not-connected",
   "session-lost",
+  // 响应解析错位：连接已被自动对齐、**会话仍然可用**，但这句的结果没确认
+  // （写入可能已经生效）。不要把它当成 `session-lost`：那个要重连，这个不要。
+  "session-desync",
   // 语句没跑完（点了停止或超过等待超时），会话还在——不要跟 `bridge` 混为一谈
   "timeout",
   "fallback-session-lost",
@@ -120,6 +123,7 @@ export interface DbError {
     | "need-password"
     | "not-connected"
     | "session-lost"
+    | "session-desync"
     | "timeout"
     | "fallback-session-lost"
     | "probe-failed"
@@ -176,6 +180,11 @@ export function friendlyDbError(e: unknown): string {
     case "fallback-tx":
       // 这条最容易被误读成普通报错：必须让人看到「写入没有生效」
       return `这条语句只能在 JVM 桥的临时会话里执行，写入已被回滚、没有生效：${message}`;
+    case "session-desync":
+      // 后端两种文案已经把「会话还在 / 结果未确认 / 写入可能已生效」写全了：
+      // 查询是「已自动重发」不用管，写入是「请到库里核对」。这里不再套模板，
+      // 否则「重新连接即可」这类话会把人带去重连一个本来好好的会话。
+      return message;
     default:
       return message;
   }

@@ -116,6 +116,28 @@ fn not_connected() -> BridgeError {
     sql_err("还没连数据库")
 }
 
+/// 响应流错位：驱动在响应里读到了不认识的 TTC 消息类型。
+///
+/// 命中和「连接真的断了」是两回事：会话还在服务端活着，只是本机这条字节流已经
+/// 对不上消息边界（`unknown TTC message type 0 at packet 1, offset …`），之后每条
+/// 语句都会接着错位，界面上就表现成「用着用着会话断开」。发 RESET 标记能把流对齐。
+fn is_desync(e: &Error) -> bool {
+    matches!(e.kind(), ErrorKind::UnknownTtcMessageType(..))
+}
+
+/// [`is_desync`] 的字符串版：错误已经过 [`drv_err`] 转成 [`BridgeError`] 时用。
+fn is_desync_msg(msg: &str) -> bool {
+    msg.contains("unknown TTC message type")
+}
+
+/// 错位之后连 RESET 都对齐不了：这条连接已经不能再用，只能让用户重连。
+fn resync_failed() -> BridgeError {
+    BridgeError::new(
+        "session-lost",
+        "响应流错位，且自动对齐失败，请重新连接后核对事务状态",
+    )
+}
+
 /// 驱动的错误 → 我们的错误码。带 `ORA-xxxxx` 前缀，命令层的 `map_sql_error` 靠它分流
 /// （认证失败弹输口令框、网络不通单独提示）。
 fn drv_err(e: Error) -> BridgeError {
@@ -450,6 +472,17 @@ impl Session {
                 self.probe_conn(timeout)?;
                 Ok(json!({ "alive": true, "tx": self.tx_json() }))
             }
+            // 诊断/自救用：丢弃错位的响应流，把连接拉回可用（不改事务状态、不重发语句）。
+            // 界面上正常路径不会调它——执行与取数命中错位时会自己对齐。
+            "resync" => {
+                let Some(conn) = self.conn.as_ref() else {
+                    return Err(not_connected());
+                };
+                let _ = conn.set_call_timeout(Some(timeout));
+                let out = conn.resync().map_err(drv_err);
+                let _ = conn.set_call_timeout(None);
+                out.map(|_| json!({ "resynced": true }))
+            }
             "disconnect" => {
                 self.close();
                 Ok(json!({}))
@@ -782,7 +815,18 @@ impl Session {
             // 真库复现：大表取 500 行留游标，再执行同一 SQL 必炸；换一条 SQL 就正常。
             // 驱动默认 prefetch_rows=2 / fetch_array_size=100 没有这个问题，别为省几次
             // 往返把它调大（真要调，先确认 vendor 的重执行路径已修）。
-            let mut cur = conn.query(sql, params).map_err(drv_err)?;
+            let mut cur = match conn.query(sql, params) {
+                Ok(cur) => cur,
+                // 响应流错位：查询是只读的，对齐之后重发一次没有副作用。
+                // 不重发的话这条连接上后面每条语句都会接着错位，只能重连。
+                Err(e) if is_desync(&e) => {
+                    if conn.resync().is_err() {
+                        return Err(resync_failed());
+                    }
+                    conn.query(sql, params).map_err(drv_err)?
+                }
+                Err(e) => return Err(drv_err(e)),
+            };
             let columns: Vec<Value> = cur.columns().iter().map(column_json).collect();
             let types: Vec<String> = cur
                 .columns()
@@ -804,7 +848,25 @@ impl Session {
             }
             body.insert("rowCount".into(), json!(body_len(&body)));
         } else {
-            let mut res = conn.execute(sql, params).map_err(drv_err)?;
+            let mut res = match conn.execute(sql, params) {
+                Ok(res) => res,
+                // 🔴 写语句绝不能自动重发：服务端可能已经执行完，只是响应那条流错位了。
+                // 这里只做「把连接拉回可用」——否则接下来每条语句都报同一个错，用户
+                // 只能重连，还会以为数据没写进去。结果有没有生效必须由人去库里核对。
+                Err(e) if is_desync(&e) => {
+                    if conn.resync().is_err() {
+                        return Err(resync_failed());
+                    }
+                    return Err(BridgeError::new(
+                        "session-desync",
+                        format!(
+                            "响应流错位（会话仍在，连接已自动恢复）。这条语句的结果未确认，\
+                             如果是写入，可能已经生效——请提交前先到库里核对。原始错误：{e}"
+                        ),
+                    ));
+                }
+                Err(e) => return Err(drv_err(e)),
+            };
             let n = res.rows_affected();
             // 隐式结果集（`dbms_sql.return_result`）：PL/SQL 块自己开的 ref cursor，
             // 服务端按 TTC 27 号消息下发，驱动侧已解析（vendor 补丁四）。
@@ -854,11 +916,29 @@ impl Session {
             conn.set_call_timeout(Some(timeout)).map_err(drv_err)?;
         }
         let next = page(&mut cur, &types, max_rows, self.full_lob);
+        // 错位要**先对齐再清超时**：`resync()` 要读到服务端回的重置标记，
+        // 没有读超时会一直等下去。
+        let desync = matches!(&next, Err(e) if is_desync_msg(&e.message));
+        let mut broken = false;
+        if desync {
+            self.cursor = None;
+            if let Some(conn) = self.conn.as_ref() {
+                broken = conn.resync().is_err();
+            }
+        }
         if let Some(conn) = self.conn.as_ref() {
             let _ = conn.set_call_timeout(None);
         }
         let next = match next {
             Ok(v) => v,
+            // 游标已经跟着错位流一起作废，重取没有意义：让用户重新执行这次查询。
+            Err(_) if desync => {
+                return Err(if broken {
+                    resync_failed()
+                } else {
+                    sql_err("取数过程中响应流错位，连接已自动恢复；请重新执行这次查询")
+                });
+            }
             Err(e) => {
                 // 游标已在上一行被 take 走，这里随作用域结束关闭；用户再点「加载更多」
                 // 会收到「游标已关闭」，重新执行一次即可。
@@ -1122,18 +1202,29 @@ impl Session {
 
     fn columns(&self, table: &str) -> Result<Value, BridgeError> {
         let conn = self.conn_ref()?;
-        let t = table.to_uppercase();
-        let zh = self.nc_column_names(conn, table);
-        let pk = self.pk_columns(conn, &t)?;
-        let sql =
-            "select c.column_name, c.data_type, c.char_length, c.data_precision, c.data_scale, \
-                   c.nullable, c.data_default, cc.comments \
+        let (owner, t) = split_qualified(table);
+        let zh = self.nc_column_names(conn, &t);
+        let pk = self.pk_columns(conn, &t, owner.as_deref())?;
+        // `aier633.bd_material` 与 `bd_material` 要分开处理：前者按 owner 精确查，
+        // 后者沿用连接的 current_schema。整串丢给 `table_name = :1` 永远查不到，
+        // 结果是「表有主键却被判成没有主键」——SQL 控制台双击不能改就是这么来的。
+        const BASE: &str = "select c.column_name, c.data_type, c.char_length, c.data_precision, \
+                   c.data_scale, c.nullable, c.data_default, cc.comments \
                    from all_tab_columns c left join all_col_comments cc \
                    on cc.owner = c.owner and cc.table_name = c.table_name \
                    and cc.column_name = c.column_name \
-                   where c.owner = sys_context('userenv','current_schema') \
-                   and c.table_name = :1 order by c.column_id";
-        let cur = conn.query(sql, &[&t as &dyn ToDbValue]).map_err(drv_err)?;
+                   where c.table_name = :1";
+        let cur = match owner.as_deref() {
+            Some(o) => conn.query(
+                &format!("{BASE} and c.owner = :2 order by c.column_id"),
+                &[&t as &dyn ToDbValue, &o as &dyn ToDbValue],
+            ),
+            None => conn.query(
+                &format!("{BASE} and c.owner = sys_context('userenv','current_schema') order by c.column_id"),
+                &[&t as &dyn ToDbValue],
+            ),
+        }
+        .map_err(drv_err)?;
         let mut out = Vec::new();
         for row in cur {
             let row = row.map_err(drv_err)?;
@@ -1195,14 +1286,28 @@ impl Session {
         m
     }
 
-    fn pk_columns(&self, conn: &Connection, table: &str) -> Result<Vec<String>, BridgeError> {
-        let sql = "select cc.column_name from all_constraints c \
+    fn pk_columns(
+        &self,
+        conn: &Connection,
+        table: &str,
+        owner: Option<&str>,
+    ) -> Result<Vec<String>, BridgeError> {
+        const BASE: &str = "select cc.column_name from all_constraints c \
                    join all_cons_columns cc on cc.owner = c.owner and cc.constraint_name = c.constraint_name \
-                   where c.owner = sys_context('userenv','current_schema') \
-                   and c.table_name = :1 and c.constraint_type = 'P' order by cc.position";
-        let cur = conn
-            .query(sql, &[&table as &dyn ToDbValue])
-            .map_err(drv_err)?;
+                   where c.table_name = :1 and c.constraint_type = 'P'";
+        let cur = match owner {
+            Some(o) => conn.query(
+                &format!("{BASE} and c.owner = :2 order by cc.position"),
+                &[&table as &dyn ToDbValue, &o as &dyn ToDbValue],
+            ),
+            None => conn.query(
+                &format!(
+                    "{BASE} and c.owner = sys_context('userenv','current_schema') order by cc.position"
+                ),
+                &[&table as &dyn ToDbValue],
+            ),
+        }
+        .map_err(drv_err)?;
         let mut out = Vec::new();
         for row in cur {
             let row = row.map_err(drv_err)?;
@@ -2087,6 +2192,20 @@ fn base_type(t: &str) -> String {
     }
 }
 
+/// 元数据入参 `schema.table` → (owner, table)，都转大写。
+///
+/// 不带 schema 时 owner 为 `None`，调用方退回连接的 `current_schema`。
+/// 这一步必须做：把整串丢进 `table_name = :1` 查不到任何东西，而查询不报错、
+/// 只是返回空——上层就会把「表有主键」误判成「没有主键」，直接关掉编辑。
+fn split_qualified(name: &str) -> (Option<String>, String) {
+    match name.trim().split_once('.') {
+        Some((o, t)) if !o.is_empty() && !t.is_empty() => {
+            (Some(o.trim().to_uppercase()), t.trim().to_uppercase())
+        }
+        _ => (None, name.trim().to_uppercase()),
+    }
+}
+
 fn column_json(m: &Metadata) -> Value {
     let base = base_type(&type_label(m));
     // 字符类型（VARCHAR2 / CHAR / NCHAR…）的「精度」在 JDBC 里是 COLUMN_SIZE，
@@ -2388,6 +2507,24 @@ fn body_len(m: &Map<String, Value>) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 带 schema 的表名必须拆开：整串当 table_name 查会静默返回空，
+    /// 上层据此判「没有主键」，SQL 控制台结果页就被锁成只读。
+    #[test]
+    fn 元数据表名按需拆出_owner() {
+        assert_eq!(
+            split_qualified("aier633.bd_material"),
+            (Some("AIER633".into()), "BD_MATERIAL".into())
+        );
+        assert_eq!(
+            split_qualified(" bd_material "),
+            (None, "BD_MATERIAL".into()),
+            "不带 schema 时不能凭空造 owner"
+        );
+        // 只有一个点、两侧都非空才算限定名；`a.` / `.b` 当普通表名处理
+        assert_eq!(split_qualified("a."), (None, "A.".into()));
+        assert_eq!(split_qualified(".b"), (None, ".B".into()));
+    }
 
     /// 预览文案必须能被 `is_lob_preview` 认出来，而且不能把正常值误判成截断。
     ///
