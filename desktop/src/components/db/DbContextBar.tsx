@@ -41,7 +41,7 @@ export function DbContextBar({ connId, independent = false, connectionControl, t
         <span>账号 · {conn.user}</span>
         <span>地址 · {conn.url}</span>
         <span>当前会话 · {readOnly ? "只读查询" : transactionMode ?? "待确认"}</span>
-        <span>连接设置 · {conn.autoCommit ? "自动提交" : "手动提交"}</span>
+        <span>连接设置 · {conn.autoCommit ? "自动提交" : "手动提交"}{conn.noStmtCache && conn.engine === "rust" ? " · 无语句缓存" : ""}</span>
         <span>连接只读作用于此连接全部会话；账号权限由数据库配置。</span>
         <span>只读查询使用 Oracle 只读事务并限制执行语句；具有自治事务的函数仍须使用只读账号限制。</span>
       </div>

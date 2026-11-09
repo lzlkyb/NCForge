@@ -159,6 +159,7 @@ pub fn migrate_legacy(cfg: &mut AppConfig) -> bool {
         engine: String::new(),
         note: "旧版配置迁移".to_string(),
         default_schema: String::new(),
+        no_stmt_cache: false,
     });
     true
 }

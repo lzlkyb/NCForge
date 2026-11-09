@@ -22,6 +22,11 @@ export interface DbConnForm {
   engine: DbEngine;
   /** 默认 schema：连上就切过去，写 SQL 不用带 `aier633.` 前缀。空 = 登录账号自己的。 */
   defaultSchema: string;
+  /**
+   * 关掉纯 Rust 驱动的语句缓存。只对 Rust 引擎有意义，但对**哪种引擎存的**不重要：
+   * 存的是连接属性，界面上在引擎选 Rust 时才显示（JVM 桥没有这个缓存）。
+   */
+  noStmtCache: boolean;
 }
 
 export function initialConnForm(conn: DbConn | null): DbConnForm {
@@ -41,6 +46,7 @@ export function initialConnForm(conn: DbConn | null): DbConnForm {
     note: conn?.note ?? "",
     engine: conn?.engine ?? "rust",
     defaultSchema: conn?.defaultSchema ?? "",
+    noStmtCache: conn?.noStmtCache ?? false,
   };
 }
 

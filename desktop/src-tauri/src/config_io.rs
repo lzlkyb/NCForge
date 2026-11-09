@@ -274,6 +274,7 @@ mod tests {
                 engine: "java".to_string(),
                 note: String::new(),
                 default_schema: "nc".to_string(),
+                no_stmt_cache: false,
             }],
             db_active: Some("c1".to_string()),
             lang_enabled: true,

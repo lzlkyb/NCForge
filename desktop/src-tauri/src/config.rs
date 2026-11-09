@@ -228,6 +228,20 @@ pub struct DbConnConfig {
     /// 那个账号给了 SELECT。`alter session` 是会话控制语句，不会隐式提交当前事务。
     #[serde(default)]
     pub default_schema: String,
+    /// 关掉纯 Rust 驱动的**语句缓存**（`true` = 不缓存预处理语句）。
+    ///
+    /// 只对 Rust 引擎有意义：JVM 桥用的是 oracle JDBC，它的隐式语句缓存默认就是关的。
+    ///
+    /// **为什么给这个开关**：Oracle 有一个官方也承认、只做了 workaround 的老问题——
+    /// 语句缓存里存着 describe info（列定义），表结构变过（加列 / 改类型 / DROP 后重建同名表）
+    /// 之后同一条 SQL 命中旧 slot，服务端按新结构回行、客户端按旧结构解析，字节流就错位了，
+    /// 报 `unknown TTC message type N at packet 1, offset …`。python-oracledb 维护者给用户的
+    /// 建议就是「把语句缓存设成 0」。默认关着这个开关（= 用缓存）：缓存对宽表分页查询的
+    /// 收益很明显，只在错位反复出现时按库关掉，用每条语句重新 parse 换彻底稳定。
+    ///
+    /// 改它要重连才生效（缓存大小是建连接时定死的），见 `db_rust::RustEngine::connect`。
+    #[serde(default)]
+    pub no_stmt_cache: bool,
 }
 
 impl AppConfig {

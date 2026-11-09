@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { EnvChips } from "./EnvChips";
+import { ConnStmtCacheToggle } from "./ConnStmtCacheToggle";
 import { friendlyDbError, parseDbError, thousands } from "../../lib/db";
 import { dbApi, type DbConn, type DbConnInput, type TestResult } from "../../lib/dbApi";
 import { initialConnForm, mergeConnForm, type DbConnForm } from "../../lib/dbConnForm";
@@ -63,6 +64,7 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
     note: f.note.trim() || null,
     engine: f.engine,
     defaultSchema: f.defaultSchema.trim() || null,
+    noStmtCache: f.noStmtCache,
   });
 
   const missing = !f.url.trim() ? "连接串" : !f.user.trim() ? "用户名" : null;
@@ -100,15 +102,16 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
     const task=beginOperation(dbTaskSpec(`connection.form:${conn?.id || "new"}`,"保存数据库连接配置",conn?.id ?? null,"连接配置"));
     if(!task) return;lock.current=true;setSaving(true);
     try {
-      const target = conn && (conn.url !== f.url.trim() || conn.user !== f.user.trim() || conn.engine !== input().engine || (conn.defaultSchema ?? "") !== f.defaultSchema.trim());
-      // 连接串、用户或引擎变了：旧会话已经不是这个连接了，必须先断开。
+      const target = conn && (conn.url !== f.url.trim() || conn.user !== f.user.trim() || conn.engine !== input().engine || (conn.defaultSchema ?? "") !== f.defaultSchema.trim() || (conn.noStmtCache ?? false) !== f.noStmtCache);
+      // 连接串、用户、引擎或「关闭语句缓存」变了：旧会话已经不是这个连接了，必须先断开。
+      // 语句缓存的大小是建连接时定死的，改开关同样要重连才生效。
       //
       // 🔴 不能直接调 store 的 `disconnect`：那会绕过 `guardAllSessions`，primary 和
       // 每个槽里未提交的写入会被桥静默回滚，而界面只弹一句绿色「配置已保存」。
       // 先问、再存：用户点取消时配置也不落地，避免「配置是新的、会话还是旧的」。
       if (target && conn && rtOf(conn.id).status === "connected") {
         // 动态 import：`dbActions` 会顺着 sqlModels 把整个 Monaco 拉进来，
-        // 而这只在「改地址后保存」时用得上。静态引入会让所有渲染表单的地方都背上 Monaco。
+        // 而这只在「改地址 / 开关后保存」时用得上。静态引入会让所有渲染表单的地方都背上 Monaco。
         const { disconnectConn } = await import("../../lib/dbActions");
         const closed = await disconnectConn(conn.id);
         if (!closed) {
@@ -224,6 +227,9 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
                 ? "JVM 桥：能力最全（REF CURSOR、解 prop.xml 口令），需要一套 Java 运行时与 Oracle 驱动。装了 NC 就到「设置 → 开发 → NC 环境」配一下目录；没装 NC 就到「设置 → 组件」下载「数据库 JVM 组件」。两样都没有也不影响用库——选「纯 Rust 驱动」即可，只是没有 REF CURSOR。"
                 : "JVM 桥：能力最全（支持 REF CURSOR、能解 prop.xml 口令），多条连接共用一个 JVM；要用 NC 自带的 Java 与驱动，先在设置里配置 NC home。"}
         </p>
+        {f.engine === "rust" && (
+          <ConnStmtCacheToggle checked={f.noStmtCache} onChange={noStmtCache => put({ noStmtCache })} />
+        )}
         <span className="dbx-form-label" id={fieldId("tx")}>事务</span>
         <div className="dbx-txmode" role="group" aria-labelledby={fieldId("tx")} style={{ justifySelf: "start" }}>
           <button type="button" aria-pressed={!f.autoCommit} data-on={!f.autoCommit || undefined} onClick={() => put({ autoCommit: false })}>

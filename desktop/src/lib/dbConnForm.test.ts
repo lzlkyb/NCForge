@@ -33,6 +33,8 @@ it("口令、记住与默认 schema 不参与同步，原样带过；新连接�
   const f = mergeConnForm(blank(), { password: "p", remember: false, defaultSchema: "AIER633" });
   expect([f.password, f.remember, f.defaultSchema, f.engine]).toEqual(["p", false, "AIER633", "rust"]);
   expect(f.url).toBe("");
+  // 新连接默认用语句缓存（老配置没这个字段也是同一默认）
+  expect(f.noStmtCache).toBe(false);
 });
 
 it("编辑已有连接时按 URL 回填字段，口令留空等用户重填", () => {
@@ -43,4 +45,18 @@ it("编辑已有连接时按 URL 回填字段，口令留空等用户重填", ()
   });
   expect([f.host, f.port, f.service, f.sid]).toEqual(["h", "1521", "ORCL", true]);
   expect([f.password, f.autoCommit, f.engine, f.defaultSchema]).toEqual(["", true, "java", "S"]);
+  expect(f.noStmtCache).toBe(false);
+});
+
+it("关语句缓存的开关跟着连接存、读，不参与 URL 同步", () => {
+  const f = initialConnForm({
+    id: "c2", name: "n", env: "test", source: "manual", url: "jdbc:oracle:thin:@h:1521/s",
+    user: "u", propDs: null, autoCommit: false, note: "", hasPassword: false,
+    engine: "rust", noStmtCache: true,
+  });
+  expect(f.noStmtCache).toBe(true);
+  // 它跟 host/service 同在一个 patch 里也不该触发 URL 重拼
+  const g = mergeConnForm(f, { host: "h2" });
+  expect(g.url).toBe("jdbc:oracle:thin:@h2:1521/s");
+  expect(g.noStmtCache).toBe(true);
 });

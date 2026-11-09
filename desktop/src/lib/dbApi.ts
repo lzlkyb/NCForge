@@ -38,6 +38,15 @@ export interface DbConn {
    * 不改变权限（查别人 schema 的表仍然要那边给了 SELECT）。
    */
   defaultSchema?: string;
+  /**
+   * 关掉**纯 Rust 驱动**的语句缓存（JVM 桥无此开关：oracle JDBC 的隐式语句缓存默认就没开）。
+   *
+   * 用来对付 Oracle 一个官方也只做了 workaround 的老问题：表结构变过之后，同一条 SQL
+   * 命中缓存里过期的 describe info（列定义），服务端按新结构回行、客户端按旧结构解析，
+   * 字节流就错位了（`unknown TTC message type N`）。关掉之后每条语句都重新 parse。
+   * 默认 `false`（用缓存）——宽表分页查询的收益明显，错位反复出现时再按库关。
+   */
+  noStmtCache?: boolean;
 }
 
 /**
@@ -61,6 +70,8 @@ export interface DbConnInput {
   engine?: DbEngine;
   /** 默认 schema（空 / 不传 = 不切）。写 SQL 时不用带 `aier633.` 前缀。 */
   defaultSchema?: string | null;
+  /** 关掉纯 Rust 驱动的语句缓存（见 {@link DbConn.noStmtCache}）。不传 = 用缓存。 */
+  noStmtCache?: boolean;
 }
 
 /** 这个连接用哪个引擎、那个引擎能做什么。界面按它决定按钮能不能用。 */

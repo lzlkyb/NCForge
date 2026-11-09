@@ -377,7 +377,7 @@ impl Session {
         let out = match cmd {
             "connect" => {
                 let auto = a.get(3).map(|v| v.eq_ignore_ascii_case("true")).unwrap_or(false);
-                self.connect(a.first().copied().unwrap_or(""), a.get(1).copied().unwrap_or(""), a.get(2).copied().unwrap_or(""), auto, a.get(4).copied().unwrap_or(""))
+                self.connect(a.first().copied().unwrap_or(""), a.get(1).copied().unwrap_or(""), a.get(2).copied().unwrap_or(""), auto, a.get(4).copied().unwrap_or(""), a.get(5).is_some_and(|v| v.eq_ignore_ascii_case("true")))
             }
             "connectProp" => Err(other_err(
                 "纯 Rust 驱动解不了 NC prop.xml 里加密的口令（那要用 NC 自带的 PropXMLReader，只有 JVM 里能跑）。\
@@ -587,16 +587,24 @@ impl Session {
         pass: &str,
         auto: bool,
         schema: &str,
+        no_stmt_cache: bool,
     ) -> Result<Value, BridgeError> {
         self.close();
         let cs = connect_string_from_jdbc(url).map_err(sql_err)?;
-        let cfg = oracledb::Config::default()
+        let mut cfg = oracledb::Config::default()
             .set_credentials(user, pass)
             // 连不通的库不能一直挂着：JVM 桥那边是 `oracle.net.CONNECT_TIMEOUT=15000`，
             // 这里对齐成同一个数。不设的话退到系统 TCP 超时，界面上会转两三分钟。
             .set_transport_connect_timeout(Some(Duration::from_secs(15)))
             .set_connect_string(&cs)
             .map_err(drv_err)?;
+        // 关缓存 = 设成 0：`StatementCache::new(0)` 之后 `has_space()` 恒 false，
+        // 每条语句都现 parse、用完即弃，缓存里不会再留着过期的 describe info 和
+        // 半途而废的 cursor_id（见 `DbConnConfig::no_stmt_cache` 的说明）。
+        // 不给值就走驱动默认（20 个 slot）。
+        if no_stmt_cache {
+            cfg = cfg.set_stmtcachesize(0);
+        }
         let conn = oracledb::connect(cfg).map_err(connect_err)?;
         // DBMS_OUTPUT 默认关着：打开后 PL/SQL 里的 put_line 才能在「输出」标签看到。
         // 没权限也不影响连库。
@@ -634,6 +642,9 @@ impl Session {
             "schema": current,
             "schemaWarning": schema_warning,
             "autoCommit": auto,
+            // 实际生效值（不是配置值）：关掉缓存时界面要能说出来，否则用户不知道
+            // 「我开了那个开关」到底有没有落到这条会话上。
+            "noStmtCache": no_stmt_cache,
         }))
     }
 

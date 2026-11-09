@@ -38,6 +38,8 @@ pub struct DbConnView {
     pub engine: String,
     /// 连上后切换到的默认 schema（空 = 用登录账号自己的）。
     pub default_schema: String,
+    /// 关掉纯 Rust 驱动的语句缓存（对 JVM 桥无影响）。
+    pub no_stmt_cache: bool,
 }
 
 impl From<&DbConnConfig> for DbConnView {
@@ -57,6 +59,7 @@ impl From<&DbConnConfig> for DbConnView {
                 .as_str()
                 .to_string(),
             default_schema: c.default_schema.clone(),
+            no_stmt_cache: c.no_stmt_cache,
         }
     }
 }
@@ -82,6 +85,9 @@ pub struct DbConnInput {
     /// 默认 schema（空 / 不传 = 不切）。写 SQL 时不用带 `aier633.` 前缀。
     #[serde(default)]
     pub default_schema: Option<String>,
+    /// 关掉纯 Rust 驱动的语句缓存。老前端 / 老配置不传 = 用缓存（默认）。
+    #[serde(default)]
+    pub no_stmt_cache: bool,
 }
 
 impl DbConnInput {
@@ -115,6 +121,7 @@ impl DbConnInput {
             default_schema: db_conns::normalize_schema(
                 self.default_schema.as_deref().unwrap_or(""),
             ),
+            no_stmt_cache: self.no_stmt_cache,
         }
     }
 }
@@ -211,6 +218,7 @@ fn add_prop_sources(cfg: &mut AppConfig, v: &Value, only: Option<&[String]>) -> 
             engine: crate::db_engine::EngineKind::Java.as_str().to_string(),
             note: format!("NC prop.xml · {name}"),
             default_schema: String::new(),
+            no_stmt_cache: false,
         });
         n += 1;
     }
@@ -510,6 +518,7 @@ pub async fn db_conn_import_props(
         // （老配置迁移走空串 → JVM 桥的语义在 `migrate_legacy`，这里不动）
         engine: Some("rust".into()),
         default_schema: None,
+        no_stmt_cache: false,
     };
     let cfg = state
         .update_config(|c| {
@@ -684,6 +693,7 @@ mod tests {
             engine: String::new(),
             note: String::new(),
             default_schema: String::new(),
+            no_stmt_cache: false,
         };
         let v = serde_json::to_string(&DbConnView::from(&c)).unwrap();
         assert!(!v.contains("AQAA"), "{v}");
@@ -705,6 +715,7 @@ mod tests {
             note: None,
             engine: None,
             default_schema: None,
+            no_stmt_cache: false,
         };
         let c = i.to_config("id".into(), None);
         assert_eq!(c.name, "ncdev");
@@ -725,6 +736,7 @@ mod tests {
             note: None,
             engine: None,
             default_schema: None,
+            no_stmt_cache: false,
         };
         // 新建（手动 / 导入 .properties）：不依赖 NC home
         let rust_input = DbConnInput {

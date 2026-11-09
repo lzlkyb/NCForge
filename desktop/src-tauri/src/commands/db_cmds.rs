@@ -805,10 +805,13 @@ pub(crate) fn connect_args(
         return Ok(("connectProp", vec![home.root, ds, auto, schema]));
     }
     let pass = resolve_password(conn, password)?;
-    Ok((
-        "connect",
-        vec![conn.url.clone(), conn.user.clone(), pass, auto, schema],
-    ))
+    // 第 6 项是「关掉纯 Rust 驱动的语句缓存」。加在**最后**、且不分引擎：位置参数
+    // 只增不改，JVM 桥按位置只读前 5 项（`NcDbBridge.dispatch` 里 `a.size() > 4`），
+    // 多这一项它不看。不分引擎是为了覆盖「配置写 JVM 桥但本机没有 Java → 实际降级成
+    // 纯 Rust」那条路：按配置的引擎决定要不要带，降级之后这个开关就悄悄失效了。
+    let mut args = vec![conn.url.clone(), conn.user.clone(), pass, auto, schema];
+    args.push(conn.no_stmt_cache.to_string());
+    Ok(("connect", args))
 }
 
 /// 让 `conn` 具备一个能用的口令，供非 JVM 引擎使用。
@@ -2281,7 +2284,43 @@ mod tests {
             engine: String::new(),
             note: String::new(),
             default_schema: String::new(),
+            no_stmt_cache: false,
         }
+    }
+
+    /// 关缓存的开关必须**一直传到引擎侧**（追加为 `connect` 的第 6 个位置参数）。
+    ///
+    /// 两个容易踩的点，这个用例各钉一条：
+    /// 1. 按「配置里写的引擎」决定带不带 —— 配置写 JVM 桥、本机没 Java 实际降级成纯 Rust 时，
+    ///    开关会悄悄失效。所以不分引擎都带上（JVM 桥按位置只读前 5 项，多的不看）。
+    /// 2. 只追加不改前 5 项的位置：schema 是第 4 参、autoCommit 第 3 参，Java 侧
+    ///    `NcDbBridge.dispatch` 与 `db_rust::call` 都按位置取，插在中间会把它们顶错位。
+    #[test]
+    fn 关语句缓存的开关要作为第6个参数传给引擎() {
+        let cfg = AppConfig::default();
+        let mut c = conn("a", "jdbc:oracle:thin:@//h:1521/s");
+        for kind in [
+            crate::db_engine::EngineKind::Rust,
+            crate::db_engine::EngineKind::Java,
+        ] {
+            let (cmd, args) =
+                super::connect_args(&cfg, &c, Some("pw"), true, kind).expect("构造连接参数");
+            assert_eq!(cmd, "connect");
+            assert_eq!(args.len(), 6, "{kind:?} 下也必须是 6 个（含开关）");
+            assert_eq!(args[3], "true", "autoCommit 还在第 3 参");
+            assert_eq!(args[4], "", "schema 还在第 4 参，没被顶走");
+            assert_eq!(args[5], "false", "默认开着语句缓存");
+        }
+        c.no_stmt_cache = true;
+        let (_, args) = super::connect_args(
+            &cfg,
+            &c,
+            Some("pw"),
+            true,
+            crate::db_engine::EngineKind::Rust,
+        )
+        .expect("构造连接参数");
+        assert_eq!(args[5], "true", "开了开关要如实传下去");
     }
 
     #[test]
