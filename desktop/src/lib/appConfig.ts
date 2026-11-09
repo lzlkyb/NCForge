@@ -36,6 +36,10 @@ export interface AppConfig {
   linked_overrides: LinkedOverride[];
   /** 编译/启动前自动把工程 `META-INF` 元数据投送到 NCHOME（默认开）。 */
   deploy_on_start: boolean;
+  /** 启动中间件时挂上热替换 agent（默认开，下次启动生效）。界面开关在设置 → 任务 → 热替换。 */
+  hotswap_enabled: boolean;
+  /** 编译成功后自动推送热替换（默认开）；关闭时只攒待推列表。 */
+  hotswap_auto: boolean;
   /** 保存 `.java` 后自动编译该文件（默认开）。只编这一个文件，不编整模块。 */
   auto_compile: boolean;
   /** 单文件编译后空闲一段时间，再跑一次模块级增量（补上签名变更的引用方，默认开）。 */
@@ -78,6 +82,8 @@ export interface ConfigPatch {
   prewarm_index?: boolean;
   persistent_worker?: boolean;
   build_parallel?: number;
+  hotswap_enabled?: boolean;
+  hotswap_auto?: boolean;
 }
 
 export const getConfig = () => invoke<AppConfig>("get_config");

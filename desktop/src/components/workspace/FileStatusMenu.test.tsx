@@ -9,6 +9,7 @@ vi.mock("../../lib/editorStore", () => ({ getModel: () => ({ getLanguageId: () =
 vi.mock("../../lib/cursorStore", () => ({ useCursor: () => ({ line: 23, column: 4 }) }));
 vi.mock("./LangBadge", () => ({ LangBadge: () => null }));
 vi.mock("./ServiceStatusButton", () => ({ ServiceStatusButton: () => null }));
+vi.mock("./HotswapStatusChip", () => ({ HotswapStatusChip: () => null }));
 vi.mock("./StatusContributions", () => ({ StatusContributions: () => null }));
 vi.mock("../ui/OperationStatus", () => ({ OperationStatus: () => null }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

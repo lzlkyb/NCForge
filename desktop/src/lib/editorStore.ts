@@ -248,6 +248,15 @@ export function findModel(path: string): Model | undefined {
   return undefined;
 }
 
+/**
+ * 该文件在编辑器里是否有未保存修改（没有 model 视为没有）。
+ * `path` 须是标签里的原样路径。外部改动自动刷新标签前用它挡住「会丢掉用户正在写的内容」的情况。
+ */
+export function isModelDirty(path: string): boolean {
+  const e = entries.get(path);
+  return !!e && e.model.getAlternativeVersionId() !== e.savedVersion;
+}
+
 /** 编辑器里的文本，统一用 `\n`（后端按文件原换行还原）。 */
 export function getText(path: string): string | undefined {
   return entries.get(path)?.model.getValue(monaco.editor.EndOfLinePreference.LF);

@@ -4,6 +4,7 @@ import { baseName, encodingMarks, filePathKey, readFile, type Eol } from "../lib
 import type { Problem } from "../lib/compile";
 import { consumePendingOpen, onOpenFileRequest, type OpenFileRequest } from "../lib/openFileRequest";
 import { useFileSave } from "./useFileSave";
+import { useExternalReload } from "./useExternalReload";
 import { useJdtOpen } from "./useJdtOpen";
 import { useSplitView } from "./useSplitView";
 import { useFileTabLifecycle } from "./useFileTabLifecycle";
@@ -157,6 +158,7 @@ export function useFileSession() {
   }, []);
 
   const { saving, saveFile, saveAsUtf8, reloadFile } = useFileSave(activePath);
+  useExternalReload(reloadFile);
   const lifecycle = useFileTabLifecycle();
   const { closeMany, handleRenamed, handleDeleted } = lifecycle;
   const closeTab = (path: string, confirmed = false) => {

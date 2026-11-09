@@ -80,6 +80,9 @@ pub struct AppState {
     /// 杀进程。放在 AppState 上而不是模块级 static：它跟一个应用实例同生命周期，
     /// 测试里也不会互相污染（本文件头注释的同一条纪律）。
     pub compile_cancel: std::sync::atomic::AtomicBool,
+    /// 热替换：最近一次结果、「运行中代码不是最新」标记、手动模式的待推列表。
+    /// 启动服务时清空（见 `hotswap::HotswapState::reset`）。
+    pub hotswap: std::sync::Mutex<crate::hotswap::HotswapState>,
     /// 流式导出的取消标志，**按导出实例**登记（`db_export_cancel(id)` 置位）。
     ///
     /// 以前是一个全局 `AtomicBool`：两个结果页同时导出时，取消其中一个会把另一个也停掉；
@@ -147,6 +150,7 @@ impl AppState {
             lang: std::sync::Mutex::new(Default::default()),
             debug: std::sync::Mutex::new(Default::default()),
             compile_cancel: std::sync::atomic::AtomicBool::new(false),
+            hotswap: std::sync::Mutex::new(Default::default()),
             export_cancels: std::sync::Mutex::new(Default::default()),
             transfer_cancels: std::sync::Mutex::new(Default::default()),
             search_cancels: std::sync::Mutex::new(Default::default()),

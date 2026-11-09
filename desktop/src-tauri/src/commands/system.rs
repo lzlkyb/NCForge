@@ -56,6 +56,12 @@ pub struct ConfigPatch {
     /// 独立模块并行上限（1~4）。
     #[serde(default)]
     pub build_parallel: Option<u8>,
+    /// 启动中间件时挂热替换 agent（下次启动生效）。
+    #[serde(default)]
+    pub hotswap_enabled: Option<bool>,
+    /// 编译成功后自动推送热替换；关闭时只攒待推列表。
+    #[serde(default)]
+    pub hotswap_auto: Option<bool>,
 }
 
 /// 落盘并返回改完的**完整配置**：调用方据此回填表单，不用再 get 一次。
@@ -91,6 +97,12 @@ pub async fn patch_config(
             }
             if let Some(v) = patch.build_parallel {
                 cfg.build_parallel = v.clamp(1, 4);
+            }
+            if let Some(v) = patch.hotswap_enabled {
+                cfg.hotswap_enabled = v;
+            }
+            if let Some(v) = patch.hotswap_auto {
+                cfg.hotswap_auto = v;
             }
             Ok(())
         })

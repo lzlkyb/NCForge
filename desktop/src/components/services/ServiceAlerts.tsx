@@ -1,5 +1,7 @@
 import { Icon } from "../ui/icon";
 import { UNKNOWN_PROCESS_NAME, type ServerStatus } from "../../lib/server";
+import { failureSummary, shortClassName, type HotswapStatus } from "../../lib/hotswap";
+import { openLinkedDialog } from "../../lib/linkedDialog";
 
 /**
  * 服务页的两条告警：端口被别人的进程占着、还没选工程目录。
@@ -12,11 +14,16 @@ export function ServiceAlerts({
   busy,
   onKill,
   onNavigate,
+  hotswap,
+  onRestart,
 }: {
   status: ServerStatus | null;
   busy: boolean;
   onKill: () => void;
   onNavigate: (tab: string) => void;
+  /** 热替换状态：stale 时出告警条，直到下次重启服务。 */
+  hotswap?: HotswapStatus | null;
+  onRestart?: () => void;
 }) {
   const owner = status?.portOwner ?? null;
   const conflict = !!owner && !status?.portOwnedBySelf;
@@ -25,9 +32,38 @@ export function ServiceAlerts({
   // 那不等于「不是 java」：早先这里一律落到「它不是 java 进程」，等于替用户
   // 下了一个我们并不知道的结论——而用户会据此去任务管理器里找一个「非 java」的进程。
   const ownerUnknown = !!owner && owner.name === UNKNOWN_PROCESS_NAME;
+  // 只在服务运行中讲：停了之后下次启动加载的就是磁盘上的新产物
+  const stale = status?.state === "running" && hotswap?.stale ? hotswap.staleReport : null;
 
   return (
     <>
+      {stale && (
+        <div className="sv-alert" data-tone={stale.state === "failed" ? undefined : "warn"}>
+          <Icon name={stale.state === "failed" ? "alertTriangle" : "info"} size={14} />
+          <span className="sv-alert-text">
+            {stale.state === "failed" ? (
+              <>
+                运行中的代码<b>不是最新</b>。{new Date(stale.atMs).toLocaleTimeString()} 那次热替换失败：{failureSummary(stale)}；本批改动没进 JVM。
+              </>
+            ) : (
+              <>
+                <b>{stale.shadowed.map((s) => shortClassName(s.name)).join("、")}</b> 被 classpath 前面的同名类遮挡，改动不会生效{stale.redefined.length > 0 ? `；其余 ${stale.redefined.length} 个类已替换` : ""}。重启解决不了，要在工程关联里调整顺序或删掉那份同名类。
+              </>
+            )}
+          </span>
+          {stale.state !== "failed" && (
+            <button type="button" className="sv-btn" onClick={() => openLinkedDialog("chain")}>
+              工程关联
+            </button>
+          )}
+          {/* 遮挡不给重启：重启后 classpath 顺序不变，跑的还是那份同名类 */}
+          {onRestart && stale.state === "failed" && (
+            <button type="button" className="sv-btn sv-btn-primary" disabled={busy} onClick={onRestart}>
+              重启服务
+            </button>
+          )}
+        </div>
+      )}
       {conflict && owner && (
         <div className="sv-alert">
           <Icon name="alertTriangle" size={14} />

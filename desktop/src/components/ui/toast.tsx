@@ -9,6 +9,10 @@ type ToastVariant = "success" | "error" | "warning" | "info";
 /** 附加信息：英文原文等可复制的调试细节，默认视图不显示，「复制全部错误」时附上。 */
 interface ToastOptions {
   raw?: string;
+  /** 一次性操作入口（如关闭标签后的「撤销」）；有它时通知停留更久，也不点空白即关。 */
+  action?: { label: string; onClick: () => void };
+  /** 归属标识：发起方之后可以用 `toast.dismiss(key)` 收回（如服务重启后「热替换失败」已过时）。 */
+  key?: string;
 }
 
 interface ToastItem {
@@ -16,6 +20,8 @@ interface ToastItem {
   message: string;
   variant: ToastVariant;
   raw?: string;
+  action?: { label: string; onClick: () => void };
+  key?: string;
 }
 
 interface ToastContextValue {
@@ -48,9 +54,12 @@ type ToastFn = {
   success: (message: string, options?: ToastOptions) => void;
   warning: (message: string, options?: ToastOptions) => void;
   info: (message: string, options?: ToastOptions) => void;
+  /** 收回带该 key 的通知（没有就什么都不做）。错误通知不自动消失，内容过时时由发起方收回。 */
+  dismiss: (key: string) => void;
 };
 
 let toastImpl: ((message: string, variant?: ToastVariant, options?: ToastOptions) => void) | null = null;
+let dismissImpl: ((key: string) => void) | null = null;
 
 function emitToast(message: string, variant: ToastVariant = "info", options?: ToastOptions) {
   toastImpl?.(message, variant, options);
@@ -66,6 +75,7 @@ export const toast: ToastFn = Object.assign(emitToast, {
   success: (m: string, o?: ToastOptions) => emitToast(m, "success", o),
   warning: (m: string, o?: ToastOptions) => emitToast(m, "warning", o),
   info: (m: string, o?: ToastOptions) => emitToast(m, "info", o),
+  dismiss: (key: string) => dismissImpl?.(key),
 }) as ToastFn;
 
 let toastId = 0;
@@ -117,7 +127,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       // 同一条消息只留最新一份（连点「重试」会刷出一屏一模一样的通知）；
       // 换新 id 让倒计时与进场动画重新开始，而不是静默续期
       const rest = prev.filter((t) => t.message !== message || t.variant !== variant);
-      const next = [...rest, { id, message, variant, raw: options?.raw }];
+      const next = [...rest, { id, message, variant, raw: options?.raw, action: options?.action, key: options?.key }];
       // 显示上限不能删除未处理错误；普通通知仅保留最近几条。
       const ordinary = next.filter(t => t.variant !== "error").slice(-MAX_TOASTS);
       return next.filter(t => t.variant === "error" || ordinary.includes(t));
@@ -126,6 +136,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const removeToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const dismissByKey = useCallback((key: string) => {
+    setToasts((prev) => (prev.some((t) => t.key === key) ? prev.filter((t) => t.key !== key) : prev));
   }, []);
 
   // 批量失败时用户最想要的是「把这一串贴给同事/日志」，逐条复制不现实。
@@ -152,8 +166,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   // 将实现暴露给模块级单例（供非组件调用，如 invokeOrToast）
   useEffect(() => {
     toastImpl = addToast;
-    return () => { if (toastImpl === addToast) toastImpl = null; };
-  }, [addToast]);
+    dismissImpl = dismissByKey;
+    return () => {
+      if (toastImpl === addToast) toastImpl = null;
+      if (dismissImpl === dismissByKey) dismissImpl = null;
+    };
+  }, [addToast, dismissByKey]);
 
   return (
     <ToastContext.Provider value={{ toast: addToast }}>
@@ -200,7 +218,7 @@ function ToastItemView({ item, onDismiss }: { item: ToastItem; onDismiss: (id: n
   // 而它旁边就是唯一的「复制全部错误」入口。留到用户自己关，比抢时间更合理。
   // 其它类型按时长随字数放宽（长文案仍然需要多一点时间）。
   const isError = item.variant === "error";
-  const lifetime = isError ? 0 : Math.max(TOAST_LIFETIME, item.message.length * 90);
+  const lifetime = isError ? 0 : item.action ? 8000 : Math.max(TOAST_LIFETIME, item.message.length * 90);
   const remaining = useRef(lifetime);
 
   // 计时归通知自身所有：手动关闭、卸载及暂停均清理同一个时钟。
@@ -221,7 +239,7 @@ function ToastItemView({ item, onDismiss }: { item: ToastItem; onDismiss: (id: n
   return (
     <div
       // 错误卡片点空白处不关：想全选复制时鼠标一按就没了。只有 × 能关。
-      onClick={isError ? undefined : () => setOpen(false)}
+      onClick={isError || item.action ? undefined : () => setOpen(false)}
       onMouseEnter={() => setInteraction(v => ({ ...v, hover: true }))}
       onMouseLeave={() => setInteraction(v => ({ ...v, hover: false }))}
       onFocusCapture={() => setInteraction(v => ({ ...v, focus: true }))}
@@ -230,7 +248,7 @@ function ToastItemView({ item, onDismiss }: { item: ToastItem; onDismiss: (id: n
       data-exiting={!open || undefined}
       role={isError ? "alert" : "status"}
       className={`pointer-events-auto relative flex w-[320px] max-w-[calc(100vw-2rem)] items-start gap-2.5 overflow-hidden rounded-lg border px-3.5 pb-3.5 pt-3 text-sm font-medium shadow-pop backdrop-blur-md toast ${
-        isError ? "cursor-default" : "cursor-pointer select-none"
+        isError || item.action ? "cursor-default" : "cursor-pointer select-none"
       } ${
         isError ? "err" : item.variant === "warning" ? "warn" : ""
       } ${variantStyles[item.variant]}`}
@@ -241,6 +259,19 @@ function ToastItemView({ item, onDismiss }: { item: ToastItem; onDismiss: (id: n
         <Icon name={variantIcons[item.variant]} size={15} />
       </span>
       <span className="min-w-0 flex-1 break-words py-1 leading-snug">{item.message}</span>
+      {item.action && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            item.action!.onClick();
+            setOpen(false);
+          }}
+          className="shrink-0 self-center rounded-md border border-border px-2 py-1 text-xs font-semibold text-primary hover:bg-accent"
+        >
+          {item.action.label}
+        </button>
+      )}
       <button
         onClick={(e) => {
           e.stopPropagation();

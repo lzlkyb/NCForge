@@ -22,6 +22,7 @@ import {
   type TaskStep,
 } from "../../lib/ncTasks";
 import { BuildSettings } from "./BuildSettings";
+import { HotswapSettings } from "./HotswapSettings";
 import "./settings-development.css";
 
 const ALL_STEPS = Object.keys(STEP_LABELS) as TaskStep[];
@@ -90,6 +91,7 @@ export function TaskSettings() {
         <Button size="sm" variant="ghost" onClick={auto.retry}>重试</Button>
       </p>}
       <BuildSettings />
+      <HotswapSettings />
       <details className="settings-task-builtins">
         <summary>内置任务 <span>{BUILTIN_TASKS.length} 个固定流程 · 只读</span></summary>
         <div>

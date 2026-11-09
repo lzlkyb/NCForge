@@ -193,6 +193,7 @@ pub fn middleware_vm_args(
     heap_mb: u32,
     debug_port: Option<u16>,
     hotwebs: &[String],
+    java_agent: Option<&str>,
 ) -> Vec<String> {
     let h = home.to_string_lossy();
     // 服务名必须与 prop.xml 一致：我们跳过 `Main` 直接起 `StartDirectServer`，
@@ -226,6 +227,11 @@ pub fn middleware_vm_args(
         args.push(format!(
             "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:{port}"
         ));
+    }
+    if let Some(agent) = java_agent {
+        // 热替换 agent（`hotswap::launch_agent_arg` 拼好的整条 `-javaagent:...`）。
+        // 只带会话文件路径，令牌不在命令行里，所以预览里照样显示。
+        args.push(agent.to_string());
     }
     args
 }
@@ -302,9 +308,9 @@ pub fn project_class_dirs(
     crate::eclipse_cp::class_roots_with(project_root, nc_home, overrides)
 }
 
-/// 中间件启动时可调的三项（都在服务页可改）。
+/// 中间件启动时可调的几项（堆 / 调试 / web 应用在服务页可改，热替换跟配置走）。
 ///
-/// 打成一个结构既压住 `middleware_spec` 的参数个数，也让「堆 + 调试端口 + web 应用」
+/// 打成一个结构既压住 `middleware_spec` 的参数个数，也让「堆 + 调试端口 + web 应用 + agent」
 /// 始终成组传递：启动与命令行预览各拼一套参数，迟早会出现「预览显示 8G、真起的是 4G」
 /// 或「预览说挂了 5 个、实际挂了 18 个」。
 #[derive(Clone, Copy)]
@@ -314,6 +320,8 @@ pub struct MiddlewareTuning<'a> {
     pub debug_port: Option<u16>,
     /// `hotwebs_names` 的返回值。
     pub hotwebs: &'a [String],
+    /// `hotswap::launch_agent_arg` 的返回值；`None` = 不挂热替换 agent。
+    pub java_agent: Option<&'a str>,
 }
 
 /// 拼出中间件的完整启动要素（写好 pathing jar，返回可直接起进程的 `ServerSpec`）。
@@ -333,7 +341,13 @@ pub fn middleware_spec(
         java,
         project_root,
         work_dir,
-        middleware_vm_args(nc_home, tuning.heap_mb, tuning.debug_port, tuning.hotwebs),
+        middleware_vm_args(
+            nc_home,
+            tuning.heap_mb,
+            tuning.debug_port,
+            tuning.hotwebs,
+            tuning.java_agent,
+        ),
         overrides,
         true,
     )
@@ -359,7 +373,13 @@ pub fn middleware_spec_preview(
         java,
         project_root,
         work_dir,
-        middleware_vm_args(nc_home, tuning.heap_mb, tuning.debug_port, tuning.hotwebs),
+        middleware_vm_args(
+            nc_home,
+            tuning.heap_mb,
+            tuning.debug_port,
+            tuning.hotwebs,
+            tuning.java_agent,
+        ),
         overrides,
         false,
     )
@@ -927,6 +947,7 @@ mod tests {
             DEFAULT_HEAP_MB,
             None,
             &default_hotwebs(),
+            None,
         );
         assert!(args
             .iter()
@@ -946,6 +967,7 @@ mod tests {
             8192,
             None,
             &default_hotwebs(),
+            None,
         );
         let xmx: Vec<&String> = args.iter().filter(|a| a.starts_with("-Xmx")).collect();
         assert_eq!(
@@ -961,12 +983,33 @@ mod tests {
     /// `suspend=y` 会让 JVM 停在启动前等调试器 attach，NC 服务就永远起不来；
     /// 绑 0.0.0.0 则等于把无鉴权的 JDWP 敞开给同网段任何人。
     #[test]
+    fn 热替换agent只在给出时追加且只出现一次() {
+        let home = Path::new(r"D:\ncc\1909home");
+        let off = middleware_vm_args(home, DEFAULT_HEAP_MB, None, &default_hotwebs(), None);
+        assert!(!off.iter().any(|a| a.starts_with("-javaagent")));
+        let agent =
+            r"-javaagent:D:\app\hotswap\ncforge-hotswap.jar=C:\cfg\hotswap\launch.properties";
+        let on = middleware_vm_args(
+            home,
+            DEFAULT_HEAP_MB,
+            Some(5005),
+            &default_hotwebs(),
+            Some(agent),
+        );
+        assert_eq!(on.iter().filter(|a| a.starts_with("-javaagent")).count(), 1);
+        assert_eq!(on.last().map(String::as_str), Some(agent));
+        // 与 JDWP 互不影响：两者可以同时存在
+        assert!(on.iter().any(|a| a.starts_with("-agentlib:jdwp")));
+    }
+
+    #[test]
     fn 调试参数默认关闭_开启时只绑回环() {
         let off = middleware_vm_args(
             Path::new(r"D:\ncc\1909home"),
             DEFAULT_HEAP_MB,
             None,
             &default_hotwebs(),
+            None,
         );
         assert!(
             !off.iter().any(|a| a.contains("jdwp")),
@@ -978,6 +1021,7 @@ mod tests {
             DEFAULT_HEAP_MB,
             Some(61539),
             &default_hotwebs(),
+            None,
         );
         let jdwp: Vec<&String> = on
             .iter()
@@ -1135,7 +1179,7 @@ mod tests {
         )
         .unwrap();
 
-        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &default_hotwebs());
+        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &default_hotwebs(), None);
         assert!(
             args.iter().any(|a| a == "-Dnc.server.name=xuyserver"),
             "要从 prop.xml 的 <server><name> 取服务名：{args:?}"
@@ -1146,7 +1190,7 @@ mod tests {
     #[test]
     fn prop_xml_缺失时服务名回落_server() {
         let home = temp_dir("prop-none");
-        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &default_hotwebs());
+        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &default_hotwebs(), None);
         let want = format!("-Dnc.server.name={}", crate::nc_home::DEFAULT_SERVER_NAME);
         assert!(
             args.contains(&want),
@@ -1161,7 +1205,7 @@ mod tests {
         fs::create_dir_all(home.join("hotwebs").join("uapws")).unwrap();
         fs::create_dir_all(home.join("hotwebs").join("iwebap")).unwrap();
         let hotwebs = hotwebs_names(&home, Some(&["iwebap".to_string(), "uapws".to_string()]));
-        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &hotwebs);
+        let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &hotwebs, None);
         assert!(
             args.iter().any(|a| a == "-Duap.hotwebs=iwebap,uapws"),
             "{args:?}"
@@ -1228,6 +1272,7 @@ mod tests {
                 heap_mb: DEFAULT_HEAP_MB,
                 debug_port: None,
                 hotwebs: &default_hotwebs(),
+                java_agent: None,
             },
             &[],
         )
@@ -1256,6 +1301,7 @@ mod tests {
                 heap_mb: DEFAULT_HEAP_MB,
                 debug_port: None,
                 hotwebs: &default_hotwebs(),
+                java_agent: None,
             },
             &[],
         )
@@ -1276,6 +1322,7 @@ mod tests {
                 heap_mb: DEFAULT_HEAP_MB,
                 debug_port: None,
                 hotwebs: &default_hotwebs(),
+                java_agent: None,
             },
             &[],
         )

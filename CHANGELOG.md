@@ -31,6 +31,9 @@ gen-changelog.mjs 当成真实版本段解析；代码围栏中的示例会被�
 
 ## [Unreleased]
 
+### 新增
+- 热替换：NC 服务运行时，保存 `.java` 并编译通过后，改动直接替换进运行中的中间件，不用重启（只能改方法体）。状态栏「NC 服务」左边新增热替换小签，成功时显示「已替换 N 个类」，点开可看替换明细、被遮挡的类和失败原因；改了类的结构导致失败时弹出提醒并附「重启服务」，服务面板同时标记「代码不是最新」直到重启。已附加调试时自动重新下发断点。设置 → 任务 → 热替换可关闭，或改成手动推送。
+
 ### 变更
 - 数据库首次连接并行准备 SQL 会话，减少首次查询与重连后的等待；元数据请求合并、对象按需加载、表清单提前展示；执行统计改为工具菜单按需采集，普通执行减少额外往返；连续筛选短暂复用后台数据并自动释放。
 - 代码搜索改为常驻内存的内容包：启动后自动后台建立索引，之后每次搜索从毫秒级返回；大工程首次搜索不再等十几秒，未保存的改动也会被搜到。当前工作区与关联工程各有独立索引，首次建立时会提示「本次仍走磁盘」，建好自动生效，无需手动操作。
@@ -38,6 +41,13 @@ gen-changelog.mjs 当成真实版本段解析；代码围栏中的示例会被�
 ### 修复
 - 调整 Rust 数据库连接探测方式，避免部分 Oracle 服务端的 TTC 消息解析错误阻止 SQL 执行。
 - 修复「同一条 SQL 在结果较多时重复执行会报 `unknown TTC message type`」：查询取数批量回归驱动默认值，避免上一页游标未读完时与语句缓存重执行的响应交错；此类错误现在按连接断开处理，不会再继续复用已损坏的会话。
+- 修复「手动点停止后，中间件状态显示异常退出」：停止是工作台强终进程，退出码非零不代表崩溃，现在显示「已停止」。
+- 修复「其他程序（git / SVN 更新、别的编辑器）改了已打开的 `.java` 后，编辑器仍显示旧内容」：没有未保存修改的标签会自动重新加载；有未保存修改的不动，保存时仍会提示冲突。
+
+### 技术细节
+- 热替换批 A：新增 `hotswap-agent/HotswapAgent.java`（premain + agentmain，只绑 127.0.0.1，令牌只在会话文件里，按 codeSource 区分替换 / 未加载 / 被遮蔽），`build-bridge-jar.mjs hotswap` 打成 `resources/hotswap/ncforge-hotswap.jar` 随包；配置新增 `hotswap_enabled`（默认开），启动与命令行预览共用 `hotswap::launch_agent_arg` 追加 `-javaagent`，预览不换令牌，准备失败只记日志不阻断启动。契约测试 `scripts/hotswap-agent-contract.test.mjs`（手动跑，需本机 JDK）。推送客户端与界面在后续批次。
+- 热替换批 B：`build_engine::compile_files` 在模块零错误时把编过的源文件映射成类（`Outer.class` + `Outer$*.class`），在后台线程推给 agent（`hotswap::push`），结果记入 `AppState.hotswap` 并发 `hotswap-result` 事件；失败或被遮蔽置「运行中代码不是最新」，启动服务时清除。配置新增 `hotswap_auto`（默认开，关闭时攒待推列表）；新命令 `hotswap_status` / `hotswap_push_pending`。手动全量编译不推送。
+- 热替换批 C：前端 `lib/hotswap.ts`（模块级订阅 `hotswap-result` / `hotswap-pending`：失败 toast、推送后经 `debugSync.reinstallBreakpoints` 先清后发重装断点）、状态栏 `HotswapStatusChip`、服务页告警条与「代码不是最新」标记、设置 `HotswapSettings`；后端新增 `hotswap_clear_pending`，状态增加 `agentAttached` / `pendingClasses` / `staleReport`，每次有效推送在服务日志写一行 `[nc-forge] 热替换 …`；`ConfigPatch` 接入两个开关，命令契约豁免已移除。端到端验收后修正：设置页改开关后刷新小签（`refreshHotswapStatus`）；`toast` 新增 `key` / `toast.dismiss(key)`，「热替换失败」在服务重启/停止、新结果到来或点开小签时收回；遮挡告警与卡片去掉「重启服务」（重启解决不了遮挡），告警文案去掉括号嵌套与「其余 0 个」。后续再修：「代码不是最新」按类跟踪（`Report.requestedNames` + `HotswapState` 的未生效类集合），失败的类被后续推送真正替换并覆盖后标记自动清除；服务活着而 agent 连不上时不再静默，升级为可见的失败。
 
 ## [0.2.0] - 2026-11-08
 

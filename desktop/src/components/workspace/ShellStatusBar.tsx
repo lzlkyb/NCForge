@@ -3,6 +3,7 @@ import type { TabMeta } from "../../lib/workspaceSession";
 import { WORKSPACE_LABELS } from "../layout/SideNav";
 import { LangBadge } from "./LangBadge";
 import { ServiceStatusButton } from "./ServiceStatusButton";
+import { HotswapStatusChip } from "./HotswapStatusChip";
 import { OperationStatus } from "../ui/OperationStatus";
 import { StatusContributions } from "./StatusContributions";
 import { FileStatusMenu } from "./FileStatusMenu";
@@ -60,6 +61,7 @@ export function ShellStatusBar({
       <OperationStatus compact />
       <span className="wb-status-sp" />
       {saving && <span className="wb-status-warn">保存中…</span>}
+      <HotswapStatusChip />
       <ServiceStatusButton />
       <button type="button" className="wb-status-btn" onClick={onTogglePanel}>
         {panelOpen ? "隐藏面板" : "显示面板"}

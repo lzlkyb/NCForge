@@ -490,7 +490,10 @@ impl ServerRun {
             return StopOutcome::Idle;
         };
         p.stop();
-        self.exit_code = p.exit_code();
+        // 手动停止是被我们强杀的，进程退出码非零不代表崩溃：
+        // 留着它，前端会把「已手动停止」显示成「异常退出」（exitCode 非空即异常）。
+        let _ = p.exit_code();
+        self.exit_code = None;
         self.debug_port = None;
         self.launch_phase = None;
         self.reason = Some("已手动停止".to_string());

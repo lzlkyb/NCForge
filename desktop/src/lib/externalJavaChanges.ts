@@ -23,7 +23,23 @@ export const EXTERNAL_BATCH_LIMIT = 64;
 
 let overflowNotifiedAt = 0;
 
+/**
+ * 外部 `.java` 改动的订阅（刷新已打开的标签用）。独立于自动编译开关：
+ * 就算关了自动编译，磁盘上变了的文件在编辑器里也该是新的，不然下次保存就是冲突。
+ * 已排除本应用刚保存的文件，所以订阅方看到的都是真的「别的程序改了」。
+ */
+type Listener = (paths: readonly string[]) => void;
+const listeners = new Set<Listener>();
+export function onExternalJavaChanged(cb: Listener): () => void {
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
+}
+
 export function handleExternalJavaChanges(paths: readonly string[], overflow: boolean): void {
+  const external = paths.filter((p) => isJavaFile(p) && !isRecentLocalSave(p));
+  if (external.length > 0) listeners.forEach((cb) => cb(external));
   if (paths.length === 0 && !overflow) return;
   if (!autoCompileCached() || !autoExternalCached()) return;
   const root = getSession().root ?? null;

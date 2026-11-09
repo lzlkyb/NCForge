@@ -100,7 +100,7 @@ pub struct LaunchPreview {
     pub reused: bool,
 }
 
-fn log_path(config_dir: &Path) -> PathBuf {
+pub(super) fn log_path(config_dir: &Path) -> PathBuf {
     config_dir.join("logs").join("middleware.log")
 }
 
@@ -296,8 +296,62 @@ fn launch_phase(state: &AppState, log: &Path, phase: &str) -> Result<(), String>
     let _ = server::append_log(log, &format!("[nc-forge] {phase}\n"));
     Ok(())
 }
+
+/// 热替换 agent jar：安装包资源目录 → 源码树（开发模式）。找不到返回 `None`，按不挂 agent 启动。
+fn find_hotswap_jar(app: &tauri::AppHandle) -> Option<PathBuf> {
+    use tauri::Manager;
+    let mut dirs = Vec::new();
+    if let Ok(dir) = app.path().resource_dir() {
+        dirs.push(dir.join("hotswap"));
+    }
+    dirs.push(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("hotswap"),
+    );
+    crate::hotswap::find_jar(&dirs)
+}
+
+/// 启动用：算 `-javaagent` 参数并把结果写进服务日志。
+///
+/// 开了开关却挂不上时要留一行说明：不然用户改完代码发现没热替换，只能猜。
+fn hotswap_agent_arg(
+    config_dir: &Path,
+    jar: Option<&Path>,
+    enabled: bool,
+    write: bool,
+    log: &Path,
+) -> Option<String> {
+    if !enabled {
+        return None;
+    }
+    if jar.is_none() {
+        let _ = server::append_log(
+            log,
+            "[nc-forge] 未找到热替换组件（hotswap/ncforge-hotswap.jar），本次不挂 agent；改代码需重启生效\n",
+        );
+        return None;
+    }
+    match crate::hotswap::launch_agent_arg(config_dir, jar, enabled, write) {
+        Ok(arg) => {
+            if arg.is_some() {
+                let _ = server::append_log(log, "[nc-forge] 已挂热替换 agent（只绑 127.0.0.1）\n");
+            }
+            arg
+        }
+        Err(e) => {
+            let _ = server::append_log(
+                log,
+                &format!("[nc-forge] 热替换 agent 准备失败，本次不挂（不影响启动）：{e}\n"),
+            );
+            None
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn server_start(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     debug: Option<bool>,
     skip_deploy: Option<bool>,
@@ -311,6 +365,7 @@ pub async fn server_start(
     };
     let cfg = state.config.read().await.clone();
     let config_dir = state.config_dir.clone();
+    let hotswap_jar = find_hotswap_jar(&app);
 
     st.server
         .lock()
@@ -396,6 +451,10 @@ pub async fn server_start(
             }
         }
 
+        // 热替换 agent：换新令牌、清旧就绪文件。任何失败都只记日志、按不挂 agent 启动——
+        // 它是锦上添花，不能变成「服务起不来」的新原因。
+        let java_agent = hotswap_agent_arg(&config_dir, hotswap_jar.as_deref(), cfg.hotswap_enabled, true, &log);
+
         launch_phase(&st, &log, "准备 classpath")?;
         let prepared = launch::middleware_spec(
             &nc_home,
@@ -406,6 +465,7 @@ pub async fn server_start(
                 heap_mb,
                 debug_port,
                 hotwebs: &hotwebs,
+                java_agent: java_agent.as_deref(),
             },
             &overrides,
         );
@@ -448,6 +508,11 @@ pub async fn server_start(
                 run.proc = Some(proc);
                 run.launch_phase = Some("等待监听端口".into());
                 drop(run);
+                // 新 JVM 加载的就是磁盘上的最新产物：上一轮的热替换结果、过时标记、待推列表都作废
+                if let Ok(mut h) = st.hotswap.lock() {
+                    h.reset();
+                    h.attached = java_agent.is_some();
+                }
                 Ok(())
             }
             Err(e) => {
@@ -598,10 +663,12 @@ pub async fn server_clear_log(
 /// 复用上次启动写好的清单只读展示，从没启动过才写这一次（那时不可能有并发的启动）。
 #[tauri::command]
 pub async fn server_command_line(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<LaunchPreview, String> {
     let cfg = state.config.read().await.clone();
     let config_dir = state.config_dir.clone();
+    let hotswap_jar = find_hotswap_jar(&app);
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let work_dir = config_dir.join("tmp");
@@ -628,10 +695,19 @@ pub async fn server_command_line(
         let heap_mb = launch::effective_heap_mb(cfg.server_heap_mb);
         // 与启动同一份 webapp 名单：预览里的 -Duap.hotwebs 必须就是下次真起时的那串
         let hotwebs = launch::hotwebs_names(&nc_home, cfg.hotwebs.as_deref());
+        // 与启动同一份判断，但 write=false：预览要是顺手换了令牌，正在跑的 JVM 就连不上了
+        let java_agent = crate::hotswap::launch_agent_arg(
+            &config_dir,
+            hotswap_jar.as_deref(),
+            cfg.hotswap_enabled,
+            false,
+        )
+        .unwrap_or(None);
         let tuning = launch::MiddlewareTuning {
             heap_mb,
             debug_port,
             hotwebs: &hotwebs,
+            java_agent: java_agent.as_deref(),
         };
         // 预览必须用与启动完全相同的覆盖表，否则「命令行里看到的顺序」和真起的不一样
         let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);

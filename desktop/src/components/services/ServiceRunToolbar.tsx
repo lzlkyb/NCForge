@@ -19,9 +19,11 @@ export interface ServiceRunToolbarProps {
   onDetachDebug: () => void;
   workflowBusy?: boolean;
   navigator?: ReactNode;
+  /** 标题后的附加标记（如热替换的「代码不是最新」）。 */
+  marker?: ReactNode;
   tools?: ReactNode;
 }
-export function ServiceRunToolbar({ source, status, busy, failed, debugMode, onStart, onStop, onRestart, onRetry, debugAttached, debugBusy, onAttachDebug, onDetachDebug, workflowBusy, navigator, tools }: ServiceRunToolbarProps) {
+export function ServiceRunToolbar({ source, status, busy, failed, debugMode, onStart, onStop, onRestart, onRetry, debugAttached, debugBusy, onAttachDebug, onDetachDebug, workflowBusy, navigator, marker, tools }: ServiceRunToolbarProps) {
   const view = servicePresentation(source, status, failed, busy);
   const preparing = view.state === "starting" || (view.conflict && status?.state === "starting");
   const running = view.state === "running";
@@ -30,7 +32,7 @@ export function ServiceRunToolbar({ source, status, busy, failed, debugMode, onS
   return <header className="sc-run-toolbar" data-state={view.state}>
     <div className="sc-run-heading">{navigator ?? <><strong>{serviceNames[source]}</strong><span className="sc-status-badge" data-tone={view.tone}>
       {["starting", "stopping", "loading"].includes(view.state) && <Icon name="spinner" className="animate-spin" size={11} />}{view.label}
-    </span></>}<span className="sc-run-subtitle" title={subtitle}>{subtitle}</span></div>
+    </span></>}{marker}<span className="sc-run-subtitle" title={subtitle}>{subtitle}</span></div>
     <div className="sc-run-actions">
       {["unknown", "loading"].includes(view.state) ? <button type="button" className="sv-btn" disabled={view.state === "loading"} onClick={onRetry}><Icon name="refresh" size={13} />重试状态</button> : view.conflict && !preparing ? <span className="sc-action-hint">检查端口占用后再启动</span> : running ? <>
         <button type="button" className="sv-btn sc-debug-action" disabled={disabled || debugBusy || !status?.debugPort} title={status?.debugPort ? `JDWP 127.0.0.1:${status.debugPort}` : "本次未开启调试；停止后选择调试启动"} onClick={debugAttached ? onDetachDebug : onAttachDebug}><Icon name={debugBusy ? "spinner" : "bug"} className={debugBusy ? "animate-spin" : undefined} size={13} />{debugBusy ? "处理中…" : debugAttached ? "断开调试" : "附加调试"}</button>

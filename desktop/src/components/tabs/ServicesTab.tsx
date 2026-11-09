@@ -1,7 +1,7 @@
 import { servicePollInterval } from "../../lib/servicePolling";
 import { useMemo } from "react";
 import { DockRegion } from "../workspace/WorkbenchDock";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import "../../services.css";
 import "../../service-console.css";
@@ -31,6 +31,8 @@ import { attachDebugger, detachDebugger, useDebugSnapshot } from "../../lib/debu
 import { readDebugModePref, writeDebugModePref } from "../../lib/debugKeys";
 import { serviceNames, type ServiceSource } from "../../lib/servicePresentation";
 import { serverCommandLine, serverRevealLog, serverStatus, type LaunchPreview, type ServerState, type ServerStatus } from "../../lib/server";
+import { HOTSWAP_STATUS_KEY, hotswapStatus } from "../../lib/hotswap";
+import { SERVICE_RESTART_EVENT, takeServiceRestartRequest } from "../../lib/servicePanel";
 
 interface PanelUi {
   source: ServiceSource;
@@ -60,6 +62,16 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
     queryClient.setQueryData<ServerStatus>(["server-status"], old => old ? { ...old, state: next } : old);
   }, [queryClient]);
   const clearConfirm = useCallback(() => changeUi({ confirm: null }), [changeUi]);
+  // 热替换状态按本次运行取：换了 runId 就是新 JVM，旧的过时标记自然作废。
+  const hotswap = useQuery({ queryKey: [...HOTSWAP_STATUS_KEY, status?.runId ?? ""], queryFn: hotswapStatus, enabled: status?.state === "running", retry: false }).data ?? null;
+  const askRestart = useCallback(() => changeUi({ source: "middleware", confirm: { kind: "restart", source: "middleware" } }), [changeUi]);
+  // 状态栏 / 热替换失败 toast 上的「重启服务」：面板可能刚被打开才挂载，挂载时也取一次
+  useEffect(() => {
+    const take = () => { if (takeServiceRestartRequest()) askRestart(); };
+    take();
+    window.addEventListener(SERVICE_RESTART_EVENT, take);
+    return () => window.removeEventListener(SERVICE_RESTART_EVENT, take);
+  }, [askRestart]);
   const commands = useServiceCommands({ debugMode, refetch, patchState, onGeneration: bumpGeneration, onClearConfirm: clearConfirm });
   const client = useClientService({ visible: svcVisible, appHidden });
   const flow = useDevelopmentFlow();
@@ -111,14 +123,14 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   return <>
     <DockRegion region="bottom"><div className="sc-panel">
       {/* 保持工具栏与来源按钮挂载，方向键切换后焦点仍留在当前来源。 */}
-      <ServiceRunToolbar {...toolbarProps} source={ui.source} navigator={<ServiceNavigator source={ui.source} onSource={source => changeUi({ source, drawer: null })}
+      <ServiceRunToolbar {...toolbarProps} source={ui.source} marker={ui.source === "middleware" && status?.state === "running" && hotswap?.stale ? <span className="sc-status-badge" data-tone="warn" title="有改动没能热替换进去；重启服务后清除">代码不是最新</span> : null} navigator={<ServiceNavigator source={ui.source} onSource={source => changeUi({ source, drawer: null })}
         middleware={{ status: status ?? null, busy: commands.busy, failed: isError }} client={{ status: client.status, busy: client.busy, failed: client.isError }} />} />
       <section className="sc-console" id="sc-service-console" role="tabpanel" aria-labelledby={`sc-service-${ui.source}`}>
         <DevelopmentFlowProgress />
         {selectedFailed && <div className="sc-feedback" data-tone="warn"><Icon name="alertTriangle" size={14} /><span title={String(selectedError)}>读取服务状态失败，当前运行状态未知。请重试或查看日志。</span><button type="button" className="sv-btn" onClick={toolbarProps.onRetry}>重试</button></div>}
         {!selectedFailed && selected?.state === "starting" && <div className="sc-feedback" data-tone="waiting"><Icon name="spinner" className="animate-spin" size={13} /><span>{selected.launchPhase || (selected.pid ? "JVM 已创建，正在等待运行状态" : "正在准备启动")}</span>{launchElapsed !== null && launchElapsed !== undefined && <small>已用 {Math.floor(launchElapsed / 1000)} 秒</small>}<button type="button" className="sv-btn" onClick={() => changeUi({ drawer: "details" })}>运行详情</button></div>}
         {!selectedFailed && selected?.state === "stopped" && selected.reason && <div className="sc-feedback" data-tone={selected.exitCode ? "bad" : "warn"}><Icon name="info" size={13} /><span>{selected.reason}{selected.exitCode !== null ? ` · 退出码 ${selected.exitCode}` : ""}</span></div>}
-        {ui.source === "middleware" && <ServiceAlerts status={isError ? null : status ?? null} busy={commands.busy !== null || isError} onKill={() => changeUi({ confirm: { kind: "kill", source: "middleware" } })} onNavigate={onNavigate} />}
+        {ui.source === "middleware" && <ServiceAlerts status={isError ? null : status ?? null} busy={commands.busy !== null || isError} onKill={() => changeUi({ confirm: { kind: "kill", source: "middleware" } })} onNavigate={onNavigate} hotswap={hotswap} onRestart={askRestart} />}
         <ServiceLogSection source={ui.source} appHidden={appHidden} middleware={{ active: !status || status.state === "running" || status.state === "starting", generation, runId: status?.runId, visible: svcVisible, projectRoot: status?.projectRoot, logPath: status?.logPath ?? "", logSize: status?.logSize ?? 0, onReveal: revealLog, onCleared: () => void refetch() }}
           client={{ active: !client.status || client.status.state === "running" || client.status.state === "starting", generation: client.generation, runId: client.status?.runId, visible: svcVisible, projectRoot: client.status?.projectRoot, logPath: client.status?.logPath ?? "", logSize: client.status?.logSize ?? 0, onReveal: client.revealLog, onCleared: () => void client.refetch() }} />
       </section>

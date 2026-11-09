@@ -37,6 +37,9 @@ pub(super) struct Ctx {
     pub deploy_on_start: bool,
     /// 独立模块并行的上限（1 = 串行）。
     pub parallel: usize,
+    /// 热替换开关（`hotswap_enabled` / `hotswap_auto`），取自本轮开始时的配置。
+    pub hotswap_enabled: bool,
+    pub hotswap_auto: bool,
 }
 
 impl Ctx {
@@ -115,7 +118,7 @@ impl Ctx {
 /// 取上下文。`root` 取配置里的工作区；NC home / ecj / java 与单模块编译同一套解析。
 pub(super) async fn context(app: tauri::AppHandle, state: &Arc<AppState>) -> Result<Ctx, String> {
     let (_root_raw, root) = super::compile_cmds::workspace_roots(state).await?;
-    let (nc_home_cfg, overrides, deploy_on_start, parallel, persistent) = {
+    let (nc_home_cfg, overrides, deploy_on_start, parallel, persistent, hotswap) = {
         let cfg = state.config.read().await;
         (
             cfg.nc_home.clone(),
@@ -123,6 +126,7 @@ pub(super) async fn context(app: tauri::AppHandle, state: &Arc<AppState>) -> Res
             cfg.deploy_on_start,
             (cfg.build_parallel as usize).clamp(1, 4),
             cfg.persistent_worker,
+            (cfg.hotswap_enabled, cfg.hotswap_auto),
         )
     };
     let home = nc_home::resolve(nc_home_cfg.as_deref())?;
@@ -151,6 +155,8 @@ pub(super) async fn context(app: tauri::AppHandle, state: &Arc<AppState>) -> Res
         overrides,
         deploy_on_start,
         parallel,
+        hotswap_enabled: hotswap.0,
+        hotswap_auto: hotswap.1,
     })
 }
 
@@ -779,6 +785,9 @@ pub(super) fn compile_files(
 ) -> Result<CompileResult, String> {
     let total_files: usize = groups.iter().map(|(_, f)| f.len()).sum();
     let mut results = Vec::with_capacity(groups.len());
+    // 热替换：只收集零错误模块的产物。有错时 ecj 可能写出带「编译错误桩」的 class，
+    // 推进运行中的 NC 会把能跑的代码换成会抛异常的代码。
+    let mut hotswap_batch = crate::hotswap::Batch::default();
     for (module, files) in groups {
         let layout = ModuleLayout::resolve(&ctx.root, &module);
         let previous = ctx.manifest(&module);
@@ -861,10 +870,45 @@ pub(super) fn compile_files(
                 }
                 let _ = build_state::write_manifest(&ctx.manifest_file(&module), &next);
             }
+            if ctx.hotswap_enabled {
+                collect_hotswap(&mut hotswap_batch, &layout, &job.out_dir, &files);
+            }
         }
         results.push(r);
     }
+    super::hotswap_cmds::after_compile(
+        &ctx.app,
+        &ctx.st,
+        &ctx.config_dir,
+        ctx.hotswap_enabled,
+        ctx.hotswap_auto,
+        hotswap_batch,
+    );
     Ok(merge_compile_results(results, total_files))
+}
+
+/// 把本模块编过的源文件映射成待替换的类。
+///
+/// 产物目录按源根取（一个模块可能有多个 output），取不到时回落本轮的默认产物目录，
+/// 与 `compile::compile` 写 class 的口径一致。包名从源码里读：GBK 文件按有损解码也不影响
+/// `package` 那一行（纯 ASCII）。
+fn collect_hotswap(
+    batch: &mut crate::hotswap::Batch,
+    layout: &ModuleLayout,
+    default_out: &Path,
+    files: &[PathBuf],
+) {
+    for f in files {
+        let Ok(bytes) = std::fs::read(f) else {
+            continue;
+        };
+        let package =
+            compile::extract_package(&String::from_utf8_lossy(&bytes)).unwrap_or_default();
+        let out = layout
+            .output_for(f)
+            .unwrap_or_else(|| default_out.to_path_buf());
+        batch.add_source(&out, &package, f);
+    }
 }
 
 /// 合并多模块结果；与旧 `merge_results` 同一口径（jar 取峰值）。

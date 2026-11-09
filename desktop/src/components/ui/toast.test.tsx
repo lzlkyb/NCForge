@@ -31,3 +31,42 @@ it("超出显示上限的错误仍可查看复制，关闭后移除", async () =
     await act(async () => root.unmount()); container.remove();
   }
 });
+it("dismiss(key) 只收回同 key 的通知，其余保留", async () => {
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<ToastProvider>内容</ToastProvider>));
+    await act(async () => {
+      toast.error("热替换失败：X", { key: "hs" });
+      toast.error("别的错误");
+    });
+    expect(container.querySelectorAll(".toast")).toHaveLength(2);
+    await act(async () => toast.dismiss("hs"));
+    expect(container.querySelectorAll(".toast")).toHaveLength(1);
+    expect(container.textContent).toContain("别的错误");
+    expect(container.textContent).not.toContain("热替换失败");
+    await act(async () => toast.dismiss("不存在"));
+    expect(container.querySelectorAll(".toast")).toHaveLength(1);
+  } finally {
+    await act(async () => root.unmount()); container.remove();
+  }
+});
+it("带动作的 toast 点空白不关，点「撤销」才执行并退场", async () => {
+  const run = vi.fn();
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<ToastProvider>内容</ToastProvider>));
+    await act(async () => { toast("已关闭「SQL 1」", "info", { action: { label: "撤销", onClick: run } }); });
+    const card = container.querySelector<HTMLElement>(".toast")!;
+    await act(async () => card.click());
+    expect(run).not.toHaveBeenCalled();
+    expect(container.querySelector(".toast")).not.toBeNull();
+    const undo = [...card.querySelectorAll("button")].find((b) => b.textContent === "撤销")!;
+    await act(async () => undo.click());
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".toast")).toBeNull();
+  } finally {
+    await act(async () => root.unmount()); container.remove();
+  }
+});

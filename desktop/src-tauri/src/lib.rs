@@ -61,6 +61,7 @@ pub mod decompile;
 pub mod ecj_worker;
 pub mod eclipse_cp;
 pub mod encoding_reg;
+pub mod hotswap;
 pub mod java_bridge;
 mod java_members;
 mod java_tree;

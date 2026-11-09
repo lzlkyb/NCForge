@@ -597,6 +597,31 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 .wb-status-chip[data-tone="busy"] .wb-status-dot { background: hsl(var(--warning)); animation: wb-lang-pulse 1s infinite; }
 .wb-status-dot[data-tone="ok"] { background: hsl(var(--success)); }
 .wb-status-dot[data-tone="bad"] { background: hsl(var(--destructive)); }
+/* 热替换小签（HotswapStatusChip）：黄点 = 部分生效；muted = 准备中 / 未挂载 */
+.wb-status-dot[data-tone="warn"] { background: hsl(var(--warning)); }
+.wb-status-chip[data-tone="muted"] { opacity: .75; }
+.wb-status-chip[data-tone="ok"] { color: hsl(var(--success-ink)); }
+/* 热替换明细卡（挂在 Menu 的 portal 里，宽 360px） */
+.wb-hs-card { margin: -4px; font-size: 12px; line-height: 1.55; color: hsl(var(--foreground)); }
+.wb-hs-head { display: flex; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px solid hsl(var(--border)); }
+.wb-hs-title { flex: 1; min-width: 0; font-weight: 600; }
+.wb-hs-title[data-tone="bad"] { color: hsl(var(--destructive-ink)); }
+.wb-hs-title[data-tone="warn"] { color: hsl(var(--warning-ink)); }
+.wb-hs-head small { color: hsl(var(--muted-foreground)); font-size: 11px; white-space: nowrap; }
+.wb-hs-body { display: grid; gap: 6px; padding: 8px 12px; }
+.wb-hs-row { display: flex; gap: 6px; }
+.wb-hs-k { width: 52px; flex-shrink: 0; color: hsl(var(--muted-foreground)); }
+.wb-hs-k[data-tone="warn"] { color: hsl(var(--warning-ink)); }
+.wb-hs-v { min-width: 0; flex: 1; }
+.wb-hs-list { margin: 0; padding: 0 0 0 14px; max-height: 180px; overflow: auto; font-family: var(--font-mono, Consolas, monospace); font-size: 11.5px; }
+.wb-hs-card > .wb-hs-list { padding: 8px 12px 8px 26px; }
+.wb-hs-list li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-hs-more, .wb-hs-note { color: hsl(var(--muted-foreground)); }
+.wb-hs-note { display: block; white-space: normal; font-family: var(--font-sans, inherit); font-size: 11px; }
+.wb-hs-foot { display: flex; justify-content: flex-end; gap: 6px; padding: 8px 12px; border-top: 1px solid hsl(var(--border)); }
+.wb-hs-foot .sv-btn { height: 26px; }
+.wb-hs-foot .sv-btn-ghost { border-color: transparent; background: transparent; }
+.wb-hs-foot .sv-btn-ghost:hover:not(:disabled) { background: hsl(var(--secondary)); }
 /* 服务端口跟状态一起报：连不上时第一个要核对的就是端口号 */
 .wb-status-svc-port { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) {

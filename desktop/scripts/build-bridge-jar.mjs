@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 编译 Java 桥并打包成 resources 下的 jar。
+ * 编译 Java 桥（及热替换 agent）并打包成 resources 下的 jar。
  *
  * 仓库里的 ncdb.jar / ncsvn.jar 是构建产物，但一直靠手敲 javac 打的 —— 谁也不知道
  * 当初用了什么参数。改桥的源码后如果忘了重新打包，会出现「源码改了但行为没变」的假象，
@@ -11,20 +11,21 @@
  *   node scripts/build-bridge-jar.mjs db         # 只编数据库桥
  *   node scripts/build-bridge-jar.mjs svn        # 只编 SVN 桥
  *   node scripts/build-bridge-jar.mjs ecj        # 只编常驻 ecj 编译桥
+ *   node scripts/build-bridge-jar.mjs hotswap    # 只编热替换 agent（带 MANIFEST）
  *   node scripts/build-bridge-jar.mjs db --dry   # 只编译到临时目录并报告，不覆盖 jar
  *
  * javac 的查找顺序：JAVA_HOME → NC_HOME/ufjdk → 几个常见 NC 安装位置 → PATH。
  * 桥代码按 Java 8 语法写（NC 自带的 ufjdk 就是 8），不要用 var / switch 表达式等新语法。
  */
-import { existsSync, mkdirSync, rmSync, readdirSync, statSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, rmSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ta = resolve(here, '..', 'src-tauri');
 
-/** @type {Record<string, {src: string, out: string, cp: string[], label: string}>} */
+/** @type {Record<string, {src: string, out: string, cp: string[], label: string, manifest?: string, java8?: boolean}>} */
 const BRIDGES = {
   db: {
     src: join(ta, 'db-bridge', 'NcDbBridge.java'),
@@ -49,6 +50,23 @@ const BRIDGES = {
     cp: [join(ta, 'resources', 'ecj', 'ecj-3.17.jar')],
     label: 'NcEcjBridge',
   },
+  hotswap: {
+    src: join(ta, 'hotswap-agent', 'HotswapAgent.java'),
+    out: join(ta, 'resources', 'hotswap', 'ncforge-hotswap.jar'),
+    // 只用 JDK 自带类；会被挂进 NC 的 JVM，绝不能依赖任何第三方 jar
+    cp: [],
+    label: 'HotswapAgent',
+    // premain（启动参数）与 agentmain（Attach API 动态挂载）同一个类；不开 Retransform，用不到
+    manifest:
+      'Manifest-Version: 1.0\n' +
+      'Premain-Class: io.github.lzlkyb.ncforge.hotswap.HotswapAgent\n' +
+      'Agent-Class: io.github.lzlkyb.ncforge.hotswap.HotswapAgent\n' +
+      'Can-Redefine-Classes: true\n' +
+      'Can-Retransform-Classes: false\n',
+    // 目标是 NC 的 ufjdk 1.8：字节码版本不能超过 52。JAVA_HOME 指向 JDK 9+ 时加 --release 8；
+    // 指向 JDK 7 时编出 51，ufjdk 1.8 照样能加载（源码也按 Java 7 可编的写法写，没用 lambda）
+    java8: true,
+  },
 };
 
 function findJdkTool(tool) {
@@ -70,6 +88,23 @@ function findJdkTool(tool) {
     /* 下面统一报错 */
   }
   return null;
+}
+
+/**
+ * 产出 Java 8 字节码所需的参数：JDK 9+ 用 `--release 8`（连 API 一起卡在 8），
+ * JDK 8 本身就是 52 版本，不加参数。`javac -version` 在 8 上输出到 stderr。
+ */
+function java8Flags(javac) {
+  let v = '';
+  try {
+    const r = spawnSync(javac, ['-version'], { encoding: 'utf8' });
+    v = `${r.stdout || ''}${r.stderr || ''}`;
+  } catch {
+    /* 取不到版本就按 8 处理，编出来不对会在契约测试里暴露 */
+  }
+  const m = v.match(/javac (\d+)(?:\.(\d+))?/);
+  const major = m ? (m[1] === '1' ? Number(m[2]) : Number(m[1])) : 8;
+  return major >= 9 ? ['--release', '8'] : [];
 }
 
 function run(exe, args) {
@@ -100,6 +135,7 @@ function buildOne(name, { dry }) {
     return ok;
   });
   const javacArgs = ['-encoding', 'UTF-8', '-nowarn', '-d', tmp];
+  if (spec.java8) javacArgs.push(...java8Flags(javac));
   if (cp.length) javacArgs.push('-cp', cp.join(process.platform === 'win32' ? ';' : ':'));
   javacArgs.push(spec.src);
 
@@ -135,7 +171,14 @@ function buildOne(name, { dry }) {
 
   // jar 里不要带目录条目之外的杂物；用 -C 进临时目录，保证 entry 名是裸类名
   mkdirSync(dirname(spec.out), { recursive: true });
-  run(jar, ['cf', spec.out, '-C', tmp, '.']);
+  if (spec.manifest) {
+    const mf = join(dirname(tmp), `${name}.MF`);
+    writeFileSync(mf, spec.manifest);
+    run(jar, ['cfm', spec.out, mf, '-C', tmp, '.']);
+    rmSync(mf, { force: true });
+  } else {
+    run(jar, ['cf', spec.out, '-C', tmp, '.']);
+  }
   const size = statSync(spec.out).size;
   console.log(`打包 → ${spec.out}（${(size / 1024).toFixed(1)} KB）`);
   rmSync(tmp, { recursive: true, force: true });

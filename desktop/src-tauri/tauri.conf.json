@@ -60,7 +60,8 @@
     "resources": {
       "resources/ncdb/ncdb.jar": "ncdb/ncdb.jar",
       "resources/ecj-bridge/ncecj.jar": "ecj-bridge/ncecj.jar",
-      "resources/jdtls-ext/ncforge-jdt-ext.jar": "jdtls-ext/ncforge-jdt-ext.jar"
+      "resources/jdtls-ext/ncforge-jdt-ext.jar": "jdtls-ext/ncforge-jdt-ext.jar",
+      "resources/hotswap/ncforge-hotswap.jar": "hotswap/ncforge-hotswap.jar"
     },
     "macOS": {
       "signingIdentity": "-"

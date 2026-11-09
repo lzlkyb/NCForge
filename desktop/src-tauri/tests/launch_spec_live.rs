@@ -75,7 +75,7 @@ fn hotwebs_默认与_eclipse_一致且可按配置追加() {
     eprintln!("hotwebs/ 下 {} 个目录：{}", all.len(), all.join(","));
 
     let active = hotwebs_names(&home, None);
-    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &active);
+    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &active, None);
     let arg = args
         .iter()
         .find(|a| a.starts_with("-Duap.hotwebs="))
@@ -105,7 +105,7 @@ fn hotwebs_默认与_eclipse_一致且可按配置追加() {
     // 显式追加必须真的进参数（否则服务页勾了也白勾）
     let extra = vec!["ncchr".to_string()];
     let configured = hotwebs_names(&home, Some(&extra));
-    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &configured);
+    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &configured, None);
     assert!(
         args.iter().any(|a| a == "-Duap.hotwebs=ncchr"),
         "显式名单没进启动参数：{args:?}"
@@ -120,7 +120,7 @@ fn 服务名与_prop_xml_一致() {
     eprintln!("prop.xml 里的服务名：{configured:?}");
 
     let hotwebs = hotwebs_names(&home, None);
-    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &hotwebs);
+    let args = middleware_vm_args(&home, DEFAULT_HEAP_MB, None, &hotwebs, None);
     let arg = args
         .iter()
         .find(|a| a.starts_with("-Dnc.server.name="))

@@ -363,6 +363,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::server_status,
             commands::server_start,
             commands::server_stop,
+            // 热替换：状态查询 / 手动模式推送（编译后的自动推送不走命令）
+            commands::hotswap_status,
+            commands::hotswap_push_pending,
+            commands::hotswap_clear_pending,
             commands::server_log,
             commands::service_log_read,
             commands::service_log_tail,

@@ -102,6 +102,17 @@ pub struct AppConfig {
     /// （见 `nchome_deploy.rs` 头注释里的安全约束）。
     #[serde(default = "default_true")]
     pub deploy_on_start: bool,
+    /// 启动中间件时挂上热替换 agent（默认开，2026-11-06 定）。
+    ///
+    /// 默认开是因为它只绑 127.0.0.1、要令牌，而且只能把磁盘上 classes 目录里的类换进去，
+    /// 不像 JDWP 那样等于远程执行入口。关掉后启动参数里不再出现 `-javaagent`。
+    /// 见 `docs/NCForge-热替换-方案设计-2026-11-06.md`。
+    #[serde(default = "default_true")]
+    pub hotswap_enabled: bool,
+    /// 编译成功后自动把类推给运行中的服务（默认开）。关掉 = 手动模式：只攒待推列表，
+    /// 由用户点「热替换」（`hotswap_push_pending`）时才推。`hotswap_enabled` 关闭时本项无效。
+    #[serde(default = "default_true")]
+    pub hotswap_auto: bool,
     /// 保存 `.java` 后自动编译这一个文件（默认开）。
     ///
     /// 默认开是因为这就是用户要的行为（Eclipse 里保存即出 class）；关掉的场景是低配
@@ -267,6 +278,8 @@ impl Default for AppConfig {
             lang_auto_start: true,
             lang_xmx_mb: None,
             deploy_on_start: true,
+            hotswap_enabled: true,
+            hotswap_auto: true,
             auto_compile: true,
             auto_compile_incremental: true,
             auto_compile_external: true,

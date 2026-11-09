@@ -106,6 +106,43 @@ export async function syncBreakpoints(): Promise<void> {
   }
 }
 
+/**
+ * 热替换之后重装断点，返回重新下发的断点数（没附加调试时为 0）。
+ *
+ * JVM 重定义类时会清掉该类里的断点，而调试器不知道：它那边的请求还在，
+ * 再发一次同样的清单会被适配器当成「没变」直接跳过。所以每个文件先发空集合、
+ * 再发完整清单，逼它真的重新落点。
+ */
+export async function reinstallBreakpoints(target: DebugTarget): Promise<number> {
+  if (!(attachedTargets?.() ?? []).includes(target)) return 0;
+  // 正在跑的同步会写同一份签名表：等它结束（最多约 2 秒），避免两路交错。
+  for (let i = 0; syncing && i < 40; i++) await new Promise((r) => setTimeout(r, 50));
+  syncing = true;
+  let count = 0;
+  try {
+    const sent = synced[target];
+    for (const [key, g] of groupBreakpoints(getBreakpoints())) {
+      try {
+        await debugSetBreakpoints(target, g.path, []);
+        const r = await debugSetBreakpoints(target, g.path, g.breakpoints);
+        applyVerified(target, g.path, r.breakpoints ?? []);
+        sent.set(key, { path: g.path, sig: breakpointGroupSig(g) });
+        count += g.breakpoints.length;
+      } catch {
+        // 下一轮普通同步再试：删掉签名，让它当成「没发过」
+        sent.delete(key);
+      }
+    }
+  } finally {
+    syncing = false;
+    if (dirty) {
+      dirty = false;
+      void syncBreakpoints();
+    }
+  }
+  return count;
+}
+
 /** 挂上断点订阅（幂等）。`attached` 由会话状态提供，避免这里又存一份。 */
 export function startBreakpointSync(attached: () => DebugTarget[]): void {
   if (attachedTargets) return;
