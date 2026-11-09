@@ -4,6 +4,157 @@ import type { ChangelogEntry } from "./about";
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    "version": "0.3.0",
+    "date": "2026-11-09",
+    "items": [
+      {
+        "category": "feat",
+        "text": "纯 Rust 驱动的连接多了一个「关闭语句缓存」开关（连接配置 → 运行方式，选纯 Rust 驱动时出现）：用来对付反复出现的「数据库会话已断开 / unknown TTC message type」——表结构变过之后，缓存里的列定义会过期，服务端按新结构回行、客户端按旧结构解析，字节流就错位了。Oracle 官方对这类问题的建议也是把缓存关掉。默认不勾（语句缓存开着、查询更快），勾上后每条语句都重新解析，改完保存会自动断开旧会话、下次连接生效；连接详情里能看到「无语句缓存」。"
+      },
+      {
+        "category": "feat",
+        "text": "热替换：NC 服务运行时，保存 `.java` 并编译通过后，改动直接替换进运行中的中间件，不用重启（只能改方法体）。状态栏「NC 服务」左边新增热替换小签，成功时显示「已替换 N 个类」，点开可看替换明细、被遮挡的类和失败原因；改了类的结构导致失败时弹出提醒并附「重启服务」，服务面板同时标记「代码不是最新」直到重启。已附加调试时自动重新下发断点。设置 → 任务 → 热替换可关闭，或改成手动推送。"
+      },
+      {
+        "category": "feat",
+        "text": "改数据不用再写 SQL：表数据页和 SQL 查询结果页都能直接双击单元格改值，改完按 Ctrl+S 一次性写成 UPDATE / DELETE / INSERT 执行，不用先点「复核修改 / SQL」。Enter / Tab 提交并移到下一格（Shift+Tab 反向；Shift+Enter 改弹大文本编辑框），Esc 撤销本格；可一次粘贴一片从 Excel 复制的单元格，也能把某行复制成一条新增行。查询结果只在「单表查询且结果里带全部主键列」时允许直接改，别的情况在结果条上写明原因。"
+      },
+      {
+        "category": "feat",
+        "text": "连接可以从其他工具导入：新建连接对话框多了「从其他工具导入」页，可直接读 DataGrip 的 `dataSources.xml`、DataGrip 导出的 `settings.zip`，或本机 PL/SQL Developer 配置与 `tnsnames.ora` 别名。只导入连接串和用户名，口令不导入、首次连接时再输；连接列表里已有的库会标出来，可勾选一次批量添加。"
+      },
+      {
+        "category": "feat",
+        "text": "结果网格补齐五处日常操作：①长文本自动换行（工具条「自动换行」，行高随内容增减，按列宽折行）；②滚到底自动加载下一批（结果没取完时，滚动接近底部就续取，与底栏「加载下 N 行」同一个入口）；③选中一片格子直接打字，键入的字符先填满整个选区、再停在活动格接着输入；④`Shift+Enter` 弹出大文本编辑框，`Ctrl+Enter` 应用、`Esc` 取消（应用只把值放进单元格，还要按一次 Enter 才落进待写回清单，长文本改错一次的代价比多按一次键大）；⑤结果页也能增删行——右键「复制此行（新增）」照着抄一行再改、「删除此行」只在写回时执行，新增行撤销、删除行恢复都在右键菜单。"
+      },
+      {
+        "category": "improve",
+        "text": "结果网格双击不再弹出右侧详情面板：双击就是进入编辑（不能编辑时只提示原因），查看完整值改用 F4 或右键菜单第一项；详情面板在点到别的单元格时自动收起。"
+      },
+      {
+        "category": "improve",
+        "text": "数据库首次连接并行准备 SQL 会话，减少首次查询与重连后的等待；元数据请求合并、对象按需加载、表清单提前展示；执行统计改为工具菜单按需采集，普通执行减少额外往返；连续筛选短暂复用后台数据并自动释放。"
+      },
+      {
+        "category": "improve",
+        "text": "代码搜索改为常驻内存的内容包：启动后自动后台建立索引，之后每次搜索从毫秒级返回；大工程首次搜索不再等十几秒，未保存的改动也会被搜到。当前工作区与关联工程各有独立索引，首次建立时会提示「本次仍走磁盘」，建好自动生效，无需手动操作。"
+      },
+      {
+        "category": "fix",
+        "text": "调整 Rust 数据库连接探测方式，避免部分 Oracle 服务端的 TTC 消息解析错误阻止 SQL 执行。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「同一条 SQL 在结果较多时重复执行会报 `unknown TTC message type`」：查询取数批量回归驱动默认值，避免上一页游标未读完时与语句缓存重执行的响应交错；此类错误现在按连接断开处理，不会再继续复用已损坏的会话。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「打开一张数据量大的表，几秒钟后提示『数据库会话已断开』」：同一条查询重执行时会带着上一条没读完游标的内部状态，把会话读坏（错误码同样是 `unknown TTC message type`）。现在语句交还缓存前会先关掉它挂着的游标，重查不会再伤到连接。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「改完数据或再点查询时提示『数据库会话已断开，执行或事务结果需核对』」：这不是真断网，而是驱动解析响应时读错位了。现在会自动把连接对齐：只读查询直接重发一次，界面上什么都不会发生；写入不会重发（可能已经生效），只提示结果未确认、请核对，也不用再重连。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「表的『索引』页签报 `ORA-00904：标识符无效`」：改用索引列视图的正确列名，索引列表恢复正常显示。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「手动点停止后，中间件状态显示异常退出」：停止是工作台强终进程，退出码非零不代表崩溃，现在显示「已停止」。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「其他程序（git / SVN 更新、别的编辑器）改了已打开的 `.java` 后，编辑器仍显示旧内容」：没有未保存修改的标签会自动重新加载；有未保存修改的不动，保存时仍会提示冲突。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「取消导出或到达行数上限时，上一份完整的导出文件被覆盖掉」：不完整的产物现在另存为单独命名的「部分结果」文件，原文件保持原样。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「PL/SQL 里 `open … for` 这类查询第一次执行必定失败」：这类语句要走数据库侧的独立会话，首次会自动建立连接，不再直接报错。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「按 SQL 重新查询后导出的脚本里，超长文本变成一句截断提示」：重查改走全量取值通道，长文本按完整内容写入。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「导入失败整批回滚后，界面仍显示已写入 N 行」：回滚的批次计数归零，不会再出现「界面说写进去了、库里一条没有」。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「手写 COMMIT 之后，关标签或退出仍反复提示有未提交事务」：改为以数据库事务状态为准，本地计数不再单独决定；数据库查不到时仍按保守方向提示。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「点开超长字段后连接莫名其妙掉线」：按需读取大文本时不再中途把连接摘走，这次读取失败也不会连带整条会话失效。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「测试连接第一次能通、之后偶发提示会话不存在或已断开」：测试连接与读取 NC 数据源配置改用各自独立的临时会话，两边同时进行时不会互相打断。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「超长文本偶尔显示不完整却被当成完整值」：JVM 桥遇到驱动把大字段读成空值时，也按网格 8K 预览上限截断并标明「点加载完整值查看」，不会再一次性把整段文本塞进结果。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「在网格里改超长文本字段，写回总是提示原值已被修改」：这类列界面只拿到前 8K，现在直接说明「内容太长，请用 SQL 更新」，不再给出误导性的冲突提示。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「只读模式下 `select pkg.xxx() from dual` 仍能写库」：只读模式现在拒绝自定义包函数调用；`dbms_lob` / `utl_raw` / `dbms_random` 这类只读内置函数照常可用。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「执行统计读失败一次后，Autotrace 再也不出数」：只有权限类失败才永久关闭，超时、网络抖动或字典视图被锁都会下次重试。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「关联面板读取失败时显示成『没有可确认的关联』」：现在显示「关系未完整读取」并给出重新读取。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「单条语句执行成功后界面毫无反馈」：结果区标题栏显示「执行完成 · 耗时」。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「结果网格翻页固定 20 行、Home/End 没反应」：PageUp/PageDown 按一屏能放的行数翻页，Home/End 跳首末列，Ctrl+Home/End 跳首末行。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「生产库写确认框默认焦点落在『10 分钟内不再询问』」：默认焦点回到「取消」。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「PL/SQL 编译错误只跳到语句开头」：现在按 ORA-06550 的行号定位到具体行。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「表头有中文名时看不到列类型」：第二行改为「中文名 · 类型」。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「在结果网格里按 `Shift+Enter` 想编辑长文本，结果只是把回车符打进单元格」：可打印字符的判定漏排了 `Enter`（它的长度也是 1），被「打字即编辑」抢先捕获。现在 `Enter` 明确走「进入 / 提交 / 大文本编辑框」语义。"
+      },
+      {
+        "category": "fix",
+        "text": "修复「编辑中按 `Shift+Enter` 打开大文本编辑框，窗口一闪就没了」：弹层的文本框自动聚焦时，网格里的单元格输入框失焦即提交，把编辑态清掉、弹层跟着关闭。现在弹层打开期间不再渲染那个输入框，焦点来回也不会误提交。"
+      }
+    ],
+    "summary": [
+      "结果网格可直接改数据，支持自动换行与滚到底续取；NC 服务热替换免重启；连接可从 DataGrip / PL/SQL Developer 导入。"
+    ],
+    "technical": [
+      {
+        "heading": "技术细节",
+        "text": "- 网格编辑补齐（11-09 第四批，五处缺口）：新增 `lib/gridRowMetrics.ts`（折行行高测量：`measureText` 不认 `\\n`，带换行符的文本不走整串快路径，逐字累加用与 `resultView.estimate` 同一张字符宽度表、宁宽勿窄）+ `hooks/useGridRowLayout.ts`（行高按 `rows` 下标测、偏移按 `order` 显示顺序累加，排序/筛选只重建前缀和）+ `components/db/GridRows.tsx`（数据行渲染，从 `ResultGrid` 抽出以守 300 行红线）+ `hooks/useGridTyping.ts`（选区批量赋值与 `Shift+Enter` 大文本编辑框）+ `hooks/useGridDensityScroll.ts`（切密度按总高比例换算 scrollTop，依赖数组在渲染时求值、必须放在 `layout` 声明之后）+ `lib/gridLoadMore.ts`（续取判据：阈值 / `rowsChanged` / `loading` 三条，内容不满一屏也算看到底）+ `components/db/GridTextEditor.tsx`（`createPortal` 到 body；「应用」只写回单元格编辑框，不直接提交）。`GridLayout` 新增 `wrap` 字段（老布局缺省 `false`）。`useResultSetEdit` 接管行级增删：虚拟行号 `rows.length + i`、`onCloneRow` 主键列留空、删除只标记不落库，写回时三类变更一起过 `planWriteBack`（先删→再改→后插，新增倒序），成功后逐条撤标记并把值就地覆盖显示行（不回写 store——结果集是执行时的快照）。🔴 三个真 bug 的教训：可打印字符判定必须显式排除 `Enter`（`\"Enter\".length === 1`）；自动聚焦的元素互相抢焦点会引爆对方的 blur 提交——弹层开着时整块摘掉网格里的 input（卸载聚焦元素不触发 blur）而不是给 blur 加延时补丁；同一个键的多个变体（`Shift+Enter` / `Alt+Enter`）必须在**最先截获它的那个分支里**一起判，放到后面的 `else if` 就是永不可达的死代码——`Alt+Enter` 备路起初写在 `else if (e.key === \"Enter\" && e.altKey)`，被上面的 `if (e.key === \"Enter\")` 先截走，实际行为是「提交并下移」，只有断言「按了 Alt+Enter 之后没有移动」才抓得到。\n- 表格编辑补齐（11-09 第三批）：新增 `lib/sqlEditable.ts` 判定结果集可编辑——只认单表 `select` + 结果含**全部主键列** + 连接非只读，`with`/join/子查询/聚合/`group by`/`distinct`/`over`/集合运算一律拒绝并给出原因；`hooks/useResultSetEdit.ts` 负责写回（复用 `optimisticChanges`，`execBound` 必须传执行结果那条会话的 `slot`，主键由 `dbApi.columns` 现读）。根因修复在驱动侧：`db_rust::columns` / `pk_columns` 原先拿 `aier633.bd_material` 整串去查 `table_name`，静默返回空 → 上层判「没有主键」→ 结果页锁成只读；现由 `split_qualified` 拆出 owner 精确查，Java 桥 `qualified()` 同步，表名不带 schema 时仍走 `current_schema`。另新增 `lib/gridPaste.ts`（TSV/CSV 含引号解析）、`hooks/useGridEditing.ts`（编辑态与 Enter/Tab/Shift/Esc 语义，`done` ref 防卸载后重复提交）、`hooks/useTableEdits.ts`、`hooks/useSaveShortcut.ts`（Ctrl+S 只在 `.dbx-result-table` 内接管）。`TableEditTools` 的写回按钮去掉 `preview` 依赖（原先必须先点复核才解锁）。\n- 从其他工具导入连接：新增 `db_import.rs` 纯解析层（DataGrip `dataSources.xml` 按 uuid 配 `dataSources.local.xml` 里的用户名、`settings.zip` 只读到内存不解盘且限 8MB/条 32MB/批、`tnsnames.ora` 别名与 SID/服务名两种写法归一、PL/SQL Developer `user.prefs` 固定用户），`mark_existing` 按规范化 `host:port/service` 判重与近似提示；命令层 `db_import_datagrip` / `db_import_datagrip_zip`（IPC 裸字节载荷）/ `db_import_plsql` / `db_conn_import_apply`，最后一条走 `update_config` 且不落口令、来源只记在 `note`。\n- 驱动补丁六（`vendor/oracledb`，见 `FORK.md`）：`unknown TTC message type` 不再等于会话报废。新增 `Connection::resync()`——发 `MARKER_TYPE_RESET` 之后必须把**重置标记后面的残留一并读掉**（服务端会补一个 `ORA-01013` 被中止操作的响应，只读到标记就把这个包留给下一条语句），没有更多数据时靠 1.5s 短超时收尾并恢复原超时；`db_rust::run_with` 对查询 resync 后重发一次、对写入只对齐不重发并返回新错误码 `session-desync`，`more()` 清游标并要求重新查询；`db_engine::record_loss` 对 `session-desync` 直接放行，不置 `state.lost`；`Response` 记录最近 16 条已解析 TTC 消息类型，错位报错现在带「已解析消息 16/列信息,6/行头,7/行…」便于定位是列解码还是消息边界的问题。真库回归 `流错位对齐之后会话仍然可用`。补丁七：`resync()` 之后必须 `StatementCache::clear()`——对齐只修好了流，slot 里留着的旧 `cursor_id` 与过期 describe info 会让同一条 SQL 下次命中时把坏状态再重放一次（表现是「恢复后过一会儿又报同一个错」）；代价只是下一条语句重新 parse。🔴 `session-desync` 必须在两处同步登记，否则语义丢失：命令层 `engine_error` 不加它会被 `map_sql_error` 归成 `sql`（界面只剩一条普通执行失败，用户顺手再点一次写回就可能重复落库），前端 `lib/db.ts` 的 `KNOWN_CODES` 不加它会把 `session-desync|` 前缀原样怼给用户；`friendlyDbError` 对它的文案**不得**出现「重新连接/已断开」，会话是对齐过的、能继续用。断言在 `db_cmds.rs::错位后的结果未确认要原样发码` 与 `lib/db.test.ts`。\n- 数据库审查收尾（11-09 第二批）：`NcDbBridge.value` 的 `wasNull` 兜底改走 `Clob`/`cap()` 截断通道（原先对 CLOB 直接 `getString`，既不受 `CLOB_MAX` 约束也不挂截断文案）；`dbOptimisticEdit` 对被截断的大文本列拒绝写回（原值守卫拿 8K 预览值 `dbms_lob.compare` 必然 0 行）；`db_engine::readonly_query` 新增 `has_unsafe_pkg_call`（白名单 `dbms_lob`/`utl_raw`/`dbms_random`）；`stat_snapshot` 改返回 `Result`，`exec_params` 的收尾快照挪进 `set_call_timeout` 覆盖范围内，`is_permanent_stat_error` 只对 `ORA-00942/01031`/零命中永久关闭 Autotrace；`db_relations` 返回体加 `partial` 供前端显示错误态；`cellText` 截断避开代理对；`useFocusTrap` 支持 `data-autofocus`；`useResultGridNavigation` 的 PageUp/Down 按 `--dbx-row-h` 与容器高算页长，新增 Home/End 与 Ctrl+Home/End。\n- 热替换批 A：新增 `hotswap-agent/HotswapAgent.java`（premain + agentmain，只绑 127.0.0.1，令牌只在会话文件里，按 codeSource 区分替换 / 未加载 / 被遮蔽），`build-bridge-jar.mjs hotswap` 打成 `resources/hotswap/ncforge-hotswap.jar` 随包；配置新增 `hotswap_enabled`（默认开），启动与命令行预览共用 `hotswap::launch_agent_arg` 追加 `-javaagent`，预览不换令牌，准备失败只记日志不阻断启动。契约测试 `scripts/hotswap-agent-contract.test.mjs`（手动跑，需本机 JDK）。推送客户端与界面在后续批次。\n- 热替换批 B：`build_engine::compile_files` 在模块零错误时把编过的源文件映射成类（`Outer.class` + `Outer$*.class`），在后台线程推给 agent（`hotswap::push`），结果记入 `AppState.hotswap` 并发 `hotswap-result` 事件；失败或被遮蔽置「运行中代码不是最新」，启动服务时清除。配置新增 `hotswap_auto`（默认开，关闭时攒待推列表）；新命令 `hotswap_status` / `hotswap_push_pending`。手动全量编译不推送。\n- 热替换批 C：前端 `lib/hotswap.ts`（模块级订阅 `hotswap-result` / `hotswap-pending`：失败 toast、推送后经 `debugSync.reinstallBreakpoints` 先清后发重装断点）、状态栏 `HotswapStatusChip`、服务页告警条与「代码不是最新」标记、设置 `HotswapSettings`；后端新增 `hotswap_clear_pending`，状态增加 `agentAttached` / `pendingClasses` / `staleReport`，每次有效推送在服务日志写一行 `[nc-forge] 热替换 …`；`ConfigPatch` 接入两个开关，命令契约豁免已移除。端到端验收后修正：设置页改开关后刷新小签（`refreshHotswapStatus`）；`toast` 新增 `key` / `toast.dismiss(key)`，「热替换失败」在服务重启/停止、新结果到来或点开小签时收回；遮挡告警与卡片去掉「重启服务」（重启解决不了遮挡），告警文案去掉括号嵌套与「其余 0 个」。后续再修：「代码不是最新」按类跟踪（`Report.requestedNames` + `HotswapState` 的未生效类集合），失败的类被后续推送真正替换并覆盖后标记自动清除；服务活着而 agent 连不上时不再静默，升级为可见的失败。"
+      }
+    ]
+  },
+  {
     "version": "0.2.0",
     "date": "2026-11-08",
     "items": [
