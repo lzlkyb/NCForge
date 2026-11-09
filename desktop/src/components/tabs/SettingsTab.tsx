@@ -12,6 +12,7 @@ import { ResourceSettings } from "../settings/ResourceSettings";
 import { ConfigTransferSettings } from "../settings/ConfigTransferSettings";
 import { KeymapSettings } from "../settings/KeymapSettings";
 import { EditorSettings } from "../settings/EditorSettings";
+import { SqlFormatSettings } from "../settings/SqlFormatSettings";
 import { TaskSettings } from "../settings/TaskSettings";
 import { NcEnvSettings } from "../settings/NcEnvSettings";
 import { AppearanceSettings } from "../settings/AppearanceSettings";
@@ -72,6 +73,10 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
       {
         label: "任务", group: "开发", description: "查看内置流程，按当前工作区组合自己的开发任务。",
         keywords: ["编译", "投送", "重启", "补丁", "步骤", "热替换", "task", "build"], content: <TaskSettings />,
+      },
+      {
+        label: "SQL 格式化", group: "开发", description: "调整数据库控制台 SQL 的排版风格。本机偏好，不随配置导入导出。",
+        keywords: ["SQL", "格式化", "美化", "缩进", "关键字大小写", "方言", "format", "sql-formatter"], content: <SqlFormatSettings />,
       },
       {
         label: "组件与更新", aliases: ["资源与更新"], group: "维护", description: "管理软件更新，查看编译与代码智能所需组件。",

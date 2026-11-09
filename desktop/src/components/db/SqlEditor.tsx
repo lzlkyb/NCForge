@@ -2,10 +2,12 @@ import { useLayoutEffect, useRef } from "react";
 import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { sqlModel, tabIdOfModel } from "../../lib/sqlModels";
 import { registerSqlProviders } from "../../lib/sqlProviders";
-import { isPlsql, pickStatement, splitStatements, type Stmt } from "../../lib/sqlSplit";
+import { pickStatement, splitStatements, type Stmt } from "../../lib/sqlSplit";
 import { statementsOf } from "../../lib/sqlStmtCache";
-import { formatSql } from "../../lib/sqlFormat";
-import { setSqlDraft } from "../../lib/dbStore";
+import { applyFormatEdits, fallbackFormatEdits, formatTargetOf, type SqlFormatScope } from "../../lib/sqlFormatTarget";
+import { formatSql, sqlLanguageOf } from "../../lib/sqlFormat";
+import { connOf, setSqlDraft, sqlTabOf } from "../../lib/dbStore";
+import { toast } from "../ui/toast";
 
 export interface RunStmt {
   text: string;
@@ -23,12 +25,14 @@ export interface SqlExecutionScope {
   statements: RunStmt[];
 }
 
+export type { SqlFormatScope };
+
 /** SqlConsole 拿到的编辑器句柄。 */
 export interface SqlEditorApi {
   /** `current`：选中的那段（可能多条），没选中就是光标所在的一条；`script`：全部。 */
   insert:(text:string)=>void;
   target: (mode: "current" | "script") => RunStmt[];
-  format: () => void;
+  format: (scope?: SqlFormatScope) => void;
   reveal: (line: number) => void;
   focus: () => void;
   setText: (text: string) => void;
@@ -72,27 +76,32 @@ function targetOf(editor: Editor, mode: "current" | "script"): RunStmt[] {
   return s ? [statement(s)] : [];
 }
 
-/** 格式化选中部分，或光标所在的语句；PL/SQL 块不动。走 executeEdits 保留撤销。 */
-function formatAt(editor: Editor) {
+/** 按范围格式化（范围解析见 lib/sqlFormatTarget）。整篇解析失败时逐条兜底，坏语句保留原文。 */
+async function formatAt(editor: Editor, scope: SqlFormatScope = "auto") {
   const model = editor.getModel();
   if (!model) return;
-  const sel = editor.getSelection();
-  let range: monaco.IRange;
-  let src: string;
-  if (sel && !sel.isEmpty()) {
-    range = sel;
-    src = model.getValueInRange(sel);
-  } else {
-    const pos = editor.getPosition();
-    const s = pos ? pickStatement(statementsOf(model), model.getOffsetAt(pos)) : null;
-    if (!s) return;
-    const a = model.getPositionAt(s.start);
-    const b = model.getPositionAt(s.start + s.text.length);
-    range = new monaco.Range(a.lineNumber, a.column, b.lineNumber, b.column);
-    src = s.text;
+  const target = formatTargetOf(model, editor.getSelection(), editor.getPosition(), scope);
+  if (!target) {
+    toast("光标处没有可格式化的 SQL 语句", "warning");
+    return;
   }
-  if (isPlsql(src)) return;
-  editor.executeEdits("ncforge-format", [{ range, text: formatSql(src) }]);
+  const connId = sqlTabOf(tabIdOfModel(model))?.connId;
+  const language = sqlLanguageOf(connId ? connOf(connId)?.url ?? "" : "");
+  const version = model.getVersionId();
+  const stale = () => editor.getModel() !== model || model.getVersionId() !== version;
+  let text: string | null = null;
+  let error = "";
+  try { text = await formatSql(target.text, language); }
+  catch (e) { error = e instanceof Error ? e.message : String(e); }
+  if (stale()) return;
+  if (text !== null) { applyFormatEdits(editor, [{ range: target.range, text }]); return; }
+  if (target.kind !== "script") { toast(`SQL 格式化失败：${error}`, "warning"); return; }
+  // 整个脚本里有一条没写完（引号/括号未闭合）会整篇解析失败：逐条排版，只跳过那一条。
+  const result = await fallbackFormatEdits(model, target.text, language);
+  if (stale()) return;
+  if (result.edits.length === 0) { toast(`SQL 格式化失败：${result.error ?? error}`, "warning"); return; }
+  applyFormatEdits(editor, result.edits);
+  if (result.skipped > 0) toast(`已格式化 ${result.edits.length} 条语句，跳过 ${result.skipped} 条无法解析的`, "warning");
 }
 
 /**
@@ -219,7 +228,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
     apiRef.current = {
       insert:(text)=>{const range=editor.getSelection();if(range) editor.executeEdits("ncforge-object-name",[{range,text,forceMoveMarkers:true}]);if (visibleRef.current) editor.focus();},
       target,
-      format: () => formatAt(editor),
+      format: (scope) => formatAt(editor, scope),
       reveal: (line) => {
         editor.revealLineInCenter(line);
         editor.setPosition({ lineNumber: line, column: 1 });

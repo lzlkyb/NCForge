@@ -107,7 +107,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         onRun={(m, collectStats) => void run(m, collectStats)}
         onStop={onStop}
         onExplain={onExplain}
-        onFormat={() => api.current?.format()}
+        onFormat={(scope) => api.current?.format(scope)}
         onExport={onExport}
         onValueSearch={() => setVsOpen(true)}
         onScriptReplay={() => setSrOpen(true)}

@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   scrollTop: 0,
   listeners: {} as Record<string, () => void>,
   create: vi.fn(), dispose: vi.fn(), focus: vi.fn(), layout: vi.fn(), draft: vi.fn(),
+  undoStop: vi.fn(), format: vi.fn(), language: vi.fn((_url: string) => "plsql"), toast: vi.fn(),
 }));
 
 vi.mock("../../lib/monacoSetup", () => {
@@ -42,7 +43,23 @@ vi.mock("../../lib/monacoSetup", () => {
     restoreViewState: (view: { position: Position; selection: Selection; scrollTop: number }) => {
       mocks.position = { ...view.position }; mocks.selection = { ...view.selection }; mocks.scrollTop = view.scrollTop;
     },
-    executeEdits: (_source: string, edits: { text: string }[]) => { mocks.model?.setValue(edits[0].text); mocks.listeners.content?.(); },
+    pushUndoStop: mocks.undoStop,
+    executeEdits: (_source: string, edits: { range?: Selection; text: string }[]) => {
+      const model = mocks.model!;
+      // 按偏移从后往前替换，才能正确处理同一次批量里的多条编辑
+      const spans = edits.map((edit) => {
+        const range = edit.range as Selection;
+        return {
+          start: model.getOffsetAt({ lineNumber: range.startLineNumber, column: range.startColumn }),
+          end: model.getOffsetAt({ lineNumber: range.endLineNumber, column: range.endColumn }),
+          text: edit.text,
+        };
+      }).sort((a, b) => b.start - a.start);
+      let value = model.getValue();
+      for (const span of spans) value = value.slice(0, span.start) + span.text + value.slice(span.end);
+      model.setValue(value);
+      mocks.listeners.content?.();
+    },
     revealLineInCenter: () => {},
     setPosition: (position: Position) => {
       mocks.position = position;
@@ -56,7 +73,9 @@ vi.mock("../../lib/monacoSetup", () => {
     initMonaco: () => {},
     monaco: {
       KeyMod: { CtrlCmd: 2048, Alt: 512, Shift: 1024 }, KeyCode: { Enter: 3, KeyX: 88, KeyF: 70 },
-      Range: class { constructor(readonly a: number, readonly b: number, readonly c: number, readonly d: number) {} },
+      Range: class {
+        constructor(readonly startLineNumber: number, readonly startColumn: number, readonly endLineNumber: number, readonly endColumn: number) {}
+      },
       editor: { create: mocks.create },
     },
   };
@@ -80,13 +99,15 @@ vi.mock("../../lib/sqlModels", () => ({
   tabIdOfModel: (model: TestModel) => model.id,
 }));
 vi.mock("../../lib/sqlProviders", () => ({ registerSqlProviders: () => {} }));
-vi.mock("../../lib/sqlFormat", () => ({ formatSql: (sql: string) => sql }));
-vi.mock("../../lib/dbStore", () => ({ setSqlDraft: mocks.draft }));
+vi.mock("../../lib/sqlFormat", () => ({ formatSql: (sql: string, lang: string) => mocks.format(sql, lang), sqlLanguageOf: (url: string) => mocks.language(url) }));
+vi.mock("../../lib/dbStore", () => ({ setSqlDraft: mocks.draft, sqlTabOf: () => ({ connId: "c1" }), connOf: () => ({ url: "jdbc:oracle:thin:@h:1521/x" }) }));
+vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
 import { SqlEditor } from "./SqlEditor";
 
 let root: Root, host: HTMLDivElement;
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.actions.length = 0; mocks.models.clear(); mocks.model = null; mocks.listeners = {};
+  vi.clearAllMocks(); mocks.format.mockReset(); mocks.format.mockImplementation(async (sql: string) => sql);
+  mocks.actions.length = 0; mocks.models.clear(); mocks.model = null; mocks.listeners = {};
   mocks.position = { lineNumber: 1, column: 1 };
   mocks.selection = { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }; mocks.scrollTop = 0;
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -197,4 +218,118 @@ it("切标签恢复各自视图，并立即替换执行范围，隐藏的旧视�
   render("t1", false); render("t1", true);
   expect(onScope.mock.lastCall![0]).toEqual({ tabId: "t1", selected: true, statements: firstTarget });
   expect(mocks.scrollTop).toBe(120);
+});
+
+describe("SQL 格式化接线", () => {
+  const runFormat = () => mocks.actions.find((a) => a.id === "ncforge.sql.format")!.run!() as unknown as Promise<void>;
+
+  it("按连接方言排版并应用结果；PL/SQL 块不再被跳过", async () => {
+    mocks.format.mockResolvedValue("begin\n  null;\nend;");
+    mount("begin null; end;");
+    await act(async () => { await runFormat(); });
+    expect(mocks.language).toHaveBeenCalledWith("jdbc:oracle:thin:@h:1521/x");
+    expect(mocks.format).toHaveBeenCalledWith(expect.any(String), "plsql");
+    expect(mocks.model!.getValue()).toBe("begin\n  null;\nend;");
+  });
+
+  it("懒加载期间内容被改动则放弃，不拿旧范围覆盖新内容", async () => {
+    let resolveFmt!: (v: string) => void;
+    mocks.format.mockImplementation(() => new Promise<string>((r) => { resolveFmt = r; }));
+    mount("select 1 from dual");
+    const pending = runFormat();
+    act(() => { mocks.model!.setValue("select 2 from dual"); mocks.listeners.content(); });
+    resolveFmt("select\n  1\nfrom\n  dual");
+    await pending;
+    expect(mocks.model!.getValue()).toBe("select 2 from dual");
+  });
+
+  it("格式化失败给出可见提示，原文不动", async () => {
+    mocks.format.mockRejectedValue(new Error("解析失败"));
+    mount("select 1 from dual");
+    await act(async () => { await runFormat(); });
+    expect(mocks.toast).toHaveBeenCalledWith(expect.stringContaining("格式化失败"), "warning");
+    expect(mocks.model!.getValue()).toBe("select 1 from dual");
+  });
+});
+
+describe("SQL 格式化范围", () => {
+  it("current 只取光标处语句", async () => {
+    mocks.format.mockResolvedValue("select\n  2");
+    const { apiRef } = mount("select 1;\nselect 2;");
+    mocks.position = { lineNumber: 2, column: 1 };
+    await act(async () => { await apiRef.current!.format("current"); });
+    expect(mocks.format).toHaveBeenCalledWith("select 2", "plsql");
+  });
+
+  it("script 忽略选区，排版整个脚本", async () => {
+    const { apiRef } = mount("select 1;\nselect 2;");
+    select({ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 9 });
+    await act(async () => { await apiRef.current!.format("script"); });
+    expect(mocks.format).toHaveBeenCalledWith("select 1;\nselect 2;", "plsql");
+  });
+
+  it("current 有选中时仍只排光标所在语句", async () => {
+    mocks.format.mockResolvedValue("select\n  2");
+    const { apiRef } = mount("select 1;\nselect 2;");
+    select({ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 9 });
+    mocks.position = { lineNumber: 2, column: 1 };
+    await act(async () => { await apiRef.current!.format("current"); });
+    expect(mocks.format).toHaveBeenCalledWith("select 2", "plsql");
+  });
+
+  it("auto 有选区时只排版选区（原行为）", async () => {
+    const { apiRef } = mount("select 1;\nselect 2;");
+    select({ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 9 });
+    await act(async () => { await apiRef.current!.format("auto"); });
+    expect(mocks.format).toHaveBeenCalledWith("select 1", "plsql");
+  });
+});
+
+it("无选区美化整个编辑器，并隔离撤销边界", async () => {
+  mocks.format.mockResolvedValue("SELECT 1;\nSELECT 2;");
+  const { apiRef } = mount("select 1; select 2;");
+  await act(async () => { await apiRef.current!.format(); });
+  expect(mocks.format).toHaveBeenCalledWith("select 1; select 2;", "plsql");
+  expect(mocks.undoStop).toHaveBeenCalledTimes(2);
+});
+it("存在选区时仅将选中内容交给美化器", async () => {
+  mocks.format.mockResolvedValue("SELECT 2");
+  const { apiRef } = mount("select 1;\nselect 2");
+  select({startLineNumber:2,startColumn:1,endLineNumber:2,endColumn:9});
+  await act(async () => { await apiRef.current!.format(); });
+  expect(mocks.format).toHaveBeenCalledWith("select 2", "plsql");
+});
+
+describe("整篇格式化兜底", () => {
+  // 模拟解析器：括号没闭合就整条报错，其余原样返回（大写以便区分是否真的排过）
+  const parseLoose = async (sql: string) => {
+    if (sql.includes("(") && !sql.includes(")")) throw new Error("Parse error: unmatched (");
+    return sql.toUpperCase();
+  };
+
+  it("整篇解析失败时逐条排版，只跳过写了一半的语句", async () => {
+    mocks.format.mockImplementation(parseLoose);
+    const { apiRef } = mount("select a;\nselect * from t where id in (1, 2;\nselect c;");
+    await act(async () => { await apiRef.current!.format("script"); });
+    expect(mocks.model!.getValue()).toBe("SELECT A;\nselect * from t where id in (1, 2;\nSELECT C;");
+    expect(mocks.toast).toHaveBeenCalledWith(expect.stringContaining("跳过 1 条"), "warning");
+    expect(mocks.undoStop).toHaveBeenCalledTimes(2);
+  });
+
+  it("每条都解析不了时提示失败且原文不动", async () => {
+    mocks.format.mockRejectedValue(new Error("Parse error"));
+    const { apiRef } = mount("select 1;\nselect 2;");
+    await act(async () => { await apiRef.current!.format("script"); });
+    expect(mocks.model!.getValue()).toBe("select 1;\nselect 2;");
+    expect(mocks.toast).toHaveBeenCalledWith(expect.stringContaining("格式化失败"), "warning");
+  });
+
+  it("语句范围解析失败不兜底，直接提示", async () => {
+    mocks.format.mockRejectedValue(new Error("Parse error"));
+    const { apiRef } = mount("select 1;");
+    await act(async () => { await apiRef.current!.format("current"); });
+    expect(mocks.format).toHaveBeenCalledTimes(1);
+    expect(mocks.model!.getValue()).toBe("select 1;");
+    expect(mocks.toast).toHaveBeenCalledWith(expect.stringContaining("格式化失败"), "warning");
+  });
 });
