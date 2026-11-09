@@ -8,6 +8,9 @@ import type { Cell } from "../../lib/dbApi";
 import { ResultGrid, type ResultGridApi } from "./ResultGrid";
 import { ContextMenu } from "../workspace/ContextMenu";
 import { copyText } from "../../lib/utils";
+import { toast } from "../ui/toast";
+
+vi.mock("../ui/toast", () => ({ toast: vi.fn() }));
 
 vi.mock("../../lib/utils", async original => ({ ...await original<typeof import("../../lib/utils")>(), copyText: vi.fn() }));
 
@@ -198,4 +201,39 @@ it("列级解码：未开启时原样显示，开启后显示明文并出编码�
   render(["JSON"]);
   expect(host.querySelector('#dbx-cell-0-1')?.textContent).toBe('{"orgNo":"100789"}');
   expect(host.querySelector('.dbx-gh .dbx-codec')?.hasAttribute('data-on')).toBe(true);
+});
+
+/**
+ * 双击只负责「编辑」。这个用例守住 0.2.1 的行为变更：不可编辑时**不再顺手打开详情**，
+ * 只说明原因并指向 F4 —— 之前双击会拉开一个 340px 的侧栏，看一眼就得手动关。
+ */
+function DetailGrid({ onDetail, hint }: { onDetail: () => void; hint?: string }) {
+  const [selection, setSelection] = useState<Selection | null>({ anchor: { r: 0, c: 0 }, end: { r: 0, c: 0 } });
+  return <ResultGrid columns={columns} rows={rows} order={order} sort={null} onSort={() => {}} sel={selection?.end ?? null}
+    onSel={(p, extend) => setSelection(s => ({ anchor: extend && s ? s.anchor : p, end: p }))} selection={selection}
+    visible={[0, 1]} frozen={["ID"]} widthOverrides={{}} onWidths={() => {}} onDetail={onDetail} blockedHint={hint}
+    edit={{ canEdit: c => c === 1, changed: new Map(), onEdit: () => {} }} />;
+}
+
+it("双击不可编辑的格子只说明原因、不打开详情；F4 才是详情入口", () => {
+  const detail = vi.fn();
+  act(() => root.render(<DetailGrid onDetail={detail} hint="主键列不可改" />));
+  act(() => { host.querySelector('#dbx-cell-0-0')!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); });
+  expect(detail).not.toHaveBeenCalled();
+  // 提示要指路，否则「双击没反应」和「双击开个窗」一样让人摸不着头脑
+  expect(vi.mocked(toast)).toHaveBeenCalledWith(expect.stringContaining("F4"));
+  act(() => host.querySelector<HTMLElement>('[role="grid"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", bubbles: true })));
+  expect(detail).toHaveBeenCalledTimes(1);
+});
+
+it("双击可编辑的格子进入编辑，既不弹提示也不开详情", () => {
+  const detail = vi.fn();
+  act(() => root.render(<DetailGrid onDetail={detail} hint="主键列不可改" />));
+  const cell = host.querySelector("#dbx-cell-0-1")!;
+  // 真实顺序：mousedown 先把它选成活动格，双击才在活动格上开编辑
+  act(() => { cell.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
+  act(() => { cell.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); });
+  expect(host.querySelector(".dbx-gedit")).not.toBeNull();
+  expect(detail).not.toHaveBeenCalled();
+  expect(vi.mocked(toast)).not.toHaveBeenCalled();
 });

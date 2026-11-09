@@ -148,3 +148,39 @@ it("网格 Ctrl+F 就地筛选，Esc 清除并返回活动格", async () => {
   expect(host.querySelector('[aria-label="在结果中筛选"]')).toBeNull();
   expect(document.activeElement?.closest('[role="grid"]')).toBe(grid);
 });
+
+/**
+ * 详情入口：双击只编辑，看完整值改成右键第一项 / F4 / 工具栏按钮。
+ * 这里守住右键这条路——入口一旦没了，用户就只剩 F4 一个不知道的快捷键。
+ */
+it("右键第一项是「查看完整值」，点它才打开详情面板", async () => {
+  await act(async()=>{root=createRoot(host);root.render(<ResultTable columns={columns} rows={[["a",1]]} meta="1 行" table="T" />);});
+  expect(host.querySelector(".dbx-detail")).toBeNull();
+  const cell = host.querySelector<HTMLElement>("#dbx-cell-0-0")!;
+  act(()=>{cell.dispatchEvent(new MouseEvent("mousedown",{bubbles:true}));});
+  await act(async()=>{cell.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,clientX:10,clientY:10}));});
+  const items=[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+  expect(items[0]?.textContent).toContain("查看完整值");
+  expect(items[0]?.textContent).toContain("F4");
+  await act(async()=>{items[0].click();});
+  expect(host.querySelector(".dbx-detail")).not.toBeNull();
+});
+
+/** 详情不再「粘住」布局：点到别的格子就收起；点同一格不误关。 */
+it("详情打开后点其它格自动收起，点同一格保持打开", async () => {
+  await act(async()=>{root=createRoot(host);root.render(<ResultTable columns={columns} rows={[["a",1],["b",2]]} meta="2 行" table="T" />);});
+  const openDetailOn = async (id: string) => {
+    const cell = host.querySelector<HTMLElement>(id)!;
+    act(()=>{cell.dispatchEvent(new MouseEvent("mousedown",{bubbles:true}));});
+    await act(async()=>{cell.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,clientX:10,clientY:10}));});
+    await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')][0].click();});
+    return cell;
+  };
+  const first = await openDetailOn("#dbx-cell-0-0");
+  expect(host.querySelector(".dbx-detail")).not.toBeNull();
+  act(()=>{first.dispatchEvent(new MouseEvent("mousedown",{bubbles:true}));});
+  expect(host.querySelector(".dbx-detail")).not.toBeNull();
+  const other = host.querySelector<HTMLElement>("#dbx-cell-1-0")!;
+  act(()=>{other.dispatchEvent(new MouseEvent("mousedown",{bubbles:true}));});
+  expect(host.querySelector(".dbx-detail")).toBeNull();
+});

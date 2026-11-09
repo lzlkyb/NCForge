@@ -1477,23 +1477,49 @@ public class NcDbBridge {
             }
         }
 
+        /**
+         * 元数据入参 `schema.table` → {owner, table}，都转大写；不带 schema 时 owner 为 null
+         * （退回连接的 current_schema）。
+         *
+         * 必须拆：整串丢进 `table_name = ?` 查不到任何行，且不报错——上层会把
+         * 「表有主键」误判成「没有主键」，SQL 控制台结果页被锁成只读。
+         */
+        private String[] qualified(String table) {
+            String s = table == null ? "" : table.trim();
+            int dot = s.indexOf('.');
+            if (dot > 0 && dot < s.length() - 1) {
+                return new String[] { s.substring(0, dot).trim().toUpperCase(), s.substring(dot + 1).trim().toUpperCase() };
+            }
+            return new String[] { null, s.toUpperCase() };
+        }
+
         private String columns(String table) throws SQLException {
             requireConn();
-            String t = table.toUpperCase();
-            Map<String, String> zh = ncColumnNames(table);
-            List<String> pk = pkColumns(t);
+            String[] qn = qualified(table);
+            String owner = qn[0];
+            String t = qn[1];
+            Map<String, String> zh = ncColumnNames(t);
+            List<String> pk = pkColumns(t, owner);
             String q = "select c.column_name, c.data_type, c.char_length, c.data_precision, c.data_scale,"
                     + " c.nullable, c.data_default, cc.comments"
                     + " from all_tab_columns c left join all_col_comments cc"
                     + " on cc.owner = c.owner and cc.table_name = c.table_name"
                     + " and cc.column_name = c.column_name"
-                    + " where c.owner = sys_context('userenv','current_schema')"
-                    + " and c.table_name = ? order by c.column_id";
+                    + (owner == null
+                            ? " where c.owner = sys_context('userenv','current_schema') and c.table_name = ?"
+                            : " where c.owner = ? and c.table_name = ?")
+                    + " order by c.column_id";
             PreparedStatement ps = conn.prepareStatement(q);
             StringBuilder sb = new StringBuilder("[");
             int n = 0;
             try {
-                ps.setString(1, t);
+                if (owner == null) {
+                    ps.setString(1, t);
+                } else {
+                    // owner 在前：`where c.owner = ? and c.table_name = ?`
+                    ps.setString(1, owner);
+                    ps.setString(2, t);
+                }
                 ResultSet rs = ps.executeQuery();
                 while (rs.next()) {
                     String name = rs.getString(1);
@@ -1552,15 +1578,22 @@ public class NcDbBridge {
             return m;
         }
 
-        private List<String> pkColumns(String table) throws SQLException {
+        private List<String> pkColumns(String table, String owner) throws SQLException {
             List<String> out = new ArrayList<String>();
             PreparedStatement ps = conn.prepareStatement("select cc.column_name from all_constraints c"
                     + " join all_cons_columns cc on cc.owner = c.owner"
                     + " and cc.constraint_name = c.constraint_name"
-                    + " where c.owner = sys_context('userenv','current_schema')"
+                    + (owner == null
+                            ? " where c.owner = sys_context('userenv','current_schema')"
+                            : " where c.owner = ?")
                     + " and c.table_name = ? and c.constraint_type = 'P' order by cc.position");
             try {
-                ps.setString(1, table);
+                if (owner == null) {
+                    ps.setString(1, table);
+                } else {
+                    ps.setString(1, owner);
+                    ps.setString(2, table);
+                }
                 ResultSet rs = ps.executeQuery();
                 while (rs.next()) {
                     out.add(rs.getString(1));

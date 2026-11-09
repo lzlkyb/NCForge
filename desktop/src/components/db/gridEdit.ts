@@ -21,6 +21,15 @@ export interface GridEdit {
   /** 改过的格子：`行:列` → 新值。 */
   changed: Map<string, Cell>;
   onEdit: (row: number, col: number, value: Cell) => void;
+  /**
+   * 撤回这一格的改动，回到库里的原值（Esc / 右键「撤销本格改动」）。
+   * 不传 = 这个结果不支持单格撤销。
+   */
+  onResetCell?: (row: number, col: number) => void;
+  /** 一次改多格：粘贴一块、批量赋值。不传 = 只能逐格改。 */
+  onEditMany?: (cells: { row: number; col: number; value: Cell }[]) => void;
+  /** 复制这一行（克隆成新增行）。不传 = 这个结果不支持。 */
+  onCloneRow?: (row: number) => void;
   /** 行级状态：新增草稿 / 待删除。 */
   rowState?: (row: number) => "added" | "deleted" | undefined;
   /** 右键「删除此行 / 恢复此行」。不传 = 这个结果不支持行级删除（表页无主键 / 只读）。 */

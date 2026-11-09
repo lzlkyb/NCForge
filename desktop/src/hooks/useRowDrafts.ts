@@ -15,7 +15,12 @@ export function useRowDrafts(pageRows: Cell[][]|null, columnCount: number) {
   const [deleted, setDeleted] = useState<number[]>([]);
 
   const reset = useCallback(() => { setDrafts([]); setDeleted([]); }, []);
-  const add = useCallback(() => { setDrafts(list => [...list, newDraftRow()]); }, []);
+  /** `values` 用于「复制此行」：克隆出来的新增行直接带上原行的值。 */
+  const add = useCallback((values?: Map<number, Cell>) => {
+    // 这个函数经常被直接当 onClick 传下去，那时第一个参数是事件对象 —— 不能当成值用。
+    const seed = values instanceof Map ? values : undefined;
+    setDrafts(list => [...list, seed ? { ...newDraftRow(), values: seed } : newDraftRow()]);
+  }, []);
 
   const setCell = useCallback((row: number, col: number, value: Cell) => {
     const index = row - base;

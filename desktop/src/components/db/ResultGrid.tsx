@@ -1,7 +1,7 @@
-import { useEffect, useId, useMemo, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type Ref } from "react";
+import { useEffect, useId, useMemo, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { columnViewport, selectionBounds } from "../../lib/gridViewport";
 import { gridSelectionCell, gridSelectionHeading } from "../../lib/gridSelection";
-import { isLobPreview, sameCell } from "../../lib/db";
+import { isLobPreview } from "../../lib/db";
 import { gridCodec } from "../../lib/cellCodec";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { isNumericType } from "../../lib/resultExport";
@@ -11,6 +11,8 @@ import { toast } from "../ui/toast";
 import { ResultGridHeader } from "./ResultGridHeader";
 import { GridCellEditor } from "./GridCellEditor";
 import { useResultGridNavigation } from "../../hooks/useResultGridNavigation";
+import { useGridEditing } from "../../hooks/useGridEditing";
+import { parseClipboardGrid, pasteTargets } from "../../lib/gridPaste";
 import { getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
 import { selectionText, type Selection } from "../../lib/dbResultTools";
 import "../../db-grid-inspector.css";
@@ -26,7 +28,7 @@ import type { CellPos, GridEdit, ResultGridApi } from "./gridEdit";
  * 排序 / 筛选的结果由父组件以 `order` 传入（复制 / 导出要用同一个顺序）。
  * NULL 斜体灰字与空串区分；数字右对齐。
  */
-export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onOpen, edit, zh, visible, frozen, widthOverrides, onWidths, selection, empty, onCopy, onCellMenu, apiRef, decoded }: {
+export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onDetail, edit, blockedHint, zh, visible, frozen, widthOverrides, onWidths, selection, empty, onCopy, onCellMenu, apiRef, decoded }: {
   apiRef?: Ref<ResultGridApi>;
   columns: ColumnMeta[];
   rows: Cell[][];
@@ -40,9 +42,11 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   onSel: (p: CellPos, extend?:boolean) => void;
   visible: number[]; frozen: string[]; widthOverrides: Record<string,number>; onWidths: (w:number[])=>void; selection:Selection|null;
   decoded?: string[]; // 已开启「按编码解码显示」的列名，开关在列头右键菜单
-  /** 双击不可编辑的格子：打开详情。 */
-  onOpen?: () => void;
+  /** 打开单元格详情（F4 / 右键「查看完整值」/ 工具栏按钮）。双击不触发。 */
+  onDetail?: () => void;
   edit?: GridEdit;
+  /** 不能编辑的原因；`edit` 缺失或这格不可改时双击会先提示一次。 */
+  blockedHint?: string;
   /** 列名（小写）→ NC 中文名，表头悬停显示。 */
   zh?: Record<string, string>;
 }) {
@@ -55,12 +59,9 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   /** 拖拽中的清理函数：组件卸载（切标签、结果清空）时也要摘掉 window 上的监听。 */
   const dragCleanup = useRef<(() => void) | null>(null);
   useEffect(() => () => dragCleanup.current?.(), []);
-  /** Esc 退出编辑：`setEditing(null)` 会把 input 卸掉，紧随其后的 blur 不能再提交一次。 */
-  const cancelEdit = useRef(false);
   const widthRef=useRef<number[]>([]);
   const [widths, setWidths] = useState<number[]>(() => initialWidths(columns, rows));
   const [scroll, setScroll] = useState({ top: 0, h: 400, left: 0, w: 800 });
-  const [editing, setEditing] = useState<{ pos: CellPos; value: string } | null>(null);
 
   // 切密度保留当前首行；CSS 与虚拟滚动共用几何，不能只把可见行拉高。
   useLayoutEffect(() => {
@@ -75,13 +76,6 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
 
   const colKey = columns.map((c) => c.name).join("|");
   const colKeyRef = useRef(colKey);
-  // 只有列变了才回顶并结束编辑；拖列宽也会换 widthOverrides 引用，无差别重置会丢滚动位置和编辑中的值
-  useEffect(() => {
-    setWidths(initialWidths(columns, rows).map((w, c) => widthOverrides[columns[c].name] ?? w));
-    if (colKeyRef.current === colKey) return;
-    colKeyRef.current = colKey; setEditing(null); boxRef.current?.scrollTo({ top: 0 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [colKey, widthOverrides]);
 
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -90,8 +84,6 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-
-  useEffect(() => { if (!editing) cancelEdit.current = false; }, [editing]);
 
   // 新结果的第一帧里 effect 还没重算列宽：先按新列现算一份，避免宽度对不上
   const ws = widths.length === columns.length ? widths : initialWidths(columns, rows);
@@ -159,29 +151,20 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   /** 双击列分隔线 = 本列贴到内容（列名优先），顺手记成手调宽度。 */
   const fit = (k: number) => { if (!columns[k]) return; const next = ws.map((w, i) => (i === k ? fitWidth(columns[k], rows, k) : w)); setWidths(next); onWidths(next); };
 
-  const valueAt = (r: number, c: number): Cell => {
-    const key = `${r}:${c}`;
-    return edit?.changed.has(key) ? edit.changed.get(key)! : rows[r][c];
-  };
-
+  // 编辑态（进入 / 提交并移动 / 取消）抽到 hook：表页与 SQL 结果页共用同一套键盘语义。
+  const { editing, valueAt, startEdit: beginEdit, setValue, commit: commitEdit, cancel: cancelEdit } =
+    useGridEditing({ rows, order, visible, edit, onSel, reveal, boxRef });
+  /**
+   * 不可编辑时只说明原因，**不顺带打开详情**：双击是「编辑」手势，不该产生第二种结果。
+   * 看完整值走明确入口——F4、右键「查看完整值」、工具栏详情按钮。
+   */
+  const blockedTipAt = useRef(0);
   const startEdit = (pos: CellPos) => {
-    if (!edit?.canEdit(pos.c, pos.r)) return onOpen?.();
-    const v = valueAt(pos.r, pos.c);
-    setEditing({ pos, value: v === null ? "" : String(v) });
-  };
-
-  const commitEdit = () => {
-    if (cancelEdit.current) {
-      cancelEdit.current = false;
-      return;
+    if (beginEdit(pos)) return;
+    if (blockedHint && Date.now() - blockedTipAt.current > 4000) {
+      blockedTipAt.current = Date.now();
+      toast(onDetail ? `${blockedHint}；完整值按 F4 查看` : blockedHint);
     }
-    if (!editing || !edit) return;
-    const { r, c } = editing.pos;
-    // Oracle 里空串就是 NULL，直接记成 NULL，预览 SQL 才不会误导
-    const v: Cell = editing.value === "" ? null : editing.value;
-    if (!sameCell(v, rows[r][c]) || edit.changed.has(`${r}:${c}`)) edit.onEdit(r, c, v);
-    setEditing(null);
-    boxRef.current?.focus();
   };
 
   const copySelection = () => {
@@ -192,6 +175,31 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   };
   const navigation=useResultGridNavigation({boxRef,sel,visible,order,reveal,onSel,onSort,onHeaderMenu,onCellMenu,
     editing:!!editing,onOpen:startEdit,onCopy:copySelection,apiRef});
+  /**
+   * 非编辑态的网格快捷键：Esc 撤回本格原值（DBeaver 的语义），F4 看完整值。
+   * F4 而不是 Enter/F2：那两个是「进入编辑」，两者不该混在一起。
+   */
+  const onGridKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!editing && sel && edit?.onResetCell && e.key === "Escape") { e.preventDefault(); edit.onResetCell(sel.r, sel.c); return; }
+    if (e.key === "F4" && onDetail) { e.preventDefault(); onDetail(); return; }
+    navigation.onKey(e);
+  };
+  /** Ctrl+V：把剪贴板里那一块从活动格铺开；只粘一个值时铺满当前选区。 */
+  const onPaste = (e: ClipboardEvent<HTMLDivElement>) => {
+    if (!edit?.onEditMany || !sel) return;
+    const text = e.clipboardData.getData("text/plain");
+    if (!text) return;
+    e.preventDefault();
+    const cells = pasteTargets(parseClipboardGrid(text), sel, bounds, order, visible, (c, r) => edit.canEdit(c, r));
+    if (cells.length) edit.onEditMany(cells);
+  };
+  // 只有列变了才回顶并结束编辑；拖列宽也会换 widthOverrides 引用，无差别重置会丢滚动位置和编辑中的值
+  useEffect(() => {
+    setWidths(initialWidths(columns, rows).map((w, c) => widthOverrides[columns[c].name] ?? w));
+    if (colKeyRef.current === colKey) return;
+    colKeyRef.current = colKey; cancelEdit(); boxRef.current?.scrollTo({ top: 0 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colKey, widthOverrides]);
 
   return (
     <div
@@ -207,7 +215,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
       aria-rowcount={order.length+1}
       aria-colcount={visible.length+1}
       aria-activedescendant={activeCell}
-      onKeyDown={navigation.onKey}
+      onKeyDown={onGridKey}
+      onPaste={onPaste}
       onScroll={syncScroll}
     >
       <span id={helpId} className="dbx-grid-instructions">方向键移动，Shift 扩选，Ctrl+C 复制。Alt+上箭头进入表头；表头左右键换列，Enter 排序，{onHeaderMenu && "Shift+F10 或菜单键打开菜单，"}下箭头返回数据，Esc 返回原活动格。</span>
@@ -242,9 +251,10 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
                       value={editing.value}
                       changed={edit?.changed.has(`${r}:${k}`) ?? false}
                       selected={selected}
-                      onChange={v => setEditing({ ...editing, value: v })}
-                      onCommit={commitEdit}
-                      onCancel={() => { cancelEdit.current = true; setEditing(null); boxRef.current?.focus(); }}
+                      onChange={setValue}
+                      onCommit={() => commitEdit()}
+                      onCancel={cancelEdit}
+                      onCommitMove={(dr, dc) => commitEdit([dr, dc])}
                     />
                   );
                 }

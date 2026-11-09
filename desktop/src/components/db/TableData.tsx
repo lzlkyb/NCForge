@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../ui/toast";
 import { ResultTable } from "./ResultTable";
-import { friendlyDbError, parseDbError, sameCell, thousands, type DbError } from "../../lib/db";
+import { friendlyDbError, parseDbError, thousands, type DbError } from "../../lib/db";
 import { dbApi, type BoundCell, type Cell, type ColumnInfo, type ColumnMeta } from "../../lib/dbApi";
 import { ask, reconnectSession } from "../../lib/dbConfirm";
 import { claimCursor, connOf, rtOf, setTx, type TableTab } from "../../lib/dbStore";
@@ -22,6 +22,8 @@ import { ChangeReview } from "./ChangeReview";
 import { compileFilter, loadFilter } from "../../lib/dbConditions";
 import { optimisticChanges, insertChange, deleteChange, planWriteBack } from "../../lib/dbOptimisticEdit";
 import { useRowDrafts } from "../../hooks/useRowDrafts";
+import { useTableEdits } from "../../hooks/useTableEdits";
+import { useSaveShortcut } from "../../hooks/useSaveShortcut";
 import { useTableSave } from "../../hooks/useTableSave";
 import { TableEditTools } from "./TableEditTools";
 import { TableDataStatus } from "./TableDataStatus";
@@ -66,6 +68,8 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   // 放在这里而不是 `page` 原来那行：`load` 的依赖数组要在初始化之后才能读到 `drafts.reset`。
   const page = data && "rows" in data ? data : null;
   const drafts = useRowDrafts(page?.rows ?? null, page?.columns.length ?? 0);
+  // 格子级动作（改一格 / 撤回一格 / 批量粘贴 / 复制整行）收在一处，见 hooks/useTableEdits。
+  const edits = useTableEdits({ base: page?.rows.length ?? 0, rows: page?.rows ?? null, setChanged, drafts });
   // 取成独立引用：`load` 的依赖数组里只能放稳定值，放整个 `drafts` 会让每次渲染都重查。
   const resetDrafts = drafts.reset;
 
@@ -185,6 +189,8 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
     setConflictValues: value => setUi(current => ({ ...current, conflictValues: value })),
     setConnectionError, load,
   });
+  // Ctrl+S = 写回（DBeaver 语义）。没有待写回内容时不接管这个键，免得挡住别处。
+  useSaveShortcut(save, editable && changes.length > 0);
 
   return (
     <>
@@ -222,18 +228,22 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
               return (r !== undefined && r >= page.rows.length) || !pk.includes(col.name);
             },
             changed,
-            onEdit: (r, c, v) => {
-              if (r >= page.rows.length) { drafts.setCell(r, c, v); return; }
-              const next = new Map(changed);
-              if (sameCell(v, page.rows[r][c])) next.delete(`${r}:${c}`);
-              else next.set(`${r}:${c}`, v);
-              setChanged(next);
-            },
+            onEdit: edits.setCell,
+            onResetCell: edits.resetCell,
+            onEditMany: edits.setCells,
+            onCloneRow: (r) => edits.cloneRow(r, page.columns.flatMap((c, i) => pk.includes(c.name) ? [i] : [])),
             rowState: drafts.status,
             isDraftRow: (r) => r >= page.rows.length,
             onDeleteRow: (r) => drafts.removeRow(r),
             onRestoreRow: (r) => drafts.restoreRow(r),
           } : undefined}
+          // 只给「结构性」原因：保存中/加载中/tx 锁定也会让 editable 为假，但那不该弹提示。
+          blockedHint={
+            readonly ? "当前连接是只读模式" :
+            isView ? "视图不能直接改数据" :
+            pk.length === 0 ? "这张表没有主键，定位不到唯一行" :
+            undefined
+          }
           tools={
             <TableEditTools
               changed={changes.filter(c => c.kind === "update").length}
@@ -243,7 +253,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
               editable={editable}
               saving={saving}
               preview={preview}
-              onAdd={drafts.add}
+              onAdd={() => drafts.add()}
               onUndo={() => { setChanged(new Map()); drafts.reset(); }}
               onTogglePreview={() => setPreview(!preview)}
               onSave={() => void save()}
@@ -259,7 +269,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
               <TableDataFooter rows={page.rows.length} pageNumber={page.pageNumber} complete={page.pageNumber===1 && !page.hasNext}
                 previousDisabled={saving || loading || q.page===0} nextDisabled={saving || loading || !page.hasNext}
                 onPrevious={()=>void navTo({...q,page:q.page-1})} onNext={()=>void navTo({...q,page:q.page+1})}
-                hint={readonly ? "只读查询模式" : editable ? "双击单元格编辑（主键列不可改）" : isView ? "视图只读" : "没有主键，只读（定位不到唯一行）"} />
+                hint={readonly ? "只读查询模式" : editable ? "双击单元格编辑（主键列不可改）· F4 看完整值" : isView ? "视图只读" : "没有主键，只读（定位不到唯一行）"} />
             </>
           }
         />

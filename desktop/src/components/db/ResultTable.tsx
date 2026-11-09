@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useResultOrder } from "../../hooks/useResultOrder";
 import { selectionBounds } from "../../lib/gridViewport";
+import { selectedEditableCells } from "../../lib/gridSelection";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
@@ -42,7 +43,7 @@ export interface LobSource {
   timeoutSec?: number;
 }
 
-export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated, lob }: {
+export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated, lob }: {
   columns: ColumnMeta[];
   layoutKey?:string; snapshot?:ResultSnapshot; connId?:string|null; onRelated?:(row:Cell[])=>void;
   /** 大文本「加载完整值」的上下文；不传 = 这个结果不支持（表页 / 非查询结果）。 */
@@ -53,6 +54,8 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
   /** 复制为 INSERT 时用的表名。 */
   table: string;
   edit?: GridEdit;
+  /** 结果不可编辑的原因：双击时提示一次，不让人对着「没反应」猜。 */
+  blockedHint?: string;
   zh?: Record<string, string>;
   /** 结果条右侧额外的按钮（表页的保存 / 预览 SQL）。 */
   tools?: ReactNode;
@@ -107,14 +110,38 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
     if (!edit.onDeleteRow) return [];
     return [{ label: "删除此行", icon: "trash", danger: true, separator: true, hint: "写回时执行", onSelect: () => edit.onDeleteRow!(r) }];
   };
+  /** 选区里的可编辑格；没有选区就是当前格。 */
+  const selectedCells = () => edit && bounds ? selectedEditableCells(bounds, order, visible, edit.canEdit) : [];
   const cellMenu = (r:number,c:number,x:number,y:number) => {
     const frozen = freezeTransferFrame({...frame,selection:{anchor:{r,c},end:{r,c}}},valueAt);
     const column = {...frozen,selection:null,visible:[c]};
     setMenu({x,y,items:[
-      {label:"复制原始值",icon:"copy",onSelect:()=>void quickCopyTransfer(frozen,"tsv",true)},
+      // 双击只负责编辑，看完整值要有明确入口：右键第一项 + F4 + 工具栏详情按钮。
+      {label:"查看完整值",icon:"eye",hint:"F4",onSelect:()=>setDetail(true)},
+      {label:"复制原始值",icon:"copy",separator:true,onSelect:()=>void quickCopyTransfer(frozen,"tsv",true)},
       {label:"复制列名",onSelect:()=>void navigator.clipboard.writeText(columns[c].name).then(()=>toast("列名已复制","success"),e=>toast(`复制失败：${String(e)}`,"error"))},
       {label:"复制唯一值（当前筛选列）",onSelect:()=>{const seen=new Set<string>();const order=column.order.filter(i=>{const key=JSON.stringify([typeof valueAt(i,c),valueAt(i,c)]);if(seen.has(key)) return false;seen.add(key);return true;});void quickCopyTransfer({...column,order},"tsv");}},
       {label:"复制为 IN 条件（当前筛选列）",icon:"code",onSelect:()=>void quickCopyTransfer(column,"where")},
+      // 编辑相关动作只在「这一格真能改」时出现：主键列、只读类型、视图都没有这些项。
+      ...(edit?.canEdit(c, r) ? [
+        // 选中一列再置空是最常用的批量动作：有选区就作用整个选区，没选区就是这一格。
+        { label: selectedCells().length > 1 ? `选区设为 NULL（${selectedCells().length} 格）` : "设为 NULL",
+          hint: "写回时这些列置空",
+          onSelect: () => {
+            const cells = selectedCells();
+            if (edit.onEditMany && cells.length > 1) edit.onEditMany(cells.map(cell => ({ ...cell, value: null })));
+            else edit.onEdit(r, c, null);
+          } },
+        ...(edit.changed.has(`${r}:${c}`) && edit.onResetCell
+          ? [{ label: "撤销本格改动", icon: "restore" as const, separator: true,
+              onSelect: () => {
+                const cells = selectedCells();
+                if (cells.length > 1) cells.forEach(cell => edit.onResetCell!(cell.row, cell.col));
+                else edit.onResetCell!(r, c);
+              } }]
+          : []),
+      ] : []),
+      ...(edit?.onCloneRow ? [{ label: "复制此行（新增）", icon: "copy" as const, hint: "主键列留空", onSelect: () => edit.onCloneRow!(r) }] : []),
       // 行级增删只挂在能定位唯一行的结果上（表页有主键、且不是只读）。
       // 放在单元格右键而不是工具条：删除是「对着这一行」的动作，选中态会随排序/筛选漂移。
       ...rowActions(r),
@@ -174,7 +201,7 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
         {tools}
         {(running || pending) && <span className="dbx-busy" role="status"><Icon name="spinner" size={12} />{running ? "执行中…" : "正在整理结果…"}</span>}
         <ResultTransfer frame={frame} valueAt={valueAt} />
-        <button type="button" className="dbx-ibtn" data-on={detail || undefined} title="单元格详情" aria-label="单元格详情" aria-pressed={detail} onClick={()=>setDetail(!detail)}><Icon name="info" size={14} /></button>
+        <button type="button" className="dbx-ibtn" data-on={detail || undefined} title="单元格详情 · F4" aria-label="单元格详情" aria-pressed={detail} onClick={()=>setDetail(!detail)}><Icon name="info" size={14} /></button>
         {snapshot && <ResultSource snapshot={snapshot} meta={meta} />}
         {settings}
       </div>
@@ -205,7 +232,8 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
           onSort={(c) => setSort(nextSort(sort, c))}
           onHeaderMenu={(c, x, y) => setHead({ x, y, col: c })}
           sel={sel}
-          onSel={select}
+          // 详情是「看一眼就走」的检查器：点到别的格子就收起，不守着 340px 等手动关。
+          onSel={(p, extend) => { if (detail && (!sel || sel.r !== p.r || sel.c !== p.c)) setDetail(false); select(p, extend); }}
           selection={selection}
           onCopy={copySelection}
           onCellMenu={cellMenu}
@@ -214,8 +242,9 @@ export function ResultTable({ columns, rows, meta, table, edit, zh, tools, foot,
           widthOverrides={layout.widths}
           decoded={layout.decoded}
           onWidths={w=>setColumns({...layout,widths:Object.fromEntries(columns.map((c,i)=>[c.name,w[i]]))})}
-          onOpen={() => setDetail(true)}
+          onDetail={() => setDetail(true)}
           edit={edit}
+          blockedHint={blockedHint}
           zh={zh}
         />
         {detail && (

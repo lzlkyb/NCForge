@@ -33,8 +33,10 @@ export function TableEditTools({ changed, changedCells, added, deleted, editable
             {deleted > 0 && ` 删 ${deleted}`}
           </span>
           <button type="button" className="dbx-btn ghost" disabled={saving} onClick={onUndo}>撤销改动</button>
-          <button type="button" className="dbx-btn ghost" data-on={preview || undefined} disabled={saving} onClick={onTogglePreview}>复核修改 / SQL</button>
-          <button type="button" className="dbx-btn pri" disabled={!editable || !preview} onClick={onSave}>
+          <button type="button" className="dbx-btn ghost" data-on={preview || undefined} disabled={saving} onClick={onTogglePreview}
+            title="可选：展开后能看到将要执行的 SQL 与逐行改动，不展开也能直接写回">复核修改 / SQL</button>
+          <button type="button" className="dbx-btn pri" disabled={!editable || saving} onClick={onSave}
+            title="把上面这些改动写成 UPDATE / DELETE / INSERT 并执行 · Ctrl+S">
             <Icon name={saving ? "spinner" : "check"} size={12} />
             {saving ? "写回中…" : `写回 ${total} 行`}
           </button>
