@@ -39,6 +39,14 @@
 .dbx-doctab .dbx-edot { width: 7px; height: 7px; }
 .dbx-tabadd { width: 30px; height: var(--dbx-h-tab); display: grid; place-items: center; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
 .dbx-tabadd:hover { color: hsl(var(--foreground)); background: hsl(var(--secondary) / .6); }
+/* 标签本体单独横向滚动，右侧「所有标签 / 最近关闭 / +」始终留在可操作区。
+   不依赖 .app-shell 祖先选择器：文档面标签条是 portal 进来的，宿主层级会变。 */
+.dbx-doctabs { min-width: 0; }
+.dbx-doctabs > .wb-tabs-scroll { display: flex; align-items: center; align-self: stretch; flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.dbx-doctabs > .wb-tabs-scroll > .wb-tab { flex-shrink: 0; }
+/* 拖到目标标签前亮一条插入线；拖到空白 /「+」由根节点接成末尾落点。 */
+.dbx-doctab[draggable="true"] { cursor: grab; }
+.dbx-doctab[data-drop-target]::after { content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px; background: hsl(var(--primary)); }
 
 /* ── 通用按钮 / 输入 ── */
 .dbx-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: var(--dbx-h-control); padding: 0 10px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: var(--dbx-fs-body); white-space: nowrap; flex-shrink: 0; }

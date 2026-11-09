@@ -15,7 +15,7 @@ import { TablePage } from "../db/TablePage";
 import { ComparisonWorkspace } from "../db/ComparisonWorkspace";
 import { ViewActivityContext, useViewActive } from "../../lib/viewActivity";
 import { newConsole } from "../../lib/dbActions";
-import { showObjectFinder, defaultConnId, loadConns, openConnDialog, openDictTab, openSqlTab, useActiveDbTab, useDbSelector } from "../../lib/dbStore";
+import { showObjectFinder, defaultConnId, loadConns, openConnDialog, openDictTab, openSqlTab, restoreClosedTab, useActiveDbTab, useDbSelector } from "../../lib/dbStore";
 import { dbPanelId, dbTabId } from "../../lib/dbPendingSessions";
 
 /**
@@ -42,6 +42,7 @@ export function DbTab() {
     tabs: { length: useDbSelector((s) => s.tabs.length) },
     conns: { length: useDbSelector((s) => s.conns.length) },
     objectFinder: useDbSelector((s) => s.objectFinder),
+    closedCount: useDbSelector((s) => s.recentlyClosed.length),
   };
 
   useEffect(() => {
@@ -106,6 +107,12 @@ export function DbTab() {
                             数据字典
                           </button>
                         </>
+                      )}
+                      {db.closedCount > 0 && (
+                        <button type="button" className="dbx-btn" onClick={() => restoreClosedTab()}>
+                          <Icon name="history" size={12} />
+                          恢复上次关闭
+                        </button>
                       )}
                     </div>
                   }

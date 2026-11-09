@@ -20,6 +20,7 @@ import { toast } from "../components/ui/toast";
 import { dbCancelled, dbTaskSpec, dbTxKey } from "./dbOperations";
 import { addHistory } from "./dbHistory";
 import { persistentTab, persistentTabsChanged } from "./dbTabPersistence";
+import { dbTabLabel } from "./dbPendingSessions";
 import { appendResultRows, fitResult, fitResults, retainedResultBytes, resultBytes, TOTAL_RESULT_BYTES, RESULT_LIMIT_NOTICE } from "./dbResultBudget";
 import type { MdDictOut, PickRow, ScopeKind } from "./mdDict";
 import { captureResultContext, type ResultExecutionContext } from "./dbResultContext";
@@ -214,11 +215,48 @@ export interface DbState {
   /** 会话与锁抽屉（只读面板）。null = 关闭。 */
   sessionPanel: { connId: string } | null;
   objectFinder?:boolean;
+  /** 最近关闭的 SQL / 表标签：关掉之后草稿还能找回。只存精简快照，不带结果集。 */
+  recentlyClosed: ClosedDbTab[];
 }
 
 const TABS_KEY = "ncforge-db-tabs";
+const CLOSED_KEY = "ncforge-db-closed-tabs";
 export const DEFAULT_MAX_ROWS = 500;
 export const DEFAULT_TIMEOUT = 30;
+export const MAX_RECENTLY_CLOSED = 20;
+
+/** 关闭栈的一项。`tab` 是 `persistentTab` 的投影，持久化时与 tabs 用同一套形状。 */
+export interface ClosedDbTab {
+  /** 栈项自己的 id：撤销 / 从下拉里指定恢复都用它，和标签 id 分开。 */
+  id: string;
+  tab: Record<string, unknown>;
+  index: number;
+  at: number;
+}
+
+function loadClosed(): ClosedDbTab[] {
+  try {
+    const raw = localStorage.getItem(CLOSED_KEY);
+    if (!raw) return [];
+    const v = JSON.parse(raw) as { items?: ClosedDbTab[] };
+    const valid = (e: ClosedDbTab): boolean =>
+      !!e && typeof e.id === "string" && Number.isFinite(e.at) && Number.isFinite(e.index)
+      && !!e.tab && typeof e.tab === "object" && typeof e.tab.id === "string"
+      && (e.tab.kind === "sql" || (e.tab.kind === "table" && typeof e.tab.table === "string"));
+    return (Array.isArray(v.items) ? v.items : []).filter(valid).slice(-MAX_RECENTLY_CLOSED);
+  } catch {
+    return [];
+  }
+}
+
+/** 关闭栈立即写盘：它本来就是「下次进来还能找回」的兜底，不能跟着 400ms 防抖一起丢。 */
+function persistClosed() {
+  try {
+    localStorage.setItem(CLOSED_KEY, JSON.stringify({ items: state.recentlyClosed }));
+  } catch {
+    // 存不下就算了：栈只是找回入口，已打开的标签不受影响
+  }
+}
 
 let seq = 0;
 const newId = (p: string) => `${p}${Date.now().toString(36)}${(seq++).toString(36)}`;
@@ -249,7 +287,7 @@ function loadTabs(): Pick<DbState, "tabs" | "active"> {
   }
 }
 
-let state: DbState = { conns: [], loaded: false, loadError: null, rt: {}, dialog: null, sessionPanel: null, ...loadTabs() };
+let state: DbState = { conns: [], loaded: false, loadError: null, rt: {}, dialog: null, sessionPanel: null, recentlyClosed: loadClosed(), ...loadTabs() };
 const listeners = new Set<() => void>();
 const draftListeners = new Map<string, Set<() => void>>();
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -389,7 +427,8 @@ export function __resetDbForTest() {
   colCacheBytes.clear();
   metadataFlights.clear();
   for (const [id, version] of metadataVersions) metadataVersions.set(id, version + 1);
-  set({ conns: [], loaded: false, loadError: null, rt: {}, tabs: [], active: null, dialog: null, sessionPanel: null });
+  set({ conns: [], loaded: false, loadError: null, rt: {}, tabs: [], active: null, dialog: null, sessionPanel: null, recentlyClosed: [] });
+  try { localStorage.removeItem(CLOSED_KEY); } catch { /* 存储被禁时忽略 */ }
 }
 
 export async function loadConns(): Promise<void> {
@@ -667,14 +706,121 @@ export function patchDictTab(
   patchTab<DictTab>(tabId, { state: { ...t.state, ...next } });
 }
 
-export function closeTab(id: string) {
+/**
+ * 关闭标签时留一份可落盘的快照供找回。
+ *
+ * 字典 / 比对标签不进栈：`persistentTab` 对它们返回 null（字典有整份生成结果，
+ * 比对有两份结果快照），恢复出来只会是空壳。结果集本来只在内存，也不进快照。
+ * 同一标签 id 只留最后一次关闭，避免连开关几次把 20 格全占满。
+ */
+function closedStackAfter(closing: DbTabItem, index: number): { id: string; items: ClosedDbTab[] } | null {
+  const snap = persistentTab(closing);
+  if (!snap) return null;
+  const id = newId("c");
+  const items = [
+    ...state.recentlyClosed.filter((e) => e.tab.id !== closing.id),
+    { id, tab: snap, index, at: Date.now() },
+  ].slice(-MAX_RECENTLY_CLOSED);
+  return { id, items };
+}
+
+/** 返回入栈项 id（关闭后 toast 的「撤销」用它）；不需要找回时传 `remember = false`。 */
+export function closeTab(id: string, remember = true): string | null {
   const i = state.tabs.findIndex((t) => t.id === id);
-  if (i < 0) return;
+  if (i < 0) return null;
   const tabs = state.tabs.filter((t) => t.id !== id);
   const closing = state.tabs[i];
   const origin = closing.kind === "compare" ? [closing.after.originTabId,closing.before.originTabId].find(source => tabs.some(t => t.id === source)) : undefined;
   const active = state.active === id ? origin ?? (tabs[i] ?? tabs[i - 1])?.id ?? null : state.active;
-  set({ tabs, active });
+  const closed = remember ? closedStackAfter(closing, i) : null;
+  set({ tabs, active, ...(closed ? { recentlyClosed: closed.items } : {}) });
+  if (closed) persistClosed();
+  return closed?.id ?? null;
+}
+
+/** 取一项（指定项或栈顶）并出栈。恢复由调用方接力，失败也不回滚栈。 */
+function takeClosed(entryId?: string): ClosedDbTab | null {
+  const items = state.recentlyClosed;
+  const hit = entryId ? items.find((e) => e.id === entryId) : items[items.length - 1];
+  if (!hit) return null;
+  set({ recentlyClosed: items.filter((e) => e !== hit) });
+  persistClosed();
+  return hit;
+}
+
+function tabFromSnapshot(snap: Record<string, unknown>, id: string): DbTabItem | null {
+  if (snap.kind === "sql") {
+    // 连接已删 ⇒ 降级成「未选连接」，草稿照样找回来；连接表还没加载完时不能误判。
+    const connId = typeof snap.connId === "string" && (!state.loaded || connOf(snap.connId)) ? snap.connId : null;
+    const maxRows = Number(snap.maxRows), timeoutSec = Number(snap.timeoutSec);
+    return {
+      kind: "sql", id, title: String(snap.title ?? "SQL"), connId,
+      sql: typeof snap.sql === "string" ? snap.sql : "",
+      maxRows: Number.isFinite(maxRows) && maxRows > 0 ? maxRows : DEFAULT_MAX_ROWS,
+      timeoutSec: Number.isFinite(timeoutSec) && timeoutSec > 0 ? timeoutSec : DEFAULT_TIMEOUT,
+      results: [], view: null, output: [], plan: null, running: false, slot: null,
+    };
+  }
+  if (snap.kind === "table" && typeof snap.table === "string" && typeof snap.connId === "string") {
+    // 表页没有「未选连接」形态：连接被删后恢复出来只会是个打不开的空页，直接跳过。
+    if (state.loaded && !connOf(snap.connId)) return null;
+    const { query: _query, trail: _trail, ...rest } = snap;
+    return { ...rest, id } as unknown as TableTab;
+  }
+  return null;
+}
+
+function restoreFrom(entry: ClosedDbTab): string | null {
+  const id = entry.tab.id;
+  if (typeof id !== "string" || !id) return null;
+  // 同样的标签已经开着（重复点恢复 / 撤销后栈项没清干净）：只激活，不再插一份。
+  const existing = tabOf(id);
+  if (existing) { activateTab(id); return id; }
+  const tab = tabFromSnapshot(entry.tab, id);
+  if (!tab) return null;
+  const tabs = state.tabs.slice();
+  tabs.splice(Math.min(Math.max(entry.index, 0), tabs.length), 0, tab);
+  set({ tabs, active: id });
+  return id;
+}
+
+/**
+ * 恢复最近关闭的数据库文档（不传 id）或指定的一条。
+ *
+ * 草稿、最大行数、超时与原位置都回来；结果集/执行态不回来（它们只在内存）。
+ * 表页快照指向已删除的连接时跳过继续往下找，跟 `reopenClosed.ts` 的做法一致。
+ */
+export function restoreClosedTab(entryId?: string): string | null {
+  for (let i = 0; i < 10; i++) {
+    const entry = takeClosed(entryId);
+    if (!entry) break;
+    const id = restoreFrom(entry);
+    if (id) {
+      toast(`已恢复「${dbTabLabel(tabOf(id)!)}」`, "success");
+      return id;
+    }
+    if (entryId) break;
+  }
+  toast("没有可恢复的数据库标签", "info");
+  return null;
+}
+
+export function clearRecentlyClosed() {
+  if (!state.recentlyClosed.length) return;
+  set({ recentlyClosed: [] });
+  persistClosed();
+}
+
+/** 拖拽排序：插到目标标签**前面**；`toId = null` 表示拖到标签条空白 /「+」的末尾。 */
+export function moveDbTab(fromId: string, toId: string | null): void {
+  const from = state.tabs.findIndex((t) => t.id === fromId);
+  const to = toId === null ? state.tabs.length - 1 : state.tabs.findIndex((t) => t.id === toId);
+  if (from < 0 || to < 0 || from === to) return;
+  const next = state.tabs.slice();
+  const [moved] = next.splice(from, 1);
+  next.splice(toId === null ? next.length : next.findIndex((t) => t.id === toId), 0, moved);
+  if (next.every((t, i) => t === state.tabs[i])) return;
+  set({ tabs: next });
 }
 
 export function activateTab(id: string) {

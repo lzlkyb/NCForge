@@ -19,6 +19,7 @@ import {
   getDb,
   loadConns,
   loadMeta,
+  restoreClosedTab,
   openSqlTab,
   openTableTab,
   patchTab,
@@ -35,6 +36,7 @@ import {
 import { disposeSqlModel } from "./sqlModels";
 import { isWrite, stmtKind } from "./sqlSplit";
 import { captureResultContext, type SqlRunTarget } from "./dbResultContext";
+import { dbTabLabel } from "./dbPendingSessions";
 
 /**
  * 数据库页的用户动作：把 store（状态）与 dbConfirm（要问一句的地方）串起来。
@@ -113,8 +115,14 @@ export async function requestCloseTab(tabId: string) {
     if (!(await guardSlotTx(tab.connId, tab.slot, "关闭标签"))) return;
     await releaseSlot(tab.connId, tab.slot);
   }
-  closeTab(tabId);
+  const closedId = closeTab(tabId);
   if (tab.kind === "sql") disposeSqlModel(tabId);
+  // 关掉之后给一次「撤销」：草稿本来就没了入口，前置确认弹窗只会让每次关闭都变烦。
+  if (closedId) {
+    toast(`已关闭「${dbTabLabel(tab)}」`, "info", {
+      action: { label: "撤销", onClick: () => { restoreClosedTab(closedId); } },
+    });
+  }
 }
 
 /** 断开/删除连接前：primary 与这条连接上所有 SQL 标签的槽都要问一遍。 */
@@ -159,7 +167,7 @@ export async function deleteConn(connId: string) {
     for (const t of getDb().tabs) {
       if (t.connId !== connId) continue;
       if (t.kind === "sql") patchTab<SqlTab>(t.id, { connId: null, slot: null, tx: undefined, executionId: undefined, results: [], plan: null, view: null });
-      else closeTab(t.id);
+      else closeTab(t.id, false); // 连接已删，这份表页恢复不出来，别塞进找回栈
     }
   } catch (e) {
     toast(`删除失败：${friendlyDbError(e)}`, "error");
