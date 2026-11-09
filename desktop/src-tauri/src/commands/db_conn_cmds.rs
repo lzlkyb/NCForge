@@ -12,7 +12,7 @@ use tauri::AppHandle;
 
 use super::db_cmds::{
     bridge_for, call, code_label, connect_args, drop_bridge, find_conn, need_nc_home,
-    prop_password_ready, protect, seal_remembered, PROBE,
+    prop_password_ready, protect, seal_remembered, PROBE, PROBE_CONF,
 };
 use crate::config::{AppConfig, DbConnConfig};
 use crate::db_conns;
@@ -138,9 +138,9 @@ async fn prop_sources(
         app,
         st,
         cfg,
-        PROBE,
+        PROBE_CONF,
         crate::db_engine::EngineKind::Java,
-        PROBE,
+        PROBE_CONF,
     )?;
     call(b, "propList", vec![home.root], Duration::from_secs(60)).await
 }
@@ -410,7 +410,7 @@ pub async fn db_conn_test(
     let engine = crate::db_engine::EngineKind::parse(&draft.engine);
     // 测试也要按用户选的引擎来：选 Rust 却用 JVM 测，测通了真连也可能失败
     if engine != crate::db_engine::EngineKind::Java && draft.source == "prop" {
-        prop_password_ready(&app, &st, &cfg, &mut draft, password.as_deref(), PROBE).await?;
+        prop_password_ready(&app, &st, &cfg, &mut draft, password.as_deref(), PROBE_CONF).await?;
     }
     let (cmd, args) = connect_args(&cfg, &draft, password.as_deref(), true, engine)?;
     let b = bridge_for(&app, &st, &cfg, PROBE, engine, PROBE)?;
@@ -424,7 +424,16 @@ pub async fn db_conn_test(
                 .to_string()
         });
     let t0 = Instant::now();
-    let out = call(b.clone(), cmd, args, Duration::from_secs(60)).await?;
+    let out = match call(b.clone(), cmd, args, Duration::from_secs(60)).await {
+        Ok(v) => v,
+        Err(e) => {
+            // 连不上也要收掉这条临时会话：留着它，下一次测试会复用一条半开的连接，
+            // 用户看到的现象是「第一次报的是口令错，之后一直报别的错」。
+            let _ = call(b.clone(), "disconnect", vec![], Duration::from_secs(10)).await;
+            drop_bridge(&st, PROBE);
+            return Err(e);
+        }
+    };
     let ms = t0.elapsed().as_millis() as u64;
     let count = call(
         b.clone(),

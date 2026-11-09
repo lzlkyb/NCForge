@@ -21,7 +21,8 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 
 use crate::commands::db_cmds::{
-    call, drop_bridge, existing_bridge, find_conn, open_temp_session, prop_password_ready, PROBE,
+    call, drop_bridge, existing_bridge, find_conn, open_temp_session, prop_password_ready,
+    PROBE_CONF,
 };
 use crate::config::{AppConfig, DbConnConfig};
 use crate::db_engine::{EngineHandle, EngineKind};
@@ -90,7 +91,7 @@ pub async fn db_export_insert(
     let engine = EngineKind::parse(&conn.engine);
     if engine != EngineKind::Java && conn.source == "prop" {
         // 纯 Rust 驱动解不了 prop.xml：第一次得让 JVM 解一次再落 DPAPI，和连库时同一套
-        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE).await?;
+        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE_CONF).await?;
     }
 
     let timeout = req.timeout_sec.unwrap_or(300).clamp(5, 3600);
@@ -529,7 +530,7 @@ pub async fn db_export_file(
     let mut conn = find_conn(&cfg, &req.id)?;
     let engine = EngineKind::parse(&conn.engine);
     if engine != EngineKind::Java && conn.source == "prop" {
-        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE).await?;
+        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE_CONF).await?;
     }
     let timeout = req.timeout_sec.unwrap_or(600).clamp(5, 3600);
     let limit = match req.max_rows.unwrap_or(0) {
@@ -750,21 +751,35 @@ async fn stream_to_file(
 
     match res {
         Ok(v) => {
-            if let Err(e) = target.commit() {
-                return Err(format!(
-                    "替换导出文件失败（{} 可能被别的程序占用）：{e}",
-                    path.display()
-                ));
-            }
             // 取消 / 触顶 / 长文本被截断 —— 这三种产物都只是「合法前缀」，不是全量。
             // 直接顶掉同名的完整旧文件，用户看到文件名一样就会当完整数据用掉。
-            // 改成「…-部分结果.ext」，把真实落盘路径回给前端。
-            let mut saved = path.to_path_buf();
-            if (v.canceled || v.truncated || v.long_values > 0) && existed_before {
-                let alt = partial_path(path);
-                if std::fs::rename(path, &alt).is_ok() {
-                    saved = alt;
-                }
+            //
+            // 所以落点必须在 commit **之前**定好。以前是「先 commit() 覆盖原名，再 rename
+            // 到旁名」——旧文件在 rename 之前就已经被覆盖了，等于用残缺产物换掉完整产物，
+            // 而且 rename 失败还被 `.is_ok()` 吞掉，连「另存」都不保证。
+            // 现在：部分结果直接以 no-clobber 方式落到「…-部分结果.ext」。
+            let partial = v.canceled || v.truncated || v.long_values > 0;
+            let (saved, overwrite) =
+                resolve_export_dest(path, partial, existed_before || path.exists());
+            let target = if overwrite {
+                target
+            } else {
+                target.retarget(saved.clone())
+            };
+            let committed = if overwrite {
+                target.commit()
+            } else {
+                target.commit_new()
+            };
+            if let Err(e) = committed {
+                return Err(if overwrite {
+                    format!(
+                        "替换导出文件失败（{} 可能被别的程序占用）：{e}",
+                        path.display()
+                    )
+                } else {
+                    format!("写入部分结果失败（{}）：{e}", saved.display())
+                });
             }
             Ok((v, saved))
         }
@@ -794,6 +809,26 @@ fn partial_path(path: &Path) -> std::path::PathBuf {
         }
     }
     dir.join(format!("{stem}-部分结果.{ext}"))
+}
+
+/// 决定这份产物落到哪：返回 `(最终路径, 是否覆盖同名文件)`。
+///
+/// 「部分结果」+「已经有同名文件」是两个同时成立才改落旁名：前者说明这次的内容
+/// 不完整，后者说明有东西值得保护。首次导出就被取消时没有旧文件要护，落原名更符合
+/// 直觉（用户点导出、看到 `result.csv`，不会想到它去叫 `result-部分结果.csv`）。
+///
+/// **必须先定落点再 commit**：`commit()` 的语义是覆盖同名目标，先提交再改名的旧写法
+/// 会把完整旧文件直接毁掉。
+fn resolve_export_dest(
+    path: &Path,
+    partial: bool,
+    old_present: bool,
+) -> (std::path::PathBuf, bool) {
+    if partial && old_present {
+        (partial_path(path), false)
+    } else {
+        (path.to_path_buf(), true)
+    }
 }
 
 fn parse_cols(body: &Value) -> Result<Vec<ResultCol>, String> {
@@ -857,4 +892,74 @@ pub async fn db_export_reveal(
         .opener()
         .reveal_item_in_dir(canon)
         .map_err(|e| format!("打开目录失败：{e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// 回归：旧实现先 `commit()` 覆盖同名文件、再 `rename` 到旁名，完整导出会被残缺
+    /// 产物顶掉。现在必须先定落点、部分结果走 no-clobber。
+    #[test]
+    fn 部分结果不覆盖已存在的完整导出() {
+        let d = crate::test_support::tmp("export-partial");
+        let p = d.join("result.csv");
+        std::fs::write(&p, b"full,data\n").unwrap();
+
+        let (dest, overwrite) = resolve_export_dest(&p, true, true);
+        assert!(!overwrite, "部分结果不能覆盖同名完整文件");
+        assert_ne!(dest, p, "必须换一个落点");
+        assert!(dest.to_string_lossy().contains("部分结果"), "{dest:?}");
+
+        let mut t = crate::atomic_file::AtomicTarget::create(&p).unwrap();
+        t.as_file_mut().write_all(b"half").unwrap();
+        t.retarget(dest.clone()).commit_new().unwrap();
+
+        assert_eq!(
+            std::fs::read(&p).unwrap(),
+            b"full,data\n",
+            "旧完整文件必须原样保留"
+        );
+        assert_eq!(std::fs::read(&dest).unwrap(), b"half", "部分结果落到旁名");
+    }
+
+    #[test]
+    fn 完整结果照旧覆盖同名文件() {
+        let d = crate::test_support::tmp("export-full");
+        let p = d.join("result.csv");
+        std::fs::write(&p, b"old").unwrap();
+
+        let (dest, overwrite) = resolve_export_dest(&p, false, true);
+        assert!(overwrite, "完整结果应当刷新同名文件");
+        assert_eq!(dest, p);
+
+        let mut t = crate::atomic_file::AtomicTarget::create(&p).unwrap();
+        t.as_file_mut().write_all(b"new").unwrap();
+        t.commit().unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"new");
+    }
+
+    #[test]
+    fn 没有旧文件时部分结果仍落原名() {
+        let d = crate::test_support::tmp("export-partial-noold");
+        let p = d.join("result.csv");
+        let (dest, overwrite) = resolve_export_dest(&p, true, false);
+        assert!(overwrite, "没有旧文件要保护，不该莫名改名");
+        assert_eq!(dest, p);
+    }
+
+    #[test]
+    fn 旁名被占用时继续编号不覆盖() {
+        let d = crate::test_support::tmp("export-partial-seq");
+        let p = d.join("a.csv");
+        std::fs::write(&p, b"1").unwrap();
+        let first = partial_path(&p);
+        std::fs::write(&first, b"2").unwrap();
+        let second = partial_path(&p);
+
+        assert_ne!(first, second, "两个部分结果不能撞名");
+        assert!(!second.exists());
+        assert_eq!(std::fs::read(&p).unwrap(), b"1");
+    }
 }

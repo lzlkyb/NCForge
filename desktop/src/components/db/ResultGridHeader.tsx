@@ -54,10 +54,10 @@ export function ResultGridHeader({columns,sort,zh,order,visible,viewport,bounds,
           onClick={e=>{if(e.shiftKey && order.length){onSel({r:order[0],c:k});onSel({r:order[order.length-1],c:k},true);}else onSort(k);}}>
           <span className="nm">{c.name.toLowerCase()}{codec?.encoded(k) && <i className="dbx-codec" data-on={codec.active(k) || undefined} aria-hidden="true" />}</span>
           {sort?.col === k && <span className="so" aria-hidden="true">{sort.dir === "asc" ? "▲" : "▼"}</span>}
-          {/* 第二行：有中文名放中文名（业务上更认得），没有就放数据类型。
-              没有这一层的话，NC 里大量没有中文名的列名（`OUTTRANSLATEJSON` 之类）
-              第二行是空的，那 17px 纯浪费，列名一挤就只能看省略号。 */}
-          <span className="t">{zh?.[c.name.toLowerCase()] ?? c.type}</span>
+          {/* 第二行：有中文名时「中文名 · 类型」，没有就只放类型。
+              只放中文名的话，用户分不清 `NUMBER` 和 `VARCHAR2`（写 SQL 时要用），
+              而类型只在 hover 的 title 里，摸不到。宽度不够时 CSS 会省略类型。 */}
+          <span className="t">{zh?.[c.name.toLowerCase()] ? `${zh[c.name.toLowerCase()]} · ${c.type}` : c.type}</span>
         </button>
         {onHeaderMenu && <button type="button" className="dbx-header-menu" tabIndex={-1} aria-label={`${c.name} 列菜单`} aria-haspopup="menu" title="列菜单 · Shift+F10" onClick={()=>focusHeader(k,true)}><Icon name="more" size={13} /></button>}
         <span className="rz" title="拖动调整列宽 · 双击自适应" onClick={(e) => e.stopPropagation()} onDoubleClick={() => fit(k)} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); resize(k, e.clientX); }} />

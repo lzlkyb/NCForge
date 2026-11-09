@@ -10,5 +10,5 @@ const statusInfo = {
 
 export function ConnectionStatus({ status, className = "" }: { status: ConnRuntime["status"]; className?: string }) {
   const {label, icon} = statusInfo[status];
-  return <span className={("dbx-conn-status " + className).trim()} data-state={status}><Icon name={icon} size={12} />{label}</span>;
+  return <span className={("dbx-conn-status " + className).trim()} data-state={status} aria-label={label} title={label}><Icon name={icon} size={12} />{label}</span>;
 }

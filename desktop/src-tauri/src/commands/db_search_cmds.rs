@@ -21,7 +21,8 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 
 use crate::commands::db_cmds::{
-    call, drop_bridge, existing_bridge, find_conn, open_temp_session, prop_password_ready, PROBE,
+    call, drop_bridge, existing_bridge, find_conn, open_temp_session, prop_password_ready,
+    PROBE_CONF,
 };
 use crate::db_engine::{EngineHandle, EngineKind};
 use crate::db_value_search::{self as vs, MatchMode, SearchCol};
@@ -114,7 +115,7 @@ pub async fn db_value_search(
     let mut conn = find_conn(&cfg, &req.id)?;
     let engine = EngineKind::parse(&conn.engine);
     if engine != EngineKind::Java && conn.source == "prop" {
-        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE).await?;
+        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE_CONF).await?;
     }
 
     let owned = open_temp_session(&app, &st, &cfg, &conn, engine, "search").await;

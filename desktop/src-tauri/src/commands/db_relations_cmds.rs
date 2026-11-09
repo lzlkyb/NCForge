@@ -67,10 +67,14 @@ pub async fn db_relations(
         drop_bridge(&state, &key);
     }
     let mut notes = Vec::new();
+    // 任何一块读不出来都置位：只把原因塞进 notes（折叠在「不可用原因」里），
+    // 前端会当成「关系为空」正常渲染，用户看到的是「没有可确认的关联」。
+    let mut partial = false;
     let foreign = match fk {
         Ok(v) => v,
         Err(e) => {
             notes.push(format!("数据库外键读取失败：{e}"));
+            partial = true;
             json!({"rows":[]})
         }
     };
@@ -80,6 +84,7 @@ pub async fn db_relations(
             notes.push(format!(
                 "NC 显式类引用不可用（此库元数据版本或权限不支持）：{e}"
             ));
+            partial = true;
             json!({"rows":[]})
         }
     };
@@ -87,11 +92,12 @@ pub async fn db_relations(
         Ok(v) => v,
         Err(e) => {
             notes.push(e);
+            partial = true;
             json!({"kind":"rows","columns":[],"rows":[]})
         }
     };
     Ok(
-        json!({"foreign":foreign,"references":references,"enums":enumerations,"notes":notes,"sharedSession":shared}),
+        json!({"foreign":foreign,"references":references,"enums":enumerations,"notes":notes,"partial":partial,"sharedSession":shared}),
     )
 }
 async fn read_enums(b: Arc<crate::db_engine::EngineHandle>, table: &str) -> Result<Value, String> {

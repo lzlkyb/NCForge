@@ -712,6 +712,35 @@ pub fn refcursor_need(sql: &str) -> Option<RefcursorNeed> {
 /// 去掉字符串常量与注释（顺便转小写），避免 `'open :1 for'` 这种字面量被当成真语句。
 ///
 /// 逐字节处理：只有 ASCII 会变（大小写折叠），其余字节原样拷贝，所以结果仍是合法 UTF-8。
+/// 只读模式下放行的 Oracle 内置包：列在 SQL 里的这几个函数不改库、也不留包状态。
+///
+/// 白名单宁短不长。`dbms_sql` / `dbms_xmlgen` 这类能「执行另一条 SQL」的包绝不能进，
+/// 加进来等于把只读模式整个绕开。
+const READONLY_PKGS: &[&str] = &["dbms_lob", "utl_raw", "dbms_random"];
+
+/// 语句里有没有调用「非白名单包」里的函数。
+///
+/// `select pkg.do_write() from dual` 没有任何 DML 关键字，只读模式会直接放行，
+/// 而包函数内部可以 insert / update。静态分析分不清「只读函数」和「会写的函数」，
+/// 所以只放行几个确定只读的内置包，自定义包一律按可写处理。
+fn has_unsafe_pkg_call(code: &str) -> bool {
+    // `"` 也算标识符的一部分：`"MY"."DO_WRITE"(` 去掉函数名后要留下 `"MY".`
+    let identifier = |c: char| c.is_alphanumeric() || matches!(c, '_' | '$' | '#' | '"');
+    code.match_indices('(').any(|(at, _)| {
+        let prefix = code[..at].trim_end();
+        let start = prefix.trim_end_matches(identifier).len();
+        // 去掉函数名后，末尾必须正好是 `.`：`pkg.fn(` / `"P"."F"(`
+        if !prefix[..start].trim_end().ends_with('.') {
+            return false;
+        }
+        // 取包名（`schema.pkg.fn(` 取 pkg）：授权与白名单都按包对象算
+        let head = prefix[..start].trim_end().trim_end_matches('.').trim_end();
+        let seg = head.trim_end_matches(identifier).len();
+        let pkg = head[seg..].trim_matches('"');
+        !READONLY_PKGS.contains(&pkg)
+    })
+}
+
 pub fn readonly_query(sql: &str) -> bool {
     let code = strip_literals(sql).to_ascii_lowercase();
     let words: Vec<&str> = code
@@ -720,6 +749,7 @@ pub fn readonly_query(sql: &str) -> bool {
         .collect();
     matches!(words.first(), Some(&"select") | Some(&"with"))
         && !code.trim_end().trim_end_matches(';').contains(';')
+        && !has_unsafe_pkg_call(&code)
         && !words.iter().any(|w| {
             matches!(
                 *w,
@@ -1198,6 +1228,26 @@ mod readonly_tests {
             "alter session set current_schema=x",
         ] {
             assert!(!readonly_query(sql), "{sql}");
+        }
+    }
+    #[test]
+    fn rejects_package_calls_that_can_write() {
+        // 没有任何 DML 关键字，但包函数内部可以 insert —— 只读模式必须挡。
+        for sql in [
+            "select pkg.do_write() from dual",
+            "select scott.pkg.do_write(1) from dual",
+            "select \"MY\".\"DO_WRITE\"() from dual",
+        ] {
+            assert!(!readonly_query(sql), "{sql}");
+        }
+        // 确定只读的内置包与普通函数不能被误伤
+        for sql in [
+            "select dbms_lob.substr(c, 10, 1) from t",
+            "select utl_raw.cast_to_raw('x') from dual",
+            "select nvl(a, 1), count(*) from t group by a",
+            "select * from t where id in (select id from u)",
+        ] {
+            assert!(readonly_query(sql), "{sql}");
         }
     }
     #[test]

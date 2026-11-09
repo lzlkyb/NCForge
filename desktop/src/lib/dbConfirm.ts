@@ -7,6 +7,7 @@ import type { SaveFailure, UnsavedFile } from "./saveAllDirty";
 import { toast } from "../components/ui/toast";
 import { operationActive } from "./operations";
 import { dbTxKey } from "./dbOperations";
+import { txPending } from "./txState";
 
 /**
  * 几个「要停下来问一句」的地方，统一成 Promise：
@@ -186,7 +187,9 @@ export function askUnknownTx(rows: QuitRow[]): Promise<boolean> {
   );
 }
 
-const hasOpenTx = (connId: string) => (rtOf(connId).tx?.statements ?? 0) > 0;
+// 判据统一走 `txPending`：核对过（`tx.active`）就以数据库真源为准，否则退回本地 DML 计数。
+// 只看 `statements` 会把「手写 COMMIT 之后一直不归零」的连接永久卡在确认框里。
+const hasOpenTx = (connId: string) => txPending(rtOf(connId).tx).pending;
 
 /**
  * 离开一个连接前（关标签 / 切到别的连接 / 断开）检查未提交事务。
@@ -260,7 +263,7 @@ export async function guardSlotTx(
     );
     return false;
   }
-  if (!tx || tx.autoCommit || tx.statements <= 0) return true;
+  if (!tx || !txPending(tx).pending) return true;
   const choice = await new Promise<TxChoice>((resolve) =>
     show({ kind: "tx", connId, reason, tx, slot, resolve }),
   );

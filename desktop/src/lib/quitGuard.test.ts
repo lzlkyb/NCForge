@@ -52,6 +52,15 @@ describe("退出前的未提交事务清单", () => {
     expect(rows[0]).toMatchObject({ kind: "pending", statements: 1, rows: 3 });
   });
 
+  it("后端真源确认没有事务时，界面的脏计数不能把人拦住", () => {
+    setConns([conn("c1", "测试库")]);
+    // 手写 COMMIT / PL/SQL 内部提交都不会让本地 statements 归零；只要数据库
+    // 用 v$transaction 确认过没有未提交事务（active:false），就不该再拦。
+    setTx("c1", { autoCommit: false, statements: 3, rows: 9, since: 1_700_000_000_000 });
+    const rows = mergePending([{ id: "c1", state: "clean", active: false }]);
+    expect(rows).toHaveLength(0);
+  });
+
   it("两边都有取大的（更保守）", () => {
     setConns([conn("c1")]);
     setTx("c1", { autoCommit: false, statements: 1, rows: 100, since: 1_700_000_000_000 });

@@ -1996,8 +1996,27 @@ public class NcDbBridge {
         Object o = rs.getObject(i);
         boolean wasNull = o == null || rs.wasNull();
         if (wasNull) {
-            // 有驱动对 LOB / 长文本列 `getObject` 给 null：再用 `getString` 确认一次。
+            // 有驱动对 LOB / 长文本列 `getObject` 给 null：再用 LOB 通道确认一次。
             // 少了这一步，库里有值也会显示成 NULL，而详情面板同样看不到（值真的是 null）。
+            //
+            // 🔴 这里**不能**直接拿 `rs.getString(i)` 当值用：对 CLOB/LONG 它返回整段
+            // 文本，既不受 CLOB_PREVIEW / CLOB_MAX 约束，也不挂截断文案。网格里一行就
+            // 可能带进几 MB，把前端 16MB 结果预算一次吃光，用户还以为看到的是完整值。
+            if (isLongText(type)) {
+                Clob c = null;
+                try {
+                    c = rs.getClob(i);
+                } catch (SQLException ignore) {
+                    // 驱动不支持 getClob：退回字符串，但同样按上限裁剪
+                }
+                if (c != null) {
+                    return "\"" + esc(clobText(c, fullLob ? CLOB_MAX : CLOB_PREVIEW)) + "\"";
+                }
+                String t = rs.getString(i);
+                return t == null
+                        ? "null"
+                        : "\"" + esc(cap(t, fullLob ? CLOB_MAX : CLOB_PREVIEW)) + "\"";
+            }
             String s = rs.getString(i);
             return s == null ? "null" : "\"" + esc(s) + "\"";
         }
@@ -2032,6 +2051,42 @@ public class NcDbBridge {
             return "\"<BLOB " + ((java.sql.Blob) o).length() + "B>\"";
         }
         return "\"" + esc(String.valueOf(o)) + "\"";
+    }
+
+    /**
+     * 这列是不是「读出来可能很长、必须过截断」的类型。
+     *
+     * 与 {@link #value} 里 `o instanceof Clob` 的分支配套：那条路正常走，只有驱动
+     * `getObject` 给 null 的兜底路才需要先按类型判断（否则拿到的是一整段文本）。
+     */
+    private static boolean isLongText(int type) {
+        return type == Types.CLOB
+                || type == Types.NCLOB
+                || type == Types.LONGVARCHAR
+                || type == Types.LONGNVARCHAR;
+    }
+
+    /**
+     * 按字符上限裁剪，并挂与 {@link #clobText} 同一套截断文案。
+     *
+     * 只给「拿不到 Clob、只能取字符串」的兜底路径用；正常路径一律走 {@link #clobText}。
+     * 文案必须和 Rust 的 `preview_text` / 前端 `isLobPreview` 一字不差，否则网格上
+     * 那个「加载完整值」按钮会认不出来。
+     */
+    private static String cap(String s, int max) {
+        if (s == null || s.length() <= max) {
+            return s;
+        }
+        int n = max;
+        // 别切半个代理对：截断位置落在高位代理上就往前退一格
+        if (n > 0 && Character.isHighSurrogate(s.charAt(n - 1))) {
+            n--;
+        }
+        String body = s.substring(0, n);
+        int len = s.length();
+        return max < CLOB_MAX
+                ? body + " …（共 " + len + " 个字符，只显示前 " + max + "，点「加载完整值」查看）"
+                : body + " …（共 " + len + " 个字符，只取前 1M）";
     }
 
     private static String clobText(Clob c, int max) throws SQLException {

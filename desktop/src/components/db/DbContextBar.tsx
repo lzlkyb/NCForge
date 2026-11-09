@@ -11,8 +11,8 @@ import { useDbReadOnly } from "../../lib/dbReadOnly";
 import { SchemaChip } from "./SchemaChip";
 import { ConnectionStatus } from "./ConnectionStatus";
 
-export function DbContextBar({ connId, independent = false, connectionControl, transactionMode, sessionControl }: {
-  connId: string | null; independent?: boolean; connectionControl?: ReactNode; transactionMode?: string; sessionControl?: ReactNode;
+export function DbContextBar({ connId, independent = false, connectionControl, transactionMode, sessionControl, compact = false }: {
+  compact?: boolean; connId: string | null; independent?: boolean; connectionControl?: ReactNode; transactionMode?: string; sessionControl?: ReactNode;
 }) {
   const conn = useConnOf(connId), rt = useConnRt(connId);
   const readOnly = useDbReadOnly(connId); const [busy,setBusy] = useState(false); const lock=useRef(false);
@@ -31,9 +31,9 @@ export function DbContextBar({ connId, independent = false, connectionControl, t
     <SchemaChip connId={connId} />
     <ConnectionStatus status={rt.status} />
     <span className="dbx-context-session">{sessionControl ?? `${independent ? "独立会话" : "共享会话"} · ${readOnly ? "只读查询" : transactionMode ?? "状态待确认"}`}</span>
-    <button type="button" className="dbx-btn ghost dbx-connection-readonly" disabled={busy || rt.status !== "connected" || readOnly === null} aria-pressed={readOnly ?? false} title="只读模式应用于此连接的全部会话" onClick={() => void toggle()}>
+    <button type="button" className="dbx-btn ghost dbx-connection-readonly" disabled={busy || rt.status !== "connected" || readOnly === null} aria-pressed={readOnly ?? false} aria-label={`连接只读：${readOnly ? "开启" : "关闭"}（此连接全部会话）`} title={`连接只读：${readOnly ? "开启" : "关闭"} · 应用于此连接全部会话`} onClick={() => void toggle()}>
       <Icon name={busy ? "spinner" : "lock"} size={12} />
-      <span>连接只读：{busy ? "切换中…" : readOnly === null ? "待验证" : readOnly ? "开启" : "关闭"}<small>此连接全部会话</small></span>
+      <span hidden={compact}>连接只读：{busy ? "切换中…" : readOnly === null ? "待验证" : readOnly ? "开启" : "关闭"}<small>此连接全部会话</small></span>
     </button>
     {conn && rt.status === "connected" && <details className="dbx-connection-detail">
       <summary aria-label="连接详情" title="账号、地址和连接设置"><Icon name="info" size={14} /></summary>

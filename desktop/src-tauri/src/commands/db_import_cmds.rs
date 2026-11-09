@@ -20,7 +20,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::commands::db_cmds::{
-    bridge_for, call, connect_args, drop_bridge, find_conn, prop_password_ready, PROBE, T_CONNECT,
+    bridge_for, call, connect_args, drop_bridge, find_conn, prop_password_ready, PROBE_CONF,
+    T_CONNECT,
 };
 use crate::sql_export::literal;
 use crate::state::AppState;
@@ -155,7 +156,7 @@ pub async fn db_import_rows(
     let mut conn = find_conn(&cfg, &req.id)?;
     let engine = crate::db_engine::EngineKind::parse(&conn.engine);
     if engine != crate::db_engine::EngineKind::Java && conn.source == "prop" {
-        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE).await?;
+        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE_CONF).await?;
     }
 
     // 写操作：autoCommit=false，自己管事务；跑完断开，不留未提交状态。
@@ -208,6 +209,10 @@ pub async fn db_import_rows(
     // 出事就整批回滚：导入最怕「一半进去了、一半没进去」，用户还以为导成功了
     let committed = if aborted || (!skip_errors && !failed.is_empty()) {
         let _ = call(bridge.clone(), "rollback", vec![], Duration::from_secs(60)).await;
+        // 回滚之后这一批一条都没进库：`inserted` 必须归零。
+        // 前端是按批把这个数累加后显示「已写入 N 行」的，不归零就会出现
+        // 「界面说写进去了、库里一条没有」这种最难排查的假成功。
+        inserted = 0;
         false
     } else {
         match call(bridge.clone(), "commit", vec![], Duration::from_secs(120)).await {

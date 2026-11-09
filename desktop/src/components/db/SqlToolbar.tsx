@@ -1,5 +1,5 @@
 import { QueryElapsed } from "./SqlExecutionFeedback";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { ConnPicker } from "./ConnPicker";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
@@ -7,9 +7,9 @@ import { switchConn } from "../../lib/dbActions";
 import { useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
 import { useDbReadOnly } from "../../lib/dbReadOnly";
 import { useOperations } from "../../lib/operations";
-import { TransactionMenu, TxBar, useDbTransaction } from "./TxBar";
+import { TransactionButtons, TransactionMenu, TxBar, useDbTransaction } from "./TxBar";
 import { DbContextBar } from "./DbContextBar";
-import type { SqlExecutionScope } from "./SqlEditor";
+import type { SqlExecutionScope, SqlFormatScope } from "./SqlEditor";
 import type { SqlConsoleFocus } from "../../hooks/useSqlConsoleSplit";
 
 /** 连接上下文与执行工具条共用事务切换锁，切换模式时不能换库。 */
@@ -21,7 +21,7 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   onRun: (mode: "current" | "script", collectStats?: boolean) => void;
   onStop: () => void;
   onExplain: () => void;
-  onFormat: () => void;
+  onFormat: (scope?: SqlFormatScope) => void;
   /** 把光标处语句的结果导成 insert 脚本。 */
   onExport: () => void;
   /** 全库按值反查（只读）。 */
@@ -47,6 +47,15 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   const locked = !!transaction.active || transaction.lost;
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const scopeId = useId();
+  const barRef = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+  const modifier = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
+  useEffect(() => {
+    if (!barRef.current || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 850));
+    observer.observe(barRef.current);
+    return () => observer.disconnect();
+  }, []);
   const currentScope = scope?.tabId === tab.id ? scope : null;
   const statements = currentScope?.statements ?? [];
   const runLabel = currentScope?.selected ? "执行选中 SQL" : "执行当前语句";
@@ -64,139 +73,69 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
     setMenu({ x: r.left, y: r.bottom + 4, items });
   };
 
-  return (
-    <>
-    <div className="dbx-command-header dbx-execution-bar">
-    <div className="dbx-sqlbar dbx-execution-primary">
-      <div className="dbx-run-controls">
-      {tab.running ? (
-        // 执行中把「执行」换成「停止」：以前只能干等 30 秒超时，或者杀掉整个应用。
-        // 能不能停按 `Caps.cancel` 决定（两个引擎现在都支持，但要留出按能力降级的路）：
-        // 让它可点再报错，用户会以为语句已经在库里停了。
-        <button
-          type="button"
-          className="dbx-btn dbx-run-action" data-running
-          disabled={stopping || (rt.caps ? !rt.caps.cancel : false)}
-          onClick={onStop}
-          title={
-            rt.caps && !rt.caps.cancel
-              ? "这个连接用不了语句中断，只能等它自己跑完或超时"
-              : "取消正在执行的语句（数据库侧会收到 ORA-01013）"
-          }
-        >
-          <Icon name={stopping ? "spinner" : "stop"} size={12} />
-          {stopping ? "等待数据库停止…" : "停止"}
-          {operation && <QueryElapsed startedAt={operation.startedAt} />}
-        </button>
-      ) : (
-        <div className="dbx-runsplit">
-          <button type="button" className="dbx-btn pri dbx-run-action" disabled={!conn || locked || !!operation || !statements.length} aria-describedby={scopeId} onClick={() => onRun("current")} title={`${runLabel} · Ctrl+Enter`}>
-            <Icon name="play" size={12} />
-            {runLabel}
-          </button>
-          <button
-            type="button"
-            className="dbx-btn pri"
-            disabled={!conn || locked || !!operation}
-            aria-label="更多执行方式"
-            title="更多执行方式"
-            onClick={(e) =>
-              popup(e.currentTarget, [
+  const executionBlocked = !conn || locked || !!operation || tab.running;
+  const historyItem: ContextMenuItem = { label: historyOpen ? "收起执行历史" : "执行历史", icon: "history", disabled: !tab.connId, onSelect: onHistory };
+  const snippetsItem: ContextMenuItem = { label: snipsOpen ? "收起 SQL 片段" : "SQL 片段", icon: "sqlSnippet", disabled: !tab.connId, onSelect: onSnips };
+  const planItem: ContextMenuItem = { label: "执行计划（不真正执行）", icon: "queryPlan", disabled: executionBlocked || !statements.length, onSelect: onExplain };
+  const moreItems: ContextMenuItem[] = [
+    ...(compact ? [planItem, historyItem, snippetsItem] : []),
+    { label: "回放 .sql 文件", icon: "upload", disabled: executionBlocked, onSelect: onScriptReplay },
+    { label: "导出 INSERT（光标处查询）", icon: "download", disabled: executionBlocked || !statements.length, onSelect: onExport },
+    { label: "按值反查（只读）", icon: "search", disabled: executionBlocked, onSelect: onValueSearch },
+    { label: sessionsOpen ? "收起会话与锁" : "会话与锁", icon: "lock", separator: true, disabled: !tab.connId, onSelect: onSessions },
+  ];
+  const formatItems: ContextMenuItem[] = [
+    { label: currentScope?.selected ? "格式化选中 SQL" : "格式化整个编辑器", icon: "sqlFormat", onSelect: () => onFormat("auto") },
+    { label: "仅格式化当前语句", icon: "code", onSelect: () => onFormat("current") },
+    { label: "格式化整个脚本", icon: "terminal", onSelect: () => onFormat("script") },
+  ];
+  return <>
+    <div ref={barRef} className="dbx-command-header dbx-execution-bar" role="toolbar" aria-label="SQL 工具栏">
+      <div className="dbx-sqlbar dbx-execution-primary">
+        <div className="dbx-run-controls">
+          <div className="dbx-runsplit">
+            <button type="button" className="dbx-btn ghost dbx-run-action" disabled={executionBlocked || !statements.length}
+              aria-label={runLabel} aria-describedby={scopeId} onClick={() => onRun("current")}
+              title={`${runLabel} · ${range} · ${modifier}+Enter${disabledReason ? ` · ${disabledReason}` : ""}`}>
+              <Icon name="play" size={16} />
+            </button>
+            <button type="button" className="dbx-btn ghost dbx-run-menu" disabled={executionBlocked} aria-label="更多执行方式" title="更多执行方式" aria-haspopup="menu"
+              onClick={event => popup(event.currentTarget, [
                 { label: "执行整个脚本", icon: "terminal", hint: "Alt+X", onSelect: () => onRun("script") },
-                { label: "执行计划（不真正执行）", icon: "activity", disabled: !statements.length, onSelect: onExplain },
-                { label: "回放 .sql 文件", icon: "upload", onSelect: onScriptReplay },
-              ])
-            }
-          >
-            <Icon name="chevronDown" size={12} />
+                { label: "执行当前语句并采集统计", icon: "activity", disabled: !statements.length, onSelect: () => onRun("current", true) },
+              ])}><Icon name="chevronDown" size={12} /></button>
+          </div>
+          <button type="button" className="dbx-btn ghost dbx-stop-action" data-running={tab.running || undefined}
+            disabled={!tab.running || stopping || (rt.caps ? !rt.caps.cancel : false)} onClick={onStop}
+            aria-label={stopping ? "等待数据库停止确认" : "停止"} aria-busy={stopping}
+            title={stopping ? "正在等待数据库停止确认" : rt.caps && !rt.caps.cancel ? "当前连接不支持中断语句" : "停止当前执行，等待数据库确认"}>
+            <Icon name={stopping ? "spinner" : "stop"} size={15} />
           </button>
+          <span className="dbx-query-clock">{operation && <QueryElapsed startedAt={operation.startedAt} />}</span>
         </div>
-      )}
+        <span id={scopeId} className="dbx-scope" aria-live="polite">{range}{disabledReason && <span className="dbx-run-reason"> · {disabledReason}</span>}</span>
       </div>
-      <span id={scopeId} className="dbx-scope" aria-live="polite">
-        <span>{range}</span>
-        {disabledReason && <span className="dbx-run-reason">{disabledReason}</span>}
-      </span>
+      <div className="dbx-execution-aux">
+        <button type="button" className="dbx-btn ghost" aria-label="格式化 SQL" title={`格式化${currentScope?.selected ? "选中 SQL" : "整个编辑器"} · ${modifier}+Shift+F`} onClick={() => onFormat()}><Icon name="sqlFormat" size={16} /></button>
+        <button type="button" className="dbx-btn ghost dbx-format-menu" aria-label="选择格式化范围" title="选择格式化范围" aria-haspopup="menu" onClick={event => popup(event.currentTarget, formatItems)}><Icon name="chevronDown" size={12} /></button>
+        {!compact && <>
+          <button type="button" className="dbx-btn ghost" aria-label="执行计划" title={planItem.label} disabled={planItem.disabled} onClick={onExplain}><Icon name="queryPlan" size={16} /></button>
+          <span className="dbx-tool-divider" />
+          <button type="button" className="dbx-btn ghost" aria-label="执行历史" title="执行历史" disabled={!tab.connId} aria-pressed={historyOpen} data-on={historyOpen || undefined} onClick={onHistory}><Icon name="history" size={16} /></button>
+          <button type="button" className="dbx-btn ghost" aria-label="SQL 片段" title="SQL 片段 · 本机保存" disabled={!tab.connId} aria-pressed={snipsOpen} data-on={snipsOpen || undefined} onClick={onSnips}><Icon name="sqlSnippet" size={16} /></button>
+        </>}
+        <button type="button" className="dbx-btn ghost" aria-label="更多数据库操作" title="更多数据库操作" aria-haspopup="menu" data-on={compact && (historyOpen || snipsOpen) || sessionsOpen || undefined} onClick={event => popup(event.currentTarget, moreItems)}><Icon name="more" size={16} /></button>
+      </div>
+      <DbContextBar compact connId={tab.connId} independent={!!tab.slot} transactionMode={transaction.mode}
+        sessionControl={<><TransactionMenu key={tab.id} compact transaction={transaction} />{transaction.mode === "手动提交" && <TransactionButtons compact transaction={transaction} />}</>}
+        connectionControl={<ConnPicker connId={tab.connId} compact disabled={!!transaction.active || tab.running || !!operation} onPick={id => void switchConn(tab.id, id)} />} />
+      {onFocusChange && <button type="button" className="dbx-btn ghost dbx-layout-action" aria-label="编辑器与结果布局" title="编辑器与结果布局" aria-haspopup="menu" onClick={event => popup(event.currentTarget, [
+        { label: "专注结果", icon: "database", disabled: focusMode === "results", onSelect: () => onFocusChange("results") },
+        { label: "专注编辑器", icon: "code", disabled: focusMode === "editor", onSelect: () => onFocusChange("editor") },
+        { label: "还原布局", icon: "restore", disabled: focusMode === "split", onSelect: () => onFocusChange("split") },
+      ])}><Icon name={focusMode === "split" ? "layoutRows" : "restore"} size={16} /></button>}
     </div>
-    <DbContextBar connId={tab.connId} independent={!!tab.slot} transactionMode={transaction.mode}
-      sessionControl={<TransactionMenu key={tab.id} transaction={transaction} />}
-      connectionControl={<ConnPicker connId={tab.connId} compact disabled={!!transaction.active || tab.running || !!operation} onPick={(id) => void switchConn(tab.id, id)} />} />
-    <div className="dbx-execution-aux">
-      <button
-        type="button"
-        className="dbx-btn ghost dbx-history-action"
-        data-on={historyOpen ? "" : undefined}
-        onClick={onHistory}
-        disabled={!tab.connId}
-        title="执行历史"
-        aria-label="执行历史"
-        aria-pressed={historyOpen}
-      >
-        <Icon name="history" size={15} />
-        <span className="dbx-action-label">历史</span>
-      </button>
-      <button
-        type="button"
-        className="dbx-btn ghost dbx-snippet-action"
-        data-on={snipsOpen ? "" : undefined}
-        onClick={onSnips}
-        disabled={!tab.connId}
-        title="常用 SQL 片段（本机保存，不上传）"
-        aria-label="SQL 片段"
-        aria-pressed={snipsOpen}
-      >
-        <Icon name="code" size={15} />
-        <span className="dbx-action-label">片段</span>
-      </button>
-      <button
-        type="button"
-        className="dbx-btn ghost dbx-tools-action"
-        disabled={!tab.connId}
-        aria-label="更多数据库操作"
-        title="更多：格式化 / 导出 INSERT / 按值反查 / 会话与锁"
-        onClick={(e) =>
-          popup(e.currentTarget, [
-            { label: "格式化 SQL", icon: "paintbrush", hint: "Ctrl+Shift+F", onSelect: onFormat },
-            { label: "执行当前语句并采集统计", icon: "activity", disabled: tab.running || locked || !!operation || !conn, onSelect: () => onRun("current", true) },
-            {
-              label: "导出 INSERT（光标处查询）",
-              icon: "download",
-              disabled: tab.running || locked || !!operation || !conn,
-              onSelect: onExport,
-            },
-            {
-              label: "按值反查（只读）",
-              icon: "search",
-              disabled: tab.running || locked || !!operation || !conn,
-              onSelect: onValueSearch,
-            },
-            {
-              label: sessionsOpen ? "收起会话与锁" : "会话与锁",
-              icon: "lock",
-              separator: true,
-              onSelect: onSessions,
-            },
-          ])
-        }
-      >
-        <Icon name="more" size={15} />
-        <span className="dbx-action-label">工具</span>
-      </button>
-      {onFocusChange && <div className="dbx-focus-controls">
-        <button type="button" className="dbx-btn ghost" onClick={() => onFocusChange(focusMode === "split" ? "results" : "split")}>
-          <Icon name={focusMode === "split" ? "maximize" : "restore"} size={14} />
-          {focusMode === "split" ? "专注结果" : "还原布局"}
-        </button>
-        <button type="button" className="dbx-ibtn" aria-label="编辑器与结果布局" aria-haspopup="menu" onClick={event => popup(event.currentTarget, [
-          { label: "专注结果", icon: "database", disabled: focusMode === "results", onSelect: () => onFocusChange("results") },
-          { label: "专注编辑器", icon: "code", disabled: focusMode === "editor", onSelect: () => onFocusChange("editor") },
-          { label: "还原布局", icon: "restore", disabled: focusMode === "split", onSelect: () => onFocusChange("split") },
-        ])}><Icon name="chevronDown" size={12} /></button>
-      </div>}
-      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
-    </div>
-    </div>
-    <TxBar transaction={transaction} actions />
-    </>
-  );
+    {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+    <TxBar transaction={transaction} />
+  </>;
 }

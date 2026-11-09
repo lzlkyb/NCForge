@@ -46,12 +46,13 @@ it("切密度保持首行与选区，CSS 行高、虚拟位置、键盘滚动使
   expect(host.querySelector<HTMLDivElement>('[aria-rowindex="502"]')!.style.top).toBe(`${44+500*30}px`);
   expect(host.querySelector('#dbx-cell-500-1')?.getAttribute('aria-selected')).toBe("true");
   act(()=>grid.dispatchEvent(new KeyboardEvent("keydown",{key:"PageDown",bubbles:true})));
-  expect(grid.scrollTop).toBe(521*30-200+44);
+  // PageDown 按一屏能放几行翻页：clientHeight 200 / 行高 30 → 5 行（不再写死 20）
+  expect(grid.scrollTop).toBe(506*30-200+44);
   act(()=>grid.dispatchEvent(new Event("scroll",{bubbles:true})));
-  expect(host.querySelector('#dbx-cell-520-1')?.getAttribute('aria-selected')).toBe("true");
+  expect(host.querySelector('#dbx-cell-505-1')?.getAttribute('aria-selected')).toBe("true");
   act(()=>applyUiDensity("standard"));
-  expect(grid.scrollTop).toBeCloseTo((521*30-200+44)/30*26);
-  expect(host.querySelector('#dbx-cell-520-1')?.getAttribute('aria-selected')).toBe("true");
+  expect(grid.scrollTop).toBeCloseTo((506*30-200+44)/30*26);
+  expect(host.querySelector('#dbx-cell-505-1')?.getAttribute('aria-selected')).toBe("true");
 });
 
 it("舒适密度的编辑与冻结列不改变原始行列定位，Esc 不写入",()=>{

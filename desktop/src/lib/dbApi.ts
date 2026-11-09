@@ -405,6 +405,11 @@ export interface PendingTxRow {
   id: string;
   /** `pending` 有未提交写入；`clean` 干净；`unknown` 探测超时/连接已断。 */
   state: "pending" | "clean" | "unknown";
+  /**
+   * 数据库真源（`v$transaction`）结论：`false` = 确认没有未提交事务，
+   * `null`/缺省 = 没核对或查不了。只有 `false` 才允许推翻界面上的本地计数。
+   */
+  active?: boolean | null;
   engine?: string;
   statements?: number;
   rows?: number;
@@ -517,7 +522,7 @@ export interface SlotOut {
 }
 
 export const dbApi = {
-  relations:(id:string,table:string)=>invoke<{foreign:ExecResult;references:ExecResult;enums?:ExecResult;notes:string[];sharedSession:boolean}>("db_relations",{id,table}),
+  relations:(id:string,table:string)=>invoke<{foreign:ExecResult;references:ExecResult;enums?:ExecResult;notes:string[];partial?:boolean;sharedSession:boolean}>("db_relations",{id,table}),
   execBound: (id: string, sql: string, params: BoundCell[], maxRows: number, timeoutSec: number, slot?: string | null) => invoke<ExecResult>("db_exec_bound", {id,sql,params,maxRows,timeoutSec,slot:slot || null}),
   readOnly: (id: string, enabled?: boolean) => invoke<{readOnly:boolean;tx:TxInfo}>("db_read_only", {id,enabled:enabled ?? null}),
   list: () => invoke<DbConn[]>("db_conn_list"),

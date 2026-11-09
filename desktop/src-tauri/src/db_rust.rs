@@ -705,24 +705,33 @@ impl Session {
         // 仅显式请求 Autotrace 时前后读取 `v$mystat`；普通执行避免这两次往返。
         // 读不到（低权限账号没有 V_$MYSTAT 授权）就是 None，界面据此**不显示这一行**，
         // 而不是给一排 0 让人以为「这条 SQL 一次逻辑读都没花」。
-        // 不可用的统计只探测一次，重连后重试；避免低权限账号每条 SQL 多走两次网络。
-        let before = if !collect_stats || self.stats_unavailable {
-            None
-        } else {
-            self.conn_ref().ok().and_then(stat_snapshot)
-        };
-        if collect_stats && before.is_none() {
+        let mut before = None;
+        let mut stat_denied = false;
+        if collect_stats && !self.stats_unavailable {
+            if let Ok(conn) = self.conn_ref() {
+                match stat_snapshot(conn) {
+                    Ok(s) => before = Some(s),
+                    // 🔴 只有「这个账号永远读不到」才值得永久关掉。超时、连接抖动、
+                    // 字典视图被别的会话锁住都是临时的——按一次失败就永久关闭，用户
+                    // 会遇到「Autotrace 忽然再也不出数，只能重启应用」，而库里明明正常。
+                    Err(e) => stat_denied = is_permanent_stat_error(&e),
+                }
+            }
+        }
+        if stat_denied {
             self.stats_unavailable = true;
         }
         let out = self.run(&sql, &head, max_rows, params);
-        if let Ok(conn) = self.conn_ref() {
-            let _ = conn.set_call_timeout(None);
-        }
+        // 收尾快照同样是一次网络往返，必须在读超时复位**之前**取：
+        // 账号被卡住或字典视图被锁时，它和正文一样不能无限等。
         let after = if before.is_some() {
-            self.conn_ref().ok().and_then(stat_snapshot)
+            self.conn_ref().ok().and_then(|c| stat_snapshot(c).ok())
         } else {
             None
         };
+        if let Ok(conn) = self.conn_ref() {
+            let _ = conn.set_call_timeout(None);
+        }
 
         // 先把输出缓冲取空：`out?` 走错误分支时若还没取，本次语句已写入的
         // `put_line` 会留在缓冲里，被下一条成功语句一起取走 —— 输出就张冠李戴了。
@@ -882,9 +891,6 @@ impl Session {
         max_chars: usize,
         timeout: Duration,
     ) -> Result<Value, BridgeError> {
-        if self.conn.is_none() {
-            return Err(not_connected());
-        }
         let sql = normalize(raw);
         if sql.is_empty() {
             return Err(sql_err("SQL 是空的"));
@@ -893,12 +899,16 @@ impl Session {
             return Err(sql_err("只有查询结果才能按需取大文本"));
         }
         let probe = lob_probe_sql(&sql, column, row_index)?;
-        let conn = self.conn.take().ok_or_else(not_connected)?;
+        // 🔴 借连接，不要 `take()` 走。`take()` 之后任何一个 `?` 早退都会跳过
+        // `self.conn = Some(conn)`，连接被 drop 掉，会话就永久停在「还没连数据库」——
+        // 用户只会看到「用着用着连接没了」。同文件的 `more()` 用的也是 `as_ref()`。
+        let Some(conn) = self.conn.as_ref() else {
+            return Err(not_connected());
+        };
         // 大字段读取同样要有上限：对方数据库卡住时，这条命令会一直占着会话锁。
         conn.set_call_timeout(Some(timeout)).map_err(drv_err)?;
-        let out = lob_value_with(&conn, &probe, row_index, max_chars.clamp(1, CLOB_MAX));
+        let out = lob_value_with(conn, &probe, row_index, max_chars.clamp(1, CLOB_MAX));
         let _ = conn.set_call_timeout(None);
-        self.conn = Some(conn);
         out
     }
 
@@ -1638,22 +1648,21 @@ impl StatSnap {
 ///
 /// 可用时每次执行多两次往返，实际成本取决于网络延迟。差值里**包含**这两次统计查询自己的开销
 /// （约十几次逻辑读），与 PL/SQL Developer 的 autotrace 同口径，不额外剔除。
-fn stat_snapshot(conn: &Connection) -> Option<StatSnap> {
+fn stat_snapshot(conn: &Connection) -> Result<StatSnap, BridgeError> {
     let sql = format!(
         "select n.name, m.value from v$mystat m, v$statname n \
           where n.statistic# = m.statistic# and n.name in ({STAT_NAMES})"
     );
-    let cur = conn.query(&sql, &[]).ok()?;
+    let cur = conn.query(&sql, &[]).map_err(drv_err)?;
     let mut s = StatSnap::default();
     let mut found = 0usize;
     for row in cur {
-        let Ok(row) = row else { return None };
+        let row = row.map_err(drv_err)?;
         let name: String = row
             .get::<Option<String>>(0)
-            .ok()
-            .flatten()
+            .map_err(drv_err)?
             .unwrap_or_default();
-        let v: i64 = row.get::<Option<i64>>(1).ok().flatten().unwrap_or(0);
+        let v: i64 = row.get::<Option<i64>>(1).map_err(drv_err)?.unwrap_or(0);
         match name.trim().to_ascii_lowercase().as_str() {
             "db block gets" => {
                 s.db_block_gets = v;
@@ -1674,7 +1683,20 @@ fn stat_snapshot(conn: &Connection) -> Option<StatSnap> {
             _ => {}
         }
     }
-    (found > 0).then_some(s)
+    if found == 0 {
+        // 一条统计都没匹配上：不是网络问题，是这个库/账号看不到这几项（授权或版本差异），
+        // 再试也是空，交给调用方按「永久读不到」处理。
+        return Err(BridgeError::new("stats", "读不到执行统计"));
+    }
+    Ok(s)
+}
+
+/// 统计快照的失败是不是「这个账号永远读不到」。
+///
+/// 只有权限类错误和「一条都没匹配」算永久：其余（超时、连接抖动、字典视图被锁）
+/// 都该下次再试，否则一次抖动就把 Autotrace 永久关掉。
+fn is_permanent_stat_error(e: &BridgeError) -> bool {
+    e.code == "stats" || e.message.contains("ORA-00942") || e.message.contains("ORA-01031")
 }
 
 // ───────────────────────── 结果集转换 ─────────────────────────
@@ -2600,6 +2622,21 @@ mod tests {
     fn 没连上时取消明确报错() {
         let e = RustEngine::new();
         let err = e.cancel().unwrap_err();
+        assert!(err.message.contains("还没连"), "{}", err.message);
+    }
+
+    #[test]
+    fn 没连上时取大文本只报未连接() {
+        // 这条路径曾经用 `self.conn.take()`：一旦中途早退，连接就被 drop 掉，
+        // 会话永久停在「还没连数据库」。至少不能 panic、不能报一条看不懂的驱动错。
+        let e = RustEngine::new();
+        let err = e
+            .call(
+                "lobValue",
+                &["select c from t", "0", "C", "1024", "5"],
+                Duration::from_secs(5),
+            )
+            .unwrap_err();
         assert!(err.message.contains("还没连"), "{}", err.message);
     }
 

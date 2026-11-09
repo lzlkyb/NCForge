@@ -1,5 +1,6 @@
 import type { BoundCell, Cell, ColumnMeta } from "./dbApi";
 import { identifier } from "./dbConditions";
+import { isLobPreview } from "./db";
 
 /** 一条待写回的变更。表页一次写回里可以混着三种，顺序由 `planWriteBack` 决定。 */
 export type ChangeKind = "insert" | "update" | "delete";
@@ -24,6 +25,17 @@ export function optimisticChanges(table: string, columns: ColumnMeta[], rows: Ce
     const params: BoundCell[] = [];
     const bind = (v: Cell, c: number) => bindRowValue(v, columns[c], params);
     const cells = cs.map(c => ({ column:c, before:row[c], after:changed.get(`${r}:${c}`)! }));
+    // 🔴 被截断的大文本不能当原值，也不能就这么写回去：
+    // - `dbms_lob.compare(列, '前 8K + 尾部署名')` 永远不等于库里的完整值，UPDATE 会 0 行
+    //   命中，用户只看到「可能已被他人修改」，反复重试也不会成功；
+    // - 真要写进去，尾巴那句「…只显示前 8192…」就成了数据的一部分。
+    // 网格拿不到完整值，所以这里只能明确拒绝，让用户走 SQL。
+    const clipped = cells.find(c => typeof c.before === "string" && isLobPreview(c.before));
+    if (clipped) {
+      throw new Error(
+        `「${columns[clipped.column].name}」内容太长，网格里只有前 8K，改它会把截断内容写坏；请用 SQL 更新这条记录`,
+      );
+    }
     const set = cells.map(c => `${identifier(columns[c.column].name)} = ${bind(c.after, c.column)}`).join(", ");
     const guards = [...new Set([...keyCols, ...cs])].map(c => {
       const name = identifier(columns[c].name);

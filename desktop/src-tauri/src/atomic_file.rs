@@ -97,6 +97,17 @@ impl AtomicTarget {
         self.tmp.path()
     }
 
+    /// 换一个落点，仍复用同一个临时文件。新落点必须与原目标**同目录**（临时文件建在
+    /// 原目标目录里，跨目录 `persist` 在 Windows 上不是原子操作）。
+    ///
+    /// 给「先写、写完才知道产物完不完整」的场景用：完整才覆盖原名，部分结果改落旁名。
+    /// 关键是它能在 **`commit` 之前**定下落点——先 `commit` 覆盖原名、之后再 `rename`
+    /// 到旁名，旧文件在 rename 之前就已经没了，等于用残缺产物换掉了完整产物。
+    pub fn retarget(mut self, dest: impl Into<PathBuf>) -> Self {
+        self.dest = dest.into();
+        self
+    }
+
     /// 落到目标路径。Windows 上 `persist` 会覆盖同名目标（`MoveFileEx` 带 replace）。
     pub fn commit(self) -> Result<(), String> {
         self.commit_checked(None)

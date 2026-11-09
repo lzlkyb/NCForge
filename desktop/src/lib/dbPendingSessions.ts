@@ -1,4 +1,5 @@
 import type { DbState, DbTabItem } from "./dbStore";
+import { txPending } from "./txState";
 
 export interface PendingDbSession {
   slot: string | null;
@@ -12,14 +13,16 @@ export function pendingDbSessions(db: Pick<DbState, "tabs" | "rt" | "active">, c
   const tabs = db.tabs.filter((t) => t.connId === connId);
   const sessions = new Map<string | null, PendingDbSession>();
   const primary = db.rt[connId]?.tx;
-  if (primary && !primary.autoCommit && primary.statements > 0) {
+  // 判据统一走 `txPending`：后端核对过（`tx.active`）就以 `v$transaction` 为准，
+  // 本地 `statements` 只是 DML 计数，手写 COMMIT / PL/SQL 内部提交不会让它归零。
+  if (primary && txPending(primary).pending) {
     const owner = tabs.find((t) => t.kind === "table") ?? tabs.find((t) => t.kind === "sql" && !t.slot);
     sessions.set(null, { slot: null, tabId: owner?.id ?? null, label: "主会话", statements: primary.statements });
   }
   for (const t of tabs) {
-    if (t.kind !== "sql" || !t.slot || !t.tx || t.tx.autoCommit || t.tx.statements <= 0) continue;
+    if (t.kind !== "sql" || !t.slot || !txPending(t.tx).pending) continue;
     if (!sessions.has(t.slot) || t.id === db.active) {
-      sessions.set(t.slot, { slot: t.slot, tabId: t.id, label: `${t.title} · 独立会话 ${t.slot}`, statements: t.tx.statements });
+      sessions.set(t.slot, { slot: t.slot, tabId: t.id, label: `${t.title} · 独立会话 ${t.slot}`, statements: t.tx?.statements ?? 0 });
     }
   }
   return [...sessions.values()];

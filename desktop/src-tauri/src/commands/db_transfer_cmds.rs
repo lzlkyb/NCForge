@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
-use super::db_cmds::{call, drop_bridge, find_conn, open_temp_session, prop_password_ready, PROBE};
+use super::db_cmds::{
+    call, drop_bridge, find_conn, open_temp_session, prop_password_ready, PROBE_CONF,
+};
 use crate::db_engine::{EngineHandle, EngineKind};
 use crate::db_transfer::{
     self as transfer, Layout, TextWriter, TransferColumn, TransferData, TransferFormat,
@@ -201,7 +203,7 @@ pub async fn db_transfer_file(
     }
     let engine = EngineKind::parse(&conn.engine);
     if engine != EngineKind::Java && conn.source == "prop" {
-        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE).await?;
+        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE_CONF).await?;
     }
     if cancel.token.load(Ordering::SeqCst) {
         return Ok(None);
@@ -473,8 +475,8 @@ fn run_transfer(
     }
     if stats.long_values > 0 {
         stats.warnings.push(format!(
-            "{} 个超长文本超过 8K 预览上限，目标文件里这些值只有前 8192 个字符（含一句中文提示）。\
-             需要完整内容请缩小范围后分段导出，或先把这些列单独导出",
+            "{} 个超长文本超过单值读取上限，目标文件里这些值只保留了前面的部分（末尾带截断提示）；\
+             保存的是单独命名的部分结果。需要完整内容请缩小范围后分段导出",
             stats.long_values
         ));
     }
@@ -489,7 +491,9 @@ fn run_transfer(
         warnings.push("导出已取消；保存的是单独命名的部分结果".into());
     }
     lease.verify()?;
-    let actual = if stats.canceled || stats.truncated {
+    // 长文本被截断同样算「部分结果」：文件里那些值不完整，不能顶掉同名的完整旧文件。
+    let partial = stats.canceled || stats.truncated || stats.long_values > 0;
+    let actual = if partial {
         destination::persist_partial(temp, path, req.export_id)?
     } else {
         temp.persist(path)
@@ -590,8 +594,8 @@ struct Stats {
     warnings: Vec<String>,
 }
 fn count_long(row: &[Value], stats: &mut Stats) {
-    // 判据看预览文案，不看长度：结果集里的 CLOB 最长只有 8K 预览，
-    // 用 1MB 当阈值永远判不出来，导出的文件里就会是「8K 正文 + 一句中文提示」。
+    // 判据看截断文案，不看长度：网格通道 8K、全量通道 1M，拿固定长度当阈值两头都会判错。
+    // 尾部文案是唯一可靠信号（`is_lob_preview`）。
     stats.long_values += row
         .iter()
         .filter(|v| v.as_str().is_some_and(crate::db_rust::is_lob_preview))
@@ -747,6 +751,11 @@ fn bridge_call(
         .call(cmd, &refs, Duration::from_secs(u64::from(timeout) + 30))
         .map_err(|e| super::db_cmds::map_sql_error(&e.message))
 }
+/// 重查导出用的取数命令。
+///
+/// 走 `execFull*`（单值上限 1M 的全量通道），不能用 `exec`/`execBound`：那条是网格的
+/// 8K 预览通道，超长 CLOB 会带一句「…只取前 8192 个字符」的中文尾巴，而这条路把值直接
+/// 拼进 INSERT/UPDATE/WHERE 脚本或数据文件——等于把提示文案当成数据写出去。
 fn exec_args(
     req: &TransferReq,
     page: usize,
@@ -754,13 +763,13 @@ fn exec_args(
 ) -> Result<(&'static str, Vec<String>), String> {
     let mut args = vec![req.sql.clone(), page.to_string(), timeout.to_string()];
     let Some(params) = req.params.as_ref().filter(|p| !p.is_empty()) else {
-        return Ok(("exec", args));
+        return Ok(("execFull", args));
     };
     for v in params {
         let (kind, text) = bound_param(v)?;
         args.extend([kind.into(), text]);
     }
-    Ok(("execBound", args))
+    Ok(("execFullBound", args))
 }
 pub(crate) fn bound_param(v: &Value) -> Result<(&'static str, String), String> {
     match v {

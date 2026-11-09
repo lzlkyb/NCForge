@@ -16,7 +16,8 @@ use serde_json::Value;
 use tauri::AppHandle;
 
 use crate::commands::db_cmds::{
-    call, drop_bridge, existing_bridge, find_conn, open_temp_session, prop_password_ready, PROBE,
+    call, drop_bridge, existing_bridge, find_conn, open_temp_session, prop_password_ready,
+    PROBE_CONF,
 };
 use crate::commands::db_search_cmds::cell_text;
 use crate::db_engine::EngineKind;
@@ -62,7 +63,7 @@ pub async fn db_user_list(
     let mut conn = find_conn(&cfg, &id)?;
     let engine = EngineKind::parse(&conn.engine);
     if engine != EngineKind::Java && conn.source == "prop" {
-        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE).await?;
+        prop_password_ready(&app, &st, &cfg, &mut conn, None, PROBE_CONF).await?;
     }
 
     let owned = open_temp_session(&app, &st, &cfg, &conn, engine, "users").await;

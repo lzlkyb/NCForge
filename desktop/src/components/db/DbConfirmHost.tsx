@@ -199,7 +199,7 @@ function ProdBody({ p }: { p: Extract<Pending, { kind: "prod" }> }) {
       <div className="ft">
         <span className="dbx-muted">能不能写由数据库账号权限决定</span>
         <span className="dbx-sp" />
-        <button type="button" className="dbx-btn" onClick={() => settle((x) => x.kind === "prod" && x.resolve(false, false))}>
+        <button type="button" className="dbx-btn" data-autofocus onClick={() => settle((x) => x.kind === "prod" && x.resolve(false, false))}>
           取消
         </button>
         <button type="button" className="dbx-btn bad" onClick={() => settle((x) => x.kind === "prod" && x.resolve(true, quiet))}>

@@ -181,6 +181,19 @@ export function friendlyDbError(e: unknown): string {
   }
 }
 
+/**
+ * PL/SQL 编译错误里的行号：`ORA-06550: 第 3 行, 第 5 列` / `line 3, column 5`。
+ *
+ * 只认 ORA-06550。`ORA-06512` 的 `line N` 是**包里的**行号，拿来跳脚本会跳到毫无关系
+ * 的位置，比不跳更糟。返回值是相对这条语句的行号（1 起）。
+ */
+export function plsqlErrorLine(message: string): number | null {
+  if (!/ORA-06550/i.test(message)) return null;
+  const m = /line\s+(\d+)/i.exec(message) ?? /第\s*(\d+)\s*行/.exec(message);
+  const n = m ? Number(m[1]) : 0;
+  return n > 0 ? n : null;
+}
+
 /** ORA 号从错误文本里抠出来：`ORA-00942: 表或视图不存在`。 */
 export function oraCode(message: string): string | null {
   const m = /ORA-\d{5}/i.exec(message);
@@ -269,7 +282,11 @@ export function cellText(v: Cell, max = 400): string {
   if (v === null || v === undefined) return "NULL";
   const s = typeof v === "string" ? v : String(v);
   if (s.length <= max) return s;
-  return `${s.slice(0, max)}…`;
+  // 截断位置落在代理对中间会把 emoji / 生僻字切成半个（显示成 �，复制出去是无效字符），
+  // 遇到高位代理就往前退一格。
+  const c = max > 0 ? s.charCodeAt(max - 1) : 0;
+  const end = c >= 0xd800 && c <= 0xdbff ? max - 1 : max;
+  return `${s.slice(0, end)}…`;
 }
 
 /**

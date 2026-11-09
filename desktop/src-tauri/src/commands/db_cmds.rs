@@ -29,8 +29,15 @@ use crate::svn_cred;
 pub(crate) const T_CONNECT: Duration = Duration::from_secs(60);
 /// 元数据（表清单、DDL、执行计划）。
 const T_META: Duration = Duration::from_secs(120);
-/// 临时会话名：列数据源、测试连接、解 prop.xml 口令共用，不占用任何真实连接的会话。
+/// 测试连接用的临时会话名。用完会 `disconnect` + `drop_bridge`，所以**独占**一个键。
 pub(crate) const PROBE: &str = "__probe";
+/// 只读 NC 配置（解 prop.xml 口令、列数据源）用的临时会话名。
+///
+/// 🔴 必须和 [`PROBE`] 分开：测试连接收尾会 `drop_bridge(PROBE)`，而首次打开连接列表
+/// 的初始化（`propList`）与「测试连接」完全可能同时发生——共用一个键时，一边收尾就把
+/// 另一边正在跑的会话拆掉，现象是「第一次能测通，之后偶发会话不存在」。
+/// 这条会话不连库（`propCred` / `propList` 只读 NC 文件），所以留着复用是安全的。
+pub(crate) const PROBE_CONF: &str = "__probeConf";
 
 // ───────────────────────── 会话槽（A0：多标签独立会话） ─────────────────────────
 
@@ -919,7 +926,7 @@ pub async fn db_connect(
     let engine = EngineKind::parse(&conn.engine);
     // prop 来源要用 Rust 驱动：先把口令解出来落盘（JVM 桥那边是每次现解，不必存）
     if engine != EngineKind::Java && conn.source == "prop" {
-        prop_password_ready(&app, &st, &cfg, &mut conn, password.as_deref(), PROBE).await?;
+        prop_password_ready(&app, &st, &cfg, &mut conn, password.as_deref(), PROBE_CONF).await?;
     }
     let (cmd, args) = connect_args(&cfg, &conn, password.as_deref(), conn.auto_commit, engine)?;
     let bridge = bridge_for(&app, &st, &cfg, &id, engine, &id)?;
@@ -1304,6 +1311,16 @@ struct JavaFallback<'a> {
     need: crate::db_engine::RefcursorNeed,
 }
 
+/// JVM 桥的会话能不能直接复用：只有它**明确**回 `alive:true` 才算。
+///
+/// 三种返回都必须当「要重连」：`Err`（会话不存在 / 桥线程超时）、`Ok({alive:false})`
+/// （连接已断）、字段缺失。反过来只认 `false` 就会漏掉第一种——桥在会话不存在时回的是
+/// `err("会话不存在或已断开")`，不是 `Ok({alive:false})`，于是 `connect` 被跳过，
+/// REF CURSOR 兜底第一次跑必然失败（6481e98 把原来的 `.is_err()` 改成了那个写法）。
+fn java_session_reusable(ping: &Result<Value, String>) -> bool {
+    matches!(ping, Ok(v) if v.get("alive").and_then(Value::as_bool) == Some(true))
+}
+
 /// 在 JVM 桥的临时会话上执行一条 Rust 引擎跑不了的语句。
 ///
 /// 三条纪律，改这里之前先读完：
@@ -1336,10 +1353,8 @@ async fn exec_via_java(f: JavaFallback<'_>) -> Result<Value, String> {
     let handle = bridge_for(app, st, &cfg, &key, EngineKind::Java, id)?;
     // 连过一次就复用：桥的 `connect` 会先把旧连接关掉，等于每条语句重连一次库。
     // 用一个 ping 探活，顺带能拿到「这条会话有没有未提交写入」。
-    if call(handle.clone(), "ping", Vec::new(), T_META)
-        .await
-        .is_ok_and(|v| v.get("alive").and_then(Value::as_bool) == Some(false))
-    {
+    let reuse = java_session_reusable(&call(handle.clone(), "ping", Vec::new(), T_META).await);
+    if !reuse {
         // 兜底会话也是新会话：跟着当前生效的 schema 走，否则这条 SQL 里的无前缀表名
         // 会解析到登录账号的 schema，和同一条语句在槽里执行的结果对不上。
         let (cmd, args) = connect_args(
@@ -2135,6 +2150,21 @@ mod tests {
 
     use serde_json::json;
 
+    /// 回归：桥在「会话不存在」时回的是 Err，不是 `Ok({alive:false})`。以前只把
+    /// `Ok({alive:false})` 当「要 connect」，导致 REF CURSOR 兜底首次必失败。
+    #[test]
+    fn java_session_reusable_只认明确alive为真() {
+        assert!(java_session_reusable(&Ok(
+            json!({ "alive": true, "tx": { "statements": 0 } })
+        )));
+        assert!(!java_session_reusable(&Ok(json!({ "alive": false }))));
+        assert!(
+            !java_session_reusable(&Err("会话不存在或已断开（db#java）".to_string())),
+            "会话不存在时桥返回 Err，必须重连"
+        );
+        assert!(!java_session_reusable(&Ok(json!({}))), "字段缺失不能当活着");
+    }
+
     const SAMPLE: &str = r#"<?xml version="1.0" encoding='gb2312'?>
 <root ClassType="nc.uap.plugin.studio.ui.preference.prop.PropInfo">
   <isEncode>true</isEncode>
@@ -2306,5 +2336,13 @@ mod tests {
         // P0 的兜底会话归它所属的连接：退出确认里不能冒出「c1#java」这种假连接
         assert_eq!(split_slot_key(&java_key("c1")), ("c1", None));
         assert_eq!(split_slot_key(&java_key("c1#2")), ("c1", Some("2")));
+    }
+
+    #[test]
+    fn 测试连接与读配置不共用一个会话键() {
+        // 测试连接收尾会 `disconnect` + `drop_bridge(PROBE)`；而首次打开连接列表的
+        // `propList`（`prop_sources`）完全可能与它同时发生。共用一个键的结果是：
+        // 一边收尾，另一边正在跑的会话被拆掉——「第一次能测通，之后偶发会话不存在」。
+        assert_ne!(PROBE, PROBE_CONF);
     }
 }

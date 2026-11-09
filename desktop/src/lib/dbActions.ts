@@ -1,5 +1,5 @@
 import { toast } from "../components/ui/toast";
-import { friendlyDbError } from "./db";
+import { friendlyDbError, plsqlErrorLine } from "./db";
 import { dbApi } from "./dbApi";
 import { beginOperation, operationActive } from "./operations";
 import { dbTaskSpec, dbTxKey } from "./dbOperations";
@@ -325,13 +325,16 @@ export async function runStatements(
         if (retained) kept.splice(0, kept.length, ...retained);
       }
       if (r.kind === "error") {
+        // PL/SQL 块的 `line N` 是相对这条语句的，加上起始行偏移才能落到编辑器真正的行
+        const rel = plsqlErrorLine(r.error ?? "");
+        const line = rel ? s.startLine + rel - 1 : s.startLine;
         outcome.failures.push({
           index: i + 1,
-          line: s.startLine,
+          line,
           text: s.text,
           error: r.error ?? "执行失败",
         });
-        if (outcome.failLine === null) outcome.failLine = s.startLine;
+        if (outcome.failLine === null) outcome.failLine = line;
         if (r.cancelled || connectionInterrupted || !opts.ignoreErrors) break;
       }
     }

@@ -21,7 +21,7 @@ export function TableRelations({tab,columns,row,onClose}:{tab:TableTab;columns:C
     if(relations.status==="fulfilled") {list=[...relationRows(relations.value.foreign,"外键"),...relationRows(relations.value.references,"NC类引用")];notes.push(...relations.value.notes);if(relations.value.enums?.kind==="rows") enums=relations.value.enums.rows;if(relations.value.sharedSession) {claimCursor(tab.connId,null,`relations:${tab.id}`);notes.push("关系查询复用了主会话，原游标已关闭。");} if((relations.value.foreign.kind==="rows" && relations.value.foreign.hasMore) || (relations.value.references.kind==="rows" && relations.value.references.hasMore)) notes.push("关系超过读取上限，清单不完整。");}
     else notes.push(friendlyDbError(relations.reason));
     if(dict.status==="fulfilled") metadata=dict.value.tables[0] ?? null;else notes.push(`NC元数据：${friendlyDbError(dict.reason)}`);
-    setState({relations:list,notes,dict:metadata,enums,loading:false,failed:relations.status==="rejected" || dict.status==="rejected"});
+    setState({relations:list,notes,dict:metadata,enums,loading:false,failed:relations.status==="rejected" || dict.status==="rejected" || (relations.status==="fulfilled" && relations.value.partial===true)});
   })();return()=>{live=false;};},[tab.connId,tab.table,tab.id,revision]);
   const open=(r:Relation)=>{try {openRelated(tab,relationQuery(r,tab.table,columns,row));onClose();}catch(e){toast(friendlyDbError(e),"error");}};
   const locate=(full:string)=>{const name=full.split(".").pop() ?? full;setSearchForm({query:name,regex:false,scope:"all"});window.dispatchEvent(new CustomEvent("ncforge-navigate",{detail:"search"}));onClose();};

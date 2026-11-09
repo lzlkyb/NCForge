@@ -39,7 +39,12 @@ export function useFocusTrap(
     const focusables = () => Array.from(node.querySelectorAll<HTMLElement>(
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
     )).filter(el => !el.matches(":disabled") && !el.closest("[inert]") && el.getClientRects().length > 0);
-    focusables()[0]?.focus({ preventScroll: true });
+    const list = focusables();
+    // 默认焦点交给第一个可聚焦元素，但高危确认框里的第一个往往是复选框或
+    // 「10 分钟内不再询问」这类「顺手一按就改语义」的控件。带 `data-autofocus`
+    // 的元素优先，让调用方把焦点钉在「取消」上。
+    const preferred = node.querySelector<HTMLElement>("[data-autofocus]");
+    (preferred && list.includes(preferred) ? preferred : list[0])?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
       // IME 组词中的 Esc 属于输入法（收候选窗），不触发关闭——
       // Modal / ConfirmDialog / CommandPalette 内都有中文输入场景。

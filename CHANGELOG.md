@@ -43,8 +43,26 @@ gen-changelog.mjs 当成真实版本段解析；代码围栏中的示例会被�
 - 修复「同一条 SQL 在结果较多时重复执行会报 `unknown TTC message type`」：查询取数批量回归驱动默认值，避免上一页游标未读完时与语句缓存重执行的响应交错；此类错误现在按连接断开处理，不会再继续复用已损坏的会话。
 - 修复「手动点停止后，中间件状态显示异常退出」：停止是工作台强终进程，退出码非零不代表崩溃，现在显示「已停止」。
 - 修复「其他程序（git / SVN 更新、别的编辑器）改了已打开的 `.java` 后，编辑器仍显示旧内容」：没有未保存修改的标签会自动重新加载；有未保存修改的不动，保存时仍会提示冲突。
+- 修复「取消导出或到达行数上限时，上一份完整的导出文件被覆盖掉」：不完整的产物现在另存为单独命名的「部分结果」文件，原文件保持原样。
+- 修复「PL/SQL 里 `open … for` 这类查询第一次执行必定失败」：这类语句要走数据库侧的独立会话，首次会自动建立连接，不再直接报错。
+- 修复「按 SQL 重新查询后导出的脚本里，超长文本变成一句截断提示」：重查改走全量取值通道，长文本按完整内容写入。
+- 修复「导入失败整批回滚后，界面仍显示已写入 N 行」：回滚的批次计数归零，不会再出现「界面说写进去了、库里一条没有」。
+- 修复「手写 COMMIT 之后，关标签或退出仍反复提示有未提交事务」：改为以数据库事务状态为准，本地计数不再单独决定；数据库查不到时仍按保守方向提示。
+- 修复「点开超长字段后连接莫名其妙掉线」：按需读取大文本时不再中途把连接摘走，这次读取失败也不会连带整条会话失效。
+- 修复「测试连接第一次能通、之后偶发提示会话不存在或已断开」：测试连接与读取 NC 数据源配置改用各自独立的临时会话，两边同时进行时不会互相打断。
+- 修复「超长文本偶尔显示不完整却被当成完整值」：JVM 桥遇到驱动把大字段读成空值时，也按网格 8K 预览上限截断并标明「点加载完整值查看」，不会再一次性把整段文本塞进结果。
+- 修复「在网格里改超长文本字段，写回总是提示原值已被修改」：这类列界面只拿到前 8K，现在直接说明「内容太长，请用 SQL 更新」，不再给出误导性的冲突提示。
+- 修复「只读模式下 `select pkg.xxx() from dual` 仍能写库」：只读模式现在拒绝自定义包函数调用；`dbms_lob` / `utl_raw` / `dbms_random` 这类只读内置函数照常可用。
+- 修复「执行统计读失败一次后，Autotrace 再也不出数」：只有权限类失败才永久关闭，超时、网络抖动或字典视图被锁都会下次重试。
+- 修复「关联面板读取失败时显示成『没有可确认的关联』」：现在显示「关系未完整读取」并给出重新读取。
+- 修复「单条语句执行成功后界面毫无反馈」：结果区标题栏显示「执行完成 · 耗时」。
+- 修复「结果网格翻页固定 20 行、Home/End 没反应」：PageUp/PageDown 按一屏能放的行数翻页，Home/End 跳首末列，Ctrl+Home/End 跳首末行。
+- 修复「生产库写确认框默认焦点落在『10 分钟内不再询问』」：默认焦点回到「取消」。
+- 修复「PL/SQL 编译错误只跳到语句开头」：现在按 ORA-06550 的行号定位到具体行。
+- 修复「表头有中文名时看不到列类型」：第二行改为「中文名 · 类型」。
 
 ### 技术细节
+- 数据库审查收尾（11-09 第二批）：`NcDbBridge.value` 的 `wasNull` 兜底改走 `Clob`/`cap()` 截断通道（原先对 CLOB 直接 `getString`，既不受 `CLOB_MAX` 约束也不挂截断文案）；`dbOptimisticEdit` 对被截断的大文本列拒绝写回（原值守卫拿 8K 预览值 `dbms_lob.compare` 必然 0 行）；`db_engine::readonly_query` 新增 `has_unsafe_pkg_call`（白名单 `dbms_lob`/`utl_raw`/`dbms_random`）；`stat_snapshot` 改返回 `Result`，`exec_params` 的收尾快照挪进 `set_call_timeout` 覆盖范围内，`is_permanent_stat_error` 只对 `ORA-00942/01031`/零命中永久关闭 Autotrace；`db_relations` 返回体加 `partial` 供前端显示错误态；`cellText` 截断避开代理对；`useFocusTrap` 支持 `data-autofocus`；`useResultGridNavigation` 的 PageUp/Down 按 `--dbx-row-h` 与容器高算页长，新增 Home/End 与 Ctrl+Home/End。
 - 热替换批 A：新增 `hotswap-agent/HotswapAgent.java`（premain + agentmain，只绑 127.0.0.1，令牌只在会话文件里，按 codeSource 区分替换 / 未加载 / 被遮蔽），`build-bridge-jar.mjs hotswap` 打成 `resources/hotswap/ncforge-hotswap.jar` 随包；配置新增 `hotswap_enabled`（默认开），启动与命令行预览共用 `hotswap::launch_agent_arg` 追加 `-javaagent`，预览不换令牌，准备失败只记日志不阻断启动。契约测试 `scripts/hotswap-agent-contract.test.mjs`（手动跑，需本机 JDK）。推送客户端与界面在后续批次。
 - 热替换批 B：`build_engine::compile_files` 在模块零错误时把编过的源文件映射成类（`Outer.class` + `Outer$*.class`），在后台线程推给 agent（`hotswap::push`），结果记入 `AppState.hotswap` 并发 `hotswap-result` 事件；失败或被遮蔽置「运行中代码不是最新」，启动服务时清除。配置新增 `hotswap_auto`（默认开，关闭时攒待推列表）；新命令 `hotswap_status` / `hotswap_push_pending`。手动全量编译不推送。
 - 热替换批 C：前端 `lib/hotswap.ts`（模块级订阅 `hotswap-result` / `hotswap-pending`：失败 toast、推送后经 `debugSync.reinstallBreakpoints` 先清后发重装断点）、状态栏 `HotswapStatusChip`、服务页告警条与「代码不是最新」标记、设置 `HotswapSettings`；后端新增 `hotswap_clear_pending`，状态增加 `agentAttached` / `pendingClasses` / `staleReport`，每次有效推送在服务日志写一行 `[nc-forge] 热替换 …`；`ConfigPatch` 接入两个开关，命令契约豁免已移除。端到端验收后修正：设置页改开关后刷新小签（`refreshHotswapStatus`）；`toast` 新增 `key` / `toast.dismiss(key)`，「热替换失败」在服务重启/停止、新结果到来或点开小签时收回；遮挡告警与卡片去掉「重启服务」（重启解决不了遮挡），告警文案去掉括号嵌套与「其余 0 个」。后续再修：「代码不是最新」按类跟踪（`Report.requestedNames` + `HotswapState` 的未生效类集合），失败的类被后续推送真正替换并覆盖后标记自动清除；服务活着而 agent 连不上时不再静默，升级为可见的失败。

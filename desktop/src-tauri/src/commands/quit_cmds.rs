@@ -42,9 +42,10 @@ use crate::state::AppState;
 const PING_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// 全部连接探测的总 deadline。探测是并行的，理论上最慢就等于最慢的那一条；
-/// 再留 1 秒给调度与锁等待。超过它说明有连接把流程挂住了，没出结果的一律
-/// 按 `unknown` 报——退出探测宁可误报「可能有事务」，也不能当 clean 放行。
-const PENDING_TX_DEADLINE: Duration = Duration::from_secs(3);
+/// 有本地脏计数时要再追一次 `txStatus`（ping + 真源两次往返），所以留出两倍余量。
+/// 超过它说明有连接把流程挂住了，没出结果的一律按 `unknown` 报——退出探测宁可
+/// 误报「可能有事务」，也不能当 clean 放行。
+const PENDING_TX_DEADLINE: Duration = Duration::from_secs(5);
 
 /// 等前端回话的上限。超过它说明界面已卡死/崩溃，继续等只会让应用关不掉。
 const ACK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -184,10 +185,20 @@ pub async fn db_pending_tx(state: tauri::State<'_, Arc<AppState>>) -> Result<Val
             // A0 的独立会话槽（`c1#2`）属于同一条连接：按连接 id 归并，
             // 否则确认框里会出现「prod」「prod#2」两条同名连接，用户不知道该点哪个。
             let (id, _) = split_slot_key(&key);
-            let probed =
-                tokio::time::timeout(PING_TIMEOUT, call(h, "ping", Vec::new(), PING_TIMEOUT))
-                    .await
-                    .unwrap_or_else(|_| Err("退出探测超时".to_string()));
+            let probed = tokio::time::timeout(PING_TIMEOUT, async {
+                let p = call(h.clone(), "ping", Vec::new(), PING_TIMEOUT).await;
+                // 本地计数说「有未提交写入」时再问一次数据库真源。
+                // 手写 COMMIT / PL/SQL 内部提交都不会让这个计数归零，不问一句就会把用户
+                // 永久挡在确认框前（`v$transaction` 是唯一能纠正它的东西）。
+                // 计数为 0 时**不查**：退出路径要快，绝大多数情况本来就没有事务。
+                if needs_confirm(&p) {
+                    call(h, "txStatus", Vec::new(), PING_TIMEOUT).await.or(p)
+                } else {
+                    p
+                }
+            })
+            .await
+            .unwrap_or_else(|_| Err("退出探测超时".to_string()));
             // 先算出结果行再 move `key`：`id` 借用了 `key`，同一个表达式里
             // move 会与借用冲突（E0505）。拆两句对语义没有影响。
             let row = pending_row(id, kind, probed);
@@ -263,11 +274,33 @@ fn merge_sessions(rows: Vec<Value>) -> Vec<Value> {
                     }
                 } else if sa == "pending" || sb == "pending" {
                     cur["state"] = json!("pending");
+                } else {
+                    // 两条都干净时，「数据库已确认没有事务」必须两条都确认过才算；
+                    // 任一条没核对（null）就回 null，让界面还有机会补上刚落下的语句。
+                    let confirmed = confirmed_clean(cur) && confirmed_clean(&row);
+                    cur["active"] = if confirmed { json!(false) } else { Value::Null };
                 }
             }
         }
     }
     order.into_iter().filter_map(|id| acc.remove(&id)).collect()
+}
+
+/// 这一行是否带着「数据库确认没有未提交事务」的结论（`active:false`）。
+fn confirmed_clean(v: &Value) -> bool {
+    v.get("active").and_then(Value::as_bool) == Some(false)
+}
+
+/// ping 结果里「本地计数说有未提交写入」吗？只有这种时候才值得再问一次数据库真源。
+fn needs_confirm(ping: &Result<Value, String>) -> bool {
+    let Ok(v) = ping else { return false };
+    let Some(tx) = v.get("tx") else { return false };
+    let statements = tx.get("statements").and_then(Value::as_i64).unwrap_or(0);
+    let auto_commit = tx
+        .get("autoCommit")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    !auto_commit && statements > 0
 }
 
 fn pending_row(id: &str, kind: EngineKind, r: Result<Value, String>) -> Value {
@@ -293,12 +326,26 @@ fn pending_row(id: &str, kind: EngineKind, r: Result<Value, String>) -> Value {
         .get("autoCommit")
         .and_then(Value::as_bool)
         .unwrap_or(true);
-    // 只有写语句会累加 statements（DDL 会重置），所以「>0」就等价于「有未提交的写入」
-    let pending = !auto_commit && statements > 0;
+    // `active` 只有 `txStatus` 带出来（`tx.active`），是 `v$transaction` 的真源：
+    //   true  → 库里确实有未提交事务；
+    //   false → 库里没有，本地计数是脏的（手写 COMMIT / PL/SQL 内部提交），不能拿它拦人；
+    //   null  → 查不了（没授权 / 字典被锁），退回本地计数，绝不把「查不了」当「没有事务」。
+    let db_active = v
+        .get("active")
+        .and_then(Value::as_bool)
+        .or_else(|| tx.get("active").and_then(Value::as_bool));
+    let pending = match db_active {
+        Some(active) => active,
+        // 只有写语句会累加 statements（DDL 会重置），所以「>0」就等价于「有未提交的写入」
+        None => !auto_commit && statements > 0,
+    };
     json!({
         "id": id,
         "state": if pending { "pending" } else { "clean" },
         "engine": engine,
+        // 真源结论（`v$transaction`）：`false` = 数据库确认没有事务，界面上那份旧计数
+        // 不能把它翻回 pending；`null` = 没核对（计数为 0，没去查）或查不了。
+        "active": db_active,
         "statements": statements,
         "rows": tx.get("rows").and_then(Value::as_i64).unwrap_or(0),
         "since": tx.get("since").and_then(Value::as_i64).unwrap_or(0),
@@ -350,6 +397,62 @@ mod tests {
             Ok(json!({ "alive": false, "tx": { "statements": 3 } })),
         );
         assert_eq!(row["state"], "unknown");
+    }
+
+    /// 真源说「库里没有未提交事务」时，本地脏计数（手写 COMMIT 之后不会归零）不能拿来拦人。
+    #[test]
+    fn 真源说没有事务时不看本地脏计数() {
+        let row = pending_row(
+            "c1",
+            EngineKind::Java,
+            Ok(json!({
+                "alive": true,
+                "active": false,
+                "tx": { "autoCommit": false, "statements": 7, "rows": 40, "since": 1 }
+            })),
+        );
+        assert_eq!(row["state"], "clean");
+    }
+
+    /// 反过来也要认：本地计数是 0，但数据库说事务还在（计数被 DDL 重置过）。
+    #[test]
+    fn 真源说有事务时即使计数为零也要确认() {
+        let row = pending_row(
+            "c1",
+            EngineKind::Rust,
+            Ok(json!({
+                "alive": true,
+                "active": true,
+                "tx": { "autoCommit": false, "statements": 0, "rows": 0, "since": 0 }
+            })),
+        );
+        assert_eq!(row["state"], "pending");
+    }
+
+    /// `txStatus` 查不了（active 为 null，例如没权限看 `v$transaction`）时退回本地计数，
+    /// 不能当成「没有事务」放行。
+    #[test]
+    fn 真源查不了时退回本地计数() {
+        let row = pending_row(
+            "c1",
+            EngineKind::Rust,
+            Ok(json!({
+                "alive": true,
+                "active": null,
+                "tx": { "autoCommit": false, "statements": 2, "rows": 2, "since": 1 }
+            })),
+        );
+        assert_eq!(row["state"], "pending");
+    }
+
+    /// 快路径：本地计数为 0 或自动提交时不追 `txStatus`，退出探测不能为每条连接多花一次往返。
+    #[test]
+    fn 只有计数大于零才追真源() {
+        assert!(!needs_confirm(&Ok(tx(0, 0, false))));
+        assert!(!needs_confirm(&Ok(tx(3, 5, true))));
+        assert!(needs_confirm(&Ok(tx(1, 1, false))));
+        assert!(!needs_confirm(&Ok(json!({ "alive": false }))));
+        assert!(!needs_confirm(&Err("超时".to_string())));
     }
 
     #[test]

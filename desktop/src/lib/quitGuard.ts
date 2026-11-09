@@ -8,6 +8,7 @@ import { friendlyDbError } from "./db";
 import { requestOpenFile } from "./openFileRequest";
 import type { UnsavedFile } from "./saveAllDirty";
 import { isUnsaved } from "./tabDirty";
+import { txPending } from "./txState";
 import { getSession } from "./workspaceSession";
 import { toast } from "../components/ui/toast";
 
@@ -63,9 +64,19 @@ function loadSaveAll() {
  */
 export function mergePending(rows: PendingTxRow[]): QuitRow[] {
   const out = new Map<string, QuitRow>();
+  // 后端已经用 `v$transaction` **确认**这条连接没有未提交事务。
+  // 界面上的本地 DML 计数可能是脏的（手写 COMMIT / PL/SQL 内部提交都不归零），
+  // 拿它把这些连接重新塞回退出清单，用户就会被一个不存在的事务反复拦住。
+  //
+  // 注意只认 `active === false`：后端「只是没看到事务」（计数为 0、没去查真源）
+  // 时仍然是 null，那种情况界面的新语句要算进来（后一条可能刚落）。
+  const dbClean = new Set<string>();
 
   for (const r of rows) {
-    if (r.state === "clean") continue;
+    if (r.state === "clean") {
+      if (r.active === false) dbClean.add(r.id);
+      continue;
+    }
     const c = connOf(r.id);
     out.set(r.id, {
       connId: r.id,
@@ -80,9 +91,10 @@ export function mergePending(rows: PendingTxRow[]): QuitRow[] {
   }
 
   for (const c of getDb().conns) {
+    if (dbClean.has(c.id)) continue;
     const tx = rtOf(c.id).tx;
-    // 自动提交模式下每条语句都已落盘，退出不会丢东西 → 不算待确认
-    if (!tx || tx.autoCommit || tx.statements <= 0) continue;
+    // 判据与关标签 / 切连接共用 `txPending`：自动提交模式下每条语句都已落盘，退出不丢东西。
+    if (!tx || !txPending(tx).pending) continue;
     const cur = out.get(c.id);
     if (!cur) {
       out.set(c.id, {

@@ -175,7 +175,8 @@ describe("ResultPanel 列中文名", () => {
 
     expect(spy).toHaveBeenCalledWith("c1", ["bd_material"]);
     const sub = [...host.querySelectorAll(".dbx-gh .t")].map((e) => e.textContent);
-    expect(sub).toContain("物料编码");
+    // 中文名要显示，但类型不能丢：写 SQL 时得知道它是 VARCHAR2 还是 NUMBER
+    expect(sub[0]).toBe("物料编码 · VARCHAR2(40)");
     spy.mockRestore();
   });
 

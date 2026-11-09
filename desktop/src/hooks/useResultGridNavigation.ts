@@ -49,9 +49,33 @@ export function useResultGridNavigation({boxRef,sel,visible,order,reveal,onSel,o
     const ci=Math.max(0,Math.min(visible.length-1,Math.max(0,visible.indexOf(sel?.c ?? visible[0]))+dc));
     const c=visible[ci];onSel({r:order[i],c},extend);focusCell({r:order[i],c});
   };
+  /** 一屏能显示多少行：按容器高度与实际行高算，别写死 20。 */
+  const pageRows=()=>{
+    const box=boxRef.current;
+    const h=box?.clientHeight ?? 0;
+    const rowH=box ? parseFloat(getComputedStyle(box).getPropertyValue("--dbx-row-h")) : 0;
+    return rowH>0 && h>0 ? Math.max(1,Math.floor(h/rowH)-1) : 20;
+  };
   const onKey=(e:KeyboardEvent)=>{
     if(editing || e.target!==e.currentTarget) return;
-    const step:Record<string,[number,number]>={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1],PageUp:[-20,0],PageDown:[20,0]};
+    // Home/End（首列/末列）、Ctrl+Home/End（首行/末行）：表格的通用肌肉记忆
+    if((e.key==="Home" || e.key==="End") && !e.altKey) {
+      e.preventDefault();
+      if(!order.length || !visible.length) return;
+      const last=order[order.length-1];
+      if(e.ctrlKey || e.metaKey) {
+        const r=e.key==="Home" ? order[0] : last;
+        const c=sel && visible.includes(sel.c) ? sel.c : visible[0];
+        onSel({r,c},e.shiftKey);focusCell({r,c});
+      } else {
+        const c=e.key==="Home" ? visible[0] : visible[visible.length-1];
+        const r=sel && order.includes(sel.r) ? sel.r : order[0];
+        onSel({r,c},e.shiftKey);focusCell({r,c});
+      }
+      return;
+    }
+    const page=pageRows();
+    const step:Record<string,[number,number]>={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1],PageUp:[-page,0],PageDown:[page,0]};
     if(e.key==="ArrowUp" && (e.altKey || selIndex<=0 && !e.shiftKey)) {e.preventDefault();focusHeader(sel?.c ?? visible[0]);}
     else if((e.key==="ContextMenu" || e.key==="F10" && e.shiftKey) && sel && onCellMenu) {e.preventDefault();focusCell(sel,true);}
     else if(step[e.key]) {e.preventDefault();move(...step[e.key],e.shiftKey);}

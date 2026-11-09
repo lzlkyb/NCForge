@@ -24,16 +24,21 @@ export function SqlExecutionFeedback({ executionId, previousAt }: { executionId?
   const active = operation.endedAt === undefined;
   const progress = operation.progress;
   const script = (progress?.total ?? 0) > 1;
-  if (!active && !script && operation.state !== "cancelled" && operation.state !== "failed") return null;
+  const cost = operation.endedAt === undefined ? 0 : Math.max(0, operation.endedAt - operation.startedAt);
+  // 单条成功也要说话：DML 本来就没有结果集，用户唯一能确认「跑完了、花了多久」的
+  // 线索就是这里。以前这里直接 return null，执行完屏幕上什么都没变。
+  if (!active && !script && operation.state !== "cancelled" && operation.state !== "failed" && operation.state !== "success") return null;
   const old = previousAt !== undefined && previousAt < operation.startedAt;
   const text = active
     ? operation.state === "cancelling" ? "等待数据库停止确认"
       : script ? `执行脚本 · ${thousands(progress?.done ?? 0)} / ${thousands(progress?.total ?? 0)} 条`
       : old ? "正在重新查询 · 当前为上次结果" : operation.phase
     : operation.state === "cancelled" ? operation.detail?.startsWith("连接未建立") ? "未执行 · 连接未建立" : "执行已停止"
-      : operation.state === "failed" ? script ? "脚本执行有失败" : "执行失败" : "脚本执行完成";
+      : operation.state === "failed" ? script ? "脚本执行有失败" : "执行失败"
+        : script ? "脚本执行完成" : "执行完成";
   return <span className="dbx-query-status" data-state={operation.state} role="status" title={operation.detail ?? text}>
     <Icon name={active ? "activity" : operation.state === "success" ? "check" : operation.state === "failed" ? "alert" : "stop"} size={12} />
     {text}{!active && script && progress && <span> · 已处理 {thousands(progress.done)} / {thousands(progress.total ?? 0)} 条</span>}
+    {!active && !script && cost > 0 && <span> · {cost < 1000 ? `${Math.round(cost)}ms` : `${(cost / 1000).toFixed(1)}s`}</span>}
   </span>;
 }
