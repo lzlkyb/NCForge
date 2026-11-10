@@ -27,6 +27,8 @@
     "resources:json": "node scripts/generate-resources-json.mjs",
     "gitee:manifest": "node scripts/gitee-manifest.mjs",
     "mirror:gitee": "node scripts/mirror-gitee.mjs",
+    "release:verify": "node scripts/verify-update-chain.mjs",
+    "release:reship": "node scripts/reship.mjs",
     "release": "node scripts/release.mjs",
     "lint": "eslint .",
     "lint:prune": "eslint . --prune-suppressions",

@@ -14,6 +14,11 @@
  *
  * 用法：
  *   GITEE_TOKEN=xxx node scripts/mirror-gitee.mjs v0.1.2
+ *   GITEE_TOKEN=xxx node scripts/mirror-gitee.mjs v0.1.2 --force   # 附件全部重传
+ *
+ * 🔴 --force 是给「重发」用的：正常幂等靠「同名同大小就跳过」，而重发时新构建完全
+ *   可能产出同字节数的包（内容不同），跳过就会把上一轮那份留在 Gitee 上，客户端拿
+ *   新清单验旧包 → 验签失败 → 反复下载。字节数相等不能证明是同一份文件。
  *
  * 环境变量：
  *   GITEE_TOKEN       可选。Gitee 私人令牌（需 projects 写权限）；不给就从
@@ -32,7 +37,10 @@ import path from "node:path";
 
 const API = "https://gitee.com/api/v5";
 const REPO = (process.env.GITEE_REPOSITORY || "lzul/NCForge").trim();
-const TAG = (process.argv[2] || "").trim();
+const ARGS = process.argv.slice(2);
+// 按形状找 tag，不按位置：`--force` 放前面也不会把 tag 解析成 "--force"。
+const TAG = (ARGS.find((a) => /^v\d/.test(a)) || "").trim();
+const FORCE = ARGS.includes("--force");
 
 // 仓库根：脚本在 desktop/scripts/ 下，往上两级。
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
@@ -63,7 +71,7 @@ const ok = (m) => console.log(`\x1b[32m[OK]\x1b[0m ${m}`);
 const warn = (m) => console.log(`\x1b[33m[WARN]\x1b[0m ${m}`);
 const step = (m) => console.log(`\n\x1b[1m▸ ${m}\x1b[0m`);
 
-if (!TAG) fail("用法: GITEE_TOKEN=xxx node scripts/mirror-gitee.mjs v1.2.3");
+if (!TAG) fail("用法: GITEE_TOKEN=xxx node scripts/mirror-gitee.mjs v1.2.3 [--force]");
 if (!/^v\d/.test(TAG)) fail(`tag 必须以 v 开头（${TAG}）`);
 if (!TOKEN) {
   fail(
@@ -125,7 +133,7 @@ const ASSETS = path.join(WORK, "assets");
 const MANIFESTS = path.join(WORK, "manifests");
 fs.mkdirSync(ASSETS, { recursive: true });
 fs.mkdirSync(MANIFESTS, { recursive: true });
-info(`工作目录 ${WORK}`);
+info(`工作目录 ${WORK}${FORCE ? "（--force：附件全部重传）" : ""}`);
 
 // ── 1. 只下清单，先算出到底需要哪些文件 ───────────────────────────────────────
 step("1/6 下载清单（updater.json / resources.json）");
@@ -140,10 +148,12 @@ function ghDownload(names) {
   if (r.status !== 0) fail(`gh release download 失败（tag ${TAG} @ ${GH_REPO}）`);
 }
 
-for (const n of ["updater.json", "resources.json"]) {
-  const p = path.join(ASSETS, n);
-  if (!fs.existsSync(p)) ghDownload([n]);
-}
+// 🔴 清单必须**每次重下**，不能「存在就跳过」：两份清单只占十几 KB，而它们决定
+// 镜像的签名与版本指向。v0.4.0 实测踩过——tag 重发后重跑镜像，本地还躺着上一次
+// 构建的 updater.json（签名属于旧包），生成的 updater-gitee.json 与重新上传的
+// 安装包**验签必然不匹配**，客户端每次都要「下载到 100% → 验签失败 → 换源重下」。
+// 更隐蔽的是验收只比 `version`（两次都是 0.4.0），全程绿灯。
+ghDownload(["updater.json", "resources.json"]);
 
 /**
  * GitHub Release 上每个附件的真实字节数。
@@ -276,14 +286,16 @@ for (const name of needed) {
   const local = path.join(ASSETS, name);
   const size = fs.statSync(local).size;
   const prev = existing.get(name);
-  if (prev?.size === size) {
+  // 正常幂等：同名同大小跳过。--force（重发）时一律重传——大小相等不代表内容相同。
+  if (!FORCE && prev?.size === size) {
     ok(`${name} 已在上方（${(size / 1048576).toFixed(1)} MB），跳过`);
     continue;
   }
   if (prev) {
     // 同名附件不会被覆盖，直接重传会并排出现两条（一条坏一条好），客户端按名字
     // 取第一个就可能又拿到坏的。先删掉旧的再传。
-    warn(`${name} 大小不同（远端 ${prev.size} / 本地 ${size}），先删旧附件`);
+    const why = prev.size === size ? "大小相同但内容可能不同" : `远端 ${prev.size} / 本地 ${size}`;
+    warn(`${name} ${why}（${FORCE ? "--force" : ""}），先删旧附件`);
     const del = await gitee("DELETE", `/repos/${REPO}/releases/${releaseId}/attach_files/${prev.id}`);
     if (del.status >= 300) {
       warn(`删除旧附件失败（${del.status}）——Gitee 上可能留下重复附件，请手动清理`);
@@ -347,17 +359,29 @@ git(["push", "-f", "--progress", "origin", "releases"], { cwd: MIRROR });
 step("验收：匿名读 raw 清单");
 const rawUrl = `https://gitee.com/${REPO}/raw/releases/latest/updater-gitee.json`;
 let verified = false;
+// 只比 version 是不够的：同一个 tag 重发后 version 不变、签名却变了（新构建 = 新字节），
+// 而签名不匹配的清单会让客户端每次都「下完 → 验签失败 → 换源重下」。这里连签名一起比。
+const expectSig = Object.fromEntries(
+  Object.entries(updater.platforms || {}).map(([k, v]) => [k, v.signature]),
+);
+const sigMismatch = (data) =>
+  Object.keys(expectSig).filter((k) => expectSig[k] !== data.platforms?.[k]?.signature);
 for (let i = 1; i <= 6; i += 1) {
   const res = await fetch(rawUrl, { redirect: "follow" });
   if (res.ok) {
     const data = await res.json();
-    if (String(data.version) === TAG.replace(/^v/, "")) {
-      ok(`raw 读到 version ${data.version}（${res.status}），与 ${TAG} 一致`);
+    const bad = sigMismatch(data);
+    if (String(data.version) === TAG.replace(/^v/, "") && bad.length === 0) {
+      ok(`raw 读到 version ${data.version}（${res.status}），签名与本次 GitHub 清单一致`);
       for (const [k, v] of Object.entries(data.platforms || {})) info(`  ${k} → ${v.url}`);
       verified = true;
       break;
     }
-    warn(`raw 上的 version 是 ${data.version}，还没变成 ${TAG}（第 ${i} 次），等 5s 重试`);
+    if (bad.length) {
+      warn(`raw 上 ${bad.join("/")} 的签名与本次清单不一致（第 ${i} 次），等 5s 重试`);
+    } else {
+      warn(`raw 上的 version 是 ${data.version}，还没变成 ${TAG}（第 ${i} 次），等 5s 重试`);
+    }
   } else {
     warn(`raw 请求 ${res.status}（第 ${i} 次），等 5s 重试`);
   }
@@ -382,6 +406,24 @@ if (biggest) {
   } else {
     warn(`附件 ${biggest.n} 匿名请求返回 ${head.status}——客户端可能下不到，请用浏览器复核`);
   }
+}
+
+// ── 复核：端到端验一遍「清单 ↔ 产物 ↔ 签名」────────────────────────────────
+// 上面两步各自只保证「自己那一段」：清单比过签名、附件比过字节数。但客户端是把
+// **某个源的清单**配**某个源的包**一起用的，只有端到端跑一次才算数（v0.4.0 事故里
+// 清单签名属于上一轮构建、附件是新包，两段各自都「通过」，客户端却必然验签失败）。
+step("复核：端到端校验更新链路");
+const verify = spawnSync(
+  process.execPath,
+  [path.join(import.meta.dirname, "verify-update-chain.mjs"), TAG],
+  { encoding: "utf-8", stdio: "inherit" },
+);
+if (verify.status !== 0) {
+  fail(
+    verify.status === 2
+      ? "端到端校验时网络不通，无法确认链路（附件已上传，但结论未知）。设 HTTPS_PROXY 后重跑本脚本复核。"
+      : "更新链路校验未通过——现在宣布发版完成，用户就会「下载完又重下」。修好清单或附件后重跑本脚本。",
+  );
 }
 
 console.log(`\n\x1b[32m✅ ${TAG} 已镜像到 Gitee：https://gitee.com/${REPO}/releases/tag/${TAG}\x1b[0m`);
