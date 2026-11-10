@@ -256,8 +256,12 @@ async function main() {
   let unrelCollected = 0;
   if (unrelMatch) {
     const body = unrelMatch[0];
+    // `亮点` 不在这里跳过：它是更新弹窗顶部的高亮导读（`changelog.mjs` 解析成
+    // `highlights`，`update-release-notes.mjs` 也只剥 用户摘要/技术细节 类小节）。
+    // 此前它在这个集合里，写进 [Unreleased] 的亮点会被整段丢掉——v0.3.0 只能发版后
+    // 手工补一笔，而 tag 里没有，更新弹窗读 tag 那份 CHANGELOG 就永远拿不到亮点。
     const skipSec = new Set([
-      "用户摘要", "技术", "说明", "亮点", "Highlights",
+      "用户摘要", "技术", "说明", "Highlights",
     ]);
     // 开发者小节（技术细节 / 实现说明 / 开发者）**不在这里跳过**：它们要留在 CHANGELOG
     // 的版本段里（关于页也读同一份），「不进更新弹窗」那件事由 `update-release-notes.mjs`
@@ -304,9 +308,10 @@ async function main() {
     );
   }
 
-  // 小节顺序固定成「新增 → 变更 → 修复 → 优化 → 安全 → 其它（技术细节 等）」，
+  // 小节顺序固定成「亮点 → 新增 → 变更 → 修复 → 优化 → 安全 → 其它（技术细节 等）」，
   // 不跟 `[Unreleased]` 里的书写顺序走：那段是边写边补的，顺序通常很乱。
-  const SECTION_ORDER = ["新增", "变更", "修复", "优化", "安全"];
+  // 亮点排最前，紧跟 `### 更新摘要`，与关于页「本版亮点」的阅读顺序一致。
+  const SECTION_ORDER = ["亮点", "新增", "变更", "修复", "优化", "安全"];
   const rank = (name) => {
     const i = SECTION_ORDER.indexOf(name);
     return i < 0 ? SECTION_ORDER.length : i;
