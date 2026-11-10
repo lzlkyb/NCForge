@@ -33,6 +33,40 @@ function readAll(): Record<string, HistoryEntry[]> {
 
 const listeners = new Set<() => void>();
 
+/** 合并写盘的延迟：回放脚本几百条语句时，只在主线程空闲时序列化一次历史。 */
+const WRITE_DELAY_MS = 300;
+let writeTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * 立刻把内存里的历史写进 localStorage。
+ *
+ * 平时不必调：`addHistory` 只更新内存 + 通知，300ms 内合并写一次。但页面要走了
+ * （`pagehide` / 隐藏）时得补写，否则最后几条执行记录会随进程一起消失。
+ */
+export function flushHistory(): void {
+  if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+  if (!cache) return;
+  try {
+    localStorage.setItem(KEY, JSON.stringify(cache));
+  } catch {
+    // 存不下就算了
+  }
+}
+
+let hooked = false;
+function scheduleWrite(): void {
+  if (!hooked && typeof window !== "undefined") {
+    hooked = true;
+    // 浏览器/WebView 关闭前不一定还有定时器机会，补一次同步写。
+    window.addEventListener("pagehide", flushHistory);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flushHistory();
+    });
+  }
+  if (writeTimer) return;
+  writeTimer = setTimeout(flushHistory, WRITE_DELAY_MS);
+}
+
 export function subscribeHistory(fn: () => void): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
@@ -53,11 +87,8 @@ export function addHistory(connId: string, entry: HistoryEntry): void {
   // 不能就地改 `all`：`getHistoryMap()` 把同一个对象直接交给 useSyncExternalStore，
   // 引用不变就被判成「没变化」，历史抽屉里的列表永远不刷新。每次换一个新对象。
   cache = { ...all, [connId]: list };
-  try {
-    localStorage.setItem(KEY, JSON.stringify(cache));
-  } catch {
-    // 存不下就算了
-  }
+  // 列表立刻可见（内存 + 通知），落盘合并到 300ms：几百条 INSERT 的回放不再逐条全量序列化。
+  scheduleWrite();
   listeners.forEach((fn) => fn());
 }
 
@@ -67,11 +98,8 @@ export function clearHistory(connId: string): void {
   const next = { ...all };
   delete next[connId];
   cache = next;
-  try {
-    localStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // 忽略
-  }
+  // 清空是用户的明确动作，必须立即落盘：否则 300ms 内退出会把刚清掉的历史又带回来。
+  flushHistory();
   listeners.forEach((fn) => fn());
 }
 

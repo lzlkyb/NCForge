@@ -83,7 +83,9 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
    */
   const onStop = useCallback(() => {
     if (!tab.connId) return;
-    const task=getOperations().find(o=>o.key===`db.sql:${tab.id}` && o.endedAt===undefined);
+    // 执行计划也是一个可取消任务，且现在跑在标签自己的会话上；先找任务，
+    // 再退回到直接取消槽，避免「停止」把另一条空闲能会话取消掉。
+    const task=getOperations().find(o=>(o.key===`db.sql:${tab.id}` || o.key===`db.explain:${tab.id}`) && o.endedAt===undefined);
     if(task) void cancelOperation(task.id);
     else void dbApi.cancel(tab.connId, tab.slot).catch((e) => toast(`取消失败：${friendlyDbError(e)}`, "error"));
   }, [tab.id,tab.connId, tab.slot]);
@@ -177,7 +179,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
             onPick={(sql) => api.current?.setText(sql)}
           />
         )}
-        {sessOpen && tab.connId && <SessionDrawer connId={tab.connId} onClose={closeSessionPanel} />}
+        {sessOpen && tab.connId && <SessionDrawer connId={tab.connId} visible={active} onClose={closeSessionPanel} />}
       </div>
     </div>
   );

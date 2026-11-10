@@ -4,6 +4,7 @@ import { dbTaskSpec } from "./dbOperations";
 import { toast } from "../components/ui/toast";
 import type { TransferSource } from "./resultTransferContext";
 import { estimateTransferBytesAsync, MAX_CLIPBOARD_BYTES } from "./transferSize";
+import { isLobPreview } from "./db";
 export { estimateTransferBytes } from "./transferSize";
 
 const encoder = new TextEncoder();
@@ -39,6 +40,15 @@ export async function copyTransfer(data: TransferData, options: TransferOptions,
   const error = validateTransfer(data, options);
   if (error) { toast(error, "warning"); return false; }
   if (!data.rows.length && options.header === "none") { toast("没有可复制的数据，可先调整筛选", "info"); return false; }
+  // 结果集里的 CLOB 只带 8K 预览 + 一段说明。原始值 / IN 条件拿这种串等于拿了一段假数据，
+  // 直接拒绝并指路；普通表格复制允许带预览，但要在回执里说明有几格不是全量。
+  const columns = options.columnIndices.length ? options.columnIndices : data.columns.map((_, i) => i);
+  let previews = 0;
+  for (const row of data.rows) for (const c of columns) if (isLobPreview(row[c] ?? null)) { previews++; break; }
+  if (previews > 0 && (raw || options.format === "where")) {
+    toast(`选中的大文本是 8K 预览，不是完整值；请在单元格详情里点「加载完整值」后再复制`, "warning");
+    return false;
+  }
   const task = beginOperation(dbTaskSpec(`copy:${source.resultId}`, "生成复制内容", source.connId, "查询结果", undefined, source.tabId));
   if (!task) return false;
   try {
@@ -48,9 +58,10 @@ export async function copyTransfer(data: TransferData, options: TransferOptions,
     if (options.format === "html" && typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
       await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([text], { type: "text/html" }), "text/plain": new Blob([text], { type: "text/plain" }) })]);
     } else await navigator.clipboard.writeText(text);
-    const columns = options.columnIndices.length || data.columns.length;
-    toast(`已复制 ${data.rows.length} 行 × ${columns} 列 · ${raw ? "原始值" : options.format.toUpperCase()}`, "success");
-    task.finish("success", `已复制 ${data.rows.length} 行 × ${columns} 列`);
+    const count = options.columnIndices.length || data.columns.length;
+    const note = previews > 0 ? ` · ${previews} 行含 8K 预览` : "";
+    toast(`已复制 ${data.rows.length} 行 × ${count} 列 · ${raw ? "原始值" : options.format.toUpperCase()}${note}`, previews > 0 ? "warning" : "success");
+    task.finish("success", `已复制 ${data.rows.length} 行 × ${count} 列`);
     return true;
   } catch (error) {
     task.finish("failed", "复制失败，返回结果页保存为文件");

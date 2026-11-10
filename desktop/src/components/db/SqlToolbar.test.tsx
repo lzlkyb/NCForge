@@ -7,7 +7,7 @@ import type { ContextMenuItem } from "../workspace/ContextMenu";
 const mocks = vi.hoisted(() => ({ switchConn: vi.fn(), readOnly: false as boolean | null }));
 vi.mock("../../lib/dbActions", () => ({ switchConn: mocks.switchConn }));
 vi.mock("../../lib/dbStore", () => ({ useConnOf: (id: string | null) => id ? ({ name: "测试库", env: "test", user:"NC", url:"jdbc:oracle:thin:@localhost:1521/test", autoCommit: false }) : null, useConnRt: () => ({ status: "connected" }), rtOf: () => ({ status: "connected" }) }));
-vi.mock("../../lib/dbReadOnly", () => ({ useDbReadOnly: () => mocks.readOnly }));
+vi.mock("../../lib/dbReadOnly", () => ({ useDbReadOnly: () => mocks.readOnly, useDbReadOnlyState: () => ({ value: mocks.readOnly, error: "", retry: () => {} }) }));
 vi.mock("./ConnPicker", () => ({ ConnPicker: ({ disabled }: { disabled: boolean }) => <button disabled={disabled} aria-label="选择连接">测试库</button> }));
 vi.mock("../workspace/ContextMenu", () => ({ ContextMenu: ({ items, onClose }: { items: ContextMenuItem[]; onClose: () => void }) => <div role="menu">{items.map((item) => <button key={item.label} disabled={item.disabled} onClick={() => { item.onSelect(); onClose(); }}>{item.label}</button>)}</div> }));
 import { SqlToolbar } from "./SqlToolbar";

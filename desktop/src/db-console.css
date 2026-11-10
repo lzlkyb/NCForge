@@ -25,6 +25,8 @@
 .e-prod { --env: var(--destructive); --env-ink: var(--destructive-ink); }
 .e-other { --env: var(--muted-foreground); --env-ink: var(--muted-foreground); }
 .dbx-edot { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--env)); flex-shrink: 0; }
+/* 未写回改动：固定用警示色，不要和环境色点混在一起 */
+.dbx-dirty-dot { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--warning)); flex-shrink: 0; }
 .dbx-echip { font-size: var(--dbx-fs-body); line-height: 16px; padding: 0 6px; border-radius: 8px; background: hsl(var(--env) / .15); color: hsl(var(--env-ink)); font-weight: 600; flex-shrink: 0; white-space: nowrap; }
 .dbx-mono { font-family: "Cascadia Mono", Consolas, monospace; }
 .dbx-muted { color: hsl(var(--muted-foreground)); }

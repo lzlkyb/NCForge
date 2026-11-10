@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
-  readOnly: false as boolean | null, status: "connected", request: vi.fn(), tx: vi.fn(), setTx: vi.fn(), patchTab: vi.fn(), claimCursor: vi.fn(), toast: vi.fn(),
+  readOnly: false as boolean | null, readOnlyError: "", retry: vi.fn(), status: "connected", request: vi.fn(), tx: vi.fn(), setTx: vi.fn(), patchTab: vi.fn(), claimCursor: vi.fn(), toast: vi.fn(),
   tabs: [] as { id: string; kind: string; connId: string; slot: string }[],
 }));
 vi.mock("../../lib/dbApi", () => ({ ENV_LABEL: { test: "测试" }, dbApi: { readOnly: mocks.request, tx: mocks.tx } }));
@@ -12,7 +12,7 @@ vi.mock("../../lib/dbStore", () => ({
   useConnRt: () => ({ status: mocks.status }), getDb: () => ({ tabs: mocks.tabs }),
   claimCursor: mocks.claimCursor, patchTab: mocks.patchTab, setTx: mocks.setTx,
 }));
-vi.mock("../../lib/dbReadOnly", () => ({ useDbReadOnly: () => mocks.readOnly }));
+vi.mock("../../lib/dbReadOnly", () => ({ useDbReadOnly: () => mocks.readOnly, useDbReadOnlyState: () => ({ value: mocks.readOnly, error: mocks.readOnlyError, retry: mocks.retry }) }));
 vi.mock("../../lib/db", () => ({ friendlyDbError: (error: unknown) => String(error) }));
 vi.mock("../../lib/dbOperations", () => ({ dbTaskSpec: () => ({}) }));
 vi.mock("../../lib/operations", () => ({ trackOperation: (_spec: unknown, run: () => Promise<unknown>) => run() }));
@@ -22,7 +22,7 @@ import { DbContextBar } from "./DbContextBar";
 let root: Root, host: HTMLDivElement;
 const tx = { autoCommit: false, statements: 0, rows: 0, since: 0 };
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.readOnly = false; mocks.status = "connected"; mocks.tabs = [];
+  vi.clearAllMocks(); mocks.readOnly = false; mocks.readOnlyError = ""; mocks.status = "connected"; mocks.tabs = [];
   mocks.request.mockReset(); mocks.tx.mockReset().mockResolvedValue({ tx });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
@@ -56,6 +56,19 @@ it("切换失败保留原状态并明确反馈，不能假装只读已经开启"
   expect(mocks.toast).toHaveBeenCalledWith("数据库未确认只读切换", "error");
   expect(mocks.setTx).not.toHaveBeenCalled();
   expect(mocks.claimCursor).not.toHaveBeenCalled();
+});
+
+it("只读探测失败时给出重试入口，不让开关永久卡在待验证", () => {
+  mocks.readOnly = null;
+  mocks.readOnlyError = "数据库繁忙";
+  act(() => root.unmount());
+  root = createRoot(host);
+  act(() => root.render(<DbContextBar connId="c1" independent transactionMode="手动提交" />));
+  expect(toggle().disabled).toBe(true);
+  expect(toggle().getAttribute("title")).toContain("数据库繁忙");
+  const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.includes("重试只读探测"))!;
+  act(() => retry.click());
+  expect(mocks.retry).toHaveBeenCalled();
 });
 
 it("只读状态待验证时禁用切换，模式和影响范围仍可读", () => {

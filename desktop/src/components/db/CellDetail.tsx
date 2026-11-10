@@ -128,7 +128,8 @@ export function CellDetail({ column, zh, row, value, empty, lob, sql, onClose }:
       )}
       {preview && !full && !loadError && (
         <div className="dbx-detail-note" role="status">
-          当前是预览（前 8K 字符{total ? `，原值共 ${total} 字符` : ""}）。完整值要按原 SQL 重查这一行。
+          当前是预览（前 8K 字符{total ? `，原值共 ${total} 字符` : ""}）。
+          {canLoad ? "点「加载完整值」按这一行重查。" : lob?.canLoad === false ? "这一行没有可用的定位条件，无法加载完整值；请直接查询该表。" : "当前结果不支持按行重查；请直接查询该表取完整值。"}
           {decoded && !decoded.complete && "解码结果末尾可能不完整。"}
         </div>
       )}

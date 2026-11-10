@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { toast } from "../components/ui/toast";
-import { friendlyDbError, parseDbError, type DbError } from "../lib/db";
+import { friendlyDbError, parseDbError, qualifyTable, type DbError } from "../lib/db";
 import { dbApi, type BoundCell, type Cell, type ColumnInfo, type ColumnMeta } from "../lib/dbApi";
 import { confirmProdWrite } from "../lib/dbConfirm";
 import { claimCursor, connOf, rtOf, setTx, setTxNotice, type TableTab } from "../lib/dbStore";
@@ -47,7 +47,8 @@ export function useTableSave({ tab, page, pk, cols, changes, sqls, drafts, reado
     if (!page || readonly !== false || sqls.length === 0 || operationActive("db." + dbTxKey(tab.connId)) || txLost) return;
     // 新增行先做本地必填校验：直接发给数据库也能报错（ORA-01400），但那时前面的
     // 删除/修改已经执行了，用户得回滚重来。能提前挡掉的就别让它进事务。
-    const missing = cols ? [...new Set(drafts.drafts.flatMap(d => missingRequired(page.columns, cols, d.values)))] : [];
+    // 完全空白的草稿行是「还没用的模板行」——它不会生成 INSERT，也不该拦着别的写回。
+    const missing = cols ? [...new Set(drafts.drafts.filter(d => d.values.size > 0).flatMap(d => missingRequired(page.columns, cols, d.values)))] : [];
     if (missing.length) { toast(`新增行还有必填列没填：${missing.join("、")}`, "warning"); return; }
     const issue = resultTargetIssue(page.context, connOf(tab.connId), rtOf(tab.connId).currentSchema ?? rtOf(tab.connId).info?.schema);
     if (issue) { toast(issue, "warning"); return; }
@@ -73,7 +74,8 @@ export function useTableSave({ tab, page, pk, cols, changes, sqls, drafts, reado
           setConflict(message);
           if (change.kind !== "insert") {
             try {
-              const query = lookupRow(tab.table, page.columns, page.rows[change.row], pk);
+              // 定位原值也用打开表页时固定的 schema，切过 schema 也不会读同名表的另一份。
+              const query = lookupRow(qualifyTable(tab.schema, tab.table), page.columns, page.rows[change.row], pk);
               const latest = await dbApi.execBound(tab.connId, query.sql, query.params, 2, 60);
               if (latest.kind === "rows" && latest.rows.length === 1) {
                 setConflictValues(change.cells.map(c => ({
@@ -112,6 +114,13 @@ export function useTableSave({ tab, page, pk, cols, changes, sqls, drafts, reado
         : `写回失败：${friendlyDbError(e)}`;
       task.finish("failed", `写回失败；前 ${done} 行${auto ? "已自动提交" : "仍在未提交事务中"}，返回表页核对`);
       toast(prefix, "error");
+      // 部分已自动提交：库里的状态已经不可回滚，屏幕上的行不再代表库里的状态。
+      // 强制回读当前页，宁可丢掉还没执行的那几条，也不要把假象留给用户。
+      // 未自动提交时不能回读：前几条还在未提交事务里，回读看到的是旧值，
+      // 而且会清掉失败那条的待写回改动，用户就没法改完再重试了。
+      if (done > 0 && auto) {
+        try { await load(); } catch { /* load 自己会把连接错误显示到状态条 */ }
+      }
     } finally {
       setSaving(false);
     }

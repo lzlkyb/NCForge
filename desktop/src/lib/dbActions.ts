@@ -7,6 +7,7 @@ import { forgetColumnZh } from "./dbColumnZh";
 import { ask, confirmProdWrite, ensureConnected, guardSlotTx, guardTx, isLastTabOn } from "./dbConfirm";
 import { clearFavorites } from "./dbFavorites";
 import {
+  activateTab,
   appendOutput,
   clearSlots,
   closeTab,
@@ -20,6 +21,7 @@ import {
   loadConns,
   loadMeta,
   restoreClosedTab,
+  openDictTab,
   openSqlTab,
   openTableTab,
   patchTab,
@@ -37,21 +39,71 @@ import { disposeSqlModel } from "./sqlModels";
 import { isWrite, stmtKind } from "./sqlSplit";
 import { captureResultContext, type SqlRunTarget } from "./dbResultContext";
 import { dbTabLabel } from "./dbPendingSessions";
+import { clearEditsForTab, pendingForTab } from "./dbDirtyEdits";
 
 /**
  * 数据库页的用户动作：把 store（状态）与 dbConfirm（要问一句的地方）串起来。
  * 组件只调这里，不自己拼流程——「关标签要先问事务」这类规则只写一遍。
  */
 
-export async function newConsole(connId: string | null = defaultConnId(), sql = ""): Promise<string> {
+/**
+ * 离开当前文档前问一句：表页 / 结果网格的改动都在组件本地 state 里，
+ * 切文档、切子页、切结果标签或关闭会直接卸载组件，改动就静默没了。
+ */
+async function confirmDiscardEdits(tabId: string | null | undefined, action: string): Promise<boolean> {
+  if (!tabId) return true;
+  const count = pendingForTab(tabId);
+  if (count <= 0) return true;
+  const tab = tabOf(tabId);
+  return ask(
+    "有未写回的改动",
+    `「${tab ? dbTabLabel(tab) : "当前标签"}」里还有 ${count} 处改动没有写回数据库。${action}后这些改动会丢失；需要保留请先点「写回」。`,
+    `丢弃并${action}`,
+    true,
+  );
+}
+
+/**
+ * 切换文档标签：先确认不会丢改动。
+ *
+ * 干净的标签必须**同步**切走（键盘方向键、点击都要即时响应），只有确实有未写回
+ * 改动时才等确认框。
+ */
+export function requestActivateTab(tabId: string): void | Promise<void> {
+  const active = getDb().active;
+  if (active === tabId) return;
+  if (!active || pendingForTab(active) <= 0) { activateTab(tabId); return; }
+  return (async () => {
+    if (!(await confirmDiscardEdits(active, "切换标签"))) return;
+    activateTab(tabId);
+  })();
+}
+
+/** 恢复最近关闭的标签会切走当前文档，同样先确认；当前标签干净时同步恢复。 */
+export function requestRestoreClosedTab(entryId?: string): string | null | Promise<string | null> {
+  const active = getDb().active;
+  if (!active || pendingForTab(active) <= 0) return restoreClosedTab(entryId);
+  return (async () => ((await confirmDiscardEdits(active, "恢复标签")) ? restoreClosedTab(entryId) : null))();
+}
+
+export async function newConsole(connId: string | null = defaultConnId(), sql = ""): Promise<string | null> {
+  // 新控制台会切换到新标签，当前标签若是脏的必须先问
+  if (!(await confirmDiscardEdits(getDb().active, "新建控制台"))) return null;
   const id = openSqlTab(connId, sql);
   if (connId) void ensureConnected(connId);
   return id;
 }
 
 export async function openTable(connId: string, table: string, sub: TableSub = "data") {
+  if (!(await confirmDiscardEdits(getDb().active, "打开表页"))) return;
   if (!(await ensureConnected(connId))) return;
   openTableTab(connId, table, sub);
+}
+
+/** 打开数据字典（会切走当前文档）。 */
+export async function openDict(connId: string | null) {
+  if (!(await confirmDiscardEdits(getDb().active, "打开数据字典"))) return;
+  openDictTab(connId);
 }
 
 /**
@@ -89,6 +141,8 @@ async function guardRunning(tab: SqlTab | null | undefined, reason: string): Pro
 export async function switchConn(tabId: string, connId: string) {
   const tab = sqlTabOf(tabId);
   if (!tab || tab.connId === connId) return;
+  // 换连接要清掉结果集，结果网格里的未写回改动会跟着一起消失
+  if (!(await confirmDiscardEdits(tabId, "切换连接"))) return;
   if (!(await guardRunning(tab, "切换连接"))) return;
   if (isLastTabOn(tab.connId, tabId) && !(await guardTx(tab.connId, "切换连接"))) return;
   // 槽属于旧连接：换连接前先把它的未提交写入问清楚，再放掉
@@ -108,6 +162,7 @@ export async function requestCloseTab(tabId: string) {
     closeTab(tabId);
     return;
   }
+  if (!(await confirmDiscardEdits(tabId, "关闭标签"))) return;
   if (!(await guardRunning(sqlTabOf(tabId), "关闭标签"))) return;
   if (isLastTabOn(tab.connId, tabId) && !(await guardTx(tab.connId, "关闭标签"))) return;
   if (tab.kind === "sql") {
@@ -116,6 +171,8 @@ export async function requestCloseTab(tabId: string) {
     await releaseSlot(tab.connId, tab.slot);
   }
   const closedId = closeTab(tabId);
+  // 标签没了，登记表里的计数也要立刻清掉，否则圆点会挂在一个不存在的标签上
+  clearEditsForTab(tabId);
   if (tab.kind === "sql") disposeSqlModel(tabId);
   // 关掉之后给一次「撤销」：草稿本来就没了入口，前置确认弹窗只会让每次关闭都变烦。
   if (closedId) {

@@ -26,6 +26,22 @@ const patch=(id:number,v:Partial<Operation>)=>{items=items.map(o=>o.id===id?{...
 export const getOperations=()=>items;
 export const subscribeOperations=(f:()=>void)=>{listeners.add(f);return()=>{listeners.delete(f);};};
 export const useOperations=()=>useSyncExternalStore(subscribeOperations,getOperations,getOperations);
+/**
+ * 只订阅一个任务键：别的后台任务每 125ms 更新进度时，这个组件的快照引用不变，
+ * React 直接跳过重渲染。全量 `useOperations()` 只留给确实要列所有任务的面板。
+ */
+function operationByKey(key:string):Operation|null{
+  const list=items.filter(o=>o.key===key);
+  return list.find(o=>o.endedAt===undefined) ?? list[list.length-1] ?? null;
+}
+function activeByKey(key:string):Operation|null{
+  return items.find(o=>o.key===key && (o.state==="running" || o.state==="cancelling")) ?? null;
+}
+export const useOperation=(key:string)=>useSyncExternalStore(subscribeOperations,()=>operationByKey(key),()=>null);
+export const useActiveOperation=(key:string)=>useSyncExternalStore(subscribeOperations,()=>activeByKey(key),()=>null);
+export const useOperationById=(id:number|undefined)=>useSyncExternalStore(subscribeOperations,()=>id===undefined?null:items.find(o=>o.id===id)??null,()=>null);
+/** 只关心「这个键是否在跑」时用布尔选择器，连任务对象都不必跟着变。 */
+export const useOperationActive=(key:string)=>useSyncExternalStore(subscribeOperations,()=>operationActive(key),()=>false);
 export const operationActive=(key:string)=>items.some(o=>o.key===key && ["running","cancelling"].includes(o.state));
 export function beginOperation(spec:OperationSpec):OperationHandle|null {
   if(operationActive(spec.key)) return null;

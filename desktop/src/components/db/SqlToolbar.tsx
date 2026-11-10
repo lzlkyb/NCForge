@@ -6,7 +6,7 @@ import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { switchConn } from "../../lib/dbActions";
 import { useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
 import { useDbReadOnly } from "../../lib/dbReadOnly";
-import { useOperations } from "../../lib/operations";
+import { useActiveOperation } from "../../lib/operations";
 import { TransactionButtons, TransactionMenu, TxBar, useDbTransaction } from "./TxBar";
 import { DbContextBar } from "./DbContextBar";
 import type { SqlExecutionScope, SqlFormatScope } from "./SqlEditor";
@@ -40,7 +40,7 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   const conn = useConnOf(tab.connId);
   const rt = useConnRt(tab.connId);
   const readonly=useDbReadOnly(tab.connId);
-  const operation = useOperations().find(o => o.key === 'db.sql:' + tab.id && o.endedAt === undefined);
+  const operation = useActiveOperation('db.sql:' + tab.id);
   const stopping = operation?.state === "cancelling";
   const transaction = useDbTransaction({connId:tab.connId, tabId:tab.id, slot:tab.slot, tx:tab.tx, notice:tab.txNotice,
     blocked:tab.running || !!operation, readOnly:readonly});

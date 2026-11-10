@@ -137,6 +137,11 @@ export interface TableTab {
   id: string;
   connId: string;
   table: string;
+  /**
+   * 打开这一页时的默认 schema。之后切换默认 schema 不影响这页：
+   * 查询 / 写回 / 结构读取都用 `schema.table` 限定，避免写到另一个 schema 的同名表。
+   */
+  schema?: string;
   sub: TableSub;
   /**
    * 非表对象（包/过程/函数/序列/同义词/触发器）的类型，来自 `user_objects.object_type`。
@@ -147,6 +152,8 @@ export interface TableTab {
    */
   otype?: string;
   query?:{where:string;order:string;params:import("./dbApi").BoundCell[]};
+  /** 表页读取的等待上限（秒）。存在标签上，切走再回来仍用同一个上限；缺省按 60。 */
+  timeoutSec?: number;
   trail?:{tabId:string;label:string}[];
 }
 
@@ -222,7 +229,13 @@ export interface DbState {
 const TABS_KEY = "ncforge-db-tabs";
 const CLOSED_KEY = "ncforge-db-closed-tabs";
 export const DEFAULT_MAX_ROWS = 500;
-export const DEFAULT_TIMEOUT = 30;
+/**
+ * 新建标签的等待上限（秒）。30s 对 NC 上的多表关联/月结查询偏短，默认第一次跑就超时；
+ * 60s 覆盖常见的报表查询，超长查询仍可在「查询设置」或表页筛选栏往下调。
+ */
+export const DEFAULT_TIMEOUT = 60;
+/** 表页读取的默认等待上限（秒）。表页没有 SQL 标签的「查询设置」，上限存在表标签上。 */
+export const DEFAULT_TABLE_TIMEOUT = 60;
 export const MAX_RECENTLY_CLOSED = 20;
 
 /** 关闭栈的一项。`tab` 是 `persistentTab` 的投影，持久化时与 tabs 用同一套形状。 */
@@ -591,6 +604,10 @@ export async function changeSchema(id: string, schema: string): Promise<string> 
   forgetColumns(id);
   setRt(id, { currentSchema: r.schema });
   void loadMeta(id);
+  // 已打开的表页按打开时的 schema 固化（查询/写回都带前缀），不会跟着切过去；
+  // 但用户需要知道这一点，否则会以为旧页签也切了。
+  const kept = state.tabs.filter(t => t.kind === "table" && t.connId === id && t.schema && t.schema.toUpperCase() !== r.schema.toUpperCase()).length;
+  if (kept) toast(`已打开 ${kept} 个表页仍停留在原来的 schema；要看新 schema 的同名表请重新打开`, "info");
   return r.schema;
 }
 
@@ -635,7 +652,10 @@ export const sqlTabOf = (id: string | null | undefined) => {
 };
 
 export function openSqlTab(connId: string | null, sql = ""): string {
-  const n = state.tabs.filter((t) => t.kind === "sql").length + 1;
+  // 用「最小未使用编号」而不是「标签数 + 1」：关掉中间一个后新建，不会和已有标签重名。
+  const used = new Set(state.tabs.map((t) => (t.kind === "sql" ? /^SQL (\d+)$/.exec(t.title)?.[1] : null)).filter(Boolean));
+  let n = 1;
+  while (used.has(String(n))) n++;
   const tab = newSqlTab(connId, sql, `SQL ${n}`);
   set({ tabs: [...state.tabs, tab], active: tab.id });
   return tab.id;
@@ -653,20 +673,24 @@ export function openCompareTab(before: ResultSnapshot, after: ResultSnapshot): s
   return tab.id;
 }
 
-export function openTableTab(connId: string, table: string, sub: TableSub = "data", otype?: string): string {
-  // 同名不同类要分开：本来「包 PKG_X」和「表 PKG_X」可能共存，认 tab 时不能只看名字
+export function openTableTab(connId: string, table: string, sub: TableSub = "data", otype?: string, schema?: string): string {
+  // 打开时把 schema 固化下来；不传就取连接当前的默认 schema。
+  const fixed = schema ?? rtOf(connId).currentSchema ?? rtOf(connId).info?.schema;
+  // 同名不同类 / 不同 schema 都要分开：包 PKG_X 和表 PKG_X 可能共存，
+  // A.BD_MATERIAL 与 B.BD_MATERIAL 也是两张不同的表。
   const hit = state.tabs.find(
     (t) =>
       t.kind === "table" &&
       t.connId === connId &&
       t.table.toUpperCase() === table.toUpperCase() &&
-      (t.otype ?? "") === (otype ?? ""),
+      (t.otype ?? "") === (otype ?? "") &&
+      (t.schema ?? "") === (fixed ?? ""),
   );
   if (hit) {
     set({ active: hit.id, tabs: state.tabs.map((t) => (t.id === hit.id ? { ...t, sub } as TableTab : t)) });
     return hit.id;
   }
-  const tab: TableTab = { kind: "table", id: newId("t"), connId, table: table.toUpperCase(), sub, ...(otype ? { otype } : {}) };
+  const tab: TableTab = { kind: "table", id: newId("t"), connId, table: table.toUpperCase(), sub, ...(otype ? { otype } : {}), ...(fixed ? { schema: fixed } : {}) };
   set({ tabs: [...state.tabs, tab], active: tab.id });
   return tab.id;
 }
@@ -738,14 +762,12 @@ export function closeTab(id: string, remember = true): string | null {
   return closed?.id ?? null;
 }
 
-/** 取一项（指定项或栈顶）并出栈。恢复由调用方接力，失败也不回滚栈。 */
-function takeClosed(entryId?: string): ClosedDbTab | null {
-  const items = state.recentlyClosed;
-  const hit = entryId ? items.find((e) => e.id === entryId) : items[items.length - 1];
-  if (!hit) return null;
-  set({ recentlyClosed: items.filter((e) => e !== hit) });
+/** 恢复成功后才把这一条出栈；失败的留在栈里，别让一次「恢复最近关闭」连带吞掉还能用的几条。 */
+function dropClosed(entry: ClosedDbTab) {
+  const items = state.recentlyClosed.filter((e) => e !== entry);
+  if (items.length === state.recentlyClosed.length) return;
+  set({ recentlyClosed: items });
   persistClosed();
-  return hit;
 }
 
 function tabFromSnapshot(snap: Record<string, unknown>, id: string): DbTabItem | null {
@@ -791,17 +813,17 @@ function restoreFrom(entry: ClosedDbTab): string | null {
  * 表页快照指向已删除的连接时跳过继续往下找，跟 `reopenClosed.ts` 的做法一致。
  */
 export function restoreClosedTab(entryId?: string): string | null {
-  for (let i = 0; i < 10; i++) {
-    const entry = takeClosed(entryId);
-    if (!entry) break;
+  // 不能先出栈再试：连接已删的失效条目会让一次恢复连带吞掉后面还能用的几条。
+  const stack = state.recentlyClosed;
+  const candidates = entryId ? stack.filter((e) => e.id === entryId) : stack.slice(-10).reverse();
+  for (const entry of candidates) {
     const id = restoreFrom(entry);
-    if (id) {
-      toast(`已恢复「${dbTabLabel(tabOf(id)!)}」`, "success");
-      return id;
-    }
-    if (entryId) break;
+    if (!id) continue;
+    dropClosed(entry);
+    toast(`已恢复「${dbTabLabel(tabOf(id)!)}」`, "success");
+    return id;
   }
-  toast("没有可恢复的数据库标签", "info");
+  toast(entryId ? "这一项已无法恢复（连接可能已被删除）" : "没有可恢复的数据库标签", "info");
   return null;
 }
 
@@ -1028,11 +1050,17 @@ export async function execOne(tabId: string, sql: string, index: number, context
 export async function loadMore(tabId: string, resultId: string): Promise<void> {
   const tab = sqlTabOf(tabId);
   const res = tab?.results.find((r) => r.id === resultId);
-  if (!tab?.connId || !res || res.moreError && !res.moreRetryable || res.loadingMore || tab.running || !ownsCursor(tab.connId, tab.slot, resultId)) return;
+  if (!tab?.connId || !res || res.moreError && !res.moreRetryable || res.loadingMore || tab.running) return;
   const upd = (p: Partial<ResultEntry>) => {
     const cur = sqlTabOf(tabId);
     if (cur) patchTab<SqlTab>(tabId, { results: cur.results.map((r) => (r.id === resultId ? { ...r, ...p } : r)) });
   };
+  // 游标已经被别的查询接管：以前这里直接 return，按钮点了毫无反应。
+  // 明确告诉用户「不是网络慢，是这条结果的游标没了」，并且不再给「重试」。
+  if (!ownsCursor(tab.connId, tab.slot, resultId)) {
+    upd({ loadingMore: false, moreError: "游标已被其他查询占用，请重新执行一次查询", moreRetryable: false });
+    return;
+  }
   upd({ loadingMore: true, moreError: undefined, moreRetryable: undefined });
   try {
     const m = await trackOperation({...dbTaskSpec(`more:${tabId}:${resultId}`,"加载后续结果",tab.connId,tab.slot ? `独立会话 ${tab.slot}` : "主会话",connOf(tab.connId)?.name,tabId),cancel:()=>dbApi.cancel(tab.connId!,tab.slot),cancelled:dbCancelled},()=>dbApi.more(tab.connId!, tab.maxRows, tab.slot));
@@ -1051,8 +1079,12 @@ export async function loadMore(tabId: string, resultId: string): Promise<void> {
     const appended = appendResultRows(cur.rows, m.rows, TOTAL_RESULT_BYTES - retainedResultBytes(state.tabs) + resultBytes(cur));
     upd({ rows: appended.rows, hasMore: m.hasMore || appended.limited, moreError: appended.limited ? RESULT_LIMIT_NOTICE : undefined, moreRetryable: false, loadingMore: false });
   } catch (e) {
-    const expired = ["session-lost", "slot-gone"].includes(parseDbError(e).code);
-    const message = expired ? "旧结果游标已失效，已加载的行仍可查看。请重新执行查询。" : friendlyDbError(e);
+    const code = parseDbError(e).code;
+    // `cursor-closed`：Rust 引擎在续取失败时已经关掉游标，重试只会得到同一个错误。
+    const expired = ["session-lost", "slot-gone", "cursor-closed"].includes(code);
+    const message = code === "cursor-closed"
+      ? "游标已关闭，已加载的行仍可查看。请重新执行查询。"
+      : expired ? "旧结果游标已失效，已加载的行仍可查看。请重新执行查询。" : friendlyDbError(e);
     upd({ loadingMore: false, moreError: message, moreRetryable: !expired });
     appendOutput(tabId, [{ at: Date.now(), text: `[${now()}] 加载更多失败：${message}`, tone: "bad" }]);
   }
@@ -1061,9 +1093,15 @@ export async function loadMore(tabId: string, resultId: string): Promise<void> {
 export async function explainInto(tabId: string, sql: string): Promise<void> {
   const tab = sqlTabOf(tabId);
   if (!tab?.connId || tab.running) return;
+  const connId = tab.connId;
   patchTab<SqlTab>(tabId, { running: true });
   try {
-    const r = await trackOperation(dbTaskSpec(`explain:${tabId}`,"读取执行计划",tab.connId,"主会话",connOf(tab.connId)?.name,tabId),()=>dbApi.explain(tab.connId!, sql));
+    // 与执行走同一个会话归属：标签有独立槽就用它，停止按钮取消的也正是这一条。
+    const r = await trackOperation({
+      ...dbTaskSpec(`explain:${tabId}`,"读取执行计划",connId,tab.slot ? `独立会话 ${tab.slot}` : "主会话",connOf(connId)?.name,tabId),
+      cancel: () => dbApi.cancel(connId, tab.slot),
+      cancelled: dbCancelled,
+    }, () => dbApi.explain(connId, sql, tab.slot));
     patchTab<SqlTab>(tabId, { plan: { sql, rows: r.plan }, view: "plan", running: false });
   } catch (e) {
     patchTab<SqlTab>(tabId, { plan: { sql, rows: [], error: friendlyDbError(e) }, view: "plan", running: false });

@@ -9,8 +9,8 @@ import { FavoriteSection } from "./FavoriteSection";
 import { PasswordResetDialog } from "./PasswordResetDialog";
 import { dbNameOf, ENV_LABEL, type DbConn } from "../../lib/dbApi";
 import { ensureConnected } from "../../lib/dbConfirm";
-import { deleteConn, disconnectConn, duplicateConn, moveConn, newConsole, refreshMeta } from "../../lib/dbActions";
-import { defaultConnId, loadConns, openConnDialog, openDictTab, rtOf, showObjectFinder, useDbConns, useDbRt, useDbSelector } from "../../lib/dbStore";
+import { deleteConn, disconnectConn, duplicateConn, moveConn, newConsole, openDict, refreshMeta } from "../../lib/dbActions";
+import { defaultConnId, loadConns, openConnDialog, rtOf, showObjectFinder, useDbConns, useDbRt, useDbSelector } from "../../lib/dbStore";
 
 /**
  * 侧栏：连接列表 + 已连上连接下的对象（收藏 / 表 / 视图）。
@@ -66,7 +66,7 @@ export function ConnTree() {
           label: "数据字典",
           icon: "clipboard",
           onSelect: () => {
-            openDictTab(c.id);
+            void openDict(c.id);
             dock?.showDocument();
           },
         },
@@ -83,9 +83,16 @@ export function ConnTree() {
     });
   };
 
-  const shown = db.conns.filter(
-    (c) => !q || c.name.toLowerCase().includes(q) || c.url.toLowerCase().includes(q) || rtOf(c.id).status === "connected",
-  );
+  /** 连接自身命中，或已读到的对象里有命中的；都没命中就不在筛选结果里占一行。 */
+  const connHits = (c: DbConn) => {
+    if (!q) return true;
+    if (c.name.toLowerCase().includes(q) || c.url.toLowerCase().includes(q)) return true;
+    const rt = rtOf(c.id);
+    const names = rt.ncNames ?? {};
+    return (rt.tables ?? []).some((t) => t.name.toLowerCase().includes(q) || (names[t.name.toLowerCase()] ?? "").includes(q));
+  };
+  const shown = db.conns.filter(connHits);
+  const noFilterHits = !!q && shown.length === 0;
 
   return (
     <div className="dbx-side">
@@ -114,7 +121,7 @@ export function ConnTree() {
                   label: "数据字典",
                   icon: "clipboard",
                   onSelect: () => {
-                    openDictTab(activeConn ?? defaultConnId());
+                    void openDict(activeConn ?? defaultConnId());
                     dock?.showDocument();
                   },
                 },
@@ -136,8 +143,13 @@ export function ConnTree() {
       />
       <div className="dbx-tree">
         <FavoriteSection filter={q} onLocate={locate} />
-        {db.loadError && <p className="dbx-tree-note">{db.loadError}</p>}
-        {db.loaded && db.conns.length === 0 && (
+        {db.loadError && (
+          <p className="dbx-tree-note" role="alert" style={{ color: "hsl(var(--destructive-ink))" }}>
+            连接列表读取失败：{db.loadError}{" "}
+            <button type="button" className="dbx-lk" onClick={() => void loadConns()}>重试</button>
+          </p>
+        )}
+        {db.loaded && !db.loadError && db.conns.length === 0 && (
           <EmptyState
             icon="database"
             description="还没有数据库连接。可从 NC prop.xml 导入，或手动填写。"
@@ -152,9 +164,13 @@ export function ConnTree() {
             }
           />
         )}
+        {noFilterHits && <p className="dbx-tree-note">没有匹配「{filter.trim()}」的连接或对象。</p>}
         {shown.map((c) => {
           const rt = rtOf(c.id);
-          const expanded = !!open[c.id] || (!!q && rt.status === "connected");
+          // 筛选时只展开「确实有命中子对象」的连接，不再把所有已连接连接全铺开。
+          const names = rt.ncNames ?? {};
+          const childHit = !!q && (rt.tables ?? []).some((t) => t.name.toLowerCase().includes(q) || (names[t.name.toLowerCase()] ?? "").includes(q));
+          const expanded = !!open[c.id] || childHit;
           return (
             <div key={c.id}>
               <button

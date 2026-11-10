@@ -40,3 +40,20 @@ it("会话丢失保留已加载数据，并停止对失效游标的重试",async
   expect(result().moreRetryable).toBe(false);expect(result().moreError).toContain("游标已失效");
   expect(result().rows).toEqual([[1]]);expect(mocks.invoke).toHaveBeenCalledTimes(1);
 });
+it("游标被别的查询接管时明确说原因，且不再给重试",async()=>{
+  const {id,result}=loaded();
+  // 另一条结果把同一会话的游标占了
+  claimCursor("c","1","other-result");
+  await loadMore(id,"result");
+  expect(result().moreError).toContain("游标已被其他查询占用");
+  expect(result().moreRetryable).toBe(false);
+  expect(mocks.invoke).not.toHaveBeenCalled();
+});
+it("Rust 引擎续取时游标已关闭：说清楚要重新执行，不引导重试",async()=>{
+  const {id,result}=loaded();
+  mocks.invoke.mockRejectedValue("cursor-closed|没有可以继续读取的结果（游标已关闭，重新执行一次）");
+  await loadMore(id,"result");await loadMore(id,"result");
+  expect(result().moreError).toContain("游标已关闭");
+  expect(result().moreRetryable).toBe(false);
+  expect(mocks.invoke).toHaveBeenCalledTimes(1);
+});

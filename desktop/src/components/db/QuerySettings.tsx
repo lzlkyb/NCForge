@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../ui/icon";
 import { useDismissOnOutside } from "../../hooks/useDismissOnOutside";
-import { patchTab, type SqlTab } from "../../lib/dbStore";
+import { DEFAULT_MAX_ROWS, DEFAULT_TIMEOUT, patchTab, type SqlTab } from "../../lib/dbStore";
 
 /**
  * 查询设置：每次取多少行、超时多少秒。
@@ -100,7 +100,7 @@ export function QuerySettings({ tab }: { tab: SqlTab }) {
                 min={1}
                 max={10000}
                 value={tab.maxRows}
-                onChange={(e) => patchTab<SqlTab>(tab.id, { maxRows: Math.max(1, Math.min(10000, Number(e.target.value) || 500)) })}
+                onChange={(e) => patchTab<SqlTab>(tab.id, { maxRows: Math.max(1, Math.min(10000, Number(e.target.value) || DEFAULT_MAX_ROWS)) })}
               />
               行
             </label>
@@ -111,7 +111,7 @@ export function QuerySettings({ tab }: { tab: SqlTab }) {
                 min={1}
                 max={3600}
                 value={tab.timeoutSec}
-                onChange={(e) => patchTab<SqlTab>(tab.id, { timeoutSec: Math.max(1, Math.min(3600, Number(e.target.value) || 30)) })}
+                onChange={(e) => patchTab<SqlTab>(tab.id, { timeoutSec: Math.max(1, Math.min(3600, Number(e.target.value) || DEFAULT_TIMEOUT)) })}
               />
               秒
             </label>

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Icon } from "../ui/icon";
 import { DockRegion, useWorkbenchDock } from "../workspace/WorkbenchDock";
-import { newConsole, requestCloseTab } from "../../lib/dbActions";
+import { newConsole, requestActivateTab, requestCloseTab, requestRestoreClosedTab } from "../../lib/dbActions";
+import { pendingForTab, useEditRevision } from "../../lib/dbDirtyEdits";
 import {
-  activateTab, clearRecentlyClosed, connOf, getDb, moveDbTab, restoreClosedTab,
+  clearRecentlyClosed, connOf, getDb, moveDbTab,
   useDbConns, useDbSelector,
 } from "../../lib/dbStore";
 import { getKeymap, isReopenTabKey } from "../../lib/keymap";
@@ -29,6 +30,8 @@ export function DbDocTabs() {
   const dock = useWorkbenchDock();
   const docOpen = dock?.documentOpen ?? true;
   const viewActive = useViewActive();
+  // 有未写回改动时标签上加圆点；登记表变了要重画这一条
+  useEditRevision();
   const refs = useRef(new Map<string, HTMLDivElement>());
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const showDoc = useRef(dock?.showDocument);
@@ -37,7 +40,8 @@ export function DbDocTabs() {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const rovingIndex = Math.max(0, db.tabs.findIndex((t) => t.id === db.active));
   const show = (id: string) => {
-    activateTab(id);
+    // 当前标签还有没写回的改动时先问一句；取消则留在原标签
+    void requestActivateTab(id);
     dock?.showDocument();
   };
   useEffect(() => {
@@ -60,7 +64,7 @@ export function DbDocTabs() {
       if (target?.isContentEditable) return;
       e.preventDefault();
       e.stopPropagation();
-      if (restoreClosedTab()) showDoc.current?.();
+      void Promise.resolve(requestRestoreClosedTab()).then((id) => { if (id) showDoc.current?.(); });
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -131,6 +135,7 @@ export function DbDocTabs() {
           {db.tabs.map((t, i) => {
             const c = connOf(t.connId);
             const label = dbTabLabel(t);
+            const dirty = pendingForTab(t.id);
             const sameName = t.kind === "table" && db.tabs.some((other) => other.id !== t.id && other.kind === "table" && other.table.toUpperCase() === t.table.toUpperCase());
             const shortConn = c && c.name.length > 12 ? `${c.name.slice(0, 11)}…` : c?.name;
             const icon = t.kind === "sql" ? "terminal" : t.kind === "dict" ? "clipboard" : t.kind === "compare" ? "layers" : "database";
@@ -143,7 +148,7 @@ export function DbDocTabs() {
                 role="tab"
                 tabIndex={i === rovingIndex ? 0 : -1}
                 aria-selected={on}
-                aria-controls={dbPanelId(t.id)}
+                aria-controls={on ? dbPanelId(t.id) : undefined}
                 className={`wb-tab dbx-doctab${c ? ` e-${c.env}` : ""}`}
                 data-active={on || undefined}
                 data-drop-target={dropTarget === t.id || undefined}
@@ -158,6 +163,7 @@ export function DbDocTabs() {
                 onDragEnd={endDrag}
               >
                 <Icon name={icon} size={13} />
+                {dirty > 0 && <span className="dbx-dirty-dot" role="img" aria-label={`有 ${dirty} 处未写回的改动`} title={`有 ${dirty} 处未写回的改动`} />}
                 <span className="wb-tab-name">
                   {label}
                   <span className="dbx-muted">
@@ -188,8 +194,8 @@ export function DbDocTabs() {
         </div>
         <DbAllTabsMenu onPick={show} />
         <DbClosedTabsMenu
-          onRestore={(id) => { if (restoreClosedTab(id)) dock?.showDocument(); }}
-          onRestoreLast={() => { if (restoreClosedTab()) dock?.showDocument(); }}
+          onRestore={(id) => { void Promise.resolve(requestRestoreClosedTab(id)).then((restored) => { if (restored) dock?.showDocument(); }); }}
+          onRestoreLast={() => { void Promise.resolve(requestRestoreClosedTab()).then((restored) => { if (restored) dock?.showDocument(); }); }}
           onClear={clearRecentlyClosed}
         />
         <button

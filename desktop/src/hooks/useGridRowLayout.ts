@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   averageHeight, buildOffsets, offsetAt, rowAtOffset, rowHeights,
 } from "../lib/gridRowMetrics";
@@ -14,7 +14,7 @@ import type { Cell, ColumnMeta } from "../lib/dbApi";
  * 调用方拿到的都是纯函数式入口（`offsetAt` / `rowAtOffset` / `range`），
  * 不要在渲染里直接摸 `offsets` 数组——那会让 `ResultGrid` 的几何散落两处。
  */
-export function useGridRowLayout({ rows, columns, widths, order, wrap, rowH }: {
+export function useGridRowLayout({ rows, columns, widths, order, wrap, rowH, frozen }: {
   rows: Cell[][];
   columns: ColumnMeta[];
   /** 实际渲染用的列宽（含手调值）。 */
@@ -22,8 +22,15 @@ export function useGridRowLayout({ rows, columns, widths, order, wrap, rowH }: {
   order: number[];
   wrap: boolean;
   rowH: number;
+  /** 拖列宽期间冻结行高：每个 pointermove 都按新宽度重测所有行会让大表卡死。 */
+  frozen?: boolean;
 }) {
-  const heights = useMemo(() => rowHeights(rows, columns, widths, wrap, rowH), [rows, columns, widths, wrap, rowH]);
+  const cached = useRef<number[] | null>(null);
+  const heights = useMemo(
+    () => (frozen && cached.current ? cached.current : rowHeights(rows, columns, widths, wrap, rowH)),
+    [frozen, rows, columns, widths, wrap, rowH],
+  );
+  useEffect(() => { if (!frozen) cached.current = heights; }, [heights, frozen]);
   const { offsets, total } = useMemo(() => buildOffsets(heights, order), [heights, order]);
   const average = useMemo(() => averageHeight(total, order.length, rowH), [total, order.length, rowH]);
 

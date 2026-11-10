@@ -28,8 +28,12 @@ export function DbObjectFinder({ connId, onClose }: { connId:string|null; onClos
   const objects=objectState.rows;const actionLock=useRef(false);
   const rt = useConnRt(scope);
   useEffect(()=>{let live=true;setObjects(v=>({...v,rows:[],loading:rt.status==="connected",error:""}));if(rt.status==="connected") void trackOperation(dbTaskSpec(`objects:${scope}`,"读取数据库对象清单",scope,"对象查找"),()=>dbApi.objects(scope)).then(r=>{if(live) setObjects(v=>({...v,rows:r.objects,loading:false}));},e=>{if(live) setObjects(v=>({...v,loading:false,error:friendlyDbError(e)}));});return()=>{live=false;};},[scope,rt.status,rt.tablesAt,objectState.revision]);
-  const names = [...(rt.tables ?? Object.keys(rt.schema?.tables ?? {}).map(name => ({name,kind:"TABLE" as const}))),...objects.map(o=>({name:o.name,kind:o.type}))];
-  const hits = names.map(t => ({...t,zh:rt.ncNames?.[t.name.toLowerCase()] ?? "",score:query.trim() ? matchText(query.trim(),`${t.name} ${rt.ncNames?.[t.name.toLowerCase()] ?? ""}`)?.score : (recent.includes(t.name)?100-recent.indexOf(t.name):0)})).filter(t => t.score !== undefined).sort((a,b) => (b.score ?? 0)-(a.score ?? 0)).slice(0,80);
+  const names = useMemo(() => [...(rt.tables ?? Object.keys(rt.schema?.tables ?? {}).map(name => ({name,kind:"TABLE" as const}))),...objects.map(o=>({name:o.name,kind:o.type}))], [rt.tables, rt.schema, objects]);
+  // 打分与排序只在清单 / 关键词变化时算：上下键移动选中项也会重渲染，不能每次都重扫几千个对象。
+  const hits = useMemo(() => {
+    const q = query.trim();
+    return names.map(t => ({...t,zh:rt.ncNames?.[t.name.toLowerCase()] ?? "",score:q ? matchText(q,`${t.name} ${rt.ncNames?.[t.name.toLowerCase()] ?? ""}`)?.score : (recent.includes(t.name)?100-recent.indexOf(t.name):0)})).filter(t => t.score !== undefined).sort((a,b) => (b.score ?? 0)-(a.score ?? 0)).slice(0,80);
+  }, [names, query, recent, rt.ncNames]);
   const chosen = hits[Math.min(index,Math.max(0,hits.length-1))];
   const pick = async (mode:"data"|"struct"|"insert"|"name", target=chosen) => {
     if (!target || actionLock.current) return;

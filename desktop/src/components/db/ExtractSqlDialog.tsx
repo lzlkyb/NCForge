@@ -7,6 +7,7 @@ import { fillParams } from "../../lib/sqlExtract";
 import { loadParamValues, requestExtract, saveParamValues, useExtractRequest } from "../../lib/sqlExtractRequest";
 import { ENV_LABEL } from "../../lib/dbApi";
 import { explain, newConsole, runStatements } from "../../lib/dbActions";
+import { ensureConnected } from "../../lib/dbConfirm";
 import { defaultConnId, loadConns, useDbConns, useDbSelector } from "../../lib/dbStore";
 import { copyText } from "../../lib/utils";
 
@@ -21,6 +22,7 @@ export function ExtractSqlDialog() {
   const db = { loaded: useDbSelector((s) => s.loaded), conns: useDbConns() };
   const [values, setValues] = useState<Record<string, string>>({});
   const [connId, setConnId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!req) return;
@@ -38,17 +40,32 @@ export function ExtractSqlDialog() {
   const close = () => requestExtract(null);
 
   const go = async () => {
+    if (busy) return;
     saveParamValues(req.file, values);
-    close();
     if (req.mode === "copy") {
+      close();
       await copyText(sql, () => toast("已复制拼好的 SQL", "success"), (e) => toast(`复制失败：${e}`, "error"));
       return;
     }
     if (!connId) return toast("先建一个数据库连接", "warning");
-    const tabId = await newConsole(connId, sql);
-    window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "db" }));
-    if (req.mode === "run") void runStatements(tabId, [{ text: sql, startLine: 1 }]);
-    else void explain(tabId, sql);
+    // 先把连接建好再开控制台。`newConsole` 里是 fire-and-forget 的 ensureConnected，
+    // 紧接着的 runStatements 撞上「正在连接」会直接放弃：冷连接下第一次点「执行」一条都不跑。
+    setBusy(true);
+    try {
+      if (!(await ensureConnected(connId))) {
+        toast("连接未建立，语句没有执行", "error");
+        return;
+      }
+      // 新控制台可能会因为当前标签还有未写回改动而被用户取消：先拿到标签再关对话框
+      const tabId = await newConsole(connId, sql);
+      if (!tabId) return;
+      close();
+      window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "db" }));
+      if (req.mode === "run") void runStatements(tabId, [{ text: sql, startLine: 1 }]);
+      else void explain(tabId, sql);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -96,8 +113,8 @@ export function ExtractSqlDialog() {
         <button type="button" className="dbx-btn" onClick={close}>
           取消
         </button>
-        <button type="button" className="dbx-btn pri" onClick={() => void go()}>
-          {req.mode === "run" ? "执行" : req.mode === "explain" ? "看计划" : "复制"}
+        <button type="button" className="dbx-btn pri" disabled={busy} onClick={() => void go()}>
+          {busy ? "连接中…" : req.mode === "run" ? "执行" : req.mode === "explain" ? "看计划" : "复制"}
         </button>
       </div>
     </Modal>

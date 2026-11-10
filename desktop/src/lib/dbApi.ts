@@ -748,7 +748,8 @@ export const dbApi = {
       kind: "source",
       arg: name,
     }),
-  explain: (id: string, sql: string) => invoke<{ plan: PlanRow[] }>("db_meta", { id, kind: "explain", arg: sql }),
+  /** `slot` 传标签自己的会话，让「停止」取消的正是这条执行计划。 */
+  explain: (id: string, sql: string, slot?: string | null) => invoke<{ plan: PlanRow[] }>("db_meta", { id, kind: "explain", arg: sql, slot: slot || null }),
   /**
    * 会话与锁（只读，不生成也不执行 kill）。
    * 锁信息读不到时 `granted: false` —— 界面必须显示「缺授权」，不能显示成「没有锁」。

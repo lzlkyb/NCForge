@@ -81,8 +81,8 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
 
   const lock=useRef(false);
   const runTest = async () => {
-    if(lock.current) return;
-    const task=beginOperation(dbTaskSpec(`connection.form:${conn?.id || "new"}`,"测试数据库连接",conn?.id ?? null,"连接配置"));
+    if(lock.current) { if (saving) toast("正在保存配置，请稍候再测试","info"); return; }
+    const task=beginOperation(dbTaskSpec(`connection.test:${conn?.id || "new"}`,"测试数据库连接",conn?.id ?? null,"连接配置"));
     if(!task) return;lock.current=true;
     const version = formVersion.current;
     setTesting(true);
@@ -98,8 +98,8 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
   };
 
   const save = async () => {
-    if(lock.current) return;
-    const task=beginOperation(dbTaskSpec(`connection.form:${conn?.id || "new"}`,"保存数据库连接配置",conn?.id ?? null,"连接配置"));
+    if(lock.current) { if (testing) toast("正在测试连接，请稍候再保存","info"); return; }
+    const task=beginOperation(dbTaskSpec(`connection.save:${conn?.id || "new"}`,"保存数据库连接配置",conn?.id ?? null,"连接配置"));
     if(!task) return;lock.current=true;setSaving(true);
     try {
       const target = conn && (conn.url !== f.url.trim() || conn.user !== f.user.trim() || conn.engine !== input().engine || (conn.defaultSchema ?? "") !== f.defaultSchema.trim() || (conn.noStmtCache ?? false) !== f.noStmtCache);
@@ -278,7 +278,7 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
         )}
       </div>
       <div className="ft">
-        <button type="button" className="dbx-btn" disabled={!!missing || testing} onClick={() => void runTest()}>
+        <button type="button" className="dbx-btn" disabled={!!missing || testing || saving} onClick={() => void runTest()}>
           <Icon name={testing ? "spinner" : "plug"} size={12} />
           {testing ? "测试中…" : "测试连接"}
         </button>
@@ -287,7 +287,7 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
         <button type="button" className="dbx-btn" onClick={closeConnDialog}>
           取消
         </button>
-        <button type="button" className="dbx-btn pri" disabled={!!missing || saving} onClick={() => void save()}>
+        <button type="button" className="dbx-btn pri" disabled={!!missing || saving || testing} title={testing ? "正在测试连接，请稍候" : undefined} onClick={() => void save()}>
           {conn ? "保存" : "添加"}
         </button>
       </div>

@@ -14,8 +14,8 @@ import { SqlConsole } from "../db/SqlConsole";
 import { TablePage } from "../db/TablePage";
 import { ComparisonWorkspace } from "../db/ComparisonWorkspace";
 import { ViewActivityContext, useViewActive } from "../../lib/viewActivity";
-import { newConsole } from "../../lib/dbActions";
-import { showObjectFinder, defaultConnId, loadConns, openConnDialog, openDictTab, openSqlTab, restoreClosedTab, useActiveDbTab, useDbSelector } from "../../lib/dbStore";
+import { newConsole, openDict } from "../../lib/dbActions";
+import { showObjectFinder, defaultConnId, loadConns, openConnDialog, openSqlTab, restoreClosedTab, useActiveDbTab, useDbSelector } from "../../lib/dbStore";
 import { dbPanelId, dbTabId } from "../../lib/dbPendingSessions";
 
 /**
@@ -43,6 +43,7 @@ export function DbTab() {
     conns: { length: useDbSelector((s) => s.conns.length) },
     objectFinder: useDbSelector((s) => s.objectFinder),
     closedCount: useDbSelector((s) => s.recentlyClosed.length),
+    loadError: useDbSelector((s) => s.loadError),
   };
 
   useEffect(() => {
@@ -85,13 +86,20 @@ export function DbTab() {
                   icon="database"
                   className="dbx-empty"
                   description={
-                    db.conns.length === 0
-                      ? "还没有数据库连接。可以从 NC prop.xml 导入，或手动填写 / 导入 .properties。"
-                      : "选一个连接开始写 SQL，或直接查数据字典。"
+                    db.loadError
+                      ? `连接列表读取失败：${db.loadError}`
+                      : db.conns.length === 0
+                        ? "还没有数据库连接。可以从 NC prop.xml 导入，或手动填写 / 导入 .properties。"
+                        : "选一个连接开始写 SQL，或直接查数据字典。"
                   }
                   action={
                     <div className="flex items-center gap-2">
-                      {db.conns.length === 0 ? (
+                      {db.loadError ? (
+                        <button type="button" className="dbx-btn pri" onClick={() => void loadConns()}>
+                          <Icon name="refresh" size={12} />
+                          重试读取连接
+                        </button>
+                      ) : db.conns.length === 0 ? (
                         <button type="button" className="dbx-btn pri" onClick={() => openConnDialog(null)}>
                           <Icon name="plus" size={12} />
                           新建连接
@@ -102,7 +110,7 @@ export function DbTab() {
                             <Icon name="terminal" size={12} />
                             新建 SQL 控制台
                           </button>
-                          <button type="button" className="dbx-btn" onClick={() => openDictTab(defaultConnId())}>
+                          <button type="button" className="dbx-btn" onClick={() => void openDict(defaultConnId())}>
                             <Icon name="clipboard" size={12} />
                             数据字典
                           </button>

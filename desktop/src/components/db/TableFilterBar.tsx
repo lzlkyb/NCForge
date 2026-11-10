@@ -1,23 +1,28 @@
 import { useId, useState, type ReactNode } from "react";
 import type { BoundCell, ColumnInfo } from "../../lib/dbApi";
 import { compileFilter, emptyFilter, loadFilter, saveFilter, type TableFilter } from "../../lib/dbConditions";
+import { loadFilterView, saveFilterView } from "../../lib/dbTableView";
 import { toast } from "../ui/toast";
 import { Icon } from "../ui/icon";
 
-export function TableFilterBar({ connId, table, cols, disabled, busy = disabled, transactions, onApply }: {
+export function TableFilterBar({ connId, table, cols, disabled, busy = disabled, transactions, onApply, timeoutSec, onTimeout }: {
   connId: string; table: string; cols: ColumnInfo[]; disabled: boolean;
   busy?: boolean; transactions?: ReactNode;
   onApply: (where: string, order: string, params: BoundCell[]) => void;
+  /** 表页读取的等待上限（秒）。只作用于下一次查询，不重查、不丢未写回的改动。 */
+  timeoutSec?: number; onTimeout?: (seconds: number) => void;
 }) {
-  const [filter, setFilter] = useState<TableFilter>(() => loadFilter(connId, table));
-  const [advanced, setAdvanced] = useState(false);
-  const [raw, setRaw] = useState({ where:"", order:"" });
+  // 上次编辑状态与上次查询结果成对恢复：切到「结构」再回来时，条件框和表格里的数据一致。
+  const [savedView] = useState(() => loadFilterView(connId, table));
+  const [filter, setFilter] = useState<TableFilter>(() => savedView?.filter ?? loadFilter(connId, table));
+  const [advanced, setAdvanced] = useState(() => savedView?.advanced ?? false);
+  const [raw, setRaw] = useState(savedView?.raw ?? { where:"", order:"" });
   const [expanded, setExpanded] = useState(false);
   const bodyId = useId();
   const [error, setError] = useState("");
   const apply = () => {
     if (disabled) return;
-    try { const q = advanced ? { ...raw, params:[] } : compileFilter(filter, cols); setError(""); onApply(q.where, q.order, q.params); }
+    try { const q = advanced ? { ...raw, params:[] } : compileFilter(filter, cols); setError(""); onApply(q.where, q.order, q.params); saveFilterView(connId, table, { filter, advanced, raw }); }
     catch (e) { setExpanded(true); setError(String(e instanceof Error ? e.message : e)); }
   };
   let sql="", params="";
@@ -31,6 +36,11 @@ export function TableFilterBar({ connId, table, cols, disabled, busy = disabled,
     <div className="dbx-filter-header">
       <button type="button" className="dbx-btn ghost" aria-expanded={expanded} aria-controls={bodyId} onClick={() => setExpanded(v => !v)}><Icon name={expanded ? "chevronDown" : "sliders"} size={14} />{expanded ? "收起筛选" : "展开筛选"}</button>
       <span className="dbx-filter-summary" title={`待查询：${summary}`}>待查询：{summary}</span>
+      {onTimeout && <label className="dbx-muted" title="表页查询等多久没返回就中断；只对下一次查询生效">等待上限
+        <select aria-label="表页查询等待上限" value={timeoutSec ?? 60} onChange={e => onTimeout(Number(e.target.value))}>
+          {[30, 60, 120, 300, 600].map(s => <option key={s} value={s}>{s}s</option>)}
+        </select>
+      </label>}
       <button type="button" className="dbx-btn pri" disabled={disabled} aria-busy={busy} onClick={apply}><Icon name={busy ? "spinner" : "play"} size={12} />查询</button>
       {transactions}
     </div>

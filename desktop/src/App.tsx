@@ -26,7 +26,7 @@ import { setSession } from "./lib/workspaceSession";
 import { openPatchPage } from "./lib/svnSession";
 import { requestOpenChangelog } from "./lib/changelogRequest";
 import { showWorkbenchDocument } from "./lib/dockEvents";
-import { defaultConnId, openDictTab } from "./lib/dbStore";
+import { defaultConnId } from "./lib/dbStore";
 import { toggleTheme } from "./lib/theme";
 import { serverStart, serverStop } from "./lib/server";
 import { toast } from "./components/ui/toast";
@@ -207,8 +207,11 @@ function AppContent() {
     navRef.current("files");
   }, []);
   /** 数据字典不再是独立页签：在数据库页开一个字典文档标签，并翻出文档区。 */
-  const openDict = useCallback(() => {
-    openDictTab(defaultConnId());
+  const openDictPage = useCallback(() => {
+    // 动态引：dbActions 静态引 sqlModels（含 Monaco），首屏不该为命令面板这一项赔上整包。
+    void import("./lib/dbActions")
+      .then((m) => m.openDict(defaultConnId()))
+      .catch((e) => toast(`打开数据字典失败：${String(e)}`, "error"));
     showWorkbenchDocument();
     navRef.current("db");
   }, []);
@@ -266,7 +269,7 @@ function AppContent() {
         hint: "工程关联 · 产物检查",
         run: () => openLinkedDialog("artifacts"),
       },
-      { id: "go.dict", title: "转到：数据字典", hint: "数据库 · 数据字典", run: openDict },
+      { id: "go.dict", title: "转到：数据字典", hint: "数据库 · 数据字典", run: openDictPage },
       { id: "view.side", title: "切换侧栏", hint: "Ctrl+B", run: toggleSide },
       { id: "view.rail", title: "展开 / 收起左侧导航栏", hint: RAIL_KEY, run: toggleRail },
       { id: "view.panel", title: "切换底部面板", hint: "Ctrl+J", run: () => setSession({ panelOpen: (v) => !v }) },
@@ -276,7 +279,7 @@ function AppContent() {
       // 停止必须问一句：命令面板能一键到的地方，不能在服务面板要确认、到这里就直接打后端。
       { id: "svc.stop", title: "停止 NC 服务", run: () => setSvcConfirm("stop") },
     ]);
-  }, [openSearch, openDict, openLogs]);
+  }, [openSearch, openDictPage, openLogs]);
   // 其它页（如 Java 编辑器里「在数据库中执行此 SQL」）要切页时发这个事件，detail 是页 key。
   // 老的 "search" / "services" / "patch" / "dict" / "linked" 页 key 仍然兼容：
   // 转到文件页的对应视图 / 面板、版本控制页的打包视图、数据库页的字典标签，或工程关联弹框。
@@ -287,7 +290,7 @@ function AppContent() {
       if (tab === "search") { openSearch(); return; }
       if (tab === "services") { openServicePanel(); return; }
       if (tab === "patch") { openPatchPage(); return; }
-      if (tab === "dict") { openDict(); return; }
+      if (tab === "dict") { openDictPage(); return; }
       if (tab === "linked") { openLinkedDialog("chain"); return; }
       const page = PAGES_BY_KEY[tab];
       if (!page) return;
@@ -296,7 +299,7 @@ function AppContent() {
     };
     window.addEventListener("ncforge-navigate", go);
     return () => window.removeEventListener("ncforge-navigate", go);
-  }, [openSearch, openDict, openLogs]);
+  }, [openSearch, openDictPage, openLogs]);
   const { open: paletteOpen } = usePalette();
   // 浮层的代码块在首次使用前就拉好：第一次按快捷键时才去加载，开头敲的几个字符会落进编辑器里
   useEffect(() => {

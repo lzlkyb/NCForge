@@ -1577,7 +1577,8 @@ pub async fn db_set_schema(
 /// 元数据：`tables` / `ncNames` / `columnsZh` / `columns` / `indexes` / `ddl` / `explain` /
 /// `sessions` / `objects` / `source`。`arg` 是表名或对象名（columnsZh 时是逗号分隔的
 /// 一批表名；explain 时是 SQL；sessions、objects 不需要参数）；`arg2` 目前只有 `ddl` 用，
-/// 表示对象类型（包/过程/序列…，空 = 按表处理）。
+/// 表示对象类型（包/过程/序列…，空 = 按表处理）；`slot` 只有 `explain` 用，
+/// 表示在标签的独立会话上执行（与「停止」按钮的取消目标一致）。
 #[tauri::command]
 pub async fn db_meta(
     state: tauri::State<'_, Arc<AppState>>,
@@ -1585,6 +1586,7 @@ pub async fn db_meta(
     kind: String,
     arg: Option<String>,
     arg2: Option<String>,
+    slot: Option<String>,
 ) -> Result<Value, String> {
     let b = existing_bridge(&state, &id)?;
     // 列中文名要两个引擎各走各的取数方式（Rust 用绑定变量、JVM 桥用 `query`），
@@ -1614,6 +1616,13 @@ pub async fn db_meta(
         "source" => "source",
         "schemas" => "schemas",
         other => return Err(format!("未知元数据类型：{other}")),
+    };
+    // 执行计划可以跑在 SQL 标签自己的独立会话上：用户的「停止」按钮取消的就是那条会话。
+    // 以前固定走 primary，标签有槽时取消的是空闲槽，primary 上的计划照跑到超时。
+    let b = if cmd == "explain" && slot.as_deref().is_some_and(|s| !s.trim().is_empty()) {
+        slot_bridge(&state, &id, slot.as_deref())?
+    } else {
+        b
     };
     if arg2.is_some() && arg.is_none() {
         return Err(format!("{cmd} 的第二个参数不能脱离第一个单独给"));

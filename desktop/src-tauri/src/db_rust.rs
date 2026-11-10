@@ -36,6 +36,7 @@
 
 use std::io::Read;
 use std::panic::{self, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -145,8 +146,10 @@ fn drv_err(e: Error) -> BridgeError {
         ErrorKind::DbError(d) => {
             BridgeError::new("sql", format!("ORA-{:05}：{}", d.code(), d.message()))
         }
-        // 两种情况走同一个错误：用户点了「停止」（驱动发 INTERRUPT 打断），
-        // 或者调用超时到期（兜底）。对用户来说都是「这条语句没跑完」。
+        // 两种情况走同一个驱动错误：用户点了「停止」（驱动发 INTERRUPT 打断），
+        // 或者调用超时到期（兜底）。对用户来说都是「这条语句没跑完」，但语义不同：
+        // 前者是主动取消，不该在结果区显示成红色失败；由 `classify_cancel` 按标志改码。
+        // 真正的超时在 `exec_params` 里改写成带具体秒数的文案（这里不知道上限）。
         ErrorKind::CallTimeoutExceeded => BridgeError::new(
             "timeout",
             "语句已中断（点了停止，或等待超过超时时间）。会话仍然可用",
@@ -156,6 +159,25 @@ fn drv_err(e: Error) -> BridgeError {
         }
         _ => BridgeError::new("sql", e.to_string()),
     }
+}
+
+/// 用户点了停止时，驱动给的是 `CallTimeoutExceeded`（和真正的超时同一条路）。
+/// 中断标志为真就换成 `cancelled` —— 前端据此显示「已停止」而不是失败。
+fn classify_cancel(
+    result: Result<Value, BridgeError>,
+    interrupted: &AtomicBool,
+) -> Result<Value, BridgeError> {
+    if interrupted.swap(false, Ordering::SeqCst) {
+        if let Err(e) = &result {
+            if e.code == "timeout" {
+                return Err(BridgeError::new(
+                    "cancelled",
+                    "语句已中断（点了停止）。会话仍然可用",
+                ));
+            }
+        }
+    }
+    result
 }
 
 /// 连接阶段的错误 → 前端码。
@@ -219,6 +241,9 @@ pub struct RustEngine {
     /// 和它抢同一个锁就毫无意义了。这里只在连接/断开时短暂持有。
     /// 与 `Session.breaker` 是同一个 `Arc`（会话内部连接成功时写进去）。
     breaker: BreakerSlot,
+    /// 本次「停止」是否由用户发起。驱动把主动中断和调用超时都报成
+    /// `CallTimeoutExceeded`，靠这个标志把两者分开展示（见 `classify_cancel`）。
+    interrupted: AtomicBool,
 }
 
 /// 「当前这条连接的中断句柄」。`None` = 没连上。
@@ -277,6 +302,7 @@ impl RustEngine {
                 breaker: breaker.clone(),
             }),
             breaker,
+            interrupted: AtomicBool::new(false),
         }
     }
 
@@ -291,6 +317,7 @@ impl RustEngine {
             .clone();
         match handle {
             Some(h) => {
+                self.interrupted.store(true, Ordering::SeqCst);
                 h.interrupt();
                 Ok(())
             }
@@ -300,9 +327,12 @@ impl RustEngine {
 
     /// 跑一条命令。阻塞调用，调用方要放在 `spawn_blocking` 里。
     pub fn call(&self, cmd: &str, args: &[&str], timeout: Duration) -> Result<Value, BridgeError> {
+        // 上一条语句留下的「用户停止」标志不能算到这一条头上。
+        self.interrupted.store(false, Ordering::SeqCst);
         let mut s = self.lock();
         // 11g 密码校验器的 panic（#63）必须在这里拦下：它一炸就是整个进程退出
-        match panic::catch_unwind(AssertUnwindSafe(|| s.dispatch(cmd, args, timeout))) {
+        let result = match panic::catch_unwind(AssertUnwindSafe(|| s.dispatch(cmd, args, timeout)))
+        {
             Ok(r) => r,
             Err(p) => {
                 let detail = panic_msg(&p);
@@ -313,7 +343,8 @@ impl RustEngine {
                      这条连接已失效，请重连；若反复出现，把该连接的引擎改回「JVM 桥」"
                 )))
             }
-        }
+        };
+        classify_cancel(result, &self.interrupted)
     }
 
     /// 有连接且还能 ping 通。
@@ -780,7 +811,21 @@ impl Session {
         // 先把输出缓冲取空：`out?` 走错误分支时若还没取，本次语句已写入的
         // `put_line` 会留在缓冲里，被下一条成功语句一起取走 —— 输出就张冠李戴了。
         let output = self.take_output();
-        let mut body = out?;
+        // 超时的原文是「点了停止，或等待超过超时时间」，用户分不清是哪一种；
+        // 走到这里说明没被用户停（停会被 `classify_cancel` 改码），所以直接写明秒数。
+        let mut body = out.map_err(|e| {
+            if e.code == "timeout" {
+                BridgeError::new(
+                    "timeout",
+                    format!(
+                        "等待超过 {timeout_sec} 秒仍未返回，语句已中断。会话仍然可用；\
+                         要跑更久请在查询设置里调大等待上限"
+                    ),
+                )
+            } else {
+                e
+            }
+        })?;
         body.insert("ms".into(), json!(t0.elapsed().as_millis() as u64));
         body.insert(
             "stats".into(),
@@ -917,7 +962,10 @@ impl Session {
         // 取出游标再取数：失败时不能把坏游标留在 `self.cursor` 里 —— 继续在它上面
         // `next()` 只会重复同一个报错，或者给出错位的行（TTC 那条坑尤其如此）。
         let Some(mut cur) = self.cursor.take() else {
-            return Err(sql_err(
+            // 独立错误码：前端据此把「重试加载」换成「重新执行」。
+            // 上一次续取失败时游标已经被 take 走并关闭，再点多少次都是这个结果。
+            return Err(BridgeError::new(
+                "cursor-closed",
                 "没有可以继续读取的结果（游标已关闭，重新执行一次）",
             ));
         };
@@ -2652,6 +2700,32 @@ mod tests {
         let e = drv_err(std::io::Error::from(std::io::ErrorKind::TimedOut).into());
         assert_eq!(e.code, "timeout", "语句阶段的超时不能跟着改码");
         assert!(e.message.contains("会话仍然可用"));
+    }
+
+    /// 同一个驱动错误，用户点过停止就报 `cancelled`，否则保持 `timeout`。
+    /// 前端靠这个码把「我主动停了」显示成已停止，而不是红色失败。
+    #[test]
+    fn 用户停止产生cancelled_真超时仍是timeout() {
+        let stopped = AtomicBool::new(true);
+        let e = classify_cancel(
+            Err(drv_err(
+                std::io::Error::from(std::io::ErrorKind::TimedOut).into(),
+            )),
+            &stopped,
+        )
+        .unwrap_err();
+        assert_eq!(e.code, "cancelled");
+        assert!(!stopped.load(Ordering::SeqCst), "标志用一次就该清掉");
+
+        let timeout = AtomicBool::new(false);
+        let e = classify_cancel(
+            Err(drv_err(
+                std::io::Error::from(std::io::ErrorKind::TimedOut).into(),
+            )),
+            &timeout,
+        )
+        .unwrap_err();
+        assert_eq!(e.code, "timeout");
     }
     /// 对象类型会被拼进 `get_ddl('<type>', ?)`，所以「认不出来就 None」是安全边界，
     /// 这条用例是它的守门人：任何放宽都必须先过这里。

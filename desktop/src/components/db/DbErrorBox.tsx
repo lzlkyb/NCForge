@@ -54,6 +54,7 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
         {ora && <span className="dbx-mono">{ora}</span>}
       </div>
       <div style={{ marginTop: 4, wordBreak: "break-all" }}>{error}</div>
+      {errorCode === "timeout" && <div style={{ marginTop: 4 }}>不是语法错误，是等到上限还没跑完：可以在「查询设置」或表页筛选栏把等待上限调大后重试。</div>}
       {ora === "ORA-01031" && <div style={{ marginTop: 4 }}>当前账号没有这个操作的权限（读写权限由数据库账号决定）。</div>}
       {suggestions.length > 0 && (
         <div style={{ marginTop: 4 }}>

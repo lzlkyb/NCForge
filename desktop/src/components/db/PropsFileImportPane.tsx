@@ -51,7 +51,7 @@ export function PropsFileImportPane() {
             选择文件…
           </button>
           <span className="dbx-mono dbx-muted">{file?.name ?? "未选择"}</span>
-          <input ref={fileRef} type="file" accept=".properties,.txt,.conf" hidden onChange={(e) => void pick(e.target.files?.[0])} />
+          <input ref={fileRef} type="file" accept=".properties,.txt,.conf" hidden onChange={(e) => { const input = e.currentTarget; void pick(input.files?.[0]).finally(() => { input.value = ""; }); }} />
         </span>
         <p className="dbx-hint">
           读 <code>url</code> / <code>user</code>（或 username）/ <code>pwd</code>（或 password）三个键；口令用 Windows 加密存本机，原文件不动。

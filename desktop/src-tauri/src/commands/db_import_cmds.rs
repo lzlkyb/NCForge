@@ -80,6 +80,12 @@ fn ident(raw: &str) -> String {
     format!("\"{}\"", raw.trim().replace('"', "\"\""))
 }
 
+/// `OWNER.TABLE` 逐段加引号：整串加引号会被 Oracle 当成一个带点的表名，
+/// 目标表在非默认 schema 时导入直接报「表不存在」。
+fn ident_path(raw: &str) -> String {
+    raw.split('.').map(ident).collect::<Vec<_>>().join(".")
+}
+
 /// 一批 insert 的 SQL 预览（单测与错误信息用）。
 pub fn build_insert(table: &str, columns: &[ImportCol], row: &[Option<String>]) -> String {
     let cols: Vec<String> = columns.iter().map(|c| ident(&c.name)).collect();
@@ -97,7 +103,7 @@ pub fn build_insert(table: &str, columns: &[ImportCol], row: &[Option<String>]) 
         .collect();
     format!(
         "insert into {} ({}) values ({})",
-        ident(table),
+        ident_path(table),
         cols.join(", "),
         vals.join(", ")
     )
@@ -321,6 +327,17 @@ mod tests {
         assert_eq!(ident("  BD_MATERIAL "), "\"BD_MATERIAL\"");
         // 列名里带引号也不能把语句拼断
         assert_eq!(ident("A\"B"), "\"A\"\"B\"");
+    }
+
+    #[test]
+    fn 库名与表名逐段加引号() {
+        assert_eq!(ident_path("BD_MATERIAL"), "\"BD_MATERIAL\"");
+        assert_eq!(
+            ident_path("AIER633.BD_MATERIAL"),
+            "\"AIER633\".\"BD_MATERIAL\""
+        );
+        let sql = build_insert("AIER633.T", &cols(), &[Some("1".into()), None, None]);
+        assert!(sql.starts_with("insert into \"AIER633\".\"T\""), "{sql}");
     }
 
     #[test]

@@ -6,10 +6,11 @@ import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { ResultGrid, type GridEdit, type ResultGridApi } from "./ResultGrid";
-import { CellDetail, type LobLoader } from "./CellDetail";
+import { CellDetail } from "./CellDetail";
 import { thousands } from "../../lib/db";
 import { decodeCell } from "../../lib/cellCodec";
-import { dbApi, type Cell, type ColumnMeta } from "../../lib/dbApi";
+import type { Cell, ColumnMeta } from "../../lib/dbApi";
+import { lobLoaderFor } from "../../lib/lobLoader";
 import { ResultTransfer } from "./ResultTransfer";
 import { freezeTransferFrame, type TransferFrame, type TransferSource } from "../../lib/resultTransferContext";
 import { quickCopyTransfer } from "../../lib/resultTransferQuick";
@@ -42,6 +43,12 @@ export interface LobSource {
   slot?: string | null;
   sql: string;
   timeoutSec?: number;
+  /**
+   * 这一行自己的定位 SQL（表页按主键定位，返回 `select * from 表 where 主键 = ...`）。
+   * 返回 `null` = 这一行没有可用的定位条件（新增草稿行 / 没主键且语句带绑定），
+   * 详情面板就不显示「加载完整值」，而不是拿错行。
+   */
+  sqlForRow?: (row: number) => string | null;
 }
 
 export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated, lob, hasMore, loadingMore, onLoadMore }: {
@@ -88,11 +95,13 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
 
   const visible=gridColumns(columns,layout);
   const setColumns=(value:GridLayout)=>{setLayout(value);setSelection(null);try{saveLayout(layoutKey,value);}catch{toast("列布局未能保存，当前布局仍可使用","error");}};
+  // 宽度 / 换行 / 解码只影响显示，不该把用户正选着的区域扔掉——于是不走 `setColumns`。
+  const setLayoutOnly=(value:GridLayout)=>{setLayout(value);try{saveLayout(layoutKey,value);}catch{toast("列布局未能保存，当前布局仍可使用","error");}};
   const select=(p:{r:number;c:number},extend=false)=>setSelection(current=>({anchor:extend && current ? current.anchor : p,end:p}));
   // 自适应列宽：全部 = 清空手调值，回到 `fitWidth` 的测量结果；
   // 单列 = 只把这一列记成手调宽度，其余列保持用户已经调好的样子。
-  const fitAll=()=>setColumns({...layout,widths:{}});
-  const fitOne=(c:number)=>{const name=columns[c]?.name; if(name) setColumns({...layout,widths:{...layout.widths,[name]:fitWidth(columns[c],rows,c)}});};
+  const fitAll=()=>setLayoutOnly({...layout,widths:{}});
+  const fitOne=(c:number)=>{const name=columns[c]?.name; if(name) setLayoutOnly({...layout,widths:{...layout.widths,[name]:fitWidth(columns[c],rows,c)}});};
   const [ui,setUi] = useState<{filterOpen:boolean;columnOpen:boolean;detail:boolean;menu:{x:number;y:number;items:ContextMenuItem[]}|null;head:{x:number;y:number;col:number}|null}>({filterOpen:false,columnOpen:false,detail:false,menu:null,head:null});
   const {filterOpen,columnOpen,detail,menu,head}=ui;
   const setFilterOpen=(value:boolean|((v:boolean)=>boolean))=>setUi(v=>({...v,filterOpen:typeof value==="function"?value(v.filterOpen):value}));
@@ -151,23 +160,14 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   // 直接用 `sel.r + 1` 是原始下标，筛选后会和网格对不上。
   const selRowNo = sel ? (order.indexOf(sel.r) >= 0 ? order.indexOf(sel.r) + 1 : sel.r + 1) : null;
   // 详情面板的「加载完整值」：行号用 `sel.r`（`rows` 下标，不是显示顺序），
-  // 列名用原始列名——后端要靠它在外层子查询里定位这一格。
-  const lobLoader: LobLoader | undefined = lob && sel ? {
-    canLoad: true,
-    load: async () => {
-      const r = await dbApi.lobValue(lob.connId, lob.sql, sel.r, columns[sel.c].name, lob.slot ?? null);
-      return { value: r.value, chars: r.chars, truncated: r.truncated };
-    },
-  } : undefined;
+  // 列名用原始列名——后端要靠它在定位 SQL 里取这一格。
+  const lobLoader = lobLoaderFor(lob, sel?.r ?? null, sel ? columns[sel.c]?.name ?? "" : "");
   const selectionSummary = bounds && <span className="dbx-selection-summary">选区 {bounds.rowEnd-bounds.rowStart+1} 行 × {bounds.colEnd-bounds.colStart+1} 列</span>;
   // 解码开关按列名存进布局：下次查同一张表同一列还是这个状态。
-  // 不走 `setColumns`：那个会清选区，而切换显示方式不该把用户的选择扔掉。
   const toggleDecode=(c:number)=>{
     const name=columns[c]?.name; if(!name) return;
     const decoded=layout.decoded.includes(name)?layout.decoded.filter(n=>n!==name):[...layout.decoded,name];
-    const value={...layout,decoded};
-    setLayout(value);
-    try{saveLayout(layoutKey,value);}catch{toast("解码开关未能保存，本次仍然生效","error");}
+    setLayoutOnly({...layout,decoded});
   };
   // 右键菜单要提前知道「这列能不能解」，否则点了没反应。只抽前 50 行，够判断也不拖慢渲染。
   const headName = head ? columns[head.col]?.name ?? "" : "";
@@ -190,7 +190,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
           placeholder="输入关键字" aria-label="在结果中筛选" onChange={e=>setFilter(e.target.value)} autoFocus={filterOpen}
           onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();setFilter("");setFilterOpen(false);gridApi.current?.focusActive();}}} />}
         <button type="button" className="dbx-btn ghost" title="显示、隐藏、冻结列与恢复布局" aria-label="结果列布局" onClick={()=>setColumnOpen(true)}><Icon name="sliders" size={14} /><span className="dbx-action-label">显示列 {visible.length} / {columns.length}</span></button>
-        <button type="button" className="dbx-btn ghost" title="长文本自动换行 · 行高随内容增减" aria-label="长文本自动换行" aria-pressed={layout.wrap} data-on={layout.wrap || undefined} onClick={()=>setColumns({...layout,wrap:!layout.wrap})}>自动换行</button>
+        <button type="button" className="dbx-btn ghost" title="长文本自动换行 · 行高随内容增减" aria-label="长文本自动换行" aria-pressed={layout.wrap} data-on={layout.wrap || undefined} onClick={()=>setLayoutOnly({...layout,wrap:!layout.wrap})}>自动换行</button>
         <button type="button" className="dbx-ibtn" title="按内容自适应全部列宽" aria-label="自适应列宽" onClick={fitAll}><Icon name="columns" size={14} /></button>
         {snapshot && <ResultCompare snapshot={snapshot} related={onRelated ? {label:"关联记录",icon:"external",disabled:!sel,onSelect:()=>sel && onRelated(rows[sel.r])} : undefined} />}
         {!snapshot && onRelated && <button type="button" className="dbx-btn ghost" disabled={!sel} onClick={()=>sel && onRelated(rows[sel.r])}>关联记录</button>}
@@ -244,7 +244,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
           hasMore={hasMore}
           loadingMore={loadingMore}
           onLoadMore={onLoadMore}
-          onWidths={w=>setColumns({...layout,widths:Object.fromEntries(columns.map((c,i)=>[c.name,w[i]]))})}
+          onWidths={(k,w)=>{const name=columns[k]?.name; if(name) setLayoutOnly({...layout,widths:{...layout.widths,[name]:w}});}}
           onDetail={() => setDetail(true)}
           edit={edit}
           blockedHint={blockedHint}

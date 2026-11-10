@@ -62,7 +62,9 @@ export function useGridEditing({ rows, order, visible, edit, onSel, reveal, boxR
     if (next) { onSel(next); focusAt(next); } else boxRef.current?.focus();
   };
 
-  const cancel = () => { cancelRef.current = true; setEditing(null); boxRef.current?.focus(); };
+  // Esc 置位后要有人复位：正常路径是 input 卸载时的 blur 走到 `commit` 消费掉；
+  // 若那一次 blur 没触发，下一次 Enter 就会被这里吞掉。微任务兜底复位，不影响同一 tick 的 blur。
+  const cancel = () => { cancelRef.current = true; setEditing(null); boxRef.current?.focus(); queueMicrotask(() => { cancelRef.current = false; }); };
   const setValue = (value: string) => setEditing(current => (current ? { ...current, value } : current));
 
   return { editing, valueAt, startEdit, setValue, commit, cancel };

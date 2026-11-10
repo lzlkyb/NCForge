@@ -14,8 +14,9 @@ vi.mock("./dbConfirm", () => ({
 }));
 vi.mock("./tauri", () => ({ invoke: vi.fn() }));
 
-import { requestCloseTab } from "./dbActions";
-import { __resetDbForTest, getDb, openDictTab, openSqlTab, openTableTab, setConns, setSqlDraft, sqlTabOf } from "./dbStore";
+import { requestActivateTab, requestCloseTab } from "./dbActions";
+import { __resetDbForTest, activateTab, getDb, openDictTab, openSqlTab, openTableTab, setConns, setSqlDraft, sqlTabOf } from "./dbStore";
+import { __resetEditsForTest, pendingEdits, reportEditCount, resultEditKey, tableEditKey } from "./dbDirtyEdits";
 import type { DbConn } from "./dbApi";
 
 const conn: DbConn = {
@@ -25,6 +26,7 @@ const conn: DbConn = {
 beforeEach(() => {
   localStorage.clear();
   __resetDbForTest();
+  __resetEditsForTest();
   setConns([conn]);
   for (const fn of [mocks.toast, mocks.dispose, mocks.ask, mocks.guardTx, mocks.guardSlotTx, mocks.isLastTabOn]) fn.mockReset();
   mocks.isLastTabOn.mockReturnValue(false);
@@ -57,6 +59,30 @@ it("表页关闭同样可撤销，字典标签不弹通知也不入栈", async (
   await requestCloseTab(openDictTab("c1"));
   expect(mocks.toast).toHaveBeenCalledTimes(1);
   expect(getDb().recentlyClosed).toHaveLength(1);
+});
+
+it("有未写回的改动时关闭要先确认；取消保留标签，确认后计数一起清掉", async () => {
+  const id = openSqlTab("c1", "select 1");
+  reportEditCount(tableEditKey(id), 2);
+  mocks.ask.mockResolvedValueOnce(false);
+  await requestCloseTab(id);
+  expect(mocks.ask).toHaveBeenCalledWith("有未写回的改动", expect.stringContaining("2 处"), "丢弃并关闭标签", true);
+  expect(getDb().tabs.some((t) => t.id === id)).toBe(true);
+  await requestCloseTab(id);
+  expect(getDb().tabs.some((t) => t.id === id)).toBe(false);
+  expect(pendingEdits(tableEditKey(id))).toBe(0);
+});
+
+it("切换文档标签：干净时同步切换，有改动时先确认，取消就留在原标签", async () => {
+  const dirty = openSqlTab("c1");
+  const clean = openSqlTab("c1");
+  activateTab(dirty);
+  reportEditCount(resultEditKey(dirty, "r1"), 1);
+  mocks.ask.mockResolvedValueOnce(false);
+  await requestActivateTab(clean);
+  expect(getDb().active).toBe(dirty);
+  await requestActivateTab(clean);
+  expect(getDb().active).toBe(clean);
 });
 
 it("危险操作确认被取消时既不关闭，也不弹撤销、不入找回栈", async () => {

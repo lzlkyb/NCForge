@@ -113,6 +113,10 @@ const KNOWN_CODES = new Set([
   // Rust 引擎跑不了这条语句，已改在 JVM 桥的临时会话里执行；那条会话已经回滚，
   // 写入没有生效。这个码必须能认出来，否则界面会把「写入被回滚」显示成内部错误。
   "fallback-tx",
+  // 用户点了停止：和超时分开，界面不能把「我主动停下」显示成失败。
+  "cancelled",
+  // Rust 引擎续取时游标已经被关掉：重试只会得到同一个错误。
+  "cursor-closed",
 ]);
 
 export interface DbError {
@@ -136,6 +140,8 @@ export interface DbError {
     | "need-jvm"
     | "busy"
     | "fallback-tx"
+    | "cancelled"
+    | "cursor-closed"
     | "other";
   message: string;
 }
@@ -342,6 +348,17 @@ export function lobPreviewChars(v: Cell): number | null {
  */
 export function sameCell(a: Cell, b: Cell): boolean {
   return a === b || (a !== null && b !== null && String(a) === String(b));
+}
+
+/**
+ * 给对象名补上 schema 前缀；表名里已经写了 `schema.table` 的不重复加。
+ *
+ * 表页打开时把当时的 schema 固化下来，之后所有查询、写回、结构读取都用它，
+ * 这样切默认 schema 不会让旧页面悄悄改到另一个 schema 的同名表。
+ */
+export function qualifyTable(schema: string | null | undefined, table: string): string {
+  if (!schema || table.includes(".")) return table;
+  return `${schema}.${table}`;
 }
 
 /** `128` → `128`，`3128` → `3,128`。表数量级要一眼看出来。 */

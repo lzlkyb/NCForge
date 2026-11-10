@@ -319,3 +319,17 @@ it("Shift+Enter 打开大文本编辑框：带上原值，Ctrl+Enter 应用不�
   expect(document.querySelector(".dbx-textedit")).toBeNull();
   expect(edited).toHaveBeenCalledTimes(1);
 });
+
+it("Ctrl+V：从活动格铺开，接住后阻止浏览器默认粘贴",()=>{
+  const many=vi.fn();
+  act(()=>root.render(<ResultGrid columns={columns} rows={rows} order={order} sort={null} onSort={()=>{}}
+    sel={{r:5,c:0}} onSel={()=>{}} selection={{anchor:{r:5,c:0},end:{r:5,c:0}}}
+    visible={[0,1]} frozen={[]} widthOverrides={{}} onWidths={()=>{}}
+    edit={{canEdit:()=>true,changed:new Map(),onEdit:vi.fn(),onEditMany:many}} />));
+  const grid=host.querySelector<HTMLDivElement>('[role="grid"]')!;
+  const ev=new Event("paste",{bubbles:true,cancelable:true}) as ClipboardEvent;
+  Object.defineProperty(ev,"clipboardData",{value:{getData:()=>"x\ty"}});
+  act(()=>{grid.dispatchEvent(ev);});
+  expect(ev.defaultPrevented).toBe(true);
+  expect(many).toHaveBeenCalledWith([{row:5,col:0,value:"x"},{row:5,col:1,value:"y"}]);
+});

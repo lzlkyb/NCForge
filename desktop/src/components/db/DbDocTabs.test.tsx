@@ -2,11 +2,11 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ showDocument: vi.fn(), requestCloseTab: vi.fn(), newConsole: vi.fn() }));
-vi.mock("../../lib/dbActions", () => ({ requestCloseTab: mocks.requestCloseTab, newConsole: mocks.newConsole }));
+const mocks = vi.hoisted(() => ({ showDocument: vi.fn(), requestCloseTab: vi.fn(), requestActivateTab: vi.fn(), requestRestoreClosedTab: vi.fn(), newConsole: vi.fn() }));
+vi.mock("../../lib/dbActions", () => ({ requestActivateTab: mocks.requestActivateTab, requestCloseTab: mocks.requestCloseTab, requestRestoreClosedTab: mocks.requestRestoreClosedTab, newConsole: mocks.newConsole }));
 vi.mock("../workspace/WorkbenchDock", () => ({ DockRegion: ({ children }: { children: ReactNode }) => children, useWorkbenchDock: () => ({ documentOpen: true, showDocument: mocks.showDocument }) }));
 import { DbDocTabs } from "./DbDocTabs";
-import { __resetDbForTest, activateTab, closeTab, getDb, openSqlTab, openTableTab, setConns, sqlTabOf } from "../../lib/dbStore";
+import { __resetDbForTest, activateTab, closeTab, getDb, openSqlTab, openTableTab, restoreClosedTab, setConns, sqlTabOf } from "../../lib/dbStore";
 import { dbPanelId, dbTabId } from "../../lib/dbPendingSessions";
 import type { DbConn } from "../../lib/dbApi";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -17,6 +17,8 @@ beforeEach(() => {
   __resetDbForTest();
   mocks.showDocument.mockReset();
   mocks.requestCloseTab.mockReset().mockImplementation((id: string) => { closeTab(id); return Promise.resolve(); });
+  mocks.requestActivateTab.mockReset().mockImplementation((id: string) => { activateTab(id); });
+  mocks.requestRestoreClosedTab.mockReset().mockImplementation((id?: string) => restoreClosedTab(id));
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); __resetDbForTest(); });

@@ -135,4 +135,32 @@ describe("SessionDrawer", () => {
     });
     expect(copySpy).toHaveBeenCalledWith("alter system kill session '42,7788';");
   });
+
+  it("抽屉不可见时停止自动刷新，重新可见后恢复", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.invoke.mockResolvedValue(result());
+      await act(async () => {
+        root?.render(<SessionDrawer connId="c1" visible={false} onClose={() => {}} />);
+      });
+      // 打开时的那一次读取照常发生
+      expect(mocks.invoke).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(25_000);
+      });
+      // 被别的文档盖住：不该隔 10s 继续查 v$session
+      expect(mocks.invoke).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        root?.render(<SessionDrawer connId="c1" visible onClose={() => {}} />);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(mocks.invoke).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

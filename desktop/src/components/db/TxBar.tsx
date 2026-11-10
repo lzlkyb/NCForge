@@ -6,6 +6,7 @@ import { dbTaskSpec, dbTxKey } from "../../lib/dbOperations";
 import { getOperations, operationActive, subscribeOperations, trackOperation } from "../../lib/operations";
 import { patchTab, setTx, setTxNotice, sqlTabOf, txAction, useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
 import { dbApi, type TxInfo } from "../../lib/dbApi";
+import { bumpTxEpoch } from "../../lib/dbTxEpoch";
 import { txPending } from "../../lib/txState";
 import { ContextMenu } from "../workspace/ContextMenu";
 
@@ -62,6 +63,8 @@ export function useDbTransaction({ connId, tabId, slot, tx: slotTx, notice: slot
       } else {
         const next = await txAction(connId, action, slot);
         applySlotTx(next);
+        // 通知网格：回滚后本地覆盖的「已写回」值不再成立，表页要重新读。
+        bumpTxEpoch(connId, slot, action);
         setTxNotice(connId, slot, tabId, {kind:"success",text:'已' + label + ' · ' + thousands(tx?.rows ?? 0) + ' 行'});
       }
     } catch (error) {

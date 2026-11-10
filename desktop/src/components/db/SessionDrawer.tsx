@@ -8,8 +8,11 @@ import { beginOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
 import { copyText } from "../../lib/utils";
 
-/** 自动刷新间隔。5 秒够看清「谁锁了谁」，也不至于把共用库查出压力。 */
-const REFRESH_MS = 5000;
+/**
+ * 自动刷新间隔。10 秒够看清「谁锁了谁」，也是共用库上 `v$session` + `v$locked_object`
+ * 能长期开着的节奏——之前 5 秒在切走页面后仍在查，等于白给数据库加压。
+ */
+const REFRESH_MS = 10_000;
 
 /** 读不到 `v$locked_object` 时给用户看的授权语句（**不代执行**，权限是 DBA 的事）。 */
 const GRANT_HINT = "grant select on v$locked_object to <你的账号>;";
@@ -23,7 +26,7 @@ const GRANT_HINT = "grant select on v$locked_object to <你的账号>;";
  *
  * `granted: false` 时必须显式提示缺授权：把"看不见锁"显示成"没有锁"是这类面板最坏的 bug。
  */
-export function SessionDrawer({ connId, onClose }: { connId: string; onClose: () => void }) {
+export function SessionDrawer({ connId, onClose, visible = true }: { connId: string; onClose: () => void; visible?: boolean }) {
   const [rows, setRows] = useState<SessionRow[] | null>(null);
   const [granted, setGranted] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -54,15 +57,17 @@ export function SessionDrawer({ connId, onClose }: { connId: string; onClose: ()
     void load();
   }, [load]);
 
-  // 抽屉是 store 级状态：切到别的页面它也不关，所以最小化后照样在查 v$locked_object。
-  // 窗口不可见时必须停（CLAUDE.md 8.1 的统一约定，同仓 useServerLog 已经这么做）。
+  // 抽屉是 store 级状态（按连接记），切文档标签不关；所以「看不见」有两层：
+  // 窗口/页面不可见（`useAppHidden`），以及抽屉所在标签被别的文档盖住（`visible`）。
+  // 两者任一为假都必须停轮询（CLAUDE.md 8.1：自动行为不可见即停）。
   const appHidden = useAppHidden();
+  const paused = !auto || appHidden || !visible;
 
   useEffect(() => {
-    if (!auto || appHidden) return;
+    if (paused) return;
     const t = setInterval(() => void load(false), REFRESH_MS);
     return () => clearInterval(t);
-  }, [auto, appHidden, load]);
+  }, [paused, load]);
 
   const copy = (text: string, what: string) => {
     if (!text) return;
@@ -86,7 +91,7 @@ export function SessionDrawer({ connId, onClose }: { connId: string; onClose: ()
           type="button"
           className="dbx-ibtn"
           data-on={auto || undefined}
-          title={auto ? "每 5 秒自动刷新（点击关闭）" : "已关闭自动刷新（点击开启）"}
+          title={auto ? "每 10 秒自动刷新（点击关闭）" : "已关闭自动刷新（点击开启）"}
           aria-label="自动刷新"
           onClick={() => setAuto(!auto)}
         >

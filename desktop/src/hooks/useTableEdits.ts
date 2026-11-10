@@ -1,6 +1,7 @@
 import { useCallback } from "react";
-import { sameCell } from "../lib/db";
-import type { Cell } from "../lib/dbApi";
+import { toast } from "../components/ui/toast";
+import { isLobPreview, sameCell } from "../lib/db";
+import type { Cell, ColumnMeta } from "../lib/dbApi";
 
 /**
  * 表页的格子级编辑动作：改一格、撤回一格、一次改多格（粘贴）、复制整行。
@@ -60,12 +61,19 @@ export function useTableEdits({ base, rows, setChanged, drafts }: {
   /**
    * 复制整行成新增行。主键列刻意留空：主键值照抄一定会撞唯一约束，
    * 留空让数据库默认值（序列 / SYS_GUID）或用户自己填。
+   *
+   * 大文本预览也不能照抄：那只是前 8K + 一段说明，插进去就是永久截断的数据。
+   * 跳过该列并在提示里点名，让用户自己重新填或走 SQL。
    */
-  const cloneRow = useCallback((row: number, pkCols: number[]) => {
+  const cloneRow = useCallback((row: number, pkCols: number[], columns?: ColumnMeta[]) => {
     const values = new Map<number, Cell>();
+    const skipped: string[] = [];
     (rows?.[row] ?? []).forEach((value, col) => {
-      if (!pkCols.includes(col) && value !== null) values.set(col, value);
+      if (pkCols.includes(col) || value === null) return;
+      if (isLobPreview(value)) { skipped.push(columns?.[col]?.name ?? String(col + 1)); return; }
+      values.set(col, value);
     });
+    if (skipped.length) toast(`复制行时跳过了大文本列 ${skipped.join("、")}：网格里只有前 8K，请重新填写或改用 SQL`, "warning");
     drafts.add(values);
   }, [rows, drafts]);
 

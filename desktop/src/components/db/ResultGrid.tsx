@@ -15,7 +15,6 @@ import { useGridRowLayout } from "../../hooks/useGridRowLayout";
 import { useGridTyping } from "../../hooks/useGridTyping";
 import { useGridDensityScroll } from "../../hooks/useGridDensityScroll";
 import { shouldLoadMore } from "../../lib/gridLoadMore";
-import { parseClipboardGrid, pasteTargets } from "../../lib/gridPaste";
 import { getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
 import { selectionText, type Selection } from "../../lib/dbResultTools";
 import "../../db-grid-inspector.css";
@@ -45,7 +44,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   onHeaderMenu?: (col: number, x: number, y: number) => void;
   sel: CellPos | null;
   onSel: (p: CellPos, extend?:boolean) => void;
-  visible: number[]; frozen: string[]; widthOverrides: Record<string,number>; onWidths: (w:number[])=>void; selection:Selection|null;
+  visible: number[]; frozen: string[]; widthOverrides: Record<string,number>; onWidths: (col:number,width:number)=>void; selection:Selection|null;
   decoded?: string[]; // 已开启「按编码解码显示」的列名，开关在列头右键菜单
   /** 打开单元格详情（F4 / 右键「查看完整值」/ 工具栏按钮）。双击不触发。 */
   onDetail?: () => void;
@@ -77,6 +76,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const loadedAt = useRef(rows.length);
   const [widths, setWidths] = useState<number[]>(() => initialWidths(columns, rows));
   const [scroll, setScroll] = useState({ top: 0, h: 400, left: 0, w: 800 });
+  const [resizing, setResizing] = useState(false);
 
   const colKey = columns.map((c) => c.name).join("|");
   const colKeyRef = useRef(colKey);
@@ -91,8 +91,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
 
   // 新结果的第一帧里 effect 还没重算列宽：先按新列现算一份，避免宽度对不上
   const ws = widths.length === columns.length ? widths : initialWidths(columns, rows);
-  // 换行时行高不固定：行高按 rows 下标测、偏移按 order 累加（见 useGridRowLayout）。
-  const layout = useGridRowLayout({ rows, columns, widths: ws, order, wrap, rowH: ROW_H });
+  // 换行时行高不固定：行高按 rows 下标测、偏移按 order 累加；拖列宽期间冻结测量，pointerup 后再重算一次。
+  const layout = useGridRowLayout({ rows, columns, widths: ws, order, wrap, rowH: ROW_H, frozen: resizing });
   // 切密度保留当前首行：按总高比例换算 scrollTop（依赖数组在渲染时求值，必须放在 layout 之后）。
   useGridDensityScroll({ boxRef, rowH: ROW_H, total: layout.total, preciseTop,
     onScrollTop: (top, h) => setScroll(s => ({ ...s, top, h })) });
@@ -147,13 +147,15 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const resize = (k: number, startX: number) => {
     const start = widths[k];
     dragCleanup.current?.();
+    setResizing(true);
     const finish = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
       dragCleanup.current = null;
+      setResizing(false);
       // 宽度没变（误点、双击 fit 的第一下）就别写布局，否则自动宽度会被固化成手调值。
-      if (widthRef.current.length && widthRef.current[k] !== start) onWidths(widthRef.current);
+      if (widthRef.current.length && widthRef.current[k] !== start) onWidths(k, widthRef.current[k]);
     };
     const move = (e: PointerEvent) => {
       // 指针被系统取消（Alt+Tab、触控笔离开、拖出窗口）时 pointerup 不触发；
@@ -167,7 +169,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     window.addEventListener("pointercancel", finish, { once: true });
   };
   /** 双击列分隔线 = 本列贴到内容（列名优先），顺手记成手调宽度。 */
-  const fit = (k: number) => { if (!columns[k]) return; const next = ws.map((w, i) => (i === k ? fitWidth(columns[k], rows, k) : w)); setWidths(next); onWidths(next); };
+  const fit = (k: number) => { if (!columns[k]) return; const next = ws.map((w, i) => (i === k ? fitWidth(columns[k], rows, k) : w)); setWidths(next); onWidths(k, next[k]); };
 
   // 编辑态（进入 / 提交并移动 / 取消）抽到 hook：表页与 SQL 结果页共用同一套键盘语义。
   const { editing, valueAt, startEdit: beginEdit, setValue, commit: commitEdit, cancel: cancelEdit } =
@@ -189,7 +191,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
    * 弹层开着的时候不再渲染网格里的编辑 input（`GridRows`），autoFocus 不会互相抢。
    */
   const [textOpen, setTextOpen] = useState(false);
-  const { typeInto, openTextEditor } = useGridTyping({ sel, edit, bounds, order, visible, beginEdit, startEdit });
+  const { typeInto, openTextEditor, paste } = useGridTyping({ sel, edit, bounds, order, visible, beginEdit, startEdit });
   const openText = () => { if (openTextEditor()) setTextOpen(true); };
 
   const copySelection = () => {
@@ -212,20 +214,17 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     // `Enter` 也要排除——它 length 也是 1，但语义是「进入 / 提交」，
     // Shift+Enter 还要打开大文本编辑框，被这里捕获就再也到不了那一分支。
     if (!editing && sel && edit && e.key.length === 1 && e.key !== "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey
-      && edit.canEdit(sel.c, sel.r)) { e.preventDefault(); typeInto(e.key); return; }
+      && !e.nativeEvent.isComposing && edit.canEdit(sel.c, sel.r)) { e.preventDefault(); typeInto(e.key); return; }
     if (!editing && sel && edit && e.key === "Enter" && (e.shiftKey || e.altKey) && edit.canEdit(sel.c, sel.r)) {
       e.preventDefault(); openText(); return;
     }
     navigation.onKey(e);
   };
-  /** Ctrl+V：把剪贴板里那一块从活动格铺开；只粘一个值时铺满当前选区。 */
+  /** Ctrl+V：把剪贴板里那一块从活动格铺开（口径见 `useGridTyping.paste`）。 */
   const onPaste = (e: ClipboardEvent<HTMLDivElement>) => {
-    if (!edit?.onEditMany || !sel) return;
     const text = e.clipboardData.getData("text/plain");
-    if (!text) return;
+    if (!text || !paste(text)) return;
     e.preventDefault();
-    const cells = pasteTargets(parseClipboardGrid(text), sel, bounds, order, visible, (c, r) => edit.canEdit(c, r));
-    if (cells.length) edit.onEditMany(cells);
   };
   // 只有列变了才回顶并结束编辑；拖列宽也会换 widthOverrides 引用，无差别重置会丢滚动位置和编辑中的值
   useEffect(() => {

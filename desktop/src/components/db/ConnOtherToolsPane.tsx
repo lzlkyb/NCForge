@@ -6,6 +6,7 @@ import { dbApi, type DbEnv, type ImportCandidate, type ImportScan, type ImportTo
 import { beginOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
 import { closeConnDialog, loadConns } from "../../lib/dbStore";
+import { toast } from "../ui/toast";
 
 const TOOL_LABEL: Record<ImportTool, string> = { datagrip: "DataGrip", plsql: "PL/SQL Developer" };
 
@@ -112,7 +113,12 @@ export function OtherToolsPane() {
         setErr(out.skipped.slice(0, 3).join("；") || "没有新增连接");
         return;
       }
-      task.finish("success", `已导入 ${out.added} 个连接`);
+      task.finish("success", `已导入 ${out.added} 个连接${out.skipped.length ? `，跳过 ${out.skipped.length} 个` : ""}`);
+      // 弹窗马上关掉，跳过原因必须在这里说全：只截前 3 条等于让用户猜剩下的为什么没进来。
+      if (out.skipped.length) {
+        const more = out.skipped.length > 3 ? ` 等 ${out.skipped.length} 条` : "";
+        toast(`已导入 ${out.added} 个，跳过 ${out.skipped.length} 个：${out.skipped.slice(0, 3).join("；")}${more}`, "warning");
+      }
       closeConnDialog();
     } catch (e) {
       task.finish("failed", "配置导入失败，返回连接配置查看原因");

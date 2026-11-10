@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { selectedEditableCells } from "../lib/gridSelection";
+import { parseClipboardGrid, pasteTargets } from "../lib/gridPaste";
 import type { CellPos, GridEdit } from "../components/db/gridEdit";
 
 /**
@@ -36,5 +37,16 @@ export function useGridTyping({ sel, edit, bounds, order, visible, beginEdit, st
     return true;
   }, [sel, beginEdit, startEdit]);
 
-  return { typeInto, openTextEditor };
+  /**
+   * Ctrl+V：把剪贴板里那一块从活动格铺开；只粘一个值时铺满当前选区。
+   * 返回 true = 这个网格接了粘贴，调用方要 `preventDefault`（返回 false 时交给浏览器默认行为）。
+   */
+  const paste = useCallback((text: string) => {
+    if (!edit?.onEditMany || !sel) return false;
+    const cells = pasteTargets(parseClipboardGrid(text), sel, bounds, order, visible, (c, r) => edit.canEdit(c, r));
+    if (cells.length) edit.onEditMany(cells);
+    return true;
+  }, [edit, sel, bounds, order, visible]);
+
+  return { typeInto, openTextEditor, paste };
 }
