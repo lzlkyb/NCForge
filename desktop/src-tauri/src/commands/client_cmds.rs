@@ -93,7 +93,7 @@ pub struct ClientPreview {
     pub reused: bool,
 }
 
-fn log_path(config_dir: &Path) -> PathBuf {
+pub(super) fn log_path(config_dir: &Path) -> PathBuf {
     config_dir.join("logs").join("client.log")
 }
 
@@ -247,11 +247,13 @@ fn launch_phase(state: &AppState, log: &Path, phase: &str) -> Result<(), String>
 }
 #[tauri::command]
 pub async fn client_start(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     debug: Option<bool>,
     request_id: Option<String>,
 ) -> Result<String, String> {
     let st = state.inner().clone();
+    let hotswap_jar = super::server_cmds::find_hotswap_jar(&app);
     let run_id = {
         let mut run = st.client.lock().map_err(|_| "客户端状态异常".to_string())?;
         run.begin_start(request_id.as_deref())?
@@ -290,14 +292,28 @@ pub async fn client_start(
             let heap_mb = launch::effective_client_heap_mb(cfg.client_heap_mb);
             let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
 
+            // 热替换 agent：换新令牌、清旧就绪文件。与中间件各用各的会话文件。
+            // 任何失败都只记日志、按不挂 agent 启动——它不能变成「客户端起不来」的新原因。
+            let java_agent = super::server_cmds::hotswap_agent_arg(
+                crate::hotswap::Target::Client,
+                &config_dir,
+                hotswap_jar.as_deref(),
+                cfg.hotswap_enabled,
+                true,
+                &log,
+            );
+
             launch_phase(&st, &log, "准备 classpath")?;
             let prepared = launch::client_spec(
                 &nc_home,
                 &java,
                 &project_root,
                 &config_dir.join("tmp"),
-                heap_mb,
-                debug_port,
+                launch::ClientTuning {
+                    heap_mb,
+                    debug_port,
+                    java_agent: java_agent.as_deref(),
+                },
                 &overrides,
             );
             let (spec, entry_count) = match prepared {
@@ -334,6 +350,12 @@ pub async fn client_start(
                     run.proc = Some(proc);
                     run.launch_phase = None;
                     drop(run);
+                    // 新的客户端 JVM 加载的就是磁盘上的最新产物：上一轮的热替换结果、
+                    // 过时标记、待推列表都作废（中间件那份不动）
+                    if let Ok(mut h) = st.hotswap_client.lock() {
+                        h.reset();
+                        h.attached = java_agent.is_some();
+                    }
                     Ok(())
                 }
                 Err(e) => {
@@ -463,11 +485,13 @@ pub async fn client_clear_log(
 /// 预览客户端命令行（不起进程、不重写 pathing jar）。
 #[tauri::command]
 pub async fn client_command_line(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<ClientPreview, String> {
     let cfg = state.config.read().await.clone();
     let config_dir = state.config_dir.clone();
     let st = state.inner().clone();
+    let hotswap_jar = super::server_cmds::find_hotswap_jar(&app);
     tauri::async_runtime::spawn_blocking(move || {
         let work_dir = config_dir.join("tmp");
         let (reuse, debug_port) = {
@@ -491,14 +515,27 @@ pub async fn client_command_line(
             .unwrap_or_else(|| nc_home.clone());
         let heap_mb = launch::effective_client_heap_mb(cfg.client_heap_mb);
         let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
+        // 与启动同一份判断，但 write=false：预览要是顺手换了令牌，正在跑的客户端就连不上了
+        let java_agent = crate::hotswap::launch_agent_arg_for(
+            crate::hotswap::Target::Client,
+            &config_dir,
+            hotswap_jar.as_deref(),
+            cfg.hotswap_enabled,
+            false,
+        )
+        .unwrap_or(None);
+        let tuning = launch::ClientTuning {
+            heap_mb,
+            debug_port,
+            java_agent: java_agent.as_deref(),
+        };
         let prepared = if reuse {
             launch::client_spec_preview(
                 &nc_home,
                 &java,
                 &project_root,
                 &work_dir,
-                heap_mb,
-                debug_port,
+                tuning,
                 &overrides,
             )
         } else {
@@ -507,8 +544,7 @@ pub async fn client_command_line(
                 &java,
                 &project_root,
                 &work_dir,
-                heap_mb,
-                debug_port,
+                tuning,
                 &overrides,
             )
         };

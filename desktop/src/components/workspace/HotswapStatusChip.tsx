@@ -194,9 +194,22 @@ export function HotswapStatusChip() {
               </div>
             </>
           )}
+          <ClientLine hs={hs} />
         </div>
       )}
     </Menu>
+  );
+}
+
+/** 卡片底部一行：客户端开着时说明它的 agent 状态（没开客户端就不讲，免得常驻噪音）。 */
+function ClientLine({ hs }: { hs: HotswapStatus }) {
+  const c = hs.client;
+  if (!c?.running) return null;
+  const text = c.agentOnline ? "已挂载" : c.agentAttached ? "准备中（约 2~3 分钟后就绪）" : "未挂载（重启客户端后生效）";
+  return (
+    <div className="wb-hs-body" title="客户端和中间件各挂各的 agent；源码在 src/client 下的类只推客户端，src/public 下的两边都推">
+      <Row k="客户端" tone={c.agentOnline ? undefined : "warn"}>{text}</Row>
+    </div>
   );
 }
 
@@ -210,8 +223,10 @@ export function chipView(hs: HotswapStatus, pushing: boolean, flash: boolean): {
       : { tone: "muted", dot: "idle", label: "热替换 · 未挂载", title: "本次启动没有带热替换 agent；重启服务后生效" };
   }
   const last = hs.last;
-  if (last?.state === "failed") return { tone: "bad", dot: "bad", label: "热替换失败", title: failureSummary(last) };
-  if (last?.state === "partial") return { tone: "warn", dot: "warn", label: `热替换 · ${last.shadowed.length} 个未生效`, title: failureSummary(last) };
+  // 客户端的结果在提示里标出来：两个 JVM 共用一个小签，要让人知道是哪边的
+  const who = last?.target === "client" ? "客户端：" : "";
+  if (last?.state === "failed") return { tone: "bad", dot: "bad", label: "热替换失败", title: who + failureSummary(last) };
+  if (last?.state === "partial") return { tone: "warn", dot: "warn", label: `热替换 · ${last.shadowed.length} 个未生效`, title: who + failureSummary(last) };
   if (last && flash) return { tone: "ok", dot: "ok", label: `已替换 ${last.redefined.length} 个类`, title: "点开查看明细" };
   return { tone: "idle", dot: "ok", label: "热替换", title: hs.stale ? "之前有改动没能替换进去，服务页有提示" : "热替换已就绪 · 点开查看上次结果" };
 }
@@ -220,11 +235,13 @@ function ReportCard({ report, breakpoints, onSettings, onRestart, onLinked }: { 
   const time = new Date(report.atMs).toLocaleTimeString();
   const failed = report.state === "failed";
   const partial = report.state === "partial";
+  const client = report.target === "client";
   return (
     <>
       <div className="wb-hs-head">
         <span className="wb-status-dot" data-tone={failed ? "bad" : partial ? "warn" : "ok"} />
         <span className="wb-hs-title" data-tone={failed ? "bad" : partial ? "warn" : undefined}>
+          {client ? "客户端 · " : ""}
           {failed ? "热替换失败 · 本批未应用" : partial ? "部分生效" : "热替换成功"}
         </span>
         <small>{time}{failed ? "" : ` · ${report.elapsedMs} ms`}</small>
@@ -232,7 +249,7 @@ function ReportCard({ report, breakpoints, onSettings, onRestart, onLinked }: { 
       <div className="wb-hs-body">
         {failed ? (
           <>
-            <Row k="原因">{failureSummary(report)}{report.code === "unsupported" ? "，需要重启服务。" : ""}</Row>
+            <Row k="原因">{failureSummary(report)}{report.code === "unsupported" ? (client ? "，需要重启客户端。" : "，需要重启服务。") : ""}</Row>
             <Row k="本批">{report.requested} 个类全部未应用（JVM 一批要么全成要么全不成）</Row>
           </>
         ) : (
@@ -265,8 +282,9 @@ function ReportCard({ report, breakpoints, onSettings, onRestart, onLinked }: { 
         ) : (
           <button type="button" className="sv-btn sv-btn-ghost" onClick={partial ? onLinked : onSettings}>{partial ? "工程关联" : "设置"}</button>
         )}
-        {/* 遮挡（partial）不给重启：重启后 classpath 顺序不变，跑的还是那份同名类 */}
-        {failed && <button type="button" className="sv-btn sv-btn-primary" onClick={onRestart}>重启服务</button>}
+        {/* 遮挡（partial）不给重启：重启后 classpath 顺序不变，跑的还是那份同名类。
+            「重启服务」只管中间件，客户端的失败不给这个按钮（按了重启的是另一个 JVM） */}
+        {failed && !client && <button type="button" className="sv-btn sv-btn-primary" onClick={onRestart}>重启服务</button>}
       </div>
     </>
   );

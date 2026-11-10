@@ -31,9 +31,72 @@ pub fn session_dir(config_dir: &Path) -> PathBuf {
     config_dir.join("hotswap")
 }
 
+/// 工作台能热替换的两个 JVM。各有一套会话文件（令牌、端口、就绪文件）：
+/// 两个进程各挂各的 agent，互不知道对方，令牌也不能共用。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Target {
+    /// NC 中间件。
+    Server,
+    /// NC 客户端（`JStarter`）。
+    Client,
+}
+
+impl Target {
+    pub const ALL: [Target; 2] = [Target::Server, Target::Client];
+
+    /// 事件、状态里用的标识，与前端 `HotswapTarget` 一致。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Target::Server => "server",
+            Target::Client => "client",
+        }
+    }
+
+    /// 给人看的名字（服务日志里用）。
+    pub fn label(self) -> &'static str {
+        match self {
+            Target::Server => "中间件",
+            Target::Client => "客户端",
+        }
+    }
+
+    /// 这个目标的会话文件。中间件沿用 `launch.properties`（老版本留下的文件照常可读）。
+    pub fn session_file(self, config_dir: &Path) -> PathBuf {
+        let name = match self {
+            Target::Server => "launch.properties",
+            Target::Client => "launch-client.properties",
+        };
+        session_dir(config_dir).join(name)
+    }
+}
+
 /// 工作台自己启动的中间件用的会话文件。动态挂载到别的 JVM 时另建按 pid 命名的文件（批 F）。
 pub fn launch_session_file(config_dir: &Path) -> PathBuf {
-    session_dir(config_dir).join("launch.properties")
+    Target::Server.session_file(config_dir)
+}
+
+/// 一个源文件编译出的类会被哪些 JVM 加载：`(中间件, 客户端)`。
+///
+/// 按 NC 模块的源码目录约定判断，取路径里**最后一个** `src` 之后的第一段：
+/// `client` 只有客户端会加载；`public` 两边都加载；`private`、`test` 等其余情况只推中间件
+/// （这是加客户端之前的行为，保持不变）。
+/// 取最后一个 `src` 是因为工作区根目录本身可能就叫 `src`。
+pub fn targets_for_source(source: &Path) -> (bool, bool) {
+    let parts: Vec<String> = source
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase())
+        .collect();
+    let kind = parts
+        .iter()
+        .rposition(|p| p == "src")
+        .and_then(|i| parts.get(i + 1))
+        .map(String::as_str);
+    match kind {
+        Some("client") => (false, true),
+        Some("public") => (true, true),
+        _ => (true, false),
+    }
 }
 
 /// agent 写出的就绪文件：会话文件名后加 `.ready`。
@@ -116,10 +179,21 @@ pub fn launch_agent_arg(
     enabled: bool,
     write: bool,
 ) -> Result<Option<String>, String> {
+    launch_agent_arg_for(Target::Server, config_dir, jar, enabled, write)
+}
+
+/// 同 [`launch_agent_arg`]，指定给哪个 JVM 用（各用各的会话文件与令牌）。
+pub fn launch_agent_arg_for(
+    target: Target,
+    config_dir: &Path,
+    jar: Option<&Path>,
+    enabled: bool,
+    write: bool,
+) -> Result<Option<String>, String> {
     let Some(jar) = jar.filter(|_| enabled) else {
         return Ok(None);
     };
-    let session = launch_session_file(config_dir);
+    let session = target.session_file(config_dir);
     if write {
         write_session(&session, &new_token())?;
     }
@@ -326,11 +400,14 @@ pub struct Report {
     pub elapsed_ms: u64,
     /// 本批请求替换的类名。失败时 `redefined` 是空的，要靠它判断「后来的成功是否覆盖了失败的那批」。
     pub requested_names: Vec<String>,
+    /// 推给了哪个 JVM（`server` / `client`）。`push` 不知道目标，由调用方用 [`Report::for_target`] 补上。
+    pub target: &'static str,
 }
 
 impl Report {
     fn new(requested: usize) -> Self {
         Self {
+            target: "server",
             state: "ok",
             at_ms: crate::build_state::now_ms(),
             requested,
@@ -342,6 +419,11 @@ impl Report {
             elapsed_ms: 0,
             requested_names: Vec::new(),
         }
+    }
+
+    pub fn for_target(mut self, target: Target) -> Self {
+        self.target = target.as_str();
+        self
     }
 
     /// 把「服务活着、就绪文件在，却送不到 agent」从静默的 `unavailable` 升级成可见的失败。
@@ -393,7 +475,13 @@ impl Report {
                 self.message.as_deref().unwrap_or("未知原因")
             ),
         };
-        format!("[nc-forge] 热替换 {body} · {} ms\n", self.elapsed_ms)
+        // 中间件的行保持原样；客户端的行标出来，两边的日志合在一起看时才分得清
+        let who = if self.target == "client" {
+            "（客户端）"
+        } else {
+            ""
+        };
+        format!("[nc-forge] 热替换{who} {body} · {} ms\n", self.elapsed_ms)
     }
 }
 
@@ -636,6 +724,73 @@ mod tests {
         empty.add_source(&d.join("nowhere"), "nc.bs", &src);
         assert!(empty.is_empty() && empty.roots.is_empty());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn 按源码目录决定推给哪个_jvm() {
+        let t = |p: &str| targets_for_source(Path::new(p));
+        // (中间件, 客户端)
+        assert_eq!(t(r"C:\w\newar\arap\src\private\nc\A.java"), (true, false));
+        assert_eq!(t(r"C:\w\newar\arap\src\client\nc\ui\A.java"), (false, true));
+        assert_eq!(t(r"C:\w\newar\arap\src\public\nc\vo\A.java"), (true, true));
+        // 大小写、正斜杠混用
+        assert_eq!(t("c:/w/newar/arap/SRC/Client/nc/A.java"), (false, true));
+        // test 等其它目录保持加客户端之前的行为：只推中间件
+        assert_eq!(t(r"C:\w\newar\arap\src\test\nc\A.java"), (true, false));
+        // 没有 src 段时同样回落到中间件
+        assert_eq!(t(r"C:\w\A.java"), (true, false));
+        // 工作区根目录本身叫 src：取最后一个 src
+        assert_eq!(t(r"D:\src\newar\arap\src\client\A.java"), (false, true));
+        // 包名里的 client 不算
+        assert_eq!(t(r"C:\w\arap\src\private\nc\client\A.java"), (true, false));
+    }
+
+    #[test]
+    fn 两个目标各用各的会话文件_令牌互不共用() {
+        let d = temp_dir("targets");
+        let jar = d.join(JAR_NAME);
+        std::fs::write(&jar, b"x").unwrap();
+        assert_ne!(
+            Target::Server.session_file(&d),
+            Target::Client.session_file(&d)
+        );
+        // 中间件的文件名没变，老调用方读到的还是同一份
+        assert_eq!(Target::Server.session_file(&d), launch_session_file(&d));
+
+        let server = launch_agent_arg_for(Target::Server, &d, Some(&jar), true, true)
+            .unwrap()
+            .unwrap();
+        let client = launch_agent_arg_for(Target::Client, &d, Some(&jar), true, true)
+            .unwrap()
+            .unwrap();
+        assert_ne!(server, client, "两个 JVM 的会话文件路径不能相同");
+        assert!(client.ends_with("launch-client.properties"));
+        let ts = read_token(&Target::Server.session_file(&d)).unwrap();
+        let tc = read_token(&Target::Client.session_file(&d)).unwrap();
+        assert_ne!(ts, tc, "令牌不能共用");
+
+        // 客户端重启换令牌、清就绪文件，不能碰中间件的
+        std::fs::write(ready_file(&Target::Server.session_file(&d)), "port=1\n").unwrap();
+        launch_agent_arg_for(Target::Client, &d, Some(&jar), true, true).unwrap();
+        assert!(ready_file(&Target::Server.session_file(&d)).exists());
+        assert_eq!(read_token(&Target::Server.session_file(&d)).unwrap(), ts);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn 客户端的结果在日志行里有标记_中间件的保持原样() {
+        let mut r = Report::new(1);
+        r.redefined.push(Loaded {
+            name: "a.B".into(),
+            loader: "app".into(),
+        });
+        assert_eq!(r.target, "server");
+        assert!(r.log_line().starts_with("[nc-forge] 热替换 已替换 1 个类"));
+        let c = r.for_target(Target::Client);
+        assert_eq!(c.target, "client");
+        assert!(c
+            .log_line()
+            .starts_with("[nc-forge] 热替换（客户端） 已替换 1 个类"));
     }
 
     #[test]

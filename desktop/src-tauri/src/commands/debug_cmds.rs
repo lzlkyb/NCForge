@@ -115,7 +115,8 @@ impl debug::DapHandler for Handler {
         if event == "terminated" {
             self.finish("调试目标已结束");
         }
-        let body = self.lang.from_server(&body);
+        // breakpoint 等事件里的 source.path 也是普通路径，要和请求回包走同一条映射
+        let body = self.lang.from_server_paths(&self.lang.from_server(&body));
         let _ = self.app.emit(
             "debug-event",
             json!({ "target": self.target, "event": event, "body": body }),
@@ -220,6 +221,15 @@ pub async fn debug_start(
             });
         }
 
+        // 不发 configurationDone，java-debug 就不开始消费 JDI 事件：断点已经把线程挂起了，
+        // 界面却始终收不到 stopped（2026-11-10 用真实 HTTP 业务线程复现：jstack 里线程 at breakpoint，
+        // 页面级监听 0 个 debug-event；手动「暂停」由请求处理器直接回 stopped，所以没受影响）。
+        // 断点由前端在 attach 之后动态下发，java-debug 支持在 configurationDone 之后再设置。
+        if let Err(e) = client.request("configurationDone", json!({}), Duration::from_secs(15)) {
+            client.kill();
+            return Err(format!("调试适配器没有完成配置：{e}"));
+        }
+
         let status = DebugStatus {
             target,
             state: "attached".into(),
@@ -299,7 +309,9 @@ async fn ask(
     let session = current(&state, target)?;
     tauri::async_runtime::spawn_blocking(move || {
         let out = session.client.request(command, args, timeout)?;
-        Ok(session.lang.from_server(&out))
+        Ok(session
+            .lang
+            .from_server_paths(&session.lang.from_server(&out)))
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
@@ -326,7 +338,9 @@ pub async fn debug_set_breakpoints(
             debug::set_breakpoints_args(&shadow_path, &breakpoints),
             Duration::from_secs(15),
         )?;
-        Ok(session.lang.from_server(&out))
+        Ok(session
+            .lang
+            .from_server_paths(&session.lang.from_server(&out)))
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?

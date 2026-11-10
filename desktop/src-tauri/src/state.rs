@@ -83,6 +83,9 @@ pub struct AppState {
     /// 热替换：最近一次结果、「运行中代码不是最新」标记、手动模式的待推列表。
     /// 启动服务时清空（见 `hotswap::HotswapState::reset`）。
     pub hotswap: std::sync::Mutex<crate::hotswap::HotswapState>,
+    /// 客户端那一份。两个 JVM 各有各的 agent、各自的「代码不是最新」标记：
+    /// 客户端失败不能把中间件的标记点亮，反过来也一样。启动客户端时清空。
+    pub hotswap_client: std::sync::Mutex<crate::hotswap::HotswapState>,
     /// 流式导出的取消标志，**按导出实例**登记（`db_export_cancel(id)` 置位）。
     ///
     /// 以前是一个全局 `AtomicBool`：两个结果页同时导出时，取消其中一个会把另一个也停掉；
@@ -135,6 +138,17 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// 某个 JVM 的热替换状态。
+    pub fn hotswap_of(
+        &self,
+        target: crate::hotswap::Target,
+    ) -> &std::sync::Mutex<crate::hotswap::HotswapState> {
+        match target {
+            crate::hotswap::Target::Server => &self.hotswap,
+            crate::hotswap::Target::Client => &self.hotswap_client,
+        }
+    }
+
     pub fn new(config: AppConfig, config_dir: std::path::PathBuf) -> Arc<Self> {
         Arc::new(Self {
             config: RwLock::new(config),
@@ -151,6 +165,7 @@ impl AppState {
             debug: std::sync::Mutex::new(Default::default()),
             compile_cancel: std::sync::atomic::AtomicBool::new(false),
             hotswap: std::sync::Mutex::new(Default::default()),
+            hotswap_client: std::sync::Mutex::new(Default::default()),
             export_cancels: std::sync::Mutex::new(Default::default()),
             transfer_cancels: std::sync::Mutex::new(Default::default()),
             search_cancels: std::sync::Mutex::new(Default::default()),

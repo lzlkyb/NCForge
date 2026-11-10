@@ -468,7 +468,13 @@ pub fn client_endpoint_host_port(ep: &crate::nc_home::ServerEndpoints) -> (Strin
 /// `-Dnc.jstart.server`、`-Dnc.jstart.port`、`-Xmx768m`。Eclipse 老配置里的
 /// `-XX:MaxPermSize=256m` 在 1.8 上是被忽略的空参数（Metaspace 才是真正生效的），
 /// 这里写成 `-XX:MaxMetaspaceSize=256m`，避免日志里出现一行无意义的警告。
-pub fn client_vm_args(host: &str, port: u16, heap_mb: u32, debug_port: Option<u16>) -> Vec<String> {
+pub fn client_vm_args(
+    host: &str,
+    port: u16,
+    heap_mb: u32,
+    debug_port: Option<u16>,
+    java_agent: Option<&str>,
+) -> Vec<String> {
     let mut args = vec![
         "-Dnc.runMode=develop".into(),
         format!("-Dnc.jstart.server={host}"),
@@ -481,6 +487,11 @@ pub fn client_vm_args(host: &str, port: u16, heap_mb: u32, debug_port: Option<u1
         args.push(format!(
             "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:{port}"
         ));
+    }
+    if let Some(agent) = java_agent {
+        // 热替换 agent，与中间件同一个 jar、同一个协议，只是会话文件（令牌）不同。
+        // 启动参数里的 -javaagent 不需要 JDK，客户端用的 JRE 也能挂。
+        args.push(agent.to_string());
     }
     args
 }
@@ -557,8 +568,7 @@ pub fn client_spec(
     java: &Path,
     project_root: &Path,
     work_dir: &Path,
-    heap_mb: u32,
-    debug_port: Option<u16>,
+    tuning: ClientTuning,
     overrides: &[crate::eclipse_cp::LinkedOverride],
 ) -> Result<(ServerSpec, usize), String> {
     client_spec_inner(
@@ -566,10 +576,7 @@ pub fn client_spec(
         java,
         project_root,
         work_dir,
-        LaunchTuning {
-            heap_mb,
-            debug_port,
-        },
+        tuning,
         overrides,
         true,
     )
@@ -581,8 +588,7 @@ pub fn client_spec_preview(
     java: &Path,
     project_root: &Path,
     work_dir: &Path,
-    heap_mb: u32,
-    debug_port: Option<u16>,
+    tuning: ClientTuning,
     overrides: &[crate::eclipse_cp::LinkedOverride],
 ) -> Result<(ServerSpec, usize), String> {
     client_spec_inner(
@@ -590,21 +596,20 @@ pub fn client_spec_preview(
         java,
         project_root,
         work_dir,
-        LaunchTuning {
-            heap_mb,
-            debug_port,
-        },
+        tuning,
         overrides,
         false,
     )
 }
 
-/// 两个只在启动时生效的 JVM 参数。打包成一个结构是给 `client_spec_inner`
-/// 控制参数个数（clippy 上限 7），同时让「堆 + 调试端口」这对语义保持成组。
+/// 只在启动时生效的客户端 JVM 参数（与 `MiddlewareTuning` 对称）。打包成一个结构是给
+/// `client_spec_inner` 控制参数个数（clippy 上限 7）。
 #[derive(Clone, Copy)]
-struct LaunchTuning {
-    heap_mb: u32,
-    debug_port: Option<u16>,
+pub struct ClientTuning<'a> {
+    pub heap_mb: u32,
+    pub debug_port: Option<u16>,
+    /// `hotswap::launch_agent_arg_for` 的返回值；`None` = 不挂热替换 agent。
+    pub java_agent: Option<&'a str>,
 }
 
 fn client_spec_inner(
@@ -612,7 +617,7 @@ fn client_spec_inner(
     java: &Path,
     project_root: &Path,
     work_dir: &Path,
-    tuning: LaunchTuning,
+    tuning: ClientTuning,
     overrides: &[crate::eclipse_cp::LinkedOverride],
     write_jar: bool,
 ) -> Result<(ServerSpec, usize), String> {
@@ -638,7 +643,13 @@ fn client_spec_inner(
     let spec = ServerSpec {
         java: java.to_path_buf(),
         main_class: CLIENT_MAIN_CLASS.to_string(),
-        vm_args: client_vm_args(&host, port, tuning.heap_mb, tuning.debug_port),
+        vm_args: client_vm_args(
+            &host,
+            port,
+            tuning.heap_mb,
+            tuning.debug_port,
+            tuning.java_agent,
+        ),
         classpath_jar,
         work_dir: nc_home.to_path_buf(),
         program_args: Vec::new(),
@@ -1334,7 +1345,7 @@ mod tests {
     /// 客户端 VM 参数对齐 Eclipse 的 `JStarter` 启动配置。
     #[test]
     fn 客户端_vm_参数带连接地址与默认堆() {
-        let args = client_vm_args("192.168.1.20", 8081, DEFAULT_CLIENT_HEAP_MB, None);
+        let args = client_vm_args("192.168.1.20", 8081, DEFAULT_CLIENT_HEAP_MB, None, None);
         assert!(args.iter().any(|a| a == "-Dnc.runMode=develop"));
         assert!(args.iter().any(|a| a == "-Dnc.jstart.server=192.168.1.20"));
         assert!(args.iter().any(|a| a == "-Dnc.jstart.port=8081"));
@@ -1350,9 +1361,22 @@ mod tests {
         assert!(!args.iter().any(|a| a.contains("MaxPermSize")));
     }
 
+    /// 客户端和中间件一样可以挂热替换 agent；关闭时一个 `-javaagent` 都不能有。
+    #[test]
+    fn 客户端_vm_参数按需带热替换_agent() {
+        let off = client_vm_args("127.0.0.1", 80, DEFAULT_CLIENT_HEAP_MB, None, None);
+        assert!(!off.iter().any(|a| a.starts_with("-javaagent")));
+        let agent = r"-javaagent:D:\app\hotswap\ncforge-hotswap.jar=C:\cfg\hotswap\launch-client.properties";
+        let on = client_vm_args("127.0.0.1", 80, DEFAULT_CLIENT_HEAP_MB, None, Some(agent));
+        assert_eq!(on.iter().filter(|a| a.starts_with("-javaagent")).count(), 1);
+        assert!(on.iter().any(|a| a == agent));
+        // 不带 agent 时其它参数原样
+        assert_eq!(on.len(), off.len() + 1);
+    }
+
     #[test]
     fn 客户端调试参数只绑回环且不_suspend() {
-        let args = client_vm_args("127.0.0.1", 80, DEFAULT_CLIENT_HEAP_MB, Some(61539));
+        let args = client_vm_args("127.0.0.1", 80, DEFAULT_CLIENT_HEAP_MB, Some(61539), None);
         let jdwp: Vec<&String> = args
             .iter()
             .filter(|a| a.starts_with("-agentlib:jdwp"))
@@ -1494,8 +1518,11 @@ mod tests {
             &java,
             &project,
             &work,
-            DEFAULT_CLIENT_HEAP_MB,
-            None,
+            ClientTuning {
+                heap_mb: DEFAULT_CLIENT_HEAP_MB,
+                debug_port: None,
+                java_agent: None,
+            },
             &[],
         )
         .unwrap();

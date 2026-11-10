@@ -43,7 +43,7 @@ export function ServiceAlerts({
           <span className="sv-alert-text">
             {stale.state === "failed" ? (
               <>
-                运行中的代码<b>不是最新</b>。{new Date(stale.atMs).toLocaleTimeString()} 那次热替换失败：{failureSummary(stale)}；本批改动没进 JVM。
+                {stale.target === "client" ? "客户端里" : ""}运行中的代码<b>不是最新</b>。{new Date(stale.atMs).toLocaleTimeString()} 那次热替换失败：{failureSummary(stale)}；本批改动没进 JVM{stale.target === "client" ? "，重启客户端后生效" : ""}。
               </>
             ) : (
               <>
@@ -56,8 +56,9 @@ export function ServiceAlerts({
               工程关联
             </button>
           )}
-          {/* 遮挡不给重启：重启后 classpath 顺序不变，跑的还是那份同名类 */}
-          {onRestart && stale.state === "failed" && (
+          {/* 遮挡不给重启：重启后 classpath 顺序不变，跑的还是那份同名类。
+              这个按钮重启的是中间件，客户端的失败不给（文案里已写明重启客户端） */}
+          {onRestart && stale.state === "failed" && stale.target !== "client" && (
             <button type="button" className="sv-btn sv-btn-primary" disabled={busy} onClick={onRestart}>
               重启服务
             </button>

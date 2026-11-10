@@ -8,11 +8,11 @@ import { failureSummary, type HotswapReport, type HotswapStatus } from "../../li
 
 const report = (p: Partial<HotswapReport>): HotswapReport => ({
   state: "ok", atMs: 1, requested: 1, redefined: [{ name: "a.B", loader: "App" }], notLoaded: [], shadowed: [], requestedNames: ["a.B"],
-  code: null, message: null, elapsedMs: 5, ...p,
+  code: null, message: null, elapsedMs: 5, target: "server", ...p,
 });
 const status = (p: Partial<HotswapStatus>): HotswapStatus => ({
   enabled: true, auto: true, agentOnline: true, agentAttached: true, stale: false, pending: 0, pendingClasses: [],
-  last: null, staleReport: null, ...p,
+  last: null, staleReport: null, client: { running: false, agentOnline: false, agentAttached: false, stale: false }, ...p,
 });
 
 describe("热替换小签", () => {
@@ -34,6 +34,17 @@ describe("热替换小签", () => {
   it("agent 不在线时区分「准备中」与「未挂载」", () => {
     expect(chipView(status({ agentOnline: false }), false, false).label).toBe("热替换 · 准备中");
     expect(chipView(status({ agentOnline: false, agentAttached: false }), false, false).label).toBe("热替换 · 未挂载");
+  });
+  it("客户端的失败与中间件共用一个小签，提示里标出是哪边", () => {
+    const failed = report({ state: "failed", code: "unsupported", target: "client" });
+    const v = chipView(status({ last: failed, stale: true }), false, false);
+    expect(v).toMatchObject({ tone: "bad", label: "热替换失败" });
+    expect(v.title.startsWith("客户端：")).toBe(true);
+    // 中间件的提示不带前缀（老行为不变）
+    expect(chipView(status({ last: report({ state: "failed" }) }), false, false).title.startsWith("客户端")).toBe(false);
+    // 客户端成功的高亮期照常显示类数
+    const ok = report({ target: "client" });
+    expect(chipView(status({ last: ok }), false, true)).toMatchObject({ tone: "ok", label: "已替换 1 个类" });
   });
   it("失败原因：JVM 的英文 unsupported 翻成人话，其余照原文", () => {
     expect(failureSummary(report({ state: "failed", code: "unsupported", message: "attempted to add a method" }))).toContain("改了类的结构");

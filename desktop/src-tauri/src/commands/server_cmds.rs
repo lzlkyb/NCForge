@@ -298,7 +298,7 @@ fn launch_phase(state: &AppState, log: &Path, phase: &str) -> Result<(), String>
 }
 
 /// 热替换 agent jar：安装包资源目录 → 源码树（开发模式）。找不到返回 `None`，按不挂 agent 启动。
-fn find_hotswap_jar(app: &tauri::AppHandle) -> Option<PathBuf> {
+pub(super) fn find_hotswap_jar(app: &tauri::AppHandle) -> Option<PathBuf> {
     use tauri::Manager;
     let mut dirs = Vec::new();
     if let Ok(dir) = app.path().resource_dir() {
@@ -315,7 +315,8 @@ fn find_hotswap_jar(app: &tauri::AppHandle) -> Option<PathBuf> {
 /// 启动用：算 `-javaagent` 参数并把结果写进服务日志。
 ///
 /// 开了开关却挂不上时要留一行说明：不然用户改完代码发现没热替换，只能猜。
-fn hotswap_agent_arg(
+pub(super) fn hotswap_agent_arg(
+    target: crate::hotswap::Target,
     config_dir: &Path,
     jar: Option<&Path>,
     enabled: bool,
@@ -332,7 +333,7 @@ fn hotswap_agent_arg(
         );
         return None;
     }
-    match crate::hotswap::launch_agent_arg(config_dir, jar, enabled, write) {
+    match crate::hotswap::launch_agent_arg_for(target, config_dir, jar, enabled, write) {
         Ok(arg) => {
             if arg.is_some() {
                 let _ = server::append_log(log, "[nc-forge] 已挂热替换 agent（只绑 127.0.0.1）\n");
@@ -453,7 +454,7 @@ pub async fn server_start(
 
         // 热替换 agent：换新令牌、清旧就绪文件。任何失败都只记日志、按不挂 agent 启动——
         // 它是锦上添花，不能变成「服务起不来」的新原因。
-        let java_agent = hotswap_agent_arg(&config_dir, hotswap_jar.as_deref(), cfg.hotswap_enabled, true, &log);
+        let java_agent = hotswap_agent_arg(crate::hotswap::Target::Server, &config_dir, hotswap_jar.as_deref(), cfg.hotswap_enabled, true, &log);
 
         launch_phase(&st, &log, "准备 classpath")?;
         let prepared = launch::middleware_spec(

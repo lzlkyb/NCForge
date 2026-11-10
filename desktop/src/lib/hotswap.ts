@@ -12,6 +12,11 @@ import { requestServiceRestart } from "./servicePanel";
 
 export type HotswapState = "ok" | "partial" | "failed";
 
+/** 推给哪个 JVM（Rust `hotswap::Target`）。 */
+export type HotswapTarget = "server" | "client";
+
+export const hotswapTargetLabel = (t: HotswapTarget) => (t === "client" ? "客户端" : "中间件");
+
 export interface HotswapLoaded {
   name: string;
   loader: string;
@@ -35,9 +40,23 @@ export interface HotswapReport {
   elapsedMs: number;
   /** 本批请求替换的类名（失败时 `redefined` 为空，靠它知道哪些类没进 JVM）。 */
   requestedNames: string[];
+  /** 这次推给了哪个 JVM。 */
+  target: HotswapTarget;
 }
 
-/** Rust `HotswapStatus`。 */
+/** 客户端那一侧的状态（Rust `ClientHotswapStatus`）。中间件的字段在 [`HotswapStatus`] 顶层。 */
+export interface ClientHotswapStatus {
+  /** 客户端进程是否在运行；没开客户端时界面不讲它。 */
+  running: boolean;
+  agentOnline: boolean;
+  agentAttached: boolean;
+  stale: boolean;
+}
+
+/**
+ * Rust `HotswapStatus`。顶层的 `agent*` 是中间件的；`stale` / `pending` / `last` / `staleReport`
+ * 是中间件和客户端合并后的，具体是哪边看报告里的 `target`。
+ */
 export interface HotswapStatus {
   enabled: boolean;
   auto: boolean;
@@ -49,19 +68,21 @@ export interface HotswapStatus {
   pendingClasses: string[];
   last: HotswapReport | null;
   staleReport: HotswapReport | null;
+  client: ClientHotswapStatus;
 }
 
 export const HOTSWAP_STATUS_KEY = ["hotswap-status"] as const;
 
-/** 「热替换失败」toast 的归属标识。 */
-const FAILURE_TOAST_KEY = "hotswap-failed";
+/** 「热替换失败」toast 的归属标识。两个 JVM 各一个：客户端的失败不能把中间件的顶掉。 */
+const failureToastKey = (target: HotswapTarget) => `hotswap-failed-${target}`;
 
 /**
  * 收回「热替换失败」通知。错误通知不会自己消失：服务重启后它说的「服务上仍是旧代码」
  * 已经不对，用户点开小签卡片时也已经看到了同样的信息（而且它会压住卡片）。
+ * 不传目标就两个都收。
  */
-export function dismissHotswapFailure(): void {
-  toast.dismiss(FAILURE_TOAST_KEY);
+export function dismissHotswapFailure(target?: HotswapTarget): void {
+  for (const t of target ? [target] : (["server", "client"] as const)) toast.dismiss(failureToastKey(t));
 }
 
 export const hotswapStatus = () => invoke<HotswapStatus>("hotswap_status");
@@ -128,18 +149,24 @@ export function startHotswapEvents(queryClient: QueryClient): void {
   void listen<HotswapReport>("hotswap-result", (report) => {
     emit({ report, breakpoints: null });
     refresh();
-    // 新结果取代旧的失败提醒：再失败会弹新的，成功则不该还挂着「失败」
-    dismissHotswapFailure();
+    // 新结果取代同一个 JVM 旧的失败提醒：再失败会弹新的，成功则不该还挂着「失败」
+    dismissHotswapFailure(report.target);
     if (report.state === "failed") {
-      toast.error(`热替换失败：${failureSummary(report)}。服务上仍是旧代码。`, {
-        raw: report.message ?? undefined,
-        action: { label: "重启服务", onClick: requestServiceRestart },
-        key: FAILURE_TOAST_KEY,
-      });
+      const client = report.target === "client";
+      toast.error(
+        `${client ? "客户端" : ""}热替换失败：${failureSummary(report)}。${client ? "客户端里仍是旧代码，重启客户端后生效。" : "服务上仍是旧代码。"}`,
+        {
+          raw: report.message ?? undefined,
+          // 「重启服务」只管中间件；客户端要到服务页自己重启，文案里已经写明
+          action: client ? undefined : { label: "重启服务", onClick: requestServiceRestart },
+          key: failureToastKey(report.target),
+        },
+      );
       return;
     }
     if (report.redefined.length === 0) return;
-    void reinstallBreakpoints("server").then((n) => {
+    // 断点也要按目标重装：替换的是哪个 JVM，调试会话就是那一个
+    void reinstallBreakpoints(report.target).then((n) => {
       if (lastEvent?.report === report) emit({ report, breakpoints: n });
     });
   });

@@ -1,11 +1,14 @@
 //! 「热替换」命令层：编译后的推送入口 + 状态查询 + 手动推送。
 //!
 //! 算法在 `hotswap.rs`（纯逻辑、可单测）；这里只管三件事：取配置、把阻塞的推送放到后台线程、
-//! 把结果记进 `AppState.hotswap` 并以 `hotswap-result` 事件发给前端。
+//! 把结果记进 `AppState.hotswap` / `hotswap_client` 并以 `hotswap-result` 事件发给前端。
+//!
+//! 中间件和客户端是两个 JVM，各挂各的 agent、各记各的状态（[`Target`]）。一个源文件推给谁，
+//! 由它所在的源码目录决定（`hotswap::targets_for_source`）。
 //!
 //! 事件：
-//! - `hotswap-result`：一次有效推送的 [`hotswap::Report`]（`unavailable` 不发，那是常态）；
-//! - `hotswap-pending`：手动模式下待推类数变化（载荷是数字）。
+//! - `hotswap-result`：一次有效推送的 [`hotswap::Report`]（带 `target`；`unavailable` 不发，那是常态）；
+//! - `hotswap-pending`：手动模式下待推类数变化（载荷是两个目标的总数）。
 
 use std::path::Path;
 use std::sync::Arc;
@@ -13,66 +16,111 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::Emitter;
 
-use crate::hotswap::{self, Batch, Report};
+use crate::hotswap::{self, Batch, Report, Target};
 use crate::state::AppState;
 
 /// 编译成功后调用（`build_engine::compile_files`）。不阻塞：推送走一次性后台线程。
 ///
-/// 没有就绪文件时什么都不做，也不攒待推列表：服务没跑（或没挂 agent），
-/// 下次启动加载的就是磁盘上的新产物，没什么可推的。
+/// 没有就绪文件时什么都不做，也不攒待推列表：那个 JVM 没跑（或没挂 agent），
+/// 下次启动加载的就是磁盘上的新产物，没什么可推的。两个目标互不影响：
+/// 客户端没开不妨碍中间件照常推送。
 pub(super) fn after_compile(
     app: &tauri::AppHandle,
     st: &Arc<AppState>,
     config_dir: &Path,
     enabled: bool,
     auto: bool,
-    batch: Batch,
+    server: Batch,
+    client: Batch,
 ) {
-    if !enabled || batch.is_empty() {
+    if !enabled {
         return;
     }
-    let session = hotswap::launch_session_file(config_dir);
-    if hotswap::read_ready(&session).is_none() {
-        return;
-    }
-    if !auto {
-        let n = match st.hotswap.lock() {
-            Ok(mut h) => {
-                h.pending.merge(batch);
-                h.pending.classes.len()
+    for (target, batch) in [(Target::Server, server), (Target::Client, client)] {
+        if batch.is_empty() {
+            continue;
+        }
+        let session = target.session_file(config_dir);
+        if hotswap::read_ready(&session).is_none() {
+            continue;
+        }
+        if !auto {
+            let queued = match st.hotswap_of(target).lock() {
+                Ok(mut h) => {
+                    h.pending.merge(batch);
+                    true
+                }
+                Err(_) => false,
+            };
+            if queued {
+                let _ = app.emit("hotswap-pending", pending_total(st));
             }
-            Err(_) => return,
-        };
-        let _ = app.emit("hotswap-pending", n);
-        return;
+            continue;
+        }
+        let app = app.clone();
+        let st = st.clone();
+        let spawned = std::thread::Builder::new()
+            .name(format!("ncforge-hotswap-push-{}", target.as_str()))
+            .spawn(move || {
+                let report = hotswap::push(&session, &batch);
+                publish(&app, &st, target, report);
+            });
+        if let Err(e) = spawned {
+            log::warn!("热替换推送线程起不来（{}）：{e}", target.label());
+        }
     }
-    let app = app.clone();
-    let st = st.clone();
-    let spawned = std::thread::Builder::new()
-        .name("ncforge-hotswap-push".into())
-        .spawn(move || {
-            let report = hotswap::push(&session, &batch);
-            publish(&app, &st, report);
-        });
-    if let Err(e) = spawned {
-        log::warn!("热替换推送线程起不来：{e}");
+}
+
+/// 两个目标的待推类数之和（`hotswap-pending` 事件的载荷）。
+fn pending_total(st: &AppState) -> usize {
+    Target::ALL
+        .iter()
+        .map(|t| {
+            st.hotswap_of(*t)
+                .lock()
+                .map(|h| h.pending.classes.len())
+                .unwrap_or(0)
+        })
+        .sum()
+}
+
+/// 那个 JVM 的进程还活着吗。
+fn jvm_alive(st: &AppState, target: Target) -> bool {
+    let run = match target {
+        Target::Server => &st.server,
+        Target::Client => &st.client,
+    };
+    run.lock().map(|mut s| s.is_alive()).unwrap_or(false)
+}
+
+/// 该目标的服务日志（热替换结果同步写一行进去）。
+fn log_file(config_dir: &Path, target: Target) -> std::path::PathBuf {
+    match target {
+        Target::Server => super::server_cmds::log_path(config_dir),
+        Target::Client => super::client_cmds::log_path(config_dir),
     }
 }
 
 /// 记录并通知前端。`unavailable` 只记调试日志（服务刚停、agent 还没就绪都会走到这里），
-/// 例外：服务活着、就绪文件在却送不到 agent 时升级为可见的失败。
-fn publish(app: &tauri::AppHandle, st: &AppState, report: Report) {
+/// 例外：JVM 活着、就绪文件在却送不到 agent 时升级为可见的失败。
+fn publish(app: &tauri::AppHandle, st: &AppState, target: Target, report: Report) {
+    let report = report.for_target(target);
     let report = if report.state == "unavailable" {
-        // 带失败码 = 就绪文件在却送不到。服务还活着时这不是「没在跑」的常态：
+        // 带失败码 = 就绪文件在却送不到。JVM 还活着时这不是「没在跑」的常态：
         // class 已写盘而 JVM 里是旧的，静默会让人以为换过了（重启后首次保存没推送就是没法查）。
-        // 服务已停时就绪文件会留着，照旧静默。
-        let alive = st.server.lock().map(|mut s| s.is_alive()).unwrap_or(false);
+        // JVM 已停时就绪文件会留着，照旧静默。
+        let alive = jvm_alive(st, target);
         if report.code.is_none() || !alive {
-            log::debug!("热替换未执行：{}", report.message.as_deref().unwrap_or(""));
+            log::debug!(
+                "热替换未执行（{}）：{}",
+                target.label(),
+                report.message.as_deref().unwrap_or("")
+            );
             return;
         }
         log::warn!(
-            "热替换送不到 agent（{}）：{}",
+            "热替换送不到 agent（{}，{}）：{}",
+            target.label(),
             report.code.as_deref().unwrap_or(""),
             report.message.as_deref().unwrap_or("")
         );
@@ -85,18 +133,33 @@ fn publish(app: &tauri::AppHandle, st: &AppState, report: Report) {
     } else {
         report
     };
-    if let Ok(mut h) = st.hotswap.lock() {
+    if let Ok(mut h) = st.hotswap_of(target).lock() {
         h.record(report.clone());
     }
-    // 同步写进服务日志：翻日志时能对上「这次请求之前换没换过代码」。写失败不影响推送结果。
-    let _ = crate::server::append_log(
-        &super::server_cmds::log_path(&st.config_dir),
-        &report.log_line(),
-    );
+    // 同步写进该 JVM 的日志：翻日志时能对上「这次请求之前换没换过代码」。写失败不影响推送结果。
+    let _ = crate::server::append_log(&log_file(&st.config_dir, target), &report.log_line());
     let _ = app.emit("hotswap-result", &report);
 }
 
+/// 客户端那一侧的状态（中间件的字段在 [`HotswapStatus`] 顶层，保持老接口不变）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientHotswapStatus {
+    /// 客户端进程是否在运行。没开客户端时前端不讲它。
+    pub running: bool,
+    /// agent 此刻是否可达（ping 通）。
+    pub agent_online: bool,
+    /// 本次启动带了 agent（还没就绪时 `agent_online` 为 false）。
+    pub agent_attached: bool,
+    /// 客户端里运行的代码不是最新（客户端重启后清除）。
+    pub stale: bool,
+}
+
 /// 前端状态栏 / 服务页用的热替换状态。
+///
+/// 顶层的 `agent_*` 是中间件的；`stale` / `pending` / `last` / `stale_report` 是**两个 JVM 合并后**的：
+/// 状态栏只有一个小签，要的是「有没有哪边出了问题」「最近一次发生了什么」，
+/// 具体是哪边看报告里的 `target`。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HotswapStatus {
@@ -104,25 +167,36 @@ pub struct HotswapStatus {
     pub enabled: bool,
     /// 配置开关：编译后自动推送。
     pub auto: bool,
-    /// agent 此刻是否可达（ping 通）。
+    /// 中间件 agent 此刻是否可达（ping 通）。
     pub agent_online: bool,
     /// 本次启动带了 agent（还没就绪时 `agent_online` 为 false，靠它区分「准备中」与「没挂」）。
     pub agent_attached: bool,
-    /// 运行中的代码不是最新（有推送失败或被遮蔽，重启后清除）。
+    /// 运行中的代码不是最新（任一 JVM 有推送失败或被遮蔽，对应 JVM 重启后清除）。
     pub stale: bool,
-    /// 手动模式下待推的类数。
+    /// 手动模式下待推的类数（两个 JVM 之和）。
     pub pending: usize,
     /// 待推类名（弹出卡展示用，最多 [`PENDING_NAMES_MAX`] 个）。
     pub pending_classes: Vec<String>,
+    /// 两个 JVM 里最近一次有效推送的结果。
     pub last: Option<Report>,
     /// 让 `stale` 置位的那次结果（服务页告警条讲的是它，不是最近一次）。
     pub stale_report: Option<Report>,
+    pub client: ClientHotswapStatus,
 }
 
 /// 弹出卡最多列这么多个待推类；再多只显示总数。
 const PENDING_NAMES_MAX: usize = 50;
 
-/// 查询热替换状态。会 ping 一次 agent（本机回环，毫秒级；连不上最多等 1.5 秒）。
+/// 取较新的一份（`at_ms` 大者）。
+fn newer(a: Option<Report>, b: Option<Report>) -> Option<Report> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(if y.at_ms > x.at_ms { y } else { x }),
+        (x, None) => x,
+        (None, y) => y,
+    }
+}
+
+/// 查询热替换状态。会 ping 两个 agent 各一次（本机回环，毫秒级；连不上最多等 1.5 秒）。
 #[tauri::command]
 pub async fn hotswap_status(
     state: tauri::State<'_, Arc<AppState>>,
@@ -131,30 +205,58 @@ pub async fn hotswap_status(
         let cfg = state.config.read().await;
         (cfg.hotswap_enabled, cfg.hotswap_auto)
     };
-    let session = hotswap::launch_session_file(&state.config_dir);
-    let agent_online = tauri::async_runtime::spawn_blocking(move || hotswap::ping(&session))
-        .await
-        .unwrap_or(false);
-    let h = state
+    let server_session = Target::Server.session_file(&state.config_dir);
+    let client_session = Target::Client.session_file(&state.config_dir);
+    let client_running = jvm_alive(state.inner(), Target::Client);
+    // 客户端没在跑就不 ping：就绪文件会留着，而端口可能已被别的进程占了
+    let (agent_online, client_online) = tauri::async_runtime::spawn_blocking(move || {
+        (
+            hotswap::ping(&server_session),
+            client_running && hotswap::ping(&client_session),
+        )
+    })
+    .await
+    .unwrap_or((false, false));
+    let sh = state
         .hotswap
         .lock()
         .map_err(|_| "热替换状态异常".to_string())?;
+    let ch = state
+        .hotswap_client
+        .lock()
+        .map_err(|_| "热替换状态异常".to_string())?;
+    // 客户端停了之后，它那份结果、过时标记都不再有意义：下次启动加载的就是磁盘上的新产物
+    let client_stale = client_running && ch.stale;
+    let pending_classes: Vec<String> = sh
+        .pending
+        .classes
+        .iter()
+        .chain(ch.pending.classes.iter())
+        .take(PENDING_NAMES_MAX)
+        .map(|c| c.name.clone())
+        .collect();
     Ok(HotswapStatus {
         enabled,
         auto,
         agent_online,
-        agent_attached: h.attached || agent_online,
-        stale: h.stale,
-        pending: h.pending.classes.len(),
-        pending_classes: h
-            .pending
-            .classes
-            .iter()
-            .take(PENDING_NAMES_MAX)
-            .map(|c| c.name.clone())
-            .collect(),
-        last: h.last.clone(),
-        stale_report: h.stale_report.clone(),
+        agent_attached: sh.attached || agent_online,
+        stale: sh.stale || client_stale,
+        pending: sh.pending.classes.len() + ch.pending.classes.len(),
+        pending_classes,
+        last: newer(
+            sh.last.clone(),
+            client_running.then(|| ch.last.clone()).flatten(),
+        ),
+        stale_report: newer(
+            sh.stale.then(|| sh.stale_report.clone()).flatten(),
+            client_stale.then(|| ch.stale_report.clone()).flatten(),
+        ),
+        client: ClientHotswapStatus {
+            running: client_running,
+            agent_online: client_online,
+            agent_attached: ch.attached || client_online,
+            stale: client_stale,
+        },
     })
 }
 
@@ -164,39 +266,51 @@ pub async fn hotswap_clear_pending(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    state
-        .hotswap
-        .lock()
-        .map_err(|_| "热替换状态异常".to_string())?
-        .pending = Batch::default();
+    for target in Target::ALL {
+        state
+            .hotswap_of(target)
+            .lock()
+            .map_err(|_| "热替换状态异常".to_string())?
+            .pending = Batch::default();
+    }
     let _ = app.emit("hotswap-pending", 0usize);
     Ok(())
 }
 
-/// 手动模式：把攒着的类一次推给运行中的服务。
+/// 手动模式：把攒着的类一次推给运行中的 JVM（中间件、客户端各推各的那一批）。
 ///
 /// 待推列表先取出再推：推送期间编译出的新类进入下一批，不会被这次的结果吞掉。
-/// 服务已停（`unavailable`）时不把批次放回去：下次启动会加载磁盘上的最新产物。
+/// JVM 已停（`unavailable`）时不把批次放回去：下次启动会加载磁盘上的最新产物。
+/// 返回最后一个目标的结果；两个目标都有时前端靠 `hotswap-result` 事件拿到各自的。
 #[tauri::command]
 pub async fn hotswap_push_pending(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<Report, String> {
-    let batch = {
+    let mut batches = Vec::new();
+    for target in Target::ALL {
         let mut h = state
-            .hotswap
+            .hotswap_of(target)
             .lock()
             .map_err(|_| "热替换状态异常".to_string())?;
-        std::mem::take(&mut h.pending)
-    };
-    if batch.is_empty() {
+        let batch = std::mem::take(&mut h.pending);
+        if !batch.is_empty() {
+            batches.push((target, batch));
+        }
+    }
+    if batches.is_empty() {
         return Err("没有待热替换的类".to_string());
     }
-    let session = hotswap::launch_session_file(&state.config_dir);
-    let report = tauri::async_runtime::spawn_blocking(move || hotswap::push(&session, &batch))
-        .await
-        .map_err(|e| format!("后台任务失败: {e}"))?;
-    publish(&app, state.inner(), report.clone());
+    let mut last = None;
+    for (target, batch) in batches {
+        let session = target.session_file(&state.config_dir);
+        let report = tauri::async_runtime::spawn_blocking(move || hotswap::push(&session, &batch))
+            .await
+            .map_err(|e| format!("后台任务失败: {e}"))?
+            .for_target(target);
+        publish(&app, state.inner(), target, report.clone());
+        last = Some(report);
+    }
     let _ = app.emit("hotswap-pending", 0usize);
-    Ok(report)
+    last.ok_or_else(|| "没有待热替换的类".to_string())
 }

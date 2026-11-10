@@ -787,7 +787,9 @@ pub(super) fn compile_files(
     let mut results = Vec::with_capacity(groups.len());
     // 热替换：只收集零错误模块的产物。有错时 ecj 可能写出带「编译错误桩」的 class，
     // 推进运行中的 NC 会把能跑的代码换成会抛异常的代码。
-    let mut hotswap_batch = crate::hotswap::Batch::default();
+    // 中间件和客户端是两个 JVM，一个源文件推给谁由它所在的源码目录决定
+    let mut hotswap_server = crate::hotswap::Batch::default();
+    let mut hotswap_client = crate::hotswap::Batch::default();
     for (module, files) in groups {
         let layout = ModuleLayout::resolve(&ctx.root, &module);
         let previous = ctx.manifest(&module);
@@ -871,7 +873,13 @@ pub(super) fn compile_files(
                 let _ = build_state::write_manifest(&ctx.manifest_file(&module), &next);
             }
             if ctx.hotswap_enabled {
-                collect_hotswap(&mut hotswap_batch, &layout, &job.out_dir, &files);
+                collect_hotswap(
+                    &mut hotswap_server,
+                    &mut hotswap_client,
+                    &layout,
+                    &job.out_dir,
+                    &files,
+                );
             }
         }
         results.push(r);
@@ -882,7 +890,8 @@ pub(super) fn compile_files(
         &ctx.config_dir,
         ctx.hotswap_enabled,
         ctx.hotswap_auto,
-        hotswap_batch,
+        hotswap_server,
+        hotswap_client,
     );
     Ok(merge_compile_results(results, total_files))
 }
@@ -892,8 +901,11 @@ pub(super) fn compile_files(
 /// 产物目录按源根取（一个模块可能有多个 output），取不到时回落本轮的默认产物目录，
 /// 与 `compile::compile` 写 class 的口径一致。包名从源码里读：GBK 文件按有损解码也不影响
 /// `package` 那一行（纯 ASCII）。
+///
+/// `private` 只进中间件批，`client` 只进客户端批，`public` 两边都进（见 `hotswap::targets_for_source`）。
 fn collect_hotswap(
-    batch: &mut crate::hotswap::Batch,
+    server: &mut crate::hotswap::Batch,
+    client: &mut crate::hotswap::Batch,
     layout: &ModuleLayout,
     default_out: &Path,
     files: &[PathBuf],
@@ -907,7 +919,13 @@ fn collect_hotswap(
         let out = layout
             .output_for(f)
             .unwrap_or_else(|| default_out.to_path_buf());
-        batch.add_source(&out, &package, f);
+        let (to_server, to_client) = crate::hotswap::targets_for_source(f);
+        if to_server {
+            server.add_source(&out, &package, f);
+        }
+        if to_client {
+            client.add_source(&out, &package, f);
+        }
     }
 }
 

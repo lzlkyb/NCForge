@@ -118,6 +118,14 @@ impl LangSession {
     pub fn from_server(&self, v: &Value) -> Value {
         swap_prefix(v, &self.shadow_prefix, &self.real_prefix)
     }
+
+    /// 调试适配器返回的消息：`path` 字段里的影子目录路径 → 真实目录路径。
+    ///
+    /// DAP 的 `source.path` 是普通文件路径而不是 URI，`from_server` 换不到它，
+    /// 栈帧点开就是影子 junction 里的那份副本（编辑器里的标签、断点都对不上）。
+    pub fn from_server_paths(&self, v: &Value) -> Value {
+        swap_path_fields(v, &self.shadow_dir, &self.real_dir)
+    }
 }
 
 /// 运行态：会话 + 状态。`AppState.lang` 持有。
@@ -187,6 +195,36 @@ pub fn swap_prefix(v: &Value, from: &str, to: &str) -> Value {
         Value::Object(m) => Value::Object(
             m.iter()
                 .map(|(k, x)| (swap_head(k, from, to), swap_prefix(x, from, to)))
+                .collect(),
+        ),
+        _ => v.clone(),
+    }
+}
+
+/// 把 JSON 里所有名为 `path` 的字符串字段，从 `from_dir` 目录下换到 `to_dir` 目录下。
+///
+/// 只认 `path` 键（DAP 的 `Source.path`），其它字符串不动；大小写、斜杠风格不敏感，
+/// 含 `..` 的路径不换（见 `rel_under`）。
+fn swap_path_fields(v: &Value, from_dir: &Path, to_dir: &Path) -> Value {
+    match v {
+        Value::Array(a) => Value::Array(
+            a.iter()
+                .map(|x| swap_path_fields(x, from_dir, to_dir))
+                .collect(),
+        ),
+        Value::Object(m) => Value::Object(
+            m.iter()
+                .map(|(k, x)| {
+                    let swapped = match (k.as_str(), x) {
+                        ("path", Value::String(s)) => rel_under(&from_dir.to_string_lossy(), s)
+                            .map(|rel| {
+                                Value::String(to_dir.join(rel).to_string_lossy().into_owned())
+                            })
+                            .unwrap_or_else(|| x.clone()),
+                        _ => swap_path_fields(x, from_dir, to_dir),
+                    };
+                    (k.clone(), swapped)
+                })
                 .collect(),
         ),
         _ => v.clone(),
@@ -294,6 +332,47 @@ mod tests {
             swap_prefix(&other, "file:///C:/ws/gl", "file:///D:/s/gl"),
             other
         );
+    }
+
+    #[test]
+    fn swap_path_fields_maps_stack_frame_sources_back_to_real() {
+        let shadow = Path::new(r"C:\data\shadow\gl");
+        let real = Path::new(r"D:\ws\gl");
+        let v = json!({
+            "stackFrames": [
+                { "id": 1, "name": "A.run", "source": { "path": r"C:\data\shadow\gl\src\private\A.java" } },
+                // 大小写、正斜杠混用也要换
+                { "id": 2, "source": { "path": "c:/Data/Shadow/GL/src/B.java" } },
+                // 不在影子里（平台类、无源码帧）原样保留
+                { "id": 3, "source": { "path": r"E:\other\C.java" } },
+                { "id": 4, "name": r"C:\data\shadow\gl\src\D.java" }
+            ]
+        });
+        let out = swap_path_fields(&v, shadow, real);
+        assert_eq!(
+            out["stackFrames"][0]["source"]["path"],
+            r"D:\ws\gl\src\private\A.java"
+        );
+        assert_eq!(
+            out["stackFrames"][1]["source"]["path"],
+            r"D:\ws\gl\src\B.java"
+        );
+        assert_eq!(out["stackFrames"][2]["source"]["path"], r"E:\other\C.java");
+        // 只换 path 键，别的字段里碰巧是影子路径的文字不动
+        assert_eq!(
+            out["stackFrames"][3]["name"],
+            r"C:\data\shadow\gl\src\D.java"
+        );
+    }
+
+    #[test]
+    fn swap_path_fields_ignores_sibling_dir_and_parent_segments() {
+        let shadow = Path::new(r"C:\data\shadow\gl");
+        let real = Path::new(r"D:\ws\gl");
+        let v = json!({ "a": { "path": r"C:\data\shadow\gl2\x.java" },
+                        "b": { "path": r"C:\data\shadow\gl\..\..\evil.java" } });
+        let out = swap_path_fields(&v, shadow, real);
+        assert_eq!(out, v);
     }
 
     /// `WorkspaceEdit.changes` 的键就是文件 URI：值换了、键没换，前端按真实路径
