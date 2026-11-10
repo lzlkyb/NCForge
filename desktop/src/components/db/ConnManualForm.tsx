@@ -3,13 +3,16 @@ import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { EnvChips } from "./EnvChips";
 import { ConnStmtCacheToggle } from "./ConnStmtCacheToggle";
-import { friendlyDbError, parseDbError, thousands } from "../../lib/db";
+import { ConnGroupColorFields } from "./ConnGroupColorFields";
+import { ConnTestResult } from "./ConnTestResult";
+import { parseDbError } from "../../lib/db";
 import { dbApi, type DbConn, type DbConnInput, type TestResult } from "../../lib/dbApi";
 import { initialConnForm, mergeConnForm, type DbConnForm } from "../../lib/dbConnForm";
+import { groupNames } from "../../lib/dbConnGroups";
 import { ncHomeProbe } from "../../lib/server";
 import { beginOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
-import { closeConnDialog, loadConns, rtOf } from "../../lib/dbStore";
+import { closeConnDialog, loadConns, rtOf, useDbConns } from "../../lib/dbStore";
 
 /**
  * 手动填写（新建或编辑）。主机 / 端口 / 服务名与 JDBC URL 两种写法互相同步
@@ -22,6 +25,8 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
   const formId = useId();
   const fieldId = (field: string) => `${formId}-${field}`;
   const [f, setF] = useState<DbConnForm>(() => initialConnForm(conn));
+  // 已有分组名，只用来给分组输入框做候选（`datalist`），不参与保存逻辑。
+  const conns = useDbConns();
   const [test, setTest] = useState<{ ok?: TestResult; err?: string; busy?: boolean }>({});
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -65,6 +70,8 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
     engine: f.engine,
     defaultSchema: f.defaultSchema.trim() || null,
     noStmtCache: f.noStmtCache,
+    group: f.group.trim() || null,
+    color: f.color || null,
   });
 
   const missing = !f.url.trim() ? "连接串" : !f.user.trim() ? "用户名" : null;
@@ -143,6 +150,14 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
         <input id={fieldId("name")} className="dbx-inp" value={f.name} placeholder="留空则用服务名" onChange={(e) => put({ name: e.target.value })} />
         <span className="dbx-form-label">环境</span>
         <EnvChips value={f.env} onChange={(env) => put({ env })} />
+        <ConnGroupColorFields
+          id={fieldId("conn")}
+          group={f.group}
+          color={f.color}
+          knownGroups={groupNames(conns)}
+          onGroup={(group) => put({ group })}
+          onColor={(color) => put({ color })}
+        />
         <h3 className="dbx-form-section">连接与认证</h3>
         {fromProp ? (
           <>
@@ -242,40 +257,7 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
         <p className="dbx-hint">新会话采用此设置。已打开的会话在处理完待提交写入、重新连接后生效。</p>
         <label htmlFor={fieldId("note")}>备注</label>
         <input id={fieldId("note")} className="dbx-inp" value={f.note} onChange={(e) => put({ note: e.target.value })} />
-        {test.ok && (
-          <div className="dbx-okline">
-            <Icon name="check" size={13} />
-            连接成功 · {test.ok.product} {test.ok.version} · {test.ok.ms} ms
-            {test.ok.tables !== null && (
-              <>
-                {" "}· {test.ok.schema ? `${test.ok.schema} 下` : "该用户下"} {thousands(test.ok.tables)} 张表
-              </>
-            )}
-          </div>
-        )}
-        {test.ok?.schemaWarning && (
-          <div className="dbx-badline">
-            <Icon name="alert" size={13} />
-            <span>默认 schema 没生效，当前用的是登录账号：{test.ok.schemaWarning}</span>
-          </div>
-        )}
-        {test.ok?.engineNote && (
-          <div className="dbx-badline">
-            <Icon name="alert" size={13} />
-            <span>{test.ok.engineNote}</span>
-          </div>
-        )}
-        {test.err && (
-          <div className="dbx-badline">
-            <Icon name="alert" size={13} />
-            <span>{friendlyDbError(test.err)}</span>
-            {needHome && (
-              <button type="button" className="dbx-btn" style={{ flexShrink: 0, alignSelf: "center" }} onClick={() => put({ engine: "rust" })}>
-                换成纯 Rust 驱动
-              </button>
-            )}
-          </div>
-        )}
+        <ConnTestResult test={test} needHome={needHome} onUseRust={() => put({ engine: "rust" })} />
       </div>
       <div className="ft">
         <button type="button" className="dbx-btn" disabled={!!missing || testing || saving} onClick={() => void runTest()}>

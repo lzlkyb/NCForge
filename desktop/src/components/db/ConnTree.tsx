@@ -8,6 +8,7 @@ import { ConnectionStatus } from "./ConnectionStatus";
 import { FavoriteSection } from "./FavoriteSection";
 import { PasswordResetDialog } from "./PasswordResetDialog";
 import { dbNameOf, ENV_LABEL, type DbConn } from "../../lib/dbApi";
+import { connColor, groupConns } from "../../lib/dbConnGroups";
 import { ensureConnected } from "../../lib/dbConfirm";
 import { deleteConn, disconnectConn, duplicateConn, moveConn, newConsole, openDict, refreshMeta } from "../../lib/dbActions";
 import { defaultConnId, loadConns, openConnDialog, rtOf, showObjectFinder, useDbConns, useDbRt, useDbSelector } from "../../lib/dbStore";
@@ -16,7 +17,7 @@ import { defaultConnId, loadConns, openConnDialog, rtOf, showObjectFinder, useDb
  * 侧栏：连接列表 + 已连上连接下的对象（收藏 / 表 / 视图）。
  *
  * 单击连接 = 展开并连上；双击 = 在这个连接上新开 SQL 控制台；右键管理；拖动排序。
- * 筛选框同时筛连接名与表名（含 NC 中文名）。
+ * 筛选框同时筛连接名与表名（含 NC 中文名）。连接按「分组」折成一类，组头可收起。
  */
 export function ConnTree() {
   // 只订阅连接树用到的切片：SQL 执行、结果写回标签不再把整棵连接树重画。
@@ -30,6 +31,13 @@ export function ConnTree() {
   const dock = useWorkbenchDock();
   const [filter, setFilter] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  /**
+   * 收起的**分组**（按组名记，空串是「未分组」不会出现在这里）。
+   *
+   * 与 `open`（连接展开）分开：一个是「这个分类先不看了」，一个是「这条连接的对象先不看了」，
+   * 混在一个表里的话，切分组会连带把用户展开的连接状态弄乱。
+   */
+  const [closedGroups, setClosedGroups] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const [resetConn, setResetConn] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ from: string; over: string | null } | null>(null);
@@ -159,49 +167,72 @@ export function ConnTree() {
           />
         )}
         {noFilterHits && <p className="dbx-tree-note">没有匹配「{filter.trim()}」的连接或对象。</p>}
-        {shown.map((c) => {
-          const rt = rtOf(c.id);
-          // 筛选时只展开「确实有命中子对象」的连接，不再把所有已连接连接全铺开。
-          const names = rt.ncNames ?? {};
-          const childHit = !!q && (rt.tables ?? []).some((t) => t.name.toLowerCase().includes(q) || (names[t.name.toLowerCase()] ?? "").includes(q));
-          const expanded = !!open[c.id] || childHit;
+        {groupConns(shown).map((g) => {
+          // 筛选时强制展开：搜出来的连接藏在收起的组里等于没搜到。
+          const collapsed = !q && !!closedGroups[g.name];
           return (
-            <div key={c.id}>
-              <button
-                id={`dbx-conn-${c.id}`}
-                type="button"
-                className="dbx-crow"
-                data-active={activeConn === c.id || undefined}
-                aria-expanded={expanded}
-                aria-controls={expanded ? `dbx-objects-${c.id}` : undefined}
-                data-drop={drag?.over === c.id && drag.from !== c.id ? "" : undefined}
-                title={`${c.user}@${c.url}${c.note ? `\n${c.note}` : ""}`}
-                draggable
-                onDragStart={() => setDrag({ from: c.id, over: null })}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  if (drag && drag.over !== c.id) setDrag({ ...drag, over: c.id });
-                }}
-                onDrop={() => {
-                  if (drag) void moveConn(drag.from, c.id);
-                  setDrag(null);
-                }}
-                onDragEnd={() => setDrag(null)}
-                onClick={() => toggle(c)}
-                onDoubleClick={() => void newConsole(c.id)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  connMenu(c, e.clientX, e.clientY);
-                }}
-              >
-                <Icon name={expanded ? "chevronDown" : "chevronRight"} size={12} />
-                <span className="dbx-conn-label"><b>{c.name}</b><span className="u">{c.user}@{dbNameOf(c.url)}</span></span>
-                <span className="dbx-conn-env" data-prod={c.env === "prod" || undefined}>{ENV_LABEL[c.env]}</span>
-                <ConnectionStatus status={rt.status} />
-              </button>
-              {expanded && <div id={`dbx-objects-${c.id}`}>
-                {rt.status === "connected" && <ConnObjects connId={c.id} filter={q} />}
-              </div>}
+            <div key={g.name || "loose"} className="dbx-cgroup">
+              {g.name && (
+                <button
+                  type="button"
+                  className="dbx-cgroup-head"
+                  aria-expanded={!collapsed}
+                  title={collapsed ? `展开分组「${g.name}」` : `收起分组「${g.name}」`}
+                  onClick={() => setClosedGroups((prev) => ({ ...prev, [g.name]: !prev[g.name] }))}
+                >
+                  <Icon name={collapsed ? "chevronRight" : "chevronDown"} size={11} />
+                  <span className="dbx-cgroup-name">{g.name}</span>
+                  <span className="dbx-cgroup-count">{g.conns.length}</span>
+                </button>
+              )}
+              {!collapsed && g.conns.map((c) => {
+                const rt = rtOf(c.id);
+                // 筛选时只展开「确实有命中子对象」的连接，不再把所有已连接连接全铺开。
+                const names = rt.ncNames ?? {};
+                const childHit = !!q && (rt.tables ?? []).some((t) => t.name.toLowerCase().includes(q) || (names[t.name.toLowerCase()] ?? "").includes(q));
+                const expanded = !!open[c.id] || childHit;
+                const color = connColor(c);
+                return (
+                  <div key={c.id}>
+                    <button
+                      id={`dbx-conn-${c.id}`}
+                      type="button"
+                      className="dbx-crow"
+                      data-active={activeConn === c.id || undefined}
+                      data-color={color ?? undefined}
+                      aria-expanded={expanded}
+                      aria-controls={expanded ? `dbx-objects-${c.id}` : undefined}
+                      data-drop={drag?.over === c.id && drag.from !== c.id ? "" : undefined}
+                      title={`${c.user}@${c.url}${c.note ? `\n${c.note}` : ""}`}
+                      draggable
+                      onDragStart={() => setDrag({ from: c.id, over: null })}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        if (drag && drag.over !== c.id) setDrag({ ...drag, over: c.id });
+                      }}
+                      onDrop={() => {
+                        if (drag) void moveConn(drag.from, c.id);
+                        setDrag(null);
+                      }}
+                      onDragEnd={() => setDrag(null)}
+                      onClick={() => toggle(c)}
+                      onDoubleClick={() => void newConsole(c.id)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        connMenu(c, e.clientX, e.clientY);
+                      }}
+                    >
+                      <Icon name={expanded ? "chevronDown" : "chevronRight"} size={12} />
+                      <span className="dbx-conn-label"><b>{c.name}</b><span className="u">{c.user}@{dbNameOf(c.url)}</span></span>
+                      <span className="dbx-conn-env" data-prod={c.env === "prod" || undefined}>{ENV_LABEL[c.env]}</span>
+                      <ConnectionStatus status={rt.status} />
+                    </button>
+                    {expanded && <div id={`dbx-objects-${c.id}`}>
+                      {rt.status === "connected" && <ConnObjects connId={c.id} filter={q} />}
+                    </div>}
+                  </div>
+                );
+              })}
             </div>
           );
         })}

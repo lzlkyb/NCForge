@@ -26,6 +26,8 @@ vi.mock("../../lib/dbStore", () => ({
   disconnect: vi.fn(),
   loadConns: vi.fn(),
   rtOf: () => ({ status: "idle" }),
+  // 分组输入框的候选来自已有连接；这里不需要候选，空列表即可。
+  useDbConns: () => [],
 }));
 // 表单在「改了地址要断开旧会话」时会调 `disconnectConn`（它带未提交事务确认）。
 // dbActions 会顺着 sqlModels 把整个 Monaco 拉进 jsdom（queryCommandSupported 不存在），
@@ -66,7 +68,14 @@ const render = async (conn: DbConn | null = null) => {
   await act(async () => {});
 };
 
-const engineButtons = () => [...host.querySelectorAll<HTMLElement>('[role="group"]')][0].querySelectorAll<HTMLButtonElement>("button");
+/**
+ * 按可访问名取按钮组：颜色 / 引擎 / 事务都是 `role="group"`，
+ * 靠下标取会被「以后又加一个分组字段」带偏（颜色加进来时就发生过一次）。
+ */
+const groupByLabel = (name: string) =>
+  [...host.querySelectorAll<HTMLElement>('[role="group"]')]
+    .find((group) => document.getElementById(group.getAttribute("aria-labelledby") ?? "")?.textContent === name);
+const engineButtons = () => groupByLabel("引擎")!.querySelectorAll<HTMLButtonElement>("button");
 
 /** React 受控输入：必须走原生 setter 派发 input 事件，直接改 value 不触发 onChange。 */
 const setField = (labelText: string, value: string) => {

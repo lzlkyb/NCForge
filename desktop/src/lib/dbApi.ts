@@ -47,6 +47,17 @@ export interface DbConn {
    * 默认 `false`（用缓存）——宽表分页查询的收益明显，错位反复出现时再按库关。
    */
   noStmtCache?: boolean;
+  /**
+   * 分组名（空串 = 未分组）。侧栏按它把连接折成一类，只是显示归类：
+   * 不参与连接、权限、超时任何判断。
+   */
+  group?: string;
+  /**
+   * 颜色标记：`red` / `orange` / `amber` / `green` / `blue` / `purple` / `gray`，
+   * 空串或缺失 = 不标记（跟随环境色）。后端只接受这一组键（`db_conns::CONN_COLORS`），
+   * 前端把它当 `data-color` 枚举用，样式表里逐个定义。
+   */
+  color?: string;
 }
 
 /**
@@ -72,6 +83,10 @@ export interface DbConnInput {
   defaultSchema?: string | null;
   /** 关掉纯 Rust 驱动的语句缓存（见 {@link DbConn.noStmtCache}）。不传 = 用缓存。 */
   noStmtCache?: boolean;
+  /** 分组名（空 / 不传 = 未分组）。 */
+  group?: string | null;
+  /** 颜色键（空 / 不传 = 不标记）。不在白名单里的值后端会落空串。 */
+  color?: string | null;
 }
 
 /** 这个连接用哪个引擎、那个引擎能做什么。界面按它决定按钮能不能用。 */
@@ -415,6 +430,35 @@ export interface ColumnInfo {
   zh: string | null;
 }
 
+/** 过程 / 函数的一个参数（`all_arguments`）。 */
+export interface ProcArgInfo {
+  name: string;
+  /** 声明类型原文，如 `NUMBER` / `VARCHAR2`。 */
+  type: string;
+  /** `IN` / `OUT` / `IN OUT`。 */
+  inOut: string;
+  /** 有默认值：调用时可以省略它以及后面的参数。 */
+  defaulted: boolean;
+}
+
+/**
+ * 一个重载（同名过程可以有多个）。
+ *
+ * `position = 0` 的返回值不进 `args`，单独放 `returns`——否则签名会渲染成
+ * 「函数名(返回值类型)」，没人看得懂。
+ */
+export interface ProcOverload {
+  package: string | null;
+  subprogramId: number;
+  returns: string | null;
+  args: ProcArgInfo[];
+}
+
+export interface ProcArguments {
+  name: string;
+  overloads: ProcOverload[];
+}
+
 export interface IndexInfo {
   name: string;
   unique: boolean;
@@ -736,6 +780,14 @@ export const dbApi = {
     }),
   columns: (id: string, table: string) =>
     invoke<{ columns: ColumnInfo[] }>("db_meta", { id, kind: "columns", arg: table }),
+  /**
+   * 过程 / 函数的参数（签名帮助）。`name` 支持 `proc` 与 `pkg.proc`。
+   *
+   * 没有同名过程时 `overloads` 是空数组（不是错误）：用户敲的可能是个表函数或自己写错的
+   * 名字，编辑器不该因此弹错。
+   */
+  arguments: (id: string, name: string) =>
+    invoke<ProcArguments>("db_meta", { id, kind: "arguments", arg: name }),
   indexes: (id: string, table: string) =>
     invoke<{ indexes: IndexInfo[] }>("db_meta", { id, kind: "indexes", arg: table }),
   ddl: (id: string, table: string) => invoke<{ ddl: string }>("db_meta", { id, kind: "ddl", arg: table }),

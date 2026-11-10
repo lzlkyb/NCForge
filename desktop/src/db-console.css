@@ -134,7 +134,7 @@
 .dbx-side-head { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px 0 14px; font-size: var(--dbx-fs-title); font-weight: 600; color: hsl(var(--foreground)); flex-shrink: 0; }
 .dbx-side-filter { width: calc(100% - 16px); margin: 0 8px 6px; flex-shrink: 0; }
 .dbx-tree { flex: 1; overflow: auto; padding: 4px 8px 12px; font-size: var(--dbx-fs-body); }
-.dbx-crow { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 50px; padding: 7px 8px 7px 4px; border-radius: var(--r-control); white-space: nowrap; text-align: left; }
+.dbx-crow { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 50px; padding: 7px 8px 7px 4px; border-radius: var(--r-control); white-space: nowrap; text-align: left; position: relative; }
 .dbx-crow:hover { background: hsl(var(--secondary) / .7); }
 .dbx-crow[data-active] { background: hsl(var(--accent)); }
 .dbx-conn-label { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
@@ -149,6 +149,34 @@
 .dbx-conn-status[data-state="error"] { color:hsl(var(--destructive-ink)); }
 
 .dbx-crow[data-drop] { box-shadow: inset 0 2px 0 hsl(var(--primary)); }
+/* 连接颜色标记：左侧竖条。颜色只认 data-color 的七个键（后端 db_conns::CONN_COLORS 同源），
+   样式表逐个映射到已存在的图表色 token，绝不把配置里的字符串拼进颜色值。 */
+.dbx-crow[data-color]::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px; border-radius: 2px; background: var(--dbx-conn-color); }
+.dbx-crow[data-color="red"] { --dbx-conn-color: hsl(var(--chart-4)); }
+.dbx-crow[data-color="orange"] { --dbx-conn-color: hsl(var(--chart-10)); }
+.dbx-crow[data-color="amber"] { --dbx-conn-color: hsl(var(--chart-3)); }
+.dbx-crow[data-color="green"] { --dbx-conn-color: hsl(var(--chart-5)); }
+.dbx-crow[data-color="blue"] { --dbx-conn-color: hsl(var(--chart-7)); }
+.dbx-crow[data-color="purple"] { --dbx-conn-color: hsl(var(--chart-6)); }
+.dbx-crow[data-color="gray"] { --dbx-conn-color: hsl(var(--chart-compare)); }
+/* 分组头：比连接行矮一档，收起时只管藏组内行，不碰连接自己的展开状态 */
+.dbx-cgroup-head { display: flex; align-items: center; gap: 5px; width: 100%; padding: 7px 6px 3px; text-align: left; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); font-weight: 600; }
+.dbx-cgroup-head:hover { color: hsl(var(--foreground)); }
+.dbx-cgroup-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-cgroup-count { margin-left: auto; font-weight: 400; font-variant-numeric: tabular-nums; opacity: var(--disabled-opacity); }
+/* 表单里的颜色选择：小色块，选中态用描边而不是只靠颜色深浅 */
+.dbx-conn-colors { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dbx-conn-color { width: 18px; height: 18px; border-radius: 50%; border: 1px solid hsl(var(--border)); background: var(--dbx-swatch); }
+.dbx-conn-color[data-color="red"] { --dbx-swatch: hsl(var(--chart-4)); }
+.dbx-conn-color[data-color="orange"] { --dbx-swatch: hsl(var(--chart-10)); }
+.dbx-conn-color[data-color="amber"] { --dbx-swatch: hsl(var(--chart-3)); }
+.dbx-conn-color[data-color="green"] { --dbx-swatch: hsl(var(--chart-5)); }
+.dbx-conn-color[data-color="blue"] { --dbx-swatch: hsl(var(--chart-7)); }
+.dbx-conn-color[data-color="purple"] { --dbx-swatch: hsl(var(--chart-6)); }
+.dbx-conn-color[data-color="gray"] { --dbx-swatch: hsl(var(--chart-compare)); }
+.dbx-conn-color[data-on] { box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 3px hsl(var(--foreground) / .55); }
+.dbx-conn-color-none { height: 22px; padding: 0 8px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); }
+.dbx-conn-color-none[data-on] { border-color: hsl(var(--primary)); color: hsl(var(--primary)); }
 .dbx-sgroup { font-size: var(--dbx-fs-meta); font-weight: 600; color: hsl(var(--muted-foreground)); padding: 6px 6px 2px; display: flex; align-items: center; gap: 4px; width: 100%; text-align: left; }
 .dbx-trow { display: flex; align-items: center; gap: 6px; width: 100%; height: var(--dbx-h-icon); border-radius: var(--r-control); padding-right: 6px; white-space: nowrap; text-align: left; }
 .dbx-trow:hover { background: hsl(var(--secondary) / .7); }

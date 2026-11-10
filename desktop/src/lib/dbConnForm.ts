@@ -27,6 +27,10 @@ export interface DbConnForm {
    * 存的是连接属性，界面上在引擎选 Rust 时才显示（JVM 桥没有这个缓存）。
    */
   noStmtCache: boolean;
+  /** 分组名：侧栏按它把连接折成一类。空 = 未分组。只是显示归类，不影响连接。 */
+  group: string;
+  /** 颜色键（见 `lib/dbConnGroups.ts` 的 `CONN_COLORS`）。空 = 不标记，跟随环境色。 */
+  color: string;
 }
 
 export function initialConnForm(conn: DbConn | null): DbConnForm {
@@ -47,6 +51,8 @@ export function initialConnForm(conn: DbConn | null): DbConnForm {
     engine: conn?.engine ?? "rust",
     defaultSchema: conn?.defaultSchema ?? "",
     noStmtCache: conn?.noStmtCache ?? false,
+    group: conn?.group ?? "",
+    color: conn?.color ?? "",
   };
 }
 
