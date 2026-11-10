@@ -145,6 +145,25 @@ for (const n of ["updater.json", "resources.json"]) {
   if (!fs.existsSync(p)) ghDownload([n]);
 }
 
+/**
+ * GitHub Release 上每个附件的真实字节数。
+ *
+ * 只判「本地文件存在」是不够的：`gh release download` 被 Ctrl-C / Stop-Process
+ * 打断会留下半截文件，下一次运行就会把它当完整产物直接传给 Gitee。
+ * v0.4.0 实测踩过——jdtls.zip 只传了 5.6MB（真实 58.8MB），且因为
+ * `existing.get(name) === size` 拿坏文件的长度去比，Gitee 侧看起来还「一致」。
+ */
+function remoteSizes() {
+  const r = spawnSync(GH, ["release", "view", TAG, "-R", GH_REPO, "--json", "assets"], {
+    encoding: "utf-8",
+  });
+  if (r.status !== 0) {
+    fail(`读取 GitHub 附件清单失败：${(r.stderr || r.stdout || "").slice(0, 300)}`);
+  }
+  const assets = JSON.parse(r.stdout || "{}").assets || [];
+  return new Map(assets.map((a) => [a.name, a.size]));
+}
+
 const updater = JSON.parse(fs.readFileSync(path.join(ASSETS, "updater.json"), "utf-8"));
 const resources = JSON.parse(fs.readFileSync(path.join(ASSETS, "resources.json"), "utf-8"));
 
@@ -173,16 +192,34 @@ ok(`需要 ${needed.size} 个文件：${[...needed].join(", ")}`);
 
 // ── 2. 下载这些文件 ───────────────────────────────────────────────────────────
 step("2/6 下载产物");
-const missing = [...needed].filter((n) => !fs.existsSync(path.join(ASSETS, n)));
+const sizes = remoteSizes();
+// 大小对不上的本地文件一律删掉重下：上一次运行被打断留下的半截文件如果被当成
+// 完整产物，Gitee 上就会出现「能下、装不上」的坏附件，且下次重跑还会跳过它。
+const missing = [...needed].filter((n) => {
+  const p = path.join(ASSETS, n);
+  if (!fs.existsSync(p)) return true;
+  const want = sizes.get(n);
+  if (want === undefined) return false; // 不是 Release 附件（理论上不会），不拦
+  const got = fs.statSync(p).size;
+  if (got === want) return false;
+  warn(`${n} 本地 ${got} 字节 ≠ 远端 ${want} 字节，删掉重下`);
+  fs.rmSync(p, { force: true });
+  return true;
+});
 if (missing.length) {
   info(`下载 ${missing.length} 个：${missing.join(", ")}`);
   ghDownload(missing);
 } else {
-  ok("全部已存在，跳过下载");
+  ok("全部已存在且大小一致，跳过下载");
 }
 for (const n of needed) {
   const p = path.join(ASSETS, n);
   if (!fs.existsSync(p)) fail(`下载后仍缺 ${n}`);
+  const want = sizes.get(n);
+  const got = fs.statSync(p).size;
+  if (want !== undefined && got !== want) {
+    fail(`${n} 大小不符：本地 ${got} / 远端 ${want}（下载被截断，删掉该文件后重跑）`);
+  }
 }
 const totalMb = [...needed].reduce((s, n) => s + fs.statSync(path.join(ASSETS, n)).size, 0) / 1048576;
 ok(`共 ${totalMb.toFixed(1)} MB`);
@@ -230,7 +267,7 @@ const existing = new Map();
 for (let page = 1; ; page += 1) {
   const r = await gitee("GET", `/repos/${REPO}/releases/${releaseId}/attach_files?per_page=100&page=${page}`);
   const list = Array.isArray(r.data) ? r.data : [];
-  for (const a of list) existing.set(a.name, a.size);
+  for (const a of list) existing.set(a.name, { size: a.size, id: a.id });
   if (list.length < 100) break;
 }
 if (existing.size) info(`已有 ${existing.size} 个附件`);
@@ -238,11 +275,20 @@ if (existing.size) info(`已有 ${existing.size} 个附件`);
 for (const name of needed) {
   const local = path.join(ASSETS, name);
   const size = fs.statSync(local).size;
-  if (existing.get(name) === size) {
+  const prev = existing.get(name);
+  if (prev?.size === size) {
     ok(`${name} 已在上方（${(size / 1048576).toFixed(1)} MB），跳过`);
     continue;
   }
-  if (existing.has(name)) warn(`${name} 大小不同（远端 ${existing.get(name)} / 本地 ${size}），重新上传`);
+  if (prev) {
+    // 同名附件不会被覆盖，直接重传会并排出现两条（一条坏一条好），客户端按名字
+    // 取第一个就可能又拿到坏的。先删掉旧的再传。
+    warn(`${name} 大小不同（远端 ${prev.size} / 本地 ${size}），先删旧附件`);
+    const del = await gitee("DELETE", `/repos/${REPO}/releases/${releaseId}/attach_files/${prev.id}`);
+    if (del.status >= 300) {
+      warn(`删除旧附件失败（${del.status}）——Gitee 上可能留下重复附件，请手动清理`);
+    }
+  }
 
   info(`上传 ${name}（${(size / 1048576).toFixed(1)} MB）…`);
   const t0 = Date.now();
