@@ -180,6 +180,20 @@ fn is_retryable_check_error(err: &tauri_plugin_updater::Error) -> bool {
     !matches!(error_class(err), ErrorClass::Manifest | ErrorClass::Config)
 }
 
+/// 判断「下载安装包」的错误是否值得重试。
+///
+/// 与检查阶段不同，下载失败的代价是**整个包**：重试会从头再下一遍（实测 8.4MB～58MB）。
+/// 所以判据比检查更严——只有签名/解析类错误被排除在外也不太够，但其余（连接重置、
+/// 超时、代理断流、IO 中断）确实可能一次成功，保留重试。
+///
+/// 🔴 **验签失败必须是不可重试**：同一个源、同一个包，字节不会变，重试 N 次都是
+/// 同样的 `Minisign` 错误。2026-11-10 v0.4.0 事故里 Gitee 清单的签名属于上一轮构建、
+/// 与附件包不匹配，每个平台白下 3 次（首次 + 重试 2 次）才换源，用户看到的就是
+/// 「下载完了又自己重新下载」。
+fn is_retryable_download_error(err: &tauri_plugin_updater::Error) -> bool {
+    !matches!(error_class(err), ErrorClass::Signature)
+}
+
 /// 给更新失败打一个**机器可读**的原因标签，随 `update:error` 一起发给前端。
 ///
 /// 为什么不用字符串判断：前端原先靠 `includes("fetch")` 之类猜原因，而插件的错误文案
@@ -381,53 +395,51 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), S
             let _ = app.emit("update:downloading", ());
 
             let app_progress = app.clone();
-            // 下载阶段保持「任何错误都重试」的原有语义：这里失败多半是链路抖动，
-            // 且重试会从头下载，代价可控；换源由外层 `continue` 负责。
-            let result = retry_with_backoff(
-                2,
-                "下载更新",
-                |_: &tauri_plugin_updater::Error| true,
-                || {
-                    let u = update.clone();
-                    let ap = app_progress.clone();
-                    async move {
-                        let mut downloaded_total: u64 = 0;
-                        // 下载速度：窗口限流计算（~250ms 重算一次），不是每个 chunk 都重算——
-                        // 快网速下 chunk 回调可能每秒触发好几十次，逐次算瞬时速率会跳得难看。
-                        // downloaded/total 仍每 chunk 都发（百分比保持平滑），只有 bytesPerSec 在窗口
-                        // 间隔内复用上一次算出的值。
-                        let mut window_start = std::time::Instant::now();
-                        let mut window_bytes: u64 = 0;
-                        let mut last_bytes_per_sec: f64 = 0.0;
-                        u.download(
-                            move |chunk_len, total| {
-                                downloaded_total += chunk_len as u64;
-                                window_bytes += chunk_len as u64;
-                                let elapsed = window_start.elapsed();
-                                if elapsed.as_millis() >= 250 {
-                                    last_bytes_per_sec =
-                                        window_bytes as f64 / elapsed.as_secs_f64();
-                                    window_start = std::time::Instant::now();
-                                    window_bytes = 0;
-                                }
-                                let _ = ap.emit(
-                                    "update:progress",
-                                    serde_json::json!({
-                                        "downloaded": downloaded_total,
-                                        "total": total,
-                                        "bytesPerSec": last_bytes_per_sec,
-                                    }),
-                                );
-                            },
-                            || {
-                                // 此回调在验签之前触发；调用方只能在 download 成功返回后
-                                // 宣告 ready，验签失败时不能缓存包或允许用户安装。
-                            },
-                        )
-                        .await
-                    }
-                },
-            )
+            // 网络类失败照常重试（链路抖动、连接重置，重试真的可能成）；但**验签失败
+            // 是确定性结论**——同一个源、同一个包，再下一次还是同样的字节、同样的签名，
+            // 重试只会让用户多付一次全量流量。
+            // v0.4.0 实测：Gitee 清单的签名属于上一轮构建，与附件包不匹配，每个平台
+            // 白下 3 次（1 次 + 重试 2 次）8.4MB 才换源，用户看到的就是「下载完了又
+            // 自己重新下载」。验签失败立刻换源，代价从 4 次下载降到 2 次。
+            let result = retry_with_backoff(2, "下载更新", is_retryable_download_error, || {
+                let u = update.clone();
+                let ap = app_progress.clone();
+                async move {
+                    let mut downloaded_total: u64 = 0;
+                    // 下载速度：窗口限流计算（~250ms 重算一次），不是每个 chunk 都重算——
+                    // 快网速下 chunk 回调可能每秒触发好几十次，逐次算瞬时速率会跳得难看。
+                    // downloaded/total 仍每 chunk 都发（百分比保持平滑），只有 bytesPerSec 在窗口
+                    // 间隔内复用上一次算出的值。
+                    let mut window_start = std::time::Instant::now();
+                    let mut window_bytes: u64 = 0;
+                    let mut last_bytes_per_sec: f64 = 0.0;
+                    u.download(
+                        move |chunk_len, total| {
+                            downloaded_total += chunk_len as u64;
+                            window_bytes += chunk_len as u64;
+                            let elapsed = window_start.elapsed();
+                            if elapsed.as_millis() >= 250 {
+                                last_bytes_per_sec = window_bytes as f64 / elapsed.as_secs_f64();
+                                window_start = std::time::Instant::now();
+                                window_bytes = 0;
+                            }
+                            let _ = ap.emit(
+                                "update:progress",
+                                serde_json::json!({
+                                    "downloaded": downloaded_total,
+                                    "total": total,
+                                    "bytesPerSec": last_bytes_per_sec,
+                                }),
+                            );
+                        },
+                        || {
+                            // 此回调在验签之前触发；调用方只能在 download 成功返回后
+                            // 宣告 ready，验签失败时不能缓存包或允许用户安装。
+                        },
+                    )
+                    .await
+                }
+            })
             .await;
 
             match result {
@@ -714,6 +726,25 @@ mod tests {
         ));
         assert!(!is_retryable_check_error(&UpdaterError::EmptyEndpoints));
         assert!(!is_retryable_check_error(&UpdaterError::UnsupportedOs));
+    }
+
+    /// 下载阶段的验签失败**不可重试**：同一个源、同一个包，字节不会变，重试 N 次都是
+    /// 同一个 `Minisign` 错误，只会让用户多付 N 次全量流量。
+    ///
+    /// 2026-11-10 v0.4.0 实测：Gitee 清单的签名属于上一轮构建、与附件包不匹配，
+    /// 每个平台白下 3 次（首次 + 重试 2 次）才换源 → 用户看到「下载完了又自己重新下载」。
+    #[test]
+    fn signature_errors_are_not_retryable_for_download() {
+        assert!(!is_retryable_download_error(&UpdaterError::SignatureUtf8(
+            "not base64".into()
+        )));
+        // 网络类仍然可重试：链路抖动一次失败，第二次真的可能成。
+        assert!(is_retryable_download_error(&UpdaterError::Network(
+            "connection reset by peer".into()
+        )));
+        assert!(is_retryable_download_error(&UpdaterError::Network(
+            "unexpected end of file".into()
+        )));
     }
 
     /// 链路抖动值得再试一次：换源前多试一轮是划算的。
