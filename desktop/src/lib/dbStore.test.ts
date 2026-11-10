@@ -242,3 +242,73 @@ describe("execOne 把 sets 带到结果条目上", () => {
     expect(lines.some((t: string) => t.includes("JVM 桥") && t.includes("不受本连接"))).toBe(true);
   });
 });
+
+/**
+ * 闲置过久再查询：会话被服务端收掉之后必须能自己恢复。
+ *
+ * 现场症状是「第一次报 unable to recover from error，之后每次 9ms 报 not connected
+ * to database」，而连接状态一直是 connected —— 于是每次点执行都直接发、每次都失败，
+ * 只能手动断开重连。两条断言分别守着「后端自动重连」与「状态置错让下次真重连」。
+ */
+describe("闲置超时后的连接恢复", () => {
+  beforeEach(() => { mocks.invoke.mockReset(); __resetDbForTest(); });
+
+  const body = {
+    kind: "rows",
+    columns: [{ name: "A", type: "NUMBER", precision: 10, scale: 0 }],
+    rows: [["1"]],
+    rowCount: 1,
+    hasMore: false,
+    ms: 4,
+    output: [],
+    tx: { autoCommit: true, statements: 0, rows: 0, since: 0 },
+  };
+
+  it("撞上会话丢失时把连接置回 error，下一次执行才会真正走重连", async () => {
+    mocks.invoke.mockImplementation((cmd: string) => {
+      if (cmd === "db_slot_acquire") return Promise.resolve({ slot: "1" });
+      if (cmd === "db_exec") {
+        return Promise.reject("session-lost|数据库会话已断开，本次操作尚未发出。这条会话可能有未提交事务，请先核对再手动重连");
+      }
+      return Promise.resolve(body);
+    });
+    const tabId = openSqlTab("c1", "update t set x = 1");
+    const e = await execOne(tabId, "update t set x = 1", 1);
+    expect(e.kind).toBe("error");
+    // 停在 connected 的话 `ensureConnected` 下次仍然直接发，用户连点几次都是同一句失败。
+    expect(getDb().rt.c1?.status).toBe("error");
+    expect(getDb().rt.c1?.error).toContain("会话已断开");
+  });
+
+  it("后端自动重连后照常展示结果，并提示会话设置已重置", async () => {
+    mocks.invoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "db_slot_acquire" ? { slot: "1" } : { ...body, reconnected: true }),
+    );
+    const tabId = openSqlTab("c1", "select 1 from dual");
+    const e = await execOne(tabId, "select 1 from dual", 1);
+    expect(e.kind).toBe("rows");
+    expect(e.rows).toHaveLength(1);
+    expect(getDb().rt.c1?.status).not.toBe("error");
+    const lines = sqlTabOf(tabId)?.output.map((l) => l.text) ?? [];
+    expect(lines.some((t) => t.includes("已自动重连"))).toBe(true);
+  });
+
+
+  // 元数据取数现在也会「闲置 → 探测 → 重连」。重连要口令时如果只把清单留空，
+  // 界面看不到任何要操作的入口，用户只能猜；置回 error 才会出现重连/输口令。
+  it("元数据撞上「要口令」时把连接置回 error，而不是只留一份空清单", async () => {
+    mocks.invoke.mockImplementation(() => Promise.reject("need-password|这个连接还没存口令"));
+    await loadMeta("c1");
+    expect(getDb().rt.c1?.status).toBe("error");
+    expect(getDb().rt.c1?.error).toContain("口令");
+  });
+
+  // 反过来：ORA-00942 是表名或权限的问题，连接是好的，不能把人弹去重连。
+  it("表结构查不到但连接还活着时不动连接状态", async () => {
+    mocks.invoke.mockImplementation(() =>
+      Promise.reject("sql|ORA-00942: table or view does not exist"),
+    );
+    await loadMeta("c1");
+    expect(getDb().rt.c1?.status).not.toBe("error");
+  });
+});

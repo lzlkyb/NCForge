@@ -233,6 +233,11 @@ pub(crate) fn connection_lost(message: &str) -> bool {
         "ora-17008",
         "ora-17410",
         "no more data to read from socket",
+        // 驱动的「连接对象已经关了」。`UnableToRecover` 是它自己恢复失败后留下的状态，
+        // 两者都只在连接不可用时出现（我们自己没连库用的是另一句文案），归到丢失安全。
+        "not connected to database",
+        "unable to recover from error",
+        "closed connection",
         // thin 驱动的 TTC 流一旦错位就是**永久性**的：后续每条语句都会继续
         // 把上次残留的字节当消息头读（`unknown TTC message type 32/0/50/1…`）。
         // 必须按「连接丢失」处理，否则界面会一直复用这条坏连接。
@@ -243,6 +248,27 @@ pub(crate) fn connection_lost(message: &str) -> bool {
 }
 
 type ReconnectArgs = (&'static str, Vec<String>);
+
+/// 探测判定会话已过期、自动重连又失败时怎么报。
+///
+/// 需要口令 / 认证失败 / 网络不通这几个码必须**原样**留给前端：它们各自有专属引导
+/// （弹输口令框、去连接设置里核对、换引擎）。一律包成 `session-lost` 的话，界面只会
+/// 显示一句「自动重连失败：还没输入这个连接的口令」，却弹不出输入框——用户被卡死。
+fn reconnect_unavailable(e: BridgeError) -> BridgeError {
+    if matches!(
+        e.code.as_str(),
+        "need-password" | "auth" | "unreachable" | "need-nc-home"
+    ) {
+        return e;
+    }
+    BridgeError::new(
+        "session-lost",
+        format!(
+            "数据库会话已断开，当前 SQL 尚未发送，自动重连失败：{}",
+            e.message
+        ),
+    )
+}
 
 impl EngineHandle {
     pub fn java(bridge: Arc<Bridge>, session_id: impl Into<String>) -> Self {
@@ -409,7 +435,35 @@ impl EngineHandle {
         // execFull / execFullBound 是导出与搬运的取数通道，语义上就是执行：
         // 少了它们会绕过只读策略、取消 epoch、以及「会话被用过」的标记。
         let execution = matches!(cmd, "exec" | "execBound" | "execFull" | "execFullBound");
-        if execution
+        // 闲置后能「探测 → 重连 → 继续跑」的命令。执行类之外还有只读元数据：
+        // 展开表结构、看 DDL、拉对象列表、列中文名这些都不带事务语义也没有游标，
+        // 重放是安全的；少了它们，闲置一阵后回来第一件事（点开表）就必失败一次。
+        //
+        // 刻意不含 `more`（游标在旧会话上，重连后游标已失效，必须让 `cursor-closed`
+        // 走到前端去提示重开）与 `lobValue`（同理按游标定位行）、`commit`/`rollback`
+        // /`setSchema`（改会话状态，重连后再跑语义已变，交用户重试）。
+        let auto_recover = execution
+            || matches!(
+                cmd,
+                "tables"
+                    | "schemas"
+                    | "columns"
+                    | "columnsZh"
+                    | "indexes"
+                    | "ddl"
+                    | "objects"
+                    | "source"
+                    | "sessions"
+                    | "schema"
+                    | "schemaBatch"
+                    | "ncNames"
+                    | "arguments"
+                    | "explain"
+            );
+        // 这一趟有没有因为「会话已过期」而自动重连过：成功时随结果带给前端。
+        // 旧会话的包状态与会话级设置（NLS、临时表、包变量）不会跟着回来，用户得知道。
+        let mut reconnected = false;
+        if auto_recover
             && state
                 .last_success
                 .is_some_and(|t| t.elapsed() >= PROBE_AFTER)
@@ -419,30 +473,31 @@ impl EngineHandle {
                 Ok(v) if v.get("alive").and_then(Value::as_bool).is_none() => {
                     return Err(BridgeError::new(
                         "probe-failed",
-                        "连接探测未返回有效状态，SQL 尚未发送",
+                        "连接探测未返回有效状态，本次操作尚未发出",
                     ));
                 }
                 Err(e) if e.code != "session-lost" && !connection_lost(&e.message) => {
                     return Err(BridgeError::new(
                         "probe-failed",
-                        format!("连接探测失败，SQL 尚未发送。{}", e.message),
+                        format!("连接探测失败，本次操作尚未发出。{}", e.message),
                     ));
                 }
                 _ => {
+                    // 探测判定连接已不可用。这条命令还没发出去（probe 在 dispatch 之前），
+                    // 所以「重连 + 继续执行」是安全的——闲置一阵后再查询正是这个场景，
+                    // 以前这里一律报错让用户自己重连，体感最差。
                     state.lost = true;
-                    if state.session_used {
-                        return Err(BridgeError::new("session-lost", "数据库会话已断开，当前 SQL 尚未发送。请核对旧会话的事务和设置后重新连接"));
+                    if state.may_have_transaction {
+                        // 唯一不能自动重连的情况：本地认为可能有未提交写入。重连会丢掉
+                        // 那条会话，事务去向必须由用户确认，不能替他决定。
+                        return Err(BridgeError::new(
+                            "session-lost",
+                            "数据库会话已断开，本次操作尚未发出。这条会话可能有未提交事务，请先核对再手动重连",
+                        ));
                     }
                     self.reopen(&mut state, Duration::from_secs(15), reconnect)
-                        .map_err(|e| {
-                            BridgeError::new(
-                                "session-lost",
-                                format!(
-                                    "数据库会话已断开，当前 SQL 尚未发送。重连失败：{}",
-                                    e.message
-                                ),
-                            )
-                        })?;
+                        .map_err(reconnect_unavailable)?;
+                    reconnected = true;
                 }
             }
         }
@@ -525,7 +580,7 @@ impl EngineHandle {
             }
             other => other,
         };
-        let result = result.map_err(|e| Self::record_loss(&mut state, e, !connecting))?;
+        let mut result = result.map_err(|e| Self::record_loss(&mut state, e, !connecting))?;
         if connecting {
             *state = Recovery {
                 auto_commit: result
@@ -545,6 +600,14 @@ impl EngineHandle {
         }
         if cmd != "ping" {
             state.last_success = Some(Instant::now());
+        }
+        if reconnected {
+            // 告诉前端这一趟是「重连后再跑」的。旧会话的包状态与会话级设置
+            // （NLS 格式、临时表、包变量）不会跟着回来，静默换会话会让用户
+            // 看见「同一条 SQL 结果不一样」却找不到原因。
+            if let Some(obj) = result.as_object_mut() {
+                obj.insert("reconnected".into(), Value::Bool(true));
+            }
         }
         Ok(result)
     }
@@ -979,6 +1042,28 @@ mod tests {
         assert!(!connection_lost("ORA-00942: table or view does not exist"));
     }
 
+    /// 闲置超时后驱动留下的两种「连接对象已关」文案，必须判成连接丢失。
+    ///
+    /// 现场实测：闲置一段时间后执行，第一次报 `unable to recover from error: connection
+    /// has been closed`，之后每次都瞬间报 `not connected to database`。这两句以前都不在
+    /// 名单里，探测被当成普通失败 —— 既不标「会话已断」也不重连，用户只能手动断开重连，
+    /// 而再点几次仍然是同一句失败。
+    #[test]
+    fn driver_closed_connection_messages_are_connection_lost() {
+        for message in [
+            "unable to recover from error: connection has been closed",
+            "not connected to database",
+            "Closed Connection",
+        ] {
+            assert!(connection_lost(message), "{message}");
+        }
+        assert!(
+            !connection_lost("还没连数据库"),
+            "我们自己造的「尚未连接」文案不算连接丢失"
+        );
+        assert!(!connection_lost("ORA-00942: table or view does not exist"));
+    }
+
     #[test]
     fn failed_dml_does_not_set_transaction_flag() {
         let engine = EngineHandle::rust();
@@ -994,8 +1079,12 @@ mod tests {
         );
     }
 
+    /// 闲置超时后点执行：没有未提交事务就自动重连并继续，不再让用户自己动手。
+    ///
+    /// 判据从「会话被用过」改成「可能有未提交事务」——前者跑过任何语句就置位，拿它拦
+    /// 等于永不自动重连，这正是「很久没操作再查询必然失败」的根因。
     #[test]
-    fn expired_session_is_checked_before_sql_and_only_safe_sessions_can_reopen() {
+    fn expired_session_reconnects_even_if_session_was_used() {
         for session_used in [false, true] {
             let engine = EngineHandle::rust();
             {
@@ -1012,10 +1101,87 @@ mod tests {
                     Err(BridgeError::new("need-password", "测试：需要口令"))
                 })
                 .unwrap_err();
-            assert_eq!(error.code, "session-lost");
-            assert!(error.message.contains("尚未发送"));
-            assert_eq!(reconnects, usize::from(!session_used));
-            assert!(engine.recovery.lock().unwrap().lost);
+            assert_eq!(
+                reconnects, 1,
+                "用过会话也要自动重连（session_used={session_used}）"
+            );
+            // 重连失败的原因必须原样透传：前端靠 need-password 弹输口令框。
+            // 一律包成 session-lost 的话，用户只会看到「重连失败」却弹不出输入框。
+            assert_eq!(error.code, "need-password");
+            assert!(
+                engine.recovery.lock().unwrap().lost,
+                "重连没成功就必须留在「已断开」，否则下次又白点一次"
+            );
+        }
+    }
+
+    /// 可能有未提交事务时不自动重连：重连会丢掉那条会话，事务去向得用户自己确认。
+    #[test]
+    fn expired_session_with_pending_transaction_waits_for_user() {
+        let engine = EngineHandle::rust();
+        {
+            let mut state = engine.recovery.lock().unwrap();
+            state.last_success = Some(Instant::now() - PROBE_AFTER);
+            state.session_used = true;
+            state.may_have_transaction = true;
+            state.auto_commit = true;
+        }
+        let error = engine
+            .call_guarded("exec", &["select 1 from dual"], PROBE_TIMEOUT, |_| {
+                panic!("有未提交事务时不能自动重连")
+            })
+            .unwrap_err();
+        assert_eq!(error.code, "session-lost");
+        assert!(error.message.contains("可能有未提交事务"), "{error:?}");
+    }
+
+    /// 元数据查询同样要能自动恢复：闲置一阵后回来第一件事常常是点开一张表、
+    /// 看 DDL、拉对象列表，而不是先在编辑器里执行一条 SQL。
+    ///
+    /// 这些命令只读、没有游标，重放安全；以前只有执行类命令进探测名单，
+    /// 于是「点开表」成了闲置后最容易撞上失败的动作。
+    #[test]
+    fn idle_metadata_query_recovers_without_manual_reconnect() {
+        for cmd in [
+            "tables",
+            "columns",
+            "indexes",
+            "ddl",
+            "objects",
+            "arguments",
+        ] {
+            let engine = EngineHandle::rust();
+            {
+                let mut state = engine.recovery.lock().unwrap();
+                state.last_success = Some(Instant::now() - PROBE_AFTER);
+                state.auto_commit = true;
+            }
+            let mut reconnects = 0;
+            let error = engine
+                .call_guarded(cmd, &["T_ONE"], PROBE_TIMEOUT, |_| {
+                    reconnects += 1;
+                    Err(BridgeError::new("need-password", "测试：需要口令"))
+                })
+                .unwrap_err();
+            assert_eq!(reconnects, 1, "{cmd} 闲置后应当自动重连");
+            // 重连失败原因照原样透传，才弹得出输口令框
+            assert_eq!(error.code, "need-password", "{cmd}：{error:?}");
+        }
+    }
+
+    /// 游标续取不能自动重连：游标长在旧会话上，重连后它已经不存在，
+    /// 静默重放会拿到空结果或错行。必须让 `cursor-closed` 走到前端提示重开。
+    #[test]
+    fn cursor_fetch_is_never_auto_reconnected() {
+        for cmd in ["more", "lobValue"] {
+            let engine = EngineHandle::rust();
+            {
+                let mut state = engine.recovery.lock().unwrap();
+                state.last_success = Some(Instant::now() - PROBE_AFTER);
+                state.auto_commit = true;
+            }
+            let _ =
+                engine.call_guarded(cmd, &["0"], PROBE_TIMEOUT, |_| panic!("{cmd} 不能自动重连"));
         }
     }
 

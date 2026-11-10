@@ -1,5 +1,5 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import { friendlyDbError, parseDbError } from "./db";
+import { friendlyDbError, isConnLost, parseDbError } from "./db";
 import {
   dbApi,
   type Cell,
@@ -572,6 +572,15 @@ async function fetchMeta(id: string, observed: boolean, current: () => boolean):
     schemas: sc.status === "fulfilled" ? sc.value.schemas : rtOf(id).schemas,
     currentSchema: sc.status === "fulfilled" ? sc.value.current : rtOf(id).currentSchema,
   });
+  // 四条路都失败、且原因是「连接不可用」时，必须把连接置回断开。
+  // 只吞在 allSettled 里的话，界面表现为「清单没刷新」，用户不知道要重连，
+  // 下一次点开表还是同一句失败。ORA-00942 之类不在此列——那是表名写错，连接是好的。
+  const lost = [t, n, s, sc]
+    .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+    .find((r) => isConnLost(r.reason));
+  if (lost) {
+    setRt(id, { status: "error", error: parseDbError(lost.reason).message, tx: undefined });
+  }
   const failed=[t,n,s,sc].filter(r=>r.status==="rejected").length;
   task?.finish(failed ? "failed" : "success",failed ? `有 ${failed} 项未读取成功；已保留可用清单，返回数据库页核对` : "对象清单与缓存已刷新");
 }
@@ -1025,8 +1034,11 @@ export async function execOne(tabId: string, sql: string, index: number, context
   const connId = tab.connId;
   const t0 = Date.now();
   let entry: ResultEntry;
+  // 声明在 try 外面：catch 里要判断这条错误属于哪条会话（primary 还是槽）——
+  // 只有 primary 断了才清连接级的事务计数。
+  let slot: string | null = null;
   try {
-    let slot = await ensureSlot(tabId, connId);
+    slot = await ensureSlot(tabId, connId);
     claimCursor(connId, slot, base.id);
     let r;
     try {
@@ -1058,9 +1070,24 @@ export async function execOne(tabId: string, sql: string, index: number, context
         tone: "info",
       }]);
     }
+    // 闲置过久、会话已被服务端收掉时后端会自动重连再跑这条。结果对得上，但旧会话的
+    // 包状态与会话级设置（NLS 格式、临时表、包变量）不会跟着回来，得说一声，
+    // 否则用户会拿「同一句 SQL 结果不一样」去怀疑数据。
+    if (r.reconnected) {
+      appendOutput(tabId, [{
+        at: Date.now(),
+        text: `[${now()}] 会话闲置超时已被数据库断开，已自动重连后再执行这条。旧会话的会话级设置与包状态已重置为连接默认值`,
+        tone: "info",
+      }]);
+    }
   } catch (e) {
     const { code, message } = parseDbError(e);
-    if (code === "bridge") setRt(connId, { status: "error", error: message });
+    // 连接已经不可用：把状态置回 error，下一次执行才会真正走重连（弹口令 / 建新会话）。
+    // 不置的话 `ensureConnected` 看见 connected 就直接发，用户连点几次都是同一句失败。
+    // primary 的事务计数不再可信（会话都没了），一并清掉；槽的留着——那是另一条会话的。
+    if (isConnLost(e)) {
+      setRt(connId, { status: "error", error: message, ...(slot ? {} : { tx: undefined }) });
+    }
     entry = { ...base, kind: "error", error: friendlyDbError(e), errorCode: code, cancelled:dbCancelled(e), ms: Date.now() - t0 };
   }
   entry = fitResult(entry, TOTAL_RESULT_BYTES - retainedResultBytes(state.tabs));

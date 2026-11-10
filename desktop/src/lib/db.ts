@@ -159,6 +159,29 @@ export function parseDbError(e: unknown): DbError {
   return { code: "other", message: text };
 }
 
+/**
+ * 这些码说明「连接本身不可用」，不只是这一次操作失败。
+ *
+ * 界面据它把连接置回断开，否则下次仍然以为连着、把命令直接发出去，用户会连点
+ * 几次都看到同一句失败。`sql` 不在里面：ORA-00942 是那句话写错了，连接还活着，
+ * 算成掉线会把人白白弹去重连。`need-password` / `auth` / `unreachable` 必须在里面
+ * ——它们正是「自动重连时对方要口令 / 拒绝握手」的结果，不置错就永远卡在原地。
+ */
+const CONN_LOST_CODES = new Set([
+  "bridge",
+  "session-lost",
+  "fallback-session-lost",
+  "probe-failed",
+  "need-password",
+  "auth",
+  "unreachable",
+]);
+
+/** 传 reject 的原始 reason 或 `code|message` 字符串都行。 */
+export function isConnLost(e: unknown): boolean {
+  return CONN_LOST_CODES.has(parseDbError(e).code);
+}
+
 /** 给用户看的一句话。ORA 错误号保留在正文里，工程师排障要它。 */
 export function friendlyDbError(e: unknown): string {
   const { code, message } = parseDbError(e);

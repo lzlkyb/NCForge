@@ -1637,7 +1637,11 @@ pub async fn db_meta(
     {
         return Err(format!("{cmd} 需要参数"));
     }
-    call(b, cmd, args, T_META).await
+    // 元数据查询同样要能「闲置 → 探测 → 重连 → 继续跑」：用户回来第一件事常常是
+    // 点开一张表或看 DDL，而不是先在编辑器里执行一条 SQL。以前这些走普通 call，
+    // 连接被服务端收掉后直接失败，只有执行类命令有自动恢复。
+    // 名单在 `db_engine::call_guarded` 的 `auto_recover`，只有只读命令在里面。
+    call_with_reconnect(&state, &id, b, cmd, args, T_META, None).await
 }
 
 /// 退出前的「这条连接上所有会话」事务操作：primary + 每个独立会话槽一起提交/回滚。

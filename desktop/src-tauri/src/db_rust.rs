@@ -166,7 +166,15 @@ fn drv_err(e: Error) -> BridgeError {
             "timeout",
             "语句已中断（点了停止，或等待超过超时时间）。会话仍然可用",
         ),
-        ErrorKind::DeadConnection => {
+        // 这三种都表示「这条连接已经不能再用」：
+        // - `DeadConnection`：驱动确认对端关了；
+        // - `UnableToRecover`：驱动自己尝试恢复失败，连接已被关闭；
+        // - `NotConnected`：连接对象本身已关（前一条之后驱动就变成这个）。
+        //
+        // 🔴 不能落到 `_ => sql`：那样探测与执行都会把它当普通 SQL 错误，上层既不标
+        // 「会话丢失」也不重连，界面表现就是「闲置一阵后每次点执行都是同一句失败，
+        // 只能手动断开重连」。这是最影响体感的一条，别改回去。
+        ErrorKind::DeadConnection | ErrorKind::UnableToRecover | ErrorKind::NotConnected => {
             BridgeError::new("session-lost", "连接已断开（数据库或网络关闭了它）")
         }
         _ => BridgeError::new("sql", e.to_string()),
