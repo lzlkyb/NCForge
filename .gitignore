@@ -33,6 +33,8 @@ Thumbs.db
 
 # 测试用独立 target 目录：跑 cargo test 时用 CARGO_TARGET_DIR=target-test 绕开
 desktop/src-tauri/target-test/
+# 仓库根的 target/：跑门禁时把 TEMP 钉到 target/test-tmp 会在这里建目录
+/target/
 
 # 排障临时脚本（下划线前缀），不入库
 _*.ps1
