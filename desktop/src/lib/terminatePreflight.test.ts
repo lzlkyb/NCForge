@@ -18,7 +18,22 @@ vi.mock("./dbApi", () => ({ dbApi: { pendingTx: h.pendingTx } }));
 vi.mock("./dbStore", () => ({ getDb: () => h.db, loadConns: h.loadConns }));
 vi.mock("./workspaceSession", () => ({ getSession: () => h.session }));
 vi.mock("./ncTasks", () => ({ isNcTaskRunning: () => h.running }));
-vi.mock("./quitGuard", () => ({ mergePending: (rows: Array<{ state: string }>) => rows.filter(row => row.state !== "clean") }));
+// 与真实实现同规则：`mergePending` 只做状态到 kind 的搬运，`backendCleanRows`
+// 认「数据库说没有事务」或「会话已结束且写计数为 0」。测试关心的是 prepareRestart
+// 怎么用这两份结果，合并细节在 quitGuard.test.ts 里单独覆盖。
+vi.mock("./quitGuard", () => ({
+  backendCleanRows: (rows: Array<{ id: string; state: string; active?: boolean | null; reason?: string }>) =>
+    new Set(
+      rows
+        .filter(r => r.state === "clean" && (r.active === false || r.reason === "disconnected" || r.reason === "unreachable"))
+        .map(r => r.id),
+    ),
+  mergePending: (rows: Array<Record<string, unknown>>) =>
+    rows.filter(r => r.state !== "clean").map(r => ({
+      connId: r.id, name: r.name ?? r.id, env: "test", kind: r.state,
+      reason: r.reason, statements: r.statements ?? 0, rows: r.rows ?? 0, since: r.since ?? 0, message: r.message,
+    })),
+}));
 vi.mock("./tabDirty", () => ({ isUnsaved: (tab: { dirty: boolean }) => tab.dirty }));
 vi.mock("./saveAllDirty", () => ({ collectUnsaved: h.collect, saveAllDirty: h.save }));
 vi.mock("./openFileRequest", () => ({ requestOpenFile: h.open }));
@@ -71,6 +86,20 @@ describe("更新安装前的工作保护", () => {
     expect(await prepareRestart()).toBe(false);
     h.pendingTx.mockResolvedValue([{ state: "unknown", name: "开发库" }]);
     expect(await prepareRestart()).toBe(false); expect(h.ask).toHaveBeenCalled();
+  });
+  it("断连且没有写语句的连接不再因界面旧计数拦住安装", async () => {
+    h.db.rt = { dev: { tx: { autoCommit: false, statements: 5, rows: 5, since: 1 } } };
+    h.pendingTx.mockResolvedValue([{ id: "dev", state: "clean", reason: "disconnected", statements: 0 }]);
+    expect(await prepareRestart()).toBe(true);
+    expect(h.ask).not.toHaveBeenCalled();
+  });
+  it("状态无法确认时给一次明确代价的确认，选继续才放行", async () => {
+    h.pendingTx.mockResolvedValue([{ id: "dev", state: "unknown", reason: "disconnected", name: "开发库", statements: 2 }]);
+    expect(await prepareRestart()).toBe(false);
+    expect(h.ask.mock.calls[0][0]).toBe("有连接的事务状态无法确认");
+    expect(h.ask.mock.calls[0][1]).toContain("回滚");
+    h.ask.mockResolvedValueOnce(true);
+    expect(await prepareRestart()).toBe(true);
   });
   it("独立会话未提交时即使后端快照为空也停止", async () => {
     h.db.tabs = [{ kind: "sql", id: "s1", connId: "dev", title: "查询 1", slot: "2", tx: { autoCommit: false, statements: 1 } }];

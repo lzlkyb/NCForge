@@ -328,7 +328,7 @@
 .dbx-plan tr[data-diff="gone"] td.op { opacity: .6; text-decoration: line-through; }
 .dbx-update { flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; font-size: var(--dbx-fs-body); }
 .dbx-update .big { font-size: 15px; font-weight: 600; }
-.dbx-err { margin: 12px; padding: 10px 12px; border-radius: 8px; background: hsl(var(--destructive) / .08); border: 1px solid hsl(var(--destructive) / .25); color: hsl(var(--destructive-ink)); font-size: 13px; line-height: 1.6; }
+.dbx-err { margin: 12px; padding: 14px 16px; border-radius: 8px; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); color: hsl(var(--foreground)); font-size: 13px; line-height: 1.6; }
 .dbx-err code { font-family: "Cascadia Mono", Consolas, monospace; background: hsl(var(--card)); padding: 0 4px; border-radius: 4px; margin: 0 3px; cursor: pointer; }
 .dbx-err pre { margin-top: 6px; font: 11.5px/17px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; color: hsl(var(--foreground) / .8); }
 
@@ -602,3 +602,9 @@
 @keyframes dbx-result-wash {from{background-color:hsl(var(--primary)/.12)}to{background-color:transparent}}
 @media(prefers-reduced-motion:reduce){.dbx-query-surface .dbx-grid,.dbx-query-surface::after {animation:none!important;transform:none!important;transition:none!important;}}
 html[data-reduced=true] .dbx-query-surface .dbx-grid,html[data-reduced=true] .dbx-query-surface::after {animation:none!important;transform:none!important;transition:none!important;}
+
+/* 显式定位跨行内容，避免两列表单自动排布把后续标签挤进输入列。 */
+.dbx-other-tools .dbx-import-paste { grid-column: 2; min-width: 0; }
+.dbx-other-tools .dbx-import-paste .dbx-inp { flex: 1; min-width: 0; }
+.dbx-other-tools > .dbx-hint, .dbx-other-tools > .dbx-badline { grid-column: 1 / -1; margin: 0; }
+.dbx-other-tools > span { min-width: 0; }

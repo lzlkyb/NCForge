@@ -6,6 +6,7 @@ import { DbObjectFinder } from "../db/DbObjectFinder";
 import { DockRegion } from "../workspace/WorkbenchDock";
 import { Icon } from "../ui/icon";
 import { EmptyState } from "../ui/EmptyState";
+import { DbMessages } from "../db/DbMessages";
 import { ConnTree } from "../db/ConnTree";
 import { ConnDialog } from "../db/ConnDialog";
 import { DbDocTabs } from "../db/DbDocTabs";
@@ -74,6 +75,7 @@ export function DbTab() {
           </DockRegion>
           <DockRegion region="document">
             <div className="dbx-page" role="tabpanel" id={tab ? dbPanelId(tab.id) : "dbx-panel-empty"} aria-labelledby={tab ? dbTabId(tab.id) : "dbx-tab-empty"}>
+              <DbMessages />
               <div className="dbx-document-host" hidden={tab?.kind === "compare" || !tab}>
                 <ViewActivityContext.Provider value={active && tab?.kind !== "compare"}>
                   {retained?.kind === "sql" && <SqlConsole tab={retained} />}
@@ -87,7 +89,7 @@ export function DbTab() {
                   className="dbx-empty"
                   description={
                     db.loadError
-                      ? `连接列表读取失败：${db.loadError}`
+                      ? "连接列表暂不可用，请在上方数据库消息中重试。"
                       : db.conns.length === 0
                         ? "还没有数据库连接。可以从 NC prop.xml 导入，或手动填写 / 导入 .properties。"
                         : "选一个连接开始写 SQL，或直接查数据字典。"

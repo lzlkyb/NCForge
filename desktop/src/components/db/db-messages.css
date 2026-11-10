@@ -1,0 +1,36 @@
+/* 固定消息位采用一层轻量表面，操作优先，诊断信息按需展开。 */
+.dbx-messages { flex:none; max-height:min(300px, 40vh); overflow:auto; border-bottom:1px solid hsl(var(--border)); background:hsl(var(--warning) / .045); }
+.dbx-messages-heading { display:flex; align-items:center; gap:9px; padding:5px 20px 0; min-height:32px; color:hsl(var(--muted-foreground)); font-size:var(--dbx-fs-meta); }
+.dbx-messages-heading strong { font-weight:500; }
+.dbx-messages-count { font-variant-numeric:tabular-nums; }
+.dbx-messages-heading > button { margin-left:auto; }
+.dbx-message-chevron-open { transform:rotate(180deg); }
+.dbx-message-list { padding:0 20px 6px; }
+.dbx-message { display:flex; gap:12px; padding:10px 0 14px; }
+.dbx-message + .dbx-message { border-top:1px solid hsl(var(--border)); padding-top:16px; }
+.dbx-message-symbol { display:grid; place-items:center; flex:none; width:36px; height:36px; border-radius:10px; color:hsl(var(--warning-ink)); background:hsl(var(--warning) / .12); }
+.dbx-message-content { flex:1; min-width:0; }
+.dbx-message-row { display:flex; align-items:center; gap:24px; }
+.dbx-message-text { min-width:0; flex:1; }
+.dbx-message-title { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; }
+.dbx-message-title h3 { margin:0; font-size:14px; line-height:1.5; font-weight:600; color:hsl(var(--foreground)); }
+.dbx-message-source { max-width:240px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:hsl(var(--muted-foreground)); font-size:var(--dbx-fs-meta); }
+.dbx-message-text > p { margin:5px 0 0; color:hsl(var(--muted-foreground)); font-size:var(--dbx-fs-body); line-height:1.65; overflow-wrap:anywhere; }
+.dbx-message-actions { display:flex; gap:6px; flex:none; }
+.dbx-message-details { margin-top:8px; color:hsl(var(--muted-foreground)); font-size:var(--dbx-fs-meta); }
+.dbx-message-details summary { cursor:pointer; width:fit-content; }
+.dbx-message-diagnostic { margin-top:10px; padding:10px 12px; background:hsl(var(--card)); border:1px solid hsl(var(--border)); border-radius:6px; }
+.dbx-message-diagnostic-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.dbx-message-diagnostic > p { margin:5px 0 0; line-height:1.7; white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; color:hsl(var(--foreground)); }
+.dbx-message-feedback { margin:8px 0 0; color:hsl(var(--muted-foreground)); font-size:var(--dbx-fs-meta); }
+.dbx-message-details summary:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:3px; border-radius:2px; }
+.dbx-err.dbx-feedback { background:hsl(var(--card)); border-color:hsl(var(--border)); color:hsl(var(--foreground)); padding:14px 16px; }
+.dbx-feedback-heading { display:flex; align-items:center; gap:8px; font-weight:600; }
+.dbx-feedback-heading > svg { color:hsl(var(--destructive-ink)); flex:none; }
+.dbx-feedback-message { margin-top:6px; overflow-wrap:anywhere; color:hsl(var(--muted-foreground)); white-space:pre-wrap; }
+@media (max-width:800px) {
+  .dbx-messages-heading { padding-inline:14px; }
+  .dbx-message-list { padding-inline:14px; }
+  .dbx-message-row { flex-wrap:wrap; gap:12px; }
+  .dbx-message-text { flex-basis:100%; }
+}

@@ -164,3 +164,26 @@ describe("SessionDrawer", () => {
     }
   });
 });
+
+it("会话详情展示选中快照，可沿阻塞SID定位，关闭不执行SQL",async()=>{
+ await mount(result());
+ const invokeCount=mocks.invoke.mock.calls.length;
+ await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="查看会话 42"]')!.click());
+ const dialog=document.querySelector('[aria-label="会话 42 详情"]')!;
+ expect(dialog.textContent).toContain("选中时快照");expect(dialog.textContent).toContain("update bd_material");
+ const follow=[...dialog.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="查看阻塞会话")!;
+ await act(async()=>follow.click());expect(document.querySelector('[aria-label="会话 9 详情"]')).not.toBeNull();
+ const close=[...document.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="关闭会话详情")!;
+ await act(async()=>close.click());expect(document.querySelector('[aria-label="会话 9 详情"]')).toBeNull();
+ expect(mocks.invoke.mock.calls.length).toBe(invokeCount);
+});
+
+it("切换连接后旧请求不能覆盖新连接的会话",async()=>{
+ let resolve!:(value:SessionsResult)=>void;
+ mocks.invoke.mockImplementationOnce(()=>new Promise<SessionsResult>(done=>{resolve=done;}));
+ await act(async()=>root?.render(<SessionDrawer connId="old" onClose={()=>{}}/>));
+ mocks.invoke.mockResolvedValue(result({rows:[{...result().rows[0],sid:100,user:"NEW_USER"}]}));
+ await act(async()=>root?.render(<SessionDrawer connId="new" onClose={()=>{}}/>));
+ await act(async()=>resolve(result()));
+ expect(host.textContent).toContain("NEW_USER");expect(host.querySelector('[aria-label="查看会话 42"]')).toBeNull();
+});

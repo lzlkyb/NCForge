@@ -1,3 +1,4 @@
+import { JsonInspector } from "./JsonInspector";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
@@ -119,7 +120,7 @@ export function CellDetail({ column, zh, row, value, empty, lob, sql, onClose }:
           <Icon name="close" size={13} />
         </button>
       </div>
-      {view!=="raw" && view!=="decoded" && <div className="dbx-detail-note" role="status">{view==="json" ? "JSON 仅格式化展示" : "· 空格　⇥ 制表符　␍ 回车　↵ 换行"}；复制保留原值。</div>}
+      {view!=="raw" && view!=="decoded" && <div className="dbx-detail-note" role="status">{view==="json" ? "JSON 仅格式化展示" : "· 空格　⇥ 制表符　␍ 回车　↵ 换行"}；“复制原值”保留数据库内容，“复制展示内容”只复制当前视图。</div>}
       {view==="decoded" && decoded && (
         <div className="dbx-detail-note" role="status">
           {describeDecoded(decoded)}。{decoded.json ? "已按 JSON 格式化；" : ""}这是解码后的内容，「复制原值」拿到的仍是库里的编码串。
@@ -134,7 +135,8 @@ export function CellDetail({ column, zh, row, value, empty, lob, sql, onClose }:
         </div>
       )}
       {loadError && <div className="dbx-detail-note" role="alert">{loadError}</div>}
-      <pre ref={contentRef} tabIndex={0} aria-label="单元格完整值" aria-describedby={!empty && column ? infoId : undefined} className={value === null ? "dbx-muted" : undefined}>{empty ? "" : value === null ? "NULL" : shown}</pre>
+      <JsonInspector preRef={contentRef} text={empty ? "" : value === null ? "NULL" : shown} json={!empty && (view === "json" && pretty !== null || view === "decoded" && !!decoded?.json)}/>
+
       <div className="ft">
         <button type="button" className="dbx-btn ghost" disabled={empty || value === null} onClick={() => void copyText(text, () => toast("已复制原值", "success"), (e) => toast(`复制失败：${e}`, "error"))}>
           <Icon name="copy" size={12} />

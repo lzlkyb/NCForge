@@ -155,8 +155,9 @@ pub fn app_quit(app: tauri::AppHandle, state: tauri::State<'_, Arc<AppState>>) {
 /// 列出所有活着的连接上「有未提交写入」的情况。
 ///
 /// 只回 `id` 与事务数据，不回连接名/环境——那些在配置文件里，前端 `dbStore` 手上
-/// 就有，让 Rust 再抄一份只会两边不同步。探测失败的连接标 `unknown`，前端要显示
-/// 「探测超时」而不是当成干净。
+/// 就有，让 Rust 再抄一份只会两边不同步。探测失败/连接已断的连接按写计数分类：
+/// 计数为 0 说明本会话没有未提交写入，直接算干净；有写入或没拿到结果才标 `unknown`，
+/// 并带 `reason` 让前端说清「会话已结束」还是「只是这次探不到」。
 #[tauri::command]
 pub async fn db_pending_tx(state: tauri::State<'_, Arc<AppState>>) -> Result<Value, String> {
     let handles: Vec<(String, Arc<EngineHandle>)> = {
@@ -269,16 +270,27 @@ fn merge_sessions(rows: Vec<Value>) -> Vec<Value> {
                 let (sa, sb) = (state(cur), state(&row));
                 if sa == "unknown" || sb == "unknown" {
                     cur["state"] = json!("unknown");
+                    // 原因跟着 unknown 会话走，前端据此区分「会话已结束」与「只是探不到」。
+                    if cur.get("reason").is_none() || cur["reason"].is_null() {
+                        cur["reason"] = row.get("reason").cloned().unwrap_or(Value::Null);
+                    }
                     if cur.get("message").is_none() {
                         cur["message"] = row.get("message").cloned().unwrap_or(Value::Null);
                     }
                 } else if sa == "pending" || sb == "pending" {
                     cur["state"] = json!("pending");
+                    // 有活着的待提交事务：断连原因不再适用，别让前端拿它去选文案。
+                    cur["reason"] = Value::Null;
                 } else {
                     // 两条都干净时，「数据库已确认没有事务」必须两条都确认过才算；
                     // 任一条没核对（null）就回 null，让界面还有机会补上刚落下的语句。
                     let confirmed = confirmed_clean(cur) && confirmed_clean(&row);
                     cur["active"] = if confirmed { json!(false) } else { Value::Null };
+                    if cur.get("reason").is_none() || cur["reason"].is_null() {
+                        if let Some(reason) = row.get("reason") {
+                            cur["reason"] = reason.clone();
+                        }
+                    }
                 }
             }
         }
@@ -303,25 +315,63 @@ fn needs_confirm(ping: &Result<Value, String>) -> bool {
     !auto_commit && statements > 0
 }
 
+/// 断连原因。JVM 桥的 `alive:false` 是 `conn == null || isClosed()`，会话确实结束了；
+/// 纯 Rust 驱动的 `alive:false` 是 `probe_conn` 失败，只是这次探不到，会话可能还在。
+fn dead_reason(kind: EngineKind) -> &'static str {
+    match kind {
+        EngineKind::Java => "disconnected",
+        EngineKind::Rust => "unreachable",
+    }
+}
+
+fn dead_message(kind: EngineKind) -> &'static str {
+    match kind {
+        EngineKind::Java => "连接已断开",
+        EngineKind::Rust => "连接探测失败",
+    }
+}
+
+fn tx_num(tx: &Value, key: &str) -> i64 {
+    tx.get(key).and_then(Value::as_i64).unwrap_or(0)
+}
+
 fn pending_row(id: &str, kind: EngineKind, r: Result<Value, String>) -> Value {
     let engine = kind.as_str();
     let v = match r {
         Ok(v) => v,
         Err(e) => {
+            let message = strip_code(&e);
+            // 超时与普通探测失败要分开：超时还有机会用界面上的最后已知计数兜底，
+            // 普通失败可能只是桥忙 / 会话锁排队，不能据此说「没有写入」。
+            let reason = if message.contains("超时") {
+                "timeout"
+            } else {
+                "probe-error"
+            };
             return json!({
-                "id": id, "state": "unknown", "engine": engine, "message": strip_code(&e),
-            })
+                "id": id, "state": "unknown", "engine": engine, "reason": reason, "message": message,
+            });
         }
     };
-    // 桥的 ping 即使失败也返回 200 结构（`alive: false` + 上一次的事务数据），
-    // 那份数据是残留的，不能信。
+    let tx = v.get("tx").cloned().unwrap_or(Value::Null);
+    let statements = tx_num(&tx, "statements");
+    // 桥的 ping 即使失败也返回 200 结构（`alive: false` + 上一次的事务数据）。
+    // 写计数为 0 是「本会话没执行过未提交写入」的正向证据：SELECT 不计数，
+    // DDL / COMMIT / ROLLBACK 会清零。不能按 `alive:false` 一律 unknown——
+    // 纯查询会话正是这样被误报成「退出前还有事务」的。
     if !v.get("alive").and_then(Value::as_bool).unwrap_or(true) {
+        if statements == 0 {
+            return json!({
+                "id": id, "state": "clean", "engine": engine, "reason": dead_reason(kind),
+                "statements": 0, "rows": 0, "since": 0,
+            });
+        }
         return json!({
-            "id": id, "state": "unknown", "engine": engine, "message": "连接已断开",
+            "id": id, "state": "unknown", "engine": engine, "reason": dead_reason(kind),
+            "message": dead_message(kind), "statements": statements,
+            "rows": tx_num(&tx, "rows"), "since": tx_num(&tx, "since"),
         });
     }
-    let tx = v.get("tx").cloned().unwrap_or(Value::Null);
-    let statements = tx.get("statements").and_then(Value::as_i64).unwrap_or(0);
     let auto_commit = tx
         .get("autoCommit")
         .and_then(Value::as_bool)
@@ -347,8 +397,8 @@ fn pending_row(id: &str, kind: EngineKind, r: Result<Value, String>) -> Value {
         // 不能把它翻回 pending；`null` = 没核对（计数为 0，没去查）或查不了。
         "active": db_active,
         "statements": statements,
-        "rows": tx.get("rows").and_then(Value::as_i64).unwrap_or(0),
-        "since": tx.get("since").and_then(Value::as_i64).unwrap_or(0),
+        "rows": tx_num(&tx, "rows"),
+        "since": tx_num(&tx, "since"),
     })
 }
 
@@ -386,17 +436,46 @@ mod tests {
     fn 探测超时标未知而不是干净() {
         let row = pending_row("c1", EngineKind::Java, Err("bridge|查询超时".into()));
         assert_eq!(row["state"], "unknown");
+        assert_eq!(row["reason"], "timeout");
         assert_eq!(row["message"], "查询超时");
     }
 
     #[test]
-    fn 连接已断开标未知() {
+    fn 连接已断开且有写语句标未知() {
         let row = pending_row(
             "c1",
             EngineKind::Java,
             Ok(json!({ "alive": false, "tx": { "statements": 3 } })),
         );
         assert_eq!(row["state"], "unknown");
+        assert_eq!(row["reason"], "disconnected");
+        assert_eq!(row["statements"], 3);
+    }
+
+    /// 纯查询会话没有写语句：断连后不该再拦退出。SELECT 不累加计数，
+    /// DDL / COMMIT / ROLLBACK 会清零，所以 0 是正向证据，不是「没查到」。
+    #[test]
+    fn 连接已断开但没有写语句算干净() {
+        let row = pending_row(
+            "c1",
+            EngineKind::Java,
+            Ok(json!({ "alive": false, "tx": { "autoCommit": false, "statements": 0 } })),
+        );
+        assert_eq!(row["state"], "clean");
+        assert_eq!(row["reason"], "disconnected");
+    }
+
+    /// 纯 Rust 驱动的 `alive:false` 只是探测失败，和「会话已关闭」不是一回事；
+    /// 但写计数为 0 同样能证明没有未提交写入。
+    #[test]
+    fn 纯rust探测失败但没有写语句也算干净() {
+        let row = pending_row(
+            "c1",
+            EngineKind::Rust,
+            Ok(json!({ "alive": false, "tx": { "autoCommit": false, "statements": 0 } })),
+        );
+        assert_eq!(row["state"], "clean");
+        assert_eq!(row["reason"], "unreachable");
     }
 
     /// 真源说「库里没有未提交事务」时，本地脏计数（手写 COMMIT 之后不会归零）不能拿来拦人。
@@ -467,6 +546,32 @@ mod tests {
         assert_eq!(merged[0]["statements"], 3);
         assert_eq!(merged[0]["rows"], 12);
         assert_eq!(merged[0]["state"], "pending");
+    }
+
+    #[test]
+    fn 合并后保留未知原因() {
+        let rows = vec![
+            pending_row("c1", EngineKind::Rust, Ok(tx(0, 0, false))),
+            pending_row("c1", EngineKind::Rust, Err("退出探测超时".into())),
+        ];
+        let merged = merge_sessions(rows);
+        assert_eq!(merged[0]["state"], "unknown");
+        assert_eq!(merged[0]["reason"], "timeout");
+    }
+
+    #[test]
+    fn 合并出待提交事务时清掉断连原因() {
+        let rows = vec![
+            pending_row(
+                "c1",
+                EngineKind::Java,
+                Ok(json!({ "alive": false, "tx": { "autoCommit": false, "statements": 0 } })),
+            ),
+            pending_row("c1", EngineKind::Java, Ok(tx(2, 3, false))),
+        ];
+        let merged = merge_sessions(rows);
+        assert_eq!(merged[0]["state"], "pending");
+        assert!(merged[0]["reason"].is_null());
     }
 
     #[test]

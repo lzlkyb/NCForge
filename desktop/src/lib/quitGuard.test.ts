@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { mergePending } from "./quitGuard";
-import { __resetDbForTest, setConns, setTx } from "./dbStore";
+import { backendCleanRows, mergePending } from "./quitGuard";
+import { __resetDbForTest, openSqlTab, patchTab, setConns, setTx } from "./dbStore";
 import type { DbConn } from "./dbApi";
 
 /**
@@ -79,6 +79,79 @@ describe("退出前的未提交事务清单", () => {
     const rows = mergePending([{ id: "c1", state: "unknown", message: "探测超时" }]);
     expect(rows[0].kind).toBe("unknown");
     expect(rows[0].message).toBe("探测超时");
+  });
+
+  it("探测超时但两边都没有写入证据时不算事务（只跑过 SELECT）", () => {
+    setConns([conn("c1")]);
+    const rows = mergePending([
+      { id: "c1", state: "unknown", reason: "timeout", statements: 0 },
+    ]);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("探测超时且界面还有写入证据时保留，原因一起带上", () => {
+    setConns([conn("c1", "测试库")]);
+    setTx("c1", { autoCommit: false, statements: 2, rows: 8, since: 1 });
+    const rows = mergePending([
+      { id: "c1", state: "unknown", reason: "timeout", statements: 0 },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "unknown", reason: "timeout", name: "测试库" });
+  });
+
+  it("标签里还有执行中的语句时不按超时降级（写入可能正在路上）", () => {
+    setConns([conn("c1")]);
+    const tabId = openSqlTab("c1", "update t set x = 1");
+    patchTab(tabId, { running: true });
+    const rows = mergePending([
+      { id: "c1", state: "unknown", reason: "timeout", statements: 0 },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind).toBe("unknown");
+  });
+
+  it("会话已断且写计数为 0：界面上的旧计数不能再把它拉回来", () => {
+    setConns([conn("c1", "测试库")]);
+    // 后端探测时连接已断，但本会话 statements=0 —— 只跑过 SELECT。
+    // 界面 rt.tx 还留着几小时前的写入计数（切标签/重连都不会清），不能当证据。
+    setTx("c1", { autoCommit: false, statements: 4, rows: 40, since: 1 });
+    const raw = [
+      { id: "c1", state: "clean" as const, reason: "disconnected" as const, statements: 0 },
+    ];
+    expect(mergePending(raw)).toHaveLength(0);
+    expect(backendCleanRows(raw).has("c1")).toBe(true);
+  });
+
+  it("断连但有写语句：保持 unknown，原因与计数都留着", () => {
+    setConns([conn("c1", "测试库")]);
+    const rows = mergePending([
+      {
+        id: "c1",
+        state: "unknown",
+        reason: "disconnected",
+        message: "连接已断开",
+        statements: 3,
+        rows: 12,
+      },
+    ]);
+    expect(rows[0]).toMatchObject({
+      kind: "unknown",
+      reason: "disconnected",
+      message: "连接已断开",
+      statements: 3,
+      rows: 12,
+    });
+  });
+
+  it("只有活连接的事务才算 backend 确认干净", () => {
+    expect(
+      backendCleanRows([
+        { id: "a", state: "clean", active: false },
+        { id: "b", state: "clean", reason: "unreachable" },
+        { id: "c", state: "clean" }, // 没去查真源，界面新语句还要算进来
+        { id: "d", state: "pending" },
+      ]),
+    ).toEqual(new Set(["a", "b"]));
   });
 
   it("自动提交/没有事务的连接不进清单", () => {

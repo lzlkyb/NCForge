@@ -1,3 +1,4 @@
+import { CodePreview } from "./CodePreview";
 import { useId, useState, type ReactNode } from "react";
 import type { BoundCell, ColumnInfo } from "../../lib/dbApi";
 import { compileFilter, emptyFilter, loadFilter, saveFilter, type TableFilter } from "../../lib/dbConditions";
@@ -66,8 +67,8 @@ export function TableFilterBar({ connId, table, cols, disabled, busy = disabled,
         const input = /^(DATE|TIMESTAMP)/i.test(type) ? "datetime-local" : /^(NUMBER|INTEGER|DECIMAL|FLOAT)/i.test(type) ? "number" : "text";
         return <div className="dbx-condition" key={i}>
           <select aria-label={`条件 ${i+1} 字段`} value={c.column} onChange={e => update({column:e.target.value})}>{options}</select>
-          <select aria-label={`条件 ${i+1} 运算符`} value={c.op} onChange={e => update({op:e.target.value as typeof c.op})}><option value="eq">等于</option><option value="contains">包含</option><option value="between">区间</option><option value="null">为空 NULL</option></select>
-          {c.op !== "null" && <input aria-label={`条件 ${i+1} 值`} className="dbx-inp" type={input} value={c.value} onChange={e => update({value:e.target.value})} onKeyDown={e => e.key === "Enter" && apply()} />}
+          <select aria-label={`条件 ${i+1} 运算符`} value={c.op} onChange={e => update({op:e.target.value as typeof c.op})}><option value="eq">等于</option><option value="ne">不等于</option><option value="gt">大于</option><option value="gte">大于等于</option><option value="lt">小于</option><option value="lte">小于等于</option><option value="in">属于 IN</option><option value="contains" disabled={input !== "text"}>包含（文本）</option><option value="between">区间</option><option value="null">为空 NULL</option><option value="notnull">非空 NOT NULL</option><option value="today" disabled={input !== "datetime-local"}>今天（本机日期）</option><option value="last7days" disabled={input !== "datetime-local"}>近7天（含今天）</option></select>
+          {!["null","notnull","today","last7days"].includes(c.op) && <input aria-label={`条件 ${i+1} 值`} className="dbx-inp" type={c.op === "in" ? "text" : input} placeholder={c.op === "in" ? "多个值用逗号分隔" : undefined} value={c.value} onChange={e => update({value:e.target.value})} onKeyDown={e => e.key === "Enter" && apply()} />}
           {c.op === "between" && <input aria-label={`条件 ${i+1} 区间终点`} className="dbx-inp" type={input} value={c.end} onChange={e => update({end:e.target.value})} />}
           <button type="button" className="dbx-ibtn" title={`删除条件 ${i+1}`} aria-label={`删除条件 ${i+1}`} onClick={() => setFilter({...filter,conditions:filter.conditions.filter((_,k) => k!==i)})}><Icon name="trash" size={14} /></button>
         </div>;
@@ -78,7 +79,7 @@ export function TableFilterBar({ connId, table, cols, disabled, busy = disabled,
       <button type="button" className="dbx-btn ghost" onClick={() => { setFilter(emptyFilter()); setRaw({where:"",order:""}); setError(""); }}>清空条件</button>
       {!advanced && <button type="button" className="dbx-btn ghost" onClick={() => { try { compileFilter(filter,cols); saveFilter(connId,table,filter); toast("已保存常用筛选", "success"); } catch(e) { setError(String(e instanceof Error ? e.message : e)); } }}>保存常用筛选</button>}
     </div>
-    <details className="dbx-filter-sql"><summary>查看查询 SQL 与绑定参数</summary><pre>{sql || "请先补全条件"}</pre>{params && <code>绑定参数：{params}</code>}</details>
+    <details className="dbx-filter-sql"><summary>查看查询 SQL 与绑定参数</summary><CodePreview text={sql || "请先补全条件"} label="筛选 SQL" connId={connId}/>{params && <code>绑定参数：{params}</code>}</details>
     </div>
     {error && <p className="dbx-err" role="alert">{error}</p>}
   </div>;

@@ -772,6 +772,113 @@ pub fn parse_fixed_users(text: &str) -> Vec<(String, String)> {
     out
 }
 
+// 新版首选项把最近登录与已保存连接分开存储；仅提取明文字段。
+fn parse_named_users(text: &str) -> Vec<(String, String)> {
+    let mut active = false;
+    let mut user = String::new();
+    let mut db = String::new();
+    let mut out = Vec::new();
+    let flush = |user: &mut String, db: &mut String, out: &mut Vec<(String, String)>| {
+        if valid_user(user) && !db.is_empty() {
+            out.push((user.clone(), db.clone()));
+        }
+        user.clear();
+        db.clear();
+    };
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            flush(&mut user, &mut db, &mut out);
+            active =
+                line.eq_ignore_ascii_case("[Logon]") || line.eq_ignore_ascii_case("[Connections]");
+        } else if active {
+            if let Some((key, val)) = line.split_once('=') {
+                if key.eq_ignore_ascii_case("DisplayName") {
+                    flush(&mut user, &mut db, &mut out);
+                } else if key.eq_ignore_ascii_case("Username") {
+                    user = val.trim().to_string();
+                } else if key.eq_ignore_ascii_case("Database") {
+                    db = val.trim().to_string();
+                }
+            }
+        }
+    }
+    flush(&mut user, &mut db, &mut out);
+    out
+}
+
+/// 限定在 JetBrains 配置与其托管项目内扫描，避免遍历整个磁盘。
+pub fn scan_datagrip_local() -> ImportScan {
+    let mut out = ImportScan {
+        source: "本机 DataGrip".into(),
+        items: Vec::new(),
+        warnings: Vec::new(),
+    };
+    for env in ["APPDATA", "LOCALAPPDATA", "USERPROFILE"] {
+        let Ok(base) = std::env::var(env) else {
+            continue;
+        };
+        let base = PathBuf::from(base);
+        for root in [base.join("JetBrains"), base.clone()] {
+            let Ok(entries) = std::fs::read_dir(root) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                if !entry
+                    .file_name()
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .trim_start_matches('.')
+                    .starts_with("datagrip")
+                {
+                    continue;
+                }
+                scan_datagrip_dir(&entry.path(), 0, &mut out);
+            }
+        }
+    }
+    dedup(&mut out.items);
+    number_keys(&mut out.items);
+    if out.items.is_empty() {
+        out.warnings
+            .push("未发现可导入的 DataGrip Oracle 连接；可选择项目 XML 或导出的设置包".into());
+    }
+    out
+}
+
+fn scan_datagrip_dir(dir: &std::path::Path, depth: usize, out: &mut ImportScan) {
+    if depth > 6 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten().take(512) {
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() {
+            scan_datagrip_dir(&path, depth + 1, out);
+        } else if kind.is_file()
+            && entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case("dataSources.xml")
+        {
+            if let Some(main) = read_text(&path, &mut out.warnings) {
+                let local = read_text(&dir.join("dataSources.local.xml"), &mut out.warnings);
+                let mut scan = scan_datagrip(&main, local.as_deref(), &path.display().to_string());
+                if scan.items.is_empty() {
+                    out.warnings
+                        .push(format!("{} 未包含可导入的 Oracle 连接", path.display()));
+                }
+                out.items.append(&mut scan.items);
+                out.warnings.append(&mut scan.warnings);
+            }
+        }
+    }
+}
+
 fn parse_identity(value: &str) -> Option<(String, String)> {
     let at = value.rfind('@')?;
     let left = value[..at].trim();
@@ -869,7 +976,11 @@ pub fn scan_plsql(
         .collect::<Vec<_>>()
         .join("；");
     if source.len() > 400 {
-        source.truncate(400);
+        let mut end = 400;
+        while !source.is_char_boundary(end) {
+            end -= 1;
+        }
+        source.truncate(end);
         source.push('…');
     }
     scan.source = source;
@@ -900,7 +1011,10 @@ fn build_plsql_scan(
     let mut items = Vec::new();
     let mut used: HashSet<String> = HashSet::new();
     for (origin, text) in prefs_files {
-        for (user, db) in parse_fixed_users(text) {
+        for (user, db) in parse_fixed_users(text)
+            .into_iter()
+            .chain(parse_named_users(text))
+        {
             let alias_key = db.to_ascii_lowercase();
             let (target, warning, display) = match aliases.get(&alias_key) {
                 Some(e) => {
@@ -1413,5 +1527,28 @@ RAC1, RAC2 = (DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=h3)(PORT=1521))(ADDRESS=(
         assert_eq!(c.note, "从 DataGrip 导入");
         assert!(c.password_dpapi.is_none());
         assert!(make_conn(&want, "dev", std::slice::from_ref(&c)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod discovery_regression {
+    use super::*;
+    #[test]
+    fn recent_logon_is_imported_without_password() {
+        let scan = scan_plsql(
+            false,
+            Some("[Logon]\nDatabase=10.0.0.1/service\nUsername=scott\nPassword=secret".into()),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(scan.items.len(), 1);
+        assert_eq!(scan.items[0].user, "scott");
+        assert!(!scan.items[0].url.contains("secret"));
+    }
+    #[test]
+    fn saved_connections_are_paired_by_record() {
+        assert_eq!(parse_named_users("[Connections]\nDisplayName=A\nUsername=alice\nDatabase=host/a\nDisplayName=B\nUsername=bob\nDatabase=host/b"), vec![("alice".into(), "host/a".into()), ("bob".into(), "host/b".into())]);
     }
 }

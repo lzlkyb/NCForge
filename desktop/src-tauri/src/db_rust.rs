@@ -2402,6 +2402,10 @@ fn is_plsql(head: &str) -> bool {
 /// `String`，让「拼进 SQL 的值只可能来自常量表」这件事在类型上成立。
 fn object_type_of(raw: Option<&str>) -> Option<&'static str> {
     let want = raw?.trim().to_uppercase();
+    // 索引从表的索引页单独查看，不加入对象树清单。
+    if want == "INDEX" {
+        return Some("INDEX");
+    }
     OBJECT_TYPES.iter().copied().find(|t| *t == want)
 }
 
@@ -2737,6 +2741,8 @@ mod tests {
             Some("PACKAGE BODY")
         );
         assert_eq!(object_type_of(Some("SEQUENCE")), Some("SEQUENCE"));
+        assert_eq!(object_type_of(Some("index")), Some("INDEX"));
+        assert_eq!(object_type_of(Some("INDEX'; drop table t --")), None);
         // 表/视图走的是表那条路（TABLE 失败再回落 VIEW），不该被当对象类型
         assert_eq!(object_type_of(Some("TABLE")), None);
         assert_eq!(object_type_of(None), None);

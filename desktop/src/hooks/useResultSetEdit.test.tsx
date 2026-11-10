@@ -31,8 +31,8 @@ let root: ReturnType<typeof createRoot>;
 let latest: ReturnType<typeof useResultSetEdit>;
 let tableArg: string | null = null;
 
-function Probe({ sql }: { sql: string }) {
-  latest = useResultSetEdit({ tabId: "s1", connId: "c", sql, columns, rows });
+function Probe({ sql, rows: data = rows, columns: cols = columns, schema }: { sql: string; rows?: Cell[][]; columns?: ColumnMeta[]; schema?: string }) {
+  latest = useResultSetEdit({ tabId: "s1", connId: "c", sql, columns: cols, rows: data, schema });
   return null;
 }
 
@@ -222,4 +222,104 @@ it("同一格连改两次：第二次的原值守卫用第一次写回后的值�
   expect(calls[1].params).toContain("b");
   expect(calls[1].params).toContain("c");
   expect(calls[1].params).not.toContain("a");
+});
+
+it("续取更多行保留已有改动，换 SQL 才清空", async () => {
+  const first: Cell[][] = [[1, "a"]];
+  const more: Cell[][] = [first[0], [2, "b"]];
+  await act(async () => root.render(<Probe sql="select * from bd_material" rows={first} />));
+  await flush();
+  latest.edit!.onEdit(0, 1, "x");
+  await act(async () => {});
+  expect(latest.count).toBe(1);
+
+  await act(async () => root.render(<Probe sql="select * from bd_material" rows={more} />));
+  await flush();
+  expect(latest.count).toBe(1);
+  expect(latest.edit!.changed.get("0:1")).toBe("x");
+
+  await act(async () => root.render(<Probe sql="select * from bd_material where id = 1" rows={more} />));
+  await flush();
+  expect(latest.count).toBe(0);
+});
+
+it("执行时固化的 schema 同时用于表结构读取和写回语句", async () => {
+  await act(async () => root.render(<Probe sql="select * from bd_material" schema="AIER633" />));
+  await flush();
+  expect(tableArg).toBe("AIER633.bd_material");
+  latest.edit!.onEdit(0, 1, "x");
+  await act(async () => {});
+  await act(async () => { latest.save(); await new Promise(r => setTimeout(r, 0)); });
+  const update = mocks.invoke.mock.calls.find(([cmd, args]) => cmd === "db_exec_bound" && String(args.sql).startsWith("update"));
+  expect(update?.[1].sql).toBe("update AIER633.bd_material set CODE = :1 where ID = :2 and CODE = :3");
+});
+
+it("大文本预览格不能编辑，复制整行时跳过预览列", async () => {
+  const preview = `abc …（共 20000 个字符，只显示前 8192，点「加载完整值」查看）`;
+  const memoColumns: ColumnMeta[] = [...columns, { name: "MEMO", type: "CLOB", precision: 0, scale: 0 }];
+  mocks.invoke.mockImplementation((cmd: string, args: Record<string, unknown>) => {
+    if (cmd === "db_connect") return Promise.resolve({ url: "jdbc:oracle:thin:@h:1521/t", user: "u", autoCommit: false });
+    if (cmd === "db_read_only") return Promise.resolve({ readOnly: false, tx: { autoCommit: false, statements: 0, rows: 0, since: 0 } });
+    if (cmd === "db_meta" && args.kind === "columns") {
+      return Promise.resolve({ columns: memoColumns.map((c, i) => ({ ...c, pk: i === 0, size: 0, full: c.type, nullable: true, default: null, comment: null, zh: null })) });
+    }
+    return Promise.resolve(null);
+  });
+  await act(async () => root.render(<Probe sql="select * from bd_material" columns={memoColumns} rows={[[1, "a", preview]]} />));
+  await flush();
+  expect(latest.edit!.canEdit(2, 0)).toBe(false);   // 只有前 8K 的预览不能写回
+  latest.edit!.onCloneRow!(0);
+  await act(async () => {});
+  expect(latest.rows.length).toBe(2);
+  expect(latest.rows[1]).toEqual([null, "a", null]); // 主键留空，预览列也跳过
+});
+
+it("结果带 ROWID 时按 rowid 定位写回（表没有主键也能改）", async () => {
+  const calls: { sql: string; params: unknown[] }[] = [];
+  const ridColumns: ColumnMeta[] = [...columns, { name: "ROWID", type: "ROWID", precision: 0, scale: 0 }];
+  mocks.invoke.mockImplementation((cmd: string, args: Record<string, unknown>) => {
+    if (cmd === "db_connect") return Promise.resolve({ url: "jdbc:oracle:thin:@h:1521/t", user: "u", autoCommit: false });
+    if (cmd === "db_read_only") return Promise.resolve({ readOnly: false, tx: { autoCommit: false, statements: 0, rows: 0, since: 0 } });
+    if (cmd === "db_meta" && args.kind === "columns") {
+      return Promise.resolve({ columns: ridColumns.map(c => ({ ...c, pk: false, size: 0, full: c.type, nullable: true, default: null, comment: null, zh: null })) });
+    }
+    if (cmd === "db_exec_bound") {
+      calls.push({ sql: String(args.sql), params: (args.params as unknown[]) ?? [] });
+      return Promise.resolve({ kind: "update", updateCount: 1 });
+    }
+    return Promise.resolve(null);
+  });
+  await act(async () => root.render(<Probe sql="select ID, CODE, ROWID from bd_material"
+    columns={ridColumns} rows={[[1, "a", "rid"]]} />));
+  await flush();
+  expect(latest.edit).toBeTruthy();
+  expect(latest.diagnostics.identity).toBe("ROWID");
+  latest.edit!.onEdit(0, 1, "b");
+  await act(async () => {});
+  await act(async () => { latest.save(); await new Promise(r => setTimeout(r, 0)); });
+  expect(calls[0].sql).toBe("update bd_material set CODE = :1 where rowid = :2 and CODE = :3");
+  expect(calls[0].params).toEqual(["b", "rid", "a"]);
+});
+
+it("可编辑结果里的表达式列双击时说出这一格自己的原因", async () => {
+  const exprColumns: ColumnMeta[] = [...columns, { name: "NOW", type: "DATE", precision: 0, scale: 0 }];
+  await act(async () => root.render(<Probe sql="select ID, CODE, sysdate as NOW from bd_material"
+    columns={exprColumns} rows={[[1, "a", "2026-01-01 00:00:00"]]} />));
+  await flush();
+  expect(latest.edit).toBeTruthy();
+  expect(latest.edit!.canEdit(2, 0)).toBe(false);
+  expect(latest.edit!.blockedReason!(2, 0)).toContain("计算结果");
+  expect(latest.edit!.blockedReason!(0, 0)).toContain("定位列");
+});
+
+it("手动指定基表与定位列后，结构判不出来的查询也能改", async () => {
+  await act(async () => root.render(<Probe sql="select a.code from t a join u b on a.id = b.id" />));
+  await flush();
+  expect(latest.edit).toBeUndefined();
+  expect(latest.blocked).toContain("多表关联");
+  await act(async () => { latest.applyTarget("BD_MATERIAL", ["CODE"]); });
+  await flush();
+  expect(latest.forced).toBe(true);
+  expect(latest.edit).toBeTruthy();
+  expect(latest.diagnostics.identity).toContain("指定列");
 });

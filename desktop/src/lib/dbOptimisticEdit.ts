@@ -14,14 +14,47 @@ export interface RowChange {
   cells: { column: number; before: Cell; after: Cell }[];
 }
 
-export function optimisticChanges(table: string, columns: ColumnMeta[], rows: Cell[][], pk: string[], changed: Map<string, Cell>): RowChange[] {
-  const keyCols = pk.map(n => columns.findIndex(c => c.name.toUpperCase() === n.toUpperCase()));
-  if (!pk.length || keyCols.some(i => i < 0)) return [];
+/**
+ * 写回定位方式。表页不传：按 `pk` 名字在结果列里找。
+ *
+ * SQL 结果页会传 `keyCols` / `rowidCol` / `sourceName`：结果列可能被重命名
+ * （`code as 编码`），主键列的下标也不能靠列名再猜一遍。
+ */
+export interface WriteOptions {
+  /** 结果里 ROWID 伪列的下标；有它就不需要主键。 */
+  rowidCol?: number;
+  /** 定位列在结果里的下标（与 `pk` 二选一）。 */
+  keyCols?: number[];
+  /** 结果列下标 → 表列名；返回 null = 这一列不能写回。 */
+  sourceName?: (col: number) => string | null;
+}
+
+const ROWID_COLUMN: ColumnMeta = { name: "ROWID", type: "ROWID", precision: 0, scale: 0 };
+
+function tableNameOf(columns: ColumnMeta[], opts: WriteOptions, col: number): string {
+  const name = opts.sourceName ? opts.sourceName(col) : columns[col]?.name;
+  if (!name) throw new Error(`「${columns[col]?.name ?? `第 ${col + 1} 列`}」对不上表列，不能写回`);
+  return name;
+}
+
+export function optimisticChanges(
+  table: string,
+  columns: ColumnMeta[],
+  rows: Cell[][],
+  pk: string[],
+  changed: Map<string, Cell>,
+  opts: WriteOptions = {},
+): RowChange[] {
+  const rowid = opts.rowidCol;
+  const keyCols = opts.keyCols ?? pk.map(n => columns.findIndex(c => c.name.toUpperCase() === n.toUpperCase()));
+  if (rowid === undefined && (!keyCols.length || keyCols.some(i => i < 0))) return [];
   const byRow = new Map<number, number[]>();
   for (const k of changed.keys()) { const [r,c] = k.split(":").map(Number); byRow.set(r, [...(byRow.get(r) ?? []), c]); }
   return [...byRow].sort(([a],[b]) => a-b).map(([r, cs]) => {
     const row = rows[r];
-    if (!row || keyCols.some(i => row[i] === null)) throw new Error("记录缺少有效主键，不能写回");
+    if (!row) throw new Error("这一行已不在结果里，不能写回");
+    if (rowid !== undefined && row[rowid] === null) throw new Error("这一行没有 ROWID，不能写回");
+    if (rowid === undefined && keyCols.some(i => row[i] === null)) throw new Error("记录缺少有效主键，不能写回");
     const params: BoundCell[] = [];
     const bind = (v: Cell, c: number) => bindRowValue(v, columns[c], params);
     const cells = cs.map(c => ({ column:c, before:row[c], after:changed.get(`${r}:${c}`)! }));
@@ -36,12 +69,22 @@ export function optimisticChanges(table: string, columns: ColumnMeta[], rows: Ce
         `「${columns[clipped.column].name}」内容太长，网格里只有前 8K，改它会把截断内容写坏；请用 SQL 更新这条记录`,
       );
     }
-    const set = cells.map(c => `${identifier(columns[c.column].name)} = ${bind(c.after, c.column)}`).join(", ");
-    const guards = [...new Set([...keyCols, ...cs])].map(c => {
-      const name = identifier(columns[c].name);
-      if (row[c] === null) return `${name} is null`;
-      return /CLOB/i.test(columns[c].type) ? `dbms_lob.compare(${name}, ${bind(row[c],c)}) = 0` : `${name} = ${bind(row[c],c)}`;
-    });
+    const set = cells.map(c => `${identifier(tableNameOf(columns, opts, c.column))} = ${bind(c.after, c.column)}`).join(", ");
+    const guards: string[] = [];
+    if (rowid !== undefined) {
+      guards.push(`rowid = ${bindRowValue(row[rowid], ROWID_COLUMN, params)}`);
+    } else {
+      for (const c of keyCols) {
+        const name = identifier(tableNameOf(columns, opts, c));
+        guards.push(row[c] === null ? `${name} is null` : /CLOB/i.test(columns[c].type)
+          ? `dbms_lob.compare(${name}, ${bind(row[c],c)}) = 0` : `${name} = ${bind(row[c],c)}`);
+      }
+    }
+    for (const c of cs) {
+      const name = identifier(tableNameOf(columns, opts, c));
+      guards.push(row[c] === null ? `${name} is null` : /CLOB/i.test(columns[c].type)
+        ? `dbms_lob.compare(${name}, ${bind(row[c],c)}) = 0` : `${name} = ${bind(row[c],c)}`);
+    }
     // 原值条件与 UPDATE 是同一条语句，避免先查后改之间仍被其他会话抢写。
     return { kind:"update", row:r, cells, params, sql:`update ${identifier(table)} set ${set} where ${guards.join(" and ")}` };
   });
@@ -54,11 +97,19 @@ export function optimisticChanges(table: string, columns: ColumnMeta[], rows: Ce
  * 全部塞 NULL 会把默认值覆盖掉，写出来的单据直接不可用）。因此「空着」和「显式 NULL」
  * 是两个不同的动作，这里只处理前者——后者由用户显式输入 NULL 表示。
  */
-export function insertChange(table: string, columns: ColumnMeta[], values: Map<number, Cell>, row: number): RowChange {
+export function insertChange(table: string, columns: ColumnMeta[], values: Map<number, Cell>, row: number, opts: WriteOptions = {}): RowChange {
   const cols = [...values.keys()].sort((a, b) => a - b).filter(c => columns[c]);
   if (!cols.length) throw new Error("新增行没有任何值，不能写回");
+  // 与 UPDATE 同一条契约：网格里的大文本只有前 8K + 一段中文尾注，插进去就是永久截断。
+  // 粘贴完整文本不受影响——预览标记只由后端生成。
+  const clipped = cols.find(c => isLobPreview(values.get(c) ?? null));
+  if (clipped !== undefined) {
+    throw new Error(
+      `「${columns[clipped].name}」内容太长，网格里只有前 8K，新增行不能写入截断内容；请在该列重新粘贴完整文本，或改用 SQL 插入`,
+    );
+  }
   const params: BoundCell[] = [];
-  const names = cols.map(c => identifier(columns[c].name));
+  const names = cols.map(c => identifier(tableNameOf(columns, opts, c)));
   const binds = cols.map(c => bindRowValue(values.get(c)!, columns[c], params));
   return {
     kind: "insert",
@@ -70,18 +121,30 @@ export function insertChange(table: string, columns: ColumnMeta[], values: Map<n
 }
 
 /**
- * 删除行 → `delete`。只按主键定位：主键不变，删掉的永远是用户看见的那一行。
+ * 删除行 → `delete`。只按主键 / ROWID 定位：标识不变，删掉的永远是用户看见的那一行。
  *
  * 不加原值守卫是有意的——删除整行时其它列被谁改过都不影响「删哪一行」，
  * 而给 CLOB 列做 `dbms_lob.compare` 会让每次删除多一次大字段比较。
  */
-export function deleteChange(table: string, columns: ColumnMeta[], row: Cell[], pk: string[], index: number): RowChange {
+export function deleteChange(
+  table: string,
+  columns: ColumnMeta[],
+  row: Cell[],
+  pk: string[],
+  index: number,
+  opts: WriteOptions = {},
+): RowChange {
   const params: BoundCell[] = [];
-  const keys = pk.map(n => columns.findIndex(c => c.name.toUpperCase() === n.toUpperCase()));
-  if (!pk.length || keys.some(i => i < 0)) throw new Error("记录缺少有效主键，不能删除");
+  if (opts.rowidCol !== undefined) {
+    if (row[opts.rowidCol] === null) throw new Error("ROWID 为空，不能删除");
+    const where = `rowid = ${bindRowValue(row[opts.rowidCol], ROWID_COLUMN, params)}`;
+    return { kind: "delete", row: index, params, cells: [], sql: `delete from ${identifier(table)} where ${where}` };
+  }
+  const keys = opts.keyCols ?? pk.map(n => columns.findIndex(c => c.name.toUpperCase() === n.toUpperCase()));
+  if (!keys.length || keys.some(i => i < 0)) throw new Error("记录缺少有效主键，不能删除");
   const where = keys.map(c => {
     if (row[c] === null) throw new Error("主键为空，不能删除");
-    return `${identifier(columns[c].name)} = ${bindRowValue(row[c], columns[c], params)}`;
+    return `${identifier(tableNameOf(columns, opts, c))} = ${bindRowValue(row[c], columns[c], params)}`;
   });
   return { kind: "delete", row: index, params, cells: [], sql: `delete from ${identifier(table)} where ${where.join(" and ")}` };
 }
@@ -96,9 +159,15 @@ export function deleteChange(table: string, columns: ColumnMeta[], row: Cell[], 
  * 正序执行会让「移除第 i 条」把后面还没执行的草稿整体前移，写回写错行。
  */
 export function planWriteBack(changes: RowChange[]): RowChange[] {
+  // 同一行既标了删除又有未写回的改动：删掉整行后 UPDATE 必然 0 行命中，
+  // 手动事务会停在冲突态，自动提交时 DELETE 已落库、UPDATE 报错，用户看到的是
+  // 「写回失败」而那一行其实已经删了。删除的意图优先，UPDATE 不再生成。
+  // 若用户随后撤销删除，`changed` 仍在，这条行会恢复成普通修改。
+  const deleted = new Set(changes.filter(c => c.kind === "delete").map(c => c.row));
   const rank: Record<ChangeKind, number> = { delete: 0, update: 1, insert: 2 };
-  return [...changes].sort((a, b) =>
-    rank[a.kind] - rank[b.kind] || (a.kind === "insert" ? b.row - a.row : a.row - b.row));
+  return changes
+    .filter(c => !(c.kind === "update" && deleted.has(c.row)))
+    .sort((a, b) => rank[a.kind] - rank[b.kind] || (a.kind === "insert" ? b.row - a.row : a.row - b.row));
 }
 
 /** 显式绑定结果中的数字和时间，避免关联/冲突回读依赖会话 NLS 格式。 */

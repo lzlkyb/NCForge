@@ -181,10 +181,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const blockedTipAt = useRef(0);
   const startEdit = (pos: CellPos) => {
     if (beginEdit(pos)) return;
-    if (blockedHint && Date.now() - blockedTipAt.current > 4000) {
-      blockedTipAt.current = Date.now();
-      toast(onDetail ? `${blockedHint}；完整值按 F4 查看` : blockedHint);
-    }
+    const hint = edit?.blockedReason?.(pos.c, pos.r) || blockedHint;
+    if (hint && Date.now() - blockedTipAt.current > 4000) { blockedTipAt.current = Date.now(); toast(onDetail ? `${hint}；完整值按 F4 查看` : hint); }
   };
   /**
    * 选区批量赋值与 Shift+Enter 大文本编辑框（口径说明见 `useGridTyping`）。

@@ -1,3 +1,4 @@
+import { CodePreview } from "./CodePreview";
 import { ddlScript, type StructDiff } from "../../lib/dbStructDiff";
 import { downloadText } from "../../lib/resultExport";
 import { copyText } from "../../lib/utils";
@@ -42,7 +43,7 @@ export function StructDiffScript({ diff }: { diff: StructDiff }) {
               {s.destructive && <span className="dbx-diff-badge" data-status="onlyRight">会丢数据</span>}
               {s.reason}
             </div>
-            <pre className="dbx-mono">{s.sql}</pre>
+            <CodePreview className="dbx-mono" text={s.sql} label={`同步语句 ${i+1}`}/>
           </div>
         ))}
       </div>

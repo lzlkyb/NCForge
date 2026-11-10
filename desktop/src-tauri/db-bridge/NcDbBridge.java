@@ -1664,7 +1664,8 @@ public class NcDbBridge {
             }
             String t = table.toUpperCase();
             String ty = otype == null ? null : otype.toUpperCase();
-            if (ty != null && OBJECT_TYPES.contains(ty)) {
+            // INDEX 仅用于索引页的定义查看，不扩展对象树清单。
+            if (ty != null && (OBJECT_TYPES.contains(ty) || "INDEX".equals(ty))) {
                 // 对象 DDL 没有「依赖索引」那一段；拿到什么给什么
                 String d = metadata("select dbms_metadata.get_ddl('" + ty + "', ?) from dual", t);
                 return "{\"ddl\":\"" + esc(d.trim()) + "\",\"type\":\"" + esc(ty) + "\"}";

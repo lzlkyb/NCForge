@@ -2,7 +2,7 @@ import { invoke, listen } from "./tauri";
 import { trackOperation } from "./operations";
 import { dbTaskSpec } from "./dbOperations";
 import { dbApi, type PendingTxRow } from "./dbApi";
-import { askQuit, askUnsavedFiles, askUnknownTx, type QuitChoice, type QuitRow } from "./dbConfirm";
+import { askQuit, askUnsavedFiles, type QuitChoice, type QuitRow } from "./dbConfirm";
 import { connOf, getDb, loadConns, rtOf } from "./dbStore";
 import { friendlyDbError } from "./db";
 import { requestOpenFile } from "./openFileRequest";
@@ -55,27 +55,61 @@ function loadSaveAll() {
 }
 
 /**
+ * 后端能证明这条连接干净：数据库确认没有事务（`active === false`），或者会话已经
+ * 结束/探不到且本会话写计数为 0。后两种情况下界面上的旧计数一定是过时的，不能再
+ * 拿它把连接塞回退出清单。
+ */
+export function backendCleanRows(rows: PendingTxRow[]): Set<string> {
+  return new Set(
+    rows
+      .filter((r) => r.state === "clean" && (r.active === false || r.reason === "disconnected" || r.reason === "unreachable"))
+      .map((r) => r.id),
+  );
+}
+
+/** 界面上能看到的最后已知写入证据：primary 与每个 SQL 标签各自的会话取最大。 */
+function localWriteEvidence(connId: string): { statements: number; busy: boolean } {
+  let statements = rtOf(connId).tx?.statements ?? 0;
+  let busy = false;
+  for (const t of getDb().tabs) {
+    if (t.connId !== connId) continue;
+    if (t.kind === "sql") {
+      if (t.running) busy = true;
+      if (t.tx) statements = Math.max(statements, t.tx.statements);
+    } else if (t.kind === "dict" && t.state.running) {
+      busy = true;
+    }
+  }
+  return { statements, busy };
+}
+
+/**
  * 把后端（权威）与界面（更及时）两份事务状态合成一份待确认清单。
  *
  * 合并规则：
  * - 后端说 `unknown`（探测超时/连接已断）→ 保持 `unknown`，即使界面还有旧的事务
  *   数据——那份数据可能早就过时了，不能拿来当"可以提交"的依据；
+ * - 探测超时且两边都没有任何写入证据时不算事务：一个只跑过 SELECT 的连接不该
+ *   因为一次探测超时就被拦在退出确认前；
  * - 两边都有 → 语句数与行数取大的（更保守），开始时间取早的（显示的持续时长更长）。
  */
 export function mergePending(rows: PendingTxRow[]): QuitRow[] {
   const out = new Map<string, QuitRow>();
-  // 后端已经用 `v$transaction` **确认**这条连接没有未提交事务。
+  // 后端已经用 `v$transaction` 确认这条连接没有未提交事务，或会话已结束且写计数为 0。
   // 界面上的本地 DML 计数可能是脏的（手写 COMMIT / PL/SQL 内部提交都不归零），
   // 拿它把这些连接重新塞回退出清单，用户就会被一个不存在的事务反复拦住。
   //
-  // 注意只认 `active === false`：后端「只是没看到事务」（计数为 0、没去查真源）
-  // 时仍然是 null，那种情况界面的新语句要算进来（后一条可能刚落）。
-  const dbClean = new Set<string>();
+  // 注意「只是没看到事务」（计数为 0、没去查真源）时仍然是 null，那种情况界面的
+  // 新语句要算进来（后一条可能刚落）。
+  const dbClean = backendCleanRows(rows);
 
   for (const r of rows) {
-    if (r.state === "clean") {
-      if (r.active === false) dbClean.add(r.id);
-      continue;
+    if (r.state === "clean") continue;
+    // 探测超时没拿到任何写计数：再用界面上的最后已知计数兜底。有执行中的标签时
+    // 不降级——写语句可能正在路上，它的 tx 还没回传到界面。
+    if (r.state === "unknown" && r.reason === "timeout" && (r.statements ?? 0) === 0) {
+      const local = localWriteEvidence(r.id);
+      if (local.statements === 0 && !local.busy) continue;
     }
     const c = connOf(r.id);
     out.set(r.id, {
@@ -83,6 +117,7 @@ export function mergePending(rows: PendingTxRow[]): QuitRow[] {
       name: c?.name ?? r.id,
       env: c?.env ?? "other",
       kind: r.state,
+      reason: r.reason,
       statements: r.statements ?? 0,
       rows: r.rows ?? 0,
       since: r.since ?? 0,
@@ -208,20 +243,23 @@ async function handleQuitRequest() {
       return;
     }
 
-    // 只动探测到状态的连接。这里必须显式收集 unknown：整批探测超时时 rows
-    // 可能全是 unknown，下面 filter 之后循环体一次都不执行，直接 app_quit
-    // 会让用户以为「全部提交」成功了，实际一条都没提交（P0-4）。
-    const unknown = rows.filter((x) => x.kind === "unknown");
-    for (const r of rows.filter((x) => x.kind === "pending")) {
-      // 一个连接上可能有多条独立会话（A0 的槽）：必须由后端把 primary 与全部槽
-      // 一起处理。只提交 primary 等于把槽里的写入静默回滚——那正是这个守卫存在的原因。
-      await trackOperation(dbTaskSpec(`quit.txAll:${r.connId}`, `退出前${txChoice === "rollback" ? "回滚" : "提交"}事务`, r.connId, "全部会话"),()=>dbApi.txAll(r.connId, txChoice as "commit"|"rollback"));
-    }
-    // 状态未知的连接无法提交也无法回滚，退出后必然被数据库回滚：必须再问一次，
-    // 不能让「全部提交」这个按钮替用户做出他不知情的决定。
-    if (unknown.length > 0 && !(await askUnknownTx(unknown))) {
-      await invoke("quit_cancel");
-      return;
+    // `exit` 只可能是「清单里全是无法提交/回滚的未知连接」，用户已经在同一个框里
+    // 看过原因并确认。只有真的选了提交或回滚，才对已知事务动手；绝不能因为框里
+    // 还有 unknown 行就替用户多提交一次。
+    if (txChoice === "commit" || txChoice === "rollback") {
+      for (const r of rows.filter((x) => x.kind === "pending")) {
+        // 一个连接上可能有多条独立会话（A0 的槽）：必须由后端把 primary 与全部槽
+        // 一起处理。只提交 primary 等于把槽里的写入静默回滚——那正是这个守卫存在的原因。
+        await trackOperation(
+          dbTaskSpec(
+            `quit.txAll:${r.connId}`,
+            `退出前${txChoice === "rollback" ? "回滚" : "提交"}事务`,
+            r.connId,
+            "全部会话",
+          ),
+          () => dbApi.txAll(r.connId, txChoice as "commit" | "rollback"),
+        );
+      }
     }
     await invoke("app_quit");
   } catch (e) {

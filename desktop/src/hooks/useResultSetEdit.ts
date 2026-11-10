@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../components/ui/toast";
-import { friendlyDbError, sameCell } from "../lib/db";
+import { friendlyDbError, isLobPreview, sameCell } from "../lib/db";
 import { dbApi, type Cell, type ColumnMeta } from "../lib/dbApi";
 import { confirmProdWrite } from "../lib/dbConfirm";
-import { useDbReadOnly } from "../lib/dbReadOnly";
-import { deleteChange, insertChange, optimisticChanges, planWriteBack, type RowChange } from "../lib/dbOptimisticEdit";
-import { editableCellType, editableKeys, editableSource } from "../lib/sqlEditable";
+import type { RowChange } from "../lib/dbOptimisticEdit";
+import { editableCellType } from "../lib/sqlEditable";
 import { rowsWithDrafts } from "../lib/tableRows";
 import { useRowDrafts } from "./useRowDrafts";
+import { useResultSetPlan } from "./useResultSetPlan";
+import { useTxEpoch } from "../lib/dbTxEpoch";
+import { useResultSetEditModel } from "./useResultSetEditModel";
 import type { GridEdit } from "../components/db/gridEdit";
 
 /**
@@ -22,66 +24,49 @@ import type { GridEdit } from "../components/db/gridEdit";
  * 显示行（`applied`），不回写 store——结果集是执行时的一次快照，
  * 改了就与「再执行一次会看到什么」分叉。
  */
-export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows }: {
+export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, schema }: {
   tabId: string;
   connId: string | null;
   slot?: string | null;
   sql: string;
   columns: ColumnMeta[];
   rows: Cell[][];
+  /** 执行这条 SQL 时的默认 schema；写回与表结构读取都用它限定，之后切 schema 也不会串表。 */
+  schema?: string;
 }) {
-  const source = useMemo(() => editableSource(sql), [sql]);
-  /**
-   * 表结构读取结果。`found` 用来区分「表读不到」与「表读到了但没有主键」——
-   * 两种都不可编辑，但对用户要说不同的话，否则他只会看到「只读」两个字，
-   * 也分不清是自己 SQL 写错了还是这张表本来就不能改。
-   */
-  const [meta, setMeta] = useState<{ table: string; names: string[]; found: boolean } | null>(null);
-  const readonly = useDbReadOnly(connId);
+  const model = useResultSetEditModel({ connId, sql, schema, columns });
+  const { tableRef, rowidCol, sourceName, keyInfo, usable, blocked } = model;
   const [changed, setChanged] = useState<Map<string, Cell>>(new Map());
   /** 写回成功后更新的值：`行:列` → 新值。基准是数据库快照，不是屏幕上被草稿行改过的行。 */
   const [applied, setApplied] = useState<Map<string, Cell>>(new Map());
+  // 回滚把已经写进库的值撤掉了：本地那份「写回后的值」不能再当基准，
+  // 否则后续原值校验拿一个库里不存在的值去比，永远 0 行命中。
+  const txEpoch = useTxEpoch(connId, slot);
+  const seenTxEpoch = useRef(txEpoch.seq);
+  useEffect(() => {
+    if (txEpoch.seq === seenTxEpoch.current) return;
+    seenTxEpoch.current = txEpoch.seq;
+    if (txEpoch.action === "rollback") setApplied(new Map());
+  }, [txEpoch.seq, txEpoch.action]);
   const [saving, setSaving] = useState(false);
   const drafts = useRowDrafts(rows, columns.length);
   // `reset` 是稳定引用（useCallback），可以直接进依赖；`drafts` 对象本身每次渲染新建，不行。
   const resetDrafts = drafts.reset;
 
-  // 换了一条 SQL 或一批新行（含「加载更多」后续取），上一批改动与草稿都不再对应任何东西。
+  // 「加载更多」是纯追加：旧行下标不变，上一批改动与草稿仍然对应原来的行。
+  // 只有换了一条 SQL / 重新执行 / 换了结果集（前缀不一致）才清空。
+  // 这里不能只看 `rows` 引用：续取成功后 store 总会生成新数组。
+  const previous = useRef<{ sql: string; rows: Cell[][] } | null>(null);
   useEffect(() => {
+    const prev = previous.current;
+    previous.current = { sql, rows };
+    const appended = !!prev && prev.sql === sql && rows.length >= prev.rows.length
+      && prev.rows.every((row, i) => rows[i] === row);
+    if (appended) return;
     setChanged(new Map());
     setApplied(new Map());
     resetDrafts();
   }, [sql, rows, resetDrafts]);
-
-  useEffect(() => {
-    if (!connId || !source.table) { setMeta(null); return; }
-    const table = source.table;
-    let alive = true;
-    setMeta(null);
-    void dbApi.columns(connId, table).then(
-      // 后端给空 / 给意外结构都当「读不到」处理：这里抛异常只会变成未处理的 rejection，
-      // 界面上什么都不会发生——比只读更糟，用户完全无从判断。
-      r => {
-        if (!alive) return;
-        const cols = Array.isArray(r?.columns) ? r.columns : [];
-        setMeta({ table, names: cols.filter(c => c.pk).map(c => c.name), found: cols.length > 0 });
-      },
-      () => { if (alive) setMeta({ table, names: [], found: false }); },
-    );
-    return () => { alive = false; };
-  }, [connId, source.table]);
-
-  const keyInfo = useMemo(() => {
-    if (!source.table) return { keys: [] as string[], reason: source.reason };
-    if (!meta || meta.table !== source.table) return { keys: [] as string[], reason: "正在读取表结构…" };
-    if (!meta.found) {
-      return { keys: [] as string[], reason: `读不到表 ${source.table} 的列信息，可能不在当前 schema 或没有权限` };
-    }
-    return editableKeys(columns, meta.names);
-  }, [source, meta, columns]);
-
-  // 只读状态没读到（null）时也不放行：宁可先只读，也不要猜。
-  const usable = !!connId && readonly === false && keyInfo.reason === "";
 
   /**
    * 写回成功后的「数据库当前值」：初始快照 + 已落库的新值。
@@ -101,15 +86,31 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows }: {
     if (!usable) return undefined;
     const update = (fn: (next: Map<string, Cell>) => void) =>
       setChanged(current => { const next = new Map(current); fn(next); return next; });
-    const keys = keyInfo.keys;
+    const keyCols = keyInfo.keyCols;
     const base = baseline.length;
     return {
       canEdit: (col, row) => {
-        const meta = columns[col];
-        if (!meta || !editableCellType(meta.type)) return false;
-        // 新增草稿行要允许填主键列（新行的定位靠它）；已有行的主键列不能改。
+        const column = columns[col];
+        if (!column || !editableCellType(column.type) || !sourceName(col)) return false;
+        // 新增草稿行要允许填主键列（新行的定位靠它）；已有行的定位列不能改。
         if (row !== undefined && row >= base) return true;
-        return row === undefined || !keys.includes(meta.name.toUpperCase());
+        // 大文本预览只是前 8K + 一段说明，改它既写不回原值也会把说明当成数据。
+        if (row !== undefined && isLobPreview(baseline[row]?.[col] ?? null)) return false;
+        return !keyCols.includes(col);
+      },
+      /** 可编辑结果里也有锁住的列：双击要说出这一格自己的原因，不能静默。 */
+      blockedReason: (col, row) => {
+        const column = columns[col];
+        if (!column) return "这一列不在结果里";
+        if (col === rowidCol) return "ROWID 是行标识列，不能当数据改";
+        if (!editableCellType(column.type)) return `「${column.name}」是 ${column.type} 类型，网格里不能直接改；请用 SQL 更新`;
+        if (!sourceName(col)) return `「${column.name}」是计算结果或对不上表列，改它没有对应的表列`;
+        if (row !== undefined && row >= base) return "";
+        if (row !== undefined && isLobPreview(baseline[row]?.[col] ?? null)) {
+          return "这一格是大文本预览（只显示前 8K），不能在这里改；按 F4 查看完整值";
+        }
+        if (keyCols.includes(col)) return `「${column.name}」是定位列，改了会定位不到原行`;
+        return "";
       },
       changed,
       onEdit: (row, col, value) => {
@@ -137,10 +138,14 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows }: {
       // 用户要的就是「照着抄一行再改」。
       onCloneRow: (row) => {
         const values = new Map<number, Cell>();
+        const skipped: string[] = [];
+        const locator = new Set([...keyCols, ...(rowidCol >= 0 ? [rowidCol] : [])]);
         baseline[row]?.forEach((cell, c) => {
-          if (cell === null || keys.includes(columns[c]?.name.toUpperCase() ?? "")) return;
+          if (cell === null || locator.has(c)) return;
+          if (isLobPreview(cell)) { skipped.push(columns[c]?.name ?? String(c + 1)); return; }
           values.set(c, cell);
         });
+        if (skipped.length) toast(`复制行时跳过了大文本列 ${skipped.join("、")}：网格里只有前 8K，请重新填写或改用 SQL`, "warning");
         drafts.add(values);
       },
       rowState: (row) => drafts.status(row),
@@ -148,50 +153,25 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows }: {
       onDeleteRow: (row) => drafts.removeRow(row),
       onRestoreRow: (row) => drafts.restoreRow(row),
     };
-  }, [usable, columns, baseline, keyInfo.keys, changed, drafts]);
+  }, [usable, columns, baseline, keyInfo.keyCols, rowidCol, sourceName, changed, drafts]);
 
-  /** 待写回的删除：只按主键定位，主键取 `rows` 原值里的（屏幕上的改动不影响删哪一行）。 */
-  const deleteChanges = useCallback((): RowChange[] => {
-    if (!source.table) return [];
-    return drafts.deleted.map(r => {
-      const row = rows[r];
-      if (!row) throw new Error(`第 ${r + 1} 行已不在结果里，不能删除`);
-      return deleteChange(source.table!, columns, row, keyInfo.keys, r);
-    });
-  }, [source.table, drafts.deleted, rows, columns, keyInfo.keys]);
-
-  /** 待写回的新增：没填任何值的草稿行跳过——空 INSERT 没有意义，留给数据库默认值。 */
-  const insertChanges = useCallback((): RowChange[] => {
-    if (!source.table) return [];
-    const out: RowChange[] = [];
-    drafts.drafts.forEach((d, i) => {
-      if (!d.values.size) return;
-      out.push(insertChange(source.table!, columns, d.values, rows.length + i));
-    });
-    return out;
-  }, [source.table, drafts.drafts, columns, rows.length]);
+  // 计划在 render 期算，但异常不会穿到 React：出错时保留原因交给工具条显示，
+  // 别像以前那样静默变成「0 条」把按钮藏掉。
+  const planned = useResultSetPlan({
+    tableRef, columns, baseline, keyCols: keyInfo.keyCols, rowidCol, sourceName, changed,
+    deleted: drafts.deleted, rows, drafts: drafts.drafts,
+  });
+  const changes = planned.changes;
 
   const plan = useCallback((): RowChange[] | null => {
-    if (!source.table) return null;
-    try {
-      // 先删、再改、后插的排序由 `planWriteBack` 统一做，三类变更一起排。
-      return planWriteBack([
-        ...optimisticChanges(source.table, columns, baseline, keyInfo.keys, changed),
-        ...deleteChanges(),
-        ...insertChanges(),
-      ]);
-    } catch (e) {
-      toast(friendlyDbError(e), "error");
-      return null;
-    }
-  }, [source.table, columns, baseline, keyInfo.keys, changed, deleteChanges, insertChanges]);
+    if (planned.error) { toast(planned.error, "error"); return null; }
+    return changes.length ? changes : null;
+  }, [planned.error, changes]);
 
-  const count = useMemo(() => {
-    try {
-      const updates = source.table ? optimisticChanges(source.table, columns, baseline, keyInfo.keys, changed).length : 0;
-      return updates + drafts.deleted.length + insertChanges().length;
-    } catch { return 0; }
-  }, [source.table, columns, baseline, keyInfo.keys, changed, drafts.deleted, insertChanges]);
+  const count = changes.length;
+  const planError = planned.error;
+  /** 有任何未写回改动（含还没填值的新增草稿行）：换页 / 关标签前要问一句。 */
+  const dirty = changed.size > 0 || drafts.pending > 0;
 
   const save = useCallback(() => {
     if (!connId || !usable) return;
@@ -240,22 +220,21 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows }: {
     })();
   }, [connId, usable, plan, tabId, slot, drafts]);
 
-  /**
-   * 不可编辑的原因给用户看。顺序很关键：**能确定的先说**——SQL 结构不支持、
-   * 连接只读，这些是根因；「正在读取」只是加载态，不能盖掉根因，
-   * 否则读表结构的请求失败时会永远停在「正在读取」，用户永远等不到答案。
-   */
-  const blocked = usable ? "" : (
-    !source.table ? source.reason
-      : readonly === true ? "当前连接是只读模式"
-        : keyInfo.reason.startsWith("正在") ? "正在确认连接状态和表结构…"
-          : keyInfo.reason
-  );
-
   return {
     edit,
     blocked,
+    /** 双击不可编辑时的一次性提示：原因 + 下一步 + 查询摘要。 */
+    blockedHint: blocked ? `${blocked}。${model.diagnostics.next}（查询：${model.diagnostics.sql}）` : "",
+    /** 诊断面板要的全部信息（基表、定位方式、缺的主键列、不可编辑列）。 */
+    diagnostics: model.diagnostics,
+    /** 手动指定基表 / 定位列（没有主键或 SQL 结构判不出来时的出口）。 */
+    applyTarget: model.applyTarget,
+    clearTarget: model.clearTarget,
+    forced: model.forced,
     count,
+    /** 计划生成失败 / 有大文本预览被改：工具条显示原因，不要静默归零。 */
+    planError,
+    dirty,
     saving,
     save,
     reset: () => { setChanged(new Map()); drafts.reset(); },

@@ -3,12 +3,14 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const scanDataGrip = vi.fn();
 const importDataGrip = vi.fn();
 const importDataGripZip = vi.fn();
 const importPlsql = vi.fn();
 const importApply = vi.fn();
 vi.mock("../../lib/dbApi", () => ({
   dbApi: {
+    scanDataGrip: (...a: unknown[]) => scanDataGrip(...a),
     importDataGrip: (...a: unknown[]) => importDataGrip(...a),
     importDataGripZip: (...a: unknown[]) => importDataGripZip(...a),
     importPlsql: (...a: unknown[]) => importPlsql(...a),
@@ -72,6 +74,8 @@ beforeEach(() => {
   importDataGrip.mockReset();
   importDataGripZip.mockReset();
   importPlsql.mockReset();
+  scanDataGrip.mockReset();
+  scanDataGrip.mockResolvedValue({ source: "DataGrip", items: [], warnings: [] });
   importApply.mockReset();
   beginOperation.mockClear();
   finish.mockClear();
@@ -181,5 +185,36 @@ describe("从其他工具导入连接", () => {
     await pickFiles(".xml", [new File([LOCAL], "dataSources.local.xml")]);
     expect(host.querySelector(".dbx-badline")?.textContent).toContain("没找到 dataSources.xml");
     expect(importDataGrip).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("自动发现", () => {
+  it("打开页签时扫描两款工具并合并预览", async () => {
+    scanDataGrip.mockResolvedValue(SCAN);
+    importPlsql.mockResolvedValue({ source: "user.prefs", items: [{ ...ITEM, key: "plsql:0", tool: "plsql", name: "最近登录" }], warnings: [] });
+    await render();
+    await flush();
+    expect(scanDataGrip).toHaveBeenCalledTimes(1);
+    expect(importPlsql).toHaveBeenCalledWith(true, null, null, null, null);
+    expect(host.textContent).toContain("最近登录");
+    expect(host.querySelectorAll('.dbx-dslist input[type="checkbox"]')).toHaveLength(3);
+  });
+});
+
+
+describe("导入预览选择", () => {
+  it("全选只选择可导入项，再次操作可取消", async () => {
+    scanDataGrip.mockResolvedValue(SCAN);
+    await render();
+    await flush();
+    act(() => byText("全选可导入")!.click());
+    expect(byText("添加 1 个连接")?.disabled).toBe(false);
+    const boxes = [...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    expect(boxes[0].checked).toBe(true);
+    expect(boxes[1].disabled).toBe(true);
+    act(() => byText("取消全选")!.click());
+    expect(boxes[0].checked).toBe(false);
+    expect(byText("添加 0 个连接")?.disabled).toBe(true);
   });
 });

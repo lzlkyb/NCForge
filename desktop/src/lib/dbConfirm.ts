@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { claimCursor, connOf, connect, getDb, patchTab, rtOf, setTx, setTxNotice, sqlTabOf, txAction, type SqlTab } from "./dbStore";
 import { friendlyDbError, parseDbError } from "./db";
-import type { DbEnv, TxInfo } from "./dbApi";
+import type { DbEnv, PendingTxReason, TxInfo } from "./dbApi";
 import { dbApi } from "./dbApi";
 import type { SaveFailure, UnsavedFile } from "./saveAllDirty";
 import { toast } from "../components/ui/toast";
@@ -22,7 +22,11 @@ import { txPending } from "./txState";
  */
 
 export type TxChoice = "commit" | "rollback" | "cancel";
-export type QuitChoice = TxChoice;
+/**
+ * 退出确认的结果。`exit` 只在清单里全是无法提交/回滚的未知连接时出现：
+ * 用户确认「知道这些会话已经断开，仍然退出」，不会再被问第二次。
+ */
+export type QuitChoice = TxChoice | "exit";
 /** 未保存文件弹框的三种结果。`save` 只在**真的全部保存成功**时返回。 */
 export type FileQuitChoice = "save" | "discard" | "cancel";
 
@@ -36,6 +40,8 @@ export interface QuitRow {
   env: DbEnv;
   /** `unknown` = 探测超时或连接已断，提交/回滚都可能失败。 */
   kind: "pending" | "unknown";
+  /** `unknown` 的原因，决定弹框说「已回滚」还是「若有可能回滚」。 */
+  reason?: PendingTxReason;
   statements: number;
   rows: number;
   since: number;
@@ -160,31 +166,13 @@ export function askUnsavedFiles(
 }
 
 /**
- * 退出前的确认：列出所有还没提交的连接，一次决定全部。
+ * 退出前的确认：列出还没提交的连接，一次决定全部。
  *
- * 为什么是「全部」粒度：退出这个场景下用户通常在赶时间，逐连接选只会让框变形；
- * 实际也很少出现两个库同时有事务。
+ * 弹框自己按 `kind` 分流：只有 `pending` 才提供提交/回滚；全是 `unknown` 时只确认
+ * 「仍要退出」。断连的会话本来也无法提交或回滚，不能再拿「全部提交」去误导用户。
  */
 export function askQuit(rows: QuitRow[]): Promise<QuitChoice> {
   return new Promise((resolve) => show({ kind: "quit", rows, resolve }));
-}
-
-/**
- * 退出时还有状态未知的连接，必须**再问一次**。
- *
- * 整批探测超时时 rows 可能全是 `unknown`，`askQuit` 的「全部提交」按钮会让人
- * 以为事务都提交了，实际循环体一次都不执行。这里把「无法提交、退出即回滚」
- * 摆到用户面前，由他决定是否接受（P0-4）。
- */
-export function askUnknownTx(rows: QuitRow[]): Promise<boolean> {
-  const names = [...new Set(rows.map((r) => r.name))];
-  const list = `${names.slice(0, 8).join("、")}${names.length > 8 ? " 等" : ""}`;
-  return ask(
-    "有连接的事务状态未知",
-    `${list} 的未提交事务现在无法确认，也无法在这里提交或回滚；退出后会被数据库回滚，等同于没执行过。确定仍要退出吗？`,
-    "仍要退出",
-    true,
-  );
 }
 
 // 判据统一走 `txPending`：核对过（`tx.active`）就以数据库真源为准，否则退回本地 DML 计数。

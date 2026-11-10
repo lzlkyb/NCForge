@@ -18,6 +18,11 @@ export interface GridEdit {
    * 已有行的主键列则不能改（改了定位不到原行）。
    */
   canEdit: (col: number, row?: number) => boolean;
+  /**
+   * 这一格不能编辑的原因。整体可编辑的结果里也有锁住的列（定位列 / 只读类型 /
+   * 大文本预览），双击它们同样要说一句，不能静默。不传 = 用整体 `blockedHint`。
+   */
+  blockedReason?: (col: number, row?: number) => string;
   /** 改过的格子：`行:列` → 新值。 */
   changed: Map<string, Cell>;
   onEdit: (row: number, col: number, value: Cell) => void;

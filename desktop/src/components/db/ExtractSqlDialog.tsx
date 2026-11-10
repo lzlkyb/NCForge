@@ -1,3 +1,4 @@
+import { CodePreview } from "./CodePreview";
 import { useEffect, useState } from "react";
 import "../../db-console.css";
 import { Modal } from "../ui/Modal";
@@ -78,7 +79,7 @@ export function ExtractSqlDialog() {
         </span>
       </div>
       <div className="bd one">
-        <pre className="sql">{sql}</pre>
+        <CodePreview className="sql" text={sql} label="提取的 SQL" connId={connId ?? undefined}/>
         {req.params.length > 0 && (
           <div className="dbx-vars">
             {req.params.map((p) => (

@@ -560,9 +560,17 @@ fn raw_payload(body: &tauri::ipc::InvokeBody) -> Result<Vec<u8>, String> {
 pub async fn db_import_datagrip(
     state: tauri::State<'_, Arc<AppState>>,
     main: String,
+    scan: Option<bool>,
     main_name: Option<String>,
     local: Option<String>,
 ) -> Result<ImportScan, String> {
+    if scan.unwrap_or(false) {
+        let cfg = state.config.read().await.clone();
+        let out = tauri::async_runtime::spawn_blocking(db_import::scan_datagrip_local)
+            .await
+            .map_err(|e| format!("扫描 DataGrip 失败：{e}"))?;
+        return Ok(finish_scan(out, &cfg));
+    }
     if main.trim().is_empty() {
         return Err("没读到 dataSources.xml 的内容".to_string());
     }

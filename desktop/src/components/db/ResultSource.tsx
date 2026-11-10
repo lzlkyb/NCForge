@@ -1,3 +1,4 @@
+import { CodePreview } from "./CodePreview";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../ui/icon";
@@ -44,7 +45,7 @@ export function ResultSource({ snapshot, meta }: { snapshot: ResultSnapshot; met
       <div className="dbx-source-meta"><span>{snapshot.source}</span><time>{new Date(snapshot.at).toLocaleString()}</time></div>
       {snapshot.schema !== undefined && <div className="dbx-source-meta">执行 schema：{snapshot.schema || "登录账号"}</div>}
       <div className="dbx-source-meta"><span>{snapshot.complete ? "完整查询结果" : "已读取部分数据"}</span>{meta}</div>
-      <pre tabIndex={0} aria-label="已执行的 SQL">{snapshot.sql}</pre>
+      <CodePreview expandable={false} label="已执行的 SQL" text={snapshot.sql}/>
     </div>, document.body)}
   </>;
 }

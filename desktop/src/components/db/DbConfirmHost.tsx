@@ -6,6 +6,7 @@ import { settle, settleTx, usePending, type Pending } from "../../lib/dbConfirm"
 import { connOf } from "../../lib/dbStore";
 import { dbNameOf, ENV_LABEL } from "../../lib/dbApi";
 import { FilesBody } from "./QuitFilesBody";
+import { QuitTxBody } from "./QuitTxBody";
 
 /**
  * 确认弹框宿主：退出前未保存文件 / 未提交事务 / 生产库写语句 / 补输口令
@@ -41,7 +42,7 @@ export function DbConfirmHost() {
       closeOnOverlay={p?.kind === "ask" ? !p.danger : p?.kind === "password"}
     >
       {p?.kind === "tx" && <TxBody p={p} />}
-      {p?.kind === "quit" && <QuitBody p={p} />}
+      {p?.kind === "quit" && <QuitTxBody p={p} />}
       {p?.kind === "unsavedFiles" && <FilesBody p={p} />}
       {p?.kind === "prod" && <ProdBody p={p} />}
       {p?.kind === "password" && <PasswordBody p={p} onCancel={close} />}
@@ -115,63 +116,6 @@ function TxBody({ p }: { p: Extract<Pending, { kind: "tx" }> }) {
         </button>
         <button type="button" className="dbx-btn pri" disabled={!!p.busy} onClick={() => void settleTx("commit")}>
           {p.busy === "commit" ? "提交中…" : "提交"}
-        </button>
-      </div>
-    </>
-  );
-}
-
-/**
- * 退出前的未提交事务确认。
- *
- * 连接名/环境来自 `quitGuard` 合并好的行（不查 store）：连接可能刚从配置里删掉，
- * 那时 `connOf` 查不到，列表会凭空少一行——恰恰是最该提醒的那种。
- */
-function QuitBody({ p }: { p: Extract<Pending, { kind: "quit" }> }) {
-  return (
-    <>
-      <div className="hd">
-        <Icon name="alertTriangle" size={16} />
-        退出前还有未提交的事务
-      </div>
-      <div className="bd one">
-        <p style={{ marginBottom: 6 }}>现在退出，下面这些改动会被数据库回滚，跟没执行过一样。</p>
-        <ul style={{ margin: "0 0 8px", paddingLeft: 18, display: "grid", gap: 6 }}>
-          {p.rows.map((r) => {
-            const mins = r.since ? Math.max(1, Math.round((Date.now() - r.since) / 60_000)) : 0;
-            return (
-              <li key={r.connId}>
-                <span className={`e-${r.env}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <span className="dbx-edot" />
-                  <b>{r.name}</b>
-                  <span className="dbx-echip">{ENV_LABEL[r.env]}</span>
-                </span>
-                <div className="dbx-muted" style={{ marginTop: 2 }}>
-                  {r.kind === "unknown" ? (
-                    <>状态未知（{r.message ?? "探测超时"}），退出后由数据库回滚</>
-                  ) : (
-                    <>
-                      {r.statements} 条写语句 / 影响 {r.rows} 行
-                      {mins > 0 && <> · 已持续约 {mins} 分钟</>}
-                    </>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-        <p className="dbx-muted">「全部提交」只对状态已知的连接生效；状态未知的那些退出后仍会回滚。</p>
-      </div>
-      <div className="ft">
-        <span className="dbx-sp" />
-        <button type="button" className="dbx-btn" onClick={() => settle((x) => x.kind === "quit" && x.resolve("cancel"))}>
-          取消
-        </button>
-        <button type="button" className="dbx-btn" onClick={() => settle((x) => x.kind === "quit" && x.resolve("rollback"))}>
-          全部回滚
-        </button>
-        <button type="button" className="dbx-btn pri" onClick={() => settle((x) => x.kind === "quit" && x.resolve("commit"))}>
-          全部提交
         </button>
       </div>
     </>

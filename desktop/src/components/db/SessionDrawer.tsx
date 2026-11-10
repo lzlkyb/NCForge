@@ -1,18 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
-import { dbApi, type SessionRow } from "../../lib/dbApi";
-import { friendlyDbError } from "../../lib/db";
-import { useAppHidden } from "../../lib/appVisibility";
-import { beginOperation } from "../../lib/operations";
-import { dbTaskSpec } from "../../lib/dbOperations";
 import { copyText } from "../../lib/utils";
-
-/**
- * 自动刷新间隔。10 秒够看清「谁锁了谁」，也是共用库上 `v$session` + `v$locked_object`
- * 能长期开着的节奏——之前 5 秒在切走页面后仍在查，等于白给数据库加压。
- */
-const REFRESH_MS = 10_000;
+import type { SessionRow } from "../../lib/dbApi";
+import { useSessionList } from "../../hooks/useSessionList";
+import { SessionTable } from "./SessionTable";
+import { SessionDetail } from "./SessionDetail";
 
 /** 读不到 `v$locked_object` 时给用户看的授权语句（**不代执行**，权限是 DBA 的事）。 */
 const GRANT_HINT = "grant select on v$locked_object to <你的账号>;";
@@ -25,49 +18,14 @@ const GRANT_HINT = "grant select on v$locked_object to <你的账号>;";
  * 通常没权限，生产库误杀还会打断别人的补丁执行。
  *
  * `granted: false` 时必须显式提示缺授权：把"看不见锁"显示成"没有锁"是这类面板最坏的 bug。
+ * 取数与轮询在 `useSessionList`，表格与详情弹框各自成组件。
  */
 export function SessionDrawer({ connId, onClose, visible = true }: { connId: string; onClose: () => void; visible?: boolean }) {
-  const [rows, setRows] = useState<SessionRow[] | null>(null);
-  const [granted, setGranted] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-  const [auto, setAuto] = useState(true);
-  const [at, setAt] = useState(0);
-
-  const [loading,setLoading]=useState(false);
-  const lock=useRef(false);
-  const load = useCallback(async (observed=true) => {
-    if(lock.current) return;lock.current=true;setLoading(true);
-    const task=observed ? beginOperation(dbTaskSpec(`sessions:${connId}`,"读取数据库会话与锁",connId,"会话诊断")) : null;
-    try {
-      const r = await dbApi.sessions(connId);
-      setRows(r.rows ?? []);
-      // 后端没给 granted 时按「有」处理：老 jar 的返回里没这个字段
-      setGranted(r.granted !== false);
-      setErr(null);
-      setAt(Date.now());
-      task?.finish("success",r.granted===false ? "会话已读取；账号无权读取完整锁信息" : `已读取 ${r.rows?.length ?? 0} 个会话`);
-    } catch (e) {
-      task?.finish("failed","会话查询失败，返回数据库会话面板查看原因");
-      setErr(friendlyDbError(e));
-      setRows(null);
-    } finally {lock.current=false;setLoading(false);}
-  }, [connId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // 抽屉是 store 级状态（按连接记），切文档标签不关；所以「看不见」有两层：
-  // 窗口/页面不可见（`useAppHidden`），以及抽屉所在标签被别的文档盖住（`visible`）。
-  // 两者任一为假都必须停轮询（CLAUDE.md 8.1：自动行为不可见即停）。
-  const appHidden = useAppHidden();
-  const paused = !auto || appHidden || !visible;
-
-  useEffect(() => {
-    if (paused) return;
-    const t = setInterval(() => void load(false), REFRESH_MS);
-    return () => clearInterval(t);
-  }, [paused, load]);
+  const { rows, granted, err, at, loading, auto, setAuto, load } = useSessionList(connId, visible);
+  const [query,setQuery]=useState("");
+  const [onlyBlocked,setOnlyBlocked]=useState(false);
+  const [selected,setSelected]=useState<SessionRow|null>(null);
+  useEffect(()=>{setSelected(null);setQuery("");setOnlyBlocked(false);},[connId]);
 
   const copy = (text: string, what: string) => {
     if (!text) return;
@@ -75,6 +33,7 @@ export function SessionDrawer({ connId, onClose, visible = true }: { connId: str
   };
 
   const blocked = (rows ?? []).filter((r) => r.blocker != null).length;
+  const shown=(rows ?? []).filter(row=>(!onlyBlocked || row.blocker != null || rows?.some(item=>item.blocker === row.sid)) && [row.sid,row.user,row.machine,row.program,row.event,row.sql].some(value=>String(value ?? "").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())));
 
   return (
     <div className="dbx-drawer sess">
@@ -117,88 +76,23 @@ export function SessionDrawer({ connId, onClose, visible = true }: { connId: str
 
       {err && <div className="dbx-err" style={{ margin: 8 }}>{err}</div>}
 
+      <div className="dbx-reading-tools"><input aria-label="搜索会话" placeholder="SID / 用户 / 机器 / SQL" value={query} onChange={e=>setQuery(e.target.value)}/><label><input type="checkbox" checked={onlyBlocked} onChange={e=>setOnlyBlocked(e.target.checked)}/>阻塞关系</label></div>
       <div className="list">
         {!rows && !err && <p className="dbx-tree-note">读取中…</p>}
         {rows && rows.length === 0 && <p className="dbx-tree-note">当前没有正在执行或被阻塞的会话</p>}
-        {rows && rows.length > 0 && (
-          <table className="dbx-sess">
-            <thead>
-              <tr>
-                <th>SID</th>
-                <th>用户 / 机器</th>
-                <th>状态</th>
-                <th>等待</th>
-                <th>锁</th>
-                <th>SQL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={`${r.sid}-${r.serial ?? 0}`} data-blocked={r.blocker != null || undefined}>
-                  <td>
-                    <b>{r.sid}</b>
-                    {r.blocker != null && <span className="dbx-sess-blk" title="被这个 SID 阻塞">←{r.blocker}</span>}
-                  </td>
-                  <td title={`${r.user} @ ${r.machine} · ${r.program}`}>
-                    <span className="u">{r.user || "-"}</span>
-                    <span className="m">{r.machine || r.program || "-"}</span>
-                  </td>
-                  <td>
-                    <span className="s">{r.status}</span>
-                    {r.elapsedSec > 0 && <span className="m">{r.elapsedSec}s</span>}
-                  </td>
-                  <td title={r.event}>
-                    <span className="e">{r.event || "-"}</span>
-                    {r.waitSec > 0 && <span className="m">等 {r.waitSec}s</span>}
-                  </td>
-                  <td>
-                    {r.locked.length === 0 ? (
-                      <span className="m">-</span>
-                    ) : (
-                      r.locked.map((o) => (
-                        <span key={o} className="dbx-sess-obj" title={o}>
-                          {o}
-                        </span>
-                      ))
-                    )}
-                  </td>
-                  <td>
-                    <code
-                      title={
-                        r.sql
-                          ? r.sql
-                          : r.sqlId
-                            ? `这个账号读不到 SQL 文本（v$sql），只有 sql_id ${r.sqlId}`
-                            : ""
-                      }
-                    >
-                      {r.sql || r.sqlId || "-"}
-                    </code>
-                    <span className="acts">
-                      {r.sql && (
-                        <button type="button" className="dbx-lk" onClick={() => copy(r.sql, " SQL")}>
-                          复制 SQL
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="dbx-lk"
-                        title="只复制语句，不执行"
-                        onClick={() =>
-                          copy(`alter system kill session '${r.sid},${r.serial ?? 0}';`, " KILL 语句")
-                        }
-                      >
-                        复制 KILL
-                      </button>
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        {rows && rows.length > 0 && shown.length === 0 && <p>没有匹配的会话，请调整筛选。</p>}
+        {shown.length > 0 && <SessionTable rows={shown} onSelect={setSelected} onCopy={copy} />}
       </div>
 
+      {selected && (
+        <SessionDetail
+          selected={selected}
+          rows={rows}
+          connId={connId}
+          onSelect={setSelected}
+          onClose={()=>setSelected(null)}
+        />
+      )}
       <div className="dbx-sess-foot">
         {at > 0 && <span>更新于 {new Date(at).toLocaleTimeString()}</span>}
         <span className="dbx-sp" />

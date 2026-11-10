@@ -1,3 +1,4 @@
+import { CodePreview } from "./CodePreview";
 import type { ResultSnapshot } from "../../lib/dbResultTools";
 import { Modal } from "../ui/Modal";
 import { Icon } from "../ui/icon";
@@ -11,7 +12,7 @@ export function CompareSource({ snapshot, side, expanded=false }: { snapshot:Res
       <span className="dbx-compare-source-meta"><span>schema：{snapshot.schema || "未记录"}</span><time dateTime={new Date(snapshot.at).toISOString()}>{new Date(snapshot.at).toLocaleString()}</time><span>{snapshot.rows.length.toLocaleString()} 行</span><span data-partial={!snapshot.complete || undefined}>{snapshot.complete ? "完整查询结果" : "部分结果"}</span></span>
       <span className="dbx-compare-source-sql" title="展开查看完整 SQL">{sql ? `${sql.slice(0,140)}${sql.length>140 ? "…" : ""}` : "SQL 未记录"}</span>
     </summary>
-    <pre tabIndex={0} aria-label={`${side} 来源 SQL`}>{snapshot.sql || "SQL 未记录"}</pre>
+    <CodePreview label={`${side} 来源 SQL`} text={snapshot.sql || "SQL 未记录"}/>
   </details>;
 }
 

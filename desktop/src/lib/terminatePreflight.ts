@@ -1,7 +1,7 @@
 import { ask, askUnsavedFiles } from "./dbConfirm";
 import { dbApi } from "./dbApi";
 import { getDb, loadConns } from "./dbStore";
-import { mergePending } from "./quitGuard";
+import { backendCleanRows, mergePending } from "./quitGuard";
 import { pendingDbSessions } from "./dbPendingSessions";
 import { requestOpenFile } from "./openFileRequest";
 import { friendlyDbError } from "./db";
@@ -98,23 +98,47 @@ export async function prepareRestart(): Promise<boolean> {
   if (!(await ensureFilesSaved("安装更新", true))) return false;
 
   let rows: import("./dbConfirm").QuitRow[] = [];
+  let backendClean = new Set<string>();
   try {
     if (!getDb().loaded) await loadConns();
     if (getDb().loadError) throw new Error(getDb().loadError!);
-    rows = mergePending(await dbApi.pendingTx());
+    const raw = await dbApi.pendingTx();
+    rows = mergePending(raw);
+    backendClean = backendCleanRows(raw);
   } catch (e) {
     // 探测失败不等于没有事务：保守地停下来，不能带着未知状态重启。
     toast(`检查未提交事务失败：${friendlyDbError(e)}`, "error");
     return false;
   }
   const db = getDb();
-  const sessions = db.conns.flatMap(conn => pendingDbSessions(db, conn.id).map(session => `${conn.name} · ${session.label}`));
-  if (rows.length || sessions.length) {
+  // 后端已确认干净（数据库说没有事务，或会话已结束且写计数为 0）的连接不再采信
+  // 界面上的旧计数：那正是纯查询连接被更新前置拦住的来源。
+  const sessions = db.conns
+    .filter(conn => !backendClean.has(conn.id))
+    .flatMap(conn => pendingDbSessions(db, conn.id).map(session => `${conn.name} · ${session.label}`));
+  const pendingRows = rows.filter(row => row.kind === "pending");
+  const unknownRows = rows.filter(row => row.kind === "unknown");
+  if (pendingRows.length || sessions.length) {
     // 事务选择属于各会话：更新不能代用户对多个库批量提交或回滚。
-    const names = [...new Set([...rows.map(row => row.name), ...sessions])];
-    const go = await ask("安装前，请处理数据库事务", `${names.slice(0, 8).join("、")}${names.length > 8 ? "等" : ""}仍有未提交事务或状态未知。请逐会话核对并提交或回滚，再从更新徽章继续。`, "返回数据库");
+    const names = [...new Set([...pendingRows.map(row => row.name), ...sessions])];
+    const go = await ask("安装前，请处理数据库事务", `${names.slice(0, 8).join("、")}${names.length > 8 ? "等" : ""}仍有未提交事务。请逐会话核对并提交或回滚，再从更新徽章继续。`, "返回数据库");
     if (go) window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "db" }));
     return false;
+  }
+  if (unknownRows.length) {
+    // 断连/探测超时的会话无法在这里提交或回滚；安装更新会关闭进程，若有未提交
+    // 改动只能由数据库回滚。必须让用户知道代价，而不是当成「没有事务」放行。
+    const names = [...new Set(unknownRows.map(row => row.name))];
+    const go = await ask(
+      "有连接的事务状态无法确认",
+      `${names.slice(0, 8).join("、")}${names.length > 8 ? "等" : ""}已经断开或无法确认事务状态，无法在这里提交或回滚。继续安装会关闭数据库会话；若有未提交改动，将被数据库回滚。确定继续吗？`,
+      "仍要继续",
+      true,
+    );
+    if (!go) {
+      window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "db" }));
+      return false;
+    }
   }
   // 保存与事务探测会让出控制权；期间又开始工作时不能按旧快照放行。
   if (hasRunningWork() || getSession().tabs.some(isUnsaved)) {

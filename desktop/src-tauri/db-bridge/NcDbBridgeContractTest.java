@@ -110,6 +110,10 @@ public class NcDbBridgeContractTest {
         try {apply.invoke(s,"x; drop table t");throw new AssertionError("bad schema must be rejected");}
         catch(InvocationTargetException expected){check(expected.getCause() instanceof SQLException,"identifier injection rejected");}
         check(schemaSql.isEmpty(),"rejected schema never reaches the database");
+        Method ddl=c.getDeclaredMethod("ddl",String.class,String.class);ddl.setAccessible(true);
+        ddl.invoke(s,"idx_t","INDEX");
+        check(executed.contains("get_ddl('INDEX', ?)"),"index DDL uses the INDEX type, not the TABLE fallback");
+        check("IDX_T".equals(bound.get(1)),"index name remains a bound value");
         System.out.println("JDBC contracts passed: parameters, precision, NULL, pending writes, transaction restart, unsupported read-only, default schema.");
     }
 }

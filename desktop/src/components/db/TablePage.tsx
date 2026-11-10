@@ -8,12 +8,13 @@ import { SourceView } from "./SourceView";
 import { TableData } from "./TableData";
 import { TableMoreActions } from "./TableMoreActions";
 import { InsertExportDialog } from "./InsertExportDialog";
+import { StructView } from "./StructView";
+import { MetaText } from "./MetaText";
 import { friendlyDbError, qualifyTable } from "../../lib/db";
-import { dbApi, type ColumnInfo, type IndexInfo } from "../../lib/dbApi";
+import type { ColumnInfo } from "../../lib/dbApi";
 import { trackOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
 import { columnsOf, patchTab, useConnRt, type TableSub, type TableTab } from "../../lib/dbStore";
-import { copyText } from "../../lib/utils";
 import { ask } from "../../lib/dbConfirm";
 import { pendingEdits, tableEditKey } from "../../lib/dbDirtyEdits";
 
@@ -155,89 +156,6 @@ export function TablePage({ tab }: { tab: TableTab }) {
       {rt.status === "connected" && tab.sub === "ddl" && <MetaText key={`ddl:${tab.otype ?? ""}`} tab={tab} />}
       {rt.status === "connected" && !isObj && tab.sub === "idx" && <MetaText key="idx" tab={tab} />}
       </div>
-    </div>
-  );
-}
-
-function StructView({ cols }: { cols: ColumnInfo[] | null }) {
-  if (!cols) return <div className="dbx-empty"><Icon name="spinner" size={18} />读取中…</div>;
-  return (
-    <div className="dbx-meta">
-      <table>
-        <thead>
-          <tr><th>#</th><th>字段</th><th>中文名（NC）</th><th>类型</th><th>可空</th><th>默认值</th><th>注释</th></tr>
-        </thead>
-        <tbody>
-          {cols.map((c, i) => (
-            <tr key={c.name}>
-              <td className="dbx-muted">{i + 1}</td>
-              <td className="mono">{c.pk && <span className="pk" title="主键">PK </span>}{c.name.toLowerCase()}</td>
-              <td>{c.zh ?? ""}</td>
-              <td className="mono">{c.full}</td>
-              <td>{c.nullable ? "是" : ""}</td>
-              <td className="mono">{c.default ?? ""}</td>
-              <td>{c.comment ?? ""}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/** 索引表与 DDL：切到这页时按需读。对象页（`otype`）走 `get_ddl(类型, 名字)`。 */
-function MetaText({ tab }: { tab: TableTab }) {
-  const [request,setRequest]=useState({idx:null as IndexInfo[]|null,ddl:null as string|null,err:null as string|null,revision:0});
-  const {idx,ddl,err,revision}=request;
-  useEffect(() => {
-    let live=true;setRequest(v=>({...v,err:null,idx:null,ddl:null}));
-    const fail = (e: unknown) => {if(live) setRequest(v=>({...v,err:friendlyDbError(e)}));};
-    if (tab.sub === "idx") {
-      void trackOperation(dbTaskSpec(`indexes:${tab.connId}:${tab.table}`,"读取数据库索引",tab.connId,tab.table,undefined,tab.id),()=>dbApi.indexes(tab.connId, tab.table)).then((r) => {if(live) setRequest(v=>({...v,idx:r.indexes}));}, fail);
-      return()=>{live=false;};
-    }
-    const req = trackOperation(dbTaskSpec(`ddl:${tab.connId}:${tab.table}`,"读取数据库对象定义",tab.connId,tab.table,undefined,tab.id),()=>tab.otype
-      ? dbApi.objectDdl(tab.connId, tab.table, tab.otype)
-      : dbApi.ddl(tab.connId, tab.table));
-    void req.then((r) => {if(live) setRequest(v=>({...v,ddl:r.ddl}));}, fail);
-    return()=>{live=false;};
-  }, [tab.id,tab.connId, tab.table, tab.sub, tab.otype,revision]);
-  if (err) return <div className="dbx-err">{err}<button type="button" className="dbx-btn" onClick={()=>setRequest(v=>({...v,revision:v.revision+1}))}>重新读取</button></div>;
-  if (tab.sub === "ddl") {
-    if (ddl === null) return <div className="dbx-empty"><Icon name="spinner" size={18} />读取中…</div>;
-    return (
-      <>
-        <div className="dbx-rtool">
-          <span className="meta">DBMS_METADATA.GET_DDL（已去掉存储参数）</span>
-          <span className="dbx-sp" />
-          <button type="button" className="dbx-btn ghost" onClick={() => void copyText(ddl, () => toast("已复制 DDL", "success"), (e) => toast(`复制失败：${e}`, "error"))}>
-            <Icon name="copy" size={12} />
-            复制
-          </button>
-        </div>
-        <pre className="dbx-ddl">{ddl}</pre>
-      </>
-    );
-  }
-  if (!idx) return <div className="dbx-empty"><Icon name="spinner" size={18} />读取中…</div>;
-  return (
-    <div className="dbx-meta">
-      <table>
-        <thead>
-          <tr><th>索引</th><th>字段</th><th>唯一</th><th>状态</th></tr>
-        </thead>
-        <tbody>
-          {idx.map((i) => (
-            <tr key={i.name}>
-              <td className="mono">{i.name.toLowerCase()}</td>
-              <td className="mono">{i.columns.toLowerCase()}</td>
-              <td>{i.unique ? "唯一" : ""}</td>
-              <td>{i.status}</td>
-            </tr>
-          ))}
-          {idx.length === 0 && <tr><td colSpan={4} className="dbx-muted">没有索引</td></tr>}
-        </tbody>
-      </table>
     </div>
   );
 }

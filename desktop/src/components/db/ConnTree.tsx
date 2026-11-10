@@ -143,12 +143,6 @@ export function ConnTree() {
       />
       <div className="dbx-tree">
         <FavoriteSection filter={q} onLocate={locate} />
-        {db.loadError && (
-          <p className="dbx-tree-note" role="alert" style={{ color: "hsl(var(--destructive-ink))" }}>
-            连接列表读取失败：{db.loadError}{" "}
-            <button type="button" className="dbx-lk" onClick={() => void loadConns()}>重试</button>
-          </p>
-        )}
         {db.loaded && !db.loadError && db.conns.length === 0 && (
           <EmptyState
             icon="database"
@@ -207,7 +201,6 @@ export function ConnTree() {
               </button>
               {expanded && <div id={`dbx-objects-${c.id}`}>
                 {rt.status === "connected" && <ConnObjects connId={c.id} filter={q} />}
-                {rt.status === "error" && <p className="dbx-tree-note" style={{ color: "hsl(var(--destructive-ink))" }}>{rt.error}</p>}
               </div>}
             </div>
           );

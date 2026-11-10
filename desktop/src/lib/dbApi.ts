@@ -452,11 +452,19 @@ export interface SchemaCacheData {
   tables: Record<string, [string, string][]>;
 }
 
+/** 退出探测拿不到确定结果时，为什么会是 `unknown`；前端据此决定文案。 */
+export type PendingTxReason = "disconnected" | "unreachable" | "timeout" | "probe-error";
+
 /** `db_pending_tx` 的一行：某个连接退出时的事务情况。 */
 export interface PendingTxRow {
   id: string;
   /** `pending` 有未提交写入；`clean` 干净；`unknown` 探测超时/连接已断。 */
   state: "pending" | "clean" | "unknown";
+  /**
+   * 仅 `unknown` 行有：`disconnected` = 会话已经结束；`unreachable` = 只是这次探不到；
+   * `timeout` / `probe-error` = 没拿到结果。断连且写计数为 0 的行会直接是 `clean`。
+   */
+  reason?: PendingTxReason;
   /**
    * 数据库真源（`v$transaction`）结论：`false` = 确认没有未提交事务，
    * `null`/缺省 = 没核对或查不了。只有 `false` 才允许推翻界面上的本地计数。
@@ -589,6 +597,7 @@ export const dbApi = {
   propSources: () => invoke<{ source: string; sources: PropSource[] }>("db_prop_sources"),
   propImport: (names: string[], env: DbEnv) => invoke<DbConn[]>("db_prop_import", { names, env }),
   /** 解析 DataGrip 的 dataSources.xml（`local` 是并排的 dataSources.local.xml，含用户名）。 */
+  scanDataGrip: () => invoke<ImportScan>("db_import_datagrip", { main: "", scan: true, mainName: null, local: null }),
   importDataGrip: (main: string, mainName: string | null, local: string | null) =>
     invoke<ImportScan>("db_import_datagrip", { main, mainName, local }),
   /** 解析 DataGrip 导出的 settings.zip。裸字节载荷，与读 XLSX 同一条路。 */

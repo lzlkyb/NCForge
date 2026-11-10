@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { EnvChips } from "./EnvChips";
 import { friendlyDbError } from "../../lib/db";
@@ -7,6 +7,7 @@ import { beginOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
 import { closeConnDialog, loadConns } from "../../lib/dbStore";
 import { toast } from "../ui/toast";
+import "./conn-other-tools.css";
 
 const TOOL_LABEL: Record<ImportTool, string> = { datagrip: "DataGrip", plsql: "PL/SQL Developer" };
 
@@ -48,6 +49,21 @@ export function OtherToolsPane() {
       setBusy(false);
     }
   };
+
+  const scanLocal = () => run(async () => {
+    const results = await Promise.allSettled([
+      dbApi.scanDataGrip(), dbApi.importPlsql(true, null, null, null, null),
+    ]);
+    const merged: ImportScan = { source: "本机 DataGrip / PL/SQL Developer", items: [], warnings: [] };
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value) {
+        merged.items.push(...result.value.items);
+        merged.warnings.push(...result.value.warnings);
+      } else if (result.status === "rejected") merged.warnings.push(friendlyDbError(result.reason));
+    }
+    return merged;
+  });
+  useEffect(() => { void scanLocal(); }, []);
 
   /** 一次选多个 xml：带 `<jdbc-url>` 的是 dataSources.xml，其余带 `<user-name>` 的是 local。 */
   const pickXml = async (list: FileList | null) => {
@@ -134,125 +150,89 @@ export function OtherToolsPane() {
     c.duplicate ? "已添加" : (c.near ?? c.warning ?? "可导入");
   const tip = (c: ImportCandidate) => [c.origin, c.near, c.warning].filter(Boolean).join("\n");
 
+  const available = items.filter((c) => !c.duplicate);
+  const allPicked = available.length > 0 && available.every((c) => picked.includes(c.key));
+
   return (
     <>
-      <div className="bd">
-        <label>来源</label>
-        <span className="dbx-mono dbx-muted" style={{ wordBreak: "break-all" }}>
-          {scan?.source ?? "未读取"}
-        </span>
-
-        <label>DataGrip</label>
-        <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" className="dbx-btn" disabled={busy} onClick={() => xmlRef.current?.click()}>
-            <Icon name="folder" size={12} />
-            选择 XML…
-          </button>
-          <button type="button" className="dbx-btn" disabled={busy} onClick={() => zipRef.current?.click()}>
-            <Icon name="upload" size={12} />
-            选择 settings.zip…
-          </button>
-          <span className="dbx-muted">项目里的 .idea/dataSources.xml，或导出的设置包</span>
-          <input ref={xmlRef} type="file" accept=".xml" multiple hidden onChange={(e) => void pickXml(e.target.files)} />
-          <input ref={zipRef} type="file" accept=".zip" hidden onChange={(e) => void pickZip(e.target.files?.[0])} />
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            className="dbx-inp"
-            value={paste}
-            placeholder="或粘贴 Copy Data Source 得到的 XML"
-            onChange={(e) => setPaste(e.target.value)}
-          />
-          <button
-            type="button"
-            className="dbx-btn"
-            disabled={busy || !paste.trim()}
-            onClick={() => void run(() => dbApi.importDataGrip(paste, "粘贴的 XML", null))}
-          >
-            解析
-          </button>
-        </span>
-
-        <label>PL/SQL Developer</label>
-        <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <button type="button" className="dbx-btn" disabled={busy} onClick={() => void run(() => dbApi.importPlsql(true, null, null, null, null))}>
-            <Icon name="search" size={12} />
-            扫描本机
-          </button>
-          <button type="button" className="dbx-btn" disabled={busy} onClick={() => prefsRef.current?.click()}>
-            <Icon name="folder" size={12} />
-            选择 user.prefs / tnsnames.ora…
-          </button>
-          <input ref={prefsRef} type="file" accept=".prefs,.ora,.txt" multiple hidden onChange={(e) => void pickPrefs(e.target.files)} />
-        </span>
-        <p className="dbx-hint">
-          只读连接地址与用户名：两家工具都不导出可用的口令，导入后首次连接时输一次即可（可勾「记住」）。
-          导入的连接默认用纯 Rust 驱动，不依赖 NC home。
-        </p>
-
-        {(scan || err) && <label>预览</label>}
-        {scan && (
-          <div className="dbx-dslist">
-            <div className="r h">
-              <span />
-              <span>名称</span>
-              <span>连接串</span>
-              <span>用户</span>
-              <span>状态</span>
+      <div className="bd dbx-other-tools" aria-busy={busy}>
+        <section className="dbx-import-discovery" aria-labelledby="import-discovery-title">
+          <div className="dbx-import-heading">
+            <span className="dbx-import-symbol"><Icon name="database" size={20} /></span>
+            <div>
+              <h2 id="import-discovery-title">发现本机数据库连接</h2>
+              <p>自动读取 DataGrip 与 PL/SQL Developer 的连接配置</p>
             </div>
-            {items.map((c) => (
-              <label className="r" key={c.key} title={tip(c)} style={{ cursor: c.duplicate ? "default" : "pointer" }}>
-                <input
-                  type="checkbox"
-                  disabled={c.duplicate}
-                  checked={c.duplicate || picked.includes(c.key)}
-                  onChange={() => toggle(c.key)}
-                />
-                <b>
-                  {c.name}
-                  <span className="dbx-cnt" style={{ marginLeft: 4 }}>{TOOL_LABEL[c.tool]}</span>
-                </b>
-                <span className="mono" title={c.url}>{c.url}</span>
-                <span className="mono">{c.user || "—"}</span>
-                <span
-                  className="dbx-muted"
-                  style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                >
-                  {status(c)}
-                </span>
-              </label>
-            ))}
-            {items.length === 0 && (
-              <div className="r" style={{ display: "block", lineHeight: "32px" }}>
-                没有读到可导入的 Oracle 连接
-              </div>
-            )}
+            <button type="button" className="dbx-btn" disabled={busy} onClick={() => void scanLocal()}>
+              <Icon name="search" size={14} />{busy ? "正在读取…" : "重新扫描"}
+            </button>
           </div>
-        )}
-        {(scan?.warnings ?? []).map((w, i) => (
-          <p className="dbx-hint" key={`${i}-${w}`}>{w}</p>
-        ))}
-        {err && (
-          <div className="dbx-badline">
-            <Icon name="alert" size={13} />
-            <span>{err}</span>
+          <div className="dbx-import-source" title={scan?.source}>
+            <span>{busy ? "读取中" : "读取来源"}</span>
+            <span>{scan?.source ?? "正在检查本机常见配置目录…"}</span>
           </div>
+        </section>
+
+        <details className="dbx-import-manual">
+          <summary>补充导入 <span>未找到连接？选择配置文件或粘贴 XML</span></summary>
+          <div className="dbx-import-tool">
+            <div><h3>DataGrip</h3><p>选择项目 .idea 目录内的 XML，或导出的设置包</p></div>
+            <div className="dbx-import-actions">
+              <button type="button" className="dbx-btn" disabled={busy} onClick={() => xmlRef.current?.click()}><Icon name="folder" size={13} />选择 XML…</button>
+              <button type="button" className="dbx-btn" disabled={busy} onClick={() => zipRef.current?.click()}><Icon name="upload" size={13} />选择 settings.zip…</button>
+            </div>
+            <div className="dbx-import-paste">
+              <input className="dbx-inp" aria-label="DataGrip 连接 XML" value={paste} placeholder="粘贴 Copy Data Source 得到的 XML" onChange={(e) => setPaste(e.target.value)} />
+              <button type="button" className="dbx-btn" disabled={busy || !paste.trim()} onClick={() => void run(() => dbApi.importDataGrip(paste, "粘贴的 XML", null))}>解析</button>
+            </div>
+          </div>
+          <div className="dbx-import-tool">
+            <div><h3>PL/SQL Developer</h3><p>支持 user.prefs 与 tnsnames.ora 配置文件</p></div>
+            <div className="dbx-import-actions">
+              <button type="button" className="dbx-btn" disabled={busy} onClick={() => void run(() => dbApi.importPlsql(true, null, null, null, null))}><Icon name="search" size={13} />扫描本机</button>
+              <button type="button" className="dbx-btn" disabled={busy} onClick={() => prefsRef.current?.click()}><Icon name="folder" size={13} />选择配置文件…</button>
+            </div>
+          </div>
+        </details>
+        <input ref={xmlRef} type="file" accept=".xml" multiple hidden onChange={(e) => void pickXml(e.target.files)} />
+        <input ref={zipRef} type="file" accept=".zip" hidden onChange={(e) => void pickZip(e.target.files?.[0])} />
+        <input ref={prefsRef} type="file" accept=".prefs,.ora,.txt" multiple hidden onChange={(e) => void pickPrefs(e.target.files)} />
+
+        {err && <div className="dbx-badline" role="alert"><Icon name="alert" size={14} /><span>{err}</span></div>}
+        {scan && (
+          <section className="dbx-import-preview" aria-labelledby="import-preview-title">
+            <div className="dbx-import-section-heading">
+              <h3 id="import-preview-title">连接预览 <span>{items.length}</span></h3>
+              {available.length > 0 && <button type="button" className="dbx-btn" disabled={busy} onClick={() => setPicked(allPicked ? [] : available.map((c) => c.key))}>{allPicked ? "取消全选" : "全选可导入"}</button>}
+            </div>
+            {items.length > 0 ? <div className="dbx-dslist dbx-import-table">
+              <table>
+                <thead><tr><th aria-label="选择" /><th>连接名称 / 来源</th><th>连接地址 / 用户</th><th>状态</th></tr></thead>
+                <tbody>{items.map((c) => (
+                  <tr key={c.key} data-selected={picked.includes(c.key) || undefined} data-duplicate={c.duplicate || undefined} title={tip(c)}>
+                    <td><input id={`import-${c.key}`} type="checkbox" aria-label={`选择 ${c.name}`} disabled={c.duplicate || busy} checked={c.duplicate || picked.includes(c.key)} onChange={() => toggle(c.key)} /></td>
+                    <td><label htmlFor={`import-${c.key}`}><strong>{c.name}</strong></label><small>{TOOL_LABEL[c.tool]}</small></td>
+                    <td><span className="dbx-import-url" title={c.url}>{c.url}</span><small>用户 · {c.user || "待补充"}</small></td>
+                    <td><span className="dbx-import-status" data-ready={!c.duplicate && !c.warning && !c.near || undefined}>{status(c)}</span></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div> : <div className="dbx-import-empty" role="status">
+              <Icon name="search" size={24} />
+              <strong>没有读到可导入的 Oracle 连接</strong>
+              <p>可重新扫描，或展开“补充导入”选择配置文件。</p>
+            </div>}
+          </section>
         )}
-        {items.length > 0 && (
-          <>
-            <label>环境</label>
-            <EnvChips value={env} onChange={setEnv} />
-          </>
-        )}
+        {(scan?.warnings.length ?? 0) > 0 && <details className="dbx-import-notes"><summary>读取说明 · {scan!.warnings.length} 条</summary><ul>{scan!.warnings.map((w, i) => <li key={`${i}-${w}`}>{w}</li>)}</ul></details>}
+        {items.length > 0 && <div className="dbx-import-env"><span>导入到环境</span><EnvChips value={env} onChange={setEnv} /></div>}
+        <p className="dbx-import-footnote">仅导入连接地址与用户名。首次连接时输入口令，可勾选“记住”。</p>
       </div>
-      <div className="ft">
+      <div className="ft dbx-import-footer">
+        <span className="dbx-import-selection" role="status">已选 <b>{picked.length}</b> 个连接</span>
         <span className="dbx-sp" />
-        <button type="button" className="dbx-btn" onClick={closeConnDialog}>
-          取消
-        </button>
-        <button type="button" className="dbx-btn pri" disabled={picked.length === 0 || busy} onClick={() => void add()}>
-          添加 {picked.length || ""} 个
-        </button>
+        <button type="button" className="dbx-btn" onClick={closeConnDialog}>取消</button>
+        <button type="button" className="dbx-btn pri" disabled={picked.length === 0 || busy} onClick={() => void add()}>添加 {picked.length} 个连接</button>
       </div>
     </>
   );

@@ -1,3 +1,5 @@
+import "./db-messages.css";
+import { CodePreview } from "./CodePreview";
 import { Icon } from "../ui/icon";
 import { useRef, useState } from "react";
 import { toast } from "../ui/toast";
@@ -47,13 +49,13 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
     ora === "ORA-00942" ? [...new Set(tableRefs(sql).flatMap((t) => similarTo(t, knownTables, 2)))].slice(0, 3) : [];
   return (
     // 执行失败是异步替换进来的状态：焦点还在编辑器里，不给 role 读屏用户什么都听不到。
-    <div className="dbx-err" role="alert">
-      <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+    <div className="dbx-err dbx-feedback" role="alert">
+      <div className="dbx-feedback-heading">
         <Icon name="alert" size={13} />
         {index ? `第 ${index} 条${cancelled ? "已停止" : "执行失败"}` : cancelled ? "执行已停止" : "执行失败"}
         {ora && <span className="dbx-mono">{ora}</span>}
       </div>
-      <div style={{ marginTop: 4, wordBreak: "break-all" }}>{error}</div>
+      <div className="dbx-feedback-message">{error}</div>
       {errorCode === "timeout" && <div style={{ marginTop: 4 }}>不是语法错误，是等到上限还没跑完：可以在「查询设置」或表页筛选栏把等待上限调大后重试。</div>}
       {ora === "ORA-01031" && <div style={{ marginTop: 4 }}>当前账号没有这个操作的权限（读写权限由数据库账号决定）。</div>}
       {suggestions.length > 0 && (
@@ -72,7 +74,7 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
         {connId && ["ORA-00054","ORA-00060","ORA-01013"].includes(ora ?? "") && <button type="button" className="dbx-btn" onClick={()=>openSessionPanel(connId)}>查看会话与锁</button>}
         {connId && (errorCode === "session-lost" || errorCode === "fallback-session-lost") && <button type="button" className="dbx-btn" disabled={reconnecting} onClick={() => void reconnect()}>{reconnecting ? "正在重新连接…" : "重新连接"}</button>}
       </div>
-      {sql && <pre>{sql}</pre>}
+      {sql && <CodePreview text={sql} label="失败的 SQL" connId={connId ?? undefined}/>}
     </div>
   );
 }

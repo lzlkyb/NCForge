@@ -1,0 +1,26 @@
+.dbx-code-preview { min-width:0;position:relative; }
+.dbx-code-preview-tools { display:flex;justify-content:flex-end;gap:10px;padding:3px 8px; }
+.dbx-code-text { margin:0;padding:8px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto;font:12px/1.7 var(--font-mono,monospace); }
+.dbx-token-keyword { color:hsl(var(--primary));font-weight:600; }
+.dbx-token-type { color:hsl(var(--warning-ink)); }
+.dbx-token-string { color:hsl(var(--success-ink)); }
+.dbx-token-number { color:hsl(var(--destructive-ink)); }
+.dbx-token-comment { color:hsl(var(--muted-foreground));font-style:italic; }
+.dbx-code-find { display:flex;gap:8px;align-items:center;padding:4px 8px;font-size:12px; }
+.dbx-code-find input { min-width:0;flex:1;background:hsl(var(--card));border:1px solid hsl(var(--border));padding:4px 6px;color:hsl(var(--foreground)); }
+.dbx-code-dialog { display:flex;flex-direction:column;width:900px;height:650px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 40px);padding:12px; }
+.dbx-history-clear { padding:8px 12px;border-block:1px solid hsl(var(--border)); }
+.dbx-reading-tools { display:flex;align-items:center;gap:8px;padding:6px 10px;flex:none;flex-wrap:wrap; }
+.dbx-reading-tools input:not([type="checkbox"]) { min-width:100px;flex:1;border:1px solid hsl(var(--border));border-radius:var(--r-control);padding:4px 7px;background:hsl(var(--card));color:hsl(var(--foreground)); }
+.dbx-reading-tools label { display:flex;gap:4px;align-items:center;font-size:12px; }
+.dbx-index-detail { padding:10px; }
+.dbx-json-tree { padding:8px 12px;font:12px/1.8 var(--font-mono,monospace);overflow:auto;min-height:0;flex:1; }
+.dbx-json-tree details { margin-left:12px; }
+.dbx-json-tree summary { cursor:pointer; }
+.dbx-json-leaf { margin-left:16px;overflow-wrap:anywhere;white-space:pre-wrap; }
+.dbx-plan table .dbx-plan-toggle { display:inline-flex;align-items:center;gap:3px;text-align:left; }
+.dbx-plan-note { margin:4px 10px;font-size:12px;color:hsl(var(--muted-foreground)); }
+.dbx-sess .dbx-sess-obj { cursor:pointer; }
+
+.dbx-detail > .dbx-code-preview { display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden; }
+.dbx-detail .dbx-code-text { max-height:none;flex:1;min-height:0; }

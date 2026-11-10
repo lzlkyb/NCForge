@@ -1,12 +1,11 @@
+import { SqlCodeViewer } from "./SqlCodeViewer";
 import { useEffect, useState } from "react";
 import { Icon } from "../ui/icon";
-import { toast } from "../ui/toast";
 import { friendlyDbError } from "../../lib/db";
 import { dbApi, type SourceLine } from "../../lib/dbApi";
 import type { TableTab } from "../../lib/dbStore";
 import { trackOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
-import { copyText } from "../../lib/utils";
 
 /**
  * 库内源码（只读）：包规范与包体各一段，按 `user_source.type` 分成两组。
@@ -44,26 +43,5 @@ export function SourceView({ tab }: { tab: TableTab }) {
   }
   const all = lines.map((l) => l.text).join("");
 
-  return (
-    <>
-      <div className="dbx-rtool">
-        <span className="meta">{lines.length} 行 · 只读（改库里的包请在库里执行，这里不编译也不回写）</span>
-        <span className="dbx-sp" />
-        <button type="button" className="dbx-btn ghost" onClick={() => void copyText(all, () => toast("已复制源码", "success"), (e) => toast(`复制失败：${e}`, "error"))}>
-          <Icon name="copy" size={12} />
-          复制全文
-        </button>
-      </div>
-      <div className="dbx-src">
-        {groups.map((g, gi) => (
-          <div key={`${g.type}:${gi}`}>
-            <div className="dbx-srchead">{g.type}</div>
-            <pre className="dbx-ddl">
-              {g.rows.map((l) => `${String(l.line).padStart(4, " ")}  ${l.text}`).join("")}
-            </pre>
-          </div>
-        ))}
-      </div>
-    </>
-  );
+  return <SqlCodeViewer key={`${tab.id}:${tab.table}`} text={all} connId={tab.connId} label="对象源码" sections={groups.map(group=>({label:group.type,text:group.rows.map(line=>line.text).join("")}))}/>;
 }

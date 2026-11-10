@@ -1,3 +1,4 @@
+import { CodePreview } from "./CodePreview";
 import { useEffect, useState } from "react";
 import type { PlanRow } from "../../lib/dbApi";
 import { thousands } from "../../lib/db";
@@ -28,6 +29,9 @@ export function PlanView({ plan, connId }: {
 }) {
   const [saved, setSaved] = useState<SavedPlan | null>(null);
   const [compare, setCompare] = useState(true);
+  const [query,setQuery]=useState("");
+  const [collapsed,setCollapsed]=useState<Set<PlanNode["row"]>>(new Set());
+  useEffect(()=>{setCollapsed(new Set());setQuery("");},[plan]);
 
   // 换了 SQL（同一个标签里又查了另一条计划）要换对照，否则会拿 A 的计划比 B
   useEffect(() => {
@@ -36,7 +40,11 @@ export function PlanView({ plan, connId }: {
 
   if (plan.error) return <div className="dbx-err">{plan.error}</div>;
   const tree = buildPlanTree(plan.rows);
-  const flat = flatten(tree);
+  const needle=query.trim().toLocaleLowerCase();
+  const matches=(node:PlanNode):boolean=>[node.row.operation,node.row.object,node.row.access,node.row.filter].some(value=>value?.toLocaleLowerCase().includes(needle)) || node.children.some(matches);
+  const flat:PlanNode[]=[];
+  const visit=(nodes:PlanNode[])=>nodes.forEach(node=>{if(needle && !matches(node))return;flat.push(node);if(needle || !collapsed.has(node.row))visit(node.children);});
+  visit(tree);
   const max = Math.max(1, ...plan.rows.map((r) => r.cost ?? 0));
   const diff = saved && compare ? diffPlans(saved.rows, plan.rows) : null;
   const addedKeys = new Set(diff?.added.map(nodeKey) ?? []);
@@ -76,6 +84,8 @@ export function PlanView({ plan, connId }: {
           与上次对比
         </button>
       </div>
+      <div className="dbx-reading-tools"><input aria-label="搜索执行计划" placeholder="对象 / 操作 / 谓词" value={query} onChange={e=>setQuery(e.target.value)}/><button type="button" className="dbx-btn" onClick={()=>setCollapsed(new Set())}>展开全部</button><button type="button" className="dbx-btn" disabled={!!needle} title={needle ? "搜索时保留匹配节点及其上级，清空搜索后可收起" : "收起所有子节点"} onClick={()=>setCollapsed(new Set(plan.rows))}>收起全部</button></div>
+      <p className="dbx-plan-note">成本与行数为优化器估算，不代表实际耗时。搜索时显示匹配节点及其上级。</p>
       {diff && <div className="dbx-plandiff" data-worse={(diff.costAfter ?? 0) > (diff.costBefore ?? 0) || undefined}>{diffSummary(diff)}</div>}
       <table>
         <thead>
@@ -88,6 +98,7 @@ export function PlanView({ plan, connId }: {
           </tr>
         </thead>
         <tbody>
+          {flat.length === 0 && <tr><td colSpan={5}>{needle ? "没有匹配的计划节点，请调整关键词。" : "没有可显示的执行计划。"}</td></tr>}
           {flat.map((n, i) => {
             const r = n.row;
             const full = /TABLE ACCESS FULL/i.test(r.operation) && (r.rows ?? 0) >= 1000;
@@ -101,8 +112,7 @@ export function PlanView({ plan, connId }: {
                 title={full ? "大表全表扫描：看看条件列上有没有索引" : undefined}
               >
                 <td className="op" style={{ paddingLeft: 8 + n.depth * 18 }}>
-                  {n.depth > 0 && <span className="dbx-planline">└ </span>}
-                  {r.operation}
+                  {n.children.length ? <button type="button" className="dbx-plan-toggle" aria-expanded={!!needle || !collapsed.has(r)} aria-label={`${collapsed.has(r) ? "展开" : "收起"} ${r.operation}`} disabled={!!needle} onClick={()=>setCollapsed(before=>{const next=new Set(before);if(next.has(r))next.delete(r);else next.add(r);return next;})}><Icon name={collapsed.has(r) && !needle ? "chevronRight" : "chevronDown"} size={12}/>{r.operation}</button> : r.operation}
                   {tag === "new" && <span className="dbx-planbadge">新增</span>}
                   {tag === "gone" && <span className="dbx-planbadge gone">消失</span>}
                 </td>
@@ -117,8 +127,8 @@ export function PlanView({ plan, connId }: {
                 </td>
                 <td>{r.rows !== null ? thousands(r.rows) : ""}</td>
                 <td className="pred">
-                  {r.access && <div>access: {r.access}</div>}
-                  {r.filter && <div>filter: {r.filter}</div>}
+                  {r.access && <details><summary>访问谓词</summary><CodePreview text={r.access} label="访问谓词"/></details>}
+                  {r.filter && <details><summary>过滤谓词</summary><CodePreview text={r.filter} label="过滤谓词"/></details>}
                 </td>
               </tr>
             );
@@ -127,19 +137,6 @@ export function PlanView({ plan, connId }: {
       </table>
     </div>
   );
-}
-
-/** 树 → 行序（父在前，子按原顺序）。渲染仍然是表格，缩进靠 depth。 */
-function flatten(nodes: PlanNode[]): PlanNode[] {
-  const out: PlanNode[] = [];
-  const walk = (ns: PlanNode[]) => {
-    for (const n of ns) {
-      out.push(n);
-      walk(n.children);
-    }
-  };
-  walk(nodes);
-  return out;
 }
 
 function loadPlan(connId: string | null | undefined, sql: string): SavedPlan | null {

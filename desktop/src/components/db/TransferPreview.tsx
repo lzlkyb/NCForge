@@ -1,3 +1,4 @@
+import { CodePreview } from "./CodePreview";
 import { serializeTransfer, transferJsonKeys, type TransferOptions, type TransferData } from "../../lib/resultTransfer";
 import { Icon } from "../ui/icon";
 
@@ -34,6 +35,6 @@ export function TransferPreview({ data, options: o, order, onColumns, onMove, qu
     <div className="dbx-transfer-cols">{order.map((i, position) => <div className="dbx-transfer-col" key={i}><label><input type="checkbox" disabled={disabled} checked={selected.includes(i)} onChange={e => onColumns(e.target.checked ? order.filter(c => selected.includes(c) || c === i) : selected.filter(c => c !== i))} /><span><code>{data.columns[i].name}</code><small>{o.columnLabels[i]}</small></span></label><span className="dbx-transfer-type">{data.columns[i].type}</span><button type="button" className="dbx-ibtn" disabled={disabled || !position} aria-label={`上移 ${data.columns[i].name}`} onClick={() => onMove(i, -1)}><Icon name="arrowUp" size={12} /></button><button type="button" className="dbx-ibtn" disabled={disabled || position === order.length - 1} aria-label={`下移 ${data.columns[i].name}`} onClick={() => onMove(i, 1)}><Icon name="chevronDown" size={12} /></button></div>)}</div>
     <p className="dbx-transfer-help">{disabled ? "全部结果集分别保留各自的全部字段，此处展示当前结果集样本。" : "未勾选字段不会导出；上移、下移调整输出顺序。"}</p>
     </details>
-    {data.query && <details className="dbx-transfer-source-query"><summary>来源 SQL</summary><pre>{data.query}</pre></details>}
+    {data.query && <details className="dbx-transfer-source-query"><summary>来源 SQL</summary><CodePreview text={data.query} label="导出来源 SQL"/></details>}
   </div>;
 }

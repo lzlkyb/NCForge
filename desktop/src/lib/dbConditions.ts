@@ -1,6 +1,6 @@
 import type { BoundCell, ColumnInfo } from "./dbApi";
 
-export type Operator = "eq" | "contains" | "between" | "null";
+export type Operator = "eq" | "ne" | "gt" | "gte" | "lt" | "lte" | "in" | "contains" | "between" | "null" | "notnull" | "today" | "last7days";
 export interface Condition { column: string; op: Operator; value: string; end: string }
 export interface TableFilter { conditions: Condition[]; join: "and" | "or"; sort: string; descending: boolean }
 export const emptyFilter = (): TableFilter => ({ conditions: [], join: "and", sort: "", descending: false });
@@ -25,14 +25,31 @@ export function compileFilter(filter: TableFilter, columns: ColumnInfo[]): { whe
     const col = columns.find(v => v.name === c.column);
     if (!col) throw new Error("请选择现有字段");
     const name = identifier(col.name);
-    if (c.op === "null") return `${name} is null`;
+    if (c.op === "null" || c.op === "notnull") return `${name} is ${c.op === "notnull" ? "not " : ""}null`;
+    if (c.op === "today" || c.op === "last7days") {
+      if (!/^(DATE|TIMESTAMP)/i.test(col.type)) throw new Error("日期快捷范围仅适用于日期字段");
+      const start = new Date(); start.setHours(0,0,0,0);
+      if (c.op === "last7days") start.setDate(start.getDate()-6);
+      // 次日排他上限避免遗漏带小数秒的记录；整个日期范围仍是一个条件，OR组合不会拆散它。
+      const end = new Date(); end.setHours(0,0,0,0); end.setDate(end.getDate()+1);
+      const date = (v:Date) => `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,"0")}-${String(v.getDate()).padStart(2,"0")}`;
+      return `${name} >= ${bind(date(start),col)} and ${name} < ${bind(date(end),col)}`;
+    }
+    if (c.op === "in") {
+      const values = c.value.split(",").map(value=>value.trim());
+      if (values.length > 1000 || values.some(value=>!value)) throw new Error("IN 需要1到1000个非空值，用逗号分隔；值中含逗号时请使用手写条件");
+      return `${name} in (${values.map(value=>bind(value,col)).join(", ")})`;
+    }
     if (c.op === "contains") {
-      if (/^(NUMBER|DATE|TIMESTAMP)/i.test(col.type)) throw new Error("包含条件仅适用于文本字段");
+      if (/^(NUMBER|INTEGER|FLOAT|DECIMAL|DOUBLE|DATE|TIMESTAMP)/i.test(col.type)) throw new Error("包含条件仅适用于文本字段");
       params.push(`%${c.value.replace(/[\\%_]/g, "\\$&")}%`);
       return `${name} like :${params.length} escape '\\'`;
     }
     const start = bind(c.value, col);
-    return c.op === "between" ? `${name} between ${start} and ${bind(c.end, col)}` : `${name} = ${start}`;
+    if (c.op === "between") return `${name} between ${start} and ${bind(c.end, col)}`;
+    const operators = {eq:"=",ne:"<>",gt:">",gte:">=",lt:"<",lte:"<="};
+    if (!Object.prototype.hasOwnProperty.call(operators,c.op)) throw new Error("不支持的筛选运算符");
+    return `${name} ${operators[c.op as keyof typeof operators]} ${start}`;
   });
   if (filter.sort && !columns.some(c => c.name === filter.sort)) throw new Error("排序字段不存在");
   return { where: parts.map(s => `(${s})`).join(` ${filter.join} `), order: filter.sort ? `${identifier(filter.sort)} ${filter.descending ? "desc" : "asc"}` : "", params };
@@ -41,7 +58,7 @@ const key = (connId: string, table: string) => `ncforge-db-filter:${encodeURICom
 export function loadFilter(connId: string, table: string): TableFilter {
   try {
     const v = JSON.parse(localStorage.getItem(key(connId, table)) ?? "null");
-    if (v && Array.isArray(v.conditions) && v.conditions.length <= 100 && v.conditions.every((c: Condition) => c && typeof c.column === "string" && ["eq","contains","between","null"].includes(c.op) && typeof c.value === "string" && typeof c.end === "string") && ["and", "or"].includes(v.join) && typeof v.sort === "string" && typeof v.descending === "boolean") return v;
+    if (v && Array.isArray(v.conditions) && v.conditions.length <= 100 && v.conditions.every((c: Condition) => c && typeof c.column === "string" && ["eq","ne","gt","gte","lt","lte","in","contains","between","null","notnull","today","last7days"].includes(c.op) && typeof c.value === "string" && typeof c.end === "string") && ["and", "or"].includes(v.join) && typeof v.sort === "string" && typeof v.descending === "boolean") return v;
   } catch { /* 本机偏好不可用时保留默认查询。 */ }
   return emptyFilter();
 }

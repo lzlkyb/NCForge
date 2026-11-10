@@ -11,6 +11,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ResultSet } from "../../lib/dbApi";
 import { dbApi } from "../../lib/dbApi";
 import { forgetColumnZh } from "../../lib/dbColumnZh";
@@ -192,5 +195,47 @@ describe("ResultPanel 列中文名", () => {
     expect(sub).toEqual(["NUMBER"]);
     expect(host.querySelector('.dbx-gh[aria-colindex="2"]')?.getAttribute('title')).toContain("NUMBER");
     spy.mockRestore();
+  });
+});
+
+/**
+ * 保活容器的布局契约。
+ *
+ * jsdom 没有排版引擎，量不出滚动条挂在哪一层，所以分两半守：
+ * ① JSX 侧：非当前结果只能用 hidden 属性隐藏，且容器不得带内联 height/display——
+ *    内联块盒会让 .dbx-rset 的 flex:1/min-height:0 失效，结果区撑高，
+ *    滚动条从数据区跑到「编辑器 + 结果区」外框上（b37c9b3 的回归）。
+ * ② CSS 侧：容器必须显式给 flex 列，且 [hidden] 要自己写 display:none——
+ *    作者 display 会覆盖 UA 的 [hidden]，漏了这条所有保活视图会叠着渲染。
+ */
+describe("结果视图保活不破坏滚动链", () => {
+  it("保活容器带类名、用 hidden 隐藏，且没有内联尺寸", async () => {
+    const a = entry({ id: "r1", index: 1 });
+    const b = entry({ id: "r2", index: 2, sql: "select 1 from dual" });
+    const tab = { ...tabWith(a), results: [a, b], view: "r1" };
+    await act(async () => root.render(<ResultPanel tab={tab} height={300} />));
+    await flush();
+    await act(async () => root.render(<ResultPanel tab={{ ...tab, view: "r2" }} height={300} />));
+    await flush();
+
+    const keeps = [...host.querySelectorAll<HTMLElement>(".dbx-result-keep")];
+    expect(keeps).toHaveLength(2);
+    expect(keeps.map((k) => k.hasAttribute("hidden"))).toEqual([true, false]);
+    for (const k of keeps) expect(k.getAttribute("style")).toBeNull();
+  });
+
+  it("样式表里 .dbx-result-keep 接住高度链，并覆盖 hidden 的显示", () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../db-result-workbench.css"), "utf8");
+    const rule = (selector: string) => {
+      const at = css.indexOf(`${selector} {`);
+      expect(at, `缺少规则 ${selector}`).toBeGreaterThanOrEqual(0);
+      const open = css.indexOf("{", at);
+      return css.slice(open + 1, css.indexOf("}", open)).replace(/\s+/g, "");
+    };
+    const keep = rule(".dbx-result-keep");
+    expect(keep).toContain("display:flex");
+    expect(keep).toContain("flex-direction:column");
+    expect(keep).toContain("min-height:0");
+    expect(rule(".dbx-result-keep[hidden]")).toContain("display:none");
   });
 });

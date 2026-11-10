@@ -1,0 +1,9 @@
+.dbx-code-viewer { display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;overflow:hidden; }
+.dbx-code-toolbar { flex:none;gap:4px;min-height:34px;flex-wrap:nowrap; }
+.dbx-code-toolbar .meta { min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis; }
+.dbx-code-toolbar select { max-width:220px;min-width:0;background:hsl(var(--card));color:hsl(var(--foreground));font-size:var(--dbx-fs-body);border:1px solid hsl(var(--border));border-radius:var(--r-control);padding:3px 6px; }
+.dbx-code-toolbar .dbx-btn[aria-pressed="true"] { background:hsl(var(--primary)/.1);color:hsl(var(--primary)); }
+.dbx-code-editor,.dbx-code-fallback { flex:1;min-width:0;min-height:0; }
+.dbx-code-fallback { margin:0;padding:12px;overflow:auto;font:13px/21px var(--font-mono,monospace);white-space:pre; }
+.dbx-code-toolbar :is(button,select):focus-visible { outline:2px solid hsl(var(--ring));outline-offset:1px; }
+@container (max-width:650px) { .dbx-code-open-label { display:none; } }

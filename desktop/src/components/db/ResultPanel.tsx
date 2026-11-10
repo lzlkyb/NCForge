@@ -83,8 +83,9 @@ export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: nu
         <OutputView tab={tab} />
       ) : cur.kind === "rows" ? (
         // 保活所有看过的结果视图，只把非当前项隐藏：切标签不丢筛选 / 排序 / 滚动 / 选择。
+        // 容器必须用 flex 列承接高度链，否则结果区撑高、滚动条外溢到控制台外框。
         rowViews.map(r => (
-          <div key={r.id} style={{ display: r.id === cur.id ? undefined : "none", height: "100%" }}>
+          <div key={r.id} className="dbx-result-keep" hidden={r.id !== cur.id}>
             <RowsEntryView tab={tab} entry={r} isLast={ownsCursor(tab.connId, tab.slot, r.id)} onLocate={onLocate} />
           </div>
         ))
