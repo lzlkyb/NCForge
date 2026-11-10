@@ -40,6 +40,10 @@ pub struct DbConnView {
     pub default_schema: String,
     /// 关掉纯 Rust 驱动的语句缓存（对 JVM 桥无影响）。
     pub no_stmt_cache: bool,
+    /// 分组名（空 = 未分组）。侧栏按它折叠成一类。
+    pub group: String,
+    /// 颜色键（空 = 不标记）。见 `db_conns::CONN_COLORS`。
+    pub color: String,
 }
 
 impl From<&DbConnConfig> for DbConnView {
@@ -60,6 +64,8 @@ impl From<&DbConnConfig> for DbConnView {
                 .to_string(),
             default_schema: c.default_schema.clone(),
             no_stmt_cache: c.no_stmt_cache,
+            group: c.group.clone(),
+            color: c.color.clone(),
         }
     }
 }
@@ -88,6 +94,12 @@ pub struct DbConnInput {
     /// 关掉纯 Rust 驱动的语句缓存。老前端 / 老配置不传 = 用缓存（默认）。
     #[serde(default)]
     pub no_stmt_cache: bool,
+    /// 分组名（不传 = 未分组）。
+    #[serde(default)]
+    pub group: Option<String>,
+    /// 颜色键（不传 = 不标记）。不认识的值落空串，不报错。
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 impl DbConnInput {
@@ -122,6 +134,8 @@ impl DbConnInput {
                 self.default_schema.as_deref().unwrap_or(""),
             ),
             no_stmt_cache: self.no_stmt_cache,
+            group: db_conns::normalize_group(self.group.as_deref().unwrap_or("")),
+            color: db_conns::normalize_color(self.color.as_deref().unwrap_or("")),
         }
     }
 }
@@ -219,6 +233,8 @@ fn add_prop_sources(cfg: &mut AppConfig, v: &Value, only: Option<&[String]>) -> 
             note: format!("NC prop.xml · {name}"),
             default_schema: String::new(),
             no_stmt_cache: false,
+            group: String::new(),
+            color: String::new(),
         });
         n += 1;
     }
@@ -519,6 +535,8 @@ pub async fn db_conn_import_props(
         engine: Some("rust".into()),
         default_schema: None,
         no_stmt_cache: false,
+        group: None,
+        color: None,
     };
     let cfg = state
         .update_config(|c| {
@@ -702,6 +720,8 @@ mod tests {
             note: String::new(),
             default_schema: String::new(),
             no_stmt_cache: false,
+            group: String::new(),
+            color: String::new(),
         };
         let v = serde_json::to_string(&DbConnView::from(&c)).unwrap();
         assert!(!v.contains("AQAA"), "{v}");
@@ -724,6 +744,8 @@ mod tests {
             engine: None,
             default_schema: None,
             no_stmt_cache: false,
+            group: None,
+            color: None,
         };
         let c = i.to_config("id".into(), None);
         assert_eq!(c.name, "ncdev");
@@ -745,6 +767,8 @@ mod tests {
             engine: None,
             default_schema: None,
             no_stmt_cache: false,
+            group: None,
+            color: None,
         };
         // 新建（手动 / 导入 .properties）：不依赖 NC home
         let rust_input = DbConnInput {

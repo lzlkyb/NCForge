@@ -1608,6 +1608,7 @@ pub async fn db_meta(
         "tables" => "tables",
         "ncNames" => "ncNames",
         "columns" => "columns",
+        "arguments" => "arguments",
         "indexes" => "indexes",
         "ddl" => "ddl",
         "explain" => "explain",
@@ -2294,6 +2295,8 @@ mod tests {
             note: String::new(),
             default_schema: String::new(),
             no_stmt_cache: false,
+            group: String::new(),
+            color: String::new(),
         }
     }
 

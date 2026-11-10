@@ -109,6 +109,18 @@ fn sql_err(m: impl Into<String>) -> BridgeError {
     BridgeError::new("sql", m)
 }
 
+/// 一个重载的参数集合（`arguments` 命令的中间结构）。
+///
+/// 用结构体而不是四元组：`Vec<(i64, Option<String>, Option<String>, Vec<Value>)>` 过不了
+/// `clippy::type_complexity`，而且三个同类型的 `Option<String>` 靠位置记语义太容易写反。
+struct ArgGroup {
+    sub_id: i64,
+    package: Option<String>,
+    /// 函数返回值（`position = 0` 那行），过程为 `None`。
+    returns: Option<String>,
+    args: Vec<Value>,
+}
+
 fn other_err(m: impl Into<String>) -> BridgeError {
     BridgeError::new("other", m)
 }
@@ -387,6 +399,7 @@ impl Session {
             "tables"
                 | "schemas"
                 | "columns"
+                | "arguments"
                 | "indexes"
                 | "columnsZh"
                 | "ncNames"
@@ -524,6 +537,7 @@ impl Session {
             "ncNames" => self.nc_names(),
             "columnsZh" => self.columns_zh(a.first().copied().unwrap_or("")),
             "columns" => self.columns(a.first().copied().unwrap_or("")),
+            "arguments" => self.arguments(a.first().copied().unwrap_or("")),
             "indexes" => self.indexes(a.first().copied().unwrap_or("")),
             "ddl" => self.ddl(
                 a.first().copied().unwrap_or(""),
@@ -1322,6 +1336,95 @@ impl Session {
             }));
         }
         Ok(json!({ "table": table, "columns": out }))
+    }
+
+    /// 过程 / 函数的参数清单（SQL 编辑器签名帮助用）。
+    ///
+    /// `name` 支持 `proc` 与 `pkg.proc` 两种写法：`all_arguments` 里 `object_name` 是过程名、
+    /// `package_name` 是包名，两者都不是 schema owner，所以拆出来按列匹配，owner 固定取
+    /// 当前会话的 current_schema（跨 schema 的过程在 NC 现场几乎不写）。
+    ///
+    /// 重载会返回多条 `subprogramId`——**不能按过程名去重**，否则重载的签名全被合成一个，
+    /// 参数个数对不上时提示就是错的。
+    fn arguments(&self, name: &str) -> Result<Value, BridgeError> {
+        let conn = self.conn_ref()?;
+        let (pkg, proc_name) = match name.rsplit_once('.') {
+            Some((p, n)) => (Some(p.to_string()), n.to_string()),
+            None => (None, name.to_string()),
+        };
+        const BASE: &str = "select a.package_name, a.subprogram_id, a.position, a.argument_name, \
+                   a.data_type, a.in_out, a.defaulted \
+                   from all_arguments a \
+                   where a.owner = sys_context('userenv','current_schema') \
+                   and lower(a.object_name) = lower(:1)";
+        let cur = match pkg.as_deref() {
+            Some(p) => {
+                // position 0 是函数返回值（argument_name 为空），一起取回来当返回类型
+                conn.query(
+                    &format!("{BASE} and lower(a.package_name) = lower(:2) order by a.subprogram_id, a.position"),
+                    &[&proc_name as &dyn ToDbValue, &p as &dyn ToDbValue],
+                )
+            }
+            None => conn.query(
+                &format!("{BASE} and a.package_name is null order by a.subprogram_id, a.position"),
+                &[&proc_name as &dyn ToDbValue],
+            ),
+        }
+        .map_err(drv_err)?;
+        // subprogram_id 保序（Oracle 按定义顺序给），用 Vec + 线性查找而不是 HashMap，
+        // 因为签名顺序直接影响「第几个重载排前面」，HashMap 会把这个顺序打乱。
+        let mut groups: Vec<ArgGroup> = Vec::new();
+        for row in cur {
+            let row = row.map_err(drv_err)?;
+            let package: Option<String> = row.get::<Option<String>>(0).ok().flatten();
+            let sub_id: i64 = row.get::<Option<i64>>(1).ok().flatten().unwrap_or(0);
+            let pos: i64 = row.get::<Option<i64>>(2).ok().flatten().unwrap_or(0);
+            let arg_name: Option<String> = row.get::<Option<String>>(3).ok().flatten();
+            let ty: Option<String> = row.get::<Option<String>>(4).ok().flatten();
+            let in_out: Option<String> = row.get::<Option<String>>(5).ok().flatten();
+            let defaulted = row
+                .get::<Option<String>>(6)
+                .ok()
+                .flatten()
+                .map(|v| v == "Y")
+                .unwrap_or(false);
+            let slot = match groups.iter().position(|g| g.sub_id == sub_id) {
+                Some(i) => i,
+                None => {
+                    groups.push(ArgGroup {
+                        sub_id,
+                        package: package.clone(),
+                        returns: None,
+                        args: Vec::new(),
+                    });
+                    groups.len() - 1
+                }
+            };
+            // position = 0 的那行是返回值，不是参数：放进 returns 而不是 args，
+            // 否则签名会渲染成「函数名(返回值类型)」这种没人看得懂的形态。
+            if pos == 0 {
+                groups[slot].returns = ty;
+                continue;
+            }
+            groups[slot].args.push(json!({
+                "name": arg_name.unwrap_or_default(),
+                "type": ty.unwrap_or_default(),
+                "inOut": in_out.unwrap_or_else(|| "IN".to_string()),
+                "defaulted": defaulted,
+            }));
+        }
+        let overloads: Vec<Value> = groups
+            .into_iter()
+            .map(|g| {
+                json!({
+                    "package": g.package,
+                    "subprogramId": g.sub_id,
+                    "returns": g.returns,
+                    "args": g.args,
+                })
+            })
+            .collect();
+        Ok(json!({ "name": name, "overloads": overloads }))
     }
 
     fn nc_column_names(

@@ -275,6 +275,8 @@ mod tests {
                 note: String::new(),
                 default_schema: "nc".to_string(),
                 no_stmt_cache: false,
+                group: String::new(),
+                color: String::new(),
             }],
             db_active: Some("c1".to_string()),
             lang_enabled: true,

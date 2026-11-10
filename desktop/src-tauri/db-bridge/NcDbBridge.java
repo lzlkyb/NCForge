@@ -440,6 +440,8 @@ public class NcDbBridge {
                 ok(id, query(a.get(0), intArg(a, 1, 1000)));
             } else if ("columns".equals(cmd)) {
                 ok(id, columns(a.get(0)));
+            } else if ("arguments".equals(cmd)) {
+                ok(id, arguments(a.get(0)));
             } else if ("indexes".equals(cmd)) {
                 ok(id, indexes(a.get(0)));
             } else if ("ddl".equals(cmd)) {
@@ -1550,6 +1552,90 @@ public class NcDbBridge {
                 ps.close();
             }
             return "{\"table\":\"" + esc(table) + "\",\"columns\":" + sb.append(']') + "}";
+        }
+
+        /**
+         * 过程 / 函数的参数清单（SQL 编辑器签名帮助用）。与 Rust 侧 {@code arguments} 同口径：
+         * 支持 {@code proc} 与 {@code pkg.proc}；owner 固定取 current_schema。
+         *
+         * 重载必须按 subprogram_id 分开返回——按过程名合成一个会让参数个数对不上的调用
+         * 拿到错误的签名提示。position = 0 是函数返回值，不进 args。
+         */
+        private String arguments(String name) throws SQLException {
+            requireConn();
+            String pkg = null;
+            String proc = name;
+            int dot = name.lastIndexOf('.');
+            if (dot > 0) {
+                pkg = name.substring(0, dot);
+                proc = name.substring(dot + 1);
+            }
+            String q = "select a.package_name, a.subprogram_id, a.position, a.argument_name, a.data_type,"
+                    + " a.in_out, a.defaulted"
+                    + " from all_arguments a"
+                    + " where a.owner = sys_context('userenv','current_schema')"
+                    + " and lower(a.object_name) = lower(?)"
+                    + (pkg == null
+                            ? " and a.package_name is null"
+                            : " and lower(a.package_name) = lower(?)")
+                    + " order by a.subprogram_id, a.position";
+            PreparedStatement ps = conn.prepareStatement(q);
+            LinkedHashMap<Integer, String> pkgs = new LinkedHashMap<Integer, String>();
+            LinkedHashMap<Integer, String> rets = new LinkedHashMap<Integer, String>();
+            LinkedHashMap<Integer, StringBuilder> args = new LinkedHashMap<Integer, StringBuilder>();
+            try {
+                ps.setString(1, proc);
+                if (pkg != null) {
+                    ps.setString(2, pkg);
+                }
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    String packageName = rs.getString(1);
+                    int sub = rs.getInt(2);
+                    int pos = rs.getInt(3);
+                    String argName = rs.getString(4);
+                    String type = rs.getString(5);
+                    String inOut = rs.getString(6);
+                    boolean defaulted = "Y".equals(rs.getString(7));
+                    if (!args.containsKey(sub)) {
+                        pkgs.put(sub, packageName);
+                        rets.put(sub, null);
+                        args.put(sub, new StringBuilder());
+                    }
+                    if (pos == 0) {
+                        rets.put(sub, type);
+                        continue;
+                    }
+                    StringBuilder sb = args.get(sub);
+                    if (sb.length() > 0) {
+                        sb.append(',');
+                    }
+                    sb.append("{\"name\":\"").append(esc(argName == null ? "" : argName))
+                            .append("\",\"type\":\"").append(esc(type == null ? "" : type))
+                            .append("\",\"inOut\":\"").append(esc(inOut == null ? "IN" : inOut))
+                            .append("\",\"defaulted\":").append(defaulted)
+                            .append('}');
+                }
+                rs.close();
+            } finally {
+                ps.close();
+            }
+            StringBuilder out = new StringBuilder("{\"name\":\"").append(esc(name))
+                    .append("\",\"overloads\":[");
+            boolean first = true;
+            for (Map.Entry<Integer, StringBuilder> e : args.entrySet()) {
+                if (!first) {
+                    out.append(',');
+                }
+                first = false;
+                String p = pkgs.get(e.getKey());
+                String r = rets.get(e.getKey());
+                out.append("{\"package\":").append(p == null ? "null" : "\"" + esc(p) + "\"")
+                        .append(",\"subprogramId\":").append(e.getKey())
+                        .append(",\"returns\":").append(r == null ? "null" : "\"" + esc(r) + "\"")
+                        .append(",\"args\":[").append(e.getValue()).append("]}");
+            }
+            return out.append("]}").toString();
         }
 
         private Map<String, String> ncColumnNames(String table) {

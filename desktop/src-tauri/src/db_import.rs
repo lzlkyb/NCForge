@@ -1237,6 +1237,8 @@ pub fn make_conn(
         note: format!("从 {tool} 导入"),
         default_schema: String::new(),
         no_stmt_cache: false,
+        group: String::new(),
+        color: String::new(),
     })
 }
 

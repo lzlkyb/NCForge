@@ -242,6 +242,20 @@ pub struct DbConnConfig {
     /// 改它要重连才生效（缓存大小是建连接时定死的），见 `db_rust::RustEngine::connect`。
     #[serde(default)]
     pub no_stmt_cache: bool,
+    /// 分组名：侧栏按它把连接折成一类（如「客户 A 生产」「测试环境」）。空串 = 未分组。
+    ///
+    /// 纯显示属性，不参与连接与权限判断。用空串而不是 `Option<String>`：老配置里没有这个
+    /// 字段，反序列化出空串正好就是「未分组」，不用写迁移。
+    ///
+    /// 只有分组名是自由文本，**颜色不做自由文本**：见 `db_conns::normalize_color`，
+    /// 它限定在一小组语义色里，避免把用户输入当成 CSS 值直接拼进样式。
+    #[serde(default)]
+    pub group: String,
+    /// 颜色标记：`db_conns::CONN_COLORS` 里的一个键，空串 = 不标记（跟随环境色）。
+    ///
+    /// 前端只把这个值当 `data-color` 枚举用，样式表里逐个定义，绝不把它的内容拼进颜色值。
+    #[serde(default)]
+    pub color: String,
 }
 
 impl AppConfig {

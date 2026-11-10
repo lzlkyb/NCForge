@@ -7,6 +7,32 @@ use crate::config::{AppConfig, DbConnConfig};
 /// 环境标签。只决定颜色与「生产库写前确认」，不限制任何权限。
 pub const ENVS: [&str; 4] = ["dev", "test", "prod", "other"];
 
+/// 连接颜色的可选键。**只认这一组**，前端把它们当 `data-color` 枚举映射到样式表。
+///
+/// 为什么不让用户填任意色值：这个值会写进 `data-color` 并进入渲染路径，一旦允许
+/// 自由文本就等于让配置决定样式，拼错时整行变透明或串到别处。用固定枚举，
+/// 加颜色就改这一处 + 样式表，绕不过门禁里的裸色值检查。
+pub const CONN_COLORS: [&str; 7] = ["red", "orange", "amber", "green", "blue", "purple", "gray"];
+
+/// 颜色键的规范化：不认识的一律落空串（= 不标记），不报错——
+/// 手改配置写错一个词不该让整条连接存不下来。
+pub fn normalize_color(color: &str) -> String {
+    let c = color.trim().to_lowercase();
+    if CONN_COLORS.contains(&c.as_str()) {
+        c
+    } else {
+        String::new()
+    }
+}
+
+/// 分组名：去首尾空白、压缩内部连续空白。空串 = 未分组。
+///
+/// 不做大小写归一：中文分组名不受影响，而 `Prod` / `prod` 被强行合并反而会让
+/// 用户改过的名字突然变形。分组是显示用的，两个名字就是两个组。
+pub fn normalize_group(group: &str) -> String {
+    group.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// 不认识的环境名一律归「其他」，免得手改配置写错后界面拿不到颜色。
 pub fn normalize_env(env: &str) -> String {
     let e = env.trim().to_lowercase();
@@ -160,6 +186,8 @@ pub fn migrate_legacy(cfg: &mut AppConfig) -> bool {
         note: "旧版配置迁移".to_string(),
         default_schema: String::new(),
         no_stmt_cache: false,
+        group: String::new(),
+        color: String::new(),
     });
     true
 }
@@ -248,5 +276,26 @@ mod tests {
         assert_eq!(normalize_schema(" aier633 "), "AIER633");
         assert_eq!(normalize_schema(""), "");
         assert_eq!(normalize_schema("aie r"), "AIE R");
+    }
+
+    /// 颜色只认白名单：这个值会进前端的 `data-color`，放行任意字符串等于让配置决定样式。
+    /// 认不出的一律落空串（= 不标记），不报错——手改配置写错一个词不该让连接存不下来。
+    #[test]
+    fn 颜色只认白名单其余落空() {
+        assert_eq!(normalize_color("red"), "red");
+        assert_eq!(normalize_color("  PURPLE "), "purple");
+        assert_eq!(normalize_color("#ff0000"), "");
+        assert_eq!(normalize_color("red; background:url(x)"), "");
+        assert_eq!(normalize_color(""), "");
+        assert_eq!(CONN_COLORS.len(), 7);
+    }
+
+    /// 分组名去首尾、压内部连续空白；不做大小写归一（中文名不受影响，
+    /// 而把 `Prod` 合并成 `prod` 会让用户刚改的名字突然变形）。
+    #[test]
+    fn 分组名压缩空白但保留大小写() {
+        assert_eq!(normalize_group("  客户 A   生产 "), "客户 A 生产");
+        assert_eq!(normalize_group("Prod  "), "Prod");
+        assert_eq!(normalize_group(""), "");
     }
 }
