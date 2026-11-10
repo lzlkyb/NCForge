@@ -293,6 +293,23 @@ describe("闲置超时后的连接恢复", () => {
     expect(lines.some((t) => t.includes("已自动重连"))).toBe(true);
   });
 
+  // 启动脚本失败不该让语句判失败（连接是好的），但必须写进输出区：
+  // 脚本里的 alter session 没生效，同一句 SQL 的结果可能和预期不一样。
+  it("启动脚本失败时写一行警告，语句本身照常出结果", async () => {
+    mocks.invoke.mockImplementation((cmd: string) =>
+      Promise.resolve(
+        cmd === "db_slot_acquire"
+          ? { slot: "1" }
+          : { ...body, initError: "ORA-00911: invalid character（语句：alter session set x=1）" },
+      ),
+    );
+    const tabId = openSqlTab("c1", "select 1 from dual");
+    const e = await execOne(tabId, "select 1 from dual", 1);
+    expect(e.kind).toBe("rows");
+    expect(getDb().rt.c1?.status).not.toBe("error");
+    const lines = sqlTabOf(tabId)?.output.map((l) => l.text) ?? [];
+    expect(lines.some((t) => t.includes("启动脚本执行失败") && t.includes("ORA-00911"))).toBe(true);
+  });
 
   // 元数据取数现在也会「闲置 → 探测 → 重连」。重连要口令时如果只把清单留空，
   // 界面看不到任何要操作的入口，用户只能猜；置回 error 才会出现重连/输口令。

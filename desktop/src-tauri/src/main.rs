@@ -212,7 +212,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
               {
                   let state = app_state.clone();
-                  spawn_supervised("数据库空闲会话回收", move || {
+                  spawn_supervised("数据库后台维护", move || {
                       let state = state.clone();
                       Box::pin(async move {
                           let mut timer = tokio::time::interval(std::time::Duration::from_secs(60));
@@ -220,6 +220,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                           loop {
                               timer.tick().await;
                               commands::reclaim_idle_db_slots(&state).await;
+                              // 保活与回收共用一个 60s 定时器：再养一个只有几十行、
+                              // 精度也没有更高，反而多一处要自愈的循环。
+                              commands::keep_alive_primaries(&state).await;
                           }
                       })
                   });

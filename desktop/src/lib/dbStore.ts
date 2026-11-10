@@ -497,6 +497,8 @@ export async function connect(id: string, password?: string, remember?: boolean)
     // 配置写的是 JVM 桥、本机却没有 Java 运行时：后端已自动改用纯 Rust，
     // 但必须在界面上说出来 —— 否则用户以为自己在用 JVM 桥，撞上 REF CURSOR 时更困惑。
     if (info.engineNote) toast(info.engineNote, "warning");
+    // 启动脚本失败不阻挡连接（能连上就是能用了），但会话级设置可能没补齐，必须说出来
+    if (info.initError) toast(`启动脚本执行失败：${info.initError}`, "warning");
     setRt(id, { status: "connected", info, currentSchema: info.schema ?? rtOf(id).currentSchema, txNotice: undefined, tx: { autoCommit: info.autoCommit, statements: 0, rows: 0, since: 0 } });
     // 能力位问一次就够（连接期间不会变）；失败不影响已连上的状态，只是按钮按保守处理
     void dbApi.caps(id).then((caps) => setRt(id, { caps })).catch(() => undefined);
@@ -1078,6 +1080,15 @@ export async function execOne(tabId: string, sql: string, index: number, context
         at: Date.now(),
         text: `[${now()}] 会话闲置超时已被数据库断开，已自动重连后再执行这条。旧会话的会话级设置与包状态已重置为连接默认值`,
         tone: "info",
+      }]);
+    }
+    // 启动脚本没跑通 = 会话级设置可能没补齐。连接是好的，但这句 SQL 的结果
+    // 可能和「按启动脚本配置过」的会话不一样，必须让人看见。
+    if (r.initError) {
+      appendOutput(tabId, [{
+        at: Date.now(),
+        text: `[${now()}] 启动脚本执行失败：${r.initError}。会话仍可用，但脚本里的会话级设置没有生效`,
+        tone: "bad",
       }]);
     }
   } catch (e) {

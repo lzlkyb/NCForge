@@ -44,6 +44,10 @@ pub struct DbConnView {
     pub group: String,
     /// 颜色键（空 = 不标记）。见 `db_conns::CONN_COLORS`。
     pub color: String,
+    /// 空闲保活间隔（秒）。`0` = 不保活。
+    pub keep_alive_sec: u32,
+    /// 启动脚本（连上 / 重连后执行的 SQL，空 = 没有）。
+    pub init_sql: String,
 }
 
 impl From<&DbConnConfig> for DbConnView {
@@ -66,6 +70,8 @@ impl From<&DbConnConfig> for DbConnView {
             no_stmt_cache: c.no_stmt_cache,
             group: c.group.clone(),
             color: c.color.clone(),
+            keep_alive_sec: db_conns::normalize_keep_alive(c.keep_alive_sec),
+            init_sql: c.init_sql.clone(),
         }
     }
 }
@@ -100,6 +106,12 @@ pub struct DbConnInput {
     /// 颜色键（不传 = 不标记）。不认识的值落空串，不报错。
     #[serde(default)]
     pub color: Option<String>,
+    /// 空闲保活间隔（秒）。不传 = 默认 240；`0` = 关。
+    #[serde(default)]
+    pub keep_alive_sec: Option<u32>,
+    /// 启动脚本。不传 = 没有。
+    #[serde(default)]
+    pub init_sql: Option<String>,
 }
 
 impl DbConnInput {
@@ -136,6 +148,10 @@ impl DbConnInput {
             no_stmt_cache: self.no_stmt_cache,
             group: db_conns::normalize_group(self.group.as_deref().unwrap_or("")),
             color: db_conns::normalize_color(self.color.as_deref().unwrap_or("")),
+            keep_alive_sec: db_conns::normalize_keep_alive(
+                self.keep_alive_sec.unwrap_or(db_conns::KEEP_ALIVE_DEFAULT),
+            ),
+            init_sql: self.init_sql.as_deref().unwrap_or("").trim().to_string(),
         }
     }
 }
@@ -235,6 +251,8 @@ fn add_prop_sources(cfg: &mut AppConfig, v: &Value, only: Option<&[String]>) -> 
             no_stmt_cache: false,
             group: String::new(),
             color: String::new(),
+            keep_alive_sec: db_conns::KEEP_ALIVE_DEFAULT,
+            init_sql: String::new(),
         });
         n += 1;
     }
@@ -537,6 +555,8 @@ pub async fn db_conn_import_props(
         no_stmt_cache: false,
         group: None,
         color: None,
+        keep_alive_sec: None,
+        init_sql: None,
     };
     let cfg = state
         .update_config(|c| {
@@ -722,6 +742,8 @@ mod tests {
             no_stmt_cache: false,
             group: String::new(),
             color: String::new(),
+            keep_alive_sec: crate::db_conns::KEEP_ALIVE_DEFAULT,
+            init_sql: String::new(),
         };
         let v = serde_json::to_string(&DbConnView::from(&c)).unwrap();
         assert!(!v.contains("AQAA"), "{v}");
@@ -746,6 +768,8 @@ mod tests {
             no_stmt_cache: false,
             group: None,
             color: None,
+            keep_alive_sec: None,
+            init_sql: None,
         };
         let c = i.to_config("id".into(), None);
         assert_eq!(c.name, "ncdev");
@@ -769,6 +793,8 @@ mod tests {
             no_stmt_cache: false,
             group: None,
             color: None,
+            keep_alive_sec: None,
+            init_sql: None,
         };
         // 新建（手动 / 导入 .properties）：不依赖 NC home
         let rust_input = DbConnInput {

@@ -18,16 +18,30 @@ beforeEach(async () => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 describe("连接表单可访问名称", () => {
-  it("十个可见字段标签各关联真实输入，并且端口不会与主机共用名称", () => {
+  it("十二个可见字段标签各关联真实控件，并且端口不会与主机共用名称", () => {
     const labels = [...host.querySelectorAll<HTMLLabelElement>("label[for]")];
-    expect(labels).toHaveLength(10);
+    expect(labels).toHaveLength(12);
     for (const label of labels) {
-      expect(label.control).toBeInstanceOf(HTMLInputElement);
+      // 保活是 `select`、启动脚本是 `textarea`，其余是 `input`：只要求「点标签能聚焦到真控件」
+      expect(label.control).toBeTruthy();
       act(() => label.control!.focus());
       expect(document.activeElement).toBe(label.control);
     }
     // 「分组」在名称之后：它和颜色一起属于「这条连接归哪儿」而不是「怎么连」。
-    expect(labels.map((label) => label.textContent)).toEqual(["名称", "分组", "主机", "端口", "服务名", "JDBC URL", "用户", "口令", "默认 schema", "备注"]);
+    expect(labels.map((label) => label.textContent)).toEqual(["名称", "分组", "主机", "端口", "服务名", "JDBC URL", "用户", "口令", "默认 schema", "空闲保活", "启动脚本", "备注"]);
+  });
+  it("保活默认 4 分钟且可关，启动脚本是多行输入", () => {
+    // 用 `getElementById` 而不是拼 `#id`：`useId()` 生成的 id 带冒号，选择器会报非法
+    const keepLabel = [...host.querySelectorAll<HTMLLabelElement>("label[for]")]
+      .find((l) => l.textContent === "空闲保活")!;
+    const keep = document.getElementById(keepLabel.htmlFor) as HTMLSelectElement;
+    // 默认值必须与后端 `KEEP_ALIVE_DEFAULT` 一致：两边不一致时用户看到「推荐 4 分钟」却存了别的值
+    expect(keep.value).toBe("240");
+    expect([...keep.options].map((o) => o.value)).toContain("0");
+    expect([...keep.options].find((o) => o.value === "0")!.textContent).toBe("关闭");
+    const init = host.querySelector<HTMLElement>(".dbx-initsql")!;
+    expect(init.tagName).toBe("TEXTAREA");
+    expect(init.getAttribute("placeholder")).toContain("nls_date_format");
   });
   it("引擎与事务模式将当前选中状态暴露给辅助技术，并随点击更新", () => {
     const groups = [...host.querySelectorAll<HTMLElement>('[role="group"]')];

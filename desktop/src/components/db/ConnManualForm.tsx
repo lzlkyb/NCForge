@@ -4,6 +4,7 @@ import { toast } from "../ui/toast";
 import { EnvChips } from "./EnvChips";
 import { ConnStmtCacheToggle } from "./ConnStmtCacheToggle";
 import { ConnGroupColorFields } from "./ConnGroupColorFields";
+import { ConnSessionFields } from "./ConnSessionFields";
 import { ConnTestResult } from "./ConnTestResult";
 import { parseDbError } from "../../lib/db";
 import { dbApi, type DbConn, type DbConnInput, type TestResult } from "../../lib/dbApi";
@@ -72,6 +73,8 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
     noStmtCache: f.noStmtCache,
     group: f.group.trim() || null,
     color: f.color || null,
+    keepAliveSec: f.keepAliveSec,
+    initSql: f.initSql.trim() || null,
   });
 
   const missing = !f.url.trim() ? "连接串" : !f.user.trim() ? "用户名" : null;
@@ -255,6 +258,14 @@ export function ConnManualForm({ conn }: { conn: DbConn | null }) {
           </button>
         </div>
         <p className="dbx-hint">新会话采用此设置。已打开的会话在处理完待提交写入、重新连接后生效。</p>
+        <h3 className="dbx-form-section">会话维持</h3>
+        <ConnSessionFields
+          id={fieldId("session")}
+          keepAliveSec={f.keepAliveSec}
+          initSql={f.initSql}
+          onKeepAlive={(keepAliveSec) => put({ keepAliveSec })}
+          onInitSql={(initSql) => put({ initSql })}
+        />
         <label htmlFor={fieldId("note")}>备注</label>
         <input id={fieldId("note")} className="dbx-inp" value={f.note} onChange={(e) => put({ note: e.target.value })} />
         <ConnTestResult test={test} needHome={needHome} onUseRust={() => put({ engine: "rust" })} />

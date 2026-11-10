@@ -277,6 +277,8 @@ mod tests {
                 no_stmt_cache: false,
                 group: String::new(),
                 color: String::new(),
+                keep_alive_sec: crate::db_conns::KEEP_ALIVE_DEFAULT,
+                init_sql: String::new(),
             }],
             db_active: Some("c1".to_string()),
             lang_enabled: true,

@@ -256,6 +256,31 @@ pub struct DbConnConfig {
     /// 前端只把这个值当 `data-color` 枚举用，样式表里逐个定义，绝不把它的内容拼进颜色值。
     #[serde(default)]
     pub color: String,
+    /// 空闲保活间隔（秒）。`0` = 不保活。
+    ///
+    /// **默认 240 秒**：Oracle 的 `SQLNET.EXPIRE_TIME`、企业防火墙与 NAT 会话表的
+    /// 空闲回收大多落在 5～30 分钟，240 秒能挡住其中绝大多数；再密就只是在审计日志里
+    /// 刷屏（DBA 抱怨的第一件事）。见 `db_keepalive.rs` 头注释。
+    ///
+    /// 用 `serde(default = …)` 而不是裸 `default`（那会得到 0 = 关）：老配置里没有这个
+    /// 字段，升级后应当**直接生效**——用户遇到的就是「闲置一阵回来连不上」。
+    #[serde(default = "default_keep_alive_sec")]
+    pub keep_alive_sec: u32,
+    /// 启动脚本：连上 / 自动重连之后立刻执行一遍的 SQL（多条用分号分隔）。
+    ///
+    /// 存在的理由：重连是一条**新会话**，旧会话上的 `ALTER SESSION`（`NLS_DATE_FORMAT`、
+    /// 时区、`SET ROLE`）与 `SETUP` 之类初始化全都不在。没这一项时界面上只能写一句
+    /// 「会话设置已重置」，让用户每次自己去补。
+    ///
+    /// 空串 = 没有启动脚本（老配置反序列化出来正是空串，不用写迁移）。
+    /// 切分规则见 `db_conns::split_init_sql`：不按行、按分号，且认 `BEGIN … END;` 块。
+    #[serde(default)]
+    pub init_sql: String,
+}
+
+/// 保活间隔的默认值（秒）。**不是 0**：见 `DbConnConfig::keep_alive_sec` 的注释。
+fn default_keep_alive_sec() -> u32 {
+    crate::db_conns::KEEP_ALIVE_DEFAULT
 }
 
 impl AppConfig {

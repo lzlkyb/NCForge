@@ -388,6 +388,8 @@
 .dbx-hitem.snip:hover .dbx-snipacts, .dbx-hitem.snip:focus-within .dbx-snipacts { opacity: 1; }
 .dbx-snipform { padding: 8px; border-bottom: 1px solid hsl(var(--border)); display: flex; flex-direction: column; gap: 6px; background: hsl(var(--secondary) / .35); flex-shrink: 0; }
 .dbx-snipform textarea.dbx-inp { height: auto; padding: 6px 9px; line-height: 1.5; resize: vertical; }
+/* 连接表单里的启动脚本：多行 SQL。必须显式放开高度，`.dbx-inp` 的固定控制高度会把它压成一行。 */
+.dbx-initsql { height: auto; min-height: calc(var(--dbx-h-control) * 2.4); padding: 6px 9px; line-height: 1.5; resize: vertical; }
 .dbx-snipform-row { display: flex; align-items: center; gap: 8px; font-size: var(--dbx-fs-meta); color: hsl(var(--muted-foreground)); }
 
 /* ── 会话与锁（只读面板） ──

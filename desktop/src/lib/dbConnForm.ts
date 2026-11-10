@@ -31,6 +31,10 @@ export interface DbConnForm {
   group: string;
   /** 颜色键（见 `lib/dbConnGroups.ts` 的 `CONN_COLORS`）。空 = 不标记，跟随环境色。 */
   color: string;
+  /** 空闲保活间隔（秒）。`0` = 关闭。后端 `KEEP_ALIVE_DEFAULT` 是 240。 */
+  keepAliveSec: number;
+  /** 启动脚本：连上 / 重连之后执行的 SQL（可多条，分号分隔）。空 = 没有。 */
+  initSql: string;
 }
 
 export function initialConnForm(conn: DbConn | null): DbConnForm {
@@ -53,6 +57,8 @@ export function initialConnForm(conn: DbConn | null): DbConnForm {
     noStmtCache: conn?.noStmtCache ?? false,
     group: conn?.group ?? "",
     color: conn?.color ?? "",
+    keepAliveSec: conn?.keepAliveSec ?? 240,
+    initSql: conn?.initSql ?? "",
   };
 }
 

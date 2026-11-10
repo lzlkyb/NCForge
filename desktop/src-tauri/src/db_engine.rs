@@ -143,10 +143,64 @@ pub struct EngineHandle {
     recovery: Mutex<Recovery>,
     cancel_epoch: AtomicU64,
     closed: AtomicBool,
+    /// 启动脚本：连上 / 重连之后立刻执行一遍（多条用分号分隔，见 `db_conns::split_init_sql`）。
+    ///
+    /// 放在句柄上而不是每次从配置现读：`reopen` 发生在 `call_guarded` 里、拿不到 `AppState`，
+    /// 而「重连后要恢复什么」恰恰是它必须知道的事。连接配置改动后重新连接时会重新设一次
+    /// （见 `commands::db_cmds::bridge_for`）。
+    init_sql: Mutex<String>,
+}
+
+impl EngineHandle {
+    fn new(inner: Engine) -> Self {
+        Self {
+            inner,
+            policy: None,
+            recovery: Mutex::default(),
+            cancel_epoch: AtomicU64::new(0),
+            closed: AtomicBool::new(false),
+            init_sql: Mutex::default(),
+        }
+    }
 }
 
 const PROBE_AFTER: Duration = Duration::from_secs(60);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// 保活探测的结论。只给日志与测试看，不进 UI。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeepAlive {
+    /// 刚活动过 / 没连上过 / 已关闭 / 已标断开：这轮不用探。
+    Skipped,
+    /// 有人正在用这条会话（长查询持着锁）：这轮不做，绝不能排队等。
+    Busy,
+    /// 探通了，`last_success` 已刷新。
+    Alive,
+    /// 探不通。**不标 `lost`**，留给下一次操作去走探测重连。
+    Dead,
+}
+
+impl KeepAlive {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            KeepAlive::Skipped => "skipped",
+            KeepAlive::Busy => "busy",
+            KeepAlive::Alive => "alive",
+            KeepAlive::Dead => "dead",
+        }
+    }
+}
+
+/// 长语句只取第一行：错误提示里塞进整段两百行 SQL 只会让输出区没法看。
+fn first_line(sql: &str) -> String {
+    let line = sql.lines().next().unwrap_or("").trim();
+    let clipped: String = line.chars().take(80).collect();
+    if line.chars().count() > 80 {
+        format!("{clipped}…")
+    } else {
+        clipped
+    }
+}
 
 #[derive(Default)]
 struct Recovery {
@@ -272,26 +326,45 @@ fn reconnect_unavailable(e: BridgeError) -> BridgeError {
 
 impl EngineHandle {
     pub fn java(bridge: Arc<Bridge>, session_id: impl Into<String>) -> Self {
-        Self {
-            policy: None,
-            recovery: Mutex::default(),
-            cancel_epoch: AtomicU64::new(0),
-            closed: AtomicBool::new(false),
-            inner: Engine::Java {
-                bridge,
-                sid: session_id.into(),
-            },
-        }
+        let mut h = Self::new(Engine::Java {
+            bridge,
+            sid: session_id.into(),
+        });
+        h.policy = None;
+        h
     }
 
     pub fn rust() -> Self {
-        Self {
-            inner: Engine::Rust(Box::default()),
-            policy: None,
-            recovery: Mutex::default(),
-            cancel_epoch: AtomicU64::new(0),
-            closed: AtomicBool::new(false),
+        Self::new(Engine::Rust(Box::default()))
+    }
+
+    /// 设启动脚本。空串 = 不执行。**每次连接前都会重设**，所以改了配置重连即生效。
+    pub fn set_init_sql(&self, sql: &str) {
+        let mut slot = self.init_sql.lock().unwrap_or_else(|e| e.into_inner());
+        slot.clear();
+        slot.push_str(sql.trim());
+    }
+
+    /// 连上 / 重连之后跑一遍启动脚本。返回第一条失败原因（`None` = 全部成功）。
+    ///
+    /// **不因失败回滚连接**：能连上就是能用了，为一段初始化 SQL 把会话判成失败，
+    /// 用户会连库都进不去。失败原因随结果带给前端，界面上提示一句就够。
+    ///
+    /// 逐条执行而不是整段丢给驱动：JDBC 的 `Statement.execute` 不接受多语句，
+    /// 整段发过去必然 ORA-00911，用户会以为是自己写错了。
+    fn run_init_sql(&self) -> Option<String> {
+        let sql = self
+            .init_sql
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        for stmt in crate::db_conns::split_init_sql(&sql) {
+            if let Err(e) = self.raw_call("exec", &[&stmt], Duration::from_secs(20)) {
+                log::warn!("启动脚本执行失败：{stmt} → {}", e.message);
+                return Some(format!("{}（语句：{}）", e.message, first_line(&stmt)));
+            }
         }
+        None
     }
 
     pub fn with_policy(mut self, policy: Arc<std::sync::RwLock<bool>>) -> Self {
@@ -423,7 +496,12 @@ impl EngineHandle {
                 self.raw_call("readOnly", &["true"], timeout)
                     .map_err(|e| Self::record_loss(&mut state, e, false))?;
             }
-            return Ok(serde_json::json!({"autoCommit": state.auto_commit && !readonly}));
+            // 重连出来的是**新会话**，启动脚本必须再跑一遍
+            let mut out = serde_json::json!({"autoCommit": state.auto_commit && !readonly});
+            if let Some(err) = self.run_init_sql() {
+                out["initError"] = Value::String(err);
+            }
+            return Ok(out);
         }
         let connecting = matches!(cmd, "connect" | "connectProp");
         if state.lost && !connecting {
@@ -601,6 +679,16 @@ impl EngineHandle {
         if cmd != "ping" {
             state.last_success = Some(Instant::now());
         }
+        // 连上 / 自动重连之后补跑启动脚本：新会话不继承上一条会话的 `ALTER SESSION`、
+        // 时区、`SET ROLE` 与包状态，静默换会话会让「同一条 SQL 结果不一样」变得无法解释。
+        // 放在 `settle_transaction_flag` 之后：启动脚本自己引起的会话状态变化也算进去。
+        if (connecting || reconnected) && !state.lost {
+            if let Some(err) = self.run_init_sql() {
+                if let Some(obj) = result.as_object_mut() {
+                    obj.insert("initError".into(), Value::String(err));
+                }
+            }
+        }
         if reconnected {
             // 告诉前端这一趟是「重连后再跑」的。旧会话的包状态与会话级设置
             // （NLS 格式、临时表、包变量）不会跟着回来，静默换会话会让用户
@@ -696,6 +784,38 @@ impl EngineHandle {
         match &self.inner {
             Engine::Java { bridge, .. } => bridge.alive(),
             Engine::Rust(eng) => eng.alive(),
+        }
+    }
+
+    /// 空闲保活：会话闲置满 `idle` 就探一次，让它别被防火墙 / `SQLNET.EXPIRE_TIME` 收掉。
+    ///
+    /// **不重连、不报错、不动状态机**：这里只是替用户维持会话活着。探不通时**故意不标
+    /// `lost`** —— 标了之后下一次 `call_guarded` 会在探测之前就返回「请重新连接」，
+    /// 恰好把「探测 → 自动重连」那条路挡在外面，比不做保活更糟。让它自然过期，
+    /// 由用户的下一个操作走既有的探测重连。
+    pub fn keepalive(&self, idle: Duration) -> KeepAlive {
+        // 长查询持着 recovery 锁：等锁等于给长查询再排一条队，直接跳过。
+        let Ok(mut state) = self.recovery.try_lock() else {
+            return KeepAlive::Busy;
+        };
+        if self.closed.load(Ordering::Acquire) || state.lost {
+            return KeepAlive::Skipped;
+        }
+        // 从没连上过（`last_success` 为空）就没有会话可保活，探也是白探。
+        let Some(last) = state.last_success else {
+            return KeepAlive::Skipped;
+        };
+        if last.elapsed() < idle {
+            return KeepAlive::Skipped;
+        }
+        match self.raw_call("probe", &[], PROBE_TIMEOUT) {
+            Ok(v) if v.get("alive").and_then(Value::as_bool) != Some(false) => {
+                // 探通了就等于这条会话刚刚活动过：顺手刷新，免得下一次用户操作
+                // 又去付一次 3 秒的探测。
+                state.last_success = Some(Instant::now());
+                KeepAlive::Alive
+            }
+            _ => KeepAlive::Dead,
         }
     }
 
@@ -1212,6 +1332,80 @@ mod tests {
         assert!(!stateless_query("select pkg.count(*) from dual"));
         assert!(!stateless_query("select sequence_1.nextval from dual"));
         assert!(!stateless_query("select * from t for update"));
+    }
+
+    /// 保活只探「连着、闲着、还没断」的会话；任何一条不满足就直接跳过，
+    /// 绝不能在后台替用户制造连接或抢占正在跑长查询的会话。
+    #[test]
+    fn 保活只在会话空闲且连通时才探() {
+        let idle = Duration::from_secs(240);
+        // 从没连上过：没有会话可保活
+        let fresh = EngineHandle::rust();
+        assert_eq!(fresh.keepalive(idle), KeepAlive::Skipped);
+
+        // 刚活动过：不到间隔不探
+        let busy_recent = EngineHandle::rust();
+        busy_recent.recovery.lock().unwrap().last_success = Some(Instant::now());
+        assert_eq!(busy_recent.keepalive(idle), KeepAlive::Skipped);
+
+        // 已经标记断开：等用户操作走探测 + 自动重连，后台不掺和
+        let lost = EngineHandle::rust();
+        {
+            let mut state = lost.recovery.lock().unwrap();
+            state.last_success = Some(Instant::now() - idle - idle);
+            state.lost = true;
+        }
+        assert_eq!(lost.keepalive(idle), KeepAlive::Skipped);
+
+        // 已关闭
+        let closed = EngineHandle::rust();
+        {
+            let mut state = closed.recovery.lock().unwrap();
+            state.last_success = Some(Instant::now() - idle - idle);
+        }
+        closed.closed.store(true, Ordering::Release);
+        assert_eq!(closed.keepalive(idle), KeepAlive::Skipped);
+
+        // 有人在用（长查询持着 recovery 锁）：跳过而不是排队等
+        let running = EngineHandle::rust();
+        {
+            let mut state = running.recovery.lock().unwrap();
+            state.last_success = Some(Instant::now() - idle - idle);
+        }
+        let held = running.recovery.lock().unwrap();
+        assert_eq!(running.keepalive(idle), KeepAlive::Busy);
+        drop(held);
+    }
+
+    /// 探不通时只报 `Dead`，**不能标 `lost`**：标了之后下一次 `call_guarded`
+    /// 会在探测之前就直接回「请重新连接」，恰好把自动重连那条路挡死。
+    #[test]
+    fn 保活失败不把会话标成断开() {
+        let h = EngineHandle::rust();
+        {
+            let mut state = h.recovery.lock().unwrap();
+            state.last_success = Some(Instant::now() - Duration::from_secs(600));
+        }
+        // 纯 Rust 引擎没连过库，`probe` 必然失败——正好当作「探不通」
+        assert_eq!(h.keepalive(Duration::from_secs(240)), KeepAlive::Dead);
+        assert!(
+            !h.recovery.lock().unwrap().lost,
+            "保活失败只说明这一轮探不通，不能替用户判死连接"
+        );
+    }
+
+    /// 启动脚本为空时一次桥调用都不发（空串是最常见的情况，不该有成本）。
+    #[test]
+    fn 启动脚本为空时不做任何调用() {
+        let h = EngineHandle::rust();
+        assert!(h.run_init_sql().is_none());
+        // 设了脚本但没连库：要把失败原因带出去，而不是静默吞掉
+        h.set_init_sql("alter session set nls_date_format='YYYY-MM-DD'");
+        let err = h.run_init_sql().expect("没连库时启动脚本必然失败");
+        assert!(
+            err.contains("nls_date_format"),
+            "要指出是哪条语句失败：{err}"
+        );
     }
 
     fn fake_bridge() -> Arc<Bridge> {

@@ -1239,6 +1239,8 @@ pub fn make_conn(
         no_stmt_cache: false,
         group: String::new(),
         color: String::new(),
+        keep_alive_sec: crate::db_conns::KEEP_ALIVE_DEFAULT,
+        init_sql: String::new(),
     })
 }
 

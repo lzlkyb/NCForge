@@ -58,6 +58,18 @@ export interface DbConn {
    * 前端把它当 `data-color` 枚举用，样式表里逐个定义。
    */
   color?: string;
+  /**
+   * 空闲保活间隔（秒）。`0` = 关闭。**默认 240**（老配置里没有这个字段时后端按 240 处理）。
+   *
+   * 闲置超过这个时间，后端会定时发一次探测，把会话从防火墙 / `SQLNET.EXPIRE_TIME`
+   * 的空闲回收里救出来——比「断开之后再重连」体验好得多。
+   */
+  keepAliveSec?: number;
+  /**
+   * 启动脚本：连上、以及断线自动重连之后各执行一遍的 SQL（多条用分号分隔）。
+   * 空串 / 缺失 = 没有。重连出来的是新会话，靠它恢复 `ALTER SESSION` 那类会话级设置。
+   */
+  initSql?: string;
 }
 
 /**
@@ -87,6 +99,10 @@ export interface DbConnInput {
   group?: string | null;
   /** 颜色键（空 / 不传 = 不标记）。不在白名单里的值后端会落空串。 */
   color?: string | null;
+  /** 空闲保活间隔（秒，`0` = 关）。不传 = 后端默认 240。 */
+  keepAliveSec?: number | null;
+  /** 启动脚本（空 / 不传 = 没有）。 */
+  initSql?: string | null;
 }
 
 /** 这个连接用哪个引擎、那个引擎能做什么。界面按它决定按钮能不能用。 */
@@ -226,6 +242,18 @@ export interface RowsResult {
   tx: TxInfo;
   /** 只在「改走 JVM 桥执行」时出现。 */
   fallback?: ExecFallback;
+  /**
+   * 这一趟是「会话超时 → 自动重连 → 再执行」的结果。
+   *
+   * 后端只在 SQL 尚未发出、且没有未提交事务时才自动重连。必须提示用户：旧会话的
+   * 包状态与会话级设置（NLS 格式、临时表、包变量）不会跟着回来。
+   */
+  reconnected?: boolean;
+  /**
+   * 启动脚本有一条执行失败时的原因（连接本身是好的）。
+   * 界面显示成一条警告，不要当成执行失败。
+   */
+  initError?: string | null;
 }
 
 export interface UpdateResult {
@@ -237,6 +265,10 @@ export interface UpdateResult {
   output: string[];
   tx: TxInfo;
   fallback?: ExecFallback;
+  /** 同 `RowsResult.reconnected`：这趟经过了「会话超时 → 自动重连」。 */
+  reconnected?: boolean;
+  /** 同 `RowsResult.initError`。 */
+  initError?: string | null;
 }
 
 export type ExecResult = RowsResult | UpdateResult;
@@ -312,6 +344,8 @@ export interface ConnectInfo {
   /** 被降级时的原因。界面要显示出来，否则用户以为自己在用 JVM 桥。 */
   engineNote?: string | null;
   preparedSlot?: string | null;
+  /** 启动脚本有一条失败时的原因。连接成功，但要让人知道会话设置可能没补齐。 */
+  initError?: string | null;
 }
 
 export interface PropSource {

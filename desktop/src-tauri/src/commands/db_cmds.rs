@@ -419,6 +419,12 @@ pub(crate) fn bridge_for(
     } else {
         engine
     };
+    // 启动脚本随配置走：每次取句柄都重设一遍，用户改了「初始化 SQL」再重连即生效。
+    // 放在这里而不是 `db_connect`：槽（`id#N`）与 JVM 兜底会话也要跑同一份脚本，
+    // 它们是**独立的新会话**，不跑就等于「开个新标签，会话级设置全丢」。
+    let init_sql = find_conn(cfg, policy_id)
+        .map(|c| c.init_sql)
+        .unwrap_or_default();
     if engine == EngineKind::Rust {
         // 纯 Rust 引擎连 config_dir 都不用建：它不读 NC 的任何文件
         let old = {
@@ -428,6 +434,7 @@ pub(crate) fn bridge_for(
                 .map_err(|_| "数据库桥状态异常".to_string())?;
             if let Some(existing) = map.get(key) {
                 if existing.kind() == EngineKind::Rust {
+                    existing.set_init_sql(&init_sql);
                     return Ok(existing.clone());
                 }
             }
@@ -437,6 +444,7 @@ pub(crate) fn bridge_for(
             old.shutdown();
         }
         let handle = Arc::new(EngineHandle::rust().with_policy(policy.clone()));
+        handle.set_init_sql(&init_sql);
         state
             .db
             .lock()
@@ -455,6 +463,7 @@ pub(crate) fn bridge_for(
             // java 路径与 classpath 都没变 = 还是同一套驱动，可以直接复用。
             // 引擎种类也要对上：同一个连接被改过引擎时，旧句柄不能拿来用。
             if existing.kind() == EngineKind::Java && existing.matches_env(&env) {
+                existing.set_init_sql(&init_sql);
                 return Ok(existing.clone());
             }
         }
@@ -466,6 +475,7 @@ pub(crate) fn bridge_for(
     }
     let bridge = shared_bridge(state, &env)?;
     let handle = Arc::new(EngineHandle::java(bridge, key).with_policy(policy.clone()));
+    handle.set_init_sql(&init_sql);
     state
         .db
         .lock()
@@ -913,6 +923,11 @@ pub struct DbConnectResult {
     pub engine_note: Option<String>,
     /// 首个 SQL 会话与主会话并行登录，避免首次查询串行承担两次握手。
     pub prepared_slot: Option<String>,
+    /// 启动脚本第一条失败的原因（`None` = 没配脚本或全部成功）。
+    ///
+    /// **连接本身仍然算成功**：能连上就是能用，为一段初始化 SQL 把会话判成失败会让
+    /// 用户连库都进不去。界面把它显示成一条警告。
+    pub init_error: Option<String>,
 }
 
 /// 连库。手动来源 `password` 为空时用存过的；`remember` 为真时把这次输入的口令存起来。
@@ -1004,6 +1019,10 @@ pub async fn db_connect(
         engine: actual.as_str().to_string(),
         engine_note,
         prepared_slot: prepared.map(|slot| slot.slot),
+        init_error: out
+            .get("initError")
+            .and_then(Value::as_str)
+            .map(str::to_string),
     })
 }
 
@@ -1892,6 +1911,47 @@ pub async fn reclaim_idle_db_slots(state: &AppState) {
     }
 }
 
+/// 空闲保活：给 primary 会话定时发一次探测，让防火墙 / `SQLNET.EXPIRE_TIME` 别把它收掉。
+///
+/// **为什么不放在前端 `setInterval`**：窗口最小化或被别的窗口挡住时，Chromium 会把
+/// 定时器节流到分钟级甚至暂停——而「切去别的软件干活、半小时后回来」正是最需要保活的
+/// 时刻。只有后端定时器不受影响。
+///
+/// **为什么只保 primary**：槽是给 SQL 标签用的临时会话，空闲本来就会回收
+/// （[`SLOT_IDLE`]）。保活它们等于把 3 个槽永久占住，用户再想开新会话就没额度了。
+///
+/// 每轮都重新读配置：用户关掉保活、改间隔、删连接，下一分钟就生效，不需要重启。
+pub async fn keep_alive_primaries(state: &AppState) {
+    let cfg = state.config.read().await.clone();
+    let engines: std::collections::HashMap<String, std::sync::Arc<crate::db_engine::EngineHandle>> =
+        match state.db.lock() {
+            Ok(map) => map.clone(),
+            Err(_) => return,
+        };
+    let jobs: Vec<(String, std::sync::Arc<crate::db_engine::EngineHandle>, u32)> = cfg
+        .db_conns
+        .iter()
+        .map(|c| (c, crate::db_conns::normalize_keep_alive(c.keep_alive_sec)))
+        .filter(|(_, sec)| *sec > 0)
+        .filter_map(|(c, sec)| engines.get(&c.id).map(|h| (c.id.clone(), h.clone(), sec)))
+        .collect();
+    for (id, handle, sec) in jobs {
+        let idle = Duration::from_secs(sec as u64);
+        let done = tauri::async_runtime::spawn_blocking(move || handle.keepalive(idle)).await;
+        match done {
+            // 探不通**不在这里重连**：后台悄悄重连会抢会话（尤其是有未提交事务时），
+            // 而用户的感受是「界面上的连接状态自己变了」。留给下一次操作走既有的
+            // 探测 → 自动重连流程，那条路有明确的提示与事务拦截。
+            Ok(crate::db_engine::KeepAlive::Dead) => {
+                log::info!("连接「{id}」的空闲保活探测失败，等下一次操作时自动重连");
+            }
+            Ok(crate::db_engine::KeepAlive::Alive) => log::debug!("连接「{id}」保活探测正常"),
+            Ok(_) => {}
+            Err(e) => log::warn!("连接「{id}」的保活任务异常：{e}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DbColumn {
@@ -2301,6 +2361,8 @@ mod tests {
             no_stmt_cache: false,
             group: String::new(),
             color: String::new(),
+            keep_alive_sec: crate::db_conns::KEEP_ALIVE_DEFAULT,
+            init_sql: String::new(),
         }
     }
 
