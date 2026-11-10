@@ -5,7 +5,7 @@ import { beginOperation, cancelOperation, getOperations } from "./operations";
 import { dbTaskSpec } from "./dbOperations";
 import { listen } from "./tauri";
 import { ensureConnected } from "./dbConfirm";
-import { connOf, execOne, patchTab, rtOf, sqlTabOf, type SqlTab } from "./dbStore";
+import { connOf, execOne, isRunning, patchTab, rtOf, sqlTabOf, type RunToken, type SqlTab } from "./dbStore";
 import { orderBySql } from "./serverSort";
 import { resultTargetIssue, type ResultExecutionContext } from "./dbResultContext";
 
@@ -33,7 +33,7 @@ export async function reSortOnServer(
   context?: ResultExecutionContext,
 ): Promise<void> {
   const tab = sqlTabOf(tabId);
-  if (!tab?.connId || tab.running) return;
+  if (!tab?.connId || isRunning(tab)) return;
   const issue = context && resultTargetIssue(context, connOf(tab.connId), rtOf(tab.connId).currentSchema ?? rtOf(tab.connId).info?.schema);
   if (issue) { toast(issue, "warning"); return; }
   const wrapped = orderBySql(sql, column, dir);
@@ -44,14 +44,16 @@ export async function reSortOnServer(
   if (!(await ensureConnected(tab.connId))) return;
   const task=beginOperation({...dbTaskSpec(`sort:${tabId}`,"数据库重排结果",tab.connId,tab.slot ? `独立会话 ${tab.slot}` : "主会话",undefined,tabId),cancel:()=>{const active=sqlTabOf(tabId);return active?.connId===tab.connId ? dbApi.cancel(tab.connId!,active.slot) : Promise.reject(new Error("来源标签已关闭或切换"));}});
   if(!task) return;
-  patchTab<SqlTab>(tabId, { running: true });
+  const token: RunToken = { id: task.id, connId: tab.connId, at: Date.now(), slot: tab.slot ?? null, kind: "execute" };
+  patchTab<SqlTab>(tabId, { run: token });
   try {
     const entry = await execOne(tabId, wrapped, (sqlTabOf(tabId)?.results.length ?? 0) + 1);
     task.finish(entry.cancelled ? "cancelled" : entry.kind==="error" ? "failed" : "success",entry.kind==="error" ? "重排未完成，返回结果页查看原因" : `已重新读取 ${entry.rows.length} 行${entry.hasMore ? "，仍有后续结果" : ""}`);
     const cur = sqlTabOf(tabId);
     patchTab<SqlTab>(tabId, { results: [...(cur?.results ?? []), entry], view: entry.id });
   } catch(error) {task.finish("failed","重排失败，返回数据库页查看原因");throw error;} finally {
-    patchTab<SqlTab>(tabId, { running: false });
+    // 只清自己这一趟：期间用户可能已切连接或发起新执行
+    if (sqlTabOf(tabId)?.run?.id === token.id) patchTab<SqlTab>(tabId, { run: undefined });
   }
 }
 

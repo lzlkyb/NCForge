@@ -3,7 +3,7 @@ import { trackOperation } from "./operations";
 import { dbTaskSpec } from "./dbOperations";
 import { dbApi, type PendingTxRow } from "./dbApi";
 import { askQuit, askUnsavedFiles, type QuitChoice, type QuitRow } from "./dbConfirm";
-import { connOf, getDb, loadConns, rtOf } from "./dbStore";
+import { connOf, getDb, isRunning, loadConns, rtOf } from "./dbStore";
 import { friendlyDbError } from "./db";
 import { requestOpenFile } from "./openFileRequest";
 import type { UnsavedFile } from "./saveAllDirty";
@@ -74,7 +74,7 @@ function localWriteEvidence(connId: string): { statements: number; busy: boolean
   for (const t of getDb().tabs) {
     if (t.connId !== connId) continue;
     if (t.kind === "sql") {
-      if (t.running) busy = true;
+      if (isRunning(t)) busy = true;
       if (t.tx) statements = Math.max(statements, t.tx.statements);
     } else if (t.kind === "dict" && t.state.running) {
       busy = true;

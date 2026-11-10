@@ -1,9 +1,9 @@
 import { expect, it } from "vitest";
 import { persistentTabsChanged, persistentTab } from "./dbTabPersistence";
 import type { SqlTab, TableTab } from "./dbStore";
-const sql = {kind:"sql",id:"s",title:"SQL",connId:"c",sql:"select 1",maxRows:500,timeoutSec:30,results:[],running:false} as unknown as SqlTab;
+const sql = {kind:"sql",id:"s",title:"SQL",connId:"c",sql:"select 1",maxRows:500,timeoutSec:30,results:[]} as unknown as SqlTab;
 it("runtime results, transaction and progress never dirty the persisted projection", () => {
-  expect(persistentTabsChanged([sql],[{...sql,running:true,results:[{} as never],view:"r",slot:"1"}])).toBe(false);
+  expect(persistentTabsChanged([sql],[{...sql,run:{ id: 1, connId: "c1", at: 0, slot: null, kind: "execute" },results:[{} as never],view:"r",slot:"1"}])).toBe(false);
   expect(persistentTab(sql)).not.toHaveProperty("results");
 });
 it("draft/settings and ordering changes are persisted", () => {

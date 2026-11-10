@@ -102,7 +102,7 @@ describe("退出前的未提交事务清单", () => {
   it("标签里还有执行中的语句时不按超时降级（写入可能正在路上）", () => {
     setConns([conn("c1")]);
     const tabId = openSqlTab("c1", "update t set x = 1");
-    patchTab(tabId, { running: true });
+    patchTab(tabId, { run: { id: 1, connId: "c1", at: 0, slot: null, kind: "execute" } });
     const rows = mergePending([
       { id: "c1", state: "unknown", reason: "timeout", statements: 0 },
     ]);

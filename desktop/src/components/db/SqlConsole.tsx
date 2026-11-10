@@ -14,7 +14,7 @@ import { cancelOperation, getOperations } from "../../lib/operations";
 import { dbApi } from "../../lib/dbApi";
 import { friendlyDbError } from "../../lib/db";
 import { guessTable } from "../../lib/resultExport";
-import { closeSessionPanel, openSessionPanel, sqlTabOf, useDbSelector, type SqlTab } from "../../lib/dbStore";
+import { closeSessionPanel, isRunning, openSessionPanel, sqlTabOf, useDbSelector, type SqlTab } from "../../lib/dbStore";
 import { useSqlConsoleSplit, type SqlConsoleFocus } from "../../hooks/useSqlConsoleSplit";
 import { useViewActive } from "../../lib/viewActivity";
 import "../../db-execution.css";
@@ -103,7 +103,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
     <div className="dbx-console">
       <SqlToolbar
         tab={tab}
-        scope={tab.running ? executingScopes.current.get(tab.id) ?? null : scope}
+        scope={isRunning(tab) ? executingScopes.current.get(tab.id) ?? null : scope}
         focusMode={split.focus}
         onFocusChange={focus}
         onRun={(m, collectStats) => void run(m, collectStats)}

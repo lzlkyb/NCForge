@@ -67,7 +67,6 @@ function tabWith(e: ResultEntry): SqlTab {
     view: e.id,
     output: [],
     plan: null,
-    running: false,
   };
 }
 

@@ -15,7 +15,7 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock("./dbConfirm", () => ({ ask: h.ask, askUnsavedFiles: h.askUnsaved }));
 vi.mock("./dbApi", () => ({ dbApi: { pendingTx: h.pendingTx } }));
-vi.mock("./dbStore", () => ({ getDb: () => h.db, loadConns: h.loadConns }));
+vi.mock("./dbStore", () => ({ getDb: () => h.db, loadConns: h.loadConns, isRunning: (t: { run?: unknown } | null | undefined) => !!t?.run }));
 vi.mock("./workspaceSession", () => ({ getSession: () => h.session }));
 vi.mock("./ncTasks", () => ({ isNcTaskRunning: () => h.running }));
 // 与真实实现同规则：`mergePending` 只做状态到 kind 的搬运，`backendCleanRows`
@@ -59,7 +59,7 @@ describe("更新安装前的工作保护", () => {
   it.each(["compile", "task", "sql", "dict"])("运行中的 %s 阻止安装", async kind => {
     if (kind === "compile") h.session.compiling = true;
     if (kind === "task") h.running = true;
-    if (kind === "sql") h.db.tabs = [{ kind: "sql", running: true }];
+    if (kind === "sql") h.db.tabs = [{ kind: "sql", run: { id: 1, connId: "c1", at: 0, slot: null, kind: "execute" } }];
     if (kind === "dict") h.db.tabs = [{ kind: "dict", state: { running: true } }];
     expect(await prepareRestart()).toBe(false); expect(h.pendingTx).not.toHaveBeenCalled();
   });

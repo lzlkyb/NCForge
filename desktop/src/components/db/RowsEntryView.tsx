@@ -12,7 +12,7 @@ import { guessTable } from "../../lib/resultExport";
 import { statsText, statsTitle } from "../../lib/dbStats";
 import { reSortOnServer } from "../../lib/dbResultActions";
 import { useColumnZh } from "../../lib/dbColumnZh";
-import { loadMore, type ResultEntry, type SqlTab } from "../../lib/dbStore";
+import { isRunning, loadMore, type ResultEntry, type SqlTab } from "../../lib/dbStore";
 import { useTxEpoch } from "../../lib/dbTxEpoch";
 import { reportEditCount, resultEditKey } from "../../lib/dbDirtyEdits";
 
@@ -107,7 +107,7 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
         // 有未写回改动时不自动续取：追加虽然保得住行号，但仍在编辑时突然插入新行会打断操作，
         // 需要续取请点底栏按钮（同样保留改动）。
         hasMore={entry.hasMore && !sets.length && !expired && !entry.moreError && !editData.dirty}
-        loadingMore={entry.loadingMore || tab.running}
+        loadingMore={entry.loadingMore || isRunning(tab)}
         onLoadMore={() => void loadMore(tab.id, entry.id)}
         // 加载中不提示（「正在确认…」弹出来只是噪音），确定不能改时才说明原因。
         blockedHint={!editData.edit && !editData.blocked.startsWith("正在") ? editData.blockedHint : undefined}
@@ -160,7 +160,7 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
               <button
                 type="button"
                 className="dbx-lk"
-                disabled={entry.loadingMore || tab.running}
+                disabled={entry.loadingMore || isRunning(tab)}
                 onClick={() => void loadMore(tab.id, entry.id)}
               >
                 {entry.loadingMore ? "加载中…" : entry.moreRetryable ? "重试加载" : `加载下 ${tab.maxRows} 行`}

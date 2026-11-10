@@ -4,7 +4,7 @@ import { useCodeDiags } from "../../lib/diagStore";
 import { countErrors, mergeProblems } from "../../lib/problemList";
 import { svnInfo, svnStatus } from "../../lib/svn";
 import { useState } from "react";
-import { activateTab, connOf, rtOf, useDbSelector } from "../../lib/dbStore";
+import { activateTab, connOf, isRunning, rtOf, useDbSelector } from "../../lib/dbStore";
 import { pendingDbSessions, type PendingDbSession } from "../../lib/dbPendingSessions";
 import { showWorkbenchDocument } from "../../lib/dockEvents";
 import { openLinkedDialog } from "../../lib/linkedDialog";
@@ -57,7 +57,7 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
         name: connOf(tab.connId)?.name ?? "数据库",
         status: rt.status,
         pending: tab.connId ? pendingDbSessions(s, tab.connId) : [],
-        running: s.tabs.some((t) => t.kind === "sql" && t.running),
+        running: s.tabs.some((t) => t.kind === "sql" && isRunning(t)),
       };
     },
     (a, b) =>

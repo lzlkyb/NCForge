@@ -4,6 +4,7 @@ import { dbApi } from "./dbApi";
 import { beginOperation, operationActive } from "./operations";
 import { dbTaskSpec, dbTxKey } from "./dbOperations";
 import { forgetColumnZh } from "./dbColumnZh";
+import { forgetProcArguments } from "./sqlProcArgs";
 import { ask, confirmProdWrite, ensureConnected, guardSlotTx, guardTx, isLastTabOn } from "./dbConfirm";
 import { clearFavorites } from "./dbFavorites";
 import {
@@ -18,6 +19,7 @@ import {
   explainInto,
   forgetColumns,
   getDb,
+  isRunning,
   loadConns,
   loadMeta,
   restoreClosedTab,
@@ -32,6 +34,7 @@ import {
   sqlTabOf,
   tabOf,
   type ResultEntry,
+  type RunToken,
   type SqlTab,
   type TableSub,
 } from "./dbStore";
@@ -119,7 +122,7 @@ async function guardRunning(tab: SqlTab | null | undefined, reason: string): Pro
     toast("等待当前事务操作结束后再" + reason, "info");
     return false;
   }
-  if (!tab?.running) return true;
+  if (!tab || !isRunning(tab)) return true;
   const ok = await ask(
     `${reason}正在执行的语句？`,
     "这个标签里还有语句在执行。取消是尽力而为：计算类语句立刻停下，正卡在库里的写语句可能已经跑完并提交，而结果不会再显示给你。",
@@ -150,7 +153,7 @@ export async function switchConn(tabId: string, connId: string) {
   await releaseSlot(tab.connId, tab.slot);
   // 结果必须一起清掉：留着上一个库的行，而「导出 / 复制为 insert」用的是**新**连接，
   // 两库同名表时导出的就是错数据，全程没有任何提示。计划同理（属于旧连接的执行计划）。
-  patchTab<SqlTab>(tabId, { connId, slot: null, tx: undefined, txNotice: undefined, results: [], view: null, plan: null, running: false, executionId: undefined });
+  patchTab<SqlTab>(tabId, { connId, slot: null, tx: undefined, txNotice: undefined, results: [], view: null, plan: null, run: undefined });
   void ensureConnected(connId);
 }
 
@@ -206,6 +209,8 @@ export async function disconnectConn(connId: string): Promise<boolean> {
   clearSlots(connId);
   forgetColumns(connId);
   forgetColumnZh(connId);
+  // 重连后过程参数可能已经改过（现场改包体很常见），签名帮助的缓存一起丢
+  forgetProcArguments(connId);
   return true;
 }
 
@@ -223,7 +228,7 @@ export async function deleteConn(connId: string) {
     clearSlots(connId);
     for (const t of getDb().tabs) {
       if (t.connId !== connId) continue;
-      if (t.kind === "sql") patchTab<SqlTab>(t.id, { connId: null, slot: null, tx: undefined, executionId: undefined, results: [], plan: null, view: null });
+      if (t.kind === "sql") patchTab<SqlTab>(t.id, { connId: null, slot: null, tx: undefined, run: undefined, results: [], plan: null, view: null });
       else closeTab(t.id, false); // 连接已删，这份表页恢复不出来，别塞进找回栈
     }
   } catch (e) {
@@ -246,11 +251,46 @@ export async function duplicateConn(connId: string) {
   }
 }
 
+/**
+ * 拖动排序。**拖到别的分组上 = 移进那个分组**（顺带排到它前面）。
+ *
+ * 为什么同时改分组：列表按分组折起来显示，如果拖动只改顺序不改分组，把 A 组的一条拖到
+ * B 组下面时，视觉上它还在 A 组里（组内顺序变），用户看到的是「拖了没反应」。
+ * 代价是跨组拖动要多一次保存（分组是连接属性，不在排序里），同组拖动仍然只调顺序。
+ */
 export async function moveConn(fromId: string, toId: string) {
-  const ids = getDb().conns.map((c) => c.id);
+  const conns = getDb().conns;
+  const ids = conns.map((c) => c.id);
   const from = ids.indexOf(fromId);
   const to = ids.indexOf(toId);
   if (from < 0 || to < 0 || from === to) return;
+  const moving = conns[from];
+  const target = conns[to];
+  const sameGroup = (moving.group ?? "") === (target.group ?? "");
+  if (!sameGroup) {
+    try {
+      await dbApi.save({
+        id: moving.id,
+        name: moving.name,
+        env: moving.env,
+        source: moving.source,
+        url: moving.url,
+        user: moving.user,
+        propDs: moving.propDs,
+        autoCommit: moving.autoCommit,
+        note: moving.note,
+        engine: moving.engine,
+        defaultSchema: moving.defaultSchema ?? null,
+        noStmtCache: moving.noStmtCache ?? false,
+        group: target.group ?? "",
+        color: moving.color ?? "",
+      });
+    } catch (e) {
+      toast(`改分组失败：${friendlyDbError(e)}`, "error");
+      return;
+    }
+    await loadConns();
+  }
   ids.splice(to, 0, ids.splice(from, 1)[0]);
   try {
     setConns(await dbApi.reorder(ids));
@@ -262,6 +302,7 @@ export async function moveConn(fromId: string, toId: string) {
 export async function refreshMeta(connId: string) {
   forgetColumns(connId);
   forgetColumnZh(connId);
+  forgetProcArguments(connId);
   await loadMeta(connId,true);
 }
 
@@ -310,7 +351,7 @@ export async function runStatements(
 ): Promise<RunOutcome> {
   const outcome: RunOutcome = { failLine: null, failures: [], done: 0, stoppedByUser: false };
   const tab = sqlTabOf(tabId);
-  if (!tab || tab.running || stmts.length === 0) return outcome;
+  if (!tab || isRunning(tab) || stmts.length === 0) return outcome;
   if (!tab.connId) {
     toast("先在工具条左边选一个连接", "warning");
     return outcome;
@@ -318,14 +359,28 @@ export async function runStatements(
   if (operationActive("db." + dbTxKey(tab.connId, tab.slot)) ||
     (tab.slot ? tab.txNotice : rtOf(tab.connId).txNotice)?.kind === "lost") return outcome;
   const connId = tab.connId;let stopRequested=false;
-  const task=beginOperation({...dbTaskSpec(`sql:${tabId}`,"执行 SQL",connId,tab.slot ? `独立会话 ${tab.slot}` : `SQL 标签 ${tab.title}`,connOf(connId)?.name,tabId),phase:"检查连接与执行范围",cancel:async()=>{const active=sqlTabOf(tabId);if(active?.connId!==connId) throw new Error("来源标签已关闭或切换");stopRequested=true;try {if(active.running) await dbApi.cancel(connId,active.slot);}catch(e){stopRequested=false;throw e;}}});
+  /**
+   * 服务器上真的有一条语句在跑。
+   *
+   * 「停止」只在它为真时才去发 `dbApi.cancel`：还在建连接、或两条语句之间点停止，
+   * 发出去的取消要么是空操作、要么撞「会话忙」，一旦抛错就会把 `stopRequested` 抹回去，
+   * 用户的停止请求就这么丢了（`dbOperationFeedback` 那条用例守的就是这个）。
+   */
+  let inFlight=false;
+  const task=beginOperation({...dbTaskSpec(`sql:${tabId}`,"执行 SQL",connId,tab.slot ? `独立会话 ${tab.slot}` : `SQL 标签 ${tab.title}`,connOf(connId)?.name,tabId),phase:"检查连接与执行范围",cancel:async()=>{const active=sqlTabOf(tabId);if(active?.connId!==connId) throw new Error("来源标签已关闭或切换");stopRequested=true;try {if(inFlight && isRunning(active)) await dbApi.cancel(connId,active.slot);}catch(e){stopRequested=false;throw e;}}});
   if(!task) return outcome;
-  patchTab<SqlTab>(tabId, { executionId:task.id });
-  // 本次执行的身份 / epoch：executionId 唯一，切连接、断开或发起新执行都会让它失效。
+  // 运行身份：一个对象说清「谁在跑、跑在哪、什么时候开始」。
+  //
+  // 以前这里是 `executionId` + `running` 两个字段各自复位：切连接后 `sameRun()` 变假，
+  // finally 里那条 `if (sameRun()) patchTab({running:false})` 就整条被跳过，
+  // 标签永久停在「执行中」。现在只有 `run` 一个事实，清它就是结束。
+  const token: RunToken = { id: task.id, connId, at: Date.now(), slot: tab.slot ?? null, kind: "execute" };
+  patchTab<SqlTab>(tabId, { run: token });
+  // 本次执行的身份 / epoch：任务 id 唯一，切连接、断开或发起新执行都会让它失效。
   // 之后所有写回（含 previousResults）都先复核，避免旧库的行落到新连接的标签上。
   const sameRun = () => {
     const cur = sqlTabOf(tabId);
-    if (!cur || cur.connId !== connId || cur.executionId !== task.id) return false;
+    if (!cur || cur.connId !== connId || cur.run?.id !== task.id) return false;
     // 不再比 slot：`execOne` 自己会在槽被空闲回收（`slot-gone`）后重开一条，那是合法换槽。
     // 拿换槽判「本次执行已失效」会把已经成功的结果整批丢掉、后续语句也不再跑，
     // 界面上是「已执行 0 / N 条」，而语句其实都执行了（历史与输出区里都有）。
@@ -339,7 +394,6 @@ export async function runStatements(
   const runConn = connOf(connId), runSchema = rtOf(connId).currentSchema ?? rtOf(connId).info?.schema;
   const contexts = stmts.map(statement => captureResultContext(connId, runConn, runSchema, statement.text, statement));
   setTxNotice(connId, tab.slot, tab.id);
-  patchTab<SqlTab>(tabId, { running: true });
   const kept: ResultEntry[] = [];
   let ddl = false;
   let lastProgress = -Infinity;
@@ -363,7 +417,10 @@ export async function runStatements(
         break;
       }
       if(stopRequested) {outcome.stoppedByUser=true;break;}
-      const r = await execOne(tabId, s.text, i + 1, contexts[i], opts.collectStats);
+      let r: Awaited<ReturnType<typeof execOne>>;
+      inFlight = true;
+      try { r = await execOne(tabId, s.text, i + 1, contexts[i], opts.collectStats); }
+      finally { inFlight = false; }
       // await 期间可能已经切连接：这条结果属于旧库，丢弃且不继续写回。
       if (!sameRun()) break;
       const connectionInterrupted = r.errorCode === "session-lost" || r.errorCode === "fallback-session-lost" || r.errorCode === "probe-failed";
@@ -401,7 +458,11 @@ export async function runStatements(
   } finally {
     task.update({progress:{done:outcome.done,total:stmts.length}});
     task.finish(outcome.stoppedByUser ? "cancelled" : outcome.failures.length ? "failed" : "success",`已执行 ${outcome.done} / ${stmts.length} 条${outcome.failures.length ? `，失败 ${outcome.failures.length} 条` : ""}；写入状态以连接详情与提交/回滚按钮为准`);
-    if (sameRun()) patchTab<SqlTab>(tabId, { running: false, ...(kept.length === 0 && !outcome.stoppedByUser ? { results: [], view: "output" } : {}) });
+    // 清的是「自己这一趟」：切了连接也要清（否则标签永久转圈），
+    // 但如果 `run.id` 已经换成别人的，说明新执行占着它，不能碰。
+    if (sqlTabOf(tabId)?.run?.id === token.id) {
+      patchTab<SqlTab>(tabId, { run: undefined, ...(kept.length === 0 && !outcome.stoppedByUser ? { results: [], view: "output" } : {}) });
+    }
   }
   // 建表 / 改表之后侧栏与补全要跟上
   if (ddl) void loadMeta(connId);

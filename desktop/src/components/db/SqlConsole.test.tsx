@@ -16,7 +16,7 @@ vi.mock("../../lib/dbApi", () => ({ dbApi: { cancel: mocks.cancel } }));
 vi.mock("../../lib/db", () => ({ friendlyDbError: (error: unknown) => String(error) }));
 vi.mock("../../lib/operations", () => ({ cancelOperation: mocks.cancelOperation, getOperations: () => [] }));
 vi.mock("../../lib/resultExport", () => ({ guessTable: () => "DUAL" }));
-vi.mock("../../lib/dbStore", () => ({ useDbSelector: (selector: (state: { sessionPanel: null }) => unknown) => selector({ sessionPanel: null }), closeSessionPanel: () => {}, openSessionPanel: () => {}, sqlTabOf: () => ({}) }));
+vi.mock("../../lib/dbStore", () => ({ isRunning: (t: { run?: unknown } | null | undefined) => !!t?.run, useDbSelector: (selector: (state: { sessionPanel: null }) => unknown) => selector({ sessionPanel: null }), closeSessionPanel: () => {}, openSessionPanel: () => {}, sqlTabOf: () => ({}) }));
 vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
 vi.mock("./HistoryDrawer", () => ({ HistoryDrawer: () => null }));
 vi.mock("./SnippetDrawer", () => ({ SnippetDrawer: () => null }));
@@ -47,7 +47,7 @@ vi.mock("./SqlEditor", async () => {
 vi.mock("./ResultPanel", () => ({ ResultPanel: ({ height }: { height: number }) => <div className="dbx-res" role="grid" tabIndex={0} data-height={height} /> }));
 import { SqlConsole } from "./SqlConsole";
 import { ViewActivityContext } from "../../lib/viewActivity";
-const base: SqlTab = { id: "a", kind: "sql", title: "SQL 1", connId: "c1", sql: "select 1 from dual;", maxRows: 200, timeoutSec: 30, results: [], output: [], plan: null, view: null, running: false, slot: "1" };
+const base: SqlTab = { id: "a", kind: "sql", title: "SQL 1", connId: "c1", sql: "select 1 from dual;", maxRows: 200, timeoutSec: 30, results: [], output: [], plan: null, view: null, slot: "1" };
 let root: Root, host: HTMLDivElement, frames: FrameRequestCallback[];
 beforeEach(() => {
   vi.clearAllMocks(); mocks.mounts = 0; mocks.unmounts = 0; mocks.publish = null;
@@ -80,7 +80,7 @@ it("诊断执行将采集选项传入执行器", async () => {
 it("脚本执行中冻结实际执行范围，随后修改编辑器不会把范围改成下一条 SQL", async () => {
   let finish!: (value: object) => void;
   mocks.run.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
-  render(); click("执行脚本"); render({ ...base, running: true });
+  render(); click("执行脚本"); render({ ...base, run: { id: 1, connId: "c1", at: 0, slot: null, kind: "execute" } });
   expect(shown()?.statements).toEqual(mocks.targets.a.script);
   act(() => mocks.publish!({ tabId: "a", selected: true, statements: [{ text: "select 99", startLine: 20, endLine: 20 }] }));
   expect(shown()?.statements).toEqual(mocks.targets.a.script);
@@ -125,7 +125,7 @@ it("进入比对后后台查询失败仍保留原编辑器光标与实例", asyn
 });
 
 it("停止仍使用当前标签的独立会话槽", async () => {
-  render({ ...base, running: true });
+  render({ ...base, run: { id: 1, connId: "c1", at: 0, slot: null, kind: "execute" } });
   await act(async () => click("停止"));
   expect(mocks.cancel).toHaveBeenCalledExactlyOnceWith("c1", "1");
 });

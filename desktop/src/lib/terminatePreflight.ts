@@ -1,6 +1,6 @@
 import { ask, askUnsavedFiles } from "./dbConfirm";
 import { dbApi } from "./dbApi";
-import { getDb, loadConns } from "./dbStore";
+import { getDb, isRunning, loadConns } from "./dbStore";
 import { backendCleanRows, mergePending } from "./quitGuard";
 import { pendingDbSessions } from "./dbPendingSessions";
 import { requestOpenFile } from "./openFileRequest";
@@ -89,7 +89,7 @@ export async function ensureFilesSaved(action = "退出", required = false): Pro
 export async function prepareRestart(): Promise<boolean> {
   const { isNcTaskRunning } = await import("./ncTasks");
   const hasRunningWork = () => getSession().compiling || isNcTaskRunning() || getDb().tabs.some(tab =>
-    tab.kind === "sql" ? tab.running : tab.kind === "dict" ? tab.state.running : false,
+    tab.kind === "sql" ? isRunning(tab) : tab.kind === "dict" ? tab.state.running : false,
   );
   if (hasRunningWork()) {
     toast("编译、数据库或 NC 任务仍在运行，请完成后再安装更新", "warning");

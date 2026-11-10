@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { claimCursor, connOf, connect, getDb, patchTab, rtOf, setTx, setTxNotice, sqlTabOf, txAction, type SqlTab } from "./dbStore";
+import { claimCursor, connOf, connect, getDb, isRunning, patchTab, rtOf, setTx, setTxNotice, sqlTabOf, txAction, type SqlTab } from "./dbStore";
 import { friendlyDbError, parseDbError } from "./db";
 import type { DbEnv, PendingTxReason, TxInfo } from "./dbApi";
 import { dbApi } from "./dbApi";
@@ -333,7 +333,7 @@ export async function reconnectSession(connId: string, slot: string | null, tabI
   const current = () => {
     if (!tabId) return true;
     const tab = sqlTabOf(tabId);
-    return tab?.connId === connId && (tab.slot ?? null) === slot && !tab.running;
+    return tab?.connId === connId && (tab.slot ?? null) === slot && !isRunning(tab);
   };
   const useConfigured = configured ?? shouldUseConfigured(connId, slot, tabId, fallback);
   const detail = useConfigured ? "当前会话将采用连接设置中的提交方式，其他会话各自保留原设置。请先核对上一次操作和未提交事务的结果。"

@@ -61,10 +61,10 @@ describe("数据库仓库切片订阅", () => {
     const p = mount(() => useActiveDbTab());
     expect(p.value?.id).toBe(fg);
     const first = p.renders;
-    act(() => patchTab<SqlTab>(bg, { running: true }));
-    act(() => patchTab<SqlTab>(bg, { running: false }));
+    act(() => patchTab<SqlTab>(bg, { run: { id: 1, connId: "c1", at: 0, slot: null, kind: "execute" } }));
+    act(() => patchTab<SqlTab>(bg, { run: undefined }));
     expect(p.renders).toBe(first);
-    act(() => patchTab<SqlTab>(fg, { running: true }));
+    act(() => patchTab<SqlTab>(fg, { run: { id: 1, connId: "c1", at: 0, slot: null, kind: "execute" } }));
     expect(p.renders).toBe(first + 1);
   });
 

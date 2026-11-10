@@ -183,7 +183,7 @@ describe("状态栏贡献", () => {
     expect(el.textContent).toContain("数据库 · 测试库");
     expect(el.textContent).toContain("1 个会话待提交");
 
-    act(() => patchTab<SqlTab>(tabId, { running: true }));
+    act(() => patchTab<SqlTab>(tabId, { run: { id: 1, connId: "c1", at: 0, slot: null, kind: "execute" } }));
     expect(el.textContent).toContain("查询中");
   });
 

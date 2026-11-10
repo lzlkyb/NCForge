@@ -4,7 +4,7 @@ import { Icon } from "../ui/icon";
 import { ConnPicker } from "./ConnPicker";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { switchConn } from "../../lib/dbActions";
-import { useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
+import { isRunning, useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
 import { useDbReadOnly } from "../../lib/dbReadOnly";
 import { useActiveOperation } from "../../lib/operations";
 import { TransactionButtons, TransactionMenu, TxBar, useDbTransaction } from "./TxBar";
@@ -43,7 +43,7 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   const operation = useActiveOperation('db.sql:' + tab.id);
   const stopping = operation?.state === "cancelling";
   const transaction = useDbTransaction({connId:tab.connId, tabId:tab.id, slot:tab.slot, tx:tab.tx, notice:tab.txNotice,
-    blocked:tab.running || !!operation, readOnly:readonly});
+    blocked:isRunning(tab) || !!operation, readOnly:readonly});
   const locked = !!transaction.active || transaction.lost;
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const scopeId = useId();
@@ -65,7 +65,7 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
     : statements.length ? `${statements.length} 条语句`
     : !currentScope ? "正在读取执行范围…" : currentScope.selected ? "选中内容没有可执行 SQL" : "光标处没有可执行 SQL";
   const disabledReason = !conn ? "请先选择数据库连接" : transaction.lost ? "事务结果待核对，请先核对当前会话"
-    : transaction.active ? "正在处理事务，等待数据库确认" : operation && !tab.running ? "正在等待上次操作结束" : null;
+    : transaction.active ? "正在处理事务，等待数据库确认" : operation && !isRunning(tab) ? "正在等待上次操作结束" : null;
   useEffect(() => { setMenu(null); }, [tab.id]);
 
   const popup = (el: HTMLElement, items: ContextMenuItem[]) => {
@@ -73,7 +73,7 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
     setMenu({ x: r.left, y: r.bottom + 4, items });
   };
 
-  const executionBlocked = !conn || locked || !!operation || tab.running;
+  const executionBlocked = !conn || locked || !!operation || isRunning(tab);
   const historyItem: ContextMenuItem = { label: historyOpen ? "收起执行历史" : "执行历史", icon: "history", disabled: !tab.connId, onSelect: onHistory };
   const snippetsItem: ContextMenuItem = { label: snipsOpen ? "收起 SQL 片段" : "SQL 片段", icon: "sqlSnippet", disabled: !tab.connId, onSelect: onSnips };
   const planItem: ContextMenuItem = { label: "执行计划（不真正执行）", icon: "queryPlan", disabled: executionBlocked || !statements.length, onSelect: onExplain };
@@ -105,8 +105,8 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
                 { label: "执行当前语句并采集统计", icon: "activity", disabled: !statements.length, onSelect: () => onRun("current", true) },
               ])}><Icon name="chevronDown" size={12} /></button>
           </div>
-          <button type="button" className="dbx-btn ghost dbx-stop-action" data-running={tab.running || undefined}
-            disabled={!tab.running || stopping || (rt.caps ? !rt.caps.cancel : false)} onClick={onStop}
+          <button type="button" className="dbx-btn ghost dbx-stop-action" data-running={isRunning(tab) || undefined}
+            disabled={!isRunning(tab) || stopping || (rt.caps ? !rt.caps.cancel : false)} onClick={onStop}
             aria-label={stopping ? "等待数据库停止确认" : "停止"} aria-busy={stopping}
             title={stopping ? "正在等待数据库停止确认" : rt.caps && !rt.caps.cancel ? "当前连接不支持中断语句" : "停止当前执行，等待数据库确认"}>
             <Icon name={stopping ? "spinner" : "stop"} size={15} />
@@ -128,7 +128,7 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
       </div>
       <DbContextBar compact connId={tab.connId} independent={!!tab.slot} transactionMode={transaction.mode}
         sessionControl={<><TransactionMenu key={tab.id} compact transaction={transaction} />{transaction.mode === "手动提交" && <TransactionButtons compact transaction={transaction} />}</>}
-        connectionControl={<ConnPicker connId={tab.connId} compact disabled={!!transaction.active || tab.running || !!operation} onPick={id => void switchConn(tab.id, id)} />} />
+        connectionControl={<ConnPicker connId={tab.connId} compact disabled={!!transaction.active || isRunning(tab) || !!operation} onPick={id => void switchConn(tab.id, id)} />} />
       {onFocusChange && <button type="button" className="dbx-btn ghost dbx-layout-action" aria-label="编辑器与结果布局" title="编辑器与结果布局" aria-haspopup="menu" onClick={event => popup(event.currentTarget, [
         { label: "专注结果", icon: "database", disabled: focusMode === "results", onSelect: () => onFocusChange("results") },
         { label: "专注编辑器", icon: "code", disabled: focusMode === "editor", onSelect: () => onFocusChange("editor") },

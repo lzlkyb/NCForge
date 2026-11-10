@@ -6,7 +6,7 @@ vi.mock("./tauri",()=>({listen:vi.fn(async(_event:string,handler:typeof feedback
 vi.mock("./dbApi", () => ({
   dbApi: { exportFile: vi.fn(), cancelExport: vi.fn() },
 }));
-vi.mock("./dbStore", () => ({ connOf:()=>({name:"测试连接"}),sqlTabOf: vi.fn(), execOne: vi.fn(), patchTab: vi.fn() }));
+vi.mock("./dbStore", () => ({ connOf:()=>({name:"测试连接"}),sqlTabOf: vi.fn(), isRunning: (t:{run?:unknown}|null|undefined)=>!!t?.run, execOne: vi.fn(), patchTab: vi.fn() }));
 vi.mock("./dbConfirm", () => ({ ensureConnected: vi.fn(async () => true) }));
 vi.mock("../components/ui/toast", () => ({ toast: vi.fn() }));
 

@@ -6,14 +6,14 @@ import type { SqlTab } from "../../lib/dbStore";
 import type { ContextMenuItem } from "../workspace/ContextMenu";
 const mocks = vi.hoisted(() => ({ switchConn: vi.fn(), readOnly: false as boolean | null }));
 vi.mock("../../lib/dbActions", () => ({ switchConn: mocks.switchConn }));
-vi.mock("../../lib/dbStore", () => ({ useConnOf: (id: string | null) => id ? ({ name: "测试库", env: "test", user:"NC", url:"jdbc:oracle:thin:@localhost:1521/test", autoCommit: false }) : null, useConnRt: () => ({ status: "connected" }), rtOf: () => ({ status: "connected" }) }));
+vi.mock("../../lib/dbStore", () => ({ isRunning: (t: { run?: unknown } | null | undefined) => !!t?.run, useConnOf: (id: string | null) => id ? ({ name: "测试库", env: "test", user:"NC", url:"jdbc:oracle:thin:@localhost:1521/test", autoCommit: false }) : null, useConnRt: () => ({ status: "connected" }), rtOf: () => ({ status: "connected" }) }));
 vi.mock("../../lib/dbReadOnly", () => ({ useDbReadOnly: () => mocks.readOnly, useDbReadOnlyState: () => ({ value: mocks.readOnly, error: "", retry: () => {} }) }));
 vi.mock("./ConnPicker", () => ({ ConnPicker: ({ disabled }: { disabled: boolean }) => <button disabled={disabled} aria-label="选择连接">测试库</button> }));
 vi.mock("../workspace/ContextMenu", () => ({ ContextMenu: ({ items, onClose }: { items: ContextMenuItem[]; onClose: () => void }) => <div role="menu">{items.map((item) => <button key={item.label} disabled={item.disabled} onClick={() => { item.onSelect(); onClose(); }}>{item.label}</button>)}</div> }));
 import { SqlToolbar } from "./SqlToolbar";
 import type { SqlExecutionScope } from "./SqlEditor";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-const tab: SqlTab = { id: "t1", kind: "sql", title: "SQL 1", connId: "c1", sql: "", maxRows: 200, timeoutSec: 30, results: [], output: [], plan: null, view: null, running: false, slot: "1", tx: { autoCommit: false, statements: 0, rows: 0, since: 0 } };
+const tab: SqlTab = { id: "t1", kind: "sql", title: "SQL 1", connId: "c1", sql: "", maxRows: 200, timeoutSec: 30, results: [], output: [], plan: null, view: null, slot: "1", tx: { autoCommit: false, statements: 0, rows: 0, since: 0 } };
 const scope: SqlExecutionScope = { tabId: tab.id, selected: false, statements: [{ text: "select 1 from dual", startLine: 2, endLine: 6 }] };
 type Props = Parameters<typeof SqlToolbar>[0];
 let root: Root;
@@ -61,7 +61,7 @@ describe("SQL 执行范围", () => {
     expect(host.querySelector(".dbx-scope")?.textContent).toBe("正在读取执行范围…");
   });
   it("执行期间原位保留停止入口", () => {
-    const props = render({ tab: { ...tab, running: true } });
+    const props = render({ tab: { ...tab, run: { id: 1, connId: "c1", at: 0, slot: null, kind: "execute" } } });
     expect(button("停止").disabled).toBe(false);
     expect(button("执行当前语句").disabled).toBe(true);
     act(() => button("停止").click());

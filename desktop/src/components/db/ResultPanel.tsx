@@ -10,7 +10,7 @@ import { ResultTabList, resultTabId } from "./ResultTabList";
 import { ResultBaselineSummary } from "./ResultCompare";
 import { thousands } from "../../lib/db";
 import { statsText, statsTitle } from "../../lib/dbStats";
-import { ownsCursor, patchTab, rtOf, summaryOf, type ResultEntry, type SqlTab } from "../../lib/dbStore";
+import { isRunning, ownsCursor, patchTab, rtOf, summaryOf, type ResultEntry, type SqlTab } from "../../lib/dbStore";
 import { ask } from "../../lib/dbConfirm";
 import { clearEditsForTab, pendingEdits, pendingForTab, resultEditKey, useEditRevision } from "../../lib/dbDirtyEdits";
 
@@ -19,7 +19,7 @@ export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: nu
   const [motionHost, setMotionHost] = useState<HTMLDivElement | null>(null);
   /** 看过的结果视图保活：切标签回来时本地筛选、排序、滚动与单元格选择都还在。 */
   const [kept, setKept] = useState<string[]>([]);
-  const operation = useOperationById(tab.executionId);
+  const operation = useOperationById(tab.run?.id);
   const active = !!operation && operation.endedAt === undefined;
   const valid = tab.view === "output" || tab.view === "plan" && tab.plan || tab.results.some(r => r.id === tab.view);
   const view = valid ? tab.view! : tab.results[tab.results.length - 1]?.id ?? "output";
@@ -67,16 +67,16 @@ export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: nu
   };
   const tabs = <><ResultTabList prefix={prefix} label="查询结果" items={items} value={view} onSelect={(id) => void setView(id)} />
     <ResultBaselineSummary />
-    <SqlExecutionFeedback executionId={tab.executionId} previousAt={cur ? cur.completedAt ?? 0 : undefined} />
+    <SqlExecutionFeedback executionId={tab.run?.id} previousAt={cur ? cur.completedAt ?? 0 : undefined} />
     {cur && !active && <span className="dbx-result-runmeta" title={cur.completedAt ? `执行完成于 ${new Date(cur.completedAt).toLocaleTimeString()}` : undefined}><span>{cur.kind === "rows" ? `${thousands(cur.rows.length)} 行 · ` : ""}{cur.ms} ms</span></span>}
-    {tab.results.length > 0 && <button type="button" className="dbx-ibtn" disabled={tab.running} aria-label="释放查询结果" title="释放已读取结果，保留 SQL 和事务" onClick={() => void release()}><Icon name="close" size={14}/></button>}
+    {tab.results.length > 0 && <button type="button" className="dbx-ibtn" disabled={isRunning(tab)} aria-label="释放查询结果" title="释放已读取结果，保留 SQL 和事务" onClick={() => void release()}><Icon name="close" size={14}/></button>}
   </>;
 
   return (
     <div className="dbx-res" style={{ height }}>
       <div className="dbx-result-head">{tabs}</div>
       <div className="dbx-result-view dbx-query-surface" ref={setMotionHost} id={`${prefix}-panel`} role="tabpanel" tabIndex={0} aria-labelledby={resultTabId(prefix, view)}>
-      {motionHost && <QueryField key={tab.executionId ?? "idle"} host={motionHost} state={motionState} previous={previous} />}
+      {motionHost && <QueryField key={tab.run?.id ?? "idle"} host={motionHost} state={motionState} previous={previous} />}
       {view === "plan" && tab.plan ? (
         <PlanView plan={tab.plan} connId={tab.connId} />
       ) : view === "output" || !cur ? (

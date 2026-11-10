@@ -103,6 +103,35 @@ export interface OutputLine {
   tone: "info" | "ok" | "bad" | "dbms";
 }
 
+/**
+ * 一次执行的「运行身份」。
+ *
+ * 以前这里是两个各自复位的字段：`running: boolean` + `executionId?: number`。分开存就有
+ * 「关了执行却忘了复位 running」「executionId 已换但 running 还是上一趟的」这类状态，
+ * 历史上那个「标签一直转圈、点了没反应」就是 `runStatements` 的 finally 挂在
+ * 「同一次执行」判断里，切了连接那一支直接跳过复位。
+ *
+ * 合成一个对象之后，**「在跑」只有一个事实**：`run` 存在就是在跑，清掉就是结束。
+ * 没有第二个字段可以忘。
+ */
+export interface RunToken {
+  /** 任务 id（`operations` 里的 id）：执行反馈、进度、停止都按它找。 */
+  id: number;
+  /** 发起执行时的连接。与 `tab.connId` 不一致 ⇒ 这趟已经过期（用户切了连接）。 */
+  connId: string;
+  /** 开始时间（ms）。 */
+  at: number;
+  /** 跑在哪个会话槽（`null` = primary）。停止时按它取消。 */
+  slot: string | null;
+  /** `execute` = 跑 SQL，`explain` = 执行计划。 */
+  kind: "execute" | "explain";
+}
+
+/** 这个标签现在是否在跑。所有 UI 读它，别再读字段。 */
+export function isRunning(tab: { run?: RunToken } | null | undefined): boolean {
+  return !!tab?.run;
+}
+
 export interface SqlTab {
   kind: "sql";
   id: string;
@@ -116,8 +145,8 @@ export interface SqlTab {
   view: string | null;
   output: OutputLine[];
   plan: { sql: string; rows: PlanRow[]; error?: string } | null;
-  running: boolean;
-  executionId?: number;
+  /** 正在跑的那一趟。`undefined` = 空闲。见 {@link RunToken}。 */
+  run?: RunToken;
   /**
    * 这个标签的独立会话槽（A0）。`null` = 还走 primary（还没执行过，或申请失败）。
    *
@@ -277,7 +306,7 @@ const newId = (p: string) => `${p}${Date.now().toString(36)}${(seq++).toString(3
 function newSqlTab(connId: string | null, sql: string, title: string): SqlTab {
   return {
     kind: "sql", id: newId("s"), title, connId, sql, maxRows: DEFAULT_MAX_ROWS, timeoutSec: DEFAULT_TIMEOUT,
-    results: [], view: null, output: [], plan: null, running: false, slot: null,
+    results: [], view: null, output: [], plan: null, slot: null,
   };
 }
 
@@ -491,11 +520,11 @@ export async function disconnect(id: string): Promise<void> {
   metadataVersions.set(id, (metadataVersions.get(id) ?? 0) + 1);
   setRt(id, { status: "idle", info: undefined, tx: undefined, txNotice: undefined, error: undefined, tablesLoading: false });
   // 连接已失效：清掉这条连接上所有标签的执行反馈与旧结果，避免「执行已停止」一直挂着。
-  // `running` 必须一起复位：执行中的标签被断开时，`runStatements` 的 finally 会因为
-  // `sameRun()` 变 false 而跳过复位，标签就永久停在「正在执行」，执行按钮全灰。
+  // `run` 必须一起清：执行中的标签被断开时，`runStatements` 那边即使自己不收尾，
+  // 这里也要把「在跑」这个事实抹掉，否则标签永久停在「正在执行」、执行按钮全灰。
   const tabs = state.tabs.map((t) =>
     t.kind === "sql" && t.connId === id
-      ? { ...t, executionId: undefined, results: [], plan: null, view: null, running: false }
+      ? { ...t, run: undefined, results: [], plan: null, view: null }
       : t,
   );
   set({ tabs });
@@ -780,7 +809,7 @@ function tabFromSnapshot(snap: Record<string, unknown>, id: string): DbTabItem |
       sql: typeof snap.sql === "string" ? snap.sql : "",
       maxRows: Number.isFinite(maxRows) && maxRows > 0 ? maxRows : DEFAULT_MAX_ROWS,
       timeoutSec: Number.isFinite(timeoutSec) && timeoutSec > 0 ? timeoutSec : DEFAULT_TIMEOUT,
-      results: [], view: null, output: [], plan: null, running: false, slot: null,
+      results: [], view: null, output: [], plan: null, slot: null,
     };
   }
   if (snap.kind === "table" && typeof snap.table === "string" && typeof snap.connId === "string") {
@@ -976,11 +1005,10 @@ export function clearSlots(connId: string): void {
           slot: null,
           tx: undefined,
           txNotice: undefined,
-          executionId: undefined,
+          run: undefined,
           results: [],
           plan: null,
           view: null,
-          running: false,
         }
       : t,
   );
@@ -1050,7 +1078,7 @@ export async function execOne(tabId: string, sql: string, index: number, context
 export async function loadMore(tabId: string, resultId: string): Promise<void> {
   const tab = sqlTabOf(tabId);
   const res = tab?.results.find((r) => r.id === resultId);
-  if (!tab?.connId || !res || res.moreError && !res.moreRetryable || res.loadingMore || tab.running) return;
+  if (!tab?.connId || !res || res.moreError && !res.moreRetryable || res.loadingMore || isRunning(tab)) return;
   const upd = (p: Partial<ResultEntry>) => {
     const cur = sqlTabOf(tabId);
     if (cur) patchTab<SqlTab>(tabId, { results: cur.results.map((r) => (r.id === resultId ? { ...r, ...p } : r)) });
@@ -1092,18 +1120,26 @@ export async function loadMore(tabId: string, resultId: string): Promise<void> {
 
 export async function explainInto(tabId: string, sql: string): Promise<void> {
   const tab = sqlTabOf(tabId);
-  if (!tab?.connId || tab.running) return;
+  if (!tab?.connId || isRunning(tab)) return;
   const connId = tab.connId;
-  patchTab<SqlTab>(tabId, { running: true });
+  const slot = tab.slot ?? null;
   try {
     // 与执行走同一个会话归属：标签有独立槽就用它，停止按钮取消的也正是这一条。
+    // 运行身份同样走 `run`：以前这里只置 `running` 不置任务，停止按钮找不到执行计划那条，
+    // 就去取消了一个空闲槽（见审查 S2-4）。
     const r = await trackOperation({
-      ...dbTaskSpec(`explain:${tabId}`,"读取执行计划",connId,tab.slot ? `独立会话 ${tab.slot}` : "主会话",connOf(connId)?.name,tabId),
-      cancel: () => dbApi.cancel(connId, tab.slot),
+      ...dbTaskSpec(`explain:${tabId}`,"读取执行计划",connId,slot ? `独立会话 ${slot}` : "主会话",connOf(connId)?.name,tabId),
+      cancel: () => dbApi.cancel(connId, slot),
       cancelled: dbCancelled,
-    }, () => dbApi.explain(connId, sql, tab.slot));
-    patchTab<SqlTab>(tabId, { plan: { sql, rows: r.plan }, view: "plan", running: false });
+    }, (handle) => {
+      patchTab<SqlTab>(tabId, { run: { id: handle.id, connId, at: Date.now(), slot, kind: "explain" } });
+      return dbApi.explain(connId, sql, slot);
+    });
+    patchTab<SqlTab>(tabId, { plan: { sql, rows: r.plan }, view: "plan" });
   } catch (e) {
-    patchTab<SqlTab>(tabId, { plan: { sql, rows: [], error: friendlyDbError(e) }, view: "plan", running: false });
+    patchTab<SqlTab>(tabId, { plan: { sql, rows: [], error: friendlyDbError(e) }, view: "plan" });
+  } finally {
+    // 只清自己这一趟：期间用户可能已经开了新执行（`run.kind` 变成 execute），别碰它。
+    if (sqlTabOf(tabId)?.run?.kind === "explain") patchTab<SqlTab>(tabId, { run: undefined });
   }
 }
