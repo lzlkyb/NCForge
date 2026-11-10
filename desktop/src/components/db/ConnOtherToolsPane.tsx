@@ -30,12 +30,19 @@ export function OtherToolsPane() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [paste, setPaste] = useState("");
+  /**
+   * 上一次导入被跳过的那几条（原因来自后端）。
+   *
+   * 弹窗在有跳过时会留在原地：只报前三条、又马上关窗，等于让用户猜剩下的为什么没进来。
+   */
+  const [skipped, setSkipped] = useState<string[]>([]);
 
   const run = useCallback(async (fn: () => Promise<ImportScan>) => {
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
     setErr(null);
+    setSkipped([]);
     try {
       const next = await fn();
       setScan(next);
@@ -125,18 +132,19 @@ export function OtherToolsPane() {
     try {
       const out = await dbApi.importApply(wants, env);
       await loadConns();
+      setSkipped(out.skipped);
       if (out.added === 0) {
         task.finish("failed", "没有新增连接：都已在连接列表里");
-        setErr(out.skipped.slice(0, 3).join("；") || "没有新增连接");
+        setErr(out.skipped.length ? `没有新增连接：选中的 ${out.skipped.length} 个都被跳过，原因见下方「跳过明细」` : "没有新增连接");
         return;
       }
       task.finish("success", `已导入 ${out.added} 个连接${out.skipped.length ? `，跳过 ${out.skipped.length} 个` : ""}`);
-      // 弹窗马上关掉，跳过原因必须在这里说全：只截前 3 条等于让用户猜剩下的为什么没进来。
-      if (out.skipped.length) {
-        const more = out.skipped.length > 3 ? ` 等 ${out.skipped.length} 条` : "";
-        toast(`已导入 ${out.added} 个，跳过 ${out.skipped.length} 个：${out.skipped.slice(0, 3).join("；")}${more}`, "warning");
+      // 一条都没跳过才关窗；有跳过就留在面板上逐条列原因，让用户看着处理。
+      if (out.skipped.length === 0) {
+        closeConnDialog();
+        return;
       }
-      closeConnDialog();
+      toast(`已导入 ${out.added} 个，跳过 ${out.skipped.length} 个：原因见「跳过明细」`, "warning");
     } catch (e) {
       task.finish("failed", "配置导入失败，返回连接配置查看原因");
       setErr(friendlyDbError(e));
@@ -200,6 +208,15 @@ export function OtherToolsPane() {
         <input ref={prefsRef} type="file" accept=".prefs,.ora,.txt" multiple hidden onChange={(e) => void pickPrefs(e.target.files)} />
 
         {err && <div className="dbx-badline" role="alert"><Icon name="alert" size={14} /><span>{err}</span></div>}
+        {skipped.length > 0 && (
+          <section className="dbx-import-skipped" role="status" aria-labelledby="import-skipped-title">
+            <div className="dbx-import-section-heading">
+              <h3 id="import-skipped-title">跳过明细 <span>{skipped.length}</span></h3>
+              <button type="button" className="dbx-btn" onClick={() => setSkipped([])}>知道了</button>
+            </div>
+            <ol>{skipped.map((why, i) => <li key={`${i}:${why}`}>{why}</li>)}</ol>
+          </section>
+        )}
         {scan && (
           <section className="dbx-import-preview" aria-labelledby="import-preview-title">
             <div className="dbx-import-section-heading">

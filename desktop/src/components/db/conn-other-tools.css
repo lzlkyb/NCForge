@@ -45,6 +45,10 @@
 .dbx-import-notes summary { cursor:pointer; }
 .dbx-import-notes ul { margin:8px 0 0; padding-left:20px; overflow-wrap:anywhere; }
 .dbx-import-notes li + li { margin-top:6px; }
+/* 跳过明细：一次导入被跳过的条目可能十几条，滚起来看，不要把弹窗撑高。 */
+.dbx-import-skipped { border:1px solid hsl(var(--warning) / .32); border-radius:8px; padding:12px 14px; background:hsl(var(--warning) / .07); }
+.dbx-import-skipped ol { margin:0; padding-left:20px; max-height:132px; overflow:auto; color:hsl(var(--muted-foreground)); font-size:var(--dbx-fs-meta); line-height:1.7; overflow-wrap:anywhere; }
+.dbx-import-skipped li + li { margin-top:4px; }
 .dbx-import-env { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
 .dbx-import-env > span { color:hsl(var(--muted-foreground)); }
 .dbx-import-footnote { margin:0; color:hsl(var(--muted-foreground)); font-size:var(--dbx-fs-meta); line-height:1.6; }

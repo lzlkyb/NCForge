@@ -407,3 +407,56 @@ S3-1 → S3-10 按上面的修复方向逐条做；优先级：表页 CLOB 完�
 | S4-2 拖列宽卡顿 | 需要 500 行 + CLOB + 换行模式下实测帧时间，确认是否达到用户可感知阈值 |
 
 除此之外的条目均由源码直接判定；审查期间没有修改任何文件，也没有执行测试套件。
+
+---
+
+## 收尾记录（同日执行）
+
+按 S2/S3/S4 与 a11y 逐条回源码核对后，**多数条目在 0.4.0 之后的提交里已经落地**，本轮只补了仍有缺口的项。核对以源码为准，不以条目原文为准。
+
+### 本轮补的
+
+| 项 | 改动 | 证据 |
+|---|---|---|
+| S3-7 导入跳过原因只报前 3 条 | 有跳过项时**不再关窗**，面板上逐条列出全部原因（`.dbx-import-skipped`，最多 132px 内部滚动，可「知道了」收起）；toast 改成只报数量并指向明细；`PropsFileImportPane` 的文件 input 在 `finally` 里清 `value` | `ConnOtherToolsPane.tsx` / `conn-other-tools.css` / `ConnOtherToolsPane.test.tsx`（新增 1 条：4 条跳过全部渲染、不关窗、可收起） |
+
+### 核对了但已经不需要改（源码为证）
+
+| 项 | 现状 |
+|---|---|
+| S2-1 脏编辑登记 | `dbDirtyEdits` 计数 + `DbDocTabs` 圆点；切标签/恢复标签/新建控制台/打开表页/打开字典/切连接/释放结果/关标签都过 `confirmDiscardEdits`；表页另有 `useTableTabSync` 拦切子页 |
+| S2-2 冷连接 | `ExtractSqlDialog` 等入口先 `await ensureConnected` |
+| S2-3 取消与超时拆 code | `db_rust.rs` 独立 `cancelled`；超时文案写「等待超过 {timeout_sec} 秒」 |
+| S2-4 explain 会话归属 | `explainInto` 建的是 `RunToken{kind:"explain"}`，`cancel` 走同一 `slot`，`finally` 只清自己这趟 |
+| S2-5 / S2-6 续取失效 | 非 owner 写 `moreError`；`expired = session-lost / slot-gone / cursor-closed` 不可重试 |
+| S2-7 只读探测 | `useDbReadOnlyState` 带 `error` + `retry`；`blocked` 补「只读状态未确认」 |
+| S2-8 空草稿 | `useTableSave` 校验前过滤 `values.size > 0` |
+| S2-9 回滚后假象 | `dbTxEpoch` 按连接+槽广播；`useTableTabSync` 触发重载、`useResultSetEdit` 清 `applied`、结果页给「可能过期」提示 |
+| S2-10 测试/保存共键 | 已拆 `connection.test:` / `connection.save:` |
+| S3-1 表页完整值 | `TableData` 已传 `lob`；`CellDetail` 支持按行定位重查 |
+| S3-2 拖列宽清选区 | `setLayoutOnly` 不碰选区，`onWidths` 只写被拖那一列；`setColumns` 只在可见列/顺序/冻结变化时清 |
+| S3-3 页码/筛选持久 | `dbTableView` 按「连接 + 表」存 `{where,order,params,page}`，重进表页先读它；`tab.query` 只作旧数据兜底 |
+| S3-4 筛选与加载失败 | `connHits` 只保留自身或子对象命中的连接；`DbMessages` 给可重试的错误条；`DbTab` 空态按 `loadError` 分支 |
+| S3-5 最近关闭与重名 | `dropClosed` 只在恢复成功后出栈；SQL 标签用「最小未使用编号」 |
+| S3-6 复制原始值 | 预览值已拦截并提示（`resultTransferClipboard`） |
+| S3-8 / S3-9 | 标签脏圆点；结果视图按 `resultId` 保活（`key={r.id}` + `hidden`） |
+| S3-10 a11y | `aria-controls` 只给激活标签；`isComposing` 判断；Esc 后 `queueMicrotask` 复位 |
+| S4-1 全量订阅 | `operations` 提供按键选择器（`useOperation*`），db 组件已不再全量订阅 |
+| S4-2 拖列宽行高 | `useGridRowLayout` 在拖动期间冻结节高缓存，`pointerup` 后重算 |
+| S4-4 默认超时 | SQL 默认 60s、表页 `DEFAULT_TABLE_TIMEOUT = 60`；超时与「停止」文案已分开 |
+| S4-5 历史写盘 | `dbHistory` 写盘节流 |
+| S4-6 对象查找 | `hits` 有 `useMemo`，只在清单/关键词/recent 变化时重算 |
+| S4-7 会话轮询 | 间隔 10s，且只在抽屉可见（`visible`）时轮询 |
+| S4-8 切结果标签重拉结构 | 不再直连 `dbApi.columns` |
+
+### 明确延期：S4-3 表页独立会话槽
+
+不做的理由（不是排期问题，是耦合问题）：
+
+1. 表页当前是 **primary 上带事务** 的读：`useDbTransaction({connId})`、`TxBar`、`guardTx`、退出确认都按连接级 primary 判定。只把查询搬到槽上而事务不动，等于「读在槽 A、commit 在 primary」——回滚会漏掉真正写过的会话，这是数据错误，不是体验问题。
+2. 要一起动的清单：`TableTab` 加 `slot`、`useTableTabSync`、`useTableSave` → `dbOptimisticEdit` 计划执行的槽、`guardTx` / `quitGuard` / `dbConfirm.guardAllSessions` 的槽遍历、`clearSlots` 分派。牵一发动全身，且必须有真实 Oracle 做「写→回滚→再读」的现场验证。
+3. 槽位上限 `MAX_SLOTS = 3`：表页先占会挤掉 SQL 标签（SQL 现在失败还能退回 primary，表页退回 primary 就等于没改）。
+
+已具备的缓解：表页查询可取消（`dbApi.cancel(connId,null)`）、超时可配（`tab.timeoutSec`，默认 60）、翻页用 seek 而不是游标续取。剩下的痛点只有「两个表页不能并行 / 与回退到 primary 的 SQL 标签排队」。
+
+重开条件：S1/S2 批次全部落地且有真实库现场；把表页事务一起搬进槽（含退出确认与守卫遍历），单独一批，不和其它项混做。

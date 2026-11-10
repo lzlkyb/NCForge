@@ -147,6 +147,34 @@ describe("从其他工具导入连接", () => {
     expect(finish).toHaveBeenCalledWith("success", "已导入 1 个连接");
   });
 
+  it("有跳过项时不关窗，逐条列出全部原因", async () => {
+    importDataGrip.mockResolvedValue(SCAN);
+    const skipped = ["旧库：连接已存在", "AIER：没有用户名", "PROD：解析不到 jdbc-url", "TEST：驱动不支持"];
+    importApply.mockResolvedValue({ added: 1, skipped });
+    await render();
+
+    await pickFiles(".xml", [
+      new File([MAIN], "dataSources.xml"),
+      new File([LOCAL], "dataSources.local.xml"),
+    ]);
+    act(() => host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[0].click());
+    await act(async () => {
+      byText("添加 1 个")!.click();
+    });
+
+    // 关窗就看不到原因了：有跳过时必须留在面板上，且条目不截断。
+    expect(closeConnDialog).not.toHaveBeenCalled();
+    const panel = host.querySelector(".dbx-import-skipped");
+    expect(panel).toBeTruthy();
+    expect(panel!.querySelectorAll("li")).toHaveLength(skipped.length);
+    for (const why of skipped) expect(panel!.textContent).toContain(why);
+
+    await act(async () => {
+      byText("知道了")!.click();
+    });
+    expect(host.querySelector(".dbx-import-skipped")).toBeNull();
+  });
+
   it("扫描本机走 db_import_plsql(scan=true)，提示照原样显示", async () => {
     importPlsql.mockResolvedValue({
       source: "C:\\Users\\me\\AppData\\Roaming\\PLSQL Developer 16\\Preferences\\me\\user.prefs；TNS_ADMIN\\tnsnames.ora",
