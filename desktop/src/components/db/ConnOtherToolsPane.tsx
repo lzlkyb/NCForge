@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { EnvChips } from "./EnvChips";
 import { friendlyDbError } from "../../lib/db";
@@ -31,7 +31,7 @@ export function OtherToolsPane() {
   const [busy, setBusy] = useState(false);
   const [paste, setPaste] = useState("");
 
-  const run = async (fn: () => Promise<ImportScan>) => {
+  const run = useCallback(async (fn: () => Promise<ImportScan>) => {
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
@@ -48,9 +48,9 @@ export function OtherToolsPane() {
       lock.current = false;
       setBusy(false);
     }
-  };
+  }, []);
 
-  const scanLocal = () => run(async () => {
+  const scanLocal = useCallback(() => run(async () => {
     const results = await Promise.allSettled([
       dbApi.scanDataGrip(), dbApi.importPlsql(true, null, null, null, null),
     ]);
@@ -62,8 +62,9 @@ export function OtherToolsPane() {
       } else if (result.status === "rejected") merged.warnings.push(friendlyDbError(result.reason));
     }
     return merged;
-  });
-  useEffect(() => { void scanLocal(); }, []);
+  }), [run]);
+  // 打开面板即扫一次本机配置；run 内部用 lock 防重入，这里不随依赖反复重跑。
+  useEffect(() => { void scanLocal(); }, [scanLocal]);
 
   /** 一次选多个 xml：带 `<jdbc-url>` 的是 dataSources.xml，其余带 `<user-name>` 的是 local。 */
   const pickXml = async (list: FileList | null) => {
