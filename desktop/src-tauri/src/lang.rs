@@ -218,6 +218,10 @@ fn swap_path_fields(v: &Value, from_dir: &Path, to_dir: &Path) -> Value {
                     let swapped = match (k.as_str(), x) {
                         ("path", Value::String(s)) => rel_under(&from_dir.to_string_lossy(), s)
                             .map(|rel| {
+                                // rel_under 只做字符串替换，返回的相对部分始终是反斜杠分隔。
+                                // 直接 Path::join 在 unix 上会拼出 `…/gl\src\A.java` 这种混斜杠路径，
+                                // 这里先换回本平台的分隔符再拼。
+                                let rel = rel.replace('\\', std::path::MAIN_SEPARATOR_STR);
                                 Value::String(to_dir.join(rel).to_string_lossy().into_owned())
                             })
                             .unwrap_or_else(|| x.clone()),
@@ -334,35 +338,54 @@ mod tests {
         );
     }
 
+    /// 影子目录 → 真实路径的映射（DAP `Source.path`）。
+    ///
+    /// 路径字面量随平台走：`rel_under` 只做字符串替换，拼回目标目录时才用**本平台**分隔符，
+    /// 所以 Windows 得到 `D:\ws\gl\src\A.java`，unix 得到 `/ws/gl/src/A.java`。
+    /// 早先这里写死 Windows 字面量，一上 macOS CI 两个 assert 全红。
     #[test]
     fn swap_path_fields_maps_stack_frame_sources_back_to_real() {
-        let shadow = Path::new(r"C:\data\shadow\gl");
-        let real = Path::new(r"D:\ws\gl");
+        let (shadow, real, outside) = if cfg!(windows) {
+            (r"C:\data\shadow\gl", r"D:\ws\gl", r"E:\other\C.java")
+        } else {
+            ("/data/shadow/gl", "/ws/gl", "/other/C.java")
+        };
+        let under = |base: &str, rest: &str| {
+            let sep = std::path::MAIN_SEPARATOR_STR;
+            format!("{base}{sep}{}", rest.replace('/', sep))
+        };
         let v = json!({
             "stackFrames": [
-                { "id": 1, "name": "A.run", "source": { "path": r"C:\data\shadow\gl\src\private\A.java" } },
-                // 大小写、正斜杠混用也要换
-                { "id": 2, "source": { "path": "c:/Data/Shadow/GL/src/B.java" } },
+                { "id": 1, "name": "A.run", "source": { "path": under(shadow, "src/private/A.java") } },
+                // 正斜杠写法（两个平台上都是分隔符）也要换
+                { "id": 2, "source": { "path": format!("{shadow}/src/B.java") } },
                 // 不在影子里（平台类、无源码帧）原样保留
-                { "id": 3, "source": { "path": r"E:\other\C.java" } },
-                { "id": 4, "name": r"C:\data\shadow\gl\src\D.java" }
+                { "id": 3, "source": { "path": outside } },
+                { "id": 4, "name": under(shadow, "src/D.java") }
             ]
         });
-        let out = swap_path_fields(&v, shadow, real);
+        let out = swap_path_fields(&v, Path::new(shadow), Path::new(real));
         assert_eq!(
             out["stackFrames"][0]["source"]["path"],
-            r"D:\ws\gl\src\private\A.java"
+            under(real, "src/private/A.java")
         );
         assert_eq!(
             out["stackFrames"][1]["source"]["path"],
-            r"D:\ws\gl\src\B.java"
+            under(real, "src/B.java")
         );
-        assert_eq!(out["stackFrames"][2]["source"]["path"], r"E:\other\C.java");
+        assert_eq!(out["stackFrames"][2]["source"]["path"], outside);
         // 只换 path 键，别的字段里碰巧是影子路径的文字不动
-        assert_eq!(
-            out["stackFrames"][3]["name"],
-            r"C:\data\shadow\gl\src\D.java"
-        );
+        assert_eq!(out["stackFrames"][3]["name"], under(shadow, "src/D.java"));
+    }
+
+    /// Windows 路径不区分大小写：前端填的工作区根与 canonicalize 后的大小写不同，
+    /// 也得认成同一个目录（否则整个模块的补全静默失效，见 `rel_under`）。
+    #[cfg(windows)]
+    #[test]
+    fn swap_path_fields_matches_case_insensitively() {
+        let v = json!({ "path": r"c:/DATA/shadow/GL\src\B.java" });
+        let out = swap_path_fields(&v, Path::new(r"C:\data\shadow\gl"), Path::new(r"D:\ws\gl"));
+        assert_eq!(out["path"], r"D:\ws\gl\src\B.java");
     }
 
     #[test]

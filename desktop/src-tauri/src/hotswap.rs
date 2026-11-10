@@ -726,23 +726,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// 路径一律用正斜杠写：Windows 与 unix 都把它当分隔符，断言才在两个平台等价
+    /// （反斜杠在 unix 上不是分隔符，写死 `C:\w\…` 的断言只会在 Windows 成立）。
     #[test]
     fn 按源码目录决定推给哪个_jvm() {
         let t = |p: &str| targets_for_source(Path::new(p));
         // (中间件, 客户端)
-        assert_eq!(t(r"C:\w\newar\arap\src\private\nc\A.java"), (true, false));
-        assert_eq!(t(r"C:\w\newar\arap\src\client\nc\ui\A.java"), (false, true));
-        assert_eq!(t(r"C:\w\newar\arap\src\public\nc\vo\A.java"), (true, true));
-        // 大小写、正斜杠混用
+        assert_eq!(t("C:/w/newar/arap/src/private/nc/A.java"), (true, false));
+        assert_eq!(t("C:/w/newar/arap/src/client/nc/ui/A.java"), (false, true));
+        assert_eq!(t("C:/w/newar/arap/src/public/nc/vo/A.java"), (true, true));
+        // 大小写混用
         assert_eq!(t("c:/w/newar/arap/SRC/Client/nc/A.java"), (false, true));
         // test 等其它目录保持加客户端之前的行为：只推中间件
-        assert_eq!(t(r"C:\w\newar\arap\src\test\nc\A.java"), (true, false));
+        assert_eq!(t("C:/w/newar/arap/src/test/nc/A.java"), (true, false));
         // 没有 src 段时同样回落到中间件
-        assert_eq!(t(r"C:\w\A.java"), (true, false));
+        assert_eq!(t("C:/w/A.java"), (true, false));
         // 工作区根目录本身叫 src：取最后一个 src
-        assert_eq!(t(r"D:\src\newar\arap\src\client\A.java"), (false, true));
+        assert_eq!(t("D:/src/newar/arap/src/client/A.java"), (false, true));
         // 包名里的 client 不算
-        assert_eq!(t(r"C:\w\arap\src\private\nc\client\A.java"), (true, false));
+        assert_eq!(t("C:/w/arap/src/private/nc/client/A.java"), (true, false));
+    }
+
+    /// Windows 的真实输入是反斜杠路径，单独守一遍（unix 上 `\` 不是分隔符，跑不了）。
+    #[cfg(windows)]
+    #[test]
+    fn 按源码目录决定推给哪个_jvm_反斜杠路径() {
+        let t = |p: &str| targets_for_source(Path::new(p));
+        assert_eq!(t(r"C:\w\newar\arap\src\private\nc\A.java"), (true, false));
+        assert_eq!(t(r"C:\w\newar\arap\src\client\nc\ui\A.java"), (false, true));
+        assert_eq!(t(r"D:\src\newar\arap\src\public\A.java"), (true, true));
     }
 
     #[test]
