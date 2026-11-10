@@ -28,6 +28,8 @@ Thumbs.db
 .codegraph/
 .impeccable/
 .workbuddy/
+# AI 编码助手做 UI 自检时落盘的界面截图（过程证据，验收完即可丢）
+.codex-artifacts/
 
 # 测试用独立 target 目录：跑 cargo test 时用 CARGO_TARGET_DIR=target-test 绕开
 desktop/src-tauri/target-test/
