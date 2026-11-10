@@ -1,6 +1,6 @@
 [package]
 name = "nc-forge"
-version = "0.3.0"
+version = "0.4.0"
 description = "NCForge —— NC65 / NCC 二开的轻量桌面工作台"
 edition = "2021"
 
