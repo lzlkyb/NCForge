@@ -4,6 +4,8 @@ import { columnsOf, rtOf, sqlTabOf } from "./dbStore";
 import { pickStatement } from "./sqlSplit";
 import { statementsOf } from "./sqlStmtCache";
 import { aliasMap, completionContext, SQL_KEYWORDS, tablesIn } from "./sqlComplete";
+import { callContext, hasOverloads, parameterLabel, pickOverload, signatureLabel } from "./sqlSignature";
+import { procArguments } from "./sqlProcArgs";
 import { tableLinks } from "./sqlLinks";
 import { openTable } from "./dbActions";
 
@@ -112,6 +114,48 @@ export function registerSqlProviders(): void {
       const used = tablesIn(stmtText).slice(0, 3);
       const cols = (await Promise.all(used.map((t, i) => columnItems(connId, t, range, i + 1)))).flat();
       return { suggestions: [...cols, ...keywords, ...tableItems(connId, range)] };
+    },
+  });
+
+  // 签名帮助：敲 `proc(` 或 `proc(a, ` 时列出参数（`all_arguments`）。
+  //
+  // 查不到同名过程就返回 null、什么都不弹——用户可能在写表函数、自己定义的过程，
+  // 或者名字敲错了一半；这时候弹一个空签名比不弹更打断。
+  // 只取**当前语句内**光标前的文本：长脚本里没必要为一次按键扫全文。
+  monaco.languages.registerSignatureHelpProvider("sql", {
+    signatureHelpTriggerCharacters: ["(", ","],
+    signatureHelpRetriggerCharacters: [","],
+    provideSignatureHelp: async (model, position) => {
+      const connId = sqlTabOf(tabIdOfModel(model))?.connId;
+      if (!connId) return null;
+      const offset = model.getOffsetAt(position);
+      const stmt = pickStatement(statementsOf(model), offset);
+      const before = stmt
+        ? stmt.text.slice(0, offset - stmt.start)
+        : model.getValue().slice(0, offset);
+      const ctx = callContext(before);
+      if (!ctx) return null;
+      const data = await procArguments(connId, ctx.name);
+      if (!hasOverloads(data)) return null;
+      const chosen = pickOverload(data.overloads, ctx.argIndex);
+      if (!chosen) return null;
+      const shortName = ctx.name.split(".").pop() ?? ctx.name;
+      return {
+        value: {
+          signatures: data.overloads.map((o) => ({
+            label: signatureLabel(shortName, o),
+            documentation: o.returns ? `函数，返回 ${o.returns}` : undefined,
+            parameters: o.args.map((a) => ({
+              label: parameterLabel(a),
+              documentation: a.defaulted ? "有默认值，可省略" : undefined,
+            })),
+          })),
+          activeSignature: data.overloads.indexOf(chosen),
+          // 用户多写了参数时夹到最后一个，别让高亮落到不存在的下标上
+          activeParameter: Math.min(ctx.argIndex, Math.max(0, chosen.args.length - 1)),
+        },
+        dispose: () => {},
+      };
     },
   });
 
