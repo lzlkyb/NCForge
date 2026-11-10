@@ -3,6 +3,7 @@
   "entry": [
     "src/design-preview/main.tsx",
     "src/design-preview/motion.tsx",
+    "src/design-preview/update-preview.tsx",
     "scripts/build-bridge-jar.mjs",
     "scripts/build-design-preview.mjs",
     "scripts/build-jdtls-ext.mjs",

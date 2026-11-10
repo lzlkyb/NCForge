@@ -26,19 +26,23 @@ it("低频日志保留页面和原快捷键位置，主导航只显示常用工�
   } finally { act(() => root.unmount()); host.remove(); }
 });
 
-it("未读提示保留数量说明，设置和版本按钮分别触发各自操作", () => {
+it("未读提示使用本版新内容语义，设置和版本按钮分别触发各自操作", () => {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host), navigate = vi.fn(); h.checkUpdate.mockClear();
   try {
     act(() => root.render(<SideNav activeTab="files" onNavigate={navigate} unreadCount={99} collapsed={false} />));
-    const settings = host.querySelector<HTMLButtonElement>('[aria-label="设置，99 项更新记录未读"]')!;
+    const settings = host.querySelector<HTMLButtonElement>('[aria-label="设置，有本版新内容"]')!;
     expect(settings.textContent).toContain("设置");
-    expect(settings.title).toContain("99 项更新记录未读");
+    expect(settings.title).toContain("查看本版新内容");
+    expect(settings.textContent).not.toContain("99");
+    expect(settings.querySelector(".changelog-dot")).not.toBeNull();
     act(() => settings.click());
     expect(navigate).toHaveBeenCalledExactlyOnceWith("settings");
     expect(h.checkUpdate).not.toHaveBeenCalled();
     act(() => host.querySelector<HTMLButtonElement>('[aria-label="检查更新"]')!.click());
     expect(h.checkUpdate).toHaveBeenCalledOnce();
+    act(() => root.render(<SideNav activeTab="settings" onNavigate={navigate} unreadCount={0} collapsed={false} />));
+    expect(host.querySelector(".changelog-dot")).toBeNull();
     expect(navigate).toHaveBeenCalledTimes(1);
   } finally { act(() => root.unmount()); host.remove(); }
 });

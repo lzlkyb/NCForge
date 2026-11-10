@@ -21,6 +21,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateProvider, friendlyError, useUpdate, type UpdateState } from "./UpdateContext";
 import { clearCompletedOperations, getOperations } from "../lib/operations";
+import { setUpdateDownloadPreference } from "../lib/updateDownloadPreference";
 import { APP_SLUG } from "../lib/about";
 
 // ─── 事件总线与 IPC 打桩 ────────────────────
@@ -149,6 +150,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   clearCompletedOperations();
   localStorage.clear();
+  localStorage.setItem("shell_update_auto_download", "false");
   h.handlers.clear();
   h.order.length = 0;
   h.beforeListen.mockReset();
@@ -744,13 +746,13 @@ describe("失败提示的打扰程度", () => {
 });
 
 describe("默认更新提醒", () => {
-  it("自动发现新版本默认打开详情，稍后不持久忽略", async () => {
-    await mount(); await emit("update:available", available()); expect(state().notesOpen).toBe(true);
+  it("自动发现新版本不打开详情，稍后不持久忽略", async () => {
+    await mount(); await emit("update:available", available()); expect(state().notesOpen).toBe(false);
     await act(async () => state().closeUpdateNotes());
     expect(localStorage.getItem(DISMISSED_KEY)).toBeNull();
     await emit("update:checking"); await emit("update:available", available());
     expect(state().notesOpen).toBe(false);
-    await emit("update:available", available("100.0.0")); expect(state().notesOpen).toBe(true);
+    await emit("update:available", available("100.0.0")); expect(state().notesOpen).toBe(false);
   });
   it("忽略只阻止自动弹框，手动仍可打开详情", async () => {
     localStorage.setItem(DISMISSED_KEY, "99.9.9");
@@ -758,10 +760,10 @@ describe("默认更新提醒", () => {
     await act(async () => state().openUpdateNotes()); expect(state().notesOpen).toBe(true);
     expect(h.invoke).not.toHaveBeenCalledWith("start_update");
   });
-  it("其它确认框关闭后才显示更新，不抢当前焦点", async () => {
+  it("其它确认框关闭后也不主动弹出更新", async () => {
     const modal = document.createElement("div"); modal.setAttribute("role", "dialog"); modal.setAttribute("aria-modal", "true"); document.body.appendChild(modal);
     await mount(); await emit("update:available", available()); expect(state().notesOpen).toBe(false);
-    await act(async () => modal.remove()); await flush(); expect(state().notesOpen).toBe(true);
+    await act(async () => modal.remove()); await flush(); expect(state().notesOpen).toBe(false);
   });
 });
 
@@ -773,9 +775,11 @@ describe("提醒等待期间的用户选择", () => {
     await act(async () => modal.remove()); await flush();
     expect(state().notesOpen).toBe(false);
   });
-  it("旧版稍后记忆不应继续阻止默认启动提醒", async () => {
+  it("旧版稍后记忆不影响手动查看更新", async () => {
     localStorage.setItem(APP_SLUG + ".dismissed_update_version", "99.9.9");
     await mount(); await emit("update:available", available());
+    expect(state().notesOpen).toBe(false);
+    await act(async () => state().openUpdateNotes());
     expect(state().notesOpen).toBe(true);
   });
 });
@@ -820,4 +824,51 @@ describe("更新任务按事件结束", () => {
     await advanceToRelaunch();
     expect(getOperations()[getOperations().length - 1]?.state).toBe("running");
   });
+});
+
+describe("后台自动准备更新", () => {
+  it("默认自动下载但不打开详情或自动安装", async () => {
+    localStorage.removeItem("shell_update_auto_download");
+    await mount(); await emit("update:available", available());
+    expect(h.invoke.mock.calls.filter(c => c[0] === "start_update")).toHaveLength(1);
+    expect(state().notesOpen).toBe(false);
+    await emit("update:available", available());
+    await emit("update:ready");
+    expect(state().status).toBe("ready");
+    expect(h.prepareRestart).not.toHaveBeenCalled();
+    expect(h.invoke).not.toHaveBeenCalledWith("install_update");
+    await act(async () => state().openUpdateNotes());
+    expect(state().notesOpen).toBe(true);
+    expect(h.relaunch).not.toHaveBeenCalled();
+  });
+  it("后台下载失败不弹错误提示，也不会无限重试", async () => {
+    localStorage.removeItem("shell_update_auto_download");
+    await mount(); await emit("update:available", available());
+    await emit("update:error", {message:"offline",code:"network"});
+    expect(state().errorToastAllowed).toBe(false);
+    await emit("update:available", available());
+    expect(h.invoke.mock.calls.filter(c => c[0] === "start_update")).toHaveLength(1);
+    await act(async () => state().downloadAndInstall());
+    expect(h.invoke.mock.calls.filter(c => c[0] === "start_update")).toHaveLength(2);
+  });
+  it("忽略的版本不自动下载，手动查看仍然可用", async () => {
+    localStorage.removeItem("shell_update_auto_download");
+    localStorage.setItem(DISMISSED_KEY,"99.9.9");
+    await mount(); await emit("update:available", available());
+    expect(h.invoke).not.toHaveBeenCalledWith("start_update");
+    await act(async () => state().openUpdateNotes());
+    expect(state().notesOpen).toBe(true);
+  });
+});
+
+it("关闭自动下载后不发起下载，开启后同一版本后台准备一次", async () => {
+  await mount(); await emit("update:available", available());
+  expect(h.invoke).not.toHaveBeenCalledWith("start_update");
+  await act(async () => setUpdateDownloadPreference(true));
+  expect(h.invoke.mock.calls.filter(c => c[0] === "start_update")).toHaveLength(1);
+  expect(state().notesOpen).toBe(false);
+  await act(async () => setUpdateDownloadPreference(false));
+  expect(localStorage.getItem("shell_update_auto_download")).toBe("false");
+  await emit("update:ready");
+  expect(h.invoke).not.toHaveBeenCalledWith("install_update");
 });

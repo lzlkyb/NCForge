@@ -26,11 +26,6 @@
 .settings-about-row-value { flex:1; min-width:0; overflow-wrap:anywhere; font-size:13px; line-height:1.65; }
 .settings-about-row-value.is-description { color:hsl(var(--muted-foreground)); }
 .settings-about-copyright { margin-top:15px; font-size:12px; color:hsl(var(--muted-foreground)); line-height:1.7; }
-.settings-about-details { margin-top:24px; padding-top:18px; border-top:1px solid hsl(var(--border)); }
-.settings-about-details > summary,.settings-about-technical > summary { cursor:pointer; color:hsl(var(--muted-foreground)); font-size:12px; line-height:1.6; padding:4px 0; }
-.settings-about-details dl { display:grid; grid-template-columns:104px minmax(0,1fr); gap:12px; margin:16px 0; font-size:12px; line-height:1.6; }
-.settings-about-details dt { color:hsl(var(--muted-foreground)); }
-.settings-about-details dd { margin:0; overflow-wrap:anywhere; }
 .settings-about-skeleton { display:inline-block; height:16px; width:70px; border-radius:4px; background:hsl(var(--secondary)); animation:settings-about-loading 1.3s ease-in-out infinite; }
 .settings-about :is([data-settings-item]):focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
 .settings-about-dialog { display:flex; flex-direction:column; width:min(800px,calc(100vw - 32px)); max-height:min(720px,calc(100dvh - 48px)); padding:0; overflow:hidden; }
@@ -57,17 +52,26 @@ html[data-ui-style="glass"] .settings-about-dialog .settings-about-license-text 
 .settings-about-history-meta h3 { font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; }
 .settings-about-history-meta > span { color:hsl(var(--muted-foreground)); font-size:12px; }
 .settings-about-history-group { margin-top:20px; }
-.settings-about-history-group h4,.settings-about-technical h4 { margin-bottom:7px; font-size:12px; font-weight:600; }
 .settings-about-history-group ul { margin:0; padding-left:19px; }
 .settings-about-history-group li { padding:4px 0; font-size:13px; line-height:1.8; overflow-wrap:anywhere; }
 .settings-about-history-body > .ui-button { margin-top:16px; }
 .settings-about :is(code),.settings-about-history-body code { font-size:.95em; background:hsl(var(--secondary)); padding:1px 3px; border-radius:3px; overflow-wrap:anywhere; }
 .settings-about-empty { padding:24px 0; color:hsl(var(--muted-foreground)); font-size:13px; line-height:1.7; }
-.settings-about-technical { margin-top:22px; padding-top:16px; border-top:1px solid hsl(var(--border)); }
-.settings-about-technical section { margin-top:16px; }
-.settings-about-technical pre { font-size:12px; line-height:1.7; white-space:pre-wrap; overflow-wrap:anywhere; color:hsl(var(--muted-foreground)); }
 .settings-about-license-text { flex:1; min-height:0; padding:24px; overflow:auto; font-family:inherit; font-size:13px; line-height:1.8; white-space:pre-wrap; overflow-wrap:anywhere; }
 @container settings-pane (max-width:520px) { .settings-about-row { flex-wrap:wrap; gap:9px; } .settings-about-row-label { flex-basis:100%; } .settings-about-row > .ui-button { margin-left:auto; } .wb-settings-body .settings-about-name h2 { font-size:20px; } }
 @media(max-width:650px) { .settings-about-dialog-head,.settings-about-dialog-foot,.settings-about-history-tools,.settings-about-history-body,.settings-about-license-text { padding-inline:18px; } .settings-about-history-tools > select { width:100%; } .settings-about-search { flex-basis:100%; min-width:0; } }
 @keyframes settings-about-loading { 50% { opacity:.45; } }
 @media(prefers-reduced-motion:reduce) { .settings-about-skeleton { animation:none; } }
+
+/* Flat, shared reading rhythm across About, history and available-update notes. */
+.settings-about { max-width:760px; }
+.release-feature-list { list-style:none; padding:0; margin:10px 0 18px; }
+.release-feature-list > li { padding:18px 0; border-bottom:1px solid hsl(var(--border)); }
+.release-feature-list > li:last-child { border-bottom:0; }
+.release-item-title { font-size:15px; font-weight:600; line-height:1.5; margin:0 0 6px; color:hsl(var(--foreground)); overflow-wrap:anywhere; }
+.release-item-body { font-size:14px; line-height:1.75; margin:0; color:hsl(var(--foreground)); overflow-wrap:anywhere; }
+.settings-about .settings-about-release-summary { font-size:14px; max-width:none; color:hsl(var(--muted-foreground)); }
+.settings-about-history-group ul { list-style:none; padding:0; }
+.settings-about-history-group li { padding:14px 0; border-bottom:1px solid hsl(var(--border)); }
+.settings-about-history-group h4.release-item-title { font-size:14px; margin-bottom:5px; }
+.settings-about-history-group > h4 { font-size:15px; margin-bottom:4px; }

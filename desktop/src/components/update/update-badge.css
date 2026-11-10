@@ -61,3 +61,17 @@ html[data-ui-style="glass"] .app-side .update-slot :is(.header-badge-update,.hea
 @media(forced-colors:active) {
   html[data-ui-style="glass"] .app-side .update-slot .header-badge,.update-slot .header-badge { border:1px solid ButtonText;background:ButtonFace;color:ButtonText; }
 }
+
+/* 有更新与更新记录未读是不同状态，徽章提供完整名称并保持安静。 */
+.update-slot .header-badge { min-height:26px;gap:5px;font-variant-numeric:tabular-nums; }
+.update-slot .header-badge-ready { font-weight:600; }
+.app-side-update[data-status="ready"] .app-side-update-icon { background:hsl(var(--primary)/.10);border-radius:6px; }
+.app-side-update:focus-visible,.update-slot button:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:2px; }
+
+/* 新内容是阅读提示，静态主题色圆点与下载/安装状态分别表达。 */
+.app-side .app-side-badge.changelog-dot {
+  position:absolute; width:6px; min-width:6px; height:6px; padding:0;
+  background:hsl(var(--primary)); animation:none; transition:none;
+}
+.app-side .changelog-dot::after { display:none; }
+.app-side .changelog-dot:hover { transform:none; }

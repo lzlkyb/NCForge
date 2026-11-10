@@ -1,11 +1,13 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CHANGELOG, CATEGORY_LABELS, type ChangeCategory, type ChangelogEntry } from "../../lib/about";
 import { useAppInfo } from "../../hooks/useAppInfo";
-import { isImeComposing } from "../../lib/utils";
+import { isImeComposing, markChangelogSeen, compareVersion } from "../../lib/utils";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { ReleaseText } from "./ReleaseText";
+import { groupReleaseItems } from "../../lib/releaseReading";
+import { ReleaseItem } from "./ReleaseItem";
 import "./settings-about.css";
 
 const CATEGORIES: ChangeCategory[] = ["feat", "improve", "fix", "sec"];
@@ -27,11 +29,13 @@ export function VersionHistoryDialog({ open, onClose, entries = CHANGELOG }: {
     setQuery(""); setCategory("all"); setLimit(PAGE_SIZE);
   }, [open, currentVersion, entries]);
   const entry = entries.find(item => item.version === version) ?? entries[0];
+  useEffect(() => {
+    if (open && entry && currentVersion && compareVersion(entry.version, currentVersion) <= 0) markChangelogSeen(entry.version);
+  }, [open, entry, currentVersion]);
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const matches = (text: string) => terms.every(term => text.toLocaleLowerCase().includes(term));
   const items = entry?.items.filter(item => (category === "all" || item.category === category) && matches(item.text)) ?? [];
   const visible = items.slice(0, limit);
-  const technical = category === "all" ? entry?.technical?.filter(note => matches(note.heading + " " + note.text)) ?? [] : [];
   const resetScroll = () => { setLimit(PAGE_SIZE); if (body.current) body.current.scrollTop = 0; };
   const clear = () => { setQuery(""); setCategory("all"); resetScroll(); };
   return <Modal open={open} onClose={onClose} ariaLabel="更新历史" className="modal-surface settings-about-dialog settings-about-history">
@@ -55,17 +59,12 @@ export function VersionHistoryDialog({ open, onClose, entries = CHANGELOG }: {
       {entry ? <>
         <div className="settings-about-history-meta"><h3>v{entry.version}</h3><span>记录日期 {entry.date}</span></div>
         {!terms.length && category === "all" && (entry.summary ?? entry.highlights ?? []).map((text, index) => <p className="settings-about-release-summary" key={index}><ReleaseText text={text} /></p>)}
-        {CATEGORIES.map(value => {
-          const group = visible.filter(item => item.category === value);
-          return group.length ? <section className="settings-about-history-group" key={value}><h4>{CATEGORY_LABELS[value]}</h4>
-            <ul>{group.map((item, index) => <li key={index}><ReleaseText text={item.text} /></li>)}</ul></section> : null;
-        })}
+        {groupReleaseItems(visible.map(item => ({label: CATEGORY_LABELS[item.category], text:item.text}))).map(group => <section className="settings-about-history-group" key={group.label}><h4>{group.label}</h4>
+          <ul>{group.items.map((text, index) => <li key={index}><ReleaseItem text={text} /></li>)}</ul></section>)}
         {items.length > limit && <Button variant="link" size="sm" onClick={() => setLimit(items.length)}>展开全部 {items.length} 条记录</Button>}
-        {!items.length && !technical.length && <div className="settings-about-empty" role="status"><p>{terms.length ? "没有找到相关记录，试试其他关键词。" : category === "all" ? "这个版本没有条目记录。" : "这个版本没有此类别的记录。"}</p>
+        {!items.length && <div className="settings-about-empty" role="status"><p>{terms.length ? "没有找到相关记录，试试其他关键词。" : category === "all" ? "这个版本没有条目记录。" : "这个版本没有此类别的记录。"}</p>
           {(query || category !== "all") && <Button variant="link" size="sm" onClick={clear}>清除筛选</Button>}</div>}
-        {technical.length > 0 && <details className="settings-about-technical" open={terms.length > 0 || undefined} key={`${version}:${query}`}>
-          <summary>技术记录 · {technical.length} 节</summary>{technical.map((note, index) => <section key={index}><h4>{note.heading}</h4><pre>{note.text}</pre></section>)}
-        </details>}
+
       </> : <div className="settings-about-empty" role="status"><p>还没有随包版本记录。</p></div>}
     </div>
     <footer className="settings-about-dialog-foot"><span aria-live="polite">{entry ? `显示 ${visible.length} / ${items.length} 条 · ${entries.length} 个随包版本` : "暂无版本记录"}</span>

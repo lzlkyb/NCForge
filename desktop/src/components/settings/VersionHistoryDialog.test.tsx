@@ -12,7 +12,7 @@ const entries: ChangelogEntry[] = [
   { version: "1.0.0", date: "2026-10-25", items: [{ category: "feat", text: "旧版本新增" }] },
 ];
 let host: HTMLDivElement, root: Root; const close = vi.fn();
-beforeEach(() => { vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); close.mockClear(); host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
+beforeEach(() => { localStorage.clear(); vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); close.mockClear(); host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 const render = (data = entries) => act(() => root.render(<VersionHistoryDialog open onClose={close} entries={data} />));
 const choose = (version: string) => act(() => { const select = host.querySelector("select")!; select.value = version; select.dispatchEvent(new Event("change", { bubbles: true })); });
@@ -24,12 +24,13 @@ it("打开默认选择实际运行版本；切换后摘要优先，长记录可�
   act(() => button("展开全部 20 条记录").click()); expect(host.querySelectorAll("li")).toHaveLength(20);
   expect(host.querySelector("script")).toBeNull(); expect(host.querySelector("code")?.textContent).toBe("代码");
 });
-it("筛选与搜索可恢复，技术匹配自动展开，关闭操作明确", () => {
+it("筛选与搜索可恢复，不展示工程记录，关闭操作明确", () => {
   render(); choose("2.0.0"); act(() => button("修复").click()); expect(host.querySelectorAll("li")).toHaveLength(10);
   query("不存在"); expect(host.textContent).toContain("没有找到相关记录");
   act(() => button("清除筛选").click()); expect(host.querySelectorAll("li")).toHaveLength(12);
-  query("private-code"); expect(host.querySelector("details")?.open).toBe(true);
-  expect(host.textContent).toContain("--all-targets"); act(() => button("关闭").click()); expect(close).toHaveBeenCalledOnce();
+  query("private-code"); expect(host.querySelector("details")).toBeNull();
+  expect(host.textContent).not.toContain("--all-targets");
+  expect(host.textContent).toContain("没有找到相关记录"); act(() => button("关闭").click()); expect(close).toHaveBeenCalledOnce();
 });
 it("没有随包版本时显示明确空状态", () => { render([]); expect(host.textContent).toContain("还没有随包版本记录"); expect(host.querySelector("select")).toBeNull(); });
 it("Esc 清空搜索，输入法组合期间不清空", () => {
@@ -38,4 +39,9 @@ it("Esc 清空搜索，输入法组合期间不清空", () => {
   expect(host.querySelector("input")!.value).toBe("记录");
   act(() => host.querySelector("input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
   expect(host.querySelector("input")!.value).toBe(""); expect(close).not.toHaveBeenCalled();
+});
+
+it("仅标记实际展示的已安装版本，未来随包版本不清除未来提醒", () => {
+  render(); expect(localStorage.getItem("shell_changelog_last_seen")).toBe("1.0.0");
+  choose("2.0.0"); expect(localStorage.getItem("shell_changelog_last_seen")).toBe("1.0.0");
 });

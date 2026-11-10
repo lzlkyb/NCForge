@@ -38,12 +38,20 @@ export function compareReleaseVersions(a: string, b: string): number | null {
 
 export function parseUpdateNotes(body?: string | null): ReleaseContent {
   const result: ReleaseContent = { summary: [], highlights: [], groups: [], paragraphs: [] };
-  let section = "", last: string[] | undefined;
+  let section = "", last: string[] | undefined, privateDepth = 0;
   for (const raw of (body ?? "").replace(HISTORY, "").split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) { last = undefined; continue; }
-    const heading = /^#{1,6}\s+(.+)$/.exec(line);
-    if (heading) { section = heading[1].trim(); last = undefined; continue; }
+    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+    if (heading) {
+      const depth = heading[1].length;
+      if (privateDepth && depth > privateDepth) continue;
+      privateDepth = 0;
+      section = heading[2].trim(); last = undefined;
+      if (PRIVATE.has(section)) privateDepth = depth;
+      continue;
+    }
+    if (privateDepth) continue;
     if (PRIVATE.has(section)) continue;
     const item = /^[-*]\s+(.+)$/.exec(line);
     const text = item?.[1] ?? line;
@@ -98,7 +106,7 @@ const hasContent = (entry: ReleaseContent) => entry.groups.length || entry.summa
 export const countReleaseItems = (entry: ReleaseContent) => entry.groups.reduce((sum, group) => sum + group.items.length, 0);
 /** 「### 亮点」缺省时把「### 更新摘要」当高亮卡片——CHANGELOG 约定摘要就是弹窗顶部那张卡。 */
 const withHighlights = (entry: UpdateRelease): UpdateRelease =>
-  entry.highlights.length ? entry : { ...entry, highlights: entry.summary.slice(0, 3) };
+  entry.highlights.length ? entry : { ...entry, highlights: entry.summary };
 
 export function createUpdateNotesModel(update: UpdateNotesInfo, bundled: ChangelogEntry[] = CHANGELOG) {
   const version = (update.version ?? "").replace(/^v/, "");
@@ -110,6 +118,10 @@ export function createUpdateNotesModel(update: UpdateNotesInfo, bundled: Changel
     ...(matching ?? body), version, date: update.date ?? matching?.date,
     // Explicit server notes remain authoritative; metadata fills out the full history only.
     ...(hasContent(body) ? body : {}),
+    // 发布摘要可以很短，不能因此抹掉同版本历史中的完整记录。
+    groups: body.groups.length ? body.groups : matching?.groups ?? [],
+    summary: body.summary.length ? body.summary : matching?.summary ?? [],
+    paragraphs: body.paragraphs.length ? body.paragraphs : matching?.paragraphs ?? [],
     highlights: body.highlights.length ? body.highlights : matching?.highlights ?? [],
   });
   const current = update.currentVersion;
@@ -129,6 +141,6 @@ export function createUpdateNotesModel(update: UpdateNotesInfo, bundled: Changel
     const key = text.replace(/\*\*/g, "").trim();
     if (!key || seen.has(key)) return false;
     seen.add(key); return true;
-  }).slice(0, 4);
+  });
   return { latest, releases, counts, total: Object.values(counts).reduce((sum, count) => sum + count, 0), highlights };
 }

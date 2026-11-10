@@ -157,18 +157,17 @@ function AppContent() {
   );
 
   // ── 更新未读计数（CHANGELOG 看了几版）──
-  // 只在用户真正打开「更新历史」时写 lastSeen（SettingsTab 里的 markChangelogSeen），
-  // 启动时不再替用户标记已读，否则红点与「未读」语义互相矛盾。
+  // 关于页亮点可见或用户打开本版历史时标记已读，提醒仅针对运行版本。
   const [unreadCount, setUnreadCount] = useState(0);
   useEffect(() => {
     const recompute = () =>
       setUnreadCount(
-        countUnreadVersions(CHANGELOG.map((c) => c.version), getLastSeenVersion()),
+        status?.version ? countUnreadVersions(CHANGELOG.map((c) => c.version), getLastSeenVersion(), status.version) : 0,
       );
     recompute();
     window.addEventListener(CHANGELOG_SEEN_EVENT, recompute);
     return () => window.removeEventListener(CHANGELOG_SEEN_EVENT, recompute);
-  }, []);
+  }, [status?.version]);
 
   // ── 页面切换过渡 ──
   const navigate = useCallback((tab: string) => {

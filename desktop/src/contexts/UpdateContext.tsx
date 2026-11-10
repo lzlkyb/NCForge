@@ -7,6 +7,7 @@ import { UpdateNotesDialog } from "../components/update/UpdateNotesDialog";
 import { RestartOverlay } from "../components/update/RestartOverlay";
 import { APP_SLUG } from "../lib/about";
 import { prepareRestart } from "../lib/terminatePreflight";
+import { useUpdateDownloadPreference } from "../lib/updateDownloadPreference";
 import { useAppHidden } from "../lib/appVisibility";
 
 // ─── 类型定义 ────────────────────────────
@@ -203,6 +204,8 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const [errorToastAllowed, setErrorToastAllowed] = useState(true);
   const [restarting, setRestarting] = useState(false);
   const appHidden = useAppHidden();
+  const autoDownload = useUpdateDownloadPreference();
+  const attemptedDownloads = useRef(new Set<string>());
   const [preparing, setPreparing] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(() => {
@@ -220,7 +223,6 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const statusRef = useRef(status);
   statusRef.current = status;
   const installedRef = useRef(false);
-  const announcedVersions = useRef(new Set<string>());
   /** 重启重入防护（与 downloadingRef 同理：state 在同帧内是旧值，挡不住连点） */
   const restartingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -349,12 +351,12 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   // 重入防护：连点不会触发 start_update 并发双下载；调用即乐观置 downloading，
   // 由 update:ready / update:error 复位守卫。
 
-  const downloadAndInstall = useCallback(async () => {
+  const startDownload = useCallback(async (automatic = false) => {
     if (!update || checkingRef.current || downloadingRef.current || restartingRef.current || statusRef.current === "ready" || statusRef.current === "installing") return;
     downloadingRef.current = true;
     downloadTask.current = beginOperation({ key: "update.download", label: "下载软件更新", page: "settings", phase: "检查更新包并开始下载" });
     installedRef.current = false;
-    userInitiatedRef.current = true; // 下载是明确的手动动作，失败必须告知
+    userInitiatedRef.current = !automatic; // 后台失败只显示状态，不打断工作。
     setStatus("downloading");
     setProgress(0);
     setProgressIndeterminate(false);
@@ -371,11 +373,21 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       console.error("[Update] start_update invoke 失败:", e);
       setError(String(e));
       setErrorCode(null);
-      setErrorToastAllowed(true);
+      setErrorToastAllowed(!automatic);
       setStatus("error");
       downloadingRef.current = false;
     }
   }, [update]);
+
+  const downloadAndInstall = useCallback(() => startDownload(false), [startDownload]);
+
+  useEffect(() => {
+    const version = update?.version;
+    // 每版本本次运行最多自动尝试一次；复查事件及失败后的重渲染不能触发下载循环。
+    if (!autoDownload || status !== "available" || !version || dismissedVersion === version || attemptedDownloads.current.has(version)) return;
+    attemptedDownloads.current.add(version);
+    void startDownload(true);
+  }, [autoDownload, status, update?.version, dismissedVersion, startDownload]);
 
   // ─── 监听后台更新事件 ────────────────────
 
@@ -633,35 +645,17 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // 每版本每次运行只主动提醒一次；隐藏窗口或其它弹框占用焦点时等待。
-  useEffect(() => {
-    const version = update?.version;
-    if (status !== "available" || !version || appHidden || dismissedVersion === version || announcedVersions.current.has(version)) return;
-    const announce = () => {
-      // 等待其它弹框期间用户可能已手动查看或选择稍后，不能随后再次打开。
-      if (announcedVersions.current.has(version)) { observer.disconnect(); return; }
-      if (document.querySelector('[role="dialog"][aria-modal="true"]:not([data-exiting])')) return;
-      announcedVersions.current.add(version);
-      setShowNotes(true);
-      observer.disconnect();
-    };
-    const observer = new MutationObserver(announce);
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-exiting", "aria-modal"] });
-    announce();
-    return () => observer.disconnect();
-  }, [status, update?.version, appHidden, dismissedVersion]);
+  // 自动发现、下载和验签仅更新入口状态；详情只由用户主动打开。
 
   // ─── 更新内容弹窗 ────────────────────────
 
   const openUpdateNotes = useCallback(() => {
-    if (update?.version) announcedVersions.current.add(update.version);
     setShowNotes(true);
-  }, [update?.version]);
+  }, []);
   const closeUpdateNotes = useCallback(() => {
     if (restartingRef.current) return;
-    if (update?.version) announcedVersions.current.add(update.version);
     setShowNotes(false);
-  }, [update?.version]);
+  }, []);
 
   const retryUpdate = useCallback(async () => {
     if (statusRef.current !== "error") return;
@@ -679,7 +673,6 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       // 存储失败忽略
     }
     setDismissedVersion(v);
-    announcedVersions.current.add(v);
     setShowNotes(false);
   }, [update?.version]);
 

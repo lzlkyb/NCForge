@@ -25,10 +25,10 @@ export function updateProcessTitle(process: UpdateDialogProcess) {
   if (process.preparing) return "安装前，检查当前工作";
   const titles: Record<UpdateStatus, string> = {
     idle: "软件更新", checking: "正在检查更新", available: "发现新版本",
-    downloading: "正在下载更新", ready: "更新已准备好，等你准备好",
+    downloading: "正在下载更新", ready: "新版本已准备好",
     installing: "正在安装并重启", error: "更新暂未完成", uptodate: "当前已是最新版本",
   };
-  return process.restarting ? "正在应用新版本" : titles[process.status];
+  return process.restarting ? "正在应用新版本" : process.status === "ready" && process.error ? "更新尚未完成，可以重试" : titles[process.status];
 }
 
 export function UpdateProcess({ process }: { process: UpdateDialogProcess }) {
@@ -62,17 +62,17 @@ export function UpdateActions({ process, onClose, onDownload, onDismiss, onResta
 }) {
   const { status, preparing, restarting } = process;
   const blocked = preparing || restarting || status === "installing";
-  const closeLabel = status === "downloading" ? "收起到后台" : status === "ready" ? "稍后安装" : status === "uptodate" || status === "idle" ? "完成" : "稍后提醒";
+  const closeLabel = status === "downloading" ? "收起到后台" : status === "ready" ? "稍后" : status === "uptodate" || status === "idle" ? "完成" : "稍后提醒";
   return <footer className="update-dialog-footer">
     <p className="update-restart-note"><Icon name={status === "ready" ? "refresh" : "info"} size={14} aria-hidden="true" /><span>{status === "ready" ? "安装并重启前，会再次核对未保存文件、数据库事务和运行任务。" : "先后台下载并校验更新包，安装并重启由你确认。"}</span></p>
     <div className="update-dialog-actions">
       {status === "available" && <button key="ignore" type="button" disabled={blocked} className="interactive update-ignore" onClick={() => { onDismiss(); onClose(); }}>忽略此版本</button>}
       <Button key="close" variant="outline" disabled={blocked} onClick={onClose}>{closeLabel}</Button>
-      {status === "available" && <Button key="primary" disabled={blocked} onClick={onDownload}><Icon name="download" size={15} aria-hidden="true" />{preparing ? "检查当前工作…" : "下载并更新"}</Button>}
-      {status === "downloading" && <Button key="primary" disabled><Icon name="download" size={15} aria-hidden="true" />正在下载</Button>}
+      {status === "available" && <Button key="primary" disabled={blocked} onClick={onDownload}><Icon name="download" size={15} aria-hidden="true" />{preparing ? "检查当前工作…" : "下载更新"}</Button>}
+      {status === "downloading" && <Button key="primary" disabled><Icon name="download" size={15} aria-hidden="true" />{!process.progressIndeterminate && process.progress >= 100 ? "正在校验" : "正在下载"}</Button>}
       {status === "checking" && <Button key="primary" disabled>检查中…</Button>}
       {status === "error" && <Button key="primary" disabled={blocked || !onRetry} onClick={onRetry}><Icon name="refresh" size={15} aria-hidden="true" />重试更新</Button>}
-      {status === "ready" && <Button key="primary" disabled={blocked || !onRestart} onClick={onRestart}><Icon name="refresh" size={15} aria-hidden="true" />{preparing ? "检查当前工作…" : "安装并重启"}</Button>}
+      {status === "ready" && <Button key="primary" disabled={blocked || !onRestart} onClick={onRestart}><Icon name="refresh" size={15} aria-hidden="true" />{preparing ? "检查当前工作…" : process.error ? "重试安装并重启" : "重启更新"}</Button>}
       {status === "installing" && <Button key="primary" disabled><Icon name="refresh" size={15} aria-hidden="true" />正在安装…</Button>}
     </div>
   </footer>;

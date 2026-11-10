@@ -4,13 +4,14 @@ import { APP_INFO, CHANGELOG } from "../../lib/about";
 import { displayPlatform, versionInfoText } from "../../lib/aboutRuntime";
 import { LICENSE_COPYRIGHT } from "../../lib/license";
 import { invoke } from "../../lib/tauri";
-import { copyText } from "../../lib/utils";
+import { copyText, markChangelogSeen } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Icon } from "../ui/icon";
 import { AboutUpdateAction } from "./AboutUpdateAction";
 import { LicenseDialog } from "./LicenseDialog";
 import { ReleaseText } from "./ReleaseText";
+import { ReleaseItem } from "./ReleaseItem";
 import "./settings-about.css";
 
 export function AboutSettings({ onOpenHistory }: { onOpenHistory: () => void }) {
@@ -27,6 +28,20 @@ export function AboutSettings({ onOpenHistory }: { onOpenHistory: () => void }) 
   const current = CHANGELOG.find(entry => entry.version === version?.replace(/^v/, ""));
   // A bundled record may be newer than this executable. It must never masquerade as the running version.
   const release = current ?? CHANGELOG[0];
+  const releaseSection = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = releaseSection.current;
+    if (!current || !element || typeof IntersectionObserver === "undefined") return;
+    // 设置分类会预挂载隐藏页面；只有本版亮点真正进入视口才清除提醒。
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting) && !element.closest("[hidden]")) {
+        markChangelogSeen(current.version);
+        observer.disconnect();
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [current]);
   const platform = displayPlatform(info.data?.platform);
   const report = (text: string, error = false) => { if (alive.current) setFeedback({ text, error }); };
   const perform = async (action: "copy" | "repo" | "issues") => {
@@ -60,13 +75,14 @@ export function AboutSettings({ onOpenHistory }: { onOpenHistory: () => void }) 
       </AboutUpdateAction></div>
       {unavailable && <p className="settings-about-feedback is-error" role="alert">{info.isError ? "版本信息读取失败，可重新读取；更新记录仍可查看。" : "返回的版本信息不完整，可重新读取。"}</p>}
       {feedback && <p className={`settings-about-feedback ${feedback.error ? "is-error" : ""}`} role={feedback.error ? "alert" : "status"}>{feedback.text}</p>}
-      <section className="settings-about-section" id="about-history" data-settings-item="" data-settings-label="更新历史" data-settings-keywords="发行说明 changelog 版本记录"
+      <section ref={releaseSection} className="settings-about-section" id="about-history" data-settings-item="" data-settings-label="更新历史" data-settings-keywords="发行说明 changelog 版本记录"
         data-setting-value={`${CHANGELOG.length} 个随包版本`} tabIndex={-1} aria-labelledby="about-history-title">
-        <div className="settings-about-section-head"><h2 id="about-history-title">{current ? "本版本更新" : "随包更新记录"}</h2>
-          {release && <span>v{release.version} · 记录日期 {release.date}</span>}</div>
-        {(release?.summary ?? release?.highlights ?? []).slice(0, 2).map((text, index) => <p key={index} className="settings-about-release-summary"><ReleaseText text={text} /></p>)}
-        {release?.items.length ? <ul className="settings-about-highlights">{release.items.slice(0, 3).map((item, index) => <li key={index}><ReleaseText text={item.text} /></li>)}</ul> : <p className="settings-about-description">还没有随包条目记录。</p>}
-        <Button variant="link" size="sm" onClick={onOpenHistory}>查看完整版本记录</Button>
+        <div className="settings-about-section-head"><h2 id="about-history-title">{current ? "这一版，为日常开发省几步" : "随包更新记录"}</h2>
+          {release && <span>v{release.version}</span>}</div>
+        {(release?.summary ?? []).slice(0, 1).map((text, index) => <p key={index} className="settings-about-release-summary"><ReleaseText text={text} /></p>)}
+        {release && <ul className="release-feature-list">{(release.highlights?.length ? release.highlights : release.items.map(item => item.text)).slice(0, 4).map((text, index) => <li key={index}><ReleaseItem text={text} /></li>)}</ul>}
+        {!release && <p className="settings-about-description">还没有版本更新说明。</p>}
+        <Button variant="link" size="sm" onClick={onOpenHistory}>查看本版全部更新<Icon name="arrowRight" size={14} /></Button>
       </section>
       <section className="settings-about-section" aria-labelledby="about-project-title"><div className="settings-about-section-head"><h2 id="about-project-title">项目与许可</h2></div>
         <div className="settings-about-row" id="about-repo" data-settings-item="" data-settings-label="项目仓库" data-settings-keywords="源码 GitHub repository" data-setting-value={APP_INFO.repoUrl} tabIndex={-1}>
@@ -79,8 +95,6 @@ export function AboutSettings({ onOpenHistory }: { onOpenHistory: () => void }) 
           <span className="settings-about-row-label">开源许可</span><span className="settings-about-row-value">MIT License</span><Button variant="outline" size="sm" onClick={() => setLicenseOpen(true)}>查看许可</Button></div>
         <p className="settings-about-copyright">{LICENSE_COPYRIGHT}。版权与使用条件以项目许可证为准。</p>
       </section>
-      <details className="settings-about-details"><summary>技术与版本信息</summary><dl><dt>产品</dt><dd>{APP_INFO.name}</dd><dt>运行版本</dt><dd>{version ?? "暂不可用"}</dd>
-        <dt>运行平台</dt><dd>{platform}</dd><dt>构建框架</dt><dd>Tauri 2 / React</dd><dt>开源许可</dt><dd>{APP_INFO.license}</dd></dl>{copyButton}</details>
       <LicenseDialog open={licenseOpen} onClose={() => setLicenseOpen(false)} />
     </Card>
   );

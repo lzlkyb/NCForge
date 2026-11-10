@@ -1,3 +1,5 @@
+import { useUpdateDownloadPreference, setUpdateDownloadPreference } from "../../lib/updateDownloadPreference";
+import { Switch } from "../ui/switch";
 import { useUpdate, friendlyError } from "../../contexts/UpdateContext";
 import { useAppInfo } from "../../hooks/useAppInfo";
 import { formatBytes, formatBytesPerSec } from "../../lib/utils";
@@ -10,6 +12,7 @@ import "./settings-maintenance.css";
 /** 设置页只是更新状态的另一个入口，下载安装仍由现有弹框统一确认。 */
 export function UpdateSettings() {
   const info = useAppInfo();
+  const autoDownload = useUpdateDownloadPreference();
   const update = useUpdate();
   const { status, preparing, restarting } = update;
   const blocked = preparing || restarting || status === "installing";
@@ -26,13 +29,16 @@ export function UpdateSettings() {
     <Card className="settings-maintenance-section" aria-busy={status === "checking" || preparing || undefined}>
       <div className="settings-maintenance-heading">
         <h2>软件更新</h2>
-        <p>发现新版本会弹出更新内容；安装并重启前会检查当前工作。</p>
+        <p>后台准备更新，点击更新入口可查看更新内容；重启由你确认。</p>
       </div>
       <SettingsRow id="update-version" label="当前运行版本" keywords={["版本号", "version"]}
         valueText={info.data?.version ? `v${info.data.version}` : info.isError ? "读取失败" : "版本读取中"}
         sub="来自当前运行的软件"
         control={info.data?.version ? <span className="settings-version">v{info.data.version}</span> :
           info.isError ? <Button variant="outline" size="sm" onClick={() => void info.refetch()}>重新读取版本</Button> : <span className="settings-maintenance-muted">读取中…</span>} />
+      <SettingsRow id="update-auto-download" label="自动下载更新" keywords={["自动更新", "后台下载"]}
+        sub="后台下载并验证更新包，不自动安装或重启；关闭后可手动下载。"
+        control={<Switch ariaLabel="自动下载更新" checked={autoDownload} onChange={setUpdateDownloadPreference} />} />
       <SettingsRow id="update-status" label="更新状态" keywords={["检查更新", "升级", "下载更新", "安装", "重启"]}
         valueText={stateText}
         sub={update.update?.version ? `新版本 v${update.update.version} · ${stateText}` : stateText}

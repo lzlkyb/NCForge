@@ -1,4 +1,5 @@
-import { friendlyError, useUpdate } from "../../contexts/UpdateContext";
+import { updatePresentation } from "../../lib/updatePresentation";
+import { useUpdate } from "../../contexts/UpdateContext";
 import { Icon, type IconName } from "../ui/icon";
 import { Spinner } from "../ui/Spinner";
 import "../update/update-badge.css";
@@ -26,24 +27,17 @@ const SHOWN = new Set(["available", "downloading", "ready", "installing", "error
  * 与旧点一致：任何阶段都只打开详情，不直接下载/安装 —— 避免 ready 态误触重启。
  */
 export function UpdateRailItem() {
-  const { status, update, progress, progressIndeterminate, preparing, error, errorCode, openUpdateNotes } = useUpdate();
+  const { status, update, progress, progressIndeterminate, preparing, restarting, error, openUpdateNotes } = useUpdate();
   if (!SHOWN.has(status)) return null;
 
   const downloading = status === "downloading";
   const pct = Math.min(100, Math.max(0, progress));
 
-  const label = downloading ? (progressIndeterminate ? "下载中" : `${pct}%`) : status === "ready" ? "安装" : status === "installing" ? "安装中" : status === "error" ? "重试" : "更新";
-  const title =
-    preparing ? "正在检查当前工作"
-    : downloading ? `正在下载更新 · ${progressIndeterminate ? "总大小未知" : `${pct}%`}，点击查看进度`
-    : status === "ready" ? "更新包已下载并验证，点击查看并确认安装重启"
-    : status === "installing" ? "正在安装并重启，点击查看详情"
-    : status === "error" ? `${error ? friendlyError(error, errorCode).friendly : "更新暂未完成"}，点击查看原因和重试`
-    : `发现新版本${update?.version ? ` v${update.version}` : ""}，点击查看更新详情`;
+  const {label, title} = updatePresentation({status,progress,progressIndeterminate,preparing,restarting,error,version:update?.version});
 
   // tone 只落在图标上：`.app-side-item:hover` 会把按钮 color 改成前景色，挂在按钮上会被
   // hover 冲掉，状态色就一闪一闪。
-  const tone = status === "available" || downloading ? "primary" : status === "ready" ? "success" : status === "error" ? "danger" : undefined;
+  const tone = status === "available" || downloading ? "primary" : status === "ready" ? error ? "danger" : "success" : status === "error" ? "danger" : undefined;
 
   return (
     <button

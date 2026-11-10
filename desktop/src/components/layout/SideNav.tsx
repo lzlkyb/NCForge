@@ -96,15 +96,6 @@ function SideNavImpl({
   const pillTarget = statusPill?.target ?? null;
   const pillTitle = statusPill?.title ?? "";
 
-  const unreadLabel = unreadCount > 9 ? "9+" : String(unreadCount);
-
-  // 未读红点 scale 过渡：不条件渲染——硬插入会把「设置」两个字挤一下。
-  // 常驻渲染、0 时缩到 0 宽；退场动画期间保留最后一个非零计数。
-  const [lastUnread, setLastUnread] = useState(0);
-  useLayoutEffect(() => {
-    if (unreadCount > 0) setLastUnread(unreadCount);
-  }, [unreadCount]);
-
   // 状态胶囊槽位化：异常态出现/消失套 Collapse 行槽位（0fr→1fr），
   // foot 高度从「啪地长高一截」变成平滑展开/收起。退场期间保留最后一份异常
   // 快照渲染——收起时若跟着状态变回正常态文案，胶囊会在收缩中闪现。
@@ -177,20 +168,13 @@ function SideNavImpl({
             className="app-side-item"
             data-active={activeTab === "settings" || undefined}
             aria-current={activeTab === "settings" ? "page" : undefined}
-            aria-label={unreadCount > 0 ? `设置，${unreadCount} 项更新记录未读` : "设置"}
-            title={collapsed || unreadCount > 0 ? `设置${unreadCount > 0 ? `（${unreadCount} 项更新记录未读）` : ""}` : undefined}
+            aria-label={unreadCount > 0 ? "设置，有本版新内容" : "设置"}
+            title={collapsed || unreadCount > 0 ? unreadCount > 0 ? "设置 · 查看本版新内容" : "设置" : undefined}
             onClick={() => onNavigate("settings")}
           >
             <Icon name="settings" size={16} className="app-side-icon" />
             <span className="app-side-label">设置</span>
-            {/* changelog-dot：沿用更新未读红点的脉冲动画 + hover 放大。
-                无未读时也渲染（--off 缩为零宽），出现/消失都是 scale 过渡。 */}
-            <span
-              className={`app-side-badge changelog-dot ${unreadCount > 0 ? "" : "app-side-badge--off"}`}
-              title={unreadCount > 0 ? `${unreadCount} 项新更新` : undefined}
-            >
-              {unreadCount > 0 ? unreadLabel : lastUnread > 0 ? (lastUnread > 9 ? "9+" : String(lastUnread)) : ""}
-            </span>
+            {unreadCount > 0 && <span className="app-side-badge changelog-dot" aria-hidden="true" />}
           </button>
           {/* 折叠态更新状态点已改为 foot 里的独立「更新」项（UpdateRailItem）：
               压齿轮角的小圆点与设置自身的 changelog 红点视觉撞车，且折叠态没有文字。 */}

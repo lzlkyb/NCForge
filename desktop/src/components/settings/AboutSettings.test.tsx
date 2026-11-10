@@ -20,6 +20,7 @@ let root: Root, host: HTMLDivElement;
 const history = vi.fn();
 const buttons = (text: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].filter(button => button.textContent === text);
 beforeEach(() => {
+  localStorage.clear();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.clearAllMocks();
   Object.assign(mocks.info, { data: { version: "9.8.7", platform: "windows" }, isPending: false, isFetching: false, isError: false });
   Object.assign(mocks.update, { status: "idle", preparing: false, restarting: false, progress: 0, progressIndeterminate: false, downloadedBytes: 0, totalBytes: null, bytesPerSec: 0 });
@@ -84,4 +85,33 @@ it("下载显示百分比与速率，完成进入校验，未知大小有明确�
   expect(buttons("查看下载进度")).toHaveLength(1);
   mocks.update.progress = 100; render(); expect(host.textContent).toContain("正在验证更新包");
   mocks.update.progressIndeterminate = true; render(); expect(host.textContent).toContain("总大小未知");
+});
+
+it("隐藏的关于页不清除提醒，本版亮点可见后持久标记且不展示技术记录", () => {
+  let visible!: (entries: {isIntersecting:boolean}[]) => void;
+  const disconnect = vi.fn();
+  vi.stubGlobal("IntersectionObserver", class {
+    constructor(callback: typeof visible) { visible = callback; }
+    observe() {} disconnect = disconnect;
+  });
+  mocks.info.data = {version:"0.3.0", platform:"windows"};
+  host.hidden = true; render();
+  visible([{isIntersecting:true}]);
+  expect(localStorage.getItem("shell_changelog_last_seen")).toBeNull();
+  host.hidden = false;
+  visible([{isIntersecting:false}]);
+  expect(localStorage.getItem("shell_changelog_last_seen")).toBeNull();
+  visible([{isIntersecting:true}]);
+  expect(localStorage.getItem("shell_changelog_last_seen")).toBe("0.3.0");
+  expect(disconnect).toHaveBeenCalled();
+  expect(host.querySelectorAll(".release-feature-list > li")).toHaveLength(4);
+  expect(host.textContent).not.toContain("技术记录");
+  expect(host.textContent).not.toContain("技术与版本信息");
+  expect(host.querySelector("#about-history")?.textContent).not.toContain("缓存里的列定义");
+});
+it("未知运行版本的随包内容不会替用户标记已读", () => {
+  const observe = vi.fn();
+  vi.stubGlobal("IntersectionObserver", class { observe = observe; disconnect() {} });
+  render(); expect(observe).not.toHaveBeenCalled();
+  expect(localStorage.getItem("shell_changelog_last_seen")).toBeNull();
 });

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createUpdateNotesModel, parseUpdateNotes } from "./updateNotes";
 // 跨侧契约锁：写入侧的标记常量直接 import，任一侧单独改动此测试即红。
-import { HISTORY_MARKER } from "../../scripts/update-release-notes.mjs";
+import { readFileSync } from "node:fs";
+import { buildUpdateNotes, HISTORY_MARKER } from "../../scripts/update-release-notes.mjs";
 
 /** 复刻写入侧的最终产物形态：notes 正文 + 空行 + 转义后的元数据注释。 */
 function withHistory(notes: string, entries: unknown[]): string {
@@ -72,4 +73,33 @@ describe("更新摘要 → 弹窗高亮卡片（CHANGELOG 约定）", () => {
     expect(model.latest.summary).toEqual(["随包摘要"]);
     expect(model.highlights.map((item) => item.text)).toEqual(["随包摘要"]);
   });
+});
+
+it("0.2.0 到 0.3.0 的完整记录与八个亮点不截断，不混入旧版本内容", () => {
+  const model = createUpdateNotesModel({version:"0.3.0",currentVersion:"0.2.0",body:""});
+  expect(model.highlights).toHaveLength(8);
+  expect(model.total).toBeGreaterThan(20);
+  expect(model.releases.map(release=>release.version)).toEqual(["0.3.0"]);
+});
+it("远端简短摘要不会覆盖同版本元数据的分类详情和亮点", () => {
+  const body = withHistory("### 更新摘要\n简短导读", [{version:"1.2.0",body:"### 亮点\n- 功能亮点\n### 新增\n- 完整的新功能记录"}]);
+  const model = createUpdateNotesModel({version:"1.2.0",currentVersion:"1.1.0",body}, []);
+  expect(model.total).toBe(1);
+  expect(model.highlights[0].text).toBe("功能亮点");
+  expect(model.latest.groups[0].items).toEqual(["完整的新功能记录"]);
+});
+
+it("真实发布清单的短摘要与内嵌历史保留完整0.3.0内容", () => {
+  const source = readFileSync(new URL("../../../CHANGELOG.md", import.meta.url), "utf8");
+  const published = buildUpdateNotes("### 更新摘要\n更新导读", "0.3.0", source);
+  const model = createUpdateNotesModel({version:"0.3.0",currentVersion:"0.2.0",body:published}, []);
+  expect(model.highlights).toHaveLength(8);
+  expect(model.total).toBeGreaterThan(20);
+  expect(model.releases.map(release=>release.version)).toEqual(["0.3.0"]);
+});
+
+it("技术小节及嵌套标题均不泄漏到用户说明，后续公开小节正常保留", () => {
+  const notes = parseUpdateNotes("### 亮点\n- 更顺手\n### 技术细节\nprivate-a\n#### 原始说明\n- private-b\n### 修复\n- 公开修复");
+  expect(JSON.stringify(notes)).not.toContain("private-");
+  expect(notes.groups[0].items).toEqual(["公开修复"]);
 });

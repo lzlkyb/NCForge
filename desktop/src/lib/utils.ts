@@ -42,16 +42,15 @@ export function setLastSeenVersion(version: string): void {
   }
 }
 
-/** 「更新历史」真的被打开时广播：侧栏红点据此清零。 */
+/** 本版内容实际展示后广播，侧栏据此同步消除提示。 */
 export const CHANGELOG_SEEN_EVENT = "ncforge:changelog-seen";
 
-/**
- * 用户**主动打开更新历史**后调用（`SettingsTab`）。
- * 写在打开的那一刻而不是启动时：启动就替用户记「已读」的话，
- * 他从没看过也再不会看到红点——未读数与「已读」语义就互相打架了。
- */
+/** 本版亮点可见或版本历史打开后调用，不在启动和隐藏页面挂载时标记。 */
 export function markChangelogSeen(latest: string | null): void {
   if (!latest) return;
+  const seen = getLastSeenVersion();
+  // 浏览较旧的历史不能把阅读进度倒退，导致下次启动再次提醒。
+  if (seen && compareVersion(seen, latest) >= 0) return;
   setLastSeenVersion(latest);
   window.dispatchEvent(new Event(CHANGELOG_SEEN_EVENT));
 }
@@ -74,7 +73,12 @@ export function compareVersion(a: string, b: string): number {
 }
 
 /** 统计比 lastSeen 更新的版本数量（用于「更新」Tab 未读红点）。 */
-export function countUnreadVersions(versions: string[], lastSeen: string | null): number {
+export function countUnreadVersions(versions: string[], lastSeen: string | null, currentVersion?: string): number {
+  if (currentVersion !== undefined) {
+    const current = currentVersion.replace(/^v/, "");
+    // 提醒只对应实际运行的本版内容；不把随包的未来记录或历代版本累加给用户。
+    return versions.includes(current) && (!lastSeen || compareVersion(current, lastSeen) > 0) ? 1 : 0;
+  }
   if (!lastSeen) return versions.length; // 从未看过 → 全部未读
   return versions.filter((v) => compareVersion(v, lastSeen) > 0).length;
 }

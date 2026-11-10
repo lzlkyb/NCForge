@@ -1,3 +1,4 @@
+import { updatePresentation } from "../../lib/updatePresentation";
 import { useEffect, useRef, type ReactNode } from "react";
 import { useUpdate, friendlyError } from "../../contexts/UpdateContext";
 import { useToast } from "../ui/toast";
@@ -17,16 +18,16 @@ export function UpdateBadge({ currentVersion }: { currentVersion?: string }) {
     const prev = prevStatusRef.current;
     prevStatusRef.current = status;
     if (prev === status) return;
-    // 新版本由自动弹框说明；只在后台下载完成时补一条可行动的通知。
+    // 就绪提示不强制打开详情；安装失败同样不能伪装成更新成功。
     if (status === "ready" && prev === "downloading" && !notesOpen) {
-      toast("更新包已下载并验证，准备好后可确认安装并重启", "success");
+      toast(`新版本${update?.version ? ` v${update.version}` : ""}已就绪，可点击更新入口查看变化`, "success");
     } else if (status === "uptodate" && manualCheck) {
       toast("已是最新版本", "success");
       acknowledgeUptodate();
     } else if (status === "error" && errorToastAllowed && !notesOpen) {
       toast(error ? friendlyError(error, errorCode).friendly : "更新暂未完成，请重试", "error");
     }
-  }, [status, notesOpen, toast, manualCheck, acknowledgeUptodate, error, errorCode, errorToastAllowed]);
+  }, [status, notesOpen, toast, manualCheck, acknowledgeUptodate, error, errorCode, errorToastAllowed, update?.version]);
 
   const pct = Math.min(100, Math.max(0, progress));
   if (status === "idle") return <Slot>{currentVersion && <button type="button" className="header-badge header-badge-idle" title={`v${currentVersion} · 点击检查更新`} aria-label={`v${currentVersion} · 点击检查更新`} onClick={() => void manualCheckForUpdate()}><span>v{currentVersion}</span></button>}</Slot>;
@@ -35,9 +36,10 @@ export function UpdateBadge({ currentVersion }: { currentVersion?: string }) {
 
   const dl = totalBytes ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}` : `${formatBytes(downloadedBytes)} 已下载`;
   const speed = bytesPerSec > 0 ? ` · ${formatBytesPerSec(bytesPerSec)}` : "";
-  const label = preparing ? "检查中" : status === "downloading" ? progressIndeterminate ? "下载中" : `${pct}%` : status === "ready" ? "安装" : status === "installing" || restarting ? "安装中" : status === "error" ? "重试" : "更新";
-  const title = preparing ? "正在检查当前工作" : status === "downloading" ? `正在下载更新 · ${progressIndeterminate ? "总大小未知" : `${pct}%`}${speed} · ${dl} · 点击查看进度` : status === "ready" ? "更新包已下载并验证，点击查看并确认安装重启" : status === "installing" || restarting ? "正在安装并重启，点击查看详情" : status === "error" ? `${error ? friendlyError(error, errorCode).friendly : "更新暂未完成"} · 点击查看原因和重试` : `发现新版本 v${update?.version ?? ""}，点击查看更新详情`;
-  const variant = status === "available" ? "update" : status === "installing" ? "downloading" : status;
+  const presentation = updatePresentation({status,progress,progressIndeterminate,preparing,restarting,error,version:update?.version});
+  const label = presentation.label;
+  const title = presentation.title + (status === "downloading" ? `${speed} · ${dl}` : "");
+  const variant = status === "available" ? "update" : status === "ready" && error ? "error" : status === "installing" ? "downloading" : status;
   return <Slot><button type="button" className={`header-badge header-badge-${variant}`} title={title} aria-label={title} disabled={preparing} onClick={openUpdateNotes}>
     {preparing || status === "installing" || restarting ? <Spinner size={10} /> : status === "downloading" ? <DownloadRing progress={pct} indeterminate={progressIndeterminate} /> : <Icon name={status === "ready" ? "check" : status === "error" ? "alertTriangle" : "arrowUp"} size={10} aria-hidden="true" />}
     <span>{label}</span>

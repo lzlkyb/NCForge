@@ -11,7 +11,7 @@ export function AboutUpdateAction({ versionKnown, children }: { versionKnown: bo
   const busy = preparing || restarting || ["checking", "downloading", "ready", "installing"].includes(status);
   const hasDetails = ["available", "downloading", "ready", "installing", "error"].includes(status);
   const state = preparing ? "正在检查当前工作…" : restarting ? "正在应用更新…" : {
-    idle: "检查更新后显示最新结果，下载与安装仍由你确认。",
+    idle: "新版本可在后台下载，准备好后由你选择重启更新。",
     checking: "正在连接更新源，检查可用版本…",
     available: update.update?.version ? `发现新版本 v${update.update.version}` : "发现可用更新",
     downloading: !update.progressIndeterminate && update.progress >= 100 ? "下载完成，正在验证更新包…" : update.progressIndeterminate ? "正在下载更新包 · 总大小未知" : `正在下载更新包 · ${Math.round(update.progress)}%`,

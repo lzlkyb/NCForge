@@ -76,7 +76,7 @@ describe("update entry points", () => {
     h.state.notesOpen = true; await render("downloading"); await render("ready");
     expect(h.toast).not.toHaveBeenCalled();
     h.state.notesOpen = false; await render("downloading"); await render("ready");
-    expect(h.toast).toHaveBeenCalledWith(expect.stringContaining("确认安装并重启"), "success");
+    expect(h.toast).toHaveBeenCalledWith(expect.stringContaining("点击更新入口查看变化"), "success");
     expect(h.restart).not.toHaveBeenCalled();
   });
   it("手动检查最新版本保留提示并消费标记", async () => {
@@ -91,4 +91,16 @@ describe("update entry points", () => {
     await act(async () => buttons.forEach(button => button.click()));
     expect(h.open).not.toHaveBeenCalled();
   });
+});
+
+it("下载100%显示校验中，安装失败显示重试而不是就绪成功", async () => {
+  h.state.progress=100;
+  await render("downloading");
+  expect(host.querySelector(".header-badge")?.textContent).toContain("校验中");
+  expect(host.querySelector(".app-side-update")?.textContent).toContain("校验中");
+  h.state.error="install failed";
+  await render("ready");
+  expect(host.querySelector(".header-badge")?.textContent).toContain("安装重试");
+  expect(host.querySelector(".header-badge")?.className).toContain("error");
+  expect(h.restart).not.toHaveBeenCalled();
 });

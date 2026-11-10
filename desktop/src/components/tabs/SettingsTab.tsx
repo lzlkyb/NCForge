@@ -3,8 +3,6 @@ import { SettingsLayout } from "../settings/SettingsLayout";
 import { DockRegion } from "../workspace/WorkbenchDock";
 import { patchConfig, type ConfigPatch } from "../../lib/appConfig";
 import { errorToast } from "../../lib/errorToast";
-import { CHANGELOG } from "../../lib/about";
-import { markChangelogSeen } from "../../lib/utils";
 import { VersionHistoryDialog } from "../settings/VersionHistoryDialog";
 import { AutostartRow } from "../settings/AutostartRow";
 import { LangSettings } from "../settings/LangSettings";
@@ -23,13 +21,11 @@ import { consumePendingChangelog, onOpenChangelogRequest } from "../../lib/chang
 export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const openHistory = () => {
-    markChangelogSeen(CHANGELOG[0]?.version ?? null);
     setHistoryOpen(true);
   };
   // 懒加载前收到的更新历史请求仍可打开，保留标题栏与版本徽章的原入口。
   useEffect(() => {
     const open = () => {
-      markChangelogSeen(CHANGELOG[0]?.version ?? null);
       setHistoryOpen(true);
     };
     const off = onOpenChangelogRequest(open);
