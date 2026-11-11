@@ -1,0 +1,16 @@
+:root {
+  --sql-identifier-color: #273241; --sql-keyword-color: #71379A; --sql-type-color: #20549A;
+  --sql-number-color: #984921; --sql-string-color: #2B683E; --sql-comment-color: #536570;
+  --sql-hint-color: #075C73; --sql-parameter-color: #8A4C15; --sql-operator-color: #555E70;
+  --sql-table-color: #20549A; --sql-column-color: #273241; --sql-alias-color: #52637D;
+  --sql-cte-color: #20549A; --sql-function-color: #075C73;
+}
+.dark {
+  --sql-identifier-color: #DCE6F2; --sql-keyword-color: #CEA5F1; --sql-type-color: #9EBCFF;
+  --sql-number-color: #F0AF86; --sql-string-color: #A8D5A1; --sql-comment-color: #A0B2BF;
+  --sql-hint-color: #80CFDC; --sql-parameter-color: #F0C18A; --sql-operator-color: #A7B3C2;
+  --sql-table-color: #9EBCFF; --sql-column-color: #DCE6F2; --sql-alias-color: #A6B6CD;
+  --sql-cte-color: #9EBCFF; --sql-function-color: #80CFDC;
+}
+.sql-token { color: var(--sql-color); }
+.sql-comment { font-style: italic; }

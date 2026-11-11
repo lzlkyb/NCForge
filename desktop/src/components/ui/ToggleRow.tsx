@@ -23,7 +23,7 @@ export function ToggleRow({
   last = false,
   saved = false,
   id,
-  disabled = false, pending = false, error, disabledReason, keywords, valueText,
+  disabled = false, pending = false, error, disabledReason, keywords, valueText, onRetry,
 }: {
   label: string;
   /** L0 常显短句：≤20 字结果性描述；原理/边界请改传 info。 */
@@ -40,6 +40,7 @@ export function ToggleRow({
   disabled?: boolean;
   pending?: boolean;
   error?: string;
+  onRetry?: () => void;
   /** disabled 的原因说明（P2-12，透传给 Switch 的悬停 title）。 */
   disabledReason?: string;
   keywords?: string[];
@@ -71,7 +72,7 @@ export function ToggleRow({
         <span data-pending={pending || undefined} role={pending ? "status" : undefined} className="settings-toggle-state text-xs text-muted-foreground">{valueText ?? (pending ? "保存中…" : checked ? "已开启" : "已关闭")}</span>
         <Switch checked={checked} onChange={onChange} variant={variant} ariaLabel={label} disabled={disabled || pending} disabledReason={disabledReason ?? (pending ? "正在保存，请稍候" : undefined)} ariaDescribedBy={sub ? descriptionId : undefined} />
       </div>
-      {error && <div className="settings-row-feedback text-xs text-destructive-ink" role="alert">{error}</div>}
+      {error && <div className="settings-row-feedback text-xs text-destructive-ink" role="alert">{error}{onRetry && <button type="button" className="settings-retry" onClick={onRetry}>重试保存</button>}</div>}
     </div>
   );
 }

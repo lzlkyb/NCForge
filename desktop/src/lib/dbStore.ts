@@ -23,7 +23,10 @@ import { persistentTab, persistentTabsChanged } from "./dbTabPersistence";
 import { dbTabLabel } from "./dbPendingSessions";
 import { appendResultRows, fitResult, fitResults, retainedResultBytes, resultBytes, TOTAL_RESULT_BYTES, RESULT_LIMIT_NOTICE } from "./dbResultBudget";
 import type { MdDictOut, PickRow, ScopeKind } from "./mdDict";
-import { captureResultContext, type ResultExecutionContext } from "./dbResultContext";
+import { captureResultContext, connectionKey, type ResultExecutionContext } from "./dbResultContext";
+import { sqlUsageScope } from "./sqlUsage";
+import { sqlJoinHistoryGeneration } from "./sqlJoinHistory";
+import { clearSqlBusinessCache } from "./sqlBusiness";
 import { cloneCompareSnapshot, type CompareTab } from "./dbCompareState";
 import { rowsBytes } from "./dbResultBudget";
 import type { ResultSnapshot } from "./dbResultTools";
@@ -454,7 +457,7 @@ export function closeSessionPanel() {
 
 export function setConns(conns: DbConn[]) {
   const retained = new Set(conns.map(c => c.id));
-  for (const old of state.conns) if (!retained.has(old.id)) forgetColumns(old.id);
+  for (const old of state.conns) if (!retained.has(old.id) || connectionKey(old) !== connectionKey(conns.find(c => c.id === old.id) ?? null)) forgetColumns(old.id);
   set({ conns, loaded: true, loadError: null });
 }
 
@@ -483,6 +486,7 @@ export async function loadConns(): Promise<void> {
 
 /** 连库。返回 `need-password` 时界面弹口令框。 */
 export async function connect(id: string, password?: string, remember?: boolean): Promise<"ok" | "need-password" | "error"> {
+  forgetColumns(id);
   const requested = sqlTabOf(state.active);
   const prepareSql = requested?.connId === id && !requested.slot;
   setRt(id, { status: "connecting", error: undefined });
@@ -588,6 +592,8 @@ async function fetchMeta(id: string, observed: boolean, current: () => boolean):
 }
 
 const colCache = new Map<string, Promise<ColumnInfo[]>>();
+const columnEpochs = new Map<string, number>();
+export const sqlColumnEpoch = (id: string) => columnEpochs.get(id) ?? 0;
 const colCacheBytes = new Map<string, number>();
 const MAX_COLUMN_CACHE_BYTES = 8 * 1024 * 1024;
 function dropColumns(key: string) { colCache.delete(key); colCacheBytes.delete(key); }
@@ -623,6 +629,8 @@ export function columnsOf(id: string, table: string): Promise<ColumnInfo[]> {
 }
 
 export function forgetColumns(id: string) {
+  columnEpochs.set(id, sqlColumnEpoch(id) + 1);
+  clearSqlBusinessCache();
   for (const k of [...colCache.keys()]) if (k.startsWith(`${id}|`)) dropColumns(k);
 }
 
@@ -1031,6 +1039,8 @@ export function clearSlots(connId: string): void {
 export async function execOne(tabId: string, sql: string, index: number, context?: ResultExecutionContext, collectStats = false): Promise<ResultEntry> {
   const tab = sqlTabOf(tabId);
   const identity = context ?? (tab?.connId ? captureResultContext(tab.connId, connOf(tab.connId), rtOf(tab.connId).currentSchema ?? rtOf(tab.connId).info?.schema, sql) : undefined);
+  const joinGeneration = identity ? sqlJoinHistoryGeneration(sqlUsageScope(identity.connectionKey, identity.schema)) : undefined;
+  const usageToken = tab?.run ? `run:${tab.run.id}` : identity ? String(identity.startedAt) : undefined;
   const base = { id: newId("r"), index, sql, context: identity, startLine: identity?.target?.startLine, columns: [], rows: [], hasMore: false, updateCount: -1, ms: 0 };
   if (!tab?.connId) return { ...base, kind: "error", error: "这个标签还没选连接" };
   const connId = tab.connId;
@@ -1109,6 +1119,8 @@ export async function execOne(tabId: string, sql: string, index: number, context
     tone: entry.kind === "error" ? "bad" : "ok",
   }]);
   addHistory(connId, { at: Date.now(), sql, ms: entry.ms, summary: summaryOf(entry), ok: entry.kind !== "error" });
+  // Learning cannot delay execution feedback; the frozen identity rejects a switched database.
+  if (entry.kind !== "error" && identity) void import("./sqlAssistLearning").then(({ recordSqlExecutionUsage }) => recordSqlExecutionUsage(identity, joinGeneration, usageToken)).catch(() => {});
   return entry;
 }
 

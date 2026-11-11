@@ -8,6 +8,7 @@ import { SettingsRow } from "../ui/SettingsRow";
 import { SettingsChoice } from "../ui/SettingsChoice";
 import { SettingsField, integerRange } from "./SettingsField";
 import { SettingsGroup } from "./SettingsGroup";
+import { SqlCompletionSettings } from "./SqlCompletionSettings";
 import {
   SQL_DIALECTS, setSqlFormatPrefs, useSqlFormatPrefs,
   type SqlDialect, type SqlFormatPrefs,
@@ -89,5 +90,6 @@ export function SqlFormatSettings() {
           onSave={(value) => save({ linesBetweenQueries: Number(value) })} />}
       />
     </SettingsGroup>
+    <SqlCompletionSettings />
   </Card>;
 }

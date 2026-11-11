@@ -660,7 +660,7 @@ export interface SlotOut {
 }
 
 export const dbApi = {
-  relations:(id:string,table:string)=>invoke<{foreign:ExecResult;references:ExecResult;enums?:ExecResult;notes:string[];partial?:boolean;sharedSession:boolean}>("db_relations",{id,table}),
+  relations:(id:string,table:string,isolatedOnly=false)=>invoke<{foreign:ExecResult;references:ExecResult;enums?:ExecResult;notes:string[];partial?:boolean;sharedSession:boolean}>("db_relations",{id,table,isolatedOnly}),
   execBound: (id: string, sql: string, params: BoundCell[], maxRows: number, timeoutSec: number, slot?: string | null) => invoke<ExecResult>("db_exec_bound", {id,sql,params,maxRows,timeoutSec,slot:slot || null}),
   readOnly: (id: string, enabled?: boolean) => invoke<{readOnly:boolean;tx:TxInfo}>("db_read_only", {id,enabled:enabled ?? null}),
   list: () => invoke<DbConn[]>("db_conn_list"),

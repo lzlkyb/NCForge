@@ -1,12 +1,14 @@
 import { monaco } from "./monacoSetup";
 import { tabIdOfModel } from "./sqlModels";
-import { columnsOf, rtOf, sqlTabOf } from "./dbStore";
+import { sqlTabOf } from "./dbStore";
 import { pickStatement } from "./sqlSplit";
 import { statementsOf } from "./sqlStmtCache";
-import { aliasMap, completionContext, SQL_KEYWORDS, tablesIn } from "./sqlComplete";
+import { SQL_LANGUAGE_IDS, sqlAnalysisOf } from "./monacoSql";
+import { sqlCompletionAt } from "./sqlScope";
+import { provideSqlAssist } from "./sqlAssistProvider";
 import { callContext, hasOverloads, parameterLabel, pickOverload, signatureLabel } from "./sqlSignature";
 import { procArguments } from "./sqlProcArgs";
-import { tableLinks } from "./sqlLinks";
+import { scopedTableLinks } from "./sqlScopeLinks";
 import { openTable } from "./dbActions";
 
 /**
@@ -19,49 +21,6 @@ import { openTable } from "./dbActions";
  * 后者的 Ctrl+悬停会去 `createModelReference` 取目标行做预览，而我们的目标是数据库
  * 标签页、根本没有对应的 text model，装饰反而挂不上（还会甩一条未处理的 rejection）。
  */
-
-type Item = monaco.languages.CompletionItem;
-
-async function columnItems(connId: string, table: string, range: monaco.IRange, rank: number): Promise<Item[]> {
-  const K = monaco.languages.CompletionItemKind;
-  const rt = rtOf(connId);
-  let cols: { name: string; type: string; zh: string | null; pk: boolean }[] = [];
-  if (rt.status === "connected") {
-    try {
-      cols = (await columnsOf(connId, table)).map((c) => ({ name: c.name, type: c.full, zh: c.zh, pk: c.pk }));
-    } catch {
-      cols = [];
-    }
-  }
-  if (cols.length === 0) {
-    cols = (rt.schema?.tables[table.toLowerCase()] ?? []).map(([name, type]) => ({ name, type, zh: null, pk: false }));
-  }
-  return cols.map((c, i) => ({
-    label: { label: c.name.toLowerCase(), detail: ` ${c.type}${c.pk ? " · PK" : ""}`, description: c.zh ?? table.toLowerCase() },
-    kind: c.pk ? K.Property : K.Field,
-    insertText: c.name.toLowerCase(),
-    range,
-    sortText: `${rank}${String(i).padStart(4, "0")}`,
-  }));
-}
-
-function tableItems(connId: string, range: monaco.IRange): Item[] {
-  const K = monaco.languages.CompletionItemKind;
-  const rt = rtOf(connId);
-  const names = rt.ncNames ?? {};
-  const list = rt.tables?.map((t) => ({ name: t.name, view: t.kind === "VIEW" })) ??
-    Object.keys(rt.schema?.tables ?? {}).map((name) => ({ name, view: false }));
-  return list.map((t) => {
-    const lower = t.name.toLowerCase();
-    return {
-      label: { label: lower, description: names[lower] ?? (t.view ? "视图" : "") },
-      kind: t.view ? K.Interface : K.Struct,
-      insertText: lower,
-      range,
-      sortText: `5${lower}`,
-    };
-  });
-}
 
 let wired = false;
 
@@ -89,32 +48,10 @@ function openTableUri(resource: monaco.Uri): boolean {
 export function registerSqlProviders(): void {
   if (wired) return;
   wired = true;
-  monaco.languages.registerCompletionItemProvider("sql", {
-    triggerCharacters: ["."],
-    provideCompletionItems: async (model, position) => {
-      const tabId = tabIdOfModel(model);
-      const connId = sqlTabOf(tabId)?.connId;
-      const word = model.getWordUntilPosition(position);
-      const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
-      const K = monaco.languages.CompletionItemKind;
-      const text = model.getValue();
-      const stmt = pickStatement(statementsOf(model), model.getOffsetAt(position));
-      const stmtText = stmt?.text ?? text;
-      const before = model.getValueInRange(new monaco.Range(position.lineNumber, 1, position.lineNumber, position.column));
-      const ctx = completionContext(before);
-      const keywords: Item[] = SQL_KEYWORDS.map((k) => ({ label: k, kind: K.Keyword, insertText: k, range, sortText: `9${k}` }));
-      if (!connId) return { suggestions: ctx.kind === "column" ? [] : keywords };
-
-      if (ctx.kind === "column") {
-        const table = aliasMap(stmtText).get(ctx.qualifier) ?? ctx.qualifier;
-        return { suggestions: await columnItems(connId, table, range, 0) };
-      }
-      if (ctx.kind === "table") return { suggestions: tableItems(connId, range) };
-      // 无前缀：语句里用到的表的字段排最前（最多前 3 张表），再是关键字与表名
-      const used = tablesIn(stmtText).slice(0, 3);
-      const cols = (await Promise.all(used.map((t, i) => columnItems(connId, t, range, i + 1)))).flat();
-      return { suggestions: [...cols, ...keywords, ...tableItems(connId, range)] };
-    },
+  for (const language of SQL_LANGUAGE_IDS) {
+  monaco.languages.registerCompletionItemProvider(language, {
+    triggerCharacters: [".", "="],
+    provideCompletionItems: provideSqlAssist,
   });
 
   // 签名帮助：敲 `proc(` 或 `proc(a, ` 时列出参数（`all_arguments`）。
@@ -122,13 +59,14 @@ export function registerSqlProviders(): void {
   // 查不到同名过程就返回 null、什么都不弹——用户可能在写表函数、自己定义的过程，
   // 或者名字敲错了一半；这时候弹一个空签名比不弹更打断。
   // 只取**当前语句内**光标前的文本：长脚本里没必要为一次按键扫全文。
-  monaco.languages.registerSignatureHelpProvider("sql", {
+  monaco.languages.registerSignatureHelpProvider(language, {
     signatureHelpTriggerCharacters: ["(", ","],
     signatureHelpRetriggerCharacters: [","],
     provideSignatureHelp: async (model, position) => {
       const connId = sqlTabOf(tabIdOfModel(model))?.connId;
       if (!connId) return null;
       const offset = model.getOffsetAt(position);
+      if (sqlCompletionAt(sqlAnalysisOf(model), offset).kind === "none") return null;
       const stmt = pickStatement(statementsOf(model), offset);
       const before = stmt
         ? stmt.text.slice(0, offset - stmt.start)
@@ -160,11 +98,11 @@ export function registerSqlProviders(): void {
   });
 
   // 表名链接：Ctrl+悬停出现下划线，Ctrl+点击开 DDL；Ctrl+点击表名以外的地方不弹任何东西
-  monaco.languages.registerLinkProvider("sql", {
+  monaco.languages.registerLinkProvider(language, {
     provideLinks: (model) => {
       const connId = sqlTabOf(tabIdOfModel(model))?.connId;
       if (!connId) return null;
-      const links = tableLinks(model.getValue())
+      const links = scopedTableLinks(sqlAnalysisOf(model))
         .slice(0, MAX_LINKS)
         .map((l) => ({
           range: monaco.Range.fromPositions(model.getPositionAt(l.start), model.getPositionAt(l.end)),
@@ -174,5 +112,6 @@ export function registerSqlProviders(): void {
       return links.length > 0 ? { links } : null;
     },
   });
+  }
   monaco.editor.registerLinkOpener({ open: openTableUri });
 }

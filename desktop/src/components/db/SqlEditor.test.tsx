@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SqlEditorApi, SqlExecutionScope } from "./SqlEditor";
+vi.mock("../../lib/sqlEditorAssist", () => ({ wireSqlEditorAssist: () => ({ dispose() {} }) }));
 
 type ActionDesc = { id: string; label: string; keybindings?: number[]; contextMenuGroupId?: string; contextMenuOrder?: number; run?: () => void };
 type Position = { lineNumber: number; column: number };
@@ -99,6 +100,7 @@ vi.mock("../../lib/sqlModels", () => ({
   tabIdOfModel: (model: TestModel) => model.id,
 }));
 vi.mock("../../lib/sqlProviders", () => ({ registerSqlProviders: () => {} }));
+vi.mock("../../hooks/useSqlEditorDialect", () => ({ useSqlEditorDialect: () => {} }));
 vi.mock("../../lib/sqlFormat", () => ({ formatSql: (sql: string, lang: string) => mocks.format(sql, lang), sqlLanguageOf: (url: string) => mocks.language(url) }));
 vi.mock("../../lib/dbStore", () => ({ setSqlDraft: mocks.draft, sqlTabOf: () => ({ connId: "c1" }), connOf: () => ({ url: "jdbc:oracle:thin:@h:1521/x" }) }));
 vi.mock("../ui/toast", () => ({ toast: mocks.toast }));

@@ -5,6 +5,7 @@ import { SqlEditor, type SqlEditorApi, type SqlExecutionScope } from "./SqlEdito
 import { ResultPanel } from "./ResultPanel";
 import { HistoryDrawer } from "./HistoryDrawer";
 import { SnippetDrawer } from "./SnippetDrawer";
+import { SqlCompletionMemoryDrawer } from "./SqlCompletionMemoryDrawer";
 import { SessionDrawer } from "./SessionDrawer";
 import { InsertExportDialog } from "./InsertExportDialog";
 import { ValueSearchDialog } from "./ValueSearchDialog";
@@ -31,7 +32,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   const executingScopes = useRef(new Map<string, SqlExecutionScope>());
   const activeTabId = useRef(tab.id); activeTabId.current = tab.id;
   /** 右侧抽屉：历史与片段互斥（同一列位置，同时开就挤成两栏了）。 */
-  const [side, setSide] = useState<"history" | "snips" | null>(null);
+  const [side, setSide] = useState<"history" | "snips" | "memory" | null>(null);
   // 会话面板是页级状态（按钮在工具条、抽屉在 body 里），放 store 才不用层层回调
   const sessOpen = useDbSelector((s) => s.sessionPanel?.connId === tab.connId && tab.connId != null);
   /** 导出对话框：光标处那条语句 + 猜出来的表名。 */
@@ -117,6 +118,8 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         onHistory={() => setSide(side === "history" ? null : "history")}
         snipsOpen={side === "snips"}
         onSnips={() => setSide(side === "snips" ? null : "snips")}
+        memoryOpen={side === "memory"}
+        onMemory={() => setSide(side === "memory" ? null : "memory")}
         sessionsOpen={sessOpen}
         onSessions={() => (sessOpen ? closeSessionPanel() : openSessionPanel(tab.connId))}
       />
@@ -179,6 +182,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
             onPick={(sql) => api.current?.setText(sql)}
           />
         )}
+        {side === "memory" && tab.connId && <SqlCompletionMemoryDrawer connId={tab.connId} onClose={() => setSide(null)} />}
         {sessOpen && tab.connId && <SessionDrawer connId={tab.connId} visible={active} onClose={closeSessionPanel} />}
       </div>
     </div>

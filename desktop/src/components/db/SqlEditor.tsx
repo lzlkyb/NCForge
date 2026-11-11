@@ -2,6 +2,8 @@ import { useLayoutEffect, useRef } from "react";
 import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { sqlModel, tabIdOfModel } from "../../lib/sqlModels";
 import { registerSqlProviders } from "../../lib/sqlProviders";
+import { wireSqlEditorAssist } from "../../lib/sqlEditorAssist";
+import { useSqlEditorDialect } from "../../hooks/useSqlEditorDialect";
 import { pickStatement, splitStatements, type Stmt } from "../../lib/sqlSplit";
 import { statementsOf } from "../../lib/sqlStmtCache";
 import { applyFormatEdits, fallbackFormatEdits, formatTargetOf, type SqlFormatScope } from "../../lib/sqlFormatTarget";
@@ -145,6 +147,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
       renderLineHighlight: "none",
       unicodeHighlight: { ambiguousCharacters: false, invisibleCharacters: false },
       wordBasedSuggestions: "off",
+      "semanticHighlighting.enabled": true,
       suggest: { showWords: false },
       fixedOverflowWidgets: true,
     });
@@ -214,7 +217,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
       });
     };
     refreshScope.current = highlight;
-    const subs = [
+    const subs = [wireSqlEditorAssist(editor),
       editor.onDidChangeCursorPosition(highlight),
       editor.onDidChangeCursorSelection(highlight),
       editor.onDidChangeModelContent(() => {
@@ -286,6 +289,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
     refreshScope.current?.();
   }, [visible]);
 
+  useSqlEditorDialect(editorRef, tabId);
   return (
     <div className="dbx-editor" hidden={!visible}>
       <div ref={hostRef} className="wb-editor-host" />

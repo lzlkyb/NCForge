@@ -13,7 +13,7 @@ import type { SqlExecutionScope, SqlFormatScope } from "./SqlEditor";
 import type { SqlConsoleFocus } from "../../hooks/useSqlConsoleSplit";
 
 /** 连接上下文与执行工具条共用事务切换锁，切换模式时不能换库。 */
-export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onExport, onValueSearch, onScriptReplay, historyOpen, onHistory, snipsOpen, onSnips, sessionsOpen, onSessions, focusMode = "split", onFocusChange }: {
+export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onExport, onValueSearch, onScriptReplay, historyOpen, onHistory, snipsOpen, onSnips, memoryOpen, onMemory, sessionsOpen, onSessions, focusMode = "split", onFocusChange }: {
   tab: SqlTab;
   scope: SqlExecutionScope | null;
   focusMode?: SqlConsoleFocus;
@@ -33,6 +33,8 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   /** 片段抽屉是否打开（按钮高亮用）。 */
   snipsOpen: boolean;
   onSnips: () => void;
+  memoryOpen?: boolean;
+  onMemory?: () => void;
   /** 会话与锁抽屉是否打开（按钮高亮用）。 */
   sessionsOpen: boolean;
   onSessions: () => void;
@@ -78,6 +80,7 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   const snippetsItem: ContextMenuItem = { label: snipsOpen ? "收起 SQL 片段" : "SQL 片段", icon: "sqlSnippet", disabled: !tab.connId, onSelect: onSnips };
   const planItem: ContextMenuItem = { label: "执行计划（不真正执行）", icon: "queryPlan", disabled: executionBlocked || !statements.length, onSelect: onExplain };
   const moreItems: ContextMenuItem[] = [
+    ...(onMemory ? [{ label: memoryOpen ? "收起补全记忆" : "补全记忆", icon: "history" as const, disabled: !tab.connId, onSelect: onMemory }] : []),
     ...(compact ? [planItem, historyItem, snippetsItem] : []),
     { label: "回放 .sql 文件", icon: "upload", disabled: executionBlocked, onSelect: onScriptReplay },
     { label: "导出 INSERT（光标处查询）", icon: "download", disabled: executionBlocked || !statements.length, onSelect: onExport },

@@ -4,7 +4,7 @@ import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
 import "./monacoContributions";
 import "monaco-editor/esm/vs/basic-languages/java/java.contribution";
 import "monaco-editor/esm/vs/basic-languages/xml/xml.contribution";
-import "monaco-editor/esm/vs/basic-languages/sql/sql.contribution";
+import { registerSqlLanguages, sqlThemeRules } from "./monacoSql";
 import "monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution";
 import "monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution";
 import "monaco-editor/esm/vs/basic-languages/html/html.contribution";
@@ -63,6 +63,7 @@ export function applyMonacoTheme(theme: Theme): void {
       { token: "function", foreground: strip(primary) },
       { token: "annotation", foreground: strip(tokenHex("--success-ink")) },
       ...javaTokenRules(theme),
+      ...sqlThemeRules(),
     ],
     colors: {
       "editor.background": bg,
@@ -175,6 +176,7 @@ function wireTableHover(): void {
 
 /** 首次使用前调用：建主题并跟随壳子的 `themechange` 事件。幂等。 */
 export function initMonaco(): typeof monaco {
+  registerSqlLanguages(monaco);
   if (!themeWired) {
     themeWired = true;
     applyMonacoTheme(getStoredTheme());
