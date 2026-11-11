@@ -7,11 +7,17 @@
 import { describe, expect, it } from "vitest";
 
 import type { ColumnMeta } from "./dbApi";
-import { rowLocatorSql } from "./tableLob";
+import { binaryRowSql, rowLocatorSql } from "./tableLob";
 
 const col = (name: string, type: string): ColumnMeta => ({ name, type, precision: 0, scale: 0 });
 
 describe("rowLocatorSql", () => {
+  it("LONG RAW 按唯一键直接投影，不套子查询", () => {
+    const columns = [col("PK_LOG", "VARCHAR2"), col("INJSON", "LONG RAW")];
+    expect(binaryRowSql("NC.UAPBD_LOG_H", columns, ["O'Neil", "7B22…"], ["PK_LOG"], "INJSON"))
+      .toBe(`select "INJSON" from NC.UAPBD_LOG_H where "PK_LOG" = 'O''Neil'`);
+    expect(binaryRowSql("NC.UAPBD_LOG_H", columns, [null, "7B22…"], ["PK_LOG"], "INJSON")).toBeNull();
+  });
   it("单主键：表名与列名转小写，字符串带引号", () => {
     const columns = [col("PK_MATERIAL", "VARCHAR2(40)"), col("NAME", "VARCHAR2(100)")];
     expect(rowLocatorSql("BD_MATERIAL", columns, ["1001", "螺母"], ["pk_material"]))

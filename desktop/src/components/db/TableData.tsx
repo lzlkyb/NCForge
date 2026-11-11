@@ -29,7 +29,7 @@ import { TableEditTools } from "./TableEditTools";
 import { TableDataStatus } from "./TableDataStatus";
 import { useDbReadOnly } from "../../lib/dbReadOnly";
 import { useTableTabSync } from "../../hooks/useTableTabSync";
-import { rowLocatorSql } from "../../lib/tableLob";
+import { binaryRowSql, rowLocatorSql } from "../../lib/tableLob";
 import { loadTableView, saveTableView } from "../../lib/dbTableView";
 interface Page {
   columns: ColumnMeta[]; rows: Cell[][]; hasNext: boolean;
@@ -183,6 +183,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   const lob = tab.connId && page ? {
     connId: tab.connId, slot: null, sql: page.sql,
     sqlForRow: (r: number) => rowLocatorSql(tableRef, page.columns, page.rows[r], pk),
+    binarySqlForRow: (r: number, c: number) => binaryRowSql(tableRef, page.columns, page.rows[r], pk, page.columns[c].name),
   } : undefined;
   // 计划在 render 期算（界面要显示条数），但异常不会穿到 React：见 useTablePlan。
   const { changes, error: planError } = useTablePlan({
@@ -282,7 +283,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
           }
           foot={
             <>
-              {preview && changes.length > 0 && <ChangeReview changes={changes} columns={page.columns} rows={page.rows} pk={pk} disabled={saving} onUndo={change => {
+              {preview && changes.length > 0 && <ChangeReview changes={changes} columns={page.columns} rows={page.rows} pk={pk} zh={zh} disabled={saving} onUndo={change => {
                 if (change.kind === "update") setChanged(current => { const next = new Map(current); change.cells.forEach(c => next.delete(`${change.row}:${c.column}`)); return next; });
                 else drafts.restoreRow(change.row);
               }} />}

@@ -18,6 +18,21 @@ const button=(text:string)=>[...host.querySelectorAll<HTMLButtonElement>("button
 /** 放大后整块搬到 Modal（portal 挂 body），按钮就不在 host 里了。 */
 const docButton=(text:string)=>[...document.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent===text)!;
 
+it("LONG RAW 默认显示可读预览，加载后格式化 JSON，原值仍可复制", async () => {
+  const preview = "7B226E616D65223A22E789A9E69699…";
+  const full = "7B226E616D65223A22E789A9E69699227D";
+  const load = vi.fn().mockResolvedValue({ value: full, chars: full.length, truncated: false });
+  act(() => root.render(<CellDetail column={{ ...column, type: "LONG RAW" }} row={1} value={preview} empty={false} lob={{ canLoad: true, load }} onClose={() => {}} />));
+  expect(host.querySelector("pre")?.textContent).toContain('{"name":"物料');
+  expect(host.querySelector(".dbx-detail-status")?.textContent).toContain("预览 · UTF-8");
+  expect(host.querySelector(".dbx-detail-status button")?.textContent).toBe("加载完整值");
+  await act(async () => { button("加载完整值").click(); });
+  expect(load).toHaveBeenCalledOnce();
+  expect(host.querySelector("pre")?.textContent).toContain('"name": "物料"');
+  act(() => button("复制原值").click());
+  expect(vi.mocked(copyText).mock.calls[0][0]).toBe(full);
+});
+
 it("完整长值可聚焦阅读，JSON 格式化只影响显示，复制始终保留原值",()=>{
   const value=` {"raw":"${"x".repeat(20000)}", "n":1}\n`;
   act(()=>root.render(<CellDetail column={column} row={1} value={value} empty={false} onClose={()=>{}} />));

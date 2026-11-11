@@ -179,11 +179,11 @@ export function ImportDialog({ connId, table, cols, onClose, onDone,tabId }: {
         <span className="dbx-muted" style={{ fontWeight: 400, fontSize: 12, marginLeft: "auto" }}>{dbSourceOf(connOf(connId))}</span>
       </div>
       <div className="bd one">
+        <p className="dbx-hint">写入方式：新增记录 · 每批最多 {BATCH} 行，使用独立会话提交。停止后，已提交的批次仍会保留。</p>
         <div className="dbx-hint">
           读本机的 CSV / TSV / JSON / XLSX 文件：CSV 的 UTF-8 与 Excel 默认的 GBK/GB18030 自动识别（文件名旁会标出实际编码）；JSON 支持对象数组、二维数组与单对象；
           XLSX 只读<b>第一张工作表</b>（合并单元格只取值、公式只取缓存结果，超过 20 万行报错而不是截断）。空单元格写成 <b>NULL</b>（Oracle 里空串本来就是 NULL）；
-          日期按 <span className="dbx-mono">YYYY-MM-DD HH24:MI:SS</span> 转——<b>XLSX 里的日期列请先在 Excel 中设成「文本」</b>，否则读到的是 45900 这样的天数序列。每批 {BATCH} 行自成事务，走独立会话——
-          不会把你在这个连接上未提交的改动一起提交。
+          日期按 <span className="dbx-mono">YYYY-MM-DD HH24:MI:SS</span> 转——<b>XLSX 里的日期列请先在 Excel 中设成「文本」</b>，否则读到的是 45900 这样的天数序列。
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>

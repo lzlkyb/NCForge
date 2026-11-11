@@ -18,7 +18,7 @@ import type { ResultSet } from "../../lib/dbApi";
 import { dbApi } from "../../lib/dbApi";
 import { forgetColumnZh } from "../../lib/dbColumnZh";
 import type { ResultEntry, SqlTab } from "../../lib/dbStore";
-import { claimCursor } from "../../lib/dbStore";
+import { claimCursor, closeTab, openSqlTab, patchTab, useActiveDbTab } from "../../lib/dbStore";
 import { ResultPanel } from "./ResultPanel";
 
 // 本测试验证结果集接线，错误区的跳转动作不应把 Monaco 加载到 jsdom。
@@ -101,6 +101,43 @@ const click = async (label: string) => {
 };
 
 describe("ResultPanel 多结果集", () => {
+  it("点击输出切到日志，再点查询返回数据", async () => {
+    const result = entry({ sql: "select * from bd_material" });
+    const id = openSqlTab(null, result.sql);
+    patchTab<SqlTab>(id, { results: [result], view: result.id, output: [{ at: 1, text: "第 1 条 · 500 行", tone: "ok" }] });
+    function ConnectedPanel() {
+      const tab = useActiveDbTab();
+      return tab?.kind === "sql" ? <ResultPanel tab={tab} height={300} /> : null;
+    }
+    try {
+      await act(async () => root.render(<ConnectedPanel />));
+      const resultTab = host.querySelector<HTMLButtonElement>(".dbx-rtab")!;
+      const outputTab = [...host.querySelectorAll<HTMLButtonElement>(".dbx-rtab")].find(button => button.textContent?.includes("输出"))!;
+      await act(async () => outputTab.click());
+      expect(outputTab.getAttribute("aria-selected")).toBe("true");
+      expect(host.querySelector(".dbx-output")?.textContent).toContain("第 1 条 · 500 行");
+      expect(host.querySelector<HTMLElement>(".dbx-result-keep")?.hidden).toBe(true);
+      await act(async () => resultTab.click());
+      expect(host.querySelector(".dbx-output")).toBeNull();
+      expect(host.querySelector<HTMLElement>(".dbx-result-keep")?.hidden).toBe(false);
+    } finally {
+      await act(async () => { closeTab(id); });
+    }
+  });
+
+  it("单查询把表名和 SQL 定位合在标签栏，不展示双栏入口", async () => {
+    const onLocate = vi.fn();
+    const result = entry({ sql: "select * from bd_material", startLine: 7 });
+    await act(async () => root.render(<ResultPanel tab={tabWith(result)} height={300} onLocate={onLocate} />));
+    const head = host.querySelector(".dbx-result-head")!;
+    expect(head.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain("bd_material");
+    expect(head.querySelector('[aria-label="结果布局"]')).toBeNull();
+    expect(host.querySelector(".dbx-result-pane-heading")).toBeNull();
+    const locate = head.querySelector<HTMLButtonElement>('[aria-label="定位 SQL 第 7 行"]')!;
+    act(() => locate.click());
+    expect(onLocate).toHaveBeenCalledWith(7);
+  });
+
   it("两个结果集：出小标签，切换后列名与行都跟着换", async () => {
     const sets = [set("A", [["1"]]), set("S", [["x"], ["y"]])];
     await mount(entry({ sets, columns: sets[0].columns, rows: sets[0].rows }));

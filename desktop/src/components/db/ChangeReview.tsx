@@ -7,11 +7,12 @@ import type { RowChange } from "../../lib/dbOptimisticEdit";
  * 新增行没有主键值可显示，删除行没有字段级差异——两者都用一行摘要，
  * 免得表格里出现一堆空白格让人以为「没勾上」。
  */
-export function ChangeReview({ changes, columns, rows, pk, disabled, onUndo }: {
+export function ChangeReview({ changes, columns, rows, pk, zh, disabled, onUndo }: {
   changes: RowChange[];
   columns: ColumnMeta[];
   rows: Cell[][];
   pk: string[];
+  zh?: Record<string, string>;
   disabled?: boolean;
   onUndo: (change: RowChange) => void;
 }) {
@@ -44,7 +45,7 @@ export function ChangeReview({ changes, columns, rows, pk, disabled, onUndo }: {
         return [head, ...change.cells.map(c => <tr key={`${change.kind}:${change.row}:${c.column}`}>
           <td aria-hidden="true" />
           <td aria-hidden="true" />
-          <td>{columns[c.column].name}</td>
+          <td>{columns[c.column].name}{zh?.[columns[c.column].name.toLowerCase()] && ` · ${zh[columns[c.column].name.toLowerCase()]}`}</td>
           <td>{text(c.before)}</td>
           <td>{text(c.after)}</td>
         </tr>)];

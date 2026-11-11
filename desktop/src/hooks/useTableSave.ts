@@ -98,7 +98,7 @@ export function useTableSave({ tab, page, pk, cols, changes, sqls, drafts, reado
         }
         done++;
       }
-      toast(auto ? `已写回 ${done} 行（自动提交）` : `已写回 ${done} 行，尚未提交——用上方事务条提交或回滚`, "success");
+      toast(auto ? `已提交 ${done} 行（自动提交）` : `已写入 ${done} 行 · 待提交。可提交或回滚当前会话。`, auto ? "success" : "info");
       // 任务记录是「发生过什么」的流水，提交之后它不会跟着变：这里只写事实，
       // 「尚未提交」交给常驻的事务条（提交/回滚后它会自己消失），否则用户回头
       // 看到一条永远停在「尚未提交」的记录，分不清是历史还是当前状态。

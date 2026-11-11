@@ -37,8 +37,8 @@ export function ResultSource({ snapshot, meta }: { snapshot: ResultSnapshot; met
     return () => { document.removeEventListener("pointerdown", outside, true); window.removeEventListener("keydown", key, true); window.removeEventListener("scroll", scroll, true); };
   }, [open]);
   return <>
-    <button ref={anchor} type="button" className="dbx-btn ghost" aria-label="查看查询来源" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(v => !v)}>
-      <Icon name="info" size={14} /><span className="dbx-action-label">来源</span>
+    <button ref={anchor} type="button" className="dbx-ibtn" title="查看结果来源 · SQL、连接与 schema" aria-label="查看查询来源" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(v => !v)}>
+      <Icon name="querySource" size={14} />
     </button>
     {open && createPortal(<div ref={panel} className="dbx-source-popover" style={position} role="dialog" aria-modal="false" aria-label="查询来源">
       <header><strong>查询来源</strong><button type="button" className="dbx-ibtn" aria-label="关闭查询来源" onClick={close}><Icon name="close" size={14} /></button></header>

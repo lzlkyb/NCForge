@@ -34,7 +34,7 @@ import type { CellPos, GridEdit, ResultGridApi } from "./gridEdit";
  * 排序 / 筛选的结果由父组件以 `order` 传入（复制 / 导出要用同一个顺序）。
  * NULL 斜体灰字与空串区分；数字右对齐。
  */
-export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onDetail, edit, blockedHint, zh, visible, frozen, widthOverrides, onWidths, selection, empty, onCopy, onCellMenu, apiRef, decoded, wrap: wrapProp, hasMore, loadingMore, onLoadMore, idPrefix = "dbx-cell" }: {
+export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onDetail, edit, blockedHint, zh, visible, frozen, widthOverrides, onWidths, selection, empty, onCopy, onCellMenu, apiRef, decoded, raw, wrap: wrapProp, hasMore, loadingMore, onLoadMore, idPrefix = "dbx-cell" }: {
   apiRef?: Ref<ResultGridApi>;
   columns: ColumnMeta[];
   rows: Cell[][];
@@ -48,6 +48,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   onSel: (p: CellPos, extend?:boolean) => void;
   visible: number[]; frozen: string[]; widthOverrides: Record<string,number>; onWidths: (col:number,width:number)=>void; selection:Selection|null;
   decoded?: string[]; // 已开启「按编码解码显示」的列名，开关在列头右键菜单
+  raw?: string[];
   /** 打开单元格详情（F4 / 右键「查看完整值」/ 工具栏按钮）。双击不触发。 */
   onDetail?: () => void;
   edit?: GridEdit;
@@ -99,7 +100,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   // 切密度保留当前首行：按总高比例换算 scrollTop（依赖数组在渲染时求值，必须放在 layout 之后）。
   useGridDensityScroll({ boxRef, rowH: ROW_H, total: layout.total, preciseTop,
     onScrollTop: (top, h) => setScroll(s => ({ ...s, top, h })) });
-  const codec = useMemo(() => gridCodec(columns, rows, order, decoded ?? []), [columns, rows, order, decoded]);
+  const codec = useMemo(() => gridCodec(columns, rows, order, decoded ?? [], raw), [columns, rows, order, decoded, raw]);
   const numeric = columns.map((c) => isNumericType(c.type));
   const rnW = rowNumberWidth(rows.length);
   const total = rnW + visible.reduce((n,c)=>n+ws[c],0);

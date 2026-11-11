@@ -33,6 +33,11 @@
 .dbx-detail pre { min-height:0;font-size:var(--dbx-fs-body);line-height:1.55;white-space:pre-wrap;word-break:normal;overflow-wrap:anywhere;tab-size:4;scrollbar-gutter:stable; }
 .dbx-detail pre:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:-2px; }
 .dbx-detail .ft { align-items:center; }
+.dbx-detail-status { display:flex;align-items:center;justify-content:space-between;gap:6px;flex:none;min-height:30px;padding:3px 8px;border-bottom:1px solid hsl(var(--border));color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta); }
+.dbx-detail-status .dbx-btn { flex:none;height:26px;min-height:26px;padding-inline:8px;font-size:inherit;white-space:nowrap; }
+.dbx-detail[data-binary] .ft { flex-wrap:nowrap;gap:4px;padding:4px 6px;overflow-x:auto; }
+.dbx-detail[data-binary] .ft .dbx-btn { flex:none;padding-inline:5px;white-space:nowrap; }
+.dbx-detail[data-binary] .ft select { width:auto;flex:0 0 auto;padding-inline:5px;font-size:var(--dbx-fs-meta); }
 .dbx-detail-note { padding:6px 10px;border-bottom:1px solid hsl(var(--border));color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);line-height:1.5; }
 /* 说明行里的行内按钮（复制解码 SQL）：不能像独立按钮那样占一行高 */
 .dbx-detail-note .dbx-lk { margin-left:4px;padding:0;border:0;background:none;font-size:inherit;text-decoration:underline; }

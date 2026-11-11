@@ -12,7 +12,8 @@ import { guessTable } from "../../lib/resultExport";
 import { statsText, statsTitle } from "../../lib/dbStats";
 import { reSortOnServer } from "../../lib/dbResultActions";
 import { useColumnZh } from "../../lib/dbColumnZh";
-import { isRunning, loadMore, type ResultEntry, type SqlTab } from "../../lib/dbStore";
+import { connOf, isRunning, loadMore, rtOf, type ResultEntry, type SqlTab } from "../../lib/dbStore";
+import { resultTargetIssue } from "../../lib/dbResultContext";
 import { useTxEpoch } from "../../lib/dbTxEpoch";
 import { reportEditCount, resultEditKey } from "../../lib/dbDirtyEdits";
 
@@ -82,17 +83,23 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
         snapshot={{source:entry.context?.source ?? "执行来源未记录",schema:entry.context?.schema,originTabId:tab.id,sql:entry.sql,at:entry.completedAt ?? entry.context?.startedAt ?? 0,complete,columns,rows}}
         /* 隐式结果集（dbms_sql.return_result）的 SQL 是 PL/SQL 块，按行号外套查询取不到值：
            行号属于子结果集，重跑后外层结果集的行对不上，宁可不给这个入口。 */
-        lob={tab.connId && !sets.length ? {connId:tab.connId,slot:tab.slot,sql:entry.sql,timeoutSec:tab.timeoutSec} : undefined}
+        lob={tab.connId && !sets.length ? {connId:tab.connId,slot:tab.slot,sql:entry.sql,timeoutSec:tab.timeoutSec, binarySqlForRow: (row, column) => {
+          const rt = rtOf(tab.connId);
+          return resultTargetIssue(entry.context, connOf(tab.connId), rt.currentSchema ?? rt.info?.schema)
+            ? null : editData.binarySqlForRow(row, column);
+        }} : undefined}
         meta={
           <>
             {sets.length > 1 && <>第 {at + 1}/{sets.length} 个结果集 · </>}
-            {entry.ms} ms
+            {entry.context?.source ?? "执行来源未记录"}
+            {entry.context?.schema && <> · {entry.context.schema}</>}
+            {entry.completedAt !== undefined && <> · <time dateTime={new Date(entry.completedAt).toISOString()} title={new Date(entry.completedAt).toLocaleString("zh-CN")}>{new Date(entry.completedAt).toLocaleTimeString("zh-CN")}</time></>}
             {entry.context?.target && <span> · 第 {entry.context.target.startLine}–{entry.context.target.endLine ?? entry.context.target.startLine} 行{entry.context.target.editorVersion !== undefined && ` · 编辑版本 ${entry.context.target.editorVersion}`}</span>}
             {statsText(entry.stats) && (
               <>
                 {" · "}
                 <span className="dbx-stats" title={statsTitle(entry.stats) ?? undefined}>
-                  {statsText(entry.stats)}
+                  实际执行统计 · {statsText(entry.stats)}
                 </span>
               </>
             )}
@@ -125,11 +132,11 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
             )}
             {editData.count > 0 ? (
               <>
-                <span className="meta" style={{ color: "hsl(var(--warning-ink))" }}>待写回 修改 {editData.count} 条</span>
+                <span className="meta" style={{ color: "hsl(var(--warning-ink))" }}>本地草稿 · 待写回 {editData.count} 行</span>
                 <button type="button" className="dbx-btn ghost" disabled={editData.saving} onClick={editData.reset}>撤销改动</button>
                 <button type="button" className="dbx-btn pri" disabled={editData.saving} onClick={editData.save}
                   title="按主键写成 UPDATE 并执行 · Ctrl+S">
-                  {editData.saving ? "写回中…" : `写回 ${editData.count} 条`}
+                  {editData.saving ? "写回中…" : `写回 ${editData.count} 行`}
                 </button>
               </>
             ) : editData.planError ? (
@@ -148,13 +155,14 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
             )}
           </>
         )}
-        foot={selection =>
+        foot={
           <div className="dbx-rfoot">
             <strong>已加载 {thousands(rows.length)} 行</strong>
-            <span className="dbx-completeness" data-partial={!complete || undefined}>{complete ? "完整结果" : "尚未取完"}</span>
+            <span>{thousands(entry.ms)} ms</span>
+            <span className="dbx-completeness" data-partial={!complete || undefined}>{complete ? "完整结果" : expired ? "部分结果" : "尚未取完"}</span>
             {entry.moreError && <span role="status">{entry.moreError}</span>}
             {staleAfterRollback && <span role="status" data-stale="1">事务已回滚，结果可能过期 · 重新执行</span>}
-            {expired && !entry.moreError && <span role="status">游标已失效，已加载数据仍可查看</span>}
+            {expired && !entry.moreError && <span role="status">游标已失效 · 重新执行可刷新结果</span>}
             {(expired || entry.moreError || truncated) && onLocate && <button type="button" className="dbx-lk" onClick={()=>onLocate(entry.startLine ?? 1)}>定位原 SQL</button>}
             {entry.hasMore && (!entry.moreError || entry.moreRetryable) && !sets.length && !expired && (
               <button
@@ -171,8 +179,6 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
                 已达读取上限；隐式结果集不能续取，可调整查询设置后重新执行
               </span>
             )}
-            <span className="dbx-sp" />
-            {selection}
           </div>
         }
       />

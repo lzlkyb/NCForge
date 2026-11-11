@@ -64,7 +64,7 @@ export function PlanView({ plan, connId }: {
     <div className="dbx-plan">
       <div className="dbx-planbar">
         <span className="dbx-muted">
-          {plan.rows.length} 个步骤
+          估算计划 · {plan.rows.length} 个步骤
           {saved && <> · 对照保存于 {new Date(saved.at).toLocaleString("zh-CN")}</>}
         </span>
         <span className="dbx-sp" />

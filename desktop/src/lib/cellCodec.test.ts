@@ -5,6 +5,7 @@ import {
   decodeSqlTemplate,
   describeDecoded,
   detectEncodedColumns,
+  gridCodec,
   memoDecoder,
 } from "./cellCodec";
 import type { ColumnMeta } from "./dbApi";
@@ -23,6 +24,16 @@ const columns = (names: string[]): ColumnMeta[] =>
   names.map((name) => ({ name, type: "VARCHAR2", precision: 0, scale: 0 }));
 
 describe("单元格编码识别", () => {
+  it("LONG RAW 预览保留 UTF-8 正文和截断状态，普通列仍显示原串", () => {
+    const preview = "7B226E616D65223A22E789A9E69699E4…";
+    const meta = [{ ...columns(["INJSON"])[0], type: "LONG RAW" }, ...columns(["ID"])];
+    const codec = gridCodec(meta, [[preview, preview]], [0], []);
+    expect(codec.value(preview, 0)).toMatchObject({ text: '{"name":"物料', complete: false, json: false });
+    expect(codec.text(preview, 1)).toBe(preview);
+    expect(gridCodec(meta, [[preview]], [0], [], ["INJSON"]).text(preview, 0)).toBe(preview);
+    expect(codec.text("000102FF", 0)).toBe("000102FF");
+    expect(decodeCell(HEX_GBK_JSON, { binary: true, encoding: "gb18030" })?.text).toBe('{"名称":"物料","数量":12}');
+  });
   it("hex 还原成 JSON 原文", () => {
     const d = decodeCell(HEX_JSON, { auto: true });
     expect(d?.text).toBe(PLAIN_JSON);

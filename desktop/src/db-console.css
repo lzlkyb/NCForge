@@ -77,6 +77,15 @@
 .dbx-console-main { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; }
 .dbx-editor { flex: 1; min-height: 140px; min-width: 0; position: relative; }
 .dbx-editor .wb-editor-host { position: absolute; inset: 0; }
+/* Monaco shares its theme across editors. Scope the SQL selection colors to this host. */
+.dbx-editor .monaco-editor {
+  --vscode-editor-selectionBackground: hsl(var(--primary) / .17);
+  --vscode-editor-inactiveSelectionBackground: hsl(var(--foreground) / .09);
+}
+.dark .dbx-editor .monaco-editor {
+  --vscode-editor-selectionBackground: hsl(var(--primary) / .24);
+  --vscode-editor-inactiveSelectionBackground: hsl(var(--foreground) / .13);
+}
 .dbx-stmt-hl { background: hsl(var(--primary) / .07); }
 .dbx-stmt-gl { border-left: 2px solid hsl(var(--primary)); margin-left: 3px; }
 .dbx-splitbar { height: 5px; background: hsl(var(--border) / .6); cursor: row-resize; flex-shrink: 0; }

@@ -777,8 +777,8 @@ export const dbApi = {
    * `rowIndex` 是 `rows` 数组下标（不是显示顺序）；`column` 是列名。后端用
    * 「外层编号 + 取第 N 行」重新定位，所以带绑定参数的查询会明确报错。
    */
-  lobValue: (id: string, sql: string, rowIndex: number, column: string, slot?: string | null, maxChars?: number) =>
-    invoke<LobValueOut>("db_lob_value", { id, sql, rowIndex, column, slot: slot || null, maxChars: maxChars ?? null }),
+  lobValue: (id: string, sql: string, rowIndex: number, column: string, slot?: string | null, maxChars?: number, direct?: boolean) =>
+    invoke<LobValueOut>("db_lob_value", { id, sql, rowIndex, column, slot: slot || null, maxChars: maxChars ?? null, ...(direct ? { direct } : {}) }),
   tx: (id: string, action: "commit" | "rollback" | "autocommit-on" | "autocommit-off" | "status", slot?: string | null) =>
     invoke<{ tx: TxInfo; alive?: boolean; active?: boolean | null }>("db_tx", { id, action, slot: slot || null }),
   reconnect: (id: string, slot: string | null, password?: string, fallback = false, configured = false) =>

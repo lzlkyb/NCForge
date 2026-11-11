@@ -221,6 +221,24 @@ describe("execOne 把 sets 带到结果条目上", () => {
     expect(execCalls[1][1]).toMatchObject({ slot: "2" });
   });
 
+  it("停止显示为已停止，重新执行沿用当前标签的独立会话", async () => {
+    let cancelled = false;
+    mocks.invoke.mockImplementation((cmd: string) => {
+      if (cmd === "db_slot_acquire") return Promise.resolve({ slot: "1" });
+      if (cmd === "db_exec_result" && !cancelled) {
+        cancelled = true;
+        return Promise.reject("cancelled|语句已中断（点了停止）");
+      }
+      return Promise.resolve(rowsBody);
+    });
+    const sql = "select 1 from dual", id = openSqlTab("c1", sql);
+    expect(await execOne(id, sql, 1)).toMatchObject({ cancelled: true, errorCode: "cancelled" });
+    expect(sqlTabOf(id)?.output.slice(-1)[0]).toMatchObject({ tone: "info", text: expect.stringContaining("已停止") });
+    expect((await execOne(id, sql, 1)).kind).toBe("rows");
+    expect(mocks.invoke.mock.calls.filter(([cmd]) => cmd === "db_slot_acquire")).toHaveLength(1);
+    expect(mocks.invoke.mock.calls.filter(([cmd]) => cmd === "db_exec_result").map(([, args]) => args.slot)).toEqual(["1", "1"]);
+  });
+
   it("改走 JVM 桥执行的结果要在输出区留一行说明", async () => {
     // P0 能力路由：Rust 引擎跑不了的 REF CURSOR 语句被搬到 JVM 桥的临时会话上执行。
     // 那条会话**不归事务条管**——不说明的话，用户点了回滚会以为它也撤掉了。

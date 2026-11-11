@@ -8,7 +8,7 @@ import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { ResultGrid, type GridEdit, type ResultGridApi } from "./ResultGrid";
 import { CellDetail } from "./CellDetail";
 import { thousands } from "../../lib/db";
-import { decodeCell } from "../../lib/cellCodec";
+import { binaryColumn, decodeCell } from "../../lib/cellCodec";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { lobLoaderFor } from "../../lib/lobLoader";
 import { ResultTransfer } from "./ResultTransfer";
@@ -49,6 +49,7 @@ export interface LobSource {
    * 详情面板就不显示「加载完整值」，而不是拿错行。
    */
   sqlForRow?: (row: number) => string | null;
+  binarySqlForRow?: (row: number, column: number) => string | null;
 }
 
 export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated, lob, hasMore, loadingMore, onLoadMore, editOwner }: {
@@ -67,7 +68,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   zh?: Record<string, string>;
   /** 结果条右侧额外的按钮（表页的保存 / 预览 SQL）。 */
   tools?: ReactNode;
-  foot?: ReactNode | ((selection: ReactNode) => ReactNode);
+  foot?: ReactNode;
   /** 结果标签（SQL 控制台传；表页没有），放在结果条最左边。 */
   tabs?: ReactNode;
   /** 条件出现的副条：多结果集 / 导出进度。 */
@@ -161,8 +162,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   const selRowNo = sel ? (order.indexOf(sel.r) >= 0 ? order.indexOf(sel.r) + 1 : sel.r + 1) : null;
   // 详情面板的「加载完整值」：行号用 `sel.r`（`rows` 下标，不是显示顺序），
   // 列名用原始列名——后端要靠它在定位 SQL 里取这一格。
-  const lobLoader = lobLoaderFor(lob, sel?.r ?? null, sel ? columns[sel.c]?.name ?? "" : "");
-  const selectionSummary = bounds && <span className="dbx-selection-summary">选区 {bounds.rowEnd-bounds.rowStart+1} 行 × {bounds.colEnd-bounds.colStart+1} 列</span>;
+  const lobLoader = lobLoaderFor(lob, sel?.r ?? null, sel ? columns[sel.c]?.name ?? "" : "", sel && binaryColumn(columns[sel.c]?.type) ? sel.c : undefined);
   // 解码开关按列名存进布局：下次查同一张表同一列还是这个状态。
   const toggleDecode=(c:number)=>{
     const name=columns[c]?.name; if(!name) return;
@@ -172,6 +172,12 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   // 右键菜单要提前知道「这列能不能解」，否则点了没反应。只抽前 50 行，够判断也不拖慢渲染。
   const headName = head ? columns[head.col]?.name ?? "" : "";
   const headDecoded = layout.decoded.includes(headName);
+  const binaryMode = layout.raw?.includes(headName) ? "raw" : headDecoded ? "text" : "auto";
+  const setBinaryMode = (mode: "auto" | "text" | "raw") => setLayoutOnly({
+    ...layout,
+    decoded: [...layout.decoded.filter(name => name !== headName), ...(mode === "text" ? [headName] : [])],
+    raw: [...(layout.raw ?? []).filter(name => name !== headName), ...(mode === "raw" ? [headName] : [])],
+  });
   const headDecodable = useMemo(() => head ? rows.slice(0,50).some(r=>decodeCell(r[head.col],{auto:true})) : false, [head, rows]);
 
   return (
@@ -185,22 +191,21 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
       <div className="dbx-rbar dbx-result-tools">
         <button type="button" className="dbx-btn ghost dbx-filter-trigger" data-on={filterOpen || filter || undefined}
           title="筛选已加载数据 · 网格中 Ctrl+F" aria-label="筛选结果" aria-expanded={filterOpen || !!filter}
-          onClick={()=>setFilterOpen(v=>!v)}><Icon name="search" size={14} /><span>筛选已加载数据</span></button>
+          onClick={()=>setFilterOpen(v=>!v)}><Icon name="search" size={14} /><span>筛选</span></button>
         {(filterOpen || filter) && <input ref={filterInput} className="dbx-inp sm dbx-result-filter" value={filter}
           placeholder="输入关键字" aria-label="在结果中筛选" onChange={e=>setFilter(e.target.value)} autoFocus={filterOpen}
           onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();setFilter("");setFilterOpen(false);gridApi.current?.focusActive();}}} />}
-        <button type="button" className="dbx-btn ghost" title="显示、隐藏、冻结列与恢复布局" aria-label="结果列布局" onClick={()=>setColumnOpen(true)}><Icon name="sliders" size={14} /><span className="dbx-action-label">显示列 {visible.length} / {columns.length}</span></button>
-        <button type="button" className="dbx-btn ghost" title="长文本自动换行 · 行高随内容增减" aria-label="长文本自动换行" aria-pressed={layout.wrap} data-on={layout.wrap || undefined} onClick={()=>setLayoutOnly({...layout,wrap:!layout.wrap})}>自动换行</button>
-        <button type="button" className="dbx-ibtn" title="按内容自适应全部列宽" aria-label="自适应列宽" onClick={fitAll}><Icon name="columns" size={14} /></button>
+        <button type="button" className="dbx-ibtn" title={`显示、隐藏和冻结列 · 已显示 ${visible.length} / ${columns.length} 列`} aria-label="结果列布局" onClick={()=>setColumnOpen(true)}><Icon name="visibleColumns" size={14} /></button>
+        <button type="button" className="dbx-ibtn" title="长文本自动换行 · 行高随内容增减" aria-label="长文本自动换行" aria-pressed={layout.wrap} data-on={layout.wrap || undefined} onClick={()=>setLayoutOnly({...layout,wrap:!layout.wrap})}><Icon name="wrapText" size={14} /></button>
+        <button type="button" className="dbx-ibtn" title="按内容自适应全部列宽" aria-label="自适应列宽" onClick={fitAll}><Icon name="fitColumns" size={14} /></button>
         {snapshot && <ResultCompare snapshot={snapshot} related={onRelated ? {label:"关联记录",icon:"external",disabled:!sel,onSelect:()=>sel && onRelated(rows[sel.r])} : undefined} />}
         {!snapshot && onRelated && <button type="button" className="dbx-btn ghost" disabled={!sel} onClick={()=>sel && onRelated(rows[sel.r])}>关联记录</button>}
         <span className="dbx-sp" />
         {!snapshot && <span className="meta">{meta}</span>}
-        {typeof foot !== "function" && selectionSummary}
         {tools}
         {(running || pending) && <span className="dbx-busy" role="status"><Icon name="spinner" size={12} />{running ? "执行中…" : "正在整理结果…"}</span>}
         <ResultTransfer frame={frame} valueAt={valueAt} />
-        <button type="button" className="dbx-ibtn" data-on={detail || undefined} title="单元格详情 · F4" aria-label="单元格详情" aria-pressed={detail} onClick={()=>setDetail(!detail)}><Icon name="info" size={14} /></button>
+        <button type="button" className="dbx-ibtn" data-on={detail || undefined} title="单元格详情 · F4" aria-label="单元格详情" aria-pressed={detail} onClick={()=>setDetail(!detail)}><Icon name="cellInspect" size={14} /></button>
         {snapshot && <ResultSource snapshot={snapshot} meta={meta} />}
         {settings}
       </div>
@@ -240,6 +245,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
           frozen={layout.frozen}
           widthOverrides={layout.widths}
           decoded={layout.decoded}
+          raw={layout.raw}
           wrap={layout.wrap}
           hasMore={hasMore}
           loadingMore={loadingMore}
@@ -263,7 +269,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
           />
         )}
       </div>
-      {foot && <div className="dbx-result-footer">{typeof foot === "function" ? foot(selectionSummary) : foot}</div>}
+      {foot && <div className="dbx-result-footer">{foot}</div>}
       {columnOpen && <GridColumns columns={columns} layout={layout} onChange={setColumns} onClose={()=>setColumnOpen(false)} />}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       {head && (
@@ -276,11 +282,15 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
             { label: "本地降序（只排已取的行）", onSelect: () => setSort({ col: head.col, dir: "desc" }) },
             { label: "本列自适应宽度", onSelect: () => fitOne(head.col) },
             { label: "全部列自适应宽度", onSelect: fitAll },
-            {
+            ...(binaryColumn(columns[head.col]?.type) ? (["auto", "text", "raw"] as const).map(mode => ({
+              label: `二进制显示：${mode === "auto" ? "自动识别" : mode === "text" ? "文本" : "原始 Hex"}`,
+              checked: binaryMode === mode,
+              onSelect: () => setBinaryMode(mode),
+            })) : [{
               label: headDecoded ? "恢复原始值（关闭解码）" : "显示解码后的值（Hex / Base64）",
               disabled: !headDecoded && !headDecodable,
               onSelect: () => toggleDecode(head.col),
-            },
+            }]),
             {
               label: onServerSort ? serverSortLabel(columns[head.col]?.name ?? "", "asc") : "重排并重查（这条结果不支持）",
               disabled: !onServerSort,

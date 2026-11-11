@@ -18,7 +18,9 @@ import { isWideText } from "./wideText";
  */
 
 export type CodecKind = "hex" | "base64";
-export type TextEncoding = "utf-8" | "gbk";
+export type TextEncoding = "utf-8" | "gbk" | "gb18030";
+export const binaryColumn = (type?: string) => /^(?:LONG\s+RAW|RAW|BLOB)(?:\b|\()/i.test(type?.trim() ?? "");
+export const binaryPreview = (value: string) => /^(?:[\da-f]+…|<BLOB \d+B>)$/i.test(value.trim());
 
 export interface Decoded {
   kind: CodecKind;
@@ -125,19 +127,20 @@ function isJsonText(text: string): boolean {
  * `auto: true` 是网格自动识别用的严格模式；详情面板手动点「解码」用默认的宽松模式，
  * 允许 GBK 结果与短串，因为那是用户明确要求的，且面板上会标出编码与字节数。
  */
-export function decodeCell(v: Cell, opts?: { auto?: boolean }): Decoded | null {
+export function decodeCell(v: Cell, opts?: { auto?: boolean; binary?: boolean; encoding?: TextEncoding }): Decoded | null {
   if (typeof v !== "string") return null;
   const auto = opts?.auto ?? false;
   const source = v.trim();
   // 预览尾部的中文说明先剥掉，否则整串都判不成 hex。
-  const raw = lobPreviewBody(v).trim();
-  if (raw.length < (auto ? MIN_AUTO : MIN_MANUAL)) return null;
+  const body = lobPreviewBody(v).trim();
+  const raw = opts?.binary && /^[\da-f]+…$/i.test(body) ? body.slice(0, -1) : body;
+  if (raw.length < (opts?.binary ? 2 : auto ? MIN_AUTO : MIN_MANUAL)) return null;
   /** 来自 8K 预览 ⇒ 尾部本来就不全，解出来的文本可能缺最后几个字节。 */
   const fromPreview = raw.length !== source.length;
 
   let kind: CodecKind;
   if (HEX_RE.test(raw)) kind = "hex";
-  else if (B64_RE.test(raw)) kind = "base64";
+  else if (!opts?.binary && B64_RE.test(raw)) kind = "base64";
   else return null;
 
   const odd = kind === "hex" && raw.length % 2 !== 0;
@@ -145,7 +148,11 @@ export function decodeCell(v: Cell, opts?: { auto?: boolean }): Decoded | null {
   const bytes = kind === "hex" ? hexBytes(odd ? raw.slice(0, -1) : raw) : base64Bytes(raw);
   if (!bytes || bytes.length === 0) return null;
 
-  const decoded = decodeText(bytes);
+  const encoding = opts?.encoding ?? (opts?.binary && auto ? "utf-8" : undefined);
+  let decoded;
+  try {
+    decoded = encoding ? { text: new TextDecoder(encoding, { fatal: true }).decode(bytes, { stream: fromPreview }), encoding } : decodeText(bytes);
+  } catch { return null; }
   if (!decoded) return null;
   const json = isJsonText(decoded.text);
   if (json) {
@@ -174,13 +181,13 @@ export function decodeCell(v: Cell, opts?: { auto?: boolean }): Decoded | null {
  * 网格每帧都要渲染可视行，滚动时同一格会被反复解码；一行日志表里重复值又特别多，
  * 按原串缓存能把开销压到可忽略。上限 4000 条，超出就不再增长（宁可重算也不吃内存）。
  */
-export function memoDecoder(): (v: Cell) => Decoded | null {
+export function memoDecoder(opts?: Parameters<typeof decodeCell>[1]): (v: Cell) => Decoded | null {
   const cache = new Map<string, Decoded | null>();
   return (v) => {
     if (typeof v !== "string") return null;
     const hit = cache.get(v);
     if (hit !== undefined) return hit;
-    const decoded = decodeCell(v);
+    const decoded = decodeCell(v, opts);
     if (cache.size < 4000) cache.set(v, decoded);
     return decoded;
   };
@@ -234,7 +241,7 @@ export function codedText(v: Cell, decoded: Decoded | null, max = 300): string {
 export function describeDecoded(d: Decoded): string {
   const parts = [
     `${d.kind === "hex" ? "Hex" : "Base64"} 编码`,
-    d.encoding === "utf-8" ? "UTF-8" : "GBK",
+    d.encoding.toUpperCase(),
     `${d.bytes} 字节`,
   ];
   if (d.json) parts.push("JSON");
@@ -267,18 +274,25 @@ export function gridCodec(
   rows: Cell[][],
   order: number[],
   decodedNames: string[],
+  rawNames: string[] = [],
 ): GridCodec {
   const decode = memoDecoder();
+  const decodeBinary = memoDecoder({ binary: true, auto: true });
+  const decodeBinaryText = memoDecoder({ binary: true });
   const auto = new Set(detectEncodedColumns(columns, rows, order));
   const active = new Set(decodedNames);
-  const on = (c: number) => active.has(columns[c]?.name ?? "");
+  const raw = new Set(rawNames);
+  const binary = (c: number) => binaryColumn(columns[c]?.type);
+  const on = (c: number) => !raw.has(columns[c]?.name) && (active.has(columns[c]?.name) || binary(c));
+  const value = (v: Cell, c: number) => !on(c) ? null : !binary(c) ? decode(v)
+    : active.has(columns[c]?.name) ? decodeBinaryText(v) : decodeBinary(v);
   return {
-    encoded: (c) => auto.has(c),
+    encoded: (c) => binary(c) || auto.has(c),
     active: on,
-    value: (v, c) => (on(c) ? decode(v) : null),
-    text: (v, c, max) => codedText(v, on(c) ? decode(v) : null, max),
+    value,
+    text: (v, c, max) => codedText(v, value(v, c), max),
     title: (v, c, colWidth) => {
-      const d = on(c) ? decode(v) : null;
+      const d = value(v, c);
       // 文案必须指向**真实入口**：双击在四家主流工具里都是编辑，写成「双击看完整值」
       // 就是骗人去点一个不办事的手势（2026-11-11 用户反馈的原始触发点之一）。
       if (d) return `${describeDecoded(d)} · 点格内「…」或按 F4 看完整值`;

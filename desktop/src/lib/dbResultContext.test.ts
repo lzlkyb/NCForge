@@ -16,6 +16,7 @@ describe("不可变结果身份", () => {
     expect(resultTargetIssue(context,renamed,"SCHEMA_A")).toBeNull();
     expect(resultTargetIssue(context,renamed,"SCHEMA_B")).toContain("SCHEMA_A");
     expect(resultTargetIssue(context,{...conn,user:"OTHER"},"SCHEMA_A")).toContain("连接目标已变化");
+    expect(resultTargetIssue(context,null,"SCHEMA_A")).toContain("无法找到这份结果的原连接");
     expect(context.connectionKey).toBe(connectionKey(conn));
     expect(Object.isFrozen(context)).toBe(true);expect(Object.isFrozen(context.target)).toBe(true);
   });

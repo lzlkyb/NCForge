@@ -27,7 +27,7 @@ export function TableEditTools({ changed, changedCells, added, deleted, editable
       {total > 0 && (
         <>
           <span className="meta" style={{ color: "hsl(var(--warning-ink))" }}>
-            待写回
+            本地草稿 · 待写回
             {changed > 0 && ` 修改 ${changed} 行（${changedCells} 个单元格）`}
             {added > 0 && ` 增 ${added}`}
             {deleted > 0 && ` 删 ${deleted}`}
@@ -36,7 +36,7 @@ export function TableEditTools({ changed, changedCells, added, deleted, editable
           <button type="button" className="dbx-btn ghost" data-on={preview || undefined} disabled={saving} onClick={onTogglePreview}
             title="可选：展开后能看到将要执行的 SQL 与逐行改动，不展开也能直接写回">复核修改 / SQL</button>
           <button type="button" className="dbx-btn pri" disabled={!editable || saving} onClick={onSave}
-            title="把上面这些改动写成 UPDATE / DELETE / INSERT 并执行 · Ctrl+S">
+            title="将草稿写入数据库。手动提交模式下，写入后还需提交当前会话。快捷键 Ctrl+S">
             <Icon name={saving ? "spinner" : "check"} size={12} />
             {saving ? "写回中…" : `写回 ${total} 行`}
           </button>

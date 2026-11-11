@@ -48,20 +48,20 @@ it("固定按钮只操作当前槽，同一帧点击两种动作也只提交一�
   let finish!: (value:{tx:typeof empty})=>void;
   mocks.invoke.mockImplementation(() => new Promise(resolve => { finish=resolve; }));
   act(() => root.render(<Harness id={first} slot="1"/>));
-  act(() => { button("提交").click(); button("回滚").click(); });
+  act(() => { button("提交当前会话").click(); button("回滚当前会话").click(); });
   expect(button("提交中…").disabled).toBe(true);
-  expect(button("回滚").disabled).toBe(true);
+  expect(button("回滚当前会话").disabled).toBe(true);
   await act(async () => {});
   expect(mocks.invoke).toHaveBeenLastCalledWith("db_tx",{id:"c1",slot:"1",action:"commit"});
   act(() => root.render(<Harness id={second} slot="2"/>));
-  expect(button("提交").disabled).toBe(true);
+  expect(button("提交当前会话").disabled).toBe(true);
   expect(host.querySelector('[role="status"]')).toBeNull();
   await act(async () => finish({tx:empty}));
   act(() => root.render(<Harness id={first} slot="1"/>));
   // 提交成功后不留常驻条：状态回到「没有待处理的事务」，按钮变灰即可。
   expect(host.querySelector('[role="status"]')).toBeNull();
   expect(host.textContent).not.toContain("未提交");
-  expect(button("提交").disabled).toBe(true);
+  expect(button("提交当前会话").disabled).toBe(true);
   act(() => root.render(<Harness/>));
   expect(host.textContent).toContain("50 行");
 });
@@ -70,14 +70,14 @@ it("保存自动提交后，当前会话有待提交写入时仍允许回滚并�
   setTx(conn.id,pending);
   act(() => root.render(<Harness/>));
   act(() => setConns([{...conn,autoCommit:true}]));
-  expect(button("提交").disabled).toBe(false);
+  expect(button("提交当前会话").disabled).toBe(false);
   expect(button("重新连接").disabled).toBe(true);
   expect(host.textContent).toContain("处理事务后可重连");
   act(() => setTx(conn.id,empty));
   mocks.reconnect.mockImplementation(async () => { setTx(conn.id,{...empty,autoCommit:true}); return true; });
   await act(async () => button("重新连接").click());
   expect(mocks.reconnect).toHaveBeenCalledWith(conn.id,null,undefined,false,true);
-  expect(button("提交").disabled).toBe(true);
+  expect(button("提交当前会话").disabled).toBe(true);
   // 重连成功不留常驻条：它是一次动作的结果，不是待处理状态。
   expect(host.querySelector('[role="status"]')).toBeNull();
 });
@@ -86,9 +86,9 @@ it("提交途中断连，停用事务按钮并显示待核对", async () => {
   setTx(conn.id,pending);
   mocks.invoke.mockRejectedValue("session-lost|连接断开");
   act(() => root.render(<Harness/>));
-  await act(async () => button("提交").click());
-  expect(button("提交").disabled).toBe(true);
-  expect(button("回滚").disabled).toBe(true);
+  await act(async () => button("提交当前会话").click());
+  expect(button("提交当前会话").disabled).toBe(true);
+  expect(button("回滚当前会话").disabled).toBe(true);
   expect(host.textContent).toContain("提交结果待核对");
 });
 
@@ -96,14 +96,14 @@ it("提交超时先核对现存会话，状态回读前锁定提交与回滚", a
   setTx(conn.id,pending);
   mocks.invoke.mockRejectedValueOnce("bridge|等待提交超时");
   act(() => root.render(<Harness/>));
-  await act(async () => button("提交").click());
-  expect(button("回滚").disabled).toBe(true);
+  await act(async () => button("提交当前会话").click());
+  expect(button("回滚当前会话").disabled).toBe(true);
   mocks.invoke.mockResolvedValueOnce({tx:pending,alive:true});
   await act(async () => button("核对事务").click());
   expect(mocks.invoke).toHaveBeenLastCalledWith("db_tx",{id:"c1",action:"status",slot:null});
   // 核对结论是「确实还有未提交」：横幅切换成事务本身，操作入口重新可用。
   expect(host.textContent).toContain("未提交事务");
-  expect(button("回滚").disabled).toBe(false);
+  expect(button("回滚当前会话").disabled).toBe(false);
 });
 
 it("SQL 原位事务条沿用当前槽的回滚和数据库确认反馈", async () => {
@@ -112,7 +112,7 @@ it("SQL 原位事务条沿用当前槽的回滚和数据库确认反馈", async 
   mocks.invoke.mockResolvedValue({tx:empty});
   act(() => root.render(<Harness id={id} slot="slot-a" actions/>));
   expect(host.querySelector(".dbx-txbar .dbx-tx-actions")).not.toBeNull();
-  await act(async () => button("回滚").click());
+  await act(async () => button("回滚当前会话").click());
   expect(mocks.invoke).toHaveBeenLastCalledWith("db_tx",{id:"c1",slot:"slot-a",action:"rollback"});
   // 回滚成功也不留横幅：动作结果用一次性通知说，常驻条只留给未提交/待核对。
   expect(host.querySelector(".dbx-txbar")).toBeNull();
@@ -123,21 +123,21 @@ it("SQL 原位提交确认未知时替换为核对入口，不能重复提交", 
   setTx(conn.id,pending);
   mocks.invoke.mockRejectedValueOnce("bridge|等待提交超时");
   act(() => root.render(<Harness actions/>));
-  await act(async () => button("提交").click());
+  await act(async () => button("提交当前会话").click());
   expect(host.querySelector(".dbx-tx-actions")).toBeNull();
   expect(button("核对事务").disabled).toBe(false);
   mocks.invoke.mockResolvedValueOnce({tx:pending,alive:true});
   await act(async () => button("核对事务").click());
   expect(mocks.invoke).toHaveBeenLastCalledWith("db_tx",{id:"c1",action:"status",slot:null});
-  expect(button("提交").disabled).toBe(false);
-  expect(button("回滚").disabled).toBe(false);
+  expect(button("提交当前会话").disabled).toBe(false);
+  expect(button("回滚当前会话").disabled).toBe(false);
 });
 
 it("提交成功后不留常驻提示，后续写入只显示当前未提交", async () => {
   setTx(conn.id,pending);
   mocks.invoke.mockResolvedValueOnce({tx:empty});
   act(() => root.render(<Harness/>));
-  await act(async () => button("提交").click());
+  await act(async () => button("提交当前会话").click());
   expect(host.querySelector('[role="status"]')).toBeNull();
   expect(host.textContent).not.toContain("已提交");
   // 用户接着改了数据并写回：事务条只说「现在有 2 条未提交」，
@@ -151,7 +151,7 @@ it("核对后数据库确认没有事务：横幅收起，按钮变灰", async (
   setTx(conn.id,pending);
   mocks.invoke.mockRejectedValueOnce("bridge|等待提交超时");
   act(() => root.render(<Harness actions/>));
-  await act(async () => button("提交").click());
+  await act(async () => button("提交当前会话").click());
   mocks.invoke.mockResolvedValueOnce({tx:{...empty,active:false},alive:true,active:false});
   await act(async () => button("核对事务").click());
   expect(host.querySelector('[role="status"]')).toBeNull();

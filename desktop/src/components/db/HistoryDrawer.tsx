@@ -95,7 +95,7 @@ export function HistoryDrawer({ connId, onPick, onClose }: {
           <div key={`${id}-${entry.at}-${entry.sql.length}`} className="dbx-hitem">
             <button type="button" className="dbx-history-content" title="填回编辑器，不执行" onClick={() => onPick(entry.sql, false)}>
             <span className="m">
-              {all && <span className="dbx-hconn">{conns.find((c) => c.id === id)?.name ?? "已删除的连接"}</span>}
+              {all && <span className="dbx-hconn">来源：{conns.find((c) => c.id === id)?.name ?? "已删除的连接"}{id !== connId && ` → 编辑器：${targetName}`}</span>}
               {historyTime(entry.at)} · {entry.ms} ms
               <span className={`r${entry.ok ? "" : " fail"}`}>
                 <Highlight text={entry.summary} query={q} />

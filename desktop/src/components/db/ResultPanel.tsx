@@ -17,6 +17,7 @@ import { useTxEpoch } from "../../lib/dbTxEpoch";
 import { txStateText } from "../../lib/txResultState";
 import { clearEditsForTab, pendingEdits, pendingForTab, resultEditKey, useEditRevision } from "../../lib/dbDirtyEdits";
 import { pendingResults, resultPairOf } from "../../lib/dbResultLayout";
+import { guessTable } from "../../lib/resultExport";
 
 /** SQL 控制台下半：每条语句一个结果标签 + 执行计划 + 输出。 */
 export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: number; onLocate?:(line:number)=>void }) {
@@ -29,10 +30,11 @@ export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: nu
   const options = useMemo(() => [...tab.results, ...pending], [tab.results, pending]);
   const valid = tab.view === "output" || tab.view === "plan" && tab.plan || options.some(r => r.id === tab.view);
   const view = valid ? tab.view! : tab.results[0]?.id ?? pending[0]?.id ?? "output";
-  const layout = tab.resultLayout ?? "tabs";
+  const layout = options.length > 1 ? tab.resultLayout ?? "tabs" : "tabs";
   const pair = useMemo(() => resultPairOf(options.map(r => r.id), tab.resultPair, view), [options, tab.resultPair, view]);
   const visible = useMemo(() => options.some(r => r.id === view) ? layout === "dual" ? pair : [view] : [], [options, view, layout, pair]);
   const cur = tab.results.find((r) => r.id === view);
+  const selectedResult = options.find(r => r.id === view);
   const previous = !!cur && active && (!cur.completedAt || cur.completedAt < operation.startedAt);
   const motionState = active ? operation.state : operation?.state ?? "idle";
   useEditRevision();
@@ -55,11 +57,12 @@ export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: nu
   const items = [
     ...tab.results.map(r => {
       const dirty = r.kind === "rows" ? pendingEdits(resultEditKey(tab.id, r.id)) : 0;
+      const table = r.kind === "rows" ? guessTable(r.sql) : null;
       return { id: r.id, title: r.sql, label: <>
         {dirty > 0 && <span className="dbx-dirty-dot" role="img" aria-label={`有 ${dirty} 处未写回的改动`} title={`有 ${dirty} 处未写回的改动`} />}
         <Icon name={r.cancelled ? "stop" : r.kind === "error" ? "alert" : r.kind === "rows" ? "database" : "check"} size={13} />
         {r.kind === "rows" ? `查询 ${r.index}` : `语句 ${r.index}`}
-        {r.kind === "rows" && <span className="dbx-cnt">{thousands(r.rows.length)}{r.hasMore ? "+" : ""} 行</span>}
+        {table && <span className="dbx-result-tab-table">{table}</span>}
         {r.kind === "rows" && (r.sets?.length ?? 0) > 1 && <span className="dbx-cnt">{r.sets!.length} 个结果集</span>}
         {r.kind !== "rows" && <span className={r.kind === "error" && !r.cancelled ? "bad" : undefined}>{summaryOf(r)}</span>}
       </> };
@@ -82,31 +85,36 @@ export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: nu
     clearEditsForTab(tab.id);
     patchTab<SqlTab>(tab.id, { results: [], plan: null, view: "output", batch: undefined, resultPair: undefined });
   };
-  const tabs = <><ResultTabList prefix={prefix} label="查询结果" items={items} value={view} onSelect={(id) => void setView(id)} />
-    {cur && !active && <span className="dbx-result-runmeta" title={cur.completedAt ? `执行完成于 ${new Date(cur.completedAt).toLocaleTimeString()}` : undefined}><span>{cur.kind === "rows" ? `${thousands(cur.rows.length)} 行 · ` : ""}{cur.ms} ms</span></span>}
-    {tab.results.length > 0 && <button type="button" className="dbx-ibtn" disabled={isRunning(tab)} aria-label="释放查询结果" title="释放已读取结果，保留 SQL 和事务" onClick={() => void release()}><Icon name="close" size={14}/></button>}
-  </>;
+  const paneHeading = (result: typeof options[number]) => layout === "dual" &&
+    <ResultPaneHeading result={result} options={options.filter(o => o.id === result.id || !pair.includes(o.id))} onPick={id => pickPane(pair.indexOf(result.id), id)} onLocate={onLocate} />;
 
   return (
     <div className="dbx-res" style={{ height }}>
-      <div className="dbx-result-workspace-head"><strong>查询结果 <span>{options.length} 个</span></strong>
+      <div className="dbx-result-head">
+        <ResultTabList prefix={prefix} label="查询结果" items={items} value={view} onSelect={setView} />
         <ResultBaselineSummary /><SqlExecutionFeedback executionId={tab.run?.id} previousAt={cur ? cur.completedAt ?? 0 : undefined} />
-        <div className="dbx-result-layout" aria-label="结果布局">{(["tabs", "dual"] as const).map(mode => <button key={mode} type="button" disabled={mode === "dual" && options.length < 2} aria-pressed={layout === mode} onClick={() => patchTab<SqlTab>(tab.id, { resultLayout: mode, resultPair: pair as [string, string] })}><Icon name={mode === "tabs" ? "panel" : "columns"} size={13} />{mode === "tabs" ? "标签" : "双栏"}</button>)}</div>
+        {layout === "tabs" && selectedResult && onLocate && <button type="button" className="dbx-ibtn"
+          aria-label={`定位 SQL 第 ${selectedResult.startLine ?? 1} 行`} title={`定位 SQL 第 ${selectedResult.startLine ?? 1} 行`}
+          onClick={() => onLocate(selectedResult.startLine ?? 1)}><Icon name="locateSql" size={14} /></button>}
+        {options.length > 1 && <div className="dbx-result-layout" role="group" aria-label="结果布局">{(["tabs", "dual"] as const).map(mode => {
+          const label = mode === "tabs" ? "标签" : "双栏";
+          return <button key={mode} type="button" aria-label={label} title={label} aria-pressed={layout === mode} onClick={() => patchTab<SqlTab>(tab.id, { resultLayout: mode, resultPair: pair as [string, string] })}><Icon name={mode === "tabs" ? "panel" : "columns"} size={13} /></button>;
+        })}</div>}
+        {tab.results.length > 0 && <button type="button" className="dbx-ibtn" disabled={isRunning(tab)} aria-label="释放查询结果" title="释放已读取结果，保留 SQL 和事务" onClick={() => void release()}><Icon name="close" size={14}/></button>}
       </div>
-      <div className="dbx-result-head">{tabs}</div>
       <div className="dbx-result-view dbx-query-surface" ref={setMotionHost} id={`${prefix}-panel`} role="tabpanel" tabIndex={0} aria-labelledby={resultTabId(prefix, view)}>
       {motionHost && <QueryField key={tab.run?.id ?? "idle"} host={motionHost} state={motionState} previous={previous} />}
       <div className="dbx-result-panes" data-layout={layout}>
       {rowViews.map(r => <section key={r.id} className="dbx-result-keep" hidden={!visible.includes(r.id)} style={{ order: visible.indexOf(r.id) }} aria-label={`查询 ${r.index} 结果`}>
-        <ResultPaneHeading result={r} options={layout === "dual" ? options.filter(o => o.id === r.id || !pair.includes(o.id)) : undefined} onPick={id => pickPane(pair.indexOf(r.id), id)} onLocate={onLocate} />
+        {paneHeading(r)}
         <RowsEntryView tab={tab} entry={r} isLast={ownsCursor(tab.connId, tab.slot, r.id)} onLocate={onLocate} />
       </section>)}
       {pending.filter(r => visible.includes(r.id)).map(r => <section key={r.id} className="dbx-result-keep" style={{ order: visible.indexOf(r.id) }} aria-label={`查询 ${r.index} 结果`}>
-        <ResultPaneHeading result={r} options={layout === "dual" ? options.filter(o => o.id === r.id || !pair.includes(o.id)) : undefined} onPick={id => pickPane(pair.indexOf(r.id), id)} onLocate={onLocate} />
+        {paneHeading(r)}
         <div className="dbx-result-pending" role="status"><Icon name={r.state === "running" ? "spinner" : r.state === "skipped" ? "stop" : "clock"} size={24} /><strong>{r.state === "running" ? "正在执行查询" : r.state === "skipped" ? "未执行" : "等待执行"} {r.index}</strong><span>{r.state === "skipped" ? "本次执行已结束，完成的结果仍可查看" : "前一条完成后继续执行，返回结果不会切走其他结果"}</span></div>
       </section>)}
       {tab.results.filter(r => r.kind !== "rows" && visible.includes(r.id)).map(r => <section key={r.id} className="dbx-result-keep" style={{ order: visible.indexOf(r.id) }} aria-label={`语句 ${r.index} 结果`}>
-        <ResultPaneHeading result={r} options={layout === "dual" ? options.filter(o => o.id === r.id || !pair.includes(o.id)) : undefined} onPick={id => pickPane(pair.indexOf(r.id), id)} onLocate={onLocate} />
+        {paneHeading(r)}
         <EntryView tab={tab} entry={r} tables={tables} onLocate={onLocate} />
       </section>)}
       {view === "plan" && tab.plan ? (
@@ -151,7 +159,7 @@ function StatsLine({ stats }: { stats: ResultEntry["stats"] }) {
   return (
     <span className="dbx-stats" title={statsTitle(stats) ?? undefined}>
       <Icon name="activity" size={12} />
-      {text}
+      实际执行统计 · {text}
     </span>
   );
 }

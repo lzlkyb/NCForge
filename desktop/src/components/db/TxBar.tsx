@@ -126,15 +126,15 @@ export function TransactionMenu({ transaction: t, compact = false }: { transacti
 export function TransactionButtons({ transaction: t, compact = false }: { transaction: Transaction; compact?: boolean }) {
   const title = transactionReason(t);
   return <div className="dbx-tx-actions" data-compact={compact || undefined} role="group" aria-label="当前会话事务">
-    <button type="button" className={t.disabled ? "dbx-btn" : "dbx-btn ok"} title={`提交 · ${title}`} aria-label={t.active?.label === "提交事务" ? "提交中…" : "提交"}
+    <button type="button" className={t.disabled ? "dbx-btn" : "dbx-btn ok"} title={`提交当前会话 · ${title}`} aria-label={t.active?.label === "提交事务" ? "提交中…" : "提交当前会话"}
       disabled={t.disabled} aria-busy={t.active?.label === "提交事务"} onClick={() => void t.act("commit")}>
       <Icon name={t.active?.label === "提交事务" ? "clock" : "check"} size={12} />
-      {!compact && (t.active?.label === "提交事务" ? "提交中…" : "提交")}
+      {!compact && (t.active?.label === "提交事务" ? "提交中…" : "提交当前会话")}
     </button>
-    <button type="button" className="dbx-btn" title={`回滚 · ${title}`} aria-label={t.active?.label === "回滚事务" ? "回滚中…" : "回滚"}
+    <button type="button" className="dbx-btn" title={`回滚当前会话 · ${title}`} aria-label={t.active?.label === "回滚事务" ? "回滚中…" : "回滚当前会话"}
       disabled={t.disabled} aria-busy={t.active?.label === "回滚事务"} onClick={() => void t.act("rollback")}>
       <Icon name={t.active?.label === "回滚事务" ? "clock" : "rollback"} size={12} />
-      {!compact && (t.active?.label === "回滚事务" ? "回滚中…" : "回滚")}
+      {!compact && (t.active?.label === "回滚事务" ? "回滚中…" : "回滚当前会话")}
     </button>
   </div>;
 }

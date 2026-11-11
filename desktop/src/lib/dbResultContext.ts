@@ -22,7 +22,8 @@ export function captureResultContext(connId: string, conn: DbConn | null, schema
 }
 export function resultTargetIssue(context: ResultExecutionContext | undefined, conn: DbConn | null, schema: string | undefined): string | null {
   if (!context) return null;
-  if (!conn || conn.id !== context.connId || connectionKey(conn) !== context.connectionKey) return "连接目标已变化，请重新执行查询后重查";
+  if (!conn) return "无法找到这份结果的原连接。已加载的数据仍可查看。";
+  if (conn.id !== context.connId || connectionKey(conn) !== context.connectionKey) return "连接目标已变化。当前显示旧结果，请先核对连接，再重新执行 SQL。";
   if (context.schema !== undefined && schema !== context.schema) return `当前 schema 已变化；此结果来自 ${context.schema || "登录账号"}，请切回该 schema 或重新执行查询`;
   return null;
 }

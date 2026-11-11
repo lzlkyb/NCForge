@@ -11,6 +11,7 @@ import { useRowDrafts } from "./useRowDrafts";
 import { useResultSetPlan } from "./useResultSetPlan";
 import { useTxEpoch } from "../lib/dbTxEpoch";
 import { useResultSetEditModel } from "./useResultSetEditModel";
+import { binaryRowSql } from "../lib/tableLob";
 import type { GridEdit } from "../components/db/gridEdit";
 
 /**
@@ -201,6 +202,9 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
       setTxNotice(connId, slot ?? null, tabId, undefined);
       let done = 0;
       let auto = false;
+      const writeProgress = () => done === 0 ? "" : auto
+        ? ` 前 ${done} 行已自动提交。`
+        : ` 前 ${done} 行已写入当前会话，请核对事务状态。`;
       try {
         for (const change of changes) {
           const r = await dbApi.execBound(connId, change.sql, change.params, 1, 60, slot ?? null);
@@ -214,11 +218,12 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
           if (r.kind !== "update" || r.updateCount !== 1) {
             // 三种没命中要说不同的话：INSERT 失败多半是必填列没填 / 唯一键冲突，
             // DELETE 没命中是「别人先删了」，UPDATE 没命中是原值被改过。
-            toast(change.kind === "insert"
+            const reason = change.kind === "insert"
               ? "新增行写回失败：可能必填列没填或唯一键冲突，已停止写回。"
               : change.kind === "delete"
                 ? `第 ${change.row + 1} 行在写回前已被其他人删除，删除没有命中，已停止写回。`
-                : `第 ${done + 1} 条没命中记录：原值已被别人改过或记录已删除。已停止，此前 ${done} 条已生效。`, "error");
+                : `第 ${done + 1} 条没命中记录：原值已被别人改过或记录已删除。已停止写回。`;
+            toast(reason + writeProgress(), "error");
             break;
           }
           done += 1;
@@ -238,11 +243,11 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
             drafts.restoreRow(change.row);
           }
         }
-        if (done === changes.length) toast(auto
-          ? `已写回 ${done} 条修改（自动提交）`
-          : `已写回 ${done} 条修改，尚未提交——用事务条提交或回滚`, "success");
+        if (done === changes.length) {
+          toast(auto ? `已提交 ${done} 行（自动提交）` : `已写入 ${done} 行 · 待提交。可提交或回滚当前会话。`, auto ? "success" : "info");
+        }
       } catch (e) {
-        toast(friendlyDbError(e), "error");
+        toast(friendlyDbError(e) + writeProgress(), "error");
       } finally {
         setSaving(false);
       }
@@ -265,6 +270,12 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
     planError,
     dirty,
     saving,
+    binarySqlForRow: (row: number, column: number) => {
+      const field = sourceName(column);
+      if (!field || !tableRef || model.forced || model.meta?.table !== tableRef) return null;
+      const name = model.meta.all.find(name => name.toUpperCase() === field.toUpperCase());
+      return name ? binaryRowSql(tableRef, columns.map((col, index) => ({ ...col, name: sourceName(index) ?? "" })), rows[row], model.meta.pk, name) : null;
+    },
     save,
     reset: () => { setChanged(new Map()); drafts.reset(); },
     /** 显示行（含写回覆盖与新增草稿行）：调用方直接拿它喂网格。 */

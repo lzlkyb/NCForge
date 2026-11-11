@@ -1179,7 +1179,7 @@ export async function execOne(tabId: string, sql: string, index: number, context
   appendOutput(tabId, [{
     at: Date.now(),
     text: `[${now()}] 第 ${index} 条 · ${summaryOf(entry)} · ${entry.ms} ms${clientMs > entry.ms+50 ? ` · 语句调用用时（含会话申请）${clientMs} ms` : ""}${entry.error ? ` · ${entry.error}` : ""}`,
-    tone: entry.kind === "error" ? "bad" : "ok",
+    tone: entry.cancelled ? "info" : entry.kind === "error" ? "bad" : "ok",
   }]);
   addHistory(connId, { at: Date.now(), sql, ms: entry.ms, summary: summaryOf(entry), ok: entry.kind !== "error" });
   // Learning cannot delay execution feedback; the frozen identity rejects a switched database.

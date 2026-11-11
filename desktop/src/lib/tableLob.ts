@@ -1,5 +1,6 @@
 import { sqlLiteral } from "./resultExport";
 import type { Cell, ColumnMeta } from "./dbApi";
+import { binaryColumn } from "./cellCodec";
 
 /**
  * 表页「加载完整值」的行定位 SQL：按主键单行反查。
@@ -18,4 +19,19 @@ export function rowLocatorSql(table: string, columns: ColumnMeta[], row: Cell[] 
     conds.push(`${columns[i].name.toLowerCase()} = ${sqlLiteral(value, columns[i].type)}`);
   }
   return `select * from ${table.toLowerCase()} where ${conds.join(" and ")}`;
+}
+
+/** LONG RAW cannot be projected through the normal row-number subquery. */
+export function binaryRowSql(table: string, columns: ColumnMeta[], row: Cell[] | undefined, pk: string[], column: string): string | null {
+  if (!row || !pk.length) return null;
+  const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
+  const conditions: string[] = [];
+  for (const key of pk) {
+    const matches = columns.map((c, index) => c.name.toUpperCase() === key.toUpperCase() ? index : -1).filter(index => index >= 0);
+    if (matches.length !== 1) return null;
+    const index = matches[0], value = row[index];
+    if (value == null || binaryColumn(columns[index].type)) return null;
+    conditions.push(`${quote(key)} = ${sqlLiteral(value, columns[index].type)}`);
+  }
+  return `select ${quote(column)} from ${table} where ${conditions.join(" and ")}`;
 }

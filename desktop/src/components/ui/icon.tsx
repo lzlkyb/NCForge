@@ -121,6 +121,12 @@ const paths = {
   sqlFormat: "M4 5h16M9 10h11M9 15h8M4 20h16M3 10l3 2.5L3 15",
   queryPlan: "M4 3h6v5H4zM14 16h6v5h-6zM14 6h6v5h-6zM7 8v10.5H14M7 8.5h7",
   sqlSnippet: "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M9 12l-2 2 2 2M15 12l2 2-2 2",
+  cellInspect: "M3 3h13v5M3 3v13h5M3 9h5M9 3v5M19 19l3 3M20 15a5 5 0 1 1-10 0 5 5 0 0 1 10 0z",
+  querySource: "M11 3H4v18h16V10M11 3v7h9M11 3l9 7M8 14h8M8 17h5",
+  locateSql: "M11 5h9M11 12h9M11 19h9M3 12h5m-3-3 3 3-3 3",
+  visibleColumns: "M3 4h18v16H3zM9 4v16M15 4v16",
+  fitColumns: "M3 4v16M21 4v16M6 12h12M9 9l-3 3 3 3m6-6 3 3-3 3",
+  wrapText: "M3 5h18M3 19h7M3 12h14a3 3 0 0 1 0 6h-3m2-2-2 2 2 2",
   rollback: "M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12",
   layoutRows: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM3 11h18",
   paintbrush:
