@@ -1598,6 +1598,11 @@ pub async fn db_result_close(
 ///
 /// `row_index` 是 `rows` 数组下标（不是显示顺序），前端直接给 `sel.r`。
 /// 带绑定参数的查询暂不支持（会明确报错，不会猜）。
+///
+/// `direct` 为真时直接把原查询发下去（不再套「编号 + 取第 N 行」）：二进制列套了外层
+/// 就只剩一个字节数组，取不到原值；调用前已限定必须是单行只读查询。
+// Tauri 命令的参数必须平铺成前端 `invoke` 的键，无法收成一个结构体。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn db_lob_value(
     state: tauri::State<'_, Arc<AppState>>,
