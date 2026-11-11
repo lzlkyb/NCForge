@@ -73,7 +73,7 @@ function targetOf(editor: Editor, mode: SqlRunMode): RunStmt[] {
     const offset = model.getOffsetAt(sel.getStartPosition());
     return splitStatements(part).map((s) => statement(s, offset, sel.startLineNumber - 1));
   }
-  if (mode !== "current") return statementsOf(model).map((s) => statement(s));
+  if (mode === "script") return statementsOf(model).map((s) => statement(s));
   const pos = editor.getPosition();
   const s = pos ? pickStatement(statementsOf(model), model.getOffsetAt(pos)) : null;
   return s ? [statement(s)] : [];
@@ -155,7 +155,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
     // 菜单项右侧），工具条按钮上就不必再印 Ctrl+Enter。id 会同时出现在 F1 命令面板里。
     editor.addAction({
       id: "ncforge.sql.run",
-      label: "执行（选中内容或整个脚本）",
+      label: "执行选中 SQL 或当前语句",
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
       contextMenuGroupId: CONTEXT_GROUP,
       contextMenuOrder: 0.1,

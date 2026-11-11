@@ -76,12 +76,12 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   }, []);
   const currentScope = scope?.tabId === tab.id ? scope : null;
   const statements = currentScope?.statements ?? [];
-  const runLabel = currentScope?.selected ? "执行选中 SQL" : "执行整个脚本";
+  const runLabel = currentScope?.selected ? "执行选中 SQL" : "执行当前语句";
   const first = statements[0], last = statements[statements.length - 1];
   const range = first && last?.endLine !== undefined
     ? `${first.startLine === last.endLine ? `第 ${first.startLine} 行` : `第 ${first.startLine}–${last.endLine} 行`}`
-    : statements.length ? "执行整个脚本"
-    : !currentScope ? "正在读取执行范围…" : currentScope.selected ? "选中内容没有可执行 SQL" : "编辑器里没有可执行 SQL";
+    : statements.length ? `第 ${first.startLine} 行`
+    : !currentScope ? "正在读取执行范围…" : currentScope.selected ? "选中内容没有可执行 SQL" : "光标处没有可执行 SQL";
   const disabledReason = !conn ? "请先选择数据库连接" : transaction.lost ? "事务结果待核对，请先核对当前会话"
     : transaction.active ? "正在处理事务，等待数据库确认" : null;
   useEffect(() => { setMenu(null); }, [tab.id]);
@@ -118,10 +118,10 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
         <div className="dbx-run-controls">
           <div className="dbx-runsplit">
             <button type="button" className="dbx-btn pri dbx-run-action" disabled={executionBlocked || !statements.length}
-              aria-label="执行" aria-describedby={scopeId} onClick={() => onRun("auto")}
+              aria-describedby={scopeId} onClick={() => onRun("auto")}
               title={`${runLabel} · ${range} · ${modifier}+Enter${disabledReason ? ` · ${disabledReason}` : ""}`}>
               <Icon name="play" size={16} />
-              <span>执行</span>
+              <span>{runLabel}</span>
             </button>
             <button type="button" className="dbx-btn pri dbx-run-menu" disabled={executionBlocked} aria-label="更多执行方式" title="更多执行方式" aria-haspopup="menu"
               onClick={event => popup(event.currentTarget, [

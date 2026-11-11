@@ -141,9 +141,9 @@ describe("SQL 编辑器动作与真实执行目标", () => {
     act(() => current.run?.()); expect(onRun).toHaveBeenCalledWith("current");
     act(() => script.run?.()); expect(onRun).toHaveBeenCalledWith("script");
   });
-  it("主执行无选区取全部，有选区只取选中内容", () => {
+  it("主执行无选区只取当前语句，有选区只取选中内容", () => {
     const { apiRef } = mount("select 1 from dual;\nselect 2 from dual;");
-    expect(apiRef.current!.target("auto")).toHaveLength(2);
+    expect(apiRef.current!.target("auto").map(s => s.text)).toEqual(["select 1 from dual"]);
     expect(apiRef.current!.target("current")).toHaveLength(1);
     select({ startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 20 });
     expect(apiRef.current!.target("auto").map(s => s.text)).toEqual(["select 2 from dual"]);
@@ -190,11 +190,12 @@ describe("SQL 编辑器动作与真实执行目标", () => {
     expect(script[script.length - 1].endOffset).toBe(sql.length);
   });
 
-  it("整篇执行范围随其它语句编辑刷新，当前语句仍保留最新编辑版本", () => {
+  it("编辑其它语句不改变当前范围，整段执行使用最新文本", () => {
     const { apiRef, onScope } = mount("select 1;\nselect 2;");
     const before = onScope.mock.calls.length;
     act(() => { mocks.model!.setValue("select 1;\nselect 3;"); mocks.listeners.content(); });
-    expect(onScope).toHaveBeenCalledTimes(before + 1);
+    expect(onScope).toHaveBeenCalledTimes(before);
+    expect(apiRef.current!.target("script").map(s => s.text)).toEqual(["select 1", "select 3"]);
     const current = apiRef.current!.target("current")[0];
     expect(current.text).toBe("select 1");
     expect(current.editorVersion).toBe(2);
