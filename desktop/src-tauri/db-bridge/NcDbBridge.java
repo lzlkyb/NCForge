@@ -441,7 +441,8 @@ public class NcDbBridge {
             } else if ("closeResult".equals(cmd)) {
                 ok(id, "{\"closed\":" + closeResult(a.size() > 0 ? a.get(0) : "") + "}");
             } else if ("lobValue".equals(cmd)) {
-                ok(id, lobValue(a.get(0), intArg(a, 1, 0), a.get(2), intArg(a, 3, CLOB_MAX)));
+                ok(id, lobValue(a.get(0), intArg(a, 1, 0), a.get(2), intArg(a, 3, CLOB_MAX),
+                        a.size() > 4 && "true".equals(a.get(4))));
             } else if ("commit".equals(cmd)) {
                 requireConn();
                 conn.commit();
@@ -1258,7 +1259,7 @@ public class NcDbBridge {
          * 与 Rust 侧 `Session::lob_value` 同一套写法：外面套一层「编号 + 取第 N 行」，
          * 服务端只回一行一列，也不碰「加载更多」那条游标。
          */
-        private String lobValue(String raw, int rowIndex, String column, int maxChars) throws Exception {
+        private String lobValue(String raw, int rowIndex, String column, int maxChars, boolean direct) throws Exception {
             requireConn();
             String sql = normalize(raw);
             if (sql.isEmpty()) {
@@ -1266,7 +1267,7 @@ public class NcDbBridge {
             }
             int max = Math.max(1, Math.min(CLOB_MAX, maxChars));
             String ident = "\"" + column.replace("\"", "\"\"") + "\"";
-            String probe = "select " + ident + " as \"__nc_lob\" from "
+            String probe = direct ? sql : "select " + ident + " as \"__nc_lob\" from "
                     + "(select t.*, rownum as \"__ncforge_rn\" from (" + sql + ") t) "
                     + "where \"__ncforge_rn\" = " + (rowIndex + 1);
             long t0 = System.currentTimeMillis();
@@ -1276,6 +1277,23 @@ public class NcDbBridge {
                     if (!rs.next()) {
                         throw new SQLException("第 " + (rowIndex + 1)
                                 + " 行已经不存在（结果可能已变化，请重新执行查询）");
+                    }
+                    int type = rs.getMetaData().getColumnType(1);
+                    if (type == Types.BINARY || type == Types.VARBINARY || type == Types.LONGVARBINARY || type == Types.BLOB) {
+                        int cap = max / 2;
+                        try (java.io.InputStream stream = rs.getBinaryStream(1)) {
+                            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+                            if (stream != null) {
+                                byte[] buffer = new byte[8192];
+                                while (bytes.size() <= cap) {
+                                    int n = stream.read(buffer, 0, Math.min(buffer.length, cap + 1 - bytes.size()));
+                                    if (n < 0) break;
+                                    bytes.write(buffer, 0, n);
+                                }
+                            }
+                            return "{\"value\":\"" + hex(bytes.toByteArray(), cap) + "\",\"chars\":" + Math.min(bytes.size(), cap) * 2
+                                    + ",\"truncated\":" + (bytes.size() > cap) + ",\"ms\":" + (System.currentTimeMillis() - t0) + "}";
+                        }
                     }
                     Object o = rs.getObject(1);
                     String text;
@@ -2275,7 +2293,7 @@ public class NcDbBridge {
         }
         if (o instanceof byte[]) {
             byte[] b = (byte[]) o;
-            if (type == Types.VARBINARY || type == Types.BINARY) {
+            if (type == Types.VARBINARY || type == Types.BINARY || type == Types.LONGVARBINARY) {
                 return "\"" + hex(b, 64) + "\""; // RAW：十六进制，GUID 主键常用
             }
             return "\"<BLOB " + b.length + "B>\"";

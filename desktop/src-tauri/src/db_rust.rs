@@ -524,6 +524,7 @@ impl Session {
                 a.get(2).copied().unwrap_or(""),
                 int_arg(a, 3, CLOB_MAX),
                 timeout,
+                a.get(4) == Some(&"true"),
             ),
             "commit" => {
                 let conn = self.conn_ref()?;
@@ -1139,6 +1140,7 @@ impl Session {
         column: &str,
         max_chars: usize,
         timeout: Duration,
+        direct: bool,
     ) -> Result<Value, BridgeError> {
         let sql = normalize(raw);
         if sql.is_empty() {
@@ -1147,7 +1149,11 @@ impl Session {
         if !is_query(&leading_keywords(&sql), &sql) {
             return Err(sql_err("只有查询结果才能按需取大文本"));
         }
-        let probe = lob_probe_sql(&sql, column, row_index)?;
+        let probe = if direct {
+            sql
+        } else {
+            lob_probe_sql(&sql, column, row_index)?
+        };
         // 🔴 借连接，不要 `take()` 走。`take()` 之后任何一个 `?` 早退都会跳过
         // `self.conn = Some(conn)`，连接被 drop 掉，会话就永久停在「还没连数据库」——
         // 用户只会看到「用着用着连接没了」。同文件的 `more()` 用的也是 `as_ref()`。
@@ -2360,6 +2366,27 @@ fn lob_value_with(
         )));
     };
     let base = base_type(&type_label(&cur.columns()[0]));
+    if matches!(base.as_str(), "RAW" | "LONG RAW" | "BLOB") {
+        let cap = max_chars / 2;
+        let bytes = if base == "BLOB" {
+            let mut bytes = Vec::new();
+            if let Some(lob) = row.get::<Option<Lob>>(0).map_err(drv_err)? {
+                lob.take(cap as u64 + 1)
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| sql_err(format!("读 BLOB 失败：{e}")))?;
+            }
+            bytes
+        } else {
+            row.get::<Option<Vec<u8>>>(0)
+                .map_err(drv_err)?
+                .unwrap_or_default()
+        };
+        let value = hex(&bytes, cap);
+        return Ok(json!({
+            "value": value, "chars": bytes.len().min(cap) * 2,
+            "truncated": bytes.len() > cap, "ms": t0.elapsed().as_millis() as u64
+        }));
+    }
     let text = match base.as_str() {
         "CLOB" | "NCLOB" | "LONG" => clob_full_at(&row, 0, max_chars)?,
         _ => row
