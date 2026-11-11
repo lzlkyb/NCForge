@@ -23,6 +23,13 @@ describe("insertChange", () => {
     expect(change.params).toEqual([null]);
   });
 
+  it("同一表列在结果里出现两次时新增只写一次（否则是重复列名）", () => {
+    const dup = [{ ...cols[0] }, { ...cols[0] }];
+    const change = insertChange("t", dup, new Map([[0, "A"], [1, "A"]]), 0);
+    expect(change.sql).toBe("insert into t (CODE) values (:1)");
+    expect(change.params).toEqual(["A"]);
+  });
+
   it("CLOB 走 to_clob 绑定，避免长文本被当 VARCHAR2 截断", () => {
     const change = insertChange("t", cols, new Map([[2, "x"]]), 0);
     expect(change.sql).toContain("to_clob(:1)");
@@ -105,6 +112,17 @@ describe("SQL 结果页的定位方式", () => {
   it("ROWID 为空时拒绝写回（行号会落到别的行）", () => {
     expect(() => optimisticChanges("t", resultCols, [["A", "1", null]], [], new Map([["0:1", "2"]]),
       { rowidCol: 2, sourceName })).toThrow("没有 ROWID");
+  });
+
+  it("同一表列在结果里出现两次（t.code, t.*）只 SET 一次、只守卫一次", () => {
+    const dupCols: ColumnMeta[] = [resultCols[0], resultCols[1], { ...cols[0], name: "编码" }, resultCols[2]];
+    const dupSource = (i: number) => (i === 0 || i === 2 ? "CODE" : i === 1 ? "QTY" : null);
+    const changes = optimisticChanges("t", dupCols, [["A", "1", "A", "rid"]], [],
+      new Map([["0:0", "B"], ["0:2", "B"]]), { rowidCol: 3, sourceName: dupSource });
+    // `set CODE = :1, CODE = :2` 会被 Oracle 拒（ORA-00957 重复的列名）。
+    expect(changes[0].sql).toBe("update t set CODE = :1 where rowid = :2 and CODE = :3");
+    expect(changes[0].params).toEqual(["B", "rid", "A"]);
+    expect(changes[0].cells.map(c => c.column)).toEqual([0, 2]);   // 两格都要回填
   });
 
   it("ROWID 删除与别名新增都按源表列", () => {

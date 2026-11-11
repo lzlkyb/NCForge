@@ -37,6 +37,23 @@ function tableNameOf(columns: ColumnMeta[], opts: WriteOptions, col: number): st
   return name;
 }
 
+/**
+ * 同一个表列在结果里出现多次（`select t.code, t.*`）时，几格指向同一个表列。
+ *
+ * 一条 UPDATE 里 `set CODE = :1, CODE = :2` 会被 Oracle 直接拒（ORA-00957 重复的列名），
+ * 守卫里同一个列写两遍也不会让条件更严。几格的值本来就必须相同（界面会同步改），
+ * 所以只留第一次出现的那个下标拼 SQL；`cells` 仍然保留全部下标，写回成功后要按格回填。
+ */
+function firstPerColumn(indices: number[], columns: ColumnMeta[], opts: WriteOptions): number[] {
+  const seen = new Set<string>();
+  return indices.filter(c => {
+    const name = tableNameOf(columns, opts, c).toUpperCase();
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return true;
+  });
+}
+
 export function optimisticChanges(
   table: string,
   columns: ColumnMeta[],
@@ -69,7 +86,8 @@ export function optimisticChanges(
         `「${columns[clipped.column].name}」内容太长，网格里只有前 8K，改它会把截断内容写坏；请用 SQL 更新这条记录`,
       );
     }
-    const set = cells.map(c => `${identifier(tableNameOf(columns, opts, c.column))} = ${bind(c.after, c.column)}`).join(", ");
+    const set = firstPerColumn(cs, columns, opts)
+      .map(c => `${identifier(tableNameOf(columns, opts, c))} = ${bind(changed.get(`${r}:${c}`)!, c)}`).join(", ");
     const guards: string[] = [];
     if (rowid !== undefined) {
       guards.push(`rowid = ${bindRowValue(row[rowid], ROWID_COLUMN, params)}`);
@@ -80,7 +98,7 @@ export function optimisticChanges(
           ? `dbms_lob.compare(${name}, ${bind(row[c],c)}) = 0` : `${name} = ${bind(row[c],c)}`);
       }
     }
-    for (const c of cs) {
+    for (const c of firstPerColumn(cs, columns, opts)) {
       const name = identifier(tableNameOf(columns, opts, c));
       guards.push(row[c] === null ? `${name} is null` : /CLOB/i.test(columns[c].type)
         ? `dbms_lob.compare(${name}, ${bind(row[c],c)}) = 0` : `${name} = ${bind(row[c],c)}`);
@@ -109,8 +127,11 @@ export function insertChange(table: string, columns: ColumnMeta[], values: Map<n
     );
   }
   const params: BoundCell[] = [];
-  const names = cols.map(c => identifier(tableNameOf(columns, opts, c)));
-  const binds = cols.map(c => bindRowValue(values.get(c)!, columns[c], params));
+  // 复制行 / 同步填值会让同一个表列在结果里出现多次（`select t.code, t.*`），
+  // `insert into t (CODE, CODE)` 会报重复列名，所以同样按表列去重。
+  const written = firstPerColumn(cols, columns, opts);
+  const names = written.map(c => identifier(tableNameOf(columns, opts, c)));
+  const binds = written.map(c => bindRowValue(values.get(c)!, columns[c], params));
   return {
     kind: "insert",
     row,

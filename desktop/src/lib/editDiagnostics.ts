@@ -57,7 +57,6 @@ function nextStep(source: QuerySource, keyInfo: EditKeyInfo, readonly: boolean |
     return `给结果加 rowid：select t.*, t.rowid from ${source.table} t；或手动指定一列能唯一确定行的定位列（不保证唯一时，写回命中多行会被拒绝）。`;
   }
   if (keyInfo.reason.includes("读不到表")) return "检查表名 / schema 与访问权限；或点「指定基表/定位列…」从表清单重新选。";
-  if (keyInfo.reason.includes("多列对应主键")) return "结果里同一主键出现了多次；去掉重复列，或手动指定定位列。";
   return "点「指定基表/定位列…」调整定位方式。";
 }
 

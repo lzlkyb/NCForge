@@ -88,8 +88,15 @@ export function useResultSetEditModel({ connId, sql, schema, columns }: {
     return columns.findIndex(c => c.name.toUpperCase() === "ROWID");
   }, [columns, source.rowid, forced]);
 
-  /** 结果列 → 表列（未去重的原始映射）。 */
-  const rawSourceName = useCallback((col: number): string | null => {
+  /**
+   * 结果列 → 表列。
+   *
+   * 同一个表列在结果里出现多次时（`select t.code, t.*`）**不**返回 null：几格取的是
+   * 同一个值，改哪一格写回的都该是 `CODE`。同步与写回去重交给 `twinsOf` /
+   * `dbOptimisticEdit`，别用「不给改」来处理重复列——那会让 `t.x, t.*` 这种最顺手的
+   * 写法整列变只读，用户还以为是软件不支持改数据。
+   */
+  const sourceName = useCallback((col: number): string | null => {
     const c = columns[col];
     if (!c || col === rowidCol) return null;
     const upper = c.name.toUpperCase();
@@ -103,19 +110,24 @@ export function useResultSetEditModel({ connId, sql, schema, columns }: {
     return meta.all.some(n => n.toUpperCase() === name.toUpperCase()) ? name : null;
   }, [columns, rowidCol, forced, source, meta, tableRef]);
 
-  /** 同一个表列在结果里出现多次时两边都不给改：改哪一格都会让另一格显示错。 */
-  const duplicateSources = useMemo(() => {
-    const counts = new Map<string, number>();
+  const colsBySource = useMemo(() => {
+    const map = new Map<string, number[]>();
     for (let i = 0; i < columns.length; i += 1) {
-      const name = rawSourceName(i)?.toUpperCase();
-      if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
+      const name = sourceName(i)?.toUpperCase();
+      if (name) map.set(name, [...(map.get(name) ?? []), i]);
     }
-    return new Set([...counts].filter(([, n]) => n > 1).map(([name]) => name));
-  }, [columns, rawSourceName]);
-  const sourceName = useCallback((col: number): string | null => {
-    const name = rawSourceName(col);
-    return name && duplicateSources.has(name.toUpperCase()) ? null : name;
-  }, [rawSourceName, duplicateSources]);
+    return map;
+  }, [columns, sourceName]);
+
+  /**
+   * 与这一格对应同一个表列的其它结果列。
+   *
+   * 写回只改一个表列，这些格子必须跟着变，否则同一次修改里一格新、一格旧。
+   */
+  const twinsOf = useCallback((col: number): number[] => {
+    const name = sourceName(col)?.toUpperCase();
+    return name ? (colsBySource.get(name) ?? []).filter(i => i !== col) : [];
+  }, [colsBySource, sourceName]);
 
   const keyInfo = useMemo<EditKeyInfo>(() => {
     if (!source.table) return { keys: [], keyCols: [], kind: null, reason: source.reason, missing: [] };
@@ -171,6 +183,7 @@ export function useResultSetEditModel({ connId, sql, schema, columns }: {
     readonly,
     rowidCol,
     sourceName,
+    twinsOf,
     keyInfo,
     readonlyColumns,
     usable,

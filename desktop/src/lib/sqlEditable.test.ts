@@ -105,9 +105,11 @@ describe("editableIdentity", () => {
   it("主键经别名映射到结果列", () => {
     expect(editableIdentity(cols, ["CODE"], map)).toMatchObject({ keys: ["CODE"], keyCols: [0], kind: "pk", reason: "" });
   });
-  it("缺主键列 / 多列对应同一主键都拒绝", () => {
+  it("缺主键列拒绝；同一主键在结果里出现多次时用第一格定位、其余几格一起锁住", () => {
     expect(editableIdentity(cols, ["CODE", "ID"], map).missing).toEqual(["ID"]);
-    expect(editableIdentity([{ name: "A" }, { name: "B" }], ["CODE"], () => "CODE").reason).toContain("多列对应主键");
+    // `select t.id, t.*`：两格是同一个表列，值本来就一样，锁住两格但 WHERE 只写一次。
+    expect(editableIdentity([{ name: "CODE" }, { name: "CODE" }], ["CODE"], () => "CODE"))
+      .toMatchObject({ keys: ["CODE"], keyCols: [0], lockedCols: [0, 1], kind: "pk", reason: "" });
   });
   it("ROWID 优先，不需要主键", () => {
     expect(editableIdentity(cols, [], map, 1)).toMatchObject({ kind: "rowid", reason: "" });

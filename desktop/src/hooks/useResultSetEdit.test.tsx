@@ -312,6 +312,66 @@ it("可编辑结果里的表达式列双击时说出这一格自己的原因", a
   expect(latest.edit!.blockedReason!(0, 0)).toContain("定位列");
 });
 
+it("同一表列在结果里出现两次（t.code, t.*）时两格都能改，写回只改一次", async () => {
+  const calls: { sql: string; params: unknown[] }[] = [];
+  // 用户现场那条：select t.process_status, t.*, t.rowid → 表列在结果里占了两格。
+  const dupColumns: ColumnMeta[] = [
+    { name: "CODE", type: "VARCHAR2(40)", precision: 40, scale: 0 },
+    { name: "ID", type: "NUMBER", precision: 10, scale: 0 },
+    { name: "CODE", type: "VARCHAR2(40)", precision: 40, scale: 0 },
+    { name: "ROWID", type: "ROWID", precision: 0, scale: 0 },
+  ];
+  mocks.invoke.mockImplementation((cmd: string, args: Record<string, unknown>) => {
+    if (cmd === "db_connect") return Promise.resolve({ url: "jdbc:oracle:thin:@h:1521/t", user: "u", autoCommit: false });
+    if (cmd === "db_read_only") return Promise.resolve({ readOnly: false, tx: { autoCommit: false, statements: 0, rows: 0, since: 0 } });
+    if (cmd === "db_meta" && args.kind === "columns") {
+      return Promise.resolve({ columns: columns.map((c, i) => ({ ...c, pk: i === 0, size: 0, full: c.type, nullable: true, default: null, comment: null, zh: null })) });
+    }
+    if (cmd === "db_exec_bound") {
+      calls.push({ sql: String(args.sql), params: (args.params as unknown[]) ?? [] });
+      return Promise.resolve({ kind: "update", updateCount: 1 });
+    }
+    return Promise.resolve(null);
+  });
+  await act(async () => root.render(<Probe sql="select t.code, t.*, t.rowid from bd_material t"
+    columns={dupColumns} rows={[["a", 1, "a", "rid"]]} />));
+  await flush();
+  expect(latest.blocked).toBe("");
+  // 两格都是 CODE，都该能改；原来这一整列被判成「计算结果或对不上表列」。
+  expect(latest.edit!.canEdit(0, 0)).toBe(true);
+  expect(latest.edit!.canEdit(2, 0)).toBe(true);
+
+  latest.edit!.onEdit(0, 0, "b");
+  await act(async () => {});
+  // 同一个表列的两格必须一起变，否则写回后另一格还显示旧值。
+  expect(latest.edit!.changed.get("0:0")).toBe("b");
+  expect(latest.edit!.changed.get("0:2")).toBe("b");
+
+  await act(async () => { latest.save(); await new Promise(r => setTimeout(r, 0)); });
+  expect(calls).toHaveLength(1);
+  // 列名大小写照抄 SQL 里的写法（`t.code` 就是小写）；Oracle 不加引号时不分大小写。
+  expect(calls[0].sql).toBe("update bd_material set code = :1 where rowid = :2 and code = :3");
+  expect(calls[0].params).toEqual(["b", "rid", "a"]);
+  expect(latest.rows[0][0]).toBe("b");
+  expect(latest.rows[0][2]).toBe("b");
+});
+
+it("主键在结果里出现两次时两格都锁住，理由是「定位列」", async () => {
+  const dupColumns: ColumnMeta[] = [
+    { name: "ID", type: "NUMBER", precision: 10, scale: 0 },
+    { name: "ID", type: "NUMBER", precision: 10, scale: 0 },
+    { name: "CODE", type: "VARCHAR2(40)", precision: 40, scale: 0 },
+  ];
+  await act(async () => root.render(<Probe sql="select t.id, t.* from bd_material t"
+    columns={dupColumns} rows={[[1, 1, "a"]]} />));
+  await flush();
+  expect(latest.blocked).toBe("");
+  expect(latest.edit!.canEdit(2, 0)).toBe(true);
+  expect(latest.edit!.canEdit(0, 0)).toBe(false);
+  expect(latest.edit!.canEdit(1, 0)).toBe(false);
+  expect(latest.edit!.blockedReason!(1, 0)).toContain("定位列");
+});
+
 it("手动指定基表与定位列后，结构判不出来的查询也能改", async () => {
   await act(async () => root.render(<Probe sql="select a.code from t a join u b on a.id = b.id" />));
   await flush();

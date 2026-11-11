@@ -35,7 +35,7 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
   schema?: string;
 }) {
   const model = useResultSetEditModel({ connId, sql, schema, columns });
-  const { tableRef, rowidCol, sourceName, keyInfo, usable, blocked } = model;
+  const { tableRef, rowidCol, sourceName, twinsOf, keyInfo, usable, blocked } = model;
   const [changed, setChanged] = useState<Map<string, Cell>>(new Map());
   /** 写回成功后更新的值：`行:列` → 新值。基准是数据库快照，不是屏幕上被草稿行改过的行。 */
   const [applied, setApplied] = useState<Map<string, Cell>>(new Map());
@@ -87,7 +87,20 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
     const update = (fn: (next: Map<string, Cell>) => void) =>
       setChanged(current => { const next = new Map(current); fn(next); return next; });
     const keyCols = keyInfo.keyCols;
+    // 定位列在结果里可能出现多次（`select t.id, t.*`）：既然值相同，几格都锁住，
+    // 否则改掉其中一格会让 WHERE 定位到「改之前」的那一行。
+    const locked = new Set(keyInfo.lockedCols ?? keyCols);
     const base = baseline.length;
+    /**
+     * 同一个表列在结果里出现多次时，几格必须一起改：写回只改一个表列，
+     * 不给另一格同步，同一次修改里就会一格新、一格旧。
+     */
+    const writeCell = (next: Map<string, Cell>, row: number, col: number, value: Cell) => {
+      for (const c of [col, ...twinsOf(col)]) {
+        if (sameCell(value, baseline[row]?.[c] ?? null)) next.delete(`${row}:${c}`);
+        else next.set(`${row}:${c}`, value);
+      }
+    };
     return {
       canEdit: (col, row) => {
         const column = columns[col];
@@ -96,7 +109,7 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
         if (row !== undefined && row >= base) return true;
         // 大文本预览只是前 8K + 一段说明，改它既写不回原值也会把说明当成数据。
         if (row !== undefined && isLobPreview(baseline[row]?.[col] ?? null)) return false;
-        return !keyCols.includes(col);
+        return !locked.has(col);
       },
       /** 可编辑结果里也有锁住的列：双击要说出这一格自己的原因，不能静默。 */
       blockedReason: (col, row) => {
@@ -109,29 +122,32 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
         if (row !== undefined && isLobPreview(baseline[row]?.[col] ?? null)) {
           return "这一格是大文本预览（只显示前 8K），不能在这里改；按 F4 查看完整值";
         }
-        if (keyCols.includes(col)) return `「${column.name}」是定位列，改了会定位不到原行`;
+        if (locked.has(col)) return `「${column.name}」是定位列，改了会定位不到原行`;
         return "";
       },
       changed,
       onEdit: (row, col, value) => {
         // 虚拟行号：填的是草稿，不进 `changed`（写回时按 INSERT 生成）。
-        if (row >= base) { drafts.setCell(row, col, value); return; }
-        update(next => {
-          if (sameCell(value, baseline[row]?.[col] ?? null)) next.delete(`${row}:${col}`);
-          else next.set(`${row}:${col}`, value);
-        });
+        if (row >= base) {
+          for (const c of [col, ...twinsOf(col)]) drafts.setCell(row, c, value);
+          return;
+        }
+        update(next => writeCell(next, row, col, value));
       },
       onResetCell: (row, col) => {
-        if (row >= base) { drafts.setCell(row, col, null); return; }
-        update(next => { next.delete(`${row}:${col}`); });
+        if (row >= base) {
+          for (const c of [col, ...twinsOf(col)]) drafts.setCell(row, c, null);
+          return;
+        }
+        update(next => { for (const c of [col, ...twinsOf(col)]) next.delete(`${row}:${c}`); });
       },
       onEditMany: (cells) => {
         for (const { row, col, value } of cells) {
-          if (row >= base) { drafts.setCell(row, col, value); continue; }
-          update(next => {
-            if (sameCell(value, baseline[row]?.[col] ?? null)) next.delete(`${row}:${col}`);
-            else next.set(`${row}:${col}`, value);
-          });
+          if (row >= base) {
+            for (const c of [col, ...twinsOf(col)]) drafts.setCell(row, c, value);
+            continue;
+          }
+          update(next => writeCell(next, row, col, value));
         }
       },
       // 复制这一行（新增）：主键列留空——同一主键插不进去，
@@ -139,7 +155,7 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
       onCloneRow: (row) => {
         const values = new Map<number, Cell>();
         const skipped: string[] = [];
-        const locator = new Set([...keyCols, ...(rowidCol >= 0 ? [rowidCol] : [])]);
+        const locator = new Set([...locked, ...(rowidCol >= 0 ? [rowidCol] : [])]);
         baseline[row]?.forEach((cell, c) => {
           if (cell === null || locator.has(c)) return;
           if (isLobPreview(cell)) { skipped.push(columns[c]?.name ?? String(c + 1)); return; }
@@ -153,7 +169,7 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
       onDeleteRow: (row) => drafts.removeRow(row),
       onRestoreRow: (row) => drafts.restoreRow(row),
     };
-  }, [usable, columns, baseline, keyInfo.keyCols, rowidCol, sourceName, changed, drafts]);
+  }, [usable, columns, baseline, keyInfo.keyCols, keyInfo.lockedCols, rowidCol, sourceName, twinsOf, changed, drafts]);
 
   // 计划在 render 期算，但异常不会穿到 React：出错时保留原因交给工具条显示，
   // 别像以前那样静默变成「0 条」把按钮藏掉。

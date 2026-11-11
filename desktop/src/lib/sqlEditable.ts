@@ -24,8 +24,14 @@ export function editableSource(sql: string): EditableSource {
 export interface EditKeyInfo {
   /** 定位列的表列名（大写）；rowid 定位时为空。 */
   keys: string[];
-  /** 定位列在结果里的下标。 */
+  /** 定位列在结果里的下标；拼 WHERE 用它。 */
   keyCols: number[];
+  /**
+   * 也要锁住、但不进 WHERE 的下标：结果里同一个表列出现多次（`select t.id, t.*`）时，
+   * 两格的值本来就一样，用第一格定位就够了，可两格都不能当数据改。
+   * 不传 = 与 `keyCols` 相同。
+   */
+  lockedCols?: number[];
   kind: "pk" | "rowid" | "custom" | null;
   reason: string;
   /** 主键里结果没有的列。 */
@@ -47,14 +53,18 @@ export function editableIdentity(
   if (rowidCol >= 0) return { keys: ["ROWID"], keyCols: [], kind: "rowid", reason: "", missing: [] };
   if (!pk.length) return { keys: [], keyCols: [], kind: null, reason: "这张表没有主键，定位不到唯一行", missing: [] };
   const keyCols: number[] = [];
+  const twins: number[] = [];
   const missing: string[] = [];
   for (const name of pk) {
     const wanted = name.toUpperCase();
     const hits = columns.flatMap((_, i) => (sourceName(i)?.toUpperCase() === wanted ? [i] : []));
     if (!hits.length) missing.push(wanted);
-    else if (hits.length > 1) {
-      return { keys: [], keyCols: [], kind: null, reason: `结果里有多列对应主键 ${wanted}，定位不唯一`, missing: [] };
-    } else keyCols.push(hits[0]);
+    // 同一表列在结果里出现多次（`select t.id, t.*`）：两格取的是同一个值，
+    // 用第一格拼 WHERE 一样准；其余几格跟着锁住，不能当数据改。
+    else {
+      keyCols.push(hits[0]);
+      twins.push(...hits.slice(1));
+    }
   }
   if (missing.length) {
     return {
@@ -62,7 +72,7 @@ export function editableIdentity(
       reason: `结果里没有主键列 ${missing.join("、")}，定位不到唯一行`,
     };
   }
-  return { keys: pk.map(k => k.toUpperCase()), keyCols, kind: "pk", reason: "", missing: [] };
+  return { keys: pk.map(k => k.toUpperCase()), keyCols, lockedCols: [...keyCols, ...twins], kind: "pk", reason: "", missing: [] };
 }
 
 /** 用户手动指定的定位列（DBeaver virtual key 思路）：没有主键时的兜底。 */
@@ -74,16 +84,20 @@ export function editableCustomKeys(
   const names = selected.map(n => n.toUpperCase()).filter(Boolean);
   if (!names.length) return { keys: [], keyCols: [], kind: null, reason: "还没有选择定位列", missing: [] };
   const keyCols: number[] = [];
+  const twins: number[] = [];
   const missing: string[] = [];
   for (const name of names) {
-    const index = columns.findIndex(c => c.name.toUpperCase() === name);
-    if (index < 0 || !sourceName(index)) missing.push(name);
-    else keyCols.push(index);
+    const hits = columns.flatMap((c, i) => (c.name.toUpperCase() === name && sourceName(i) ? [i] : []));
+    if (!hits.length) missing.push(name);
+    else {
+      keyCols.push(hits[0]);
+      twins.push(...hits.slice(1));
+    }
   }
   if (missing.length) {
     return { keys: [], keyCols: [], kind: null, missing, reason: `选中的定位列 ${missing.join("、")} 不能写回表列` };
   }
-  return { keys: names, keyCols, kind: "custom", reason: "", missing: [] };
+  return { keys: names, keyCols, lockedCols: [...keyCols, ...twins], kind: "custom", reason: "", missing: [] };
 }
 
 /** 老接口：只按结果列名匹配主键（表页 / 旧调用方继续使用）。 */
