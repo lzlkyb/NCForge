@@ -161,6 +161,15 @@ export function sqlHistoricalJoinSuggestions(scopeKey: string, sources: SqlBusin
   return out;
 }
 export function sqlJoinHistoryGeneration(scopeKey: string): number { return generations.get(scopeKey) ?? 0; }
+export function snapshotSqlJoinHistory(scopeKey: string): () => boolean {
+  const snapshot = read().scopes[scopeKey] ?? [];
+  return () => {
+    const store = read();
+    const current = store.scopes[scopeKey] ?? [];
+    const keys = new Set(current.map(keyOf));
+    return save({ ...store, scopes: { ...store.scopes, [scopeKey]: [...current, ...snapshot.filter(entry => !keys.has(keyOf(entry)))] } });
+  };
+}
 export function clearSqlJoinHistory(scopeKey: string): boolean {
   if (!validScope(scopeKey)) return false;
   generations.set(scopeKey, sqlJoinHistoryGeneration(scopeKey) + 1);

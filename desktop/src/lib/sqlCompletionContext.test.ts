@@ -34,3 +34,14 @@ it("does not treat quoted clause names as SQL clauses", () => {
   expect(at('select "where", | from a').clause).toBe("select");
   expect(at('select * from a order by "where", |').clause).toBe("order");
 });
+
+it("suggests enums in comparisons, literal lists and update assignments", () => {
+  for (const sql of [
+    "select * from a where status <> |",
+    "select * from a where status in (|)",
+    "select * from a where status not in ('A', |)",
+    "update a set status = | where id = 2",
+  ]) expect(at(sql)).toMatchObject({ kind: "value", field: "status", valueSource: { table: "a" } });
+  expect(at("select * from a where status in (select | from b)").kind).not.toBe("value");
+  expect(at("select * from a where status >= |").kind).not.toBe("value");
+});

@@ -3,7 +3,7 @@ import type * as Monaco from "monaco-editor";
 const h = vi.hoisted(() => ({ completions: new Map<string, Monaco.languages.CompletionItemProvider>(), signatures: vi.fn(), links: vi.fn(), columns: vi.fn(), runtime: { status: "connected", currentSchema: "APP", tables: [{ name: "BD_MATERIAL", kind: "TABLE" }, { name: "BD_PROJECT", kind: "TABLE" }], ncNames: { bd_material: "物料", bd_project: "项目" }, tablesAt: 1 }, business: vi.fn(), joins: vi.fn() }));
 vi.mock("./monacoSetup", () => ({ monaco: {
   Range: class { constructor(readonly startLineNumber: number, readonly startColumn: number, readonly endLineNumber: number, readonly endColumn: number) {} static fromPositions(a: Monaco.Position, b: Monaco.Position) { return { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column }; } },
-  languages: { CompletionItemInsertTextRule: { InsertAsSnippet: 4 }, CompletionItemKind: { Field: 1, Property: 2, Keyword: 3, Struct: 4, Interface: 5, Snippet: 6, Function: 7, Variable: 8 }, registerCompletionItemProvider: (id: string, provider: Monaco.languages.CompletionItemProvider) => h.completions.set(id, provider), registerSignatureHelpProvider: h.signatures, registerLinkProvider: h.links },
+  languages: { CompletionTriggerKind: { Invoke: 0 }, CompletionItemInsertTextRule: { InsertAsSnippet: 4 }, CompletionItemKind: { Field: 1, Property: 2, Keyword: 3, Struct: 4, Interface: 5, Snippet: 6, Function: 7, Variable: 8 }, registerCompletionItemProvider: (id: string, provider: Monaco.languages.CompletionItemProvider) => h.completions.set(id, provider), registerSignatureHelpProvider: h.signatures, registerLinkProvider: h.links },
   editor: { registerLinkOpener: vi.fn() },
 } }));
 vi.mock("./sqlModels", () => ({ tabIdOfModel: () => "t" }));
@@ -78,6 +78,19 @@ it("读取中切schema丢弃过时字段", async () => {
   h.runtime.currentSchema = "OTHER"; resolve([]);
   expect((await promise).suggestions).toEqual([]);
   h.runtime.currentSchema = "APP";
+});
+it("冷缓存提示加载，刷新后提供字段", async () => {
+  let finish: (columns: unknown[]) => void = () => {};
+  h.columns.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const sql = "select a. from a";
+  const first = await complete(sql, 9);
+  expect(first.suggestions).toEqual([expect.objectContaining({
+    label: expect.objectContaining({ label: "字段加载中" }),
+    insertText: "",
+    range: expect.objectContaining({ startColumn: 10, endColumn: 10 }),
+  })]);
+  finish([{ name: "id", full: "NUMBER", zh: null, pk: true }]);
+  expect((await complete(sql, 9)).suggestions.map(item => item.insertText)).toEqual(["id"]);
 });
 it("普通引号别名保留原文，重复别名不生成歧义字段", async () => {
   const sql = 'select  from a "a" join b "bMixed" on 1=1';

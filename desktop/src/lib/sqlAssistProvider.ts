@@ -21,15 +21,15 @@ const fieldCache = new Map<string, { columns: ColumnInfo[]; at: number }>();
 const scopesSeen = new Map<string, string>();
 const mixed = (name: string) => /[a-z]/.test(name) && /[A-Z]/.test(name);
 const normalized = (name: string) => mixed(name) ? name : name.toLowerCase();
-async function early<T>(promise: Promise<T>, fallback: T): Promise<T> {
+async function early<T>(promise: Promise<T>, fallback: T, budget = 120): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const value = await Promise.race([promise, new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback), 120); })]);
+  const value = await Promise.race([promise, new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback), budget); })]);
   clearTimeout(timer);
   return value;
 }
 
 /** A snapshot is returned once. Learning and late metadata never reorder an already selected list. */
-export async function provideSqlAssist(model: monaco.editor.ITextModel, position: monaco.Position, _context: monaco.languages.CompletionContext, token: monaco.CancellationToken): Promise<monaco.languages.CompletionList> {
+export async function provideSqlAssist(model: monaco.editor.ITextModel, position: monaco.Position, context: monaco.languages.CompletionContext, token: monaco.CancellationToken): Promise<monaco.languages.CompletionList> {
   const tabId = tabIdOfModel(model), connId = sqlTabOf(tabId)?.connId;
   const rt = connId ? rtOf(connId) : null, identity = connectionKey(connId ? connOf(connId) : null);
   const schema = rt?.currentSchema ?? rt?.info?.schema ?? "", scope = connId ? sqlUsageScope(identity, schema) : null;
@@ -39,8 +39,14 @@ export async function provideSqlAssist(model: monaco.editor.ITextModel, position
   const word = model.getWordUntilPosition(position);
   const identifier = analysis.tokens.find(t => t.start < offset && t.end >= offset && ["identifier", "quoted"].includes(t.kind));
   const start = identifier?.start ?? offset - (position.column - word.startColumn);
-  const prefix = model.getValue().slice(start, offset).replace(/^["`[]/, "");
+  const prefix = model.getValue().slice(ctx.valueStart ?? start, offset).replace(/^['"`[]/, "");
   const range = monaco.Range.fromPositions(model.getPositionAt(start), model.getPositionAt(identifier?.end ?? offset));
+  const waitBudget = context?.triggerKind === monaco.languages.CompletionTriggerKind.Invoke ? 500 : 120;
+  const loadingItem: Item = {
+    label: { label: "字段加载中", description: "稍后按 Ctrl+空格刷新" },
+    kind: K.Text, insertText: "", filterText: prefix || "字段加载中", sortText: "z",
+    range: monaco.Range.fromPositions(position, position),
+  };
   if (connId && scope) {
     if (scopesSeen.has(connId) && scopesSeen.get(connId) !== scope) clearSqlBusinessCache();
     scopesSeen.set(connId, scope);
@@ -104,10 +110,11 @@ export async function provideSqlAssist(model: monaco.editor.ITextModel, position
     insertText: `${qualified ? qualifierText(source) + "." : ""}${sqlIdentifier(name, dialect)}`, filterText: filter(name), range, sortText: sqlAssistSort(match(name), 1, name) }));
   if (ctx.kind === "column") {
     const source = resolveSqlQualifier(analysis, offset, ctx.qualifier!, ctx.qualifierRef);
-    const suggestions = source ? source.table ? fromColumns(source, await early(readColumns(source), []), false) : derived(source, false) : [];
+    const columns = source?.table ? await early(readColumns(source), null, waitBudget) : undefined;
+    const suggestions = !source ? [] : columns === null ? [loadingItem] : columns ? fromColumns(source, columns, false) : derived(source, false);
     return { suggestions: stale() ? [] : suggestions, incomplete: true };
   }
-  const businessItem = (s: BusinessSuggestion, targetRange = range): Item => ({ label: { label: s.label, description: s.reason }, kind: K.Snippet, insertText: s.insertText, range: targetRange,
+  const businessItem = (s: BusinessSuggestion, targetRange = range): Item => ({ label: { label: s.label, detail: ctx.clause === "on" && ctx.kind !== "value" ? `  ${s.insertText}` : undefined, description: s.reason }, kind: K.Snippet, insertText: s.insertText, range: targetRange,
     insertTextRules: s.snippet ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
     filterText: filter(s.label), sortText: `${match(s.label, s.insertText)}00${s.label}`, documentation: { value: s.documentation + "\n\n来源：" + s.source } });
   const physical = visible.filter(s => s.table && !s.quoted && (!s.schema || s.schema.toLowerCase() === schema.toLowerCase()));
@@ -116,7 +123,8 @@ export async function provideSqlAssist(model: monaco.editor.ITextModel, position
     return early(readSqlBusinessMetadata(connId, scope, source.table!, metadataCurrent), null);
   };
   if (ctx.kind === "value") {
-    const source = ctx.valueSource!, cols = await early(readColumns(source), []), column = cols.find(c => c.name.toLowerCase() === ctx.field?.toLowerCase());
+    const source = ctx.valueSource!, cols = await early(readColumns(source), null, waitBudget), column = cols?.find(c => c.name.toLowerCase() === ctx.field?.toLowerCase());
+    if (!cols) return { suggestions: stale() ? [] : [loadingItem], incomplete: true };
     const meta = column && await metadata(source);
     const suggestions = meta && column ? sqlEnumSuggestions(meta, ctx.field!, column.full).filter(s => !prefix || match(s.label, s.insertText) < 9).map(s => businessItem(s, monaco.Range.fromPositions(model.getPositionAt(ctx.valueStart!), model.getPositionAt(ctx.valueEnd!)))) : [];
     return { suggestions: stale() ? [] : suggestions, incomplete: true };
@@ -126,9 +134,7 @@ export async function provideSqlAssist(model: monaco.editor.ITextModel, position
   let next = 0;
   const budget = visible.slice(0, 32);
   const load = async () => { while (next < budget.length && !stale()) { const source = budget[next++]; if (source.table) loaded.set(source, await readColumns(source)); } };
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([Promise.all([load(), load()]), new Promise<void>(resolve => { timer = setTimeout(resolve, 120); })]);
-  clearTimeout(timer);
+  const fieldsReady = await early(Promise.all([load(), load()]).then(() => true), false, waitBudget);
   if (stale()) return { suggestions: [] };
   const cols = visible.flatMap(s => s.table ? fromColumns(s, loaded.get(s) ?? [], sources.length > 1) : derived(s, sources.length > 1));
   const aliases: Item[] = visible.filter(s => match(s.alias ?? s.name) < 9).map(s => ({ label: { label: s.alias ?? s.name, description: `来源 ${s.tableRef ?? "查询输出"} · 输入 . 查看字段` }, kind: K.Variable, insertText: qualifierText(s), filterText: filter(s.alias ?? s.name), range, sortText: sqlAssistSort(match(s.alias ?? s.name), 3, s.name) }));
@@ -147,6 +153,6 @@ export async function provideSqlAssist(model: monaco.editor.ITextModel, position
     if (scope) business.push(...sqlHistoricalJoinSuggestions(scope, verifiedSources, Object.fromEntries(onSources.map(s => [s.tableRef ?? s.table!, (loaded.get(s) ?? []).map(c => ({ name: c.name, type: c.full }))])), dialect).filter(s => !prefix || match(s.label, s.insertText) < 9).map(s => ({ ...businessItem(s), sortText: `${match(s.label, s.insertText)}01${s.label}` })));
   }
   if (ctx.clause === "where") for (const source of physical) business.push(...sqlConditionSuggestions({ ...source, table: source.table! }, (loaded.get(source) ?? []).map(c => ({ name: c.name, type: c.full })), dialect).filter(s => !prefix || match(s.label, s.insertText) < 9).map(s => businessItem(s)));
-  const suggestions = [...business, ...projections, ...cols, ...aliases, ...functions, ...snippets, ...keywords, ...(ctx.clause === "other" ? cteItems : [])];
+  const suggestions = [...business, ...projections, ...cols, ...aliases, ...functions, ...snippets, ...keywords, ...(ctx.clause === "other" ? cteItems : []), ...(fieldsReady ? [] : [loadingItem])];
   return { suggestions: stale() ? [] : suggestions, incomplete: true };
 }

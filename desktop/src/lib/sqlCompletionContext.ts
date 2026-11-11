@@ -22,13 +22,26 @@ export function completionContext(analysis: SqlAnalysis, offset: number, dialect
   const before = analysis.tokens.filter(t => t.start < offset && !["space", "comment", "hint"].includes(t.kind));
   const last = (back: number) => before[before.length - back];
   if (hit && (isSqlName(hit) || hit.kind === "string" || hit.kind === "number")) before.pop();
-  // Literal completion is permitted only immediately after a verified field comparison.
-  if (["where", "on"].includes(clause) && last(1)?.text === "=" && (!hit || !["comment", "hint", "parameter"].includes(hit.kind))) {
-    const field = last(2), dot = last(3), qualifier = last(4);
+  // Only suggest values for a direct field comparison, assignment or literal list.
+  let operator = 0;
+  if (["where", "on", "set"].includes(clause) && last(1)?.text === "=") operator = 1;
+  if (["where", "on"].includes(clause)) {
+    if (["<>", "!="].includes(last(1)?.text)) operator = 1;
+    let index = before.length - 1;
+    if (before[index]?.text === ",") {
+      while (before[index]?.text === "," && ["string", "number"].includes(before[index - 1]?.kind)) index -= 2;
+    }
+    if (before[index]?.text === "(" && before[index - 1]?.text.toUpperCase() === "IN") {
+      operator = before.length - index + (before[index - 2]?.text.toUpperCase() === "NOT" ? 2 : 1);
+    }
+  }
+  if (operator && (!hit || !["comment", "hint", "parameter"].includes(hit.kind))) {
+    const field = last(operator + 1), dot = last(operator + 2), qualifier = last(operator + 3);
     if (isSqlName(field)) {
       const sources = sqlSourcesAt(analysis, offset);
       const source = dot?.text === "." && isSqlName(qualifier) ? resolveSqlQualifier(analysis, offset, sqlName(qualifier), qualifier.text) : sources.length === 1 ? sources[0] : undefined;
-      if (source?.table) Object.assign(result, { kind: "value", field: sqlName(field), valueSource: source, valueStart: hit && ["string", "number", "identifier"].includes(hit.kind) ? hit.start : offset, valueEnd: hit && ["string", "number", "identifier"].includes(hit.kind) ? hit.end : offset });
+      const value = hit && ["string", "number", "identifier"].includes(hit.kind) ? hit : undefined;
+      if (source?.table) Object.assign(result, { kind: "value", field: sqlName(field), valueSource: source, valueStart: value?.start ?? offset, valueEnd: value?.end ?? offset });
     }
   }
   if (base.kind === "column") {

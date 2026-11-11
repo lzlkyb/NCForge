@@ -187,6 +187,12 @@ export function clearSqlUsage(scope: string): boolean {
   return publish({ ...store, scopes }, true);
 }
 
+export function restoreSqlUsage(scope: string, snapshot: SqlUsageSnapshot): boolean {
+  if (!validIdentity(scope, 512)) return false;
+  const store = read();
+  return publish({ ...store, scopes: { ...store.scopes, [scope]: { ...snapshot, ...usageSnapshot(scope) } } }, true);
+}
+
 /** 只在相同匹配等级内比较此值。第一小时明显偏向近期，其后以衰减频率稳定兜底。 */
 export function sqlUsageRank(scope: string, key: string, now = Date.now()): number {
   if (!getSqlUsageEnabled() || !validIdentity(key, 1024)) return 0;

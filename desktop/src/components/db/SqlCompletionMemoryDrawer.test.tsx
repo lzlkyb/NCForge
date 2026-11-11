@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ConnRuntime } from "../../lib/dbStore";
 const h = vi.hoisted(() => ({ runtime: { status: "connected", currentSchema: "A" } as ConnRuntime }));
+vi.mock("../ui/toast", () => ({ toast: { info: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
 vi.mock("../../lib/dbStore", () => ({ useConnOf: () => ({ id: "c", name: "测试库", url: "test", user: "NC" }), useConnRt: () => h.runtime }));
 let host: HTMLDivElement, root: Root;
 beforeEach(() => { vi.resetModules(); localStorage.clear(); h.runtime = { status: "connected", currentSchema: "A" }; host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
@@ -30,4 +31,23 @@ it("清除确认绑定原schema，切换后不能误清新scope", async () => {
   act(() => root.render(<SqlCompletionMemoryDrawer connId="c" onClose={() => {}} />));
   expect(host.querySelector('[aria-label="确认清除补全记忆"]')).toBeNull();
   expect(u.usageSnapshot(b)[key].accept).toBe(1);
+});
+
+it("显示实际使用时间，撤销清除时保留清除后新增的记录", async () => {
+  const { SqlCompletionMemoryDrawer } = await import("./SqlCompletionMemoryDrawer");
+  const u = await import("../../lib/sqlUsage");
+  const { toast } = await import("../ui/toast");
+  const { connectionKey } = await import("../../lib/dbResultContext");
+  const scope = u.sqlUsageScope(connectionKey({ id: "c", url: "test", user: "NC" } as never), "A");
+  const oldKey = u.sqlUsageKey("orders"), newKey = u.sqlUsageKey("items");
+  const receipt = u.recordSqlUsage(scope, oldKey, "accept")!;
+  act(() => root.render(<SqlCompletionMemoryDrawer connId="c" onClose={() => {}} />));
+  expect(host.querySelector("time")?.dateTime).toBe(new Date(receipt.after.lastUsed).toISOString());
+  act(() => button("清除当前 schema 补全记忆").click());
+  expect(host.textContent).toContain("JOIN 历史");
+  clickText("确认清除");
+  expect(u.usageSnapshot(scope)[oldKey]).toBeUndefined();
+  act(() => { u.recordSqlUsage(scope, newKey, "accept"); });
+  act(() => vi.mocked(toast.info).mock.lastCall![1]!.action!.onClick());
+  expect(Object.keys(u.usageSnapshot(scope))).toEqual(expect.arrayContaining([oldKey, newKey]));
 });
