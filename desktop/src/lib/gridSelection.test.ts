@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { gridSelectionCell, gridSelectionHeading, selectedEditableCells } from "./gridSelection";
+import { allResultSelection, gridSelectionCell, gridSelectionHeading, selectedEditableCells } from "./gridSelection";
+it("全选依据筛选和排序后的行、显示列顺序，空数据不生成选区", () => {
+  expect(allResultSelection([3, 0, 2], [4, 1])).toEqual({ anchor: { r: 3, c: 4 }, end: { r: 2, c: 1 } });
+  expect(allResultSelection([], [0])).toBeNull(); expect(allResultSelection([0], [])).toBeNull();
+});
 describe("logical grid selection perimeter", () => {
   const bounds={rowStart:10,rowEnd:1000,colStart:2,colEnd:80};
   it("marks only true logical edges, including reversed/cross-screen ranges",()=>{

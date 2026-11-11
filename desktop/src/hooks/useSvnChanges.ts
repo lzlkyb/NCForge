@@ -7,6 +7,7 @@ import { getSession } from "../lib/workspaceSession";
 import { workspaceEpoch } from "../lib/workspaceEpoch";
 import { trackOperation, waitForFileOperations } from "../lib/operations";
 import { getSvnWrite, useSvnWrite, withSvnWriteLock } from "../lib/svnWrite";
+import { invalidateBaselines } from "../lib/changedLinesStore";
 
 type Busy = null | "commit" | "update" | "revert" | "resolve" | "auth";
 
@@ -31,6 +32,9 @@ export function useSvnChanges({ setBusy, setAuth, refresh, onCommitted, onRevert
       const scanned = await refresh();
       assertSvnWorkspace(actionRoot, epoch);
       if (!scanned) throw new Error("扫描结果未返回");
+      // commit / update / revert / resolve 都会改 BASE：清掉基线缓存，
+      // 让当前挂载的编辑器按需重取，色条立刻归零（P0-3）。不清的话直到重启都在误报。
+      invalidateBaselines();
       return scanned;
     } catch (error) {
       if (getSession().root !== actionRoot || workspaceEpoch() !== epoch) return undefined;

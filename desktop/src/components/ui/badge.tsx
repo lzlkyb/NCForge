@@ -29,6 +29,7 @@ export function Badge({ variant = "default", className = "", ...props }: BadgePr
   return (
     <span
       className={`badge ${modernTone[variant]} inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${variants[variant]} ${className}`}
+      data-variant={variant}
       {...props}
     />
   );

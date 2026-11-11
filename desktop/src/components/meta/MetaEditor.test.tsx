@@ -117,3 +117,14 @@ it("2000 字段的可见范围有界，方向键选择和 F2 编辑可用", asyn
   await act(async () => table.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })));
   expect(host.querySelector(".meta-inline-edit h3")!.textContent).toContain("field0");
 });
+
+it("全选筛选结果保留被隐藏的批量选择，取消时只移除当前结果", async () => {
+  ui = { ...ui, selectedFields: ["amount"] };
+  await act(async () => render());
+  await act(async () => setValue(host.querySelector<HTMLInputElement>('input[aria-label="过滤字段"]')!, "billcode"));
+  const all = host.querySelector<HTMLInputElement>('input[aria-label="选择筛选后的全部字段"]')!;
+  await act(async () => all.click());
+  expect(ui.selectedFields).toEqual(["amount", "billcode"]);
+  await act(async () => all.click());
+  expect(ui.selectedFields).toEqual(["amount"]);
+});

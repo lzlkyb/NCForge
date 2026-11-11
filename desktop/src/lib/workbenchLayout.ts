@@ -18,7 +18,8 @@ export interface WorkbenchLayout {
 export const WORKBENCH_MODES: { id: WorkbenchMode; label: string }[] = [
   { id: "code", label: "编码布局" }, { id: "diagnose", label: "排错布局" }, { id: "debug", label: "调试布局" },
 ];
-export const PRIMARY_PANELS: PanelTab[] = ["problems", "build", "svc", "debug"];
+// 「改动」是审 AI 代码的主入口，常驻页签条而不是藏在「更多底部工具」里。
+export const PRIMARY_PANELS: PanelTab[] = ["problems", "changes", "build", "svc", "debug"];
 export const SECONDARY_PANELS: PanelTab[] = ["calls", "types", "todo", "bookmarks"];
 const KEY = "ncforge-workbench-layout";
 const DEFAULTS: WorkbenchLayout = { mode: "code", locked: false, side: 240, sides: {}, heights: {}, pinned: [], expanded: null, compact: true };

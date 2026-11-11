@@ -19,20 +19,9 @@ export const MAX_WRAP_LINES = 8;
 /** 单元格左右 padding 各 10px，与 `.dbx-gc` 的 CSS 一致。 */
 const SAFE_PAD = 4;
 
-/**
- * 单字符宽度（px，13px `system-ui` 的近似值）。
- *
- * 故意与 `resultView` 的 `estimate` 用同一张表：**宁宽勿窄**——估算偏大只是多留
- * 一点空白，偏窄会把最后一个字裁掉。折行是逐字累加的，不能整串丢给 canvas。
- */
+/** 按实际显示字体折行；复用测宽缓存，字体加载后字符宽度也一起失效。 */
 function charWidth(ch: string): number {
-  const c = ch.codePointAt(0)!;
-  if (c > 0x2e80) return 13.5; // CJK / 全角标点
-  if (c >= 48 && c <= 57) return 7.6; // 数字
-  if (c >= 65 && c <= 90) return 9.4; // 大写
-  if (c === 32) return 3.8; // 空格
-  if (c === 10) return 0; // 换行由分段处理
-  return 7.2; // 小写与常见符号
+  return textWidth(ch);
 }
 
 /**

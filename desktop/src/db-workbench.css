@@ -15,8 +15,8 @@
 /* ── 默认 schema 胶囊：切了之后写 SQL 不用带 `aier633.` 前缀 ── */
 .dbx-schema {position:relative;display:inline-flex;flex-shrink:0;}
 /* 左栏表树顶部那行：当前 schema + 读取时刻 */
-.dbx-schema-tag {color:hsl(var(--foreground));font-family:"Cascadia Mono",Consolas,monospace;font-size:var(--dbx-fs-meta);}
-.dbx-schema-chip {display:inline-flex;align-items:center;gap:5px;height:var(--dbx-h-control);max-width:240px;padding:0 7px;border:1px solid hsl(var(--border));border-radius:var(--r-control);background:hsl(var(--card));color:hsl(var(--foreground));font-family:"Cascadia Mono",Consolas,monospace;font-size:var(--dbx-fs-meta);white-space:nowrap;}
+.dbx-schema-tag {color:hsl(var(--foreground));font-family:var(--font-mono);font-size:var(--dbx-fs-meta);}
+.dbx-schema-chip {display:inline-flex;align-items:center;gap:5px;height:var(--dbx-h-control);max-width:240px;padding:0 7px;border:1px solid hsl(var(--border));border-radius:var(--r-control);background:hsl(var(--card));color:hsl(var(--foreground));font-family:var(--font-mono);font-size:var(--dbx-fs-meta);white-space:nowrap;}
 .dbx-schema-chip:hover:not(:disabled) {background:hsl(var(--secondary));}
 .dbx-schema-chip:disabled {opacity:.5;cursor:default;}
 .dbx-schema-chip[data-warn] {border-color:hsl(var(--warning) / .6);color:hsl(var(--warning-ink));}
@@ -28,7 +28,7 @@
 .dbx-schema-clear:disabled {visibility:hidden;}
 .dbx-schema-clear:hover:not(:disabled) {background:hsl(var(--secondary));color:hsl(var(--foreground));}
 .dbx-schema-list {flex:1;min-height:0;overflow:auto;padding:4px;}
-.dbx-schema-item {display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:28px;padding:0 8px;border-radius:var(--r-control);color:hsl(var(--foreground));font-family:"Cascadia Mono",Consolas,monospace;font-size:var(--dbx-fs-meta);text-align:left;}
+.dbx-schema-item {display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:28px;padding:0 8px;border-radius:var(--r-control);color:hsl(var(--foreground));font-family:var(--font-mono);font-size:var(--dbx-fs-meta);text-align:left;}
 .dbx-schema-item:hover {background:hsl(var(--selection-hover,var(--secondary)));}
 .dbx-schema-item[aria-selected="true"] {background:hsl(var(--selection-bg,var(--accent)));color:hsl(var(--foreground));font-weight:500;}
 .dbx-schema-item[data-highlighted] {outline:1px solid hsl(var(--selection-marker,var(--primary)));outline-offset:-1px;}
@@ -39,7 +39,7 @@
 .dbx-read-status {color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);line-height:1.5;overflow-wrap:anywhere;}
 .dbx-result-source {flex:none;padding:4px 12px;color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);border-top:1px solid hsl(var(--border));background:hsl(var(--chrome));max-height:130px;overflow:auto;}
 .dbx-result-source summary {cursor:pointer;min-height:24px;line-height:24px;}
-.dbx-result-source pre {margin:6px 0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 "Cascadia Mono",Consolas,monospace;}
+.dbx-result-source pre {margin:6px 0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 var(--font-mono);}
 .dbx-result-footer {display:flex;flex-wrap:wrap;align-items:center;flex:none;border-top:1px solid hsl(var(--border));background:hsl(var(--chrome));min-width:0;}
 .dbx-result-footer > .dbx-result-source {border-top:0;}
 .dbx-result-footer > .dbx-result-source[open] {flex-basis:100%;}

@@ -47,7 +47,6 @@ export function AppearanceSettings() {
 
   return (
     <Card className="flex flex-col gap-1 p-2">
-      <AppearancePreview theme={theme} density={density} appearance={appearance} />
       <SettingsRow id="appearance-theme" label="明暗主题" valueText={theme === "dark" ? "深色" : "浅色"}
         {...feedback.主题}
         keywords={["主题", "theme", "深色", "浅色", "明暗"]}
@@ -90,6 +89,10 @@ export function AppearanceSettings() {
           }} />{feedback.密度?.error && <Button variant="ghost" size="sm" onClick={() => report(applyUiDensity(density), "密度")}>重试保存</Button>}</div>}
         last
       />
+      <AppearancePreview theme={theme} density={density} appearance={appearance} />
+      <div className="settings-form-actions"><Button size="sm" variant="ghost" onClick={() => {
+        report(applyTheme("light"), "主题"); change("classic"); report(applyUiDensity("standard"), "密度");
+      }}>恢复默认外观</Button></div>
     </Card>
   );
 }

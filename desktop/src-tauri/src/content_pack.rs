@@ -42,7 +42,12 @@ use crate::workspace;
 
 /// 包格式版本。**改布局必须 +1**：旧包会因版本不符被重建，而不是被误读。
 /// v2：去掉压缩（块只有 `off/len`）。
-const FORMAT_VERSION: u32 = 2;
+/// v3：2026-11-10 修编码探测（`workspace::decode` 的前导/续字节比例判据）。
+/// **不是为了布局，是为了让旧包失效**：v2 及以前的包里，「凭证」「审批」「状态」
+/// 这类 GBK 字节恰好构成合法 UTF-8 的文件，存的是按 UTF-8 误解释出来的乱码文本
+/// （U+06FD U+05A4…）。增量复用只按 size/mtime 判定，文件没变就会把乱码块
+/// 一直复用下去——版本不 +1 的话，用户升级后仍然搜不到这些中文。
+const FORMAT_VERSION: u32 = 3;
 /// 单个块的目标大小。1 MB 是「增量重建够便宜」与「并行切分够细」的折中。
 const CHUNK_BYTES: usize = 1 << 20;
 const DIR_NAME: &str = "search-pack";

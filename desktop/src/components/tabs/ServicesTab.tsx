@@ -33,6 +33,7 @@ import { serviceNames, type ServiceSource } from "../../lib/servicePresentation"
 import { serverCommandLine, serverRevealLog, serverStatus, type LaunchPreview, type ServerState, type ServerStatus } from "../../lib/server";
 import { HOTSWAP_STATUS_KEY, hotswapStatus } from "../../lib/hotswap";
 import { SERVICE_RESTART_EVENT, takeServiceRestartRequest } from "../../lib/servicePanel";
+import { ServiceContextBar } from "../services/ServiceContextBar";
 
 interface PanelUi {
   source: ServiceSource;
@@ -63,17 +64,19 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   }, [queryClient]);
   const clearConfirm = useCallback(() => changeUi({ confirm: null }), [changeUi]);
   // 热替换状态按本次运行取：换了 runId 就是新 JVM，旧的过时标记自然作废。
-  const hotswap = useQuery({ queryKey: [...HOTSWAP_STATUS_KEY, status?.runId ?? ""], queryFn: hotswapStatus, enabled: status?.state === "running", retry: false }).data ?? null;
-  const askRestart = useCallback(() => changeUi({ source: "middleware", confirm: { kind: "restart", source: "middleware" } }), [changeUi]);
-  // 状态栏 / 热替换失败 toast 上的「重启服务」：面板可能刚被打开才挂载，挂载时也取一次
+  const client = useClientService({ visible: svcVisible, appHidden });
+  // 两个 JVM 任一在跑就要查：客户端页的过时告警也读这份状态；换了任一边的 runId 都当新一次运行
+  const anyRunning = status?.state === "running" || client.status?.state === "running";
+  const hotswap = useQuery({ queryKey: [...HOTSWAP_STATUS_KEY, status?.runId ?? "", client.status?.runId ?? ""], queryFn: hotswapStatus, enabled: anyRunning, retry: false }).data ?? null;
+  const askRestart = useCallback((source: ServiceSource = "middleware") => changeUi({ source, confirm: { kind: "restart", source } }), [changeUi]);
+  // 状态栏 / 热替换失败 toast 上的「重启服务 / 重启客户端」：面板可能刚被打开才挂载，挂载时也取一次
   useEffect(() => {
-    const take = () => { if (takeServiceRestartRequest()) askRestart(); };
+    const take = () => { const target = takeServiceRestartRequest(); if (target) askRestart(target); };
     take();
     window.addEventListener(SERVICE_RESTART_EVENT, take);
     return () => window.removeEventListener(SERVICE_RESTART_EVENT, take);
   }, [askRestart]);
   const commands = useServiceCommands({ debugMode, refetch, patchState, onGeneration: bumpGeneration, onClearConfirm: clearConfirm });
-  const client = useClientService({ visible: svcVisible, appHidden });
   const flow = useDevelopmentFlow();
   const selected = ui.source === "client" ? client.status : status ?? null;
   const selectedFailed = ui.source === "client" ? client.isError : isError;
@@ -122,6 +125,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
   const drawerTitle = ui.drawer === "details" ? `${serviceNames[ui.source]} · 运行详情` : ui.drawer === "config" ? "中间件与客户端 · 启动设置" : "元数据投送";
   return <>
     <DockRegion region="bottom"><div className="sc-panel">
+      <ServiceContextBar projectRoot={selected?.projectRoot} ncHome={selected?.ncHome} />
       {/* 保持工具栏与来源按钮挂载，方向键切换后焦点仍留在当前来源。 */}
       <ServiceRunToolbar {...toolbarProps} source={ui.source} marker={ui.source === "middleware" && status?.state === "running" && hotswap?.stale ? <span className="sc-status-badge" data-tone="warn" title="有改动没能热替换进去；重启服务后清除">代码不是最新</span> : null} navigator={<ServiceNavigator source={ui.source} onSource={source => changeUi({ source, drawer: null })}
         middleware={{ status: status ?? null, busy: commands.busy, failed: isError }} client={{ status: client.status, busy: client.busy, failed: client.isError }} />} />
@@ -130,7 +134,7 @@ export function ServicesTab({ onNavigate }: { onNavigate: (tab: string) => void 
         {selectedFailed && <div className="sc-feedback" data-tone="warn"><Icon name="alertTriangle" size={14} /><span title={String(selectedError)}>读取服务状态失败，当前运行状态未知。请重试或查看日志。</span><button type="button" className="sv-btn" onClick={toolbarProps.onRetry}>重试</button></div>}
         {!selectedFailed && selected?.state === "starting" && <div className="sc-feedback" data-tone="waiting"><Icon name="spinner" className="animate-spin" size={13} /><span>{selected.launchPhase || (selected.pid ? "JVM 已创建，正在等待运行状态" : "正在准备启动")}</span>{launchElapsed !== null && launchElapsed !== undefined && <small>已用 {Math.floor(launchElapsed / 1000)} 秒</small>}<button type="button" className="sv-btn" onClick={() => changeUi({ drawer: "details" })}>运行详情</button></div>}
         {!selectedFailed && selected?.state === "stopped" && selected.reason && <div className="sc-feedback" data-tone={selected.exitCode ? "bad" : "warn"}><Icon name="info" size={13} /><span>{selected.reason}{selected.exitCode !== null ? ` · 退出码 ${selected.exitCode}` : ""}</span></div>}
-        {ui.source === "middleware" && <ServiceAlerts status={isError ? null : status ?? null} busy={commands.busy !== null || isError} onKill={() => changeUi({ confirm: { kind: "kill", source: "middleware" } })} onNavigate={onNavigate} hotswap={hotswap} onRestart={askRestart} />}
+        <ServiceAlerts source={ui.source} clientRunning={client.status?.state === "running"} status={isError ? null : status ?? null} busy={(ui.source === "client" ? client.busy !== null : commands.busy !== null) || isError} onKill={() => changeUi({ confirm: { kind: "kill", source: "middleware" } })} onNavigate={onNavigate} hotswap={hotswap} onRestart={() => askRestart(ui.source)} />
         <ServiceLogSection source={ui.source} appHidden={appHidden} middleware={{ active: !status || status.state === "running" || status.state === "starting", generation, runId: status?.runId, visible: svcVisible, projectRoot: status?.projectRoot, logPath: status?.logPath ?? "", logSize: status?.logSize ?? 0, onReveal: revealLog, onCleared: () => void refetch() }}
           client={{ active: !client.status || client.status.state === "running" || client.status.state === "starting", generation: client.generation, runId: client.status?.runId, visible: svcVisible, projectRoot: client.status?.projectRoot, logPath: client.status?.logPath ?? "", logSize: client.status?.logSize ?? 0, onReveal: client.revealLog, onCleared: () => void client.refetch() }} />
       </section>

@@ -23,7 +23,9 @@ export function ResultGridHeader({columns,sort,zh,order,visible,viewport,bounds,
   const {headerRefs,headerCol,setHeaderCol,focusHeader,onHeaderKey}=navigation;
   const headerTabStop=viewport.some(c=>c.column===headerCol) ? headerCol : viewport[0]?.column;
   return <div className="dbx-ghead" style={{ width: total }} role="row" aria-rowindex={1}>
-    <div className="dbx-gh rn" style={{ width: rnW }} role="columnheader" aria-colindex={1} title="选择全部" onClick={()=>{if(order.length && visible.length) {onSel({r:order[0],c:visible[0]});onSel({r:order[order.length-1],c:visible[visible.length-1]},true);}}} />
+    <div className="dbx-gh rn" style={{ width: rnW }} role="columnheader" aria-colindex={1}>
+      <button type="button" className="dbx-select-all" aria-label="全选结果" aria-keyshortcuts="Control+A Meta+A" title="全选当前筛选后已加载的数据 · Ctrl+A" disabled={!order.length || !visible.length} aria-pressed={!!bounds && bounds.rowStart === 0 && bounds.rowEnd === order.length - 1 && bounds.colStart === 0 && bounds.colEnd === visible.length - 1} onClick={navigation.selectAll}><Icon name="maximize" size={14} /></button>
+    </div>
     {viewport.map(({column:k,index:vi}) => { const c=columns[k]; return (
       <div
         key={k}

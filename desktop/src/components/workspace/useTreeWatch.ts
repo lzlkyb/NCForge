@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { listen } from "../../lib/tauri";
 import { handleExternalJavaChanges } from "../../lib/externalJavaChanges";
+import { invalidateFileIndex } from "../../lib/fileIndex";
 
 /** Directory rows refresh immediately. Package indexing coalesces bursts of file events. */
 export function useTreeWatch(
@@ -21,12 +22,26 @@ export function useTreeWatch(
       rescan?: boolean;
       javaChanged?: string[];
       javaOverflow?: boolean;
+      reviewChanged?: string[];
+      reviewOverflow?: boolean;
+      filesChanged?: boolean;
     }>("fs-changed", (p) => {
       refreshDirs(p?.dirs ?? [], p?.rescan === true);
+      // 外部新建 / 删除 / 改名了会进清单的文件：让「转到文件」的索引作废并后台重取
+      // （SVN 更新、AI、手工拷贝产生的文件）。编译写 .class 不会走到这里。
+      if (p?.filesChanged === true) invalidateFileIndex();
       for (const dir of p?.dirs ?? []) changed.add(dir);
       rescan ||= p?.rescan === true;
-      // 外部 .java 改动走保存同一条自动编译队列（内部会挡掉本应用刚保存的文件）
-      handleExternalJavaChanges(p?.javaChanged ?? [], p?.javaOverflow === true);
+      // 审查通道：所有外部改动的文本文件（.java/.xml/.sql/.js…）都进时间线 / 色条 / 已审角标。
+      // 老后端没有 reviewChanged 时退化成 javaChanged，行为不变。
+      const reviewChanged = p?.reviewChanged ?? p?.javaChanged ?? [];
+      // 编译通道：外部 .java 改动走保存同一条自动编译队列（内部会挡掉本应用刚保存的文件）。
+      handleExternalJavaChanges(
+        p?.javaChanged ?? [],
+        p?.javaOverflow === true,
+        reviewChanged,
+        p?.reviewOverflow === true,
+      );
       clearTimeout(indexRefresh);
       indexRefresh = setTimeout(() => {
         invalidate([...changed], rescan, packageView);

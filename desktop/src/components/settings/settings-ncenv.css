@@ -91,3 +91,11 @@
 }
 
 .settings-ncenv-check-act { margin-left: auto; flex-shrink: 0; }
+.settings-ncenv-editor { display:flex; flex-direction:column; gap:12px; width:100%; min-width:0; }
+.settings-ncenv-path > input { flex:1; width:auto; min-width:0; }
+.settings-ncenv-path > button { flex-shrink:0; }
+.settings-ncenv-detection { padding:12px; border:1px solid hsl(var(--border)); border-radius:var(--r-control); background:hsl(var(--secondary)); font-size:12px; line-height:1.7; }
+.settings-ncenv-detection p { display:flex; align-items:baseline; flex-wrap:wrap; gap:6px; }
+.settings-ncenv-detection code { white-space:normal; overflow-wrap:anywhere; }
+.settings-ncenv-cand { flex-wrap:wrap; }
+.settings-ncenv-cand-main { flex:1; }

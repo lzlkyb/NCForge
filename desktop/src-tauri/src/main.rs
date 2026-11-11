@@ -152,6 +152,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 commands::spawn_prewarm(app_state.clone());
                 // 类型索引也一起建：第一次 Ctrl+T 找类不该让用户等扫盘
                 commands::spawn_prewarm_types(app_state.clone());
+                // jar 内符号索引（代码与中文字符串）：第一次搜 jar 内代码不该等一分钟
+                commands::spawn_prewarm_jar_symbols(app_state.clone());
+                // jar 内源码注释索引（_src.jar 的 .java）：class 里没有注释，只能走源码包
+                commands::spawn_prewarm_src_notes(app_state.clone());
                 // 搜索内容包：有包就加载，没有就后台建（首次两分钟，期间搜索仍可用）
                 commands::spawn_prewarm_search_pack(app_state.clone());
             }
@@ -263,6 +267,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::fs_read_file,
             commands::fs_write_file,
             commands::fs_create,
+            commands::fs_create_java,
+            commands::fs_java_preview,
             commands::fs_rename,
             commands::fs_delete,
             commands::fs_count_files,
@@ -313,6 +319,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::search_invalidate_files,
             commands::search_types,
             commands::search_workspace_symbols,
+            commands::search_jar_symbols,
+            commands::search_src_notes,
+            commands::read_src_file,
             commands::search_replace,
             commands::search_cancel,
             commands::search_pack_status,
@@ -444,12 +453,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::db_connect,
             commands::db_disconnect,
             commands::db_exec,
+            commands::db_exec_result,
             commands::db_exec_bound,
             commands::db_read_only,
             commands::db_relations,
             commands::db_cancel,
             commands::db_caps,
             commands::db_more,
+            commands::db_more_result,
+            commands::db_result_close,
             commands::db_lob_value,
             commands::db_tx,
             commands::db_tx_all,

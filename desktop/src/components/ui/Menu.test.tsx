@@ -67,3 +67,81 @@ describe("menus in scrollable SSH sidebar", () => {
     expect(container.querySelector('[role="menu"]')).not.toBeNull();
   });
 });
+
+it("从键盘打开门户菜单后焦点进入菜单，Esc 返回触发器", async () => {
+  await render();
+  const trigger = container.querySelector("button")!;
+  trigger.focus();
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })));
+  expect(document.activeElement?.textContent).toBe("文件");
+  await act(async () => document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+  expect(document.activeElement).toBe(trigger);
+});
+
+describe("键盘意图只在「按键打开」那一次有效", () => {
+  it("鼠标点开菜单不会把焦点抢进菜单项", async () => {
+    // 键盘意图（keyboardFocus）是「按键打开」那一次专属的。鼠标点开时它必须是空的，
+    // 否则布局 effect 会把焦点拽到第一个菜单项上——用户根本没想用键盘，
+    // 看到的却是「菜单开了，焦点莫名在第一项，回车直接触发它」。
+    // 这里同时守住 onDown 的清零与 effect 的 `!keyboardFocus.current` 门闸。
+    await render();
+    const trigger = container.querySelector("button")!;
+    trigger.focus();
+    // 先按一次键盘打开再关掉：这一轮会把 ref 用掉并清空
+    await act(async () => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })));
+    expect(document.activeElement?.textContent).toBe("文件");
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+    expect(document.activeElement).toBe(trigger);
+    // 现在改用鼠标：先 mousedown（真实点击顺序，`.click()` 不发它）再 click
+    await act(async () => trigger.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    await click(trigger);
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(document.activeElement?.textContent).not.toBe("文件");
+  });
+
+  it("键盘打开后焦点确实落在意图指定的那一端", async () => {
+    await render();
+    const trigger = container.querySelector("button")!;
+    trigger.focus();
+    await act(async () => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })));
+    expect(document.activeElement?.textContent).toBe("文件");
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+    trigger.focus();
+    await act(async () => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true })));
+    expect(document.activeElement?.textContent).toBe("编辑");
+  });
+});
+
+describe("异常关闭路径", () => {
+  it("焦点被菜单外的内容拿走时关菜单（抽屉换了一批控件）", async () => {
+    await render();
+    await click(container.querySelector("button")!);
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    const outside = document.createElement("button");
+    outside.textContent = "别处";
+    document.body.append(outside);
+    await act(async () => outside.focus());
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    outside.remove();
+  });
+
+  it("菜单内移动焦点不会把它关掉", async () => {
+    await render();
+    await click(container.querySelector("button")!);
+    const item = document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[1];
+    await act(async () => item.focus());
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+  });
+
+  it("选完项后焦点回触发器，菜单随即变 inert 也接得住键盘", async () => {
+    await render();
+    const trigger = container.querySelector("button")!;
+    await click(trigger);
+    const first = document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[0];
+    await act(async () => first.focus());
+    await click(first);
+    expect(run).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(trigger);
+  });
+});

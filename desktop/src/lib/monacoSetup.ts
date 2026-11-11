@@ -17,6 +17,7 @@ import { getStoredTheme, type Theme } from "./theme";
 import { getTableLookup } from "./tableLookup";
 import { OPEN_TABLE_COMMAND, buildTableHover } from "./tableHover";
 import { openTableInDb } from "./openTableFromHover";
+import { subscribeFonts } from "./fonts";
 
 self.MonacoEnvironment = {
   // 只有基础 worker（diff / 单词补全等），所有 label 共用。
@@ -179,6 +180,7 @@ export function initMonaco(): typeof monaco {
   registerSqlLanguages(monaco);
   if (!themeWired) {
     themeWired = true;
+    subscribeFonts(() => monaco.editor.remeasureFonts());
     applyMonacoTheme(getStoredTheme());
     // 事件在 applyTheme 里的 class 切换之后发出，此时 getComputedStyle 读到的已是新主题的变量。
     window.addEventListener("themechange", (e) => applyMonacoTheme((e as CustomEvent<Theme>).detail));

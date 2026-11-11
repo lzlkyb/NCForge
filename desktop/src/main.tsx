@@ -12,6 +12,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { getStoredTheme } from "./lib/theme";
 import { initializeAppearance } from "./lib/appearance";
 import { initializeUiDensity } from "./lib/uiDensity";
+import { initializeFonts } from "./lib/fonts";
 import "./index.css";
 // 独立模块导入保证 Vite 开发注入与生产构建都包含补充样式。
 import "./interaction-refinements.css";
@@ -23,11 +24,14 @@ import "./interaction-density.css";
 import "./native-workbench.css";
 import "./selection-states.css";
 import "./content-first.css";
+import "./forge-controls.css";
 
 // 启动即应用已保存的主题，避免首帧闪烁。
 document.documentElement.classList.toggle("dark", getStoredTheme() === "dark");
+document.documentElement.classList.add("forge-controls");
 initializeAppearance();
 initializeUiDensity();
+initializeFonts();
 
 const queryClient = new QueryClient({
   defaultOptions: {

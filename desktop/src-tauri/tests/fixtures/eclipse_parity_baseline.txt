@@ -1,0 +1,12 @@
+# NCForge 整模块编译 vs Eclipse 产物：已解释、允许存在的差异。
+# 格式：类型<TAB>相对路径（小写、正斜杠）<TAB># 说明。多出白名单的差异会让 tests/eclipse_parity_live.rs 失败。
+# 刷新：PARITY_WRITE_BASELINE=1（会覆盖本文件，请先确认每条差异都已解释，并把原因补回注释）。
+#
+# 2026-11-10 基线（newar 33 个模块、可比对 6057 个文件）。
+#
+# ic 下这两个文件的 class 是 2026-11-09 由 NCForge 自己单文件编译写进 out/ic 的，不是 Eclipse 产物：
+# 当时同模块新建的 CrossBorrowNumUtil / CrossBorrowSignNumRule 还没编出 class，单文件编译看不到它们，
+# 产物里带了 unresolved 标记。该问题已由 compile.rs 的 missing_sibling_sources 修复，
+# 重新编译这两个文件、产物刷新后这两条会自动消失（消失时测试会提示可以从基线删除）。
+MISS	ic/src/private/nc/bs/ic/eye/crossborrow/crossorgborrowflow.java	# CrossBorrowNumUtil
+MISS	ic/src/private/nc/bs/ic/m4h/sign/signbp.java	# CrossBorrowSignNumRule

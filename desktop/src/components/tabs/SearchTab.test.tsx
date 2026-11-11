@@ -16,9 +16,20 @@ const ROOT = "C:\\w\\newar";
 let root: Root;
 let container: HTMLDivElement;
 const onOpenFile = vi.fn();
+const onOpenJarClass = vi.fn();
+const onOpenSrcNote = vi.fn();
 
 const render = async () => {
-  await act(async () => root.render(<SearchTab projects={[]} onOpenFile={onOpenFile} />));
+  await act(async () =>
+    root.render(
+      <SearchTab
+        projects={[]}
+        onOpenFile={onOpenFile}
+        onOpenJarClass={onOpenJarClass}
+        onOpenSrcNote={onOpenSrcNote}
+      />,
+    ),
+  );
   await act(async () => {}); // 等 get_workspace 落回状态
 };
 

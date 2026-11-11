@@ -46,6 +46,7 @@ export function LogList({
       event.preventDefault();
       const next = event.key === "Home" ? 0 : event.key === "End" ? rows.length - 1
         : Math.max(0, Math.min(rows.length - 1, current + (event.key === "ArrowDown" ? 1 : -1)));
+      if (next !== current) onSelect(entries[next]);
       rows[next].focus({ preventScroll: true });
       rows[next].scrollIntoView?.({ block: "nearest" });
     }}>
@@ -64,7 +65,6 @@ export function LogList({
             data-sev={severity}
             data-active={selectedKey === key || undefined}
             onClick={() => onSelect(entry)}
-            onFocus={() => onSelect(entry)}
           >
             <span className="lg-row-icon">
               {meta ? (

@@ -256,7 +256,8 @@ describe("文件页", () => {
     // 标签 + 只读徽标 + 编译按钮
     expect(container.querySelector(".wb-tab-name")?.textContent).toBe("A.java");
     expect(container.querySelector(".wb-status-warn")?.textContent).toBe("只读");
-    expect(buttonByText("编译")).toBeTruthy();
+    // 编译按钮并进了代码上下文条：文案带模块名（编译 <模块> 模块），不再叫「编译」
+    expect([...container.querySelectorAll("button")].some(b => /^编译 .+ 模块$/.test(b.textContent?.trim() ?? ""))).toBe(true);
     // 混合换行提示条带两个统一选项
     expect(container.textContent).toContain("混合换行");
     expect(buttonByText("统一为 CRLF 并编辑")).toBeTruthy();

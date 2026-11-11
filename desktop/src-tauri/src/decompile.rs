@@ -140,10 +140,15 @@ pub fn run_cfr(java: &Path, cfr: &Path, jar: &Path, entry: &str) -> Result<Strin
     let _reservation = crate::process_budget::Reservation::acquire(512)?;
     let mut cmd = Command::new(java);
     // CFR 走 stdout 输出，`file.encoding` 决定它写出的编码；中文注释不能变乱码。
+    // `--hideutf false`：CFR 默认 true，会把非 ASCII 全转成 `\uXXXX`——NC 的类里
+    // 满是中文提示语，不关掉的话反编译出来的正文一行中文都看不见（实测确认）。
+    // JVM 只认 `-jar <jar> [args]`：CFR 自己的参数必须排在 jar 之后，
+    // 不然 JVM 会把 `--hideutf` 当成 jar 文件，直接报 Unable to access jarfile。
     cmd.args(["-Dfile.encoding=UTF-8", "-Xmx512m", "-jar"])
         .arg(cfr)
         .arg(jar)
         .arg(entry)
+        .args(["--hideutf", "false"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());

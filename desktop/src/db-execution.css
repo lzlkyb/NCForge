@@ -1,7 +1,7 @@
 /* 单行命令栏：常用动作靠左，会话与连接靠右；窄栏将辅助操作收入菜单。 */
 .dbx-console .dbx-execution-bar {
   display:flex; align-items:center; flex-wrap:nowrap; gap:8px;
-  height:36px; min-height:36px; padding:3px 8px;
+  height:40px; min-height:40px; padding:3px 8px;
   border-bottom:1px solid hsl(var(--border)); background:hsl(var(--card));
   overflow:visible;
 }
@@ -20,6 +20,10 @@
 .dbx-execution-primary .dbx-stop-action { width:28px; }
 .dbx-execution-primary .dbx-stop-action[data-running] { color:hsl(var(--destructive-ink)); }
 .dbx-execution-primary .dbx-run-menu { width:18px; padding:0; }
+.dbx-console .dbx-execution-bar .dbx-runsplit > .dbx-btn.pri { height:32px;min-height:32px;color:hsl(var(--primary-foreground));background:hsl(var(--primary));border:0; }
+.dbx-console .dbx-execution-bar .dbx-runsplit > .dbx-run-action.pri { width:auto;min-width:66px;padding:0 10px;gap:5px;border-radius:var(--r-control) 0 0 var(--r-control); }
+.dbx-console .dbx-execution-bar .dbx-runsplit > .dbx-run-menu.pri { width:24px;padding:0;border-left:1px solid hsl(var(--primary-foreground) / .25);border-radius:0 var(--r-control) var(--r-control) 0; }
+.dbx-console .dbx-execution-bar .dbx-runsplit > .dbx-btn.pri:hover:not(:disabled) { background:hsl(var(--primary) / .9); }
 .dbx-query-clock { width:43px; display:inline-flex; justify-content:flex-end; font-variant-numeric:tabular-nums; font-size:var(--dbx-fs-meta); }
 .dbx-query-clock:empty { width:0; }
 /* 执行范围仍向辅助技术播报，并完整出现在执行按钮提示里。 */

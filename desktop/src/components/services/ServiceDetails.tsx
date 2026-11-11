@@ -20,6 +20,6 @@ export function ServiceDetails({ source, status, failed, onCommandLine, onEditPo
     <h3>可用性依据</h3><div className="sc-health-row"><span>{source === "client" ? "客户端连接目标" : "进程与端口"}</span><span className="sc-status-badge" data-tone={source === "client" && "serverReachable" in status ? status.serverReachable ? "ok" : "warn" : view.state === "running" ? "ok" : "idle"}>{source === "client" && "serverReachable" in status ? status.serverReachable ? "可达" : "未就绪" : view.state === "running" ? "本进程监听" : "尚未确认监听"}</span></div>
     <div className="sc-health-row"><span>NC 业务健康</span><span className="sc-status-badge">未验证</span></div><p className="sc-detail-muted">端口可达不能证明登录与业务模块正常。</p>
     <h3>工作台数据库</h3><p>{dbNames || "尚无已连接的数据库"}</p><p className="sc-detail-muted">供工作台查询使用，独立于{serviceNames[source]}运行状态。</p>
-    <div className="sc-detail-actions"><button type="button" className="sv-btn" onClick={onCommandLine}>完整启动命令</button>{source === "middleware" && <button type="button" className="sv-btn" disabled={status.state !== "stopped"} title={status.state !== "stopped" ? "先停止服务再修改端口" : undefined} onClick={onEditPort}>修改监听端口</button>}</div>
+    <div className="sc-detail-actions"><button type="button" className="sv-btn" onClick={onCommandLine}>完整启动命令</button>{source === "middleware" && <><button type="button" className="sv-btn" disabled={status.state !== "stopped"} onClick={onEditPort}>修改监听端口</button>{status.state !== "stopped" && <span className="text-xs text-muted-foreground">停止服务后可修改端口</span>}</>}</div>
   </>;
 }

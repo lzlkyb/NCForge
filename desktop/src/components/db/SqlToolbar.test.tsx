@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_SQL_FORMAT, getSqlFormatPrefs, setSqlFormatPrefs } from "../../lib/sqlFormatPrefs";
 import type { SqlTab } from "../../lib/dbStore";
 import type { ContextMenuItem } from "../workspace/ContextMenu";
 const mocks = vi.hoisted(() => ({ switchConn: vi.fn(), readOnly: false as boolean | null }));
@@ -11,6 +12,7 @@ vi.mock("../../lib/dbReadOnly", () => ({ useDbReadOnly: () => mocks.readOnly, us
 vi.mock("./ConnPicker", () => ({ ConnPicker: ({ disabled }: { disabled: boolean }) => <button disabled={disabled} aria-label="选择连接">测试库</button> }));
 vi.mock("../workspace/ContextMenu", () => ({ ContextMenu: ({ items, onClose }: { items: ContextMenuItem[]; onClose: () => void }) => <div role="menu">{items.map((item) => <button key={item.label} disabled={item.disabled} onClick={() => { item.onSelect(); onClose(); }}>{item.label}</button>)}</div> }));
 import { SqlToolbar } from "./SqlToolbar";
+import { beginOperation } from "../../lib/operations";
 import type { SqlExecutionScope } from "./SqlEditor";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const tab: SqlTab = { id: "t1", kind: "sql", title: "SQL 1", connId: "c1", sql: "", maxRows: 200, timeoutSec: 30, results: [], output: [], plan: null, view: null, slot: "1", tx: { autoCommit: false, statements: 0, rows: 0, since: 0 } };
@@ -18,7 +20,7 @@ const scope: SqlExecutionScope = { tabId: tab.id, selected: false, statements: [
 type Props = Parameters<typeof SqlToolbar>[0];
 let root: Root;
 let host: HTMLDivElement;
-beforeEach(() => { mocks.readOnly = false; vi.clearAllMocks(); host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); });
+beforeEach(() => { setSqlFormatPrefs(DEFAULT_SQL_FORMAT); mocks.readOnly = false; vi.clearAllMocks(); host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 const button = (text: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(item => (item.getAttribute("aria-label") ?? item.textContent) === text)!;
 function render(overrides: Partial<Props> = {}) {
@@ -37,35 +39,55 @@ describe("SQL 执行范围", () => {
 
   it("执行名称、行范围和语句数来自当前文档的真实目标", () => {
     const props = render();
-    expect(host.querySelector(".dbx-scope")?.textContent).toBe("第 2–6 行 · 1 条");
-    act(() => button("执行当前语句").click());
-    expect(props.onRun).toHaveBeenCalledWith("current");
+    expect(host.querySelector(".dbx-scope")?.textContent).toBe("第 2–6 行");
+    expect(button("执行").textContent).toContain("执行");
+    act(() => button("执行").click());
+    expect(props.onRun).toHaveBeenCalledWith("auto");
     render({ scope: { ...scope, selected: true, statements: [{ text: "select 1", startLine: 2, endLine: 3 }, { text: "select 2", startLine: 5, endLine: 8 }] } });
-    expect(button("执行选中 SQL").disabled).toBe(false);
-    expect(host.querySelector(".dbx-scope")?.textContent).toBe("第 2–8 行 · 2 条");
+    expect(button("执行").disabled).toBe(false);
+    expect(host.querySelector(".dbx-scope")?.textContent).toBe("第 2–8 行");
     expect(host.querySelector(".dbx-execution-primary")?.textContent).not.toMatch(/Ctrl\+Enter|Alt\+X/);
+    expect(host.querySelector(".dbx-execution-primary")?.textContent).not.toMatch(/\d+ 条/);
+    act(() => button("执行").click());
+    expect(props.onRun).toHaveBeenLastCalledWith("auto");
   });
   it("空白 SQL 禁用主执行并就地说明，历史和片段仍然可用", () => {
     render({ scope: { ...scope, statements: [] } });
-    expect(button("执行当前语句").disabled).toBe(true);
-    expect(host.querySelector(".dbx-scope")?.textContent).toContain("光标处没有可执行 SQL");
+    expect(button("执行").disabled).toBe(true);
+    expect(host.querySelector(".dbx-scope")?.textContent).toContain("编辑器里没有可执行 SQL");
     expect(host.querySelector<HTMLButtonElement>('[aria-label="执行历史"]')?.disabled).toBe(false);
     expect(host.querySelector<HTMLButtonElement>('[aria-label="SQL 片段"]')?.disabled).toBe(false);
     render({ scope: { ...scope, selected: true, statements: [] } });
-    expect(button("执行选中 SQL").disabled).toBe(true);
+    expect(button("执行").disabled).toBe(true);
     expect(host.querySelector(".dbx-scope")?.textContent).toContain("选中内容没有可执行 SQL");
   });
   it("切标签不能显示或执行上一份标签的范围", () => {
     render({ tab: { ...tab, id: "t2" } });
-    expect(button("执行当前语句").disabled).toBe(true);
+    expect(button("执行").disabled).toBe(true);
     expect(host.querySelector(".dbx-scope")?.textContent).toBe("正在读取执行范围…");
   });
   it("执行期间原位保留停止入口", () => {
     const props = render({ tab: { ...tab, run: { id: 1, connId: "c1", at: 0, slot: null, kind: "execute" } } });
     expect(button("停止").disabled).toBe(false);
-    expect(button("执行当前语句").disabled).toBe(true);
+    expect(button("执行").disabled).toBe(true);
     act(() => button("停止").click());
     expect(props.onStop).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * 回归：v0.4.0 里「执行」按钮从 `beginOperation` 那一刻就灰了，而「停止」只看标签上
+   * 那个更晚落地的执行身份——建连接、等口令、申请独立会话这段窗口里两个按钮都是灰的，
+   * 用户以为整个执行都停不下来。执行入口与停止入口必须共用同一个「正在执行」判据。
+   */
+  it("任务一登记，停止入口就可用，不等标签上的执行身份落地", () => {
+    let task: ReturnType<typeof beginOperation> = null;
+    act(() => { task = beginOperation({ key: "db.sql:t1", label: "执行 SQL" }); });
+    render();
+    expect(button("执行").disabled).toBe(true);
+    expect(button("停止").disabled).toBe(false);
+    act(() => task?.finish("cancelled"));
+    render();
+    expect(button("停止").disabled).toBe(true);
   });
 });
 
@@ -89,7 +111,7 @@ describe("会话上下文与事务", () => {
   });
   it("未知事务禁止继续执行，核对入口保留在原位", () => {
     render({ tab: { ...tab, txNotice: { kind: "lost", verify: true, text: "提交结果待核对" } } });
-    expect(button("执行当前语句").disabled).toBe(true);
+    expect(button("执行").disabled).toBe(true);
     expect(host.querySelector(".dbx-scope")?.textContent).toContain("事务结果待核对");
     expect(host.querySelector(".dbx-txbar")?.textContent).toContain("核对事务");
     expect(button("核对事务").disabled).toBe(false);
@@ -134,10 +156,10 @@ it("可专注结果、专注编辑器并还原布局", () => {
   expect(onFocusChange).toHaveBeenLastCalledWith("split");
 });
 
-it("常用编辑工具无需菜单，执行图标保留范围提示", () => {
+it("常用编辑工具无需菜单，执行按钮显示文字并保留范围提示", () => {
   const props = render();
-  expect(button("执行当前语句").textContent).toBe("");
-  expect(button("执行当前语句").title).toContain("第 2–6 行 · 1 条");
+  expect(button("执行").textContent).toBe("执行");
+  expect(button("执行").title).toContain("第 2–6 行");
   act(() => button("格式化 SQL").click());
   act(() => button("执行计划").click());
   expect(props.onFormat).toHaveBeenCalledOnce();
@@ -149,18 +171,18 @@ it("无连接仍可格式化 SQL，数据库操作禁用", () => {
   act(() => button("格式化 SQL").click());
   expect(props.onFormat).toHaveBeenCalledOnce();
   expect(button("执行历史").disabled).toBe(true);
-  expect(button("执行当前语句").disabled).toBe(true);
+  expect(button("执行").disabled).toBe(true);
   expect(button("执行计划").disabled).toBe(true);
 });
 it("格式化范围下拉把三档范围交给编辑器", () => {
   const props = render();
-  act(() => host.querySelector<HTMLButtonElement>('[aria-label="选择格式化范围"]')!.click());
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="格式化选项"]')!.click());
   act(() => button("仅格式化当前语句").click());
   expect(props.onFormat).toHaveBeenLastCalledWith("current");
-  act(() => host.querySelector<HTMLButtonElement>('[aria-label="选择格式化范围"]')!.click());
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="格式化选项"]')!.click());
   act(() => button("格式化整个脚本").click());
   expect(props.onFormat).toHaveBeenLastCalledWith("script");
-  act(() => host.querySelector<HTMLButtonElement>('[aria-label="选择格式化范围"]')!.click());
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="格式化选项"]')!.click());
   act(() => button("格式化整个编辑器").click());
   expect(props.onFormat).toHaveBeenLastCalledWith("auto");
 });
@@ -179,4 +201,19 @@ it("窄栏把辅助功能收入更多菜单，释放观察器", () => {
   expect(disconnect).toHaveBeenCalledOnce();
   root=createRoot(host);
   vi.unstubAllGlobals();
+});
+
+it("排版菜单只更改偏好，下次格式化使用当前方式", () => {
+  const props = render();
+  act(() => button("格式化选项").click());
+  act(() => button("排版：结构展开").click());
+  expect(getSqlFormatPrefs().layout).toBe("expanded");
+  expect(props.onFormat).not.toHaveBeenCalled();
+  expect(button("格式化 SQL").title).toContain("结构展开");
+  act(() => button("格式化选项").click());
+  act(() => button("排版：阅读优先").click());
+  expect(getSqlFormatPrefs().layout).toBe("reading");
+  expect(props.onFormat).not.toHaveBeenCalled();
+  act(() => button("格式化 SQL").click());
+  expect(props.onFormat).toHaveBeenCalledOnce();
 });

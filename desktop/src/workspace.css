@@ -875,3 +875,30 @@ button.wb-empty-row:hover { background: hsl(var(--secondary)); }
 /* P1-22：柔光玻璃下历史/结构/右键浮层用统一材质阅读面，消除与半透壳的接缝。 */
 html[data-ui-style="glass"] :is(.wb-hist, .wb-outline, .wb-ctx) { background: var(--glass-reading); }
 html[data-ui-style="glass"] :is(.wb-hist, .wb-outline) :is(input, select, textarea) { background-color: var(--glass-inset); }
+
+/* ---- 新建 Java 类型对话框 ---- */
+.nj-dialog { width: 456px; max-width: calc(100vw - 32px); border-radius: var(--r-card); overflow: hidden; }
+.nj-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid hsl(var(--border)); font-size: 14px; font-weight: 600; }
+.nj-x { margin-left: auto; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; color: hsl(var(--muted-foreground)); cursor: pointer; }
+.nj-x:hover { background: hsl(var(--secondary)); }
+.nj-body { padding: 14px 16px; display: grid; gap: 12px; }
+.nj-lbl { display: block; margin-bottom: 4px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+.nj-kinds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.nj-kind { display: grid; gap: 2px; padding: 8px 6px; border: 1px solid hsl(var(--border)); border-radius: 7px; text-align: center; background: hsl(var(--card)); cursor: pointer; }
+.nj-kind b { font-size: 13px; font-weight: 600; }
+.nj-kind small { font-size: 11px; color: hsl(var(--muted-foreground)); }
+.nj-kind:hover { background: hsl(var(--secondary)); }
+.nj-kind[aria-checked="true"] { border-color: hsl(var(--primary)); background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
+.nj-kind[aria-checked="true"] small { color: inherit; opacity: 0.8; }
+.nj-field { display: flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px; border: 1px solid hsl(var(--ring)); border-radius: 6px; background: hsl(var(--card)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.16); }
+.nj-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: inherit; font: inherit; }
+.nj-field[data-bad] { border-color: hsl(var(--destructive)); box-shadow: 0 0 0 3px hsl(var(--destructive) / 0.14); }
+.nj-suffix { color: hsl(var(--muted-foreground)); }
+.nj-err { margin-top: 4px; font-size: 11.5px; font-weight: 600; color: hsl(var(--destructive-ink)); }
+.nj-meta { display: grid; grid-template-columns: 40px 1fr; gap: 4px 8px; font-size: 12px; line-height: 1.55; }
+.nj-meta > span:nth-child(odd) { color: hsl(var(--muted-foreground)); }
+.nj-meta code { font: 11.5px Consolas, monospace; word-break: break-all; }
+.nj-warn { color: hsl(var(--warning-ink)); }
+.nj-pv { margin: 0; padding: 8px 10px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--background)); font: 12px/1.6 Consolas, monospace; white-space: pre; overflow: auto; max-height: 260px; tab-size: 4; }
+.nj-foot { display: flex; align-items: center; gap: 6px; padding: 10px 16px; border-top: 1px solid hsl(var(--border)); }
+.nj-hint { flex: 1; font-size: 11.5px; color: hsl(var(--muted-foreground)); }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "../ui/toast";
 import { SqlToolbar } from "./SqlToolbar";
-import { SqlEditor, type SqlEditorApi, type SqlExecutionScope } from "./SqlEditor";
+import { SqlEditor, type SqlEditorApi, type SqlExecutionScope, type SqlRunMode } from "./SqlEditor";
 import { ResultPanel } from "./ResultPanel";
 import { HistoryDrawer } from "./HistoryDrawer";
 import { SnippetDrawer } from "./SnippetDrawer";
@@ -45,13 +45,13 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   useEffect(()=>{const insert=(e:Event)=>{const v=(e as CustomEvent<{tabId:string;text:string}>).detail;if(v.tabId===tab.id) api.current?.insert(v.text);};window.addEventListener("ncforge-db-insert-name",insert);return()=>window.removeEventListener("ncforge-db-insert-name",insert);},[tab.id]);
 
   const run = useCallback(
-    async (mode: "current" | "script", collectStats = false) => {
+    async (mode: SqlRunMode, collectStats = false) => {
       const stmts = api.current?.target(mode) ?? [];
       if (stmts.length === 0) {
-        toast(mode === "script" ? "编辑器里没有可执行的语句" : "光标处没有语句", "info");
+        toast(mode === "current" ? "光标处没有语句" : "执行范围内没有可执行的语句", "info");
         return;
       }
-      const executionScope = { tabId, selected: mode === "current" && scopeRef.current?.tabId === tabId && scopeRef.current.selected, statements: stmts };
+      const executionScope = { tabId, selected: mode === "auto" && scopeRef.current?.tabId === tabId && scopeRef.current.selected, statements: stmts };
       executingScopes.current.set(tabId, executionScope);
       try {
         const outcome = await runStatements(tabId, stmts, { collectStats });

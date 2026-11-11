@@ -59,7 +59,7 @@ export function ToggleRow({
       <div className="grow min-w-0">
         <div className="srow-heading flex items-center gap-1.5">
           <span className="t text-sm font-medium">{label}</span>
-          {saved && <SavedHint>已保存</SavedHint>}
+          {saved && !pending && !error && <SavedHint>已保存</SavedHint>}
           {info && <InfoPopover label={label}>{info}</InfoPopover>}
         </div>
         {sub && (
@@ -67,6 +67,7 @@ export function ToggleRow({
             {sub}
           </div>
         )}
+        {disabled && disabledReason && <div className="d text-xs text-muted-foreground">{disabledReason}</div>}
       </div>
       <div className="srow-control flex shrink-0 items-center gap-2">
         <span data-pending={pending || undefined} role={pending ? "status" : undefined} className="settings-toggle-state text-xs text-muted-foreground">{valueText ?? (pending ? "保存中…" : checked ? "已开启" : "已关闭")}</span>

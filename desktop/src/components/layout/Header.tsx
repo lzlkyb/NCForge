@@ -10,6 +10,8 @@ import { ApplicationMenu, LayoutMenu } from "./HeaderMenus";
 import { OperationStatus } from "../ui/OperationStatus";
 import { ResourceDownloadEntry } from "../resource/ResourceDownloadEntry";
 import { WorkspaceMenu } from "./WorkspaceMenu";
+import { ServiceStatusButton } from "../workspace/ServiceStatusButton";
+import { ToolReturnEntry } from "./ToolReturnEntry";
 
 /**
  * 应用标题栏（40px，横跨整个窗口）：品牌、工作区、全局入口与原生窗口控件。
@@ -70,6 +72,8 @@ function HeaderImpl({
 
       {/* 右侧：搜索 / 主题 / 窗口控件 */}
       <div data-tauri-drag-region="false" className="flex shrink-0 items-center gap-1">
+        <ToolReturnEntry />
+        <ServiceStatusButton header />
         <OperationStatus />
         <ResourceDownloadEntry />
         <LayoutMenu activeTool={activeTool} />

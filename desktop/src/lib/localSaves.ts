@@ -15,9 +15,25 @@ const MAX_TRACKED = 256;
 
 const recent = new Map<string, number>();
 
+/**
+ * 保存事件的订阅（改动时间线 B1 用）。与抑制窗口无关，resetLocalSaves 不清订阅。
+ *
+ * `versionId` = 本轮**写盘前**归档出的本地历史版本 id（没归档到就是 undefined）。
+ * 轮基线靠它精确定位，不再用时间戳猜——猜的话必差一版。
+ */
+const saveListeners = new Set<(path: string, versionId?: string) => void>();
+export function onLocalSave(cb: (path: string, versionId?: string) => void): () => void {
+  saveListeners.add(cb);
+  return () => { saveListeners.delete(cb); };
+}
+
 const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase();
 
-/** 保存开始前调用（而不是成功后）：监听事件可能比 IPC 返回先到。 */
+/**
+ * 保存开始前调用（而不是成功后）：监听事件可能比 IPC 返回先到。
+ * **只设抑制窗口，不发保存事件**——写盘可能失败（冲突 / 编码写不出），
+ * 那时文件没落盘，多一条幻影轮还会把已审角标连带后端标记一起清掉。
+ */
 export function markLocalSave(path: string): void {
   const key = norm(path);
   recent.set(key, Date.now());
@@ -28,6 +44,14 @@ export function markLocalSave(path: string): void {
     if (now - t > LOCAL_SAVE_WINDOW_MS) recent.delete(k);
     else if (recent.size > MAX_TRACKED) recent.delete(k);
   }
+}
+
+/**
+ * 写盘**成功后**发保存事件（由 `fileSave.saveOne` 调，覆盖 Ctrl+S / 转 UTF-8 /
+ * 退出前保存全部 / 提交前保存所有路径）。抑制窗口仍由 markLocalSave 在写盘前设。
+ */
+export function notifyLocalSave(path: string, versionId?: string): void {
+  saveListeners.forEach((cb) => cb(path, versionId));
 }
 
 export function isRecentLocalSave(path: string, windowMs = LOCAL_SAVE_WINDOW_MS): boolean {

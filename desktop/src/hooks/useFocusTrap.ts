@@ -38,7 +38,7 @@ export function useFocusTrap(
     const prev = document.activeElement as HTMLElement | null;
     const focusables = () => Array.from(node.querySelectorAll<HTMLElement>(
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    )).filter(el => !el.matches(":disabled") && !el.closest("[inert]") && el.getClientRects().length > 0);
+    )).filter(el => el.tabIndex >= 0 && !el.matches(":disabled") && !el.closest("[inert]") && el.getClientRects().length > 0);
     const list = focusables();
     // 默认焦点交给第一个可聚焦元素，但高危确认框里的第一个往往是复选框或
     // 「10 分钟内不再询问」这类「顺手一按就改语义」的控件。带 `data-autofocus`
@@ -54,8 +54,11 @@ export function useFocusTrap(
         escapeRef.current();
         return;
       }
+      // 只有 Tab 需要知道焦点环里有哪些元素：别为每个按键都扫一遍 DOM + 量布局
+      // （弹窗控件多时，输入/方向键都会白扫一遍）。
+      if (e.key !== "Tab") return;
       const controls = focusables();
-      if (e.key !== "Tab" || controls.length === 0) return;
+      if (controls.length === 0) return;
       const first = controls[0];
       const last = controls[controls.length - 1];
       if (e.shiftKey && document.activeElement === first) {
@@ -69,7 +72,16 @@ export function useFocusTrap(
     node.addEventListener("keydown", onKey);
     return () => {
       node.removeEventListener("keydown", onKey);
-      prev?.focus?.();
+      // A drawer action can deliberately focus the newly revealed document.
+      const active = document.activeElement;
+      if (prev?.isConnected && (node.contains(active) || active === document.body || !active)) {
+        // preventScroll 只是避开退场动画期间的跳转；焦点必须落在看得见的地方，
+        // 否则键盘用户回到一个屏幕外的元素上，后续 Tab 从看不见的位置开始。
+        prev.focus({ preventScroll: true });
+        const box = prev.getBoundingClientRect();
+        const visible = box.top >= 0 && box.bottom <= innerHeight && box.left >= 0 && box.right <= innerWidth;
+        if (!visible) prev.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
     };
   }, [ref, enabled]);
 }

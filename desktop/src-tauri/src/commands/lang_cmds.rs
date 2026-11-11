@@ -847,6 +847,15 @@ fn fill_document_uris(p: &mut Value, uri: &str) {
             td["uri"] = Value::String(uri.to_string());
         }
     }
+    // `java/findLinks` 的 `position` 是完整的 TextDocumentPositionParams，文档在 position.textDocument 里
+    if let Some(td) = p
+        .get_mut("position")
+        .and_then(|c| c.get_mut("textDocument"))
+    {
+        if td.is_object() {
+            td["uri"] = Value::String(uri.to_string());
+        }
+    }
     // 自定义命令（`ncforge.typeHierarchy`）把目标文档放在第一个参数里。
     // 只在**已经给了 uri 键**时覆盖：别的 executeCommand 参数对象不该被塞进一个多余的字段。
     if let Some(first) = p.get_mut("arguments").and_then(|a| a.get_mut(0)) {
@@ -1168,6 +1177,26 @@ mod tests {
             "file:///tmp/shadow/A.java"
         );
         assert_eq!(p["context"]["range"]["start"]["line"], 0, "其它字段不能动");
+    }
+
+    /// `java/findLinks` 把文档放在 `position.textDocument`；普通请求的 `position` 是 LSP 位置（没有 textDocument），不能被塞进去。
+    #[test]
+    fn fill_document_uris_fills_nested_position_document() {
+        let mut nested = serde_json::json!({
+            "type": "superImplementation",
+            "position": { "textDocument": { "uri": "" }, "position": { "line": 3, "character": 4 } }
+        });
+        fill_document_uris(&mut nested, "file:///tmp/shadow/A.java");
+        assert_eq!(
+            nested["position"]["textDocument"]["uri"],
+            "file:///tmp/shadow/A.java"
+        );
+        assert_eq!(nested["position"]["position"]["line"], 3, "位置本身不能动");
+
+        let mut plain = serde_json::json!({ "position": { "line": 3, "character": 4 } });
+        fill_document_uris(&mut plain, "file:///tmp/shadow/A.java");
+        assert!(plain["position"].get("textDocument").is_none());
+        assert_eq!(plain["textDocument"]["uri"], "file:///tmp/shadow/A.java");
     }
 
     /// `context.textDocument` 不是对象（null / 字符串）时不能建出一个怪结构。

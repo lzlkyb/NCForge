@@ -1,7 +1,7 @@
 import type { RefObject } from "react";
 import { GridCellEditor } from "./GridCellEditor";
 import { gridSelectionCell, gridSelectionHeading } from "../../lib/gridSelection";
-import { isLobPreview } from "../../lib/db";
+import { CELL_TEXT_MAX, isWideText } from "../../lib/wideText";
 import type { GridCodec } from "../../lib/cellCodec";
 import type { Cell } from "../../lib/dbApi";
 import type { CellPos, GridEdit } from "./gridEdit";
@@ -18,8 +18,8 @@ import type { CSSProperties } from "react";
  * 大文本编辑框开着（`textOpen`）时**不渲染**那个 input——它的 autoFocus 会和弹层的
  * textarea 抢焦点，input 一 blur 就提交，弹层跟着自己关了。
  */
-export function GridRows({ order, first, last, layout, rowH, headH, total, rnW, viewport, visible, bounds, sel, editing, textOpen, numeric, wrap, valueAt, cellStyle, edit, codec, onSel, onCellMenu, startEdit, onCellEditor, boxRef }: {
-  order: number[];
+export function GridRows({ order, first, last, layout, rowH, headH, total, rnW, viewport, visible, bounds, sel, editing, textOpen, numeric, wrap, valueAt, cellStyle, edit, codec, onSel, onCellMenu, startEdit, onOpenDetail, onCellEditor, boxRef, idPrefix = "dbx-cell" }: {
+  order: number[]; idPrefix?: string;
   /** 可视区间（闭开区间），由 `layout.range` 算出。 */
   first: number;
   last: number;
@@ -44,7 +44,9 @@ export function GridRows({ order, first, last, layout, rowH, headH, total, rnW, 
   codec: GridCodec;
   onSel: (p: CellPos, extend?: boolean) => void;
   onCellMenu?: (r: number, c: number, x: number, y: number) => void;
-  startEdit: (pos: CellPos) => void;
+  startEdit: (pos: CellPos, fromMouse?: boolean) => void;
+  /** 打开某一格的详情（格内「…」按钮）。不传就退回只角标、不提供点击入口。 */
+  onOpenDetail?: (r: number, c: number) => void;
   onCellEditor: {
     onChange: (value: string) => void;
     onCommit: () => void;
@@ -79,7 +81,7 @@ export function GridRows({ order, first, last, layout, rowH, headH, total, rnW, 
                 return (
                   <GridCellEditor
                     key={k}
-                    id={`dbx-cell-${r}-${k}`}
+                    id={`${idPrefix}-${r}-${k}`}
                     colIndex={vi + 2}
                     style={{ ...cellStyle(k), height }}
                     value={editing.value}
@@ -95,12 +97,14 @@ export function GridRows({ order, first, last, layout, rowH, headH, total, rnW, 
               }
               const cls = ["dbx-gc", numeric[k] && "n", v === null && "null", edit?.changed.has(`${r}:${k}`) && "chg"].filter(Boolean).join(" ");
               const valueKind = v === null ? "null" : v === "" ? "empty" : typeof v === "string" && !/\S/.test(v) ? "whitespace" : undefined;
-              // 大文本（>4K 或后端标了预览）在网格里只露开头：给角标提示「双击看完整值」
-              const longText = typeof v === "string" && (v.length >= 4096 || isLobPreview(v));
+              // 显示不全的格子（长文本 / 多行 / 后端 8K 预览）：右缘给一个「…」按钮。
+              // 复刻 PL/SQL Developer 的 cell button —— 从那儿迁过来的用户，习惯就是点这个
+              // 小钮看全值；而双击在四家主流工具里都是「编辑」，不能把查看借走。
+              const wide = isWideText(v, wrap);
               return (
                 <div
                   key={k}
-                  id={`dbx-cell-${r}-${k}`}
+                  id={`${idPrefix}-${r}-${k}`}
                   className={cls}
                   style={wrap ? { ...cellStyle(k), height } : cellStyle(k)}
                   role="gridcell"
@@ -111,12 +115,25 @@ export function GridRows({ order, first, last, layout, rowH, headH, total, rnW, 
                   {...selected}
                   onMouseDown={e => { e.preventDefault(); boxRef.current?.focus(); onSel({ r, c: k }, e.shiftKey); }}
                   onMouseEnter={e => { if (e.buttons === 1 && !editing) onSel({ r, c: k }, true); }}
-                  onDoubleClick={() => startEdit({ r, c: k })}
+                  onDoubleClick={() => startEdit({ r, c: k }, true)}
                   onContextMenu={e => { if (onCellMenu) { e.preventDefault(); onCellMenu(r, k, e.clientX, e.clientY); } }}
                 >
                   {(valueKind === "empty" || valueKind === "whitespace") && <span className="dbx-value-placeholder" data-placeholder={valueKind === "empty" ? "空字符串" : "空白"} aria-hidden="true" />}
-                  {longText && <span className="dbx-lob-mark" aria-hidden="true" />}
-                  {codec.text(v, k, 300)}
+                  {codec.text(v, k, CELL_TEXT_MAX)}
+                  {wide && !onOpenDetail && <span className="dbx-lob-mark" aria-hidden="true" />}
+                  {wide && onOpenDetail && (
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      className="dbx-cell-more"
+                      aria-label="查看完整内容"
+                      title="查看完整内容（这一格在网格里显示不全）"
+                      // 选区交给这里自己设：stopPropagation 之后外层的 onMouseDown 收不到。
+                      onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onSel({ r, c: k }); }}
+                      onClick={e => { e.stopPropagation(); onOpenDetail(r, k); }}
+                      onDoubleClick={e => e.stopPropagation()}
+                    >…</button>
+                  )}
                 </div>
               );
             })}

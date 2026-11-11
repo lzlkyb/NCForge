@@ -9,7 +9,7 @@ import type { Jump } from "./ncLog";
  * 三个动作都复用已有入口，不新造机制：
  * - **表** → `openTableInDb`（表结构悬停卡片里那个「在数据库中打开」走的就是它）
  * - **upm** → `requestOpenFile`（和搜索页/版本控制页同一条管道）
- * - **类名** → 复制到剪贴板 + 打开「类型搜索」浮层
+ * - **类名** → 带上真实类名打开「类型搜索」浮层
  *
  * 🔴 数据库那两个模块用**动态 import**。`openTableInDb` 会拉进 `dbStore` / `dbConfirm`，
  * 直接静态引入会让日志页的依赖图多出一大坨，组件测试里也更容易踩到 jsdom 的坑。
@@ -29,10 +29,7 @@ export async function runJump(jump: Jump): Promise<void> {
       }
       case "source": {
         // 类名本身没有源码路径，得靠 jdt.ls 的类型搜索去定位。
-        // 顺手复制一份：浮层打开后直接 Ctrl+V 就能搜，少一次口述类名的痛苦。
-        await copyText(jump.class).catch(() => undefined);
-        openPalette("type");
-        toast(`已复制类名 ${jump.class}，在类型搜索里粘贴即可定位`, "success");
+        openPalette("type", jump.class);
         return;
       }
     }

@@ -12,7 +12,9 @@ import { DebugInspectorDock } from "./DebugInspectorDock";
 import { useWorkbenchAutoLayout } from "../../hooks/useWorkbenchAutoLayout";
 import { useSidebarView } from "../../lib/sidebarView";
 import { PAGES } from "../../lib/pages";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { BP_SM } from "../../lib/layoutBreakpoints";
+import { returnFromLogs, takeRestoredTool } from "../../lib/toolReturn";
 
 /** 以下四份清单全部由 `lib/pages.ts` 的单一真源派生，新增页面不再需要改这里。 */
 const TOOLBAR_TOOLS = PAGES.filter((p) => p.toolbar).map((p) => p.key);
@@ -27,7 +29,7 @@ const DOCUMENT_DEFAULT_OPEN = PAGES.filter((p) => p.documentDefault).map((p) => 
 /** NC 服务的卡片 + 日志放在底部面板里，打开这个标签时把面板撑高到够看。 */
 const HOST_NAMES: DockRegionName[] = ["toolbar", "sidebar", "document", "bottom", "actions", "doctabs"];
 /** 文件页槽位：由 FilesTab 用 portal 注入（见 WorkbenchDock 的 FileSlotName）。 */
-const FILE_SLOTS: FileSlotName[] = ["tree", "tabs", "editor", "status", "output"];
+const FILE_SLOTS: FileSlotName[] = ["tree", "context", "tabs", "editor", "status", "output"];
 
 /** 侧栏 / 底部面板的尺寸。拖过就该记住：每次重启都回到 240 是白费用户的调整。 */
 const SIDE_MIN = 180;
@@ -40,7 +42,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
   editor: ReactNode; output: ReactNode; status: ReactNode;
 }) {
   const [hosts, setHosts] = useState<Record<DockRegionName, HTMLElement | null>>({ toolbar: null, sidebar: null, document: null, bottom: null, actions: null, doctabs: null });
-  const [fileHosts, setFileHosts] = useState<Record<FileSlotName, HTMLElement | null>>({ tree: null, tabs: null, editor: null, status: null, output: null });
+  const [fileHosts, setFileHosts] = useState<Record<FileSlotName, HTMLElement | null>>({ tree: null, context: null, tabs: null, editor: null, status: null, output: null });
   /** 用户手动切代码/文档面的显式覆盖；null = 按 activeTool 派生默认值。 */
   const [docOverride, setDocOverride] = useState<boolean | null>(null);
   const sideOpen = useSideOpen();
@@ -51,7 +53,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
   const legacyExpanded = useWorkspaceSelector(s => !!s.serviceExpanded);
   const sidebarView = useSidebarView();
   const { layout, sideWidth, bottomHeight, bottomMax, resize, onSeparatorKey } = useWorkbenchGeometry(panelTab, activeTool === "files" && sidebarView === "search" ? "search" : activeTool);
-  const panelExpanded = panelOpen && (layout.expanded === panelTab || legacyExpanded && panelTab === "svc");
+  const panelExpanded = activeTool === "files" && panelOpen && (layout.expanded === panelTab || legacyExpanded && panelTab === "svc");
   useWorkbenchAutoLayout(activeTool === "files");
   // 每个宿主一个稳定的 ref 回调：回调身份变了 React 会先 null 再重填，宿主里的工具内容就闪一下
   const refs = useMemo(() => Object.fromEntries(HOST_NAMES.map(name => [name, (node: HTMLElement | null) => setHosts(old => old[name] === node ? old : { ...old, [name]: node })])) as Record<DockRegionName, (node: HTMLElement | null) => void>, []);
@@ -69,6 +71,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
   useEffect(() => {
     if (effectTool.current === activeTool) return;
     effectTool.current = activeTool;
+    if (takeRestoredTool(activeTool)) return;
     setSession({ serviceExpanded: false });
     updateWorkbenchLayout({ expanded: null });
   }, [activeTool]);
@@ -83,7 +86,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
             ...DOCUMENT_TOOLS.logs,
             onClose: () => {
               setDocOverride(false);
-              window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "files" }));
+              returnFromLogs();
               requestAnimationFrame(() =>
                 document
                   .querySelector<HTMLElement>(
@@ -103,10 +106,22 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
   // 会变成双左栏、把主区挤窄。两页都保留用户在代码页设置的开合偏好。
   const sideShown = sideOpen && activeTool !== "logs" && activeTool !== "meta";
   const sideLabel = activeTool === "settings" ? "设置分类" : "资源侧栏";
+  const [narrow, setNarrow] = useState(() => window.matchMedia?.(`(max-width: ${BP_SM}px)`).matches ?? false);
+  const sideRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const media = window.matchMedia?.(`(max-width: ${BP_SM}px)`);
+    const update = () => setNarrow(media?.matches ?? false);
+    media?.addEventListener?.("change", update);
+    update();
+    return () => media?.removeEventListener?.("change", update);
+  }, []);
+  const drawerOpen = narrow && sideShown;
   const closeSide = () => {
     setSideOpen(false);
-    document.querySelector<HTMLElement>('[aria-label="工作台布局"]')?.focus();
+    // 初始打开或焦点触发元素已消失时，关闭抽屉仍需要一个可用的返回入口。
+    document.querySelector<HTMLElement>('[aria-label="工作台布局"]')?.focus({ preventScroll: true });
   };
+  useFocusTrap(sideRef, { enabled: drawerOpen, onEscape: closeSide });
   // 底部面板有没有内容由 FilesTab 决定（它 portal 到宿主）；这里不再用 `output` 断言，
   // 空面板与分隔条靠 workbench-layout.css 的 `:empty` 规则收起。
   return <WorkbenchDockContext.Provider value={dock}>
@@ -121,12 +136,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
       <div className="wb-layout" data-side-open={sideShown} style={{ gridTemplateColumns: sideShown ? `${sideWidth}px 4px minmax(0,1fr)` : "0px 0px minmax(0,1fr)" }}>
         {/* 收起时不能用 hidden：display:none 的 aside 不占网格格子，后面的分隔条与主区会各前进一格，主区落进 0px 那一列 */}
         <button type="button" className="wb-side-backdrop" aria-label="收起侧栏" tabIndex={-1} hidden={!sideShown} onClick={closeSide} />
-        <aside className="wb-tree" data-closed={!sideShown || undefined} onKeyDown={e => {
-          // 窄窗侧栏是覆盖式抽屉，Esc 要能关掉；断点与 CSS 共用 BP_SM，别写死 640
-          if (e.key === "Escape" && !e.defaultPrevented && window.matchMedia?.(`(max-width: ${BP_SM}px)`).matches) {
-            e.preventDefault(); e.stopPropagation(); closeSide();
-          }
-        }}>
+        <aside ref={sideRef} className="wb-tree" data-closed={!sideShown || undefined} aria-label={sideLabel}>
           <div className="wb-tree-heading"><span>{sideLabel}</span><button type="button" className="wb-tree-close" aria-label={`关闭${sideLabel}`} onClick={closeSide}><Icon name="close" size={16} /></button></div>
           <div ref={fileRefs.tree} className="wb-tree-native" hidden={hasSide}>{tree}</div>
           <div ref={refs.sidebar} className="wb-sidebar-host" hidden={!hasSide} />
@@ -138,7 +148,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
             e.preventDefault();
             resize("side", e.clientX, sideWidth, { id: e.pointerId, element: e.currentTarget });
           }} onKeyDown={e => onSeparatorKey(e, "side")} />
-        <div className="wb-main-with-inspector">
+        <div className="wb-main-with-inspector" ref={node => { if (node) node.inert = drawerOpen; }}>
         <section className="wb-main" data-service-mode={panelOpen && panelTab === "svc" || undefined} data-service-expanded={panelExpanded || undefined} data-panel-expanded={panelExpanded || undefined}>
           {/* 代码面自带文件标签条：切到工具页时整块 hidden，文件标签就不可能和
               文档面的工具标签同屏（以前两者挤在顶层 `wb-tabbar` 的同一条 flex 行里）。
@@ -151,6 +161,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
             aria-label="编辑器"
             hidden={documentOpen}
           >
+            <div ref={fileRefs.context} className="wb-code-context-host" />
             <div ref={fileRefs.tabs} className="wb-code-tools">{tabs}</div>
             <div ref={fileRefs.editor} className="wb-code-body">{editor}</div>
           </div>

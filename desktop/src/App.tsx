@@ -16,6 +16,8 @@ import { getKeymap, isWorkspaceSearch, layoutKeyOf, paletteModeOf, RAIL_KEY, WOR
 import { setSideOpen, toggleRail, toggleSide, useRailExpanded } from "./lib/layoutStore";
 import { setSidebarView } from "./lib/sidebarView";
 import { openServicePanel } from "./lib/servicePanel";
+import { getToolReturn, recordToolNavigation } from "./lib/toolReturn";
+import "./workbench-upgrade.css";
 import { openPalette, usePalette } from "./lib/paletteStore";
 import { openLinkedDialog } from "./lib/linkedDialog";
 import { ShortcutSheet } from "./components/layout/ShortcutSheet";
@@ -23,6 +25,7 @@ import { showObjectFinder } from "./lib/dbStore";
 import { isDbObjectKey } from "./lib/keymap";
 import { registerCommands } from "./lib/commandRegistry";
 import { setSession } from "./lib/workspaceSession";
+import { initReviewSession } from "./lib/reviewSession";
 import { openPatchPage } from "./lib/svnSession";
 import { requestOpenChangelog } from "./lib/changelogRequest";
 import { showWorkbenchDocument } from "./lib/dockEvents";
@@ -126,6 +129,9 @@ function AppContent() {
   useAppHiddenFlag();
   // 退出守卫：点 X 后先查一遍未提交的事务，再决定退不退（见 lib/quitGuard）。
   // 全局只挂一次，卸载时解绑。
+  // 审查事件采集必须早于用户第一次打开「改动」页签：否则 AI 改完文件后
+  // 时间线是空的（P0-2）。幂等，全局只挂一次。
+  useEffect(() => initReviewSession(), []);
   useEffect(() => wireQuitGuard(), []);
   // 窗口尺寸持久化：启动恢复上次尺寸 + resize 防抖落盘（纯前端方案）
   useWindowSizePersistence();
@@ -175,7 +181,9 @@ function AppContent() {
     // 切到别的页时展开资源侧栏；日志页及其返回代码页保留原开合偏好（见 railNavigation）。
     // 同页收侧栏只属于侧栏点击（navigateRail），这里不处理，避免 openSearch 等
     // 「同页带动作」入口把刚展开的侧栏又收回去。
-    pageSideEffect(activeTab, tab);
+    const currentTool = getToolReturn().activeTool;
+    recordToolNavigation(tab);
+    pageSideEffect(currentTool, tab);
     // 日志页始终翻出工具文档面：同页重入时 WorkbenchFrame 的切页 effect 不会跑。
     if (tab === "logs") showWorkbenchDocument();
     // View Transition 动画：update 回调里同步切 tab；当前页已是目标页时不动画

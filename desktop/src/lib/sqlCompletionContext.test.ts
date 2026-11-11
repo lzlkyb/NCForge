@@ -25,3 +25,12 @@ it("literal suggestions are scoped to field comparisons, never ordinary strings"
   expect(at("select 'from a |'").kind).toBe("none");
   expect(at("select * from a -- where status=|").kind).toBe("none");
 });
+
+it("does not consume whitespace after a value insertion", () => {
+  const sql = "select * from a where status = |  and id = 1";
+  expect(at(sql)).toMatchObject({ kind: "value", valueStart: sql.indexOf("|"), valueEnd: sql.indexOf("|") });
+});
+it("does not treat quoted clause names as SQL clauses", () => {
+  expect(at('select "where", | from a').clause).toBe("select");
+  expect(at('select * from a order by "where", |').clause).toBe("order");
+});

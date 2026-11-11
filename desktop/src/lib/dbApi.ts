@@ -697,6 +697,13 @@ export const dbApi = {
    */
     exec: (id: string, sql: string, maxRows: number, timeoutSec: number, slot?: string | null, collectStats = false) =>
       invoke<ExecResult>("db_exec", { id, sql, maxRows, timeoutSec, slot: slot || null, collectStats }),
+  /** SQL 结果独立持有游标，后续语句不会替换它。 */
+  execResult: (id: string, sql: string, maxRows: number, timeoutSec: number, slot: string | null | undefined, collectStats: boolean, resultId: string) =>
+    invoke<ExecResult>("db_exec_result", { id, sql, maxRows, timeoutSec, slot: slot || null, collectStats, resultId }),
+  moreResult: (id: string, maxRows: number, slot: string | null | undefined, resultId: string, fallback = false) =>
+    invoke<MoreResult>("db_more_result", { id, maxRows, slot: slot || null, resultId, fallback }),
+  closeResult: (id: string, slot: string | null | undefined, resultId: string) =>
+    invoke<void>("db_result_close", { id, slot: slot || null, resultId }),
   /** 给一个 SQL 标签再开一条独立会话。最多 3 个/连接，超出报 `slots-full`。 */
   slotAcquire: (id: string) => invoke<SlotOut>("db_slot_acquire", { id }),
   /** 关标签时释放；断开连接时后端会连带收掉全部槽。 */

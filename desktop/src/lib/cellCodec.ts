@@ -1,6 +1,7 @@
 import type { Cell, ColumnMeta } from "./dbApi";
-import { cellText, isLobPreview, lobPreviewBody } from "./db";
+import { cellText, lobPreviewBody } from "./db";
 import { fitsCell } from "./resultView";
+import { isWideText } from "./wideText";
 
 /**
  * 单元格里的「二次编码」识别与解码。
@@ -278,13 +279,13 @@ export function gridCodec(
     text: (v, c, max) => codedText(v, on(c) ? decode(v) : null, max),
     title: (v, c, colWidth) => {
       const d = on(c) ? decode(v) : null;
-      if (d) return `${describeDecoded(d)} · 双击看完整值`;
+      // 文案必须指向**真实入口**：双击在四家主流工具里都是编辑，写成「双击看完整值」
+      // 就是骗人去点一个不办事的手势（2026-11-11 用户反馈的原始触发点之一）。
+      if (d) return `${describeDecoded(d)} · 点格内「…」或按 F4 看完整值`;
       // 这里只看列级判定，不再逐格解码：title 是每帧对每个可见格都要算的，
       // 一帧上千次 hex 解析会把滚动拖卡。列级 80% 命中已经足够支撑这句提示。
       if (auto.has(c)) return "检测到十六进制/Base64 编码 · 右键列头可显示明文";
-      if (typeof v === "string" && (v.length >= 4096 || isLobPreview(v))) {
-        return `${v.length} 字符 · 双击看完整值`;
-      }
+      if (isWideText(v)) return `${String(v).length} 字符 · 点格内「…」或按 F4 看完整值`;
       // 被列宽挤掉的值：悬停要给完整值，否则「显示不全」就没有第二条路。
       // 宽度判定走 `fitsCell`（带测量缓存），短值一次比较就能排除。
       if (colWidth !== undefined) {
@@ -292,8 +293,8 @@ export function gridCodec(
         if (text && !fitsCell(text, colWidth)) {
           const full = typeof v === "string" ? v : String(v);
           return full.length > 500
-            ? `${full.slice(0, 500)}…（共 ${full.length} 字符，双击看详情）`
-            : `${full}（双击看详情）`;
+            ? `${full.slice(0, 500)}…（共 ${full.length} 字符，按 F4 看完整值）`
+            : `${full}（按 F4 看完整值）`;
         }
       }
       return undefined;

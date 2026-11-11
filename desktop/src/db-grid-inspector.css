@@ -6,13 +6,27 @@
 .dbx-gh:hover .dbx-header-menu,.dbx-gh:focus-within .dbx-header-menu { opacity:1; }
 .dbx-header-menu:hover { color:hsl(var(--foreground));background:hsl(var(--secondary)); }
 .dbx-grid .dbx-value-placeholder { color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);font-style:italic;user-select:none; }
-/* 大文本角标：真值超过 4K（或后端只带了预览）时提示「还有内容」。
+/* 大文本角标：没有详情入口时的退路（只有它，点不了）。
    绝对定位的小圆点，不占文字宽度；复制走 rows 数据而不是 DOM，不会带上它。 */
 .dbx-grid .dbx-lob-mark { position:absolute;right:2px;bottom:2px;width:4px;height:4px;border-radius:50%;background:hsl(var(--primary) / .55);pointer-events:none; }
+/* 格内「…」按钮：复刻 PL/SQL Developer 的 cell button。
+   长文本在网格里显示不全时，点这里看完整值——不抢双击（双击仍是编辑）。
+   常驻但压暗（PL/SQL 的 cell button 也是常驻的：藏起来等于没有入口），
+   悬停本格或本格是活动格时转为实色。 */
+.dbx-grid .dbx-cell-more { position:absolute;right:2px;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:15px;height:15px;padding:0;border:0;border-radius:3px;background:hsl(var(--card) / .92);color:hsl(var(--muted-foreground));font:600 11px/1 var(--font-mono);cursor:pointer;opacity:.5; }
+.dbx-grid .dbx-gc:hover .dbx-cell-more,.dbx-grid .dbx-gc[data-cell] .dbx-cell-more { opacity:1; }
+.dbx-grid .dbx-cell-more:hover { background:hsl(var(--secondary));color:hsl(var(--foreground)); }
+.dbx-grid .dbx-cell-more:focus-visible { opacity:1;outline:2px solid hsl(var(--ring));outline-offset:-1px; }
+/* 有按钮的格子多留 8px：否则 15px 的按钮会盖住末尾的省略号（宽度是 border-box，列宽不变）。 */
+.dbx-grid .dbx-gc:has(> .dbx-cell-more) { padding-right:18px; }
 /* The explanatory marker is generated content, so selecting/copying text cannot include it. */
 .dbx-grid .dbx-value-placeholder::before { content:attr(data-placeholder); }
 .dbx-rbody:has(> .dbx-detail) { position:relative;container-type:inline-size;container-name:dbx-result-body; }
 .dbx-detail { width:340px;max-width:100%;min-width:0; }
+/* 放大态：把详情从 340px 侧栏搬进独立大窗——DBeaver 的 value panel、DataGrip 的
+   value editor 都是大 pane，没有一家把小窗当唯一入口。 */
+.dbx-detail-modal { display:flex;width:min(1000px,94vw);height:min(760px,86vh);overflow:hidden; }
+.dbx-detail-modal .dbx-detail { width:100%;max-width:none;border-left:0; }
 .dbx-detail .hd { align-items:flex-start; }
 .dbx-detail .hd b { overflow-wrap:anywhere; }
 .dbx-detail .hd .s { line-height:1.5;overflow-wrap:anywhere; }

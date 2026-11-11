@@ -11,6 +11,7 @@ import { registerJavaSqlActions } from "../../lib/javaSqlActions";
 import { registerJavaTemplates } from "../../lib/liveTemplates";
 import { attachErrorLens } from "../../lib/errorLens";
 import { attachBookmarkGutter } from "../../lib/bookmarkGutter";
+import { attachChangedLines } from "../../lib/changedLinesGutter";
 import { attachDebugGutter } from "../../lib/debugGutter";
 import { wireDebugHover } from "../../lib/debugHover";
 import { getEditorPrefs, monacoOptionsOf, PREFS_EVENT } from "../../lib/editorPrefs";
@@ -20,6 +21,7 @@ import { registerEditorBindings } from "../../lib/editorBindings";
 import { noteEdit } from "../../lib/editHistory";
 import "../../error-lens.css";
 import "../../bookmark-gutter.css";
+import "../../changed-lines.css";
 import "../../debug.css";
 
 interface Props {
@@ -117,6 +119,8 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     const lensOff = attachErrorLens(editor);
     // 行号槽书签：数据来自 lib/bookmarks（F11 增删、书签面板共用同一份）
     const bookmarkOff = attachBookmarkGutter(editor);
+    // 相对 SVN 基线的改动色条 / 单块还原（A 批）：独立于 React state，见 lib/changedLinesGutter
+    const changedOff = attachChangedLines(editor);
     // 行号槽断点 + 暂停行：数据来自 lib/breakpoints 与 lib/debugSession
     const debugOff = attachDebugGutter(editor);
     // Alt+Enter 绑快速修复；命令面板要靠这个引用找到「当前在编辑哪个文件」
@@ -129,6 +133,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       sqlActions.forEach((d) => d.dispose());
       lensOff();
       bookmarkOff();
+      changedOff();
       debugOff();
       contentSub.dispose();
       if (autoSaveTimer !== undefined) window.clearTimeout(autoSaveTimer);

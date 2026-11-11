@@ -1,5 +1,6 @@
 import type { Cell, ColumnMeta } from "./dbApi";
 import { isNumericType } from "./resultExport";
+import { getFontRevision, UI_FONT_FAMILY } from "./fonts";
 
 /** 结果表的本地排序与筛选（不重新查库）。返回显示顺序：原始行号数组。 */
 
@@ -84,17 +85,13 @@ const PROBE_CHARS = 120;
 const SAMPLE_ROWS = 200;
 
 const FONT_SIZE = 13; // 与 `--dbx-fs-body` 一致（紧凑 / 舒适两档都是 13px）
-/**
- * 🔴 字体族顺序必须与 CSS 完全一致（`.dbx-grid` / `.dbx-gh` 都是
- * `system-ui, "Segoe UI", sans-serif`）。写成 `"Segoe UI"` 在前，Windows 的
- * `system-ui` 会解析到另一个更宽的字体，实测同一串文本窄 11%——列名照样被截断，
- * 而且「本地看起来没问题、用户机器上全截断」这种差异最难查。
- */
-const FONT_FAMILY = `system-ui, "Segoe UI", sans-serif`;
+// 与 `.dbx-grid` 的 --font-sans 同序；不同字体测量会使列名截断。
+const FONT_FAMILY = UI_FONT_FAMILY;
 
 let measureCtx: CanvasRenderingContext2D | null | undefined;
 let measureFont = "";
 const widthCache = new Map<string, number>();
+let measuredRevision = -1;
 
 /**
  * jsdom 没有 canvas 实现，`getContext` 会返回 null 并在控制台打一条 “Not implemented”。
@@ -132,6 +129,12 @@ function estimate(text: string): number {
 
 /** 一段文本渲染出来有多宽（px）。按字符串 + 字重缓存，滚动时不会重复测量。 */
 export function textWidth(text: string, bold = false): number {
+  const revision = getFontRevision();
+  if (measuredRevision !== revision) {
+    measuredRevision = revision;
+    widthCache.clear();
+    measureFont = "";
+  }
   if (!text) return 0;
   const key = bold ? `b${text}` : text;
   const hit = widthCache.get(key);
@@ -213,13 +216,14 @@ export function fitWidth(column: ColumnMeta, rows: Cell[][], index: number): num
  * 一次测量是「列数 × 最多 200 行」次 `measureText`，不缓存的话每拖一次都要再付一遍。
  * 用 WeakMap 挂在大数组上，结果被丢掉时一起回收；`length` 变了（加载更多）就重算。
  */
-const widthByRows = new WeakMap<Cell[][], { columns: ColumnMeta[]; length: number; widths: number[] }>();
+const widthByRows = new WeakMap<Cell[][], { columns: ColumnMeta[]; length: number; revision: number; widths: number[] }>();
 
 /** 首次渲染的列宽：逐列 `fitWidth`。手调过的宽度由 `widthOverrides` 覆盖，不在这里处理。 */
 export function initialWidths(columns: ColumnMeta[], rows: Cell[][]): number[] {
+  const revision = getFontRevision();
   const hit = widthByRows.get(rows);
-  if (hit && hit.columns === columns && hit.length === rows.length) return hit.widths;
+  if (hit && hit.columns === columns && hit.length === rows.length && hit.revision === revision) return hit.widths;
   const widths = columns.map((c, k) => fitWidth(c, rows, k));
-  widthByRows.set(rows, { columns, length: rows.length, widths });
+  widthByRows.set(rows, { columns, length: rows.length, revision, widths });
   return widths;
 }

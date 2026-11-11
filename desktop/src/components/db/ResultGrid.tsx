@@ -13,9 +13,11 @@ import { useResultGridNavigation } from "../../hooks/useResultGridNavigation";
 import { useGridEditing } from "../../hooks/useGridEditing";
 import { useGridRowLayout } from "../../hooks/useGridRowLayout";
 import { useGridTyping } from "../../hooks/useGridTyping";
+import { useGridCellOpen } from "../../hooks/useGridCellOpen";
 import { useGridDensityScroll } from "../../hooks/useGridDensityScroll";
 import { shouldLoadMore } from "../../lib/gridLoadMore";
 import { getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
+import { getFontRevision, subscribeFonts } from "../../lib/fonts";
 import { selectionText, type Selection } from "../../lib/dbResultTools";
 import "../../db-grid-inspector.css";
 
@@ -32,13 +34,13 @@ import type { CellPos, GridEdit, ResultGridApi } from "./gridEdit";
  * 排序 / 筛选的结果由父组件以 `order` 传入（复制 / 导出要用同一个顺序）。
  * NULL 斜体灰字与空串区分；数字右对齐。
  */
-export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onDetail, edit, blockedHint, zh, visible, frozen, widthOverrides, onWidths, selection, empty, onCopy, onCellMenu, apiRef, decoded, wrap: wrapProp, hasMore, loadingMore, onLoadMore }: {
+export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onDetail, edit, blockedHint, zh, visible, frozen, widthOverrides, onWidths, selection, empty, onCopy, onCellMenu, apiRef, decoded, wrap: wrapProp, hasMore, loadingMore, onLoadMore, idPrefix = "dbx-cell" }: {
   apiRef?: Ref<ResultGridApi>;
   columns: ColumnMeta[];
   rows: Cell[][];
   order: number[];
   sort: SortState | null;
-  empty?: ReactNode; onCopy?: () => void; onCellMenu?: (r:number,c:number,x:number,y:number) => void;
+  empty?: ReactNode; onCopy?: () => void; onCellMenu?: (r:number,c:number,x:number,y:number) => void; idPrefix?: string;
   onSort: (col: number) => void;
   /** 表头右键（A3：让数据库重排整表）。不传就没有这个入口。 */
   onHeaderMenu?: (col: number, x: number, y: number) => void;
@@ -62,6 +64,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   onLoadMore?: () => void;
 }) {
   const density = useSyncExternalStore(subscribeUiDensity, getUiDensity);
+  const fontRevision = useSyncExternalStore(subscribeFonts, getFontRevision);
   const ROW_H = density === "comfortable" ? 30 : 26;
   const HEAD_H = density === "comfortable" ? 44 : 40;
   const wrap = !!wrapProp;
@@ -108,7 +111,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const { first, last } = range;
   const selIndex = sel ? order.indexOf(sel.r) : -1;
   // 活动格滚出可视区时 aria-activedescendant 会指向不存在的 id
-  const activeCell = sel && viewport.some(c=>c.column===sel.c) && selIndex >= first && selIndex < last ? `dbx-cell-${sel.r}-${sel.c}` : undefined;
+  const activeCell = sel && viewport.some(c=>c.column===sel.c) && selIndex >= first && selIndex < last ? `${idPrefix}-${sel.r}-${sel.c}` : undefined;
 
   const syncScroll = () => {
     const el = boxRef.current;
@@ -175,22 +178,17 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   const { editing, valueAt, startEdit: beginEdit, setValue, commit: commitEdit, cancel: cancelEdit } =
     useGridEditing({ rows, order, visible, edit, onSel, reveal, boxRef });
   /**
-   * 不可编辑时只说明原因，**不顺带打开详情**：双击是「编辑」手势，不该产生第二种结果。
-   * 看完整值走明确入口——F4、右键「查看完整值」、工具栏详情按钮。
-   */
-  const blockedTipAt = useRef(0);
-  const startEdit = (pos: CellPos) => {
-    if (beginEdit(pos)) return;
-    const hint = edit?.blockedReason?.(pos.c, pos.r) || blockedHint;
-    if (hint && Date.now() - blockedTipAt.current > 4000) { blockedTipAt.current = Date.now(); toast(onDetail ? `${hint}；完整值按 F4 查看` : hint); }
-  };
-  /**
    * 选区批量赋值与 Shift+Enter 大文本编辑框（口径说明见 `useGridTyping`）。
    * 弹层开着的时候不再渲染网格里的编辑 input（`GridRows`），autoFocus 不会互相抢。
    */
   const [textOpen, setTextOpen] = useState(false);
+  // 双击分流（鼠标专用）：普通格编辑；显示不全的长文本进大文本框 / 详情。口径见 hook。
+  const startEdit = useGridCellOpen({ valueAt, beginEdit, edit, onSel, onDetail, blockedHint,
+    onExpand: () => setTextOpen(true) });
   const { typeInto, openTextEditor, paste } = useGridTyping({ sel, edit, bounds, order, visible, beginEdit, startEdit });
   const openText = () => { if (openTextEditor()) setTextOpen(true); };
+  /** 格内「…」按钮：先把选区落到这一格，再开详情（详情面板按 `sel` 取值）。 */
+  const openCellDetail = (r: number, c: number) => { onSel({ r, c }); onDetail?.(); };
 
   const copySelection = () => {
     if (!sel) return;
@@ -230,8 +228,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     if (colKeyRef.current === colKey) return;
     colKeyRef.current = colKey; cancelEdit(); boxRef.current?.scrollTo({ top: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [colKey, widthOverrides]);
-
+  }, [colKey, widthOverrides, fontRevision]);
   return (
     <div
       ref={boxRef}
@@ -242,21 +239,23 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
       aria-multiselectable
       aria-label="查询结果"
       aria-describedby={helpId}
-      aria-keyshortcuts={onCellMenu ? "Alt+ArrowUp Shift+F10" : "Alt+ArrowUp"}
+      aria-keyshortcuts={onCellMenu ? "Control+A Meta+A Alt+ArrowUp Shift+F10" : "Control+A Meta+A Alt+ArrowUp"}
       aria-rowcount={order.length+1}
       aria-colcount={visible.length+1}
       aria-activedescendant={activeCell}
       onKeyDown={onGridKey}
+      // WebView 菜单或系统复制命令可能只发 copy 事件，不发 Ctrl+C 的 keydown。
+      onCopy={e=>{if (!editing && sel && e.target===e.currentTarget && !window.getSelection()?.toString()) {e.preventDefault();copySelection();}}}
       onPaste={onPaste}
       onScroll={syncScroll}
     >
-      <span id={helpId} className="dbx-grid-instructions">方向键移动，Shift 扩选，Ctrl+C 复制。Alt+上箭头进入表头；表头左右键换列，Enter 排序，{onHeaderMenu && "Shift+F10 或菜单键打开菜单，"}下箭头返回数据，Esc 返回原活动格。</span>
+      <span id={helpId} className="dbx-grid-instructions">方向键移动，Shift 扩选，Ctrl+A 全选已加载数据，Ctrl+C 复制，F4 查看完整值；Enter 或 Tab 进入编辑，Shift+Enter 打开大文本编辑框。Alt+上箭头进入表头；表头左右键换列，Enter 排序，{onHeaderMenu && "Shift+F10 或菜单键打开菜单，"}下箭头返回数据，Esc 返回原活动格。</span>
       <div className="dbx-grid-inner" style={{ width: total, height: HEAD_H + layout.total }}>
         <ResultGridHeader columns={columns} sort={sort} zh={zh} order={order} visible={visible} viewport={viewport}
           bounds={bounds} total={total} rnW={rnW} cellStyle={cellStyle} navigation={navigation}
           onSel={onSel} onSort={onSort} onHeaderMenu={onHeaderMenu} resize={resize} fit={fit} codec={codec} />
         <GridRows
-          order={order}
+          order={order} idPrefix={idPrefix}
           first={first}
           last={last}
           layout={layout}
@@ -279,6 +278,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
           onSel={onSel}
           onCellMenu={onCellMenu}
           startEdit={startEdit}
+          onOpenDetail={onDetail ? openCellDetail : undefined}
           boxRef={boxRef}
           onCellEditor={{ onChange: setValue, onCommit: () => commitEdit(), onCancel: cancelEdit, onCommitMove: (dr, dc) => commitEdit([dr, dc]), onExpand: () => setTextOpen(true) }}
         />

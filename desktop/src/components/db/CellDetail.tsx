@@ -1,6 +1,7 @@
 import { JsonInspector } from "./JsonInspector";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
+import { Modal } from "../ui/Modal";
 import { toast } from "../ui/toast";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { isLobPreview, lobPreviewChars } from "../../lib/db";
@@ -49,6 +50,8 @@ export function CellDetail({ column, zh, row, value, empty, lob, sql, onClose }:
   const [full, setFull] = useState<{ value: string; chars: number; truncated: boolean } | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  /** 放大到独立大窗：340px 侧栏读一千多字的报错堆栈太窄。 */
+  const [expanded, setExpanded] = useState(false);
   const contentRef=useRef<HTMLPreElement>(null), infoId=useId();
   // 加载完整值是异步的：切到别的格子后，旧的请求不能再把结果写进面板。
   const reqRef = useRef(0);
@@ -76,10 +79,14 @@ export function CellDetail({ column, zh, row, value, empty, lob, sql, onClose }:
     setLoadError(null);
     setLoading(false);
   },[column?.name,row,value]);
-  useLayoutEffect(()=>{
+  // 放大到 Modal 时内容会被 portal 重建，焦点必须跟着重落一次：Modal 的焦点陷阱
+  // 挂载时把焦点给「第一个可聚焦元素」，DOM 顺序上那是「关闭详情」，键盘用户
+  // 放大后一按回车就把面板关了。CellDetail 的 effect 晚于子组件 Modal 的 effect，
+  // 所以这里用普通 useEffect 就能盖住陷阱的初始聚焦。
+  useEffect(()=>{
     contentRef.current?.focus({preventScroll:true});
     contentRef.current?.scrollIntoView?.({block:"nearest",inline:"nearest"});
-  },[]);
+  },[expanded]);
 
   const loadFull = async () => {
     if (!lob?.canLoad || loading || full) return;
@@ -95,14 +102,16 @@ export function CellDetail({ column, zh, row, value, empty, lob, sql, onClose }:
       if (token === reqRef.current) setLoading(false);
     }
   };
+  // `>= 4096` 是「值可能被后端截断」的兜底猜测，与 `isWideText`（网格显示不全，>300）不是一回事：
+  // 300~4096 的完整值不需要按行重查，合并判据会让每个长值都多出一个点了没用的按钮。
   const canLoad = !!lob?.canLoad && !empty && (preview || baseLength >= 4096);
   const copySql = () => {
     if (!sql || !column) return;
     void copyText(decodeSqlTemplate(sql, column.name), () => toast("解码 SQL 已复制", "success"), (e) => toast(`复制失败：${e}`, "error"));
   };
 
-  return (
-    <div className="dbx-detail" role="region" aria-label="单元格详情" onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();e.stopPropagation();onClose();}}}>
+  const panel = (
+    <div className="dbx-detail" data-expanded={expanded || undefined} role="region" aria-label="单元格详情" onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();e.stopPropagation();if(expanded) setExpanded(false);else onClose();}}}>
       <div className="hd">
         <div style={{ flex: 1, minWidth: 0 }}>
           {empty || !column ? (
@@ -168,7 +177,16 @@ export function CellDetail({ column, zh, row, value, empty, lob, sql, onClose }:
           JSON 格式化
         </button>
         <button type="button" className="dbx-btn ghost" data-on={view==="whitespace" || undefined} aria-pressed={view==="whitespace"} disabled={empty || !/\s/.test(text)} onClick={()=>setView(view==="whitespace" ? "raw" : "whitespace")}>显示空白</button>
+        <button type="button" className="dbx-btn ghost" data-on={expanded || undefined} aria-pressed={expanded}
+          title={expanded ? "退回侧栏（Esc）" : "在大窗口里查看，读长文本更舒服"}
+          onClick={() => setExpanded(!expanded)}>
+          <Icon name={expanded ? "collapse" : "expand"} size={12} />
+          {expanded ? "退回侧栏" : "放大"}
+        </button>
       </div>
     </div>
   );
+  return expanded
+    ? <Modal open onClose={() => setExpanded(false)} className="modal-surface dbx-detail-modal" ariaLabel="单元格详情（放大）">{panel}</Modal>
+    : panel;
 }

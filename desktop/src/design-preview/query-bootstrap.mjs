@@ -34,7 +34,9 @@ mockIPC(async (cmd,args)=>{
  }
  if(cmd==='db_slot_acquire') return {slot:'preview-slot',tx:tx()};
  if(cmd==='db_cancel') { window.previewCancel?.(); return null; }
- if(cmd==='db_exec' || cmd==='db_exec_bound') {
+ // `db_exec_result` 是控制台真正走的命令（带 resultId 的游标式执行）。缺了它，
+ // 预览里一按执行就立刻失败，慢查询/停止那条演示路径根本走不到。
+ if(cmd==='db_exec' || cmd==='db_exec_bound' || cmd==='db_exec_result') {
    const scenario=window.previewScenario || 'success';
    const run=++previewRun;
    const started=performance.now();

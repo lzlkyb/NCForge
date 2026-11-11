@@ -45,3 +45,10 @@ it("仅标记实际展示的已安装版本，未来随包版本不清除未来�
   render(); expect(localStorage.getItem("shell_changelog_last_seen")).toBe("1.0.0");
   choose("2.0.0"); expect(localStorage.getItem("shell_changelog_last_seen")).toBe("1.0.0");
 });
+
+it("弹窗打开时列表更新，保留用户正在阅读的版本和搜索", () => {
+  render(); choose("2.0.0"); query("记录 12");
+  render([...entries]);
+  expect(host.querySelector("select")?.value).toBe("2.0.0");
+  expect(host.querySelector("input")?.value).toBe("记录 12");
+});

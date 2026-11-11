@@ -3,6 +3,7 @@ import { copyText } from "../../lib/utils";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import type { SqlCodeViewerApi } from "./SqlCodeViewerEditor";
+import { useSqlDialect } from "../../hooks/useSqlDialect";
 import "./sql-code-viewer.css";
 
 const ViewerEditor = lazy(() => import("./SqlCodeViewerEditor"));
@@ -13,6 +14,7 @@ export function SqlCodeViewer({ text, connId, label, source, sections = [] }: {
   text:string; connId?:string; label:string; source?:string; sections?:SqlCodeSection[];
 }) {
   const api = useRef<SqlCodeViewerApi | null>(null);
+  const dialect = useSqlDialect(connId);
   const [wrap, setWrap] = useState(false);
   const [section, setSection] = useState(0);
   const shown = sections[section]?.text ?? text;
@@ -35,7 +37,7 @@ export function SqlCodeViewer({ text, connId, label, source, sections = [] }: {
       {connId && <button type="button" className="dbx-btn ghost" aria-label="打开到 SQL 控制台" title="复制当前内容到新 SQL 控制台，不自动执行" disabled={opening} onClick={()=>void open()}><Icon name="terminal" size={14}/><span className="dbx-code-open-label">打开到 SQL 控制台</span></button>}
     </div>
     <Suspense fallback={<pre className="dbx-code-fallback" tabIndex={0} aria-label={`${currentLabel}（正在加载语法高亮）`}>{shown}</pre>}>
-      <ViewerEditor text={shown} label={currentLabel} wrap={wrap} apiRef={api}/>
+      <ViewerEditor text={shown} label={currentLabel} wrap={wrap} apiRef={api} dialect={dialect}/>
     </Suspense>
   </section>;
 }

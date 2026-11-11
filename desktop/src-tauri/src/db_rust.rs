@@ -34,6 +34,7 @@
 //! `DATE` 给 `yyyy-MM-dd HH:mm:ss`、`CLOB` 截到 1M、`RAW` 给十六进制。这里逐条照搬，
 //! 否则同一个查询在两个引擎下会显示出两种样子。
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -269,15 +270,66 @@ pub struct RustEngine {
 /// 「当前这条连接的中断句柄」。`None` = 没连上。
 type BreakerSlot = Arc<Mutex<Option<BreakHandle>>>;
 
+const MAX_RESULT_CURSORS: usize = 32;
+
+/// Legacy callers keep their own slot; named results never replace another result's cursor.
+struct ResultCursors<T> {
+    legacy: Option<T>,
+    named: HashMap<String, T>,
+}
+
+impl<T> ResultCursors<T> {
+    fn new() -> Self {
+        Self {
+            legacy: None,
+            named: HashMap::new(),
+        }
+    }
+
+    fn check_capacity(&self, id: Option<&str>) -> Result<(), BridgeError> {
+        if id.is_some_and(|id| !self.named.contains_key(id))
+            && self.named.len() >= MAX_RESULT_CURSORS
+        {
+            return Err(BridgeError::new(
+                "cursor-limit",
+                "已保留 32 个查询游标，请先关闭部分结果再执行",
+            ));
+        }
+        Ok(())
+    }
+
+    fn take(&mut self, id: Option<&str>) -> Option<T> {
+        match id {
+            Some(id) => self.named.remove(id),
+            None => self.legacy.take(),
+        }
+    }
+
+    fn put(&mut self, id: Option<&str>, cursor: T) {
+        match id {
+            Some(id) => {
+                self.named.insert(id.to_string(), cursor);
+            }
+            None => self.legacy = Some(cursor),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.legacy = None;
+        self.named.clear();
+    }
+}
+
+struct ResultCursor {
+    cursor: Cursor,
+    columns: Vec<Value>,
+    full_lob: bool,
+}
+
 struct Session {
     conn: Option<Connection>,
     /// 「加载更多」用的游标。Oracle 游标不能回退，必须留着才能接着取。
-    cursor: Option<Cursor>,
-    /// 结果集的列（`columns` 字段原样），分页时复用。
-    columns: Vec<Value>,
-    /// 当前游标是否按「全量 CLOB」取值（`execFull`）。跟着游标走，`more` 沿用；
-    /// 每次 `exec` / `execBound` 都会重设，不会串到下一个查询。
-    full_lob: bool,
+    cursors: ResultCursors<ResultCursor>,
     auto_commit: bool,
     readonly: bool,
     readonly_started: bool,
@@ -306,9 +358,7 @@ impl RustEngine {
         Self {
             sess: Mutex::new(Session {
                 conn: None,
-                cursor: None,
-                columns: Vec::new(),
-                full_lob: false,
+                cursors: ResultCursors::new(),
                 auto_commit: false,
                 readonly: false,
                 readonly_started: false,
@@ -443,6 +493,7 @@ impl Session {
                 int_arg(a, 2, 30),
                 a.get(3).is_some_and(|v| v.eq_ignore_ascii_case("true")),
                 cmd == "execFull",
+                a.get(4).copied().filter(|id| !id.is_empty()),
             ),
             // `execFullBound` 与 execBound 同协议，只是 CLOB 走全量（导出带绑定变量时用）。
             // 不能靠在参数尾部加一个开关：a[3..] 是成对的 (类型, 值)，加单参数会破坏配对。
@@ -459,10 +510,14 @@ impl Session {
                 }).collect();
                 let params = params?;
                 let refs: Vec<&dyn ToDbValue> = params.iter().map(|p| p.as_ref()).collect();
-                self.exec_params(a[0],int_arg(a,1,500),int_arg(a,2,30),&refs,false,cmd == "execFullBound")
+                self.exec_params(a[0],int_arg(a,1,500),int_arg(a,2,30),&refs,false,cmd == "execFullBound",None)
             }
             "readOnly" => self.set_readonly(a.first() == Some(&"true")),
-            "more" => self.more(int_arg(a, 0, 500), timeout),
+            "more" => self.more(int_arg(a, 0, 500), timeout, a.get(1).copied().filter(|id| !id.is_empty())),
+            "closeResult" => {
+                let id = a.first().copied().filter(|id| !id.is_empty()).ok_or_else(|| sql_err("结果标识是空的"))?;
+                Ok(json!({"closed": self.cursors.take(Some(id)).is_some()}))
+            }
             "lobValue" => self.lob_value(
                 a.first().copied().unwrap_or(""),
                 int_arg(a, 1, 0),
@@ -500,6 +555,7 @@ impl Session {
             // 而 `db_read_only` 与重连前置校验走的是 `ping`，两套口径必须统一。
             "ping" => {
                 let alive = self.probe_conn(timeout).is_ok();
+                if !alive { self.cursors.clear(); }
                 Ok(json!({ "alive": alive, "tx": self.tx_json() }))
             }
             // 重连前给 `db_engine.rs` 校准本地脏标志用：只问字典，不探活、不改计数。
@@ -510,6 +566,7 @@ impl Session {
             // `active` 同时放进 tx 与顶层：TxBar 拿 `status.tx` 就能显示核对结果。
             "txStatus" => {
                 let alive = self.probe_conn(timeout).is_ok();
+                if !alive { self.cursors.clear(); }
                 let flag = self.tx_active().map(Value::Bool).unwrap_or(Value::Null);
                 let mut tx = self.tx_json();
                 if let Some(m) = tx.as_object_mut() {
@@ -527,6 +584,7 @@ impl Session {
             // 诊断/自救用：丢弃错位的响应流，把连接拉回可用（不改事务状态、不重发语句）。
             // 界面上正常路径不会调它——执行与取数命中错位时会自己对齐。
             "resync" => {
+                self.cursors.clear();
                 let Some(conn) = self.conn.as_ref() else {
                     return Err(not_connected());
                 };
@@ -566,6 +624,9 @@ impl Session {
                 let _ = conn.set_call_timeout(None);
             }
         }
+        if matches!(&out, Err(e) if is_desync_msg(&e.message) || e.code == "session-lost") {
+            self.cursors.clear();
+        }
         out
     }
 
@@ -581,8 +642,7 @@ impl Session {
     }
 
     fn reset_all(&mut self) {
-        self.cursor = None;
-        self.columns.clear();
+        self.cursors.clear();
         self.conn = None;
         self.drop_breaker();
         self.reset_tx();
@@ -609,17 +669,11 @@ impl Session {
         conn.ping().map_err(drv_err)
     }
 
-    fn close_cursor(&mut self) {
-        // 驱动的 Cursor 没有显式 close：丢掉即可，语句随 Drop 归还
-        self.cursor = None;
-        self.columns.clear();
-    }
-
     fn close(&mut self) {
         self.drop_breaker();
+        // 游标先归还，再关连接；否则仍持有旧会话的游标会延长服务端资源寿命。
+        self.cursors.clear();
         if let Some(conn) = self.conn.take() {
-            self.cursor = None;
-            self.columns.clear();
             if !self.auto_commit {
                 let _ = conn.rollback();
             }
@@ -703,6 +757,7 @@ impl Session {
 
     /// 切换默认 schema。空串 = 回到登录账号自己的 schema。
     fn set_schema(&mut self, name: &str) -> Result<Value, BridgeError> {
+        self.cursors.clear();
         // 连接先取出来再放回：`effective_schema` 要 `&Connection`，而这里拿着 `&mut self`。
         let conn = self.conn.take().ok_or_else(not_connected)?;
         let result = effective_schema(&conn, name, &self.login_user);
@@ -742,6 +797,7 @@ impl Session {
             if self.tx_statements > 0 {
                 return Err(sql_err("有未提交写入，请先提交或回滚再切换只读查询"));
             }
+            self.cursors.clear();
             self.conn_ref()?.rollback().map_err(drv_err)?;
             if enabled {
                 self.previous_auto = self.auto_commit;
@@ -767,9 +823,19 @@ impl Session {
         timeout_sec: usize,
         collect_stats: bool,
         full_lob: bool,
+        result_id: Option<&str>,
     ) -> Result<Value, BridgeError> {
-        self.exec_params(raw, max_rows, timeout_sec, &[], collect_stats, full_lob)
+        self.exec_params(
+            raw,
+            max_rows,
+            timeout_sec,
+            &[],
+            collect_stats,
+            full_lob,
+            result_id,
+        )
     }
+    #[allow(clippy::too_many_arguments)]
     fn exec_params(
         &mut self,
         raw: &str,
@@ -778,18 +844,22 @@ impl Session {
         params: &[&dyn ToDbValue],
         collect_stats: bool,
         full_lob: bool,
+        result_id: Option<&str>,
     ) -> Result<Value, BridgeError> {
         if self.conn.is_none() {
             return Err(not_connected());
         }
-        self.close_cursor();
-        // 必须在 close_cursor 之后：标志是一次查询（含它后续所有 `more`）的属性。
-        self.full_lob = full_lob;
         let sql = normalize(raw);
         if sql.is_empty() {
+            self.cursors.take(result_id);
             return Err(sql_err("空语句"));
         }
         let head = leading_keywords(&sql);
+        if is_query(&head, &sql) {
+            // 先检查再发 SQL；满额时不能执行完才报错，更不能悄悄关掉其它结果。
+            self.cursors.check_capacity(result_id)?;
+        }
+        self.cursors.take(result_id);
         let max_rows = max_rows.clamp(1, 10_000);
         let t0 = Instant::now();
 
@@ -818,7 +888,7 @@ impl Session {
         if stat_denied {
             self.stats_unavailable = true;
         }
-        let out = self.run(&sql, &head, max_rows, params);
+        let out = self.run(&sql, &head, max_rows, params, full_lob, result_id);
         // 收尾快照同样是一次网络往返，必须在读超时复位**之前**取：
         // 账号被卡住或字典视图被锁时，它和正文一样不能无限等。
         let after = if before.is_some() {
@@ -868,13 +938,16 @@ impl Session {
         head: &str,
         max_rows: usize,
         params: &[&dyn ToDbValue],
+        full_lob: bool,
+        result_id: Option<&str>,
     ) -> Result<Map<String, Value>, BridgeError> {
         let conn = self.conn.take().ok_or_else(not_connected)?;
-        let r = self.run_with(&conn, sql, head, max_rows, params);
+        let r = self.run_with(&conn, sql, head, max_rows, params, full_lob, result_id);
         self.conn = Some(conn);
         r
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_with(
         &mut self,
         conn: &Connection,
@@ -882,6 +955,8 @@ impl Session {
         head: &str,
         max_rows: usize,
         params: &[&dyn ToDbValue],
+        full_lob: bool,
+        result_id: Option<&str>,
     ) -> Result<Map<String, Value>, BridgeError> {
         let mut body = Map::new();
         if is_query(head, sql) {
@@ -898,6 +973,7 @@ impl Session {
                 // 响应流错位：查询是只读的，对齐之后重发一次没有副作用。
                 // 不重发的话这条连接上后面每条语句都会接着错位，只能重连。
                 Err(e) if is_desync(&e) => {
+                    self.cursors.clear();
                     if conn.resync().is_err() {
                         return Err(resync_failed());
                     }
@@ -911,14 +987,20 @@ impl Session {
                 .iter()
                 .map(|m| base_type(&type_label(m)))
                 .collect();
-            self.columns = columns.clone();
-            let (rows, has_more) = page(&mut cur, &types, max_rows, self.full_lob)?;
+            let (rows, has_more) = page(&mut cur, &types, max_rows, full_lob)?;
             body.insert("kind".into(), json!("rows"));
-            body.insert("columns".into(), Value::Array(columns));
+            body.insert("columns".into(), Value::Array(columns.clone()));
             body.insert("rows".into(), json!(rows));
             body.insert("hasMore".into(), json!(has_more));
             if has_more {
-                self.cursor = Some(cur);
+                self.cursors.put(
+                    result_id,
+                    ResultCursor {
+                        cursor: cur,
+                        columns,
+                        full_lob,
+                    },
+                );
             }
             // `select … for update` 也算开了事务（和 JVM 桥一致）
             if has_for_update(sql) {
@@ -932,6 +1014,7 @@ impl Session {
                 // 这里只做「把连接拉回可用」——否则接下来每条语句都报同一个错，用户
                 // 只能重连，还会以为数据没写进去。结果有没有生效必须由人去库里核对。
                 Err(e) if is_desync(&e) => {
+                    self.cursors.clear();
                     if conn.resync().is_err() {
                         return Err(resync_failed());
                     }
@@ -948,7 +1031,7 @@ impl Session {
             let n = res.rows_affected();
             // 隐式结果集（`dbms_sql.return_result`）：PL/SQL 块自己开的 ref cursor，
             // 服务端按 TTC 27 号消息下发，驱动侧已解析（vendor 补丁四）。
-            let sets = implicit_sets(&mut res, max_rows, self.full_lob)?;
+            let sets = implicit_sets(&mut res, max_rows, full_lob)?;
             if sets.is_empty() {
                 body.insert("kind".into(), json!("update"));
                 body.insert("updateCount".into(), json!(n));
@@ -973,17 +1056,17 @@ impl Session {
         Ok(body)
     }
 
-    fn more(&mut self, max_rows: usize, timeout: Duration) -> Result<Value, BridgeError> {
+    fn more(
+        &mut self,
+        max_rows: usize,
+        timeout: Duration,
+        result_id: Option<&str>,
+    ) -> Result<Value, BridgeError> {
         let max_rows = max_rows.clamp(1, 10_000);
         let t0 = Instant::now();
-        let types: Vec<String> = self
-            .columns
-            .iter()
-            .map(|c| base_type(c.get("type").and_then(Value::as_str).unwrap_or("")))
-            .collect();
-        // 取出游标再取数：失败时不能把坏游标留在 `self.cursor` 里 —— 继续在它上面
+        // 取出游标再取数：失败时不能把坏游标留在池里 —— 继续在它上面
         // `next()` 只会重复同一个报错，或者给出错位的行（TTC 那条坑尤其如此）。
-        let Some(mut cur) = self.cursor.take() else {
+        let Some(mut state) = self.cursors.take(result_id) else {
             // 独立错误码：前端据此把「重试加载」换成「重新执行」。
             // 上一次续取失败时游标已经被 take 走并关闭，再点多少次都是这个结果。
             return Err(BridgeError::new(
@@ -991,18 +1074,23 @@ impl Session {
                 "没有可以继续读取的结果（游标已关闭，重新执行一次）",
             ));
         };
+        let types: Vec<String> = state
+            .columns
+            .iter()
+            .map(|c| base_type(c.get("type").and_then(Value::as_str).unwrap_or("")))
+            .collect();
         // 「加载更多」以前没有超时：服务端黑洞时这里会一直持着会话锁，
         // 同一连接上的提交 / 断开全部排队，用户只能强杀进程。
         if let Some(conn) = self.conn.as_ref() {
             conn.set_call_timeout(Some(timeout)).map_err(drv_err)?;
         }
-        let next = page(&mut cur, &types, max_rows, self.full_lob);
+        let next = page(&mut state.cursor, &types, max_rows, state.full_lob);
         // 错位要**先对齐再清超时**：`resync()` 要读到服务端回的重置标记，
         // 没有读超时会一直等下去。
         let desync = matches!(&next, Err(e) if is_desync_msg(&e.message));
         let mut broken = false;
         if desync {
-            self.cursor = None;
+            self.cursors.clear();
             if let Some(conn) = self.conn.as_ref() {
                 broken = conn.resync().is_err();
             }
@@ -1028,7 +1116,7 @@ impl Session {
         };
         let (rows, has_more) = next;
         if has_more {
-            self.cursor = Some(cur);
+            self.cursors.put(result_id, state);
         }
         let count = rows.len();
         Ok(json!({
@@ -1983,8 +2071,8 @@ fn is_permanent_stat_error(e: &BridgeError) -> bool {
 /// 取满就停、不预读下一行：Oracle 游标不能回退，预读会把一行吞掉（JVM 桥踩过这个坑）。
 /// 把 `dbms_sql.return_result` 交回来的每个结果集取成 JSON（顺序与 `return_result` 一致）。
 ///
-/// **不接「加载更多」**：会话里只留一条分页游标（`Session.cursor`），多结果集时没法给每个
-/// 都留一条，而按「最后点过的那个」留会让用户以为另一条也能接着取。所以每个结果集一次取
+/// **不接「加载更多」**：一个 PL/SQL 执行可能返回多个隐式结果，当前协议没有为这些内部
+/// 结果分别分配 resultId。因此每个结果集一次取
 /// `max_rows` 行，取满就给 `hasMore: true`（前端提示调大「每次取」再执行），然后让游标
 /// 随 `Cursor` 一起 drop —— `Statement::new` 的 `return_on_drop` 会把它还给客户端，
 /// 否则会话游标会一路漏到 `open_cursors` 上限（探针 R11 验过）。
@@ -2681,6 +2769,79 @@ fn body_len(m: &Map<String, Value>) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn result_cursors_keep_named_and_legacy_results_independent() {
+        let mut cursors = ResultCursors::new();
+        cursors.put(None, ("legacy", false));
+        cursors.put(Some("a"), ("column-a", true));
+        cursors.put(Some("b"), ("column-b", false));
+        let first = cursors.take(Some("a")).unwrap();
+        assert_eq!(first, ("column-a", true));
+        // Fetch keeps the selected state only when it has more rows.
+        cursors.put(Some("a"), first);
+        assert_eq!(cursors.take(Some("b")), Some(("column-b", false)));
+        assert_eq!(cursors.take(None), Some(("legacy", false)));
+        assert_eq!(cursors.take(Some("a")), Some(("column-a", true)));
+        assert!(cursors.take(Some("b")).is_none());
+    }
+
+    #[test]
+    fn result_cursors_reject_overflow_without_evicting_existing_results() {
+        let mut cursors = ResultCursors::new();
+        for n in 0..MAX_RESULT_CURSORS {
+            let id = n.to_string();
+            cursors.check_capacity(Some(&id)).unwrap();
+            cursors.put(Some(&id), n);
+        }
+        assert_eq!(
+            cursors.check_capacity(Some("overflow")).unwrap_err().code,
+            "cursor-limit"
+        );
+        assert_eq!(cursors.named.len(), MAX_RESULT_CURSORS);
+        assert!(
+            cursors.check_capacity(Some("0")).is_ok(),
+            "同名替换不占新名额"
+        );
+        assert!(cursors.check_capacity(None).is_ok(), "保留旧调用的独立槽位");
+        assert_eq!(cursors.take(Some("0")), Some(0));
+        assert!(cursors.check_capacity(Some("overflow")).is_ok());
+        assert_eq!(cursors.take(Some("31")), Some(31));
+    }
+
+    #[test]
+    fn result_cursors_close_only_selected_and_clear_invalidates_all() {
+        let mut cursors = ResultCursors::new();
+        cursors.put(None, 0);
+        cursors.put(Some("a"), 1);
+        cursors.put(Some("b"), 2);
+        assert_eq!(cursors.take(Some("a")), Some(1));
+        assert!(cursors.take(Some("a")).is_none(), "关闭是幂等的");
+        assert_eq!(cursors.take(Some("b")), Some(2));
+        cursors.put(Some("b"), 2);
+        cursors.clear();
+        assert!(cursors.take(None).is_none());
+        assert!(cursors.take(Some("b")).is_none());
+    }
+
+    #[test]
+    fn named_more_is_cursor_closed_and_close_is_idempotent_without_connection() {
+        let e = RustEngine::new();
+        assert_eq!(
+            e.call("more", &["2", "gone"], Duration::from_secs(5))
+                .unwrap_err()
+                .code,
+            "cursor-closed"
+        );
+        assert_eq!(
+            e.call("closeResult", &["gone"], Duration::from_secs(5))
+                .unwrap()["closed"],
+            false
+        );
+        assert!(e
+            .call("closeResult", &[""], Duration::from_secs(5))
+            .is_err());
+    }
 
     /// 带 schema 的表名必须拆开：整串当 table_name 查会静默返回空，
     /// 上层据此判「没有主键」，SQL 控制台结果页就被锁成只读。

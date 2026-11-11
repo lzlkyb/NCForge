@@ -45,6 +45,47 @@ fn call(e: &RustEngine, cmd: &str, args: &[&str]) -> Value {
 
 #[test]
 #[ignore = "要连真实数据库"]
+fn named_results_fetch_independently_and_close_only_the_selected_result() {
+    let e = RustEngine::new();
+    call(&e, "connect", &[&url(), &user(), &pass(), "false"]);
+    let sql_a = "select level as a from dual connect by level <= 7";
+    let sql_b = "select level + 100 as b from dual connect by level <= 7";
+    assert_eq!(call(&e, "exec", &[sql_a, "2", "30"])["hasMore"], true);
+    assert_eq!(
+        call(&e, "exec", &[sql_a, "2", "30", "false", "a"])["hasMore"],
+        true
+    );
+    assert_eq!(
+        call(&e, "exec", &[sql_b, "2", "30", "false", "b"])["hasMore"],
+        true
+    );
+    let a = call(&e, "more", &["2", "a"]);
+    let b = call(&e, "more", &["2", "b"]);
+    assert_eq!(a["rows"][0][0].as_str(), Some("3"));
+    assert_eq!(b["rows"][0][0].as_str(), Some("103"));
+    assert_eq!(call(&e, "more", &["2"])["rows"][0][0].as_str(), Some("3"));
+    assert_eq!(call(&e, "closeResult", &["a"])["closed"], true);
+    assert_eq!(
+        e.call("more", &["2", "a"], Duration::from_secs(30))
+            .unwrap_err()
+            .code,
+        "cursor-closed"
+    );
+    assert_eq!(
+        call(&e, "more", &["2", "b"])["rows"][0][0].as_str(),
+        Some("105")
+    );
+    call(&e, "disconnect", &[]);
+    assert_eq!(
+        e.call("more", &["2", "b"], Duration::from_secs(30))
+            .unwrap_err()
+            .code,
+        "cursor-closed"
+    );
+}
+
+#[test]
+#[ignore = "要连真实数据库"]
 fn 表页大结果集留游标后重查同一_sql_不能打坏连接() {
     let e = RustEngine::new();
     call(&e, "connect", &[&url(), &user(), &pass(), "false"]);

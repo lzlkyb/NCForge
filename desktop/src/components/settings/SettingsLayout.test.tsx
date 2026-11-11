@@ -6,7 +6,7 @@ import { SettingsLayout } from "./SettingsLayout";
 import { SettingsRow } from "../ui/SettingsRow";
 import { ToggleRow } from "../ui/ToggleRow";
 import { SettingsGroup } from "./SettingsGroup";
-import { clearSettingsRequest, getSettingsRequest, requestSettingsSection } from "../../lib/settingsJump";
+import { clearSettingsRequest, getSettingsRequest, requestSettingsSection, requestSettingItem } from "../../lib/settingsJump";
 import { getSideOpen, setSideOpen } from "../../lib/layoutStore";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -51,6 +51,30 @@ const visiblePage = () => container.querySelector<HTMLElement>(".wb-settings-pag
 const results = () => [...container.querySelectorAll<HTMLButtonElement>(".wb-settings-result")];
 
 describe("设置中心搜索与导航", () => {
+  it("首次挂载前的旧分类请求按稳定设置 ID 定位新分类", async () => {
+    requestSettingItem("外观", "font");
+    await render();
+    expect(visiblePage()?.dataset.settingsSection).toBe("编辑器");
+    expect(document.activeElement?.id).toBe("font");
+  });
+  it("正文分类按钮可直接打开侧栏", async () => {
+    setSideOpen(false);
+    await render();
+    const button = [...container.querySelectorAll<HTMLButtonElement>(".wb-settings-commandbar button")].find(b => b.textContent === "分类")!;
+    await act(async () => button.click());
+    expect(getSideOpen()).toBe(true);
+  });
+  it("从设置项返回搜索保留关键词和结果滚动位置", async () => {
+    await render(); await search("字体");
+    const body = container.querySelector<HTMLElement>(".wb-settings-body")!;
+    body.scrollTop = 180;
+    await act(async () => results()[0].click());
+    const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "返回搜索结果")!;
+    await act(async () => button.click());
+    expect(container.querySelector<HTMLInputElement>('[aria-label="搜索设置"]')?.value).toBe("字体");
+    expect(results()[0]?.textContent).toContain("字体");
+    expect(body.scrollTop).toBe(180);
+  });
   it("窄窗口选分类自动收起侧栏，并将焦点移到正文标题", async () => {
     vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
     setSideOpen(true);
@@ -130,5 +154,20 @@ describe("设置中心搜索与导航", () => {
     expect(visiblePage()?.dataset.settingsSection).toBe("编辑器");
     expect(container.querySelector("#font input")).toBe(font);
     expect(font.value).toBe("Consolas");
+  });
+  it("宽窗切分类会清掉残留的跳转请求", async () => {
+    await render();
+    await act(async () => requestSettingsSection("编辑器"));
+    expect(getSettingsRequest()?.section).toBe("编辑器");
+    const about = [...container.querySelectorAll<HTMLButtonElement>(".wb-settings-nav button")].find(b => b.textContent === "关于")!;
+    await act(async () => about.click());
+    expect(getSettingsRequest()).toBeNull();
+  });
+  it("返回搜索结果后焦点回到搜索框", async () => {
+    await render(); await search("字体");
+    await act(async () => results()[0].click());
+    const back = [...container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "返回搜索结果")!;
+    await act(async () => back.click());
+    expect(document.activeElement).toBe(container.querySelector<HTMLInputElement>('[aria-label="搜索设置"]'));
   });
 });

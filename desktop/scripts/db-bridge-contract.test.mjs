@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 const root=fileURLToPath(new URL("../",import.meta.url));
@@ -20,12 +19,14 @@ test("Rust / JVM 桥共用同一条事务真源 SQL 与同一套 LOB 截断文�
  assert.match(java,/只取前 1M/);
  assert.match(front,/只取前 1M/);
 });
-test("JDBC read-only and bound parameter contracts without a real database",()=>{
- const dir=mkdtempSync(join(tmpdir(),"ncforge-db-contract-"));
+test("JDBC read-only, bound parameters and independent cursors without a real database",()=>{
+ const base=join(root,"src-tauri/target/test-tmp");
+ mkdirSync(base,{recursive:true});
+ const dir=mkdtempSync(join(base,"ncforge-db-contract-"));
  try {
-  const jar=join(root,"src-tauri/resources/ncdb/ncdb.jar");
-  execFileSync(jdk?join(jdk,"bin/javac.exe"):"javac",["-encoding","UTF-8","-cp",jar,"-d",dir,join(root,"src-tauri/db-bridge/NcDbBridgeContractTest.java")],{stdio:"pipe"});
-  const out=execFileSync(jdk?join(jdk,"bin/java.exe"):"java",["-cp",jar+(process.platform==="win32"?";":":")+dir,"NcDbBridgeContractTest"],{encoding:"utf8"});
+  // Compile the current source: the bundled jar may precede this change and would hide regressions.
+  execFileSync(jdk?join(jdk,"bin/javac.exe"):"javac",["-encoding","UTF-8","-d",dir,join(root,"src-tauri/db-bridge/NcDbBridge.java"),join(root,"src-tauri/db-bridge/NcDbBridgeContractTest.java")],{stdio:"pipe"});
+  const out=execFileSync(jdk?join(jdk,"bin/java.exe"):"java",["-cp",dir,"NcDbBridgeContractTest"],{encoding:"utf8"});
   assert.match(out,/JDBC contracts passed/);
- }finally {const absolute=resolve(dir);assert.ok(absolute.startsWith(resolve(tmpdir())+sep) && absolute.split(sep).at(-1).startsWith("ncforge-db-contract-"));rmSync(absolute,{recursive:true});}
+ }finally {const absolute=resolve(dir);assert.ok(absolute.startsWith(resolve(base)+sep) && absolute.split(sep).at(-1).startsWith("ncforge-db-contract-"));rmSync(absolute,{recursive:true});}
 });

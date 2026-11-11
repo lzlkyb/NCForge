@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 import { WorkspaceGlyph } from "./WorkspaceGlyph";
 import { Breadcrumb } from "./Breadcrumb";
+import { ChangedLinesBar } from "./ChangedLinesBar";
 import { NavigationHistoryMenu } from "./NavigationHistoryMenu";
 import { setEditorPrefs, useEditorPrefs } from "../../lib/editorPrefs";
 import type { TabMeta } from "../../lib/workspaceSession";
@@ -73,6 +74,7 @@ export function EditorNavRow({
       </button>
       <NavigationHistoryMenu root={root} onSelect={onJumpHistory} />
       <Breadcrumb root={root} active={active} />
+      <ChangedLinesBar path={active.virtual ? null : active.path} />
       <button type="button" className="wb-outline-btn wb-minimap-toggle wb-reading-secondary" aria-pressed={minimap && !heavy}
         disabled={heavy} title={heavy ? "大文件已暂停小地图" : "显示或隐藏小地图"}
         onClick={() => setEditorPrefs({ minimap: !minimap })}>小地图</button>

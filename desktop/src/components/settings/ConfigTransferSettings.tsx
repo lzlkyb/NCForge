@@ -3,7 +3,7 @@ import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Modal } from "../ui/Modal";
 import { SettingsRow } from "../ui/SettingsRow";
-import { Input } from "../ui/input";
+import { ImportPathPreview } from "./ImportPathPreview";
 import { InlineNotice } from "../ui/notice";
 import { toast } from "../ui/toast";
 import { trackOperation } from "../../lib/operations";
@@ -82,7 +82,7 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
       return;
     }
     const plan = buildImportPlan(parsed.data);
-    if (plan.pathItems.length === 0 && plan.connCount === 0 && !plan.hasHeap && !plan.hasSvnUser) {
+    if (plan.pathItems.length === 0 && plan.connCount === 0 && !plan.hasHeap && !plan.hasClientHeap && !plan.hasSvnUser && !plan.hasLang && plan.overrideCount === 0) {
       setFeedback({ kind: "import", error: "文件里没有可导入的设置" });
       toast("文件里没有可导入的设置", "error");
       return;
@@ -116,6 +116,7 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
 
   return (
     <Card className="settings-maintenance-section">
+      <div className="settings-maintenance-heading"><h2>迁移应用配置</h2><p>包含 NC 路径、工作区、连接与代码智能等支持的配置。外观、编辑器、SQL 排版、自定义任务与密码不包含在文件中。</p></div>
       <SettingsRow
         id="transfer-export"
         label="导出配置"
@@ -168,35 +169,29 @@ export function ConfigTransferSettings({ onChanged }: { onChanged?: () => void }
         {pending && (
           <div className="settings-import-preview">
             <h2 className="text-base font-medium">导入配置</h2>
+            <p className="settings-help">选择文件 → 核对变更 → 确认导入</p>
             <p className="text-xs text-muted-foreground">
               来自工作台{pending.plan.fromVersion ? ` v${pending.plan.fromVersion}` : "（版本未知）"}
               的配置文件。确认下面各项后导入；<b className="text-foreground">没有出现的设置保持本机原值</b>。
             </p>
 
-            {pending.plan.pathItems.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <div className="text-sm font-medium">路径设置（已按导入机器改写）</div>
-                {pending.plan.pathItems.map((item) => (
-                  <label key={item.key} htmlFor={`${pathId}-${item.key}`} className="flex flex-col gap-0.5">
-                    <span className="text-xs text-muted-foreground">
-                      {item.label} · {item.hint}
-                    </span>
-                    <Input
-                      id={`${pathId}-${item.key}`}
-                      disabled={importing}
-                      spellCheck={false}
-                      value={pending.edits[item.key] ?? ""}
-                      onChange={(e) =>
-                        setPending({
-                          ...pending,
-                          edits: { ...pending.edits, [item.key]: e.target.value },
-                        })
-                      }
-                    />
-                  </label>
-                ))}
+            {pending.plan.pathItems.length > 0 && <ImportPathPreview plan={pending.plan} edits={pending.edits}
+              disabled={importing} idPrefix={pathId} onEdit={(key, value) => setPending({ ...pending, edits: { ...pending.edits, [key]: value } })} />}
+            {pending.plan.hasHeap && <p className="settings-help">服务内存上限：{pending.data.config.server_heap_mb} MB · 下次启动服务生效</p>}
+            {pending.plan.hasClientHeap && <p className="settings-help">客户端内存上限：{pending.data.config.client_heap_mb} MB · 下次启动生效</p>}
+            {pending.plan.overrideCount > 0 && (
+              <div className="flex flex-col gap-1">
+                <div className="text-sm font-medium">工程关联覆盖（{pending.plan.overrideCount} 条，将替换本机列表）</div>
+                <ul className="flex flex-col gap-0.5 pl-4">
+                  {pending.plan.overrideTargets.map((t, i) => (
+                    <li key={i} className="text-xs text-muted-foreground">{t}</li>
+                  ))}
+                </ul>
+                <p className="text-xs text-muted-foreground">失效的工程路径会在解析时被跳过，界面里能看到当初配了什么。</p>
               </div>
             )}
+            {pending.plan.hasLang && <p className="settings-help">代码智能配置将按文件中的选项更新；内存上限在下次启动时生效。</p>}
+            {pending.plan.hasSvnUser && <p className="settings-help">SVN 用户：{pending.data.config.svn_user}</p>}
 
             {pending.plan.connCount > 0 && (
               <div className="flex flex-col gap-1">

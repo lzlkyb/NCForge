@@ -1,4 +1,5 @@
 import { Icon } from "../ui/icon";
+import type { Ref } from "react";
 import type { LogSearchState, SearchForm } from "../../lib/logSearch";
 
 /**
@@ -8,6 +9,7 @@ import type { LogSearchState, SearchForm } from "../../lib/logSearch";
  * 想找一段报错但规则还没覆盖时，检索是唯一入口，所以它不受归因过滤影响。
  */
 export function LogSearchBar({
+  inputRef,
   advanced = false,
   form,
   state,
@@ -17,6 +19,7 @@ export function LogSearchBar({
   onClear,
   onExport,
 }: {
+  inputRef?: Ref<HTMLInputElement>;
   advanced?: boolean;
   form: SearchForm;
   state: LogSearchState;
@@ -37,6 +40,7 @@ export function LogSearchBar({
       <div className="lg-search-row">
         <Icon name="search" size={13} className="lg-search-icon" />
         <input
+          ref={inputRef}
           className="lg-search-inp"
           value={form.query}
           placeholder="搜索报错、类名或请求编号"

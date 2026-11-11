@@ -1,5 +1,6 @@
 import { getModel, getText, markSaved } from "./editorStore";
 import { captureLocalHistory } from "./localHistory";
+import { notifyLocalSave } from "./localSaves";
 import { baseName, writeFile, type Eol, type TextEncoding } from "./workspace";
 
 /**
@@ -41,18 +42,19 @@ export interface SaveResult {
 }
 
 /**
- * 写盘前归档磁盘上的旧内容（本地历史）。
+ * 写盘前归档磁盘上的旧内容（本地历史），返回这一版的 id 供「本人保存」轮当基线。
  *
  * 必须 **await**：capture 读的是磁盘，晚于 writeFile 就只抓到刚写进去的新内容，
  * 这一版白抓——「改动前」才是本地历史最有价值的一版。
  * 但历史绝不能拖累保存：任何失败都吞掉，只 console.warn。
  */
-async function archiveBeforeSave(path: string): Promise<void> {
-  if (path.includes("://")) return; // jdt:// 等虚拟路径没有磁盘内容
+async function archiveBeforeSave(path: string): Promise<string | null> {
+  if (path.includes("://")) return null; // jdt:// 等虚拟路径没有磁盘内容
   try {
-    await captureLocalHistory(path);
+    return await captureLocalHistory(path);
   } catch (e) {
     console.warn("[local-history] pre-save capture failed:", path, e);
+    return null;
   }
 }
 
@@ -79,7 +81,7 @@ export async function saveOne(tab: SaveTarget, opts: SaveOptions = {}): Promise<
   // 转 UTF-8 时不写 BOM：BOM 是「原来是 UTF-8 带 BOM」这个事实的延续，
   // 转换后的文件不该凭空多出三个字节。
   const hasBom = opts.encodingOverride === "UTF-8" ? false : tab.hasBom;
-  await archiveBeforeSave(tab.path);
+  const archivedId = await archiveBeforeSave(tab.path);
   const mtimeMs = await writeFile({
     path: tab.path,
     text,
@@ -91,5 +93,8 @@ export async function saveOne(tab: SaveTarget, opts: SaveOptions = {}): Promise<
   // 先记账再返回：退出流程不看 React 状态，靠这里把 model 从「未保存」里摘出来，
   // 否则紧接着再查一遍还会认为它是脏的。
   if (getModel(tab.path) === model) markSaved(tab.path, version);
+  // 事件只在真的落盘后发：写盘失败（冲突 / UNENCODABLE）时文件没变，
+  // 发出去会多一条幻影轮，还会把已审角标连后端标记一起清掉。
+  notifyLocalSave(tab.path, archivedId ?? undefined);
   return { mtimeMs, encoding, hasBom, converted: !!opts.encodingOverride };
 }

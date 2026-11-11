@@ -58,8 +58,12 @@ export async function applyClean(path?: string): Promise<CleanReport[]> {
   return reports;
 }
 
-/** 重建类索引：不删产物，只删索引文件与构建清单；下次编译自动全量。 */
-export async function reindexBuild(): Promise<void> {
+/** 重建类索引：不删产物，只删索引文件与构建清单；下次编译自动全量。
+ *
+ * 返回 `false` 表示这次没做成（错误已经 toast 过）：设置页要靠它显示错误条与
+ * 「重试」—— 只弹一条会消失的 toast，用户回头只看到「成功」的统计面板。
+ */
+export async function reindexBuild(): Promise<boolean> {
   try {
     const msg = await trackOperation(
       {
@@ -76,8 +80,10 @@ export async function reindexBuild(): Promise<void> {
       },
     );
     toast(msg, "success");
+    return true;
   } catch (e) {
     errorToast("重建索引", e);
+    return false;
   }
 }
 
@@ -85,10 +91,10 @@ export async function reindexBuild(): Promise<void> {
 let cleanTmpBusy = false;
 
 /** 清理编译临时文件（只动配置目录下的 ecj 参数文件与原子写残留）。 */
-export async function cleanTmpBuild(): Promise<void> {
+export async function cleanTmpBuild(): Promise<boolean> {
   if (cleanTmpBusy) {
     toast("正在清理编译临时文件，请稍候", "info");
-    return;
+    return true;
   }
   cleanTmpBusy = true;
   try {
@@ -108,8 +114,10 @@ export async function cleanTmpBuild(): Promise<void> {
       : "没有需要清理的编译临时文件";
     setSession({ compileLog: (l) => [...l, text] });
     toast(text, "success");
+    return true;
   } catch (e) {
     errorToast("清理编译临时文件", e);
+    return false;
   } finally {
     cleanTmpBusy = false;
   }

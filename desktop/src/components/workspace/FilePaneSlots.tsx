@@ -25,6 +25,7 @@ import { setSidebarView, useSidebarView } from "../../lib/sidebarView";
 import { ServiceStatusButton } from "./ServiceStatusButton";
 import type { PanelTab } from "./BottomPanel";
 import type { LinkedProject } from "../../lib/linkedProjects";
+import { jarClassUri } from "../../lib/jarSymbolSearch";
 
 /**
  * 文件页四个槽位（树 / 标签条 / 编辑器 / 状态栏）的实际渲染。
@@ -118,14 +119,13 @@ export function FilePaneSlots({
 
   const sideView = useSidebarView();
   const splitTab = splitPath ? tabs.find((t) => t.path === splitPath) ?? null : null;
-  // NC 服务是底部面板的一个标签；它不依赖当前工具页，用户主动选了这个标签就留着面板
+  // NC 服务停靠在代码页；工具文档需要完整阅读区域，跨页返回时由导航恢复面板。
   const servicesPanel = panelTab === "svc";
   /**
-   * 底部面板要不要显示，与拆开之前同一条规则：设置页不要；打开文档页（补丁 /
-   * 数据库）时让位，除非当前是 NC 服务（它的日志就住在底部面板里）。
+   * 底部面板只在代码页显示，避免展开服务后切数据库或元数据遮住文档。
    * 展开态必须保留内容：两个面在展开时都由 CSS 让位，底部一旦为空就整块纯白（P1-18）。
    */
-  const wantPanel = panelOpen && activeTool !== "settings" && (!documentOpen || servicesPanel || panelExpanded);
+  const wantPanel = panelOpen && activeTool === "files" && (!documentOpen || servicesPanel || panelExpanded);
 
   const tree = (
     <TreeSvnProvider root={root}>
@@ -148,6 +148,10 @@ export function FilePaneSlots({
           <SearchTab
             projects={projects}
             onOpenFile={(path, line, column) => openPath(path, { line, column })}
+            onOpenJarClass={(jar, className) => session.openJdt(jarClassUri(jar, className), 1)}
+            onOpenSrcNote={(jar, className, line) =>
+              session.openJdt(jarClassUri(jar, className, true), line)
+            }
           />
         </>
       ) : (

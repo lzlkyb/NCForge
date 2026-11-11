@@ -56,7 +56,7 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
     if (txEpoch.action === "rollback") setStaleAfterRollback(true);
   }, [txEpoch.seq, txEpoch.action]);
   // Ctrl+S = 写回，与表页一致；没有待写回内容时不接管这个键。
-  useSaveShortcut(editData.save, !!editData.edit && editData.count > 0);
+  useSaveShortcut(editData.save, !!editData.edit && editData.count > 0, resultEditKey(tab.id, entry.id));
   /** 隐式结果集取到上限还有剩：不能续取，只能调大行数重跑。 */
   const truncated = !!set?.hasMore;
   /** 列名 → NC 中文名。查不到（非 NC 库 / 算出来的列）时表头照旧显示类型。 */
@@ -73,7 +73,7 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
       <div className="dbx-result-view" id={multiple ? `${prefix}-panel` : undefined} role={multiple ? "tabpanel" : undefined} tabIndex={multiple ? 0 : undefined} aria-labelledby={multiple ? resultTabId(prefix,String(at)) : undefined}>
       <ResultContextNotice tabId={tab.id} context={entry.context} />
       <ResultTable
-        key={at}
+        key={at} editOwner={resultEditKey(tab.id, entry.id)}
         settings={<QuerySettings tab={tab} />}
         columns={columns}
         rows={rows}
@@ -138,11 +138,11 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
           </>
         ) : (
           <>
-            <button type="button" className="dbx-lk" title="查看判定依据与下一步" onClick={() => setDiagOpen(true)}>
+            <button type="button" className="dbx-lk dbx-edit-status-action" title="查看判定依据与下一步" onClick={() => setDiagOpen(true)}>
               只读 · {editData.blocked}
             </button>
             {tab.connId && !sets.length && !editData.blocked.startsWith("正在") && (
-              <button type="button" className="dbx-lk" onClick={() => setPickTarget(true)}>
+              <button type="button" className="dbx-lk dbx-edit-target-action" onClick={() => setPickTarget(true)}>
                 指定基表/定位列…
               </button>
             )}

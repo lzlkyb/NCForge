@@ -3,7 +3,8 @@ import { useSyncExternalStore } from "react";
 const KEY = "shell_update_auto_download";
 const EVENT = "ncforge-update-download-preference";
 let fallback = true;
-const read = () => { try { return localStorage.getItem(KEY) !== "false"; } catch { return fallback; } };
+let sessionOnly = false;
+const read = () => { if (sessionOnly) return fallback; try { return localStorage.getItem(KEY) !== "false"; } catch { return fallback; } };
 function subscribe(notify: () => void) {
   window.addEventListener(EVENT, notify);
   window.addEventListener("storage", notify);
@@ -14,6 +15,9 @@ export function useUpdateDownloadPreference() {
 }
 export function setUpdateDownloadPreference(enabled: boolean) {
   fallback = enabled;
-  try { localStorage.setItem(KEY, String(enabled)); } catch { /* 本次运行仍保留用户选择。 */ }
+  let stored = true;
+  try { localStorage.setItem(KEY, String(enabled)); } catch { stored = false; }
+  sessionOnly = !stored;
   window.dispatchEvent(new Event(EVENT));
+  return stored;
 }

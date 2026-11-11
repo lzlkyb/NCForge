@@ -28,7 +28,7 @@ export function collectSettings(root: HTMLElement): SettingsSearchItem[] {
         label: clean(row.dataset.settingsLabel ?? row.querySelector(".t")?.textContent),
         description: clean(row.dataset.settingsDescription ?? row.querySelector(".d")?.textContent),
         keywords: row.dataset.settingsKeywords ?? "",
-        value: clean(row.dataset.settingValue ?? selected?.textContent ?? input?.value ?? control?.textContent),
+        value: clean(row.dataset.settingValue ?? selected?.textContent ?? input?.value),
       });
     });
   });
@@ -43,7 +43,9 @@ export function searchSettings(items: SettingsSearchItem[], query: string): Sett
     return terms.every((term) => fields.some((field) => field.toLowerCase().includes(term) || !!matchText(term, field)));
   });
   // 有具体项目时不重复展示同一分类，用户可直接到达所需控件。
-  return hits.filter((item) => item.id !== null || !hits.some((hit) => hit.id && hit.section === item.section));
+  const score = (item: SettingsSearchItem) => terms.reduce((sum, term) => sum + (item.label.toLowerCase() === term ? 8 : item.label.toLowerCase().includes(term) ? 4 : 0), item.id ? 1 : 0);
+  return hits.filter((item) => item.id !== null || !hits.some((hit) => hit.id && hit.section === item.section))
+    .sort((a, b) => score(b) - score(a));
 }
 
 export function revealSetting(root: HTMLElement, id: string): HTMLElement | null {

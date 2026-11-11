@@ -198,7 +198,7 @@ export function StatusContributions({ activeTool }: { activeTool: string }) {
               </button>
             )}>
               {(close) => db.pending.map((session) => (
-                <MenuItem key={session.slot ?? "primary"} label={`${session.label} · ${session.statements} 条未提交`} icon="alertTriangle" onClick={() => { close(); locateSession(session); }} />
+                <MenuItem key={session.slot ?? "primary"} label={`${session.label} · ${session.statements > 0 ? `${session.statements} 条未提交` : "有未提交事务"}`} icon="alertTriangle" onClick={() => { close(); locateSession(session); }} />
               ))}
             </Menu>
           )}

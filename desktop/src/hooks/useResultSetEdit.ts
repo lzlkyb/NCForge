@@ -6,6 +6,7 @@ import { confirmProdWrite } from "../lib/dbConfirm";
 import type { RowChange } from "../lib/dbOptimisticEdit";
 import { editableCellType } from "../lib/sqlEditable";
 import { rowsWithDrafts } from "../lib/tableRows";
+import { patchTab, setTx, setTxNotice, type SqlTab } from "../lib/dbStore";
 import { useRowDrafts } from "./useRowDrafts";
 import { useResultSetPlan } from "./useResultSetPlan";
 import { useTxEpoch } from "../lib/dbTxEpoch";
@@ -196,10 +197,20 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
     void (async () => {
       if (!(await confirmProdWrite(tabId, connId, changes.map(c => c.sql).join(";\n")))) return;
       setSaving(true);
+      // 新的写入让上一条「提交失败 / 结果待核对」的横幅过时：状态条重新从这次事实说起。
+      setTxNotice(connId, slot ?? null, tabId, undefined);
       let done = 0;
+      let auto = false;
       try {
         for (const change of changes) {
           const r = await dbApi.execBound(connId, change.sql, change.params, 1, 60, slot ?? null);
+          // 写回同样要记事务计数：不记的话库里已经有未提交的 DML，界面却还说「没有未提交事务」，
+          // 提交按钮是灰的，用户只能靠再执行一条语句把它「撞」出来（表页 useTableSave 一直这么做）。
+          if (r.tx) {
+            auto = r.tx.autoCommit;
+            if (slot) patchTab<SqlTab>(tabId, { tx: r.tx });
+            else setTx(connId, r.tx);
+          }
           if (r.kind !== "update" || r.updateCount !== 1) {
             // 三种没命中要说不同的话：INSERT 失败多半是必填列没填 / 唯一键冲突，
             // DELETE 没命中是「别人先删了」，UPDATE 没命中是原值被改过。
@@ -227,7 +238,9 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
             drafts.restoreRow(change.row);
           }
         }
-        if (done === changes.length) toast(`已写回 ${done} 条修改`, "success");
+        if (done === changes.length) toast(auto
+          ? `已写回 ${done} 条修改（自动提交）`
+          : `已写回 ${done} 条修改，尚未提交——用事务条提交或回滚`, "success");
       } catch (e) {
         toast(friendlyDbError(e), "error");
       } finally {

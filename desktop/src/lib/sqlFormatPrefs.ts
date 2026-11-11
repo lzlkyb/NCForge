@@ -1,4 +1,4 @@
-// SQL 格式化偏好：关键字大小写 / 缩进风格 / 宽度 / 方言覆盖 / 长表达式宽度 / 语句间空行。
+// SQL 格式化偏好：阅读布局与行宽 / 关键字大小写 / 缩进 / 方言 / 括号宽度 / 语句间空行。
 //
 // 与 `lib/editorPrefs` 同一套范式（localStorage + 事件订阅，`useSyncExternalStore`）：
 // 这些是**本机排版习惯**，不进 AppConfig 导入导出，换台机器不该被同事的偏好覆盖。
@@ -10,8 +10,12 @@ const KEY = "ncforge-sql-format-prefs";
 
 /** `auto` = 跟随连接 JDBC URL 推断方言；其余为手动覆盖。 */
 export type SqlDialect = "auto" | SqlLanguage;
+export type SqlLayout = "reading" | "expanded";
+export type SqlFormattingOptions = Partial<FormatOptions> & { layout?: SqlLayout; lineWidth?: number };
 
 export interface SqlFormatPrefs {
+  layout: SqlLayout;
+  lineWidth: number;
   keywordCase: KeywordCase;
   indentStyle: IndentStyle;
   tabWidth: number;
@@ -22,6 +26,8 @@ export interface SqlFormatPrefs {
 }
 
 export const DEFAULT_SQL_FORMAT: SqlFormatPrefs = {
+  layout: "reading",
+  lineWidth: 120,
   keywordCase: "preserve",
   indentStyle: "standard",
   tabWidth: 2,
@@ -61,6 +67,8 @@ function integer(value: unknown, fallback: number, min: number, max: number): nu
 /** 逐字段归一化：老版本/手改的 JSON 缺字段或越界时回落默认，而不是整体失效。 */
 function normalize(raw: Partial<SqlFormatPrefs>): SqlFormatPrefs {
   return {
+    layout: oneOf(raw.layout, ["reading", "expanded"], DEFAULT_SQL_FORMAT.layout),
+    lineWidth: integer(raw.lineWidth, DEFAULT_SQL_FORMAT.lineWidth, 60, 240),
     keywordCase: oneOf(raw.keywordCase, KEYWORD_CASES, DEFAULT_SQL_FORMAT.keywordCase),
     indentStyle: oneOf(raw.indentStyle, INDENT_STYLES, DEFAULT_SQL_FORMAT.indentStyle),
     tabWidth: integer(raw.tabWidth, DEFAULT_SQL_FORMAT.tabWidth, 1, 8),
@@ -117,9 +125,11 @@ export function useSqlFormatPrefs(): SqlFormatPrefs {
   return useSyncExternalStore(subscribe, getSqlFormatPrefs, getSqlFormatPrefs);
 }
 
-/** 传给 sql-formatter 的选项子集；方言由调用方按连接推断后单独传入。 */
-export function formatOptionsOf(prefs: SqlFormatPrefs): Partial<FormatOptions> {
+/** 统一 formatSql 入口的选项；布局参数由入口处理，方言按连接推断后单独传入。 */
+export function formatOptionsOf(prefs: SqlFormatPrefs): SqlFormattingOptions {
   return {
+    layout: prefs.layout,
+    lineWidth: prefs.lineWidth,
     keywordCase: prefs.keywordCase,
     indentStyle: prefs.indentStyle,
     tabWidth: prefs.tabWidth,

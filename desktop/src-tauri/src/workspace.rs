@@ -287,6 +287,45 @@ pub fn create_entry(parent: &Path, name: &str, kind: NewEntryKind) -> Result<Pat
     Ok(target)
 }
 
+/// 同 [`create_entry`]，但新建的是普通类名的 `.java` 时写入骨架（包名、类/接口声明，换行符跟随同目录）。
+/// 其它文件仍是空文件。骨架只含 ASCII，不会用错编码。
+pub fn create_entry_templated(
+    parent: &Path,
+    name: &str,
+    kind: NewEntryKind,
+) -> Result<PathBuf, String> {
+    let target = create_entry(parent, name, kind)?;
+    if kind == NewEntryKind::File {
+        if let Some(text) = crate::file_template::skeleton_for_new_file(parent, name) {
+            if let Err(e) = std::fs::write(&target, text) {
+                // 写不进去就把刚建的空文件收回，不留半成品
+                let _ = std::fs::remove_file(&target);
+                return Err(format!("写入文件骨架失败：{e}"));
+            }
+        }
+    }
+    Ok(target)
+}
+
+/// 「新建 Java 类型」：按种类写入骨架（名字不带 `.java`），返回新文件路径。
+/// 预览里报错的（名字非法、已有同名）一律拒绝；写失败时收回刚建的空文件。
+pub fn create_java_type(
+    parent: &Path,
+    name: &str,
+    kind: crate::file_template::JavaKind,
+) -> Result<PathBuf, String> {
+    let pv = crate::file_template::preview(parent, name, kind);
+    if let Some(e) = pv.error {
+        return Err(e);
+    }
+    let target = create_entry(parent, &pv.file_name, NewEntryKind::File)?;
+    if let Err(e) = std::fs::write(&target, pv.text) {
+        let _ = std::fs::remove_file(&target);
+        return Err(format!("写入文件失败：{e}"));
+    }
+    Ok(target)
+}
+
 /// 两个路径是否指向同一个实体。Windows 上只改大小写时新旧路径是同一文件，需要特判。
 fn is_same_path(a: &Path, b: &Path) -> bool {
     match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
@@ -428,6 +467,77 @@ fn detect_eol(bytes: &[u8]) -> Eol {
     }
 }
 
+/// 按 UTF-8 严格解码**成功**时，进一步分辨「真 UTF-8」与「GBK 恰好能按 UTF-8 解开」。
+///
+/// 🔴 为什么不能解成功就信（2026-11-10 用户实景：GBK 文件里的中文注释搜不到）：
+/// GBK 尾字节覆盖 0x40-0xFE，其中 0x80-0xBF 正是 UTF-8 的续字节区间。于是
+/// **尾字节落在 0x80-0xBF 的 GBK 汉字，其「首字节 + 尾字节」恰好构成合法 UTF-8
+/// 双字节序列**。实测（CP936，逐个核过字节）落在巧合区的词：
+/// - 凭证 `C6BE D6A4` → 解成 `U+01BE U+05A4`（拉丁扩展 + 希伯来）
+/// - 状态 `D7B4 CCAC` → 解成 `U+05F4 U+032C`
+/// - 摘要 `D5AA D2AA` → 解成 `U+056A U+04AA`
+/// - 同 `CDAC` → 解成 `U+036C`
+///
+/// 这些词按 UTF-8 解一个汉字都不剩，整个文件被判成 UTF-8 ⇒ 中文注释变乱码，
+/// 搜索页面搜中文永远 0 命中（而 `客户档案` `BFCD BBA7 B5B5 B0B8`、`接口` `BDD3 BFDA`
+/// 这类含首字节 <0xC2 的字的文件反而会 UTF-8 解失败、正确落到 GBK 分支——
+/// 所以 bug 表现成「有的中文能搜、有的不能」）。
+///
+/// 判据是**前导字节与续字节的数量比**，不做第二次解码（搜索路径每文件都调，要零成本）：
+/// - 真 UTF-8 中文：每字 1 前导 + 2 续 ⇒ 比例约 2.0；
+/// - GBK 巧合：每「字」1 前导 + 1 续 ⇒ 比例约 1.0。
+///
+/// 阈值取 1.5，两种分布离它都很远。另有一条护栏：出现 4 字节序列（emoji、
+/// CJK 扩展 B）直接判 UTF-8——GBK 巧合几乎拼不出合法 4 字节。
+///
+/// 实测（CP936，2026-11-10，64 个 NC 高频词逐个验字节）：只有**状态、凭证、摘要、同**
+/// 四个落在巧合区，约 6%。所以 bug 表现是间歇性的——一条注释里只要混进一个「接口」
+/// 这类含 UTF-8 非法字节的词，整个文件又恢复正常。**其余高频词都不巧**（审批
+/// `C9F3 C5FA` 的 `C5`、合同 `BACF CDAC` 的 `BA`、新增 `D0C2 D4F6` 的 `D4`
+/// 都不是合法 UTF-8 续字节），别把这个名单凭记忆扩写。
+/// 纯 ASCII 与带 BOM 的文件在调用方就已分流，不进入这里。
+///
+/// 已知局限（明示，不静默）：非 ASCII 内容几乎全是 2 字节字符（拉丁扩展为主）的
+/// UTF-8 文件仍会被误判成 GBK——如 `café` 的 é（1 前导 + 1 续，与 GBK 单字同形）。
+/// 取舍理由：NC 源码里「// 同」「// 是」这类**单字 GBK 注释**远多于西欧字符。
+/// 实测代价（CP936，2026-11-10）：`café` 的 UTF-8 字节 `C3 A9` 恰好是合法 GBK 双字节、
+/// 解成「茅」，于是显示成 `caf茅`——**用户看得到一个错字，但存盘字节原样写回、
+/// 不丢数据**（`lossless` 仍为 true，因为重编码结果与磁盘一致）。也就是说这个误判
+/// 的代价是「显示错、可切编码补救」，不是静默损坏。一旦文件里出现三字节的中文，
+/// 比值立刻回到 ~2.0，café 也会被正确认回 UTF-8。
+fn utf8_multibyte_shape_says_utf8(body: &[u8]) -> bool {
+    let (mut lead, mut cont, mut has_four_byte) = (0usize, 0usize, false);
+    let mut i = 0usize;
+    while i < body.len() {
+        let b = body[i];
+        if b < 0x80 {
+            i += 1;
+            continue;
+        }
+        // `from_utf8` 已保证这里必是合法前导，匹配不到就是不可能分支
+        let need = match b {
+            0xC2..=0xDF => 1,
+            0xE0..=0xEF => 2,
+            0xF0..=0xF4 => {
+                has_four_byte = true;
+                3
+            }
+            _ => {
+                lead += 1;
+                i += 1;
+                continue;
+            }
+        };
+        lead += 1;
+        cont += need;
+        i += 1 + need;
+    }
+    if has_four_byte {
+        return true;
+    }
+    lead > 0 && cont * 2 > lead * 3 // cont/lead > 1.5
+}
+
 /// 解码：返回（文本，编码，是否带 UTF-8 BOM，解码时是否遇到无法映射的字节）。
 fn decode(bytes: &[u8]) -> (String, TextEncoding, bool, bool) {
     let (body, bom) = match bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
@@ -435,7 +545,15 @@ fn decode(bytes: &[u8]) -> (String, TextEncoding, bool, bool) {
         None => (bytes, false),
     };
     match std::str::from_utf8(body) {
-        Ok(s) if bom || !s.is_ascii() => (s.to_owned(), TextEncoding::Utf8, bom, false),
+        Ok(s) if bom || !s.is_ascii() => {
+            // UTF-8 解得开，还可能是 GBK 的字节巧合（见 `utf8_multibyte_shape_says_utf8`）
+            if bom || utf8_multibyte_shape_says_utf8(body) {
+                (s.to_owned(), TextEncoding::Utf8, bom, false)
+            } else {
+                let (cow, _, had_errors) = GBK.decode(body);
+                (cow.into_owned(), TextEncoding::Gbk, false, had_errors)
+            }
+        }
         Ok(s) => (s.to_owned(), TextEncoding::Gbk, false, false),
         Err(_) => {
             let (cow, _, had_errors) = GBK.decode(body);
@@ -639,6 +757,120 @@ mod tests {
         assert!(c.lossless);
     }
 
+    /// 🔴 2026-11-10 用户实景回归：GBK 文件里「凭证」搜不到。
+    ///
+    /// 「凭证」的 GBK 字节 `C6BE D6A4` 恰好是合法 UTF-8 双字节序列（解成
+    /// `U+01BE U+05A4`），旧判据「UTF-8 解得开就信」把整个文件认成 UTF-8，
+    /// 中文全变拉丁/希伯来字符。判据改成前导/续字节比例后必须认成 GBK。
+    ///
+    /// 词表是 CP936 实测的巧合区高频词（64 个词逐个验字节，只有这四个巧）：
+    /// 凭证 `C6BE D6A4`、状态 `D7B4 CCAC`、摘要 `D5AA D2AA`、同 `CDAC`。
+    /// 自证断言留在循环里——将来谁改了判据或词表，先炸的是「这些词到底还巧不巧」，
+    /// 而不是让用例悄悄退化成一个永远走 GBK 分支的哑测试。
+    #[test]
+    fn gbk_字节巧合合法_utf8_时仍认_gbk() {
+        for word in ["凭证", "状态", "摘要", "同"] {
+            let src = format!("// {word}\nclass X {{}}\n");
+            let (gbk, _, _) = GBK.encode(&src);
+            assert!(
+                std::str::from_utf8(&gbk).is_ok(),
+                "{word} 的 GBK 字节必须恰好是合法 UTF-8（否则本用例没覆盖到巧合场景）"
+            );
+            assert_eq!(
+                detect_encoding(&gbk),
+                TextEncoding::Gbk,
+                "{word} 被误判成 UTF-8"
+            );
+            assert_eq!(decode_lossy(&gbk), src, "{word} 解出来的文本不对");
+        }
+    }
+
+    /// 反向护栏：真 UTF-8 高频词（1 前导 + 2 续）不能被误判成 GBK。
+    /// 词表与上一个用例相同——同样的词，GBK 字节认 GBK、UTF-8 字节认 UTF-8。
+    #[test]
+    fn 真_utf8_高频词不会被误判成_gbk() {
+        for word in ["凭证", "状态", "摘要", "同"] {
+            let src = format!("// {word}\nclass X {{}}\n");
+            assert_eq!(
+                detect_encoding(src.as_bytes()),
+                TextEncoding::Utf8,
+                "{word} 被误判成 GBK"
+            );
+            assert_eq!(decode_lossy(src.as_bytes()), src);
+        }
+    }
+
+    /// 单个汉字：GBK 是 1 前导 + 1 续（认 GBK），UTF-8 是 1 前导 + 2 续（认 UTF-8）。
+    /// 单字注释（`// 同`）在 NC 源码里很常见，不能因为「只有一个字」就瞎猜。
+    #[test]
+    fn 单个汉字_按前导续字节比区分() {
+        let (gbk, _, _) = GBK.encode("同");
+        assert_eq!(detect_encoding(&gbk), TextEncoding::Gbk);
+        assert_eq!(detect_encoding("同".as_bytes()), TextEncoding::Utf8);
+    }
+
+    /// 已知局限的固化：`café` 的 é（1 前导 + 1 续）与 GBK 单字同形，按 GBK 解释。
+    /// 实测（CP936）字节 `C3 A9` 恰好是合法 GBK 双字节、解成「茅」，于是显示成
+    /// `caf茅`——用户看得到一个错字；但重编码回 GBK 字节不变，`lossless` 仍为 true、
+    /// 存盘不丢数据。这条用例钉住这两件事，谁改判据先得面对「显示错字但别改坏文件」。
+    #[test]
+    fn 西欧字符按_gbk_解释_显示错字但存盘不坏() {
+        let d = tmpdir("cafe");
+        let p = d.join("h.java");
+        let raw = "caf\u{e9} // note\n".as_bytes().to_vec();
+        std::fs::write(&p, &raw).unwrap();
+        let c = read_text_file(&p).unwrap();
+        assert_eq!(c.encoding, TextEncoding::Gbk);
+        assert!(
+            c.text.contains('茅'),
+            "应按 GBK 解成错字让用户看出来，实际: {:?}",
+            c.text
+        );
+        assert!(
+            !c.text.contains('\u{e9}'),
+            "不能把 é 原样解出来——那就没误判了"
+        );
+        assert!(c.lossless, "误判可以，但存盘必须字节级安全");
+        write_text_file(&p, &c.text, c.encoding, c.has_bom, c.eol, Some(c.mtime_ms)).unwrap();
+        assert_eq!(
+            std::fs::read(&p).unwrap(),
+            raw,
+            "误判成 GBK 也不能把文件写坏"
+        );
+    }
+
+    /// emoji（4 字节序列）直接判 UTF-8：GBK 巧合拼不出合法 4 字节序列。
+    #[test]
+    fn emoji_文件保持_utf8() {
+        let s = "// \u{1F600} 凭证\n".as_bytes();
+        assert_eq!(detect_encoding(s), TextEncoding::Utf8);
+        assert_eq!(decode_lossy(s), "// \u{1F600} 凭证\n");
+    }
+
+    /// 中文一旦多起来，比值回到 ~2.0，混在西文里的 café 也会被认回 UTF-8。
+    #[test]
+    fn 中文为主时西欧字符不再拖偏判据() {
+        let s = "// café 凭证状态\nclass X {}\n".as_bytes();
+        assert_eq!(detect_encoding(s), TextEncoding::Utf8);
+        assert_eq!(decode_lossy(s), "// café 凭证状态\nclass X {}\n");
+    }
+
+    /// 纯巧合词文件的完整读写往返：读对、存回去字节不变（编辑器保存依赖这条）。
+    #[test]
+    fn gbk_纯巧合词_文件读写往返() {
+        let d = tmpdir("gbk-coincide");
+        let p = d.join("p.java");
+        let (gbk, _, _) = GBK.encode("// 凭证\r\nclass Pz {}\r\n");
+        std::fs::write(&p, &gbk).unwrap();
+        let c = read_text_file(&p).unwrap();
+        assert_eq!(c.encoding, TextEncoding::Gbk);
+        assert_eq!(c.eol, Eol::Crlf);
+        assert!(c.lossless, "按 GBK 解释后必须能无损写回");
+        assert_eq!(c.text, "// 凭证\nclass Pz {}\n");
+        write_text_file(&p, &c.text, c.encoding, c.has_bom, c.eol, Some(c.mtime_ms)).unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), gbk.as_ref());
+    }
+
     #[test]
     fn pure_ascii_defaults_to_gbk_and_bom_is_kept() {
         let d = tmpdir("ascii");
@@ -832,6 +1064,48 @@ mod tests {
         ] {
             assert!(validate_entry_name(ok).is_ok(), "应通过：{ok:?}");
         }
+    }
+
+    #[test]
+    fn 新建_java_类型按种类写入且拒绝同名() {
+        use crate::file_template::JavaKind;
+        let base = crate::test_support::tmp("create-java-type");
+        let dir = base.join("gl/src/client/nc/ui/gl");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = create_java_type(&dir, "GlJob", JavaKind::BgPlugin).unwrap();
+        let text = std::fs::read_to_string(&p).unwrap();
+        assert!(text.starts_with("package nc.ui.gl;"));
+        assert!(text.contains("class GlJob implements IBackgroundWorkPlugin"));
+        assert!(create_java_type(&dir, "GlJob", JavaKind::Class).is_err());
+        assert!(create_java_type(&dir, "bad name", JavaKind::Class).is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn 模板新建_java_写骨架_其它文件仍是空文件() {
+        let base = crate::test_support::tmp("create-templated");
+        let dir = base.join("gl/src/private/nc/bs/gl");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Old.java"), b"class Old {\r\n}\r\n").unwrap();
+
+        let java = create_entry_templated(&dir, "NewBp.java", NewEntryKind::File).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&java).unwrap(),
+            "package nc.bs.gl;\r\n\r\npublic class NewBp {\r\n\r\n}\r\n"
+        );
+        let itf = create_entry_templated(&dir, "IFoo.java", NewEntryKind::File).unwrap();
+        assert!(std::fs::read_to_string(&itf)
+            .unwrap()
+            .contains("public interface IFoo {"));
+        // 非 Java / 小写名：空文件
+        let xml = create_entry_templated(&dir, "a.xml", NewEntryKind::File).unwrap();
+        assert_eq!(std::fs::metadata(&xml).unwrap().len(), 0);
+        let low = create_entry_templated(&dir, "util.java", NewEntryKind::File).unwrap();
+        assert_eq!(std::fs::metadata(&low).unwrap().len(), 0);
+        // 同名仍然拒绝，且不会覆盖已有内容
+        assert!(create_entry_templated(&dir, "NewBp.java", NewEntryKind::File).is_err());
+        assert!(std::fs::read_to_string(&java).unwrap().contains("NewBp"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

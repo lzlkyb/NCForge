@@ -4,6 +4,7 @@ import { organizeImportsCommand } from "./javaActions";
 import { runCallHierarchy } from "./callHierarchy";
 import { runTypeHierarchy } from "./typeHierarchy";
 import { registerRefactorKeys } from "./refactor";
+import { registerExtractParameterKey } from "./refactorParameter";
 import { toggleBookmark } from "./bookmarks";
 import { setSession } from "./workspaceSession";
 import { toggleBreakpointHere } from "./debugSession";
@@ -41,6 +42,8 @@ export function registerEditorBindings(editor: Editor, saveNow: () => void) {
   );
   // 提取类重构（IDEA 同键：Ctrl+Alt+M/V/F/C）。键位与命令面板共用 lib/refactor 里的清单
   registerRefactorKeys(editor);
+  // 提取参数（受限版，IDEA 同键 Ctrl+Alt+P）
+  registerExtractParameterKey(editor);
   // F11 = 加/去书签（IDEA 同键）；Shift+F11 = 打开书签面板
   bind(monaco.KeyCode.F11, () => {
     const model = editor.getModel();

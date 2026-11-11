@@ -1,5 +1,6 @@
 import { useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref, type RefObject } from "react";
 import type { CellPos, ResultGridApi } from "../components/db/ResultGrid";
+import { allResultSelection } from "../lib/gridSelection";
 
 type GridFocus={kind:"header";c:number;menu?:boolean}|{kind:"cell";pos:CellPos;menu?:boolean};
 
@@ -14,6 +15,11 @@ export function useResultGridNavigation({boxRef,sel,visible,order,reveal,onSel,o
   const [headerCol,setHeaderCol]=useState(sel?.c ?? visible[0]);
   const [pendingFocus,setPendingFocus]=useState<GridFocus|null>(null);
   const selIndex=sel ? order.indexOf(sel.r) : -1;
+  const selectAll = () => {
+    const selection = allResultSelection(order, visible);
+    if (!selection) return;
+    onSel(selection.anchor); onSel(selection.end, true); boxRef.current?.focus({ preventScroll: true });
+  };
   const focusCell=(pos:CellPos,menu=false)=>{
     const index=order.indexOf(pos.r);
     if(index<0 || !visible.includes(pos.c)) return;
@@ -31,7 +37,7 @@ export function useResultGridNavigation({boxRef,sel,visible,order,reveal,onSel,o
   useLayoutEffect(()=>{
     if(!pendingFocus) return;
     const target=pendingFocus.kind==="header" ? headerRefs.current.get(pendingFocus.c)
-      : boxRef.current?.querySelector<HTMLElement>(`#dbx-cell-${pendingFocus.pos.r}-${pendingFocus.pos.c}`);
+      : boxRef.current?.querySelector<HTMLElement>(`[id$="-${pendingFocus.pos.r}-${pendingFocus.pos.c}"]`);
     setPendingFocus(null);
     if(!target) return;
     target.scrollIntoView?.({block:"nearest",inline:"nearest"});
@@ -57,6 +63,11 @@ export function useResultGridNavigation({boxRef,sel,visible,order,reveal,onSel,o
     return rowH>0 && h>0 ? Math.max(1,Math.floor(h/rowH)-1) : 20;
   };
   const onKey=(e:KeyboardEvent)=>{
+    // 输入框仍保留原生全选文本，网格和表头的 Ctrl+A 只选择这份结果。
+    if (!editing && !e.altKey && !e.shiftKey && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a" &&
+      !(e.target instanceof HTMLElement && e.target.closest('input,textarea,[contenteditable="true"]'))) {
+      e.preventDefault(); e.stopPropagation(); selectAll(); return;
+    }
     if(editing || e.target!==e.currentTarget) return;
     // Home/End（首列/末列）、Ctrl+Home/End（首行/末行）：表格的通用肌肉记忆
     if((e.key==="Home" || e.key==="End") && !e.altKey) {
@@ -95,5 +106,5 @@ export function useResultGridNavigation({boxRef,sel,visible,order,reveal,onSel,o
     } else if((e.key==="ContextMenu" || e.key==="F10" && e.shiftKey) && onHeaderMenu) {e.preventDefault();focusHeader(c,true);}
     else if((e.key==="Enter" || e.key===" ") && e.target===headerRefs.current.get(c)) {e.preventDefault();onSort(c);}
   };
-  return {headerRefs,headerCol,setHeaderCol,focusHeader,onHeaderKey,onKey};
+  return {headerRefs,headerCol,setHeaderCol,focusHeader,onHeaderKey,onKey,selectAll};
 }

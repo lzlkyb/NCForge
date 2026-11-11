@@ -27,9 +27,12 @@ import { captureResultContext, connectionKey, type ResultExecutionContext } from
 import { sqlUsageScope } from "./sqlUsage";
 import { sqlJoinHistoryGeneration } from "./sqlJoinHistory";
 import { clearSqlBusinessCache } from "./sqlBusiness";
+import { bumpTxEpoch } from "./dbTxEpoch";
+import { txControlOf } from "./sqlTxControl";
 import { cloneCompareSnapshot, type CompareTab } from "./dbCompareState";
 import { rowsBytes } from "./dbResultBudget";
 import type { ResultSnapshot } from "./dbResultTools";
+import { closeResultCursor, closeTabResultCursors, hasResultCursor, invalidateResultCursors, ownsResultCursor, registerResultCursor, resetResultCursors } from "./dbResultCursors";
 export type { CompareTab } from "./dbCompareState";
 
 /**
@@ -71,7 +74,12 @@ export interface ConnRuntime {
   caps?: EngineCaps;
 }
 
-export type TxNotice = { kind: "success" | "error" | "lost"; text: string; verify?: boolean };
+/**
+ * 事务条上的常驻提示：只放「还没处理完的事」（失败 / 结果待核对）。
+ * 提交成功、核对通过之类**不是状态**，用一次性通知说一声就收——常驻条一挂，
+ * 用户回头只看到一个勾，会以为还有一笔事务没提交。
+ */
+export type TxNotice = { kind: "error" | "lost"; text: string; verify?: boolean };
 
 export interface ResultEntry {
   context?: ResultExecutionContext;
@@ -85,6 +93,7 @@ export interface ResultEntry {
   columns: ColumnMeta[];
   rows: Cell[][];
   hasMore: boolean;
+  cursorFallback?: boolean;
   /** 多个结果集（`dbms_sql.return_result`）。>1 时结果区给一排小标签。 */
   sets?: ResultSet[];
   updateCount: number;
@@ -146,6 +155,9 @@ export interface SqlTab {
   results: ResultEntry[];
   /** 当前结果标签：结果 id / `plan` / `output`。 */
   view: string | null;
+  resultLayout?: "tabs" | "dual";
+  resultPair?: [string, string];
+  batch?: SqlBatch;
   output: OutputLine[];
   plan: { sql: string; rows: PlanRow[]; error?: string } | null;
   /** 正在跑的那一趟。`undefined` = 空闲。见 {@link RunToken}。 */
@@ -160,6 +172,14 @@ export interface SqlTab {
   /** 这个标签所在会话的事务状态。primary 标签不用它（统一看连接的 `rt.tx`）。 */
   tx?: TxInfo;
   txNotice?: TxNotice;
+}
+
+export interface SqlBatch {
+  id: number;
+  statements: { index: number; sql: string; startLine: number }[];
+  completed: number;
+  activeIndex: number | null;
+  status: "running" | "done" | "stopped" | "failed";
 }
 
 export type TableSub = "data" | "struct" | "idx" | "ddl" | "source";
@@ -468,6 +488,7 @@ export function setConns(conns: DbConn[]) {
  * 用例读到（表现为"莫名多出一条事务"）。`setConns([])` 只清连接表，清不掉 rt。
  */
 export function __resetDbForTest() {
+  resetResultCursors();
   colCache.clear();
   colCacheBytes.clear();
   metadataFlights.clear();
@@ -651,6 +672,7 @@ export async function changeSchema(id: string, schema: string): Promise<string> 
   );
   forgetColumns(id);
   setRt(id, { currentSchema: r.schema });
+  invalidateResultCursors(id);
   void loadMeta(id);
   // 已打开的表页按打开时的 schema 固化（查询/写回都带前缀），不会跟着切过去；
   // 但用户需要知道这一点，否则会以为旧页签也切了。
@@ -802,6 +824,7 @@ export function closeTab(id: string, remember = true): string | null {
   if (i < 0) return null;
   const tabs = state.tabs.filter((t) => t.id !== id);
   const closing = state.tabs[i];
+  if (closing.kind === "sql") void closeTabResultCursors(id);
   const origin = closing.kind === "compare" ? [closing.after.originTabId,closing.before.originTabId].find(source => tabs.some(t => t.id === source)) : undefined;
   const active = state.active === id ? origin ?? (tabs[i] ?? tabs[i - 1])?.id ?? null : state.active;
   const closed = remember ? closedStackAfter(closing, i) : null;
@@ -901,7 +924,14 @@ export function patchTab<T extends DbTabItem>(id: string, patch: Partial<T>) {
   set({ tabs: state.tabs.map((t) => {
     if (t.id !== id) return t;
     const next = { ...t, ...patch } as DbTabItem;
-    if (next.kind === "sql" && "results" in patch) next.results = fitResults(next.results, TOTAL_RESULT_BYTES - retainedResultBytes(state.tabs, id));
+    if (next.kind === "sql" && "results" in patch) {
+      next.results = fitResults(next.results, TOTAL_RESULT_BYTES - retainedResultBytes(state.tabs, id));
+      if (t.kind === "sql") for (const result of t.results) {
+        if (!next.results.some(r => r.id === result.id)) void closeResultCursor(result.id);
+      }
+      for (const result of next.results) if (result.moreError === RESULT_LIMIT_NOTICE) void closeResultCursor(result.id);
+    }
+    if (t.kind === "sql" && next.kind === "sql" && next.connId !== t.connId) void closeTabResultCursors(id);
     return next;
   }) });
 }
@@ -960,10 +990,12 @@ export function summaryOf(r: ResultEntry): string {
  */
 const cursorOwner = new Map<string, string>();
 const cursorKey = (connId: string, slot: string | null | undefined) => `${connId}#${slot ?? ""}`;
-export const claimCursor = (connId: string, slot: string | null | undefined, owner: string) =>
-  void cursorOwner.set(cursorKey(connId, slot), owner);
+export const claimCursor = (connId: string, slot: string | null | undefined, owner: string) => {
+  cursorOwner.set(cursorKey(connId, slot), owner);
+  if (owner === "readonly-toggle" || owner === "reconnect") invalidateResultCursors(connId, slot ?? null);
+};
 export const ownsCursor = (connId: string | null, slot: string | null | undefined, owner: string) =>
-  !!connId && cursorOwner.get(cursorKey(connId, slot)) === owner;
+  !!connId && (ownsResultCursor(owner, connId, slot) || cursorOwner.get(cursorKey(connId, slot)) === owner);
 
 /**
  * 标签第一次执行时申请一条独立会话（A0）。返回 `null` = 还是走 primary。
@@ -1000,6 +1032,7 @@ export async function ensureSlot(tabId: string, connId: string): Promise<string 
 export async function releaseSlot(connId: string | null, slot: string | null | undefined): Promise<void> {
   if (!connId || !slot) return;
   cursorOwner.delete(cursorKey(connId, slot));
+  invalidateResultCursors(connId, slot);
   try {
     await dbApi.slotRelease(connId, slot);
   } catch {
@@ -1014,6 +1047,7 @@ export async function releaseSlot(connId: string | null, slot: string | null | u
  * 报「会话已回收」——而用户明明刚连上。
  */
 export function clearSlots(connId: string): void {
+  invalidateResultCursors(connId);
   // 结果一并清掉是有意的：断开 / 删除连接后，槽与游标在后端已经收掉，
   // 留着旧结果会让「加载更多」「转移到表」打到不存在的会话上（报 ORA-01000 那一类），
   // 而把它们标成「已完整」又是对导出数据的谎报。宁可让用户重跑一次。
@@ -1028,6 +1062,8 @@ export function clearSlots(connId: string): void {
           results: [],
           plan: null,
           view: null,
+          batch: undefined,
+          resultPair: undefined,
         }
       : t,
   );
@@ -1049,29 +1085,53 @@ export async function execOne(tabId: string, sql: string, index: number, context
   // 声明在 try 外面：catch 里要判断这条错误属于哪条会话（primary 还是槽）——
   // 只有 primary 断了才清连接级的事务计数。
   let slot: string | null = null;
+  const sameRequest = () => { const current = sqlTabOf(tabId); return current?.connId === connId && current.run?.id === tab.run?.id; };
   try {
     slot = await ensureSlot(tabId, connId);
-    claimCursor(connId, slot, base.id);
+    if (!sameRequest()) return { ...base, kind: "error", error: "来源标签或执行已切换" };
+    registerResultCursor(base.id, connId, slot, tabId);
     let r;
     try {
-      r = await dbApi.exec(connId, sql, tab.maxRows, tab.timeoutSec, slot, collectStats);
+      r = await dbApi.execResult(connId, sql, tab.maxRows, tab.timeoutSec, slot, collectStats, base.id);
     } catch (e) {
       // 槽被空闲回收（10 分钟没动过）：重开一条再试一次，别让用户点一次就看见红字
       if (slot && parseDbError(e).code === "slot-gone") {
+        invalidateResultCursors(connId, slot);
         patchTab<SqlTab>(tabId, { slot: null, tx: undefined });
         slot = await ensureSlot(tabId, connId);
-        claimCursor(connId, slot, base.id);
-        r = await dbApi.exec(connId, sql, tab.maxRows, tab.timeoutSec, slot, collectStats);
+        if (!sameRequest()) return { ...base, kind: "error", error: "来源标签或执行已切换" };
+        registerResultCursor(base.id, connId, slot, tabId);
+        r = await dbApi.execResult(connId, sql, tab.maxRows, tab.timeoutSec, slot, collectStats, base.id);
       } else {
         throw e;
       }
     }
+    if (!sameRequest()) {
+      // 关闭标签会提前作废本地身份；仍用原会话收回迟到的服务器结果。
+      try { await dbApi.closeResult(connId, slot, base.id); } catch { /* 会话已回收 */ }
+      return { ...base, kind: "error", error: "来源标签或执行已切换" };
+    }
+    if (r.reconnected) {
+      invalidateResultCursors(connId, slot);
+      registerResultCursor(base.id, connId, slot, tabId);
+    }
     // 槽各自独立事务：primary 的结果写回连接，槽的写回标签
     if (slot) patchTab<SqlTab>(tabId, { tx: r.tx });
     else setTx(connId, r.tx);
+    // 手写 COMMIT / ROLLBACK 结束了事务：后端的计数已经归零，但结果页要知道
+    // 「这条写入是在提交前还是提交后执行的」，否则会一直挂着「尚未提交」。
+    // DDL 的隐式提交不进纪元：它没有「用户刚提交了一次」这层意思，
+    // 让表页跟着重读（有未保存改动时还会弹确认）反而是噪音，只把那条结果标成已提交。
+    const control = txControlOf(sql);
+    if (control === "commit" || control === "rollback") {
+      bumpTxEpoch(connId, slot, control);
+      // 用户自己提交/回滚过，之前「提交结果待核对」的悬案就有答案了，横幅该收起来。
+      setTxNotice(connId, slot, tabId, undefined);
+    }
     entry = r.kind === "rows"
-      ? { ...base, completedAt:Date.now(), kind: "rows", columns: r.columns, rows: r.rows, hasMore: r.hasMore, ms: r.ms, sets: r.sets, stats: r.stats }
-      : { ...base, kind: "update", updateCount: r.updateCount, autoCommit: r.fallback ? undefined : r.tx.autoCommit, ms: r.ms, stats: r.stats };
+      ? { ...base, completedAt:Date.now(), kind: "rows", columns: r.columns, rows: r.rows, hasMore: r.hasMore, cursorFallback: !!r.fallback, ms: r.ms, sets: r.sets, stats: r.stats }
+      : { ...base, completedAt:Date.now(), kind: "update", updateCount: r.updateCount,
+          autoCommit: r.fallback ? undefined : control === "implicit" ? true : r.tx.autoCommit, ms: r.ms, stats: r.stats };
     if (r.output.length) appendOutput(tabId, r.output.map((text) => ({ at: Date.now(), text, tone: "dbms" as const })));
     // P0 能力路由：这条语句其实是在 JVM 桥的临时会话上跑的。必须说出来——
     // 那条会话不在下面的事务条管辖范围里，用户若以为「回滚能撤掉它」会出事。
@@ -1102,6 +1162,8 @@ export async function execOne(tabId: string, sql: string, index: number, context
       }]);
     }
   } catch (e) {
+    await closeResultCursor(base.id);
+    if (!sameRequest()) return { ...base, kind: "error", error: "来源标签或执行已切换" };
     const { code, message } = parseDbError(e);
     // 连接已经不可用：把状态置回 error，下一次执行才会真正走重连（弹口令 / 建新会话）。
     // 不置的话 `ensureConnected` 看见 connected 就直接发，用户连点几次都是同一句失败。
@@ -1112,6 +1174,7 @@ export async function execOne(tabId: string, sql: string, index: number, context
     entry = { ...base, kind: "error", error: friendlyDbError(e), errorCode: code, cancelled:dbCancelled(e), ms: Date.now() - t0 };
   }
   entry = fitResult(entry, TOTAL_RESULT_BYTES - retainedResultBytes(state.tabs));
+  if (!entry.hasMore || entry.sets?.length || entry.moreError === RESULT_LIMIT_NOTICE) await closeResultCursor(base.id);
   const clientMs = Date.now() - t0;
   appendOutput(tabId, [{
     at: Date.now(),
@@ -1124,11 +1187,11 @@ export async function execOne(tabId: string, sql: string, index: number, context
   return entry;
 }
 
-/** 「加载下 N 行」：只对最后一次查询有效（每个会话一个游标）。 */
+/** 按结果身份续取，各 SELECT 的游标可以交错读取。 */
 export async function loadMore(tabId: string, resultId: string): Promise<void> {
   const tab = sqlTabOf(tabId);
   const res = tab?.results.find((r) => r.id === resultId);
-  if (!tab?.connId || !res || res.moreError && !res.moreRetryable || res.loadingMore || isRunning(tab)) return;
+  if (!tab?.connId || !res || !res.hasMore || res.moreError && !res.moreRetryable || res.loadingMore || isRunning(tab)) return;
   const upd = (p: Partial<ResultEntry>) => {
     const cur = sqlTabOf(tabId);
     if (cur) patchTab<SqlTab>(tabId, { results: cur.results.map((r) => (r.id === resultId ? { ...r, ...p } : r)) });
@@ -1141,7 +1204,7 @@ export async function loadMore(tabId: string, resultId: string): Promise<void> {
   }
   upd({ loadingMore: true, moreError: undefined, moreRetryable: undefined });
   try {
-    const m = await trackOperation({...dbTaskSpec(`more:${tabId}:${resultId}`,"加载后续结果",tab.connId,tab.slot ? `独立会话 ${tab.slot}` : "主会话",connOf(tab.connId)?.name,tabId),cancel:()=>dbApi.cancel(tab.connId!,tab.slot),cancelled:dbCancelled},()=>dbApi.more(tab.connId!, tab.maxRows, tab.slot));
+    const m = await trackOperation({...dbTaskSpec(`more:${tabId}:${resultId}`,"加载后续结果",tab.connId,tab.slot ? `独立会话 ${tab.slot}` : "主会话",connOf(tab.connId)?.name,tabId),cancel:()=>dbApi.cancel(tab.connId!,tab.slot),cancelled:dbCancelled},()=>hasResultCursor(resultId) ? dbApi.moreResult(tab.connId!, tab.maxRows, tab.slot, resultId, res.cursorFallback) : dbApi.more(tab.connId!, tab.maxRows, tab.slot));
     const cur = sqlTabOf(tabId)?.results.find((r) => r.id === resultId);
     // The tab may have closed, switched connection or re-executed during the request.
     if (!cur || sqlTabOf(tabId)?.connId !== tab.connId || !ownsCursor(tab.connId, tab.slot, resultId)) {
@@ -1156,10 +1219,12 @@ export async function loadMore(tabId: string, resultId: string): Promise<void> {
     }
     const appended = appendResultRows(cur.rows, m.rows, TOTAL_RESULT_BYTES - retainedResultBytes(state.tabs) + resultBytes(cur));
     upd({ rows: appended.rows, hasMore: m.hasMore || appended.limited, moreError: appended.limited ? RESULT_LIMIT_NOTICE : undefined, moreRetryable: false, loadingMore: false });
+    if (!m.hasMore || appended.limited) await closeResultCursor(resultId);
   } catch (e) {
     const code = parseDbError(e).code;
     // `cursor-closed`：Rust 引擎在续取失败时已经关掉游标，重试只会得到同一个错误。
     const expired = ["session-lost", "slot-gone", "cursor-closed"].includes(code);
+    if (expired) await closeResultCursor(resultId);
     const message = code === "cursor-closed"
       ? "游标已关闭，已加载的行仍可查看。请重新执行查询。"
       : expired ? "旧结果游标已失效，已加载的行仍可查看。请重新执行查询。" : friendlyDbError(e);

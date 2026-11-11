@@ -58,6 +58,16 @@ describe("组合键的规范化", () => {
 });
 
 describe("自定义键位覆盖默认行为", () => {
+  it("恢复失败不清空生效缓存，成功重试后才恢复默认", () => {
+    setBindingOverride("layout.panel", "ctrl+alt+j");
+    const remove = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => { throw new Error("denied"); });
+    expect(clearAllBindings()).toBe(false);
+    expect(getBindingOverride("layout.panel")).toBe("ctrl+alt+j");
+    expect(layoutKeyOf(ev("j", { altKey: true }))).toBe("panel");
+    remove.mockRestore();
+    expect(clearAllBindings()).toBe(true);
+    expect(getBindingOverride("layout.panel")).toBeUndefined();
+  });
   it("快速导航：改后的键生效，原默认键让出来", () => {
     expect(paletteModeOf(ev("P", { shiftKey: true }), "eclipse")).toBe("cmd");
     expect(setBindingOverride("palette.cmd", "ctrl+alt+k")).toEqual({ ok: true, chord: "ctrl+alt+k" });

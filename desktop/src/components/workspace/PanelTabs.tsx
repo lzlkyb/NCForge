@@ -4,8 +4,8 @@ import { PRIMARY_PANELS, SECONDARY_PANELS, revealWorkbenchPanel, togglePinnedPan
 import { Menu, MenuItem } from "../ui/Menu";
 import { Icon } from "../ui/icon";
 
-export const PANEL_NAMES: Record<PanelTab, string> = { problems: "问题", build: "编译输出", svc: "NC 服务", calls: "调用层级", types: "类型层级", todo: "待办", bookmarks: "书签", debug: "调试" };
-const ORDER: PanelTab[] = ["problems", "build", "svc", "calls", "types", "todo", "bookmarks", "debug"];
+export const PANEL_NAMES: Record<PanelTab, string> = { problems: "问题", changes: "改动", build: "编译输出", svc: "NC 服务", calls: "调用层级", types: "类型层级", todo: "待办", bookmarks: "书签", debug: "调试" };
+const ORDER: PanelTab[] = ["problems", "changes", "build", "svc", "calls", "types", "todo", "bookmarks", "debug"];
 export function PanelTabs({ tab, onTab, errors, paused }: { tab: PanelTab; onTab: (tab: PanelTab) => void; errors: number; paused: boolean }) {
   const layout = useWorkbenchLayout();
   const visible = ORDER.filter(p => PRIMARY_PANELS.includes(p) || layout.pinned.includes(p) || p === tab);

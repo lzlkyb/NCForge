@@ -203,7 +203,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           recents={getRecentRoots()}
           onOpen={applyRoot}
           output={panel}
-          servicesPanel={panelOpen && panelTab === "svc"}
+          servicesPanel={activeTool === "files" && panelOpen && panelTab === "svc"}
         />
         {services}
       </>

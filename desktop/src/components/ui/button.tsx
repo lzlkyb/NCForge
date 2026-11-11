@@ -47,6 +47,8 @@ export function Button({
       ref={buttonRef}
       aria-busy={isLoading || undefined}
       data-loading={isLoading || undefined}
+      data-variant={variant}
+      data-size={size}
       style={{ minWidth: isLoading ? widthRef.current : undefined, ...style }}
       className={`${base} relative overflow-hidden ${variants[variant]} ${sizes[size]} ${className}`}
       disabled={disabled || isLoading}

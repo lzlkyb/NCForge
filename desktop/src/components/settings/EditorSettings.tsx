@@ -13,7 +13,9 @@ import { ToggleRow } from "../ui/ToggleRow";
 import { SettingsField, integerRange } from "./SettingsField";
 import { EditorPreview } from "./EditorPreview";
 import { SettingsGroup } from "./SettingsGroup";
-import { useEditorPrefs, setEditorPrefs, type EditorPrefs } from "../../lib/editorPrefs";
+import { useEditorPrefs, setEditorPrefs, DEFAULT_PREFS, type EditorPrefs } from "../../lib/editorPrefs";
+import { requestSettingItem } from "../../lib/settingsJump";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { TEMPLATE_PREFIXES } from "../../lib/liveTemplates";
 
 const onOff = (v: boolean) => (v ? "开" : "关");
@@ -22,9 +24,16 @@ export function EditorSettings() {
   const p = useEditorPrefs();
   const fontFamilyId = useId();
   const [feedback, setFeedback] = useState<{ key: string; error?: string }>();
+  const [drafts, setDrafts] = useState<Partial<EditorPrefs>>({});
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetEpoch, setResetEpoch] = useState(0);
+  const preview = (patch: Partial<EditorPrefs>) => setDrafts(prev => Object.fromEntries(
+    Object.entries({ ...prev, ...patch }).filter(([key, value]) => p[key as keyof EditorPrefs] !== value),
+  ));
   const save = (patch: Partial<EditorPrefs>) => {
     if (!setEditorPrefs(patch)) throw new Error("已在本次会话生效，但无法保存到本机。可重试保存，重启前请勿丢弃当前设置。");
     setFeedback(undefined);
+    setDrafts(prev => Object.fromEntries(Object.entries(prev).filter(([key]) => !(key in patch))));
   };
   const apply = (patch: Partial<EditorPrefs>, key: string) => {
     try { save(patch); setFeedback({ key }); }
@@ -36,12 +45,12 @@ export function EditorSettings() {
   });
   return (
     <Card className="flex flex-col gap-1 p-2">
-      <EditorPreview prefs={p} />
       {feedback?.error && <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span>当前编辑器设置尚未保存到本机</span>
         <Button variant="ghost" size="sm" onClick={() => apply({}, feedback.key)}>重试保存</Button>
       </div>}
       <SettingsGroup
+        key={`display-${resetEpoch}`}
         title="显示与排版"
         defaultOpen
         summary={`${p.fontSize}px · Tab ${p.tabSize} ${
@@ -51,23 +60,26 @@ export function EditorSettings() {
         <SettingsRow
           id="editor-size" keywords={["字号", "font size"]} valueText={`${p.fontSize}px`}
           label="字号"
-          sub="只影响代码编辑器（不影响界面其它文字）"
+          sub="影响代码与 SQL 编辑器、SQL 查看器的文字大小"
           control={<SettingsField value={p.fontSize} type="number" min={9} max={28} unit="px"
             ariaLabel="代码字号" validate={integerRange(9, 28, "px")}
+            onDraft={value => preview({ fontSize: Number(value) })}
             onSave={value => save({ fontSize: Number(value) })} />}
         />
         <SettingsRow
-          id="editor-font" keywords={["字体", "font", "Consolas", "Cascadia"]}
+          id="editor-font" keywords={["字体", "font", "JetBrains", "Consolas", "Cascadia"]}
           valueText={p.fontFamily.trim() || "默认字体"}
           label="字体"
           controlId={fontFamilyId}
-          sub="留空用默认（Cascadia Mono → Consolas）"
+          sub="留空使用内置 JetBrains Mono，中文使用 Noto Sans SC"
           control={
             <SettingsField
               id={fontFamilyId}
               ariaLabel="代码字体"
               value={p.fontFamily}
               placeholder="留空用默认"
+              suggestions={["JetBrains Mono", "Cascadia Mono", "Consolas", "Courier New"]}
+              onDraft={value => preview({ fontFamily: value })}
               validate={value => value.length > 200 ? "字体名称请控制在 200 个字符以内" : undefined}
               onSave={value => save({ fontFamily: value })}
             />
@@ -82,6 +94,7 @@ export function EditorSettings() {
             <span className="flex flex-wrap items-center gap-2">
               <SettingsField value={p.tabSize} type="number" min={1} max={12} unit="列"
                 ariaLabel="缩进宽度" validate={integerRange(1, 12, "列")}
+                onDraft={value => preview({ tabSize: Number(value) })}
                 onSave={value => save({ tabSize: Number(value) })} />
               <label className="flex items-center gap-1 whitespace-nowrap text-sm">
                 <input
@@ -105,6 +118,8 @@ export function EditorSettings() {
           {...toggleFeedback("wrap")}
         />
       </SettingsGroup>
+
+      <EditorPreview prefs={{ ...p, ...drafts }} draft={Object.entries(drafts).some(([key, value]) => p[key as keyof EditorPrefs] !== value)} />
 
       <SettingsGroup
         title="编辑器辅助"
@@ -140,6 +155,7 @@ export function EditorSettings() {
       </SettingsGroup>
 
       <SettingsGroup
+        key={`save-${resetEpoch}`}
         title="保存"
         summary={`${
           p.autoSave ? `自动保存 ${p.autoSaveDelayMs}ms` : "自动保存关"
@@ -177,7 +193,7 @@ export function EditorSettings() {
         <ToggleRow
           id="editor-format" keywords={["保存时格式化", "format on save"]}
           label="保存时格式化"
-          sub="保存前整理 Java 格式"
+          sub="保存前整理 Java 格式，可能重排文件内容"
           info="Ctrl+S 与自动保存前先格式化。语言服务未就绪时直接保存原文，不阻挡保存。"
           last
           checked={p.formatOnSave}
@@ -186,6 +202,25 @@ export function EditorSettings() {
         />
       </SettingsGroup>
 
+      <SettingsGroup
+        key={`refactor-${resetEpoch}`}
+        title="重构"
+        summary={`提取参数范围：${p.extractParamWide ? "宽档" : "窄档"}`}
+      >
+        <ToggleRow
+          id="editor-extract-param-wide" keywords={["提取参数", "extract parameter", "重构", "宽档"]}
+          label="提取参数放宽到字段引用"
+          sub="默认只允许字面量和 static final 常量；开启后也允许引用字段等不依赖方法局部变量的表达式"
+          info="提取参数（Ctrl+Alt+P）把方法体里的表达式变成新参数，并在当前文件的每个调用点补上同一段表达式。窄档几乎不会改错；宽档放行字段引用时，调用点所在对象的字段可能和原处不是同一个，请改完自查。无论哪档，含方法调用、new、赋值、局部变量或参数的表达式都不会处理。"
+          last
+          checked={p.extractParamWide}
+          onChange={(v) => apply({ extractParamWide: v }, "extract-param")}
+          {...toggleFeedback("extract-param")}
+        />
+      </SettingsGroup>
+      <SettingsRow id="editor-compile-link" label="保存后自动编译" sub="编译及热替换选项统一在“编译与热替换”管理。"
+        control={<Button size="sm" variant="ghost" onClick={() => requestSettingItem("编译与热替换", "task-auto-compile")}>调整自动编译</Button>} />
+
       <SettingsRow
         id="editor-templates" keywords={["代码模板", "template", "sout", "psvm", "fori"]}
         label="代码模板"
@@ -193,6 +228,11 @@ export function EditorSettings() {
         sub={`敲这些前缀按 Tab/回车展开：${TEMPLATE_PREFIXES.slice(0, 8).join(" ")} …`}
         info="模板是编辑器自带能力，不依赖代码智能服务：sout、souf、serr、psvm、fori、forr、iter、ifn、inn、tryc、tryf、th、swi、strnull 等。"
       />
+      <div className="settings-form-actions"><Button size="sm" variant="ghost" onClick={() => setResetOpen(true)}>恢复编辑器默认设置</Button></div>
+      <ConfirmDialog open={resetOpen} title="恢复编辑器默认设置？" description="恢复字体、排版、阅读辅助与保存选项，并清除当前预览草稿。"
+        confirmLabel="恢复默认" onCancel={() => setResetOpen(false)} onConfirm={() => {
+          apply(DEFAULT_PREFS, "reset"); setDrafts({}); setResetEpoch(n => n + 1); setResetOpen(false);
+        }} />
     </Card>
   );
 }

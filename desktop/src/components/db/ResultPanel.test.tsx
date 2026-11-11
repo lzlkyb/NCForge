@@ -155,7 +155,7 @@ describe("ResultPanel 多结果集", () => {
     await act(async () => root.render(<ResultPanel tab={{ ...tabWith(e), view: "removed" }} height={300} />));
     const active = host.querySelector('[role="tablist"][aria-label="查询结果"] [aria-selected="true"]')!;
     const panel = document.getElementById(active.getAttribute("aria-controls")!)!;
-    expect(active.textContent).toContain("数据 1");
+    expect(active.textContent).toContain("查询 1");
     expect(panel.getAttribute("aria-labelledby")).toBe(active.id);
   });
 });
@@ -208,6 +208,30 @@ describe("ResultPanel 列中文名", () => {
  *    作者 display 会覆盖 UA 的 [hidden]，漏了这条所有保活视图会叠着渲染。
  */
 describe("结果视图保活不破坏滚动链", () => {
+  it("任意两份结果双栏展示，筛选与全选独立，切输出后返回保留视图", async () => {
+    const a = entry({ id: "a", index: 1, sql: "select value from dual", ...set("VALUE", [["one"], ["two"]]) });
+    const b = entry({ id: "b", index: 2, sql: "select value from dual", ...set("VALUE", [["middle"]]) });
+    const c = entry({ id: "c", index: 3, sql: "select value from dual", ...set("VALUE", [["three"]]) });
+    const tab: SqlTab = { ...tabWith(a), results: [a, b, c], view: "a", resultLayout: "dual", resultPair: ["a", "c"] };
+    await act(async () => root.render(<ResultPanel tab={tab} height={400} />));
+    const first = host.querySelector<HTMLElement>('[aria-label="查询 1 结果"]')!;
+    const third = host.querySelector<HTMLElement>('[aria-label="查询 3 结果"]')!;
+    expect(host.querySelector('[aria-label="查询 2 结果"]')).toBeNull();
+    await act(async () => first.querySelector<HTMLButtonElement>('[aria-label="筛选结果"]')!.click());
+    const input = first.querySelector<HTMLInputElement>('[aria-label="在结果中筛选"]')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "one"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    await act(async () => first.querySelector<HTMLButtonElement>('[aria-label="全选结果"]')!.click());
+    expect(first.querySelectorAll('[role="gridcell"][aria-selected="true"]')).toHaveLength(1);
+    expect(third.querySelectorAll('[role="gridcell"][aria-selected="true"]')).toHaveLength(0);
+    const ids = [...host.querySelectorAll('[role="gridcell"][id]')].map(cell => cell.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    await act(async () => root.render(<ResultPanel tab={{ ...tab, view: "output" }} height={400} />));
+    expect(first.hidden).toBe(true); expect(third.hidden).toBe(true);
+    await act(async () => root.render(<ResultPanel tab={tab} height={400} />));
+    expect(host.querySelector('[aria-label="查询 1 结果"]')).toBe(first);
+    expect(input.value).toBe("one"); expect(first.hidden).toBe(false);
+    expect(first.querySelectorAll('[role="gridcell"][aria-selected="true"]')).toHaveLength(1);
+  });
   it("保活容器带类名、用 hidden 隐藏，且没有内联尺寸", async () => {
     const a = entry({ id: "r1", index: 1 });
     const b = entry({ id: "r2", index: 2, sql: "select 1 from dual" });
@@ -220,7 +244,7 @@ describe("结果视图保活不破坏滚动链", () => {
     const keeps = [...host.querySelectorAll<HTMLElement>(".dbx-result-keep")];
     expect(keeps).toHaveLength(2);
     expect(keeps.map((k) => k.hasAttribute("hidden"))).toEqual([true, false]);
-    for (const k of keeps) expect(k.getAttribute("style")).toBeNull();
+    for (const k of keeps) { expect(k.style.height).toBe(""); expect(k.style.display).toBe(""); }
   });
 
   it("样式表里 .dbx-result-keep 接住高度链，并覆盖 hidden 的显示", () => {

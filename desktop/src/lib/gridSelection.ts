@@ -1,5 +1,10 @@
 import type { selectionBounds } from "./gridViewport";
+import type { Selection } from "./dbResultTools";
 type Bounds = ReturnType<typeof selectionBounds>;
+export function allResultSelection(order: number[], visible: number[]): Selection | null {
+  if (!order.length || !visible.length) return null;
+  return { anchor: { r: order[0], c: visible[0] }, end: { r: order[order.length - 1], c: visible[visible.length - 1] } };
+}
 
 /** Borders belong to logical row/column indices, never the rendered viewport edge. */
 export function gridSelectionCell(bounds: Bounds, row: number, column: number, active: boolean) {

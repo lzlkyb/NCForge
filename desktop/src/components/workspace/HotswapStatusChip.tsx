@@ -16,7 +16,7 @@ import {
   type HotswapStatus,
 } from "../../lib/hotswap";
 import { requestServiceRestart } from "../../lib/servicePanel";
-import { requestSettingsSection } from "../../lib/settingsJump";
+import { requestSettingItem } from "../../lib/settingsJump";
 import { openLinkedDialog } from "../../lib/linkedDialog";
 import { errorToast } from "../../lib/errorToast";
 import { Menu } from "../ui/Menu";
@@ -99,12 +99,12 @@ export function HotswapStatusChip() {
   };
   const goSettings = (close: () => void) => {
     close();
-    requestSettingsSection("任务");
+    requestSettingItem("编译与热替换", "build-hotswap");
     window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "settings" }));
   };
-  const restart = (close: () => void) => {
+  const restart = (close: () => void, target: "middleware" | "client" = "middleware") => {
     close();
-    requestServiceRestart();
+    requestServiceRestart(target);
   };
 
   if (view.tone === "busy") {
@@ -177,7 +177,7 @@ export function HotswapStatusChip() {
               report={last}
               breakpoints={event?.report.atMs === last.atMs ? event.breakpoints : null}
               onSettings={() => goSettings(close)}
-              onRestart={() => restart(close)}
+              onRestart={() => restart(close, last.target === "client" ? "client" : "middleware")}
               onLinked={() => { close(); openLinkedDialog("chain"); }}
             />
           ) : (
@@ -283,8 +283,8 @@ function ReportCard({ report, breakpoints, onSettings, onRestart, onLinked }: { 
           <button type="button" className="sv-btn sv-btn-ghost" onClick={partial ? onLinked : onSettings}>{partial ? "工程关联" : "设置"}</button>
         )}
         {/* 遮挡（partial）不给重启：重启后 classpath 顺序不变，跑的还是那份同名类。
-            「重启服务」只管中间件，客户端的失败不给这个按钮（按了重启的是另一个 JVM） */}
-        {failed && !client && <button type="button" className="sv-btn sv-btn-primary" onClick={onRestart}>重启服务</button>}
+            重启的是失败的那个 JVM：客户端失败就重启客户端 */}
+        {failed && <button type="button" className="sv-btn sv-btn-primary" onClick={onRestart}>{client ? "重启客户端" : "重启服务"}</button>}
       </div>
     </>
   );

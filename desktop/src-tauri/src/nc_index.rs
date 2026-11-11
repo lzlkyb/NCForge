@@ -6,7 +6,8 @@
 //! classpath 顺序规则（从 Eclipse 的实际 classpath 里归纳；M0 验证过顺序会影响字节一致性，
 //! 同名类先出现的优先）：
 //!
-//! 1. `lib`、`framework`、`external/lib`、`middleware`（各自递归，按完整路径字符串排序）
+//! 1. `lib`、`framework`、`external/lib`、`middleware`、`ant/lib`（各只取下一层的 jar/zip、不收 `_src`/`_doc`，与 Eclipse 一致；按完整路径字符串排序；
+//!    `ant/lib` 对应 Eclipse 的 `Ant_Library` 容器，排在最后只补充别处没有的类，不改变已有解析）
 //! 2. `modules/<模块名>/...`：模块名排序；每个模块内按「段 public → client → private，
 //!    段内 hyext 层在标准层之前」，散类目录（`*classes`）一律排在 jar 目录之前
 //!
@@ -139,7 +140,7 @@ pub fn module_names(home: &Path) -> Vec<String> {
 /// 与中间件的 15 层**不是同一套规则**：
 /// - `extension/` 与 `var/` 是递归的（内部还能再有 extension/var）；
 /// - `lib` 只收一层 jar，按**文件名**忽略大小写排序（不是完整路径）；
-/// - 没有 `_classes` / `_lib` / `hyext`。
+/// - 没有 `_classes` / `_lib`（`hyext` 有，和 extension/var 一样递归）。
 ///
 /// 两边各用各的规则，是因为官方插件对客户端与服务端本来就是两套代码：
 /// 服务端走 NC 自己的 `BootstrapClassLoader`，客户端走插件自己的容器解析。
@@ -157,6 +158,9 @@ fn push_stand_cp(root: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     }
     push_stand_cp(&root.join("extension"), depth + 1, out);
     push_stand_cp(&root.join("var"), depth + 1, out);
+    // `hyext` 同样递归：反编译 `computeStandCP` 确认 extension → var → hyext → classes → resources → lib，
+    // 以前漏了 hyext（本机模块容器里少 189 个 jar，全是 `*/hyext/lib` 下的二开覆盖包）
+    push_stand_cp(&root.join("hyext"), depth + 1, out);
     // 散类目录只在自己存在时入列：不存在的路径进 classpath 只会让清单骗人
     for sub in ["classes", "resources"] {
         let p = root.join(sub);
@@ -209,57 +213,68 @@ fn sort_key(p: &Path) -> String {
     p.to_string_lossy().to_uppercase()
 }
 
-/// 按完整路径递归收集目录下的 jar，路径不区分大小写排序（与 Eclipse 的顺序一致）。
+/// 收集目录**下一层**的 jar/zip，路径不区分大小写排序（与 Eclipse 的顺序一致）。
+///
+/// 不递归、不收 `_src` / `_doc`：Eclipse 插件 `ClasspathComputer.computeJarsInPath` 就是这样取的
+/// （反编译 `nc.uap.mde` 确认）。以前递归，会把 `framework/mwconfig`（配置工具自己的 32 个 jar）
+/// 和 `middleware/was|wls` 的 `fwejb.jar` 也纳入——Eclipse 看不到它们，引用其中的类在
+/// Eclipse 里是编译错，我们却能编过（漏报）。
 fn collect_jars(dir: &Path, out: &mut Vec<PathBuf>) {
-    let mut found = Vec::new();
-    walk(dir, &mut found);
-    found.sort_by_key(|p| sort_key(p));
-    out.extend(found);
-}
-
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return;
     };
-    for e in rd.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            walk(&p, out);
-        } else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("jar")) {
-            out.push(p);
-        }
-    }
+    let mut found: Vec<PathBuf> = rd
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && is_runtime_archive(p))
+        .collect();
+    found.sort_by_key(|p| sort_key(p));
+    out.extend(found);
 }
 
 /// NC home 的全部 jar，按 Eclipse 的 classpath 顺序排列。
 pub fn classpath_jars(nc_home: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for d in ["lib", "framework", "external/lib", "middleware"] {
+    // `ant/lib` 是 Eclipse `Ant_Library` 容器的内容（如 ant-contrib 的 net.sf.antcontrib.inifile.IniFile）。
+    // Eclipse 里它排在最前；这里放最后，只让「别处没有的类」可见，不改变任何已有类的解析结果。
+    for d in ["lib", "framework", "external/lib", "middleware", "ant/lib"] {
         collect_jars(&nc_home.join(d), &mut out);
     }
+    // 模块三个容器的顺序是「所有模块的 public → 所有模块的 client → 所有模块的 META-INF」，
+    // 而不是按模块分组（Eclipse 的 `Module_Public/Client/Private_Library`）。跨模块同名类谁先命中
+    // 取决于它：按模块分组时 baseapp/META-INF 里的 guava-18 / jackson-2.8 / bcprov-1.57 会压过
+    // 其他模块 lib 里的版本，与 Eclipse 编译见到的 API 不同（实测 5974 个类先命中的 jar 不同）。
+    // client 容器里 `uap*` 模块排在其他模块前（当前模块也算，这里不知道当前模块）。
     let modules = nc_home.join("modules");
-    let layers = module_layers();
-    for m in module_names(nc_home) {
-        for (sub, kind) in &layers {
-            if *kind != LayerKind::Jars {
-                continue;
+    let all_names = module_names(nc_home);
+    for scope in SCOPES {
+        let mut names: Vec<&String> = all_names.iter().collect();
+        if scope == "client/" {
+            // 稳定排序：uap* 在前，其余保持原顺序
+            names.sort_by_key(|n| !n.to_ascii_lowercase().starts_with("uap"));
+        }
+        for m in names {
+            for (rel, kind) in LAYERS {
+                if kind != LayerKind::Jars {
+                    continue;
+                }
+                // 只取该目录本层的 jar，不递归（子目录会被下一个 sub 或别的模块覆盖）
+                let dir = modules.join(m).join(format!("{scope}{rel}"));
+                let Ok(rd) = std::fs::read_dir(&dir) else {
+                    continue;
+                };
+                let mut jars: Vec<PathBuf> = rd
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.is_file()
+                            && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("jar"))
+                            && is_runtime_jar(p)
+                    })
+                    .collect();
+                jars.sort_by_key(|p| sort_key(p));
+                out.extend(jars);
             }
-            // 只取该目录本层的 jar，不递归（子目录会被下一个 sub 或别的模块覆盖）
-            let dir = modules.join(&m).join(sub);
-            let Ok(rd) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            let mut jars: Vec<PathBuf> = rd
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| {
-                    p.is_file()
-                        && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("jar"))
-                        && is_runtime_jar(p)
-                })
-                .collect();
-            jars.sort_by_key(|p| sort_key(p));
-            out.extend(jars);
         }
     }
     out
@@ -588,8 +603,11 @@ mod tests {
             "lib/a.jar",
             "framework/z.jar",
             "framework/mwconfig/m.jar",
+            "lib/x_doc.jar",
             "external/lib/e.jar",
+            "external/lib/z.zip",
             "middleware/x.jar",
+            "ant/lib/ant-contrib.jar",
             "modules/bb/lib/l.jar",
             "modules/bb/client/lib/c.jar",
             "modules/bb/META-INF/lib/meta.jar",
@@ -613,15 +631,97 @@ mod tests {
             [
                 "lib/a.jar",
                 "lib/b.jar",
-                "framework/mwconfig/m.jar",
+                // 子目录、`_doc` 不收；`.zip` 要收
                 "framework/z.jar",
                 "external/lib/e.jar",
+                "external/lib/z.zip",
                 "middleware/x.jar",
+                // Ant_Library：排在 NC home 其它目录之后，只补充别处没有的类
+                "ant/lib/ant-contrib.jar",
                 "modules/aa/lib/a.jar",
                 // 段序 public → client → private（旧实现把 client 排最前）
                 "modules/bb/lib/l.jar",
                 "modules/bb/client/lib/c.jar",
                 "modules/bb/META-INF/lib/meta.jar",
+            ]
+        );
+    }
+
+    /// 模块容器按「全部 public → 全部 client（uap* 先）→ 全部 META-INF」排，不是按模块分组。
+    #[test]
+    fn 模块jar按容器而不是按模块分组() {
+        let d = tmpdir("scope-major");
+        for p in [
+            "modules/aa/lib/a.jar",
+            "modules/aa/client/lib/ac.jar",
+            "modules/aa/META-INF/lib/am.jar",
+            "modules/uapx/lib/u.jar",
+            "modules/uapx/client/lib/uc.jar",
+            "modules/uapx/META-INF/lib/um.jar",
+            "modules/zz/hyext/lib/h.jar",
+            "modules/zz/lib/z.jar",
+            "modules/zz/client/lib/zc.jar",
+        ] {
+            let f = d.join(p);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, b"").unwrap();
+        }
+        let got: Vec<String> = classpath_jars(&d)
+            .iter()
+            .map(|p| {
+                p.strip_prefix(&d)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                "modules/aa/lib/a.jar",
+                "modules/uapx/lib/u.jar",
+                // hyext 层在同模块标准 lib 之前
+                "modules/zz/hyext/lib/h.jar",
+                "modules/zz/lib/z.jar",
+                // client：uap* 模块在前
+                "modules/uapx/client/lib/uc.jar",
+                "modules/aa/client/lib/ac.jar",
+                "modules/zz/client/lib/zc.jar",
+                "modules/aa/META-INF/lib/am.jar",
+                "modules/uapx/META-INF/lib/um.jar",
+            ]
+        );
+    }
+
+    #[test]
+    fn stand_cp_会收_hyext_且在标准_lib_之前() {
+        let d = tmpdir("standcp-hyext");
+        for p in [
+            "lib/b.jar",
+            "hyext/lib/h.jar",
+            "extension/lib/e.jar",
+            "var/lib/v.jar",
+        ] {
+            let f = d.join(p);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, b"").unwrap();
+        }
+        let got: Vec<String> = stand_cp(&d)
+            .iter()
+            .map(|p| {
+                p.strip_prefix(&d)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                "extension/lib/e.jar",
+                "var/lib/v.jar",
+                "hyext/lib/h.jar",
+                "lib/b.jar"
             ]
         );
     }

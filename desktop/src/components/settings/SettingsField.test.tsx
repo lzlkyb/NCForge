@@ -38,6 +38,19 @@ afterEach(async () => {
 });
 
 describe("设置输入草稿与提交", () => {
+  it("数字保存成功后规范化显示，避免保留前导零草稿", async () => {
+    await render(); await type("016"); await enter();
+    expect(save).toHaveBeenCalledWith("016");
+    await render(16);
+    expect(field().value).toBe("16");
+    expect([...container.querySelectorAll("button")].some(b => b.textContent === "保存")).toBe(false);
+  });
+  it("失焦只校验草稿，不自动保存", async () => {
+    await render(); await type("16");
+    await act(async () => field().dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+    expect(save).not.toHaveBeenCalled(); expect(container.textContent).toContain("待保存");
+    await enter(); expect(save).toHaveBeenCalledWith("16");
+  });
   it("允许中间输入，完成输入且通过范围校验后才保存", async () => {
     await render();
     await type("1");
@@ -58,6 +71,10 @@ describe("设置输入草稿与提交", () => {
     await type("18");
     await enter();
     expect(field().value).toBe("18");
+    expect(field().getAttribute("aria-invalid")).toBe("true");
+    expect(container.textContent).toContain("无法保存到本机");
+    await render(18);
+    await act(async () => field().dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
     expect(field().getAttribute("aria-invalid")).toBe("true");
     expect(container.textContent).toContain("无法保存到本机");
     await enter();
@@ -85,6 +102,32 @@ describe("设置输入草稿与提交", () => {
     await enter();
     expect(save).toHaveBeenCalledTimes(1);
     await act(async () => finish());
+  });
+
+  it("改回原值后 dirty 复位，外部更新能重新同步", async () => {
+    await render();
+    await type("16");
+    await type("13");
+    await render(20);
+    expect(field().value).toBe("20");
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("保存期间输入保持可聚焦，完成后焦点不丢", async () => {
+    let finish!: () => void;
+    save.mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    await render();
+    field().focus();
+    await type("18");
+    await enter();
+    expect(document.activeElement).toBe(field());
+    expect(field().disabled).toBe(false);
+    expect(field().readOnly).toBe(true);
+    expect(field().getAttribute("aria-busy")).toBe("true");
+    await act(async () => finish());
+    expect(document.activeElement).toBe(field());
+    expect(field().readOnly).toBe(false);
+    expect(field().value).toBe("18");
   });
 });
 

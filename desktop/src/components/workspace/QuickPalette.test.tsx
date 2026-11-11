@@ -57,6 +57,15 @@ function type(value: string) {
 }
 
 describe("快速导航浮层的查询状态", () => {
+  it("跨工具定位预填类名，正常重开清空旧查询", async () => {
+    deps.buildItems.mockResolvedValue({ items: [], note: "" });
+    openPalette("type", "nc.impl.ic.StockService");
+    act(() => root.render(<QuickPalette activeTab="logs" onNavigate={vi.fn()} />));
+    await flush();
+    expect(container.querySelector<HTMLInputElement>('[aria-label="快速导航输入"]')?.value).toBe("nc.impl.ic.StockService");
+    act(() => { closePalette(); openPalette("file"); }); await flush();
+    expect(container.querySelector<HTMLInputElement>('[aria-label="快速导航输入"]')?.value).toBe("");
+  });
   it("五种模式的标签与快捷键分开显示，切换后只标记当前模式", async () => {
     deps.buildItems.mockResolvedValue({ items: [], note: "" });
     openPalette("file");

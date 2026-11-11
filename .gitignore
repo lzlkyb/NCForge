@@ -16,6 +16,8 @@ dist/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
 desktop/src-tauri/binaries/
+# desktop 侧构建/测试的 target（早期把 CARGO_TARGET_DIR 指到过这里，产物数 GB）
+desktop/target/
 
 # OS cruft
 .DS_Store

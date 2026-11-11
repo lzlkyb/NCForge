@@ -3,14 +3,15 @@ import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { sqlModel, tabIdOfModel } from "../../lib/sqlModels";
 import { registerSqlProviders } from "../../lib/sqlProviders";
 import { wireSqlEditorAssist } from "../../lib/sqlEditorAssist";
-import { useSqlEditorDialect } from "../../hooks/useSqlEditorDialect";
 import { pickStatement, splitStatements, type Stmt } from "../../lib/sqlSplit";
 import { statementsOf } from "../../lib/sqlStmtCache";
 import { applyFormatEdits, fallbackFormatEdits, formatTargetOf, type SqlFormatScope } from "../../lib/sqlFormatTarget";
 import { formatSql, sqlLanguageOf } from "../../lib/sqlFormat";
 import { connOf, setSqlDraft, sqlTabOf } from "../../lib/dbStore";
 import { toast } from "../ui/toast";
-
+import { useSqlEditorDialect } from "../../hooks/useSqlEditorDialect";
+import { useSqlDisplayPrefs } from "../../hooks/useSqlDisplayPrefs";
+import { codeDisplayOptionsOf, getEditorPrefs } from "../../lib/editorPrefs";
 export interface RunStmt {
   text: string;
   startLine: number;
@@ -28,12 +29,12 @@ export interface SqlExecutionScope {
 }
 
 export type { SqlFormatScope };
-
+export type SqlRunMode = "auto" | "current" | "script";
 /** SqlConsole 拿到的编辑器句柄。 */
 export interface SqlEditorApi {
-  /** `current`：选中的那段（可能多条），没选中就是光标所在的一条；`script`：全部。 */
+  /** auto：选中内容或全部；current：仅光标语句；script：全部。 */
   insert:(text:string)=>void;
-  target: (mode: "current" | "script") => RunStmt[];
+  target: (mode: SqlRunMode) => RunStmt[];
   format: (scope?: SqlFormatScope) => void;
   reveal: (line: number) => void;
   focus: () => void;
@@ -52,7 +53,7 @@ const HL_LIMIT = 200_000;
 const CONTEXT_GROUP = "navigation";
 const modelSources = new WeakMap<monaco.editor.ITextModel, { editorVersion: number; editorSql: string }>();
 
-function targetOf(editor: Editor, mode: "current" | "script"): RunStmt[] {
+function targetOf(editor: Editor, mode: SqlRunMode): RunStmt[] {
   const model = editor.getModel();
   if (!model) return [];
   const editorVersion = model.getVersionId();
@@ -67,12 +68,12 @@ function targetOf(editor: Editor, mode: "current" | "script"): RunStmt[] {
     startOffset: stmt.start + offset, endOffset: stmt.end + offset,
   });
   const sel = editor.getSelection();
-  if (mode === "current" && sel && !sel.isEmpty()) {
+  if (mode === "auto" && sel && !sel.isEmpty()) {
     const part = model.getValueInRange(sel);
     const offset = model.getOffsetAt(sel.getStartPosition());
     return splitStatements(part).map((s) => statement(s, offset, sel.startLineNumber - 1));
   }
-  if (mode === "script") return statementsOf(model).map((s) => statement(s));
+  if (mode !== "current") return statementsOf(model).map((s) => statement(s));
   const pos = editor.getPosition();
   const s = pos ? pickStatement(statementsOf(model), model.getOffsetAt(pos)) : null;
   return s ? [statement(s)] : [];
@@ -115,7 +116,7 @@ async function formatAt(editor: Editor, scope: SqlFormatScope = "auto") {
 export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = true }: {
   tabId: string;
   initial: string;
-  onRun: (mode: "current" | "script") => void;
+  onRun: (mode: SqlRunMode) => void;
   apiRef: { current: SqlEditorApi | null };
   onScope?: (scope: SqlExecutionScope) => void;
   visible?: boolean;
@@ -137,9 +138,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
     const editor = monaco.editor.create(hostRef.current, {
       model: null,
       automaticLayout: true,
-      fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
-      fontSize: 13,
-      lineHeight: 20,
+      ...codeDisplayOptionsOf(getEditorPrefs()),
       ariaLabel: "SQL 查询编辑器",
       padding: { top: 8, bottom: 8 },
       minimap: { enabled: false },
@@ -155,15 +154,17 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
     // 用 addAction 而不是 addCommand：前者能带 label 进编辑器右键菜单（键位由 Monaco 自动渲染在
     // 菜单项右侧），工具条按钮上就不必再印 Ctrl+Enter。id 会同时出现在 F1 命令面板里。
     editor.addAction({
-      id: "ncforge.sql.runCurrent",
-      label: "执行当前语句",
+      id: "ncforge.sql.run",
+      label: "执行（选中内容或整个脚本）",
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
       contextMenuGroupId: CONTEXT_GROUP,
       contextMenuOrder: 0.1,
-      run: () => onRunRef.current("current"),
+      run: () => onRunRef.current("auto"),
     });
-    editor.addAction({
-      id: "ncforge.sql.runScript",
+    editor.addAction({ id: "ncforge.sql.runCurrent", label: "执行当前语句",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter], contextMenuGroupId: CONTEXT_GROUP,
+      contextMenuOrder: 0.15, run: () => onRunRef.current("current") });
+    editor.addAction({ id: "ncforge.sql.runScript",
       label: "执行整个脚本",
       keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.KeyX],
       contextMenuGroupId: CONTEXT_GROUP,
@@ -179,7 +180,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
       run: () => formatAt(editor),
     });
 
-    const target = (mode: "current" | "script") => targetOf(editor, mode);
+    const target = (mode: SqlRunMode) => targetOf(editor, mode);
     const rememberView = () => {
       const model = editor.getModel(), view = editor.saveViewState();
       const id = model && tabIdOfModel(model);
@@ -192,7 +193,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
       const model = editor.getModel(), id = model && tabIdOfModel(model);
       // 与按钮/快捷键最终调用的 target() 共用语句列表，范围不能另行猜测或切分。
       if (id) {
-        const next = { tabId: id, selected: editor.getSelection()?.isEmpty() === false, statements: target("current") };
+        const next = { tabId: id, selected: editor.getSelection()?.isEmpty() === false, statements: target("auto") };
         // 语句内移动光标不必让整块结果网格跟随重绘。
         if (!previousScope || previousScope.tabId !== id || previousScope.selected !== next.selected || previousScope.statements.length !== next.statements.length
           || next.statements.some((stmt, index) => { const previous = previousScope!.statements[index]; return stmt.text !== previous.text || stmt.startLine !== previous.startLine || stmt.endLine !== previous.endLine; })) {
@@ -290,6 +291,7 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
   }, [visible]);
 
   useSqlEditorDialect(editorRef, tabId);
+  useSqlDisplayPrefs(editorRef);
   return (
     <div className="dbx-editor" hidden={!visible}>
       <div ref={hostRef} className="wb-editor-host" />

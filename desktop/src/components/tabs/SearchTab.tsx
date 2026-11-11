@@ -12,10 +12,11 @@ import { useWorkspaceSelector } from "../../lib/workspaceSession";
 import { useSidebarView } from "../../lib/sidebarView";
 import { useSearchPackStatus } from "../../lib/searchPackStatus";
 import { SearchPackNotice } from "../search/SearchPackNotice";
+import { JarSymbolResults } from "../search/JarSymbolResults";
+import { SrcNoteResults } from "../search/SrcNoteResults";
 import { toast } from "../ui/toast";
 import type { LinkedProject } from "../../lib/linkedProjects";
 import {
-  applySearchScope,
   currentSearchSeq,
   getSearchForm,
   loadHistory,
@@ -24,8 +25,8 @@ import {
   setSearchForm,
   subscribeSearchForm,
   type SearchForm,
-  type SearchScope,
 } from "../../lib/searchStore";
+import { useSearchControls } from "../../hooks/useSearchControls";
 
 const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 
@@ -47,10 +48,16 @@ const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 export function SearchTab({
   projects,
   onOpenFile,
+  onOpenJarClass,
+  onOpenSrcNote,
 }: {
   /** 关联工程（含当前工作区）；「全部工程」搜索与结果分组都靠它。 */
   projects: LinkedProject[];
   onOpenFile: (path: string, line: number, column?: number) => void;
+  /** 打开依赖 jar 里的某个 class（反编译查看）。 */
+  onOpenJarClass: (jar: string, className: string) => void;
+  /** 打开源码包内某个 .java（跳到指定行，看到带注释的原始源码）。 */
+  onOpenSrcNote: (jar: string, className: string, line: number) => void;
 }) {
   // 直接订阅模块仓库，不留本地副本：applyWorkspace 会调 resetSearchForm 清结果，
   // 本页被 ActivityPanel 保活、不会重新挂载——本地 useState 副本会让旧工作区的
@@ -139,6 +146,8 @@ export function SearchTab({
           outcome: null,
           outcomeRoot: root,
           outcomeOptions: null,
+          // jar 两段跟着**这次搜索的词**走，不是输入框实时值（搜完再打字不该重发 IPC）
+          outcomeQuery: q,
           collapsed: [],
         });
       } else {
@@ -151,6 +160,7 @@ export function SearchTab({
           projectOutcome: null,
           outcomeRoot: root,
           outcomeOptions: opts,
+          outcomeQuery: q,
           collapsed: [],
         });
       }
@@ -162,6 +172,7 @@ export function SearchTab({
         projectOutcome: null,
         outcomeRoot: null,
         outcomeOptions: null,
+        outcomeQuery: null,
         error: String(e),
       });
     } finally {
@@ -174,22 +185,14 @@ export function SearchTab({
   /**
    * 换范围 / 换组件就丢掉旧结果——这条状态机在仓库里（`applySearchScope`），
    * 这里只负责收起编辑态；「为什么必须清」写在那个函数上。
+   * 键盘同理（Enter 搜索 / Esc 清空）：都搬去了 `hooks/useSearchControls`。
    */
-  const pickScope = (scope: SearchScope, component: string | null) => {
-    setEditing(false);
-    applySearchScope(scope, component);
-  };
-
-  const changeScope = (scope: SearchScope) => {
-    if (scope === form.scope) return;
-    pickScope(scope, form.component);
-  };
-
-  /** 从菜单里点了一个组件：切到组件范围（`component` 记住，切回来不用重选）。 */
-  const pickComponent = (name: string) => {
-    if (name === form.component && form.scope === "component") return;
-    pickScope("component", name);
-  };
+  const { changeScope, pickComponent, onSearchKey } = useSearchControls({
+    form,
+    leaveEditing: () => setEditing(false),
+    run: () => void run(),
+    clearQuery: () => update({ query: "" }),
+  });
 
   const resolvePath = (hit: ResultHit) => {
     const hitRoot = hit.root ?? (form.outcomeRoot !== null && form.outcomeRoot !== root ? null : root);
@@ -211,18 +214,6 @@ export function SearchTab({
       hit.line,
       (hit.ranges[0]?.start ?? 0) + 1,
     );
-  };
-
-  const onSearchKey = (e: React.KeyboardEvent) => {
-    // 组词的 Enter/Esc 留给输入法；部分 WebView 结束组词时仍用 229 标记。
-    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
-    if (e.key === "Enter") {
-      e.preventDefault();
-      void run();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      update({ query: "" });
-    }
   };
 
   // 结果是别的工作区搜出来的（只对当前范围有意义；全部工程的结果自带工程根）：
@@ -254,6 +245,10 @@ export function SearchTab({
         onKeyDown={onSearchKey}
       />
       <SearchPackNotice status={packStatus} />
+      {/* jar 内符号段：自己订阅仓库、自己取数，这里只负责给它一个打开管道 */}
+      <JarSymbolResults onOpenClass={onOpenJarClass} />
+      {/* jar 内源码注释段：与上一段互补（class 里没有注释，只能走 _src.jar） */}
+      <SrcNoteResults onOpenSource={onOpenSrcNote} />
       {single && (
         <ReplaceBar
           form={form}

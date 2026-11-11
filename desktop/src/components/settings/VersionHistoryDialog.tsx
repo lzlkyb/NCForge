@@ -23,8 +23,11 @@ export function VersionHistoryDialog({ open, onClose, entries = CHANGELOG }: {
   const [category, setCategory] = useState<ChangeCategory | "all">("all");
   const [limit, setLimit] = useState(PAGE_SIZE);
   const body = useRef<HTMLDivElement>(null);
+  const initialized = useRef(false);
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open) { initialized.current = false; return; }
+    if (initialized.current) return;
+    initialized.current = true;
     setVersion(entries.find(entry => entry.version === currentVersion)?.version ?? entries[0]?.version ?? "");
     setQuery(""); setCategory("all"); setLimit(PAGE_SIZE);
   }, [open, currentVersion, entries]);

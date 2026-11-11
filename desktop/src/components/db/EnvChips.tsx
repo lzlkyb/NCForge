@@ -4,12 +4,21 @@ import { ENV_LABEL, ENVS, type DbEnv } from "../../lib/dbApi";
 export function EnvChips({ value, onChange }: { value: DbEnv; onChange: (v: DbEnv) => void }) {
   return (
     <div className="dbx-envs" role="radiogroup" aria-label="环境">
-      {ENVS.map((e) => (
+      {ENVS.map((e, index) => (
         <button
           key={e}
           type="button"
           role="radio"
           aria-checked={value === e}
+          tabIndex={value === e ? 0 : -1}
+          onKeyDown={event => {
+            const step = ["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : ["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 0;
+            const next = event.key === "Home" ? 0 : event.key === "End" ? ENVS.length - 1 : step ? (index + step + ENVS.length) % ENVS.length : -1;
+            if (next < 0) return;
+            event.preventDefault();
+            onChange(ENVS[next]);
+            event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
+          }}
           className={`e-${e}`}
           data-on={value === e || undefined}
           onClick={() => onChange(e)}

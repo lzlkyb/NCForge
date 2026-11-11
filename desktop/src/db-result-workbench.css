@@ -3,8 +3,50 @@
 .dbx-document-host[hidden] { display:none; }
 .dbx-result-table,.dbx-result-view { display:flex;flex-direction:column;flex:1;min-width:0;min-height:0; }
 /* 保活的结果视图要接住高度链：块盒会让 .dbx-rset 的 flex:1 失效，滚动条外溢到控制台外框。 */
-.dbx-result-keep { display:flex;flex-direction:column;flex:1;min-width:0;min-height:0; }
+.dbx-result-keep { display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;container:sql-result-pane / inline-size; }
 .dbx-result-keep[hidden] { display:none; }
+.dbx-grid .dbx-gh.rn:has(.dbx-select-all) { padding:3px; }
+.dbx-select-all { display:grid;place-items:center;width:100%;height:100%;min-height:28px;color:hsl(var(--muted-foreground));border-radius:var(--r-control); }
+.dbx-select-all:hover:not(:disabled),.dbx-select-all[aria-pressed="true"] { background:hsl(var(--primary) / .12);color:hsl(var(--primary)); }
+.dbx-select-all:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:-2px; }
+.dbx-select-all:disabled { opacity:var(--disabled-opacity);cursor:default; }
+.dbx-result-workspace-head { display:flex;align-items:center;gap:10px;min-height:36px;padding:4px 10px;flex:none;background:hsl(var(--chrome));border-bottom:1px solid hsl(var(--border)); }
+.dbx-result-workspace-head > strong { font-weight:500;white-space:nowrap; }
+.dbx-result-workspace-head > strong > span { margin-left:4px;color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);font-weight:400; }
+.dbx-result-layout { display:flex;gap:2px;margin-left:auto;flex:none; }
+.dbx-result-layout > button { display:flex;align-items:center;gap:5px;padding:4px 8px;border-radius:var(--r-control);font-size:var(--dbx-fs-meta);color:hsl(var(--muted-foreground)); }
+.dbx-result-layout > button[aria-pressed="true"] { background:hsl(var(--accent));color:hsl(var(--accent-foreground)); }
+.dbx-result-layout > button:disabled { opacity:var(--disabled-opacity); }
+.dbx-result-panes { display:flex;flex:1;min-width:0;min-height:0;overflow:hidden; }
+.dbx-result-panes[data-layout="dual"] > .dbx-result-keep { flex:1 1 0; }
+.dbx-result-panes[data-layout="dual"] > .dbx-result-keep { border-right:1px solid hsl(var(--border)); }
+.dbx-result-pane-heading { display:flex;align-items:center;gap:8px;padding:5px 10px;min-height:34px;flex:none;border-bottom:1px solid hsl(var(--border)); }
+.dbx-result-pane-heading > strong { font-weight:500;white-space:nowrap; }
+.dbx-result-pane-heading > select { min-width:80px;max-width:55%;background:transparent;color:hsl(var(--foreground));border:1px solid hsl(var(--input));border-radius:var(--r-control);padding:2px 4px;font-size:var(--dbx-fs-meta); }
+.dbx-result-pane-table { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:var(--dbx-fs-meta) var(--font-mono);color:hsl(var(--muted-foreground)); }
+.dbx-result-pane-heading > button { display:flex;align-items:center;gap:4px;white-space:nowrap;margin-left:auto;font-size:var(--dbx-fs-meta); }
+.dbx-result-pending { display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;flex:1;min-height:120px;padding:20px;text-align:center;color:hsl(var(--muted-foreground)); }
+.dbx-result-pending > strong { color:hsl(var(--foreground));font-weight:500; }
+.dbx-result-pending > span { font-size:var(--dbx-fs-meta); }
+.dbx-result-layout button:focus-visible,.dbx-result-pane-heading select:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:2px; }
+@container sql-result-pane (max-width:650px) {
+  .dbx-result-tools .dbx-filter-trigger > span,.dbx-result-tools .dbx-action-label,
+  .dbx-result-tools .dbx-compare-action .dbx-btn > span,.dbx-result-tools > .dbx-btn > .dbx-transfer-action-label,
+  .dbx-result-tools .dbx-edit-target-action { display:none; }
+  .dbx-result-tools .dbx-filter-trigger,.dbx-result-tools .dbx-btn:has(.dbx-action-label) { width:28px;padding:0; }
+  .dbx-result-tools { gap:3px; }
+  .dbx-result-tools .dbx-btn.ghost { min-width:0; }
+  .dbx-result-tools > .dbx-btn[aria-label="导出"] { width:28px;padding:0; }
+  .dbx-result-tools > .dbx-btn[aria-label="长文本自动换行"] { font-size:var(--dbx-fs-meta);padding-inline:4px; }
+  .dbx-result-panes .dbx-result-tools .dbx-transfer-split .dbx-transfer-action-label { display:inline;font-size:0; }
+  .dbx-result-tools .dbx-transfer-action-count { font-size:var(--dbx-fs-meta); }
+  .dbx-result-tools .dbx-edit-status-action { max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .dbx-result-tools .dbx-transfer-split > .dbx-btn { padding-inline:5px; }
+}
+@container workbench-document (max-width:760px) {
+  .dbx-result-panes[data-layout="dual"] { flex-direction:column;overflow:auto; }
+  .dbx-result-panes[data-layout="dual"] > .dbx-result-keep { flex:none;height:290px;min-height:240px;border-right:0;border-bottom:1px solid hsl(var(--border)); }
+}
 .dbx-res { overflow:hidden; }
 .dbx-result-view > .dbx-update { overflow:auto; }
 .dbx-result-view:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:-2px; }
@@ -32,7 +74,7 @@
 .dbx-source-popover { position:fixed;z-index:80;display:flex;flex-direction:column;width:min(520px,calc(100vw - 24px));max-height:min(420px,calc(100vh - 24px));padding:14px;gap:10px;border-radius:var(--r-control);background:hsl(var(--card));box-shadow:0 8px 28px hsl(var(--foreground) / .18);font-size:var(--dbx-fs-body);color:hsl(var(--foreground)); }
 .dbx-source-popover header { display:flex;align-items:center;justify-content:space-between;gap:12px; }
 .dbx-source-meta { display:flex;flex-wrap:wrap;gap:4px 12px;color:hsl(var(--muted-foreground));font-size:var(--dbx-fs-meta);overflow-wrap:anywhere; }
-.dbx-source-popover pre { margin:0;min-height:0;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:var(--dbx-fs-body)/1.6 "Cascadia Mono",Consolas,monospace;scrollbar-gutter:stable; }
+.dbx-source-popover pre { margin:0;min-height:0;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:var(--dbx-fs-body)/1.6 var(--font-mono);scrollbar-gutter:stable; }
 .dbx-source-popover pre:focus-visible { outline:2px solid hsl(var(--ring));outline-offset:2px; }
 @container workbench-document (max-width:900px) {
   .dbx-result-tools .dbx-action-label { display:none; }

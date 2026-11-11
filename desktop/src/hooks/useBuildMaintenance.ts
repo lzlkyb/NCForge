@@ -82,7 +82,8 @@ export function useBuildMaintenance({
         "会删除类索引文件与全部构建清单（不删 class 产物）。下次编译要重新扫描全部 jar，首轮会明显变慢；只有在补全 / 跳转异常或怀疑索引过期时才需要。",
       confirmLabel: "重建索引",
       reports: [],
-      run: () => reindexBuild(),
+      // 确认框只关心「有没有做完」，失败原因由 buildMaintenance 自己 toast 与设置页错误条负责
+      run: async () => { await reindexBuild(); },
     });
   };
 

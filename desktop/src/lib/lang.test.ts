@@ -39,11 +39,15 @@ describe("loadJdtSource", () => {
 
   it("请求失败不缓存，下次可重试", async () => {
     const uri = "jdt://contents/b.jar/p/B.class";
+    // jdt.ls  reject → 降级 CFR；CFR 也没有 → 整个失败（缓存不写）
     h.invoke.mockRejectedValueOnce(new Error("boom"));
+    h.invoke.mockRejectedValueOnce(new Error("no cfr"));
     await expect(loadJdtSource(uri)).rejects.toThrow();
-    h.invoke.mockResolvedValueOnce("class B {}");
-    await loadJdtSource(uri);
-    expect(h.invoke).toHaveBeenCalledTimes(2);
+    // 重试时后端已经有真源码：不再反编译
+    h.invoke.mockResolvedValue("package p;\n\npublic class B {}\n");
+    const src = await loadJdtSource(uri);
+    expect(src.decompiled).toBe(false);
+    expect(h.invoke).toHaveBeenCalledTimes(3);
   });
 
   it("签名桩会换成本地反编译结果，并在正文里标出处", async () => {
@@ -85,6 +89,57 @@ describe("loadJdtSource", () => {
     const src = await loadJdtSource(uri);
     expect(src.decompiled).toBe(false);
     expect(h.invoke.mock.calls.every((c) => c[0] !== "decompile_class")).toBe(true);
+  });
+
+  it("合成地址 jdt.ls 不认识时降级到反编译，而不是整个打开失败", async () => {
+    // `preferSource` 走的就是这条路：URI 不带 DIRECT_DECOMPILE 标记，先问 jdt.ls。
+    // 万一它 reject（而不是返回桩），必须退到 CFR——否则「打开 jar 里的类」直接不可用。
+    const uri = "jdt://contents/synth.jar/p/S.class";
+    h.invoke.mockImplementation(async (cmd: string) => {
+      // langRequest 是 invoke("lang_request", …) 的封装：cmd 恒为 lang_request，方法名在参数里
+      if (cmd === "lang_request") throw new Error("unhandled uri scheme");
+      return { source: "public class S {}", jar: "synth.jar", class: "p.S", ms: 1 };
+    });
+    const src = await loadJdtSource(uri);
+    expect(src.decompiled).toBe(true);
+    expect(src.text).toContain("public class S {}");
+  });
+
+  it("反编译也失败时把错抛给界面，不塞假桩", async () => {
+    const uri = "jdt://contents/synth.jar/p/T.class";
+    h.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "lang_request") throw new Error("unhandled uri scheme");
+      throw "在 NC 安装目录与工作区里都没找到 synth.jar";
+    });
+    await expect(loadJdtSource(uri)).rejects.toThrow();
+  });
+
+  it("源码包地址直读 .java 原文：不起 JVM、不问 jdt.ls", async () => {
+    const uri = "jdt://contents/pubgl_src.jar/nc/bs/gl/GlBO.class";
+    h.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "read_src_file") {
+        return "package nc.bs.gl;\n// 61升级63，节点编码从8001变为8004\npublic class GlBO {}\n";
+      }
+      throw new Error(`不该被调用：${cmd}`);
+    });
+    const src = await loadJdtSource(uri);
+    expect(src.decompiled).toBe(false);
+    expect(src.text).toContain("61升级63，节点编码从8001变为8004");
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("源码包直读失败时回落 jdt.ls，不让点开整个不可用", async () => {
+    const uri = "jdt://contents/orphan_src.jar/p/O.class";
+    h.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "read_src_file") throw new Error("组件已卸载");
+      if (cmd === "lang_request") {
+        return "// Failed to get sources. Instead, stub sources have been generated\npublic class O {}";
+      }
+      return { source: "public class O {}", jar: "orphan.jar", class: "p.O", ms: 1 };
+    });
+    const src = await loadJdtSource(uri);
+    expect(src.decompiled).toBe(true); // 直读没了：桩 → CFR
+    expect(src.text).toContain("反编译自");
   });
 
   it("预览不反编译（一次跳转可能预建多个候选，起多个 JVM 不值得）", async () => {

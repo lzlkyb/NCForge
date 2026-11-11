@@ -28,7 +28,7 @@ export function completionContext(analysis: SqlAnalysis, offset: number, dialect
     if (isSqlName(field)) {
       const sources = sqlSourcesAt(analysis, offset);
       const source = dot?.text === "." && isSqlName(qualifier) ? resolveSqlQualifier(analysis, offset, sqlName(qualifier), qualifier.text) : sources.length === 1 ? sources[0] : undefined;
-      if (source?.table) Object.assign(result, { kind: "value", field: sqlName(field), valueSource: source, valueStart: hit && ["string", "number", "identifier"].includes(hit.kind) ? hit.start : offset, valueEnd: hit?.end ?? offset });
+      if (source?.table) Object.assign(result, { kind: "value", field: sqlName(field), valueSource: source, valueStart: hit && ["string", "number", "identifier"].includes(hit.kind) ? hit.start : offset, valueEnd: hit && ["string", "number", "identifier"].includes(hit.kind) ? hit.end : offset });
     }
   }
   if (base.kind === "column") {

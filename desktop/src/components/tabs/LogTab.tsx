@@ -1,5 +1,5 @@
 import { trackOperation } from "../../lib/operations";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import "../../log.css";
 import { Icon } from "../ui/icon";
@@ -7,6 +7,7 @@ import { LogToolbar } from "../log/LogToolbar";
 import { LogSearchBar } from "../log/LogSearchBar";
 import { LogList } from "../log/LogList";
 import { LogDetail } from "../log/LogDetail";
+import { LogContextBar } from "../log/LogContextBar";
 import { DockRegion, useWorkbenchDock } from "../workspace/WorkbenchDock";
 import { useViewActive } from "../../lib/viewActivity";
 import { failureText } from "../../lib/friendlyError";
@@ -51,13 +52,15 @@ export function LogTab() {
   const [filter, setFilter] = useState<Filter>(DEFAULT_FILTER);
   const selection = useLogSelection();
   const [advanced, setAdvanced] = useState(false);
+  const [searchChosen, setSearchChosen] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
   const active = useViewActive();
   const dock = useWorkbenchDock();
   const visibleDocument = active && (dock?.documentOpen ?? true);
 
   const search = useLogSearch();
   const found = search.result;
-  const searchMode = search.state.phase !== "idle";
+  const searchMode = searchChosen || search.state.phase !== "idle";
   // 归因开关和慢 SQL 阈值不参与全文检索，不应顺带改变它的时间边界。
   const sinceTs = useMemo(() => sinceOf(filter.range), [filter.range]);
 
@@ -127,6 +130,7 @@ export function LogTab() {
   return (
     <DockRegion region="document">
     <div className="lg-page">
+      <LogContextBar searchMode={searchMode} onMode={value => { setSearchChosen(value); if (value) searchInput.current?.focus(); else search.clear(); }} />
       <LogToolbar
         onClose={dock?.toolTab?.onClose}
         advanced={advanced}
@@ -156,13 +160,14 @@ export function LogTab() {
         onRefresh={() => searchMode ? runSearch(found?.form) : refresh()}
       >
         <LogSearchBar
+          inputRef={searchInput}
           advanced={advanced}
           form={search.form}
           state={search.state}
           stale={stale}
           onPatch={search.patch}
           onRun={() => runSearch()}
-          onClear={search.clear}
+          onClear={() => { setSearchChosen(false); search.clear(); }}
           onExport={() => found && exportSearchResult(found.result, found.form)}
         />
       </LogToolbar>

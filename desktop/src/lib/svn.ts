@@ -1,7 +1,7 @@
 import { invoke, listen } from "./tauri";
 import { trackOperation } from "./operations";
 import { getSession } from "./workspaceSession";
-import { withSvnWriteLock, type SvnWriteHandle } from "./svnWrite";
+import { withSvnWriteLock, getSvnWrite, type SvnWriteHandle } from "./svnWrite";
 
 /**
  * 版本控制（SVN）的命令封装与纯函数。
@@ -143,7 +143,12 @@ export const svnInfo = () => invoke<SvnInfo>("svn_info");
  * 界面的「显示全部」开关只在本地过滤，不再重扫。
  */
 export const svnStatus = () => invoke<StatusResult>("svn_status");
-export const svnDiff = (path: string) => trackOperation({ key: `svn.diff:${path.toLowerCase()}`, label: "读取 SVN 差异", scope: path, page: "svn", path }, () => invoke<DiffResult>("svn_diff", { path }));
+/**
+ * 取单文件 BASE 基线：打开文件就调，是全流程最高频的动作。
+ * 裸 invoke，不进 trackOperation——否则操作历史被刷屏，桥偶尔慢于 300ms 还会闪
+ * 等待图标，`page:"svn"` 的「返回来源」还会把用户从代码面带去版本控制页（P1-10）。
+ */
+export const svnDiff = (path: string) => invoke<DiffResult>("svn_diff", { path });
 export const svnCommit = (paths: string[], message: string, guard?: SvnWriteHandle) => {
   const root = getSession().root ?? "";
   const snapshot = { paths: [...paths], message };
@@ -164,8 +169,39 @@ export const svnResolve = (path: string, choice: "mine" | "theirs" | "base", gua
   const root = getSession().root ?? "";
   return withSvnWriteLock(root, "resolve", () => trackOperation({ key: `svn.resolve:${root}:${path}`, label: "解决 SVN 冲突", scope: path, page: "svn", phase: "备份冲突文件并应用所选版本" }, () => invoke<ResolveResult>("svn_resolve", { path, choice, expectedRoot: root })), guard);
 };
-export const svnReviewMark = (path: string, revision: number, reviewed: boolean) =>
-  invoke<void>("svn_review_mark", { path, revision, reviewed });
+/**
+ * 标记/取消「已审」。
+ *
+ * 版本未知（`revision <= 0`，代码面常态）时后端要自己发一次 `info` 查单文件 BASE 版本。
+ * SVN 桥是单线程 readLine：commit/update 在飞时这条 info 会排在后面，等到
+ * `T_NET`(90s) 超时——而 SVN 桥的超时语义是**杀掉整个 JVM**，那次提交就跟着断了。
+ * 所以写操作在飞时先等它空闲；等不起就明说，让用户稍后再点，绝不硬发。
+ * 取消标记（`reviewed = false`）后端不发桥请求，无需等待。
+ */
+export const svnReviewMark = (path: string, revision: number, reviewed: boolean) => {
+  const root = getSession().root ?? "";
+  const needsBridgeInfo = reviewed && revision <= 0;
+  if (!root || !needsBridgeInfo || !getSvnWrite(root)) {
+    return invoke<void>("svn_review_mark", { path, revision, reviewed });
+  }
+  return waitSvnWriteIdle(root).then(() => invoke<void>("svn_review_mark", { path, revision, reviewed }));
+};
+
+/** 轮询等写操作空闲。超过 `capMs` 仍没结束就 reject：此刻发 info 就是杀桥，宁可让用户再点一次。 */
+function waitSvnWriteIdle(root: string, capMs = 60_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const tick = () => {
+      if (!getSvnWrite(root)) { resolve(); return; }
+      if (Date.now() - started >= capMs) {
+        reject(new Error("工作副本正在提交/更新，标记要等它结束，请稍后再点"));
+        return;
+      }
+      setTimeout(tick, 500);
+    };
+    tick();
+  });
+}
 export const svnReviewPrune = () => trackOperation({ key: "svn.review.prune", label: "清理失效审查标记", page: "svn" }, () => invoke<number>("svn_review_prune"));
 /** 维护面板的只读数据：备份目录盘点 + 审查标记统计。 */
 export const svnHousekeeping = () => trackOperation({ key: `svn.housekeeping:${getSession().root}`, label: "盘点 SVN 备份", page: "svn" }, () => invoke<HousekeepingInfo>("svn_housekeeping"));

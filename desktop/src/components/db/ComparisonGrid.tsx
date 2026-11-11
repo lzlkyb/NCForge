@@ -100,7 +100,8 @@ export function ComparisonGrid({ model, order, columns, activeCell, scrollTop=0,
     if(moves[event.key]) {r+=moves[event.key][0];c+=moves[event.key][1];}
     else if(event.key==="Home") {c=0;if(event.ctrlKey || event.metaKey) r=0;}
     else if(event.key==="End") {c=columns.length-1;if(event.ctrlKey || event.metaKey) r=order.length-1;}
-    else if(event.key==="Enter" || event.key==="F2") {event.preventDefault();inspect(pos);return;}
+    // 只认 Enter：F2 在结果网格里是「打开大文本编辑框」，同一个键不能在这里变成「查看」。
+    else if(event.key==="Enter") {event.preventDefault();inspect(pos);return;}
     else if((event.ctrlKey || event.metaKey) && event.key.toLowerCase()==="c" && !window.getSelection()?.toString()) {
       event.preventDefault();const value=comparisonCell(model.records[pos.r],columns[pos.c]);
       if(value===undefined || value===null) {toast(value===undefined ? "此侧无此记录，没有可复制的原值" : "NULL 为数据库空值，没有文本原值","info");return;}

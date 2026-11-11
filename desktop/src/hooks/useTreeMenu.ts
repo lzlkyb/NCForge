@@ -28,6 +28,7 @@ export function useTreeMenu({
   onCleanModule,
   onRebuildModule,
   beginCreate,
+  onNewJavaType,
   beginRename,
   askDelete,
   load,
@@ -42,6 +43,7 @@ export function useTreeMenu({
   onCleanModule?: (path: string, module: string) => void;
   onRebuildModule?: (path: string, module: string) => void;
   beginCreate: (target: TreeMenuTarget, kind: NewEntryKind) => void;
+  onNewJavaType?: (target: TreeMenuTarget) => void;
   beginRename: (target: TreeMenuTarget) => void;
   askDelete: (target: TreeMenuTarget) => Promise<void>;
   load: (path: string) => Promise<void>;
@@ -72,6 +74,7 @@ export function useTreeMenu({
       onRebuildModule,
       onOpen,
       onBeginCreate: beginCreate,
+      onNewJavaType,
       onBeginRename: beginRename,
       onDelete: (t) => void askDelete(t),
       onCopyPath: (p) => void copyPath(p),

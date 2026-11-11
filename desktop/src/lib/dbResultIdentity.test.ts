@@ -12,7 +12,7 @@ it("返回结果使用请求开始时的来源，不使用等待期间被改动�
   const id=openSqlTab("c","select 1 from dual");
   let resolve!:(value:unknown)=>void,started!:()=>void;
   const ready=new Promise<void>(r=>{started=r;}),response=new Promise(r=>{resolve=r;});
-  mocks.invoke.mockImplementation((command:string)=>command==="db_slot_acquire" ? Promise.resolve({slot:"1"}) : command==="db_exec" ? (started(),response) : Promise.resolve(null));
+  mocks.invoke.mockImplementation((command:string)=>command==="db_slot_acquire" ? Promise.resolve({slot:"1"}) : command==="db_exec_result" ? (started(),response) : Promise.resolve(null));
   const pending=execOne(id,"select 1 from dual",1);
   await ready;setConns([{...conn,name:"新连接",user:"OTHER"}]);
   resolve({kind:"rows",columns:[],rows:[],hasMore:false,ms:1,output:[],tx:{autoCommit:true,statements:0,rows:0,since:0}});

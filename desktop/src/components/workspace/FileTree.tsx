@@ -24,6 +24,7 @@ import { useTreeMenu } from "../../hooks/useTreeMenu";
 import { useProblemMarks, useProblemTreeFilter } from "../../hooks/useProblemMarks";
 import { useTreeLocate } from "../../hooks/useTreeLocate";
 import type { NewEntryKind } from "../../lib/workspace";
+import { useTreeNewJava } from "../../hooks/useTreeNewJava";
 import { flattenTree, treeKeyAction, treeRowId as rowId } from "../../lib/treeNav";
 import { countBookmarks, useBookmarks } from "../../lib/bookmarks";
 import { useCompactPackages, useNcStructure, usePackageView, useRevealOnOpen } from "../../lib/treeViewPrefs";
@@ -134,6 +135,10 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   const clearFilter = useCallback(() => setFilter(""), [setFilter]);
   useTreeLocate(reveal, activePath, revealOnOpen, clearFilter);
 
+  const { openNewJava, newJavaDialog } = useTreeNewJava({
+    root, load, expand, setSelected, onCreated,
+    onEntryCreated: path => { if (packageView) invalidatePackages([path]); },
+  });
   const { menu, menuItems, openMenu, closeMenu } = useTreeMenu({
     root,
     marks: problemMarks.paths,
@@ -143,6 +148,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     onCleanModule,
     onRebuildModule,
     beginCreate,
+    onNewJavaType: openNewJava,
     beginRename,
     askDelete,
     load,
@@ -223,15 +229,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   };
 
   const handlers = useTreeHandlers({
-    toggleRow: toggleVisibleRow,
-    toggle,
-    onOpen,
-    onPin,
-    openMenu,
-    commitEdit,
-    cancelEdit,
-    setSelected,
-    isEditable,
+    toggleRow: toggleVisibleRow, toggle, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected, isEditable,
   });
 
   const ctx: TreeRowsCtx = {
@@ -290,11 +288,8 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
         <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu)} onClose={closeMenu} />
       )}
 
-      <TreeDeleteConfirm
-        pending={pendingDelete}
-        onCancel={cancelDelete}
-        onConfirm={() => void confirmDelete()}
-      />
+      <TreeDeleteConfirm pending={pendingDelete} onCancel={cancelDelete} onConfirm={() => void confirmDelete()} />
+      {newJavaDialog}
     </>
   );
 });

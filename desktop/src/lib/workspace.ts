@@ -43,9 +43,30 @@ export const writeFile = (args: WriteArgs) =>
 
 export type NewEntryKind = "file" | "dir";
 
+/** 「新建 Java 类型」的种类（与 Rust `file_template::JavaKind` 对应）。 */
+export type JavaKind = "class" | "interface" | "enum" | "bgplugin";
+
+/** 对话框预览：包名、将写入的内容、换行符、不能创建的原因（与 Rust `JavaPreview` 对应）。 */
+export interface JavaPreview {
+  /** 由目录推出的包名；`null` = 写入默认包。 */
+  package: string | null;
+  fileName: string;
+  text: string;
+  eol: "CRLF" | "LF";
+  error: string | null;
+}
+
+export const javaPreview = (parent: string, name: string, kind: JavaKind) =>
+  invoke<JavaPreview>("fs_java_preview", { parent, name, kind });
+
+/** 按种类新建 Java 类型文件（名字不带 `.java`），返回新文件完整路径。 */
+export const createJavaType = (parent: string, name: string, kind: JavaKind) =>
+  invoke<string>("fs_create_java", { parent, name, kind });
+
 /** 新建文件/文件夹，返回新条目的完整路径。 */
 export const createEntry = (parent: string, name: string, kind: NewEntryKind) =>
-  invoke<string>("fs_create", { parent, name, kind });
+  // 新建文件时让后端给 .java 写包名 + 类骨架（其它文件仍是空文件）
+  invoke<string>("fs_create", { parent, name, kind, template: kind === "file" });
 
 /** 同目录内改名，返回新路径。 */
 export const renameEntry = (path: string, newName: string) =>

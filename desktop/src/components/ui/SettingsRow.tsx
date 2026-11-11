@@ -25,7 +25,7 @@ export function SettingsRow({
   danger = false,
   last = false,
   layout = "row",
-  id, controlId, pending = false, error, keywords, valueText,
+  id, controlId, pending = false, error, keywords, valueText, onRetry,
 }: {
   label: ReactNode;
   /** L0 常显短句：≤20 字结果性描述；原理/边界请改传 info。 */
@@ -41,6 +41,7 @@ export function SettingsRow({
   controlId?: string;
   pending?: boolean;
   error?: string;
+  onRetry?: () => void;
   /** 可定位的设置行同时作为设置搜索的索引来源。 */
   keywords?: string[];
   valueText?: string;
@@ -63,7 +64,7 @@ export function SettingsRow({
       <div className="grow min-w-0">
         <div className="srow-heading flex items-center gap-2">
           {controlId ? <label id={labelId} htmlFor={controlId} className="t text-sm font-medium">{label}</label> : <span id={labelId} className="t text-sm font-medium">{label}</span>}
-          {saved && <SavedHint>已保存</SavedHint>}
+          {saved && !pending && !error && <SavedHint>已保存</SavedHint>}
           {info && <InfoPopover label={typeof label === "string" ? label : "详细说明"}>{info}</InfoPopover>}
         </div>
         {!isStack && sub && (
@@ -80,7 +81,7 @@ export function SettingsRow({
       {isStack && sub && (
         <div className={`d text-xs ${danger ? "text-destructive-ink" : "text-muted-foreground"}`}>{sub}</div>
       )}
-      {(pending || error) && <div className={`settings-row-feedback text-xs ${error ? "text-destructive-ink" : "text-muted-foreground"}`} role={error ? "alert" : "status"}>{error ?? "保存中…"}</div>}
+      {(pending || error) && <div className={`settings-row-feedback text-xs ${error ? "text-destructive-ink" : "text-muted-foreground"}`} role={error ? "alert" : "status"}>{error ?? "保存中…"}{error && onRetry && <button type="button" className="settings-retry" onClick={onRetry}>重试保存</button>}</div>}
     </div>
   );
 }

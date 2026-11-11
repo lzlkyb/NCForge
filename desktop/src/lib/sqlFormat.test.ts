@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { formatSql, sqlLanguageOf, sqlLanguageOfUrl } from "./sqlFormat";
-import { DEFAULT_SQL_FORMAT } from "./sqlFormatPrefs";
+import { DEFAULT_SQL_FORMAT, setSqlFormatPrefs } from "./sqlFormatPrefs";
+
+// The original snapshots continue to verify the user-selectable expanded layout.
+beforeEach(() => setSqlFormatPrefs({ ...DEFAULT_SQL_FORMAT, layout: "expanded" }));
+afterEach(() => setSqlFormatPrefs(DEFAULT_SQL_FORMAT));
 
 describe("sqlLanguageOfUrl", () => {
   it("JDBC 子协议映射到 sql-formatter 方言", () => {

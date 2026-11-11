@@ -48,6 +48,10 @@ const MAX_PENDING: usize = 256;
 /// 一批最多带多少个外部改动的 `.java`：再多就让前端按「全工作区」处理。
 const MAX_JAVA: usize = 64;
 
+/// 一批最多带多少个「可审查」的外部改动文件。与前端 `EXTERNAL_BATCH_LIMIT` 对齐：
+/// 再多就让前端只提示、不逐个处理。
+const MAX_REVIEW: usize = 64;
+
 /// 一批最多攒多久：持续写入时每来一个事件都会重置 DEBOUNCE，没有这个上限
 /// 编译期间目录变化可能几十秒都送不到前端。
 const MAX_WAIT: Duration = Duration::from_millis(1000);
@@ -60,10 +64,32 @@ const EVENT_QUEUE: usize = 4096;
 ///
 /// **`.java` 内容变更是例外**：树不用刷新，但构建引擎要知道「外部改了源码」。
 /// 只放行 `.java`，编译写出的 `.class` 仍然在回调里丢掉。
+///
+/// **可审查文本文件的内容变更是另一个例外**：AI 工具 / 别的编辑器改 `.xml`、
+/// `.sql`、`.properties`、`.js` 时，审查时间线、改动色条、已审角标都要跟着更新，
+/// 不送的话这些改动对工作台完全不可见（只有 `.java` 能进自动编译那条线）。
 pub fn worth_queueing(ev: &notify::Event) -> bool {
     ev.need_rescan()
         || (needs_tree_refresh(&ev.kind) && ev.paths.iter().any(|p| !is_ignored(p)))
         || (is_java_change(&ev.kind) && ev.paths.iter().any(|p| is_java_path(p)))
+        || (is_review_change(&ev.kind) && ev.paths.iter().any(|p| is_review_path(p)))
+}
+
+/// 可审查文件的**内容**变更。不含增 / 删 / 改名：那类改动由文件树与「转到文件」
+/// 清单负责（见 `needs_tree_refresh` / `files_changed`），新建的文件本来就没有
+/// 旧内容可供比对，删掉的文件在编辑器里也不再存在。
+fn is_review_change(kind: &notify::EventKind) -> bool {
+    use notify::{event::ModifyKind, EventKind};
+    matches!(
+        kind,
+        EventKind::Modify(ModifyKind::Data(_)) | EventKind::Modify(ModifyKind::Any)
+    )
+}
+
+/// 可审查 = 工作区内的文本文件（与「转到文件」清单同一套判定：二进制扩展名 /
+/// 构建产物目录都不算）。`.java` 也在其中——它同样要进审查时间线。
+fn is_review_path(path: &Path) -> bool {
+    !is_ignored(path) && crate::search::is_listed_path(path)
 }
 
 /// 外部源码改动：内容变更 + 增删改名（新增/删除会让模块走全量）。
@@ -95,6 +121,12 @@ struct Batcher {
     java: BTreeSet<PathBuf>,
     /// `.java` 太多，下一批让前端按全工作区处理
     java_overflow: bool,
+    /// 外部改动的可审查文本文件（`.java` / `.xml` / `.sql` / `.js` …，已去重）
+    review: BTreeSet<PathBuf>,
+    /// 可审查文件太多：下一批让前端只提示、不逐个进时间线
+    review_overflow: bool,
+    /// 这一批里有「会出现在文件清单里」的文件被增 / 删 / 改名（编译写 `.class` 不算）
+    files_changed: bool,
     /// 这一批第一个事件到达的时间；空批为 None。
     since: Option<Instant>,
 }
@@ -106,9 +138,20 @@ impl Batcher {
             affected_dirs(root, &ev.paths, &mut self.pending);
             self.rescan |= self.pending.len() >= MAX_PENDING;
         }
+        if needs_tree_refresh(&ev.kind)
+            && ev
+                .paths
+                .iter()
+                .any(|p| p.starts_with(root) && !is_ignored(p) && crate::search::is_listed_path(p))
+        {
+            self.files_changed = true;
+        }
         if is_java_change(&ev.kind) {
             for p in &ev.paths {
-                if p.starts_with(root) && is_java_path(p) {
+                // 已在批次里的文件再收到一次事件（编辑器分块写、java 与 review 两条通道
+                // 同时命中）不算新增：不先跳过的话，集合正好满 64 时任何重复事件都会
+                // 把 java_overflow 置真，前端因此提示「改动太多，只处理一部分」。
+                if p.starts_with(root) && is_java_path(p) && !self.java.contains(p) {
                     if self.java.len() < MAX_JAVA {
                         self.java.insert(p.clone());
                     } else {
@@ -117,8 +160,22 @@ impl Batcher {
                 }
             }
         }
+        if is_review_change(&ev.kind) {
+            for p in &ev.paths {
+                if p.starts_with(root) && is_review_path(p) && !self.review.contains(p) {
+                    if self.review.len() < MAX_REVIEW {
+                        self.review.insert(p.clone());
+                    } else {
+                        self.review_overflow = true;
+                    }
+                }
+            }
+        }
         if self.since.is_none()
-            && (self.rescan || !self.pending.is_empty() || !self.java.is_empty())
+            && (self.rescan
+                || !self.pending.is_empty()
+                || !self.java.is_empty()
+                || !self.review.is_empty())
         {
             self.since = Some(now);
         }
@@ -131,15 +188,16 @@ impl Batcher {
     }
 
     /// 重扫 / 源码改动都要尽快送：持续队列溢出不能退化成逐事件触发整棵树重读。
+    /// 可审查文件的内容变更同样走急件通道——用户刚保存完就想在时间线里看见。
     fn due(&self, now: Instant) -> bool {
-        let urgent = self.rescan || !self.java.is_empty();
+        let urgent = self.rescan || !self.java.is_empty() || !self.review.is_empty();
         self.since
             .is_some_and(|t| now.duration_since(t) >= if urgent { DEBOUNCE } else { MAX_WAIT })
     }
 
     /// 下一次 recv 最多等多久：平时 DEBOUNCE，但不能越过这一批的 MAX_WAIT 截止点。
     fn wait(&self, now: Instant) -> Duration {
-        let urgent = self.rescan || !self.java.is_empty();
+        let urgent = self.rescan || !self.java.is_empty() || !self.review.is_empty();
         match self.since {
             Some(t) => DEBOUNCE.min(
                 (if urgent { DEBOUNCE } else { MAX_WAIT }).saturating_sub(now.duration_since(t)),
@@ -159,12 +217,27 @@ impl Batcher {
         if !self.pending.is_empty() || self.rescan {
             crate::content_pack::mark_dirty();
         }
+        // 内容包按文件正文做索引：外部改了什么文本文件，它的内容就该重扫一遍。
+        // （以前只认目录集变化，AI 改 .xml 之后搜索到的还是旧正文。）
+        if !self.review.is_empty() || self.review_overflow {
+            crate::content_pack::mark_dirty();
+        }
+        // 「转到文件」的清单：文件集变了（或事件丢了）就作废，下一次取清单真扫。
+        // 以前只有文件树里自己新建 / 删除才会失效，SVN 更新 / 外部工具生成的文件进不了清单。
+        let files_changed = self.files_changed || self.rescan;
+        if files_changed {
+            crate::search::mark_list_dirty();
+        }
+        self.files_changed = false;
         self.since = None;
         flush(
             &mut self.pending,
             &mut self.rescan,
             &mut self.java,
             &mut self.java_overflow,
+            &mut self.review,
+            &mut self.review_overflow,
+            files_changed,
             emit,
         );
     }
@@ -228,6 +301,15 @@ pub struct WatchBatch {
     pub java: Vec<String>,
     /// 改动的 `.java` 太多：前端应按「全工作区」处理，不要逐个文件编。
     pub java_overflow: bool,
+    /// 外部改动的可审查文本文件（`.java` / `.xml` / `.sql` / `.js` / 配置 …）。
+    /// 前端据此刷新已打开的标签、审查时间线、改动色条、已审角标；
+    /// 与 `java` 分开：编译只认 `.java`，审查要认所有文本文件。
+    pub review: Vec<String>,
+    /// 可审查文件太多：前端只提示，不逐个进时间线（如 `git checkout` 一个分支）。
+    pub review_overflow: bool,
+    /// 文件集变了（会出现在「转到文件」清单里的文件被增 / 删 / 改名，或事件丢失）：
+    /// 前端应让文件名索引失效并后台重取。编译写出的 `.class` 不算。
+    pub files_changed: bool,
 }
 
 /// 一个工作区的文件监听。拿到即活，`Drop` 即停（换工作区 / 退出应用）。
@@ -309,14 +391,19 @@ impl Drop for WorkspaceWatcher {
     }
 }
 
+// 参数是批里各个独立的待发集合，硬凑成结构体只是把同样的字段换个地方摆
+#[allow(clippy::too_many_arguments)]
 fn flush(
     pending: &mut BTreeSet<PathBuf>,
     rescan: &mut bool,
     java: &mut BTreeSet<PathBuf>,
     java_overflow: &mut bool,
+    review: &mut BTreeSet<PathBuf>,
+    review_overflow: &mut bool,
+    files_changed: bool,
     emit: &Arc<dyn Fn(WatchBatch) + Send + Sync>,
 ) {
-    if pending.is_empty() && !*rescan && java.is_empty() && !*java_overflow {
+    if pending.is_empty() && !*rescan && java.is_empty() && !*java_overflow && review.is_empty() {
         return;
     }
     // 超过单批上限时列表只带得走前 MAX_DIRS 个。剩下的不能就这么丢了——
@@ -327,11 +414,16 @@ fn flush(
         rescan: *rescan || overflow,
         java: java.iter().map(|p| display_path(p)).collect(),
         java_overflow: *java_overflow,
+        review: review.iter().map(|p| display_path(p)).collect(),
+        review_overflow: *review_overflow,
+        files_changed,
     };
     *rescan = false;
     pending.clear();
     java.clear();
     *java_overflow = false;
+    review.clear();
+    *review_overflow = false;
     emit(batch);
 }
 
@@ -438,11 +530,15 @@ mod tests {
         }
         let mut rescan = false;
         let (mut java, mut java_overflow) = (BTreeSet::new(), false);
+        let (mut review, mut review_overflow) = (BTreeSet::new(), false);
         flush(
             &mut pending,
             &mut rescan,
             &mut java,
             &mut java_overflow,
+            &mut review,
+            &mut review_overflow,
+            false,
             &emit,
         );
         let batch = rx.try_recv().expect("应当发了一批");
@@ -458,6 +554,9 @@ mod tests {
             &mut rescan,
             &mut java,
             &mut java_overflow,
+            &mut review,
+            &mut review_overflow,
+            false,
             &emit,
         );
         assert!(!rx.try_recv().expect("应当又发了一批").rescan);
@@ -483,6 +582,25 @@ mod tests {
         assert!(worth_queueing(&ev(
             K::Modify(ModifyKind::Data(DataChange::Content)),
             src.join("A.java")
+        )));
+        // AI 改的非 .java 文本：树不用刷新，但要进审查时间线
+        assert!(worth_queueing(&ev(
+            K::Modify(ModifyKind::Data(DataChange::Content)),
+            src.join("mapper").join("A.xml")
+        )));
+        assert!(worth_queueing(&ev(
+            K::Modify(ModifyKind::Data(DataChange::Content)),
+            src.join("init.sql")
+        )));
+        // 二进制内容（编译产物 / jar 内容）不进队列
+        assert!(!worth_queueing(&ev(
+            K::Modify(ModifyKind::Data(DataChange::Content)),
+            src.join("A.class")
+        )));
+        // 属性变化（改时间戳）不算内容变更
+        assert!(!worth_queueing(&ev(
+            K::Modify(ModifyKind::Metadata(MetadataKind::WriteTime)),
+            src.join("A.xml")
         )));
         assert!(!worth_queueing(&ev(
             K::Create(CreateKind::File),
@@ -535,6 +653,131 @@ mod tests {
         assert!(b.due(now + DEBOUNCE));
         b.flush(&emit);
         assert!(rx.try_recv().unwrap().rescan);
+    }
+
+    /// 非 .java 文本的内容改动要进审查通道，且与自动编译的 `.java` 通道分开。
+    #[test]
+    fn 审查通道收录所有文本内容改动() {
+        let (tx, rx) = mpsc::channel::<WatchBatch>();
+        let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |x| drop(tx.send(x)));
+        let src = root().join("newar").join("src");
+        let now = Instant::now();
+        let mut b = Batcher::default();
+        for f in [
+            "A.java",
+            "mapper/B.xml",
+            "init.sql",
+            "web.js",
+            "app.properties",
+        ] {
+            b.add(
+                &root(),
+                &ev(
+                    K::Modify(ModifyKind::Data(DataChange::Content)),
+                    src.join(f),
+                ),
+                now,
+            );
+        }
+        // 编译写出的二进制内容不算可审查改动
+        b.add(
+            &root(),
+            &ev(
+                K::Modify(ModifyKind::Data(DataChange::Content)),
+                src.join("A.class"),
+            ),
+            now,
+        );
+        b.flush(&emit);
+        let batch = rx.try_recv().expect("应当发了一批");
+        assert_eq!(batch.review.len(), 5);
+        assert!(!batch.review_overflow);
+        // 编译队列只认 .java
+        assert_eq!(batch.java.len(), 1);
+        // 纯内容改动不动目录树
+        assert!(batch.dirs.is_empty() && !batch.rescan && !batch.files_changed);
+        // 发完后状态清空，再 flush 不再发第二批（空批直接返回）
+        b.flush(&emit);
+        assert!(rx.try_recv().is_err());
+    }
+
+    /// 可审查文件超过上限：只提示，不当真逐个送（前端会显示「请手动」）。
+    #[test]
+    fn 审查通道超上限改为提示() {
+        let (tx, rx) = mpsc::channel::<WatchBatch>();
+        let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |x| drop(tx.send(x)));
+        let src = root().join("newar").join("src");
+        let now = Instant::now();
+        let mut b = Batcher::default();
+        for i in 0..(MAX_REVIEW + 5) {
+            b.add(
+                &root(),
+                &ev(
+                    K::Modify(ModifyKind::Data(DataChange::Content)),
+                    src.join(format!("f{i}.xml")),
+                ),
+                now,
+            );
+        }
+        b.flush(&emit);
+        let batch = rx.try_recv().expect("应当发了一批");
+        assert_eq!(batch.review.len(), MAX_REVIEW);
+        assert!(batch.review_overflow);
+    }
+
+    /// 空批次直接返回，不发事件（内容变化只落在不可审查文件上时）。
+    #[test]
+    fn 只有二进制内容改动时不发批次() {
+        let (tx, rx) = mpsc::channel::<WatchBatch>();
+        let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |x| drop(tx.send(x)));
+        let src = root().join("newar").join("src");
+        let now = Instant::now();
+        let mut b = Batcher::default();
+        b.add(
+            &root(),
+            &ev(
+                K::Modify(ModifyKind::Data(DataChange::Content)),
+                src.join("A.class"),
+            ),
+            now,
+        );
+        b.flush(&emit);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn 文件集变动才标记_files_changed() {
+        let (tx, rx) = mpsc::channel::<WatchBatch>();
+        let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |x| drop(tx.send(x)));
+        let src = root().join("newar").join("src");
+        let now = Instant::now();
+
+        // 新建 .java：文件集变了
+        let mut b = Batcher::default();
+        b.add(
+            &root(),
+            &ev(K::Create(CreateKind::File), src.join("A.java")),
+            now,
+        );
+        b.flush(&emit);
+        assert!(rx.try_recv().unwrap().files_changed);
+
+        // 只改内容：文件集没变，且发完后标志已复位
+        b.add(
+            &root(),
+            &ev(
+                K::Modify(ModifyKind::Data(DataChange::Content)),
+                src.join("A.java"),
+            ),
+            now,
+        );
+        b.flush(&emit);
+        assert!(!rx.try_recv().unwrap().files_changed);
+
+        // 丢事件要求全量重读：文件集未知，按已变处理
+        b.mark_lost(now);
+        b.flush(&emit);
+        assert!(rx.try_recv().unwrap().files_changed);
     }
 
     #[test]

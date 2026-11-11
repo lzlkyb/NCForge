@@ -54,10 +54,12 @@ export function useTableSave({ tab, page, pk, cols, changes, sqls, drafts, reado
     if (issue) { toast(issue, "warning"); return; }
     const task = beginOperation(dbTaskSpec(`table.save:${tab.id}`, "写回表数据", tab.connId, tab.table, connOf(tab.connId)?.name, tab.id));
     if (!task) return;
-    if (!(await confirmProdWrite(tab.id, tab.connId, sqls.join(";\n")))) { task.finish("cancelled", "未确认写回，未执行写入"); return; }
+    // 先锁页面再问生产库确认：确认框可能挂着几十秒，这期间若还能改格子，
+    // 新改动不在这次 `changes` 快照里，写回成功后的 `load()` 会把它们静默清掉。
+    setSaving(true);
+    if (!(await confirmProdWrite(tab.id, tab.connId, sqls.join(";\n")))) { task.finish("cancelled", "未确认写回，未执行写入"); setSaving(false); return; }
     setTxNotice(tab.connId, null, undefined);
     const auto = rtOf(tab.connId).tx?.autoCommit ?? connOf(tab.connId)?.autoCommit ?? false;
-    setSaving(true);
     let done = 0;
     try {
       for (const change of changes) {
@@ -97,7 +99,10 @@ export function useTableSave({ tab, page, pk, cols, changes, sqls, drafts, reado
         done++;
       }
       toast(auto ? `已写回 ${done} 行（自动提交）` : `已写回 ${done} 行，尚未提交——用上方事务条提交或回滚`, "success");
-      task.finish("success", `已写回 ${done} 行${auto ? "（自动提交）" : "，尚未提交"}`);
+      // 任务记录是「发生过什么」的流水，提交之后它不会跟着变：这里只写事实，
+      // 「尚未提交」交给常驻的事务条（提交/回滚后它会自己消失），否则用户回头
+      // 看到一条永远停在「尚未提交」的记录，分不清是历史还是当前状态。
+      task.finish("success", `已写回 ${done} 行${auto ? "（自动提交）" : ""}`);
       setPreview(false);
       await load();
     } catch (e) {

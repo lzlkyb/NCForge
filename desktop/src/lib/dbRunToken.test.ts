@@ -23,7 +23,7 @@ vi.mock("./dbConfirm", () => ({
 vi.mock("./tauri", () => ({ invoke: vi.fn() }));
 vi.mock("./dbApi", async () => {
   const actual = await vi.importActual<typeof import("./dbApi")>("./dbApi");
-  return { ...actual, dbApi: { ...actual.dbApi, exec: mocks.exec } };
+  return { ...actual, dbApi: { ...actual.dbApi, execResult: mocks.exec } };
 });
 
 import { runStatements, switchConn } from "./dbActions";

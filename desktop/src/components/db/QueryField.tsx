@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useAppHidden } from "../../lib/appVisibility";
+import { UI_FONT_FAMILY } from "../../lib/fonts";
 
 /** Abstract query feedback; never draws over retained cells or intercepts grid input. */
 export function QueryField({ host, state, previous, reduced = false }: {host:Element;state:string;previous:boolean;reduced?:boolean}) {
@@ -57,7 +58,7 @@ export function QueryField({ host, state, previous, reduced = false }: {host:Ele
      if(i%7===0){ctx.beginPath();ctx.arc(x,y,1.5,0,Math.PI*2);ctx.fill();}
      if(i%12<11&&gather>.55){ctx.globalAlpha*=.22;ctx.beginPath();ctx.moveTo(x+length,y);ctx.lineTo(gx+available*.05,y);ctx.stroke();}
     }
-    if(!previous&&active){ctx.globalAlpha=.78;ctx.fillStyle=getComputedStyle(box).color;ctx.font="12px system-ui";ctx.textAlign="center";ctx.fillText(state==="cancelling"?"正在等待停止确认":"等待数据库返回",width/2,height*.83);}
+    if(!previous&&active){ctx.globalAlpha=.78;ctx.fillStyle=getComputedStyle(box).color;ctx.font=`12px ${UI_FONT_FAMILY}`;ctx.textAlign="center";ctx.fillText(state==="cancelling"?"正在等待停止确认":"等待数据库返回",width/2,height*.83);}
     ctx.restore();
     if(!active && age>=.24)ctx.clearRect(0,0,width,height);
    }

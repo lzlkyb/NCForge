@@ -26,6 +26,7 @@ export interface ExportableConfig {
   workspace_root?: string | null;
   nc_home?: string | null;
   server_heap_mb?: number | null;
+  client_heap_mb?: number | null;
   svn_user?: string | null;
   patch_out_dir?: string | null;
   patch_out_root?: string | null;
@@ -37,6 +38,8 @@ export interface ExportableConfig {
   lang_enabled?: boolean | null;
   lang_auto_start?: boolean | null;
   lang_xmx_mb?: number | null;
+  /** 工程关联覆盖表：全量替换语义，导入后本机列表被换成它。 */
+  linked_overrides?: LinkedOverrideExport[] | null;
 }
 
 /** 导出物里的连接（**没有口令字段**——Rust 导出时就抹掉了）。 */
@@ -49,8 +52,15 @@ export interface DbConnExport {
   note?: string;
 }
 
+/** 导出物里的工程关联覆盖（Rust `config::LinkedOverrideConfig` 的镜像）。 */
+export interface LinkedOverrideExport {
+  action: string;
+  target: string;
+  dir?: string | null;
+}
+
 /** 本机支持的最高格式版本（Rust `config_io::EXPORT_SCHEMA`，两边同步改）。 */
-export const EXPORT_SCHEMA = 1;
+export const EXPORT_SCHEMA = 2;
 
 /** 路径类字段：换机器后必须允许改写的项。 */
 export const PATH_FIELDS: { key: PathFieldKey; label: string; hint: string }[] = [
@@ -97,6 +107,25 @@ export function parseExportFile(text: string): ParseResult {
     };
   }
   const cfg = (t.config ?? {}) as ExportableConfig;
+  if (typeof cfg !== "object" || cfg === null || Array.isArray(cfg)) return { ok: false, error: "config 必须是配置对象" };
+  for (const field of PATH_FIELDS) {
+    if (cfg[field.key] != null && typeof cfg[field.key] !== "string") return { ok: false, error: `${field.label}必须是路径文本` };
+  }
+  for (const key of ["svn_user", "db_url", "db_user", "db_active"] as const) {
+    if (cfg[key] != null && typeof cfg[key] !== "string") return { ok: false, error: `${key} 必须是文本` };
+  }
+  for (const key of ["server_heap_mb", "lang_xmx_mb", "client_heap_mb"] as const) {
+    if (cfg[key] != null && (!Number.isInteger(cfg[key]) || Number(cfg[key]) <= 0)) return { ok: false, error: `${key} 必须是正整数` };
+  }
+  for (const key of ["lang_enabled", "lang_auto_start", "db_conns_init"] as const) {
+    if (cfg[key] != null && typeof cfg[key] !== "boolean") return { ok: false, error: `${key} 必须是开关值` };
+  }
+  if (cfg.db_conns != null && (!Array.isArray(cfg.db_conns) || cfg.db_conns.some(conn => !conn || typeof conn !== "object" || typeof conn.id !== "string" || typeof conn.name !== "string"))) {
+    return { ok: false, error: "数据库连接列表格式不正确" };
+  }
+  if (cfg.linked_overrides != null && (!Array.isArray(cfg.linked_overrides) || cfg.linked_overrides.some(o => !o || typeof o !== "object" || typeof o.action !== "string" || typeof o.target !== "string"))) {
+    return { ok: false, error: "工程关联覆盖列表格式不正确" };
+  }
   return {
     ok: true,
     data: {
@@ -117,7 +146,13 @@ export interface ImportPlan {
   connCount: number;
   connNames: string[];
   hasHeap: boolean;
+  hasClientHeap: boolean;
   hasSvnUser: boolean;
+  hasLang: boolean;
+  /** 工程关联覆盖条数（全量替换语义，导入即覆盖本机列表）。 */
+  overrideCount: number;
+  /** 覆盖里的工程名 / 路径（`add` 动作可能只有 dir，这时显示 dir）。 */
+  overrideTargets: string[];
   /** 恒定 true：口令永远不进导出物。界面据此显示固定提示。 */
   secretsExcluded: true;
 }
@@ -128,13 +163,18 @@ export function buildImportPlan(data: ConfigExport): ImportPlan {
     (f) => f.value.trim() !== "",
   );
   const conns = cfg.db_conns ?? [];
+  const overrides = cfg.linked_overrides ?? [];
   return {
     fromVersion: data.from_version,
     pathItems,
     connCount: conns.length,
     connNames: conns.map((c) => c.name || c.id),
     hasHeap: cfg.server_heap_mb != null,
+    hasClientHeap: cfg.client_heap_mb != null,
     hasSvnUser: cfg.svn_user != null,
+    hasLang: cfg.lang_enabled != null || cfg.lang_auto_start != null || cfg.lang_xmx_mb != null,
+    overrideCount: overrides.length,
+    overrideTargets: overrides.map((o) => o.target || o.dir || o.action),
     secretsExcluded: true,
   };
 }

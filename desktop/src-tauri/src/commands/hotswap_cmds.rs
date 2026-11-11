@@ -45,14 +45,7 @@ pub(super) fn after_compile(
             continue;
         }
         if !auto {
-            let queued = match st.hotswap_of(target).lock() {
-                Ok(mut h) => {
-                    h.pending.merge(batch);
-                    true
-                }
-                Err(_) => false,
-            };
-            if queued {
+            if queue_pending(st, target, batch) {
                 let _ = app.emit("hotswap-pending", pending_total(st));
             }
             continue;
@@ -69,6 +62,44 @@ pub(super) fn after_compile(
             log::warn!("热替换推送线程起不来（{}）：{e}", target.label());
         }
     }
+}
+
+/// 手动模式：把一批编译产物攒进该目标的待推列表。锁坏了返回 false（不通知前端）。
+fn queue_pending(st: &AppState, target: Target, batch: Batch) -> bool {
+    match st.hotswap_of(target).lock() {
+        Ok(mut h) => {
+            h.pending.merge(batch);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// 取走两个目标各自攒着的批次（空批次不返回）。先取出再推：推送期间编译出的新类进入下一批。
+fn take_pending(st: &AppState) -> Result<Vec<(Target, Batch)>, String> {
+    let mut batches = Vec::new();
+    for target in Target::ALL {
+        let mut h = st
+            .hotswap_of(target)
+            .lock()
+            .map_err(|_| "热替换状态异常".to_string())?;
+        let batch = std::mem::take(&mut h.pending);
+        if !batch.is_empty() {
+            batches.push((target, batch));
+        }
+    }
+    Ok(batches)
+}
+
+/// 丢掉两个目标攒着的待推类。
+fn clear_pending(st: &AppState) -> Result<(), String> {
+    for target in Target::ALL {
+        st.hotswap_of(target)
+            .lock()
+            .map_err(|_| "热替换状态异常".to_string())?
+            .pending = Batch::default();
+    }
+    Ok(())
 }
 
 /// 两个目标的待推类数之和（`hotswap-pending` 事件的载荷）。
@@ -266,13 +297,7 @@ pub async fn hotswap_clear_pending(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    for target in Target::ALL {
-        state
-            .hotswap_of(target)
-            .lock()
-            .map_err(|_| "热替换状态异常".to_string())?
-            .pending = Batch::default();
-    }
+    clear_pending(state.inner())?;
     let _ = app.emit("hotswap-pending", 0usize);
     Ok(())
 }
@@ -287,17 +312,7 @@ pub async fn hotswap_push_pending(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<Report, String> {
-    let mut batches = Vec::new();
-    for target in Target::ALL {
-        let mut h = state
-            .hotswap_of(target)
-            .lock()
-            .map_err(|_| "热替换状态异常".to_string())?;
-        let batch = std::mem::take(&mut h.pending);
-        if !batch.is_empty() {
-            batches.push((target, batch));
-        }
-    }
+    let batches = take_pending(state.inner())?;
     if batches.is_empty() {
         return Err("没有待热替换的类".to_string());
     }
@@ -313,4 +328,101 @@ pub async fn hotswap_push_pending(
     }
     let _ = app.emit("hotswap-pending", 0usize);
     last.ok_or_else(|| "没有待热替换的类".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AppConfig;
+    use crate::hotswap::ClassItem;
+    use std::path::PathBuf;
+
+    fn batch(root: &str, names: &[&str]) -> Batch {
+        let root = PathBuf::from(root);
+        Batch {
+            roots: vec![root.clone()],
+            classes: names
+                .iter()
+                .map(|n| ClassItem {
+                    name: n.to_string(),
+                    file: root.join(format!("{}.class", n.replace('.', "/"))),
+                })
+                .collect(),
+        }
+    }
+
+    fn state() -> (tempfile::TempDir, Arc<AppState>) {
+        let d = tempfile::tempdir().unwrap();
+        let st = AppState::new(AppConfig::default(), d.path().to_path_buf());
+        (d, st)
+    }
+
+    #[test]
+    fn 手动模式两个目标各攒各的() {
+        let (_d, st) = state();
+        assert!(queue_pending(
+            &st,
+            Target::Server,
+            batch("s/classes", &["a.A", "a.B"])
+        ));
+        assert!(queue_pending(
+            &st,
+            Target::Client,
+            batch("c/classes", &["c.C"])
+        ));
+        assert_eq!(pending_total(&st), 3);
+        // 互不串：服务端那份里没有客户端的类
+        let server = st.hotswap_of(Target::Server).lock().unwrap();
+        assert!(server
+            .pending
+            .classes
+            .iter()
+            .all(|c| c.name.starts_with("a.")));
+        let client = st.hotswap_of(Target::Client).lock().unwrap();
+        assert_eq!(client.pending.classes.len(), 1);
+    }
+
+    #[test]
+    fn 同一目标重复攒会去重() {
+        let (_d, st) = state();
+        queue_pending(&st, Target::Client, batch("c/classes", &["c.C"]));
+        queue_pending(&st, Target::Client, batch("c/classes", &["c.C", "c.D"]));
+        assert_eq!(pending_total(&st), 2);
+    }
+
+    #[test]
+    fn 推送取走两边的批次并清空待推列表() {
+        let (_d, st) = state();
+        queue_pending(&st, Target::Server, batch("s/classes", &["a.A"]));
+        queue_pending(&st, Target::Client, batch("c/classes", &["c.C"]));
+        let taken = take_pending(&st).unwrap();
+        let targets: Vec<Target> = taken.iter().map(|(t, _)| *t).collect();
+        assert_eq!(targets, vec![Target::Server, Target::Client]);
+        assert_eq!(pending_total(&st), 0);
+        // 取走之后新编译出的类进下一批，不会被这一次吞掉
+        queue_pending(&st, Target::Client, batch("c/classes", &["c.E"]));
+        let next = take_pending(&st).unwrap();
+        assert_eq!(next.len(), 1);
+        assert_eq!(next[0].0, Target::Client);
+    }
+
+    #[test]
+    fn 只有一边有待推类时只取那一边() {
+        let (_d, st) = state();
+        queue_pending(&st, Target::Client, batch("c/classes", &["c.C"]));
+        let taken = take_pending(&st).unwrap();
+        assert_eq!(taken.len(), 1);
+        assert_eq!(taken[0].0, Target::Client);
+        assert!(take_pending(&st).unwrap().is_empty());
+    }
+
+    #[test]
+    fn 清空待推列表两边都清() {
+        let (_d, st) = state();
+        queue_pending(&st, Target::Server, batch("s/classes", &["a.A"]));
+        queue_pending(&st, Target::Client, batch("c/classes", &["c.C"]));
+        clear_pending(&st).unwrap();
+        assert_eq!(pending_total(&st), 0);
+        assert!(take_pending(&st).unwrap().is_empty());
+    }
 }

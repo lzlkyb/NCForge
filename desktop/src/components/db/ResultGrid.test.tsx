@@ -98,6 +98,37 @@ function key(el: Element, value: string, options: KeyboardEventInit = {}) {
   act(()=>el.dispatchEvent(new KeyboardEvent("keydown",{key:value,bubbles:true,cancelable:true,...options})));
 }
 
+it("Ctrl+A 与左上角全选一致，不跳动滚动位置；编辑框保留全选文本", () => {
+  act(() => root.render(<Grid />));
+  const grid = host.querySelector<HTMLDivElement>('[role="grid"]')!;
+  act(() => { grid.scrollTop = 500 * 26; grid.dispatchEvent(new Event("scroll", { bubbles: true })); grid.focus(); });
+  const top = grid.scrollTop;
+  key(grid, "a", { ctrlKey: true });
+  const corner = host.querySelector<HTMLButtonElement>('[aria-label="全选结果"]')!;
+  expect(corner.getAttribute("aria-pressed")).toBe("true"); expect(grid.scrollTop).toBe(top);
+  expect(host.querySelectorAll('[role="gridcell"][aria-selected="true"]').length).toBeGreaterThan(2);
+  key(grid, "c", { ctrlKey: true }); expect(copyText).toHaveBeenCalledOnce();
+  const copied = vi.mocked(copyText).mock.calls[0][0].split(/\r?\n/);
+  expect(copied).toHaveLength(2000); expect(copied[0]).toBe("0\t名称 0"); expect(copied[1999]).toBe("1999\t名称 1999");
+  key(grid, "Home", { ctrlKey: true }); key(grid, "F2");
+  const input = host.querySelector<HTMLInputElement>(".dbx-gedit")!;
+  const event = new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true, cancelable: true });
+  act(() => input.dispatchEvent(event)); expect(event.defaultPrevented).toBe(false);
+});
+
+it("系统复制事件能复制结果选区，编辑框仍使用原生复制", () => {
+  act(() => root.render(<Grid />));
+  const grid = host.querySelector<HTMLDivElement>('[role="grid"]')!;
+  const event = new Event("copy", { bubbles: true, cancelable: true });
+  act(() => grid.dispatchEvent(event));
+  expect(event.defaultPrevented).toBe(true); expect(copyText).toHaveBeenCalledOnce();
+  key(grid, "Home", { ctrlKey: true }); key(grid, "F2");
+  const input = host.querySelector<HTMLInputElement>(".dbx-gedit")!;
+  const textCopy = new Event("copy", { bubbles: true, cancelable: true });
+  act(() => input.dispatchEvent(textCopy));
+  expect(textCopy.defaultPrevented).toBe(false); expect(copyText).toHaveBeenCalledOnce();
+});
+
 it("表头提供单一 Tab 入口，键盘排序和菜单关闭后回到原表头",()=>{
   const sorted=vi.fn(), selected=vi.fn();
   function Headers() {
@@ -204,8 +235,10 @@ it("列级解码：未开启时原样显示，开启后显示明文并出编码�
 });
 
 /**
- * 双击只负责「编辑」。这个用例守住 0.2.1 的行为变更：不可编辑时**不再顺手打开详情**，
- * 只说明原因并指向 F4 —— 之前双击会拉开一个 340px 的侧栏，看一眼就得手动关。
+ * 双击只负责「编辑」。这个用例守住 0.2.1 的行为变更：不可编辑的**普通格**双击
+ * 不再顺手打开详情，只说明原因并指向 F4 —— 之前双击会拉开一个 340px 的侧栏，
+ * 看一眼就得手动关。显示不全的长文本格是例外，见下面两条用例：那种格在单行
+ * 输入框里既改不了也看不全，双击必须落到能看全的形态上。
  */
 function DetailGrid({ onDetail, hint }: { onDetail: () => void; hint?: string }) {
   const [selection, setSelection] = useState<Selection | null>({ anchor: { r: 0, c: 0 }, end: { r: 0, c: 0 } });
@@ -332,4 +365,58 @@ it("Ctrl+V：从活动格铺开，接住后阻止浏览器默认粘贴",()=>{
   act(()=>{grid.dispatchEvent(ev);});
   expect(ev.defaultPrevented).toBe(true);
   expect(many).toHaveBeenCalledWith([{row:5,col:0,value:"x"},{row:5,col:1,value:"y"}]);
+});
+
+/**
+ * 长文本的三个入口（2026-11-11 用户反馈：VARCHAR2(2000) 的报错堆栈点不出全部内容）。
+ *
+ * 口径按四家主流工具：双击在 PL/SQL Developer / DBeaver / DataGrip / Navicat 里都是
+ * 「编辑」，所以不抢手势；长文本的双击落到多行框 / 查看器，另外格内给一个「…」按钮
+ * ——PL/SQL Developer 的 cell button 就在那个位置，从那儿迁过来的人第一反应就是点它。
+ */
+const LONG_TEXT = `反馈传输数据失败！{"code":"0","success":true,"message":"${"回".repeat(400)}"}`;
+const wideRows: Cell[][] = [[1, LONG_TEXT]];
+const wideOrder = [0];
+
+function WideGrid({ onDetail, canEdit, onSelect }: {
+  onDetail?: () => void; canEdit?: (c: number) => boolean; onSelect?: (r: number, c: number) => void;
+}) {
+  return <ResultGrid columns={columns} rows={wideRows} order={wideOrder} sort={null} onSort={() => {}}
+    sel={{ r: 0, c: 1 }} onSel={p => onSelect?.(p.r, p.c)}
+    selection={{ anchor: { r: 0, c: 1 }, end: { r: 0, c: 1 } }}
+    visible={[0, 1]} frozen={[]} widthOverrides={{}} onWidths={() => {}}
+    onDetail={onDetail} blockedHint="只读查询模式"
+    edit={{ canEdit: canEdit ?? (c => c === 1), changed: new Map(), onEdit: () => {} }} />;
+}
+
+it("双击长文本格：可编辑时打开多行大文本框，而不是单行输入框", () => {
+  act(() => root.render(<WideGrid />));
+  const cell = host.querySelector("#dbx-cell-0-1")!;
+  act(() => { cell.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
+  act(() => { cell.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); });
+  expect(document.querySelector<HTMLTextAreaElement>(".dbx-textedit-area")!.value).toBe(LONG_TEXT);
+  expect(host.querySelector(".dbx-gedit")).toBeNull();
+});
+
+it("双击不可编辑的长文本格：直接开详情，不再只是弹一句提示", () => {
+  const detail = vi.fn();
+  act(() => root.render(<WideGrid onDetail={detail} canEdit={() => false} />));
+  act(() => { host.querySelector("#dbx-cell-0-1")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); });
+  expect(detail).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(toast)).not.toHaveBeenCalled();
+});
+
+it("格内「…」按钮：只出现在显示不全的格子上，点它先落选区再开详情，不进入编辑", () => {
+  const detail = vi.fn(), picked: [number, number][] = [];
+  act(() => root.render(<WideGrid onDetail={detail} canEdit={() => true} onSelect={(r, c) => picked.push([r, c])} />));
+  // 第一列是短数字：不该有按钮；第二列 1200 字符：有
+  expect(host.querySelector("#dbx-cell-0-0 .dbx-cell-more")).toBeNull();
+  const more = host.querySelector<HTMLButtonElement>("#dbx-cell-0-1 .dbx-cell-more")!;
+  expect(more).not.toBeNull();
+  act(() => { more.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
+  act(() => { more.click(); });
+  expect(picked[picked.length - 1]).toEqual([0, 1]);
+  expect(detail).toHaveBeenCalledTimes(1);
+  // 它只是「看」：不能顺手进入编辑态
+  expect(host.querySelector(".dbx-gedit")).toBeNull();
 });

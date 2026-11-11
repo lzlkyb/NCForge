@@ -12,6 +12,8 @@ export interface SettingsRequest {
   section: string;
   /** 要在分类里点亮的键位 id（只对「快捷键」分类有意义）。 */
   binding?: string;
+  /** Stable setting id, including items moved to a new category. */
+  itemId?: string;
   /** 每次请求递增：连续请求同一个分类也要能再次触发高亮。 */
   nonce: number;
 }
@@ -26,6 +28,11 @@ function emit(): void {
 
 export function requestSettingsSection(section: string, binding?: string): void {
   current = { section, binding, nonce: ++nonce };
+  emit();
+}
+
+export function requestSettingItem(section: string, itemId: string): void {
+  current = { section, itemId, nonce: ++nonce };
   emit();
 }
 

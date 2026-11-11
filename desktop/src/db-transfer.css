@@ -51,7 +51,7 @@ body:has(:is(.dbx-transfer-dialog,.dbx-nc-transfer):not([data-exiting])) .toast-
 .dbx-transfer-preview-head h3 { margin: 0; }
 .dbx-transfer-preview-head > span, .dbx-transfer-cols-title h3 span { color: hsl(var(--muted-foreground)); font-weight: 400; font-size: 12px; }
 .dbx-transfer-preview-data { height: 220px; overflow: auto; margin: 14px 0 8px; border: 1px solid hsl(var(--border)); border-radius: var(--r-control); background: hsl(var(--background)); }
-.dbx-transfer-preview-data pre { margin: 0; padding: 12px; font: 12px/1.7 "Cascadia Mono", Consolas, monospace; white-space: pre; }
+.dbx-transfer-preview-data pre { margin: 0; padding: 12px; font: 12px/1.7 var(--font-mono); white-space: pre; }
 .dbx-transfer-preview-empty { padding: 20px; color: hsl(var(--muted-foreground)); }
 .dbx-transfer-preview-data table { border-collapse: collapse; font-size: 12px; white-space: pre; min-width: 100%; }
 .dbx-transfer-preview-data th, .dbx-transfer-preview-data td { border-bottom: 1px solid hsl(var(--border)); border-right: 1px solid hsl(var(--border)); padding: 7px 10px; text-align: left; }
@@ -65,9 +65,9 @@ body:has(:is(.dbx-transfer-dialog,.dbx-nc-transfer):not([data-exiting])) .toast-
 .dbx-transfer-col label > span { min-width: 0; overflow-wrap: anywhere; }
 .dbx-transfer-col small { display: block; font-size: 11px; color: hsl(var(--muted-foreground)); }
 .dbx-transfer-col code { font-size: 12px; }
-.dbx-transfer-type { font: 11px "Cascadia Mono", Consolas, monospace; color: hsl(var(--muted-foreground)); max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-transfer-type { font: 11px var(--font-mono); color: hsl(var(--muted-foreground)); max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-transfer-source-query { margin-top: 16px; }
-.dbx-transfer-source-query pre { font: 12px/1.6 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: hsl(var(--muted-foreground)); }
+.dbx-transfer-source-query pre { font: 12px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; color: hsl(var(--muted-foreground)); }
 .dbx-transfer-foot { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--card)); }
 .dbx-transfer-summary { min-width: 0; font-size: 12px; }
 .dbx-transfer-summary strong { display: block; font-weight: 500; overflow-wrap: anywhere; }

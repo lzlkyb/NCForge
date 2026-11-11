@@ -145,24 +145,26 @@ export function setBindingOverride(id: string, raw: string): BindingResult {
   return { ok: true, chord };
 }
 
-export function clearBindingOverride(id: string): void {
+export function clearBindingOverride(id: string): boolean {
   const all = { ...read() };
   delete all[id];
   try {
     localStorage.setItem(KEY, JSON.stringify(all));
   } catch {
-    return;
+    return false;
   }
   cache = all;
   window.dispatchEvent(new Event(BINDINGS_EVENT));
+  return true;
 }
 
-export function clearAllBindings(): void {
-  cache = {};
+export function clearAllBindings(): boolean {
   try {
     localStorage.removeItem(KEY);
   } catch {
-    return;
+    return false;
   }
+  cache = {};
   window.dispatchEvent(new Event(BINDINGS_EVENT));
+  return true;
 }

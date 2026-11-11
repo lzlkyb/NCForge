@@ -30,7 +30,7 @@ describe("数据库用户任务反馈",()=>{
     let finish!:(r:typeof success & {cancelled:boolean;error:string})=>void;
     mocks.exec.mockReturnValue(new Promise(r=>{finish=r;}));
     const run=runStatements("t",[{text:"select 1",startLine:1},{text:"select 2",startLine:2}],{ignoreErrors:true});
-    await Promise.resolve();await cancelOperation(latest().id);
+    await vi.waitFor(() => expect(mocks.exec).toHaveBeenCalledOnce());await cancelOperation(latest().id);
     expect(mocks.cancel).toHaveBeenCalledWith("c","7");expect(latest().state).toBe("cancelling");expect(mocks.tab.run).toBeTruthy();
     finish({...success,kind:"error",cancelled:true,error:"ORA-01013"});await run;
     expect(latest().state).toBe("cancelled");expect(mocks.exec).toHaveBeenCalledTimes(1);expect(mocks.tab.run).toBeUndefined();

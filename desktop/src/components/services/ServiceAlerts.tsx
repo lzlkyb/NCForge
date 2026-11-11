@@ -3,6 +3,14 @@ import { UNKNOWN_PROCESS_NAME, type ServerStatus } from "../../lib/server";
 import { failureSummary, shortClassName, type HotswapStatus } from "../../lib/hotswap";
 import { openLinkedDialog } from "../../lib/linkedDialog";
 
+/** 遮挡来源目录（去重、最多列两个）；来自 jar 或启动类加载器时后端给空串，不列。 */
+function shadowSources(list: { source: string }[]): string {
+  const uniq = [...new Set(list.map((s) => s.source).filter(Boolean))];
+  if (uniq.length === 0) return "";
+  const shown = uniq.slice(0, 2).join("、");
+  return `（来自 ${shown}${uniq.length > 2 ? " 等" : ""}）`;
+}
+
 /**
  * 服务页的两条告警：端口被别人的进程占着、还没选工程目录。
  *
@@ -16,6 +24,8 @@ export function ServiceAlerts({
   onNavigate,
   hotswap,
   onRestart,
+  source = "middleware",
+  clientRunning = false,
 }: {
   status: ServerStatus | null;
   busy: boolean;
@@ -23,9 +33,15 @@ export function ServiceAlerts({
   onNavigate: (tab: string) => void;
   /** 热替换状态：stale 时出告警条，直到下次重启服务。 */
   hotswap?: HotswapStatus | null;
+  /** 点「重启服务 / 重启客户端」：重启的是告警所属的那个 JVM。 */
   onRestart?: () => void;
+  /** 当前看的是哪个来源页：端口占用、未选工程是中间件的事，客户端页只讲它自己的热替换。 */
+  source?: "middleware" | "client";
+  /** 客户端进程是否在运行（客户端页的过时告警只在它运行时讲）。 */
+  clientRunning?: boolean;
 }) {
-  const owner = status?.portOwner ?? null;
+  const isClientPage = source === "client";
+  const owner = isClientPage ? null : (status?.portOwner ?? null);
   const conflict = !!owner && !status?.portOwnedBySelf;
   const ownerIsJava = !!owner && owner.name.toLowerCase().startsWith("java");
   // 读不到进程名时后端给的是占位值（Rust `server::UNKNOWN_PROCESS`，前端同名常量）。
@@ -33,7 +49,10 @@ export function ServiceAlerts({
   // 下了一个我们并不知道的结论——而用户会据此去任务管理器里找一个「非 java」的进程。
   const ownerUnknown = !!owner && owner.name === UNKNOWN_PROCESS_NAME;
   // 只在服务运行中讲：停了之后下次启动加载的就是磁盘上的新产物
-  const stale = status?.state === "running" && hotswap?.stale ? hotswap.staleReport : null;
+  // 过时报告是两个 JVM 合并后取较新的一条，只在它属于当前页的那个 JVM 时才讲
+  const running = isClientPage ? clientRunning : status?.state === "running";
+  const report = running && hotswap?.stale ? hotswap.staleReport : null;
+  const stale = report && report.target === (isClientPage ? "client" : "server") ? report : null;
 
   return (
     <>
@@ -47,7 +66,7 @@ export function ServiceAlerts({
               </>
             ) : (
               <>
-                <b>{stale.shadowed.map((s) => shortClassName(s.name)).join("、")}</b> 被 classpath 前面的同名类遮挡，改动不会生效{stale.redefined.length > 0 ? `；其余 ${stale.redefined.length} 个类已替换` : ""}。重启解决不了，要在工程关联里调整顺序或删掉那份同名类。
+                <b>{stale.shadowed.map((s) => shortClassName(s.name)).join("、")}</b> 被 classpath 前面的同名类遮挡{shadowSources(stale.shadowed)}，改动暂时不会生效{stale.redefined.length > 0 ? `；其余 ${stale.redefined.length} 个类已替换` : ""}。如果遮挡它的是工程的 out/ 旧产物目录，重启{stale.target === "client" ? "客户端" : "服务"}后工作台编出的产物会排到它前面、就能生效；重启后仍被遮挡，再到工程关联里调整顺序或删掉那份同名类。
               </>
             )}
           </span>
@@ -56,11 +75,10 @@ export function ServiceAlerts({
               工程关联
             </button>
           )}
-          {/* 遮挡不给重启：重启后 classpath 顺序不变，跑的还是那份同名类。
-              这个按钮重启的是中间件，客户端的失败不给（文案里已写明重启客户端） */}
-          {onRestart && stale.state === "failed" && stale.target !== "client" && (
+          {/* 失败、遮挡都给：工程 out/ 旧产物造成的遮挡，重启后工作台产物目录会排到它前面 */}
+          {onRestart && (
             <button type="button" className="sv-btn sv-btn-primary" disabled={busy} onClick={onRestart}>
-              重启服务
+              {stale.target === "client" ? "重启客户端" : "重启服务"}
             </button>
           )}
         </div>
@@ -89,7 +107,7 @@ export function ServiceAlerts({
         </div>
       )}
 
-      {status && !status.projectRoot && (
+      {!isClientPage && status && !status.projectRoot && (
         <div className="sv-alert" data-tone="warn">
           <Icon name="info" size={14} />
           <span className="sv-alert-text">

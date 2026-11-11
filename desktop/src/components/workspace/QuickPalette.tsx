@@ -18,14 +18,6 @@ const PLACEHOLDER: Record<PaletteMode, string> = {
   cmd: "输入命令…",
 };
 
-/**
- * 切模式时 `>` / `@` 前缀后的内容。openPalette 会改 nonce 让 PaletteBody 重挂载、查询归零，
- * 输入法一次性上屏「>停止服务」就只剩空面板；这里先把内容种下，重挂载时作为初始查询。
- * 由 PaletteBody 挂载后清空，避免污染下一次从快捷键打开的面板。
- */
-let paletteSeed = "";
-const seedQuery = (v: string) => { paletteSeed = v; };
-
 /** 把命中区间用 <mark> 圈出来。 */
 function Marked({ text, ranges }: { text: string; ranges?: Range[] }) {
   if (!ranges?.length) return <>{text}</>;
@@ -46,16 +38,16 @@ function Marked({ text, ranges }: { text: string; ranges?: Range[] }) {
  * 开关由 `paletteStore` 管；每次打开 / 切模式 `nonce` 都变，用它当 key 让正文重新挂载，查询和选中项自然归零。
  */
 export function QuickPalette({ activeTab, onNavigate }: { activeTab: string; onNavigate: (tab: string) => void }) {
-  const { open, mode, nonce } = usePalette();
+  const { open, mode, nonce, query } = usePalette();
   if (!open) return null;
-  return <PaletteBody key={nonce} mode={mode} activeTab={activeTab} onNavigate={onNavigate} />;
+  return <PaletteBody key={nonce} mode={mode} initialQuery={query} activeTab={activeTab} onNavigate={onNavigate} />;
 }
 
-function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activeTab: string; onNavigate: (tab: string) => void }) {
+function PaletteBody({ mode, initialQuery, activeTab, onNavigate }: { mode: PaletteMode; initialQuery: string; activeTab: string; onNavigate: (tab: string) => void }) {
   const root = useWorkspaceSelector((s) => s.root);
   const activePath = useWorkspaceSelector((s) => s.activePath);
   const tabs = useWorkspaceSelector((s) => s.tabs);
-  const [query, setQuery] = useState(() => paletteSeed);
+  const [query, setQuery] = useState(initialQuery);
   const restore = useRef<{ el: Element | null; on: boolean }>({ el: document.activeElement, on: true });
   const dialogRef = useRef<HTMLDivElement>(null);
   // 遮罩关闭要求按下与抬起都落在遮罩上：mousedown 在弹窗内、mouseup 在遮罩（或反过来）
@@ -82,7 +74,6 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
     ctx: { root: root ?? null, activePath, openPaths: tabs.map((t) => t.path), run: runner },
   });
   // 本次挂载消费完 seed 后清空，避免下次正常打开面板还带着上一次的前缀内容。
-  useEffect(() => { paletteSeed = ""; }, []);
 
   // 打开前的焦点（通常是编辑器）：Esc 关掉后要还给它；执行了某一项则不还，由目标（编辑器）自己拿焦点
   useEffect(() => {
@@ -104,8 +95,8 @@ function PaletteBody({ mode, activeTab, onNavigate }: { mode: PaletteMode; activ
   const onChange = (v: string) => {
     // 输入框里第一个字符敲 > / @ 直接切模式（和 VS Code 一样）；前缀后的内容要带过去，
     // 否则输入法一次性上屏「>停止服务」切到命令模式后查询被清空、面板空白。
-    if (mode !== "cmd" && v.startsWith(">")) { seedQuery(v.slice(1)); return openPalette("cmd"); }
-    if (mode !== "symbol" && v.startsWith("@")) { seedQuery(v.slice(1)); return openPalette("symbol"); }
+    if (mode !== "cmd" && v.startsWith(">")) return openPalette("cmd", v.slice(1));
+    if (mode !== "symbol" && v.startsWith("@")) return openPalette("symbol", v.slice(1));
     setQuery(v);
   };
   const onKeyDown = (e: React.KeyboardEvent) => {

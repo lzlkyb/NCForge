@@ -157,8 +157,10 @@ export function startHotswapEvents(queryClient: QueryClient): void {
         `${client ? "客户端" : ""}热替换失败：${failureSummary(report)}。${client ? "客户端里仍是旧代码，重启客户端后生效。" : "服务上仍是旧代码。"}`,
         {
           raw: report.message ?? undefined,
-          // 「重启服务」只管中间件；客户端要到服务页自己重启，文案里已经写明
-          action: client ? undefined : { label: "重启服务", onClick: requestServiceRestart },
+          // 两个 JVM 各有各的重启入口：点了都是先切到服务面板、弹确认框
+          action: client
+            ? { label: "重启客户端", onClick: () => requestServiceRestart("client") }
+            : { label: "重启服务", onClick: () => requestServiceRestart("middleware") },
           key: failureToastKey(report.target),
         },
       );

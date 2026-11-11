@@ -433,6 +433,10 @@ impl EngineHandle {
         if self.closed.load(Ordering::Acquire) {
             return Err(BridgeError::new("session-lost", "该会话已经关闭"));
         }
+        if cmd == "closeResult" {
+            // 释放结果不执行 SQL，也不能开启只读事务或自动重连；丢失的会话仍可丢弃本地游标。
+            return self.raw_call(cmd, args, timeout);
+        }
         if cmd == "idlePing" {
             // SQL 可能改变包状态或会话设置，即使事务计数为零也不能静默回收。
             if state.session_used || state.lost {
@@ -1599,6 +1603,22 @@ mod tests {
 
 #[cfg(test)]
 mod readonly_tests {
+    #[test]
+    fn result_cleanup_does_not_start_readonly_or_reconnect_a_lost_session() {
+        let h = super::EngineHandle::rust()
+            .with_policy(std::sync::Arc::new(std::sync::RwLock::new(true)));
+        h.recovery.lock().unwrap().lost = true;
+        let out = h
+            .call_guarded(
+                "closeResult",
+                &["gone"],
+                std::time::Duration::from_secs(1),
+                |_| panic!("结果清理不能重建会话"),
+            )
+            .unwrap();
+        assert_eq!(out["closed"], false);
+        assert!(h.recovery.lock().unwrap().lost, "清理不能隐瞒会话丢失");
+    }
     use super::*;
     #[test]
     fn accepts_selects_ctes_comments_and_string_literals() {

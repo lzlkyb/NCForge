@@ -8,18 +8,19 @@
  * 两条不可退让的约定：
  * - 读失败保持 `null`（未知），**不能**兜底成 `true`——那会把「没读到」显示成「已开启」，
  *   与实际状态相反，用户会以为开关坏了。
- * - 写回是乐观更新 + 失败回滚，并且必须同步更新 `rememberAutoCompile` 的进程内缓存：
+ * - 写回成功后同步更新 `rememberAutoCompile` 的进程内缓存：
  *   保存流程读的是那份缓存，不更新要等重启才生效。
  */
 import { useEffect, useState } from "react";
 import { getConfig, patchConfig, rememberAutoCompile } from "../lib/appConfig";
 import { failureText } from "../lib/friendlyError";
-import { errorToast } from "../lib/errorToast";
+import { useSettingsMutation } from "./useSettingsMutation";
 
 export function useAutoCompilePref() {
   const [value, setValue] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
+  const mutation = useSettingsMutation();
 
   useEffect(() => {
     let alive = true;
@@ -33,16 +34,12 @@ export function useAutoCompilePref() {
   }, [retryToken]);
 
   const save = async (next: boolean) => {
-    setValue(next);
-    rememberAutoCompile(next);
-    try {
-      await patchConfig({ auto_compile: next });
-    } catch (e) {
-      setValue(!next);
-      rememberAutoCompile(!next);
-      errorToast("保存自动编译设置", e);
-    }
+    await mutation.run("auto_compile", async () => {
+      const cfg = await patchConfig({ auto_compile: next });
+      setValue(cfg.auto_compile);
+      rememberAutoCompile(cfg.auto_compile);
+    });
   };
 
-  return { value, error, save, retry: () => setRetryToken((n) => n + 1) };
+  return { value, error, save, feedback: mutation.feedback("auto_compile"), retry: () => setRetryToken((n) => n + 1) };
 }

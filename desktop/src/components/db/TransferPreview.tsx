@@ -1,17 +1,19 @@
 import { CodePreview } from "./CodePreview";
 import { serializeTransfer, transferJsonKeys, type TransferOptions, type TransferData } from "../../lib/resultTransfer";
 import { Icon } from "../ui/icon";
+import { CELL_TEXT_MAX } from "../../lib/wideText";
 
 export function TransferPreview({ data, options: o, order, onColumns, onMove, query, disabled, summary }: {
   data: TransferData; options: TransferOptions; order: number[]; onColumns: (indices: number[]) => void;
   onMove: (index: number, direction: number) => void; query: boolean; disabled?: boolean; summary?: string;
 }) {
   const selected = o.columnIndices;
-  const clipped = data.rows.slice(0, 10).some(r => r.some(v => typeof v === "string" && v.length > 300));
+  // 与结果网格共用同一个「长文本」上限：两处各写一个 300 迟早会漂。
+  const clipped = data.rows.slice(0, 10).some(r => r.some(v => typeof v === "string" && v.length > CELL_TEXT_MAX));
   const sql=["insert","where","update"].includes(o.format);
   const full={...data,rows:data.rows.slice(0,10),originalRows:data.originalRows?.slice(0,10)};
   // SQL compares current and original keys. Abbreviating inputs can invent a key change.
-  const sample = sql ? full : { ...full, rows: full.rows.map(r => r.map(v => typeof v === "string" && v.length > 300 ? `${v.slice(0, 300)}…` : v)) };
+  const sample = sql ? full : { ...full, rows: full.rows.map(r => r.map(v => typeof v === "string" && v.length > CELL_TEXT_MAX ? `${v.slice(0, CELL_TEXT_MAX)}…` : v)) };
   const largeSql=sql && [...full.rows,...(full.originalRows ?? [])].reduce((sum,r)=>sum+r.reduce<number>((n,v)=>n+(typeof v==="string" ? v.length : 16),0),0)>500000;
   let text = "";
   try { if (selected.length && o.format !== "xlsx") text = largeSql ? "样本含超大文本，SQL 预览已暂停；复制或文件导出保留完整值。" : serializeTransfer(sample, o); }

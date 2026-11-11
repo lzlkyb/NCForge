@@ -29,6 +29,8 @@ const form = (patch: Partial<SearchForm>): SearchForm => ({
   replacement: "",
   replacing: false,
   replaceOutcome: null,
+  jarSymbols: null,
+  srcNotes: null,
   ...patch,
 });
 

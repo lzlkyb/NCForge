@@ -33,6 +33,7 @@ export function Menu({
   const { mounted, entered } = usePresence(open);
   const boxRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const keyboardFocus = useRef<"first" | "last" | null>(null);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const viewActive = useViewActive();
   useEffect(() => { if (portal && !viewActive) setOpen(false); }, [portal, viewActive]);
@@ -45,9 +46,23 @@ export function Menu({
     setPosition({ left, top });
   }, [portal, mounted, open, align]);
 
+  useLayoutEffect(() => {
+    if (!open || !mounted || (portal && !position) || !keyboardFocus.current) return;
+    const items = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)');
+    const direction = keyboardFocus.current;
+    keyboardFocus.current = null;
+    if (!items?.length || menuRef.current?.contains(document.activeElement)) return;
+    const target = items[direction === "last" ? items.length - 1 : 0];
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView?.({ block: "nearest" });
+  }, [open, mounted, portal, position]);
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
+      // 鼠标重新打开菜单时不继承上一次的键盘意图：否则焦点被抢进菜单，
+      // 而用户根本没想用键盘（键盘意图只在「按键打开」那一次有效）。
+      keyboardFocus.current = null;
       if (!boxRef.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -62,7 +77,10 @@ export function Menu({
       }
       if ((!boxRef.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node)) || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
       const editing = e.target instanceof HTMLElement && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
-      if (editing && (e.key === "Home" || e.key === "End")) return;
+      if (editing && (
+        e.key === "Home" || e.key === "End" ||
+        !(e.target instanceof HTMLInputElement) || !["text", "search"].includes(e.target.type)
+      )) return;
       const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)') ?? []);
       if (!items.length) return;
       e.preventDefault();
@@ -71,11 +89,16 @@ export function Menu({
       items[index].focus({ preventScroll: true });
       items[index].scrollIntoView?.({ block: "nearest" });
     };
+    const onFocus = (event: FocusEvent) => {
+      if (event.target instanceof Node && !boxRef.current?.contains(event.target) && !menuRef.current?.contains(event.target)) setOpen(false);
+    };
+    window.addEventListener("focusin", onFocus);
     window.addEventListener("mousedown", onDown, true);
     window.addEventListener("keydown", onKey, true);
     const onMove = (e: Event) => { if (portal && (!(e.target instanceof Node) || !menuRef.current?.contains(e.target))) setOpen(false); };
     if (portal) { window.addEventListener("resize", onMove); window.addEventListener("scroll", onMove, true); }
     return () => {
+      window.removeEventListener("focusin", onFocus);
       window.removeEventListener("mousedown", onDown, true);
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("resize", onMove);
@@ -95,7 +118,15 @@ export function Menu({
   </div>;
 
   return (
-    <div ref={boxRef} className="relative">
+    <div ref={boxRef} className="relative" onKeyDownCapture={event => {
+      if (open || event.nativeEvent.isComposing || event.keyCode === 229 || !(event.target instanceof HTMLButtonElement)) return;
+      if (event.key === "Enter" || event.key === " ") keyboardFocus.current = "first";
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        keyboardFocus.current = event.key === "ArrowUp" ? "last" : "first";
+        setOpen(true);
+      }
+    }}>
       {trigger(open, () => setOpen((v) => !v))}
       {portal ? menu && createPortal(menu, document.body) : menu}
     </div>

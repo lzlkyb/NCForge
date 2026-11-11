@@ -3,6 +3,7 @@ import { registerCommands } from "../lib/commandRegistry";
 import { EDITOR_COMMANDS, currentIsJava, runEditorCommand } from "../lib/editorActions";
 import { organizeImportsCommand } from "../lib/javaActions";
 import { runRefactor } from "../lib/refactor";
+import { runExtractParameter } from "../lib/refactorParameter";
 import { REFACTOR_KINDS } from "../lib/refactorPlan";
 import { runCallHierarchy } from "../lib/callHierarchy";
 import { runTypeHierarchy, typeHierarchyKey } from "../lib/typeHierarchy";
@@ -120,6 +121,12 @@ export function useFilesTabCommands(deps: FilesTabCommands) {
       id: "editor.extractField",
       title: `提取字段（Ctrl+Alt+F：选中${REFACTOR_KINDS.extractField.need}）`,
       run: () => void runRefactor("extractField"),
+      enabled: () => !!live.current.activePath && currentIsJava(),
+    },
+    {
+      id: "editor.extractParameter",
+      title: "提取参数（Ctrl+Alt+P：选中方法体里的字面量或 static final 常量；设置里可放宽）",
+      run: () => void runExtractParameter(),
       enabled: () => !!live.current.activePath && currentIsJava(),
     },
     {

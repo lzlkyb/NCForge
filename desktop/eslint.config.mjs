@@ -26,6 +26,10 @@ export default tseslint.config(
       "node_modules/**",
       "public/**",
       "src-tauri/**",
+      // cargo 的构建产物。tauri 的 build script 会往 target/debug/build/*/out/
+      // 写 JS（`__global-api-script.js` 等），`.gitignore` 忽略了 target/，这里
+      // 不同步忽略的话——只要本机跑过一次 cargo build/test，eslint 就会红。
+      "target/**",
       // 生成物（由 scripts/gen-changelog.mjs 写入），不归人管。
       "src/lib/changelog.generated.ts",
       // 临时探针脚本（`_` 前缀，.gitignore 里的 `_*.mjs` 与 `scripts/_*/` 同一条约定）。

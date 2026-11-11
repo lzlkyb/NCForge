@@ -8,43 +8,71 @@ import { SettingsRow } from "../ui/SettingsRow";
 import { SettingsChoice } from "../ui/SettingsChoice";
 import { SettingsField, integerRange } from "./SettingsField";
 import { SettingsGroup } from "./SettingsGroup";
+import { Button } from "../ui/button";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { SqlFormatPreview } from "./SqlFormatPreview";
 import { SqlCompletionSettings } from "./SqlCompletionSettings";
 import {
-  SQL_DIALECTS, setSqlFormatPrefs, useSqlFormatPrefs,
+  SQL_DIALECTS, setSqlFormatPrefs, useSqlFormatPrefs, DEFAULT_SQL_FORMAT,
   type SqlDialect, type SqlFormatPrefs,
 } from "../../lib/sqlFormatPrefs";
 
 const CASE_LABEL = { preserve: "保持原样", upper: "大写", lower: "小写" } as const;
 const INDENT_LABEL = { standard: "标准", tabularLeft: "表格·左对齐", tabularRight: "表格·右对齐" } as const;
 const LOGICAL_LABEL = { before: "运算符在行首", after: "运算符在行尾" } as const;
+const LAYOUT_LABEL = { reading: "阅读优先", expanded: "结构展开" } as const;
 
 export function SqlFormatSettings() {
   const p = useSqlFormatPrefs();
   const [failed, setFailed] = useState(false);
-  const save = (patch: Partial<SqlFormatPrefs>) => setFailed(!setSqlFormatPrefs(patch));
+  const [resetOpen, setResetOpen] = useState(false);
+  const save = (patch: Partial<SqlFormatPrefs>) => {
+    const stored = setSqlFormatPrefs(patch);
+    setFailed(!stored);
+    // Fields only report success when persistence succeeded, including same-value retries.
+    if (!stored) throw new Error("本次会话已生效，但未保存到本机。请重试保存。");
+  };
+  const apply = (patch: Partial<SqlFormatPrefs>) => { try { save(patch); } catch { setFailed(true); } };
   const dialectLabel = SQL_DIALECTS.find((item) => item.value === p.dialect)?.label ?? p.dialect;
   return <Card className="flex flex-col gap-1 p-2">
     {failed && <p className="settings-row-feedback text-xs text-destructive-ink" role="alert">
-      已在本机生效，但无法写入本机存储；重启后可能恢复默认。
+      本次会话已生效，但无法写入本机存储；重启后可能恢复原值。
+      <Button size="sm" variant="ghost" onClick={() => apply({})}>重试保存</Button>
     </p>}
     <SettingsGroup
       title="排版"
       defaultOpen
-      summary={`${CASE_LABEL[p.keywordCase]} · Tab ${p.tabWidth} · ${INDENT_LABEL[p.indentStyle]}`}
+      summary={`${LAYOUT_LABEL[p.layout]}${p.layout === "reading" ? ` · ${p.lineWidth} 字符` : ""} · ${CASE_LABEL[p.keywordCase]} · ${p.tabWidth} 空格`}
     >
+      <SettingsRow
+        id="sql-format-layout" keywords={["SQL", "排版方式", "阅读优先", "结构展开", "紧凑", "换行太多"]}
+        valueText={LAYOUT_LABEL[p.layout]} label="排版方式" sub="阅读优先减少零散换行，结构展开逐项展示"
+        control={<SettingsChoice label="SQL 排版方式" value={p.layout}
+          options={(Object.keys(LAYOUT_LABEL) as SqlFormatPrefs["layout"][]).map(value => ({ value, label: LAYOUT_LABEL[value] }))}
+          onChange={value => apply({ layout: value as SqlFormatPrefs["layout"] })} />}
+      />
+      <SettingsRow
+        id="sql-format-line-width" keywords={["SQL", "目标行宽", "字段列表", "阅读", "换行", "line width"]}
+        valueText={`${p.lineWidth} 字符`} label="目标行宽" sub="字段按宽度填行，超长字符串保持完整"
+        control={<SettingsField value={p.lineWidth} type="number" min={60} max={240} unit="字符"
+          ariaLabel="SQL 目标行宽" validate={integerRange(60, 240, "字符")}
+          disabled={p.layout !== "reading"} disabledReason={p.layout !== "reading" ? "切换到阅读优先后可调整" : undefined}
+          onSave={value => save({ lineWidth: Number(value) })} />}
+      />
       <SettingsRow
         id="sql-format-case" keywords={["SQL", "关键字大小写", "大写", "小写", "keyword case"]}
         valueText={CASE_LABEL[p.keywordCase]} label="关键字大小写" sub="默认保持原样，避免无意义的 diff"
         control={<SettingsChoice label="关键字大小写" value={p.keywordCase}
           options={(Object.keys(CASE_LABEL) as SqlFormatPrefs["keywordCase"][]).map((value) => ({ value, label: CASE_LABEL[value] }))}
-          onChange={(value) => save({ keywordCase: value as SqlFormatPrefs["keywordCase"] })} />}
+          onChange={(value) => apply({ keywordCase: value as SqlFormatPrefs["keywordCase"] })} />}
       />
       <SettingsRow
         id="sql-format-indent" keywords={["SQL", "缩进风格", "标准", "表格", "indent"]}
-        valueText={INDENT_LABEL[p.indentStyle]} label="缩进风格" sub="表格风格把 SELECT 列竖向对齐"
-        control={<SettingsChoice label="缩进风格" value={p.indentStyle}
+        valueText={p.layout === "reading" ? "标准" : INDENT_LABEL[p.indentStyle]} label="缩进风格"
+        sub={p.layout === "reading" ? "阅读优先使用标准缩进；表格对齐可选结构展开" : "表格风格把 SELECT 列竖向对齐"}
+        control={<SettingsChoice label="缩进风格" value={p.layout === "reading" ? "standard" : p.indentStyle} disabled={p.layout === "reading"}
           options={(Object.keys(INDENT_LABEL) as SqlFormatPrefs["indentStyle"][]).map((value) => ({ value, label: INDENT_LABEL[value] }))}
-          onChange={(value) => save({ indentStyle: value as SqlFormatPrefs["indentStyle"] })} />}
+          onChange={(value) => apply({ indentStyle: value as SqlFormatPrefs["indentStyle"] })} />}
       />
       <SettingsRow
         id="sql-format-tab" keywords={["SQL", "缩进宽度", "Tab", "indent width"]}
@@ -59,26 +87,28 @@ export function SqlFormatSettings() {
         last
         control={<SettingsChoice label="逻辑运算符换行" value={p.logicalOperatorNewline}
           options={(Object.keys(LOGICAL_LABEL) as SqlFormatPrefs["logicalOperatorNewline"][]).map((value) => ({ value, label: LOGICAL_LABEL[value] }))}
-          onChange={(value) => save({ logicalOperatorNewline: value as SqlFormatPrefs["logicalOperatorNewline"] })} />}
+          onChange={(value) => apply({ logicalOperatorNewline: value as SqlFormatPrefs["logicalOperatorNewline"] })} />}
       />
     </SettingsGroup>
 
     <SettingsGroup
       title="宽度与方言"
-      summary={`${dialectLabel} · 长表达式 ${p.expressionWidth} 字符起折 · 语句间 ${p.linesBetweenQueries} 空行`}
+      summary={`${dialectLabel} · 括号内表达式 ${p.expressionWidth} 字符 · 语句间 ${p.linesBetweenQueries} 空行`}
     >
       <SettingsRow
         id="sql-format-dialect" keywords={["SQL", "方言", "Oracle", "MySQL", "PostgreSQL", "SQL Server", "DB2", "SQLite", "dialect"]}
         valueText={dialectLabel} label="方言" sub="手动指定会覆盖按连接自动推断"
-        control={<SettingsChoice label="SQL 方言" value={p.dialect}
-          options={SQL_DIALECTS.map((item) => ({ value: item.value, label: item.label }))}
-          onChange={(value) => save({ dialect: value as SqlDialect })} />}
+        control={<select className="settings-select" aria-label="SQL 方言" value={p.dialect}
+          onChange={e => apply({ dialect: e.target.value as SqlDialect })}>
+          {SQL_DIALECTS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>}
       />
       <SettingsRow
-        id="sql-format-width" keywords={["SQL", "长表达式", "换行宽度", "expression width"]}
-        valueText={`${p.expressionWidth} 字符`} label="长表达式折行宽度" sub="候选列表等长表达式超过该宽度时换行"
+        id="sql-format-width" keywords={["SQL", "长表达式", "括号", "结构展开", "expression width"]}
+        valueText={`${p.expressionWidth} 字符`} label="括号内表达式宽度" sub="结构展开时控制函数、IN 等括号内表达式"
         control={<SettingsField value={p.expressionWidth} type="number" min={1} max={200} unit="字符"
-          ariaLabel="长表达式折行宽度" validate={integerRange(1, 200, "字符")}
+          ariaLabel="括号内表达式宽度" validate={integerRange(1, 200, "字符")}
+          disabled={p.layout === "reading"} disabledReason={p.layout === "reading" ? "阅读优先按目标行宽收拢表达式" : undefined}
           onSave={(value) => save({ expressionWidth: Number(value) })} />}
       />
       <SettingsRow
@@ -90,6 +120,10 @@ export function SqlFormatSettings() {
           onSave={(value) => save({ linesBetweenQueries: Number(value) })} />}
       />
     </SettingsGroup>
+    <SqlFormatPreview prefs={p} />
     <SqlCompletionSettings />
+    <div className="settings-form-actions"><Button size="sm" variant="ghost" onClick={() => setResetOpen(true)}>恢复 SQL 排版默认值</Button></div>
+    <ConfirmDialog open={resetOpen} title="恢复 SQL 排版默认值？" description="排版方式、目标行宽、关键字大小写、缩进、逻辑运算符换行、方言、括号内表达式宽度与语句间空行都会恢复默认，并立即生效。"
+      confirmLabel="恢复默认" onCancel={() => setResetOpen(false)} onConfirm={() => { apply(DEFAULT_SQL_FORMAT); setResetOpen(false); }} />
   </Card>;
 }

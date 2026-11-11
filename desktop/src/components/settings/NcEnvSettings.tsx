@@ -1,279 +1,146 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { Icon } from "../ui/icon";
-import { toast } from "../ui/toast";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { SettingsRow } from "../ui/SettingsRow";
 import { SettingsGroup } from "./SettingsGroup";
+import { SettingsPath } from "./SettingsPath";
 import { failureText } from "../../lib/friendlyError";
-import { errorToast } from "../../lib/errorToast";
 import { pickFolder, pickFolderError } from "../../lib/folderPicker";
-import {
-  ncHomeCandidates,
-  ncHomeProbe,
-  ncHomeSet,
-  serverStatus,
-  type HomeCandidate,
-  type NcHome,
-} from "../../lib/server";
+import { ncHomeCandidates, ncHomeProbe, ncHomeSet, serverStatus, type HomeCandidate, type NcHome } from "../../lib/server";
 import "./settings-ncenv.css";
 
-/** 跳到别的工具页（与 HeaderMenus 应用菜单同一套事件，见 App.tsx 的监听）。 */
+type EditState = {
+  path: string | null; checked: NcHome | null; checking: boolean; saving: boolean;
+  error: string | null; saved: string | null; confirm: boolean;
+  candidates: HomeCandidate[] | null; scanning: boolean; scanError: string | null;
+};
+const initial: EditState = { path: null, checked: null, checking: false, saving: false, error: null, saved: null,
+  confirm: false, candidates: null, scanning: false, scanError: null };
 const goTab = (tab: string) => window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: tab }));
 
-/**
- * 设置 → 开发 → 「NC 环境」：NC 安装目录（NC home）的固定配置处。
- *
- * 为什么单开这一页（2026-11-06）：home 的判定（`nc_home::probe`，按内容识别）
- * 一直很稳，但**发现**和**入口**是缺口——没配置时只试一个硬编码默认位置，
- * 唯一能改的地方埋在「NC 服务」页顶部一条配置栏里，还只能手敲路径。
- * 这里把三件事收口：显式配置（浏览 + 手输）、自动探测候选、环境自检。
- *
- * **全应用唯一的 home 编辑入口**：服务页、补丁页健康条、各处报错文案都只读
- * 展示 + 跳转到这里，不再有第二个能改 home 的地方（数据流本来就走同一份
- * `AppConfig.nc_home`，统一的是入口与展示）。
- *
- * 运行中改 home 不杀正在跑的 JVM：端口按新 home 的 prop.xml 读，会出现
- * 「启动中」假象，所以先问一句（与「NC 服务」页原 PathField 同一套守卫）。
- */
 export function NcEnvSettings() {
   const qc = useQueryClient();
-  const probe = useQuery({
-    queryKey: ["nc-home"],
-    queryFn: () => ncHomeProbe(),
-    staleTime: 30_000,
-    retry: false,
-  });
-  // 只为拿「服务在不在跑」：改 home 时决定要不要弹确认框。
-  const server = useQuery({
-    queryKey: ["server-status"],
-    queryFn: serverStatus,
-    staleTime: 5_000,
-    retry: false,
-  });
-
-  /** 编辑中的路径草稿；null = 展示态。 */
-  const [draft, setDraft] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [scanning, setScanning] = useState(false);
-  /** 候选扫描结果；null = 还没扫过（与「扫了但没有」是两回事）。 */
-  const [cands, setCands] = useState<HomeCandidate[] | null>(null);
-  /** 运行中切换的确认闸：用户在弹窗上选完才继续保存。 */
-  const [pending, setPending] = useState<{ path: string; resolve: (ok: boolean) => void } | null>(null);
-
+  const probe = useQuery({ queryKey: ["nc-home"], queryFn: () => ncHomeProbe(), staleTime: 30_000, retry: false });
+  const server = useQuery({ queryKey: ["server-status"], queryFn: serverStatus, staleTime: 5_000, retry: false });
+  const [edit, setEdit] = useState(initial);
+  const operation = useRef(0);
+  const saving = useRef(false);
+  const current = probe.data?.root ?? "";
+  const path = edit.path ?? current;
+  const busy = edit.checking || edit.saving || edit.confirm;
   const running = server.data?.state === "running" || server.data?.state === "starting";
-  const home: NcHome | undefined = probe.data;
-  const current = home?.root ?? "";
-
-  const save = async (path: string) => {
-    const p = path.trim();
-    if (!p) return;
-    if (running && !(await new Promise<boolean>((resolve) => setPending({ path: p, resolve })))) return;
-    setSaving(true);
-    try {
-      const saved = await ncHomeSet(p);
-      qc.setQueryData(["nc-home"], saved);
-      setDraft(null);
-      toast(running ? "NC 安装目录已保存，重启服务后生效" : "NC 安装目录已切换", "success");
-      // home 换了：服务状态（端口）与补丁默认值（落位层）都按新 home 重读
-      void qc.invalidateQueries({ queryKey: ["server-status"] });
-      void qc.invalidateQueries({ queryKey: ["patch-defaults"] });
-    } catch (e) {
-      errorToast("保存 NC 安装目录", e);
-    } finally {
-      setSaving(false);
-    }
+  const choose = (next: string) => {
+    ++operation.current;
+    setEdit(prev => ({ ...prev, path: next, checked: null, error: null, saved: null, checking: false }));
   };
-
+  const reset = () => { ++operation.current; setEdit(prev => ({ ...prev, path: null, checked: null, error: null, saved: null, checking: false })); };
   const browse = async () => {
     try {
-      const picked = await pickFolder({ title: "选择 NC 安装目录（含 ufjdk 的那一层）", defaultPath: current || undefined });
-      if (picked) await save(picked);
-    } catch (e) {
-      toast(pickFolderError(e), "error");
-    }
+      const selected = await pickFolder({ title: "选择 NC 安装目录（含 ufjdk、modules 的那一层）", defaultPath: path || undefined });
+      if (selected) choose(selected);
+    } catch (e) { setEdit(prev => ({ ...prev, error: pickFolderError(e) })); }
   };
-
-  const scan = async () => {
-    setScanning(true);
+  const check = async () => {
+    if (!path.trim()) { setEdit(prev => ({ ...prev, error: "请输入或选择 NC 安装目录。" })); return; }
+    const token = ++operation.current;
+    setEdit(prev => ({ ...prev, checking: true, checked: null, error: null, saved: null }));
     try {
-      const list = await ncHomeCandidates();
-      setCands(list);
-      if (list.length === 0) toast("没扫到 NC 安装目录：换「浏览」手动指定", "info");
+      const checked = await ncHomeProbe(path.trim());
+      if (token === operation.current) setEdit(prev => ({ ...prev, checked, checking: false }));
     } catch (e) {
-      errorToast("扫描候选目录", e);
-    } finally {
-      setScanning(false);
+      if (token === operation.current) setEdit(prev => ({ ...prev, checking: false, error: failureText("检测目录", e) }));
     }
   };
+  const commit = async () => {
+    if (!edit.checked || saving.current) return;
+    saving.current = true;
+    setEdit(prev => ({ ...prev, confirm: false, saving: true, error: null }));
+    try {
+      const home = await ncHomeSet(edit.checked.root);
+      qc.setQueryData(["nc-home"], home);
+      setEdit(prev => ({ ...prev, path: null, checked: null, saved: "NC 安装目录已保存。正在运行的服务继续使用启动时的目录，新目录在下次启动服务时生效。" }));
+      void qc.invalidateQueries({ queryKey: ["server-status"] });
+      void qc.invalidateQueries({ queryKey: ["patch-defaults"] });
+    } catch (e) { setEdit(prev => ({ ...prev, error: failureText("保存 NC 安装目录", e) })); }
+    finally { saving.current = false; setEdit(prev => ({ ...prev, saving: false })); }
+  };
+  const save = async () => {
+    if (!edit.checked || busy || saving.current) return;
+    // Refresh before switching: a stale stopped snapshot must not bypass confirmation.
+    saving.current = true;
+    setEdit(prev => ({ ...prev, saving: true, error: null }));
+    try {
+      const status = await server.refetch();
+      if (status.error || !status.data) throw status.error ?? new Error("服务状态未知，请重试。");
+      saving.current = false;
+      setEdit(prev => ({ ...prev, saving: false }));
+      if (status.data.state !== "stopped") setEdit(prev => ({ ...prev, confirm: true }));
+      else await commit();
+    } catch (e) {
+      saving.current = false;
+      setEdit(prev => ({ ...prev, saving: false, error: failureText("确认服务状态", e) }));
+    }
+  };
+  const scan = async () => {
+    setEdit(prev => ({ ...prev, scanning: true, scanError: null }));
+    try { const candidates = await ncHomeCandidates(); setEdit(prev => ({ ...prev, candidates })); }
+    catch (e) { setEdit(prev => ({ ...prev, scanError: failureText("扫描常见位置", e) })); }
+    finally { setEdit(prev => ({ ...prev, scanning: false })); }
+  };
 
-  const probeSummary = home
-    ? [
-        `${home.moduleCount} 个模块`,
-        "自带 java 1.8",
-        home.hasNcStarter ? "完整安装" : "被裁剪过（无 startup.bat）",
-        home.httpPort ? `端口 ${home.httpPort}` : "端口未读到",
-      ].join(" · ")
-    : "尚未识别";
-
-  return (
-    <div className="settings-section-block">
-      <SettingsGroup
-        title="NC 安装目录"
-        summary={current || "未配置"}
-        defaultOpen
-      >
-        <SettingsRow
-          label="安装目录"
-          sub="含 ufjdk、modules、middleware 的那一层。编译类路径、启动服务、补丁落位都从这里读"
-          layout="stack"
-          control={
-            draft === null ? (
-              <div className="settings-ncenv-path">
-                <span className="settings-ncenv-path-text" title={current || "未配置"}>
-                  {current || <span className="text-muted-foreground">未配置</span>}
-                </span>
-                <Button size="sm" variant="outline" onClick={() => void browse()} disabled={saving}>
-                  <Icon name="folderPlus" size={13} />浏览…
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setDraft(current)} disabled={saving}>
-                  更改
-                </Button>
-              </div>
-            ) : (
-              <div className="settings-ncenv-path">
-                <input
-                  autoFocus
-                  className="settings-memory-input grow"
-                  aria-label="NC 安装目录"
-                  value={draft}
-                  spellCheck={false}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.nativeEvent.isComposing) return;
-                    if (e.key === "Enter") { e.preventDefault(); void save(draft); }
-                    if (e.key === "Escape") setDraft(null);
-                  }}
-                />
-                <Button size="sm" onClick={() => void save(draft)} disabled={saving} isLoading={saving} loadingText="保存中">
-                  保存
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setDraft(null)} disabled={saving}>
-                  取消
-                </Button>
-              </div>
-            )
-          }
-        />
-        <SettingsRow
-          label="探测结果"
-          sub={
-            probe.isLoading
-              ? "正在识别…"
-              : probe.error
-                ? failureText("探测 NC 环境", probe.error)
-                : probeSummary
-          }
-          last
-          control={
-            probe.error ? (
-              <Button size="sm" variant="outline" onClick={() => void probe.refetch()}>
-                重试
-              </Button>
-            ) : undefined
-          }
-        />
-      </SettingsGroup>
-
-      <SettingsGroup
-        title="自动探测"
-        summary={cands ? `${cands.length} 个候选` : "扫描常见位置"}
-      >
-        <SettingsRow
-          label="扫描常见位置"
-          sub="扫各硬盘根目录下两级，以及当前工作区的同级目录。只做轻量识别，点「使用」后才会完整校验"
-          control={
-            <Button size="sm" variant="outline" onClick={() => void scan()} isLoading={scanning} loadingText="扫描中">
-              <Icon name="search" size={13} />扫描
-            </Button>
-          }
-        />
-        {cands && cands.length > 0 && (
-          <div className="settings-ncenv-cands" role="list" aria-label="扫描到的候选">
-            {cands.map((c) => (
-              <div className="settings-ncenv-cand" key={c.root} role="listitem">
-                <div className="settings-ncenv-cand-main">
-                  <span className="settings-ncenv-path-text" title={c.root}>{c.root}</span>
-                  <span className="settings-ncenv-cand-src">
-                    {c.source === "driveRoot" ? "硬盘目录" : "工作区同级"}
-                  </span>
-                  <span className="text-xs text-muted-foreground">{c.moduleCount} 个模块</span>
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="ml-auto"
-                  disabled={saving || c.root === current}
-                  onClick={() => void save(c.root)}
-                >
-                  {c.root === current ? "当前配置" : "使用"}
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </SettingsGroup>
-
-      <SettingsGroup title="环境自检" summary={probe.error ? "home 待修复" : "四项就绪度"}>
-        <div className="settings-ncenv-check" data-tone={probe.error ? "bad" : home ? "ok" : "idle"}>
-          <span className="settings-ncenv-check-dot" aria-hidden="true" />
-          <span className="settings-ncenv-check-k">NC home</span>
-          <span className="settings-ncenv-check-d">
-            {probe.error ? "未识别，换一个目录" : home ? current : "读取中…"}
-          </span>
+  return <>
+    <SettingsRow id="nc-home-current" label="当前配置目录" keywords={["NC", "home", "安装目录", "路径"]}
+      sub={probe.isLoading ? "正在识别当前配置…" : probe.error ? failureText("识别当前配置", probe.error) : probe.data?.root ? `${probe.data.moduleCount} 个模块 · ${probe.data.hasNcStarter ? "完整安装" : "无 startup.bat"} · ${probe.data.httpPort ? `端口 ${probe.data.httpPort}` : "端口未识别"}` : "未配置，请在下方选择目录。"}
+      valueText={current || "未配置"} layout="stack" control={<div className="settings-form-actions"><SettingsPath value={current} label="NC 配置目录" empty="未配置" />{probe.error && <Button size="sm" variant="outline" onClick={() => void probe.refetch()}>重试识别</Button>}</div>} />
+    <SettingsRow id="nc-home-service" label="当前服务目录" valueText={server.isLoading ? "读取中" : server.error ? "读取失败" : running ? server.data?.ncHome ?? "运行目录未知" : "服务未运行"}
+      sub={server.error ? failureText("读取服务状态", server.error) : running ? `正在使用：${server.data?.ncHome ?? "运行目录未知"}；切换配置后需要重新启动服务。` : "下次启动服务时使用配置目录。"}
+      control={<div className="settings-form-actions">{running && server.data?.ncHome && <SettingsPath value={server.data.ncHome} label="当前服务目录" />}<Button size="sm" variant="ghost" onClick={() => server.error ? void server.refetch() : goTab("services")}>{server.error ? "重试读取" : "查看 NC 服务"}</Button></div>} />
+    <SettingsRow id="nc-home-path" controlId="nc-home-input" label="选择安装目录" keywords={["更改", "浏览", "检测", "NC65", "ufjdk"]}
+      sub="选择包含 ufjdk、modules、middleware 的那一层。浏览与候选选择只填写草稿，检测通过后再保存。"
+      valueText={current || "未配置"} layout="stack" error={edit.error ?? undefined}
+      control={<div className="settings-ncenv-editor">
+        <div className="settings-ncenv-path"><Input id="nc-home-input" aria-label="NC 安装目录" value={path} spellCheck={false}
+          placeholder="输入 NC 安装目录" disabled={edit.saving || edit.confirm}
+          onChange={e => choose(e.target.value)} aria-invalid={!!edit.error}
+          onKeyDown={e => {
+            if (e.nativeEvent.isComposing || busy) return;
+            if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); reset(); }
+            if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); void (edit.checked ? save() : check()); }
+          }} />
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void browse()}><Icon name="folder" size={14} />浏览…</Button>
         </div>
-        <div className="settings-ncenv-check" data-tone={home ? "ok" : "idle"}>
-          <span className="settings-ncenv-check-dot" aria-hidden="true" />
-          <span className="settings-ncenv-check-k">java 1.8</span>
-          <span className="settings-ncenv-check-d">
-            {home ? home.java.replace(/^.*[\\/]/, "") : "home 未识别"}
-          </span>
+        <div className="settings-form-actions">
+          <Button size="sm" variant="outline" disabled={busy} isLoading={edit.checking} loadingText="检测中…" onClick={() => void check()}>检测目录</Button>
+          <Button size="sm" disabled={!edit.checked || busy} isLoading={edit.saving} loadingText="保存中…" onClick={() => void save()}>保存并使用</Button>
+          {edit.path !== null && <Button size="sm" variant="ghost" disabled={edit.saving || edit.confirm} onClick={reset}>取消修改</Button>}
         </div>
-        <div className="settings-ncenv-check" data-tone={home ? (home.httpPort ? "ok" : "warn") : "idle"}>
-          <span className="settings-ncenv-check-dot" aria-hidden="true" />
-          <span className="settings-ncenv-check-k">中间件端口</span>
-          <span className="settings-ncenv-check-d">
-            {!home
-              ? "home 未识别"
-              : home.httpPort
-                ? `${home.httpPort}（ierp/bin/prop.xml）`
-                : "prop.xml 读不到，端口按默认 80 处理"}
-          </span>
-          {home && (
-            <span className="settings-ncenv-check-act">
-              <Button size="sm" variant="ghost" onClick={() => goTab("services")}>去服务页</Button>
-            </span>
-          )}
-        </div>
-        <div className="settings-ncenv-check" data-tone="idle">
-          <span className="settings-ncenv-check-dot" aria-hidden="true" />
-          <span className="settings-ncenv-check-k">数据库连接</span>
-          <span className="settings-ncenv-check-d">在数据库页管理，与 home 无关</span>
-          <span className="settings-ncenv-check-act">
-            <Button size="sm" variant="ghost" onClick={() => goTab("db")}>去连接</Button>
-          </span>
-        </div>
-      </SettingsGroup>
-
-      <ConfirmDialog
-        open={pending !== null}
-        title="服务正在运行，切换 NC 安装目录？"
-        description={<>在跑的 JVM 不会重读配置：<b>新目录要停止并重启服务才生效</b>。切换后状态栏会按新目录的 prop.xml 报告端口，可能出现「启动中」或端口冲突提示——那是旧进程还在用旧配置，不是它没停下来。</>}
-        confirmLabel="仍然切换"
-        onCancel={() => { pending?.resolve(false); setPending(null); }}
-        onConfirm={() => { pending?.resolve(true); setPending(null); }}
-      />
-    </div>
-  );
+        <p className="settings-help" role="status">{edit.saved ?? (edit.checked ? "检测通过，确认后保存并使用。" : "请先检测目录，再保存。")}</p>
+        {edit.checked && <div className="settings-ncenv-detection" aria-label="目录检测结果">
+          <p><Icon name="check" size={14} />目录识别通过 · {edit.checked.moduleCount} 个模块</p>
+          <p>Java：<code>{edit.checked.java}</code></p>
+          <p>启动文件：{edit.checked.hasNcStarter ? "startup.bat 已找到" : "无 startup.bat，部分启动方式可能不可用"}</p>
+          <p>中间件端口：{edit.checked.httpPort ?? "未读到配置，服务将按默认端口处理"}</p>
+        </div>}
+      </div>} />
+    <SettingsGroup title="自动发现目录" summary={edit.candidates ? `${edit.candidates.length} 个候选` : "扫描常见位置"} defaultOpen={!current}>
+      <SettingsRow id="nc-home-scan" label="扫描常见位置" keywords={["自动探测", "候选", "搜索目录"]}
+        sub="扫描硬盘根目录及工作区同级目录；候选需要再检测确认。" valueText={edit.scanning ? "扫描中" : edit.candidates ? `${edit.candidates.length} 个候选` : "尚未扫描"}
+        error={edit.scanError ?? undefined} control={<Button size="sm" variant="outline" disabled={edit.scanning || busy} isLoading={edit.scanning} loadingText="扫描中…" onClick={() => void scan()}>扫描常见位置</Button>} />
+      {edit.candidates?.length === 0 && <p className="settings-help" role="status">没有找到候选。请使用上方“浏览”或手动输入目录。</p>}
+      {!!edit.candidates?.length && <div className="settings-ncenv-cands" role="list" aria-label="扫描到的候选">
+        {edit.candidates.map(candidate => <div key={candidate.root} className="settings-ncenv-cand" role="listitem">
+          <div className="settings-ncenv-cand-main"><code>{candidate.root}</code><span className="settings-help">{candidate.moduleCount} 个模块 · {candidate.source === "driveRoot" ? "硬盘目录" : "工作区同级"}</span></div>
+          <Button size="sm" variant="outline" disabled={busy || candidate.root === current} onClick={() => choose(candidate.root)}>{candidate.root === current ? "当前配置" : "选择目录"}</Button>
+        </div>)}
+      </div>}
+    </SettingsGroup>
+    <SettingsRow id="nc-home-database" label="相关配置：数据库连接" sub="数据库连接在数据库页管理，不参与安装目录识别。" last
+      control={<Button size="sm" variant="ghost" onClick={() => goTab("db")}>管理数据库连接</Button>} />
+    <ConfirmDialog open={edit.confirm} title="保存新的 NC 安装目录？"
+      description="当前服务仍使用启动时的目录。本次只保存配置，服务下次启动时使用新目录；现在的服务不会被停止。"
+      confirmLabel="保存配置，稍后重启" onCancel={() => setEdit(prev => ({ ...prev, confirm: false }))} onConfirm={() => void commit()} />
+  </>;
 }

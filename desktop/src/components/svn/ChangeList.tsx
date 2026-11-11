@@ -11,6 +11,8 @@ export function ChangeList({ view, reviewed, selected, loading, error, onSelect,
   const prefs = useSvnListPrefs(root), list = useRef<HTMLDivElement>(null);
   const initialScroll = useRef(prefs.scroll);
   const groups = useMemo(() => svnVisibleGroups(view,prefs.filter,prefs.search,prefs.sort,showIgnored,reviewed,picked),[view,prefs,showIgnored,reviewed,picked]);
+  const visibleFiles = useMemo(() => groups.filter(group => !prefs.closed.includes(group.module)).flatMap(group => group.items), [groups, prefs.closed]);
+  const tabStop = visibleFiles.find(item => selected !== null && keyOf(item.path) === keyOf(selected))?.path ?? visibleFiles[0]?.path;
   // 筛选片计数一趟算完并记住：输入搜索词、滚动等无关渲染不再把几千行过 7 遍
   const counts = useMemo(() => svnFilterCounts(view.groups.flatMap(g => g.items).filter(it => showIgnored || !it.ignored),reviewed,picked),[view,showIgnored,reviewed,picked]);
   const progress = reviewProgress({ ...view, groups: view.groups.map(g => ({ ...g, items: g.items.filter(it => !it.ignored) })) },reviewed);
@@ -41,7 +43,7 @@ export function ChangeList({ view, reviewed, selected, loading, error, onSelect,
       {loading && !view.total && <div className="vc-empty" role="status"><Icon name="spinner" size={20} className="animate-spin" /><div>正在扫描工作副本…<br />完成后显示真实改动</div></div>}
       {error && !loading && <div className="vc-alert" data-tone="warn"><Icon name="alert" size={14} /><span>{view.total ? "扫描失败，以下是上次结果。" : "尚未取得改动结果。"}请在上方重试。</span></div>}
       {!error && !groups.length && !(loading && !view.total) && <div className="vc-empty"><Icon name="check" size={24} /><div>{!view.total ? "工作副本没有本地改动" : !view.shown && view.ignored ? "只有构建产物，没有源码改动" : "当前筛选没有匹配文件"}</div>{view.total > 0 && <button type="button" className="vc-btn" onClick={() => setSvnListPrefs(root,{search:"",filter:"all"})}>清除筛选</button>}</div>}
-      {groups.map(group => <SvnFileRows key={group.module} group={group} closed={prefs.closed.includes(group.module)} onToggleGroup={() => setSvnListPrefs(root,{closed:prefs.closed.includes(group.module) ? prefs.closed.filter(s => s !== group.module) : [...prefs.closed,group.module]})} selected={selected} reviewed={reviewed} picked={picked} root={root} busy={busy} sort={prefs.sort} onSelect={onSelect} onOpenFile={onOpenFile} />)}
+      {groups.map(group => <SvnFileRows key={group.module} group={group} closed={prefs.closed.includes(group.module)} onToggleGroup={() => setSvnListPrefs(root,{closed:prefs.closed.includes(group.module) ? prefs.closed.filter(s => s !== group.module) : [...prefs.closed,group.module]})} selected={selected} tabStop={tabStop} reviewed={reviewed} picked={picked} root={root} busy={busy} sort={prefs.sort} onSelect={onSelect} onOpenFile={onOpenFile} />)}
     </div>
     <div className="vc-chg-foot">
       <div className="vc-list-summary"><button type="button" className="vc-chip" onClick={()=>setSvnListPrefs(root,{filter:"reviewed"})}>已审 {progress.done}/{progress.total}</button><button type="button" className="vc-chip" onClick={() => setSvnListPrefs(root,{filter:"picked",search:""})}>已选 {picked.size}</button></div>

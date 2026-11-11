@@ -7,6 +7,7 @@
 //!   编译报「类找不到」时再按报错分轮补 jar；
 //! - jar 顺序要按 Eclipse 的 classpath 顺序（nc_index 保证），同名类先出现的优先；
 //! - 不要给 `-sourcepath` 放其它模块源码（连带编译会滚雪球式报错）；
+//!   单文件编译只把「被引用、还没编出 class 的同模块兄弟源文件」作为额外编译单元带上（`missing_sibling_sources`）；
 //! - 逐文件标编码，写法是 `X.java[GBK]`。
 //!
 //! 纯逻辑模块，不含 tauri 类型（原因见 workspace.rs 头注释）。
@@ -265,6 +266,158 @@ fn add_import(index: &ClassIndex, jars: &mut BTreeSet<u32>, name: &str, wildcard
     }
 }
 
+/// 把注释和字符串字面量抹成空格（换行保留，行号不变）。
+///
+/// 只为扫「全限定类名」服务：注释和字符串里恰好有个像类名的串，不该让它去挑 jar。
+fn blank_comments_and_strings(text: &str) -> String {
+    let b: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        let next = b.get(i + 1).copied();
+        if c == '/' && next == Some('/') {
+            while i < b.len() && b[i] != '\n' {
+                out.push(' ');
+                i += 1;
+            }
+        } else if c == '/' && next == Some('*') {
+            while i < b.len() && !(b[i] == '*' && b.get(i + 1) == Some(&'/')) {
+                out.push(if b[i] == '\n' { '\n' } else { ' ' });
+                i += 1;
+            }
+            // 吃掉收尾的 */（文件被截断时 i 已到末尾，不越界）
+            for _ in 0..2 {
+                if i < b.len() {
+                    out.push(' ');
+                    i += 1;
+                }
+            }
+        } else if c == '\"' || c == '\'' {
+            out.push(' ');
+            i += 1;
+            while i < b.len() && b[i] != c && b[i] != '\n' {
+                if b[i] == '\\' && i + 1 < b.len() && b[i + 1] != '\n' {
+                    out.push(' ');
+                    i += 1;
+                }
+                out.push(' ');
+                i += 1;
+            }
+            if i < b.len() && b[i] == c {
+                out.push(' ');
+                i += 1;
+            }
+        } else {
+            out.push(c);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// 抽出源码里所有带点的标识符链（`a.b.c.D.m` 这种写法），已去掉注释与字符串。
+///
+/// 不带 import 的全限定写法（`if (nc.vo.tmpub.util.StringUtil.isNull(x))`）只出现在正文里，
+/// 只看 import 挑 jar 会漏掉它们，ecj 报的又是包名（`nc.vo.tmpub cannot be resolved`），
+/// 事后补 jar 的办法点不出缺哪个 jar。
+pub fn extract_dotted_chains(text: &str) -> Vec<String> {
+    let clean = blank_comments_and_strings(text);
+    let b: Vec<char> = clean.chars().collect();
+    let is_start = |c: char| c.is_alphabetic() || c == '_' || c == '$';
+    let is_part = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        // 链只能从标识符开头起，且前一个字符不是标识符/点（避免从 `x.y.z` 中间起一条）
+        let prev_ok = i == 0 || !(is_part(b[i - 1]) || b[i - 1] == '.');
+        if !(is_start(b[i]) && prev_ok) {
+            i += 1;
+            continue;
+        }
+        let begin = i;
+        while i < b.len() {
+            // 标识符字符，或者「后面紧跟标识符开头」的点，都属于这条链
+            let dot_in_chain = b[i] == '.' && b.get(i + 1).is_some_and(|&c| is_start(c));
+            if !(is_part(b[i]) || dot_in_chain) {
+                break;
+            }
+            i += 1;
+        }
+        let chain: String = b[begin..i].iter().collect();
+        if chain.contains('.') && seen.insert(chain.clone()) {
+            out.push(chain);
+        }
+    }
+    out
+}
+
+/// 一条点链里最短的、在类索引里真实存在的类前缀（全限定类名）。
+///
+/// 只有索引命中才算：变量链（`this.a.b`、`vo.getName`）不会误挑 jar。
+fn qualified_class(index: &ClassIndex, chain: &str) -> Option<String> {
+    let segs: Vec<&str> = chain.split('.').collect();
+    (2..=segs.len())
+        .map(|k| segs[..k].join("."))
+        .find(|c| index.jar_for_class(c).is_some())
+}
+
+fn qualified_jar(index: &ClassIndex, chain: &str) -> Option<u32> {
+    qualified_class(index, chain).and_then(|c| index.jar_for_class(&c))
+}
+
+/// 把正文里的全限定类名对应的 jar 补进来（见 `extract_dotted_chains`）。
+///
+/// `chains` 由调用方每文件抽一次后传入：抹注释要 collect 两遍整文件字符，
+/// 全量编译时按文件重复扫是纯浪费。
+fn add_qualified_refs(index: &ClassIndex, jars: &mut BTreeSet<u32>, chains: &[String]) {
+    for chain in chains {
+        if let Some(j) = qualified_jar(index, chain) {
+            jars.insert(j);
+        }
+    }
+}
+
+/// 源码里引用到的类型（单类 import + 正文全限定名）的父类/接口链上的 jar 一并补上。
+///
+/// 只补类型自身的 jar 不够：`nc.vo.am.common.util.StringUtils` 的 `isBlank` 继承自
+/// `nccloud...StringUtils` → `org.apache.commons.lang3.StringUtils`，链上任何一环的 jar
+/// 不在类路径里，ecj 都只报「The method isBlank(String) is undefined」，既不点名缺哪个类，
+/// 也没有「hierarchy inconsistent」可供事后补。`seen` 在整批文件间共用，同一个类只读一次。
+///
+/// `imports` / `chains` 同样是调用方每文件扫一次的结果，与 `add_qualified_refs` 共用。
+fn add_referenced_type_supers(
+    index: &ClassIndex,
+    jars: &mut BTreeSet<u32>,
+    imports: &[(String, bool)],
+    chains: &[String],
+    seen: &mut std::collections::HashSet<String>,
+) {
+    for (name, wildcard) in imports {
+        if *wildcard {
+            continue;
+        }
+        // import 的可能是 static 成员或内部类：逐级去掉末段，取第一个真实存在的类
+        let mut cur = name.as_str();
+        for _ in 0..3 {
+            if index.jar_for_class(cur).is_some() {
+                add_super_chain_seen(index, jars, cur, seen);
+                break;
+            }
+            match cur.rsplit_once('.') {
+                Some((head, _)) => cur = head,
+                None => break,
+            }
+        }
+    }
+    for chain in chains {
+        if let Some(c) = qualified_class(index, chain) {
+            add_super_chain_seen(index, jars, &c, seen);
+        }
+    }
+}
+
 /// 从 ecj 的报错里找「还缺哪个 jar」：
 ///
 /// - `The import X cannot be resolved`（X 可能是类，也可能是 import a.b.* 的包名）
@@ -292,11 +445,77 @@ fn discover_jars(index: &ClassIndex, output: &str, jars: &mut BTreeSet<u32>) -> 
             jars.extend(index.jars_for_package(name).iter().copied());
         }
     }
+    discover_qualified(index, output, jars);
     jars.len() - before
+}
+
+/// 「`a.b.c cannot be resolved`」（点名的是包前缀、不是类）：回读出错那一行，
+/// 找以该前缀开头的全限定写法，按类索引挑 jar。正文里的全限定名在预挑阶段已经处理过，
+/// 这里兜的是预挑漏掉的（比如写在多行表达式里被换行拆开的链）。
+fn discover_qualified(index: &ClassIndex, output: &str, jars: &mut BTreeSet<u32>) {
+    // 一个文件 N 条报错只读一次盘：整文件读 + 解码按文件名缓存（补 jar 最多 6 轮，每轮都重来）
+    let mut texts: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for p in parse_problems(output) {
+        let Some(name) = p.message.strip_suffix(" cannot be resolved") else {
+            continue;
+        };
+        if !name.contains('.') || name.contains(' ') {
+            continue;
+        }
+        let text = texts.entry(p.file.clone()).or_insert_with(|| {
+            std::fs::read(&p.file)
+                .map(|b| decode_lossy(&b))
+                .unwrap_or_default()
+        });
+        let Some(line) = text.lines().nth(p.line.saturating_sub(1) as usize) else {
+            continue;
+        };
+        for chain in extract_dotted_chains(line) {
+            if chain.starts_with(name) {
+                if let Some(j) = qualified_jar(index, &chain) {
+                    jars.insert(j);
+                }
+            }
+        }
+    }
 }
 
 /// 读 class 文件头，返回直接父类与实现接口的全限定名（只解析常量池，不看字段方法）。
 fn class_supers(jar: &Path, fqcn: &str) -> Vec<String> {
+    // 单文件保存编译会反复读同一批类的头，缓存结果；但 jar 会原地重建（旧父类链会让挑 jar 挑错），
+    // 所以 (len, mtime) 进键，再按插入顺序封顶淘汰，长会话里不会无界增长
+    type Stamp = Option<(u64, Option<std::time::SystemTime>)>;
+    type Key = (PathBuf, String, Stamp);
+    type SupersCache = std::sync::Mutex<(
+        std::collections::HashMap<Key, Vec<String>>,
+        std::collections::VecDeque<Key>,
+    )>;
+    const CAP: usize = 4096;
+    static CACHE: std::sync::OnceLock<SupersCache> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let stamp: Stamp = std::fs::metadata(jar)
+        .ok()
+        .map(|m| (m.len(), m.modified().ok()));
+    let key = (jar.to_path_buf(), fqcn.to_string(), stamp);
+    if let Some(hit) = cache.lock().ok().and_then(|c| c.0.get(&key).cloned()) {
+        return hit;
+    }
+    let supers = class_supers_uncached(jar, fqcn);
+    if let Ok(mut c) = cache.lock() {
+        if !c.0.contains_key(&key) {
+            c.1.push_back(key.clone());
+        }
+        c.0.insert(key, supers.clone());
+        while c.1.len() > CAP {
+            if let Some(old) = c.1.pop_front() {
+                c.0.remove(&old);
+            }
+        }
+    }
+    supers
+}
+
+fn class_supers_uncached(jar: &Path, fqcn: &str) -> Vec<String> {
     let parse = || -> Option<Vec<String>> {
         let file = std::fs::File::open(jar).ok()?;
         let mut zip = zip::ZipArchive::new(file).ok()?;
@@ -518,9 +737,14 @@ pub fn select_jars(index: &ClassIndex, files: &[PathBuf]) -> BTreeSet<u32> {
         if let Some(pkg) = extract_package(&text) {
             add_import(index, &mut jars, &pkg, true);
         }
-        for (name, wildcard) in extract_imports(&text) {
-            add_import(index, &mut jars, &name, wildcard);
+        // 每文件只扫一次：import 与点链在下面几个入口间共用，别各扫各的
+        let imports = extract_imports(&text);
+        let chains = extract_dotted_chains(&text);
+        for (name, wildcard) in &imports {
+            add_import(index, &mut jars, name, *wildcard);
         }
+        add_qualified_refs(index, &mut jars, &chains);
+        add_referenced_type_supers(index, &mut jars, &imports, &chains, &mut seen);
         let Some(stem) = f.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
             continue;
         };
@@ -683,13 +907,41 @@ pub fn compile(
 ) -> Result<CompileResult, String> {
     let started = Instant::now();
     let module_dir = env.project_root.join(&job.module);
-    let files = match &job.files {
+    let mut files = match &job.files {
         Some(f) => f.clone(),
         None => match &job.source_roots {
             Some(roots) => collect_sources_in(roots),
             None => collect_sources(&module_dir),
         },
     };
+    // 只编指定文件时，把「被引用、没有 class 的同模块兄弟源文件」一起编；它们的报错不算在本次头上
+    let extras: Vec<PathBuf> = if job.files.is_some() && !files.is_empty() {
+        let roots: Vec<PathBuf> = job
+            .source_roots
+            .clone()
+            .unwrap_or_else(|| SRC_DIRS.iter().map(|d| module_dir.join(d)).collect());
+        let mut built =
+            crate::launch::project_class_dirs(env.project_root, env.nc_home, env.overrides);
+        built.push(job.out_dir.clone());
+        built.extend(job.output_map.iter().map(|(_, o)| o.clone()));
+        let found = missing_sibling_sources(&roots, &built, &files);
+        if !found.is_empty() {
+            log(&format!(
+                "带上 {} 个还没编出 class 的同模块源文件：{}",
+                found.len(),
+                found
+                    .iter()
+                    .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                    .take(5)
+                    .collect::<Vec<_>>()
+                    .join("、")
+            ));
+        }
+        found
+    } else {
+        Vec::new()
+    };
+    files.extend(extras.iter().cloned());
     if files.is_empty() {
         return Err(format!(
             "模块 {} 下没有找到 .java 源文件（查找目录：{}）",
@@ -735,11 +987,14 @@ pub fn compile(
         }
         results.push(compile_group(
             env,
-            &job.module,
-            &files,
-            &out,
-            &job.seed_jars,
-            job.fast,
+            GroupJob {
+                module: &job.module,
+                files: &files,
+                extras: &extras,
+                out_dir: &out,
+                seed_jars: &job.seed_jars,
+                fast: job.fast,
+            },
             log,
         )?);
     }
@@ -780,32 +1035,55 @@ pub fn compile(
     Ok(merged)
 }
 
+/// 一组写到同一个产物目录的编译输入（打成结构只是为了压住参数个数）。
+struct GroupJob<'a> {
+    module: &'a str,
+    /// 本组全部要编的文件（含 `extras`）。
+    files: &'a [PathBuf],
+    /// 为解析引用而带上的兄弟源文件：不计入源文件数，它们的报错也不算本次的。
+    extras: &'a [PathBuf],
+    out_dir: &'a Path,
+    seed_jars: &'a [u32],
+    fast: bool,
+}
+
 /// 编译一组写到同一个目录的文件。
 fn compile_group(
     env: &CompileEnv,
-    module: &str,
-    files: &[PathBuf],
-    out_dir: &Path,
-    seed_jars: &[u32],
-    fast: bool,
+    group: GroupJob,
     log: &dyn Fn(&str),
 ) -> Result<CompileResult, String> {
+    let GroupJob {
+        module,
+        files,
+        extras,
+        out_dir,
+        seed_jars,
+        fast,
+    } = group;
     let started = Instant::now();
+    let is_extra = |p: &Path| extras.iter().any(|e| path_eq(e, p));
     std::fs::create_dir_all(out_dir).map_err(|e| format!("无法创建输出目录: {e}"))?;
     std::fs::create_dir_all(env.work_dir).map_err(|e| format!("无法创建工作目录: {e}"))?;
 
     // 读源码：定编码 + 提取 import
     let mut jars: BTreeSet<u32> = seed_jars.iter().copied().collect();
     let mut sources: Vec<(PathBuf, TextEncoding)> = Vec::with_capacity(files.len());
+    let mut supers_seen = std::collections::HashSet::new();
     for f in files {
         let bytes = std::fs::read(f).map_err(|e| format!("读取 {} 失败: {e}", f.display()))?;
         let text = decode_lossy(&bytes);
         if let Some(pkg) = extract_package(&text) {
             add_import(env.index, &mut jars, &pkg, true);
         }
-        for (name, wildcard) in extract_imports(&text) {
-            add_import(env.index, &mut jars, &name, wildcard);
+        // 每文件只扫一次：import 与点链在下面几个入口间共用（全量编译上千文件，重复抹注释很贵）
+        let imports = extract_imports(&text);
+        let chains = extract_dotted_chains(&text);
+        for (name, wildcard) in &imports {
+            add_import(env.index, &mut jars, name, *wildcard);
         }
+        add_qualified_refs(env.index, &mut jars, &chains);
+        add_referenced_type_supers(env.index, &mut jars, &imports, &chains, &mut supers_seen);
         sources.push((f.clone(), detect_encoding(&bytes)));
     }
     log(&format!(
@@ -858,11 +1136,20 @@ fn compile_group(
     }
     let _ = std::fs::remove_file(&args_path);
 
-    let problems = parse_problems(&output);
+    let all_problems = parse_problems(&output);
+    // 兄弟源文件只是为了让引用解析得到：它们自己的报错不算在本次保存头上
+    let extra_errors = all_problems
+        .iter()
+        .any(|p| p.severity == "error" && is_extra(Path::new(&p.file)));
+    let problems: Vec<Problem> = all_problems
+        .into_iter()
+        .filter(|p| !is_extra(Path::new(&p.file)))
+        .collect();
     let error_count = problems.iter().filter(|p| p.severity == "error").count();
     let warning_count = problems.len() - error_count;
     // ecj 退出码非 0 但一条报错都没解析出来：把原始输出带回去，不要假装成功
-    if !ok && error_count == 0 {
+    // （报错全落在兄弟源文件上时，退出码非 0 是它们造成的，本次要编的文件没问题）
+    if !ok && error_count == 0 && !extra_errors {
         return Err(format!(
             "ecj 异常退出：{}",
             output.lines().take(8).collect::<Vec<_>>().join(" | ")
@@ -871,19 +1158,24 @@ fn compile_group(
     // D4：失败归因（有源码没产物 / 工程被停用 / 产物比源码旧）。
     // **只按类判断**，不扫整棵树——全量新旧检测要 8 秒，见 compile_diag::stale_diagnostics。
     // 依赖链在这里解析一次 `.classpath`（毫秒级）：顺序口径与 class_dirs 共用 `flat_dirs`。
-    let diagnostics = if ok && error_count == 0 {
-        Vec::new()
-    } else {
+    let diagnostics = if error_count > 0 {
         let graph = crate::eclipse_cp::graph(env.project_root, env.nc_home, env.overrides);
         crate::compile_diag::uncompiled_diagnostics(&graph.projects, &problems)
+    } else if extra_errors {
+        // 兄弟有错、本次保存的文件没错：problems 里没有错误能驱动诊断，等于把「有源码没产物 /
+        // 产物比源码旧」这道兜底整个关掉（用户看到成功、运行时却是旧类）。只对被保存文件下探针。
+        let graph = crate::eclipse_cp::graph(env.project_root, env.nc_home, env.overrides);
+        crate::compile_diag::uncompiled_diagnostics(&graph.projects, &product_probes(files, extras))
+    } else {
+        Vec::new()
     };
     for d in &diagnostics {
         log(&format!("诊断：{}", d.message));
     }
     Ok(CompileResult {
-        ok: ok && error_count == 0,
+        ok: error_count == 0,
         duration_ms: started.elapsed().as_millis() as u64,
-        source_count: sources.len(),
+        source_count: sources.iter().filter(|(p, _)| !is_extra(p)).count(),
         error_count,
         warning_count,
         problems,
@@ -894,6 +1186,144 @@ fn compile_group(
         resolved_jars: jars.into_iter().collect(),
         modules: Vec::new(),
     })
+}
+
+/// 产物兜底诊断的探针：只覆盖本次被保存的源文件（兄弟 extras 不算）。
+///
+/// `uncompiled_diagnostics` 是按「报错里点名的缺失符号」驱动的；兄弟有错而被保存文件没错时
+/// 传进去的 problems 一条错误都没有，诊断就成了空。这里按被保存文件自己的类名合成一条探针
+/// （只喂诊断，不进 problems / error_count），让它照样查「有源码没产物 / 产物比源码旧」。
+fn product_probes(files: &[PathBuf], extras: &[PathBuf]) -> Vec<Problem> {
+    let mut out = Vec::new();
+    for f in files {
+        if extras.iter().any(|e| path_eq(e, f)) {
+            continue;
+        }
+        let Some(stem) = f.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        out.push(Problem {
+            severity: "error".to_string(),
+            file: f.to_string_lossy().into_owned(),
+            line: 1,
+            message: format!("{stem} cannot be resolved"),
+        });
+    }
+    out
+}
+
+/// 单文件编译带上的「兄弟源文件」个数上限：只为解决「刚新建、还没编出 class」的引用，不是整模块编译。
+const MAX_SIBLING_UNITS: usize = 40;
+
+/// 顶层类 `fqcn` 在任一类目录里有没有已编出的 class。
+fn class_built(dirs: &[PathBuf], fqcn: &str) -> bool {
+    let rel = format!("{}.class", fqcn.replace('.', "/"));
+    dirs.iter().any(|d| d.join(&rel).is_file())
+}
+
+/// 正文里有没有「按词边界」点名 `stem`：子串不算（引用 `UtilHelper` 不该把 `Util` 也带上，
+/// 那会写出用户没动过的 class）。标识符字符含字母数字与 `_` `$`。
+fn mentions_type(code: &str, stem: &str) -> bool {
+    if stem.is_empty() {
+        return false;
+    }
+    let is_part = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+    code.match_indices(stem).any(|(at, _)| {
+        let before = code[..at].chars().next_back();
+        let after = code[at + stem.len()..].chars().next();
+        before.is_none_or(|c| !is_part(c)) && after.is_none_or(|c| !is_part(c))
+    })
+}
+
+/// 找出「被引用、源码在源根里、但还没有 class」的兄弟源文件，随本次编译一起作为编译单元。
+///
+/// 背景：保存即编只编被改的那一个文件，同模块里刚新建、还没编出 class 的类对它不可见，
+/// 会报 `cannot be resolved`；Eclipse 整个工程一起编，不会有这个问题。
+/// 不用 `-sourcepath`：它会把所有被引用的源码都连带重编、全部写出 class（M0 实测滚雪球）。
+/// 这里只挑「引用得到且确实没有 class」的文件，传递两层，数量封顶。
+///
+/// - `roots`：本模块的源码根；`built_dirs`：判断「class 是否已有」的目录（类路径 + 产物目录）。
+/// - 只认显式 import 与同包里被正文点名的类，通配 import 不展开。
+fn missing_sibling_sources(
+    roots: &[PathBuf],
+    built_dirs: &[PathBuf],
+    requested: &[PathBuf],
+) -> Vec<PathBuf> {
+    let mut extras: Vec<PathBuf> = Vec::new();
+    let mut known: Vec<PathBuf> = requested.to_vec();
+    let mut frontier: Vec<PathBuf> = requested.to_vec();
+    for _depth in 0..2 {
+        let mut next: Vec<PathBuf> = Vec::new();
+        for f in &frontier {
+            let Ok(bytes) = std::fs::read(f) else {
+                continue;
+            };
+            let text = decode_lossy(&bytes);
+            let code = blank_comments_and_strings(&text);
+            let pkg = extract_package(&text).unwrap_or_default();
+            let mut want: Vec<(String, PathBuf)> = Vec::new();
+            // 显式 import：逐级去掉末段，兼容 static 成员 / 内部类
+            for (name, wildcard) in extract_imports(&text) {
+                if wildcard {
+                    continue;
+                }
+                let mut cur = name.as_str();
+                for _ in 0..3 {
+                    for r in roots {
+                        let p = r.join(format!("{}.java", cur.replace('.', "/")));
+                        if p.is_file() {
+                            want.push((cur.to_string(), p));
+                        }
+                    }
+                    match cur.rsplit_once('.') {
+                        Some((head, _)) => cur = head,
+                        None => break,
+                    }
+                }
+            }
+            // 同包：目录里的类，正文里点名了才算
+            for r in roots {
+                let dir = r.join(pkg.replace('.', "/"));
+                let Ok(rd) = std::fs::read_dir(&dir) else {
+                    continue;
+                };
+                for e in rd.flatten() {
+                    let p = e.path();
+                    let Some(stem) = p
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .and_then(|n| n.strip_suffix(".java"))
+                    else {
+                        continue;
+                    };
+                    if mentions_type(&code, stem) {
+                        let fq = if pkg.is_empty() {
+                            stem.to_string()
+                        } else {
+                            format!("{pkg}.{stem}")
+                        };
+                        want.push((fq, p));
+                    }
+                }
+            }
+            for (fq, p) in want {
+                if known.iter().any(|k| path_eq(k, &p)) || class_built(built_dirs, &fq) {
+                    continue;
+                }
+                if extras.len() >= MAX_SIBLING_UNITS {
+                    return extras;
+                }
+                known.push(p.clone());
+                extras.push(p.clone());
+                next.push(p);
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        frontier = next;
+    }
+    extras
 }
 
 /// 按多个源码根收集 `.java`（不跟随 symlink/junction）。
@@ -940,6 +1370,324 @@ fn path_eq(a: &Path, b: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn put(p: &Path, s: &str) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, s).unwrap();
+    }
+
+    /// 只挑「被引用、有源码、没有 class」的兄弟：已编出的、没被点名的都不带，传递引用要跟上。
+    #[test]
+    fn 只带被引用且没有class的兄弟源文件() {
+        let base = crate::test_support::tmp("sib-pure");
+        let root = base.join("src");
+        let built = base.join("classes");
+        let a = root.join("p").join("A.java");
+        put(
+            &a,
+            "package p;\nimport q.B;\nimport q.C;\npublic class A { D d; /* Z */ }\n",
+        );
+        put(
+            &root.join("q").join("B.java"),
+            "package q;\nimport q.F;\npublic class B { F f; }\n",
+        );
+        put(
+            &root.join("q").join("C.java"),
+            "package q;\npublic class C {}\n",
+        );
+        put(
+            &root.join("q").join("F.java"),
+            "package q;\npublic class F {}\n",
+        );
+        put(
+            &root.join("p").join("D.java"),
+            "package p;\npublic class D {}\n",
+        );
+        put(
+            &root.join("p").join("E.java"),
+            "package p;\npublic class E {}\n",
+        );
+        put(
+            &root.join("p").join("Z.java"),
+            "package p;\npublic class Z {}\n",
+        );
+        // C 已经编出过
+        put(&built.join("q").join("C.class"), "x");
+
+        let got = missing_sibling_sources(
+            std::slice::from_ref(&root),
+            std::slice::from_ref(&built),
+            std::slice::from_ref(&a),
+        );
+        let names: BTreeSet<String> = got
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        let want: BTreeSet<String> = ["B.java", "D.java", "F.java"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        // C 已有 class；E 没被点名；Z 只出现在注释里；F 是 B 的引用（第二层）
+        assert_eq!(names, want, "实际：{got:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 没有任何引用缺失时不多带文件。
+    #[test]
+    fn 已全部编出时不带兄弟() {
+        let base = crate::test_support::tmp("sib-none");
+        let root = base.join("src");
+        let built = base.join("classes");
+        let a = root.join("p").join("A.java");
+        put(&a, "package p;\nimport q.B;\npublic class A { }\n");
+        put(
+            &root.join("q").join("B.java"),
+            "package q;\npublic class B {}\n",
+        );
+        put(&built.join("q").join("B.class"), "x");
+        let got = missing_sibling_sources(
+            std::slice::from_ref(&root),
+            std::slice::from_ref(&built),
+            std::slice::from_ref(&a),
+        );
+        assert!(got.is_empty(), "{got:?}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 同包兄弟按词边界点名：`UtilHelper` 不该把 `Util` 带上、`ArrayList` 不该把 `List` 带上；
+    /// 真被点名的仍要带（不能为了少带文件而漏掉引用）。
+    #[test]
+    fn 兄弟点名按词边界_子串不算() {
+        let base = crate::test_support::tmp("sib-word");
+        let root = base.join("src");
+        let built = base.join("classes");
+        for n in ["Util", "UtilHelper", "List", "ArrayList"] {
+            put(
+                &root.join("p").join(format!("{n}.java")),
+                &format!("package p;\npublic class {n} {{}}\n"),
+            );
+        }
+        let names = |f: &PathBuf| -> BTreeSet<String> {
+            missing_sibling_sources(
+                std::slice::from_ref(&root),
+                std::slice::from_ref(&built),
+                std::slice::from_ref(f),
+            )
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect()
+        };
+        let a = root.join("p").join("A.java");
+        put(
+            &a,
+            "package p;\npublic class A { UtilHelper h; ArrayList l; }\n",
+        );
+        let want: BTreeSet<String> = ["UtilHelper.java", "ArrayList.java"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(names(&a), want, "子串命中把没点名的兄弟也带上了");
+
+        let b = root.join("p").join("B.java");
+        put(&b, "package p;\npublic class B { Util u; List l; }\n");
+        let want: BTreeSet<String> = ["Util.java", "List.java"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(names(&b), want, "真被点名的兄弟仍要带上");
+    }
+
+    /// 兄弟有错、被保存文件自己没错时，产物兜底诊断仍要覆盖被保存文件（兄弟不参与）。
+    #[test]
+    fn 兄弟有错时仍对被保存文件做产物诊断() {
+        let base = crate::test_support::tmp("sib-probe");
+        let root = base.join("newar");
+        let a = root
+            .join("m")
+            .join("src")
+            .join("public")
+            .join("p")
+            .join("A.java");
+        let b = root
+            .join("m")
+            .join("src")
+            .join("public")
+            .join("q")
+            .join("B.java");
+        put(&a, "package p;\npublic class A {}\n");
+        put(&b, "package q;\npublic class B { int x = \"s\"; }\n");
+        let classes = root.join("m").join("classes");
+        std::fs::create_dir_all(&classes).unwrap();
+        let projects = vec![crate::eclipse_cp::LinkedProject {
+            name: "newar".to_string(),
+            root: Some(root.to_string_lossy().into_owned()),
+            origin: "legacy".to_string(),
+            depth: 0,
+            exported: true,
+            class_dirs: vec![classes.to_string_lossy().into_owned()],
+            disabled: false,
+            has_classpath: false,
+        }];
+        let files = vec![a.clone(), b.clone()];
+        let extras = vec![b.clone()];
+        let probes = product_probes(&files, &extras);
+        assert_eq!(probes.len(), 1, "只探被保存文件：{probes:?}");
+        assert_eq!(probes[0].file, a.to_string_lossy().into_owned());
+
+        // 本次 problems 里一条错误都没有：探针仍要查出「有源码没产物」
+        let diags = crate::compile_diag::uncompiled_diagnostics(&projects, &probes);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.kind == "uncompiled" && d.message.contains("p.A")),
+            "应报「有源码没产物」：{diags:?}"
+        );
+        assert!(
+            !diags.iter().any(|d| d.message.contains("q.B")),
+            "兄弟不该被诊断：{diags:?}"
+        );
+
+        // 产物在、但比源码旧：同样要报出来（编译显示成功、运行时用的是改动前的类）
+        let cls = classes.join("p").join("A.class");
+        put(&cls, "x");
+        let f = std::fs::OpenOptions::new().write(true).open(&cls).unwrap();
+        f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(120))
+            .unwrap();
+        let diags = crate::compile_diag::uncompiled_diagnostics(
+            &projects,
+            &product_probes(&files, &extras),
+        );
+        assert!(
+            diags.iter().any(|d| d.kind == "stale-class"),
+            "应报「产物比源码旧」：{diags:?}"
+        );
+    }
+
+    /// 真跑 ecj：保存 A 时 B（同模块、刚新建、还没 class）不再报 cannot be resolved；
+    /// B 自己有错时不算在 A 头上，也不会把半成品 class 写进产物目录。
+    ///
+    /// 真机 live，需显式 `--ignored`：路径守卫只挡「没装 NC 的机器」，挡不住门禁机起真 JVM。
+    #[test]
+    #[ignore]
+    fn 单文件编译能看见还没编出的同模块兄弟() {
+        use std::sync::atomic::AtomicBool;
+        let java = Path::new(r"D:\ncc\1909home")
+            .join("ufjdk")
+            .join("bin")
+            .join("java.exe");
+        let ecj = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("ecj")
+            .join("ecj-3.17.jar");
+        if !java.is_file() || !ecj.is_file() {
+            return;
+        }
+        let base = crate::test_support::tmp("sib-live");
+        let ws = base.join("ws");
+        let work = base.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let src = ws.join("m").join("src").join("public");
+        let a = src.join("p").join("A.java");
+        put(
+            &a,
+            "package p;\nimport q.B;\npublic class A { public int f() { return new B().g(); } }\n",
+        );
+        put(
+            &src.join("q").join("B.java"),
+            "package q;\npublic class B { public int g() { return 1; } }\n",
+        );
+
+        let index = crate::nc_index::ClassIndex::build(Vec::new());
+        let cancel = AtomicBool::new(false);
+        let home = base.join("nchome");
+        let env = CompileEnv {
+            nc_home: &home,
+            java_exe: &java,
+            ecj_jar: &ecj,
+            worker_jar: None,
+            project_root: &ws,
+            index: &index,
+            work_dir: &work,
+            cancel: Some(&cancel),
+            overrides: &[],
+        };
+        let out = ws.join("m").join("classes");
+        let job = CompileJob {
+            module: "m".to_string(),
+            files: Some(vec![a.clone()]),
+            out_dir: out.clone(),
+            source_roots: None,
+            output_map: Vec::new(),
+            seed_jars: Vec::new(),
+            fast: true,
+        };
+        let r = compile(&env, &job, &|_| {}).unwrap();
+        assert_eq!(r.error_count, 0, "应能看见 B：{:?}", r.problems);
+        assert_eq!(r.source_count, 1, "兄弟不计入本次源文件数");
+        assert!(out.join("p").join("A.class").is_file());
+
+        // B 自己有错：A 照样算成功，错误不算在 A 头上，B 的半成品不落盘
+        let _ = std::fs::remove_dir_all(&out);
+        put(
+            &src.join("q").join("B.java"),
+            "package q;\npublic class B { public int g() { int x = \"s\"; return x; } }\n",
+        );
+        let r2 = compile(&env, &job, &|_| {}).unwrap();
+        assert_eq!(
+            r2.error_count, 0,
+            "B 的错误不该算在 A 头上：{:?}",
+            r2.problems
+        );
+        assert!(r2.ok);
+        assert!(
+            !out.join("q").join("B.class").is_file(),
+            "有错的 B 不该落盘"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 正文里不带 import 的全限定写法要能抽出来；注释、字符串里的不算。
+    #[test]
+    fn 抽出正文里的全限定类名链() {
+        let src = r#"
+package a.b;
+import x.y.Z;
+public class T {
+    // nc.in.comment.Foo.bar()
+    /* nc.in.block.Foo
+       nc.in.block2.Foo */
+    String s = "nc.in.string.Foo";
+    char c = '.';
+    void f(String code) {
+        if (nc.vo.tmpub.util.StringUtil.isNull(code)) { this.x.y = 1; }
+        Map<String, nc.vo.pub.BusinessException> m = null;
+    }
+}
+"#;
+        let chains = extract_dotted_chains(src);
+        assert!(chains.contains(&"nc.vo.tmpub.util.StringUtil.isNull".to_string()));
+        assert!(chains.contains(&"nc.vo.pub.BusinessException".to_string()));
+        assert!(
+            chains.contains(&"this.x.y".to_string()),
+            "变量链也会抽出，靠类索引过滤"
+        );
+        for bad in ["comment", "block", "block2", "string"] {
+            assert!(
+                !chains.iter().any(|c| c.contains(bad)),
+                "注释/字符串里的 {bad} 不该被抽出：{chains:?}"
+            );
+        }
+    }
+
+    /// 抹注释不能改变行号，也不能越界（注释没收尾、字符串没收尾）。
+    #[test]
+    fn 抹注释保持行号且不越界() {
+        let src = "a\n/* x\ny */\nb \"s\nc // t\nd /* 未收尾";
+        let out = blank_comments_and_strings(src);
+        assert_eq!(out.matches('\n').count(), src.matches('\n').count());
+        assert!(out.starts_with("a\n"));
+        assert!(!out.contains('x') && !out.contains("未收尾"));
+    }
 
     /// classpath 的连接符必须跟 JVM 走：Windows 是 `;`，macOS / Linux 是 `:`。
     ///

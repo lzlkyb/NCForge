@@ -22,6 +22,11 @@ export function MetaToolbar({ state, mode, locked, dirty = false, resourceDrawer
     {tool && <span className="meta-active-tool">{tool[1]}</span>}
     {locked && <span className="meta-edit-status" role="status">编辑中 · 预览后保存</span>}
     <div className="meta-toolbar-spacer" />
+    <div className="meta-task-actions" role="group" aria-label="元数据任务">
+      {([["detail", "编辑"], ["generate", "生成中心"], ["excel", "导入导出"]] as const).map(([key, label]) => <button type="button" className="meta-link" key={key}
+        aria-pressed={state.view === key} disabled={locked || dirty && key !== "detail"} title={locked ? "请先完成当前编辑" : dirty && key !== "detail" ? "先预览并保存草稿" : undefined}
+        onClick={() => onState({ view: key })}>{label}</button>)}
+    </div>
     <button type="button" className="meta-link" disabled={locked} onClick={onFocus} aria-pressed={focused}
       aria-label={focused ? "退出元数据专注模式" : "进入元数据专注模式"} title={focused ? "恢复资源栏和属性栏" : "专注当前文档：收起资源栏和属性栏"}>
       <Icon name={focused ? "collapse" : "expand"} size={14} />

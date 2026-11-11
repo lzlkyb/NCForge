@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import { Menu } from "../ui/Menu";
 import { errorToast } from "../../lib/errorToast";
 
 /** 像绝对路径就行——真正的落盘校验在后端 `patch_set_out_dir`。 */
@@ -60,6 +59,7 @@ export function PatchActions({
   const savingDirRef = useRef(false);
   useEffect(() => setDraft(dir), [dir]);
   const dirty = draft.trim() !== dir;
+  const buildReason = dirty ? "输出目录未保存，请先保存或撤销" : !dir ? "请选择输出目录" : count === 0 ? "请选择出包文件" : !canBuild ? "请填写改动描述后生成" : null;
 
   const commitDir = () => {
     if (savingDirRef.current || building) return;
@@ -76,8 +76,7 @@ export function PatchActions({
   return (
     <div className="pk-actions">
       <div className="pk-action-meta">
-      <Menu portal width="w-96" trigger={(open,toggle)=><button type="button" className="pk-btn" aria-haspopup="menu" aria-expanded={open} onClick={toggle}>打包设置 · {sqls.length} SQL</button>}>
-      {()=><div className="pk-action-meta pk-settings-menu"><div className="pk-out">
+      <div className="pk-action-meta pk-output-summary"><div className="pk-out">
         <span>输出目录</span>
         <input
           aria-label="补丁输出目录"
@@ -131,8 +130,7 @@ export function PatchActions({
         <SqlAdder onAdd={(p) => onSqls(sqls.includes(p) ? sqls : [...sqls, p])} />
       </div>
 
-      </div>}
-      </Menu><span className="pk-sp" />
+      </div><span className="pk-sp" />
 
       {blockedCount > 0 && (
         <span className="pk-pill" data-tone="bad">
@@ -162,13 +160,14 @@ export function PatchActions({
           输出目录未保存
         </span>
       )}
+      {!building && buildReason && <span className="pk-pill" data-tone="warn" role="status">{buildReason}</span>}
       </div><button
         type="button"
         className="pk-btn pk-btn-primary"
         // 草稿脏时必须挡住出包：输入框里明写着新路径，包却落到旧目录，事后很难发现。
         // 落盘是显式动作（见上面 commitDir 的注释），所以这里不替用户自动保存。
-        disabled={building || !canBuild || !!dirty}
-        title={dirty ? "输出目录改了还没保存：先点「保存」，否则包会打到旧目录" : undefined}
+        disabled={building || savingDir || !canBuild || !!dirty}
+        title={buildReason ?? undefined}
         onClick={() => setAskBuild(true)}
       >
         <Icon name="package" size={13} />

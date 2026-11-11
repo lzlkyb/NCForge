@@ -1687,6 +1687,8 @@ struct ListCache {
 static LIST_CACHE: Mutex<Option<ListCache>> = Mutex::new(None);
 /// 后台校准的单飞标志：连续打开面板不要排一队全量扫描。
 static LIST_REFRESHING: AtomicBool = AtomicBool::new(false);
+/// 文件集已变、缓存全部作废：下一次取清单必须真扫（见 [`list_files_cached`]）。
+static LIST_DIRTY: AtomicBool = AtomicBool::new(false);
 
 /// 带缓存的 [`list_files`]，供「转到文件」用。
 ///
@@ -1694,6 +1696,15 @@ static LIST_REFRESHING: AtomicBool = AtomicBool::new(false);
 /// 除非真的一个缓存都没有，否则**不会**让调用方等全树扫描。
 pub fn list_files_cached(root: &Path, cache_dir: &Path) -> (Vec<String>, bool) {
     let key = norm_root(root);
+    // 被标脏（文件集变了）：内存与磁盘那两份都是旧的，必须真扫一次。
+    // 以前失效只清内存，下一次取清单会先读到旧的磁盘缓存，刷新出来的还是旧清单。
+    // 先清标志再扫：扫描期间又有新改动会再次置位，下次照样重扫，不会漏。
+    if LIST_DIRTY.swap(false, Ordering::SeqCst) {
+        let (files, truncated) = list_files(root);
+        store_list_memory(&key, &files, truncated);
+        write_list_cache(&list_cache_path(cache_dir, &key), &key, &files, truncated);
+        return (files, truncated);
+    }
     if let Some((files, truncated, fresh)) = list_memory_hit(&key) {
         if !fresh {
             spawn_list_refresh(root.to_path_buf(), cache_dir.to_path_buf());
@@ -1716,6 +1727,31 @@ pub fn list_files_cached(root: &Path, cache_dir: &Path) -> (Vec<String>, bool) {
 /// 丢掉缓存（前端在文件树里新建 / 改名 / 删除后调用，让下一次取清单重新扫）。
 pub fn invalidate_list_cache() {
     *LIST_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    LIST_DIRTY.store(true, Ordering::SeqCst);
+}
+
+/// 文件监听发现「文件集变了」（有可能出现在清单里的文件被增 / 删 / 改名）：下一次取清单真扫。
+///
+/// 只置标志，不动缓存、不扫盘：旧清单继续可用，真正的重扫发生在下一次有人取清单时
+/// （前端收到 `fs-changed` 后会去取）。
+pub fn mark_list_dirty() {
+    LIST_DIRTY.store(true, Ordering::SeqCst);
+}
+
+/// 这条路径出现 / 消失，会不会改变「转到文件」的清单。
+///
+/// 与 [`list_files`] 同一口径：不在 `.svn` / `.git` / `node_modules` 等目录里，且不是必然二进制的
+/// 扩展名。编译写出的 `.class` 因此不算——否则每次编译都会让索引整棵重扫。
+pub fn is_listed_path(path: &Path) -> bool {
+    let in_skipped_dir = path.components().any(|c| match c {
+        std::path::Component::Normal(n) => n.to_str().is_some_and(|s| SKIP_DIRS.contains(&s)),
+        _ => false,
+    });
+    !in_skipped_dir
+        && path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| !has_binary_ext(n))
 }
 
 fn list_memory_hit(key: &str) -> Option<(Vec<String>, bool, bool)> {
@@ -2176,6 +2212,100 @@ mod tests {
         assert!(m.spans("// 生成凭单", 32).is_empty());
     }
 
+    /// 探针：GBK 文件里的中文注释必须能搜到（NC 工程 GBK/UTF-8 混放是常态）。
+    /// 2026-11-10 用户实景反馈「中文注释搜不到」的复现用例。
+    #[test]
+    fn gbk_文件里的中文注释能搜到() {
+        // test_support::tmp 先删后建并 canonicalize：裸 temp_dir 在 macOS /var 符号链接
+        // 与 Windows CI 8.3 短名下拼出的路径和产品代码对不上（rust-tempdir 棘轮拦这个）。
+        let root = crate::test_support::tmp("gbk");
+        let src = "// 客户档案同步\npublic class CustDocSync {}\n";
+        let (bytes, _, _) = encoding_rs::GBK.encode(src);
+        std::fs::write(root.join("CustDocSync.java"), bytes.as_ref()).unwrap();
+        let out = search(&root, &opts("客户档案")).unwrap();
+        assert_eq!(out.hits.len(), 1, "GBK 文件里的中文注释搜不到");
+        assert_eq!(
+            out.hits[0].text, "// 客户档案同步",
+            "结果行应是正确解码的中文"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 探针（复现用户 bug）：GBK 文件里的**短中文词**必须能搜到。
+    ///
+    /// 🔴 与上一个用例的区别在选词：「客户档案同步」的 GBK 字节
+    /// `BFCD BBA7 B5B5 B0B8` 里 `BF`/`BB`/`B0` 不是合法 UTF-8 前导，严格解直接失败，
+    /// 于是正确落到 GBK 分支。而「凭证」「状态」「摘要」「同」的 GBK 字节对
+    /// （`C6BE D6A4` / `D7B4 CCAC` / `D5AA D2AA` / `CDAC`）**恰好全是合法 UTF-8
+    /// 双字节序列**——整个文件被 `from_utf8` 判成 UTF-8，中文解成 U+01BE、U+05A4
+    /// 这类拉丁/希伯来字符，搜中文永远 0 命中。2026-11-10 用户实景反馈的正是这类。
+    /// （实测 64 个高频词只有这四个巧，其余如审批 `C9F3 C5FA`、新增 `D0C2 D4F6`
+    /// 都不巧——别凭记忆往这个名单里加词。）
+    #[test]
+    fn gbk_短中文词_凭证_能搜到() {
+        // test_support::tmp 先删后建并 canonicalize：裸 temp_dir 在 macOS /var 符号链接
+        // 与 Windows CI 8.3 短名下拼出的路径和产品代码对不上（rust-tempdir 棘轮拦这个）。
+        let root = crate::test_support::tmp("gbk-short");
+        let src = "// 凭证\npublic class Pz {}\n";
+        let (bytes, _, _) = encoding_rs::GBK.encode(src);
+        // 自证：这份字节确实能被 UTF-8 严格解开（所以旧判据会走错分支）
+        assert!(
+            std::str::from_utf8(&bytes).is_ok(),
+            "字节对必须恰好是合法 UTF-8"
+        );
+        std::fs::write(root.join("Pz.java"), bytes.as_ref()).unwrap();
+        let out = search(&root, &opts("凭证")).unwrap();
+        assert_eq!(out.hits.len(), 1, "GBK 文件里的「凭证」搜不到");
+        assert_eq!(out.hits[0].text, "// 凭证", "结果行应是正确解码的中文");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 同上，但走**内容包路径**——搜索页面默认就走这条，磁盘路径只是兜底。
+    ///
+    /// 直接调 `search_pack` 而不碰 `content_pack::set_cache_dir`：那个全局一改，
+    /// 并发跑的其他搜索测试会被暗度切到包路径，纯属自找 flaky。
+    ///
+    /// 为什么单有这条：`pack_and_disk_agree` 只断言「两条路结果一致」。解码器判错时
+    /// 两条路**一起**错，照样一致 ⇒ 这类共享根因的 bug 一致性测试天生抓不到，
+    /// 必须有人断言绝对正确（这里是「必须命中、且命中行是正确解码的中文」）。
+    #[test]
+    fn gbk_短中文词_凭证_走内容包也能搜到() {
+        let root = crate::test_support::tmp("gbk-pack-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let src = "// 凭证\npublic class Pz {}\n";
+        let (bytes, _, _) = encoding_rs::GBK.encode(src);
+        assert!(
+            std::str::from_utf8(&bytes).is_ok(),
+            "字节对必须恰好是合法 UTF-8"
+        );
+        std::fs::write(root.join("Pz.java"), bytes.as_ref()).unwrap();
+
+        let pack_dir = crate::test_support::tmp("gbk-pack-dir");
+        crate::content_pack::build(&root, &pack_dir, &AtomicBool::new(false)).unwrap();
+        let pack = crate::content_pack::Pack::open(&pack_dir).expect("建完包必须能打开");
+
+        let o = opts("凭证");
+        let matcher = Matcher::build(&o).unwrap();
+        let filter = FileFilter::parse(&o.include);
+        let scope = plan_scope(&root, &o.dirs);
+        let out = search_pack(
+            &pack,
+            &o,
+            &matcher,
+            &filter,
+            &scope,
+            HARD_MAX_RESULTS,
+            Instant::now(),
+            TIME_BUDGET_MS,
+            &AtomicBool::new(false),
+            None,
+        );
+        assert_eq!(out.hits.len(), 1, "内容包里搜不到 GBK 文件的「凭证」");
+        assert_eq!(out.hits[0].text, "// 凭证", "包内存的应是正确解码的中文");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&pack_dir);
+    }
+
     #[test]
     fn 同一行多处命中都出区间() {
         let o = opts("aa");
@@ -2606,8 +2736,12 @@ mod tests {
         );
     }
 
+    /// 清单缓存与脏标记是进程级全局：用到它们的测试串行，免得互相抢标志。
+    static LIST_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn 文件清单缓存_内存命中与磁盘往返() {
+        let _g = LIST_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let root = crate::test_support::tmp("list-cache-root");
         std::fs::create_dir_all(root.join("m/src")).unwrap();
         std::fs::write(root.join("m/src/A.java"), "x").unwrap();
@@ -2623,10 +2757,38 @@ mod tests {
         let (again, _) = list_files_cached(&root, &cache_dir);
         assert_eq!(again, files, "软 TTL 内不该重新扫盘");
 
-        // 清掉进程内的那份 → 从磁盘读回，冷启动（重启应用）走的就是这条路
-        invalidate_list_cache();
+        // 只清进程内的那份（不标脏）→ 从磁盘读回，冷启动（重启应用）走的就是这条路
+        *LIST_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let (from_disk, _) = list_files_cached(&root, &cache_dir);
         assert_eq!(from_disk, files, "磁盘缓存应与上次扫描一致");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&cache_dir);
+        invalidate_list_cache();
+    }
+
+    #[test]
+    fn 文件集变动后下次取清单必须真扫() {
+        let _g = LIST_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = crate::test_support::tmp("list-dirty-root");
+        std::fs::create_dir_all(root.join("m/src")).unwrap();
+        std::fs::write(root.join("m/src/A.java"), "x").unwrap();
+        let cache_dir = crate::test_support::tmp("list-dirty-dir");
+
+        invalidate_list_cache();
+        let (files, _) = list_files_cached(&root, &cache_dir);
+        assert_eq!(files, vec!["m/src/A.java"]);
+
+        // 外部新建文件 + 标脏：内存和磁盘缓存都还是旧的，但必须绕开它们
+        std::fs::write(root.join("m/src/B.java"), "x").unwrap();
+        mark_list_dirty();
+        let (fresh, _) = list_files_cached(&root, &cache_dir);
+        assert_eq!(fresh, vec!["m/src/A.java", "m/src/B.java"]);
+
+        // 真扫后脏标记已清，并把新清单写回磁盘：清内存后读到的是新的
+        *LIST_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        let (from_disk, _) = list_files_cached(&root, &cache_dir);
+        assert_eq!(from_disk, fresh);
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&cache_dir);

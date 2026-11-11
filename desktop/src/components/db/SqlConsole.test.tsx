@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SqlTab } from "../../lib/dbStore";
-import type { RunStmt, SqlEditorApi, SqlExecutionScope } from "./SqlEditor";
+import type { RunStmt, SqlEditorApi, SqlExecutionScope, SqlRunMode } from "./SqlEditor";
 import type { SqlConsoleFocus } from "../../hooks/useSqlConsoleSplit";
 const mocks = vi.hoisted(() => ({
   run: vi.fn(), explain: vi.fn(), cancel: vi.fn(), cancelOperation: vi.fn(), reveal: vi.fn(), focus: vi.fn(), toast: vi.fn(),
@@ -25,9 +25,9 @@ vi.mock("./InsertExportDialog", () => ({ InsertExportDialog: () => null }));
 vi.mock("./ValueSearchDialog", () => ({ ValueSearchDialog: () => null }));
 vi.mock("./ScriptReplayDialog", () => ({ ScriptReplayDialog: () => null }));
 vi.mock("./SqlToolbar", () => ({ SqlToolbar: ({ scope, onRun, onStop, focusMode, onFocusChange }: {
-  scope: SqlExecutionScope | null; onRun: (mode: "current" | "script", collectStats?: boolean) => void; onStop: () => void; focusMode: SqlConsoleFocus; onFocusChange: (mode: SqlConsoleFocus) => void;
+  scope: SqlExecutionScope | null; onRun: (mode: SqlRunMode, collectStats?: boolean) => void; onStop: () => void; focusMode: SqlConsoleFocus; onFocusChange: (mode: SqlConsoleFocus) => void;
 }) => <div data-scope={JSON.stringify(scope)} data-focus-mode={focusMode}>
-  <button onClick={() => onRun("current")}>执行当前</button><button onClick={() => onRun("script")}>执行脚本</button><button onClick={onStop}>停止</button>
+  <button onClick={() => onRun("auto")}>执行</button><button onClick={() => onRun("current")}>执行当前</button><button onClick={() => onRun("script")}>执行脚本</button><button onClick={onStop}>停止</button>
   <button onClick={() => onRun("current", true)}>执行并采集统计</button>
   <button onClick={() => onFocusChange("results")}>专注结果</button><button onClick={() => onFocusChange("editor")}>专注编辑器</button><button onClick={() => onFocusChange("split")}>还原布局</button>
 </div> }));
@@ -36,7 +36,7 @@ vi.mock("./SqlEditor", async () => {
   return { SqlEditor: ({ tabId, initial, visible, apiRef, onScope }: { tabId: string; initial: string; visible: boolean; apiRef: { current: SqlEditorApi | null }; onScope: (scope: SqlExecutionScope) => void }) => {
     useLayoutEffect(() => { mocks.mounts++; return () => { mocks.unmounts++; }; }, []);
     useLayoutEffect(() => {
-      const api: SqlEditorApi = { target: mode => mocks.targets[tabId][mode], reveal: line => mocks.reveal(tabId, line), focus: () => mocks.focus(tabId), format: () => {}, insert: () => {}, setText: () => {} };
+      const api: SqlEditorApi = { target: mode => mocks.targets[tabId][mode === "auto" ? "script" : mode], reveal: line => mocks.reveal(tabId, line), focus: () => mocks.focus(tabId), format: () => {}, insert: () => {}, setText: () => {} };
       apiRef.current = api; mocks.publish = onScope;
       onScope({ tabId, selected: false, statements: api.target("current") });
       return () => { apiRef.current = null; };
@@ -64,6 +64,10 @@ afterEach(() => { act(() => root.unmount()); host.remove(); vi.restoreAllMocks()
 const render = (tab: SqlTab = base, active = true) => act(() => root.render(<ViewActivityContext.Provider value={active}><SqlConsole tab={tab} /></ViewActivityContext.Provider>));
 const click = (label: string) => act(() => [...host.querySelectorAll("button")].find(button => button.textContent === label)!.click());
 const shown = () => JSON.parse(host.querySelector("[data-scope]")!.getAttribute("data-scope")!) as SqlExecutionScope | null;
+it("主执行通过 auto 获取整篇实际目标", async () => {
+  render(); await act(async () => click("执行"));
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", mocks.targets.a.script, { collectStats: false });
+});
 
 it("工具条范围与实际交给执行器的目标一致", async () => {
   render(); expect(shown()?.statements).toEqual(mocks.targets.a.current);

@@ -33,9 +33,15 @@ describe("workbench docking", () => {
     await act(async () => setSideOpen(true));
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')!.click());
     expect(getSideOpen()).toBe(false);
+    expect(document.activeElement).toBe(host.querySelector('[aria-label="工作台布局"]'));
     await act(async () => setSideOpen(true));
+    await act(async () => close.focus());
+    await act(async () => close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, isComposing: true })));
+    expect(getSideOpen()).toBe(true);
     await act(async () => close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     expect(getSideOpen()).toBe(false);
+    expect(document.activeElement).toBe(host.querySelector('[aria-label="工作台布局"]'));
+    expect(host.querySelector<HTMLElement>(".wb-main-with-inspector")?.inert).toBe(false);
   });
   it("关闭按需日志标签回到代码，保留编辑节点和草稿", async () => {
     const host = document.createElement("div"); document.body.append(host);

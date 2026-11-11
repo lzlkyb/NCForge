@@ -143,7 +143,8 @@ export function MetaFieldTable({ entity, selectedAttrId, filter, scroll, locked,
     }}>
       <table className={`meta-field-table ${onSelectedIds ? "has-selection" : ""}`} aria-label="实体字段" aria-rowcount={attrs.length + 1}>
         <thead><tr>{onSelectedIds && <th scope="col" className="meta-field-check"><input type="checkbox" aria-label="选择筛选后的全部字段" disabled={locked} checked={attrs.length > 0 && attrs.every((a) => selected.has(a.id))}
-          onChange={(e) => onSelectedIds(e.target.checked ? attrs.map((a) => a.id) : selectedIds.filter((id) => !attrs.some((a) => a.id === id)))} /></th>}{["字段", "显示名", "类型", "列名", "长度", "约束"].map((title) => <th key={title} scope="col">{title}</th>)}</tr></thead>
+          ref={(el) => { if (el) el.indeterminate = !attrs.every((a) => selected.has(a.id)) && attrs.some((a) => selected.has(a.id)); }}
+          onChange={(e) => onSelectedIds(e.target.checked ? [...new Set([...selectedIds, ...attrs.map((a) => a.id)])] : selectedIds.filter((id) => !attrs.some((a) => a.id === id)))} /></th>}{["字段", "显示名", "类型", "列名", "长度", "约束"].map((title) => <th key={title} scope="col">{title}</th>)}</tr></thead>
         <tbody>
           {range.before > 0 && <tr aria-hidden="true" className="meta-field-spacer"><td colSpan={onSelectedIds ? 7 : 6} style={{ height: range.before }} /></tr>}
           {attrs.slice(range.start, range.end).map((attr, offset) => <tr key={attr.id} data-attr={attr.id} aria-rowindex={range.start + offset + 2}

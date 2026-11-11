@@ -1,9 +1,8 @@
 /**
  * SQL 格式化（`Ctrl+Shift+F`）。
  *
- * 底层用 sql-formatter（语法级排版）：嵌套子查询逐层缩进、join / and 拆行、CASE 展开、
- * 函数参数规整——旧的手写 tokenizer 对括号内一律原样保留，NC 的多层分页 SQL 几乎整坨在
- * 括号里，等于没格式化。这里换成解析器排版。
+ * 底层用 sql-formatter 识别方言和语法边界，再按阅读布局收拢完整字段与短子句。
+ * 保留结构展开选项；字符串、注释和不确定的结构不能因为收拢布局而改变。
  *
  * 关键字大小写默认 preserve：团队写法各异，改大小写只会让 SVN 里的 diff 变脏。
  * 方言按连接 JDBC URL 推断（oracle→plsql 等），未知回退标准 sql；国产库无对应方言时
@@ -11,8 +10,9 @@
  *
  * 排版选项（大小写 / 缩进 / 宽度 / 方言覆盖）来自 `lib/sqlFormatPrefs`，设置页可调、本机生效。
  */
-import type { FormatOptions, SqlLanguage } from "sql-formatter";
-import { formatOptionsOf, getSqlFormatPrefs, type SqlFormatPrefs } from "./sqlFormatPrefs";
+import type { SqlLanguage } from "sql-formatter";
+import { formatOptionsOf, getSqlFormatPrefs, type SqlFormatPrefs, type SqlFormattingOptions } from "./sqlFormatPrefs";
+import { readingLayout } from "./sqlReadingLayout";
 
 /** JDBC 子协议 → sql-formatter 方言。只列语法明确对应的；其余（达梦/金仓/神通等）回退 sql。 */
 const JDBC_LANGUAGE: Record<string, SqlLanguage> = {
@@ -39,8 +39,12 @@ export function sqlLanguageOf(url: string, prefs: SqlFormatPrefs = getSqlFormatP
 export async function formatSql(
   sql: string,
   language: SqlLanguage = "sql",
-  options: Partial<FormatOptions> = formatOptionsOf(getSqlFormatPrefs()),
+  options: SqlFormattingOptions = formatOptionsOf(getSqlFormatPrefs()),
 ): Promise<string> {
+  const prefs = getSqlFormatPrefs();
+  const { layout = prefs.layout, lineWidth = prefs.lineWidth, ...engineOptions } = options;
   const { format } = await import("sql-formatter");
-  return format(sql, { ...options, language });
+  // Reading uses regular nesting rather than column alignment, retaining that preference for expanded mode.
+  const expanded = format(sql, { ...engineOptions, ...(layout === "reading" ? { indentStyle: "standard", useTabs: false, expressionWidth: lineWidth } : {}), language });
+  return layout === "reading" ? readingLayout(expanded, language, lineWidth, engineOptions.tabWidth ?? 2) : expanded;
 }

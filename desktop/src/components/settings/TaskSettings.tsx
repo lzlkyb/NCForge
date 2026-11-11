@@ -1,182 +1,75 @@
-// 设置 → 任务：内置的运行配置只读，自定义任务按工作区保存在本机。
-//
-// 只允许固定步骤（编译 / 投送 / 重启 / 补丁），不提供任意命令输入：
-// 这些步骤都会碰 NC 安装目录或起 JVM，自由命令等于把安全边界交给一个输入框。
-import { useEffect, useRef, useState } from "react";
-import { Card } from "../ui/card";
+import { useState } from "react";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { SettingsRow } from "../ui/SettingsRow";
-import { ToggleRow } from "../ui/ToggleRow";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { SettingsRow } from "../ui/SettingsRow";
 import { toast } from "../ui/toast";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
-import { useAutoCompilePref } from "../../hooks/useAutoCompilePref";
-import {
-  addTask,
-  BUILTIN_TASKS,
-  loadCustomTasks,
-  removeTask,
-  STEP_LABELS,
-  type NcTask,
-  type TaskStep,
-} from "../../lib/ncTasks";
-import { BuildSettings } from "./BuildSettings";
-import { HotswapSettings } from "./HotswapSettings";
+import { addTask, updateTask, loadCustomTasks, removeTask, BUILTIN_TASKS, STEP_LABELS, type NcTask } from "../../lib/ncTasks";
+import { TaskEditor, newTaskDraft, type TaskDraft } from "./TaskEditor";
+import { SettingsPath } from "./SettingsPath";
 import "./settings-development.css";
 
-const ALL_STEPS = Object.keys(STEP_LABELS) as TaskStep[];
-
-const stepsText = (t: NcTask) => t.steps.map((s) => STEP_LABELS[s]).join(" → ");
+const stepsText = (task: NcTask) => task.steps.map(step => STEP_LABELS[step]).join(" → ");
 
 export function TaskSettings() {
-  const root = useWorkspaceSelector((s) => s.root) ?? null;
-  const [custom, setCustom] = useState<NcTask[]>(() => loadCustomTasks(root));
-  const [name, setName] = useState("");
-  // 默认就是最常见的「编全部 → 投送」；勾选顺序即执行顺序
-  const [steps, setSteps] = useState<TaskStep[]>(["compileAll", "deploy"]);
-  const createRef = useRef<HTMLDetailsElement>(null);
-  // 「保存时自动编译」的读取 / 写回 / 失败回滚都在这个 hook 里（读写约定见文件头注释）
-  const auto = useAutoCompilePref();
-  const [removeTarget, setRemoveTarget] = useState<NcTask | null>(null);
-
-  useEffect(() => {
-    setCustom(loadCustomTasks(root));
-  }, [root]);
-
-  const toggle = (s: TaskStep) =>
-    setSteps((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
-
-  const add = () => {
-    const r = addTask(root, name, steps);
-    if (!r.ok) {
-      toast(r.error, "warning");
-      return;
-    }
-    setName("");
-    setCustom(loadCustomTasks(root));
-    if (createRef.current) createRef.current.open = false;
-    toast(`已添加任务「${r.task.name}」`, "success");
+  const workspace = useWorkspaceSelector(s => s.root) ?? null;
+  const key = workspace?.toLowerCase() ?? "";
+  // Drafts belong to their workspace even while the settings page remains mounted.
+  const [drafts, setDrafts] = useState<Record<string, TaskDraft>>({});
+  const [action, setAction] = useState<{ task: NcTask; workspace: string; kind: "delete" | "edit" | "new" } | null>(null);
+  const [feedback, setFeedback] = useState<string>();
+  const [, refresh] = useState(0);
+  const draft = drafts[key] ?? newTaskDraft();
+  const tasks = loadCustomTasks(workspace);
+  const change = (next: TaskDraft) => setDrafts(prev => ({ ...prev, [key]: next }));
+  const start = (task?: NcTask) => change(task ? { id: task.id, name: task.name, steps: [...task.steps], open: true } : { ...newTaskDraft(), open: true });
+  const select = (task?: NcTask) => {
+    if (!workspace) return;
+    // 守卫看草稿内容而非展开态：「收起并保留草稿」后新建/编辑同样要先确认，不能无声覆盖。
+    if (draft.name.trim() || draft.id || draft.steps.join() !== newTaskDraft().steps.join()) setAction({ task: task ?? { id: "", name: "", steps: [] }, workspace, kind: task ? "edit" : "new" });
+    else start(task);
   };
-
-  // 删除是不可逆操作：先弹 destructive 确认框，别一点就删掉。
-  const remove = (t: NcTask) => setRemoveTarget(t);
-  const confirmRemove = () => {
-    const t = removeTarget;
-    setRemoveTarget(null);
-    if (!t) return;
-    if (!removeTask(root, t.id)) {
-      toast("删除失败：本机存储不可用", "error");
-      return;
-    }
-    setCustom(loadCustomTasks(root));
-    toast(`已删除任务「${t.name}」`, "success");
+  const save = () => {
+    const result = draft.id ? updateTask(workspace, draft.id, draft.name, draft.steps) : addTask(workspace, draft.name, draft.steps);
+    if (!result.ok) { change({ ...draft, error: result.error }); return; }
+    change(newTaskDraft());
+    setFeedback(`已保存任务「${result.task.name}」。从工作台任务菜单运行。`);
+    refresh(n => n + 1);
   };
-
-  return (
-    <Card className="flex flex-col gap-1 p-2">
-      <ToggleRow
-        id="task-auto-compile"
-        label="保存时自动编译"
-        keywords={["编译", "保存", "auto compile", "自动"]}
-        sub="只编刚保存的这一个文件，约 1~3 秒；产物写到模块的 classes"
-        info="Eclipse 里保存即出 class，靠的是常驻进程 + 整工程依赖图，我们拿不到那份能力（实测 jdt.ls 每次启动要重建工作区，整工程 152 秒）。所以这里只编保存的那一个文件，够挡语法、拼写、import 这类错误。改了方法签名或继承关系时它发现不了引用方——那种改动请手动「编译模块」。"
-        checked={auto.value ?? true}
-        disabled={auto.value === null}
-        valueText={auto.value === null ? "读取中" : auto.value ? "已开启" : "已关闭"}
-        onChange={(v) => void auto.save(v)}
-      />
-      {auto.error && <p role="alert" className="flex items-center gap-2 px-2 py-1 text-xs text-destructive-ink">
-        <span className="min-w-0 flex-1">{auto.error}</span>
-        <Button size="sm" variant="ghost" onClick={auto.retry}>重试</Button>
-      </p>}
-      <BuildSettings />
-      <HotswapSettings />
-      <details className="settings-task-builtins">
-        <summary>内置任务 <span>{BUILTIN_TASKS.length} 个固定流程 · 只读</span></summary>
-        <div>
-      <SettingsRow
-        id="task-builtin"
-        label="运行方式"
-        keywords={["内置任务"]}
-        sub="固定步骤，只读；从工作台的任务菜单运行"
-        valueText={`${BUILTIN_TASKS.length} 个内置任务`}
-        info="任务在标签条右侧的「任务」下拉里运行。「编译当前模块」需要先打开一个文件；编译未通过时后面的投送 / 重启会自动跳过，避免把旧产物推上去。"
-      />
-      {BUILTIN_TASKS.map((t) => (
-        <SettingsRow key={t.id} id={`task-${t.id}`} label={t.name} sub={stepsText(t)}
-          valueText="内置 · 只读" />
-      ))}
-        </div>
-      </details>
-
-      <SettingsRow
-        id="task-custom"
-        label="自定义任务"
-        sub={root ? "按当前工作区保存在本机，不上传" : "打开工程后可按工作区保存"}
-        info="勾选顺序即执行顺序；某一步没做成（编译有错、投送失败、重启被挡）会停在那里并跳过后续步骤。"
-        last={custom.length === 0}
-        valueText={`${custom.length} 个自定义任务`}
-      />
-      {custom.map((t) => (
-        <SettingsRow
-          key={t.id}
-          id={`task-${t.id}`}
-          label={t.name}
-          sub={stepsText(t)}
-          valueText="当前工作区"
-          control={
-            <Button size="sm" variant="ghost" aria-label={`删除任务「${t.name}」`} onClick={() => remove(t)}>
-              删除
-            </Button>
-          }
-        />
-      ))}
-      {custom.length === 0 && <p className="text-xs text-muted-foreground pb-3">
-        {root ? "还没有自定义任务，可将常用步骤组合成一个任务。" : "打开工程后，可保存此工作区的任务组合。"}
-      </p>}
-
-      <details ref={createRef} className="settings-task-create" id="task-new" tabIndex={-1}
-        data-settings-item data-settings-label="新建任务"
-        data-settings-description="按勾选顺序组合编译、投送、重启或补丁步骤"
-        data-setting-value={root ? "按需创建" : "需先打开工程"}>
-        <summary>新建任务</summary>
-        <form className="settings-task-form" onSubmit={(e) => { e.preventDefault(); if (root && name.trim() && steps.length) add(); }}>
-          <label className="settings-task-name" htmlFor="task-name-input">
-            任务名称
-            <Input id="task-name-input" value={name} maxLength={40} disabled={!root}
-              placeholder="例如：编译全部并投送"
-              onChange={(e) => setName(e.target.value)} />
-          </label>
-          <fieldset className="settings-task-steps" disabled={!root}>
-            <legend>选择步骤（按勾选顺序执行）</legend>
-            {ALL_STEPS.map((s) => (
-              <label key={s}>
-                <input type="checkbox" checked={steps.includes(s)} onChange={() => toggle(s)} />
-                {STEP_LABELS[s]}
-              </label>
-            ))}
-          </fieldset>
-          <p className="settings-task-sequence" aria-live="polite">
-            {steps.length ? `执行顺序：${steps.map((s) => STEP_LABELS[s]).join(" → ")}` : "至少选择一个步骤。"}
-          </p>
-          {!root && <p className="text-xs text-muted-foreground">请先打开工程，再创建此工作区的任务。</p>}
-          <div className="settings-task-form-actions">
-            <Button type="button" size="sm" variant="ghost" onClick={() => { if (createRef.current) createRef.current.open = false; }}>收起</Button>
-            <Button type="submit" size="sm" disabled={!root || !name.trim() || steps.length === 0}>添加任务</Button>
-          </div>
-        </form>
-      </details>
-
-      <ConfirmDialog
-        open={removeTarget !== null}
-        variant="destructive"
-        title="删除自定义任务？"
-        description={removeTarget ? `将删除任务「${removeTarget.name}」，此操作不可撤销。` : undefined}
-        confirmLabel="删除"
-        onCancel={() => setRemoveTarget(null)}
-        onConfirm={confirmRemove}
-      />
-    </Card>
-  );
+  const confirmAction = () => {
+    const pending = action;
+    setAction(null);
+    if (!pending) return;
+    if (pending.workspace.toLowerCase() !== key) { setFeedback("工程已切换，请在原工作区完成操作。"); return; }
+    if (pending.kind !== "delete") { start(pending.kind === "edit" ? pending.task : undefined); return; }
+    if (!removeTask(pending.workspace, pending.task.id)) { toast("删除失败：本机存储不可用", "error"); return; }
+    if (draft.id === pending.task.id) change(newTaskDraft());
+    setFeedback(`已删除任务「${pending.task.name}」。`);
+    refresh(n => n + 1);
+  };
+  return <div className="settings-task-page">
+    <div className="settings-task-toolbar">
+      <div><h2>当前工作区</h2><SettingsPath value={workspace} label="任务工作区路径" empty="尚未打开工程" /></div>
+      <Button size="sm" disabled={!workspace} onClick={() => select()}>新建任务</Button>
+    </div>
+    {!workspace && <p className="settings-help">打开工程后可创建任务。<Button variant="link" size="sm" onClick={() => window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "files" }))}>去打开工程</Button></p>}
+    {feedback && <p role="status" className="settings-help">{feedback}</p>}
+    <TaskEditor key={key} draft={draft} disabled={!workspace} onChange={change} onSave={save} />
+    <h2>自定义任务 <span className="settings-help">（{tasks.length}/20）</span></h2>
+    {!tasks.length && <p className="settings-help">还没有自定义任务。可将编译、投送元数据与重启组合成常用流程。</p>}
+    {tasks.map(task => <SettingsRow key={task.id} id={`task-${task.id}`} label={task.name}
+      sub={stepsText(task)} valueText="当前工作区"
+      control={<div className="settings-form-actions">
+        <Button variant="outline" size="sm" aria-label={`编辑任务「${task.name}」`} onClick={() => select(task)}>编辑</Button>
+        <Button variant="ghost" size="sm" aria-label={`删除任务「${task.name}」`} onClick={() => { if (workspace) setAction({ task, workspace, kind: "delete" }); }}>删除</Button>
+      </div>} />)}
+    <details className="settings-task-builtins"><summary>内置任务 <span>{BUILTIN_TASKS.length} 个固定流程 · 只读</span></summary>
+      <p className="settings-help">从工作台任务菜单运行。编译失败时不会继续投送或重启。</p>
+      {BUILTIN_TASKS.map(task => <SettingsRow key={task.id} id={`task-${task.id}`} label={task.name} sub={stepsText(task)} valueText="内置 · 只读" />)}
+    </details>
+    <ConfirmDialog open={action !== null} variant={action?.kind === "delete" ? "destructive" : "default"}
+      title={action?.kind === "delete" ? "删除自定义任务？" : "放弃当前任务草稿？"}
+      description={action?.kind === "delete" ? `将删除「${action.task.name}」。` : "切换编辑任务会替换当前草稿；收起表单可以保留草稿。"}
+      confirmLabel={action?.kind === "delete" ? "删除" : "放弃并继续"} onCancel={() => setAction(null)} onConfirm={confirmAction} />
+  </div>;
 }

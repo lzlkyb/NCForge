@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("../lib/tauri", () => ({ invoke: mocks.invoke }));
 
 import { useResultSetEdit } from "./useResultSetEdit";
-import { __resetDbForTest, connect, setConns } from "../lib/dbStore";
+import { __resetDbForTest, connect, rtOf, setConns } from "../lib/dbStore";
 import type { Cell, ColumnMeta } from "../lib/dbApi";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -186,6 +186,29 @@ it("批量赋值与单格撤回都按虚拟行号分流：草稿行进草稿，�
   await act(async () => {});
   expect(latest.edit!.changed.has("0:1")).toBe(false);
   expect(latest.rows[1][1]).toBe(null);
+});
+
+it("写回把事务计数记回当前会话：提交按钮这才知道有未提交写入", async () => {
+  mocks.invoke.mockImplementation((cmd: string, args: Record<string, unknown>) => {
+    if (cmd === "db_connect") return Promise.resolve({ url: "jdbc:oracle:thin:@h:1521/t", user: "u", autoCommit: false });
+    if (cmd === "db_read_only") return Promise.resolve({ readOnly: false, tx: { autoCommit: false, statements: 0, rows: 0, since: 0 } });
+    if (cmd === "db_meta" && args.kind === "columns") {
+      return Promise.resolve({ columns: columns.map((c, i) => ({ ...c, pk: i === 0, size: 0, full: c.type, nullable: true, default: null, comment: null, zh: null })) });
+    }
+    if (cmd === "db_exec_bound") {
+      return Promise.resolve({ kind: "update", updateCount: 1, tx: { autoCommit: false, statements: 1, rows: 1, since: 1 } });
+    }
+    return Promise.resolve(null);
+  });
+  await act(async () => root.render(<Probe sql="select * from bd_material" />));
+  await flush();
+  expect(rtOf("c").tx?.statements).toBe(0);
+  latest.edit!.onEdit(0, 1, "b");
+  await act(async () => {});
+  await act(async () => { latest.save(); await new Promise(r => setTimeout(r, 0)); });
+  // 不记的话：库里已有未提交的 update，事务条却说「没有未提交事务」、提交按钮是灰的，
+  // 用户只能再执行一条语句把它「撞」出来——这正是现场反馈的「提交之后状态还是乱的」。
+  expect(rtOf("c").tx?.statements).toBe(1);
 });
 
 it("同一格连改两次：第二次的原值守卫用第一次写回后的值，不是初始快照", async () => {

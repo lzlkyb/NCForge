@@ -58,3 +58,12 @@ describe("代码智能内存草稿", () => {
     expect(container.querySelector("button")!.disabled).toBe(true);
   });
 });
+
+it("语言服务内存失焦只校验，Esc 还原最新值", async () => {
+  await render(); await change("2048");
+  await act(async () => input().dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+  expect(onSave).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("待保存");
+  await act(async () => input().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(input().value).toBe("1024");
+});

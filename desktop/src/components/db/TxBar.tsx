@@ -1,5 +1,6 @@
 import { useState, useSyncExternalStore } from "react";
 import { Icon } from "../ui/icon";
+import { toast } from "../ui/toast";
 import { friendlyDbError, parseDbError, thousands } from "../../lib/db";
 import { reconnectSession } from "../../lib/dbConfirm";
 import { dbTaskSpec, dbTxKey } from "../../lib/dbOperations";
@@ -44,6 +45,17 @@ export function useDbTransaction({ connId, tabId, slot, tx: slotTx, notice: slot
       const tab = sqlTabOf(tabId);
       if (slot && tab && tab.connId === connId && tab.slot === slot) patchTab<SqlTab>(tab.id, {tx:next});
     };
+    /**
+     * 成功不是「状态」，是「刚发生的一件事」：说一声就收，别在事务条上常驻。
+     *
+     * 常驻横幅一挂就是「已提交 · 3 行」，用户过一会儿回来只看到一个勾，会以为
+     * 还有一笔事务没处理；真正要看的「有没有未提交事务」反而被这行盖住了。
+     * 常驻条只留给需要动手的状态（未提交 / 结果待核对 / 待重连 / 失败）。
+     */
+    const done = (text: string) => {
+      setTxNotice(connId, slot, tabId, undefined);
+      toast(text, "success");
+    };
     try {
       if (action === "reconnect" && notice?.verify) {
         const status = await trackOperation(dbTaskSpec(key,label,connId,slot ? "独立会话" : "主会话",conn?.name,tabId),
@@ -54,18 +66,18 @@ export function useDbTransaction({ connId, tabId, slot, tx: slotTx, notice: slot
         const verdict = status.active === true ? "数据库确认有未提交事务"
           : status.active === false ? "数据库确认没有未提交事务"
           : "字典不可读，按本地记录核对";
-        setTxNotice(connId,slot,tabId,{kind:"success",text:`事务状态已刷新 · ${verdict}`});
+        done(`事务状态已刷新 · ${verdict}`);
       } else if (action === "reconnect") {
         const ok = await trackOperation(dbTaskSpec(key,"重新连接",connId,slot ? "独立会话" : "主会话",conn?.name,tabId),
           () => reconnectSession(connId, slot ?? null, tabId, false, !lost),
           value => ({state:value ? "success" : "cancelled"}));
-        if (ok) setTxNotice(connId, slot, tabId, {kind:"success",text:"已重新连接 · 连接设置已生效"});
+        if (ok) done("已重新连接 · 连接设置已生效");
       } else {
         const next = await txAction(connId, action, slot);
         applySlotTx(next);
         // 通知网格：回滚后本地覆盖的「已写回」值不再成立，表页要重新读。
         bumpTxEpoch(connId, slot, action);
-        setTxNotice(connId, slot, tabId, {kind:"success",text:'已' + label + ' · ' + thousands(tx?.rows ?? 0) + ' 行'});
+        done('已' + label + ' · ' + thousands(tx?.rows ?? 0) + ' 行');
       }
     } catch (error) {
       const code = parseDbError(error).code;
@@ -87,8 +99,9 @@ function transactionReason(t: Transaction) {
   return !t.connected ? "当前连接尚未建立" : t.lost ? "当前会话的事务结果待核对"
     : t.active ? `${t.active.label}中，等待数据库确认` : t.blocked ? "正在执行 SQL，等待返回后处理事务"
     : t.mode === "只读查询" ? "当前连接全部会话使用只读查询" : t.mode === "自动提交" ? "当前会话使用自动提交"
-    : t.dbConfirmed !== null ? (t.dbConfirmed ? "数据库确认当前会话有未提交事务" : "数据库确认当前会话没有未提交事务")
-    : t.pending ? "处理当前会话的事务" : "当前会话没有待提交的写入";
+    : t.pending ? (t.dbConfirmed === true ? "数据库确认当前会话有未提交事务" : "处理当前会话的事务")
+    : t.dbConfirmed === false ? "数据库确认当前会话没有未提交事务"
+    : "当前会话没有待提交的写入";
 }
 
 export function TransactionMenu({ transaction: t, compact = false }: { transaction: Transaction; compact?: boolean }) {
@@ -127,16 +140,23 @@ export function TransactionButtons({ transaction: t, compact = false }: { transa
 }
 
 export function TxBar({ transaction: t, actions = false }: { transaction: Transaction; actions?: boolean }) {
-  const tone = t.active ? "busy" : t.lost || t.notice?.kind === "error" ? "bad"
-    : t.pending || t.modeChanged ? "warn" : "ok";
-  if (!t.active && !t.notice && !t.pending && !t.modeChanged && t.dbConfirmed === null) return null;
+  // 只在「有事要处理」时出现：处理中 / 未提交 / 结果待核对 / 待重连 / 失败。
+  // 事务已经结束（提交、回滚、核对确认没有）就不该再挂一行——那是状态，不是待办。
+  if (!t.active && !t.notice && !t.pending && !t.modeChanged) return null;
+  const tone = t.active ? "busy" : (t.lost || t.notice) ? "bad" : "warn";
   return <div className="dbx-txbar" data-tone={tone} role="status">
-    <Icon name={tone === "busy" ? "clock" : tone === "ok" ? "check" : "alertTriangle"} size={14} />
+    <Icon name={tone === "busy" ? "clock" : "alertTriangle"} size={14} />
     {actions && <span className="dbx-tx-owner">{t.slot ? "独立会话" : "共享会话"}</span>}
     {t.active ? <span>{t.active.label}中…等待数据库确认</span> : <>
       {t.notice && <span>{t.notice.text}</span>}
-      {!t.notice && t.dbConfirmed !== null && <span>{t.dbConfirmed ? "数据库确认：有未提交事务" : "数据库确认：没有未提交事务"}</span>}
-      {!t.lost && t.pending && <span>未提交事务 · <b>{t.tx?.statements}</b> 条写入 · 影响 <b>{thousands(t.tx?.rows ?? 0)}</b> 行</span>}
+      {!t.lost && t.pending && <span>
+        {t.dbConfirmed === true ? "数据库确认：有未提交事务" : "未提交事务"}
+        {/* 核对过但本地计数为 0（手写 PL/SQL 内部提交、别的工具写过同一条会话）：
+            写「0 条写入」只会让人以为搞错了，不如直说要处理事务。 */}
+        {(t.tx?.statements ?? 0) > 0
+          ? <> · <b>{t.tx?.statements}</b> 条写入 · 影响 <b>{thousands(t.tx?.rows ?? 0)}</b> 行</>
+          : <span className="dbx-muted"> · 提交或回滚后此条消失</span>}
+      </span>}
       {!t.lost && t.modeChanged && <span>{t.pending ? "提交方式已更新 · 处理事务后可重连" : "提交方式已更新 · 重连后生效"}</span>}
     </>}
     {actions && !t.lost && (t.pending || t.active) && <TransactionButtons transaction={t} />}

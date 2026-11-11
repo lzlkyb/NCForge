@@ -1,6 +1,6 @@
 import { EditorTabTypeIcon } from "./EditorTabTypeIcon";
 import { ProblemBadge, problemDescription } from "./ProblemBadge";
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { AllEditorTabs } from "./AllEditorTabs";
@@ -18,6 +18,7 @@ import { useProblemMarks } from "../../hooks/useProblemMarks";
 import { diagnosticPathKey } from "../../lib/diagnosticScope";
 import type { TabMeta } from "../../lib/workspaceSession";
 import { emptyEditorGroups, type EditorGroupId } from "../../lib/editorGroups";
+import { initReviewMarks, isReviewed, markReviewed, reviewMarksVersion, subscribeReviewMarks } from "../../lib/reviewMarks";
 
 /**
  * 编辑器上方的标签条 + 编译按钮。
@@ -67,6 +68,9 @@ export function TabStrip({
   tools?: ReactNode;
 }) {
   const dock = useWorkbenchDock();
+  // 已审角标跟版本控制面同一份后端标记；订阅只为了在失效时重渲染这一条标签条。
+  initReviewMarks();
+  useSyncExternalStore(subscribeReviewMarks, reviewMarksVersion, reviewMarksVersion);
   const pathLabels = tabPathLabels(root, tabs);
   const { paths: marks } = useProblemMarks();
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
@@ -167,7 +171,9 @@ export function TabStrip({
         onSelect: () => onOpenSplit(path),
       },
       { label: "关闭分屏", disabled: !splitPath, onSelect: onCloseSplit },
-      { label: "在文件树中显示", separator: true, disabled: !!t?.virtual, onSelect: () => revealInTree(path) },
+      { label: isReviewed(path) ? "取消已审" : "标记为已审", separator: true, disabled: !!t?.virtual,
+        onSelect: () => { void markReviewed(path, !isReviewed(path)).catch((e) => toast(String(e) || "标记失败，请到版本控制面操作", "error")); } },
+      { label: "在文件树中显示", disabled: !!t?.virtual, onSelect: () => revealInTree(path) },
       { label: "复制路径", separator: true, disabled: !!t?.virtual, onSelect: () => copy(path) },
       { label: "复制相对路径", disabled: !!t?.virtual, onSelect: () => copy(relativeTo(root, path)) },
     ];
@@ -229,10 +235,12 @@ export function TabStrip({
           <WorkspaceFileName name={t.name} className="wb-tab-name" />
           {pathLabels.has(t.path) && <span className="wb-tab-scope">· {pathLabels.get(t.path)}</span>}
           <ProblemBadge mark={problem} path={t.path} name={t.name} tabStop={i === rovingIndex} />
+          {isReviewed(t.path) && <span className="ncf-reviewed" title="已审 · 文件再被改动会自动失效">已审</span>}
           {t.readOnly && <span className="wb-status-warn">只读</span>}
           <button
             type="button"
             className="wb-tab-x"
+            tabIndex={i === rovingIndex ? 0 : -1}
             aria-label={`关闭 ${t.name}`}
             title={t.dirty || t.eolChanged ? "关闭（有未保存修改，会先确认）" : `关闭 ${t.name}`}
             onClick={(e) => {

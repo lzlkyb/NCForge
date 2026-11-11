@@ -28,7 +28,7 @@ export function TaskMenu({ root, compiling }: { root: string; compiling: boolean
           onClick={toggle}
         >
           <Icon name="terminal" size={16} />
-          <span className="wb-task-label">任务</span>
+          <span className="wb-task-label">开发任务</span>
           <WorkspaceGlyph name="down" size={12} className="wb-task-chevron" />
         </Button>
       )}

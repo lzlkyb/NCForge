@@ -28,7 +28,7 @@
 /* 未写回改动：固定用警示色，不要和环境色点混在一起 */
 .dbx-dirty-dot { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--warning)); flex-shrink: 0; }
 .dbx-echip { font-size: var(--dbx-fs-body); line-height: 16px; padding: 0 6px; border-radius: 8px; background: hsl(var(--env) / .15); color: hsl(var(--env-ink)); font-weight: 600; flex-shrink: 0; white-space: nowrap; }
-.dbx-mono { font-family: "Cascadia Mono", Consolas, monospace; }
+.dbx-mono { font-family: var(--font-mono); }
 .dbx-muted { color: hsl(var(--muted-foreground)); }
 .dbx-sp { flex: 1; }
 
@@ -67,7 +67,7 @@
 .dbx-ibtn:disabled { opacity: .45; cursor: default; }
 .dbx-ibtn:disabled:hover { background: none; color: hsl(var(--muted-foreground)); }
 .dbx-inp { height: var(--dbx-h-control); width: 100%; min-width: 0; padding: 0 9px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: var(--dbx-fs-body); color: hsl(var(--foreground)); }
-.dbx-inp.mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: var(--dbx-fs-body); }
+.dbx-inp.mono { font-family: var(--font-mono); font-size: var(--dbx-fs-body); }
 .dbx-inp.sm { height: var(--dbx-h-icon); font-size: var(--dbx-fs-body); }
 
 /* ── 页面骨架 ── */
@@ -117,7 +117,7 @@
 .dbx-dd .li { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; width: 100%; min-height: 38px; padding: 6px 8px; border-radius: var(--r-control); text-align: left; }
 .dbx-dd .li b { min-width: 0; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-dd .li:hover, .dbx-dd .li[data-sel] { background: hsl(var(--accent)); }
-.dbx-dd .li .u { color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); font-family: "Cascadia Mono", Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-dd .li .u { color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-dd .li .r { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: var(--dbx-fs-meta); }
 .dbx-dd hr { border: 0; border-top: 1px solid hsl(var(--border)); margin: 4px 2px; }
 
@@ -166,7 +166,9 @@
 .dbx-cgroup-count { margin-left: auto; font-weight: 400; font-variant-numeric: tabular-nums; opacity: var(--disabled-opacity); }
 /* 表单里的颜色选择：小色块，选中态用描边而不是只靠颜色深浅 */
 .dbx-conn-colors { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.dbx-conn-color { width: 18px; height: 18px; border-radius: 50%; border: 1px solid hsl(var(--border)); background: var(--dbx-swatch); }
+.dbx-conn-color { width: var(--h-icon); height: var(--h-icon); border-radius: var(--r-chip); display:grid; place-items:center; }
+.dbx-conn-color::before { content:""; width:16px; height:16px; border-radius:50%; border:1px solid hsl(var(--border)); background:var(--dbx-swatch); }
+.dbx-conn-color-none { min-height:var(--h-icon); }
 .dbx-conn-color[data-color="red"] { --dbx-swatch: hsl(var(--chart-4)); }
 .dbx-conn-color[data-color="orange"] { --dbx-swatch: hsl(var(--chart-10)); }
 .dbx-conn-color[data-color="amber"] { --dbx-swatch: hsl(var(--chart-3)); }
@@ -183,7 +185,7 @@
 .dbx-trow[data-active] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
 .dbx-trow .nm { overflow: hidden; text-overflow: ellipsis; }
 .dbx-trow .zh { color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.dbx-trow .ty { margin-left: auto; color: hsl(var(--muted-foreground)); font: 11px "Cascadia Mono", Consolas, monospace; flex-shrink: 0; }
+.dbx-trow .ty { margin-left: auto; color: hsl(var(--muted-foreground)); font: 11px var(--font-mono); flex-shrink: 0; }
 /* 行内星标：未收藏只在悬停 / 键盘聚焦时出现，已收藏常驻；已收藏的星形填色 */
 .dbx-favbtn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin-left: auto; border-radius: var(--r-control); color: hsl(var(--muted-foreground)); opacity: 0; flex-shrink: 0; }
 .dbx-trow:hover .dbx-favbtn, .dbx-trow:focus-within .dbx-favbtn, .dbx-favbtn[data-on] { opacity: 1; }
@@ -241,7 +243,7 @@
 /* A4：流式导出的进度 / 结果条（住在 `.dbx-rsub` 里） */
 .dbx-exportbar { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 8px; min-height: var(--dbx-h-control); font-size: var(--dbx-fs-meta); color: hsl(var(--foreground)); flex: 1; min-width: 0; }
 .dbx-exportbar .bad { color: hsl(var(--destructive-ink)); }
-.dbx-exportbar .dbx-mono { font-family: "Cascadia Mono", Consolas, monospace; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-exportbar .dbx-mono { font-family: var(--font-mono); min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 一个结果里的多个结果集（dbms_sql.return_result）：小标签 + 表格，整体还是纵向铺满 */
 .dbx-rset { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
@@ -251,7 +253,7 @@
 .dbx-settab[data-on]::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: 0; height: 2px; background: hsl(var(--primary)); }
 
 /* ── 结果表（手写虚拟滚动） ── */
-.dbx-grid { flex: 1; min-width: 0; overflow: auto; position: relative; font: var(--dbx-fs-body) system-ui, "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; outline: none; scrollbar-gutter: stable; }
+.dbx-grid { flex: 1; min-width: 0; overflow: auto; position: relative; font: var(--dbx-fs-body) var(--font-sans); font-variant-numeric: tabular-nums; outline: none; scrollbar-gutter: stable; }
 /* `outline:none` 必须给替代：全局只有 `outline-color`，在 style:none 下等于没有焦点环。
    空选区时网格内没有任何颜色变化，纯键盘用户 Tab 进来会完全失去位置感。 */
 .dbx-grid:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }
@@ -301,7 +303,7 @@
 .dbx-textedit-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid hsl(var(--border)); font-size: var(--dbx-fs-meta); }
 .dbx-textedit-col { font-weight: 600; color: hsl(var(--foreground)); }
 .dbx-textedit-head .dbx-muted { margin-left: auto; }
-.dbx-textedit-area { flex: 1; min-height: 0; resize: none; border: 0; outline: none; padding: 12px; background: transparent; color: hsl(var(--foreground)); font: var(--dbx-fs-body) ui-monospace, "Cascadia Mono", Consolas, monospace; line-height: 1.5; }
+.dbx-textedit-area { flex: 1; min-height: 0; resize: none; border: 0; outline: none; padding: 12px; background: transparent; color: hsl(var(--foreground)); font: var(--dbx-fs-body) var(--font-mono); line-height: 1.5; }
 .dbx-textedit-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid hsl(var(--border)); font-size: var(--dbx-fs-meta); }
 .dbx-grid .dbx-gc:is(.error,[data-error]) { text-decoration:underline wavy hsl(var(--destructive-ink));text-underline-offset:3px; }
 @media (forced-colors:active) {
@@ -312,7 +314,7 @@
   .dbx-grid:focus-within .dbx-gc[data-active-cell]::after { border-color:HighlightText; }
   .dbx-grid .dbx-gc.chg::before { background:CanvasText;outline:1px solid Canvas; }
 }
-.dbx-gh { flex-shrink: 0; position: relative; height: var(--dbx-head-h); padding: 4px 10px 0; border-bottom: 1px solid hsl(var(--border)); font: 600 var(--dbx-fs-body) system-ui, "Segoe UI", sans-serif; white-space: nowrap; overflow: hidden; text-align: left; background: hsl(var(--chrome)); }
+.dbx-gh { flex-shrink: 0; position: relative; height: var(--dbx-head-h); padding: 4px 10px 0; border-bottom: 1px solid hsl(var(--border)); font: 600 var(--dbx-fs-body) var(--font-sans); white-space: nowrap; overflow: hidden; text-align: left; background: hsl(var(--chrome)); }
 .dbx-gh .t { display: block; font-size: var(--dbx-fs-meta); line-height: 17px; color: hsl(var(--muted-foreground)); font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
 .dbx-gh .nm { overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: calc(100% - 14px); line-height: 17px; vertical-align: top; }
 /* 列名后面那个点：空心 = 抽样判定为编码列，实心 = 正在显示解码后的值。
@@ -327,13 +329,13 @@
 .dbx-gedit { width: 100%; height: calc(var(--dbx-row-h) - 2px); border: 0; outline: none; padding: 0 9px; font: inherit; background: hsl(var(--card)); color: hsl(var(--foreground)); }
 .dbx-detail { width: 270px; max-width: 55%; border-left: 1px solid hsl(var(--border)); background: hsl(var(--card)); display: flex; flex-direction: column; flex-shrink: 0; font-size: var(--dbx-fs-body); min-height: 0; }
 .dbx-detail .hd { display: flex; align-items: flex-start; gap: 6px; padding: 8px 10px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); }
-.dbx-detail .hd b { font-family: "Cascadia Mono", Consolas, monospace; }
+.dbx-detail .hd b { font-family: var(--font-mono); }
 .dbx-detail .hd .s { color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); margin-top: 2px; }
-.dbx-detail pre { flex: 1; margin: 0; padding: 8px 10px; font: 12px/18px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; word-break: break-all; overflow: auto; }
+.dbx-detail pre { flex: 1; margin: 0; padding: 8px 10px; font: 12px/18px var(--font-mono); white-space: pre-wrap; word-break: break-all; overflow: auto; }
 .dbx-detail .ft { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); }
 
 /* ── 输出 / 计划 / 错误 ── */
-.dbx-output { flex: 1; overflow: auto; padding: 6px 12px; font: 12px/19px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; }
+.dbx-output { flex: 1; overflow: auto; padding: 6px 12px; font: 12px/19px var(--font-mono); white-space: pre-wrap; }
 .dbx-output .ok { color: hsl(var(--success-ink)); }
 .dbx-output .bad { color: hsl(var(--destructive-ink)); }
 .dbx-output .dbms { color: hsl(var(--foreground)); }
@@ -342,8 +344,8 @@
 .dbx-plan table { border-collapse: collapse; width: 100%; font-size: var(--dbx-fs-body); }
 .dbx-plan th, .dbx-plan td { padding: 3px 10px; text-align: left; border-bottom: 1px solid hsl(var(--border)); white-space: nowrap; }
 .dbx-plan th { background: hsl(var(--secondary) / .6); font-weight: 600; position: sticky; top: 0; }
-.dbx-plan td.op { white-space: pre; font-family: "Cascadia Mono", Consolas, monospace; }
-.dbx-plan td.pred { font-family: "Cascadia Mono", Consolas, monospace; font-size: var(--dbx-fs-meta); color: hsl(var(--muted-foreground)); white-space: normal; max-width: 420px; }
+.dbx-plan td.op { white-space: pre; font-family: var(--font-mono); }
+.dbx-plan td.pred { font-family: var(--font-mono); font-size: var(--dbx-fs-meta); color: hsl(var(--muted-foreground)); white-space: normal; max-width: 420px; }
 .dbx-plan tr[data-full] td.op { color: hsl(var(--warning-ink)); font-weight: 600; }
 .dbx-plan .bar { display: inline-block; height: 8px; border-radius: 4px; background: hsl(var(--warning)); vertical-align: middle; margin-right: 6px; }
 /* A5：树形计划 + 与上次对比 */
@@ -357,8 +359,8 @@
 .dbx-update { flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; font-size: var(--dbx-fs-body); }
 .dbx-update .big { font-size: 15px; font-weight: 600; }
 .dbx-err { margin: 12px; padding: 14px 16px; border-radius: 8px; background: hsl(var(--card)); border: 1px solid hsl(var(--border)); color: hsl(var(--foreground)); font-size: 13px; line-height: 1.6; }
-.dbx-err code { font-family: "Cascadia Mono", Consolas, monospace; background: hsl(var(--card)); padding: 0 4px; border-radius: 4px; margin: 0 3px; cursor: pointer; }
-.dbx-err pre { margin-top: 6px; font: 11.5px/17px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; color: hsl(var(--foreground) / .8); }
+.dbx-err code { font-family: var(--font-mono); background: hsl(var(--card)); padding: 0 4px; border-radius: 4px; margin: 0 3px; cursor: pointer; }
+.dbx-err pre { margin-top: 6px; font: 11.5px/17px var(--font-mono); white-space: pre-wrap; color: hsl(var(--foreground) / .8); }
 
 /* ── 历史抽屉 ── */
 .dbx-drawer { width: 350px; max-width: 55%; border-left: 1px solid hsl(var(--border)); background: hsl(var(--card)); display: flex; flex-direction: column; flex-shrink: 0; min-width: 0; min-height: 0; }
@@ -369,7 +371,7 @@
 .dbx-hitem:hover { background: hsl(var(--accent) / .6); }
 .dbx-hitem .m { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); margin-bottom: 6px; }
 .dbx-hitem .m .r { margin-left: auto; }
-.dbx-hitem code { display: block; font: 12px/19px "Cascadia Mono", Consolas, monospace; white-space: pre; overflow: hidden; text-overflow: ellipsis; max-height: 57px; }
+.dbx-hitem code { display: block; font: 12px/19px var(--font-mono); white-space: pre; overflow: hidden; text-overflow: ellipsis; max-height: 57px; }
 .dbx-hitem .fail { color: hsl(var(--destructive-ink)); }
 /* 搜索框下面那行开关（全部连接 / 只看失败）：12px 的小控件，别做成整行按钮 */
 .dbx-flags { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: var(--dbx-fs-meta); color: hsl(var(--muted-foreground)); }
@@ -398,7 +400,7 @@
 .dbx-drawer.sess { width: 560px; }
 .dbx-drawer .hd .dbx-sess-bad { padding: 1px 6px; border-radius: 999px; font-size: var(--dbx-fs-meta); font-weight: 600; color: hsl(var(--destructive-ink)); background: hsl(var(--destructive) / .12); }
 .dbx-sess-warn { display: flex; gap: 6px; align-items: flex-start; padding: 8px 10px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--warning) / .1); color: hsl(var(--warning-ink)); font-size: var(--dbx-fs-meta); line-height: 1.5; }
-.dbx-sess-warn code { font: 11px "Cascadia Mono", Consolas, monospace; }
+.dbx-sess-warn code { font: 11px var(--font-mono); }
 .dbx-sess-warn .dbx-lk { flex-shrink: 0; color: hsl(var(--warning-ink)); text-decoration: underline; }
 .dbx-sess { width: 100%; border-collapse: collapse; font-size: var(--dbx-fs-meta); table-layout: fixed; }
 .dbx-sess th { position: sticky; top: 0; z-index: 1; background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); font-weight: 600; text-align: left; padding: 5px 6px; border-bottom: 1px solid hsl(var(--border)); white-space: nowrap; }
@@ -413,7 +415,7 @@
 .dbx-sess td .m { display: block; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-sess td .s { display: block; }
 .dbx-sess td .e { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dbx-sess td code { display: block; font: 10.5px/15px "Cascadia Mono", Consolas, monospace; max-height: 45px; overflow: hidden; word-break: break-all; }
+.dbx-sess td code { display: block; font: 10.5px/15px var(--font-mono); max-height: 45px; overflow: hidden; word-break: break-all; }
 .dbx-sess-blk { margin-left: 4px; color: hsl(var(--destructive-ink)); font-size: var(--dbx-fs-meta); }
 .dbx-sess-obj { display: block; font-size: var(--dbx-fs-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-sess td .acts { display: flex; gap: 8px; margin-top: 3px; }
@@ -429,9 +431,9 @@
 .dbx-subtabs .title .dbx-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-subtabs .title .dbx-mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-where-field.order { flex-basis: 200px; max-width: 340px; }
-.dbx-where .kw { font: 600 11px "Cascadia Mono", Consolas, monospace; color: hsl(var(--primary)); flex-shrink: 0; }
+.dbx-where .kw { font: 600 11px var(--font-mono); color: hsl(var(--primary)); flex-shrink: 0; }
 .dbx-where .dbx-inp { height: var(--dbx-h-control); flex: 1; width: auto; }
-.dbx-ddl { flex: 1; overflow: auto; margin: 0; padding: 10px 14px; font: 12.5px/20px "Cascadia Mono", Consolas, monospace; white-space: pre; }
+.dbx-ddl { flex: 1; overflow: auto; margin: 0; padding: 10px 14px; font: 12.5px/20px var(--font-mono); white-space: pre; }
 /* 库内源码：包规范与包体各一段，段头用粘性条区分，滚到一半也知道在看哪一段 */
 .dbx-src { flex: 1; overflow: auto; display: flex; flex-direction: column; }
 .dbx-srchead {
@@ -449,7 +451,7 @@
 .dbx-meta th { background: hsl(var(--chrome)); font-weight: 600; position: sticky; top: 0; }
 .dbx-meta tbody tr:nth-child(even) { background: color-mix(in srgb, hsl(var(--chrome)) 35%, hsl(var(--card))); }
 .dbx-meta tbody tr:hover { background: hsl(var(--accent)); }
-.dbx-meta td.mono { font-family: "Cascadia Mono", Consolas, monospace; }
+.dbx-meta td.mono { font-family: var(--font-mono); }
 .dbx-meta .pk { color: hsl(var(--warning-ink)); font-weight: 700; }
 
 /* ── 对话框 ── */
@@ -472,7 +474,7 @@
 .dbx-dlg .bd > label { color: hsl(var(--muted-foreground)); text-align: left; }
 .dbx-dlg .bd.one { display: block; }
 .dbx-dlg .ft { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 20px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); flex-shrink: 0; }
-.dbx-dlg pre.sql { margin: 0; padding: 8px 10px; border-radius: 8px; background: hsl(var(--secondary) / .6); font: 11.5px/18px "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; max-height: 220px; overflow: auto; }
+.dbx-dlg pre.sql { margin: 0; padding: 8px 10px; border-radius: 8px; background: hsl(var(--secondary) / .6); font: 11.5px/18px var(--font-mono); white-space: pre-wrap; max-height: 220px; overflow: auto; }
 .dbx-envs { display: flex; gap: 6px; flex-wrap: wrap; }
 .dbx-envs > button { display: inline-flex; align-items: center; gap: 6px; height: var(--dbx-h-control); padding: 0 10px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); font-size: var(--dbx-fs-body); }
 .dbx-envs > button[data-on] { border-color: hsl(var(--env)); background: hsl(var(--env) / .12); color: hsl(var(--env-ink)); font-weight: 600; }
@@ -484,16 +486,16 @@
 .dbx-homeguide { grid-column: 1 / -1; display: flex; gap: 10px; padding: 10px 12px; border: 1px solid hsl(var(--border)); border-radius: 8px; background: hsl(var(--secondary) / .5); font-size: var(--dbx-fs-body); line-height: 1.6; }
 .dbx-homeguide > svg { flex-shrink: 0; color: hsl(var(--muted-foreground)); margin-top: 3px; }
 .dbx-homeguide p { margin: 0 0 8px; }
-.dbx-homeguide code { font: 12px "Cascadia Mono", Consolas, monospace; }
+.dbx-homeguide code { font: 12px var(--font-mono); }
 .dbx-homeguide-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .dbx-chk { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .dbx-dslist { grid-column: 1 / -1; border: 1px solid hsl(var(--border)); border-radius: 8px; overflow: hidden; }
 .dbx-dslist .r { display: grid; grid-template-columns: 22px 110px 1fr 90px 70px; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border-bottom: 1px solid hsl(var(--border)); font-size: var(--dbx-fs-body); }
 .dbx-dslist .r:last-child { border-bottom: 0; }
 .dbx-dslist .r.h { min-height: 26px; background: hsl(var(--secondary) / .6); font-weight: 600; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); }
-.dbx-dslist .mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: var(--dbx-fs-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-dslist .mono { font-family: var(--font-mono); font-size: var(--dbx-fs-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-vars { display: grid; grid-template-columns: 140px 1fr; gap: 6px 8px; align-items: center; margin-top: 10px; }
-.dbx-vars code { font: 12px "Cascadia Mono", Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-vars code { font: 12px var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── 全库按值反查（ValueSearchDialog） ── */
 .dbx-vs .bd.one { display: flex; flex-direction: column; gap: 12px; }
@@ -519,7 +521,7 @@
 .dbx-vs-table td.dbx-mono { font-size: var(--dbx-fs-meta); white-space: nowrap; }
 .dbx-vs-table .dbx-vs-sample { white-space: pre-wrap; word-break: break-all; max-width: 420px; }
 .dbx-vs-table .dbx-ibtn { width: 22px; height: 22px; }
-.dbx-vs-link { color: hsl(var(--primary)); font-weight: 600; font-family: "Cascadia Mono", Consolas, monospace; font-size: var(--dbx-fs-meta); }
+.dbx-vs-link { color: hsl(var(--primary)); font-weight: 600; font-family: var(--font-mono); font-size: var(--dbx-fs-meta); }
 .dbx-vs-link:hover { text-decoration: underline; }
 .dbx-vs-errors { font-size: var(--dbx-fs-meta); color: hsl(var(--muted-foreground)); }
 .dbx-vs-errors summary { cursor: pointer; }

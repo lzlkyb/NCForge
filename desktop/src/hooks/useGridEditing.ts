@@ -33,7 +33,7 @@ export function useGridEditing({ rows, order, visible, edit, onSel, reveal, boxR
     if (index < 0) return;
     reveal(pos.c, index);
     requestAnimationFrame(() => {
-      boxRef.current?.querySelector<HTMLElement>(`#dbx-cell-${pos.r}-${pos.c}`)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      boxRef.current?.querySelector<HTMLElement>(`[id$="-${pos.r}-${pos.c}"]`)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
       boxRef.current?.focus({ preventScroll: true });
     });
   };

@@ -7,6 +7,7 @@ import { PanelTabs } from "./PanelTabs";
 import { getWorkbenchLayout, restoreWorkbenchLayout, selectWorkbenchLayout, updateWorkbenchLayout } from "../../lib/workbenchLayout";
 import { setSession } from "../../lib/workspaceSession";
 import { setSidebarView } from "../../lib/sidebarView";
+import { getToolReturn, recordToolNavigation, returnFromLogs } from "../../lib/toolReturn";
 
 vi.mock("./DebugInspectorDock", () => ({ DebugInspectorDock: () => null }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -15,6 +16,21 @@ beforeEach(() => { restoreWorkbenchLayout(); setSidebarView("files"); setSession
 afterEach(() => { act(() => root.unmount()); host.remove(); restoreWorkbenchLayout(); setSidebarView("files"); vi.restoreAllMocks(); });
 const renderFrame = (activeTool = "files") => root.render(<WorkbenchFrame activeTool={activeTool} tree={null} tabs={<div>Tabs</div>} editor={<textarea defaultValue="draft" />} output={<div>Panel</div>} status={null} />);
 describe("工作台任务布局", () => {
+  it("服务展开后进入日志让出正文，返回后恢复展开且保留编辑节点", () => {
+    recordToolNavigation("files");
+    act(() => { renderFrame(); setSession({ panelOpen: true, panelTab: "svc" }); updateWorkbenchLayout({ expanded: "svc" }); });
+    const editor = host.querySelector<HTMLTextAreaElement>("textarea")!; editor.value = "draft before logs";
+    act(() => { recordToolNavigation("logs"); renderFrame("logs"); });
+    expect(host.querySelector(".wb-main")?.hasAttribute("data-panel-expanded")).toBe(false);
+    const onNavigate = (event: Event) => { const tool = (event as CustomEvent<string>).detail; recordToolNavigation(tool); renderFrame(tool); };
+    window.addEventListener("ncforge-navigate", onNavigate);
+    try {
+      act(() => returnFromLogs());
+      expect(getToolReturn().activeTool).toBe("files");
+      expect(host.querySelector(".wb-main")?.hasAttribute("data-panel-expanded")).toBe(true);
+      expect(host.querySelector("textarea")).toBe(editor); expect(editor.value).toBe("draft before logs");
+    } finally { window.removeEventListener("ncforge-navigate", onNavigate); }
+  });
   it("不同底部工具记忆各自高度，展开和恢复保持编辑节点及输入", () => {
     act(() => renderFrame());
     const editor = host.querySelector<HTMLTextAreaElement>("textarea")!; editor.value = "unsaved";
@@ -68,7 +84,8 @@ describe("工作台任务布局", () => {
   it("次要工具通过更多打开并可固定，取消固定后当前工具仍可见", () => {
     const selected = vi.fn();
     act(() => root.render(<PanelTabs tab="problems" onTab={selected} errors={0} paused={false} />));
-    expect(host.querySelectorAll('[role="tab"]')).toHaveLength(4);
+    // 常驻页签 5 个：问题 / 改动 / 编译输出 / NC 服务 / 调试（「改动」是审 AI 代码的主入口）
+    expect(host.querySelectorAll('[role="tab"]')).toHaveLength(5);
     act(() => host.querySelector<HTMLButtonElement>('[aria-label="更多底部工具"]')!.click());
     const pin = [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.getAttribute("aria-label") === "固定待办")!;
     act(() => pin.click()); expect(getWorkbenchLayout().pinned).toEqual(["todo"]);

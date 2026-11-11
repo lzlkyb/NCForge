@@ -20,41 +20,7 @@
   box-shadow: none;
 }
 
-/* Material belongs to the window frame, never to an editor or a result grid. */
-html[data-ui-style="glass"],
-html.dark[data-ui-style="glass"] {
-  --glass-stage: hsl(var(--chrome));
-  --glass-backdrop: none;
-  --glass-panel: hsl(var(--chrome));
-  --glass-wash: transparent;
-  --glass-sheen: none;
-  --glass-document: hsl(var(--card));
-  --glass-depth: none;
-}
-html[data-ui-style="glass"] .app-shell .wb-content-frame {
-  border-radius: 0;
-}
-html[data-ui-style="glass"] .app-shell .wb-toolbar {
-  background: hsl(var(--card));
-}
-html[data-ui-style="glass"] .app-shell .wb-tabbar {
-  background: hsl(var(--chrome));
-}
-
-/* An unread changelog is available information, not an urgent incident. */
+/* Unread release notes use a quiet indicator. */
 .app-shell .changelog-dot {
   animation: none;
-}
-.app-shell .ui-button {
-  transition: background-color var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
-}
-.app-shell .ui-button:active:not(:disabled) {
-  transform: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .app-shell .ui-button {
-    transition: none;
-  }
 }

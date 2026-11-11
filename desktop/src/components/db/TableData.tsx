@@ -206,7 +206,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
     setConnectionError, load,
   });
   // Ctrl+S = 写回（DBeaver 语义）。没有待写回内容时不接管这个键，免得挡住别处。
-  useSaveShortcut(save, editable && changes.length > 0);
+  useSaveShortcut(save, editable && changes.length > 0, tab.id);
 
   return (
     <>
@@ -225,7 +225,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
       />
       {page && <ResultContextNotice tabId={tab.id} context={page.context} />}
       {page && q && (
-        <ResultTable
+        <ResultTable editOwner={tab.id}
           tabs={baseline ? <ResultBaselineSummary /> : undefined}
           key={`${q.where}|${order}|${q.page}|${page.at}`}
           columns={page.columns}
@@ -290,7 +290,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
               <TableDataFooter rows={page.rows.length} pageNumber={page.pageNumber} complete={page.pageNumber===1 && !page.hasNext}
                 previousDisabled={saving || loading || q.page===0} nextDisabled={saving || loading || !page.hasNext}
                 onPrevious={()=>void navTo({...q,page:q.page-1})} onNext={()=>void navTo({...q,page:q.page+1})}
-                hint={`${readonly ? "只读查询模式" : editable ? "双击单元格编辑（主键列不可改）· F4 看完整值" : isView ? "视图只读" : "没有主键，只读（定位不到唯一行）"} · 等待上限 ${timeoutSec}s`} />
+                hint={`${readonly ? "只读查询模式" : isView ? "视图只读" : pk.length === 0 ? "没有主键，只读（定位不到唯一行）" : editable ? "双击单元格编辑（主键列不可改）· F4 看完整值" : "暂时不可编辑（正在查询或写回）"} · 等待上限 ${timeoutSec}s`} />
             </>
           }
         />

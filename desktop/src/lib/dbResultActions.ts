@@ -50,6 +50,7 @@ export async function reSortOnServer(
     const entry = await execOne(tabId, wrapped, (sqlTabOf(tabId)?.results.length ?? 0) + 1);
     task.finish(entry.cancelled ? "cancelled" : entry.kind==="error" ? "failed" : "success",entry.kind==="error" ? "重排未完成，返回结果页查看原因" : `已重新读取 ${entry.rows.length} 行${entry.hasMore ? "，仍有后续结果" : ""}`);
     const cur = sqlTabOf(tabId);
+    if (cur?.connId !== tab.connId || cur.run?.id !== token.id) return;
     patchTab<SqlTab>(tabId, { results: [...(cur?.results ?? []), entry], view: entry.id });
   } catch(error) {task.finish("failed","重排失败，返回数据库页查看原因");throw error;} finally {
     // 只清自己这一趟：期间用户可能已切连接或发起新执行

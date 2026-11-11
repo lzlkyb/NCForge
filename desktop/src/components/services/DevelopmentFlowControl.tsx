@@ -22,12 +22,13 @@ export function DevelopmentFlowControl({ onChanged, compileAll, disabled = false
     try { flow.save(draft); setError(""); setOpen(false); if (start) void flow.start(draft); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
-  const title = !flow.root ? "先打开工程" : flow.running ? flow.snapshot.phase : "按配置编译、投送并启动服务；已运行的服务按当前参数复用";
+  const title = !flow.root ? "先打开工程" : flow.running ? flow.snapshot.phase : locked ? "等待当前操作完成" : "按配置编译、投送并启动服务；已运行的服务按当前参数复用";
   return <div className="development-control">
     <button type="button" className="sv-btn development-start" disabled={locked} title={title} onClick={() => void flow.start()}>
       <Icon name={flow.running ? "spinner" : "play"} size={13} className={flow.running ? "animate-spin" : ""} />
       {flow.running ? flow.snapshot.state === "cancelling" ? "取消中…" : "开发中…" : "开始开发"}
     </button>
+    {locked && !flow.running && <span className="text-xs text-muted-foreground">{title}</span>}
     <button type="button" className="sv-icon-btn" aria-label="配置开始开发流程" title="配置开始开发流程" disabled={!flow.root || flow.running} onClick={edit}><Icon name="settings" size={14} /></button>
     <Dialog open={open} onClose={() => setOpen(false)} ariaLabel="开始开发流程设置">
       <DialogHeader><DialogTitle>开始开发</DialogTitle><button type="button" className="sv-icon-btn" aria-label="关闭开发流程设置" onClick={() => setOpen(false)}><Icon name="close" size={16} /></button></DialogHeader>

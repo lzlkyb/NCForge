@@ -35,13 +35,22 @@ export function ConnDialog() {
             </button>
           </div>
           {!editing && (
-            <div className="tabs" role="tablist">
-              {TABS.map((t) => (
+            <div className="tabs" role="tablist" aria-label="连接来源">
+              {TABS.map((t, index) => (
                 <button
                   key={t.key}
                   type="button"
                   role="tab"
                   aria-selected={dialog.tab === t.key}
+                  tabIndex={dialog.tab === t.key ? 0 : -1}
+                  onKeyDown={event => {
+                    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+                    const next = event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1 : step ? (index + step + TABS.length) % TABS.length : -1;
+                    if (next < 0) return;
+                    event.preventDefault();
+                    openConnDialog(null, TABS[next].key);
+                    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+                  }}
                   data-on={dialog.tab === t.key || undefined}
                   onClick={() => openConnDialog(null, t.key)}
                 >

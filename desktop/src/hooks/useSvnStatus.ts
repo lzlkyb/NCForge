@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSession, useWorkspaceRoot } from "../lib/workspaceSession";
 import { workspaceEpoch } from "../lib/workspaceEpoch";
+import { initReviewMarks, syncReviewMarks } from "../lib/reviewMarks";
 import {
   keyOf,
   onSvnScanProgress,
@@ -50,6 +51,8 @@ export function useSvnStatus() {
     enabled: !!root,
   });
 
+  // 代码面「已审」角标跟同一份数据（B4）：这里推过去，不额外发 SVN 扫描。
+  useEffect(() => { initReviewMarks(); syncReviewMarks(status.data); }, [status.data]);
   /** 每次新扫描结果落地就作废覆盖层，让后端标记成为唯一真相。 */
   const scannedAt = status.dataUpdatedAt;
   useEffect(() => {

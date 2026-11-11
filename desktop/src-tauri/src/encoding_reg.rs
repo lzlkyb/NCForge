@@ -125,6 +125,57 @@ pub fn check_java(file: &Path, root: &Path, reg: &EncodingRegistry) -> Option<En
     })
 }
 
+/// 源码里含中文的字符串字面量（不带引号）。
+///
+/// 只认最朴素的 `"..."`：遇到反斜杠转义或换行就整个跳过——转义后的字节和源码字节对不上，
+/// 拿来比对 class 只会误报；漏掉几条不要紧，这里只是给「产物是否已乱码」做旁证。
+fn cjk_string_literals(source: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = source;
+    while let Some(start) = rest.find('"') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find(['"', '\n']) else {
+            break;
+        };
+        if after.as_bytes()[end] == b'"' {
+            let lit = &after[..end];
+            if !lit.contains('\\') && lit.chars().any(|c| (c as u32) > 0x7F) {
+                out.push(lit);
+            }
+            rest = &after[end + 1..];
+        } else {
+            // 引号没闭合就换行了（多半是字符 '"' 或注释里的引号），从下一行接着找
+            rest = &after[end + 1..];
+        }
+    }
+    out
+}
+
+/// class 字节里有多少个中文字符串是「按 GBK 误读 UTF-8 源码」才会出现的乱码形态。
+///
+/// 做法：把字面量的 UTF-8 字节按 GBK 解一遍再编回 UTF-8，得到「乱码版」；class 里找到乱码版、
+/// 而找不到正确版，才算一处。常量池存的是修改版 UTF-8，BMP 里的中文字符与标准 UTF-8 字节相同，
+/// 所以可以直接按字节搜。
+pub fn garbled_literals_in_class(source: &str, class_bytes: &[u8]) -> usize {
+    let mut n = 0;
+    for lit in cjk_string_literals(source) {
+        let good = lit.as_bytes();
+        let (garbled, _, _) = encoding_rs::GBK.decode(good);
+        let garbled = garbled.as_bytes();
+        if garbled == good {
+            continue;
+        }
+        if contains(class_bytes, garbled) && !contains(class_bytes, good) {
+            n += 1;
+        }
+    }
+    n
+}
+
+fn contains(hay: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty() && hay.windows(needle.len()).any(|w| w == needle)
+}
+
 /// 只看扩展名，用来在扫描前把非 `.java` 的路径整个筛掉。
 pub fn is_java_source(path: &Path) -> bool {
     path.extension()
@@ -291,6 +342,44 @@ other.key=whatever
         assert!(check_java(&f, &d, &EncodingRegistry::parse("")).is_none());
         cleanup(&d);
         cleanup(&other);
+    }
+
+    /// 模拟 Eclipse 的错误编译：把 UTF-8 源码字节按 GBK 解成字符串，再以 UTF-8 写进 class。
+    fn fake_class(literal: &str, garbled: bool) -> Vec<u8> {
+        let mut b = b"\xCA\xFE\xBA\xBE....".to_vec();
+        if garbled {
+            let (s, _, _) = encoding_rs::GBK.decode(literal.as_bytes());
+            b.extend_from_slice(s.as_bytes());
+        } else {
+            b.extend_from_slice(literal.as_bytes());
+        }
+        b
+    }
+
+    #[test]
+    fn class_里是乱码形态才计数() {
+        let src = "class A { String s = \"保存成功\"; String t = \"ok\"; }";
+        assert_eq!(
+            garbled_literals_in_class(src, &fake_class("保存成功", true)),
+            1
+        );
+        assert_eq!(
+            garbled_literals_in_class(src, &fake_class("保存成功", false)),
+            0
+        );
+        assert_eq!(garbled_literals_in_class(src, b"\xCA\xFE\xBA\xBE"), 0);
+    }
+
+    #[test]
+    fn 字面量提取跳过转义与纯_ascii() {
+        let src = "a(\"中文\"); b(\"x\\ny中\"); c(\"abc\"); d(\"又一条\");";
+        assert_eq!(cjk_string_literals(src), vec!["中文", "又一条"]);
+    }
+
+    #[test]
+    fn 字符引号不会把后面的字面量吃掉() {
+        let src = "char c = '\"';\nString s = \"正常\";";
+        assert_eq!(cjk_string_literals(src), vec!["正常"]);
     }
 
     #[test]

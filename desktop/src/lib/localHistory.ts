@@ -58,9 +58,17 @@ export const restoreLocalHistory = (path: string, id: string, expectedMtimeMs?: 
  * 失败**绝不能**影响用户操作——历史是保险丝，不是主流程。所以这里吞掉一切
  * （磁盘满、目录被删、文件正在被占用都只当没发生），只留一行 console 供排查。
  */
+const captureListeners = new Set<(path: string, id: string) => void>();
+export function onLocalHistoryCaptured(cb: (path: string, id: string) => void): () => void {
+  captureListeners.add(cb);
+  return () => { captureListeners.delete(cb); };
+}
+
 export const captureQuietly = (path: string): void => {
   if (!path) return;
-  void captureLocalHistory(path).catch((e) => {
+  void captureLocalHistory(path).then((id) => {
+    if (id) captureListeners.forEach((cb) => cb(path, id));
+  }).catch((e) => {
     console.warn("[local-history] capture failed:", path, e);
   });
 };

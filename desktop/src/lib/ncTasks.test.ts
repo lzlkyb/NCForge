@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   addTask,
   BUILTIN_TASKS,
   listTasks,
   loadCustomTasks,
   removeTask,
+  updateTask,
   runTask,
   type NcTask,
   type TaskRuntime,
@@ -37,6 +38,21 @@ beforeEach(() => {
 });
 
 describe("自定义任务的本地存储", () => {
+  it("编辑保留任务 ID、顺序和工作区归属，写失败保持原任务", () => {
+    const a = addTask(ROOT, "A", ["deploy", "compileAll"]);
+    if (!a.ok) throw new Error("setup failed");
+    addTask(ROOT, "B", ["patch"]);
+    expect(updateTask(ROOT.toLowerCase(), a.task.id, "新任务", ["compileAll", "deploy"])).toMatchObject({ ok: true, task: { id: a.task.id } });
+    expect(loadCustomTasks(ROOT)[0]).toEqual({ id: a.task.id, name: "新任务", steps: ["compileAll", "deploy"] });
+    expect(loadCustomTasks(ROOT)[1].name).toBe("B");
+    expect(updateTask("D:\\other", a.task.id, "串工程", ["patch"]).ok).toBe(false);
+    const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("disk full"); });
+    expect(updateTask(ROOT, a.task.id, "失败改名", ["patch"])).toEqual({ ok: false, error: "本机存储写入失败" });
+    write.mockRestore();
+    expect(loadCustomTasks(ROOT)[0].name).toBe("新任务");
+    expect(updateTask(ROOT, a.task.id, "", ["patch"]).ok).toBe(false);
+    expect(updateTask(ROOT, a.task.id, "任务", []).ok).toBe(false);
+  });
   it("按工作区隔离，路径大小写不影响归属", () => {
     expect(addTask(ROOT, "A", ["compileAll"]).ok).toBe(true);
     expect(loadCustomTasks(ROOT)).toHaveLength(1);

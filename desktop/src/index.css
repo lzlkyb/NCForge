@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./fonts.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -259,10 +260,13 @@
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
-  font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-sans);
   font-size: 13px;
   accent-color: hsl(var(--primary));
 }
+
+/* Keep SQL operators and source text literal; programming ligatures obscure individual characters. */
+pre, code, .font-mono { font-variant-ligatures: none; }
 
 /* 自定义滚动条：细条 + 圆角 + 半透明，仅对可滚动区域生效 */
 ::-webkit-scrollbar {

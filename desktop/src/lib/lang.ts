@@ -671,7 +671,10 @@ export interface JdtSource {
 }
 
 /**
- * 拿 `jdt://` 类的正文：先问 jdt.ls，拿到桩就再让后端用 CFR 反编译一次。
+ * 拿 `jdt://` 类的正文。三条路按代价从低到高：
+ *
+ * 1. 源码包地址（`*_src.jar`）→ 直读包内 `.java` 原文（带注释，不起 JVM）；
+ * 2. 其余地址 → 先问 jdt.ls 的 source lookup，拿到桩再让后端用 CFR 反编译一次。
  *
  * 桩本身只有方法签名，点进去看不到实现——NC 的 jar 里只有 27.8% 带 `_src.jar`，
  * 现场补丁包更是几乎全裸，所以「桩 → 反编译」是常态路径而不是兜底。
@@ -680,17 +683,52 @@ export interface JdtSource {
 /** 本地类型索引给 jar 类合成的地址标记：见到它就不问语言服务，直接让后端反编译。 */
 const DIRECT_DECOMPILE = "?=ncforge-decompile";
 
+/** 直接走 CFR 反编译；失败抛友好错误（调用方提示后不激活标签）。 */
+async function decompileOnly(uri: string): Promise<JdtSource> {
+  try {
+    const r = await decompileClass(uri);
+    return { text: decompileHeader(r.jar) + r.source, decompiled: true };
+  } catch (e) {
+    throw new Error(friendlyError(e));
+  }
+}
+
+/**
+ * 源码包（`_src.jar`）里的 `.java` 直读通道。
+ *
+ * `_src.jar` 被 `is_runtime_archive` 有意排除在 classpath 外（源码不是字节码），
+ * jdt.ls 与 CFR 的 jar 候选里都没有它，而包内全部 STORED——读出来就是带注释的
+ * 原文，比反编译更真也更快（不起 JVM）。点开「jar 内注释」命中走这条直路。
+ */
+async function readSrcFile(uri: string): Promise<JdtSource> {
+  return { text: await invoke<string>("read_src_file", { uri }), decompiled: false };
+}
+
 async function fetchJdtSource(uri: string): Promise<JdtSource> {
   if (uri.includes(DIRECT_DECOMPILE)) {
-    // 合成地址不是 jdt.ls 认识的 URI，问它只会得到错误；直接走 CFR。
+    // 合成地址带标记：不是 jdt.ls 认识的 URI，问它只会得到错误；直接走 CFR。
+    return decompileOnly(uri);
+  }
+  // 🔴 源码包地址（jar 段是 `*_src.jar`）：先直读 .java 原文。读不到（组件卸载、
+  // 条目缺失）再落通用链路，别让「点开注释」整个不可用。
+  if (/_src\.jar\//i.test(uri)) {
     try {
-      const r = await decompileClass(uri);
-      return { text: decompileHeader(r.jar) + r.source, decompiled: true };
-    } catch (e) {
-      throw new Error(friendlyError(e));
+      return await readSrcFile(uri);
+    } catch {
+      // 直读失败：下面照常问 jdt.ls / CFR
     }
   }
-  const text = await langRequest<string>("java/classFileContents", null, { uri }, 60_000);
+  // 不带标记（`preferSource`）：先问 jdt.ls 的 source lookup，它有源码
+  // （与编译 jar 同名的 `_src.jar`）就直接给原文——**带注释**。
+  // 🔴 合成 URI 万一不被 jdt.ls 认识，请求会 reject 而不是返回桩：必须退到 CFR，
+  // 否则「打开 jar 里的类」整个不可用。CFR 也不成就把错抛出去，由界面提示
+  // 「读不到」——比塞一份来路不明的假桩诚实。
+  let text: string;
+  try {
+    text = await langRequest<string>("java/classFileContents", null, { uri }, 60_000);
+  } catch {
+    return decompileOnly(uri);
+  }
   if (!isStubSource(text)) return { text, decompiled: false };
   try {
     const r = await decompileClass(uri);

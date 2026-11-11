@@ -26,6 +26,11 @@ const goodExport = (over: Partial<ConfigExport> = {}): ConfigExport => ({
 });
 
 describe("parseExportFile", () => {
+  it("错误的对象、路径和连接类型在打开预览前被拒绝", () => {
+    for (const config of [[], "bad", { nc_home: 42 }, { db_conns: {} }, { db_conns: [null] }, { db_conns: [{ id: "x", name: 42 }] }, { svn_user: {} }, { server_heap_mb: "4096" }, { lang_enabled: "false" }]) {
+      expect(parseExportFile(JSON.stringify({ config })).ok).toBe(false);
+    }
+  });
   it("接受本应用导出的文件", () => {
     const r = parseExportFile(JSON.stringify(goodExport()));
     expect(r.ok).toBe(true);
@@ -57,9 +62,49 @@ describe("parseExportFile", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.data.from_version).toBe("0.1.0");
   });
+
+  it("本机当前格式（schema 2 + 新字段）导出后能被自己解析", () => {
+    // Rust `config_io::build_export` 的形状：v2 起带 client_heap_mb / linked_overrides。
+    // 两侧字段漂移会让「导出即导入」在最常见的路径上失败，这里钉住。
+    const own: ConfigExport = {
+      app: "ncforge",
+      schema: 2,
+      from_version: "1.4.2",
+      config: {
+        workspace_root: "D:\\ws\\newar",
+        client_heap_mb: 1024,
+        server_heap_mb: 4096,
+        db_conns: [{ id: "a", name: "测试库", source: "manual" }],
+        linked_overrides: [
+          { action: "front", target: "nc60-public" },
+          { action: "add", target: "", dir: "D:\\extra-libs" },
+        ],
+      },
+    };
+    const r = parseExportFile(JSON.stringify(own));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const plan = buildImportPlan(r.data);
+      expect(plan.hasClientHeap).toBe(true);
+      expect(plan.overrideCount).toBe(2);
+      expect(plan.overrideTargets).toEqual(["nc60-public", "D:\\extra-libs"]);
+      // 路径项仍只收有值的路径，新字段不该悄悄占位
+      expect(plan.pathItems.map((p) => p.key)).toEqual(["workspace_root"]);
+    }
+  });
+
+  it("linked_overrides / client_heap_mb 形状不对时拒绝", () => {
+    for (const config of [{ linked_overrides: {} }, { linked_overrides: [{ action: 1, target: "x" }] }, { client_heap_mb: "1024" }, { client_heap_mb: 0 }]) {
+      expect(parseExportFile(JSON.stringify({ config })).ok).toBe(false);
+    }
+  });
 });
 
 describe("buildImportPlan", () => {
+  it("只有代码智能设置的文件也包含可导入项目", () => {
+    expect(buildImportPlan(goodExport({ config: { lang_enabled: false } })).hasLang).toBe(true);
+    expect(buildImportPlan(goodExport({ config: {} })).hasLang).toBe(false);
+  });
   it("只列有值的路径项，连接取名字", () => {
     const plan = buildImportPlan(goodExport());
     expect(plan.pathItems.map((p) => p.key)).toEqual(["workspace_root", "nc_home"]);

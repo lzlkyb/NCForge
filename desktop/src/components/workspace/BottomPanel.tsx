@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { lazy, Suspense, useMemo } from "react";
 import { Icon } from "../ui/icon";
 import { missingResourceId } from "../../lib/resourceMissing";
 import { ResourceDownloadButton } from "../resource/ResourceDownloadButton";
@@ -20,9 +20,14 @@ import { countErrors, mergeProblems } from "../../lib/problemList";
 import { DevelopmentFlowControl } from "../services/DevelopmentFlowControl";
 import { useQueryClient } from "@tanstack/react-query";
 import { PanelTabs } from "./PanelTabs";
+// 懒加载：改动面板会拉起 Monaco 比较器，静态 import 会让整个底部面板的
+// jsdom 测试在 import 阶段就加载 monaco-editor（document.queryCommandSupported 缺失）。
+const ChangeTimelinePanel = lazy(() =>
+  import("./ChangeTimelinePanel").then((m) => ({ default: m.ChangeTimelinePanel })),
+);
 import { revealWorkbenchPanel, updateWorkbenchLayout, useWorkbenchLayout } from "../../lib/workbenchLayout";
 
-export type PanelTab = "problems" | "build" | "svc" | "calls" | "types" | "todo" | "bookmarks" | "debug";
+export type PanelTab = "problems" | "changes" | "build" | "svc" | "calls" | "types" | "todo" | "bookmarks" | "debug";
 
 interface Props {
   root: string;
@@ -157,6 +162,11 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
         </div>
       )}
       {tab === "types" && <TypeHierarchyPanel />}
+      {tab === "changes" && (
+        <Suspense fallback={<div className="ncf-empty">正在打开改动面板…</div>}>
+          <ChangeTimelinePanel root={root} activePath={activePath} onOpenAt={onOpenAt} />
+        </Suspense>
+      )}
       {tab === "todo" && <TodoPanel root={root} onOpenAt={onOpenAt} />}
       {tab === "bookmarks" && <BookmarkPanel root={root} onOpenAt={onOpenAt} />}
       {tab === "debug" && <DebugPanel onOpenAt={onOpenAt} />}

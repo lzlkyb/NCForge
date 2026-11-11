@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NCForge</title>
+    <link rel="preload" href="/src/assets/fonts/NotoSansSC-Latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/src/assets/fonts/JetBrainsMono.woff2" as="font" type="font/woff2" crossorigin />
     <script>
       // Bundle 加载前恢复窗口颜色和导航宽度，避免首帧闪回上一套布局。
       try {
@@ -34,7 +36,7 @@
       :root[data-boot-rail="expanded"] { --sk-nav: 148px; }
       html, body { margin:0; height:100%; background:var(--sk-bg); }
       #root { height:100%; }
-      .boot { display:flex; flex-direction:column; height:100%; overflow:hidden; font:13px/1.5 "Segoe UI","Microsoft YaHei UI","Microsoft YaHei",sans-serif; }
+      .boot { display:flex; flex-direction:column; height:100%; overflow:hidden; font:13px/1.5 var(--font-sans,"Noto Sans SC","Segoe UI","Microsoft YaHei UI",sans-serif); }
       .boot-hd { display:flex; align-items:center; flex:none; gap:10px; height:40px; padding:0 12px; }
       .boot-brand { display:flex; align-items:center; gap:7px; color:var(--sk-ink); font-weight:600; }
       .boot-brand img { display:block; border-radius:6px; }

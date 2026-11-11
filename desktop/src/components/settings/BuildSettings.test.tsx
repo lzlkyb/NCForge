@@ -46,7 +46,7 @@ const render = () => act(async () => root.render(<BuildSettings />));
 
 beforeEach(() => {
   getConfig.mockResolvedValue({ ...cfg });
-  patchConfig.mockResolvedValue({ ...cfg });
+  patchConfig.mockImplementation(async patch => ({ ...cfg, ...patch }));
   buildCacheInfo.mockResolvedValue({ ...baseCache });
   buildHistory.mockResolvedValue([]);
   container = document.createElement("div");
@@ -58,7 +58,7 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 describe("常驻 ecj 编译进程开关", () => {
   it("默认开：界面显示已开启", async () => {
     await render();
-    expect(row().textContent).toContain("常驻 ecj 编译进程");
+    expect(row().textContent).toContain("保留后台编译进程");
     expect(row().textContent).toContain("已开启");
     expect(switchOf().getAttribute("aria-checked")).toBe("true");
   });
@@ -75,7 +75,8 @@ describe("常驻 ecj 编译进程开关", () => {
     patchConfig.mockRejectedValueOnce(new Error("磁盘只读"));
     await act(async () => { switchOf().click(); });
     expect(row().textContent).toContain("已开启");
-    expect(toast).toHaveBeenCalledWith(expect.stringContaining("保存构建设置失败"), "error", { raw: "磁盘只读" });
+    expect(row().querySelector('[role="alert"]')?.textContent).toContain("磁盘只读");
+    expect(row().textContent).toContain("重试保存");
   });
 
   it("统计行显示回退、冷启动与耗时分布", async () => {

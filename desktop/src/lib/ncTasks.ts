@@ -129,6 +129,20 @@ export function removeTask(root: string | null, id: string): boolean {
   }
 }
 
+/** Edit in place so menu references and workspace isolation remain intact. */
+export function updateTask(root: string | null, id: string, name: string, steps: TaskStep[]): AddTaskResult {
+  if (!root) return { ok: false, error: "先打开工程再编辑任务" };
+  const tasks = loadCustomTasks(root);
+  const index = tasks.findIndex(task => task.id === id);
+  if (index < 0) return { ok: false, error: "任务已不存在，请重新选择" };
+  const task = sanitize({ id, name, steps });
+  if (!task) return { ok: false, error: name.trim() ? "至少选择一个步骤" : "任务名不能为空" };
+  tasks[index] = task;
+  try { localStorage.setItem(keyOf(root), JSON.stringify(tasks)); }
+  catch { return { ok: false, error: "本机存储写入失败" }; }
+  return { ok: true, task };
+}
+
 /* ─── 执行 ─── */
 
 /**

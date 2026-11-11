@@ -1,0 +1,4395 @@
+{
+  "measurements": [
+    {
+      "name": "light-1280-01",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-02",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码字号",
+          "left": 1119.5625,
+          "right": 1209.5625
+        },
+        {
+          "label": "代码字体",
+          "left": 990,
+          "right": 1230
+        },
+        {
+          "label": "缩进宽度",
+          "left": 1025.125,
+          "right": 1115.125
+        },
+        {
+          "label": null,
+          "left": 1143,
+          "right": 1156
+        },
+        {
+          "label": "自动保存延迟",
+          "left": 1086,
+          "right": 1176
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-03",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "SQL 缩进宽度",
+          "left": 1110,
+          "right": 1200
+        },
+        {
+          "label": "SQL 方言",
+          "left": 1121,
+          "right": 1230
+        },
+        {
+          "label": "长表达式折行宽度",
+          "left": 1101.65625,
+          "right": 1191.65625
+        },
+        {
+          "label": "语句之间空行",
+          "left": 1122,
+          "right": 1212
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-04",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-05",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 329,
+          "right": 1167.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-06",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码智能内存上限（MB）",
+          "left": 1050.34375,
+          "right": 1150.34375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-07",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-08",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": null,
+          "left": 329,
+          "right": 1251
+        },
+        {
+          "label": "添加执行步骤",
+          "left": 393,
+          "right": 549
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-09",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-10",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-11",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-01",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-02",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码字号",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": "代码字体",
+          "left": 98,
+          "right": 338
+        },
+        {
+          "label": "缩进宽度",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": null,
+          "left": 215.875,
+          "right": 228.875
+        },
+        {
+          "label": "自动保存延迟",
+          "left": 98,
+          "right": 188
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-03",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "SQL 缩进宽度",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": "SQL 方言",
+          "left": 98,
+          "right": 207
+        },
+        {
+          "label": "长表达式折行宽度",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": "语句之间空行",
+          "left": 98,
+          "right": 188
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-04",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-05",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 77,
+          "right": 455.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-06",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码智能内存上限（MB）",
+          "left": 98,
+          "right": 198
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-07",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-08",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": null,
+          "left": 77,
+          "right": 539
+        },
+        {
+          "label": "添加执行步骤",
+          "left": 141,
+          "right": 297
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-09",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-10",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-11",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-01-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-02-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码字号",
+          "left": 863.5625,
+          "right": 953.5625
+        },
+        {
+          "label": "代码字体",
+          "left": 734,
+          "right": 974
+        },
+        {
+          "label": "缩进宽度",
+          "left": 769.125,
+          "right": 859.125
+        },
+        {
+          "label": null,
+          "left": 887,
+          "right": 900
+        },
+        {
+          "label": "自动保存延迟",
+          "left": 830,
+          "right": 920
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-03-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "SQL 缩进宽度",
+          "left": 854,
+          "right": 944
+        },
+        {
+          "label": "SQL 方言",
+          "left": 865,
+          "right": 974
+        },
+        {
+          "label": "长表达式折行宽度",
+          "left": 845.65625,
+          "right": 935.65625
+        },
+        {
+          "label": "语句之间空行",
+          "left": 866,
+          "right": 956
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-04-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-05-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 329,
+          "right": 911.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-06-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码智能内存上限（MB）",
+          "left": 794.34375,
+          "right": 894.34375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-07-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-08-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": null,
+          "left": 329,
+          "right": 995
+        },
+        {
+          "label": "添加执行步骤",
+          "left": 393,
+          "right": 549
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-09-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-10-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-11-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-01-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-02-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码字号",
+          "left": 1119.5625,
+          "right": 1209.5625
+        },
+        {
+          "label": "代码字体",
+          "left": 990,
+          "right": 1230
+        },
+        {
+          "label": "缩进宽度",
+          "left": 1025.125,
+          "right": 1115.125
+        },
+        {
+          "label": null,
+          "left": 1143,
+          "right": 1156
+        },
+        {
+          "label": "自动保存延迟",
+          "left": 1086,
+          "right": 1176
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-03-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "SQL 缩进宽度",
+          "left": 1110,
+          "right": 1200
+        },
+        {
+          "label": "SQL 方言",
+          "left": 1116,
+          "right": 1230
+        },
+        {
+          "label": "长表达式折行宽度",
+          "left": 1101.65625,
+          "right": 1191.65625
+        },
+        {
+          "label": "语句之间空行",
+          "left": 1122,
+          "right": 1212
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-04-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-05-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 329,
+          "right": 1167.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-06-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码智能内存上限（MB）",
+          "left": 1050.34375,
+          "right": 1150.34375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-07-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-08-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": null,
+          "left": 329,
+          "right": 1251
+        },
+        {
+          "label": "添加执行步骤",
+          "left": 393,
+          "right": 549
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-09-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-10-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1280-11-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-01-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-02-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码字号",
+          "left": 863.5625,
+          "right": 953.5625
+        },
+        {
+          "label": "代码字体",
+          "left": 734,
+          "right": 974
+        },
+        {
+          "label": "缩进宽度",
+          "left": 769.125,
+          "right": 859.125
+        },
+        {
+          "label": null,
+          "left": 887,
+          "right": 900
+        },
+        {
+          "label": "自动保存延迟",
+          "left": 830,
+          "right": 920
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-03-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "SQL 缩进宽度",
+          "left": 854,
+          "right": 944
+        },
+        {
+          "label": "SQL 方言",
+          "left": 860,
+          "right": 974
+        },
+        {
+          "label": "长表达式折行宽度",
+          "left": 845.65625,
+          "right": 935.65625
+        },
+        {
+          "label": "语句之间空行",
+          "left": 866,
+          "right": 956
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-04-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-05-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 329,
+          "right": 911.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-06-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码智能内存上限（MB）",
+          "left": 794.34375,
+          "right": 894.34375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-07-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-08-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": null,
+          "left": 329,
+          "right": 995
+        },
+        {
+          "label": "添加执行步骤",
+          "left": 393,
+          "right": 549
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-09-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-10-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-1024-11-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-01-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-02-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码字号",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": "代码字体",
+          "left": 98,
+          "right": 338
+        },
+        {
+          "label": "缩进宽度",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": null,
+          "left": 215.875,
+          "right": 228.875
+        },
+        {
+          "label": "自动保存延迟",
+          "left": 98,
+          "right": 188
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-03-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "SQL 缩进宽度",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": "SQL 方言",
+          "left": 98,
+          "right": 212
+        },
+        {
+          "label": "长表达式折行宽度",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": "语句之间空行",
+          "left": 98,
+          "right": 188
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-04-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-05-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 77,
+          "right": 455.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-06-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码智能内存上限（MB）",
+          "left": 98,
+          "right": 198
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-07-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-08-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": null,
+          "left": 77,
+          "right": 539
+        },
+        {
+          "label": "添加执行步骤",
+          "left": 141,
+          "right": 297
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-09-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-10-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "light-560-11-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-01",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-02",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码字号",
+          "left": 1119.5625,
+          "right": 1209.5625
+        },
+        {
+          "label": "代码字体",
+          "left": 990,
+          "right": 1230
+        },
+        {
+          "label": "缩进宽度",
+          "left": 1025.125,
+          "right": 1115.125
+        },
+        {
+          "label": null,
+          "left": 1143,
+          "right": 1156
+        },
+        {
+          "label": "自动保存延迟",
+          "left": 1086,
+          "right": 1176
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-03",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "SQL 缩进宽度",
+          "left": 1110,
+          "right": 1200
+        },
+        {
+          "label": "SQL 方言",
+          "left": 1121,
+          "right": 1230
+        },
+        {
+          "label": "长表达式折行宽度",
+          "left": 1101.65625,
+          "right": 1191.65625
+        },
+        {
+          "label": "语句之间空行",
+          "left": 1122,
+          "right": 1212
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-04",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-05",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 329,
+          "right": 1167.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-06",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码智能内存上限（MB）",
+          "left": 1050.34375,
+          "right": 1150.34375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-07",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-08",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": null,
+          "left": 329,
+          "right": 1251
+        },
+        {
+          "label": "添加执行步骤",
+          "left": 393,
+          "right": 549
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-09",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-10",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-11",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-01",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-02",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码字号",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": "代码字体",
+          "left": 98,
+          "right": 338
+        },
+        {
+          "label": "缩进宽度",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": null,
+          "left": 215.875,
+          "right": 228.875
+        },
+        {
+          "label": "自动保存延迟",
+          "left": 98,
+          "right": 188
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-03",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "SQL 缩进宽度",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": "SQL 方言",
+          "left": 98,
+          "right": 207
+        },
+        {
+          "label": "长表达式折行宽度",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": "语句之间空行",
+          "left": 98,
+          "right": 188
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-04",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-05",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 77,
+          "right": 455.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-06",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码智能内存上限（MB）",
+          "left": 98,
+          "right": 198
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-07",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-08",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": null,
+          "left": 77,
+          "right": 539
+        },
+        {
+          "label": "添加执行步骤",
+          "left": 141,
+          "right": 297
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-09",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-10",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-11",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-01-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-02-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码字号",
+          "left": 863.5625,
+          "right": 953.5625
+        },
+        {
+          "label": "代码字体",
+          "left": 734,
+          "right": 974
+        },
+        {
+          "label": "缩进宽度",
+          "left": 769.125,
+          "right": 859.125
+        },
+        {
+          "label": null,
+          "left": 887,
+          "right": 900
+        },
+        {
+          "label": "自动保存延迟",
+          "left": 830,
+          "right": 920
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-03-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "SQL 缩进宽度",
+          "left": 854,
+          "right": 944
+        },
+        {
+          "label": "SQL 方言",
+          "left": 865,
+          "right": 974
+        },
+        {
+          "label": "长表达式折行宽度",
+          "left": 845.65625,
+          "right": 935.65625
+        },
+        {
+          "label": "语句之间空行",
+          "left": 866,
+          "right": 956
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-04-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-05-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 329,
+          "right": 911.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-06-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码智能内存上限（MB）",
+          "left": 794.34375,
+          "right": 894.34375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-07-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-08-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": null,
+          "left": 329,
+          "right": 995
+        },
+        {
+          "label": "添加执行步骤",
+          "left": 393,
+          "right": 549
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-09-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-10-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-11-standard",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-01-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-02-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码字号",
+          "left": 1119.5625,
+          "right": 1209.5625
+        },
+        {
+          "label": "代码字体",
+          "left": 990,
+          "right": 1230
+        },
+        {
+          "label": "缩进宽度",
+          "left": 1025.125,
+          "right": 1115.125
+        },
+        {
+          "label": null,
+          "left": 1143,
+          "right": 1156
+        },
+        {
+          "label": "自动保存延迟",
+          "left": 1086,
+          "right": 1176
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-03-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "SQL 缩进宽度",
+          "left": 1110,
+          "right": 1200
+        },
+        {
+          "label": "SQL 方言",
+          "left": 1116,
+          "right": 1230
+        },
+        {
+          "label": "长表达式折行宽度",
+          "left": 1101.65625,
+          "right": 1191.65625
+        },
+        {
+          "label": "语句之间空行",
+          "left": 1122,
+          "right": 1212
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-04-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-05-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 329,
+          "right": 1167.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-06-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码智能内存上限（MB）",
+          "left": 1050.34375,
+          "right": 1150.34375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-07-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-08-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": null,
+          "left": 329,
+          "right": 1251
+        },
+        {
+          "label": "添加执行步骤",
+          "left": 393,
+          "right": 549
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-09-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-10-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1280-11-comfortable",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-01-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-02-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码字号",
+          "left": 863.5625,
+          "right": 953.5625
+        },
+        {
+          "label": "代码字体",
+          "left": 734,
+          "right": 974
+        },
+        {
+          "label": "缩进宽度",
+          "left": 769.125,
+          "right": 859.125
+        },
+        {
+          "label": null,
+          "left": 887,
+          "right": 900
+        },
+        {
+          "label": "自动保存延迟",
+          "left": 830,
+          "right": 920
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-03-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "SQL 缩进宽度",
+          "left": 854,
+          "right": 944
+        },
+        {
+          "label": "SQL 方言",
+          "left": 860,
+          "right": 974
+        },
+        {
+          "label": "长表达式折行宽度",
+          "left": 845.65625,
+          "right": 935.65625
+        },
+        {
+          "label": "语句之间空行",
+          "left": 866,
+          "right": 956
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-04-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-05-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 329,
+          "right": 911.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-06-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码智能内存上限（MB）",
+          "left": 794.34375,
+          "right": 894.34375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-07-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-08-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [
+        {
+          "label": null,
+          "left": 329,
+          "right": 995
+        },
+        {
+          "label": "添加执行步骤",
+          "left": 393,
+          "right": 549
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-09-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-10-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-1024-11-comfortable",
+      "width": 1024,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 714,
+          "scroll": 714
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-01-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-02-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码字号",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": "代码字体",
+          "left": 98,
+          "right": 338
+        },
+        {
+          "label": "缩进宽度",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": null,
+          "left": 215.875,
+          "right": 228.875
+        },
+        {
+          "label": "自动保存延迟",
+          "left": 98,
+          "right": 188
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-03-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "SQL 缩进宽度",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": "SQL 方言",
+          "left": 98,
+          "right": 212
+        },
+        {
+          "label": "长表达式折行宽度",
+          "left": 98,
+          "right": 188
+        },
+        {
+          "label": "语句之间空行",
+          "left": 98,
+          "right": 188
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-04-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-05-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 77,
+          "right": 455.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-06-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "代码智能内存上限（MB）",
+          "left": 98,
+          "right": 198
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-07-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-08-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": null,
+          "left": 77,
+          "right": 539
+        },
+        {
+          "label": "添加执行步骤",
+          "left": 141,
+          "right": 297
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-09-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-10-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "dark-560-11-comfortable",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "14px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "14px"
+        }
+      ]
+    },
+    {
+      "name": "nc-directory-confirmation",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 329,
+          "right": 1167.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "nc-confirmation-narrow",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [
+        {
+          "label": "NC 安装目录",
+          "left": 77,
+          "right": 455.234375
+        }
+      ],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "import-review",
+      "width": 1280,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 970,
+          "scroll": 970
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "12px 24px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    },
+    {
+      "name": "import-review-narrow",
+      "width": 560,
+      "outerOverflow": false,
+      "body": [
+        {
+          "client": 494,
+          "scroll": 494
+        }
+      ],
+      "controls": [],
+      "spacing": [
+        {
+          "class": "wb-settings-commandbar",
+          "padding": "10px 16px",
+          "fontSize": "13px"
+        },
+        {
+          "class": "wb-settings-page-header",
+          "padding": "0px",
+          "fontSize": "13px"
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "fixture": {
+    "commands": [
+      {
+        "cmd": "plugin:window|is_maximized",
+        "args": {
+          "label": "main"
+        }
+      },
+      {
+        "cmd": "debug_status",
+        "args": {
+          "target": "server"
+        }
+      },
+      {
+        "cmd": "debug_status",
+        "args": {
+          "target": "client"
+        }
+      },
+      {
+        "cmd": "debug_status",
+        "args": {
+          "target": "remote"
+        }
+      },
+      {
+        "cmd": "db_cached_tables",
+        "args": {}
+      },
+      {
+        "cmd": "get_app_info",
+        "args": {}
+      },
+      {
+        "cmd": "plugin:window|is_maximized",
+        "args": {
+          "label": "main"
+        }
+      },
+      {
+        "cmd": "db_cached_tables",
+        "args": {}
+      },
+      {
+        "cmd": "check_update",
+        "args": {}
+      },
+      {
+        "cmd": "resources_status",
+        "args": {}
+      },
+      {
+        "cmd": "server_status",
+        "args": {}
+      },
+      {
+        "cmd": "client_status",
+        "args": {}
+      },
+      {
+        "cmd": "get_workspace",
+        "args": {}
+      },
+      {
+        "cmd": "get_autostart",
+        "args": {}
+      },
+      {
+        "cmd": "nc_home_probe",
+        "args": {
+          "path": null
+        }
+      },
+      {
+        "cmd": "get_config",
+        "args": {}
+      },
+      {
+        "cmd": "build_cache_info",
+        "args": {}
+      },
+      {
+        "cmd": "build_history",
+        "args": {}
+      },
+      {
+        "cmd": "get_config",
+        "args": {}
+      },
+      {
+        "cmd": "get_config",
+        "args": {}
+      },
+      {
+        "cmd": "hotswap_status",
+        "args": {}
+      },
+      {
+        "cmd": "get_config",
+        "args": {}
+      },
+      {
+        "cmd": "resources_status",
+        "args": {}
+      },
+      {
+        "cmd": "get_workspace",
+        "args": {}
+      },
+      {
+        "cmd": "get_config",
+        "args": {}
+      },
+      {
+        "cmd": "build_cache_info",
+        "args": {}
+      },
+      {
+        "cmd": "build_history",
+        "args": {}
+      },
+      {
+        "cmd": "get_config",
+        "args": {}
+      },
+      {
+        "cmd": "get_config",
+        "args": {}
+      },
+      {
+        "cmd": "hotswap_status",
+        "args": {}
+      },
+      {
+        "cmd": "get_config",
+        "args": {}
+      },
+      {
+        "cmd": "resources_status",
+        "args": {}
+      },
+      {
+        "cmd": "hotswap_status",
+        "args": {}
+      },
+      {
+        "cmd": "lang_status",
+        "args": {}
+      },
+      {
+        "cmd": "get_config",
+        "args": {}
+      },
+      {
+        "cmd": "nc_manifest",
+        "args": {
+          "root": "D:/工程/验收工程"
+        }
+      },
+      {
+        "cmd": "fs_list_dir",
+        "args": {
+          "path": "D:/工程/验收工程"
+        }
+      },
+      {
+        "cmd": "svn_info",
+        "args": {}
+      },
+      {
+        "cmd": "svn_status",
+        "args": {}
+      },
+      {
+        "cmd": "tree_projects",
+        "args": {}
+      },
+      {
+        "cmd": "nc_manifest",
+        "args": {
+          "root": "D:/工程/验收工程"
+        }
+      },
+      {
+        "cmd": "hotswap_status",
+        "args": {}
+      },
+      {
+        "cmd": "hotswap_status",
+        "args": {}
+      },
+      {
+        "cmd": "hotswap_status",
+        "args": {}
+      },
+      {
+        "cmd": "hotswap_status",
+        "args": {}
+      },
+      {
+        "cmd": "hotswap_status",
+        "args": {}
+      },
+      {
+        "cmd": "get_app_info",
+        "args": {}
+      },
+      {
+        "cmd": "hotswap_status",
+        "args": {}
+      },
+      {
+        "cmd": "hotswap_status",
+        "args": {}
+      },
+      {
+        "cmd": "pick_folder",
+        "args": {
+          "title": "选择 NC 安装目录（含 ufjdk、modules 的那一层）",
+          "defaultPath": "D:/NC/NC65"
+        }
+      },
+      {
+        "cmd": "nc_home_probe",
+        "args": {
+          "path": "D:/NC/测试环境/NC65"
+        }
+      },
+      {
+        "cmd": "server_status",
+        "args": {}
+      },
+      {
+        "cmd": "nc_home_set",
+        "args": {
+          "path": "D:/NC/测试环境/NC65"
+        }
+      },
+      {
+        "cmd": "server_status",
+        "args": {}
+      },
+      {
+        "cmd": "export_config",
+        "args": {}
+      },
+      {
+        "cmd": "export_config",
+        "args": {}
+      },
+      {
+        "cmd": "hotswap_status",
+        "args": {}
+      }
+    ],
+    "unknown": [
+      "debug_status",
+      "debug_status",
+      "debug_status",
+      "client_status",
+      "get_workspace",
+      "get_workspace",
+      "lang_status",
+      "nc_manifest",
+      "svn_info",
+      "svn_status",
+      "tree_projects",
+      "nc_manifest"
+    ],
+    "home": "D:/NC/测试环境/NC65",
+    "copied": "D:/NC/NC65"
+  },
+  "ipc": "全部为 Tauri mocks，没有真实配置写入或服务操作"
+}

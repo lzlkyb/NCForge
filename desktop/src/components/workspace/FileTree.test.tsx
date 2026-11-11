@@ -333,6 +333,7 @@ describe("文件树的右键操作", () => {
       parent: MODULES,
       name: "A.java",
       kind: "file",
+      template: true,
     });
     expect(onCreated).toHaveBeenCalledWith(`${MODULES}\\A.java`);
     // 输入行收掉
@@ -453,6 +454,7 @@ describe("文件树的右键操作", () => {
       parent: ROOT,
       name: "Top.java",
       kind: "file",
+      template: true,
     });
   });
 });

@@ -48,6 +48,18 @@ pub fn is_valid(mark: &ReviewMark, revision: i64, mtime_ms: u64, size: u64) -> b
     mark.revision == revision && mark.mtime_ms == mtime_ms && mark.size == size
 }
 
+/// 一条标记此刻是否算数（纯判定，便于单测）。
+///
+/// `revision < 0` = 版本未知：代码面标记时后端没查到 BASE 版本（桥没起 / 未纳管）。
+/// 不能拿一个假版本去和扫描到的真版本做全等比较——那样标记会被下一次 status
+/// 立刻误杀（P0-4）。这时只按内容指纹（mtime + size）判失效，语义仍然诚实。
+fn mark_ok(mark: &ReviewMark, revision: i64, mtime_ms: u64, size: u64) -> bool {
+    if mark.revision < 0 {
+        return mark.mtime_ms == mtime_ms && mark.size == size;
+    }
+    is_valid(mark, revision, mtime_ms, size)
+}
+
 /// 存储用的 key：Windows 路径大小写不敏感，统一小写 + 正斜杠，避免同一文件两条记录。
 pub fn key_of(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/").to_lowercase()
@@ -78,7 +90,7 @@ pub fn valid_marks(store: &ReviewStore, revisions: &HashMap<String, i64>) -> Vec
             continue;
         };
         let rev = revisions.get(key).copied().unwrap_or(mark.revision);
-        if is_valid(mark, rev, mt, md.len()) {
+        if mark_ok(mark, rev, mt, md.len()) {
             out.push(key.clone());
         }
     }
@@ -161,6 +173,27 @@ mod tests {
             !is_valid(&m, 14231, 1_700_000_000_123, 4097),
             "长度变了要失效"
         );
+    }
+
+    #[test]
+    fn 版本未知的标记不被扫描版本号误杀() {
+        let m = ReviewMark {
+            revision: -1,
+            path: String::new(),
+            mtime_ms: 10,
+            size: 4,
+            at_ms: 0,
+        };
+        // 代码面标记：即便扫描拿到的真版本是 14231，也不能用 0/-1 去比
+        assert!(mark_ok(&m, 14231, 10, 4), "版本未知时跳过 revision 维度");
+        assert!(!mark_ok(&m, 14231, 11, 4), "文件被改过仍然失效");
+        assert!(!mark_ok(&m, 14231, 10, 5), "长度变了仍然失效");
+        let known = ReviewMark {
+            revision: 5,
+            ..m.clone()
+        };
+        assert!(mark_ok(&known, 5, 10, 4));
+        assert!(!mark_ok(&known, 6, 10, 4), "已知版本仍要求四元组全等");
     }
 
     #[test]

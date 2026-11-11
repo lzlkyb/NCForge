@@ -75,4 +75,14 @@ describe("外部改动自动刷新已打开标签", () => {
     handleExternalJavaChanges(["D:/p/m/src/B.java"], false);
     expect(reload).not.toHaveBeenCalled();
   });
+
+  it("审查通道里的非 .java 文本改动也刷新对应标签", async () => {
+    const off = await mount();
+    mocks.tabs = [{ path: "D:/p/m/src/A.java" }, { path: "D:/p/m/mapper/B.xml" }];
+    // 后端把 .xml 内容改动放进 reviewChanged：编辑器里打开的 .xml 也得跟着磁盘变
+    handleExternalJavaChanges(["D:/p/m/src/A.java"], false, ["D:/p/m/mapper/B.xml"], false);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledWith("D:/p/m/mapper/B.xml");
+    await off();
+  });
 });

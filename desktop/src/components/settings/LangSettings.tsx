@@ -6,6 +6,7 @@ import { missingResourceId } from "../../lib/resourceMissing";
 import { ResourceDownloadButton } from "../resource/ResourceDownloadButton";
 import { Card } from "../ui/card";
 import { LangMemoryField } from "./LangMemoryField";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Badge } from "../ui/badge";
 import { SettingsRow } from "../ui/SettingsRow";
 import { ToggleRow } from "../ui/ToggleRow";
@@ -35,7 +36,8 @@ type SaveFeedback = { pending: string | null; saved: string | null; errorKey?: s
 export function LangSettings() {
   const [cfg, setCfg] = useState<AppConfig | null>(null);
   const [feedback, setFeedback] = useState<SaveFeedback>({ pending: null, saved: null });
-  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildState, setRebuildState] = useState({ active: false, confirm: false });
+  const rebuilding = rebuildState.active;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
@@ -95,9 +97,10 @@ export function LangSettings() {
   };
 
   const rebuild = async () => {
+    setRebuildState(prev => ({ ...prev, confirm: false }));
     if (rebuildingRef.current) return;
     rebuildingRef.current = true;
-    setRebuilding(true);
+    setRebuildState({ active: true, confirm: false });
     try {
       await langRegenerate();
       toast("工程已重新生成，代码智能索引仍在准备", "success");
@@ -105,7 +108,7 @@ export function LangSettings() {
       errorToast("重新生成影子工程", e);
     } finally {
       rebuildingRef.current = false;
-      if (mounted.current) setRebuilding(false);
+      if (mounted.current) setRebuildState({ active: false, confirm: false });
     }
   };
 
@@ -194,12 +197,12 @@ export function LangSettings() {
         <SettingsRow
           id="lang-rebuild"
           label="重新生成影子工程"
-          sub={off ? "先启用代码智能后可重建" : "模块目录变化后，重新生成并建立索引"}
+          sub={off ? "先启用代码智能后可重建" : "停止代码智能，清理影子工程并重新准备索引"}
           info="重建会刷新影子工程及索引。耗时取决于当前工程规模，重建期间代码补全可能暂未就绪。"
           valueText={off ? "需启用代码智能" : rebuilding ? "重建中" : "可重建"}
           last
           control={
-            <Button variant="outline" size="sm" isLoading={rebuilding} loadingText="重建中…" disabled={off || busy || rebuilding} title={disabledReason} onClick={() => void rebuild()}>
+            <Button variant="outline" size="sm" isLoading={rebuilding} loadingText="重建中…" disabled={off || busy || rebuilding} title={disabledReason} onClick={() => setRebuildState(prev => ({ ...prev, confirm: true }))}>
               {rebuilding ? "重建中…" : "重新建立"}
             </Button>
           }
@@ -229,6 +232,8 @@ export function LangSettings() {
         </p>
         </div>
       </details>
+      <ConfirmDialog open={rebuildState.confirm} title="重新准备代码智能工程？" description="会停止当前代码智能并重新生成影子工程，重新建立索引期间补全和跳转可能暂不可用。"
+        confirmLabel="重新准备" onCancel={() => setRebuildState(prev => ({ ...prev, confirm: false }))} onConfirm={() => void rebuild()} />
     </>
   );
 }

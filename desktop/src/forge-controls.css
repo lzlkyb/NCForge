@@ -1,0 +1,271 @@
+/* Workbench surface and control tokens. Grid row geometry remains owned by the grid. */
+.forge-controls {
+  --forge-control: 32px;
+  --forge-radius: 8px;
+  --forge-tool-radius: 6px;
+  --r-control: 8px;
+  --r-chip: 6px;
+  --r-card: 12px;
+  --r-menu: 12px;
+  --r-dialog: 16px;
+  --h-control: 32px;
+  --h-icon: 28px;
+  --dbx-h-control: 32px;
+  --dbx-h-icon: 28px;
+  --forge-card-radius: 12px;
+  --forge-edge: hsl(var(--foreground) / .15);
+  --forge-hover: hsl(var(--foreground) / .065);
+  --forge-press: hsl(var(--foreground) / .12);
+  --forge-selected: hsl(var(--primary) / .13);
+  --forge-highlight: inset 0 1px 0 hsl(0 0% 100% / .14);
+  --forge-button-depth: 0 1px 2px rgb(23 55 49 / .17), 0 3px 6px rgb(23 55 49 / .06);
+  --forge-card-depth: 0 1px 2px rgb(23 55 49 / .09), 0 5px 14px rgb(23 55 49 / .07);
+  --forge-menu-depth: 0 3px 7px rgb(23 55 49 / .16), 0 9px 23px rgb(23 55 49 / .12);
+  --sh-card: var(--forge-card-depth);
+  --sh-pop: var(--forge-float-depth);
+  --shadow-pop: var(--forge-float-depth);
+  --forge-float-depth: 0 4px 12px rgb(15 27 32 / .12), 0 16px 44px rgb(15 27 32 / .14);
+}
+.dark.forge-controls, .dark .forge-controls {
+  --forge-button-depth: 0 1px 2px rgb(0 0 0 / .42), 0 3px 6px rgb(0 0 0 / .15);
+  --forge-card-depth: 0 1px 3px rgb(0 0 0 / .30), 0 5px 14px rgb(0 0 0 / .20);
+  --forge-menu-depth: 0 4px 9px rgb(0 0 0 / .34), 0 10px 26px rgb(0 0 0 / .30);
+  --forge-float-depth: 0 4px 14px rgb(0 0 0 / .35), 0 16px 44px rgb(0 0 0 / .42);
+}
+
+.forge-controls .ui-icon { flex-shrink: 0; vertical-align: middle; }
+.forge-controls .ui-icon:is([data-icon-size="12"], [data-icon-size="13"], [data-icon-size="14"]) { stroke-width: 2.15; }
+.forge-controls .ui-icon:is([data-icon-size="18"], [data-icon-size="19"], [data-icon-size="20"]) { stroke-width: 1.85; }
+.forge-controls .dbx-execution-primary .dbx-run-action svg { stroke-width: 1.25; }
+.forge-controls .dbx-execution-primary .dbx-stop-action:not([aria-busy="true"]) svg { stroke-width: 0; }
+
+.forge-controls :is(.ui-button, .dbx-btn, .dbx-ibtn, .dbx-connpick, .wb-header-icon,
+  .vc-btn, .meta-link, .lg-btn, .wb-icon-btn, .wb-nav-btn, .wb-outline-btn, .sv-icon-btn, .app-side-item, .header-badge, button.wb-status-chip) {
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-press) var(--ease);
+}
+.forge-controls .ui-button { border-radius: var(--forge-radius); }
+.forge-controls .ui-button[data-size="default"] { height: var(--forge-control); }
+.forge-controls .ui-button[data-size="icon"] { border-radius: var(--r-control); }
+.forge-controls .ui-button:is([data-variant="default"], [data-variant="destructive"]) {
+  box-shadow: var(--forge-highlight), var(--forge-button-depth);
+}
+.forge-controls .ui-button[data-variant="outline"] {
+  border-color: var(--forge-edge);
+  background-color: hsl(var(--card));
+}
+.forge-controls :is(.ui-button[data-variant="outline"], .ui-button[data-variant="ghost"],
+  .ui-button[data-variant="secondary"], .dbx-ibtn, .wb-header-icon, .vc-btn, .meta-link, .lg-btn, .wb-icon-btn, .wb-nav-btn, .wb-outline-btn, .sv-icon-btn):hover:not(:disabled) {
+  background-color: var(--forge-hover);
+  color: hsl(var(--foreground));
+}
+.forge-controls .ui-button:not([data-size="icon"]):not([data-variant="link"]):active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 3px rgb(0 0 0 / .14);
+}
+.forge-controls :is(.dbx-btn, .dbx-ibtn, .dbx-connpick, .wb-header-icon,
+  .ui-button[data-size="icon"], .meta-link, .vc-btn, .lg-btn, .wb-icon-btn, .wb-nav-btn, .wb-outline-btn, .sv-icon-btn):active:not(:disabled) {
+  transform: none;
+  box-shadow: inset 0 0 0 1px var(--forge-edge);
+}
+.forge-controls :is(.dbx-ibtn, .wb-header-icon, .ui-button[data-size="icon"]):active:not(:disabled) {
+  background-color: var(--forge-press);
+}
+.forge-controls :is(.dbx-btn, .dbx-ibtn, .wb-header-icon, .ui-button[data-variant="ghost"], .meta-link, .vc-btn):is(
+  [aria-pressed="true"], [aria-expanded="true"], [data-on="true"]) {
+  box-shadow: inset 0 0 0 1px hsl(var(--primary) / .24);
+}
+.forge-controls .dbx-execution-primary .dbx-runsplit {
+  box-shadow: inset 0 0 0 1px hsl(var(--primary) / .22);
+}
+.forge-controls .app-side-item[data-active] {
+  background-color: var(--forge-selected);
+  box-shadow: inset 0 0 0 1px hsl(var(--primary) / .18);
+}
+
+.forge-controls .badge {
+  min-height: 20px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.forge-controls .badge:is([data-variant="default"], [data-variant="accent"]) {
+  background: var(--forge-selected);
+  color: hsl(var(--primary));
+}
+.forge-controls .badge[data-variant="secondary"] {
+  background: hsl(var(--secondary));
+  color: hsl(var(--secondary-foreground));
+}
+.forge-controls .dbx-conn-env[data-prod] {
+  border-radius: 4px;
+  background: hsl(var(--destructive) / .10);
+  padding-inline: 4px;
+}
+.forge-controls :is(button.wb-status-chip, .header-badge):hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px var(--forge-edge);
+}
+.forge-controls .ui-card {
+  border-radius: var(--forge-card-radius);
+  border-color: var(--forge-edge);
+  box-shadow: var(--forge-card-depth);
+}
+.forge-controls .title-chip {
+  border-radius: var(--forge-radius);
+  box-shadow: inset 0 0 0 1px hsl(var(--primary) / .15);
+}
+.forge-controls :is(.input, .dbx-inp, .wb-global-search, .wb-settings-search, .settings-choice) {
+  border-radius: var(--forge-radius);
+  border-color: var(--forge-edge);
+}
+.forge-controls .sw {
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / .16);
+}
+.forge-controls .sw-thumb {
+  box-shadow: 0 1px 2px rgb(0 0 0 / .22);
+}
+/* 真实应用把 `forge-controls` 挂在 <html> 上，控件对照页挂在 section 上：
+   两条都写，预览页才不会少画一层（`html` 前缀在这里只为压过 glass 的同级选择器）。 */
+html.forge-controls .modal-surface,
+.forge-controls .modal-surface {
+  border-radius: var(--r-dialog);
+  box-shadow: var(--forge-float-depth);
+}
+html.forge-controls :is(.ui-surface[role="menu"], .ui-surface[role="listbox"], .dbx-dd),
+.forge-controls :is(.ui-surface[role="menu"], .ui-surface[role="listbox"], .dbx-dd) {
+  border-radius: var(--r-menu);
+  box-shadow: var(--forge-menu-depth);
+}
+.forge-controls :is(.ui-button, .dbx-btn, .dbx-ibtn, .dbx-connpick, .wb-header-icon,
+  .vc-btn, .meta-link, .lg-btn, .wb-icon-btn, .wb-nav-btn, .wb-outline-btn, .sv-icon-btn, .app-side-item, .header-badge, button.wb-status-chip, .input, .dbx-inp):focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+}
+/* Floating and inset surfaces have different depth and shared concentric corners. */
+html.forge-controls .wb-settings-body .ui-card {
+  padding: 20px;
+  border: 1px solid var(--forge-edge);
+  border-radius: var(--r-card);
+  background: hsl(var(--card));
+  box-shadow: var(--forge-card-depth);
+}
+.forge-controls .settings-choice { padding: 3px; border-radius: var(--forge-radius); }
+.forge-controls .settings-choice button { min-height: 32px; border-radius: 5px; }
+.forge-controls .settings-choice button[aria-checked="true"] { box-shadow: var(--forge-button-depth); }
+.forge-controls :is(.srow-control input:not([type="checkbox"], [type="radio"], [type="range"]), .srow-control select, .dbx-inp, .input) {
+  min-height: var(--h-control);
+}
+.forge-controls :is(.input, .dbx-inp, .sv-cfg-input):not([aria-invalid="true"], [data-invalid]) {
+  box-shadow: inset 0 1px 2px hsl(var(--foreground) / .045);
+}
+.forge-controls :is(.vc-btn, .lg-btn, .sv-btn) {
+  min-height: var(--h-control);
+  border-radius: var(--forge-radius);
+}
+.forge-controls :is(.sv-btn-primary, .vc-btn-primary, .dbx-btn.pri) {
+  box-shadow: var(--forge-button-depth);
+}
+.forge-controls :is(.dbx-ibtn, .wb-icon-btn, .wb-header-icon, .sv-icon-btn, .vc-btn-icon) {
+  min-width: var(--h-icon);
+  min-height: var(--h-icon);
+  border-radius: var(--forge-tool-radius);
+}
+/* 标签关闭按钮不跟着 `--h-icon` 放大：它长在 30px 高的标签行里，28px（舒适档 32px）
+   会顶破行高。尺寸由 workspace.css 的 18px 与 interaction-density.css 的舒适档
+   26px 决定，这里只统一圆角与焦点环。 */
+.forge-controls .wb-tab-x {
+  min-width: 0;
+  min-height: 0;
+  border-radius: var(--forge-tool-radius);
+}
+.forge-controls .wb-tab-x:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }
+/* 紧凑控件组（工具栏 / 进度条 / 标签脚注…）自带 25–28px 的尺寸，是有意的密度设计。
+   上面的通用控制高度不能覆盖它们，否则按钮会顶破所在行高。 */
+.forge-controls :is(.development-control, .development-progress, .wb-hs-foot, .sc-run-actions, .dbx-execution-bar, .dbx-result-tools, .dbx-transfer-split, .dbx-transfer-col, .dbx-vs-table, .wb-code-tree-title) :is(.sv-btn, .sv-icon-btn, .wb-icon-btn, .dbx-btn, .dbx-ibtn) {
+  min-height: 0;
+}
+/* 执行按钮组：真实应用与对照页都命中（后者把类挂在 section 上，不吃 html 级选择器）。
+   带文字的 `.ghost` 变体（SQL 工具栏的「执行当前语句」，自带 min-width:114px）不参与
+   图标尺寸统一，否则 28px 的盒子装不下文字，会溢到隔壁按钮上。 */
+.forge-controls .dbx-console .dbx-execution-primary .dbx-runsplit {
+  border-radius: var(--forge-radius);
+  background: hsl(var(--primary) / .10);
+  box-shadow: var(--forge-button-depth);
+}
+.forge-controls .dbx-console .dbx-execution-primary .dbx-run-action:not(.ghost) {
+  width: var(--h-icon);
+  min-width: var(--h-icon);
+  height: var(--h-icon);
+  border-radius: var(--forge-radius) 0 0 var(--forge-radius);
+}
+.forge-controls .dbx-console .dbx-execution-primary .dbx-run-menu {
+  width: var(--h-icon);
+  min-width: var(--h-icon);
+  height: var(--h-icon);
+  border-radius: 0 var(--forge-radius) var(--forge-radius) 0;
+}
+.forge-controls .dbx-crow {
+  border: 1px solid transparent;
+  border-radius: var(--r-card);
+  padding-inline: 7px;
+}
+.forge-controls .dbx-crow[data-active] {
+  border-color: hsl(var(--primary) / .20);
+  box-shadow: var(--forge-card-depth);
+}
+/* 选中行同时是拖放目标时，两个反馈都要画：卡片阴影 + 顶部 inset 指示线。
+   只写一个 box-shadow 会互相覆盖，用户看不到「能落在哪儿」。 */
+.forge-controls .dbx-crow[data-active][data-drop] {
+  box-shadow: var(--forge-card-depth), inset 0 2px 0 hsl(var(--primary));
+}
+.forge-controls .dbx-crow:hover:not([data-active]) { background: var(--forge-hover); }
+.forge-controls :is(.dbx-dlg .ft, .dbx-dlg .foot, .update-dialog-actions) :is(.ui-button, .dbx-btn) {
+  min-height: 36px;
+}
+.forge-controls .ui-button[data-size="lg"] { min-height: 36px; }
+html.forge-controls[data-ui-density="comfortable"] {
+  --h-icon: 32px;
+  --dbx-h-icon: 32px;
+}
+@media (pointer: coarse) {
+  html.forge-controls, html.forge-controls[data-ui-density] {
+    --h-control: 40px;
+    --forge-control: 40px;
+    --h-icon: 40px;
+    --dbx-h-control: 40px;
+    --dbx-h-icon: 40px;
+    --dbx-h-bar: 44px;
+  }
+  html.forge-controls[data-ui-density="comfortable"] {
+    --h-icon: 44px;
+    --dbx-h-icon: 44px;
+  }
+  .forge-controls :is(.settings-choice button, .ui-button, .meta-link, .dbx-btn, .lg-btn, .vc-btn, .sv-btn) {
+    min-height: 40px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .forge-controls :is(.ui-button, .dbx-btn, .dbx-ibtn, .dbx-connpick, .wb-header-icon,
+    .vc-btn, .meta-link, .lg-btn, .wb-icon-btn, .wb-nav-btn, .wb-outline-btn, .sv-icon-btn, .app-side-item, .header-badge, button.wb-status-chip) {
+    transition: none;
+  }
+  .forge-controls .ui-button:active:not(:disabled) { transform: none; }
+}
+@media (forced-colors: active) {
+  html.forge-controls {
+    --forge-button-depth: none;
+    --forge-highlight: none;
+    --forge-card-depth: none;
+    --forge-menu-depth: none;
+    --forge-float-depth: none;
+  }
+  .forge-controls :is(.ui-button, .dbx-btn, .dbx-ibtn, .dbx-connpick, .vc-btn, .meta-link, .header-badge,
+    .badge, .ui-card, .modal-surface, .ui-surface) { border: 1px solid ButtonText; box-shadow: none; }
+  .forge-controls :is(.app-side-item[data-active], [aria-pressed="true"], [data-on="true"]) {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+}

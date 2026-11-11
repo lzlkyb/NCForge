@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { getFontRevision, subscribeFonts } from "../lib/fonts";
 import {
   averageHeight, buildOffsets, offsetAt, rowAtOffset, rowHeights,
 } from "../lib/gridRowMetrics";
@@ -25,12 +26,15 @@ export function useGridRowLayout({ rows, columns, widths, order, wrap, rowH, fro
   /** 拖列宽期间冻结行高：每个 pointermove 都按新宽度重测所有行会让大表卡死。 */
   frozen?: boolean;
 }) {
-  const cached = useRef<number[] | null>(null);
-  const heights = useMemo(
-    () => (frozen && cached.current ? cached.current : rowHeights(rows, columns, widths, wrap, rowH)),
-    [frozen, rows, columns, widths, wrap, rowH],
+  const cached = useRef<{ heights: number[]; fontRevision: number } | null>(null);
+  const fontRevision = useSyncExternalStore(subscribeFonts, getFontRevision);
+  // Store the font generation with the measurement so a swap also refreshes wrapped row geometry.
+  const measurement = useMemo(
+    () => (frozen && cached.current ? cached.current : { heights: rowHeights(rows, columns, widths, wrap, rowH), fontRevision }),
+    [frozen, rows, columns, widths, wrap, rowH, fontRevision],
   );
-  useEffect(() => { if (!frozen) cached.current = heights; }, [heights, frozen]);
+  const { heights } = measurement;
+  useEffect(() => { if (!frozen) cached.current = measurement; }, [measurement, frozen]);
   const { offsets, total } = useMemo(() => buildOffsets(heights, order), [heights, order]);
   const average = useMemo(() => averageHeight(total, order.length, rowH), [total, order.length, rowH]);
 

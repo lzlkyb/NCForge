@@ -717,6 +717,7 @@ pub(super) fn backup_conflict_files(
 /// 标记/取消「已审」。`reviewed = false` 时删掉标记。
 #[tauri::command]
 pub async fn svn_review_mark(
+    app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     path: String,
     revision: i64,
@@ -729,6 +730,20 @@ pub async fn svn_review_mark(
         // 这个 key 会落盘、下次 status 时被读回来，所以路径必须过白名单：
         // 不能让前端把工作区外的任意路径写进标记文件。
         let target = safe_path(&cfg, &path)?;
+        // P0-4：代码面标记时前端没有 status 数据，传 -1（版本未知）。后端自己
+        // 查单文件 BASE 版本，不让 0 冒充版本号去和真 revision 比（0 != 14231
+        // 会让「恰好有改动、最需要标记」的文件过几秒就失效）。查不到就保持 -1，
+        // `mark_ok` 会跳过版本维度、仅按 mtime/size 判失效。
+        let revision = if !reviewed || revision > 0 {
+            revision
+        } else {
+            let target_s = target.display().to_string();
+            bridge_for(&app, &st, &cfg)
+                .ok()
+                .and_then(|b| b.call("info", &[&target_s], T_NET).ok())
+                .and_then(|v| v["revision"].as_i64())
+                .unwrap_or(-1)
+        };
         let mut store = ReviewStore::load(&cfg_dir);
         let key = svn_review::key_of(&target);
         if reviewed {

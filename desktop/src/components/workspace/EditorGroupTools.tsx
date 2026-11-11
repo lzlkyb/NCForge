@@ -1,6 +1,7 @@
 import { Menu, MenuItem } from "../ui/Menu";
 import { Icon } from "../ui/icon";
-import { Button } from "../ui/button";
+import { CodeContextBar } from "./CodeContextBar";
+import { useFileSlot } from "./useFileSlot";
 import { TaskMenu } from "./TaskMenu";
 import { getSession, setSession, useWorkspaceSelector } from "../../lib/workspaceSession";
 import { emptyEditorGroups, swapEditorGroups, type EditorGroupId } from "../../lib/editorGroups";
@@ -13,8 +14,9 @@ export function EditorGroupTools({ root, session, compiling, canCompile, onCompi
   compiling: boolean; canCompile: boolean; onCompile: () => void;
 }) {
   const groups = useWorkspaceSelector(s => s.editorGroups), split = !!groups?.right.length;
+  const slot = useFileSlot();
   const focus = (group: EditorGroupId) => { setSession({ editorGroups: old => ({ ...(old ?? emptyEditorGroups()), focused: group }) }); const path = getSession().activePath; if (path) session.selectTab(path); };
-  return <div className="wb-editor-tools" aria-label="代码执行与分组工具">
+  return <>{slot("context", <CodeContextBar root={root} compiling={compiling} canCompile={canCompile} onCompile={onCompile} />)}<div className="wb-editor-tools" aria-label="代码执行与分组工具">
     {split ? <div className="wb-group-switch" role="group" aria-label="活动编辑器组">
       {([['left', '左组'], ['right', '右组']] as const).map(([id, name]) => <button key={id} type="button" disabled={!groups?.[id].length} aria-pressed={groups?.focused === id} title={`聚焦${name} · ${tabKeyLabel(id)}`} onClick={() => focus(id)}>{name}</button>)}
     </div> : <span className="wb-editor-tools-label">代码</span>}
@@ -33,6 +35,5 @@ export function EditorGroupTools({ root, session, compiling, canCompile, onCompi
       </>}
     </Menu>
     <TaskMenu root={root} compiling={compiling} />
-    <Button size="sm" variant="outline" className="wb-compile-btn" disabled={!canCompile || compiling} isLoading={compiling} loadingText="编译中" onClick={onCompile} title="编译活动编辑器组文件所属模块"><Icon name="hammer" size={16} />{compiling ? "编译中…" : "编译"}</Button>
-  </div>;
+  </div></>;
 }

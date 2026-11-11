@@ -144,7 +144,7 @@ public class NcDbBridge {
 
     /** 已知命令名：用来区分「新格式的第二段是会话名」还是「旧格式的第二段就是命令」。 */
     private static final Set<String> CMDS = new HashSet<String>(Arrays.asList(
-            "hello", "propList", "propCred", "connect", "connectProp", "exec", "execBound", "readOnly", "more", "commit",
+            "hello", "propList", "propCred", "connect", "connectProp", "exec", "execBound", "readOnly", "more", "closeResult", "commit",
             "rollback", "autocommit", "tables", "ncNames", "query", "columns", "indexes", "ddl",
             "explain", "sessions", "objects", "source", "schema", "schemas", "setSchema", "ping", "probe",
             "disconnect", "quit", "cancel"));
@@ -301,6 +301,11 @@ public class NcDbBridge {
 
     // ───────────────────────── 会话 ─────────────────────────
 
+    private static final class CursorError extends SQLException {
+        final String code;
+        CursorError(String code, String message) { super(message); this.code = code; }
+    }
+
     /** 一条连接的全套状态。字段只在它自己的工作线程里读写（`running` 除外）。 */
     private static final class Session {
         final String name;
@@ -317,6 +322,23 @@ public class NcDbBridge {
         int cursorCols;
         /** 当前这条查询（含后续 more）是否按全量 CLOB 取值；每次 exec 重设。 */
         boolean fullLob;
+        private static final int MAX_RESULT_CURSORS = 32;
+        final Map<String, CursorState> resultCursors = new LinkedHashMap<String, CursorState>();
+
+        /** 每个结果独占 JDBC 资源及取值模式，下一条查询不能覆盖它的分页位置。 */
+        static final class CursorState {
+            final Statement statement;
+            final ResultSet rows;
+            final int columns;
+            final boolean fullLob;
+            CursorState(Statement statement, ResultSet rows, int columns, boolean fullLob) {
+                this.statement = statement; this.rows = rows; this.columns = columns; this.fullLob = fullLob;
+            }
+            void close() {
+                try { if (rows != null) rows.close(); } catch (SQLException ignore) { }
+                try { if (statement != null) statement.close(); } catch (SQLException ignore) { }
+            }
+        }
 
         /** 手动提交模式下的未提交事务：写语句条数、影响行数、开始时刻。 */
         int txStatements;
@@ -368,7 +390,10 @@ public class NcDbBridge {
                     }
                     try {
                         dispatch(j.id, j.cmd, j.args);
+                    } catch (CursorError e) {
+                        err(j.id, e.code, e.getMessage());
                     } catch (SQLException e) {
+                        if (connectionLost(e)) closeQuietly();
                         err(j.id, "sql", sqlMessage(e));
                     } catch (Throwable e) {
                         Throwable c = e.getCause() != null ? e.getCause() : e;
@@ -404,15 +429,17 @@ public class NcDbBridge {
                         a.size() > 3 ? a.get(3) : "", true));
             } else if ("exec".equals(cmd) || "execFull".equals(cmd)) {
                 // execFull：导出 / 表间搬运的全量取数通道，CLOB 给到 1M 而不是网格的 8K 预览。
-                ok(id, exec(a.get(0), intArg(a, 1, 500), intArg(a, 2, 30), flag(a, 3),
-                        "execFull".equals(cmd)));
+                ok(id, execResult(a.get(0), intArg(a, 1, 500), intArg(a, 2, 30), flag(a, 3),
+                        "execFull".equals(cmd), a.size() > 4 ? a.get(4) : ""));
             } else if ("execBound".equals(cmd) || "execFullBound".equals(cmd)) {
                 ok(id, execParams(a.get(0), intArg(a,1,500), intArg(a,2,30), a.subList(3,a.size()),
                         false, "execFullBound".equals(cmd)));
             } else if ("readOnly".equals(cmd)) {
                 ok(id, setReadOnly(flag(a,0)));
             } else if ("more".equals(cmd)) {
-                ok(id, more(intArg(a, 0, 500)));
+                ok(id, moreResult(intArg(a, 0, 500), a.size() > 1 ? a.get(1) : ""));
+            } else if ("closeResult".equals(cmd)) {
+                ok(id, "{\"closed\":" + closeResult(a.size() > 0 ? a.get(0) : "") + "}");
             } else if ("lobValue".equals(cmd)) {
                 ok(id, lobValue(a.get(0), intArg(a, 1, 0), a.get(2), intArg(a, 3, CLOB_MAX)));
             } else if ("commit".equals(cmd)) {
@@ -479,12 +506,14 @@ public class NcDbBridge {
                         alive = false;
                     }
                 }
+                if (!alive) closeAllCursors();
                 Boolean txFlag = txActive();
                 String aj = txFlag == null ? "null" : txFlag.toString();
                 ok(id, "{\"alive\":" + alive + ",\"tx\":" + txJson(txFlag, true)
                         + ",\"active\":" + aj + "}");
             } else if ("ping".equals(cmd)) {
                 boolean alive = conn != null && !conn.isClosed();
+                if (!alive) closeAllCursors();
                 ok(id, "{\"alive\":" + alive + ",\"tx\":" + txJson() + "}");
             } else if ("probe".equals(cmd)) {
                 boolean alive = conn != null && !conn.isClosed();
@@ -497,6 +526,7 @@ public class NcDbBridge {
                         }
                     }
                 }
+                if (!alive) closeAllCursors();
                 ok(id, "{\"alive\":" + alive + ",\"tx\":" + txJson() + "}");
             } else if ("disconnect".equals(cmd)) {
                 closeQuietly();
@@ -584,6 +614,7 @@ public class NcDbBridge {
                         + "（只能字母开头，其余用字母、数字、下划线，最长 128 个字符）");
             }
             target = target.toUpperCase(java.util.Locale.ROOT);
+            closeAllCursors();
             Statement st = conn.createStatement();
             try {
                 st.execute("alter session set current_schema = " + target);
@@ -710,6 +741,7 @@ public class NcDbBridge {
             requireConn();
             if (enabled != readOnly) {
                 if (txStatements > 0) throw new SQLException("有未提交写入，请先提交或回滚再切换只读查询");
+                closeAllCursors();
                 if (enabled) { previousAuto = conn.getAutoCommit(); conn.setAutoCommit(false); }
                 conn.rollback();
                 if (!enabled) conn.setAutoCommit(previousAuto);
@@ -723,6 +755,68 @@ public class NcDbBridge {
         }
         private String exec(String raw, int maxRows, int timeout, boolean collectStats, boolean fullLob) throws Exception {
             return execParams(raw,maxRows,timeout,null,collectStats,fullLob);
+        }
+        private CursorState saveCursor() {
+            return new CursorState(cursorStmt, cursor, cursorCols, fullLob);
+        }
+        private void useCursor(CursorState state) {
+            cursorStmt = state == null ? null : state.statement;
+            cursor = state == null ? null : state.rows;
+            cursorCols = state == null ? 0 : state.columns;
+            fullLob = state != null && state.fullLob;
+        }
+        private String execResult(String raw, int maxRows, int timeout, boolean collectStats,
+                                  boolean fullLob, String resultId) throws Exception {
+            if (resultId == null || resultId.isEmpty()) return exec(raw,maxRows,timeout,collectStats,fullLob);
+            requireConn();
+            String sql = normalize(raw), head = leadingKeywords(sql);
+            boolean mayReturnRows = head.startsWith("select") || head.startsWith("with") || cursorOutBinds(sql).length > 0;
+            if (mayReturnRows && !resultCursors.containsKey(resultId) && resultCursors.size() >= MAX_RESULT_CURSORS) {
+                throw new CursorError("cursor-limit", "最多保留 32 个可继续读取的结果，请关闭部分结果后重试");
+            }
+            closeResult(resultId);
+            CursorState legacy = saveCursor();
+            // 会话工作线程串行执行：复用旧执行路径时暂存旧槽，避免复制绑定、事务和 LOB 逻辑。
+            useCursor(null);
+            boolean success = false;
+            try {
+                String result = exec(raw,maxRows,timeout,collectStats,fullLob);
+                if (cursor != null && resultCursors.size() >= MAX_RESULT_CURSORS) {
+                    throw new CursorError("cursor-limit", "最多保留 32 个可继续读取的结果，请关闭部分结果后重试");
+                }
+                success = true;
+                return result;
+            } finally {
+                if (success && cursor != null) resultCursors.put(resultId,saveCursor());
+                else closeCursor();
+                useCursor(legacy);
+            }
+        }
+        private String moreResult(int maxRows, String resultId) throws SQLException {
+            if (resultId == null || resultId.isEmpty()) return more(maxRows);
+            requireConn();
+            CursorState state = resultCursors.remove(resultId);
+            if (state == null) throw new CursorError("cursor-closed", "这个结果的游标已关闭，请重新执行查询");
+            CursorState legacy = saveCursor();
+            useCursor(state);
+            running = cursorStmt;
+            boolean success = false;
+            try {
+                String result = more(maxRows);
+                success = true;
+                return result;
+            } finally {
+                if (success && cursor != null) resultCursors.put(resultId,saveCursor());
+                else closeCursor();
+                useCursor(legacy);
+                running = null;
+            }
+        }
+        private boolean closeResult(String resultId) {
+            CursorState state = resultCursors.remove(resultId);
+            if (state == null) return false; // 读完后前端释放同一个结果仍然安全。
+            state.close();
+            return true;
         }
         private String execParams(String raw, int maxRows, int timeout, List<String> binds) throws Exception {
             return execParams(raw,maxRows,timeout,binds,false,false);
@@ -1144,12 +1238,18 @@ public class NcDbBridge {
         }
 
         private String more(int maxRows) throws SQLException {
+            requireConn();
             if (cursor == null) {
                 throw new SQLException("没有可以继续读取的结果（游标已关闭，重新执行一次）");
             }
             long t0 = System.currentTimeMillis();
-            String page = page(maxRows);
-            return "{" + page + ",\"ms\":" + (System.currentTimeMillis() - t0) + "}";
+            try {
+                String page = page(maxRows);
+                return "{" + page + ",\"ms\":" + (System.currentTimeMillis() - t0) + "}";
+            } catch (SQLException e) {
+                closeCursor();
+                throw e;
+            }
         }
 
         /**
@@ -1215,6 +1315,12 @@ public class NcDbBridge {
                 }
                 cursorStmt = null;
             }
+        }
+
+        private void closeAllCursors() {
+            closeCursor();
+            for (CursorState state : resultCursors.values()) state.close();
+            resultCursors.clear();
         }
 
         /** 取出 DBMS_OUTPUT 缓冲（没开或没有权限就是空数组）。 */
@@ -1952,8 +2058,15 @@ public class NcDbBridge {
 
         private void requireConn() throws SQLException {
             if (conn == null || conn.isClosed()) {
+                closeAllCursors();
                 throw new SQLException("还没连数据库");
             }
+        }
+
+        private boolean connectionLost(SQLException error) {
+            String state = error.getSQLState();
+            if (state != null && state.startsWith("08")) return true;
+            try { return conn == null || conn.isClosed(); } catch (SQLException ignore) { return true; }
         }
 
         /**
@@ -1961,7 +2074,7 @@ public class NcDbBridge {
          * 走到这里时用户已经选过了；进程被直接杀掉时 Oracle 也会回滚。
          */
         private void closeQuietly() {
-            closeCursor();
+            closeAllCursors();
             if (conn != null) {
                 try {
                     if (!conn.getAutoCommit()) {

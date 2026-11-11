@@ -15,6 +15,7 @@ export function buildTreeMenu({
   onCleanModule,
   onRebuildModule,
   onBeginCreate,
+  onNewJavaType,
   onBeginRename,
   onDelete,
   onCopyPath,
@@ -42,6 +43,8 @@ export function buildTreeMenu({
   /** 清理并重编这个模块（会先弹确认框）。 */
   onRebuildModule?: (path: string, module: string) => void;
   onBeginCreate: (target: { path: string; isDir: boolean }, kind: NewEntryKind) => void;
+  /** 弹出「新建 Java 类型…」对话框；不传就不显示这一项。 */
+  onNewJavaType?: (target: { path: string; isDir: boolean }) => void;
   onBeginRename: (target: { path: string; isDir: boolean }) => void;
   onDelete: (target: { path: string; isDir: boolean }) => void;
   onCopyPath: (path: string) => void;
@@ -61,6 +64,13 @@ export function buildTreeMenu({
         // 不标 Ctrl+N：全局没有这个快捷键，标了就是承诺一个不存在的操作
         onSelect: () => onBeginCreate(target, "file"),
       });
+      if (onNewJavaType) {
+        items.push({
+          label: "新建 Java 类型…",
+          icon: "filePlus",
+          onSelect: () => onNewJavaType(target),
+        });
+      }
       items.push({
         label: "新建文件夹",
         icon: "folderPlus",

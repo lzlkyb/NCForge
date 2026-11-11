@@ -13,7 +13,7 @@ export type DockRegionName = "toolbar" | "sidebar" | "document" | "bottom" | "ac
  * 一个工具页抛错会连累整个工作台。改成 FilesTab 用 portal 往这几个容器里渲染之后，
  * 外层壳（WorkbenchShell）与文件页不再是父子关系，两者各自独立。
  */
-export type FileSlotName = "tree" | "tabs" | "editor" | "status" | "output";
+export type FileSlotName = "tree" | "context" | "tabs" | "editor" | "status" | "output";
 
 /** 当前工具的「文档页」入口：作为一个标签排在文件标签后面。 */
 export interface DockToolTab {

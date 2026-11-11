@@ -629,7 +629,7 @@ fn engine_error(e: db_bridge::BridgeError) -> String {
         // （写入可能已经生效）。归成 `sql` 的话界面只会显示成一条普通执行失败，
         // 用户顺手再点一次写回就可能重复落库。前端据这个码给「请先到库里核对」。
         "session-lost" | "session-desync" | "probe-failed" | "need-password" | "auth"
-        | "unreachable" => code_label(&e.code, &e.message),
+        | "unreachable" | "cursor-closed" | "cursor-limit" => code_label(&e.code, &e.message),
         _ => map_sql_error(&e.message),
     }
 }
@@ -1250,40 +1250,126 @@ pub async fn db_exec(
     slot: Option<String>,
     collect_stats: Option<bool>,
 ) -> Result<Value, String> {
+    exec_result(
+        &app,
+        &state,
+        &id,
+        &sql,
+        max_rows,
+        timeout_sec,
+        slot.as_deref(),
+        collect_stats,
+        None,
+    )
+    .await
+}
+
+/// 同一 SQL 标签内的每个结果保留独立分页游标，事务仍属于原会话槽。
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn db_exec_result(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+    sql: String,
+    max_rows: Option<u32>,
+    timeout_sec: Option<u32>,
+    slot: Option<String>,
+    collect_stats: Option<bool>,
+    result_id: String,
+) -> Result<Value, String> {
+    validate_result_id(&result_id)?;
+    exec_result(
+        &app,
+        &state,
+        &id,
+        &sql,
+        max_rows,
+        timeout_sec,
+        slot.as_deref(),
+        collect_stats,
+        Some(&result_id),
+    )
+    .await
+}
+
+fn validate_result_id(id: &str) -> Result<(), String> {
+    if id.trim().is_empty() || id.len() > 128 {
+        return Err(code_label(
+            "sql",
+            "结果标识必须是 1 到 128 字节的非空字符串",
+        ));
+    }
+    Ok(())
+}
+
+fn exec_args(
+    sql: &str,
+    rows: u32,
+    timeout: u32,
+    collect_stats: bool,
+    result_id: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        sql.to_string(),
+        rows.to_string(),
+        timeout.to_string(),
+        collect_stats.to_string(),
+    ];
+    if let Some(id) = result_id {
+        args.push(id.to_string());
+    }
+    args
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn exec_result(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    id: &str,
+    sql: &str,
+    max_rows: Option<u32>,
+    timeout_sec: Option<u32>,
+    slot: Option<&str>,
+    collect_stats: Option<bool>,
+    result_id: Option<&str>,
+) -> Result<Value, String> {
     if sql.trim().is_empty() {
         return Err(code_label("sql", "SQL 是空的"));
     }
-    let b = slot_bridge(&state, &id, slot.as_deref())?;
+    let b = slot_bridge(state, id, slot)?;
     let rows = max_rows.unwrap_or(500).clamp(1, 10_000);
     let timeout = timeout_sec.unwrap_or(30).clamp(1, 3600);
     let limit = Duration::from_secs(u64::from(timeout) + 30);
     if b.kind() == EngineKind::Rust {
-        if let Some(need) = crate::db_engine::refcursor_need(&sql) {
+        if let Some(need) = crate::db_engine::refcursor_need(sql) {
             return exec_via_java(JavaFallback {
-                app: &app,
-                st: &state,
-                id: &id,
-                slot: slot.as_deref(),
-                sql: &sql,
+                app,
+                st: state,
+                id,
+                slot,
+                sql,
                 rows,
                 timeout,
                 collect_stats: collect_stats.unwrap_or(false),
+                result_id,
                 need,
             })
             .await;
         }
     }
     match call_with_reconnect(
-        &state,
-        &id,
+        state,
+        id,
         b.clone(),
         "exec",
-        vec![
-            sql.clone(),
-            rows.to_string(),
-            timeout.to_string(),
-            collect_stats.unwrap_or(false).to_string(),
-        ],
+        exec_args(
+            sql,
+            rows,
+            timeout,
+            collect_stats.unwrap_or(false),
+            result_id,
+        ),
         limit,
         None,
     )
@@ -1294,14 +1380,15 @@ pub async fn db_exec(
         // 兜底也失败时把两个原因都写出来——用户至少知道我们试过什么。
         Err(e) if b.kind() == EngineKind::Rust && e.contains("PLS-00707") => {
             exec_via_java(JavaFallback {
-                app: &app,
-                st: &state,
-                id: &id,
-                slot: slot.as_deref(),
-                sql: &sql,
+                app,
+                st: state,
+                id,
+                slot,
+                sql,
                 rows,
                 timeout,
                 collect_stats: collect_stats.unwrap_or(false),
+                result_id,
                 need: crate::db_engine::RefcursorNeed::OutBind,
             })
             .await
@@ -1332,6 +1419,7 @@ struct JavaFallback<'a> {
     rows: u32,
     timeout: u32,
     collect_stats: bool,
+    result_id: Option<&'a str>,
     need: crate::db_engine::RefcursorNeed,
 }
 
@@ -1364,6 +1452,7 @@ async fn exec_via_java(f: JavaFallback<'_>) -> Result<Value, String> {
         rows,
         timeout,
         collect_stats,
+        result_id,
         need,
     } = f;
     let cfg = st.config.read().await.clone();
@@ -1396,12 +1485,7 @@ async fn exec_via_java(f: JavaFallback<'_>) -> Result<Value, String> {
         id,
         handle.clone(),
         "exec",
-        vec![
-            sql.to_string(),
-            rows.to_string(),
-            timeout.to_string(),
-            collect_stats.to_string(),
-        ],
+        exec_args(sql, rows, timeout, collect_stats, result_id),
         limit,
         None,
     )
@@ -1454,6 +1538,54 @@ pub async fn db_more(
     let b = slot_bridge(&state, &id, slot.as_deref())?;
     let rows = max_rows.unwrap_or(500).clamp(1, 10_000);
     call(b, "more", vec![rows.to_string()], T_META).await
+}
+
+#[tauri::command]
+pub async fn db_more_result(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+    max_rows: Option<u32>,
+    slot: Option<String>,
+    result_id: String,
+    fallback: Option<bool>,
+) -> Result<Value, String> {
+    validate_result_id(&result_id)?;
+    let b = if fallback.unwrap_or(false) {
+        // 结果归实际执行它的会话所有；宿主连接的状态不能决定兜底游标是否有效。
+        let key = slot_key(&id, slot.as_deref())?;
+        touch_slot(&key);
+        existing_bridge(&state, &java_key(&key))
+            .map_err(|_| code_label("cursor-closed", "结果所属的 JVM 兜底会话已关闭，请重新执行"))?
+    } else {
+        slot_bridge(&state, &id, slot.as_deref())?
+    };
+    let rows = max_rows.unwrap_or(500).clamp(1, 10_000);
+    call(b, "more", vec![rows.to_string(), result_id], T_META).await
+}
+
+#[tauri::command]
+pub async fn db_result_close(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+    slot: Option<String>,
+    result_id: String,
+) -> Result<Value, String> {
+    validate_result_id(&result_id)?;
+    let key = slot_key(&id, slot.as_deref())?;
+    let args = vec![result_id];
+    let mut closed = false;
+    // 关闭可重复调用；宿主或兜底会话已释放时无需重建连接。
+    for key in [key.clone(), java_key(&key)] {
+        if let Ok(b) = existing_bridge(&state, &key) {
+            match call(b, "closeResult", args.clone(), T_META).await {
+                Ok(out) => closed |= out.get("closed").and_then(Value::as_bool).unwrap_or(false),
+                // 已断开的会话不能再续取，仍要继续清理另一端可能存在的结果。
+                Err(e) if e.starts_with("session-lost|") => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    Ok(serde_json::json!({"closed": closed}))
 }
 
 /// 按需取一格大文本的完整值。
@@ -1531,7 +1663,7 @@ pub async fn db_tx(
 ///
 /// 为什么不干脆让前端把 `alter session` 当普通 SQL 发下来：那条路会被只读策略拦
 /// （`readonly_query` 明确拒绝 alter session），还会算进事务条与执行历史。这条命令走
-/// 引擎的专用入口，不碰游标、不计事务。
+/// 引擎的专用入口，不计事务；切换后旧结果的分页游标失效。
 ///
 /// 安全性：schema 名是标识符，**绑不进绑定变量**，只能拼串，所以先按 Oracle 标识符的
 /// 字符集校验（`db_conns::valid_schema`）。空串 = 回到登录账号自己的 schema。
@@ -2215,6 +2347,26 @@ fn rel_of(abs: &str, root: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn result_execution_protocol_keeps_legacy_prefix() {
+        let legacy = super::exec_args("select 1 from dual", 500, 30, true, None);
+        let named = super::exec_args("select 1 from dual", 500, 30, true, Some("result-1"));
+        assert_eq!(&named[..4], legacy.as_slice());
+        assert_eq!(named[4], "result-1");
+        assert!(super::validate_result_id("result-1").is_ok());
+        assert!(super::validate_result_id("   ").is_err());
+        assert!(super::validate_result_id(&"a".repeat(129)).is_err());
+    }
+    #[test]
+    fn result_cursor_errors_keep_their_codes_for_fetch_and_cleanup() {
+        for code in ["cursor-closed", "cursor-limit"] {
+            let out = super::engine_error(crate::java_bridge::BridgeError::new(
+                code,
+                "结果不可继续读取",
+            ));
+            assert_eq!(out, format!("{code}|结果不可继续读取"));
+        }
+    }
     #[test]
     fn schema_batches_seek_instead_of_skipping() {
         let first = super::schema_batch_sql("", "");

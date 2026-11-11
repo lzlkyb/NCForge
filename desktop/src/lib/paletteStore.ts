@@ -9,9 +9,10 @@ export interface PaletteState {
   open: boolean;
   mode: PaletteMode;
   nonce: number;
+  query: string;
 }
 
-let state: PaletteState = { open: false, mode: "file", nonce: 0 };
+let state: PaletteState = { open: false, mode: "file", nonce: 0, query: "" };
 const listeners = new Set<() => void>();
 
 function set(next: PaletteState): void {
@@ -19,8 +20,8 @@ function set(next: PaletteState): void {
   listeners.forEach((l) => l());
 }
 
-export function openPalette(mode: PaletteMode): void {
-  set({ open: true, mode, nonce: state.nonce + 1 });
+export function openPalette(mode: PaletteMode, query = ""): void {
+  set({ open: true, mode, nonce: state.nonce + 1, query });
 }
 
 export function closePalette(): void {

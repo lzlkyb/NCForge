@@ -170,7 +170,7 @@ describe("execOne 把 sets 带到结果条目上", () => {
     const tabId = openSqlTab("c1", "select 1 from dual");
     await execOne(tabId, "select 1 from dual", 1);
     // A0 的核心：执行必须落到自己那条会话上，否则长查询还是会把别的标签堵住
-    const exec = mocks.invoke.mock.calls.find((c) => c[0] === "db_exec");
+    const exec = mocks.invoke.mock.calls.find((c) => c[0] === "db_exec_result");
     expect(exec?.[1]).toMatchObject({ id: "c1", slot: "2", collectStats: false });
     expect(mocks.invoke.mock.calls.filter((c) => c[0] === "db_slot_acquire")).toHaveLength(1);
   });
@@ -181,7 +181,7 @@ describe("execOne 把 sets 带到结果条目上", () => {
     );
     const tabId = openSqlTab("c1", "select 1 from dual");
     await execOne(tabId, "select 1 from dual", 1, undefined, true);
-    expect(mocks.invoke.mock.calls.find((c) => c[0] === "db_exec")?.[1]).toMatchObject({ collectStats: true });
+    expect(mocks.invoke.mock.calls.find((c) => c[0] === "db_exec_result")?.[1]).toMatchObject({ collectStats: true });
   });
 
   it("申请不到槽时退回 primary，执行不失败", async () => {
@@ -192,7 +192,7 @@ describe("execOne 把 sets 带到结果条目上", () => {
     const tabId = openSqlTab("c1", "select 1 from dual");
     const e = await execOne(tabId, "select 1 from dual", 1);
     expect(e.kind).toBe("rows");
-    const exec = mocks.invoke.mock.calls.find((c) => c[0] === "db_exec");
+    const exec = mocks.invoke.mock.calls.find((c) => c[0] === "db_exec_result");
     expect(exec?.[1]).toMatchObject({ slot: null });
   });
 
@@ -203,7 +203,7 @@ describe("execOne 把 sets 带到结果条目上", () => {
     let execs = 0;
     mocks.invoke.mockImplementation((cmd: string) => {
       if (cmd === "db_slot_acquire") return Promise.resolve({ slot: String(++acquired) });
-      if (cmd === "db_exec") {
+      if (cmd === "db_exec_result") {
         execs += 1;
         if (execs === 1) return Promise.reject("slot-gone|会话 1 已被回收，请重试");
         return Promise.resolve(rowsBody);
@@ -215,7 +215,7 @@ describe("execOne 把 sets 带到结果条目上", () => {
     expect(e.kind).toBe("rows");
     // 两次申请 = 第一次的槽 1 作废，重开拿到槽 2
     expect(mocks.invoke.mock.calls.filter((c) => c[0] === "db_slot_acquire")).toHaveLength(2);
-    const execCalls = mocks.invoke.mock.calls.filter((c) => c[0] === "db_exec");
+    const execCalls = mocks.invoke.mock.calls.filter((c) => c[0] === "db_exec_result");
     expect(execCalls).toHaveLength(2);
     expect(execCalls[0][1]).toMatchObject({ slot: "1" });
     expect(execCalls[1][1]).toMatchObject({ slot: "2" });
@@ -267,7 +267,7 @@ describe("闲置超时后的连接恢复", () => {
   it("撞上会话丢失时把连接置回 error，下一次执行才会真正走重连", async () => {
     mocks.invoke.mockImplementation((cmd: string) => {
       if (cmd === "db_slot_acquire") return Promise.resolve({ slot: "1" });
-      if (cmd === "db_exec") {
+      if (cmd === "db_exec_result") {
         return Promise.reject("session-lost|数据库会话已断开，本次操作尚未发出。这条会话可能有未提交事务，请先核对再手动重连");
       }
       return Promise.resolve(body);

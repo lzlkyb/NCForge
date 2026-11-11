@@ -165,14 +165,14 @@ const render = async (active = true) => {
 };
 
 const buttonByText = (text: string) =>
-  [...document.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim().includes(text)) as
+  ([...document.querySelectorAll("button")].find(b => b.textContent?.trim() === text) ??
+    [...document.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim().includes(text))) as
     | HTMLButtonElement
     | undefined;
 
 const rows = () => [...container.querySelectorAll<HTMLButtonElement>(".lg-row")];
 const traceRequest = async () => {
-  await act(async () => buttonByText("高级操作")!.click());
-  await act(async () => buttonByText("追踪这次请求")!.click());
+  await act(async () => buttonByText("追踪请求")!.click());
 };
 
 /** 往检索框里打字（React 只认原生 setter + input 事件）。 */
@@ -371,7 +371,7 @@ describe("NC 日志页", () => {
     expect(buttonByText("正在追踪")?.disabled).toBe(true);
     await act(async () => resolveB({ ...TRACE, callId: "request-B", entries: [other] }));
     expect(container.querySelector(".lg-trace-head")?.textContent).toContain("request-B");
-    expect(buttonByText("高级操作")?.disabled).toBe(false);
+    expect(buttonByText("追踪请求")?.disabled).toBe(false);
   });
 
   it("检索模式切换后保留当前完整详情，并说明不参与检索的归因筛选", async () => {

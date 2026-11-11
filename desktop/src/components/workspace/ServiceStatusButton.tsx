@@ -2,14 +2,9 @@ import { servicePollInterval } from "../../lib/servicePolling";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAppHidden } from "../../lib/appVisibility";
-import { serverStatus, type ServerState } from "../../lib/server";
+import { serverStatus } from "../../lib/server";
 import { openServicePanel } from "../../lib/servicePanel";
-
-const LABELS: Record<ServerState, string> = {
-  stopped: "已停止",
-  starting: "启动中",
-  running: "运行中",
-};
+import { servicePresentation } from "../../lib/servicePresentation";
 
 /**
  * 状态栏里的 NC 服务入口。
@@ -18,31 +13,30 @@ const LABELS: Record<ServerState, string> = {
  * 所以在文件页状态栏常驻一个状态胶囊：一眼看到启停状态，点一下直达底部服务面板。
  * 轮询放慢到 5 秒——服务面板自己开着时会用 1 秒轮询，这里只需要跟得上状态变化。
  */
-export function ServiceStatusButton() {
+export function ServiceStatusButton({ header = false }: { header?: boolean }) {
   const appHidden = useAppHidden();
   const pollInterval = useMemo(servicePollInterval, []);
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ["server-status"],
     queryFn: serverStatus,
     refetchInterval: appHidden ? false : pollInterval,
     retry: false,
   });
-  const state = data?.state;
-  const label = state ? LABELS[state] : "状态未知";
+  const { state, label } = servicePresentation("middleware", data ?? null, isError);
   // 端口跟着状态一起报：服务起来了但连不上时，第一个要核对的就是「连的是哪个端口」
   const port = state === "running" && data?.port ? data.port : null;
   const where = port ? ` · ${data?.portAddress ? `${data.portAddress}:` : ":"}${port}` : "";
   return (
     <button
       type="button"
-      className="wb-status-svc"
+      className={header ? "wb-service-entry ux-btn" : "wb-status-svc"}
       data-state={state ?? "unknown"}
       title={`NC 中间件${label}${where} · 点击打开服务面板`}
       onClick={openServicePanel}
     >
       <span className="wb-status-svc-dot" />
-      NC 服务 · {label}
-      {port !== null && <span className="wb-status-svc-port">:{port}</span>}
+      {header ? <><span>NC 服务</span><small>{label}</small></> : <>NC 服务 · {label}</>}
+      {!header && port !== null && <span className="wb-status-svc-port">:{port}</span>}
     </button>
   );
 }

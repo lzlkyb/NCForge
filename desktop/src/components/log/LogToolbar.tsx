@@ -96,6 +96,11 @@ export function LogToolbar({
         {onClose && <button type="button" className="lg-btn" aria-label="关闭日志排查" title="关闭日志排查" onClick={onClose}><Icon name="close" size={13}/></button>}
       </div>
 
+      <div className="lg-filter-summary" role="status">
+        {searchMode ? "检索范围" : "当前筛选"}：{TIME_RANGES.find(r => r.key === range)?.label} · {loggers.length ? loggers.join("、") : "全部来源"}
+        {!searchMode && <> · {onlyProblems ? "仅问题与慢 SQL" : "包含普通记录"} · 慢 SQL ≥ {slowMs}ms</>}
+      </div>
+
       <div id={advancedId} hidden={!advanced}>
       <div className="lg-head">
         <label className="lg-field" title="warningsql 里 NC 自己登记的耗时超过这个值才算慢 SQL">

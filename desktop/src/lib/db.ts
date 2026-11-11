@@ -117,6 +117,7 @@ const KNOWN_CODES = new Set([
   "cancelled",
   // Rust 引擎续取时游标已经被关掉：重试只会得到同一个错误。
   "cursor-closed",
+  "cursor-limit",
 ]);
 
 export interface DbError {
@@ -142,6 +143,7 @@ export interface DbError {
     | "fallback-tx"
     | "cancelled"
     | "cursor-closed"
+    | "cursor-limit"
     | "other";
   message: string;
 }

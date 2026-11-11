@@ -4,6 +4,8 @@ import type {
   SearchOptions,
   SearchOutcome,
 } from "./search";
+import type { JarSymbolResult } from "./jarSymbolSearch";
+import type { SrcNoteResult } from "./srcNoteSearch";
 
 /**
  * 搜索范围：全部关联工程 / 当前工作区 / 当前工作区里的某个业务组件。
@@ -65,6 +67,14 @@ export interface SearchForm {
    */
   outcomeOptions: SearchOptions | null;
   /**
+   * 产出 `outcome` / `projectOutcome` 时的查询词快照（已 trim）。
+   *
+   * jar 符号段与源码注释段只认它、不认输入框实时值：那两段的触发点是「一次全文
+   * 搜索**完成**」，拿实时 query 当依赖会让搜完后每敲一个字都重发两路 IPC，而主
+   * 结果还停在旧词上。没有快照（缺省）时那两段不搜。
+   */
+  outcomeQuery?: string | null;
+  /**
    * 搜索在跑。放仓库里（而不是组件 state）：切页会卸载组件，loading 归 false，
    * 而后端那次全盘扫描还在跑——回来再点一次就是两个扫描并行。
    */
@@ -92,6 +102,21 @@ export interface SearchForm {
    * 不自动清空搜索结果（用户可能还想看改之前的样子），但要把「重新搜索」摆出来。
    */
   replaceOutcome: ReplaceOutcome | null;
+  /**
+   * 同一个查询词在**依赖 jar 内部**的符号命中（类名 / 方法名 / 中文字符串原文）。
+   *
+   * 与 `outcome` 分开存：它不属于任何工作区文件，替换与「编辑匹配」都不能碰它，
+   * 混在一起会让「看到的就是会被改的」这条失效。由 `search/JarSymbolResults`
+   * 在一次全文搜索完成后自行取数并写回这里。
+   */
+  jarSymbols: JarSymbolResult | null;
+  /**
+   * 同一个查询词在**依赖 jar 的源码注释**里的命中（来自 `_src.jar`）。
+   *
+   * 与 `jarSymbols` 分开存：那一段是编译产物（class 常量池），这一段是源码注释，
+   * 两者的命中本来就不是一回事（注释在 class 里物理上不存在）。
+   */
+  srcNotes: SrcNoteResult | null;
 }
 
 const EMPTY: SearchForm = {
@@ -106,12 +131,15 @@ const EMPTY: SearchForm = {
   projectOutcome: null,
   outcomeRoot: null,
   outcomeOptions: null,
+  outcomeQuery: null,
   running: false,
   collapsed: [],
   error: null,
   replacement: "",
   replacing: false,
   replaceOutcome: null,
+  jarSymbols: null,
+  srcNotes: null,
 };
 
 let form: SearchForm = { ...EMPTY };
@@ -172,10 +200,13 @@ export function resetSearchForm(): void {
     projectOutcome: null,
     outcomeRoot: null,
     outcomeOptions: null,
+    outcomeQuery: null,
     collapsed: [],
     error: null,
     running: false,
     replaceOutcome: null,
+    jarSymbols: null,
+    srcNotes: null,
   };
   emit();
 }
@@ -204,10 +235,13 @@ export function applySearchScope(scope: SearchScope, component: string | null): 
     projectOutcome: null,
     outcomeRoot: null,
     outcomeOptions: null,
+    outcomeQuery: null,
     collapsed: [],
     error: null,
     running: false,
     replaceOutcome: null,
+    jarSymbols: null,
+    srcNotes: null,
   };
   emit();
 }

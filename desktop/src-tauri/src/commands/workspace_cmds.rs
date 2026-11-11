@@ -29,6 +29,11 @@ pub fn restart_watcher(app: &tauri::AppHandle, state: &AppState, root: &str) {
                 // 外部源码改动单独一栏：树刷新与「要不要重编」是两条消费链
                 "javaChanged": batch.java,
                 "javaOverflow": batch.java_overflow,
+                // 外部改动的所有可审查文本文件（含 .java）：刷新标签 / 时间线 / 色条 / 已审角标
+                "reviewChanged": batch.review,
+                "reviewOverflow": batch.review_overflow,
+                // 文件名索引（转到文件）要不要作废：只在会进清单的文件增删改名时为真
+                "filesChanged": batch.files_changed,
             }),
         ) {
             log::warn!("推送 fs-changed 失败：{e}");
@@ -215,6 +220,8 @@ pub async fn set_workspace(
     super::compile_cmds::spawn_prewarm(state.inner().clone());
     // 类型索引同步预热：换工程后第一次「找类」也要秒开
     super::type_search_cmds::spawn_prewarm_types(state.inner().clone());
+    // jar 内符号索引：换 NC home 后旧索引作废，趁换工程一并重建
+    super::jar_symbol_cmds::spawn_prewarm_jar_symbols(state.inner().clone());
     Ok(shown)
 }
 
@@ -343,12 +350,51 @@ pub async fn fs_create(
     parent: String,
     name: String,
     kind: NewEntryKind,
+    // 新建 .java 时写入包名 + 类骨架（缺省不写，保持旧行为）
+    template: Option<bool>,
 ) -> Result<String, String> {
     let dir = resolve_in_workspace(&state, &parent).await?;
-    let created =
-        tauri::async_runtime::spawn_blocking(move || workspace::create_entry(&dir, &name, kind))
-            .await
-            .map_err(|e| format!("后台任务失败: {e}"))??;
+    let templated = template.unwrap_or(false);
+    let created = tauri::async_runtime::spawn_blocking(move || {
+        if templated {
+            workspace::create_entry_templated(&dir, &name, kind)
+        } else {
+            workspace::create_entry(&dir, &name, kind)
+        }
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))??;
+    Ok(display_path(&created))
+}
+
+/// 「新建 Java 类型」对话框的预览：包名、将写入的内容、换行符、不能创建的原因。
+#[tauri::command]
+pub async fn fs_java_preview(
+    state: tauri::State<'_, Arc<AppState>>,
+    parent: String,
+    name: String,
+    kind: crate::file_template::JavaKind,
+) -> Result<crate::file_template::JavaPreview, String> {
+    let dir = resolve_in_workspace(&state, &parent).await?;
+    tauri::async_runtime::spawn_blocking(move || crate::file_template::preview(&dir, &name, kind))
+        .await
+        .map_err(|e| format!("后台任务失败: {e}"))
+}
+
+/// 按种类新建 Java 类型文件（名字不带 `.java`），返回新文件完整路径。
+#[tauri::command]
+pub async fn fs_create_java(
+    state: tauri::State<'_, Arc<AppState>>,
+    parent: String,
+    name: String,
+    kind: crate::file_template::JavaKind,
+) -> Result<String, String> {
+    let dir = resolve_in_workspace(&state, &parent).await?;
+    let created = tauri::async_runtime::spawn_blocking(move || {
+        workspace::create_java_type(&dir, &name, kind)
+    })
+    .await
+    .map_err(|e| format!("后台任务失败: {e}"))??;
     Ok(display_path(&created))
 }
 

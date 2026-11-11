@@ -740,13 +740,51 @@ pub fn resolve_ref(name: &str, workspace: &Path) -> Option<PathBuf> {
     p.is_dir().then_some(p)
 }
 
+/// 工程的产物目录，按 `.classpath` 顺序。
+///
+/// 一个模块（工程根下的一级目录）自己没有 `.classpath` 时，工作台把它编到 `<模块>/classes`
+/// （`ModuleLayout` 的旧约定），而 Eclipse 的根 `.classpath` 可能让它的 src 写到别处
+/// （`output="out/riart"`，或没写 output 就用默认的 `out/bin`）。两边不一致的后果：
+/// 运行用的类路径里只有 Eclipse 的旧目录，工作台编出的 `<模块>/classes` 根本不在上面，
+/// 改了代码重启也不生效、热替换还报「被遮挡」。所以这类模块要把 `<模块>/classes`
+/// **排在它对应的 Eclipse 产物目录之前**——工作台编出来的类优先，没编过的类仍回落到旧产物。
 fn push_outputs(cp: &ProjectCp, root: &Path, out: &mut Vec<PathBuf>) {
     for rel in &cp.outputs {
         let p = root.join(rel);
+        for module in workbench_modules_writing_to(cp, root, rel) {
+            let own = root.join(&module).join("classes");
+            if own.is_dir() && !crate::build_layout::eq_path(&own, &p) {
+                out.push(own);
+            }
+        }
         if p.is_dir() {
             out.push(p);
         }
     }
+}
+
+/// 在 Eclipse 里把产物写到 `output` 的那些「没有自己 `.classpath` 的模块」（按声明顺序、去重）。
+fn workbench_modules_writing_to(cp: &ProjectCp, root: &Path, output: &Path) -> Vec<String> {
+    let mut modules: Vec<String> = Vec::new();
+    for src in &cp.srcs {
+        let effective = src.output.as_ref().or(cp.default_output.as_ref());
+        if effective != Some(&output.to_path_buf()) {
+            continue;
+        }
+        let mut parts = src.path.components();
+        let (Some(first), Some(_)) = (parts.next(), parts.next()) else {
+            continue; // 源根就是工程根下一级：没有「模块」这一层
+        };
+        let module = first.as_os_str().to_string_lossy().to_string();
+        if module.is_empty() || module == ".." || module == "." {
+            continue;
+        }
+        if root.join(&module).join(".classpath").is_file() || modules.contains(&module) {
+            continue;
+        }
+        modules.push(module);
+    }
+    modules
 }
 
 /// 没有 `.classpath` 的工程：保留老规则（模块 classes → out/*），并补上 `<根>/bin`
@@ -1479,6 +1517,62 @@ mod tests {
 
     fn names(g: &LinkedGraph) -> Vec<&str> {
         g.projects.iter().map(|p| p.name.as_str()).collect()
+    }
+
+    /// 根 `.classpath` 把模块的 src 写到 `out/<模块>` 或默认 `out/bin` 时，工作台的
+    /// `<模块>/classes` 要排在它们前面（否则工作台编出的类运行时根本不在类路径上）。
+    #[test]
+    fn 工作台产物目录排在_eclipse_旧产物前面() {
+        let ws = temp_dir("own-before-eclipse");
+        let root = ws.join("newar");
+        for d in [
+            "out/riart",
+            "out/bin",
+            "gl/classes",
+            "riart/classes",
+            "pubapp/classes",
+            "own/classes",
+        ] {
+            touch_class(&root.join(d));
+        }
+        // own 模块自己有 .classpath：它的产物由它自己说了算，不额外加 own/classes
+        write(&root.join("own").join(".classpath"), "<classpath/>");
+        write(
+            &root.join(".classpath"),
+            r#"<classpath>
+  <classpathentry kind="src" output="gl/classes" path="gl/src/public"/>
+  <classpathentry kind="src" output="out/riart" path="riart/src/public"/>
+  <classpathentry kind="src" output="out/riart" path="riart/src/client"/>
+  <classpathentry kind="src" path="pubapp/src/public"/>
+  <classpathentry kind="src" output="out/bin" path="own/src/public"/>
+  <classpathentry kind="output" path="out/bin"/>
+</classpath>"#,
+        );
+        let cp = ProjectCp::load(&root).unwrap();
+        let mut dirs = Vec::new();
+        push_outputs(&cp, &root, &mut dirs);
+        let got: Vec<String> = dirs
+            .iter()
+            .map(|p| {
+                p.strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                // 输出就是模块自己的 classes：原样一份
+                "gl/classes",
+                // riart：工作台产物在 Eclipse 的 out/riart 之前
+                "riart/classes",
+                "out/riart",
+                // pubapp 没写 output，走默认 out/bin；own 自带 .classpath，不加
+                "pubapp/classes",
+                "out/bin",
+            ]
+        );
     }
 
     /// 依赖链视图：顺序 = 主工程 → 依赖声明顺序，且分组信息能让用户对上 Eclipse。

@@ -7,6 +7,7 @@
 // 与 keymap 同一套范式：模块级读缓存 + 事件通知（`useSyncExternalStore` 订阅），
 // 不引入 React Context，编辑器（非 React 的 Monaco 实例）也能直接读。
 import { useSyncExternalStore } from "react";
+import { codeFontFamilyOf } from "./fonts";
 
 const KEY = "ncforge-editor-prefs";
 export const PREFS_EVENT = "ncforge-editor-prefs-change";
@@ -29,6 +30,11 @@ export interface EditorPrefs {
   autoSaveDelayMs: number;
   /** 保存（Ctrl+S / 自动保存）前先格式化 Java 文件。默认关：格式化会重排整份文件，不是所有人都想要。 */
   formatOnSave: boolean;
+  /**
+   * 提取参数（Ctrl+Alt+P）的范围。默认 false = 窄档：只放字面量和 static final 常量；
+   * true = 宽档：再放字段等不依赖方法局部状态的引用。放宽后搬到调用点的含义可能与原处不同，所以默认关。
+   */
+  extractParamWide: boolean;
 }
 
 export const DEFAULT_PREFS: EditorPrefs = {
@@ -43,6 +49,7 @@ export const DEFAULT_PREFS: EditorPrefs = {
   autoSave: false,
   autoSaveDelayMs: 2000,
   formatOnSave: false,
+  extractParamWide: false,
 };
 
 let cache: EditorPrefs = load();
@@ -101,9 +108,7 @@ export function useEditorPrefs(): EditorPrefs {
 /** Monaco 的 `updateOptions` 片段：只映射与选项有关的字段。 */
 export function monacoOptionsOf(p: EditorPrefs, heavy = false, java = false): Record<string, unknown> {
   return {
-    fontSize: p.fontSize,
-    lineHeight: Math.round(p.fontSize * 1.62),
-    fontFamily: p.fontFamily || '"Cascadia Mono", Consolas, "Courier New", monospace',
+    ...codeDisplayOptionsOf(p),
     wordWrap: p.wordWrap ? "on" : "off",
     tabSize: p.tabSize,
     insertSpaces: p.insertSpaces,
@@ -112,4 +117,10 @@ export function monacoOptionsOf(p: EditorPrefs, heavy = false, java = false): Re
     bracketPairColorization: { enabled: !heavy },
     folding: !heavy,
   };
+}
+
+/** Shared by Java and SQL; SQL keeps its own wrapping and editing behavior. */
+export function codeDisplayOptionsOf(p: Pick<EditorPrefs, "fontSize" | "fontFamily">) {
+  return { fontSize: p.fontSize, lineHeight: Math.round(p.fontSize * 1.62),
+    fontFamily: codeFontFamilyOf(p.fontFamily), fontWeight: "400", fontLigatures: false };
 }

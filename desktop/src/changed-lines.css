@@ -1,0 +1,135 @@
+/* 代码区改动色条（A 批）。色条画在行号右侧的 lineDecorations 槽，不占代码宽度。
+   配色沿用版本控制面 .vc-add/.vc-del 的语义 token，深浅主题自动跟随。 */
+.ncf-chg-add, .ncf-chg-del, .ncf-chg-mod { height: 100%; width: 4px; margin-left: 3px; }
+.ncf-chg-add { border-left: 3px solid hsl(var(--success)); }
+.ncf-chg-mod { border-left: 3px solid hsl(var(--warning)); }
+.ncf-chg-del::before {
+  content: ""; display: block; width: 0; height: 0; margin: 5px 0 0 2px;
+  border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+  border-right: 6px solid hsl(var(--destructive));
+}
+.dark .ncf-chg-add { border-left-color: hsl(var(--success-ink)); }
+.dark .ncf-chg-mod { border-left-color: hsl(var(--warning-ink)); }
+.dark .ncf-chg-del::before { border-right-color: hsl(var(--destructive-ink)); }
+
+/* 阅读工具行里的摘要：不换行、不抢面包屑宽度，窄屏时先收起「相对 SVN 基线」。 */
+.ncf-chg-bar {
+  display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  height: 22px; padding: 0 4px 0 8px; margin-left: 8px;
+  border: 1px solid hsl(var(--border)); border-radius: var(--r-control, 5px);
+  background: hsl(var(--secondary) / .55); color: hsl(var(--muted-foreground));
+  font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.ncf-chg-summary { display: inline-flex; align-items: center; gap: 4px; }
+.ncf-chg-plus { color: hsl(var(--success-ink)); font-weight: 700; }
+.ncf-chg-minus { color: hsl(var(--destructive-ink)); font-weight: 700; }
+.ncf-chg-nav {
+  width: 18px; height: 18px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 3px; background: transparent; cursor: pointer;
+  color: hsl(var(--muted-foreground)); font-size: 12px; line-height: 1;
+}
+.ncf-chg-nav:hover { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
+.ncf-chg-nav:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }
+.ncf-chg-hint { color: hsl(var(--warning-ink)); }
+@media (max-width: 1180px) { .ncf-chg-who { display: none; } }
+
+/* 基线 peek：fixed 定位挂在 body，避开 Monaco 的堆叠上下文与滚动裁切。 */
+.ncf-peek {
+  position: fixed; z-index: 70; width: 360px; max-height: 260px;
+  display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid hsl(var(--border)); border-radius: var(--r-dialog, 8px);
+  background: hsl(var(--popover)); color: hsl(var(--foreground));
+  box-shadow: var(--sh-pop, 0 12px 32px rgba(0, 0, 0, .18));
+  font-size: 12px;
+}
+.ncf-peek-hd {
+  padding: 8px 12px; flex: 0 0 auto; font-weight: 600;
+  border-bottom: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground));
+}
+.ncf-peek-code {
+  margin: 0; padding: 10px 12px; flex: 1 1 auto; min-height: 60px; overflow: auto;
+  font: 12px/18px "Cascadia Mono", Consolas, monospace; white-space: pre;
+  background: hsl(var(--card));
+}
+.ncf-peek-tip {
+  margin: 0; padding: 7px 12px; flex: 0 0 auto; line-height: 1.5;
+  color: hsl(var(--muted-foreground)); border-top: 1px solid hsl(var(--border));
+}
+.ncf-peek-actions {
+  display: flex; gap: 6px; justify-content: flex-end; padding: 8px 10px;
+  flex: 0 0 auto; border-top: 1px solid hsl(var(--border));
+}
+.ncf-peek-btn {
+  padding: 4px 9px; border-radius: var(--r-control, 5px); cursor: pointer;
+  border: 1px solid hsl(var(--border)); background: hsl(var(--secondary));
+  color: hsl(var(--foreground)); font-size: 11.5px;
+}
+.ncf-peek-btn:hover { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
+.ncf-peek-btn:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }
+.ncf-peek-primary { background: hsl(var(--primary)); border-color: hsl(var(--primary)); color: hsl(var(--primary-foreground)); font-weight: 600; }
+.ncf-peek-primary:hover { filter: brightness(1.1); }
+
+/* B/D 批：底部「改动」面板（时间线 / 多文件 diff / 审查清单）与已审角标。 */
+.ncf-reviewed { flex: 0 0 auto; padding: 0 4px; border-radius: 3px; font-size: 10px; line-height: 15px;
+  background: hsl(var(--success) / .16); color: hsl(var(--success-ink)); }
+.ncf-link { padding: 0 4px; border: 0; background: transparent; cursor: pointer; font-size: 11.5px;
+  color: hsl(var(--muted-foreground)); white-space: nowrap; }
+.ncf-link:hover { color: hsl(var(--primary)); text-decoration: underline; }
+.ncf-link[data-on] { color: hsl(var(--primary)); font-weight: 600; }
+.ncf-link:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }
+.ncf-timeline, .ncf-multi, .ncf-check { height: 100%; display: flex; flex-direction: column; min-height: 0; font-size: 12px; }
+.ncf-tl-bar, .ncf-check-hd { display: flex; align-items: center; gap: 8px; flex: 0 0 auto;
+  height: 26px; padding: 0 8px; border-bottom: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); }
+.ncf-tl-sp { flex: 1; }
+.ncf-tl-count { font-variant-numeric: tabular-nums; }
+.ncf-tl-list, .ncf-check-list { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.ncf-empty { padding: 14px; color: hsl(var(--muted-foreground)); line-height: 1.6; }
+.ncf-ev { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 2px 8px;
+  border-bottom: 1px solid hsl(var(--border) / .5); }
+.ncf-ev:hover { background: hsl(var(--accent) / .4); }
+.ncf-kind { flex: 0 0 auto; min-width: 30px; text-align: center; padding: 1px 5px; border-radius: 3px;
+  font-size: 10.5px; font-weight: 600; background: hsl(var(--secondary)); color: hsl(var(--muted-foreground)); }
+.ncf-ev[data-kind="external"] .ncf-kind { background: hsl(var(--warning) / .18); color: hsl(var(--warning-ink)); }
+.ncf-ev[data-kind="me"] .ncf-kind { background: hsl(var(--primary) / .15); color: hsl(var(--primary)); }
+.ncf-ev time { flex: 0 0 auto; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+.ncf-ev-files { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ncf-ev-actions { flex: 0 0 auto; display: flex; gap: 2px; }
+.ncf-multi { flex-direction: row; }
+.ncf-multi-list { flex: 0 0 220px; display: flex; flex-direction: column; overflow: auto;
+  border-right: 1px solid hsl(var(--border)); }
+.ncf-multi-back, .ncf-multi-file { flex: 0 0 auto; text-align: left; padding: 4px 8px; border: 0;
+  border-bottom: 1px solid hsl(var(--border) / .5); background: transparent; cursor: pointer;
+  color: hsl(var(--foreground)); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ncf-multi-file[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-weight: 600; }
+.ncf-multi-file:disabled { opacity: .5; cursor: default; }
+.ncf-multi-na { margin-left: 6px; font-size: 10px; color: hsl(var(--muted-foreground)); }
+.ncf-multi-body { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.ncf-multi-body .vc-compare { height: 100%; }
+.ncf-check-item { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 2px 10px;
+  border-bottom: 1px solid hsl(var(--border) / .5); }
+.ncf-check-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: hsl(var(--success)); }
+.ncf-check-item[data-tone="warn"] .ncf-check-dot { background: hsl(var(--warning)); }
+.ncf-check-item[data-tone="bad"] .ncf-check-dot { background: hsl(var(--destructive)); }
+.ncf-check-label { flex: 0 0 auto; font-weight: 600; }
+.ncf-check-detail { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: hsl(var(--muted-foreground)); }
+.ncf-chg-check { width: auto; padding: 0 4px; font-size: 10.5px; }
+@media (max-width: 900px) { .ncf-multi-list { flex-basis: 150px; } }
+
+/* 轮 ↔ 代码面联动：基线切换按钮、块级已审、窄浮层、清单信息项。 */
+.ncf-chg-base { padding: 0 5px; height: 18px; border: 1px solid hsl(var(--border));
+  border-radius: 3px; background: transparent; cursor: pointer; font-size: 10.5px;
+  color: hsl(var(--muted-foreground)); white-space: nowrap; }
+.ncf-chg-base:hover { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
+.ncf-chg-progress { color: hsl(var(--success-ink)); font-weight: 600; }
+.ncf-chg-loading { color: hsl(var(--muted-foreground)); }
+.ncf-peek { max-width: calc(100vw - 16px); }
+.ncf-peek-actions { flex-wrap: wrap; }
+.ncf-peek-round { padding: 5px 12px; font-size: 11px; color: hsl(var(--primary));
+  border-bottom: 1px solid hsl(var(--border) / .5); }
+.ncf-chg-reviewed { opacity: .38; }
+.ncf-check-item[data-tone="info"] .ncf-check-dot { background: hsl(var(--muted-foreground) / .45); }
+.ncf-ev[data-on] { background: hsl(var(--accent) / .7); }
+.ncf-ev-select { padding: 0 4px; font-size: 11px; }
+.ncf-multi-note { flex: 0 0 auto; padding: 5px 10px; font-size: 11px;
+  color: hsl(var(--muted-foreground)); border-bottom: 1px solid hsl(var(--border)); }

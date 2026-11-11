@@ -51,12 +51,16 @@ fn 三工程的类目录数量与顺序() {
 
     assert_eq!(count(&portal), 9, "EyePortal 应有 9 个输出目录");
     assert_eq!(count(&pm), 8, "pm 应有 8 个（7 个显式 + 默认 bin）");
-    assert_eq!(
-        count(&newar),
-        35,
-        "newar 应有 35 个（34 个显式 + 默认 out/bin）"
+    // 35 = 34 个显式 + 默认 out/bin；再加 5 个「工作台编译产物 `<模块>/classes`」——
+    // 这些模块在 Eclipse 里的输出是 out/<模块> 或默认 out/bin，工作台却编到 `<模块>/classes`，
+    // 不把它排到 Eclipse 旧产物前面，改了代码运行时也不生效（A4）。
+    // 数量随本机哪些模块已经被工作台编译过而变，这里只锁「不少于 Eclipse 的 35」。
+    assert!(
+        count(&newar) >= 35,
+        "newar 至少 35 个（34 个显式 + 默认 out/bin），实际 {}",
+        count(&newar)
     );
-    assert_eq!(dirs.len(), 52, "总数 = 9 + 8 + 35");
+    assert_eq!(dirs.len(), 9 + 8 + count(&newar), "总数 = 9 + 8 + newar");
 
     // 段顺序：EyePortal → pm → newar
     let pos = |root: &Path| dirs.iter().position(|d| d.starts_with(root)).unwrap();

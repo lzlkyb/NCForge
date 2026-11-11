@@ -98,7 +98,7 @@
   color: hsl(var(--warning-ink));
 }
 .dq-errbox .msg {
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   color: hsl(var(--foreground));
   margin-top: 6px;
@@ -117,7 +117,7 @@
   border-radius: 3px;
   font-size: 10.5px;
   margin: 0 2px;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-mono);
 }
 table.dq-grid th .t {
   display: block;
@@ -235,7 +235,7 @@ table.dq-grid td.rn {
   min-width: 0;
 }
 .dq-check-item .tb {
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-weight: 700;
   color: hsl(var(--destructive-ink));
   flex-shrink: 0;
@@ -244,7 +244,7 @@ table.dq-grid td.rn {
   color: hsl(var(--warning-ink));
 }
 .dq-check-item .col {
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   color: hsl(var(--warning-ink));
 }
 /* 路径紧跟表名，而不是甩到最右边：它和表名是「在哪里用到了这张表」的一整句，
@@ -274,7 +274,7 @@ table.dq-grid td.rn {
   flex-wrap: wrap;
 }
 .dq-check-item .l2 code {
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   padding: 0 5px;
   border-radius: 4px;

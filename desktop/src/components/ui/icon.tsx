@@ -145,7 +145,8 @@ export function Icon({
       strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={className}
+      className={`ui-icon ${className}`}
+      data-icon-size={size}
       {...props}
     >
       <path d={paths[name]} />

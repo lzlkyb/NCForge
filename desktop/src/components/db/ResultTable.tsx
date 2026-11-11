@@ -51,9 +51,9 @@ export interface LobSource {
   sqlForRow?: (row: number) => string | null;
 }
 
-export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated, lob, hasMore, loadingMore, onLoadMore }: {
+export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated, lob, hasMore, loadingMore, onLoadMore, editOwner }: {
   columns: ColumnMeta[];
-  layoutKey?:string; snapshot?:ResultSnapshot; connId?:string|null; onRelated?:(row:Cell[])=>void;
+  layoutKey?:string; snapshot?:ResultSnapshot; connId?:string|null; onRelated?:(row:Cell[])=>void; editOwner?:string;
   /** 大文本「加载完整值」的上下文；不传 = 这个结果不支持（表页 / 非查询结果）。 */
   lob?: LobSource;
   rows: Cell[][];
@@ -175,7 +175,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   const headDecodable = useMemo(() => head ? rows.slice(0,50).some(r=>decodeCell(r[head.col],{auto:true})) : false, [head, rows]);
 
   return (
-    <div className="dbx-result-table" onKeyDown={event=>{
+    <div className="dbx-result-table" data-result-edit-owner={editOwner} onKeyDown={event=>{
       if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase()==="f" &&
         event.target instanceof HTMLElement && event.target.closest('[role="grid"]') && !event.target.closest('input,textarea,[contenteditable="true"]')) {
         event.preventDefault();setFilterOpen(true);requestAnimationFrame(()=>filterInput.current?.focus());
@@ -222,7 +222,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
       {subbar && <div className="dbx-rsub">{subbar}</div>}
       <div className="dbx-rbody">
         <ResultGrid
-          apiRef={gridApi}
+          apiRef={gridApi} idPrefix={transferSource ? `dbx-cell-${transferSource.resultId.replace(/[^\w-]/g,"_")}` : undefined}
           columns={columns}
           rows={rows}
           empty={pending ? "正在计算结果…" : orderError ? "结果计算失败" : <><strong>{filter ? "筛选后没有匹配的行" : "没有匹配的行"}</strong><span>{filter ? "结果筛选只作用于已读取的数据。" : "可调整查询条件后重新执行。"}</span>{filter && <button type="button" className="dbx-btn ghost" onClick={()=>setFilter("")}>清除结果筛选</button>}</>}

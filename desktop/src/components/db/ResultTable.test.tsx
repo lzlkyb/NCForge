@@ -78,6 +78,28 @@ it("没有结果时给出恢复路径，清除本地筛选恢复数据",()=>{
   expect(host.querySelector('#dbx-cell-0-0')?.textContent).toBe("可见");
 });
 
+it("全选当前已加载数据；筛选后只选匹配行，空结果禁用", async () => {
+  const writeText = vi.fn(async () => {});
+  const previousClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+  await act(async () => { root = createRoot(host); root.render(<ResultTable columns={columns} rows={[["a", 1], ["b", 2], ["a", 3]]} meta="3 行" table="T" />); });
+  const selectAll = () => host.querySelector<HTMLButtonElement>('[aria-label="全选结果"]')!;
+  await act(async () => selectAll().click());
+  expect(host.querySelectorAll('[role="gridcell"][aria-selected="true"]')).toHaveLength(6);
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="筛选结果"]')!.click());
+  const input = host.querySelector<HTMLInputElement>('[aria-label="在结果中筛选"]')!;
+  const filter = async (value: string) => act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); });
+  await filter("a"); await act(async () => selectAll().click());
+  expect(host.querySelectorAll('[role="gridcell"][aria-selected="true"]')).toHaveLength(4);
+  const grid = host.querySelector<HTMLElement>('[role="grid"]')!;
+  expect(document.activeElement).toBe(grid);
+  await act(async () => grid.dispatchEvent(new KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true, cancelable: true })));
+  await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith("a\t1\na\t3"));
+  await filter("不存在"); expect(selectAll().disabled).toBe(true);
+  if (previousClipboard) Object.defineProperty(navigator, "clipboard", previousClipboard);
+  else Reflect.deleteProperty(navigator, "clipboard");
+});
+
 afterEach(() => {
   act(() => root?.unmount());
   clearCompareBaseline();__resetDbForTest();

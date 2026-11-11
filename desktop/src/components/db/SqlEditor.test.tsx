@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../lib/monacoSetup", () => {
   const editor = {
+    updateOptions: vi.fn(),
     addAction: (action: ActionDesc) => { mocks.actions.push(action); return { dispose: () => {} }; },
     addCommand: () => { throw new Error("SQL 动作必须保留编辑器右键菜单"); },
     createDecorationsCollection: () => ({ set: () => {}, clear: () => {} }),
@@ -130,20 +131,29 @@ function select(range: Selection) {
 }
 
 describe("SQL 编辑器动作与真实执行目标", () => {
-  it("三条动作保留右键菜单、命令面板与原有快捷键", () => {
+  it("主执行与当前语句分别接到一致的菜单和快捷键", () => {
     const onRun = vi.fn(); mount("", onRun);
-    expect(mocks.actions.map(action => action.id)).toEqual(["ncforge.sql.runCurrent", "ncforge.sql.runScript", "ncforge.sql.format"]);
+    expect(mocks.actions.map(action => action.id)).toEqual(["ncforge.sql.run", "ncforge.sql.runCurrent", "ncforge.sql.runScript", "ncforge.sql.format"]);
     for (const action of mocks.actions) { expect(action.contextMenuGroupId).toBeTruthy(); expect(action.label.length).toBeGreaterThan(0); }
-    const [current, script, format] = mocks.actions;
-    expect(current.keybindings).toEqual([2048 | 3]); expect(script.keybindings).toEqual([512 | 88]); expect(format.keybindings).toEqual([2048 | 1024 | 70]);
+    const [run, current, script, format] = mocks.actions;
+    expect(run.keybindings).toEqual([2048 | 3]); expect(current.keybindings).toEqual([2048 | 1024 | 3]); expect(script.keybindings).toEqual([512 | 88]); expect(format.keybindings).toEqual([2048 | 1024 | 70]);
+    act(() => run.run?.()); expect(onRun).toHaveBeenCalledWith("auto");
     act(() => current.run?.()); expect(onRun).toHaveBeenCalledWith("current");
     act(() => script.run?.()); expect(onRun).toHaveBeenCalledWith("script");
+  });
+  it("主执行无选区取全部，有选区只取选中内容", () => {
+    const { apiRef } = mount("select 1 from dual;\nselect 2 from dual;");
+    expect(apiRef.current!.target("auto")).toHaveLength(2);
+    expect(apiRef.current!.target("current")).toHaveLength(1);
+    select({ startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 20 });
+    expect(apiRef.current!.target("auto").map(s => s.text)).toEqual(["select 2 from dual"]);
+    expect(apiRef.current!.target("script")).toHaveLength(2);
   });
 
   it("选区范围复用 target()，字符串中的分号不会被统计为额外语句", () => {
     const { apiRef, onScope } = mount("-- 标题\nselect ';' AS txt\nfrom dual;\n\nselect 2 from dual;");
     select({ startLineNumber: 2, startColumn: 1, endLineNumber: 5, endColumn: 20 });
-    const target = apiRef.current!.target("current");
+    const target = apiRef.current!.target("auto");
     const shown = onScope.mock.lastCall![0];
     expect(shown).toEqual({ tabId: "t1", selected: true, statements: target });
     expect(target).toHaveLength(2);
@@ -169,7 +179,7 @@ describe("SQL 编辑器动作与真实执行目标", () => {
     const sql = "-- note\nselect 1;\n\nselect 2;";
     const { apiRef } = mount(sql);
     select({ startLineNumber: 2, startColumn: 1, endLineNumber: 4, endColumn: 10 });
-    const selected = apiRef.current!.target("current");
+    const selected = apiRef.current!.target("auto");
     expect(selected.map(stmt => [stmt.startOffset, stmt.endOffset])).toEqual([
       [sql.indexOf("select 1"), sql.indexOf("select 1") + "select 1;".length],
       [sql.indexOf("select 2"), sql.length],
@@ -180,11 +190,11 @@ describe("SQL 编辑器动作与真实执行目标", () => {
     expect(script[script.length - 1].endOffset).toBe(sql.length);
   });
 
-  it("不相关语句编辑不会重发相同范围，但真正执行目标取得最新编辑版本", () => {
+  it("整篇执行范围随其它语句编辑刷新，当前语句仍保留最新编辑版本", () => {
     const { apiRef, onScope } = mount("select 1;\nselect 2;");
     const before = onScope.mock.calls.length;
     act(() => { mocks.model!.setValue("select 1;\nselect 3;"); mocks.listeners.content(); });
-    expect(onScope).toHaveBeenCalledTimes(before);
+    expect(onScope).toHaveBeenCalledTimes(before + 1);
     const current = apiRef.current!.target("current")[0];
     expect(current.text).toBe("select 1");
     expect(current.editorVersion).toBe(2);
@@ -211,7 +221,7 @@ it("专注模式不卸载编辑器，返回时恢复草稿、选区和滚动", (
 it("切标签恢复各自视图，并立即替换执行范围，隐藏的旧视图不覆盖已保存滚动", () => {
   const { render, onScope, apiRef } = mount("select 1;\nselect 2;\nselect 3;");
   select({ startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 10 }); mocks.scrollTop = 120;
-  const firstTarget = apiRef.current!.target("current");
+  const firstTarget = apiRef.current!.target("auto");
   render("t1", false); mocks.scrollTop = 0;
   render("t2", true, "select 4;");
   expect(onScope.mock.lastCall![0].tabId).toBe("t2");

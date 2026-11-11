@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useUpdateDownloadPreference, setUpdateDownloadPreference } from "../../lib/updateDownloadPreference";
 import { Switch } from "../ui/switch";
 import { useUpdate, friendlyError } from "../../contexts/UpdateContext";
@@ -13,6 +14,8 @@ import "./settings-maintenance.css";
 export function UpdateSettings() {
   const info = useAppInfo();
   const autoDownload = useUpdateDownloadPreference();
+  const [preferenceResult, setPreferenceResult] = useState<boolean>();
+  const changePreference = (enabled: boolean) => setPreferenceResult(setUpdateDownloadPreference(enabled));
   const update = useUpdate();
   const { status, preparing, restarting } = update;
   const blocked = preparing || restarting || status === "installing";
@@ -37,8 +40,9 @@ export function UpdateSettings() {
         control={info.data?.version ? <span className="settings-version">v{info.data.version}</span> :
           info.isError ? <Button variant="outline" size="sm" onClick={() => void info.refetch()}>重新读取版本</Button> : <span className="settings-maintenance-muted">读取中…</span>} />
       <SettingsRow id="update-auto-download" label="自动下载更新" keywords={["自动更新", "后台下载"]}
+        saved={preferenceResult === true} error={preferenceResult === false ? "本次会话已生效，但无法保存到本机。" : undefined} onRetry={() => changePreference(autoDownload)}
         sub="后台下载并验证更新包，不自动安装或重启；关闭后可手动下载。"
-        control={<Switch ariaLabel="自动下载更新" checked={autoDownload} onChange={setUpdateDownloadPreference} />} />
+        control={<Switch ariaLabel="自动下载更新" checked={autoDownload} onChange={changePreference} />} />
       <SettingsRow id="update-status" label="更新状态" keywords={["检查更新", "升级", "下载更新", "安装", "重启"]}
         valueText={stateText}
         sub={update.update?.version ? `新版本 v${update.update.version} · ${stateText}` : stateText}
@@ -57,6 +61,7 @@ export function UpdateSettings() {
       </div>}
       {update.error && <InlineNotice variant="error">{friendlyError(update.error, update.errorCode).friendly}</InlineNotice>}
       {status === "ready" && <p className="settings-maintenance-footnote">安装由你确认，稍后安装可以继续工作。</p>}
+      {busy && <p className="settings-help">{status === "ready" ? "更新包已准备好，请用“查看并安装”继续。" : status === "downloading" ? "正在下载，完成后再选择安装时间。" : "当前更新操作完成后可重新检查。"}</p>}
     </Card>
   );
 }

@@ -2,7 +2,7 @@ import { Icon } from "../ui/icon";
 import { SvnCheckbox } from "./SvnCheckbox";
 import { formatWhen, keyOf, letterTone, type ChangeGroup, type ChangeItem, type SortMode } from "../../lib/svn";
 import { isSvnCommittable, isSvnPicked, selectSvnPaths, toggleSvnPicked } from "../../lib/svnDraft";
-export function SvnFileRows({ group, closed, onToggleGroup, selected, reviewed, picked, root, busy, sort, onSelect, onOpenFile }: { group: ChangeGroup; closed: boolean; onToggleGroup: () => void; selected: string | null; reviewed: ReadonlySet<string>; picked: ReadonlySet<string>; root: string; busy: boolean; sort: SortMode; onSelect: (item: ChangeItem) => void; onOpenFile?: (path: string) => void }) {
+export function SvnFileRows({ group, closed, onToggleGroup, selected, tabStop, reviewed, picked, root, busy, sort, onSelect, onOpenFile }: { group: ChangeGroup; closed: boolean; onToggleGroup: () => void; selected: string | null; tabStop?: string; reviewed: ReadonlySet<string>; picked: ReadonlySet<string>; root: string; busy: boolean; sort: SortMode; onSelect: (item: ChangeItem) => void; onOpenFile?: (path: string) => void }) {
   const eligible = group.items.filter(isSvnCommittable);
   const count = eligible.filter(it => isSvnPicked(picked,it.path)).length;
   const toggleGroup = () => {
@@ -21,13 +21,14 @@ export function SvnFileRows({ group, closed, onToggleGroup, selected, reviewed, 
       const done = reviewed.has(keyOf(it.path)), name = it.rel.split("/").pop() ?? it.rel;
       const dir = it.rel.slice(0,Math.max(0,it.rel.lastIndexOf("/")));
       return <div className="vc-file-row" key={it.path} data-selected={selected !== null && keyOf(selected) === keyOf(it.path) || undefined}>
-        <SvnCheckbox label={`提交 ${it.rel}`} checked={isSvnPicked(picked,it.path)} disabled={busy || !isSvnCommittable(it)} onChange={() => toggleSvnPicked(root,it.path)} />
-        <button type="button" className="vc-row" data-file-row aria-pressed={selected !== null && keyOf(selected) === keyOf(it.path)} data-reviewed={done || undefined} title={it.rel} onClick={() => onSelect(it)} onDoubleClick={() => !it.isDir && onOpenFile?.(it.path)} onKeyDown={e => {
+        <SvnCheckbox tabIndex={-1} label={`提交 ${it.rel}`} checked={isSvnPicked(picked,it.path)} disabled={busy || !isSvnCommittable(it)} onChange={() => toggleSvnPicked(root,it.path)} />
+        <button type="button" className="vc-row" data-file-row tabIndex={tabStop === undefined || it.path === tabStop ? 0 : -1} aria-keyshortcuts="Space Control+Enter Meta+Enter" aria-description={isSvnPicked(picked,it.path) ? "已选提交，空格取消选择" : "空格选中提交"} aria-pressed={selected !== null && keyOf(selected) === keyOf(it.path)} data-reviewed={done || undefined} title={it.rel} onClick={() => onSelect(it)} onDoubleClick={() => !it.isDir && onOpenFile?.(it.path)} onKeyDown={e => {
           if (e.nativeEvent.isComposing) return;
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !it.isDir && onOpenFile) { e.preventDefault(); onOpenFile(it.path); return; }
           if (e.key === " ") { e.preventDefault(); if (!busy && isSvnCommittable(it)) toggleSvnPicked(root,it.path); return; }
           if (!["ArrowDown","ArrowUp","Home","End"].includes(e.key)) return;
           e.preventDefault();
-          const rows = [...e.currentTarget.closest(".vc-list")!.querySelectorAll<HTMLButtonElement>("[data-file-row]")];
+          const rows = [...(e.currentTarget.closest(".vc-list")?.querySelectorAll<HTMLButtonElement>("[data-file-row]") ?? [])];
           const index = rows.indexOf(e.currentTarget), target = e.key === "Home" ? 0 : e.key === "End" ? rows.length - 1 : Math.max(0,Math.min(rows.length - 1,index + (e.key === "ArrowDown" ? 1 : -1)));
           rows[target]?.focus(); rows[target]?.click();
         }}>

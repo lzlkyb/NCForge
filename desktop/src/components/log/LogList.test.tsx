@@ -53,3 +53,12 @@ describe("日志长列表键盘选择", () => {
     expect(host.textContent).not.toContain("只看有结论的");
   });
 });
+
+it("Tab 进入筛选后的日志时保留已打开详情，确认选择后才替换", () => {
+  const picked: LogEntry[] = [];
+  act(() => root.render(<LogList entries={entries.slice(0, 2)} selectedKey={entryKey(entries[5])} onSelect={row => picked.push(row)} />));
+  act(() => rows()[0].focus());
+  expect(picked).toEqual([]);
+  act(() => rows()[0].click());
+  expect(picked).toEqual([entries[0]]);
+});

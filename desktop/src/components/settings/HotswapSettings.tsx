@@ -5,6 +5,7 @@ import { ToggleRow } from "../ui/ToggleRow";
 import { failureText } from "../../lib/friendlyError";
 import { errorToast } from "../../lib/errorToast";
 import { getConfig, patchConfig } from "../../lib/appConfig";
+import { useSettingsMutation } from "../../hooks/useSettingsMutation";
 import { hotswapPushPending, hotswapStatus, refreshHotswapStatus, type HotswapStatus } from "../../lib/hotswap";
 import "./settings-development.css";
 
@@ -25,6 +26,7 @@ export function HotswapSettings() {
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [pushing, setPushing] = useState(false);
   const [retry, setRetry] = useState(0);
+  const mutation = useSettingsMutation();
 
   const loadLive = useCallback(() => hotswapStatus().then(setLive, () => setLive(null)), []);
 
@@ -41,16 +43,12 @@ export function HotswapSettings() {
   }, [retry, loadLive]);
 
   const update = async (patch: Partial<HotswapCfg>) => {
-    const before = cfg;
-    setCfg((prev) => (prev ? { ...prev, ...patch } : prev));
-    try {
-      await patchConfig(patch);
+    await mutation.run(Object.keys(patch)[0], async () => {
+      const next = await patchConfig(patch);
+      setCfg({ hotswap_enabled: next.hotswap_enabled, hotswap_auto: next.hotswap_auto });
       void loadLive();
       refreshHotswapStatus();
-    } catch (e) {
-      setCfg(before);
-      errorToast("保存热替换设置", e);
-    }
+    });
   };
 
   const push = async () => {
@@ -77,12 +75,13 @@ export function HotswapSettings() {
         id="build-hotswap"
         label="保存后热替换到运行中的服务"
         keywords={["热替换", "hotswap", "redefine", "agent", "不重启", "生效"]}
-        sub={on ? "编译通过的类直接替换进 JVM，不用重启" : "下次启动服务时不再带 agent"}
+        sub="总开关在下次启动 NC 服务时生效。当前服务是否可用，见下方状态。"
         info="只对工作台启动、并带上 agent 的中间件生效；开关在下次启动服务时生效（agent 是启动参数）。JVM 只允许改方法体：新增/删除方法、字段或改了签名时会失败，需要重启服务。工程 classes 在 classpath 里排在同名 jar 后面时，该类会报「被遮挡」。"
         checked={on}
         disabled={!cfg}
         valueText={!cfg ? "读取中" : on ? "已开启" : "已关闭"}
         onChange={(v) => void update({ hotswap_enabled: v })}
+        {...mutation.feedback("hotswap_enabled")}
       />
       <ToggleRow
         id="build-hotswap-auto"
@@ -95,18 +94,20 @@ export function HotswapSettings() {
         disabledReason={!on ? "先打开「保存后热替换」" : undefined}
         valueText={!cfg ? "读取中" : cfg.hotswap_auto ? "已开启" : "已关闭"}
         onChange={(v) => void update({ hotswap_auto: v })}
+        {...mutation.feedback("hotswap_auto")}
       />
       <SettingsRow
         id="build-hotswap-live"
         label="当前服务"
         keywords={["热替换", "推送", "agent", "状态"]}
-        sub={liveText(live)}
-        valueText={live?.agentOnline ? "agent 已挂载" : "未挂载"}
+        sub={`${liveText(live)}${!on ? "；请先开启热替换" : live?.pending === 0 ? "；当前没有待推送的类" : live && !live.agentOnline ? "；代理就绪后可推送" : ""}`}
+        valueText={!live ? "状态未知" : live.agentOnline ? "agent 已就绪" : live.agentAttached ? "agent 准备中" : "未挂载"}
         last
         control={
-          <Button size="sm" variant="ghost" disabled={!on || !live?.pending || pushing} isLoading={pushing} onClick={() => void push()}>
+          <div className="settings-form-actions"><Button size="sm" variant="ghost" onClick={() => void loadLive()}>重新读取状态</Button>
+          <Button size="sm" variant="ghost" disabled={!on || !live?.agentOnline || !live.pending || pushing} isLoading={pushing} onClick={() => void push()}>
             立即推送
-          </Button>
+          </Button></div>
         }
       />
     </>
@@ -114,7 +115,7 @@ export function HotswapSettings() {
 }
 
 function liveText(s: HotswapStatus | null): string {
-  if (!s) return "读不到状态";
+  if (!s) return "状态未知，请重新读取";
   if (!s.agentOnline) return s.agentAttached ? "agent 准备中（NC 加载完 jar 后就绪）" : "服务未运行，或本次启动没带 agent";
   const parts = ["agent 已挂载"];
   if (s.last) parts.push(`上次 ${new Date(s.last.atMs).toLocaleTimeString()} ${s.last.state === "failed" ? "失败" : `替换 ${s.last.redefined.length} 个类`}`);

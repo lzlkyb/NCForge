@@ -43,6 +43,8 @@ import { isWrite, stmtKind } from "./sqlSplit";
 import { captureResultContext, type SqlRunTarget } from "./dbResultContext";
 import { dbTabLabel } from "./dbPendingSessions";
 import { clearEditsForTab, pendingForTab } from "./dbDirtyEdits";
+import { closeTabResultCursors } from "./dbResultCursors";
+import { pendingResultId } from "./dbResultLayout";
 
 /**
  * 数据库页的用户动作：把 store（状态）与 dbConfirm（要问一句的地方）串起来。
@@ -153,7 +155,9 @@ export async function switchConn(tabId: string, connId: string) {
   await releaseSlot(tab.connId, tab.slot);
   // 结果必须一起清掉：留着上一个库的行，而「导出 / 复制为 insert」用的是**新**连接，
   // 两库同名表时导出的就是错数据，全程没有任何提示。计划同理（属于旧连接的执行计划）。
-  patchTab<SqlTab>(tabId, { connId, slot: null, tx: undefined, txNotice: undefined, results: [], view: null, plan: null, run: undefined });
+  // `batch` 也要清：待执行标签由它推导，留着会在新连接上显示上一批「查询 3 · 已跳过」，
+  // 而 `results` 已经空了，点进去没有任何内容可看。
+  patchTab<SqlTab>(tabId, { connId, slot: null, tx: undefined, txNotice: undefined, results: [], view: null, plan: null, run: undefined, batch: undefined, resultPair: undefined });
   void ensureConnected(connId);
 }
 
@@ -375,7 +379,7 @@ export async function runStatements(
   // finally 里那条 `if (sameRun()) patchTab({running:false})` 就整条被跳过，
   // 标签永久停在「执行中」。现在只有 `run` 一个事实，清它就是结束。
   const token: RunToken = { id: task.id, connId, at: Date.now(), slot: tab.slot ?? null, kind: "execute" };
-  patchTab<SqlTab>(tabId, { run: token });
+  patchTab<SqlTab>(tabId, { run: token, batch: { id: task.id, statements: stmts.map((s, i) => ({ index: i + 1, sql: s.text, startLine: s.startLine })), completed: 0, activeIndex: null, status: "running" }, resultPair: undefined });
   // 本次执行的身份 / epoch：任务 id 唯一，切连接、断开或发起新执行都会让它失效。
   // 之后所有写回（含 previousResults）都先复核，避免旧库的行落到新连接的标签上。
   const sameRun = () => {
@@ -386,10 +390,11 @@ export async function runStatements(
     // 界面上是「已执行 0 / N 条」，而语句其实都执行了（历史与输出区里都有）。
     return true;
   };
-  try {if (!(await ensureConnected(connId))) {task.finish("cancelled","连接未建立，语句未执行");return outcome;}}
-  catch {task.finish("failed","连接未建立，返回数据库页查看原因");return outcome;}
-  if(stopRequested) {task.finish("cancelled","执行请求尚未发出，语句未执行");outcome.stoppedByUser=true;return outcome;}
-  if(sqlTabOf(tabId)?.connId!==connId) {task.finish("cancelled","来源标签或连接已切换，语句未执行");return outcome;}
+  const endBeforeExecution = () => { const current = sqlTabOf(tabId); if (current?.run?.id === token.id) patchTab<SqlTab>(tabId, { run: undefined, batch: current.batch && { ...current.batch, status: "stopped" } }); };
+  try {if (!(await ensureConnected(connId))) {task.finish("cancelled","连接未建立，语句未执行");endBeforeExecution();return outcome;}}
+  catch {task.finish("failed","连接未建立，返回数据库页查看原因");endBeforeExecution();return outcome;}
+  if(stopRequested) {task.finish("cancelled","执行请求尚未发出，语句未执行");outcome.stoppedByUser=true;endBeforeExecution();return outcome;}
+  if(sqlTabOf(tabId)?.connId!==connId) {task.finish("cancelled","来源标签或连接已切换，语句未执行");endBeforeExecution();return outcome;}
   const previousResults = tab.results;
   const runConn = connOf(connId), runSchema = rtOf(connId).currentSchema ?? rtOf(connId).info?.schema;
   const contexts = stmts.map(statement => captureResultContext(connId, runConn, runSchema, statement.text, statement));
@@ -397,12 +402,17 @@ export async function runStatements(
   const kept: ResultEntry[] = [];
   let ddl = false;
   let lastProgress = -Infinity;
+  let interrupted = false;
   try {
+    // 重跑释放旧游标，但保留已读取数据，直到首份新结果返回。
+    await closeTabResultCursors(tabId);
     for (let i = 0; i < stmts.length; i++) {
       if(stopRequested) {outcome.stoppedByUser=true;break;}
       // 每条开始前重取标签：执行期间切连接 / 换槽 / 起了新执行，旧结果一律不再写回。
       if (!sameRun()) break;
       const s = stmts[i];
+      const batch = sqlTabOf(tabId)?.batch;
+      if (batch) patchTab<SqlTab>(tabId, { batch: { ...batch, activeIndex: i + 1 } });
       // 回放进度每条都推进；节流只作用于任务中心的 task.update，避免频繁改 store。
       opts.onProgress?.({ done: i, total: stmts.length, line: s.startLine, text: s.text });
       const now = performance.now();
@@ -427,13 +437,20 @@ export async function runStatements(
       r.startLine=s.startLine;
       if(r.cancelled) outcome.stoppedByUser = true;
       outcome.done = i + 1;
+      const current = sqlTabOf(tabId)!;
+      if (current.batch) patchTab<SqlTab>(tabId, { batch: { ...current.batch, completed: i + 1 } });
       if (r.kind !== "error" && stmtKind(s.text) === "ddl") ddl = true;
       if (r.kind !== "update" || stmts.length === 1) {
         if (kept.length === 0 && (connectionInterrupted || r.cancelled)) {
           kept.push(...previousResults.filter((result) => result.kind !== "error"));
         }
+        const firstResult = kept.length === 0;
         kept.push(r);
-        patchTab<SqlTab>(tabId, { results: [...kept], view: r.id });
+        const selected = sqlTabOf(tabId)?.view;
+        const pendingId = pendingResultId(task.id, i + 1);
+        const view = selected === pendingId || firstResult && !selected?.startsWith(`pending:${task.id}:`) ? r.id : selected;
+        const pair = sqlTabOf(tabId)?.resultPair?.map(id => id === pendingId ? r.id : id) as [string, string] | undefined;
+        patchTab<SqlTab>(tabId, { results: [...kept], view, resultPair: pair });
         // Keep the script's own references bounded too, not just the store snapshot.
         const retained = sqlTabOf(tabId)?.results;
         if (retained) kept.splice(0, kept.length, ...retained);
@@ -453,6 +470,7 @@ export async function runStatements(
       }
     }
   } catch(error) {
+    interrupted = true;
     task.finish("failed",`执行中断；已执行 ${outcome.done} 条，返回数据库页核对`);
     throw error;
   } finally {
@@ -461,7 +479,8 @@ export async function runStatements(
     // 清的是「自己这一趟」：切了连接也要清（否则标签永久转圈），
     // 但如果 `run.id` 已经换成别人的，说明新执行占着它，不能碰。
     if (sqlTabOf(tabId)?.run?.id === token.id) {
-      patchTab<SqlTab>(tabId, { run: undefined, ...(kept.length === 0 && !outcome.stoppedByUser ? { results: [], view: "output" } : {}) });
+      const batch = sqlTabOf(tabId)?.batch;
+      patchTab<SqlTab>(tabId, { run: undefined, batch: batch && { ...batch, activeIndex: null, status: outcome.stoppedByUser ? "stopped" : outcome.failures.length || interrupted ? "failed" : "done" }, ...(kept.length === 0 && !outcome.stoppedByUser ? { results: [], view: "output" } : {}) });
     }
   }
   // 建表 / 改表之后侧栏与补全要跟上

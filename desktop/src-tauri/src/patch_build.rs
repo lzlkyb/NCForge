@@ -212,6 +212,44 @@ fn sibling_classes(dir: &Path, stem: &str, java_ms: u64) -> Vec<ClassFile> {
     out
 }
 
+/// 「UTF-8 源文件、Eclipse 会按 GBK 读」的提示（只是警告，不阻断出包）。
+///
+/// 工作台按内容探测编码，编出来是对的；问题只出在 Eclipse：它用工程默认 GBK 读这类文件，
+/// 中文字符串常量会变乱码。产物 class 里已经是乱码形态时措辞更重，让人先重编再出包。
+fn encoding_problem(
+    path: &Path,
+    root: &Path,
+    reg: &crate::encoding_reg::EncodingRegistry,
+    classes: &[ClassFile],
+) -> Option<Problem> {
+    crate::encoding_reg::check_java(path, root, reg)?;
+    let stem = path.file_stem()?.to_string_lossy().to_string();
+    let source = std::fs::read(path)
+        .ok()
+        .and_then(|b| String::from_utf8(b).ok())
+        .unwrap_or_default();
+    let garbled: usize = classes
+        .iter()
+        .filter_map(|c| std::fs::read(&c.path).ok())
+        .map(|b| crate::encoding_reg::garbled_literals_in_class(&source, &b))
+        .sum();
+    let text = if garbled > 0 {
+        format!(
+            "{stem}.java 是 UTF-8，Eclipse 会按 GBK 读它；现有 class 里有 {garbled} 处中文字符串已是乱码（\
+             多半是 Eclipse 编的）。请在工作台重新编译该文件后再出包"
+        )
+    } else {
+        format!(
+            "{stem}.java 是 UTF-8 且 Eclipse 偏好里没登记，Eclipse 会按 GBK 读它：\
+             出包前请用工作台编译，别用 Eclipse 重编，否则中文字符串会变乱码"
+        )
+    };
+    Some(Problem {
+        level: "warn".to_string(),
+        text,
+    })
+}
+
 fn mtime_ms(p: &Path) -> u64 {
     std::fs::metadata(p)
         .and_then(|m| m.modified())
@@ -445,6 +483,8 @@ pub fn scan(options: &BuildOptions, files: &[String]) -> Result<ScanResult, Stri
     let nc_home = options.nc_home.as_ref().map(PathBuf::from);
     let configured_out = options.out_root.as_ref().map(PathBuf::from);
     let mut index = JarIndex::load(Path::new(&options.cache_file));
+    // Eclipse 逐文件编码登记：补丁里的 UTF-8 源文件若没登记，Eclipse 重编会把中文编成乱码
+    let enc_reg = crate::encoding_reg::EncodingRegistry::load(&root);
 
     let force_hy: std::collections::HashSet<String> =
         options.force_hyext.iter().map(|s| pv::norm(s)).collect();
@@ -578,6 +618,12 @@ pub fn scan(options: &BuildOptions, files: &[String]) -> Result<ScanResult, Stri
                         text: format!("找不到 {stem}.class，已找过：{tried}。先在 IDE 里编译"),
                     });
                 }
+            }
+        }
+
+        if is_java && path.is_file() {
+            if let Some(p) = encoding_problem(&path, &root, &enc_reg, &classes) {
+                problems.push(p);
             }
         }
 
@@ -1140,6 +1186,54 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn utf8_源文件按_eclipse_编码给出提示() {
+        let root = crate::test_support::tmp("enc-hint");
+        let src_dir = root.join("ic/src/private/nc/bs");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let java = src_dir.join("X.java");
+        std::fs::write(&java, "class X { String s = \"保存成功\"; }").unwrap();
+        let no_reg = crate::encoding_reg::EncodingRegistry::default();
+
+        // 产物里没有乱码：只提醒别用 Eclipse 重编
+        let good = root.join("good.class");
+        std::fs::write(&good, "保存成功".as_bytes()).unwrap();
+        let classes = vec![ClassFile {
+            name: "X.class".into(),
+            path: good.display().to_string(),
+            fresh: true,
+        }];
+        let p = encoding_problem(&java, &root, &no_reg, &classes).expect("应有提示");
+        assert_eq!(p.level, "warn");
+        assert!(p.text.contains("别用 Eclipse 重编"), "{}", p.text);
+        assert!(!p.text.contains("已是乱码"), "{}", p.text);
+
+        // 产物里已经是乱码形态：措辞升级并给出处数
+        let bad = root.join("bad.class");
+        let (garbled, _, _) = encoding_rs::GBK.decode("保存成功".as_bytes());
+        std::fs::write(&bad, garbled.as_bytes()).unwrap();
+        let classes = vec![ClassFile {
+            name: "X.class".into(),
+            path: bad.display().to_string(),
+            fresh: true,
+        }];
+        let p = encoding_problem(&java, &root, &no_reg, &classes).expect("应有提示");
+        assert!(p.text.contains("1 处中文字符串已是乱码"), "{}", p.text);
+
+        // 偏好里登记成 UTF-8：Eclipse 读得对，不提示
+        let reg = crate::encoding_reg::EncodingRegistry::parse(
+            "encoding//ic/src/private/nc/bs/X.java=UTF-8\n",
+        );
+        assert!(encoding_problem(&java, &root, &reg, &classes).is_none());
+
+        // 纯 ASCII 源文件：Eclipse 怎么读都一样，不提示
+        let ascii = src_dir.join("Y.java");
+        std::fs::write(&ascii, "class Y {}").unwrap();
+        assert!(encoding_problem(&ascii, &root, &no_reg, &[]).is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

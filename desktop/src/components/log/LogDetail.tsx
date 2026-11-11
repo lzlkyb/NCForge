@@ -1,5 +1,4 @@
 import { Icon } from "../ui/icon";
-import { Menu, MenuItem } from "../ui/Menu";
 import {
   entryTitle,
   severityMeta,
@@ -50,7 +49,7 @@ export function LogDetail({
       <div className="lg-detail lg-detail-empty">
         <p>选一条记录看详情</p>
         <p className="lg-empty-hint">
-          每条结论都会说明「为什么」和「下一步」；有 callid 的可在高级操作中追踪请求链路。
+          每条结论都会说明「为什么」和「下一步」；有 callid 的可直接追踪请求链路。
         </p>
       </div>
     );
@@ -70,13 +69,8 @@ export function LogDetail({
         </span>
         <strong>{entryTitle(entry)}</strong>
         <span className="lg-sp" />
-        {entry.callId && <Menu portal trigger={(open, toggle) => <button type="button" className="lg-btn"
-          aria-haspopup="menu" aria-expanded={open} disabled={tracing} onClick={toggle}>
-          {tracing ? "正在追踪…" : "高级操作"}<Icon name="chevronDown" size={12} />
-        </button>}>
-          {(close) => <MenuItem label="追踪这次请求" icon="activity" disabled={tracing}
-            onClick={() => { close(); onTrace(entry.callId!); }} />}
-        </Menu>}
+        {entry.callId && <button type="button" className="lg-btn" disabled={tracing} aria-busy={tracing}
+          onClick={() => onTrace(entry.callId!)}><Icon name="activity" size={13} />{tracing ? "正在追踪…" : "追踪请求"}</button>}
         {jump && (
           <button type="button" className="lg-btn" onClick={() => void runJump(verdict!.jump!)}>
             <Icon name="external" size={13} />

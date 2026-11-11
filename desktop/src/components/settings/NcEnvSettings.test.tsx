@@ -1,199 +1,97 @@
 // @vitest-environment jsdom
-/**
- * 设置 → 开发 →「NC 环境」页（NC home 的唯一配置入口，2026-11-06）：
- * - 展示已配置 home 的探测结果（模块数 / java / 端口）；
- * - 浏览（pickFolder）与扫描候选两条路都能落库；
- * - 服务在跑时先确认再保存，取消就不写；
- * - 保存失败要可见（toast），不假装成功。
- */
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-const mocks = vi.hoisted(() => ({
-  ncHomeProbe: vi.fn(),
-  ncHomeSet: vi.fn(),
-  ncHomeCandidates: vi.fn(),
-  serverStatus: vi.fn(),
-  pickFolder: vi.fn(),
-  toast: vi.fn(),
-}));
-
-vi.mock("../../lib/server", () => ({
-  ncHomeProbe: mocks.ncHomeProbe,
-  ncHomeSet: mocks.ncHomeSet,
-  ncHomeCandidates: mocks.ncHomeCandidates,
-  serverStatus: mocks.serverStatus,
-}));
-vi.mock("../../lib/folderPicker", () => ({ pickFolder: mocks.pickFolder }));
-vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
-
+import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
+const mocks = vi.hoisted(() => ({ probe: vi.fn(), save: vi.fn(), scan: vi.fn(), status: vi.fn(), pick: vi.fn() }));
+vi.mock("../../lib/server", () => ({ ncHomeProbe: mocks.probe, ncHomeSet: mocks.save, ncHomeCandidates: mocks.scan, serverStatus: mocks.status }));
+vi.mock("../../lib/folderPicker", () => ({ pickFolder: mocks.pick, pickFolderError: () => "选择失败，请重试" }));
+vi.mock("../ui/ConfirmDialog", () => ({ ConfirmDialog: ({ open, onCancel, onConfirm, confirmLabel }: { open: boolean; onCancel: () => void; onConfirm: () => void; confirmLabel: ReactNode }) =>
+  open ? <div role="dialog"><button onClick={onCancel}>取消</button><button onClick={onConfirm}>{confirmLabel}</button></div> : null }));
 import { NcEnvSettings } from "./NcEnvSettings";
-
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-const home = {
-  root: "D:\\ncc\\1909home",
-  java: "D:\\ncc\\1909home\\ufjdk\\bin\\java.exe",
-  moduleCount: 245,
-  hasNcStarter: true,
-  httpPort: 80,
-  servicePort: 8005,
-};
-
+const home = { root: "D:/nc", java: "D:/nc/ufjdk/bin/java.exe", moduleCount: 245, hasNcStarter: true, httpPort: 80, servicePort: 8005 };
 let root: Root;
-let container: HTMLDivElement;
-
-const render = async () => {
-  await act(async () => {
-    root.render(
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })}>
-        <NcEnvSettings />
-      </QueryClientProvider>,
-    );
-  });
-  // react-query 首轮落地要跨 microtask + 一轮重渲染，单轮 act 拿不到 data
-  //（probe / server-status 各一条查询，漏了这轮会看到「未配置」假象）。
-  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+let host: HTMLDivElement;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === label)!;
+const input = () => host.querySelector<HTMLInputElement>('[aria-label="NC 安装目录"]')!;
+const type = async (text: string) => act(async () => {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input(), text);
+  input().dispatchEvent(new Event("input", { bubbles: true }));
+});
+const click = async (label: string) => act(async () => { button(label).click(); });
+const mount = async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  await act(async () => root.render(<QueryClientProvider client={client}><NcEnvSettings /></QueryClientProvider>));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
 };
-
-const btn = (text: string) =>
-  [...container.querySelectorAll("button")].find((b) => b.textContent?.includes(text)) as HTMLButtonElement | undefined;
-
-const input = () => container.querySelector<HTMLInputElement>('input[aria-label="NC 安装目录"]');
-
 beforeEach(() => {
-  mocks.ncHomeProbe.mockReset();
-  mocks.ncHomeSet.mockReset();
-  mocks.ncHomeCandidates.mockReset();
-  mocks.serverStatus.mockReset();
-  mocks.pickFolder.mockReset();
-  mocks.toast.mockReset();
-  mocks.serverStatus.mockResolvedValue({ state: "stopped" });
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
+  vi.resetAllMocks();
+  mocks.probe.mockImplementation(async (path?: string) => path ? { ...home, root: path } : home);
+  mocks.save.mockImplementation(async (path: string) => ({ ...home, root: path }));
+  mocks.status.mockResolvedValue({ state: "stopped", ncHome: null });
+  mocks.pick.mockResolvedValue("E:/nc-new");
+  mocks.scan.mockResolvedValue([]);
+  host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
-describe("NC 环境：安装目录展示", () => {
-  it("已配置时展示路径与探测结果（模块数 / java / 端口）", async () => {
-    mocks.ncHomeProbe.mockResolvedValue(home);
-    await render();
-    expect(container.textContent).toContain("D:\\ncc\\1909home");
-    expect(container.textContent).toContain("245 个模块");
-    expect(container.textContent).toContain("完整安装");
-    expect(container.textContent).toContain("端口 80");
+describe("NC 目录检测与确认", () => {
+  it("浏览、候选选择与输入都只形成草稿，检测与确认后才写入", async () => {
+    await mount(); await click("浏览…");
+    expect(input().value).toBe("E:/nc-new");
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(button("保存并使用").disabled).toBe(true);
+    await click("检测目录");
+    expect(mocks.probe).toHaveBeenCalledWith("E:/nc-new");
+    expect(host.textContent).toContain("检测通过");
+    expect(mocks.save).not.toHaveBeenCalled();
+    await click("保存并使用");
+    expect(mocks.save).toHaveBeenCalledWith("E:/nc-new");
+    expect(host.textContent).toContain("已保存");
   });
-
-  it("探测失败时显示原因并给重试，不显示假路径", async () => {
-    mocks.ncHomeProbe.mockRejectedValue(new Error("D:\\ncc 下没有 modules 目录"));
-    await render();
-    expect(container.textContent).toContain("没有 modules 目录");
-    expect(btn("重试")).toBeDefined();
+  it("已检测的草稿修改后需要重新检测，取消不会写入", async () => {
+    await mount(); await type("E:/nc-new"); await click("检测目录");
+    await type("E:/other"); expect(button("保存并使用").disabled).toBe(true);
+    await click("取消修改"); expect(input().value).toBe(home.root); expect(mocks.save).not.toHaveBeenCalled();
   });
-
-  it("未配置时行内提示未配置", async () => {
-    mocks.ncHomeProbe.mockResolvedValue({ ...home, root: "", moduleCount: 0 });
-    await render();
-    expect(container.textContent).toContain("未配置");
+  it("最新状态为运行中时确认后保存，取消保留草稿", async () => {
+    await mount(); await type("E:/nc-new"); await click("检测目录");
+    mocks.status.mockResolvedValue({ state: "running", ncHome: home.root });
+    await click("保存并使用"); expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    await click("取消"); expect(mocks.save).not.toHaveBeenCalled(); expect(input().value).toBe("E:/nc-new");
+    await click("保存并使用"); await click("保存配置，稍后重启");
+    expect(mocks.save).toHaveBeenCalledWith("E:/nc-new");
   });
-});
-
-describe("NC 环境：两条写入路径", () => {
-  it("浏览选中的目录直接验证并保存", async () => {
-    mocks.ncHomeProbe.mockResolvedValue(home);
-    mocks.pickFolder.mockResolvedValue("D:\\NC65\\home");
-    await render();
-    await act(async () => { btn("浏览…")!.click(); });
-    expect(mocks.pickFolder).toHaveBeenCalledWith(
-      expect.objectContaining({ title: expect.stringContaining("NC 安装目录"), defaultPath: home.root }),
-    );
-    expect(mocks.ncHomeSet).toHaveBeenCalledWith("D:\\NC65\\home");
-    expect(mocks.toast).toHaveBeenCalledWith(expect.stringContaining("已切换"), "success");
+  it("检测或保存失败就地显示原因并保留可重试的草稿", async () => {
+    await mount(); await type("E:/bad");
+    mocks.probe.mockRejectedValueOnce(new Error("缺少 modules 目录"));
+    await click("检测目录"); expect(host.textContent).toContain("modules"); expect(button("保存并使用").disabled).toBe(true);
+    await click("检测目录");
+    mocks.save.mockRejectedValueOnce(new Error("磁盘只读"));
+    await click("保存并使用"); expect(input().value).toBe("E:/bad"); expect(host.textContent).toContain("磁盘只读");
+    await click("保存并使用"); expect(mocks.save).toHaveBeenCalledTimes(2);
   });
-
-  it("手输路径回车保存", async () => {
-    mocks.ncHomeProbe.mockResolvedValue(home);
-    await render();
-    await act(async () => { btn("更改")!.click(); });
-    const el = input()!;
-    await act(async () => {
-      // React 受控输入：直接改 value 不触发 onChange，走原生 setter
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-      setter.call(el, "D:\\ncc\\1909home2");
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => {
-      el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-    });
-    expect(mocks.ncHomeSet).toHaveBeenCalledWith("D:\\ncc\\1909home2");
+  it("服务状态未知时不写配置，允许重试", async () => {
+    await mount(); await type("E:/nc-new"); await click("检测目录");
+    mocks.status.mockRejectedValueOnce(new Error("读取状态失败"));
+    await click("保存并使用"); expect(mocks.save).not.toHaveBeenCalled(); expect(host.textContent).toContain("读取状态失败");
   });
-
-  it("扫描出候选后可点「使用」落库", async () => {
-    mocks.ncHomeProbe.mockResolvedValue(home);
-    mocks.ncHomeCandidates.mockResolvedValue([
-      { root: "D:\\NC65\\home", moduleCount: 12, source: "driveRoot" },
-      { root: "E:\\ws-sibling\\nchome", moduleCount: 3, source: "workspaceSibling" },
-    ]);
-    await render();
-    await act(async () => { btn("扫描")!.click(); });
-    expect(container.textContent).toContain("D:\\NC65\\home");
-    expect(container.textContent).toContain("工作区同级");
-    const use = [...container.querySelectorAll("button")].filter((b) => b.textContent === "使用");
-    expect(use).toHaveLength(2);
-    await act(async () => { use[0].click(); });
-    expect(mocks.ncHomeSet).toHaveBeenCalledWith("D:\\NC65\\home");
+  it("输入改变后忽略较早的检测结果", async () => {
+    await mount(); await type("E:/older");
+    let finish!: (value: typeof home) => void;
+    mocks.probe.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await click("检测目录"); await type("E:/newer");
+    await act(async () => finish({ ...home, root: "E:/older" }));
+    expect(button("保存并使用").disabled).toBe(true);
+    expect(input().value).toBe("E:/newer");
   });
-
-  it("扫不到候选时提示手动浏览，不报错", async () => {
-    mocks.ncHomeProbe.mockResolvedValue(home);
-    mocks.ncHomeCandidates.mockResolvedValue([]);
-    await render();
-    await act(async () => { btn("扫描")!.click(); });
-    expect(mocks.toast).toHaveBeenCalledWith(expect.stringContaining("没扫到"), "info");
-  });
-});
-
-describe("NC 环境：保存的前置守卫", () => {
-  it("服务在跑时先确认，取消就不写配置", async () => {
-    mocks.ncHomeProbe.mockResolvedValue(home);
-    mocks.serverStatus.mockResolvedValue({ state: "running" });
-    mocks.pickFolder.mockResolvedValue("D:\\NC65\\home");
-    await render();
-    await act(async () => { btn("浏览…")!.click(); });
-    // 确认框（portal 到 body）出现，且 set 尚未调用
-    const confirm = [...document.body.querySelectorAll("button")].find((b) => b.textContent === "仍然切换");
-    expect(confirm).toBeDefined();
-    expect(mocks.ncHomeSet).not.toHaveBeenCalled();
-    await act(async () => {
-      [...document.body.querySelectorAll("button")].find((b) => b.textContent === "取消")!.click();
-    });
-    expect(mocks.ncHomeSet).not.toHaveBeenCalled();
-  });
-
-  it("服务在跑时确认后照常保存，并提示重启后生效", async () => {
-    mocks.ncHomeProbe.mockResolvedValue(home);
-    mocks.serverStatus.mockResolvedValue({ state: "running" });
-    mocks.pickFolder.mockResolvedValue("D:\\NC65\\home");
-    await render();
-    await act(async () => { btn("浏览…")!.click(); });
-    await act(async () => {
-      [...document.body.querySelectorAll("button")].find((b) => b.textContent === "仍然切换")!.click();
-    });
-    // 确认框的 onConfirm 排在退场动画（rAF + MOTION.exit=140ms）之后，要等它跑完
-    await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
-    expect(mocks.ncHomeSet).toHaveBeenCalledWith("D:\\NC65\\home");
-    expect(mocks.toast).toHaveBeenCalledWith(expect.stringContaining("重启服务后生效"), "success");
-  });
-
-  it("保存失败时弹错误，不显示成功", async () => {
-    mocks.ncHomeProbe.mockResolvedValue(home);
-    mocks.ncHomeSet.mockRejectedValue(new Error("D:\\ncc 下没有 ufjdk/bin/java.exe"));
-    mocks.pickFolder.mockResolvedValue("D:\\bad");
-    await render();
-    await act(async () => { btn("浏览…")!.click(); });
-    expect(mocks.toast).toHaveBeenCalledWith(expect.stringContaining("ufjdk"), "error", { raw: "D:\\ncc 下没有 ufjdk/bin/java.exe" });
+  it("扫描空结果原位显示下一步，选择候选不自动保存", async () => {
+    await mount(); await click("扫描常见位置");
+    expect(host.textContent).toContain("没有找到候选");
+    mocks.scan.mockResolvedValue([{ root: "E:/candidate", moduleCount: 20, source: "workspaceSibling" }]);
+    await click("扫描常见位置"); await click("选择目录");
+    expect(input().value).toBe("E:/candidate"); expect(mocks.save).not.toHaveBeenCalled();
+    expect(host.querySelector("#nc-home-path")?.hasAttribute("data-settings-item")).toBe(true);
   });
 });
