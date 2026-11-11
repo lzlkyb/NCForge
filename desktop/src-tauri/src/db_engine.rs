@@ -630,7 +630,20 @@ impl EngineHandle {
                 }
                 other => other,
             },
-            Engine::Rust(eng) => eng.call(cmd, args, timeout),
+            Engine::Rust(eng) => match eng.call(cmd, args, timeout) {
+                Err(e)
+                    if cmd == "exec"
+                        && !stateful_execution
+                        && e.code == "sql"
+                        && e.message.starts_with("ORA-01002：")
+                        && self.cancel_epoch.load(Ordering::Relaxed) == epoch =>
+                {
+                    // The driver discarded the failed cursor. Only a stateless
+                    // query may be repeated on this same session.
+                    eng.call(cmd, args, timeout)
+                }
+                other => other,
+            },
         };
         // 兜底：任何命令撞上「响应流错位」都先把连接对齐。
         //

@@ -517,14 +517,17 @@ fn 纯rust引擎能在语句执行中途取消() {
     let e = Arc::new(RustEngine::new());
     call(&e, "connect", &[&url(), &user(), &pass(), "false"]);
 
+    let sql = "select count(*) from (select level from dual connect by level <= :1)";
+    // Warm the same SQL's cache, then interrupt its slow execution.
+    call(&e, "execBound", &[sql, "10", "10", "number", "2"]);
     let t0 = Instant::now();
     // 另起一个线程跑长语句：主线程要能在它阻塞期间调用 cancel
     let worker = {
         let e = e.clone();
         std::thread::spawn(move || {
             e.call(
-                "exec",
-                &["begin dbms_lock.sleep(30); end;", "10", "30"],
+                "execBound",
+                &[sql, "10", "30", "number", "1000000000"],
                 Duration::from_secs(60),
             )
         })
@@ -547,8 +550,8 @@ fn 纯rust引擎能在语句执行中途取消() {
     );
 
     // 取消之后连接必须还能用，否则这个能力等于「把连接弄死」
-    let r = call(&e, "exec", &["select 1 from dual", "10", "10"]);
-    assert_eq!(r["rows"][0][0], "1");
+    let r = call(&e, "execBound", &[sql, "10", "10", "number", "2"]);
+    assert_eq!(r["rows"][0][0], "2");
     println!("[cancel 后复用] ok");
     call(&e, "disconnect", &[]);
 }

@@ -46,7 +46,7 @@ use crate::constants;
 use crate::db_info::DbInfo;
 use crate::dbobject::DbObjectTypeCache;
 use crate::end_user_security_context::EndUserSecurityContext;
-use crate::error::Error;
+use crate::error::{Error, ErrorKind};
 use crate::messages::AuthMessage;
 use crate::messages::CommitMessage;
 use crate::messages::ConnectMessage;
@@ -662,6 +662,17 @@ impl Client {
         statement.clear_cursor();
     }
 
+    fn discard_interrupted_statement(&mut self, statement: &mut CachedStatement, error: &Error) {
+        match error.kind() {
+            ErrorKind::CallTimeoutExceeded => self.statement_cache.discard_interrupted(statement),
+            ErrorKind::DbError(error) if matches!(error.code(), 1002 | 1013) => {
+                self.close_cursor(statement);
+                self.statement_cache.discard_interrupted(statement);
+            }
+            _ => {}
+        }
+    }
+
     /// Commits any pending transaction.
     pub(crate) fn commit(&mut self) -> Result<(), Error> {
         self.process_message(&mut CommitMessage::new())?;
@@ -835,7 +846,13 @@ impl Client {
         } else {
             let mut message =
                 ExecuteMessage::new(statement, params, parse_only);
-            let mut response = self.process_message(&mut message)?;
+            let mut response = match self.process_message(&mut message) {
+                Ok(response) => response,
+                Err(error) => {
+                    self.discard_interrupted_statement(statement, &error);
+                    return Err(error);
+                }
+            };
             response.set_implicit_results(std::mem::take(
                 &mut message.implicit_results,
             ));
@@ -855,7 +872,13 @@ impl Client {
         last_row: Option<DbRow>,
     ) -> Result<Response, Error> {
         let mut message = FetchMessage::new(statement, last_row);
-        let mut response = self.process_message(&mut message)?;
+        let mut response = match self.process_message(&mut message) {
+            Ok(response) => response,
+            Err(error) => {
+                self.discard_interrupted_statement(statement, &error);
+                return Err(error);
+            }
+        };
         response.complete_values(self, client_ref, statement)?;
         Ok(response)
     }

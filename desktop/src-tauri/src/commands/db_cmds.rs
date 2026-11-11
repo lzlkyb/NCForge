@@ -629,7 +629,9 @@ fn engine_error(e: db_bridge::BridgeError) -> String {
         // （写入可能已经生效）。归成 `sql` 的话界面只会显示成一条普通执行失败，
         // 用户顺手再点一次写回就可能重复落库。前端据这个码给「请先到库里核对」。
         "session-lost" | "session-desync" | "probe-failed" | "need-password" | "auth"
-        | "unreachable" | "cursor-closed" | "cursor-limit" => code_label(&e.code, &e.message),
+        | "unreachable" | "cursor-closed" | "cursor-limit" | "cancelled" => {
+            code_label(&e.code, &e.message)
+        }
         _ => map_sql_error(&e.message),
     }
 }
@@ -1605,7 +1607,12 @@ pub async fn db_lob_value(
     column: String,
     slot: Option<String>,
     max_chars: Option<u32>,
+    direct: Option<bool>,
 ) -> Result<Value, String> {
+    let direct = direct.unwrap_or(false);
+    if direct && !crate::db_engine::readonly_query(&sql) {
+        return Err(code_label("sql", "完整二进制值只支持单行查询"));
+    }
     let b = slot_bridge(&state, &id, slot.as_deref())?;
     let chars = max_chars
         .unwrap_or(1024 * 1024)
@@ -1613,7 +1620,13 @@ pub async fn db_lob_value(
     call(
         b,
         "lobValue",
-        vec![sql, row_index.to_string(), column, chars.to_string()],
+        vec![
+            sql,
+            row_index.to_string(),
+            column,
+            chars.to_string(),
+            direct.to_string(),
+        ],
         Duration::from_secs(180),
     )
     .await
@@ -2470,6 +2483,12 @@ mod tests {
             "响应解析错位",
         ));
         assert_eq!(e, "session-desync|响应解析错位");
+    }
+
+    #[test]
+    fn rust取消保留状态码() {
+        let error = db_bridge::BridgeError::new("cancelled", "语句已中断");
+        assert_eq!(super::engine_error(error), "cancelled|语句已中断");
     }
 
     /// 存不下口令（macOS 钥匙串被拒、系统不支持…）只能降级成「不记住」。

@@ -136,6 +136,19 @@ impl StatementCache {
         }
     }
 
+    /// An interrupted statement must be parsed again instead of restoring its
+    /// cursor and describe state when the public statement is dropped.
+    pub(crate) fn discard_interrupted(&mut self, info: &mut CachedStatement) {
+        let slot = info.cache_slot_num();
+        if slot != 0 && self.slots_by_name.get(info.sql()).copied() == Some(slot) {
+            self.slots_by_name.remove(info.sql());
+            self.cached_statements[slot - 1] = None;
+            self.empty_slots.push_back(slot);
+        }
+        info.set_cache_slot_num(0);
+        info.clear_cursor();
+    }
+
     /// Returns whether the cache is able to accept more entries.
     fn has_space(&self) -> bool {
         !self.empty_slots.is_empty() || !self.free_used_slots.is_empty()
