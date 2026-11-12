@@ -66,6 +66,8 @@ public class NcSvnBridge {
 
 	// 协议出口：固定 UTF-8，且与可能存在的第三方打印彻底分开（System.out 一律改道 stderr）
 	private static PrintStream out;
+	/** 写 stdout 的互斥锁：status 并行扫描时多个线程同时推进度，行会交错成坏 JSON。 */
+	private static final Object OUT_LOCK = new Object();
 	private static SVNClientManager cm;
 	private static String user = "";
 	private static String pass = "";
@@ -205,8 +207,18 @@ public class NcSvnBridge {
 	 * 64 次进度），而且能只扫指定模块：增量刷新时只碰变脏的那几个。
 	 *
 	 * <p>代价是串行按模块扫比全根单次扫慢约 2 秒（实测 12.6s vs 10.7s）。拿 2 秒换
-	 * 「有进度」+「第二次之后只扫脏模块」，划算。真要抹平这 2 秒就得上多线程，
-	 * 那是另一件事（实测 8 线程 6.7 秒），别混在这里。
+	 * 「有进度」+「第二次之后只扫脏模块」，划算。这 2 秒在下面用多线程抹平：format 10
+	 * 的每个一级目录自带 {@code .svn}，是天然的独立根，8 线程并行实测 6.7 秒（16 线程
+	 * 不再变快，磁盘 IO 已饱和）。
+	 *
+	 * <p><b>并行度只到「模块」这一层，不再往下拆</b>：单模块内部是 SVNKit 的递归，拆不动。
+	 * 冷缓存下耗时极度不均（实测 {@code uapbd} 8.6s、{@code ic} 4.3s、{@code pu} 3.4s，
+	 * 而 {@code out} 的 7741 个编译产物只要 3ms——那些文件全 unversioned，SVNKit 不递归
+	 * 进去），总时长因此由最慢的那个模块决定，这正是并行能重叠掉的部分。
+	 *
+	 * <p>线程安全：{@link SVNClientManager} 不是线程安全的，每个工作线程借一个自己的
+	 * （见 {@link #newManager()}）；{@code out} 由 {@link #OUT_LOCK} 串起来，否则两个
+	 * 线程的进度行会交错成一行坏 JSON。
 	 *
 	 * <p>unit("") 是根层：只扫 {@code IMMEDIATES}，拿到工作副本根下的文件
 	 * （{@code .module_prj} 这类）与各模块目录自身。子目录再各自 {@code INFINITY}，
@@ -215,35 +227,10 @@ public class NcSvnBridge {
 	 * @param only 增量时要扫的模块名（TAB 分隔，空串 = 全部）。请求了但目录已不在的
 	 *             模块不会出现在返回的 modules 里——调用方据此把它的缓存条目剔除
 	 */
-	private static String status(final String id, File root, String only) throws SVNException {
-		final List<String> items = new ArrayList<String>();
-		// 去重：根层（IMMEDIATES）与模块层（INFINITY）都会报模块目录自己
-		final java.util.Map<String, String> seen = new java.util.HashMap<String, String>();
-		final int[] n = new int[1];
-		final ISVNStatusHandler handler = new ISVNStatusHandler() {
-			public void handleStatus(SVNStatus s) {
-				String path = s.getFile().getPath();
-				if (seen.put(path, path) != null) {
-					return;
-				}
-				n[0]++;
-				SVNStatusType st = s.getContentsStatus();
-				String name = st == null ? "none" : st.toString();
-				if (st == SVNStatusType.STATUS_CONFLICTED || s.getPropertiesStatus() == SVNStatusType.STATUS_CONFLICTED || s.getTreeConflict() != null) name = "conflicted";
-				if ("normal".equals(name) || "none".equals(name)) {
-					return;
-				}
-				items.add("{\"path\":" + jstr(path)
-						+ ",\"status\":" + jstr(name)
-						+ ",\"revision\":" + (s.getRevision() == null || s.getRevision().getNumber() < 0 ? -1
-								: s.getRevision().getNumber())
-						+ ",\"dir\":" + (s.getKind() == SVNNodeKind.DIR || s.getFile().isDirectory() ? "true" : "false") + "}");
-			}
-		};
-
+	private static String status(final String id, File root, final String only) throws SVNException {
 		// 单元列表：第 0 个是根层（null 表示「不递归」）
-		List<String> names = new ArrayList<String>();
-		List<File> units = new ArrayList<File>();
+		final List<String> names = new ArrayList<String>();
+		final List<File> units = new ArrayList<File>();
 		names.add("");
 		units.add(null);
 		File[] children = root.listFiles();
@@ -262,43 +249,205 @@ public class NcSvnBridge {
 				units.add(c);
 			}
 		}
-		// 一级目录太多（把某个数据目录当工作区用）：退回单次全根扫，别在这里循环几千次
+		// 一级目录太多（把某个数据目录当工作区用）：退回单次全根扫，别在这里起几百个任务
 		if (names.size() > MAX_STATUS_UNITS) {
-			manager().getStatusClient().doStatus(root, SVNRevision.WORKING, SVNDepth.INFINITY, false, false, false, false, handler, null);
-			return result(n[0], 1, 1, names, items);
+			java.util.Map<String, String> got = new java.util.LinkedHashMap<String, String>();
+			int n = scanInto(manager(), root, SVNDepth.INFINITY, got);
+			return result(n, 1, 1, names, new ArrayList<String>(got.values()));
 		}
 
 		java.util.Set<String> want = null;
 		if (!only.isEmpty()) {
 			want = new java.util.HashSet<String>(java.util.Arrays.asList(only.split("\t", -1)));
 		}
-		int total = 0;
-		for (String nm : names) {
-			if (want == null || want.contains(nm)) {
-				total++;
-			}
-		}
-		int done = 0;
-		List<String> processed = new ArrayList<String>();
+		final List<Integer> todo = new ArrayList<Integer>();
 		for (int i = 0; i < names.size(); i++) {
-			String nm = names.get(i);
-			if (want != null && !want.contains(nm)) {
-				continue;
+			if (want == null || want.contains(names.get(i))) {
+				todo.add(i);
 			}
-			File unit = units.get(i);
-			if (unit == null) {
-				manager().getStatusClient().doStatus(root, SVNRevision.WORKING, SVNDepth.IMMEDIATES, false, false, false, false, handler, null);
-			} else if (unit.isDirectory()) {
-				manager().getStatusClient().doStatus(unit, SVNRevision.WORKING, SVNDepth.INFINITY, false, false, false, false, handler, null);
-			} else {
-				// 请求了但已经不是一个目录（增量期间模块被删 / 改名）
-				continue;
-			}
-			done++;
-			processed.add(nm);
-			progress(id, n[0], done, total, nm);
 		}
-		return result(n[0], done, total, processed, items);
+		// 最慢的先跑（LPT 调度）：冷缓存下 uapbd 一个模块就 8.6 秒，它若按字母序排在
+		// 末尾、第 8 批才启动，总时长就成了「其余模块全跑完 + 8.6 秒」。上次的耗时记在
+		// 桥里（常驻进程，见 UNIT_MS），第一次没有数据就保持字母序，之后每轮都接近下界。
+		java.util.Collections.sort(todo, new java.util.Comparator<Integer>() {
+			public int compare(Integer a, Integer b) {
+				long ma = lastMs(root, names.get(a));
+				long mb = lastMs(root, names.get(b));
+				if (ma == mb) {
+					// 没有历史数据时保持字母序：任务完成顺序虽然随机，合并顺序另有保证
+					return a.compareTo(b);
+				}
+				return ma > mb ? -1 : 1;
+			}
+		});
+		final int total = todo.size();
+		if (total == 0) {
+			return result(0, 0, 0, new ArrayList<String>(), new ArrayList<String>());
+		}
+
+		final int threads = Math.min(STATUS_THREADS, total);
+		final java.util.concurrent.LinkedBlockingQueue<SVNClientManager> free =
+				new java.util.concurrent.LinkedBlockingQueue<SVNClientManager>();
+		final List<SVNClientManager> created = new ArrayList<SVNClientManager>();
+		final java.util.concurrent.ConcurrentHashMap<Integer, java.util.LinkedHashMap<String, String>> perUnit =
+				new java.util.concurrent.ConcurrentHashMap<Integer, java.util.LinkedHashMap<String, String>>();
+		final java.util.concurrent.atomic.AtomicInteger scanned = new java.util.concurrent.atomic.AtomicInteger();
+		final java.util.concurrent.atomic.AtomicInteger done = new java.util.concurrent.atomic.AtomicInteger();
+		final java.util.concurrent.atomic.AtomicReference<Throwable> failure =
+				new java.util.concurrent.atomic.AtomicReference<Throwable>();
+		final java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads,
+				new java.util.concurrent.ThreadFactory() {
+					public Thread newThread(Runnable r) {
+						Thread t = new Thread(r, "ncsvn-status");
+						t.setDaemon(true);
+						return t;
+					}
+				});
+		try {
+			for (int i = 0; i < threads; i++) {
+				SVNClientManager m = newManager();
+				created.add(m);
+				free.add(m);
+			}
+			List<java.util.concurrent.Future<?>> jobs = new ArrayList<java.util.concurrent.Future<?>>();
+			for (final Integer idx : todo) {
+				jobs.add(pool.submit(new Runnable() {
+					public void run() {
+						SVNClientManager m;
+						try {
+							m = free.take();
+						} catch (InterruptedException e) {
+							Thread.currentThread().interrupt();
+							return;
+						}
+						try {
+							File unit = units.get(idx);
+							java.util.LinkedHashMap<String, String> got = new java.util.LinkedHashMap<String, String>();
+							long t0 = System.nanoTime();
+							int n;
+							if (unit == null) {
+								n = scanInto(m, root, SVNDepth.IMMEDIATES, got);
+							} else if (unit.isDirectory()) {
+								n = scanInto(m, unit, SVNDepth.INFINITY, got);
+							} else {
+								// 请求了但已经不是一个目录（增量期间模块被删 / 改名）：
+								// 不放进 perUnit，合并时按「这一轮没扫到」处理
+								return;
+							}
+							UNIT_MS.put(unitKey(root, names.get(idx)), (System.nanoTime() - t0) / 1000000L);
+							perUnit.put(idx, got);
+							scanned.addAndGet(n);
+							progress(id, scanned.get(), done.incrementAndGet(), total, names.get(idx));
+						} catch (Throwable t) {
+							failure.compareAndSet(null, t);
+						} finally {
+							free.add(m);
+						}
+					}
+				}));
+			}
+			pool.shutdown();
+			// 等所有任务结束再合并：中途合并会漏掉后完成的模块
+			for (java.util.concurrent.Future<?> f : jobs) {
+				try {
+					f.get();
+				} catch (Exception e) {
+					// 任务内部已把异常放进 failure，这里只是等它停下来
+				}
+			}
+		} finally {
+			// 正常路径上 pool 已 shutdown；这里兜的是「起线程池后中途抛异常」那条路
+			pool.shutdownNow();
+			for (SVNClientManager m : created) {
+				m.dispose();
+			}
+		}
+		Throwable err = failure.get();
+		if (err instanceof SVNException) {
+			throw (SVNException) err;
+		}
+		if (err != null) {
+			throw new SVNException(org.tmatesoft.svn.core.SVNErrorMessage.create(
+					org.tmatesoft.svn.core.SVNErrorCode.UNKNOWN, String.valueOf(err)));
+		}
+
+		// 合并：按 names 顺序（根层在前），跨单元按路径去重——根层的 IMMEDIATES 与模块的
+		// INFINITY 都会报模块目录自己。顺序必须稳定：串行时就是「根层 → 按名字排序的模块」，
+		// 并发完成顺序是随机的，不能直接按完成顺序拼。
+		List<String> items = new ArrayList<String>();
+		List<String> processed = new ArrayList<String>();
+		java.util.Set<String> seen = new java.util.HashSet<String>();
+		for (Integer idx : todo) {
+			java.util.LinkedHashMap<String, String> got = perUnit.get(idx);
+			if (got == null) {
+				continue;
+			}
+			processed.add(names.get(idx));
+			for (java.util.Map.Entry<String, String> e : got.entrySet()) {
+				if (seen.add(e.getKey())) {
+					items.add(e.getValue());
+				}
+			}
+		}
+		// 结果里的 scanned 用**去重后**的条目数：进度事件里的 scanned 是各单元累加的，
+		// 同一条目在根层与模块层会各算一次（接口复用了 `result`，两个数不能混着用）
+		return result(items.size(), processed.size(), total, processed, items);
+	}
+
+	/** status 的并行度：实测 8 线程 6.7 秒，16 线程不再变快（磁盘 IO 已饱和）。 */
+	private static final int STATUS_THREADS = 8;
+
+	/**
+	 * 上一次每个模块扫了多久（key = 工作副本根 + 模块名，见 {@link #unitKey}）。
+	 *
+	 * <p>只用于给下次排提交顺序（LPT），不参与任何结果计算——估错了顶多多等几秒，
+	 * 不会漏报改动。桥是常驻进程，所以这份数据天然跨次调用。
+	 */
+	private static final java.util.Map<String, Long> UNIT_MS =
+			new java.util.concurrent.ConcurrentHashMap<String, Long>();
+
+	private static String unitKey(File root, String name) {
+		return root.getPath() + "\u0000" + name;
+	}
+
+	private static long lastMs(File root, String name) {
+		Long v = UNIT_MS.get(unitKey(root, name));
+		return v == null ? 0L : v;
+	}
+
+	/**
+	 * 扫一个单元（工作副本根、或根下的一个一级目录），结果按 {@code path → JSON} 放进
+	 * {@code got}，保持回调顺序。
+	 *
+	 * <p>用 {@code LinkedHashMap} 而不是 {@code List}：合并阶段要按**路径**跨单元去重，
+	 * 拿整条 JSON 当 key 是错的（同一路径在根层与模块层报出来的 {@code revision} 可能不同）。
+	 *
+	 * <p>返回回调条目数（含被过滤掉的 normal），与串行时代的 {@code scanned} 同一个口径。
+	 */
+	private static int scanInto(SVNClientManager m, File target, SVNDepth depth,
+			final java.util.Map<String, String> got) throws SVNException {
+		final int[] n = new int[1];
+		m.getStatusClient().doStatus(target, SVNRevision.WORKING, depth, false, false, false, false,
+				new ISVNStatusHandler() {
+					public void handleStatus(SVNStatus s) {
+						n[0]++;
+						String path = s.getFile().getPath();
+						SVNStatusType st = s.getContentsStatus();
+						String name = st == null ? "none" : st.toString();
+						if (st == SVNStatusType.STATUS_CONFLICTED
+								|| s.getPropertiesStatus() == SVNStatusType.STATUS_CONFLICTED
+								|| s.getTreeConflict() != null) name = "conflicted";
+						if ("normal".equals(name) || "none".equals(name)) {
+							return;
+						}
+						got.put(path, "{\"path\":" + jstr(path)
+								+ ",\"status\":" + jstr(name)
+								+ ",\"revision\":" + (s.getRevision() == null || s.getRevision().getNumber() < 0 ? -1
+										: s.getRevision().getNumber())
+								+ ",\"dir\":" + (s.getKind() == SVNNodeKind.DIR || s.getFile().isDirectory() ? "true" : "false") + "}");
+					}
+				}, null);
+		return n[0];
 	}
 
 	/** 一级目录超过这个数就不切分（正常 NC 工作区是 8–15 个模块，极端情况除外）。 */
@@ -658,20 +807,29 @@ public class NcSvnBridge {
 
 	// ───────────────────────── 基础设施 ─────────────────────────
 
+	/**
+	 * 造一个全新的 client manager（不缓存）。
+	 *
+	 * <p>{@link SVNClientManager} 不是线程安全的，status 的并行扫描每个工作线程都要有
+	 * 自己的一份；单线程命令走 {@link #manager()} 的缓存。
+	 */
+	private static SVNClientManager newManager() {
+		org.tmatesoft.svn.core.wc.ISVNOptions options = configDir == null
+				? SVNWCUtil.createDefaultOptions(true)
+				: SVNWCUtil.createDefaultOptions(configDir, true);
+		if (user.isEmpty()) {
+			return SVNClientManager.newInstance(options, configDir == null
+					? SVNWCUtil.createDefaultAuthenticationManager()
+					: SVNWCUtil.createDefaultAuthenticationManager(configDir));
+		}
+		return SVNClientManager.newInstance(options, configDir == null
+				? SVNWCUtil.createDefaultAuthenticationManager(user, pass)
+				: SVNWCUtil.createDefaultAuthenticationManager(configDir, user, pass));
+	}
+
 	private static SVNClientManager manager() {
 		if (cm == null) {
-			org.tmatesoft.svn.core.wc.ISVNOptions options = configDir == null
-					? SVNWCUtil.createDefaultOptions(true)
-					: SVNWCUtil.createDefaultOptions(configDir, true);
-			if (user.isEmpty()) {
-				cm = SVNClientManager.newInstance(options, configDir == null
-						? SVNWCUtil.createDefaultAuthenticationManager()
-						: SVNWCUtil.createDefaultAuthenticationManager(configDir));
-			} else {
-				cm = SVNClientManager.newInstance(options, configDir == null
-						? SVNWCUtil.createDefaultAuthenticationManager(user, pass)
-						: SVNWCUtil.createDefaultAuthenticationManager(configDir, user, pass));
-			}
+			cm = newManager();
 		}
 		return cm;
 	}
@@ -684,16 +842,20 @@ public class NcSvnBridge {
 	}
 
 	private static void respond(String id, String data) throws Exception {
-		Writer w = new OutputStreamWriter(out, "UTF-8");
-		w.write("{\"id\":" + jstr(id) + ",\"ok\":true,\"data\":" + data + "}\n");
-		w.flush();
+		synchronized (OUT_LOCK) {
+			Writer w = new OutputStreamWriter(out, "UTF-8");
+			w.write("{\"id\":" + jstr(id) + ",\"ok\":true,\"data\":" + data + "}\n");
+			w.flush();
+		}
 	}
 
 	/** status 的进度：一个一级目录扫完推一次（`done`/`total` 是模块数，`scanned` 是条目数）。 */
 	private static void progress(String id, int scanned, int done, int total, String module) {
-		out.print("{\"id\":" + jstr(id) + ",\"progress\":{\"scanned\":" + scanned + ",\"done\":" + done
-				+ ",\"total\":" + total + ",\"module\":" + jstr(module) + "}}\n");
-		out.flush();
+		synchronized (OUT_LOCK) {
+			out.print("{\"id\":" + jstr(id) + ",\"progress\":{\"scanned\":" + scanned + ",\"done\":" + done
+					+ ",\"total\":" + total + ",\"module\":" + jstr(module) + "}}\n");
+			out.flush();
+		}
 	}
 
 	private static void error(String id, Throwable t) {
@@ -720,8 +882,10 @@ public class NcSvnBridge {
 		} else if (msg.contains("冲突")) {
 			code = "conflict";
 		}
-		out.print("{\"id\":" + jstr(id) + ",\"ok\":false,\"error\":" + jstr(msg) + ",\"code\":" + jstr(code) + "}\n");
-		out.flush();
+		synchronized (OUT_LOCK) {
+			out.print("{\"id\":" + jstr(id) + ",\"ok\":false,\"error\":" + jstr(msg) + ",\"code\":" + jstr(code) + "}\n");
+			out.flush();
+		}
 	}
 
 	private static String[] tail(String[] f, int from) {
