@@ -15,6 +15,9 @@
 //! 纯逻辑（过滤 / 归类 / 合并）都在本文件；[`WorkspaceWatcher`] 是唯一摸 OS 的地方，
 //! 命令层只负责在切工作区时换一份监听（见 `workspace_cmds::restart_watcher`）。
 //!
+//! 同一批事件还顺手喂给 `svn_status_cache`：版本控制页的增量刷新靠「哪个模块脏了」
+//! 决定要不要重扫，而这里已经在逐条看工作区的每个变化，再开一条 notify 监听纯属浪费。
+//!
 //! 前端契约：事件名 `fs-changed`，载荷
 //! `{ "dirs": ["<绝对路径>", …], "rescan": false }`，路径形如 `set_workspace`
 //! 的返回值（不带 `\\?\` 前缀）。`rescan` 为真时前端应把所有已读目录重读一遍
@@ -48,6 +51,12 @@ const MAX_PENDING: usize = 256;
 /// 一批最多带多少个外部改动的 `.java`：再多就让前端按「全工作区」处理。
 const MAX_JAVA: usize = 64;
 
+/// 一批最多记多少个「SVN 可能要重扫」的路径。
+///
+/// 溢出**不丢正确性**：一溢出就把这一轮标成「脏集合不完整」，增量刷新自动退回全量。
+/// 只是别让它无限涨——一次 `svn update` 能产生几万个事件。
+const MAX_SVN: usize = 256;
+
 /// 一批最多带多少个「可审查」的外部改动文件。与前端 `EXTERNAL_BATCH_LIMIT` 对齐：
 /// 再多就让前端只提示、不逐个处理。
 const MAX_REVIEW: usize = 64;
@@ -73,6 +82,46 @@ pub fn worth_queueing(ev: &notify::Event) -> bool {
         || (needs_tree_refresh(&ev.kind) && ev.paths.iter().any(|p| !is_ignored(p)))
         || (is_java_change(&ev.kind) && ev.paths.iter().any(|p| is_java_path(p)))
         || (is_review_change(&ev.kind) && ev.paths.iter().any(|p| is_review_path(p)))
+        // 版本控制页的增量刷新要知道「哪个模块脏了」。这条比前三条宽：SVN 的
+        // modified 只认 mtime/size，`touch` 一下、改个 .txt 都算——它们进不了
+        // 文件树与审查时间线，但不送进来增量就会漏掉这次改动。
+        || (is_svn_watchable(&ev.kind) && ev.paths.iter().any(|p| svn_relevant(p)))
+}
+
+/// SVN 脏集关心的事件：除了「读」都算。
+///
+/// `Access` 是读文件 / 读属性（应用自己打开标签就一堆），送进来纯属噪音。
+fn is_svn_watchable(kind: &notify::EventKind) -> bool {
+    use notify::EventKind;
+    !matches!(kind, EventKind::Access(_) | EventKind::Other)
+}
+
+/// 这个路径变了，有没有可能让 `svn status` 的结论变。
+///
+/// **元数据目录只认 `entries`**：format 10 每个目录一份 `.svn/entries`，写频率远低于
+/// 其它元数据文件，但一次写入足以说明「这个目录的纳管情况变了」（add / delete /
+/// commit / update）。不认的话，在 Eclipse 里 `svn add` 一个已存在的文件，
+/// 文件本身没被写过、脏集合又空着，增量刷新会把这次新增当成不存在。
+pub fn svn_relevant(path: &Path) -> bool {
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        // 构建产物 / 归档：`svn_view::is_ignored` 本来就不把它们当改动。
+        // 先按扩展名挡掉是性能考虑——编译一次几千个 .class 事件全走下面的
+        // 字符串切分，会把 OS 回调拖慢。
+        const NOISE: [&str; 6] = ["class", "jar", "zip", "log", "tmp", "bak"];
+        if NOISE.iter().any(|e| ext.eq_ignore_ascii_case(e)) {
+            return false;
+        }
+    }
+    if is_ignored(path) {
+        let name_is = |p: Option<&Path>, want: &str| {
+            p.and_then(|x| x.file_name())
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.eq_ignore_ascii_case(want))
+        };
+        return name_is(Some(path), "entries") && name_is(path.parent(), ".svn");
+    }
+    // 构建产物目录（classes / out / target …）里的东西，改了 SVN 也不报
+    !crate::svn_view::is_ignored(&path.to_string_lossy(), false)
 }
 
 /// 可审查文件的**内容**变更。不含增 / 删 / 改名：那类改动由文件树与「转到文件」
@@ -113,8 +162,9 @@ pub fn is_java_path(path: &Path) -> bool {
 }
 
 /// 合并状态机（纯逻辑，时间由调用方传入，便于单测）。
-#[derive(Default)]
 struct Batcher {
+    /// 监听的工作区根。SVN 脏标记要靠它把路径归到模块上。
+    root: PathBuf,
     pending: BTreeSet<PathBuf>,
     rescan: bool,
     /// 外部改动的 `.java`（绝对路径，已去重）
@@ -125,6 +175,10 @@ struct Batcher {
     review: BTreeSet<PathBuf>,
     /// 可审查文件太多：下一批让前端只提示、不逐个进时间线
     review_overflow: bool,
+    /// SVN 可能要重扫的路径（比 `review` 宽：任何 SVN 会判 modified 的文件都算）。
+    svn: BTreeSet<PathBuf>,
+    /// SVN 路径太多：本轮脏集合不完整，增量刷新退回全量
+    svn_overflow: bool,
     /// 这一批里有「会出现在文件清单里」的文件被增 / 删 / 改名（编译写 `.class` 不算）
     files_changed: bool,
     /// 这一批第一个事件到达的时间；空批为 None。
@@ -132,6 +186,22 @@ struct Batcher {
 }
 
 impl Batcher {
+    fn new(root: PathBuf) -> Self {
+        Self {
+            root,
+            pending: BTreeSet::new(),
+            rescan: false,
+            java: BTreeSet::new(),
+            java_overflow: false,
+            review: BTreeSet::new(),
+            review_overflow: false,
+            svn: BTreeSet::new(),
+            svn_overflow: false,
+            files_changed: false,
+            since: None,
+        }
+    }
+
     fn add(&mut self, root: &Path, ev: &notify::Event, now: Instant) {
         self.rescan |= ev.need_rescan();
         if !self.rescan && needs_tree_refresh(&ev.kind) {
@@ -171,11 +241,23 @@ impl Batcher {
                 }
             }
         }
+        if is_svn_watchable(&ev.kind) {
+            for p in &ev.paths {
+                if p.starts_with(root) && svn_relevant(p) && !self.svn.contains(p) {
+                    if self.svn.len() < MAX_SVN {
+                        self.svn.insert(p.clone());
+                    } else {
+                        self.svn_overflow = true;
+                    }
+                }
+            }
+        }
         if self.since.is_none()
             && (self.rescan
                 || !self.pending.is_empty()
                 || !self.java.is_empty()
-                || !self.review.is_empty())
+                || !self.review.is_empty()
+                || !self.svn.is_empty())
         {
             self.since = Some(now);
         }
@@ -207,6 +289,18 @@ impl Batcher {
     }
 
     fn flush(&mut self, emit: &Arc<dyn Fn(WatchBatch) + Send + Sync>) {
+        // SVN 脏标记先落地：它跟下面那几个通道是两回事，空批（只有 .txt 内容变了）
+        // 也必须记下来，否则增量刷新会认为这个模块没变。
+        if !self.svn.is_empty() || self.svn_overflow || self.rescan {
+            let paths: Vec<PathBuf> = self.svn.iter().cloned().collect();
+            crate::svn_status_cache::mark_dirty(
+                &self.root,
+                &paths,
+                self.svn_overflow || self.rescan,
+            );
+            self.svn.clear();
+            self.svn_overflow = false;
+        }
         // 源码变了：让工作区索引在下一次查询时后台校准。索引构建要遍历整棵树
         // （慢盘上十几秒），绝不能跟着查询同步做，也不能靠定时校准空转。
         if !self.java.is_empty() || self.java_overflow {
@@ -346,13 +440,17 @@ impl WorkspaceWatcher {
         watcher
             .watch(&root, RecursiveMode::Recursive)
             .map_err(|e| format!("无法监听工作区 {}：{e}", display_path(&root)))?;
+        // 版本控制页的增量缓存从这里开始记账。登记时会把「脏集合不可信」置上：
+        // 监听开始之前（应用没跑、切工作区期间）发生了什么谁也不知道。
+        crate::svn_status_cache::watch_root(&root);
 
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);
+        let batch_root = root.clone();
         std::thread::Builder::new()
             .name("nc-fs-watch".to_string())
             .spawn(move || {
-                let mut batch = Batcher::default();
+                let mut batch = Batcher::new(batch_root);
                 loop {
                     // 让出点：没有事件时阻塞在 recv_timeout 上，每轮至多一次 flush
                     if stop_thread.load(Ordering::Relaxed) {
@@ -597,8 +695,10 @@ mod tests {
             K::Modify(ModifyKind::Data(DataChange::Content)),
             src.join("A.class")
         )));
-        // 属性变化（改时间戳）不算内容变更
-        assert!(!worth_queueing(&ev(
+        // 属性变化（改时间戳）不算内容变更，不刷新树、不进审查时间线；
+        // 但 SVN 的 modified 判据就是 mtime + size，`touch` 一下它就报 M，
+        // 所以这条必须进队列——只在 Batcher 里落到 svn 通道（见下一个测试）
+        assert!(worth_queueing(&ev(
             K::Modify(ModifyKind::Metadata(MetadataKind::WriteTime)),
             src.join("A.xml")
         )));
@@ -611,10 +711,91 @@ mod tests {
         assert!(worth_queueing(&lost));
     }
 
+    /// SVN 脏集只收「可能让 `svn status` 变结论」的路径。
+    ///
+    /// 多收的后果只是多扫一个模块（慢），**少收的后果是改动在界面上根本不存在**，
+    /// 所以这里把「构建产物」与「元数据目录」两条边界都钉住。
+    #[test]
+    fn svn_脏集只收会让状态变的东西() {
+        let src = root().join("newar").join("src");
+        assert!(svn_relevant(&src.join("A.java")));
+        assert!(svn_relevant(&src.join("readme.txt")));
+        // 构建产物与归档：svn_view 的忽略规则本来就不把它们当改动
+        assert!(!svn_relevant(
+            &root().join("newar").join("classes").join("A.class")
+        ));
+        assert!(!svn_relevant(
+            &root().join("newar").join("out").join("x.txt")
+        ));
+        assert!(!svn_relevant(&src.join("A.jar")));
+        // 元数据目录只认 entries：format 10 每个目录一份，它变了说明这个目录的
+        // 纳管情况变了（add / delete / commit / update）；其余元数据是高频写
+        assert!(svn_relevant(
+            &root().join("newar").join(".svn").join("entries")
+        ));
+        assert!(!svn_relevant(
+            &root().join("newar").join(".svn").join("tmp")
+        ));
+        assert!(!svn_relevant(
+            &root()
+                .join("newar")
+                .join(".svn")
+                .join("text-base")
+                .join("A.java.svn-base")
+        ));
+    }
+
+    /// `touch` 一个 .txt：SVN 会报 modified，但树、审查、编译三条通道都不该动。
+    #[test]
+    fn 只看时间戳的改动只进_svn_通道() {
+        let (tx, rx) = mpsc::channel::<WatchBatch>();
+        let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |x| drop(tx.send(x)));
+        let now = Instant::now();
+        let mut b = Batcher::new(root());
+        let f = root().join("newar").join("readme.txt");
+        b.add(
+            &root(),
+            &ev(
+                K::Modify(ModifyKind::Metadata(MetadataKind::WriteTime)),
+                f.clone(),
+            ),
+            now,
+        );
+        assert_eq!(b.svn.len(), 1, "SVN 通道必须记住这次 touch");
+        assert!(b.svn.contains(&f));
+        assert!(!b.due(now), "不是急件，等合并窗口");
+        b.flush(&emit);
+        assert!(b.svn.is_empty(), "发完清空");
+        assert!(
+            rx.try_recv().is_err(),
+            "没有任何需要前端处理的通道，不该发批次"
+        );
+    }
+
+    /// SVN 路径装不下时要把本轮标成「脏集合不完整」——增量刷新据此退回全量。
+    #[test]
+    fn svn_路径过多时标成不完整() {
+        let now = Instant::now();
+        let mut b = Batcher::new(root());
+        let src = root().join("newar").join("src");
+        for i in 0..(MAX_SVN + 3) {
+            b.add(
+                &root(),
+                &ev(
+                    K::Modify(ModifyKind::Data(DataChange::Content)),
+                    src.join(format!("f{i}.txt")),
+                ),
+                now,
+            );
+        }
+        assert_eq!(b.svn.len(), MAX_SVN);
+        assert!(b.svn_overflow, "装不下的路径不能静默丢掉");
+    }
+
     #[test]
     fn 持续事件最多合并一个截止期() {
         let t0 = Instant::now();
-        let mut b = Batcher::default();
+        let mut b = Batcher::new(root());
         let src = root().join("newar").join("src");
         // 每 100ms 来一个事件（比 DEBOUNCE 短，旧逻辑永远等不到超时）。
         // 用非 .java 的普通文件：.java 改动是 urgent，350ms 就会发（见下一个断言）。
@@ -662,7 +843,7 @@ mod tests {
         let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |x| drop(tx.send(x)));
         let src = root().join("newar").join("src");
         let now = Instant::now();
-        let mut b = Batcher::default();
+        let mut b = Batcher::new(root());
         for f in [
             "A.java",
             "mapper/B.xml",
@@ -708,7 +889,7 @@ mod tests {
         let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |x| drop(tx.send(x)));
         let src = root().join("newar").join("src");
         let now = Instant::now();
-        let mut b = Batcher::default();
+        let mut b = Batcher::new(root());
         for i in 0..(MAX_REVIEW + 5) {
             b.add(
                 &root(),
@@ -732,7 +913,7 @@ mod tests {
         let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |x| drop(tx.send(x)));
         let src = root().join("newar").join("src");
         let now = Instant::now();
-        let mut b = Batcher::default();
+        let mut b = Batcher::new(root());
         b.add(
             &root(),
             &ev(
@@ -753,7 +934,7 @@ mod tests {
         let now = Instant::now();
 
         // 新建 .java：文件集变了
-        let mut b = Batcher::default();
+        let mut b = Batcher::new(root());
         b.add(
             &root(),
             &ev(K::Create(CreateKind::File), src.join("A.java")),
@@ -783,7 +964,7 @@ mod tests {
     #[test]
     fn 持续溢出不会逐事件触发全量重读() {
         let t0 = Instant::now();
-        let mut b = Batcher::default();
+        let mut b = Batcher::new(root());
         let (tx, rx) = mpsc::channel::<WatchBatch>();
         let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |x| drop(tx.send(x)));
         for ms in 0..2000 {

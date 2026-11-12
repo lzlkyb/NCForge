@@ -9,7 +9,7 @@
 //!    `<工作副本上一级>/.ncforge-revert-<时间戳>/` 再动手（落点见 `backup_root`，
 //!    这些目录的盘点与清理见 `svn_backup` 与 `svn_housekeeping`）。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,6 +24,7 @@ use crate::svn_backup;
 use crate::svn_bridge::{self, Bridge};
 use crate::svn_cred;
 use crate::svn_review::{self, ReviewMark, ReviewStore};
+use crate::svn_status_cache::{self, StatusCache};
 use crate::svn_view::{self, ChangesView, RawEntry};
 use crate::workspace;
 
@@ -65,6 +66,10 @@ pub struct StatusResult {
     pub has_conflict: bool,
     /// 已审标记（只含仍然有效的：文件没被改过）。前端还要拿它和当前 revision 比。
     pub reviewed: Vec<String>,
+    /// 这一轮是不是增量：只重扫了脏模块，其余沿用上一轮结果。
+    pub incremental: bool,
+    /// 这一轮实际扫了几个模块（`Cached` 即一个模块都没脏时为 0）。
+    pub modules_scanned: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -352,56 +357,194 @@ pub async fn svn_info(
 /// 扫描改动。构建产物也一并返回（带 `ignored` 标记），由界面决定显不显示——
 /// 让后端按界面开关重扫一遍，等于点一下「显示全部」等 7.6 秒。
 ///
-/// 扫描要 7.6 秒，这段时间界面只转个 spinner 用户分不清「在跑」还是「卡死」，
-/// 所以走 `call_with_progress` 把桥每 300 条的进度用事件推给前端
-/// （桥一直在推，以前被 `call()` 当心跳丢掉）。
+/// **增量**：`force=false` 时优先复用本进程上一轮的扫描结果，只重扫
+/// `svn_status_cache` 记下来的脏模块（详见那一坨注释）。`force=true` 走全量：
+/// 提交预检、更新 / 提交 / 撤销之后的复核都必须看到盘上的真实情况，这里省下的
+/// 几秒钟换一个「漏提交的文件」不值。
+///
+/// 进度走 `call_with_progress`：桥按一级目录推，一个模块一次。以前按「每 300 条目」
+/// 推，而 `reportAll=false` 只回改动条目（实测 199 条），整场触发 0 次，界面
+/// 十几秒里没有任何动静。
 #[tauri::command]
 pub async fn svn_status(
     app: AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
+    force: Option<bool>,
 ) -> Result<StatusResult, String> {
     let cfg = state.config.read().await.clone();
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let root = root_of(&cfg)?;
-        let bridge = bridge_for(&app, &st, &cfg)?;
-        let root_s = crate::nc_home::strip_verbatim(&root).display().to_string();
-        let emitter = app.clone();
-        let v = bridge
-            .call_with_progress("status", &[&root_s], T_STATUS, move |p| {
-                if let Some(n) = p.get("scanned").and_then(|x| x.as_i64()) {
-                    // 进度只是提示：发不出去（窗口已关）不影响扫描结果
-                    let _ = emitter.emit("svn-scan-progress", serde_json::json!({ "scanned": n }));
-                }
-            })
-            .map_err(|e| split_code_label(e.code, e.message))?;
-        let scanned = v["scanned"].as_i64().unwrap_or(0);
-        let raw: Vec<RawEntry> = serde_json::from_value(v["entries"].clone())
-            .map_err(|e| format!("解析 SVN 状态失败: {e}"))?;
-        let changes = svn_view::build_changes(&root, &raw);
-        let has_conflict = changes
-            .groups
-            .iter()
-            .flat_map(|g| g.items.iter())
-            .any(|i| i.letter == "C");
-        // 每个条目的 BASE 版本号：已审标记的 revision 维度就靠它（见 `valid_marks`）
-        let mut revisions = HashMap::new();
-        for g in &changes.groups {
-            for it in &g.items {
-                revisions.insert(svn_review::key_of(Path::new(&it.path)), it.revision);
-            }
-        }
-        let store = ReviewStore::load(&st.config_dir);
-        Ok(StatusResult {
-            changes,
-            scanned,
-            generated_at_ms: now_ms(),
-            has_conflict,
-            reviewed: svn_review::valid_marks(&store, &revisions),
-        })
+        scan_status(&app, &st, &cfg, force.unwrap_or(false))
     })
     .await
     .map_err(|e| format!("扫描改动失败: {e}"))?
+}
+
+/// 一轮扫描的三种走法。
+enum ScanPlan {
+    /// 全量：没有可用缓存，或 dirty 集合不可信。
+    Full,
+    /// 只重扫这些模块，其余沿用缓存。
+    Only(BTreeSet<String>),
+    /// 一个模块都没脏：直接拿缓存当结论（0 秒）。
+    Cached,
+}
+
+/// 桥一次 status 的返回。
+struct BridgeStatus {
+    scanned: i64,
+    /// 本次实际扫过的模块名（`""` = 工作副本根那一层）。
+    modules: Vec<String>,
+    entries: Vec<RawEntry>,
+}
+
+fn scan_status(
+    app: &AppHandle,
+    st: &Arc<AppState>,
+    cfg: &AppConfig,
+    force: bool,
+) -> Result<StatusResult, String> {
+    let root = root_of(cfg)?;
+    let bridge = bridge_for(app, st, cfg)?;
+    let root_s = crate::nc_home::strip_verbatim(&root).display().to_string();
+
+    // 上一轮的结果：只有「本进程写的 + 同一个根」才敢用。跨进程复用会把应用关着
+    // 期间在 Eclipse / 命令行里做的改动藏起来。
+    let cached = if force {
+        None
+    } else {
+        svn_status_cache::load(&st.config_dir).filter(|c| c.usable(&root_s))
+    };
+    // 起点序号无论如何都要取：全量扫完之后要靠它把「脏集合不可信」清成可信，
+    // 不然第一次全量之后会永远停在「必须全量」。
+    let dirty = if force {
+        None
+    } else {
+        Some(svn_status_cache::dirty_snapshot(&root))
+    };
+    let plan = match (&cached, &dirty) {
+        (Some(_), Some(d)) => match &d.modules {
+            Some(m) if m.is_empty() => ScanPlan::Cached,
+            Some(m) => ScanPlan::Only(m.clone()),
+            None => ScanPlan::Full,
+        },
+        // 没缓存（第一次 / force / 上次运行留下的）或脏集合不可信
+        _ => ScanPlan::Full,
+    };
+
+    let now = now_ms();
+    let mut cache = cached.unwrap_or_else(|| StatusCache::empty(&root_s, now));
+    let mut scanned = 0i64;
+    let mut modules_scanned = 0usize;
+    match &plan {
+        // 一个模块都没脏：cache 里就是结论，一个字节都不用扫
+        ScanPlan::Cached => {}
+        ScanPlan::Full => {
+            let got = fetch_status(app, &bridge, &root_s, None)?;
+            scanned = got.scanned;
+            modules_scanned = got.modules.len();
+            cache.replace(&by_module(&root, &got), now);
+        }
+        ScanPlan::Only(wanted) => {
+            let got = fetch_status(app, &bridge, &root_s, Some(wanted))?;
+            scanned = got.scanned;
+            modules_scanned = got.modules.len();
+            cache.merge(wanted, &by_module(&root, &got), now);
+            // 增量只碰脏模块：整目录改名 / 删除时旧名字不会出现在任何一次请求里，
+            // 不清掉就会留一个「已经不存在的模块」挂在改动列表上
+            cache.prune_missing(&root);
+        }
+    }
+    if let Some(d) = &dirty {
+        svn_status_cache::settle(&root, d.point);
+    }
+    if !matches!(plan, ScanPlan::Cached) {
+        svn_status_cache::save(&st.config_dir, &cache);
+    }
+
+    let raw = cache.flatten();
+    let changes = svn_view::build_changes(&root, &raw);
+    let has_conflict = changes
+        .groups
+        .iter()
+        .flat_map(|g| g.items.iter())
+        .any(|i| i.letter == "C");
+    // 每个条目的 BASE 版本号：已审标记的 revision 维度就靠它（见 `valid_marks`）
+    let mut revisions = HashMap::new();
+    for g in &changes.groups {
+        for it in &g.items {
+            revisions.insert(svn_review::key_of(Path::new(&it.path)), it.revision);
+        }
+    }
+    let store = ReviewStore::load(&st.config_dir);
+    Ok(StatusResult {
+        changes,
+        scanned,
+        generated_at_ms: now,
+        has_conflict,
+        reviewed: svn_review::valid_marks(&store, &revisions),
+        incremental: !matches!(plan, ScanPlan::Full),
+        modules_scanned,
+    })
+}
+
+/// 把桥返回的条目按模块归位。
+///
+/// 归位用的是 `svn_status_cache::module_of`——和 watcher 标脏用的是同一个函数。
+/// 两边对不上会出现「标脏了 A、结果写进 B」，下一次又把 A 当脏的重扫一遍，
+/// 而 B 的旧条目永远不更新。
+fn by_module(root: &Path, got: &BridgeStatus) -> BTreeMap<String, Vec<RawEntry>> {
+    let mut out: BTreeMap<String, Vec<RawEntry>> = BTreeMap::new();
+    // 先按桥报的模块建空桶：这一轮扫过但没有任何改动的模块也要有一条空记录，
+    // 增量合并时才会把它的旧条目覆盖掉（否则已撤销的改动会一直挂在列表上）
+    for name in &got.modules {
+        out.insert(name.clone(), Vec::new());
+    }
+    for e in &got.entries {
+        let key = svn_status_cache::module_of(root, Path::new(&e.path)).unwrap_or_default();
+        out.entry(key).or_default().push(e.clone());
+    }
+    out
+}
+
+/// 调桥扫一次。`only` 为 None = 全量。
+fn fetch_status(
+    app: &AppHandle,
+    bridge: &Bridge,
+    root_s: &str,
+    only: Option<&BTreeSet<String>>,
+) -> Result<BridgeStatus, String> {
+    let emitter = app.clone();
+    let mut args: Vec<&str> = vec![root_s];
+    let joined = only.map(|set| set.iter().cloned().collect::<Vec<_>>().join("\t"));
+    if let Some(j) = &joined {
+        args.push(j);
+    }
+    let v = bridge
+        .call_with_progress("status", &args, T_STATUS, move |p| {
+            let Some(n) = p.get("scanned").and_then(|x| x.as_i64()) else {
+                return;
+            };
+            // 进度只是提示：发不出去（窗口已关）不影响扫描结果
+            let _ = emitter.emit(
+                "svn-scan-progress",
+                serde_json::json!({
+                    "scanned": n,
+                    "done": p.get("done").and_then(|x| x.as_u64()),
+                    "total": p.get("total").and_then(|x| x.as_u64()),
+                    "module": p.get("module").and_then(|x| x.as_str()),
+                }),
+            );
+        })
+        .map_err(|e| split_code_label(e.code, e.message))?;
+    let entries: Vec<RawEntry> = serde_json::from_value(v["entries"].clone())
+        .map_err(|e| format!("解析 SVN 状态失败: {e}"))?;
+    let modules: Vec<String> = serde_json::from_value(v["modules"].clone()).unwrap_or_default();
+    Ok(BridgeStatus {
+        scanned: v["scanned"].as_i64().unwrap_or(0),
+        modules,
+        entries,
+    })
 }
 
 /// 命令层错误统一编码成 `code|message`：前端按第一个 `|` 切开，`code` 决定引导方式

@@ -109,6 +109,7 @@ pub mod svn_bridge;
 pub mod svn_cred;
 pub mod svn_history;
 pub mod svn_review;
+pub mod svn_status_cache;
 pub mod svn_view;
 pub mod watcher;
 pub mod workspace;

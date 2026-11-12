@@ -47,7 +47,7 @@ import org.tmatesoft.svn.core.internal.io.svn.SVNRepositoryFactoryImpl;
  * <pre>
  *   1	hello
  *   2	auth	lzl	密码
- *   3	status	C:\work\aier\newar
+ *   3	status	C:\work\aier\newar	[要扫的模块名，TAB 分隔；空 = 全部]
  *   4	diff	C:\work\aier\newar\pu\src\A.java
  *   5	log	C:\work\aier\newar\pu	30	-1
  *   6	blame	C:\work\aier\newar\pu\src\A.java
@@ -60,6 +60,7 @@ import org.tmatesoft.svn.core.internal.io.svn.SVNRepositoryFactoryImpl;
  * </pre>
  * 响应：{"id":3,"ok":true,"data":{...}} / {"id":3,"ok":false,"error":"...","code":"auth"}，
  * 长任务在最终响应前会有若干 {"id":3,"progress":{"scanned":1200}}。
+ * status 的进度额外带 done / total / module（按一级目录推进，见 status 的注释）。
  */
 public class NcSvnBridge {
 
@@ -132,7 +133,7 @@ public class NcSvnBridge {
 			return info(new File(f[2]));
 		}
 		if ("status".equals(cmd)) {
-			return status(f[0], new File(f[2]));
+			return status(f[0], new File(f[2]), f.length > 3 ? f[3] : "");
 		}
 		if ("diff".equals(cmd)) {
 			return baseContent(new File(f[2]));
@@ -194,32 +195,122 @@ public class NcSvnBridge {
 		return out1.get(0);
 	}
 
-	private static String status(final String id, File root) throws SVNException {
+	/**
+	 * 扫描改动。
+	 *
+	 * <p><b>为什么按一级目录切分</b>：全根一次 {@code doStatus(INFINITY)} 在 22431 个文件的
+	 * 工作副本上要 10.7 秒（冷缓存 54 秒），而 {@code reportAll=false} 只回改动条目
+	 * （实测 199 条）——「每 300 条推一次进度」整场最多触发 0 次，界面十几秒里没有任何
+	 * 进度，看着就是卡死。切分之后每个一级目录是一个进度单位（NC 工作区 64 个模块 =
+	 * 64 次进度），而且能只扫指定模块：增量刷新时只碰变脏的那几个。
+	 *
+	 * <p>代价是串行按模块扫比全根单次扫慢约 2 秒（实测 12.6s vs 10.7s）。拿 2 秒换
+	 * 「有进度」+「第二次之后只扫脏模块」，划算。真要抹平这 2 秒就得上多线程，
+	 * 那是另一件事（实测 8 线程 6.7 秒），别混在这里。
+	 *
+	 * <p>unit("") 是根层：只扫 {@code IMMEDIATES}，拿到工作副本根下的文件
+	 * （{@code .module_prj} 这类）与各模块目录自身。子目录再各自 {@code INFINITY}，
+	 * 两者报同一个目录条目时按路径去重。
+	 *
+	 * @param only 增量时要扫的模块名（TAB 分隔，空串 = 全部）。请求了但目录已不在的
+	 *             模块不会出现在返回的 modules 里——调用方据此把它的缓存条目剔除
+	 */
+	private static String status(final String id, File root, String only) throws SVNException {
 		final List<String> items = new ArrayList<String>();
+		// 去重：根层（IMMEDIATES）与模块层（INFINITY）都会报模块目录自己
+		final java.util.Map<String, String> seen = new java.util.HashMap<String, String>();
 		final int[] n = new int[1];
-		// reportAll=false：只回改动与未纳管。全量 12757 条目报全部要 61 秒，只报改动 7.6 秒——
-		// 界面要的就是「改动」，normal 条目一条都用不上。
-		manager().getStatusClient().doStatus(root, SVNRevision.WORKING, SVNDepth.INFINITY, false, false, false, false,
-				new ISVNStatusHandler() {
-					public void handleStatus(SVNStatus s) {
-						n[0]++;
-						if (n[0] % 300 == 0) {
-							progress(id, n[0]);
-						}
-						SVNStatusType st = s.getContentsStatus();
-						String name = st == null ? "none" : st.toString();
-						if (st == SVNStatusType.STATUS_CONFLICTED || s.getPropertiesStatus() == SVNStatusType.STATUS_CONFLICTED || s.getTreeConflict() != null) name = "conflicted";
-						if ("normal".equals(name) || "none".equals(name)) {
-							return;
-						}
-						items.add("{\"path\":" + jstr(s.getFile().getPath())
-								+ ",\"status\":" + jstr(name)
-								+ ",\"revision\":" + (s.getRevision() == null || s.getRevision().getNumber() < 0 ? -1
-										: s.getRevision().getNumber())
-								+ ",\"dir\":" + (s.getKind() == SVNNodeKind.DIR || s.getFile().isDirectory() ? "true" : "false") + "}");
-					}
-				}, null);
-		return "{\"scanned\":" + n[0] + ",\"entries\":[" + join(items) + "]}";
+		final ISVNStatusHandler handler = new ISVNStatusHandler() {
+			public void handleStatus(SVNStatus s) {
+				String path = s.getFile().getPath();
+				if (seen.put(path, path) != null) {
+					return;
+				}
+				n[0]++;
+				SVNStatusType st = s.getContentsStatus();
+				String name = st == null ? "none" : st.toString();
+				if (st == SVNStatusType.STATUS_CONFLICTED || s.getPropertiesStatus() == SVNStatusType.STATUS_CONFLICTED || s.getTreeConflict() != null) name = "conflicted";
+				if ("normal".equals(name) || "none".equals(name)) {
+					return;
+				}
+				items.add("{\"path\":" + jstr(path)
+						+ ",\"status\":" + jstr(name)
+						+ ",\"revision\":" + (s.getRevision() == null || s.getRevision().getNumber() < 0 ? -1
+								: s.getRevision().getNumber())
+						+ ",\"dir\":" + (s.getKind() == SVNNodeKind.DIR || s.getFile().isDirectory() ? "true" : "false") + "}");
+			}
+		};
+
+		// 单元列表：第 0 个是根层（null 表示「不递归」）
+		List<String> names = new ArrayList<String>();
+		List<File> units = new ArrayList<File>();
+		names.add("");
+		units.add(null);
+		File[] children = root.listFiles();
+		if (children != null) {
+			java.util.Arrays.sort(children, new java.util.Comparator<File>() {
+				public int compare(File a, File b) {
+					return a.getName().compareToIgnoreCase(b.getName());
+				}
+			});
+			for (File c : children) {
+				String name = c.getName();
+				if (!c.isDirectory() || isMetaDir(name)) {
+					continue;
+				}
+				names.add(name);
+				units.add(c);
+			}
+		}
+		// 一级目录太多（把某个数据目录当工作区用）：退回单次全根扫，别在这里循环几千次
+		if (names.size() > MAX_STATUS_UNITS) {
+			manager().getStatusClient().doStatus(root, SVNRevision.WORKING, SVNDepth.INFINITY, false, false, false, false, handler, null);
+			return result(n[0], 1, 1, names, items);
+		}
+
+		java.util.Set<String> want = null;
+		if (!only.isEmpty()) {
+			want = new java.util.HashSet<String>(java.util.Arrays.asList(only.split("\t", -1)));
+		}
+		int total = 0;
+		for (String nm : names) {
+			if (want == null || want.contains(nm)) {
+				total++;
+			}
+		}
+		int done = 0;
+		List<String> processed = new ArrayList<String>();
+		for (int i = 0; i < names.size(); i++) {
+			String nm = names.get(i);
+			if (want != null && !want.contains(nm)) {
+				continue;
+			}
+			File unit = units.get(i);
+			if (unit == null) {
+				manager().getStatusClient().doStatus(root, SVNRevision.WORKING, SVNDepth.IMMEDIATES, false, false, false, false, handler, null);
+			} else if (unit.isDirectory()) {
+				manager().getStatusClient().doStatus(unit, SVNRevision.WORKING, SVNDepth.INFINITY, false, false, false, false, handler, null);
+			} else {
+				// 请求了但已经不是一个目录（增量期间模块被删 / 改名）
+				continue;
+			}
+			done++;
+			processed.add(nm);
+			progress(id, n[0], done, total, nm);
+		}
+		return result(n[0], done, total, processed, items);
+	}
+
+	/** 一级目录超过这个数就不切分（正常 NC 工作区是 8–15 个模块，极端情况除外）。 */
+	private static final int MAX_STATUS_UNITS = 512;
+
+	private static boolean isMetaDir(String name) {
+		return ".svn".equalsIgnoreCase(name) || ".git".equalsIgnoreCase(name) || ".idea".equalsIgnoreCase(name);
+	}
+
+	private static String result(int scanned, int done, int total, List<String> modules, List<String> items) {
+		return "{\"scanned\":" + scanned + ",\"done\":" + done + ",\"total\":" + total
+				+ ",\"modules\":[" + join(quoteAll(modules)) + "],\"entries\":[" + join(items) + "]}";
 	}
 
 	private static String baseContent(File path) throws Exception {
@@ -598,8 +689,10 @@ public class NcSvnBridge {
 		w.flush();
 	}
 
-	private static void progress(String id, int scanned) {
-		out.print("{\"id\":" + jstr(id) + ",\"progress\":{\"scanned\":" + scanned + "}}\n");
+	/** status 的进度：一个一级目录扫完推一次（`done`/`total` 是模块数，`scanned` 是条目数）。 */
+	private static void progress(String id, int scanned, int done, int total, String module) {
+		out.print("{\"id\":" + jstr(id) + ",\"progress\":{\"scanned\":" + scanned + ",\"done\":" + done
+				+ ",\"total\":" + total + ",\"module\":" + jstr(module) + "}}\n");
 		out.flush();
 	}
 
