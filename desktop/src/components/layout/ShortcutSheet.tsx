@@ -22,9 +22,15 @@ const FIXED: SheetRow[] = [
   { id: "fixed.save", label: "保存当前文件", group: "固定键", keys: ["ctrl+s"], display: ["Ctrl+S"], overridden: false },
   { id: "fixed.callHierarchy", label: "调用层级", group: "固定键", keys: ["ctrl+alt+h"], display: ["Ctrl+Alt+H"], overridden: false },
   { id: "fixed.thisSheet", label: "打开 / 关闭快捷键一览", group: "固定键", keys: ["?"], display: ["?"], overridden: false },
-  { id: "fixed.sqlRunCurrent", label: "SQL：执行当前语句", group: "SQL 控制台", keys: ["ctrl+enter"], display: ["Ctrl+Enter"], overridden: false },
+  { id: "fixed.sqlRunCurrent", label: "SQL：执行选中的 SQL（没选中就是光标处语句）", group: "SQL 控制台", keys: ["ctrl+enter"], display: ["Ctrl+Enter"], overridden: false },
   { id: "fixed.sqlRunScript", label: "SQL：执行整个脚本", group: "SQL 控制台", keys: ["alt+x"], display: ["Alt+X"], overridden: false },
   { id: "fixed.sqlFormat", label: "SQL：格式化", group: "SQL 控制台", keys: ["ctrl+shift+f"], display: ["Ctrl+Shift+F"], overridden: false },
+  // 下面几条是编辑器/结果网格里绑的，同样不可改键；写进来是因为「有这功能但没人知道」最常见。
+  { id: "fixed.sqlRunSelection", label: "SQL：只执行光标处语句（忽略选中）", group: "SQL 控制台", keys: ["ctrl+shift+enter"], display: ["Ctrl+Shift+Enter"], overridden: false },
+  { id: "fixed.sqlOpenDdl", label: "SQL：Ctrl+点击表名打开 DDL", group: "SQL 控制台", keys: ["ctrl+click"], display: ["Ctrl+点击"], overridden: false },
+  { id: "fixed.sqlResultFilter", label: "SQL：在结果里筛选", group: "SQL 控制台", keys: ["ctrl+f"], display: ["Ctrl+F"], overridden: false },
+  { id: "fixed.sqlCellDetail", label: "SQL：单元格详情", group: "SQL 控制台", keys: ["f4"], display: ["F4"], overridden: false },
+  { id: "fixed.sqlCellEditor", label: "SQL：单元格大文本编辑框", group: "SQL 控制台", keys: ["shift+enter"], display: ["Shift+Enter"], overridden: false },
 ];
 
 /** 页面切换组：由 PAGES 派生（含 hotkey），? 搜「代码」「Ctrl+3」都能命中（P1-16）。 */

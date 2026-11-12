@@ -74,7 +74,10 @@
 .dbx-page { display: flex; flex-direction: column; height: 100%; min-height: 0; background: hsl(var(--card)); }
 .dbx-console { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .dbx-console-body { display: flex; flex: 1; min-height: 0; }
-.dbx-console-main { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.dbx-console-main { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: auto; position: relative; }
+/* 空 SQL 页的一行提示：绝对定位浮在右上角，不占编辑器高度、不挡输入。 */
+.dbx-sql-empty-hint { position: absolute; top: 10px; right: 16px; z-index: 1; pointer-events: none; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); opacity: 0.75; }
+.dbx-sql-empty-hint kbd { padding: 0 4px; border: 1px solid hsl(var(--border)); border-radius: 3px; font-family: var(--font-mono); font-size: 10px; }
 .dbx-editor { flex: 1; min-height: 140px; min-width: 0; position: relative; }
 .dbx-editor .wb-editor-host { position: absolute; inset: 0; }
 /* Monaco shares its theme across editors. Scope the SQL selection colors to this host. */
@@ -96,6 +99,15 @@
 /* ── SQL 工具条 ── */
 .dbx-sqlbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-height: var(--dbx-h-bar); padding: 5px 12px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); flex-shrink: 0; min-width: 0; font-size: var(--dbx-fs-body); }
 .dbx-scope { color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); white-space: nowrap; }
+/* 语句大纲：多语句脚本的横向导航条。只在 ≥3 条时渲染，单条查询不占位。 */
+.dbx-outline { display: flex; align-items: center; gap: 2px; height: 26px; padding: 0 8px; flex: none; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--card)); }
+.dbx-outline-icon { flex: none; color: hsl(var(--muted-foreground)); margin-right: 4px; }
+.dbx-outline-item { display: inline-flex; align-items: center; gap: 4px; flex: none; height: 20px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--r-control); background: transparent; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); white-space: nowrap; cursor: pointer; }
+.dbx-outline-item:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+.dbx-outline-no { color: hsl(var(--muted-foreground)); font-family: var(--font-mono); font-size: 10px; }
+.dbx-outline-more { flex: none; padding: 0 6px; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); }
+/* 表页恢复了上次条件时的提示：必须显眼，否则用户会把「筛过的几十行」当成整张表。 */
+.dbx-restored { display: flex; align-items: center; gap: 8px; padding: 2px 8px; flex: none; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); }
 .dbx-connpick { white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; height: var(--dbx-h-control); min-width: 0; padding: 0 8px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); background: hsl(var(--card)); font-size: var(--dbx-fs-body); max-width: min(240px, 100%); }
 .dbx-connpick b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .dbx-connpick .u { color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); overflow: hidden; text-overflow: ellipsis; }

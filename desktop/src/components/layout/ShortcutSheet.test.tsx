@@ -55,7 +55,8 @@ describe("快捷键一览", () => {
     expect(text).toContain("Eclipse");
     // 执行按钮上不再印 Ctrl+Enter 之后，这里成了用户唯一能查到它的地方，别被顺手删掉
     expect(text).toContain("SQL 控制台");
-    expect(text).toContain("执行当前语句");
+    // Ctrl+Enter 是「有选中执行选中」，写「执行当前语句」会让人以为选中会被忽略
+    expect(text).toContain("执行选中的 SQL");
     expect(text).toContain("Ctrl+Enter");
   });
 

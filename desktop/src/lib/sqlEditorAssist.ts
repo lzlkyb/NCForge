@@ -11,6 +11,7 @@ import { sqlAssistObjectKey, sqlAssistScope, verifiedSqlSource } from "./sqlAssi
 import { isPlsql, splitStatements } from "./sqlSplit";
 import { forgetSqlUsage, recordSqlUsage, rollbackSqlUsage, setSqlUsagePinned, sqlUsageKey, usageSnapshot, type SqlUsageReceipt } from "./sqlUsage";
 import { toast } from "../components/ui/toast";
+import { listCommands } from "./commandRegistry";
 
 type Editor = monaco.editor.IStandaloneCodeEditor;
 interface AcceptArgs { scope: string; key: string }
@@ -195,6 +196,9 @@ export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
     ["ncforge.sql.insertTemplate", "生成 INSERT 模板", () => fields(true)],
     ["ncforge.sql.pinTable", "固定 / 取消固定当前表", () => memory(false)],
     ["ncforge.sql.forgetTable", "忘记当前表的使用偏好", () => memory(true)],
+    // 编辑器里按 `?` 会被 Monaco 吃掉（它是文本输入），所以在右键菜单里给一个入口，
+    // 与外壳的 `?` 打开的是同一张表。
+    ["ncforge.sql.shortcuts", "快捷键速查", () => listCommands().find((c) => c.id === "help.shortcuts")?.run()],
   ] as const) disposables.push(editor.addAction({ id, label, contextMenuGroupId: "navigation", contextMenuOrder: 4, run }));
   return { dispose() {
     if (disposed) return;

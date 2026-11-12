@@ -10,6 +10,7 @@ import { callContext, hasOverloads, parameterLabel, pickOverload, signatureLabel
 import { procArguments } from "./sqlProcArgs";
 import { scopedTableLinks } from "./sqlScopeLinks";
 import { openTable } from "./dbActions";
+import { registerSqlHoverProviders } from "./sqlHoverProvider";
 
 /**
  * SQL 编辑器的补全：表名（带 NC 中文名）、别名后的字段（带类型与中文名）、关键字。
@@ -113,5 +114,7 @@ export function registerSqlProviders(): void {
     },
   });
   }
+  // 悬停卡片与补全/链接同一套词法分析：表名与字段用的是同一个 scope 结果，不会互相矛盾。
+  registerSqlHoverProviders();
   monaco.editor.registerLinkOpener({ open: openTableUri });
 }

@@ -1,9 +1,9 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type * as Monaco from "monaco-editor";
-const h = vi.hoisted(() => ({ completions: new Map<string, Monaco.languages.CompletionItemProvider>(), signatures: vi.fn(), links: vi.fn(), columns: vi.fn(), runtime: { status: "connected", currentSchema: "APP", tables: [{ name: "BD_MATERIAL", kind: "TABLE" }, { name: "BD_PROJECT", kind: "TABLE" }], ncNames: { bd_material: "物料", bd_project: "项目" }, tablesAt: 1 }, business: vi.fn(), joins: vi.fn() }));
+const h = vi.hoisted(() => ({ completions: new Map<string, Monaco.languages.CompletionItemProvider>(), signatures: vi.fn(), links: vi.fn(), hovers: vi.fn(), columns: vi.fn(), runtime: { status: "connected", currentSchema: "APP", tables: [{ name: "BD_MATERIAL", kind: "TABLE" }, { name: "BD_PROJECT", kind: "TABLE" }], ncNames: { bd_material: "物料", bd_project: "项目" }, tablesAt: 1 }, business: vi.fn(), joins: vi.fn() }));
 vi.mock("./monacoSetup", () => ({ monaco: {
   Range: class { constructor(readonly startLineNumber: number, readonly startColumn: number, readonly endLineNumber: number, readonly endColumn: number) {} static fromPositions(a: Monaco.Position, b: Monaco.Position) { return { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column }; } },
-  languages: { CompletionTriggerKind: { Invoke: 0 }, CompletionItemInsertTextRule: { InsertAsSnippet: 4 }, CompletionItemKind: { Field: 1, Property: 2, Keyword: 3, Struct: 4, Interface: 5, Snippet: 6, Function: 7, Variable: 8 }, registerCompletionItemProvider: (id: string, provider: Monaco.languages.CompletionItemProvider) => h.completions.set(id, provider), registerSignatureHelpProvider: h.signatures, registerLinkProvider: h.links },
+  languages: { CompletionTriggerKind: { Invoke: 0 }, CompletionItemInsertTextRule: { InsertAsSnippet: 4 }, CompletionItemKind: { Field: 1, Property: 2, Keyword: 3, Struct: 4, Interface: 5, Snippet: 6, Function: 7, Variable: 8 }, registerCompletionItemProvider: (id: string, provider: Monaco.languages.CompletionItemProvider) => h.completions.set(id, provider), registerSignatureHelpProvider: h.signatures, registerLinkProvider: h.links, registerHoverProvider: h.hovers },
   editor: { registerLinkOpener: vi.fn() },
 } }));
 vi.mock("./sqlModels", () => ({ tabIdOfModel: () => "t" }));
@@ -23,7 +23,7 @@ async function complete(text: string, cursor: number = text.length, cancelled = 
   return await h.completions.get("ncforge-sql-plsql")!.provideCompletionItems(model, position as Monaco.Position, {} as Monaco.languages.CompletionContext, { isCancellationRequested: cancelled } as Monaco.CancellationToken) as Monaco.languages.CompletionList;
 }
 it("所有方言保留补全、签名和DDL链接", () => {
-  expect([...h.completions.keys()]).toHaveLength(8); expect(h.signatures).toHaveBeenCalledTimes(8); expect(h.links).toHaveBeenCalledTimes(8);
+  expect([...h.completions.keys()]).toHaveLength(8); expect(h.signatures).toHaveBeenCalledTimes(8); expect(h.links).toHaveBeenCalledTimes(8); expect(h.hovers).toHaveBeenCalledTimes(8);
 });
 it("中文命中后插入真实标识符，范围覆盖完整输入词", async () => {
   const result = await complete("select * from 物料");

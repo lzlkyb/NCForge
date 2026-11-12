@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "../ui/toast";
 import { SqlToolbar } from "./SqlToolbar";
-import { SqlEditor, type SqlEditorApi, type SqlExecutionScope, type SqlRunMode } from "./SqlEditor";
+import { SqlEditor, type SqlEditorApi, type SqlExecutionScope, type SqlRunMode, type RunStmt } from "./SqlEditor";
 import { ResultPanel } from "./ResultPanel";
 import { HistoryDrawer } from "./HistoryDrawer";
 import { SnippetDrawer } from "./SnippetDrawer";
@@ -10,7 +10,10 @@ import { SessionDrawer } from "./SessionDrawer";
 import { InsertExportDialog } from "./InsertExportDialog";
 import { ValueSearchDialog } from "./ValueSearchDialog";
 import { ScriptReplayDialog } from "./ScriptReplayDialog";
+import { SqlDangerDialog, type DangerItem } from "./SqlDangerDialog";
+import { SqlOutlineBar } from "./SqlOutlineBar";
 import { explain, runStatements } from "../../lib/dbActions";
+import { dangerousStatements } from "../../lib/sqlDanger";
 import { cancelOperation, getOperations } from "../../lib/operations";
 import { dbApi } from "../../lib/dbApi";
 import { friendlyDbError } from "../../lib/db";
@@ -41,16 +44,18 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   const [vsOpen, setVsOpen] = useState(false);
   /** 回放 .sql 文件（按名字取文件，不进编辑器）。 */
   const [srOpen, setSrOpen] = useState(false);
+  /** 待确认的危险语句；非空即弹框。 */
+  const [danger, setDanger] = useState<{ items: DangerItem[]; total: number } | null>(null);
+  /** 用户确认后要跑的那一次（语句已从编辑器取出，不能等确认时再取一遍）。 */
+  const pendingDanger = useRef<{ tabId: string; mode: SqlRunMode; stmts: RunStmt[]; collectStats: boolean } | null>(null);
   const tabId = tab.id;
+  // 切标签就丢掉待确认的弹框：这些语句属于上一个标签的连接，点头确认后
+  // 跑到新连接上就是「拿 A 库的 DELETE 删 B 库」。
+  useEffect(() => { setDanger(null); pendingDanger.current = null; }, [tabId]);
   useEffect(()=>{const insert=(e:Event)=>{const v=(e as CustomEvent<{tabId:string;text:string}>).detail;if(v.tabId===tab.id) api.current?.insert(v.text);};window.addEventListener("ncforge-db-insert-name",insert);return()=>window.removeEventListener("ncforge-db-insert-name",insert);},[tab.id]);
 
-  const run = useCallback(
-    async (mode: SqlRunMode, collectStats = false) => {
-      const stmts = api.current?.target(mode) ?? [];
-      if (stmts.length === 0) {
-        toast(mode === "current" ? "光标处没有语句" : "执行范围内没有可执行的语句", "info");
-        return;
-      }
+  const execute = useCallback(
+    async (mode: SqlRunMode, stmts: RunStmt[], collectStats: boolean) => {
       const executionScope = { tabId, selected: mode === "auto" && scopeRef.current?.tabId === tabId && scopeRef.current.selected, statements: stmts };
       executingScopes.current.set(tabId, executionScope);
       try {
@@ -62,6 +67,42 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
     },
     [tabId],
   );
+
+  /**
+   * 执行入口。危险语句在这里先拦一次：没有 WHERE 的 UPDATE / DELETE 弹框确认，
+   * DROP / TRUNCATE 只给一条 warning——删表的人通常是有意的，每次都拦会变成点确认训练。
+   */
+  const run = useCallback(
+    async (mode: SqlRunMode, collectStats = false) => {
+      const stmts = api.current?.target(mode) ?? [];
+      if (stmts.length === 0) {
+        toast(mode === "current" ? "光标处没有语句" : "执行范围内没有可执行的语句", "info");
+        return;
+      }
+      const found = dangerousStatements(stmts.map((s) => s.text));
+      for (const item of found) if (item.finding.advisory) toast(`这条语句不可撤销：${item.finding.verb} ${item.finding.table}`, "warning");
+      const blocked = found.filter((item) => !item.finding.advisory);
+      if (blocked.length > 0 && tab.connId) {
+        // 语句在这一刻已经取出来了：等用户在框里按「仍要执行」时编辑器可能已经改过，
+        // 那就不是他确认过的那一条了。
+        pendingDanger.current = { tabId, mode, stmts, collectStats };
+        setDanger({ items: blocked, total: stmts.length });
+        return;
+      }
+      await execute(mode, stmts, collectStats);
+    },
+    [execute, tab.connId, tabId],
+  );
+
+  const confirmDanger = () => {
+    const p = pendingDanger.current;
+    pendingDanger.current = null;
+    setDanger(null);
+    // 双保险：切标签的 effect 已经清过，这里再核一次标签身份
+    if (p && p.tabId !== tabId) { toast("标签已切换，这次执行已取消", "info"); return; }
+    if (p) void execute(p.mode, p.stmts, p.collectStats);
+  };
+  const cancelDanger = () => { pendingDanger.current = null; setDanger(null); };
 
   const onExplain = () => {
     const s = api.current?.target("current")[0];
@@ -123,6 +164,11 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         sessionsOpen={sessOpen}
         onSessions={() => (sessOpen ? closeSessionPanel() : openSessionPanel(tab.connId))}
       />
+      {/* 多语句脚本的导航：点了跳到该语句首行。条数少时组件自己返回 null。 */}
+      {scope && scope.tabId === tab.id && <SqlOutlineBar statements={scope.statements} onPick={(line) => api.current?.reveal(line)} />}
+      {danger && tab.connId && (
+        <SqlDangerDialog items={danger.items} total={danger.total} connId={tab.connId} slot={tab.slot ?? null} onCancel={cancelDanger} onConfirm={confirmDanger} />
+      )}
       {exp && tab.connId && (
         <InsertExportDialog tabId={tab.id}
           connId={tab.connId}
@@ -139,6 +185,12 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
       )}
       <div className="dbx-console-body">
         <div ref={split.bodyRef} className="dbx-console-main" data-focus={split.focus}>
+          {/* 空页才出现的一行提示：新标签打开后最常问的三件事。不挡输入（pointer-events:none）。 */}
+          {tab.sql.trim() === "" && tab.results.length === 0 && split.focus !== "results" && (
+            <div className="dbx-sql-empty-hint" aria-hidden>
+              写 SQL 后 Ctrl+Enter 执行 · 直接打表名就有提示 · 按 <kbd>?</kbd> 看全部快捷键
+            </div>
+          )}
           <SqlEditor tabId={tab.id} initial={tab.sql} onRun={(m) => void run(m)} apiRef={api} onScope={setScope} visible={active && split.focus !== "results"} />
           <div
             className="dbx-splitbar"

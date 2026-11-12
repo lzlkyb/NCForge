@@ -24,6 +24,11 @@ vi.mock("./SessionDrawer", () => ({ SessionDrawer: () => null }));
 vi.mock("./InsertExportDialog", () => ({ InsertExportDialog: () => null }));
 vi.mock("./ValueSearchDialog", () => ({ ValueSearchDialog: () => null }));
 vi.mock("./ScriptReplayDialog", () => ({ ScriptReplayDialog: () => null }));
+// 弹框本身单独测（SqlDangerDialog.test.tsx）；这里只验「拦住了没有」。
+vi.mock("./SqlDangerDialog", () => ({ SqlDangerDialog: ({ items, onCancel, onConfirm }: { items: { finding: { table: string } }[]; onCancel: () => void; onConfirm: () => void }) =>
+  <div data-danger={items.length} data-table={items[0].finding.table}>
+    <button onClick={onCancel}>取消，不执行</button><button onClick={onConfirm}>仍要执行</button>
+  </div> }));
 vi.mock("./SqlToolbar", () => ({ SqlToolbar: ({ scope, onRun, onStop, focusMode, onFocusChange }: {
   scope: SqlExecutionScope | null; onRun: (mode: SqlRunMode, collectStats?: boolean) => void; onStop: () => void; focusMode: SqlConsoleFocus; onFocusChange: (mode: SqlConsoleFocus) => void;
 }) => <div data-scope={JSON.stringify(scope)} data-focus-mode={focusMode}>
@@ -132,4 +137,45 @@ it("停止仍使用当前标签的独立会话槽", async () => {
   render({ ...base, run: { id: 1, connId: "c1", at: 0, slot: null, kind: "execute" } });
   await act(async () => click("停止"));
   expect(mocks.cancel).toHaveBeenCalledExactlyOnceWith("c1", "1");
+});
+
+it("没有 WHERE 的 DELETE 先弹确认，取消就一条都不执行", async () => {
+  const stmt = { text: "delete from bd_material", startLine: 1, endLine: 1 };
+  mocks.targets.a.current = [stmt];
+  render(); await act(async () => click("执行当前"));
+  expect(mocks.run).not.toHaveBeenCalled();
+  const box = host.querySelector("[data-danger]")!;
+  expect(box.getAttribute("data-danger")).toBe("1");
+  expect(box.getAttribute("data-table")).toBe("bd_material");
+  await act(async () => click("取消，不执行"));
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(host.querySelector("[data-danger]")).toBeNull();
+});
+
+it("确认后执行的是弹框里那一段语句，不是编辑器当前内容", async () => {
+  const stmt = { text: "delete from bd_material", startLine: 1, endLine: 1 };
+  mocks.targets.a.current = [stmt];
+  render(); await act(async () => click("执行当前"));
+  // 弹框还开着的时候编辑器被改了：执行范围必须仍是确认过的那一条
+  mocks.targets.a.current = [{ text: "delete from somewhere_else", startLine: 1, endLine: 1 }];
+  await act(async () => click("仍要执行"));
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", [stmt], { collectStats: false });
+});
+
+it("有 WHERE 的写语句和纯查询不拦", async () => {
+  mocks.targets.a.current = [{ text: "update t set a = 1 where id = 2", startLine: 1, endLine: 1 }];
+  render(); await act(async () => click("执行当前"));
+  expect(mocks.run).toHaveBeenCalledOnce();
+  expect(host.querySelector("[data-danger]")).toBeNull();
+});
+
+it("弹框开着的时候切标签：弹框消失，绝不会把 A 的语句跑在 B 的连接上", async () => {
+  mocks.targets.a.current = [{ text: "delete from bd_material", startLine: 1, endLine: 1 }];
+  render(); await act(async () => click("执行当前"));
+  expect(host.querySelector("[data-danger]")).not.toBeNull();
+  // 同一个 SqlConsole 实例换成另一个标签（DbTab 里没有 key，组件会被复用）
+  const other: SqlTab = { ...base, id: "b", connId: "c2", slot: "2" };
+  render(other);
+  expect(host.querySelector("[data-danger]")).toBeNull();
+  expect(mocks.run).not.toHaveBeenCalled();
 });
