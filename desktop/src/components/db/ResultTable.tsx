@@ -7,15 +7,15 @@ import { toast } from "../ui/toast";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
 import { ResultGrid, type GridEdit, type ResultGridApi } from "./ResultGrid";
 import { CellDetail } from "./CellDetail";
-import { thousands } from "../../lib/db";
 import { binaryColumn, decodeCell } from "../../lib/cellCodec";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { lobLoaderFor } from "../../lib/lobLoader";
 import { ResultTransfer } from "./ResultTransfer";
 import { freezeTransferFrame, type TransferFrame, type TransferSource } from "../../lib/resultTransferContext";
 import { quickCopyTransfer } from "../../lib/resultTransferQuick";
-import { fitWidth, nextSort, type SortState } from "../../lib/resultView";
+import { fitWidth, nextSort, cellBrief, type SortState, type ValueFilter } from "../../lib/resultView";
 import { headMenuItems } from "../../lib/resultHeadMenu";
+import { ResultViewState } from "./ResultViewState";
 
 /**
  * 结果表 + 工具条（筛选 / 复制为… / 导出 / 详情）+ 底栏。SQL 控制台与表页共用。
@@ -90,6 +90,10 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   const filterInput = useRef<HTMLInputElement>(null);
 
   const [sort, setSort] = useState<SortState | null>(null);
+  /** 「以此值筛选」：只在一列里做整值相等，和关键字筛选可以叠加。 */
+  const [valueFilter, setValueFilter] = useState<ValueFilter | null>(null);
+  /** 关键字筛选 / 排序 / 值筛选一起清掉：状态条与「计算失败」两处都要，别写成两份。 */
+  const clearView = () => { setFilter(""); setSort(null); setValueFilter(null); };
   const [selection,setSelection] = useState<Selection|null>(null);
   const sel=selection?.end ?? null;
   const [layout,setLayout] = useState(()=>loadLayout(layoutKey));
@@ -110,7 +114,7 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   const setDetail=(detail:boolean)=>setUi(v=>({...v,detail}));
   const setMenu=(menu:typeof ui.menu)=>setUi(v=>({...v,menu}));
   const setHead=(head:typeof ui.head)=>setUi(v=>({...v,head}));
-  const { order, pending, error: orderError, retry } = useResultOrder(rows, columns, filter, sort);
+  const { order, pending, error: orderError, retry } = useResultOrder(rows, columns, filter, sort, valueFilter);
   const bounds = selectionBounds(order,visible,selection);
 
   const valueAt=(r:number,c:number)=>edit?.changed.has(`${r}:${c}`) ? edit.changed.get(`${r}:${c}`)! : rows[r][c];
@@ -126,6 +130,10 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
     setMenu({x,y,items:[
       // 双击只负责编辑，看完整值要有明确入口：右键第一项 + F4 + 工具栏详情按钮。
       {label:"查看完整值",icon:"eye",hint:"F4",onSelect:()=>setDetail(true)},
+      // 「以此值筛选」读的是 `rows` 里的原值，不是未写回的编辑草稿：本地筛选只作用于
+      // 已取到的数据，拿编辑后的值去筛会立刻筛出 0 行。
+      {label: (() => { const v = rows[r]?.[c] ?? null; return v === null ? "只看这一列为空" : `只看「${cellBrief(v)}」`; })(),
+        icon:"filter", hint: columns[c]?.name, onSelect: () => { const v = rows[r]?.[c] ?? null; setValueFilter({ col: c, value: v === null ? null : String(v) }); }},
       {label:"复制原始值",icon:"copy",separator:true,onSelect:()=>void quickCopyTransfer(frozen,"tsv",true)},
       {label:"复制列名",onSelect:()=>void navigator.clipboard.writeText(columns[c].name).then(()=>toast("列名已复制","success"),e=>toast(`复制失败：${String(e)}`,"error"))},
       {label:"复制唯一值（当前筛选列）",onSelect:()=>{const seen=new Set<string>();const order=column.order.filter(i=>{const key=JSON.stringify([typeof valueAt(i,c),valueAt(i,c)]);if(seen.has(key)) return false;seen.add(key);return true;});void quickCopyTransfer({...column,order},"tsv");}},
@@ -189,11 +197,11 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
     }}>
       {tabs && <div className="dbx-result-head">{tabs}</div>}
       <div className="dbx-rbar dbx-result-tools">
-        <button type="button" className="dbx-btn ghost dbx-filter-trigger" data-on={filterOpen || filter || undefined}
+        <button type="button" className="dbx-btn ghost dbx-filter-trigger" data-on={filterOpen || !!filter || !!valueFilter || undefined}
           title="筛选已加载数据 · 网格中 Ctrl+F" aria-label="筛选结果" aria-expanded={filterOpen || !!filter}
           onClick={()=>setFilterOpen(v=>!v)}><Icon name="search" size={14} /><span>筛选</span></button>
         {(filterOpen || filter) && <input ref={filterInput} className="dbx-inp sm dbx-result-filter" value={filter}
-          placeholder="输入关键字" aria-label="在结果中筛选" onChange={e=>setFilter(e.target.value)} autoFocus={filterOpen}
+          placeholder="输入关键字" aria-label="在结果中筛选" onChange={e=>{setFilter(e.target.value);setValueFilter(null);}} autoFocus={filterOpen}
           onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();setFilter("");setFilterOpen(false);gridApi.current?.focusActive();}}} />}
         <button type="button" className="dbx-ibtn" title={`显示、隐藏和冻结列 · 已显示 ${visible.length} / ${columns.length} 列`} aria-label="结果列布局" onClick={()=>setColumnOpen(true)}><Icon name="visibleColumns" size={14} /></button>
         <button type="button" className="dbx-ibtn" title="长文本自动换行 · 行高随内容增减" aria-label="长文本自动换行" aria-pressed={layout.wrap} data-on={layout.wrap || undefined} onClick={()=>setLayoutOnly({...layout,wrap:!layout.wrap})}><Icon name="wrapText" size={14} /></button>
@@ -209,28 +217,17 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
         {snapshot && <ResultSource snapshot={snapshot} meta={meta} />}
         {settings}
       </div>
-      {(sort || filter) && <div className="dbx-result-view-state" role="status">
-        {filter && <span>筛出 <b>{thousands(order.length)}</b> 行</span>}
-          <span
-            className="dbx-localhint"
-            title={
-              onServerSort
-                ? "表头排序与筛选只作用于已经取到的行；要整表有序：右键表头 →「重排并重查」"
-                : "表头排序与筛选只作用于已经取到的行"
-            }
-          >
-            仅作用于已取的 {thousands(rows.length)} 行{onServerSort ? " · 右键表头可整表重排" : ""}
-          </span>
-        <button type="button" className="dbx-lk" onClick={()=>{setFilter("");setSort(null);}}>清除筛选与排序</button>
-      </div>}
-      {orderError && <div role="alert">{orderError}<button type="button" onClick={retry}>重试计算</button><button type="button" onClick={()=>{setFilter("");setSort(null);}}>清除筛选与排序</button></div>}
+      <ResultViewState filter={filter} sort={sort} valueFilter={valueFilter} columns={columns}
+        visibleCount={order.length} loadedCount={rows.length} pending={pending}
+        serverSort={!!onServerSort} onClear={clearView} />
+      {orderError && <div role="alert">{orderError}<button type="button" onClick={retry}>重试计算</button><button type="button" onClick={clearView}>清除筛选与排序</button></div>}
       {subbar && <div className="dbx-rsub">{subbar}</div>}
       <div className="dbx-rbody">
         <ResultGrid
           apiRef={gridApi} idPrefix={transferSource ? `dbx-cell-${transferSource.resultId.replace(/[^\w-]/g,"_")}` : undefined}
           columns={columns}
           rows={rows}
-          empty={pending ? "正在计算结果…" : orderError ? "结果计算失败" : <><strong>{filter ? "筛选后没有匹配的行" : "没有匹配的行"}</strong><span>{filter ? "结果筛选只作用于已读取的数据。" : "可调整查询条件后重新执行。"}</span>{filter && <button type="button" className="dbx-btn ghost" onClick={()=>setFilter("")}>清除结果筛选</button>}</>}
+          empty={pending ? "正在计算结果…" : orderError ? "结果计算失败" : <><strong>{filter || valueFilter ? "筛选后没有匹配的行" : "没有匹配的行"}</strong><span>{filter || valueFilter ? "结果筛选只作用于已读取的数据。" : "可调整查询条件后重新执行。"}</span>{(filter || valueFilter) && <button type="button" className="dbx-btn ghost" onClick={()=>{setFilter("");setValueFilter(null);}}>清除结果筛选</button>}</>}
           order={order}
           sort={sort}
           onSort={(c) => setSort(nextSort(sort, c))}

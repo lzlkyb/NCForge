@@ -18,6 +18,7 @@ import { txStateText } from "../../lib/txResultState";
 import { clearEditsForTab, pendingEdits, pendingForTab, resultEditKey, useEditRevision } from "../../lib/dbDirtyEdits";
 import { pendingResults, resultPairOf } from "../../lib/dbResultLayout";
 import { guessTable } from "../../lib/resultExport";
+import { statementTitle } from "../../lib/sqlStatementTitle";
 
 /** SQL 控制台下半：每条语句一个结果标签 + 执行计划 + 输出。 */
 export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: number; onLocate?:(line:number)=>void }) {
@@ -58,16 +59,22 @@ export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: nu
     ...tab.results.map(r => {
       const dirty = r.kind === "rows" ? pendingEdits(resultEditKey(tab.id, r.id)) : 0;
       const table = r.kind === "rows" ? guessTable(r.sql) : null;
+      // 紧贴语句的那行注释就是它的名字（`-- 物料主档`）；没有注释才退回序号。
+      const name = statementTitle(r.sql);
+      const kindLabel = r.kind === "rows" ? `查询 ${r.index}` : `语句 ${r.index}`;
       return { id: r.id, title: r.sql, label: <>
         {dirty > 0 && <span className="dbx-dirty-dot" role="img" aria-label={`有 ${dirty} 处未写回的改动`} title={`有 ${dirty} 处未写回的改动`} />}
         <Icon name={r.cancelled ? "stop" : r.kind === "error" ? "alert" : r.kind === "rows" ? "database" : "check"} size={13} />
-        {r.kind === "rows" ? `查询 ${r.index}` : `语句 ${r.index}`}
+        {name ? <><span className="dbx-result-tab-name">{name}</span><span className="dbx-cnt">{kindLabel}</span></> : kindLabel}
         {table && <span className="dbx-result-tab-table">{table}</span>}
         {r.kind === "rows" && (r.sets?.length ?? 0) > 1 && <span className="dbx-cnt">{r.sets!.length} 个结果集</span>}
         {r.kind !== "rows" && <span className={r.kind === "error" && !r.cancelled ? "bad" : undefined}>{summaryOf(r)}</span>}
       </> };
     }),
-    ...pending.map(r => ({ id: r.id, title: r.sql, label: <><Icon name={r.state === "running" ? "spinner" : r.state === "skipped" ? "stop" : "clock"} size={13} />查询 {r.index}<span className="dbx-cnt">{r.state === "running" ? "执行中" : r.state === "skipped" ? "未执行" : "等待"}</span></> })),
+    ...pending.map(r => {
+      const name = statementTitle(r.sql);
+      return { id: r.id, title: r.sql, label: <><Icon name={r.state === "running" ? "spinner" : r.state === "skipped" ? "stop" : "clock"} size={13} />{name ? <><span className="dbx-result-tab-name">{name}</span><span className="dbx-cnt">{`查询 ${r.index}`}</span></> : `查询 ${r.index}`}<span className="dbx-cnt">{r.state === "running" ? "执行中" : r.state === "skipped" ? "未执行" : "等待"}</span></> };
+    }),
     ...(tab.plan ? [{ id: "plan", label: <><Icon name="activity" size={13} />执行计划</> }] : []),
     { id: "output", label: <><Icon name="terminal" size={13} />输出{tab.output.length > 0 && <span className="dbx-cnt">{tab.output.length}</span>}</> },
   ];
@@ -136,7 +143,10 @@ function EntryView({ tab, entry, tables, onLocate }: { tab: SqlTab; entry: Resul
   const epoch = useTxEpoch(tab.connId, tab.slot);
   // 取消执行也要把错误码、相似表建议和「重新连接」入口留在页面上；
   // 只在摘要上标注「已停止」，不能整个吞掉 DbErrorBox（P1-3）。
-  if (entry.kind === "error") return <div style={{ overflow: "auto" }}><DbErrorBox error={entry.error ?? ""} errorCode={entry.errorCode} sql={entry.sql} knownTables={tables} connId={tab.connId} tabId={tab.id} slot={tab.slot} cancelled={entry.cancelled} onLocate={()=>onLocate?.(entry.startLine ?? 1)} index={tab.results.length > 1 ? entry.index : undefined} /></div>;
+  if (entry.kind === "error") return <div style={{ overflow: "auto" }}><DbErrorBox error={entry.error ?? ""} errorCode={entry.errorCode} sql={entry.sql} knownTables={tables} connId={tab.connId} tabId={tab.id} slot={tab.slot} cancelled={entry.cancelled}
+    // 传进来的是**语句内**行号；编辑器要的是整个脚本的行号，按语句首行换算。
+    onLocate={(line) => { const base = entry.startLine ?? 1; onLocate?.(line == null ? base : base - 1 + line); }}
+    index={tab.results.length > 1 ? entry.index : undefined} /></div>;
   if (entry.kind === "update")
     return (
       <div className="dbx-update">

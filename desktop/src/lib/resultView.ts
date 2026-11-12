@@ -23,11 +23,44 @@ function cmp(a: Cell, b: Cell, numeric: boolean): number {
   return collator.compare(String(a), String(b));
 }
 
-export function viewOrder(rows: Cell[][], columns: ColumnMeta[], filter: string, sort: SortState | null): number[] {
+/** 「以此值筛选」：只看某一列的整值相等的行。`value === null` 表示只看这一列为空的行。 */
+export interface ValueFilter {
+  col: number;
+  value: string | null;
+}
+
+/**
+ * 值在界面上的短预览：右键菜单与筛选状态条都用它。
+ *
+ * 8K 的 CLOB 原样放进菜单会把菜单撑出屏幕，状态条也会挤掉「仅作用于已取的 N 行」。
+ */
+export function cellBrief(value: Cell, max = 20): string {
+  const text = String(value);
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/**
+ * 结果表的显示顺序。
+ *
+ * `filter` 是**关键字**：不分大小写、跨所有列做子串匹配。
+ * `value` 是**值筛选**：只在一列里做整值相等（右键「以此值筛选」）。两者同时给就取交集——
+ * 用户先按关键字缩小范围、再点某一格的值，期望的是在结果里继续收窄。
+ *
+ * 🔴 值筛选必须用整值相等，不能退化成子串：`BD001` 是 `BD0011` 的前缀，
+ * 按子串筛会把不相关的行一起带出来。
+ */
+export function viewOrder(rows: Cell[][], columns: ColumnMeta[], filter: string, sort: SortState | null, value?: ValueFilter | null): number[] {
   const q = filter.trim().toLowerCase();
   let order = rows.map((_, i) => i);
   if (q) {
     order = order.filter((i) => rows[i].some((v) => v !== null && String(v).toLowerCase().includes(q)));
+  }
+  if (value && value.col < columns.length) {
+    const { col, value: want } = value;
+    order = order.filter((i) => {
+      const cell = rows[i][col];
+      return want === null ? cell === null : cell !== null && String(cell) === want;
+    });
   }
   if (sort && sort.col < columns.length) {
     const numeric = isNumericType(columns[sort.col].type);

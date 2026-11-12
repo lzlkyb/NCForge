@@ -38,6 +38,28 @@ describe("viewOrder", () => {
     expect(nextSort({ col: 1, dir: "asc" }, 1)).toEqual({ col: 1, dir: "desc" });
     expect(nextSort({ col: 1, dir: "desc" }, 1)).toBeNull();
   });
+
+  describe("以此值筛选", () => {
+    // BD001 是 BD0011 的前缀：用子串会多带一行，必须是整值相等。
+    const r = [["BD001", "1"], ["BD0011", "2"], [null, "3"], ["bd001", "4"]];
+
+    it("只在一列里做整值相等，大小写敏感", () => {
+      expect(viewOrder(r, cols, "", null, { col: 0, value: "BD001" })).toEqual([0]);
+      expect(viewOrder(r, cols, "", null, { col: 0, value: "bd001" })).toEqual([3]);
+    });
+
+    it("值为 null = 只看这一列为空", () => {
+      expect(viewOrder(r, cols, "", null, { col: 0, value: null })).toEqual([2]);
+    });
+
+    it("与关键字筛选叠加（取交集）", () => {
+      expect(viewOrder(r, cols, "BD", null, { col: 1, value: "2" })).toEqual([1]);
+    });
+
+    it("列下标越界当作不筛", () => {
+      expect(viewOrder(r, cols, "", null, { col: 9, value: "x" })).toEqual([0, 1, 2, 3]);
+    });
+  });
 });
 
 describe("textWidth", () => {

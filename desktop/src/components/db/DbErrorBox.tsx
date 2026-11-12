@@ -4,6 +4,7 @@ import { Icon } from "../ui/icon";
 import { useRef, useState } from "react";
 import { toast } from "../ui/toast";
 import { friendlyDbError, oraCode, similarTo, tableRefs } from "../../lib/db";
+import { oraHint } from "../../lib/oraErrorHint";
 import { copyText } from "../../lib/utils";
 
 /**
@@ -18,7 +19,7 @@ import { openSessionPanel, type ResultEntry } from "../../lib/dbStore";
 
 export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot, errorCode, cancelled, onLocate }: {
   error: string;
-  connId?:string|null; onLocate?:()=>void;
+  connId?:string|null; onLocate?:(line?:number)=>void;
   tabId?: string;
   slot?: string | null;
   errorCode?: ResultEntry["errorCode"];
@@ -47,6 +48,8 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
   };
   const suggestions =
     ora === "ORA-00942" ? [...new Set(tableRefs(sql).flatMap((t) => similarTo(t, knownTables, 2)))].slice(0, 3) : [];
+  // 「错在哪一处」：ORA-00904 的标识符名就在错误文本里，能直接在语句里定位。
+  const hint = oraHint(error, sql);
   return (
     // 执行失败是异步替换进来的状态：焦点还在编辑器里，不给 role 读屏用户什么都听不到。
     <div className="dbx-err dbx-feedback" role="alert">
@@ -58,6 +61,14 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
       <div className="dbx-feedback-message">{error}</div>
       {errorCode === "timeout" && <div style={{ marginTop: 4 }}>不是语法错误，是等到上限还没跑完：可以在「查询设置」或表页筛选栏把等待上限调大后重试。</div>}
       {ora === "ORA-01031" && <div style={{ marginTop: 4 }}>当前账号没有这个操作的权限（读写权限由数据库账号决定）。</div>}
+      {hint?.note && ora !== "ORA-01031" && <div style={{ marginTop: 4 }}>{hint.note}</div>}
+      {hint?.location && (
+        <div style={{ marginTop: 4 }}>
+          语句里 <code>{hint.location.ident.toUpperCase()}</code> 出现在第 {hint.location.line} 行第 {hint.location.column} 列
+          {hint.location.occurrences > 1 && `（共 ${hint.location.occurrences} 处，先看第一处）`}
+          {onLocate && <> · <button type="button" className="dbx-lk" onClick={() => onLocate(hint.location!.line)}>跳到这一行</button></>}
+        </div>
+      )}
       {suggestions.length > 0 && (
         <div style={{ marginTop: 4 }}>
           库里相近的表名（点击复制）：
@@ -69,7 +80,7 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
         </div>
       )}
       <div className="dbx-filter-actions">
-        {onLocate && <button type="button" className="dbx-btn" onClick={onLocate}>定位 SQL 行</button>}
+        {onLocate && <button type="button" className="dbx-btn" onClick={() => onLocate()}>定位 SQL 行</button>}
         {connId && ["ORA-00942","ORA-00904"].includes(ora ?? "") && tableRefs(sql).slice(0,1).map(t=><button key={t} type="button" className="dbx-btn" onClick={()=>void openTable(connId,t,"struct")}>查看 {t} 结构</button>)}
         {connId && ["ORA-00054","ORA-00060","ORA-01013"].includes(ora ?? "") && <button type="button" className="dbx-btn" onClick={()=>openSessionPanel(connId)}>查看会话与锁</button>}
         {connId && (errorCode === "session-lost" || errorCode === "fallback-session-lost") && <button type="button" className="dbx-btn" disabled={reconnecting} onClick={() => void reconnect()}>{reconnecting ? "正在重新连接…" : "重新连接"}</button>}
