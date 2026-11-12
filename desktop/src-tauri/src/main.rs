@@ -158,6 +158,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 commands::spawn_prewarm_src_notes(app_state.clone());
                 // 搜索内容包：有包就加载，没有就后台建（首次两分钟，期间搜索仍可用）
                 commands::spawn_prewarm_search_pack(app_state.clone());
+                // 版本控制页：冷缓存全量要 8.5 秒，后台先扫一遍，用户点进去时是 0 秒
+                commands::spawn_prewarm_svn(app.handle().clone(), app_state.clone());
             }
 
             // 资源只在用户选择组件或功能提示中请求下载；启动读取本地状态，不联网置备。

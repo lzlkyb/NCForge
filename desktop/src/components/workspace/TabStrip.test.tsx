@@ -2,7 +2,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TreeSvnContext } from "./TreeSvnContext";
+import type { StatusLetter } from "../../lib/svn";
 import { TabStrip } from "./TabStrip";
+import { svnSession } from "../../lib/svnSession";
 import { setCodeDiags } from "../../lib/diagStore";
 
 vi.mock("../../lib/editorStore", () => ({ getText: () => undefined }));
@@ -15,6 +18,7 @@ vi.mock("./TaskMenu", () => ({ TaskMenu: () => null }));
 const session = vi.hoisted(() => ({ state: {} as { compileResult?: unknown; root?: string; tabs?: TabMeta[] } }));
 vi.mock("../../lib/workspaceSession", () => ({
   setSession: vi.fn(),
+  getSession: () => session.state,
   useWorkspaceSelector: (select: (s: typeof session.state) => unknown) => select(session.state),
 }));
 
@@ -51,10 +55,11 @@ afterEach(() => {
 });
 
 const onSelect=vi.fn(),onClose=vi.fn();
-function render(tabs: TabMeta[], activePath: string) {
+function render(tabs: TabMeta[], activePath: string, files = new Map<string, StatusLetter>()) {
   session.state.tabs = tabs;
   act(() =>
     root.render(
+      <TreeSvnContext.Provider value={{ files, directories: new Map(), summary: null }}>
       <TabStrip
         root="C:\\w"
         tabs={tabs}
@@ -69,7 +74,8 @@ function render(tabs: TabMeta[], activePath: string) {
         onOpenSplit={vi.fn()}
         onCloseSplit={vi.fn()}
         onCompile={vi.fn()}
-      />,
+      />
+      </TreeSvnContext.Provider>,
     ),
   );
 }
@@ -82,6 +88,29 @@ describe("TabStrip 未保存标签", () => {
     expect(x?.title).toContain("未保存");
     expect(x?.querySelector(".wb-dirty-dot")).not.toBeNull();
     expect(x?.querySelector(".wb-tab-close")).not.toBeNull();
+  });
+
+  it("shows the SVN status alongside unsaved edits and offers targeted review", () => {
+    const changed = tab("C:/w/A.java", true);
+    changed.name = "A.java";
+    render([changed], changed.path, new Map([["c:/w/a.java", "?"]]));
+    const row = container.querySelector<HTMLElement>("[role=tab]")!;
+    expect(row.textContent).toContain("未跟踪");
+    expect(row.querySelector(".wb-dirty-dot")).not.toBeNull();
+    act(() => row.querySelector<HTMLButtonElement>(".wb-svn-badge-action")!.click());
+    expect(svnSession.get()).toMatchObject({
+      selectedPath: changed.path, changeIntent: { path: changed.path, action: "review" },
+    });
+    expect(onSelect).not.toHaveBeenCalled();
+    act(() => row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })));
+    expect(document.body.textContent).toContain("到版本控制查看改动");
+    expect(document.body.textContent).toContain("加入本次提交");
+    const action = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find(item => item.textContent?.includes("加入本次提交"))!;
+    act(() => action.click());
+    expect(svnSession.get()).toMatchObject({
+      page: "review", selectedPath: changed.path, changeIntent: { path: changed.path, action: "commit" },
+    });
   });
 
   it("已保存标签只显示叉", () => {

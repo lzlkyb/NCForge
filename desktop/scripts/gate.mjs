@@ -12,9 +12,9 @@
  *   node scripts/gate.mjs                    # 全量（pre-push 就是这一条）
  *   node scripts/gate.mjs --scope frontend   # 只跑某个 scope（可多次）
  *   node scripts/gate.mjs --only clippy      # 只跑某项（CI 每步用这个，可逗号分隔）
- *   node scripts/gate.mjs --precommit        # 提交前的三项（pre-commit 钩子用）
+ *   node scripts/gate.mjs --precommit        # 提交前的六项纯扫描（pre-commit 钩子用）
  *   node scripts/gate.mjs --list             # 打印清单，不执行
- *   node scripts/gate.mjs --verify-ci        # 断言 workflow 与清单一致
+ *   node scripts/gate.mjs --verify-ci        # 断言 CI 与发版脚本都没绕开门禁
  *
  * 退出码：0 全过；1 有失败（第一个失败即停，别让人等完 cargo test 才知道
  * eslint 挂了）；2 参数错。
@@ -25,7 +25,16 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CI_JOBS, PRECOMMIT, STEPS, SCOPES, stepById, verifyWorkflow } from "./lib/gate-plan.mjs";
+import {
+  CI_JOBS,
+  PRECOMMIT,
+  RELEASE_SCRIPTS,
+  STEPS,
+  SCOPES,
+  stepById,
+  verifyReleaseScript,
+  verifyWorkflow,
+} from "./lib/gate-plan.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url)); // desktop/scripts
 const desktopDir = resolve(here, ".."); // desktop
@@ -87,9 +96,9 @@ function printHelp() {
   node scripts/gate.mjs                   全量（${STEPS.length} 项，pre-push 用的就是这个）
   node scripts/gate.mjs --scope frontend  只跑某 scope：${SCOPES.join(" / ")}
   node scripts/gate.mjs --only clippy     只跑某项，可逗号分隔
-  node scripts/gate.mjs --precommit       提交前三项（${PRECOMMIT.map((p) => p.id).join(" / ")}，按暂存文件后缀挑）
+  node scripts/gate.mjs --precommit       提交前六项（${PRECOMMIT.map((p) => p.id).join(" / ")}，按暂存文件后缀挑）
   node scripts/gate.mjs --list            打印清单
-  node scripts/gate.mjs --verify-ci       断言 workflow 与清单一致
+  node scripts/gate.mjs --verify-ci       断言 CI 与发版脚本都没绕开门禁
 
 CI job ↔ scope：${Object.entries(CI_JOBS).map(([j, s]) => `${j}=${s}`).join("  ")}`);
 }
@@ -103,6 +112,7 @@ function printList(scopes) {
   }
   console.log(`\n共 ${picked.length} 项；scope：${SCOPES.join(" / ")}；不带参数跑全部 ${STEPS.length} 项。`);
   console.log(`pre-commit（提交前，按暂存文件后缀挑）：${PRECOMMIT.map((p) => p.id).join(" → ")}`);
+  console.log(`pre-push（push 前，默认全量）：${STEPS.length} 项；NCFORGE_PUSH_GATE=0 跳过`);
 }
 
 /**
@@ -137,8 +147,9 @@ function stagedFiles() {
 /**
  * 选出要跑的步骤：--precommit 优先，其次 --only、--scope，都没有则全量。
  *
- * --precommit 只跑清单里 PRECOMMIT 声明的三项，并按「暂存文件后缀」跳过无关项：
- * 只改文档的提交不该花 20 秒等 tsc。跳过项会打印出来，免得让人以为三项都验过。
+ * --precommit 只跑清单里 PRECOMMIT 声明的六项（都是纯扫描，合计约 10 秒），并按
+ * 「暂存文件后缀」跳过无关项：只改文档的提交不该花 20 秒等 tsc。跳过项会打印出来，
+ * 免得让人以为六项都验过。
  */
 function pickSteps(opts) {
   if (opts.precommit) {
@@ -193,14 +204,24 @@ function runVerifyCi() {
     process.exit(1);
   }
   const { errors, warnings } = verifyWorkflow(text);
+  // 发版脚本与 CI 同受一条约束：不许自己拼门禁命令（v0.5.0 的 clippy 参数不一致
+  // 就是发版脚本自成一派造成的）。这里是它唯一能被机械抓住的地方。
+  for (const name of RELEASE_SCRIPTS) {
+    try {
+      errors.push(...verifyReleaseScript(name, readFileSync(resolve(here, name), "utf8")).errors);
+    } catch (e) {
+      errors.push(`读不到发版脚本 ${name}：${e.message}`);
+    }
+  }
   for (const w of warnings) console.log(`⚠️  ${w}`);
   if (errors.length) {
     for (const e of errors) console.error(`❌ ${e}`);
-    console.error(`\n门禁清单与 .github/workflows/build.yml 不一致（共 ${errors.length} 处）。`);
-    console.error("清单真源：desktop/scripts/lib/gate-plan.mjs；CI 侧只该有 `gate.mjs --only <id>`。");
+    console.error(`\n门禁清单与 CI / 发版脚本不一致（共 ${errors.length} 处）。`);
+    console.error("清单真源：desktop/scripts/lib/gate-plan.mjs；CI 与发版脚本里只该有 `gate.mjs`。");
     process.exit(1);
   }
   console.log(`✅ workflow 与清单一致：${Object.entries(CI_JOBS).map(([j, s]) => `${j}(${s})`).join("、")}`);
+  console.log(`✅ 发版脚本未绕开门禁：${RELEASE_SCRIPTS.join("、")}`);
 }
 
 function main() {
@@ -212,8 +233,8 @@ function main() {
   const steps = pickSteps(opts);
   if (!steps.length) {
     if (opts.precommit) {
-      // 只改了文档/图片之类：三项都与它无关，别拿一个空跑当失败。
-      console.log("✅ 暂存改动不涉及设计 token / fmt / tsc，pre-commit 无需跑");
+      // 只改了文档/图片之类：六项都与它无关，别拿一个空跑当失败。
+      console.log("✅ 暂存改动不涉及体量/token/UI 约定/fmt/tsc，pre-commit 无需跑");
       return;
     }
     console.error("❌ 没有选中任何步骤");

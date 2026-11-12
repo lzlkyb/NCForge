@@ -8,6 +8,7 @@
 //!
 //! 下载与安装分离：后台仅下载并验签，用户确认并完成工作预检后才启动安装器。
 
+use base64::{engine::general_purpose::STANDARD, Engine};
 use tauri::{Emitter, Manager};
 
 // 指数退避重试与资源包下载共用（见 retry.rs）；本文件只传 should_retry 策略。
@@ -48,6 +49,86 @@ fn update_cache<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::State<'_
     // manage 已存在时不会替换状态；每个应用只保留一个包，检查与重复点击均不清空它。
     app.manage(UpdateCache::default());
     app.state::<UpdateCache>()
+}
+
+fn package_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<std::path::PathBuf> {
+    Some(app.path().app_cache_dir().ok()?.join("verified-update.pkg"))
+}
+
+fn persist_package<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let path = package_path(app).ok_or_else(|| std::io::Error::other("无法定位更新缓存目录"))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("更新缓存目录无效"))?;
+    std::fs::create_dir_all(dir)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(dir)?;
+    temporary.write_all(bytes)?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(path)?;
+    Ok(())
+}
+
+fn verify_package(bytes: &[u8], signature: &str, public_key: &str) -> Result<(), String> {
+    let decode = |value: &str| {
+        String::from_utf8(STANDARD.decode(value).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())
+    };
+    let key =
+        minisign_verify::PublicKey::decode(&decode(public_key)?).map_err(|e| e.to_string())?;
+    let sig = minisign_verify::Signature::decode(&decode(signature)?).map_err(|e| e.to_string())?;
+    key.verify(bytes, &sig, true).map_err(|e| e.to_string())
+}
+
+fn verify_update<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    update: &tauri_plugin_updater::Update,
+    bytes: &[u8],
+) -> Result<(), String> {
+    let version = semver::Version::parse(&update.version).map_err(|e| e.to_string())?;
+    if version <= app.package_info().version {
+        return Err("更新包版本不高于当前版本".into());
+    }
+    let key = app
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|config| config.get("pubkey"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or("无法读取更新验签公钥")?;
+    verify_package(bytes, &update.signature, key)
+}
+
+fn restore_package<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    update: &tauri_plugin_updater::Update,
+) -> bool {
+    let Some(path) = package_path(app) else {
+        return false;
+    };
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    // 使用当前平台和版本的在线清单签名，旧包或损坏的包不会进入就绪状态。
+    if verify_update(app, update, &bytes).is_err() {
+        return false;
+    }
+    let cache = update_cache(app);
+    let Ok(mut pending) = cache.pending.lock() else {
+        return false;
+    };
+    *pending = Some(PreparedUpdate {
+        update: update.clone(),
+        package: CachedPackage {
+            bytes,
+            installed: false,
+        },
+    });
+    true
 }
 
 fn emit_cached_ready<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<bool, String> {
@@ -279,13 +360,7 @@ fn candidate_endpoint_groups() -> Result<Vec<Option<Vec<url::Url>>>, String> {
 /// 供 `check_update` / `start_update` 共用，确保更新源解析只有这一处实现（单一真相源）。
 /// 泛型 `R: Runtime`：让 mock 运行时的集成测试也能驱动作命令（见文件末尾测试）。
 ///
-/// 超时设 180s：插件的 `timeout` 同时作用于 manifest 检查与安装包下载（`Update`
-/// 的 timeout 从 `Updater` 直传，无法只给一头设）。manifest 是几 KB 的小文件，
-/// 180 秒只为防"服务器收下连接再不响应"的永久挂死（reqwest 默认无总超时，
-/// 挂死时徽章会转到天荒地老）；安装包实测 ≤15MB，180s ≈ 83KB/s 的兜底网速，
-/// 更慢还有重试 2 次 + 换源兜底。常见场景不受影响：端点 404 走 ReleaseNotFound
-/// 秒回（不可重试），端点通畅也是秒回——只有"端点活着但不响应"的罕见死链
-/// 才会真的吃满 180s。
+/// 清单检查使用短超时，下载时为同一版本单独设置较长的包传输超时。
 fn build_updater<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     endpoints: Option<Vec<url::Url>>,
@@ -300,7 +375,7 @@ fn build_updater<R: tauri::Runtime>(
             .map_err(|e| format!("更新源配置无效（需 https）: {e}"))?;
     }
     builder
-        .timeout(Duration::from_secs(180))
+        .timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| format!("更新插件初始化失败: {e}"))
 }
@@ -341,7 +416,10 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), S
         // 所有候选源都明确报告「没有更新」时为 true：用户点了下载却无更新可下，
         // 循环外要发 stale 而不是「全部源失败：未知错误」。
         let mut stale = false;
-        for endpoints in groups {
+        for (idx, endpoints) in groups.into_iter().enumerate() {
+            if idx > 0 {
+                let _ = app.emit("update:source", ());
+            }
             let updater = match build_updater(&app, endpoints) {
                 Ok(u) => u,
                 Err(e) => {
@@ -365,7 +443,7 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), S
                     }
                 };
 
-            let update = match check_result {
+            let mut update = match check_result {
                 Some(u) => u,
                 None => {
                     // None = 这个源明确报告没有更新。**不在这里 return 发 error**：
@@ -382,6 +460,12 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), S
 
             let date_str = update.date.map(|d| d.to_string());
             let current_ver = update.current_version.clone();
+            if restore_package(&app, &update) {
+                drop(_guard);
+                let _ = emit_cached_ready(&app);
+                return;
+            }
+            update.timeout = Some(std::time::Duration::from_secs(180));
             let _ = app.emit(
                 "update:available",
                 serde_json::json!({
@@ -444,6 +528,9 @@ pub fn start_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), S
 
             match result {
                 Ok(bytes) => {
+                    if let Err(error) = persist_package(&app, &bytes) {
+                        log::warn!("[Update] 无法保存跨重启的更新包缓存: {error}");
+                    }
                     let cache = update_cache(&app);
                     match cache.pending.lock() {
                         Ok(mut pending) => {
@@ -524,7 +611,15 @@ pub async fn install_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Resu
             .take()
             .ok_or_else(|| "尚无已下载并验证的更新包，请先下载更新".to_string())?;
         let update = &prepared.update;
-        let result = prepared.package.install(|bytes| update.install(bytes));
+        let result = prepared.package.install(|bytes| {
+            verify_update(&app, update, bytes)?;
+            update.install(bytes).map_err(|error| error.to_string())
+        });
+        if result.is_ok() {
+            if let Some(path) = package_path(&app) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
         // 不在安装器运行时持锁；失败也放回同一个包，用户重试无需重新下载。
         *cache
             .pending
@@ -568,6 +663,9 @@ pub fn check_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), S
         let mut last_code: &'static str = "unknown";
         let total_groups = groups.len();
         for (idx, endpoints) in groups.into_iter().enumerate() {
+            if idx > 0 {
+                let _ = app.emit("update:source", ());
+            }
             let updater = match build_updater(&app, endpoints) {
                 Ok(u) => u,
                 Err(e) => {
@@ -583,6 +681,11 @@ pub fn check_update<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), S
             .await
             {
                 Ok(Some(u)) => {
+                    if restore_package(&app, &u) {
+                        drop(_guard);
+                        let _ = emit_cached_ready(&app);
+                        return;
+                    }
                     let date_str = u.date.map(|d| d.to_string());
                     let current_ver = u.current_version.clone();
                     drop(_guard);
@@ -642,6 +745,26 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tauri_plugin_updater::Error as UpdaterError;
+
+    #[test]
+    fn verifies_cached_package_against_manifest_signature() {
+        // Known signed fixture from minisign-verify's public example.
+        let key = STANDARD.encode(
+            "untrusted comment: test key
+RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3",
+        );
+        let sig = STANDARD.encode(concat!(
+            "untrusted comment: signature from minisign secret key
+",
+            "RUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=
+",
+            "trusted comment: timestamp:1633700835	file:test	prehashed
+",
+            "wLMDjy9FLAuxZ3q4NlEvkgtyhrr0gtTu6KC4KBJdITbbOeAi1zBIYo0v4iTgt8jJpIidRJnp94ABQkJAgAooBQ==",
+        ));
+        assert!(verify_package(b"test", &sig, &key).is_ok());
+        assert!(verify_package(b"altered", &sig, &key).is_err());
+    }
 
     #[test]
     fn update_single_flight_rejects_reentry_and_releases_on_drop() {

@@ -6,7 +6,18 @@ import { fileURLToPath } from "node:url";
 
 import { execFileSync } from "node:child_process";
 
-import { CI_JOBS, PRECOMMIT, STEPS, SCOPES, stepById, stepsForScope, verifyWorkflow } from "./gate-plan.mjs";
+import {
+  CI_JOBS,
+  PRECOMMIT,
+  PRECOMMIT_FORBIDDEN,
+  RELEASE_SCRIPTS,
+  STEPS,
+  SCOPES,
+  stepById,
+  stepsForScope,
+  verifyReleaseScript,
+  verifyWorkflow,
+} from "./gate-plan.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../../..");
@@ -111,23 +122,30 @@ test("CI_JOBS 的键就是 workflow 里真实存在的 job", () => {
   }
 });
 
-test("pre-commit 只有三项、都来自清单、且不含慢项", () => {
+test("pre-commit 的六项都来自清单、且不含重活", () => {
   const ids = PRECOMMIT.map((p) => p.id);
-  assert.deepEqual(ids, ["tokens", "fmt", "tsc"], "顺序按「快 → 慢」，别随手调");
+  // 顺序即契约：按耗时从短到长，便宜的先红。
+  assert.deepEqual(
+    ids,
+    ["component-size", "rust-tempdir", "tokens", "fmt", "ui-contract", "tsc"],
+    "顺序按「快 → 慢」，别随手调",
+  );
   for (const id of ids) assert.ok(stepById(id), `${id} 不在 STEPS 里，pre-commit 会跑空`);
-  const slow = ["eslint", "vitest", "clippy", "rust-test", "vite-build", "bundle-budget", "knip", "contract", "machete", "component-size", "ui-contract", "rust-tempdir"];
-  for (const id of slow) assert.ok(!ids.includes(id), `${id} 太慢，不该进 pre-commit（钩子超 30 秒就会被 --no-verify 绕过）`);
+  for (const id of PRECOMMIT_FORBIDDEN) {
+    assert.ok(!ids.includes(id), `${id} 太重，不该进 pre-commit（钩子超 30 秒就会被 --no-verify 绕过）`);
+  }
   for (const p of PRECOMMIT) assert.ok(p.match instanceof RegExp, `${p.id} 缺少 match：无法按暂存文件挑`);
 });
 
 test("pre-commit 的后缀匹配：改文档不跑，改代码按类型跑", () => {
   const hit = (file) => PRECOMMIT.filter((p) => p.match.test(file)).map((p) => p.id);
-  assert.deepEqual(hit("docs/x.md"), [], "只改文档时三项都不跑");
+  assert.deepEqual(hit("docs/x.md"), [], "只改文档时六项都不跑");
   assert.deepEqual(hit("CHANGELOG.md"), []);
-  assert.deepEqual(hit("desktop/src/components/db/X.tsx"), ["tokens", "tsc"]);
-  assert.deepEqual(hit("desktop/src/lib/db.ts"), ["tsc"]);
-  assert.deepEqual(hit("desktop/src-tauri/src/lib.rs"), ["fmt"]);
-  assert.deepEqual(hit("desktop/src/db-console.css"), ["tokens"]);
+  // 写组件是最容易踩 300 行红线的地方，必须每次都扫。
+  assert.deepEqual(hit("desktop/src/components/db/X.tsx"), ["component-size", "tokens", "ui-contract", "tsc"]);
+  assert.deepEqual(hit("desktop/src/lib/db.ts"), ["component-size", "tsc"]);
+  assert.deepEqual(hit("desktop/src-tauri/src/lib.rs"), ["rust-tempdir", "fmt"]);
+  assert.deepEqual(hit("desktop/src/db-console.css"), ["tokens", "ui-contract"]);
 });
 
 test("两个钩子都走 gate.mjs，且以可执行位入库", () => {
@@ -147,4 +165,99 @@ test("两个钩子都走 gate.mjs，且以可执行位入库", () => {
     }).trim();
     if (staged) assert.ok(staged.startsWith("100755"), `${hook} 的索引模式是 ${staged.split(" ")[0]}，必须 100755`);
   }
+});
+
+// ── 发版脚本的裸命令守卫 ─────────────────────────────────────────────
+// v0.5.0 的成因原样复现：release.mjs 里写的是 `cargo clippy --no-default-features`，
+// CI 跑的是 `clippy --all-targets -- -D warnings`。本地绿、tag 构建红。
+test("发版脚本里裸写 clippy 会被拦（v0.5.0 原样命令）", () => {
+  const src = 'run("cargo clippy --no-default-features", path.join(DESKTOP, "src-tauri"));';
+  const { errors } = verifyReleaseScript("release.mjs", src);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /绕过了 gate\.mjs/);
+  assert.match(errors[0], /第 1 行/);
+});
+
+test("发版脚本里裸写 cargo test / npx tsc / npm run lint 都会拦", () => {
+  const src = [
+    'run("cargo test --no-default-features", x);',
+    'run("npx tsc --noEmit", x);',
+    'run("npm run lint", x);',
+  ].join("\n");
+  assert.equal(verifyReleaseScript("release.mjs", src).errors.length, 3);
+});
+
+test("注释里举例说明不算违规（否则改不了这类注释）", () => {
+  const src = [
+    "  // 以前这里写的是 cargo clippy --no-default-features，别抄回来",
+    "   * cargo test --no-default-features 也不行",
+    '  run("node scripts/gate.mjs", DESKTOP);',
+  ].join("\n");
+  assert.deepEqual(verifyReleaseScript("release.mjs", src).errors, []);
+});
+
+test("cargo check 不拦：它不是门禁项，只是 --skip-tests 的保底编译", () => {
+  assert.deepEqual(verifyReleaseScript("release.mjs", 'run("cargo check --no-default-features", x);').errors, []);
+});
+
+test("真实的 release.mjs / reship.mjs 现在必须过守卫", () => {
+  for (const name of RELEASE_SCRIPTS) {
+    const file = resolve(here, "..", name);
+    assert.ok(existsSync(file), `缺 ${name}`);
+    assert.deepEqual(verifyReleaseScript(name, readFileSync(file, "utf8")).errors, []);
+  }
+});
+
+// ── pre-commit 的构成（红线要在本地就红，不能等到发版） ─────────────────
+test("component-size 必须在 pre-commit 里（300 行红线要在提交前就拦住）", () => {
+  const hit = PRECOMMIT.find((p) => p.id === "component-size");
+  assert.ok(hit, "component-size 不在 PRECOMMIT 里：v0.5.0 的 309 行 ResultTable 就是这么发出去的");
+  // 写组件时的主战场是 .tsx；.ts 里的 hook 也扫行数，所以一起命中。
+  assert.ok(hit.match.test("src/components/db/ResultTable.tsx"));
+  assert.ok(hit.match.test("src/lib/big.ts"));
+  assert.ok(!hit.match.test("src/styles/app.css"), "改 css 不该触发组件体量扫描");
+});
+
+test("PRECOMMIT 里每一项的 id 都存在，且各自 match 是真正则", () => {
+  for (const item of PRECOMMIT) {
+    assert.ok(stepById(item.id), `PRECOMMIT 引用了清单里不存在的 id：${item.id}`);
+    assert.ok(item.match instanceof RegExp, `${item.id} 的 match 不是正则`);
+  }
+});
+
+test("重活不许进 PRECOMMIT（钩子超过 30s 就等于没有）", () => {
+  const bad = PRECOMMIT.filter((p) => PRECOMMIT_FORBIDDEN.includes(p.id)).map((p) => p.id);
+  assert.deepEqual(bad, [], `这些项会把提交拖到分钟级，请留给 pre-push / CI：${bad.join(", ")}`);
+});
+
+test("PRECOMMIT 按耗时从短到长排（便宜的先红，才不容易被 --no-verify）", () => {
+  const order = PRECOMMIT.map((p) => p.id);
+  const cost = { "component-size": 1, "rust-tempdir": 2, tokens: 3, fmt: 4, "ui-contract": 5, tsc: 6 };
+  for (let i = 1; i < order.length; i += 1) {
+    assert.ok(cost[order[i - 1]] < cost[order[i]], `顺序反了：${order[i - 1]} 应排在 ${order[i]} 之前`);
+  }
+});
+
+// ── pre-push 默认开启（2026-11-12 决定） ─────────────────────────────────
+test("pre-push 默认开启：环境变量默认值必须是 1，且仍然调 gate.mjs", () => {
+  const src = readFileSync(resolve(repoRoot, ".githooks/pre-push"), "utf8");
+  assert.match(src, /NCFORGE_PUSH_GATE:-1/, "默认值被改回 0 了：push 时不会跑门禁");
+  assert.ok(!/NCFORGE_PUSH_GATE:-0\}/.test(src), "还有默认关闭的写法");
+  assert.match(src, /gate\.mjs/, "pre-push 必须走统一入口");
+  // dev 探测只用于「失败后解释」，不能用来预判失败：2026-11-12 实测 dev 开着、
+  // rust 零改动时 cargo test 通过（cargo 不必重写没变的产物）。预判会误拦。
+  assert.match(src, /dev_running\(\)/, "缺 dev 运行探测：红了看不出是 dev 没停");
+  const beforeGate = src.slice(0, src.indexOf("node desktop/scripts/gate.mjs"));
+  assert.ok(
+    !/exit 1/.test(beforeGate),
+    "别在跑门禁之前预判失败：dev 在跑 ≠ cargo 会红（实测会过），误拦一次就会有人开始习惯性 NCFORGE_PUSH_GATE=0",
+  );
+  assert.match(src, /exit "\$status"/, "必须透传 gate.mjs 的退出码");
+});
+
+test("发版的两次 push 都跳过 pre-push（第 1 步已全量，别白等 24 分钟）", () => {
+  const src = readFileSync(resolve(repoRoot, "desktop/scripts/release.mjs"), "utf8");
+  const pushes = [...src.matchAll(/run\(`git push origin (?:\$\{tagName\}|main)`,\s*ROOT,\s*true,\s*PUSH_ENV\)/g)];
+  assert.equal(pushes.length, 2, "main 与 tag 两次 push 都要带 PUSH_ENV，否则发版各等 12 分钟");
+  assert.match(src, /NCFORGE_PUSH_GATE: "0"/);
 });

@@ -35,6 +35,9 @@
 .vc-file-row[data-selected] { background:hsl(var(--accent)); }
 .vc-file-row[data-selected] .vc-row { background:transparent;color:hsl(var(--accent-foreground)); }
 .vc-file-label { display:flex;flex:1;min-width:0;flex-direction:column;gap:2px; }
+.vc-file-line { display:flex;align-items:center;gap:6px;min-width:0; }
+.vc-file-line > :is(.vc-fn,.vc-file-dir) { flex:1;min-width:0; }
+.vc-file-line > .vc-when { flex:none; }
 .vc-file-dir { font-size:10.5px;color:hsl(var(--muted-foreground));overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 .vc-reviewed-mark { display:grid;place-items:center;flex-shrink:0;color:hsl(var(--success-ink)); }
 .vc-chg .vc-chg-foot { gap:9px;padding:10px; }
@@ -94,3 +97,6 @@ html[data-ui-density="comfortable"] :is(.vc-chip,.vc-group-head .vc-grp) { min-h
   .wb-root[data-tool="svn"] .vc-head .vc-btn { padding:0 6px; }
   .vc-focus-bar { padding-inline:6px; }
 }
+
+.vc-commit-review { flex-shrink: 0; color: hsl(var(--muted-foreground)); font-size: 11px; }
+.vc-commit-review[data-outdated] { color: hsl(var(--warning-ink)); }

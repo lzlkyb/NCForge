@@ -1,3 +1,5 @@
+import { updatePrimaryAction } from "../../lib/updatePresentation";
+import { useLastUpdateResult } from "../../lib/updateResult";
 import { useState } from "react";
 import { useUpdateDownloadPreference, setUpdateDownloadPreference } from "../../lib/updateDownloadPreference";
 import { Switch } from "../ui/switch";
@@ -13,20 +15,21 @@ import "./settings-maintenance.css";
 /** 设置页只是更新状态的另一个入口，下载安装仍由现有弹框统一确认。 */
 export function UpdateSettings() {
   const info = useAppInfo();
+  const lastResult = useLastUpdateResult();
+  const lastResultText = lastResult?.status === "confirmed" ? "已确认升级" : lastResult?.status === "failed" ? "安装或重启失败" : "等待确认运行版本";
   const autoDownload = useUpdateDownloadPreference();
   const [preferenceResult, setPreferenceResult] = useState<boolean>();
   const changePreference = (enabled: boolean) => setPreferenceResult(setUpdateDownloadPreference(enabled));
   const update = useUpdate();
   const { status, preparing, restarting } = update;
   const blocked = preparing || restarting || status === "installing";
-  const busy = blocked || status === "checking" || status === "downloading" || status === "ready";
+  const primary = updatePrimaryAction(update);
   const pct = Math.min(100, Math.max(0, update.progress));
   const stateText = preparing ? "正在检查当前工作" : restarting ? "正在应用更新" : {
     idle: "可检查更新", checking: "正在检查更新", available: "发现新版本",
     downloading: update.progressIndeterminate ? "正在下载" : pct >= 100 ? "正在校验更新包" : `正在下载 · ${pct}%`,
     ready: "更新包已下载并验证", installing: "正在安装并重启", error: "更新暂未完成", uptodate: "已是最新版本",
   }[status];
-  const actionText = status === "ready" ? "查看并安装" : status === "downloading" ? "查看下载进度" : status === "error" ? "查看原因与重试" : status === "installing" ? "查看安装进度" : "查看更新";
   const hasDetails = ["available", "downloading", "ready", "installing", "error"].includes(status);
   return (
     <Card className="settings-maintenance-section" aria-busy={status === "checking" || preparing || undefined}>
@@ -47,9 +50,12 @@ export function UpdateSettings() {
         valueText={stateText}
         sub={update.update?.version ? `新版本 v${update.update.version} · ${stateText}` : stateText}
         last control={<div className="settings-maintenance-actions">
-          {hasDetails && <Button size="sm" disabled={preparing} onClick={update.openUpdateNotes}>{actionText}</Button>}
-          <Button variant="outline" size="sm" isLoading={status === "checking"} loadingText="检查中…" disabled={busy} onClick={() => void update.manualCheckForUpdate()}>{status === "checking" ? "检查中…" : "检查更新"}</Button>
+          <Button size="sm" isLoading={status === "checking"} loadingText="检查中…" disabled={blocked || status === "checking"} onClick={() => void primary.run()}>{primary.label}</Button>
+          {hasDetails && <Button variant="outline" size="sm" disabled={blocked} onClick={update.openUpdateNotes}>{status === "error" ? "查看原因" : "查看更新内容"}</Button>}
         </div>} />
+      {lastResult && <SettingsRow id="last-update-result" label="最近更新结果" keywords={["安装记录"]}
+        valueText={lastResultText} control={<span>{lastResultText}</span>}
+        sub={`v${lastResult.from} → v${lastResult.to} · ${new Date(lastResult.at).toLocaleString()}`} />}
       {status === "downloading" && <div className="settings-update-progress">
         <div className="settings-update-track" role="progressbar" aria-label="软件更新下载进度" aria-valuemin={0} aria-valuemax={100}
           aria-valuenow={update.progressIndeterminate ? undefined : pct} aria-valuetext={update.progressIndeterminate ? "总大小未知" : undefined}>
@@ -61,7 +67,8 @@ export function UpdateSettings() {
       </div>}
       {update.error && <InlineNotice variant="error">{friendlyError(update.error, update.errorCode).friendly}</InlineNotice>}
       {status === "ready" && <p className="settings-maintenance-footnote">安装由你确认，稍后安装可以继续工作。</p>}
-      {busy && <p className="settings-help">{status === "ready" ? "更新包已准备好，请用“查看并安装”继续。" : status === "downloading" ? "正在下载，完成后再选择安装时间。" : "当前更新操作完成后可重新检查。"}</p>}
+      {update.installBlock && <InlineNotice variant="warning">{update.installBlock} {update.openInstallBlock && <Button size="sm" variant="outline" onClick={update.openInstallBlock}>前往处理</Button>}</InlineNotice>}
+      {update.tryingBackup && ["checking", "downloading"].includes(status) && <p className="settings-help" role="status">正在尝试备用更新源…</p>}
     </Card>
   );
 }

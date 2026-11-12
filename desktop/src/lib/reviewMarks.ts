@@ -1,11 +1,8 @@
 /**
  * 代码面的「已审」角标：与版本控制面共用后端同一份标记数据，不另起一套。
  *
- * 数据来源是 `useSvnStatus` 扫出来的 `status.reviewed`（7.6 秒一次，只有版本控制面会扫），
- * 由那里 `syncReviewMarks()` 推过来；代码面自己**绝不**为了一个角标再发起 SVN 扫描。
- *
- * 失效语义对齐 VS Code：文件再被改（外部写入或本人保存）角标立刻消失，并且
- * 同步删掉后端那条标记——否则一次旧扫描结果会把角标加回来（闪回）。
+ * 保存或外部修改会立即使标记失效。保留磁盘上的审查记录，
+ * 这样下次扫描仍可告诉用户该文件需要重审。
  *
  * revision 契约（P0-4）：后端 `is_valid` 要求 `mark.revision == 扫描到的真 revision`。
  * 代码面通常没有 status 数据，**不能传 0**（0 != 14231，标记下次扫描必失效）。
@@ -20,7 +17,15 @@ import type { StatusResult } from "./svn";
 /** 「版本未知」的哨兵；0 是一个合法的 SVN 版本号，不能拿来当缺省值。 */
 export const UNKNOWN_REVISION = -1;
 
+let lastSynced: StatusResult | undefined;
 let marks = new Set<string>();
+const invalidated = new Set<string>();
+let scannedOutdated = new Set<string>();
+export const isReviewOutdated = (path: string) => {
+  const key = keyOf(path);
+  return invalidated.has(key) || scannedOutdated.has(key);
+};
+export const getReviewedPaths = () => marks;
 /** path → SVN revision：有扫描结果时带上，能省掉后端一次 info 查询。 */
 const revisions = new Map<string, number>();
 let version = 0;
@@ -38,21 +43,28 @@ export function isReviewed(path: string): boolean {
 
 /** 版本控制面每次扫描结果落地时调用：后端有效标记是唯一真相。 */
 export function syncReviewMarks(status: StatusResult | undefined): void {
+  if (status === lastSynced) return;
+  lastSynced = status;
+  revisions.clear();
   for (const g of status?.changes.groups ?? []) {
     for (const it of g.items) revisions.set(keyOf(it.path), it.revision);
   }
-  const next = new Set((status?.reviewed ?? []).map(keyOf));
-  if (next.size === marks.size && [...next].every((k) => marks.has(k))) return;
+  const nextOutdated = new Set(status?.reviewOutdated);
+  const sameOutdated = nextOutdated.size === scannedOutdated.size && [...nextOutdated].every(key => scannedOutdated.has(key));
+  scannedOutdated = nextOutdated;
+  const next = new Set((status?.reviewed ?? []).map(keyOf).filter(key => !invalidated.has(key)));
+  if (sameOutdated && next.size === marks.size && [...next].every((k) => marks.has(k))) return;
   marks = next;
   emit();
 }
 
 /** 代码面点「标记已审」：成功后本地立刻生效，失败由调用方提示去版本控制面。 */
-export async function markReviewed(path: string, next: boolean): Promise<void> {
-  const revision = revisions.get(keyOf(path)) ?? UNKNOWN_REVISION;
+export async function markReviewed(path: string, next: boolean, revision = revisions.get(keyOf(path)) ?? UNKNOWN_REVISION): Promise<void> {
   await svnReviewMark(path, revision, next);
   if (!next) revisions.delete(keyOf(path));
   const k = keyOf(path);
+  invalidated.delete(k);
+  scannedOutdated.delete(k);
   const updated = new Set(marks);
   if (next) updated.add(k); else updated.delete(k);
   marks = updated;
@@ -69,10 +81,9 @@ export function initReviewMarks(): void {
     for (const path of paths) {
       if (!marks.delete(keyOf(path))) continue;
       changed = true;
-      // 后端也删：只删本地的话，下一次 status 扫描的旧 reviewed 会把角标加回来
-      void svnReviewMark(path, UNKNOWN_REVISION, false).catch(() => {});
+      invalidated.add(keyOf(path));
     }
-    if (changed) emit();
+    if (changed) { marks = new Set(marks); emit(); }
   };
   onExternalJavaChanged(invalidate);
   onLocalSave(invalidate);
@@ -80,7 +91,10 @@ export function initReviewMarks(): void {
 
 /** 单测 / 换工作区用：重置本地标记与接线状态。 */
 export function resetReviewMarks(): void {
+  lastSynced = undefined;
   marks = new Set();
+  invalidated.clear();
+  scannedOutdated.clear();
   revisions.clear();
   started = false;
   emit();

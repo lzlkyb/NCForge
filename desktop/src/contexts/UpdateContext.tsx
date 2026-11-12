@@ -5,6 +5,7 @@ import { beginOperation, type OperationHandle } from "../lib/operations";
 import { listen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
 import { UpdateNotesDialog } from "../components/update/UpdateNotesDialog";
 import { RestartOverlay } from "../components/update/RestartOverlay";
+import { recordUpdateResult } from "../lib/updateResult";
 import { APP_SLUG } from "../lib/about";
 import { prepareRestart } from "../lib/terminatePreflight";
 import { useUpdateDownloadPreference } from "../lib/updateDownloadPreference";
@@ -45,6 +46,10 @@ export interface UpdateState {
   error: string | null;
   /** 错误原因码（见 `UpdateErrorCode`）；旧后端或未知错误为 null */
   errorCode: string | null;
+  failureStage?: "check" | "download";
+  tryingBackup?: boolean;
+  installBlock?: string | null;
+  openInstallBlock?: () => void;
   /**
    * 本次失败是否该弹 toast。
    *
@@ -200,12 +205,17 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const [downloadedBytes, setDownloadedBytes] = useState(0);
   const [totalBytes, setTotalBytes] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [failureStage, setFailureStage] = useState<"check" | "download">("check");
+  const [tryingBackup, setTryingBackup] = useState(false);
+  const [installBlock, setInstallBlock] = useState<string | null>(null);
+  const [installBlockTarget, setInstallBlockTarget] = useState<"db">();
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [errorToastAllowed, setErrorToastAllowed] = useState(true);
   const [restarting, setRestarting] = useState(false);
   const appHidden = useAppHidden();
   const autoDownload = useUpdateDownloadPreference();
   const attemptedDownloads = useRef(new Set<string>());
+  const promptedVersions = useRef(new Set<string>());
   const [preparing, setPreparing] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(() => {
@@ -220,6 +230,8 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const installTask = useRef<OperationHandle | null>(null);
   const checkingRef = useRef(false);
   const downloadingRef = useRef(false);
+  const updateRef = useRef(update);
+  updateRef.current = update;
   const statusRef = useRef(status);
   statusRef.current = status;
   const installedRef = useRef(false);
@@ -251,6 +263,8 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     const listeners = listenersRef.current!;
     if (!listeners.active || checkingRef.current || downloadingRef.current || restartingRef.current || statusRef.current === "ready" || statusRef.current === "installing") return;
     checkingRef.current = true;
+    setFailureStage("check");
+    setTryingBackup(false);
     userInitiatedRef.current = false; // 这一轮失败不弹 toast
     let requested = false;
     try {
@@ -288,6 +302,8 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     manualCheckRef.current = manual;
     userInitiatedRef.current = manual;
     setStatus("checking");
+    setFailureStage("check");
+    setTryingBackup(false);
     setError(null);
     setErrorCode(null);
 
@@ -358,6 +374,8 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     installedRef.current = false;
     userInitiatedRef.current = !automatic; // 后台失败只显示状态，不打断工作。
     setStatus("downloading");
+    setFailureStage("download");
+    setTryingBackup(false);
     setProgress(0);
     setProgressIndeterminate(false);
     setDownloadedBytes(0);
@@ -461,6 +479,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
           setBytesPerSec(bps ?? 0);
         }),
       );
+      track(await register("update:source", () => setTryingBackup(true)));
       track(
         await register<UpdateInfo | undefined>("update:ready", (event) => {
           checkingRef.current = false;
@@ -597,11 +616,14 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     restartingRef.current = true;
     installTask.current = beginOperation({ key: "update.install", label: "请求安装并重启软件", page: "settings", phase: "检查未保存文件、事务与运行任务" });
     setPreparing(true);
+    setInstallBlock(null);
+    setInstallBlockTarget(undefined);
     setError(null);
     setShowNotes(false);
     // Windows 安装器本身就会关闭应用，保护必须放在 install_update 之前。
     try {
-      if (!(await prepareRestart())) {
+      if (!(await prepareRestart((message, target) => { setInstallBlock(message); setInstallBlockTarget(target); }))) {
+        setInstallBlock(message => message ?? "安装已暂停，准备好后可继续安装。");
         installTask.current?.finish("cancelled", "用户取消了安装前检查");
         installTask.current = null;
         restartingRef.current = false;
@@ -622,6 +644,8 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     installTask.current?.update({ phase: "请求应用更新包；最终版本在重启后确认" });
     setStatus("installing");
     setRestarting(true);
+    const { currentVersion, version } = updateRef.current ?? {};
+    if (currentVersion && version) recordUpdateResult({ from: currentVersion, to: version, status: "pending" });
     try {
       // 下载成功仅表示包已验签；安装失败仍可重试同一个包。
       if (!installedRef.current) {
@@ -637,6 +661,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       installTask.current?.finish("failed", String(e));
       installTask.current = null;
       console.error("[Update] 重启失败:", e);
+      if (currentVersion && version) recordUpdateResult({ from: currentVersion, to: version, status: "failed" });
       restartingRef.current = false;
       setRestarting(false);
       setStatus("ready");
@@ -645,7 +670,13 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // 自动发现、下载和验签仅更新入口状态；详情只由用户主动打开。
+  // 最小化期间保留就绪状态，用户回到窗口时再展示安装选择。
+  useEffect(() => {
+    const version = update?.version;
+    if (appHidden || status !== "ready" || !version || promptedVersions.current.has(version)) return;
+    promptedVersions.current.add(version);
+    setShowNotes(true);
+  }, [appHidden, status, update?.version]);
 
   // ─── 更新内容弹窗 ────────────────────────
 
@@ -657,11 +688,17 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     setShowNotes(false);
   }, []);
 
+  const openInstallBlock = useCallback(() => {
+    if (!installBlockTarget) return;
+    setShowNotes(false);
+    window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: installBlockTarget }));
+  }, [installBlockTarget]);
+
   const retryUpdate = useCallback(async () => {
     if (statusRef.current !== "error") return;
-    if (update && errorCode !== "stale") await downloadAndInstall();
+    if (failureStage === "download" && update && errorCode !== "stale") await downloadAndInstall();
     else await manualCheckForUpdate();
-  }, [update, errorCode, downloadAndInstall, manualCheckForUpdate]);
+  }, [update, failureStage, errorCode, downloadAndInstall, manualCheckForUpdate]);
 
   // ─── 明确忽略版本（换版本自动解除）────
   const dismissUpdate = useCallback(() => {
@@ -700,13 +737,14 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       status, update, progress, progressIndeterminate, bytesPerSec, downloadedBytes, totalBytes,
-      restarting, preparing, notesOpen: showNotes, error, errorCode, errorToastAllowed,
+      restarting, preparing, notesOpen: showNotes, error, errorCode, errorToastAllowed, failureStage, tryingBackup, installBlock,
+      openInstallBlock: installBlockTarget ? openInstallBlock : undefined,
       checkForUpdate, manualCheckForUpdate, downloadAndInstall, restart, openUpdateNotes,
       closeUpdateNotes, retryUpdate, dismissUpdate, isDismissed, manualCheck, acknowledgeUptodate,
     }),
     [
       status, update, progress, progressIndeterminate, bytesPerSec, downloadedBytes, totalBytes,
-      restarting, preparing, showNotes, error, errorCode, errorToastAllowed,
+      restarting, preparing, showNotes, error, errorCode, errorToastAllowed, failureStage, tryingBackup, installBlock, installBlockTarget, openInstallBlock,
       checkForUpdate, manualCheckForUpdate, downloadAndInstall, restart, openUpdateNotes,
       closeUpdateNotes, retryUpdate, dismissUpdate, isDismissed, manualCheck, acknowledgeUptodate,
     ],

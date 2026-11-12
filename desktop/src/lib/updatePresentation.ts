@@ -16,3 +16,19 @@ export function updatePresentation({status, progress, progressIndeterminate, pre
   if (status === "error") return {label:"更新重试",title:`${target} 更新未完成，点击查看原因并重试`};
   return {label:"新版本",title:`发现 ${target}，点击查看更新内容`};
 }
+
+export function updateRetryLabel(stage?: "check" | "download", code?: string | null) {
+  return stage === "download" && code !== "stale" ? "重试下载" : "重新检查";
+}
+
+export function updatePrimaryAction(state: import("../contexts/UpdateContext").UpdateState) {
+  if (state.status === "ready") {
+    return { label: state.installBlock ? "继续安装" : state.error ? "重试安装" : "安装并重启", run: state.restart };
+  }
+  if (state.status === "available") return { label: "下载更新", run: state.downloadAndInstall };
+  if (state.status === "error") return { label: updateRetryLabel(state.failureStage, state.errorCode), run: state.retryUpdate };
+  if (state.status === "downloading" || state.status === "installing") {
+    return { label: state.status === "downloading" ? "查看进度" : "查看安装进度", run: state.openUpdateNotes };
+  }
+  return { label: "检查更新", run: state.manualCheckForUpdate };
+}

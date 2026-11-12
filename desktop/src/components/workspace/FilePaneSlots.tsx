@@ -1,4 +1,4 @@
-import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
+import { useContext, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
 import type { EncodingMark } from "../../lib/workspace";
 import type { TabMeta } from "../../lib/workspaceSession";
 import { isUnsaved } from "../../lib/tabDirty";
@@ -6,6 +6,7 @@ import type { FileTreeHandle } from "./FileTree";
 import type { useFileSession } from "../../hooks/useFileSession";
 import { FileTree } from "./FileTree";
 import { TreeHeader } from "./TreeHeader";
+import { TreeSvnContext } from "./TreeSvnContext";
 import { TreeSvnProvider } from "./TreeSvnProvider";
 import { EditorGroupTools } from "./EditorGroupTools";
 import { EditorGroupsPane } from "./EditorGroupsPane";
@@ -128,7 +129,7 @@ export function FilePaneSlots({
   const wantPanel = panelOpen && activeTool === "files" && (!documentOpen || servicesPanel || panelExpanded);
 
   const tree = (
-    <TreeSvnProvider root={root}>
+    <>
       {sideView === "search" ? (
         <>
           <div className="wb-pane-title">
@@ -173,7 +174,7 @@ export function FilePaneSlots({
             onRebuildModule={rebuildModulePath} />
         </>
       )}
-    </TreeSvnProvider>
+    </>
   );
 
   const tabStrip = (
@@ -220,14 +221,14 @@ export function FilePaneSlots({
   );
 
   return (
-    <>
-      {slot("tree", tree)}
+    <TreeSvnProvider root={root}>
+      {slot("tree", <>{tree}<TreeSvnSummary /></>)}
       {/* 执行/分组工具已并入文件标签条（EditorGroupsPane → TabStrip），
           不再单独占一行 36px 的 `.wb-code-tools`。 */}
       {slot("editor", editor)}
       {slot("status", status)}
       {slot("output", wantPanel ? output : null)}
-    </>
+    </TreeSvnProvider>
   );
 }
 
@@ -260,4 +261,8 @@ export function EmptyProjectSlots({
       {slot("output", servicesPanel ? output : null)}
     </>
   );
+}
+
+function TreeSvnSummary() {
+  return useContext(TreeSvnContext).summary;
 }

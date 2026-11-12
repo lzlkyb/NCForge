@@ -42,11 +42,18 @@ export function TreeFilterBar({
   );
 }
 
-export function TreeProblemToggle({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+export function TreeViewFilters({ mode, onToggle }: {
+  mode: "problems" | "changes" | null;
+  onToggle: (mode: "problems" | "changes") => void;
+}) {
   return <div className="wb-tree-problem-tools">
-    <button type="button" className="wb-status-btn" aria-pressed={active}
-      title="只显示有错误或警告的文件及所在目录" onClick={onToggle}>
+    <button type="button" className="wb-status-btn" aria-pressed={mode === "problems"}
+      title="只显示有错误或警告的文件及所在目录" onClick={() => onToggle("problems")}>
       <Icon name="alertTriangle" size={13} />只看问题
+    </button>
+    <button type="button" className="wb-status-btn" aria-pressed={mode === "changes"}
+      title="只显示有 SVN 改动的文件及所在目录" onClick={() => onToggle("changes")}>
+      <Icon name="gitBranch" size={13} />只看改动
     </button>
   </div>;
 }

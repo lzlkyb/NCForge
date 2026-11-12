@@ -1,4 +1,7 @@
-import { useState, type MouseEvent } from "react";
+import { useContext, useState, type MouseEvent } from "react";
+import { TreeSvnContext } from "../components/workspace/TreeSvnContext";
+import { svnCodeMenuItems } from "../components/workspace/svnCodeMenu";
+import { pathKey } from "../lib/treeSvn";
 import { toast } from "../components/ui/toast";
 import type { ContextMenuItem } from "../components/workspace/ContextMenu";
 import { buildTreeMenu } from "../components/workspace/treeMenu";
@@ -49,6 +52,7 @@ export function useTreeMenu({
   load: (path: string) => Promise<void>;
   setSelected: (target: TreeMenuTarget) => void;
 }) {
+  const svnFiles = useContext(TreeSvnContext).files;
   const [menu, setMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(
     null,
   );
@@ -63,7 +67,7 @@ export function useTreeMenu({
   };
 
   const menuItems = (m: TreeMenuTarget): ContextMenuItem[] =>
-    buildTreeMenu({
+    [...buildTreeMenu({
       target: m,
       root,
       canEdit: isEditable(m.path),
@@ -85,7 +89,7 @@ export function useTreeMenu({
         return mark ? mark.errors + mark.warnings : 0;
       })(),
       onShowProblems: showProblems,
-    });
+    }), ...svnCodeMenuItems(m.path, m.isDir ? undefined : svnFiles.get(pathKey(m.path)))];
 
   const openMenu = (e: MouseEvent, path: string, isDir: boolean) => {
     e.preventDefault();

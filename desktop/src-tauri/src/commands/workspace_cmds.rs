@@ -222,6 +222,8 @@ pub async fn set_workspace(
     super::type_search_cmds::spawn_prewarm_types(state.inner().clone());
     // jar 内符号索引：换 NC home 后旧索引作废，趁换工程一并重建
     super::jar_symbol_cmds::spawn_prewarm_jar_symbols(state.inner().clone());
+    // 新工作区的改动清单：缓存是「本进程 + 同一个根」，换根必然作废，重新预热一遍
+    super::svn_cmds::spawn_prewarm_svn(app.clone(), state.inner().clone());
     Ok(shown)
 }
 

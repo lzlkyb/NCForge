@@ -41,6 +41,8 @@ sha2 = "0.10"
 # md-5 经 oracledb、base64 经 reqwest/tauri 已在依赖树里，提成直接依赖不增加实际编译量。
 md-5 = "0.11"
 base64 = "0.22"
+minisign-verify = "0.2.5"
+semver = "1"
 tauri-plugin-process = "2"
 tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-opener = "2"
@@ -113,9 +115,6 @@ oracledb = { path = "../vendor/oracledb" }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
-# 仅为测试构造 UpdaterError::Semver 变体（插件错误的确定性分类断言）。
-# updater 插件已传递依赖 semver 1.x，这里不增加实际编译量。
-semver = "1"
 
 # ─── 开发 / 测试 profile：不生成依赖的调试信息 ───
 #

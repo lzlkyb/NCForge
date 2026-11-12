@@ -71,18 +71,18 @@ it("打开外链期间防止重复触发，失败显示恢复反馈", async () =
   await act(async () => reject(new Error("browser unavailable")));
   expect(host.textContent).toContain("打开链接失败"); expect(buttons("打开仓库")[0].disabled).toBe(false);
 });
-it("就绪更新只打开确认弹窗，检查中显示等待，不直接重启", () => {
+it("就绪时提供安装操作和独立的更新内容入口", () => {
   mocks.update.status = "ready"; render();
-  expect(buttons("检查更新")[0].disabled).toBe(true);
-  act(() => buttons("查看并安装")[0].click());
-  expect(mocks.update.openUpdateNotes).toHaveBeenCalledOnce(); expect(mocks.update.restart).not.toHaveBeenCalled();
+  act(() => buttons("安装并重启")[0].click());
+  act(() => buttons("查看更新内容")[0].click());
+  expect(mocks.update.openUpdateNotes).toHaveBeenCalledOnce(); expect(mocks.update.restart).toHaveBeenCalledOnce();
   mocks.update.status = "checking"; render();
   expect(host.querySelector('[data-loading="true"]')).not.toBeNull();
 });
 it("下载显示百分比与速率，完成进入校验，未知大小有明确说明", () => {
   Object.assign(mocks.update, { status: "downloading", progress: 50, downloadedBytes: 524288, totalBytes: 1048576, bytesPerSec: 262144 }); render();
   expect(host.textContent).toContain("50%"); expect(host.textContent).toContain("256 KB/s");
-  expect(buttons("查看下载进度")).toHaveLength(1);
+  expect(buttons("查看进度")).toHaveLength(1);
   mocks.update.progress = 100; render(); expect(host.textContent).toContain("正在验证更新包");
   mocks.update.progressIndeterminate = true; render(); expect(host.textContent).toContain("总大小未知");
 });

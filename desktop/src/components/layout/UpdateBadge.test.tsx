@@ -22,9 +22,8 @@ beforeEach(() => {
     status: "idle", update: { version: "0.1.1" }, progress: 42, progressIndeterminate: false,
     bytesPerSec: 100, downloadedBytes: 42, totalBytes: 100, preparing: false, restarting: false,
     notesOpen: false, error: null, errorCode: null, errorToastAllowed: true, manualCheck: false,
-    openUpdateNotes: h.open, downloadAndInstall: h.download, restart: h.restart,
+    openUpdateNotes: h.open, downloadAndInstall: h.download, restart: h.restart, retryUpdate: h.check,
     manualCheckForUpdate: h.check, acknowledgeUptodate: h.acknowledge,
-    // Even a previously ignored version must open details rather than directly download.
     isDismissed: () => true,
   };
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
@@ -37,15 +36,17 @@ async function render(status: string) {
 
 describe("update entry points", () => {
   for (const status of ["available", "downloading", "ready", "installing", "error"]) {
-    it(`${status}展开徽章与折叠项都只打开更新详情`, async () => {
+    it(`${status} 展开徽章与折叠项执行同一个主操作`, async () => {
       await render(status);
       const badge = host.querySelector('.update-slot button') as HTMLButtonElement;
       const rail = host.querySelector('.app-side-update') as HTMLButtonElement;
       expect(badge).not.toBeNull(); expect(rail).not.toBeNull();
       await act(async () => { badge.click(); rail.click(); });
-      expect(h.open).toHaveBeenCalledTimes(2);
-      expect(h.download).not.toHaveBeenCalled(); expect(h.restart).not.toHaveBeenCalled();
-      expect(h.check).not.toHaveBeenCalled();
+      const action = status === "available" ? h.download : status === "ready" ? h.restart : status === "error" ? h.check : h.open;
+      expect(action).toHaveBeenCalledTimes(2);
+      for (const other of [h.open, h.download, h.restart, h.check]) {
+        if (other !== action) expect(other).not.toHaveBeenCalled();
+      }
       expect(host.querySelectorAll('.update-slot')).toHaveLength(1);
     });
   }
@@ -72,11 +73,11 @@ describe("update entry points", () => {
     h.state.errorToastAllowed = false; h.state.error = "network";
     await render("error"); expect(h.toast).not.toHaveBeenCalled();
   });
-  it("弹框可见时下载完成不再叠加提示，后台完成仍给出通知", async () => {
+  it("就绪提醒由更新弹框提供，徽章不重复发通知", async () => {
     h.state.notesOpen = true; await render("downloading"); await render("ready");
     expect(h.toast).not.toHaveBeenCalled();
     h.state.notesOpen = false; await render("downloading"); await render("ready");
-    expect(h.toast).toHaveBeenCalledWith(expect.stringContaining("点击更新入口查看变化"), "success");
+    expect(h.toast).not.toHaveBeenCalled();
     expect(h.restart).not.toHaveBeenCalled();
   });
   it("手动检查最新版本保留提示并消费标记", async () => {
@@ -100,7 +101,7 @@ it("下载100%显示校验中，安装失败显示重试而不是就绪成功", 
   expect(host.querySelector(".app-side-update")?.textContent).toContain("校验中");
   h.state.error="install failed";
   await render("ready");
-  expect(host.querySelector(".header-badge")?.textContent).toContain("安装重试");
+  expect(host.querySelector(".header-badge")?.textContent).toContain("重试安装");
   expect(host.querySelector(".header-badge")?.className).toContain("error");
   expect(h.restart).not.toHaveBeenCalled();
 });

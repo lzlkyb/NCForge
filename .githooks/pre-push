@@ -1,17 +1,21 @@
 #!/bin/sh
 # ──────────────────────────────────────────────────
-#  pre-push — push 前跑门禁（**默认关闭，按需开启**）
+#  pre-push — push 前跑完整门禁（**默认开启**）
 #
-#  2026-11-08 起默认不跑：整套门禁 15 项要 9~12 分钟（vitest 一项就 9 分钟），
-#  而每次 push 都重跑一遍没有增量，把「推一下」变成「等一刻钟」。
-#  改为按需开启：
+#  2026-11-12 起默认跑：整套 15 项 9~12 分钟（vitest 一项约 9 分钟），但「push
+#  前知道红了」比「CI 红了再回头翻日志」便宜得多——尤其 tag 那趟的 CI 只构建、
+#  不阻断出包（见 build.yml），真正的把关点只剩本地和 main 的 CI。
 #
-#      NCFORGE_PUSH_GATE=1 git push origin main
+#  应急跳过（例如只改文档的提交不想等）：
 #
-#  仍然保留的兜底：
-#   - pre-commit：tokens / fmt / tsc（每次提交都跑，秒级）
-#   - CI（.github/workflows/build.yml）：完整的 gate.mjs，push 后必跑
-#  所以「本地不跑 = 没人管」不成立；只是把重活从「推送当场」挪到了「CI」。
+#      NCFORGE_PUSH_GATE=0 git push origin main
+#      git push --no-verify            # 连钩子都不进
+#
+#  🔴 只改文档的 push 也会跑全量：commit 那次按暂存后缀挑拣够了，push 是一次性
+#     的，按「差异里有没有 ts」猜要不要跑反而容易漏。嫌慢用上面两条。
+#
+#  🔴 发版不会因此跑两遍：release.mjs 第 1 步已经跑过全量 15 项，它 push 时带
+#     NCFORGE_PUSH_GATE=0，避免「刚验完又验一遍」（main + tag 两次 push = 24 分钟）。
 #
 #  清单的唯一真源：desktop/scripts/lib/gate-plan.mjs（增删门禁只改那里）。
 #  本文件故意只做一件事：调用它。
@@ -22,9 +26,8 @@
 #
 #  安装：git config core.hooksPath .githooks
 #        （npm install / npm run dev 会自动装，见 scripts/ensure-hooks.mjs）
-#  完全跳过：git push --no-verify
 #
-#  ⚠️ 开启后本钩子会跑 cargo clippy + cargo test，push 前别另外手动起 cargo，
+#  ⚠️ 本钩子会跑 cargo clippy + cargo test，push 前别另外手动起 cargo，
 #      否则会争抢 target/ 构建锁导致钩子失败。
 #  ⚠️ cargo-machete 需要一次性安装：cargo install cargo-machete --locked。
 # ──────────────────────────────────────────────────
@@ -34,9 +37,39 @@ set -e
 # 钩子由 git 从仓库根调用，但 cwd 不保证是仓库根。
 cd "$(dirname "$0")/.."
 
-if [ "${NCFORGE_PUSH_GATE:-0}" != "1" ]; then
-  echo "pre-push：跳过门禁（默认关闭）。要跑完整门禁：NCFORGE_PUSH_GATE=1 git push，或 cd desktop && node scripts/gate.mjs"
+# 默认开启。注意默认值是 1（2026-11-12 从 0 改过来）：`:-1` 里的 1 就是
+# 「没设环境变量时也跑」，显式 NCFORGE_PUSH_GATE=0 才跳过。
+if [ "${NCFORGE_PUSH_GATE:-1}" = "0" ]; then
+  echo "pre-push：NCFORGE_PUSH_GATE=0，跳过门禁（这次 push 只靠 CI）"
   exit 0
 fi
 
-exec node desktop/scripts/gate.mjs
+# dev 在跑时，cargo 若要重写 target/debug/nc-forge.exe 会失败在文件占用上
+# （报错本身看不出是 dev 没停）。但**不能预先拦**：2026-11-12 实测 dev 开着、
+# rust 零改动时 cargo test 照样通过（cargo 不必重写没变的产物），先拦就是误拦，
+# 而误拦会让人开始习惯性 NCFORGE_PUSH_GATE=0 —— 比没有钩子更糟。
+# 所以改成事后解释：先跑，红了再看 dev 是不是最可能的原因。
+dev_running() {
+  if command -v tasklist >/dev/null 2>&1; then
+    tasklist 2>/dev/null | grep -qi "nc-forge.exe"
+  elif command -v pgrep >/dev/null 2>&1; then
+    pgrep -qi "nc-forge" 2>/dev/null
+  else
+    return 1
+  fi
+}
+
+set +e
+node desktop/scripts/gate.mjs
+status=$?
+set -e
+
+if [ "$status" -ne 0 ] && dev_running; then
+  echo ""
+  echo "⚠️  门禁失败了，而 nc-forge.exe 正在运行。"
+  echo "    最可能的原因：cargo 要重写 target/ 下的产物却被 dev 占用（改了 rust 就会这样）。"
+  echo "    停掉 dev（Ctrl+C）后重跑：git push"
+  echo "    确认与 dev 无关才跳过门禁：NCFORGE_PUSH_GATE=0 git push"
+fi
+
+exit "$status"

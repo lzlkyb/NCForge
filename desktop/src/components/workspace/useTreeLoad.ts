@@ -40,12 +40,12 @@ export function useTreeLoad(
   const tree = useWorkspaceSelector((s) => s.tree);
   const epoch = workspaceEpoch();
   const { dirs, marks } = tree;
-  const [problemExpansion, setProblemExpansion] = useState<{ root: string; expanded: Set<string> } | null>(null);
-  const onlyProblems = problemExpansion?.root === root;
-  const expanded = onlyProblems ? problemExpansion.expanded : tree.expanded;
-  const setOnlyProblems = (enabled: boolean) => setProblemExpansion(enabled ? { root, expanded: tree.expanded } : null);
-  const filterMode = useRef(onlyProblems);
-  filterMode.current = onlyProblems;
+  const [filteredTree, setFilteredTree] = useState<{ root: string; mode: "problems" | "changes"; expanded: Set<string> } | null>(null);
+  const filtered = filteredTree?.root === root ? filteredTree : null;
+  const expanded = filtered?.expanded ?? tree.expanded;
+  const setMode = (mode: "problems" | "changes" | null) => setFilteredTree(mode ? { root, mode, expanded: tree.expanded } : null);
+  const filterMode = useRef(filtered?.mode ?? null);
+  filterMode.current = filtered?.mode ?? null;
   const fallbackRoots = useMemo(() => [root], [root]);
   const packageRoots = usePackageRoots(projectRoots ?? fallbackRoots, expanded, packageView);
   const { indexes: packageIndexes, ensure, invalidate } = usePackageIndexes(packageRoots, expanded, epoch);
@@ -197,7 +197,7 @@ export function useTreeLoad(
     }
   }, [hoist, expanded, dirs, load]);
 
-  const setExpandedPaths = useCallback((paths: string[], open: boolean, filtered = filterMode.current) => {
+  const setExpandedPaths = useCallback((paths: string[], open: boolean, mode = filterMode.current) => {
     if (workspaceEpoch() !== epoch) return;
     const update = (previous: Set<string>) => {
       if (paths.every(path => previous.has(path) === open)) return previous;
@@ -208,11 +208,11 @@ export function useTreeLoad(
       }
       return next;
     };
-    // The diagnostic view shares directory caches but keeps its own expansion state.
-    if (filtered) setProblemExpansion(previous => {
-      if (previous?.root !== root) return previous;
+    // 筛选视图复用目录缓存，展开状态独立于完整文件树。
+    if (mode) setFilteredTree(previous => {
+      if (previous?.root !== root || previous.mode !== mode) return previous;
       const next = update(previous.expanded);
-      return next === previous.expanded ? previous : { root, expanded: next };
+      return next === previous.expanded ? previous : { ...previous, expanded: next };
     });
     else setTree(t => {
       const next = update(t.expanded);
@@ -270,9 +270,9 @@ export function useTreeLoad(
       const parts = path.slice(owner.length).replace(/^[\\/]/, "").split(/[\\/]/).filter(Boolean);
       if (parts.length > REVEAL_MAX_DEPTH) return false;
       // 多工程树里工程根本身是一行，必须先展开它；单工程时 expanded 里本来就有它
-      const filtered = !explicit && filterMode.current;
-      if (explicit && filterMode.current) setProblemExpansion(null);
-      setExpandedPaths([owner], true, filtered);
+      const mode = explicit ? null : filterMode.current;
+      if (explicit && filterMode.current) setFilteredTree(null);
+      setExpandedPaths([owner], true, mode);
       const source = sourceForPath(packageRoots, path);
       const index = source ? await ensure(source) : null;
       if (workspaceEpoch() !== epoch) return false;
@@ -288,7 +288,7 @@ export function useTreeLoad(
       if (getSession().tree.dirs[owner]?.status !== "ok") await load(owner);
       for (const cur of revealDirs) {
         if (workspaceEpoch() !== epoch) return false;
-        setExpandedPaths([cur], true, filtered);
+        setExpandedPaths([cur], true, mode);
         if (getSession().tree.dirs[cur]?.status !== "ok") await load(cur);
       }
       return workspaceEpoch() === epoch;
@@ -296,5 +296,5 @@ export function useTreeLoad(
     [load, projectRoots, root, epoch, packageRoots, ensure, setExpandedPaths],
   );
 
-  return { dirs, expanded, marks, onlyProblems, setOnlyProblems, load, expand, toggle, toggleRow, depthOf, reveal, setExpandedPaths, packageRoots, packageIndexes, invalidatePackages: invalidate };
+  return { dirs, expanded, marks, mode: filtered?.mode ?? null, setMode, load, expand, toggle, toggleRow, depthOf, reveal, packageRoots, packageIndexes, invalidatePackages: invalidate };
 }

@@ -9,10 +9,10 @@ import { keyOf, type ChangeItem } from "../../lib/svn";
 const file = (name: string): ChangeItem => ({path:`C:/svn-ui/${name}.java`,rel:`module/src/${name}.java`,module:"module",letter:"M",status:"modified",revision:2,isDir:false,ignored:false});
 let dispose = () => {}, sequence = 0;
 afterEach(() => dispose());
-function render(files = [file("A"),file("B")]) {
+function render(files = [file("A"),file("B")], outdated = new Set<string>()) {
   const workspace = `C:/svn-ui-${++sequence}`, host = document.createElement("div"), root = createRoot(host), submit = vi.fn(), select = vi.fn();
   document.body.append(host); syncSvnDraft(workspace,files);
-  const paint = () => act(() => root.render(<CommitPanel items={files} root={workspace} reviewed={new Set([keyOf(files[0].path)])} busy={false} onSubmit={submit} onCancel={vi.fn()} onSelect={select} />));
+  const paint = () => act(() => root.render(<CommitPanel items={files} root={workspace} outdated={outdated} reviewed={new Set([keyOf(files[0].path)])} busy={false} onSubmit={submit} onCancel={vi.fn()} onSelect={select} />));
   paint(); dispose = () => { act(() => root.unmount()); host.remove(); };
   const button = (text: string) => [...host.querySelectorAll("button")].find(b => b.textContent === text)!;
   return {host,workspace,submit,select,files,paint,button};
@@ -35,6 +35,14 @@ describe("SVN commit UI", () => {
   });
   it("only-reviewed selection follows review identity", () => {
     const t = render(); act(() => t.button("只选已审").click()); expect([...getSvnDraft(t.workspace).picked]).toEqual([t.files[0].path]);
+  });
+  it("distinguishes reviewed, outdated and untracked files while excluding conflicts", () => {
+    const stale = { ...file("B"), letter: "?" as const };
+    const t = render([file("A"), stale, { ...file("C"), letter: "C" }], new Set([keyOf(stale.path)]));
+    expect(t.host.querySelector(".vc-commit-summary")?.textContent).toContain("已审 1 · 需重审 1");
+    expect(t.host.textContent).toContain("1 项冲突或受阻改动已排除");
+    expect(t.host.textContent).toContain("1 个未跟踪文件将在提交时加入 SVN");
+    expect(t.host.querySelectorAll(".vc-commit-file")).toHaveLength(2);
   });
   it("IME Ctrl+Enter does not submit a valid message", () => {
     const t = render(); const textarea = t.host.querySelector("textarea")!;

@@ -2695,6 +2695,7 @@ dependencies = [
  "log",
  "md-5",
  "memchr",
+ "minisign-verify",
  "notify",
  "oracledb",
  "regex",

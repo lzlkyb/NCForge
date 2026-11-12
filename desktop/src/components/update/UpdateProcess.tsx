@@ -1,5 +1,6 @@
 import { friendlyError, type UpdateStatus } from "../../contexts/UpdateContext";
 import { formatBytes, formatBytesPerSec } from "../../lib/utils";
+import { updateRetryLabel } from "../../lib/updatePresentation";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 
@@ -14,6 +15,10 @@ export interface UpdateDialogProcess {
   restarting: boolean;
   error: string | null;
   errorCode: string | null;
+  failureStage?: "check" | "download";
+  tryingBackup?: boolean;
+  installBlock?: string | null;
+  openInstallBlock?: () => void;
 }
 
 export const AVAILABLE_PROCESS: UpdateDialogProcess = {
@@ -46,6 +51,8 @@ export function UpdateProcess({ process }: { process: UpdateDialogProcess }) {
       {status === "downloading" && <strong>{process.progressIndeterminate ? "下载中" : `${pct}%`}</strong>}
     </div>
     <p>{preparing ? "处理好当前工作后才会启动安装；取消后会留在工作台。" : status === "installing" || restarting ? "安装器可能关闭应用，请等待新版本启动。" : status === "ready" ? process.error ? "安装或重启尚未完成，更新包仍已准备好，可以再次尝试。" : "确认后才安装并重启，软件不会倒计时强制重启。" : status === "downloading" ? verifying ? "验签完成后等待你确认安装，不会自动关闭工作台。" : "可收起到后台，随时从更新徽章查看进度。" : status === "error" ? friendlyError(process.error ?? "", process.errorCode).friendly : status === "checking" ? "检查完成后显示最新结果。" : "可以继续工作，软件会在后台检查新的更新。"}</p>
+    {process.tryingBackup && ["checking", "downloading"].includes(status) && <p role="status">正在尝试备用更新源…</p>}
+    {process.installBlock && <p role="status">{process.installBlock} {process.openInstallBlock && <Button size="sm" variant="outline" onClick={process.openInstallBlock}>前往处理</Button>}</p>}
     {status === "downloading" && <>
       <div className="update-progress-track" role="progressbar" aria-label="更新下载进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={process.progressIndeterminate ? undefined : pct} aria-valuetext={process.progressIndeterminate ? "总大小未知" : undefined}>
         <span className={process.progressIndeterminate ? "update-progress-unknown" : ""} style={process.progressIndeterminate ? undefined : { transform: `scaleX(${pct / 100})` }} />
@@ -71,8 +78,8 @@ export function UpdateActions({ process, onClose, onDownload, onDismiss, onResta
       {status === "available" && <Button key="primary" disabled={blocked} onClick={onDownload}><Icon name="download" size={15} aria-hidden="true" />{preparing ? "检查当前工作…" : "下载更新"}</Button>}
       {status === "downloading" && <Button key="primary" disabled><Icon name="download" size={15} aria-hidden="true" />{!process.progressIndeterminate && process.progress >= 100 ? "正在校验" : "正在下载"}</Button>}
       {status === "checking" && <Button key="primary" disabled>检查中…</Button>}
-      {status === "error" && <Button key="primary" disabled={blocked || !onRetry} onClick={onRetry}><Icon name="refresh" size={15} aria-hidden="true" />重试更新</Button>}
-      {status === "ready" && <Button key="primary" disabled={blocked || !onRestart} onClick={onRestart}><Icon name="refresh" size={15} aria-hidden="true" />{preparing ? "检查当前工作…" : process.error ? "重试安装并重启" : "重启更新"}</Button>}
+      {status === "error" && <Button key="primary" disabled={blocked || !onRetry} onClick={onRetry}><Icon name="refresh" size={15} aria-hidden="true" />{updateRetryLabel(process.failureStage, process.errorCode)}</Button>}
+      {status === "ready" && <Button key="primary" disabled={blocked || !onRestart} onClick={onRestart}><Icon name="refresh" size={15} aria-hidden="true" />{preparing ? "检查当前工作…" : process.installBlock ? "继续安装" : process.error ? "重试安装" : "安装并重启"}</Button>}
       {status === "installing" && <Button key="primary" disabled><Icon name="refresh" size={15} aria-hidden="true" />正在安装…</Button>}
     </div>
   </footer>;

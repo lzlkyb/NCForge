@@ -1,4 +1,6 @@
 import { memo, useContext, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { CodeSvnBadge } from "./CodeSvnBadge";
+import { svnStatusLabel } from "../../lib/svn";
 import { TreeSvnContext } from "./TreeSvnContext";
 import { treeFileKind, type JavaTreeKind } from "../../lib/treeFileKind";
 import { pathKey } from "../../lib/treeSvn";
@@ -51,6 +53,7 @@ export const TreeProjectRow = memo(function TreeProjectRow({
   onToggle: (path: string) => void;
   onContextMenu: (e: ReactMouseEvent, path: string, isDir: boolean) => void;
 }) {
+  const count = useContext(TreeSvnContext).directories.get(pathKey(path));
   return (
     <div
       className="wb-row wb-row-project"
@@ -79,6 +82,7 @@ export const TreeProjectRow = memo(function TreeProjectRow({
       <span className="wb-project-badge" data-current={current || undefined}>
         {badge}
       </span>
+      {!!count && <span className="wb-svn-count" title={`${count} 个文件有 SVN 变更`}>{count}</span>}
       <ProblemBadge mark={problem} path={path} name={name} scope="branch" tabStop={selected} />
     </div>
   );
@@ -216,7 +220,7 @@ export const TreeFileRow = memo(function TreeFileRow({
       aria-current={active || undefined}
       aria-expanded={memberExpanded}
       aria-label={name}
-      aria-description={[kind.label, problemDescription(problem)].filter(Boolean).join(" · ")}
+      aria-description={[kind.label, svn && svnStatusLabel[svn], problemDescription(problem)].filter(Boolean).join(" · ")}
       style={{ "--wb-tree-pad": `${padLeft}px` } as CSSProperties}
       data-active={active || undefined}
       data-selected={selected || undefined}
@@ -231,7 +235,7 @@ export const TreeFileRow = memo(function TreeFileRow({
       </span>}
       <TreeTypeMarker kind={kind} />
       <WorkspaceFileName name={name} className="wb-row-name" />
-      {svn && <span className="wb-svn-mark" data-st={svn} title={`SVN：${({ M: "已修改", A: "新增", D: "已删除", "?": "未纳管", C: "冲突", "!": "缺失", R: "替换", G: "已合并", "~": "类型冲突" })[svn]}`}>{svn}</span>}
+      {svn && <CodeSvnBadge status={svn} />}
       {bookmarks > 0 && (
         <span
           className="wb-bookmark-mark"

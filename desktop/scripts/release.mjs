@@ -11,7 +11,7 @@
  *   npm run release -- --patch --yes      # 非交互：用默认摘要，自动确认 push/tag
  *   npm run release -- --patch --yes --summary "一句话更新摘要"
  *                                         # 非交互但自己写摘要（更新弹窗顶部那句）
- *   npm run release -- --patch --skip-tests  # 跳过 cargo test + clippy 门禁（不推荐）
+ *   npm run release -- --patch --skip-tests  # 跳 cargo test（前端门禁仍跑，不推荐）
  *
  * 流程（自动）：
  *   1. 计算新版本号 → 只改 Cargo.toml（唯一真源）
@@ -19,11 +19,13 @@
  *   3. 在 CHANGELOG.md 顶部插新版本段（更新摘要交互填写；变更列表由 git log 自动分类生成草稿）
  *   4. 在 README 版本历史表插行
  *   5. 重新生成 changelog.generated.ts
- *   6. cargo test + cargo clippy --no-default-features 门禁（不过不提交）
+ *   6. gate.mjs 门禁（不过不提交）。全量 15 项；--skip-tests 时只跑前端 scope + cargo check
  *   7. git add 相关文件 → commit → push origin main → tag vX.Y.Z → push tag
  *   8. 打印两条后续命令（都不在 CI 里做）：要 mac 包怎么触发
- *   9. Gitee 镜像自动做：轮询等 GitHub CI 出完 Release（最长 45 分钟），随后
- *      自动跑 mirror-gitee.mjs（token 从环境变量或 .gitee-token 读）。--no-mirror 跳过。
+ *   9. Gitee 镜像自动做：轮询等 GitHub CI 出完 Release（最长 45 分钟），先把
+ *      「门禁绿/红」与「产物齐/缺」分开报（第 9 步的核对），再自动跑
+ *      mirror-gitee.mjs（token 从环境变量或 .gitee-token 读）。--no-mirror 跳过。
+ *      产物没出全会中止镜像；门禁红不挡（tag 构建本来就不让门禁阻断出包）。
  *
  * Gitee 镜像也是本地做的：CI 的境外 runner 到 Gitee 只有 ~50KB/s（推 13 分钟被断连），
  * 本地直连 2.2MB/s。以前靠人肉记得跑（发版脚本只打印提醒），v0.2.0 就忘了，导致
@@ -45,9 +47,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import { releaseReadiness } from "./lib/reship-plan.mjs";
+import { describeVerdict, formatJobLine, summarizeRunJobs } from "./lib/releaseGateReport.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DESKTOP = path.resolve(__dirname, "..");
@@ -80,9 +84,13 @@ else if (hasFlag("--major")) bumpType = "major";
 if (!bumpType && !explicitVersion) bumpType = "patch"; // 默认 patch
 
 // ── 工具函数 ──
-function run(cmd, cwd = ROOT, inherit = true) {
+function run(cmd, cwd = ROOT, inherit = true, env) {
   console.log(`\x1b[35m$ ${cmd}\x1b[0m  (cwd: ${path.relative(ROOT, cwd) || "."})`);
-  return execSync(cmd, { cwd, stdio: inherit ? "inherit" : "pipe" });
+  return execSync(cmd, {
+    cwd,
+    stdio: inherit ? "inherit" : "pipe",
+    env: env ? { ...process.env, ...env } : process.env,
+  });
 }
 function readCargoVersion() {
   const txt = fs.readFileSync(CARGO_PATH, "utf-8");
@@ -171,13 +179,14 @@ async function main() {
 
   if (DRY_RUN) {
     console.log("[dry-run] 以下为将执行步骤，不改动任何文件：");
-    console.log(`  1. Cargo.toml version: ${current} → ${next}`);
-    console.log("  2. node scripts/sync-version.mjs（同步 tauri.conf.json + package.json）");
-    console.log(`  3. CHANGELOG.md 顶部插入 ## [${next}] - ${todayISO()} 段`);
-    console.log("  4. README.md 版本历史表插入行");
-    console.log("  5. node scripts/gen-changelog.mjs（重新生成 changelog.generated.ts）");
-    if (!SKIP_TESTS) console.log("  6. cargo test + cargo clippy --no-default-features 门禁");
-    else console.log("  6. [--skip-tests] 仅 cargo check --no-default-features 保底");
+    if (!SKIP_TESTS)
+      console.log("  1. gate.mjs 门禁全量 15 项（前端 + fmt/machete/clippy/rust-test，约 12 分钟）");
+    else console.log("  1. [--skip-tests] 门禁只跑前端 scope + cargo check 保底");
+    console.log(`  2. Cargo.toml version: ${current} → ${next}`);
+    console.log("  3. node scripts/sync-version.mjs（同步 tauri.conf.json + package.json）");
+    console.log(`  4. CHANGELOG.md 顶部插入 ## [${next}] - ${todayISO()} 段`);
+    console.log("  5. README.md 版本历史表插入行");
+    console.log("  6. node scripts/gen-changelog.mjs（重新生成 changelog.generated.ts）");
     console.log(`  7. semver/tag 预检 → git add 版本文件+CHANGELOG+README+generated.ts → commit → push → tag ${tagName} → push tag`);
     console.log(
       NO_MIRROR
@@ -187,17 +196,45 @@ async function main() {
     return;
   }
 
-  // 1. bump Cargo.toml（唯一真源）
+  // 1. 门禁：一律走 gate.mjs 这一条入口，而且放在**任何写操作之前**。
+  //
+  // 为什么提前：以前它是第 7 步，前面已经改过 Cargo.toml / tauri.conf.json /
+  // package.json / CHANGELOG / README / changelog.generated.ts。门禁一红，工作树
+  // 就留下半截"版本号都改了但没提交"的改动，得人工 git checkout 收拾。现在红了
+  // 直接退出，什么都没动——失败零副作用。
+  //
+  // 🔴 这里曾经裸写 `cargo clippy --no-default-features`，而 CI 跑的是
+  //    `clippy --all-targets -- -D warnings`。同一个检查两个真源，v0.5.0 就是
+  //    这样「本地全绿、tag 构建红在 clippy 上」，一个包都没出。发版路径能自己
+  //    拼命令，就等于存在一条比 CI 宽松的路——现在改成调清单，参数不可能再漂，
+  //    并且 `gate.mjs --verify-ci` 会断言这里不再出现裸门禁命令。
+  //
+  // 为什么连前端一起跑：tag push 时 CI 的 frontend / test / check-macos 三个 job
+  // 都被 `if:` 跳过（发版只构建不验货），发版脚本这一次是前端门禁唯一的机会。
+  // 为什么 --skip-tests 仍跑前端：要跳的从来只是 cargo test 那几分钟，前端扫描
+  // 项都是秒级到十几秒，没有跳的理由。
+  const gateCli = `node "${path.join(__dirname, "gate.mjs")}"`;
+  if (!SKIP_TESTS) {
+    console.log("\x1b[32m[1/8]\x1b[0m 门禁全量 15 项（前端 + fmt/machete/clippy/rust-test，约 12 分钟）");
+    run(gateCli, DESKTOP);
+  } else {
+    // cargo check 不是清单里的门禁项，是「至少能编译」的保底，所以留在这里。
+    console.log("\x1b[32m[1/8]\x1b[0m 门禁 --skip-tests：前端全跑，cargo 侧只做 cargo check");
+    run(`${gateCli} --scope frontend`, DESKTOP);
+    run("cargo check --no-default-features", path.join(DESKTOP, "src-tauri"));
+  }
+
+  // 2. bump Cargo.toml（唯一真源）
   let cargoTxt = fs.readFileSync(CARGO_PATH, "utf-8");
   cargoTxt = cargoTxt.replace(/^version\s*=\s*"[^"]+"/m, `version = "${next}"`);
   fs.writeFileSync(CARGO_PATH, cargoTxt, "utf-8");
-  console.log(`\x1b[32m[1/7]\x1b[0m Cargo.toml → ${next}`);
+  console.log(`\x1b[32m[2/8]\x1b[0m Cargo.toml → ${next}`);
 
-  // 2. 同步其余文件
+  // 3. 同步其余文件
   run(`node ${path.join(__dirname, "sync-version.mjs")}`, DESKTOP);
-  console.log(`\x1b[32m[2/7]\x1b[0m 已同步 tauri.conf.json + package.json`);
+  console.log(`\x1b[32m[3/8]\x1b[0m 已同步 tauri.conf.json + package.json`);
 
-  // 3. 收集 git log 生成变更草稿
+  // 4. 收集 git log 生成变更草稿
   let logEntries = [];
   try {
     const lastTag = execSync("git describe --tags --abbrev=0", { cwd: ROOT, stdio: "pipe" })
@@ -207,9 +244,9 @@ async function main() {
       .toString()
       .trim();
     logEntries = log ? log.split("\n").map((l) => l.replace(/^[0-9a-f]+\s+/, "")) : [];
-    console.log(`\x1b[32m[3/7]\x1b[0m 自 ${lastTag} 起 ${logEntries.length} 条 commit 纳入草稿`);
+    console.log(`\x1b[32m[4/8]\x1b[0m 自 ${lastTag} 起 ${logEntries.length} 条 commit 纳入草稿`);
   } catch {
-    console.log("\x1b[33m[3/7]\x1b[0m 未找到上一 tag，跳过 git log 草稿");
+    console.log("\x1b[33m[4/8]\x1b[0m 未找到上一 tag，跳过 git log 草稿");
   }
 
   // 交互：更新摘要（用户向，显示在更新弹框）
@@ -241,7 +278,7 @@ async function main() {
   /** 最终进版本段的内容：Unreleased 手写条目（或回退用的 git log 草稿）。 */
   const sections = {};
 
-  // 4. 插入 CHANGELOG.md
+  // 5. 插入 CHANGELOG.md
   let changelog = readTextNormalized(CHANGELOG_PATH);
 
   // 消费 ## [Unreleased]：把其用户向小节并入本次发布，并从 CHANGELOG 删除该段，
@@ -297,14 +334,14 @@ async function main() {
     changelog = changelog.replace(unrelMatch[0] + "\n", "");
     unrelCollected = collected;
     console.log(
-      `\x1b[32m[4/7]\x1b[0m 已消费并归档 ## [Unreleased]（并入 ${collected} 条）`,
+      `\x1b[32m[5/8]\x1b[0m 已消费并归档 ## [Unreleased]（并入 ${collected} 条）`,
     );
   }
   // 有手写条目就只用手写条目（`sections` 已由上面填好），否则回退到 git log 草稿。
   if (!unrelCollected) {
     for (const [name, items] of Object.entries(draft)) if (items.length) sections[name] = items;
     console.log(
-      `\x1b[33m[4/7]\x1b[0m [Unreleased] 无条目，改用 ${logEntries.length} 条 git log 标题当草稿`,
+      `\x1b[33m[5/8]\x1b[0m [Unreleased] 无条目，改用 ${logEntries.length} 条 git log 标题当草稿`,
     );
   }
 
@@ -334,9 +371,9 @@ async function main() {
     changelog = changelog.replace(/(^#.*\n)/, `$1\n${newBlock}`);
   }
   fs.writeFileSync(CHANGELOG_PATH, changelog, "utf-8");
-  console.log(`\x1b[32m[4/7]\x1b[0m CHANGELOG.md 插入 [${next}] 段`);
+  console.log(`\x1b[32m[5/8]\x1b[0m CHANGELOG.md 插入 [${next}] 段`);
 
-  // 5. 插入 README 版本历史行
+  // 6. 插入 README 版本历史行
   let readme = readTextNormalized(README_PATH);
   // 🔴 R1：README 没有版本历史表时，replace 是静默 no-op——一路打印"插入版本行"成功，
   // 直到第 8 步 git 漏纳检查才以"README 未纳入暂存"这个误导性错误 exit 1。
@@ -365,26 +402,11 @@ async function main() {
     process.exit(1);
   }
   fs.writeFileSync(README_PATH, readme, "utf-8");
-  console.log(`\x1b[32m[5/7]\x1b[0m README.md 插入版本行`);
+  console.log(`\x1b[32m[6/8]\x1b[0m README.md 插入版本行`);
 
-  // 6. 重新生成 changelog.generated.ts
+  // 7. 重新生成 changelog.generated.ts
   run(`node ${path.join(__dirname, "gen-changelog.mjs")}`, DESKTOP);
-  console.log(`\x1b[32m[6/7]\x1b[0m 已重新生成 changelog.generated.ts`);
-
-  // 7. 门禁：cargo test + clippy
-  // cargo test 必须 --no-default-features：notifications feature 会拉入 GUI DLL
-  // 导致 test 二进制 0xc0000139（与 CI/pre-push 钩子保持一致）
-  if (!SKIP_TESTS) {
-    console.log("\x1b[35m[门禁] cargo test --no-default-features\x1b[0m");
-    run("cargo test --no-default-features", path.join(DESKTOP, "src-tauri"));
-    console.log("\x1b[35m[门禁] cargo clippy --no-default-features\x1b[0m");
-    run("cargo clippy --no-default-features", path.join(DESKTOP, "src-tauri"));
-  } else {
-    // --skip-tests 跳的是"慢门禁"（test/clippy），不是"不编译"：check 只要几十秒，
-    // 却能拦住拼写错误/类型错误这类一发版就红的事。留个保底。
-    console.log("\x1b[35m[门禁] --skip-tests：跳过 test/clippy，仍跑 cargo check 保底\x1b[0m");
-    run("cargo check --no-default-features", path.join(DESKTOP, "src-tauri"));
-  }
+  console.log(`\x1b[32m[7/8]\x1b[0m 已重新生成 changelog.generated.ts`);
 
   // 8. git add + commit + push + tag
   // tag 预检（Y10）：本地 tag 已存在时 `git tag` 会失败——但那一刻 commit 和 push
@@ -445,7 +467,7 @@ async function main() {
     process.exit(1);
   }
   run(`git commit -m "chg: 发版 v${next}"`);
-  console.log(`\x1b[32m[7/7]\x1b[0m 已 commit 发版 v${next}`);
+  console.log(`\x1b[32m[8/8]\x1b[0m 已 commit 发版 v${next}`);
 
   const wantPush = YES || (await ask("确认 push main 并打 tag v" + next + " ? (y/N)", "")) === "y";
   if (!wantPush) {
@@ -453,9 +475,13 @@ async function main() {
     console.log(`  git push origin main && git tag v${next} && git push origin v${next}`);
     return;
   }
-  run(`git push origin main`);
+  // 第 1 步刚跑完全量 15 项（≈12 分钟），这里再让 pre-push 跑一遍是纯重复，
+  // 而且 main 与 tag 是两次 push ⇒ 24 分钟白等。所以显式告诉钩子「已验过」。
+  // 这不是绕过门禁：门禁就在上面第 1 步，失败的话根本走不到这行。
+  const PUSH_ENV = { NCFORGE_PUSH_GATE: "0" };
+  run(`git push origin main`, ROOT, true, PUSH_ENV);
   run(`git tag ${tagName}`);
-  run(`git push origin ${tagName}`);
+  run(`git push origin ${tagName}`, ROOT, true, PUSH_ENV);
   console.log(`\x1b[32m✅ 发版 ${tagName} 完成，CI 正在构建 Windows 包（约 28 分钟）。\x1b[0m`);
   // mac 默认不发（见文件头说明）：把"要 mac 时敲什么"直接打出来，省得回头翻 workflow。
   console.log(`\x1b[36m   需要 macOS 包（+约 26 分钟，别重推 tag）：\x1b[0m`);
@@ -495,11 +521,11 @@ function findGiteeToken() {
   return "";
 }
 
-/** 每 60s 探一次 Release：已发布且 updater.json 资产出现 = CI 完成。超时返回 false。 */
+/** 每 60s 探一次 Release：已发布且更新清单与安装包齐全才就绪。超时返回 false。 */
 async function waitForReleaseAssets(tagName, timeoutMin = 45) {
   const ghRepo = resolveGithubRepo();
   const deadline = Date.now() + timeoutMin * 60_000;
-  console.log(`\x1b[35m[9] 等待 GitHub Release ${tagName} 出全产物（updater.json 出现即算完成，最长 ${timeoutMin} 分钟）…\x1b[0m`);
+  console.log(`\x1b[35m[9] 等待 GitHub Release ${tagName} 出全产物（校验更新清单及安装包，最长 ${timeoutMin} 分钟）…\x1b[0m`);
   while (Date.now() < deadline) {
     try {
       const out = execSync(`gh release view ${tagName} -R ${ghRepo} --json isDraft,assets`, {
@@ -509,7 +535,16 @@ async function waitForReleaseAssets(tagName, timeoutMin = 45) {
       });
       const rel = JSON.parse(out);
       const names = (rel.assets || []).map((a) => a.name);
-      if (!rel.isDraft && names.includes("updater.json")) return true;
+      if (!rel.isDraft && names.includes("updater.json")) {
+        const manifest = JSON.parse(execFileSync("gh", [
+          "release", "download", tagName, "-R", ghRepo, "--pattern", "updater.json", "--output", "-",
+        ], { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }));
+        const windows = manifest.platforms?.["windows-x86_64"];
+        const hasMac = Boolean(manifest.platforms?.["darwin-aarch64"]);
+        if (manifest.version === tagName.slice(1) && windows?.url &&
+            (!hasMac || manifest.platforms["darwin-aarch64"].url) &&
+            releaseReadiness(manifest, rel.assets, { wantMac: hasMac }).ready) return true;
+      }
     } catch {
       /* Release 还没建出来（CI 还在跑），等下一轮 */
     }
@@ -517,6 +552,54 @@ async function waitForReleaseAssets(tagName, timeoutMin = 45) {
     process.stdout.write(".");
   }
   return false;
+}
+
+/**
+ * 镜像之前的核对：把「门禁绿没绿」与「产物齐没齐」分开报。
+ *
+ * 为什么要有这一步：tag 推的 CI 里 frontend job 会跑但**不阻断**出包（见 build.yml
+ * 里 frontend 的注释），所以「Release 出全产物」不等于「门禁全绿」。v0.5.0 就是
+ * 产物齐全、run 标红，谁也没注意，直到手动补 mac 才发现 309 行的 ResultTable。
+ *
+ * 查不到只警告、不退出：核对失败不该挡住镜像（镜像才是这一步的活）。
+ */
+async function reportRunOutcome(tagName) {
+  const ghRepo = resolveGithubRepo();
+  try {
+    const list = JSON.parse(
+      execFileSync("gh", ["run", "list", "-R", ghRepo, "--workflow", "build.yml", "-L", "30", "--json", "databaseId,headBranch,createdAt"], {
+        cwd: ROOT,
+        stdio: "pipe",
+        encoding: "utf-8",
+      }),
+    );
+    // head_branch 对 tag 触发的 run 就是 tag 名；同名可能有多条（重发），取最新。
+    const mine = list
+      .filter((r) => r.headBranch === tagName)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    if (!mine.length) throw new Error(`找不到 ${tagName} 的构建 run`);
+
+    const runId = mine[0].databaseId;
+    const view = JSON.parse(
+      execFileSync("gh", ["run", "view", String(runId), "-R", ghRepo, "--json", "jobs"], { cwd: ROOT, stdio: "pipe", encoding: "utf-8" }),
+    );
+    const result = summarizeRunJobs(view.jobs || []);
+    const { level, title, hints } = describeVerdict(result);
+    const color = level === "ok" ? "\x1b[32m" : level === "warn" ? "\x1b[33m" : "\x1b[31m";
+    const mark = level === "ok" ? "✅" : level === "warn" ? "⚠️ " : "❌";
+
+    console.log(`\x1b[35m[门禁核对]\x1b[0m run ${runId} -R ${ghRepo}`);
+    for (const j of [...result.gates, ...result.builds]) {
+      const icon = j.conclusion === "success" ? "✅" : j.conclusion === "skipped" ? "⏭ " : "❌";
+      console.log(`   ${icon} ${formatJobLine(j)}`);
+    }
+    console.log(`${color}${mark} [结论] ${title}\x1b[0m`);
+    for (const h of hints) console.log(`   ${h}`);
+    return result;
+  } catch (e) {
+    console.log(`\x1b[33m[门禁核对] 跳过（${e.message || e}）。手动核：gh run view <id> --json jobs\x1b[0m`);
+    return null;
+  }
 }
 
 async function autoMirror(tagName) {
@@ -529,6 +612,18 @@ async function autoMirror(tagName) {
     );
     process.exit(1);
   }
+  // 门禁红不挡镜像（产物是好的，用户能正常升级）；但**产物没出全必须挡**——
+  // 残缺的 Release 镜像到 Gitee 会被当成「已同步」，老版本用户反而收到半套更新。
+  const outcome = await reportRunOutcome(tagName);
+  if (outcome && (outcome.verdict === "build-missing" || outcome.verdict === "both-bad")) {
+    console.error(
+      `\x1b[31m[GITEE MIRROR ERROR]\x1b[0m 产物没出全，先不镜像（残缺镜像会被后续对账当成"已同步"）。\n` +
+        `修好再补：node scripts/reship.mjs ${tagName} --full\n` +
+        `出齐之后只补镜像：node scripts/reship.mjs ${tagName} --mirror-only`,
+    );
+    process.exit(1);
+  }
+
   const token = findGiteeToken();
   if (!token) {
     console.log(`\x1b[33m[9] 未找到 GITEE_TOKEN（环境变量或 .gitee-token 都没有）。\x1b[0m CI Release 已就绪，手动跑：`);

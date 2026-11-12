@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { readUpdateResult, recordUpdateResult } from "../../lib/updateResult";
+import { compareVersion } from "../../lib/utils";
 import { Icon } from "../ui/icon";
 
 /** 上次「启动时运行的版本」。刻意不复用 `shell_changelog_last_seen`（那个记的是
@@ -38,7 +40,13 @@ export function UpgradeWelcomeBar({
       // 存储不可用（隐私模式等）：静默降级为不显示
       return;
     }
-    if (last && last !== currentVersion) setFromVersion(last);
+    const attempted = readUpdateResult();
+    if (attempted?.status === "pending" && attempted.to === currentVersion) {
+      recordUpdateResult({ from: attempted.from, to: currentVersion, status: "confirmed" });
+    } else if (last && compareVersion(currentVersion, last) > 0) {
+      recordUpdateResult({ from: last, to: currentVersion, status: "confirmed" });
+    }
+    if (last && compareVersion(currentVersion, last) > 0) setFromVersion(last);
   }, [currentVersion]);
 
   useEffect(() => {

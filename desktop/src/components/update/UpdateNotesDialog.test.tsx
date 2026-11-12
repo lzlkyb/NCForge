@@ -93,7 +93,7 @@ describe("update dialog behavior", () => {
     await mount(props.update, { ...AVAILABLE_PROCESS, status: "ready", progress: 100 });
     expect(document.body.textContent).toContain("更新包已下载并验证");
     expect(restart).not.toHaveBeenCalled(); expect(download).not.toHaveBeenCalled();
-    await act(async () => button("重启更新").click());
+    await act(async () => button("安装并重启").click());
     expect(restart).toHaveBeenCalledOnce(); expect(download).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
   });
@@ -101,7 +101,7 @@ describe("update dialog behavior", () => {
     await mount(null, { ...AVAILABLE_PROCESS, status: "error", errorCode: "network", error: "failed to fetch <img src=x>" });
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(document.body.textContent).toContain("无法连接更新服务器");
-    await act(async () => button("重试更新").click()); expect(retry).toHaveBeenCalledOnce();
+    await act(async () => button("重新检查").click()); expect(retry).toHaveBeenCalledOnce();
     expect(download).not.toHaveBeenCalled();
     expect(document.querySelectorAll("img")).toHaveLength(1);
   });

@@ -1,4 +1,4 @@
-import { updatePresentation } from "../../lib/updatePresentation";
+import { updatePresentation, updatePrimaryAction } from "../../lib/updatePresentation";
 import { useUpdate } from "../../contexts/UpdateContext";
 import { Icon, type IconName } from "../ui/icon";
 import { Spinner } from "../ui/Spinner";
@@ -24,16 +24,22 @@ const SHOWN = new Set(["available", "downloading", "ready", "installing", "error
  * 不渲染时 foot **不增高**：本项排在设置行上方，出现时只是把 foot 顶边往上推，
  * 设置行与其下元素原地不动，导航区少一行的空白 —— 没有横向或纵向位移。
  *
- * 与旧点一致：任何阶段都只打开详情，不直接下载/安装 —— 避免 ready 态误触重启。
+ * 动作和展开态徽章一致。
  */
 export function UpdateRailItem() {
-  const { status, update, progress, progressIndeterminate, preparing, restarting, error, openUpdateNotes } = useUpdate();
+  const state = useUpdate();
+  const { status, update, progress, progressIndeterminate, preparing, restarting, error } = state;
   if (!SHOWN.has(status)) return null;
 
   const downloading = status === "downloading";
   const pct = Math.min(100, Math.max(0, progress));
 
-  const {label, title} = updatePresentation({status,progress,progressIndeterminate,preparing,restarting,error,version:update?.version});
+  const primary = updatePrimaryAction(state);
+  const presentation = updatePresentation({status,progress,progressIndeterminate,preparing,restarting,error,version:update?.version});
+
+  const direct = !preparing && !restarting && ["ready", "available", "error"].includes(status);
+  const label = direct ? primary.label : presentation.label;
+  const title = direct ? [label, update?.version && `v${update.version}`, state.installBlock].filter(Boolean).join(" · ") : presentation.title;
 
   // tone 只落在图标上：`.app-side-item:hover` 会把按钮 color 改成前景色，挂在按钮上会被
   // hover 冲掉，状态色就一闪一闪。
@@ -48,7 +54,7 @@ export function UpdateRailItem() {
       aria-label={title}
       title={title}
       disabled={preparing}
-      onClick={openUpdateNotes}
+      onClick={() => void primary.run()}
     >
       <span className="app-side-update-icon">
         {downloading ? <ProgressRing progress={pct} indeterminate={progressIndeterminate} />

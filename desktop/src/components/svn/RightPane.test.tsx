@@ -10,9 +10,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ diff: vi.fn(), blame: vi.fn() }));
+const mocks = vi.hoisted(() => ({ diff: vi.fn(), blame: vi.fn(), read: vi.fn() }));
 
 vi.mock("../../lib/tauri", () => ({ invoke: vi.fn() }));
+vi.mock("../../lib/workspace", async importOriginal => ({ ...await importOriginal<typeof import("../../lib/workspace")>(), readFile: mocks.read }));
 vi.mock("../../lib/svnHistory", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/svnHistory")>();
   return { ...actual, svnBlameSnapshot: mocks.blame };
@@ -65,6 +66,28 @@ afterEach(() => {
 });
 
 describe("RightPane 差异失败重试", () => {
+  it.each(["?", "A"] as const)("新增状态 %s 直接读取本地文本", async letter => {
+    mocks.read.mockResolvedValue({ text: "class 新增 {}\n", encoding: "GBK", size: 17 });
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const qc = new QueryClient();
+    const mark = vi.fn(), next = vi.fn();
+    await act(async () => root!.render(<QueryClientProvider client={qc}>
+      <RightPane file={{ ...FILE, letter }} mode="diff" onMode={vi.fn()} reviewed={false} busy={false}
+        onToggleReviewed={mark} onOpenFile={vi.fn()} onMarkAndNext={next} onResolve={vi.fn()} onLater={vi.fn()} />
+    </QueryClientProvider>));
+    await flush();
+    expect(mocks.read).toHaveBeenLastCalledWith(FILE.path);
+    expect(mocks.diff).not.toHaveBeenCalled();
+    expect(host.querySelector("pre")?.textContent).toContain("class 新增 {}");
+    expect(host.textContent).toContain("1 行新增 · GBK");
+    expect(host.textContent).not.toContain("看历史");
+    act(() => host!.querySelector<HTMLButtonElement>('[aria-pressed="false"]')!.click());
+    expect(mark).toHaveBeenCalledOnce();
+    act(() => host!.querySelector<HTMLButtonElement>(".vc-review-next")!.click());
+    expect(next).toHaveBeenCalledOnce();
+  });
   it("点重试会再请求一次，成功后离开错误态", async () => {
     mocks.diff.mockRejectedValueOnce(new Error("svn: E155004 工作副本被锁"));
     mocks.diff.mockResolvedValueOnce({

@@ -1,8 +1,8 @@
 import { Icon } from "../ui/icon";
 import { SvnCheckbox } from "./SvnCheckbox";
-import { formatWhen, keyOf, letterTone, type ChangeGroup, type ChangeItem, type SortMode } from "../../lib/svn";
+import { formatWhen, keyOf, letterTone, svnStatusLabel, type ChangeGroup, type ChangeItem, type SortMode } from "../../lib/svn";
 import { isSvnCommittable, isSvnPicked, selectSvnPaths, toggleSvnPicked } from "../../lib/svnDraft";
-export function SvnFileRows({ group, closed, onToggleGroup, selected, tabStop, reviewed, picked, root, busy, sort, onSelect, onOpenFile }: { group: ChangeGroup; closed: boolean; onToggleGroup: () => void; selected: string | null; tabStop?: string; reviewed: ReadonlySet<string>; picked: ReadonlySet<string>; root: string; busy: boolean; sort: SortMode; onSelect: (item: ChangeItem) => void; onOpenFile?: (path: string) => void }) {
+export function SvnFileRows({ group, closed, onToggleGroup, selected, tabStop, reviewed, outdated, picked, root, busy, sort, onSelect, onOpenFile }: { group: ChangeGroup; closed: boolean; onToggleGroup: () => void; selected: string | null; tabStop?: string; reviewed: ReadonlySet<string>; outdated?: ReadonlySet<string>; picked: ReadonlySet<string>; root: string; busy: boolean; sort: SortMode; onSelect: (item: ChangeItem) => void; onOpenFile?: (path: string) => void }) {
   const eligible = group.items.filter(isSvnCommittable);
   const count = eligible.filter(it => isSvnPicked(picked,it.path)).length;
   const toggleGroup = () => {
@@ -32,10 +32,18 @@ export function SvnFileRows({ group, closed, onToggleGroup, selected, tabStop, r
           const index = rows.indexOf(e.currentTarget), target = e.key === "Home" ? 0 : e.key === "End" ? rows.length - 1 : Math.max(0,Math.min(rows.length - 1,index + (e.key === "ArrowDown" ? 1 : -1)));
           rows[target]?.focus(); rows[target]?.click();
         }}>
-          <span className="vc-badge" data-st={letterTone(it.letter)}>{it.letter}</span>
-          <span className="vc-file-label"><span className="vc-fn">{name}</span>{dir && <span className="vc-file-dir">{dir}</span>}</span>
-          {done && <span className="vc-reviewed-mark" title="已审查" aria-label="已审查"><Icon name="check" size={12} /></span>}
-          {sort === "mtime" && <span className="vc-when">{formatWhen(it.mtimeMs)}</span>}
+          <span className="vc-file-label">
+            <span className="vc-file-line">
+              <span className="vc-fn">{name}</span>
+              {!done && outdated?.has(keyOf(it.path)) && <span className="vc-commit-review" data-outdated>需重审</span>}
+              {done && <span className="vc-reviewed-mark" title="已审查" aria-label="已审查"><Icon name="check" size={12} /></span>}
+              <span className="vc-badge vc-badge-label" data-st={letterTone(it.letter)} title={`SVN ${it.letter} · ${svnStatusLabel[it.letter]}`}>{svnStatusLabel[it.letter]}</span>
+            </span>
+            {(dir || sort === "mtime") && <span className="vc-file-line">
+              <span className="vc-file-dir">{dir}</span>
+              {sort === "mtime" && <span className="vc-when">{formatWhen(it.mtimeMs)}</span>}
+            </span>}
+          </span>
         </button>
       </div>;
     })}

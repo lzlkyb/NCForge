@@ -6,7 +6,7 @@ import { ChangeList } from "./ChangeList";
 import { SvnFileRows } from "./SvnFileRows";
 import { getSvnDraft, syncSvnDraft } from "../../lib/svnDraft";
 import { setSvnListPrefs } from "../../lib/svnListPrefs";
-import type { ChangeItem } from "../../lib/svn";
+import { keyOf, type ChangeItem } from "../../lib/svn";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let dispose = () => {};
 afterEach(() => dispose());
@@ -35,4 +35,26 @@ it("row Space chooses submission while arrow keys browse visible files", () => {
   expect(document.activeElement).toBe(rows[1]); expect(select).toHaveBeenCalledWith(items[1]);
   act(() => rows[1].dispatchEvent(new KeyboardEvent("keydown",{key:" ",bubbles:true})));
   expect([...getSvnDraft(workspace).picked]).toEqual([items[0].path]);
+});
+
+it("需重审筛选只显示过期审查，重审后更新列表与数量", () => {
+  const workspace = "C:/svn-outdated-ui";
+  const items = ["A","B"].map(name => ({
+    path:`${workspace}/${name}.java`,rel:`${name}.java`,module:"m",letter:"M",status:"modified",revision:1,isDir:false,ignored:false,
+  } as ChangeItem));
+  const view = { groups:[{ module:"m",items }], shown:2,total:2,ignored:0 };
+  const host = document.createElement("div"), root = createRoot(host); document.body.append(host);
+  dispose = () => { act(() => root.unmount()); host.remove(); };
+  const outdated = new Set([keyOf(items[0].path)]);
+  const paint = (reviewed = new Set<string>()) => act(() => root.render(
+    <ChangeList root={workspace} view={view} reviewed={reviewed} outdated={outdated} selected={null} loading={false}
+      error={null} showIgnored={false} onToggleIgnored={vi.fn()} onSelect={vi.fn()} />,
+  ));
+  paint();
+  const chip = [...host.querySelectorAll<HTMLButtonElement>(".vc-chip")].find(button => button.textContent === "需重审1")!;
+  act(() => chip.click());
+  expect([...host.querySelectorAll(".vc-fn")].map(row => row.textContent)).toEqual(["A.java"]);
+  paint(new Set([keyOf(items[0].path)]));
+  expect(host.querySelectorAll(".vc-fn")).toHaveLength(0);
+  expect(chip.textContent).toBe("需重审0");
 });

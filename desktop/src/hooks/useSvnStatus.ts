@@ -1,15 +1,12 @@
 import { trackOperation, updateOperation } from "../lib/operations";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSession, useWorkspaceRoot } from "../lib/workspaceSession";
 import { workspaceEpoch } from "../lib/workspaceEpoch";
-import { initReviewMarks, syncReviewMarks } from "../lib/reviewMarks";
+import { getReviewedPaths, initReviewMarks, markReviewed, reviewMarksVersion, subscribeReviewMarks, syncReviewMarks } from "../lib/reviewMarks";
 import {
-  keyOf,
   onSvnScanProgress,
-  reviewedSet,
   svnInfo,
-  svnReviewMark,
   svnStatus,
   type ScanProgress,
   type StatusResult,
@@ -30,18 +27,10 @@ export function describeScan(result: StatusResult | undefined): string {
  * 5～8 秒一轮等于让桥进程永远在扫盘，用户点任何东西都在排队。
  * 改为「进页面扫一次 + 手动刷新 + 更新/提交/撤销后自动重扫」。
  *
- *   已审标记用「服务端有效标记 + 本地覆盖」两层合成：
- * 勾一个文件不能顺手 invalidate 整条 status 查询——那会把 7.6s 的扫描又跑一遍。
- *
- * 但覆盖层只能活在「下一次扫描结果还没回来」这个窗口里：后端 `valid_marks` 会按
- * mtime/size 把已被外部修改的文件剔出有效标记（`svn_review.rs` 的原话是「比不标更
- * 危险」），前端若让覆盖层跨刷新长期有效，Eclipse 改过的文件回工作台点「刷新」仍
- * 显示「已审」，用户据此跳过审查直接提交。因此每次扫描结果一到就清空覆盖层。
  */
 export function useSvnStatus() {
   const root = useWorkspaceRoot() ?? "";
   const qc = useQueryClient();
-  const [overrides, setOverrides] = useState<Map<string, boolean>>(() => new Map());
   /** 本次扫描的进度（桥每扫完一个模块推一次）；null = 没有进行中的扫描。 */
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
 
@@ -60,31 +49,10 @@ export function useSvnStatus() {
     enabled: !!root,
   });
 
-  // 代码面「已审」角标跟同一份数据（B4）：这里推过去，不额外发 SVN 扫描。
+  useSyncExternalStore(subscribeReviewMarks, reviewMarksVersion);
   useEffect(() => { initReviewMarks(); syncReviewMarks(status.data); }, [status.data]);
-  /** 每次新扫描结果落地就作废覆盖层，让后端标记成为唯一真相。 */
-  const scannedAt = status.dataUpdatedAt;
-  useEffect(() => {
-    setOverrides(new Map());
-  }, [scannedAt]);
-
-  const reviewed = useMemo(() => {
-    const set = reviewedSet(status.data);
-    for (const [k, on] of overrides) {
-      if (on) set.add(k);
-      else set.delete(k);
-    }
-    return set;
-  }, [status.data, overrides]);
-
-  const mark = useCallback(async (path: string, revision: number, next: boolean) => {
-    await svnReviewMark(path, revision, next);
-    setOverrides((prev) => {
-      const m = new Map(prev);
-      m.set(keyOf(path), next);
-      return m;
-    });
-  }, []);
+  const reviewed = getReviewedPaths();
+  const mark = (path: string, revision: number, next: boolean) => markReviewed(path, next, revision);
 
   /**
    * 重扫。**返回新数据**：更新/提交之后要拿这次扫描的结论判断「有没有冲突」，

@@ -29,6 +29,6 @@ const write = spawnSync("git", ["config", "core.hooksPath", ".githooks"], {
   stdio: "inherit",
 });
 if (write.status === 0) {
-  console.log("[hooks] 已启用 .githooks：提交前跑三项、push 前跑全量（清单见 scripts/lib/gate-plan.mjs）");
+  console.log("[hooks] 已启用 .githooks：提交前跑六项纯扫描、push 前跑全量（清单见 scripts/lib/gate-plan.mjs）");
 }
 process.exit(write.status ?? 0);

@@ -151,10 +151,6 @@
 .wb-svn-summary { display:flex; align-items:center; justify-content:space-between; padding:9px 12px; gap:8px; border-top:1px solid hsl(var(--border)); font-size:11px; color:hsl(var(--muted-foreground)); }
 .wb-svn-summary button { color:hsl(var(--primary)); }
 .wb-svn-count { margin-left:auto; font-size:11px; color:hsl(var(--muted-foreground)); }
-.wb-svn-mark { flex-shrink:0; font:11px Consolas,monospace; color:hsl(var(--warning-ink)); }
-.wb-svn-mark[data-st=A],.wb-svn-mark[data-st=G] { color:hsl(var(--success-ink)); }
-.wb-svn-mark[data-st=C],.wb-svn-mark[data-st=D],.wb-svn-mark[data-st="!"] { color:hsl(var(--destructive-ink)); }
-.wb-svn-mark[data-st="?"] { color:hsl(var(--muted-foreground)); }
 
 /* 顶层 `wb-tabbar` 已拆掉：文件标签条进代码面（`.wb-file-tabs`）、工具标签条进文档面
    （`.wb-doc-tabs`）。以前两者是同一条 flex 行，数据库页里两套文档标签会并列。 */

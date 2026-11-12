@@ -60,7 +60,16 @@ jobs:
   # 跑 ubuntu：纯 Node 工作，不需要 Rust/系统依赖，比 windows runner 快且便宜。
   frontend:
     name: Frontend (tsc + vitest + build)
-    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/v')
+    # 🔴 故意**不**按 tag 跳过（2026-11-12 改）：这一 job 盖的是纯扫描项（体量、
+    # 孤立文件、设计 token、UI 约定、tsc、vitest），而 tag 那趟恰恰是唯一产出
+    # 用户产物的构建。以前它在 tag 下被 `if` 跳过，v0.5.0 就这样把 309 行的
+    # ResultTable 发出去，直到手动补 mac 才暴露。
+    #
+    # 🔴 但**不**让 build 依赖它：红了只把 run 标红，不阻断出包。理由——CI 偶发
+    # 红（runner 抖动）挡住发版的代价，比「事后发现再补一个补丁版」更大。
+    # 所以「产物齐」≠「门禁绿」，release.mjs 第 9 步会把两者分开报
+    # （scripts/lib/releaseGateReport.mjs）。要改成阻断只需给 build-windows 加
+    # `needs: [frontend]`，但先确认接受「一个 lint 就能让发版不出包」。
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -121,12 +130,16 @@ jobs:
         run: node scripts/gate.mjs --only bundle-budget
         working-directory: desktop
 
-  # 轻量测试：仅 PR / 非 tag 的 push / 手动触发时跑，保护合入质量（用 dev 编译，快）。
-  # tag 发版时跳过本 job —— 由 build-windows 内的 `cargo test --release` 统一覆盖，
-  # 避免 dev + release 两遍全量依赖编译。
+  # Rust 门禁（fmt / machete / clippy / test），用 dev 编译，快。
+  #
+  # 🔴 tag 发版时**也跑**（2026-11-12 改）：以前这里按 tag 跳过，理由是「build-windows
+  # 内的 cargo test --release 已覆盖」——但那只覆盖 test，**不跑 clippy**。于是
+  # tag 那趟的 Rust 侧唯一缺的就是 lint，v0.5.0 的 `clippy -D warnings`（命令参数
+  # 8/7）正是这样在本地绿、在 CI 红。多一台 windows runner 与 26min 的 build 并行，
+  # 墙钟不增，只多花额度；换「发版前一定有人验过 Rust」值得。
+  # 一样不让 build 依赖它：红了标红，不阻断出包（见 frontend 的说明）。
   test:
     name: Rust test suite (Windows)
-    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -164,6 +177,10 @@ jobs:
   # 严格度与 Windows 侧齐平：两边都跑 `clippy --all-targets -D warnings`。
   check-macos:
     name: Rust check + test (macOS)
+    # 唯一保留按 tag 跳过的门禁 job（2026-11-12 决定）：macOS runner 计费 10x，
+    # 而 `build-macos` 一旦触发（`gh workflow run build.yml --ref vX -f with_macos=true`）
+    # 自己就会跑 `cargo test --release`，mac 侧不至于完全没人验。代价是「只发 Windows
+    # 的那趟，mac 编译覆盖为零」——已知并接受，要比对就手动带 with_macos 跑一次。
     if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     steps:

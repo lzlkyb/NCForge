@@ -24,7 +24,11 @@ describe("SQL 阅读布局", () => {
     expect(out).toContain("left outer join");
     expect(tokenText(out)).toEqual(tokenText(pagination));
     expect(await read(out)).toBe(out);
-  });
+    // 单独跑 386ms，但它要跑两次完整排版（第二次是幂等性验证）。全量 vitest
+    // 时 476 个文件抢 CPU、jsdom 环境累计创建 600s+，默认 5s 会偶发撞线
+    // （2026-11-12 实测一次失败、单跑必过）。放宽到 20s：仍能抓住真的性能退化
+    // （13 倍以上），又不至于让 pre-push 因为机器忙就拦住一次正常推送。
+  }, 20_000);
 
   it("默认入口使用阅读布局，短子句收拢，顶层 AND 保留层次", async () => {
     const sql = "select pk_org, name from org where enable = 1 and name is not null order by name";

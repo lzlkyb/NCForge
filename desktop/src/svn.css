@@ -1,3 +1,4 @@
+@import "./svn-status-badge.css";
 /* 版本控制页样式（vc-*）。单独一份，不复用 workspace.css / services.css：
    那两份是文件页与服务页的布局，混在一起只会更难读。 */
 
@@ -264,38 +265,6 @@
   white-space: nowrap;
   flex-shrink: 0;
 }
-.vc-badge {
-  width: 15px;
-  height: 15px;
-  border-radius: var(--r-control);
-  display: grid;
-  place-items: center;
-  font-size: 11px;
-  font-weight: 800;
-  flex-shrink: 0;
-  font-family: "Cascadia Mono", Consolas, monospace;
-}
-.vc-badge[data-st="mod"] {
-  color: hsl(var(--warning-ink));
-  background: hsl(var(--warning) / 0.16);
-}
-.vc-badge[data-st="add"] {
-  color: hsl(var(--success-ink));
-  background: hsl(var(--success) / 0.16);
-}
-.vc-badge[data-st="del"] {
-  color: hsl(var(--destructive-ink));
-  background: hsl(var(--destructive) / 0.14);
-}
-.vc-badge[data-st="conflict"] {
-  color: hsl(var(--destructive-foreground));
-  background: hsl(var(--destructive));
-}
-.vc-badge[data-st="untracked"] {
-  color: hsl(var(--muted-foreground));
-  background: hsl(var(--secondary));
-}
-
 .vc-chg-foot {
   border-top: 1px solid hsl(var(--border));
   padding: 8px 10px;

@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { APP_SLUG } from "../../lib/about";
 import { UpgradeWelcomeBar } from "./UpgradeWelcomeBar";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,6 +30,9 @@ describe("升级后首次启动欢迎条", () => {
     expect(container.textContent).toContain("已升级到");
     expect(container.textContent).toContain("v0.0.9");
     expect(localStorage.getItem(KEY)).toBe("0.1.0");
+    expect(JSON.parse(localStorage.getItem(`${APP_SLUG}.last_update_result`)!)).toMatchObject({
+      from: "0.0.9", to: "0.1.0", status: "confirmed",
+    });
 
     const link = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("查看更新内容"))!;
     await act(async () => link.click());

@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateProvider, friendlyError, useUpdate, type UpdateState } from "./UpdateContext";
 import { clearCompletedOperations, getOperations } from "../lib/operations";
 import { setUpdateDownloadPreference } from "../lib/updateDownloadPreference";
+import { initAppVisibility } from "../lib/appVisibility";
 import { APP_SLUG } from "../lib/about";
 
 // ─── 事件总线与 IPC 打桩 ────────────────────
@@ -71,6 +72,7 @@ const EVENTS = [  "update:checking",
   "update:available",
   "update:downloading",
   "update:progress",
+  "update:source",
   "update:ready",
   "update:error",
   "update:uptodate",
@@ -578,7 +580,9 @@ describe("确认安装与重启", () => {
     await advanceToRelaunch();
     expect(h.invoke).not.toHaveBeenCalledWith("install_update"); expect(h.relaunch).not.toHaveBeenCalled();
     expect(state().preparing).toBe(false); expect(state().notesOpen).toBe(false); expect(state().status).toBe("ready");
+    expect(state().installBlock).toContain("继续安装");
     await advanceToRelaunch(); expect(h.relaunch).toHaveBeenCalledTimes(1);
+    expect(state().installBlock).toBeNull();
   });
 });
 
@@ -785,6 +789,26 @@ describe("提醒等待期间的用户选择", () => {
 });
 
 describe("检查与下载的单飞", () => {
+  it("检查和下载失败各自重试，换源提示只保留在当前尝试", async () => {
+    await mount();
+    await emit("update:available", available());
+    await act(async () => state().manualCheckForUpdate());
+    await emit("update:source");
+    expect(state().tryingBackup).toBe(true);
+    await emit("update:error", { message: "offline", code: "network" });
+    h.invoke.mockClear();
+    await act(async () => state().retryUpdate());
+    expect(h.invoke).toHaveBeenCalledWith("check_update");
+    expect(h.invoke).not.toHaveBeenCalledWith("start_update");
+    expect(state().tryingBackup).toBe(false);
+    await emit("update:available", available());
+    await act(async () => state().downloadAndInstall());
+    await emit("update:error", { message: "offline", code: "network" });
+    h.invoke.mockClear();
+    await act(async () => state().retryUpdate());
+    expect(h.invoke).toHaveBeenCalledWith("start_update");
+  });
+
   it("检查命令返回后仍等事件终态，重复检查不并发", async () => {
     await mount(); h.invoke.mockClear();
     await act(async () => { await state().manualCheckForUpdate(); });
@@ -827,7 +851,7 @@ describe("更新任务按事件结束", () => {
 });
 
 describe("后台自动准备更新", () => {
-  it("默认自动下载但不打开详情或自动安装", async () => {
+  it("后台验签完成主动提示，同版本选稍后后不会再次弹出", async () => {
     localStorage.removeItem("shell_update_auto_download");
     await mount(); await emit("update:available", available());
     expect(h.invoke.mock.calls.filter(c => c[0] === "start_update")).toHaveLength(1);
@@ -835,11 +859,31 @@ describe("后台自动准备更新", () => {
     await emit("update:available", available());
     await emit("update:ready");
     expect(state().status).toBe("ready");
+    expect(state().notesOpen).toBe(true);
     expect(h.prepareRestart).not.toHaveBeenCalled();
     expect(h.invoke).not.toHaveBeenCalledWith("install_update");
+    await act(async () => state().closeUpdateNotes());
+    await emit("update:ready", available());
+    expect(state().notesOpen).toBe(false);
     await act(async () => state().openUpdateNotes());
     expect(state().notesOpen).toBe(true);
     expect(h.relaunch).not.toHaveBeenCalled();
+  });
+  it("最小化时下载完成，恢复窗口后提示安装", async () => {
+    await mount();
+    const disposeVisibility = initAppVisibility();
+    try {
+      await flush();
+      await emit("app:visibility", false);
+      await emit("update:available", available());
+      await emit("update:ready", available());
+      expect(state().status).toBe("ready");
+      expect(state().notesOpen).toBe(false);
+      await emit("app:visibility", true);
+      expect(state().notesOpen).toBe(true);
+    } finally {
+      await act(async () => disposeVisibility());
+    }
   });
   it("后台下载失败不弹错误提示，也不会无限重试", async () => {
     localStorage.removeItem("shell_update_auto_download");

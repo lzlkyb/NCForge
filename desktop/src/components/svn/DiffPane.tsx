@@ -1,4 +1,4 @@
-import { formatBytes, isMarkable, letterTone, type ChangeItem, type DiffResult } from "../../lib/svn";
+import { formatBytes, isMarkable, letterTone, svnStatusLabel, type ChangeItem, type DiffResult } from "../../lib/svn";
 import { useWorkspaceRoot } from "../../lib/workspaceSession";
 import { copyText } from "../../lib/utils";
 import { Icon } from "../ui/icon";
@@ -35,13 +35,13 @@ export function DiffPane({ file, data, reviewed, onToggleReviewed, onOpenInEdito
       originalLabel={data.baseEmpty ? "无 BASE · 新文件" : `BASE r${file.revision > 0 ? file.revision : "?"}`}
       modifiedLabel={file.letter === "D" ? "工作副本 · 已删除" : "工作副本 · 只读"}
       toolbar={<div className="vc-diff-file" title={file.path}>
-      <span className="vc-badge" data-st={letterTone(file.letter)} title={file.status}>{file.letter}</span>
+      <span className="vc-badge vc-badge-label" data-st={letterTone(file.letter)} title={`SVN ${file.letter}`}>{svnStatusLabel[file.letter]}</span>
       <b>{name}</b>{reviewed && <span aria-label="已审" title="已审"><Icon name="check" size={12} /></span>}
     </div>}
       actions={<>
         <button type="button" className="vc-btn vc-btn-sm vc-open-code" aria-label="在代码中打开" title="在代码中打开" onClick={onOpenInEditor}><Icon name="external" size={12} /><span>在代码中打开</span></button>
         {onFocus && !focused && <button type="button" className="vc-btn vc-btn-sm" aria-label="专注对比" title="专注对比" onClick={onFocus}><Icon name="panel" size={13} /><span className="vc-focus-label">专注对比</span></button>}
-        <button type="button" className="vc-btn vc-btn-sm vc-btn-primary vc-review-next" title="标记已审并查看下一个 · Alt+↓" disabled={disabled || !markable} onClick={onMarkAndNext}><Icon name="check" size={12} /><span>已审并下一个</span></button>
+        <button type="button" className="vc-btn vc-btn-sm vc-btn-primary vc-review-next" aria-keyshortcuts="Alt+ArrowDown" title="标记已审并查看下一项 · Alt+↓" disabled={disabled || !markable} onClick={onMarkAndNext}><Icon name="check" size={12} /><span>已审并看下一项</span></button>
         <Menu portal width="w-64" trigger={(open,toggle)=><button type="button" className="vc-btn vc-btn-sm" aria-label="当前文件更多操作" aria-haspopup="menu" aria-expanded={open} onClick={toggle}><Icon name="more" size={14}/></button>}>
           {close=><>
             <MenuItem label={reviewed ? "取消已审" : "标记已审"} icon="check" disabled={disabled || !markable} onClick={()=>{close();onToggleReviewed();}}/>

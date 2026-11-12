@@ -61,6 +61,8 @@ export interface StatusResult {
   hasConflict: boolean;
   /** 仍然有效的已审标记（key = 小写 + 正斜杠的绝对路径）。 */
   reviewed: string[];
+  /** 当前改动中，审查标记已失效的路径。 */
+  reviewOutdated?: string[];
   /** 这一轮只重扫了脏模块，其余沿用上一轮结果。 */
   incremental: boolean;
   /** 这一轮实际扫了几个模块（一个模块都没脏时为 0）。 */
@@ -264,17 +266,20 @@ export function keyOf(path: string): string {
 }
 
 /** 状态字母 → 语义色调（样式表按 data-st 上色）。 */
-export function letterTone(letter: string): "mod" | "add" | "del" | "conflict" | "untracked" {
+export function letterTone(letter: string): "mod" | "add" | "del" | "missing" | "conflict" | "untracked" {
   switch (letter) {
     case "M":
+    case "G":
     case "R":
       return "mod";
     case "A":
       return "add";
     case "D":
-    case "!":
       return "del";
+    case "!":
+      return "missing";
     case "C":
+    case "~":
       return "conflict";
     default:
       return "untracked";
@@ -289,7 +294,7 @@ export function letterTone(letter: string): "mod" | "add" | "del" | "conflict" |
  * 分母里算上它们，进度永远到不了 100%，用户没法判断是真没审完还是分母算错。
  */
 export function isMarkable(it: ChangeItem): boolean {
-  return !it.isDir && it.letter !== "C" && it.letter !== "D" && it.letter !== "!";
+  return !it.isDir && it.letter !== "C" && it.letter !== "D" && it.letter !== "!" && it.letter !== "~";
 }
 
 /**

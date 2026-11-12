@@ -29,6 +29,7 @@ export interface SvnView {
   selectedPath: string | null;
   mode: RightMode;
   commitOpen: boolean;
+  changeIntent: { path: string; action: "review" | "conflict" | "commit" } | null;
 }
 
 const initial = (): SvnView => ({
@@ -37,6 +38,7 @@ const initial = (): SvnView => ({
   selectedPath: null,
   mode: "diff",
   commitOpen: false,
+  changeIntent: null,
 });
 const views = new Map<string, ReturnType<typeof createSessionStore<SvnView>>>();
 const listeners = new Set<() => void>();
@@ -61,5 +63,11 @@ export function openPatchPage(): void {
   window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "svn" }));
   // 已经在版本控制页、但停在源码视图时，导航事件不改变任何 state；
   // 这条信号负责把文档区翻出来，否则「打开补丁打包」只是悄悄换了页内视图。
+  showWorkbenchDocument();
+}
+
+export function openSvnChange(path: string, action: NonNullable<SvnView["changeIntent"]>["action"]): void {
+  svnSession.set({ page: "review", selectedPath: path, mode: "diff", commitOpen: false, changeIntent: { path, action } });
+  window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "svn" }));
   showWorkbenchDocument();
 }

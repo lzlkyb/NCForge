@@ -66,6 +66,8 @@ pub struct StatusResult {
     pub has_conflict: bool,
     /// 已审标记（只含仍然有效的：文件没被改过）。前端还要拿它和当前 revision 比。
     pub reviewed: Vec<String>,
+    /// 本次扫描中仍有改动、但审查依据已失效的路径。
+    pub review_outdated: Vec<String>,
     /// 这一轮是不是增量：只重扫了脏模块，其余沿用上一轮结果。
     pub incremental: bool,
     /// 这一轮实际扫了几个模块（`Cached` 即一个模块都没脏时为 0）。
@@ -398,12 +400,21 @@ struct BridgeStatus {
     entries: Vec<RawEntry>,
 }
 
+/// 同一时刻只允许一个扫描在跑。
+///
+/// 预热在后台扫的时候用户点开版本控制页，两边会各起 8 个线程扫同一个工作副本——
+/// 实测 16 线程抢磁盘会让两个都变慢，而第二个扫描的结论和第一个没有区别。
+/// 后到的那个阻塞等前者结束，然后按增量走（通常 0 秒）。
+static SCAN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn scan_status(
     app: &AppHandle,
     st: &Arc<AppState>,
     cfg: &AppConfig,
     force: bool,
 ) -> Result<StatusResult, String> {
+    // 中毒恢复而非 unwrap：一次 panic 不该让之后的每次扫描都失败
+    let _one_at_a_time = SCAN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let root = root_of(cfg)?;
     let bridge = bridge_for(app, st, cfg)?;
     let root_s = crate::nc_home::strip_verbatim(&root).display().to_string();
@@ -436,9 +447,15 @@ fn scan_status(
     let mut cache = cached.unwrap_or_else(|| StatusCache::empty(&root_s, now));
     let mut scanned = 0i64;
     let mut modules_scanned = 0usize;
+    // 报给界面的「扫描于」：Cached 走法一个字节都没扫，报的必须是上一轮真正扫描的时间。
+    // 报 now 会让「扫描于 5 分钟前」显示成「刚刚」，`FreshnessBadge` 的陈旧变色也永远
+    // 不会触发——启动预热之后这条路径是常态，不修就等于一直在骗人。
+    let mut generated_at = now;
     match &plan {
         // 一个模块都没脏：cache 里就是结论，一个字节都不用扫
-        ScanPlan::Cached => {}
+        ScanPlan::Cached => {
+            generated_at = cache.generated_at_ms;
+        }
         ScanPlan::Full => {
             let got = fetch_status(app, &bridge, &root_s, None)?;
             scanned = got.scanned;
@@ -477,15 +494,75 @@ fn scan_status(
         }
     }
     let store = ReviewStore::load(&st.config_dir);
+    let reviewed = svn_review::valid_marks(&store, &revisions);
+    let reviewed_keys: std::collections::HashSet<_> = reviewed.iter().collect();
+    let review_outdated = store
+        .marks
+        .keys()
+        .filter(|key| revisions.contains_key(*key) && !reviewed_keys.contains(*key))
+        .cloned()
+        .collect();
     Ok(StatusResult {
         changes,
         scanned,
-        generated_at_ms: now,
+        generated_at_ms: generated_at,
         has_conflict,
-        reviewed: svn_review::valid_marks(&store, &revisions),
+        reviewed,
+        review_outdated,
         incremental: !matches!(plan, ScanPlan::Full),
         modules_scanned,
     })
+}
+
+/// 预热启动多久之后开始扫。
+///
+/// 不立刻扫：首屏渲染、类索引、类型索引都在同一块盘上，svn 这次全量要遍历两万多个
+/// 文件，挤进去只是让两边都慢。也不拖太久：用户很可能开机就直奔版本控制页。
+const SVN_WARMUP_DELAY_SECS: u64 = 8;
+
+/// 版本控制页的扫描预热：启动 / 切工作区后在后台先扫一遍。
+///
+/// 冷缓存的一次全量在 22431 个文件的工作副本上要 8.5 秒（format 10 每个目录一份
+/// `.svn`，只能逐目录 stat）。等用户点开版本控制页才开始扫，他就得盯着空白等 8.5 秒。
+/// 这里在启动后安静地扫一遍，结论落进 `svn_status_cache`；用户点进去时缓存可用、
+/// 脏集合为空，直接返回上一轮结论（0 秒）。
+///
+/// 三条边界：
+/// - 根下没有 `.svn` 直接退出：普通目录不值得为它起一次 JVM。
+/// - 失败只记日志：预热失败不该在界面上留下任何痕迹，版本页自己会重扫。
+/// - 跟随 `prewarm_index` 总开关：关掉后台预热的人不想让这些任务占盘。
+pub fn spawn_prewarm_svn(app: AppHandle, state: Arc<AppState>) {
+    tauri::async_runtime::spawn(async move {
+        let cfg = state.config.read().await.clone();
+        if !cfg.prewarm_index {
+            return;
+        }
+        let Ok(root) = root_of(&cfg) else {
+            return;
+        };
+        if !root.join(".svn").is_dir() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(SVN_WARMUP_DELAY_SECS)).await;
+        // 睡醒之后工作区可能已经换了：别拿旧配置给旧根预热
+        let current = state.config.read().await.workspace_root.clone();
+        if current.as_deref().map(Path::new) != Some(root.as_path()) {
+            return;
+        }
+        let st = Arc::clone(&state);
+        match tauri::async_runtime::spawn_blocking(move || scan_status(&app, &st, &cfg, false))
+            .await
+        {
+            Ok(Ok(r)) => log::info!(
+                "SVN 预热完成：{} 个条目{}",
+                r.scanned,
+                if r.has_conflict { "，有冲突" } else { "" }
+            ),
+            // 非工作副本、没有桥、凭据失效都走这里：用户没打开版本页，静默即可
+            Ok(Err(e)) => log::info!("SVN 预热跳过：{e}"),
+            Err(e) => log::warn!("SVN 预热任务失败：{e}"),
+        }
+    });
 }
 
 /// 把桥返回的条目按模块归位。

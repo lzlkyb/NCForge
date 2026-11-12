@@ -23,7 +23,7 @@ vi.mock("./localSaves", () => ({
 }));
 
 import {
-  initReviewMarks, isReviewed, markReviewed, resetReviewMarks, syncReviewMarks,
+  initReviewMarks, isReviewOutdated, isReviewed, markReviewed, resetReviewMarks, syncReviewMarks,
 } from "./reviewMarks";
 
 const path = "D:/work/src/A.java";
@@ -62,13 +62,16 @@ describe("reviewMarks revision 契约", () => {
     expect(isReviewed(path)).toBe(false);
   });
 
-  it("P2 回归：文件被外部改动时本地角标消失，并同步删后端标记（不闪回）", () => {
+  it("文件被外部改动后需要重审，旧扫描不会恢复角标", () => {
     initReviewMarks();
     syncReviewMarks(status([path]) as never);
     expect(isReviewed(path)).toBe(true);
     expect(h.ext.length).toBe(1);
     h.ext[0]([path]);
     expect(isReviewed(path)).toBe(false);
-    expect(h.mark).toHaveBeenCalledWith(path, -1, false);
+    expect(isReviewOutdated(path)).toBe(true);
+    expect(h.mark).not.toHaveBeenCalled();
+    syncReviewMarks(status([path]) as never);
+    expect(isReviewed(path)).toBe(false);
   });
 });

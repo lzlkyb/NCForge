@@ -2,6 +2,8 @@
 import { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TreeSvnContext } from "./TreeSvnContext";
+import { pathKey } from "../../lib/treeSvn";
 import { FileTree, type FileTreeHandle } from "./FileTree";
 import { getSession, setSession } from "../../lib/workspaceSession";
 import {
@@ -60,10 +62,11 @@ const onDeleted = vi.fn();
 const onCompileModule = vi.fn();
 const treeRef = createRef<FileTreeHandle>();
 
-const render = async (activePath: string | null = null, projects?: LinkedProject[]) => {
+const render = async (activePath: string | null = null, projects?: LinkedProject[], svn = { files: new Map(), directories: new Map(), summary: null }) => {
   await act(async () =>
     root.render(
       <ViewActivityContext.Provider value={true}>
+        <TreeSvnContext.Provider value={svn}>
         <FileTree
           ref={treeRef}
           root={ROOT}
@@ -76,6 +79,7 @@ const render = async (activePath: string | null = null, projects?: LinkedProject
           openPaths={[]}
           onCompileModule={onCompileModule}
         />
+        </TreeSvnContext.Provider>
       </ViewActivityContext.Provider>,
     ),
   );
@@ -166,6 +170,35 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+});
+
+it("只看改动保留父目录，退出后恢复展开状态和滚动位置", async () => {
+  const name = "changed.txt";
+  const invoke = mocks.invoke.getMockImplementation()!;
+  mocks.invoke.mockImplementation(async (cmd, args) =>
+    cmd === "fs_list_dir" && args?.path === MODULES
+      ? [{ name, isDir: false, size: 1 }]
+      : invoke(cmd, args),
+  );
+  await render(null, undefined, {
+    files: new Map([[pathKey(MODULES + "/" + name), "M"]]),
+    directories: new Map([[pathKey(ROOT), 1], [pathKey(MODULES), 1]]),
+    summary: null,
+  });
+  const list = container.querySelector<HTMLElement>('[role="tree"]')!;
+  const toggle = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("只看改动"));
+  list.scrollTop = 90;
+  await click(toggle);
+  expect(rowByExact("readme.txt")).toBeNull();
+  expect(rowByExact("modules")).toBeTruthy();
+  await click(rowByExact("modules"));
+  expect(rowByExact(name)).toBeTruthy();
+  expect(getSession().tree.expanded.has(MODULES)).toBe(false);
+  list.scrollTop = 0;
+  await click(toggle);
+  expect(rowByExact("readme.txt")).toBeTruthy();
+  expect(rowByExact(name)).toBeNull();
+  expect(list.scrollTop).toBe(90);
 });
 
 describe("树目录文件类型", () => {

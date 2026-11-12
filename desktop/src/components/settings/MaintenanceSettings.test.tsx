@@ -69,22 +69,22 @@ describe("维护设置入口", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("open_external", { url: "https://github.com/lzlkyb/NCForge" });
   });
 
-  it("就绪安装入口打开现有弹框，避免跳过确认立即重启", async () => {
+  it("就绪时主操作进入安装预检，更新内容可单独打开", async () => {
     mocks.update.status = "ready";
     await mount(<UpdateSettings />);
-    expect(button("检查更新").disabled).toBe(true);
-    await act(async () => button("查看并安装").click());
+    await act(async () => button("安装并重启").click());
+    await act(async () => button("查看更新内容").click());
     expect(mocks.update.openUpdateNotes).toHaveBeenCalledOnce();
-    expect(mocks.update.restart).not.toHaveBeenCalled();
+    expect(mocks.update.restart).toHaveBeenCalledOnce();
   });
 
-  it("下载大小未知时不提供虚假的百分比，并禁用重新检查", async () => {
+  it("下载大小未知时不提供百分比，可查看进度", async () => {
     Object.assign(mocks.update, { status: "downloading", progress: 23, progressIndeterminate: true, downloadedBytes: 1000 });
     await mount(<UpdateSettings />);
     const progress = container.querySelector('[role="progressbar"]')!;
     expect(progress.hasAttribute("aria-valuenow")).toBe(false);
     expect(progress.getAttribute("aria-valuetext")).toBe("总大小未知");
-    expect(button("检查更新").disabled).toBe(true);
+    expect(button("查看进度").disabled).toBe(false);
     expect(container.textContent).toContain("总大小未知");
   });
 

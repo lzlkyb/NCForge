@@ -6,14 +6,18 @@ import { HistoryView } from "./HistoryView";
 import { BlameView } from "./BlameView";
 import { ConflictPane } from "./ConflictPane";
 import {
+  formatBytes,
   friendlySvnError,
   isMarkable,
+  letterTone,
+  svnStatusLabel,
   svnDiff,
   type ChangeItem,
 } from "../../lib/svn";
 import { svnBlameSnapshot } from "../../lib/svnHistory";
 import { useWorkspaceRoot } from "../../lib/workspaceSession";
 import { workspaceEpoch } from "../../lib/workspaceEpoch";
+import { readFile } from "../../lib/workspace";
 
 export type RightMode = "diff" | "log" | "blame";
 
@@ -31,6 +35,7 @@ export function RightPane({
   busy,
   onToggleReviewed,
   onOpenFile,
+  onPrepareNew,
   onMarkAndNext,
   onResolve,
   onLater,
@@ -45,6 +50,7 @@ export function RightPane({
   busy: boolean;
   onToggleReviewed: () => void;
   onOpenFile: (path: string) => void;
+  onPrepareNew?: () => void;
   onMarkAndNext: () => void;
   onResolve: (choice: "mine" | "theirs" | "base") => void;
   onLater: () => void;
@@ -58,7 +64,14 @@ export function RightPane({
   const isConflict = file?.letter === "C";
   /** 已删除（D）/ 缺失（!）：盘上没有内容可对比，也不该去拉 BASE。 */
   const isGone = file?.letter === "!";
-  const needDiff = !!file && !isConflict && !file.isDir && !isGone;
+  const isNew = file?.letter === "?" || file?.letter === "A";
+  const newFile = useQuery({
+    queryKey: ["svn-new-file", root, epoch, path, file?.letter, file?.mtimeMs],
+    queryFn: () => readFile(path),
+    enabled: isNew && !file?.isDir,
+    retry: false,
+  });
+  const needDiff = !!file && !isNew && !isConflict && !file.isDir && !isGone;
 
   const diff = useQuery({
     queryKey: ["svn-diff", root, epoch, path],
@@ -70,7 +83,7 @@ export function RightPane({
   const blame = useQuery({
     queryKey: ["svn-blame-snapshot", root, epoch, path],
     queryFn: () => svnBlameSnapshot(path),
-    enabled: !!file && !file.isDir && mode === "blame",
+    enabled: !!file && !isNew && !file.isDir && mode === "blame",
     retry: false,
   });
 
@@ -78,7 +91,8 @@ export function RightPane({
   // DiffPane 的 hook 数已经贴着门禁上限（8），再塞一个监听就要拆组件了。
   useEffect(() => {
     // 目录、已删除、缺失、冲突都标记不了（见 `isMarkable`），不接这个快捷键
-    if (!file || !isMarkable(file) || disabled || mode !== "diff" || diff.isFetching) return;
+    const readable = isNew ? newFile.data && !newFile.isFetching : diff.data && !diff.isFetching;
+    if (!file || !isMarkable(file) || disabled || mode !== "diff" || !readable) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || !e.altKey || e.key !== "ArrowDown") return;
       if ((e.target as HTMLElement)?.closest("input,textarea,select,[contenteditable='true']")) return;
@@ -89,9 +103,9 @@ export function RightPane({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [file, onMarkAndNext, disabled, mode, diff.isFetching]);
+  }, [file, onMarkAndNext, disabled, mode, diff.data, diff.isFetching, isNew, newFile.data, newFile.isFetching]);
 
-  if (mode === "log" && root) {
+  if (mode === "log" && root && !isNew) {
     const module = file?.rel.includes("/") ? `${root.replace(/[\\/]$/, "")}/${file.rel.split("/")[0]}` : undefined;
     return <HistoryView key={`${root}:${epoch}:${path}:${historyRevision ?? ""}`} path={file?.path ?? root} title={file?.rel ?? "工作副本"} modulePath={module} initialRevision={historyRevision} onBack={() => { setHistoryRevision(undefined); onMode("diff"); }} />;
   }
@@ -104,11 +118,35 @@ export function RightPane({
           <div>
             从左边选一个文件开始审查
             <br />
-            标记已审后按 <kbd>Alt</kbd>+<kbd>↓</kbd> 逐个往下走
+            按 <kbd>Alt</kbd>+<kbd>↓</kbd> 标记已审并查看下一项
           </div>
         </div>
       </section>
     );
+  }
+
+  if (isNew) {
+    const data = newFile.data;
+    const binary = String(newFile.error ?? "").includes("疑似二进制文件");
+    const lines = data?.text ? data.text.split(/\r\n|\n|\r/).length - Number(/[\r\n]$/.test(data.text)) : 0;
+    return <section className="vc-main">
+      <div className="vc-bar">
+        <b title={file.rel}>{file.rel.split("/").pop()}</b>
+        <span title={`SVN ${file.letter}`}>{file.letter === "A" ? "已加入 SVN · 待提交" : "本地新增 · 未加入 SVN"}</span>
+        <span className="vc-sp" />
+        {data && isMarkable(file) && <button type="button" className="vc-btn vc-btn-sm vc-btn-primary vc-review-next" aria-keyshortcuts="Alt+ArrowDown" title="标记已审并查看下一项 · Alt+↓" disabled={disabled || newFile.isFetching} onClick={onMarkAndNext}><Icon name="check" size={12} /><span>已审并看下一项</span></button>}
+        {data && <button type="button" className="vc-btn vc-btn-sm" aria-pressed={reviewed} disabled={disabled || newFile.isFetching} onClick={onToggleReviewed}>{reviewed ? "取消已审" : "标记已审"}</button>}
+        {onPrepareNew && <button type="button" className="vc-btn vc-btn-sm" disabled={disabled} onClick={onPrepareNew}>准备提交</button>}
+        <button type="button" className="vc-btn vc-btn-sm" onClick={() => onOpenFile(file.path)}>{file.isDir ? "打开目录" : "打开编辑器"}</button>
+      </div>
+      {file.isDir ? <div className="vc-empty">{file.rel} · 新增目录</div>
+        : binary ? <div className="vc-empty">{file.rel} · 二进制文件</div>
+        : newFile.error ? <div className="vc-alert" data-tone="warn" role="alert">读取本地文件失败：{String(newFile.error)} <button type="button" className="vc-btn vc-btn-sm" disabled={newFile.isFetching} onClick={() => void newFile.refetch()}>重试</button></div>
+        : data ? <>
+          <div className="vc-bar">{lines} 行新增 · {data.encoding} · {formatBytes(data.size)}</div>
+          <pre aria-label="新增文件内容" tabIndex={0} style={{ flex: 1, minHeight: 0, overflow: "auto", margin: 0, padding: "12px 16px", fontFamily: "var(--font-mono)", tabSize: 4 }}>{data.text || "空文件"}</pre>
+        </> : <div className="vc-empty" role="status">正在读取本地文件…</div>}
+    </section>;
   }
 
   if (isConflict) {
@@ -135,8 +173,8 @@ export function RightPane({
     return (
       <section className="vc-main">
         <div className="vc-bar">
-          <span className="vc-badge" data-st="untracked">
-            {file.letter}
+          <span className="vc-badge vc-badge-label" data-st="untracked" title={`SVN ${file.letter}`}>
+            {svnStatusLabel[file.letter]}
           </span>
           <b>{file.rel}</b>
           <span className="vc-sp" />
@@ -147,7 +185,7 @@ export function RightPane({
         <div className="vc-empty">
           <Icon name="folder" size={22} />
           <div>
-            目录级的改动（新增 / 未纳管 / 属性变更）
+            目录级的改动（新增 / 未跟踪 / 属性变更）
             <br />
             SVN 把整个目录当一个条目报出来，里面的文件不单独列
           </div>
@@ -162,8 +200,8 @@ export function RightPane({
     return (
       <section className="vc-main">
         <div className="vc-bar">
-          <span className="vc-badge" data-st="del">
-            {file.letter}
+          <span className="vc-badge vc-badge-label" data-st={letterTone(file.letter)} title={`SVN ${file.letter}`}>
+            {svnStatusLabel[file.letter]}
           </span>
           <b>{file.rel.slice(file.rel.lastIndexOf("/") + 1)}</b>
           <span className="vc-sp" />
@@ -215,8 +253,8 @@ export function RightPane({
     return (
       <section className="vc-main">
         <div className="vc-bar">
-          <span className="vc-badge" data-st="untracked">
-            {file.letter}
+          <span className="vc-badge vc-badge-label" data-st="untracked" title={`SVN ${file.letter}`}>
+            {svnStatusLabel[file.letter]}
           </span>
           <b>{file.rel.slice(file.rel.lastIndexOf("/") + 1)}</b>
           <span className="vc-sp" />

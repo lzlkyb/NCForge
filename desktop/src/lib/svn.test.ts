@@ -62,11 +62,11 @@ describe("letterTone", () => {
     expect(letterTone("R")).toBe("mod");
     expect(letterTone("A")).toBe("add");
     expect(letterTone("D")).toBe("del");
-    expect(letterTone("!")).toBe("del");
+    expect(letterTone("!")).toBe("missing");
     expect(letterTone("C")).toBe("conflict");
     expect(letterTone("?")).toBe("untracked");
-    // SVN 还有 G/U/~ 等状态，界面上统一按「未纳管」的灰色处理即可
-    expect(letterTone("~")).toBe("untracked");
+    expect(letterTone("~")).toBe("conflict");
+    expect(letterTone("G")).toBe("mod");
   });
 });
 

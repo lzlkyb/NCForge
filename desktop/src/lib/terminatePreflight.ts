@@ -86,16 +86,28 @@ export async function ensureFilesSaved(action = "退出", required = false): Pro
  *
  * 返回 false = 用户取消 / 保存失败 / 提交回滚失败，调用方必须放弃重启。
  */
-export async function prepareRestart(): Promise<boolean> {
+export async function prepareRestart(onBlocked?: (message: string, target?: "db") => void): Promise<boolean> {
   const { isNcTaskRunning } = await import("./ncTasks");
   const hasRunningWork = () => getSession().compiling || isNcTaskRunning() || getDb().tabs.some(tab =>
     tab.kind === "sql" ? isRunning(tab) : tab.kind === "dict" ? tab.state.running : false,
   );
   if (hasRunningWork()) {
-    toast("编译、数据库或 NC 任务仍在运行，请完成后再安装更新", "warning");
+    const dbTasks = getDb().tabs.flatMap(tab => {
+      if (tab.kind === "sql" && isRunning(tab) || tab.kind === "dict" && tab.state.running) {
+        return [tab.title || "数据库任务"];
+      }
+      return [];
+    });
+    const tasks = [getSession().compiling ? "编译" : "", isNcTaskRunning() ? "NC 任务" : "", ...dbTasks].filter(Boolean);
+    const message = `${tasks.join("、")}仍在运行，请完成后继续安装。`;
+    onBlocked?.(message);
+    toast(message, "warning");
     return false;
   }
-  if (!(await ensureFilesSaved("安装更新", true))) return false;
+  if (!(await ensureFilesSaved("安装更新", true))) {
+    onBlocked?.("请保存未保存的文件，再继续安装。");
+    return false;
+  }
 
   let rows: import("./dbConfirm").QuitRow[] = [];
   let backendClean = new Set<string>();
@@ -107,6 +119,7 @@ export async function prepareRestart(): Promise<boolean> {
     backendClean = backendCleanRows(raw);
   } catch (e) {
     // 探测失败不等于没有事务：保守地停下来，不能带着未知状态重启。
+    onBlocked?.("暂时无法检查数据库事务，请核对连接后继续安装。", "db");
     toast(`检查未提交事务失败：${friendlyDbError(e)}`, "error");
     return false;
   }
@@ -121,6 +134,7 @@ export async function prepareRestart(): Promise<boolean> {
   if (pendingRows.length || sessions.length) {
     // 事务选择属于各会话：更新不能代用户对多个库批量提交或回滚。
     const names = [...new Set([...pendingRows.map(row => row.name), ...sessions])];
+    onBlocked?.(`${names.slice(0, 8).join("、")}仍有未提交事务，请处理后继续安装。`, "db");
     const go = await ask("安装前，请处理数据库事务", `${names.slice(0, 8).join("、")}${names.length > 8 ? "等" : ""}仍有未提交事务。请逐会话核对并提交或回滚，再从更新徽章继续。`, "返回数据库");
     if (go) window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "db" }));
     return false;
@@ -136,12 +150,14 @@ export async function prepareRestart(): Promise<boolean> {
       true,
     );
     if (!go) {
+      onBlocked?.("请先核对数据库事务状态，再继续安装。", "db");
       window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "db" }));
       return false;
     }
   }
   // 保存与事务探测会让出控制权；期间又开始工作时不能按旧快照放行。
   if (hasRunningWork() || getSession().tabs.some(isUnsaved)) {
+    onBlocked?.("工作状态已变化，请保存并完成任务后继续安装。");
     toast("当前工作状态已变化，请保存并完成任务后再继续更新", "warning");
     return false;
   }
