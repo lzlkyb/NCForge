@@ -68,3 +68,34 @@ describe("右键菜单焦点", () => {
     expect(document.activeElement).toBe(outside); expect(focus).not.toHaveBeenCalled();
   });
 });
+
+describe("单选态菜单项", () => {
+  /** 二进制列显示的三个档位就是这样用的：要能看出当前是哪一档。 */
+  const renderChecked = async () => {
+    await act(async () => root.render(<ContextMenu x={0} y={0} onClose={onClose} items={[
+      { label: "自动识别", checked: true, onSelect },
+      { label: "文本", checked: false, onSelect },
+      { label: "原始 Hex", onSelect },
+    ]} />));
+    return Array.from(document.querySelectorAll('[role="menuitem"]'));
+  };
+
+  it("当前档位打勾且标为 current，未选中的项留出同样的空位", async () => {
+    const [auto, text, raw] = await renderChecked();
+    // 打勾靠图标占住 icon 位；未选中的项用等宽空槽占位，三档文字才不会左右错开。
+    expect(auto.querySelector(".wb-ctx-icon")).not.toBeNull();
+    expect(auto.getAttribute("aria-current")).toBe("true");
+    expect(text.querySelector(".wb-ctx-icon")).toBeNull();
+    expect(text.querySelector(".wb-ctx-slot")).not.toBeNull();
+    expect(text.getAttribute("aria-current")).toBeNull();
+    // 不传 checked 的项既不打勾也不算当前，但仍然占位（同一个菜单里的单选组要对齐）。
+    expect(raw.getAttribute("aria-current")).toBeNull();
+    expect(raw.querySelector(".wb-ctx-slot")).not.toBeNull();
+  });
+
+  it("没有单选组的普通菜单不额外插空槽", async () => {
+    await act(async () => root.render(<ContextMenu x={0} y={0} onClose={onClose} items={[
+      { label: "打开", onSelect },
+    ]} />));
+    expect(container.querySelector(".wb-ctx-slot")).toBeNull();  });
+});

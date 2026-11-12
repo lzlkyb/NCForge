@@ -12,6 +12,12 @@ export interface ContextMenuItem {
   disabled?: boolean;
   /** 在这一项之前画一条分隔线。 */
   separator?: boolean;
+  /**
+   * 单选态：用于「当前是哪个档位」这类菜单（例如二进制列显示：自动 / 文本 / 原始 Hex）。
+   * 之前调用方传了这个字段，类型里却没有，于是它一路被静默丢掉——菜单永远不打勾，
+   * 用户看不出当前档位。现在补上类型与渲染。
+   */
+  checked?: boolean;
   onSelect: () => void;
 }
 
@@ -66,8 +72,7 @@ export function ContextMenu({
   }, []);
 
   useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      // 外部按下会由浏览器把焦点交给目标；关闭菜单不能再抢回触发器。
+    const onDown = (e: MouseEvent) => {      // 外部按下会由浏览器把焦点交给目标；关闭菜单不能再抢回触发器。
       if (!boxRef.current?.contains(e.target as Node)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
@@ -112,6 +117,9 @@ export function ContextMenu({
     };
   }, [onClose, closeAndRestoreFocus]);
 
+  // 菜单里有单选组时，未选中的项要占住图标位（否则组内文字左右错开）。
+  const hasCheckable = items.some(item => item.checked !== undefined);
+
   return createPortal(
     <div
       ref={boxRef}
@@ -132,13 +140,20 @@ export function ContextMenu({
             role="menuitem"
             className="wb-ctx-item"
             data-danger={item.danger || undefined}
+            // 勾选态：`aria-current` 在任何 role 上都合法，不用为了打勾把 role 改掉
+            // （键盘导航靠 `[role="menuitem"]` 定位，改 role 会一并失配）。
+            aria-current={item.checked ? "true" : undefined}
             disabled={item.disabled}
             onClick={() => {
               closeAndRestoreFocus();
               item.onSelect();
             }}
           >
-            {item.icon && <Icon name={item.icon} size={13} className="wb-ctx-icon" />}
+            {item.checked
+              ? <Icon name="check" size={13} className="wb-ctx-icon" />
+              : item.icon
+                ? <Icon name={item.icon} size={13} className="wb-ctx-icon" />
+                : hasCheckable && <span className="wb-ctx-slot" aria-hidden="true" />}
             <span className="wb-ctx-label">{item.label}</span>
             {item.hint && <span className="wb-ctx-hint">{item.hint}</span>}
           </button>

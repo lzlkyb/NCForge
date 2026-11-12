@@ -346,6 +346,8 @@ html[data-ui-density="comfortable"] .wb-tree-list .wb-row { height:30px; }
 .wb-ctx-item:disabled { opacity: var(--disabled-opacity, .62); cursor: not-allowed; }
 .wb-ctx-item:disabled:hover { background: none; }
 .wb-ctx-icon { flex-shrink: 0; color: hsl(var(--muted-foreground)); }
+/* 单选组里未选中的项：占住图标位，免得三个档位的文字左右错开。 */
+.wb-ctx-slot { flex: 0 0 13px; }
 .wb-ctx-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-ctx-hint { margin-left: auto; flex-shrink: 0; font-size: 11px; color: hsl(var(--muted-foreground)); }
 .wb-ctx-item[data-danger] { color: hsl(var(--destructive-ink)); }
