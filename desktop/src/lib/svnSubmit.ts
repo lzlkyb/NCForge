@@ -55,7 +55,9 @@ export async function prepareSvnSubmit(root: string, epoch: number, snapshot: Sv
     if (!allowDirtyDisk && dirty().length > 0) throw new Error("选中文件在保存期间又有修改，请先保存再提交");
   }
   handle.update({ phase: "重新核对本次文件与冲突状态", progress: undefined });
-  const status = await svnStatus();
+  // 全量：这一份清单直接决定「哪些文件会被提交」。增量靠的是 watcher 的脏集合，
+  // 那里漏一次就是漏提交一个文件，几秒钟不值得赌。
+  const status = await svnStatus(true);
   assertSvnWorkspace(root, epoch);
   const current = status.changes.groups.flatMap(group => group.items);
   const byKey = new Map(current.map(item => [keyOf(item.path), item]));

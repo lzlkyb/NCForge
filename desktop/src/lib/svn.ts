@@ -23,6 +23,9 @@ export interface SvnInfo {
 }
 
 export type StatusLetter = "M" | "A" | "D" | "?" | "C" | "!" | "R" | "G" | "~";
+export const svnStatusLabel: Record<StatusLetter, string> = {
+  M: "修改", A: "新增", D: "删除", "?": "未跟踪", C: "冲突", "!": "缺失", R: "替换", G: "合并", "~": "受阻",
+};
 
 export interface ChangeItem {
   path: string;
@@ -58,6 +61,10 @@ export interface StatusResult {
   hasConflict: boolean;
   /** 仍然有效的已审标记（key = 小写 + 正斜杠的绝对路径）。 */
   reviewed: string[];
+  /** 这一轮只重扫了脏模块，其余沿用上一轮结果。 */
+  incremental: boolean;
+  /** 这一轮实际扫了几个模块（一个模块都没脏时为 0）。 */
+  modulesScanned: number;
 }
 
 export interface DiffResult {
@@ -141,8 +148,11 @@ export const svnInfo = () => invoke<SvnInfo>("svn_info");
 /**
  * 扫描改动。一次返回全部条目（构建产物带 `ignored` 标记），
  * 界面的「显示全部」开关只在本地过滤，不再重扫。
+ *
+ * `force` = 全量：提交预检、更新 / 提交 / 撤销之后的复核必须看到盘上的真实情况。
+ * 默认走增量（后端只重扫 watcher 标记过的脏模块，一个没脏就直接给上次结果）。
  */
-export const svnStatus = () => invoke<StatusResult>("svn_status");
+export const svnStatus = (force = false) => invoke<StatusResult>("svn_status", { force });
 /**
  * 取单文件 BASE 基线：打开文件就调，是全流程最高频的动作。
  * 裸 invoke，不进 trackOperation——否则操作历史被刷屏，桥偶尔慢于 300ms 还会闪
@@ -212,13 +222,21 @@ export const svnAuthSet = (user: string, password: string) =>
   trackOperation({ key: "svn.auth", label: "验证 SVN 账号", errorDetail: () => "账号验证失败，请查看账号对话框", page: "svn", phase: "连接服务器验证并保存凭据" }, () => invoke<void>("svn_auth_set", { user, password }));
 
 /**
- * 扫描进度（桥每 300 条推一次）。
+ * 扫描进度：桥按一级目录推进，扫完一个模块推一次。
  *
- * 一次全量 status 要 7.6 秒，界面上只有一个转圈的图标时用户分不清「在跑」和「卡死」。
- * 进度只是提示，丢了不影响结果，所以订阅失败也不必处理。
+ * `done`/`total` 是模块数（本次任务的范围；增量时只有变化的那几个），
+ * `scanned` 是已回调的条目数。老版本桥只给 `scanned`，所以后三个可空。
+ * 进度只是提示，丢了不影响结果，订阅失败也不必处理。
  */
-export const onSvnScanProgress = (handler: (scanned: number) => void) =>
-  listen<{ scanned: number }>("svn-scan-progress", (p) => handler(p.scanned));
+export interface ScanProgress {
+  scanned: number;
+  done: number | null;
+  total: number | null;
+  module: string | null;
+}
+
+export const onSvnScanProgress = (handler: (p: ScanProgress) => void) =>
+  listen<ScanProgress>("svn-scan-progress", (p) => handler(p));
 
 // ───────────────────────── 纯函数 ─────────────────────────
 

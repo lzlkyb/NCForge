@@ -11,8 +11,17 @@ import {
   svnInfo,
   svnReviewMark,
   svnStatus,
+  type ScanProgress,
   type StatusResult,
 } from "../lib/svn";
+
+/** 扫描结果的说明文案：增量时把「只扫了几个模块」写出来，免得用户以为漏扫了。 */
+export function describeScan(result: StatusResult | undefined): string {
+  if (!result) return "扫描完成";
+  if (result.incremental && result.modulesScanned === 0) return "没有模块变化，沿用上次扫描结果";
+  const base = `扫描 ${result.scanned} 个条目`;
+  return result.incremental ? `${base}（增量：${result.modulesScanned} 个模块）` : base;
+}
 
 /**
  * 版本控制页的状态源。
@@ -33,8 +42,8 @@ export function useSvnStatus() {
   const root = useWorkspaceRoot() ?? "";
   const qc = useQueryClient();
   const [overrides, setOverrides] = useState<Map<string, boolean>>(() => new Map());
-  /** 本次扫描已走过的条目数（桥每 300 条推一次）；null = 没有进行中的扫描。 */
-  const [scanProgress, setScanProgress] = useState<number | null>(null);
+  /** 本次扫描的进度（桥每扫完一个模块推一次）；null = 没有进行中的扫描。 */
+  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
 
   const info = useQuery({
     queryKey: ["svn-info", root],
@@ -46,7 +55,7 @@ export function useSvnStatus() {
 
   const status = useQuery({
     queryKey: ["svn-status", root],
-    queryFn: svnStatus,
+    queryFn: () => svnStatus(false),
     retry: false,
     enabled: !!root,
   });
@@ -80,11 +89,21 @@ export function useSvnStatus() {
   /**
    * 重扫。**返回新数据**：更新/提交之后要拿这次扫描的结论判断「有没有冲突」，
    * 以前只能再单独扫一遍（等于同一件事做两遍，多等 7.6 秒）。
+   *
+   * `force` = 全量。默认增量：写操作之后必须传 true——更新/提交/撤销落的是盘上的
+   * 新状态，靠 watcher 标记去省这几秒，一旦漏标就是「界面显示已提交、实际没动」。
    */
-  const refresh = useCallback(async (): Promise<StatusResult | undefined> => {
+  const refresh = useCallback(async (force = false): Promise<StatusResult | undefined> => {
     if (!root || getSession().root !== root) return undefined;
     const epoch = workspaceEpoch();
-    const [, s] = await trackOperation({ key: `svn.scan:${root}`, label: "重新扫描 SVN 改动", scope: root, page: "svn", phase: "扫描工作副本条目" }, () => Promise.all([info.refetch(), status.refetch({ cancelRefetch: false })]), results => ({ state: results[1].error ? "failed" : "success", detail: results[1].error ? String(results[1].error) : `扫描 ${results[1].data?.scanned ?? 0} 个条目${results[1].data?.hasConflict ? "；存在冲突待处理" : ""}` }));
+    // 增量/全量只是 queryFn 的参数差异，用 fetchQuery 才能带上 force；
+    // refetch 永远复用缓存里的 queryFn（也就是 force=false 那一份）。
+    const scan = () => force
+      ? qc.fetchQuery({ queryKey: ["svn-status", root], queryFn: () => svnStatus(true), staleTime: 0, retry: false })
+        .then(data => ({ data, error: null as unknown }))
+        .catch((error: unknown) => ({ data: undefined, error }))
+      : status.refetch({ cancelRefetch: false });
+    const [, s] = await trackOperation({ key: `svn.scan:${root}`, label: "重新扫描 SVN 改动", scope: root, page: "svn", phase: "扫描工作副本条目" }, () => Promise.all([info.refetch(), scan()]), results => ({ state: results[1].error ? "failed" : "success", detail: results[1].error ? String(results[1].error) : `${describeScan(results[1].data)}${results[1].data?.hasConflict ? "；存在冲突待处理" : ""}` }));
     if (getSession().root !== root || workspaceEpoch() !== epoch) return undefined;
     // 更新 / 提交 / 撤销 / 解决冲突之后，右侧对比与追溯读的都是盘上的旧内容：
     // 不失效就会一直显示「改动前」的差异，用户以为动作没生效
@@ -98,7 +117,7 @@ export function useSvnStatus() {
   }, [status, info, qc, root]);
 
   // 扫描进度：只在扫描进行中订阅（扫完就退订，桥那边不再推）。
-  // 7.6 秒里界面只有一个转圈图标时，用户分不清「在跑」和「卡死」。
+  // 十几秒里界面只有一个转圈图标时，用户分不清「在跑」和「卡死」。
   useEffect(() => {
     if (!status.isFetching) {
       setScanProgress(null);
@@ -106,7 +125,7 @@ export function useSvnStatus() {
     }
     let gone = false;
     let un: (() => void) | undefined;
-    void onSvnScanProgress((n) => { if (getSession().root !== root) return; setScanProgress(n); updateOperation(`svn.scan:${root}`, { progress: { done: n }, phase: "扫描工作副本条目" }); })
+    void onSvnScanProgress((p) => { if (getSession().root !== root) return; setScanProgress(p); updateOperation(`svn.scan:${root}`, { progress: { done: p.done ?? p.scanned }, phase: p.total ? `扫描模块 ${p.done ?? 0}/${p.total}` : "扫描工作副本条目" }); })
       .then((fn) => {
         // 订阅回来之前扫描可能已经结束了，此时立刻退订，别把监听留在窗口上
         if (gone) fn();

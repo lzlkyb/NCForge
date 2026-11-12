@@ -15,7 +15,7 @@ type Busy = null | "commit" | "update" | "revert" | "resolve" | "auth";
 export function useSvnChanges({ setBusy, setAuth, refresh, onCommitted, onReverted }: {
   setBusy: (busy: Busy) => void;
   setAuth: (auth: { open: boolean; error: string | null }) => void;
-  refresh: () => Promise<StatusResult | undefined>;
+  refresh: (force?: boolean) => Promise<StatusResult | undefined>;
   onCommitted: () => void;
   onReverted: () => void;
 }) {
@@ -29,7 +29,9 @@ export function useSvnChanges({ setBusy, setAuth, refresh, onCommitted, onRevert
     if (getSession().root !== actionRoot || workspaceEpoch() !== epoch) return undefined;
     try {
       assertSvnWorkspace(actionRoot, epoch);
-      const scanned = await refresh();
+      // 写操作之后一律全量：更新/提交/撤销改的是盘上的真实状态，靠脏模块省几秒，
+      // 一旦 watcher 漏标就是「界面说已提交、实际没动」。
+      const scanned = await refresh(true);
       assertSvnWorkspace(actionRoot, epoch);
       if (!scanned) throw new Error("扫描结果未返回");
       // commit / update / revert / resolve 都会改 BASE：清掉基线缓存，

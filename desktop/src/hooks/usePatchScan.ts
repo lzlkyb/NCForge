@@ -30,7 +30,8 @@ export function usePatchScan(force: LayerForce = NO_FORCE) {
 
   const changes = useQuery({
     queryKey: ["patch-changes", root],
-    queryFn: svnStatus,
+    // 打补丁要的就是完整清单，不能吃增量缓存
+    queryFn: () => svnStatus(true),
     refetchOnWindowFocus: false,
     retry: false,
   });

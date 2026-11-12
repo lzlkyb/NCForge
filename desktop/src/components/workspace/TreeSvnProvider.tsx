@@ -7,7 +7,7 @@ import { pathKey, treeSvnIndex } from "../../lib/treeSvn";
 export function TreeSvnProvider({ root, children }: { root: string; children: ReactNode }) {
   const info = useQuery({ queryKey: ["svn-info"], queryFn: svnInfo, staleTime: 30_000, retry: false });
   // Shared with the review tool: no polling or separate scan per directory.
-  const status = useQuery({ queryKey: ["svn-status"], queryFn: svnStatus, staleTime: 30_000, retry: false });
+  const status = useQuery({ queryKey: ["svn-status"], queryFn: () => svnStatus(), staleTime: 30_000, retry: false });
   const belongs = info.data && (pathKey(root) === pathKey(info.data.root) || pathKey(root).startsWith(pathKey(info.data.root) + "/"));
   const index = useMemo(() => treeSvnIndex(root, belongs ? status.data?.changes.groups.flatMap(g => g.items) ?? [] : []), [root, belongs, status.data]);
   const failed = info.isError || status.isError;

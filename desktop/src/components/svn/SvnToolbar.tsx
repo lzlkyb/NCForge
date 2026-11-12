@@ -1,9 +1,21 @@
 import { Icon } from "../ui/icon";
 import { FreshnessBadge } from "../ui/FreshnessBadge";
 import { Menu, MenuItem } from "../ui/Menu";
-import type { SvnInfo } from "../../lib/svn";
+import type { ScanProgress, SvnInfo } from "../../lib/svn";
 import { SvnContextMenu } from "./SvnContextMenu";
 import { openPatchPage } from "../../lib/svnSession";
+
+/**
+ * 扫描中的按钮文案。
+ *
+ * 桥按一级目录推进，所以能说「3/66 个模块」——比「已扫 1200 条」有用得多：
+ * 条目数在 `reportAll=false` 时只统计改动，一个干净的模块从头到尾不涨数字，
+ * 看着还是像卡死。
+ */
+function scanLabel(p: ScanProgress | null): string {
+  if (!p) return "扫描中…";
+  return p.total ? `已扫 ${p.done ?? 0}/${p.total} 个模块…` : `已扫 ${p.scanned} 条…`;
+}
 
 /**
  * 版本控制页顶部工具条。
@@ -44,7 +56,8 @@ export function SvnToolbar({
   generatedAtMs: number | null;
   shown: number | null;
   fetching: boolean;
-  scanned: number | null;
+  /** 扫描进度（桥按一级目录推）；null = 没有进行中的扫描。 */
+  scanned: ScanProgress | null;
   busy: string | null;
   canRevert: boolean;
   revertTitle: string;
@@ -79,7 +92,7 @@ export function SvnToolbar({
       )}
       <button type="button" className="vc-btn" disabled={fetching} onClick={onRefresh}>
         <Icon name="refresh" size={13} className={fetching ? "animate-spin" : undefined} />
-        {fetching ? (scanned === null ? "扫描中…" : `已扫 ${scanned} 条…`) : "刷新"}
+        {fetching ? scanLabel(scanned) : "刷新"}
       </button>
       {busy === "update" && <button type="button" className="vc-btn" disabled onClick={onUpdate}>
         <Icon name={busy === "update" ? "spinner" : "download"} size={13} className={busy === "update" ? "animate-spin" : undefined} />

@@ -31,7 +31,8 @@ export function PatchHealth() {
   });
   const changes = useQuery({
     queryKey: ["patch-changes", root],
-    queryFn: svnStatus,
+    // 这里要的是「打补丁前的完整清单」，不能吃增量缓存：漏一个文件就打不全一次包
+    queryFn: () => svnStatus(true),
     refetchOnWindowFocus: false,
     retry: false,
   });

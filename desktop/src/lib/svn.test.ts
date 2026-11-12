@@ -140,6 +140,8 @@ describe("reviewedSet", () => {
       generatedAtMs: 0,
       hasConflict: false,
       reviewed: ["c:/a.java", "c:/b.java"],
+      incremental: false,
+      modulesScanned: 0,
     });
     expect(s.has("c:/a.java")).toBe(true);
     expect(s.size).toBe(2);
