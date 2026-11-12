@@ -1,6 +1,25 @@
 import { sqlLiteral } from "./resultExport";
 import type { Cell, ColumnMeta } from "./dbApi";
 import { binaryColumn } from "./cellCodec";
+import type { TablePage } from "./tablePaging";
+import type { LobSource } from "../components/db/ResultTable";
+
+/**
+ * 表页的「加载完整值」上下文。
+ *
+ * `sql` 是这一页实际执行的查询，`sqlForRow` / `binarySqlForRow` 按主键换成单行反查；
+ * 两者都可能返回 null（没主键 / 主键为 NULL / 该列不能单取），那时详情面板就不给入口，
+ * 而不是拿错行去取。
+ */
+export function tableLobSource({ connId, tableRef, page, pk }: {
+  connId: string; tableRef: string; page: TablePage; pk: string[];
+}): LobSource {
+  return {
+    connId, slot: null, sql: page.sql,
+    sqlForRow: (r: number) => rowLocatorSql(tableRef, page.columns, page.rows[r], pk),
+    binarySqlForRow: (r: number, c: number) => binaryRowSql(tableRef, page.columns, page.rows[r], pk, page.columns[c].name),
+  };
+}
 
 /**
  * 表页「加载完整值」的行定位 SQL：按主键单行反查。

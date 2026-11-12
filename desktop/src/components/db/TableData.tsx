@@ -2,14 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../ui/toast";
 import { ResultTable } from "./ResultTable";
 import { friendlyDbError, parseDbError, qualifyTable, thousands, type DbError } from "../../lib/db";
-import { dbApi, type BoundCell, type Cell, type ColumnInfo, type ColumnMeta } from "../../lib/dbApi";
-import { ask, reconnectSession } from "../../lib/dbConfirm";
+import { dbApi, type BoundCell, type Cell, type ColumnInfo } from "../../lib/dbApi";
+import { reconnectSession } from "../../lib/dbConfirm";
+import { askDiscardEdits } from "../../lib/tableDiscard";
 import { claimCursor, connOf, DEFAULT_TABLE_TIMEOUT, patchTab, rtOf, setTx, type TableTab } from "../../lib/dbStore";
 import { beginOperation, useOperationActive } from "../../lib/operations";
 import { dbCancelled, dbTaskSpec } from "../../lib/dbOperations";
 import { PAGE, pageSql, tableQuerySql, stripPage } from "../../lib/tableEdit";
-import { seekPage, type PageAnchor } from "../../lib/tablePaging";
-import { captureResultContext, type ResultExecutionContext } from "../../lib/dbResultContext";
+import { seekPage, type PageAnchor, type TablePage as Page } from "../../lib/tablePaging";
+import { captureResultContext } from "../../lib/dbResultContext";
 import { useCompareBaseline } from "../../lib/dbCompareState";
 import { ResultBaselineSummary } from "./ResultCompare";
 import { ResultContextNotice } from "./ResultContextNotice";
@@ -18,7 +19,7 @@ import { TableDataFooter } from "./TableDataFooter";
 import { TableRelations } from "./TableRelations";
 import { TransactionButtons, TxBar, useDbTransaction } from "./TxBar";
 import { TableFilterBar } from "./TableFilterBar";
-import { ChangeReview } from "./ChangeReview";
+import type { RowChange } from "../../lib/dbOptimisticEdit";
 import { compileFilter, loadFilter } from "../../lib/dbConditions";
 import { useRowDrafts } from "../../hooks/useRowDrafts";
 import { useTableEdits } from "../../hooks/useTableEdits";
@@ -29,14 +30,11 @@ import { TableEditTools } from "./TableEditTools";
 import { TableDataStatus } from "./TableDataStatus";
 import { useDbReadOnly } from "../../lib/dbReadOnly";
 import { useTableTabSync } from "../../hooks/useTableTabSync";
-import { binaryRowSql, rowLocatorSql } from "../../lib/tableLob";
-import { loadTableView, saveTableView } from "../../lib/dbTableView";
+import { tableLobSource } from "../../lib/tableLob";
+import { hasViewState, loadTableView, saveTableView } from "../../lib/dbTableView";
 import { tableBlockedHint, tableCellEditable, tableFootHint } from "../../lib/tableEditGuard";
-interface Page {
-  columns: ColumnMeta[]; rows: Cell[][]; hasNext: boolean;
-  ms: number; at:number; sql:string; pageNumber:number; exportSql:string; params:BoundCell[];
-  context:ResultExecutionContext;
-}
+import { TableRestoreNotice } from "./TableRestoreNotice";
+import { TableChangePreview } from "./TableChangePreview";
 
 /**
  * 表页·数据：WHERE / ORDER BY + 分页（每页 200 行，默认按主键排）。
@@ -53,6 +51,11 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   // 上次看到的页码 / 条件：切走再回来接着看；常用筛选改过（指纹不同）就让新条件生效。
   const filterKey = JSON.stringify(loadFilter(tab.connId, tab.table));
   const tableView = useRef(loadTableView(tab.connId, tableRef, filterKey));
+  /**
+   * 「恢复了上次的查看条件」这个状态本身要显式记住：不提示的话，用户看到的是一张
+   * 只有几十行的表，而库里其实有几万行——这类「数据看起来丢了」的误会代价最高。
+   */
+  const [restored, setRestored] = useState(() => hasViewState(tableView.current));
   const [ui,setUi] = useState({loading:false,conflict:"",preview:false,saving:false,relationRow:null as Cell[]|null, conflictValues:[] as {name:string;before:Cell;current:Cell;after:Cell}[]});
   const {loading,conflict,preview,saving}=ui;
   const setLoading=(loading:boolean)=>setUi(v=>({...v,loading}));
@@ -139,16 +142,8 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
     if (cols && q) void load();
   }, [cols, q, load]);
 
-  /** 翻页 / 改查询条件 / 重新查询前：有未写回的格子时先问一句，别静默丢。 */
-  const confirmDiscard = async (): Promise<boolean> => {
-    if (changed.size === 0 && drafts.pending === 0) return true;
-    return ask(
-      "丢弃未保存的修改？",
-      `当前有 ${changed.size} 个单元格改过、${drafts.pending} 处行级增删还没写回，翻页或改查询条件会丢弃它们。`,
-      "丢弃并继续",
-      true,
-    );
-  };
+  /** 翻页 / 改查询条件 / 重新查询前：有未写回的格子时先问一句，别静默丢（规则见 lib/tableDiscard）。 */
+  const confirmDiscard = () => askDiscardEdits(changed.size, drafts.pending);
 
   // 登记改动数 + 提交/回滚后重读（含「先问一句」）；细节见 hooks/useTableTabSync。
   useTableTabSync(tab.id, tab.connId, dirtyCount, confirmDiscard, load);
@@ -165,9 +160,11 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
     }
   };
 
-  const navTo = async (next: NonNullable<typeof q>) => {
-    if (!(await confirmDiscard())) return;
+  /** 翻页 / 换条件。返回 `false` = 用户在「丢弃未保存的修改？」里取消了。 */
+  const navTo = async (next: NonNullable<typeof q>): Promise<boolean> => {
+    if (!(await confirmDiscard())) return false;
     setLoading(true); setQ(next);
+    return true;
   };
 
   /**
@@ -180,12 +177,19 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
     else void navTo(next);
   };
   const viewRows = drafts.rows ?? [];
+  /**
+   * 一键回到「无条件、第 1 页」，同时把记忆清掉——否则下次打开又被恢复回来。
+   *
+   * 先过 `navTo`（里面有「丢弃未保存的修改？」）：用户在那里取消时，
+   * 提示条与查询条件都必须保持原样，不能先把提示条抹掉。
+   */
+  const clearRestored = async () => {
+    if (!(await navTo({ where: "", order: "", params: [], page: 0 }))) return;
+    setRestored(false);
+    if (tab.connId) saveTableView(tab.connId, tableRef, { where: "", order: "", params: [], page: 0, filterKey });
+  };
   // 大文本「加载完整值」按主键定位这一行；没有主键 / 主键为 NULL 时不给入口。
-  const lob = tab.connId && page ? {
-    connId: tab.connId, slot: null, sql: page.sql,
-    sqlForRow: (r: number) => rowLocatorSql(tableRef, page.columns, page.rows[r], pk),
-    binarySqlForRow: (r: number, c: number) => binaryRowSql(tableRef, page.columns, page.rows[r], pk, page.columns[c].name),
-  } : undefined;
+  const lob = tab.connId && page ? tableLobSource({ connId: tab.connId, tableRef, page, pk }) : undefined;
   // 计划在 render 期算（界面要显示条数），但异常不会穿到 React：见 useTablePlan。
   const { changes, error: planError } = useTablePlan({
     tableRef, page, pk, changed, drafts: drafts.drafts, deleted: drafts.deleted,
@@ -210,6 +214,12 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   // Ctrl+S = 写回（DBeaver 语义）。没有待写回内容时不接管这个键，免得挡住别处。
   useSaveShortcut(save, editable && changes.length > 0, tab.id);
 
+  /** 复核表里的「撤销」：改格子清掉那一格，增删行还原草稿。 */
+  const undoChange = (change: RowChange) => {
+    if (change.kind !== "update") return drafts.restoreRow(change.row);
+    setChanged(current => { const next = new Map(current); change.cells.forEach(c => next.delete(`${change.row}:${c.column}`)); return next; });
+  };
+
   return (
     <>
       {ui.relationRow && page && <TableRelations tab={tab} columns={page.columns} row={ui.relationRow} onClose={()=>setUi(v=>({...v,relationRow:null}))} />}
@@ -218,6 +228,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
         transactions={<TransactionButtons transaction={transaction} />} onApply={apply} />}
       <TxBar transaction={transaction} />
       {planError && <div className="dbx-err" role="alert">无法写回：{planError}</div>}
+      {restored && q && <TableRestoreNotice where={q.where} page={q.page} onClear={() => void clearRestored()} />}
       {loading && data && <div className="dbx-read-status" role="status">正在查询，暂保留上一份结果…</div>}
       <TableDataStatus
         conflict={conflict} conflictValues={ui.conflictValues} connectionError={connectionError}
@@ -271,11 +282,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
           }
           foot={
             <>
-              {preview && changes.length > 0 && <ChangeReview changes={changes} columns={page.columns} rows={page.rows} pk={pk} zh={zh} disabled={saving} onUndo={change => {
-                if (change.kind === "update") setChanged(current => { const next = new Map(current); change.cells.forEach(c => next.delete(`${change.row}:${c.column}`)); return next; });
-                else drafts.restoreRow(change.row);
-              }} />}
-              {preview && sqls.length > 0 && <pre className="dbx-ddl" style={{ flex: "none", maxHeight: 140, borderTop: "1px solid hsl(var(--border))" }}>{changes.map(c=>`${c.sql};\n-- 绑定参数: ${JSON.stringify(c.params)}`).join("\n")}</pre>}
+              {preview && <TableChangePreview changes={changes} sqls={sqls} columns={page.columns} rows={page.rows} pk={pk} zh={zh} disabled={saving} onUndo={undoChange} />}
               <TableDataFooter rows={page.rows.length} pageNumber={page.pageNumber} complete={page.pageNumber===1 && !page.hasNext}
                 previousDisabled={saving || loading || q.page===0} nextDisabled={saving || loading || !page.hasNext}
                 onPrevious={()=>void navTo({...q,page:q.page-1})} onNext={()=>void navTo({...q,page:q.page+1})}

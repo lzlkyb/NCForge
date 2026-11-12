@@ -1,7 +1,26 @@
 import type { BoundCell, Cell, ColumnMeta } from "./dbApi";
+import type { ResultExecutionContext } from "./dbResultContext";
 import { PAGE, tableQuerySql } from "./tableEdit";
 
 export interface PageAnchor { key: string; page: number; columns: ColumnMeta[]; rows: Cell[][] }
+
+/**
+ * 表页「取到的一页」：数据 + 这次查询的执行信息（耗时、实际 SQL、页码、上下文）。
+ *
+ * 放在这里而不是组件里，是因为门禁按文件算行数；它同时被查询、写回、导出三处消费。
+ */
+export interface TablePage {
+  columns: ColumnMeta[];
+  rows: Cell[][];
+  hasNext: boolean;
+  ms: number;
+  at: number;
+  sql: string;
+  pageNumber: number;
+  exportSql: string;
+  params: BoundCell[];
+  context: ResultExecutionContext;
+}
 
 /** Only default, non-null primary-key order is seekable. Custom SQL keeps the old paginator. */
 export function seekPage(table: string, where: string, pk: string[], key: string, page: number, previous: PageAnchor | null): {sql: string; params: BoundCell[]; reverse: boolean} | null {
