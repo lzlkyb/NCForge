@@ -15,4 +15,5 @@ export function missingResourceId(error: unknown): ResourceId | null {
 export const RESOURCE_DOWNLOAD_LABELS: Record<ResourceId, string> = {
   svnkit: "下载 SVN 组件", cfr: "下载反编译组件",
   ecj: "下载 Java 编译器", jdtls: "下载代码智能组件",
+  ncdb: "下载数据库组件",
 };

@@ -91,7 +91,7 @@ describe("维护设置入口", () => {
   it("组件维护明确重下全部，并调用原有 force 接口", async () => {
     await mount(<ResourceSettings />);
     await act(async () => button("重新下载全部组件").click());
-    expect(mocks.resources.ensure).toHaveBeenCalledExactlyOnceWith(true, ["jdtls", "ecj", "svnkit", "cfr"]);
+    expect(mocks.resources.ensure).toHaveBeenCalledExactlyOnceWith(true);
     expect(container.querySelector("#resource-jdtls")?.textContent).toContain("已安装");
   });
 

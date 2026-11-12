@@ -507,6 +507,20 @@ describe("按需下载与可恢复面板", () => {
     expect(h.invoke).not.toHaveBeenCalledWith("resources_ensure", expect.anything());
   });
 
+  // 回归：后端 ALL_PACKS 有 5 个包（含 ncdb），前端 RESOURCE_IDS 曾只列 4 个。
+  // 点「下载缺失组件」时 ids 里带 ncdb，被本地白名单拦下 → 一个都不下，
+  // 还报成「组件源配置有误」。以后后端再加包也不能重演。
+  it("本地快照里的组件即使不在前端清单里，也能发起下载", async () => {
+    h.state.statusResult = [
+      { id: "svnkit", title: "SVN 客户端", notes: "代码检出与更新", state: "installed", version: "v1", size: 1024 },
+      { id: "ncdb", title: "数据库 JVM 组件", notes: "JVM 桥连库", state: "missing", version: null, size: 0 },
+    ];
+    await mount();
+    await act(async () => state().ensure(false, ["ncdb"]));
+    expect(h.invoke).toHaveBeenCalledWith("resources_ensure", { force: false, ids: ["ncdb"] });
+    expect(state().phase).not.toBe("error");
+  });
+
   it("下载到 100% 后仍区分校验/安装，忽略过时的检查事件", async () => {
     await mount();
     await act(async () => state().ensure(false, ["ecj"]));

@@ -14,7 +14,10 @@
 /** 按真实后台事件区分下载、校验与安装；下载到 100% 不等于可使用。 */
 export type ResourcePhase = "idle" | "checking" | "downloading" | "verifying" | "installing" | "ready" | "error";
 
-export const RESOURCE_IDS = ["jdtls", "ecj", "svnkit", "cfr"] as const;
+// 前端认识的组件 id（用于标签、按需下载引导）。**必须与 Rust 侧 ALL_PACKS 对齐**：
+// 少一个 id 就会让「下载缺失组件」被本地白名单拦下（ncdb 曾因此长期下不下来）。
+// 但校验本身不再只认这份列表，见 ResourceContext 的 knownIds（快照 ∪ 本表）。
+export const RESOURCE_IDS = ["jdtls", "ecj", "svnkit", "cfr", "ncdb"] as const;
 export const resourceBusy = (phase: ResourcePhase) => ["checking", "downloading", "verifying", "installing"].includes(phase);
 export const RESOURCE_PHASE_TEXT: Record<ResourcePhase, string> = {
   idle: "尚未开始", checking: "检查组件", downloading: "下载中", verifying: "校验中",
@@ -59,7 +62,8 @@ export interface ResourceReadyPayload {
   adoptedLegacy: boolean;
 }
 
-/** 后端 `resource:error` 的机器可读原因码（Rust 侧 classify() 产出）。 */
+/** 后端 `resource:error` 的机器可读原因码（Rust 侧 classify() 产出）。
+ *  `client` 是前端本地态专用码（不来自后端）：请求里的组件 id 与本地清单对不上时用。 */
 export type ResourceErrorCode =
   | "signature"
   | "corrupt"
@@ -67,6 +71,7 @@ export type ResourceErrorCode =
   | "config"
   | "timeout"
   | "network"
+  | "client"
   | "unknown";
 
 /** code → 用户文案。键必须与 Rust 侧 classify() 的返回值一一对应。 */
@@ -79,6 +84,9 @@ export const RESOURCE_ERROR_TEXT: Record<ResourceErrorCode, string> = {
   config: "组件源配置有误，请联系维护者",
   timeout: "下载组件超时（网络较慢），可重试或更换网络环境",
   network: "无法连接组件服务器，请检查网络或代理设置",
+  // 本地态：id 对不上（客户端比后端清单旧，或调用方传错 id）——与「源坏了」无关，
+  // 以前的 config 文案会把用户引去找维护者改源，方向完全错
+  client: "组件清单与当前版本不一致，请检查更新后重试",
   unknown: "组件下载失败，请重试",
 };
 

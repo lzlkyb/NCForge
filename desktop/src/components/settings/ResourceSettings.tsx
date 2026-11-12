@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { trackOperation } from "../../lib/operations";
 import { useResources } from "../../contexts/ResourceContext";
-import { formatBytes, packStateLabel, resourceBusy, resourceFriendlyError, RESOURCE_IDS, RESOURCE_PHASE_TEXT } from "../../lib/resource";
+import { formatBytes, packStateLabel, resourceBusy, resourceFriendlyError, RESOURCE_PHASE_TEXT } from "../../lib/resource";
 import { ResourceDownloadReadout } from "../resource/ResourceDownloadReadout";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -66,7 +66,7 @@ export function ResourceSettings() {
       sub="组件损坏时可单独重下；此维护操作会重新下载全部组件。"
       info="需要网络连接，会重新下载全部运行组件。组件下载与软件更新分别管理。"
       valueText={busy ? "处理中" : "可重新下载"} last
-      control={<Button variant="outline" size="sm" disabled={busy} onClick={() => void ensure(true, [...RESOURCE_IDS])}>重新下载全部组件</Button>} />
+      control={<Button variant="outline" size="sm" disabled={busy} onClick={() => void ensure(true)}>重新下载全部组件</Button>} />
     </SettingsGroup>
     {phase === "error" && error && <InlineNotice variant="error"><div className="flex flex-col items-start gap-2">
       <span>{resourceFriendlyError(error, errorCode).friendly}</span>

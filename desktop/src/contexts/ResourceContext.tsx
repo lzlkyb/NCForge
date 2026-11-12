@@ -87,10 +87,15 @@ export function ResourceProvider({ children }: { children: ReactNode }) {
     if (!listeners.active) return;
     commit({ panelOpen: true });
     if (locked.current || resourceBusy(stateRef.current.phase)) return;
-    const ids = [...new Set(selected ?? (force ? [...RESOURCE_IDS] : stateRef.current.packs.filter(p => p.state === "missing").map(p => p.id)))];
+    // 认「本地快照 ∪ 前端已知表」：快照是后端 ALL_PACKS 的权威副本，后端加包后
+    // 前端不必同步就能下；硬编码白名单曾把 ncdb 拦在门外（点批量下载一个都不下，
+    // 还报成「组件源配置有误」）。
+    const knownIds = [...new Set([...stateRef.current.packs.map(p => p.id), ...RESOURCE_IDS])];
+    const ids = [...new Set(selected ?? (force ? knownIds : stateRef.current.packs.filter(p => p.state === "missing").map(p => p.id)))];
     if (!ids.length) return;
-    if (ids.some(id => !(RESOURCE_IDS as readonly string[]).includes(id))) {
-      commit({ phase: "error", error: "未知的运行组件，请刷新组件状态后重试", errorCode: "config" });
+    const unknown = ids.filter(id => !knownIds.includes(id));
+    if (unknown.length) {
+      commit({ phase: "error", error: `本地组件清单里没有：${unknown.join("、")}`, errorCode: "client" });
       return;
     }
     locked.current = true;
