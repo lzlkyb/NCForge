@@ -4,7 +4,9 @@ import { sqlAssistColumns as readAssistColumns } from "./sqlAssistColumns";
 import { connectionKey } from "./dbResultContext";
 import { tabIdOfModel } from "./sqlModels";
 import { dialectOfSqlModel, sqlAnalysisOf } from "./monacoSql";
-import { resolveSqlQualifier, sqlCtesAt, sqlSourcesAt, type SqlSource } from "./sqlScope";
+import { resolveSqlQualifier, sqlCtesAt, sqlScopeAt, sqlSourcesAt, type SqlSource } from "./sqlScope";
+import { getSqlFormatPrefs } from "./sqlFormatPrefs";
+import { getSqlTemplatesEnabled, tableTemplates } from "./sqlTemplates";
 import { completionContext, sqlIdentifier } from "./sqlCompletionContext";
 import { sqlAssistSort, sqlMatchQuality, sqlSnippetText } from "./sqlAssistRanking";
 import { sqlAssistFunctions, sqlAssistKeywords } from "./sqlAssistDialect";
@@ -79,11 +81,16 @@ export async function provideSqlAssist(model: monaco.editor.ITextModel, position
   const unique = (s: SqlSource) => sources.filter(other => sourceKey(other) === sourceKey(s)).length === 1;
   const visible = sources.filter(unique);
   const qualifierText = (s: SqlSource) => s.aliasRef ?? (s.alias ? sqlIdentifier(s.alias, dialect) : s.nameRef ?? sqlIdentifier(s.name, dialect));
+  // 光标不落在任何查询语句里 = 语句还没开始（空行、或刚敲完分号的新语句）。
+  // 这是「先打表名、再补 select」的起点，也是唯一该把表名与整条查询模板端出来的位置；
+  // 一旦进了 SELECT 投影 / WHERE，列表要留给字段。
+  // 🔴 判据不能用 `analysis.scopes.length === 0`：脚本里前面写过语句就永远不为 0。
+  const bare = !sqlScopeAt(analysis, offset);
+  const tableList = rt?.tables ?? Object.keys(rt?.schema?.tables ?? {}).map(name => ({ name, kind: "TABLE" }));
   const tables = (): Item[] => {
     if (!connId || ctx.kind === "schema" && ctx.schema?.toLowerCase() !== schema.toLowerCase()) return [];
-    const list = rt?.tables ?? Object.keys(rt?.schema?.tables ?? {}).map(name => ({ name, kind: "TABLE" }));
     const shadowed = new Set(ctes.map(c => sqlReferenceKey(c.name, c.nameRef, dialect)));
-    return list.flatMap(t => {
+    return tableList.flatMap(t => {
       const name = normalized(t.name), zh = rt?.ncNames?.[name.toLowerCase()] ?? "", quality = match(name, zh);
       if (quality === 9) return [];
       const insertText = sqlIdentifier(sqlWordKind(name, dialect) === "identifier" ? name : t.name, dialect);
@@ -95,6 +102,32 @@ export async function provideSqlAssist(model: monaco.editor.ITextModel, position
     });
   };
   const cteItems: Item[] = ctes.filter(c => match(c.name) < 9).map(c => ({ label: { label: c.name, description: "当前查询 CTE" }, kind: K.Interface, insertText: c.nameRef ?? sqlIdentifier(c.name, dialect), filterText: filter(c.name), range, sortText: sqlAssistSort(match(c.name), 0, c.name) }));
+  /**
+   * 唯一命中（或精确命中）的那张表，额外给「整条查询」模板。
+   *
+   * 排序：复用表名的 sortText 再追加 `~序号`。表名本身的 sortText 止于 name，是它的
+   * 前缀，所以表名永远排在模板前面——配合 `suggestSelection: "first"`（见
+   * `sqlEditorAssist`），回车默认仍然只插入表名，不会误插一整条语句。
+   */
+  const templates = (): Item[] => {
+    if (!connId || !prefix || !getSqlTemplatesEnabled()) return [];
+    const typed = prefix.toLowerCase();
+    const named = tableList.map(t => ({ raw: t.name, name: normalized(t.name) }));
+    const exact = named.filter(t => t.name.toLowerCase() === typed);
+    const candidates = exact.length ? exact : named.filter(t => t.name.startsWith(typed));
+    // 多条命中就不猜：猜错一次就要用户撤销一整条语句
+    if (candidates.length !== 1) return [];
+    const { raw, name } = candidates[0];
+    const insertText = sqlIdentifier(sqlWordKind(name, dialect) === "identifier" ? name : raw, dialect);
+    const head = sqlAssistSort(match(name), 4, name);
+    const upper = getSqlFormatPrefs().keywordCase !== "lower";
+    return tableTemplates(insertText, upper, dialect).map((tpl, i) => ({
+      label: { label: tpl.label, description: tpl.hint }, kind: K.Snippet, insertText: tpl.insertText,
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      filterText: name, range, sortText: `${head}~${i}`,
+      documentation: { value: `\`\`\`sql\n${tpl.label};\n\`\`\`` },
+    }));
+  };
   if (ctx.kind === "none" || stale()) return { suggestions: [] };
   if (ctx.kind === "table" || ctx.kind === "schema") return { suggestions: [...cteItems.filter(() => ctx.kind !== "schema"), ...tables()], incomplete: true };
   const fromColumns = (source: SqlSource, cols: ColumnInfo[], qualified: boolean): Item[] => cols.flatMap(c => {
@@ -153,6 +186,13 @@ export async function provideSqlAssist(model: monaco.editor.ITextModel, position
     if (scope) business.push(...sqlHistoricalJoinSuggestions(scope, verifiedSources, Object.fromEntries(onSources.map(s => [s.tableRef ?? s.table!, (loaded.get(s) ?? []).map(c => ({ name: c.name, type: c.full }))])), dialect).filter(s => !prefix || match(s.label, s.insertText) < 9).map(s => ({ ...businessItem(s), sortText: `${match(s.label, s.insertText)}01${s.label}` })));
   }
   if (ctx.clause === "where") for (const source of physical) business.push(...sqlConditionSuggestions({ ...source, table: source.table! }, (loaded.get(source) ?? []).map(c => ({ name: c.name, type: c.full })), dialect).filter(s => !prefix || match(s.label, s.insertText) < 9).map(s => businessItem(s)));
-  const suggestions = [...business, ...projections, ...cols, ...aliases, ...functions, ...snippets, ...keywords, ...(ctx.clause === "other" ? cteItems : []), ...(fieldsReady ? [] : [loadingItem])];
+  // 语句还没开始时，表名才是这个位置最该出现的东西。`any` 分支其余内容（字段、别名、
+  // 函数、关键字）在这个位置基本都用不上，所以表名与模板排在最前面。
+  // 已知取舍：超过 `SQL_ANALYSIS_LIMIT`（200k 字符）或 512 条语句的脚本里 `analyzeSql`
+  // 会放弃建 scope，此时 `bare` 对所有位置都为真——但那时整条链路本来就没有上下文可用，
+  // 多出来的表名仍然按输入的前缀过滤，不会误导。
+  const tableItems = bare ? tables() : [];
+  const templateItems = bare ? templates() : [];
+  const suggestions = [...business, ...projections, ...cols, ...aliases, ...tableItems, ...templateItems, ...functions, ...snippets, ...keywords, ...(ctx.clause === "other" ? cteItems : []), ...(fieldsReady ? [] : [loadingItem])];
   return { suggestions: stale() ? [] : suggestions, incomplete: true };
 }

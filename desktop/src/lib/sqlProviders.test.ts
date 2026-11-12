@@ -12,6 +12,7 @@ vi.mock("./sqlBusiness", () => ({ clearSqlBusinessCache: vi.fn(), readSqlBusines
 vi.mock("./dbActions", () => ({ openTable: vi.fn() }));
 vi.mock("./sqlProcArgs", () => ({ procArguments: vi.fn() }));
 import { registerSqlProviders } from "./sqlProviders";
+import { setSqlTemplatesEnabled } from "./sqlTemplates";
 import { clearSqlUsage, recordSqlUsage, sqlUsageKey, sqlUsageScope } from "./sqlUsage";
 import { connectionKey } from "./dbResultContext";
 registerSqlProviders();
@@ -23,7 +24,8 @@ async function complete(text: string, cursor: number = text.length, cancelled = 
   return await h.completions.get("ncforge-sql-plsql")!.provideCompletionItems(model, position as Monaco.Position, {} as Monaco.languages.CompletionContext, { isCancellationRequested: cancelled } as Monaco.CancellationToken) as Monaco.languages.CompletionList;
 }
 it("所有方言保留补全、签名和DDL链接", () => {
-  expect([...h.completions.keys()]).toHaveLength(8); expect(h.signatures).toHaveBeenCalledTimes(8); expect(h.links).toHaveBeenCalledTimes(8); expect(h.hovers).toHaveBeenCalledTimes(8);
+  expect([...h.completions.keys()]).toHaveLength(8); expect(h.signatures).toHaveBeenCalledTimes(8); expect(h.links).toHaveBeenCalledTimes(8);
+  expect(h.hovers).toHaveBeenCalledTimes(8);
 });
 it("中文命中后插入真实标识符，范围覆盖完整输入词", async () => {
   const result = await complete("select * from 物料");
@@ -134,4 +136,41 @@ it("字符串、注释、重复别名和未知别名不触发字段查询", asyn
     expect((await complete(sql, at)).suggestions).toEqual([]);
   }
   expect(h.columns).not.toHaveBeenCalled();
+});
+it("语句还没开始就打了字：直接给表名，不需要先写 from", async () => {
+  const result = await complete("bd_");
+  expect(result.suggestions.map(s => s.insertText)).toEqual(["bd_material", "bd_project"]);
+  // 这个位置不该再请求字段：没有来源表可言
+  expect(h.columns).not.toHaveBeenCalled();
+});
+it("表名前缀唯一命中时，整条查询模板排在表名之后", async () => {
+  const items = (await complete("bd_mat")).suggestions;
+  const inserts = items.map(s => s.insertText);
+  expect(inserts[0]).toBe("bd_material");
+  expect(inserts).toContain("SELECT * FROM bd_material;$0");
+  expect(inserts).toContain("SELECT COUNT(*) FROM bd_material;$0");
+  // 表名的 sortText 是模板的前缀，回车默认落点仍是表名
+  const table = items.find(s => s.insertText === "bd_material")!;
+  const template = items.find(s => s.insertText === "SELECT * FROM bd_material;$0")!;
+  expect(table.sortText!.localeCompare(template.sortText!)).toBeLessThan(0);
+});
+it("多条前缀命中时不猜模板——猜错要撤销一整条语句", async () => {
+  const inserts = (await complete("bd_")).suggestions.map(s => s.insertText);
+  expect(inserts.some(text => text.startsWith("SELECT "))).toBe(false);
+});
+it("已经在 from 后面时不出模板，只给表名", async () => {
+  expect((await complete("select * from bd_mat")).suggestions.map(s => s.insertText)).toEqual(["bd_material"]);
+  expect((await complete("update bd_mat")).suggestions.map(s => s.insertText)).toEqual(["bd_material"]);
+});
+it("上一句没写分号时那个词是别名，不算语句起点", async () => {
+  const inserts = (await complete("select 1 from dual bd_mat")).suggestions.map(s => s.insertText);
+  expect(inserts.some(text => text.startsWith("SELECT "))).toBe(false);
+});
+it("关掉模板开关后只剩表名", async () => {
+  setSqlTemplatesEnabled(false);
+  try {
+    expect((await complete("bd_mat")).suggestions.map(s => s.insertText)).toEqual(["bd_material"]);
+  } finally {
+    setSqlTemplatesEnabled(true);
+  }
 });

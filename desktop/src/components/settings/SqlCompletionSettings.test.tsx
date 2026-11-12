@@ -3,6 +3,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { getSqlUsageEnabled, setSqlUsageEnabled } from "../../lib/sqlUsage";
+import { getSqlTemplatesEnabled } from "../../lib/sqlTemplates";
 import { SqlCompletionSettings } from "./SqlCompletionSettings";
 vi.mock("./SettingsGroup", () => ({ SettingsGroup: ({ children }: { children: ReactNode }) => <div>{children}</div> }));
 let root: Root, host: HTMLDivElement;
@@ -26,4 +27,12 @@ it("持久化失败保留会话设置，可在恢复存储后重试同一值", (
   act(() => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "重试保存")!.click());
   expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(JSON.parse(localStorage.getItem("ncforge-sql-usage")!).enabled).toBe(false);
+});
+it("模板开关立即生效并保存到本机", () => {
+  expect(host.querySelectorAll('[role="switch"]')).toHaveLength(2);
+  act(() => host.querySelectorAll<HTMLButtonElement>('[role="switch"]')[1].click());
+  expect(getSqlTemplatesEnabled()).toBe(false);
+  expect(localStorage.getItem("ncforge-sql-templates")).toBe("off");
+  act(() => host.querySelectorAll<HTMLButtonElement>('[role="switch"]')[1].click());
+  expect(getSqlTemplatesEnabled()).toBe(true);
 });

@@ -8,10 +8,11 @@ import { dialectOfSqlModel, sqlAnalysisOf } from "./monacoSql";
 import { getSqlFormatPrefs } from "./sqlFormatPrefs";
 import { sqlIdentifier } from "./sqlCompletionContext";
 import { sqlAssistObjectKey, sqlAssistScope, verifiedSqlSource } from "./sqlAssistLearning";
+import { snippetEscape } from "./sqlTemplates";
 import { isPlsql, splitStatements } from "./sqlSplit";
 import { forgetSqlUsage, recordSqlUsage, rollbackSqlUsage, setSqlUsagePinned, sqlUsageKey, usageSnapshot, type SqlUsageReceipt } from "./sqlUsage";
-import { toast } from "../components/ui/toast";
 import { listCommands } from "./commandRegistry";
+import { toast } from "../components/ui/toast";
 
 type Editor = monaco.editor.IStandaloneCodeEditor;
 interface AcceptArgs { scope: string; key: string }
@@ -35,7 +36,6 @@ function rangeOf(model: monaco.editor.ITextModel, start: number, end: number): m
   const a = model.getPositionAt(start), b = model.getPositionAt(end);
   return { startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column };
 }
-const snippetEscape = (text: string) => text.replace(/[\\$}]/g, "\\$&");
 
 /** Per-editor listeners follow model changes; the shared completion command is registered once. */
 export function wireSqlEditorAssist(editor: Editor): monaco.IDisposable {
