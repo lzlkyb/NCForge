@@ -439,6 +439,10 @@
 .dbx-subtabs .title { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; font-weight: 600; min-width: 0; max-width: 42%; }
 .dbx-subtabs .title .dbx-muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dbx-subtabs .title .dbx-mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 表操作粘在右端：这条标签栏是横向滚动容器且滚动条隐藏，窗口窄或表名长时按钮会被推出
+   可见区、看不出右边还有内容。粘住后任何宽度都点得到；左侧渐隐遮住从按钮底下滑过的标签。
+   「从文件导入」全软件只挂在这个下拉里，被滑出屏幕就等于没有入口。 */
+.dbx-subtabs > .dbx-more-actions { position: sticky; right: 0; z-index: 1; background: hsl(var(--chrome)); box-shadow: -12px 0 10px -10px hsl(var(--border)); }
 .dbx-where-field.order { flex-basis: 200px; max-width: 340px; }
 .dbx-where .kw { font: 600 11px var(--font-mono); color: hsl(var(--primary)); flex-shrink: 0; }
 .dbx-where .dbx-inp { height: var(--dbx-h-control); flex: 1; width: auto; }

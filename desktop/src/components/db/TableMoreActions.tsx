@@ -26,7 +26,7 @@ export function TableMoreActions({
     <>
       <button
         type="button"
-        className="dbx-btn ghost"
+        className="dbx-btn ghost dbx-more-actions"
         title="表操作：导出 INSERT、从文件导入、在控制台查询"
         aria-label="更多表操作"
         onClick={(e) => {
