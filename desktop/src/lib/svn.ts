@@ -67,6 +67,8 @@ export interface StatusResult {
   incremental: boolean;
   /** 这一轮实际扫了几个模块（一个模块都没脏时为 0）。 */
   modulesScanned: number;
+  /** 本轮扫描的纪元（进程内自增）。流式单元事件带同一个号，前端据此丢弃旧扫描的残余。 */
+  epoch: number;
 }
 
 export interface DiffResult {
@@ -239,6 +241,25 @@ export interface ScanProgress {
 
 export const onSvnScanProgress = (handler: (p: ScanProgress) => void) =>
   listen<ScanProgress>("svn-scan-progress", (p) => handler(p));
+
+/**
+ * 流式上屏的单元事件：桥每扫完一个模块（根层或一个一级目录）推一次，
+ * 带上该模块的条目——后端已经转成界面条目，前端直接显示，不必等整轮扫完。
+ *
+ * 与 `svn-scan-progress` 的关系：两条事件由同一次扫描按同样顺序推出，progress 管
+ * 「扫到哪了」，unit 管「这些可以显示了」。单元事件丢了不影响最终结果（完整结论
+ * 仍是 `svnStatus` 的返回值），只是那一模块要等到扫描结束才出现。
+ */
+export interface ScanUnit {
+  /** 扫描纪元：与最终结果的 `epoch` 同号。比已应用的结果旧的事件一律丢弃。 */
+  epoch: number;
+  /** 刚扫完的模块（`""` = 工作副本根那一层）。 */
+  module: string;
+  items: ChangeItem[];
+}
+
+export const onSvnScanUnit = (handler: (u: ScanUnit) => void) =>
+  listen<ScanUnit>("svn-scan-unit", (u) => handler(u));
 
 // ───────────────────────── 纯函数 ─────────────────────────
 

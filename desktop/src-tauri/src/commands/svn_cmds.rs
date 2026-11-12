@@ -25,7 +25,7 @@ use crate::svn_bridge::{self, Bridge};
 use crate::svn_cred;
 use crate::svn_review::{self, ReviewMark, ReviewStore};
 use crate::svn_status_cache::{self, StatusCache};
-use crate::svn_view::{self, ChangesView, RawEntry};
+use crate::svn_view::{self, ChangeItem, ChangesView, RawEntry};
 use crate::workspace;
 
 /// status 超时：实测全量 7.6 秒，给 4 倍余量应付别人机器上的杀软扫描。
@@ -72,6 +72,10 @@ pub struct StatusResult {
     pub incremental: bool,
     /// 这一轮实际扫了几个模块（`Cached` 即一个模块都没脏时为 0）。
     pub modules_scanned: usize,
+    /// 本轮扫描的纪元（进程内自增）。流式上屏的单元事件带同一个号：
+    /// 前端据此丢掉「比已应用结果更旧」的扫描残余，并把新纪元的第一个单元
+    /// 当作重新开始累加的信号。没有进行中的扫描时也会占一个号（Cached 走法）。
+    pub epoch: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -407,6 +411,18 @@ struct BridgeStatus {
 /// 后到的那个阻塞等前者结束，然后按增量走（通常 0 秒）。
 static SCAN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// 扫描纪元：每次 `scan_status` 调用（含 Cached 走法）取一个号，单调递增。
+///
+/// 流式上屏靠它区分「进行中的扫描」和「已经被新结果取代的旧扫描」：单元事件
+/// 带 epoch 推出，最终结果也带 epoch 返回，前端只认比自己已应用的结果更新的
+/// 那一轮。有 SCAN_LOCK 串行化，旧扫描的残余事件理论上到不了新结果之后，
+/// 但锁是实现细节，契约不能建立在它上面。
+static SCAN_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn next_scan_epoch() -> u64 {
+    SCAN_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+
 fn scan_status(
     app: &AppHandle,
     st: &Arc<AppState>,
@@ -415,6 +431,7 @@ fn scan_status(
 ) -> Result<StatusResult, String> {
     // 中毒恢复而非 unwrap：一次 panic 不该让之后的每次扫描都失败
     let _one_at_a_time = SCAN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let epoch = next_scan_epoch();
     let root = root_of(cfg)?;
     let bridge = bridge_for(app, st, cfg)?;
     let root_s = crate::nc_home::strip_verbatim(&root).display().to_string();
@@ -457,13 +474,27 @@ fn scan_status(
             generated_at = cache.generated_at_ms;
         }
         ScanPlan::Full => {
-            let got = fetch_status(app, &bridge, &root_s, None)?;
+            let got = fetch_status(app, &bridge, &root, epoch, None)?;
             scanned = got.scanned;
             modules_scanned = got.modules.len();
             cache.replace(&by_module(&root, &got), now);
         }
         ScanPlan::Only(wanted) => {
-            let got = fetch_status(app, &bridge, &root_s, Some(wanted))?;
+            // 增量只重扫脏模块。先把缓存里的完整清单推上屏：否则刷新途中列表
+            // 「只剩脏模块」，用户会以为其余改动消失了。随后每个脏模块的新条目
+            // 按路径盖掉这里的旧条目（前端合并时去重），最终结果再整份换规范序。
+            let cached = cache.flatten();
+            if !cached.is_empty() {
+                let _ = app.emit(
+                    "svn-scan-unit",
+                    serde_json::json!({
+                        "epoch": epoch,
+                        "module": "",
+                        "items": svn_view::items_for(&root, &cached),
+                    }),
+                );
+            }
+            let got = fetch_status(app, &bridge, &root, epoch, Some(wanted))?;
             scanned = got.scanned;
             modules_scanned = got.modules.len();
             cache.merge(wanted, &by_module(&root, &got), now);
@@ -511,6 +542,7 @@ fn scan_status(
         review_outdated,
         incremental: !matches!(plan, ScanPlan::Full),
         modules_scanned,
+        epoch,
     })
 }
 
@@ -585,31 +617,52 @@ fn by_module(root: &Path, got: &BridgeStatus) -> BTreeMap<String, Vec<RawEntry>>
 }
 
 /// 调桥扫一次。`only` 为 None = 全量。
+///
+/// 流式上屏：桥每扫完一个模块，会在同一条 `progress` 事件里带上该模块的原始条目
+/// （见 `NcSvnBridge.status` 的注释）。这里把它们转成界面条目，随扫描纪元立刻
+/// 推给前端——用户先看到已扫完的模块，剩下的继续扫。**这只是上屏时机**：
+/// 最终结论仍然来自下面那份完整结果（顺序、去重、缓存合并都不受它影响）。
 fn fetch_status(
     app: &AppHandle,
     bridge: &Bridge,
-    root_s: &str,
+    root: &Path,
+    epoch: u64,
     only: Option<&BTreeSet<String>>,
 ) -> Result<BridgeStatus, String> {
+    let root_s = crate::nc_home::strip_verbatim(root).display().to_string();
     let emitter = app.clone();
-    let mut args: Vec<&str> = vec![root_s];
+    let mut args: Vec<&str> = vec![&root_s];
     let joined = only.map(|set| set.iter().cloned().collect::<Vec<_>>().join("\t"));
     if let Some(j) = &joined {
         args.push(j);
     }
     let v = bridge
         .call_with_progress("status", &args, T_STATUS, move |p| {
-            let Some(n) = p.get("scanned").and_then(|x| x.as_i64()) else {
+            // 进度只是提示：发不出去（窗口已关）不影响扫描结果。
+            // scanned 缺失（理论上不该发生）就不发进度，但单元条目照发——
+            // 两件事互不依赖
+            if let Some(n) = p.get("scanned").and_then(|x| x.as_i64()) {
+                let _ = emitter.emit(
+                    "svn-scan-progress",
+                    serde_json::json!({
+                        "scanned": n,
+                        "done": p.get("done").and_then(|x| x.as_u64()),
+                        "total": p.get("total").and_then(|x| x.as_u64()),
+                        "module": p.get("module").and_then(|x| x.as_str()),
+                    }),
+                );
+            }
+            // 该单元的条目：没有这个字段就是老桥（或非 status 命令），跳过即可
+            let items = unit_items(root, p);
+            if items.is_empty() {
                 return;
-            };
-            // 进度只是提示：发不出去（窗口已关）不影响扫描结果
+            }
             let _ = emitter.emit(
-                "svn-scan-progress",
+                "svn-scan-unit",
                 serde_json::json!({
-                    "scanned": n,
-                    "done": p.get("done").and_then(|x| x.as_u64()),
-                    "total": p.get("total").and_then(|x| x.as_u64()),
-                    "module": p.get("module").and_then(|x| x.as_str()),
+                    "epoch": epoch,
+                    "module": p.get("module").and_then(|x| x.as_str()).unwrap_or(""),
+                    "items": items,
                 }),
             );
         })
@@ -622,6 +675,21 @@ fn fetch_status(
         modules,
         entries,
     })
+}
+
+/// 桥的 progress 事件里的单元条目 → 界面条目。
+///
+/// 纯函数：条目缺失、字段畸形、整段不是数组都返回空_vec_（流式上屏丢了只等于
+/// 「这一模块等最终结果」，绝不让一次坏事件把整轮扫描带崩）。
+pub(super) fn unit_items(root: &Path, progress: &serde_json::Value) -> Vec<ChangeItem> {
+    let Some(entries) = progress.get("entries") else {
+        return Vec::new();
+    };
+    let entries: Vec<RawEntry> = match serde_json::from_value(entries.clone()) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    svn_view::items_for(root, &entries)
 }
 
 /// 命令层错误统一编码成 `code|message`：前端按第一个 `|` 切开，`code` 决定引导方式
@@ -1259,5 +1327,53 @@ mod upgrade_tests {
         }
         assert!(temp.starts_with(&base));
         std::fs::remove_dir_all(temp).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+
+    fn root() -> PathBuf {
+        PathBuf::from("C:").join("ws")
+    }
+
+    #[test]
+    fn 单元条目转成界面条目() {
+        let root = root();
+        let progress = serde_json::json!({
+            "scanned": 12,
+            "done": 3,
+            "total": 66,
+            "module": "pu",
+            "entries": [
+                {"path": root.join("pu").join("A.java").to_string_lossy(), "status": "modified", "revision": 7, "dir": false},
+                {"path": root.join("pu").join("B.java").to_string_lossy(), "status": "unversioned", "revision": -1, "dir": false},
+            ],
+        });
+        let items = unit_items(&root, &progress);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].rel, "pu/A.java");
+        assert_eq!(items[0].letter, "M");
+        assert_eq!(items[0].revision, 7);
+        assert_eq!(items[1].letter, "?");
+        assert_eq!(items[1].revision, -1);
+    }
+
+    #[test]
+    fn 没有条目或条目畸形时流式静默跳过() {
+        let root = root();
+        // 老桥的 progress 没有 entries：不等最终结果也不该崩
+        assert!(unit_items(&root, &serde_json::json!({"scanned": 1})).is_empty());
+        // 条目缺字段 / 类型不对：同样返回空，让这一模块等最终结果
+        assert!(unit_items(&root, &serde_json::json!({"entries": "不是数组"})).is_empty());
+        assert!(unit_items(&root, &serde_json::json!({"entries": [{"path": 1}]})).is_empty());
+    }
+
+    #[test]
+    fn 扫描纪元单调递增() {
+        let a = next_scan_epoch();
+        let b = next_scan_epoch();
+        assert!(b > a, "纪元必须单调递增，否则前端分不清新旧扫描");
     }
 }

@@ -16,6 +16,6 @@ test('SVNKit file repository: fixed history, blame and preserved conflict merge'
   try {
     execFileSync(join(jdk,'bin/javac.exe'),['-encoding','UTF-8','-cp',cp,'-d',temporary,join(desktop,'src-tauri/svn-bridge/NcSvnHistoryContractTest.java')],{encoding:'utf8'});
     const output=execFileSync(join(jdk,'bin/java.exe'),['-Dfile.encoding=UTF-8','-cp',cp+(sep==='\\'?';':':')+temporary,'NcSvnHistoryContractTest',temporary],{encoding:'utf8',timeout:60000});
-    assert.match(output,/SVN history contract passed: 18 checks/);
+    assert.match(output,/SVN history contract passed: 25 checks/);
   } finally { if(resolve(temporary).startsWith(resolve(cache)+sep))rmSync(temporary,{recursive:true,force:true}); }
 });

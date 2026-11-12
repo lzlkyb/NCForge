@@ -103,6 +103,38 @@ public class NcSvnHistoryContractTest {
             boolean traversal = false;
             try { call("revision_diff", a.getPath(), "/../A.java", Long.toString(r1)); } catch (Exception error) { traversal = true; }
             check(traversal, "repository path traversal rejected");
+            // 流式上屏：status 每扫完一个单元推一条带该单元条目的 progress，
+            // 且与最终结果同源（同一条目、同一字段）。把 out 换到缓冲里接住这些行。
+            File fresh = new File(a, "Stream.java"); write(fresh, "streaming\n");
+            java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+            Field out = NcSvnBridge.class.getDeclaredField("out"); out.setAccessible(true);
+            java.io.PrintStream original = (java.io.PrintStream) out.get(null);
+            out.set(null, new java.io.PrintStream(captured, true, "UTF-8"));
+            String statusResult;
+            try {
+                java.lang.reflect.Method status = NcSvnBridge.class
+                        .getDeclaredMethod("status", String.class, File.class, String.class);
+                status.setAccessible(true);
+                statusResult = (String) status.invoke(null, "t", a, "");
+            } finally { out.set(null, original); }
+            String streamed = captured.toString("UTF-8");
+            check(statusResult.contains("\"entries\":["), "status 最终结果带 entries: " + statusResult);
+            check(statusResult.contains("\"status\":\"unversioned\"") && statusResult.contains("\"revision\":-1"),
+                    "最终结果的条目带状态与版本: " + statusResult);
+            int unitLines = 0;
+            for (String line : streamed.split("\n")) {
+                if (line.isEmpty()) continue;
+                check(line.startsWith("{\"id\":\"t\",\"progress\":{") && line.endsWith("}}"),
+                        "每个单元的 progress 行都是完整 JSON: " + line);
+                if (line.contains("\"entries\":[")) unitLines++;
+            }
+            check(unitLines >= 1, "至少一个单元推了条目: " + streamed);
+            check(streamed.contains("\"module\":\"\""), "根层单元的 module 是空串: " + streamed);
+            check(streamed.contains("\"entries\":[{\"path\":") && streamed.contains("\"status\":\"unversioned\"")
+                    && streamed.contains("\"revision\":-1") && streamed.contains("\"dir\":false"),
+                    "单元条目带 path/status/revision/dir: " + streamed);
+            check(streamed.contains("Stream.java") && statusResult.contains("Stream.java"),
+                    "单元条目与最终结果指向同一批文件");
             System.out.println("SVN history contract passed: " + checks + " checks");
         } finally { manager.dispose(); cm.set(null, null); }
     }

@@ -35,14 +35,19 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
   const [revertTarget,setRevertTarget] = useState<ChangeItem | null>(null), [hkOpen,setHkOpen] = useState(false), [marking,setMarking] = useState(false);
   const markLock = useRef(false);
   const [focused,setFocused] = useState(false);
-  const {info,status,reviewed,mark,refresh,scanProgress} = useSvnStatus();
+  const {info,status,reviewed,mark,refresh,scanProgress,streamed} = useSvnStatus();
   const {doUpdate,doCommit,doRevert,doResolve,writeBusy} = useSvnChanges({setBusy,setAuth,refresh,onCommitted:() => svnSession.set({commitOpen:false,selectedPath:null}),onReverted:() => svnSession.set({selectedPath:null})});
-  const view = status.data?.changes ?? {groups:[],shown:0,total:0,ignored:0};
+  // 流式上屏：扫描途中的已扫条目优先显示，最终结果一到整份换掉（后端排好的序）。
+  // items（提交面板/草稿/冲突计数的依据）仍然只取最终结果——流式数据绝不进写路径。
+  const view = streamed ?? status.data?.changes ?? {groups:[],shown:0,total:0,ignored:0};
   const items = useMemo(() => status.data?.changes.groups.flatMap(g => g.items) ?? [],[status.data]);
+  // 首扫期间列表里已经有文件了：选中回退查流式条目，点开就能看 diff
+  // （diff 是单文件请求，不依赖整轮扫描的结论）。
+  const streamedItems = useMemo(() => streamed?.groups.flatMap(g => g.items) ?? [],[streamed]);
   useEffect(() => {
     if (root && status.data && !status.error && !changeIntent) syncSvnDraft(root,items);
   }, [root,items,status.data,status.error,changeIntent]);
-  const selected = items.find(it => selectedPath && keyOf(it.path) === keyOf(selectedPath)) ?? null;
+  const selected = items.find(it => selectedPath && keyOf(it.path) === keyOf(selectedPath)) ?? streamedItems.find(it => selectedPath && keyOf(it.path) === keyOf(selectedPath)) ?? null;
   const eligible = items.filter(isSvnCommittable), pickedCount = eligible.filter(it => isSvnPicked(draft.picked,it.path)).length;
   const locked = !!writeBusy || busy !== null, selectionLocked = locked || !!draft.unknown;
   useEffect(() => {
@@ -115,7 +120,7 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
     void mark(selected.path,selected.revision,!reviewed.has(keyOf(selected.path))).catch(error => toast(friendlySvnError(error),"error")).finally(() => { markLock.current = false; setMarking(false); });
   };
   return <>
-    <DockRegion region="toolbar"><SvnToolbar rev={info.data?.revision ?? 0} info={info.data} url={info.data?.url ?? null} generatedAtMs={status.data?.generatedAtMs ?? null} shown={status.data?.changes.shown ?? null} fetching={status.isFetching} scanned={scanProgress} busy={writeBusy?.kind ?? busy} canRevert={!!selected && !selected.isDir && !locked} revertTitle={selected ? `备份并撤销 ${selected.rel}` : "先选择文件"} committable={eligible.length} pickedCount={pickedCount} conflicts={items.filter(it => it.letter === "C").length} hkOpen={hkOpen} onRefresh={refreshNow} onUpdate={() => void doUpdate()} onRevert={() => setRevertTarget(selected)} onCommit={() => { svnSession.set({commitOpen:!commitOpen}); dock?.showDocument(); }} onHousekeeping={() => setHkOpen(true)} onHistory={showHistory} onFiles={() => setSideOpen(true)} /></DockRegion>
+    <DockRegion region="toolbar"><SvnToolbar rev={info.data?.revision ?? 0} info={info.data} url={info.data?.url ?? null} generatedAtMs={status.data?.generatedAtMs ?? null} shown={(streamed ?? status.data?.changes)?.shown ?? null} fetching={status.isFetching} scanned={scanProgress} busy={writeBusy?.kind ?? busy} canRevert={!!selected && !selected.isDir && !locked} revertTitle={selected ? `备份并撤销 ${selected.rel}` : "先选择文件"} committable={eligible.length} pickedCount={pickedCount} conflicts={items.filter(it => it.letter === "C").length} hkOpen={hkOpen} onRefresh={refreshNow} onUpdate={() => void doUpdate()} onRevert={() => setRevertTarget(selected)} onCommit={() => { svnSession.set({commitOpen:!commitOpen}); dock?.showDocument(); }} onHousekeeping={() => setHkOpen(true)} onHistory={showHistory} onFiles={() => setSideOpen(true)} /></DockRegion>
     <DockRegion region="sidebar"><ChangeList view={view} root={root} reviewed={reviewed} outdated={outdated} picked={draft.picked} busy={selectionLocked} selected={selectedPath} loading={status.isFetching} error={status.error ? friendlySvnError(status.error) : null} onSelect={pick} onOpenFile={openFile} showIgnored={showIgnored} onToggleIgnored={() => svnSession.set({showIgnored:!showIgnored})} /></DockRegion>
     <DockRegion region="document"><div className="vc-review-document" data-focus={focused || undefined}>
       {focused && <div className="vc-focus-bar"><SvnReviewFiles items={queue} selected={selectedPath} onSelect={pick}/><button type="button" className="vc-btn vc-btn-sm vc-focus-exit" onClick={()=>{setFocused(false);requestAnimationFrame(()=>workarea.current?.querySelector<HTMLButtonElement>('[aria-label="专注对比"]')?.focus());}}>退出专注对比</button></div>}

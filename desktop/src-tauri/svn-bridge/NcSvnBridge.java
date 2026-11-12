@@ -60,7 +60,8 @@ import org.tmatesoft.svn.core.internal.io.svn.SVNRepositoryFactoryImpl;
  * </pre>
  * 响应：{"id":3,"ok":true,"data":{...}} / {"id":3,"ok":false,"error":"...","code":"auth"}，
  * 长任务在最终响应前会有若干 {"id":3,"progress":{"scanned":1200}}。
- * status 的进度额外带 done / total / module（按一级目录推进，见 status 的注释）。
+ * status 的进度额外带 done / total / module（按一级目录推进，见 status 的注释），
+ * 扫完一个模块时还带该模块的 entries（流式上屏：条目随扫随到，不必等整轮结束）。
  */
 public class NcSvnBridge {
 
@@ -253,6 +254,8 @@ public class NcSvnBridge {
 		if (names.size() > MAX_STATUS_UNITS) {
 			java.util.Map<String, String> got = new java.util.LinkedHashMap<String, String>();
 			int n = scanInto(manager(), root, SVNDepth.INFINITY, got);
+			// 这条路没有分单元，把整次结果当一个单元推出去，前端行为与分单元时一致
+			progress(id, n, 1, 1, "", got);
 			return result(n, 1, 1, names, new ArrayList<String>(got.values()));
 		}
 
@@ -337,7 +340,8 @@ public class NcSvnBridge {
 							UNIT_MS.put(unitKey(root, names.get(idx)), (System.nanoTime() - t0) / 1000000L);
 							perUnit.put(idx, got);
 							scanned.addAndGet(n);
-							progress(id, scanned.get(), done.incrementAndGet(), total, names.get(idx));
+							// 条目跟着进度一起推：这一模块扫完了，前端立刻能显示它
+							progress(id, scanned.get(), done.incrementAndGet(), total, names.get(idx), got);
 						} catch (Throwable t) {
 							failure.compareAndSet(null, t);
 						} finally {
@@ -851,9 +855,27 @@ public class NcSvnBridge {
 
 	/** status 的进度：一个一级目录扫完推一次（`done`/`total` 是模块数，`scanned` 是条目数）。 */
 	private static void progress(String id, int scanned, int done, int total, String module) {
+		progress(id, scanned, done, total, module, null);
+	}
+
+	/**
+	 * status 的进度 + 该单元刚扫到的条目（流式上屏）。
+	 *
+	 * <p>条目随「扫完一个模块」推一次，前端立刻能把它们显示出来，不用等 66 个模块
+	 * 全部扫完（冷缓存 8.5 秒）。这只是上屏时机：最终响应仍是合并去重后的完整结果，
+	 * 顺序与字段都不受它影响，所以这里连去重都不做——同一路径在根层与模块层各报一次，
+	 * 由最终响应按 names 顺序去重。
+	 *
+	 * <p>挂在 progress 上而不是新开一种事件：宿主侧的读取循环只认 progress 一种途中
+	 * 事件，新开事件类型要改数据库桥共用的分发。
+	 */
+	private static void progress(String id, int scanned, int done, int total, String module,
+			java.util.Map<String, String> got) {
 		synchronized (OUT_LOCK) {
 			out.print("{\"id\":" + jstr(id) + ",\"progress\":{\"scanned\":" + scanned + ",\"done\":" + done
-					+ ",\"total\":" + total + ",\"module\":" + jstr(module) + "}}\n");
+					+ ",\"total\":" + total + ",\"module\":" + jstr(module)
+					+ (got == null || got.isEmpty() ? "" : ",\"entries\":[" + join(new ArrayList<String>(got.values())) + "]")
+					+ "}}\n");
 			out.flush();
 		}
 	}

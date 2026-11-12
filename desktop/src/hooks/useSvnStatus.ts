@@ -1,16 +1,18 @@
 import { trackOperation, updateOperation } from "../lib/operations";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSession, useWorkspaceRoot } from "../lib/workspaceSession";
 import { workspaceEpoch } from "../lib/workspaceEpoch";
 import { getReviewedPaths, initReviewMarks, markReviewed, reviewMarksVersion, subscribeReviewMarks, syncReviewMarks } from "../lib/reviewMarks";
 import {
   onSvnScanProgress,
+  onSvnScanUnit,
   svnInfo,
   svnStatus,
   type ScanProgress,
   type StatusResult,
 } from "../lib/svn";
+import { emptyStream, reduceStream } from "../lib/svnStream";
 
 /** 扫描结果的说明文案：增量时把「只扫了几个模块」写出来，免得用户以为漏扫了。 */
 export function describeScan(result: StatusResult | undefined): string {
@@ -33,6 +35,15 @@ export function useSvnStatus() {
   const qc = useQueryClient();
   /** 本次扫描的进度（桥每扫完一个模块推一次）；null = 没有进行中的扫描。 */
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
+  /**
+   * 流式上屏：扫描进行中陆续到达的条目（已按模块合并）。
+   *
+   * 只在 `status.isFetching` 期间订阅；最终结果一到就清空——之后的展示完全以
+   * `status.data` 为准，流式数据绝不参与提交、草稿、冲突计数任何判断。
+   */
+  const [stream, reduceStreamBy] = useReducer(reduceStream, emptyStream);
+  /** 已应用过的最大结果纪元：比它旧的单元事件是旧扫描的残余，直接丢。 */
+  const lastResultEpoch = useRef(0);
 
   const info = useQuery({
     queryKey: ["svn-info", root],
@@ -51,6 +62,13 @@ export function useSvnStatus() {
 
   useSyncExternalStore(subscribeReviewMarks, reviewMarksVersion);
   useEffect(() => { initReviewMarks(); syncReviewMarks(status.data); }, [status.data]);
+  // 最终结果到达：记下纪元、清空流式缓冲区。之后的展示完全以 status.data 为准，
+  // 流式数据只在扫描途中顶班（首扫时用户面对的不是空白，而是已扫到的模块）。
+  useEffect(() => {
+    const epoch = status.data?.epoch;
+    if (typeof epoch === "number" && epoch > lastResultEpoch.current) lastResultEpoch.current = epoch;
+    reduceStreamBy({ type: "reset" });
+  }, [status.data]);
   const reviewed = getReviewedPaths();
   const mark = (path: string, revision: number, next: boolean) => markReviewed(path, next, revision);
 
@@ -84,7 +102,7 @@ export function useSvnStatus() {
     return s.error ? undefined : s.data;
   }, [status, info, qc, root]);
 
-  // 扫描进度：只在扫描进行中订阅（扫完就退订，桥那边不再推）。
+  // 扫描进度与流式条目：只在扫描进行中订阅（扫完就退订，桥那边不再推）。
   // 十几秒里界面只有一个转圈图标时，用户分不清「在跑」和「卡死」。
   useEffect(() => {
     if (!status.isFetching) {
@@ -93,11 +111,17 @@ export function useSvnStatus() {
     }
     let gone = false;
     let un: (() => void) | undefined;
-    void onSvnScanProgress((p) => { if (getSession().root !== root) return; setScanProgress(p); updateOperation(`svn.scan:${root}`, { progress: { done: p.done ?? p.scanned }, phase: p.total ? `扫描模块 ${p.done ?? 0}/${p.total}` : "扫描工作副本条目" }); })
-      .then((fn) => {
+    const subs = [
+      onSvnScanProgress((p) => { if (getSession().root !== root) return; setScanProgress(p); updateOperation(`svn.scan:${root}`, { progress: { done: p.done ?? p.scanned }, phase: p.total ? `扫描模块 ${p.done ?? 0}/${p.total}` : "扫描工作副本条目" }); }),
+      // 流式上屏：一个模块的条目到了就并进视图。丢了不影响最终结果，只是那一模块
+      // 要等扫描结束才出现，所以这里不做任何补偿处理。
+      onSvnScanUnit((u) => { if (getSession().root !== root) return; reduceStreamBy({ type: "unit", unit: u, lastResultEpoch: lastResultEpoch.current }); }),
+    ];
+    void Promise.all(subs)
+      .then((fns) => {
         // 订阅回来之前扫描可能已经结束了，此时立刻退订，别把监听留在窗口上
-        if (gone) fn();
-        else un = fn;
+        if (gone) fns.forEach(fn => fn());
+        else un = () => fns.forEach(fn => fn());
       })
       .catch(() => {
         /* 非 Tauri 环境（浏览器里跑 vite dev）没有事件通道，忽略 */
@@ -108,5 +132,5 @@ export function useSvnStatus() {
     };
   }, [status.isFetching, root]);
 
-  return { info, status, reviewed, mark, refresh, scanProgress };
+  return { info, status, reviewed, mark, refresh, scanProgress, streamed: stream.view };
 }

@@ -180,27 +180,36 @@ fn fs_modified_ms(path: &str) -> Option<i64> {
         .map(|d| d.as_millis() as i64)
 }
 
-/// 原始状态 → 界面视图：拼字段、打忽略标记、按模块分组（模块按条目数降序，条目按路径升序）。
+/// 原始状态 → 界面条目（拼字段、打忽略标记）。**不分组**。
+///
+/// 分组排序在 [`build_changes`]；单独拆出来给流式上屏用：桥每扫完一个模块就推
+/// 一次该模块的原始条目，后端转成界面条目立刻发给前端，不等整轮扫完。
+pub fn items_for(root: &Path, raw: &[RawEntry]) -> Vec<ChangeItem> {
+    raw.iter()
+        .map(|e| {
+            let p = Path::new(&e.path);
+            let rel = relative(root, p);
+            ChangeItem {
+                module: module_of(&rel),
+                ignored: is_ignored(&rel, e.dir),
+                path: e.path.clone(),
+                letter: status_letter(&e.status).to_string(),
+                status: e.status.clone(),
+                revision: e.revision,
+                is_dir: e.dir,
+                mtime_ms: fs_modified_ms(&e.path),
+                rel,
+            }
+        })
+        .collect()
+}
+
+/// 原始状态 → 界面视图：按模块分组（模块按条目数降序，条目按路径升序）。
 ///
 /// **不在这里按忽略规则删条目**：条目带上 `ignored` 标记，由界面决定显不显示。
 /// 这样左栏那个「显示全部」开关是纯前端的，不会又触发一次全量 status。
 pub fn build_changes(root: &Path, raw: &[RawEntry]) -> ChangesView {
-    let mut items: Vec<ChangeItem> = Vec::new();
-    for e in raw {
-        let p = Path::new(&e.path);
-        let rel = relative(root, p);
-        items.push(ChangeItem {
-            path: e.path.clone(),
-            module: module_of(&rel),
-            ignored: is_ignored(&rel, e.dir),
-            rel,
-            letter: status_letter(&e.status).to_string(),
-            status: e.status.clone(),
-            revision: e.revision,
-            is_dir: e.dir,
-            mtime_ms: fs_modified_ms(&e.path),
-        });
-    }
+    let mut items = items_for(root, raw);
     items.sort_by_key(|a| a.rel.to_lowercase());
 
     let mut groups: Vec<ChangeGroup> = Vec::new();
@@ -361,6 +370,45 @@ mod tests {
         )];
         let v = build_changes(&root, &raw);
         assert_eq!(v.groups[0].items[0].mtime_ms, None);
+    }
+
+    #[test]
+    fn items_for_不分组但字段与忽略标记齐全() {
+        // 流式上屏按模块收条目，走的是这个函数：少一个字段（mtime / ignored）
+        // 前端首屏渲染就会静默错位，而最终结果走的 build_changes 仍然是对的，
+        // 两条路必须同一套拼装逻辑
+        let root = PathBuf::from("C:").join("ws");
+        let raw = vec![
+            raw(
+                &root.join("pu").join("A.java").to_string_lossy(),
+                "modified",
+                false,
+            ),
+            raw(
+                &root
+                    .join("pu")
+                    .join("classes")
+                    .join("A.class")
+                    .to_string_lossy(),
+                "unversioned",
+                false,
+            ),
+        ];
+        let items = items_for(&root, &raw);
+        assert_eq!(items.len(), 2, "不分组：原样返回，条目数不变");
+        assert_eq!(items[0].rel, "pu/A.java");
+        assert_eq!(items[0].module, "pu");
+        assert_eq!(items[0].letter, "M");
+        assert!(!items[0].ignored);
+        assert!(items[1].ignored, "构建产物仍要带 ignored 标记");
+        assert_eq!(items[1].letter, "?");
+        // 与 build_changes 同源：同一条 raw 两条路给出的条目必须逐字段相等
+        let grouped = build_changes(&root, &raw);
+        let flat: Vec<&ChangeItem> = grouped.groups.iter().flat_map(|g| g.items.iter()).collect();
+        assert_eq!(flat.len(), items.len());
+        for (a, b) in flat.iter().zip(items.iter()) {
+            assert_eq!(**a, *b, "两条路的条目必须一致");
+        }
     }
 
     #[test]
