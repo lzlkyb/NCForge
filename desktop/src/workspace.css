@@ -734,6 +734,9 @@ button.wb-status-chip:hover { background: hsl(var(--secondary)); color: hsl(var(
 @media (prefers-reduced-motion: reduce) { .wb-lang[data-tone="busy"] .wb-lang-dot { animation: none; } }
 .wb-status-btn { color: inherit; font-size: inherit; padding: 0 4px; border-radius: 4px; }
 .wb-status-btn:hover { background: hsl(var(--secondary)); color: hsl(var(--foreground)); }
+/* 状态栏「当前需求」：需求名可能很长，截断不挤掉右侧的服务状态 */
+.wb-status-req { display: inline-flex; align-items: center; min-width: 0; max-width: 360px; flex-shrink: 1; }
+.wb-status-req span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 状态栏的 NC 服务入口：小圆点表达启停态，点一下打开底部服务面板 */
 .wb-status-svc {
   display: inline-flex;

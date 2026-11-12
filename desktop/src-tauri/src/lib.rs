@@ -36,6 +36,8 @@ pub mod bmf_write;
 pub mod branding;
 pub mod build_layout;
 pub mod build_state;
+/// 读 cc-bridge 变更日志（按需求审查）。
+pub mod cc_journal;
 pub mod class_pool;
 pub mod commands;
 pub mod compile;
@@ -92,8 +94,12 @@ pub mod nc_upm;
 pub mod nchome_deploy;
 pub mod patch_build;
 pub mod patch_view;
+/// 需求表：需求、文件归属、当前需求（按需求审查）。
+pub mod req_store;
 pub mod resource_pack;
 pub mod retry;
+/// 按改动块的「已审」落盘。
+pub mod review_blocks;
 pub mod search;
 pub mod security;
 pub mod server;

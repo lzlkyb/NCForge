@@ -7,6 +7,7 @@ import { HotswapStatusChip } from "./HotswapStatusChip";
 import { OperationStatus } from "../ui/OperationStatus";
 import { StatusContributions } from "./StatusContributions";
 import { FileStatusMenu } from "./FileStatusMenu";
+import { ReqStatusChip } from "./ReqStatusChip";
 
 /**
  * 外壳状态栏（工作台里只有这一条）。
@@ -58,6 +59,7 @@ export function ShellStatusBar({
         </>
       )}
       <StatusContributions activeTool={activeTool} />
+      <ReqStatusChip activeTool={activeTool} />
       <OperationStatus compact />
       <span className="wb-status-sp" />
       {saving && <span className="wb-status-warn">保存中…</span>}

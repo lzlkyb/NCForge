@@ -2,16 +2,22 @@ import { useEffect, useMemo, useRef } from "react";
 import { Icon } from "../ui/icon";
 import { Menu, MenuItem } from "../ui/Menu";
 import { SvnFileRows } from "./SvnFileRows";
+import { ReqGroupRows } from "./ReqGroupRows";
+import { ReqJournalHint } from "./ReqJournalHint";
+import { useRequirements } from "../../lib/requirements";
+import type { FileBlocks } from "../../hooks/useReqBlocks";
 import { keyOf, reviewProgress, type ChangeItem, type ChangesView } from "../../lib/svn";
 import { SVN_FILTERS, svnFilterCounts, svnVisibleGroups } from "../../lib/svnList";
 import { setSvnListPrefs, useSvnListPrefs } from "../../lib/svnListPrefs";
 import { clearSvnPicked, isSvnCommittable, selectSvnPaths } from "../../lib/svnDraft";
 
-export function ChangeList({ view, reviewed, outdated, selected, loading, error, onSelect, showIgnored, onToggleIgnored, root = "", picked = new Set<string>(), busy = false, onOpenFile }: { view: ChangesView; reviewed: Set<string>; outdated?: ReadonlySet<string>; selected: string | null; loading: boolean; error: string | null; onSelect: (item: ChangeItem) => void; showIgnored: boolean; onToggleIgnored: () => void; root?: string; picked?: ReadonlySet<string>; busy?: boolean; onOpenFile?: (path: string) => void }) {
-  const prefs = useSvnListPrefs(root), list = useRef<HTMLDivElement>(null);
+export function ChangeList({ view, reviewed, outdated, selected, loading, error, onSelect, showIgnored, onToggleIgnored, root = "", picked = new Set<string>(), busy = false, onOpenFile, onMarkReqAll }: { view: ChangesView; reviewed: Set<string>; outdated?: ReadonlySet<string>; selected: string | null; loading: boolean; error: string | null; onSelect: (item: ChangeItem) => void; showIgnored: boolean; onToggleIgnored: () => void; root?: string; picked?: ReadonlySet<string>; busy?: boolean; onOpenFile?: (path: string) => void; onMarkReqAll?: (items: ChangeItem[], blocks: Map<string, FileBlocks>) => void }) {
+  const prefs = useSvnListPrefs(root), list = useRef<HTMLDivElement>(null), reqs = useRequirements();
+  const byReq = prefs.groupBy === "req", hasReqs = reqs.view.reqs.some(r => r.status === "open");
   const initialScroll = useRef(prefs.scroll);
   const groups = useMemo(() => svnVisibleGroups(view,prefs.filter,prefs.search,prefs.sort,showIgnored,reviewed,picked,outdated),[view,prefs,showIgnored,reviewed,picked,outdated]);
-  const visibleFiles = useMemo(() => groups.filter(group => !prefs.closed.includes(group.module)).flatMap(group => group.items), [groups, prefs.closed]);
+  // 按需求分组时模块折叠不生效（折叠的是需求组，在 ReqGroupRows 里管）。
+  const visibleFiles = useMemo(() => groups.filter(group => byReq || !prefs.closed.includes(group.module)).flatMap(group => group.items), [groups, prefs.closed, byReq]);
   const selectedRow = visibleFiles.find(item => selected !== null && keyOf(item.path) === keyOf(selected))?.path;
   const tabStop = selectedRow ?? visibleFiles[0]?.path;
   // 筛选片计数一趟算完并记住：输入搜索词、滚动等无关渲染不再把几千行过 7 遍
@@ -21,6 +27,8 @@ export function ChangeList({ view, reviewed, outdated, selected, loading, error,
   if (!chips.includes(prefs.filter)) chips.push(prefs.filter);
   const progress = reviewProgress({ ...view, groups: view.groups.map(g => ({ ...g, items: g.items.filter(it => !it.ignored) })) },reviewed);
   useEffect(() => { const el = list.current; if (el) el.scrollTop = initialScroll.current; return () => { if (el) setSvnListPrefs(root,{scroll:el.scrollTop}); }; },[root]); // 滚动只在离开时落盘，避免每个滚动帧写本地存储。
+  // 设计稿拍板 2：用户没亲手选过分组方式时，第一次出现需求就自动切到按需求。
+  useEffect(() => { if (root && hasReqs && !prefs.groupChosen && !byReq) setSvnListPrefs(root,{groupBy:"req"}); },[root,hasReqs,prefs.groupChosen,byReq]);
   useEffect(() => {
     if (selectedRow) {
       list.current?.querySelector('[data-file-row][aria-pressed="true"]')?.scrollIntoView?.({ block: "nearest" });
@@ -29,6 +37,7 @@ export function ChangeList({ view, reviewed, outdated, selected, loading, error,
   return <aside className="vc-chg">
     <div className="vc-chg-top">
       <div className="vc-list-title"><b>本地改动 · {view.shown}</b>
+        <span className="vc-mini-seg" role="group" aria-label="分组方式">{([["module","按模块"],["req","按需求"]] as const).map(([g,label]) => <button key={g} type="button" aria-pressed={prefs.groupBy === g} data-on={prefs.groupBy === g || undefined} onClick={() => setSvnListPrefs(root,{groupBy:g,groupChosen:true})}>{label}</button>)}</span>
         <Menu portal width="w-56" trigger={(open,toggle)=><button type="button" className="vc-btn vc-btn-sm" aria-label="筛选与清单操作" aria-haspopup="menu" aria-expanded={open} onClick={toggle}><Icon name="settings" size={13}/></button>}>
           {close=><>
             {(Object.keys(SVN_FILTERS) as (keyof typeof SVN_FILTERS)[]).map(f=><MenuItem key={f} label={`${SVN_FILTERS[f]} ${counts[f]}`} checked={prefs.filter===f} onClick={()=>{setSvnListPrefs(root,{filter:f});close();}}/>)}
@@ -49,10 +58,12 @@ export function ChangeList({ view, reviewed, outdated, selected, loading, error,
       </div>
     </div>
     <div className="vc-list" ref={list}>
+      {byReq && <ReqJournalHint view={reqs.view} loaded={reqs.loaded} />}
       {loading && !view.total && <div className="vc-empty" role="status"><Icon name="spinner" size={20} className="animate-spin" /><div>正在扫描工作副本…<br />完成后显示真实改动</div></div>}
       {error && !loading && <div className="vc-alert" data-tone="warn"><Icon name="alert" size={14} /><span>{view.total ? "扫描失败，以下是上次结果。" : "尚未取得改动结果。"}请在上方重试。</span></div>}
       {!error && !groups.length && !(loading && !view.total) && <div className="vc-empty"><Icon name="check" size={24} /><div>{!view.total ? "工作副本没有本地改动" : !view.shown && view.ignored ? "只有构建产物，没有源码改动" : "当前筛选没有匹配文件"}</div>{view.total > 0 && <button type="button" className="vc-btn" onClick={() => setSvnListPrefs(root,{search:"",filter:"all"})}>清除筛选</button>}</div>}
-      {groups.map(group => <SvnFileRows key={group.module} group={group} closed={prefs.closed.includes(group.module)} onToggleGroup={() => setSvnListPrefs(root,{closed:prefs.closed.includes(group.module) ? prefs.closed.filter(s => s !== group.module) : [...prefs.closed,group.module]})} selected={selected} tabStop={tabStop} reviewed={reviewed} outdated={outdated} picked={picked} root={root} busy={busy} sort={prefs.sort} onSelect={onSelect} onOpenFile={onOpenFile} />)}
+      {byReq && groups.length > 0 && <ReqGroupRows items={visibleFiles} reqs={reqs.view} root={root} closed={prefs.closed} selected={selected} tabStop={tabStop} reviewed={reviewed} outdated={outdated} picked={picked} busy={busy} sort={prefs.sort} onSelect={onSelect} onOpenFile={onOpenFile} onMarkAll={onMarkReqAll} />}
+      {!byReq && groups.map(group => <SvnFileRows key={group.module} group={group} closed={prefs.closed.includes(group.module)} onToggleGroup={() => setSvnListPrefs(root,{closed:prefs.closed.includes(group.module) ? prefs.closed.filter(s => s !== group.module) : [...prefs.closed,group.module]})} selected={selected} tabStop={tabStop} reviewed={reviewed} outdated={outdated} picked={picked} root={root} busy={busy} sort={prefs.sort} onSelect={onSelect} onOpenFile={onOpenFile} />)}
     </div>
     <div className="vc-chg-foot">
       <div className="vc-list-summary"><button type="button" className="vc-chip" onClick={()=>setSvnListPrefs(root,{filter:"reviewed"})}>已审 {progress.done}/{progress.total}</button><button type="button" className="vc-chip" onClick={() => setSvnListPrefs(root,{filter:"picked",search:""})}>已选 {picked.size}</button></div>

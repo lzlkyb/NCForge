@@ -5,6 +5,7 @@ import { failureText } from "../lib/friendlyError";
 import type { PatchDraft } from "../lib/patchDraft";
 import { cancelOperation, getOperations, operationActive } from "../lib/operations";
 import { listen } from "../lib/tauri";
+import { notePackaged } from "../lib/reqActions";
 import {
   EMPTY_DRAFT,
   NO_FORCE,
@@ -107,6 +108,8 @@ export function usePatchBuild(
         forceStd: force.std,
       });
       setResult(r);
+      // 补丁名对得上某个需求就记一笔出包（变更列表的「已出包 +N」靠它）
+      notePackaged(desc.trim(), r.zipPath);
       // 「zip 条目」含目录条目（与 `zip -r` 的历史包一致）——预览树那边数的是
       // 文件，两个数不是一回事，文案里说清，别让用户以为预览少数了
       toast(`已生成补丁包，共 ${r.entries} 个 zip 条目（含目录）`, "success");

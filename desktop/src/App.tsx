@@ -21,11 +21,13 @@ import "./workbench-upgrade.css";
 import { openPalette, usePalette } from "./lib/paletteStore";
 import { openLinkedDialog } from "./lib/linkedDialog";
 import { ShortcutSheet } from "./components/layout/ShortcutSheet";
+import { ReqNameDialogHost } from "./components/svn/ReqNameDialog";
 import { showObjectFinder } from "./lib/dbStore";
 import { isDbObjectKey } from "./lib/keymap";
 import { registerCommands } from "./lib/commandRegistry";
 import { setSession } from "./lib/workspaceSession";
 import { initReviewSession } from "./lib/reviewSession";
+import { initRequirements } from "./lib/requirements";
 import { openPatchPage } from "./lib/svnSession";
 import { requestOpenChangelog } from "./lib/changelogRequest";
 import { showWorkbenchDocument } from "./lib/dockEvents";
@@ -131,7 +133,7 @@ function AppContent() {
   // 全局只挂一次，卸载时解绑。
   // 审查事件采集必须早于用户第一次打开「改动」页签：否则 AI 改完文件后
   // 时间线是空的（P0-2）。幂等，全局只挂一次。
-  useEffect(() => initReviewSession(), []);
+  useEffect(() => { initReviewSession(); initRequirements(); }, []);
   useEffect(() => wireQuitGuard(), []);
   // 窗口尺寸持久化：启动恢复上次尺寸 + resize 防抖落盘（纯前端方案）
   useWindowSizePersistence();
@@ -450,6 +452,7 @@ function AppContent() {
       {/* 版本变化的那次启动浮一条一次性提示，把「升级完成」这个闭环补上 */}
       <UpgradeWelcomeBar currentVersion={status?.version} onOpenHistory={openUpdateNotes} />
       <ShortcutSheet />
+      <ReqNameDialogHost />
     </div>
   );
 }

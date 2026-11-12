@@ -13,6 +13,7 @@ import {
   type StatusResult,
 } from "../lib/svn";
 import { emptyStream, reduceStream } from "../lib/svnStream";
+import { syncRequirementsWithScan } from "../lib/requirements";
 
 /** 扫描结果的说明文案：增量时把「只扫了几个模块」写出来，免得用户以为漏扫了。 */
 export function describeScan(result: StatusResult | undefined): string {
@@ -61,7 +62,8 @@ export function useSvnStatus() {
   });
 
   useSyncExternalStore(subscribeReviewMarks, reviewMarksVersion);
-  useEffect(() => { initReviewMarks(); syncReviewMarks(status.data); }, [status.data]);
+  // 需求归属跟着完整扫描走：清掉已不在改动里的文件，再同步 cc-bridge 变更日志。
+  useEffect(() => { initReviewMarks(); syncReviewMarks(status.data); syncRequirementsWithScan(status.data); }, [status.data]);
   // 最终结果到达：记下纪元、清空流式缓冲区。之后的展示完全以 status.data 为准，
   // 流式数据只在扫描途中顶班（首扫时用户面对的不是空白，而是已扫到的模块）。
   useEffect(() => {

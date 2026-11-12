@@ -20,6 +20,7 @@ import { readTabSnapshot } from "./tabPersistence";
 import { recomputeChanged, setRoundBaselines } from "./changedLinesStore";
 import { loadRoundBaseTexts } from "./roundBaseline";
 import { blockFingerprint, type ChangedBlock } from "./changedLines";
+import { invoke } from "./tauri";
 
 export type ReviewView = "timeline" | "diff" | "checklist";
 export type BaselineMode = "svn" | "round";
@@ -116,8 +117,36 @@ export async function setBaselineMode(mode: BaselineMode): Promise<void> {
   recomputeChanged();
 }
 
+/**
+ * 指纹含整块原文，直接当落盘 key 会把标记文件撑得很大；取 53 位哈希（cyrb53）。
+ * 只在同一文件内比较，碰撞概率可以忽略。
+ */
+function hashFingerprint(s: string): string {
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
 export function reviewedKey(path: string, block: ChangedBlock): string {
-  return `${norm(path)}|${blockFingerprint(block)}`;
+  return `${norm(path)}|${hashFingerprint(blockFingerprint(block))}`;
+}
+
+/**
+ * 块级已审落盘（按需求审查 P1：重启不丢）。先改内存再异步写盘：写盘失败只影响重启后的记忆，
+ * 不该让「点了已审却没反应」。块文本一并存下，供以后「只看这次改了什么」用。
+ */
+function persistBlocks(keys: string[], blocks: readonly ChangedBlock[], reviewed: boolean): void {
+  if (!keys.length) return;
+  const texts = reviewed ? blocks.map((b) => b.currentLines.join("\n")) : undefined;
+  void invoke("review_blocks_set", { keys, texts, reviewed }).catch((e) => {
+    console.warn("块级审查标记写盘失败（本次会话内仍有效）", e);
+  });
 }
 export function isBlockReviewed(path: string, block: ChangedBlock): boolean {
   return state.reviewed.has(reviewedKey(path, block));
@@ -131,7 +160,18 @@ export function markBlockReviewed(path: string, block: ChangedBlock, next?: bool
   const updated = new Set(state.reviewed);
   if (want) updated.add(key); else updated.delete(key);
   patch({ reviewed: updated });
+  persistBlocks([key], [block], want);
   return want;
+}
+/** 批量标记（「已审并看下一项」「本需求全部标为已审」）。只写状态真正变了的块。 */
+export function markBlocksReviewed(path: string, blocks: readonly ChangedBlock[], next: boolean): void {
+  const changed = blocks.filter((b) => state.reviewed.has(reviewedKey(path, b)) !== next);
+  if (!changed.length) return;
+  const keys = changed.map((b) => reviewedKey(path, b));
+  const updated = new Set(state.reviewed);
+  for (const k of keys) { if (next) updated.add(k); else updated.delete(k); }
+  patch({ reviewed: updated });
+  persistBlocks(keys, changed, next);
 }
 export function reviewedCount(path: string, blocks: readonly ChangedBlock[]): number {
   return blocks.filter((b) => isBlockReviewed(path, b)).length;
@@ -164,6 +204,16 @@ export function initReviewSession(): void {
   initChangeTimeline();
   initReviewMarks();
   void seedRoundsFromHistory();
+  void loadPersistedBlocks();
+}
+
+/** 启动时读回落盘的块级已审，并入内存（不覆盖启动后已经点过的）。读不到就算了。 */
+async function loadPersistedBlocks(): Promise<void> {
+  try {
+    const keys = await invoke<string[]>("review_blocks_list");
+    if (!keys.length) return;
+    patch({ reviewed: new Set([...keys, ...state.reviewed]) });
+  } catch { /* 桥没起 / 单测环境：只是没有上次的记忆 */ }
 }
 
 /**

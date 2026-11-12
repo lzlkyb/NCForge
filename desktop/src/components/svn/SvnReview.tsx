@@ -21,6 +21,9 @@ import { setSvnListPrefs, useSvnListPrefs } from "../../lib/svnListPrefs";
 import { isSvnCommittable, isSvnPicked, selectSvnPaths, syncSvnDraft, useSvnDraft } from "../../lib/svnDraft";
 import { workspaceEpoch } from "../../lib/workspaceEpoch";
 import { setSideOpen } from "../../lib/layoutStore";
+import { useQueryClient } from "@tanstack/react-query";
+import { markBlocksReviewed } from "../../lib/reviewSession";
+import { cachedBlocks, type FileBlocks } from "../../hooks/useReqBlocks";
 import "../../svn-workbench.css";
 
 export function SvnReview({ onOpenFile }: { onOpenFile: (path: string) => void }) {
@@ -33,7 +36,7 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
   const prefs = useSvnListPrefs(root), draft = useSvnDraft(root);
   const [busy,setBusy] = useState<SvnBusy>(null), [auth,setAuth] = useState<SvnAuth>({open:false,error:null});
   const [revertTarget,setRevertTarget] = useState<ChangeItem | null>(null), [hkOpen,setHkOpen] = useState(false), [marking,setMarking] = useState(false);
-  const markLock = useRef(false);
+  const markLock = useRef(false), qc = useQueryClient();
   const [focused,setFocused] = useState(false);
   const {info,status,reviewed,mark,refresh,scanProgress,streamed} = useSvnStatus();
   const {doUpdate,doCommit,doRevert,doResolve,writeBusy} = useSvnChanges({setBusy,setAuth,refresh,onCommitted:() => svnSession.set({commitOpen:false,selectedPath:null}),onReverted:() => svnSession.set({selectedPath:null})});
@@ -106,6 +109,8 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
     const epoch = workspaceEpoch(), path = selected.path, visible = [...queue];
     markLock.current = true; setMarking(true);
     try {
+      // P1：整个文件的块一起标（混改文件里按需求分块是 P2），块级标记落盘、重启不丢。
+      markBlocksReviewed(path,cachedBlocks(qc,root,selected),true);
       await mark(path,selected.revision,true);
       if (getSession().root !== root || workspaceEpoch() !== epoch || svnSession.get().selectedPath !== path) return;
       const next = nextSvnUnreviewed(visible,path,reviewed,path);
@@ -114,6 +119,13 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
     } catch (error) { toast(`标记失败，仍保留当前文件：${friendlySvnError(error)}`,"error"); }
     finally { markLock.current = false; setMarking(false); }
   };
+  const markReqAll = (reqItems: ChangeItem[], blocks: Map<string, FileBlocks>) => {
+    if (locked || markLock.current) return;
+    const todo = reqItems.filter(it => isMarkable(it) && !reviewed.has(keyOf(it.path)));
+    for (const it of reqItems) markBlocksReviewed(it.path,blocks.get(keyOf(it.path))?.blocks ?? cachedBlocks(qc,root,it),true);
+    markLock.current = true; setMarking(true);
+    void Promise.all(todo.map(it => mark(it.path,it.revision,true))).then(() => toast(`已标记 ${reqItems.length} 个文件为已审`,"success")).catch(error => toast(friendlySvnError(error),"error")).finally(() => { markLock.current = false; setMarking(false); });
+  };
   const toggleReviewed = () => {
     if (!selected || !isMarkable(selected) || locked || markLock.current) return;
     markLock.current = true; setMarking(true);
@@ -121,7 +133,7 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
   };
   return <>
     <DockRegion region="toolbar"><SvnToolbar rev={info.data?.revision ?? 0} info={info.data} url={info.data?.url ?? null} generatedAtMs={status.data?.generatedAtMs ?? null} shown={(streamed ?? status.data?.changes)?.shown ?? null} fetching={status.isFetching} scanned={scanProgress} busy={writeBusy?.kind ?? busy} canRevert={!!selected && !selected.isDir && !locked} revertTitle={selected ? `备份并撤销 ${selected.rel}` : "先选择文件"} committable={eligible.length} pickedCount={pickedCount} conflicts={items.filter(it => it.letter === "C").length} hkOpen={hkOpen} onRefresh={refreshNow} onUpdate={() => void doUpdate()} onRevert={() => setRevertTarget(selected)} onCommit={() => { svnSession.set({commitOpen:!commitOpen}); dock?.showDocument(); }} onHousekeeping={() => setHkOpen(true)} onHistory={showHistory} onFiles={() => setSideOpen(true)} /></DockRegion>
-    <DockRegion region="sidebar"><ChangeList view={view} root={root} reviewed={reviewed} outdated={outdated} picked={draft.picked} busy={selectionLocked} selected={selectedPath} loading={status.isFetching} error={status.error ? friendlySvnError(status.error) : null} onSelect={pick} onOpenFile={openFile} showIgnored={showIgnored} onToggleIgnored={() => svnSession.set({showIgnored:!showIgnored})} /></DockRegion>
+    <DockRegion region="sidebar"><ChangeList view={view} root={root} reviewed={reviewed} outdated={outdated} picked={draft.picked} busy={selectionLocked} selected={selectedPath} loading={status.isFetching} error={status.error ? friendlySvnError(status.error) : null} onSelect={pick} onOpenFile={openFile} showIgnored={showIgnored} onToggleIgnored={() => svnSession.set({showIgnored:!showIgnored})} onMarkReqAll={markReqAll} /></DockRegion>
     <DockRegion region="document"><div className="vc-review-document" data-focus={focused || undefined}>
       {focused && <div className="vc-focus-bar"><SvnReviewFiles items={queue} selected={selectedPath} onSelect={pick}/><button type="button" className="vc-btn vc-btn-sm vc-focus-exit" onClick={()=>{setFocused(false);requestAnimationFrame(()=>workarea.current?.querySelector<HTMLButtonElement>('[aria-label="专注对比"]')?.focus());}}>退出专注对比</button></div>}
       <SvnScanNotice error={status.error} fetching={status.isFetching} onAuth={() => setAuth({open:true,error:null})} onRefresh={refreshNow} />

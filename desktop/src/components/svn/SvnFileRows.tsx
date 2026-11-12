@@ -1,8 +1,14 @@
+import type { ReactNode } from "react";
 import { Icon } from "../ui/icon";
 import { SvnCheckbox } from "./SvnCheckbox";
 import { formatWhen, keyOf, letterTone, svnStatusLabel, type ChangeGroup, type ChangeItem, type SortMode } from "../../lib/svn";
 import { isSvnCommittable, isSvnPicked, selectSvnPaths, toggleSvnPicked } from "../../lib/svnDraft";
-export function SvnFileRows({ group, closed, onToggleGroup, selected, tabStop, reviewed, outdated, picked, root, busy, sort, onSelect, onOpenFile }: { group: ChangeGroup; closed: boolean; onToggleGroup: () => void; selected: string | null; tabStop?: string; reviewed: ReadonlySet<string>; outdated?: ReadonlySet<string>; picked: ReadonlySet<string>; root: string; busy: boolean; sort: SortMode; onSelect: (item: ChangeItem) => void; onOpenFile?: (path: string) => void }) {
+/**
+ * 一个分组（模块或需求）的组头 + 文件行。按需求分组时由 ReqGroupRows 传入：
+ * `title` 替换组名、`headExtra` 放标签（在折叠按钮内）、`headAction` 放「⋯」菜单（按钮外，按钮不能套按钮）、`rowExtra` 在文件名后插块数/混改等标记。
+ */
+export function SvnFileRows({ group, closed, onToggleGroup, selected, tabStop, reviewed, outdated, picked, root, busy, sort, onSelect, onOpenFile, title, muted, headExtra, headAction, rowExtra }: { group: ChangeGroup; closed: boolean; onToggleGroup: () => void; selected: string | null; tabStop?: string; reviewed: ReadonlySet<string>; outdated?: ReadonlySet<string>; picked: ReadonlySet<string>; root: string; busy: boolean; sort: SortMode; onSelect: (item: ChangeItem) => void; onOpenFile?: (path: string) => void; title?: string; muted?: boolean; headExtra?: ReactNode; headAction?: ReactNode; rowExtra?: (it: ChangeItem) => ReactNode }) {
+  const label = title ?? group.module;
   const eligible = group.items.filter(isSvnCommittable);
   const count = eligible.filter(it => isSvnPicked(picked,it.path)).length;
   const toggleGroup = () => {
@@ -14,8 +20,9 @@ export function SvnFileRows({ group, closed, onToggleGroup, selected, tabStop, r
   };
   return <div className="vc-file-group">
     <div className="vc-group-head">
-      <SvnCheckbox label={`选择模块 ${group.module}`} checked={eligible.length > 0 && count === eligible.length} mixed={count > 0 && count < eligible.length} disabled={busy || !eligible.length} onChange={toggleGroup} />
-      <button type="button" className="vc-grp" data-closed={closed || undefined} aria-expanded={!closed} onClick={onToggleGroup}><Icon name="chevronDown" size={12} /><span className="vc-grp-name" title={group.module}>{group.module}</span><span className="n">{group.items.length}</span></button>
+      <SvnCheckbox label={`选择${title ? "需求" : "模块"} ${label}`} checked={eligible.length > 0 && count === eligible.length} mixed={count > 0 && count < eligible.length} disabled={busy || !eligible.length} onChange={toggleGroup} />
+      <button type="button" className="vc-grp" data-closed={closed || undefined} aria-expanded={!closed} onClick={onToggleGroup}><Icon name="chevronDown" size={12} /><span className="vc-grp-name" data-muted={muted || undefined} title={label}>{label}</span>{headExtra && <span className="vc-grp-tags">{headExtra}</span>}<span className="n">{group.items.length}</span></button>
+      {headAction}
     </div>
     {!closed && group.items.map(it => {
       const done = reviewed.has(keyOf(it.path)), name = it.rel.split("/").pop() ?? it.rel;
@@ -35,8 +42,9 @@ export function SvnFileRows({ group, closed, onToggleGroup, selected, tabStop, r
           <span className="vc-file-label">
             <span className="vc-file-line">
               <span className="vc-fn">{name}</span>
+              {rowExtra?.(it)}
               {!done && outdated?.has(keyOf(it.path)) && <span className="vc-commit-review" data-outdated>需重审</span>}
-              {done && <span className="vc-reviewed-mark" title="已审查" aria-label="已审查"><Icon name="check" size={12} /></span>}
+              {done && !rowExtra && <span className="vc-reviewed-mark" title="已审查" aria-label="已审查"><Icon name="check" size={12} /></span>}
               <span className="vc-badge vc-badge-label" data-st={letterTone(it.letter)} title={`SVN ${it.letter} · ${svnStatusLabel[it.letter]}`}>{svnStatusLabel[it.letter]}</span>
             </span>
             {(dir || sort === "mtime") && <span className="vc-file-line">
