@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../ui/toast";
 import { ResultTable } from "./ResultTable";
-import { friendlyDbError, isLobPreview, parseDbError, qualifyTable, thousands, type DbError } from "../../lib/db";
+import { friendlyDbError, parseDbError, qualifyTable, thousands, type DbError } from "../../lib/db";
 import { dbApi, type BoundCell, type Cell, type ColumnInfo, type ColumnMeta } from "../../lib/dbApi";
 import { ask, reconnectSession } from "../../lib/dbConfirm";
 import { claimCursor, connOf, DEFAULT_TABLE_TIMEOUT, patchTab, rtOf, setTx, type TableTab } from "../../lib/dbStore";
@@ -31,6 +31,7 @@ import { useDbReadOnly } from "../../lib/dbReadOnly";
 import { useTableTabSync } from "../../hooks/useTableTabSync";
 import { binaryRowSql, rowLocatorSql } from "../../lib/tableLob";
 import { loadTableView, saveTableView } from "../../lib/dbTableView";
+import { tableBlockedHint, tableCellEditable, tableFootHint } from "../../lib/tableEditGuard";
 interface Page {
   columns: ColumnMeta[]; rows: Cell[][]; hasNext: boolean;
   ms: number; at:number; sql:string; pageNumber:number; exportSql:string; params:BoundCell[];
@@ -241,14 +242,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
           lob={lob}
           meta={<>第 {page.pageNumber} 页 · <b>{thousands(page.rows.length)}</b> 行 · {page.ms} ms</>}
           edit={editable ? {
-            canEdit: (c, r) => {
-              const col = page.columns[c];
-              if (!col || /TIME ZONE/i.test(col.type) || !/^(VARCHAR|NVARCHAR|CHAR|NCHAR|NUMBER|FLOAT|INTEGER|DECIMAL|DATE|TIMESTAMP|CLOB)/i.test(col.type)) return false;
-              // 大文本预览只有前 8K + 一段说明：改它写不回原值，只会把说明当数据写进去。
-              if (r !== undefined && r < page.rows.length && isLobPreview(page.rows[r]?.[c] ?? null)) return false;
-              // 新增行还没进库，主键列必须能填（否则新增记录永远缺主键）；已有行不能改主键。
-              return (r !== undefined && r >= page.rows.length) || !pk.includes(col.name);
-            },
+            canEdit: (c, r) => tableCellEditable(page.columns, page.rows, pk, c, r),
             changed,
             onEdit: edits.setCell,
             onResetCell: edits.resetCell,
@@ -259,13 +253,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
             onDeleteRow: (r) => drafts.removeRow(r),
             onRestoreRow: (r) => drafts.restoreRow(r),
           } : undefined}
-          // 只给「结构性」原因：保存中/加载中/tx 锁定也会让 editable 为假，但那不该弹提示。
-          blockedHint={
-            readonly ? "当前连接是只读模式" :
-            isView ? "视图不能直接改数据" :
-            pk.length === 0 ? "这张表没有主键，定位不到唯一行" :
-            undefined
-          }
+          blockedHint={tableBlockedHint({ readonly, isView, pk })}
           tools={
             <TableEditTools
               changed={changes.filter(c => c.kind === "update").length}
@@ -291,7 +279,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
               <TableDataFooter rows={page.rows.length} pageNumber={page.pageNumber} complete={page.pageNumber===1 && !page.hasNext}
                 previousDisabled={saving || loading || q.page===0} nextDisabled={saving || loading || !page.hasNext}
                 onPrevious={()=>void navTo({...q,page:q.page-1})} onNext={()=>void navTo({...q,page:q.page+1})}
-                hint={`${readonly ? "只读查询模式" : isView ? "视图只读" : pk.length === 0 ? "没有主键，只读（定位不到唯一行）" : editable ? "双击单元格编辑（主键列不可改）· F4 看完整值" : "暂时不可编辑（正在查询或写回）"} · 等待上限 ${timeoutSec}s`} />
+                hint={tableFootHint({ readonly, isView, pk, editable, timeoutSec })} />
             </>
           }
         />

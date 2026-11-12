@@ -15,7 +15,7 @@ import { ResultTransfer } from "./ResultTransfer";
 import { freezeTransferFrame, type TransferFrame, type TransferSource } from "../../lib/resultTransferContext";
 import { quickCopyTransfer } from "../../lib/resultTransferQuick";
 import { fitWidth, nextSort, type SortState } from "../../lib/resultView";
-import { serverSortLabel } from "../../lib/serverSort";
+import { headMenuItems } from "../../lib/resultHeadMenu";
 
 /**
  * 结果表 + 工具条（筛选 / 复制为… / 导出 / 详情）+ 底栏。SQL 控制台与表页共用。
@@ -277,31 +277,10 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
           x={head.x}
           y={head.y}
           onClose={() => setHead(null)}
-          items={[
-            { label: "本地升序（只排已取的行）", onSelect: () => setSort({ col: head.col, dir: "asc" }) },
-            { label: "本地降序（只排已取的行）", onSelect: () => setSort({ col: head.col, dir: "desc" }) },
-            { label: "本列自适应宽度", onSelect: () => fitOne(head.col) },
-            { label: "全部列自适应宽度", onSelect: fitAll },
-            ...(binaryColumn(columns[head.col]?.type) ? (["auto", "text", "raw"] as const).map(mode => ({
-              label: `二进制显示：${mode === "auto" ? "自动识别" : mode === "text" ? "文本" : "原始 Hex"}`,
-              checked: binaryMode === mode,
-              onSelect: () => setBinaryMode(mode),
-            })) : [{
-              label: headDecoded ? "恢复原始值（关闭解码）" : "显示解码后的值（Hex / Base64）",
-              disabled: !headDecoded && !headDecodable,
-              onSelect: () => toggleDecode(head.col),
-            }]),
-            {
-              label: onServerSort ? serverSortLabel(columns[head.col]?.name ?? "", "asc") : "重排并重查（这条结果不支持）",
-              disabled: !onServerSort,
-              onSelect: () => onServerSort?.(head.col, "asc"),
-            },
-            {
-              label: onServerSort ? serverSortLabel(columns[head.col]?.name ?? "", "desc") : "重排并重查（这条结果不支持）",
-              disabled: !onServerSort,
-              onSelect: () => onServerSort?.(head.col, "desc"),
-            },
-          ]}
+          items={headMenuItems({
+            col: head.col, columns, binaryMode, decoded: headDecoded, decodable: headDecodable,
+            onServerSort, setSort, fitOne, fitAll, setBinaryMode, toggleDecode,
+          })}
         />
       )}
     </div>
