@@ -122,12 +122,12 @@ test("CI_JOBS 的键就是 workflow 里真实存在的 job", () => {
   }
 });
 
-test("pre-commit 的六项都来自清单、且不含重活", () => {
+test("pre-commit 的七项都来自清单、且不含重活", () => {
   const ids = PRECOMMIT.map((p) => p.id);
   // 顺序即契约：按耗时从短到长，便宜的先红。
   assert.deepEqual(
     ids,
-    ["component-size", "rust-tempdir", "tokens", "fmt", "ui-contract", "tsc"],
+    ["source-size", "component-size", "rust-tempdir", "tokens", "fmt", "ui-contract", "tsc"],
     "顺序按「快 → 慢」，别随手调",
   );
   for (const id of ids) assert.ok(stepById(id), `${id} 不在 STEPS 里，pre-commit 会跑空`);
@@ -139,12 +139,12 @@ test("pre-commit 的六项都来自清单、且不含重活", () => {
 
 test("pre-commit 的后缀匹配：改文档不跑，改代码按类型跑", () => {
   const hit = (file) => PRECOMMIT.filter((p) => p.match.test(file)).map((p) => p.id);
-  assert.deepEqual(hit("docs/x.md"), [], "只改文档时六项都不跑");
+  assert.deepEqual(hit("docs/x.md"), [], "只改文档时七项都不跑");
   assert.deepEqual(hit("CHANGELOG.md"), []);
   // 写组件是最容易踩 300 行红线的地方，必须每次都扫。
   assert.deepEqual(hit("desktop/src/components/db/X.tsx"), ["component-size", "tokens", "ui-contract", "tsc"]);
   assert.deepEqual(hit("desktop/src/lib/db.ts"), ["component-size", "tsc"]);
-  assert.deepEqual(hit("desktop/src-tauri/src/lib.rs"), ["rust-tempdir", "fmt"]);
+  assert.deepEqual(hit("desktop/src-tauri/src/lib.rs"), ["source-size", "rust-tempdir", "fmt"]);
   assert.deepEqual(hit("desktop/src/db-console.css"), ["tokens", "ui-contract"]);
 });
 
@@ -218,6 +218,13 @@ test("component-size 必须在 pre-commit 里（300 行红线要在提交前就�
   assert.ok(!hit.match.test("src/styles/app.css"), "改 css 不该触发组件体量扫描");
 });
 
+test("source-size 必须在 pre-commit 里（.rs 600 行线要在提交前就拦住）", () => {
+  const hit = PRECOMMIT.find((p) => p.id === "source-size");
+  assert.ok(hit, "source-size 不在 PRECOMMIT 里：新写一个 800 行的 .rs 会一路绿灯到发版");
+  assert.ok(hit.match.test("src-tauri/src/new_module.rs"));
+  assert.ok(!hit.match.test("src-tauri/src/lib.ts"), "只改前端不该触发 Rust 体量扫描");
+});
+
 test("PRECOMMIT 里每一项的 id 都存在，且各自 match 是真正则", () => {
   for (const item of PRECOMMIT) {
     assert.ok(stepById(item.id), `PRECOMMIT 引用了清单里不存在的 id：${item.id}`);
@@ -232,7 +239,7 @@ test("重活不许进 PRECOMMIT（钩子超过 30s 就等于没有）", () => {
 
 test("PRECOMMIT 按耗时从短到长排（便宜的先红，才不容易被 --no-verify）", () => {
   const order = PRECOMMIT.map((p) => p.id);
-  const cost = { "component-size": 1, "rust-tempdir": 2, tokens: 3, fmt: 4, "ui-contract": 5, tsc: 6 };
+  const cost = { "source-size": 0, "component-size": 1, "rust-tempdir": 2, tokens: 3, fmt: 4, "ui-contract": 5, tsc: 6 };
   for (let i = 1; i < order.length; i += 1) {
     assert.ok(cost[order[i - 1]] < cost[order[i]], `顺序反了：${order[i - 1]} 应排在 ${order[i]} 之前`);
   }

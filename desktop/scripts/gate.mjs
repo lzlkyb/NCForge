@@ -12,7 +12,7 @@
  *   node scripts/gate.mjs                    # 全量（pre-push 就是这一条）
  *   node scripts/gate.mjs --scope frontend   # 只跑某个 scope（可多次）
  *   node scripts/gate.mjs --only clippy      # 只跑某项（CI 每步用这个，可逗号分隔）
- *   node scripts/gate.mjs --precommit        # 提交前的六项纯扫描（pre-commit 钩子用）
+ *   node scripts/gate.mjs --precommit        # 提交前的七项纯扫描（pre-commit 钩子用）
  *   node scripts/gate.mjs --list             # 打印清单，不执行
  *   node scripts/gate.mjs --verify-ci        # 断言 CI 与发版脚本都没绕开门禁
  *
@@ -96,7 +96,7 @@ function printHelp() {
   node scripts/gate.mjs                   全量（${STEPS.length} 项，pre-push 用的就是这个）
   node scripts/gate.mjs --scope frontend  只跑某 scope：${SCOPES.join(" / ")}
   node scripts/gate.mjs --only clippy     只跑某项，可逗号分隔
-  node scripts/gate.mjs --precommit       提交前六项（${PRECOMMIT.map((p) => p.id).join(" / ")}，按暂存文件后缀挑）
+  node scripts/gate.mjs --precommit       提交前七项（${PRECOMMIT.map((p) => p.id).join(" / ")}，按暂存文件后缀挑）
   node scripts/gate.mjs --list            打印清单
   node scripts/gate.mjs --verify-ci       断言 CI 与发版脚本都没绕开门禁
 
@@ -147,9 +147,9 @@ function stagedFiles() {
 /**
  * 选出要跑的步骤：--precommit 优先，其次 --only、--scope，都没有则全量。
  *
- * --precommit 只跑清单里 PRECOMMIT 声明的六项（都是纯扫描，合计约 10 秒），并按
+ * --precommit 只跑清单里 PRECOMMIT 声明的七项（都是纯扫描，合计约 10 秒），并按
  * 「暂存文件后缀」跳过无关项：只改文档的提交不该花 20 秒等 tsc。跳过项会打印出来，
- * 免得让人以为六项都验过。
+ * 免得让人以为七项都验过。
  */
 function pickSteps(opts) {
   if (opts.precommit) {
@@ -233,7 +233,7 @@ function main() {
   const steps = pickSteps(opts);
   if (!steps.length) {
     if (opts.precommit) {
-      // 只改了文档/图片之类：六项都与它无关，别拿一个空跑当失败。
+      // 只改了文档/图片之类：七项都与它无关，别拿一个空跑当失败。
       console.log("✅ 暂存改动不涉及体量/token/UI 约定/fmt/tsc，pre-commit 无需跑");
       return;
     }

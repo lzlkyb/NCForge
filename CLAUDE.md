@@ -73,6 +73,19 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd desktop; npm r
 
 存量超标记在脚本里的 `BASELINE`，采用**棘轮**：存量文件只允许变小不允许变大，新文件必须直接合规；改小了脚本会提醒把基线跟着调低。
 
+**Rust 源文件体量限制**（硬性规则，**已由机器执行**）：
+
+门禁在 `desktop/scripts/check-source-size.mjs`，以 `source-size` 项挂在 `gate.mjs` 清单里（pre-commit / pre-push / CI 都调它；纯文件扫描 ~0.1s，不需要 Rust 工具链，所以跑在 frontend job）。扫 `src-tauri/src/**/*.rs`：
+
+- **新文件 ≤ 600 行**（硬红线，无基线、无例外）。
+- **超 600 行的文件个数只许减**（基线 `desktop/scripts/source-size-baseline.json`，2026-11-12 首次登记 43 个，最大 `db_rust.rs` 生产段 2,939 行）。
+
+行数按**第一个顶层 `#[cfg(test)]` 之前**的生产段算——否则"多写测试"会被这条规则惩罚。`tests/` 目录不扫。
+
+🔴 **为什么数「个数」而不是逐个文件记行数**：把 43 个存量文件按当前行数逐一登记、只许变小，看着更严，实际会在第一次给 `db_rust.rs` 加 3 行修复时就红；于是每次提交都得 `--update`，棘轮退化成一条顺手的命令，只剩噪音。数个数与正常编辑无关：往 2,939 行的文件里加代码**不改变个数**，只有"又长出一个超 600 行的 `.rs`"才会红——那正是要拦的事（与 `check-rust-tempdir.mjs` 数总处数同构）。`--update` 是显式的棘轮松动，会把"哪个文件涨了"打印出来，别拿它当日常操作。
+
+拆法：纯计算 → 同目录新文件；状态编排 → 子模块（Rust 允许 `impl` 写在子模块里，父模块的私有字段对子模块可见，所以 `impl Session` 能拆成 `session/{conn,tx,query,meta}.rs` 而不用改字段可见性）。
+
 **ESLint**（`desktop/eslint.config.mjs`）：为 `react-hooks` 两条规则（`rules-of-hooks` / `exhaustive-deps`）而上——依赖数组不全导致的"闭包拿陈旧值" tsc 完全看不出来。壳子基线**零豁免**；若确需存量豁免，用 `eslint . --suppress-all` 生成 `eslint-suppressions.json`（棘轮，只许减少），修好后跑 `npm run lint:prune` 收紧。
 
 **Rust 后端规则**——提交前跑 `node scripts/gate.mjs`，保持零警告。三项已在清单里，想单独复现时：

@@ -49,6 +49,14 @@ export const STEPS = [
     why: "规则 7 的机器执行版：行数 + 单文件 useState/useEffect 总数。存量走棘轮基线，新文件必须直接合规。",
   },
   {
+    id: "source-size",
+    name: "Rust 体量门禁（.rs ≤600 行）",
+    cwd: "desktop",
+    argv: ["node", "scripts/check-source-size.mjs"],
+    scopes: ["frontend"],
+    why: "前端有 300 行红线，Rust 侧此前一条都没有：2026-11-12 实测 43 个 .rs 生产段超 600 行、最大 2,939 行。只管新文件 ≤600 + 超限文件个数只许减；纯文件扫描，不需要 Rust 工具链，所以放 frontend job。",
+  },
+  {
     id: "knip",
     name: "knip 孤立文件 / 依赖",
     cwd: "desktop",
@@ -182,29 +190,32 @@ export const STEPS = [
 export const SCOPES = [...new Set(Object.values(CI_JOBS))];
 
 /**
- * pre-commit 的六项：提交前只跑「纯扫描 + 秒级」的检查，重的留给 pre-push / CI。
+ * pre-commit 的七项：提交前只跑「纯扫描 + 秒级」的检查，重的留给 pre-push / CI。
  *
  * 为什么门槛是「纯扫描」而不是「重要不重要」：commit 比 push 频繁一个量级，
  * 钩子一旦超过 30 秒就会被 `--no-verify` 绕过，等于没有。所以这里只收**不需要
  * 编译、不需要跑测试树**的项——它们的耗时与代码体量无关，加进提交路径几乎免费。
- * 实测（2026-11-12，本机）：component-size 0.5s / rust-tempdir 1.1s / tokens 1.4s
- * / fmt 2s / ui-contract 2.2s / tsc 6s（冷 23s）；全部命中约 10s。
+ * 实测（2026-11-12，本机）：source-size 0.1s / component-size 0.5s / rust-tempdir
+ * 1.1s / tokens 1.4s / fmt 2s / ui-contract 2.2s / tsc 6s（冷 23s）；全部命中约 10s。
  *
  * 🔴 为什么 component-size 必须在这一层（2026-11-12 补）：300 行红线以前只在 CI
  * 和「发版跑的完整门禁」里检查，结果是 v0.5.0 把一个 309 行的 `ResultTable` 写完、
  * 提交、推主线、发版全程无人拦，直到手动补 mac 才在 frontend job 里红。红线这种
  * 「写的时候就该知道」的事，检查点越靠前越省事——它只要 0.5 秒。
+ * source-size 同理（2026-11-12 加）：`.rs` 的 600 行线如果要等到 push 才发现，
+ * 那时候新文件已经写完、调用方也挂上了，拆的成本翻几倍。
  *
  * 为什么不进 pre-commit（都是「重活」，留在 pre-push 与 CI）：
  *   contract 10s（要连生成物一起比对）、knip 16s、eslint 5s+、vitest 9min、
  *   clippy / cargo test 数分钟。硬塞进来只会让人开始用 --no-verify。
  *
  * match 只按「暂存文件的后缀」判断这项要不要跑：没有相关改动就跳过，并在
- * 输出里说明跳了哪几项（免得让人以为六项都验过了）。故意不做依赖分析——
+ * 输出里说明跳了哪几项（免得让人以为七项都验过了）。故意不做依赖分析——
  * 宁可多跑一项，也不做会漏的判断。
  */
 export const PRECOMMIT = [
   // 按耗时从短到长排：先红的那项越便宜，越不容易被 --no-verify 绕过。
+  { id: "source-size", match: /\.rs$/ },
   { id: "component-size", match: /\.(ts|tsx)$/ },
   { id: "rust-tempdir", match: /\.rs$/ },
   { id: "tokens", match: /\.(css|tsx)$/ },

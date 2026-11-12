@@ -13,6 +13,7 @@
     "scripts/java-completion-qa/verify.mjs",
     "scripts/check-component-size.mjs",
     "scripts/check-rust-tempdir.mjs",
+    "scripts/check-source-size.mjs",
     "scripts/fake-update-server.mjs",
     "scripts/fetch-ncdb.mjs",
     "scripts/update-release-notes.d.mts"
