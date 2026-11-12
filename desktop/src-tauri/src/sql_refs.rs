@@ -220,10 +220,11 @@ fn is_table_name(name: &str) -> bool {
     // 全大写的多半是常量名（`FROM` 关键字已被小写比较吃掉，这里是 `PK_ORG` 这类）：
     // 表名在 NC 里一律小写，出现纯大写当表名基本是误判。只看字母，`_` 不参与判断。
     let letters: Vec<char> = name.chars().filter(|c| c.is_ascii_alphabetic()).collect();
-    if !letters.is_empty() && !letters.iter().any(|c| c.is_ascii_lowercase()) {
-        return false;
-    }
-    true
+    // 全大写 = 有字母、且一个都不小写（`letters` 为空说明名字里没有字母，不算全大写）。
+    // 写成命名变量再取反，别写成 `if … { return false } true`：clippy 的
+    // needless_bool（1.100 起在 CI 的 stable 上）会直接判红。
+    let all_upper = !letters.is_empty() && !letters.iter().any(|c| c.is_ascii_lowercase());
+    !all_upper
 }
 
 /// 表名后面的别名。`from t a` / `from t as a` / `from t`（后面是 where 之类）。
