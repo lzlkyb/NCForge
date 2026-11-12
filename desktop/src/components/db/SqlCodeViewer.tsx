@@ -10,8 +10,10 @@ const ViewerEditor = lazy(() => import("./SqlCodeViewerEditor"));
 export interface SqlCodeSection { label:string; text:string }
 
 /** 展示原始数据库文本，不格式化或补写 CREATE；转到控制台也不自动执行。 */
-export function SqlCodeViewer({ text, connId, label, source, sections = [] }: {
+export function SqlCodeViewer({ text, connId, label, source, sections = [], onRefresh }: {
   text:string; connId?:string; label:string; source?:string; sections?:SqlCodeSection[];
+  /** 有值才显示「刷新」：重新从数据库读一次，丢掉本地缓存。 */
+  onRefresh?:()=>void;
 }) {
   const api = useRef<SqlCodeViewerApi | null>(null);
   const dialect = useSqlDialect(connId);
@@ -31,6 +33,7 @@ export function SqlCodeViewer({ text, connId, label, source, sections = [] }: {
     <div className="dbx-rtool dbx-code-toolbar">
       {sections.length > 1 ? <select aria-label="源码段" value={section} onChange={event=>setSection(Number(event.target.value))}>{sections.map((item,index)=><option key={item.label} value={index}>{item.label}</option>)}</select> : <span className="meta" title={source}>{label} · SQL · 只读</span>}
       <span className="dbx-sp" />
+      {onRefresh && <button type="button" className="dbx-btn ghost" aria-label="重新读取" title="重新从数据库读取（丢弃缓存）" onClick={onRefresh}><Icon name="refresh" size={14}/></button>}
       <button type="button" className="dbx-btn ghost" aria-label="查找代码" title="查找 · Ctrl / ⌘ + F" onClick={()=>api.current?.find()}><Icon name="search" size={14}/></button>
       <button type="button" className="dbx-btn ghost" aria-label="自动换行" aria-pressed={wrap} title="自动换行" onClick={()=>setWrap(value=>!value)}><Icon name="sqlFormat" size={14}/></button>
       <button type="button" className="dbx-btn ghost" title={sections.length > 1 ? "复制全部源码，保留原文" : "复制完整原文"} onClick={()=>void copyText(text,()=>toast("已复制完整原文","success"),error=>toast(`复制失败：${error}`,"error"))}><Icon name="copy" size={14}/><span>{sections.length > 1 ? "复制全文" : "复制"}</span></button>

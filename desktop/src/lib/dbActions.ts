@@ -4,6 +4,7 @@ import { dbApi } from "./dbApi";
 import { beginOperation, operationActive } from "./operations";
 import { dbTaskSpec, dbTxKey } from "./dbOperations";
 import { forgetColumnZh } from "./dbColumnZh";
+import { dropDdl } from "./ddlCache";
 import { forgetProcArguments } from "./sqlProcArgs";
 import { ask, confirmProdWrite, ensureConnected, guardSlotTx, guardTx, isLastTabOn } from "./dbConfirm";
 import { clearFavorites } from "./dbFavorites";
@@ -215,6 +216,8 @@ export async function disconnectConn(connId: string): Promise<boolean> {
   forgetColumnZh(connId);
   // 重连后过程参数可能已经改过（现场改包体很常见），签名帮助的缓存一起丢
   forgetProcArguments(connId);
+  // 重连可能连到另一个库/另一个 schema，对象定义缓存一并作废
+  dropDdl(connId);
   return true;
 }
 
@@ -307,6 +310,8 @@ export async function refreshMeta(connId: string) {
   forgetColumns(connId);
   forgetColumnZh(connId);
   forgetProcArguments(connId);
+  // 用户点「刷新元数据」就是想看最新的：对象定义缓存必须一起丢
+  dropDdl(connId);
   await loadMeta(connId,true);
 }
 
@@ -483,8 +488,11 @@ export async function runStatements(
       patchTab<SqlTab>(tabId, { run: undefined, batch: batch && { ...batch, activeIndex: null, status: outcome.stoppedByUser ? "stopped" : outcome.failures.length || interrupted ? "failed" : "done" }, ...(kept.length === 0 && !outcome.stoppedByUser ? { results: [], view: "output" } : {}) });
     }
   }
-  // 建表 / 改表之后侧栏与补全要跟上
-  if (ddl) void loadMeta(connId);
+  // 建表 / 改表之后侧栏与补全要跟上；DDL 缓存也要丢，否则再打开这张表看到的还是旧结构
+  if (ddl) {
+    dropDdl(connId);
+    void loadMeta(connId);
+  }
   return outcome;
 }
 

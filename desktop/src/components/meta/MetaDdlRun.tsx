@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { dbApi, ENV_LABEL, type DbConn } from "../../lib/dbApi";
+import { dropDdl } from "../../lib/ddlCache";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 
@@ -119,6 +120,8 @@ export function MetaDdlRun({ ddl, component, onRunning }: { ddl: string; compone
         if (!mounted.current) return;
         try {
           const r = await dbApi.exec(conn.id, stmt, 50, 120);
+          // 刚改完结构：这条连接上缓存的 DDL 全部作废，否则再打开还是旧定义
+          dropDdl(conn.id);
           if (!mounted.current) return;
           const detail = r.kind === "update" ? `${r.ms} ms · 影响 ${r.updateCount}` : `${r.ms} ms · ${r.rowCount} 行`;
           done.push({ sql: stmt, ok: true, detail });

@@ -7,8 +7,13 @@
 - 需求来自 cc-bridge 变更日志里 AI 声明的需求名，也可以手动新建；支持改名、合并名字相近的需求、关闭，未认领的文件可勾选后归入需求；「用这个需求出包」把需求名和文件带入打包页，出过包后再改会提示「已出包 +N」。
 - 状态栏「当前需求」：在 NCForge 里手改保存的文件归到这个需求；已审状态按改动块存盘，重启不丢。
 
+### 修复
+- 查看对象定义不再把主键索引输出两遍：以前主键在表定义里是 `CONSTRAINT ... PRIMARY KEY USING INDEX`，索引段又给一条 `CREATE UNIQUE INDEX`，整段复制执行第二条会撞 ORA-00955。多索引表一次点击从 0.82 秒降到 0.56 秒，切走再切回直接命中缓存，不再重算。
+- 索引段的 SQL 在 JVM 桥下会报 ORA-00904（`all_ind_columns` 没有 `owner` 列，应为 `index_owner`），只有用纯 Rust 驱动时才没暴露。
+
 ### 技术细节
 - 增量读取 cc-bridge `journal/changes-YYYYMMDD.jsonl`（可用环境变量 `NCFORGE_CCBRIDGE_JOURNAL` 改目录），按工作区存 `requirements/<哈希>.json`；块级已审存 `review-blocks.json`。混改文件里按需求划分改动块留待 P2。
+- 表/视图仍走 `dbms_metadata.get_ddl`，索引段改为查 `all_indexes` + `all_ind_columns` 本地拼装（31 个索引 416ms → 51ms），排除主键/唯一约束背后的索引；位图、函数、降序、分区、压缩、反向索引逐条回落原生 `get_ddl('INDEX')`。DDL 结果按 `(连接, schema, 对象类型, 表)` 缓存，刷新按钮、断开连接、执行过 DDL 时失效。
 
 ## [0.5.0] - 2026-11-11
 

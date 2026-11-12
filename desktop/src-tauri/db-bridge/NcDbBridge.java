@@ -1817,9 +1817,10 @@ public class NcDbBridge {
 
         private String indexes(String table) throws SQLException {
             requireConn();
+            // all_ind_columns 没有 owner 列，只有 index_owner / table_owner。
             String q = "select i.index_name, i.uniqueness, i.status, ic.column_name"
                     + " from all_indexes i join all_ind_columns ic"
-                    + " on ic.owner = i.owner and ic.index_name = i.index_name"
+                    + " on ic.index_owner = i.owner and ic.index_name = i.index_name"
                     + " where i.owner = sys_context('userenv','current_schema')"
                     + " and i.table_name = ? order by i.index_name, ic.column_position";
             PreparedStatement ps = conn.prepareStatement(q);
@@ -1886,13 +1887,123 @@ public class NcDbBridge {
             } catch (SQLException e) {
                 main = metadata("select dbms_metadata.get_ddl('VIEW', ?) from dual", t);
             }
-            String idx = "";
-            try {
-                idx = metadata("select dbms_metadata.get_dependent_ddl('INDEX', ?) from dual", t);
-            } catch (SQLException e) {
-                // ORA-31608：没有索引
-            }
+            String idx = indexDdl(t);
             return "{\"ddl\":\"" + esc((main.trim() + "\n\n" + idx.trim()).trim()) + "\"}";
+        }
+
+        /** 本地拼一条索引需要的字典信息。 */
+        private static final class IdxMeta {
+            final String name;
+            final boolean unique;
+            boolean buildable = true;
+            final List<String> cols = new ArrayList<String>();
+
+            IdxMeta(String name, boolean unique) {
+                this.name = name;
+                this.unique = unique;
+            }
+        }
+
+        /**
+         * 表 DDL 的索引段：本地按字典拼装（与 Rust 侧 `index_ddl` 同一套判据）。
+         *
+         * 实测 `get_dependent_ddl('INDEX')` 固定耗约 390ms、与索引个数无关（3 个索引的表
+         * 也是 390ms），同样的信息用字典查只要约 108ms；它还会把主键索引再输出一遍
+         * （主 DDL 的 PRIMARY KEY 约束已经建了索引），整段复制执行会撞 ORA-00955。
+         * 所以这里排除约束索引，只拼「能 100% 还原」的普通索引，其余回落 `get_ddl('INDEX')`。
+         */
+        private String indexDdl(String table) throws SQLException {
+            // 约束索引必须单独查一次再做集合差：写成 `not exists` 会让 all_constraints
+            // 这个字典视图按索引行反复展开，实测同一张表从 136ms 涨到 15.2 秒。
+            String consSql = "select index_name from all_constraints"
+                    + " where owner = sys_context('userenv','current_schema')"
+                    + " and table_name = ? and constraint_type in ('P','U')"
+                    + " and index_name is not null";
+            String sql = "select i.table_owner, i.index_name, i.uniqueness, i.index_type,"
+                    + " i.partitioned, i.compression, ic.column_name, ic.descend"
+                    + " from all_indexes i join all_ind_columns ic"
+                    + " on ic.index_owner = i.owner and ic.index_name = i.index_name"
+                    + " where i.table_owner = sys_context('userenv','current_schema')"
+                    + " and i.table_name = ? and i.generated = 'N'"
+                    + " order by i.index_name, ic.column_position";
+            String t = table.toUpperCase();
+            Set<String> cons = new HashSet<String>();
+            PreparedStatement cps = conn.prepareStatement(consSql);
+            try {
+                cps.setString(1, t);
+                ResultSet crs = cps.executeQuery();
+                while (crs.next()) {
+                    String name = crs.getString(1);
+                    if (name != null) {
+                        cons.add(name);
+                    }
+                }
+                crs.close();
+            } finally {
+                cps.close();
+            }
+            Map<String, IdxMeta> map = new LinkedHashMap<String, IdxMeta>();
+            String owner = "";
+            PreparedStatement ps = conn.prepareStatement(sql);
+            try {
+                ps.setString(1, t);
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    if (owner.length() == 0) {
+                        owner = rs.getString(1);
+                    }
+                    String name = rs.getString(2);
+                    // 约束索引已在主 DDL 的 PRIMARY KEY ... USING INDEX 里建过，跳过
+                    if (cons.contains(name)) {
+                        continue;
+                    }
+                    IdxMeta m = map.get(name);
+                    if (m == null) {
+                        m = new IdxMeta(name, "UNIQUE".equals(rs.getString(3)));
+                        map.put(name, m);
+                    }
+                    String type = rs.getString(4);
+                    String part = rs.getString(5);
+                    String comp = rs.getString(6);
+                    String col = rs.getString(7);
+                    String desc = rs.getString(8);
+                    boolean plain = "NORMAL".equals(type) && !"YES".equals(part)
+                            && !"ENABLED".equalsIgnoreCase(comp) && !"DESC".equals(desc)
+                            && col != null && col.length() > 0 && !col.startsWith("SYS_NC");
+                    if (!plain) {
+                        m.buildable = false;
+                    }
+                    if (col != null) {
+                        m.cols.add(col);
+                    }
+                }
+                rs.close();
+            } finally {
+                ps.close();
+            }
+            StringBuilder out = new StringBuilder();
+            for (IdxMeta m : map.values()) {
+                if (!m.buildable || m.cols.isEmpty()) {
+                    try {
+                        out.append(metadata("select dbms_metadata.get_ddl('INDEX', ?) from dual", m.name).trim())
+                                .append('\n');
+                    } catch (SQLException ignore) {
+                        // 单条索引取不到就不出这一段
+                    }
+                    continue;
+                }
+                out.append("CREATE ").append(m.unique ? "UNIQUE " : "").append("INDEX \"")
+                        .append(owner).append("\".\"").append(m.name).append("\" ON \"")
+                        .append(owner).append("\".\"").append(t).append("\" (");
+                for (int i = 0; i < m.cols.size(); i++) {
+                    if (i > 0) {
+                        out.append(", ");
+                    }
+                    out.append('"').append(m.cols.get(i)).append('"');
+                }
+                out.append(") ;\n");
+            }
+            return out.toString();
         }
 
         /**

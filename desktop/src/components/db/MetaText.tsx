@@ -8,6 +8,7 @@ import { dbApi, type IndexInfo } from "../../lib/dbApi";
 import { trackOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
 import { patchTab, type TableTab } from "../../lib/dbStore";
+import { ddlKey, dropDdl, readDdl, writeDdl } from "../../lib/ddlCache";
 import { copyText } from "../../lib/utils";
 
 /** 索引表与 DDL：切到这页时按需读。对象页（`otype`）走 `get_ddl(类型, 名字)`。 */
@@ -26,6 +27,7 @@ export function MetaText({ tab }: { tab: TableTab }) {
   };
   const [request,setRequest]=useState({idx:null as IndexInfo[]|null,ddl:null as string|null,err:null as string|null,revision:0});
   const {idx,ddl,err,revision}=request;
+  const key = ddlKey(tab.connId, tab.table, tab.otype, tab.schema);
   useEffect(() => {
     let live=true;setRequest(v=>({...v,err:null,idx:null,ddl:null}));
     const fail = (e: unknown) => {if(live) setRequest(v=>({...v,err:friendlyDbError(e)}));};
@@ -33,16 +35,20 @@ export function MetaText({ tab }: { tab: TableTab }) {
       void trackOperation(dbTaskSpec(`indexes:${tab.connId}:${tab.table}`,"读取数据库索引",tab.connId,tab.table,undefined,tab.id),()=>dbApi.indexes(tab.connId, tab.table)).then((r) => {if(live) setRequest(v=>({...v,idx:r.indexes}));}, fail);
       return()=>{live=false;};
     }
+    // 命中缓存就直接出，不再往返：一次表 DDL 实测 740ms 起，宽表 1.15s。
+    const hit = readDdl(key);
+    if (hit !== undefined) { setRequest(v=>({...v,ddl:hit})); return()=>{live=false;}; }
     const req = trackOperation(dbTaskSpec(`ddl:${tab.connId}:${tab.table}`,"读取数据库对象定义",tab.connId,tab.table,undefined,tab.id),()=>tab.otype
       ? dbApi.objectDdl(tab.connId, tab.table, tab.otype)
       : dbApi.ddl(tab.connId, tab.table));
-    void req.then((r) => {if(live) setRequest(v=>({...v,ddl:r.ddl}));}, fail);
+    void req.then((r) => {if(live){writeDdl(key,r.ddl);setRequest(v=>({...v,ddl:r.ddl}));}}, fail);
     return()=>{live=false;};
-  }, [tab.id,tab.connId, tab.table, tab.sub, tab.otype,revision]);
+  }, [key, tab.id,tab.connId, tab.table, tab.sub, tab.otype,revision]);
+  const refresh = () => { dropDdl(key); setRequest(v=>({...v,ddl:null,err:null,revision:v.revision+1})); };
   if (err) return <div className="dbx-err">{err}<button type="button" className="dbx-btn" onClick={()=>setRequest(v=>({...v,revision:v.revision+1}))}>重新读取</button></div>;
   if (tab.sub === "ddl") {
     if (ddl === null) return <div className="dbx-empty"><Icon name="spinner" size={18} />读取中…</div>;
-    return <SqlCodeViewer key={`${tab.id}:${tab.table}`} text={ddl} connId={tab.connId} label="对象定义" source="DBMS_METADATA.GET_DDL · 已去掉存储参数，复制保留返回原文" />;
+    return <SqlCodeViewer key={`${tab.id}:${tab.table}`} text={ddl} connId={tab.connId} label="对象定义" source="DBMS_METADATA.GET_DDL · 已去掉存储参数，复制保留返回原文" onRefresh={refresh} />;
   }
   if (!idx) return <div className="dbx-empty"><Icon name="spinner" size={18} />读取中…</div>;
   return (

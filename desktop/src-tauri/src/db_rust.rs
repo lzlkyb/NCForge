@@ -34,7 +34,7 @@
 //! `DATE` 给 `yyyy-MM-dd HH:mm:ss`、`CLOB` 截到 1M、`RAW` 给十六进制。这里逐条照搬，
 //! 否则同一个查询在两个引擎下会显示出两种样子。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1676,12 +1676,7 @@ impl Session {
             )
         })
         .map_err(sql_err)?;
-        let idx = metadata_ddl(
-            conn,
-            "select dbms_metadata.get_dependent_ddl('INDEX', :1) from dual",
-            &t,
-        )
-        .unwrap_or_default();
+        let idx = index_ddl(conn, &t);
         let text = format!("{}\n\n{}", main.trim(), idx.trim());
         Ok(json!({ "ddl": text.trim() }))
     }
@@ -2769,6 +2764,155 @@ fn db_version(conn: &Connection) -> String {
     String::new()
 }
 
+/// 取某一列的可空字符串，取不到就当空串（索引元数据里 NULL 只代表「没这个属性」）。
+fn text_at(row: &Row, i: usize) -> String {
+    row.get::<Option<String>>(i)
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+}
+
+/// 一条索引的字典元数据（`all_indexes` + `all_ind_columns` 聚合后）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct IdxMeta {
+    name: String,
+    unique: bool,
+    /// false = 字典拼不出来（函数索引 / 位图 / 降序 / 分区 / 压缩 / 反向），必须回落
+    /// `dbms_metadata.get_ddl('INDEX')`。
+    buildable: bool,
+    cols: Vec<String>,
+}
+
+/// 把索引元数据拼成 `CREATE INDEX`。返回 `(能本地拼的语句, 需要回落的索引名)`。
+///
+/// 抽成纯函数是为了能脱库单测「哪些该回落」——这条判据写错不会报错，只会安静地
+/// 生成一段跑不通的 DDL。
+fn render_indexes(owner: &str, table: &str, list: &[IdxMeta]) -> (String, Vec<String>) {
+    let mut sql = String::new();
+    let mut fallback = Vec::new();
+    for it in list {
+        if !it.buildable || it.cols.is_empty() {
+            fallback.push(it.name.clone());
+            continue;
+        }
+        let cols: Vec<String> = it.cols.iter().map(|c| format!("\"{c}\"")).collect();
+        sql.push_str(&format!(
+            "CREATE {}INDEX \"{}\".\"{}\" ON \"{}\".\"{}\" ({}) ;\n",
+            if it.unique { "UNIQUE " } else { "" },
+            owner,
+            it.name,
+            owner,
+            table,
+            cols.join(", ")
+        ));
+    }
+    (sql, fallback)
+}
+
+/// 表 DDL 的索引段：本地按字典拼装。
+///
+/// 实测（AIER633 / GL_DOCFREE2，31 个索引）：`get_dependent_ddl('INDEX')` 固定耗约 390ms，
+/// **与索引个数无关**（3 个索引的表也是 390ms）；同样的信息用字典查只要约 108ms。
+///
+/// 它还有个副作用：会把主键索引再输出一遍——主 DDL 的
+/// `CONSTRAINT ... PRIMARY KEY ... USING INDEX` 已经建了索引，整段复制执行必撞 ORA-00955。
+/// 所以这里**排除约束索引（P/U）**，只拼「能 100% 还原」的普通索引，其余回落
+/// `get_ddl('INDEX')`：拼错比慢更糟（用户会拿这段去执行）。
+///
+/// 🔴 约束索引**必须单独查一次再做集合差**，不能写成 SQL 里的 `not exists`：
+/// `all_constraints` 是字典视图，相关子查询会让它按索引行反复展开——实测同一张表
+/// 从 136ms（两次查询）涨到 15.2 秒（`not exists`）。
+fn index_ddl(conn: &Connection, table: &str) -> String {
+    const CONS: &str = "select index_name from all_constraints \
+                         where owner = sys_context('userenv','current_schema') \
+                           and table_name = :1 and constraint_type in ('P','U') \
+                           and index_name is not null";
+    const SQL: &str = "select i.table_owner, i.index_name, i.uniqueness, i.index_type, \
+                              i.partitioned, i.compression, ic.column_name, ic.descend \
+                         from all_indexes i join all_ind_columns ic \
+                           on ic.index_owner = i.owner and ic.index_name = i.index_name \
+                        where i.table_owner = sys_context('userenv','current_schema') \
+                          and i.table_name = :1 and i.generated = 'N' \
+                        order by i.index_name, ic.column_position";
+    let t = table.to_uppercase();
+    let mut cons: HashSet<String> = HashSet::new();
+    if let Ok(cur) = conn.query(CONS, &[&t as &dyn ToDbValue]) {
+        for row in cur.flatten() {
+            let name = text_at(&row, 0);
+            if !name.is_empty() {
+                cons.insert(name);
+            }
+        }
+    }
+    let cur = match conn.query(SQL, &[&t as &dyn ToDbValue]) {
+        Ok(c) => c,
+        // 查不到元数据不等于没有索引，但也不该把整条 DDL 变成错误：主 DDL 已经拿到了
+        Err(_) => return String::new(),
+    };
+    let mut order: Vec<String> = Vec::new();
+    let mut map: HashMap<String, (String, IdxMeta)> = HashMap::new();
+    for row in cur {
+        let row = match row {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let owner = text_at(&row, 0);
+        let name = text_at(&row, 1);
+        // 约束索引已在主 DDL 的 `PRIMARY KEY ... USING INDEX` 里建过，跳过
+        if cons.contains(&name) {
+            continue;
+        }
+        let uniq = text_at(&row, 2);
+        let ty = text_at(&row, 3);
+        let part = text_at(&row, 4);
+        let comp = text_at(&row, 5);
+        let col = text_at(&row, 6);
+        let desc = text_at(&row, 7);
+        let plain = ty == "NORMAL"
+            && part != "YES"
+            && !comp.eq_ignore_ascii_case("ENABLED")
+            && desc != "DESC"
+            && !col.is_empty()
+            && !col.starts_with("SYS_NC");
+        match map.get_mut(&name) {
+            Some((_, meta)) => {
+                meta.buildable &= plain;
+                meta.cols.push(col);
+            }
+            None => {
+                order.push(name.clone());
+                map.insert(
+                    name.clone(),
+                    (
+                        owner,
+                        IdxMeta {
+                            name,
+                            unique: uniq == "UNIQUE",
+                            buildable: plain,
+                            cols: vec![col],
+                        },
+                    ),
+                );
+            }
+        }
+    }
+    let list: Vec<(String, IdxMeta)> = order.into_iter().filter_map(|n| map.remove(&n)).collect();
+    let owner = list.first().map(|(o, _)| o.clone()).unwrap_or_default();
+    let metas: Vec<IdxMeta> = list.into_iter().map(|(_, m)| m).collect();
+    let (mut sql, fallback) = render_indexes(&owner, &t, &metas);
+    for name in fallback {
+        if let Ok(text) = metadata_ddl(
+            conn,
+            "select dbms_metadata.get_ddl('INDEX', :1) from dual",
+            &name,
+        ) {
+            sql.push_str(text.trim());
+            sql.push('\n');
+        }
+    }
+    sql
+}
+
 /// 取 `dbms_metadata.get_ddl(...)` 的 CLOB 文本。错误统一成消息字符串——调用方只关心
 /// 「TABLE 不行就试 VIEW」。
 fn metadata_ddl(conn: &Connection, sql: &str, name: &str) -> Result<String, String> {
@@ -3265,6 +3409,52 @@ fn decimal_number(input: &str) -> Result<oracledb::OracleNumber, BridgeError> {
     text.parse()
         .map_err(|_| sql_err("绑定数字无效或超出 Oracle 精度"))
 }
+#[cfg(test)]
+mod index_ddl_tests {
+    use super::*;
+
+    fn meta(name: &str, unique: bool, buildable: bool, cols: &[&str]) -> IdxMeta {
+        IdxMeta {
+            name: name.to_string(),
+            unique,
+            buildable,
+            cols: cols.iter().map(|c| c.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn renders_plain_and_unique_indexes_with_qualified_names() {
+        let list = vec![
+            meta("IDX_A", false, true, &["A", "B"]),
+            meta("IDX_B", true, true, &["C"]),
+        ];
+        let (sql, fallback) = render_indexes("AIER633", "GL_DOCFREE2", &list);
+        assert!(fallback.is_empty(), "{fallback:?}");
+        assert!(sql.contains(
+            "CREATE INDEX \"AIER633\".\"IDX_A\" ON \"AIER633\".\"GL_DOCFREE2\" (\"A\", \"B\") ;"
+        ));
+        assert!(sql.contains(
+            "CREATE UNIQUE INDEX \"AIER633\".\"IDX_B\" ON \"AIER633\".\"GL_DOCFREE2\" (\"C\") ;"
+        ));
+    }
+
+    #[test]
+    fn falls_back_when_any_column_is_not_reconstructible() {
+        // 函数索引：列名是 SYS_NC 系统列，拼出来跑不通 → 必须回落 DBMS_METADATA
+        let list = vec![
+            meta("IDX_OK", false, true, &["A"]),
+            meta("IDX_FUNC", false, false, &["SYS_NC00012$"]),
+            meta("IDX_EMPTY", false, true, &[]),
+        ];
+        let (sql, fallback) = render_indexes("S", "T", &list);
+        assert_eq!(sql.matches("CREATE ").count(), 1);
+        assert_eq!(
+            fallback,
+            vec!["IDX_FUNC".to_string(), "IDX_EMPTY".to_string()]
+        );
+    }
+}
+
 #[cfg(test)]
 mod bound_number_tests {
     use super::*;
