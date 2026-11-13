@@ -35,11 +35,25 @@ export function TreeSvnProvider({ root, children }: { root: string; children: Re
   const index = useMemo(() => treeSvnIndex(root, belongs ? status.data?.changes.groups.flatMap(g => g.items) ?? [] : []), [root, belongs, status.data]);
   const failed = info.isError || status.isError;
   const fetching = info.isFetching || status.isFetching;
-  const summary = <div className="wb-svn-summary">
-    <span title={failed ? String(info.error ?? status.error) : undefined}>
-      {fetching ? "SVN · 正在扫描…" : failed ? "SVN · 读取失败" : !belongs ? "SVN · 非当前工作副本" : `${index.files.size} 个 SVN 变更`}
-    </span>
-    <button type="button" disabled={fetching} onClick={() => { void info.refetch(); void status.refetch(); }}>刷新</button>
-  </div>;
-  return <TreeSvnContext.Provider value={{ ...index, summary }}>{children}</TreeSvnContext.Provider>;
+  const errorText = failed ? String(info.error ?? status.error) : undefined;
+  const refetchInfo = info.refetch, refetchStatus = status.refetch;
+  /**
+   * `summary` 与整个 context value 都必须稳定。
+   *
+   * context 换了引用就会绕过 `TreeRow` 那批 `memo`，让展开着的成千行全部重渲染——
+   * 而这里原本每渲染一次就造一个新对象 + 新元素，等于每次父组件抖动都白算一遍。
+   */
+  const summary = useMemo(
+    () => (
+      <div className="wb-svn-summary">
+        <span title={errorText}>
+          {fetching ? "SVN · 正在扫描…" : failed ? "SVN · 读取失败" : !belongs ? "SVN · 非当前工作副本" : `${index.files.size} 个 SVN 变更`}
+        </span>
+        <button type="button" disabled={fetching} onClick={() => { void refetchInfo(); void refetchStatus(); }}>刷新</button>
+      </div>
+    ),
+    [errorText, fetching, failed, belongs, index, refetchInfo, refetchStatus],
+  );
+  const value = useMemo(() => ({ ...index, summary }), [index, summary]);
+  return <TreeSvnContext.Provider value={value}>{children}</TreeSvnContext.Provider>;
 }

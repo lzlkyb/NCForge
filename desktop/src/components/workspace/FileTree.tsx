@@ -4,7 +4,6 @@ import {
   useMemo,
   useState,
   forwardRef,
-  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { ContextMenu } from "./ContextMenu";
 import { TreeDeleteConfirm, TreeViewFilters } from "./TreeChrome";
@@ -19,6 +18,7 @@ import { useTreeEdit } from "./useTreeEdit";
 import { useTreeMembers } from "../../hooks/useTreeMembers";
 import { useTreeLoad } from "./useTreeLoad";
 import { useTreeHandlers } from "./useTreeHandlers";
+import { useTreeKeyboard } from "./useTreeKeyboard";
 import { packageCompact, packageDepthOffset } from "../../lib/packageTree";
 import { useNcComponents } from "../../hooks/useNcComponents";
 import { useTreeMenu } from "../../hooks/useTreeMenu";
@@ -26,7 +26,7 @@ import { useProblemMarks, useProblemTreeFilter } from "../../hooks/useProblemMar
 import { useTreeLocate } from "../../hooks/useTreeLocate";
 import type { NewEntryKind } from "../../lib/workspace";
 import { useTreeNewJava } from "../../hooks/useTreeNewJava";
-import { flattenTree, treeKeyAction, treeRowId as rowId } from "../../lib/treeNav";
+import { flattenTree, treeRowId as rowId } from "../../lib/treeNav";
 import { countBookmarks, useBookmarks } from "../../lib/bookmarks";
 import { useCompactPackages, useNcStructure, usePackageView, useRevealOnOpen } from "../../lib/treeViewPrefs";
 import { isUnderPath } from "../../lib/treeProjects";
@@ -72,7 +72,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   ref,
 ) {
   const [selected, setSelected] = useState<{ path: string; isDir: boolean } | null>(null);
-  const [filter, setFilter] = useTreeFilterState(root);
+  const [filter, setFilter, filterOpen, closeFilter] = useTreeFilterState(root);
   const problemMarks = useProblemMarks();
   const compact = useCompactPackages();
   const ncStructure = useNcStructure();
@@ -180,55 +180,14 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     [dirs, expanded, root, rootRows, multi, filterFn, compact, hoist, packageRoots, packageIndexes, packageView, members],
   );
 
-  // 焦点留在容器，方向键按视觉树移动。
-  const onKeyDown = (e: ReactKeyboardEvent) => {
-    if ((e.target as HTMLElement).closest(".wb-problem-badge") || editing || e.nativeEvent.isComposing) return;
-    if (e.key === "Escape" && filter) {
-      e.preventDefault();
-      setFilter("");
-      return;
-    }
-    if (e.key === "Backspace" && filter) {
-      e.preventDefault();
-      setFilter((f) => f.slice(0, -1));
-      return;
-    }
-    if (e.key.length === 1 && (e.key !== " " || filter) && !e.ctrlKey && !e.altKey && !e.metaKey) {
-      e.preventDefault();
-      setFilter((f) => f + e.key);
-      return;
-    }
-    const act = treeKeyAction(e.key, flat, selected, new Set([...expanded, ...members.keys()]));
-    if (act) {
-      e.preventDefault();
-      if (act.kind === "select") setSelected({ path: act.path, isDir: act.isDir });
-      else if (act.kind === "toggle") {
-        const row = flat.find((r) => r.path === act.path);
-        // 工程根行不参与压缩链：点一下只展开这一层
-        if (row?.branch === "java-file") toggleFileMembers(act.path);
-        else if (row?.project) toggle(act.path);
-        // NC 结构视图摊平后的行真身在 `bill/src` 下，问压缩链要用真实父目录
-        else toggleVisibleRow(act.path, row?.realParent ?? row?.parent ?? root);
-      } else {
-        const symbol = flat.find(row => row.path === act.path)?.symbol;
-        if (symbol) onOpen(symbol.file, { line: symbol.line, column: symbol.column });
-        else onOpen(act.path);
-      }
-      return;
-    }
-    if (!selected || (mode && !flat.some(row => row.path === selected.path))) return;
-    // 关联工程只读：F2 / Del 在后端必被拒，这里直接不接
-    if (!isEditable(selected.path)) return;
-    if (e.key === "F2") {
-      e.preventDefault();
-      beginRename(selected);
-    } else if (e.key === "Delete") {
-      e.preventDefault();
-      void askDelete(selected);
-    } else if (e.key === "Escape") {
-      setSelected(null);
-    }
-  };
+  // 焦点留在容器，方向键按视觉树移动。规则与经验见 useTreeKeyboard
+  // （编辑态只让 Esc 走、移动后滚到可见、导航可被筛选框复用）。
+  const memberPaths = useMemo(() => new Set(members.keys()), [members]);
+  const keys = useTreeKeyboard({
+    flat, selected, setSelected, expanded, memberPaths, editing: !!editing, cancelEdit,
+    filter, filterOpen, setFilter, closeFilter, root, toggleFileMembers, toggle, toggleVisibleRow,
+    onOpen, isEditable, beginRename, askDelete,
+  });
 
   const handlers = useTreeHandlers({
     toggleRow: toggleVisibleRow, toggle, onOpen, onPin, openMenu, commitEdit, cancelEdit, setSelected, isEditable,
@@ -262,7 +221,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
   return (
     <>
       <TreeViewFilters mode={mode} onToggle={toggleMode} />
-      <TreeQuickFilter root={root} />
+      <TreeQuickFilter root={root} onNavigate={keys.navigate} />
       <div
         ref={treeList}
         className="wb-tree-list"
@@ -270,7 +229,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
         aria-label={packageView ? "包资源管理器" : "文件树"}
         tabIndex={0}
         aria-activedescendant={selected && flat.some(row => row.path === selected.path) ? rowId(selected.path) : undefined}
-        onKeyDown={onKeyDown}
+        onKeyDown={keys.onKeyDown}
         onContextMenu={(e) => {
           // 空白处右键 = 对工作区根操作（新建到根下）
           if (e.target === e.currentTarget) openMenu(e, root, true);

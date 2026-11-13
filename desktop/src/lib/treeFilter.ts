@@ -21,5 +21,7 @@ export function useTreeFilterState(root: string) {
     const text = typeof value === "function" ? value(store.get().text) : value;
     store.set({ text, ...(text ? { open: true } : {}) });
   }, [store]);
-  return [state.text, setText] as const;
+  /** 收掉过滤条（连输入框一起）：键盘上打完字清空后还得能把它关掉。 */
+  const close = useCallback(() => store.set({ text: "", open: false }), [store]);
+  return [state.text, setText, state.open, close] as const;
 }

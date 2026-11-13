@@ -24,10 +24,20 @@ export function useTreeHandlers(impl: {
 }) {
   const latest = useRef(impl);
   latest.current = impl;
+  // 点目录行除了展开/收起，也要把它变成「当前选中行」：F2 / Del / 标题栏「新建」
+  // 全都读 `selected`，不跟着走就会作用在上一次选中的项上——在 A 目录上按 F2，
+  // 结果改的是前面点过的 B。文件行由 `onActivate` 负责，这里补目录那两路。
+  const select = (path: string, isDir: boolean) => latest.current.setSelected({ path, isDir });
   return useMemo(
     () => ({
-      onToggle: (tail: string, parent: string) => latest.current.toggleRow(tail, parent),
-      onProjectToggle: (path: string) => latest.current.toggle(path),
+      onToggle: (tail: string, parent: string) => {
+        select(tail, true);
+        latest.current.toggleRow(tail, parent);
+      },
+      onProjectToggle: (path: string) => {
+        select(path, true);
+        latest.current.toggle(path);
+      },
       onActivate: (path: string) => {
         latest.current.setSelected({ path, isDir: false });
         latest.current.onOpen(path);

@@ -47,6 +47,10 @@ export function TreeEditRow({
   }, [initial, selectStem]);
 
   useEffect(() => {
+    // `busy` = 新建 / 改名已经发出去了。后端没有取消通道，这时关掉输入行只会让结果
+    // 落在用户看不见的地方（文件建好了却没有提示，或者改名成功但输入行先消失、点别处
+    // 又什么都没发生）。做完之前不许外部点击把它收走。
+    if (busy) return;
     const onDown = (e: MouseEvent) => {
       if (!boxRef.current?.contains(e.target as Node)) onCancel();
     };
@@ -56,7 +60,7 @@ export function TreeEditRow({
       window.clearTimeout(id);
       window.removeEventListener("mousedown", onDown, true);
     };
-  }, [onCancel]);
+  }, [onCancel, busy]);
 
   return (
     <>

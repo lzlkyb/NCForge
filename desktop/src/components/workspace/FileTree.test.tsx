@@ -1321,3 +1321,47 @@ describe("编译问题标记", () => {
     expect(rowByExact("p")?.getAttribute("aria-expanded")).toBe("false");
   });
 });
+
+describe("树键盘导航", () => {
+  const treeEl = () => container.querySelector<HTMLElement>('[role="tree"]')!;
+  const key = async (name: string) =>
+    act(async () => treeEl().dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true })));
+  const editInput = () => container.querySelector<HTMLInputElement>(".wb-tree-edit input");
+
+  it("点目录行就是选中它，F2 改名落在这一行而不是上一次选中的文件", async () => {
+    await render();
+    await click(rowByExact("readme.txt"));
+    expect(onOpen).toHaveBeenCalledWith(`${ROOT}\\readme.txt`);
+    await click(rowByExact("modules"));
+    await key("F2");
+    // 不更新 selected 的话这里会变成 readme.txt —— 用户点的是目录，改的却是文件
+    expect(editInput()?.value).toBe("modules");
+  });
+
+  it("编辑态下 Escape 能取消，方向键不穿透到树", async () => {
+    await render();
+    await act(async () => treeRef.current!.startCreate("file"));
+    expect(editInput()).toBeTruthy();
+    await key("ArrowDown");
+    expect(treeEl().getAttribute("aria-activedescendant")).toBeNull();
+    await key("Escape");
+    expect(editInput()).toBeNull();
+  });
+
+  it("树上打字进筛选条但不抢焦点，方向键仍然驱动树", async () => {
+    await render();
+    treeEl().focus();
+    await key("r");
+    const box = container.querySelector<HTMLInputElement>(".wb-tree-quick-filter input");
+    expect(box?.value).toBe("r");
+    // 抢走焦点就等于把整棵树的键盘导航关掉：↑↓ 会落到输入框里
+    expect(document.activeElement).toBe(treeEl());
+    await key("ArrowDown");
+    expect(document.getElementById(treeEl().getAttribute("aria-activedescendant")!)).toBe(rowByExact("readme.txt"));
+    // Escape 第一下清词（条还留着好继续打），第二下把它收掉
+    await key("Escape");
+    expect(box?.value).toBe("");
+    await key("Escape");
+    expect(container.querySelector(".wb-tree-quick-filter")).toBeNull();
+  });
+});
