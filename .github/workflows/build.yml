@@ -170,7 +170,18 @@ jobs:
       - name: cargo clippy (与 macOS 侧同等严格)
         run: node scripts/gate.mjs --only clippy
         working-directory: desktop
+      # 🔴 这一步关掉 sccache（RUSTC_WRAPPER 置空 = cargo 直接调 rustc）。
+      # 现象：sccache 报 `failed to spawn Command { std: "…rustc.exe" … }`，
+      # 根因是 `The filename or extension is too long. (os error 206)`——编译 `nc_forge`
+      # 这一条的命令行里有 150+ 个 `-L dependency=…\target\debug\build\<crate>\<hash>\out`，
+      # 长度已经贴到 Windows 32767 的上限；sccache 转手 spawn rustc 时越界，编译直接失败，
+      # 测试根本没跑。cargo 自己 spawn 同样的命令没这个问题（同一棵树、同等路径长度本地能过）。
+      # 推测之前一直没暴露，是因为 sccache 命中缓存时压根不 spawn rustc：只要没人动 lib 源码，
+      # 缓存一直命中；第一次真改代码就必红（本仓 2026-11-13 就是这么发现的）。
+      # clippy 那步仍走缓存——它的命令行略短，这次是绿的。
       - name: cargo test
+        env:
+          RUSTC_WRAPPER: ""
         run: node scripts/gate.mjs --only rust-test
         working-directory: desktop
 
