@@ -62,4 +62,27 @@ describe("分屏会话", () => {
     await act(async () => api.closeSplit());
     expect(getSession().splitPath).toBeNull();
   });
+
+  it("连点两个「在右侧打开」，右侧落在后点的那个", async () => {
+    // 只加标签、不抢 activePath：真实的 openFile 抢不抢是它自己的事，
+    // 这里要验的是 openSplit 会不会让先点的那次把右侧抢回去。
+    const openTab = (path: string) => {
+      setSession({ tabs: (tabs) => [...tabs, tabMetaFromDisk(path, { text: "", encoding: "UTF-8", hasBom: false, eol: "LF", lossless: true, mtimeMs: 0, size: 1 })] });
+      return true;
+    };
+    const waiters: Array<() => void> = [];
+    await render((path) => new Promise<boolean>((resolve) => {
+      waiters.push(() => resolve(openTab(path)));
+    }));
+    let first!: Promise<void>, second!: Promise<void>;
+    await act(async () => {
+      first = api.openSplit("C:\\w\\A.java");
+      second = api.openSplit("C:\\w\\B.java");
+    });
+    // 后点的先读完：先点的那次回来时不能再把右侧抢回 A
+    await act(async () => { waiters[1](); await second; });
+    expect(getSession().splitPath).toBe("C:\\w\\B.java");
+    await act(async () => { waiters[0](); await first; });
+    expect(getSession().splitPath).toBe("C:\\w\\B.java");
+  });
 });

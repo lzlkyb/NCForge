@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { setSession, useWorkspaceSelector, type Updater } from "../lib/workspaceSession";
 import { closeRightGroup, emptyEditorGroups, selectGroupFile } from "../lib/editorGroups";
 import { getSession } from "../lib/workspaceSession";
@@ -16,11 +17,16 @@ import { filePathKey } from "../lib/workspace";
 export function useSplitView(openFile: (path: string) => Promise<boolean>) {
   const splitPath = useWorkspaceSelector((s) => s.splitPath);
   const setSplitPath = (v: Updater<string | null>) => setSession({ splitPath: v });
+  /** 右侧最近一次「在右侧打开」的号。 */
+  const seq = useRef(0);
 
   const openSplit = async (path: string) => {
     const root = getSession().root, epoch = workspaceEpoch();
+    // 连点两个「在右侧打开」时右侧要落在**后点的那一个**。打开是异步的：先点的那个
+    // 读得慢一点就会在后点的之后回来，把右侧抢回上一个文件。按点击顺序抢号。
+    const nonce = ++seq.current;
     if (!(await openFile(path))) return;
-    if (root !== getSession().root || epoch !== workspaceEpoch()) return;
+    if (nonce !== seq.current || root !== getSession().root || epoch !== workspaceEpoch()) return;
     const canonical = getSession().tabs.find(t => filePathKey(t.path) === filePathKey(path))?.path;
     if (!canonical) return;
     setSession({ tabs: tabs => pinTab(tabs, canonical), editorGroups: groups => selectGroupFile(groups ?? emptyEditorGroups(), "right", canonical) });
