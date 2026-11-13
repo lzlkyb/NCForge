@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { getSession, setSession, useWorkspaceSelector, type TabMeta } from "../../lib/workspaceSession";
 import { activeOfGroup, emptyEditorGroups, moveGroupFile, removeGroupView, type EditorGroupId } from "../../lib/editorGroups";
 import { setCursor } from "../../lib/cursorStore";
@@ -35,12 +35,36 @@ export function EditorGroupsPane({ root, tabs, session, reveal, tools, nav }: {
     if (current[other].includes(path)) setSession({ editorGroups: removeGroupView(current, group, path) });
     else session.closeTab(path);
   };
-  const resize = (start: number) => {
+  /**
+   * 开始拖分隔条。
+   *
+   * 必须用**指针捕获 + pointerId 过滤**：只挂 window 监听的话，松手发生在窗口外
+   * （或拖到另一块屏幕/预览面板上）就收不到 `pointerup`，松手之后鼠标一动还在改比例
+   * ——幽灵拖拽。捕获到分隔条自己身上，能保证松开时一定收到 `lostpointercapture`。
+   */
+  const resize = (event: ReactPointerEvent<HTMLElement>) => {
     cleanup.current?.(); const bounds = host.current?.getBoundingClientRect(); if (!bounds?.width) return;
+    const handle = event.currentTarget, pointerId = event.pointerId, start = event.clientX;
     const initial = getSession().editorGroups?.ratio ?? .5;
-    const move = (event: PointerEvent) => setSession({ editorGroups: old => ({ ...(old ?? emptyEditorGroups()), ratio: initial + (event.clientX - start) / bounds.width }) });
-    const finish = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", finish); window.removeEventListener("pointercancel", finish); cleanup.current = null; };
-    cleanup.current = finish; window.addEventListener("pointermove", move); window.addEventListener("pointerup", finish); window.addEventListener("pointercancel", finish);
+    const move = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      setSession({ editorGroups: old => ({ ...(old ?? emptyEditorGroups()), ratio: initial + (e.clientX - start) / bounds.width }) });
+    };
+    const finish = (e?: Event) => {
+      if (e && "pointerId" in e && (e as PointerEvent).pointerId !== pointerId) return;
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", finish);
+      handle.removeEventListener("pointercancel", finish);
+      handle.removeEventListener("lostpointercapture", finish);
+      try { handle.releasePointerCapture?.(pointerId); } catch { /* 已经自动释放 */ }
+      cleanup.current = null;
+    };
+    try { handle.setPointerCapture?.(pointerId); } catch { /* 捕获失败不影响基本拖拽 */ }
+    cleanup.current = () => finish();
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+    handle.addEventListener("lostpointercapture", finish);
   };
   const split = groups.right.length > 0;
   return <div ref={host} className="wb-editor-groups" data-compact={compact || undefined} data-split={split || undefined}>
@@ -75,7 +99,7 @@ export function EditorGroupsPane({ root, tabs, session, reveal, tools, nav }: {
       </div>;
     })}
     {split && !compact && <div className="wb-editor-divider" role="separator" aria-label="调整编辑器组比例" aria-orientation="vertical" aria-valuemin={25} aria-valuemax={75} aria-valuenow={Math.round(groups.ratio * 100)} tabIndex={0}
-      style={{ left: `${groups.ratio * 100}%` }} onPointerDown={event => { event.preventDefault(); resize(event.clientX); }} onDoubleClick={() => setSession({ editorGroups: old => ({ ...(old ?? emptyEditorGroups()), ratio: .5 }) })}
+      style={{ left: `${groups.ratio * 100}%` }} onPointerDown={event => { event.preventDefault(); resize(event); }} onDoubleClick={() => setSession({ editorGroups: old => ({ ...(old ?? emptyEditorGroups()), ratio: .5 }) })}
       onKeyDown={event => { if (!['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)) return; event.preventDefault(); setSession({ editorGroups: old => ({ ...(old ?? emptyEditorGroups()), ratio: event.key === 'Home' ? .5 : (old?.ratio ?? .5) + (event.key === 'ArrowRight' ? .05 : -.05) }) }); }} />}
   </div>;
 }

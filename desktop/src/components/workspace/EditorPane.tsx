@@ -191,6 +191,10 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
   }, [readOnly, activePath]);
 
   // 设置变化与大文件降级共用一次计算，切换文件时保留用户的小地图偏好。
+  //
+  // `modelGeneration` 必须进依赖：后台恢复的标签是「先有标签、后读到内容」，
+  // model 是异步到位的。少了它，这一次算出来的 `java` 永远是 false——Java 专属选项
+  // 没生效，`attachJavaStickyScope` 也没挂上，而 activePath 一直没变，不会重算。
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -200,7 +204,7 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     const detach = java && activePath && !heavy ? attachJavaStickyScope(editor, activePath) : undefined;
     window.addEventListener(PREFS_EVENT, apply);
     return () => { window.removeEventListener(PREFS_EVENT, apply); detach?.(); };
-  }, [heavy, activePath]);
+  }, [heavy, activePath, modelGeneration]);
 
   // 跳转到指定行。必须排在上面的「切换文件」之后：同一个 commit 里 effect 按声明顺序执行，
   // 先换 model 再定位，否则 setPosition 会落到上一个文件的 model 上被 setModel 冲掉。

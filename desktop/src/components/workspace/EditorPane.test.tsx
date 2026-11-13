@@ -9,6 +9,10 @@ import { EditorPane } from "./EditorPane";
 // 记录 updateOptions 收到了什么。
 const mocks = vi.hoisted(() => ({
   createArgs: [] as Record<string, unknown>[],
+  /** 拿到的模型生命周期回调：用来模拟「内容晚一步读到」。 */
+  lifecycle: null as null | ((path: string) => void),
+  /** 当前挂着的 model（`getModel` 读它，用例里可以中途换）。 */
+  model: null as unknown,
   editor: {
     addCommand: vi.fn(),
     addAction: vi.fn(() => ({ dispose: vi.fn() })),
@@ -72,8 +76,8 @@ vi.mock("../../lib/langProviders", () => ({ registerLangProviders: vi.fn() }));
 vi.mock("../../lib/javaSqlActions", () => ({ registerJavaSqlActions: () => [] }));
 
 vi.mock("../../lib/editorStore", () => ({
-  onModelLifecycle: () => () => {},
-  getModel: () => undefined,
+  onModelLifecycle: (created: (path: string) => void) => { mocks.lifecycle = created; return () => {}; },
+  getModel: () => mocks.model,
   getViewState: () => null,
   saveViewState: vi.fn(),
   // 预览模型的保活入口（EditorPane 切 model 时调）；当前用例 getModel 恒为 undefined，
@@ -106,6 +110,7 @@ const renderPane = async (heavy: boolean) => {
 const lastOptions = () => mocks.editor.updateOptions.mock.lastCall?.[0] as Record<string, unknown>;
 
 beforeEach(() => {
+  mocks.model = null;
   mocks.editor.getModel.mockReturnValue(null);
   setEditorPrefs({ ...DEFAULT_PREFS, minimap: true });
   container = document.createElement("div");
@@ -133,6 +138,17 @@ it("共享模型的非焦点视图不重复自动保存；切模型后旧计时�
   act(() => changed()); expect(timer).toHaveBeenCalled();
   mocks.editor.getModel.mockReturnValue({} as never);
   await act(async () => vi.advanceTimersByTime(500)); expect(save).not.toHaveBeenCalled();
+});
+
+it("后台恢复的标签等到 model 到位后补算编辑器配置", async () => {
+  await act(async () => root.render(
+    <EditorPane activePath={"C:\\w\\A.java"} readOnly={false} reveal={null} heavy={false} onCursor={() => {}} onSave={() => {}} />,
+  ));
+  mocks.editor.updateOptions.mockClear();
+  // 内容晚一步读到：model 这时才挂上，而 activePath 一直没变
+  mocks.model = { getLanguageId: () => "plaintext" };
+  await act(async () => mocks.lifecycle!("C:\\w\\A.java"));
+  expect(mocks.editor.updateOptions).toHaveBeenCalled();
 });
 
 describe("行号槽", () => {

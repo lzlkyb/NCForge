@@ -105,3 +105,20 @@ it("左组没有文件时仍保留路径行，右组的执行与阅读入口正�
   act(() => h.resize!([{ contentRect: { width: 700 } }]));
   expect(host.querySelector('[data-group="right"] [data-execution]')).toBeTruthy();
 });
+
+it("分隔条松手在窗口外（只补 lostpointercapture）之后，鼠标移动不再改比例", () => {
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(
+    { width: 1000, height: 600, left: 0, top: 0, right: 1000, bottom: 600, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
+  );
+  const divider = host.querySelector<HTMLElement>('[role="separator"]')!;
+  const pointer = (type: string, clientX: number) =>
+    act(() => divider.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 7, clientX })));
+  pointer("pointerdown", 500);
+  pointer("pointermove", 600);
+  const dragged = getSession().editorGroups!.ratio;
+  expect(dragged).toBeGreaterThan(.5);
+  // 拖出窗口再松手：浏览器不派 pointerup，只派 lostpointercapture
+  pointer("lostpointercapture", 600);
+  pointer("pointermove", 950);
+  expect(getSession().editorGroups!.ratio).toBe(dragged);
+});

@@ -25,6 +25,9 @@
 .wb-crumb-row .wb-outline-btn { margin-right:0; }
 .wb-group-path-empty { padding-inline:8px; color:hsl(var(--muted-foreground)); font-size:12px; }
 .wb-reading-body > .wb-hist { top:64px; width:min(460px,calc(100% - 16px)); max-height:min(72vh,calc(100% - 72px)); }
+/* 大纲固定时占住右侧 224px 的 flex 列：历史弹层是 absolute + right:8px，不改就会整块压在
+   大纲上面——而固定大纲正是用户要求「一直看着」的东西。让开这一列。 */
+.wb-reading-body:has(> .wb-outline[data-pinned]) > .wb-hist { right:232px; width:min(460px,calc(100% - 248px)); }
 .wb-reading-body > .wb-outline:not([data-pinned]) { top:64px; max-height:min(60vh,calc(100% - 72px)); }
 .wb-crumb .wb-crumb-middle { display:inline-flex; align-items:center; flex:none; }
 .wb-banner-summary { display:flex; align-items:center; gap:7px; min-width:0; font-size:12px; }
