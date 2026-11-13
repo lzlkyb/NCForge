@@ -165,4 +165,29 @@ describe("标签键盘与子按钮",()=>{  it.each(["Enter"," "])("关闭按钮�
     act(()=>row.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowRight",bubbles:true,cancelable:true})));
     expect(onSelect).toHaveBeenCalledWith("C:\\w\\B.java");
   });
+
+  it("Delete 关掉标签后焦点落到相邻标签，不掉到 body",async()=>{
+    const list=[tab("C:\\w\\A.java"),tab("C:\\w\\B.java"),tab("C:\\w\\C.java")];
+    // 关闭由调用方真正把标签摘掉：不这么做的话 DOM 节点还在，焦点「没掉」是假象
+    const draw=(tabs:TabMeta[])=>act(()=>root.render(
+      <TreeSvnContext.Provider value={{ files:new Map(), directories:new Map(), summary:null }}>
+      <TabStrip root="C:\\w" tabs={tabs} activePath="C:\\w\\B.java" splitPath={null} compiling={false} canCompile
+        onSelect={onSelect} onClose={(p)=>draw(tabs.filter(t=>t.path!==p))} onCloseMany={()=>0}
+        onPin={vi.fn()} onOpenSplit={vi.fn()} onCloseSplit={vi.fn()} onCompile={vi.fn()} />
+      </TreeSvnContext.Provider>,
+    ));
+    session.state.tabs=list;draw(list);
+    const b=[...container.querySelectorAll<HTMLElement>('[role="tab"]')][1];
+    b.focus();
+    expect(document.activeElement).toBe(b);
+    await act(async()=>{
+      b.dispatchEvent(new KeyboardEvent("keydown",{key:"Delete",bubbles:true,cancelable:true}));
+      await new Promise(resolve=>requestAnimationFrame(()=>resolve(null)));
+    });
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2);
+    // B 被关掉后焦点该接在它后面的 C 上。必须断言 role=tab：焦点掉到 body 时
+    // body 的 textContent 里也有 "C.java"，只看文字会当成通过。
+    expect(document.activeElement?.getAttribute("role")).toBe("tab");
+    expect(document.activeElement?.textContent).toContain("C.java");
+  });
 });

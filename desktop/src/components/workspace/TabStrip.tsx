@@ -3,12 +3,12 @@ import { TreeSvnContext } from "./TreeSvnContext";
 import { pathKey } from "../../lib/treeSvn";
 import { svnStatusLabel } from "../../lib/svn";
 import { openSvnChange } from "../../lib/svnSession";
-import { svnCodeMenuItems } from "./svnCodeMenu";
 import { EditorTabTypeIcon } from "./EditorTabTypeIcon";
 import { ProblemBadge, problemDescription } from "./ProblemBadge";
 import { useContext, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useWorkbenchDock } from "./WorkbenchDock";
-import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { ContextMenu } from "./ContextMenu";
+import { tabMenuItems } from "./tabMenu";
 import { AllEditorTabs } from "./AllEditorTabs";
 import { TaskMenu } from "./TaskMenu";
 import { Button } from "../ui/button";
@@ -17,14 +17,12 @@ import { Icon } from "../ui/icon";
 import { WorkspaceFileName } from "./WorkspaceFileName";
 import { toast } from "../ui/toast";
 import { tabPathLabels } from "../../lib/tabPathLabels";
-import { relativeTo } from "../../lib/compile";
-import { revealInTree } from "../../lib/revealInTree";
 import { setSession } from "../../lib/workspaceSession";
 import { useProblemMarks } from "../../hooks/useProblemMarks";
 import { diagnosticPathKey } from "../../lib/diagnosticScope";
 import type { TabMeta } from "../../lib/workspaceSession";
 import { emptyEditorGroups, type EditorGroupId } from "../../lib/editorGroups";
-import { initReviewMarks, isReviewed, markReviewed, reviewMarksVersion, subscribeReviewMarks } from "../../lib/reviewMarks";
+import { initReviewMarks, isReviewed, reviewMarksVersion, subscribeReviewMarks } from "../../lib/reviewMarks";
 
 /**
  * 编辑器上方的标签条 + 编译按钮。
@@ -93,7 +91,9 @@ export function TabStrip({
     const el = activePath ? tabRefs.current.get(activePath) : null;
     const strip = el?.parentElement;
     if (!el || !strip) return;
-    const left = el.offsetLeft;
+    // offsetLeft 相对最近的定位祖先（`.wb-editor-groups`），而 scrollLeft 相对滚动容器：
+    // 分屏时两者差了一个左组的宽度，直接用会把标签滚过头。减去容器自身的 offsetLeft 归一。
+    const left = el.offsetLeft - strip.offsetLeft;
     const right = left + el.offsetWidth;
     if (left < strip.scrollLeft) strip.scrollLeft = Math.max(0, left - 8);
     else if (right > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = right - strip.clientWidth + 8;
@@ -110,7 +110,11 @@ export function TabStrip({
     }
     if (e.key === "Delete") {
       e.preventDefault();
+      // 这一格马上会被卸载，焦点直接掉到 body，整条标签条就再也用不了方向键。
+      // 先记下邻居，关完在下一帧把它接住（tabs 要等这一轮渲染后才更新）。
+      const sibling = tabs[i + 1]?.path ?? tabs[i - 1]?.path;
       onClose(path);
+      if (sibling) requestAnimationFrame(() => tabRefs.current.get(sibling)?.focus());
       return;
     }
     let next = -1;
@@ -161,31 +165,10 @@ export function TabStrip({
       .then(() => toast("已复制", "success"))
       .catch(() => toast("复制失败", "error"));
   };
-  const menuItems = (path: string): ContextMenuItem[] => {
-    const i = tabs.findIndex((t) => t.path === path);
-    const t = tabs[i];
-    return [
-      { label: "关闭", onSelect: () => onClose(path) },
-      { label: "关闭其他", disabled: tabs.length < 2, onSelect: () => closeMany((x) => x.path !== path) },
-      { label: "关闭右侧", disabled: i === tabs.length - 1, onSelect: () => closeMany((_, j) => j > i) },
-      { label: "关闭已保存的", onSelect: () => closeMany(() => true) },
-      { label: "保留预览标签", separator: true, disabled: !t?.preview, onSelect: () => onPin(path) },
-      { label: t?.pinned ? "取消钉住文件" : "钉住文件", onSelect: () => setSession({ tabs: prev => prev.map(tab => tab.path === path ? { ...tab, pinned: !tab.pinned, preview: false } : tab) }) },
-      ...(onMoveGroup ? [{ label: groupId === "right" ? "移动到左组" : "移动到右组", onSelect: () => onMoveGroup(path) }] : []),
-      {
-        label: splitPath === path ? "已在右侧分屏" : "在右侧打开",
-        disabled: splitPath === path,
-        onSelect: () => onOpenSplit(path),
-      },
-      { label: "关闭分屏", disabled: !splitPath, onSelect: onCloseSplit },
-      { label: isReviewed(path) ? "取消已审" : "标记为已审", separator: true, disabled: !!t?.virtual,
-        onSelect: () => { void markReviewed(path, !isReviewed(path)).catch((e) => toast(String(e) || "标记失败，请到版本控制面操作", "error")); } },
-      ...svnCodeMenuItems(path, t?.virtual ? undefined : svnFiles.get(pathKey(path))),
-      { label: "在文件树中显示", disabled: !!t?.virtual, onSelect: () => revealInTree(path) },
-      { label: "复制路径", separator: true, disabled: !!t?.virtual, onSelect: () => copy(path) },
-      { label: "复制相对路径", disabled: !!t?.virtual, onSelect: () => copy(relativeTo(root, path)) },
-    ];
-  };
+  const menuItems = (path: string) => tabMenuItems({
+    root, tabs, splitPath, groupId, onMoveGroup, onClose,
+    onCloseMany: closeMany, onOpenSplit, onCloseSplit, copy, svnFiles,
+  }, path);
 
   return (
     <div className="wb-tabs" role="tablist" aria-label={groupId ? `${groupId === 'left' ? '左' : '右'}编辑器组文件` : '打开的文件'}>
@@ -233,7 +216,10 @@ export function TabStrip({
           onKeyDown={e => onTabKey(e, i, t.path)}
           onClick={() => { onSelect(t.path); dock?.showCode(); }}
           onDoubleClick={() => onPin(t.path)}
-          onAuxClick={(e) => e.button === 1 && onClose(t.path)}
+          // 中键两处都要拦：`auxclick` 拦的是关闭，`mousedown` 拦的是 WebView2 的
+          // 中键自动滚动——不拦住的话关标签的同时还会把页面切成滚动状态。
+          onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
+          onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(t.path); } }}
           onContextMenu={(e) => {
             e.preventDefault();
             setMenu({ x: e.clientX, y: e.clientY, path: t.path });
