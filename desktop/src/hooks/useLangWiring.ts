@@ -15,8 +15,8 @@ export function useLangWiring({
   openJdt,
 }: {
   activePath: string | null;
-  openAt: (path: string, line: number, push?: boolean, column?: number) => Promise<void>;
-  openJdt: (uri: string, line: number) => Promise<void>;
+  openAt: (path: string, line: number, push?: boolean, column?: number) => Promise<boolean>;
+  openJdt: (uri: string, line: number) => Promise<boolean>;
 }) {
   useEffect(() => {
     void initLang();

@@ -53,7 +53,7 @@ describe("文件读取并发",()=>{
   it("慢文件读取时点击同组已有标签，旧回包不能抢回活动文件或定位", async () => {
     h.readFile.mockResolvedValue(content); await act(async () => api.openFile(b));
     act(() => root.render(<Harness groups />));
-    const wait = deferred<typeof content>(); h.readFile.mockReturnValue(wait.promise); let pending!: Promise<void>;
+    const wait = deferred<typeof content>(); h.readFile.mockReturnValue(wait.promise); let pending!: Promise<boolean>;
     act(() => { pending = api.openAt(a, 22); });
     act(() => host.querySelector<HTMLButtonElement>('[data-tab-group="left"] button')!.click());
     await act(async () => { wait.resolve(content); await pending; });
@@ -61,7 +61,7 @@ describe("文件读取并发",()=>{
   });
   it("慢文件读取期间通过 Ctrl+Tab 切到同组最近文件，旧响应不能抢焦点", async () => {
     h.readFile.mockResolvedValue(content); await act(async () => api.openFile(b)); await act(async () => api.openFile("C:\\w\\C.java"));
-    const wait = deferred<typeof content>(); h.readFile.mockReturnValue(wait.promise); let pending!: Promise<void>;
+    const wait = deferred<typeof content>(); h.readFile.mockReturnValue(wait.promise); let pending!: Promise<boolean>;
     act(() => { pending = api.openAt(a, 22); });
     act(() => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, bubbles: true, cancelable: true })));
     await act(async () => { wait.resolve(content); await pending; });
@@ -69,7 +69,7 @@ describe("文件读取并发",()=>{
   });
   it("左组慢读取回包仍归左组，不抢走右组焦点或定位", async () => {
     h.readFile.mockResolvedValue(content); await act(async () => api.openFile(b));
-    const wait = deferred<typeof content>(); h.readFile.mockReturnValue(wait.promise); let pending!: Promise<void>;
+    const wait = deferred<typeof content>(); h.readFile.mockReturnValue(wait.promise); let pending!: Promise<boolean>;
     act(() => { pending = api.openAt(a, 12); });
     act(() => setSession({ editorGroups: old => selectGroupFile(old ?? emptyEditorGroups(), "right", b) }));
     await act(async () => { wait.resolve(content); await pending; });

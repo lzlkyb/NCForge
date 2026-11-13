@@ -15,7 +15,7 @@ import type { Problem } from "../lib/compile";
 export function useProblemJump(
   compileProblems: Problem[] | undefined,
   activePath: string | null,
-  openAt: (path: string, line: number, push?: boolean, column?: number) => Promise<void>,
+  openAt: (path: string, line: number, push?: boolean, column?: number) => Promise<boolean>,
 ) {
   return (dir: 1 | -1) => {
     const all = mergeProblems(compileProblems, getCodeDiags());

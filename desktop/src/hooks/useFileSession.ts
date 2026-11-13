@@ -28,7 +28,7 @@ import { toast } from "../components/ui/toast";
 import { trackOperation } from "../lib/operations";
 import { workspaceEpoch } from "../lib/workspaceEpoch";
 import { friendlyError } from "../lib/friendlyError";
-import { navAt, navBack, navForward, type NavPoint } from "../lib/navHistory";
+import { navCommit, navLook, navLookAt, type NavStep } from "../lib/navHistory";
 import { captureFileJumpOrigin, recordFileJump } from "../lib/navContext";
 import { emptyEditorGroups, removeGroupView, selectGroupFile } from "../lib/editorGroups";
 
@@ -152,8 +152,8 @@ export function useFileSession() {
       });
     };
     const off = onOpenFileRequest(handle);
-    const pending = consumePendingOpen();
-    if (pending) handle(pending);
+    // 挂载前攒下的可能不止一条：连点两条搜索结果时页面还没挂载，只取一条会丢掉前一次
+    for (let pending = consumePendingOpen(); pending; pending = consumePendingOpen()) handle(pending);
     return off;
   }, []);
 
@@ -178,53 +178,61 @@ export function useFileSession() {
    * `push=false` 是「后退 / 前进」在用的：那两个动作本身就是回到历史里的某个点，
    * 再记一笔会让前进栈立刻被自己清掉（退两步就再也前进不回去）。
    */
-  const openAt = (path: string, line: number, push = true, column?: number): Promise<void> => {
+  const openAt = (path: string, line: number, push = true, column?: number): Promise<boolean> => {
     const origin = push ? captureFileJumpOrigin() : null;
     const nonce = ++revealSeq.current;
     const group = getSession().editorGroups?.focused ?? "left";
     // 跳转目标的盘符/大小写可能与标签里的不一致：已有同一文件的标签就复用它，免得开出重复标签
     return openFile(tabs.find((t) => filePathKey(t.path) === filePathKey(path))?.path ?? path).then((ok) => {
-      if (!ok || nonce !== revealSeq.current || group !== (getSession().editorGroups?.focused ?? "left")) return;
+      if (!ok || nonce !== revealSeq.current || group !== (getSession().editorGroups?.focused ?? "left")) return false;
       if (push) recordFileJump(origin, { path, line, column });
       setReveal({ line, column, nonce, path, group });
+      return true;
     });
   };
 
   const openProblem = (p: Problem) => void openAt(p.file, p.line);
 
   /** 打开 jar 内的类（jdt.ls 给出的 `jdt://` 地址）为只读标签页。 */
-  const openJdt = async (uri: string, line: number, push = true) => {
+  const openJdt = async (uri: string, line: number, push = true): Promise<boolean> => {
     const origin = push ? captureFileJumpOrigin() : null;
     const group = getSession().editorGroups?.focused ?? "left";
     const existed = getSession().tabs.some(tab => tab.path === uri);
     // 与 openFile 同一个道理：读源码是异步的，只有最后一次打开有权激活
     const nonce = ++revealSeq.current,openNonce=++openSeq.current;
-    if (!(await openJdtTab(uri))) return;
-    if (!getSession().tabs.some(tab => tab.path === uri)) return;
+    if (!(await openJdtTab(uri))) return false;
+    if (!getSession().tabs.some(tab => tab.path === uri)) return false;
     setSession({ editorGroups: old => {
       const groups = old ?? emptyEditorGroups();
       return { ...groups, left: group === "right" && !existed ? groups.left.filter(path => path !== uri) : groups.left, [group]: groups[group].includes(uri) ? groups[group] : [...groups[group], uri] };
     } });
-    if (nonce !== revealSeq.current || openNonce !== openSeq.current || group !== (getSession().editorGroups?.focused ?? "left")) return;
+    if (nonce !== revealSeq.current || openNonce !== openSeq.current || group !== (getSession().editorGroups?.focused ?? "left")) return false;
     if (push) recordFileJump(origin, { path: uri, line, jdt: true });
     setActivePath(uri);
     setReveal({ line, nonce, path: uri, group });
+    return true;
   };
 
-  /** 回到历史里的某个点。不要走 openAt 的默认参数——那会把它重新记成新历史。 */
-  const goToNav = (p: NavPoint) => {
-    if (p.jdt) void openJdt(p.path, p.line, false);
-    else void openAt(p.path, p.line, false, p.column);
+  /**
+   * 回到历史里的某个点。不要走 openAt 的默认参数——那会把它重新记成新历史。
+   *
+   * 打开成功才 `navCommit`：目标文件可能已经被删了，那时游标必须留在原处，
+   * 否则用户想退回去的位置被一次失败的白跳吃掉（连点两下就跳过一格）。
+   */
+  const goToNav = async (step: NavStep) => {
+    const p = step.point;
+    const ok = p.jdt ? await openJdt(p.path, p.line, false) : await openAt(p.path, p.line, false, p.column);
+    if (ok) navCommit(step);
   };
 
   const goBack = () => {
-    const p = navBack();
-    if (p) goToNav(p);
+    const step = navLook(-1);
+    if (step) void goToNav(step);
   };
 
   const goForward = () => {
-    const p = navForward();
-    if (p) goToNav(p);
+    const step = navLook(1);
+    if (step) void goToNav(step);
   };
 
   const pin = (path: string) => setTabs((ts) => pinTab(ts, path));
@@ -255,7 +263,7 @@ export function useFileSession() {
     openJdt,
     goBack,
     goForward,
-    goToHistory: (index: number) => { const point = navAt(index); if (point) goToNav(point); },
+    goToHistory: (index: number) => { const step = navLookAt(index); if (step) void goToNav(step); },
     unifyEol,
     cancelClose: () => setClosingPath(null),
   };

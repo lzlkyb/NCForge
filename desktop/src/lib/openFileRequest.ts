@@ -17,23 +17,28 @@ export interface OpenFileRequest {
   column?: number;
 }
 
-let pending: OpenFileRequest | null = null;
+/**
+ * 挂载前攒下的请求。**用队列不用单值**：结果页连点两条命中时页面可能还没挂载，
+ * 只留最后一条会让前一次打开直接消失（用户点了两次，只开了一个文件）。
+ * 上限只防极端刷新，正常一次最多两三条。
+ */
+const MAX_PENDING = 8;
+const pending: OpenFileRequest[] = [];
 const listeners = new Set<(req: OpenFileRequest) => void>();
 
 /** 请求打开文件。已有订阅者就直接派发，否则先存着等 `consumePendingOpen`。 */
 export function requestOpenFile(req: OpenFileRequest): void {
   if (listeners.size === 0) {
-    pending = req;
+    pending.push(req);
+    if (pending.length > MAX_PENDING) pending.shift();
     return;
   }
   listeners.forEach((cb) => cb(req));
 }
 
-/** 取走挂载前攒下的请求（只取一次）。 */
+/** 取走挂载前攒下的下一条请求（一次一条，取空返回 null）。 */
 export function consumePendingOpen(): OpenFileRequest | null {
-  const p = pending;
-  pending = null;
-  return p;
+  return pending.shift() ?? null;
 }
 
 /** 订阅打开请求。返回取消订阅函数。 */

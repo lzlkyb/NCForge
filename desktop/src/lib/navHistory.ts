@@ -73,17 +73,39 @@ export function pushNav(p: NavPoint): void {
   recompute();
 }
 
-/** 回到栈内某个位置，保留它之后可前进的记录。 */
-export function navAt(index: number): NavPoint | null {
-  const h = history();
-  if (!Number.isInteger(index) || index < 0 || index >= h.stack.length || index === h.cursor) return null;
-  h.cursor = index;
-  recompute();
-  return h.stack[h.cursor];
+/**
+ * 一次待执行的历史跳转。
+ *
+ * 为什么是「先看后落」两步：打开目标文件可能失败（文件被删了、路径不在当前工程里），
+ * 而以前是先把游标挪过去再打开。失败了游标已经走掉——用户想退回去的地方就这么没了，
+ * 连点两次「后退」还会跳过一格。现在只有真打开了才 `navCommit`。
+ */
+export interface NavStep {
+  /** 发生这次跳转的编辑器组：异步打开期间用户可能切组，落到别的组等于改错历史。 */
+  group: EditorGroupId;
+  index: number;
+  point: NavPoint;
 }
 
-export function navBack(): NavPoint | null { return navAt(history().cursor - 1); }
-export function navForward(): NavPoint | null { return navAt(history().cursor + 1); }
+/** 看一眼后退 / 前进的目标，不动游标。 */
+export function navLook(delta: -1 | 1): NavStep | null {
+  return navLookAt(history().cursor + delta);
+}
+
+export function navLookAt(index: number): NavStep | null {
+  const group = getSession().editorGroups?.focused ?? "left";
+  const h = histories[group];
+  if (!Number.isInteger(index) || index < 0 || index >= h.stack.length || index === h.cursor) return null;
+  return { group, index, point: h.stack[index] };
+}
+
+/** 目标确实已经打开了，才把游标挪过去（保留它之后可前进的记录）。 */
+export function navCommit(step: NavStep): void {
+  const h = histories[step.group];
+  if (!h || !h.stack[step.index] || h.cursor === step.index) return;
+  h.cursor = step.index;
+  recompute();
+}
 
 export function captureNavOrigin(): NavPoint | null {
   const path = getSession().activePath;
