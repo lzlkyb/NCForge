@@ -205,18 +205,23 @@ pub(crate) fn walk_java(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// 是否是重解析点（Windows junction / symlink）。清理与遍历都不能跟进去。
 pub fn is_reparse(md: &std::fs::Metadata) -> bool {
-    if md.file_type().is_symlink() {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        if md.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return true;
+    // symlink 各平台都有；Windows 的 junction 不算 symlink，要再看文件属性。
+    // 刻意写成「求值 + 或」而不是 if-return：macOS 上 `cfg(windows)` 那段会被剥掉，
+    // 函数只剩 `if symlink { return true } false`，clippy 1.100 的 needless_bool
+    // 会在 mac CI 判红（Windows 侧因为有中间那段反而看不见）。
+    let reparse_attr = {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+            md.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
         }
-    }
-    false
+        #[cfg(not(windows))]
+        {
+            false
+        }
+    };
+    md.file_type().is_symlink() || reparse_attr
 }
 
 /// 路径任一层（含自身）是重解析点。
