@@ -31,17 +31,29 @@ function load(): Store {
   }
 }
 
-/** 只接受磁盘文件的快照：`jdt://` 类重开时会走另一条读源码的链路，这里不处理。 */
-function validPaths(v: unknown): string[] {
-  return Array.isArray(v)
-    ? v.filter((p): p is string => typeof p === "string" && !p.startsWith("jdt://")).slice(0, MAX_TABS)
+/**
+ * 只接受磁盘文件的快照：`jdt://` 类重开时会走另一条读源码的链路，这里不处理。
+ *
+ * `keep` 是「一定要保住」的路径（当前前台 / 分屏那个）。开超过 `MAX_TABS` 个标签时
+ * 简单截断会把前台那个截掉，恢复后用户落在另一个文件上——所以先截，再把 keep
+ * 里被截掉的顶掉末位。
+ */
+function validPaths(v: unknown, keep: (string | null | undefined)[] = []): string[] {
+  const all = Array.isArray(v)
+    ? v.filter((p): p is string => typeof p === "string" && !p.startsWith("jdt://"))
     : [];
+  if (all.length <= MAX_TABS) return all;
+  const head = all.slice(0, MAX_TABS);
+  for (const want of keep) {
+    if (want && all.includes(want) && !head.includes(want)) head[head.length - 1] = want;
+  }
+  return [...new Set(head)];
 }
 
 export function readTabSnapshot(root: string): TabSnapshot | null {
   const raw = load()[root.toLowerCase()];
   if (!raw || typeof raw !== "object") return null;
-  const tabs = validPaths(raw.tabs);
+  const tabs = validPaths(raw.tabs, [raw.activePath, raw.splitPath]);
   if (tabs.length === 0) return null;
   const activePath = typeof raw.activePath === "string" && tabs.includes(raw.activePath) ? raw.activePath : tabs[0];
   const splitPath = typeof raw.splitPath === "string" && tabs.includes(raw.splitPath) ? raw.splitPath : null;
@@ -54,7 +66,7 @@ export function saveTabSnapshot(root: string, snap: TabSnapshot): void {
   delete store[root.toLowerCase()];
   const roots = Object.keys(store);
   for (const old of roots.slice(0, Math.max(0, roots.length - 19))) delete store[old];
-  const tabs = validPaths(snap.tabs);
+  const tabs = validPaths(snap.tabs, [snap.activePath, snap.splitPath]);
   store[root.toLowerCase()] =
     tabs.length === 0
       ? { tabs: [], activePath: null, splitPath: null }

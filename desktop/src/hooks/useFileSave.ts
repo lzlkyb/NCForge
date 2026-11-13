@@ -32,8 +32,11 @@ export function useFileSave(activePath: string | null) {
   /**
    * 进行态的同步副本。`saving` 是渲染期才更新的，两个 Ctrl+S 落在同一个 tick 时
    * 双方都读到 false，会写两次盘（第二次还会带着第一次的旧 mtime 触发冲突误报）。
+   *
+   * 按**文件**记而不是全局一个布尔：A 在写盘时用户切到 B 按 Ctrl+S，全局单飞会把
+   * B 的保存静默丢掉（`return` 得无声无息），看起来就是「Ctrl+S 没反应」。
    */
-  const savingRef = useRef(false);
+  const savingRef = useRef(new Set<string>());
   /**
    * 保存。`encodingOverride` 用于「转成 UTF-8 保存」——GBK 文件写进了它表示不了的
    * 字符时，后端会拒（`UNENCODABLE`），这条路径把编码换掉再存一次。
@@ -44,8 +47,9 @@ export function useFileSave(activePath: string | null) {
   const saveFile = async (path: string, force = false, encodingOverride?: TextEncoding, prepare?: () => Promise<void | "failed">) => {
     const tab = getSession().tabs.find((t) => t.path === path);
     const root = getSession().root,epoch=workspaceEpoch();
-    if (!tab || tab.readOnly || savingRef.current || operationActive(`file.reload:${path.toLowerCase()}`)) return;
-    savingRef.current = true;
+    const savingKey = path.toLowerCase();
+    if (!tab || tab.readOnly || savingRef.current.has(savingKey) || operationActive(`file.reload:${savingKey}`)) return;
+    savingRef.current.add(savingKey);
     setSaving(true);
     try {
       await trackOperation({ key:`file.save:${path.toLowerCase()}`,label:`保存 ${tab.name}`,scope:path,page:"files",path,phase:prepare?"保存前格式化":"正在写入文件" }, async task => {
@@ -58,8 +62,10 @@ export function useFileSave(activePath: string | null) {
         const r = await saveOne(latest, { force, encodingOverride });
         if (epoch !== workspaceEpoch() || root !== getSession().root) { task.finish("success", "已写入原工程文件"); return; }
         setTabs((ts) => applySaved(ts, path, r));
-        setConflictPath(null);
-        setEncodingIssue(null);
+        // 只清这个文件自己的提示：A 存成功不该把 B 的「异地修改」对话抹掉，
+        // 那条提示是 B 的未决决策，抹掉后用户会以为冲突已经处理完了。
+        setConflictPath((v) => (v === path ? null : v));
+        setEncodingIssue((v) => (v?.path === path ? null : v));
         // 保存后自动编译（防抖 700 ms，由 useModuleCompile 消费）。放在这里而不是
         // `saveOne` 里：退出流程的「保存全部」也走 saveOne，那时候不该起 JVM。
         //
@@ -81,14 +87,14 @@ export function useFileSave(activePath: string | null) {
       else if (isUnencodableError(e)) setEncodingIssue({ path, message: cleanError(e) });
       else toast(`保存失败：${cleanError(e)}`, "error");
     } finally {
-      savingRef.current = false;
-      setSaving(false);
+      savingRef.current.delete(savingKey);
+      setSaving(savingRef.current.size > 0);
     }
   };
 
-  /** 「转成 UTF-8 保存」按钮。 */
+  /** 「转成 UTF-8 保存」按钮。提示条由 saveFile 成功后按路径清掉——这里先清的话，
+   *  保存失败（还是编不了）时用户就看不到原因了，输入框下方的错误也一起消失。 */
   const saveAsUtf8 = async (path: string) => {
-    setEncodingIssue(null);
     await saveFile(path, false, "UTF-8");
   };
 
@@ -120,7 +126,7 @@ export function useFileSave(activePath: string | null) {
    * 下一次 Ctrl+S 就会把文件写坏。
    */
   const reloadFile = async (path: string) => {
-    if (savingRef.current || operationActive(`file.reload:${path.toLowerCase()}`)) return;
+    if (savingRef.current.has(path.toLowerCase()) || operationActive(`file.reload:${path.toLowerCase()}`)) return;
     const root = getSession().root,epoch=workspaceEpoch();
     const model = getModel(path);
     const version = model?.getAlternativeVersionId();
@@ -132,7 +138,7 @@ export function useFileSave(activePath: string | null) {
         const meta = tabMetaFromDisk(path, c);
         replaceContent(path, c);
         setTabs((ts) => ts.map((t) => (t.path === path ? { ...t, ...meta, preview: t.preview } : t)));
-        setConflictPath(null);
+        setConflictPath((v) => (v === path ? null : v));
       });
     } catch (e) {
       toast(`重新加载失败：${e}`, "error");

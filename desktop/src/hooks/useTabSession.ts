@@ -4,6 +4,7 @@ import { readTabSnapshot, saveTabSnapshot } from "../lib/tabPersistence";
 import { mruNeighbor, pruneMru, touchMru } from "../lib/tabMru";
 import { getKeymap, isReopenTabKey, tabKeyAction } from "../lib/keymap";
 import { activeOfGroup } from "../lib/editorGroups";
+import { workspaceEpoch } from "../lib/workspaceEpoch";
 import type { useFileSession } from "./useFileSession";
 
 /**
@@ -29,7 +30,10 @@ export function useTabRestore(
     if (getSession().tabs.length > 0) return;
     const snap = readTabSnapshot(root);
     if (!snap) return;
-    let cancelled = false;
+    // 恢复期间可能被切工程 / 换工作区打断：旧快照的路径属于旧工程，追加进新会话
+    // 会凭空多出打不开的标签，而且把新工程自己的恢复堵死（tabs 非空 + key 已置位）。
+    const epoch = workspaceEpoch();
+    let cancelled = false, done = false;
     void (async () => {
       const opened: string[] = [];
       const priority = [...new Set([snap.activePath, snap.splitPath].filter((path): path is string => !!path))];
@@ -38,12 +42,15 @@ export function useTabRestore(
         if (await openRef.current(path, { silent: true })) opened.push(path);
       }
       if (cancelled || opened.length === 0) return;
+      // 恢复中途换了工程：epoch 由 `switchWorkspace` 推进，旧快照的路径不能落进新会话
+      if (workspaceEpoch() !== epoch) return;
       const shells: TabMeta[] = snap.tabs.filter(path => !opened.includes(path)).map(path => ({
         path, name: path.split(/[\\/]/).pop() ?? path, deferred: true,
         encoding: "UTF-8", hasBom: false, eol: "LF", mtimeMs: 0, dirty: false,
         eolChanged: false, readOnly: false, readOnlyReason: null, lines: 0,
       }));
       setSession({ tabs: tabs => [...tabs, ...shells] });
+      done = true;
       const match = (want: string | null) =>
         want ? opened.find((p) => p.toLowerCase() === want.toLowerCase()) : undefined;
       const active = match(snap.activePath);
@@ -53,6 +60,9 @@ export function useTabRestore(
     })();
     return () => {
       cancelled = true;
+      // 没走完就被卸载（切页 / 换工程）：放开标记，下次回来还能接着恢复。
+      // 一直按「已恢复」记着的话，这一趟运行里剩下的标签永远不会出现。
+      if (!done) restoredRoots.delete(key);
     };
   }, [root]);
 }
@@ -64,6 +74,8 @@ export function useTabPersistence(
   activePath: string | null,
   splitPath: string | null,
 ): void {
+  const latest = useRef({ root, tabs, activePath, splitPath });
+  latest.current = { root, tabs, activePath, splitPath };
   useEffect(() => {
     if (!root) return;
     const t = window.setTimeout(() => {
@@ -71,6 +83,12 @@ export function useTabPersistence(
     }, 400);
     return () => window.clearTimeout(t);
   }, [root, tabs, activePath, splitPath]);
+  // 卸载时补写一次。文件页是按 tab 切的，切走那一刻现场必须落盘——否则
+  // 「开/关标签后立刻切页再退出」会丢掉最后 400ms 内的改动，重启后标签少几条。
+  useEffect(() => () => {
+    const v = latest.current;
+    if (v.root) saveTabSnapshot(v.root, { tabs: v.tabs.map((x) => x.path), activePath: v.activePath, splitPath: v.splitPath });
+  }, []);
 }
 
 /**
