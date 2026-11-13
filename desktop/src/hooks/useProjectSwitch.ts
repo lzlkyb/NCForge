@@ -93,7 +93,9 @@ export function useProjectSwitch({
     if (!root) return;
     if (isUnderPath(path, root)) {
       if (pos?.line != null) requestOpenFile({ path, ...pos });
-      else void openFile(path, { preview: true });
+      // 单击文件树不建「预览标签」：预览会把上一个没固定的预览页签顶掉，用户读成
+      // 「新文件替换了刚打开的那个」。这里一律开成固定标签，一条一个页签。
+      else void openFile(path);
       return;
     }
     const project = projectForPath(path, projects);
