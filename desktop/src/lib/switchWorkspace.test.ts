@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   closeModel: vi.fn(),
   stopLang: vi.fn(),
+  cancelJava: vi.fn(),
 }));
 
 vi.mock("./tauri", () => ({ invoke: mocks.invoke }));
@@ -13,6 +14,7 @@ vi.mock("./editorStore", () => ({
   onDirtyChange: () => () => {},
 }));
 vi.mock("./lang", () => ({ stopLang: mocks.stopLang }));
+vi.mock("./javaRunLifecycle", () => ({ withJavaRunsStopped: async (work: () => Promise<string>) => { await mocks.cancelJava(); return work(); } }));
 
 import { applyWorkspace } from "./switchWorkspace";
 import { getSession, setSession } from "./workspaceSession";
@@ -33,6 +35,7 @@ const tab = (path: string) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.cancelJava.mockResolvedValue(undefined);
   setSession({
     root: "C:\\old",
     tabs: [tab("C:\\old\\A.java")],
@@ -46,6 +49,21 @@ beforeEach(() => {
 });
 
 describe("applyWorkspace", () => {
+  it("waits for the current Java run to release its slot before changing the workspace", async () => {
+    let finish!: () => void;
+    mocks.cancelJava.mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    const switching = applyWorkspace("C:\\new");
+    await Promise.resolve();
+    expect(mocks.cancelJava).toHaveBeenCalledOnce();
+    expect(mocks.invoke).not.toHaveBeenCalled(); expect(getSession().root).toBe("C:\\old");
+    finish(); await switching;
+    expect(mocks.invoke).toHaveBeenCalledWith("set_workspace", { path: "C:\\new" });
+  });
+  it("keeps the workspace when Java cancellation cannot be confirmed", async () => {
+    mocks.cancelJava.mockRejectedValue(new Error("cancel failed"));
+    await expect(applyWorkspace("C:\\new")).rejects.toThrow("cancel failed");
+    expect(mocks.invoke).not.toHaveBeenCalled(); expect(getSession().root).toBe("C:\\old");
+  });
   it("返回后端规范化后的路径，并把会话里属于旧工作区的东西全部清掉", async () => {
     const shown = await applyWorkspace("c:\\new");
 

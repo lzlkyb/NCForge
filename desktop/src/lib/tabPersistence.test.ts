@@ -7,6 +7,10 @@ beforeEach(() => {
 });
 
 describe("标签快照", () => {
+  it("库文件地址不能被当作磁盘文件恢复", () => {
+    saveTabSnapshot("C:/work", { tabs: ["nc-library://files/a.jar/config.xml?archive=1", "C:/work/A.java"], activePath: "nc-library://files/a.jar/config.xml?archive=1", splitPath: null });
+    expect(readTabSnapshot("C:/work")).toEqual({ tabs: ["C:/work/A.java"], activePath: "C:/work/A.java", splitPath: null });
+  });
   it("存了能原样读回（标签顺序 / 激活项 / 分屏）", () => {
     saveTabSnapshot("C:\\w\\a", {
       tabs: ["C:\\w\\a\\A.java", "C:\\w\\a\\B.java"],

@@ -31,6 +31,7 @@ import { friendlyError } from "../lib/friendlyError";
 import { navCommit, navLook, navLookAt, type NavStep } from "../lib/navHistory";
 import { captureFileJumpOrigin, recordFileJump } from "../lib/navContext";
 import { emptyEditorGroups, removeGroupView, selectGroupFile } from "../lib/editorGroups";
+import { isHistoryRestoring } from "../lib/historyRestoreGuard";
 
 /** 标签与文件操作共用打开序号，避免异步读盘把较新的选择顶掉。 */
 export function useFileSession() {
@@ -66,19 +67,19 @@ export function useFileSession() {
    * 「后退」过去只会再撞一次报错。
    */
   const openFile = useCallback(
-    async (path: string, opts?: { preview?: boolean; silent?: boolean }): Promise<boolean> => {
+    async (path: string, opts?: { preview?: boolean; silent?: boolean; group?: "left" | "right" }): Promise<boolean> => {
       const existing = getSession().tabs.find((t) => filePathKey(t.path) === filePathKey(path));
       if (existing && !existing.deferred) {
         path=existing.path;
-        const group = getSession().editorGroups?.focused ?? "left";
+        const group = opts?.group ?? getSession().editorGroups?.focused ?? "left";
         if (existing.preview && (!opts?.preview || !getSession().editorGroups?.[group].includes(path))) setTabs((ts) => pinTab(ts, path));
         // 已有标签是同步命中的，也要占号：它同样是「用户此刻要点的那一个」
         openSeq.current += 1;
-        setActivePath(path);
+        setSession({ editorGroups: old => selectGroupFile(old ?? emptyEditorGroups(), group, path) });
         return true;
       }
       const nonce = ++openSeq.current;
-      const root=getSession().root,epoch=workspaceEpoch(),group=getSession().editorGroups?.focused ?? "left";
+      const root=getSession().root,epoch=workspaceEpoch(),focused=getSession().editorGroups?.focused ?? "left",group=opts?.group ?? focused;
       try {
         const c = opts?.silent ? await readFile(path) : await trackOperation({key:`file.open:${path.toLowerCase()}`,label:`读取 ${baseName(path)}`,scope:path,page:"files",path,phase:"正在读取文件"},()=>readFile(path));
         // 慢读取属于旧工程/旧预览时，不能把它加进当前工作区或顶替最新预览。
@@ -95,7 +96,7 @@ export function useFileSession() {
         }, editorGroups: (old) => {
           const groups = old ?? emptyEditorGroups();
           // A late read joins its original group, but never takes focus from another group.
-          return nonce === openSeq.current && groups.focused === group ? selectGroupFile(groups, group, path)
+          return nonce === openSeq.current && groups.focused === focused ? selectGroupFile(groups, group, path)
             : { ...groups, [group]: groups[group].includes(path) ? groups[group] : [...groups[group], path] };
         } });
         recordRecent(getSession().root, path);
@@ -162,12 +163,13 @@ export function useFileSession() {
   const lifecycle = useFileTabLifecycle();
   const { closeMany, handleRenamed, handleDeleted } = lifecycle;
   const closeTab = (path: string, confirmed = false) => {
+    if (isHistoryRestoring(path)) return;
     const groups = getSession().editorGroups, other = groups?.focused === "right" ? "left" : "right";
     if (!confirmed && groups?.[groups.focused].includes(path) && groups[other].includes(path)) { setSession({ editorGroups: removeGroupView(groups, groups.focused, path) }); return; }
     lifecycle.closeTab(path, confirmed);
   };
 
-  const reopenLast = () => reopenClosed(openFile);
+  const reopenLast = () => reopenClosed(path => path.startsWith("nc-library://") ? openJdt(path, 1) : openFile(path));
 
   /**
    * 打开文件（已在标签里就是切过去）并跳到该行。
@@ -178,12 +180,12 @@ export function useFileSession() {
    * `push=false` 是「后退 / 前进」在用的：那两个动作本身就是回到历史里的某个点，
    * 再记一笔会让前进栈立刻被自己清掉（退两步就再也前进不回去）。
    */
-  const openAt = (path: string, line: number, push = true, column?: number): Promise<boolean> => {
+  const openAt = (path: string, line: number, push = true, column?: number, destination?: "left" | "right"): Promise<boolean> => {
     const origin = push ? captureFileJumpOrigin() : null;
     const nonce = ++revealSeq.current;
-    const group = getSession().editorGroups?.focused ?? "left";
+    const group = destination ?? getSession().editorGroups?.focused ?? "left";
     // 跳转目标的盘符/大小写可能与标签里的不一致：已有同一文件的标签就复用它，免得开出重复标签
-    return openFile(tabs.find((t) => filePathKey(t.path) === filePathKey(path))?.path ?? path).then((ok) => {
+    return openFile(tabs.find((t) => filePathKey(t.path) === filePathKey(path))?.path ?? path, { group }).then((ok) => {
       if (!ok || nonce !== revealSeq.current || group !== (getSession().editorGroups?.focused ?? "left")) return false;
       if (push) recordFileJump(origin, { path, line, column });
       setReveal({ line, column, nonce, path, group });
@@ -194,9 +196,9 @@ export function useFileSession() {
   const openProblem = (p: Problem) => void openAt(p.file, p.line);
 
   /** 打开 jar 内的类（jdt.ls 给出的 `jdt://` 地址）为只读标签页。 */
-  const openJdt = async (uri: string, line: number, push = true): Promise<boolean> => {
+  const openJdt = async (uri: string, line: number, push = true, column?: number, destination?: "left" | "right"): Promise<boolean> => {
     const origin = push ? captureFileJumpOrigin() : null;
-    const group = getSession().editorGroups?.focused ?? "left";
+    const focused = getSession().editorGroups?.focused ?? "left", group = destination ?? focused;
     const existed = getSession().tabs.some(tab => tab.path === uri);
     // 与 openFile 同一个道理：读源码是异步的，只有最后一次打开有权激活
     const nonce = ++revealSeq.current,openNonce=++openSeq.current;
@@ -206,10 +208,13 @@ export function useFileSession() {
       const groups = old ?? emptyEditorGroups();
       return { ...groups, left: group === "right" && !existed ? groups.left.filter(path => path !== uri) : groups.left, [group]: groups[group].includes(uri) ? groups[group] : [...groups[group], uri] };
     } });
-    if (nonce !== revealSeq.current || openNonce !== openSeq.current || group !== (getSession().editorGroups?.focused ?? "left")) return false;
-    if (push) recordFileJump(origin, { path: uri, line, jdt: true });
+    if (nonce !== revealSeq.current || openNonce !== openSeq.current || focused !== (getSession().editorGroups?.focused ?? "left")) return false;
+    // Binary/signature locations belong to another document; only attached source preserves them.
+    if (["decompiled", "stub"].includes(getSession().tabs.find(tab => tab.path === uri)?.virtual ?? "")) { line = 1; column = 1; }
+    setSession({ editorGroups: old => selectGroupFile(old ?? emptyEditorGroups(), group, uri) });
+    if (push) recordFileJump(origin, { path: uri, line, column, jdt: true });
     setActivePath(uri);
-    setReveal({ line, nonce, path: uri, group });
+    setReveal({ line, column, nonce, path: uri, group });
     return true;
   };
 

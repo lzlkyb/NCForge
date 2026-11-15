@@ -4,6 +4,7 @@ import type { BuildProgress, CompileResult } from "./compile";
 import { onDirtyChange } from "./dirtyBus";
 import type { DirItem, EncodingMark, Eol, TextEncoding } from "./workspace";
 import { reconcileEditorGroups, type EditorGroups, type EditorGroupId } from "./editorGroups";
+import { getHistoryRestorePath } from "./historyRestoreGuard";
 
 /** 单个目录的加载结果：加载中 / 条目 / 错误信息。 */
 export type TreeDirState =
@@ -65,9 +66,11 @@ export interface TabMeta {
    * `source` = 有真实源码（配了 _src.jar），`stub` = 只有方法签名，
    * `decompiled` = 没有源码，正文由 CFR 反编译得到。不可编辑、不可保存、不可编译。
    */
-  virtual?: "source" | "stub" | "decompiled";
+  virtual?: "source" | "stub" | "decompiled" | "resource";
   /** 反编译失败原因，用于签名桩上的组件下载引导。 */
   decompileError?: string;
+  /** 精确匹配当前二进制 JAR 的源码附件及包内文件路径。 */
+  sourceOrigin?: string;
   /**
    * 预览标签：文件树单击打开，斜体显示，会被下一次单击预览替换；
    * 双击标签 / 双击树里的文件 / 开始编辑后固定。
@@ -179,6 +182,8 @@ export type SessionPatch = Partial<{
  * 值没变（引用相同）就不广播，避免 `setTabs((ts) => ts)` 这类空操作触发重渲染。
  */
 export function setSession(patch: SessionPatch): void {
+  // 恢复期间的面板锁覆盖快捷键、后台编译完成与菜单入口，防止详情被卸载。
+  if (getHistoryRestorePath()) patch = { ...patch, panelOpen: state.panelOpen, panelTab: state.panelTab };
   const changes: Partial<WorkspaceSession> = {};
   let touched = false;
   for (const key of Object.keys(patch) as (keyof WorkspaceSession)[]) {

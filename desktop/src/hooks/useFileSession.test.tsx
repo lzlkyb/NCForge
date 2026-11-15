@@ -10,6 +10,7 @@ import { resetNav } from "../lib/navHistory";
 import { invalidateWorkspaceRequests } from "../lib/workspaceEpoch";
 import { emptyEditorGroups, selectGroupFile } from "../lib/editorGroups";
 import { tabMetaFromDisk } from "../lib/tabSession";
+import type { FileContent } from "../lib/workspace";
 import { EditorGroupsPane } from "../components/workspace/EditorGroupsPane";
 import { useTabSessionKeys } from "./useTabSession";
 vi.mock("../components/workspace/EditorPane", () => ({ EditorPane: () => null }));
@@ -18,23 +19,50 @@ vi.mock("../components/workspace/EmptyEditor", () => ({ EmptyEditor: () => null 
 vi.mock("../components/workspace/Breadcrumb", () => ({ Breadcrumb: () => null }));
 vi.mock("../components/workspace/EditorNavRow", () => ({ EditorNavRow: () => null }));
 vi.mock("../components/workspace/TabStrip", () => ({ TabStrip: ({ tabs, groupId, onSelect }: { tabs: { path: string }[]; groupId: string; onSelect: (path: string) => void }) => <div data-tab-group={groupId}>{tabs.map(tab => <button key={tab.path} data-path={tab.path} onClick={() => onSelect(tab.path)}>{tab.path}</button>)}</div> }));
-const h=vi.hoisted(()=>({readFile:vi.fn(),openModel:vi.fn(),closeModel:vi.fn()}));
+const h=vi.hoisted(()=>({readFile:vi.fn(),openModel:vi.fn(),closeModel:vi.fn(),openJdtTab:vi.fn(async(_uri:string)=>true)}));
 vi.mock("../lib/editorStore",()=>({openModel:h.openModel,closeModel:h.closeModel,renameModel:vi.fn(),getModel:()=>undefined}));
 vi.mock("../lib/symbols",()=>({chainAt:()=>[]}));
 vi.mock("../lib/tauri",()=>({invoke:vi.fn(async()=>[])}));
 vi.mock("./useFileSave",()=>({useFileSave:()=>({saving:false,saveFile:vi.fn(),saveAsUtf8:vi.fn(),reloadFile:vi.fn()})}));
-vi.mock("./useJdtOpen",()=>({useJdtOpen:()=>vi.fn(async()=>true)}));
+vi.mock("./useJdtOpen",()=>({useJdtOpen:()=>h.openJdtTab}));
 vi.mock("./useSplitView",()=>({useSplitView:()=>({splitPath:null,setSplitPath:vi.fn(),openSplit:vi.fn(),closeSplit:vi.fn()})}));
 vi.mock("../components/ui/toast",()=>({toast:vi.fn()}));
 vi.mock("../lib/workspace",async()=>{const orig=await vi.importActual<typeof import("../lib/workspace")>("../lib/workspace");return {...orig,readFile:h.readFile,encodingMarks:async()=>[]};});
 (globalThis as unknown as {IS_REACT_ACT_ENVIRONMENT:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
-const a="C:\\w\\A.java",b="C:\\w\\B.java",content={text:"class A {}",lossless:true,encoding:"UTF-8",hasBom:false,eol:"LF",mtimeMs:1,size:10};
+const a="C:\\w\\A.java",b="C:\\w\\B.java",content:FileContent={text:"class A {}",lossless:true,encoding:"UTF-8",hasBom:false,eol:"LF",mtimeMs:1,size:10};
 const deferred=<T,>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(yes=>{resolve=yes;});return {promise,resolve};};
 let api:ReturnType<typeof useFileSession>,root:Root,host:HTMLDivElement;
 function Harness({ groups = false }: { groups?: boolean }){api=useFileSession();useTabSessionKeys(getSession().tabs, getSession().activePath, api);return groups ? <EditorGroupsPane root="C:\\w" tabs={getSession().tabs} session={api} reveal={api.reveal} /> : null;}
 beforeEach(()=>{vi.clearAllMocks();resetNav();clearCompletedOperations();setSession({root:"C:\\w",tabs:[],activePath:null});host=document.createElement("div");document.body.append(host);root=createRoot(host);act(()=>root.render(<Harness/>));});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 describe("文件读取并发",()=>{
+  it("从库文档跳到源码后，后退用虚拟打开并可再次前进", async () => {
+    const uri = "nc-library://files/D%3A%2Flib%2Fx.jar/p/A.class?archive=1";
+    act(() => setSession({ tabs: [tabMetaFromDisk(uri, content), tabMetaFromDisk(b, content)], activePath: uri }));
+    setCursor(8, 5);
+    await act(async () => api.openAt(b, 20));
+    act(() => setSession({ tabs: tabs => tabs.filter(tab => tab.path !== uri) }));
+    h.openJdtTab.mockImplementationOnce(async path => {
+      setSession({ tabs: tabs => [...tabs, tabMetaFromDisk(path, content)] });
+      return true;
+    });
+    await act(async () => api.goBack());
+    expect(h.openJdtTab).toHaveBeenCalledWith(uri);
+    expect(h.readFile).not.toHaveBeenCalled();
+    expect(getSession().activePath).toBe(uri);
+    await act(async () => api.goForward());
+    expect(getSession().activePath).toBe(b);
+  });
+  it("右侧导航只在目的组打开并在右组记录来源，左侧文件保持", async () => {
+    h.readFile.mockResolvedValue(content); await act(async () => api.openFile(a));
+    setCursor(14, 4);
+    await act(async () => api.openAt(b, 20, true, 6, "right"));
+    expect(getSession().editorGroups).toMatchObject({ leftActive: a, rightActive: b, focused: "right" });
+    expect(api.reveal).toMatchObject({ path: b, line: 20, column: 6, group: "right" });
+    await act(async () => api.goBack());
+    expect(getSession().editorGroups).toMatchObject({ leftActive: a, rightActive: a, focused: "right" });
+    expect(api.reveal).toMatchObject({ line: 14, column: 4, group: "right" });
+  });
   it("问题跳转的正斜杠路径复用树中反斜杠标签及未保存模型", async () => {
     h.readFile.mockResolvedValue(content); await act(async () => api.openFile(b));
     act(() => setSession({ tabs: tabs => tabs.map(tab => ({ ...tab, dirty: true })) }));

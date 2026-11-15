@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { ensureLang, initLang, setNavHandler } from "../lib/lang";
 import { initCompileMarkers } from "../lib/compileMarkers";
 import { initSemanticTokens } from "../lib/semanticTokens";
+import { getSession } from "../lib/workspaceSession";
 
 /**
  * 把代码智能接到文件页：
@@ -15,8 +16,8 @@ export function useLangWiring({
   openJdt,
 }: {
   activePath: string | null;
-  openAt: (path: string, line: number, push?: boolean, column?: number) => Promise<boolean>;
-  openJdt: (uri: string, line: number) => Promise<boolean>;
+  openAt: (path: string, line: number, push?: boolean, column?: number, destination?: "left" | "right") => Promise<boolean>;
+  openJdt: (uri: string, line: number, push?: boolean, column?: number, destination?: "left" | "right") => Promise<boolean>;
 }) {
   useEffect(() => {
     void initLang();
@@ -36,10 +37,13 @@ export function useLangWiring({
   jumpRef.current = { openAt, openJdt };
 
   useEffect(() => {
-    setNavHandler((t) => {
+    setNavHandler(async (t) => {
       const { openAt: at, openJdt: toJdt } = jumpRef.current;
-      if (t.kind === "file") void at(t.path, t.line, true, t.column);
-      else void toJdt(t.uri, t.line);
+      const root = getSession().root;
+      // The file session reads once and activates only the destination group.
+      const destination = t.right ? "right" : undefined;
+      const ok = await (t.kind === "file" ? at(t.path, t.line, true, t.column, destination) : toJdt(t.uri, t.line, true, t.column, destination));
+      return ok && root === getSession().root;
     });
     return () => setNavHandler(null);
   }, []);

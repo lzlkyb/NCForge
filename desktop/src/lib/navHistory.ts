@@ -12,12 +12,12 @@ import { getSession, subscribe as subscribeWorkspace } from "./workspaceSession"
 import type { EditorGroupId } from "./editorGroups";
 
 export interface NavPoint {
-  /** 文件路径（`jdt://` 开头的表示 jar 里的类）。 */
+  /** 文件路径，或 `jdt://` / `nc-library://` 库文档身份。 */
   path: string;
   line: number;
   column?: number;
   symbol?: string;
-  /** jdt 目标要走「打开 jar 内类」那条路，不能当磁盘文件读。 */
+  /** 库文档要走虚拟打开，不能当磁盘文件读。 */
   jdt?: boolean;
 }
 
@@ -109,7 +109,7 @@ export function navCommit(step: NavStep): void {
 
 export function captureNavOrigin(): NavPoint | null {
   const path = getSession().activePath;
-  return path ? { path, ...getCursor(), jdt: path.startsWith("jdt://") || undefined } : null;
+  return path ? { path, ...getCursor(), jdt: /^(?:jdt|nc-library):\/\//.test(path) || undefined } : null;
 }
 
 export function recordNavJump(origin: NavPoint | null, target: NavPoint): void {

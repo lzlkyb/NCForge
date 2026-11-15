@@ -63,6 +63,47 @@ let syncing = false;
 let dirty = false;
 let attachedTargets: (() => DebugTarget[]) | null = null;
 
+const temporary = new Map<DebugTarget, { path: string; line: number }>();
+function groupsForTarget(target: DebugTarget): ReturnType<typeof groupBreakpoints> {
+  const extra = temporary.get(target);
+  const items = getBreakpoints();
+  // A logpoint or false condition is verified too, but cannot stop at the cursor.
+  // Override only this target's outgoing rule and restore the stored rule on cleanup.
+  return groupBreakpoints(extra
+    ? [...items.filter(b => bpKey(b.path, b.line) !== bpKey(extra.path, extra.line)), { ...extra, enabled: true }] : items);
+}
+
+async function waitForSync(): Promise<void> {
+  // A pending DAP request has a timeout. Do not interleave setBreakpoints lists.
+  for (let n = 0; syncing && n < 400; n++) await new Promise(resolve => setTimeout(resolve, 50));
+  if (syncing) throw new Error("断点正在同步，请稍后重试");
+}
+function invalidateTemporaryFile(target: DebugTarget, path: string): void {
+  const key = path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  synced[target].set(key, { path, sig: "" });
+  const next = { ...verified[target] };
+  for (const item of Object.keys(next)) if (item.startsWith(`${key}#`)) delete next[item];
+  verified = { ...verified, [target]: next };
+}
+export async function installTemporaryBreakpoint(target: DebugTarget, path: string, line: number): Promise<void> {
+  if (!(attachedTargets?.() ?? []).includes(target)) throw new Error("该目标尚未附加调试器");
+  await waitForSync();
+  temporary.set(target, { path, line }); invalidateTemporaryFile(target, path);
+  await syncBreakpoints();
+  if (!verified[target][bpKey(path, line)]) {
+    await clearTemporaryBreakpoint(target);
+    throw new Error("目标行没有可执行代码或不在当前调试类路径中，未继续运行");
+  }
+}
+export async function clearTemporaryBreakpoint(target: DebugTarget): Promise<void> {
+  if (!temporary.has(target)) return;
+  await waitForSync();
+  const extra = temporary.get(target);
+  if (!extra) return;
+  temporary.delete(target); invalidateTemporaryFile(target, extra.path);
+  await syncBreakpoints();
+}
+
 export async function syncBreakpoints(): Promise<void> {
   const targets = attachedTargets?.() ?? [];
   if (targets.length === 0) return;
@@ -72,8 +113,8 @@ export async function syncBreakpoints(): Promise<void> {
   }
   syncing = true;
   try {
-    const groups = groupBreakpoints(getBreakpoints());
     for (const target of targets) {
+      const groups = groupsForTarget(target);
       const sent = synced[target];
       for (const [key, g] of groups) {
         const sig = breakpointGroupSig(g);
@@ -121,7 +162,7 @@ export async function reinstallBreakpoints(target: DebugTarget): Promise<number>
   let count = 0;
   try {
     const sent = synced[target];
-    for (const [key, g] of groupBreakpoints(getBreakpoints())) {
+    for (const [key, g] of groupsForTarget(target)) {
       try {
         await debugSetBreakpoints(target, g.path, []);
         const r = await debugSetBreakpoints(target, g.path, g.breakpoints);
@@ -155,6 +196,7 @@ export function startBreakpointSync(attached: () => DebugTarget[]): void {
 /** 断开/重新附加时丢掉签名：下一次附加要整批重发。只清指定目标，另一边不受影响。 */
 export function resetBreakpointSync(target?: DebugTarget): void {
   for (const t of target ? [target] : DEBUG_TARGETS) {
+    temporary.delete(t);
     synced[t].clear();
     verified = { ...verified, [t]: {} };
   }

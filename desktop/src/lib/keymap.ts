@@ -71,6 +71,9 @@ export const EDITOR_KEYS = [
   { label: "替换（Eclipse 方案从查找框展开）", eclipse: "—", idea: "Ctrl+R", action: "editor.action.startFindReplaceAction" },
   { label: "跳转到行", eclipse: "Ctrl+L", idea: "Ctrl+G", action: "editor.action.gotoLine" },
   { label: "跳转定义", eclipse: "F3", idea: "Ctrl+B", action: "editor.action.revealDefinition" },
+  { label: "打开实现", eclipse: "Ctrl+Alt+B", idea: "Ctrl+Alt+B", action: "ncforge.navigation.implementation" },
+  { label: "打开父方法", eclipse: "Ctrl+Alt+U", idea: "Ctrl+U", action: "ncforge.navigation.super" },
+  { label: "找引用", eclipse: "Ctrl+Shift+G", idea: "Alt+F7", action: "ncforge.navigation.references" },
   { label: "代码补全", eclipse: "Ctrl+Space", idea: "Ctrl+Space", action: "editor.action.triggerSuggest" },
   { label: "行注释", eclipse: "Ctrl+/", idea: "Ctrl+/", action: "editor.action.commentLine" },
   { label: "删除当前行", eclipse: "Ctrl+D", idea: "Ctrl+Y", action: "editor.action.deleteLines" },
@@ -90,7 +93,7 @@ export function editorCommand(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "sh
 }
 
 /** 快速导航浮层的五种模式：转到文件 / 类型 / 当前文件符号 / 工作区符号 / 命令。 */
-export type PaletteMode = "file" | "type" | "symbol" | "sym" | "cmd";
+export type PaletteMode = "file" | "search" | "type" | "symbol" | "sym" | "cmd";
 
 /**
  * 各模式的入口键，第一项是展示用的首选键。
@@ -102,7 +105,7 @@ export type PaletteMode = "file" | "type" | "symbol" | "sym" | "cmd";
  * `Ctrl+Alt+Shift+N`，但那套键在 Windows 的某些输入法/系统热键下会被吃掉，
  * 这里给它一个稳的等价键（设置页的说明也按这个写）。
  */
-const PALETTE_KEYS: Record<PaletteMode, Record<Keymap, string[]>> = {
+const PALETTE_KEYS: Record<Exclude<PaletteMode, "search">, Record<Keymap, string[]>> = {
   file: { eclipse: ["ctrl+shift+r", "ctrl+p"], idea: ["ctrl+shift+n", "ctrl+p"] },
   type: { eclipse: ["ctrl+shift+t"], idea: ["ctrl+n"] },
   symbol: { eclipse: ["ctrl+o"], idea: ["ctrl+f12"] },
@@ -112,6 +115,7 @@ const PALETTE_KEYS: Record<PaletteMode, Record<Keymap, string[]>> = {
 
 export const PALETTE_MODES: { mode: PaletteMode; label: string }[] = [
   { mode: "file", label: "文件" },
+  { mode: "search", label: "工程搜索" },
   { mode: "type", label: "类型" },
   { mode: "symbol", label: "符号" },
   { mode: "sym", label: "工作区符号" },
@@ -120,6 +124,7 @@ export const PALETTE_MODES: { mode: PaletteMode; label: string }[] = [
 
 /** 改过键位就只认改后的那一个（默认的多个等价键一起让出）。 */
 function paletteChords(mode: PaletteMode, keymap: Keymap): string[] {
+  if (mode === "search") return ["ctrl+k", getBindingOverride("search.workspace") ?? (keymap === "eclipse" ? "ctrl+h" : "ctrl+shift+f")];
   const custom = getBindingOverride(`palette.${mode}`);
   return custom ? [custom] : PALETTE_KEYS[mode][keymap];
 }
@@ -244,6 +249,7 @@ export function bindingRows(keymap: Keymap): BindingRow[] {
     rows.push({ id, label, group, keys, display: keys.map(prettyChord), overridden: !!custom });
   };
   for (const { mode, label } of PALETTE_MODES) {
+    if (mode === "search") continue;
     add(`palette.${mode}`, `转到${label}`, "快速导航", PALETTE_KEYS[mode][keymap]);
   }
   add("layout.side", "切换侧栏", "窗口", ["ctrl+b"]);

@@ -40,7 +40,7 @@ function load(): Store {
  */
 function validPaths(v: unknown, keep: (string | null | undefined)[] = []): string[] {
   const all = Array.isArray(v)
-    ? v.filter((p): p is string => typeof p === "string" && !p.startsWith("jdt://"))
+    ? v.filter((p): p is string => typeof p === "string" && !p.startsWith("jdt://") && !p.startsWith("nc-library://"))
     : [];
   if (all.length <= MAX_TABS) return all;
   const head = all.slice(0, MAX_TABS);

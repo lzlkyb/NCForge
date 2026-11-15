@@ -7,15 +7,10 @@
 //
 // 语法是 Monaco 的 snippet：`$1` 占位、`${1:默认值}` 带默认文本、`$0` 收尾位置。
 import { monaco } from "./monacoSetup";
+import { effectiveJavaTemplates, type JavaTemplate } from "./javaTemplateStore";
+import { blankLiterals } from "./javaModel";
 
-interface Template {
-  prefix: string;
-  /** 列表里显示的说明。 */
-  detail: string;
-  body: string;
-}
-
-const TEMPLATES: Template[] = [
+export const BUILTIN_JAVA_TEMPLATES: JavaTemplate[] = [
   { prefix: "sout", detail: "System.out.println", body: "System.out.println($1);$0" },
   { prefix: "souf", detail: "格式化输出", body: 'System.out.printf("$1%n", $2);$0' },
   { prefix: "serr", detail: "System.err.println", body: "System.err.println($1);$0" },
@@ -112,8 +107,12 @@ export function registerJavaTemplates(): void {
     // 多一个触发字符只会让补全弹窗在奇怪的时候跳出来
     provideCompletionItems: (model, position) => {
       const word = model.getWordUntilPosition(position);
+      if (typeof model.getLineContent === "function") {
+        const prefix = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
+        if (blankLiterals(prefix).slice(word.startColumn - 1) !== prefix.slice(word.startColumn - 1)) return null;
+      }
       // Monaco 在分组产生任何候选后便停止后续 provider；不匹配的模板会挡住单词补全。
-      const matches = word.word ? TEMPLATES.filter(t => t.prefix.startsWith(word.word)) : [];
+      const matches = word.word ? effectiveJavaTemplates(BUILTIN_JAVA_TEMPLATES).filter(t => t.prefix.startsWith(word.word)) : [];
       if (!matches.length) return null;
       const range = {
         startLineNumber: position.lineNumber,
@@ -141,4 +140,4 @@ export function registerJavaTemplates(): void {
 }
 
 /** 供设置页/文档引用：当前内置模板的清单。 */
-export const TEMPLATE_PREFIXES = TEMPLATES.map((t) => t.prefix);
+export const TEMPLATE_PREFIXES = BUILTIN_JAVA_TEMPLATES.map((t) => t.prefix);

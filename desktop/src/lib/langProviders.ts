@@ -17,6 +17,7 @@ import {
 } from "./langConvert";
 import { monaco } from "./monacoSetup";
 import { registerJavaCompletion } from "./javaCompletion";
+import { navigationHover, registerNavigationCommand } from "./navigationHover";
 import { context, type Ctx } from "./langProviderContext";
 export { context, type Ctx } from "./langProviderContext";
 
@@ -75,7 +76,8 @@ const LIGHT_CACHE_MAX = 200;
 const lightCache = new Map<string, { at: number; hits: Promise<SearchHit[] | null> }>();
 
 function searchDeclarations(word: string): Promise<SearchHit[] | null> {
-  const cached = lightCache.get(word);
+  const key = `${workspaceEpoch()}:${getSession().root}:${word}`;
+  const cached = lightCache.get(key);
   if (cached && Date.now() - cached.at < LIGHT_CACHE_MS) return cached.hits;
   const hits = searchWorkspace({
     text: declarationPattern(word),
@@ -86,7 +88,7 @@ function searchDeclarations(word: string): Promise<SearchHit[] | null> {
   })
     .then((r) => r.hits)
     .catch(() => null);
-  lightCache.set(word, { at: Date.now(), hits });
+  lightCache.set(key, { at: Date.now(), hits });
   // Map 保持插入顺序：超上限就淘汰最早插入的那条
   if (lightCache.size > LIGHT_CACHE_MAX) {
     const oldest = lightCache.keys().next().value;
@@ -96,6 +98,7 @@ function searchDeclarations(word: string): Promise<SearchHit[] | null> {
 }
 
 async function lightDefinition(model: Model, pos: Pos): Promise<Loc[] | null> {
+  const epoch = workspaceEpoch(), version = model.getVersionId();
   const path = pathOfModel(model);
   const root = getSession().root;
   if (!path || !root || !path.toLowerCase().endsWith(".java")) return null;
@@ -103,7 +106,7 @@ async function lightDefinition(model: Model, pos: Pos): Promise<Loc[] | null> {
   // 类名按 Java 习惯大写开头；小写开头的是变量 / 方法，这个模式本来就跳不到，别白扫一遍盘
   if (!word || !isIdentifier(word) || !/^[A-Z]/.test(word)) return null;
   const found = await searchDeclarations(word);
-  if (!found) return null;
+  if (!found || epoch !== workspaceEpoch() || model.isDisposed() || version !== model.getVersionId()) return null;
   const res = { hits: found };
   const base = root.replace(/[\\/]+$/, "");
   return res.hits.map((h) => {
@@ -130,17 +133,19 @@ export function registerLangProviders(): void {
   registered = true;
 
   registerJavaCompletion();
+  registerNavigationCommand();
 
   monaco.languages.registerHoverProvider("java", {
-    provideHover: async (model, position) => {
+    provideHover: async (model, position, token) => {
+      const version = model.getVersionId(), epoch = workspaceEpoch(), capability = langCapabilityEpoch();
       const ctx = await context(model, position);
       if (!ctx) return null;
       const res = await ask<{ contents?: unknown; range?: LspRange }>("textDocument/hover", ctx);
       const parts = contentsToMarkdown(res?.contents);
-      if (!res || parts.length === 0) return null;
+      if (!res || parts.length === 0 || token.isCancellationRequested || model.isDisposed() || model.getVersionId() !== version || epoch !== workspaceEpoch() || capability !== langCapabilityEpoch()) return null;
       return {
         range: res.range ? toMonacoRange(res.range) : undefined,
-        contents: parts.map((value) => ({ value })),
+        contents: [...parts.map((value) => ({ value })), navigationHover(model, position, parts.join("\n"))],
       };
     },
   });
@@ -184,12 +189,16 @@ export function registerLangProviders(): void {
   });
 
   monaco.languages.registerDefinitionProvider("java", {
-    provideDefinition: async (model, position) => {
+    provideDefinition: async (model, position, token) => {
+      const version = model.getVersionId(), epoch = workspaceEpoch(), capability = langCapabilityEpoch();
+      const current = () => !token.isCancellationRequested && !model.isDisposed() && version === model.getVersionId() && epoch === workspaceEpoch() && capability === langCapabilityEpoch();
       const ctx = await context(model, position);
       if (!ctx) return lightDefinition(model, position);
       const res = await ask<unknown>("textDocument/definition", ctx);
+      if (!current()) return null;
       const out: Loc[] = [];
       for (const t of toTargets(res)) {
+        if (!current()) return null;
         // jar 内的类：先把源码取来建好只读 model，Monaco 才能解析这个目标。
         // peek 身份：用户多半只是看一眼 peek 窗口，不成标签页，model 走预览队列按上限淘汰
         if (t.uri.startsWith("jdt://")) {
@@ -203,7 +212,7 @@ export function registerLangProviders(): void {
         rememberUri(uri.toString(), t.uri);
         out.push({ uri, range: toMonacoRange(t.range) });
       }
-      return out;
+      return current() ? out : null;
     },
   });
 
@@ -219,8 +228,8 @@ export function registerLangProviders(): void {
         selection && "startColumn" in selection
           ? selection.startColumn
           : ((selection as Pos | undefined)?.column ?? 1);
-      if (orig.startsWith("jdt://")) {
-        navigate({ kind: "jdt", uri: orig, line, column });
+      if (orig.startsWith("jdt://") || orig.startsWith("nc-library://")) {
+        void navigate({ kind: "jdt", uri: orig, line, column });
         return true;
       }
       const path = uriToPath(orig);

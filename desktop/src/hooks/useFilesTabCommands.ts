@@ -16,6 +16,12 @@ import { toast } from "../components/ui/toast";
 import { langRegenerate } from "../lib/appConfig";
 import { getLangView } from "../lib/lang";
 import { setLightMode } from "../lib/lightMode";
+import { openNavigation } from "../lib/navigationService";
+import { NAVIGATION_LABELS, type NavigationKind } from "../lib/navigationTargets";
+import { registerJavaRunCommands } from "../lib/javaRun";
+import { registerDebugAdvancedCommands } from "../lib/debugAdvanced";
+import { registerRefactorWorkbenchCommands } from "../lib/refactorWorkbench";
+import { registerProjectWorkbenchCommands } from "../lib/projectWorkbench";
 
 /** 命令面板里文件页命令用到的「当前值」。闭包每次渲染都是新的，所以经 ref 读最新值。 */
 export interface FilesTabCommands {
@@ -26,6 +32,7 @@ export interface FilesTabCommands {
   compileActiveFile: () => void;
   closeTab: (path: string) => void;
   openOutline: () => void;
+  pinOutline?: () => void;
   openHistory: () => void;
   jumpToProblem: (dir: 1 | -1) => void;
   goBack: () => void;
@@ -52,6 +59,10 @@ export interface FilesTabCommands {
  * 这里每帧覆写 ref，命令执行时从 `live.current` 读。
  */
 export function useFilesTabCommands(deps: FilesTabCommands) {
+  useEffect(() => {
+    const release = [registerJavaRunCommands(() => setSession({ panelOpen: true, panelTab: "tests" })), registerDebugAdvancedCommands(), registerRefactorWorkbenchCommands(), registerProjectWorkbenchCommands()];
+    return () => release.forEach(dispose => dispose());
+  }, []);
   const live = useRef(deps);
   live.current = deps;
 
@@ -85,6 +96,10 @@ export function useFilesTabCommands(deps: FilesTabCommands) {
       title: "文件结构（本文件的类 / 方法 / 字段列表）",
       run: () => live.current.openOutline(),
       enabled: () => !!live.current.activePath,
+    },
+    {
+      id: "editor.outlinePin", title: "固定文件结构到侧栏", run: () => live.current.pinOutline?.(),
+      enabled: () => !!live.current.pinOutline && !!live.current.activePath && !live.current.activePath.includes("://") && /\.(java|rest|upm)$/i.test(live.current.activePath),
     },
     {
       id: "editor.history",
@@ -158,7 +173,7 @@ export function useFilesTabCommands(deps: FilesTabCommands) {
       id: "editor.goToTest",
       title: "跳到测试 / 被测类（按命名配对）",
       run: () => void goToTestPair(live.current.activePath),
-      enabled: () => !!live.current.activePath && !live.current.activePath.startsWith("jdt://"),
+      enabled: () => !!live.current.activePath && !live.current.activePath.includes("://"),
     },
     {
       id: "view.todo",
@@ -174,7 +189,7 @@ export function useFilesTabCommands(deps: FilesTabCommands) {
       id: "view.revealInTree",
       title: "在文件树中显示当前文件",
       run: () => revealInTree(live.current.activePath),
-      enabled: () => !!live.current.activePath && !live.current.activePath.startsWith("jdt://"),
+      enabled: () => !!live.current.activePath && !live.current.activePath.includes("://"),
     },
     {
       id: "nav.back",
@@ -227,7 +242,8 @@ export function useFilesTabCommands(deps: FilesTabCommands) {
     },
     // 编辑器动作也进命令面板：找引用 / 格式化 / 快速修复这些操作不该逼用户记快捷键，
     // 敲「引用」「格式化」「父类」就能找到。java 之外的文件不列出来（列了点了也没反应）
-    ...EDITOR_COMMANDS.map((c) => ({
+    ...(["definition", "implementation", "type", "super", "references", "assembly"] as NavigationKind[]).map(kind => ({ id: `navigation.${kind}`, title: NAVIGATION_LABELS[kind], run: () => { void openNavigation(kind); }, enabled: currentIsJava })),
+    ...EDITOR_COMMANDS.filter(c => !["editor.implementation", "editor.typenav", "editor.references"].includes(c.id)).map((c) => ({
       id: c.id,
       title: c.title,
       run: () => {

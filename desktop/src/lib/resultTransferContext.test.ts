@@ -39,7 +39,7 @@ describe("输出范围与数据快照", () => {
     value.source.params = [{ number: "12345678901234567890" }, "bind-text", null];
     value.source.keys = ["ID"];
     value.source.sheets = [{ name: "结果2", data: { columns: [{ ...value.data.columns[0] }], rows: [["sheet-current"]], originalRows: [["sheet-original"]], query: "select ID from T2" } }];
-    const frozen = freezeTransferFrame(value, (r, c) => c === 1 ? `edit-${r}` : value.data.rows[r][c]);
+    const frozen = freezeTransferFrame(value, new Map(value.data.rows.map((_, r) => [`${r}:1`, `edit-${r}`])));
     value.data.rows[0][0] = "later-edit";
     value.data.originalRows![0][0] = "later-original";
     value.data.columns[0].name = "LATER_COLUMN";
@@ -65,9 +65,11 @@ describe("输出范围与数据快照", () => {
 
   it("未提供 originalRows 时冻结加载值作为原值，不把编辑回调写入原值", () => {
     const value = frame(); value.data.originalRows = undefined;
-    const frozen = freezeTransferFrame(value, () => "edited");
+    const frozen = freezeTransferFrame(value, new Map([["0:0", "edited"], ["0:1", null], ["0:2", "edited"]]));
     expect(frozen.data.originalRows![0]).toEqual(["changed-id", "new-a", "note-a"]);
-    expect(frozen.data.rows[0]).toEqual(["edited", "edited", "edited"]);
+    expect(frozen.data.rows[0]).toEqual(["edited", null, "edited"]);
+    expect(frozen.data.rows[1]).toBe(frozen.data.originalRows![1]);
+    expect(frozen.data.rows[1]).not.toBe(value.data.rows[1]);
   });
 });
 

@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { PaletteMode } from "./keymap";
+import { getSearchForm, setSearchForm } from "./searchStore";
 
 /**
  * 快速导航浮层的开关与模式。触发入口（快捷键、标题栏输入框、输入框里敲 `>` / `@`）分散在不同组件，
@@ -20,8 +21,9 @@ function set(next: PaletteState): void {
   listeners.forEach((l) => l());
 }
 
-export function openPalette(mode: PaletteMode, query = ""): void {
-  set({ open: true, mode, nonce: state.nonce + 1, query });
+export function openPalette(mode: PaletteMode, query?: string): void {
+  if (mode === "search" && query !== undefined) setSearchForm({ query });
+  set({ open: true, mode, nonce: state.nonce + 1, query: query ?? (mode === "search" ? getSearchForm().query : "") });
 }
 
 export function closePalette(): void {

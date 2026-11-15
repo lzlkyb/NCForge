@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const h = vi.hoisted(() => ({ search: vi.fn(), open: vi.fn() }));
-vi.mock("./typeSearch", () => ({ searchTypes: h.search }));
+const h = vi.hoisted(() => ({ search: vi.fn(), open: vi.fn(), navigate: vi.fn() }));
+vi.mock("./typeSearch", () => ({ searchTypes: h.search, jarTypeUri: (hit: {jar:string}) => `nc-library://${hit.jar}` }));
+vi.mock("./lang", () => ({ navigate: h.navigate }));
 vi.mock("./openFileRequest", () => ({ requestOpenFile: h.open }));
 import { findStackSources, openStackSource, stackLocation } from "./serviceLogSource";
 
@@ -23,5 +24,14 @@ describe("Java堆栈源码映射", () => {
   it("重复全限定类型保留候选交给用户选择", async () => {
     h.search.mockResolvedValue({ workspace: [{ name: "foo.Bar", file: "D:\\a\\Bar.java" }, { name: "foo.Bar", file: "D:\\b\\Bar.java" }] });
     expect(await findStackSources(stackLocation("at foo.Bar.run(Bar.java:42)")!)).toHaveLength(2); expect(h.open).not.toHaveBeenCalled();
+  });
+  it("保留JAR的准确来源并避免把原源码行号用于反编译文本", async () => {
+    const location = stackLocation("at foo.Bar.run(Bar.java:42)")!;
+    const hit = { name: "foo.Bar", file: "", jar: "D:/hyext/one.jar" };
+    h.search.mockResolvedValue({ workspace: [], jars: [hit] });
+    expect(await findStackSources(location)).toEqual([hit]);
+    openStackSource(hit as never, location);
+    await vi.waitFor(() => expect(h.navigate).toHaveBeenCalledWith({ kind: "jdt", uri: "nc-library://D:/hyext/one.jar", line: 1, column: 1 }));
+    expect(h.open).not.toHaveBeenCalled();
   });
 });

@@ -46,6 +46,12 @@ describe("rowHeights", () => {
   const columns = cols(["a", "b"]);
   const widths = [100, 100];
 
+  it("达到换行上限后跳过该行其余字段", () => {
+    const row = ["长".repeat(8192), ""];
+    Object.defineProperty(row, 1, { get: () => { throw new Error("unneeded cell read"); } });
+    expect(rowHeights([row], columns, widths, true, 26)).toEqual([MAX_WRAP_LINES * 26]);
+  });
+
   it("关闭换行时全部等宽", () => {
     const rows = [["x".repeat(400), "短"], ["y", null]];
     expect(rowHeights(rows, columns, widths, false, 26)).toEqual([26, 26]);

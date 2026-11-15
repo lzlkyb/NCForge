@@ -46,11 +46,12 @@ describe("deleteDescription", () => {
 
   it("没有样本路径时引用提示也成立", () => {
     const t = deleteDescription({ isDir: false, files: 1, labels: 0, unsaved: 0, refs: 3 });
-    expect(t).toBe("别处还有 3 处提到这个类，删除后那些地方会编译不过。");
+    expect(t).toBe("别处还有 3 处提到这个类，删除后请核对这些引用和配置。");
   });
 
   it("目录不显示引用提示（那是类名级别的概念）", () => {
     const t = deleteDescription({ isDir: true, files: 3, labels: 0, unsaved: 0, refs: 9 });
     expect(t).not.toContain("提到这个类");
   });
+  it("does not present a failed reference search as zero impact",()=>{expect(deleteDescription({isDir:false,files:1,labels:0,unsaved:0,refs:0,referenceCheck:"failed"})).toContain("不能确认删除影响");});
 });

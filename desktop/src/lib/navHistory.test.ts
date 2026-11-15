@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { navLook, navLookAt, navCommit, recordNavJump, navSize, pushNav, resetNav, swapGroupNavigation, mergeGroupNavigation } from "./navHistory";
+import { navLook, navLookAt, navCommit, recordNavJump, captureNavOrigin, navSize, pushNav, resetNav, swapGroupNavigation, mergeGroupNavigation } from "./navHistory";
 import { getSession, setSession, type TabMeta } from "./workspaceSession";
 import { emptyEditorGroups, selectGroupFile } from "./editorGroups";
 
@@ -11,6 +11,12 @@ const forward = () => { const step = navLook(1); if (!step) return null; navComm
 const at = (index: number) => { const step = navLookAt(index); if (!step) return null; navCommit(step); return step.point; };
 
 describe("导航历史", () => {
+  it("从库文档跳到源码时保留虚拟打开身份", () => {
+    const uri = "nc-library://files/D%3A%2Flib%2Fx.jar/p/A.class?archive=1";
+    setSession({ tabs: [{ path: uri } as TabMeta], activePath: uri });
+    recordNavJump(captureNavOrigin(), { path: "D:/project/B.java", line: 20 });
+    expect(navLook(-1)?.point).toMatchObject({ path: uri, jdt: true });
+  });
   it("同一位置连记两次只留一个（连点同一条引用不该出现两个「上一处」）", () => {
     pushNav({ path: "A.java", line: 10 });
     pushNav({ path: "a.JAVA", line: 10 });

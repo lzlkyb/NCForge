@@ -14,6 +14,8 @@ import { pathOfModel } from "./editorStore";
 import { navigate } from "./lang";
 import { editorCommand, getKeymap, isTypeHierarchyKey } from "./keymap";
 import { toast } from "../components/ui/toast";
+import { openNavigation } from "./navigationService";
+import type { NavigationKind } from "./navigationTargets";
 
 type Editor = ReturnType<typeof monaco.editor.create>;
 
@@ -103,6 +105,7 @@ export function registerEditorBindings(editor: Editor, saveNow: () => void) {
     if (!action) return;
     event.preventDefault();
     event.stopPropagation();
-    editor.trigger("ncforge-keymap", action, undefined);
+    if (action.startsWith("ncforge.navigation.")) void openNavigation(action.slice("ncforge.navigation.".length) as NavigationKind);
+    else editor.trigger("ncforge-keymap", action, undefined);
   });
 }

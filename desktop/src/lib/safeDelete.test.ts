@@ -30,7 +30,7 @@ describe("checkReferences", () => {
       text: "\\bVoucherBO\\b",
       regex: true,
       caseSensitive: true,
-      include: "*.java,*.xml",
+      include: "*.java,*.xml,*.upm,*.aop,*.rest,*.bmf,*.mbe",
       maxResults: 200,
     });
   });
@@ -84,4 +84,5 @@ describe("checkReferences", () => {
     });
     expect(mocks.searchWorkspace).not.toHaveBeenCalled();
   });
+  it("escapes dollars in Java type names and includes NC registration files",async()=>{await checkReferences("D:/w/Outer$Inner.java");expect(mocks.searchWorkspace.mock.calls[0][0].text).toBe("\\bOuter\\$Inner\\b");await checkReferences("D:/w/$Proxy.java");expect(mocks.searchWorkspace.mock.calls[1][0].text).toContain("\\$Proxy");});
 });

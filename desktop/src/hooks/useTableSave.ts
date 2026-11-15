@@ -57,7 +57,7 @@ export function useTableSave({ tab, page, pk, cols, changes, sqls, drafts, reado
     // 先锁页面再问生产库确认：确认框可能挂着几十秒，这期间若还能改格子，
     // 新改动不在这次 `changes` 快照里，写回成功后的 `load()` 会把它们静默清掉。
     setSaving(true);
-    if (!(await confirmProdWrite(tab.id, tab.connId, sqls.join(";\n")))) { task.finish("cancelled", "未确认写回，未执行写入"); setSaving(false); return; }
+    if (!(await confirmProdWrite(tab.id, tab.connId, sqls.join(";\n"), { schema: page.context.schema, rows: changes.length }))) { task.finish("cancelled", "未确认写回，未执行写入"); setSaving(false); return; }
     setTxNotice(tab.connId, null, undefined);
     const auto = rtOf(tab.connId).tx?.autoCommit ?? connOf(tab.connId)?.autoCommit ?? false;
     let done = 0;
@@ -98,7 +98,7 @@ export function useTableSave({ tab, page, pk, cols, changes, sqls, drafts, reado
         }
         done++;
       }
-      toast(auto ? `已提交 ${done} 行（自动提交）` : `已写入 ${done} 行 · 待提交。可提交或回滚当前会话。`, auto ? "success" : "info");
+      if (auto) toast(`已提交 ${done} 行`, "success");
       // 任务记录是「发生过什么」的流水，提交之后它不会跟着变：这里只写事实，
       // 「尚未提交」交给常驻的事务条（提交/回滚后它会自己消失），否则用户回头
       // 看到一条永远停在「尚未提交」的记录，分不清是历史还是当前状态。

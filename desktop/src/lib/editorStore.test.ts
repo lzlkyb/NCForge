@@ -140,6 +140,16 @@ describe("openVirtualModel 预览身份（peek）", () => {
     expect(h.models).toHaveLength(1);
   });
 
+  it("refreshes a library model in place when attached source replaces decompiled text", () => {
+    const uri = "nc-library://archive/p/Outer.class";
+    const original = store.openVirtualModel(uri, "// decompiled", { language: "java" });
+    const refreshed = store.openVirtualModel(uri, "class Outer { void sourceMethod() {} }", { language: "java", replace: true });
+    expect(refreshed).toBe(original);
+    expect(fake(original).getValue()).toContain("sourceMethod");
+    expect(store.pathOfModel(original)).toBe(uri);
+    expect(h.models).toHaveLength(1);
+  });
+
   it("预览模型转成标签页后摘牌，不再受上限约束", () => {
     const m0 = store.openVirtualModel(jdt(0), "class C0 {}", { peek: true });
     // openJdt 路径：不带 peek = 正式身份，从预览队列摘掉

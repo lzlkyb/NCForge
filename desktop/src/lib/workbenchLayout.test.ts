@@ -15,7 +15,7 @@ describe("工作台布局偏好", () => {
   });
   it("只恢复可识别的工具偏好；异常值、重复固定与临时展开不会污染会话", () => {
     const layout = parseWorkbenchLayout(JSON.stringify({ side: 999, mode: "unknown", heights: { problems: -1, svc: 400, injected: 100 }, pinned: ["calls", "calls", "svc", "injected"], expanded: "svc", compact: false }));
-    expect(layout).toMatchObject({ side: 420, mode: "code", pinned: ["calls"], expanded: null, compact: true });
+    expect(layout).toMatchObject({ side: 420, mode: "code", pinned: ["relations"], expanded: null, compact: true });
     expect(layout.heights).toEqual({ problems: 140, svc: 400 });
     // 400px 高的窗口：服务面板按 75% 会给 300，但主区只剩 100px（Monaco 会被裁到不能滚）。
     // 上限保留主区 220px ⇒ 面板最多 180。
@@ -36,7 +36,7 @@ describe("工作台布局偏好", () => {
     selectWorkbenchLayout("debug");
     expect(getSession().panelTab).toBe("debug");
     expect(getSideOpen()).toBe(false);
-    togglePinnedPanel("calls"); expect(getWorkbenchLayout().pinned).toEqual(["calls"]);
+    togglePinnedPanel("calls"); expect(getWorkbenchLayout().pinned).toEqual(["relations"]);
     restoreWorkbenchLayout();
     expect(getWorkbenchLayout()).toMatchObject({ mode: "code", locked: false, compact: true, heights: {}, pinned: [] });
     expect(getSideOpen()).toBe(true);

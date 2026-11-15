@@ -1,4 +1,6 @@
 import { APP_SLUG } from "./about";
+import { prefersReducedMotion } from "./motionPreference";
+import { isAppHidden } from "./appVisibility";
 
 /** 界面材质独立于明暗与终端配色；只切根节点属性，保留页面和会话节点。 */
 export type Appearance = "classic" | "glass";
@@ -37,7 +39,7 @@ export function applyAppearance(appearance: Appearance): boolean {
     root.dataset.uiStyle = appearance;
     if (shouldNotify) window.dispatchEvent(new Event(EVENT));
   };
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const reduced = prefersReducedMotion() || isAppHidden();
   if (changed && !reduced && !document.hidden && document.startViewTransition) {
     root.dataset.materialTransitions = "";
     try {

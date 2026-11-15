@@ -12,6 +12,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { getStoredTheme } from "./lib/theme";
 import { initializeAppearance } from "./lib/appearance";
 import { initializeUiDensity } from "./lib/uiDensity";
+import { initializeMotionPreference } from "./lib/motionPreference";
 import { initializeFonts } from "./lib/fonts";
 import "./index.css";
 // 独立模块导入保证 Vite 开发注入与生产构建都包含补充样式。
@@ -25,12 +26,16 @@ import "./native-workbench.css";
 import "./selection-states.css";
 import "./content-first.css";
 import "./forge-controls.css";
+import "./motion-feedback.css";
+// The approved material layer follows layout and control defaults in dev and packaged builds.
+import "./workbench-material.css";
 
 // 启动即应用已保存的主题，避免首帧闪烁。
 document.documentElement.classList.toggle("dark", getStoredTheme() === "dark");
 document.documentElement.classList.add("forge-controls");
 initializeAppearance();
 initializeUiDensity();
+initializeMotionPreference();
 initializeFonts();
 
 const queryClient = new QueryClient({

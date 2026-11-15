@@ -123,7 +123,7 @@ function unregister(path: string, entry: Entry): void {
 export function openVirtualModel(
   uri: string,
   text: string,
-  opts?: { peek?: boolean; replace?: boolean },
+  opts?: { peek?: boolean; replace?: boolean; language?: string },
 ): Model {
   const existing = entries.get(uri);
   if (existing) {
@@ -137,7 +137,7 @@ export function openVirtualModel(
     return existing.model;
   }
   admitModel(text);
-  const model = monaco.editor.createModel(text, "java", monaco.Uri.parse(uri));
+  const model = monaco.editor.createModel(text, opts?.language ?? "java", monaco.Uri.parse(uri));
   const entry: Entry = {
     model,
     savedVersion: model.getAlternativeVersionId(),

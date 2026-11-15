@@ -65,4 +65,25 @@ describe("rankFiles", () => {
   it("空查询返回空（由调用方决定显示什么）", () => {
     expect(rankFiles(files, "  ", 10)).toEqual([]);
   });
+
+  it("完整 Java 类名精准匹配包路径，不混入其他包的同名类", () => {
+    const qualified = "nc.ui.pp.m28.editor.card.afteredit.CardBodyAfterEditEventHandler";
+    const target = "purp/src/client/nc/ui/pp/m28/editor/card/afteredit/CardBodyAfterEditEventHandler.java";
+    const copies = [target, "pu/src/client/nc/ui/pu/m25/editor/card/afteredit/CardBodyAfterEditEventHandler.java"].map(entry);
+    for (const query of [qualified, qualified.toUpperCase(), `${qualified}.java`]) {
+      const hits = rankFiles(copies, query, 1);
+      expect(hits.map(hit => hit.entry.rel)).toEqual([target]);
+      expect(hits[0].on).toBe("rel");
+      const [start, end] = hits[0].ranges[0];
+      expect(target.slice(start, end)).toBe(qualified.replace(/\./g, "/"));
+    }
+    expect(rankFiles(copies, "nc.ui.pp.m99.editor.card.afteredit.CardBodyAfterEditEventHandler", 10)).toEqual([]);
+    expect(rankFiles(copies, "CardBodyAfterEditEventHandler", 10)).toHaveLength(2);
+  });
+
+  it("完整类名支持工程根下的包，普通点分文件名仍按文件名匹配", () => {
+    expect(rankFiles([entry("nc/ui/Widget.java")], "nc.ui.Widget", 1)[0].entry.rel).toBe("nc/ui/Widget.java");
+    const dotted = [entry("settings.properties"), entry("settings/properties.java")];
+    expect(rankFiles(dotted, "settings.properties", 10).map(hit => hit.entry.name)).toEqual(["settings.properties"]);
+  });
 });

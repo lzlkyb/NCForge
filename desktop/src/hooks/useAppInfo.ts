@@ -6,8 +6,8 @@ export function useAppInfo() {
   return useQuery({
     queryKey: ["app-status"],
     queryFn: () => invoke<{ version?: string; platform?: string }>("get_app_info"),
-    staleTime: 30_000,
-    refetchInterval: false,
+    // Version and platform are compile-time constants for this process.
+    staleTime: Infinity,
     retry: false,
   });
 }

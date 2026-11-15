@@ -3,10 +3,12 @@ import { getSession, setSession } from "../lib/workspaceSession";
 import { coversPath, pickClosable, renameTabs } from "../lib/tabSession";
 import { remapPath } from "../lib/workspace";
 import { rememberClosed } from "../lib/closedTabs";
+import { isHistoryRestoring } from "../lib/historyRestoreGuard";
 
 /** File removal owns model disposal; closing only one of two views never calls this path. */
 export function useFileTabLifecycle() {
   const closeTab = (path: string, confirmed = false) => {
+    if (isHistoryRestoring(path)) return;
     const { tabs, conflictPath } = getSession(), tab = tabs.find(t => t.path === path);
     if (!tab) return;
     if ((tab.dirty || tab.eolChanged) && !confirmed) { setSession({ closingPath: path }); return; }
@@ -14,7 +16,8 @@ export function useFileTabLifecycle() {
     setSession({ tabs: tabs.filter(t => t.path !== path), conflictPath: conflictPath === path ? null : conflictPath });
   };
   const closeMany = (want: Parameters<typeof pickClosable>[1]): number => {
-    const { tabs, conflictPath } = getSession(), { close, kept } = pickClosable(tabs, want);
+    const { tabs, conflictPath } = getSession(), picked = pickClosable(tabs, want);
+    const close = picked.close.filter(path => !isHistoryRestoring(path)), kept = picked.kept + picked.close.length - close.length;
     if (!close.length) return kept;
     close.forEach(path => { closeModel(path); rememberClosed(path); });
     setSession({ tabs: tabs.filter(t => !close.includes(t.path)), conflictPath: conflictPath && close.includes(conflictPath) ? null : conflictPath });

@@ -17,6 +17,8 @@ export function useResultOrder(rows: Cell[][], columns: ColumnMeta[], filter: st
   const retained = useRef<CachedWorker | null>(null);
   useEffect(() => () => { release(retained.current); retained.current = null; }, []);
   const [result, setResult] = useState<{ rows: Cell[][]; columns: ColumnMeta[]; filter: string; sort: SortState | null; value?: ValueFilter | null; order: number[]; error?: string } | null>(null);
+  // An obsolete order must release its dataset even if the next view never starts a worker.
+  if (result && (!heavy || result.rows !== rows || result.columns !== columns)) setResult(null);
   useEffect(() => {
     if (!heavy) { release(retained.current); retained.current = null; return; }
     let active = true, worker: Worker | undefined;

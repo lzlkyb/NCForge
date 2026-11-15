@@ -79,7 +79,7 @@ export const EDITOR_COMMANDS: EditorCommand[] = [
   },
   {
     id: "editor.typenav",
-    title: "跳到父类 / 声明类型",
+    title: "打开声明类型（变量 / 字段的类型）",
     action: "editor.action.goToTypeDefinition",
     javaOnly: true,
   },

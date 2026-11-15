@@ -38,15 +38,24 @@ export function wrapLineCount(text: string, avail: number): number {
   if (!text.includes("\n") && textWidth(text) <= avail) return 1;
   let lines = 0;
   for (const paragraph of text.split("\n")) {
-    if (!paragraph) { lines += 1; continue; }
+    if (!paragraph) {
+      lines += 1;
+      if (lines >= MAX_WRAP_LINES) return MAX_WRAP_LINES;
+      continue;
+    }
     let used = 0, n = 1;
     for (const ch of paragraph) {
       const w = charWidth(ch);
       // 英文单词中间不折（`word-break: break-word` 的近似）：只在超过宽度处断，
       // 与 CSS 的 `overflow-wrap: anywhere` 略有差别，但行数不会少算。
-      if (used + w > avail && used > 0) { n += 1; used = w; } else used += w;
+      if (used + w > avail && used > 0) {
+        n += 1;
+        if (lines + n >= MAX_WRAP_LINES) return MAX_WRAP_LINES;
+        used = w;
+      } else used += w;
     }
     lines += n;
+    if (lines >= MAX_WRAP_LINES) return MAX_WRAP_LINES;
   }
   return Math.min(lines, MAX_WRAP_LINES);
 }
@@ -76,6 +85,8 @@ export function rowHeights(
       if (v === null || v === undefined) continue;
       const n = wrapLineCount(typeof v === "string" ? v : String(v), avail[c] ?? 0);
       if (n > lines) lines = n;
+      // The remaining cells cannot increase an already capped row height.
+      if (lines === MAX_WRAP_LINES) break;
     }
     return lines * rowH;
   });

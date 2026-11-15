@@ -10,6 +10,7 @@ import { createSessionStore, useSessionStore } from "./sessionStore";
 import { getSession, useWorkspaceRoot } from "./workspaceSession";
 import { onLocalSave } from "./localSaves";
 import type { StatusResult } from "./svn";
+import type { FileVersions } from "./blockOwners";
 
 export type ReqStatus = "open" | "closed";
 export interface PackRecord { zip: string; atMs: number }
@@ -96,6 +97,8 @@ export const reqSetStatus = (id: string, open: boolean) => track(invoke<ReqView>
 export const reqSetCurrent = (id: string | null) => track(invoke<ReqView>("req_set_current", { id }));
 export const reqClaim = (paths: string[], id: string | null) => track(invoke<ReqView>("req_claim", { paths, id }));
 export const reqRecordPackage = (id: string, zip: string) => track(invoke<ReqView>("req_record_package", { id, zip }));
+/** 混改文件按需求拆块的原料（见 `lib/blockOwners.ts`）。只读，不动需求表。 */
+export const reqFileVersions = (path: string) => invoke<FileVersions>("req_file_versions", { path });
 
 let lastScan: StatusResult | undefined;
 /**

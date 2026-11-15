@@ -5,6 +5,8 @@ import {
 } from "../lib/gridRowMetrics";
 import type { Cell, ColumnMeta } from "../lib/dbApi";
 
+const FIXED_HEIGHTS: number[] = [];
+
 /**
  * 可变行高的虚拟滚动几何。
  *
@@ -26,35 +28,37 @@ export function useGridRowLayout({ rows, columns, widths, order, wrap, rowH, fro
   /** 拖列宽期间冻结行高：每个 pointermove 都按新宽度重测所有行会让大表卡死。 */
   frozen?: boolean;
 }) {
-  const cached = useRef<{ heights: number[]; fontRevision: number } | null>(null);
+  const cached = useRef<{ heights: number[]; fontRevision: number; wrap: boolean } | null>(null);
   const fontRevision = useSyncExternalStore(subscribeFonts, getFontRevision);
   // Store the font generation with the measurement so a swap also refreshes wrapped row geometry.
   const measurement = useMemo(
-    () => (frozen && cached.current ? cached.current : { heights: rowHeights(rows, columns, widths, wrap, rowH), fontRevision }),
+    () => (frozen && cached.current?.wrap === wrap ? cached.current : { heights: wrap ? rowHeights(rows, columns, widths, true, rowH) : FIXED_HEIGHTS, fontRevision, wrap }),
     [frozen, rows, columns, widths, wrap, rowH, fontRevision],
   );
   const { heights } = measurement;
   useEffect(() => { if (!frozen) cached.current = measurement; }, [measurement, frozen]);
-  const { offsets, total } = useMemo(() => buildOffsets(heights, order), [heights, order]);
-  const average = useMemo(() => averageHeight(total, order.length, rowH), [total, order.length, rowH]);
+  const geometry = useMemo(() => wrap ? buildOffsets(heights, order) : null, [heights, order, wrap]);
+  const total = geometry?.total ?? order.length * rowH;
+  const average = averageHeight(total, order.length, rowH);
+  const indexAt = (y: number) => geometry ? rowAtOffset(geometry.offsets, y) : Math.min(Math.max(0, order.length - 1), Math.max(0, Math.floor(y / rowH)));
 
   return {
-    /** 按 `rows` 下标的高度；换行关闭时全等于 `rowH`。 */
+    /** 仅在换行时存各行高度，等高网格用行号直接计算几何。 */
     heights,
     /** 表格内容总高（不含表头）。 */
     total,
     /** 平均行高：PageUp / PageDown 的「一屏多少行」用它。 */
     average,
-    offsetAt: (index: number) => offsetAt(offsets, index),
-    rowAtOffset: (y: number) => rowAtOffset(offsets, y),
+    offsetAt: (index: number) => geometry ? offsetAt(geometry.offsets, index) : Math.max(0, Math.min(index, order.length - 1)) * rowH,
+    rowAtOffset: indexAt,
     /**
      * 可视行区间（闭开区间 `[first, last)`）。上下各多留 `overscan` 行：
      * 按平均行高换算成 px，行高不固定时也能保证快滚不露白。
      */
     range: (top: number, height: number, overscan: number) => {
       const pad = average * overscan;
-      const first = rowAtOffset(offsets, Math.max(0, top - pad));
-      const last = Math.min(order.length, rowAtOffset(offsets, top + height + pad) + 2);
+      const first = indexAt(Math.max(0, top - pad));
+      const last = Math.min(order.length, indexAt(top + height + pad) + 2);
       return { first, last };
     },
   };

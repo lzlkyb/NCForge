@@ -130,10 +130,10 @@ export function langReady(): boolean {
 export function moduleOfPath(path: string): string | null {
   const root = getSession().root;
   if (!root) return null;
-  const prefix = root.replace(/[\\/]+$/, "") + "\\";
-  if (!path.toLowerCase().startsWith(prefix.toLowerCase())) return null;
-  const seg = path.slice(prefix.length).split("\\")[0];
-  return seg && path.length > prefix.length + seg.length ? seg : null;
+  const prefix = root.replace(/\\/g, "/").replace(/\/+$/, "") + "/", normalized = path.replace(/\\/g, "/");
+  if (!normalized.toLowerCase().startsWith(prefix.toLowerCase())) return null;
+  const seg = normalized.slice(prefix.length).split("/")[0];
+  return seg && normalized.length > prefix.length + seg.length ? seg : null;
 }
 
 /** 这个文件当前是不是由语言服务负责：是 .java，且属于正在服务的模块。 */
@@ -800,16 +800,17 @@ export async function loadJdtSource(
 }
 
 export type NavTarget =
-  | { kind: "file"; path: string; line: number; column: number }
-  | { kind: "jdt"; uri: string; line: number; column: number };
+  | { kind: "file"; path: string; line: number; column: number; right?: boolean }
+  | { kind: "jdt"; uri: string; line: number; column: number; right?: boolean };
 
-let navHandler: ((t: NavTarget) => void) | null = null;
+let navHandler: ((t: NavTarget) => Promise<boolean> | boolean | void) | null = null;
 
 /** 文件页挂载时登记「怎么打开一个跳转目标」；卸载时传 null。 */
-export function setNavHandler(h: ((t: NavTarget) => void) | null): void {
+export function setNavHandler(h: ((t: NavTarget) => Promise<boolean> | boolean | void) | null): void {
   navHandler = h;
 }
 
-export function navigate(t: NavTarget): void {
-  navHandler?.(t);
+export async function navigate(t: NavTarget): Promise<boolean> {
+  if (!navHandler) return false;
+  return (await navHandler(t)) !== false;
 }

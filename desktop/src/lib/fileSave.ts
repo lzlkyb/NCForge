@@ -2,6 +2,7 @@ import { getModel, getText, markSaved } from "./editorStore";
 import { captureLocalHistory } from "./localHistory";
 import { notifyLocalSave } from "./localSaves";
 import { baseName, writeFile, type Eol, type TextEncoding } from "./workspace";
+import { isHistoryRestoring } from "./historyRestoreGuard";
 
 /**
  * 保存一个文件到磁盘：**模块级、不依赖 React**。
@@ -65,6 +66,7 @@ async function archiveBeforeSave(path: string): Promise<string | null> {
  * 并发由调用方保证：编辑器侧靠 `useFileSave` 的 `savingRef`，退出流程是单次串行。
  */
 export async function saveOne(tab: SaveTarget, opts: SaveOptions = {}): Promise<SaveResult> {
+  if (isHistoryRestoring(tab.path)) throw new Error("此文件正在恢复本地版本，请稍后保存");
   const text = getText(tab.path);
   const model = getModel(tab.path);
   const version = model?.getAlternativeVersionId();
@@ -82,6 +84,7 @@ export async function saveOne(tab: SaveTarget, opts: SaveOptions = {}): Promise<
   // 转换后的文件不该凭空多出三个字节。
   const hasBom = opts.encodingOverride === "UTF-8" ? false : tab.hasBom;
   const archivedId = await archiveBeforeSave(tab.path);
+  if (isHistoryRestoring(tab.path)) throw new Error("此文件正在恢复本地版本，请稍后保存");
   const mtimeMs = await writeFile({
     path: tab.path,
     text,

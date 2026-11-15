@@ -35,6 +35,8 @@ export interface EditorPrefs {
    * true = 宽档：再放字段等不依赖方法局部状态的引用。放宽后搬到调用点的含义可能与原处不同，所以默认关。
    */
   extractParamWide: boolean;
+  inlayHints: boolean;
+  pasteImports: boolean;
 }
 
 export const DEFAULT_PREFS: EditorPrefs = {
@@ -50,6 +52,8 @@ export const DEFAULT_PREFS: EditorPrefs = {
   autoSaveDelayMs: 2000,
   formatOnSave: false,
   extractParamWide: false,
+  inlayHints: false,
+  pasteImports: true,
 };
 
 let cache: EditorPrefs = load();
@@ -116,6 +120,7 @@ export function monacoOptionsOf(p: EditorPrefs, heavy = false, java = false): Re
     stickyScroll: { enabled: p.stickyScroll && !heavy && !java, maxLineCount: 1 },
     bracketPairColorization: { enabled: !heavy },
     folding: !heavy,
+    inlayHints: { enabled: p.inlayHints && !heavy ? "on" : "off" },
   };
 }
 

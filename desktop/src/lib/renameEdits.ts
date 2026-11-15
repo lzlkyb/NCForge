@@ -4,6 +4,7 @@
 // （`renameSymbol.ts`）必须 import editorStore → monacoSetup，一旦这些纯函数跟着它，
 // 单测环境没有 `window`，整个测试文件起不来。这条和 db 那边的笔记是同一个坑。
 import { uriToPath } from "./langConvert";
+import type { WorkbenchPlan } from "./refactorWorkbench";
 
 export interface LspPos {
   line: number;
@@ -26,6 +27,8 @@ export interface RenamePlan {
   groups: RenameGroup[];
   /** 动不了的目标（jar 里的类：只读，写不进去）。列出来让人知道这不是漏改。 */
   skipped: string[];
+  /** Prepared snapshots and resource moves are required by the transaction. */
+  workbench?: WorkbenchPlan;
 }
 
 export interface RenameResult {

@@ -68,6 +68,7 @@ export function locateIdent(sql: string, ident: string): OraLocation | null {
 
 const NOTES: Record<string, string> = {
   "ORA-00904": "有一个标识符在这个上下文里不存在：列名写错、Alias 没声明，或者它属于另一张表。",
+  "ORA-00918": "多张来源表有同名字段。请给字段加上它所属的表名或别名。",
   "ORA-01722": "有值没法转成数字。常见是拿字符串列和数字比较、或 `''` 进了数字列。",
   "ORA-01438": "某个值超过了列的精度。检查数字列的长度和小数位。",
   "ORA-12899": "某个值超过了列的长度上限。",

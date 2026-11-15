@@ -4,6 +4,8 @@ const lang = vi.hoisted(() => ({ ready: false, state: "stopped", request: vi.fn(
 const files = vi.hoisted(() => ({ list: [] as string[], peek: false }));
 const search = vi.hoisted(() => ({ run: vi.fn(), batches: [] as { path: string; line: number; text: string; ranges: { start: number; end: number }[] }[][] }));
 const types = vi.hoisted(() => ({ search: vi.fn(), symbols: vi.fn() }));
+const library = vi.hoisted(() => ({ search: vi.fn() }));
+vi.mock("./libraryFiles", async orig => ({ ...await orig<typeof import("./libraryFiles")>(), searchLibraryFiles: library.search }));
 
 // lang / symbols 会间接拉起 Monaco，这里只验证「每种模式怎么选数据源」
 vi.mock("./lang", () => ({
@@ -41,11 +43,28 @@ vi.mock("./search", () => ({
 
 import { registerCommands } from "./commandRegistry";
 import { buildItems, type PaletteCtx } from "./paletteSources";
+import type { FlatSymbol } from "./symbols";
 
 const run = { file: vi.fn(), jdt: vi.fn() };
 const ctx = (over: Partial<PaletteCtx> = {}): PaletteCtx => ({ root: "C:\\w", activePath: "C:\\w\\gl\\A.java", openPaths: ["C:\\w\\gl\\A.java"], run, ...over });
+const localSymbol = (name: string, kind: number): FlatSymbol => ({ name, kind, container: "A", line: 7, column: 4, startLine: 7, endLine: 8, depth: 1 });
+
+describe("符号模式的本地结构", () => {
+  it("代码智能未就绪时使用当前编辑模型，方法筛选与定位保留", async () => {
+    const result = await buildItems("symbol", "", ctx({ documentSymbols: [localSymbol("A", 5), localSymbol("editedMethod", 6)], methodsOnly: true }));
+    expect(result.items.map(item => item.title)).toEqual(["editedMethod"]);
+    result.items[0].run(); expect(run.file).toHaveBeenCalledWith("C:\\w\\gl\\A.java", 7, 4);
+    expect(lang.symbols).not.toHaveBeenCalled();
+  });
+  it("NC 声明支持端点和节点，方法筛选不抹掉声明", async () => {
+    const result = await buildItems("symbol", "", ctx({ activePath: "C:/w/demo.rest", documentSymbols: [localSymbol("save", 201), localSymbol("detail", 203)], methodsOnly: true }));
+    expect(result.items).toHaveLength(2); expect(result.items[0].kind).toBe("端点");
+    expect(lang.symbols).not.toHaveBeenCalled();
+  });
+});
 
 beforeEach(() => {
+  library.search.mockReset().mockResolvedValue({ items: [], building: false, truncated: false });
   lang.ready = false;
   lang.state = "stopped";
   lang.request.mockReset();
@@ -64,6 +83,25 @@ beforeEach(() => {
 });
 
 describe("文件模式", () => {
+  it("库文件与散类显示完整来源并走只读打开管道", async () => {
+    library.search.mockResolvedValue({ items: [{ source: "D:/NC/modules/pp/hyext/classes", entry: "nc/ui/Demo.class", archive: false, class: true, line: 1, text: "", ranges: [] }], building: false });
+    const result = await buildItems("file", "nc.ui.Demo", ctx());
+    expect(result.items).toHaveLength(1); expect(result.items[0].detail).toContain("hyext/classes/nc/ui/Demo.class");
+    result.items[0].run(); expect(run.jdt).toHaveBeenCalledWith(expect.stringContaining("nc-library://files/"), 1, 1);
+    expect(run.file).not.toHaveBeenCalled();
+    const jump = await buildItems("file", ":12:4", ctx({ activePath: result.items[0].key }));
+    jump.items[0].run(); expect(run.jdt).toHaveBeenLastCalledWith(result.items[0].key, 12, 4);
+  });
+  it("粘贴完整 Java 类名只打开对应包下的源码", async () => {
+    const query = "nc.ui.pp.m28.editor.card.afteredit.CardBodyAfterEditEventHandler";
+    const target = "purp/src/client/nc/ui/pp/m28/editor/card/afteredit/CardBodyAfterEditEventHandler.java";
+    files.list = [target, "pu/src/client/nc/ui/pu/m25/editor/card/afteredit/CardBodyAfterEditEventHandler.java"];
+    const result = await buildItems("file", query, ctx());
+    expect(result.items).toHaveLength(1);
+    result.items[0].run();
+    expect(run.file).toHaveBeenCalledWith(`C:\\w\\${target.replace(/\//g, "\\")}`);
+  });
+
   it("空查询：显示最近打开的，且不含当前标签", async () => {
     const r = await buildItems("file", "", ctx());
     expect(r.items.map((i) => i.title)).toEqual(["B.java"]);
@@ -84,6 +122,44 @@ describe("文件模式", () => {
 });
 
 describe("类型模式", () => {
+  it("完整类名传给本地类型索引，结果标题只高亮类名", async () => {
+    const query = "nc.ui.pp.m28.editor.card.afteredit.CardBodyAfterEditEventHandler";
+    const simple = "CardBodyAfterEditEventHandler";
+    types.search.mockResolvedValue({ workspace: [{ name: query, simple, package: "nc.ui.pp.m28.editor.card.afteredit", kind: 5, file: "C:/w/purp/Handler.java", module: "purp", jar: "", line: 20, column: 14 }], jars: [], indexing: false, jarsPending: false, elapsedMs: 1 });
+    const result = await buildItems("type", query, ctx());
+    expect(types.search).toHaveBeenCalledWith(query, 50);
+    expect(result.items[0].ranges).toEqual([[0, simple.length]]);
+    result.items[0].run();
+    expect(run.file).toHaveBeenCalledWith("C:/w/purp/Handler.java", 20, 14);
+    expect(lang.request).not.toHaveBeenCalled();
+  });
+
+  it("类索引未就绪时完整类名仍能按包路径精准定位", async () => {
+    const query = "nc.ui.pp.m28.editor.card.afteredit.CardBodyAfterEditEventHandler";
+    const target = "purp/src/client/nc/ui/pp/m28/editor/card/afteredit/CardBodyAfterEditEventHandler.java";
+    files.list = [target, "pu/src/client/nc/ui/pu/m25/editor/card/afteredit/CardBodyAfterEditEventHandler.java"];
+    types.search.mockResolvedValue({ workspace: [], jars: [], jarsPending: true, indexing: true, elapsedMs: 1 });
+    const result = await buildItems("type", query, ctx());
+    expect(result.items.map(item => item.title)).toEqual(["CardBodyAfterEditEventHandler"]);
+    expect(result.items[0].ranges).toEqual([[0, "CardBodyAfterEditEventHandler".length]]);
+    result.items[0].run();
+    expect(run.file).toHaveBeenCalledWith(`C:\\w\\${target.replace(/\//g, "\\")}`);
+  });
+
+  it("语言服务兜底在截断前按包名筛选，避免同名类挤掉目标", async () => {
+    lang.ready = true;
+    const simple = "CardBodyAfterEditEventHandler";
+    const pkg = "nc.ui.pp.m28.editor.card.afteredit";
+    const at = { start: { line: 12, character: 7 } };
+    const symbols = Array.from({ length: 60 }, (_, i) => ({ name: simple, kind: 5, containerName: `nc.other.p${i}`, location: { uri: `file:///C:/w/other/p${i}/${simple}.java`, range: at } }));
+    lang.request.mockResolvedValue([...symbols, { name: simple, kind: 5, containerName: pkg, location: { uri: `file:///C:/w/purp/${simple}.java`, range: at } }]);
+    const result = await buildItems("type", `${pkg}.${simple}`, ctx());
+    expect(result.items.map(item => item.detail)).toEqual([pkg]);
+    expect(lang.request).toHaveBeenCalledWith("workspace/symbol", null, { query: simple }, 4_000);
+    result.items[0].run();
+    expect(run.file).toHaveBeenCalledWith(`C:\\w\\purp\\${simple}.java`, 13, 8);
+  });
+
   it("代码智能未就绪：退回工作区 .java 文件名，标题去掉扩展名", async () => {
     const r = await buildItems("type", "vbo", ctx());
     expect(r.items.map((i) => i.title)).toEqual(["VoucherBO"]);
@@ -312,61 +388,9 @@ describe("命令模式", () => {
 });
 
 describe("转到任意位置：内容与行号", () => {
-  it("#内容：把相对命中拼回绝对路径，最近打开的文件排前面", async () => {
-    search.run.mockResolvedValue({
-      hits: [
-        { path: "gl/A.java", line: 10, text: "  saveBo();", ranges: [{ start: 2, end: 6 }] },
-        { path: "gl/B.java", line: 3, text: "  saveBo();", ranges: [{ start: 2, end: 6 }] },
-      ],
-      filesScanned: 2,
-      filesMatched: 2,
-      truncated: false,
-      elapsedMs: 5,
-    });
-    const r = await buildItems("file", "#saveBo", ctx());
-    // 带来源标识：后端据此取消同一面板上一次还在跑的扫描
-    expect(search.run).toHaveBeenCalledWith({ text: "saveBo", maxResults: 50, priority: ["gl\\B.java"] }, false, "palette");
-    // 最近打开的是 B.java（见 recentFiles mock），它的命中排第一
-    expect(r.items.map((i) => i.detail)).toEqual(["gl/B.java:3", "gl/A.java:10"]);
-    r.items[0].run();
-    expect(run.file).toHaveBeenCalledWith("C:\\w\\gl\\B.java", 3, 3);
-  });
-
-  it("#内容：空关键词与后端失败都给出说明，不假装没有结果", async () => {
-    expect((await buildItems("file", "#  ", ctx())).note).toContain("输入");
-    search.run.mockRejectedValue(new Error("扫描超时"));
-    expect((await buildItems("file", "#abc", ctx())).note).toContain("扫描超时");
-  });
-
-  it("#内容：分批到达就先铺到列表，不必等全量扫完", async () => {
-    search.batches = [[{ path: "gl/B.java", line: 3, text: "  saveBo();", ranges: [{ start: 2, end: 6 }] }]];
-    search.run.mockResolvedValue({
-      hits: [
-        { path: "gl/A.java", line: 10, text: "  saveBo();", ranges: [{ start: 2, end: 6 }] },
-        { path: "gl/B.java", line: 3, text: "  saveBo();", ranges: [{ start: 2, end: 6 }] },
-      ],
-      filesScanned: 2,
-      filesMatched: 2,
-      truncated: false,
-      elapsedMs: 40,
-    });
-    const partials: { items: { detail?: string }[]; note: string }[] = [];
-    const r = await buildItems("file", "#saveBo", ctx(), (p) => partials.push(p));
-    expect(partials).toHaveLength(1);
-    expect(partials[0].items[0].detail).toBe("gl/B.java:3");
-    expect(partials[0].note).toContain("还在扫");
-    // 最终结果仍是完整的一份，且按最近打开优先重排
-    expect(r.items.map((i) => i.detail)).toEqual(["gl/B.java:3", "gl/A.java:10"]);
-    expect(r.note).toContain("40ms");
-  });
-
-  it("#内容：文件名里带关键词的文件排到扫描队首，不必等扫到它", async () => {
-    files.peek = true;
-    search.run.mockResolvedValue({ hits: [], filesScanned: 0, filesMatched: 0, truncated: false, elapsedMs: 1 });
-    await buildItems("file", "#VoucherBO", ctx());
-    const opts = search.run.mock.calls[0][0] as { priority: string[] };
-    // 最近打开的在最前，文件名命中的紧随其后（清单只认内存里那份，不额外加载）
-    expect(opts.priority).toEqual(["gl\\B.java", "gl/VoucherBO.java"]);
+  it("工程内容查询交给完整搜索模式，导航源不再另起扫描", async () => {
+    expect((await buildItems("search", "saveBo", ctx())).items).toEqual([]);
+    expect(search.run).not.toHaveBeenCalled();
   });
 
   it(":行号 跳到当前文件的指定位置；带列号时按列落点", async () => {

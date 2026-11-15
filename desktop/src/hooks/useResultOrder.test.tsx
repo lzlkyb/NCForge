@@ -13,7 +13,7 @@ class FakeWorker {
 const columns=[{name:"NAME",type:"VARCHAR2",precision:0,scale:0}];
 const rows=Array.from({length:20000},(_,i)=>[String(i)]);
 let host:HTMLDivElement, root:ReturnType<typeof createRoot>, latest:ReturnType<typeof useResultOrder>;
-function Test({filter}:{filter:string}){latest=useResultOrder(rows,columns,filter,null);return null;}
+function Test({filter, data = rows}:{filter:string; data?:string[][]}){latest=useResultOrder(data,columns,filter,null);return null;}
 beforeEach(()=>{vi.useFakeTimers();vi.stubGlobal("Worker",FakeWorker);workers.length=0;host=document.createElement("div");root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());vi.useRealTimers();vi.unstubAllGlobals();});
 it("debounces requests and rejects late messages from cancelled workers",()=>{
@@ -51,4 +51,14 @@ it("reuses completed data without another clone and releases it after idle",()=>
   act(()=>workers[0].onmessage?.({data:{order:[2]}} as MessageEvent));
   expect(latest.order).toEqual([2]);
   act(()=>vi.advanceTimersByTime(5000));expect(workers[0].terminate).toHaveBeenCalled();
+});
+it("clearing or replacing the data discards the old order and worker",()=>{
+  act(()=>root.render(<Test filter="1"/>));act(()=>vi.advanceTimersByTime(120));
+  act(()=>workers[0].onmessage?.({data:{order:[7]}} as MessageEvent));
+  act(()=>root.render(<Test filter="1" data={[["10"],["20"]]}/>));
+  expect(latest.order).toEqual([0]);
+  expect(workers[0].terminate).toHaveBeenCalledTimes(1);
+  act(()=>root.render(<Test filter="1"/>));
+  expect(latest.pending).toBe(true);
+  expect(latest.order).toEqual([]);
 });

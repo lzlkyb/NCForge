@@ -10,6 +10,7 @@ export function useComparison(before: ResultSnapshot, after: ResultSnapshot, key
     catch (error) { return { model: null, error: String(error) }; }
   }, [before, after, keys, heavy]);
   const [result, setResult] = useState<{ before: ResultSnapshot; after: ResultSnapshot; keys: string[]; model: ComparisonModel | null; error: string } | null>(null);
+  if (result && (!heavy || !keys.length || result.before !== before || result.after !== after)) setResult(null);
   useEffect(() => {
     if (!heavy || !keys.length) return;
     let active = true, worker: Worker | undefined;

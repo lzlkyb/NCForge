@@ -10,6 +10,7 @@ export interface DeleteFacts {
   /** 别处引用这个类的地方数（只对 .java 有意义）。 */
   refs?: number;
   refSamples?: string[];
+  referenceCheck?: "text" | "incomplete" | "failed";
 }
 
 /**
@@ -32,7 +33,10 @@ export function deleteDescription(d: DeleteFacts): string | undefined {
   // 引用提示放在最后：它不阻止删除，只是让人知道「删了别处会编不过」
   if (!d.isDir && (d.refs ?? 0) > 0) {
     const where = d.refSamples?.length ? `（如 ${d.refSamples.slice(0, 2).join("、")}）` : "";
-    parts.push(`别处还有 ${d.refs} 处提到这个类${where}，删除后那些地方会编译不过。`);
+    parts.push(`别处还有 ${d.refs} 处提到这个类${where}，删除后请核对这些引用和配置。`);
   }
+  if(!d.isDir&&d.referenceCheck==="failed")parts.push("引用搜索未完成，当前不能确认删除影响；请核对后再删除。");
+  else if(!d.isDir&&d.referenceCheck==="incomplete")parts.push("引用搜索结果已截断，以上数量不是全部影响范围。");
+  else if(!d.isDir&&d.referenceCheck==="text")parts.push("以上为类名文本搜索提示，不能代替完整语义引用检查。");
   return parts.join(" ") || undefined;
 }

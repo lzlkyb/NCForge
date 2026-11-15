@@ -5,6 +5,9 @@
  * 事件保持图标/UI 同步，避免各组件各自维护导致状态分裂。
  */
 
+import { prefersReducedMotion } from "./motionPreference";
+import { isAppHidden } from "./appVisibility";
+
 export type Theme = "dark" | "light";
 export type ThemeSaveResult = { theme: Theme; stored: boolean };
 let transitionTimer: ReturnType<typeof setTimeout>;
@@ -44,7 +47,7 @@ export function applyTheme(theme: Theme): boolean {
   requestedTheme = theme;
   // transitionend 会从子元素冒泡，也可能根本不触发；用有界计时器清理，连切可续期。
   clearTimeout(transitionTimer);
-  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = prefersReducedMotion() || isAppHidden() || document.hidden;
   const revision = ++themeRevision;
   const paint = () => {
     if (revision !== themeRevision) return;
@@ -56,10 +59,12 @@ export function applyTheme(theme: Theme): boolean {
     // 整页 cross-fade 交给 View Transition（合成器完成）。旧的「全树颜色 transition」
     // 在切换瞬间会让每个节点各跑一次样式重算，大文件树上能明显感到卡顿。
     root.classList.remove("theme-transition");
+    try {
     const vt = document.startViewTransition(paint);
     // 连续切主题时上一个 transition 会被 skip：ready/finished 都会 reject，吞掉即可。
     void vt.ready.catch(() => {});
     void vt.finished.catch(() => {});
+    } catch { paint(); }
   } else {
     // 旧环境回退：保留 180ms 全树颜色过渡（一次性）。class 必须先加，否则不触发动画。
     if (reduced) {

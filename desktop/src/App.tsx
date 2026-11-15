@@ -1,7 +1,5 @@
 import { ActivityPanel } from "./components/ui/ActivityPanel";
 import { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo, lazy, Suspense, memo, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { invoke } from "./lib/tauri";
 import { CHANGELOG } from "./lib/about";
 import {
   getLastSeenVersion,
@@ -13,8 +11,7 @@ import { navigateRail, pageSideEffect } from "./lib/railNavigation";
 import { PAGES, PAGES_BY_KEY, HOTKEY_TABS } from "./lib/pages";
 import { requestOpenFile } from "./lib/openFileRequest";
 import { getKeymap, isWorkspaceSearch, layoutKeyOf, paletteModeOf, RAIL_KEY, WORKSPACE_SEARCH_KEY } from "./lib/keymap";
-import { setSideOpen, toggleRail, toggleSide, useRailExpanded } from "./lib/layoutStore";
-import { setSidebarView } from "./lib/sidebarView";
+import { toggleRail, toggleSide, useRailExpanded } from "./lib/layoutStore";
 import { openServicePanel } from "./lib/servicePanel";
 import { getToolReturn, recordToolNavigation } from "./lib/toolReturn";
 import "./workbench-upgrade.css";
@@ -45,8 +42,8 @@ import { UpgradeWelcomeBar } from "./components/update/UpgradeWelcomeBar";
 import { useAppHiddenFlag } from "./hooks/useAppHiddenFlag";
 import { useWindowSizePersistence } from "./hooks/useWindowSizePersistence";
 import { useTableLookup } from "./hooks/useTableLookup";
-import { useAppHidden } from "./lib/appVisibility";
-import { Skeleton } from "./components/ui/Skeleton";
+import { useAppInfo } from "./hooks/useAppInfo";
+import { WorkspaceSkeleton } from "./components/workspace/WorkspaceSkeleton";
 import { DbConfirmHost } from "./components/db/DbConfirmHost";
 import { LinkedDialogHost } from "./components/linked/LinkedDialogHost";
 import { wireQuitGuard } from "./lib/quitGuard";
@@ -63,7 +60,7 @@ for (const page of PAGES) {
 }
 
 // 数据字典已并进数据库页的字典标签（见 DbTab / DictWorkspace），不再单独成页。
-// 快速导航浮层要查语言服务（间接依赖 Monaco），首次打开时才加载，和文件页共用同一个 chunk。
+// 快速导航的命令与文件搜索可以独立预热，语言服务按搜索类型加载。
 const QuickPalette = lazy(() =>
   import("./components/workspace/QuickPalette").then((m) => ({ default: m.QuickPalette })),
 );
@@ -117,7 +114,6 @@ const HostedTab = memo(function HostedTab({ tab, children }: { tab: string; chil
  *
  * 保留的范式（业务直接沿用）：
  * - QueryClient 全局配置在 main.tsx（staleTime/retry/refetchOnWindowFocus）
- * - 窗口隐藏时停轮询：useAppHidden + refetchInterval（统一节流口径）
  * - 侧栏折叠 + 宽度记忆、Ctrl+1~N 快捷键来自 WORKSPACE_NAV 单一来源
  * - 页面切换过渡动画 transitionPage（pageTransition.ts）
  * - 错误边界 + 骨架屏 + Toast 三态
@@ -139,30 +135,12 @@ function AppContent() {
   useWindowSizePersistence();
   // 编辑器里悬停表名看表结构的数据源（没配数据库时静默不生效）
   useTableLookup();
-  // 窗口不可见时停掉全部定时轮询（壳子示例 5s；业务按需调）
-  const appHidden = useAppHidden();
-
   const [activeTab, setActiveTab] = useState("files");
   const railExpanded = useRailExpanded();
   /** 命令面板触发的服务停止：先弹确认，确认后才真的停。 */
   const [svcConfirm, setSvcConfirm] = useState<null | "stop">(null);
 
-  // ── 状态源（壳子示例：后端还没有业务状态，这里演示查询范式）──
-  // 业务把 queryKey/queryFn 换成自家命令，如 invoke<StatusResponse>("get_status")
-  // 只用来显示版本号 / 启动错误，没有「实时」语义：30 秒一次足够，兜住设置页
-  // 改完之后漏掉的 invalidate。以前 5 秒一次等于每分钟多打 11 次无意义的 IPC。
-  const { data: status } = useQuery({
-    queryKey: ["app-status"],
-    queryFn: () => invoke<{ version?: string; running?: boolean; platform?: string }>("get_app_info"),
-    refetchInterval: appHidden ? false : 30_000,
-    retry: false,
-  });
-
-  const queryClient = useQueryClient();
-  const refreshStatus = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: ["app-status"] }),
-    [queryClient],
-  );
+  const { data: status } = useAppInfo();
 
   // ── 更新未读计数（CHANGELOG 看了几版）──
   // 关于页亮点可见或用户打开本版历史时标记已读，提醒仅针对运行版本。
@@ -188,7 +166,7 @@ function AppContent() {
     pageSideEffect(currentTool, tab);
     // 日志页始终翻出工具文档面：同页重入时 WorkbenchFrame 的切页 effect 不会跑。
     if (tab === "logs") showWorkbenchDocument();
-    // View Transition 动画：update 回调里同步切 tab；当前页已是目标页时不动画
+    // 导航立即提交，工作台阅读区自行短淡入；不等待整页截图。
     transitionPage(() => setActiveTab(tab), activeTab !== tab);
   }, [activeTab]);
 
@@ -207,13 +185,10 @@ function AppContent() {
   const navRef = useRef(navigate);
   navRef.current = navigate;
   /**
-   * 全工程搜索不再是独立页签：切到文件页并把侧栏切到搜索视图。
-   * 侧栏收起时先展开——否则「打开了搜索」却看不到任何东西。
+   * 全工程搜索与快速导航共用顶部浮层；打开时保留查询与结果。
    */
   const openSearch = useCallback(() => {
-    setSidebarView("search");
-    setSideOpen(true);
-    navRef.current("files");
+    openPalette("search");
   }, []);
   /** 数据字典不再是独立页签：在数据库页开一个字典文档标签，并翻出文档区。 */
   const openDictPage = useCallback(() => {
@@ -319,6 +294,7 @@ function AppContent() {
   // ── Ctrl+1~N / Ctrl+K 快捷键：前 N 位来自 WORKSPACE_NAV，最后一位是设置 ──
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return;
       // 导航浮层与布局键：任何焦点下都生效（含编辑器），只让位给真正的模态框。
       // 只认 aria-modal="true"：InfoPopover / 大纲 / 历史这类非模态浮层也是 role=dialog，
       // 把它们算进来的话，打开一个说明气泡就按不了 Ctrl+K / Ctrl+B / Ctrl+J。
@@ -335,13 +311,9 @@ function AppContent() {
         else setSession({ panelOpen: (v) => !v });
         return;
       }
-      const target = e.target instanceof HTMLElement ? e.target : null;
-      const formField = target && !target.closest(".monaco-editor") && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
-      if (!formField && !document.querySelector('[role="dialog"][aria-modal="true"], dialog[open]') && isWorkspaceSearch(e, getKeymap())) {
-        e.preventDefault();
-        e.stopPropagation();
-        openSearch();
-        return;
+      if (!otherDialog && !e.isComposing && (isWorkspaceSearch(e, getKeymap()) ||
+        (e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === "k"))) {
+        e.preventDefault(); e.stopPropagation(); openSearch(); return;
       }
       // P1-9：模态框（生产库写语句确认 / 删除连接 / 快捷键一览）打开时，
       // Ctrl+1~N 与 Ctrl+K 会把背后页面切走或开搜索，浮层却还挂在 body 上。
@@ -397,11 +369,11 @@ function AppContent() {
           {/* 每页一个边界 + 自己的 Suspense：谁崩了卸谁，谁在加载谁显示骨架，
               不再共用最外层那一个（那样任一工具页出错会把整个工作台卸掉）。 */}
           <ErrorBoundary resetKey={tab}>
-            <Suspense fallback={<Skeleton className="m-4 h-40" />}>{renderTab(tab, refreshStatus, navigateViaRef)}</Suspense>
+            <Suspense fallback={<WorkspaceSkeleton page={tab} />}>{renderTab(tab, navigateViaRef)}</Suspense>
           </ErrorBoundary>
         </HostedTab>
       )),
-    [hostedTabs, refreshStatus, navigateViaRef],
+    [hostedTabs, navigateViaRef],
   );
 
   return (
@@ -469,7 +441,7 @@ function UnregisteredPage({ tabKey }: { tabKey: string }) {
 }
 
 /** 页面表：由 PAGES_BY_KEY + PAGE_COMPONENTS 派生，新增页面只改 lib/pages.ts。 */
-function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: string) => void) {
+function renderTab(tab: string, navigate: (tab: string) => void) {
   const page = PAGES_BY_KEY[tab];
   const Comp = page?.component ? PAGE_COMPONENTS[tab] : undefined;
   if (!Comp) {
@@ -489,8 +461,6 @@ function renderTab(tab: string, refreshStatus: () => void, navigate: (tab: strin
           }}
         />
       );
-    case "settings":
-      return <Comp onChanged={refreshStatus} />;
     default:
       return <Comp />;
   }

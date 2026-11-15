@@ -9,11 +9,12 @@
 import { useSyncExternalStore } from "react";
 import { currentModel, cursorAt } from "./editorActions";
 import { beginOperation } from "./operations";
-import { context } from "./langProviders";
+import { context } from "./langProviderContext";
 import { uriToPath } from "./langConvert";
-import { langReady, langRequest, navigate } from "./lang";
-import { setSession } from "./workspaceSession";
+import { langReady, langRequest, langCapabilityEpoch, navigate } from "./lang";
+import { workspaceEpoch } from "./workspaceEpoch";
 import { toast } from "../components/ui/toast";
+import { selectRelationView } from "./codeRelations";
 
 export interface CallItem {
   name: string;
@@ -37,6 +38,7 @@ export interface CallState {
 const EMPTY: CallState = { root: null, incoming: [], outgoing: [], loading: false, error: null };
 let state: CallState = EMPTY;
 let seq = 0;
+let resultCurrent: (() => boolean) | null = null;
 const listeners = new Set<() => void>();
 
 function set(next: Partial<CallState>): void {
@@ -98,18 +100,29 @@ export async function openCallHierarchy(): Promise<void> {
     toast("代码智能未就绪，调用层级需要它（设置 → 开发环境里启动）", "warning");
     return;
   }
+  const version = model.getVersionId(), epoch = workspaceEpoch(), capability = langCapabilityEpoch();
+  const snapshotCurrent = () => !model.isDisposed() && model.getVersionId() === version && workspaceEpoch() === epoch && langCapabilityEpoch() === capability;
   const operation = beginOperation({ key: "language.calls", label: "查询调用层级", page: "files", phase: "准备方法与调用关系" });
   if (!operation) return;
   const my = ++seq;
+  const current = () => {
+    if (my !== seq) return false;
+    if (snapshotCurrent()) return true;
+    set({ loading: false, error: "查询期间文件、工程或代码智能发生变化，请重新查询" });
+    return false;
+  };
+  // Keep the last successful result while synchronizing and querying a new position.
+  set({ loading: true, error: null });
   try {
+    if (!current()) return;
     const ctx = await context(model, { lineNumber: pos.line, column: pos.column });
+    if (!current()) return;
     if (!ctx) {
-      toast("当前文件不在可分析的模块里", "warning");
+      set({ loading: false, error: "当前文件不在可分析的模块里" });
       return;
     }
-    set({ loading: true, error: null, incoming: [], outgoing: [] });
     const prepared = await langRequest<LspCallItem[] | LspCallItem | null>("textDocument/prepareCallHierarchy", ctx.path, { position: ctx.position });
-    if (my !== seq) return;
+    if (!current()) return;
     const list = Array.isArray(prepared) ? prepared : prepared ? [prepared] : [];
     const root = list.length ? toItem(list[0]) : null;
     if (!root) {
@@ -123,9 +136,9 @@ export async function openCallHierarchy(): Promise<void> {
       langRequest<{ from?: LspCallItem }[] | null>("callHierarchy/incomingCalls", ctx.path, { item: rawItem }, 20_000),
       langRequest<{ to?: LspCallItem }[] | null>("callHierarchy/outgoingCalls", ctx.path, { item: rawItem }, 20_000),
     ]);
-    if (my !== seq) return;
-    if (model.isDisposed()) { set({ loading: false, error: "文件已关闭或工程已切换，请重新查询" }); return; }
+    if (!current()) return;
     operation.finish("success", `调用者 ${incoming?.length ?? 0} 个、调用目标 ${outgoing?.length ?? 0} 个`);
+    resultCurrent = snapshotCurrent;
     set({
       root,
       incoming: (incoming ?? []).map((c) => toItem(c.from ?? {})).filter((x): x is CallItem => !!x),
@@ -134,14 +147,15 @@ export async function openCallHierarchy(): Promise<void> {
       error: null,
     });
   } catch (e) {
+    if (!current()) return;
     operation.finish("failed", String(e));
-    if (my !== seq) return;
     set({ loading: false, error: String(e) });
   } finally { operation.finish("cancelled", "此位置没有可分析的方法，请根据提示重新执行"); }
 }
 
 /** 点一行跳到那个调用点（jar 内的类走只读标签）。 */
 export function openCallItem(it: CallItem): void {
+  if (resultCurrent && !resultCurrent()) { toast("这些调用结果所属的文件或工程已变化，请重新查询", "warning"); return; }
   if (it.path) navigate({ kind: "file", path: it.path, line: it.line, column: it.column });
   else navigate({ kind: "jdt", uri: it.uri, line: it.line, column: it.column });
 }
@@ -153,6 +167,6 @@ export function openCallItem(it: CallItem): void {
  * 否则按了键像没反应。
  */
 export async function runCallHierarchy(): Promise<void> {
-  setSession({ panelOpen: true, panelTab: "calls" });
+  selectRelationView("calls");
   await openCallHierarchy();
 }

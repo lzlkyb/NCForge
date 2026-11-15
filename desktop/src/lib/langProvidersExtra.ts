@@ -9,8 +9,11 @@
 // 不用再自己 addAction 造一遍，否则右键里会出现中英两条同义项。
 import { monaco } from "./monacoSetup";
 import { ask, context } from "./langProviders";
-import { toLspPosition, toMonacoRange, toTargets, type LspRange } from "./langConvert";
+import { toLspPosition, toMonacoRange, type LspRange } from "./langConvert";
 import { toast } from "../components/ui/toast";
+import { loadJdtSource, langCapabilityEpoch } from "./lang";
+import { workspaceEpoch } from "./workspaceEpoch";
+import { navigationTargets } from "./navigationTargets";
 
 /**
  * 引用结果的条数上限。
@@ -74,8 +77,14 @@ function toMonacoEdit(edit: LspWorkspaceEdit | undefined): monaco.languages.Work
 }
 
 /** 位置列表（definition / implementation / typeDefinition / references 同形）→ Monaco Location。 */
-function toLocations(result: unknown): monaco.languages.Location[] {
-  return toTargets(result)
+async function toLocations(result: unknown, current: () => boolean): Promise<monaco.languages.Location[]> {
+  if (!current()) return [];
+  const targets = navigationTargets(result);
+  // Previews use source/signature content, never start one decompiler JVM per candidate.
+  const jars = [...new Set(targets.filter(t => t.uri.startsWith("jdt://")).map(t => t.uri))].slice(0, 32);
+  await Promise.allSettled(jars.map(uri => loadJdtSource(uri, true)));
+  if (!current()) return [];
+  return targets
     .slice(0, MAX_REFERENCES)
     .map((t) => ({ uri: monaco.Uri.parse(t.uri), range: toMonacoRange(t.range) }));
 }
@@ -86,15 +95,18 @@ export function registerExtraLangProviders(): void {
   registered = true;
 
   monaco.languages.registerReferenceProvider("java", {
-    provideReferences: async (model, position) => {
+    provideReferences: async (model, position, _options, token) => {
+      const version = model.getVersionId(), epoch = workspaceEpoch(), capability = langCapabilityEpoch();
+      const current = () => !token.isCancellationRequested && !model.isDisposed() && model.getVersionId() === version && epoch === workspaceEpoch() && capability === langCapabilityEpoch();
       const ctx = await context(model, position);
-      if (!ctx) return null;
+      if (!ctx || !current()) return null;
       const res = await ask<unknown>("textDocument/references", ctx, {
         context: { includeDeclaration: true },
       });
       if (!res) return null;
       const all = Array.isArray(res) ? res.length : 0;
-      const out = toLocations(res);
+      const out = await toLocations(res, current);
+      if (!current()) return null;
       // 截断必须说出来：静默少给几条，用户会以为某个调用点「没有被算进来」，比慢更糟
       if (all > MAX_REFERENCES) notifyTruncated(all);
       return out;
@@ -152,20 +164,26 @@ export function registerExtraLangProviders(): void {
   });
 
   monaco.languages.registerImplementationProvider("java", {
-    provideImplementation: async (model, position) => {
+    provideImplementation: async (model, position, token) => {
+      const version = model.getVersionId(), epoch = workspaceEpoch(), capability = langCapabilityEpoch();
+      const current = () => !token.isCancellationRequested && !model.isDisposed() && model.getVersionId() === version && epoch === workspaceEpoch() && capability === langCapabilityEpoch();
       const ctx = await context(model, position);
-      if (!ctx) return null;
+      if (!ctx || !current()) return null;
       const res = await ask<unknown>("textDocument/implementation", ctx);
-      return res ? toLocations(res) : null;
+      const targets = res ? await toLocations(res, current) : null;
+      return current() ? targets : null;
     },
   });
 
   monaco.languages.registerTypeDefinitionProvider("java", {
-    provideTypeDefinition: async (model, position) => {
+    provideTypeDefinition: async (model, position, token) => {
+      const version = model.getVersionId(), epoch = workspaceEpoch(), capability = langCapabilityEpoch();
+      const current = () => !token.isCancellationRequested && !model.isDisposed() && model.getVersionId() === version && epoch === workspaceEpoch() && capability === langCapabilityEpoch();
       const ctx = await context(model, position);
-      if (!ctx) return null;
+      if (!ctx || !current()) return null;
       const res = await ask<unknown>("textDocument/typeDefinition", ctx);
-      return res ? toLocations(res) : null;
+      const targets = res ? await toLocations(res, current) : null;
+      return current() ? targets : null;
     },
   });
 

@@ -3,6 +3,7 @@ import type { PanelTab } from "../components/workspace/BottomPanel";
 import { PAGES } from "./pages";
 import { setSideOpen } from "./layoutStore";
 import { setSession } from "./workspaceSession";
+import { getHistoryRestorePath } from "./historyRestoreGuard";
 
 export type WorkbenchMode = "code" | "diagnose" | "debug";
 export interface WorkbenchLayout {
@@ -19,8 +20,8 @@ export const WORKBENCH_MODES: { id: WorkbenchMode; label: string }[] = [
   { id: "code", label: "编码布局" }, { id: "diagnose", label: "排错布局" }, { id: "debug", label: "调试布局" },
 ];
 // 「改动」是审 AI 代码的主入口，常驻页签条而不是藏在「更多底部工具」里。
-export const PRIMARY_PANELS: PanelTab[] = ["problems", "changes", "build", "svc", "debug"];
-export const SECONDARY_PANELS: PanelTab[] = ["calls", "types", "todo", "bookmarks"];
+export const PRIMARY_PANELS: PanelTab[] = ["problems", "changes", "run"];
+export const SECONDARY_PANELS: PanelTab[] = ["relations", "todo", "bookmarks"];
 const KEY = "ncforge-workbench-layout";
 const DEFAULTS: WorkbenchLayout = { mode: "code", locked: false, side: 240, sides: {}, heights: {}, pinned: [], expanded: null, compact: true };
 /**
@@ -42,14 +43,14 @@ export function parseWorkbenchLayout(raw: string | null, legacy: string | null =
     const heights: WorkbenchLayout["heights"] = {};
     const sides: WorkbenchLayout["sides"] = {};
     for (const key of SIDE_KEYS) if (typeof value.sides?.[key] === "number") sides[key] = clamp(value.sides[key], 180, 420, 240);
-    for (const panel of [...PRIMARY_PANELS, ...SECONDARY_PANELS]) {
+    for (const panel of [...PRIMARY_PANELS, ...SECONDARY_PANELS, "build", "svc", "debug", "tests", "calls", "types"] as PanelTab[]) {
       if (typeof value.heights?.[panel] === "number") heights[panel] = clamp(value.heights[panel], 140, 1200, 200);
     }
     // The old shared height belongs to general output, not every future tool.
     if (!raw && typeof old.bottom === "number") heights.problems = heights.build = clamp(old.bottom, 140, 1200, 200);
     return { ...DEFAULTS, mode: WORKBENCH_MODES.some(m => m.id === value.mode) ? value.mode : "code", locked: value.locked === true,
       side: clamp(value.side ?? old.side, 180, 420, 240), sides, heights,
-      pinned: SECONDARY_PANELS.filter(p => Array.isArray(value.pinned) && value.pinned.includes(p)) };
+      pinned: SECONDARY_PANELS.filter(p => Array.isArray(value.pinned) && (value.pinned.includes(p) || p === "relations" && value.pinned.some((old: string) => old === "calls" || old === "types"))) };
   } catch { return { ...DEFAULTS, heights: {}, pinned: [] }; }
 }
 function load() {
@@ -71,6 +72,7 @@ export function updateWorkbenchLayout(patch: Partial<WorkbenchLayout>): void {
   }, 300);
 }
 export function selectWorkbenchLayout(mode: WorkbenchMode): void {
+  if (getHistoryRestorePath()) return;
   updateWorkbenchLayout({ mode, expanded: null, compact: mode === "code" });
   setSideOpen(mode !== "debug");
   setSession({ panelOpen: true, panelTab: mode === "debug" ? "debug" : "problems", serviceExpanded: false });
@@ -81,14 +83,17 @@ export function autoWorkbenchLayout(mode: WorkbenchMode): boolean {
   return true;
 }
 export function restoreWorkbenchLayout(): void {
+  if (getHistoryRestorePath()) return;
   updateWorkbenchLayout({ ...DEFAULTS, sides: {}, heights: {}, pinned: [] });
   setSideOpen(true);
   setSession({ panelOpen: true, panelTab: "problems", serviceExpanded: false });
 }
 export function revealWorkbenchPanel(panel: PanelTab): void {
+  if (getHistoryRestorePath()) return;
   updateWorkbenchLayout({ compact: false, expanded: snapshot.expanded === panel ? panel : null });
 }
 export function togglePinnedPanel(panel: PanelTab): void {
+  if (panel === "calls" || panel === "types") panel = "relations";
   if (!SECONDARY_PANELS.includes(panel)) return;
   updateWorkbenchLayout({ pinned: snapshot.pinned.includes(panel) ? snapshot.pinned.filter(p => p !== panel) : [...snapshot.pinned, panel] });
 }

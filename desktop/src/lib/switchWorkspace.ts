@@ -11,6 +11,7 @@ import { rememberRoot } from "./recentRoots";
 import { clearClosed } from "./closedTabs";
 import { resetMru } from "./tabMru";
 import { invalidateWorkspaceRequests } from "./workspaceEpoch";
+import { withJavaRunsStopped } from "./javaRunLifecycle";
 
 /**
  * 切换工作区：改配置 + 清掉属于旧工作区的会话状态。
@@ -29,6 +30,8 @@ export async function applyWorkspace(
   path: string,
   queryClient?: QueryClient,
 ): Promise<string> {
+  // Keep new runs out until the old JVM, readers and any pending attach have ended.
+  return withJavaRunsStopped(async () => {
   // set_workspace 会让后端规范化路径，返回的才是真值；失败时抛错，下方副作用一概不做
   const shown = await setWorkspace(path);
   invalidateWorkspaceRequests();
@@ -65,4 +68,5 @@ export async function applyWorkspace(
   void queryClient?.invalidateQueries({ queryKey: ["svn-info"] });
   void queryClient?.invalidateQueries({ queryKey: ["svn-status"] });
   return shown;
+  });
 }

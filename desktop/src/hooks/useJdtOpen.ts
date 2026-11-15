@@ -6,6 +6,9 @@ import { trackOperation } from "../lib/operations";
 import { getSession } from "../lib/workspaceSession";
 import { workspaceEpoch } from "../lib/workspaceEpoch";
 import { toast } from "../components/ui/toast";
+import { libraryTabMeta, parseLibraryUri, readLibraryFile } from "../lib/libraryFiles";
+import { openVirtualModel } from "../lib/editorStore";
+import { languageOf } from "../lib/workspace";
 
 /**
  * 「把 jar 内的类打开成只读标签」这一个动作：读源码（没有源码就反编译）、建标签、失败提示。
@@ -65,9 +68,15 @@ export function useJdtOpen(setTabs: (v: Updater<TabMeta[]>) => void) {
     }
     try {
       const root=getSession().root,epoch=workspaceEpoch();
-      const src = await trackOperation({key:`class:${epoch}:${uri}`,root,label:"读取库中的类",scope:uri,page:"files",phase:"读取源码，缺少源码时尝试反编译"},()=>loadJdtSource(uri));
+      const target = parseLibraryUri(uri);
+      const src = await trackOperation({key:`class:${epoch}:${uri}`,root,label:target ? "读取库文件" : "读取库中的类",scope:uri,page:"files",phase:"读取附件源码或类文件实现"},
+        async () => target ? { ...await readLibraryFile(target), decompileError: null } : loadJdtSource(uri));
       if(epoch!==workspaceEpoch() || root!==getSession().root) return false;
       const meta = { ...tabMetaFromJdt(uri, src.text, src.decompiled), decompileError: src.decompileError ?? undefined };
+      if (target) {
+        openVirtualModel(uri, src.text, { language: target.entry.endsWith(".class") ? "java" : languageOf(target.entry, src.text) });
+        Object.assign(meta, libraryTabMeta(uri, target, src));
+      }
       setTabs((ts) => (ts.some((t) => t.path === uri) ? ts : [...ts, meta]));
       // 反编译失败退回签名桩：桩没有实现，不说明原因用户只会以为「这个类就长这样」
       if (src.decompileError) {

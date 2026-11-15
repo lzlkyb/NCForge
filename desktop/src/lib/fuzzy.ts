@@ -140,6 +140,20 @@ export function rankFiles(files: FileEntry[], query: string, limit: number): Ran
   if (!q) return [];
   const byPath = q.includes("/");
   const lower = q.toLowerCase();
+  const javaName = q.replace(/\.java$/i, "");
+  // 完整类名里的点是包分隔符。先精确比较路径后缀，避免同名类被模糊排序挤掉。
+  // 真正的点分文件名仍优先按文件名查找（例如 settings.properties）。
+  if (!byPath && javaName.includes(".") && !files.some(entry => entry.name.toLowerCase() === lower)) {
+    const qualifiedPath = javaName.replace(/\./g, "/").toLowerCase();
+    const exact: RankedFile[] = [];
+    for (const entry of files) {
+      if (!/\.java$/i.test(entry.name)) continue;
+      const stem = entry.rel.replace(/\.java$/i, "").toLowerCase();
+      if (stem !== qualifiedPath && !stem.endsWith(`/${qualifiedPath}`)) continue;
+      exact.push({ entry, score: 200, on: "rel", ranges: [[stem.length - qualifiedPath.length, stem.length]] });
+    }
+    if (exact.length) return exact.sort((a, b) => a.entry.rel.localeCompare(b.entry.rel)).slice(0, limit);
+  }
   const out: RankedFile[] = [];
   for (const entry of files) {
     if (!byPath) {

@@ -8,6 +8,7 @@ import { getDirectSwitch } from "../lib/projectSwitchPref";
 import { isUnderPath, projectForPath } from "../lib/treeProjects";
 import { ensureFilesSaved } from "../lib/terminatePreflight";
 import type { LinkedProject } from "../lib/linkedProjects";
+import { getHistoryRestorePath } from "../lib/historyRestoreGuard";
 
 export interface SwitchTarget {
   project: LinkedProject;
@@ -47,10 +48,12 @@ export function useProjectSwitch({
    * 否则会把取消当成成功，接着去打开一个属于旧工作区白名单外的路径。
    */
   const switchWorkspace = async (path: string): Promise<{ ok: boolean; message?: string }> => {
+    if (getHistoryRestorePath()) return { ok: false, message: "正在恢复本地版本，请完成后再切换工程" };
     const task=beginOperation({key:"workspace.switch",label:"切换工程",scope:path,page:"files",phase:"检查未保存文件"});
     if(!task) return {ok:false,message:"正在切换工程，请等待当前操作结束"};
     try {
       if (!(await ensureFilesSaved("切换工程"))) {task.finish("cancelled","已取消切换，当前工程未变");return {ok:false};}
+      if (getHistoryRestorePath()) { task.finish("cancelled", "本地版本正在恢复，已保留当前工程"); return { ok: false, message: "正在恢复本地版本，请完成后再切换工程" }; }
       task.update({phase:"验证目录并切换工作区"});
       // 切换的副作用（关模型 / 停 jdt.ls / 清会话 / 失效 svn 缓存）统一在 lib 里，
       // 各入口各写一套必然分叉

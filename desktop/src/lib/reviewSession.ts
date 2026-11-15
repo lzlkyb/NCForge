@@ -21,8 +21,9 @@ import { recomputeChanged, setRoundBaselines } from "./changedLinesStore";
 import { loadRoundBaseTexts } from "./roundBaseline";
 import { blockFingerprint, type ChangedBlock } from "./changedLines";
 import { invoke } from "./tauri";
+import { getHistoryRestorePath } from "./historyRestoreGuard";
 
-export type ReviewView = "timeline" | "diff" | "checklist";
+export type ReviewView = "timeline" | "diff" | "checklist" | "history";
 export type BaselineMode = "svn" | "round";
 
 export interface ReviewState {
@@ -62,9 +63,10 @@ export function subscribeReviewSession(cb: () => void): () => void {
 }
 export function getReviewState(): ReviewState { return state; }
 
-export function setReviewView(view: ReviewView): void { patch({ view }); }
+export function setReviewView(view: ReviewView): void { if (!getHistoryRestorePath()) patch({ view }); }
 export function setReviewSelected(selected: string[]): void { patch({ selected }); }
 export function setDiffScope(diffPaths: string[], startEvent: ChangeEvent | null, endEvent: ChangeEvent | null = null): void {
+  if (getHistoryRestorePath()) return;
   patch({ diffPaths, startEvent, endEvent, view: "diff" });
 }
 
@@ -75,6 +77,7 @@ export function setDiffScope(diffPaths: string[], startEvent: ChangeEvent | null
  * 视图状态存在这里，所以底部面板还没挂载时点「核对」也不会丢（P0-1）。
  */
 function openReviewPanel(view: ReviewView): void {
+  if (getHistoryRestorePath()) return;
   setSession({ panelOpen: true, panelTab: "changes" });
   revealWorkbenchPanel("changes");
   // Tauri 里一定有 window；纯 node 环境（工具链 / 单测）不该因为一次导航就抛
@@ -85,6 +88,7 @@ function openReviewPanel(view: ReviewView): void {
 }
 export function openChecklist(): void { openReviewPanel("checklist"); }
 export function openTimeline(): void { openReviewPanel("timeline"); }
+export function openFileHistory(): void { openReviewPanel("history"); }
 
 /** 选中一轮：色条基线收敛到该轮之前，代码面滚到首处改动。 */
 export async function selectRound(ev: ChangeEvent | null): Promise<void> {
@@ -137,16 +141,65 @@ export function reviewedKey(path: string, block: ChangedBlock): string {
   return `${norm(path)}|${hashFingerprint(blockFingerprint(block))}`;
 }
 
+/** 一条块级已审标记的细节：审的时间、当时的块文本、基线侧行区间（P1 存的没有区间）。 */
+export interface BlockMark { atMs: number; text?: string | null; range?: [number, number] | null }
+const markInfo = new Map<string, BlockMark>();
+let markIndex: Map<string, { key: string; mark: BlockMark }[]> | null = null;
+const pathOfKey = (key: string) => key.slice(0, key.lastIndexOf("|"));
+function setMarkInfo(keys: readonly string[], blocks: readonly ChangedBlock[] | null, reviewed: boolean): void {
+  const now = Date.now();
+  keys.forEach((k, i) => {
+    const b = blocks?.[i];
+    if (reviewed) markInfo.set(k, { atMs: now, text: b ? b.currentLines.join("\n") : null, range: b ? [b.oldStart, b.oldEnd] : null });
+    // 取消已审当作「没审过」：不留着去触发需重审
+    else markInfo.delete(k);
+  });
+  markIndex = null;
+}
+
 /**
  * 块级已审落盘（按需求审查 P1：重启不丢）。先改内存再异步写盘：写盘失败只影响重启后的记忆，
- * 不该让「点了已审却没反应」。块文本一并存下，供以后「只看这次改了什么」用。
+ * 不该让「点了已审却没反应」。块文本与基线区间一并存下，供需重审判断与「只看这次改了什么」用。
  */
 function persistBlocks(keys: string[], blocks: readonly ChangedBlock[], reviewed: boolean): void {
   if (!keys.length) return;
+  setMarkInfo(keys, blocks, reviewed);
   const texts = reviewed ? blocks.map((b) => b.currentLines.join("\n")) : undefined;
-  void invoke("review_blocks_set", { keys, texts, reviewed }).catch((e) => {
+  const ranges = reviewed ? blocks.map((b) => [b.oldStart, b.oldEnd]) : undefined;
+  void invoke("review_blocks_set", { keys, texts, ranges, reviewed }).catch((e) => {
     console.warn("块级审查标记写盘失败（本次会话内仍有效）", e);
   });
+}
+
+/**
+ * 需重审：这个块现在没审过，但同一段基线上曾经审过另一个版本（审完后内容又变了）。
+ * 返回最近的那次标记；没有返回 null。
+ *
+ * 基线（SVN BASE）在 update 前不变，所以用基线侧行区间对位置；纯新增块的基线区间是一个插入点。
+ * 把区间各外扩半行再求交：当前两个不同的块之间至少隔一行未改动的行，不会互相误伤。
+ */
+export function priorReview(path: string, block: ChangedBlock): BlockMark | null {
+  if (!markIndex) {
+    markIndex = new Map();
+    for (const [key, mark] of markInfo) {
+      if (!mark.range) continue;
+      const p = pathOfKey(key);
+      const list = markIndex.get(p) ?? [];
+      list.push({ key, mark });
+      markIndex.set(p, list);
+    }
+  }
+  const list = markIndex.get(norm(path));
+  if (!list) return null;
+  const self = reviewedKey(path, block);
+  const lo = block.oldStart - 0.5, hi = block.oldEnd + 0.5;
+  let best: BlockMark | null = null;
+  for (const { key, mark } of list) {
+    if (key === self || !mark.range) continue;
+    const [s, e] = mark.range;
+    if (s - 0.5 <= hi && lo <= e + 0.5 && (!best || mark.atMs > best.atMs)) best = mark;
+  }
+  return best;
 }
 export function isBlockReviewed(path: string, block: ChangedBlock): boolean {
   return state.reviewed.has(reviewedKey(path, block));
@@ -159,8 +212,8 @@ export function markBlockReviewed(path: string, block: ChangedBlock, next?: bool
   if (want === has) return has;
   const updated = new Set(state.reviewed);
   if (want) updated.add(key); else updated.delete(key);
-  patch({ reviewed: updated });
   persistBlocks([key], [block], want);
+  patch({ reviewed: updated });
   return want;
 }
 /** 批量标记（「已审并看下一项」「本需求全部标为已审」）。只写状态真正变了的块。 */
@@ -170,8 +223,9 @@ export function markBlocksReviewed(path: string, blocks: readonly ChangedBlock[]
   const keys = changed.map((b) => reviewedKey(path, b));
   const updated = new Set(state.reviewed);
   for (const k of keys) { if (next) updated.add(k); else updated.delete(k); }
-  patch({ reviewed: updated });
+  // 先更新标记细节再通知界面：重渲染时「需重审」要用到新标记
   persistBlocks(keys, changed, next);
+  patch({ reviewed: updated });
 }
 export function reviewedCount(path: string, blocks: readonly ChangedBlock[]): number {
   return blocks.filter((b) => isBlockReviewed(path, b)).length;
@@ -210,8 +264,11 @@ export function initReviewSession(): void {
 /** 启动时读回落盘的块级已审，并入内存（不覆盖启动后已经点过的）。读不到就算了。 */
 async function loadPersistedBlocks(): Promise<void> {
   try {
-    const keys = await invoke<string[]>("review_blocks_list");
+    const marks = await invoke<Record<string, BlockMark>>("review_blocks_marks");
+    const keys = Object.keys(marks ?? {});
     if (!keys.length) return;
+    for (const k of keys) if (!markInfo.has(k)) markInfo.set(k, marks[k]);
+    markIndex = null;
     patch({ reviewed: new Set([...keys, ...state.reviewed]) });
   } catch { /* 桥没起 / 单测环境：只是没有上次的记忆 */ }
 }
@@ -283,6 +340,8 @@ export function resetReviewSession(): void {
     selected: [], diffPaths: [], startEvent: null, endEvent: null,
     reviewed: new Set<string>(),
   };
+  markInfo.clear();
+  markIndex = null;
   started = false;
   seedTried = false;
   disarmSeedWatch();

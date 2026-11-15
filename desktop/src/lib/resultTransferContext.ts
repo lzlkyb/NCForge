@@ -22,7 +22,7 @@ export interface TransferDialogSeed {
 }
 export interface TransferRetry { frame:TransferFrame; seed:TransferDialogSeed }
 export const transferScopeLabel: Record<TransferScope, string> = {
-  selection: "当前选区", filtered: "当前筛选结果", loaded: "已加载全部行", query: "重新查询导出全部",
+  selection: "选中行", filtered: "筛选后已加载行", loaded: "全部已加载行", query: "完整查询结果（重查）",
 };
 export function selectionIndices(frame: TransferFrame): number[] {
   return frame.selection ? selectedCols(frame.visible, frame.selection) : frame.visible;
@@ -45,14 +45,26 @@ export function transferCanRequery(source: TransferSource): boolean {
   return statements.length === 1 && !isWrite(statements[0].text) && /^(?:\s|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*(?:select|with)\b/i.test(source.sql);
 }
 /** Freeze before opening: later paging, editing or connection changes must not redirect an export. */
-export function freezeTransferFrame(frame: TransferFrame, value: (r: number, c: number) => Cell): TransferFrame {
+export function freezeTransferFrame(frame: TransferFrame, edits?: ReadonlyMap<string, Cell>): TransferFrame {
+  const originalRows = (frame.data.originalRows ?? frame.data.rows).map(row => [...row]);
+  // Unedited rows can share their snapshot with the original values. Copy only touched rows
+  // before applying the sparse edits so exporting original values still uses the query data.
+  const rows = frame.data.originalRows ? frame.data.rows.map(row => [...row]) : originalRows.slice();
+  for (const [key, value] of edits ?? []) {
+    const separator = key.indexOf(":");
+    const r = Number(key.slice(0, separator)), c = Number(key.slice(separator + 1));
+    const row = rows[r];
+    if (!row || c < 0 || c >= row.length) continue;
+    if (row === originalRows[r]) rows[r] = [...row];
+    rows[r][c] = value;
+  }
   return { ...frame, order: [...frame.order], visible: [...frame.visible], labels: [...frame.labels],
     selection: frame.selection ? { anchor: { ...frame.selection.anchor }, end: { ...frame.selection.end } } : null,
     source: { ...frame.source, keys: frame.source.keys ? [...frame.source.keys] : undefined, params: frame.source.params?.map(p => typeof p === "object" && p ? { ...p } : p),
       sheets: frame.source.sheets?.map(s => ({ name: s.name, data: { ...s.data, columns: s.data.columns.map(c => ({ ...c })), rows: s.data.rows.map(r => [...r]), originalRows: s.data.originalRows?.map(r => [...r]) } })) },
     data: { columns: frame.data.columns.map(c => ({ ...c })), query: frame.source.sql,
-      originalRows: (frame.data.originalRows ?? frame.data.rows).map(r => [...r]),
-      rows: frame.data.rows.map((r, i) => r.map((_, c) => value(i, c))),
+      originalRows,
+      rows,
     },
   };
 }

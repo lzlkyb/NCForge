@@ -1,20 +1,17 @@
 import { listCommands, type Command } from "./commandRegistry";
 import { recentCommandIds, recordCommandUse } from "./commandUsage";
-import { getFileIndex, peekFileIndex } from "./fileIndex";
+import { getFileIndex } from "./fileIndex";
 import { fuzzyMatch, rankFiles, type FileEntry, type Range } from "./fuzzy";
 import { matchText } from "./pinyin";
-import { parseLineQuery, rankFilesRecent, recentFirst } from "./gotoAnything";
-import { getLangView, langReady, langRequest } from "./lang";
+import { parseLineQuery, rankFilesRecent } from "./gotoAnything";
 import { uriToPath } from "./langConvert";
 import { failureText } from "./friendlyError";
 import type { PaletteMode } from "./keymap";
 import { getRecent } from "./recentFiles";
-import { searchWorkspaceStream, type SearchHit, type SearchOutcome } from "./search";
-import { fetchSymbols, kindLetter } from "./symbols";
+import { fetchSymbols, kindLetter, type FlatSymbol } from "./symbols";
+import { isNcDeclaration, ncDeclarationLabel } from "./ncDeclarationOutline";
 import { jarTypeUri, searchSymbols, searchTypes, type SymbolHit, type SymbolSearchResult, type TypeHit } from "./typeSearch";
-
-/** 快速面板 `#内容` 搜索在后端的来源标识：同来源新搜索顺带取消旧的。 */
-export const PALETTE_SEARCH_SOURCE = "palette";
+import { libraryUri, searchLibraryFiles, type LibraryHit, type LibraryOutcome } from "./libraryFiles";
 
 /** 浮层里的一行。 */
 export interface PaletteItem {
@@ -44,6 +41,8 @@ export interface PaletteCtx {
   /** 当前标签的路径（可能是 jdt:// 虚拟文件）。 */
   activePath: string | null;
   openPaths: string[];
+  documentSymbols?: FlatSymbol[];
+  methodsOnly?: boolean;
   run: Runner;
 }
 
@@ -73,12 +72,9 @@ function fileItem(e: FileEntry, ctx: PaletteCtx, extra: Partial<PaletteItem>): P
   };
 }
 
-async function filesMode(query: string, ctx: PaletteCtx, onPartial?: (r: PaletteResult) => void): Promise<PaletteResult> {
+async function filesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult> {
   if (!ctx.root) return { items: [], note: "尚未打开工程" };
   const q = query.trim();
-  // `#` 搜内容、`:` 跳行号：和 VS Code 的「转到任意位置」同一套前缀，
-  // 不必为它们再占一个入口键，也不用离开这个输入框。
-  if (q.startsWith("#")) return contentMode(q.slice(1).trim(), ctx, onPartial);
   if (q.startsWith(":")) return lineMode(q, ctx);
   const entries = await getFileIndex(ctx.root);
   if (!q) {
@@ -91,81 +87,24 @@ async function filesMode(query: string, ctx: PaletteCtx, onPartial?: (r: Palette
     return { items: recent.map((e) => fileItem(e, ctx, { badge: undefined })), note: recent.length ? "最近打开" : `输入文件名（工程内共 ${entries.length} 个文件）` };
   }
   const ranked = rankFilesRecent(entries, q, LIMIT, getRecent(ctx.root));
+  const library = await libraryNames(q);
+  const extra = library?.items.map(hit => libraryItem(hit, ctx)) ?? [];
   return {
     items: ranked.map((r) =>
       fileItem(r.entry, ctx, r.on === "name" ? { ranges: r.ranges } : { detail: r.entry.rel }),
-    ),
-    note: ranked.length ? `匹配 ${ranked.length} 项` : "没有匹配的文件",
+    ).concat(extra),
+    note: [ranked.length || extra.length ? `匹配 ${ranked.length + extra.length} 项` : "没有匹配的文件", library?.building ? "库文件目录准备中" : "", library?.truncated ? "库文件结果已截断" : ""].filter(Boolean).join(" · "),
   };
 }
 
-/** `#内容`：在工作区文件里找文本，最近打开过的文件排前面。 */
-async function contentMode(text: string, ctx: PaletteCtx, onPartial?: (r: PaletteResult) => void): Promise<PaletteResult> {
-  if (!text) return { items: [], note: "输入要在工程里找的内容（# 开头）" };
-  const base = (ctx.root ?? "").replace(/[\\/]+$/, "");
-  const recent = getRecent(ctx.root);
-  // 先扫谁：最近打开的文件 + 文件名里就带关键词的文件（见下面的注释）
-  const priority = [
-    ...new Set([
-      // 最近打开的文件：用户多半在找刚看过的
-      ...recent
-        .map((p) => (p.toLowerCase().startsWith(`${base.toLowerCase()}\\`) ? p.slice(base.length + 1) : null))
-        .filter((p): p is string => !!p),
-      // 文件名里就带关键词的文件：`#VoucherBillOrder` 这类搜法里，它们几乎必然含这个词，
-      // 排到队首比按目录顺序撞运气快一个数量级。清单只认内存里已有的那份，
-      // 不让搜索倒过来等一次全树扫描（`peekFileIndex` 不会触发加载）。
-      ...(ctx.root ? (peekFileIndex(ctx.root) ?? []) : [])
-        .filter((e) => e.name.toLowerCase().includes(text.toLowerCase()))
-        .slice(0, 30)
-        .map((e) => e.rel),
-    ]),
-  ].slice(0, 50);
-  const item = (h: SearchHit): PaletteItem => {
-    const path = `${base}\\${h.path.replace(/\//g, "\\")}`;
-    return {
-      key: `${path}:${h.line}`,
-      title: h.text.trim() || "（空行）",
-      detail: `${h.path}:${h.line}`,
-      run: () => ctx.run.file(path, h.line, (h.ranges[0]?.start ?? 0) + 1),
-    };
-  };
-  // 增量结果只用于「列表先长出来」：顺序按发现顺序（最近文件本来就在最前），
-  // 最终结果仍用完整数据按最近优先重排一次。
-  const seen = new Map<string, PaletteItem>();
-  let out: SearchOutcome;
-  try {
-    // 每改一次词就是一次全量扫描：按来源登记，新的一发出，后端就停掉旧的
-    out = await searchWorkspaceStream(
-      { text, maxResults: LIMIT, priority },
-      (hits) => {
-        if (!onPartial) return;
-        for (const h of hits) {
-          const it = item(h);
-          if (!seen.has(it.key)) seen.set(it.key, it);
-        }
-        if (seen.size) {
-          onPartial({ items: [...seen.values()].slice(0, LIMIT), note: `内容 · 已找到 ${seen.size} 条，还在扫…` });
-        }
-      },
-      PALETTE_SEARCH_SOURCE,
-    );
-  } catch (e) {
-    return { items: [], note: failureText("搜索", e) };
-  }
-  const hits = out.hits.map((h) => ({ hit: h, path: `${base}\\${h.path.replace(/\//g, "\\")}` }));
-  const ordered = recentFirst(hits, (h) => h.path, recent);
-  const items: PaletteItem[] = ordered.map(({ hit, path }) => ({
-    key: `${path}:${hit.line}`,
-    title: hit.text.trim() || "（空行）",
-    detail: `${hit.path}:${hit.line}`,
-    run: () => ctx.run.file(path, hit.line, (hit.ranges[0]?.start ?? 0) + 1),
-  }));
-  const note = out.truncated
-    ? `内容命中 ${items.length} 条（已到上限，缩小关键词可看到更精确的结果）`
-    : items.length
-      ? `内容 · ${items.length} 项 · ${out.elapsedMs}ms`
-      : "没有匹配的内容";
-  return { items, note };
+async function libraryNames(query: string, include = ""): Promise<LibraryOutcome | null> {
+  try { return await searchLibraryFiles({ text: query, caseSensitive: false, wholeWord: false, regex: false, include, dirs: [] }, true, `library-names:${query.trim()}`); }
+  catch { return null; }
+}
+function libraryItem(hit: LibraryHit, ctx: PaletteCtx): PaletteItem {
+  return { key: libraryUri(hit), title: hit.entry.split("/").pop() ?? hit.entry,
+    detail: `${hit.source}${hit.archive ? " ! " : "/"}${hit.entry}`, badge: hit.class ? "已编译" : "库文件", kind: hit.class ? "C" : undefined,
+    run: () => ctx.run.jdt(libraryUri(hit), hit.line, 1) };
 }
 
 /** `:行号` / `:行号:列号`：跳到当前文件的位置（jar 内的类也能跳）。 */
@@ -183,7 +122,7 @@ function lineMode(query: string, ctx: PaletteCtx): PaletteResult {
         title: `跳到第 ${target.line} 行${target.column ? `第 ${column} 列` : ""}`,
         detail: name,
         run: () =>
-          path.startsWith("jdt://")
+          path.startsWith("jdt://") || path.startsWith("nc-library://")
             ? ctx.run.jdt(path, target.line, column)
             : ctx.run.file(path, target.line, column),
       },
@@ -234,13 +173,18 @@ async function langHits(
   query: string,
   ctx: PaletteCtx,
   accept: (kind: number) => boolean,
+  qualifiedTypes = false,
 ): Promise<LangHit[] | null> {
+  const { langReady, langRequest } = await import("./lang");
   if (!langReady()) return null;
+  const qualified = qualifiedTypes && query.includes(".");
+  const nameQuery = qualified ? query.slice(query.lastIndexOf(".") + 1) : query;
+  const qualifiedQuery = query.toLowerCase();
   let res: unknown;
   try {
     // 4 秒。以前是 20 秒：面板上就一行「查询中…」，用户体感是卡死；而 jdt.ls 一旦
     // 索引没建完，等到 20 秒也只是拿到空结果。宁可早退回本地/文件名，也别让人干等。
-    res = await langRequest<unknown>("workspace/symbol", null, { query }, 4_000);
+    res = await langRequest<unknown>("workspace/symbol", null, { query: nameQuery }, 4_000);
   } catch {
     return null;
   }
@@ -251,13 +195,15 @@ async function langHits(
     const uri = s.location?.uri;
     const pos = s.location?.range?.start;
     if (!s.name || !uri || !pos || !accept(s.kind ?? 0)) continue;
+    // JDT 按短名取候选；包名过滤必须先于 LIMIT，否则其他包的同名类会挤掉目标。
+    if (qualified && !`${s.containerName ?? ""}.${s.name}`.toLowerCase().startsWith(qualifiedQuery)) continue;
     const key = `${uri}#${s.name}#${pos.line}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const line = pos.line + 1;
     const column = pos.character + 1;
     const path = uriToPath(uri);
-    const hit = fuzzyMatch(query, s.name);
+    const hit = fuzzyMatch(nameQuery, s.name);
     const kind = path ? { badge: undefined, rank: 0 } : jdtBadge(uri);
     hits.push({
       fq: `${s.containerName ?? ""}#${s.name}`,
@@ -320,11 +266,11 @@ async function typeFileItems(query: string, ctx: PaletteCtx): Promise<PaletteIte
   if (!ctx.root) return [];
   const javas = (await getFileIndex(ctx.root)).filter((e) => e.name.endsWith(".java"));
   return rankFiles(javas, query, LIMIT)
-    .filter((r) => r.on === "name")
+    .filter((r) => r.on === "name" || query.includes("."))
     .map((r) =>
       fileItem(r.entry, ctx, {
         title: r.entry.name.replace(/\.java$/, ""),
-        ranges: r.ranges,
+        ranges: r.on === "name" ? r.ranges : fuzzyMatch(query.replace(/\.java$/i, "").split(".").pop() ?? query, r.entry.name)?.ranges,
         kind: "C",
         badge: undefined,
       }),
@@ -332,7 +278,7 @@ async function typeFileItems(query: string, ctx: PaletteCtx): Promise<PaletteIte
 }
 
 function typeHitItem(hit: TypeHit, ctx: PaletteCtx, query: string): PaletteItem {
-  const ranges = fuzzyMatch(query, hit.simple)?.ranges;
+  const ranges = fuzzyMatch(query.slice(query.lastIndexOf(".") + 1), hit.simple)?.ranges;
   if (hit.file) {
     return {
       key: `type:ws:${hit.file}:${hit.line}:${hit.name}`,
@@ -366,16 +312,23 @@ async function typesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult>
   } catch {
     // 后端不可用（未打开工程 / 命令失败）：继续走语言服务
   }
-  if (local && (local.workspace.length || local.jars.length)) {
-    const items = [...local.workspace, ...local.jars].map((h) => typeHitItem(h, ctx, q));
+  const library = await libraryNames(q, "*.class");
+  const loose = library?.items.filter(h => h.class && !h.archive).map(hit => libraryItem(hit, ctx)) ?? [];
+  const extraJars = library?.items.filter(h => h.class && h.archive && !local?.jars.some(j => j.jar === h.source && j.name.replace(/\./g, "/") + ".class" === h.entry))
+    .map(hit => libraryItem(hit, ctx)) ?? [];
+  if (local && (local.workspace.length || local.jars.length) || loose.length || extraJars.length) {
+    const items = (local?.workspace ?? []).map(h => typeHitItem(h, ctx, q)).concat(loose, (local?.jars ?? []).map(h => typeHitItem(h, ctx, q)), extraJars);
     const parts = [
-      local.workspace.length ? `工作区 ${local.workspace.length}` : "",
-      local.jars.length ? `依赖 jar ${local.jars.length}` : "",
-      local.jarsPending ? "依赖 jar 目录准备中" : "",
-      `${local.elapsedMs}ms`,
+      local?.workspace.length ? `工作区 ${local.workspace.length}` : "",
+      local?.jars.length ? `依赖 jar ${local.jars.length}` : "",
+      loose.length + extraJars.length ? `库类与散类 ${loose.length + extraJars.length}` : "",
+      local?.jarsPending ? "依赖 jar 目录准备中" : "",
+      library?.building ? "扩展类目录准备中" : "",
+      local ? `${local.elapsedMs}ms` : "",
     ].filter(Boolean);
     return { items, note: `类型 · ${parts.join(" · ")}` };
   }
+  const { getLangView, langReady } = await import("./lang");
   if (local?.indexing && !langReady()) {
     // 首次建索引要读完整个源码树（这台机器上近百秒），不能把用户扣在输入框前
     const items = await typeFileItems(q, ctx);
@@ -388,7 +341,7 @@ async function typesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult>
     const what = langState === "indexing" ? "索引中" : "启动中";
     return { items, note: `${what}，先按文件名匹配，结果可能不全` };
   }
-  const hits = await langHits(q, ctx, (k) => TYPE_KINDS.has(k));
+  const hits = await langHits(q, ctx, (k) => TYPE_KINDS.has(k), true);
   if (hits) {
     const items = dedupeTypes(hits);
     return { items, note: `工作区与依赖 jar 中的类型 · ${items.length} 项` };
@@ -402,19 +355,23 @@ async function typesMode(query: string, ctx: PaletteCtx): Promise<PaletteResult>
 
 async function symbolsMode(query: string, ctx: PaletteCtx): Promise<PaletteResult> {
   const path = ctx.activePath;
-  if (!path || path.startsWith("jdt://") || !path.toLowerCase().endsWith(".java")) {
-    return { items: [], note: "先打开一个 Java 文件" };
+  if (!path || path.includes("://") || (!/\.java$/i.test(path) && !isNcDeclaration(path))) {
+    return { items: [], note: "先打开一个 Java 或 NC 声明文件" };
   }
+  let symbols = ctx.documentSymbols;
+  if (!symbols) {
+  const { langReady } = await import("./lang");
   if (!langReady()) return { items: [], note: "代码智能未就绪，暂时列不出符号" };
-  let symbols;
   try {
     symbols = await fetchSymbols(path);
   } catch (e) {
     return { items: [], note: failureText("取符号", e) };
   }
+  }
   const q = query.trim();
   const items: PaletteItem[] = [];
   symbols.forEach((s, i) => {
+    if (ctx.methodsOnly && /\.java$/i.test(path) && ![6, 9, 12].includes(s.kind)) return;
     const hit = q ? fuzzyMatch(q, s.name) : { score: 0, ranges: [] };
     if (!hit) return;
     items.push({
@@ -422,11 +379,11 @@ async function symbolsMode(query: string, ctx: PaletteCtx): Promise<PaletteResul
       title: s.name,
       ranges: hit.ranges,
       detail: `${s.container ? `${s.container} · ` : ""}第 ${s.line} 行`,
-      kind: kindLetter(s.kind),
+      kind: isNcDeclaration(path) ? ncDeclarationLabel(s.kind) : kindLetter(s.kind),
       run: () => ctx.run.file(path, s.line, s.column),
     });
   });
-  return { items: items.slice(0, 200), note: `${path.slice(path.lastIndexOf("\\") + 1)} 中的符号 · ${items.length} 项` };
+  return { items: items.slice(0, 200), note: `当前文件符号 · ${items.length} 项${items.length > 200 ? "，请输入名称缩小范围" : ""}` };
 }
 
 /** 工作区符号：方法 / 字段级搜索（IDEA 的 Ctrl+Alt+Shift+N）。 */
@@ -447,6 +404,7 @@ async function workspaceSymbolsMode(query: string, ctx: PaletteCtx): Promise<Pal
     const scope = local.total >= 200_000 ? "工作区" : `工作区 ${local.total} 个成员`;
     return { items, note: `方法与字段 · ${scope} · ${local.elapsedMs}ms` };
   }
+  const { langReady } = await import("./lang");
   if (local?.indexing) {
     if (!langReady()) return { items: [], note: "正在建工作区符号索引，稍后再搜" };
   } else if (!langReady()) {
@@ -511,18 +469,18 @@ function commandsMode(query: string): PaletteResult {
 }
 
 /**
- * 生成浮层条目。`onPartial` 只有 `#内容` 用得上：扫描是全工程的，先送几批让
- * 列表长出来，返回的 Promise 仍给最终结果。
+ * 生成快速导航条目；完整工程内容搜索由 searchRunner 执行。
  */
 export async function buildItems(
   mode: PaletteMode,
   query: string,
   ctx: PaletteCtx,
-  onPartial?: (r: PaletteResult) => void,
 ): Promise<PaletteResult> {
   switch (mode) {
+    case "search":
+      return { items: [], note: "" };
     case "file":
-      return filesMode(query, ctx, onPartial);
+      return filesMode(query, ctx);
     case "type":
       return typesMode(query, ctx);
     case "symbol":
