@@ -122,12 +122,13 @@ test("CI_JOBS 的键就是 workflow 里真实存在的 job", () => {
   }
 });
 
-test("pre-commit 的七项都来自清单、且不含重活", () => {
+test("pre-commit 的八项都来自清单、且不含重活", () => {
   const ids = PRECOMMIT.map((p) => p.id);
   // 顺序即契约：按耗时从短到长，便宜的先红。
+  // boot-path 排第一（2026-11-15 实测 ~150 ms，只读 main.rs 一个文件，比 source-size 还便宜）。
   assert.deepEqual(
     ids,
-    ["source-size", "component-size", "rust-tempdir", "tokens", "fmt", "ui-contract", "tsc"],
+    ["boot-path", "source-size", "component-size", "rust-tempdir", "tokens", "fmt", "ui-contract", "tsc"],
     "顺序按「快 → 慢」，别随手调",
   );
   for (const id of ids) assert.ok(stepById(id), `${id} 不在 STEPS 里，pre-commit 会跑空`);
@@ -139,12 +140,12 @@ test("pre-commit 的七项都来自清单、且不含重活", () => {
 
 test("pre-commit 的后缀匹配：改文档不跑，改代码按类型跑", () => {
   const hit = (file) => PRECOMMIT.filter((p) => p.match.test(file)).map((p) => p.id);
-  assert.deepEqual(hit("docs/x.md"), [], "只改文档时七项都不跑");
+  assert.deepEqual(hit("docs/x.md"), [], "只改文档时八项都不跑");
   assert.deepEqual(hit("CHANGELOG.md"), []);
   // 写组件是最容易踩 300 行红线的地方，必须每次都扫。
   assert.deepEqual(hit("desktop/src/components/db/X.tsx"), ["component-size", "tokens", "ui-contract", "tsc"]);
   assert.deepEqual(hit("desktop/src/lib/db.ts"), ["component-size", "tsc"]);
-  assert.deepEqual(hit("desktop/src-tauri/src/lib.rs"), ["source-size", "rust-tempdir", "fmt"]);
+  assert.deepEqual(hit("desktop/src-tauri/src/lib.rs"), ["boot-path", "source-size", "rust-tempdir", "fmt"]);
   assert.deepEqual(hit("desktop/src/db-console.css"), ["tokens", "ui-contract"]);
 });
 
@@ -239,7 +240,7 @@ test("重活不许进 PRECOMMIT（钩子超过 30s 就等于没有）", () => {
 
 test("PRECOMMIT 按耗时从短到长排（便宜的先红，才不容易被 --no-verify）", () => {
   const order = PRECOMMIT.map((p) => p.id);
-  const cost = { "source-size": 0, "component-size": 1, "rust-tempdir": 2, tokens: 3, fmt: 4, "ui-contract": 5, tsc: 6 };
+  const cost = { "boot-path": 0, "source-size": 1, "component-size": 2, "rust-tempdir": 3, tokens: 4, fmt: 5, "ui-contract": 6, tsc: 7 };
   for (let i = 1; i < order.length; i += 1) {
     assert.ok(cost[order[i - 1]] < cost[order[i]], `顺序反了：${order[i - 1]} 应排在 ${order[i]} 之前`);
   }

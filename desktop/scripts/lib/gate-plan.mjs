@@ -97,6 +97,14 @@ export const STEPS = [
     why: "测试里裸用 std::env::temp_dir() 只许减不许增：macOS 的 /var→/private/var 与 Windows CI 的 8.3 短名会让拼出的路径与产品代码对不上，表现是「本地全绿、CI 红」。新测试用 crate::test_support::tmp()。纯文件扫描，不需要 Rust 工具链。",
   },
   {
+    id: "boot-path",
+    name: "启动路径禁区（禁止同步扫盘）",
+    cwd: "desktop",
+    argv: ["node", "scripts/check-boot-path.mjs"],
+    scopes: ["frontend"],
+    why: "启动时长是「轻量 + 速度」唯一能被用户直接感知的指标，而毁掉它只要在 setup 里写 5 行 read_dir；开发机盘热目录小，肉眼看不出。门禁扫 main.rs 的 fn main 段（含 setup / on_window_event / run 闭包）：禁目录遍历，并要求 boot_timing 起点是第一句。纯文件扫描。",
+  },
+  {
     id: "fmt",
     name: "cargo fmt --check",
     cwd: "desktop/src-tauri",
@@ -190,13 +198,14 @@ export const STEPS = [
 export const SCOPES = [...new Set(Object.values(CI_JOBS))];
 
 /**
- * pre-commit 的七项：提交前只跑「纯扫描 + 秒级」的检查，重的留给 pre-push / CI。
+ * pre-commit 的八项：提交前只跑「纯扫描 + 秒级」的检查，重的留给 pre-push / CI。
  *
  * 为什么门槛是「纯扫描」而不是「重要不重要」：commit 比 push 频繁一个量级，
  * 钩子一旦超过 30 秒就会被 `--no-verify` 绕过，等于没有。所以这里只收**不需要
  * 编译、不需要跑测试树**的项——它们的耗时与代码体量无关，加进提交路径几乎免费。
  * 实测（2026-11-12，本机）：source-size 0.1s / component-size 0.5s / rust-tempdir
  * 1.1s / tokens 1.4s / fmt 2s / ui-contract 2.2s / tsc 6s（冷 23s）；全部命中约 10s。
+ * boot-path（2026-11-15 加）实测 ~0.15s：只读 `main.rs` 一个文件，所以排在最前。
  *
  * 🔴 为什么 component-size 必须在这一层（2026-11-12 补）：300 行红线以前只在 CI
  * 和「发版跑的完整门禁」里检查，结果是 v0.5.0 把一个 309 行的 `ResultTable` 写完、
@@ -210,11 +219,12 @@ export const SCOPES = [...new Set(Object.values(CI_JOBS))];
  *   clippy / cargo test 数分钟。硬塞进来只会让人开始用 --no-verify。
  *
  * match 只按「暂存文件的后缀」判断这项要不要跑：没有相关改动就跳过，并在
- * 输出里说明跳了哪几项（免得让人以为七项都验过了）。故意不做依赖分析——
+ * 输出里说明跳了哪几项（免得让人以为八项都验过了）。故意不做依赖分析——
  * 宁可多跑一项，也不做会漏的判断。
  */
 export const PRECOMMIT = [
   // 按耗时从短到长排：先红的那项越便宜，越不容易被 --no-verify 绕过。
+  { id: "boot-path", match: /\.rs$/ },
   { id: "source-size", match: /\.rs$/ },
   { id: "component-size", match: /\.(ts|tsx)$/ },
   { id: "rust-tempdir", match: /\.rs$/ },

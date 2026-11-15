@@ -116,6 +116,11 @@ jobs:
       - name: Rust 测试临时目录棘轮
         run: node scripts/gate.mjs --only rust-tempdir
         working-directory: desktop
+      # main.rs 的 fn main 段禁止同步目录遍历，且 boot_timing 起点必须是第一句。
+      # 启动时长没人在 review 时看得见，只能靠门禁。
+      - name: 启动路径禁区
+        run: node scripts/gate.mjs --only boot-path
+        working-directory: desktop
       # 存量违规记在 eslint-suppressions.json（棘轮，只许减少），新违规直接拦。
       - name: eslint
         run: node scripts/gate.mjs --only eslint
