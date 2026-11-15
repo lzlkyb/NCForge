@@ -32,7 +32,10 @@ import 'monaco-editor/esm/vs/editor/contrib/inlayHints/browser/inlayHintsContrib
 import 'monaco-editor/esm/vs/editor/contrib/inPlaceReplace/browser/inPlaceReplace.js';
 import 'monaco-editor/esm/vs/editor/contrib/lineSelection/browser/lineSelection.js';
 import 'monaco-editor/esm/vs/editor/contrib/linesOperations/browser/linesOperations.js';
-import 'monaco-editor/esm/vs/editor/contrib/linkedEditing/browser/linkedEditing.js';
+// 没有 linkedEditing 的 contribution：Java 侧 jdt.ls 0.57 不实现
+// `textDocument/linkedEditingRange`（实测返回 -32601 Unsupported request method），
+// 全仓也没有注册过 provider，留着只是白打一个 chunk 进包里。
+// 要恢复就先在 langProviders 里注册 provider，再把这一行加回来。
 import 'monaco-editor/esm/vs/editor/contrib/links/browser/links.js';
 import 'monaco-editor/esm/vs/editor/contrib/longLinesHelper/browser/longLinesHelper.js';
 import 'monaco-editor/esm/vs/editor/contrib/multicursor/browser/multicursor.js';

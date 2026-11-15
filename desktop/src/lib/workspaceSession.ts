@@ -62,6 +62,14 @@ export interface TabMeta {
   /** 打开时的行数。超过阈值要提示「语义补全不可用」，不必为了它再读一次文件。 */
   lines: number;
   /**
+   * 打开时磁盘上的字节数（`FileContent.size`，虚拟文件用字符数近似）。
+   *
+   * 与 `lines` 一起构成大文件判据（`isHeavyFile`）：行数管正常源码，字节管
+   * 「行少但单行极长」的报文 / SQL / 日志切片。保存后不重算——差几千字节不会
+   * 跨越 2 MB 这条线，真跨了下次打开会重新判。
+   */
+  bytes: number;
+  /**
    * 虚拟文件（不在磁盘上）：jar 内的类，`path` 是 jdt:// 地址。
    * `source` = 有真实源码（配了 _src.jar），`stub` = 只有方法签名，
    * `decompiled` = 没有源码，正文由 CFR 反编译得到。不可编辑、不可保存、不可编译。

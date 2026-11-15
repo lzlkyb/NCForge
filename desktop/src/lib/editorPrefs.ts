@@ -121,6 +121,11 @@ export function monacoOptionsOf(p: EditorPrefs, heavy = false, java = false): Re
     bracketPairColorization: { enabled: !heavy },
     folding: !heavy,
     inlayHints: { enabled: p.inlayHints && !heavy ? "on" : "off" },
+    // 大文件里「输入即弹」的补全实测 p50 1165 ms（6003 行，见 `npm run test:editor-gaps`）：
+    // 每敲一个字都卡一秒，比没有补全更难受。这里只关自动弹出，`.` 触发与 Ctrl+Space
+    // 仍然可用——Eclipse 的 scalable editor 是大文件直接全关，NC 的巨型类文件还要改字段，
+    // 保留手动入口。`suggestOnTriggerCharacters` 不动：`.` 是 Java 最常用的补全入口。
+    quickSuggestions: !heavy,
   };
 }
 

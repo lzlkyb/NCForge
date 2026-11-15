@@ -4,6 +4,7 @@
 // 后端只认真实文件路径（影子工程的 URI 映射在 Rust 侧完成），这里不碰**文件** URI；
 // 唯一的例外是 `jdt://`——它本来就是语言服务的地址，反编译要用它定位 jar 与条目。
 import { beginOperation } from "./operations";
+import { markBootStage } from "./bootTrace";
 import { useSyncExternalStore } from "react";
 import { forEachModel, onModelLifecycle, openVirtualModel } from "./editorStore";
 import { workspaceEpoch } from "./workspaceEpoch";
@@ -24,6 +25,10 @@ export interface LangStatus {
   message: string;
   sourceFiles: number;
   jarCount: number;
+  /** 进度百分比。`null`/缺省 = 服务端原文里没有数字，UI 不许自己编一个。 */
+  progress?: number | null;
+  /** 阶段中文短语（「导入工程」「建立索引」）；空串 = 这条状态不值得单独成句。 */
+  stage?: string;
   /** 读取 lang_status 失败：state 是上次的值、不是确定结论，UI 应显示「状态未知」。 */
   unknown?: boolean;
 }
@@ -420,6 +425,9 @@ function armSettle(): void {
     const idle = now - (lastDiagAt || readyAt);
     if (since >= SETTLE_MAX_MS || (since >= SETTLE_MIN_MS && idle >= SETTLE_IDLE_MS)) {
       setView({ ...view, settled: true });
+      // 启动分段：从这一刻起诊断可信（之前那批「找不到类」是索引没算完的假象），
+      // 也正是用户第一次能看到真实错误提示的时间点。
+      markBootStage("diag");
       latestDiags.forEach((_, key) => applyMarkers(key));
       // 一次刷完再发：面板要在所有文档的标记都对齐之后才更新列表
       publishDiags();
@@ -442,6 +450,9 @@ function onStatus(next: LangStatus): void {
   if (next.state === "ready" && prev !== "ready") {
     readyAt = Date.now();
     lastDiagAt = 0;
+    // 启动分段：索引就绪（在真实工程上这一段是最长的一截，单独记出来才分得清
+    // 「启动慢」和「索引慢」）
+    markBootStage("index");
     armSettle();
     setView({ ...next, settled: false });
     syncAll();
@@ -488,8 +499,24 @@ export async function initLang(): Promise<void> {
  * 所以保留上次状态并标记不确定，由状态栏显示「状态未知」并提供重试入口。
  * 拿到确定结论后必须把标记清掉，否则那条「不确定」会一直挂在状态栏上。
  */
-export async function refreshLangStatus(): Promise<boolean> {
-  try {
+/**
+ * 索引缓存现状：一份 = 一个「工程 + 模块」。
+ *
+ * 多项目切换时要看它：缓存命中就秒级就绪，被挤掉了就重头索引一遍。
+ */
+export interface LangCacheStats {
+  count: number;
+  bytes: number;
+  dir: string;
+  /** 语言服务在跑：后端会拒绝清理，UI 据此把清理按钮灰掉。 */
+  busy: boolean;
+}
+
+export const langCacheStats = () => invoke<LangCacheStats>("lang_cache_stats");
+/** 清掉全部索引缓存，返回删掉的份数。语言服务在跑时后端会拒绝。 */
+export const langCacheClear = () => invoke<number>("lang_cache_clear");
+
+export async function refreshLangStatus(): Promise<boolean> {  try {
     const cur = await invoke<LangStatus>("lang_status");
     if (cur.state === "stopped") {
       // 后端明确说没在跑：这是确定结论，直接如实反映（并清掉上次的模块 / 报错残留）

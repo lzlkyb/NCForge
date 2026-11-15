@@ -1,4 +1,5 @@
 import { languageOfFormat } from "./fileFormats";
+import { markBootStage } from "./bootTrace";
 import { invoke } from "./tauri";
 
 // 与 Rust `workspace.rs` 的 serde 结构一一对应（camelCase，枚举用字面值）。
@@ -35,7 +36,12 @@ export interface WriteArgs {
 
 export const getWorkspace = () => invoke<string | null>("get_workspace");
 export const setWorkspace = (path: string) => invoke<string>("set_workspace", { path });
-export const listDir = (path: string) => invoke<DirItem[]>("fs_list_dir", { path });
+export const listDir = async (path: string) => {
+  const items = await invoke<DirItem[]>("fs_list_dir", { path });
+  // 启动分段：第一次列目录成功 = 目录树有内容了（后续调用由打点自己判重）
+  markBootStage("tree");
+  return items;
+};
 export const readFile = (path: string) => invoke<FileContent>("fs_read_file", { path });
 // 类型断言：WriteArgs 是具名接口，没有索引签名，不能直接赋给 Record<string, unknown>。
 export const writeFile = (args: WriteArgs) =>

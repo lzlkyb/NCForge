@@ -26,6 +26,9 @@ import { jarClassUri } from "../../lib/jarSymbolSearch";
 import { libraryUri } from "../../lib/libraryFiles";
 import { NavigationChoices } from "./NavigationChoices";
 import { JavaEditingDialogs } from "./JavaEditingDialogs";
+import { RefactorMenuHost } from "./RefactorMenuHost";
+import { VoTableDialog } from "./VoTableDialog";
+import { setSearchForm } from "../../lib/searchStore";
 import { RefactorWorkbenchHost } from "./RefactorWorkbenchHost";
 import { ProjectWorkbenchHost } from "./ProjectWorkbenchHost";
 
@@ -204,7 +207,16 @@ export function FilePaneSlots({
     <TreeSvnProvider root={root}>
       <NavigationChoices />
       <JavaEditingDialogs />
+      <RefactorMenuHost />
       <RefactorWorkbenchHost />
+      {/* B3：表名点「在工程中搜索」时跳到搜索页。和 TableRelations 用的是同一条路
+          （setSearchForm + 切页事件），不另造一套导航。 */}
+      <VoTableDialog
+        onSearch={(text) => {
+          setSearchForm({ query: text, regex: false, scope: "all" });
+          window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "search" }));
+        }}
+      />
       <ProjectWorkbenchHost />
       {slot("tree", <>{tree}<TreeSvnSummary /></>)}
       {/* 执行/分组工具已并入文件标签条（EditorGroupsPane → TabStrip），

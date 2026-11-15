@@ -67,6 +67,7 @@ export function tabMetaFromDisk(path: string, c: FileContent): TabMeta {
     // 与编辑器同口径：Monaco 把 \r\n、\r、\n 都当一次换行，
     // 用 split("\n") 会漏掉孤立 \r，大文件提示与行跳转就对不齐了。
     lines: countLines(c.text),
+    bytes: c.size,
   };
 }
 
@@ -90,6 +91,9 @@ export function tabMetaFromJdt(uri: string, text: string, decompiled = false): T
     readOnly: true,
     readOnlyReason: null,
     lines: countLines(text),
+    // 虚拟文件没有磁盘字节数，用字符数近似（UTF-8 下中文会偏小，但判据是 2 MB 这条线，
+    // 差一倍也跨不过去；反编译出来的类本来就到不了这个量级）。
+    bytes: text.length,
     virtual: decompiled ? "decompiled" : isStubSource(text) ? "stub" : "source",
   };
 }

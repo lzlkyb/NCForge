@@ -1,5 +1,10 @@
 .dw-problem-row { display:flex; align-items:center; min-width:0; }
 .dw-problem-row > .wb-prow { flex:1; min-width:0; }
+/* 根因说明（B4）：挂在错误行下面。不挤压上面那行的 flex——那一行还有预览按钮。 */
+.dw-problem-item { min-width:0; }
+.dw-problem-cause { display:flex; gap:5px; align-items:flex-start; padding:0 10px 6px 30px; font-size:11.5px; line-height:1.45; color:hsl(var(--muted-foreground)); }
+.dw-problem-cause strong { color:hsl(var(--foreground)); font-weight:500; }
+.dw-problem-cause svg { flex:none; margin-top:2px; }
 .dw-problem-row[data-selected] { background:hsl(var(--accent)); }
 .dw-preview-button { margin-inline:3px; flex:none; }
 .dw-problem-scopes { display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:6px 10px; border-bottom:1px solid hsl(var(--border)); font-size:12px; }

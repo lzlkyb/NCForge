@@ -1,6 +1,8 @@
 import { useOperations } from "../../lib/operations";
 import { Icon } from "../ui/icon";
-import { inLangModule, refreshLangStatus, restartLang, startLangNow, useLangView } from "../../lib/lang";
+import { inLangModule, langCacheClear, langCacheStats, refreshLangStatus, restartLang, startLangNow, useLangView, type LangCacheStats } from "../../lib/lang";
+import { formatBytes } from "../../lib/resource";
+import { useState } from "react";
 import { Menu, MenuItem } from "../ui/Menu";
 import { setLightMode } from "../../lib/lightMode";
 import { toast } from "../ui/toast";
@@ -15,6 +17,19 @@ import { requestResourceDownload } from "../../lib/resourceActions";
 export function LangBadge({ activePath }: { activePath: string | null }) {
   const v = useLangView();
   const requesting = useOperations().some(o => o.key === "language.control" && (o.state === "running" || o.state === "cancelling"));
+  // 索引缓存：一份 = 一个「工程 + 模块」。多项目来回切时它决定「切回去要不要重头索引」，
+  // 所以给用户一个看得见、清得掉的入口（不然只能去 AppData 里翻）。
+  const [cache, setCache] = useState<LangCacheStats | null>(null);
+  const loadCache = () => { void langCacheStats().then(setCache).catch(() => setCache(null)); };
+  const clearCache = async () => {
+    try {
+      const removed = await langCacheClear();
+      toast(removed > 0 ? `已清理 ${removed} 份索引缓存` : "没有可清理的索引缓存", "success");
+      loadCache();
+    } catch (e) {
+      toast(`清理索引缓存失败：${String(e)}`, "error");
+    }
+  };
   // 总开关关掉时不能什么都不显示：用户会以为「跳转/补全坏了」而找不到原因。
   // 做成可点的按钮：状态栏是用户最常看到它的地方，恢复代码智能不该再绕去设置页。
   if (!v.enabled) {
@@ -100,16 +115,25 @@ export function LangBadge({ activePath }: { activePath: string | null }) {
       </button>
     );
   }
+  // 忙态先说「在干什么、到哪了」。jdt.ls 的进度原文是英文（"42% Starting Java Language
+  // Server"），阶段由后端归纳成中文；没拿到百分比就只说阶段，绝不显示一个停在 0% 的假进度。
+  const busy = v.stage
+    ? v.progress != null
+      ? `代码智能：${v.stage} ${v.progress}%`
+      : `代码智能：${v.stage}…`
+    : v.progress != null
+      ? `代码智能：${v.progress}%`
+      : "代码智能：正在建立索引…";
   const text =
     v.state === "starting"
       ? "代码智能：准备中…"
       : v.state === "indexing"
-        ? "代码智能：正在建立索引…"
+        ? busy
         : v.settled
           ? "jdt.ls 就绪"
           : "代码智能：就绪，错误提示稍后显示…";
   return (
-    <Menu portal align="left" width="w-72" trigger={(open, toggle) => <button type="button" className="wb-status-btn wb-lang" aria-label="代码智能状态详情" aria-haspopup="menu" aria-expanded={open} data-tone={v.state === "ready" && v.settled ? "ok" : "busy"} title={detail} onClick={toggle}>
+    <Menu portal align="left" width="w-72" trigger={(open, toggle) => <button type="button" className="wb-status-btn wb-lang" aria-label="代码智能状态详情" aria-haspopup="menu" aria-expanded={open} data-tone={v.state === "ready" && v.settled ? "ok" : "busy"} title={detail} onClick={() => { if (!open) loadCache(); toggle(); }}>
       <span className="wb-lang-dot" /><span className="wb-lang-text">{text}</span>
     </button>}>
       {close => <>
@@ -119,6 +143,9 @@ export function LangBadge({ activePath }: { activePath: string | null }) {
         {v.message && <p className="wb-tree-menu-note">{v.message}</p>}
         <MenuItem label="为当前文件重新建立索引" icon="refresh" disabled={requesting || v.state !== "ready" || !activePath?.toLowerCase().endsWith(".java")}
           onClick={() => { close(); if (activePath) void restartLang(activePath).catch(e => toast(`重新建立索引失败：${String(e)}`, "error")); }} />
+        {cache && <p className="wb-tree-menu-note">{cache.count > 0 ? `索引缓存 ${cache.count} 份 · 占 ${formatBytes(cache.bytes)}` : "没有索引缓存（下次打开 Java 文件要重建）"}</p>}
+        <MenuItem label="清理索引缓存" icon="trash" hint={cache?.busy ? "先停止代码智能" : "切回旧工程会重新索引"} disabled={requesting || !cache || cache.busy || cache.count === 0}
+          onClick={() => { close(); void clearCache(); }} />
       </>}
     </Menu>
   );

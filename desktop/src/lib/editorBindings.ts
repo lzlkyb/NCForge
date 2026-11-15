@@ -4,6 +4,7 @@ import { organizeImportsCommand } from "./javaActions";
 import { runCallHierarchy } from "./callHierarchy";
 import { runTypeHierarchy } from "./typeHierarchy";
 import { registerRefactorKeys } from "./refactor";
+import { openRefactorMenu } from "./refactorMenu";
 import { registerExtractParameterKey } from "./refactorParameter";
 import { toggleBookmark } from "./bookmarks";
 import { setSession } from "./workspaceSession";
@@ -44,6 +45,14 @@ export function registerEditorBindings(editor: Editor, saveNow: () => void) {
   );
   // 提取类重构（IDEA 同键：Ctrl+Alt+M/V/F/C）。键位与命令面板共用 lib/refactor 里的清单
   registerRefactorKeys(editor);
+  // 重构菜单：Eclipse 是 Alt+Shift+T，IDEA 是 Ctrl+Alt+Shift+T，两个都认。
+  // 在此之前 14 个重构动作只在命令面板里搜得到，等于「有能力但没有入口」。
+  bind(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyT, () => openRefactorMenu(), "重构…");
+  bind(
+    monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyT,
+    () => openRefactorMenu(),
+    "重构…",
+  );
   // 提取参数（受限版，IDEA 同键 Ctrl+Alt+P）
   registerExtractParameterKey(editor);
   // F11 = 加/去书签（IDEA 同键）；Shift+F11 = 打开书签面板

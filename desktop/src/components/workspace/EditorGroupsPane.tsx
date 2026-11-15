@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEve
 import { getSession, setSession, useWorkspaceSelector, type TabMeta } from "../../lib/workspaceSession";
 import { activeOfGroup, emptyEditorGroups, moveGroupFile, removeGroupView, type EditorGroupId } from "../../lib/editorGroups";
 import { setCursor } from "../../lib/cursorStore";
-import { LARGE_FILE_LINES } from "../../lib/largeFile";
+import { isHeavyFile } from "../../lib/largeFile";
 import { filePathKey } from "../../lib/workspace";
 import { EditorPane } from "./EditorPane";
 import { TabStrip } from "./TabStrip";
@@ -94,7 +94,7 @@ export function EditorGroupsPane({ root, tabs, session, reveal, tools, nav }: {
             {active ? <Breadcrumb root={root} active={active} showSymbols={false} /> : <span className="wb-group-path-empty">尚未打开文件</span>}
           </div>)}
         <div id={`wb-editor-${group}-surface`} role="tabpanel" aria-label={`${group === "left" ? "左" : "右"}编辑器组内容`} className="wb-editor-body">
-          <EditorPane groupId={group} focused={focused} onFocus={() => focus(group)} activePath={activePath} readOnly={!!active?.readOnly || !!activePath && isHistoryRestoring(activePath)} heavy={(active?.lines ?? 0) > LARGE_FILE_LINES}
+          <EditorPane groupId={group} focused={focused} onFocus={() => focus(group)} activePath={activePath} readOnly={!!active?.readOnly || !!activePath && isHistoryRestoring(activePath)} heavy={active !== undefined && isHeavyFile(active)}
             reveal={focused && (!reveal?.group || reveal.group === group) && (!reveal?.path || filePathKey(reveal.path) === filePathKey(activePath ?? "")) ? reveal : null} onCursor={(line, column) => { if (getSession().editorGroups?.focused === group) setCursor(line, column); }}
             onSave={prepare => { if (activePath) void session.saveFile(activePath, false, undefined, prepare); }} />
           {!active && <EmptyEditor root={root} onOpen={path => { focus(group); void session.openFile(path); }} />}

@@ -98,7 +98,7 @@ export function EditorBanners({
       )}
       {showLargeHint && active && (
         <ReadingNotice summary={`${active.lines} 行大文件 · 阅读优化已启用`}
-          detail="已暂停括号对着色、代码折叠和小地图；语法高亮、搜索、编译和补全仍可用。代码智能首次分析可能较慢。" dismiss={() => onDismissLargeHint(active.path)} />
+          detail="已暂停括号对着色、代码折叠、小地图和「输入即弹」的补全建议：6000 行实测补全要 1.1 秒，自动弹出会让每敲一个字都卡一下。输入 . 触发的成员提示与 Ctrl+Space 仍可用，语法高亮、搜索、编译不受影响。" dismiss={() => onDismissLargeHint(active.path)} />
       )}
     </>
   );

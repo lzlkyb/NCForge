@@ -21,7 +21,9 @@ import { NAVIGATION_LABELS, type NavigationKind } from "../lib/navigationTargets
 import { registerJavaRunCommands } from "../lib/javaRun";
 import { registerDebugAdvancedCommands } from "../lib/debugAdvanced";
 import { registerRefactorWorkbenchCommands } from "../lib/refactorWorkbench";
+import { registerRefactorMenuCommand } from "../lib/refactorMenu";
 import { registerProjectWorkbenchCommands } from "../lib/projectWorkbench";
+import { currentClassName, openVoTableDialog } from "../lib/voTables";
 
 /** 命令面板里文件页命令用到的「当前值」。闭包每次渲染都是新的，所以经 ref 读最新值。 */
 export interface FilesTabCommands {
@@ -60,7 +62,7 @@ export interface FilesTabCommands {
  */
 export function useFilesTabCommands(deps: FilesTabCommands) {
   useEffect(() => {
-    const release = [registerJavaRunCommands(() => setSession({ panelOpen: true, panelTab: "tests" })), registerDebugAdvancedCommands(), registerRefactorWorkbenchCommands(), registerProjectWorkbenchCommands()];
+    const release = [registerJavaRunCommands(() => setSession({ panelOpen: true, panelTab: "tests" })), registerDebugAdvancedCommands(), registerRefactorWorkbenchCommands(), registerRefactorMenuCommand(), registerProjectWorkbenchCommands()];
     return () => release.forEach(dispose => dispose());
   }, []);
   const live = useRef(deps);
@@ -73,6 +75,18 @@ export function useFilesTabCommands(deps: FilesTabCommands) {
     // `isJavaFile` 同时挡掉 `jdt://` 虚拟标签：jar 内的类没有可编的源文件。
     { id: "build.compileFile", title: "编译当前文件（只编这一个，比编模块快）", run: () => live.current.compileActiveFile(), enabled: () => !!live.current.activePath && isJavaFile(live.current.activePath) && !live.current.compiling },
     { id: "build.cancel", title: "取消编译", run: () => void compileCancel(), enabled: () => live.current.compiling },
+    // B3：反向查这个 VO 是哪张表。只对 Java 文件有意义，且必须在类里
+    // （光标在注释/文件头时 currentClassName 会退回第一个顶层类，仍然可用）。
+    {
+      id: "db.voTables",
+      title: "查看这个 VO 对应的表与字段",
+      run: () => {
+        const name = currentClassName();
+        if (!name) { toast("把光标放到 Java 类里再用这条命令", "warning"); return; }
+        openVoTableDialog(name);
+      },
+      enabled: () => !!live.current.activePath && currentIsJava(),
+    },
     { id: "tab.close", title: "关闭当前标签", run: () => live.current.activePath && live.current.closeTab(live.current.activePath), enabled: () => !!live.current.activePath },
     {
       id: "tab.reopen",

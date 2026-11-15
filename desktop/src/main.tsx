@@ -10,6 +10,7 @@ import { ResourceProvider } from "./contexts/ResourceContext";
 import { ToastProvider } from "./components/ui/toast";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { getStoredTheme } from "./lib/theme";
+import { reportFirstFrame } from "./lib/bootTrace";
 import { initializeAppearance } from "./lib/appearance";
 import { initializeUiDensity } from "./lib/uiDensity";
 import { initializeMotionPreference } from "./lib/motionPreference";
@@ -68,3 +69,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+// 冷启动基线：首帧画完后上报一次，Rust 侧补上「进程启动」这段起点（见 `boot_timing`）。
+// 用 requestAnimationFrame 而不是 setTimeout(0)：rAF 回调意味着这一帧已经画出来了。
+// 失败不弹提示：旧后端没有这个命令时，用户不该因为一条统计而看到一个错误。
+requestAnimationFrame(() => reportFirstFrame());

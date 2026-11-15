@@ -47,7 +47,7 @@ export function useTabRestore(
       const shells: TabMeta[] = snap.tabs.filter(path => !opened.includes(path)).map(path => ({
         path, name: path.split(/[\\/]/).pop() ?? path, deferred: true,
         encoding: "UTF-8", hasBom: false, eol: "LF", mtimeMs: 0, dirty: false,
-        eolChanged: false, readOnly: false, readOnlyReason: null, lines: 0,
+        eolChanged: false, readOnly: false, readOnlyReason: null, lines: 0, bytes: 0,
       }));
       setSession({ tabs: tabs => [...tabs, ...shells] });
       done = true;

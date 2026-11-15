@@ -30,7 +30,7 @@ import { invalidateFileIndex } from "../../lib/fileIndex";
 import { getCodeDiags, useCodeDiags } from "../../lib/diagStore";
 import { mergeProblems } from "../../lib/problemList";
 import { useNav } from "../../lib/navHistory";
-import { LARGE_FILE_LINES } from "../../lib/largeFile";
+import { isHeavyFile } from "../../lib/largeFile";
 import { openPalette } from "../../lib/paletteStore";
 import { openFileHistory } from "../../lib/reviewSession";
 import {
@@ -213,7 +213,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
 
   const active: TabMeta | null = tabs.find((t) => t.path === activePath) ?? null;
   const showLargeHint =
-    active !== null && active.lines > LARGE_FILE_LINES && !largeHintDismissed.includes(active.path);
+    active !== null && isHeavyFile(active) && !largeHintDismissed.includes(active.path);
 
   return (
     <>
@@ -232,7 +232,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
           activeMark: active ? tree.marks[active.path] : undefined,
           showLargeHint,
           // 大文件降级：提示条可以关掉，但编辑器里的降级一直有效
-          heavyFile: active !== null && active.lines > LARGE_FILE_LINES,
+          heavyFile: active !== null && isHeavyFile(active),
           conflictPath,
           encodingIssue,
           saving,

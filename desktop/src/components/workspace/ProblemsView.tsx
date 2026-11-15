@@ -9,7 +9,7 @@ import { useWorkspaceSelector } from "../../lib/workspaceSession";
 import type { CompileDiagnostic, CompileResult, Problem } from "../../lib/compile";
 import { filterProblems, formatProblems, groupProblems, type ProblemFilter, type UnifiedProblem } from "../../lib/problemList";
 import { problemsAtPath, scopeProblems, type DiagnosticScope, type ProblemPathScope } from "../../lib/diagnosticScope";
-import { ProblemRow } from "./ProblemRow";
+import { ProblemRow, ProblemCause } from "./ProblemRow";
 import { ProblemDiagnostics } from "./ProblemDiagnostics";
 import { SourceContextPreview } from "./SourceContextPreview";
 import "../../diagnostic-workspace.css";
@@ -49,7 +49,9 @@ export function ProblemsView({ problems, diags, running, compiled, pathFilter = 
     else if (p.source === "inspect") onOpenAt(p.path, p.line);
     else onOpenProblem({ file: p.path, line: p.line, severity: p.severity === "info" ? "warning" : p.severity, message: p.message });
   };
-  const row = (p: UnifiedProblem, key: string) => <ProblemRow key={key} problem={p} selected={preview === p} onOpen={() => open(p)} onPreview={() => setSelected(selected === p ? null : p)} />;
+  // 根因单独一行挂在错误下面（B4）：包一层容器只是为了让「行 + 说明」成组，
+  // 不动 `.dw-problem-row` 自己的 flex 布局——那一行还有预览按钮，改布局会牵动面板宽度
+  const row = (p: UnifiedProblem, key: string) => <div key={key} className="dw-problem-item"><ProblemRow problem={p} selected={preview === p} onOpen={() => open(p)} onPreview={() => setSelected(selected === p ? null : p)} /><ProblemCause message={p.message} /></div>;
   return <div className="dw-problems-shell">
     <div className="dw-problem-scopes">
       <label>范围 <select aria-label="问题范围" value={scope} disabled={!!pathFilter} onChange={event => { setScope(event.target.value as DiagnosticScope); setSelected(null); }}>
