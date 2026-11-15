@@ -1,5 +1,3 @@
-import { flushDoc, langRequest } from "./lang";
-
 /** 文件内的一个符号（类 / 方法 / 字段），行列都是 1 基。 */
 export interface FlatSymbol {
   name: string;
@@ -126,6 +124,7 @@ export function resetSymbolCache(): void {
 
 /** 取一个 Java 文件的符号。调用方负责确认代码智能已就绪。 */
 export async function fetchSymbols(path: string): Promise<FlatSymbol[]> {
+  const { flushDoc, langRequest } = await import("./lang");
   // 与补全 / 跳转同理：先把还没发出去的修改发给服务端，否则算的是改动前的文本
   await flushDoc(path);
   // 5 秒。单文件的 documentSymbol 正常是几十毫秒；15 秒只会在服务端卡住时

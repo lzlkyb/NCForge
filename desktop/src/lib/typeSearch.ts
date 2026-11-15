@@ -3,6 +3,7 @@
 // 数据都来自后端 `search_types`，前端不做二次过滤——「工作区优先、jar 去重」这类
 // 规则只写一份，快速面板与将来的其它入口看到的结果才一致。
 import { invoke } from "./tauri";
+import { libraryUri } from "./libraryFiles";
 
 export interface TypeHit {
   /** 全限定名 */
@@ -65,10 +66,8 @@ export const searchSymbols = (query: string, limit = 50) =>
   invoke<SymbolSearchResult>("search_workspace_symbols", { query, limit });
 
 /**
- * jar 内类型的打开地址。查询串是标记而不是 jdt.ls 的真实附件：
- * `loadJdtSource` 见到它就不问语言服务，直接让后端用 CFR 反编译。
+ * jar 内类型使用准确的绝对来源，避免不同目录的同名 jar 打开成另一份。
  */
 export function jarTypeUri(hit: TypeHit): string {
-  const name = hit.jar.split(/[\\/]/).pop() ?? hit.jar;
-  return `jdt://contents/${encodeURIComponent(name)}/${hit.name.replace(/\./g, "/")}.class?=ncforge-decompile`;
+  return libraryUri({ source: hit.jar, entry: `${hit.name.replace(/\./g, "/")}.class`, archive: true });
 }

@@ -7,13 +7,14 @@
 import { beginOperation } from "./operations";
 import { useSyncExternalStore } from "react";
 import { currentModel, cursorAt } from "./editorActions";
-import { context } from "./langProviders";
+import { context } from "./langProviderContext";
 import { uriToPath } from "./langConvert";
-import { langReady, langRequest, navigate } from "./lang";
+import { langReady, langRequest, langCapabilityEpoch, navigate } from "./lang";
+import { workspaceEpoch } from "./workspaceEpoch";
 import { getKeymap, prettyChord } from "./keymap";
 import { getBindingOverride } from "./keybindings";
-import { setSession } from "./workspaceSession";
 import { toast } from "../components/ui/toast";
+import { selectRelationView } from "./codeRelations";
 
 export const TYPE_HIERARCHY_COMMAND = "ncforge.typeHierarchy";
 
@@ -48,6 +49,7 @@ let state: TypeState = EMPTY;
 const listeners = new Set<() => void>();
 /** 查询代际：连按两次时只让最后一次的结果落地。 */
 let seq = 0;
+let resultCurrent: (() => boolean) | null = null;
 
 function set(next: Partial<TypeState>): void {
   state = { ...state, ...next };
@@ -146,32 +148,42 @@ export async function openTypeHierarchy(): Promise<void> {
     toast("代码智能未就绪，类型层级需要它（设置 → 开发环境里启动）", "warning");
     return;
   }
+  const version = model.getVersionId(), epoch = workspaceEpoch(), capability = langCapabilityEpoch();
+  const snapshotCurrent = () => !model.isDisposed() && model.getVersionId() === version && workspaceEpoch() === epoch && langCapabilityEpoch() === capability;
   const operation = beginOperation({ key: "language.types", label: "查询类型层级", page: "files", phase: "准备类型并查找父类与子类" });
   if (!operation) return;
   const my = ++seq;
+  const current = () => {
+    if (my !== seq) return false;
+    if (snapshotCurrent()) return true;
+    set({ loading: false, error: "查询期间文件、工程或代码智能发生变化，请重新查询" });
+    return false;
+  };
+  set({ loading: true, error: null });
   try {
+    if (!current()) return;
     const ctx = await context(model, { lineNumber: pos.line, column: pos.column });
+    if (!current()) return;
     if (!ctx) {
-      toast("当前文件不在可分析的模块里", "warning");
+      set({ loading: false, error: "当前文件不在可分析的模块里" });
       return;
     }
-    set({ loading: true, error: null });
     const res = await langRequest<LspTypeHierarchy | null>(
       "workspace/executeCommand", ctx.path,
       { command: TYPE_HIERARCHY_COMMAND, arguments: [{ uri: "", line: ctx.position.line, character: ctx.position.character }] },
       60_000,
     );
-    if (my !== seq) return;
-    if (model.isDisposed()) { set({ loading: false, error: "文件已关闭或工程已切换，请重新查询" }); return; }
+    if (!current()) return;
     const root = toTypeEntry(res?.type);
     if (!root) {
-      set({ root: null, supertypes: [], subtypes: [], loading: false, error: "光标所在位置不是一个类型（类 / 接口 / 枚举）" });
+      set({ loading: false, error: "光标所在位置不是一个类型（类 / 接口 / 枚举）" });
       return;
     }
     operation.finish("success", `父类型 ${res?.supertypes?.length ?? 0} 个、子类型 ${res?.subtypes?.length ?? 0} 个`);
+    resultCurrent = snapshotCurrent;
     set({ root, supertypes: entries(res?.supertypes), subtypes: entries(res?.subtypes), loading: false, error: null });
   } catch (e) {
-    if (my !== seq) return;
+    if (!current()) return;
     const msg = explainTypeHierarchyError(String(e));
     operation.finish("failed", msg);
     set({ loading: false, error: msg });
@@ -183,6 +195,7 @@ export async function openTypeHierarchy(): Promise<void> {
 
 /** 点一行：有源码就跳过去；jar 内类型走只读标签；没位置的（如 java.lang.Object）不动。 */
 export function openTypeEntry(it: TypeEntry): void {
+  if (resultCurrent && !resultCurrent()) { toast("这些类型结果所属的文件或工程已变化，请重新查询", "warning"); return; }
   if (it.path) navigate({ kind: "file", path: it.path, line: it.line, column: it.column });
   else if (it.uri) navigate({ kind: "jdt", uri: it.uri, line: it.line, column: it.column });
 }
@@ -194,6 +207,6 @@ export function openTypeEntry(it: TypeEntry): void {
  * 否则按了键像没反应（与调用层级同一处理）。
  */
 export async function runTypeHierarchy(): Promise<void> {
-  setSession({ panelOpen: true, panelTab: "types" });
+  selectRelationView("types");
   await openTypeHierarchy();
 }
