@@ -218,6 +218,7 @@ fn set_last_build_error(e: Option<String>) {
 
 /// 打开工作区后预热：第一次搜 jar 内注释不该让用户等一分钟。
 pub fn spawn_prewarm_src_notes(state: Arc<AppState>) {
+    super::library_cmds::spawn_prewarm_library(state.clone());
     tauri::async_runtime::spawn(async move {
         let Ok((home, cache)) = resolve_paths(&state).await else {
             return;

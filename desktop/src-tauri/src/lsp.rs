@@ -272,14 +272,14 @@ impl JdtlsLaunch<'_> {
 /// 发给 jdt.ls 的 `java.*` 配置（initialize 与 didChangeConfiguration 共用）。
 ///
 /// - `autobuild` 关：红线「禁止 jdt.ls 写用户文件」，也省 CPU；
-/// - `format` 关：NC 代码是 CRLF + 制表符风格，任何自动格式化都是灾难；
+/// - `format` 开放手动/选区调用：客户端默认关闭保存时格式化，缩进参数来自当前编辑器；
 /// - `.svn` 排除：不排除时索引会卡在 35% 一分钟以上（NC 工作副本每层都有 `.svn`）。
 pub fn build_settings(runtime_home: &str) -> Value {
     json!({
         "java": {
             "configuration": { "runtimes": [{ "name": "JavaSE-1.8", "path": runtime_home, "default": true }] },
             "autobuild": { "enabled": false },
-            "format": { "enabled": false },
+            "format": { "enabled": true },
             "import": { "exclusions": ["**/.svn/**"] },
             "errors": { "incompleteClasspath": { "severity": "ignore" } },
             "completion": { "maxResults": 50 }
@@ -370,6 +370,8 @@ pub fn build_initialize_params(
                 "workspaceFolders": true,
                 "configuration": true,
                 "didChangeConfiguration": { "dynamicRegistration": true },
+                // Accept file moves in a preview plan; the client still controls all writes.
+                "workspaceEdit": { "documentChanges": true, "resourceOperations": ["create", "rename", "delete"] },
                 "applyEdit": false
             }
         },
@@ -749,7 +751,7 @@ pub(crate) mod tests {
             r"D:\ncc\1909home\ufjdk"
         );
         assert_eq!(opts["settings"]["java"]["autobuild"]["enabled"], false);
-        assert_eq!(opts["settings"]["java"]["format"]["enabled"], false);
+        assert_eq!(opts["settings"]["java"]["format"]["enabled"], true);
         assert_eq!(
             opts["settings"]["java"]["import"]["exclusions"][0],
             "**/.svn/**"

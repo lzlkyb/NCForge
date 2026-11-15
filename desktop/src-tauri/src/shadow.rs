@@ -305,7 +305,7 @@ fn common_jars(index: &ClassIndex, nc_home: &Path) -> Vec<u32> {
 }
 
 /// `xxx.jar` 同目录下的 `xxx_src.jar`。
-fn src_jar_of(jar: &Path) -> Option<PathBuf> {
+pub(crate) fn src_jar_of(jar: &Path) -> Option<PathBuf> {
     let stem = jar.file_stem()?.to_string_lossy();
     let candidate = jar.with_file_name(format!("{stem}_src.jar"));
     candidate.is_file().then_some(candidate)
@@ -382,10 +382,16 @@ pub fn generate(spec: &ShadowSpec) -> Result<ShadowProject, String> {
     let mut jar_ids: BTreeSet<u32> = compile::select_jars(spec.index, &files);
     jar_ids.extend(common_jars(spec.index, spec.nc_home));
     jar_ids.extend(spec.extra_jars.iter().copied());
+    let attachments = crate::classpath_sources::attachments(spec.workspace_root);
     let jars: Vec<(PathBuf, Option<PathBuf>)> = jar_ids
         .iter()
         .filter_map(|&i| spec.index.jars.get(i as usize))
-        .map(|j| (j.clone(), src_jar_of(j)))
+        .map(|j| {
+            (
+                j.clone(),
+                crate::classpath_sources::source_for(&attachments, j).or_else(|| src_jar_of(j)),
+            )
+        })
         .collect();
 
     // 4. 编码：按内容探测 UTF-8 的文件逐个登记
@@ -407,6 +413,7 @@ pub fn generate(spec: &ShadowSpec) -> Result<ShadowProject, String> {
         class_dirs: &class_dirs,
         jars: &jars,
     });
+    let classpath = crate::classpath_sources::apply_shadow_javadoc(&classpath, &attachments);
     changed |= write_if_changed(&root.join(".project"), &render_project())?;
     changed |= write_if_changed(&root.join(".classpath"), &classpath)?;
     changed |= write_if_changed(

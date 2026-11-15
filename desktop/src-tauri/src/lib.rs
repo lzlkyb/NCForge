@@ -10,6 +10,7 @@
 //! 命令层在 `src/commands/xxx_cmds.rs`，在 `commands/mod.rs` 声明 + `pub use`，
 //! 最后在 `main.rs` 的 `invoke_handler!` 注册。四处，缺一不可。
 
+pub mod app_lifecycle;
 pub mod atomic_file;
 pub mod bmf_excel;
 pub mod bmf_export;
@@ -38,6 +39,7 @@ pub mod build_layout;
 pub mod build_state;
 /// 读 cc-bridge 变更日志（按需求审查）。
 pub mod cc_journal;
+pub mod change_shelf;
 pub mod class_pool;
 pub mod commands;
 pub mod compile;
@@ -77,6 +79,9 @@ pub mod java_types;
 pub mod jvm_runtime;
 pub mod lang;
 pub mod launch;
+pub mod library_index;
+pub mod library_search;
+pub mod library_source;
 pub mod local_history;
 pub mod lsp;
 pub mod md_dict;
@@ -96,6 +101,7 @@ pub mod patch_build;
 pub mod patch_view;
 /// 需求表：需求、文件归属、当前需求（按需求审查）。
 pub mod req_store;
+pub mod req_versions;
 pub mod resource_pack;
 pub mod retry;
 /// 按改动块的「已审」落盘。
@@ -160,4 +166,7 @@ pub fn notify_toast(_handle: &tauri::AppHandle, _body: &str) {}
 
 pub mod prewarm_budget;
 
+pub mod classpath_sources;
+pub mod java_run;
 pub mod process_budget;
+pub mod workspace_edit;

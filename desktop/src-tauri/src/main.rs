@@ -143,6 +143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let app_state = AppState::new(app_config, config_dir.clone());
             app.manage(app_state.clone());
             app.manage(db_transfer_destination::DestinationRegistry::default());
+            app.manage(java_run::JavaRuns::default());
 
             // 上次的工作区在启动时就挂上文件监听：树第一次列目录后，外部改动立即自动刷新。
             // 失败只记日志（没有自动刷新，展开 / 手动刷新照常可用）。
@@ -323,6 +324,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::search_workspace_symbols,
             commands::search_jar_symbols,
             commands::search_src_notes,
+            commands::search_library_files,
+            commands::read_library_file,
+            commands::library_search_cancel,
             commands::read_src_file,
             commands::search_replace,
             commands::search_cancel,
@@ -436,7 +440,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::req_note_manual,
             commands::req_record_package,
             commands::req_prune,
-            commands::review_blocks_list,
+            commands::review_blocks_marks,
+            commands::req_file_versions,
             commands::review_blocks_set,
             commands::svn_housekeeping,
             commands::svn_backup_delete,
@@ -457,6 +462,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::db_conn_reorder,
             commands::db_conn_test,
             commands::db_conn_import_props,
+            commands::db_conn_preview_props,
             commands::db_prop_sources,
             commands::db_prop_import,
             // 数据库连接：从 DataGrip / PL/SQL Developer 导入（只导结构）
@@ -522,6 +528,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commands::quit_check_acked,
             commands::quit_cancel,
             commands::app_quit,
+            commands::java_run,
+            commands::java_run_cancel,
+            commands::java_run_discover,
+            commands::java_run_open_report,
+            commands::java_diagnostic,
+            commands::debug_set_step_filters,
+            commands::workspace_apply_edit,
+            commands::project_run_tool,
+            commands::project_stop_tool,
+            commands::project_open_terminal,
+            commands::project_tools_context,
+            commands::project_plan_attachment,
+            commands::change_shelf_list,
+            commands::change_shelf_create,
+            commands::change_shelf_plan,
+            commands::change_shelf_delete,
         ])
         .on_window_event(|window, event| match event {
             // 点 X / Alt+F4 / 标题栏关闭按钮 = 退出应用（2026-10-31 起不再收进托盘）。
@@ -562,32 +584,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // 本应用现在的语义就是关窗即退出，拦住它只会得到一个关不掉的幽灵进程
             // （托盘已经没了，用户连唤回界面都做不到）。
             if let tauri::RunEvent::Exit = event {
-                if let Some(st) = app_handle.try_state::<std::sync::Arc<AppState>>() {
-                    let session = st.lang.lock().unwrap_or_else(|e| e.into_inner()).session.take();
-                    if let Some(s) = session {
-                        s.client.kill();
-                    }
-                    // 调试连接：不关的话 java-debug 的适配器会话会挂在 jdt.ls 里。
-                    // 两个目标各一条，退出时都要收。
-                    let (server_debug, client_debug) = {
-                        let mut run = st.debug.lock().unwrap_or_else(|e| e.into_inner());
-                        (run.server.session.take(), run.client.session.take())
-                    };
-                    for s in [server_debug, client_debug].into_iter().flatten() {
-                        s.client.kill();
-                    }
-                    // 数据库桥同理：每个连接一个 JVM，未提交的事务随进程结束由 Oracle 回滚
-                    let bridges: Vec<_> = st
-                        .db
-                        .lock()
-                        .map(|mut m| m.drain().map(|(_, b)| b).collect())
-                        .unwrap_or_default();
-                    for b in bridges {
-                        b.shutdown();
-                    }
-                    // 常驻 ecj worker：不留孤儿 JVM（点 X 即退出，没有托盘）。
-                    ecj_worker::shutdown_all();
-                }
+                app_lifecycle::shutdown(app_handle);
             }
         });
 

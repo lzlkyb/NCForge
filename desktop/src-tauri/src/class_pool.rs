@@ -194,7 +194,7 @@ fn mutf8_unit(raw: &[u8], i: usize) -> Option<(u32, usize)> {
 
 /// 按 Java 改性 UTF-8（JVMS §4.4.7）解码：NUL 编成 `C0 80`，增补字符编成两对 3 字节
 /// 代理。标准 UTF-8 校验会把这些字节整条拒绝，而 NC 的常量里真有它们。
-fn decode_mutf8(raw: &[u8]) -> Option<String> {
+pub(crate) fn decode_mutf8(raw: &[u8]) -> Option<String> {
     let mut out = String::new();
     let mut i = 0usize;
     while i < raw.len() {

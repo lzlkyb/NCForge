@@ -146,9 +146,12 @@ pub fn run_cfr(java: &Path, cfr: &Path, jar: &Path, entry: &str) -> Result<Strin
     // 不然 JVM 会把 `--hideutf` 当成 jar 文件，直接报 Unable to access jarfile。
     cmd.args(["-Dfile.encoding=UTF-8", "-Xmx512m", "-jar"])
         .arg(cfr)
-        .arg(jar)
-        .arg(entry)
-        .args(["--hideutf", "false"])
+        .arg(jar);
+    // 散放 class 直接作为输入；空条目不是 CFR 的有效选项。
+    if !entry.is_empty() {
+        cmd.arg(entry);
+    }
+    cmd.args(["--hideutf", "false"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());

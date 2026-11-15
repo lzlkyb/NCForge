@@ -22,6 +22,9 @@ use serde_json::{json, Value};
 
 use crate::lsp::{encode_message, FrameDecoder};
 
+mod settings;
+pub use settings::{read_debug_settings_args, update_step_filters_args, verify_step_filters_reply};
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }

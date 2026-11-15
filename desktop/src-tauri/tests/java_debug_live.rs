@@ -147,10 +147,13 @@ fn write_project(ws: &Path) {
     public static void main(String[] args) throws Exception {
         for (int i = 1; i <= 20; i++) {
             total += i;
-            Thread.sleep(150);
+            Helper.pause();
         }
         System.out.println("total=" + total);
     }
+}
+class Helper {
+    static void pause() throws Exception { Thread.sleep(150); }
 }
 "#,
     )
@@ -455,6 +458,132 @@ fn 真机走完一条调试会话() {
         "i + 100 的结果不对：{value}"
     );
 
+    // A verified false-condition/logpoint at the cursor still cannot stop execution.
+    let cursor_rule = debug::BreakpointSpec {
+        line: 6,
+        condition: Some("false".into()),
+        log_message: Some("cursor user rule".into()),
+        ..Default::default()
+    };
+    let user_rules = client
+        .request(
+            "setBreakpoints",
+            debug::set_breakpoints_args(
+                &hello,
+                &[
+                    debug::BreakpointSpec {
+                        line: 5,
+                        ..Default::default()
+                    },
+                    cursor_rule.clone(),
+                ],
+            ),
+            Duration::from_secs(20),
+        )
+        .expect("install user conditional cursor rule");
+    assert_eq!(user_rules["breakpoints"][1]["verified"], true);
+    // Override that outgoing rule with an unconditional temporary breakpoint.
+    let temporary = client
+        .request(
+            "setBreakpoints",
+            debug::set_breakpoints_args(
+                &hello,
+                &[
+                    debug::BreakpointSpec {
+                        line: 5,
+                        ..Default::default()
+                    },
+                    debug::BreakpointSpec {
+                        line: 6,
+                        ..Default::default()
+                    },
+                ],
+            ),
+            Duration::from_secs(20),
+        )
+        .expect("install temporary cursor breakpoint");
+    assert_eq!(
+        temporary["breakpoints"][1]["verified"], true,
+        "临时断点未落点：{temporary}"
+    );
+    client
+        .request(
+            "continue",
+            json!({ "threadId": thread_id }),
+            Duration::from_secs(15),
+        )
+        .expect("continue to cursor");
+    let at_cursor = wait_event(&rx, "stopped", Duration::from_secs(30));
+    let cursor_tid = at_cursor["threadId"].as_i64().unwrap();
+    let cursor_stack = client
+        .request(
+            "stackTrace",
+            json!({ "threadId": cursor_tid, "startFrame": 0, "levels": 5 }),
+            Duration::from_secs(15),
+        )
+        .unwrap();
+    assert_eq!(
+        cursor_stack["stackFrames"][0]["line"], 6,
+        "运行到光标应到第 6 行：{cursor_stack}"
+    );
+    let restored = client
+        .request(
+            "setBreakpoints",
+            debug::set_breakpoints_args(
+                &hello,
+                &[
+                    debug::BreakpointSpec {
+                        line: 5,
+                        ..Default::default()
+                    },
+                    cursor_rule,
+                ],
+            ),
+            Duration::from_secs(20),
+        )
+        .expect("restore user breakpoint list");
+    assert_eq!(restored["breakpoints"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        restored["breakpoints"][0]["verified"], true,
+        "用户断点恢复失败：{restored}"
+    );
+    client
+        .request(
+            "continue",
+            json!({ "threadId": cursor_tid }),
+            Duration::from_secs(15),
+        )
+        .unwrap();
+    let restored_stop = wait_event(&rx, "stopped", Duration::from_secs(30));
+    let thread_id = restored_stop["threadId"].as_i64().unwrap();
+    let restored_stack = client
+        .request(
+            "stackTrace",
+            json!({ "threadId": thread_id, "startFrame": 0, "levels": 5 }),
+            Duration::from_secs(15),
+        )
+        .unwrap();
+    assert_eq!(
+        restored_stack["stackFrames"][0]["line"], 5,
+        "清除临时断点后仍应命中用户第 5 行：{restored_stack}"
+    );
+
+    let filters = vec!["Helper".into(), "java.*".into()];
+    let current = lsp
+        .request(
+            "workspace/executeCommand",
+            debug::read_debug_settings_args(),
+            Duration::from_secs(15),
+        )
+        .expect("language server returns existing settings");
+    let args = debug::update_step_filters_args(current, &filters)
+        .expect("preserve existing settings and valid log level");
+    let settings = lsp
+        .request("workspace/executeCommand", args, Duration::from_secs(15))
+        .expect("language server updates actual debug settings");
+    debug::verify_step_filters_reply(settings, &filters)
+        .expect("debug settings reply confirms actual skip classes");
+
     // 步过：从第 5 行到第 6 行
     client
         .request(
@@ -475,6 +604,29 @@ fn 真机走完一条调试会话() {
     assert_eq!(
         stack["stackFrames"][0]["line"], 6,
         "步过应到第 6 行：{stack}"
+    );
+
+    // Helper.pause has real Java bytecode. The active class filter must skip it.
+    client
+        .request(
+            "stepIn",
+            json!({ "threadId": tid }),
+            Duration::from_secs(15),
+        )
+        .expect("stepIn with Helper filtered");
+    let filtered_stop = wait_event(&rx, "stopped", Duration::from_secs(30));
+    let filtered_tid = filtered_stop["threadId"].as_i64().unwrap();
+    let filtered_stack = client
+        .request(
+            "stackTrace",
+            json!({ "threadId": filtered_tid, "startFrame": 0, "levels": 5 }),
+            Duration::from_secs(15),
+        )
+        .unwrap();
+    let filtered_line = filtered_stack["stackFrames"][0]["line"].as_i64().unwrap();
+    assert!(
+        (4..=6).contains(&filtered_line),
+        "过滤 Helper 后应留在 Hello 主方法：{filtered_stack}"
     );
 
     client.close();

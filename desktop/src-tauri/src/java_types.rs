@@ -63,15 +63,22 @@ pub(crate) fn type_match_score(query: &str, name: &str) -> Option<u8> {
 ///
 /// 首字母串是「VBO → VoucherBillOrder」这类查法的关键，逐条现算同样要分配一个
 /// String；存在索引里就把这条也省掉。
+/// name 可传全限定名；短查询仍只匹配类名，带包名的查询按全名精确/前缀匹配。
 pub(crate) fn type_match_score_with(query: &str, name: &str, initials: Option<&str>) -> Option<u8> {
     if query.is_empty() || query.len() > 100 {
         return None;
     }
+    let qualified = query.contains('.');
+    let name = if qualified { name } else { simple(name) };
     if eq_ignore_case(name, query) {
         return Some(0);
     }
     if starts_with_ignore_case(name, query) {
         return Some(1);
+    }
+    // 包限定查询不能退回短名/首字母，否则精准查类又会混入其他包的同名类。
+    if qualified {
+        return None;
     }
     if query.len() >= 2 {
         let owned;
@@ -342,7 +349,7 @@ impl TypeCatalog {
         let mut hits: Vec<(u8, &Entry)> = self
             .entries
             .iter()
-            .filter_map(|e| type_match_score(query, simple(&e.name)).map(|s| (s, e)))
+            .filter_map(|e| type_match_score(query, &e.name).map(|s| (s, e)))
             .collect();
         hits.sort_by(|a, b| {
             a.0.cmp(&b.0)
@@ -461,6 +468,65 @@ mod tests {
         assert_eq!(type_match_score("VBO", "VoucherBillOrder"), Some(2));
         assert_eq!(type_match_score("rder", "Order"), Some(3));
         assert_eq!(type_match_score("xyz", "Voucher"), None);
+    }
+
+    #[test]
+    fn qualified_type_query_matches_package_and_class() {
+        let name = "nc.ui.pp.m28.editor.card.afteredit.CardBodyAfterEditEventHandler";
+        assert_eq!(type_match_score(name, name), Some(0));
+        assert_eq!(type_match_score(&name.to_uppercase(), name), Some(0));
+        assert_eq!(
+            type_match_score("nc.ui.pp.m28.editor.card.afteredit.CardBody", name),
+            Some(1)
+        );
+        assert_eq!(
+            type_match_score(
+                "nc.ui.pp.m99.editor.card.afteredit.CardBodyAfterEditEventHandler",
+                name
+            ),
+            None
+        );
+        assert_eq!(
+            type_match_score("CardBodyAfterEditEventHandler", name),
+            Some(0)
+        );
+        assert_eq!(type_match_score("CBAEEH", name), Some(2));
+    }
+
+    #[test]
+    fn qualified_type_search_filters_same_name_jar_classes() {
+        let temp = tempfile::tempdir().unwrap();
+        let jar = temp.path().join("types.jar");
+        let mut zip = zip::ZipWriter::new(File::create(&jar).unwrap());
+        for name in [
+            "nc/ui/pp/m28/editor/card/afteredit/CardBodyAfterEditEventHandler.class",
+            "nc/ui/pu/m25/editor/card/afteredit/CardBodyAfterEditEventHandler.class",
+        ] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(&[0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 52, 0, 1, 0, 1])
+                .unwrap();
+        }
+        zip.finish().unwrap();
+        let index = ClassIndex::build(vec![jar]);
+        let catalog = TypeCatalog::load(&index, &temp.path().join("types.json"), &|_, _| {});
+        let name = "nc.ui.pp.m28.editor.card.afteredit.CardBodyAfterEditEventHandler";
+        let hits = catalog.search_fuzzy(&index, name, 1);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].name, name);
+        assert!(catalog
+            .search_fuzzy(
+                &index,
+                "nc.ui.pp.m99.editor.card.afteredit.CardBodyAfterEditEventHandler",
+                10
+            )
+            .is_empty());
+        assert_eq!(
+            catalog
+                .search_fuzzy(&index, "CardBodyAfterEditEventHandler", 10)
+                .len(),
+            2
+        );
     }
 
     #[test]

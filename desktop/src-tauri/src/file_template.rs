@@ -14,6 +14,7 @@ pub enum JavaKind {
     Class,
     Interface,
     Enum,
+    Exception,
     /// NC 后台任务插件：`implements IBackgroundWorkPlugin`。
     #[serde(rename = "bgplugin")]
     BgPlugin,
@@ -64,14 +65,14 @@ pub fn package_of_dir(dir: &Path) -> Option<String> {
     let src = parts.iter().rposition(|p| p.eq_ignore_ascii_case("src"))?;
     let mut start = src + 1;
     let scope = parts.get(start)?;
-    if SCOPES.iter().any(|s| scope.eq_ignore_ascii_case(s)) {
-        start += 1;
-    } else if (scope.eq_ignore_ascii_case("main") || scope.eq_ignore_ascii_case("test"))
+    if (scope.eq_ignore_ascii_case("main") || scope.eq_ignore_ascii_case("test"))
         && parts
             .get(start + 1)
             .is_some_and(|p| p.eq_ignore_ascii_case("java"))
     {
         start += 2;
+    } else if SCOPES.iter().any(|s| scope.eq_ignore_ascii_case(s)) {
+        start += 1;
     }
     let pkg = &parts[start.min(parts.len())..];
     if pkg.is_empty()
@@ -154,6 +155,9 @@ fn count_eol(bytes: &[u8]) -> (usize, usize) {
 
 /// 按文件名猜一个默认种类：NC 的接口都叫 `IXxx`，其余当类。
 pub fn guess_kind(stem: &str) -> JavaKind {
+    if stem.ends_with("Exception") {
+        return JavaKind::Exception;
+    }
     let mut c = stem.chars();
     if c.next() == Some('I') && c.next().is_some_and(|x| x.is_ascii_uppercase()) {
         JavaKind::Interface
@@ -183,6 +187,21 @@ pub fn render_java(kind: JavaKind, name: &str, package: Option<&str>, eol: &str)
         JavaKind::Enum => {
             lines.push(format!("public enum {name} {{"));
             lines.push(String::new());
+            lines.push("}".into());
+        }
+        JavaKind::Exception => {
+            lines.push(format!("public class {name} extends Exception {{"));
+            lines.push("\tprivate static final long serialVersionUID = 1L;".into());
+            lines.push(String::new());
+            lines.push(format!("\tpublic {name}(String message) {{"));
+            lines.push("\t\tsuper(message);".into());
+            lines.push("\t}".into());
+            lines.push(String::new());
+            lines.push(format!(
+                "\tpublic {name}(String message, Throwable cause) {{"
+            ));
+            lines.push("\t\tsuper(message, cause);".into());
+            lines.push("\t}".into());
             lines.push("}".into());
         }
         JavaKind::BgPlugin => {
@@ -259,18 +278,47 @@ fn check_type_name(name: &str) -> Result<(), String> {
 }
 
 pub fn preview(parent: &Path, name: &str, kind: JavaKind) -> JavaPreview {
+    preview_with_header(parent, name, kind, None)
+}
+
+pub fn preview_with_header(
+    parent: &Path,
+    name: &str,
+    kind: JavaKind,
+    header: Option<&str>,
+) -> JavaPreview {
     let file_name = format!("{name}.java");
     let package = package_of_dir(parent);
     let eol = detect_dir_eol(parent);
     let eol_label = if eol == "\n" { "LF" } else { "CRLF" }.to_string();
-    let error = check_type_name(name).err().or_else(|| {
-        parent
-            .join(&file_name)
-            .exists()
-            .then(|| format!("该目录下已有 {file_name}"))
-    });
+    let error = check_type_name(name)
+        .err()
+        .or_else(|| {
+            header
+                .filter(|value| value.len() > 8192 || value.contains('\0'))
+                .map(|_| "文件说明不能超过8KB或包含空字符".to_string())
+        })
+        .or_else(|| {
+            parent
+                .join(&file_name)
+                .exists()
+                .then(|| format!("该目录下已有 {file_name}"))
+        });
     let text = if error.is_none() {
-        render_java(kind, name, package.as_deref(), eol)
+        let body = render_java(kind, name, package.as_deref(), eol);
+        if let Some(header) = header.filter(|value| !value.trim().is_empty()) {
+            // 用户输入是说明而非源码；转义注释结束符，避免说明跑进 Java 类体。
+            let lines = header
+                .replace("\r\n", "\n")
+                .replace("*/", "* /")
+                .lines()
+                .map(|line| format!(" * {line}"))
+                .collect::<Vec<_>>()
+                .join(eol);
+            format!("/*{eol}{lines}{eol} */{eol}{body}")
+        } else {
+            body
+        }
     } else {
         String::new()
     };
@@ -304,6 +352,10 @@ mod tests {
         );
         assert_eq!(
             package_of_dir(&p("proj/src/main/java/com/acme")).as_deref(),
+            Some("com.acme")
+        );
+        assert_eq!(
+            package_of_dir(&p("proj/src/test/java/com/acme")).as_deref(),
             Some("com.acme")
         );
         // 没有作用域的普通 src
@@ -348,6 +400,40 @@ mod tests {
         ));
         assert!(s.contains("import nc.bs.pub.taskcenter.IBackgroundWorkPlugin;"));
         assert!(s.is_ascii());
+    }
+
+    #[test]
+    fn 异常骨架提供消息和原因构造器() {
+        let text = render_java(
+            JavaKind::Exception,
+            "BillException",
+            Some("nc.vo.bill"),
+            "\r\n",
+        );
+        assert!(text.contains("public class BillException extends Exception"));
+        assert!(text.contains("public BillException(String message, Throwable cause)"));
+        assert!(text.contains("super(message, cause);"));
+        assert!(!text.replace("\r\n", "").contains('\n'));
+    }
+
+    #[test]
+    fn 文件说明预览转义注释结束符且保持换行() {
+        let dir = crate::test_support::tmp("java-header");
+        let preview = preview_with_header(
+            &dir,
+            "Bill",
+            JavaKind::Class,
+            Some("Copyright Example\n*/ class Injected {}"),
+        );
+        assert!(preview.error.is_none());
+        assert!(preview
+            .text
+            .starts_with("/*\r\n * Copyright Example\r\n * * / class Injected {}\r\n */\r\n"));
+        assert!(
+            preview_with_header(&dir, "Bill", JavaKind::Class, Some(&"x".repeat(8193)))
+                .error
+                .is_some()
+        );
     }
 
     #[test]

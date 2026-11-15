@@ -314,7 +314,16 @@ pub fn create_java_type(
     name: &str,
     kind: crate::file_template::JavaKind,
 ) -> Result<PathBuf, String> {
-    let pv = crate::file_template::preview(parent, name, kind);
+    create_java_type_with_header(parent, name, kind, None)
+}
+
+pub fn create_java_type_with_header(
+    parent: &Path,
+    name: &str,
+    kind: crate::file_template::JavaKind,
+    header: Option<&str>,
+) -> Result<PathBuf, String> {
+    let pv = crate::file_template::preview_with_header(parent, name, kind, header);
     if let Some(e) = pv.error {
         return Err(e);
     }
@@ -698,6 +707,15 @@ fn read_stable(path: &Path) -> Result<(Vec<u8>, u64), String> {
 /// - 同目录临时文件 + rename 保证目标不会被写成旧新混合的半截内容；临时文件在
 ///   commit 时先 `sync_all` 刷盘、再尽量 fsync 父目录，降低断电后目录项/数据回退的
 ///   概率。但 rename 本身只保证原子性、不保证持久性，极端断电仍可能丢本次写入。
+pub(crate) fn encode_text_file(
+    text: &str,
+    encoding: TextEncoding,
+    has_bom: bool,
+    eol: Eol,
+) -> Result<Vec<u8>, String> {
+    encode(&apply_eol(text, eol)?, encoding, has_bom)
+}
+
 pub fn write_text_file(
     path: &Path,
     text: &str,

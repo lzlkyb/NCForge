@@ -1,8 +1,9 @@
 //! 按改动块的「已审」落盘（按需求审查 P1）。
 //!
 //! key = `归一路径|块内容指纹`（前端 `reviewSession.reviewedKey` 生成）：块内容一变指纹就变，
-//! 旧标记天然不再命中，不用另写失效逻辑。顺带存下标记时的块文本，
-//! 以后做「只看这次改了什么」（上次审过的版本 → 现在）要用。
+//! 旧标记天然不再命中，不用另写失效逻辑。顺带存下标记时的块文本与基线侧行区间：
+//! 基线（SVN BASE）在 update 之前不变，所以「同一段基线上审过、现在指纹变了」= 需重审，
+//! 「只看这次改了什么」就是「当时审过的块文本 → 现在」的小对比。
 //!
 //! 只存在配置目录，不进 SVN。文件不再在 SVN 改动里（已提交 / 已还原）时由 [`BlockStore::prune`] 清掉。
 
@@ -18,6 +19,9 @@ pub struct BlockMark {
     pub at_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// 基线侧行区间 `[起, 止]`（前端 ChangedBlock 的 oldStart / oldEnd）。P1 存的标记没有。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<[u32; 2]>,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -53,8 +57,15 @@ impl BlockStore {
         crate::atomic_file::write_atomic(&Self::path(config_dir), &text)
     }
 
-    /// 标记 / 取消。`texts` 与 `keys` 一一对应，可以短于 `keys`（缺的就不存文本）。
-    pub fn set(&mut self, keys: &[String], texts: &[Option<String>], reviewed: bool, now_ms: u64) {
+    /// 标记 / 取消。`texts`、`ranges` 与 `keys` 一一对应，可以短于 `keys`（缺的就不存）。
+    pub fn set(
+        &mut self,
+        keys: &[String],
+        texts: &[Option<String>],
+        ranges: &[[u32; 2]],
+        reviewed: bool,
+        now_ms: u64,
+    ) {
         for (i, key) in keys.iter().enumerate() {
             if !reviewed {
                 self.marks.remove(key);
@@ -70,6 +81,7 @@ impl BlockStore {
                 BlockMark {
                     at_ms: now_ms,
                     text,
+                    range: ranges.get(i).copied(),
                 },
             );
         }
@@ -93,16 +105,27 @@ mod tests {
         let dir = tempfile::tempdir_in(crate::test_support::tmp("review-blocks")).unwrap();
         let mut s = BlockStore::default();
         let keys = vec!["c:/w/a.java|f1".to_string(), "c:/w/b.java|f2".to_string()];
-        s.set(&keys, &[Some("块文本".into())], true, 5);
+        s.set(&keys, &[Some("块文本".into())], &[[3, 5]], true, 5);
         assert_eq!(s.marks["c:/w/a.java|f1"].text.as_deref(), Some("块文本"));
+        assert_eq!(s.marks["c:/w/a.java|f1"].range, Some([3, 5]));
         assert!(s.marks["c:/w/b.java|f2"].text.is_none());
-        s.set(&keys[..1], &[], false, 6);
+        assert!(s.marks["c:/w/b.java|f2"].range.is_none());
+        s.set(&keys[..1], &[], &[], false, 6);
         assert!(!s.marks.contains_key("c:/w/a.java|f1"));
-        s.set(&keys[..1], &[Some("x".repeat(TEXT_MAX_CHARS + 1))], true, 7);
+        s.set(
+            &keys[..1],
+            &[Some("x".repeat(TEXT_MAX_CHARS + 1))],
+            &[],
+            true,
+            7,
+        );
         assert!(s.marks["c:/w/a.java|f1"].text.is_none(), "超长不存文本");
         s.save(dir.path()).unwrap();
         let mut back = BlockStore::load(dir.path());
         assert_eq!(back.marks.len(), 2);
+        // P1 存的标记没有 range 字段，仍能读回
+        let old: BlockStore = serde_json::from_str(r#"{"c:/w/x.java|f":{"atMs":1}}"#).unwrap();
+        assert!(old.marks["c:/w/x.java|f"].range.is_none());
         let changed: HashSet<String> = ["c:/w/a.java".to_string()].into();
         assert_eq!(back.prune(&changed), 1);
         assert!(back.marks.contains_key("c:/w/a.java|f1"));

@@ -269,35 +269,78 @@ pub async fn req_prune(
     .await
 }
 
-/// 全部块级已审的 key。
+/// 全部块级已审标记（含当时的块文本与基线区间，需重审判断与「只看这次改了什么」用）。
 #[tauri::command]
-pub async fn review_blocks_list(
+pub async fn review_blocks_marks(
     state: tauri::State<'_, Arc<AppState>>,
-) -> Result<Vec<String>, String> {
+) -> Result<std::collections::BTreeMap<String, crate::review_blocks::BlockMark>, String> {
     let cfg_dir = state.config_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        Ok(BlockStore::load(&cfg_dir).marks.into_keys().collect())
+        Ok(BlockStore::load(&cfg_dir).marks)
     })
     .await
     .map_err(|e| format!("读取块级审查标记失败: {e}"))?
 }
 
-/// 标记 / 取消若干块已审。`texts` 与 `keys` 一一对应（可缺省）。
+/// 标记 / 取消若干块已审。`texts`、`ranges` 与 `keys` 一一对应（可缺省）。
 #[tauri::command]
 pub async fn review_blocks_set(
     state: tauri::State<'_, Arc<AppState>>,
     keys: Vec<String>,
     texts: Option<Vec<Option<String>>>,
+    ranges: Option<Vec<[u32; 2]>>,
     reviewed: bool,
 ) -> Result<(), String> {
     let cfg_dir = state.config_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut s = BlockStore::load(&cfg_dir);
-        s.set(&keys, &texts.unwrap_or_default(), reviewed, now_ms());
+        s.set(
+            &keys,
+            &texts.unwrap_or_default(),
+            &ranges.unwrap_or_default(),
+            reviewed,
+            now_ms(),
+        );
         s.save(&cfg_dir)
     })
     .await
     .map_err(|e| format!("保存块级审查标记失败: {e}"))?
+}
+
+/// 一个改动文件的版本链原料：每次 AI 写入前的内容 + 当前内容的哈希（混改文件按需求拆块用）。
+/// 路径必须在工作区内；备份在 cc-bridge 数据目录，只读。
+#[tauri::command]
+pub async fn req_file_versions(
+    state: tauri::State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<crate::req_versions::FileVersions, String> {
+    let cfg = state.config.read().await.clone();
+    let cfg_dir = state.config_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = display_path(&root_of(&cfg)?);
+        let file = safe_path(&cfg, &path)?;
+        let touches = {
+            let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let store = ReqStore::load(&cfg_dir, &root);
+            store
+                .touches
+                .get(&key_of(&display_path(&file)))
+                .cloned()
+                .unwrap_or_default()
+        };
+        // 读备份可能较慢（几十个版本），放在锁外。
+        // 本地历史里哈希对得上的版本一并读出来，补「写入后」的内容；读不到就算了。
+        let wanted = crate::req_versions::wanted_shas(&touches);
+        let extra: Vec<Vec<u8>> = crate::local_history::list(&cfg_dir, &file)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|v| wanted.contains(&v.sha.to_ascii_lowercase()))
+            .filter_map(|v| crate::local_history::read_version(&cfg_dir, &file, &v.id).ok())
+            .collect();
+        Ok(crate::req_versions::collect(&file, &touches, &extra))
+    })
+    .await
+    .map_err(|e| format!("读取文件版本失败: {e}"))?
 }

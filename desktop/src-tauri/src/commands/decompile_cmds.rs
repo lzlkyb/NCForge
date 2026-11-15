@@ -30,7 +30,7 @@ pub struct Decompiled {
 /// 与 `find_ecj` 同一套：开发态下 `active_dir` 为空（没走过下载流程），
 /// 只能落到 `CARGO_MANIFEST_DIR` 那份。资源包目录里只有一个 jar，不按版本号硬编码，
 /// 换版本时不用改代码。
-fn find_cfr(config_dir: &Path) -> Result<PathBuf, String> {
+pub(super) fn find_cfr(config_dir: &Path) -> Result<PathBuf, String> {
     let mut cands: Vec<PathBuf> = Vec::new();
     if let Some(dir) = active_dir(config_dir, PACK_CFR) {
         cands.extend(jars_in(&dir));

@@ -277,15 +277,14 @@ impl Batcher {
             .is_some_and(|t| now.duration_since(t) >= if urgent { DEBOUNCE } else { MAX_WAIT })
     }
 
-    /// 下一次 recv 最多等多久：平时 DEBOUNCE，但不能越过这一批的 MAX_WAIT 截止点。
-    fn wait(&self, now: Instant) -> Duration {
+    /// 只有待发送的批次需要计时，空闲时由文件事件或通道关闭唤醒。
+    fn wait(&self, now: Instant) -> Option<Duration> {
         let urgent = self.rescan || !self.java.is_empty() || !self.review.is_empty();
-        match self.since {
-            Some(t) => DEBOUNCE.min(
+        self.since.map(|t| {
+            DEBOUNCE.min(
                 (if urgent { DEBOUNCE } else { MAX_WAIT }).saturating_sub(now.duration_since(t)),
-            ),
-            None => DEBOUNCE,
-        }
+            )
+        })
     }
 
     fn flush(&mut self, emit: &Arc<dyn Fn(WatchBatch) + Send + Sync>) {
@@ -428,7 +427,12 @@ impl WorkspaceWatcher {
                 // 先过滤再入队：内容变更（编译写 .class）与 .svn 写入占事件的绝大多数
                 Ok(ev) if worth_queueing(&ev) => match tx.try_send(ev) {
                     Ok(()) => {}
-                    Err(mpsc::TrySendError::Full(_)) => lost_cb.store(true, Ordering::Relaxed),
+                    Err(mpsc::TrySendError::Full(ev)) => {
+                        lost_cb.store(true, Ordering::Relaxed);
+                        // The receiver may have drained the queue before the flag was set.
+                        // A second send wakes it if it has gone back to waiting for an event.
+                        let _ = tx.try_send(ev);
+                    }
                     // 接收方已退出（正在换工作区）：丢弃即可，回调里不能阻塞
                     Err(mpsc::TrySendError::Disconnected(_)) => {}
                 },
@@ -452,11 +456,17 @@ impl WorkspaceWatcher {
             .spawn(move || {
                 let mut batch = Batcher::new(batch_root);
                 loop {
-                    // 让出点：没有事件时阻塞在 recv_timeout 上，每轮至多一次 flush
                     if stop_thread.load(Ordering::Relaxed) {
                         break;
                     }
-                    match rx.recv_timeout(batch.wait(Instant::now())) {
+                    let next = match batch.wait(Instant::now()) {
+                        Some(wait) => rx.recv_timeout(wait),
+                        None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+                    };
+                    if stop_thread.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    match next {
                         // 丢了事件时平台给的补偿信号（need_rescan）在 add 里并入：
                         // 宁可让前端重读一遍，也别一直显示旧树
                         Ok(ev) => batch.add(&root, &ev, Instant::now()),
@@ -483,8 +493,7 @@ impl WorkspaceWatcher {
 
 impl Drop for WorkspaceWatcher {
     fn drop(&mut self) {
-        // 线程在下一个合并窗口（≤ DEBOUNCE）看到标志即退出；监听句柄随后被 Drop，
-        // 通道断开也会让它立刻醒
+        // 监听句柄随后关闭通道，唤醒正在等待的合并线程。
         self.stop.store(true, Ordering::Relaxed);
     }
 }
@@ -812,7 +821,7 @@ mod tests {
                 break;
             }
             // 等待时间不能越过本批截止点
-            assert!(b.wait(now) <= MAX_WAIT.saturating_sub(now.duration_since(t0)));
+            assert!(b.wait(now).unwrap() <= MAX_WAIT.saturating_sub(now.duration_since(t0)));
             now += Duration::from_millis(100);
         }
         let at = flushed_at.expect("持续写入时也必须按期发出");
@@ -821,12 +830,12 @@ mod tests {
             "{at:?}"
         );
 
-        // 发完后状态清空，空批等待恢复 DEBOUNCE
+        // 发完后状态清空，空批等待下一条事件。
         let (tx, rx) = mpsc::channel::<WatchBatch>();
         let emit: Arc<dyn Fn(WatchBatch) + Send + Sync> = Arc::new(move |x| drop(tx.send(x)));
         b.flush(&emit);
         assert_eq!(rx.try_recv().unwrap().dirs.len(), 1);
-        assert!(!b.due(now) && b.wait(now) == DEBOUNCE);
+        assert!(!b.due(now) && b.wait(now).is_none());
 
         // 队列溢出丢了事件：合并一个窗口后要求全量重读
         b.mark_lost(now);

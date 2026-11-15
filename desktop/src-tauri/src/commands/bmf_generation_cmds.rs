@@ -26,7 +26,16 @@ fn root_path(cfg: &AppConfig, root: &str) -> Result<PathBuf, String> {
     if root.trim().is_empty() {
         return Err("请选择输出目录".into());
     }
-    safe_write_path(cfg, root.trim())
+    let root = safe_write_path(cfg, root.trim())?;
+    // A missing target beneath a file otherwise looks like a new artifact during inspection.
+    if root
+        .ancestors()
+        .find(|path| path.exists())
+        .is_some_and(|path| !path.is_dir())
+    {
+        return Err("输出路径必须是目录，不能使用已有文件或其下级路径".into());
+    }
+    Ok(root)
 }
 
 fn ledger_key(snapshot: &Snapshot) -> String {
@@ -258,4 +267,57 @@ pub async fn bmf_gen_apply(
     })
     .await
     .map_err(|e| format!("写入任务失败：{e}"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn description() -> Snapshot {
+        Snapshot {
+            component: "demo".into(),
+            source_path: "demo.bmf".into(),
+            input_sha256: "source".into(),
+            profile_sha256: "profile".into(),
+            root: String::new(),
+            targets: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn directory_check_rejects_file_roots_and_file_ancestors() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("existing.java");
+        std::fs::write(&file, b"keep existing file").unwrap();
+        let cfg = AppConfig {
+            workspace_root: Some(temp.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        for root in [&file, &file.join("generated/nested")] {
+            let result = check(&cfg, temp.path(), description(), &root.to_string_lossy());
+            assert!(result.snapshot.is_none());
+            assert!(result.items.is_empty());
+            assert!(result.error.unwrap().contains("输出路径必须是目录"));
+        }
+        assert_eq!(std::fs::read(file).unwrap(), b"keep existing file");
+    }
+
+    #[test]
+    fn directory_check_accepts_existing_and_new_directories_without_writing() {
+        let temp = tempfile::tempdir().unwrap();
+        let cfg = AppConfig {
+            workspace_root: Some(temp.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        let pending = temp.path().join("generated/nested");
+        for root in [temp.path(), pending.as_path()] {
+            let result = check(&cfg, temp.path(), description(), &root.to_string_lossy());
+            assert!(result.error.is_none(), "{:?}", result.error);
+            assert!(result.snapshot.is_some());
+        }
+        assert!(
+            !pending.exists(),
+            "checking must not create the output directory"
+        );
+    }
 }

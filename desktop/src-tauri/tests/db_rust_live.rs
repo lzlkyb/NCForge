@@ -45,6 +45,24 @@ fn call(e: &RustEngine, cmd: &str, args: &[&str]) -> Value {
 
 #[test]
 #[ignore = "要连真实数据库"]
+fn bound_query_can_page_by_result_id() {
+    let e = RustEngine::new();
+    call(&e, "connect", &[&url(), &user(), &pass(), "false"]);
+    let sql = "select level + :1 from dual connect by level <= :2";
+    let first = call(
+        &e,
+        "execBoundResult",
+        &[sql, "1", "10", "bound", "number", "10", "number", "3"],
+    );
+    assert_eq!(first["rows"][0][0], "11");
+    assert_eq!(first["hasMore"], true);
+    let next = call(&e, "more", &["1", "bound"]);
+    assert_eq!(next["rows"][0][0], "12");
+    call(&e, "disconnect", &[]);
+}
+
+#[test]
+#[ignore = "要连真实数据库"]
 fn named_results_fetch_independently_and_close_only_the_selected_result() {
     let e = RustEngine::new();
     call(&e, "connect", &[&url(), &user(), &pass(), "false"]);

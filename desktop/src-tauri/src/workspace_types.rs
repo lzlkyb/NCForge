@@ -111,7 +111,7 @@ impl WorkspaceTypes {
             .entries
             .iter()
             .filter_map(|e| {
-                crate::java_types::type_match_score_with(query, &e.hit.simple, Some(&e.initials))
+                crate::java_types::type_match_score_with(query, &e.hit.name, Some(&e.initials))
                     .map(|s| (s, e))
             })
             .collect();
@@ -743,6 +743,31 @@ mod tests {
         let again = build(&root, &cache);
         assert_eq!(again.len(), idx.len());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn qualified_type_search_filters_same_name_source_classes() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let name = "nc.ui.pp.m28.editor.card.afteredit.CardBodyAfterEditEventHandler";
+        let target =
+            "purp/src/client/nc/ui/pp/m28/editor/card/afteredit/CardBodyAfterEditEventHandler.java";
+        write(root, target, "package nc.ui.pp.m28.editor.card.afteredit;\npublic class CardBodyAfterEditEventHandler {}\n");
+        write(root, "pu/src/client/nc/ui/pu/m25/editor/card/afteredit/CardBodyAfterEditEventHandler.java", "package nc.ui.pu.m25.editor.card.afteredit;\npublic class CardBodyAfterEditEventHandler {}\n");
+        let index = build(root, &root.join("cache"));
+        let hits = index.search(name, 1);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].name, name);
+        assert_eq!(hits[0].module, "purp");
+        assert_eq!((hits[0].line, hits[0].column), (2, 14));
+        assert!(hits[0].file.replace('\\', "/").ends_with(target));
+        assert!(index
+            .search(
+                "nc.ui.pp.m99.editor.card.afteredit.CardBodyAfterEditEventHandler",
+                10
+            )
+            .is_empty());
+        assert_eq!(index.search("CardBodyAfterEditEventHandler", 10).len(), 2);
     }
 
     #[test]
