@@ -2,6 +2,7 @@ import { useState } from "react";
 import { bmfReferences, type BmfRefScan } from "../../lib/bmf";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
+import { TaskFeedback } from "../ui/TaskFeedback";
 
 /**
  * 跨工程引用（F1，只读）。
@@ -33,11 +34,12 @@ export function MetaRefs({ path, onOpen }: { path: string; onOpen?: (path: strin
         <p className="meta-note m-0">
           引用关系来自其他组件字段的 <code>typeName</code> / <code>refModelName</code>；按类全名匹配。
         </p>
-        <Button size="sm" variant="outline" onClick={() => void run()} disabled={busy}>
-          <Icon name="gitBranch" size={13} /> {busy ? "扫描中…" : "扫描引用"}
+        <Button size="sm" variant="outline" onClick={() => void run()} disabled={busy} isLoading={busy} loadingText="扫描中…">
+          <Icon name="gitBranch" size={13} /> 扫描引用
         </Button>
       </div>
 
+      <TaskFeedback active={busy} compact label="正在扫描元数据引用…" operationKey={path} />
       {err && <p className="meta-error">{err}</p>}
 
       {scan && !busy && (

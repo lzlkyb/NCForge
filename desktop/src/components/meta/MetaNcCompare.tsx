@@ -3,6 +3,7 @@ import { bmfNchomeCompare, type BmfDetail, type BmfNcCompare } from "../../lib/b
 import { diffDetails, summarize } from "../../lib/bmfDiff";
 import { Button } from "../ui/button";
 import { MetaDiffRows } from "./MetaDiffRows";
+import { TaskFeedback } from "../ui/TaskFeedback";
 
 /**
  * F3：当前工作区组件 vs NC 安装目录里的同名组件。
@@ -40,11 +41,12 @@ export function MetaNcCompare({ current }: { current: BmfDetail }) {
           只读
         </span>
         {nc && <span className="meta-nc-home">{nc.ncHome}</span>}
-        <Button size="sm" variant="outline" onClick={() => load()} disabled={busy}>
-          {busy ? "读取中…" : nc ? "重新读取" : "对比同名组件"}
+        <Button size="sm" variant="outline" onClick={() => load()} disabled={busy} isLoading={busy} loadingText="读取中…">
+          {nc ? "重新读取" : "对比同名组件"}
         </Button>
       </div>
 
+      <TaskFeedback active={busy} compact label="正在读取安装目录中的元数据…" operationKey={current.path} />
       {err && <p className="meta-error">{err}</p>}
 
       {nc && nc.candidates.length === 0 && (

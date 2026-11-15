@@ -2,6 +2,7 @@ import type { MetaDocument } from "../../hooks/useMetaDocuments";
 import type { MetaDraft } from "../../lib/metaDraft";
 import { Button } from "../ui/button";
 import { Dialog, DialogHeader, DialogTitle } from "../ui/dialog";
+import { TaskFeedback } from "../ui/TaskFeedback";
 
 export function MetaDraftDialogs({ draft, reviewOpen, closing, locked, onCancelReview, onSave, onCancelClose, onDiscardClose, onReviewClose }: {
   draft: MetaDraft; reviewOpen: boolean; closing: MetaDocument | null; locked: boolean;
@@ -21,8 +22,9 @@ export function MetaDraftDialogs({ draft, reviewOpen, closing, locked, onCancelR
         {blockers.slice(0, 8).map((issue) => <p key={issue.id}>{issue.title}：{issue.action}</p>)}</div>}
       <pre className="meta-diff meta-draft-diff" aria-label="草稿差异">{ready?.diff || "文件内容没有变化。"}</pre>
       {!fresh && <p className="meta-note">草稿已变化，请关闭后重新预览。</p>}
+      <TaskFeedback active={!!draft.busy && reviewOpen} compact label="正在保存元数据草稿…" />
       <div className="meta-dialog-actions"><Button variant="ghost" disabled={locked} onClick={onCancelReview}>继续编辑</Button>
-        <Button disabled={locked || !fresh || !!blockers.length || !draft.steps.length} onClick={onSave}>{draft.busy ? "正在保存…" : "保存全部修改"}</Button></div>
+        <Button disabled={locked || !fresh || !!blockers.length || !draft.steps.length} isLoading={!!draft.busy} loadingText="正在保存…" onClick={onSave}>保存全部修改</Button></div>
     </Dialog>
     <Dialog open={!!closing} onClose={onCancelClose} ariaLabel="关闭未保存的元数据文档" zIndex={1250}>
       <DialogHeader><DialogTitle>这个文档还有待保存的修改</DialogTitle></DialogHeader>

@@ -37,7 +37,7 @@ export function MetaHead({
           {counts.info > 0 && <span className="sev-info">{counts.info} 提示</span>}
           {!counts.error && !counts.warn && !counts.info && <span>无校验问题</span>}
         </button>
-        <Button size="sm" variant="outline" onClick={onRevalidate} disabled={busy || editing}>
+        <Button size="sm" variant="outline" onClick={onRevalidate} disabled={busy || editing} isLoading={busy} loadingText="校验中…">
           <Icon name="shield" size={13} /> 校验
         </Button>
         <Menu portal trigger={(open,toggle)=><button type="button" className="meta-link" aria-label="组件文件信息与操作" aria-haspopup="menu" aria-expanded={open} onClick={toggle}><Icon name="more" size={14}/></button>}>

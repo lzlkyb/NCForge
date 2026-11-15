@@ -5,6 +5,7 @@ import { Icon } from "../ui/icon";
 import { Input } from "../ui/input";
 import { MetaResourceList } from "./MetaResourceList";
 import { MetaOutline } from "./MetaOutline";
+import { TaskFeedback } from "../ui/TaskFeedback";
 
 /**
  * 元数据页左栏：按「来源 → 模块」分组的组件清单。
@@ -54,8 +55,8 @@ export function MetaTree({
           <span className="meta-count">{entries.length}</span>
         </div>
         <div className="flex items-center gap-1">
-          <Button size="icon" variant="ghost" title="重新索引" onClick={onRefresh} disabled={refreshing || locked}>
-            <Icon name="refresh" size={14} className={refreshing ? "animate-spin" : ""} />
+          <Button size="icon" variant="ghost" title="重新索引" aria-label="重新索引" onClick={onRefresh} disabled={refreshing || locked} isLoading={refreshing} loadingText="正在索引元数据">
+            <Icon name="refresh" size={14} />
           </Button>
           <Button size="icon" variant="ghost" title="新建组件" onClick={onNew} disabled={locked}>
             <Icon name="filePlus" size={14} />
@@ -85,7 +86,8 @@ export function MetaTree({
         </details>
       )}
       <div className="meta-side-foot">
-        {refreshing ? "正在索引…" : `${(elapsedMs / 1000).toFixed(2)}s · 缓存 ${cached}`}
+        <TaskFeedback active={refreshing} compact label="正在索引元数据…" />
+        {!refreshing && `${(elapsedMs / 1000).toFixed(2)}s · 缓存 ${cached}`}
       </div>
     </aside>
   );

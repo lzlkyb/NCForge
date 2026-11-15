@@ -11,6 +11,7 @@ import { formatHistoryTime } from "../../lib/historyFormat";
 import type { HistoryEntry } from "../../lib/svnHistory";
 import { Button } from "../ui/button";
 import { MetaDiffRows } from "./MetaDiffRows";
+import { TaskFeedback } from "../ui/TaskFeedback";
 
 const HISTORY_LIMIT = 50;
 
@@ -107,14 +108,15 @@ export function MetaHistory({ current }: { current: BmfDetail }) {
         <span className="meta-note m-0">
           选中一个修订，与当前 {currentName} 做字段级对比（历史 → 当前）。只读，不写任何文件。
         </span>
-        {!list.loading && !list.error && (
-          <Button size="sm" variant="outline" onClick={() => void loadList()}>
+        {!list.error && (
+          <Button size="sm" variant="outline" onClick={() => void loadList()} isLoading={list.loading} loadingText="读取中…">
             刷新
           </Button>
         )}
       </div>
 
-      {list.loading && <p className="meta-note">正在读取 SVN 历史…</p>}
+      <TaskFeedback active={list.loading} compact label="正在读取 SVN 历史…" operationKey={current.path}
+        detail={list.entries.length ? "当前显示上次读取的修订列表。" : undefined} />
       {list.error && (
         <div className="meta-error-box">
           <strong>读不到这个组件的历史</strong>
@@ -125,9 +127,9 @@ export function MetaHistory({ current }: { current: BmfDetail }) {
         </div>
       )}
 
-      {!list.loading && !list.error && (
-        <div className="meta-history-body">
-          <ol className="meta-history-list" aria-label="组件修订列表">
+      {(!list.loading || list.entries.length > 0) && !list.error && (
+        <div className="meta-history-body" data-busy={list.loading || undefined}>
+          <ol className="meta-history-list" aria-label="组件修订列表" aria-busy={list.loading}>
             {list.entries.length === 0 && <li className="meta-note">这个文件还没有提交记录。</li>}
             {list.entries.map((e) => {
               const when = formatHistoryTime(e.date);
@@ -158,7 +160,7 @@ export function MetaHistory({ current }: { current: BmfDetail }) {
 
           <section className="meta-history-diff" aria-label="历史版本与当前的结构差异">
             {!rev.revision && <p className="meta-note">从左边选一个修订。</p>}
-            {rev.loading && <p className="meta-note">正在读取 r{rev.revision} 的正文并解析…</p>}
+            <TaskFeedback active={rev.loading} compact label={`正在读取 r${rev.revision} 的正文并解析…`} operationKey={rev.revision ?? undefined} />
             {rev.error && <p className="meta-error">{rev.error}</p>}
             {rev.empty && (
               <p className="meta-note">r{rev.revision} 里没有这个文件（通常是该修订中它被删除了）。</p>

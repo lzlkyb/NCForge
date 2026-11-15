@@ -136,3 +136,9 @@ body:has(.gen-workbench[data-active="true"]) .toast-stack { bottom: 148px; }
 @media (max-width: 900px) {
   .gen-workbench-body { grid-template-columns: minmax(0, 1fr); }
 }
+
+.gen-task-feedback { flex: none; padding: 6px 12px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); }
+.gen-file, .gen-filters button, .gen-preview-tabs button, .gen-mobile-tabs button, .gen-steps li {
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.gen-file-group > button > svg { transition: transform var(--dur) var(--ease); }

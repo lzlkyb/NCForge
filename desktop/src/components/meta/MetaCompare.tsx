@@ -3,6 +3,7 @@ import { bmfDetail, type BmfDetail, type BmfEntry } from "../../lib/bmf";
 import { diffDetails, summarize } from "../../lib/bmfDiff";
 import { normalizeBmfPath } from "../../lib/bmfPath";
 import { MetaDiffRows } from "./MetaDiffRows";
+import { TaskFeedback } from "../ui/TaskFeedback";
 import { MetaNcCompare } from "./MetaNcCompare";
 
 /**
@@ -84,7 +85,7 @@ export function MetaCompare({ current, entries }: { current: BmfDetail; entries:
         )}
       </div>
 
-      {busy && <p className="meta-note">正在解析对比对象…</p>}
+      <TaskFeedback active={busy} compact label="正在解析对比对象…" operationKey={otherPath} />
       {err && <p className="meta-error">{err}</p>}
 
       {other && !busy && rows.length === 0 && (

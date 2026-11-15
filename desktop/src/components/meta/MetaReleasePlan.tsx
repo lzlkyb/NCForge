@@ -8,6 +8,7 @@ import {
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
+import { TaskFeedback } from "../ui/TaskFeedback";
 
 const TOOL_STATUS: Record<string, string> = { found: "在位", missing: "缺失", unknown: "待确认" };
 const STEP_STATUS: Record<string, string> = { ready: "就绪", blocked: "阻断", pending: "待人工" };
@@ -93,12 +94,12 @@ export function MetaReleasePlan({
         <span className="meta-release-badge" title="官方入口确认前不提供自动发布">
           不会自动发布
         </span>
-        <Button size="sm" variant="outline" onClick={() => void reload()} disabled={load.busy}>
+        <Button size="sm" variant="outline" onClick={() => void reload()} disabled={load.busy} isLoading={load.busy} loadingText="探测中…">
           <Icon name="refresh" size={13} /> 重新编排
         </Button>
       </div>
 
-      {load.busy && <p className="meta-note">正在探测官方工具并生成步骤…</p>}
+      <TaskFeedback active={load.busy} compact label="正在探测官方工具并生成步骤…" operationKey={path} />
       {!load.busy && load.error && <p className="meta-error">编排失败：{load.error}</p>}
 
       {plan && !load.busy && (

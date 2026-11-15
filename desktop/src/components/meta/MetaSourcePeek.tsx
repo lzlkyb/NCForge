@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { bmfNodeSource } from "../../lib/bmf";
 import { Button } from "../ui/button";
 import { Dialog, DialogHeader, DialogTitle } from "../ui/dialog";
+import { TaskFeedback } from "../ui/TaskFeedback";
 
 /** 大模型只在用户查看时取单个节点源码，不把整份 XML 复制进常驻详情。 */
 export function MetaSourcePeek({ path, id, sha, raw = "", disabled = false, draft = false }: {
@@ -23,7 +24,7 @@ export function MetaSourcePeek({ path, id, sha, raw = "", disabled = false, draf
     <button type="button" className="meta-link" disabled={disabled || draft} title={draft ? "保存草稿后查看原始文件内容" : undefined} onClick={() => void load()}>查看原始 XML</button>
     <Dialog open={state.open} ariaLabel="元数据原始 XML" onClose={() => { token.current.value++; setState((s) => ({ ...s, open: false })); }} zIndex={1250}>
       <DialogHeader><DialogTitle>原始 XML · 只读</DialogTitle></DialogHeader>
-      {state.busy ? <p className="meta-note" role="status">正在读取这个节点…</p> : state.error ? <div className="meta-error-box" role="alert"><pre>{state.error}</pre><Button variant="outline" size="sm" onClick={() => void load()}>重试</Button></div>
+      {state.busy ? <TaskFeedback active={state.open} compact label="正在读取这个节点…" operationKey={`${path}:${id}`} /> : state.error ? <div className="meta-error-box" role="alert"><pre>{state.error}</pre><Button variant="outline" size="sm" onClick={() => void load()}>重试</Button></div>
         : <pre className="meta-diff meta-draft-diff" aria-label="节点原始 XML">{state.text}</pre>}
     </Dialog>
   </>;

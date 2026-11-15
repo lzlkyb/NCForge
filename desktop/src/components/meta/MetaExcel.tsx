@@ -10,6 +10,7 @@ import { pickFile } from "../../lib/filePicker";
 import { pickFolder, pickFolderError } from "../../lib/folderPicker";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
+import { TaskFeedback } from "../ui/TaskFeedback";
 import { toast } from "../ui/toast";
 import { MetaExcelPreview } from "./MetaExcelPreview";
 
@@ -132,7 +133,9 @@ export function MetaExcel({
   };
 
   return (
-    <div className="meta-excel">
+    <div className="meta-excel" data-busy={busy !== null || undefined}>
+      <TaskFeedback active={busy !== null} compact operationKey={`${path}:${busy}`}
+        label={busy === "template" ? "正在导出字段模板…" : busy === "preview" ? "正在解析模板并生成差异…" : "正在校验、备份并写入元数据…"} />
       <section className="meta-excel-card">
         <div className="meta-excel-head">
           <h4 className="meta-section-title">
@@ -144,7 +147,7 @@ export function MetaExcel({
           导出当前 {component} 的实体字段，表头与默认值由 NCForge 定义；官方 PDM 模板的列名与语义不同，
           等真实样本到位后再单独适配，两者不会混用。
         </p>
-        <div className="meta-export-row">
+        <div className="meta-export-row" aria-busy={busy === "template"}>
           <span className="meta-export-label">落盘到</span>
           <input
             className="meta-export-input"
@@ -152,13 +155,14 @@ export function MetaExcel({
             onChange={(e) => setDir(e.target.value)}
             placeholder="工作区内的目录"
             aria-label="模板落盘目录"
+            disabled={busy !== null}
             spellCheck={false}
           />
           <Button size="sm" variant="ghost" onClick={() => void pickDir()} disabled={busy !== null}>
             选择…
           </Button>
-          <Button size="sm" variant="outline" onClick={() => void runExport()} disabled={busy !== null}>
-            {busy === "template" ? "导出中…" : "导出模板"}
+          <Button size="sm" variant="outline" onClick={() => void runExport()} disabled={busy !== null} isLoading={busy === "template"} loadingText="导出中…">
+            导出模板
           </Button>
         </div>
         {exported && (
@@ -179,7 +183,7 @@ export function MetaExcel({
           选一个用自有模板填好的 .xlsx。空单元格表示不修改；新增字段默认 String / 可空。
           写入前会校验文件 SHA 并自动备份。
         </p>
-        <div className="meta-export-row">
+        <div className="meta-export-row" aria-busy={busy === "preview"}>
           <input
             className="meta-export-input"
             value={file}
@@ -190,13 +194,14 @@ export function MetaExcel({
             }}
             placeholder="选择 .xlsx，或粘贴完整路径"
             aria-label="导入文件路径"
+            disabled={busy !== null}
             spellCheck={false}
           />
           <Button size="sm" variant="ghost" onClick={() => void pickImport()} disabled={busy !== null}>
             选择文件…
           </Button>
-          <Button size="sm" variant="outline" onClick={() => void runPreview()} disabled={busy !== null}>
-            {busy === "preview" ? "解析中…" : "解析预览"}
+          <Button size="sm" variant="outline" onClick={() => void runPreview()} disabled={busy !== null} isLoading={busy === "preview"} loadingText="解析中…">
+            解析预览
           </Button>
         </div>
 

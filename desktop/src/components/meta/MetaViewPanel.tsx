@@ -2,6 +2,8 @@ import { lazy, Suspense, type ReactNode } from "react";
 import type { BmfDetail, BmfEntry } from "../../lib/bmf";
 import type { GenerationPreferences } from "../../lib/bmfGeneration";
 import type { MetaSelection } from "../../lib/metaEditor";
+import { TaskFeedback } from "../ui/TaskFeedback";
+import { MetaToolSkeleton } from "./MetaToolSkeleton";
 
 const MetaCompare = lazy(() => import("./MetaCompare").then((m) => ({ default: m.MetaCompare })));
 const MetaHistory = lazy(() => import("./MetaHistory").then((m) => ({ default: m.MetaHistory })));
@@ -18,10 +20,11 @@ export function MetaViewPanel({ view, detail, error, busy, entries, editor, onEd
   generationPreferences?: GenerationPreferences; onGenerationPreferences?: (prefs: GenerationPreferences) => void;
   onGenerationBack?: (issues?: boolean) => void; onGenerationLocate?: (selection: MetaSelection) => void; onGenerationApplying?: (applying: boolean) => void;
 }) {
-  return <div className={`meta-main-body ${view === "detail" ? "meta-main-editor" : view === "generate" ? "meta-main-generation" : ""}`} id="meta-view-panel" aria-label={view === "detail" ? "元数据编辑工作区" : "元数据工具"} aria-busy={busy}>
-    {busy && <p className="meta-loading-note" role="status">正在解析…</p>}
+  return <div className={`meta-main-body ${view === "detail" ? "meta-main-editor" : view === "generate" ? "meta-main-generation" : ""}`} id="meta-view-panel" aria-label={view === "detail" ? "元数据编辑工作区" : "元数据工具"} data-busy={busy || undefined}>
+    <TaskFeedback active={busy && !!detail} compact label="正在解析元数据…" operationKey={detail?.path} className="meta-loading-note" />
+    {busy && !detail && !error && <MetaToolSkeleton view={view} label="正在解析元数据…" />}
     {error && <div className="meta-error-box"><strong>无法解析这个组件</strong><pre>{error}</pre><p className="meta-note m-0">修好 XML 后点右上角「校验」重新加载，或重新索引。</p></div>}
-    {!error && detail && (view === "detail" ? editor : <Suspense key={detail.path} fallback={<p className="meta-note">正在加载工具…</p>}>
+    {!error && detail && (view === "detail" ? editor : <Suspense key={detail.path} fallback={<MetaToolSkeleton view={view} />}>
       {view === "compare" && <MetaCompare current={detail} entries={entries} />}
       {view === "history" && <MetaHistory current={detail} />}
       {view === "excel" && <MetaExcel path={detail.path} component={detail.component.name} onEdited={onEdited} />}

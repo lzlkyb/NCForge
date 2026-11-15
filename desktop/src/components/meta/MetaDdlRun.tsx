@@ -3,6 +3,7 @@ import { dbApi, ENV_LABEL, type DbConn } from "../../lib/dbApi";
 import { dropDdl } from "../../lib/ddlCache";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
+import { TaskFeedback } from "../ui/TaskFeedback";
 
 export interface DdlStepResult {
   sql: string;
@@ -163,8 +164,8 @@ export function MetaDdlRun({ ddl, component, onRunning }: { ddl: string; compone
           ))}
         </select>
         <span className="meta-export-label">共 {stmts.length} 条语句</span>
-        <Button size="sm" variant="outline" onClick={() => void run()} disabled={!ready}>
-          {busy ? "执行中…" : "执行 DDL"}
+        <Button size="sm" variant="outline" onClick={() => void run()} disabled={!ready} isLoading={busy} loadingText="执行中…">
+          执行 DDL
         </Button>
       </div>
 
@@ -190,6 +191,8 @@ export function MetaDdlRun({ ddl, component, onRunning }: { ddl: string; compone
       />
 
       {err && <p className="meta-error">{err}</p>}
+      <TaskFeedback active={busy} label="执行中…" operationKey={connId} progress={{ done: logs?.length ?? 0, total: stmts.length, unit: "条语句" }}
+        detail="正在等待数据库返回；已成功执行的 DDL 不会自动回滚。" />
 
       {logs && logs.length > 0 && (
         <div className="meta-export-result">

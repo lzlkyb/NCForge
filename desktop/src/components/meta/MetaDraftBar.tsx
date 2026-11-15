@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { MetaDraft } from "../../lib/metaDraft";
 import { Icon } from "../ui/icon";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { BusyIndicator } from "../ui/BusyIndicator";
 
 export function MetaDraftBar({ draft, locked, onUndo, onRedo, onReview, onDiscard }: {
   draft: MetaDraft; locked: boolean; onUndo: () => void; onRedo: () => void;
@@ -9,8 +10,8 @@ export function MetaDraftBar({ draft, locked, onUndo, onRedo, onReview, onDiscar
 }) {
   const [discardOpen, setDiscardOpen] = useState(false);
   if (!draft.steps.length && !draft.redo.length && !draft.error) return null;
-  return <div className="meta-draft-bar" aria-label="当前文档草稿">
-    <div className="meta-draft-summary" role="status"><Icon name="edit" size={13} />
+  return <div className="meta-draft-bar" aria-label="当前文档草稿" data-busy={draft.busy || undefined}>
+    <div className="meta-draft-summary" role="status">{draft.busy ? <BusyIndicator size={13} /> : <Icon name="edit" size={13} />}
       <span>{draft.busy ? "正在校验草稿…" : `${draft.steps.length} 步待保存`}</span>
       {draft.error && <span className="meta-draft-error" title={draft.error}>{draft.error}</span>}
     </div>

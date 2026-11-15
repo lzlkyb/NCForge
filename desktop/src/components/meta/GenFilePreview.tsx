@@ -6,6 +6,7 @@ import type { MetaSelection } from "../../lib/metaEditor";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
+import { TaskFeedback } from "../ui/TaskFeedback";
 
 const GenTextPreview = lazy(() => import("./GenTextPreview").then((m) => ({ default: m.GenTextPreview })));
 interface Props {
@@ -48,7 +49,7 @@ export function GenFilePreview({ active, plan, prefs, status, snapshot, detail, 
       <h3>依赖产物</h3>{active.dependsOn.length ? active.dependsOn.map((id) => { const dep = plan.artifacts.find((a) => a.id === id); const chosen = prefs.selected?.includes(id); return <div key={id} className="gen-dependency"><span>{dep?.name || id}</span><small>{chosen ? "已选中" : "未选中，请核对目标工程"}</small>
         {dep && !chosen && <Button size="sm" variant="outline" disabled={disabled} onClick={() => onPreferences({ selected: [...(prefs.selected ?? []), id] })}>同时选择</Button>}</div>; }) : <p>没有声明产物依赖。</p>}
       {active.kind === "registry" && <p className="gen-protection">这是注册建议清单。菜单和模板等注册操作由后续发布流程处理。</p>}
-    </div> : prefs.pane === "diff" && (!snapshot || !ready || original.text === null) ? <div className="gen-empty" role="status">{!snapshot ? "先更新产物并检查输出目录" : ready && original.error ? original.error : "正在读取原文件…"}</div> :
+    </div> : prefs.pane === "diff" && (!snapshot || !ready || original.text === null) ? <div className="gen-empty">{!snapshot ? <span>先更新产物并检查输出目录</span> : ready && original.error ? <p role="alert">{original.error}</p> : <TaskFeedback active compact label="正在读取原文件…" operationKey={active.id} />}</div> :
       <Suspense fallback={<pre className="gen-code-fallback">{active.text}</pre>}><GenTextPreview id={active.id} text={active.text}
         original={prefs.pane === "diff" ? original.text ?? "" : undefined} language={active.kind === "ddl" ? "sql" : active.family === "java" ? "java" : "plaintext"}
         onCompared={(compared) => setOriginal((prev) => prev.compared === compared ? prev : { ...prev, compared })}

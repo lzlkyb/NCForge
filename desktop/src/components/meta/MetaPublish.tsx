@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { bmfPublishProbe, type BmfPublishProbe } from "../../lib/bmf";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
+import { TaskFeedback } from "../ui/TaskFeedback";
 import { toast } from "../ui/toast";
 import { MetaReleasePlan } from "./MetaReleasePlan";
 
@@ -55,7 +56,7 @@ export function MetaPublish({ component, module, path }: { component: string; mo
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => void run()} disabled={busy}>
+          <Button size="sm" variant="outline" onClick={() => void run()} disabled={busy} isLoading={busy} loadingText="探测中…">
             <Icon name="refresh" size={13} /> 重新探测
           </Button>
           <Button size="sm" variant="ghost" onClick={() => void copy(probe?.manual ?? "", "操作手册")} disabled={!probe}>
@@ -64,7 +65,7 @@ export function MetaPublish({ component, module, path }: { component: string; mo
         </div>
       </div>
 
-      {busy && <p className="meta-note">正在检查…</p>}
+      <TaskFeedback active={busy} label="正在检查发布前置条件…" operationKey={path} />
       {!busy && err && <p className="meta-error">探针失败：{err}</p>}
 
       {probe && !busy && (

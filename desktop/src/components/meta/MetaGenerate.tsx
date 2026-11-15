@@ -10,6 +10,8 @@ import { useViewActive } from "../../lib/viewActivity";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
+import { BusyIndicator } from "../ui/BusyIndicator";
+import { TaskFeedback } from "../ui/TaskFeedback";
 import { toast } from "../ui/toast";
 import { GenArtifacts } from "./GenArtifacts";
 import { GenFilePreview } from "./GenFilePreview";
@@ -55,16 +57,19 @@ export function MetaGenerate({ path, component, detail, preferences, onPreferenc
     updating={gen.busy} checking={gen.checking} checked={!!gen.snapshot} dirty={gen.dirty} checkError={gen.diffErr}
     onChange={(profile) => gen.setPreferences({ profile })} onRoot={gen.setRoot} onPick={() => void gen.pick()} onCheck={() => void gen.check()} onGenerate={() => void gen.generate()} /> :
     <p className="gen-note">{gen.busy ? "正在载入 BMF 配置…" : "请更新产物，载入生成配置"}</p>;
-  return <div className="gen-workbench" ref={layout.ref} data-layout={layout.mode} data-active={viewActive || undefined} aria-busy={gen.busy || working}>
+  return <div className="gen-workbench" ref={layout.ref} data-layout={layout.mode} data-active={viewActive || undefined} data-busy={gen.busy || working || undefined}>
     <header className="gen-workbench-head"><Button size="sm" variant="ghost" disabled={working} onClick={() => onBack?.()}><Icon name="chevronLeft" size={14} />返回元数据</Button>
       <div className="gen-context"><strong>{detail?.component.displayName || name} · 整套生成</strong><small title={path}>{name}.bmf · 已保存</small></div>
       <ol className="gen-steps" aria-label="生成步骤"><li className={gen.dirty ? "is-current" : ""}>配置</li><li className={!gen.dirty && !gen.result && !gen.applying ? "is-current" : ""}>产物与差异</li><li className={gen.applying || panels.review ? "is-current" : ""}>写入</li><li className={gen.result ? "is-current" : ""}>结果</li></ol>
       {layout.mode !== "wide" && <Button size="sm" variant="outline" disabled={working} onClick={() => setPanels({ config: true })}><Icon name="settings" size={14} />配置</Button>}
-      <Button size="sm" variant="ghost" disabled={gen.busy || working} onClick={() => void gen.generate()} title="重新读取 BMF 并更新产物"><Icon name="refresh" size={14} /><span className="gen-refresh-label">更新产物</span></Button>
+      <Button size="sm" variant="ghost" disabled={gen.busy || working} aria-busy={gen.busy} onClick={() => void gen.generate()} title="重新读取 BMF 并更新产物">{gen.busy ? <BusyIndicator /> : <Icon name="refresh" size={14} />}<span className="gen-refresh-label">更新产物</span></Button>
     </header>
     {gen.err && <p className="gen-error" role="alert">{gen.err}</p>}
-    {gen.dirty && <p className="gen-state-note gen-warning" role="status">配置已修改。当前显示上次预览，更新产物后可写入。</p>}
-    {gen.busy && <p className="gen-state-note" role="status">正在解析、校验并更新产物…</p>}
+    {gen.dirty && !gen.busy && <p className="gen-state-note gen-warning" role="status">配置已修改。当前显示上次预览，更新产物后可写入。</p>}
+    <TaskFeedback active={gen.busy || gen.checking} compact className="gen-task-feedback"
+      label={gen.busy ? "正在解析、校验并更新产物…" : "正在检查输出目录与文件差异…"}
+      operationKey={gen.busy ? `${path}:preview` : `${path}:check:${gen.root}`}
+      detail={gen.busy ? gen.plan ? "当前显示上次预览，完成后更新产物与差异。" : "完成后可查看代码、脚本和来源。" : gen.root} />
     {layout.mode === "narrow" && <div className="gen-mobile-tabs"><button type="button" disabled={working} aria-pressed={panels.list} onClick={() => setPanels({ list: true })}>产物清单</button><button type="button" disabled={working} aria-pressed={!panels.list} onClick={() => setPanels({ list: false })}>内容预览</button></div>}
     <div className="gen-workbench-body">
       {gen.plan ? <>

@@ -37,10 +37,11 @@ export function GenConfigBar({ profile, root, component, disabled, updating, che
     <label className="gen-field"><span>包根</span><input aria-label="生成包根" value={profile.basePackage} disabled={disabled} spellCheck={false} placeholder="留空沿用实体包名" onChange={(e) => set("basePackage", e.target.value)} />
       <small title={profile.basePackage ? `${profile.basePackage}.${component}` : "按实体 fullClassName 生成"}>{profile.basePackage ? `实际包名：${profile.basePackage}.${component}` : "沿用实体 fullClassName 中的包名"}</small>
     </label>
-    <div className="gen-field"><label htmlFor="gen-output-root">输出目录</label><input id="gen-output-root" value={root} disabled={disabled} spellCheck={false} onChange={(e) => onRoot(e.target.value)} onBlur={onCheck} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onCheck(); } }} />
+    {/* 已核对或正在核对时不重复失焦检查，避免禁用用户同次点击的写入按钮。 */}
+    <div className="gen-field"><label htmlFor="gen-output-root">输出目录</label><input id="gen-output-root" value={root} disabled={disabled} spellCheck={false} onChange={(e) => onRoot(e.target.value)} onBlur={checked || checking ? undefined : onCheck} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onCheck(); } }} />
       <div className="gen-dir-actions"><Button size="sm" variant="outline" disabled={disabled} onClick={onPick}><Icon name="folder" size={13} />选择目录</Button>
-        <Button size="sm" variant="ghost" disabled={disabled || updating || checking} onClick={onCheck}>重新检查</Button></div>
-      <small className={checkError ? "gen-warning" : checked ? "gen-ok" : ""} role="status">{checking ? "正在检查目录…" : checkError ? checkError : checked ? "目录已检查" : "目录尚未检查"}</small>
+        <Button size="sm" variant="ghost" disabled={disabled || updating || checking} isLoading={checking} loadingText="检查中…" onClick={onCheck}>重新检查</Button></div>
+      <small className={checkError ? "gen-warning" : checked ? "gen-ok" : ""} role={checking ? undefined : "status"}>{checking ? "正在检查目录…" : checkError ? checkError : checked ? "目录已检查" : "目录尚未检查"}</small>
     </div>
     <details className="gen-advanced"><summary>高级选项</summary><div>
       <label className="gen-checkbox"><input type="checkbox" checked={profile.options.generateDdl} disabled={disabled} onChange={() => toggle("generateDdl")} />生成数据库脚本</label>
@@ -48,7 +49,7 @@ export function GenConfigBar({ profile, root, component, disabled, updating, che
       <label className="gen-field"><span>public 源码根</span><input value={profile.publicSrcRoot} disabled={disabled} spellCheck={false} onChange={(e) => set("publicSrcRoot", e.target.value)} /></label>
       <label className="gen-field"><span>test 源码根</span><input value={profile.testSrcRoot} disabled={disabled} spellCheck={false} onChange={(e) => set("testSrcRoot", e.target.value)} /></label>
     </div></details>
-    <Button className="gen-update" size="sm" disabled={disabled || updating} onClick={onGenerate}><Icon name="refresh" size={13} />{updating ? "更新中…" : "更新产物"}</Button>
+    <Button className="gen-update" size="sm" disabled={disabled || updating} isLoading={updating} loadingText="更新中…" onClick={onGenerate}><Icon name="refresh" size={13} />更新产物</Button>
     <small className={dirty ? "gen-warning" : ""}>{dirty ? "配置已修改，预览待更新" : "配置修改后统一更新预览"}</small>
   </div>;
 }

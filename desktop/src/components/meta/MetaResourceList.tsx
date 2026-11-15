@@ -2,6 +2,8 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { BmfEntry } from "../../lib/bmf";
 import { normalizeBmfPath } from "../../lib/bmfPath";
 import { Icon } from "../ui/icon";
+import { useScrollFrame } from "../../hooks/useScrollFrame";
+import { retainViewport, visibleRange } from "../../lib/scrollViewport";
 
 type Row = { kind: "group"; key: string; count: number; top: number; height: number } | { kind: "entry"; entry: BmfEntry; top: number; height: number };
 
@@ -12,6 +14,10 @@ export function MetaResourceList({ entries, selected, search, locked, onSelect }
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [viewport, setViewport] = useState({ top: 0, height: 500 });
   const ref = useRef<HTMLDivElement>(null);
+  const scrollFrame = useScrollFrame(() => {
+    const node = ref.current;
+    if (node) setViewport(previous => retainViewport(previous, { top: node.scrollTop, height: node.clientHeight || 500 }, 264));
+  });
   const rows = useMemo(() => {
     const query = search.trim().toLowerCase();
     const groups = new Map<string, BmfEntry[]>();
@@ -40,13 +46,13 @@ export function MetaResourceList({ entries, selected, search, locked, onSelect }
     const node = ref.current;
     if (!node) return;
     node.scrollTop = Math.min(node.scrollTop, Math.max(0, total - node.clientHeight));
-    const measure = () => setViewport({ top: node.scrollTop, height: node.clientHeight || 500 });
-    measure();
+    const measure = scrollFrame.schedule;
+    scrollFrame.flush();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [total]);
+  }, [total, scrollFrame]);
   useLayoutEffect(() => {
     const row = rows.find((r) => r.kind === "entry" && selected && normalizeBmfPath(r.entry.path) === normalizeBmfPath(selected));
     const node = ref.current;
@@ -56,8 +62,9 @@ export function MetaResourceList({ entries, selected, search, locked, onSelect }
       setViewport((v) => ({ ...v, top: node.scrollTop }));
     }
   }, [selected, rows]);
-  const visible = rows.filter((r) => r.top + r.height >= viewport.top - 88 && r.top <= viewport.top + viewport.height + 88);
-  return <div className="meta-tree" ref={ref} onScroll={(e) => { const top = e.currentTarget.scrollTop; setViewport((v) => ({ ...v, top })); }}>
+  const range = visibleRange(rows, viewport.top, viewport.height, 264);
+  const visible = rows.slice(range.first, range.last);
+  return <div className="meta-tree" ref={ref} onScroll={scrollFrame.schedule}>
     {!rows.length && <p className="meta-tree-empty">{entries.length ? "没有匹配的组件" : "工作区里没有找到 .bmf 文件"}</p>}
     <div className="meta-resource-rows" style={{ height: total }}>
       {visible.map((row) => row.kind === "group" ? <button type="button" key={row.key} className="meta-group-head" style={{ top: row.top, height: row.height }} title={row.key}

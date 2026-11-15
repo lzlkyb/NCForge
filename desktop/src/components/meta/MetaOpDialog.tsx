@@ -4,6 +4,7 @@ import { toast } from "../ui/toast";
 import { Button } from "../ui/button";
 import { Dialog, DialogHeader, DialogTitle } from "../ui/dialog";
 import type { MetaStage } from "../../lib/metaDraft";
+import { TaskFeedback } from "../ui/TaskFeedback";
 
 /**
  * 元数据编辑弹框的统一外壳：**先预览 diff、再保存**。
@@ -138,6 +139,7 @@ export function MetaOpDialog({
         </pre>
       )}
       {diff != null && !previewFresh && <p className="meta-note" role="status">输入已改变，请重新预览。</p>}
+      <TaskFeedback active={busy} compact label={onStage ? "正在校验并加入草稿…" : "正在校验并处理当前修改…"} operationKey={path} />
 
       <div className="mt-4 flex items-center justify-end gap-2">
         <Button variant="ghost" onClick={onClose} disabled={busy}>

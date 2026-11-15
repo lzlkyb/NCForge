@@ -82,8 +82,8 @@ export function MetaExcelPreview({
         {preview.errors === 0 && preview.ops.length === 0 && (
           <span className="meta-note m-0">没有需要写入的变更。</span>
         )}
-        <Button size="sm" variant="outline" onClick={onWrite} disabled={blocked || busy}>
-          {busy ? "写入中…" : `写入 ${preview.ops.length} 条变更`}
+        <Button size="sm" variant="outline" onClick={onWrite} disabled={blocked || busy} isLoading={busy} loadingText="写入中…">
+          {`写入 ${preview.ops.length} 条变更`}
         </Button>
       </div>
     </>
