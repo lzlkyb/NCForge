@@ -3,8 +3,10 @@ import { Icon } from "../ui/icon";
 import { countLevels, filterLines, logsRaw, type LogRecord } from "../../lib/serverLog";
 import { getLogPanelStore, useLogPanelForm, type ServiceLogSource } from "../../lib/logPanelStore";
 import { serviceLogMatches, serviceLogRows, isLaunchCommand } from "../../lib/serviceLogRows";
-import { useViewActive } from "../../lib/viewActivity";
+import { ViewActivityContext, useViewActive } from "../../lib/viewActivity";
+import { TaskFeedback } from "../ui/TaskFeedback";
 import { useServerLog } from "../../hooks/useServerLog";
+import { useScrollIdle } from "../../hooks/useScrollFrame";
 import { useServiceLogVirtual } from "../../hooks/useServiceLogVirtual";
 import { useServiceLogActions } from "../../hooks/useServiceLogActions";
 import { ServiceLogToolbar } from "./ServiceLogToolbar";
@@ -69,11 +71,13 @@ export function LogPanel({ active, generation, appHidden, logPath, logSize, onRe
   }, [available, store]);
 
   const followLatest = () => { reader.showLatest(); store.set({ follow: true, seen: reader.newestId }); };
+  const saveScroll = useScrollIdle((scrollTop: number) => store.set({ scrollTop }));
   const toggle = (id: number) => { const expanded = new Set(form.expanded); if (expanded.has(id)) expanded.delete(id); else expanded.add(id); store.set({ expanded }); };
   const onScroll = () => {
     virtual.onScroll(); const element = body.current; if (!element) return;
     const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 8;
-    store.set({ scrollTop: element.scrollTop, ...(form.follow && !atBottom ? { follow: false } : {}) });
+    saveScroll.schedule(element.scrollTop);
+    if (form.follow && !atBottom) store.set({ follow: false });
   };
   const captureSelection = () => {
     const selection = window.getSelection();
@@ -86,7 +90,9 @@ export function LogPanel({ active, generation, appHidden, logPath, logSize, onRe
       onCopy={() => actions.copy(logsRaw(filtered), `${filtered.length} 行已加载匹配日志`)} onCopySelection={() => actions.copy(selected, "日志选区")} onClear={actions.clear} onPurge={actions.purge}
       onExport={complete => actions.exportLog(complete ? undefined : logsRaw(filtered))} onReload={() => { reader.reset(); reader.retry(); }}
       onFollow={() => form.follow ? store.set({ follow: false }) : followLatest()} />
-    {actions.busy && <div className="sc-log-operation" role="status"><Icon name="spinner" size={12} className="animate-spin" /><span>{actions.busy}中…</span>{actions.busy === '导出日志' && <button type="button" className="sc-log-button" onClick={actions.cancel}>取消</button>}</div>}
+    <ViewActivityContext.Provider value={available}><TaskFeedback active={!!actions.busy} compact className="sc-log-task"
+      operationKey={actions.operationId} startedAt={actions.startedAt} label={`${actions.busy ?? "处理日志"}中…`}
+      onCancel={actions.busy === "导出日志" ? actions.cancel : undefined} cancelling={actions.cancelling} /></ViewActivityContext.Provider>
     {reader.error && <div className="sc-log-error" role="alert"><Icon name="alertTriangle" size={13} /><span>读取日志失败：{reader.error}。已加载内容仍可查看。</span><button type="button" className="sc-log-button" onClick={reader.retry}>重试</button></div>}
     {reader.truncated && <div className="sc-log-range-note">部分超长内容未加载，导出完整日志文件可保留全部原文。</div>}
     <div className="sc-log-container">

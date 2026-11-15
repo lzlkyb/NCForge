@@ -1,0 +1,60 @@
+/* Loading geometry belongs to the reading surface; the shared outer shell supplies material and radius. */
+.wb-loading-page,.wb-loading-visual { display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;overflow:hidden; }
+.wb-loading-page { background:transparent; }
+.wb-loading-for-meta { container:workspace-loading / inline-size; }
+.wb-loading-page:is([data-loading-region="context"],[data-loading-region="tabs"],[data-loading-region="status"],[data-loading-region="toolbar"]) { flex:none; }
+.wb-loading-page:not([data-visible]) .wb-loading-visual { visibility:hidden; }
+.wb-loading-page:not([data-visible]) .skeleton { animation-play-state:paused; }
+.wb-loading-page .skeleton { flex:none;border-radius:var(--r-control); }
+.wb-loading-page .wb-loading-bar { display:flex;align-items:center;gap:10px;height:40px;flex:none;padding:6px 12px; }
+.wb-loading-bar .wb-loading-label { width:130px;height:12px; }
+.wb-loading-bar .wb-loading-action { width:64px;height:24px;margin-left:auto; }
+.wb-loading-bar .wb-loading-icon { width:24px;height:24px; }
+.wb-loading-page .wb-loading-tabs { height:36px; }
+.wb-loading-tabs .wb-loading-label { width:150px;height:24px;border-radius:var(--r-tab); }
+.wb-loading-search { padding:4px 10px;flex:none;height:36px; }
+.wb-loading-search .skeleton { height:28px;width:100%; }
+.wb-loading-sidebar { display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden;background:hsl(var(--chrome)/.3); }
+.wb-loading-lines { padding:4px 12px;min-width:0;overflow:hidden; }
+.wb-loading-row { display:flex;align-items:center;gap:12px;height:26px;min-width:0; }
+:root[data-ui-density="comfortable"] .wb-loading-row { height:30px; }
+.wb-loading-row>.skeleton { height:10px; }
+.wb-loading-code { padding:12px 24px 12px 20px; }
+.wb-loading-row>.wb-loading-gutter { width:14px;height:8px;margin-right:20px; }
+.wb-loading-query { flex:1;min-height:160px;overflow:hidden; }
+.wb-loading-grid { height:240px;flex:none;overflow:hidden; }
+.wb-loading-settings { padding:20px 24px;overflow:hidden; }
+.wb-loading-for-settings { background:hsl(var(--background)); }
+.wb-loading-for-settings>.wb-loading-visual>.wb-loading-bar { height:56px;padding-inline:24px; }
+.wb-loading-setting-group { margin-top:32px;padding:20px;max-width:960px;background:hsl(var(--card));border-radius:var(--r-card); }
+.wb-loading-setting-preview { width:100%;height:240px;margin-top:12px; }
+.wb-loading-title { width:170px;height:20px;margin-bottom:12px; }
+.wb-loading-description { width:min(360px,72%);height:10px; }
+.wb-loading-setting { display:flex;align-items:center;justify-content:space-between;gap:24px;min-height:72px; }
+.wb-loading-setting>div { display:flex;flex:1;flex-direction:column;gap:10px;min-width:0; }
+.wb-loading-setting .wb-loading-label { width:150px;height:12px; }
+.wb-loading-setting>.wb-loading-action { width:44px;height:24px; }
+.wb-loading-group { height:10px;width:70px;margin:18px 16px 8px; }
+.wb-loading-sidebar-settings .wb-loading-row { height:32px; }
+.wb-loading-logs,.wb-loading-meta { display:grid;grid-template-columns:minmax(360px,52%) minmax(0,1fr);flex:1;min-height:0; }
+.wb-loading-logs>div { min-width:0;overflow:hidden; }
+.wb-loading-meta { grid-template-columns:224px minmax(0,1fr); }
+.wb-loading-pane { display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden; }
+.wb-loading-empty { display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:20px; }
+.wb-loading-empty-icon { height:40px;width:40px; }
+.wb-loading-empty>.wb-loading-description { width:260px;max-width:85%; }
+.wb-code-context-host .wb-loading-bar { height:47px; }
+.wb-code-tools .wb-loading-tabs { height:36px; }
+.wb-code-body .wb-loading-bar { height:28px; }.wb-code-body .wb-loading-tabs { height:36px; }.wb-code-body .wb-loading-code { padding-top:0; }
+.wb-loading-code .wb-loading-row { height:21px; }
+.wb-status-host .wb-loading-bar { height:26px;padding-block:3px; }
+.wb-bottom .wb-loading-bar { height:36px; }
+.wb-root[data-tool="settings"]:has([data-workspace-skeleton="settings"]) .wb-doc-tabs,
+.wb-root[data-tool="logs"]:has([data-workspace-skeleton="logs"]) .wb-doc-tabs { display:none; }
+.wb-loading-for-logs>.wb-loading-visual>.wb-loading-bar:first-child { height:51px;background:var(--material-resource); }
+.wb-loading-for-logs>.wb-loading-visual>.wb-loading-bar:nth-child(2) { height:79px; }
+.wb-loading-logs>div:first-child { background:var(--material-resource); }.wb-loading-logs .wb-loading-row { height:44px; }
+.wb-loading-logs .wb-loading-empty>.wb-loading-label { width:100px;height:12px; }
+@media(max-width:1100px) { .wb-loading-logs { grid-template-columns:minmax(0,1fr);grid-template-rows:45% 55%; } }
+@container workspace-loading (max-width:1100px) { .wb-loading-meta { grid-template-columns:minmax(0,1fr); }.wb-loading-meta>.wb-loading-sidebar { display:none; } }
+@media(max-width:640px) { .wb-loading-settings { padding:16px; } }

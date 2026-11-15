@@ -58,3 +58,4 @@
 .dw-search-actions button:disabled { opacity:.5; cursor:default; }
 .dw-search-actions button:focus-visible,.dw-search-hit:focus-visible,.dw-build-nav button:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:-2px; }
 @media (max-width:600px) { .dw-search-expanded { inset:48px 6px 30px; } }
+.dw-build-task { flex-shrink:0;padding:6px 12px;border-bottom:1px solid hsl(var(--border)); }

@@ -890,7 +890,7 @@ html[data-ui-style="glass"] :is(.wb-hist, .wb-outline) :is(input, select, textar
 .nj-x:hover { background: hsl(var(--secondary)); }
 .nj-body { padding: 14px 16px; display: grid; gap: 12px; }
 .nj-lbl { display: block; margin-bottom: 4px; font-size: 12px; color: hsl(var(--muted-foreground)); }
-.nj-kinds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.nj-kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 6px; }
 .nj-kind { display: grid; gap: 2px; padding: 8px 6px; border: 1px solid hsl(var(--border)); border-radius: 7px; text-align: center; background: hsl(var(--card)); cursor: pointer; }
 .nj-kind b { font-size: 13px; font-weight: 600; }
 .nj-kind small { font-size: 11px; color: hsl(var(--muted-foreground)); }

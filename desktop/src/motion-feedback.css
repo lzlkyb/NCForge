@@ -1,0 +1,51 @@
+/* Shared interaction timing; colors and dimensions still belong to each module. */
+:root :is(.dbx-btn,.dbx-ibtn,.sv-btn,.sv-icon-btn,.vc-btn,.wb-icon-btn,.wb-header-icon,.wb-nav-btn,.meta-link,.lg-btn) {
+  transition:background-color var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease),transform var(--dur-fast) var(--ease);
+}
+:root :is(.ui-button,.dbx-btn,.dbx-ibtn,.sv-btn,.sv-icon-btn,.vc-btn,.wb-icon-btn,.wb-header-icon,.wb-nav-btn,.meta-link,.lg-btn):active:not(:disabled):not([aria-disabled="true"]) {
+  transform:translateY(1px);transition-duration:var(--dur-press);
+}
+.ui-busy-indicator {display:inline-flex;flex:none;visibility:hidden;vertical-align:middle}
+.ui-busy-indicator[data-visible] {visibility:visible;animation:ui-feedback-in var(--dur-fast) var(--ease)}
+.ui-busy-indicator:not([data-visible]) .animate-spin {animation-play-state:paused}
+.ui-task-feedback {min-width:0;padding:8px 0;color:hsl(var(--muted-foreground));font-size:12px}
+.ui-task-summary {display:flex;align-items:center;gap:8px;min-height:28px;flex-wrap:wrap}
+.ui-task-message {display:inline-flex;align-items:center;gap:8px;min-width:0;overflow-wrap:anywhere;color:hsl(var(--foreground))}
+.ui-task-message>svg {flex:none}
+.ui-task-elapsed {font-variant-numeric:tabular-nums;white-space:nowrap}
+.ui-task-summary>.ui-button {margin-left:auto}
+.ui-task-detail {display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;margin-top:4px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.ui-task-track {height:2px;margin-top:7px;overflow:hidden;background:hsl(var(--muted));border-radius:2px}
+.ui-task-track>span {display:block;height:100%;background:hsl(var(--primary));transform-origin:left;transition:transform var(--dur) var(--ease)}
+.ui-task-track>span[data-indeterminate] {width:35%;animation:task-progress-sweep var(--dur-loop) var(--ease-standard) infinite}
+.ui-task-feedback:not([data-visible]) :is(.ui-task-message,.ui-task-detail,.ui-task-track) {visibility:hidden}
+.ui-task-feedback:not([data-visible]) :is(.animate-spin,[data-indeterminate]) {animation-play-state:paused}
+.ui-task-feedback[data-visible] .ui-task-message {animation:ui-feedback-in var(--dur-fast) var(--ease)}
+.ui-task-feedback[data-waiting-long] .ui-task-elapsed {color:hsl(var(--foreground))}
+.ui-task-feedback[data-compact] {padding:0}
+.ui-task-wait-note {margin:4px 0 0;line-height:1.6}
+@keyframes task-progress-sweep {from{transform:translateX(-105%)}to{transform:translateX(390%)}}
+/* Native minimization and retained inactive views must both stop visual loops. */
+:is(:root[data-app-hidden],[data-view-inactive],[hidden]) :is(.animate-spin,.skeleton,.vh-skel,.ui-task-track>span[data-indeterminate]) {animation-play-state:paused!important}
+/* Unread state remains visible after a finite attention cue. */
+.notice-pulse::after,.changelog-dot::after {animation-iteration-count:2}
+.ui-loading-blocks {display:flex;flex-direction:column;gap:12px;min-width:0}
+.meta-tool-skeleton:not([data-visible]) :is(.meta-tool-skeleton-head,.meta-tool-skeleton-body) {visibility:hidden}
+.ui-loading-state:not([data-visible]) .ui-loading-blocks {visibility:hidden}
+.ui-loading-state:not([data-visible]) .skeleton,.meta-tool-skeleton:not([data-visible]) .skeleton {animation-play-state:paused}
+:root[data-motion="reduce"] *, :root[data-motion="reduce"] *::before, :root[data-motion="reduce"] *::after {
+  animation-duration:.001ms!important;animation-delay:0ms!important;animation-iteration-count:1!important;
+  transition-duration:.001ms!important;transition-delay:0ms!important;scroll-behavior:auto!important;
+}
+:root[data-motion="reduce"] :is(.ui-surface[data-state],.toast[data-state],.ui-button:active,.dbx-btn:active,.dbx-ibtn:active,.sv-btn:active,.sv-icon-btn:active,.vc-btn:active,.wb-icon-btn:active,.wb-header-icon:active,.wb-nav-btn:active,.meta-link:active,.lg-btn:active) {transform:none!important}
+:root[data-motion="reduce"] :is(.skeleton,.vh-skel,.animate-spin,.ui-task-track>span[data-indeterminate]) {animation:none!important}
+:root[data-motion="reduce"] .toast-countdown {display:none}
+:root[data-motion="reduce"]::view-transition-group(*),
+:root[data-motion="reduce"]::view-transition-old(*),
+:root[data-motion="reduce"]::view-transition-new(*) {animation:none!important}
+:root[data-motion="reduce"] .sw:active:not(:disabled) .sw-thumb {transform:translateX(2px)}
+:root[data-motion="reduce"] .sw.on:active:not(:disabled) .sw-thumb {transform:translateX(22px)}
+@media(prefers-reduced-motion:reduce) {
+  :root :is(.ui-button,.dbx-btn,.dbx-ibtn,.sv-btn,.sv-icon-btn,.vc-btn,.wb-icon-btn,.wb-header-icon,.wb-nav-btn,.meta-link,.lg-btn):active:not(:disabled) {transform:none!important}
+  .ui-task-track>span[data-indeterminate],.ui-busy-indicator .animate-spin {animation:none!important}
+}

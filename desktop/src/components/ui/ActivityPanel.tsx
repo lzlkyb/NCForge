@@ -12,7 +12,7 @@ export function ActivityPanel({ active, children, className = "", ...props }: HT
   if (!visited) return null;
   return (
     <ViewActivityContext.Provider value={active && parentActive}>
-      <div {...props} hidden={!active} style={{ ...props.style, display: active ? undefined : "none" }} className={className}>
+      <div {...props} hidden={!active} data-view-inactive={!active || !parentActive || undefined} style={{ ...props.style, display: active ? undefined : "none" }} className={className}>
         {children}
       </div>
     </ViewActivityContext.Provider>

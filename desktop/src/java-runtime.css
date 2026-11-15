@@ -1,0 +1,22 @@
+.jrun-body { overflow: auto; }
+.jrun-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.jrun-config { display: grid; grid-template-columns: minmax(160px, .35fr) minmax(240px, 1fr); gap: 8px 12px; }
+.jrun-config label, .jrun-diagnostics label, .dbg-filter-form label { display: flex; flex-direction: column; gap: 4px; color: hsl(var(--muted-foreground)); font-size: 12px; }
+.jrun-config input, .jrun-config select, .jrun-config textarea, .jrun-diagnostics input, .dbg-filter-form textarea { border: 1px solid hsl(var(--input)); border-radius: var(--r-control); background: hsl(var(--background)); color: hsl(var(--foreground)); padding: 6px 8px; min-width: 0; font: inherit; }
+.jrun-config textarea { resize: vertical; }
+.jrun-config input:focus-visible, .jrun-config textarea:focus-visible, .jrun-config select:focus-visible, .jrun-diagnostics input:focus-visible, .dbg-filter-form textarea:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.jrun-targets { grid-column: 1 / -1; }
+.jrun-result { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 8px 0; font-size: 12px; }
+.jrun-result strong { color: hsl(var(--destructive-ink)); }
+.jrun-result[data-ok] strong { color: hsl(var(--success-ink)); }
+.jrun-tests { border-collapse: collapse; width: 100%; font-size: 12px; text-align: left; }
+.jrun-tests td, .jrun-tests th { padding: 5px 8px; border-bottom: 1px solid hsl(var(--border)); }
+.jrun-tests td:not(:first-child) { font-variant-numeric: tabular-nums; }
+.jrun-failure, .jrun-output, .jrun-diagnostics { margin-top: 10px; border-top: 1px solid hsl(var(--border)); padding-top: 8px; }
+.jrun-failure summary, .jrun-output summary, .jrun-diagnostics summary { cursor: pointer; font-size: 12px; }
+.jrun-failure summary button { margin-left: 10px; }
+.jrun-failure pre, .jrun-output pre, .jrun-diagnostics pre { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.55; }
+.jrun-source-options { display: grid; gap: 4px; font-size: 12px; }
+.dbg-filter-form { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; padding: 8px; }
+.dbg-filter-form label { flex: 1; min-width: 220px; }
+@media (max-width: 800px) { .jrun-config { grid-template-columns: minmax(0, 1fr); } }

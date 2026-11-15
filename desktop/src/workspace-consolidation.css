@@ -1,0 +1,46 @@
+.wb-compile-split { display:inline-flex; flex:none; height:24px; border:1px solid hsl(var(--border)); border-radius:5px; overflow:hidden; background:hsl(var(--secondary)); }
+.wb-compile-split > .relative { display:flex; align-self:stretch; }
+.wb-compile-primary, .wb-compile-dropdown { display:inline-flex; align-items:center; justify-content:center; gap:5px; padding:0 7px; font-size:12px; white-space:nowrap; }
+.wb-compile-primary span { max-width:144px; overflow:hidden; text-overflow:ellipsis; }
+.wb-compile-dropdown { border-left:1px solid hsl(var(--border)); padding-inline:5px; }
+.wb-compile-primary:hover, .wb-compile-dropdown:hover { background:hsl(var(--foreground) / .06); }
+.wb-compile-split button:disabled { opacity:var(--disabled-opacity,.62); cursor:not-allowed; }
+.wb-compile-split button:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:-2px; }
+.wb-code-layout-btn { gap:4px; white-space:nowrap; }
+.wb-menu-caption { padding:5px 10px; color:hsl(var(--muted-foreground)); font-size:11px; }
+.ncf-chg-compact { display:inline-flex; align-items:center; flex:none; gap:5px; padding:3px 7px; margin-left:auto; border-radius:4px; font-size:12px; white-space:nowrap; }
+.ncf-chg-compact:hover { background:hsl(var(--secondary)); }
+.ncf-chg-compact:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:-2px; }
+.qp-symbol-tools { display:flex; align-items:center; gap:7px; padding:6px 12px; border-bottom:1px solid hsl(var(--border)); font-size:12px; }
+.qp-symbol-tools > span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:hsl(var(--muted-foreground)); }
+.qp-symbol-tools .qp-symbol-action { flex:none; padding:3px 7px; border-radius:4px; }
+.qp-symbol-action:hover { background:hsl(var(--secondary)); }
+.qp-symbol-action:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:-2px; }
+.qp-symbol-action:disabled { opacity:var(--disabled-opacity,.62); cursor:not-allowed; }
+.qp-symbol-tools [aria-pressed="true"] { background:hsl(var(--secondary)); color:hsl(var(--foreground)); }
+.ncf-file-context { display:flex; align-items:center; gap:8px; padding:4px 10px; border-bottom:1px solid hsl(var(--border)); flex:none; min-height:26px; font-size:11px; }
+.ncf-file-context > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:hsl(var(--muted-foreground)); }
+.ncf-file-context .ncf-chg-bar { margin-left:auto; flex-wrap:wrap; flex:none; }
+.ncf-file-context:has(.ncf-chg-bar) { flex-wrap:wrap; }
+.ncf-tl-bar { overflow-x:auto; white-space:nowrap; }
+.wb-hist[data-embedded] { position:relative; top:auto; right:auto; width:100%; max-height:none; height:100%; flex:1; min-height:0; border:0; border-radius:0; box-shadow:none; display:grid; grid-template-columns:190px minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); background:transparent; }
+.wb-hist[data-embedded] .wb-hist-head { grid-column:1; grid-row:1; padding:4px 10px; }
+.wb-hist[data-embedded] .wb-hist-list { grid-column:1; grid-row:2; min-height:0; max-height:none; border-right:1px solid hsl(var(--border)); overflow:auto; }
+.wb-hist[data-embedded] .wb-hist-detail { grid-column:2; grid-row:1 / 3; border-top:0; min-width:0; }
+.wb-hist[data-embedded] > .wb-hist-foot { grid-column:2; grid-row:1 / 3; }
+.wb-hist[data-embedded] .wb-hist-actions { padding:4px 10px; flex-wrap:wrap; }
+.wb-hist[data-embedded] .wb-hist-diffhead { padding:4px 10px; flex:none; }
+.wb-hist[data-embedded] .wb-hist-note { padding:5px 10px; }
+.wb-hist[data-embedded] .wb-hist-row { min-height:28px; }
+@media(max-width:800px) {
+  .wb-compile-primary span { max-width:92px; }
+  .wb-code-layout-btn > span { display:none; }
+  .ncf-file-context .ncf-chg-who, .ncf-file-context .ncf-chg-progress { display:none; }
+  .wb-hist[data-embedded] { grid-template-columns:145px minmax(0,1fr); }
+}
+@media(max-height:600px) {
+  /* 限制停靠宿主，给标签、路径及代码正文一起留空间。仅缩小子面板会留下空白。 */
+  .wb-main:not([data-panel-expanded]) .wb-bottom:has(.ncf-timeline) { max-height:min(65%,calc(100% - 288px)); }
+  .wb-hist[data-embedded] .wb-hist-diffhead { padding-block:2px; }
+  .wb-hist[data-embedded] .wb-hist-actions { padding-block:2px; }
+}

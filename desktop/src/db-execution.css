@@ -25,7 +25,8 @@
 .dbx-console .dbx-execution-bar .dbx-runsplit > .dbx-run-menu.pri { width:24px;padding:0;border-left:1px solid hsl(var(--primary-foreground) / .25);border-radius:0 var(--r-control) var(--r-control) 0; }
 .dbx-console .dbx-execution-bar .dbx-runsplit > .dbx-btn.pri:hover:not(:disabled) { background:hsl(var(--primary) / .9); }
 .dbx-query-clock { width:43px; display:inline-flex; justify-content:flex-end; font-variant-numeric:tabular-nums; font-size:var(--dbx-fs-meta); }
-.dbx-query-clock:empty { width:0; }
+.dbx-stop-slot { width:28px; flex:none; }
+.dbx-console > .dbx-txbar { order:1; }
 /* 执行范围仍向辅助技术播报，并完整出现在执行按钮提示里。 */
 .dbx-console .dbx-execution-bar .dbx-scope {
   position:absolute; width:1px; height:1px; padding:0; margin:-1px;

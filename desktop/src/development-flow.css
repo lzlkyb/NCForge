@@ -16,4 +16,6 @@
 .development-phase { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .development-elapsed { color: hsl(var(--muted-foreground)); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .development-progress .sv-btn { height: 26px; }
+.development-task { flex:1;min-width:0; }
+.development-progress[data-state="success"] > svg { color:hsl(var(--success)); }
 @media (max-width: 760px) { .development-steps small { max-width: 130px; text-align: right; } .development-elapsed { display: none; } }

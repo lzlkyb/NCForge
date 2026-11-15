@@ -364,18 +364,8 @@ pre, code, .font-mono { font-variant-ligatures: none; }
 @keyframes tab-fade-in { from { opacity:.45; } to { opacity:1; } }
 .animate-tab-in { animation: tab-in var(--dur-page) var(--ease); }
 .animate-tab-in[data-page-motion="fade"] { animation-name:tab-fade-in; }
-[data-page-panel] { view-transition-name:workspace-page; }
-/* 外壳继续实时响应。只捕获内容区，不冻结顶栏、侧栏与通知。 */
-:root[data-page-transitions] { view-transition-name:none; }
-:root[data-page-transitions] .animate-tab-in { animation:none; }
-::view-transition { pointer-events:none; }
-::view-transition-group(workspace-page) { animation-duration:var(--dur-page);animation-timing-function:var(--ease); }
-::view-transition-old(workspace-page) { animation:page-out var(--dur-fast) var(--ease-exit) both;mix-blend-mode:normal; }
-::view-transition-new(workspace-page) { animation:tab-in var(--dur-page) var(--ease) both;mix-blend-mode:normal; }
-@keyframes page-out { to { opacity:0; } }
 @media(prefers-reduced-motion:reduce) {
  .animate-tab-in { animation:none; }
- ::view-transition-group(workspace-page), ::view-transition-old(workspace-page), ::view-transition-new(workspace-page) { animation:none; }
 }
 @keyframes ripple-out {
   to { transform: scale(2.4); opacity: 0; }

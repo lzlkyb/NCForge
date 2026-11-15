@@ -1,5 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { rowAtOffset, type ServiceLogRow } from "../lib/serviceLogRows";
+import { useScrollFrame } from "./useScrollFrame";
+import { retainViewport } from "../lib/scrollViewport";
 
 /** 动态换行与栈展开逐行测高；滚动只挂可见窗口，不截掉已加载历史。 */
 export function useServiceLogVirtual(rows: ServiceLogRow[], body: RefObject<HTMLDivElement>, follow: boolean, visible: boolean, wrap: boolean, fontSize: number, savedTop: number) {
@@ -11,26 +13,30 @@ export function useServiceLogVirtual(rows: ServiceLogRow[], body: RefObject<HTML
   const anchor = useRef<{ key: string; delta: number } | null>(null);
   const requested = useRef<string | null>(null);
   const config = useRef("");
+  const indexes = useMemo(() => {
+    const next = new Map(rows.map((row, index) => [row.key, index]));
+    // 行窗口有上限，但日志 id 会持续递增；移除被淘汰行，测高缓存才同样有界。
+    for (const key of heights.current.keys()) if (!next.has(key)) heights.current.delete(key);
+    return next;
+  }, [rows]);
   const offsets = useMemo(() => {
     void version;
     const values = [0], estimate = Math.ceil(fontSize * 1.75);
-    const keys = new Set(rows.map(row => row.key));
-    // 行窗口有上限，但日志 id 会持续递增；移除被淘汰行，测高缓存才同样有界。
-    for (const key of heights.current.keys()) if (!keys.has(key)) heights.current.delete(key);
     for (const row of rows) values.push(values[values.length - 1] + (heights.current.get(row.key) ?? estimate));
     return values;
   }, [rows, fontSize, version]);
-  const indexes = useMemo(() => new Map(rows.map((row, index) => [row.key, index])), [rows]);
   const latest = useRef({ rows, offsets, indexes }); latest.current = { rows, offsets, indexes };
-  const refresh = useCallback(() => {
+  const padding = Math.max(160, Math.ceil(fontSize * 1.75) * 8);
+  const refresh = useScrollFrame(() => {
     const element = body.current;
-    if (element) setViewport({ top: element.scrollTop, height: element.clientHeight, width: element.clientWidth });
-  }, [body]);
+    if (element) setViewport(previous => retainViewport(previous, { top: element.scrollTop, height: element.clientHeight, width: element.clientWidth }, padding));
+  });
+  const measured = useScrollFrame(() => setVersion(value => value + 1));
   const onScroll = useCallback(() => {
     const element = body.current; if (!element) return;
     const data = latest.current, index = rowAtOffset(data.offsets, element.scrollTop);
     const row = data.rows[index]; anchor.current = row ? { key: row.key, delta: element.scrollTop - data.offsets[index] } : null;
-    refresh();
+    refresh.schedule();
   }, [body, refresh]);
   useLayoutEffect(() => {
     if (!visible || !body.current) return;
@@ -38,17 +44,17 @@ export function useServiceLogVirtual(rows: ServiceLogRow[], body: RefObject<HTML
     const measure = new ResizeObserver(entries => {
       let changed = false;
       for (const entry of entries) {
-        if (entry.target === element) { refresh(); continue; }
+        if (entry.target === element) { refresh.schedule(); continue; }
         const key = entry.target.getAttribute("data-row-key");
         if (!key) continue;
-        const height = entry.target.getBoundingClientRect().height;
+        const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.target.getBoundingClientRect().height;
         if (height > 0 && Math.abs(height - (heights.current.get(key) ?? 0)) > .25) { heights.current.set(key, height); changed = true; }
       }
-      if (changed) setVersion(value => value + 1);
+      if (changed) measured.schedule();
     });
-    observer.current = measure; measure.observe(element); nodes.current.forEach(node => measure.observe(node)); refresh();
-    return () => { observer.current = null; measure.disconnect(); };
-  }, [body, refresh, visible]);
+    observer.current = measure; measure.observe(element); nodes.current.forEach(node => measure.observe(node)); refresh.flush();
+    return () => { observer.current = null; measure.disconnect(); refresh.cancel(); measured.cancel(); };
+  }, [body, refresh, measured, visible]);
   useLayoutEffect(() => {
     const next = `${wrap}:${fontSize}:${viewport.width}`;
     if (config.current === next) return;
@@ -65,7 +71,7 @@ export function useServiceLogVirtual(rows: ServiceLogRow[], body: RefObject<HTML
     } else if (follow) element.scrollTop = Math.max(0, total - element.clientHeight);
     else if (anchor.current && indexes.has(anchor.current.key)) element.scrollTop = offsets[indexes.get(anchor.current.key)!] + anchor.current.delta;
     else element.scrollTop = Math.min(savedTop, Math.max(0, total - element.clientHeight));
-    refresh();
+    refresh.flush();
   }, [body, offsets, indexes, follow, visible, savedTop, refresh]);
   const rowRef = useCallback((key: string, node: HTMLDivElement | null) => {
     const previous = nodes.current.get(key); if (previous) observer.current?.unobserve(previous);
@@ -75,9 +81,9 @@ export function useServiceLogVirtual(rows: ServiceLogRow[], body: RefObject<HTML
   const jumpTo = useCallback((key: string) => {
     requested.current = key;
     const element = body.current, data = latest.current, index = data.indexes.get(key);
-    if (element && index !== undefined) { element.scrollTop = data.offsets[index]; requested.current = null; anchor.current = null; refresh(); }
+    if (element && index !== undefined) { element.scrollTop = data.offsets[index]; requested.current = null; anchor.current = null; refresh.flush(); }
   }, [body, refresh]);
-  const start = Math.max(0, rowAtOffset(offsets, viewport.top) - 6);
-  const end = Math.min(rows.length, rowAtOffset(offsets, viewport.top + viewport.height) + 8);
+  const start = Math.max(0, rowAtOffset(offsets, Math.max(0, viewport.top - padding)));
+  const end = Math.min(rows.length, rowAtOffset(offsets, viewport.top + viewport.height + padding) + 2);
   return { start, end, offsets, height: offsets[offsets.length - 1], rowRef, onScroll, jumpTo };
 }

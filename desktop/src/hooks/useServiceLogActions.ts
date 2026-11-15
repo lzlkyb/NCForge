@@ -6,14 +6,16 @@ import { toast } from "../components/ui/toast";
 
 interface Options { target: ServiceLogTarget; previous: boolean; fileId?: string; reset: (offset: number) => void; onCleared: () => void; }
 export function useServiceLogActions({ target, previous, fileId, reset, onCleared }: Options) {
-  const [busy, setBusy] = useState<string | null>(null);
+  const [task, setTask] = useState<{ label: string; id: number; startedAt: number; cancelling: boolean } | null>(null);
+  const nextId = useRef(0);
   const lock = useRef(false), controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
   const run = async (label: string, action: () => Promise<void>) => {
     if (lock.current) return;
-    lock.current = true; setBusy(label);
+    const id = ++nextId.current;
+    lock.current = true; setTask({ label, id, startedAt: Date.now(), cancelling: false });
     try { await action(); } catch (error) { errorToast(label, error); }
-    finally { lock.current = false; controller.current = null; setBusy(null); }
+    finally { lock.current = false; controller.current = null; setTask(current => current?.id === id ? null : current); }
   };
   const copy = (text: string, label: string) => {
     if (!text) return;
@@ -40,5 +42,11 @@ export function useServiceLogActions({ target, previous, fileId, reset, onCleare
       if (result) toast(`日志已保存：${result.path}`, "success");
     });
   };
-  return { busy, copy, clear, purge, exportLog, cancel: () => controller.current?.abort() };
+  const cancel = () => {
+    if (!controller.current || controller.current.signal.aborted) return;
+    setTask(current => current ? { ...current, cancelling: true } : current);
+    controller.current.abort();
+  };
+  return { busy: task?.label ?? null, operationId: task?.id, startedAt: task?.startedAt,
+    cancelling: task?.cancelling ?? false, copy, clear, purge, exportLog, cancel };
 }

@@ -28,3 +28,23 @@
 .qp-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 14px; border-top: 1px solid hsl(var(--border)); font-size: 11.5px; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
 .qp-foot > span:not(.qp-sp) { white-space: nowrap; }
 .qp-sp { flex: 1; }
+
+/* Full workspace search shares the palette shell and keeps its result viewport bounded. */
+.qp-workspace { width: min(960px, calc(100vw - 32px)); height: calc(100vh - 100px); }
+.qp-workspace .wb-search-tool { overflow: hidden; }
+/* 范围和开关共用一行；避免旧侧栏的四列网格挤掉低窗口的结果。 */
+.qp-workspace .wb-search-tool > .qp-search-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; max-height: 30vh; overflow: auto; }
+.qp-workspace .wb-search-tool > .qp-search-options > .qp-search-scope:first-child { display: flex; grid-template-columns: none; margin-top: 0; }
+.qp-workspace .qp-search-options > .qp-search-toggles { margin-top: 0; margin-left: auto; }
+.qp-workspace .qp-search-options > .qp-search-filters, .qp-workspace .qp-search-options > .qp-search-error { width: 100%; margin-top: 0; }
+.qp-workspace .qp-search-toggles button { height: 30px; }
+/* 组件菜单挂在 body，必须位于工程搜索遮罩上方才能点击。 */
+body:has(.qp-workspace) > .ui-surface[role="menu"] { z-index: 61; }
+.qp-search-submit, .qp-more { padding: 4px 10px; border-radius: var(--r-control); font-size: 12px; color: hsl(var(--accent-foreground)); background: hsl(var(--accent)); }
+.qp-search-submit:disabled { opacity: .45; cursor: default; }
+.qp-more { margin-left: auto; color: hsl(var(--foreground)); background: hsl(var(--secondary)); }
+.qp-search-submit:focus-visible, .qp-more:focus-visible, .qp-mode:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }
+.qp-workspace .dw-search-content { min-height: 0; }
+@media (max-height: 600px) {
+  .qp-workspace { height: calc(100vh - 72px); max-height: calc(100vh - 72px); }
+}

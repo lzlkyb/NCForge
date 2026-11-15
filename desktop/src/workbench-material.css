@@ -1,0 +1,279 @@
+/* Both materials share geometry and elevation; classic keeps solid surfaces. */
+html[data-ui-style] {
+  --r-control: 8px; --r-chip: 6px; --r-card: 14px; --r-menu: 14px; --r-dialog: 18px;
+  --r-shell: 16px; --r-pane: 12px; --r-work: 14px; --r-inset: 10px; --material-gutter: 4px;
+  --material-shell: hsl(var(--chrome)); --material-shell-light: none;
+  --material-sidebar: hsl(var(--chrome)); --material-floating: hsl(var(--popover)); --material-blur: none;
+  --material-resource: color-mix(in srgb, hsl(var(--foreground)) 2%, hsl(var(--card)));
+  --material-sheen: inset 0 1px 0 rgb(255 255 255 / .85);
+  --material-edge: hsl(var(--border)); --material-scrim: rgb(25 32 45 / .14);
+  --material-depth: var(--material-sheen), 0 4px 12px rgb(20 28 42 / .08), 0 20px 54px rgb(20 28 42 / .16);
+  --material-pane-depth: 0 2px 12px rgb(20 28 42 / .055);
+  --forge-card-radius: var(--r-card);
+}
+html.dark[data-ui-style] {
+  --material-sheen: inset 0 1px 0 rgb(255 255 255 / .07); --material-scrim: rgb(0 0 0 / .22);
+  --material-depth: var(--material-sheen), 0 5px 16px rgb(0 0 0 / .28), 0 22px 60px rgb(0 0 0 / .4);
+  --material-pane-depth: 0 3px 14px rgb(0 0 0 / .16);
+}
+/* One reading plane; only its outer perimeter and transient overlays carry elevation. */
+html[data-ui-style="glass"] {
+  --background: 220 12% 96%; --chrome: 220 10% 94%; --foreground: 220 14% 18%;
+  --card: 0 0% 100%; --card-foreground: 220 14% 18%; --popover: 220 15% 98%;
+  --popover-foreground: 220 14% 18%; --secondary: 220 10% 94%; --secondary-foreground: 220 14% 18%;
+  --muted: 220 10% 95%; --muted-foreground: 220 8% 42%;
+  --accent: 174 24% 92%; --accent-foreground: 174 49% 26%;
+  --primary: 174 51% 30%; --primary-foreground: 0 0% 100%; --ring: 174 51% 30%;
+  --border: 220 10% 86%; --input: 220 10% 83%;
+  --material-shell: #eef0f3; --material-sidebar: rgb(247 248 250 / .72);
+  --material-floating: rgb(250 251 253 / .78); --material-blur: blur(22px) saturate(1.1);
+  --material-sheen: inset 0 1px 0 rgb(255 255 255 / .85);
+  --material-edge: rgb(55 65 81 / .14); --material-scrim: rgb(25 32 45 / .14);
+  --material-depth: var(--material-sheen), 0 4px 12px rgb(20 28 42 / .08), 0 20px 54px rgb(20 28 42 / .16);
+  --material-pane-depth: 0 2px 12px rgb(20 28 42 / .055);
+  --material-shell-light: linear-gradient(125deg, rgb(87 164 158 / .085), transparent 58%);
+  --glass-stage: var(--material-shell); --glass-backdrop: none; --glass-panel: var(--material-sidebar);
+  --glass-wash: transparent; --glass-document: hsl(var(--background)); --glass-sheen: none;
+  --glass-edge: var(--material-edge); --glass-chrome-edge: var(--material-edge);
+  --glass-depth: var(--material-sheen); --glass-floating: var(--material-floating);
+  --glass-inset: hsl(var(--card)); --glass-reading: hsl(var(--card)); --glass-canvas: hsl(var(--card));
+  --forge-edge: var(--material-edge); --forge-card-radius: var(--r-card);
+  --forge-card-depth: 0 1px 3px rgb(20 28 42 / .045); --forge-float-depth: var(--material-depth);
+  --forge-menu-depth: var(--material-depth); --forge-button-depth: 0 1px 2px rgb(20 28 42 / .1);
+  --sh-pop: var(--material-depth); --shadow-pop: var(--material-depth);
+}
+html.dark[data-ui-style="glass"] {
+  --background: 225 10% 12%; --chrome: 225 9% 14%; --foreground: 220 15% 91%;
+  --card: 225 9% 15%; --card-foreground: 220 15% 91%; --popover: 225 9% 19%;
+  --popover-foreground: 220 15% 91%; --secondary: 225 8% 20%; --secondary-foreground: 220 15% 91%;
+  --muted: 225 8% 18%; --muted-foreground: 220 9% 69%;
+  --accent: 174 22% 22%; --accent-foreground: 173 40% 76%;
+  --primary: 173 42% 66%; --primary-foreground: 174 40% 13%; --ring: 173 42% 66%;
+  --border: 225 8% 26%; --input: 225 7% 34%;
+  --material-shell: #1b1d23; --material-sidebar: rgb(35 37 44 / .78);
+  --material-floating: rgb(44 47 55 / .78);
+  --material-sheen: inset 0 1px 0 rgb(255 255 255 / .07);
+  --material-edge: rgb(225 230 242 / .13); --material-scrim: rgb(0 0 0 / .22);
+  --material-depth: var(--material-sheen), 0 5px 16px rgb(0 0 0 / .28), 0 22px 60px rgb(0 0 0 / .4);
+  --material-pane-depth: 0 3px 14px rgb(0 0 0 / .16);
+  --material-shell-light: linear-gradient(125deg, rgb(100 159 151 / .05), transparent 58%);
+  --forge-card-depth: 0 1px 3px rgb(0 0 0 / .12); --forge-button-depth: 0 1px 3px rgb(0 0 0 / .24);
+}
+html[data-ui-style] .app-shell {
+  background: var(--material-shell); background-image: var(--material-shell-light);
+  border-radius: var(--r-shell); box-shadow: var(--material-sheen);
+}
+html[data-ui-style] .app-shell :is(.app-header, .app-side, .wb-status) { background: transparent; box-shadow: none; }
+html[data-ui-style] .app-shell .app-body { background: transparent; }
+/* One perimeter includes resources, document, bottom panels and the status bar on every page. */
+html[data-ui-style] .app-shell .wb-root {
+  margin: var(--material-gutter) 6px var(--material-gutter) var(--material-gutter);
+  border: 0; border-radius: var(--r-work); background: hsl(var(--card));
+  box-shadow: var(--material-pane-depth); overflow: hidden;
+}
+html[data-ui-style] .app-shell .wb-root .wb-status { background: var(--material-resource); }
+html[data-ui-style] .app-shell :is(.wb-toolbar, .wb-tabbar, .wb-tabs) {
+  background: hsl(var(--card)); background-image: none; border-color: transparent; box-shadow: none;
+}
+/* The stable root clips the outer corners; page transitions and dock hosts stay inside it. */
+html[data-ui-style] .app-shell .wb-content-frame {
+  padding: 0; border: 0; border-radius: 0; background: transparent; overflow: hidden;
+}
+html[data-ui-style] .app-shell .wb-layout { background: var(--material-resource); }
+/* The grid has a definite remaining viewport size; child intrinsic widths must not relayout the app shell. */
+html[data-ui-style] .app-shell .wb-layout { contain:strict; }
+html[data-ui-style] .app-shell .wb-root .wb-tree {
+  border: 0; border-radius: 0;
+  background: var(--material-resource); box-shadow: none; overflow: hidden;contain:strict;
+}
+@media(min-width:641px) {
+  html[data-ui-style] .app-shell .wb-root .wb-tree { position:relative; }
+  html[data-ui-style] .app-shell .wb-tree-native { position:absolute;inset:0 auto 0 0; }
+}
+/* Retain DOM and scroll position without measuring thousands of inactive tree rows. */
+html[data-ui-style] .app-shell .wb-tree-native[data-inactive] { content-visibility:hidden;pointer-events:none; }
+/* Preserve scroll extent and all keyboard targets while skipping offscreen row contents. */
+html[data-ui-style] .app-shell .wb-tree-row-chunk { content-visibility:auto;contain-intrinsic-block-size:auto calc(var(--wb-tree-row-count) * 27px); }
+html[data-ui-style][data-ui-density="comfortable"] .app-shell .wb-tree-row-chunk { contain-intrinsic-block-size:auto calc(var(--wb-tree-row-count) * 30px); }
+html[data-ui-style] .app-shell .wb-main-with-inspector { overflow: hidden; }
+html[data-ui-style] .app-shell .wb-main {
+  border: 0; border-radius: 0;
+  background: hsl(var(--card)); box-shadow: none; overflow: hidden;
+}
+html[data-ui-style] .app-shell :is(.wb-code-surface, .wb-document-surface, .wb-bottom) { border-radius: 0; }
+html[data-ui-style] .app-shell .wb-bottom { background: hsl(var(--card)); box-shadow: none; overflow: hidden; }
+html[data-ui-style] .app-shell .wb-toolbar {
+  background: transparent; border-color: transparent; border-radius: 0;
+  margin-bottom: 0; box-shadow: none;
+}
+/* Structural regions use tint and spacing; semantic content and floating menus keep their states. */
+html[data-ui-style] .app-shell :is(.wb-code-context, .wb-code-tree-title, .wb-tree-quick-filter, .wb-panel-tabs, .vc-chg-top, .vc-chg-foot, .vc-file-head, .vc-review-head, .pk-tabs, .pk-actions, .lg-head-wrap, .lg-context, .lg-left, .lg-detail-head, .lg-foot, .sc-run-toolbar, .sc-log-toolbar, .sc-log-footer) { border-color: transparent; }
+html[data-ui-style] .app-shell :is(.wb-code-context, .lg-head-wrap) { background: var(--material-resource); }
+html[data-ui-style] .app-shell .wb-sidebar-host .vc-chg { background: transparent; }
+html[data-ui-style] .app-shell .lg-list { border-color: transparent; background: var(--material-resource); }
+html[data-ui-style] .app-shell .dw-debug-dock { border-color: transparent; border-radius: 0; box-shadow: none; background: var(--material-resource); }
+/* Native scrolling stays independent of neighbouring panes and the rounded shell's paint. */
+html[data-ui-style] .app-shell :is(.dbx-grid, .dbx-compare-grid, .sc-log-body, .dw-build-raw, .meta-tree, .wb-tree-list, .vc-list, .sr-results, .wb-settings-body, .lg-list) {
+  overscroll-behavior: contain; scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / .38) transparent;
+}
+html[data-ui-style] .app-shell :is(.dbx-grid, .dbx-compare-grid, .sc-log-body, .dw-build-raw, .meta-tree) { contain: layout paint; }
+/* 正文已有明确宽高，内容测高不应触发旁边文件树和整个工作台的固有尺寸排版。 */
+html[data-ui-style] .app-shell .sc-log-body { contain: strict; }
+html[data-ui-style] .app-shell :is(.dbx-grow, .dbx-compare-row) { contain: layout style paint; }
+html[data-ui-style] .app-shell :is(.input, .dbx-inp, .wb-global-search, .wb-settings-search, .settings-select):not(:focus, :focus-within, [aria-invalid="true"], [data-invalid], [data-error], .error, .bad, [class*="border-destructive"], :invalid, :has([aria-invalid="true"], [data-invalid], :invalid)) {
+  border-color: transparent; background: hsl(var(--foreground) / .045); box-shadow: none;
+}
+html[data-ui-style] .app-shell .wb-tab {
+  height: 30px; border-radius: 999px; background: transparent; border-color: transparent; box-shadow: none;
+}
+html[data-ui-style] .app-shell .wb-tabs-scroll { gap: 4px; }
+html[data-ui-style] .dbx-doctab[data-active][class*="e-"]::before { display: none; }
+html[data-ui-style] .app-shell .wb-tab[data-active] {
+  background: hsl(var(--accent)); border-radius: 999px; color: hsl(var(--accent-foreground));
+  box-shadow: 0 1px 3px hsl(var(--foreground) / .06);
+}
+html[data-ui-style] .app-shell .wb-tab:hover:not([data-active]) { background: hsl(var(--foreground) / .05); }
+html[data-ui-style] :is(.dbx-conn-env, .badge, .header-badge, .title-chip) { border-radius: 999px; }
+html[data-ui-style] .app-shell .wb-document-surface { background: hsl(var(--card)); }
+html[data-ui-style] .dbx-console-body { padding: 0; background: hsl(var(--card)); }
+html[data-ui-style] .dbx-console-main { background: transparent; }
+html[data-ui-style] .dbx-editor {
+  border: 0; border-radius: 0; background: hsl(var(--card)); box-shadow: none; overflow: hidden;
+}
+html[data-ui-style] .dbx-editor :is(.wb-editor-host, .monaco-editor, .overflow-guard) { border-radius: inherit; }
+html[data-ui-style] .dbx-res {
+  border: 0; border-radius: 0;
+  background: hsl(var(--card)); box-shadow: none; overflow: hidden;
+}
+/* Transparent borders preserve toolbar geometry without drawing permanent seams. */
+html[data-ui-style] .app-shell :is(.dbx-command-header, .dbx-result-head, .dbx-result-tools, .dbx-result-footer, .dbx-rfoot, .dbx-result-source, .wb-crumb-row, .wb-panel, .wb-tree-heading, .app-side-foot, .wb-settings-commandbar) { border-color: transparent; }
+html[data-ui-style] .app-shell :is(.dbx-result-head, .dbx-result-tools, .dbx-result-footer, .dbx-rfoot, .dbx-result-source) { background: hsl(var(--card)); }
+html[data-ui-style] .app-shell :is(.dbx-execution-primary, .dbx-context-session) { border-right-color: transparent; }
+html[data-ui-style] :is(.dbx-tool-divider, .wb-header-divider) { background: transparent; }
+html[data-ui-style] .app-side [class~="border-t"] { border-top-color: transparent; }
+html[data-ui-style] .app-shell .dbx-side { background: transparent; border-color: transparent; }
+html[data-ui-style] .app-shell .dbx-crow:not([data-drop]) { border-color: transparent; box-shadow: none; }
+html[data-ui-style] .app-shell .dbx-rtab { border-radius: 999px; }
+html[data-ui-style] .app-shell .dbx-rtab[data-on] { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
+html[data-ui-style] .app-shell .dbx-rtab[data-on]::after { display: none; }
+html[data-ui-style] .app-shell :is(.dbx-ghead, .dbx-gh) { background: color-mix(in srgb, hsl(var(--foreground)) 3.5%, hsl(var(--card))); }
+html[data-ui-style] .app-shell .dbx-gh { border-right-color: transparent; border-bottom-color: hsl(var(--border) / .35); }
+html[data-ui-style] .app-shell .dbx-gc { border-right-color: transparent; border-bottom-color: hsl(var(--border) / .22); }
+html[data-ui-style] .app-shell .dbx-gc.rn:not([data-range-heading]) { background: hsl(var(--card)); }
+html[data-ui-style] .dbx-splitbar {
+  position: relative; height: 5px; border: 0; background: transparent;
+}
+html[data-ui-style] .dbx-splitbar::before {
+  content: ""; position: absolute; width: 30px; height: 2px; top: 2px; left: calc(50% - 15px);
+  border-radius: 999px; background: hsl(var(--primary)); opacity: 0;
+}
+html[data-ui-style] .dbx-splitbar:is(:hover, :focus-visible)::before { opacity: 1; }
+html[data-ui-style] .app-shell :is(.wb-resize-x, .wb-resize-y) { border-color: transparent; background: transparent; }
+html[data-ui-style] .app-shell :is(.wb-resize-x, .wb-resize-y)::before {
+  content: ""; position: absolute; border-radius: 999px; background: hsl(var(--primary)); opacity: 0; pointer-events: none;
+}
+html[data-ui-style] .app-shell .wb-resize-x::before { width: 2px; height: 30px; left: 1px; top: calc(50% - 15px); }
+html[data-ui-style] .app-shell .wb-resize-y::before { height: 2px; width: 30px; top: 1px; left: calc(50% - 15px); }
+html[data-ui-style] .app-shell :is(.wb-resize-x, .wb-resize-y):is(:hover, :focus-visible)::before { opacity: 1; }
+html[data-ui-style] .app-shell .wb-document-surface:has(.wb-dock-region:not([hidden]) > .wb-settings-page) { background: hsl(var(--background)); background-image: none; }
+html[data-ui-style] .wb-settings-commandbar { background: transparent; }
+html[data-ui-style] .wb-settings-body .ui-card {
+  border: 0; border-radius: var(--r-card); background: hsl(var(--card));
+  box-shadow: none;
+}
+html[data-ui-style] .wb-settings-body .srow { border-color: transparent; }
+html[data-ui-style] .wb-settings-body :is(.settings-group, .settings-section-block) { border-color: transparent; }
+html[data-ui-style] .app-shell .settings-choice { background: hsl(var(--muted)); border-color: transparent; border-radius: 10px; box-shadow: none; }
+html[data-ui-style] .settings-choice button { border-radius: 7px; }
+html[data-ui-style] .settings-choice button[aria-checked="true"] { background: hsl(var(--card)); }
+html[data-ui-style] .settings-appearance-preview .appearance-preview-window { border-color: transparent; border-radius: var(--r-inset); overflow: hidden; }
+html[data-ui-style] .settings-appearance-preview .appearance-preview-tab { border-color: transparent; background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); border-radius: 999px; }
+/* Metadata owns its sidebar inside the document surface, outside the shared shell tree. */
+html[data-ui-style] .app-shell .meta-workbench { background: hsl(var(--card)); }
+html[data-ui-style] .app-shell :is(.meta-resource-panel, .meta-side) { background: var(--material-resource); border-color: transparent; box-shadow: none; }
+html[data-ui-style] .app-shell :is(.meta-side-head, .meta-side-foot, .meta-main-head, .meta-document-tabs, .meta-document-tools, .meta-editor-toolbar, .meta-document-status) { border-color: transparent; background: transparent; box-shadow: none; }
+html[data-ui-style] .app-shell .meta-search { border-color: transparent; background: hsl(var(--foreground) / .045); border-radius: var(--r-control); box-shadow: none; }
+html[data-ui-style] .app-shell .meta-workbench .meta-search input.input:not([type="checkbox"], [type="radio"], [type="range"]) { border: 0; background: transparent; box-shadow: none; outline: none; }
+html[data-ui-style] .app-shell .meta-search:focus-within { outline: 2px solid hsl(var(--ring)); outline-offset: 1px; }
+html[data-ui-style] .app-shell .meta-tree-empty { text-align: left; padding: 24px 10px; font-size: 12px; line-height: 1.7; }
+html[data-ui-style] .app-shell .meta-splitter { background: transparent; }
+html[data-ui-style] .app-shell .meta-splitter::after { top: calc(50% - 15px); bottom: auto; height: 30px; width: 2px; border-radius: 999px; background: hsl(var(--primary)); opacity: 0; }
+html[data-ui-style] .app-shell .meta-splitter.is-horizontal::after { top: 2px; left: calc(50% - 15px); width: 30px; height: 2px; }
+html[data-ui-style] .app-shell .meta-splitter:is(:hover, :focus-visible)::after { opacity: 1; }
+html[data-ui-style] .app-shell .meta-document-tab { border-color: transparent; border-radius: 999px; }
+html[data-ui-style] .app-shell .meta-document-tab.is-active { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); box-shadow: none; }
+/* Place the existing action beneath the empty-state guidance without changing its handler. */
+html[data-ui-style] .app-shell .meta-main:has(> .meta-empty-toolbar) { display: grid; grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr); justify-items: center; padding: 24px; overflow: auto; }
+html[data-ui-style] .app-shell .meta-empty-toolbar { grid-row: 2; padding: 0; }
+html[data-ui-style] .app-shell .meta-empty-toolbar > .meta-link { min-height: 32px; padding: 0 14px; border-radius: var(--r-control); background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); font-size: 12px; box-shadow: 0 1px 3px hsl(var(--foreground) / .06); }
+html[data-ui-style] .app-shell .meta-empty-toolbar > .meta-link:hover { background: color-mix(in srgb, hsl(var(--accent)) 88%, hsl(var(--primary))); text-decoration: none; }
+html[data-ui-style] .app-shell .meta-empty-toolbar + div { grid-row: 1; align-self: end; height: auto; max-width: 100%; padding: 0 0 20px; gap: 18px; }
+html[data-ui-style] .app-shell .meta-empty-toolbar + div > :is(.empty-ring, svg.absolute) { display: none; }
+html[data-ui-style] .app-shell .meta-empty-toolbar + div > svg.relative { box-sizing: content-box; width: 28px; height: 28px; padding: 18px; border-radius: 20px; color: hsl(var(--primary)); background: hsl(var(--accent)); }
+html[data-ui-style] .app-shell .meta-empty-toolbar + div > p { max-width: 360px; margin: 0; color: hsl(var(--muted-foreground)); font-size: 13px; line-height: 1.85; text-wrap: balance; }
+html[data-ui-style] .app-shell .meta-panel.is-drawer { background: hsl(var(--card)); border-radius: var(--r-pane); box-shadow: var(--material-depth); overflow: hidden; }
+html[data-ui-style] .app-shell .meta-panel.is-drawer :is(.meta-side, .meta-drawer-head) { background: hsl(var(--card)); border-color: transparent; }
+/* All transient surfaces share one material; reading surfaces never inherit blur. */
+html[data-ui-style] :is(.modal-surface, .ui-surface[role="menu"], .ui-surface[role="listbox"], .dbx-dd, .wb-ctx, .qp, .toast) {
+  background: var(--material-floating); background-image: none; border: 1px solid var(--material-edge);
+  border-radius: var(--r-menu); backdrop-filter: var(--material-blur); -webkit-backdrop-filter: var(--material-blur);
+  box-shadow: var(--material-depth);
+}
+html[data-ui-style] .modal-surface { border-radius: var(--r-dialog); }
+/* Dense connection forms keep an opaque reading plane within their floating perimeter. */
+html[data-ui-style] .dbx-conn-dialog { background: hsl(var(--card)); backdrop-filter: none; -webkit-backdrop-filter: none; }
+html[data-ui-style] .qp-scrim { background: var(--material-scrim); backdrop-filter: none; }
+html[data-ui-style] .qp { background: var(--material-floating); }
+html[data-ui-style] .qp-list {
+  background: transparent; background-image: none; border: 0; border-radius: 0; box-shadow: none; backdrop-filter: none;
+}
+html[data-ui-style] .qp-in { background: hsl(var(--card) / .65); }
+html[data-ui-style] .qp-mode { background: hsl(var(--foreground) / .045); }
+html[data-ui-style] .qp-mode[data-on] { background: hsl(var(--accent)); }
+html[data-ui-style] .settings-appearance-preview[data-material="glass"] {
+  --glass-stage: var(--material-shell); --glass-backdrop: none; --glass-panel: var(--material-sidebar);
+  --glass-reading: hsl(var(--card)); --glass-wash: transparent; --glass-chrome-edge: var(--material-edge);
+  --glass-document: hsl(var(--card));
+}
+html[data-ui-style] .monaco-editor :is(.suggest-widget, .monaco-hover, .parameter-hints-widget),
+html[data-ui-style] .monaco-editor .action-widget {
+  --vscode-editorSuggestWidget-background: var(--material-floating);
+  --vscode-editorHoverWidget-background: var(--material-floating);
+  background: var(--material-floating) !important; border: 1px solid var(--material-edge) !important;
+  border-radius: var(--r-menu) !important; box-shadow: var(--material-depth) !important;
+  backdrop-filter: var(--material-blur); overflow: hidden;
+}
+html[data-ui-style] .action-widget {
+  --vscode-menu-background: var(--material-floating); --vscode-menu-border: var(--material-edge);
+  background: var(--material-floating) !important; border-radius: var(--r-menu);
+  box-shadow: var(--material-depth); backdrop-filter: var(--material-blur);
+}
+html[data-ui-style] .action-widget :is(.monaco-list, .monaco-list-rows, .monaco-scrollable-element) { background: transparent !important; }
+html[data-ui-style] .action-widget .monaco-list-row.focused {
+  background: hsl(var(--accent)) !important; color: hsl(var(--accent-foreground)) !important; border-radius: 6px;
+}
+html[data-ui-style] .monaco-editor .suggest-widget :is(.monaco-list, .monaco-list-rows),
+html[data-ui-style] .monaco-editor .monaco-hover .monaco-hover-row { background: transparent !important; }
+@media (max-width: 640px) {
+  html[data-ui-style] .app-shell .wb-root { margin: 3px; }
+  html[data-ui-style] .app-shell .wb-root .wb-tree {
+    top: 0; bottom: 0; border-radius: var(--r-pane); background: hsl(var(--card)); box-shadow: var(--material-depth);
+  }
+}
+@media (max-height: 700px) {
+  /* Reserve the outer corner gutters without taking a visible row from the grid. */
+  html[data-ui-style] .app-shell .dbx-filterbar[data-expanded="true"] { max-height: min(144px, calc(30dvh - 16px)); }
+}
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  html[data-ui-style] { --material-floating: hsl(var(--popover)); }
+  html[data-ui-style] :is(.modal-surface, .ui-surface, .dbx-dd, .toast),
+  html[data-ui-style] .monaco-editor :is(.suggest-widget, .monaco-hover, .parameter-hints-widget, .action-widget) { backdrop-filter: none; }
+}
+@media (forced-colors: active) {
+  html[data-ui-style] { --material-shell: Canvas; --material-shell-light: none; --material-edge: CanvasText; --material-floating: Canvas; --material-depth: none; --material-pane-depth: none; }
+  html[data-ui-style] :is(.modal-surface, .ui-surface, .dbx-dd, .wb-ctx, .qp, .toast, .action-widget) { background: Canvas; border-color: CanvasText; box-shadow: none; backdrop-filter: none; }
+  html[data-ui-style] .app-shell :is(.wb-tab[data-active], .dbx-rtab[data-on], .meta-document-tab.is-active) { background: Highlight; color: HighlightText; }
+  html[data-ui-style] .app-shell :is(.meta-search, .wb-global-search, .wb-settings-search) { border-color: CanvasText; }
+  html[data-ui-style] .app-shell .meta-search:focus-within { outline-color: Highlight; }
+}

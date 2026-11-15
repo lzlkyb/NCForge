@@ -70,6 +70,7 @@
 .dbx-result-context-note { display:flex;align-items:flex-start;gap:8px;flex:none;padding:6px 10px;background:hsl(var(--warning) / .09);color:hsl(var(--warning-ink));font-size:var(--dbx-fs-meta);border-bottom:1px solid hsl(var(--border)); }
 .dbx-result-context-note > svg { flex:none;margin-top:2px; }
 .dbx-result-footer .dbx-rfoot { min-height:30px;padding-block:4px;gap:4px 10px; }
+.dbx-result-footer > .dbx-writeback-bar { flex:0 0 100%; order:1; }
 .dbx-rfoot > strong { color:hsl(var(--foreground));font-weight:600;font-variant-numeric:tabular-nums; }
 .dbx-completeness { display:inline-flex;align-items:center;gap:5px;color:hsl(var(--success-ink)); }
 .dbx-completeness::before { content:"";width:5px;height:5px;border-radius:50%;background:currentColor; }

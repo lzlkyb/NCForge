@@ -3,6 +3,7 @@ import { formatBytes, formatBytesPerSec } from "../../lib/utils";
 import { updateRetryLabel } from "../../lib/updatePresentation";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
+import { TaskFeedback } from "../ui/TaskFeedback";
 
 export interface UpdateDialogProcess {
   status: UpdateStatus;
@@ -42,12 +43,15 @@ export function UpdateProcess({ process }: { process: UpdateDialogProcess }) {
   const pct = Math.min(100, Math.max(0, process.progress));
   const verifying = status === "downloading" && pct >= 100 && !process.progressIndeterminate;
   const failed = status === "error" || (status === "ready" && !!process.error);
+  const waiting = !failed && (preparing || restarting || status === "checking" || status === "installing");
+  const message = preparing ? "正在检查未保存文件、数据库事务与运行任务…" : restarting || status === "installing" ? "正在启动安装器并应用更新…" : verifying ? "下载完成，正在校验更新包" : status === "downloading" ? "关闭弹框后仍会继续下载" : status === "ready" ? "更新包已下载并验证" : status === "checking" ? "正在重新检查更新…" : status === "error" ? "更新暂未完成" : "当前已是最新版本";
   return <section className="update-process" data-status={failed ? "error" : status} aria-label="更新状态">
     <div className="update-process-heading">
-      <h3 role="status" aria-live="polite">
+      {waiting ? <TaskFeedback active compact className="update-task" label={message}
+        operationKey={preparing ? "prepare" : restarting ? "restart" : status} /> : <h3 role="status" aria-live="polite">
         <Icon name={failed ? "alertTriangle" : status === "ready" ? "check" : "refresh"} size={15} aria-hidden="true" />
-        {preparing ? "正在检查未保存文件、数据库事务与运行任务…" : restarting || status === "installing" ? "正在启动安装器并应用更新…" : verifying ? "下载完成，正在校验更新包" : status === "downloading" ? "关闭弹框后仍会继续下载" : status === "ready" ? "更新包已下载并验证" : status === "checking" ? "正在重新检查更新…" : status === "error" ? "更新暂未完成" : "当前已是最新版本"}
-      </h3>
+        {message}
+      </h3>}
       {status === "downloading" && <strong>{process.progressIndeterminate ? "下载中" : `${pct}%`}</strong>}
     </div>
     <p>{preparing ? "处理好当前工作后才会启动安装；取消后会留在工作台。" : status === "installing" || restarting ? "安装器可能关闭应用，请等待新版本启动。" : status === "ready" ? process.error ? "安装或重启尚未完成，更新包仍已准备好，可以再次尝试。" : "确认后才安装并重启，软件不会倒计时强制重启。" : status === "downloading" ? verifying ? "验签完成后等待你确认安装，不会自动关闭工作台。" : "可收起到后台，随时从更新徽章查看进度。" : status === "error" ? friendlyError(process.error ?? "", process.errorCode).friendly : status === "checking" ? "检查完成后显示最新结果。" : "可以继续工作，软件会在后台检查新的更新。"}</p>

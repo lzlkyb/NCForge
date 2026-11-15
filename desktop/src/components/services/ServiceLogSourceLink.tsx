@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Icon } from "../ui/icon";
+import { BusyIndicator } from "../ui/BusyIndicator";
 import { Modal } from "../ui/Modal";
 import { toast } from "../ui/toast";
 import { findStackSources, openStackSource, stackLocation } from "../../lib/serviceLogSource";
@@ -27,17 +28,17 @@ export function ServiceLogSourceLink({ text, children }: { text: string; childre
     finally { setBusy(false); }
   };
   return <>
-    <button type="button" className="sc-log-source" disabled={busy} onClick={() => void find()} title={`定位 ${location.className} · ${location.file}:${location.line}`}>
-      {busy && <Icon name="spinner" size={11} className="animate-spin" />}{children ?? `${location.file}:${location.line}`}
+    <button type="button" className="sc-log-source" aria-busy={busy || undefined} disabled={busy} onClick={() => void find()} title={`定位 ${location.className} · ${location.file}:${location.line}`}>
+      {busy && <BusyIndicator size={11} />}{children ?? `${location.file}:${location.line}`}
     </button>
     <Modal open={choices !== null} onClose={() => setChoices(null)} ariaLabel="选择堆栈源码" className="modal-surface sc-log-dialog">
       <div className="sc-log-dialog-head"><strong>选择源码位置</strong><button className="sc-log-icon" type="button" aria-label="关闭源码选择" onClick={() => setChoices(null)}><Icon name="close" size={15} /></button></div>
       <p>找到多个同名类型，请选择当前运行使用的模块。</p>
-      <div className="sc-log-source-choices">{choices?.hits.map(hit => <button key={hit.file} type="button" onClick={() => {
+      <div className="sc-log-source-choices">{choices?.hits.map(hit => <button key={`${hit.file}:${hit.jar}`} type="button" onClick={() => {
         setChoices(null);
         if (choices.epoch !== workspaceEpoch()) { toast("工程已切换，请重新定位源码", "info"); return; }
         openStackSource(hit, location);
-      }}><strong>{hit.module || hit.name}</strong><span>{hit.file}</span></button>)}</div>
+      }}><strong>{hit.module || hit.name}</strong><span>{hit.jar || hit.file}</span></button>)}</div>
     </Modal>
   </>;
 }

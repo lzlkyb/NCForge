@@ -55,11 +55,11 @@
 .sc-log-empty p { margin: 5px 0 10px; color: hsl(var(--muted-foreground)); font-size: 12px; }
 .sc-log-new { position: absolute; right: 12px; bottom: 9px; display: flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid hsl(var(--primary) / .3); border-radius: var(--r-control); color: hsl(var(--primary)); background: hsl(var(--card)); font-size: 12px; cursor: pointer; }
 .sc-log-new:hover { background: hsl(var(--accent)); }
-.sc-log-error, .sc-log-operation { display: flex; align-items: center; gap: 7px; padding: 4px 12px; flex-shrink: 0; min-height: 30px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; }
+.sc-log-error, .sc-log-task { padding: 4px 12px; flex-shrink: 0; min-height: 30px; border-bottom: 1px solid hsl(var(--border)); font-size: 12px; }
+.sc-log-error { display:flex;align-items:center;gap:7px; }
 .sc-log-error { color: hsl(var(--destructive-ink)); }
 .sc-log-error > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.sc-log-operation { background: hsl(var(--background)); }
-.sc-log-operation > span { flex: 1; }
+.sc-log-task { background: hsl(var(--background)); }
 .sc-log-range-note { padding: 4px 12px; border-bottom: 1px solid hsl(var(--border)); font-size: 11px; color: hsl(var(--warning-ink)); }
 .sc-log-footer { display: flex; align-items: center; gap: 8px; height: 27px; flex-shrink: 0; padding: 0 12px; border-top: 1px solid hsl(var(--border)); font-size: 11px; white-space: nowrap; }
 .sc-log-footer select { height: 23px; padding: 0 4px; border: 1px solid transparent; border-radius: var(--r-control); color: hsl(var(--foreground)); background: hsl(var(--card)); font-size: 11px; }

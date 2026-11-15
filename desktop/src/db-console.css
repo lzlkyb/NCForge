@@ -170,16 +170,15 @@
 .dbx-conn-status[data-state="error"] { color:hsl(var(--destructive-ink)); }
 
 .dbx-crow[data-drop] { box-shadow: inset 0 2px 0 hsl(var(--primary)); }
-/* 连接颜色标记：左侧竖条。颜色只认 data-color 的七个键（后端 db_conns::CONN_COLORS 同源），
-   样式表逐个映射到已存在的图表色 token，绝不把配置里的字符串拼进颜色值。 */
+/* 连接列表和表单共用七个颜色键。图表 token 已经是完整色值，直接引用。 */
 .dbx-crow[data-color]::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px; border-radius: 2px; background: var(--dbx-conn-color); }
-.dbx-crow[data-color="red"] { --dbx-conn-color: hsl(var(--chart-4)); }
-.dbx-crow[data-color="orange"] { --dbx-conn-color: hsl(var(--chart-10)); }
-.dbx-crow[data-color="amber"] { --dbx-conn-color: hsl(var(--chart-3)); }
-.dbx-crow[data-color="green"] { --dbx-conn-color: hsl(var(--chart-5)); }
-.dbx-crow[data-color="blue"] { --dbx-conn-color: hsl(var(--chart-7)); }
-.dbx-crow[data-color="purple"] { --dbx-conn-color: hsl(var(--chart-6)); }
-.dbx-crow[data-color="gray"] { --dbx-conn-color: hsl(var(--chart-compare)); }
+:is(.dbx-crow, .dbx-conn-color)[data-color="red"] { --dbx-conn-color: var(--chart-4); }
+:is(.dbx-crow, .dbx-conn-color)[data-color="orange"] { --dbx-conn-color: var(--chart-10); }
+:is(.dbx-crow, .dbx-conn-color)[data-color="amber"] { --dbx-conn-color: var(--chart-3); }
+:is(.dbx-crow, .dbx-conn-color)[data-color="green"] { --dbx-conn-color: var(--chart-5); }
+:is(.dbx-crow, .dbx-conn-color)[data-color="blue"] { --dbx-conn-color: var(--chart-7); }
+:is(.dbx-crow, .dbx-conn-color)[data-color="purple"] { --dbx-conn-color: var(--chart-6); }
+:is(.dbx-crow, .dbx-conn-color)[data-color="gray"] { --dbx-conn-color: var(--chart-compare); }
 /* 分组头：比连接行矮一档，收起时只管藏组内行，不碰连接自己的展开状态 */
 .dbx-cgroup-head { display: flex; align-items: center; gap: 5px; width: 100%; padding: 7px 6px 3px; text-align: left; color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); font-weight: 600; }
 .dbx-cgroup-head:hover { color: hsl(var(--foreground)); }
@@ -188,15 +187,8 @@
 /* 表单里的颜色选择：小色块，选中态用描边而不是只靠颜色深浅 */
 .dbx-conn-colors { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .dbx-conn-color { width: var(--h-icon); height: var(--h-icon); border-radius: var(--r-chip); display:grid; place-items:center; }
-.dbx-conn-color::before { content:""; width:16px; height:16px; border-radius:50%; border:1px solid hsl(var(--border)); background:var(--dbx-swatch); }
+.dbx-conn-color::before { content:""; width:16px; height:16px; border-radius:50%; border:1px solid hsl(var(--border)); background:var(--dbx-conn-color); }
 .dbx-conn-color-none { min-height:var(--h-icon); }
-.dbx-conn-color[data-color="red"] { --dbx-swatch: hsl(var(--chart-4)); }
-.dbx-conn-color[data-color="orange"] { --dbx-swatch: hsl(var(--chart-10)); }
-.dbx-conn-color[data-color="amber"] { --dbx-swatch: hsl(var(--chart-3)); }
-.dbx-conn-color[data-color="green"] { --dbx-swatch: hsl(var(--chart-5)); }
-.dbx-conn-color[data-color="blue"] { --dbx-swatch: hsl(var(--chart-7)); }
-.dbx-conn-color[data-color="purple"] { --dbx-swatch: hsl(var(--chart-6)); }
-.dbx-conn-color[data-color="gray"] { --dbx-swatch: hsl(var(--chart-compare)); }
 .dbx-conn-color[data-on] { box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 3px hsl(var(--foreground) / .55); }
 .dbx-conn-color-none { height: 22px; padding: 0 8px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); font-size: var(--dbx-fs-meta); }
 .dbx-conn-color-none[data-on] { border-color: hsl(var(--primary)); color: hsl(var(--primary)); }
@@ -300,6 +292,9 @@
 .dbx-grow[data-state="added"] .dbx-gc.rn { background: color-mix(in srgb, hsl(var(--success)) 16%, hsl(var(--chrome))); color: hsl(var(--success-ink)); font-weight: 600; }
 .dbx-grow[data-state="deleted"] .dbx-gc { background: color-mix(in srgb, hsl(var(--destructive)) 8%, hsl(var(--card))); color: hsl(var(--muted-foreground)); text-decoration: line-through; }
 .dbx-grow[data-state="deleted"] .dbx-gc.rn { background: color-mix(in srgb, hsl(var(--destructive)) 14%, hsl(var(--chrome))); color: hsl(var(--destructive-ink)); text-decoration: none; font-weight: 600; }
+/* 已写回删除：库里没了、但这份结果是执行时的快照。比「待删除」更弱——它不是待办，是既成事实。 */
+.dbx-grow[data-state="removed"] .dbx-gc { background: color-mix(in srgb, hsl(var(--muted)) 55%, hsl(var(--card))); color: hsl(var(--muted-foreground)); font-style: italic; }
+.dbx-grow[data-state="removed"] .dbx-gc.rn { background: color-mix(in srgb, hsl(var(--muted)) 70%, hsl(var(--chrome))); font-weight: 600; }
 .dbx-grid { --grid-selection-fill: hsl(var(--selection-inactive)); --grid-selection-edge: hsl(var(--muted-foreground)); }
 .dbx-grid:focus-within { --grid-selection-fill: hsl(var(--selection-bg)); --grid-selection-edge: hsl(var(--selection-marker)); }
 .dbx-grid .dbx-gc[data-cell] { outline: none; background: var(--grid-selection-fill); }
@@ -499,6 +494,41 @@
 .dbx-dlg .bd > label { color: hsl(var(--muted-foreground)); text-align: left; }
 .dbx-dlg .bd.one { display: block; }
 .dbx-dlg .ft { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 20px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--chrome)); flex-shrink: 0; }
+.dbx-conn-dialog { height: min(480px, calc(100dvh - 40px)); }
+.dbx-conn-dialog .hd { padding: 12px 20px; border-bottom: 1px solid hsl(var(--border)); }
+.dbx-conn-dialog .bd { flex: 1; align-content: start; scrollbar-gutter: stable; }
+.dbx-conn-dialog .ft { min-height: 55px; }
+.dbx-conn-dialog .ft .pri { min-width: 104px; }
+.dbx-conn-manual:not([hidden]) { display: contents; }
+.dbx-conn-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-conn-import { position: relative; z-index: 2; }
+.dbx-conn-import summary { cursor: pointer; list-style: none; }
+.dbx-conn-import summary::-webkit-details-marker { display: none; }
+.dbx-conn-import-list { position: absolute; inset: calc(100% + 5px) 0 auto auto; min-width: 154px; display: grid; padding: 4px; border: 1px solid hsl(var(--border)); border-radius: var(--r-control); background: hsl(var(--card)); box-shadow: 0 5px 18px hsl(var(--foreground) / .12); }
+.dbx-conn-import-list .dbx-btn { justify-content: flex-start; }
+.dbx-conn-dialog .bd.dbx-conn-body { grid-template-columns: minmax(0, 1fr); }
+.dbx-conn-fields, .dbx-conn-advanced { min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.dbx-conn-fields { display: grid; gap: 12px; }
+.dbx-conn-address, .dbx-conn-field { display: grid; gap: 4px; min-width: 0; }
+.dbx-conn-address { gap: 8px; }
+.dbx-conn-pair, .dbx-conn-address-row { display: grid; gap: 12px; align-items: start; }
+.dbx-conn-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dbx-conn-address-row { grid-template-columns: minmax(0, 1fr) 104px; }
+.dbx-conn-field-title { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.dbx-conn-link { color: hsl(var(--primary)); text-decoration: underline; text-underline-offset: 3px; font-size: var(--dbx-fs-meta); white-space: nowrap; }
+.dbx-conn-error { color: hsl(var(--destructive-ink)); font-size: var(--dbx-fs-meta); }
+.dbx-conn-body [aria-invalid="true"] { border-color: hsl(var(--destructive)); }
+.dbx-conn-origin { overflow-wrap: anywhere; }
+.dbx-conn-advanced:not([hidden]) { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 9px 14px; align-items: center; }
+.dbx-conn-advanced .dbx-conn-cache, .dbx-conn-advanced .dbx-hint { grid-column: 2; }
+.dbx-conn-advanced .dbx-txmode { justify-self: start; }
+@media (max-width: 490px) {
+  .dbx-conn-dialog .hd, .dbx-conn-dialog .ft { padding-inline: 12px; }
+  .dbx-conn-dialog .ft { min-height: 93px; align-content: end; }
+  .dbx-conn-manual .ft { justify-content: flex-end; }
+  .dbx-conn-manual .ft .dbx-sp { display: none; }
+  .dbx-conn-dialog .ft .dbx-sp { flex: 1 0 0; }
+}
 .dbx-dlg pre.sql { margin: 0; padding: 8px 10px; border-radius: 8px; background: hsl(var(--secondary) / .6); font: 11.5px/18px var(--font-mono); white-space: pre-wrap; max-height: 220px; overflow: auto; }
 .dbx-envs { display: flex; gap: 6px; flex-wrap: wrap; }
 .dbx-envs > button { display: inline-flex; align-items: center; gap: 6px; height: var(--dbx-h-control); padding: 0 10px; border-radius: var(--r-control); border: 1px solid hsl(var(--border)); font-size: var(--dbx-fs-body); }
@@ -665,3 +695,24 @@ html[data-reduced=true] .dbx-query-surface .dbx-grid,html[data-reduced=true] .db
 .dbx-other-tools .dbx-import-paste .dbx-inp { flex: 1; min-width: 0; }
 .dbx-other-tools > .dbx-hint, .dbx-other-tools > .dbx-badline { grid-column: 1 / -1; margin: 0; }
 .dbx-other-tools > span { min-width: 0; }
+
+/* ── SQL 行内提示（lib/sqlAssistGhost）：表名后的 chip 与条件行尾说明 ──
+   两者的定位都由 Monaco 的 float widget / 装饰负责，这里只管外观：
+   chip 长得像正文里的一枚小按钮（不抢视线，但看得出能点），
+   行尾说明是浅灰小字，不和代码抢颜色。 */
+.ncforge-sql-chip {
+  margin-left: 10px; padding: 0 7px; height: 18px;
+  display: inline-flex; align-items: center; gap: 3px;
+  border: 1px solid hsl(var(--primary) / .35); border-radius: 9px;
+  background: hsl(var(--primary) / .08); color: hsl(var(--primary));
+  font-size: var(--dbx-fs-badge); line-height: 1; font-weight: 600;
+  cursor: pointer; user-select: none; white-space: nowrap;
+}
+.ncforge-sql-chip:hover, .ncforge-sql-chip:focus-visible {
+  background: hsl(var(--primary) / .16); border-color: hsl(var(--primary) / .55);
+}
+.ncforge-sql-chip[hidden] { display: none; }
+.ncforge-sql-lens {
+  margin-left: 4px; color: hsl(var(--muted-foreground));
+  font-size: var(--dbx-fs-badge); font-style: italic; opacity: .85;
+}
