@@ -1,0 +1,50 @@
+.review-mode {
+  position: fixed;
+  z-index: 80;
+  right: 14px;
+  top: 48px;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-control);
+  background: hsl(var(--card));
+}
+.review-mode [aria-pressed="true"] { color: hsl(var(--primary)); background: hsl(var(--accent)); }
+.review-guide {
+  position: fixed;
+  z-index: 79;
+  right: 14px;
+  top: 91px;
+  width: min(286px, calc(100vw - 28px));
+  max-height: calc(100dvh - 100px);
+  overflow: auto;
+  padding: 13px 15px;
+  color: hsl(var(--foreground));
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--r-control);
+  box-shadow: 0 4px 16px hsl(var(--foreground) / .10);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.review-guide[hidden] { display: none; }
+.review-guide h2 { margin: 0 0 6px; font-size: 14px; font-weight: 650; }
+.review-guide ul { list-style: none; margin: 0; padding: 0; }
+.review-guide li { display: grid; gap: 2px; padding: 6px 0; }
+.review-guide li + li { border-top: 1px solid hsl(var(--border)); }
+.review-guide li span { color: hsl(var(--muted-foreground)); }
+.db-review-markers .dbx-side-filter,
+.db-review-markers .review-filter-actions button:not([hidden]),
+.db-review-markers .dbx-table-filter-header > button[aria-pressed],
+.db-review-markers .dbx-filter-header .pri,
+.db-review-markers [aria-label="筛选已加载行"] {
+  outline: 1px solid hsl(var(--primary));
+  outline-offset: 1px;
+}
+.db-review-proposed .review-filter-actions, .db-review-proposed .review-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.db-review-proposed .review-chips[hidden], .db-review-proposed .review-filter-actions [hidden] { display: none; }
+.db-review-proposed .review-chip { color: hsl(var(--accent-foreground)); background: hsl(var(--accent)); }
+.db-review-proposed .review-filter-actions [aria-pressed="true"] { color: hsl(var(--primary)); background: hsl(var(--accent)); }
+.db-review-proposed .dbx-filterbar[data-expanded="false"] .dbx-filter-header > label:has(select[aria-label="表页查询等待上限"]) { display: none; }
+.db-review-proposed .dbx-filter-header .dbx-tx-actions:not(:has(button:enabled)) { display: none; }

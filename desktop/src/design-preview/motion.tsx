@@ -12,11 +12,17 @@ import { useCountUp } from "../hooks/useCountUp";
 import { Icon } from "../components/ui/icon";
 import { toggleTheme } from "../lib/theme";
 import { transitionPage } from "../lib/pageTransition";
+import { MotionTaskPreview } from "./MotionTaskPreview";
+import { initializeMotionPreference } from "../lib/motionPreference";
+import { useAppHiddenFlag } from "../hooks/useAppHiddenFlag";
 import "../index.css";
 import "../interaction-refinements.css";
+import "../forge-controls.css";
+import "../motion-feedback.css";
 
 /** Isolated, real-component preview: never calls IPC or writes app settings. */
 function MotionPreview() {
+  useAppHiddenFlag();
   const [busy, setBusy] = useState(false);
   const [checked, setChecked] = useState(false);
   const [open, setOpen] = useState(false);
@@ -39,6 +45,7 @@ function MotionPreview() {
         <div><h1 className="text-lg font-semibold">交互动效预览</h1><p className="mt-1 text-sm text-muted-foreground">复用实际组件 · 示例操作，不连接本地服务</p></div>
         <Button variant="outline" onClick={toggleTheme}>切换主题</Button>
       </header>
+      <MotionTaskPreview />
       <section className="rounded-xl border bg-card p-5">
         <h2 className="mb-4 text-sm font-semibold">操作与反馈</h2>
         <div className="flex flex-wrap items-center gap-3">
@@ -88,4 +95,6 @@ function MotionPreview() {
   );
 }
 
+initializeMotionPreference();
+document.documentElement.classList.add("forge-controls");
 createRoot(document.getElementById("root")!).render(<StrictMode><ToastProvider><MotionPreview /></ToastProvider></StrictMode>);
