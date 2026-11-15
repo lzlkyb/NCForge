@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock("./monacoSetup", () => ({ monaco: { editor: {
   EditorOption: { quickSuggestions: 90 },
+  ShowLightbulbIconMode: { Off: "off", OnCode: "onCode", On: "on" },
   registerCommand: (id: string, fn: (...args: unknown[]) => void) => { h.commands.set(id, fn); return { dispose: () => h.commands.delete(id) }; },
 } } }));
 vi.mock("./dbStore", () => ({ connOf: () => h.conn, rtOf: () => h.rt, sqlColumnEpoch: () => h.epoch, sqlTabOf: (id: string) => ({ id, connId: "conn" }), columnsOf: h.columns }));
@@ -18,6 +19,9 @@ vi.mock("./sqlFormat", () => ({ sqlLanguageOf: () => "plsql" }));
 vi.mock("./monacoSql", async () => { const { analyzeSql } = await import("./sqlScope"); return { dialectOfSqlModel: () => "plsql", sqlAnalysisOf: (model: { getValue: () => string }) => analyzeSql(model.getValue(), "plsql") }; });
 vi.mock("./sqlFormatPrefs", () => ({ getSqlFormatPrefs: () => ({ keywordCase: "upper" }) }));
 vi.mock("../components/ui/toast", () => ({ toast: h.toast }));
+vi.mock("./sqlJoinMeaningAssist", () => ({ wireSqlJoinMeaningAssist: () => ({ dispose() {} }) }));
+vi.mock("./sqlBillAssist", () => ({ wireSqlBillAssist: () => ({ dispose() {} }) }));
+vi.mock("./sqlAssistGhost", () => ({ wireSqlAssistGhost: () => ({ dispose() {} }) }));
 const cleanups: (() => void)[] = [];
 
 beforeEach(() => {
@@ -44,6 +48,7 @@ function fakeEditor(sql: string) {
   const editor = {
     getModel: () => model, getPosition: () => model.getPositionAt(offset), hasTextFocus: () => focus,
     onDidChangeModel: listen("model"), onDidChangeModelContent: listen("content"), onDidChangeCursorPosition: listen("cursor"),
+    onDidChangeCursorSelection: listen("selection"),
     onDidCompositionStart: listen("composeStart"), onDidCompositionEnd: listen("composeEnd"),
     getOption: () => ({ other: "on", comments: "off", strings: "off" }), updateOptions: vi.fn(), trigger: vi.fn(),
     addAction: (a: { id: string; run: () => unknown }) => { actions.set(a.id, a); return { dispose: () => actions.delete(a.id) }; },
@@ -73,6 +78,65 @@ async function accept(table = "bd_material") {
 }
 
 describe("SQL 编辑器习惯与辅助操作", () => {
+  // 从候选列表点选表名后补全框会关闭，用户就看不到「N 个关联表」和 JOIN 片段了。
+  // 选完立刻重唤一次，等价于「打完表名再看一眼」。
+  it("选完表名立刻重弹补全，不用再按一次 Ctrl+空格", async () => {
+    const fake = fakeEditor("SELECT * FROM bd_material"); await wire(fake);
+    vi.useFakeTimers();
+    try {
+      await accept("bd_material");
+      expect(fake.spy.trigger).not.toHaveBeenCalled();
+      vi.runAllTimers();
+      expect(fake.spy.trigger).toHaveBeenCalledWith("sql-assist", "editor.action.triggerSuggest", {});
+    } finally { vi.useRealTimers(); }
+  });
+  it("选完字段不重弹补全", async () => {
+    const fake = fakeEditor("SELECT * FROM bd_material"); await wire(fake);
+    vi.useFakeTimers();
+    try {
+      const u = await import("./sqlUsage"), l = await import("./sqlAssistLearning");
+      h.commands.get("ncforge.sql.accept")!(null, { scope: l.sqlAssistScope("conn")!, key: u.sqlUsageKey("bd_material", "code") });
+      vi.runAllTimers();
+      expect(fake.spy.trigger).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+  it("光标已经离开表名末尾时不重弹", async () => {
+    const fake = fakeEditor("SELECT * FROM bd_material WHERE code = 'x'"); await wire(fake);
+    vi.useFakeTimers();
+    try {
+      await accept("bd_material");
+      vi.runAllTimers();
+      expect(fake.spy.trigger).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+  // 灯泡是 CodeAction 唯一的可见入口，而 Monaco 的灯泡是 glyphMargin 装饰、ESM 版默认关掉了那条槽。
+  it("建编辑器时打开 glyphMargin 与灯泡，否则四个 CodeAction 能力没有入口", async () => {
+    const fake = fakeEditor("SELECT 1 FROM dual"); await wire(fake);
+    expect(fake.spy.updateOptions).toHaveBeenCalledWith(expect.objectContaining({
+      glyphMargin: true, lightbulb: { enabled: "on" },
+    }));
+  });
+  // 空格曾经是补全触发字符：WHERE 里每敲一个空格都开面板，用户被训成「看见就 Esc」。
+  it("只有 FROM/JOIN 这类词后面的空格唤补全，WHERE 里的空格不弹", async () => {
+    const from = fakeEditor("SELECT * FROM "); await wire(from);
+    vi.useFakeTimers();
+    try {
+      from.spy.trigger.mockClear();
+      from.change(from.model.getValue().length, 0, " ");
+      vi.runAllTimers();
+      expect(from.spy.trigger).toHaveBeenCalledWith("sql-assist", "editor.action.triggerSuggest", {});
+    } finally { vi.useRealTimers(); }
+
+    const where = fakeEditor("SELECT * FROM bd_material WHERE "); await wire(where);
+    vi.useFakeTimers();
+    try {
+      where.spy.trigger.mockClear();
+      where.change(where.model.getValue().length, 0, " ");
+      vi.runAllTimers();
+      expect(where.spy.trigger).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("初始加载、只移动光标和换模型不学习", async () => {
     const fake = fakeEditor("SELECT * FROM bd_material "); await wire(fake);
     fake.move(0); fake.move(fake.model.getValue().length); fake.handlers.get("model")?.(); fake.move(8);
@@ -140,6 +204,7 @@ describe("SQL 编辑器习惯与辅助操作", () => {
 
   it("通过 addAction 注册真实右键操作，限定 * 展开保留别名", async () => {
     const fake = fakeEditor("SELECT m.* FROM nc.bd_material m"); await wire(fake); fake.move(9);
+    expect(fake.actions.has("ncforge.sql.batchIn")).toBe(true);
     await fake.actions.get("ncforge.sql.expandStar")!.run();
     expect(h.columns).toHaveBeenCalledWith("conn", "nc.bd_material");
     expect(fake.executeEdits).toHaveBeenCalledWith("sql-assist", [{ range: { startLineNumber: 1, startColumn: 10, endLineNumber: 1, endColumn: 11 }, text: 'code, m.name' }]);
@@ -203,11 +268,15 @@ describe("SQL 编辑器习惯与辅助操作", () => {
     await fake.actions.get("ncforge.sql.forgetTable")!.run(); expect(u.usageSnapshot(scope)[key]).toBeUndefined();
   });
 
-  it("多个编辑器共用一个接受命令，只最后一个销毁时注销", async () => {
+  it("多个编辑器共用接受命令，各自的主表选择命令随编辑器注销", async () => {
     const first = fakeEditor("SELECT * FROM bd_material"), second = fakeEditor("SELECT * FROM bd_material");
     const a = await wire(first), b = await wire(second); first.focus(false);
-    expect(h.commands.size).toBe(1); const { u, scope, key } = await accept();
-    expect(u.usageSnapshot(scope)[key].accept).toBe(1); a.dispose(); expect(h.commands.size).toBe(1);
+    expect(h.commands.has("ncforge.sql.accept")).toBe(true);
+    expect(h.commands.has("ncforge.sql.quickFix")).toBe(true);
+    expect([...h.commands.keys()].filter(id => id.startsWith("ncforge.sql.chooseSummary."))).toHaveLength(2);
+    const { u, scope, key } = await accept();
+    // 共用命令（accept / quickFix）留到最后一个编辑器注销；每个编辑器自己的选择命令先走。
+    expect(u.usageSnapshot(scope)[key].accept).toBe(1); a.dispose(); expect(h.commands.size).toBe(3);
     b.dispose(); expect(h.commands.size).toBe(0);
   });
 });

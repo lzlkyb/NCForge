@@ -10,16 +10,21 @@ import { SessionDrawer } from "./SessionDrawer";
 import { InsertExportDialog } from "./InsertExportDialog";
 import { ValueSearchDialog } from "./ValueSearchDialog";
 import { ScriptReplayDialog } from "./ScriptReplayDialog";
-import { SqlDangerDialog, type DangerItem } from "./SqlDangerDialog";
+import { SqlDangerDialog } from "./SqlDangerDialog";
 import { SqlOutlineBar } from "./SqlOutlineBar";
 import { explain, runStatements } from "../../lib/dbActions";
 import { dangerousStatements } from "../../lib/sqlDanger";
 import { cancelOperation, getOperations } from "../../lib/operations";
-import { dbApi } from "../../lib/dbApi";
+import { dbApi, dbSourceOf } from "../../lib/dbApi";
+import { connectionKey, resultTargetIssue } from "../../lib/dbResultContext";
+import { sqlQuickFixes } from "../../lib/sqlQuickFix";
+import { bindQuery, canParameterizeQuery, queryParameters } from "../../lib/sqlQueryParameters";
+import { SqlParameterDialog } from "./SqlParameterDialog";
 import { friendlyDbError } from "../../lib/db";
 import { guessTable } from "../../lib/resultExport";
-import { closeSessionPanel, isRunning, openSessionPanel, sqlTabOf, useDbSelector, type SqlTab } from "../../lib/dbStore";
+import { closeSessionPanel, columnsOf, connOf, isRunning, openSessionPanel, rtOf, sqlTabOf, useDbSelector, type ResultEntry, type SqlTab } from "../../lib/dbStore";
 import { useSqlConsoleSplit, type SqlConsoleFocus } from "../../hooks/useSqlConsoleSplit";
+import { useSqlRunConfirm } from "../../hooks/useSqlRunConfirm";
 import { useViewActive } from "../../lib/viewActivity";
 import "../../db-execution.css";
 
@@ -44,22 +49,17 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
   const [vsOpen, setVsOpen] = useState(false);
   /** 回放 .sql 文件（按名字取文件，不进编辑器）。 */
   const [srOpen, setSrOpen] = useState(false);
-  /** 待确认的危险语句；非空即弹框。 */
-  const [danger, setDanger] = useState<{ items: DangerItem[]; total: number } | null>(null);
-  /** 用户确认后要跑的那一次（语句已从编辑器取出，不能等确认时再取一遍）。 */
-  const pendingDanger = useRef<{ tabId: string; mode: SqlRunMode; stmts: RunStmt[]; collectStats: boolean } | null>(null);
   const tabId = tab.id;
-  // 切标签就丢掉待确认的弹框：这些语句属于上一个标签的连接，点头确认后
-  // 跑到新连接上就是「拿 A 库的 DELETE 删 B 库」。
-  useEffect(() => { setDanger(null); pendingDanger.current = null; }, [tabId]);
+  // 危险语句确认 / 参数输入两个弹框；切标签、换连接时 hook 里一起清掉。
+  const { danger, askDanger, takeDanger, cancelDanger, parameters, setParameters } = useSqlRunConfirm(tabId, tab.connId);
   useEffect(()=>{const insert=(e:Event)=>{const v=(e as CustomEvent<{tabId:string;text:string}>).detail;if(v.tabId===tab.id) api.current?.insert(v.text);};window.addEventListener("ncforge-db-insert-name",insert);return()=>window.removeEventListener("ncforge-db-insert-name",insert);},[tab.id]);
 
   const execute = useCallback(
-    async (mode: SqlRunMode, stmts: RunStmt[], collectStats: boolean) => {
+    async (mode: SqlRunMode, stmts: RunStmt[], collectStats: boolean, bound?: { bindings?: ReturnType<typeof bindQuery>[]; targetCurrent?: () => boolean; dangerConfirmed?: boolean }) => {
       const executionScope = { tabId, selected: mode === "auto" && scopeRef.current?.tabId === tabId && scopeRef.current.selected, statements: stmts };
       executingScopes.current.set(tabId, executionScope);
       try {
-        const outcome = await runStatements(tabId, stmts, { collectStats });
+        const outcome = await runStatements(tabId, stmts, { collectStats, ...bound });
         if (outcome.failLine && activeRef.current && activeTabId.current === tabId) api.current?.reveal(outcome.failLine);
       } finally {
         if (executingScopes.current.get(tabId) === executionScope) executingScopes.current.delete(tabId);
@@ -79,30 +79,51 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
         toast(mode === "current" ? "光标处没有语句" : "执行范围内没有可执行的语句", "info");
         return;
       }
+      const names = [...new Set(stmts.flatMap(s => {
+        const names = queryParameters(s.text);
+        return names.length && canParameterizeQuery(s.text) ? names : [];
+      }))];
+      if (tab.connId && names.length) {
+        if (stmts.length !== 1) return toast("请单独执行带参数的查询。", "info");
+        const connId = tab.connId;
+        const conn = connOf(connId), identity = connectionKey(conn);
+        const currentSchema = () => rtOf(connId).currentSchema ?? rtOf(connId).info?.schema;
+        const schema = currentSchema();
+        const targetCurrent = () => activeRef.current && activeTabId.current === tabId &&
+          sqlTabOf(tabId)?.connId === connId && connectionKey(connOf(connId)) === identity &&
+          (schema === undefined || currentSchema() === schema);
+        setParameters({
+          names, target: [dbSourceOf(conn), schema ?? conn?.user].filter(Boolean).join(" · "),
+          submit: values => {
+            setParameters(null);
+            if (!targetCurrent()) return toast("执行目标已变化，请重新发起查询。", "warning");
+            void execute(mode, stmts, false, { bindings: [bindQuery(stmts[0].text, values)], targetCurrent });
+          },
+        });
+        return;
+      }
       const found = dangerousStatements(stmts.map((s) => s.text));
       for (const item of found) if (item.finding.advisory) toast(`这条语句不可撤销：${item.finding.verb} ${item.finding.table}`, "warning");
       const blocked = found.filter((item) => !item.finding.advisory);
       if (blocked.length > 0 && tab.connId) {
         // 语句在这一刻已经取出来了：等用户在框里按「仍要执行」时编辑器可能已经改过，
         // 那就不是他确认过的那一条了。
-        pendingDanger.current = { tabId, mode, stmts, collectStats };
-        setDanger({ items: blocked, total: stmts.length });
+        askDanger({ tabId, mode, stmts, collectStats }, blocked, stmts.length);
         return;
       }
-      await execute(mode, stmts, collectStats);
+      // `dangerConfirmed`：危险语句已经在这里问过（advisory 也 toast 过），
+      // 不再让 `runStatements` 里的闸门问第二遍。
+      await execute(mode, stmts, collectStats, { dangerConfirmed: true });
     },
-    [execute, tab.connId, tabId],
+    [execute, tab.connId, tabId, askDanger, setParameters],
   );
 
   const confirmDanger = () => {
-    const p = pendingDanger.current;
-    pendingDanger.current = null;
-    setDanger(null);
+    const p = takeDanger();
     // 双保险：切标签的 effect 已经清过，这里再核一次标签身份
     if (p && p.tabId !== tabId) { toast("标签已切换，这次执行已取消", "info"); return; }
-    if (p) void execute(p.mode, p.stmts, p.collectStats);
+    if (p) void execute(p.mode, p.stmts, p.collectStats, { dangerConfirmed: true });
   };
-  const cancelDanger = () => { pendingDanger.current = null; setDanger(null); };
 
   const onExplain = () => {
     const s = api.current?.target("current")[0];
@@ -140,6 +161,15 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
       else api.current?.focus();
     });
   };
+  const repairContext = (entry: ResultEntry) => {
+    const current = sqlTabOf(tabId);
+    const target = entry.context?.target;
+    const runtime = rtOf(current?.connId);
+    if (!current?.connId || target?.editorSql === undefined || target.startOffset === undefined ||
+        target.editorSql !== current.sql || target.editorSql.slice(target.startOffset, target.startOffset + entry.sql.length) !== entry.sql ||
+        resultTargetIssue(entry.context, connOf(current.connId), runtime.currentSchema ?? runtime.info?.schema)) return null;
+    return { connId: current.connId, editorSql: target.editorSql, offset: target.startOffset, tables: runtime.tables?.map(t => t.name) ?? [] };
+  };
 
   return (
     <div className="dbx-console">
@@ -169,6 +199,7 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
       {danger && tab.connId && (
         <SqlDangerDialog items={danger.items} total={danger.total} connId={tab.connId} slot={tab.slot ?? null} onCancel={cancelDanger} onConfirm={confirmDanger} />
       )}
+      {parameters && <SqlParameterDialog names={parameters.names} target={parameters.target} onClose={() => setParameters(null)} onRun={parameters.submit} />}
       {exp && tab.connId && (
         <InsertExportDialog tabId={tab.id}
           connId={tab.connId}
@@ -208,7 +239,20 @@ export function SqlConsole({ tab }: { tab: SqlTab }) {
               split.startDrag(e.clientY);
             }}
           />
-          <ResultPanel tab={tab} height={split.resultHeight} onLocate={line => {
+          <ResultPanel tab={tab} height={split.resultHeight} fixes={{
+            find: async entry => {
+              const current = repairContext(entry);
+              return current ? sqlQuickFixes(entry.error ?? "", entry.sql, current.tables,
+                async table => (await columnsOf(current.connId, table)).map(column => column.name)) : [];
+            },
+            apply: (entry, fix) => {
+              const current = repairContext(entry);
+              if (split.focus === "results") split.setFocus("split");
+              if (!current || !api.current?.fix?.({ editorSql: current.editorSql, start: current.offset + fix.start, end: current.offset + fix.end, text: fix.text })) {
+                toast("SQL 或连接已变化，请重新执行后再修复。", "warning");
+              }
+            },
+          }} onLocate={line => {
             if (split.focus === "results") split.setFocus("split");
             api.current?.reveal(line);
           }} />

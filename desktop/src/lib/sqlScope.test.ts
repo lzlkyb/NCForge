@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeSql, resolveSqlQualifier, sqlCompletionAt, sqlSourcesAt } from "./sqlScope";
+import { analyzeSql, resolveSqlQualifier, sqlCompletionAt, sqlSourcesAt, sqlWildcardAt } from "./sqlScope";
 const resolve = (sql: string, at: string, name: string) => {
   const analysis = analyzeSql(sql, "plsql"), offset = sql.indexOf(at);
   return resolveSqlQualifier(analysis, offset, name, analysis.tokens.find(t => t.start === offset)?.text);
@@ -70,5 +70,17 @@ describe("SQL查询作用域", () => {
     for (const sql of ["select a.", "select a.na", 'select "Mixed".']) expect(sqlCompletionAt(analyzeSql(sql), sql.length).kind).toBe("column");
     for (const sql of ["select q'[from t a. select", "select 1 -- a.", "select :param"]) expect(sqlCompletionAt(analyzeSql(sql, "plsql"), sql.length).kind).toBe("none");
     const sql = "select a.id from a x, "; expect(sqlCompletionAt(analyzeSql(sql), sql.length).kind).toBe("table");
+  });
+  it("通配投影只在独占一个投影项时算可展开", () => {
+    const at = (sql: string, text: string) => sqlWildcardAt(analyzeSql(sql, "plsql"), sql.indexOf(text) + text.length - 1);
+    expect(at("select * from t", "*")?.qualifier).toBeUndefined();
+    // 别名.* 要能报出限定名与来源表，展开时才去对的那张表取字段
+    const qualified = at("select m.* from material m", "m.*");
+    expect(qualified?.qualifier).toBe("m");
+    expect(qualified?.source?.table).toBe("material");
+    // 乘法、半截投影、已进 WHERE 的 * 都不是通配投影
+    expect(at("select a.qty * 2 from lines a", "*")).toBeUndefined();
+    expect(at("select id, * from t", "*")?.qualifier).toBeUndefined();
+    expect(at("select a.id from a where b.id = *", "*")).toBeUndefined();
   });
 });

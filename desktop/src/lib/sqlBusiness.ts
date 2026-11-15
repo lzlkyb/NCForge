@@ -1,6 +1,8 @@
 import { dbApi, type Cell, type ExecResult } from "./dbApi";
 import { sqlReferenceKey, sqlWordKind } from "./sqlLex";
 import type { SqlLanguage } from "sql-formatter";
+import { snippetEscape } from "./sqlTemplates";
+import { sqlPredicates } from "./sqlPredicates";
 
 export interface SqlBusinessSource { table: string; alias?: string; aliasRef?: string; name?: string; nameRef?: string; schema?: string; tableRef?: string; quoted?: boolean; declaration?: number }
 export interface SqlBusinessColumn { name: string; type?: string }
@@ -10,6 +12,14 @@ export interface SqlBusinessMetadata { table: string; schema?: string; relations
 export interface BusinessSuggestion { label: string; insertText: string; documentation: string; reason: string; source: string; snippet?: boolean }
 type Response = Awaited<ReturnType<typeof dbApi.relations>>;
 const EMPTY = new Map<string, Promise<SqlBusinessMetadata | null>>();
+/**
+ * 已解析结果的同步副本。
+ *
+ * 补全列表里要给表名标一句「有没有关联」，这个判断必须**当场回答**——`EMPTY`
+ * 里存的是 Promise，取不到值，而在补全里 await 一次关系查询会把 120ms 预算吃光。
+ * 所以另存一份解析完成的快照，只读、不发起请求。
+ */
+const done = new Map<string, { value: SqlBusinessMetadata; at: number }>();
 const CACHE_TTL = 5 * 60_000, MAX_CACHE = 64, MAX_ROWS = 1000, MAX_QUEUE = 16;
 const ages = new Map<string, number>();
 const waiting: { run: () => void; skip: () => void }[] = [];
@@ -40,14 +50,27 @@ export function readSqlBusinessMetadata(connId: string, scopeKey: string, table:
   });
   EMPTY.set(key, cached); ages.set(key, Date.now());
   // A full queue resolves synchronously, before the cache entry has been installed.
-  void cached.then(value => { if (!value && EMPTY.get(key) === cached) { EMPTY.delete(key); ages.delete(key); } });
+  void cached.then(value => {
+    if (!value) { if (EMPTY.get(key) === cached) { EMPTY.delete(key); ages.delete(key); } return; }
+    done.set(key, { value, at: Date.now() });
+    while (done.size > MAX_CACHE) done.delete(done.keys().next().value!);
+  });
   while (EMPTY.size > MAX_CACHE) { const oldest = EMPTY.keys().next().value!; EMPTY.delete(oldest); ages.delete(oldest); }
   return cached;
 }
 
+/**
+ * 同步读**已解析**的业务元数据。只用于补全列表里的一句说明：
+ * 没读到就返回 null，绝不在这里发起请求或等待。
+ */
+export function peekSqlBusinessMetadata(connId: string, scopeKey: string, table: string): SqlBusinessMetadata | null {
+  const hit = done.get(JSON.stringify([connId, scopeKey, table.toLowerCase()]));
+  return hit && Date.now() - hit.at < CACHE_TTL ? hit.value : null;
+}
+
 /** Invalidation also removes queued requests, avoiding obsolete schema reads on a later session. */
 export function clearSqlBusinessCache(): void {
-  EMPTY.clear(); ages.clear(); for (const queued of waiting.splice(0)) queued.skip();
+  EMPTY.clear(); ages.clear(); done.clear(); for (const queued of waiting.splice(0)) queued.skip();
 }
 
 function cells(result?: ExecResult): { columns: string[]; rows: Cell[][] } | null {
@@ -116,6 +139,26 @@ export function sqlJoinSuggestions(metadata: SqlBusinessMetadata, sources: SqlBu
   return out;
 }
 const numeric = (type: string) => /^(?:NUMBER|NUMERIC|DECIMAL|INTEGER|INT|SMALLINT|BIGINT|TINYINT|FLOAT|DOUBLE|REAL|BINARY_FLOAT|BINARY_DOUBLE)(?:\b|\()/i.test(type.trim());
+
+export function sqlRelatedQueries(metadata: SqlBusinessMetadata, names: Record<string, string>, upper: boolean, dialect: SqlLanguage): BusinessSuggestion[] {
+  const root = metadata.table.toLowerCase();
+  const kw = (text: string) => upper ? text : text.toLowerCase();
+  const suggestions: BusinessSuggestion[] = [];
+  for (const relation of metadata.relations) {
+    const from = relation.source.toLowerCase(), to = relation.target.toLowerCase();
+    const other = from === root ? to : to === root ? from : "";
+    if (!other || other === root) continue;
+    const sources = [{ table: root, alias: "a" }, { table: other, alias: "b" }];
+    const [condition] = sqlJoinSuggestions({ ...metadata, relations: [relation] }, sources, "b", dialect);
+    if (!condition) continue;
+    const name = (table: string) => names[table] || table;
+    const insertText = `${kw("SELECT")} a.*, b.*\n${kw("FROM")} ${ident(root, dialect)} a\n${kw("JOIN")} ${ident(other, dialect)} b ${kw("ON")} ${condition.insertText};`;
+    if (suggestions.some(item => item.insertText === insertText)) continue;
+    suggestions.push({ ...condition, label: `关联查询 · ${name(root)} + ${name(other)}`, insertText });
+    if (suggestions.length === 5) break;
+  }
+  return suggestions;
+}
 export function sqlEnumSuggestions(metadata: SqlBusinessMetadata, field: string, columnType: string): BusinessSuggestion[] {
   if (metadata.sharedSession || !columnType) return [];
   const entries = metadata.enums.filter(e => same(e.field, field));
@@ -131,6 +174,9 @@ export function sqlEnumSuggestions(metadata: SqlBusinessMetadata, field: string,
 }
 export function sqlConditionSuggestions(source: SqlBusinessSource, columns: SqlBusinessColumn[], dialect: SqlLanguage): BusinessSuggestion[] {
   const q = qualifier(source, dialect), out: BusinessSuggestion[] = [];
+  const bill = columns.find(c => same(c.name, "vbillcode"));
+  if (bill) out.push({ label: "单据号过滤 · 填写单号", insertText: `${snippetEscape(`${q}.${ident(bill.name, dialect)}`)} = '$0'`, snippet: true,
+    reason: "条件片段", source: `${source.table}.${bill.name} · 已读取字段`, documentation: "当前表已确认存在单据号字段。接受后直接在 SQL 的空引号中手工填写单号。" });
   const dr = columns.find(c => same(c.name, "dr") && c.type && numeric(c.type));
   if (dr) {
     const fn = dialect === "plsql" ? "nvl" : dialect === "tsql" ? "isnull" : "coalesce";
@@ -138,6 +184,7 @@ export function sqlConditionSuggestions(source: SqlBusinessSource, columns: SqlB
     out.push({ label: "有效数据 · 逻辑删除过滤", insertText, reason: "条件片段", source: `${source.table}.${dr.name} · 已读取字段`, documentation: `当前表已确认存在数值型 ${dr.name} 字段。\n请确认此表采用 0 表示有效的业务约定后接受。\n\n${insertText}` });
   }
   const org = columns.find(c => same(c.name, "pk_org"));
-  if (org) out.push({ label: "组织过滤 · 填写组织主键", insertText: `${q}.${ident(org.name, dialect)} = \${1::pk_org}`, snippet: true, reason: "条件片段", source: `${source.table}.${org.name} · 已读取字段`, documentation: "当前表已确认存在组织字段。接受后填写组织主键参数，不沿用旧查询的组织值。" });
+  const orgPredicate = org && sqlPredicates(`${q}.${ident(org.name, dialect)}`, org.type ?? "", dialect, false).find(p => p.operator === "=");
+  if (org && orgPredicate) out.push({ label: "组织过滤 · 填写组织主键", insertText: orgPredicate.insertText, snippet: true, reason: "条件片段", source: `${source.table}.${org.name} · 已读取字段`, documentation: "当前表已确认存在组织字段。接受后直接在 SQL 中手工填写组织主键。" });
   return out;
 }

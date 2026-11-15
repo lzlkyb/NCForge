@@ -27,8 +27,22 @@ describe("危险语句识别", () => {
 
   it("占位条件不进 COUNT：它一行都筛不掉，不该多跑一次全表", () => {
     expect(dangerOf("delete from t where 1=1")).toMatchObject({ countSql: "select count(*) from t" });
-    // 真条件要留着，预估才有意义
-    expect(dangerOf("delete from t where 1=1 or id > 0")).toBeNull();
+    // 组合写法同样要把占位条件剔掉，否则「预估影响行数」会多跑一次带恒真条件的 COUNT
+    expect(dangerOf("delete from t where 1=1 and 1=1")).toMatchObject({
+      countSql: "select count(*) from t",
+    });
+  });
+
+  it("占位条件被 AND / OR 拼起来仍然是全表", () => {
+    // 只认「恰好 3 个 token 的 1=1」会漏掉最常被生成器写出来的两种形态。
+    expect(dangerOf("delete from t where 1=1 and 1=1")).toMatchObject({ kind: "delete-all" });
+    expect(dangerOf("update t set a = 1 where '1' = '1'")).toMatchObject({ kind: "update-all" });
+    // `OR 1=1` 不是占位：它把后面的真实条件短路掉了，整条恒真。
+    expect(dangerOf("delete from t where 1=1 or id > 0")).toMatchObject({ kind: "delete-all" });
+    // 真实条件跟在 AND 后面 = 有条件，必须放过（否则每次都弹框，用户会习惯性点确认）
+    expect(dangerOf("delete from t where 1=1 and id > 0")).toBeNull();
+    // 括号会改变优先级：不能去掉括号再按 AND/OR 拆，否则这条会被误判成全表
+    expect(dangerOf("delete from t where (1=1 or x=1) and y=2")).toBeNull();
   });
 
   it("子查询里的 WHERE 不算数（关键用例）", () => {

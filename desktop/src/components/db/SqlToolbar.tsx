@@ -1,5 +1,5 @@
 import { QueryElapsed } from "./SqlExecutionFeedback";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Icon } from "../ui/icon";
 import { ConnPicker } from "./ConnPicker";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
@@ -7,7 +7,7 @@ import { switchConn } from "../../lib/dbActions";
 import { isRunning, useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
 import { useDbReadOnly } from "../../lib/dbReadOnly";
 import { useActiveOperation } from "../../lib/operations";
-import { TransactionButtons, TransactionMenu, TxBar, useDbTransaction } from "./TxBar";
+import { TransactionMenu, TxBar, useDbTransaction } from "./TxBar";
 import { DbContextBar } from "./DbContextBar";
 import { setSqlFormatPrefs, useSqlFormatPrefs, type SqlLayout } from "../../lib/sqlFormatPrefs";
 import { toast } from "../ui/toast";
@@ -48,7 +48,9 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   const conn = useConnOf(tab.connId);
   const rt = useConnRt(tab.connId);
   const readonly=useDbReadOnly(tab.connId);
-  const operation = useActiveOperation('db.sql:' + tab.id);
+  const execution = useActiveOperation('db.sql:' + tab.id);
+  const explain = useActiveOperation('db.explain:' + tab.id);
+  const operation = execution ?? explain;
   /**
    * 「这个标签正在执行」的唯一定义，两个按钮共用。
    *
@@ -65,15 +67,7 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   const locked = !!transaction.active || transaction.lost;
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   const scopeId = useId();
-  const barRef = useRef<HTMLDivElement>(null);
-  const [compact, setCompact] = useState(false);
   const modifier = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
-  useEffect(() => {
-    if (!barRef.current || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 850));
-    observer.observe(barRef.current);
-    return () => observer.disconnect();
-  }, []);
   const currentScope = scope?.tabId === tab.id ? scope : null;
   const statements = currentScope?.statements ?? [];
   const runLabel = currentScope?.selected ? "执行选中 SQL" : "执行当前语句";
@@ -97,11 +91,16 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
   const planItem: ContextMenuItem = { label: "执行计划（不真正执行）", icon: "queryPlan", disabled: executionBlocked || !statements.length, onSelect: onExplain };
   const moreItems: ContextMenuItem[] = [
     ...(onMemory ? [{ label: memoryOpen ? "收起补全记忆" : "补全记忆", icon: "history" as const, disabled: !tab.connId, onSelect: onMemory }] : []),
-    ...(compact ? [planItem, historyItem, snippetsItem] : []),
+    planItem, historyItem, snippetsItem,
     { label: "回放 .sql 文件", icon: "upload", disabled: executionBlocked, onSelect: onScriptReplay },
     { label: "导出 INSERT（光标处查询）", icon: "download", disabled: executionBlocked || !statements.length, onSelect: onExport },
     { label: "按值反查（只读）", icon: "search", disabled: executionBlocked, onSelect: onValueSearch },
     { label: sessionsOpen ? "收起会话与锁" : "会话与锁", icon: "lock", separator: true, disabled: !tab.connId, onSelect: onSessions },
+    ...(onFocusChange ? [
+      { label: "专注结果", icon: "database" as const, separator: true, disabled: focusMode === "results", onSelect: () => onFocusChange("results") },
+      { label: "专注编辑器", icon: "code" as const, disabled: focusMode === "editor", onSelect: () => onFocusChange("editor") },
+      { label: "还原布局", icon: "restore" as const, disabled: focusMode === "split", onSelect: () => onFocusChange("split") },
+    ] : []),
   ];
   const formatItems: ContextMenuItem[] = [
     { label: currentScope?.selected ? "格式化选中 SQL" : "格式化整个编辑器", icon: "sqlFormat", onSelect: () => onFormat("auto") },
@@ -113,7 +112,7 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
       onSelect: () => chooseLayout("expanded") },
   ];
   return <>
-    <div ref={barRef} className="dbx-command-header dbx-execution-bar" role="toolbar" aria-label="SQL 工具栏">
+    <div className="dbx-command-header dbx-execution-bar" role="toolbar" aria-label="SQL 工具栏">
       <div className="dbx-sqlbar dbx-execution-primary">
         <div className="dbx-run-controls">
           <div className="dbx-runsplit">
@@ -130,12 +129,12 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
                 { label: "执行当前语句并采集统计", icon: "activity", disabled: !statements.length, onSelect: () => onRun("current", true) },
               ])}><Icon name="chevronDown" size={12} /></button>
           </div>
-          <button type="button" className="dbx-btn ghost dbx-stop-action" data-running={running || undefined}
+          <span className="dbx-stop-slot">{running && <button type="button" className="dbx-btn ghost dbx-stop-action" data-running
             disabled={!running || stopping || (rt.caps ? !rt.caps.cancel : false)} onClick={onStop}
             aria-label={stopping ? "等待数据库停止确认" : "停止"} aria-busy={stopping}
             title={stopping ? "正在等待数据库停止确认" : rt.caps && !rt.caps.cancel ? "当前连接不支持中断语句" : "停止当前执行，等待数据库确认"}>
             <Icon name={stopping ? "spinner" : "stop"} size={15} />
-          </button>
+          </button>}</span>
           <span className="dbx-query-clock">{operation && <QueryElapsed startedAt={operation.startedAt} />}</span>
         </div>
         <span id={scopeId} className="dbx-scope" aria-live="polite">{range}{disabledReason && <span className="dbx-run-reason"> · {disabledReason}</span>}</span>
@@ -143,24 +142,16 @@ export function SqlToolbar({ tab, scope, onRun, onStop, onExplain, onFormat, onE
       <div className="dbx-execution-aux">
         <button type="button" className="dbx-btn ghost" aria-label="格式化 SQL" title={`格式化${currentScope?.selected ? "选中 SQL" : "整个编辑器"} · ${formatPrefs.layout === "reading" ? "阅读优先" : "结构展开"} · ${modifier}+Shift+F`} onClick={() => onFormat()}><Icon name="sqlFormat" size={16} /></button>
         <button type="button" className="dbx-btn ghost dbx-format-menu" aria-label="格式化选项" title="选择排版方式与格式化范围" aria-haspopup="menu" onClick={event => popup(event.currentTarget, formatItems)}><Icon name="chevronDown" size={12} /></button>
-        {!compact && <>
-          <button type="button" className="dbx-btn ghost" aria-label="执行计划" title={planItem.label} disabled={planItem.disabled} onClick={onExplain}><Icon name="queryPlan" size={16} /></button>
-          <span className="dbx-tool-divider" />
-          <button type="button" className="dbx-btn ghost" aria-label="执行历史" title="执行历史" disabled={!tab.connId} aria-pressed={historyOpen} data-on={historyOpen || undefined} onClick={onHistory}><Icon name="history" size={16} /></button>
-          <button type="button" className="dbx-btn ghost" aria-label="SQL 片段" title="SQL 片段 · 本机保存" disabled={!tab.connId} aria-pressed={snipsOpen} data-on={snipsOpen || undefined} onClick={onSnips}><Icon name="sqlSnippet" size={16} /></button>
-        </>}
-        <button type="button" className="dbx-btn ghost" aria-label="更多数据库操作" title="更多数据库操作" aria-haspopup="menu" data-on={compact && (historyOpen || snipsOpen) || sessionsOpen || undefined} onClick={event => popup(event.currentTarget, moreItems)}><Icon name="more" size={16} /></button>
+        <button type="button" className="dbx-btn ghost" aria-label="更多数据库操作" title="SQL 工具"
+          aria-haspopup="menu" data-on={historyOpen || snipsOpen || memoryOpen || sessionsOpen || undefined}
+          onClick={event => popup(event.currentTarget, moreItems)}><Icon name="more" size={16} /></button>
       </div>
       <DbContextBar compact connId={tab.connId} independent={!!tab.slot} transactionMode={transaction.mode}
-        sessionControl={<><TransactionMenu key={tab.id} compact transaction={transaction} />{transaction.mode === "手动提交" && <TransactionButtons compact transaction={transaction} />}</>}
+        sessionControl={<TransactionMenu key={tab.id} compact transaction={transaction} />}
         connectionControl={<ConnPicker connId={tab.connId} compact disabled={!!transaction.active || running} onPick={id => void switchConn(tab.id, id)} />} />
-      {onFocusChange && <button type="button" className="dbx-btn ghost dbx-layout-action" aria-label="编辑器与结果布局" title="编辑器与结果布局" aria-haspopup="menu" onClick={event => popup(event.currentTarget, [
-        { label: "专注结果", icon: "database", disabled: focusMode === "results", onSelect: () => onFocusChange("results") },
-        { label: "专注编辑器", icon: "code", disabled: focusMode === "editor", onSelect: () => onFocusChange("editor") },
-        { label: "还原布局", icon: "restore", disabled: focusMode === "split", onSelect: () => onFocusChange("split") },
-      ])}><Icon name={focusMode === "split" ? "layoutRows" : "restore"} size={16} /></button>}
+
     </div>
     {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
-    <TxBar transaction={transaction} />
+    <TxBar transaction={transaction} actions />
   </>;
 }

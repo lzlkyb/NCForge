@@ -77,18 +77,50 @@ function whereTokens(list: ReturnType<typeof significant>, whereIdx: number): Sq
   return out;
 }
 
+/** 常量字面量的值（数字原样、引号字符串去引号）；不是常量返回 null。 */
+function constValue(t: SqlToken): string | null {
+  if (/^[-+]?\d+(?:\.\d+)?$/.test(t.text)) return t.text;
+  const m = /^(?:'([\s\S]*)'|"([\s\S]*)")$/.exec(t.text);
+  return m ? (m[1] ?? m[2] ?? "") : null;
+}
+
+/** 单个条件原子是否恒真：`1=1` / `'a' = 'a'` 这类两个常量相等。 */
+function atomAlwaysTrue(tokens: SqlToken[]): boolean {
+  if (tokens.length !== 3 || tokens[1].text !== "=") return false;
+  const a = constValue(tokens[0]), b = constValue(tokens[2]);
+  return a !== null && b !== null && a === b;
+}
+
+/** 按顶层连接词切分（调用方已保证没有括号）。 */
+function splitOn(tokens: SqlToken[], word: string): SqlToken[][] {
+  const out: SqlToken[][] = [[]];
+  for (const t of tokens) {
+    if (upper(t.text) === word) out.push([]);
+    else out[out.length - 1].push(t);
+  }
+  return out;
+}
+
 /**
  * 只写了 `1=1` 的 WHERE —— 等于没有条件。
  *
  * 🔴 必须按 token 判，不能对文本跑正则：`delete from t where 1=1 -- 全表` 这种带尾注释的
- * 写法，正则匹配不上（`1=1` 后面还有注释），整表删除会被当成「有条件」放过去。
- * 括号在 token 里是同层级的，`(1=1)` 与 `1=1` 视为同一件事。
+ * 写法，正则匹配不上，整表删除会被当成「有条件」放过去。
+ *
+ * 判据按**布尔结构**而不是「恰好 3 个 token」：`1=1 AND 1=1`、`1=1 OR id=5` 都等于全表，
+ * 只认单个 `1 = 1` 一条都拦不住——而 SQL 生成器以 `where 1=1` 起头拼条件的习惯，
+ * 让 `1=1 and 1=1` 在真实脚本里很容易出现。任一 OR 分支全为恒真原子 ⇒ 整条恒真。
  */
 function tautology(tokens: SqlToken[]): boolean {
-  const inner = tokens.filter(t => t.text !== "(" && t.text !== ")");
-  if (inner.length !== 3) return false;
-  const one = (t: SqlToken) => t.text.replace(/^['"]|['"]$/g, "") === "1";
-  return one(inner[0]) && inner[1].text === "=" && one(inner[2]);
+  const flat = tokens.filter(t => t.text !== "(" && t.text !== ")");
+  if (flat.length === 0) return false;
+  // 有括号时退回最保守的口径（`(1=1)` 与 `1=1` 同一件事）：括号会改变优先级，
+  // 去掉它们再按 AND/OR 拆会把 `(1=1 OR x=1) AND y=2` 误判成「无条件」。
+  if (flat.length !== tokens.length) return atomAlwaysTrue(flat);
+  return splitOn(flat, "OR").some(group => {
+    const atoms = splitOn(group, "AND");
+    return atoms.length > 0 && atoms.every(atomAlwaysTrue);
+  });
 }
 
 /** WHERE 缺省、或者只有占位条件（`1=1`）⇒ 这条语句动整张表。 */

@@ -7,16 +7,16 @@ import type { RunStmt, SqlEditorApi, SqlExecutionScope, SqlRunMode } from "./Sql
 import type { SqlConsoleFocus } from "../../hooks/useSqlConsoleSplit";
 const mocks = vi.hoisted(() => ({
   run: vi.fn(), explain: vi.fn(), cancel: vi.fn(), cancelOperation: vi.fn(), reveal: vi.fn(), focus: vi.fn(), toast: vi.fn(),
-  mounts: 0, unmounts: 0,
+  mounts: 0, unmounts: 0, schema: "APP",
   targets: {} as Record<string, Record<"current" | "script", RunStmt[]>>,
   publish: null as ((scope: SqlExecutionScope) => void) | null,
 }));
 vi.mock("../../lib/dbActions", () => ({ runStatements: mocks.run, explain: mocks.explain }));
-vi.mock("../../lib/dbApi", () => ({ dbApi: { cancel: mocks.cancel } }));
+vi.mock("../../lib/dbApi", () => ({ dbApi: { cancel: mocks.cancel }, dbSourceOf: () => "测试库" }));
 vi.mock("../../lib/db", () => ({ friendlyDbError: (error: unknown) => String(error) }));
 vi.mock("../../lib/operations", () => ({ cancelOperation: mocks.cancelOperation, getOperations: () => [] }));
 vi.mock("../../lib/resultExport", () => ({ guessTable: () => "DUAL" }));
-vi.mock("../../lib/dbStore", () => ({ isRunning: (t: { run?: unknown } | null | undefined) => !!t?.run, useDbSelector: (selector: (state: { sessionPanel: null }) => unknown) => selector({ sessionPanel: null }), closeSessionPanel: () => {}, openSessionPanel: () => {}, sqlTabOf: () => ({}) }));
+vi.mock("../../lib/dbStore", () => ({ isRunning: (t: { run?: unknown } | null | undefined) => !!t?.run, useDbSelector: (selector: (state: { sessionPanel: null }) => unknown) => selector({ sessionPanel: null }), closeSessionPanel: () => {}, openSessionPanel: () => {}, sqlTabOf: () => ({ connId: "c1" }), connOf: () => ({ url: "jdbc:oracle:thin:@test", user: "APP" }), rtOf: () => ({ currentSchema: mocks.schema }) }));
 vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
 vi.mock("./HistoryDrawer", () => ({ HistoryDrawer: () => null }));
 vi.mock("./SnippetDrawer", () => ({ SnippetDrawer: () => null }));
@@ -56,6 +56,7 @@ const base: SqlTab = { id: "a", kind: "sql", title: "SQL 1", connId: "c1", sql: 
 let root: Root, host: HTMLDivElement, frames: FrameRequestCallback[];
 beforeEach(() => {
   vi.clearAllMocks(); mocks.mounts = 0; mocks.unmounts = 0; mocks.publish = null;
+  mocks.schema = "APP";
   const first = { text: "select 1 from dual", startLine: 2, endLine: 4 };
   mocks.targets = { a: { current: [first], script: [first, { text: "select 2 from dual", startLine: 6, endLine: 6 }] }, b: { current: [{ text: "select 3 from dual", startLine: 1, endLine: 1 }], script: [] } };
   mocks.run.mockReset().mockResolvedValue({}); mocks.cancel.mockResolvedValue({});
@@ -71,19 +72,39 @@ const click = (label: string) => act(() => [...host.querySelectorAll("button")].
 const shown = () => JSON.parse(host.querySelector("[data-scope]")!.getAttribute("data-scope")!) as SqlExecutionScope | null;
 it("主执行通过 auto 获取整篇实际目标", async () => {
   render(); await act(async () => click("执行"));
-  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", mocks.targets.a.script, { collectStats: false });
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", mocks.targets.a.script, { collectStats: false, dangerConfirmed: true });
+});
+
+it("参数只填写一次并显示执行目标，schema 变化后取消旧请求", async () => {
+  mocks.targets.a.current = [{ text: "select :code from dual where :CODE is not null", startLine: 1 }];
+  render();
+  click("执行当前");
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog.textContent).toContain("测试库 · APP");
+  expect(dialog.querySelectorAll("input")).toHaveLength(1);
+  expect(mocks.run).not.toHaveBeenCalled();
+  mocks.schema = "OTHER";
+  await act(async () => dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.toast).toHaveBeenCalledWith("执行目标已变化，请重新发起查询。", "warning");
+  click("执行当前");
+  const next = document.querySelector('[role="dialog"]')!;
+  await act(async () => next.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
+  expect(mocks.run).toHaveBeenCalledWith("a", mocks.targets.a.current, expect.objectContaining({
+    bindings: [{ sql: "select :1 from dual where :2 is not null", params: ["", ""] }],
+  }));
 });
 
 it("工具条范围与实际交给执行器的目标一致", async () => {
   render(); expect(shown()?.statements).toEqual(mocks.targets.a.current);
   await act(async () => click("执行当前"));
-  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", mocks.targets.a.current, { collectStats: false });
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", mocks.targets.a.current, { collectStats: false, dangerConfirmed: true });
 });
 
 it("诊断执行将采集选项传入执行器", async () => {
   render();
   await act(async () => click("执行并采集统计"));
-  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", mocks.targets.a.current, { collectStats: true });
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", mocks.targets.a.current, { collectStats: true, dangerConfirmed: true });
 });
 
 it("脚本执行中冻结实际执行范围，随后修改编辑器不会把范围改成下一条 SQL", async () => {
@@ -159,7 +180,7 @@ it("确认后执行的是弹框里那一段语句，不是编辑器当前内容"
   // 弹框还开着的时候编辑器被改了：执行范围必须仍是确认过的那一条
   mocks.targets.a.current = [{ text: "delete from somewhere_else", startLine: 1, endLine: 1 }];
   await act(async () => click("仍要执行"));
-  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", [stmt], { collectStats: false });
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith("a", [stmt], { collectStats: false, dangerConfirmed: true });
 });
 
 it("有 WHERE 的写语句和纯查询不拦", async () => {

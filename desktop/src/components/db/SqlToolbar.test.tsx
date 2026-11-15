@@ -56,8 +56,9 @@ describe("SQL 执行范围", () => {
     render({ scope: { ...scope, statements: [] } });
     expect(runButton().disabled).toBe(true);
     expect(host.querySelector(".dbx-scope")?.textContent).toContain("光标处没有可执行 SQL");
-    expect(host.querySelector<HTMLButtonElement>('[aria-label="执行历史"]')?.disabled).toBe(false);
-    expect(host.querySelector<HTMLButtonElement>('[aria-label="SQL 片段"]')?.disabled).toBe(false);
+    act(() => button("更多数据库操作").click());
+    expect(button("执行历史").disabled).toBe(false);
+    expect(button("SQL 片段").disabled).toBe(false);
     render({ scope: { ...scope, selected: true, statements: [] } });
     expect(runButton().disabled).toBe(true);
     expect(host.querySelector(".dbx-scope")?.textContent).toContain("选中内容没有可执行 SQL");
@@ -88,7 +89,7 @@ describe("SQL 执行范围", () => {
     expect(button("停止").disabled).toBe(false);
     act(() => task?.finish("cancelled"));
     render();
-    expect(button("停止").disabled).toBe(true);
+    expect(button("停止")).toBeUndefined();
   });
 });
 
@@ -96,19 +97,19 @@ describe("会话上下文与事务", () => {
   it("空闲时显示模式，提交回滚收进带禁用原因的会话菜单", () => {
     render();
     expect(host.querySelector(".dbx-context-session")?.textContent).toContain("手动提交");
-    expect(host.querySelector<HTMLButtonElement>('.dbx-command-header [aria-label="提交当前会话"]')?.disabled).toBe(true);
+    expect(button("提交当前会话")).toBeUndefined();
     expect(host.querySelector(".dbx-txbar")).toBeNull();
     act(() => host.querySelector<HTMLButtonElement>(".dbx-session-trigger")!.click());
     expect(host.querySelector('[role="menu"]')?.textContent).toContain("当前会话没有待提交的写入");
-    expect(button("提交当前会话").disabled).toBe(true);
-    expect(button("回滚当前会话").disabled).toBe(true);
+    expect(button("提交").disabled).toBe(true);
+    expect(button("回滚").disabled).toBe(true);
   });
   it("待提交状态在所属会话的事务条内提供可用操作", () => {
     render({ tab: { ...tab, tx: { autoCommit: false, statements: 2, rows: 20, since: 1 } } });
     const transaction = host.querySelector(".dbx-txbar")!;
     expect(host.querySelector(".dbx-session-trigger")?.getAttribute("title")).toContain("独立会话");
-    expect(transaction.textContent).toContain("2 条写入 · 影响 20 行");
-    expect([...host.querySelectorAll<HTMLButtonElement>(".dbx-command-header .dbx-tx-actions button")].map(item => [item.getAttribute("aria-label"), item.disabled])).toEqual([["提交当前会话", false], ["回滚当前会话", false]]);
+    expect(transaction.textContent).toContain("已写回 20 行，待提交");
+    expect([...host.querySelectorAll<HTMLButtonElement>(".dbx-txbar .dbx-tx-actions button")].map(item => [item.getAttribute("aria-label"), item.disabled])).toEqual([["提交当前会话", false], ["回滚当前会话", false]]);
   });
   it("未知事务禁止继续执行，核对入口保留在原位", () => {
     render({ tab: { ...tab, txNotice: { kind: "lost", verify: true, text: "提交结果待核对" } } });
@@ -145,14 +146,14 @@ it.each([
 it("可专注结果、专注编辑器并还原布局", () => {
   const onFocusChange = vi.fn();
   render({ onFocusChange });
-  act(() => button("编辑器与结果布局").click());
+  act(() => button("更多数据库操作").click());
   act(() => button("专注结果").click());
   expect(onFocusChange).toHaveBeenLastCalledWith("results");
-  act(() => host.querySelector<HTMLButtonElement>('[aria-label="编辑器与结果布局"]')!.click());
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="更多数据库操作"]')!.click());
   act(() => button("专注编辑器").click());
   expect(onFocusChange).toHaveBeenLastCalledWith("editor");
   render({ onFocusChange, focusMode: "editor" });
-  act(() => button("编辑器与结果布局").click());
+  act(() => button("更多数据库操作").click());
   act(() => button("还原布局").click());
   expect(onFocusChange).toHaveBeenLastCalledWith("split");
 });
@@ -162,18 +163,20 @@ it("常用编辑工具无需菜单，执行按钮显示文字并保留范围提�
   expect(runButton().textContent).toBe("执行当前语句");
   expect(runButton().title).toContain("第 2–6 行");
   act(() => button("格式化 SQL").click());
-  act(() => button("执行计划").click());
+  act(() => button("更多数据库操作").click());
+  act(() => button("执行计划（不真正执行）").click());
   expect(props.onFormat).toHaveBeenCalledOnce();
   expect(props.onExplain).toHaveBeenCalledOnce();
-  expect(button("停止").disabled).toBe(true);
+  expect(button("停止")).toBeUndefined();
 });
 it("无连接仍可格式化 SQL，数据库操作禁用", () => {
   const props = render({tab: {...tab, connId:null}});
   act(() => button("格式化 SQL").click());
   expect(props.onFormat).toHaveBeenCalledOnce();
+  act(() => button("更多数据库操作").click());
   expect(button("执行历史").disabled).toBe(true);
   expect(runButton().disabled).toBe(true);
-  expect(button("执行计划").disabled).toBe(true);
+  expect(button("执行计划（不真正执行）").disabled).toBe(true);
 });
 it("格式化范围下拉把三档范围交给编辑器", () => {
   const props = render();
@@ -187,21 +190,13 @@ it("格式化范围下拉把三档范围交给编辑器", () => {
   act(() => button("格式化整个编辑器").click());
   expect(props.onFormat).toHaveBeenLastCalledWith("auto");
 });
-it("窄栏把辅助功能收入更多菜单，释放观察器", () => {
-  let resize!: ResizeObserverCallback;
-  const disconnect = vi.fn();
-  vi.stubGlobal("ResizeObserver", class {constructor(callback: ResizeObserverCallback) {resize=callback;} observe() {} disconnect=disconnect;});
+it("宽窄界面统一通过 SQL 工具进入辅助功能", () => {
   const props = render();
-  act(() => resize([{contentRect:{width:700}}] as ResizeObserverEntry[], {} as ResizeObserver));
   expect(button("执行历史")).toBeUndefined();
   expect(button("格式化 SQL")).toBeDefined();
   act(() => button("更多数据库操作").click());
   act(() => button("执行计划（不真正执行）").click());
   expect(props.onExplain).toHaveBeenCalledOnce();
-  act(() => root.unmount());
-  expect(disconnect).toHaveBeenCalledOnce();
-  root=createRoot(host);
-  vi.unstubAllGlobals();
 });
 
 it("排版菜单只更改偏好，下次格式化使用当前方式", () => {

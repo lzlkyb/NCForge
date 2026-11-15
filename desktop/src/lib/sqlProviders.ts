@@ -51,6 +51,9 @@ export function registerSqlProviders(): void {
   wired = true;
   for (const language of SQL_LANGUAGE_IDS) {
   monaco.languages.registerCompletionItemProvider(language, {
+    // 只留标点：空格曾经也在里面，结果 WHERE 里每敲一个空格都开一次面板，
+    // 用户被训成「看见就按 Esc」。空格后的补全改由 `sqlEditorAssist` 精确触发——
+    // 只有前一个词是 FROM/JOIN/INTO/UPDATE/TABLE 或逗号时才唤，那里才真的需要表名。
     triggerCharacters: [".", "="],
     provideCompletionItems: provideSqlAssist,
   });

@@ -222,3 +222,41 @@ export function sqlCompletionAt(analysis: SqlAnalysis, offset: number): { kind: 
   }
   return { kind: "any" };
 }
+
+/** 光标处的通配投影（`SELECT *` 或 `SELECT m.*`）。 */
+export interface SqlWildcard {
+  /** `*` 在 token 表里的下标。 */
+  token: number;
+  /** `别名.*` 里的别名原文。 */
+  qualifier?: string;
+  /** 展开后该去哪张表取字段；多表无别名时为 undefined。 */
+  source?: SqlSource;
+}
+
+/**
+ * 光标是否压在一个**可展开**的 `*` 上：`SELECT *` / `SELECT m.*`，且独占一个投影项。
+ *
+ * 一个位置判定两处共用（右键动作 `ncforge.sql.expandStar` 与表名旁的 chip），
+ * 否则「chip 显示但点了提示请把光标放在 * 上」这种自相矛盾的事一定会发生。
+ *
+ * `m.* / 2` 这种乘法、`SELECT a, * FROM` 之外的半截投影都不算：展开会改坏语句。
+ */
+export function sqlWildcardAt(analysis: SqlAnalysis, offset: number): SqlWildcard | undefined {
+  const token = analysis.tokens.findIndex(t => t.text === "*" && t.start <= offset && t.end >= offset);
+  if (token < 0) return undefined;
+  const scope = sqlScopeAt(analysis, offset);
+  if (!scope || !scope.indices.includes(token)) return undefined;
+  if (upper(analysis.tokens[scope.select]) !== "SELECT") return undefined;
+  // 投影区里的 `*` 不会出现在 FROM 之后；出现就是别的东西。
+  if (scope.indices.some(i => i < token && upper(analysis.tokens[i]) === "FROM")) return undefined;
+  const ids = scope.indices, at = ids.indexOf(token);
+  const dot = analysis.tokens[ids[at - 1]], alias = analysis.tokens[ids[at - 2]];
+  const qualified = dot?.text === "." && isSqlName(alias);
+  const before = analysis.tokens[ids[at - (qualified ? 3 : 1)]], after = analysis.tokens[ids[at + 1]];
+  // 通配符必须占满整个投影项：前面是 SELECT/DISTINCT/ALL/逗号，后面是 FROM/逗号/分号。
+  if (!["SELECT", "DISTINCT", "ALL", ","].includes(upper(before))) return undefined;
+  if (after && !["FROM", ",", ";"].includes(after.text.toUpperCase())) return undefined;
+  const source = qualified ? resolveSqlQualifier(analysis, offset, sqlName(alias), alias.text)
+    : scope.sources.length === 1 ? scope.sources[0] : undefined;
+  return { token, qualifier: qualified ? alias.text : undefined, source };
+}

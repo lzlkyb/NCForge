@@ -1,0 +1,25 @@
+.dbx-parameter-dialog { width:min(560px, calc(100vw - 32px)); }
+.dbx-parameter-dialog form { display:grid; gap:12px; }
+.dbx-parameter-dialog h2, .dbx-parameter-dialog p { margin:0; }
+.dbx-parameter-dialog label { display:grid; gap:5px; min-width:0; overflow-wrap:anywhere; }
+.dbx-parameter-dialog :is(input, select, textarea) {
+  min-width:0;
+  padding:7px 9px;
+  border:1px solid hsl(var(--border));
+  border-radius:6px;
+  background:hsl(var(--background));
+  color:hsl(var(--foreground));
+}
+.dbx-parameter-dialog textarea { resize:vertical; width:100%; box-sizing:border-box; }
+.dbx-parameter-field { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:8px; align-items:end; }
+.dbx-parameter-target {
+  display:grid;
+  gap:4px;
+  padding:10px 12px;
+  border-radius:6px;
+  background:hsl(var(--muted));
+  overflow-wrap:anywhere;
+}
+.dbx-parameter-target span { color:hsl(var(--muted-foreground)); font-size:.9em; }
+.dbx-parameter-error { color:hsl(var(--destructive-ink)); }
+.dbx-parameter-footer { display:flex; justify-content:flex-end; gap:8px; padding-top:8px; border-top:1px solid hsl(var(--border)); }

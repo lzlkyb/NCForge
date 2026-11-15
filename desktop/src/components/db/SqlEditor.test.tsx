@@ -305,6 +305,16 @@ it("无选区美化整个编辑器，并隔离撤销边界", async () => {
   expect(mocks.format).toHaveBeenCalledWith("select 1; select 2;", "plsql");
   expect(mocks.undoStop).toHaveBeenCalledTimes(2);
 });
+it("快速修复只改原版本的目标范围，并单独划分撤销边界", () => {
+  const sql = "select nam from t";
+  const { apiRef } = mount(sql);
+  act(() => {
+    expect(apiRef.current!.fix!({ editorSql: sql + " ", start: 7, end: 10, text: "name" })).toBe(false);
+    expect(mocks.undoStop).not.toHaveBeenCalled();
+    expect(apiRef.current!.fix!({ editorSql: sql, start: 7, end: 10, text: "name" })).toBe(true);
+  });
+  expect(mocks.undoStop).toHaveBeenCalledTimes(2);
+});
 it("存在选区时仅将选中内容交给美化器", async () => {
   mocks.format.mockResolvedValue("SELECT 2");
   const { apiRef } = mount("select 1;\nselect 2");

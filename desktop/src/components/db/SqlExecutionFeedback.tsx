@@ -1,20 +1,14 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { Icon } from "../ui/icon";
 import { thousands } from "../../lib/db";
-import { useAppHidden } from "../../lib/appVisibility";
+import { useTaskElapsed } from "../../hooks/useTaskElapsed";
+import { BusyIndicator } from "../ui/BusyIndicator";
 import { getOperations, subscribeOperations } from "../../lib/operations";
 
 /** The clock stays inside the stop button, so it never rerenders the result grid. */
 export function QueryElapsed({ startedAt }: { startedAt: number }) {
-  const [now, setNow] = useState(Date.now);
-  const hidden = useAppHidden();
-  useEffect(() => {
-    if (hidden) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 100);
-    return () => window.clearInterval(timer);
-  }, [hidden, startedAt]);
-  return <span className="dbx-query-time" aria-hidden="true"> · {(Math.max(0, now - startedAt) / 1000).toFixed(1)}s</span>;
+  const seconds = useTaskElapsed(true, startedAt, startedAt);
+  return <span className="dbx-query-time" aria-hidden="true"> · {seconds}s</span>;
 }
 
 /** Execution status belongs to the existing result header, not a separate row. */
@@ -37,7 +31,7 @@ export function SqlExecutionFeedback({ executionId, previousAt }: { executionId?
       : operation.state === "failed" ? script ? "脚本执行有失败" : "执行失败"
         : script ? "脚本执行完成" : "执行完成";
   return <span className="dbx-query-status" data-state={operation.state} role="status" title={operation.detail ?? text}>
-    <Icon name={active ? "activity" : operation.state === "success" ? "check" : operation.state === "failed" ? "alert" : "stop"} size={12} />
+    {active ? <BusyIndicator size={12} operationKey={operation.id} /> : <Icon name={operation.state === "success" ? "check" : operation.state === "failed" ? "alert" : "stop"} size={12} />}
     {text}{!active && script && progress && <span> · 已处理 {thousands(progress.done)} / {thousands(progress.total ?? 0)} 条</span>}
     {!active && !script && cost > 0 && <span> · {cost < 1000 ? `${Math.round(cost)}ms` : `${(cost / 1000).toFixed(1)}s`}</span>}
   </span>;

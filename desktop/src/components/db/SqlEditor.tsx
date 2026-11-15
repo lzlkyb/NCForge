@@ -3,33 +3,17 @@ import { initMonaco, monaco } from "../../lib/monacoSetup";
 import { sqlModel, tabIdOfModel } from "../../lib/sqlModels";
 import { registerSqlProviders } from "../../lib/sqlProviders";
 import { wireSqlEditorAssist } from "../../lib/sqlEditorAssist";
-import { pickStatement, splitStatements, type Stmt } from "../../lib/sqlSplit";
+import { pickStatement } from "../../lib/sqlSplit";
 import { statementsOf } from "../../lib/sqlStmtCache";
-import { applyFormatEdits, fallbackFormatEdits, formatTargetOf, type SqlFormatScope } from "../../lib/sqlFormatTarget";
-import { formatSql, sqlLanguageOf } from "../../lib/sqlFormat";
-import { connOf, setSqlDraft, sqlTabOf } from "../../lib/dbStore";
-import { toast } from "../ui/toast";
+import type { SqlFormatScope } from "../../lib/sqlFormatTarget";
+import { formatAt, targetOf, type RunStmt, type SqlExecutionScope, type SqlRunMode } from "../../lib/sqlEditorTarget";
+import { setSqlDraft } from "../../lib/dbStore";
 import { useSqlEditorDialect } from "../../hooks/useSqlEditorDialect";
 import { useSqlDisplayPrefs } from "../../hooks/useSqlDisplayPrefs";
 import { codeDisplayOptionsOf, getEditorPrefs } from "../../lib/editorPrefs";
-export interface RunStmt {
-  text: string;
-  startLine: number;
-  endLine?: number;
-  editorVersion?: number;
-  editorSql?: string;
-  startOffset?: number;
-  endOffset?: number;
-}
 
-export interface SqlExecutionScope {
-  tabId: string;
-  selected: boolean;
-  statements: RunStmt[];
-}
-
-export type { SqlFormatScope };
-export type SqlRunMode = "auto" | "current" | "script";
+// 取执行范围 / 格式化的逻辑在 lib/sqlEditorTarget；类型从这里转出，调用方不用改引用。
+export type { RunStmt, SqlExecutionScope, SqlFormatScope, SqlRunMode };
 /** SqlConsole 拿到的编辑器句柄。 */
 export interface SqlEditorApi {
   /** auto：选中内容或全部；current：仅光标语句；script：全部。 */
@@ -39,6 +23,7 @@ export interface SqlEditorApi {
   reveal: (line: number) => void;
   focus: () => void;
   setText: (text: string) => void;
+  fix?: (target: { editorSql: string; start: number; end: number; text: string }) => boolean;
 }
 
 type Editor = monaco.editor.IStandaloneCodeEditor;
@@ -51,61 +36,6 @@ const HL_LIMIT = 200_000;
  * 自造分组的排序依赖 group id 的字典序，会飘到剪切/粘贴后面去。
  */
 const CONTEXT_GROUP = "navigation";
-const modelSources = new WeakMap<monaco.editor.ITextModel, { editorVersion: number; editorSql: string }>();
-
-function targetOf(editor: Editor, mode: SqlRunMode): RunStmt[] {
-  const model = editor.getModel();
-  if (!model) return [];
-  const editorVersion = model.getVersionId();
-  let source = modelSources.get(model);
-  // 范围随光标更新，整篇 SQL 只随版本更新，避免每次移动都重新读取大脚本。
-  if (!source || source.editorVersion !== editorVersion) {
-    source = { editorVersion, editorSql: model.getValue() };
-    modelSources.set(model, source);
-  }
-  const statement = (stmt: Stmt, offset = 0, lineOffset = 0): RunStmt => ({
-    ...source, text: stmt.text, startLine: stmt.startLine + lineOffset, endLine: stmt.endLine + lineOffset,
-    startOffset: stmt.start + offset, endOffset: stmt.end + offset,
-  });
-  const sel = editor.getSelection();
-  if (mode === "auto" && sel && !sel.isEmpty()) {
-    const part = model.getValueInRange(sel);
-    const offset = model.getOffsetAt(sel.getStartPosition());
-    return splitStatements(part).map((s) => statement(s, offset, sel.startLineNumber - 1));
-  }
-  if (mode === "script") return statementsOf(model).map((s) => statement(s));
-  const pos = editor.getPosition();
-  const s = pos ? pickStatement(statementsOf(model), model.getOffsetAt(pos)) : null;
-  return s ? [statement(s)] : [];
-}
-
-/** 按范围格式化（范围解析见 lib/sqlFormatTarget）。整篇解析失败时逐条兜底，坏语句保留原文。 */
-async function formatAt(editor: Editor, scope: SqlFormatScope = "auto") {
-  const model = editor.getModel();
-  if (!model) return;
-  const target = formatTargetOf(model, editor.getSelection(), editor.getPosition(), scope);
-  if (!target) {
-    toast("光标处没有可格式化的 SQL 语句", "warning");
-    return;
-  }
-  const connId = sqlTabOf(tabIdOfModel(model))?.connId;
-  const language = sqlLanguageOf(connId ? connOf(connId)?.url ?? "" : "");
-  const version = model.getVersionId();
-  const stale = () => editor.getModel() !== model || model.getVersionId() !== version;
-  let text: string | null = null;
-  let error = "";
-  try { text = await formatSql(target.text, language); }
-  catch (e) { error = e instanceof Error ? e.message : String(e); }
-  if (stale()) return;
-  if (text !== null) { applyFormatEdits(editor, [{ range: target.range, text }]); return; }
-  if (target.kind !== "script") { toast(`SQL 格式化失败：${error}`, "warning"); return; }
-  // 整个脚本里有一条没写完（引号/括号未闭合）会整篇解析失败：逐条排版，只跳过那一条。
-  const result = await fallbackFormatEdits(model, target.text, language);
-  if (stale()) return;
-  if (result.edits.length === 0) { toast(`SQL 格式化失败：${result.error ?? error}`, "warning"); return; }
-  applyFormatEdits(editor, result.edits);
-  if (result.skipped > 0) toast(`已格式化 ${result.edits.length} 条语句，跳过 ${result.skipped} 条无法解析的`, "warning");
-}
 
 /**
  * SQL 编辑器（Monaco，与源码编辑器同一套）。整个控制台只有一个实例，切标签 = 换 model。
@@ -240,6 +170,18 @@ export function SqlEditor({ tabId, initial, onRun, apiRef, onScope, visible = tr
         if (visibleRef.current) editor.focus();
       },
       focus: () => { if (visibleRef.current) editor.focus(); },
+      fix: ({ editorSql, start, end, text }) => {
+        const model = editor.getModel();
+        if (!model || model.getValue() !== editorSql) return false;
+        const from = model.getPositionAt(start), to = model.getPositionAt(end);
+        const range = new monaco.Range(from.lineNumber, from.column, to.lineNumber, to.column);
+        editor.pushUndoStop();
+        editor.executeEdits("ncforge-sql-fix", [{ range, text }]);
+        editor.pushUndoStop();
+        editor.revealLineInCenter(range.startLineNumber);
+        if (visibleRef.current) editor.focus();
+        return true;
+      },
       setText: (text) => {
         const model = editor.getModel();
         if (!model) return;

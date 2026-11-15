@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Cell, ExecResult } from "./dbApi";
-import { clearSqlBusinessCache, readSqlBusinessMetadata, sqlBusinessMetadata, sqlConditionSuggestions, sqlEnumSuggestions, sqlJoinSuggestions } from "./sqlBusiness";
+import { clearSqlBusinessCache, peekSqlBusinessMetadata, readSqlBusinessMetadata, sqlBusinessMetadata, sqlConditionSuggestions, sqlEnumSuggestions, sqlJoinSuggestions } from "./sqlBusiness";
 
 const h = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("./tauri", () => ({ invoke: h.invoke }));
@@ -62,7 +62,7 @@ describe("NC 补全证据", () => {
     const quoted = [{ table: "orders", alias: "o", aliasRef: '"o"' }, { table: "orgs", alias: "oRder", aliasRef: '"oRder"' }];
     expect(sqlJoinSuggestions(metadata(), quoted)[0].insertText).toBe('"o".pk_org = "oRder".id');
     expect(sqlConditionSuggestions(quoted[0], [{ name: "dr", type: "NUMBER" }], "plsql")[0].insertText).toBe('nvl("o".dr, 0) = 0');
-    expect(sqlConditionSuggestions({ table: "orders", name: "orders", nameRef: '"orders"' }, [{ name: "pk_org" }], "plsql")[0].insertText).toBe('"orders".pk_org = ${1::pk_org}');
+    expect(sqlConditionSuggestions({ table: "orders", name: "orders", nameRef: '"orders"' }, [{ name: "pk_org", type: "VARCHAR2(20)" }], "plsql")[0].insertText).toBe('"orders".pk_org = \'$0\'');
     expect(sqlConditionSuggestions({ table: "orders", alias: "a", aliasRef: "[a]" }, [{ name: "dr", type: "INT" }], "tsql")[0].insertText).toBe("isnull([a].dr, 0) = 0");
   });
 
@@ -87,14 +87,36 @@ describe("NC 补全证据", () => {
   it("业务条件只依据现存字段，组织参数不复用字面值", () => {
     expect(sqlConditionSuggestions(sources[0], [], "plsql")).toEqual([]);
     expect(sqlConditionSuggestions(sources[0], [{ name: "dr", type: "VARCHAR2" }], "plsql")).toEqual([]);
-    const cols = [{ name: "DR", type: "NUMBER(1)" }, { name: "pk_org" }];
-    expect(sqlConditionSuggestions(sources[0], cols, "plsql").map(s => s.insertText)).toEqual(["nvl(o.DR, 0) = 0", "o.pk_org = ${1::pk_org}"]);
+    const cols = [{ name: "DR", type: "NUMBER(1)" }, { name: "pk_org", type: "VARCHAR2" }];
+    expect(sqlConditionSuggestions(sources[0], cols, "plsql").map(s => s.insertText)).toEqual(["nvl(o.DR, 0) = 0", "o.pk_org = '$0'"]);
     expect(sqlConditionSuggestions(sources[0], cols, "tsql")[0].insertText).toBe("isnull(o.DR, 0) = 0");
     expect(sqlConditionSuggestions(sources[0], cols, "postgresql")[0].insertText).toBe("coalesce(o.DR, 0) = 0");
+  });
+
+  it("单号条件保留当前别名，使用空引号中的光标而不是绑定参数", () => {
+    const [suggestion] = sqlConditionSuggestions({ table: "po_order", alias: "a" }, [{ name: "vbillcode" }], "plsql");
+    expect(suggestion.insertText).toBe("a.vbillcode = '$0'");
+    expect(suggestion.snippet).toBe(true);
+    expect(suggestion.label).toContain("单号");
+    expect(sqlConditionSuggestions({ table: "po_order", alias: "a", aliasRef: '"a"' }, [{ name: "vbillcode" }], "plsql")[0].insertText).toBe('"a".vbillcode = \'$0\'');
+    expect(sqlConditionSuggestions({ table: "po_order", alias: "a$0" }, [{ name: "vbillcode" }], "plsql")[0].insertText).toBe("a\\$0.vbillcode = '$0'");
+    expect(sqlConditionSuggestions({ table: "po_order_b", alias: "b" }, [{ name: "pk_order" }], "plsql")).toEqual([]);
   });
 });
 
 describe("补全元数据缓存", () => {
+  it("解析完成后同步副本可读，清理后立刻读不到", async () => {
+    h.invoke.mockResolvedValue(response(rows(headers, [["fk_org", "orders", "pk_org", "orgs", "id", 1]])));
+    // 补全列表要当场回答「这张表有没有关联」，不能 await 一次查询
+    expect(peekSqlBusinessMetadata("c", "s", "orders")).toBeNull();
+    const value = await readSqlBusinessMetadata("c", "s", "orders");
+    expect(value).not.toBeNull();
+    await tick();
+    expect(peekSqlBusinessMetadata("c", "s", "ORDERS")).toBe(value);
+    clearSqlBusinessCache();
+    expect(peekSqlBusinessMetadata("c", "s", "orders")).toBeNull();
+  });
+
   it("并发合并且固定使用 isolatedOnly，scope 和连接隔离", async () => {
     h.invoke.mockResolvedValue(response());
     const a = readSqlBusinessMetadata("c", "s", "orders");
