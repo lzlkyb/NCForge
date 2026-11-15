@@ -1,21 +1,9 @@
 import { Icon } from "../ui/icon";
 import { FreshnessBadge } from "../ui/FreshnessBadge";
 import { Menu, MenuItem } from "../ui/Menu";
-import type { ScanProgress, SvnInfo } from "../../lib/svn";
+import type { SvnInfo } from "../../lib/svn";
 import { SvnContextMenu } from "./SvnContextMenu";
 import { openPatchPage } from "../../lib/svnSession";
-
-/**
- * 扫描中的按钮文案。
- *
- * 桥按一级目录推进，所以能说「3/66 个模块」——比「已扫 1200 条」有用得多：
- * 条目数在 `reportAll=false` 时只统计改动，一个干净的模块从头到尾不涨数字，
- * 看着还是像卡死。
- */
-function scanLabel(p: ScanProgress | null): string {
-  if (!p) return "扫描中…";
-  return p.total ? `已扫 ${p.done ?? 0}/${p.total} 个模块…` : `已扫 ${p.scanned} 条…`;
-}
 
 /**
  * 版本控制页顶部工具条。
@@ -33,7 +21,6 @@ export function SvnToolbar({
   generatedAtMs,
   shown,
   fetching,
-  scanned,
   busy,
   canRevert,
   revertTitle,
@@ -56,8 +43,6 @@ export function SvnToolbar({
   generatedAtMs: number | null;
   shown: number | null;
   fetching: boolean;
-  /** 扫描进度（桥按一级目录推）；null = 没有进行中的扫描。 */
-  scanned: ScanProgress | null;
   busy: string | null;
   canRevert: boolean;
   revertTitle: string;
@@ -83,21 +68,17 @@ export function SvnToolbar({
       {shown !== null && <span className="vc-hint">{shown} 处改动</span>}
       {generatedAtMs !== null && (
         <FreshnessBadge
-          state={fetching ? "loading" : "live"}
+          state="live"
           at={generatedAtMs}
           label="扫描"
           staleAfterMs={300_000}
           className="vc-scan-freshness"
         />
       )}
-      <button type="button" className="vc-btn" disabled={fetching} onClick={onRefresh}>
-        <Icon name="refresh" size={13} className={fetching ? "animate-spin" : undefined} />
-        {fetching ? scanLabel(scanned) : "刷新"}
+      <button type="button" className="vc-btn" aria-busy={fetching || undefined} disabled={fetching} onClick={onRefresh}>
+        <Icon name="refresh" size={13} />
+        刷新
       </button>
-      {busy === "update" && <button type="button" className="vc-btn" disabled onClick={onUpdate}>
-        <Icon name={busy === "update" ? "spinner" : "download"} size={13} className={busy === "update" ? "animate-spin" : undefined} />
-        {busy === "update" ? "更新中…" : "更新"}
-      </button>}
       <button
         type="button"
         className="vc-btn"

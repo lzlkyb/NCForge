@@ -16,7 +16,9 @@ import { ReqJournalHint } from "./ReqJournalHint";
 import { ReqReviewSidebar, UNCLAIMED_ID, pendingBlocks } from "./ReqReviewSidebar";
 import { useSvnStatus } from "../../hooks/useSvnStatus";
 import { cachedBlocks, useReqBlocks } from "../../hooks/useReqBlocks";
-import { markBlocksReviewed } from "../../lib/reviewSession";
+import { isBlockReviewed, markBlocksReviewed } from "../../lib/reviewSession";
+import { inScope, statsIn } from "../../lib/blockState";
+import { setSvnDiffPrefs, useSvnDiffPrefs } from "../../lib/svnDiffPrefs";
 import { changedSincePackage, FILE_SOURCE_LABEL, fileSource, groupByRequirement, reqName } from "../../lib/reqGroups";
 import { claimFiles, closeRequirement, copyFileList, createRequirement, mergeRequirement, packRequirement, renameRequirement } from "../../lib/reqActions";
 import { useRequirements } from "../../lib/requirements";
@@ -33,7 +35,8 @@ export function ReqReview({ onOpenFile }: { onOpenFile: (path: string) => void }
 function ReqReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path: string) => void }) {
   const { status, reviewed, mark, refresh } = useSvnStatus();
   const { reqId } = useSvnView(), reqs = useRequirements(), qc = useQueryClient();
-  const [onlyNew, setOnlyNew] = useState(false), [marking, setMarking] = useState(false);
+  const [mixedOnly, setMixedOnly] = useState(false), [marking, setMarking] = useState(false);
+  const onlyNew = useSvnDiffPrefs(root).onlyNew;
   const items = useMemo(() => status.data?.changes.groups.flatMap((g) => g.items).filter((it) => !it.ignored) ?? [], [status.data]);
   const grouping = useMemo(() => groupByRequirement(items, reqs.view), [items, reqs.view]);
   const allGrouped = useMemo(() => grouping.groups.flatMap((g) => g.items), [grouping]);
@@ -41,19 +44,25 @@ function ReqReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
   const active = reqId === UNCLAIMED_ID ? null : grouping.groups.find((g) => g.req.id === reqId) ?? grouping.groups[0] ?? null;
   const selectedId = active?.req.id ?? (grouping.unclaimed.length ? UNCLAIMED_ID : null);
   const files = active ? active.items : selectedId === UNCLAIMED_ID ? grouping.unclaimed : [];
-  const isDone = (it: ChangeItem) => { const fb = blocks.get(keyOf(it.path)); return fb && fb.blocks.length ? fb.done === fb.blocks.length : reviewed.has(keyOf(it.path)); };
-  const shown = onlyNew ? files.filter((it) => !isDone(it)) : files;
+  const ctxReq = selectedId === UNCLAIMED_ID ? UNCLAIMED_ID : active?.req.id ?? null;
+  // 「审完」只看算在本需求里的块：混改文件里别的需求的块不拖本需求的进度
+  const isDone = (it: ChangeItem) => { const fb = blocks.get(keyOf(it.path)); if (!fb || !fb.blocks.length) return reviewed.has(keyOf(it.path)); const s = statsIn(fb.infos, ctxReq); return s.done === s.total; };
+  const shown = files.filter((it) => (!onlyNew || !isDone(it)) && (!mixedOnly || !!active?.mixed.has(keyOf(it.path))));
   const openFile = (path: string) => { window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "files" })); onOpenFile(path); };
   const markFiles = (targets: ChangeItem[]) => {
     if (marking) return;
-    for (const it of targets) markBlocksReviewed(it.path, blocks.get(keyOf(it.path))?.blocks ?? cachedBlocks(qc, root, it), true);
-    const todo = targets.filter((it) => isMarkable(it) && !reviewed.has(keyOf(it.path)));
+    for (const it of targets) {
+      const fb = blocks.get(keyOf(it.path));
+      markBlocksReviewed(it.path, fb ? fb.infos.filter((info) => inScope(info, ctxReq)).map((info) => info.block) : cachedBlocks(qc, root, it), true);
+    }
+    // 文件级已审只在全部块都审完时才标（混改文件在另一个需求下还有没审的块）
+    const todo = targets.filter((it) => isMarkable(it) && !reviewed.has(keyOf(it.path)) && (blocks.get(keyOf(it.path))?.blocks ?? []).every((b) => isBlockReviewed(it.path, b)));
     if (!todo.length) return;
     setMarking(true);
     void Promise.all(todo.map((it) => mark(it.path, it.revision, true))).catch((e) => toast(friendlySvnError(e), "error")).finally(() => setMarking(false));
   };
   const jump = (it: ChangeItem) => document.querySelector(`[data-file-key="${CSS.escape(it.path.toLowerCase())}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
-  const { pending } = pendingBlocks(files, blocks, reviewed);
+  const { pending, redo } = pendingBlocks(files, blocks, reviewed, ctxReq);
   const since = active ? changedSincePackage(active, reqs.view) : null;
   const openReqs = reqs.view.reqs.filter((r) => r.status === "open");
   return <>
@@ -67,9 +76,10 @@ function ReqReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
       {!selectedId && <div className="vc-empty"><Icon name="check" size={24} /><div>{status.isFetching && !status.data ? "正在扫描工作副本…" : "没有待审的需求改动"}</div></div>}
       {selectedId && <div className="vc-rq-bar-top">
         <span className="vc-rq-name" title={active?.req.name}>{active ? active.req.name : "未认领的改动"}</span>
-        <span className="vc-rq-meta">{files.length} 个文件 · {pending ? `待审 ${pending} 块` : "全部审完"}{since !== null ? ` · 出过包${since ? `，之后又改了 ${since} 个文件` : ""}` : ""}</span>
+        <span className="vc-rq-meta">{files.length} 个文件 · {pending ? `待审 ${pending} 块` : "全部审完"}{redo ? `（其中需重审 ${redo} 块）` : ""}{since !== null ? ` · 出过包${since ? `，之后又改了 ${since} 个文件` : ""}` : ""}</span>
         <span className="vc-sp" />
-        <label className="vc-rq-toggle" title="隐藏已经审完的文件；审完后又被改过的文件会重新出现"><input type="checkbox" checked={onlyNew} onChange={(e) => setOnlyNew(e.target.checked)} />只看新改动</label>
+        {!!active?.mixed.size && <label className="vc-rq-toggle" title="只显示也被别的需求改过的文件（出包会把别的需求的改动一起带上）"><input type="checkbox" checked={mixedOnly} onChange={(e) => setMixedOnly(e.target.checked)} />只看混改</label>}
+        <label className="vc-rq-toggle" title="已审的改动块与审完的文件不再显示；审完后又被改过的会重新出现"><input type="checkbox" checked={onlyNew} onChange={(e) => setSvnDiffPrefs(root, { onlyNew: e.target.checked })} />只看新改动</label>
         {active && <button type="button" className="vc-btn vc-btn-sm vc-btn-primary" onClick={() => packRequirement(root, active.req, active.items)}><Icon name="package" size={12} /><span>出包…</span></button>}
         <Menu portal width="w-64" trigger={(isOpen, toggle) => <button type="button" className="vc-btn vc-btn-sm" aria-label={active ? "需求操作" : "归入需求"} aria-haspopup="menu" aria-expanded={isOpen} onClick={toggle}><Icon name="more" size={14} /></button>}>
           {close => active ? <>
@@ -86,16 +96,17 @@ function ReqReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
         </Menu>
       </div>}
       {files.length > 1 && <div className="vc-rq-chips"><span>跳到：</span>{files.map((it) => {
-        const fb = blocks.get(keyOf(it.path)), done = isDone(it);
-        return <button key={it.path} type="button" className="vc-chip" data-done={done || undefined} onClick={() => jump(it)}>{done && <Icon name="check" size={11} />}{active?.mixed.has(keyOf(it.path)) && <span className="vc-tag" data-tone="mix">混</span>}{it.rel.split("/").pop()}{fb && !done ? ` · ${fb.done}/${fb.blocks.length}` : ""}</button>;
+        const fb = blocks.get(keyOf(it.path)), done = isDone(it), s = fb && statsIn(fb.infos, ctxReq);
+        return <button key={it.path} type="button" className="vc-chip" data-done={done || undefined} onClick={() => jump(it)}>{done && <Icon name="check" size={11} />}{active?.mixed.has(keyOf(it.path)) && <span className="vc-tag" data-tone="mix">混</span>}{it.rel.split("/").pop()}{s && !done ? ` · ${s.done}/${s.total}` : ""}</button>;
       })}</div>}
-      {onlyNew && files.length > 0 && !shown.length && <div className="vc-empty"><Icon name="check" size={24} /><div>这个需求的改动都审完了</div></div>}
+      {(onlyNew || mixedOnly) && files.length > 0 && !shown.length && <div className="vc-empty"><Icon name="check" size={24} /><div>{mixedOnly && !onlyNew ? "这个需求没有混改文件" : "这个需求的改动都审完了"}</div></div>}
       <div className="vc-rq-stack">
         {shown.map((it) => {
           const mixed = active?.mixed.get(keyOf(it.path)) ?? [];
           return <div key={it.path}>
             {!active && <div className="vc-rq-src"><span className="vc-tag" data-tone="muted">{FILE_SOURCE_LABEL[fileSource(reqs.view, it.path)]}</span></div>}
-            <ReqFileSection it={it} root={root} fb={blocks.get(keyOf(it.path))} done={isDone(it)} mixedWith={mixed.map((id) => reqName(reqs.view, id))} disabled={marking} onMark={() => markFiles([it])} onOpenFile={openFile} />
+            <ReqFileSection it={it} root={root} ctxReq={ctxReq} fb={blocks.get(keyOf(it.path))} done={isDone(it)} mixedWith={mixed.map((id) => reqName(reqs.view, id))} disabled={marking}
+              onMark={() => markFiles([it])} onFileReviewed={(all) => { if (isMarkable(it) && all !== reviewed.has(keyOf(it.path))) void mark(it.path, it.revision, all).catch((e) => toast(friendlySvnError(e), "error")); }} onOpenFile={openFile} />
           </div>;
         })}
       </div>

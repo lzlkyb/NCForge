@@ -26,6 +26,10 @@ export function SvnDiffTools({ root, prefs, narrow, disabled = false }: {
           onChange={e => setSvnDiffPrefs(root, { wrap: e.target.checked })} />长行自动换行</label>
         <label><input type="checkbox" checked={prefs.collapseUnchanged} disabled={disabled}
           onChange={e => setSvnDiffPrefs(root, { collapseUnchanged: e.target.checked })} />折叠长段未修改代码</label>
+        <label title="每个改动块上方一条：谁改的、为什么改、审没审、是不是别的需求的"><input type="checkbox" checked={prefs.blockStrips} disabled={disabled}
+          onChange={e => setSvnDiffPrefs(root, { blockStrips: e.target.checked })} />改动块标注条</label>
+        <label title="已审的改动块不再显示；审完后又被改过的块会重新出现"><input type="checkbox" checked={prefs.onlyNew} disabled={disabled}
+          onChange={e => setSvnDiffPrefs(root, { onlyNew: e.target.checked })} />只看新改动</label>
         <label>阅读字号<select aria-label="差异字号" className="vc-reading-select" value={prefs.fontSize} disabled={disabled}
           onChange={e => setSvnDiffPrefs(root, { fontSize: Number(e.target.value) })}>
           {[12, 13, 14, 16].map(size => <option key={size} value={size}>{size}px</option>)}

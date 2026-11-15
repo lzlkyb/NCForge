@@ -5,6 +5,7 @@ import { waitForFileOperations, type OperationHandle } from "./operations";
 import { workspaceEpoch } from "./workspaceEpoch";
 import { keyOf, svnStatus } from "./svn";
 import { getSvnDraft, isSvnCommittable, isSvnPicked, type SvnCommitSnapshot } from "./svnDraft";
+import { checkProjectPreflight } from "./projectPreflight";
 
 export function assertSvnWorkspace(root: string, epoch: number): void {
   if (keyOf(getSession().root ?? "") !== keyOf(root) || workspaceEpoch() !== epoch) {
@@ -63,6 +64,9 @@ export async function prepareSvnSubmit(root: string, epoch: number, snapshot: Sv
   const byKey = new Map(current.map(item => [keyOf(item.path), item]));
   const invalid = snapshot.paths.filter(path => !byKey.has(keyOf(path)) || !isSvnCommittable(byKey.get(keyOf(path))!));
   if (invalid.length > 0) throw new Error(`${invalid.length} 个选中文件已消失、发生冲突或不可提交，请刷新清单后重新选择`);
+  handle.update({ phase: "检查选中文件的 Java 错误与冲突标记" });
+  await checkProjectPreflight(snapshot.paths.filter(path=>byKey.get(keyOf(path))?.letter!=="D"));
+  assertSvnWorkspace(root, epoch);
   if (!allowDirtyDisk && dirty().length > 0) throw new Error("预检期间选中文件又有未保存修改，本次提交已停止");
   const draft = getSvnDraft(root);
   if (draft.unknown) throw new Error("上次提交结果尚未确认，请先核实服务器历史");

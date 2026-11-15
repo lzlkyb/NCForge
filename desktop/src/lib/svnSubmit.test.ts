@@ -11,6 +11,7 @@ vi.mock("./dbConfirm", () => ({ askUnsavedFiles: h.ask }));
 vi.mock("./operations", () => ({ waitForFileOperations: h.wait }));
 vi.mock("./svn", () => ({ keyOf: (p: string) => p.replace(/\\/g, "/").toLowerCase(), svnStatus: h.status }));
 vi.mock("./fileSave", () => ({ saveOne: h.save }));
+vi.mock("./projectPreflight", () => ({ checkProjectPreflight: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("./tabSession", () => ({ applySaved: (tabs: TabMeta[]) => tabs }));
 import { assertSvnWorkspace, isUnknownSvnCommitError, prepareSvnSubmit } from "./svnSubmit";
 import { getSvnDraft, setSvnMessage, syncSvnDraft } from "./svnDraft";

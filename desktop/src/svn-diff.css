@@ -49,3 +49,31 @@ html[data-ui-density="comfortable"] :is(.vc-compare,.vc-local-diff) :is(.vc-btn,
   .vc-compare[data-compact] .vc-reading-tools { margin-left:auto; }
   .vc-compare[data-compact] .vc-reading-warning { display:none; }
 }
+/* 按需求审查 P2：改动块标注条（挂在 Monaco 新侧的 view zone 里，高 28px；六种状态见 BlockStrip.tsx） */
+.vc-strip-zone { font-family:var(--font-sans),system-ui,sans-serif; }
+.vc-strip { box-sizing:border-box;height:100%;display:flex;align-items:center;gap:8px;padding:0 8px 0 6px;font-size:11.5px;line-height:18px;color:hsl(var(--foreground));background:hsl(var(--secondary) / .7);border-left:3px solid hsl(var(--primary) / .55);border-top:1px solid hsl(var(--border) / .7);overflow:hidden; }
+.vc-strip[data-mini] { flex-direction:column;align-items:stretch;justify-content:flex-start;gap:0; }
+.vc-strip-row { display:flex;align-items:center;gap:8px;min-height:27px; }
+.vc-strip-main { flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden;white-space:nowrap; }
+.vc-strip-main > * { flex-shrink:0; }
+.vc-strip-main b { font-weight:600; }
+.vc-strip-main .vc-strip-dim,.vc-strip-main .vc-strip-reason { flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis; }
+.vc-strip-dim { color:hsl(var(--muted-foreground)); }
+.vc-strip-badge { font-size:10px;font-weight:700;line-height:15px;padding:0 4px;border-radius:3px;color:hsl(var(--primary));background:hsl(var(--primary) / .14); }
+.vc-strip .vc-btn { flex-shrink:0;min-height:20px;height:20px;padding:0 7px;font-size:11px; }
+.vc-strip-check[data-on] { color:hsl(var(--success-ink)); }
+.vc-strip[data-state="reviewed"] { border-left-color:hsl(var(--success) / .7);background:hsl(var(--success) / .07); }
+.vc-strip[data-state="reviewed"] .vc-strip-badge { color:hsl(var(--success-ink));background:hsl(var(--success) / .14); }
+.vc-strip[data-state="redo"] { border-left-color:hsl(var(--warning));background:hsl(var(--warning) / .1); }
+.vc-strip[data-state="redo"] b,.vc-strip[data-state="redo"] .vc-strip-badge { color:hsl(var(--warning-ink)); }
+.vc-strip[data-state="redo"] .vc-strip-badge { background:hsl(var(--warning) / .18); }
+.vc-strip[data-state="other"] { border-left-color:hsl(var(--warning));background:hsl(var(--warning) / .2);color:hsl(var(--warning-ink)); }
+.vc-strip[data-state="other"] .vc-strip-dim { color:hsl(var(--warning-ink) / .85); }
+.vc-strip[data-state="manual"] .vc-strip-badge { color:hsl(var(--accent-foreground));background:hsl(var(--accent)); }
+.vc-strip[data-state="unknown"],.vc-strip[data-state="plain"] { border-left-color:hsl(var(--muted-foreground) / .45); }
+.vc-strip[data-state="unknown"] .vc-strip-badge { color:hsl(var(--muted-foreground));background:hsl(var(--muted-foreground) / .14); }
+.vc-strip-mini { overflow:auto;margin:0 0 6px;padding:2px 0;border:1px solid hsl(var(--border));border-radius:4px;background:hsl(var(--card));font-family:var(--font-mono,ui-monospace),monospace;font-size:11.5px; }
+.vc-strip-mini-row { display:flex;gap:6px;min-height:18px;line-height:18px;padding:0 6px;white-space:pre; }
+.vc-strip-mini-row > span { width:10px;flex-shrink:0;color:hsl(var(--muted-foreground));user-select:none; }
+.vc-strip-mini-row[data-op="add"] { background:hsl(var(--success) / .14); }
+.vc-strip-mini-row[data-op="del"] { background:hsl(var(--destructive) / .12); }

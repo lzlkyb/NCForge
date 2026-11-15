@@ -115,6 +115,8 @@ html[data-ui-density="comfortable"] :is(.vc-chip,.vc-group-head .vc-grp) { min-h
 .vc-blocks { display:inline-flex;align-items:center;gap:2px;flex-shrink:0;font-size:10.5px;color:hsl(var(--muted-foreground));font-variant-numeric:tabular-nums; }
 .vc-blocks[data-state="done"] { color:hsl(var(--success-ink));font-weight:600; }
 .vc-blocks[data-state="part"] { color:hsl(var(--warning-ink)); }
+.vc-blocks[data-state="redo"] { color:hsl(var(--warning-ink));font-weight:700;background:hsl(var(--warning) / .16);border-radius:3px;padding:0 3px; }
+.vc-tag[data-tone="redo"] { color:hsl(var(--warning-ink));background:hsl(var(--warning) / .16); }
 .vc-req-hint { margin:6px 8px;align-items:flex-start; }
 .vc-req-hint span { flex:1;min-width:0; }
 /* 按需求审查 P1 · 方案二：需求卡片 + 整页连续对比 */
@@ -151,3 +153,4 @@ html[data-ui-density="comfortable"] :is(.vc-chip,.vc-group-head .vc-grp) { min-h
 .vc-rq-diff > * { flex:1;min-height:0; }
 .vc-rq-loading,.vc-rq-note { display:flex;align-items:center;gap:6px;padding:12px;font-size:12px;color:hsl(var(--muted-foreground));border-top:1px solid hsl(var(--border)); }
 .vc-rq-src { padding:0 0 3px; }
+.vc-task-feedback { flex-shrink:0;padding:6px 12px;border-bottom:1px solid hsl(var(--border)); }

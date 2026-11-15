@@ -5,6 +5,10 @@ import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { Menu, MenuItem } from "../ui/Menu";
 import { SvnDiffEditor } from "./SvnDiffEditor";
+import { useBlockStrips } from "../../hooks/useBlockStrips";
+import { useSvnView } from "../../lib/svnSession";
+import { useSvnListPrefs } from "../../lib/svnListPrefs";
+import { useSvnDiffPrefs } from "../../lib/svnDiffPrefs";
 
 export function svnDiffLanguage(path: string): string {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
@@ -27,12 +31,20 @@ export function DiffPane({ file, data, reviewed, onToggleReviewed, onOpenInEdito
 }) {
   const root = useWorkspaceRoot();
   const markable = isMarkable(file);
+  // 按需求分组时，标注条按「从哪个需求组点开的」判断哪些块是别的需求的
+  const { selectedReq } = useSvnView(), byReq = useSvnListPrefs(root ?? "").groupBy === "req", diffPrefs = useSvnDiffPrefs(root);
+  const strip = useBlockStrips({
+    root: root ?? "", path: file.path, base: data.baseText, working: data.workingText,
+    ctxReq: byReq ? selectedReq : null, disabled: disabled || !markable,
+    // 块全部审完 / 又取消了一块：文件级已审跟着变（筛选、提交前核对都看文件级）
+    onAllReviewed: (all) => { if (markable && all !== reviewed) onToggleReviewed(); },
+  });
   const name = file.rel.slice(file.rel.lastIndexOf("/") + 1);
   const dir = file.rel.includes("/") ? file.rel.slice(0, file.rel.lastIndexOf("/")) : "";
   return <section className="vc-main vc-local-diff">
-    <SvnDiffEditor original={data.baseText} modified={data.workingText} language={svnDiffLanguage(file.path)} root={root}
-      sourceKey={`local:${file.path.toLowerCase()}:r${file.revision}`} disabled={disabled}
-      originalLabel={data.baseEmpty ? "无 BASE · 新文件" : `BASE r${file.revision > 0 ? file.revision : "?"}`}
+    <SvnDiffEditor original={strip.original} modified={data.workingText} language={svnDiffLanguage(file.path)} root={root}
+      sourceKey={`local:${file.path.toLowerCase()}:r${file.revision}`} disabled={disabled} strips={strip.strips}
+      originalLabel={diffPrefs.onlyNew ? "BASE + 已审的改动 · 只看新改动" : data.baseEmpty ? "无 BASE · 新文件" : `BASE r${file.revision > 0 ? file.revision : "?"}`}
       modifiedLabel={file.letter === "D" ? "工作副本 · 已删除" : "工作副本 · 只读"}
       toolbar={<div className="vc-diff-file" title={file.path}>
       <span className="vc-badge vc-badge-label" data-st={letterTone(file.letter)} title={`SVN ${file.letter}`}>{svnStatusLabel[file.letter]}</span>
@@ -41,7 +53,7 @@ export function DiffPane({ file, data, reviewed, onToggleReviewed, onOpenInEdito
       actions={<>
         <button type="button" className="vc-btn vc-btn-sm vc-open-code" aria-label="在代码中打开" title="在代码中打开" onClick={onOpenInEditor}><Icon name="external" size={12} /><span>在代码中打开</span></button>
         {onFocus && !focused && <button type="button" className="vc-btn vc-btn-sm" aria-label="专注对比" title="专注对比" onClick={onFocus}><Icon name="panel" size={13} /><span className="vc-focus-label">专注对比</span></button>}
-        <button type="button" className="vc-btn vc-btn-sm vc-btn-primary vc-review-next" aria-keyshortcuts="Alt+ArrowDown" title="标记已审并查看下一项 · Alt+↓" disabled={disabled || !markable} onClick={onMarkAndNext}><Icon name="check" size={12} /><span>已审并看下一项</span></button>
+        <button type="button" className="vc-btn vc-btn-sm vc-btn-primary vc-review-next" aria-keyshortcuts="Alt+ArrowDown" title={byReq && selectedReq && selectedReq !== "-" ? "只标本需求的改动块为已审，并查看下一项 · Alt+↓" : "标记已审并查看下一项 · Alt+↓"} disabled={disabled || !markable} onClick={onMarkAndNext}><Icon name="check" size={12} /><span>已审并看下一项</span></button>
         <Menu portal width="w-64" trigger={(open,toggle)=><button type="button" className="vc-btn vc-btn-sm" aria-label="当前文件更多操作" aria-haspopup="menu" aria-expanded={open} onClick={toggle}><Icon name="more" size={14}/></button>}>
           {close=><>
             <MenuItem label={reviewed ? "取消已审" : "标记已审"} icon="check" disabled={disabled || !markable} onClick={()=>{close();onToggleReviewed();}}/>

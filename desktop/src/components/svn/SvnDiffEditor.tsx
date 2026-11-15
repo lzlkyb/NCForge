@@ -3,8 +3,12 @@ import { initMonaco } from "../../lib/monacoSetup";
 import { useSvnDiffPrefs } from "../../lib/svnDiffPrefs";
 import { changedLine, diffSummary, emptyDiffSummary } from "../../lib/svnDiffState";
 import { Icon } from "../ui/icon";
+import { BusyIndicator } from "../ui/BusyIndicator";
 import { SvnDiffTools } from "./SvnDiffTools";
+import { useDiffStrips, type StripSpec } from "../../hooks/useDiffStrips";
 import "../../svn-diff.css";
+
+const NO_STRIPS: readonly StripSpec[] = [];
 
 type Monaco = ReturnType<typeof initMonaco>;
 type DiffEditor = ReturnType<Monaco["editor"]["createDiffEditor"]>;
@@ -33,7 +37,7 @@ function saveView(editor: DiffEditor, key: string, at: number): void {
 
 /** 只读比较器：本地审查、固定历史版本和冲突预览共用同一套阅读行为。 */
 export function SvnDiffEditor({ original, modified, language = "plaintext", sourceKey, root = null,
-  originalLabel = "原版本", modifiedLabel = "新版本", footer, toolbar, actions, disabled = false }: {
+  originalLabel = "原版本", modifiedLabel = "新版本", footer, toolbar, actions, disabled = false, strips = NO_STRIPS }: {
   original: string;
   modified: string;
   language?: string;
@@ -45,12 +49,16 @@ export function SvnDiffEditor({ original, modified, language = "plaintext", sour
   toolbar?: ReactNode;
   actions?: ReactNode;
   disabled?: boolean;
+  /** 改动块标注条（按需求审查 P2），插在新侧。 */
+  strips?: readonly StripSpec[];
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<DiffEditor | null>(null);
   const modelsRef = useRef<ComparisonModels | null>(null);
   const [summary, setSummary] = useState(emptyDiffSummary);
   const [narrow, setNarrow] = useState(false);
+  /** 每次 setModel 自增：换模型会连带清掉 view zone，标注条要重加。编辑器一并放进来，渲染时不读 ref。 */
+  const [zoneTarget, setZoneTarget] = useState<{ editor: DiffEditor | null; tick: number }>({ editor: null, tick: 0 });
   const prefs = useSvnDiffPrefs(root);
   const summaryRef = useRef(summary); summaryRef.current = summary;
   const key = `${(root ?? "").replace(/\\/g, "/").toLowerCase()}:${sourceKey}`;
@@ -121,6 +129,7 @@ export function SvnDiffEditor({ original, modified, language = "plaintext", sour
     const comparison = { ...models, viewModel };
     modelsRef.current = comparison;
     editor.setModel(viewModel);
+    setZoneTarget(prev => ({ editor, tick: prev.tick + 1 }));
     // 初始 onDidUpdateDiff 可能先报告空结果；等待当前 worker 完成再首次定位。
     // 同一个编辑器的布局或偏好变化不触发这段逻辑，返回文件则恢复原视图。
     void viewModel.waitForDiff().then(() => {
@@ -169,6 +178,8 @@ export function SvnDiffEditor({ original, modified, language = "plaintext", sour
     return () => observer.disconnect();
   }, []);
 
+  const stripNodes = useDiffStrips(zoneTarget.editor, zoneTarget.tick, strips);
+
   const jump = (step: number) => {
     const editor = editorRef.current;
     const changes = editor?.getLineChanges();
@@ -183,7 +194,7 @@ export function SvnDiffEditor({ original, modified, language = "plaintext", sour
   return <div className="vc-compare" data-compact={toolbar ? true : undefined}>
     <div className="vc-reading-bar">{toolbar}
       <span className="vc-reading-stats" role="status" aria-live="polite">
-        {!summary.ready ? <><Icon name="spinner" size={12} className="animate-spin" />计算差异中…</> : summary.total === 0 ? "当前设置下没有差异" : <><span className="vc-add">+{summary.add}</span><span className="vc-del">−{summary.del}</span><span>{summary.total} 处差异</span></>}
+        {!summary.ready ? <><BusyIndicator size={12} />计算差异中…</> : summary.total === 0 ? "当前设置下没有差异" : <><span className="vc-add">+{summary.add}</span><span className="vc-del">−{summary.del}</span><span>{summary.total} 处差异</span></>}
       </span>
       <div className="vc-diff-navigation">
       <button type="button" className="vc-btn vc-btn-sm" aria-label="上一处差异" title="上一处差异" disabled={disabled || !summary.ready || summary.at <= 1} onClick={() => jump(-1)}><Icon name="arrowUp" size={12} /><span className="vc-diff-jump-label">上一处</span></button>
@@ -193,7 +204,7 @@ export function SvnDiffEditor({ original, modified, language = "plaintext", sour
       <SvnDiffTools root={root} prefs={prefs} narrow={narrow} disabled={disabled} />{actions}
     </div>
     <div className="vc-compare-sources"><span title={originalLabel}>{originalLabel}</span><span title={modifiedLabel}>{modifiedLabel}</span></div>
-    <div className="vc-compare-body"><div className="vc-compare-host" ref={hostRef} /></div>
+    <div className="vc-compare-body"><div className="vc-compare-host" ref={hostRef} /></div>{stripNodes}
     {footer && <div className="vc-compare-foot">{footer}</div>}
   </div>;
 }

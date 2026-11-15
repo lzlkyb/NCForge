@@ -32,6 +32,11 @@ export interface SvnView {
   changeIntent: { path: string; action: "review" | "conflict" | "commit" } | null;
   /** 「按需求审查」视图里选中的需求；`"-"` = 未认领的改动。 */
   reqId: string | null;
+  /**
+   * 「审查改动」按需求分组时，当前文件是从哪个需求组里点开的（混改文件在两个组里各有一行）。
+   * 决定标注条哪些块算「别的需求」、「已审并看下一项」标哪些块。`"-"` = 未认领组。
+   */
+  selectedReq: string | null;
 }
 
 const initial = (): SvnView => ({
@@ -42,6 +47,7 @@ const initial = (): SvnView => ({
   commitOpen: false,
   changeIntent: null,
   reqId: null,
+  selectedReq: null,
 });
 const views = new Map<string, ReturnType<typeof createSessionStore<SvnView>>>();
 const listeners = new Set<() => void>();

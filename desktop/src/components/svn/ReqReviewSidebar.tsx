@@ -7,19 +7,20 @@ import { toast } from "../ui/toast";
 import { keyOf, type ChangeItem } from "../../lib/svn";
 import { changedSincePackage, type ReqGrouping } from "../../lib/reqGroups";
 import { reqSetStatus, type ReqView } from "../../lib/requirements";
+import { statsIn } from "../../lib/blockState";
 import type { FileBlocks } from "../../hooks/useReqBlocks";
 
 export const UNCLAIMED_ID = "-";
 
-/** 待审块数；取不到块的文件按文件级已审算一块。 */
-export function pendingBlocks(items: readonly ChangeItem[], blocks: Map<string, FileBlocks>, reviewed: ReadonlySet<string>): { pending: number; total: number } {
-  let pending = 0, total = 0;
+/** 待审块数（只数算在需求 `reqId` 里的块）；取不到块的文件按文件级已审算一块。 */
+export function pendingBlocks(items: readonly ChangeItem[], blocks: Map<string, FileBlocks>, reviewed: ReadonlySet<string>, reqId: string | null): { pending: number; total: number; redo: number } {
+  let pending = 0, total = 0, redo = 0;
   for (const it of items) {
     const fb = blocks.get(keyOf(it.path));
-    if (fb) { total += fb.blocks.length; pending += fb.blocks.length - fb.done; }
+    if (fb) { const s = statsIn(fb.infos, reqId); total += s.total; pending += s.total - s.done; redo += s.redo; }
     else { total += 1; if (!reviewed.has(keyOf(it.path))) pending += 1; }
   }
-  return { pending, total };
+  return { pending, total, redo };
 }
 
 export function ReqReviewSidebar({ grouping, view, selected, blocks, reviewed, onSelect }: {
@@ -43,10 +44,11 @@ export function ReqReviewSidebar({ grouping, view, selected, blocks, reviewed, o
     <div className="vc-list vc-rq-list">
       {!groups.length && !grouping.unclaimed.length && <div className="vc-empty"><Icon name="check" size={24} /><div>{q ? "没有匹配的需求" : "还没有需求。AI 声明了需求名、或你新建需求后，这里会列出来。"}</div></div>}
       {groups.map((g) => {
-        const { pending, total } = pendingBlocks(g.items, blocks, reviewed), since = changedSincePackage(g, view);
+        const { pending, total, redo } = pendingBlocks(g.items, blocks, reviewed, g.req.id), since = changedSincePackage(g, view);
         return <button key={g.req.id} type="button" className="vc-rq" aria-pressed={selected === g.req.id} data-on={selected === g.req.id || undefined} onClick={() => onSelect(g.req.id)}>
           <span className="vc-rq-t" title={g.req.name}>{g.req.name}</span>
           <span className="vc-rq-m">{g.items.length} 个文件 · {pending ? `待审 ${pending} 块` : "全部审完"}
+            {redo > 0 && <span className="vc-tag" data-tone="redo" title="审完后又被改过的块">需重审 {redo}</span>}
             {since !== null && <span className="vc-tag" data-tone="ship">已出包{since ? ` +${since}` : ""}</span>}
             {g.mixed.size > 0 && <span className="vc-tag" data-tone="mix">混 {g.mixed.size}</span>}
           </span>

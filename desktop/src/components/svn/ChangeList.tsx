@@ -11,7 +11,7 @@ import { SVN_FILTERS, svnFilterCounts, svnVisibleGroups } from "../../lib/svnLis
 import { setSvnListPrefs, useSvnListPrefs } from "../../lib/svnListPrefs";
 import { clearSvnPicked, isSvnCommittable, selectSvnPaths } from "../../lib/svnDraft";
 
-export function ChangeList({ view, reviewed, outdated, selected, loading, error, onSelect, showIgnored, onToggleIgnored, root = "", picked = new Set<string>(), busy = false, onOpenFile, onMarkReqAll }: { view: ChangesView; reviewed: Set<string>; outdated?: ReadonlySet<string>; selected: string | null; loading: boolean; error: string | null; onSelect: (item: ChangeItem) => void; showIgnored: boolean; onToggleIgnored: () => void; root?: string; picked?: ReadonlySet<string>; busy?: boolean; onOpenFile?: (path: string) => void; onMarkReqAll?: (items: ChangeItem[], blocks: Map<string, FileBlocks>) => void }) {
+export function ChangeList({ view, reviewed, outdated, selected, loading, error, onSelect, showIgnored, onToggleIgnored, root = "", picked = new Set<string>(), busy = false, onOpenFile, onMarkReqAll }: { view: ChangesView; reviewed: Set<string>; outdated?: ReadonlySet<string>; selected: string | null; loading: boolean; error: string | null; onSelect: (item: ChangeItem) => void; showIgnored: boolean; onToggleIgnored: () => void; root?: string; picked?: ReadonlySet<string>; busy?: boolean; onOpenFile?: (path: string) => void; onMarkReqAll?: (reqId: string, items: ChangeItem[], blocks: Map<string, FileBlocks>) => void }) {
   const prefs = useSvnListPrefs(root), list = useRef<HTMLDivElement>(null), reqs = useRequirements();
   const byReq = prefs.groupBy === "req", hasReqs = reqs.view.reqs.some(r => r.status === "open");
   const initialScroll = useRef(prefs.scroll);

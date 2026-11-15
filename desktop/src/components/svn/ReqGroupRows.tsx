@@ -14,6 +14,8 @@ import { claimFiles, closeRequirement, copyFileList, mergeRequirement, packRequi
 import type { ReqView, Requirement } from "../../lib/requirements";
 import { isSvnPicked } from "../../lib/svnDraft";
 import { setSvnListPrefs } from "../../lib/svnListPrefs";
+import { svnSession } from "../../lib/svnSession";
+import { statsIn } from "../../lib/blockState";
 import { useReqBlocks, type FileBlocks } from "../../hooks/useReqBlocks";
 
 export const reqGroupKey = (id: string) => `req:${id}`;
@@ -34,13 +36,15 @@ interface Props {
   onSelect: (item: ChangeItem) => void;
   onOpenFile?: (path: string) => void;
   /** 「本需求全部标为已审」：由 SvnReview 提供（要同时写文件级标记）。 */
-  onMarkAll?: (items: ChangeItem[], blocks: Map<string, FileBlocks>) => void;
+  onMarkAll?: (reqId: string, items: ChangeItem[], blocks: Map<string, FileBlocks>) => void;
 }
 
-function BlockProgress({ fb, done }: { fb?: FileBlocks; done: boolean }) {
+/** 文件行的「已审块 / 全部块」：只数算在本需求里的块；有需重审的块显示橙色。 */
+export function BlockProgress({ fb, done, reqId = null }: { fb?: FileBlocks; done: boolean; reqId?: string | null }) {
   if (!fb) return done ? <span className="vc-reviewed-mark" title="已审查" aria-label="已审查"><Icon name="check" size={12} /></span> : null;
-  const all = fb.blocks.length > 0 && fb.done === fb.blocks.length;
-  return <span className="vc-blocks" data-state={all ? "done" : fb.done ? "part" : undefined} title={`已审 ${fb.done} 块 / 共 ${fb.blocks.length} 块`}>{all && <Icon name="check" size={11} />}{fb.done}/{fb.blocks.length} 块</span>;
+  const s = statsIn(fb.infos, reqId), all = s.total > 0 && s.done === s.total;
+  const title = `已审 ${s.done} 块 / 共 ${s.total} 块${s.redo ? `，${s.redo} 块审完后又改了（需重审）` : ""}${s.total < fb.blocks.length ? `；另有 ${fb.blocks.length - s.total} 块属于别的需求` : ""}`;
+  return <span className="vc-blocks" data-state={s.redo ? "redo" : all ? "done" : s.done ? "part" : undefined} title={title}>{all && <Icon name="check" size={11} />}{s.done}/{s.total} 块</span>;
 }
 
 export function ReqGroupRows(p: Props) {
@@ -56,7 +60,7 @@ export function ReqGroupRows(p: Props) {
       <MenuItem label="用这个需求出包…" hint="带入打包页" onClick={() => { close(); packRequirement(p.root, req, items); }} />
       <MenuItem label="改名…" hint="如补上清单号" onClick={() => { close(); void renameRequirement(req); }} />
       {req.mergeHint && <MenuItem label={`并入「${reqName(p.reqs, req.mergeHint)}」`} hint="名字很像" onClick={() => { close(); if (req.mergeHint) void mergeRequirement(req, req.mergeHint); }} />}
-      {p.onMarkAll && <MenuItem label="本需求全部标为已审" onClick={() => { close(); p.onMarkAll?.(items, blocks); }} />}
+      {p.onMarkAll && <MenuItem label="本需求全部标为已审" hint="只标本需求的块" onClick={() => { close(); p.onMarkAll?.(req.id, items, blocks); }} />}
       <MenuItem label="复制文件清单" onClick={() => { close(); void copyFileList(items); }} />
       <MenuItem label="关闭需求" hint="文件回到未认领" onClick={() => { close(); void closeRequirement(req); }} />
     </>}
@@ -74,15 +78,15 @@ export function ReqGroupRows(p: Props) {
   return <>
     {groups.map((g) => {
       const key = reqGroupKey(g.req.id), since = changedSincePackage(g, p.reqs);
-      return <SvnFileRows key={key} {...common} group={{ module: key, items: g.items }} title={g.req.name} closed={p.closed.includes(key)} onToggleGroup={() => toggle(key)}
+      return <SvnFileRows key={key} {...common} onSelect={(it) => { svnSession.set({ selectedReq: g.req.id }); p.onSelect(it); }} group={{ module: key, items: g.items }} title={g.req.name} closed={p.closed.includes(key)} onToggleGroup={() => toggle(key)}
         headExtra={since !== null ? <span className="vc-tag" data-tone="ship" title={since ? `出过包，之后又改了 ${since} 个文件` : "出过包，之后没有新改动"}>已出包{since ? ` +${since}` : ""}</span> : undefined}
         headAction={reqMenu(g.req, g.items)}
         rowExtra={(it) => {
           const others = g.mixed.get(keyOf(it.path));
-          return <>{others && <span className="vc-tag" data-tone="mix" title={`这个文件也被「${others.map((id) => reqName(p.reqs, id)).join("」「")}」改过`}>混</span>}<BlockProgress fb={blocks.get(keyOf(it.path))} done={p.reviewed.has(keyOf(it.path))} /></>;
+          return <>{others && <span className="vc-tag" data-tone="mix" title={`这个文件也被「${others.map((id) => reqName(p.reqs, id)).join("」「")}」改过`}>混</span>}<BlockProgress fb={blocks.get(keyOf(it.path))} done={p.reviewed.has(keyOf(it.path))} reqId={g.req.id} /></>;
         }} />;
     })}
-    {unclaimed.length > 0 && <SvnFileRows {...common} group={{ module: UNCLAIMED_KEY, items: unclaimed }} title="未认领" muted closed={p.closed.includes(UNCLAIMED_KEY)} onToggleGroup={() => toggle(UNCLAIMED_KEY)}
+    {unclaimed.length > 0 && <SvnFileRows {...common} onSelect={(it) => { svnSession.set({ selectedReq: "-" }); p.onSelect(it); }} group={{ module: UNCLAIMED_KEY, items: unclaimed }} title="未认领" muted closed={p.closed.includes(UNCLAIMED_KEY)} onToggleGroup={() => toggle(UNCLAIMED_KEY)}
       headAction={claimMenu}
       rowExtra={(it) => {
         const src = fileSource(p.reqs, it.path);
