@@ -55,8 +55,6 @@ const BIN_NAME: &str = "pack.bin";
 const IDX_NAME: &str = "pack.idx";
 /// 文件监听停止抖动后的等待窗口：连续保存 10 个文件只重建一次。
 const DIRTY_QUIET: Duration = Duration::from_millis(1500);
-/// 后台线程轮询间隔。只在有活时才有实际动作，空转成本可忽略。
-const TICK: Duration = Duration::from_millis(300);
 
 // ───────────────────────────── 表结构 ─────────────────────────────
 
@@ -629,21 +627,19 @@ fn dirty() -> &'static AtomicBool {
     &D
 }
 
-fn building() -> &'static AtomicBool {
-    static B: AtomicBool = AtomicBool::new(false);
-    &B
-}
-
 fn start_worker() {
-    static STARTED: OnceLock<()> = OnceLock::new();
-    STARTED.get_or_init(|| {
-        let _ = std::thread::Builder::new()
+    use std::sync::mpsc::{sync_channel, SyncSender};
+
+    static WORKER: OnceLock<Mutex<Option<SyncSender<()>>>> = OnceLock::new();
+    let mut worker = WORKER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if worker.is_none() {
+        let (wake, idle) = sync_channel(1);
+        match std::thread::Builder::new()
             .name("search-pack".to_string())
-            .spawn(|| loop {
-                std::thread::sleep(TICK);
-                if building().load(Ordering::Relaxed) {
-                    continue;
-                }
+            .spawn(move || loop {
                 if dirty().swap(false, Ordering::Relaxed) {
                     // 抖动窗口：期间又来改动就放弃这次，下一轮再说
                     std::thread::sleep(DIRTY_QUIET);
@@ -663,31 +659,42 @@ fn start_worker() {
                     }
                     continue;
                 }
-                let job = {
+                let base = dir();
+                let job = base.and_then(|base| {
                     let mut g = state().lock().unwrap_or_else(|e| e.into_inner());
-                    g.queue.pop_front()
-                };
-                if let (Some((_key, root)), Some(base)) = (job, dir()) {
-                    run(&root, &dir_for(&base, &root));
+                    // A concurrent ensure must see either a queued or an active build.
+                    let (key, root) = g.queue.pop_front()?;
+                    g.building = Some(key);
+                    Some((base, root))
+                });
+                match job {
+                    Some((base, root)) => run(&root, &dir_for(&base, &root)),
+                    None => {
+                        if idle.recv().is_err() {
+                            break;
+                        }
+                    }
                 }
-            });
-    });
+            }) {
+            Ok(_) => *worker = Some(wake),
+            Err(error) => log::warn!("搜索内容包后台线程未启动：{error}"),
+        }
+    }
+    if let Some(wake) = worker.as_ref() {
+        // One pending wakeup is enough: the worker drains the queue before sleeping again.
+        let _ = wake.try_send(());
+    }
 }
 
 fn run(root: &Path, out_dir: &Path) {
     let key = root_key(root);
     {
         let mut g = state().lock().unwrap_or_else(|e| e.into_inner());
-        if g.building.is_some() {
-            return;
-        }
         g.building = Some(key.clone());
         g.root_paths.insert(key.clone(), root.to_path_buf());
     }
-    building().store(true, Ordering::Relaxed);
     let cancel = AtomicBool::new(false);
     let result = build(root, out_dir, &cancel);
-    building().store(false, Ordering::Relaxed);
 
     let mut g = state().lock().unwrap_or_else(|e| e.into_inner());
     g.building = None;

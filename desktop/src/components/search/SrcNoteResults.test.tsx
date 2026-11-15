@@ -64,6 +64,16 @@ afterEach(() => {
 });
 
 describe("SrcNoteResults", () => {
+  it("同一份搜索重开复用已返回的源码注释", async () => {
+    mocks.invoke.mockResolvedValue(emptyResult({ total: 1, items: [{ jar: "D:/a_src.jar", path: "nc/System.java", line: 4, text: "System 注释" }] }));
+    setSearchForm({ query: "System", outcome: outcome(), outcomeQuery: "System", resultId: 102 });
+    await render();
+    await act(async () => root.render(null));
+    await render();
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("System 注释");
+  });
+
   it("没有全文结果时整段不出现，也不发请求", async () => {
     await render();
     expect(mocks.invoke).not.toHaveBeenCalled();

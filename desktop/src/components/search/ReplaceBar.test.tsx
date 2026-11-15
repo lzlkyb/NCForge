@@ -214,6 +214,19 @@ describe("ReplaceBar", () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { running: true },
+    { outcome: { ...OUTCOME, truncated: true } },
+    { outcome: { ...OUTCOME, cancelled: true } },
+    { outcomeOptions: null },
+  ])("未完成或未保留完整条件的结果不能替换：%j", (patch) => {
+    mount(form(patch));
+    expect(btn("全部替换")!.disabled).toBe(true);
+    act(() => btn("全部替换")!.click());
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain("直接改写磁盘");
+  });
+
   it("确认框开着时工作区变了：警示上墙、确认按钮也禁用（二道网）", async () => {
     mount(form(), false);
     act(() => btn("全部替换")?.click());

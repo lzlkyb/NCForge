@@ -17,11 +17,12 @@ const render = () => root.render(<SearchResults form={form} update={patch => { f
 const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === label)!;
 const press = (element: HTMLElement, key: string, composing = false) => act(async () => element.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, isComposing: composing })));
 beforeEach(async () => {
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
   open.mockReset(); mocks.text.mockReset(); mocks.read.mockReset(); mocks.text.mockReturnValue("match first\ncontext\nmatch second"); resetSearchForm();
   form = { ...getSearchForm(), scope: "current", outcome: outcome(), outcomeRoot: "D:/p", query: "match" };
   host = document.createElement("div"); document.body.append(host); root = createRoot(host); await act(async () => render());
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); });
 it("continuous navigation expands folded files and uses Enter to open the selected hit, including IME protection", async () => {
   await act(async () => button("全部折叠").click()); expect(host.querySelectorAll("[data-hit-key]")).toHaveLength(0);
   await act(async () => button("下一结果").click()); expect(open).toHaveBeenLastCalledWith(hits[0]); expect(host.querySelectorAll("[data-hit-key]")).toHaveLength(2);
@@ -42,9 +43,10 @@ it("expanded results keep one DOM/list scroll and restore the sidebar without ch
 it("returning to the same results restores scroll while a fresh search starts from the top", async () => {
   let list = host.querySelector<HTMLElement>('[aria-label="搜索结果列表"]')!;
   await act(async () => { list.scrollTop = 84; list.dispatchEvent(new Event("scroll")); });
-  await act(async () => root.render(null)); await act(async () => render());
+  await act(async () => root.render(null)); await act(async () => { render(); });
+  await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); });
   list = host.querySelector<HTMLElement>('[aria-label="搜索结果列表"]')!; expect(list.scrollTop).toBe(84);
-  form = { ...form, outcome: outcome() }; await act(async () => render()); expect(list.scrollTop).toBe(0);
+  form = { ...form, outcome: outcome() }; await act(async () => render()); await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); }); expect(list.scrollTop).toBe(0);
 });
 it("previews use the source result's project root, do not open an editor, and disappear for a new result", async () => {
   form = { ...form, scope: "all", outcome: null, projectOutcome: { projects: [{ root: "D:/other", project: "other", outcome: { ...outcome(), hits: [hits[0]] } }], errors: [], elapsedMs: 2, truncated: false } };

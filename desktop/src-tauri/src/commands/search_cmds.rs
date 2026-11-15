@@ -98,12 +98,13 @@ pub async fn search_workspace(
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
     let root = PathBuf::from(root);
-    resolve_overlay(&root, &mut options, overlay_refs)?;
     // 没有包就在这里排一次后台建包：本次搜索仍走磁盘，下一次开始走包。
     // 放在命令入口而不是 `search` 模块里——建包要 config_dir，纯逻辑模块不碰配置。
     // 主工作区要登记成 primary：文件监听只重建它，依赖工程的包各自排队。
-    crate::content_pack::ensure_primary(&root, &state.config_dir);
+    let cache = state.config_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        resolve_overlay(&root, &mut options, overlay_refs)?;
+        crate::content_pack::ensure_primary(&root, &cache);
         request.run(|cancel| {
             search::search_cancellable(&root, &options, search::TIME_BUDGET_MS, cancel)
         })
@@ -138,9 +139,10 @@ pub async fn search_workspace_stream(
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
     let root = PathBuf::from(root);
-    resolve_overlay(&root, &mut options, overlay_refs)?;
-    crate::content_pack::ensure_primary(&root, &state.config_dir);
+    let cache = state.config_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        resolve_overlay(&root, &mut options, overlay_refs)?;
+        crate::content_pack::ensure_primary(&root, &cache);
         request.run(|cancel| {
             search::search_stream(&root, &options, search::TIME_BUDGET_MS, cancel, &|batch| {
                 let _ = app.emit(
@@ -281,9 +283,12 @@ pub struct ProjectsSearchOutcome {
 /// 依赖工程上会得到「每个工程都少搜一堆文件」的静默错范围。宁可明确拒绝。
 #[tauri::command]
 pub async fn search_projects(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
-    options: SearchOptions,
+    mut options: SearchOptions,
+    overlay_refs: Option<Vec<OverlayRef>>,
     source: Option<String>,
+    stream: Option<String>,
 ) -> Result<ProjectsSearchOutcome, String> {
     let request = gate().register(source.as_deref());
     if !options.dirs.is_empty() {
@@ -295,17 +300,18 @@ pub async fn search_projects(
         .clone()
         .ok_or_else(|| "尚未选择工作区目录".to_string())?;
     let primary_path = PathBuf::from(&primary);
-    if !primary_path.is_dir() {
-        return Err(format!("工作区目录不存在：{primary}"));
-    }
     // 每个工程根都有自己的包：`ensure` 把没建好的排进串行队列，本次仍走磁盘。
     // 只在命令入口登记 primary，队列里的都是依赖工程，不会同时开几次全量读盘。
-    crate::content_pack::ensure_primary(&primary_path, &state.config_dir);
     let overrides = crate::eclipse_cp::active_overrides(&cfg.linked_overrides);
     let cache = state.config_dir.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
-        request.run(|cancel| {
+        if !primary_path.is_dir() {
+            return Err(format!("工作区目录不存在：{primary}"));
+        }
+        resolve_overlay(&primary_path, &mut options, overlay_refs)?;
+        crate::content_pack::ensure_primary(&primary_path, &cache);
+        Ok(request.run(|cancel| {
             let mut roots: Vec<(String, String)> = Vec::new();
             for p in crate::eclipse_cp::projects(&primary_path, &overrides) {
                 let Some(root) = p.root else { continue };
@@ -347,7 +353,28 @@ pub async fn search_projects(
                     break;
                 }
                 let budget = PER_PROJECT_BUDGET_MS.min(MULTI_PROJECT_BUDGET_MS - used);
-                match search::search_cancellable(Path::new(&root), &options, budget, cancel) {
+                // Overlay paths are relative to the primary root, never to an associated project.
+                let project_options = options_for_project(&options, &root, &primary);
+                let result = if let Some(stream) = stream.as_ref() {
+                    use tauri::Emitter;
+                    search::search_stream(
+                        Path::new(&root),
+                        &project_options,
+                        budget,
+                        cancel,
+                        &|hits| {
+                            let _ = app.emit(
+                                "search:projects-batch",
+                                serde_json::json!({
+                                    "stream": stream, "project": project, "root": root, "hits": hits
+                                }),
+                            );
+                        },
+                    )
+                } else {
+                    search::search_cancellable(Path::new(&root), &project_options, budget, cancel)
+                };
+                match result {
                     Ok(outcome) => {
                         truncated |= outcome.truncated;
                         projects.push(ProjectSearch {
@@ -366,15 +393,39 @@ pub async fn search_projects(
                 elapsed_ms: started.elapsed().as_millis() as u64,
                 cancelled: cancel.load(Ordering::Relaxed),
             }
-        })
+        }))
     })
     .await
-    .map_err(|e| format!("后台任务失败: {e}"))
+    .map_err(|e| format!("后台任务失败: {e}"))?
+}
+
+fn options_for_project(options: &SearchOptions, root: &str, primary: &str) -> SearchOptions {
+    let mut selected = options.clone();
+    if !root.eq_ignore_ascii_case(primary) {
+        selected.overlay.clear();
+        selected.priority.clear();
+    }
+    selected
 }
 
 #[cfg(test)]
 mod overlay_cache_tests {
     use super::*;
+    #[test]
+    fn associated_same_relative_path_never_receives_primary_edits() {
+        let mut options = SearchOptions::default();
+        options.overlay.push(search::OverlayDoc {
+            path: "A.java".into(),
+            text: "unsaved primary text".into(),
+        });
+        options.priority.push("A.java".into());
+        let primary = options_for_project(&options, "D:/primary", "D:/PRIMARY");
+        let associated = options_for_project(&options, "D:/associated", "D:/primary");
+        assert_eq!(primary.overlay[0].text, "unsaved primary text");
+        assert!(associated.overlay.is_empty());
+        assert!(associated.priority.is_empty());
+        assert_eq!(options.overlay.len(), 1);
+    }
     #[test]
     fn references_resolve_to_independent_request_snapshots() {
         let root = Path::new("overlay-cache-test");

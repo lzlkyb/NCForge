@@ -6,6 +6,8 @@ import type {
 } from "./search";
 import type { JarSymbolResult } from "./jarSymbolSearch";
 import type { SrcNoteResult } from "./srcNoteSearch";
+import type { LibraryOutcome } from "./libraryFiles";
+import { cancelSearch } from "./search";
 
 /**
  * 搜索范围：全部关联工程 / 当前工作区 / 当前工作区里的某个业务组件。
@@ -30,6 +32,12 @@ export type SearchScope = "all" | "current" | "component";
  * 只存可序列化的搜索态，不放 DOM 引用。
  */
 export interface SearchForm {
+  libraryFiles?: LibraryOutcome | null;
+  /** 搜索条件快照包含正则原文，也用于截断或跨工程查询的库文件补充结果。 */
+  libraryOptions?: SearchOptions | null;
+  /** Stable through streamed batches; a new query resets reading position once. */
+  resultId?: number;
+  more?: boolean;
   query: string;
   /** IDEA 风格掩码。 */
   include: string;
@@ -120,6 +128,8 @@ export interface SearchForm {
 }
 
 const EMPTY: SearchForm = {
+  libraryFiles: null,
+  libraryOptions: null,
   query: "",
   include: "",
   caseSensitive: false,
@@ -149,6 +159,9 @@ let form: SearchForm = { ...EMPTY };
  * 只需要在重挂载时恢复一次，所以单独存。
  */
 let scrollTop = 0;
+let selectedKey: string | null = null;
+export const getSearchSelectedKey = () => selectedKey;
+export const setSearchSelectedKey = (key: string | null) => { selectedKey = key; };
 export const getSearchScrollTop = (): number => scrollTop;
 export const setSearchScrollTop = (v: number): void => {
   scrollTop = v;
@@ -188,8 +201,10 @@ export function resetSearchForm(): void {
   // 顶掉还在路上的搜索请求：它们回来时 mine !== currentSearchSeq()，不会把旧
   // 工作区的结果写回来（它们的 finally 也不会动 running，所以在这里一并清）。
   // replacing 不清：那次全量写盘还在跑，它的完成回调会自己把状态收尾。
-  void nextSearchSeq();
+  cancelWorkspaceSearch();
+  nextSearchSeq();
   scrollTop = 0;
+  selectedKey = null;
   form = {
     ...form,
     // 组件属于旧工作区的 manifest：留着它，新工程里同名的目录会被当成「刚选的组件」。
@@ -201,12 +216,15 @@ export function resetSearchForm(): void {
     outcomeRoot: null,
     outcomeOptions: null,
     outcomeQuery: null,
+    resultId: undefined,
     collapsed: [],
     error: null,
     running: false,
     replaceOutcome: null,
     jarSymbols: null,
     srcNotes: null,
+    libraryFiles: null,
+    libraryOptions: null,
   };
   emit();
 }
@@ -226,7 +244,10 @@ export function resetSearchForm(): void {
  */
 export function applySearchScope(scope: SearchScope, component: string | null): void {
   // 顶掉还在路上的请求：它们回来时序号已经不对，不会把旧范围的结果写回来
-  void nextSearchSeq();
+  cancelWorkspaceSearch();
+  nextSearchSeq();
+  scrollTop = 0;
+  selectedKey = null;
   form = {
     ...form,
     scope,
@@ -236,12 +257,15 @@ export function applySearchScope(scope: SearchScope, component: string | null): 
     outcomeRoot: null,
     outcomeOptions: null,
     outcomeQuery: null,
+    resultId: undefined,
     collapsed: [],
     error: null,
     running: false,
     replaceOutcome: null,
     jarSymbols: null,
     srcNotes: null,
+    libraryFiles: null,
+    libraryOptions: null,
   };
   emit();
 }
@@ -255,6 +279,20 @@ export function applySearchScope(scope: SearchScope, component: string | null): 
 let seq = 0;
 export const nextSearchSeq = () => ++seq;
 export const currentSearchSeq = () => seq;
+export const workspaceSearchSource = (request: number) => `engineering:${request}`;
+/** Cancel only the request that owned the scanner, so late cancellation cannot stop its successor. */
+export function cancelWorkspaceSearch(): void {
+  if (!form.running) return;
+  void cancelSearch(workspaceSearchSource(seq));
+  nextSearchSeq();
+  setSearchForm({
+    running: false,
+    outcomeOptions: null,
+    outcomeQuery: null,
+    outcome: form.outcome ? { ...form.outcome, cancelled: true, truncated: true } : null,
+    projectOutcome: form.projectOutcome ? { ...form.projectOutcome, cancelled: true, truncated: true } : null,
+  });
+}
 
 // ── 搜索词历史（Eclipse / VS Code 的下拉历史，翻回上次搜的词是真实高频动作）──
 const HISTORY_KEY = "ncforge.search.history";

@@ -64,6 +64,16 @@ afterEach(() => {
 });
 
 describe("JarSymbolResults", () => {
+  it("同一份搜索重开复用已返回的 jar 结果", async () => {
+    mocks.invoke.mockResolvedValue(emptyResult({ total: 1, items: [{ term: "System", score: 2, places: [{ jar: "D:/a.jar", class: "nc.System" }] }] }));
+    setSearchForm({ query: "System", outcome: outcome(), outcomeQuery: "System", resultId: 101 });
+    await render();
+    await act(async () => root.render(null));
+    await render();
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("nc.System");
+  });
+
   it("没有全文结果时整段不出现，也不发请求", async () => {
     await render();
     expect(mocks.invoke).not.toHaveBeenCalled();

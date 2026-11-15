@@ -94,15 +94,15 @@ function withOverlay(options: SearchOptions): SearchOptions {
 }
 
 const acknowledgedOverlays = new Set<string>();
-async function invokeOverlay(command: string, args: { options: SearchOptions; [key: string]: unknown }): Promise<SearchOutcome> {
+async function invokeOverlay<T = SearchOutcome>(command: "search_workspace" | "search_workspace_stream" | "search_projects", args: { options: SearchOptions; [key: string]: unknown }): Promise<T> {
   const docs = args.options.overlay ?? [];
   const overlayRefs = docs.filter(doc => doc.revision).map(doc => ({ path: doc.path, key: doc.revision! }));
   const full = overlayRefs.length ? { ...args, overlayRefs } : args;
   const reduced = docs.length ? { ...full, options: { ...args.options, overlay: docs.filter(doc => !doc.revision || !acknowledgedOverlays.has(doc.revision)) } } : full;
   const send = (payload: Record<string, unknown>) => command === "search_workspace"
-    ? invoke<SearchOutcome>("search_workspace", payload)
-    : invoke<SearchOutcome>("search_workspace_stream", payload);
-  let result: SearchOutcome;
+    ? invoke<T>("search_workspace", payload)
+    : command === "search_projects" ? invoke<T>("search_projects", payload) : invoke<T>("search_workspace_stream", payload);
+  let result: T;
   try { result = await send(reduced); }
   catch (error) {
     if (!String(error).includes("OVERLAY_CACHE_MISS")) throw error;
@@ -119,7 +119,7 @@ async function invokeOverlay(command: string, args: { options: SearchOptions; [k
  */
 export const searchWorkspace = (options: SearchOptions, report = false, source?: string) => {
   const opts = withOverlay(options);
-  return !report ? invokeOverlay("search_workspace", source ? { options: opts, source } : { options: opts }) : trackOperation({ key: `search.workspace:${getSession().root}:${JSON.stringify(opts)}`, label: "搜索当前工程", errorDetail: () => "搜索失败，请查看搜索页错误详情", scope: getSession().root ?? "工作区", page: "search", phase: "扫描所选范围，保留已有结果" }, () => invokeOverlay("search_workspace", { options: opts }), r => ({ state: "success", detail: `扫描 ${r.filesScanned} 个文件，命中 ${r.filesMatched} 个${r.truncated ? "；达到上限，结果不完整" : ""}${r.scopeFallback ? "；指定范围不存在，已回落到整个工作区" : ""}` }));
+  return !report ? invokeOverlay("search_workspace", source ? { options: opts, source } : { options: opts }) : trackOperation({ key: `search.workspace:${getSession().root}:${JSON.stringify(opts)}`, label: "搜索当前工程", errorDetail: () => "搜索失败，请查看搜索页错误详情", scope: getSession().root ?? "工作区", page: "search", phase: "扫描所选范围，保留已有结果" }, () => invokeOverlay("search_workspace", { options: opts, source }), r => ({ state: "success", detail: `扫描 ${r.filesScanned} 个文件，命中 ${r.filesMatched} 个${r.truncated ? "；达到上限，结果不完整" : ""}${r.scopeFallback ? "；指定范围不存在，已回落到整个工作区" : ""}` }));
 };
 
 /** 一批流式结果。`stream` 是查询标识：连续敲键会有多次查询同时在飞。 */
@@ -142,6 +142,7 @@ export async function searchWorkspaceStream(
   options: SearchOptions,
   onBatch: (hits: SearchHit[]) => void,
   source?: string,
+  isCurrent: () => boolean = () => true,
 ): Promise<SearchOutcome> {
   const stream = `s${++streamSeq}`;
   const opts = withOverlay(options);
@@ -154,6 +155,7 @@ export async function searchWorkspaceStream(
     // 浏览器里跑 vite dev 时 listen 会失败：退化成「只拿最终结果」
   }
   try {
+    if (!isCurrent()) throw new Error("SEARCH_CANCELLED");
     return await invokeOverlay("search_workspace_stream", { options: opts, source, stream });
   } finally {
     un?.();
@@ -175,6 +177,7 @@ export interface ProjectSearch {
  * 所以错误单独收集，界面才能说清「哪几个工程没搜完」。
  */
 export interface ProjectsSearchOutcome {
+  cancelled?: boolean;
   projects: ProjectSearch[];
   /** 读取失败的工程（`工程名: 原因`），其余工程的结果仍然有效。 */
   errors: string[];
@@ -189,8 +192,23 @@ export interface ProjectSearchHit extends SearchHit {
   root: string;
 }
 
-export const searchProjects = (options: SearchOptions) =>
-  trackOperation({ key: `search.projects:${getSession().root}:${JSON.stringify(options)}`, label: "搜索全部工程", errorDetail: () => "搜索失败，请查看搜索页错误详情", page: "search", phase: "逐工程扫描所选范围" }, () => invoke<ProjectsSearchOutcome>("search_projects", { options }), r => ({ state: r.errors.length ? "failed" : "success", detail: `${r.projects.length} 个工程返回结果；${r.errors.length} 个工程读取失败${r.truncated ? "；结果达到上限，未查全" : ""}` }));
+export const searchProjects = (options: SearchOptions, source?: string) =>
+  trackOperation({ key: `search.projects:${getSession().root}:${JSON.stringify(options)}`, label: "搜索全部工程", errorDetail: () => "搜索失败，请查看搜索错误详情", page: "search", phase: "逐工程扫描所选范围" }, () => invokeOverlay<ProjectsSearchOutcome>("search_projects", { options: withOverlay(options), source }), r => ({ state: r.errors.length ? "failed" : "success", detail: `${r.projects.length} 个工程返回结果；${r.errors.length} 个工程读取失败${r.truncated ? "；结果达到上限，未查全" : ""}` }));
+
+export interface ProjectSearchBatch extends SearchBatch { project: string; root: string }
+/** Final command result replaces the previews; delayed batches cannot append duplicates. */
+export async function searchProjectsStream(options: SearchOptions, onBatch: (batch: ProjectSearchBatch) => void,
+  source: string, isCurrent: () => boolean = () => true): Promise<ProjectsSearchOutcome> {
+  const stream = `projects${++streamSeq}`, opts = withOverlay(options);
+  let un: (() => void) | undefined;
+  try { un = await listen<ProjectSearchBatch>("search:projects-batch", batch => {
+    if (batch.stream === stream && isCurrent()) onBatch(batch);
+  }); } catch { /* Browser previews can still use the final result. */ }
+  try {
+    if (!isCurrent()) throw new Error("SEARCH_CANCELLED");
+    return await invokeOverlay<ProjectsSearchOutcome>("search_projects", { options: opts, source, stream });
+  } finally { un?.(); }
+}
 
 /**
  * 「全部替换」的汇总，与 Rust `search::ReplaceOutcome` 一一对应（camelCase）。

@@ -1,15 +1,18 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../ui/icon";
 import type { SearchForm } from "../../lib/searchStore";
 import {
   setSearchScrollTop,
-  getSearchScrollTop,
+  getSearchSelectedKey,
+  setSearchSelectedKey,
 } from "../../lib/searchStore";
 import { buildResultView, groupByProject, type ResultHit } from "../../lib/searchResults";
 import { VirtualSearchRows } from "./VirtualSearchRows";
 import { ResultFile } from "./ResultFile";
 import { nextSearchEntry, resultHitKey, searchEntries } from "../../lib/searchNavigation";
 import { SourceContextPreview } from "../workspace/SourceContextPreview";
+import { useSearchResultScroll } from "../../hooks/useSearchResultScroll";
+import { SearchEmpty as Empty } from "./SearchEmpty";
 import { SearchResultViewport } from "./SearchResultViewport";
 
 /**
@@ -28,7 +31,11 @@ export function SearchResults({
   onOpen,
   onEdit,
   resolvePath,
+  embedded = false,
+  supplements,
 }: {
+  supplements?: ReactNode;
+  embedded?: boolean;
   form: SearchForm;
   update: (patch: Partial<SearchForm>) => void;
   loading: boolean;
@@ -41,27 +48,11 @@ export function SearchResults({
   const view = useMemo(() => buildResultView(form), [form]);
   const all = form.scope === "all";
 
-  // 滚动位置只在挂载时恢复一次，之后由 onScroll 持续记录
-  useEffect(() => {
-    const el = listRef.current;
-    const saved = getSearchScrollTop();
-    if (el && saved > 0) el.scrollTop = saved;
-  }, []);
-
-  // 换了一份结果（重新搜索 / 换范围）就回到顶部。恢复逻辑只跑一次，光把仓库里的
-  // scrollTop 设成 0 不会让 DOM 自己滚回去——新结果会从上一份的偏移处开始显示。
-  const identity = all ? form.projectOutcome : form.outcome;
-  const [selection, setSelection] = useState<{ identity: unknown; key: string; preview: boolean } | null>(null);
+  const identity = form.resultId ?? (all ? form.projectOutcome : form.outcome);
+  const [selection, setSelection] = useState<{ identity: unknown; key: string; preview: boolean } | null>(() => { const key = getSearchSelectedKey(); return key ? { identity, key, preview: false } : null; });
   const [expandedIdentity, setExpandedIdentity] = useState<unknown>(null);
   const expanded = !!identity && expandedIdentity === identity;
-  const shown = useRef<unknown>(identity);
-  useEffect(() => {
-    if (shown.current === identity) return;
-    shown.current = identity;
-    const el = listRef.current;
-    if (el) el.scrollTop = 0;
-  }, [identity]);
-
+  useSearchResultScroll(listRef, identity);
   const groups = useMemo(() => view?.groups ?? [], [view]);
   const entries = useMemo(() => searchEntries(groups), [groups]);
   const selected = selection?.identity === identity ? entries.find(entry => entry.key === selection.key) : null;
@@ -76,7 +67,9 @@ export function SearchResults({
   };
   const allCollapsed = groups.length > 0 && groups.every((g) => collapsed.has(g.key));
   const choose = (group: typeof groups[number], hit: ResultHit, preview = false) => {
-    setSelection({ identity, key: resultHitKey(group, hit), preview });
+    const key = resultHitKey(group, hit);
+    setSearchSelectedKey(key);
+    setSelection({ identity, key, preview });
     if (collapsed.has(group.key)) update({ collapsed: form.collapsed.filter(key => key !== group.key) });
   };
   const navigate = (direction: -1 | 1, open = false) => {
@@ -102,13 +95,14 @@ export function SearchResults({
       : "整个工作区";
 
   return (
-    <SearchResultViewport expanded={expanded} onClose={() => setExpandedIdentity(null)}>
+    <SearchResultViewport embedded={embedded} expanded={expanded} onClose={() => setExpandedIdentity(null)}>
       {entries.length > 0 && <div className="dw-search-actions" aria-label="搜索结果导航">
         <button type="button" onClick={() => navigate(-1, true)} disabled={selected === entries[0]}>上一结果</button>
         <button type="button" onClick={() => navigate(1, true)} disabled={selected === entries[entries.length - 1]}>下一结果</button>
         <span>{selected ? `${entries.indexOf(selected) + 1} / ${entries.length}` : "↑↓ 选择 · Enter 打开"}</span>
-        <button type="button" className="dw-search-expand" aria-pressed={expanded} onClick={() => setExpandedIdentity(expanded ? null : identity)}>{expanded ? "恢复侧栏" : "展开结果"}</button>
+        {!embedded && <button type="button" className="dw-search-expand" aria-pressed={expanded} onClick={() => setExpandedIdentity(expanded ? null : identity)}>{expanded ? "恢复侧栏" : "展开结果"}</button>}
       </div>}
+      {loading && <div className="qp-sec" role="status">搜索中… · 正在扫描，命中分批显示</div>}
       {/* ── 汇总行 ── */}
       {view && (
         <div className="flex flex-shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-border px-3 py-1.5 text-[12px]">
@@ -163,7 +157,7 @@ export function SearchResults({
         onKeyDown={event => {
           if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || (event.target as HTMLElement).closest("input,textarea,select")) return;
           if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); navigate(event.key === "ArrowDown" ? 1 : -1); }
-          else if (event.key === "Enter" && selected && (event.target === event.currentTarget || (event.target as HTMLElement).closest("[data-hit-key]"))) { event.preventDefault(); onOpen(selected.hit); }
+          else if (event.key === "Enter" && selected && event.target === event.currentTarget) { event.preventDefault(); onOpen(selected.hit); }
         }}
         onScroll={(e) => setSearchScrollTop(e.currentTarget.scrollTop)}
         className="min-h-0 flex-1 overflow-auto"
@@ -199,9 +193,9 @@ export function SearchResults({
           />
         )}
 
-        {view && noHits && !view.summary.truncated && (
+        {view && noHits && !loading && !view.summary.truncated && (
           <Empty
-            title={`没有找到 “${form.query.trim()}”`}
+            title={`没有找到 “${form.outcomeQuery ?? form.query.trim()}”`}
             hint={
               all
                 ? `已搜索 ${view.summary.projects} 个工程。可以切到「当前工程」缩小范围${
@@ -236,6 +230,7 @@ export function SearchResults({
               <div className="sr-project flex items-center gap-1.5 border-b border-border bg-muted/40 px-3 py-1">
                 <Icon name="folder" size={13} className="flex-shrink-0 text-muted-foreground" />
                 <span className="truncate text-[12px] font-semibold">{sec.project}</span>
+                <span className="truncate text-[11px] text-muted-foreground" title={sec.root}>{sec.root}</span>
                 {currentRoot && sec.root.toLowerCase() === currentRoot.toLowerCase() && (
                   <span className="wb-project-badge" data-current>
                     当前
@@ -272,19 +267,10 @@ export function SearchResults({
             />
           ))}
         </>}
+        {supplements}
       </div>
       {previewPath && selected && <SourceContextPreview path={previewPath} line={selected.hit.line} identity={identity} originLabel="搜索结果" onOpen={() => onOpen(selected.hit)} onClose={() => setSelection({ identity, key: selected.key, preview: false })} />}
       {selected && selection?.preview && !previewPath && <div className="wb-panel-note" role="status">结果所属的工作区已变更，请重新搜索后预览。</div>}
     </SearchResultViewport>
-  );
-}
-
-function Empty({ title, hint }: { title: string; hint: string }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-1.5 px-6 text-center">
-      <Icon name="search" size={20} className="text-muted-foreground/60" />
-      <div className="text-[13px] font-semibold">{title}</div>
-      <div className="max-w-md text-[11.5px] text-muted-foreground">{hint}</div>
-    </div>
   );
 }

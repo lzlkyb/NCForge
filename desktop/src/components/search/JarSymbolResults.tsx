@@ -46,21 +46,26 @@ export function JarSymbolResults({
       if (form.jarSymbols !== null) setSearchForm({ jarSymbols: null });
       return;
     }
+    // Reopening the same completed search reuses its JAR result rather than restarting IPC.
+    const cached = getSearchForm().jarSymbols;
+    if (cached && !cached.building && !cached.error) return;
+    const resultId = getSearchForm().resultId;
+    const current = () => getSearchForm().resultId === resultId && getSearchForm().outcomeQuery === query;
     let alive = true;
     const mine = ++seq.current;
     setLoading(true);
     searchJarSymbols(query, 50)
       .then((r) => {
-        if (alive && mine === seq.current) setSearchForm({ jarSymbols: r });
+        if (alive && mine === seq.current && current()) setSearchForm({ jarSymbols: r });
       })
       .catch(() => {
         // jar 索引不可用（没有 NC home / 命令失败）不该让搜索页报错，
         // 静默跳过这一段即可
-        if (alive && mine === seq.current) setSearchForm({ jarSymbols: null });
+        if (alive && mine === seq.current && current()) setSearchForm({ jarSymbols: null });
       })
       .finally(() => {
         // 也要判序号：旧请求回来不能把新请求的「搜索中」收掉
-        if (alive && mine === seq.current) setLoading(false);
+        if (alive && mine === seq.current && current()) setLoading(false);
       });
     return () => {
       alive = false;

@@ -4,6 +4,7 @@ import { Icon } from "../ui/icon";
 import { Dialog } from "../ui/dialog";
 import { Spinner } from "../ui/Spinner";
 import { replaceWorkspace, type SearchOptions } from "../../lib/search";
+import { sameSearchCriteria } from "../../lib/searchScope";
 import { previewReplacedLine, replacePlan } from "../../lib/replacePreview";
 import type { SearchForm } from "../../lib/searchStore";
 
@@ -46,9 +47,9 @@ export function ReplaceBar({
    * 确认框列的是旧结果的改动面，后端却按新条件全盘改写——不可撤销的错配。
    */
   const snapshot = form.outcomeOptions;
-  const criteriaStale = !snapshot || !sameCriteria(snapshot, options);
+  const criteriaStale = !snapshot || !sameSearchCriteria(snapshot, options);
   const shownQuery = snapshot?.text ?? form.query;
-  const scopeBlocked = stale || criteriaStale;
+  const scopeBlocked = stale || criteriaStale || form.running || !!form.outcome?.truncated || !!form.outcome?.cancelled;
   // 惰性初值：替换在跑时切走再回来，直接进入 running——不能让人再点一次「替换」
   const [phase, setPhase] = useState<Phase>(() => (form.replacing ? "running" : "confirm"));
   const [open, setOpen] = useState(false);
@@ -276,18 +277,5 @@ export function ReplaceBar({
         )}
       </Dialog>
     </>
-  );
-}
-
-/** 两份搜索条件是否等价（缺省值与显式 false 视为同一件事）。 */
-function sameCriteria(a: SearchOptions, b: SearchOptions): boolean {
-  return (
-    a.text === b.text &&
-    (a.caseSensitive ?? false) === (b.caseSensitive ?? false) &&
-    (a.wholeWord ?? false) === (b.wholeWord ?? false) &&
-    (a.regex ?? false) === (b.regex ?? false) &&
-    (a.include ?? "") === (b.include ?? "") &&
-    // 范围也是条件的一部分：按组件搜出来的结果，换成整个工程去替换就等于改别的模块
-    (a.dirs ?? []).join("|").toLowerCase() === (b.dirs ?? []).join("|").toLowerCase()
   );
 }

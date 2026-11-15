@@ -431,6 +431,29 @@ enum Matcher {
     },
 }
 
+/// 库文件复用工作区的匹配与 UTF-16 高亮规则；一次编译供多份文档使用。
+pub(crate) struct DocumentMatcher {
+    matcher: Matcher,
+    filter: FileFilter,
+}
+impl DocumentMatcher {
+    pub(crate) fn new(opts: &SearchOptions) -> Result<Self, String> {
+        Ok(Self {
+            matcher: Matcher::build(opts)?,
+            filter: FileFilter::parse(&opts.include),
+        })
+    }
+    pub(crate) fn accepts(&self, path: &str) -> bool {
+        self.filter
+            .accepts(path, path.rsplit('/').next().unwrap_or(path))
+    }
+    pub(crate) fn scan(&self, path: &str, text: &str, room: usize) -> Vec<SearchHit> {
+        let mut hits = Vec::new();
+        scan_text(path, text, &self.matcher, room, &mut hits);
+        hits
+    }
+}
+
 impl Matcher {
     fn build(opts: &SearchOptions) -> Result<Self, String> {
         if opts.regex {

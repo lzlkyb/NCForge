@@ -48,20 +48,25 @@ export function SrcNoteResults({
       if (form.srcNotes !== null) setSearchForm({ srcNotes: null });
       return;
     }
+    // Reopening the same completed search reuses its JAR result rather than restarting IPC.
+    const cached = getSearchForm().srcNotes;
+    if (cached && !cached.building && !cached.error && !ask) return;
+    const resultId = getSearchForm().resultId;
+    const current = () => getSearchForm().resultId === resultId && getSearchForm().outcomeQuery === query;
     let alive = true;
     const mine = ++seq.current;
     setLoading(true);
     searchSrcNotes(query, limit)
       .then((r) => {
-        if (alive && mine === seq.current) setSearchForm({ srcNotes: r });
+        if (alive && mine === seq.current && current()) setSearchForm({ srcNotes: r });
       })
       .catch(() => {
         // 源码包索引不可用（没有 NC home / 命令失败）不该让搜索页报错
-        if (alive && mine === seq.current) setSearchForm({ srcNotes: null });
+        if (alive && mine === seq.current && current()) setSearchForm({ srcNotes: null });
       })
       .finally(() => {
         // 也要判序号：旧请求回来不能把新请求的「搜索中」收掉
-        if (alive && mine === seq.current) setLoading(false);
+        if (alive && mine === seq.current && current()) setLoading(false);
       });
     return () => {
       alive = false;
