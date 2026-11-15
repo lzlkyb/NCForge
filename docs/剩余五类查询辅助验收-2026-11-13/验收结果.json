@@ -1,0 +1,19 @@
+{
+  "passed": [
+    "missing-related template uses verified generic keys",
+    "orphan template explicitly excludes null reference keys",
+    "detail counts aggregate first and zero-fill unmatched parents",
+    "selected-field duplicate check appends explicit whole-table query and undoes atomically",
+    "multiple verified parents use completion choices and selected numeric metrics",
+    "generated summary uses normal manual execution and returns success without a parameter panel",
+    "accepting an already visible parent choice after metadata refresh cannot insert stale SQL",
+    "condition notice annotates SQL without modifying or executing it",
+    "explicit ON correction preserves other filters and undoes as one operation",
+    "explicit matching-only choice changes LEFT to INNER",
+    "date-field picker inserts dynamic database month boundaries",
+    "operator-only time picker retains the qualified field",
+    "seven-day preset includes today with natural-day boundaries",
+    "NC character dates do not receive guessed calendar presets"
+  ],
+  "errors": []
+}

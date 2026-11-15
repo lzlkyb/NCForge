@@ -1,0 +1,528 @@
+{
+  "passed": [
+    "light-classic packaged reading surfaces share one outer perimeter",
+    "light-classic workbench density is preserved",
+    "light-classic splitter is hidden at rest",
+    "light-classic keyboard result resizing works",
+    "light-classic grid selection remains visible",
+    "light-classic menus use the selected material",
+    "light-classic classic material selection persists",
+    "light-classic settings have no repeated row separators",
+    "light-classic metadata search has one surface",
+    "light-classic metadata search focus remains clear",
+    "light-classic metadata guidance and action are grouped",
+    "light-classic narrow metadata drawer works without page overflow",
+    "light-classic packaged CSP has no violations",
+    "light-classic files resources, document and status share one clipped shell",
+    "light-classic code bottom panels belong to the shared shell",
+    "light-classic shared shell keeps keyboard panel resizing",
+    "light-classic NC service and logs stay in the shared shell",
+    "light-classic service console loads its normal empty state without errors",
+    "light-classic service toolbars and footer have no hard horizontal seams",
+    "light-classic files 1024px shell stays within the viewport",
+    "light-classic files 560px shell stays within the viewport",
+    "light-classic svn resources, document and status share one clipped shell",
+    "light-classic svn 1024px shell stays within the viewport",
+    "light-classic svn 560px shell stays within the viewport",
+    "light-classic logs resources, document and status share one clipped shell",
+    "light-classic log list and detail have no hard vertical seam",
+    "light-classic logs 1024px shell stays within the viewport",
+    "light-classic logs 560px shell stays within the viewport",
+    "light-classic db resources, document and status share one clipped shell",
+    "light-classic db 1024px shell stays within the viewport",
+    "light-classic db 560px shell stays within the viewport",
+    "light-classic meta resources, document and status share one clipped shell",
+    "light-classic meta 1024px shell stays within the viewport",
+    "light-classic meta 560px shell stays within the viewport",
+    "light-classic settings resources, document and status share one clipped shell",
+    "light-classic settings splitter blends into the resource surface",
+    "light-classic settings 1024px shell stays within the viewport",
+    "light-classic settings 560px shell stays within the viewport",
+    "light-classic all pages respect packaged CSP",
+    "light-glass packaged reading surfaces share one outer perimeter",
+    "light-glass workbench density is preserved",
+    "light-glass splitter is hidden at rest",
+    "light-glass keyboard result resizing works",
+    "light-glass grid selection remains visible",
+    "light-glass menus use the selected material",
+    "light-glass classic material selection persists",
+    "light-glass settings have no repeated row separators",
+    "light-glass metadata search has one surface",
+    "light-glass metadata search focus remains clear",
+    "light-glass metadata guidance and action are grouped",
+    "light-glass narrow metadata drawer works without page overflow",
+    "light-glass packaged CSP has no violations",
+    "light-glass files resources, document and status share one clipped shell",
+    "light-glass code bottom panels belong to the shared shell",
+    "light-glass shared shell keeps keyboard panel resizing",
+    "light-glass NC service and logs stay in the shared shell",
+    "light-glass service console loads its normal empty state without errors",
+    "light-glass service toolbars and footer have no hard horizontal seams",
+    "light-glass svn resources, document and status share one clipped shell",
+    "light-glass logs resources, document and status share one clipped shell",
+    "light-glass log list and detail have no hard vertical seam",
+    "light-glass db resources, document and status share one clipped shell",
+    "light-glass meta resources, document and status share one clipped shell",
+    "light-glass settings resources, document and status share one clipped shell",
+    "light-glass settings splitter blends into the resource surface",
+    "light-glass all pages respect packaged CSP",
+    "dark-classic packaged reading surfaces share one outer perimeter",
+    "dark-classic workbench density is preserved",
+    "dark-classic splitter is hidden at rest",
+    "dark-classic keyboard result resizing works",
+    "dark-classic grid selection remains visible",
+    "dark-classic menus use the selected material",
+    "dark-classic classic material selection persists",
+    "dark-classic settings have no repeated row separators",
+    "dark-classic metadata search has one surface",
+    "dark-classic metadata search focus remains clear",
+    "dark-classic metadata guidance and action are grouped",
+    "dark-classic narrow metadata drawer works without page overflow",
+    "dark-classic packaged CSP has no violations",
+    "dark-classic files resources, document and status share one clipped shell",
+    "dark-classic code bottom panels belong to the shared shell",
+    "dark-classic shared shell keeps keyboard panel resizing",
+    "dark-classic NC service and logs stay in the shared shell",
+    "dark-classic service console loads its normal empty state without errors",
+    "dark-classic service toolbars and footer have no hard horizontal seams",
+    "dark-classic svn resources, document and status share one clipped shell",
+    "dark-classic logs resources, document and status share one clipped shell",
+    "dark-classic log list and detail have no hard vertical seam",
+    "dark-classic db resources, document and status share one clipped shell",
+    "dark-classic meta resources, document and status share one clipped shell",
+    "dark-classic settings resources, document and status share one clipped shell",
+    "dark-classic settings splitter blends into the resource surface",
+    "dark-classic all pages respect packaged CSP",
+    "dark-glass packaged reading surfaces share one outer perimeter",
+    "dark-glass workbench density is preserved",
+    "dark-glass splitter is hidden at rest",
+    "dark-glass keyboard result resizing works",
+    "dark-glass grid selection remains visible",
+    "dark-glass menus use the selected material",
+    "dark-glass classic material selection persists",
+    "dark-glass settings have no repeated row separators",
+    "dark-glass metadata search has one surface",
+    "dark-glass metadata search focus remains clear",
+    "dark-glass metadata guidance and action are grouped",
+    "dark-glass narrow metadata drawer works without page overflow",
+    "dark-glass packaged CSP has no violations",
+    "dark-glass files resources, document and status share one clipped shell",
+    "dark-glass code bottom panels belong to the shared shell",
+    "dark-glass shared shell keeps keyboard panel resizing",
+    "dark-glass NC service and logs stay in the shared shell",
+    "dark-glass service console loads its normal empty state without errors",
+    "dark-glass service toolbars and footer have no hard horizontal seams",
+    "dark-glass files 1024px shell stays within the viewport",
+    "dark-glass files 560px shell stays within the viewport",
+    "dark-glass svn resources, document and status share one clipped shell",
+    "dark-glass svn 1024px shell stays within the viewport",
+    "dark-glass svn 560px shell stays within the viewport",
+    "dark-glass logs resources, document and status share one clipped shell",
+    "dark-glass log list and detail have no hard vertical seam",
+    "dark-glass logs 1024px shell stays within the viewport",
+    "dark-glass logs 560px shell stays within the viewport",
+    "dark-glass db resources, document and status share one clipped shell",
+    "dark-glass db 1024px shell stays within the viewport",
+    "dark-glass db 560px shell stays within the viewport",
+    "dark-glass meta resources, document and status share one clipped shell",
+    "dark-glass meta 1024px shell stays within the viewport",
+    "dark-glass meta 560px shell stays within the viewport",
+    "dark-glass settings resources, document and status share one clipped shell",
+    "dark-glass settings splitter blends into the resource surface",
+    "dark-glass settings 1024px shell stays within the viewport",
+    "dark-glass settings 560px shell stays within the viewport",
+    "dark-glass all pages respect packaged CSP",
+    "No page script errors"
+  ],
+  "errors": [],
+  "measurements": [
+    {
+      "theme": "light",
+      "material": "classic",
+      "reading": {
+        "background": "rgb(255, 255, 255)",
+        "continuous": true,
+        "radius": 14,
+        "innerRadius": 0,
+        "row": 26,
+        "toolbar": 40,
+        "tabs": 36
+      }
+    },
+    {
+      "theme": "light",
+      "material": "classic",
+      "page": "files",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "light",
+      "material": "classic",
+      "page": "svn",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "light",
+      "material": "classic",
+      "page": "logs",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "light",
+      "material": "classic",
+      "page": "db",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "light",
+      "material": "classic",
+      "page": "meta",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "light",
+      "material": "classic",
+      "page": "settings",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "reading": {
+        "background": "rgb(255, 255, 255)",
+        "continuous": true,
+        "radius": 14,
+        "innerRadius": 0,
+        "row": 26,
+        "toolbar": 40,
+        "tabs": 36
+      }
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "page": "files",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "page": "svn",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "page": "logs",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "page": "db",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "page": "meta",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "light",
+      "material": "glass",
+      "page": "settings",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "classic",
+      "reading": {
+        "background": "rgb(32, 36, 41)",
+        "continuous": true,
+        "radius": 14,
+        "innerRadius": 0,
+        "row": 26,
+        "toolbar": 40,
+        "tabs": 36
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "classic",
+      "page": "files",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "classic",
+      "page": "svn",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "classic",
+      "page": "logs",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "classic",
+      "page": "db",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "classic",
+      "page": "meta",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "classic",
+      "page": "settings",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "reading": {
+        "background": "rgb(35, 37, 42)",
+        "continuous": true,
+        "radius": 14,
+        "innerRadius": 0,
+        "row": 26,
+        "toolbar": 40,
+        "tabs": 36
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "page": "files",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "page": "svn",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "page": "logs",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "page": "db",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "page": "meta",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    },
+    {
+      "theme": "dark",
+      "material": "glass",
+      "page": "settings",
+      "shell": {
+        "radius": true,
+        "shadow": true,
+        "clipped": true,
+        "inner": true,
+        "status": true,
+        "outside": true,
+        "overflow": false
+      }
+    }
+  ]
+}

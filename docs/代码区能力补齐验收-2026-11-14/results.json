@@ -1,0 +1,9 @@
+{
+  "checks": [
+    "light:hover",
+    "light:navigation,split,references,templates,refactor,project,runtime",
+    "dark:hover",
+    "dark:navigation,split,references,templates,refactor,project,runtime"
+  ],
+  "errors": []
+}

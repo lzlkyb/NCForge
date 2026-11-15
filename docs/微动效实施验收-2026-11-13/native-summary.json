@@ -1,0 +1,201 @@
+{
+  "passed": true,
+  "started": "2026-11-13T11:44:09.603Z",
+  "finished": "2026-11-13T11:54:09.716Z",
+  "elapsedSeconds": 600.11,
+  "cycles": 24,
+  "hardwareThreads": 16,
+  "viewport": {
+    "width": 1280,
+    "height": 840
+  },
+  "clickResponse": {
+    "count": 144,
+    "p50Ms": 54.5,
+    "p95Ms": 72.5,
+    "maxMs": 162.2
+  },
+  "longTasks": [
+    {
+      "at": 1113012.9000000001,
+      "ms": 54
+    },
+    {
+      "at": 1427972.4999999998,
+      "ms": 54
+    },
+    {
+      "at": 1438220.2,
+      "ms": 76
+    }
+  ],
+  "errors": [],
+  "pageErrors": [],
+  "retained": {
+    "before": {
+      "nodes": 2807,
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "heapMB": 36.84,
+      "embedderHeapMB": 10.92
+    },
+    "after": {
+      "nodes": 2807,
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "heapMB": 39.59,
+      "embedderHeapMB": 12.16
+    }
+  },
+  "resources": [
+    {
+      "phase": "initializing",
+      "samples": 1,
+      "privateMB": {
+        "min": 487.8,
+        "median": 487.8,
+        "max": 487.8
+      },
+      "workingSetMB": {
+        "median": 512.32,
+        "max": 512.32
+      },
+      "cpuMachinePercent": 0,
+      "cpuCorePercent": 0
+    },
+    {
+      "phase": "idle-before",
+      "samples": 5,
+      "privateMB": {
+        "min": 486.32,
+        "median": 486.97,
+        "max": 487.07
+      },
+      "workingSetMB": {
+        "median": 511.49,
+        "max": 511.68
+      },
+      "cpuMachinePercent": 0.01,
+      "cpuCorePercent": 0.15
+    },
+    {
+      "phase": "navigation-first",
+      "samples": 3,
+      "privateMB": {
+        "min": 583.19,
+        "median": 707.14,
+        "max": 750.22
+      },
+      "workingSetMB": {
+        "median": 721.96,
+        "max": 765.46
+      },
+      "cpuMachinePercent": 5.66,
+      "cpuCorePercent": 90.54
+    },
+    {
+      "phase": "visible-idle",
+      "samples": 12,
+      "privateMB": {
+        "min": 498.71,
+        "median": 498.84,
+        "max": 760.53
+      },
+      "workingSetMB": {
+        "median": 527.24,
+        "max": 781.19
+      },
+      "cpuMachinePercent": 0.04,
+      "cpuCorePercent": 0.61
+    },
+    {
+      "phase": "minimized",
+      "samples": 14,
+      "privateMB": {
+        "min": 485.1,
+        "median": 485.3,
+        "max": 496.15
+      },
+      "workingSetMB": {
+        "median": 518.68,
+        "max": 527.34
+      },
+      "cpuMachinePercent": 0.01,
+      "cpuCorePercent": 0.11
+    },
+    {
+      "phase": "restore-request",
+      "samples": 1,
+      "privateMB": {
+        "min": 485.2,
+        "median": 485.2,
+        "max": 485.2
+      },
+      "workingSetMB": {
+        "median": 461.93,
+        "max": 461.93
+      },
+      "cpuMachinePercent": 0,
+      "cpuCorePercent": 0
+    },
+    {
+      "phase": "restored",
+      "samples": 3,
+      "privateMB": {
+        "min": 490.88,
+        "median": 490.88,
+        "max": 492.36
+      },
+      "workingSetMB": {
+        "median": 470.12,
+        "max": 471.29
+      },
+      "cpuMachinePercent": 0.01,
+      "cpuCorePercent": 0.23
+    },
+    {
+      "phase": "navigation-second",
+      "samples": 3,
+      "privateMB": {
+        "min": 688.94,
+        "median": 734.76,
+        "max": 771.61
+      },
+      "workingSetMB": {
+        "median": 759.51,
+        "max": 793.78
+      },
+      "cpuMachinePercent": 5.21,
+      "cpuCorePercent": 83.4
+    },
+    {
+      "phase": "idle-after",
+      "samples": 19,
+      "privateMB": {
+        "min": 493.81,
+        "median": 493.98,
+        "max": 570.1
+      },
+      "workingSetMB": {
+        "median": 527.33,
+        "max": 602.89
+      },
+      "cpuMachinePercent": 0.03,
+      "cpuCorePercent": 0.53
+    }
+  ]
+}

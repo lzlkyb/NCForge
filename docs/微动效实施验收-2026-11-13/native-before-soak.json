@@ -1,0 +1,5515 @@
+{
+  "started": "2026-11-13T08:26:33.105Z",
+  "durationSeconds": 600,
+  "samples": [
+    {
+      "elapsedSeconds": 0.205,
+      "phase": "idle-before",
+      "at": "2026-11-13T08:26:33.302Z",
+      "now": 2114662.599999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2882,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 0,
+      "errors": [],
+      "heap": {
+        "used": 40344908,
+        "total": 42748936
+      },
+      "performance": {
+        "TaskDuration": 0.163666,
+        "ScriptDuration": 0.001998,
+        "LayoutDuration": 0,
+        "RecalcStyleDuration": 0,
+        "JSHeapUsedSize": 34252632,
+        "JSHeapTotalSize": 36593664,
+        "Nodes": 5825,
+        "Documents": 2,
+        "JSEventListeners": 2789
+      }
+    },
+    {
+      "elapsedSeconds": 10.23,
+      "phase": "idle-before",
+      "at": "2026-11-13T08:26:43.329Z",
+      "now": 2124689.099999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2882,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 0,
+      "errors": [],
+      "heap": {
+        "used": 40515679,
+        "total": 42749859
+      },
+      "performance": {
+        "TaskDuration": 0.954583,
+        "ScriptDuration": 0.303271,
+        "LayoutDuration": 0,
+        "RecalcStyleDuration": 0,
+        "JSHeapUsedSize": 34383960,
+        "JSHeapTotalSize": 36593664,
+        "Nodes": 5825,
+        "Documents": 2,
+        "JSEventListeners": 2789
+      }
+    },
+    {
+      "elapsedSeconds": 20.262,
+      "phase": "idle-before",
+      "at": "2026-11-13T08:26:53.360Z",
+      "now": 2134720.799999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2882,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 0,
+      "errors": [],
+      "heap": {
+        "used": 40614663,
+        "total": 43012003
+      },
+      "performance": {
+        "TaskDuration": 1.851958,
+        "ScriptDuration": 0.647433,
+        "LayoutDuration": 0,
+        "RecalcStyleDuration": 0,
+        "JSHeapUsedSize": 34482944,
+        "JSHeapTotalSize": 36855808,
+        "Nodes": 5825,
+        "Documents": 2,
+        "JSEventListeners": 2789
+      }
+    },
+    {
+      "elapsedSeconds": 30.291,
+      "phase": "idle-before",
+      "at": "2026-11-13T08:27:03.390Z",
+      "now": 2144750.299999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2882,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 0,
+      "errors": [],
+      "heap": {
+        "used": 40732035,
+        "total": 43012091
+      },
+      "performance": {
+        "TaskDuration": 2.443045,
+        "ScriptDuration": 0.876382,
+        "LayoutDuration": 0,
+        "RecalcStyleDuration": 0,
+        "JSHeapUsedSize": 34600300,
+        "JSHeapTotalSize": 36855808,
+        "Nodes": 5825,
+        "Documents": 2,
+        "JSEventListeners": 2789
+      }
+    },
+    {
+      "elapsedSeconds": 40.326,
+      "phase": "idle-before",
+      "at": "2026-11-13T08:27:13.417Z",
+      "now": 2154777.799999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2882,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 0,
+      "errors": [],
+      "heap": {
+        "used": 40336194,
+        "total": 43273246
+      },
+      "performance": {
+        "TaskDuration": 3.279586,
+        "ScriptDuration": 1.176557,
+        "LayoutDuration": 0,
+        "RecalcStyleDuration": 0,
+        "JSHeapUsedSize": 34212224,
+        "JSHeapTotalSize": 37117952,
+        "Nodes": 5825,
+        "Documents": 2,
+        "JSEventListeners": 2789
+      }
+    },
+    {
+      "elapsedSeconds": 50.354,
+      "phase": "idle-before",
+      "at": "2026-11-13T08:27:23.452Z",
+      "now": 2164812,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2882,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 0,
+      "errors": [],
+      "heap": {
+        "used": 40440642,
+        "total": 43273246
+      },
+      "performance": {
+        "TaskDuration": 3.993518,
+        "ScriptDuration": 1.452344,
+        "LayoutDuration": 0,
+        "RecalcStyleDuration": 0,
+        "JSHeapUsedSize": 34310748,
+        "JSHeapTotalSize": 37117952,
+        "Nodes": 5825,
+        "Documents": 2,
+        "JSEventListeners": 2789
+      }
+    },
+    {
+      "elapsedSeconds": 63.71,
+      "phase": "navigation-first",
+      "at": "2026-11-13T08:27:36.800Z",
+      "now": 2178160.199999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 10,
+      "errors": [],
+      "heap": {
+        "used": 48296840,
+        "total": 61987940
+      },
+      "performance": {
+        "TaskDuration": 7.955093,
+        "ScriptDuration": 2.45083,
+        "LayoutDuration": 0.169235,
+        "RecalcStyleDuration": 1.008247,
+        "JSHeapUsedSize": 42150612,
+        "JSHeapTotalSize": 55812096,
+        "Nodes": 6796,
+        "Documents": 2,
+        "JSEventListeners": 2779
+      }
+    },
+    {
+      "elapsedSeconds": 67.875,
+      "phase": "navigation-first",
+      "at": "2026-11-13T08:27:40.972Z",
+      "now": 2182332.799999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 19,
+      "errors": [],
+      "heap": {
+        "used": 55203477,
+        "total": 66985673
+      },
+      "performance": {
+        "TaskDuration": 10.88937,
+        "ScriptDuration": 3.065383,
+        "LayoutDuration": 0.26004,
+        "RecalcStyleDuration": 2.015492,
+        "JSHeapUsedSize": 49039596,
+        "JSHeapTotalSize": 60792832,
+        "Nodes": 6915,
+        "Documents": 2,
+        "JSEventListeners": 2867
+      }
+    },
+    {
+      "elapsedSeconds": 72.092,
+      "phase": "navigation-first",
+      "at": "2026-11-13T08:27:45.186Z",
+      "now": 2186546.899999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 29,
+      "errors": [],
+      "heap": {
+        "used": 55075266,
+        "total": 70655550
+      },
+      "performance": {
+        "TaskDuration": 13.869607,
+        "ScriptDuration": 3.672788,
+        "LayoutDuration": 0.350984,
+        "RecalcStyleDuration": 3.082028,
+        "JSHeapUsedSize": 48912040,
+        "JSHeapTotalSize": 64462848,
+        "Nodes": 6906,
+        "Documents": 2,
+        "JSEventListeners": 2867
+      }
+    },
+    {
+      "elapsedSeconds": 76.168,
+      "phase": "navigation-first",
+      "at": "2026-11-13T08:27:49.265Z",
+      "now": 2190625.799999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 39,
+      "errors": [],
+      "heap": {
+        "used": 63143547,
+        "total": 99532859
+      },
+      "performance": {
+        "TaskDuration": 16.666674,
+        "ScriptDuration": 4.227507,
+        "LayoutDuration": 0.440818,
+        "RecalcStyleDuration": 4.157285,
+        "JSHeapUsedSize": 56933924,
+        "JSHeapTotalSize": 93298688,
+        "Nodes": 9760,
+        "Documents": 2,
+        "JSEventListeners": 3429
+      }
+    },
+    {
+      "elapsedSeconds": 80.451,
+      "phase": "navigation-first",
+      "at": "2026-11-13T08:27:53.513Z",
+      "now": 2194873.699999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 47,
+      "errors": [],
+      "heap": {
+        "used": 78498376,
+        "total": 117062316
+      },
+      "performance": {
+        "TaskDuration": 19.566525,
+        "ScriptDuration": 4.814102,
+        "LayoutDuration": 0.533909,
+        "RecalcStyleDuration": 5.276537,
+        "JSHeapUsedSize": 72266116,
+        "JSHeapTotalSize": 110804992,
+        "Nodes": 12616,
+        "Documents": 2,
+        "JSEventListeners": 3991
+      }
+    },
+    {
+      "elapsedSeconds": 85.135,
+      "phase": "navigation-first",
+      "at": "2026-11-13T08:27:58.230Z",
+      "now": 2199590.199999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 59,
+      "errors": [],
+      "heap": {
+        "used": 74154812,
+        "total": 115716796
+      },
+      "performance": {
+        "TaskDuration": 23.08707,
+        "ScriptDuration": 5.510402,
+        "LayoutDuration": 0.637077,
+        "RecalcStyleDuration": 6.541571,
+        "JSHeapUsedSize": 67961280,
+        "JSHeapTotalSize": 109494272,
+        "Nodes": 11193,
+        "Documents": 2,
+        "JSEventListeners": 3208
+      }
+    },
+    {
+      "elapsedSeconds": 88.978,
+      "phase": "navigation-first",
+      "at": "2026-11-13T08:28:02.077Z",
+      "now": 2203437,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 67,
+      "errors": [],
+      "heap": {
+        "used": 54365251,
+        "total": 115855007
+      },
+      "performance": {
+        "TaskDuration": 25.675462,
+        "ScriptDuration": 6.047936,
+        "LayoutDuration": 0.70821,
+        "RecalcStyleDuration": 7.493879,
+        "JSHeapUsedSize": 48146800,
+        "JSHeapTotalSize": 109608960,
+        "Nodes": 14047,
+        "Documents": 2,
+        "JSEventListeners": 3770
+      }
+    },
+    {
+      "elapsedSeconds": 92.802,
+      "phase": "navigation-first",
+      "at": "2026-11-13T08:28:05.899Z",
+      "now": 2207259.099999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 75,
+      "errors": [],
+      "heap": {
+        "used": 67643626,
+        "total": 119751558
+      },
+      "performance": {
+        "TaskDuration": 28.201942,
+        "ScriptDuration": 6.550951,
+        "LayoutDuration": 0.786424,
+        "RecalcStyleDuration": 8.461321,
+        "JSHeapUsedSize": 61400764,
+        "JSHeapTotalSize": 113483776,
+        "Nodes": 16839,
+        "Documents": 2,
+        "JSEventListeners": 4332
+      }
+    },
+    {
+      "elapsedSeconds": 96.883,
+      "phase": "navigation-first",
+      "at": "2026-11-13T08:28:09.980Z",
+      "now": 2211340.599999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 86,
+      "errors": [],
+      "heap": {
+        "used": 77485113,
+        "total": 126067885
+      },
+      "performance": {
+        "TaskDuration": 31.034993,
+        "ScriptDuration": 7.10659,
+        "LayoutDuration": 0.875184,
+        "RecalcStyleDuration": 9.534142,
+        "JSHeapUsedSize": 71217380,
+        "JSHeapTotalSize": 119775232,
+        "Nodes": 19692,
+        "Documents": 2,
+        "JSEventListeners": 4894
+      }
+    },
+    {
+      "elapsedSeconds": 101.101,
+      "phase": "navigation-first",
+      "at": "2026-11-13T08:28:14.194Z",
+      "now": 2215554.099999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 97,
+      "errors": [],
+      "heap": {
+        "used": 42525299,
+        "total": 120074087
+      },
+      "performance": {
+        "TaskDuration": 33.95129,
+        "ScriptDuration": 7.664275,
+        "LayoutDuration": 0.967353,
+        "RecalcStyleDuration": 10.677251,
+        "JSHeapUsedSize": 36282552,
+        "JSHeapTotalSize": 113803264,
+        "Nodes": 22549,
+        "Documents": 2,
+        "JSEventListeners": 5454
+      }
+    },
+    {
+      "elapsedSeconds": 106.071,
+      "phase": "navigation-first",
+      "at": "2026-11-13T08:28:19.166Z",
+      "now": 2220526.299999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 108,
+      "errors": [],
+      "heap": {
+        "used": 50332692,
+        "total": 120298456
+      },
+      "performance": {
+        "TaskDuration": 37.564608,
+        "ScriptDuration": 8.350409,
+        "LayoutDuration": 1.072435,
+        "RecalcStyleDuration": 12.007812,
+        "JSHeapUsedSize": 44125056,
+        "JSHeapTotalSize": 114065408,
+        "Nodes": 16020,
+        "Documents": 2,
+        "JSEventListeners": 3248
+      }
+    },
+    {
+      "elapsedSeconds": 110.236,
+      "phase": "navigation-first",
+      "at": "2026-11-13T08:28:23.333Z",
+      "now": 2224693.5,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 120,
+      "errors": [],
+      "heap": {
+        "used": 66749321,
+        "total": 123409673
+      },
+      "performance": {
+        "TaskDuration": 40.520861,
+        "ScriptDuration": 8.933935,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.147556,
+        "JSHeapUsedSize": 60521152,
+        "JSHeapTotalSize": 117153792,
+        "Nodes": 18875,
+        "Documents": 2,
+        "JSEventListeners": 3810
+      }
+    },
+    {
+      "elapsedSeconds": 111.268,
+      "phase": "visible-idle",
+      "at": "2026-11-13T08:28:24.365Z",
+      "now": 2225725.299999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 800
+        }
+      ],
+      "longTaskCount": 120,
+      "errors": [],
+      "heap": {
+        "used": 69606549,
+        "total": 123409673
+      },
+      "performance": {
+        "TaskDuration": 40.697599,
+        "ScriptDuration": 8.97936,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.15606,
+        "JSHeapUsedSize": 63378336,
+        "JSHeapTotalSize": 117153792,
+        "Nodes": 18875,
+        "Documents": 2,
+        "JSEventListeners": 3810
+      }
+    },
+    {
+      "elapsedSeconds": 121.291,
+      "phase": "visible-idle",
+      "at": "2026-11-13T08:28:34.391Z",
+      "now": 2235751.899999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 120,
+      "errors": [],
+      "heap": {
+        "used": 44842040,
+        "total": 50490808
+      },
+      "performance": {
+        "TaskDuration": 41.651008,
+        "ScriptDuration": 9.277483,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.1577,
+        "JSHeapUsedSize": 38713920,
+        "JSHeapTotalSize": 44335104,
+        "Nodes": 8948,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 131.305,
+      "phase": "visible-idle",
+      "at": "2026-11-13T08:28:44.403Z",
+      "now": 2245763.5,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 120,
+      "errors": [],
+      "heap": {
+        "used": 44459850,
+        "total": 47869258
+      },
+      "performance": {
+        "TaskDuration": 42.45853,
+        "ScriptDuration": 9.561599,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.1577,
+        "JSHeapUsedSize": 38332456,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5748,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 141.342,
+      "phase": "visible-idle",
+      "at": "2026-11-13T08:28:54.432Z",
+      "now": 2255792.599999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 120,
+      "errors": [],
+      "heap": {
+        "used": 44561850,
+        "total": 47869258
+      },
+      "performance": {
+        "TaskDuration": 43.550592,
+        "ScriptDuration": 9.978807,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.1577,
+        "JSHeapUsedSize": 38430804,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5748,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 151.374,
+      "phase": "visible-idle",
+      "at": "2026-11-13T08:29:04.467Z",
+      "now": 2265827.699999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 120,
+      "errors": [],
+      "heap": {
+        "used": 44685328,
+        "total": 47869432
+      },
+      "performance": {
+        "TaskDuration": 44.584126,
+        "ScriptDuration": 10.37981,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.1577,
+        "JSHeapUsedSize": 38554036,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5748,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 161.418,
+      "phase": "visible-idle",
+      "at": "2026-11-13T08:29:14.510Z",
+      "now": 2275870.299999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 120,
+      "errors": [],
+      "heap": {
+        "used": 44817887,
+        "total": 48132383
+      },
+      "performance": {
+        "TaskDuration": 45.648832,
+        "ScriptDuration": 10.786947,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.1577,
+        "JSHeapUsedSize": 38685860,
+        "JSHeapTotalSize": 41975808,
+        "Nodes": 5748,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 171.454,
+      "phase": "visible-idle",
+      "at": "2026-11-13T08:29:24.550Z",
+      "now": 2285910.5,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 120,
+      "errors": [],
+      "heap": {
+        "used": 44915883,
+        "total": 48132383
+      },
+      "performance": {
+        "TaskDuration": 46.614135,
+        "ScriptDuration": 11.163001,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.1577,
+        "JSHeapUsedSize": 38783856,
+        "JSHeapTotalSize": 41975808,
+        "Nodes": 5748,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 181.48,
+      "phase": "visible-idle",
+      "at": "2026-11-13T08:29:34.578Z",
+      "now": 2295938.799999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 120,
+      "errors": [],
+      "heap": {
+        "used": 44534842,
+        "total": 47869442
+      },
+      "performance": {
+        "TaskDuration": 47.741628,
+        "ScriptDuration": 11.568338,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.1577,
+        "JSHeapUsedSize": 38406720,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5748,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 191.506,
+      "phase": "visible-idle",
+      "at": "2026-11-13T08:29:44.602Z",
+      "now": 2305962.899999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 120,
+      "errors": [],
+      "heap": {
+        "used": 44667809,
+        "total": 47870249
+      },
+      "performance": {
+        "TaskDuration": 48.533735,
+        "ScriptDuration": 11.877327,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.1577,
+        "JSHeapUsedSize": 38536636,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5748,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 201.544,
+      "phase": "visible-idle",
+      "at": "2026-11-13T08:29:54.637Z",
+      "now": 2315997.199999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 120,
+      "errors": [],
+      "heap": {
+        "used": 44772297,
+        "total": 48132393
+      },
+      "performance": {
+        "TaskDuration": 49.807442,
+        "ScriptDuration": 12.3641,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.1577,
+        "JSHeapUsedSize": 38640332,
+        "JSHeapTotalSize": 41975808,
+        "Nodes": 5748,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 210.403,
+      "phase": "minimized",
+      "at": "2026-11-13T08:30:03.494Z",
+      "now": 2324854.399999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 45060441,
+        "total": 47870537
+      },
+      "performance": {
+        "TaskDuration": 51.286169,
+        "ScriptDuration": 12.866196,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 38952684,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5753,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 220.427,
+      "phase": "minimized",
+      "at": "2026-11-13T08:30:13.523Z",
+      "now": 2334883.599999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 45184369,
+        "total": 47870537
+      },
+      "performance": {
+        "TaskDuration": 52.168099,
+        "ScriptDuration": 13.210803,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 39051824,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5753,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 230.444,
+      "phase": "minimized",
+      "at": "2026-11-13T08:30:23.545Z",
+      "now": 2344905.5,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 45282221,
+        "total": 47870537
+      },
+      "performance": {
+        "TaskDuration": 52.609531,
+        "ScriptDuration": 13.384957,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 39149676,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5753,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 240.462,
+      "phase": "minimized",
+      "at": "2026-11-13T08:30:33.563Z",
+      "now": 2354923.5,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 45382853,
+        "total": 48132681
+      },
+      "performance": {
+        "TaskDuration": 52.996589,
+        "ScriptDuration": 13.537658,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 38814656,
+        "JSHeapTotalSize": 41189376,
+        "Nodes": 5753,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 250.496,
+      "phase": "minimized",
+      "at": "2026-11-13T08:30:43.589Z",
+      "now": 2364949.5,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 44583304,
+        "total": 47606936
+      },
+      "performance": {
+        "TaskDuration": 53.661121,
+        "ScriptDuration": 13.788528,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 38455144,
+        "JSHeapTotalSize": 41451520,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 260.517,
+      "phase": "minimized",
+      "at": "2026-11-13T08:30:53.617Z",
+      "now": 2374977.099999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 44685104,
+        "total": 47606936
+      },
+      "performance": {
+        "TaskDuration": 54.622876,
+        "ScriptDuration": 14.159174,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 38554076,
+        "JSHeapTotalSize": 41451520,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 270.529,
+      "phase": "minimized",
+      "at": "2026-11-13T08:31:03.630Z",
+      "now": 2384990.899999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 44783648,
+        "total": 47869080
+      },
+      "performance": {
+        "TaskDuration": 55.137825,
+        "ScriptDuration": 14.363832,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 38652560,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 280.549,
+      "phase": "minimized",
+      "at": "2026-11-13T08:31:13.650Z",
+      "now": 2395010.699999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 44882344,
+        "total": 47869080
+      },
+      "performance": {
+        "TaskDuration": 55.700434,
+        "ScriptDuration": 14.586522,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 38751316,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 290.563,
+      "phase": "minimized",
+      "at": "2026-11-13T08:31:23.666Z",
+      "now": 2405026,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 44981192,
+        "total": 47869080
+      },
+      "performance": {
+        "TaskDuration": 56.22448,
+        "ScriptDuration": 14.79455,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 38850104,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 300.58,
+      "phase": "minimized",
+      "at": "2026-11-13T08:31:33.682Z",
+      "now": 2415042.599999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 45079220,
+        "total": 48131224
+      },
+      "performance": {
+        "TaskDuration": 56.526334,
+        "ScriptDuration": 14.917202,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 38948132,
+        "JSHeapTotalSize": 41975808,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 310.592,
+      "phase": "minimized",
+      "at": "2026-11-13T08:31:43.695Z",
+      "now": 2425055.199999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 45176932,
+        "total": 48131224
+      },
+      "performance": {
+        "TaskDuration": 56.803529,
+        "ScriptDuration": 15.030323,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 39045844,
+        "JSHeapTotalSize": 41975808,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 320.621,
+      "phase": "minimized",
+      "at": "2026-11-13T08:31:53.717Z",
+      "now": 2435077.699999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 44412067,
+        "total": 47344675
+      },
+      "performance": {
+        "TaskDuration": 57.361026,
+        "ScriptDuration": 15.228591,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 38284036,
+        "JSHeapTotalSize": 41189376,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 330.643,
+      "phase": "minimized",
+      "at": "2026-11-13T08:32:03.745Z",
+      "now": 2445105,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 44512083,
+        "total": 47344675
+      },
+      "performance": {
+        "TaskDuration": 57.819509,
+        "ScriptDuration": 15.410856,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 38381112,
+        "JSHeapTotalSize": 41189376,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 340.67,
+      "phase": "minimized",
+      "at": "2026-11-13T08:32:13.769Z",
+      "now": 2455129.299999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true",
+        "appHidden": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        150000,
+        300000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 44608967,
+        "total": 47344675
+      },
+      "performance": {
+        "TaskDuration": 58.130557,
+        "ScriptDuration": 15.535029,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.234376,
+        "JSHeapUsedSize": 38477996,
+        "JSHeapTotalSize": 41189376,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 359.073,
+      "phase": "restored",
+      "at": "2026-11-13T08:32:32.173Z",
+      "now": 2473533.399999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        },
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 45124637,
+        "total": 47869329
+      },
+      "performance": {
+        "TaskDuration": 58.891171,
+        "ScriptDuration": 15.818079,
+        "LayoutDuration": 1.164425,
+        "RecalcStyleDuration": 13.252145,
+        "JSHeapUsedSize": 39001912,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5753,
+        "Documents": 2,
+        "JSEventListeners": 2676
+      }
+    },
+    {
+      "elapsedSeconds": 369.085,
+      "phase": "restored",
+      "at": "2026-11-13T08:32:42.187Z",
+      "now": 2483547.5,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 45104400,
+        "total": 48917996
+      },
+      "performance": {
+        "TaskDuration": 59.245827,
+        "ScriptDuration": 15.934573,
+        "LayoutDuration": 1.165904,
+        "RecalcStyleDuration": 13.270343,
+        "JSHeapUsedSize": 38972816,
+        "JSHeapTotalSize": 42762240,
+        "Nodes": 5753,
+        "Documents": 2,
+        "JSEventListeners": 2677
+      }
+    },
+    {
+      "elapsedSeconds": 379.091,
+      "phase": "restored",
+      "at": "2026-11-13T08:32:52.194Z",
+      "now": 2493554.299999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 45201164,
+        "total": 48917996
+      },
+      "performance": {
+        "TaskDuration": 59.500529,
+        "ScriptDuration": 16.035542,
+        "LayoutDuration": 1.165904,
+        "RecalcStyleDuration": 13.270343,
+        "JSHeapUsedSize": 39069580,
+        "JSHeapTotalSize": 42762240,
+        "Nodes": 5753,
+        "Documents": 2,
+        "JSEventListeners": 2677
+      }
+    },
+    {
+      "elapsedSeconds": 389.109,
+      "phase": "restored",
+      "at": "2026-11-13T08:33:02.211Z",
+      "now": 2503571.599999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 121,
+      "errors": [],
+      "heap": {
+        "used": 44481549,
+        "total": 48394285
+      },
+      "performance": {
+        "TaskDuration": 59.761085,
+        "ScriptDuration": 16.130951,
+        "LayoutDuration": 1.165904,
+        "RecalcStyleDuration": 13.270343,
+        "JSHeapUsedSize": 38352248,
+        "JSHeapTotalSize": 42237952,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 391.809,
+      "phase": "navigation-second",
+      "at": "2026-11-13T08:33:04.911Z",
+      "now": 2506271.299999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 99.56864748054105
+        },
+        {
+          "name": "CSSTransition",
+          "duration": 99.56864748054105
+        },
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        },
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        },
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        },
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 124,
+      "errors": [],
+      "heap": {
+        "used": 50035332,
+        "total": 63298368
+      },
+      "performance": {
+        "TaskDuration": 61.027706,
+        "ScriptDuration": 16.380521,
+        "LayoutDuration": 1.213499,
+        "RecalcStyleDuration": 13.736791,
+        "JSHeapUsedSize": 43901344,
+        "JSHeapTotalSize": 57122816,
+        "Nodes": 6727,
+        "Documents": 2,
+        "JSEventListeners": 2771
+      }
+    },
+    {
+      "elapsedSeconds": 395.541,
+      "phase": "navigation-second",
+      "at": "2026-11-13T08:33:08.638Z",
+      "now": 2509998.899999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 132,
+      "errors": [],
+      "heap": {
+        "used": 55942442,
+        "total": 70131474
+      },
+      "performance": {
+        "TaskDuration": 63.413421,
+        "ScriptDuration": 16.862831,
+        "LayoutDuration": 1.293195,
+        "RecalcStyleDuration": 14.60335,
+        "JSHeapUsedSize": 49777192,
+        "JSHeapTotalSize": 63938560,
+        "Nodes": 6910,
+        "Documents": 2,
+        "JSEventListeners": 2867
+      }
+    },
+    {
+      "elapsedSeconds": 399.663,
+      "phase": "navigation-second",
+      "at": "2026-11-13T08:33:12.761Z",
+      "now": 2514121.399999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 141,
+      "errors": [],
+      "heap": {
+        "used": 50262220,
+        "total": 73784108
+      },
+      "performance": {
+        "TaskDuration": 66.307225,
+        "ScriptDuration": 17.401289,
+        "LayoutDuration": 1.379003,
+        "RecalcStyleDuration": 15.642729,
+        "JSHeapUsedSize": 44114352,
+        "JSHeapTotalSize": 67608576,
+        "Nodes": 6727,
+        "Documents": 2,
+        "JSEventListeners": 2771
+      }
+    },
+    {
+      "elapsedSeconds": 403.12,
+      "phase": "navigation-second",
+      "at": "2026-11-13T08:33:16.216Z",
+      "now": 2517576.299999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 147,
+      "errors": [],
+      "heap": {
+        "used": 70825685,
+        "total": 91845461
+      },
+      "performance": {
+        "TaskDuration": 68.487631,
+        "ScriptDuration": 17.837051,
+        "LayoutDuration": 1.449711,
+        "RecalcStyleDuration": 16.430876,
+        "JSHeapUsedSize": 64647128,
+        "JSHeapTotalSize": 85639168,
+        "Nodes": 7880,
+        "Documents": 2,
+        "JSEventListeners": 3193
+      }
+    },
+    {
+      "elapsedSeconds": 407.54,
+      "phase": "navigation-second",
+      "at": "2026-11-13T08:33:20.633Z",
+      "now": 2521993.299999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 159,
+      "errors": [],
+      "heap": {
+        "used": 50395081,
+        "total": 93707061
+      },
+      "performance": {
+        "TaskDuration": 71.648495,
+        "ScriptDuration": 18.436805,
+        "LayoutDuration": 1.548028,
+        "RecalcStyleDuration": 17.597644,
+        "JSHeapUsedSize": 44244176,
+        "JSHeapTotalSize": 87531520,
+        "Nodes": 6727,
+        "Documents": 2,
+        "JSEventListeners": 2771
+      }
+    },
+    {
+      "elapsedSeconds": 412.064,
+      "phase": "navigation-second",
+      "at": "2026-11-13T08:33:25.154Z",
+      "now": 2526514.599999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 172,
+      "errors": [],
+      "heap": {
+        "used": 71066090,
+        "total": 97366130
+      },
+      "performance": {
+        "TaskDuration": 74.926043,
+        "ScriptDuration": 19.101485,
+        "LayoutDuration": 1.652809,
+        "RecalcStyleDuration": 18.822266,
+        "JSHeapUsedSize": 64868788,
+        "JSHeapTotalSize": 91144192,
+        "Nodes": 7882,
+        "Documents": 2,
+        "JSEventListeners": 3193
+      }
+    },
+    {
+      "elapsedSeconds": 416.017,
+      "phase": "navigation-second",
+      "at": "2026-11-13T08:33:29.112Z",
+      "now": 2530472.5,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 181,
+      "errors": [],
+      "heap": {
+        "used": 56694186,
+        "total": 93200262
+      },
+      "performance": {
+        "TaskDuration": 77.685543,
+        "ScriptDuration": 19.624336,
+        "LayoutDuration": 1.745883,
+        "RecalcStyleDuration": 19.80714,
+        "JSHeapUsedSize": 50528820,
+        "JSHeapTotalSize": 87007232,
+        "Nodes": 6984,
+        "Documents": 2,
+        "JSEventListeners": 3007
+      }
+    },
+    {
+      "elapsedSeconds": 419.671,
+      "phase": "navigation-second",
+      "at": "2026-11-13T08:33:32.768Z",
+      "now": 2534128.199999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 189,
+      "errors": [],
+      "heap": {
+        "used": 70959984,
+        "total": 96040804
+      },
+      "performance": {
+        "TaskDuration": 80.066895,
+        "ScriptDuration": 20.100347,
+        "LayoutDuration": 1.811333,
+        "RecalcStyleDuration": 20.665598,
+        "JSHeapUsedSize": 64780388,
+        "JSHeapTotalSize": 89833472,
+        "Nodes": 7902,
+        "Documents": 2,
+        "JSEventListeners": 3193
+      }
+    },
+    {
+      "elapsedSeconds": 423.424,
+      "phase": "navigation-second",
+      "at": "2026-11-13T08:33:36.520Z",
+      "now": 2537880.899999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 197,
+      "errors": [],
+      "heap": {
+        "used": 50525318,
+        "total": 95017774
+      },
+      "performance": {
+        "TaskDuration": 82.419396,
+        "ScriptDuration": 20.568995,
+        "LayoutDuration": 1.882665,
+        "RecalcStyleDuration": 21.518887,
+        "JSHeapUsedSize": 44374420,
+        "JSHeapTotalSize": 88842240,
+        "Nodes": 6727,
+        "Documents": 2,
+        "JSEventListeners": 2771
+      }
+    },
+    {
+      "elapsedSeconds": 427.424,
+      "phase": "navigation-second",
+      "at": "2026-11-13T08:33:40.521Z",
+      "now": 2541881.599999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 205,
+      "errors": [],
+      "heap": {
+        "used": 71099766,
+        "total": 98923454
+      },
+      "performance": {
+        "TaskDuration": 85.119133,
+        "ScriptDuration": 21.105179,
+        "LayoutDuration": 1.964173,
+        "RecalcStyleDuration": 22.546106,
+        "JSHeapUsedSize": 64921104,
+        "JSHeapTotalSize": 92717056,
+        "Nodes": 7879,
+        "Documents": 2,
+        "JSEventListeners": 3193
+      }
+    },
+    {
+      "elapsedSeconds": 431.148,
+      "phase": "navigation-second",
+      "at": "2026-11-13T08:33:44.245Z",
+      "now": 2545605.199999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 100
+        }
+      ],
+      "longTaskCount": 212,
+      "errors": [],
+      "heap": {
+        "used": 50662202,
+        "total": 95542078
+      },
+      "performance": {
+        "TaskDuration": 87.494217,
+        "ScriptDuration": 21.572286,
+        "LayoutDuration": 2.034234,
+        "RecalcStyleDuration": 23.412565,
+        "JSHeapUsedSize": 44514432,
+        "JSHeapTotalSize": 89366528,
+        "Nodes": 6727,
+        "Documents": 2,
+        "JSEventListeners": 2771
+      }
+    },
+    {
+      "elapsedSeconds": 435.205,
+      "phase": "navigation-second",
+      "at": "2026-11-13T08:33:48.282Z",
+      "now": 2549642.399999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 71585042,
+        "total": 99200998
+      },
+      "performance": {
+        "TaskDuration": 90.105694,
+        "ScriptDuration": 22.095336,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.392564,
+        "JSHeapUsedSize": 65388032,
+        "JSHeapTotalSize": 92979200,
+        "Nodes": 9520,
+        "Documents": 2,
+        "JSEventListeners": 3227
+      }
+    },
+    {
+      "elapsedSeconds": 436.233,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:33:49.331Z",
+      "now": 2550691,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [
+        {
+          "name": "CSSTransition",
+          "duration": 800
+        }
+      ],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 74439585,
+        "total": 101298541
+      },
+      "performance": {
+        "TaskDuration": 90.393086,
+        "ScriptDuration": 22.169522,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407334,
+        "JSHeapUsedSize": 68244744,
+        "JSHeapTotalSize": 95338496,
+        "Nodes": 9520,
+        "Documents": 2,
+        "JSEventListeners": 3227
+      }
+    },
+    {
+      "elapsedSeconds": 446.246,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:33:59.348Z",
+      "now": 2560708.699999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 74541081,
+        "total": 101560685
+      },
+      "performance": {
+        "TaskDuration": 90.954842,
+        "ScriptDuration": 22.378124,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 68343064,
+        "JSHeapTotalSize": 95338496,
+        "Nodes": 9520,
+        "Documents": 2,
+        "JSEventListeners": 3227
+      }
+    },
+    {
+      "elapsedSeconds": 456.266,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:34:09.368Z",
+      "now": 2570728.099999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45380168,
+        "total": 50490496
+      },
+      "performance": {
+        "TaskDuration": 91.315382,
+        "ScriptDuration": 22.500701,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39251880,
+        "JSHeapTotalSize": 44335104,
+        "Nodes": 6713,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 466.284,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:34:19.386Z",
+      "now": 2580746.5,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45136248,
+        "total": 48393264
+      },
+      "performance": {
+        "TaskDuration": 91.687487,
+        "ScriptDuration": 22.631161,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39007968,
+        "JSHeapTotalSize": 42237952,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 476.294,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:34:29.396Z",
+      "now": 2590756.5,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45235528,
+        "total": 48393264
+      },
+      "performance": {
+        "TaskDuration": 91.944128,
+        "ScriptDuration": 22.731199,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39104388,
+        "JSHeapTotalSize": 42237952,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 486.301,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:34:39.404Z",
+      "now": 2600763.899999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45384702,
+        "total": 48656398
+      },
+      "performance": {
+        "TaskDuration": 92.229146,
+        "ScriptDuration": 22.844435,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39252644,
+        "JSHeapTotalSize": 42500096,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 496.314,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:34:49.416Z",
+      "now": 2610776.699999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45480258,
+        "total": 48656398
+      },
+      "performance": {
+        "TaskDuration": 92.480316,
+        "ScriptDuration": 22.942191,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39348128,
+        "JSHeapTotalSize": 42500096,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 506.336,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:34:59.438Z",
+      "now": 2620798.699999988,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45144836,
+        "total": 48393300
+      },
+      "performance": {
+        "TaskDuration": 92.789806,
+        "ScriptDuration": 23.054645,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39016520,
+        "JSHeapTotalSize": 42237952,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 516.353,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:35:09.455Z",
+      "now": 2630815.899999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45300685,
+        "total": 48394285
+      },
+      "performance": {
+        "TaskDuration": 93.202999,
+        "ScriptDuration": 23.218415,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39168524,
+        "JSHeapTotalSize": 42237952,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 526.376,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:35:19.471Z",
+      "now": 2640831.299999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45402497,
+        "total": 48656429
+      },
+      "performance": {
+        "TaskDuration": 93.817363,
+        "ScriptDuration": 23.460637,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39270408,
+        "JSHeapTotalSize": 42500096,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 536.403,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:35:29.503Z",
+      "now": 2650863.299999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45095650,
+        "total": 48131166
+      },
+      "performance": {
+        "TaskDuration": 94.758823,
+        "ScriptDuration": 23.80356,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 38967396,
+        "JSHeapTotalSize": 41975808,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 546.416,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:35:39.517Z",
+      "now": 2660877.799999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45248241,
+        "total": 48132141
+      },
+      "performance": {
+        "TaskDuration": 95.110909,
+        "ScriptDuration": 23.946044,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39116080,
+        "JSHeapTotalSize": 41975808,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 556.44,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:35:49.541Z",
+      "now": 2670901.799999997,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45347045,
+        "total": 48132141
+      },
+      "performance": {
+        "TaskDuration": 95.651828,
+        "ScriptDuration": 24.158402,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39214892,
+        "JSHeapTotalSize": 41975808,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 566.455,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:35:59.555Z",
+      "now": 2680914.899999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45443473,
+        "total": 48132141
+      },
+      "performance": {
+        "TaskDuration": 95.911687,
+        "ScriptDuration": 24.263451,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39311312,
+        "JSHeapTotalSize": 41975808,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 576.463,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:36:09.566Z",
+      "now": 2690926.399999991,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45132526,
+        "total": 47869058
+      },
+      "performance": {
+        "TaskDuration": 96.226296,
+        "ScriptDuration": 24.380089,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39004164,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 586.475,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:36:19.578Z",
+      "now": 2700938.099999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45239471,
+        "total": 47869163
+      },
+      "performance": {
+        "TaskDuration": 96.489878,
+        "ScriptDuration": 24.486243,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39108144,
+        "JSHeapTotalSize": 41713664,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    },
+    {
+      "elapsedSeconds": 596.488,
+      "phase": "idle-after",
+      "at": "2026-11-13T08:36:29.591Z",
+      "now": 2710951.099999994,
+      "url": "http://tauri.localhost/",
+      "nativeIPC": true,
+      "hidden": false,
+      "root": {
+        "uiStyle": "classic",
+        "uiDensity": "standard",
+        "motion": "system",
+        "pageTransitions": "true"
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 840
+      },
+      "nodes": 2887,
+      "renderedEditorLines": [
+        29
+      ],
+      "intervals": [
+        30000,
+        30000,
+        30000,
+        30000,
+        150000,
+        300000,
+        86400000
+      ],
+      "animations": [],
+      "longTaskCount": 221,
+      "errors": [],
+      "heap": {
+        "used": 45336203,
+        "total": 47869163
+      },
+      "performance": {
+        "TaskDuration": 96.730598,
+        "ScriptDuration": 24.581337,
+        "LayoutDuration": 2.112517,
+        "RecalcStyleDuration": 24.407886,
+        "JSHeapUsedSize": 39204876,
+        "JSHeapTotalSize": 41975808,
+        "Nodes": 5752,
+        "Documents": 2,
+        "JSEventListeners": 2675
+      }
+    }
+  ],
+  "cycles": [
+    {
+      "phase": "navigation-first",
+      "index": 1,
+      "milliseconds": 3676
+    },
+    {
+      "phase": "navigation-first",
+      "index": 2,
+      "milliseconds": 3136
+    },
+    {
+      "phase": "navigation-first",
+      "index": 3,
+      "milliseconds": 3186
+    },
+    {
+      "phase": "navigation-first",
+      "index": 4,
+      "milliseconds": 3043
+    },
+    {
+      "phase": "navigation-first",
+      "index": 5,
+      "milliseconds": 3224
+    },
+    {
+      "phase": "navigation-first",
+      "index": 6,
+      "milliseconds": 3654
+    },
+    {
+      "phase": "navigation-first",
+      "index": 7,
+      "milliseconds": 2823
+    },
+    {
+      "phase": "navigation-first",
+      "index": 8,
+      "milliseconds": 2802
+    },
+    {
+      "phase": "navigation-first",
+      "index": 9,
+      "milliseconds": 3058
+    },
+    {
+      "phase": "navigation-first",
+      "index": 10,
+      "milliseconds": 3146
+    },
+    {
+      "phase": "navigation-first",
+      "index": 11,
+      "milliseconds": 3937
+    },
+    {
+      "phase": "navigation-first",
+      "index": 12,
+      "milliseconds": 3138
+    },
+    {
+      "phase": "navigation-second",
+      "index": 1,
+      "milliseconds": 1799
+    },
+    {
+      "phase": "navigation-second",
+      "index": 2,
+      "milliseconds": 2718
+    },
+    {
+      "phase": "navigation-second",
+      "index": 3,
+      "milliseconds": 3107
+    },
+    {
+      "phase": "navigation-second",
+      "index": 4,
+      "milliseconds": 2432
+    },
+    {
+      "phase": "navigation-second",
+      "index": 5,
+      "milliseconds": 3395
+    },
+    {
+      "phase": "navigation-second",
+      "index": 6,
+      "milliseconds": 3492
+    },
+    {
+      "phase": "navigation-second",
+      "index": 7,
+      "milliseconds": 2926
+    },
+    {
+      "phase": "navigation-second",
+      "index": 8,
+      "milliseconds": 2623
+    },
+    {
+      "phase": "navigation-second",
+      "index": 9,
+      "milliseconds": 2728
+    },
+    {
+      "phase": "navigation-second",
+      "index": 10,
+      "milliseconds": 2972
+    },
+    {
+      "phase": "navigation-second",
+      "index": 11,
+      "milliseconds": 2707
+    },
+    {
+      "phase": "navigation-second",
+      "index": 12,
+      "milliseconds": 3012
+    }
+  ],
+  "snapshots": {
+    "before": {
+      "at": "2026-11-13T08:26:33.282Z",
+      "page": {
+        "at": "2026-11-13T08:26:33.286Z",
+        "now": 2114646.599999994,
+        "url": "http://tauri.localhost/",
+        "nativeIPC": true,
+        "hidden": false,
+        "root": {
+          "uiStyle": "classic",
+          "uiDensity": "standard",
+          "motion": "system",
+          "pageTransitions": "true"
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 840
+        },
+        "nodes": 2882,
+        "renderedEditorLines": [
+          29
+        ],
+        "intervals": [
+          30000,
+          30000,
+          30000,
+          30000,
+          150000,
+          300000,
+          86400000
+        ],
+        "animations": [],
+        "longTaskCount": 0,
+        "errors": [],
+        "heap": {
+          "used": 40344908,
+          "total": 42748936
+        }
+      },
+      "heap": {
+        "usedSize": 34221032,
+        "totalSize": 36593664,
+        "embedderHeapUsedSize": 11837824,
+        "backingStorageSize": 6155272
+      }
+    },
+    "after": {
+      "at": "2026-11-13T08:36:33.211Z",
+      "page": {
+        "at": "2026-11-13T08:36:33.213Z",
+        "now": 2714573.899999991,
+        "url": "http://tauri.localhost/",
+        "nativeIPC": true,
+        "hidden": false,
+        "root": {
+          "uiStyle": "classic",
+          "uiDensity": "standard",
+          "motion": "system",
+          "pageTransitions": "true"
+        },
+        "viewport": {
+          "width": 1280,
+          "height": 840
+        },
+        "nodes": 2887,
+        "renderedEditorLines": [
+          29
+        ],
+        "intervals": [
+          30000,
+          30000,
+          30000,
+          30000,
+          150000,
+          300000,
+          86400000
+        ],
+        "animations": [],
+        "longTaskCount": 221,
+        "errors": [],
+        "heap": {
+          "used": 44987922,
+          "total": 47082518
+        }
+      },
+      "heap": {
+        "usedSize": 38859668,
+        "totalSize": 40927232,
+        "embedderHeapUsedSize": 13383928,
+        "backingStorageSize": 6155286
+      }
+    }
+  },
+  "errors": [],
+  "events": {
+    "clicks": [
+      {
+        "label": "元数据",
+        "ms": 169.90000000596046
+      },
+      {
+        "label": "数据库",
+        "ms": 85.20000000298023
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 93.5
+      },
+      {
+        "label": "代码",
+        "ms": 104.5
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 233.20000000298023
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 73.40000000596046
+      },
+      {
+        "label": "元数据",
+        "ms": 140.79999999701977
+      },
+      {
+        "label": "数据库",
+        "ms": 80.5
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 73.1000000089407
+      },
+      {
+        "label": "代码",
+        "ms": 141.09999999403954
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 194
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 59.20000000298023
+      },
+      {
+        "label": "元数据",
+        "ms": 110.19999998807907
+      },
+      {
+        "label": "数据库",
+        "ms": 72.79999999701977
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 83.5
+      },
+      {
+        "label": "代码",
+        "ms": 115.29999999701977
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 192.8999999910593
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 60.099999994039536
+      },
+      {
+        "label": "元数据",
+        "ms": 144.79999999701977
+      },
+      {
+        "label": "数据库",
+        "ms": 80.79999999701977
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 97.5
+      },
+      {
+        "label": "代码",
+        "ms": 142.29999999701977
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 174.8999999910593
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 51.5
+      },
+      {
+        "label": "元数据",
+        "ms": 146.40000000596046
+      },
+      {
+        "label": "数据库",
+        "ms": 79.40000000596046
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 83.70000000298023
+      },
+      {
+        "label": "代码",
+        "ms": 107.19999998807907
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 181.70000000298023
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 45.69999998807907
+      },
+      {
+        "label": "元数据",
+        "ms": 146.70000000298023
+      },
+      {
+        "label": "数据库",
+        "ms": 78.5
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 114.09999999403954
+      },
+      {
+        "label": "代码",
+        "ms": 164.5
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 218.59999999403954
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 65.5
+      },
+      {
+        "label": "元数据",
+        "ms": 128.5
+      },
+      {
+        "label": "数据库",
+        "ms": 91
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 86.30000001192093
+      },
+      {
+        "label": "代码",
+        "ms": 99.19999998807907
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 189.8999999910593
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 44.5
+      },
+      {
+        "label": "元数据",
+        "ms": 82.5
+      },
+      {
+        "label": "数据库",
+        "ms": 71.59999999403954
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 93.8999999910593
+      },
+      {
+        "label": "代码",
+        "ms": 109.79999999701977
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 166.09999999403954
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 53.69999998807907
+      },
+      {
+        "label": "元数据",
+        "ms": 124.69999998807907
+      },
+      {
+        "label": "数据库",
+        "ms": 86.80000001192093
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 90
+      },
+      {
+        "label": "代码",
+        "ms": 111.1000000089407
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 192.5
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 55.5
+      },
+      {
+        "label": "元数据",
+        "ms": 111.70000000298023
+      },
+      {
+        "label": "数据库",
+        "ms": 62.79999999701977
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 94.5
+      },
+      {
+        "label": "代码",
+        "ms": 117.6000000089407
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 200.70000000298023
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 60.70000000298023
+      },
+      {
+        "label": "元数据",
+        "ms": 139
+      },
+      {
+        "label": "数据库",
+        "ms": 72.8999999910593
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 88.59999999403954
+      },
+      {
+        "label": "代码",
+        "ms": 140.09999999403954
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 237.29999999701977
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 63.1000000089407
+      },
+      {
+        "label": "元数据",
+        "ms": 105.8999999910593
+      },
+      {
+        "label": "数据库",
+        "ms": 72.30000001192093
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 110.09999999403954
+      },
+      {
+        "label": "代码",
+        "ms": 158.79999999701977
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 196.29999999701977
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 59.20000000298023
+      },
+      {
+        "label": "最小化",
+        "ms": 16.200000002980232
+      },
+      {
+        "label": "元数据",
+        "ms": 53.70000000298023
+      },
+      {
+        "label": "数据库",
+        "ms": 32.80000001192093
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 43.3999999910593
+      },
+      {
+        "label": "代码",
+        "ms": 61.900000005960464
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 95.29999999701977
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 24.400000005960464
+      },
+      {
+        "label": "元数据",
+        "ms": 105.5
+      },
+      {
+        "label": "数据库",
+        "ms": 54
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 61
+      },
+      {
+        "label": "代码",
+        "ms": 111.59999999403954
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 164.79999999701977
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 41.400000005960464
+      },
+      {
+        "label": "元数据",
+        "ms": 167.79999999701977
+      },
+      {
+        "label": "数据库",
+        "ms": 96.79999999701977
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 102.59999999403954
+      },
+      {
+        "label": "代码",
+        "ms": 139.69999998807907
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 168.79999999701977
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 47.80000001192093
+      },
+      {
+        "label": "元数据",
+        "ms": 110.5
+      },
+      {
+        "label": "数据库",
+        "ms": 56.5
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 73
+      },
+      {
+        "label": "代码",
+        "ms": 110.1000000089407
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 135.59999999403954
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 37.20000000298023
+      },
+      {
+        "label": "元数据",
+        "ms": 96.5
+      },
+      {
+        "label": "数据库",
+        "ms": 74.8999999910593
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 110.79999999701977
+      },
+      {
+        "label": "代码",
+        "ms": 144
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 216.5
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 65.79999999701977
+      },
+      {
+        "label": "元数据",
+        "ms": 137.20000000298023
+      },
+      {
+        "label": "数据库",
+        "ms": 63.1000000089407
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 90.29999999701977
+      },
+      {
+        "label": "代码",
+        "ms": 149.20000000298023
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 245.80000001192093
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 71.20000000298023
+      },
+      {
+        "label": "元数据",
+        "ms": 152.59999999403954
+      },
+      {
+        "label": "数据库",
+        "ms": 93
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 82.40000000596046
+      },
+      {
+        "label": "代码",
+        "ms": 135.5
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 145.70000000298023
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 56.900000005960464
+      },
+      {
+        "label": "元数据",
+        "ms": 98
+      },
+      {
+        "label": "数据库",
+        "ms": 60.599999994039536
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 85.09999999403954
+      },
+      {
+        "label": "代码",
+        "ms": 87.3999999910593
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 141.8999999910593
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 51.8999999910593
+      },
+      {
+        "label": "元数据",
+        "ms": 94
+      },
+      {
+        "label": "数据库",
+        "ms": 60.30000001192093
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 71.69999998807907
+      },
+      {
+        "label": "代码",
+        "ms": 113.90000000596046
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 143.70000000298023
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 51.099999994039536
+      },
+      {
+        "label": "元数据",
+        "ms": 94.09999999403954
+      },
+      {
+        "label": "数据库",
+        "ms": 65.20000000298023
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 70.3999999910593
+      },
+      {
+        "label": "代码",
+        "ms": 109.29999999701977
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 214.5
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 51.70000000298023
+      },
+      {
+        "label": "元数据",
+        "ms": 102.6000000089407
+      },
+      {
+        "label": "数据库",
+        "ms": 65.29999999701977
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 58.099999994039536
+      },
+      {
+        "label": "代码",
+        "ms": 117.79999999701977
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 136.40000000596046
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 40.19999998807907
+      },
+      {
+        "label": "元数据",
+        "ms": 99.59999999403954
+      },
+      {
+        "label": "数据库",
+        "ms": 55.20000000298023
+      },
+      {
+        "label": "设置，有本版新内容",
+        "ms": 91.20000000298023
+      },
+      {
+        "label": "代码",
+        "ms": 105.6000000089407
+      },
+      {
+        "label": "关闭 MotionDemo.java",
+        "ms": 169.1000000089407
+      },
+      {
+        "label": "转到文件、类型、命令…Ctrl+Shift+R",
+        "ms": 42.20000000298023
+      }
+    ],
+    "longTasks": [
+      {
+        "at": 2174756.399999991,
+        "ms": 107
+      },
+      {
+        "at": 2175610.699999988,
+        "ms": 59
+      },
+      {
+        "at": 2175830.799999997,
+        "ms": 70
+      },
+      {
+        "at": 2175953.099999994,
+        "ms": 54
+      },
+      {
+        "at": 2176219.099999994,
+        "ms": 213
+      },
+      {
+        "at": 2176432.799999997,
+        "ms": 52
+      },
+      {
+        "at": 2176658.799999997,
+        "ms": 176
+      },
+      {
+        "at": 2177058.599999994,
+        "ms": 76
+      },
+      {
+        "at": 2177452.5,
+        "ms": 132
+      },
+      {
+        "at": 2177791.799999997,
+        "ms": 225
+      },
+      {
+        "at": 2179295.5,
+        "ms": 100
+      },
+      {
+        "at": 2180357.599999994,
+        "ms": 92
+      },
+      {
+        "at": 2180711.5,
+        "ms": 104
+      },
+      {
+        "at": 2181001.5,
+        "ms": 124
+      },
+      {
+        "at": 2181126.299999997,
+        "ms": 60
+      },
+      {
+        "at": 2181347.5,
+        "ms": 65
+      },
+      {
+        "at": 2181769.099999994,
+        "ms": 105
+      },
+      {
+        "at": 2182023.199999988,
+        "ms": 131
+      },
+      {
+        "at": 2182155.199999988,
+        "ms": 53
+      },
+      {
+        "at": 2183452.599999994,
+        "ms": 69
+      },
+      {
+        "at": 2184422,
+        "ms": 81
+      },
+      {
+        "at": 2184770.799999997,
+        "ms": 130
+      },
+      {
+        "at": 2185088.399999991,
+        "ms": 122
+      },
+      {
+        "at": 2185211.199999988,
+        "ms": 61
+      },
+      {
+        "at": 2185427.799999997,
+        "ms": 60
+      },
+      {
+        "at": 2185784.399999991,
+        "ms": 51
+      },
+      {
+        "at": 2185861.199999988,
+        "ms": 129
+      },
+      {
+        "at": 2186163.399999991,
+        "ms": 151
+      },
+      {
+        "at": 2186315.399999991,
+        "ms": 73
+      },
+      {
+        "at": 2187664.599999994,
+        "ms": 94
+      },
+      {
+        "at": 2188496.099999994,
+        "ms": 55
+      },
+      {
+        "at": 2188741.5,
+        "ms": 87
+      },
+      {
+        "at": 2188882.799999997,
+        "ms": 54
+      },
+      {
+        "at": 2189094.5,
+        "ms": 116
+      },
+      {
+        "at": 2189369.699999988,
+        "ms": 121
+      },
+      {
+        "at": 2189686,
+        "ms": 57
+      },
+      {
+        "at": 2190013.699999988,
+        "ms": 105
+      },
+      {
+        "at": 2190287.099999994,
+        "ms": 125
+      },
+      {
+        "at": 2190413.299999997,
+        "ms": 63
+      },
+      {
+        "at": 2191744.299999997,
+        "ms": 90
+      },
+      {
+        "at": 2192730.799999997,
+        "ms": 72
+      },
+      {
+        "at": 2193065.699999988,
+        "ms": 114
+      },
+      {
+        "at": 2193372.299999997,
+        "ms": 117
+      },
+      {
+        "at": 2193490.199999988,
+        "ms": 58
+      },
+      {
+        "at": 2194076.799999997,
+        "ms": 114
+      },
+      {
+        "at": 2194365.399999991,
+        "ms": 169
+      },
+      {
+        "at": 2194535.199999988,
+        "ms": 85
+      },
+      {
+        "at": 2196047.199999988,
+        "ms": 88
+      },
+      {
+        "at": 2196933.799999997,
+        "ms": 65
+      },
+      {
+        "at": 2197278.599999994,
+        "ms": 132
+      },
+      {
+        "at": 2197433.199999988,
+        "ms": 66
+      },
+      {
+        "at": 2197665.799999997,
+        "ms": 158
+      },
+      {
+        "at": 2197824.899999991,
+        "ms": 54
+      },
+      {
+        "at": 2198089.5,
+        "ms": 121
+      },
+      {
+        "at": 2198211.799999997,
+        "ms": 79
+      },
+      {
+        "at": 2198488.699999988,
+        "ms": 57
+      },
+      {
+        "at": 2198876.899999991,
+        "ms": 117
+      },
+      {
+        "at": 2199194.099999994,
+        "ms": 154
+      },
+      {
+        "at": 2199349.5,
+        "ms": 76
+      },
+      {
+        "at": 2200722.599999994,
+        "ms": 82
+      },
+      {
+        "at": 2201743.5,
+        "ms": 64
+      },
+      {
+        "at": 2201859.399999991,
+        "ms": 51
+      },
+      {
+        "at": 2202077.399999991,
+        "ms": 97
+      },
+      {
+        "at": 2202348.399999991,
+        "ms": 111
+      },
+      {
+        "at": 2202460.599999994,
+        "ms": 61
+      },
+      {
+        "at": 2202930.699999988,
+        "ms": 83
+      },
+      {
+        "at": 2203149.099999994,
+        "ms": 111
+      },
+      {
+        "at": 2204519.199999988,
+        "ms": 51
+      },
+      {
+        "at": 2205396.5,
+        "ms": 69
+      },
+      {
+        "at": 2205715.599999994,
+        "ms": 97
+      },
+      {
+        "at": 2205978.699999988,
+        "ms": 100
+      },
+      {
+        "at": 2206079.299999997,
+        "ms": 63
+      },
+      {
+        "at": 2206288.099999994,
+        "ms": 56
+      },
+      {
+        "at": 2206623.799999997,
+        "ms": 107
+      },
+      {
+        "at": 2206897.899999991,
+        "ms": 130
+      },
+      {
+        "at": 2208363.5,
+        "ms": 74
+      },
+      {
+        "at": 2209167.799999997,
+        "ms": 52
+      },
+      {
+        "at": 2209404.699999988,
+        "ms": 72
+      },
+      {
+        "at": 2209534.599999994,
+        "ms": 56
+      },
+      {
+        "at": 2209749.899999991,
+        "ms": 127
+      },
+      {
+        "at": 2210062.5,
+        "ms": 113
+      },
+      {
+        "at": 2210176.799999997,
+        "ms": 68
+      },
+      {
+        "at": 2210420.699999988,
+        "ms": 63
+      },
+      {
+        "at": 2210732,
+        "ms": 96
+      },
+      {
+        "at": 2210994.599999994,
+        "ms": 118
+      },
+      {
+        "at": 2211113,
+        "ms": 65
+      },
+      {
+        "at": 2212457.699999988,
+        "ms": 71
+      },
+      {
+        "at": 2213169.5,
+        "ms": 64
+      },
+      {
+        "at": 2213377.399999991,
+        "ms": 76
+      },
+      {
+        "at": 2213501.899999991,
+        "ms": 55
+      },
+      {
+        "at": 2213738.5,
+        "ms": 137
+      },
+      {
+        "at": 2214095.399999991,
+        "ms": 123
+      },
+      {
+        "at": 2214219.299999997,
+        "ms": 71
+      },
+      {
+        "at": 2214430.799999997,
+        "ms": 65
+      },
+      {
+        "at": 2214788.099999994,
+        "ms": 113
+      },
+      {
+        "at": 2215081.199999988,
+        "ms": 142
+      },
+      {
+        "at": 2215223.699999988,
+        "ms": 78
+      },
+      {
+        "at": 2216689.399999991,
+        "ms": 79
+      },
+      {
+        "at": 2217520.399999991,
+        "ms": 53
+      },
+      {
+        "at": 2217761.299999997,
+        "ms": 112
+      },
+      {
+        "at": 2217913.699999988,
+        "ms": 67
+      },
+      {
+        "at": 2218111.199999988,
+        "ms": 146
+      },
+      {
+        "at": 2218493.199999988,
+        "ms": 157
+      },
+      {
+        "at": 2218651.199999988,
+        "ms": 74
+      },
+      {
+        "at": 2219022.899999991,
+        "ms": 68
+      },
+      {
+        "at": 2219532.199999988,
+        "ms": 188
+      },
+      {
+        "at": 2219721.399999991,
+        "ms": 59
+      },
+      {
+        "at": 2220073.899999991,
+        "ms": 253
+      },
+      {
+        "at": 2221644,
+        "ms": 67
+      },
+      {
+        "at": 2222378.699999988,
+        "ms": 52
+      },
+      {
+        "at": 2222629.299999997,
+        "ms": 90
+      },
+      {
+        "at": 2222781.5,
+        "ms": 66
+      },
+      {
+        "at": 2222991.299999997,
+        "ms": 123
+      },
+      {
+        "at": 2223306.299999997,
+        "ms": 123
+      },
+      {
+        "at": 2223430.199999988,
+        "ms": 64
+      },
+      {
+        "at": 2223631.099999994,
+        "ms": 64
+      },
+      {
+        "at": 2224005.599999994,
+        "ms": 118
+      },
+      {
+        "at": 2224283.899999991,
+        "ms": 160
+      },
+      {
+        "at": 2224445.299999997,
+        "ms": 77
+      },
+      {
+        "at": 2224536.399999991,
+        "ms": 54
+      },
+      {
+        "at": 2324720.299999997,
+        "ms": 105
+      },
+      {
+        "at": 2505473.099999994,
+        "ms": 54
+      },
+      {
+        "at": 2505631.899999991,
+        "ms": 71
+      },
+      {
+        "at": 2506098.5,
+        "ms": 68
+      },
+      {
+        "at": 2507350.099999994,
+        "ms": 70
+      },
+      {
+        "at": 2508260.399999991,
+        "ms": 81
+      },
+      {
+        "at": 2508592.799999997,
+        "ms": 110
+      },
+      {
+        "at": 2508867.399999991,
+        "ms": 110
+      },
+      {
+        "at": 2508978.5,
+        "ms": 50
+      },
+      {
+        "at": 2509478.599999994,
+        "ms": 81
+      },
+      {
+        "at": 2509680.699999988,
+        "ms": 114
+      },
+      {
+        "at": 2509795.5,
+        "ms": 52
+      },
+      {
+        "at": 2511133.399999991,
+        "ms": 110
+      },
+      {
+        "at": 2512305,
+        "ms": 85
+      },
+      {
+        "at": 2512434.299999997,
+        "ms": 57
+      },
+      {
+        "at": 2512650.599999994,
+        "ms": 116
+      },
+      {
+        "at": 2512951.399999991,
+        "ms": 109
+      },
+      {
+        "at": 2513061.599999994,
+        "ms": 50
+      },
+      {
+        "at": 2513251.199999988,
+        "ms": 52
+      },
+      {
+        "at": 2513545,
+        "ms": 89
+      },
+      {
+        "at": 2513795.699999988,
+        "ms": 187
+      },
+      {
+        "at": 2515222.099999994,
+        "ms": 71
+      },
+      {
+        "at": 2516061.299999997,
+        "ms": 66
+      },
+      {
+        "at": 2516382.399999991,
+        "ms": 91
+      },
+      {
+        "at": 2516616.299999997,
+        "ms": 88
+      },
+      {
+        "at": 2517102.5,
+        "ms": 75
+      },
+      {
+        "at": 2517294.899999991,
+        "ms": 116
+      },
+      {
+        "at": 2518673.099999994,
+        "ms": 58
+      },
+      {
+        "at": 2519466.099999994,
+        "ms": 63
+      },
+      {
+        "at": 2519735.199999988,
+        "ms": 106
+      },
+      {
+        "at": 2519903.299999997,
+        "ms": 61
+      },
+      {
+        "at": 2520080.799999997,
+        "ms": 140
+      },
+      {
+        "at": 2520419.399999991,
+        "ms": 131
+      },
+      {
+        "at": 2520551.5,
+        "ms": 74
+      },
+      {
+        "at": 2520815.299999997,
+        "ms": 72
+      },
+      {
+        "at": 2521232.099999994,
+        "ms": 136
+      },
+      {
+        "at": 2521553,
+        "ms": 153
+      },
+      {
+        "at": 2521707.199999988,
+        "ms": 73
+      },
+      {
+        "at": 2521809.899999991,
+        "ms": 50
+      },
+      {
+        "at": 2523117.299999997,
+        "ms": 86
+      },
+      {
+        "at": 2523866.599999994,
+        "ms": 60
+      },
+      {
+        "at": 2524123.399999991,
+        "ms": 102
+      },
+      {
+        "at": 2524304.399999991,
+        "ms": 105
+      },
+      {
+        "at": 2524515.699999988,
+        "ms": 134
+      },
+      {
+        "at": 2524936.399999991,
+        "ms": 158
+      },
+      {
+        "at": 2525095.099999994,
+        "ms": 81
+      },
+      {
+        "at": 2525190.399999991,
+        "ms": 51
+      },
+      {
+        "at": 2525378.5,
+        "ms": 78
+      },
+      {
+        "at": 2525788.899999991,
+        "ms": 115
+      },
+      {
+        "at": 2526084.299999997,
+        "ms": 153
+      },
+      {
+        "at": 2526238.5,
+        "ms": 73
+      },
+      {
+        "at": 2526326.599999994,
+        "ms": 51
+      },
+      {
+        "at": 2527694.299999997,
+        "ms": 106
+      },
+      {
+        "at": 2528514.799999997,
+        "ms": 53
+      },
+      {
+        "at": 2528776,
+        "ms": 88
+      },
+      {
+        "at": 2528905.599999994,
+        "ms": 50
+      },
+      {
+        "at": 2529121.699999988,
+        "ms": 92
+      },
+      {
+        "at": 2529370.599999994,
+        "ms": 93
+      },
+      {
+        "at": 2529632.399999991,
+        "ms": 57
+      },
+      {
+        "at": 2529991.399999991,
+        "ms": 88
+      },
+      {
+        "at": 2530176.299999997,
+        "ms": 111
+      },
+      {
+        "at": 2531593,
+        "ms": 63
+      },
+      {
+        "at": 2532490,
+        "ms": 60
+      },
+      {
+        "at": 2532770.399999991,
+        "ms": 94
+      },
+      {
+        "at": 2533046.599999994,
+        "ms": 87
+      },
+      {
+        "at": 2533134,
+        "ms": 50
+      },
+      {
+        "at": 2533317.799999997,
+        "ms": 51
+      },
+      {
+        "at": 2533618.099999994,
+        "ms": 96
+      },
+      {
+        "at": 2533842.799999997,
+        "ms": 110
+      },
+      {
+        "at": 2535224.599999994,
+        "ms": 58
+      },
+      {
+        "at": 2536087.5,
+        "ms": 70
+      },
+      {
+        "at": 2536512.199999988,
+        "ms": 85
+      },
+      {
+        "at": 2536734.399999991,
+        "ms": 92
+      },
+      {
+        "at": 2536882.599999994,
+        "ms": 54
+      },
+      {
+        "at": 2537026,
+        "ms": 54
+      },
+      {
+        "at": 2537306.599999994,
+        "ms": 80
+      },
+      {
+        "at": 2537518.299999997,
+        "ms": 190
+      },
+      {
+        "at": 2538986.399999991,
+        "ms": 63
+      },
+      {
+        "at": 2539872.5,
+        "ms": 76
+      },
+      {
+        "at": 2540240.799999997,
+        "ms": 136
+      },
+      {
+        "at": 2540606.5,
+        "ms": 139
+      },
+      {
+        "at": 2540746.699999988,
+        "ms": 69
+      },
+      {
+        "at": 2540989.399999991,
+        "ms": 58
+      },
+      {
+        "at": 2541274.099999994,
+        "ms": 99
+      },
+      {
+        "at": 2541550.199999988,
+        "ms": 196
+      },
+      {
+        "at": 2542970,
+        "ms": 62
+      },
+      {
+        "at": 2543821.199999988,
+        "ms": 73
+      },
+      {
+        "at": 2544260.799999997,
+        "ms": 101
+      },
+      {
+        "at": 2544526.5,
+        "ms": 82
+      },
+      {
+        "at": 2545035.5,
+        "ms": 82
+      },
+      {
+        "at": 2545291,
+        "ms": 121
+      },
+      {
+        "at": 2545412.799999997,
+        "ms": 50
+      },
+      {
+        "at": 2546703.5,
+        "ms": 63
+      },
+      {
+        "at": 2547641,
+        "ms": 67
+      },
+      {
+        "at": 2547784.899999991,
+        "ms": 50
+      },
+      {
+        "at": 2548010.5,
+        "ms": 125
+      },
+      {
+        "at": 2548313.699999988,
+        "ms": 110
+      },
+      {
+        "at": 2548424.799999997,
+        "ms": 51
+      },
+      {
+        "at": 2548953.099999994,
+        "ms": 108
+      },
+      {
+        "at": 2549201,
+        "ms": 155
+      },
+      {
+        "at": 2549357.299999997,
+        "ms": 70
+      }
+    ],
+    "errors": [],
+    "visibility": []
+  },
+  "passed": true,
+  "finished": "2026-11-13T08:36:33.262Z",
+  "elapsedSeconds": 600.157
+}

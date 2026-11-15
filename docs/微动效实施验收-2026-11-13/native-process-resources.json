@@ -1,0 +1,3906 @@
+[
+  {
+    "at": "2026-11-13T19:44:09.3826809+08:00",
+    "elapsedSeconds": 0.1582162,
+    "phase": "initializing",
+    "freeKB": 7461812,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.234375,
+        "privateBytes": 50257920,
+        "workingSetBytes": 92049408
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 14.84375,
+        "privateBytes": 77504512,
+        "workingSetBytes": 72945664
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 15.3125,
+        "privateBytes": 133005312,
+        "workingSetBytes": 81285120
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.890625,
+        "privateBytes": 11526144,
+        "workingSetBytes": 36044800
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7434240,
+        "workingSetBytes": 18898944
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 59.0625,
+        "privateBytes": 228777984,
+        "workingSetBytes": 225177600
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:44:19.5941830+08:00",
+    "elapsedSeconds": 10.3676465,
+    "phase": "idle-before",
+    "freeKB": 7454188,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.25,
+        "privateBytes": 50196480,
+        "workingSetBytes": 92016640
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 14.84375,
+        "privateBytes": 78082048,
+        "workingSetBytes": 73388032
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 15.328125,
+        "privateBytes": 133087232,
+        "workingSetBytes": 81575936
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.890625,
+        "privateBytes": 11526144,
+        "workingSetBytes": 36044800
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7434240,
+        "workingSetBytes": 18898944
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 59.578125,
+        "privateBytes": 227237888,
+        "workingSetBytes": 223514624
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:44:29.7425857+08:00",
+    "elapsedSeconds": 20.5160251,
+    "phase": "idle-before",
+    "freeKB": 7448988,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.265625,
+        "privateBytes": 50229248,
+        "workingSetBytes": 92037120
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 14.84375,
+        "privateBytes": 78127104,
+        "workingSetBytes": 73420800
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 15.328125,
+        "privateBytes": 133087232,
+        "workingSetBytes": 81575936
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.890625,
+        "privateBytes": 11526144,
+        "workingSetBytes": 36044800
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7434240,
+        "workingSetBytes": 18898944
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 59.59375,
+        "privateBytes": 227237888,
+        "workingSetBytes": 223547392
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:44:39.8892522+08:00",
+    "elapsedSeconds": 30.6626744,
+    "phase": "idle-before",
+    "freeKB": 7433796,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.265625,
+        "privateBytes": 50290688,
+        "workingSetBytes": 92069888
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 14.84375,
+        "privateBytes": 78139392,
+        "workingSetBytes": 73433088
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 15.328125,
+        "privateBytes": 133042176,
+        "workingSetBytes": 81555456
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.890625,
+        "privateBytes": 11534336,
+        "workingSetBytes": 36052992
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7434240,
+        "workingSetBytes": 18898944
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 59.59375,
+        "privateBytes": 227303424,
+        "workingSetBytes": 223719424
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:44:50.0336900+08:00",
+    "elapsedSeconds": 40.8071058,
+    "phase": "idle-before",
+    "freeKB": 7426884,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.28125,
+        "privateBytes": 50229248,
+        "workingSetBytes": 92037120
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 14.84375,
+        "privateBytes": 78139392,
+        "workingSetBytes": 73433088
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 15.328125,
+        "privateBytes": 133042176,
+        "workingSetBytes": 81555456
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.890625,
+        "privateBytes": 11534336,
+        "workingSetBytes": 36052992
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7434240,
+        "workingSetBytes": 18898944
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 59.59375,
+        "privateBytes": 227303424,
+        "workingSetBytes": 223748096
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:45:00.1786070+08:00",
+    "elapsedSeconds": 50.9520246,
+    "phase": "idle-before",
+    "freeKB": 7408432,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.296875,
+        "privateBytes": 50229248,
+        "workingSetBytes": 92037120
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 14.84375,
+        "privateBytes": 78143488,
+        "workingSetBytes": 73437184
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 15.328125,
+        "privateBytes": 132317184,
+        "workingSetBytes": 80982016
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.890625,
+        "privateBytes": 11534336,
+        "workingSetBytes": 36052992
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7434240,
+        "workingSetBytes": 18898944
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 59.59375,
+        "privateBytes": 227303424,
+        "workingSetBytes": 223776768
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:45:10.3954644+08:00",
+    "elapsedSeconds": 61.168918,
+    "phase": "navigation-first",
+    "freeKB": 7124624,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.328125,
+        "privateBytes": 50290688,
+        "workingSetBytes": 92069888
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 14.84375,
+        "privateBytes": 79900672,
+        "workingSetBytes": 74756096
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 15.421875,
+        "privateBytes": 221147136,
+        "workingSetBytes": 168734720
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.890625,
+        "privateBytes": 11526144,
+        "workingSetBytes": 36044800
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7434240,
+        "workingSetBytes": 18898944
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 60.203125,
+        "privateBytes": 238231552,
+        "workingSetBytes": 233676800
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:45:20.6391815+08:00",
+    "elapsedSeconds": 71.4126232,
+    "phase": "navigation-first",
+    "freeKB": 6987236,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.421875,
+        "privateBytes": 50315264,
+        "workingSetBytes": 92086272
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 16.078125,
+        "privateBytes": 80752640,
+        "workingSetBytes": 75919360
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 16.765625,
+        "privateBytes": 254820352,
+        "workingSetBytes": 203321344
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.90625,
+        "privateBytes": 11575296,
+        "workingSetBytes": 36093952
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7438336,
+        "workingSetBytes": 18903040
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 67.25,
+        "privateBytes": 333598720,
+        "workingSetBytes": 319901696
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:45:30.8621999+08:00",
+    "elapsedSeconds": 81.6357292,
+    "phase": "navigation-first",
+    "freeKB": 6937652,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.515625,
+        "privateBytes": 50311168,
+        "workingSetBytes": 92086272
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 17.171875,
+        "privateBytes": 81227776,
+        "workingSetBytes": 76431360
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 18.140625,
+        "privateBytes": 252379136,
+        "workingSetBytes": 201068544
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.921875,
+        "privateBytes": 11677696,
+        "workingSetBytes": 36192256
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18907136
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 73.46875,
+        "privateBytes": 380641280,
+        "workingSetBytes": 367149056
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:45:41.0619631+08:00",
+    "elapsedSeconds": 91.8353741,
+    "phase": "visible-idle",
+    "freeKB": 6895508,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.546875,
+        "privateBytes": 50315264,
+        "workingSetBytes": 92147712
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.25,
+        "privateBytes": 81252352,
+        "workingSetBytes": 76509184
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.453125,
+        "privateBytes": 264531968,
+        "workingSetBytes": 213549056
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.9375,
+        "privateBytes": 11681792,
+        "workingSetBytes": 36196352
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 78.984375,
+        "privateBytes": 379256832,
+        "workingSetBytes": 371015680
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:45:51.2550582+08:00",
+    "elapsedSeconds": 102.0284901,
+    "phase": "visible-idle",
+    "freeKB": 7119588,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.5625,
+        "privateBytes": 50253824,
+        "workingSetBytes": 92114944
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.25,
+        "privateBytes": 81252352,
+        "workingSetBytes": 76517376
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.46875,
+        "privateBytes": 162025472,
+        "workingSetBytes": 111378432
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.9375,
+        "privateBytes": 11681792,
+        "workingSetBytes": 36196352
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.328125,
+        "privateBytes": 256225280,
+        "workingSetBytes": 255123456
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:46:01.4572251+08:00",
+    "elapsedSeconds": 112.2306579,
+    "phase": "visible-idle",
+    "freeKB": 7102812,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.5625,
+        "privateBytes": 50282496,
+        "workingSetBytes": 92127232
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.25,
+        "privateBytes": 81207296,
+        "workingSetBytes": 76496896
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.46875,
+        "privateBytes": 161984512,
+        "workingSetBytes": 111362048
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.9375,
+        "privateBytes": 11681792,
+        "workingSetBytes": 36196352
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.359375,
+        "privateBytes": 256344064,
+        "workingSetBytes": 255217664
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:46:11.6820876+08:00",
+    "elapsedSeconds": 122.4555165,
+    "phase": "visible-idle",
+    "freeKB": 7067596,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.578125,
+        "privateBytes": 50192384,
+        "workingSetBytes": 92073984
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.25,
+        "privateBytes": 78569472,
+        "workingSetBytes": 74264576
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.46875,
+        "privateBytes": 161984512,
+        "workingSetBytes": 111370240
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.9375,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36085760
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.359375,
+        "privateBytes": 256802816,
+        "workingSetBytes": 255500288
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:46:21.8670153+08:00",
+    "elapsedSeconds": 132.6404542,
+    "phase": "visible-idle",
+    "freeKB": 7117116,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.59375,
+        "privateBytes": 50192384,
+        "workingSetBytes": 92073984
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.25,
+        "privateBytes": 78503936,
+        "workingSetBytes": 74199040
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.46875,
+        "privateBytes": 115556352,
+        "workingSetBytes": 65163264
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.9375,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36085760
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.359375,
+        "privateBytes": 256802816,
+        "workingSetBytes": 255516672
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:46:32.0271826+08:00",
+    "elapsedSeconds": 142.8006039,
+    "phase": "visible-idle",
+    "freeKB": 7104400,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.640625,
+        "privateBytes": 50253824,
+        "workingSetBytes": 92106752
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.265625,
+        "privateBytes": 78471168,
+        "workingSetBytes": 74190848
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.46875,
+        "privateBytes": 115556352,
+        "workingSetBytes": 65163264
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.9375,
+        "privateBytes": 11579392,
+        "workingSetBytes": 36093952
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.359375,
+        "privateBytes": 256774144,
+        "workingSetBytes": 255504384
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:46:42.1714865+08:00",
+    "elapsedSeconds": 152.9449058,
+    "phase": "visible-idle",
+    "freeKB": 7144736,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.65625,
+        "privateBytes": 50192384,
+        "workingSetBytes": 92073984
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.265625,
+        "privateBytes": 78471168,
+        "workingSetBytes": 74190848
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.46875,
+        "privateBytes": 115556352,
+        "workingSetBytes": 65163264
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.9375,
+        "privateBytes": 11579392,
+        "workingSetBytes": 36093952
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.359375,
+        "privateBytes": 256774144,
+        "workingSetBytes": 255516672
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:46:52.3300209+08:00",
+    "elapsedSeconds": 163.1034331,
+    "phase": "visible-idle",
+    "freeKB": 7129584,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.65625,
+        "privateBytes": 50192384,
+        "workingSetBytes": 92073984
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.265625,
+        "privateBytes": 78471168,
+        "workingSetBytes": 74190848
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.46875,
+        "privateBytes": 115556352,
+        "workingSetBytes": 65163264
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.9375,
+        "privateBytes": 11579392,
+        "workingSetBytes": 36093952
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.359375,
+        "privateBytes": 256774144,
+        "workingSetBytes": 255533056
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:47:02.4830110+08:00",
+    "elapsedSeconds": 173.2564216,
+    "phase": "visible-idle",
+    "freeKB": 7137416,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.671875,
+        "privateBytes": 50253824,
+        "workingSetBytes": 92106752
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.265625,
+        "privateBytes": 78626816,
+        "workingSetBytes": 74354688
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.46875,
+        "privateBytes": 115511296,
+        "workingSetBytes": 65142784
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.9375,
+        "privateBytes": 11661312,
+        "workingSetBytes": 36167680
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.359375,
+        "privateBytes": 256745472,
+        "workingSetBytes": 255537152
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:47:12.6310636+08:00",
+    "elapsedSeconds": 183.4044769,
+    "phase": "visible-idle",
+    "freeKB": 7156624,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.671875,
+        "privateBytes": 50188288,
+        "workingSetBytes": 92069888
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.296875,
+        "privateBytes": 78548992,
+        "workingSetBytes": 74285056
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.46875,
+        "privateBytes": 115511296,
+        "workingSetBytes": 65142784
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36081664
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.359375,
+        "privateBytes": 256745472,
+        "workingSetBytes": 255553536
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:47:22.7784089+08:00",
+    "elapsedSeconds": 193.5518397,
+    "phase": "visible-idle",
+    "freeKB": 7161144,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50126848,
+        "workingSetBytes": 92037120
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.296875,
+        "privateBytes": 78548992,
+        "workingSetBytes": 74285056
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.46875,
+        "privateBytes": 115511296,
+        "workingSetBytes": 65142784
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36081664
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.359375,
+        "privateBytes": 256745472,
+        "workingSetBytes": 255565824
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:47:32.9347335+08:00",
+    "elapsedSeconds": 203.7081837,
+    "phase": "visible-idle",
+    "freeKB": 7140624,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50184192,
+        "workingSetBytes": 92065792
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.359375,
+        "privateBytes": 78557184,
+        "workingSetBytes": 74293248
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.46875,
+        "privateBytes": 115511296,
+        "workingSetBytes": 65142784
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11579392,
+        "workingSetBytes": 36089856
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.375,
+        "privateBytes": 256876544,
+        "workingSetBytes": 255598592
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:47:43.1023557+08:00",
+    "elapsedSeconds": 213.8757558,
+    "phase": "minimized",
+    "freeKB": 7113676,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92041216
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.40625,
+        "privateBytes": 78725120,
+        "workingSetBytes": 78020608
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 126971904,
+        "workingSetBytes": 76046336
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11583488,
+        "workingSetBytes": 36093952
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.5,
+        "privateBytes": 242409472,
+        "workingSetBytes": 241029120
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:47:53.2577831+08:00",
+    "elapsedSeconds": 224.0311811,
+    "phase": "minimized",
+    "freeKB": 7432388,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92041216
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.484375,
+        "privateBytes": 78901248,
+        "workingSetBytes": 80039936
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 117518336,
+        "workingSetBytes": 67137536
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11583488,
+        "workingSetBytes": 36093952
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.5,
+        "privateBytes": 242409472,
+        "workingSetBytes": 241029120
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:48:03.4201394+08:00",
+    "elapsedSeconds": 234.1935411,
+    "phase": "minimized",
+    "freeKB": 7421228,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92041216
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.484375,
+        "privateBytes": 78757888,
+        "workingSetBytes": 79900672
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 117518336,
+        "workingSetBytes": 67145728
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11583488,
+        "workingSetBytes": 36093952
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.5,
+        "privateBytes": 242409472,
+        "workingSetBytes": 241029120
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:48:13.5859818+08:00",
+    "elapsedSeconds": 244.3593802,
+    "phase": "minimized",
+    "freeKB": 7418508,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92041216
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.484375,
+        "privateBytes": 78761984,
+        "workingSetBytes": 79843328
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 117518336,
+        "workingSetBytes": 67145728
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36081664
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.5,
+        "privateBytes": 242540544,
+        "workingSetBytes": 241045504
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:48:23.7427395+08:00",
+    "elapsedSeconds": 254.5161602,
+    "phase": "minimized",
+    "freeKB": 7354688,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92041216
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.484375,
+        "privateBytes": 78700544,
+        "workingSetBytes": 79810560
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 115494912,
+        "workingSetBytes": 65130496
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36081664
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.515625,
+        "privateBytes": 242540544,
+        "workingSetBytes": 241061888
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:48:33.8995620+08:00",
+    "elapsedSeconds": 264.6729664,
+    "phase": "minimized",
+    "freeKB": 7224704,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92041216
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.484375,
+        "privateBytes": 78700544,
+        "workingSetBytes": 79810560
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 115494912,
+        "workingSetBytes": 65130496
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36081664
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.515625,
+        "privateBytes": 242540544,
+        "workingSetBytes": 241074176
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:48:44.0465076+08:00",
+    "elapsedSeconds": 274.819925,
+    "phase": "minimized",
+    "freeKB": 7227152,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92041216
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.484375,
+        "privateBytes": 78700544,
+        "workingSetBytes": 79810560
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 115494912,
+        "workingSetBytes": 65130496
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36081664
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.515625,
+        "privateBytes": 242540544,
+        "workingSetBytes": 241090560
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:48:54.2042384+08:00",
+    "elapsedSeconds": 284.977637,
+    "phase": "minimized",
+    "freeKB": 7224012,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92041216
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.484375,
+        "privateBytes": 78700544,
+        "workingSetBytes": 79810560
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 115494912,
+        "workingSetBytes": 65130496
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36081664
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.515625,
+        "privateBytes": 242540544,
+        "workingSetBytes": 241102848
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:49:04.3669184+08:00",
+    "elapsedSeconds": 295.1403173,
+    "phase": "minimized",
+    "freeKB": 7254964,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92041216
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.484375,
+        "privateBytes": 78700544,
+        "workingSetBytes": 79822848
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 115494912,
+        "workingSetBytes": 65130496
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36081664
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.515625,
+        "privateBytes": 242540544,
+        "workingSetBytes": 241119232
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:49:14.5358365+08:00",
+    "elapsedSeconds": 305.3092431,
+    "phase": "minimized",
+    "freeKB": 7254168,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92041216
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.5,
+        "privateBytes": 78704640,
+        "workingSetBytes": 79826944
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 115494912,
+        "workingSetBytes": 65130496
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36081664
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.53125,
+        "privateBytes": 242540544,
+        "workingSetBytes": 241131520
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:49:24.6980715+08:00",
+    "elapsedSeconds": 315.4714695,
+    "phase": "minimized",
+    "freeKB": 7243124,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92041216
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.5,
+        "privateBytes": 78540800,
+        "workingSetBytes": 79736832
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 115449856,
+        "workingSetBytes": 65122304
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36081664
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.53125,
+        "privateBytes": 242540544,
+        "workingSetBytes": 241147904
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:49:34.8480630+08:00",
+    "elapsedSeconds": 325.6214588,
+    "phase": "minimized",
+    "freeKB": 7526672,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 91881472
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.5,
+        "privateBytes": 78540800,
+        "workingSetBytes": 79052800
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 115494912,
+        "workingSetBytes": 63299584
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36077568
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18907136
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.53125,
+        "privateBytes": 242540544,
+        "workingSetBytes": 184360960
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:49:44.9898002+08:00",
+    "elapsedSeconds": 335.7631958,
+    "phase": "minimized",
+    "freeKB": 7525928,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 91881472
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.5,
+        "privateBytes": 78438400,
+        "workingSetBytes": 78983168
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 115494912,
+        "workingSetBytes": 63299584
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36077568
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18907136
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.546875,
+        "privateBytes": 242671616,
+        "workingSetBytes": 184381440
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:49:55.1519043+08:00",
+    "elapsedSeconds": 345.9252995,
+    "phase": "minimized",
+    "freeKB": 7545732,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 91881472
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.5,
+        "privateBytes": 78438400,
+        "workingSetBytes": 78983168
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 115494912,
+        "workingSetBytes": 63299584
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36077568
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18907136
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.546875,
+        "privateBytes": 242671616,
+        "workingSetBytes": 184397824
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:50:05.3947689+08:00",
+    "elapsedSeconds": 356.1681832,
+    "phase": "restore-request",
+    "freeKB": 7513864,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.703125,
+        "privateBytes": 50163712,
+        "workingSetBytes": 91901952
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.5,
+        "privateBytes": 78434304,
+        "workingSetBytes": 78979072
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.5,
+        "privateBytes": 115494912,
+        "workingSetBytes": 63299584
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11571200,
+        "workingSetBytes": 36077568
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18907136
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.546875,
+        "privateBytes": 242671616,
+        "workingSetBytes": 184397824
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:50:15.6061209+08:00",
+    "elapsedSeconds": 366.3795233,
+    "phase": "restored",
+    "freeKB": 7851756,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.734375,
+        "privateBytes": 50167808,
+        "workingSetBytes": 91959296
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.578125,
+        "privateBytes": 78524416,
+        "workingSetBytes": 79200256
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.53125,
+        "privateBytes": 122617856,
+        "workingSetBytes": 72183808
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11587584,
+        "workingSetBytes": 36093952
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.59375,
+        "privateBytes": 241389568,
+        "workingSetBytes": 183791616
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:50:25.7456241+08:00",
+    "elapsedSeconds": 376.5190229,
+    "phase": "restored",
+    "freeKB": 7742748,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.734375,
+        "privateBytes": 50167808,
+        "workingSetBytes": 91959296
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.609375,
+        "privateBytes": 78528512,
+        "workingSetBytes": 79204352
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.53125,
+        "privateBytes": 122617856,
+        "workingSetBytes": 72183808
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11587584,
+        "workingSetBytes": 36093952
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.59375,
+        "privateBytes": 241389568,
+        "workingSetBytes": 183791616
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:50:35.8880372+08:00",
+    "elapsedSeconds": 386.661435,
+    "phase": "restored",
+    "freeKB": 7634252,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.75,
+        "privateBytes": 50266112,
+        "workingSetBytes": 92004352
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 18.609375,
+        "privateBytes": 78532608,
+        "workingSetBytes": 79192064
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 19.53125,
+        "privateBytes": 122617856,
+        "workingSetBytes": 72183808
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.953125,
+        "privateBytes": 11587584,
+        "workingSetBytes": 36093952
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 79.59375,
+        "privateBytes": 242843648,
+        "workingSetBytes": 184987648
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:50:46.0798101+08:00",
+    "elapsedSeconds": 396.8532373,
+    "phase": "navigation-second",
+    "freeKB": 7238124,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.890625,
+        "privateBytes": 50282496,
+        "workingSetBytes": 92073984
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 19.203125,
+        "privateBytes": 79470592,
+        "workingSetBytes": 80568320
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 20.6875,
+        "privateBytes": 254169088,
+        "workingSetBytes": 202645504
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.96875,
+        "privateBytes": 11603968,
+        "workingSetBytes": 36110336
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 83.84375,
+        "privateBytes": 316448768,
+        "workingSetBytes": 290422784
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:50:56.3035857+08:00",
+    "elapsedSeconds": 407.0769879,
+    "phase": "navigation-second",
+    "freeKB": 7217592,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 5.953125,
+        "privateBytes": 50282496,
+        "workingSetBytes": 92094464
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 20.640625,
+        "privateBytes": 79511552,
+        "workingSetBytes": 80601088
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 22.125,
+        "privateBytes": 252796928,
+        "workingSetBytes": 201756672
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.015625,
+        "privateBytes": 11689984,
+        "workingSetBytes": 36196352
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18911232
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 89.984375,
+        "privateBytes": 365740032,
+        "workingSetBytes": 356032512
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:51:06.4815949+08:00",
+    "elapsedSeconds": 417.2550221,
+    "phase": "navigation-second",
+    "freeKB": 7177668,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.03125,
+        "privateBytes": 50262016,
+        "workingSetBytes": 92078080
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 21.6875,
+        "privateBytes": 79556608,
+        "workingSetBytes": 80633856
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.546875,
+        "privateBytes": 273170432,
+        "workingSetBytes": 222494720
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.046875,
+        "privateBytes": 11644928,
+        "workingSetBytes": 36155392
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 95.296875,
+        "privateBytes": 384024576,
+        "workingSetBytes": 371249152
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:51:16.6602205+08:00",
+    "elapsedSeconds": 427.4336183,
+    "phase": "idle-after",
+    "freeKB": 7363836,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.0625,
+        "privateBytes": 50286592,
+        "workingSetBytes": 92094464
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.21875,
+        "privateBytes": 79601664,
+        "workingSetBytes": 80678912
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 194793472,
+        "workingSetBytes": 144343040
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.078125,
+        "privateBytes": 11653120,
+        "workingSetBytes": 36163584
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18919424
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.234375,
+        "privateBytes": 251027456,
+        "workingSetBytes": 249167872
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:51:26.8049762+08:00",
+    "elapsedSeconds": 437.578372,
+    "phase": "idle-after",
+    "freeKB": 7396724,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.078125,
+        "privateBytes": 50225152,
+        "workingSetBytes": 92061696
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.21875,
+        "privateBytes": 79650816,
+        "workingSetBytes": 80703488
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 163844096,
+        "workingSetBytes": 113725440
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.078125,
+        "privateBytes": 11653120,
+        "workingSetBytes": 36163584
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18919424
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.234375,
+        "privateBytes": 251158528,
+        "workingSetBytes": 249184256
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:51:36.9557812+08:00",
+    "elapsedSeconds": 447.7291758,
+    "phase": "idle-after",
+    "freeKB": 7351760,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.09375,
+        "privateBytes": 50229248,
+        "workingSetBytes": 92057600
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.21875,
+        "privateBytes": 78639104,
+        "workingSetBytes": 79683584
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 163844096,
+        "workingSetBytes": 113725440
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.078125,
+        "privateBytes": 11653120,
+        "workingSetBytes": 36163584
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18919424
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.25,
+        "privateBytes": 251383808,
+        "workingSetBytes": 249348096
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:51:47.1022336+08:00",
+    "elapsedSeconds": 457.875627,
+    "phase": "idle-after",
+    "freeKB": 7369404,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.109375,
+        "privateBytes": 50167808,
+        "workingSetBytes": 92024832
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.21875,
+        "privateBytes": 78639104,
+        "workingSetBytes": 79683584
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115990528,
+        "workingSetBytes": 66150400
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.078125,
+        "privateBytes": 11653120,
+        "workingSetBytes": 36163584
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7446528,
+        "workingSetBytes": 18919424
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.25,
+        "privateBytes": 251383808,
+        "workingSetBytes": 249368576
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:51:57.2424939+08:00",
+    "elapsedSeconds": 468.0158889,
+    "phase": "idle-after",
+    "freeKB": 7378376,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.109375,
+        "privateBytes": 50167808,
+        "workingSetBytes": 92024832
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.21875,
+        "privateBytes": 78630912,
+        "workingSetBytes": 79675392
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115990528,
+        "workingSetBytes": 66150400
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.078125,
+        "privateBytes": 11653120,
+        "workingSetBytes": 36163584
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.25,
+        "privateBytes": 251383808,
+        "workingSetBytes": 249380864
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:52:07.3935610+08:00",
+    "elapsedSeconds": 478.1670452,
+    "phase": "idle-after",
+    "freeKB": 7393240,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.109375,
+        "privateBytes": 50229248,
+        "workingSetBytes": 92057600
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.21875,
+        "privateBytes": 78475264,
+        "workingSetBytes": 79552512
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115990528,
+        "workingSetBytes": 66150400
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.078125,
+        "privateBytes": 11620352,
+        "workingSetBytes": 36130816
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251383808,
+        "workingSetBytes": 249401344
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:52:17.5433235+08:00",
+    "elapsedSeconds": 488.3168094,
+    "phase": "idle-after",
+    "freeKB": 7393412,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.109375,
+        "privateBytes": 50167808,
+        "workingSetBytes": 92024832
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.234375,
+        "privateBytes": 78602240,
+        "workingSetBytes": 79679488
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115945472,
+        "workingSetBytes": 66105344
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.078125,
+        "privateBytes": 11620352,
+        "workingSetBytes": 36130816
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251371520,
+        "workingSetBytes": 249405440
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:52:27.6810479+08:00",
+    "elapsedSeconds": 498.4544454,
+    "phase": "idle-after",
+    "freeKB": 7388552,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.109375,
+        "privateBytes": 50167808,
+        "workingSetBytes": 92024832
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.234375,
+        "privateBytes": 78413824,
+        "workingSetBytes": 79491072
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115945472,
+        "workingSetBytes": 66105344
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.078125,
+        "privateBytes": 11620352,
+        "workingSetBytes": 36130816
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251371520,
+        "workingSetBytes": 249417728
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:52:37.8212696+08:00",
+    "elapsedSeconds": 508.5946777,
+    "phase": "idle-after",
+    "freeKB": 7396076,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.140625,
+        "privateBytes": 50229248,
+        "workingSetBytes": 92057600
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.25,
+        "privateBytes": 78422016,
+        "workingSetBytes": 79499264
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115900416,
+        "workingSetBytes": 66084864
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.078125,
+        "privateBytes": 11620352,
+        "workingSetBytes": 36130816
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251379712,
+        "workingSetBytes": 249446400
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:52:47.9750589+08:00",
+    "elapsedSeconds": 518.7484739,
+    "phase": "idle-after",
+    "freeKB": 7354212,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.140625,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92004352
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.25,
+        "privateBytes": 78356480,
+        "workingSetBytes": 79462400
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115900416,
+        "workingSetBytes": 66084864
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.078125,
+        "privateBytes": 11620352,
+        "workingSetBytes": 36130816
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251510784,
+        "workingSetBytes": 249470976
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:52:58.1448908+08:00",
+    "elapsedSeconds": 528.9182849,
+    "phase": "idle-after",
+    "freeKB": 7360956,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.171875,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92004352
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.25,
+        "privateBytes": 78307328,
+        "workingSetBytes": 79437824
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115900416,
+        "workingSetBytes": 66084864
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.078125,
+        "privateBytes": 11620352,
+        "workingSetBytes": 36130816
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251510784,
+        "workingSetBytes": 249487360
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:53:08.2886003+08:00",
+    "elapsedSeconds": 539.0619938,
+    "phase": "idle-after",
+    "freeKB": 7408748,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.1875,
+        "privateBytes": 50192384,
+        "workingSetBytes": 92037120
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.296875,
+        "privateBytes": 78258176,
+        "workingSetBytes": 79364096
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115900416,
+        "workingSetBytes": 66084864
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.09375,
+        "privateBytes": 11538432,
+        "workingSetBytes": 36057088
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251482112,
+        "workingSetBytes": 249491456
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:53:18.4298129+08:00",
+    "elapsedSeconds": 549.2032211,
+    "phase": "idle-after",
+    "freeKB": 7407340,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.203125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92004352
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.296875,
+        "privateBytes": 78385152,
+        "workingSetBytes": 79491072
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115900416,
+        "workingSetBytes": 66084864
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.09375,
+        "privateBytes": 11538432,
+        "workingSetBytes": 36057088
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251482112,
+        "workingSetBytes": 249503744
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:53:28.5786430+08:00",
+    "elapsedSeconds": 559.3520362,
+    "phase": "idle-after",
+    "freeKB": 7406488,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.203125,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92004352
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.296875,
+        "privateBytes": 78385152,
+        "workingSetBytes": 79491072
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115900416,
+        "workingSetBytes": 66084864
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.09375,
+        "privateBytes": 11538432,
+        "workingSetBytes": 36057088
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251482112,
+        "workingSetBytes": 249520128
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:53:38.7247560+08:00",
+    "elapsedSeconds": 569.4981508,
+    "phase": "idle-after",
+    "freeKB": 7407508,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.21875,
+        "privateBytes": 50188288,
+        "workingSetBytes": 92033024
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.328125,
+        "privateBytes": 78385152,
+        "workingSetBytes": 79491072
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115900416,
+        "workingSetBytes": 66084864
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.09375,
+        "privateBytes": 11538432,
+        "workingSetBytes": 36057088
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251482112,
+        "workingSetBytes": 249540608
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:53:48.8782605+08:00",
+    "elapsedSeconds": 579.6516557,
+    "phase": "idle-after",
+    "freeKB": 7401732,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.25,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92004352
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.328125,
+        "privateBytes": 78426112,
+        "workingSetBytes": 79511552
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115900416,
+        "workingSetBytes": 66084864
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.09375,
+        "privateBytes": 11538432,
+        "workingSetBytes": 36057088
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251482112,
+        "workingSetBytes": 249552896
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:53:59.0253186+08:00",
+    "elapsedSeconds": 589.7987212,
+    "phase": "idle-after",
+    "freeKB": 7375896,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.25,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92004352
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.328125,
+        "privateBytes": 78426112,
+        "workingSetBytes": 79511552
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115855360,
+        "workingSetBytes": 66068480
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.09375,
+        "privateBytes": 11538432,
+        "workingSetBytes": 36057088
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251482112,
+        "workingSetBytes": 249569280
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:54:09.1689799+08:00",
+    "elapsedSeconds": 599.9423778,
+    "phase": "idle-after",
+    "freeKB": 7370364,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.28125,
+        "privateBytes": 50192384,
+        "workingSetBytes": 92037120
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.34375,
+        "privateBytes": 78311424,
+        "workingSetBytes": 79396864
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 115900416,
+        "workingSetBytes": 66129920
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.09375,
+        "privateBytes": 11538432,
+        "workingSetBytes": 36057088
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.265625,
+        "privateBytes": 251613184,
+        "workingSetBytes": 249597952
+      }
+    ]
+  },
+  {
+    "at": "2026-11-13T19:54:19.3098976+08:00",
+    "elapsedSeconds": 610.0833023,
+    "phase": "idle-after",
+    "freeKB": 7532332,
+    "processes": [
+      {
+        "pid": 2508,
+        "parentPid": 23436,
+        "role": "native",
+        "cpuSeconds": 6.296875,
+        "privateBytes": 50130944,
+        "workingSetBytes": 92004352
+      },
+      {
+        "pid": 14064,
+        "parentPid": 2508,
+        "role": "webview-browser",
+        "cpuSeconds": 22.34375,
+        "privateBytes": 78512128,
+        "workingSetBytes": 79609856
+      },
+      {
+        "pid": 22588,
+        "parentPid": 14064,
+        "role": "crashpad-handler",
+        "cpuSeconds": 0.046875,
+        "privateBytes": 2985984,
+        "workingSetBytes": 10809344
+      },
+      {
+        "pid": 20212,
+        "parentPid": 14064,
+        "role": "gpu-process",
+        "cpuSeconds": 23.96875,
+        "privateBytes": 136073216,
+        "workingSetBytes": 86011904
+      },
+      {
+        "pid": 13428,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 1.09375,
+        "privateBytes": 11538432,
+        "workingSetBytes": 36057088
+      },
+      {
+        "pid": 17992,
+        "parentPid": 14064,
+        "role": "utility",
+        "cpuSeconds": 0.15625,
+        "privateBytes": 7442432,
+        "workingSetBytes": 18915328
+      },
+      {
+        "pid": 24156,
+        "parentPid": 14064,
+        "role": "renderer",
+        "cpuSeconds": 98.828125,
+        "privateBytes": 240709632,
+        "workingSetBytes": 237223936
+      }
+    ]
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "name": "已有文件或其下级路径不能作为输出目录",
+    "root": "D:\\AItool\\winapp\\nc-workbench\\desktop\\.cache\\motion-closeout-2026-11-13\\workspace/src/public/demo/MotionDemo.java",
+    "passed": true,
+    "writeDisabled": true
+  },
+  {
+    "name": "已有文件或其下级路径不能作为输出目录",
+    "root": "D:\\AItool\\winapp\\nc-workbench\\desktop\\.cache\\motion-closeout-2026-11-13\\workspace/src/public/demo/MotionDemo.java/child",
+    "passed": true,
+    "writeDisabled": true
+  },
+  {
+    "name": "未创建的新目录完成整套生成，原测试 Java 未改变",
+    "passed": true,
+    "written": 3,
+    "failed": 0,
+    "files": [
+      {
+        "path": "src/public/nc/vo/uapbd/demo_simple/DemoHVO.java",
+        "bytes": 924
+      },
+      {
+        "path": "db/demo_simple.oracle.sql",
+        "bytes": 466
+      },
+      {
+        "path": "meta/demo_simple.registry.json",
+        "bytes": 2281
+      }
+    ]
+  }
+]

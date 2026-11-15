@@ -1,0 +1,175 @@
+{
+  "errors": [],
+  "measurements": [
+    {
+      "theme": "light",
+      "name": "wide",
+      "rect": {
+        "x": 240,
+        "y": 52,
+        "width": 960,
+        "height": 800,
+        "top": 52,
+        "right": 1200,
+        "bottom": 852,
+        "left": 240
+      },
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "listHeight": 446,
+      "overflow": false
+    },
+    {
+      "theme": "light",
+      "name": "low",
+      "rect": {
+        "x": 32,
+        "y": 52,
+        "width": 960,
+        "height": 468,
+        "top": 52,
+        "right": 992,
+        "bottom": 520,
+        "left": 32
+      },
+      "viewport": {
+        "width": 1024,
+        "height": 540
+      },
+      "listHeight": 114,
+      "overflow": false
+    },
+    {
+      "theme": "light",
+      "name": "scale150",
+      "rect": {
+        "x": 16,
+        "y": 52,
+        "width": 651,
+        "height": 440,
+        "top": 52,
+        "right": 667,
+        "bottom": 492,
+        "left": 16
+      },
+      "viewport": {
+        "width": 683,
+        "height": 512
+      },
+      "listHeight": 86,
+      "overflow": false
+    },
+    {
+      "theme": "light",
+      "name": "narrow",
+      "rect": {
+        "x": 16,
+        "y": 52,
+        "width": 528,
+        "height": 600,
+        "top": 52,
+        "right": 544,
+        "bottom": 652,
+        "left": 16
+      },
+      "viewport": {
+        "width": 560,
+        "height": 700
+      },
+      "listHeight": 195,
+      "overflow": false
+    },
+    {
+      "theme": "light",
+      "name": "jar-low",
+      "listHeight": 127
+    },
+    {
+      "theme": "dark",
+      "name": "wide",
+      "rect": {
+        "x": 240,
+        "y": 52,
+        "width": 960,
+        "height": 800,
+        "top": 52,
+        "right": 1200,
+        "bottom": 852,
+        "left": 240
+      },
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "listHeight": 446,
+      "overflow": false
+    },
+    {
+      "theme": "dark",
+      "name": "low",
+      "rect": {
+        "x": 32,
+        "y": 52,
+        "width": 960,
+        "height": 468,
+        "top": 52,
+        "right": 992,
+        "bottom": 520,
+        "left": 32
+      },
+      "viewport": {
+        "width": 1024,
+        "height": 540
+      },
+      "listHeight": 114,
+      "overflow": false
+    },
+    {
+      "theme": "dark",
+      "name": "scale150",
+      "rect": {
+        "x": 16,
+        "y": 52,
+        "width": 651,
+        "height": 440,
+        "top": 52,
+        "right": 667,
+        "bottom": 492,
+        "left": 16
+      },
+      "viewport": {
+        "width": 683,
+        "height": 512
+      },
+      "listHeight": 86,
+      "overflow": false
+    },
+    {
+      "theme": "dark",
+      "name": "narrow",
+      "rect": {
+        "x": 16,
+        "y": 52,
+        "width": 528,
+        "height": 600,
+        "top": 52,
+        "right": 544,
+        "bottom": 652,
+        "left": 16
+      },
+      "viewport": {
+        "width": 560,
+        "height": 700
+      },
+      "listHeight": 195,
+      "overflow": false
+    },
+    {
+      "theme": "dark",
+      "name": "jar-low",
+      "listHeight": 127
+    }
+  ]
+}

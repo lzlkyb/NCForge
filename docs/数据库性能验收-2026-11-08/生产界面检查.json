@@ -1,10 +1,10 @@
 {
   "passed": true,
   "measurements": {
-    "rows": 20,
+    "rows": 21,
     "headers": 17,
     "commandHeader": {
-      "height": 52.390625,
+      "height": 40,
       "overflow": false
     },
     "selection": {
@@ -25,7 +25,7 @@
       "field": {
         "outline": "none",
         "parentBorder": "1px",
-        "parentRadius": "6px"
+        "parentRadius": "8px"
       },
       "variants": [
         {
@@ -110,8 +110,8 @@
         }
       ]
     },
-    "workerFilterMs": 923,
-    "workerRefilterMs": 84
+    "workerFilterMs": 898,
+    "workerRefilterMs": 62
   },
   "errors": []
 }

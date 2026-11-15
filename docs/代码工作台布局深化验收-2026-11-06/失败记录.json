@@ -1,0 +1,224 @@
+{
+  "errors": [],
+  "text": "NCForge\n验收工程\n转到文件、搜索、符号…\nCtrl+Shift+R\nNC 服务\n已停止\n代码\n版本\n数据库\n元数据\n日志\n设置\n资源\n文件\n包\n只看问题\n只看改动\ndemo\nJava\nA\n.java\nJava\nB\n.java\nJava\nFile01\n.java\nJava\nFile02\n.java\nJava\nFile03\n.java\nJava\nFile04\n.java\nJava\nFile05\n.java\nJava\nFile06\n.java\nJava\nFile07\n.java\nJava\nFile08\n.java\nJava\nFile09\n.java\nJava\nFile10\n.java\nJava\nFile11\n.java\nJava\nFile12\n.java\nJava\nFile13\n.java\nJava\nFile14\n.java\nJava\nFile15\n.java\nJava\nFile16\n.java\nJava\nFile17\n.java\nJava\nFile18\n.java\nSVN · 非当前工作副本\n刷新\nFile18\n.java\nA\n.java\n左组\n右组\n编译 demo 模块\n布局\n跳转记录\ndemo\nA\n.java\n改动\n1\n2\n3\n4\n5\n6\n7\n8\n9\npackage demo;\npublic class A {\n    private String name;\n    public String getName() { return name; }\n    public void execute() {\n        System.out.println(\"A\");\n    }\n}\n// SHARED_MODEL_EDIT\nB\n.java\ndemo\nB\n.java\n1\n2\n3\n4\n5\n6\n7\npackage demo;\npublic class B {\n    public void execute() {\n        System.out.println(\"B\");\n    }\n}\n// RIGHT_GROUP_EDIT\n问题\n改动\n运行\n展开阅读\nD:/验收工程\\demo\\A.java\n轻量模式 · 恢复代码智能\n工程关联\n隐藏面板\nUTF-8 · 9:21",
+  "debug": {
+    "writes": [
+      {
+        "path": "D:/验收工程\\demo\\B.java",
+        "text": "package demo;\npublic class B {\n    public void execute() {\n        System.out.println(\"B\");\n    }\n}\n// RIGHT_GROUP_EDIT",
+        "encoding": "UTF-8",
+        "hasBom": false,
+        "eol": "LF",
+        "expectedMtimeMs": 1
+      },
+      {
+        "path": "D:/验收工程\\demo\\A.java",
+        "text": "package demo;\npublic class A {\n    private String name;\n    public String getName() { return name; }\n    public void execute() {\n        System.out.println(\"A\");\n    }\n}\n// SHARED_MODEL_EDIT",
+        "encoding": "UTF-8",
+        "hasBom": false,
+        "eol": "LF",
+        "expectedMtimeMs": 1
+      }
+    ],
+    "calls": [
+      {
+        "cmd": "fs_read_file",
+        "args": {
+          "path": "D:/验收工程\\demo\\File13.java"
+        }
+      },
+      {
+        "cmd": "fs_encoding_marks",
+        "args": {
+          "paths": [
+            "D:/验收工程\\demo\\File13.java"
+          ]
+        }
+      },
+      {
+        "cmd": "local_history_capture",
+        "args": {
+          "path": "D:/验收工程\\demo\\File12.java"
+        }
+      },
+      {
+        "cmd": "svn_diff",
+        "args": {
+          "path": "D:/验收工程\\demo\\File13.java"
+        }
+      },
+      {
+        "cmd": "fs_read_file",
+        "args": {
+          "path": "D:/验收工程\\demo\\File14.java"
+        }
+      },
+      {
+        "cmd": "fs_encoding_marks",
+        "args": {
+          "paths": [
+            "D:/验收工程\\demo\\File14.java"
+          ]
+        }
+      },
+      {
+        "cmd": "local_history_capture",
+        "args": {
+          "path": "D:/验收工程\\demo\\File13.java"
+        }
+      },
+      {
+        "cmd": "svn_diff",
+        "args": {
+          "path": "D:/验收工程\\demo\\File14.java"
+        }
+      },
+      {
+        "cmd": "fs_read_file",
+        "args": {
+          "path": "D:/验收工程\\demo\\File15.java"
+        }
+      },
+      {
+        "cmd": "fs_encoding_marks",
+        "args": {
+          "paths": [
+            "D:/验收工程\\demo\\File15.java"
+          ]
+        }
+      },
+      {
+        "cmd": "local_history_capture",
+        "args": {
+          "path": "D:/验收工程\\demo\\File14.java"
+        }
+      },
+      {
+        "cmd": "svn_diff",
+        "args": {
+          "path": "D:/验收工程\\demo\\File15.java"
+        }
+      },
+      {
+        "cmd": "fs_read_file",
+        "args": {
+          "path": "D:/验收工程\\demo\\File16.java"
+        }
+      },
+      {
+        "cmd": "fs_encoding_marks",
+        "args": {
+          "paths": [
+            "D:/验收工程\\demo\\File16.java"
+          ]
+        }
+      },
+      {
+        "cmd": "local_history_capture",
+        "args": {
+          "path": "D:/验收工程\\demo\\File15.java"
+        }
+      },
+      {
+        "cmd": "svn_diff",
+        "args": {
+          "path": "D:/验收工程\\demo\\File16.java"
+        }
+      },
+      {
+        "cmd": "fs_read_file",
+        "args": {
+          "path": "D:/验收工程\\demo\\File17.java"
+        }
+      },
+      {
+        "cmd": "fs_encoding_marks",
+        "args": {
+          "paths": [
+            "D:/验收工程\\demo\\File17.java"
+          ]
+        }
+      },
+      {
+        "cmd": "local_history_capture",
+        "args": {
+          "path": "D:/验收工程\\demo\\File16.java"
+        }
+      },
+      {
+        "cmd": "svn_diff",
+        "args": {
+          "path": "D:/验收工程\\demo\\File17.java"
+        }
+      },
+      {
+        "cmd": "fs_read_file",
+        "args": {
+          "path": "D:/验收工程\\demo\\File18.java"
+        }
+      },
+      {
+        "cmd": "fs_encoding_marks",
+        "args": {
+          "paths": [
+            "D:/验收工程\\demo\\File18.java"
+          ]
+        }
+      },
+      {
+        "cmd": "local_history_capture",
+        "args": {
+          "path": "D:/验收工程\\demo\\File17.java"
+        }
+      },
+      {
+        "cmd": "svn_diff",
+        "args": {
+          "path": "D:/验收工程\\demo\\File18.java"
+        }
+      },
+      {
+        "cmd": "local_history_capture",
+        "args": {
+          "path": "D:/验收工程\\demo\\File18.java"
+        }
+      },
+      {
+        "cmd": "local_history_capture",
+        "args": {
+          "path": "D:/验收工程\\demo\\A.java"
+        }
+      },
+      {
+        "cmd": "local_history_capture",
+        "args": {
+          "path": "D:/验收工程\\demo\\B.java"
+        }
+      },
+      {
+        "cmd": "local_history_capture",
+        "args": {
+          "path": "D:/验收工程\\demo\\A.java"
+        }
+      },
+      {
+        "cmd": "fs_write_file",
+        "args": {
+          "path": "D:/验收工程\\demo\\A.java",
+          "text": "package demo;\npublic class A {\n    private String name;\n    public String getName() { return name; }\n    public void execute() {\n        System.out.println(\"A\");\n    }\n}\n// SHARED_MODEL_EDIT",
+          "encoding": "UTF-8",
+          "hasBom": false,
+          "eol": "LF",
+          "expectedMtimeMs": 1
+        }
+      },
+      {
+        "cmd": "req_note_manual",
+        "args": {
+          "path": "D:/验收工程\\demo\\A.java"
+        }
+      }
+    ],
+    "focus": "<textarea data-mprt=\"7\" class=\"inputarea monaco-mouse-cursor-text\" wrap=\"off\" autocorrect=\"off\" autocapitalize=\"off\" autocomplete=\"off\" spellcheck=\"false\" aria-label=\"Editor content\" aria-required=\"false\" tabindex=\"0\" role=\"textbox\" aria-roledescription=\"editor\" aria-multiline=\"true\" aria-autocomplete=\"both\" style=\"tab-size: 31.2031px; font-family: &quot;JetBrains Mono&quot;, &quot;Noto Sans SC&quot;, Consolas, monospace, Consolas, &quot;Courier New&quot;, monospace; font-weight: 400; font-size: 13px; font-feature-settings: &quot;liga&quot; 0, &quot;calt&quot; 0; font-variation-settings: normal; line-height: 21px; letter-spacing: 0px; top: 168px; left: 242px; width: 1px; height: 1px;\"></textarea>"
+  }
+}

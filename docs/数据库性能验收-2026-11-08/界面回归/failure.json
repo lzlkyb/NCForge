@@ -1,0 +1,199 @@
+{
+  "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'40' !== '2'\n",
+  "errors": [],
+  "measurements": [
+    {
+      "mode": "sql",
+      "theme": "light",
+      "material": "glass",
+      "label": "wide",
+      "width": 1280,
+      "overflow": false,
+      "grid": 202,
+      "editor": 375,
+      "body": {
+        "x": 304,
+        "y": 120,
+        "width": 965,
+        "height": 690,
+        "top": 120,
+        "right": 1269,
+        "bottom": 810,
+        "left": 304
+      },
+      "result": {
+        "x": 304,
+        "y": 500,
+        "width": 965,
+        "height": 310,
+        "top": 500,
+        "right": 1269,
+        "bottom": 810,
+        "left": 304
+      },
+      "vars": {
+        "theme": false,
+        "material": "glass"
+      },
+      "contrast": [
+        {
+          "selector": ".dbx-gc:not(.rn)",
+          "ratio": 14.036246348620386
+        },
+        {
+          "selector": ".dbx-context .dbx-schema-chip",
+          "ratio": 14.036246348620386
+        },
+        {
+          "selector": ".dbx-context .dbx-conn-status",
+          "ratio": 5.416842810608172
+        }
+      ]
+    },
+    {
+      "mode": "sql",
+      "theme": "light",
+      "material": "glass",
+      "label": "low",
+      "width": 1024,
+      "overflow": false,
+      "grid": 141,
+      "editor": 140,
+      "body": {
+        "x": 304,
+        "y": 120,
+        "width": 709,
+        "height": 394,
+        "top": 120,
+        "right": 1013,
+        "bottom": 514,
+        "left": 304
+      },
+      "result": {
+        "x": 304,
+        "y": 265,
+        "width": 709,
+        "height": 249,
+        "top": 265,
+        "right": 1013,
+        "bottom": 514,
+        "left": 304
+      },
+      "vars": {
+        "theme": false,
+        "material": "glass"
+      },
+      "contrast": [
+        {
+          "selector": ".dbx-gc:not(.rn)",
+          "ratio": 14.036246348620386
+        },
+        {
+          "selector": ".dbx-context .dbx-schema-chip",
+          "ratio": 14.036246348620386
+        },
+        {
+          "selector": ".dbx-context .dbx-conn-status",
+          "ratio": 5.416842810608172
+        }
+      ]
+    },
+    {
+      "mode": "sql",
+      "theme": "light",
+      "material": "glass",
+      "label": "narrow",
+      "width": 560,
+      "overflow": false,
+      "grid": 202,
+      "editor": 237,
+      "body": {
+        "x": 63,
+        "y": 119,
+        "width": 489,
+        "height": 552,
+        "top": 119,
+        "right": 552,
+        "bottom": 671,
+        "left": 63
+      },
+      "result": {
+        "x": 63,
+        "y": 361,
+        "width": 489,
+        "height": 310,
+        "top": 361,
+        "right": 552,
+        "bottom": 671,
+        "left": 63
+      },
+      "vars": {
+        "theme": false,
+        "material": "glass"
+      },
+      "contrast": [
+        {
+          "selector": ".dbx-gc:not(.rn)",
+          "ratio": 14.036246348620386
+        },
+        {
+          "selector": ".dbx-context .dbx-schema-chip",
+          "ratio": 14.036246348620386
+        },
+        {
+          "selector": ".dbx-context .dbx-conn-status",
+          "ratio": 5.416842810608172
+        }
+      ]
+    },
+    {
+      "mode": "sql",
+      "theme": "light",
+      "material": "glass",
+      "label": "scale150",
+      "width": 683,
+      "overflow": false,
+      "grid": 113,
+      "editor": 140,
+      "body": {
+        "x": 64,
+        "y": 120,
+        "width": 608,
+        "height": 366,
+        "top": 120,
+        "right": 672,
+        "bottom": 486,
+        "left": 64
+      },
+      "result": {
+        "x": 64,
+        "y": 265,
+        "width": 608,
+        "height": 221,
+        "top": 265,
+        "right": 672,
+        "bottom": 486,
+        "left": 64
+      },
+      "vars": {
+        "theme": false,
+        "material": "glass"
+      },
+      "contrast": [
+        {
+          "selector": ".dbx-gc:not(.rn)",
+          "ratio": 14.036246348620386
+        },
+        {
+          "selector": ".dbx-context .dbx-schema-chip",
+          "ratio": 14.036246348620386
+        },
+        {
+          "selector": ".dbx-context .dbx-conn-status",
+          "ratio": 5.416842810608172
+        }
+      ]
+    }
+  ],
+  "text": "NCForge\n选择工作区\n转到文件、类型、命令…\nCtrl+Shift+R\nNC 服务\n状态未知\n代码\n版本\n数据库\n元数据\n日志\n重新检查\n设置\nSQL 1 · NC 测试环境 · 数… · 测试\n执行当前语句\n第 1 行\nNC 测试环境 · 数据核对工作台\n测试\n登录账号\n已连接\n手动提交\n1\nselect * from TEST_TABLE;\n查询 1\nTEST_TABLE\n输出\n1\n筛选已加载行\n显示\n比对\n固定 A\n复制当前结果 1200 × 3\n导出…\n方向键移动，Shift 扩选，Ctrl+A 全选已加载数据，Ctrl+C 复制，F4 查看完整值；Enter 或 Tab 进入编辑，Shift+Enter 打开大文本编辑框。Alt+上箭头进入表头；表头左右键换列，Enter 排序，Shift+F10 或菜单键打开菜单，下箭头返回数据，Esc 返回原活动格。\nid\nNUMBER\ncode\nVARCHAR2\nname\nVARCHAR2\n39\n39\nNC-0039\n物料名称 39\n40\n40\nNC-0040\n物料名称 40\n41\n41\nNC-0041\n物料名称 41\n42\n42\nNC-0042\n物料名称 42\n43\n43\nNC-0043\n物料名称 43\n44\n44\nNC-0044\n物料名称 44\n45\n45\nNC-0045\n物料名称 45\n46\n46\nNC-0046\n物料名称 46\n47\n47\nNC-0047\n物料名称 47\n48\n48\nNC-0048\n物料名称 48\n49\n49\nNC-0049\n物料名称 49\n50\n50\nNC-0050\n物料名称 50\n51\n51\nNC-0051\n物料名称 51\n52\n52\nNC-0052\n物料名称 52\n53\n53\nNC-0053\n物料名称 53\n54\n54\nNC-0054\n物料名称 54\n55\n55\nNC-0055\n物料名称 55\n56\n56\nNC-0056\n物料名称 56\n57\n57\nNC-0057\n物料名称 57\n58\n58\nNC-0058\n物料名称 58\n59\n59\nNC-0059\n物料名称 59\n60\n60\nNC-0060\n物料名称 60\n61\n61\nNC-0061\n物料名称 61\n62\n62\nNC-0062\n物料名称 62\n63\n63\nNC-0063\n物料名称 63\n64\n64\nNC-0064\n物料名称 64\n65\n65\nNC-0065\n物料名称 65\n66\n66\nNC-0066\n物料名称 66\n67\n67\nNC-0067\n物料名称 67\n68\n68\nNC-0068\n物料名称 68\n69\n69\nNC-0069\n物料名称 69\n70\n70\nNC-0070\n物料名称 70\n71\n71\nNC-0071\n物料名称 71\n已加载 1,200 行\n10 ms\n完整结果\n尚未打开工程\nNC 服务 · 状态未知"
+}

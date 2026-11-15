@@ -1,0 +1,125 @@
+NCForge
+验收工程
+转到文件、搜索、符号…
+Ctrl+Shift+R
+NC 服务
+已停止
+代码
+版本
+数据库
+元数据
+日志
+设置
+资源
+文件
+包
+当前
+验收工程
+· 编译 / SVN 只作用于它 · 共 2 个关联工程
+只看问题
+只看改动
+验收工程
+当前
+Java
+A
+.java
+Java
+B
+.java
+Java
+File01
+.java
+Java
+File02
+.java
+Java
+File03
+.java
+Java
+File04
+.java
+Java
+File05
+.java
+Java
+File06
+.java
+Java
+File07
+.java
+Java
+File08
+.java
+Java
+File09
+.java
+Java
+File10
+.java
+Java
+File11
+.java
+Java
+File12
+.java
+Java
+File13
+.java
+Java
+File14
+.java
+Java
+File15
+.java
+Java
+File16
+.java
+Java
+File17
+.java
+Java
+File18
+.java
+关联工程
+依赖
+SVN · 非当前工作副本
+刷新
+A
+.java
+编译当前模块
+布局
+跳转记录
+A
+.java
+改动
+1
+2
+3
+4
+5
+6
+7
+8
+9
+package demo;
+public class A {
+    private String name;
+    public String getName() { return name; }
+    public void execute() {
+        System.out.println("A");
+    }
+}
+// UNSAVED_SEARCH_TEXT
+No results
+问题
+改动
+编译输出
+NC 服务
+调试
+展开阅读
+D:/验收工程\A.java
+轻量模式 · 恢复代码智能
+工程关联
+隐藏面板
+UTF-8 · 9:23
+No results found

@@ -1,0 +1,244 @@
+{
+  "phase": "after",
+  "entry": "/assets/index-BAVS9xpB.js",
+  "cold": [
+    {
+      "key": "files",
+      "skeleton": {
+        "x": 308,
+        "y": 128,
+        "width": 1121,
+        "height": 738
+      },
+      "document": {
+        "x": 308,
+        "y": 128,
+        "width": 1121,
+        "height": 738
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14
+    },
+    {
+      "key": "db",
+      "skeleton": {
+        "x": 304,
+        "y": 80,
+        "width": 1125,
+        "height": 790
+      },
+      "document": {
+        "x": 304,
+        "y": 80,
+        "width": 1125,
+        "height": 790
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14
+    },
+    {
+      "key": "svn",
+      "skeleton": {
+        "x": 348,
+        "y": 80,
+        "width": 1081,
+        "height": 790
+      },
+      "document": {
+        "x": 348,
+        "y": 80,
+        "width": 1081,
+        "height": 790
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 64,
+        "y": 44,
+        "width": 1365,
+        "height": 36
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14
+    },
+    {
+      "key": "meta",
+      "skeleton": {
+        "x": 64,
+        "y": 80,
+        "width": 1365,
+        "height": 790
+      },
+      "document": {
+        "x": 64,
+        "y": 80,
+        "width": 1365,
+        "height": 790
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14
+    },
+    {
+      "key": "logs",
+      "skeleton": {
+        "x": 64,
+        "y": 44,
+        "width": 1365,
+        "height": 826
+      },
+      "document": {
+        "x": 64,
+        "y": 44,
+        "width": 1365,
+        "height": 826
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14
+    },
+    {
+      "key": "settings",
+      "skeleton": {
+        "x": 308,
+        "y": 44,
+        "width": 1121,
+        "height": 826
+      },
+      "document": {
+        "x": 308,
+        "y": 44,
+        "width": 1121,
+        "height": 826
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14
+    }
+  ],
+  "warm": [
+    {
+      "round": 0,
+      "key": "files",
+      "commitMs": 1010.8,
+      "p95": 683.3000000000029,
+      "max": 1003.9839999999967,
+      "longTasks": 3,
+      "longTaskMs": 2060
+    },
+    {
+      "round": 0,
+      "key": "db",
+      "commitMs": 1540.4,
+      "p95": 566.5999999999985,
+      "max": 1529.3040000029796,
+      "longTasks": 3,
+      "longTaskMs": 2165
+    },
+    {
+      "round": 0,
+      "key": "svn",
+      "commitMs": 160.6,
+      "p95": 533.3000000000029,
+      "max": 1300.0740000000005,
+      "longTasks": 4,
+      "longTaskMs": 1987
+    },
+    {
+      "round": 0,
+      "key": "meta",
+      "commitMs": 52.9,
+      "p95": 51.56200000148965,
+      "max": 1966.5380000000005,
+      "longTasks": 2,
+      "longTaskMs": 2035
+    },
+    {
+      "round": 0,
+      "key": "logs",
+      "commitMs": 56.3,
+      "p95": 1066.6000000000058,
+      "max": 1166.6359999999986,
+      "longTasks": 3,
+      "longTaskMs": 2274
+    },
+    {
+      "round": 0,
+      "key": "settings",
+      "commitMs": 43,
+      "p95": 35.19800000148825,
+      "max": 1166.601999999999,
+      "longTasks": 1,
+      "longTaskMs": 1172
+    }
+  ],
+  "transitions": [],
+  "errors": []
+}

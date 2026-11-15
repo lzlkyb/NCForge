@@ -1,0 +1,55 @@
+[
+  {
+    "name": "文件及其下级路径被拒绝",
+    "root": "D:\\AItool\\winapp\\nc-workbench\\desktop\\.cache\\motion-closeout-2026-11-13\\workspace/src/public/demo/MotionDemo.java",
+    "passed": true,
+    "writeDisabled": true
+  },
+  {
+    "name": "文件及其下级路径被拒绝",
+    "root": "D:\\AItool\\winapp\\nc-workbench\\desktop\\.cache\\motion-closeout-2026-11-13\\workspace/src/public/demo/MotionDemo.java/child",
+    "passed": true,
+    "writeDisabled": true
+  },
+  {
+    "name": "目录已核对后第一次全选点击生效",
+    "passed": true,
+    "selected": 3
+  },
+  {
+    "name": "已核对的目录失焦后第一次写入点击打开确认",
+    "passed": true
+  },
+  {
+    "name": "新目录实际写入三类产物，原文件不变且清单可定位",
+    "passed": true,
+    "written": 3,
+    "failed": 0,
+    "files": [
+      {
+        "path": "src/public/nc/vo/uapbd/demo_simple/DemoHVO.java",
+        "bytes": 924
+      },
+      {
+        "path": "db/demo_simple.oracle.sql",
+        "bytes": 466
+      },
+      {
+        "path": "meta/demo_simple.registry.json",
+        "bytes": 2281
+      }
+    ]
+  },
+  {
+    "name": "560×800 原生窗口无溢出且配置入口可用",
+    "passed": true,
+    "width": 560,
+    "height": 800,
+    "documentWidth": 560,
+    "bodyWidth": 560
+  },
+  {
+    "name": "实时减少动效、深色和玻璃材质生效",
+    "passed": true
+  }
+]

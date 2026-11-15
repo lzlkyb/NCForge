@@ -1,0 +1,21 @@
+{
+  "passed": [
+    "template accepted without execution; caret is between empty quotes",
+    "manual bill literal executes through the existing SQL path without parameter dialog",
+    "undo removes manual bill without losing the template",
+    "exact Chinese main-table name also finds the template",
+    "existing neighboring statement and semicolon are preserved",
+    "WHERE keyword assistance inserts the alias-qualified field and quote caret",
+    "FROM suggestions remain table names",
+    "general query opens the field picker automatically at WHERE",
+    "Chinese field search composes child text, numeric and parent conditions and executes literal SQL",
+    "date range Tab stops work while NC character dates remain quoted text",
+    "operator picker preserves the typed field and fills IN values through Tab",
+    "ON filters stay inside ON without changing LEFT JOIN semantics",
+    "a table without vbillcode can generate the same general query",
+    "sales bill lists two independent related-table choices and inserts the selected column pair",
+    "receipt bill with unrelated table and key names uses the same generic assistance",
+    "missing metadata falls back to main-table query even for purchase orders"
+  ],
+  "errors": []
+}

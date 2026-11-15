@@ -1,0 +1,63 @@
+{
+  "environment": {
+    "browser": "157.0.4341.46",
+    "viewport": "1200x800",
+    "mode": "Vite dev preview, real components, simulated task"
+  },
+  "samples": [
+    {
+      "state": "idle",
+      "sampleMs": 3000,
+      "rendererTaskMs": 1.669,
+      "scriptMs": 0,
+      "layoutMs": 0,
+      "heapUsedKB": 5972,
+      "intervalCount": 1,
+      "applicationIntervals": 0,
+      "developmentToolIntervals": 1,
+      "runningAnimations": 0
+    },
+    {
+      "state": "visible-task",
+      "sampleMs": 3000,
+      "rendererTaskMs": 16.833,
+      "scriptMs": 2.987,
+      "layoutMs": 0.966,
+      "heapUsedKB": 6458,
+      "intervalCount": 2,
+      "applicationIntervals": 1,
+      "developmentToolIntervals": 1,
+      "runningAnimations": 2
+    },
+    {
+      "state": "hidden-task",
+      "sampleMs": 3000,
+      "rendererTaskMs": 6.186,
+      "scriptMs": 1.824,
+      "layoutMs": 0.16,
+      "heapUsedKB": 6875,
+      "intervalCount": 1,
+      "applicationIntervals": 0,
+      "developmentToolIntervals": 1,
+      "runningAnimations": 0
+    },
+    {
+      "state": "after-cancel",
+      "sampleMs": 3000,
+      "rendererTaskMs": 0.932,
+      "scriptMs": 0,
+      "layoutMs": 0,
+      "heapUsedKB": 7423,
+      "intervalCount": 1,
+      "applicationIntervals": 0,
+      "developmentToolIntervals": 1,
+      "runningAnimations": 0
+    }
+  ],
+  "clickToNextPaintOpportunity": {
+    "count": 30,
+    "p95Ms": 13.9,
+    "maxMs": 15.5
+  },
+  "longTasksAfterWarmup": []
+}

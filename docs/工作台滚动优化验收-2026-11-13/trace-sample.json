@@ -1,0 +1,23 @@
+{
+  "phase": "after",
+  "entry": "/assets/index-CHbtrTmB.js",
+  "measurements": [
+    {
+      "name": "service-log",
+      "axis": "y",
+      "p50": 50,
+      "p95": 99.9,
+      "max": 100,
+      "slowFrames": 20,
+      "frames": 23,
+      "longTasks": 2,
+      "mutations": 978,
+      "blanks": 0,
+      "maxTop": 93313,
+      "maxLeft": 0,
+      "renderedRows": 7,
+      "headers": 0
+    }
+  ],
+  "errors": []
+}

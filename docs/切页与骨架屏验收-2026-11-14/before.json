@@ -1,0 +1,467 @@
+{
+  "phase": "before",
+  "entry": "/assets/index-BMawiy_I.js",
+  "cold": [
+    {
+      "key": "files",
+      "skeleton": {
+        "x": 308,
+        "y": 80,
+        "width": 1121,
+        "height": 790
+      },
+      "document": {
+        "x": 308,
+        "y": 80,
+        "width": 1121,
+        "height": 790
+      },
+      "inside": true,
+      "outside": 0,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14
+    },
+    {
+      "key": "db",
+      "skeleton": {
+        "x": 80,
+        "y": 720,
+        "width": 1333,
+        "height": 160
+      },
+      "document": {
+        "x": 304,
+        "y": 44,
+        "width": 1125,
+        "height": 634
+      },
+      "inside": false,
+      "outside": 1,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14
+    },
+    {
+      "key": "svn",
+      "skeleton": {
+        "x": 80,
+        "y": 720,
+        "width": 1333,
+        "height": 160
+      },
+      "document": {
+        "x": 348,
+        "y": 80,
+        "width": 1081,
+        "height": 598
+      },
+      "inside": false,
+      "outside": 1,
+      "toolbar": {
+        "x": 64,
+        "y": 44,
+        "width": 1365,
+        "height": 36
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14
+    },
+    {
+      "key": "meta",
+      "skeleton": {
+        "x": 80,
+        "y": 720,
+        "width": 1333,
+        "height": 160
+      },
+      "document": {
+        "x": 64,
+        "y": 80,
+        "width": 1365,
+        "height": 598
+      },
+      "inside": false,
+      "outside": 1,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14
+    },
+    {
+      "key": "logs",
+      "skeleton": {
+        "x": 80,
+        "y": 720,
+        "width": 1333,
+        "height": 160
+      },
+      "document": {
+        "x": 64,
+        "y": 80,
+        "width": 1365,
+        "height": 598
+      },
+      "inside": false,
+      "outside": 1,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14
+    },
+    {
+      "key": "settings",
+      "skeleton": {
+        "x": 80,
+        "y": 720,
+        "width": 1333,
+        "height": 160
+      },
+      "document": {
+        "x": 308,
+        "y": 80,
+        "width": 1121,
+        "height": 598
+      },
+      "inside": false,
+      "outside": 1,
+      "toolbar": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "tabs": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      },
+      "shellRadius": 14
+    }
+  ],
+  "warm": [
+    {
+      "round": 0,
+      "key": "files",
+      "commitMs": 656.4,
+      "p95": 966.5500000000011,
+      "max": 966.5500000000011,
+      "longTasks": 2,
+      "longTaskMs": 942
+    },
+    {
+      "round": 0,
+      "key": "db",
+      "commitMs": 228.5,
+      "p95": 33.29999999999927,
+      "max": 249.98199999999997,
+      "longTasks": 2,
+      "longTaskMs": 225
+    },
+    {
+      "round": 0,
+      "key": "svn",
+      "commitMs": 43.1,
+      "p95": 16.80000000000109,
+      "max": 83.26800000000003,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 0,
+      "key": "meta",
+      "commitMs": 30.3,
+      "p95": 616.7000000000007,
+      "max": 616.7000000000007,
+      "longTasks": 1,
+      "longTaskMs": 584
+    },
+    {
+      "round": 0,
+      "key": "logs",
+      "commitMs": 224.3,
+      "p95": 683.268,
+      "max": 683.268,
+      "longTasks": 2,
+      "longTaskMs": 655
+    },
+    {
+      "round": 0,
+      "key": "settings",
+      "commitMs": 267.2,
+      "p95": 16.80000000000291,
+      "max": 299.9359999999979,
+      "longTasks": 1,
+      "longTaskMs": 236
+    },
+    {
+      "round": 1,
+      "key": "files",
+      "commitMs": 563.9,
+      "p95": 799.9680000000008,
+      "max": 799.9680000000008,
+      "longTasks": 2,
+      "longTaskMs": 789
+    },
+    {
+      "round": 1,
+      "key": "db",
+      "commitMs": 165.3,
+      "p95": 16.799999999999272,
+      "max": 166.79999999999927,
+      "longTasks": 2,
+      "longTaskMs": 156
+    },
+    {
+      "round": 1,
+      "key": "svn",
+      "commitMs": 27,
+      "p95": 16.799999999999272,
+      "max": 50.099999999998545,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 1,
+      "key": "meta",
+      "commitMs": 29.1,
+      "p95": 633.1340000000018,
+      "max": 633.1340000000018,
+      "longTasks": 1,
+      "longTaskMs": 593
+    },
+    {
+      "round": 1,
+      "key": "logs",
+      "commitMs": 255.4,
+      "p95": 733.3339999999989,
+      "max": 733.3339999999989,
+      "longTasks": 2,
+      "longTaskMs": 695
+    },
+    {
+      "round": 1,
+      "key": "settings",
+      "commitMs": 245.5,
+      "p95": 16.80000000000291,
+      "max": 283.03399999999965,
+      "longTasks": 1,
+      "longTaskMs": 214
+    },
+    {
+      "round": 2,
+      "key": "files",
+      "commitMs": 729,
+      "p95": 950.2000000000007,
+      "max": 950.2000000000007,
+      "longTasks": 2,
+      "longTaskMs": 940
+    },
+    {
+      "round": 2,
+      "key": "db",
+      "commitMs": 158,
+      "p95": 16.799999999999272,
+      "max": 166.51599999999962,
+      "longTasks": 2,
+      "longTaskMs": 151
+    },
+    {
+      "round": 2,
+      "key": "svn",
+      "commitMs": 30.8,
+      "p95": 16.799999999999272,
+      "max": 49.934000000001106,
+      "longTasks": 0,
+      "longTaskMs": 0
+    },
+    {
+      "round": 2,
+      "key": "meta",
+      "commitMs": 27.4,
+      "p95": 599.8999999999978,
+      "max": 599.8999999999978,
+      "longTasks": 1,
+      "longTaskMs": 564
+    },
+    {
+      "round": 2,
+      "key": "logs",
+      "commitMs": 206,
+      "p95": 583.3339999999989,
+      "max": 583.3339999999989,
+      "longTasks": 2,
+      "longTaskMs": 566
+    },
+    {
+      "round": 2,
+      "key": "settings",
+      "commitMs": 214.9,
+      "p95": 16.80000000000291,
+      "max": 233.3680000000022,
+      "longTasks": 1,
+      "longTaskMs": 182
+    }
+  ],
+  "transitions": [
+    {
+      "started": 4301.29999999702,
+      "ready": 4422.5,
+      "finished": 4464
+    },
+    {
+      "started": 5465.5999999940395,
+      "ready": 5523.39999999851,
+      "finished": 5581.5
+    },
+    {
+      "started": 6725.79999999702,
+      "ready": 7488.69999999553,
+      "finished": 7833.89999999851
+    },
+    {
+      "started": 9114.29999999702,
+      "ready": 9620.29999999702,
+      "finished": 9896.09999999404
+    },
+    {
+      "started": 12135.79999999702,
+      "ready": 12542.89999999851,
+      "finished": 12581.69999999553
+    },
+    {
+      "started": 13619.19999999553,
+      "ready": 14569.29999999702,
+      "finished": 14983.89999999851
+    },
+    {
+      "started": 14983.5,
+      "ready": 15219.5,
+      "finished": 15413
+    },
+    {
+      "started": 15412.79999999702,
+      "ready": 15488.59999999404,
+      "finished": 15686.5
+    },
+    {
+      "started": 15833.59999999404,
+      "ready": 16447.79999999702,
+      "finished": 16477.39999999851
+    },
+    {
+      "started": 16476.89999999851,
+      "ready": 17165.5,
+      "finished": 17242.09999999404
+    },
+    {
+      "started": 17241.59999999404,
+      "ready": 17549.59999999404,
+      "finished": 17673.5
+    },
+    {
+      "started": 17673,
+      "ready": 18479.59999999404,
+      "finished": 18890.59999999404
+    },
+    {
+      "started": 18894.09999999404,
+      "ready": 19063.79999999702,
+      "finished": 19253.79999999702
+    },
+    {
+      "started": 19318.29999999702,
+      "ready": 19359,
+      "finished": 19553.89999999851
+    },
+    {
+      "started": 19736,
+      "ready": 20359,
+      "finished": 20393.79999999702
+    },
+    {
+      "started": 20393.09999999404,
+      "ready": 21119.19999999553,
+      "finished": 21158
+    },
+    {
+      "started": 21157.59999999404,
+      "ready": 21440.5,
+      "finished": 21585
+    },
+    {
+      "started": 21584.79999999702,
+      "ready": 22531.39999999851,
+      "finished": 22897.5
+    },
+    {
+      "started": 22933.39999999851,
+      "ready": 23098.59999999404,
+      "finished": 23287
+    },
+    {
+      "started": 23350.59999999404,
+      "ready": 23392.89999999851,
+      "finished": 23587
+    },
+    {
+      "started": 23765,
+      "ready": 24356.5,
+      "finished": 24394.19999999553
+    },
+    {
+      "started": 24393.59999999404,
+      "ready": 24984.29999999702,
+      "finished": 25005.09999999404
+    },
+    {
+      "started": 25004.69999999553,
+      "ready": 25248.29999999702
+    }
+  ],
+  "errors": []
+}

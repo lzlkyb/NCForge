@@ -1,0 +1,15 @@
+{
+  "passed": [
+    "complete-result template picks x fields and filters only inside EXISTS",
+    "OR remains inside the detail group and cannot bypass the document correlation",
+    "manual literal executes through normal query path without parameter UI",
+    "batch action preserves leading zeros, escapes quotes, deduplicates and undoes in one step",
+    "numeric metadata generates raw numeric IN values",
+    "Oracle 1001 values form grouped OR lists under the existing AND NOT",
+    "archive completion inserts fields and LEFT JOIN together and undoes atomically",
+    "matching existing LEFT JOIN is reused",
+    "DISTINCT results do not get archive edits",
+    "no relationship evidence means no archive candidate"
+  ],
+  "errors": []
+}

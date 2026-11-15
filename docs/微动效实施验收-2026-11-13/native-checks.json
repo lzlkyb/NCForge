@@ -1,0 +1,66 @@
+[
+  {
+    "name": "代码草稿切页保留",
+    "passed": true
+  },
+  {
+    "name": "Java 文件实际保存到测试工程",
+    "passed": true
+  },
+  {
+    "name": "6004 行文件切页后保留滚动与编辑器实例",
+    "passed": true,
+    "renderedLines": [
+      29
+    ]
+  },
+  {
+    "name": "标准模块目录索引 126 份 BMF",
+    "passed": true,
+    "indexSeconds": 0.04
+  },
+  {
+    "name": "元数据图形、字段表与属性检查器联动",
+    "passed": true
+  },
+  {
+    "name": "BMF 编辑、预览、实际保存与校验恢复",
+    "passed": true
+  },
+  {
+    "name": "当前 BMF 整套生成与实际磁盘产物",
+    "passed": true,
+    "written": 3,
+    "failed": 0,
+    "files": [
+      {
+        "path": "src/public/nc/vo/uapbd/demo_simple/DemoHVO.java",
+        "bytes": 924
+      },
+      {
+        "path": "db/demo_simple.oracle.sql",
+        "bytes": 466
+      },
+      {
+        "path": "meta/demo_simple.registry.json",
+        "bytes": 2281
+      }
+    ]
+  },
+  {
+    "name": "逐文件勾选与同内容重复生成保护",
+    "passed": true
+  },
+  {
+    "name": "实时减少动效与浅深色切换",
+    "passed": true
+  },
+  {
+    "name": "实际 560×800 窗口生成布局与配置入口",
+    "passed": true,
+    "width": 560,
+    "documentWidth": 560,
+    "bodyWidth": 560,
+    "layout": "narrow"
+  }
+]

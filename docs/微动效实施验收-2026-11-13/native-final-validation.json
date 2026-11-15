@@ -1,0 +1,27 @@
+{
+  "passed": true,
+  "elapsedSeconds": 600.113,
+  "cycles": 24,
+  "hiddenSamples": 14,
+  "hiddenAnimations": 0,
+  "visibleIntervals": 7,
+  "hiddenIntervals": 3,
+  "restoredIntervals": 7,
+  "nodesBefore": 2807,
+  "nodesAfter": 2807,
+  "heapBeforeMiB": 36.84,
+  "heapAfterMiB": 39.59,
+  "heapDeltaMiB": 2.75,
+  "longTasks": [
+    {
+      "ms": 54
+    },
+    {
+      "ms": 54
+    },
+    {
+      "ms": 76
+    }
+  ],
+  "pageErrors": []
+}
