@@ -6,6 +6,7 @@ import { toast } from "../ui/toast";
 import { friendlyDbError, oraCode, similarTo, tableRefs } from "../../lib/db";
 import { oraHint } from "../../lib/oraErrorHint";
 import { copyText } from "../../lib/utils";
+import type { SqlQuickFix } from "../../lib/sqlQuickFix";
 
 /**
  * 执行失败的说明。
@@ -17,7 +18,9 @@ import { openTable } from "../../lib/dbActions";
 import { reconnectSession } from "../../lib/dbConfirm";
 import { openSessionPanel, type ResultEntry } from "../../lib/dbStore";
 
-export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot, errorCode, cancelled, onLocate }: {
+export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot, errorCode, cancelled, onLocate, onFixes, onApply }: {
+  onFixes?: () => Promise<SqlQuickFix[]>;
+  onApply?: (fix: SqlQuickFix) => void;
   error: string;
   connId?:string|null; onLocate?:(line?:number)=>void;
   tabId?: string;
@@ -33,6 +36,8 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
   const ora = oraCode(error);
   const lock = useRef(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [fixes, setFixes] = useState<SqlQuickFix[] | null>(null);
+  const [checking, setChecking] = useState(false);
   const reconnect = async () => {
     if (!connId || lock.current) return;
     lock.current = true;
@@ -58,10 +63,10 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
         {index ? `第 ${index} 条${cancelled ? "已停止" : "执行失败"}` : cancelled ? "执行已停止" : "执行失败"}
         {ora && <span className="dbx-mono">{ora}</span>}
       </div>
-      <div className="dbx-feedback-message">{error}</div>
+      <div className="dbx-feedback-message">{hint?.note ?? error}</div>
+      {hint?.note && <details><summary>Oracle 错误详情</summary><div>{error}</div></details>}
       {errorCode === "timeout" && <div style={{ marginTop: 4 }}>不是语法错误，是等到上限还没跑完：可以在「查询设置」或表页筛选栏把等待上限调大后重试。</div>}
       {ora === "ORA-01031" && <div style={{ marginTop: 4 }}>当前账号没有这个操作的权限（读写权限由数据库账号决定）。</div>}
-      {hint?.note && ora !== "ORA-01031" && <div style={{ marginTop: 4 }}>{hint.note}</div>}
       {hint?.location && (
         <div style={{ marginTop: 4 }}>
           语句里 <code>{hint.location.ident.toUpperCase()}</code> 出现在第 {hint.location.line} 行第 {hint.location.column} 列
@@ -80,6 +85,16 @@ export function DbErrorBox({ error, sql, knownTables, index, connId, tabId, slot
         </div>
       )}
       <div className="dbx-filter-actions">
+        {onFixes && !cancelled && ["ORA-00942", "ORA-00904", "ORA-00918"].includes(ora ?? "") &&
+          <button type="button" className="dbx-btn" disabled={checking} onClick={async () => {
+            setChecking(true);
+            try { setFixes(await onFixes()); }
+            catch { toast("未能读取表结构，请稍后重试。", "warning"); }
+            finally { setChecking(false); }
+          }}>{checking ? "正在检查…" : "检查可用修复"}</button>}
+        {fixes?.length === 0 && <span>没有找到可确认的替换。</span>}
+        {fixes?.map(fix => <button type="button" className="dbx-btn" key={fix.text}
+          onClick={() => { onApply?.(fix); setFixes(null); }}>替换为 {fix.text}</button>)}
         {onLocate && <button type="button" className="dbx-btn" onClick={() => onLocate()}>定位 SQL 行</button>}
         {connId && ["ORA-00942","ORA-00904"].includes(ora ?? "") && tableRefs(sql).slice(0,1).map(t=><button key={t} type="button" className="dbx-btn" onClick={()=>void openTable(connId,t,"struct")}>查看 {t} 结构</button>)}
         {connId && ["ORA-00054","ORA-00060","ORA-01013"].includes(ora ?? "") && <button type="button" className="dbx-btn" onClick={()=>openSessionPanel(connId)}>查看会话与锁</button>}

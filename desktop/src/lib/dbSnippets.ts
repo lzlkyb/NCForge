@@ -15,6 +15,7 @@ export interface Snippet {
   sql: string;
   /** `null` = 全局。 */
   connId: string | null;
+  schema?: string;
   /** 最后修改时间（毫秒），列表按它倒序。 */
   at: number;
 }
@@ -109,9 +110,9 @@ function newId(): string {
 }
 
 /** 存一条。名字留空时用 SQL 第一行兜底，免得列表里出现一堆空标题。 */
-export function addSnippet(input: { name: string; sql: string; connId: string | null }): Snippet {
+export function addSnippet(input: { name: string; sql: string; connId: string | null; schema?: string }): Snippet {
   const name = input.name.trim() || defaultName(input.sql);
-  const s: Snippet = { id: newId(), name, sql: input.sql, connId: input.connId, at: Date.now() };
+  const s: Snippet = { ...input, id: newId(), name, at: Date.now() };
   writeAll([s, ...readAll().filter((x) => x.id !== s.id)].slice(0, MAX));
   return s;
 }

@@ -57,7 +57,7 @@ describe("prop.xml 导入页：没有 NC home 时给引导而不是裸错误", (
     const guide = host.querySelector<HTMLElement>(".dbx-homeguide");
     expect(guide, "要出引导卡片").toBeTruthy();
     expect(guide?.textContent).toContain("ierp/bin/prop.xml");
-    expect(guide?.textContent).toContain("纯 Rust 驱动不依赖 NC home");
+    expect(guide?.textContent).toContain("请先配置 NC 安装目录");
     expect(host.querySelector(".dbx-dslist")).toBeNull();
     expect(host.querySelector(".dbx-badline")).toBeNull();
     // 来源行说明白「为什么空着」
@@ -95,10 +95,10 @@ describe("prop.xml 导入页：没有 NC home 时给引导而不是裸错误", (
     // 先勾一个数据源，让「添加」按钮可用
     const box = host.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
     act(() => box.click());
-    const addBtn = buttons().find((b) => b.textContent?.includes("添加"))!;
+    const addBtn = buttons().find((b) => b.textContent?.includes("导入 1 个连接"))!;
     await act(async () => { addBtn.click(); });
     expect(propImport).toHaveBeenCalledTimes(1);
-    expect(host.querySelector(".dbx-homeguide")?.textContent).toContain("需要先配置 NC home");
+    expect(host.querySelector(".dbx-homeguide")?.textContent).toContain("请先配置 NC 安装目录");
   });
 
   it("正常读到数据源：列表照常渲染，不出引导卡", async () => {

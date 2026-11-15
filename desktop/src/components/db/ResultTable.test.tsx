@@ -68,7 +68,7 @@ it("比对入口保留快照、独立文档和关联，完整 SQL 可读取",asy
 
 it("没有结果时给出恢复路径，清除本地筛选恢复数据",()=>{
   act(()=>{root=createRoot(host);root.render(<ResultTable columns={columns} rows={[["可见",1]]} meta="1 行" table="T" />);});
-  act(()=>host.querySelector<HTMLButtonElement>('[aria-label="筛选结果"]')!.click());
+  act(()=>host.querySelector<HTMLButtonElement>('[aria-label="筛选已加载行"]')!.click());
   const input=host.querySelector<HTMLInputElement>('[aria-label="在结果中筛选"]')!;
   act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,"不存在");input.dispatchEvent(new Event("input",{bubbles:true}));});
   expect(host.querySelector('.dbx-grid-empty[role="status"]')?.textContent).toContain("筛选后没有匹配的行");
@@ -86,7 +86,7 @@ it("全选当前已加载数据；筛选后只选匹配行，空结果禁用", a
   const selectAll = () => host.querySelector<HTMLButtonElement>('[aria-label="全选结果"]')!;
   await act(async () => selectAll().click());
   expect(host.querySelectorAll('[role="gridcell"][aria-selected="true"]')).toHaveLength(6);
-  act(() => host.querySelector<HTMLButtonElement>('[aria-label="筛选结果"]')!.click());
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="筛选已加载行"]')!.click());
   const input = host.querySelector<HTMLInputElement>('[aria-label="在结果中筛选"]')!;
   const filter = async (value: string) => act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); });
   await filter("a"); await act(async () => selectAll().click());

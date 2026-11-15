@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ copy: vi.fn(), history: { c: [{ at: 1, sql: "select * from test", ms: 1, summary: "1行", ok: true }] } }));
-vi.mock("../../lib/dbStore", () => ({ useDbConns: () => [{ id: "c", name: "测试库" }], openSessionPanel: vi.fn() }));
+vi.mock("../../lib/dbStore", () => ({ useConnRt: () => ({}), useDbConns: () => [{ id: "c", name: "测试库" }], openSessionPanel: vi.fn() }));
 vi.mock("../../lib/dbHistory", () => ({ subscribeHistory: () => () => {}, getHistoryMap: () => mocks.history, historyHits: () => [{ connId: "c", entry: mocks.history.c[0] }], filterHits: (hits: unknown) => hits, historyTime: () => "刚刚", clearHistory: vi.fn() }));
 vi.mock("../../lib/dbActions", () => ({ openTable: vi.fn() }));
 vi.mock("../../lib/dbConfirm", () => ({ reconnectSession: vi.fn() }));

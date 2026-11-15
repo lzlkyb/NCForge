@@ -35,8 +35,14 @@ export interface GridEdit {
   onEditMany?: (cells: { row: number; col: number; value: Cell }[]) => void;
   /** 复制这一行（克隆成新增行）。不传 = 这个结果不支持。 */
   onCloneRow?: (row: number) => void;
-  /** 行级状态：新增草稿 / 待删除。 */
-  rowState?: (row: number) => "added" | "deleted" | undefined;
+  /**
+   * 行级状态：`added` 未写回的新增 / `deleted` 待删除 / `removed` 已写回删除。
+   *
+   * `removed` 只出现在「结果集是执行时的快照、写回后不重新查库」的场景（SQL 控制台）：
+   * 库里已经删掉了，但这一行还在这份快照里。撤掉标记会让用户以为删除没生效、再删一次，
+   * 所以必须有一个独立状态，视觉上与「待删除」区分开。
+   */
+  rowState?: (row: number) => "added" | "deleted" | "removed" | undefined;
   /** 右键「删除此行 / 恢复此行」。不传 = 这个结果不支持行级删除（表页无主键 / 只读）。 */
   onDeleteRow?: (row: number) => void;
   onRestoreRow?: (row: number) => void;

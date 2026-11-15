@@ -15,11 +15,11 @@ import { TableRow } from "./ConnTableRow";
 it("keeps manual draft when changing import source", async () => {
  const host = document.createElement("div"); const root = createRoot(host);
  await act(async () => root.render(<ConnDialog />));
- const input = host.querySelector("input")!;
+ const input = host.querySelector<HTMLInputElement>('input[aria-label="draft"]')!;
  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "draft value"); input.dispatchEvent(new Event("input", { bubbles: true })); });
  mocks.tab = "prop"; await act(async () => root.render(<ConnDialog />));
  mocks.tab = "manual"; await act(async () => root.render(<ConnDialog />));
- expect(host.querySelector("input")!.value).toBe("draft value");
+ expect(host.querySelector<HTMLInputElement>('input[aria-label="draft"]')!.value).toBe("draft value");
  await act(async () => root.unmount());
 });
 it("keyboard expansion reports failure and can retry", async () => {

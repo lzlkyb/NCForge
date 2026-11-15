@@ -22,8 +22,17 @@ const columns=[{name:"ID",type:"NUMBER",precision:10,scale:0},{name:"NAME",type:
 const rows=Array.from({length:2000},(_,i)=>[i,`名称 ${i}`]);
 const order=rows.map((_,i)=>i);
 let root:Root, host:HTMLDivElement;
-beforeEach(()=>{vi.clearAllMocks();applyUiDensity("standard");host=document.createElement("div");document.body.appendChild(host);root=createRoot(host);});
-afterEach(()=>{act(()=>root.unmount());host.remove();applyUiDensity("standard");});
+beforeEach(()=>{vi.clearAllMocks();vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });applyUiDensity("standard");host=document.createElement("div");document.body.appendChild(host);root=createRoot(host);});
+afterEach(()=>{act(()=>root.unmount());vi.useRealTimers();host.remove();applyUiDensity("standard");});
+
+function scrollGrid(grid: HTMLElement, top = grid.scrollTop, left = grid.scrollLeft) {
+  act(() => {
+    grid.scrollTop = top;
+    grid.scrollLeft = left;
+    grid.dispatchEvent(new Event("scroll", { bubbles: true }));
+    vi.advanceTimersToNextFrame();
+  });
+}
 
 function Grid({edited=vi.fn()}:{edited?:(r:number,c:number,v:Cell)=>void}) {
   const [selection,setSelection]=useState<Selection|null>({anchor:{r:500,c:1},end:{r:500,c:1}});
@@ -35,7 +44,7 @@ it("切密度保持首行与选区，CSS 行高、虚拟位置、键盘滚动使
   const grid=host.querySelector<HTMLDivElement>('[role="grid"]')!;
   Object.defineProperty(grid,"clientHeight",{value:200});
   Object.defineProperty(grid,"clientWidth",{value:400});
-  act(()=>{grid.scrollTop=500*26;grid.dispatchEvent(new Event("scroll",{bubbles:true}));});
+  scrollGrid(grid, 500 * 26);
   expect(grid.style.getPropertyValue("--dbx-row-h")).toBe("26px");
   expect(host.querySelector<HTMLDivElement>('.dbx-grid-inner')!.style.height).toBe(`${40+2000*26}px`);
   expect(host.querySelectorAll('.dbx-grow').length).toBeLessThan(40);
@@ -51,18 +60,25 @@ it("切密度保持首行与选区，CSS 行高、虚拟位置、键盘滚动使
   act(()=>grid.dispatchEvent(new KeyboardEvent("keydown",{key:"PageDown",bubbles:true})));
   // PageDown 按一屏能放几行翻页：clientHeight 200 / 行高 30 → 5 行（不再写死 20）
   expect(grid.scrollTop).toBe(506*30-200+44);
-  act(()=>grid.dispatchEvent(new Event("scroll",{bubbles:true})));
+  scrollGrid(grid);
   expect(host.querySelector('#dbx-cell-505-1')?.getAttribute('aria-selected')).toBe("true");
   act(()=>applyUiDensity("standard"));
   expect(grid.scrollTop).toBeCloseTo((506*30-200+44)/30*26);
   expect(host.querySelector('#dbx-cell-505-1')?.getAttribute('aria-selected')).toBe("true");
+
+  // 向上导航也要让出吸顶表头：只写 `scrollTop = y` 会把目标行藏进表头覆盖的带子里，
+  // 选区框和活动格都看不见（以前只覆盖了向下那一半，所以这道断言以前不存在）。
+  const head = parseFloat(grid.style.getPropertyValue("--dbx-head-h"));
+  scrollGrid(grid, 700 * 26);
+  act(()=>grid.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowUp",bubbles:true})));
+  expect(grid.scrollTop).toBe(Math.max(0, 504 * 26 - head));
 });
 
 it("舒适密度的编辑与冻结列不改变原始行列定位，Esc 不写入",()=>{
   applyUiDensity("comfortable");const edited=vi.fn();
   act(()=>root.render(<Grid edited={edited} />));
   const grid=host.querySelector<HTMLDivElement>('[role="grid"]')!;
-  act(()=>{grid.scrollTop=500*30;grid.dispatchEvent(new Event("scroll",{bubbles:true}));});
+  scrollGrid(grid, 500 * 30);
   expect(host.querySelector<HTMLDivElement>('#dbx-cell-500-0')!.style.position).toBe("sticky");
   act(()=>grid.dispatchEvent(new KeyboardEvent("keydown",{key:"F2",bubbles:true})));
   const input=host.querySelector<HTMLInputElement>('.dbx-gedit')!;
@@ -82,7 +98,7 @@ it("虚拟范围仅绘制逻辑外周，活动格、冻结列、修改值和 NUL
     edit={{canEdit:()=>true,changed:new Map([["500:0","changed"]]),onEdit:()=>{}}} />));
   const grid=host.querySelector<HTMLDivElement>('[role="grid"]')!;
   Object.defineProperty(grid,"clientHeight",{value:200});Object.defineProperty(grid,"clientWidth",{value:400});
-  act(()=>{grid.scrollTop=500*26;grid.scrollLeft=3000;grid.dispatchEvent(new Event("scroll",{bubbles:true}));});
+  scrollGrid(grid, 500 * 26, 3000);
   const changed=host.querySelector<HTMLDivElement>('#dbx-cell-500-0')!;
   expect(changed.classList.contains("chg")).toBe(true);
   expect(changed.style.position).toBe("sticky");
@@ -101,7 +117,8 @@ function key(el: Element, value: string, options: KeyboardEventInit = {}) {
 it("Ctrl+A 与左上角全选一致，不跳动滚动位置；编辑框保留全选文本", () => {
   act(() => root.render(<Grid />));
   const grid = host.querySelector<HTMLDivElement>('[role="grid"]')!;
-  act(() => { grid.scrollTop = 500 * 26; grid.dispatchEvent(new Event("scroll", { bubbles: true })); grid.focus(); });
+  scrollGrid(grid, 500 * 26);
+  act(() => grid.focus());
   const top = grid.scrollTop;
   key(grid, "a", { ctrlKey: true });
   const corner = host.querySelector<HTMLButtonElement>('[aria-label="全选结果"]')!;
@@ -187,7 +204,7 @@ it("键盘跨虚拟列会显露目标，Esc 保持原绝对选区，focusActive 
   expect(grid.getAttribute("aria-activedescendant")).toBe("dbx-cell-500-40");
   key(grid,"ArrowDown",{shiftKey:true});
   expect(host.querySelector('#dbx-cell-499-40')?.getAttribute("aria-selected")).toBe("true");
-  act(()=>{grid.scrollTop=0;grid.scrollLeft=0;grid.dispatchEvent(new Event("scroll",{bubbles:true}));});
+  scrollGrid(grid, 0, 0);
   expect(grid.getAttribute("aria-activedescendant")).toBeNull();
   act(()=>api.current!.focusActive());
   expect(grid.getAttribute("aria-activedescendant")).toBe("dbx-cell-499-40");
@@ -418,5 +435,29 @@ it("格内「…」按钮：只出现在显示不全的格子上，点它先落�
   expect(picked[picked.length - 1]).toEqual([0, 1]);
   expect(detail).toHaveBeenCalledTimes(1);
   // 它只是「看」：不能顺手进入编辑态
+  expect(host.querySelector(".dbx-gedit")).toBeNull();
+});
+
+it("输入法组字中的按键不能抢进编辑（Safari 只有 keyCode 229）", () => {
+  act(() => root.render(<Grid />));
+  const grid = host.querySelector<HTMLDivElement>('[role="grid"]')!;
+  Object.defineProperty(grid, "clientHeight", { value: 200 });
+  Object.defineProperty(grid, "clientWidth", { value: 400 });
+  // 选区在 500 行：虚拟滚动只渲染窗口内的行，得先滚过去编辑框才会挂载。
+  scrollGrid(grid, 500 * 26);
+  // 对照组：普通字母要能「打字即编辑」，否则下面的断言没有意义
+  act(() => { grid.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true })); });
+  expect(host.querySelector(".dbx-gedit")).toBeTruthy();
+  act(() => {
+    host.querySelector<HTMLInputElement>(".dbx-gedit")!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  expect(host.querySelector(".dbx-gedit")).toBeNull();
+
+  // 组字中的第一个字母：Safari 上 `isComposing` 仍是 false，只有 keyCode=229。
+  // 只判 isComposing 会把中文输入法的首字母吃掉，格子里落下一个拉丁字母。
+  const composing = new KeyboardEvent("keydown", { key: "a", bubbles: true });
+  Object.defineProperty(composing, "keyCode", { value: 229 });
+  act(() => { grid.dispatchEvent(composing); });
   expect(host.querySelector(".dbx-gedit")).toBeNull();
 });

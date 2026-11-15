@@ -1,11 +1,13 @@
 import { useEffect, useRef } from "react";
 import { useAppHidden } from "../../lib/appVisibility";
+import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
 import { UI_FONT_FAMILY } from "../../lib/fonts";
 
 /** Abstract query feedback; never draws over retained cells or intercepts grid input. */
 export function QueryField({ host, state, previous, reduced = false }: {host:Element;state:string;previous:boolean;reduced?:boolean}) {
  const canvas=useRef<HTMLCanvasElement>(null);
  const hidden=useAppHidden();
+ const prefersReduced=usePrefersReducedMotion();
  const observed=useRef(false);
  useEffect(()=>{
   const node=canvas.current,box=host as HTMLElement;
@@ -18,7 +20,6 @@ export function QueryField({ host, state, previous, reduced = false }: {host:Ele
   let frame=0,last=0,width=0,height=0,hover=false;
   const started=performance.now();
   const pointer={x:-1000,y:-1000};
-  const media=window.matchMedia("(prefers-reduced-motion: reduce)");
   const resize=()=>{width=box.clientWidth;height=box.clientHeight;const scale=Math.min(devicePixelRatio,2);node.width=width*scale;node.height=height*scale;ctx.setTransform(scale,0,0,scale,0,0);};
   const observer=new ResizeObserver(resize);observer.observe(box);resize();
   box.dataset.queryField=active?(previous?"previous":"fresh"):"settled";
@@ -28,7 +29,8 @@ export function QueryField({ host, state, previous, reduced = false }: {host:Ele
   box.addEventListener("pointermove",move);box.addEventListener("pointerleave",leave);
   const draw=(now:number)=>{
    if(document.hidden)return;
-   const quiet=reduced||media.matches;
+   const quiet=reduced||prefersReduced;
+   if(quiet&&!active){ctx.clearRect(0,0,width,height);return;}
    const age=(now-started)/1000;
    if(now-last>32||quiet){
     if(!box.getClientRects().length)return;
@@ -62,13 +64,13 @@ export function QueryField({ host, state, previous, reduced = false }: {host:Ele
     ctx.restore();
     if(!active && age>=.24)ctx.clearRect(0,0,width,height);
    }
-   if((active&&!reduced&&!media.matches)||(!active&&age<.24))frame=requestAnimationFrame(draw);
+   if(!quiet && (active||(!active&&age<.24)))frame=requestAnimationFrame(draw);
   };
   const resume=()=>{cancelAnimationFrame(frame);if(!document.hidden)frame=requestAnimationFrame(draw);};
   const intersection=typeof IntersectionObserver!=="undefined"?new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))resume();else cancelAnimationFrame(frame);}):null;
   intersection?.observe(box);
-  document.addEventListener("visibilitychange",resume);media.addEventListener("change",resume);frame=requestAnimationFrame(draw);
-  return()=>{cancelAnimationFrame(frame);observer.disconnect();intersection?.disconnect();box.removeEventListener("pointermove",move);box.removeEventListener("pointerleave",leave);document.removeEventListener("visibilitychange",resume);media.removeEventListener("change",resume);delete box.dataset.queryField;delete box.dataset.queryOutcome;};
- },[host,state,previous,reduced,hidden]);
+  document.addEventListener("visibilitychange",resume);frame=requestAnimationFrame(draw);
+  return()=>{cancelAnimationFrame(frame);observer.disconnect();intersection?.disconnect();box.removeEventListener("pointermove",move);box.removeEventListener("pointerleave",leave);document.removeEventListener("visibilitychange",resume);delete box.dataset.queryField;delete box.dataset.queryOutcome;};
+ },[host,state,previous,reduced,prefersReduced,hidden]);
  return <canvas className="dbx-query-field" ref={canvas} aria-hidden="true"/>;
 }

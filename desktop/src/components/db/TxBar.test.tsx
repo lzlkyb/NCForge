@@ -2,9 +2,9 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({invoke:vi.fn(), reconnect:vi.fn()}));
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), reconnect: vi.fn(), ask: vi.fn(async () => true) }));
 vi.mock("../../lib/tauri", () => ({invoke:mocks.invoke}));
-vi.mock("../../lib/dbConfirm", () => ({reconnectSession:mocks.reconnect}));
+vi.mock("../../lib/dbConfirm", () => ({ reconnectSession: mocks.reconnect, ask: mocks.ask }));
 import { TransactionButtons, TxBar, useDbTransaction } from "./TxBar";
 import { __resetDbForTest, connect, openSqlTab, patchTab, setConns, setTx, useDbSelector, type SqlTab } from "../../lib/dbStore";
 import type { DbConn } from "../../lib/dbApi";
@@ -38,7 +38,7 @@ function Harness({id, slot, actions = false}: {id?: string; slot?: string; actio
   return <>{!actions && <TransactionButtons transaction={transaction}/>}<TxBar transaction={transaction} actions={actions}/></>;
 }
 
-const button = (text: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === text)!;
+const button = (text: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => (b.getAttribute("aria-label") ?? b.textContent) === text)!;
 
 it("固定按钮只操作当前槽，同一帧点击两种动作也只提交一次", async () => {
   setTx(conn.id,{...pending,statements:2,rows:50});
@@ -102,7 +102,7 @@ it("提交超时先核对现存会话，状态回读前锁定提交与回滚", a
   await act(async () => button("核对事务").click());
   expect(mocks.invoke).toHaveBeenLastCalledWith("db_tx",{id:"c1",action:"status",slot:null});
   // 核对结论是「确实还有未提交」：横幅切换成事务本身，操作入口重新可用。
-  expect(host.textContent).toContain("未提交事务");
+  expect(host.textContent).toContain("已写回 240 行，待提交");
   expect(button("回滚当前会话").disabled).toBe(false);
 });
 
@@ -143,7 +143,7 @@ it("提交成功后不留常驻提示，后续写入只显示当前未提交", a
   // 用户接着改了数据并写回：事务条只说「现在有 2 条未提交」，
   // 不能同时挂着上一轮那句「已提交 · 240 行」——两句并排就是自相矛盾。
   act(() => setTx(conn.id,{...empty,statements:2,rows:3}));
-  expect(host.textContent).toContain("未提交事务");
+  expect(host.textContent).toContain("已写回 3 行，待提交");
   expect(host.textContent).not.toContain("已提交");
 });
 

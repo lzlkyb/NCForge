@@ -22,7 +22,7 @@ export function TransferRowsDialog({ connId, table, tabId, onClose }: {
 }) {
   const left = useConnRt(connId);
   const leftOwner = (left.currentSchema ?? left.info?.schema ?? "").toUpperCase();
-  const { form, run, ready, blocker, patch, pick, loadPlan, start, stop } =
+  const { form, run, ready, blocker, sameTarget, patch, pick, loadPlan, start, stop } =
     useTransferRows({ connId, table, tabId, leftOwner });
   const { rightConn, owner, other, plan, mode, filter } = form;
   const { busy, out, err } = run;
@@ -97,6 +97,11 @@ export function TransferRowsDialog({ connId, table, tabId, onClose }: {
           </div>
         )}
         {!leftOwner && <div className="dbx-hint">源连接还没读到当前 schema，先连上再来搬。</div>}
+        {sameTarget && (
+          <div className="dbx-err" style={{ marginTop: 8 }}>
+            目标就是源表本身：追加会把这张表读一遍再插回去（行数翻倍），清空等于白删重写。请改目标表名。
+          </div>
+        )}
         {plan && (
           <>
             <div className="dbx-hint">{planNote(plan)}</div>

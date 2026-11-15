@@ -4,7 +4,7 @@ import { gridCodec } from "../../lib/cellCodec";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { isNumericType } from "../../lib/resultExport";
 import { fitWidth, initialWidths, rowNumberWidth, type SortState } from "../../lib/resultView";
-import { copyText } from "../../lib/utils";
+import { copyText, isImeComposing } from "../../lib/utils";
 import { toast } from "../ui/toast";
 import { ResultGridHeader } from "./ResultGridHeader";
 import { GridTextEditor } from "./GridTextEditor";
@@ -18,10 +18,13 @@ import { useGridDensityScroll } from "../../hooks/useGridDensityScroll";
 import { shouldLoadMore } from "../../lib/gridLoadMore";
 import { getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
 import { getFontRevision, subscribeFonts } from "../../lib/fonts";
+import { useScrollFrame } from "../../hooks/useScrollFrame";
+import { retainViewport } from "../../lib/scrollViewport";
 import { selectionText, type Selection } from "../../lib/dbResultTools";
 import "../../db-grid-inspector.css";
 
 const OVERSCAN = 12; // 可视区上下多渲染的行数，滚得快时不露白
+const NO_DECODE_COLUMNS: string[] = [];
 /** 距底部还有多少 px 就当作「滚到底」：一屏的 1/4，手指一拨就能续取。 */
 const LOAD_MORE_MARGIN = 96;
 
@@ -34,7 +37,7 @@ import type { CellPos, GridEdit, ResultGridApi } from "./gridEdit";
  * 排序 / 筛选的结果由父组件以 `order` 传入（复制 / 导出要用同一个顺序）。
  * NULL 斜体灰字与空串区分；数字右对齐。
  */
-export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onDetail, edit, blockedHint, zh, visible, frozen, widthOverrides, onWidths, selection, empty, onCopy, onCellMenu, apiRef, decoded, raw, wrap: wrapProp, hasMore, loadingMore, onLoadMore, idPrefix = "dbx-cell" }: {
+export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, sel, onSel, onDetail, edit, blockedHint, zh, visible, frozen, widthOverrides, onWidths, selection, empty, onCopy, onCellMenu, apiRef, decoded = NO_DECODE_COLUMNS, raw = NO_DECODE_COLUMNS, wrap: wrapProp, hasMore, loadingMore, onLoadMore, idPrefix = "dbx-cell" }: {
   apiRef?: Ref<ResultGridApi>;
   columns: ColumnMeta[];
   rows: Cell[][];
@@ -79,7 +82,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   /** 续取过的行数：滚到底触发一次后要等新行真的到达才会再触发。 */
   const loadedAt = useRef(rows.length);
   const [widths, setWidths] = useState<number[]>(() => initialWidths(columns, rows));
-  const [scroll, setScroll] = useState({ top: 0, h: 400, left: 0, w: 800 });
+  const [scroll, setScroll] = useState({ top: 0, height: 400, left: 0, width: 800 });
   const [resizing, setResizing] = useState(false);
 
   const colKey = columns.map((c) => c.name).join("|");
@@ -88,49 +91,49 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
   useLayoutEffect(() => {
     const el = boxRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setScroll(s => s.h === el.clientHeight && s.w === el.clientWidth ? s : ({ ...s, h: el.clientHeight, w: el.clientWidth })));
+    const ro = new ResizeObserver(() => setScroll(s => s.height === el.clientHeight && s.width === el.clientWidth ? s : ({ ...s, height: el.clientHeight, width: el.clientWidth })));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
   // 新结果的第一帧里 effect 还没重算列宽：先按新列现算一份，避免宽度对不上
-  const ws = widths.length === columns.length ? widths : initialWidths(columns, rows);
+  const ws = useMemo(() => widths.length === columns.length ? widths : initialWidths(columns, rows), [widths, columns, rows]);
   // 换行时行高不固定：行高按 rows 下标测、偏移按 order 累加；拖列宽期间冻结测量，pointerup 后再重算一次。
   const layout = useGridRowLayout({ rows, columns, widths: ws, order, wrap, rowH: ROW_H, frozen: resizing });
   // 切密度保留当前首行：按总高比例换算 scrollTop（依赖数组在渲染时求值，必须放在 layout 之后）。
   useGridDensityScroll({ boxRef, rowH: ROW_H, total: layout.total, preciseTop,
-    onScrollTop: (top, h) => setScroll(s => ({ ...s, top, h })) });
-  const codec = useMemo(() => gridCodec(columns, rows, order, decoded ?? [], raw), [columns, rows, order, decoded, raw]);
-  const numeric = columns.map((c) => isNumericType(c.type));
+    onScrollTop: (top, height) => setScroll(s => ({ ...s, top, height })) });
+  const codec = useMemo(() => gridCodec(columns, rows, order, decoded, raw), [columns, rows, order, decoded, raw]);
+  const numeric = useMemo(() => columns.map((c) => isNumericType(c.type)), [columns]);
   const rnW = rowNumberWidth(rows.length);
   const total = rnW + visible.reduce((n,c)=>n+ws[c],0);
   const bounds = useMemo(() => selectionBounds(order,visible,selection), [order,visible,selection]);
-  const viewport = columnViewport(visible,ws,new Set(visible.filter(c=>frozen.includes(columns[c].name))),scroll.left,scroll.w,rnW);
+  const viewport = useMemo(() => columnViewport(visible,ws,new Set(visible.filter(c=>frozen.includes(columns[c].name))),scroll.left,scroll.width,rnW), [visible, ws, frozen, columns, scroll.left, scroll.width, rnW]);
   const viewportByColumn = new Map(viewport.map(col => [col.column, col]));
   const cellStyle = (c:number) => { const col=viewportByColumn.get(c)!; return {width:col.width,position:col.frozen ? "sticky" as const : "absolute" as const,left:col.frozen ? col.sticky : col.left,...(col.frozen ? {zIndex:2} : {})}; };
-  const range = layout.range(scroll.top, scroll.h, OVERSCAN);
+  const range = layout.range(scroll.top, scroll.height, OVERSCAN);
   const { first, last } = range;
-  const selIndex = sel ? order.indexOf(sel.r) : -1;
+  const selIndex = useMemo(() => sel ? order.indexOf(sel.r) : -1, [order, sel]);
   // 活动格滚出可视区时 aria-activedescendant 会指向不存在的 id
   const activeCell = sel && viewport.some(c=>c.column===sel.c) && selIndex >= first && selIndex < last ? `${idPrefix}-${sel.r}-${sel.c}` : undefined;
 
-  const syncScroll = () => {
+  const scrollFrame = useScrollFrame(() => {
     const el = boxRef.current;
     if (!el) return;
     preciseTop.current=el.scrollTop;
-    const top=Math.floor(el.scrollTop/ROW_H)*ROW_H, left=Math.floor(el.scrollLeft/100)*100;
-    setScroll(s=>s.top===top && s.left===left && s.h===el.clientHeight && s.w===el.clientWidth ? s : {...s,top,left,h:el.clientHeight,w:el.clientWidth});
+    const next = { top: el.scrollTop, left: el.scrollLeft, height: el.clientHeight, width: el.clientWidth };
+    setScroll(s => retainViewport(s, next, layout.average * OVERSCAN, 200));
     // 续取：离底部不到 `LOAD_MORE_MARGIN` 就算「滚到底」。`loadedAt` 记住上次触发时的
     // 行数，新行没到之前不重复发——否则一次滚动能连发十几次请求（判据见 gridLoadMore）。
     if (onLoadMore && shouldLoadMore(el, { hasMore: !!hasMore, loading: !!loadingMore, rowsChanged: rows.length !== loadedAt.current, margin: LOAD_MORE_MARGIN })) {
       loadedAt.current = rows.length;
       onLoadMore();
     }
-  };
+  });
   const reveal = (c: number, rowIndex?: number) => {
     const el = boxRef.current, ci = visible.indexOf(c);
     if (!el || ci < 0) return;
-    const width=el.clientWidth || scroll.w, height=el.clientHeight || scroll.h;
+    const width=el.clientWidth || scroll.width, height=el.clientHeight || scroll.height;
     const x=rnW+visible.slice(0,ci).reduce((n,k)=>n+ws[k],0);
     const frozenWidth=rnW+visible.filter(k=>frozen.includes(columns[k].name)).reduce((n,k)=>n+ws[k],0);
     if (!frozen.includes(columns[c].name)) {
@@ -142,11 +145,13 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
       // 偏移按显示顺序（`rowIndex`）取，行高按 `rows` 下标取——两者在排序/筛选后不同。
       const y = layout.offsetAt(rowIndex);
       const h = layout.heights[order[rowIndex]] ?? ROW_H;
-      if (y < el.scrollTop) el.scrollTop=y;
+      // 两个方向都要让出吸顶表头（`HEAD_H`）：向上只写 `scrollTop = y` 会把目标行
+      // 送进表头覆盖的那条带子里，选区框与活动格都看不见，用户以为「跳过去了但没显示」。
+      if (y < el.scrollTop) el.scrollTop = Math.max(0, y - HEAD_H);
       else if (y+h > el.scrollTop+height-HEAD_H) el.scrollTop=y+h-height+HEAD_H;
     }
     // Programmatic focus can cross a virtual row/column boundary before the scroll event arrives.
-    syncScroll();
+    scrollFrame.flush();
   };
   const resize = (k: number, startX: number) => {
     const start = widths[k];
@@ -210,8 +215,10 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
     // 放在 navigation 之前：方向键、Home/End 这些 length>1，天然不会撞上。
     // `Enter` 也要排除——它 length 也是 1，但语义是「进入 / 提交」，
     // Shift+Enter 还要打开大文本编辑框，被这里捕获就再也到不了那一分支。
+    // IME 必须用 `isImeComposing`：组词中的第一个字母在 Safari 上 `isComposing` 仍是
+    // false、只有 `keyCode === 229`，光判前者会把中文输入法的首字母吃掉并直接进编辑。
     if (!editing && sel && edit && e.key.length === 1 && e.key !== "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey
-      && !e.nativeEvent.isComposing && edit.canEdit(sel.c, sel.r)) { e.preventDefault(); typeInto(e.key); return; }
+      && !isImeComposing(e.nativeEvent) && edit.canEdit(sel.c, sel.r)) { e.preventDefault(); typeInto(e.key); return; }
     if (!editing && sel && edit && e.key === "Enter" && (e.shiftKey || e.altKey) && edit.canEdit(sel.c, sel.r)) {
       e.preventDefault(); openText(); return;
     }
@@ -248,7 +255,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
       // WebView 菜单或系统复制命令可能只发 copy 事件，不发 Ctrl+C 的 keydown。
       onCopy={e=>{if (!editing && sel && e.target===e.currentTarget && !window.getSelection()?.toString()) {e.preventDefault();copySelection();}}}
       onPaste={onPaste}
-      onScroll={syncScroll}
+      onScroll={event => { preciseTop.current = event.currentTarget.scrollTop; scrollFrame.schedule(); }}
     >
       <span id={helpId} className="dbx-grid-instructions">方向键移动，Shift 扩选，Ctrl+A 全选已加载数据，Ctrl+C 复制，F4 查看完整值；Enter 或 Tab 进入编辑，Shift+Enter 打开大文本编辑框。Alt+上箭头进入表头；表头左右键换列，Enter 排序，{onHeaderMenu && "Shift+F10 或菜单键打开菜单，"}下箭头返回数据，Esc 返回原活动格。</span>
       <div className="dbx-grid-inner" style={{ width: total, height: HEAD_H + layout.total }}>
@@ -256,7 +263,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
           bounds={bounds} total={total} rnW={rnW} cellStyle={cellStyle} navigation={navigation}
           onSel={onSel} onSort={onSort} onHeaderMenu={onHeaderMenu} resize={resize} fit={fit} codec={codec} />
         <GridRows
-          order={order} idPrefix={idPrefix}
+          rows={rows} order={order} idPrefix={idPrefix}
           first={first}
           last={last}
           layout={layout}
@@ -285,14 +292,7 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
         />
       </div>
       {order.length === 0 && <div className="dbx-grid-empty" role="status" style={{top:HEAD_H}}>{empty ?? "没有匹配的行"}</div>}
-      {textOpen && editing && (
-        <GridTextEditor
-          column={columns[editing.pos.c]?.name ?? ""}
-          value={editing.value}
-          onChange={setValue}
-          onClose={() => { setTextOpen(false); boxRef.current?.focus({ preventScroll: true }); }}
-        />
-      )}
+      {textOpen && editing && <GridTextEditor column={columns[editing.pos.c]?.name ?? ""} value={editing.value} onChange={setValue} onClose={() => { setTextOpen(false); boxRef.current?.focus({ preventScroll: true }); }} />}
     </div>
   );
 }

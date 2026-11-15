@@ -98,7 +98,7 @@ describe("ImportDialog 取消语义", () => {
       btn("开始导入")?.click();
     });
     await flush();
-    expect(document.body.textContent ?? "").toContain("正在写");
+    expect(document.body.textContent ?? "").toContain("正在导入数据");
     const importCalls = mocks.invoke.mock.calls.filter((c) => c[0] === "db_import_rows").length;
     expect(importCalls).toBe(1); // 第一批在飞
 
@@ -106,10 +106,10 @@ describe("ImportDialog 取消语义", () => {
       btn("取消导入")?.click();
     });
     await flush();
-    // ① 立刻有反馈：按钮变「取消中…」且禁用，提示换成「已请求取消」
+    // ① 立刻有反馈：按钮变「取消中…」且禁用，状态明确等待后台确认。
     expect(btn("取消中…")).toBeTruthy();
     expect((btn("取消中…") as HTMLButtonElement).disabled).toBe(true);
-    expect(document.body.textContent ?? "").toContain("已请求取消");
+    expect(document.body.textContent ?? "").toContain("等待任务确认");
 
     // ② 第一批 resolve 后循环就该停：cancelRef 在批间被检查
     await act(async () => {

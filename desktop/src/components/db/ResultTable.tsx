@@ -11,7 +11,7 @@ import { binaryColumn, decodeCell } from "../../lib/cellCodec";
 import type { Cell, ColumnMeta } from "../../lib/dbApi";
 import { lobLoaderFor } from "../../lib/lobLoader";
 import { ResultTransfer } from "./ResultTransfer";
-import { freezeTransferFrame, type TransferFrame, type TransferSource } from "../../lib/resultTransferContext";
+import type { TransferFrame, TransferSource } from "../../lib/resultTransferContext";
 import { quickCopyTransfer } from "../../lib/resultTransferQuick";
 import { fitWidth, nextSort, cellBrief, type SortState, type ValueFilter } from "../../lib/resultView";
 import { headMenuItems } from "../../lib/resultHeadMenu";
@@ -52,9 +52,10 @@ export interface LobSource {
   binarySqlForRow?: (row: number, column: number) => string | null;
 }
 
-export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated, lob, hasMore, loadingMore, onLoadMore, editOwner }: {
+export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh, tools, foot, tabs, subbar, settings, running, onServerSort, transferSource, layoutKey, snapshot, onRelated, lob, hasMore, loadingMore, onLoadMore, editOwner, queryCell }: {
   columns: ColumnMeta[];
   layoutKey?:string; snapshot?:ResultSnapshot; connId?:string|null; onRelated?:(row:Cell[])=>void; editOwner?:string;
+  queryCell?: (column: number, row: number) => (() => void) | undefined;
   /** 大文本「加载完整值」的上下文；不传 = 这个结果不支持（表页 / 非查询结果）。 */
   lob?: LobSource;
   rows: Cell[][];
@@ -96,9 +97,10 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   const clearView = () => { setFilter(""); setSort(null); setValueFilter(null); };
   const [selection,setSelection] = useState<Selection|null>(null);
   const sel=selection?.end ?? null;
+  const querySelected = sel && selection?.anchor.r === sel.r && selection.anchor.c === sel.c ? queryCell?.(sel.c, sel.r) : undefined;
   const [layout,setLayout] = useState(()=>loadLayout(layoutKey));
 
-  const visible=gridColumns(columns,layout);
+  const visible=useMemo(() => gridColumns(columns,layout), [columns,layout]);
   const setColumns=(value:GridLayout)=>{setLayout(value);setSelection(null);try{saveLayout(layoutKey,value);}catch{toast("列布局未能保存，当前布局仍可使用","error");}};
   // 宽度 / 换行 / 解码只影响显示，不该把用户正选着的区域扔掉——于是不走 `setColumns`。
   const setLayoutOnly=(value:GridLayout)=>{setLayout(value);try{saveLayout(layoutKey,value);}catch{toast("列布局未能保存，当前布局仍可使用","error");}};
@@ -121,12 +123,12 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
   const frame: TransferFrame = { data: { columns, rows }, order, visible, selection,
     labels: columns.map(c => zh?.[c.name.toLowerCase()] || c.name),
     source: transferSource ?? { connId: null, resultId: layoutKey || "result", sql: snapshot?.sql ?? "", source: snapshot?.source ?? "当前结果", complete: snapshot?.complete ?? true, table, canRequery: false } };
-  const copySelection = () => void quickCopyTransfer(freezeTransferFrame(frame,valueAt));
+  const copySelection = () => void quickCopyTransfer(frame,"tsv",false,edit?.changed);
   /** 选区里的可编辑格；没有选区就是当前格。 */
   const selectedCells = () => edit && bounds ? selectedEditableCells(bounds, order, visible, edit.canEdit) : [];
   const cellMenu = (r:number,c:number,x:number,y:number) => {
-    const frozen = freezeTransferFrame({...frame,selection:{anchor:{r,c},end:{r,c}}},valueAt);
-    const column = {...frozen,selection:null,visible:[c]};
+    const cell = {...frame,selection:{anchor:{r,c},end:{r,c}}};
+    const column = {...cell,selection:null,visible:[c]};
     setMenu({x,y,items:[
       // 双击只负责编辑，看完整值要有明确入口：右键第一项 + F4 + 工具栏详情按钮。
       {label:"查看完整值",icon:"eye",hint:"F4",onSelect:()=>setDetail(true)},
@@ -134,10 +136,10 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
       // 已取到的数据，拿编辑后的值去筛会立刻筛出 0 行。
       {label: (() => { const v = rows[r]?.[c] ?? null; return v === null ? "只看这一列为空" : `只看「${cellBrief(v)}」`; })(),
         icon:"filter", hint: columns[c]?.name, onSelect: () => { const v = rows[r]?.[c] ?? null; setValueFilter({ col: c, value: v === null ? null : String(v) }); }},
-      {label:"复制原始值",icon:"copy",separator:true,onSelect:()=>void quickCopyTransfer(frozen,"tsv",true)},
+      {label:"复制原始值",icon:"copy",separator:true,onSelect:()=>void quickCopyTransfer(cell,"tsv",true,edit?.changed)},
       {label:"复制列名",onSelect:()=>void navigator.clipboard.writeText(columns[c].name).then(()=>toast("列名已复制","success"),e=>toast(`复制失败：${String(e)}`,"error"))},
-      {label:"复制唯一值（当前筛选列）",onSelect:()=>{const seen=new Set<string>();const order=column.order.filter(i=>{const key=JSON.stringify([typeof valueAt(i,c),valueAt(i,c)]);if(seen.has(key)) return false;seen.add(key);return true;});void quickCopyTransfer({...column,order},"tsv");}},
-      {label:"复制为 IN 条件（当前筛选列）",icon:"code",onSelect:()=>void quickCopyTransfer(column,"where")},
+      {label:"复制唯一值（当前筛选列）",onSelect:()=>{const seen=new Set<Cell>();const order=column.order.filter(i=>{const key=valueAt(i,c);if(seen.has(key)) return false;seen.add(key);return true;});void quickCopyTransfer({...column,order},"tsv",false,edit?.changed);}},
+      {label:"复制为 IN 条件（当前筛选列）",icon:"code",onSelect:()=>void quickCopyTransfer(column,"where",false,edit?.changed)},
       // 编辑相关动作只在「这一格真能改」时出现：主键列、只读类型、视图都没有这些项。
       ...(edit?.canEdit(c, r) ? [
         // 选中一列再置空是最常用的批量动作：有选区就作用整个选区，没选区就是这一格。
@@ -198,21 +200,27 @@ export function ResultTable({ columns, rows, meta, table, edit, blockedHint, zh,
       {tabs && <div className="dbx-result-head">{tabs}</div>}
       <div className="dbx-rbar dbx-result-tools">
         <button type="button" className="dbx-btn ghost dbx-filter-trigger" data-on={filterOpen || !!filter || !!valueFilter || undefined}
-          title="筛选已加载数据 · 网格中 Ctrl+F" aria-label="筛选结果" aria-expanded={filterOpen || !!filter}
-          onClick={()=>setFilterOpen(v=>!v)}><Icon name="search" size={14} /><span>筛选</span></button>
+          title="筛选已加载行 · 网格中 Ctrl+F" aria-label="筛选已加载行" aria-expanded={filterOpen || !!filter}
+          onClick={()=>setFilterOpen(v=>!v)}><Icon name="search" size={14} /><span>筛选已加载行</span></button>
+        {querySelected && <button type="button" className="dbx-btn ghost" onClick={querySelected}>按此值查整表</button>}
         {(filterOpen || filter) && <input ref={filterInput} className="dbx-inp sm dbx-result-filter" value={filter}
           placeholder="输入关键字" aria-label="在结果中筛选" onChange={e=>{setFilter(e.target.value);setValueFilter(null);}} autoFocus={filterOpen}
           onKeyDown={e=>{if(e.key==="Escape"){e.preventDefault();setFilter("");setFilterOpen(false);gridApi.current?.focusActive();}}} />}
-        <button type="button" className="dbx-ibtn" title={`显示、隐藏和冻结列 · 已显示 ${visible.length} / ${columns.length} 列`} aria-label="结果列布局" onClick={()=>setColumnOpen(true)}><Icon name="visibleColumns" size={14} /></button>
-        <button type="button" className="dbx-ibtn" title="长文本自动换行 · 行高随内容增减" aria-label="长文本自动换行" aria-pressed={layout.wrap} data-on={layout.wrap || undefined} onClick={()=>setLayoutOnly({...layout,wrap:!layout.wrap})}><Icon name="wrapText" size={14} /></button>
-        <button type="button" className="dbx-ibtn" title="按内容自适应全部列宽" aria-label="自适应列宽" onClick={fitAll}><Icon name="fitColumns" size={14} /></button>
+        <button type="button" className="dbx-btn ghost" aria-label="显示选项" aria-haspopup="menu" onClick={event => {
+          const box = event.currentTarget.getBoundingClientRect();
+          setMenu({ x: box.left, y: box.bottom + 4, items: [
+            { label: "结果列布局", icon: "visibleColumns", hint: `${visible.length} / ${columns.length} 列`, onSelect: () => setColumnOpen(true) },
+            { label: "长文本自动换行", icon: "wrapText", checked: layout.wrap, onSelect: () => setLayoutOnly({...layout,wrap:!layout.wrap}) },
+            { label: "自适应列宽", icon: "fitColumns", onSelect: fitAll },
+          ] });
+        }}><Icon name="visibleColumns" size={14} /><span className="dbx-action-label">显示</span><Icon name="chevronDown" size={12} /></button>
         {snapshot && <ResultCompare snapshot={snapshot} related={onRelated ? {label:"关联记录",icon:"external",disabled:!sel,onSelect:()=>sel && onRelated(rows[sel.r])} : undefined} />}
         {!snapshot && onRelated && <button type="button" className="dbx-btn ghost" disabled={!sel} onClick={()=>sel && onRelated(rows[sel.r])}>关联记录</button>}
         <span className="dbx-sp" />
         {!snapshot && <span className="meta">{meta}</span>}
         {tools}
         {(running || pending) && <span className="dbx-busy" role="status"><Icon name="spinner" size={12} />{running ? "执行中…" : "正在整理结果…"}</span>}
-        <ResultTransfer frame={frame} valueAt={valueAt} />
+        <ResultTransfer frame={frame} edits={edit?.changed} />
         <button type="button" className="dbx-ibtn" data-on={detail || undefined} title="单元格详情 · F4" aria-label="单元格详情" aria-pressed={detail} onClick={()=>setDetail(!detail)}><Icon name="cellInspect" size={14} /></button>
         {snapshot && <ResultSource snapshot={snapshot} meta={meta} />}
         {settings}

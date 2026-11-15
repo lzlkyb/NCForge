@@ -43,6 +43,24 @@ it("status stays inline and preserves script progress and stop confirmation",asy
 it("elapsed time lives in its own component and clears its timer",async()=>{
  vi.useFakeTimers();
  await act(async()=>root.render(<QueryElapsed startedAt={Date.now()}/>));
- await act(async()=>vi.advanceTimersByTime(1200));expect(host.textContent).toContain("1.2s");
+ await act(async()=>vi.advanceTimersByTime(1200));expect(host.textContent).toContain("1s");
  await act(async()=>root.unmount());expect(vi.getTimerCount()).toBe(0);root=createRoot(host);vi.useRealTimers();
+});
+
+it("the first reduced-motion terminal frame clears the previous query decoration",async()=>{
+ let frame:FrameRequestCallback=()=>{};
+ const clear=vi.fn();
+ Object.defineProperty(host,"clientWidth",{configurable:true,value:400});
+ Object.defineProperty(host,"clientHeight",{configurable:true,value:200});
+ vi.spyOn(HTMLCanvasElement.prototype,"getContext").mockReturnValue({setTransform:vi.fn(),clearRect:clear} as unknown as CanvasRenderingContext2D);
+ const raf=vi.fn((callback:FrameRequestCallback)=>{frame=callback;return 1;});
+ vi.stubGlobal("requestAnimationFrame",raf);
+ for(const state of ["success","cancelled"]){
+  await act(async()=>root.render(<QueryField host={host} state="running" previous reduced/>));
+  await act(async()=>root.render(<QueryField host={host} state={state} previous reduced/>));
+  const calls=raf.mock.calls.length;
+  await act(async()=>frame(performance.now()));
+  expect(clear).toHaveBeenLastCalledWith(0,0,400,200);
+  expect(raf.mock.calls.length).toBe(calls);
+ }
 });

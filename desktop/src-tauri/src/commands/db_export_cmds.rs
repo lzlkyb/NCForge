@@ -31,10 +31,21 @@ use crate::sql_export::{self, ColMeta, Plan, ResultCol};
 use crate::state::AppState;
 
 /// 一页取多少行。页太小则往返多，太大则单个 IPC 报文过重。
-const PAGE: usize = 5000;
+/// 单页取数行数。
+///
+/// 导出走 `execFull`（每格 CLOB 上限 1M），所以「页大小 × 单格」就是一次驻留内存的峰值：
+/// 5000 行 × 1MB 在最坏情况下是 5GB，进程会被直接 OOM 杀掉而不是报错。
+/// 500 行把峰值压到 1/10，代价只是多几次往返。
+const PAGE: usize = 500;
 /// 行数默认上限。整表几十万行的场景要走 `exp`，不是这里。
 const MAX_ROWS_DEFAULT: usize = 5000;
 const MAX_ROWS_LIMIT: usize = 100_000;
+/// INSERT 脚本文本的上限。
+///
+/// 这条通道把整份脚本先拼成一个大 `String` 再整串交给前端（`sql_text`），没有
+/// `db_export_file` 那样的流式落盘，所以必须有个硬上限：超过就停下并明确告警，
+/// 而不是让进程在拼字符串时被 OOM 杀掉。
+const MAX_TEXT_BYTES: usize = 256 * 1024 * 1024;
 /// 会话名的序号，避免两次导出撞同一个临时会话。
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -162,10 +173,18 @@ pub async fn db_export_insert(
             "行数到了上限 {max_rows}，脚本只是前 {max_rows} 行；要全量就调大上限，或用 where 把范围收窄"
         ));
     }
+    if fetched.oversize {
+        warnings.push(format!(
+            "结果文本超过 {} MB，已停止取数。这条通道要把整份脚本拼成一个字符串返回，再往下会先把内存占满；\
+             请用 where 缩小范围分段导出，或改用「导出为 CSV」那条边取边写的通道",
+            MAX_TEXT_BYTES / (1024 * 1024)
+        ));
+    }
     if fetched.long_values > 0 {
         warnings.push(format!(
-            "有 {} 个超长文本超过 8K 预览上限，脚本里的这些值只有前 8192 个字符（含一句中文提示），\
-             不能直接用于数据迁移。请缩小 where 范围后按行分段导出，或先把这些列单独导出",
+            "有 {} 个超长文本超过 1M 字符上限（导出通道的上限；网格里显示的 8K 只是预览），\
+             脚本里的这些值只保留前 1M 个字符并带一句中文提示，不能直接用于数据迁移。\
+             请缩小 where 范围后按行分段导出，或先把这些列单独导出",
             fetched.long_values
         ));
     }
@@ -198,7 +217,8 @@ pub async fn db_export_insert(
         file_name: file_name(req.schema.as_deref(), &req.table),
         sql_text,
         rows: stats.rows,
-        truncated: fetched.truncated,
+        // 撞文本上限同样是「部分结果」：界面据此加 `-部分结果` 后缀，漏了会被当成完整脚本重放。
+        truncated: fetched.truncated || fetched.oversize,
         blob_nulls: stats.blob_nulls,
         raw_nulls: stats.raw_nulls,
         ml_tildes: stats.ml_tildes,
@@ -232,6 +252,8 @@ struct Fetched {
     columns: Vec<ResultCol>,
     rows: Vec<Vec<String>>,
     truncated: bool,
+    /// 文本总量撞到 `MAX_TEXT_BYTES` 而停：与行数上限不是一回事，告警要分开说。
+    oversize: bool,
     /// 长到 CLOB 上限、可能已被截断的值个数。
     long_values: usize,
 }
@@ -294,8 +316,15 @@ async fn fetch(
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut long_values = 0usize;
     let mut truncated = false;
+    let mut oversize = false;
+    let mut bytes = 0usize;
     loop {
-        collect_rows(&body, &mut rows, &mut long_values, max_rows);
+        bytes += collect_rows(&body, &mut rows, &mut long_values, max_rows);
+        // 文本总量撞上限：再往下取只会先把内存占满，不如停下给一句能照做的告警。
+        if bytes > MAX_TEXT_BYTES {
+            oversize = true;
+            break;
+        }
         let more = body
             .get("hasMore")
             .and_then(Value::as_bool)
@@ -319,22 +348,25 @@ async fn fetch(
         columns,
         rows,
         truncated,
+        oversize,
         long_values,
     })
 }
 
+/// 收一页行进 `out`；返回这一页的文本字节数（调用方用它累计 `MAX_TEXT_BYTES`）。
 fn collect_rows(
     body: &Value,
     out: &mut Vec<Vec<String>>,
     long_values: &mut usize,
     max_rows: usize,
-) {
+) -> usize {
     let Some(arr) = body.get("rows").and_then(Value::as_array) else {
-        return;
+        return 0;
     };
+    let mut bytes = 0usize;
     for r in arr {
         if out.len() >= max_rows {
-            return;
+            break;
         }
         let cells: Vec<String> = r
             .as_array()
@@ -353,8 +385,10 @@ fn collect_rows(
                     .collect()
             })
             .unwrap_or_default();
+        bytes += cells.iter().map(String::len).sum::<usize>();
         out.push(cells);
     }
+    bytes
 }
 
 fn cell_text(v: &Value) -> Option<String> {

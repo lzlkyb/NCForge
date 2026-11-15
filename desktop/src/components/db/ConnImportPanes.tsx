@@ -80,19 +80,17 @@ export function PropImportPane() {
           <>
             <label>环境</label>
             <EnvChips value={env} onChange={setEnv} />
-            <p className="dbx-hint">口令用 NC 自带的 PropXMLReader 现解，不用再输；prop.xml 改了自动跟着变。</p>
           </>
         )}
         {needHome ? (
           <div className="dbx-homeguide">
             <Icon name="alert" size={14} />
             <div>
-              <p>这一页从 NC 安装目录的 <code>ierp/bin/prop.xml</code> 读数据源，并用 NC 自带的类解密口令——需要先配置 NC home。</p>
+              <p>请先配置 NC 安装目录，再读取 <code>ierp/bin/prop.xml</code>。</p>
               <div className="dbx-homeguide-actions">
                 <button type="button" className="dbx-btn pri" onClick={goNcEnv}>
-                  去设置 → 开发 →「NC 环境」配置
+                  打开 NC 环境设置
                 </button>
-                <span className="dbx-muted">不配 NC home 也能连库：关闭这一页，用「手动填写」或「导入 .properties」（纯 Rust 驱动不依赖 NC home）。</span>
               </div>
             </div>
           </div>
@@ -109,7 +107,7 @@ export function PropImportPane() {
           取消
         </button>
         <button type="button" className="dbx-btn pri" disabled={picked.length === 0 || busy} onClick={() => void add()}>
-          添加 {picked.length || ""} 个
+          {picked.length ? `导入 ${picked.length} 个连接` : "导入连接"}
         </button>
       </div>
     </>

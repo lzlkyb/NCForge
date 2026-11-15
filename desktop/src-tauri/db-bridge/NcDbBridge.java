@@ -144,7 +144,7 @@ public class NcDbBridge {
 
     /** 已知命令名：用来区分「新格式的第二段是会话名」还是「旧格式的第二段就是命令」。 */
     private static final Set<String> CMDS = new HashSet<String>(Arrays.asList(
-            "hello", "propList", "propCred", "connect", "connectProp", "exec", "execBound", "readOnly", "more", "closeResult", "commit",
+            "hello", "propList", "propCred", "connect", "connectProp", "exec", "execBound", "execBoundResult", "readOnly", "more", "closeResult", "commit",
             "rollback", "autocommit", "tables", "ncNames", "query", "columns", "indexes", "ddl",
             "explain", "sessions", "objects", "source", "schema", "schemas", "setSchema", "ping", "probe",
             "disconnect", "quit", "cancel"));
@@ -431,6 +431,9 @@ public class NcDbBridge {
                 // execFull：导出 / 表间搬运的全量取数通道，CLOB 给到 1M 而不是网格的 8K 预览。
                 ok(id, execResult(a.get(0), intArg(a, 1, 500), intArg(a, 2, 30), flag(a, 3),
                         "execFull".equals(cmd), a.size() > 4 ? a.get(4) : ""));
+            } else if ("execBoundResult".equals(cmd)) {
+                ok(id, execResult(a.get(0), intArg(a, 1, 500), intArg(a, 2, 30), false, false,
+                        a.get(3), a.subList(4, a.size())));
             } else if ("execBound".equals(cmd) || "execFullBound".equals(cmd)) {
                 ok(id, execParams(a.get(0), intArg(a,1,500), intArg(a,2,30), a.subList(3,a.size()),
                         false, "execFullBound".equals(cmd)));
@@ -768,7 +771,11 @@ public class NcDbBridge {
         }
         private String execResult(String raw, int maxRows, int timeout, boolean collectStats,
                                   boolean fullLob, String resultId) throws Exception {
-            if (resultId == null || resultId.isEmpty()) return exec(raw,maxRows,timeout,collectStats,fullLob);
+            return execResult(raw, maxRows, timeout, collectStats, fullLob, resultId, null);
+        }
+        private String execResult(String raw, int maxRows, int timeout, boolean collectStats,
+                                  boolean fullLob, String resultId, List<String> binds) throws Exception {
+            if (resultId == null || resultId.isEmpty()) return execParams(raw,maxRows,timeout,binds,collectStats,fullLob);
             requireConn();
             String sql = normalize(raw), head = leadingKeywords(sql);
             boolean mayReturnRows = head.startsWith("select") || head.startsWith("with") || cursorOutBinds(sql).length > 0;
@@ -781,7 +788,7 @@ public class NcDbBridge {
             useCursor(null);
             boolean success = false;
             try {
-                String result = exec(raw,maxRows,timeout,collectStats,fullLob);
+                String result = execParams(raw,maxRows,timeout,binds,collectStats,fullLob);
                 if (cursor != null && resultCursors.size() >= MAX_RESULT_CURSORS) {
                     throw new CursorError("cursor-limit", "最多保留 32 个可继续读取的结果，请关闭部分结果后重试");
                 }
@@ -951,11 +958,18 @@ public class NcDbBridge {
             int n = sql.length();
             while (i < n) {
                 char c = sql.charAt(i);
-                if (c == '\'') {
+                if ((c == 'q' || c == 'Q') && i + 2 < n && sql.charAt(i + 1) == '\'') {
+                    char open = sql.charAt(i + 2);
+                    char close = open == '[' ? ']' : open == '{' ? '}' : open == '(' ? ')' : open == '<' ? '>' : open;
+                    int end = sql.indexOf(String.valueOf(close) + "'", i + 3);
+                    end = end < 0 ? n : end + 2;
+                    b.append(sql, i, end);
+                    i = end;
+                } else if (c == '\'' || c == '"') {
                     int j = i++;
                     while (i < n) {
-                        if (sql.charAt(i) == '\'') {
-                            if (i + 1 < n && sql.charAt(i + 1) == '\'') {
+                        if (sql.charAt(i) == c) {
+                            if (i + 1 < n && sql.charAt(i + 1) == c) {
                                 i += 2;
                                 continue;
                             }

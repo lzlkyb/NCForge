@@ -8,6 +8,7 @@ import {
   useDbConns, useDbSelector,
 } from "../../lib/dbStore";
 import { getKeymap, isReopenTabKey } from "../../lib/keymap";
+import { isImeComposing } from "../../lib/utils";
 import { useViewActive } from "../../lib/viewActivity";
 import { ENV_LABEL } from "../../lib/dbApi";
 import { dbPanelId, dbTabId, dbTabLabel } from "../../lib/dbPendingSessions";
@@ -58,7 +59,7 @@ export function DbDocTabs() {
   useEffect(() => {
     if (!dock?.documentOpen || !viewActive) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing || !isReopenTabKey(e, getKeymap())) return;
+      if (e.defaultPrevented || isImeComposing(e) || !isReopenTabKey(e, getKeymap())) return;
       if (document.querySelector('[role="dialog"][aria-modal="true"], dialog[open]')) return;
       const target = e.target instanceof HTMLElement ? e.target : null;
       if (target?.isContentEditable) return;

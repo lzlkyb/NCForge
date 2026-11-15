@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks=vi.hoisted(()=>({tab:{id:"t",kind:"sql",title:"SQL 1",connId:"c",slot:"7",run:undefined as unknown,results:[] as unknown[]},ensure:vi.fn(),exec:vi.fn(),cancel:vi.fn(),activate:vi.fn(),patch:vi.fn()}));
 vi.mock("./dbApi",async importOriginal=>({...await importOriginal<typeof import("./dbApi")>(),dbApi:{cancel:mocks.cancel}}));
 vi.mock("./dbStore",()=>({tabOf:()=>mocks.tab,activateTab:mocks.activate,sqlTabOf:()=>mocks.tab,isRunning:(t:{run?:unknown}|null|undefined)=>!!t?.run,connOf:()=>({name:"测试连接",env:"test",source:"manual",url:"jdbc:test",user:"NC",engine:"java",propDs:null}),rtOf:()=>({currentSchema:"SCHEMA_A"}),patchTab:(_id:string,patch:Record<string,unknown>)=>{Object.assign(mocks.tab,patch);mocks.patch(patch);},execOne:mocks.exec,setTxNotice:vi.fn(),appendOutput:vi.fn(),loadMeta:vi.fn()}));
-vi.mock("./dbConfirm",()=>({ensureConnected:mocks.ensure,confirmProdWrite:vi.fn(async()=>true)}));
+vi.mock("./dbConfirm",()=>({ensureConnected:mocks.ensure,confirmProdWrite:vi.fn(async()=>true),ask:vi.fn(async()=>true)}));
 vi.mock("./sqlModels",()=>({disposeSqlModel:vi.fn()}));
 vi.mock("../components/ui/toast",()=>({toast:vi.fn()}));
 import { runStatements } from "./dbActions";

@@ -5,7 +5,12 @@ use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
 use tauri::AppHandle;
 const FOREIGN_KEYS: &str = "select f.constraint_name RELATION, f.table_name SOURCE_TABLE, fc.column_name SOURCE_COLUMN, p.table_name TARGET_TABLE, pc.column_name TARGET_COLUMN, fc.position POSITION from all_constraints f join all_constraints p on p.constraint_name=f.r_constraint_name and p.owner=f.r_owner join all_cons_columns fc on fc.constraint_name=f.constraint_name and fc.owner=f.owner join all_cons_columns pc on pc.constraint_name=p.constraint_name and pc.owner=p.owner and pc.position=fc.position where f.constraint_type='R' and f.owner=sys_context('userenv','current_schema') and p.owner=f.owner and (f.table_name=:1 or p.table_name=:2) order by f.constraint_name, fc.position";
-const NC_REFS: &str = "select distinct p.id RELATION, st.name SOURCE_TABLE, sc.name SOURCE_COLUMN, tt.name TARGET_TABLE, tc.name TARGET_COLUMN, 1 POSITION from md_property p join md_class cl on cl.id=p.datatype join md_ormap sm on sm.propertyid=p.id join md_column sc on sc.id=sm.columnid join md_table st on st.id=sc.tableid join md_ormap tm on tm.classid=cl.id join md_column tc on tc.id=tm.columnid join md_table tt on tt.id=tc.tableid where nvl(p.dr,0)=0 and nvl(sm.dr,0)=0 and nvl(tm.dr,0)=0 and nvl(sc.dr,0)=0 and nvl(tc.dr,0)=0 and nvl(st.dr,0)=0 and nvl(tt.dr,0)=0 and upper(tc.pkey) in ('Y','TRUE','1') and not exists (select 1 from md_column otherkey where otherkey.tableid=tc.tableid and otherkey.id<>tc.id and nvl(otherkey.dr,0)=0 and upper(otherkey.pkey) in ('Y','TRUE','1')) and (upper(st.name)=:1 or upper(tt.name)=:2)";
+/// `{attr}` 是 `MD_ORMAP` 指向 `MD_PROPERTY` 的那一列：NC6 系列叫 `ATTRIBUTEID`，
+/// 早期按 `PROPERTYID` 写死在这套库上直接 ORA-00904，关系恒空（用户看不到任何标注）。
+const NC_REFS_TEMPLATE: &str = "select distinct p.id RELATION, st.name SOURCE_TABLE, sc.name SOURCE_COLUMN, tt.name TARGET_TABLE, tc.name TARGET_COLUMN, 1 POSITION from md_property p join md_class cl on cl.id=p.datatype join md_ormap sm on sm.{attr}=p.id join md_column sc on sc.id=sm.columnid join md_table st on st.id=sc.tableid join md_ormap tm on tm.classid=cl.id join md_column tc on tc.id=tm.columnid join md_table tt on tt.id=tc.tableid where nvl(p.dr,0)=0 and nvl(sm.dr,0)=0 and nvl(tm.dr,0)=0 and nvl(sc.dr,0)=0 and nvl(tc.dr,0)=0 and nvl(st.dr,0)=0 and nvl(tt.dr,0)=0 and upper(tc.pkey) in ('Y','TRUE','1') and not exists (select 1 from md_column otherkey where otherkey.tableid=tc.tableid and otherkey.id<>tc.id and nvl(otherkey.dr,0)=0 and upper(otherkey.pkey) in ('Y','TRUE','1')) and (upper(st.name)=:1 or upper(tt.name)=:2)";
+/// 元数据表清单：一次查完，后面按需取列名（不同 NC 版本列名不一样）。
+const META_TABLES: &str =
+    "('MD_ENUM','MD_ENUMCLASS','MD_ENUMVALUE','MD_ORMAP','MD_PROPERTY','MD_COLUMN','MD_TABLE')";
 async fn read(
     b: Arc<crate::db_engine::EngineHandle>,
     sql: &str,
@@ -62,10 +67,18 @@ pub async fn db_relations(
     } else {
         slot_bridge(&state, &id, None)?
     };
-    let fk = read(b.clone(), FOREIGN_KEYS, &table.to_uppercase()).await;
-    // Missing/older metadata schemas remain usable through the declared-FK path.
-    let nc = read(b.clone(), NC_REFS, &table.to_uppercase()).await;
-    let enums = read_enums(b.clone(), &table.to_uppercase()).await;
+    // 列名只能来自库自己：同一段 SQL 在 NC5/NC6 上叫法不同，猜错就是整块关系静默为空。
+    let meta = metadata_columns(b.clone()).await;
+    let upper = table.to_uppercase();
+    let fk = read(b.clone(), FOREIGN_KEYS, &upper).await;
+    let nc = match &meta {
+        Ok(columns) => match ormap_attribute(columns) {
+            Some(attr) => read(b.clone(), &NC_REFS_TEMPLATE.replace("{attr}", attr), &upper).await,
+            None => Err("此库的 MD_ORMAP 没有可确认的属性列".into()),
+        },
+        Err(error) => Err(error.clone()),
+    };
+    let enums = read_enums(b.clone(), &upper, meta.as_deref().unwrap_or(&[])).await;
     if let Some((key, engine)) = temporary {
         let _ = call(engine, "disconnect", vec![], Duration::from_secs(10)).await;
         drop_bridge(&state, &key);
@@ -110,35 +123,60 @@ fn require_relation_session(temporary: bool, isolated_only: bool) -> Result<(), 
     }
     Ok(())
 }
-async fn read_enums(b: Arc<crate::db_engine::EngineHandle>, table: &str) -> Result<Value, String> {
-    let schema=call(b.clone(),"exec",vec!["select table_name, column_name from all_tab_columns where owner=sys_context('userenv','current_schema') and table_name in ('MD_ENUM','MD_ENUMCLASS','MD_ENUMVALUE')".into(),"200".into(),"60".into()],Duration::from_secs(90)).await?;
-    let has = |t: &str, c: &str| {
-        schema["rows"].as_array().is_some_and(|rows| {
-            rows.iter()
-                .any(|r| r[0].as_str() == Some(t) && r[1].as_str() == Some(c))
-        })
-    };
+/// 本库元数据表的 `(表名, 列名)` 全表，列名来自 `all_tab_columns`，不是猜的。
+async fn metadata_columns(
+    b: Arc<crate::db_engine::EngineHandle>,
+) -> Result<Vec<(String, String)>, String> {
+    let sql = format!("select table_name, column_name from all_tab_columns where owner=sys_context('userenv','current_schema') and table_name in {META_TABLES}");
+    let out = call(
+        b,
+        "exec",
+        vec![sql, "800".into(), "60".into()],
+        Duration::from_secs(90),
+    )
+    .await?;
+    let rows = out["rows"].as_array().ok_or("元数据列清单读取失败")?;
+    Ok(rows
+        .iter()
+        .filter_map(|r| Some((r[0].as_str()?.to_string(), r[1].as_str()?.to_string())))
+        .collect())
+}
+fn has(columns: &[(String, String)], table: &str, column: &str) -> bool {
+    columns.iter().any(|(t, c)| t == table && c == column)
+}
+/// `MD_ORMAP` 指向 `MD_PROPERTY` 的外键列：优先 `ATTRIBUTEID`（NC6），退回 `PROPERTYID`。
+fn ormap_attribute(columns: &[(String, String)]) -> Option<&'static str> {
+    ["ATTRIBUTEID", "PROPERTYID"]
+        .into_iter()
+        .find(|c| has(columns, "MD_ORMAP", c))
+}
+async fn read_enums(
+    b: Arc<crate::db_engine::EngineHandle>,
+    table: &str,
+    columns: &[(String, String)],
+) -> Result<Value, String> {
     let enum_table = ["MD_ENUM", "MD_ENUMCLASS"]
         .into_iter()
-        .find(|t| has(t, "ID"))
+        .find(|t| has(columns, t, "ID"))
         .ok_or("此库没有受支持的 NC 枚举定义表")?;
     let reference = ["ENUMID", "ENUMCLASSID"]
         .into_iter()
-        .find(|c| has("MD_ENUMVALUE", c))
+        .find(|c| has(columns, "MD_ENUMVALUE", c))
         .ok_or("此库的 NC 枚举值未提供可确认的枚举引用列")?;
     let value = ["VALUE", "ENUMVALUE"]
         .into_iter()
-        .find(|c| has("MD_ENUMVALUE", c))
+        .find(|c| has(columns, "MD_ENUMVALUE", c))
         .ok_or("此库的 NC 枚举值结构不受支持")?;
     let label = ["DISPLAYNAME", "NAME"]
         .into_iter()
-        .find(|c| has("MD_ENUMVALUE", c))
+        .find(|c| has(columns, "MD_ENUMVALUE", c))
         .ok_or("此库的 NC 枚举值没有显示名")?;
+    let attr = ormap_attribute(columns).ok_or("此库的 MD_ORMAP 没有可确认的属性列")?;
     // Identifiers come exclusively from the verified schema whitelist; the selected table stays bound.
-    let sql=format!("select distinct sc.name FIELD, ev.\"{value}\" ENUM_VALUE, ev.\"{label}\" ENUM_LABEL from md_property p join {enum_table} en on en.id=p.datatype join md_ormap sm on sm.propertyid=p.id join md_column sc on sc.id=sm.columnid join md_table st on st.id=sc.tableid join MD_ENUMVALUE ev on ev.\"{reference}\"=en.id where nvl(p.dr,0)=0 and nvl(sm.dr,0)=0 and nvl(sc.dr,0)=0 and nvl(st.dr,0)=0 and upper(st.name)=:1 and upper(st.name)=:2");
+    let sql=format!("select distinct sc.name FIELD, ev.\"{value}\" ENUM_VALUE, ev.\"{label}\" ENUM_LABEL from md_property p join {enum_table} en on en.id=p.datatype join md_ormap sm on sm.{attr}=p.id join md_column sc on sc.id=sm.columnid join md_table st on st.id=sc.tableid join MD_ENUMVALUE ev on ev.\"{reference}\"=en.id where nvl(p.dr,0)=0 and nvl(sm.dr,0)=0 and nvl(sc.dr,0)=0 and nvl(st.dr,0)=0 and upper(st.name)=:1 and upper(st.name)=:2");
     let deleted = [(enum_table, "en"), ("MD_ENUMVALUE", "ev")]
         .into_iter()
-        .filter(|(t, _)| has(t, "DR"))
+        .filter(|(t, _)| has(columns, t, "DR"))
         .map(|(_, alias)| format!(" and nvl({alias}.dr,0)=0"))
         .collect::<String>();
     read(b, &format!("{sql}{deleted}"), table).await
@@ -148,6 +186,11 @@ async fn read_enums(b: Arc<crate::db_engine::EngineHandle>, table: &str) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn meta(rows: &[(&str, &str)]) -> Vec<(String, String)> {
+        rows.iter()
+            .map(|(t, c)| (t.to_string(), c.to_string()))
+            .collect()
+    }
     #[test]
     fn compound_keys_join_by_position() {
         assert!(FOREIGN_KEYS.contains("pc.position=fc.position"));
@@ -159,9 +202,21 @@ mod tests {
     }
     #[test]
     fn nc_reference_requires_real_class_mapping() {
-        assert!(NC_REFS.contains("cl.id=p.datatype"));
-        assert!(NC_REFS.contains("tc.pkey"));
-        assert!(!NC_REFS.contains("pk_org"));
+        assert!(NC_REFS_TEMPLATE.contains("cl.id=p.datatype"));
+        assert!(NC_REFS_TEMPLATE.contains("tc.pkey"));
+        assert!(!NC_REFS_TEMPLATE.contains("pk_org"));
+    }
+    /// 真实库的 `MD_ORMAP` 只有 `ATTRIBUTEID`：写死 `PROPERTYID` 会让整块关系静默为空。
+    #[test]
+    fn ormap_attribute_follows_the_library() {
+        let nc6 = meta(&[("MD_ORMAP", "ATTRIBUTEID"), ("MD_ORMAP", "CLASSID")]);
+        assert_eq!(ormap_attribute(&nc6), Some("ATTRIBUTEID"));
+        let legacy = meta(&[("MD_ORMAP", "PROPERTYID")]);
+        assert_eq!(ormap_attribute(&legacy), Some("PROPERTYID"));
+        assert_eq!(ormap_attribute(&meta(&[("MD_ORMAP", "CLASSID")])), None);
+        let sql = NC_REFS_TEMPLATE.replace("{attr}", "ATTRIBUTEID");
+        assert!(sql.contains("sm.ATTRIBUTEID=p.id"));
+        assert!(!sql.contains("{attr}"));
     }
     #[test]
     fn completion_requires_an_isolated_session_without_changing_table_page_fallback() {

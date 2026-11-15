@@ -2,6 +2,7 @@ import { CodePreview } from "./CodePreview";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../ui/icon";
+import { isImeComposing } from "../../lib/utils";
 import type { ResultSnapshot } from "../../lib/dbResultTools";
 
 /** Render outside the result's scroll container so a short result pane cannot clip its provenance. */
@@ -28,7 +29,7 @@ export function ResultSource({ snapshot, meta }: { snapshot: ResultSnapshot; met
       if (!panel.current?.contains(event.target as Node) && !anchor.current?.contains(event.target as Node)) setOpen(false);
     };
     const key = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.isComposing) return;
+      if (event.key !== "Escape" || isImeComposing(event)) return;
       event.preventDefault(); event.stopPropagation(); setOpen(false); anchor.current?.focus({ preventScroll: true });
     };
     const scroll = (event: Event) => { if (!panel.current?.contains(event.target as Node)) setOpen(false); };

@@ -11,6 +11,8 @@ export interface HistoryEntry {
   /** 「500+ 行」「更新 1 行」「ORA-00942」之类的一句话结果。 */
   summary: string;
   ok: boolean;
+  schema?: string;
+  pinned?: boolean;
 }
 
 const KEY = "ncforge-db-history";
@@ -83,13 +85,26 @@ export function getHistoryMap(): Readonly<Record<string, HistoryEntry[]>> {
 
 export function addHistory(connId: string, entry: HistoryEntry): void {
   const all = readAll();
-  const list = [entry, ...(all[connId] ?? []).filter((e) => e.sql !== entry.sql)].slice(0, MAX);
+  const before = all[connId] ?? [];
+  const same = (e: HistoryEntry) => e.sql === entry.sql && e.schema === entry.schema;
+  const prior = before.find(same);
+  const recent = [{ ...entry, ...(prior?.pinned ? { pinned: true } : {}) }, ...before.filter(e => !same(e))];
+  const list = recent.filter(e => e.pinned).concat(recent.filter(e => !e.pinned)).slice(0, MAX).sort((a, b) => b.at - a.at);
   // 不能就地改 `all`：`getHistoryMap()` 把同一个对象直接交给 useSyncExternalStore，
   // 引用不变就被判成「没变化」，历史抽屉里的列表永远不刷新。每次换一个新对象。
   cache = { ...all, [connId]: list };
   // 列表立刻可见（内存 + 通知），落盘合并到 300ms：几百条 INSERT 的回放不再逐条全量序列化。
   scheduleWrite();
   listeners.forEach((fn) => fn());
+}
+
+export function changeHistoryEntry(connId: string, entry: HistoryEntry, action: "pin" | "forget"): void {
+  const all = readAll(), list = all[connId];
+  if (!list?.includes(entry)) return;
+  cache = { ...all, [connId]: action === "forget" ? list.filter(e => e !== entry) :
+    list.map(e => e === entry ? { ...e, pinned: !e.pinned } : e) };
+  flushHistory();
+  listeners.forEach(fn => fn());
 }
 
 export function clearHistory(connId: string): void {

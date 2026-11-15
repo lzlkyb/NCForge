@@ -1,4 +1,5 @@
 import type { ImportFail } from "../../lib/dbApi";
+import { TaskFeedback } from "../ui/TaskFeedback";
 
 /** 导入进行到哪一步。`canceling` 并进来是因为它本来就是「这一轮的状态」的一部分。 */
 export interface ImportBusy {
@@ -28,16 +29,12 @@ export function ImportProgress({ busy, err, out }: {
 }) {
   return (
     <>
-      {busy && (
-        <div className="dbx-hint" style={{ marginTop: 8 }}>
-          {busy.canceling
-            ? "已请求取消，等当前批写完就停（已经在飞的那批必须写完，否则不知道结果）…"
-            : `正在写：${busy.done} / ${busy.total} 行…（点「取消导入」会在当前批写完后停下）`}
-        </div>
-      )}
-      {err && <div className="dbx-err" style={{ marginTop: 8 }}>{err}</div>}
+      <TaskFeedback active={!!busy} label="正在导入数据…" cancelling={busy?.canceling}
+        progress={busy ? { done: busy.done, total: busy.total, unit: "行" } : undefined}
+        detail={busy?.canceling ? "当前批确认完成后停止，已写入的数据会保留。" : "可使用下方「取消导入」，等待当前批处理确认。"} />
+      {err && <div className="dbx-err" role="alert" style={{ marginTop: 8 }}>{err}</div>}
       {out && (
-        <div className="dbx-hint" style={{ marginTop: 8 }}>
+        <div className="dbx-hint" role="status" style={{ marginTop: 8 }}>
           <div style={{ color: "hsl(var(--foreground))" }}>
             {out.canceled ? "已取消 · 已写进 " : "写进 "}
             <b>{out.inserted}</b> 行 · {(out.ms / 1000).toFixed(1)}s

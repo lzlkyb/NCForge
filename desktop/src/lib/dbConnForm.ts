@@ -73,7 +73,7 @@ export function initialConnForm(conn: DbConn | null): DbConnForm {
 export function mergeConnForm(f: DbConnForm, patch: Partial<DbConnForm>): DbConnForm {
   const next = { ...f, ...patch };
   if ("host" in patch || "port" in patch || "service" in patch || "sid" in patch) {
-    next.url = next.host && next.service ? buildOracleUrl(next.host, next.port, next.service, next.sid) : "";
+    next.url = next.host.trim() && next.service.trim() ? buildOracleUrl(next.host, next.port, next.service, next.sid) : "";
   } else if ("url" in patch) {
     const p = parseOracleUrl(next.url);
     if (p) Object.assign(next, { host: p.host, port: p.port, service: p.service, sid: p.sid });

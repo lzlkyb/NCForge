@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { friendlyDbError } from "../lib/db";
 import { dbApi } from "../lib/dbApi";
-import { rtOf } from "../lib/dbStore";
-import { confirmProdWrite } from "../lib/dbConfirm";
+import { rtOf, connOf } from "../lib/dbStore";
+import { ask, confirmProdWrite } from "../lib/dbConfirm";
 import { beginOperation, cancelOperation, type OperationHandle } from "../lib/operations";
 import { dbTaskSpec } from "../lib/dbOperations";
 import { listen } from "../lib/tauri";
@@ -51,8 +51,16 @@ export function useTransferRows({ connId, table, tabId, leftOwner }: {
   const patch = (p: Partial<TransferForm>) => setForm((v) => ({ ...v, ...p }));
   const patchRun = (p: Partial<TransferRun>) => setRun((v) => ({ ...v, ...p }));
   const blocker = planBlocker(form.plan);
+  /**
+   * 目标是源表本身。追加模式会把表读一遍再插回去（行数翻倍），清空模式等于白删重写，
+   * 后端也挡了一层（`reject_self_transfer`）。这里只负责「按钮不可点 + 说清原因」。
+   */
+  const sameTarget = !!leftOwner
+    && form.rightConn === connId
+    && form.owner.trim().toUpperCase() === leftOwner.trim().toUpperCase()
+    && form.other.trim().toUpperCase() === table.trim().toUpperCase();
   const ready = !!leftOwner && !!form.owner.trim() && !!form.other.trim()
-    && !blocker && !run.busy && !run.out;
+    && !blocker && !run.busy && !run.out && !sameTarget;
 
   // 进度事件按实例号过滤：同一次会话里可能有别的搬运在跑
   useEffect(() => {
@@ -99,6 +107,18 @@ export function useTransferRows({ connId, table, tabId, leftOwner }: {
   const start = async () => {
     if (!ready) return;
     const target = `${form.owner.trim()}.${form.other.trim()}`;
+    // 清空目标表是不可恢复动作（delete 随第一批一起提交），和「追加」只差一个单选：
+    // 无论哪个环境都要单独问一次，点错的代价是目标表原有数据全没。
+    if (form.mode === "replace") {
+      const ok = await ask(
+        `清空 ${target} 后搬运？`,
+        `目标表 ${target} 的现有数据会被 DELETE 掉，并随第一批一起提交、无法回滚。\n`
+          + `确认目标表选对了再继续（当前目标连接：${connOf(form.rightConn)?.name ?? form.rightConn}）。`,
+        "清空并搬运",
+        true,
+      );
+      if (!ok) return;
+    }
     const head = form.mode === "replace"
       ? `-- 清空 ${target} 并写入 ${table} 的数据`
       : `-- 向 ${target} 追加 ${table} 的数据`;
@@ -141,5 +161,5 @@ export function useTransferRows({ connId, table, tabId, leftOwner }: {
     if (taskRef.current) void cancelOperation(taskRef.current.id);
   };
 
-  return { form, run, ready, blocker, patch, pick, loadPlan, start, stop };
+  return { form, run, ready, blocker, sameTarget, patch, pick, loadPlan, start, stop };
 }

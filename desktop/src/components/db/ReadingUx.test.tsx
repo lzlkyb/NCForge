@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot,type Root } from "react-dom/client";
 import { afterEach,beforeEach,expect,it,vi } from "vitest";
 const h=vi.hoisted(()=>({clear:vi.fn(),copy:vi.fn(),map:{a:[{at:1,sql:"select 1",ms:1,summary:"ok",ok:true}],b:[{at:2,sql:"delete from B",ms:2,summary:"ok",ok:true}]}}));
-vi.mock("../../lib/dbStore",()=>({useDbConns:()=>[{id:"a",name:"开发库"},{id:"b",name:"生产库"}]}));
+vi.mock("../../lib/dbStore",()=>({useConnRt:()=>({}),useDbConns:()=>[{id:"a",name:"开发库"},{id:"b",name:"生产库"}]}));
 vi.mock("../../lib/dbHistory",()=>({subscribeHistory:()=>()=>{},getHistoryMap:()=>h.map,historyHits:()=>[{connId:"a",entry:h.map.a[0]},{connId:"b",entry:h.map.b[0]}],filterHits:(v:unknown)=>v,historyTime:()=>"刚刚",clearHistory:h.clear}));
 vi.mock("../../lib/utils",()=>({copyText:h.copy}));
 import { HistoryDrawer } from "./HistoryDrawer";

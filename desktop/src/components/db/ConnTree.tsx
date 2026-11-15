@@ -9,8 +9,9 @@ import { FavoriteSection } from "./FavoriteSection";
 import { PasswordResetDialog } from "./PasswordResetDialog";
 import { dbNameOf, ENV_LABEL, type DbConn } from "../../lib/dbApi";
 import { connColor, groupConns } from "../../lib/dbConnGroups";
+import { isImeComposing } from "../../lib/utils";
 import { ensureConnected } from "../../lib/dbConfirm";
-import { deleteConn, disconnectConn, duplicateConn, moveConn, newConsole, openDict, refreshMeta } from "../../lib/dbActions";
+import { deleteConn, disconnectConn, duplicateConn, moveConn, newConsole, openDict, openTable, refreshMeta } from "../../lib/dbActions";
 import { defaultConnId, loadConns, openConnDialog, rtOf, showObjectFinder, useDbConns, useDbRt, useDbSelector } from "../../lib/dbStore";
 
 /**
@@ -43,6 +44,15 @@ export function ConnTree() {
   const [drag, setDrag] = useState<{ from: string; over: string | null } | null>(null);
   const activeConn = useDbSelector((s) => s.tabs.find((t) => t.id === s.active)?.connId ?? null);
   const q = filter.trim().toLowerCase();
+  const openMatch = () => {
+    const connId = activeConn ?? defaultConnId();
+    if (!q || !connId) return;
+    const { tables, ncNames } = rtOf(connId);
+    const hits = (tables ?? []).filter(t => t.name.toLowerCase().includes(q) || (ncNames?.[t.name.toLowerCase()] ?? "").includes(q));
+    const match = hits.find(t => t.name.toLowerCase() === q)
+      ?? hits.find(t => ncNames?.[t.name.toLowerCase()] === q) ?? hits[0];
+    if (match) void openTable(connId, match.name);
+  };
 
   const toggle = (c: DbConn) => {
     const next = !open[c.id];
@@ -144,10 +154,15 @@ export function ConnTree() {
       <input
         className="dbx-inp sm dbx-side-filter"
         value={filter}
-        placeholder="筛选连接 / 表名 / 中文名"
+        placeholder="搜索表名 / 中文名 / 连接"
+        title="输入表名或中文名，按 Enter 打开当前连接中匹配的表"
+        aria-keyshortcuts="Enter"
         aria-label="筛选连接与表"
         spellCheck={false}
         onChange={(e) => setFilter(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !isImeComposing(e.nativeEvent)) { e.preventDefault(); openMatch(); }
+        }}
       />
       <div className="dbx-tree">
         <FavoriteSection filter={q} onLocate={locate} />

@@ -68,20 +68,20 @@ it("范围摘要、预览与主动作一致，切换格式不扩大选区",()=>{
   const dialog=document.querySelector<HTMLElement>('[role="dialog"]')!;
   expect(dialog.querySelector(".dbx-transfer-head")?.textContent).toContain("NC_FROZEN");
   const summary=()=>[".dbx-transfer-range strong",".dbx-transfer-preview-scope",".dbx-transfer-summary strong"].map(selector=>dialog.querySelector(selector)?.textContent);
-  expect(summary()).toEqual(Array(3).fill("当前选区 · 1 行 × 1 列"));
+  expect(summary()).toEqual(Array(3).fill("选中行 · 1 行 × 1 列"));
   const format=dialog.querySelector<HTMLSelectElement>('[aria-label="输出格式"]')!;
   for(const value of ["csv","json","markdown","html","insert","where","update","tsv","jsonl","xlsx"]){
     act(()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,"value")!.set!.call(format,value);format.dispatchEvent(new Event("change",{bubbles:true}));});
-    expect(summary()).toEqual(Array(3).fill("当前选区 · 1 行 × 1 列"));
+    expect(summary()).toEqual(Array(3).fill("选中行 · 1 行 × 1 列"));
     expect([...dialog.querySelectorAll<HTMLInputElement>('.dbx-transfer-col input:checked')]).toHaveLength(1);
     const action=dialog.querySelector<HTMLButtonElement>(".dbx-transfer-foot-actions .pri")!;
-    expect(document.getElementById(action.getAttribute("aria-describedby")!)?.textContent).toBe("当前选区 · 1 行 × 1 列");
+    expect(document.getElementById(action.getAttribute("aria-describedby")!)?.textContent).toBe("选中行 · 1 行 × 1 列");
   }
   const scopes=[...dialog.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
   act(()=>scopes[2].click());
-  expect(summary()).toEqual(Array(3).fill("已加载全部行 · 2 行 × 1 列"));
+  expect(summary()).toEqual(Array(3).fill("全部已加载行 · 2 行 × 1 列"));
   act(()=>scopes[3].click());
-  expect(summary()).toEqual(Array(3).fill("重新查询导出全部 · 总行数未知 × 1 列"));
+  expect(summary()).toEqual(Array(3).fill("完整查询结果（重查） · 总行数未知 × 1 列"));
   expect(dialog.querySelector(".dbx-transfer-preview")?.textContent).toContain("当前结果样本");
 });
 it("折叠的字段设置可展开修改，Esc 关闭后归还触发点焦点",async()=>{
@@ -96,7 +96,7 @@ it("折叠的字段设置可展开修改，Esc 关闭后归还触发点焦点",a
   act(()=>toggle.click());expect(fields.open).toBe(true);
   const id=[...fields.querySelectorAll<HTMLElement>(".dbx-transfer-col")].find(row=>row.querySelector("code")?.textContent==="ID")!;
   act(()=>id.querySelector<HTMLInputElement>("input")!.click());
-  expect(dialog.querySelector(".dbx-transfer-range strong")?.textContent).toBe("当前选区 · 1 行 × 2 列");
+  expect(dialog.querySelector(".dbx-transfer-range strong")?.textContent).toBe("选中行 · 1 行 × 2 列");
   act(()=>id.querySelector<HTMLButtonElement>('[aria-label="上移 ID"]')!.click());
   expect([...dialog.querySelectorAll(".dbx-transfer-preview-data th")].map(cell=>cell.textContent)).toEqual(["ID","NAME"]);
   const advanced=dialog.querySelector<HTMLDetailsElement>(".dbx-transfer-advanced")!;

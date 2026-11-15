@@ -1,19 +1,21 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), ask: vi.fn(async (_title: string, _message: string, _ok?: string, _danger?: boolean) => true) }));
 vi.mock("./tauri", () => ({ invoke: mocks.invoke }));
 vi.mock("./sqlModels", () => ({ disposeSqlModel: vi.fn() }));
-vi.mock("./dbConfirm", () => ({ ensureConnected: vi.fn(async () => true), confirmProdWrite: vi.fn(async () => true) }));
+vi.mock("./dbConfirm", () => ({ ensureConnected: vi.fn(async () => true), confirmProdWrite: vi.fn(async () => true), ask: mocks.ask }));
 import { dbApi, type DbConn } from "./dbApi";
 import { runStatements } from "./dbActions";
 import { __resetDbForTest, closeTab, execOne, loadMore, openSqlTab, ownsCursor, patchTab, setConns, sqlTabOf, type SqlTab } from "./dbStore";
 import { clearCompletedOperations } from "./operations";
+import { pendingForTab, reportEditCount, resultEditKey, __resetEditsForTest } from "./dbDirtyEdits";
 import { pendingResultId, resultPairOf } from "./dbResultLayout";
 
 const rowResult = (value: number, hasMore = true) => ({ kind: "rows", columns: [{ name: "VALUE", type: "NUMBER", precision: 10, scale: 0 }], rows: [[value]], hasMore, ms: 1, output: [], tx: { autoCommit: true, statements: 0, rows: 0, since: 0 } });
 const statements = [1, 2, 3].map(index => ({ text: `select ${index} from dual`, startLine: index }));
 beforeEach(() => {
-  __resetDbForTest(); clearCompletedOperations(); mocks.invoke.mockReset();
+  __resetDbForTest(); clearCompletedOperations(); mocks.invoke.mockReset(); __resetEditsForTest();
+  mocks.ask.mockReset(); mocks.ask.mockResolvedValue(true);
   setConns([{ id: "c", name: "测试", env: "test", source: "manual", url: "jdbc:test", user: "NC", engine: "java", propDs: null } as DbConn]);
   mocks.invoke.mockImplementation(async (command, args) => command === "db_slot_acquire" ? { slot: "1" } : command === "db_exec_result" ? rowResult(Number(/select (\d)/.exec(args.sql)?.[1])) : undefined);
 });
@@ -86,4 +88,26 @@ it("选中的等待结果完成后在原位替换，双栏可选择任意两份�
 it("JVM 回退结果续取明确指向实际执行引擎", async () => {
   await dbApi.moreResult("c", 100, "1", "r-fallback", true);
   expect(mocks.invoke).toHaveBeenCalledWith("db_more_result", { id: "c", maxRows: 100, slot: "1", resultId: "r-fallback", fallback: true });
+});
+
+it("无 WHERE 的 DELETE 在执行通道上就被拦下：回放脚本走的是同一个入口", async () => {
+  const id = openSqlTab("c");
+  mocks.ask.mockResolvedValueOnce(false);
+  const out = await runStatements(id, [{ text: "delete from bd_material", startLine: 1 }]);
+  expect(mocks.ask).toHaveBeenCalledTimes(1);
+  expect(String(mocks.ask.mock.calls[0][0])).toContain("整表改动");
+  // 用户点了取消：一条语句都不该发出去
+  expect(mocks.invoke.mock.calls.filter(([c]) => c === "db_exec_result" || c === "db_exec")).toHaveLength(0);
+  expect(out.done).toBe(0);
+});
+
+it("有未写回的改动时，重跑先问一句（手顺 Ctrl+Enter 不该静默丢掉改动）", async () => {
+  const id = openSqlTab("c");
+  reportEditCount(resultEditKey(id, "r1"), 3);
+  mocks.ask.mockResolvedValueOnce(false);
+  const out = await runStatements(id, statements);
+  expect(String(mocks.ask.mock.calls[0][1])).toContain("3 处改动");
+  expect(out.done).toBe(0);
+  // 取消后计数必须留着：改动还在屏幕上，标签的小圆点不能自己消失
+  expect(pendingForTab(id)).toBe(3);
 });

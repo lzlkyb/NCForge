@@ -128,13 +128,16 @@ function ProdBody({ p }: { p: Extract<Pending, { kind: "prod" }> }) {
     <>
       <div className="hd" style={{ color: "hsl(var(--destructive-ink))" }}>
         <Icon name="alertTriangle" size={16} />
-        在生产库上执行写语句
+        {p.target ? "确认写回生产库" : "在生产库上执行写语句"}
       </div>
       <div className="bd one">
         <p style={{ marginBottom: 8 }}>
           <ConnLine connId={p.connId} />
         </p>
-        <pre className="sql">{p.sql}</pre>
+        {p.target ? <>
+          <p>Schema · <code>{p.target.schema || "登录账号"}</code> · 拟写回 <strong>{p.target.rows}</strong> 行</p>
+          <details><summary>查看写回 SQL</summary><pre className="sql">{p.sql}</pre></details>
+        </> : <pre className="sql">{p.sql}</pre>}
         <label className="dbx-chk" style={{ marginTop: 10 }}>
           <input type="checkbox" checked={quiet} onChange={(e) => setQuiet(e.target.checked)} />
           本标签 10 分钟内不再询问
@@ -147,7 +150,7 @@ function ProdBody({ p }: { p: Extract<Pending, { kind: "prod" }> }) {
           取消
         </button>
         <button type="button" className="dbx-btn bad" onClick={() => settle((x) => x.kind === "prod" && x.resolve(true, quiet))}>
-          执行
+          {p.target ? "确认写回" : "执行"}
         </button>
       </div>
     </>

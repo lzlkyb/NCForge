@@ -1295,7 +1295,7 @@ pub async fn db_exec_result(
     .await
 }
 
-fn validate_result_id(id: &str) -> Result<(), String> {
+pub(super) fn validate_result_id(id: &str) -> Result<(), String> {
     if id.trim().is_empty() || id.len() > 128 {
         return Err(code_label(
             "sql",

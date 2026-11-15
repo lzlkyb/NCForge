@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../components/ui/toast";
-import { friendlyDbError, isLobPreview, sameCell } from "../lib/db";
+import { friendlyDbError, isLobPreview } from "../lib/db";
+import { canEditCell, blockedCellReason, writeCellWithTwins, type CellRuleContext } from "../lib/resultEditRules";
 import { dbApi, type Cell, type ColumnMeta } from "../lib/dbApi";
 import { confirmProdWrite } from "../lib/dbConfirm";
 import type { RowChange } from "../lib/dbOptimisticEdit";
-import { editableCellType } from "../lib/sqlEditable";
 import { rowsWithDrafts } from "../lib/tableRows";
 import { patchTab, setTx, setTxNotice, type SqlTab } from "../lib/dbStore";
+import { beginOperation } from "../lib/operations";
+import { dbTaskSpec } from "../lib/dbOperations";
 import { useRowDrafts } from "./useRowDrafts";
 import { useResultSetPlan } from "./useResultSetPlan";
 import { useTxEpoch } from "../lib/dbTxEpoch";
@@ -41,6 +43,14 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
   const [changed, setChanged] = useState<Map<string, Cell>>(new Map());
   /** 写回成功后更新的值：`行:列` → 新值。基准是数据库快照，不是屏幕上被草稿行改过的行。 */
   const [applied, setApplied] = useState<Map<string, Cell>>(new Map());
+  /**
+   * 已经写回成功的删除（原行号）。
+   *
+   * 结果集是执行时的快照，写回后不重新查库，所以这些行仍在 `rows` 里。以前走
+   * `drafts.restoreRow` 会把删除标记一并撤掉，行又变回普通行、值还在——用户以为没删掉，
+   * 再删一次只能撞「该行已被其他人删除」。这里单独记一份「已写回删除」，视觉上与待删区分。
+   */
+  const [removed, setRemoved] = useState<Set<number>>(new Set());
   // 回滚把已经写进库的值撤掉了：本地那份「写回后的值」不能再当基准，
   // 否则后续原值校验拿一个库里不存在的值去比，永远 0 行命中。
   const txEpoch = useTxEpoch(connId, slot);
@@ -67,6 +77,7 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
     if (appended) return;
     setChanged(new Map());
     setApplied(new Map());
+    setRemoved(new Set());
     resetDrafts();
   }, [sql, rows, resetDrafts]);
 
@@ -93,40 +104,12 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
     // 否则改掉其中一格会让 WHERE 定位到「改之前」的那一行。
     const locked = new Set(keyInfo.lockedCols ?? keyCols);
     const base = baseline.length;
-    /**
-     * 同一个表列在结果里出现多次时，几格必须一起改：写回只改一个表列，
-     * 不给另一格同步，同一次修改里就会一格新、一格旧。
-     */
-    const writeCell = (next: Map<string, Cell>, row: number, col: number, value: Cell) => {
-      for (const c of [col, ...twinsOf(col)]) {
-        if (sameCell(value, baseline[row]?.[c] ?? null)) next.delete(`${row}:${c}`);
-        else next.set(`${row}:${c}`, value);
-      }
-    };
+    const rules: CellRuleContext = { columns, baseline, base, locked, rowidCol, sourceName, twinsOf };
+    const writeCell = (next: Map<string, Cell>, row: number, col: number, value: Cell) =>
+      writeCellWithTwins(rules, next, row, col, value);
     return {
-      canEdit: (col, row) => {
-        const column = columns[col];
-        if (!column || !editableCellType(column.type) || !sourceName(col)) return false;
-        // 新增草稿行要允许填主键列（新行的定位靠它）；已有行的定位列不能改。
-        if (row !== undefined && row >= base) return true;
-        // 大文本预览只是前 8K + 一段说明，改它既写不回原值也会把说明当成数据。
-        if (row !== undefined && isLobPreview(baseline[row]?.[col] ?? null)) return false;
-        return !locked.has(col);
-      },
-      /** 可编辑结果里也有锁住的列：双击要说出这一格自己的原因，不能静默。 */
-      blockedReason: (col, row) => {
-        const column = columns[col];
-        if (!column) return "这一列不在结果里";
-        if (col === rowidCol) return "ROWID 是行标识列，不能当数据改";
-        if (!editableCellType(column.type)) return `「${column.name}」是 ${column.type} 类型，网格里不能直接改；请用 SQL 更新`;
-        if (!sourceName(col)) return `「${column.name}」是计算结果或对不上表列，改它没有对应的表列`;
-        if (row !== undefined && row >= base) return "";
-        if (row !== undefined && isLobPreview(baseline[row]?.[col] ?? null)) {
-          return "这一格是大文本预览（只显示前 8K），不能在这里改；按 F4 查看完整值";
-        }
-        if (locked.has(col)) return `「${column.name}」是定位列，改了会定位不到原行`;
-        return "";
-      },
+      canEdit: (col, row) => canEditCell(rules, col, row),
+      blockedReason: (col, row) => blockedCellReason(rules, col, row),
       changed,
       onEdit: (row, col, value) => {
         // 虚拟行号：填的是草稿，不进 `changed`（写回时按 INSERT 生成）。
@@ -144,13 +127,17 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
         update(next => { for (const c of [col, ...twinsOf(col)]) next.delete(`${row}:${c}`); });
       },
       onEditMany: (cells) => {
-        for (const { row, col, value } of cells) {
-          if (row >= base) {
-            for (const c of [col, ...twinsOf(col)]) drafts.setCell(row, c, value);
-            continue;
-          }
-          update(next => writeCell(next, row, col, value));
+        // 整批一次 setState：以前在循环里逐格调 `update`，而 `update` 每次 `new Map(current)`
+        // 全量复制——粘 5000 格就是 5000 份 Map，界面直接卡住几秒。
+        const draftCells = cells.filter(cell => cell.row >= base);
+        for (const { row, col, value } of draftCells) {
+          for (const c of [col, ...twinsOf(col)]) drafts.setCell(row, c, value);
         }
+        const real = cells.filter(cell => cell.row < base);
+        if (!real.length) return;
+        update(next => {
+          for (const { row, col, value } of real) writeCell(next, row, col, value);
+        });
       },
       // 复制这一行（新增）：主键列留空——同一主键插不进去，
       // 用户要的就是「照着抄一行再改」。
@@ -166,12 +153,12 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
         if (skipped.length) toast(`复制行时跳过了大文本列 ${skipped.join("、")}：网格里只有前 8K，请重新填写或改用 SQL`, "warning");
         drafts.add(values);
       },
-      rowState: (row) => drafts.status(row),
+      rowState: (row) => drafts.status(row) ?? (removed.has(row) ? "removed" : undefined),
       isDraftRow: (row) => row >= base,
       onDeleteRow: (row) => drafts.removeRow(row),
       onRestoreRow: (row) => drafts.restoreRow(row),
     };
-  }, [usable, columns, baseline, keyInfo.keyCols, keyInfo.lockedCols, rowidCol, sourceName, twinsOf, changed, drafts]);
+  }, [usable, columns, baseline, keyInfo.keyCols, keyInfo.lockedCols, rowidCol, sourceName, twinsOf, changed, drafts, removed]);
 
   // 计划在 render 期算，但异常不会穿到 React：出错时保留原因交给工具条显示，
   // 别像以前那样静默变成「0 条」把按钮藏掉。
@@ -195,8 +182,18 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
     if (!connId || !usable) return;
     const changes = plan();
     if (!changes?.length) return;
+    // 连按两次 Ctrl+S 会跑两遍写回循环（第一次还停在逐条 `execBound` 上），新增行就被插两次。
+    // 表页一直用操作中心去重（`useTableSave` 的 `beginOperation` 返回 null 即已在跑），
+    // 结果页补上同一道闸；顺带得到进度与任务中心里的一条记录。
+    const task = beginOperation(
+      dbTaskSpec(`result.save:${tabId}`, "写回结果集", connId, slot ?? "主会话", undefined, tabId),
+    );
+    if (!task) return;
     void (async () => {
-      if (!(await confirmProdWrite(tabId, connId, changes.map(c => c.sql).join(";\n")))) return;
+      if (!(await confirmProdWrite(tabId, connId, changes.map(c => c.sql).join(";\n"), { schema, rows: changes.length }))) {
+        task.finish("cancelled", "未确认写回，未执行写入");
+        return;
+      }
       setSaving(true);
       // 新的写入让上一条「提交失败 / 结果待核对」的横幅过时：状态条重新从这次事实说起。
       setTxNotice(connId, slot ?? null, tabId, undefined);
@@ -207,6 +204,7 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
         : ` 前 ${done} 行已写入当前会话，请核对事务状态。`;
       try {
         for (const change of changes) {
+          task.update({ phase: `写回第 ${done + 1} / ${changes.length} 条`, progress: { done, total: changes.length } });
           const r = await dbApi.execBound(connId, change.sql, change.params, 1, 60, slot ?? null);
           // 写回同样要记事务计数：不记的话库里已经有未提交的 DML，界面却还说「没有未提交事务」，
           // 提交按钮是灰的，用户只能靠再执行一条语句把它「撞」出来（表页 useTableSave 一直这么做）。
@@ -238,21 +236,32 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
               change.cells.forEach(x => next.delete(`${change.row}:${x.column}`));
               return next;
             });
+          } else if (change.kind === "insert") {
+            // 新增成功后撤掉草稿行。新增是倒序执行的，撤一行不影响还没写回的那几条行号。
+            drafts.restoreRow(change.row);
           } else {
-            // 新增 / 删除成功后撤掉标记。新增是倒序执行的，撤草稿不会影响还没写回的那几行。
+            // 删除成功：库里已经没了，但结果是执行时的快照、这一行还在。
+            // 撤掉「待删除」标记（否则脏计数不清、再点写回会重复 DELETE），
+            // 同时记成「已写回删除」——视觉上明确是删掉的，不会让人以为没生效。
+            setRemoved(current => (current.has(change.row) ? current : new Set(current).add(change.row)));
             drafts.restoreRow(change.row);
           }
         }
         if (done === changes.length) {
-          toast(auto ? `已提交 ${done} 行（自动提交）` : `已写入 ${done} 行 · 待提交。可提交或回滚当前会话。`, auto ? "success" : "info");
+          task.finish("success", `已写回 ${done} 行${auto ? "（自动提交）" : "，尚未提交"}`);
+          if (auto) toast(`已提交 ${done} 行`, "success");
+        } else {
+          // 中途 break（某条没命中）：不能再报成功，任务中心要留真实的进度。
+          task.finish("failed", `写回中断：成功 ${done} / 共 ${changes.length} 条`);
         }
       } catch (e) {
+        task.finish("failed", `写回失败；前 ${done} 行${auto ? "已自动提交" : "仍在未提交事务中"}`);
         toast(friendlyDbError(e) + writeProgress(), "error");
       } finally {
         setSaving(false);
       }
     })();
-  }, [connId, usable, plan, tabId, slot, drafts]);
+  }, [connId, usable, plan, tabId, slot, drafts, schema]);
 
   return {
     edit,
@@ -277,7 +286,7 @@ export function useResultSetEdit({ tabId, connId, slot, sql, columns, rows, sche
       return name ? binaryRowSql(tableRef, columns.map((col, index) => ({ ...col, name: sourceName(index) ?? "" })), rows[row], model.meta.pk, name) : null;
     },
     save,
-    reset: () => { setChanged(new Map()); drafts.reset(); },
+    reset: () => { setChanged(new Map()); setRemoved(new Set()); drafts.reset(); },
     /** 显示行（含写回覆盖与新增草稿行）：调用方直接拿它喂网格。 */
     rows: displayRows,
   };

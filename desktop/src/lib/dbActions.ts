@@ -7,6 +7,7 @@ import { forgetColumnZh } from "./dbColumnZh";
 import { dropDdl } from "./ddlCache";
 import { forgetProcArguments } from "./sqlProcArgs";
 import { ask, confirmProdWrite, ensureConnected, guardSlotTx, guardTx, isLastTabOn } from "./dbConfirm";
+import { dangerousStatements } from "./sqlDanger";
 import { clearFavorites } from "./dbFavorites";
 import {
   activateTab,
@@ -291,6 +292,11 @@ export async function moveConn(fromId: string, toId: string) {
         noStmtCache: moving.noStmtCache ?? false,
         group: target.group ?? "",
         color: moving.color ?? "",
+        // 这两项漏传的后果特别隐蔽：后端 `DbConnInput` 对它们用的是 `unwrap_or(默认)`，
+        // 整条连接又是全量替换（`c.db_conns[i] = next`），所以拖一下改分组就会把
+        // 保活间隔重置成 240s、把启动脚本清空，而界面只说「已改分组」。
+        keepAliveSec: moving.keepAliveSec ?? null,
+        initSql: moving.initSql ?? null,
       });
     } catch (e) {
       toast(`改分组失败：${friendlyDbError(e)}`, "error");
@@ -336,12 +342,22 @@ export interface RunOutcome {
 }
 
 export interface RunOptions {
+  bindings?: (undefined | { sql: string; params: import("./dbApi").BoundCell[] })[];
+  targetCurrent?: () => boolean;
   /** 诊断操作才采集会话统计；普通查询不增加两次统计往返。 */
   collectStats?: boolean;
   /** 出错后继续执行剩余语句（回放迁移脚本用）；默认出错即停。 */
   ignoreErrors?: boolean;
   /** 每条开始前回调（回放进度用）。 */
   onProgress?: (p: { done: number; total: number; line: number; text: string }) => void;
+  /**
+   * 调用方已经自己做过危险语句确认（`SqlConsole` 的 `SqlDangerDialog` 会估影响行数）。
+   *
+   * 闸门放在 `runStatements` 里，是因为「执行」不止编辑器一个入口：`.sql` 回放
+   * （`scriptReplay`）走的是同一个函数，以前完全没有二次确认——含无 WHERE 的
+   * `delete from t;` 的脚本会被直接执行。
+   */
+  dangerConfirmed?: boolean;
 }
 
 /**
@@ -364,6 +380,50 @@ export async function runStatements(
   if (!tab.connId) {
     toast("先在工具条左边选一个连接", "warning");
     return outcome;
+  }
+  // 重跑会整体替换结果集，而结果网格里的改动只存在组件 state 里（`useResultSetEdit`）。
+  // 切标签 / 关标签 / 切连接 / 新建控制台 / 打开表页都问过一句，唯独「执行」不问——
+  // 改了三格没写回，手顺按一下 Ctrl+Enter 就没了，界面连痕迹都不留。
+  const unsaved = pendingForTab(tabId);
+  if (unsaved > 0) {
+    const ok = await ask(
+      "有未写回的改动",
+      `结果网格里还有 ${unsaved} 处改动没有写回数据库。重新执行会用新结果替换当前结果，这些改动会一起丢掉。`,
+      "丢弃并执行",
+      true,
+    );
+    if (!ok) {
+      toast("已取消执行，改动还在", "info");
+      return outcome;
+    }
+    clearEditsForTab(tabId);
+  }
+  // 危险语句闸门（所有执行入口共用）。
+  //
+  // 以前只在 `SqlConsole.run` 里挡：同一份脚本换个入口（回放 .sql、诊断里的批量执行）
+  // 就绕过去了。`advisory`（DROP / TRUNCATE）只提示不拦——删表的人通常有意的；
+  // 无 WHERE 的 UPDATE / DELETE 才问。
+  if (!opts.dangerConfirmed) {
+    const found = dangerousStatements(stmts.map(s => s.text));
+    for (const item of found) {
+      if (item.finding.advisory) toast(`这条语句不可撤销：${item.finding.verb} ${item.finding.table}`, "warning");
+    }
+    const blocked = found.filter(item => !item.finding.advisory);
+    if (blocked.length) {
+      const lines = blocked.slice(0, 5).map(item =>
+        `第 ${item.index + 1} 条：${item.finding.verb} ${item.finding.table}（${item.finding.kind === "delete-all" ? "没有 WHERE" : "没有有效 WHERE"}）`);
+      const ok = await ask(
+        `这次执行有 ${blocked.length} 条会整表改动`,
+        `${lines.join("\n")}${blocked.length > 5 ? `\n… 共 ${blocked.length} 条` : ""}\n\n`
+          + "没有 WHERE 的 UPDATE / DELETE 会动整张表，无法只撤回这次执行。确定继续？",
+        "仍要执行",
+        true,
+      );
+      if (!ok) {
+        toast("已取消执行", "info");
+        return outcome;
+      }
+    }
   }
   if (operationActive("db." + dbTxKey(tab.connId, tab.slot)) ||
     (tab.slot ? tab.txNotice : rtOf(tab.connId).txNotice)?.kind === "lost") return outcome;
@@ -400,6 +460,12 @@ export async function runStatements(
   catch {task.finish("failed","连接未建立，返回数据库页查看原因");endBeforeExecution();return outcome;}
   if(stopRequested) {task.finish("cancelled","执行请求尚未发出，语句未执行");outcome.stoppedByUser=true;endBeforeExecution();return outcome;}
   if(sqlTabOf(tabId)?.connId!==connId) {task.finish("cancelled","来源标签或连接已切换，语句未执行");endBeforeExecution();return outcome;}
+  if (opts.targetCurrent && !opts.targetCurrent()) {
+    task.finish("cancelled", "执行目标已变化，语句未执行");
+    toast("执行目标已变化，请重新发起查询。", "warning");
+    endBeforeExecution();
+    return outcome;
+  }
   const previousResults = tab.results;
   const runConn = connOf(connId), runSchema = rtOf(connId).currentSchema ?? rtOf(connId).info?.schema;
   const contexts = stmts.map(statement => captureResultContext(connId, runConn, runSchema, statement.text, statement));
@@ -434,7 +500,9 @@ export async function runStatements(
       if(stopRequested) {outcome.stoppedByUser=true;break;}
       let r: Awaited<ReturnType<typeof execOne>>;
       inFlight = true;
-      try { r = await execOne(tabId, s.text, i + 1, contexts[i], opts.collectStats); }
+      try { r = opts.bindings?.[i]
+        ? await execOne(tabId, s.text, i + 1, contexts[i], opts.collectStats, opts.bindings[i], opts.targetCurrent)
+        : await execOne(tabId, s.text, i + 1, contexts[i], opts.collectStats); }
       finally { inFlight = false; }
       // await 期间可能已经切连接：这条结果属于旧库，丢弃且不继续写回。
       if (!sameRun()) break;

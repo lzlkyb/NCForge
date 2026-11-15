@@ -46,6 +46,28 @@ pub struct Endpoint {
     pub table: String,
 }
 
+/// 源和目标指向同一张表。
+///
+/// 追加模式下这是「把表读一遍再插回自己」——行数直接翻倍，而且每批提交后不可回退；
+/// 清空模式更糟：先 `delete` 再读，源会话的读一致性仍看得见旧行，等于白删重写。
+/// 前后端都各挡一次（前端禁用按钮，后端拒绝请求），因为目标表名是自由输入。
+fn same_table(a: &Endpoint, b: &Endpoint) -> bool {
+    a.id == b.id
+        && a.owner.trim().eq_ignore_ascii_case(b.owner.trim())
+        && a.table.trim().eq_ignore_ascii_case(b.table.trim())
+}
+
+fn reject_self_transfer(a: &Endpoint, b: &Endpoint) -> Result<(), String> {
+    if !same_table(a, b) {
+        return Ok(());
+    }
+    Err(concat!(
+        "源和目标是同一张表：追加模式会把这张表读一遍再插回去（行数翻倍，且每批提交后不可回退），",
+        "清空模式等于白删重写。请改目标表名，或改用「导出 INSERT 脚本」在目标库执行。"
+    )
+    .to_string())
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferRowsReq {
@@ -98,6 +120,7 @@ pub async fn db_transfer_plan(
     from: Endpoint,
     to: Endpoint,
 ) -> Result<TransferPlan, String> {
+    reject_self_transfer(&from, &to)?;
     let st = state.inner().clone();
     let cfg = st.config.read().await.clone();
     let src = read_columns(&app, &st, &cfg, &from).await?;
@@ -111,6 +134,7 @@ pub async fn db_transfer_rows(
     state: tauri::State<'_, Arc<AppState>>,
     req: TransferRowsReq,
 ) -> Result<TransferRowsOut, String> {
+    reject_self_transfer(&req.from, &req.to)?;
     let st = state.inner().clone();
     let t0 = Instant::now();
     let cfg = st.config.read().await.clone();
@@ -578,5 +602,40 @@ mod tests {
         assert!(check_filter("1=1; delete from t").is_err());
         assert!(check_filter("delete from t").is_err());
         assert!(check_filter("  DELETE from t").is_err());
+    }
+
+    fn ep(id: &str, owner: &str, table: &str) -> Endpoint {
+        Endpoint {
+            id: id.into(),
+            owner: owner.into(),
+            table: table.into(),
+        }
+    }
+
+    #[test]
+    fn 源和目标是同一张表时必须拒绝() {
+        // 大小写与首尾空白不算区别：Oracle 侧本来就是无引号即大写。
+        assert!(reject_self_transfer(
+            &ep("c1", "nc65", "bd_material"),
+            &ep("c1", " NC65 ", "BD_MATERIAL")
+        )
+        .is_err());
+        // 同连接不同表、或同表不同连接都是合法搬运。
+        assert!(reject_self_transfer(
+            &ep("c1", "NC65", "BD_MATERIAL"),
+            &ep("c1", "NC65", "BD_MATERIAL_BAK")
+        )
+        .is_ok());
+        assert!(reject_self_transfer(
+            &ep("c1", "NC65", "BD_MATERIAL"),
+            &ep("c2", "NC65", "BD_MATERIAL")
+        )
+        .is_ok());
+        // 不同 schema 的同名表也算不同目标。
+        assert!(reject_self_transfer(
+            &ep("c1", "NC65", "BD_MATERIAL"),
+            &ep("c1", "NC66", "BD_MATERIAL")
+        )
+        .is_ok());
     }
 }

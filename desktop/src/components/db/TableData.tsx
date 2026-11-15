@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "../ui/toast";
 import { ResultTable } from "./ResultTable";
-import { friendlyDbError, parseDbError, qualifyTable, thousands, type DbError } from "../../lib/db";
+import { friendlyDbError, isLobPreview, parseDbError, qualifyTable, thousands, type DbError } from "../../lib/db";
 import { dbApi, type BoundCell, type Cell, type ColumnInfo } from "../../lib/dbApi";
 import { reconnectSession } from "../../lib/dbConfirm";
 import { askDiscardEdits } from "../../lib/tableDiscard";
@@ -17,7 +17,7 @@ import { ResultContextNotice } from "./ResultContextNotice";
 import { TableDataFooter } from "./TableDataFooter";
 
 import { TableRelations } from "./TableRelations";
-import { TransactionButtons, TxBar, useDbTransaction } from "./TxBar";
+import { TxBar, useDbTransaction } from "./TxBar";
 import { TableFilterBar } from "./TableFilterBar";
 import type { RowChange } from "../../lib/dbOptimisticEdit";
 import { compileFilter, loadFilter } from "../../lib/dbConditions";
@@ -51,6 +51,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   // 上次看到的页码 / 条件：切走再回来接着看；常用筛选改过（指纹不同）就让新条件生效。
   const filterKey = JSON.stringify(loadFilter(tab.connId, tab.table));
   const tableView = useRef(loadTableView(tab.connId, tableRef, filterKey));
+  const filterBar = useRef<{ queryValue: (column: string, value: string | null) => void }>(null);
   /**
    * 「恢复了上次的查看条件」这个状态本身要显式记住：不提示的话，用户看到的是一张
    * 只有几十行的表，而库里其实有几万行——这类「数据看起来丢了」的误会代价最高。
@@ -90,11 +91,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   /** 未写回的改动数：切子页 / 切文档 / 关标签前，外层据此拦一句。 */
   const dirtyCount = changed.size + drafts.pending;
 
-  /**
-   * 每次查询的序号。慢库上连点两次「下一页」时，第 3 页可能先在、第 2 页后到；
-   * 没有这道判定的话页脚写「第 3 页」而表格里是第 2 页的行——此时双击改格子，
-   * `updateSql` 用的是**看得见的那一行**的主键，写回的就是另一行。
-   */
+  // 只接受最新查询的响应，避免页码与可编辑的行错位。
   const gen = useRef(0);
   const reading = useRef<typeof q>(null);
   const anchor = useRef<PageAnchor | null>(null);
@@ -167,22 +164,16 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
     return true;
   };
 
-  /**
-   * 查询按钮。条件一个字都没改时也必须真的重查：同事在库里改了数据，回来点「查询」
-   * 什么都不发生的话，用户会以为这个工具在读缓存——而这页原本没有别的刷新入口。
-   */
-  const apply = (where:string,order:string,params:BoundCell[]) => {
+  // 相同条件也重新查，让用户读到其他会话的最新改动。
+  const apply = async (where:string,order:string,params:BoundCell[]) => {
     const next = {where,order,params,page:0};
-    if(JSON.stringify(next) === JSON.stringify(q)) { void (async () => {if(await confirmDiscard()) await load();})(); }
-    else void navTo(next);
+    if (JSON.stringify(next) !== JSON.stringify(q)) return navTo(next);
+    if (!(await confirmDiscard())) return false;
+    await load();
+    return true;
   };
   const viewRows = drafts.rows ?? [];
-  /**
-   * 一键回到「无条件、第 1 页」，同时把记忆清掉——否则下次打开又被恢复回来。
-   *
-   * 先过 `navTo`（里面有「丢弃未保存的修改？」）：用户在那里取消时，
-   * 提示条与查询条件都必须保持原样，不能先把提示条抹掉。
-   */
+  // 先确认丢弃草稿，再清除恢复提示和查询记忆。
   const clearRestored = async () => {
     if (!(await navTo({ where: "", order: "", params: [], page: 0 }))) return;
     setRestored(false);
@@ -223,11 +214,10 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
   return (
     <>
       {ui.relationRow && page && <TableRelations tab={tab} columns={page.columns} row={ui.relationRow} onClose={()=>setUi(v=>({...v,relationRow:null}))} />}
-      {cols && <TableFilterBar connId={tab.connId} table={tab.table} cols={cols} disabled={saving || loading || txLocked} busy={loading}
+      {cols && <TableFilterBar ref={filterBar} connId={tab.connId} table={tab.table} filterScope={tableRef}
+        appliedQuery={page ? tableView.current : null} cols={cols} disabled={saving || loading || txLocked} busy={loading}
         timeoutSec={timeoutSec} onTimeout={n=>patchTab(tab.id,{timeoutSec:n})}
-        transactions={<TransactionButtons transaction={transaction} />} onApply={apply} />}
-      <TxBar transaction={transaction} />
-      {planError && <div className="dbx-err" role="alert">无法写回：{planError}</div>}
+        onApply={apply} />}
       {restored && q && <TableRestoreNotice where={q.where} page={q.page} onClear={() => void clearRestored()} />}
       {loading && data && <div className="dbx-read-status" role="status">正在查询，暂保留上一份结果…</div>}
       <TableDataStatus
@@ -249,6 +239,13 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
           connId={tab.connId}
           transferSource={{connId:tab.connId,resultId:`${tab.id}:${page.at}`,tabId:tab.id,sql:page.exportSql,params:page.params,source:page.context.source,schema:page.context.schema,connectionKey:page.context.connectionKey,complete:page.pageNumber===1 && !page.hasNext,table:tableRef,keys:pk,timeoutSec}}
           onRelated={row=>setUi(v=>({...v,relationRow:row}))}
+          queryCell={saving || loading || txLocked || connectionError ? undefined : (column, row) => {
+            const value = page.rows[row]?.[column];
+            const col = cols?.find(c => c.name.toLowerCase() === page.columns[column]?.name.toLowerCase());
+            if (!col || value === undefined || isLobPreview(value)
+              || (value !== null && !/^(NUMBER|INTEGER|FLOAT|DECIMAL|DOUBLE|N?VARCHAR2?|N?CHAR)\b/i.test(col.type))) return;
+            return () => filterBar.current?.queryValue(col.name, value === null ? null : String(value));
+          }}
           zh={zh}
           lob={lob}
           meta={<>第 {page.pageNumber} 页 · <b>{thousands(page.rows.length)}</b> 行 · {page.ms} ms</>}
@@ -265,23 +262,12 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
             onRestoreRow: (r) => drafts.restoreRow(r),
           } : undefined}
           blockedHint={tableBlockedHint({ readonly, isView, pk })}
-          tools={
-            <TableEditTools
-              changed={changes.filter(c => c.kind === "update").length}
-              changedCells={changes.filter(c => c.kind === "update").reduce((n, c) => n + c.cells.length, 0)}
-              added={changes.filter(c => c.kind === "insert").length}
-              deleted={changes.filter(c => c.kind === "delete").length}
-              editable={editable}
-              saving={saving}
-              preview={preview}
-              onAdd={() => drafts.add()}
-              onUndo={() => { setChanged(new Map()); drafts.reset(); }}
-              onTogglePreview={() => setPreview(!preview)}
-              onSave={() => void save()}
-            />
-          }
+          tools={<button type="button" className="dbx-btn ghost" disabled={!editable} onClick={() => drafts.add()}>+ 新增行</button>}
           foot={
             <>
+              <TableEditTools count={changes.length} dirty={dirtyCount > 0} error={planError ? "无法写回：" + planError : undefined}
+                editable={editable} saving={saving} preview={preview} onUndo={() => { setChanged(new Map()); drafts.reset(); }}
+                onTogglePreview={() => setPreview(!preview)} onSave={() => void save()} />
               {preview && <TableChangePreview changes={changes} sqls={sqls} columns={page.columns} rows={page.rows} pk={pk} zh={zh} disabled={saving} onUndo={undoChange} />}
               <TableDataFooter rows={page.rows.length} pageNumber={page.pageNumber} complete={page.pageNumber===1 && !page.hasNext}
                 previousDisabled={saving || loading || q.page===0} nextDisabled={saving || loading || !page.hasNext}
@@ -291,6 +277,7 @@ export function TableData({ tab, cols, isView, zh }: { tab: TableTab; cols: Colu
           }
         />
       )}
+      <TxBar transaction={transaction} actions />
     </>
   );
 }

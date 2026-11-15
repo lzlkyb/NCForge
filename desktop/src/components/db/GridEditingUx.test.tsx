@@ -16,15 +16,15 @@ it("composition Enter and Escape do not commit or cancel an edit", async () => {
  expect(commit).toHaveBeenCalledOnce();
  await act(async () => root.unmount()); host.remove();
 });
-it("describes modified rows separately from cells", async () => {
+it("shows pending writeback in rows", async () => {
  const host = document.createElement("div"); const root = createRoot(host);
- await act(async () => root.render(<TableEditTools changed={1} changedCells={3} added={0} deleted={0} editable saving={false} preview onAdd={() => {}} onUndo={() => {}} onTogglePreview={() => {}} onSave={() => {}} />));
- expect(host.textContent).toContain("修改 1 行（3 个单元格）"); expect(host.textContent).toContain("写回 1 行");
+ await act(async () => root.render(<TableEditTools count={1} dirty editable saving={false} preview onUndo={() => {}} onTogglePreview={() => {}} onSave={() => {}} />));
+ expect(host.textContent).toContain("1 行待写回"); expect(host.textContent).toContain("写回 1 行");
  await act(async () => root.unmount());
 });
 it("写回按钮不需要先展开复核", async () => {
  const host = document.createElement("div"); const root = createRoot(host);
- await act(async () => root.render(<TableEditTools changed={1} changedCells={1} added={0} deleted={0} editable saving={false} preview={false} onAdd={() => {}} onUndo={() => {}} onTogglePreview={() => {}} onSave={() => {}} />));
+ await act(async () => root.render(<TableEditTools count={1} dirty editable saving={false} preview={false} onUndo={() => {}} onTogglePreview={() => {}} onSave={() => {}} />));
  const save = [...host.querySelectorAll("button")].find(b => b.textContent?.includes("写回"))!;
  expect(save.disabled).toBe(false);
  await act(async () => root.unmount());

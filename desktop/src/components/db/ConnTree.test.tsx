@@ -2,17 +2,20 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-vi.mock("../../lib/dbActions", () => ({ deleteConn: vi.fn(), disconnectConn: vi.fn(), duplicateConn: vi.fn(), moveConn: vi.fn(), newConsole: vi.fn(), refreshMeta: vi.fn() }));
+vi.mock("../../lib/dbActions", () => ({ deleteConn: vi.fn(), disconnectConn: vi.fn(), duplicateConn: vi.fn(), moveConn: vi.fn(), newConsole: vi.fn(), openTable: vi.fn(), refreshMeta: vi.fn() }));
 vi.mock("../../lib/dbConfirm", () => ({ ensureConnected: vi.fn() }));
 vi.mock("../../lib/dbStore", () => {
   const S = { conns: [{ id: "c1", name: "开发库", env: "dev", url: "", user: "u" }], tabs: [], active: null, loaded: true, loadError: null, rt: {} };
-  return { useDbSelector: (sel: (s: typeof S) => unknown) => sel(S), useDbConns: () => S.conns, useDbRt: () => S.rt, rtOf: () => ({ status: "connected" }), defaultConnId: vi.fn(), loadConns: vi.fn(), openConnDialog: vi.fn(), openDictTab: vi.fn(), showObjectFinder: vi.fn() };
+  return { useDbSelector: (sel: (s: typeof S) => unknown) => sel(S), useDbConns: () => S.conns, useDbRt: () => S.rt,
+    rtOf: () => ({ status: "connected", tables: [{ name: "ORG_DEPT_ARCHIVE" }, { name: "ORG_DEPT" }], ncNames: { org_dept_archive: "历史部门", org_dept: "部门" } }),
+    defaultConnId: () => "c1", loadConns: vi.fn(), openConnDialog: vi.fn(), openDictTab: vi.fn(), showObjectFinder: vi.fn() };
 });
 vi.mock("./ConnObjects", () => ({ ConnObjects: () => <span>连接对象</span> }));
 vi.mock("./FavoriteSection", () => ({ FavoriteSection: () => null }));
 vi.mock("./PasswordResetDialog", () => ({ PasswordResetDialog: () => null }));
 import { ConnTree } from "./ConnTree";
 import { showObjectFinder } from "../../lib/dbStore";
+import { openTable } from "../../lib/dbActions";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
 let host: HTMLDivElement;
@@ -33,4 +36,15 @@ it("连接行明确报告展开状态并关联真实对象区域", () => {
   act(() => row.click());
   expect(row.getAttribute("aria-expanded")).toBe("false");
   expect(row.hasAttribute("aria-controls")).toBe(false);
+});
+it("搜索框回车优先打开中文名精确匹配的表，输入法确认时不触发", () => {
+  const input = host.querySelector<HTMLInputElement>(".dbx-side-filter")!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "部门");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, isComposing: true }));
+  });
+  expect(openTable).not.toHaveBeenCalled();
+  act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  expect(openTable).toHaveBeenCalledExactlyOnceWith("c1", "ORG_DEPT");
 });

@@ -12,7 +12,12 @@ import type { GridEdit } from "../components/db/gridEdit";
 export function rowActionItems(edit: GridEdit | undefined, r: number): ContextMenuItem[] {
   if (!edit?.rowState) return [];
   if (edit.isDraftRow?.(r)) return [{ label: "撤销这行新增", icon: "restore", separator: true, onSelect: () => edit.onRestoreRow?.(r) }];
-  if (edit.rowState(r) === "deleted") return [{ label: "恢复此行（取消删除）", icon: "restore", separator: true, onSelect: () => edit.onRestoreRow?.(r) }];
+  const state = edit.rowState(r);
+  if (state === "deleted") return [{ label: "恢复此行（取消删除）", icon: "restore", separator: true, onSelect: () => edit.onRestoreRow?.(r) }];
+  // 已经写回删除的行：再删一次只会撞「该行已被其他人删除」，所以不给入口，只说明现状。
+  if (state === "removed") {
+    return [{ label: "这行已删除并写回（结果集是执行时的快照）", icon: "trash", separator: true, disabled: true, onSelect: () => {} }];
+  }
   if (!edit.onDeleteRow) return [];
   return [{ label: "删除此行", icon: "trash", danger: true, separator: true, hint: "写回时执行", onSelect: () => edit.onDeleteRow!(r) }];
 }

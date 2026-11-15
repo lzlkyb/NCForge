@@ -11,6 +11,7 @@ import { trackOperation } from "../../lib/operations";
 import { dbTaskSpec } from "../../lib/dbOperations";
 import { Icon } from "../ui/icon";
 import { friendlyDbError } from "../../lib/db";
+import { isImeComposing } from "../../lib/utils";
 
 export function DbObjectFinder({ connId, onClose }: { connId:string|null; onClose:()=>void }) {
   const db = {
@@ -60,7 +61,7 @@ export function DbObjectFinder({ connId, onClose }: { connId:string|null; onClos
     <h2>查找数据库对象</h2>
     <select aria-label="对象查找连接" value={scope} onChange={e => {setScope(e.target.value);setIndex(0);}}>{db.conns.map(c => <option key={c.id} value={c.id}>{c.name} · {ENV_LABEL[c.env]}</option>)}</select>
     <input className="dbx-inp" autoFocus aria-label="查找表名或中文名" role="combobox" aria-expanded aria-controls="dbx-object-options" aria-activedescendant={chosen ? `dbx-object-${Math.min(index,hits.length-1)}` : undefined} placeholder="表名 / 中文名 / 拼音首字母" value={query} onChange={e => {setQuery(e.target.value);setIndex(0);}} onKeyDown={e => {
-      if (e.nativeEvent.isComposing) return;
+      if (isImeComposing(e.nativeEvent)) return;
       if (["ArrowDown","ArrowUp","Home","End"].includes(e.key)) {e.preventDefault();setIndex(i => e.key === "Home" ? 0 : e.key === "End" ? hits.length-1 : Math.max(0,Math.min(hits.length-1,i+(e.key === "ArrowDown"?1:-1))));}
       if (e.key === "Enter") {e.preventDefault();void pick("data");}
     }} />

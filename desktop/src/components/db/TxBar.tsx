@@ -2,7 +2,7 @@ import { useState, useSyncExternalStore } from "react";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 import { friendlyDbError, parseDbError, thousands } from "../../lib/db";
-import { reconnectSession } from "../../lib/dbConfirm";
+import { ask, reconnectSession } from "../../lib/dbConfirm";
 import { dbTaskSpec, dbTxKey } from "../../lib/dbOperations";
 import { getOperations, operationActive, subscribeOperations, trackOperation } from "../../lib/operations";
 import { patchTab, setTx, setTxNotice, sqlTabOf, txAction, useConnOf, useConnRt, type SqlTab } from "../../lib/dbStore";
@@ -40,6 +40,20 @@ export function useDbTransaction({ connId, tabId, slot, tx: slotTx, notice: slot
 
   const act = async (action: "commit" | "rollback" | "reconnect") => {
     if (!connId || operationActive('db.' + key) || (action === "reconnect" ? !canReconnect : disabled)) return;
+    // 回滚不可恢复，而且和「提交」是两个相邻的按钮：手一滑就丢掉整个会话的写入。
+    // 提交不需要问（它保留数据），回滚必须问，并把「丢多少」摊开写。
+    if (action === "rollback") {
+      const scope = tx && (tx.statements > 0 || tx.rows > 0)
+        ? `当前会话有 ${thousands(tx.statements)} 条语句、${thousands(tx.rows)} 行改动`
+        : "当前会话里未提交的写入";
+      const ok = await ask(
+        "回滚这个会话？",
+        `${scope}会被全部丢弃，数据库回到事务开始前的状态。已经写进库但没提交的内容无法恢复。`,
+        "回滚",
+        true,
+      );
+      if (!ok) return;
+    }
     const label = action === "commit" ? "提交" : action === "rollback" ? "回滚" : notice?.verify ? "核对事务" : "重新连接";
     const applySlotTx = (next: TxInfo) => {
       const tab = sqlTabOf(tabId);
@@ -129,12 +143,12 @@ export function TransactionButtons({ transaction: t, compact = false }: { transa
     <button type="button" className={t.disabled ? "dbx-btn" : "dbx-btn ok"} title={`提交当前会话 · ${title}`} aria-label={t.active?.label === "提交事务" ? "提交中…" : "提交当前会话"}
       disabled={t.disabled} aria-busy={t.active?.label === "提交事务"} onClick={() => void t.act("commit")}>
       <Icon name={t.active?.label === "提交事务" ? "clock" : "check"} size={12} />
-      {!compact && (t.active?.label === "提交事务" ? "提交中…" : "提交当前会话")}
+      {!compact && (t.active?.label === "提交事务" ? "提交中…" : "提交")}
     </button>
     <button type="button" className="dbx-btn" title={`回滚当前会话 · ${title}`} aria-label={t.active?.label === "回滚事务" ? "回滚中…" : "回滚当前会话"}
       disabled={t.disabled} aria-busy={t.active?.label === "回滚事务"} onClick={() => void t.act("rollback")}>
       <Icon name={t.active?.label === "回滚事务" ? "clock" : "rollback"} size={12} />
-      {!compact && (t.active?.label === "回滚事务" ? "回滚中…" : "回滚当前会话")}
+      {!compact && (t.active?.label === "回滚事务" ? "回滚中…" : "回滚")}
     </button>
   </div>;
 }
@@ -150,12 +164,9 @@ export function TxBar({ transaction: t, actions = false }: { transaction: Transa
     {t.active ? <span>{t.active.label}中…等待数据库确认</span> : <>
       {t.notice && <span>{t.notice.text}</span>}
       {!t.lost && t.pending && <span>
-        {t.dbConfirmed === true ? "数据库确认：有未提交事务" : "未提交事务"}
-        {/* 核对过但本地计数为 0（手写 PL/SQL 内部提交、别的工具写过同一条会话）：
-            写「0 条写入」只会让人以为搞错了，不如直说要处理事务。 */}
-        {(t.tx?.statements ?? 0) > 0
-          ? <> · <b>{t.tx?.statements}</b> 条写入 · 影响 <b>{thousands(t.tx?.rows ?? 0)}</b> 行</>
-          : <span className="dbx-muted"> · 提交或回滚后此条消失</span>}
+        {(t.tx?.rows ?? 0) > 0
+          ? <>已写回 <b>{thousands(t.tx?.rows ?? 0)}</b> 行，待提交</>
+          : "当前会话有未提交事务"}
       </span>}
       {!t.lost && t.modeChanged && <span>{t.pending ? "提交方式已更新 · 处理事务后可重连" : "提交方式已更新 · 重连后生效"}</span>}
     </>}

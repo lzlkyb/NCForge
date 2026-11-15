@@ -497,9 +497,10 @@ impl Session {
             ),
             // `execFullBound` 与 execBound 同协议，只是 CLOB 走全量（导出带绑定变量时用）。
             // 不能靠在参数尾部加一个开关：a[3..] 是成对的 (类型, 值)，加单参数会破坏配对。
-            "execBound" | "execFullBound" => {
-                if a.len()<3 || !(a.len()-3).is_multiple_of(2) {return Err(sql_err("绑定参数协议不完整"));}
-                let params: Result<Vec<Box<dyn ToDbValue>>, BridgeError> = a[3..].as_chunks::<2>().0.iter().map(|pair| {
+            "execBound" | "execFullBound" | "execBoundResult" => {
+                let header = if cmd == "execBoundResult" { 4 } else { 3 };
+                if a.len()<header || !(a.len()-header).is_multiple_of(2) {return Err(sql_err("绑定参数协议不完整"));}
+                let params: Result<Vec<Box<dyn ToDbValue>>, BridgeError> = a[header..].as_chunks::<2>().0.iter().map(|pair| {
                     Ok(match pair[0] {
                         "null" => Box::new(None::<String>) as Box<dyn ToDbValue>,
                         "number" => Box::new(decimal_number(pair[1])?),
@@ -510,7 +511,7 @@ impl Session {
                 }).collect();
                 let params = params?;
                 let refs: Vec<&dyn ToDbValue> = params.iter().map(|p| p.as_ref()).collect();
-                self.exec_params(a[0],int_arg(a,1,500),int_arg(a,2,30),&refs,false,cmd == "execFullBound",None)
+                self.exec_params(a[0],int_arg(a,1,500),int_arg(a,2,30),&refs,false,cmd == "execFullBound",a.get(3).copied().filter(|_| header == 4))
             }
             "readOnly" => self.set_readonly(a.first() == Some(&"true")),
             "more" => self.more(int_arg(a, 0, 500), timeout, a.get(1).copied().filter(|id| !id.is_empty())),

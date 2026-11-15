@@ -1,9 +1,11 @@
-import { useId, useImperativeHandle, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type Ref } from "react";
+import { useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type Ref } from "react";
 import { comparisonCell, compareKindLabel, type ComparisonColumn, type ComparisonModel, type CompareTab } from "../../lib/dbCompareState";
 import { columnViewport } from "../../lib/gridViewport";
 import { getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
 import { copyText } from "../../lib/utils";
 import { toast } from "../ui/toast";
+import { useScrollFrame, useScrollIdle } from "../../hooks/useScrollFrame";
+import { retainViewport } from "../../lib/scrollViewport";
 
 type CellPos={r:number;c:number};
 export type ComparisonViewState=Partial<Pick<CompareTab,"scrollTop"|"scrollLeft"|"activeCell">>;
@@ -19,50 +21,56 @@ export function ComparisonGrid({ model, order, columns, activeCell, scrollTop=0,
   const density=useSyncExternalStore(subscribeUiDensity,getUiDensity);
   const rowHeight=density==="comfortable" ? 30 : 26, headHeight=density==="comfortable" ? 48 : 44;
   const boxRef=useRef<HTMLDivElement>(null), previousRowHeight=useRef(rowHeight);
+  const liveOffset=useRef({top:scrollTop,left:scrollLeft});
   const id=useId(), helpId=`${id}-help`;
-  const [scroll,setScroll]=useState({top:scrollTop,left:scrollLeft,h:320,w:800});
+  const [scroll,setScroll]=useState({top:scrollTop,left:scrollLeft,height:320,width:800});
   const [pendingFocus,setPendingFocus]=useState<CellPos|null>(null);
   const active=activeCell && order.includes(activeCell.r) && columns[activeCell.c] ? activeCell : null;
   const visible=columns.map((_,i)=>i), widths=columns.map(c=>c.width);
   const frozen=new Set(visible.filter(c=>columns[c].kind!=="value"));
-  const viewport=columnViewport(visible,widths,frozen,scroll.left,scroll.w,0);
+  const viewport=columnViewport(visible,widths,frozen,scroll.left,scroll.width,0);
   const total=widths.reduce((sum,width)=>sum+width,0);
   const first=Math.max(0,Math.floor(scroll.top/rowHeight)-OVERSCAN);
-  const last=Math.min(order.length,Math.ceil((scroll.top+scroll.h)/rowHeight)+OVERSCAN);
+  const last=Math.min(order.length,Math.ceil((scroll.top+scroll.height)/rowHeight)+OVERSCAN);
   const activeIndex=active ? order.indexOf(active.r) : -1;
   const cellId=(pos:CellPos)=>`${id}-cell-${pos.r}-${pos.c}`;
   const activeId=active && activeIndex>=first && activeIndex<last && viewport.some(c=>c.column===active.c) ? cellId(active) : undefined;
+  const viewKey=useMemo(()=>order.join(",")+"|"+columns.map(c=>[c.name,c.kind,c.side,c.sourceIndex,c.width].join(":")).join("|"),[order,columns]);
 
   useLayoutEffect(()=>{
     const el=boxRef.current;if(!el) return;
-    const nextTop=scrollTop/previousRowHeight.current*rowHeight;
     const densityChanged=previousRowHeight.current!==rowHeight;
+    const nextTop=densityChanged ? liveOffset.current.top/previousRowHeight.current*rowHeight : scrollTop;
+    const nextLeft=densityChanged ? liveOffset.current.left : scrollLeft;
+    saveScroll.cancel();
     previousRowHeight.current=rowHeight;
-    el.scrollTop=nextTop;el.scrollLeft=scrollLeft;
+    el.scrollTop=nextTop;el.scrollLeft=nextLeft;liveOffset.current={top:el.scrollTop,left:el.scrollLeft};
     setScroll(s=>s.top===el.scrollTop && s.left===el.scrollLeft ? s : {...s,top:el.scrollTop,left:el.scrollLeft});
     // Store the new pixel offset too, so returning to this document preserves the same first row.
     if(densityChanged) onStateChange({scrollTop:el.scrollTop});
-  },[scrollTop,scrollLeft,rowHeight,onStateChange]);
+    // Callback identity is not a request to restore the last saved offset mid-gesture.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[scrollTop,scrollLeft,rowHeight,viewKey]);
   useLayoutEffect(()=>{
     const el=boxRef.current;if(!el) return;
     const update=()=>setScroll(s=>{
-      const h=el.clientHeight || s.h,w=el.clientWidth || s.w;
-      return s.h===h && s.w===w ? s : {...s,h,w};
+      const height=el.clientHeight || s.height,width=el.clientWidth || s.width;
+      return s.height===height && s.width===width ? s : {...s,height,width};
     });
     update();const observer=new ResizeObserver(update);observer.observe(el);
     return ()=>observer.disconnect();
   },[]);
 
-  const syncScroll=()=>{
+  const saveScroll=useScrollIdle((offset:{scrollTop:number;scrollLeft:number})=>onStateChange(offset));
+  const scrollFrame=useScrollFrame(()=>{
     const el=boxRef.current;if(!el) return;
     const top=el.scrollTop,left=el.scrollLeft;
-    setScroll(s=>({...s,top,left,h:el.clientHeight || s.h,w:el.clientWidth || s.w}));
-    if(top!==scrollTop || left!==scrollLeft) onStateChange({scrollTop:top,scrollLeft:left});
-  };
+    setScroll(s=>retainViewport(s,{top,left,height:el.clientHeight || s.height,width:el.clientWidth || s.width},rowHeight*OVERSCAN,200));
+  });
   const reveal=(pos:CellPos)=>{
     const el=boxRef.current,index=order.indexOf(pos.r);
     if(!el || index<0 || !columns[pos.c]) return;
-    const h=el.clientHeight || scroll.h,w=el.clientWidth || scroll.w;
+    const h=el.clientHeight || scroll.height,w=el.clientWidth || scroll.width;
     const x=widths.slice(0,pos.c).reduce((n,width)=>n+width,0);
     const fixedWidth=visible.filter(c=>frozen.has(c)).reduce((n,c)=>n+widths[c],0);
     if(!frozen.has(pos.c)) {
@@ -72,7 +80,10 @@ export function ComparisonGrid({ model, order, columns, activeCell, scrollTop=0,
     const y=index*rowHeight;
     if(y<el.scrollTop) el.scrollTop=y;
     else if(y+rowHeight>el.scrollTop+h-headHeight) el.scrollTop=y+rowHeight-h+headHeight;
-    syncScroll();
+    liveOffset.current={top:el.scrollTop,left:el.scrollLeft};
+    scrollFrame.flush();saveScroll.cancel();
+    // Keyboard/focus moves already change selection; save their exact offset in the same update.
+    onStateChange({scrollTop:el.scrollTop,scrollLeft:el.scrollLeft});
   };
   const focusCell=(pos:CellPos)=>{reveal(pos);setPendingFocus(pos);};
   const focusActive=()=>{if(active) focusCell(active);else boxRef.current?.focus({preventScroll:true});};
@@ -95,7 +106,7 @@ export function ComparisonGrid({ model, order, columns, activeCell, scrollTop=0,
     if(event.target!==event.currentTarget || !order.length) return;
     const pos=active ?? {r:order[Math.min(order.length-1,Math.floor(scroll.top/rowHeight))],c:0};
     let r=order.indexOf(pos.r),c=pos.c;
-    const page=Math.max(1,Math.floor((scroll.h-headHeight)/rowHeight)-1);
+    const page=Math.max(1,Math.floor((scroll.height-headHeight)/rowHeight)-1);
     const moves:Record<string,[number,number]>={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1],PageUp:[-page,0],PageDown:[page,0]};
     if(moves[event.key]) {r+=moves[event.key][0];c+=moves[event.key][1];}
     else if(event.key==="Home") {c=0;if(event.ctrlKey || event.metaKey) r=0;}
@@ -113,7 +124,7 @@ export function ComparisonGrid({ model, order, columns, activeCell, scrollTop=0,
   return <div ref={boxRef} className="dbx-compare-grid" role="grid" aria-label="结果差异" tabIndex={0}
     aria-describedby={helpId} aria-rowcount={order.length+1} aria-colcount={columns.length} aria-activedescendant={activeId}
     style={{"--cmp-row-h":`${rowHeight}px`,"--cmp-head-h":`${headHeight}px`} as CSSProperties}
-    onScroll={syncScroll} onKeyDown={onKeyDown} onFocus={event=>{
+    onScroll={event=>{liveOffset.current={top:event.currentTarget.scrollTop,left:event.currentTarget.scrollLeft};scrollFrame.schedule();saveScroll.schedule({scrollTop:liveOffset.current.top,scrollLeft:liveOffset.current.left});}} onKeyDown={onKeyDown} onFocus={event=>{
       if(event.target===event.currentTarget && !active && order.length) onStateChange({activeCell:{r:order[Math.min(order.length-1,Math.floor(scroll.top/rowHeight))],c:0}});
     }}>
     <span id={helpId} className="dbx-compare-instructions">方向键移动；Home、End 移到本行首尾；Ctrl+Home、Ctrl+End 移到首末行；Enter 查看完整原值，Ctrl+C 复制原值。唯一键列固定，A 为对照值，B 为当前值。</span>

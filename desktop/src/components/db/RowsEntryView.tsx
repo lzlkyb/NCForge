@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { DbWritebackBar } from "./DbWritebackBar";
 import { ResultTable } from "./ResultTable";
 import { QuerySettings } from "./QuerySettings";
 import { EditBlockedPanel } from "./EditBlockedPanel";
@@ -35,7 +36,7 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
   // 隐式结果集也允许改（它同样是单表 SELECT 的结果）；判据全在 editableSource / editableKeys 里。
   // `rows` 由 hook 出来：数据库快照 + 写回成功的本地覆盖 + 新增草稿行。
   const editData = useResultSetEdit({
-    tabId: tab.id, connId: tab.connId, slot: tab.slot, sql: entry.sql, columns, rows: baseRows,
+    tabId: tab.id, connId: entry.boundQuery ? null : tab.connId, slot: tab.slot, sql: entry.sql, columns, rows: baseRows,
     // 写回按执行时的 schema 限定表名：之后切默认 schema 也不会改到同名表的另一份。
     schema: entry.context?.schema,
   });
@@ -83,7 +84,7 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
         snapshot={{source:entry.context?.source ?? "执行来源未记录",schema:entry.context?.schema,originTabId:tab.id,sql:entry.sql,at:entry.completedAt ?? entry.context?.startedAt ?? 0,complete,columns,rows}}
         /* 隐式结果集（dbms_sql.return_result）的 SQL 是 PL/SQL 块，按行号外套查询取不到值：
            行号属于子结果集，重跑后外层结果集的行对不上，宁可不给这个入口。 */
-        lob={tab.connId && !sets.length ? {connId:tab.connId,slot:tab.slot,sql:entry.sql,timeoutSec:tab.timeoutSec, binarySqlForRow: (row, column) => {
+        lob={tab.connId && !sets.length && !entry.boundQuery ? {connId:tab.connId,slot:tab.slot,sql:entry.sql,timeoutSec:tab.timeoutSec, binarySqlForRow: (row, column) => {
           const rt = rtOf(tab.connId);
           return resultTargetIssue(entry.context, connOf(tab.connId), rt.currentSchema ?? rt.info?.schema)
             ? null : editData.binarySqlForRow(row, column);
@@ -105,8 +106,8 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
             )}
           </>
         }
-        onServerSort={sets.length ? undefined : (col, dir) => void reSortOnServer(tab.id, entry.sql, columns[col]?.name ?? "", dir, entry.context)}
-        transferSource={{connId:entry.context?.connId ?? tab.connId,resultId:`${entry.id}:${at}`,tabId:tab.id,sql:entry.sql,source:entry.context?.source ?? "执行来源未记录",schema:entry.context?.schema,connectionKey:entry.context?.connectionKey,complete,canRequery:!sets.length,timeoutSec:tab.timeoutSec,table:guessTable(entry.sql),sheets:sets.length>1 ? sets.map((s,i)=>({name:`结果集 ${i+1}${s.hasMore ? "-部分" : ""}`,data:{columns:s.columns,rows:s.rows,query:entry.sql}})) : undefined}}
+        onServerSort={sets.length || entry.boundQuery ? undefined : (col, dir) => void reSortOnServer(tab.id, entry.sql, columns[col]?.name ?? "", dir, entry.context)}
+        transferSource={{connId:entry.context?.connId ?? tab.connId,resultId:`${entry.id}:${at}`,tabId:tab.id,sql:entry.sql,source:entry.context?.source ?? "执行来源未记录",schema:entry.context?.schema,connectionKey:entry.context?.connectionKey,complete,canRequery:!sets.length && !entry.boundQuery,timeoutSec:tab.timeoutSec,table:guessTable(entry.sql),sheets:sets.length>1 ? sets.map((s,i)=>({name:`结果集 ${i+1}${s.hasMore ? "-部分" : ""}`,data:{columns:s.columns,rows:s.rows,query:entry.sql}})) : undefined}}
         zh={zh}
         edit={editData.edit}
         // 滚到底自动续取：与底栏「加载下 N 行」同一个入口，条件也一致（隐式结果集 / 失效游标不能续）。
@@ -125,23 +126,7 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
                 手动指定 {editData.diagnostics.table ?? ""} · 取消
               </button>
             )}
-            {editData.planError && (
-              <span className="meta" role="alert" style={{ color: "hsl(var(--destructive-ink))" }} title={editData.planError}>
-                {editData.planError}
-              </span>
-            )}
-            {editData.count > 0 ? (
-              <>
-                <span className="meta" style={{ color: "hsl(var(--warning-ink))" }}>本地草稿 · 待写回 {editData.count} 行</span>
-                <button type="button" className="dbx-btn ghost" disabled={editData.saving} onClick={editData.reset}>撤销改动</button>
-                <button type="button" className="dbx-btn pri" disabled={editData.saving} onClick={editData.save}
-                  title="按主键写成 UPDATE 并执行 · Ctrl+S">
-                  {editData.saving ? "写回中…" : `写回 ${editData.count} 行`}
-                </button>
-              </>
-            ) : editData.planError ? (
-              editData.dirty && <button type="button" className="dbx-btn ghost" disabled={editData.saving} onClick={editData.reset}>撤销改动</button>
-            ) : <span className="meta" title="双击单元格直接改：Enter 下移、Tab 右移、Esc 取消；也能从 Excel 粘一块进来">可改数据</span>}
+
           </>
         ) : (
           <>
@@ -155,7 +140,9 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
             )}
           </>
         )}
-        foot={
+        foot={<>
+          <DbWritebackBar count={editData.count} dirty={editData.dirty} error={editData.planError || undefined}
+            disabled={!editData.edit} saving={editData.saving} onUndo={editData.reset} onSave={editData.save} />
           <div className="dbx-rfoot">
             <strong>已加载 {thousands(rows.length)} 行</strong>
             <span>{thousands(entry.ms)} ms</span>
@@ -180,7 +167,7 @@ export function RowsEntryView({ tab, entry, isLast, onLocate }: { tab: SqlTab; e
               </span>
             )}
           </div>
-        }
+        </>}
       />
       <EditBlockedPanel
         open={diagOpen}

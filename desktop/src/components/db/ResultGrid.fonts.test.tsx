@@ -14,6 +14,7 @@ vi.mock("../../lib/resultView", async original => {
 globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
 
 it("字体加载后重新计算自动列宽，保留手调宽度、选区、滚动和编辑草稿", () => {
+  vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
   const target = new EventTarget();
   Object.defineProperty(document, "fonts", { configurable: true, value: target });
   const scrollTo = vi.fn();
@@ -30,7 +31,7 @@ it("字体加载后重新计算自动列宽，保留手调宽度、选区、滚�
       sel={{ r: 40, c: 1 }} selection={{ anchor: { r: 40, c: 1 }, end: { r: 40, c: 1 } }} onSel={() => {}}
       edit={{ canEdit: () => true, changed: new Map(), onEdit: edited }} />));
     const grid = host.querySelector<HTMLDivElement>('[role="grid"]')!;
-    act(() => { grid.scrollTop = 40 * 26; grid.dispatchEvent(new Event("scroll", { bubbles: true })); });
+    act(() => { grid.scrollTop = 40 * 26; grid.dispatchEvent(new Event("scroll", { bubbles: true })); vi.advanceTimersToNextFrame(); });
     act(() => grid.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })));
     const input = host.querySelector<HTMLInputElement>(".dbx-gedit")!;
     expect(input.value).toBe("名称 40");
@@ -45,5 +46,5 @@ it("字体加载后重新计算自动列宽，保留手调宽度、选区、滚�
     expect(host.querySelector("#dbx-cell-40-1")?.getAttribute("aria-selected")).toBe("true");
     expect(scrollTo).not.toHaveBeenCalled();
     expect(edited).not.toHaveBeenCalled();
-  } finally { act(() => root.unmount()); host.remove(); delete (document as unknown as { fonts?: FontFaceSet }).fonts; }
+  } finally { act(() => root.unmount()); vi.useRealTimers(); host.remove(); delete (document as unknown as { fonts?: FontFaceSet }).fonts; }
 });

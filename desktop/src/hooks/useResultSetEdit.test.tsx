@@ -11,8 +11,13 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), confirm: vi.fn(async () => true) }));
 vi.mock("../lib/tauri", () => ({ invoke: mocks.invoke }));
+// 写回路径要过生产库确认；其余导出保持真实，避免把 dbConfirm 的依赖全 stub 掉。
+vi.mock("../lib/dbConfirm", async (io) => {
+  const actual = await io<typeof import("../lib/dbConfirm")>();
+  return { ...actual, confirmProdWrite: mocks.confirm };
+});
 
 import { useResultSetEdit } from "./useResultSetEdit";
 import { __resetDbForTest, connect, rtOf, setConns } from "../lib/dbStore";
@@ -405,4 +410,28 @@ it("手动指定基表与定位列后，结构判不出来的查询也能改", a
   expect(latest.forced).toBe(true);
   expect(latest.edit).toBeTruthy();
   expect(latest.diagnostics.identity).toContain("指定列");
+});
+
+it("删除写回成功后就地标记「已写回删除」，不能退回普通行", async () => {
+  await act(async () => root.render(<Probe sql="select * from bd_material" />));
+  await flush();
+  latest.edit!.onDeleteRow!(0);
+  await act(async () => {});
+  expect(latest.edit!.rowState!(0)).toBe("deleted");
+  expect(latest.dirty).toBe(true);
+
+  // 写回：一条 DELETE 命中 1 行
+  mocks.invoke.mockImplementation((cmd: string) => {
+    if (cmd === "db_exec_bound") {
+      return Promise.resolve({ kind: "update", updateCount: 1, tx: { autoCommit: false, statements: 1, rows: 1, since: 1 } });
+    }
+    return Promise.resolve(null);
+  });
+  await act(async () => { latest.save(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+  // 结果集是执行时的快照，行还在 `rows` 里；撤掉标记会让它看起来「没删掉」，
+  // 再删一次只能撞「该行已被其他人删除」。所以必须换成一个独立的「已写回删除」态。
+  expect(latest.edit!.rowState!(0)).toBe("removed");
+  expect(latest.count).toBe(0);
+  expect(latest.dirty).toBe(false);
 });

@@ -169,8 +169,8 @@ export function OtherToolsPane() {
           <div className="dbx-import-heading">
             <span className="dbx-import-symbol"><Icon name="database" size={20} /></span>
             <div>
-              <h2 id="import-discovery-title">发现本机数据库连接</h2>
-              <p>自动读取 DataGrip 与 PL/SQL Developer 的连接配置</p>
+              <h2 id="import-discovery-title">本机连接</h2>
+              <p>DataGrip 和 PL/SQL Developer</p>
             </div>
             <button type="button" className="dbx-btn" disabled={busy} onClick={() => void scanLocal()}>
               <Icon name="search" size={14} />{busy ? "正在读取…" : "重新扫描"}
@@ -183,7 +183,7 @@ export function OtherToolsPane() {
         </section>
 
         <details className="dbx-import-manual">
-          <summary>补充导入 <span>未找到连接？选择配置文件或粘贴 XML</span></summary>
+          <summary>从文件或 XML 导入</summary>
           <div className="dbx-import-tool">
             <div><h3>DataGrip</h3><p>选择项目 .idea 目录内的 XML，或导出的设置包</p></div>
             <div className="dbx-import-actions">
@@ -238,13 +238,13 @@ export function OtherToolsPane() {
             </div> : <div className="dbx-import-empty" role="status">
               <Icon name="search" size={24} />
               <strong>没有读到可导入的 Oracle 连接</strong>
-              <p>可重新扫描，或展开“补充导入”选择配置文件。</p>
+              <p>可以重新扫描或从文件导入。</p>
             </div>}
           </section>
         )}
         {(scan?.warnings.length ?? 0) > 0 && <details className="dbx-import-notes"><summary>读取说明 · {scan!.warnings.length} 条</summary><ul>{scan!.warnings.map((w, i) => <li key={`${i}-${w}`}>{w}</li>)}</ul></details>}
         {items.length > 0 && <div className="dbx-import-env"><span>导入到环境</span><EnvChips value={env} onChange={setEnv} /></div>}
-        <p className="dbx-import-footnote">仅导入连接地址与用户名。首次连接时输入口令，可勾选“记住”。</p>
+        {items.length > 0 && <p className="dbx-import-footnote">首次连接时输入密码。</p>}
       </div>
       <div className="ft dbx-import-footer">
         <span className="dbx-import-selection" role="status">已选 <b>{picked.length}</b> 个连接</span>

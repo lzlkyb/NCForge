@@ -24,6 +24,18 @@ afterEach(() => {
 const writes = (set: { mock: { calls: unknown[][] } }) => set.mock.calls.filter(c => c[0] === KEY).length;
 
 describe("执行历史写盘", () => {
+  it("同一 SQL 按 schema 保留，重跑延续固定状态，移除立即落盘", async () => {
+    const h = await import("./dbHistory");
+    h.addHistory("c1", { ...at(1), schema: "APP" });
+    h.changeHistoryEntry("c1", h.getHistoryMap().c1[0], "pin");
+    h.addHistory("c1", { ...at(1), at: 2, schema: "OTHER" });
+    h.addHistory("c1", { ...at(1), at: 3, schema: "APP" });
+    const [app, other] = h.getHistoryMap().c1;
+    expect(app).toMatchObject({ schema: "APP", pinned: true, at: 3 });
+    expect(other.schema).toBe("OTHER");
+    h.changeHistoryEntry("c1", other, "forget");
+    expect(JSON.parse(localStorage.getItem(KEY)!).c1).toEqual([app]);
+  });
   it("300ms 内连续执行只序列化一次，列表仍然立刻可读", async () => {
     const h = await import("./dbHistory");
     const set = vi.spyOn(Storage.prototype, "setItem");

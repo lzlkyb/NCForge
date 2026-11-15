@@ -136,12 +136,16 @@ public class NcDbBridgeContractTest {
             if(n.equals("setAutoCommit")) {auto=(Boolean)a[0];return null;}
             if(n.equals("getMetaData")) return proxy(DatabaseMetaData.class);
             if(n.equals("prepareCall")) return proxy(CallableStatement.class);
-            if(n.equals("createStatement")) return Proxy.newProxyInstance(Statement.class.getClassLoader(),new Class<?>[]{Statement.class},new InvocationHandler(){
+            if(n.equals("createStatement") || n.equals("prepareStatement")) {
+                final boolean prepared=n.equals("prepareStatement");
+                final String preparedSql=prepared?(String)a[0]:null;
+                Class<?> statementType=prepared?PreparedStatement.class:Statement.class;
+                return Proxy.newProxyInstance(statementType.getClassLoader(),new Class<?>[]{statementType},new InvocationHandler(){
                 QueryHandle query;
                 public Object invoke(Object p,Method m,Object[] a) throws Throwable {
                     String n=m.getName();
                     if(n.equals("execute")) {
-                        String sql=(String)a[0];executions++;
+                        String sql=prepared?preparedSql:(String)a[0];executions++;
                         if(sql.equals("select FAIL")) throw new SQLException("second statement failed");
                         if(!sql.startsWith("select ")) return false;
                         String prefix=sql.substring(7);
@@ -155,7 +159,8 @@ public class NcDbBridgeContractTest {
                     if(n.equals("close") && query!=null) {query.statementClosed=true;query.rowsClosed=true;return null;}
                     return defaultValue(m);
                 }
-            });
+                });
+            }
             return defaultValue(m);
         }
     }
@@ -168,6 +173,12 @@ public class NcDbBridgeContractTest {
         QueryFixture fixture=new QueryFixture();Object s=cursorSession(fixture);
         check(runResult(s,"select LEGACY",1,false,"").contains("LEGACY1"),"empty result ID keeps legacy exec");
         check(runResult(s,"select A",2,true,"a").contains("A2"),"first result has its own first page");
+        Method bound=s.getClass().getDeclaredMethod("execResult",String.class,int.class,int.class,boolean.class,boolean.class,String.class,List.class);
+        bound.setAccessible(true);
+        check(((String)bound.invoke(s,"select BOUND :1",1,30,false,false,"bound",Arrays.asList("string","value"))).contains("BOUND ?1"),
+                "bound statement opens its own named cursor");
+        check(nextResult(s,1,"bound").contains("BOUND ?2"),"bound statement continues through named pagination");
+        call(s,"closeResult",new Class<?>[]{String.class},"bound");
         check(runResult(s,"select B",1,false,"b").contains("B1"),"second result starts independently");
         Field pool=s.getClass().getDeclaredField("resultCursors");pool.setAccessible(true);
         Map<?,?> states=(Map<?,?>)pool.get(s);
@@ -247,6 +258,9 @@ public class NcDbBridgeContractTest {
     }
     public static void main(String[] args) throws Exception {
         Class<?> c=Class.forName("NcDbBridge$Session");Constructor<?> ctor=c.getDeclaredConstructor(String.class);ctor.setAccessible(true);Object s=ctor.newInstance("contract");
+        Method markers=c.getDeclaredMethod("toQuestionMarks",String.class);markers.setAccessible(true);
+        check("select q'[it's :99]', \"ID:98\", ? from dual -- :97".equals(
+                markers.invoke(null,"select q'[it's :99]', \"ID:98\", :1 from dual -- :97")), "only real bind tokens are rewritten");
         Field conn=c.getDeclaredField("conn");conn.setAccessible(true);conn.set(s,proxy(Connection.class));
         java.io.ByteArrayOutputStream reply = new java.io.ByteArrayOutputStream();
         Field out = Class.forName("NcDbBridge").getDeclaredField("out");

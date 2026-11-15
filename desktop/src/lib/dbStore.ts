@@ -82,6 +82,7 @@ export interface ConnRuntime {
 export type TxNotice = { kind: "error" | "lost"; text: string; verify?: boolean };
 
 export interface ResultEntry {
+  boundQuery?: boolean;
   context?: ResultExecutionContext;
   completedAt?:number;
   startLine?:number;
@@ -506,7 +507,7 @@ export async function loadConns(): Promise<void> {
 }
 
 /** 连库。返回 `need-password` 时界面弹口令框。 */
-export async function connect(id: string, password?: string, remember?: boolean): Promise<"ok" | "need-password" | "error"> {
+export async function connect(id: string, password?: string, remember?: boolean, onError?: (reason: string) => void): Promise<"ok" | "need-password" | "error"> {
   forgetColumns(id);
   const requested = sqlTabOf(state.active);
   const prepareSql = requested?.connId === id && !requested.slot;
@@ -536,6 +537,7 @@ export async function connect(id: string, password?: string, remember?: boolean)
   } catch (e) {
     const { code } = parseDbError(e);
     setRt(id, { status: "error", error: friendlyDbError(e) });
+    onError?.(e instanceof Error ? e.message : String(e));
     return code === "need-password" || (code === "auth" && connOf(id)?.source === "manual") ? "need-password" : "error";
   }
 }
@@ -1072,12 +1074,12 @@ export function clearSlots(connId: string): void {
 }
 
 /** 执行一条语句，结果记进标签、事务状态更新到连接（或标签的槽）、写入历史。不抛异常。 */
-export async function execOne(tabId: string, sql: string, index: number, context?: ResultExecutionContext, collectStats = false): Promise<ResultEntry> {
+export async function execOne(tabId: string, sql: string, index: number, context?: ResultExecutionContext, collectStats = false, bound?: { sql: string; params: import("./dbApi").BoundCell[] }, targetCurrent?: () => boolean): Promise<ResultEntry> {
   const tab = sqlTabOf(tabId);
   const identity = context ?? (tab?.connId ? captureResultContext(tab.connId, connOf(tab.connId), rtOf(tab.connId).currentSchema ?? rtOf(tab.connId).info?.schema, sql) : undefined);
   const joinGeneration = identity ? sqlJoinHistoryGeneration(sqlUsageScope(identity.connectionKey, identity.schema)) : undefined;
   const usageToken = tab?.run ? `run:${tab.run.id}` : identity ? String(identity.startedAt) : undefined;
-  const base = { id: newId("r"), index, sql, context: identity, startLine: identity?.target?.startLine, columns: [], rows: [], hasMore: false, updateCount: -1, ms: 0 };
+  const base = { id: newId("r"), index, sql, context: identity, startLine: identity?.target?.startLine, columns: [], rows: [], hasMore: false, updateCount: -1, ms: 0, ...(bound ? { boundQuery: true } : {}) };
   if (!tab?.connId) return { ...base, kind: "error", error: "这个标签还没选连接" };
   const connId = tab.connId;
   const t0 = Date.now();
@@ -1089,10 +1091,14 @@ export async function execOne(tabId: string, sql: string, index: number, context
   try {
     slot = await ensureSlot(tabId, connId);
     if (!sameRequest()) return { ...base, kind: "error", error: "来源标签或执行已切换" };
+    if (targetCurrent && !targetCurrent()) return { ...base, kind: "error", error: "执行目标已变化，查询未执行", cancelled: true };
     registerResultCursor(base.id, connId, slot, tabId);
+    const invoke = () => bound
+      ? dbApi.execBound(connId, bound.sql, bound.params, tab.maxRows, tab.timeoutSec, slot, base.id)
+      : dbApi.execResult(connId, sql, tab.maxRows, tab.timeoutSec, slot, collectStats, base.id);
     let r;
     try {
-      r = await dbApi.execResult(connId, sql, tab.maxRows, tab.timeoutSec, slot, collectStats, base.id);
+      r = await invoke();
     } catch (e) {
       // 槽被空闲回收（10 分钟没动过）：重开一条再试一次，别让用户点一次就看见红字
       if (slot && parseDbError(e).code === "slot-gone") {
@@ -1100,8 +1106,9 @@ export async function execOne(tabId: string, sql: string, index: number, context
         patchTab<SqlTab>(tabId, { slot: null, tx: undefined });
         slot = await ensureSlot(tabId, connId);
         if (!sameRequest()) return { ...base, kind: "error", error: "来源标签或执行已切换" };
+        if (targetCurrent && !targetCurrent()) return { ...base, kind: "error", error: "执行目标已变化，查询未执行", cancelled: true };
         registerResultCursor(base.id, connId, slot, tabId);
-        r = await dbApi.execResult(connId, sql, tab.maxRows, tab.timeoutSec, slot, collectStats, base.id);
+        r = await invoke();
       } else {
         throw e;
       }
@@ -1181,7 +1188,7 @@ export async function execOne(tabId: string, sql: string, index: number, context
     text: `[${now()}] 第 ${index} 条 · ${summaryOf(entry)} · ${entry.ms} ms${clientMs > entry.ms+50 ? ` · 语句调用用时（含会话申请）${clientMs} ms` : ""}${entry.error ? ` · ${entry.error}` : ""}`,
     tone: entry.cancelled ? "info" : entry.kind === "error" ? "bad" : "ok",
   }]);
-  addHistory(connId, { at: Date.now(), sql, ms: entry.ms, summary: summaryOf(entry), ok: entry.kind !== "error" });
+  addHistory(connId, { at: Date.now(), sql, ms: entry.ms, summary: summaryOf(entry), ok: entry.kind !== "error", schema: identity?.schema });
   // Learning cannot delay execution feedback; the frozen identity rejects a switched database.
   if (entry.kind !== "error" && identity) void import("./sqlAssistLearning").then(({ recordSqlExecutionUsage }) => recordSqlExecutionUsage(identity, joinGeneration, usageToken)).catch(() => {});
   return entry;

@@ -3,7 +3,7 @@ import "../../db-console.css";
 import { Modal } from "../ui/Modal";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
-import { copyText } from "../../lib/utils";
+import { copyText, isImeComposing } from "../../lib/utils";
 import { downloadText } from "../../lib/resultExport";
 import { connOf } from "../../lib/dbStore";
 import { ENV_LABEL } from "../../lib/dbApi";
@@ -88,7 +88,7 @@ export function PasswordResetDialog({ connId, onClose }: { connId: string; onClo
             spellCheck={false}
             onChange={(e) => setFilter(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) search(filter);
+              if (e.key === "Enter" && !isImeComposing(e.nativeEvent)) search(filter);
             }}
           />
           <button type="button" className="dbx-btn" disabled={loading} onClick={() => search(filter)}>

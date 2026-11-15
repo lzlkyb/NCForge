@@ -4,6 +4,8 @@ use crate::state::AppState;
 use serde_json::{json, Value};
 use std::{sync::Arc, time::Duration};
 
+// 参数由 `invoke` 契约决定：前端按名字平铺传，收成 struct 就得改契约与生成的类型。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn db_exec_bound(
     state: tauri::State<'_, Arc<AppState>>,
@@ -13,6 +15,7 @@ pub async fn db_exec_bound(
     max_rows: Option<u32>,
     timeout_sec: Option<u32>,
     slot: Option<String>,
+    result_id: Option<String>,
 ) -> Result<Value, String> {
     let engine = slot_bridge(&state, &id, slot.as_deref())?;
     let mut args = vec![
@@ -20,6 +23,10 @@ pub async fn db_exec_bound(
         max_rows.unwrap_or(500).clamp(1, 10000).to_string(),
         timeout_sec.unwrap_or(30).clamp(1, 3600).to_string(),
     ];
+    if let Some(result_id) = result_id.as_deref() {
+        super::db_cmds::validate_result_id(result_id)?;
+        args.push(result_id.to_string());
+    }
     for value in params {
         let (kind, text) = match value {
             Value::Null => ("null", String::new()),
@@ -34,7 +41,12 @@ pub async fn db_exec_bound(
         args.extend([kind.to_string(), text]);
     }
     let timeout = Duration::from_secs(timeout_sec.unwrap_or(30).clamp(1, 3600) as u64 + 30);
-    call_with_reconnect(&state, &id, engine, "execBound", args, timeout, None).await
+    let command = if result_id.is_some() {
+        "execBoundResult"
+    } else {
+        "execBound"
+    };
+    call_with_reconnect(&state, &id, engine, command, args, timeout, None).await
 }
 
 #[tauri::command]

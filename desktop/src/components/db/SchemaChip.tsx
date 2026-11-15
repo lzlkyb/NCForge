@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 
 import { dbApi } from "../../lib/dbApi";
 import { changeSchema, useConnOf, useConnRt } from "../../lib/dbStore";
 import { friendlyDbError } from "../../lib/db";
+import { isImeComposing } from "../../lib/utils";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
 
@@ -120,7 +121,7 @@ export function SchemaChip({ connId }: { connId: string | null }) {
   };
 
   const onFilterKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.nativeEvent.isComposing || ui.busy) return;
+    if (isImeComposing(e.nativeEvent) || ui.busy) return;
     if (e.key === "Enter" && candidate) { e.preventDefault(); void pick(candidate); return; }
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key) || !list.length) return;
     e.preventDefault();

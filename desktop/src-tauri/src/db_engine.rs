@@ -452,7 +452,7 @@ impl EngineHandle {
         if readonly {
             if matches!(
                 cmd,
-                "exec" | "execBound" | "execFull" | "execFullBound" | "query"
+                "exec" | "execBound" | "execBoundResult" | "execFull" | "execFullBound" | "query"
             ) && !readonly_query(args.first().copied().unwrap_or(""))
             {
                 return Err(BridgeError::new(
@@ -516,7 +516,10 @@ impl EngineHandle {
         }
         // execFull / execFullBound 是导出与搬运的取数通道，语义上就是执行：
         // 少了它们会绕过只读策略、取消 epoch、以及「会话被用过」的标记。
-        let execution = matches!(cmd, "exec" | "execBound" | "execFull" | "execFullBound");
+        let execution = matches!(
+            cmd,
+            "exec" | "execBound" | "execBoundResult" | "execFull" | "execFullBound"
+        );
         // 闲置后能「探测 → 重连 → 继续跑」的命令。执行类之外还有只读元数据：
         // 展开表结构、看 DDL、拉对象列表、列中文名这些都不带事务语义也没有游标，
         // 重放是安全的；少了它们，闲置一阵后回来第一件事（点开表）就必失败一次。
@@ -1684,7 +1687,14 @@ mod readonly_tests {
         let primary = EngineHandle::rust().with_policy(policy.clone());
         let slot = EngineHandle::rust().with_policy(policy);
         for h in [&primary, &slot] {
-            for cmd in ["exec", "execBound", "execFull", "execFullBound", "query"] {
+            for cmd in [
+                "exec",
+                "execBound",
+                "execBoundResult",
+                "execFull",
+                "execFullBound",
+                "query",
+            ] {
                 assert_eq!(
                     h.call(cmd, &["delete from t"], Duration::from_secs(1))
                         .unwrap_err()

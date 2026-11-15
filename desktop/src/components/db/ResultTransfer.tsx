@@ -3,7 +3,8 @@ import "../../db-transfer.css";
 import "../../db-transfer-workbench.css";
 import { Icon } from "../ui/icon";
 import { ContextMenu, type ContextMenuItem } from "../workspace/ContextMenu";
-import { freezeTransferFrame, selectionIndices, scopeIndices, type TransferFrame } from "../../lib/resultTransferContext";
+import { freezeTransferFrame, selectionIndices, type TransferFrame } from "../../lib/resultTransferContext";
+import { selectionBounds } from "../../lib/gridViewport";
 import { quickCopyTransfer } from "../../lib/resultTransferQuick";
 import { clearTransferJob, transferJobKey, useTransferJob } from "../../lib/resultTransferJobs";
 import type { Cell } from "../../lib/dbApi";
@@ -12,11 +13,13 @@ import type { TransferDialogSeed } from "../../hooks/useResultTransferDialog";
 type Mode="copy"|"file";
 interface DialogState {frame:TransferFrame;open:boolean;revision:number;seed?:TransferDialogSeed}
 
-export function ResultTransfer({ frame, valueAt }: { frame: TransferFrame; valueAt: (r: number, c: number) => Cell }) {
+export function ResultTransfer({ frame, edits }: { frame: TransferFrame; edits?: ReadonlyMap<string, Cell> }) {
   const [ui, setUi] = useState<{busy:boolean;menu:{x:number;y:number;items:ContextMenuItem[]}|null;dialogs:Partial<Record<Mode,DialogState>>}>({busy:false,menu:null,dialogs:{}});
   const lock = useRef(false), job = useTransferJob(transferJobKey(frame.source));
   const selected = !!frame.selection, enabled = !!frame.visible.length;
-  const rows = scopeIndices(frame, selected ? "selection" : "filtered").length, columns = selectionIndices(frame).length;
+  const bounds = selectionBounds(frame.order, frame.visible, frame.selection);
+  const rows = selected ? bounds ? bounds.rowEnd - bounds.rowStart + 1 : 0 : frame.order.length;
+  const columns = selectionIndices(frame).length;
   const copyLabel = selected ? "复制选区" : "复制当前结果", copySize = `${rows} 行 × ${columns} 列`;
   const activate = (mode:Mode, chosen:DialogState) => {
     const other=mode==="copy" ? "file" : "copy";
@@ -25,15 +28,15 @@ export function ResultTransfer({ frame, valueAt }: { frame: TransferFrame; value
   const open = (mode:Mode) => {
     const stored=ui.dialogs[mode];
     const recovered=mode==="file" && job?.retry ? {...job.retry,open:true,revision:1} : undefined;
-    activate(mode,mode==="file" && job && (stored || recovered) ? {...(stored || recovered)!,open:true} : {frame:freezeTransferFrame(frame,valueAt),open:true,revision:(stored?.revision ?? 0)+1});
+    activate(mode,mode==="file" && job && (stored || recovered) ? {...(stored || recovered)!,open:true} : {frame:freezeTransferFrame(frame,edits),open:true,revision:(stored?.revision ?? 0)+1});
   };
   const fileFromCopy = (seed:TransferDialogSeed) => {
     const stored=ui.dialogs.file;
     if(job && ["running","cancelling"].includes(job.state) && stored){activate("file",{...stored,open:true});return;}
     clearTransferJob(transferJobKey(frame.source));
-    activate("file",{frame:ui.dialogs.copy?.frame ?? freezeTransferFrame(frame,valueAt),open:true,revision:(stored?.revision ?? 0)+1,seed});
+    activate("file",{frame:ui.dialogs.copy?.frame ?? freezeTransferFrame(frame,edits),open:true,revision:(stored?.revision ?? 0)+1,seed});
   };
-  const quick = async (format: Parameters<typeof quickCopyTransfer>[1]) => { if (lock.current) return; lock.current = true; setUi(s => ({ ...s, busy: true })); try { await quickCopyTransfer(freezeTransferFrame(frame, valueAt), format); } finally { lock.current = false; setUi(s => ({ ...s, busy: false })); } };
+  const quick = async (format: Parameters<typeof quickCopyTransfer>[1]) => { if (lock.current) return; lock.current = true; setUi(s => ({ ...s, busy: true })); try { await quickCopyTransfer(frame, format, false, edits); } finally { lock.current = false; setUi(s => ({ ...s, busy: false })); } };
   const menu = (x: number, y: number) => setUi(s => ({ ...s, menu: { x, y, items: [
     { label: `${selected ? "选区" : "当前筛选结果"} ${copySize}`, disabled: true, onSelect: () => undefined },
     ...([ ["tsv", "TSV · 贴到 Excel / WPS"], ["csv", "CSV"], ["json", "JSON"], ["markdown", "Markdown 表格"], ["html", "HTML 表格"], ["insert", "SQL · INSERT"], ["where", "SQL · IN 条件（单列）"] ] as const).map(([format, label]) => ({ label, icon: "copy" as const, disabled: !enabled || (format === "where" && columns !== 1), onSelect: () => void quick(format) })),

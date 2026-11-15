@@ -76,7 +76,7 @@ export type Pending =
       onSave: (onProgress: (done: number, total: number) => void) => Promise<SaveFailure[]>;
       resolve: (c: FileQuitChoice) => void;
     }
-  | { kind: "prod"; connId: string; tabId: string; sql: string; resolve: (ok: boolean, quiet: boolean) => void }
+  | { kind: "prod"; connId: string; tabId: string; sql: string; target?: { schema?: string | null; rows: number }; resolve: (ok: boolean, quiet: boolean) => void }
   | { kind: "password"; connId: string; error: string | null; temporary?: boolean; resolve: (r: { password: string; remember: boolean } | null) => void }
   | { kind: "ask"; title: string; message: string; ok: string; danger: boolean; resolve: (ok: boolean) => void };
 
@@ -263,7 +263,7 @@ export async function guardSlotTx(
 const quietUntil = new Map<string, number>();
 
 /** 生产库执行写语句前确认。「10 分钟内不再询问」按标签记。 */
-export async function confirmProdWrite(tabId: string, connId: string, sql: string): Promise<boolean> {
+export async function confirmProdWrite(tabId: string, connId: string, sql: string, target?: { schema?: string | null; rows: number }): Promise<boolean> {
   if (connOf(connId)?.env !== "prod") return true;
   // 静默期按「标签 + 连接」记：只记标签的话，同一个 SQL 标签切到另一个生产库后
   // 会继承上一个库的免确认，对着第二个生产库写也不问了。
@@ -275,6 +275,7 @@ export async function confirmProdWrite(tabId: string, connId: string, sql: strin
       connId,
       tabId,
       sql,
+      target,
       resolve: (ok, quiet) => {
         if (ok && quiet) quietUntil.set(quietKey, Date.now() + 10 * 60_000);
         resolve(ok);

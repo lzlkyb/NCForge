@@ -518,6 +518,13 @@ pub async fn db_conn_test(
     })
 }
 
+/// 核对导入信息时复用正式导入的解析器，密码留在原文件中。
+#[tauri::command]
+pub fn db_conn_preview_props(text: String) -> Result<Value, String> {
+    let (url, user, _) = db_conns::parse_properties(&text)?;
+    Ok(serde_json::json!({ "url": url, "user": user }))
+}
+
 /// 导入 `.properties`（url / user / pwd，与 nc-db 工具的 `--conf` 文件同格式）为一条手动连接。
 ///
 /// 收文件**内容**而不是路径：界面用浏览器的文件选择框读文件（没有引入原生对话框插件），

@@ -254,7 +254,7 @@ describe("结果视图保活不破坏滚动链", () => {
     const first = host.querySelector<HTMLElement>('[aria-label="查询 1 结果"]')!;
     const third = host.querySelector<HTMLElement>('[aria-label="查询 3 结果"]')!;
     expect(host.querySelector('[aria-label="查询 2 结果"]')).toBeNull();
-    await act(async () => first.querySelector<HTMLButtonElement>('[aria-label="筛选结果"]')!.click());
+    await act(async () => first.querySelector<HTMLButtonElement>('[aria-label="筛选已加载行"]')!.click());
     const input = first.querySelector<HTMLInputElement>('[aria-label="在结果中筛选"]')!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "one"); input.dispatchEvent(new Event("input", { bubbles: true })); });
     await act(async () => first.querySelector<HTMLButtonElement>('[aria-label="全选结果"]')!.click());

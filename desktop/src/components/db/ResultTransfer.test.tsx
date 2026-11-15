@@ -38,7 +38,7 @@ function originalFrame(): TransferFrame {
     order: [1, 0], visible: [2, 0, 1], selection: { anchor: { r: 1, c: 2 }, end: { r: 0, c: 0 } }, labels: ["编号", "说明", "值"],
     source: { connId: "conn-a", resultId: "result-a", tabId: "tab-a", sql: "select * from T where ID = ?", params: [{ number: "12345678901234567890" }], source: "来源A", complete: false, table: "T" } };
 }
-function render() { root.render(<ResultTransfer frame={frame} valueAt={(r, c) => c === 1 ? `edited-${r}` : frame.data.rows[r][c]} />); }
+function render() { root.render(<ResultTransfer frame={frame} edits={new Map(frame.data.rows.map((_, r) => [`${r}:1`, `edited-${r}`]))} />); }
 function dialog(label = "导出查询结果"): HTMLElement {
   const node = host.querySelector<HTMLElement>(`[role="dialog"][aria-label="${label}"]`); expect(node).not.toBeNull(); return node!;
 }
@@ -78,6 +78,13 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
 describe("复制与导出独立快照", () => {
+  it("单格复制仅读取选中行，保留 NULL 草稿", async () => {
+    frame.selection = { anchor: { r: 0, c: 0 }, end: { r: 0, c: 0 } };
+    Object.defineProperty(frame.data.rows, 1, { get: () => { throw new Error("unselected row read"); } });
+    act(() => root.render(<ResultTransfer frame={frame} edits={new Map([["0:0", null]])} />));
+    await click("复制选区 1 行 × 1 列");
+    expect(mocks.copy.mock.calls[0][0].rows[0][0]).toBeNull();
+  });
   it.each([true, false])("快捷复制显示真实行列数，换格式保留范围（选区：%s）", async selected => {
     if (!selected) { frame.selection = null; frame.order = [1]; frame.visible = [2, 0]; act(render); }
     const rows = selected ? 2 : 1, label = selected ? "复制选区" : "复制当前结果";

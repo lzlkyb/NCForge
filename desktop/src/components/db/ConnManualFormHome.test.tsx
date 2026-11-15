@@ -11,6 +11,7 @@ vi.mock("../../lib/server", () => ({ ncHomeProbe: () => probe() }));
 // 测试连接的结果由用例决定（need-nc-home 拒绝 / 成功）
 const testConn = vi.fn();
 const saveConn = vi.fn();
+const connect = vi.fn();
 vi.mock("../../lib/dbApi", () => ({
   dbApi: { test: (...a: unknown[]) => testConn(...a), save: (...a: unknown[]) => saveConn(...a) },
   ENVS: ["dev", "test", "prod", "other"],
@@ -23,6 +24,7 @@ vi.mock("../../lib/operations", () => ({ beginOperation: () => ({ finish: vi.fn(
 vi.mock("../../lib/dbOperations", () => ({ dbTaskSpec: () => ({}) }));
 vi.mock("../../lib/dbStore", () => ({
   closeConnDialog: vi.fn(),
+  connect: (...args: unknown[]) => connect(...args),
   disconnect: vi.fn(),
   loadConns: vi.fn(),
   rtOf: () => ({ status: "idle" }),
@@ -50,6 +52,7 @@ beforeEach(() => {
   probe.mockResolvedValue({ root: null });
   testConn.mockReset();
   saveConn.mockReset();
+  connect.mockReset();
 });
 
 afterEach(() => {
@@ -78,6 +81,8 @@ const groupByLabel = (name: string) =>
 const engineButtons = () => groupByLabel("引擎")!.querySelectorAll<HTMLButtonElement>("button");
 
 /** React 受控输入：必须走原生 setter 派发 input 事件，直接改 value 不触发 onChange。 */
+const button = (text: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === text)!;
+const useUrl = () => act(() => button("使用连接串").click());
 const setField = (labelText: string, value: string) => {
   const label = [...host.querySelectorAll<HTMLLabelElement>("label[for]")].find((l) => l.textContent === labelText);
   expect(label, `找不到标签「${labelText}」`).toBeTruthy();
@@ -128,14 +133,16 @@ describe("数据库连接表单：没有 NC home 也能用", () => {
     testConn.mockRejectedValue("need-nc-home|JVM 桥需要 NC 安装目录：它用 NC 自带的 Java 1.8 与 Oracle 驱动");
     await render();
     act(() => engineButtons()[1].click());
+    useUrl();
     setField("JDBC URL", "jdbc:oracle:thin:@10.0.0.1:1521/orcl");
-    setField("用户", "nc");
+    setField("用户名", "nc");
 
     const testBtn = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.includes("测试连接"))!;
     await act(async () => { testBtn.click(); });
 
     const bad = host.querySelector<HTMLElement>(".dbx-badline");
-    expect(bad?.textContent).toContain("JVM 桥需要 NC 安装目录");
+    expect(bad?.textContent).toContain("JVM 桥需要 Java");
+    expect(bad?.querySelector("details")?.textContent).toContain("JVM 桥需要 NC 安装目录");
     const quick = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "换成纯 Rust 驱动");
     expect(quick, "红条里要有一键换引擎的按钮").toBeTruthy();
 
@@ -148,11 +155,12 @@ describe("数据库连接表单：没有 NC home 也能用", () => {
   });
 
   it("保存新连接时默认带上纯 Rust 驱动（不依赖 NC home）", async () => {
-    saveConn.mockResolvedValue(undefined);
+    saveConn.mockResolvedValue({ id: "new", hasPassword: false });
     await render();
+    useUrl();
     setField("JDBC URL", "jdbc:oracle:thin:@10.0.0.1:1521/orcl");
-    setField("用户", "nc");
-    const addBtn = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "添加")!;
+    setField("用户名", "nc");
+    const addBtn = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "仅保存")!;
     await act(async () => { addBtn.click(); });
     expect(saveConn).toHaveBeenCalledTimes(1);
     expect(saveConn.mock.calls[0][0].engine).toBe("rust");
@@ -163,10 +171,40 @@ it("ignores a test reply after the connection fields change", async () => {
   let done!: (value: unknown) => void;
   testConn.mockImplementation(() => new Promise(resolve => { done = resolve; }));
   await render();
-  setField("JDBC URL", "jdbc:oracle:thin:@old:1521/orcl"); setField("用户", "nc");
+  useUrl();
+  setField("JDBC URL", "jdbc:oracle:thin:@old:1521/orcl"); setField("用户名", "nc");
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "测试连接")!.click());
   setField("JDBC URL", "jdbc:oracle:thin:@new:1521/orcl");
   expect([...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "测试中…")?.disabled).toBe(true);
   await act(async () => done({ product: "Oracle", version: "11g", ms: 1, tables: 1 }));
   expect(host.querySelector(".dbx-okline")).toBeNull();
+});
+
+it("失败后保留草稿，重试更新原连接并使用本次密码", async () => {
+  saveConn.mockResolvedValue({ id: "saved", hasPassword: false });
+  connect.mockImplementationOnce((_id, _password, _remember, report) => {
+    report("auth|ORA-01017");
+    return Promise.resolve("need-password");
+  }).mockResolvedValueOnce("ok");
+  await render();
+  setField("主机", "db.example.com");
+  setField("服务名", "test");
+  setField("用户名", "tester");
+  setField("密码", "old");
+  await act(async () => button("保存并连接").click());
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("配置已保存，连接未建立");
+  expect(saveConn.mock.calls[0][0].id).toBeNull();
+  expect(saveConn.mock.calls[0][1]).toBeUndefined();
+  setField("密码", "corrected");
+  await act(async () => button("保存并连接").click());
+  expect(saveConn.mock.calls[1][0].id).toBe("saved");
+  expect(connect.mock.calls[1].slice(0, 3)).toEqual(["saved", "corrected", true]);
+});
+
+it("没有主机时直接提示并聚焦字段", async () => {
+  await render();
+  await act(async () => button("保存并连接").click());
+  expect(document.activeElement?.getAttribute("aria-invalid")).toBe("true");
+  expect(host.textContent).toContain("请输入主机地址");
+  expect(saveConn).not.toHaveBeenCalled();
 });

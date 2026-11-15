@@ -19,9 +19,11 @@ import { clearEditsForTab, pendingEdits, pendingForTab, resultEditKey, useEditRe
 import { pendingResults, resultPairOf } from "../../lib/dbResultLayout";
 import { guessTable } from "../../lib/resultExport";
 import { statementTitle } from "../../lib/sqlStatementTitle";
+import type { SqlQuickFix } from "../../lib/sqlQuickFix";
+type FixActions = { find: (entry: ResultEntry) => Promise<SqlQuickFix[]>; apply: (entry: ResultEntry, fix: SqlQuickFix) => void };
 
 /** SQL 控制台下半：每条语句一个结果标签 + 执行计划 + 输出。 */
-export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: number; onLocate?:(line:number)=>void }) {
+export function ResultPanel({ tab, height, onLocate, fixes }: { tab: SqlTab; height: number; onLocate?:(line:number)=>void; fixes?: FixActions }) {
   const [motionHost, setMotionHost] = useState<HTMLDivElement | null>(null);
   /** 看过的结果视图保活：切标签回来时本地筛选、排序、滚动与单元格选择都还在。 */
   const [kept, setKept] = useState<string[]>([]);
@@ -122,7 +124,7 @@ export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: nu
       </section>)}
       {tab.results.filter(r => r.kind !== "rows" && visible.includes(r.id)).map(r => <section key={r.id} className="dbx-result-keep" style={{ order: visible.indexOf(r.id) }} aria-label={`语句 ${r.index} 结果`}>
         {paneHeading(r)}
-        <EntryView tab={tab} entry={r} tables={tables} onLocate={onLocate} />
+        <EntryView tab={tab} entry={r} tables={tables} onLocate={onLocate} fixes={fixes} />
       </section>)}
       {view === "plan" && tab.plan ? (
         <PlanView plan={tab.plan} connId={tab.connId} />
@@ -139,11 +141,13 @@ export function ResultPanel({ tab, height, onLocate }: { tab: SqlTab; height: nu
  * 非表格结果（写语句 / 空结果）。提交状态交给 `txStateText`：按会话的提交纪元说
  * 「这条语句现在到底提交了没有」，提交之后不再继续挂着「尚未提交」。
  */
-function EntryView({ tab, entry, tables, onLocate }: { tab: SqlTab; entry: ResultEntry; tables: string[]; onLocate?:(line:number)=>void }) {
+function EntryView({ tab, entry, tables, onLocate, fixes }: { tab: SqlTab; entry: ResultEntry; tables: string[]; onLocate?:(line:number)=>void; fixes?: FixActions }) {
   const epoch = useTxEpoch(tab.connId, tab.slot);
   // 取消执行也要把错误码、相似表建议和「重新连接」入口留在页面上；
   // 只在摘要上标注「已停止」，不能整个吞掉 DbErrorBox（P1-3）。
   if (entry.kind === "error") return <div style={{ overflow: "auto" }}><DbErrorBox error={entry.error ?? ""} errorCode={entry.errorCode} sql={entry.sql} knownTables={tables} connId={tab.connId} tabId={tab.id} slot={tab.slot} cancelled={entry.cancelled}
+    onFixes={fixes && entry.context?.target?.editorSql !== undefined ? () => fixes.find(entry) : undefined}
+    onApply={fixes ? fix => fixes.apply(entry, fix) : undefined}
     // 传进来的是**语句内**行号；编辑器要的是整个脚本的行号，按语句首行换算。
     onLocate={(line) => { const base = entry.startLine ?? 1; onLocate?.(line == null ? base : base - 1 + line); }}
     index={tab.results.length > 1 ? entry.index : undefined} /></div>;
