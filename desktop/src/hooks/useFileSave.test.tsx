@@ -16,7 +16,7 @@ vi.mock("../components/ui/toast",()=>({toast:h.toast}));
 vi.mock("../lib/workspace",()=>({readFile:h.readFile,baseName:(p:string)=>p.split("\\").pop(),countLines:()=>1,cleanError:String,isConflictError:()=>false,isUnencodableError:()=>false}));
 (globalThis as unknown as {IS_REACT_ACT_ENVIRONMENT:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
 const path="C:\\w\\A.java";
-const tab={path,name:"A.java",encoding:"UTF-8",hasBom:false,eol:"LF",mtimeMs:1,dirty:true,eolChanged:false,readOnly:false,readOnlyReason:null,lines:1} as TabMeta;
+const tab={path,name:"A.java",encoding:"UTF-8",hasBom:false,eol:"LF",mtimeMs:1,dirty:true,eolChanged:false,readOnly:false,readOnlyReason:null,lines:1,bytes:32} as TabMeta;
 const content={text:"disk",lossless:true,encoding:"UTF-8",hasBom:false,eol:"LF",mtimeMs:5,lines:1,readOnly:false,readOnlyReason:null};
 const deferred=<T,>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(yes=>{resolve=yes;});return {promise,resolve};};
 let api:ReturnType<typeof useFileSave>,root:Root,host:HTMLDivElement;

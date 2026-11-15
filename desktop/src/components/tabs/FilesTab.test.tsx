@@ -227,6 +227,7 @@ describe("文件页", () => {
           readOnly: true,
           readOnlyReason: "mixed",
           lines: 10,
+          bytes: 320,
         },
       ],
       activePath: `${ROOT}\\modules\\ic\\A.java`,

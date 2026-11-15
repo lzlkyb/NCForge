@@ -34,6 +34,7 @@ const tab = (path: string, dirty = false): TabMeta => ({
   readOnly: false,
   readOnlyReason: null,
   lines: 1,
+  bytes: 32,
   preview: false,
 });
 

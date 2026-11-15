@@ -16,7 +16,7 @@ vi.mock("./EditorTabTypeIcon", () => ({ EditorTabTypeIcon: () => <svg /> }));
 let host: HTMLDivElement, root: Root;
 const symbol: FlatSymbol = { name: "doAction", kind: 6, container: "Actions", line: 8, column: 3, startLine: 8, endLine: 12, depth: 1 };
 const active: TabMeta = { path: "C:/w/src/Actions.java", name: "Actions.java", dirty: false, mtimeMs: 1,
-  encoding: "UTF-8", hasBom: false, eol: "LF", eolChanged: false, readOnly: false, readOnlyReason: null, lines: 20 };
+  encoding: "UTF-8", hasBom: false, eol: "LF", eolChanged: false, readOnly: false, readOnlyReason: null, lines: 20, bytes: 640 };
 beforeEach(() => {
   h.local.mockReset().mockReturnValue([symbol]); h.symbols.mockReset().mockResolvedValue([symbol]); h.navigate.mockClear();
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);

@@ -23,6 +23,7 @@ function tab(path: string): TabMeta {
     readOnly: false,
     readOnlyReason: null,
     lines: 1,
+    bytes: 32,
   };
 }
 

@@ -14,7 +14,7 @@ const session = { selectTab: vi.fn(), openSplit: vi.fn(), closeSplit: vi.fn() };
 beforeEach(() => {
   session.selectTab.mockClear();
   setSession({ tabs: [a, b].map((path): TabMeta => ({ path, name: path.split('/').pop() ?? path, dirty: true,
-    encoding: "UTF-8", hasBom: false, eol: "LF", mtimeMs: 1, eolChanged: false, readOnly: false, readOnlyReason: null, lines: 1 })),
+    encoding: "UTF-8", hasBom: false, eol: "LF", mtimeMs: 1, eolChanged: false, readOnly: false, readOnlyReason: null, lines: 1, bytes: 32 })),
     editorGroups: { ...emptyEditorGroups(), left: [a], leftActive: a, right: [b], rightActive: b } });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   act(() => root.render(<EditorGroupTools root="C:/w" session={session} compiling={false} canCompile onCompile={vi.fn()} />));

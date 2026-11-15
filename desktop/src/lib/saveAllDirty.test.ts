@@ -44,6 +44,7 @@ const tab = (path: string, over: Partial<TabMeta> = {}): TabMeta => ({
   readOnly: false,
   readOnlyReason: null,
   lines: 10,
+  bytes: 320,
   ...over,
 });
 

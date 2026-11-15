@@ -69,6 +69,17 @@ describe("editorPrefs", () => {
     expect(String(o.fontFamily)).toContain("monospace");
   });
 
+  it("大文件只关「输入即弹」的补全，不关 . 触发与手动补全", () => {
+    const heavy = monacoOptionsOf(DEFAULT_PREFS, true, true);
+    const normal = monacoOptionsOf(DEFAULT_PREFS, false, true);
+    expect(heavy.quickSuggestions).toBe(false);
+    expect(normal.quickSuggestions).toBe(true);
+    // `.` 触发与 Ctrl+Space 是 Java 最常用的补全入口，降级不能把它们带走
+    expect(heavy).not.toHaveProperty("suggestOnTriggerCharacters");
+    // 其余大文件降级项保持原样
+    expect(heavy).toMatchObject({ folding: false, bracketPairColorization: { enabled: false } });
+  });
+
   it("写入失败返回 false，保持本次生效，并允许重试同一个值", () => {
     const write = vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => { throw new Error("quota"); });
     expect(setEditorPrefs({ fontSize: 19 })).toBe(false);

@@ -13,7 +13,7 @@ it("deduplicates sources, keeps same-line columns distinct, and marks stale buil
   expect(merged.map(p => p.column)).toEqual([5, 12]);
   expect(merged[0]).toMatchObject({ severity: "error", alsoInspected: true });
   const tabs: TabMeta[] = [{ path: file, name: "A.java", dirty: true, encoding: "UTF-8", eol: "LF",
-    hasBom: false, eolChanged: false, lines: 20, mtimeMs: 2, readOnly: false, readOnlyReason: null }];
+    hasBom: false, eolChanged: false, lines: 20, bytes: 640, mtimeMs: 2, readOnly: false, readOnlyReason: null }];
   const { paths } = buildProblemMarks(merged, "C:/w", null, tabs);
   expect(paths.get("c:/w/mod")).toEqual({ errors: 2, warnings: 0, live: 2, compiled: 1, stale: true });
 });

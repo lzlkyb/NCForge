@@ -90,7 +90,7 @@ describe("ProblemsView 筛选与分组", () => {
   });
   it("saved disk changes remain visibly stale against the captured build version", async () => {
     const path = "D:/p/gl/A.java";
-    setSession({ tabs: [{ path, name: "A.java", encoding: "UTF-8", hasBom: false, eol: "LF", mtimeMs: 20, dirty: false, eolChanged: false, readOnly: false, readOnlyReason: null, lines: 2 }] });
+    setSession({ tabs: [{ path, name: "A.java", encoding: "UTF-8", hasBom: false, eol: "LF", mtimeMs: 20, dirty: false, eolChanged: false, readOnly: false, readOnlyReason: null, lines: 2, bytes: 64 }] });
     const result: CompileResult = { ok: true, errorCount: 0, warningCount: 0, sourceCount: 1, durationMs: 1, jarCount: 0, rounds: 1, outDir: "classes", problems: [], diagnostics: [], completedAtMs: 123, sourceSnapshots: { "d:/p/gl/a.java": { mtimeMs: 10, atMs: 123 } } };
     await render([], { root: "D:/p", activePath: path, result });
     expect(container.textContent).toContain("1 个文件需核对新版本"); expect(container.textContent).toContain("编译结果");

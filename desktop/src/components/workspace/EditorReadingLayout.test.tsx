@@ -15,7 +15,7 @@ const noop = () => {};
 const navigation = (path: string, virtual = false): EditorNavigation => ({
   active: { path, name: path.split("/").pop() ?? path, dirty: false,
     encoding: "UTF-8", hasBom: false, eol: "LF", mtimeMs: 1, eolChanged: false,
-    readOnly: virtual, readOnlyReason: null, lines: 1, virtual: virtual ? "stub" : undefined } satisfies TabMeta,
+    readOnly: virtual, readOnlyReason: null, lines: 1, bytes: 32, virtual: virtual ? "stub" : undefined } satisfies TabMeta,
   root: "C:/w", canBack: false, canForward: false,
   onBack: noop, onForward: noop, onJumpHistory: noop, outlineOpen: true,
 });

@@ -82,7 +82,7 @@ beforeEach(() => {
       { path: "C:/p2-ws/b.java", line: 8 },
     ]),
   );
-  const tabs = ["a", "b"].map(name => ({ path: `C:/p2-ws/${name}.java`, name: `${name}.java`, encoding: "UTF-8" as const, hasBom: false, eol: "LF" as const, mtimeMs: 1, dirty: false, eolChanged: false, readOnly: false, readOnlyReason: null, lines: 2 }));
+  const tabs = ["a", "b"].map(name => ({ path: `C:/p2-ws/${name}.java`, name: `${name}.java`, encoding: "UTF-8" as const, hasBom: false, eol: "LF" as const, mtimeMs: 1, dirty: false, eolChanged: false, readOnly: false, readOnlyReason: null, lines: 2, bytes: 64 }));
   setSession({ root: "C:/p2-ws", tabs, activePath: "C:/p2-ws/a.java" });
   container = document.createElement("div");
   document.body.appendChild(container);

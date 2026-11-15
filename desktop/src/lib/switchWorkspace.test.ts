@@ -31,6 +31,7 @@ const tab = (path: string) => ({
   readOnly: false,
   readOnlyReason: null,
   lines: 10,
+  bytes: 320,
 });
 
 beforeEach(() => {

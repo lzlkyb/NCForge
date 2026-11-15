@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { addTab, pickClosable, pinTab, tabMetaFromJdt } from "./tabSession";
+import { addTab, pickClosable, pinTab, tabMetaFromDisk, tabMetaFromJdt } from "./tabSession";
+import type { FileContent } from "./workspace";
 import type { TabMeta } from "./workspaceSession";
 
 const tab = (path: string, extra: Partial<TabMeta> = {}): TabMeta =>
@@ -80,5 +81,35 @@ describe("tabMetaFromJdt", () => {
     expect(m.readOnly).toBe(true);
     expect(m.name).toBe("A.java");
     expect(m.path).toBe(uri);
+  });
+
+  it("虚拟文件没有磁盘字节数，用字符数近似", () => {
+    expect(tabMetaFromJdt(uri, source).bytes).toBe(source.length);
+  });
+});
+
+describe("tabMetaFromDisk", () => {
+  const content = (over: Partial<FileContent> = {}): FileContent => ({
+    text: "package p;\npublic class A {}\n",
+    encoding: "UTF-8",
+    hasBom: false,
+    eol: "LF",
+    lossless: true,
+    size: 28,
+    mtimeMs: 1,
+    ...over,
+  });
+
+  it("bytes 取磁盘字节数，不是解码后的字符数", () => {
+    // GBK 下一个汉字占 2 字节：text.length 会比 size 小，大文件判据必须用后者。
+    const m = tabMetaFromDisk("C:/w/A.java", content({ encoding: "GBK", size: 4096 }));
+    expect(m.bytes).toBe(4096);
+    expect(m.lines).toBe(3);
+  });
+
+  it("行少但单行极长的报文 XML 也要能被字节线抓住", () => {
+    const m = tabMetaFromDisk("C:/w/msg.xml", content({ text: "<a/>", size: 3 * 1024 * 1024 }));
+    expect(m.lines).toBe(1);
+    expect(m.bytes).toBe(3 * 1024 * 1024);
   });
 });

@@ -14,7 +14,7 @@ vi.mock("./StatusContributions", () => ({ StatusContributions: () => null }));
 vi.mock("../ui/OperationStatus", () => ({ OperationStatus: () => null }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement, root: Root;
-const active: TabMeta = { path: "D:/工程/Current.java", name: "Current.java", dirty: true, readOnly: false, readOnlyReason: null, encoding: "GBK", eol: "CRLF", eolChanged: false, hasBom: false, lines: 100, mtimeMs: 1 };
+const active: TabMeta = { path: "D:/工程/Current.java", name: "Current.java", dirty: true, readOnly: false, readOnlyReason: null, encoding: "GBK", eol: "CRLF", eolChanged: false, hasBom: false, lines: 100, bytes: 4096, mtimeMs: 1 };
 beforeEach(() => { host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 describe("当前文件状态菜单", () => {
