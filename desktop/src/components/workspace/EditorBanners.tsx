@@ -91,8 +91,8 @@ export function EditorBanners({
         </div>
       )}
       {active?.virtual && (
-        <ReadingNotice summary={active.virtual === "source" ? "依赖库源码 · 只读" : active.virtual === "decompiled" ? "反编译源码 · 只读" : "类方法签名 · 只读"}
-          detail={active.virtual === "source" ? "NC 标准库 jar 已附带源码，可阅读和导航。" : active.virtual === "decompiled" ? "这个类没有配套源码（_src.jar），显示 CFR 的近似实现；局部变量名可能丢失，语法糖可能展开，与原始源码不逐字一致。" : "这个类没有配套源码，反编译也未成功；当前仅显示方法签名。"}>
+        <ReadingNotice summary={active.virtual === "resource" ? "库文件内容 · 只读" : active.virtual === "source" ? "依赖库源码 · 只读" : active.virtual === "decompiled" ? "反编译源码 · 只读" : "类方法签名 · 只读"}
+          detail={active.virtual === "resource" ? "显示 JAR 或扩展目录内的原始文本，来源见当前标签的文件路径。" : active.virtual === "source" ? active.sourceOrigin ? `正在阅读源码附件：${active.sourceOrigin}` : "依赖库已附带源码，可阅读和导航。" : active.virtual === "decompiled" ? "这个类没有匹配的源码附件，显示 CFR 的近似实现；局部变量名可能丢失，语法糖可能展开，与原始源码不逐字一致。" : "这个类没有配套源码，反编译也未成功；当前仅显示方法签名。"}>
           {active.virtual === "stub" && missingResourceId(active.decompileError) === "cfr" && <div className="wb-banner-actions"><ResourceDownloadButton id="cfr" /><span>下载完成后再次打开这个类即可重试</span></div>}
         </ReadingNotice>
       )}

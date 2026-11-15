@@ -6,6 +6,7 @@ import { AppearanceSettings } from "./AppearanceSettings";
 import { applyAppearance, getAppearance } from "../../lib/appearance";
 import { applyUiDensity, getUiDensity } from "../../lib/uiDensity";
 import { applyTheme, toggleTheme } from "../../lib/theme";
+import { getMotionPreference } from "../../lib/motionPreference";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
@@ -15,6 +16,7 @@ const radio = (text: string) =>
 
 beforeEach(() => {
   localStorage.clear();
+  delete document.documentElement.dataset.motion;
   document.documentElement.classList.remove("dark");
   Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn(() => ({
     matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn(),
@@ -32,6 +34,27 @@ afterEach(async () => {
 });
 
 describe("界面材质设置", () => {
+  it("动效选项立即生效，恢复默认外观时回到跟随系统", async () => {
+    await act(async () => root.render(<AppearanceSettings />));
+    await act(async () => radio("减少动效").click());
+    expect(getMotionPreference()).toBe("reduce");
+    expect(radio("减少动效").getAttribute("aria-checked")).toBe("true");
+    const reset = [...container.querySelectorAll("button")].find(button => button.textContent === "恢复默认外观")!;
+    await act(async () => reset.click());
+    expect(getMotionPreference()).toBe("system");
+    expect(radio("跟随系统").getAttribute("aria-checked")).toBe("true");
+  });
+  it("动效偏好保存失败时保留本次选择并提供重试", async () => {
+    await act(async () => root.render(<AppearanceSettings />));
+    const storage = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
+    await act(async () => radio("减少动效").click());
+    expect(getMotionPreference()).toBe("reduce");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("本次会话生效");
+    storage.mockRestore();
+    const retry = [...container.querySelectorAll("button")].find(button => button.textContent === "重试保存")!;
+    await act(async () => retry.click());
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
   it("标题栏成功切换后清除旧保存失败提示；再次失败仍明确告知", async () => {
     applyTheme("light");
     await act(async () => root.render(<AppearanceSettings />));

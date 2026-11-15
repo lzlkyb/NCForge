@@ -40,12 +40,8 @@ const renderHeader = () =>
     root.render(
       <TreeHeader
         root={"C:\\w\\newar"}
-        recents={[]}
-        onOpen={noop}
-        onOpenRecent={noop}
         onCreateFile={noop}
         onCreateDir={noop}
-        onSearch={noop}
       />,
     ),
   );

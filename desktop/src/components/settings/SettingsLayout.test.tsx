@@ -51,6 +51,35 @@ const visiblePage = () => container.querySelector<HTMLElement>(".wb-settings-pag
 const results = () => [...container.querySelectorAll<HTMLButtonElement>(".wb-settings-result")];
 
 describe("设置中心搜索与导航", () => {
+  it("滚轮按显示顺序切换分类，保留侧栏和各页正文滚动位置", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+    setSideOpen(true);
+    await render();
+    const menu = container.querySelector<HTMLElement>(".wb-settings-menu")!;
+    const body = container.querySelector<HTMLElement>(".wb-settings-body")!;
+    const scroll = async (target: HTMLElement, options: WheelEventInit) => {
+      const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, ...options });
+      await act(async () => target.dispatchEvent(event));
+      return event.defaultPrevented;
+    };
+    body.scrollTop = 120;
+    expect(await scroll(body, { deltaY: 120 })).toBe(false);
+    expect(await scroll(menu, { deltaY: 120, ctrlKey: true })).toBe(false);
+    expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
+    expect(await scroll(menu, { deltaY: 20 })).toBe(true);
+    expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
+    await scroll(menu, { deltaY: 20 });
+    expect(visiblePage()?.dataset.settingsSection).toBe("编辑器");
+    await scroll(menu, { deltaY: 1, deltaMode: 1 });
+    await scroll(menu, { deltaY: 120 });
+    expect(visiblePage()?.dataset.settingsSection).toBe("关于");
+    expect(menu.querySelector("[aria-current=page]")?.textContent).toBe("关于");
+    await scroll(menu, { deltaY: -120 });
+    await scroll(menu, { deltaY: -120 });
+    expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
+    expect(body.scrollTop).toBe(120);
+    expect(getSideOpen()).toBe(true);
+  });
   it("首次挂载前的旧分类请求按稳定设置 ID 定位新分类", async () => {
     requestSettingItem("外观", "font");
     await render();

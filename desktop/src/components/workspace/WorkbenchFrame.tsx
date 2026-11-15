@@ -10,7 +10,6 @@ import { useWorkbenchGeometry } from "../../hooks/useWorkbenchGeometry";
 import { updateWorkbenchLayout } from "../../lib/workbenchLayout";
 import { DebugInspectorDock } from "./DebugInspectorDock";
 import { useWorkbenchAutoLayout } from "../../hooks/useWorkbenchAutoLayout";
-import { useSidebarView } from "../../lib/sidebarView";
 import { PAGES } from "../../lib/pages";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { BP_SM } from "../../lib/layoutBreakpoints";
@@ -43,29 +42,41 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
 }) {
   const [hosts, setHosts] = useState<Record<DockRegionName, HTMLElement | null>>({ toolbar: null, sidebar: null, document: null, bottom: null, actions: null, doctabs: null });
   const [fileHosts, setFileHosts] = useState<Record<FileSlotName, HTMLElement | null>>({ tree: null, context: null, tabs: null, editor: null, status: null, output: null });
-  /** 用户手动切代码/文档面的显式覆盖；null = 按 activeTool 派生默认值。 */
-  const [docOverride, setDocOverride] = useState<boolean | null>(null);
+  /**
+   * 用户手动切代码/文档面的显式覆盖。**把归属工具一起存**：`null` = 按 activeTool 派生。
+   *
+   * 以前只存一个 boolean，切页时靠渲染期间 `if (lastTool.current !== activeTool) setDocOverride(null)`
+   * 清掉。那个写法在 View Transition / transition 里 render 被中断时，这次 setState 可能
+   * 连同那次 render 一起丢掉，于是 override 残留在新页面：代码页被 `hidden`、文档面又
+   * 没有工具可画，主区一片白。绑定工具后不需要再「清」，换了页面它自己就失效。
+   */
+  const [docOverride, setDocOverride] = useState<{ tool: string; open: boolean } | null>(null);
+  const toolRef = useRef(activeTool);
+  toolRef.current = activeTool;
   const sideOpen = useSideOpen();
-  const pageRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement | null>(null);
   // 控制台正常停靠留足日志正文；展开不改写用户保存的停靠高度。
   const panelOpen = useWorkspaceSelector((s) => s.panelOpen);
   const panelTab = useWorkspaceSelector((s) => s.panelTab);
   const legacyExpanded = useWorkspaceSelector(s => !!s.serviceExpanded);
-  const sidebarView = useSidebarView();
-  const { layout, sideWidth, bottomHeight, bottomMax, resize, onSeparatorKey } = useWorkbenchGeometry(panelTab, activeTool === "files" && sidebarView === "search" ? "search" : activeTool);
+  const { layout, sideWidth, bottomHeight, bottomMax, resize, onSeparatorKey } = useWorkbenchGeometry(panelTab, activeTool);
   const panelExpanded = activeTool === "files" && panelOpen && (layout.expanded === panelTab || legacyExpanded && panelTab === "svc");
   useWorkbenchAutoLayout(activeTool === "files");
   // 每个宿主一个稳定的 ref 回调：回调身份变了 React 会先 null 再重填，宿主里的工具内容就闪一下
   const refs = useMemo(() => Object.fromEntries(HOST_NAMES.map(name => [name, (node: HTMLElement | null) => setHosts(old => old[name] === node ? old : { ...old, [name]: node })])) as Record<DockRegionName, (node: HTMLElement | null) => void>, []);
   const fileRefs = useMemo(() => Object.fromEntries(FILE_SLOTS.map(name => [name, (node: HTMLElement | null) => setFileHosts(old => old[name] === node ? old : { ...old, [name]: node })])) as Record<FileSlotName, (node: HTMLElement | null) => void>, []);
-  const lastTool = useRef(activeTool);
-  // 切页时同步清掉上一工具的覆盖：派生值保证首帧就正确，不再等 effect 里
-  // setState（View Transition 会先拍一帧，旧实现会闪一下代码面）。
-  if (lastTool.current !== activeTool) {
-    lastTool.current = activeTool;
-    if (docOverride !== null) setDocOverride(null);
-  }
-  const documentOpen = docOverride ?? DOCUMENT_DEFAULT_OPEN.includes(activeTool);
+  /**
+   * 当前工具到底有没有「文档面」可显示。
+   *
+   * 代码页（files）没有：它的内容是代码面里的编辑器。所以 `documentOpen` 必须再与它
+   * 求与——否则 `docOverride` 一旦被置 true（状态栏的数据库会话项、命令面板里开补丁
+   * 的入口都会经 `showWorkbenchDocument()` 置它），代码面被 `hidden` 藏掉、文档面又
+   * 没有任何工具可画，主区就是一片白，而且用户在代码页里没有任何入口能退出来。
+   */
+  const hasDocumentTool = activeTool in DOCUMENT_TOOLS;
+  // 只认当前工具自己的那次覆盖；换了页面旧的自动作废，不依赖渲染期 setState 去清。
+  const overrideHere = docOverride !== null && docOverride.tool === activeTool ? docOverride.open : null;
+  const documentOpen = (overrideHere ?? DOCUMENT_DEFAULT_OPEN.includes(activeTool)) && hasDocumentTool;
   // 只跟着工具切换重置副作用；底部面板换标签不该把用户刚切回代码的视图顶走。
   const effectTool = useRef(activeTool);
   useEffect(() => {
@@ -75,8 +86,8 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
     setSession({ serviceExpanded: false });
     updateWorkbenchLayout({ expanded: null });
   }, [activeTool]);
-  const showCode = useCallback(() => setDocOverride(false), []);
-  const showDocument = useCallback(() => setDocOverride(true), []);
+  const showCode = useCallback(() => setDocOverride({ tool: toolRef.current, open: false }), []);
+  const showDocument = useCallback(() => setDocOverride({ tool: toolRef.current, open: true }), []);
   // 必须包 useMemo：`logs` 分支里有内联 onClose，每次渲染都是新对象，
   // 会让下面 `dock` 的 useMemo 依赖整体失效（每次渲染都重建宿主导航绑定）
   const toolTab = useMemo(
@@ -85,7 +96,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
         ? {
             ...DOCUMENT_TOOLS.logs,
             onClose: () => {
-              setDocOverride(false);
+              showCode();
               returnFromLogs();
               requestAnimationFrame(() =>
                 document
@@ -97,7 +108,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
             },
           }
         : DOCUMENT_TOOLS[activeTool] ?? null,
-    [activeTool],
+    [activeTool, showCode],
   );
   const dock = useMemo(() => ({ hosts, fileHosts, bindHost: (name: DockRegionName) => refs[name], bindFileSlot: (name: FileSlotName) => fileRefs[name], showDocument, showCode, documentOpen, panelExpanded, toolTab }), [hosts, fileHosts, refs, fileRefs, showDocument, showCode, documentOpen, panelExpanded, toolTab]);
   const hasSide = SIDE_TOOLS.includes(activeTool);
@@ -128,7 +139,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
     <ShowDocumentBridge show={showDocument} />
     <WorkspacePageMotion page={activeTool} target={pageRef} />
     <div className="wb-root" data-tool={activeTool}>
-      <div ref={pageRef} className="wb-content-frame" data-page-panel>
+      <div className="wb-content-frame">
       <header className="wb-toolbar" hidden={!hasToolbar}>
         <div ref={refs.toolbar} className="wb-toolbar-host" />
         <div ref={refs.actions} className="wb-toolbar-actions" />
@@ -136,9 +147,11 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
       <div className="wb-layout" data-side-open={sideShown} style={{ gridTemplateColumns: sideShown ? `${sideWidth}px 4px minmax(0,1fr)` : "0px 0px minmax(0,1fr)" }}>
         {/* 收起时不能用 hidden：display:none 的 aside 不占网格格子，后面的分隔条与主区会各前进一格，主区落进 0px 那一列 */}
         <button type="button" className="wb-side-backdrop" aria-label="收起侧栏" tabIndex={-1} hidden={!sideShown} onClick={closeSide} />
-        <aside ref={sideRef} className="wb-tree" data-closed={!sideShown || undefined} aria-label={sideLabel}>
+        <aside ref={sideRef} className="wb-tree" data-closed={!sideShown || undefined} aria-label={sideLabel} style={narrow ? undefined : { width: sideWidth }}>
           <div className="wb-tree-heading"><span>{sideLabel}</span><button type="button" className="wb-tree-close" aria-label={`关闭${sideLabel}`} onClick={closeSide}><Icon name="close" size={16} /></button></div>
-          <div ref={fileRefs.tree} className="wb-tree-native" hidden={hasSide}>{tree}</div>
+          {/* Keep the retained tree at its own width even while another tool owns this sidebar. */}
+          <div ref={fileRefs.tree} className="wb-tree-native" data-inactive={hasSide || !sideShown || undefined} aria-hidden={hasSide || !sideShown || undefined}
+            style={narrow ? undefined : { width: layout.sides.files ?? layout.side }}>{tree}</div>
           <div ref={refs.sidebar} className="wb-sidebar-host" hidden={!hasSide} />
         </aside>
         <div className="wb-resize-x" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical"
@@ -148,7 +161,7 @@ export function WorkbenchFrame({ activeTool, tool, tree, tabs, editor, output, s
             e.preventDefault();
             resize("side", e.clientX, sideWidth, { id: e.pointerId, element: e.currentTarget });
           }} onKeyDown={e => onSeparatorKey(e, "side")} />
-        <div className="wb-main-with-inspector" ref={node => { if (node) node.inert = drawerOpen; }}>
+        <div className="wb-main-with-inspector" ref={node => { pageRef.current = node; if (node) node.inert = drawerOpen; }}>
         <section className="wb-main" data-service-mode={panelOpen && panelTab === "svc" || undefined} data-service-expanded={panelExpanded || undefined} data-panel-expanded={panelExpanded || undefined}>
           {/* 代码面自带文件标签条：切到工具页时整块 hidden，文件标签就不可能和
               文档面的工具标签同屏（以前两者挤在顶层 `wb-tabbar` 的同一条 flex 行里）。

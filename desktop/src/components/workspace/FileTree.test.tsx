@@ -172,6 +172,24 @@ afterEach(async () => {
   container.remove();
 });
 
+it("大目录分批保留完整键盘顺序，末行仍可定位并进入重命名", async () => {
+  const files = Array.from({ length: 240 }, (_, i) => ({ name: `File${String(i).padStart(3, "0")}.txt`, isDir: false, size: 10 }));
+  setSession({ tree: { root: ROOT, expanded: new Set([ROOT]), marks: {}, dirs: { [ROOT]: { status: "ok", items: files } } } });
+  await render();
+  const list = container.querySelector<HTMLElement>('[role="tree"]')!;
+  expect(list.querySelectorAll('[role="treeitem"]')).toHaveLength(240);
+  await act(async () => list.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true })));
+  const last = rowByExact("File239.txt")!;
+  expect(last.getAttribute("aria-selected")).toBe("true");
+  expect(list.getAttribute("aria-activedescendant")).toBe(last.id);
+  await act(async () => list.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true })));
+  const input = list.querySelector<HTMLInputElement>('input')!;
+  expect(input).not.toBeNull();
+  expect(input.value).toBe("File239.txt");
+  await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(list.querySelectorAll('[role="treeitem"]')).toHaveLength(240);
+});
+
 it("只看改动保留父目录，退出后恢复展开状态和滚动位置", async () => {
   const name = "changed.txt";
   const invoke = mocks.invoke.getMockImplementation()!;

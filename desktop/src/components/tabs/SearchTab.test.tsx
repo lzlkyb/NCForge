@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SearchTab } from "./SearchTab";
 import { setSession } from "../../lib/workspaceSession";
-import { setSidebarView } from "../../lib/sidebarView";
+import { closePalette, openPalette } from "../../lib/paletteStore";
 import { resetSearchForm, setSearchForm } from "../../lib/searchStore";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -102,7 +102,7 @@ afterEach(async () => {
   container.remove();
   // 会话仓库是模块级的：本文件里写过的 root 要还回去，否则同文件后续用例走不到兜底分支
   setSession({ root: undefined });
-  setSidebarView("files");
+  closePalette();
 });
 
 describe("搜索页", () => {
@@ -141,7 +141,7 @@ describe("搜索页", () => {
     const missingRange = { path: "A.java", line: 42, text: `${"x".repeat(300)}…`, ranges: [] };
     mocks.invoke.mockImplementation(async (cmd: string) => {
       if (cmd === "get_workspace") return ROOT;
-      if (cmd === "search_workspace") return { ...ONE_HIT, hits: [missingRange] };
+      if (cmd === "search_workspace_stream") return { ...ONE_HIT, hits: [missingRange] };
       throw new Error(`unexpected command: ${cmd}`);
     });
     await render(); await act(async () => buttonByText("当前工程")!.click());
@@ -183,7 +183,7 @@ describe("搜索页", () => {
     expect(mocks.invoke).not.toHaveBeenCalledWith("search_projects", expect.anything());
 
     await press(input(), "Enter");
-    expect(mocks.invoke).toHaveBeenCalledWith("search_projects", {
+    expect(mocks.invoke).toHaveBeenCalledWith("search_projects", expect.objectContaining({
       options: {
         text: "billSave",
         caseSensitive: false,
@@ -193,9 +193,9 @@ describe("搜索页", () => {
         // 全部工程不接受范围（后端会拒绝 dirs），所以这里必须是空的
         dirs: [],
       },
-    });
+    }));
     // 默认范围不该退化成只搜当前工作区
-    expect(mocks.invoke).not.toHaveBeenCalledWith("search_workspace", expect.anything());
+    expect(mocks.invoke).not.toHaveBeenCalledWith("search_workspace_stream", expect.anything());
 
     // 汇总行 + 工程分段 + 两条命中
     expect(container.textContent).toContain("1 个工程");
@@ -216,7 +216,7 @@ describe("搜索页", () => {
           truncated: false,
           elapsedMs: 620,
         };
-      if (cmd === "search_workspace")
+      if (cmd === "search_workspace_stream")
         return {
           hits: [{ path: "modules/ic/src/A.java", line: 12, text: "其他工程命中", ranges: [] }],
           filesMatched: 1,
@@ -238,7 +238,7 @@ describe("搜索页", () => {
     expect(container.textContent).toContain("输入关键字，回车搜索整个工作区");
 
     await press(input(), "Enter");
-    expect(mocks.invoke).toHaveBeenCalledWith("search_workspace", expect.anything());
+    expect(mocks.invoke).toHaveBeenCalledWith("search_workspace_stream", expect.anything());
     // search_projects 只被第一次搜索调用过
     expect(
       mocks.invoke.mock.calls.filter(([cmd]) => cmd === "search_projects"),
@@ -266,7 +266,7 @@ describe("搜索页", () => {
     const NEW = "D:\\w\\other";
     mocks.invoke.mockImplementation(async (cmd: string) => {
       if (cmd === "get_workspace") return ROOT;
-      if (cmd === "search_workspace") return ONE_HIT;
+      if (cmd === "search_workspace_stream") return ONE_HIT;
       throw new Error(`unexpected command: ${cmd}`);
     });
     await render();
@@ -308,7 +308,7 @@ describe("搜索页", () => {
     mocks.invoke.mockImplementation(async (cmd: string) => {
       if (cmd === "get_workspace") return ROOT;
       if (cmd === "nc_manifest") return MANIFEST;
-      if (cmd === "search_workspace") return { ...ONE_HIT, scopeDirs: ["bill"] };
+      if (cmd === "search_workspace_stream") return { ...ONE_HIT, scopeDirs: ["bill"] };
       throw new Error(`unexpected command: ${cmd}`);
     });
     await render();
@@ -320,7 +320,7 @@ describe("搜索页", () => {
     await press(input(), "Enter");
 
     // 范围是模块目录本身：resources / META-INF 也算组件的一部分（不只是 src/public）
-    expect(mocks.invoke).toHaveBeenCalledWith("search_workspace", {
+    expect(mocks.invoke).toHaveBeenCalledWith("search_workspace_stream", expect.objectContaining({
       options: {
         text: "billSave",
         caseSensitive: false,
@@ -329,7 +329,7 @@ describe("搜索页", () => {
         include: "",
         dirs: ["bill"],
       },
-    });
+    }));
     expect(container.textContent).toContain("A.java");
   });
 
@@ -356,7 +356,7 @@ describe("搜索页", () => {
       if (cmd === "get_workspace") return ROOT;
       if (cmd === "nc_manifest")
         return { components: [{ name: "gone", dispname: "", roots: [] }], notes: [] };
-      if (cmd === "search_workspace")
+      if (cmd === "search_workspace_stream")
         return { ...ONE_HIT, scopeFallback: true, missingDirs: ["gone"], scopeDirs: [] };
       throw new Error(`unexpected command: ${cmd}`);
     });
@@ -408,7 +408,7 @@ describe("搜索内容包提示", () => {
   };
 
   it("建包中显示提示，说明本次搜索仍走磁盘", async () => {
-    setSidebarView("search");
+    openPalette("search");
     mockStatus(true);
     await render();
     const notice = container.querySelector('[data-testid="search-pack-notice"]');
@@ -418,7 +418,7 @@ describe("搜索内容包提示", () => {
   });
 
   it("包就绪后不再显示提示", async () => {
-    setSidebarView("search");
+    openPalette("search");
     mockStatus(false);
     await render();
     expect(container.querySelector('[data-testid="search-pack-notice"]')).toBeNull();

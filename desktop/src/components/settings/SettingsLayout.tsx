@@ -28,6 +28,8 @@ export function SettingsLayout({ sections }: { sections: SettingsSection[] }) {
   const index = useSettingsIndex(pages);
   const body = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
+  const menu = useRef<HTMLDivElement | null>(null);
+  const wheel = useRef({ delta: 0, at: 0 });
   const positions = useRef(new Map<string, number>());
   const lastSearch = useRef({ query: "", scroll: 0 });
   const seen = useRef(0);
@@ -80,12 +82,12 @@ export function SettingsLayout({ sections }: { sections: SettingsSection[] }) {
   }, [flash]);
   useEffect(() => () => clearSettingsRequest(), []);
 
-  const navigate = (section: string, id?: string) => {
+  const navigate = (section: string, id?: string, keepSidebar = false) => {
     if (searching) lastSearch.current = { query, scroll: body.current?.scrollTop ?? 0 };
     if (!searching && body.current) positions.current.set(selected, body.current.scrollTop);
     setSelected(section);
     setQuery("");
-    const narrow = window.matchMedia?.(`(max-width: ${BP_SM}px)`).matches;
+    const narrow = !keepSidebar && window.matchMedia?.(`(max-width: ${BP_SM}px)`).matches;
     // 抽屉退出后不能把焦点留在隐藏分类上；沿用定位逻辑将焦点移到正文。
     const next = id || narrow ? { section, id, nonce: Date.now(), highlight: Boolean(id) } : null;
     // 置空 flash 会取消清理定时器，残留跳转请求必须在这里清掉，否则键位页会按旧请求重新武装采集。
@@ -93,16 +95,44 @@ export function SettingsLayout({ sections }: { sections: SettingsSection[] }) {
     setFlash(next);
     if (narrow) setSideOpen(false);
   };
+  const navigation = useRef({ navigate, selected });
+  navigation.current = { navigate, selected };
+  // 侧栏是常驻节点，挂一次就够；用 ref 而不是 callback-ref + state，省掉一轮渲染和一条依赖。
+  useEffect(() => {
+    const element = menu.current;
+    if (!element) return;
+    const switchCategory = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey || event.shiftKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+      event.preventDefault();
+      // Precision touchpads emit small deltas; combine them into a single category step.
+      const step = wheel.current;
+      const delta = event.deltaY * (event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? 80 : 1);
+      if (event.timeStamp - step.at > 180 || Math.sign(delta) !== Math.sign(step.delta)) step.delta = 0;
+      step.at = event.timeStamp;
+      step.delta += delta;
+      if (Math.abs(step.delta) < 40) return;
+      const direction = Math.sign(step.delta);
+      step.delta = 0;
+      const buttons = [...element.querySelectorAll<HTMLButtonElement>("nav button")];
+      const current = buttons.findIndex(button => button.value === navigation.current.selected);
+      const next = buttons[current + direction];
+      if (!next) return;
+      navigation.current.navigate(next.value, undefined, true);
+      next.scrollIntoView?.({ block: "nearest" });
+    };
+    element.addEventListener("wheel", switchCategory, { passive: false });
+    return () => element.removeEventListener("wheel", switchCategory);
+  }, []);
   const hits = searchSettings(index, query);
   const groups = [...new Set(sections.map((s) => s.group ?? "设置"))];
   const clearSearch = () => { lastSearch.current = { query: "", scroll: 0 }; setQuery(""); search.current?.focus(); };
   return <div className="wb-settings-layout">
     <DockRegion region="sidebar">
-      <div className="wb-settings-menu">
+      <div className="wb-settings-menu" ref={menu}>
         <nav className="wb-settings-nav" aria-label="设置分类">
           {groups.map((group) => <div className="wb-settings-nav-group" key={group}>
             <div className="wb-settings-nav-heading">{group}</div>
-            {sections.filter((s) => (s.group ?? "设置") === group).map((section) => <button key={section.label} type="button" aria-current={!searching && selected === section.label ? "page" : undefined} onClick={() => navigate(section.label)}>{section.label}</button>)}
+            {sections.filter((s) => (s.group ?? "设置") === group).map((section) => <button key={section.label} type="button" value={section.label} aria-current={!searching && selected === section.label ? "page" : undefined} onClick={() => navigate(section.label)}>{section.label}</button>)}
           </div>)}
         </nav>
       </div>

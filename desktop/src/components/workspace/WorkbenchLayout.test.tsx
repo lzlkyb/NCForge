@@ -6,14 +6,14 @@ import { WorkbenchFrame } from "./WorkbenchFrame";
 import { PanelTabs } from "./PanelTabs";
 import { getWorkbenchLayout, restoreWorkbenchLayout, selectWorkbenchLayout, updateWorkbenchLayout } from "../../lib/workbenchLayout";
 import { setSession } from "../../lib/workspaceSession";
-import { setSidebarView } from "../../lib/sidebarView";
+import { closePalette, openPalette } from "../../lib/paletteStore";
 import { getToolReturn, recordToolNavigation, returnFromLogs } from "../../lib/toolReturn";
 
 vi.mock("./DebugInspectorDock", () => ({ DebugInspectorDock: () => null }));
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement, root: Root;
-beforeEach(() => { restoreWorkbenchLayout(); setSidebarView("files"); setSession({ panelOpen: true, panelTab: "problems", serviceExpanded: false }); host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
-afterEach(() => { act(() => root.unmount()); host.remove(); restoreWorkbenchLayout(); setSidebarView("files"); vi.restoreAllMocks(); });
+beforeEach(() => { restoreWorkbenchLayout(); closePalette(); setSession({ panelOpen: true, panelTab: "problems", serviceExpanded: false }); host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
+afterEach(() => { act(() => root.unmount()); host.remove(); restoreWorkbenchLayout(); closePalette(); vi.restoreAllMocks(); });
 const renderFrame = (activeTool = "files") => root.render(<WorkbenchFrame activeTool={activeTool} tree={null} tabs={<div>Tabs</div>} editor={<textarea defaultValue="draft" />} output={<div>Panel</div>} status={null} />);
 describe("工作台任务布局", () => {
   it("服务展开后进入日志让出正文，返回后恢复展开且保留编辑节点", () => {
@@ -55,21 +55,20 @@ describe("工作台任务布局", () => {
     act(() => selectWorkbenchLayout("debug")); expect(host.querySelector<HTMLElement>(".wb-bottom")?.style.height).toBe("260px");
     act(() => selectWorkbenchLayout("code")); expect(host.querySelector<HTMLElement>(".wb-bottom")?.style.height).toBe("200px");
   });
-  it("文件树、搜索和数据库分别记忆宽度，切回时恢复本视图", () => {
+  it("工程搜索浮层保留树宽度，文件树和数据库分别恢复宽度", () => {
     act(() => renderFrame());
     const separator = () => host.querySelector<HTMLElement>('[aria-label="调整侧栏宽度"]')!;
     const width = () => Number(separator().getAttribute("aria-valuenow"));
     const grow = () => act(() => separator().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
     expect(width()).toBe(240); grow(); expect(width()).toBe(250);
-    act(() => setSidebarView("search")); expect(width()).toBe(320);
-    grow(); expect(width()).toBe(330);
-    act(() => setSidebarView("files")); expect(width()).toBe(250);
+    act(() => openPalette("search")); expect(width()).toBe(250);
+    act(() => closePalette()); expect(width()).toBe(250);
     // 数据库对象侧栏默认 236px（方案定的口径，比通用 240 窄一点给 SQL 与网格让位）
     act(() => renderFrame("db")); expect(width()).toBe(236);
     grow(); expect(width()).toBe(246);
     act(() => renderFrame()); expect(width()).toBe(250);
-    act(() => setSidebarView("search")); expect(width()).toBe(330);
-    expect(getWorkbenchLayout().sides).toEqual({ files: 250, search: 330, db: 246 });
+    act(() => openPalette("search")); expect(width()).toBe(250);
+    expect(getWorkbenchLayout().sides).toEqual({ files: 250, db: 246 });
   });
   it("启动后第一次 Enter 不复位尺寸，连续两次 Enter 才复位", () => {
     updateWorkbenchLayout({ sides: { files: 280 } });
@@ -84,8 +83,8 @@ describe("工作台任务布局", () => {
   it("次要工具通过更多打开并可固定，取消固定后当前工具仍可见", () => {
     const selected = vi.fn();
     act(() => root.render(<PanelTabs tab="problems" onTab={selected} errors={0} paused={false} />));
-    // 常驻页签 5 个：问题 / 改动 / 编译输出 / NC 服务 / 调试（「改动」是审 AI 代码的主入口）
-    expect(host.querySelectorAll('[role="tab"]')).toHaveLength(5);
+    // 常驻页签收敛为问题 / 改动 / 运行；运行内部切编译、服务、调试和测试。
+    expect(host.querySelectorAll('[role="tab"]')).toHaveLength(3);
     act(() => host.querySelector<HTMLButtonElement>('[aria-label="更多底部工具"]')!.click());
     const pin = [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.getAttribute("aria-label") === "固定待办")!;
     act(() => pin.click()); expect(getWorkbenchLayout().pinned).toEqual(["todo"]);

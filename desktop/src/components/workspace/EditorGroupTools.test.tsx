@@ -23,7 +23,7 @@ afterEach(() => { act(() => root.unmount()); host.remove(); document.body.innerH
 
 it("分组菜单也能切换焦点，窄区收起分段按钮后仍能访问左右组且保留未保存文件", async () => {
   for (const [label, path, group] of [["聚焦右编辑器组", b, "right"], ["聚焦左编辑器组", a, "left"]]) {
-    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="编辑器组操作"]')!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="编辑器布局"]')!.click());
     const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(button => button.textContent === label)!;
     await act(async () => item.click());
     expect(getSession().editorGroups?.focused).toBe(group);
@@ -31,4 +31,10 @@ it("分组菜单也能切换焦点，窄区收起分段按钮后仍能访问左�
     expect(getSession().tabs).toHaveLength(2);
     expect(getSession().tabs.every(tab => tab.dirty)).toBe(true);
   }
+});
+it("小地图迁入布局菜单后仍保留大文件禁用提示", async () => {
+  act(() => root.render(<EditorGroupTools root="C:/w" session={session} compiling={false} canCompile onCompile={vi.fn()} reading={{ pinned: false, heavy: true, onTogglePinned: vi.fn() }} />));
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="编辑器布局"]')!.click());
+  const minimap = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')).find(button => button.textContent?.startsWith("小地图"))!;
+  expect(minimap.disabled).toBe(true); expect(minimap.textContent).toContain("大文件已暂停小地图");
 });

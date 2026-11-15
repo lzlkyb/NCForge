@@ -6,6 +6,8 @@ import { isJavaFile } from "../../lib/autoCompile";
 import type { BuildMaintenance } from "../../hooks/useBuildMaintenance";
 import { BuildActions } from "./BuildActions";
 import { BuildRawLog } from "./BuildRawLog";
+import { BuildTaskFeedback } from "./BuildTaskFeedback";
+import { useWorkspaceSelector } from "../../lib/workspaceSession";
 import "../../diagnostic-workspace.css";
 
 const STATUS_LABEL: Record<ModuleBuildResult["status"], string> = { ok: "成功", failed: "失败", blocked: "被阻断", skipped: "跳过", cleaned: "已清理" };
@@ -17,11 +19,13 @@ export function BuildOutputView({ root, log, result, activePath, onOpenProblem, 
   onOpenProblem: (p: Problem) => void; onOpenAt: (path: string, line: number) => void; build?: BuildMaintenance;
 }) {
   const [section, setSection] = useState<Section>("summary");
+  const compiling = useWorkspaceSelector(s => s.compiling && s.root === root);
   const modules = result?.modules ?? [];
   const notOk = modules.filter(m => m.status === "failed" || m.status === "blocked").length;
   const modulePath = activePath && !activePath.includes("://") && isJavaFile(activePath) ? activePath : null;
   const activeModule = modulePath ? moduleOf(root, dirName(modulePath)) : null;
   return <div className="wb-build">
+    <BuildTaskFeedback root={root} resultCompletedAt={result?.completedAtMs} onShowLog={() => setSection("raw")} />
     <div className="dw-build-nav" aria-label="编译输出层次">
       <button type="button" aria-pressed={section === "summary"} onClick={() => setSection("summary")}>模块摘要{modules.length > 0 ? ` · ${modules.length}` : ""}</button>
       <button type="button" aria-pressed={section === "problems"} onClick={() => setSection("problems")}>问题定位{result?.problems.length ? ` · ${result.problems.length}` : ""}</button>
@@ -31,7 +35,7 @@ export function BuildOutputView({ root, log, result, activePath, onOpenProblem, 
     </div>
     <section className="dw-build-section" hidden={section !== "summary"} aria-label="模块构建摘要">
       {result ? <div className="dw-build-heading">
-        <strong className={result.ok && result.errorCount === 0 ? "wb-log-ok" : "wb-log-er"}>{result.ok && result.errorCount === 0 ? "编译成功" : `编译未通过 · ${result.errorCount} 个错误`}</strong>
+        <strong className={result.ok && result.errorCount === 0 ? "wb-log-ok" : "wb-log-er"}>{compiling ? "上次结果 · " : ""}{result.ok && result.errorCount === 0 ? "编译成功" : `编译未通过 · ${result.errorCount} 个错误`}</strong>
         <span>{result.sourceCount} 个源文件 · {(result.durationMs / 1000).toFixed(1)}s{result.completedAtMs ? ` · ${new Date(result.completedAtMs).toLocaleTimeString()}` : ""}</span>
       </div> : <div className="wb-panel-note">还没有编译结果；构建过程可查看原始输出。</div>}
       {notOk > 0 && <div className="wb-panel-note wb-log-er">{notOk} 个模块未通过，请查看原因或问题定位。</div>}

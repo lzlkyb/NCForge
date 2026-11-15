@@ -2,7 +2,7 @@
 //
 // 材质独立于明暗主题，只切 <html data-ui-style>；偏好存 localStorage，不进
 // AppConfig——「这台机器看着顺眼」不该跟着配置导入导出跑到同事机器上。
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { Card } from "../ui/card";
 import { SettingsRow } from "../ui/SettingsRow";
 import { SettingsChoice } from "../ui/SettingsChoice";
@@ -10,6 +10,7 @@ import { Button } from "../ui/button";
 import { applyTheme, type Theme, type ThemeSaveResult } from "../../lib/theme";
 import { AppearancePreview } from "./AppearancePreview";
 import { applyUiDensity, getUiDensity, subscribeUiDensity, type UiDensity } from "../../lib/uiDensity";
+import { applyMotionPreference, getMotionPreference, subscribeMotionPreference, type MotionPreference } from "../../lib/motionPreference";
 import {
   applyAppearance,
   getAppearance,
@@ -22,8 +23,9 @@ export function AppearanceSettings() {
   const [appearance, setAppearance] = useState<Appearance>(getAppearance);
   const [density, setDensity] = useState<UiDensity>(getUiDensity);
   const [theme, setTheme] = useState<Theme>(() => document.documentElement.classList.contains("dark") ? "dark" : "light");
-  const [feedback, setFeedback] = useState<Partial<Record<"主题" | "材质" | "密度", { saved: boolean; error?: string }>>>({});
-  const report = useCallback((stored: boolean, label: "主题" | "材质" | "密度") => {
+  const motion = useSyncExternalStore(subscribeMotionPreference, getMotionPreference);
+  const [feedback, setFeedback] = useState<Partial<Record<"主题" | "材质" | "密度" | "动效", { saved: boolean; error?: string }>>>({});
+  const report = useCallback((stored: boolean, label: "主题" | "材质" | "密度" | "动效") => {
     setFeedback(prev => ({ ...prev, [label]: { saved: stored,
       error: stored ? undefined : `${label}已在本次会话生效，但无法保存到本机，重启后会恢复原值。`,
     } }));
@@ -62,7 +64,7 @@ export function AppearanceSettings() {
         {...feedback.材质}
         label="界面材质"
         sub="柔光玻璃 提供半透明层次；经典 使用实色背景"
-        info="柔光玻璃使用窗口内的柔和彩色背景，标题栏与侧栏共享材质；代码、数据库表格与日志保持清晰的阅读底色。偏好只存本机，不随配置迁移。"
+        info="两种材质共用窗口与面板圆角、连续工作面和轻微层次；柔光玻璃的菜单与提示使用半透明模糊，经典使用实底。代码、数据库表格与日志保持清晰的阅读底色。偏好只存本机，不随配置迁移。"
         control={
           <div className="flex flex-wrap items-center gap-2"><SettingsChoice
             label="界面材质"
@@ -87,11 +89,18 @@ export function AppearanceSettings() {
           onChange={(value) => {
             report(applyUiDensity(value as UiDensity), "密度");
           }} />{feedback.密度?.error && <Button variant="ghost" size="sm" onClick={() => report(applyUiDensity(density), "密度")}>重试保存</Button>}</div>}
-        last
       />
+      <SettingsRow id="appearance-motion" label="界面动效" keywords={["动效", "动画", "等待", "减少动态效果", "motion"]}
+        valueText={motion === "reduce" ? "减少动效" : "跟随系统"} {...feedback.动效}
+        sub="减少位移与循环动画，保留操作结果和进度提示"
+        control={<div className="flex flex-wrap items-center gap-2"><SettingsChoice label="界面动效" value={motion}
+          options={[{ value: "system", label: "跟随系统" }, { value: "reduce", label: "减少动效" }]}
+          onChange={value => report(applyMotionPreference(value as MotionPreference), "动效")} />
+          {feedback.动效?.error && <Button variant="ghost" size="sm" onClick={() => report(applyMotionPreference(motion), "动效")}>重试保存</Button>}
+        </div>} last />
       <AppearancePreview theme={theme} density={density} appearance={appearance} />
       <div className="settings-form-actions"><Button size="sm" variant="ghost" onClick={() => {
-        report(applyTheme("light"), "主题"); change("classic"); report(applyUiDensity("standard"), "密度");
+        report(applyTheme("light"), "主题"); change("classic"); report(applyUiDensity("standard"), "密度"); report(applyMotionPreference("system"), "动效");
       }}>恢复默认外观</Button></div>
     </Card>
   );

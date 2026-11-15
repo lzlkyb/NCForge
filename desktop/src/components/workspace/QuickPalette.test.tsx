@@ -3,10 +3,12 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const deps = vi.hoisted(() => ({ buildItems: vi.fn() }));
+const deps = vi.hoisted(() => ({ buildItems: vi.fn(), run: vi.fn() }));
 
 vi.mock("../../lib/paletteSources", () => ({ buildItems: deps.buildItems }));
 vi.mock("../../lib/lang", () => ({ navigate: vi.fn() }));
+vi.mock("../../hooks/useDocumentSymbols", () => ({ useDocumentSymbols: () => ({ symbols: EMPTY_SYMBOLS, supported: false }) }));
+const EMPTY_SYMBOLS: [] = [];
 vi.mock("../../lib/openFileRequest", () => ({ requestOpenFile: vi.fn() }));
 vi.mock("../../lib/workspaceSession", () => ({
   useWorkspaceSelector: (sel: (s: { root: string; activePath: null; tabs: [] }) => unknown) =>
@@ -14,6 +16,10 @@ vi.mock("../../lib/workspaceSession", () => ({
 }));
 
 import { QuickPalette } from "./QuickPalette";
+vi.mock("../../lib/searchRunner", () => ({ runWorkspaceSearch: deps.run }));
+vi.mock("./PaletteWorkspaceSearch", () => ({ PaletteWorkspaceSearch: () => <div><select aria-label="测试范围"><option>当前</option></select><div tabIndex={0} aria-label="搜索结果列表" /></div> }));
+
+import { getSearchForm, setSearchForm, resetSearchForm } from "../../lib/searchStore";
 import { closePalette, openPalette } from "../../lib/paletteStore";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -24,7 +30,7 @@ let container: HTMLDivElement;
 beforeEach(() => {
   // jsdom 没有布局，scrollIntoView 需要补一个空实现
   Element.prototype.scrollIntoView = vi.fn();
-  deps.buildItems.mockReset();
+  deps.buildItems.mockReset(); deps.run.mockReset(); resetSearchForm(); setSearchForm({ query: "" });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -57,6 +63,13 @@ function type(value: string) {
 }
 
 describe("快速导航浮层的查询状态", () => {
+  it("预览卸载后焦点落到 body，Escape 仍关闭浮层并恢复原焦点", async () => {
+    deps.buildItems.mockResolvedValue({ items: [], note: "" });
+    const origin = document.createElement("button"); document.body.append(origin); origin.focus();
+    openPalette("file"); act(() => root.render(<QuickPalette activeTab="files" onNavigate={vi.fn()} />)); await flush();
+    act(() => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(container.querySelector('[data-palette]')).toBeNull(); expect(document.activeElement).toBe(origin); origin.remove();
+  });
   it("跨工具定位预填类名，正常重开清空旧查询", async () => {
     deps.buildItems.mockResolvedValue({ items: [], note: "" });
     openPalette("type", "nc.impl.ic.StockService");
@@ -73,7 +86,7 @@ describe("快速导航浮层的查询状态", () => {
     await flush();
 
     const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>(".qp-mode"));
-    expect(buttons.map((b) => b.querySelector(".qp-mode-label")?.textContent)).toEqual(["文件", "类型", "符号", "工作区符号", "命令"]);
+    expect(buttons.map((b) => b.querySelector(".qp-mode-label")?.textContent)).toEqual(["文件", "工程搜索", "类型", "符号", "工作区符号", "命令"]);
     expect(buttons.every((b) => b.querySelector("kbd")?.textContent)).toBe(true);
 
     for (const label of ["工作区符号", "命令", "类型", "符号", "文件"]) {
@@ -136,30 +149,38 @@ describe("快速导航浮层的查询状态", () => {
     expect(listbox()?.getAttribute("aria-busy")).toBe("false");
   });
 
-  it("#内容 分批到达就先显示命中，不必等全量扫完", async () => {
-    let resolveFinal: (value: unknown) => void = () => {};
-    deps.buildItems.mockImplementationOnce(
-      (_mode: string, _q: string, _ctx: unknown, onPartial?: (r: unknown) => void) => {
-        onPartial?.({ items: [{ key: "a", title: "先到的命中", run: vi.fn() }], note: "内容 · 已找到 1 条，还在扫…" });
-        return new Promise((r) => {
-          resolveFinal = r;
-        });
-      },
-    );
-    openPalette("file");
-    act(() => root.render(<QuickPalette activeTab="files" onNavigate={vi.fn()} />));
-    await flush();
+  it("粘贴 #关键词切入工程搜索，只有一个查询框，Enter 提交且组词不提交", async () => {
+    deps.buildItems.mockResolvedValue({ items: [], note: "" });
+    openPalette("file"); act(() => root.render(<QuickPalette activeTab="files" onNavigate={vi.fn()} />)); await flush();
+    type("#凭证保存"); await flush();
+    const input = container.querySelector<HTMLInputElement>('[aria-label="搜索工程文件内容"]')!;
+    expect(input.value).toBe("凭证保存"); expect(container.querySelectorAll("input")).toHaveLength(1);
+    act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, isComposing: true })));
+    expect(deps.run).not.toHaveBeenCalled();
+    act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(deps.run).toHaveBeenCalledWith("C:\\w");
+    act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    expect(document.activeElement).toBe(container.querySelector('[aria-label="搜索结果列表"]'));
+  });
 
-    // 扫描还没结束，但列表里已经有东西了，且可以回车打开（都是本次查询的真实命中）
-    expect(container.textContent).toContain("先到的命中");
-    expect(container.textContent).toContain("还在扫");
-    expect(listbox()?.getAttribute("aria-busy")).toBe("false");
-    expect(container.textContent).not.toContain("查询中");
+  it("模式重挂载保留原焦点，Esc 关闭后查询保留，重开恢复查询", async () => {
+    const origin = document.createElement("button"); document.body.append(origin); origin.focus();
+    deps.buildItems.mockResolvedValue({ items: [], note: "" });
+    openPalette("file"); act(() => root.render(<QuickPalette activeTab="files" onNavigate={vi.fn()} />)); await flush();
+    type("#保存"); await flush();
+    act(() => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(document.activeElement).toBe(origin); expect(getSearchForm().query).toBe("保存");
+    act(() => openPalette("search")); await flush();
+    expect(container.querySelector<HTMLInputElement>('[aria-label="搜索工程文件内容"]')!.value).toBe("保存");
+    origin.remove();
+  });
 
-    await act(async () => {
-      resolveFinal({ items: [{ key: "a", title: "先到的命中", run: vi.fn() }], note: "内容 · 1 项" });
-      await tick();
-    });
-    expect(container.textContent).toContain("内容 · 1 项");
+  it("Tab 焦点循环覆盖范围控件和结果列表", async () => {
+    openPalette("search"); act(() => root.render(<QuickPalette activeTab="files" onNavigate={vi.fn()} />)); await flush();
+    const first = container.querySelector<HTMLInputElement>("input")!, last = container.querySelector<HTMLElement>('[aria-label="搜索结果列表"]')!;
+    act(() => { last.focus(); last.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true })); });
+    expect(document.activeElement).toBe(first);
+    act(() => first.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true })));
+    expect(document.activeElement).toBe(last);
   });
 });

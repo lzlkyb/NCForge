@@ -52,7 +52,7 @@ export function ResourceSettings() {
             onClick={() => void (unfinished ? retry([pack.id]) : ensure(pack.state !== "missing", [pack.id]))}>{unfinished ? "重试" : pack.state === "missing" ? "下载" : "重新下载"}</Button>
         </div>} />;
     })}
-    {packs.length === 0 && !readError && <div className="settings-resource-loading" role="status" aria-label="正在读取组件状态"><Skeleton className="h-4 w-40" /><Skeleton className="h-4 w-52" /></div>}
+    {packs.length === 0 && !readError && <div className="settings-resource-loading" role="status" aria-label="正在读取组件状态"><span className="sr-only">正在读取组件状态</span><Skeleton className="h-4 w-40" /><Skeleton className="h-4 w-52" /></div>}
     {readError && <InlineNotice variant="error"><div className="flex flex-col items-start gap-2"><span>{readError}</span>
       <Button variant="outline" size="sm" isLoading={reading} loadingText="读取中…" disabled={reading} onClick={() => void readStatus()}>重新读取</Button>
     </div></InlineNotice>}

@@ -7,7 +7,6 @@ import { WorkspaceMenu } from "./WorkspaceMenu";
 import { useWorkspacePicker } from "../../hooks/useWorkspacePicker";
 import { getPalette, closePalette } from "../../lib/paletteStore";
 import { getSideOpen, setSideOpen } from "../../lib/layoutStore";
-import { getSidebarView, setSidebarView } from "../../lib/sidebarView";
 import { rememberRoot } from "../../lib/recentRoots";
 import { getSession, setSession } from "../../lib/workspaceSession";
 import { clearSettingsRequest, getSettingsRequest } from "../../lib/settingsJump";
@@ -55,7 +54,6 @@ afterEach(() => {
   window.removeEventListener("ncforge-navigate", navigate);
   setSession({ root: original.root, panelOpen: original.panelOpen, splitPath: original.splitPath });
   setSideOpen(wasSideOpen);
-  setSidebarView("files");
   closePalette(); clearSettingsRequest();
 });
 
@@ -95,12 +93,10 @@ describe("一体化标题栏真实入口", () => {
     expect(getSideOpen()).toBe(false);
     expect(document.activeElement).toBe(trigger("工作台布局"));
   });
-  it("从搜索侧栏打开其他工作区时切回文件树，并拉起文件夹选择器", async () => {
-    setSidebarView("search");
+  it("打开其他工作区时导航到代码并拉起文件夹选择器", async () => {
     act(() => root.render(<PickerBridge />));
     act(() => trigger("选择工作区").click());
     act(() => item("打开其他工作区").click());
-    expect(getSidebarView()).toBe("files");
     expect(events).toEqual(["files"]);
     await flush();
     expect(picker.pickFolder).toHaveBeenCalledWith({ title: "选择工程目录", defaultPath: "D:\\NC65" });

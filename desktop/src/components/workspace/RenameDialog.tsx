@@ -11,6 +11,7 @@ import { toast } from "../ui/toast";
 import { baseName } from "../../lib/workspace";
 import { applyRenamePlan, planRename, type RenamePlan } from "../../lib/renameSymbol";
 import { cursorAt, wordAtCursor } from "../../lib/editorActions";
+import { WorkbenchEditPreview } from "./WorkbenchEditPreview";
 
 interface Props {
   open: boolean;
@@ -89,7 +90,7 @@ export function RenameDialog({ open, path, onClose }: Props) {
         重命名符号
       </h4>
       <p className="mb-3 text-sm text-muted-foreground">
-        改的是整个工程里的这个符号（类 / 方法 / 字段），包含还没打开的文件。
+        预览这个符号的全部 Java 修改与文件移动；确认后一起写入，包含清单中文件的当前编辑内容。
       </p>
 
       <label className="mb-1 block text-xs text-muted-foreground" htmlFor="rename-input">
@@ -136,6 +137,8 @@ export function RenameDialog({ open, path, onClose }: Props) {
         </div>
       )}
 
+      {plan?.workbench&&<WorkbenchEditPreview files={plan.workbench.files}/>}
+      {plan?.workbench?.warnings.map((warning,i)=><p key={i} className="mt-2 text-xs text-warning-ink">{warning}</p>)}
       <div className="mt-4 flex justify-end gap-2">
         <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>
           取消

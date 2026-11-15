@@ -1,127 +1,37 @@
 // @vitest-environment jsdom
-/**
- * 换工作区走系统文件夹选择器：工具栏按钮不再展开手填输入框。
- */
-import { act, type ComponentProps } from "react";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TreeHeader } from "./TreeHeader";
 import { treeFilterFor } from "../../lib/treeFilter";
-
-const h = vi.hoisted(() => ({ pickFolder: vi.fn() }));
-vi.mock("../../lib/folderPicker", () => ({
-  pickFolder: h.pickFolder,
-  pickFolderError: (e: unknown) => `无法打开文件夹选择框：${String(e)}`,
-}));
+import { setPackageView, setRevealOnOpen } from "../../lib/treeViewPrefs";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-const noop = () => {};
-let host: HTMLDivElement;
-let root: Root;
-
+let host: HTMLDivElement, root: Root;
+const createFile = vi.fn(), createDir = vi.fn();
 beforeEach(() => {
-  localStorage.clear();
-  h.pickFolder.mockReset();
-  treeFilterFor("C:\\w\\newar").set({ text: "", open: false });
-  host = document.createElement("div");
-  document.body.appendChild(host);
-  root = createRoot(host);
+  localStorage.clear(); createFile.mockClear(); createDir.mockClear();
+  treeFilterFor("C:/w").set({ text: "", open: false }); setPackageView(false); setRevealOnOpen(false);
+  host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+  act(() => root.render(<TreeHeader root="C:/w" projectCount={2} onCreateFile={createFile} onCreateDir={createDir} />));
 });
-
-afterEach(() => {
-  act(() => root.unmount());
-  host.remove();
+afterEach(() => { act(() => root.unmount()); host.remove(); document.body.innerHTML = ""; });
+it("名称过滤和文件/包视图可用，全文搜索与切换工程归顶栏", async () => {
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="过滤资源树入口"]')!.click());
+  expect(treeFilterFor("C:/w").get().open).toBe(true);
+  act(() => host.querySelector<HTMLButtonElement>('[aria-label="包视图"]')!.click());
+  expect(host.querySelector('[aria-label="包视图"]')?.getAttribute("aria-pressed")).toBe("true");
+  expect(host.querySelector('[aria-label="全工程搜索"]')).toBeNull();
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="更多资源操作"]')!.click());
+  expect(document.body.textContent).not.toContain("更换工作区目录");
+  expect(document.body.textContent).not.toContain("最近工作区");
+  expect(host.textContent).toContain("编译 / SVN 只作用于它");
 });
-
-const flush = async () => {
-  for (let i = 0; i < 3; i += 1) {
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+it("新建文件与文件夹保持独立动作", async () => {
+  for (const label of ["新建文件", "新建文件夹"]) {
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="更多资源操作"]')!.click());
+    const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(button => button.textContent === label)!;
+    await act(async () => item.click());
   }
-};
-
-function render(onOpen: (path: string) => void, actions: Partial<ComponentProps<typeof TreeHeader>> = {}) {
-  act(() => root.render(
-    <TreeHeader
-      root={"C:\\w\\newar"}
-      recents={[]}
-      onOpen={onOpen}
-      onOpenRecent={noop}
-      onCreateFile={noop}
-      onCreateDir={noop}
-      onSearch={noop}
-      {...actions}
-    />,
-  ));
-}
-
-const chooseFolder = async () => {
-  await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="更多资源操作"]')!.click());
-  const item = Array.from(document.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]')).find(button => button.textContent?.includes("更换工作区目录"))!;
-  await act(async () => item.click());
-};
-
-describe("TreeHeader 换目录", () => {
-  it("收纳后名称过滤、全工程搜索和新建文件仍分别执行自己的操作", async () => {
-    const onSearch = vi.fn(), onCreateFile = vi.fn(), onCreateDir = vi.fn();
-    render(vi.fn(), { onSearch, onCreateFile, onCreateDir });
-    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="过滤资源树入口"]')!.click());
-    expect(treeFilterFor("C:\\w\\newar").get().open).toBe(true);
-    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="全工程搜索"]')!.click());
-    expect(onSearch).toHaveBeenCalledTimes(1);
-    expect(onCreateFile).not.toHaveBeenCalled();
-    for (const label of ["新建文件", "新建文件夹"]) {
-      await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="更多资源操作"]')!.click());
-      const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(button => button.textContent === label)!;
-      await act(async () => item.click());
-    }
-    expect(onCreateFile).toHaveBeenCalledTimes(1);
-    expect(onCreateDir).toHaveBeenCalledTimes(1);
-  });
-  it("点按钮拉起选择器，从当前目录开始，选中后切过去", async () => {
-    h.pickFolder.mockResolvedValueOnce("D:\\w\\other");
-    const onOpen = vi.fn();
-    render(onOpen);
-
-    // 不再有时间就地展开的手填输入框
-    expect(document.querySelector("input")).toBeNull();
-    await chooseFolder();
-    await flush();
-
-    expect(h.pickFolder).toHaveBeenCalledWith({
-      title: "更换工作区目录",
-      defaultPath: "C:\\w\\newar",
-    });
-    expect(onOpen).toHaveBeenCalledExactlyOnceWith("D:\\w\\other");
-  });
-
-  it("取消选择不切换，也不报错", async () => {
-    h.pickFolder.mockResolvedValueOnce(null);
-    const onOpen = vi.fn();
-    render(onOpen);
-
-    await chooseFolder();
-    await flush();
-
-    expect(onOpen).not.toHaveBeenCalled();
-    expect(document.querySelector('[role="alert"]')).toBeNull();
-  });
-
-  it("选择器失败时在标题下留原因", async () => {
-    h.pickFolder.mockRejectedValueOnce(new Error("boom"));
-    render(vi.fn());
-
-    await chooseFolder();
-    await flush();
-
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain("无法打开文件夹选择框");
-  });
-  it("选择目录期间显示等待并禁止重复打开，取消后恢复入口", async () => {
-    let finish!: (path: string | null) => void;
-    h.pickFolder.mockImplementation(() => new Promise<string | null>(resolve => { finish = resolve; }));
-    render(vi.fn()); await chooseFolder();
-    const entry = document.querySelector<HTMLButtonElement>('button[aria-label="更多资源操作"]')!;
-    expect(entry.disabled).toBe(true); expect(entry.querySelector(".animate-spin")).toBeTruthy();
-    await act(async () => entry.click()); expect(h.pickFolder).toHaveBeenCalledTimes(1);
-    await act(async () => finish(null)); expect(entry.disabled).toBe(false);
-  });
+  expect(createFile).toHaveBeenCalledTimes(1); expect(createDir).toHaveBeenCalledTimes(1);
 });

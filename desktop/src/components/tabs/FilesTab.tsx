@@ -2,10 +2,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { installSearchOverlay } from "../../lib/searchOverlay";
 import { useEffect, useRef, useState } from "react";
 import "../../workspace.css";
-import { Skeleton } from "../ui/Skeleton";
+import "../../workspace-consolidation.css";
+import { WorkspaceSkeleton } from "../workspace/WorkspaceSkeleton";
 import { BottomPanel } from "../workspace/BottomPanel";
 import { EmptyProjectSlots, FilePaneSlots } from "../workspace/FilePaneSlots";
-import { useFileSlot } from "../workspace/useFileSlot";
 import { ServicesTab } from "./ServicesTab";
 import { FilesTabDialogs } from "./FilesTabDialogs";
 import type { FileTreeHandle } from "../workspace/FileTree";
@@ -31,6 +31,8 @@ import { getCodeDiags, useCodeDiags } from "../../lib/diagStore";
 import { mergeProblems } from "../../lib/problemList";
 import { useNav } from "../../lib/navHistory";
 import { LARGE_FILE_LINES } from "../../lib/largeFile";
+import { openPalette } from "../../lib/paletteStore";
+import { openFileHistory } from "../../lib/reviewSession";
 import {
   getSession,
   setSession,
@@ -55,10 +57,8 @@ installSearchOverlay();
  */
 export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {}) {
   const queryClient = useQueryClient();
-  const slot = useFileSlot();
-  // 文件结构 / 本地历史 / 生成代码三个弹层：放这里而不是组件内部，命令面板与快捷键也要能打开它。
-  // 合成一个 state：三个布尔各占一个 hook，会把组件顶到体量门禁（≤8）之上
-  const [panels, setPanels] = useState({ outline: false, outlinePinned: false, history: false, generate: false });
+  // 固定结构与生成对话框由文件页管理；结构快跳在顶部，本地版本在改动会话中。
+  const [panels, setPanels] = useState({ outline: false, outlinePinned: false, generate: false });
   const [renameOpen, setRenameOpen] = useState(false);
   // 标签、激活项、面板与编译结果都存在模块级仓库里：切页卸载再回来不该丢。
   //
@@ -116,7 +116,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
 
   // 临时弹层随文件关闭，固定的结构面板则跟随当前文件。
   useEffect(() => {
-    setPanels(p => ({ ...p, outline: p.outline && p.outlinePinned, history: false, generate: false }));
+    setPanels(p => ({ ...p, outline: p.outline && p.outlinePinned, generate: false }));
   }, [activePath]);
 
   // F2 落到自己的重命名流程（Monaco 内置那套只改打开的 model，跨文件会改一半）
@@ -150,8 +150,9 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
     compileActive,
     compileActiveFile,
     closeTab: session.closeTab,
-    openOutline: () => setPanels((p) => ({ ...p, outline: true })),
-    openHistory: () => setPanels((p) => ({ ...p, history: true })),
+    openOutline: () => openPalette("symbol"),
+    pinOutline: () => setPanels(p => ({ ...p, outline: true, outlinePinned: true })),
+    openHistory: openFileHistory,
     jumpToProblem,
     goBack,
     goForward,
@@ -176,7 +177,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
       onNextProblem={() => jumpToProblem(1)}
       onPrevProblem={() => jumpToProblem(-1)}
       onCancel={() => void compileCancel()} onClose={() => setPanelOpen(false)}
-      activePath={activePath} build={build} compileAll={() => compileAll(true)} />
+      activePath={activePath} onRestored={session.reloadFile} build={build} compileAll={() => compileAll(true)} />
   );
 
   // NC 服务既是底部面板的一个标签，又要能在没打开工程时使用，所以跟着文件页常驻，
@@ -192,7 +193,7 @@ export function FilesTab({ activeTool = "files" }: { activeTool?: string } = {})
   // 还没读到工作区（一个 IPC 的工夫）：只影响文件页自己的槽位。以前这里 `return null`
   // 会把**所有页面**一起吞掉——连骨架都没有，用户看到的是整片空白。
   if (root === undefined) {
-    return <>{slot("editor", <div className="wb-editor"><Skeleton className="m-4 h-40" /></div>)}{services}</>;
+    return <><WorkspaceSkeleton page="files" />{services}</>;
   }
 
   // 尚未选择工作区：明确引导，不让用户盲猜（NC 服务不依赖工程，它的面板仍要在）

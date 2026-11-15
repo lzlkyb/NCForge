@@ -1,17 +1,24 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import "../../palette.css";
 import { Icon } from "../ui/icon";
 import { getKeymap, paletteKeyLabel, PALETTE_MODES, type PaletteMode } from "../../lib/keymap";
-import { navigate } from "../../lib/lang";
 import { requestOpenFile } from "../../lib/openFileRequest";
-import { closePalette, openPalette, usePalette } from "../../lib/paletteStore";
+import { closePalette, openPalette, usePalette, getPalette } from "../../lib/paletteStore";
 import type { Runner } from "../../lib/paletteSources";
 import { usePaletteSearch } from "../../hooks/usePaletteSearch";
+import { getSearchForm, setSearchForm, subscribeSearchForm, loadHistory, cancelWorkspaceSearch, getSearchSelectedKey } from "../../lib/searchStore";
+import { runWorkspaceSearch } from "../../lib/searchRunner";
 import type { Range } from "../../lib/fuzzy";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
+import { useDocumentSymbols } from "../../hooks/useDocumentSymbols";
+import { PaletteSymbolTools } from "./PaletteSymbolTools";
+import { isUnsaved } from "../../lib/tabDirty";
+
+const WorkspaceSearch = lazy(() => import("./PaletteWorkspaceSearch").then(m => ({ default: m.PaletteWorkspaceSearch })));
 
 const PLACEHOLDER: Record<PaletteMode, string> = {
-  file: "输入文件名…（# 搜内容，:行号 跳转）",
+  file: "输入文件名…（# 工程搜索，:行号 跳转）",
+  search: "输入工程内容，回车搜索…",
   type: "输入类名…",
   symbol: "输入方法 / 字段名…",
   sym: "输入方法 / 字段名…（整个工作区，含依赖 jar）",
@@ -33,23 +40,46 @@ function Marked({ text, ranges }: { text: string; ranges?: Range[] }) {
 }
 
 /**
- * 快速导航浮层：文件 / 类型 / 符号 / 命令四种模式共用一个输入框。
+ * 文件、工程搜索、类型、符号与命令共用浮层输入及焦点管理。
  *
  * 开关由 `paletteStore` 管；每次打开 / 切模式 `nonce` 都变，用它当 key 让正文重新挂载，查询和选中项自然归零。
  */
 export function QuickPalette({ activeTab, onNavigate }: { activeTab: string; onNavigate: (tab: string) => void }) {
   const { open, mode, nonce, query } = usePalette();
+  const restore = useRef<{ el: Element | null; on: boolean }>({ el: document.activeElement, on: true });
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current) restore.current = { el: document.activeElement, on: true };
+  wasOpen.current = open;
+  useEffect(() => {
+    if (!open) return;
+    const original = restore.current;
+    // 预览关闭后它的按钮已卸载，焦点可能落到 body；Esc 仍归当前浮层处理。
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]:not([data-palette]):not([data-exiting])')) return;
+      event.preventDefault(); closePalette();
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => { window.removeEventListener("keydown", onEscape); if (original.on && original.el instanceof HTMLElement) original.el.focus({ preventScroll: true }); };
+  }, [open]);
   if (!open) return null;
-  return <PaletteBody key={nonce} mode={mode} initialQuery={query} activeTab={activeTab} onNavigate={onNavigate} />;
+  return <PaletteBody key={nonce} mode={mode} initialQuery={query} activeTab={activeTab} onNavigate={onNavigate}
+    onExecute={() => { restore.current.on = false; }} />;
 }
 
-function PaletteBody({ mode, initialQuery, activeTab, onNavigate }: { mode: PaletteMode; initialQuery: string; activeTab: string; onNavigate: (tab: string) => void }) {
+function PaletteBody({ mode, initialQuery, activeTab, onNavigate, onExecute }: { mode: PaletteMode; initialQuery: string; activeTab: string; onNavigate: (tab: string) => void; onExecute: () => void }) {
   const root = useWorkspaceSelector((s) => s.root);
   const activePath = useWorkspaceSelector((s) => s.activePath);
   const tabs = useWorkspaceSelector((s) => s.tabs);
-  const [query, setQuery] = useState(initialQuery);
-  const restore = useRef<{ el: Element | null; on: boolean }>({ el: document.activeElement, on: true });
+  const [navigationQuery, setQuery] = useState(initialQuery);
+  const [methodsOnly, setMethodsOnly] = useState(false);
+  const active = tabs.find(tab => tab.path === activePath);
+  const documentSymbols = useDocumentSymbols(mode === "symbol" ? activePath : null, active?.mtimeMs, active ? isUnsaved(active) : false);
+  const form = useSyncExternalStore(subscribeSearchForm, getSearchForm, getSearchForm);
+  const engineering = mode === "search";
+  const query = engineering ? form.query : navigationQuery;
   const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (engineering) return () => cancelWorkspaceSearch(); }, [engineering]);
   // 遮罩关闭要求按下与抬起都落在遮罩上：mousedown 在弹窗内、mouseup 在遮罩（或反过来）
   // 时 click 的 target 都是公共祖先遮罩，只判 down 会反方向误关、丢掉已输入的长查询。
   const downOnScrim = useRef(false);
@@ -64,35 +94,27 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate }: { mode: Pale
       goFiles();
     },
     jdt: (uri, line, column) => {
-      navigate({ kind: "jdt", uri, line, column });
       goFiles();
+      void import("../../lib/lang").then(({ navigate }) => navigate({ kind: "jdt", uri, line, column }));
     },
   };
   const { result, sel, setSel, loadState, retry, listRef } = usePaletteSearch({
     mode,
     query,
-    ctx: { root: root ?? null, activePath, openPaths: tabs.map((t) => t.path), run: runner },
+    ctx: { root: root ?? null, activePath, openPaths: tabs.map((t) => t.path), run: runner, documentSymbols: documentSymbols.symbols, methodsOnly },
   });
-  // 本次挂载消费完 seed 后清空，避免下次正常打开面板还带着上一次的前缀内容。
-
-  // 打开前的焦点（通常是编辑器）：Esc 关掉后要还给它；执行了某一项则不还，由目标（编辑器）自己拿焦点
-  useEffect(() => {
-    const r = restore.current;
-    return () => {
-      if (r.on && r.el instanceof HTMLElement) r.el.focus({ preventScroll: true });
-    };
-  }, []);
-
   const close = () => closePalette();
   const runAt = (i: number) => {
     const item = result.items[i];
     if (!item) return;
-    restore.current.on = false;
     closePalette();
     item.run();
+    if (!getPalette().open) onExecute();
   };
 
   const onChange = (v: string) => {
+    if (engineering) { setSearchForm({ query: v }); return; }
+    if (mode === "file" && v.startsWith("#")) return openPalette("search", v.slice(1));
     // 输入框里第一个字符敲 > / @ 直接切模式（和 VS Code 一样）；前缀后的内容要带过去，
     // 否则输入法一次性上屏「>停止服务」切到命令模式后查询被清空、面板空白。
     if (mode !== "cmd" && v.startsWith(">")) return openPalette("cmd", v.slice(1));
@@ -100,6 +122,15 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate }: { mode: Pale
     setQuery(v);
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+    if (engineering && e.key === "Enter") { e.preventDefault(); void runWorkspaceSearch(root ?? null); return; }
+    if (engineering && e.key === "ArrowDown") {
+      e.preventDefault();
+      const list = dialogRef.current?.querySelector<HTMLElement>('[aria-label="搜索结果列表"]');
+      list?.focus();
+      if (!getSearchSelectedKey()) list?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      return;
+    }
     const n = result.items.length;
     if (e.key === "Escape") {
       e.preventDefault();
@@ -128,10 +159,16 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate }: { mode: Pale
    * 不拦的话 Tab 会把焦点送到背后编辑器的 Monaco 里，而 Esc 之后焦点又回到那里。
    */
   const onDialogKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape" && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) {
+      // Nested replacement confirmation owns its own Escape/focus handling.
+      if (document.querySelector('[role="dialog"][aria-modal="true"]:not([data-palette])')) return;
+      e.preventDefault(); close(); return;
+    }
     if (e.key !== "Tab") return;
+    if (document.querySelector('[role="dialog"][aria-modal="true"]:not([data-palette])')) return;
     const el = dialogRef.current;
     if (!el) return;
-    const focusables = el.querySelectorAll<HTMLElement>('button, input, [tabindex]:not([tabindex="-1"])');
+    const focusables = [...el.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])')].filter(node => !node.closest('[hidden], [aria-hidden="true"]'));
     if (focusables.length === 0) return;
     const first = focusables[0];
     const last = focusables[focusables.length - 1];
@@ -157,7 +194,7 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate }: { mode: Pale
         close();
       }}
     >
-      <div ref={dialogRef} className="qp" role="dialog" aria-modal="true" aria-label="快速导航" data-palette onKeyDown={onDialogKeyDown}>
+      <div ref={dialogRef} className={engineering ? "qp qp-workspace" : "qp"} role="dialog" aria-modal="true" aria-label="快速导航" data-palette onKeyDown={onDialogKeyDown}>
         <div className="qp-in" data-focus-container>
           <Icon name="search" size={15} />
           <input
@@ -167,13 +204,18 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate }: { mode: Pale
             spellCheck={false}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={onKeyDown}
-            role="combobox"
-            aria-expanded
-            aria-controls="qp-listbox"
-            aria-autocomplete="list"
-            aria-activedescendant={result.items.length > 0 ? `qp-opt-${sel}` : undefined}
-            aria-label="快速导航输入"
+            list={engineering ? "ncforge-search-history" : undefined}
+            role={engineering ? "searchbox" : "combobox"}
+            aria-expanded={engineering ? undefined : true}
+            aria-controls={engineering ? undefined : "qp-listbox"}
+            aria-autocomplete={engineering ? undefined : "list"}
+            aria-activedescendant={!engineering && result.items.length > 0 ? `qp-opt-${sel}` : undefined}
+            aria-label={engineering ? "搜索工程文件内容" : "快速导航输入"}
           />
+          {engineering && <>
+            <datalist id="ncforge-search-history">{loadHistory().map(word => <option key={word} value={word} />)}</datalist>
+            <button type="button" className="qp-search-submit" disabled={!query.trim() || form.replacing} onClick={() => void runWorkspaceSearch(root ?? null)}>{form.running ? "重新搜索" : "搜索"}</button>
+          </>}
         </div>
         <div className="qp-modes">
           {PALETTE_MODES.map((m) => (
@@ -183,7 +225,10 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate }: { mode: Pale
             </button>
           ))}
         </div>
-        <div
+        {mode === "symbol" && <PaletteSymbolTools path={activePath} methodsOnly={methodsOnly} onMethodsOnly={() => setMethodsOnly(value => !value)} />}
+        {engineering ? <Suspense fallback={<div className="qp-sec" role="status">正在准备工程搜索…</div>}>
+          <WorkspaceSearch onExecute={() => { onExecute(); closePalette(); goFiles(); }} />
+        </Suspense> : <><div
           className={loadState === "error" ? "qp-sec qp-sec-err" : "qp-sec"}
           role={loadState === "error" ? "alert" : "status"}
           aria-live="polite"
@@ -209,12 +254,13 @@ function PaletteBody({ mode, initialQuery, activeTab, onNavigate }: { mode: Pale
             </div>
           ))}
         </div>
+        </>}
         <div className="qp-foot">
-          <span>↑↓ 选择</span>
-          <span>Enter 打开</span>
+          <span>{engineering ? "↓ 进入结果 · ↑↓ 选择" : "↑↓ 选择"}</span>
+          <span>{engineering ? "Enter 搜索 / 打开" : "Enter 打开"}</span>
           <span>Esc 关闭</span>
           <span className="qp-sp" />
-          <span>{mode === "file" ? "> 命令，@ 符号，# 内容，:行号" : "退格回到文件模式"}</span>
+          <span>{engineering ? "重开恢复阅读位置" : mode === "file" ? "> 命令，@ 符号，# 工程搜索，:行号" : "退格回到文件模式"}</span>
         </div>
       </div>
     </div>

@@ -14,7 +14,8 @@ export function CallHierarchyPanel() {
       <div className="wb-panel-body">
         <div className="wb-panel-note">
           把光标放到方法名上，按 Ctrl+Alt+H 或点右上角「查调用层级」。
-          {st.error && <span className="wb-prow-warn"> {st.error}</span>}
+          {st.loading && <span role="status"> 正在查询…</span>}
+          {st.error && <span role="alert" className="wb-prow-warn"> {st.error}</span>}
         </div>
       </div>
     );
@@ -25,6 +26,7 @@ export function CallHierarchyPanel() {
       <div className="wb-panel-note">
         {st.loading ? "正在查询…" : `${st.root.name}${st.root.detail ? ` · ${st.root.detail}` : ""}`}
       </div>
+      {st.error && <div role="alert" className="wb-panel-note wb-prow-warn">{st.error} · 显示上次成功查询的结果</div>}
       <Section title="被调用（谁调了它）" items={st.incoming} empty="没有找到调用者" />
       <Section title="调用（它调了谁）" items={st.outgoing} empty="它没有调用别的成员" />
     </div>

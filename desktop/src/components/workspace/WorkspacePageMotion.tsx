@@ -1,21 +1,27 @@
-import { useEffect, type RefObject } from "react";
+import { useLayoutEffect, useRef, type RefObject } from "react";
+import { useAppHidden } from "../../lib/appVisibility";
+import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
+import { MOTION } from "../../lib/motion";
 
-/** 旧 WebView 的淡入回退直接作用于实际内容框，不重挂编辑器，也不移动输入位置。 */
+/** Only the live reading area fades; navigation never waits for a whole-workspace snapshot. */
 export function WorkspacePageMotion({ page, target }: { page: string; target: RefObject<HTMLDivElement> }) {
-  useEffect(() => {
+  const hidden = useAppHidden(), reduced = usePrefersReducedMotion();
+  const previous = useRef(page);
+  useLayoutEffect(() => {
+    const changed = previous.current !== page; previous.current = page;
     const element = target.current;
-    if (!element?.animate || typeof document.startViewTransition === "function" || document.hidden || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (!changed || !element?.animate || hidden || reduced || document.hidden) return;
     const style = getComputedStyle(document.documentElement);
-    const timing = style.getPropertyValue("--dur-page").trim();
+    const timing = style.getPropertyValue("--dur-fast").trim();
     const value = Number.parseFloat(timing);
     if (!Number.isFinite(value)) return;
-    const animation = element.animate([{ opacity: .45 }, { opacity: 1 }], {
+    const animation = element.animate([{ opacity: .85 }, { opacity: 1 }], {
       duration: timing.endsWith("ms") ? value : value * 1000,
-      easing: style.getPropertyValue("--ease").trim() || "ease-out",
+      easing: style.getPropertyValue("--ease").trim() || MOTION.ease,
     });
     void animation.finished.catch(() => {});
     return () => animation.cancel();
     // page 只负责触发短淡入，内容及其草稿始终保留在原节点。
-  }, [page, target]);
+  }, [page, target, hidden, reduced]);
   return null;
 }

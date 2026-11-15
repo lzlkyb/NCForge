@@ -17,6 +17,7 @@ import { useEditorPrefs, setEditorPrefs, DEFAULT_PREFS, type EditorPrefs } from 
 import { requestSettingItem } from "../../lib/settingsJump";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { TEMPLATE_PREFIXES } from "../../lib/liveTemplates";
+import { showJavaEditingDialog } from "../../lib/javaEditingDialogStore";
 
 const onOff = (v: boolean) => (v ? "开" : "关");
 
@@ -227,7 +228,10 @@ export function EditorSettings() {
         last
         sub={`敲这些前缀按 Tab/回车展开：${TEMPLATE_PREFIXES.slice(0, 8).join(" ")} …`}
         info="模板是编辑器自带能力，不依赖代码智能服务：sout、souf、serr、psvm、fori、forr、iter、ifn、inn、tryc、tryf、th、swi、strnull 等。"
+        control={<Button size="sm" variant="ghost" onClick={() => showJavaEditingDialog({ kind: "templates" })}>管理模板</Button>}
       />
+      <ToggleRow id="editor-inlay" keywords={["参数名", "推断类型", "lambda", "内联提示", "inlay"]} label="参数名与推断类型提示" sub="显示真实方法参数名及隐式 lambda 参数类型；默认关闭，需要代码智能就绪。" checked={p.inlayHints} onChange={v => apply({ inlayHints: v }, "inlay")} {...toggleFeedback("inlay")} />
+      <ToggleRow id="editor-paste-imports" keywords={["粘贴", "import"]} label="粘贴后检查导入" sub="发现未导入的类时选择来源并补充导入，不自动保存。" checked={p.pasteImports} onChange={v => apply({ pasteImports: v }, "paste-imports")} {...toggleFeedback("paste-imports")} />
       <div className="settings-form-actions"><Button size="sm" variant="ghost" onClick={() => setResetOpen(true)}>恢复编辑器默认设置</Button></div>
       <ConfirmDialog open={resetOpen} title="恢复编辑器默认设置？" description="恢复字体、排版、阅读辅助与保存选项，并清除当前预览草稿。"
         confirmLabel="恢复默认" onCancel={() => setResetOpen(false)} onConfirm={() => {

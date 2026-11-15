@@ -8,6 +8,8 @@ import { setSession, useWorkspaceSelector } from "../../lib/workspaceSession";
 import { Menu, MenuItem } from "../ui/Menu";
 import { Icon, type IconName } from "../ui/icon";
 import { restoreWorkbenchLayout, selectWorkbenchLayout, updateWorkbenchLayout, useWorkbenchLayout, WORKBENCH_MODES } from "../../lib/workbenchLayout";
+import type { ReactNode } from "react";
+import { useHistoryRestorePath } from "../../lib/historyRestoreGuard";
 
 const navigate = (tab: string) => window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: tab }));
 
@@ -39,28 +41,31 @@ export function ApplicationMenu() {
   </Menu>;
 }
 
-export function LayoutMenu({ activeTool = "files" }: { activeTool?: string }) {
+export function LayoutMenu({ activeTool = "files", editorActions, readingActions }: { activeTool?: string; editorActions?: (close: () => void) => ReactNode; readingActions?: (close: () => void) => ReactNode }) {
   const sideOpen = useSideOpen();
   const railExpanded = useRailExpanded();
   const panelOpen = useWorkspaceSelector((s) => s.panelOpen);
   const splitPath = useWorkspaceSelector((s) => s.splitPath);
   const layout = useWorkbenchLayout();
+  const restoring = !!useHistoryRestorePath();
   const check = (active: boolean) => active ? <Icon name="check" size={13} /> : undefined;
-  return <Menu portal trigger={(open, toggle) => <button type="button" className="wb-header-icon" aria-label="工作台布局"
-    title="工作台布局" aria-haspopup="menu" aria-expanded={open} onClick={toggle}><Icon name="panel" size={16} /></button>}>
+  return <Menu portal trigger={(open, toggle) => <button type="button" className={editorActions ? "wb-outline-btn wb-code-layout-btn" : "wb-header-icon"} aria-label={editorActions ? "编辑器布局" : "工作台布局"}
+    title={editorActions ? "编辑器分组与阅读布局" : "工作台布局"} aria-haspopup="menu" aria-expanded={open} onClick={toggle}><Icon name={editorActions ? "columns" : "panel"} size={16} />{editorActions && <><span>布局</span><Icon name="chevronDown" size={12} /></>}</button>}>
     {(close) => {
       const split = listCommands().find((command) => command.id === (splitPath ? "tab.splitClose" : "tab.split"));
       return <>
-        {WORKBENCH_MODES.map(mode => <MenuItem key={mode.id} label={mode.label} active={layout.mode === mode.id} trailing={check(layout.mode === mode.id)}
+        {editorActions && <><p className="wb-menu-caption">编辑器分组</p>{editorActions(close)}<div className="wb-menu-separator" role="separator" /></>}
+        {readingActions && <><p className="wb-menu-caption">阅读布局</p>{readingActions(close)}<div className="wb-menu-separator" role="separator" /></>}
+        {WORKBENCH_MODES.map(mode => <MenuItem key={mode.id} label={mode.label} disabled={restoring} active={layout.mode === mode.id} trailing={check(layout.mode === mode.id)}
           onClick={() => { close(); selectWorkbenchLayout(mode.id); if (activeTool !== "files") navigate("files"); }} />)}
         <MenuItem label={layout.locked ? "解除布局锁定" : "锁定当前布局"} active={layout.locked} trailing={check(layout.locked)} onClick={() => { close(); updateWorkbenchLayout({ locked: !layout.locked }); }} />
-        <MenuItem label="恢复默认布局" onClick={() => { close(); restoreWorkbenchLayout(); if (activeTool !== "files") navigate("files"); }} />
+        <MenuItem label="恢复默认布局" disabled={restoring} onClick={() => { close(); restoreWorkbenchLayout(); if (activeTool !== "files") navigate("files"); }} />
         <div className="wb-menu-separator" role="separator" />
         {activeTool !== "logs" && <MenuItem label={activeTool === "settings" ? "设置分类" : "资源侧栏"} active={sideOpen} trailing={check(sideOpen)} onClick={() => { close(); toggleSide(); }} />}
         <MenuItem label="展开主导航" active={railExpanded} trailing={check(railExpanded)} onClick={() => { close(); toggleRail(); }} />
-        <MenuItem label={activeTool === "files" ? "底部面板" : "代码底部面板"} active={panelOpen} trailing={check(panelOpen)} onClick={() => { close(); setSession({ panelOpen: (v) => !v }); if (activeTool !== "files") navigate("files"); }} />
-        <div className="wb-menu-separator" role="separator" />
-        <MenuItem label={splitPath ? "关闭代码分屏" : "代码左右分屏"} disabled={!split} onClick={() => { close(); split?.run(); if (activeTool !== "files") navigate("files"); }} />
+        <MenuItem label={activeTool === "files" ? "底部面板" : "代码底部面板"} disabled={restoring} active={panelOpen} trailing={check(panelOpen)} onClick={() => { close(); setSession({ panelOpen: (v) => !v }); if (activeTool !== "files") navigate("files"); }} />
+        {!editorActions && <><div className="wb-menu-separator" role="separator" />
+        <MenuItem label={splitPath ? "关闭代码分屏" : "代码左右分屏"} disabled={!split} onClick={() => { close(); split?.run(); if (activeTool !== "files") navigate("files"); }} /></>}
       </>;
     }}
   </Menu>;

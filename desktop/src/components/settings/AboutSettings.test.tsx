@@ -28,7 +28,7 @@ beforeEach(() => {
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: mocks.write } });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); Reflect.deleteProperty(navigator, "clipboard"); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root.unmount()); host.remove(); Reflect.deleteProperty(navigator, "clipboard"); vi.unstubAllGlobals(); vi.useRealTimers(); });
 const render = () => act(() => root.render(<AboutSettings onOpenHistory={history} />));
 it("未知运行版本不拿随包版本冒充；平台、仓库与许可使用真实信息", () => {
   render();
@@ -64,10 +64,15 @@ it("复制完成才反馈成功，失败提示权限问题并恢复可重试", a
   expect(host.textContent).toContain("复制失败"); expect(buttons("复制版本信息")[0].disabled).toBe(false);
 });
 it("打开外链期间防止重复触发，失败显示恢复反馈", async () => {
+  vi.useFakeTimers();
   let reject!: (error: Error) => void;
   mocks.invoke.mockReturnValue(new Promise((_, fail) => { reject = fail; })); render();
   act(() => { buttons("打开仓库")[0].click(); buttons("打开仓库")[0].click(); });
-  expect(mocks.invoke).toHaveBeenCalledOnce(); expect(host.textContent).toContain("打开中");
+  expect(mocks.invoke).toHaveBeenCalledOnce();
+  expect(buttons("打开仓库")[0].disabled).toBe(true);
+  expect(host.textContent).not.toContain("打开中");
+  act(() => vi.advanceTimersByTime(180));
+  expect(host.textContent).toContain("打开中");
   await act(async () => reject(new Error("browser unavailable")));
   expect(host.textContent).toContain("打开链接失败"); expect(buttons("打开仓库")[0].disabled).toBe(false);
 });

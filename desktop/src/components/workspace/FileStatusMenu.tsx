@@ -9,7 +9,7 @@ import { toast } from "../ui/toast";
 
 export function FileStatusMenu({ active }: { active: TabMeta }) {
   const cursor = useCursor();
-  const language = active.virtual ? "java" : getModel(active.path)?.getLanguageId() ?? languageOf(active.path);
+  const language = getModel(active.path)?.getLanguageId() ?? (active.virtual ? "java" : languageOf(active.path));
   const details = `${language} · ${active.encoding}${active.hasBom ? " BOM" : ""} · ${active.eol} · 第 ${cursor.line} 行，第 ${cursor.column} 列`;
   return <Menu portal width="w-72" trigger={(open, toggle) => <button type="button" className="wb-status-btn wb-file-status" aria-label="当前文件状态" title={details} aria-haspopup="menu" aria-expanded={open} onClick={toggle}>
     <span className="wb-file-status-details">{active.encoding} · {cursor.line}:{cursor.column}</span><span className="wb-file-status-short">文件状态</span><Icon name="chevronDown" size={11} />

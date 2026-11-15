@@ -15,11 +15,14 @@ import {
  * 「核对」直调 store 函数（P0-1），不再派发一个可能无人接收的 window 事件。
  * 摘要同时给出「几块已审」与当前基线口径（P1-1 / S9），loading 也有反馈（P2）。
  */
-export function ChangedLinesBar({ path }: { path: string | null }) {
+export function ChangedLinesBar({ path, compact = false }: { path: string | null; compact?: boolean }) {
   const snap = useSyncExternalStore(subscribeSnapshot, () => getSnapshotFor(path), () => getSnapshotFor(path));
   const baseline = useSyncExternalStore(subscribeBaseline, () => getEffectiveBaseline(path), () => getEffectiveBaseline(path));
   const review = useSyncExternalStore(subscribeReviewSession, getReviewState, getReviewState);
   if (!path || getSession().root === null) return null;
+  if (compact) return <button type="button" className="ncf-chg-compact" title="在改动面板查看本文件的差异、基线与审查状态" aria-label="查看当前文件改动" onClick={openChecklist}>
+    <span>改动</span>{baseline?.state === "ok" && !snap.tooBig && snap.blocks.length > 0 && <><b className="ncf-chg-plus">+{snap.added}</b><b className="ncf-chg-minus">−{snap.removed}</b></>}
+  </button>;
   if (baseline?.state === "loading") {
     return <span className="ncf-chg-bar ncf-chg-loading" role="status">正在读取基线…</span>;
   }

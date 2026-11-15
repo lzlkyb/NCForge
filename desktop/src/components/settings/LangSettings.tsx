@@ -117,7 +117,8 @@ export function LangSettings() {
       <Card className="flex flex-col gap-2 p-4">
         <div className="text-sm font-medium">代码智能</div>
         {loading ? (
-          <div className="flex flex-col gap-2" aria-busy="true" aria-label="正在读取代码智能设置">
+          <div className="flex flex-col gap-2" role="status" aria-label="正在读取代码智能设置">
+            <span className="sr-only">正在读取代码智能设置</span>
             <Skeleton className="h-4 w-40" />
             <Skeleton className="h-4 w-64" />
             <Skeleton className="h-4 w-52" />

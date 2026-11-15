@@ -1,6 +1,5 @@
 import { getRecentRoots } from "../../lib/recentRoots";
 import { setSideOpen } from "../../lib/layoutStore";
-import { setSidebarView } from "../../lib/sidebarView";
 import { baseName } from "../../lib/workspace";
 import { requestWorkspacePicker } from "../../lib/workspacePicker";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
@@ -13,7 +12,6 @@ export function WorkspaceMenu() {
     if (path && path.toLowerCase() === root?.toLowerCase()) return;
     requestWorkspacePicker(path);
     setSideOpen(true);
-    setSidebarView("files");
     window.dispatchEvent(new CustomEvent("ncforge-navigate", { detail: "files" }));
   };
   return <Menu align="left" width="w-80" portal

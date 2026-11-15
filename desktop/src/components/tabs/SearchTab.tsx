@@ -3,25 +3,27 @@ import { SearchBar } from "../search/SearchBar";
 import { SearchResults } from "../search/SearchResults";
 import { SearchEditPanel } from "../search/SearchEditPanel";
 import { ReplaceBar } from "../search/ReplaceBar";
-import { searchProjects, searchWorkspace } from "../../lib/search";
+import { runWorkspaceSearch } from "../../lib/searchRunner";
+import { cancelWorkspaceSearch } from "../../lib/searchStore";
+import { usePalette } from "../../lib/paletteStore";
+import { sameSearchCriteria } from "../../lib/searchScope";
 import type { ResultHit } from "../../lib/searchResults";
 import { componentOptions, isSingleScope, toSearchOptions } from "../../lib/searchScope";
 import { useNcManifest, useNcManifestAudit } from "../../hooks/useNcManifest";
 import { getWorkspace, joinPath } from "../../lib/workspace";
 import { useWorkspaceSelector } from "../../lib/workspaceSession";
-import { useSidebarView } from "../../lib/sidebarView";
 import { useSearchPackStatus } from "../../lib/searchPackStatus";
 import { SearchPackNotice } from "../search/SearchPackNotice";
 import { JarSymbolResults } from "../search/JarSymbolResults";
 import { SrcNoteResults } from "../search/SrcNoteResults";
+import { LibraryFileResults } from "../search/LibraryFileResults";
+import type { LibraryHit } from "../../lib/libraryFiles";
+import { requestSearchOpen } from "../../lib/searchOpenRequest";
 import { toast } from "../ui/toast";
 import type { LinkedProject } from "../../lib/linkedProjects";
 import {
-  currentSearchSeq,
   getSearchForm,
   loadHistory,
-  nextSearchSeq,
-  pushHistory,
   setSearchForm,
   subscribeSearchForm,
   type SearchForm,
@@ -31,39 +33,43 @@ import { useSearchControls } from "../../hooks/useSearchControls";
 const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 
 /**
- * 全工程搜索（M2）。现在是文件页侧栏的一个视图，不再占主导航页签。
+ * 完整工程搜索：在顶部快速导航浮层内复用条件、结果与打开管道。
  *
  * 交互取舍（都照成熟工具的实际做法定的，理由见各处注释）：
  * - **不边输边搜**：后端是真实扫盘（7000 文件约 0.6s），边输边搜会把磁盘打满、
  *   结果还一直跳。回车或按「搜索」才真正执行——Eclipse 的 Ctrl+H 也是这个模型。
- * - **选项常显**：不学 VS Code 把过滤收进「⋯」——收纳后不给快捷键基本想不起来。
+ * - **范围与文本选项常显**：浮层内的文件过滤与替换放在「更多」。
  * - **点命中打开文件并定位行**：调用方通过 `onOpenFile` 接到文件页的打开管道。
  * - **默认搜全部关联工程**：依赖链上的改动（接口在 A 工程、调用在 B 工程）是 NC
  *   二开的日常，只搜当前工程会把跨工程引用漏掉。替换与「编辑匹配」仍只对当前
  *   工作区开放——一次改写多个工程不可撤销，确认框也列不清跨工程的改动面。
  *
  * 条件栏在 `search/SearchBar`，结果区在 `search/SearchResults`；本文件只做取数与接线。
- * 组件保持「纯内容」：不自己往停靠区 portal，文件页把它放进侧栏槽位里。
+ * 组件保持「纯内容」：浮层负责入口输入与焦点，本组件负责条件与结果。
  */
 export function SearchTab({
   projects,
   onOpenFile,
   onOpenJarClass,
   onOpenSrcNote,
+  onOpenLibraryFile = hit => requestSearchOpen({ kind: "library", hit }),
+  embedded = false,
 }: {
   /** 关联工程（含当前工作区）；「全部工程」搜索与结果分组都靠它。 */
+  embedded?: boolean;
   projects: LinkedProject[];
   onOpenFile: (path: string, line: number, column?: number) => void;
   /** 打开依赖 jar 里的某个 class（反编译查看）。 */
   onOpenJarClass: (jar: string, className: string) => void;
   /** 打开源码包内某个 .java（跳到指定行，看到带注释的原始源码）。 */
   onOpenSrcNote: (jar: string, className: string, line: number) => void;
+  onOpenLibraryFile?: (hit: LibraryHit) => void;
 }) {
   // 直接订阅模块仓库，不留本地副本：applyWorkspace 会调 resetSearchForm 清结果，
   // 本页被 ActivityPanel 保活、不会重新挂载——本地 useState 副本会让旧工作区的
   // 结果一直挂在屏幕上（替换虽被 stale 挡住，界面却自相矛盾）。
   const form = useSyncExternalStore(subscribeSearchForm, getSearchForm, getSearchForm);
-  const [history, setHistory] = useState<string[]>(loadHistory);
+  const history = loadHistory();
   const [editing, setEditing] = useState(false);
   // 「在跑」也读仓库：组件卸载不代表后端那次全盘扫描停了
   const loading = form.running;
@@ -91,13 +97,14 @@ export function SearchTab({
 
   // 建包提示：首次打开/换工作区时在后台建内容包，这段时间搜索仍走磁盘。
   // 面板不见时连轮询都不启动；换工作区与每次搜索各唤醒一次。
-  const sideView = useSidebarView();
+  const palette = usePalette();
   const { status: packStatus, refresh: refreshPackStatus } = useSearchPackStatus(
-    sideView === "search",
+    palette.open && palette.mode === "search",
   );
   useEffect(() => {
     void refreshPackStatus();
   }, [root, refreshPackStatus]);
+  useEffect(() => () => cancelWorkspaceSearch(), []);
 
   // 业务组件清单（manifest）：既是「按组件」的范围来源，也是那个范围可不可用的判据。
   // 读不到就是空数组 → 范围芯片置灰，不让用户选到一个会静默变成全工程的范围。
@@ -120,66 +127,9 @@ export function SearchTab({
   const buildOptions = toSearchOptions;
 
   const run = async () => {
-    // running 从仓库读：连点两次时第二次的事件闭包还是上一次渲染的，
-    // 读组件 state 会漏掉「已经在跑」这个事实，变成两个全盘扫描并行
-    if (getSearchForm().running) return;
-    const q = form.query.trim();
-    if (!q) return;
-    const mine = nextSearchSeq();
-    // 条件与结果必须同源：这份快照既用于本次搜索，也用于之后的「全部替换」。
-    // 用表单实时值去替换，会在「搜完改词没重搜」时改写另一批文件。
-    const opts = buildOptions(form);
-    const scope = form.scope;
-    // 新搜索一开始，上次替换留下的「结果已过期」提示就作废了；
-    // 编辑预览里的行号也只对旧结果有效，跟着退出。
     setEditing(false);
-    update({ running: true, error: null, replaceOutcome: null });
-    try {
-      if (scope === "all") {
-        const projectOutcome = await searchProjects(opts);
-        if (mine !== currentSearchSeq()) return;
-        setHistory(pushHistory(q));
-        // outcome 必须清空：替换与编辑匹配只认它，全部工程的结果不能被它们当成
-        // 「当前工作区的结果」去改写磁盘。
-        update({
-          projectOutcome,
-          outcome: null,
-          outcomeRoot: root,
-          outcomeOptions: null,
-          // jar 两段跟着**这次搜索的词**走，不是输入框实时值（搜完再打字不该重发 IPC）
-          outcomeQuery: q,
-          collapsed: [],
-        });
-      } else {
-        const outcome = await searchWorkspace(opts, true);
-        if (mine !== currentSearchSeq()) return;
-        setHistory(pushHistory(q));
-        // 结果里存的是相对路径，必须记下它属于哪个工作区
-        update({
-          outcome,
-          projectOutcome: null,
-          outcomeRoot: root,
-          outcomeOptions: opts,
-          outcomeQuery: q,
-          collapsed: [],
-        });
-      }
-    } catch (e) {
-      if (mine !== currentSearchSeq()) return;
-      // 正则语法错之类：清掉旧结果，否则「报错了但结果还在」会让人以为搜成功了
-      update({
-        outcome: null,
-        projectOutcome: null,
-        outcomeRoot: null,
-        outcomeOptions: null,
-        outcomeQuery: null,
-        error: String(e),
-      });
-    } finally {
-      // 这次搜索可能刚给一个新工作区排了建包任务，重新问一次状态把提示点亮
-      void refreshPackStatus();
-      if (mine === currentSearchSeq()) update({ running: false });
-    }
+    await runWorkspaceSearch(root);
+    void refreshPackStatus();
   };
 
   /**
@@ -227,10 +177,16 @@ export function SearchTab({
   const currentName =
     projects.find((p) => p.root && root && p.root.toLowerCase() === root.toLowerCase())?.name ??
     (root ? baseName(root) : "");
+  const jarResults = <>
+    <LibraryFileResults onOpen={onOpenLibraryFile} />
+    <JarSymbolResults onOpenClass={onOpenJarClass} />
+    <SrcNoteResults onOpenSource={onOpenSrcNote} />
+  </>;
 
   return (
     <div className="wb-search-tool flex min-h-0 flex-1 flex-col bg-background">
       <SearchBar
+        embedded={embedded}
         form={form}
         history={history}
         loading={loading}
@@ -242,14 +198,12 @@ export function SearchTab({
         onScope={changeScope}
         onPickComponent={pickComponent}
         onSearch={() => void run()}
-        onKeyDown={onSearchKey}
+        onKeyDown={e => { if (!(embedded && e.key === "Escape")) onSearchKey(e); }}
       />
       <SearchPackNotice status={packStatus} />
-      {/* jar 内符号段：自己订阅仓库、自己取数，这里只负责给它一个打开管道 */}
-      <JarSymbolResults onOpenClass={onOpenJarClass} />
-      {/* jar 内源码注释段：与上一段互补（class 里没有注释，只能走 _src.jar） */}
-      <SrcNoteResults onOpenSource={onOpenSrcNote} />
-      {single && (
+      {/* 浮层里的依赖命中随结果滚动，避免占满低窗口；独立视图保留原布局。 */}
+      {!embedded && jarResults}
+      {single && (!embedded || form.more) && (
         <ReplaceBar
           form={form}
           update={update}
@@ -269,13 +223,15 @@ export function SearchTab({
         />
       ) : (
         <SearchResults
+          embedded={embedded}
+          supplements={embedded ? jarResults : undefined}
           form={form}
           update={update}
           loading={loading}
           onOpen={open}
           resolvePath={resolvePath}
           onEdit={
-            single && root && !stale && form.outcome ? () => setEditing(true) : undefined
+            single && root && !stale && !loading && !form.outcome?.truncated && !form.outcome?.cancelled && form.outcomeOptions && sameSearchCriteria(form.outcomeOptions, buildOptions(form)) ? () => setEditing(true) : undefined
           }
         />
       )}

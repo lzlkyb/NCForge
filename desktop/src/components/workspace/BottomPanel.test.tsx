@@ -106,16 +106,16 @@ describe("BottomPanel 页签条", () => {
     act(() => {
       tab("build")?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
     });
-    expect(onTab).toHaveBeenLastCalledWith("svc");
-    expect(document.activeElement).toBe(tab("svc"));
+    expect(onTab).toHaveBeenLastCalledWith("problems");
+    expect(document.activeElement).toBe(tab("problems"));
 
     act(() => {
-      tab("svc")?.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+      tab("problems")?.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
     });
-    expect(onTab).toHaveBeenLastCalledWith("debug");
+    expect(onTab).toHaveBeenLastCalledWith("build");
 
     act(() => {
-      tab("debug")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+      tab("build")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
     });
     expect(onTab).toHaveBeenLastCalledWith("problems");
   });

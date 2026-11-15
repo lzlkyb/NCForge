@@ -2,12 +2,14 @@ import { type EncodingMark } from "../../lib/workspace";
 import type { TabMeta } from "../../lib/workspaceSession";
 import { WORKSPACE_LABELS } from "../layout/SideNav";
 import { LangBadge } from "./LangBadge";
-import { ServiceStatusButton } from "./ServiceStatusButton";
 import { HotswapStatusChip } from "./HotswapStatusChip";
 import { OperationStatus } from "../ui/OperationStatus";
 import { StatusContributions } from "./StatusContributions";
 import { FileStatusMenu } from "./FileStatusMenu";
 import { ReqStatusChip } from "./ReqStatusChip";
+import { useHistoryRestorePath } from "../../lib/historyRestoreGuard";
+import { libraryLocation } from "../../lib/libraryFiles";
+import { isUnsaved } from "../../lib/tabDirty";
 
 /**
  * 外壳状态栏（工作台里只有这一条）。
@@ -42,6 +44,7 @@ export function ShellStatusBar({
   // 挂在父组件上会拖着整棵文件树一起重渲染。
   const toolMode = activeTool !== "files";
   const toolLabel = WORKSPACE_LABELS[activeTool];
+  const restoring = !!useHistoryRestorePath();
   return (
     <footer className="wb-status">
       {toolMode ? (
@@ -51,10 +54,9 @@ export function ShellStatusBar({
         </>
       ) : (
         <>
-          <span className="wb-status-path" title={active?.path}>
-            {active ? (active.virtual ? `${active.name} · jar 内` : active.path) : root}
+          <span className="wb-status-path" title={active ? libraryLocation(active.path) ?? active.path : undefined}>
+            {active ? (libraryLocation(active.path) ?? (active.virtual ? `${active.name} · jar 内` : active.path)) : root}
           </span>
-          {active && (active.dirty || active.eolChanged) && <span className="wb-status-unsaved" title="当前文件有未保存修改">未保存</span>}
           <LangBadge activePath={active && !active.virtual ? active.path : null} />
         </>
       )}
@@ -64,8 +66,7 @@ export function ShellStatusBar({
       <span className="wb-status-sp" />
       {saving && <span className="wb-status-warn">保存中…</span>}
       <HotswapStatusChip />
-      <ServiceStatusButton />
-      <button type="button" className="wb-status-btn" onClick={onTogglePanel}>
+      <button type="button" className="wb-status-btn" disabled={restoring} title={restoring ? "正在恢复本地版本" : undefined} onClick={onTogglePanel}>
         {panelOpen ? "隐藏面板" : "显示面板"}
       </button>
       {!toolMode && active && (
@@ -83,6 +84,7 @@ export function ShellStatusBar({
             </span>
           )}
           <FileStatusMenu active={active} />
+          {isUnsaved(active) && <span className="wb-status-unsaved">未保存</span>}
         </>
       )}
     </footer>

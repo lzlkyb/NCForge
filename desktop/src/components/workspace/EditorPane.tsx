@@ -6,6 +6,9 @@ import { readGroupView, storeGroupView } from "../../lib/editorGroupViews";
 import type { EditorGroupId } from "../../lib/editorGroups";
 import { registerLangProviders } from "../../lib/langProviders";
 import { registerExtraLangProviders } from "../../lib/langProvidersExtra";
+import { attachNavigationActions } from "../../lib/navigationHover";
+import { registerJavaEditingProviders, attachJavaEditing } from "../../lib/javaEditing";
+import { registerNavigationExtras } from "../../lib/navigationExtras";
 import { registerEditorKeys, releaseCurrentEditor, setCurrentEditor } from "../../lib/editorActions";
 import { registerJavaSqlActions } from "../../lib/javaSqlActions";
 import { registerJavaTemplates } from "../../lib/liveTemplates";
@@ -70,6 +73,8 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     // 引用 / 格式化 / 快速修复 / 跳实现：与上面四个 provider 同一根管道，
     // 只是这些能力 Monaco 的右键菜单和命令面板会自动接上去，不用自己造 UI
     registerExtraLangProviders();
+    registerJavaEditingProviders();
+    registerNavigationExtras();
     // 代码模板（sout / fori / ifn…）：纯编辑器能力，不依赖语言服务是否就绪
     registerJavaTemplates();
     // 调试悬停：只在暂停时求值，其余时间不接管悬停
@@ -115,6 +120,8 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
       }, Math.max(500, prefs.autoSaveDelayMs));
     });
     const sqlActions = registerJavaSqlActions(editor);
+    const navigationOff = attachNavigationActions(editor);
+    const javaEditingOff = attachJavaEditing(editor);
     // 行尾诊断（Error Lens）：数据来自 diagStore，开关在设置 → 编辑器
     const lensOff = attachErrorLens(editor);
     // 行号槽书签：数据来自 lib/bookmarks（F11 增删、书签面板共用同一份）
@@ -130,6 +137,8 @@ export function EditorPane({ activePath, readOnly, reveal, heavy, onCursor, onSa
     const focusSub = editor.onDidFocusEditorText(() => { focusRef.current.onFocus?.(); setCurrentEditor(editor); const pos = editor.getPosition(); if (pos) onCursorRef.current(pos.lineNumber, pos.column); });
     editorRef.current = editor;
     return () => {
+      navigationOff();
+      javaEditingOff();
       sqlActions.forEach((d) => d.dispose());
       lensOff();
       bookmarkOff();

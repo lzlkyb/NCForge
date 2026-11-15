@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesTab } from "./FilesTab";
 import { WorkbenchFrame } from "../workspace/WorkbenchFrame";
 import { setSession } from "../../lib/workspaceSession";
-import { setSidebarView } from "../../lib/sidebarView";
+import { closePalette, getPalette, openPalette } from "../../lib/paletteStore";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), toast: vi.fn() }));
 // 服务面板与状态栏胶囊都走 useQuery（server-status）：这里给一份空状态，不让测试去碰真实后端
@@ -140,7 +140,7 @@ afterEach(async () => {
   container.remove();
   vi.unstubAllGlobals();
   // 侧栏视图与底部标签都是模块级仓库：不还原，后面的用例会互相污染
-  setSidebarView("files");
+  closePalette();
   setSession({ panelTab: "problems", panelOpen: true, serviceExpanded: false });
 });
 
@@ -175,20 +175,19 @@ describe("文件页", () => {
     expect(container.textContent).toContain("资源管理器");
   });
 
-  it("搜索是文件侧栏视图，NC 服务在底部面板，两者都不换掉编辑器节点", async () => {
+  it("搜索入口打开顶部浮层，文件树与 NC 服务保留编辑器节点", async () => {
     mocks.invoke.mockImplementation(async (cmd: string) => cmd === "get_workspace" ? ROOT : []);
     await render();
     const editor = container.querySelector('[data-testid="editor-pane"]');
     expect(editor).toBeTruthy();
 
-    // 搜索并进侧栏：文件树槽位换成搜索表单，编辑器原样保留
-    await act(async () => setSidebarView("search"));
+    const tree = container.querySelector(".wb-tree");
+    await act(async () => openPalette("search"));
+    expect(getPalette()).toMatchObject({ open: true, mode: "search" });
     expect(container.querySelector('[data-testid="editor-pane"]')).toBe(editor);
-    expect(container.querySelector(".wb-tree input[list]")).toBeTruthy();
-    expect(container.querySelector(".wb-pane-title")?.textContent).toContain("全工程搜索");
-    await act(async () => setSidebarView("files"));
-    expect(container.querySelector(".wb-tree")?.textContent).toContain("资源管理器");
-    expect(container.querySelector('[aria-label="全工程搜索"]')).toBeTruthy();
+    expect(container.querySelector(".wb-tree")).toBe(tree);
+    expect(container.querySelector(".wb-tree input[list]")).toBeNull();
+    await act(async () => closePalette());
 
     // 文档型工具仍然占文档区，编辑器留在 DOM 里
     await render("db", <DockRegion region="document"><div>SQL 查询</div></DockRegion>);
@@ -245,13 +244,13 @@ describe("文件页", () => {
     });
     await render();
 
-    // 资源操作集中在 portal 菜单，打开后仍可访问三个既有动作。
+    // 资源操作只放新建；搜索与工程切换在顶栏统一入口。
     const resourceMenu = container.querySelector<HTMLButtonElement>('[aria-label="更多资源操作"]')!;
     await act(async () => resourceMenu.click());
     const resourceActions = Array.from(document.querySelectorAll('[role="menuitem"]')).map(item => item.textContent);
     expect(resourceActions).toContain("新建文件");
     expect(resourceActions).toContain("新建文件夹");
-    expect(resourceActions).toContain("更换工作区目录");
+    expect(resourceActions).not.toContain("更换工作区目录");
     await act(async () => resourceMenu.click());
     // 标签 + 只读徽标 + 编译按钮
     expect(container.querySelector(".wb-tab-name")?.textContent).toBe("A.java");

@@ -11,6 +11,7 @@ import { Breadcrumb } from "./Breadcrumb";
 import { EditorNavRow, type EditorNavigation } from "./EditorNavRow";
 import type { useFileSession } from "../../hooks/useFileSession";
 import "../../editor-groups.css";
+import { useHistoryRestorePath, isHistoryRestoring } from "../../lib/historyRestoreGuard";
 
 export function EditorGroupsPane({ root, tabs, session, reveal, tools, nav }: {
   root: string; tabs: TabMeta[]; session: ReturnType<typeof useFileSession>;
@@ -20,6 +21,7 @@ export function EditorGroupsPane({ root, tabs, session, reveal, tools, nav }: {
   nav?: EditorNavigation | null;
 }) {
   const groups = useWorkspaceSelector(s => s.editorGroups) ?? emptyEditorGroups();
+  useHistoryRestorePath();
   const host = useRef<HTMLDivElement>(null), cleanup = useRef<(() => void) | null>(null);
   const [width, setWidth] = useState(0), compact = width > 0 && width < 850;
   useLayoutEffect(() => {
@@ -31,6 +33,7 @@ export function EditorGroupsPane({ root, tabs, session, reveal, tools, nav }: {
     if (getSession().editorGroups?.focused !== group) setSession({ editorGroups: old => ({ ...(old ?? emptyEditorGroups()), focused: group }) });
   };
   const closeView = (group: EditorGroupId, path: string) => {
+    if (isHistoryRestoring(path)) return;
     const current = getSession().editorGroups ?? emptyEditorGroups(), other = group === "left" ? "right" : "left";
     if (current[other].includes(path)) setSession({ editorGroups: removeGroupView(current, group, path) });
     else session.closeTab(path);
@@ -86,12 +89,12 @@ export function EditorGroupsPane({ root, tabs, session, reveal, tools, nav }: {
           }}
           onPin={session.pin} onOpenSplit={path => void session.openSplit(path)} onCloseSplit={session.closeSplit}
           onMoveGroup={path => setSession({ tabs: tabs => tabs.map(tab => tab.path === path && tab.preview ? { ...tab, previewGroup: group === "left" ? "right" : "left" } : tab), editorGroups: old => moveGroupFile(old ?? emptyEditorGroups(), group, path) })} />
-        {(active || split) && (focused && active && nav ? <EditorNavRow {...nav} active={active} heavy={(active.lines ?? 0) > LARGE_FILE_LINES} /> :
+        {(active || split) && (focused && active && nav ? <EditorNavRow {...nav} active={active} /> :
           <div className="wb-crumb-row wb-group-path" role="group" aria-label={`${group === "left" ? "左" : "右"}编辑器组路径`}>
             {active ? <Breadcrumb root={root} active={active} showSymbols={false} /> : <span className="wb-group-path-empty">尚未打开文件</span>}
           </div>)}
         <div id={`wb-editor-${group}-surface`} role="tabpanel" aria-label={`${group === "left" ? "左" : "右"}编辑器组内容`} className="wb-editor-body">
-          <EditorPane groupId={group} focused={focused} onFocus={() => focus(group)} activePath={activePath} readOnly={active?.readOnly ?? false} heavy={(active?.lines ?? 0) > LARGE_FILE_LINES}
+          <EditorPane groupId={group} focused={focused} onFocus={() => focus(group)} activePath={activePath} readOnly={!!active?.readOnly || !!activePath && isHistoryRestoring(activePath)} heavy={(active?.lines ?? 0) > LARGE_FILE_LINES}
             reveal={focused && (!reveal?.group || reveal.group === group) && (!reveal?.path || filePathKey(reveal.path) === filePathKey(activePath ?? "")) ? reveal : null} onCursor={(line, column) => { if (getSession().editorGroups?.focused === group) setCursor(line, column); }}
             onSave={prepare => { if (activePath) void session.saveFile(activePath, false, undefined, prepare); }} />
           {!active && <EmptyEditor root={root} onOpen={path => { focus(group); void session.openFile(path); }} />}

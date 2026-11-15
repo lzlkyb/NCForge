@@ -4,16 +4,19 @@ import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { useDialogDismiss } from "../../hooks/useDialogDismiss";
 import { createJavaType, javaPreview, type JavaKind, type JavaPreview } from "../../lib/workspace";
+import { getJavaFileHeader, saveJavaFileHeader } from "../../lib/javaTemplateStore";
+import { toast } from "../ui/toast";
 
 const KINDS: { kind: JavaKind; label: string; hint: string }[] = [
   { kind: "class", label: "类", hint: "class" },
   { kind: "interface", label: "接口", hint: "interface" },
   { kind: "enum", label: "枚举", hint: "enum" },
+  { kind: "exception", label: "异常", hint: "Exception" },
   { kind: "bgplugin", label: "后台插件", hint: "NC 任务" },
 ];
 
 /** NC 的接口都叫 `IXxx`：名字这样开头就默认选接口（用户手动选过类型后不再自动切）。 */
-export const guessKind = (name: string): JavaKind => (/^I[A-Z]/.test(name) ? "interface" : "class");
+export const guessKind = (name: string): JavaKind => (/Exception$/.test(name) ? "exception" : /^I[A-Z]/.test(name) ? "interface" : "class");
 
 /** 把目录显示成相对工作区根的写法，找不到就原样给。 */
 const relPath = (root: string, path: string) => {
@@ -40,35 +43,39 @@ export function NewJavaTypeDialog({
 }) {
   const { closing, dismiss } = useDialogDismiss(onClose, true);
   const [kind, setKind] = useState<JavaKind>("class");
-  const [picked, setPicked] = useState(false);
+  const picked = useRef(false);
   const [name, setName] = useState("");
+  const [header, setHeader] = useState(getJavaFileHeader);
   const [preview, setPreview] = useState<JavaPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const seq = useRef(0);
+  const previewKey = useRef("");
 
   useEffect(() => {
     const id = ++seq.current;
     const timer = setTimeout(() => {
-      javaPreview(parent, name, kind)
-        .then((p) => { if (id === seq.current) setPreview(p); })
+      javaPreview(parent, name, kind, header)
+        .then((p) => { if (id === seq.current) { previewKey.current = `${parent}:${name}:${kind}:${header}`; setPreview(p); } })
         .catch((e) => { if (id === seq.current) setFailure(String(e)); });
     }, 120);
     return () => clearTimeout(timer);
-  }, [parent, name, kind]);
+  }, [parent, name, kind, header]);
 
   const onName = (value: string) => {
     const v = value.replace(/\.java$/i, "").trim();
     setName(v);
     setFailure(null);
-    if (!picked) setKind(guessKind(v));
+    if (!picked.current) setKind(guessKind(v));
   };
-  const canCreate = !!preview && !preview.error && !busy && !closing && name !== "";
+  const canCreate = !!preview && previewKey.current === `${parent}:${name}:${kind}:${header}` && !preview.error && !busy && !closing && name !== "";
   const submit = async () => {
     if (!canCreate) return;
     setBusy(true);
     try {
-      const path = await createJavaType(parent, name, kind);
+      const remembered = saveJavaFileHeader(header);
+      const path = await createJavaType(parent, name, kind, header);
+      if (!remembered) toast("文件已创建，说明未能保存到本机，下次不会自动沿用", "warning");
       dismiss(() => onCreated(path));
     } catch (e) {
       setFailure(String(e));
@@ -79,10 +86,10 @@ export function NewJavaTypeDialog({
   const nameError = failure ?? (name === "" ? null : preview?.error ?? null);
 
   return (
-    <Modal open={!closing} ariaLabel="新建 Java 类型" onClose={() => dismiss()} className="nj-dialog">
+    <Modal open={!closing} ariaLabel="新建 Java 类型" onClose={() => { if (!busy) dismiss(); }} className="nj-dialog">
       <div className="nj-head">
         新建 Java 类型
-        <button type="button" className="nj-x" aria-label="关闭" onClick={() => dismiss()}>
+        <button type="button" disabled={busy} className="nj-x" aria-label="关闭" onClick={() => dismiss()}>
           <Icon name="close" size={14} />
         </button>
       </div>
@@ -96,8 +103,9 @@ export function NewJavaTypeDialog({
                 type="button"
                 role="radio"
                 aria-checked={kind === k.kind}
+                disabled={busy}
                 className="nj-kind"
-                onClick={() => { setKind(k.kind); setPicked(true); }}
+                onClick={() => { setKind(k.kind); picked.current = true; }}
               >
                 <b>{k.label}</b>
                 <small>{k.hint}</small>
@@ -114,6 +122,7 @@ export function NewJavaTypeDialog({
               value={name}
               spellCheck={false}
               autoComplete="off"
+              disabled={busy}
               onChange={(e) => onName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(); }
@@ -133,6 +142,7 @@ export function NewJavaTypeDialog({
           <span>位置</span>
           <code>{relPath(root, parent)}</code>
         </div>
+        <details><summary className="cursor-pointer text-sm">文件说明与版权头（可选）</summary><label className="mt-2 block text-xs text-muted-foreground">下次新建会沿用；中文说明按 UTF-8 写入，换行跟随目录。<textarea aria-label="文件说明与版权头" disabled={busy} maxLength={2000} className="nj-header input-surface mt-1 h-20 w-full" value={header} onChange={event => { setHeader(event.target.value); setFailure(null); }} /></label></details>
         {preview && !preview.error && preview.text && (
           <div>
             <span className="nj-lbl">将写入</span>
@@ -144,7 +154,7 @@ export function NewJavaTypeDialog({
         <span className="nj-hint">
           {preview?.error && name === "" ? "名字需以大写字母开头，只含字母、数字、下划线" : `换行符跟随同目录：${preview?.eol ?? "CRLF"}`}
         </span>
-        <Button variant="outline" size="sm" onClick={() => dismiss()}>取消</Button>
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => dismiss()}>取消</Button>
         <Button size="sm" disabled={!canCreate} isLoading={busy} onClick={() => void submit()}>创建并打开</Button>
       </div>
     </Modal>

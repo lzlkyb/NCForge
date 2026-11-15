@@ -18,6 +18,7 @@ export interface PendingDelete {
   /** 别处还提到这个类的地方（只对 .java 有意义，删除确认里提示用）。 */
   refs: number;
   refSamples: string[];
+  referenceCheck?: "text" | "incomplete" | "failed";
 }
 
 /** 删除流程：数文件 → 确认 → 删 → 清缓存 → 通知调用方关标签。 */
@@ -66,16 +67,18 @@ export function useTreeDelete({
     // 让用户在确认框里就能看出这一刀会不会削到别人
     let refs = 0;
     let refSamples: string[] = [];
+    let referenceCheck: "text" | "incomplete" | "failed" | undefined;
     if (!target.isDir) {
       try {
         const r = await checkReferences(target.path);
         refs = r.count;
         refSamples = r.samples;
+        if(/\.java$/i.test(target.path))referenceCheck=r.truncated?"incomplete":"text";
       } catch {
-        // 查不到就当没有引用：这是提示，不该因为它让删除按钮点不动
+        referenceCheck="failed";
       }
     }
-    setPendingDelete({ ...target, files, labels, unsaved, refs, refSamples });
+    setPendingDelete({ ...target, files, labels, unsaved, refs, refSamples,referenceCheck });
   };
 
   /** 删掉目录后，缓存里以它为前缀的键都失效了。 */

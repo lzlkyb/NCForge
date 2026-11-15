@@ -42,6 +42,9 @@ vi.mock("../ui/ConfirmDialog", () => ({
 }));
 vi.mock("./MultiFileDiffPanel", () => ({ MultiFileDiffPanel: () => <div data-testid="multi-diff" /> }));
 vi.mock("./ReviewChecklist", () => ({ ReviewChecklist: () => <div data-testid="checklist" /> }));
+// 时间线面板只用子面板的展示能力；Monaco 一进 jsdom 就会在加载期调用 document.queryCommandSupported。
+vi.mock("./ChangedLinesBar", () => ({ ChangedLinesBar: () => <div data-testid="changed-bar" /> }));
+vi.mock("./FileHistoryView", () => ({ FileHistoryView: () => <div data-testid="file-history" /> }));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

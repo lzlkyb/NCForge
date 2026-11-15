@@ -3,7 +3,7 @@
 // 抽出来的原因：FileTree 还要管菜单、键盘、筛选、自动定位，行渲染本身（含递归与
 // 压缩中间包）就有 70 行；两者混在一起会顶爆单文件 300 行的门禁。
 //
-// 递归渲染：目录展开时直接渲染它的下一层，不额外建虚拟列表（NC 工程一个目录最多几百项）。
+// 递归保留树节点；大目录的固定高兄弟行分批跳过屏幕外排版。
 import { useJavaTreeKinds } from "../../hooks/useJavaTreeKinds";
 import type { ProblemMark } from "../../lib/problemMarks";
 import { diagnosticPathKey } from "../../lib/diagnosticScope";
@@ -13,6 +13,7 @@ import { hasJavaMembers, type TreeMembers, type JavaTreeMember } from "../../lib
 import { JavaMemberRows } from "./JavaMemberRows";
 import { TreeEditRow } from "./TreeEditRow";
 import { TreeDirRow, TreeFileRow, TreeRowNote } from "./TreeRow";
+import { treeRowChunks } from "./TreeRowChunks";
 import { joinPath, type EncodingMark } from "../../lib/workspace";
 import { chainOpen, dirChain } from "../../lib/treeCompact";
 import { bcBadge, type ComponentIndex } from "../../lib/ncManifest";
@@ -192,5 +193,5 @@ export function TreeRows({ dir, depth, ctx }: { dir: string; depth: number; ctx:
         selected={ctx.selectedPath} onJump={member => ctx.onOpenMember(full, member)} />);
     }
   }
-  return <>{rows}</>;
+  return <>{treeRowChunks(rows)}</>;
 }

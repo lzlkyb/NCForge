@@ -20,16 +20,20 @@ import { countErrors, mergeProblems } from "../../lib/problemList";
 import { DevelopmentFlowControl } from "../services/DevelopmentFlowControl";
 import { useQueryClient } from "@tanstack/react-query";
 import { PanelTabs } from "./PanelTabs";
+import { useHistoryRestorePath } from "../../lib/historyRestoreGuard";
 // 懒加载：改动面板会拉起 Monaco 比较器，静态 import 会让整个底部面板的
 // jsdom 测试在 import 阶段就加载 monaco-editor（document.queryCommandSupported 缺失）。
 const ChangeTimelinePanel = lazy(() =>
   import("./ChangeTimelinePanel").then((m) => ({ default: m.ChangeTimelinePanel })),
 );
+const JavaRunPanel = lazy(() => import("./JavaRunPanel").then(module => ({ default: module.JavaRunPanel })));
+const CodeRelationsPanel = lazy(() => import("./CodeRelationsPanel").then(module => ({ default: module.CodeRelationsPanel })));
 import { revealWorkbenchPanel, updateWorkbenchLayout, useWorkbenchLayout } from "../../lib/workbenchLayout";
 
-export type PanelTab = "problems" | "changes" | "build" | "svc" | "calls" | "types" | "todo" | "bookmarks" | "debug";
+export type PanelTab = "problems" | "changes" | "run" | "build" | "svc" | "calls" | "types" | "relations" | "todo" | "bookmarks" | "debug" | "tests";
 
 interface Props {
+  onRestored?: (path: string) => Promise<void> | void;
   root: string;
   tab: PanelTab;
   onTab: (t: PanelTab) => void;
@@ -65,7 +69,7 @@ interface Props {
  * 底部面板：问题列表、编译输出、NC 服务（服务页把自己的卡片与日志停靠到「NC 服务」标签的宿主里）。
  * 搜索结果留在侧栏、SQL 结果留在 SQL 标签页——它们和各自的输入表单是一体的，拆出来反而来回跳。
  */
-export function BottomPanel({ root, tab, onTab, running, result, log: logProp, onOpenProblem, onOpenAt, inspect, onNextProblem, onPrevProblem, onCancel, onClose, activePath = null, build, compileAll }: Props) {
+export function BottomPanel({ root, tab, onTab, running, result, log: logProp, onOpenProblem, onOpenAt, inspect, onNextProblem, onPrevProblem, onCancel, onClose, activePath = null, build, compileAll, onRestored }: Props) {
   const queryClient = useQueryClient();
   const serviceExpanded = useWorkspaceSelector(s => !!s.serviceExpanded);
   const layout = useWorkbenchLayout();
@@ -78,6 +82,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
   // 标签上的小灯：调试停在某一行时，没开面板也能看到「现在断住了」
   const debug = useDebugSnapshot();
   const dock = useWorkbenchDock();
+  const restoring = !!useHistoryRestorePath();
 
   // D4 诊断：ecj 原文之外的推断（有源码没产物 / 工程被停用 / 产物比源码旧）。
   // 单独一段显示，不算进错误数——它是「为什么编不过」的解释，不是又一条报错。
@@ -94,10 +99,10 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
   return (
     <section className="wb-panel" data-compact={compact || undefined}>
       <div className="wb-panel-tabs">
-        <PanelTabs tab={tab} onTab={onTab} errors={errors} paused={debug.anyPaused} />
+        <PanelTabs tab={tab} onTab={onTab} errors={errors} paused={debug.anyPaused} disabled={restoring} />
         <span className="wb-status-sp" />
         {tab === "svc" && <DevelopmentFlowControl compileAll={compileAll} onChanged={() => { void queryClient.invalidateQueries({ queryKey: ["server-status"] }); void queryClient.invalidateQueries({ queryKey: ["client-status"] }); void queryClient.invalidateQueries({ queryKey: ["deploy-status"] }); }} />}
-        <button type="button" className="wb-status-btn sc-expand-button" aria-pressed={expanded} onClick={toggleExpanded}><Icon name={expanded ? "collapse" : "expand"} size={16} />{expanded ? "恢复布局" : "展开阅读"}</button>
+        <button type="button" className="wb-status-btn sc-expand-button" disabled={restoring} aria-pressed={expanded} onClick={toggleExpanded}><Icon name={expanded ? "collapse" : "expand"} size={16} />{expanded ? "恢复布局" : "展开阅读"}</button>
         {tab === "problems" && merged.length > 0 && (
           <>
             <button type="button" className="wb-status-btn" title="跳到上一处问题" onClick={onPrevProblem}>
@@ -118,12 +123,13 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
             取消编译
           </button>
         )}
-        <button type="button" className="wb-icon-btn" title="关闭面板" aria-label="关闭面板" onClick={() => { updateWorkbenchLayout({ expanded: null }); setSession({ serviceExpanded: false }); onClose(); }}>
+        <button type="button" className="wb-icon-btn" disabled={restoring} title="关闭面板" aria-label="关闭面板" onClick={() => { updateWorkbenchLayout({ expanded: null }); setSession({ serviceExpanded: false }); onClose(); }}>
           <Icon name="close" size={16} />
         </button>
       </div>
 
       <div className="wb-tabpanel" role="tabpanel" id="wb-panel-body" aria-labelledby={`wb-ptab-${tab}`} hidden={compact}>
+      {["run", "build", "svc", "debug", "tests"].includes(tab) && <div className="wb-panel-note" role="tablist" aria-label="运行视图">{(["build", "svc", "debug", "tests"] as PanelTab[]).map(view => <button key={view} type="button" role="tab" aria-selected={view === tab || tab === "run" && view === "build"} className="wb-status-btn" onClick={() => onTab(view)}>{view === "build" ? "编译输出" : view === "svc" ? "NC 服务" : view === "debug" ? "调试" : "Java 运行 / 测试"}</button>)}</div>}
       {(tab === "build" || tab === "problems") && !running && (compileResourceMissing || log.some(line => missingResourceId(line) === "ecj")) && <div className="wb-banner"><span>缺少 Java 编译器，下载完成后请重新编译。</span><ResourceDownloadButton id="ecj" /></div>}
       {tab === "problems" && (
         <ProblemsView
@@ -142,7 +148,7 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
           onOpenAt={onOpenAt}
         />
       )}
-      {tab === "build" && (
+      {(tab === "build" || tab === "run") && (
         <BuildOutputView
           root={root}
           log={log}
@@ -162,14 +168,16 @@ export function BottomPanel({ root, tab, onTab, running, result, log: logProp, o
         </div>
       )}
       {tab === "types" && <TypeHierarchyPanel />}
+      {tab === "relations" && <Suspense fallback={<div className="ncf-empty">正在打开代码关系…</div>}><CodeRelationsPanel /></Suspense>}
       {tab === "changes" && (
         <Suspense fallback={<div className="ncf-empty">正在打开改动面板…</div>}>
-          <ChangeTimelinePanel root={root} activePath={activePath} onOpenAt={onOpenAt} />
+          <ChangeTimelinePanel root={root} activePath={activePath} onOpenAt={onOpenAt} onRestored={onRestored} />
         </Suspense>
       )}
       {tab === "todo" && <TodoPanel root={root} onOpenAt={onOpenAt} />}
       {tab === "bookmarks" && <BookmarkPanel root={root} onOpenAt={onOpenAt} />}
       {tab === "debug" && <DebugPanel onOpenAt={onOpenAt} />}
+      {tab === "tests" && <Suspense fallback={<div className="ncf-empty">正在打开运行工具…</div>}><JavaRunPanel /></Suspense>}
       <div ref={dock?.bindHost("bottom")} className="wb-panel-body wb-svc-host" hidden={tab !== "svc"} />
       </div>
     </section>

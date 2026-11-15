@@ -1,7 +1,6 @@
 import { useContext, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
 import type { EncodingMark } from "../../lib/workspace";
 import type { TabMeta } from "../../lib/workspaceSession";
-import { isUnsaved } from "../../lib/tabDirty";
 import type { FileTreeHandle } from "./FileTree";
 import type { useFileSession } from "../../hooks/useFileSession";
 import { FileTree } from "./FileTree";
@@ -20,13 +19,15 @@ import { ExtractSqlDialog } from "../db/ExtractSqlDialog";
 import { useWorkbenchDock } from "./WorkbenchDock";
 import { useFileSlot } from "./useFileSlot";
 import { OperationStatus } from "../ui/OperationStatus";
-import { Icon } from "../ui/icon";
-import { SearchTab } from "../tabs/SearchTab";
-import { setSidebarView, useSidebarView } from "../../lib/sidebarView";
-import { ServiceStatusButton } from "./ServiceStatusButton";
+import { useSearchOpenRequests } from "../../hooks/useSearchOpenRequests";
 import type { PanelTab } from "./BottomPanel";
 import type { LinkedProject } from "../../lib/linkedProjects";
 import { jarClassUri } from "../../lib/jarSymbolSearch";
+import { libraryUri } from "../../lib/libraryFiles";
+import { NavigationChoices } from "./NavigationChoices";
+import { JavaEditingDialogs } from "./JavaEditingDialogs";
+import { RefactorWorkbenchHost } from "./RefactorWorkbenchHost";
+import { ProjectWorkbenchHost } from "./ProjectWorkbenchHost";
 
 /**
  * 文件页四个槽位（树 / 标签条 / 编辑器 / 状态栏）的实际渲染。
@@ -59,7 +60,7 @@ export interface FilePaneModel {
   recentRoots: string[];
   panelOpen: boolean;
   panelTab: PanelTab;
-  panels: { outline: boolean; outlinePinned: boolean; history: boolean; generate: boolean };
+  panels: { outline: boolean; outlinePinned: boolean; generate: boolean };
   compiling: boolean;
   canBack: boolean;
   canForward: boolean;
@@ -109,16 +110,15 @@ export function FilePaneSlots({
   const panelExpanded = dock?.panelExpanded ?? false;
   const {
     root, projects, activeTool, tabs, activePath, active, splitPath, activeMark,
-    showLargeHint, heavyFile, conflictPath, encodingIssue, saving, reveal,
-    recentRoots, panelOpen, panelTab, panels, compiling, canBack, canForward, treeRef,
+    showLargeHint, conflictPath, encodingIssue, saving, reveal,
+    panelOpen, panelTab, panels, compiling, canBack, canForward, treeRef,
   } = model;
   const {
-    setPanels, setPanelOpen, applyRoot, openPath, compileActive,
+    setPanels, setPanelOpen, openPath, compileActive,
     compileModulePath, cleanModulePath, rebuildModulePath,
-    onDismissLargeHint, openRecentRoot, invalidateIndex,
+    onDismissLargeHint, invalidateIndex,
   } = actions;
 
-  const sideView = useSidebarView();
   const splitTab = splitPath ? tabs.find((t) => t.path === splitPath) ?? null : null;
   // NC 服务停靠在代码页；工具文档需要完整阅读区域，跨页返回时由导航恢复面板。
   const servicesPanel = panelTab === "svc";
@@ -128,71 +128,51 @@ export function FilePaneSlots({
    */
   const wantPanel = panelOpen && activeTool === "files" && (!documentOpen || servicesPanel || panelExpanded);
 
+  /**
+   * 从文件树 / 搜索结果打开一个文件：**先回代码面再打开**。
+   *
+   * `openFile` 只改会话里的标签与 activePath，它管不到外壳的代码面/文档面哪个在前台。
+   * 用户从任何地方点一个源码文件，期待的都是「右边出现代码」——所以这层出口统一补一次
+   * `showCode()`，别指望每个调用点自己记得。
+   */
+  const openInCode = (path: string, pos?: { line?: number; column?: number }) => {
+    dock?.showCode();
+    openPath(path, pos);
+  };
+
+  useSearchOpenRequests(request => {
+    dock?.showCode();
+    if (request.kind === "file") openPath(request.path, { line: request.line, column: request.column });
+    else if (request.kind === "library") session.openJdt(libraryUri(request.hit), request.hit.line, true, (request.hit.ranges[0]?.start ?? 0) + 1);
+    else session.openJdt(jarClassUri(request.jar, request.className, request.source), request.line);
+  });
+
   const tree = (
     <>
-      {sideView === "search" ? (
-        <>
-          <div className="wb-pane-title">
-            <span>全工程搜索</span>
-            <div className="wb-pane-acts">
-              <button
-                type="button"
-                className="wb-icon-btn"
-                title="返回文件树"
-                aria-label="返回文件树"
-                onClick={() => setSidebarView("files")}
-              >
-                <Icon name="close" size={14} />
-              </button>
-            </div>
-          </div>
-          <SearchTab
-            projects={projects}
-            onOpenFile={(path, line, column) => openPath(path, { line, column })}
-            onOpenJarClass={(jar, className) => session.openJdt(jarClassUri(jar, className), 1)}
-            onOpenSrcNote={(jar, className, line) =>
-              session.openJdt(jarClassUri(jar, className, true), line)
-            }
-          />
-        </>
-      ) : (
-        <>
-          <TreeHeader root={root} projectCount={projects.length} recents={recentRoots}
-            onOpen={(path) => void applyRoot(path)}
-            onOpenRecent={openRecentRoot}
+          <TreeHeader root={root} projectCount={projects.length}
             onCreateFile={() => treeRef.current?.startCreate("file")}
-            onCreateDir={() => treeRef.current?.startCreate("dir")}
-            onSearch={() => setSidebarView("search")} />
+            onCreateDir={() => treeRef.current?.startCreate("dir")} />
           <FileTree key={root} ref={treeRef} root={root} projects={projects} activePath={activePath}
-            onOpen={openPath} onPin={session.pin}
-            onCreated={(p) => { invalidateIndex(); void session.openFile(p); }}
+            onOpen={openInCode} onPin={session.pin}
+            onCreated={(p) => { invalidateIndex(); dock?.showCode(); void session.openFile(p); }}
             onRenamed={(a, b) => { invalidateIndex(); session.handleRenamed(a, b); }}
             onDeleted={(ps) => { invalidateIndex(); session.handleDeleted(ps); }}
             openPaths={tabs.map((t) => t.path)}
             onCompileModule={compileModulePath}
             onCleanModule={cleanModulePath}
             onRebuildModule={rebuildModulePath} />
-        </>
-      )}
     </>
   );
 
   const tabStrip = (
-    <EditorGroupTools root={root} session={session} compiling={compiling} canCompile={active !== null && !active.virtual} onCompile={() => void compileActive()} />
+    <EditorGroupTools root={root} session={session} compiling={compiling} canCompile={active !== null && !active.virtual} onCompile={() => void compileActive()}
+      reading={{ pinned: panels.outline && panels.outlinePinned, heavy: model.heavyFile, onTogglePinned: () => setPanels(p => ({ ...p, outline: !(p.outline && p.outlinePinned), outlinePinned: true })) }} />
   );
 
   const navigation: EditorNavigation | null = active ? {
-    active, root, canBack, canForward, heavy: heavyFile,
+    active, root, canBack, canForward,
     onBack: session.goBack, onForward: session.goForward, onJumpHistory: session.goToHistory,
     outlineOpen: panels.outline,
-    onToggleOutline: () => setPanels(p => ({ ...p, outline: !p.outline })),
-    history: {
-      open: panels.history,
-      onToggle: () => setPanels(p => ({ ...p, history: !p.history })),
-      onClose: () => setPanels(p => ({ ...p, history: false })),
-      dirty: isUnsaved(active),
-      onRestored: p => void session.reloadFile(p),
-    },
   } : null;
 
   const editor = (
@@ -222,6 +202,10 @@ export function FilePaneSlots({
 
   return (
     <TreeSvnProvider root={root}>
+      <NavigationChoices />
+      <JavaEditingDialogs />
+      <RefactorWorkbenchHost />
+      <ProjectWorkbenchHost />
       {slot("tree", <>{tree}<TreeSvnSummary /></>)}
       {/* 执行/分组工具已并入文件标签条（EditorGroupsPane → TabStrip），
           不再单独占一行 36px 的 `.wb-code-tools`。 */}
@@ -254,8 +238,6 @@ export function EmptyProjectSlots({
         <footer className="wb-status">
           <span className="wb-status-path wb-no-project">尚未打开工程</span>
           <OperationStatus compact/><span className="wb-status-sp" />
-          {/* 服务不依赖工作区：没开工程也要能从这里启动中间件 */}
-          <ServiceStatusButton />
         </footer>
       ))}
       {slot("output", servicesPanel ? output : null)}

@@ -7,7 +7,7 @@ import { artifactMarks } from "./artifactKind";
 import { OverrideEditor } from "./OverrideEditor";
 import { Icon } from "../ui/icon";
 import { FreshnessBadge } from "../ui/FreshnessBadge";
-import { Skeleton } from "../ui/Skeleton";
+import { LoadingState } from "../ui/LoadingState";
 import { toast } from "../ui/toast";
 import { useLinkedGraph } from "../../hooks/useLinkedGraph";
 import { useOverrideDraft } from "../../hooks/useOverrideDraft";
@@ -200,7 +200,7 @@ export const LinkedProjectsPanel = forwardRef<
           </div>
         )}
 
-        {!graph && loading && <Skeleton className="h-40" />}
+        {!graph && loading && <LoadingState className="h-40" label="正在读取关联项目…" />}
 
         <div className="lnk-anchor" ref={chainRef}>
           {graph && (

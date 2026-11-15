@@ -6,6 +6,7 @@ import { WorkbenchFrame } from "./WorkbenchFrame";
 import { DockRegion, useWorkbenchDock } from "./WorkbenchDock";
 import { ActivityPanel } from "../ui/ActivityPanel";
 import { getSideOpen, setSideOpen } from "../../lib/layoutStore";
+import { showWorkbenchDocument } from "../../lib/dockEvents";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let dispose = () => {};
@@ -17,6 +18,27 @@ function FakePanel() {
 afterEach(() => { dispose(); vi.unstubAllGlobals(); });
 
 describe("workbench docking", () => {
+  it("切换工具时保留文件树节点和原宽度，隐藏内容不另做一次尺寸继承", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false })));
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    dispose = () => { act(() => root.unmount()); host.remove(); };
+    const render = (activeTool: string) => act(async () => root.render(<WorkbenchFrame activeTool={activeTool}
+      tree={<div role="tree" />} tabs={null} editor={null} output={null} status={null} />));
+    await render("files");
+    const native = host.querySelector<HTMLElement>(".wb-tree-native")!, tree = native.firstElementChild;
+    const width = native.style.width;
+    await render("db");
+    expect(native.firstElementChild).toBe(tree);
+    expect(native.style.width).toBe(width);
+    expect(native.getAttribute("data-inactive")).toBe("true");
+    expect(native.getAttribute("aria-hidden")).toBe("true");
+    await render("meta");
+    expect(native.getAttribute("data-inactive")).toBe("true");
+    await render("files");
+    expect(native.hasAttribute("data-inactive")).toBe(false);
+    expect(native.firstElementChild).toBe(tree);
+  });
   it("窄窗口侧栏可以通过关闭按钮、正文遮罩和 Escape 收起，关闭后归还焦点", async () => {
     vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
     const wasOpen = getSideOpen();
@@ -173,8 +195,8 @@ describe("workbench docking", () => {
     const filter = host.querySelector<HTMLInputElement>('[aria-label="Log filter"]')!;
     filter.value = "SQL exception";
     expect(filter.closest(".wb-document-surface")).not.toBeNull();
-    expect(host.querySelectorAll("[data-page-panel]")).toHaveLength(1);
-    expect(host.querySelector("[data-page-panel]")?.classList.contains("wb-content-frame")).toBe(true);
+    expect(host.querySelectorAll(".wb-main-with-inspector")).toHaveLength(1);
+    expect(host.querySelector(".wb-main-with-inspector .wb-tree")).toBeNull();
     expect(host.querySelector<HTMLElement>(".wb-code-surface")?.hidden).toBe(true);
     expect(host.querySelector(".wb-layout")?.getAttribute("data-side-open")).toBe("false");
     expect(host.querySelector<HTMLElement>(".wb-resize-x")?.tabIndex).toBe(-1);
@@ -186,5 +208,20 @@ describe("workbench docking", () => {
     await render("logs");
     expect(host.querySelector('[aria-label="Log filter"]')).toBe(filter);
     expect(filter.value).toBe("SQL exception");
+  });
+  it("代码页没有文档面：外部要求显示文档区也不能把代码藏掉", async () => {
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    dispose = () => { act(() => root.unmount()); host.remove(); };
+    await act(async () => root.render(<WorkbenchFrame activeTool="files" tree={null} tabs={<div>Source.java</div>}
+      editor={<textarea aria-label="Code" defaultValue="code" />} output={null} status={null} />));
+    const code = host.querySelector<HTMLElement>("#wb-code-surface")!;
+    expect(code.hidden).toBe(false);
+    // 状态栏的数据库会话项、命令面板里开补丁都会发这个事件；代码页没有工具能画在
+    // 文档面里，跟着切过去就是整片白，且用户在代码页没有任何入口能退回来。
+    await act(async () => showWorkbenchDocument());
+    expect(code.hidden).toBe(false);
+    expect(host.querySelector<HTMLElement>("#wb-document-surface")?.hidden).toBe(true);
+    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="Code"]')).not.toBeNull();
   });
 });

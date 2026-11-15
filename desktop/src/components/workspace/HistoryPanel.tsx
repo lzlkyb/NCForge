@@ -1,18 +1,6 @@
-// 「本地历史」弹层：当前文件的历史版本列表 + 与磁盘现状的差异 + 恢复。
-//
-// 为什么是弹层而不是常驻侧栏：同「文件结构」——编辑器横向空间紧张，历史是
-// 「出事才看」的功能，常驻不划算。
-//
-// 三条口径（改前想清楚）：
-// 1. diff 比的是**磁盘现状**，不是编辑器里没保存的内容——恢复写的是磁盘。
-//    文件有未保存修改时禁用恢复并说明原因，避免「恢复了但没保存的又写回去」。
-// 2. 恢复是破坏性操作，但后端会先把当前内容归档一版，所以确认框里敢承诺
-//    「可再退回来」。确认分两步（按钮变「确认恢复？」），不借 ConfirmDialog：
-//    那个是模态的，这里只是弹层里的一小块。
-// 3. 恢复后父组件负责重载文件（mtime 变了，编辑器模型必须跟着刷新）。
-//
-// 选中版本的详情（diff / 恢复）在 HistoryDetail 里：它按选中版本重挂，
-// 预览与恢复进度只属于那一版。这里只管列表、磁盘快照与「恢复中不许关」。
+// 本地版本嵌入底部改动面板；浮层模式保留独立关闭行为。
+// 比较可使用当前编辑模型，但恢复始终使用磁盘 mtime，并禁止覆盖未保存修改。
+// 版本与滚动按文件记忆；详情随所选版本重挂，避免旧版确认状态泄漏到新版。
 import { useEffect, useRef, useState } from "react";
 import { focusReadingTrigger } from "../../lib/readingFocus";
 import { Icon } from "../ui/icon";
@@ -21,45 +9,55 @@ import { formatBytes } from "../../lib/utils";
 import { listLocalHistory, type HistoryVersion } from "../../lib/localHistory";
 import { formatHistoryTime } from "../../lib/historyFormat";
 import { HistoryDetail } from "./HistoryDetail";
+import { useHistoryRestorePath, isHistoryRestoring } from "../../lib/historyRestoreGuard";
 
 interface Props {
+  embedded?: boolean;
+  mtimeMs?: number;
   open: boolean;
   onClose: () => void;
   path: string | null;
   /** 文件有未保存修改：禁用恢复（先保存或还原） */
   dirty: boolean;
   /** 恢复成功后调用（父组件重载文件） */
-  onRestored: (path: string) => void;
+  onRestored: (path: string) => Promise<void> | void;
 }
 
-export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) {
+const positions = new Map<string, { selected: string | null; scroll: number }>();
+
+export function HistoryPanel({ open, onClose, path, dirty, onRestored, embedded = false, mtimeMs }: Props) {
   const [versions, setVersions] = useState<HistoryVersion[] | null>(null);
   const [sel, setSel] = useState<string | null>(null);
   const [current, setCurrent] = useState<FileContent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
   /** 恢复写盘中：列表切换与关闭都要锁住 */
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  useHistoryRestorePath();
+  const busy = localBusy || !!path && isHistoryRestoring(path);
   const panelRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const selectedRef = useRef(sel); selectedRef.current = sel;
 
   // busy / onClose 的活引用：Esc 与外点监听只在开屏时注册一次（不新增 effect），
   // 用 ref 穿透闭包读最新值
   const live = useRef({ busy, onClose });
   live.current = { busy, onClose };
 
-  // 打开时：版本列表 + 磁盘现状（diff 的右侧、恢复的 mtime 基准）
+  // 打开、保存或主动刷新时重读磁盘快照，恢复不能借用未保存编辑模型的时间戳。
   useEffect(() => {
     if (!open || !path) return;
     let alive = true;
     setVersions(null);
-    setSel(null);
+    setSel(embedded ? positions.get(path)?.selected ?? null : null);
     setCurrent(null);
     setError(null);
-    setBusy(false);
     void Promise.all([listLocalHistory(path), readFile(path)])
       .then(([vs, fc]) => {
         if (!alive) return;
         setVersions(vs);
         setCurrent(fc);
+        if (embedded) setSel(previous => vs.some(v => v.id === previous) ? previous : vs[0]?.id ?? null);
       })
       .catch((e) => alive && setError(String(e)));
     const onKey = (e: KeyboardEvent) => {
@@ -79,24 +77,28 @@ export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) 
       // 恢复写盘中不关：关了用户就不知道结果了
       if (!live.current.busy) live.current.onClose();
     };
-    window.addEventListener("keydown", onKey);
-    document.addEventListener("pointerdown", onPointerDown);
+    if (!embedded) {
+      window.addEventListener("keydown", onKey);
+      document.addEventListener("pointerdown", onPointerDown);
+    }
     return () => {
+      if (embedded) positions.set(path, { selected: selectedRef.current, scroll: listRef.current?.scrollTop ?? positions.get(path)?.scroll ?? 0 });
       alive = false;
       window.removeEventListener("keydown", onKey);
       document.removeEventListener("pointerdown", onPointerDown);
     };
-  }, [open, path]);
+  }, [open, path, embedded, mtimeMs, revision]);
 
   if (!open || !path) return null;
 
   return (
-    <div ref={panelRef} className="wb-hist" role="dialog" aria-label="本地历史">
+    <div ref={panelRef} className="wb-hist" data-embedded={embedded || undefined} role={embedded ? "region" : "dialog"} aria-label="本地历史">
     <div className="wb-hist-head">
         <Icon name="clock" size={13} />
         <span>本地历史</span>
         <span className="wb-hist-count">{versions ? `${versions.length} 版` : ""}</span>
-        <button
+        {embedded && <button type="button" className="wb-hist-x" aria-label="刷新本地版本" title="重新读取版本列表和磁盘基准" disabled={busy} onClick={() => setRevision(value => value + 1)}><Icon name="refresh" size={12} /></button>}
+        {!embedded && <button
           type="button"
           className="wb-hist-x"
           title={busy ? "恢复进行中，不能关闭" : "关闭"}
@@ -105,10 +107,10 @@ export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) 
           onClick={onClose}
         >
           <Icon name="close" size={12} />
-        </button>
+        </button>}
       </div>
 
-      <div className="wb-hist-list">
+      <div className="wb-hist-list" ref={node => { listRef.current = node; if (node && embedded && versions) node.scrollTop = positions.get(path)?.scroll ?? 0; }} onScroll={event => { if (embedded) positions.set(path, { selected: selectedRef.current, scroll: event.currentTarget.scrollTop }); }}>
         {versions === null && !error && <div className="wb-hist-note">加载中…</div>}
         {versions === null && error && <div className="wb-hist-error">{error}</div>}
         {versions !== null && versions.length === 0 && (
@@ -124,6 +126,7 @@ export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) 
             onClick={() => {
               if (busy) return;
               setSel(v.id);
+              if (embedded) positions.set(path, { selected: v.id, scroll: listRef.current?.scrollTop ?? 0 });
               setError(null);
             }}
           >
@@ -138,11 +141,12 @@ export function HistoryPanel({ open, onClose, path, dirty, onRestored }: Props) 
       {/* key：换版本直接重挂，预览 / 恢复进度 / diff 展开量都跟着重置 */}
       {sel && current && (
         <HistoryDetail
-          key={sel}
+          key={`${path}:${sel}`}
           path={path}
           versionId={sel}
           current={current}
           dirty={dirty}
+          embedded={embedded}
           onBusyChange={setBusy}
           onFileChanged={() => onRestored(path)}
           onRestored={(vs, fc) => {

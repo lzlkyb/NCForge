@@ -3,10 +3,13 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HistoryPanel } from "./HistoryPanel";
+import { endHistoryRestore, getHistoryRestorePath } from "../../lib/historyRestoreGuard";
+import { getSession, setSession } from "../../lib/workspaceSession";
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), toast: vi.fn() }));
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), toast: vi.fn(), text: undefined as string | undefined, modelDirty: false }));
 vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
 vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
+vi.mock("../../lib/editorStore", () => ({ getModel: () => undefined, getText: () => mocks.text, isModelDirty: () => mocks.modelDirty }));
 
 const PATH = "C:\\w\\newar\\modules\\ic\\A.java";
 const V1 = { id: "v1", ts: Date.now() - 60_000, size: 8, sha: "aaa" };
@@ -67,6 +70,8 @@ const render = async (ui: React.ReactElement) => {
 };
 
 beforeEach(() => {
+  endHistoryRestore(); mocks.text = undefined; mocks.modelDirty = false;
+  setSession({ tabs: [], panelOpen: true, panelTab: "changes" });
   vi.clearAllMocks();
   mocks.invoke.mockImplementation(async (cmd: string) => {
     if (cmd === "local_history_list") return [V1, V2];
@@ -82,7 +87,73 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  endHistoryRestore();
   container.remove();
+});
+
+describe("本地版本嵌入改动面板", () => {
+  it("自动选择版本，与未保存编辑内容比较；外点和 Escape 不关闭底部历史", async () => {
+    mocks.text = "a\nEDITOR_ONLY\n";
+    const onClose = vi.fn();
+    await render(<HistoryPanel embedded open path={PATH} dirty onClose={onClose} onRestored={() => {}} />);
+    expect(container.querySelector('[role="region"][aria-label="本地历史"]')).toBeTruthy();
+    expect(container.textContent).toContain("EDITOR_ONLY");
+    expect(container.textContent).toContain("与当前编辑内容的差异");
+    expect(btn("恢复此版本")).toBeUndefined();
+    fire(document.body, "pointerdown");
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+  it("同帧出现未保存模型时不写盘", async () => {
+    await render(<HistoryPanel embedded open path={PATH} dirty={false} onClose={() => {}} onRestored={() => {}} />);
+    await act(async () => btn("恢复此版本")!.click());
+    mocks.modelDirty = true;
+    await act(async () => btn("确认恢复")!.click());
+    expect(mocks.invoke.mock.calls.filter(call => call[0] === "local_history_restore")).toHaveLength(0);
+    expect(getHistoryRestorePath()).toBeNull();
+  });
+  it("恢复中锁住面板，重新读取失败也释放锁并保留原因", async () => {
+    let finish!: () => void;
+    const original = mocks.invoke.getMockImplementation()!;
+    let restored = false;
+    mocks.invoke.mockImplementation((cmd: string, ...args: unknown[]) => {
+      if (cmd === "local_history_restore") return new Promise<void>(resolve => { finish = () => { restored = true; resolve(); }; });
+      if (cmd === "local_history_list" && restored) return Promise.reject(new Error("列表读取失败"));
+      return original(cmd, ...args);
+    });
+    await render(<HistoryPanel embedded open path={PATH} dirty={false} onClose={() => {}} onRestored={() => {}} />);
+    await act(async () => btn("恢复此版本")!.click());
+    await act(async () => btn("确认恢复")!.click());
+    expect(getHistoryRestorePath()).toBe(PATH);
+    act(() => setSession({ panelOpen: false, panelTab: "build" }));
+    expect(getSession().panelOpen).toBe(true); expect(getSession().panelTab).toBe("changes");
+    await act(async () => finish());
+    expect(getHistoryRestorePath()).toBeNull();
+    expect(container.textContent).toContain("列表读取失败");
+    expect(container.querySelector<HTMLButtonElement>(".wb-hist-row")!.disabled).toBe(false);
+  });
+  it("切换文件返回后保留所选版本", async () => {
+    await render(<HistoryPanel embedded open path={PATH} dirty={false} onClose={() => {}} onRestored={() => {}} />);
+    await act(async () => container.querySelectorAll<HTMLButtonElement>(".wb-hist-row")[1].click());
+    await render(<HistoryPanel embedded open path="C:/w/Other.java" dirty={false} onClose={() => {}} onRestored={() => {}} />);
+    await render(<HistoryPanel embedded open path={PATH} dirty={false} onClose={() => {}} onRestored={() => {}} />);
+    expect(container.querySelector('.wb-hist-row[data-active]')?.textContent).toContain("20 B");
+  });
+  it("切到其他页面再返回也继承正在恢复的锁", async () => {
+    let finish!: () => void;
+    const original = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((cmd: string, ...args: unknown[]) => cmd === "local_history_restore" ? new Promise<void>(resolve => { finish = resolve; }) : original(cmd, ...args));
+    const history = <HistoryPanel embedded open path={PATH} dirty={false} onClose={() => {}} onRestored={() => {}} />;
+    await render(history);
+    await act(async () => btn("恢复此版本")!.click());
+    await act(async () => btn("确认恢复")!.click());
+    await render(<div>其他页面</div>); await render(history);
+    expect(container.querySelector<HTMLButtonElement>(".wb-hist-row")!.disabled).toBe(true);
+    expect(container.textContent).toContain("恢复中");
+    await act(async () => finish());
+    expect(getHistoryRestorePath()).toBeNull();
+    expect(container.querySelector<HTMLButtonElement>(".wb-hist-row")!.disabled).toBe(false);
+  });
 });
 
 describe("HistoryPanel", () => {

@@ -14,6 +14,9 @@ import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { toast } from "../ui/toast";
 import { MultiFileDiffPanel } from "./MultiFileDiffPanel";
 import { ReviewChecklist } from "./ReviewChecklist";
+import { FileHistoryView } from "./FileHistoryView";
+import { ChangedLinesBar } from "./ChangedLinesBar";
+import { useHistoryRestorePath } from "../../lib/historyRestoreGuard";
 
 const KIND: Record<ChangeKind, { text: string; hint: string }> = {
   me: { text: "我", hint: "本工作台保存" },
@@ -47,15 +50,17 @@ function roundBaselineSafe(ev: ChangeEvent): ChangeEvent {
 }
 
 export function ChangeTimelinePanel({
-  root, activePath, onOpenAt,
+  root, activePath, onOpenAt, onRestored = () => {},
 }: {
   root: string;
   activePath?: string | null;
   onOpenAt: (path: string, line: number, push?: boolean, column?: number) => void;
+  onRestored?: (path: string) => Promise<void> | void;
 }) {
   const events = useSyncExternalStore(subscribeTimeline, getTimeline, getTimeline);
   const review = useSyncExternalStore(subscribeReviewSession, getReviewState, getReviewState);
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null);
+  const restoringPath = useHistoryRestorePath();
 
   const allPaths = [...new Set(events.flatMap((e) => e.paths))];
   const compare = (paths: string[], from: ChangeEvent | null, to: ChangeEvent | null = null) => {
@@ -124,8 +129,9 @@ export function ChangeTimelinePanel({
   return (
     <div className="ncf-timeline">
       <div className="ncf-tl-bar">
-        <button type="button" className="ncf-link" data-on={review.view === "timeline" || undefined} onClick={() => setReviewView("timeline")}>改动时间线</button>
-        <button type="button" className="ncf-link" data-on={review.view === "checklist" || undefined} onClick={() => setReviewView("checklist")}>审查清单</button>
+        <button type="button" className="ncf-link" disabled={!!restoringPath} data-on={review.view === "timeline" || undefined} onClick={() => setReviewView("timeline")}>改动时间线</button>
+        <button type="button" className="ncf-link" disabled={!!restoringPath} data-on={review.view === "history" || undefined} onClick={() => setReviewView("history")}>本地版本</button>
+        <button type="button" className="ncf-link" disabled={!!restoringPath} data-on={review.view === "checklist" || undefined} onClick={() => setReviewView("checklist")}>审查清单</button>
         <span className="ncf-tl-sp" />
         <span className="ncf-tl-count">{events.length} 轮 · {allPaths.length} 个文件</span>
         {review.round && <span className="ncf-tl-count">已选：{review.round.label ?? "一轮"}</span>}
@@ -136,6 +142,9 @@ export function ChangeTimelinePanel({
           </>
         )}
       </div>
+
+      <div className="ncf-file-context"><span title={restoringPath ?? activePath ?? undefined}>{restoringPath ? `正在恢复：${relativeDisplay(restoringPath, root)}` : activePath ? relativeDisplay(activePath, root) : "尚未打开文件"}</span>{review.view !== "history" && <ChangedLinesBar path={activePath ?? null} />}</div>
+      {review.view === "history" && <FileHistoryView activePath={activePath ?? null} onRestored={onRestored} />}
 
       {review.view === "diff" && (
         <MultiFileDiffPanel paths={review.diffPaths} root={root}

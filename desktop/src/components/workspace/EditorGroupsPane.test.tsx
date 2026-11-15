@@ -27,8 +27,7 @@ function Harness() {
   const active = state.tabs.find(tab => tab.path === state.activePath);
   const noop = () => {};
   const nav: EditorNavigation | null = active ? { active, root: "C:\\w", canBack: false, canForward: false,
-    onBack: noop, onForward: noop, onJumpHistory: noop, heavy: false, outlineOpen: false, onToggleOutline: noop,
-    history: { open: false, dirty: active.dirty, onToggle: noop, onClose: noop, onRestored: noop } } : null;
+    onBack: noop, onForward: noop, onJumpHistory: noop, outlineOpen: false } : null;
   return <EditorGroupsPane root="C:\\w" tabs={state.tabs} session={session} reveal={reveal} nav={nav} tools={<span data-execution>执行工具</span>} />;
 }
 beforeEach(() => {

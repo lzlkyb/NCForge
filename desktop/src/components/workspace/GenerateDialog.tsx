@@ -10,8 +10,9 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/button";
 import { Icon } from "../ui/icon";
 import { toast } from "../ui/toast";
-import { currentModel, editorSnapshot, insertEditorTextAtLine } from "../../lib/editorActions";
-import { indentUnitOf, parseJava } from "../../lib/javaModel";
+import { currentModel, currentSelection, editorSnapshot, selectInEditor } from "../../lib/editorActions";
+import { indentUnitOf } from "../../lib/javaModel";
+import { javaGenerationModel } from "../../lib/javaGenerationModel";
 import {
   generate,
   joinGenerated,
@@ -20,7 +21,8 @@ import {
   type GenKind,
 } from "../../lib/javaCodeGen";
 import { trackOperation, operationActive } from "../../lib/operations";
-import { KINDS, applySourceAction, sourceActions, type JavaSourceAction } from "../../lib/javaActions";
+import { KINDS, applySourceAction, resolveSourceActionEdit, sourceActions, type JavaSourceAction } from "../../lib/javaActions";
+import { mergeJavaSourceEdits } from "../../lib/javaSourceEdits";
 
 interface Props {
   open: boolean;
@@ -46,12 +48,15 @@ export function GenerateDialog({ open, onClose }: Props) {
 
   // 每次打开都用当前编辑器重算：上一个文件的字段不能留
   const snap = useMemo(() => (open ? editorSnapshot() : null), [open]);
-  const parsed = useMemo(() => (snap?.isJava ? parseJava(snap.text) : null), [snap]);
+  const sourceModel = useMemo(() => open ? currentModel() : null, [open]);
+  const parsed = useMemo(() => (snap?.isJava ? javaGenerationModel(snap.text, snap.line, snap.column) : null), [snap]);
   const opts = useMemo(
     () => ({
       fields: parsed?.fields ?? [],
       className: parsed?.name ?? "",
       indent: snap ? indentUnitOf(snap.text) : "\t",
+      methods: parsed?.methods ?? [],
+      baseIndent: parsed?.baseIndent ?? "",
     }),
     [parsed, snap],
   );
@@ -67,15 +72,12 @@ export function GenerateDialog({ open, onClose }: Props) {
   const toggle = (k: GenKind) =>
     setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
 
-  /** 插入位置：光标在类体里就用光标，否则落在类体末尾（`}` 之前）。 */
-  const insertLine = (): number => {
-    if (!snap || !parsed) return 1;
-    const end = parsed.bodyEndLine >= 0 ? parsed.bodyEndLine + 1 : snap.line;
-    return snap.line > 1 && snap.line < end ? snap.line : end;
-  };
-
   const doGenerate = () => {
     if (!parsed) return;
+    if (parsed.kind !== "class") { setError("本地成员生成只适用于类；接口方法请使用实现/覆盖入口"); return; }
+    if (!sourceModel || currentModel() !== sourceModel || sourceModel.isDisposed() || sourceModel.getValue() !== snap?.text || currentSelection()?.readOnly) {
+      setError("文件已切换、修改或处于只读状态，请重新打开生成窗口"); return;
+    }
     const text = joinGenerated(picked.map((k) => generate(k, opts)));
     if (!text.trim()) {
       setError(
@@ -83,10 +85,10 @@ export function GenerateDialog({ open, onClose }: Props) {
       );
       return;
     }
-    if (!insertEditorTextAtLine(text, insertLine())) {
-      setError("编辑器不可用");
-      return;
-    }
+    const at = sourceModel.getPositionAt(parsed.bodyEndOffset);
+    sourceModel.pushEditOperations([], [{ range: { startLineNumber: at.lineNumber, startColumn: at.column, endLineNumber: at.lineNumber, endColumn: at.column }, text: `${text}\n${parsed.baseIndent}` }], () => null);
+    const position = sourceModel.getPositionAt(parsed.bodyEndOffset + text.length);
+    selectInEditor({ line: position.lineNumber, column: position.column }, { line: position.lineNumber, column: position.column });
     toast(`已生成：${summarize(picked, opts)}（未保存，Ctrl+S 落盘）`, "success");
     onClose();
   };
@@ -94,7 +96,7 @@ export function GenerateDialog({ open, onClose }: Props) {
   const loadMembers = async (which: "override" | "implement") => {
     if (operationActive("language.generate")) return;
     const model = currentModel();
-    if (!model) {
+    if (!model || model !== sourceModel || model.getValue() !== snap?.text || currentSelection()?.readOnly) {
       setError("编辑器不可用");
       return;
     }
@@ -119,16 +121,17 @@ export function GenerateDialog({ open, onClose }: Props) {
   const applyMembers = async () => {
     if (operationActive("language.generate")) return;
     const model = currentModel();
-    if (!model) return;
+    if (!model || model !== sourceModel || model.getValue() !== snap?.text || currentSelection()?.readOnly) { setError("文件已修改、切换或只读，请重新打开生成窗口"); return; }
     setBusy(true);
     try {
       const { applied, skipped } = await trackOperation({ key: "language.generate", label: "生成接口与覆盖方法", page: "files", phase: "应用选中的代码动作" }, async () => {
-        let applied = 0, skipped = 0;
+        const edits = [];
         for (const i of pickedMembers) {
-          const r = await applySourceAction(model, members[i]);
-          if (r) { applied += r.applied; skipped += r.skipped; }
+          const edit = await resolveSourceActionEdit(model, members[i]);
+          if (edit) edits.push(edit);
         }
-        return { applied, skipped };
+        if (model.isDisposed() || currentModel() !== model || model.getValue() !== snap?.text || currentSelection()?.readOnly) throw new Error("生成期间文件已修改，未应用任何成员");
+        return await applySourceAction(model, { title: "生成所选成员", kind: "source", edit: mergeJavaSourceEdits(edits) }) ?? { applied: 0, skipped: 0 };
       }, r => ({ state: r.applied ? "success" : "failed", detail: `应用 ${r.applied} 处、跳过 ${r.skipped} 处；仅修改编辑器，尚未保存` }));
       if (applied === 0) {
         setError("没有插入任何代码：动作返回的编辑不属于当前文件");

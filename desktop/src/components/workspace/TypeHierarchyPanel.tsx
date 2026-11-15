@@ -16,7 +16,8 @@ export function TypeHierarchyPanel() {
       <div className="wb-panel-body">
         <div className="wb-panel-note">
           把光标放到类名 / 接口名上，按 {key}，或点下面的按钮。
-          {st.error && <span className="wb-prow-warn"> {st.error}</span>}
+          {st.loading && <span role="status"> 正在查询…</span>}
+          {st.error && <span role="alert" className="wb-prow-warn"> {st.error}</span>}
         </div>
         <div className="wb-panel-note">
           <button type="button" className="wb-status-btn" onClick={() => void openTypeHierarchy()}>
@@ -32,6 +33,7 @@ export function TypeHierarchyPanel() {
       <div className="wb-panel-note">
         {st.loading ? "正在查询…" : `${st.root.qualifiedName} · ${kindLabel(st.root.kind)}${st.root.abstract ? "（抽象）" : ""}`}
       </div>
+      {st.error && <div role="alert" className="wb-panel-note wb-prow-warn">{st.error} · 显示上次成功查询的结果</div>}
       <Section title="父类型（它继承 / 实现了谁）" icon="arrowUp" items={st.supertypes} empty="没有父类型" />
       <Section title="子类型（谁继承 / 实现了它）" icon="chevronDown" items={st.subtypes} empty="没有子类型" />
     </div>

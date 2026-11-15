@@ -12,6 +12,7 @@ import { ResourceDownloadEntry } from "../resource/ResourceDownloadEntry";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 import { ServiceStatusButton } from "../workspace/ServiceStatusButton";
 import { ToolReturnEntry } from "./ToolReturnEntry";
+import { useWorkspaceSelector } from "../../lib/workspaceSession";
 
 /**
  * 应用标题栏（40px，横跨整个窗口）：品牌、工作区、全局入口与原生窗口控件。
@@ -29,6 +30,7 @@ function HeaderImpl({
   activeTool?: string;
 }) {
   const [dark, setDark] = useState(() => getStoredTheme() === "dark");
+  const activePath = useWorkspaceSelector(s => s.activePath);
   // 提示里的快捷键跟随快捷键方案（设置页切换后立即变）
   const [keymap, setKeymapState] = useState(getKeymap);
   useEffect(() => {
@@ -65,7 +67,7 @@ function HeaderImpl({
           读数只在这块空白里铺开、且自带 pointer-events:none，拖拽不受影响。 */}
       <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center self-stretch">
         {onOpenPalette && <button type="button" className="wb-global-search" data-tauri-drag-region="false" onClick={onOpenPalette} title="转到文件、类型、符号或命令（输入 > 进入命令，@ 进入符号）">
-          <Icon name="search" size={14} /><span>转到文件、类型、命令…</span><kbd>{paletteKeyLabel("file", keymap)}</kbd>
+          <Icon name="search" size={14} /><span>转到文件、搜索、符号…</span><kbd>{paletteKeyLabel("file", keymap)}</kbd>
         </button>}
         <UpdateReadout />
       </div>
@@ -76,7 +78,7 @@ function HeaderImpl({
         <ServiceStatusButton header />
         <OperationStatus />
         <ResourceDownloadEntry />
-        <LayoutMenu activeTool={activeTool} />
+        {(activeTool !== "files" || !activePath) && <LayoutMenu activeTool={activeTool} />}
         <Button
           variant="ghost"
           size="icon"

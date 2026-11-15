@@ -9,6 +9,7 @@ import { DebugInspectorContent } from "./DebugInspectorDock";
 import { DebugStack } from "./DebugStack";
 import { DebugBreakpoints } from "./DebugBreakpoints";
 import { DebugConsole } from "./DebugConsole";
+import { DebugAdvancedControls } from "./DebugAdvancedControls";
 import { DebugStopBanner } from "./DebugStopBanner";
 import { RemoteAttachForm } from "./RemoteAttachForm";
 import {
@@ -190,6 +191,7 @@ export function DebugPanel({ onOpenAt }: { onOpenAt: (path: string, line: number
       </div>
 
       {snap.error && <div className="dbg-error">{snap.error}</div>}
+      {attached && <DebugAdvancedControls snap={snap} />}
 
       {snap.paused && (
         <DebugStopBanner reason={snap.stopReason} text={snap.stopText} exception={snap.exception} />

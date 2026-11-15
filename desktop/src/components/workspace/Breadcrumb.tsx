@@ -8,6 +8,7 @@ import { isNcDeclaration, ncDeclarationLabel } from "../../lib/ncDeclarationOutl
 import { useCursor } from "../../lib/cursorStore";
 import { inLangModule, navigate, useLangView } from "../../lib/lang";
 import { jdtDisplayName } from "../../lib/langConvert";
+import { parseLibraryUri } from "../../lib/libraryFiles";
 import { chainAt, symbolsFor, type FlatSymbol } from "../../lib/symbols";
 import type { TabMeta } from "../../lib/workspaceSession";
 import { breadcrumbParts } from "../../lib/breadcrumbPath";
@@ -42,7 +43,8 @@ export function Breadcrumb({ root, active, showSymbols = true }: { root: string;
     };
   }, [canAsk, javaPath, active.mtimeMs, lang.settled]);
 
-  const parts = active.virtual ? ["jar", jdtDisplayName(active.path)] : breadcrumbParts(root, active.path);
+  const library = parseLibraryUri(active.path);
+  const parts = library ? [library.source, ...library.entry.split("/")] : active.virtual ? ["jar", jdtDisplayName(active.path)] : breadcrumbParts(root, active.path);
   const middle = parts.length > 3 ? parts.slice(1, -1) : [];
   const chain = showSymbols ? chainAt(symbols && symbols.path === javaPath && canAsk ? symbols.list : local, cursor.line) : [];
 
