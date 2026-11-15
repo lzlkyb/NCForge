@@ -103,19 +103,26 @@ export async function applySourceAction(
   model: Model,
   action: JavaSourceAction,
 ): Promise<{ applied: number; skipped: number } | null> {
-  if (action.edit) return applyEdit(model, action.edit);
+  const version = model.getVersionId();
+  const edit = await resolveSourceActionEdit(model, action);
+  return edit && !model.isDisposed() && model.getVersionId() === version ? applyEdit(model, edit) : null;
+}
+
+/** 多个生成动作先收集编辑，再一次应用，避免前一个插入让后一个的坐标过期。 */
+export async function resolveSourceActionEdit(model: Model, action: JavaSourceAction): Promise<WorkspaceEditLike | null> {
+  if (action.edit) return action.edit;
   const cmd = action.command?.command;
   if (!cmd) return null;
   const version = model.getVersionId();
   try {
     const res = await langRequest<WorkspaceEditLike | null>(
       "workspace/executeCommand",
-      null,
+      pathOfModel(model) ?? null,
       { command: cmd, arguments: action.command?.arguments ?? [] },
       30_000,
     );
     if (!res || typeof res !== "object" || model.isDisposed() || model.getVersionId() !== version) return null;
-    return applyEdit(model, res);
+    return res;
   } catch {
     return null;
   }

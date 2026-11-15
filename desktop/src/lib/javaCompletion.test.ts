@@ -17,7 +17,7 @@ vi.mock("./monacoSetup", () => ({ monaco: {
     registerHoverProvider: vi.fn(),
     registerSignatureHelpProvider: (_language: string, provider: typeof h.signature) => { h.signature = provider; },
     registerDefinitionProvider: vi.fn(),
-  }, editor: { registerEditorOpener: vi.fn(), getEditors: () => h.editors },
+  }, editor: { registerEditorOpener: vi.fn(), registerCommand: vi.fn(), getEditors: () => h.editors },
 } }));
 vi.mock("./editorStore", () => ({ pathOfModel: () => "C:\\ws\\gl\\Demo.java" }));
 vi.mock("./lang", () => ({

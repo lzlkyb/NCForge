@@ -12,6 +12,8 @@ export interface JavaField {
   type: string;
   isStatic: boolean;
   isFinal: boolean;
+  /** 已初始化的 final 字段不能在生成的构造器里再次赋值。 */
+  isInitialized?: boolean;
 }
 
 export interface JavaMethod {
@@ -144,9 +146,10 @@ function stripAnnotations(s: string): string {
   // 逐条剥：注解可能带括号参数，参数里可能有嵌套括号
   for (;;) {
     const at = out.indexOf("@");
-    if (at < 0 || /\w/.test(out.slice(0, at))) return out;
+    if (at < 0 || out.slice(0, at).trim().split(/\s+/).some(word => word && !MODIFIERS.has(word))) return out;
     let j = at + 1;
     while (j < out.length && /[\w.]/.test(out[j])) j += 1;
+    while (j < out.length && /\s/.test(out[j])) j += 1;
     if (out[j] === "(") {
       let depth = 0;
       for (; j < out.length; j += 1) {
@@ -220,7 +223,7 @@ function parseField(stmt: string): JavaField | null {
   // 类型里带空格又不像泛型时（`String [] x` 之类）放行；但明显是语句的排除掉
   if (/[;{}]/.test(tn.type)) return null;
   if (tn.name === "return" || tn.name === "new") return null;
-  return { name: tn.name, type: tn.type, isStatic: mods.includes("static"), isFinal: mods.includes("final") };
+  return { name: tn.name, type: tn.type, isStatic: mods.includes("static"), isFinal: mods.includes("final"), ...(cut >= 0 ? { isInitialized: true } : {}) };
 }
 
 function parseMethodHeader(header: string): JavaMethod | null {
@@ -328,16 +331,24 @@ export function parseJava(text: string): JavaType | null {
   let started = false;
 
   const flushField = () => {
-    const stmt = buf.trim();
+    const stmt = stripAnnotations(buf).trim();
     buf = "";
     if (!stmt) return;
-    if (stmt.includes("(")) {
+    // 字段初始化可能调用方法；只有赋值之前的声明头才能决定是不是方法。
+    if ((splitTopLevel(stmt, "=")[0] ?? "").includes("(")) {
       const m = parseMethodHeader(stmt);
       if (m) methods.push(m);
       return;
     }
-    const f = parseField(stmt);
-    if (f) fields.push(f);
+    const declarations = splitTopLevel(stmt, ",");
+    const first = parseField(declarations[0] ?? "");
+    if (first) {
+      fields.push(first);
+      for (const declaration of declarations.slice(1)) {
+        const next = parseField(`${first.type} ${declaration}`);
+        if (next) fields.push({ ...next, isStatic: first.isStatic, isFinal: first.isFinal });
+      }
+    }
   };
 
   for (let i = declLine; i < lines.length; i += 1) {
@@ -355,9 +366,13 @@ export function parseJava(text: string): JavaType | null {
       if (ch === "{") {
         if (depth === 1) {
           // 成员自己的 `{`：方法头 / 初始化块 / 嵌套类型，标题到此为止
-          const head = buf.trim();
+          // 注解的命名参数不属于成员声明中的赋值。
+          const head = stripAnnotations(buf).trim();
           buf = "";
-          if (head && head.includes("(") && !/^\s*(static\s*)?\{/.test(head)) {
+          if (head.includes("=")) {
+            // 数组/匿名类初始化的块不是成员方法，块结束后仍需解析该字段。
+            buf = head;
+          } else if (head && head.includes("(") && !/^\s*(static\s*)?\{/.test(head)) {
             const m = parseMethodHeader(head);
             if (m) methods.push(m);
           } else if (head && /\b(class|interface|enum|record)\b/.test(head)) {

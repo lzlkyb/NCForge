@@ -1,6 +1,35 @@
 import { describe, expect, it } from "vitest";
 import { blankLiterals, indentUnitOf, parseJava } from "./javaModel";
 
+describe("生成器字段声明边界", () => {
+  it("方法调用/数组初始化仍然是字段，多声明不丢失", () => {
+    const parsed = parseJava("class A { private Foo value = make(); private int[] values = new int[] {1,2}; private String left, right; }");
+    expect(parsed?.fields.map(field => field.name)).toEqual(["value", "values", "left", "right"]);
+    expect(parsed?.methods).toEqual([]);
+  });
+  it("方法注解的命名参数不是字段赋值，不吞后续字段", () => {
+    const parsed = parseJava('class A { @SuppressWarnings(value = "unchecked") public void work() {} private final String token; private int value; A(String token) { this.token = token; } }');
+    expect(parsed?.fields.map(field => field.name)).toEqual(["token", "value"]);
+    expect(parsed?.methods.map(method => method.name)).toEqual(["work", "A"]);
+  });
+  it.each([" ", "\n\t"])("注解名与参数间的空白 %j 不吞后续字段", space => {
+    const parsed = parseJava(`class A { @SuppressWarnings${space}(value = "unchecked") public void work() {} private final String token; private int value; A(String token) { this.token = token; } }`);
+    expect(parsed?.fields.map(field => field.name)).toEqual(["token", "value"]);
+    expect(parsed?.methods.map(method => method.name)).toEqual(["work", "A"]);
+  });
+  it("注解与修饰符混排不把方法当成字段初始化", () => {
+    const parsed = parseJava('class A { public @SuppressWarnings(value = "unchecked") final void work() {} private final String token; private int value; A(String token) { this.token = token; } }');
+    expect(parsed?.fields.map(field => field.name)).toEqual(["token", "value"]);
+    expect(parsed?.methods.map(method => method.name)).toEqual(["work", "A"]);
+  });
+  it("带命名参数注解的数组和匿名类初始化仍保留字段", () => {
+    const parsed = parseJava('class A { @SuppressWarnings(value = "unchecked") private int[] values = new int[] {1,2}; private Runnable task = new Runnable() { public void run() {} }; private int next; }');
+    expect(parsed?.fields.map(field => field.name)).toEqual(["values", "task", "next"]);
+    expect(parsed?.fields.slice(0, 2).every(field => field.isInitialized)).toBe(true);
+    expect(parsed?.methods).toEqual([]);
+  });
+});
+
 /** 字段 / 方法 / 嵌套类 / 字符串里带分号，四种情况一次覆盖。 */
 const SRC = [
   "package nc.bs.foo;",

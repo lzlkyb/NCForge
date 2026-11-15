@@ -5,6 +5,24 @@
         处理器实现 org.eclipse.jdt.ls.core.internal.IDelegateCommandHandler，
         用 <command id="…"/> 逐个声明自己接管的命令。 -->
    <extension point="org.eclipse.jdt.ls.core.delegateCommandHandler">
+      <delegateCommandHandler class="ncforge.jdt.FieldAccessHandler">
+         <command id="ncforge.fieldAccesses"/>
+      </delegateCommandHandler>
+      <delegateCommandHandler class="ncforge.jdt.BatchInspectHandler">
+         <command id="ncforge.batchInspect"/>
+      </delegateCommandHandler>
+      <delegateCommandHandler class="ncforge.jdt.ProjectClasspathHandler">
+         <command id="ncforge.projectClasspath"/>
+      </delegateCommandHandler>
+      <delegateCommandHandler class="ncforge.jdt.StructuralSearchHandler">
+         <command id="ncforge.structuralSearch"/>
+      </delegateCommandHandler>
+      <delegateCommandHandler class="ncforge.jdt.SignatureWorkbenchHandler">
+         <command id="ncforge.signatureWorkbench"/>
+      </delegateCommandHandler>
+      <delegateCommandHandler class="ncforge.jdt.RefactorWorkbenchHandler">
+         <command id="ncforge.refactorWorkbench"/>
+      </delegateCommandHandler>
       <delegateCommandHandler class="ncforge.jdt.TypeHierarchyHandler">
          <command id="ncforge.typeHierarchy"/>
       </delegateCommandHandler>

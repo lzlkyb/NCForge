@@ -134,3 +134,30 @@ describe("生成物整体可编译的形状", () => {
     expect(open).toBe(close);
   });
 });
+
+describe("已有成员与类型边界", () => {
+  it("跳过同签名成员，保留真正不同的重载", () => {
+    const opts = { ...O(FIELDS), methods: [{ name: "getPk", returnType: "String", params: [] }, { name: "setPk", returnType: "void", params: ["String value"] }, { name: "setFlag", returnType: "void", params: ["Boolean value"] }] };
+    expect(generate("getters", opts)).not.toContain("getPk");
+    expect(generate("getters", opts)).toContain("isFlag");
+    expect(generate("setters", opts)).not.toContain("setPk");
+    expect(generate("setters", opts)).toContain("setFlag(boolean flag)");
+  });
+  it("Boolean包装类与is前缀遵守JavaBeans", () => {
+    expect(generate("getters", O([f("ready", "Boolean")]))).toContain("getReady()");
+    expect(generate("getters", O([f("isReady", "boolean")]))).toContain("isReady()");
+    expect(generate("setters", O([f("isReady", "boolean")]))).toContain("setReady(boolean isReady)");
+  });
+  it("final初始化字段不重复赋值，已有构造器不重复生成", () => {
+    expect(generate("constructor", O([f("fixed", "int", { isFinal: true, isInitialized: true }), f("pk", "String")]))).not.toContain("fixed");
+    expect(generate("constructor", { ...O([f("pk", "String")]), methods: [{ name: "BillVO", returnType: "void", params: ["String value"] }] })).toBe("");
+  });
+  it("数组equals与hashCode使用一致的内容比较", () => {
+    const opts = O([f("values", "int[]")]);
+    expect(generate("equals", opts)).toContain("Objects.deepEquals(values, that.values)");
+    expect(generate("hashCode", opts)).toContain("Arrays.deepHashCode(new Object[] {values})");
+  });
+  it("泛型擦除后相同的setter不重复生成", () => {
+    expect(generate("setters", { ...O([f("list", "List<String>")]), methods: [{ name: "setList", returnType: "void", params: ["List<Integer> existing"] }] })).toBe("");
+  });
+});
