@@ -103,6 +103,8 @@ where
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 冷启动基线的起点：必须在这一行，晚一行就少算一段（见 `boot_timing` 头注释）。
+    boot_timing::mark_process_start();
     env_logger::init();
 
     let builder = tauri::Builder::default()
@@ -238,6 +240,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
+            commands::boot_report,
+            commands::boot_stage,
+            commands::lang_cache_stats,
+            commands::lang_cache_clear,
+            commands::nc_vo_tables,
             commands::patch_config,
             commands::get_autostart,
             commands::set_autostart,

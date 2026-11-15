@@ -34,6 +34,7 @@ pub mod bmf_semantics;
 pub mod bmf_transaction;
 pub mod bmf_types;
 pub mod bmf_write;
+pub mod boot_timing;
 pub mod branding;
 pub mod build_layout;
 pub mod build_state;

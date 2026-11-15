@@ -31,7 +31,10 @@ const T_DICT: Duration = Duration::from_secs(300);
 const DICT_ROWS: u32 = 200_000;
 
 /// 解析出要查哪个库的句柄。不偷偷连库：没连上就告诉用户去连。
-async fn resolve(
+///
+/// `pub(crate)`：B3（VO → 表 → 字段反向）复用同一套连接解析，不许自己再写一份
+/// ——两份「当前连的是哪个库」必然分叉。
+pub(crate) async fn resolve(
     state: &Arc<AppState>,
     id: Option<&str>,
 ) -> Result<(Arc<EngineHandle>, String, String), String> {
@@ -60,7 +63,11 @@ async fn resolve(
 /// 为什么非要查这一下：桥给的列是 `{name,type,…}` 对象，一旦哪天形状变了，
 /// 按列名取值的代码会**每列都读到空串**——字典变成一堆空表，还不报错。
 /// `hasMore` 同理：截断的字典"看着完整、其实缺列"。
-async fn query(b: Arc<EngineHandle>, sql: String, expect: &[&str]) -> Result<Grid, String> {
+pub(crate) async fn query(
+    b: Arc<EngineHandle>,
+    sql: String,
+    expect: &[&str],
+) -> Result<Grid, String> {
     let out = call(
         b,
         "exec",

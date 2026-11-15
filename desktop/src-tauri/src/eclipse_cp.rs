@@ -454,8 +454,18 @@ fn collect(primary: &Path, plan: &OverridePlan, notes: &mut Vec<String>) -> Vec<
                 disabled: false,
             });
             let mut seen: HashSet<PathBuf> = HashSet::new();
-            seen.insert(dir_key(primary));
-            walk(&cp, &workspace, &mut out, &mut seen, plan, 1, notes);
+            let primary_key = dir_key(primary);
+            seen.insert(primary_key.clone());
+            let mut state = WalkState {
+                workspace: &workspace,
+                out: &mut out,
+                seen: &mut seen,
+                // 栈从主工程开始：环是「回到链上已有的工程」，不是「重复出现」
+                stack: vec![primary_key],
+                plan,
+                notes,
+            };
+            walk(&mut state, &cp, 1);
         }
         None => {
             // 老工程：没有依赖声明可按。**不假装**能表达依赖关系，界面会提示补 .classpath。
@@ -487,25 +497,32 @@ fn collect(primary: &Path, plan: &OverridePlan, notes: &mut Vec<String>) -> Vec<
     out
 }
 
-fn walk(
-    cp: &ProjectCp,
-    workspace: &Path,
-    out: &mut Vec<RawEntry>,
-    seen: &mut HashSet<PathBuf>,
-    plan: &OverridePlan,
-    depth: usize,
-    notes: &mut Vec<String>,
-) {
+/// 依赖遍历的借用状态。
+///
+/// 单独打包是因为参数已经到 8 个（clippy 上限 7），再加「环检测用的路径栈」只能这么给。
+/// `stack` 只用于**提示**，绝不剪枝：剪掉一条回边就是少一个类目录，编译期会表现成
+/// 「类找不到」，比多报一句严重得多。
+struct WalkState<'a> {
+    workspace: &'a Path,
+    out: &'a mut Vec<RawEntry>,
+    seen: &'a mut HashSet<PathBuf>,
+    /// 当前 DFS 路径上的工程（归一化路径）
+    stack: Vec<PathBuf>,
+    plan: &'a OverridePlan,
+    notes: &'a mut Vec<String>,
+}
+
+fn walk(state: &mut WalkState<'_>, cp: &ProjectCp, depth: usize) {
     for r in &cp.refs {
-        let Some(root) = resolve_ref(&r.name, workspace) else {
+        let Some(root) = resolve_ref(&r.name, state.workspace) else {
             // 不静默丢：编译期少一个工程的表现是「类找不到」，而原因在 .classpath 指向了
             // 一个不存在的目录——这条说明直接给到界面，比让用户猜快得多。
-            notes.push(format!(
+            state.notes.push(format!(
                 "依赖 {} 在 {} 下找不到对应工程，已跳过（编译若报类找不到，先查这条）",
                 r.name,
-                workspace.display()
+                state.workspace.display()
             ));
-            out.push(RawEntry {
+            state.out.push(RawEntry {
                 name: r.name.clone(),
                 root: None,
                 depth,
@@ -517,18 +534,36 @@ fn walk(
             });
             continue;
         };
-        if !seen.insert(dir_key(&root)) {
+        let key = dir_key(&root);
+        // 回边 = 循环依赖。这一步必须在 seen 判断之前：能回到链上的工程，它必然
+        // 也已经在 seen 里，放在后面就永远报不出来（这也是之前一直静默的原因）。
+        if state.stack.contains(&key) {
+            let chain = state
+                .stack
+                .iter()
+                .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .collect::<Vec<_>>()
+                .join(" → ");
+            state.notes.push(format!(
+                "模块循环依赖：{chain} → {}。Eclipse 同样不支持这种环，类路径这边照常工作，\
+                 但编译顺序按依赖出现先后、不是真实依赖顺序：只改环里一个模块时用单模块编译，\
+                 要同时改两个就整体编译一遍",
+                r.name
+            ));
+            continue;
+        }
+        if !state.seen.insert(key.clone()) {
             continue;
         }
         // 停用必须**在这里**生效：它要连「往下的依赖」一起剪掉。等到遍历完再过滤，
         // B 的子孙已经被别的分支 emit 出来了，只清 B 自己的目录等于没停用。
-        if plan.is_disabled(&r.name, Some(&root)) {
-            notes.push(format!(
+        if state.plan.is_disabled(&r.name, Some(&root)) {
+            state.notes.push(format!(
                 "{} 被覆盖表停用：它和它往下传递的依赖都不参与类路径",
                 r.name
             ));
             let has_cp = ProjectCp::load(&root).is_some();
-            out.push(RawEntry {
+            state.out.push(RawEntry {
                 name: r.name.clone(),
                 root: Some(root),
                 depth,
@@ -545,7 +580,7 @@ fn walk(
             Some(child) => {
                 // 直接依赖总进类路径，`exported` 只决定「要不要继续往下走」
                 push_outputs(&child, &root, &mut dirs);
-                out.push(RawEntry {
+                state.out.push(RawEntry {
                     // 用 `.classpath` 里的写法（`/newar`）而不是 `.project` 自称的名字（`ar`）：
                     // 用户是在 Eclipse 里看到 `newar` 的，界面对齐那个名字才找得到人
                     name: r.name.clone(),
@@ -558,13 +593,16 @@ fn walk(
                     disabled: false,
                 });
                 if r.exported {
-                    walk(&child, workspace, out, seen, plan, depth + 1, notes);
+                    // 在栈上才认得出回边；只影响提示，不影响目录收集
+                    state.stack.push(key);
+                    walk(state, &child, depth + 1);
+                    state.stack.pop();
                 }
             }
             None => {
                 // 被引用但不是 Eclipse 工程：按老规则扫它自己的产物
                 legacy_own_dirs(&root, &mut dirs);
-                out.push(RawEntry {
+                state.out.push(RawEntry {
                     name: r.name.clone(),
                     root: Some(root),
                     depth,
@@ -1936,5 +1974,91 @@ mod tests {
         fs::write(d.join("readme.txt"), "x").unwrap();
         assert_eq!(module_dirs_of(&d), vec!["eye", "pm"]);
         cleanup(&d);
+    }
+
+    /// 造 A→B→A 的循环依赖，看实际是哪一种：死循环 / 报错 / 静默错序。
+    ///
+    /// 竞品作者明确说 Eclipse 不支持循环引用、导致「开发非常麻烦」（调研 §3.2）。
+    /// 我们的 DFS 只有 `seen`、没有栈，历史上是**第三种**：两个工程各出现一次、
+    /// `notes` 里一个字都不提，用户只会看到「编译顺序莫名其妙」。
+    /// 现在加了一条提示，但**不剪枝**——少一个类目录会表现成「类找不到」，比多一句提示严重。
+    #[test]
+    fn 循环依赖报出来但照旧收集目录() {
+        let root = temp_dir("cycle");
+        for (this, other) in [("a", "b"), ("b", "a")] {
+            let dir = root.join(this);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join(".classpath"),
+                format!(
+                    "<classpath>\
+                     <classpathentry kind=\"src\" path=\"src\"/>\
+                     <classpathentry kind=\"output\" path=\"classes\"/>\
+                     <classpathentry kind=\"src\" path=\"/{other}\" exported=\"true\"/>\
+                     </classpath>"
+                ),
+            )
+            .unwrap();
+            fs::write(
+                dir.join(".project"),
+                format!("<projectDescription><name>{this}</name></projectDescription>"),
+            )
+            .unwrap();
+            touch_class(&dir.join("classes"));
+        }
+        let a = root.join("a");
+        let nc_home = root.join("no-nchome");
+        let dirs = class_roots(&a, &nc_home);
+        // 每个工程的输出目录恰好一次：多一次说明环没被挡住，少一次说明被误剪
+        for module in ["a", "b"] {
+            let hits = dirs
+                .iter()
+                .filter(|p| p.starts_with(root.join(module)))
+                .count();
+            assert_eq!(hits, 1, "{module} 的输出目录应恰好出现一次：{dirs:#?}");
+        }
+        let graph = graph(&a, &nc_home, &[]);
+        assert_eq!(graph.projects.len(), 2, "两个工程都要在依赖视图里");
+        assert!(
+            graph.notes.iter().any(|n| n.contains("模块循环依赖")),
+            "环必须报出来，否则用户只会看到「编译顺序莫名其妙」：{:?}",
+            graph.notes
+        );
+        // 编译顺序只按类路径倒序，不看依赖关系：环里谁在前由 DFS 先序决定
+        assert_eq!(compile_order(&dirs, &root), vec!["b", "a"]);
+        cleanup(&root);
+    }
+
+    /// 菱形依赖（a→b→c 且 a→c）是重复访问、不是环。加了环检测后不能把它误报成循环，
+    /// 否则每次打开正常工程都有一条吓人的提示。
+    #[test]
+    fn 菱形依赖不算循环() {
+        let root = temp_dir("diamond");
+        let specs = [("a", vec!["b", "c"]), ("b", vec!["c"]), ("c", vec![])];
+        for (this, refs) in specs {
+            let dir = root.join(this);
+            fs::create_dir_all(&dir).unwrap();
+            let entries = refs
+                .iter()
+                .map(|r| format!("<classpathentry kind=\"src\" path=\"/{r}\" exported=\"true\"/>"))
+                .collect::<String>();
+            fs::write(
+                dir.join(".classpath"),
+                format!(
+                    "<classpath><classpathentry kind=\"src\" path=\"src\"/>\
+                     <classpathentry kind=\"output\" path=\"classes\"/>{entries}</classpath>"
+                ),
+            )
+            .unwrap();
+            touch_class(&dir.join("classes"));
+        }
+        let graph = graph(&root.join("a"), &root.join("no-nchome"), &[]);
+        assert!(
+            !graph.notes.iter().any(|n| n.contains("模块循环依赖")),
+            "菱形依赖被误报成环：{:?}",
+            graph.notes
+        );
+        assert_eq!(graph.projects.len(), 3);
+        cleanup(&root);
     }
 }

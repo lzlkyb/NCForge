@@ -43,6 +43,12 @@ pub struct LangStatus {
     pub module: Option<String>,
     /// 给人看的一句话（进度原文或错误原因）。
     pub message: String,
+    /// 进度百分比。jdt.ls 的 `language/status` 原文里带 `NN%` 或 `A/B` 时才填，
+    /// 拿不到就是 `None`——**不编一个假的百分比**，UI 宁可只显示文字。
+    pub progress: Option<u8>,
+    /// 阶段中文短语（「启动服务」「导入工程」「建立索引」），由 [`stage_of`] 从原文归纳。
+    /// 空串表示这一条状态不值得单独成句（比如 `ServiceReady`）。
+    pub stage: String,
     pub source_files: usize,
     pub jar_count: usize,
 }
@@ -53,10 +59,83 @@ impl LangStatus {
             state: "stopped".into(),
             module: None,
             message: String::new(),
+            progress: None,
+            stage: String::new(),
             source_files: 0,
             jar_count: 0,
         }
     }
+}
+
+/// 从 jdt.ls 的状态原文里取百分比。
+///
+/// 两种格式都见过：`"42% Starting Java Language Server"` 与 `"3/7 Importing projects"`。
+/// 取不到就返回 `None`——让 UI 显示「正在建立索引…」而不是一个停在 0% 的假进度条。
+pub fn parse_progress(message: &str) -> Option<u8> {
+    let bytes = message.as_bytes();
+    // NN%
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            if bytes.get(i) == Some(&b'%') {
+                let n: u32 = message[start..i].parse().ok()?;
+                return Some(n.min(100) as u8);
+            }
+            // A/B
+            if bytes.get(i) == Some(&b'/') {
+                let done: u32 = message[start..i].parse().ok()?;
+                let rest = &message[i + 1..];
+                let end = rest
+                    .char_indices()
+                    .find(|(_, c)| !c.is_ascii_digit())
+                    .map(|(k, _)| k)
+                    .unwrap_or(rest.len());
+                let total: u32 = rest[..end].parse().ok()?;
+                // `checked_div` 同时兜住 total = 0：宁可不报进度，也不要一个 NaN/panic
+                if let Some(pct) = done.saturating_mul(100).checked_div(total) {
+                    return Some(pct.min(100) as u8);
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+    None
+}
+
+/// 把 jdt.ls 的英文阶段原文归纳成一句中文，前端直接拼在「代码智能：」后面。
+///
+/// 只做确定性关键词匹配，不猜：匹配不到就给空串，让 UI 退回通用文案。
+pub fn stage_of(message: &str, kind: &str) -> String {
+    if kind == "ServiceReady" {
+        return String::new();
+    }
+    let m = message.to_ascii_lowercase();
+    // 顺序有讲究：jdt.ls 在建索引时发的原文是
+    // `"66% Starting Java Language Server - Refreshing '/bench'."`——
+    // 它同时含 `Starting` 和 `Refreshing`，先判 `refreshing` 才说得对在干什么。
+    let hit = if m.contains("refreshing") {
+        "建立索引"
+    } else if m.contains("import") {
+        "导入工程"
+    } else if m.contains("starting") || m.contains("start java") {
+        "启动服务"
+    } else if m.contains("build")
+        || m.contains("workspace")
+        || m.contains("index")
+        || m.contains("search")
+    {
+        "建立索引"
+    } else if m.contains("load") {
+        "加载工程"
+    } else {
+        ""
+    };
+    hit.to_string()
 }
 
 /// 一次运行中的语言服务。
@@ -249,6 +328,46 @@ fn swap_head(s: &str, from: &str, to: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// 进度只认原文里真的有的数字。jdt.ls 0.57 实测发的是
+    /// `"66% Starting Java Language Server - Refreshing '/bench'."`，所以 `NN%` 是主路。
+    #[test]
+    fn 进度只从原文里的数字取() {
+        assert_eq!(parse_progress("0% Starting Java Language Server"), Some(0));
+        assert_eq!(
+            parse_progress("66% Starting Java Language Server - Refreshing '/bench'."),
+            Some(66)
+        );
+        assert_eq!(parse_progress("100% Starting"), Some(100));
+        // 分数式：jdt.ls 换版本后可能改成这种写法，两种都认
+        assert_eq!(parse_progress("3/7 Importing projects"), Some(42));
+        // 没有数字就是不编：宁可 UI 只显示「正在建立索引…」
+        assert_eq!(parse_progress("ServiceReady"), None);
+        assert_eq!(parse_progress(""), None);
+        // 超过 100 的脏值要夹住，不能让进度条溢出
+        assert_eq!(parse_progress("120% weird"), Some(100));
+    }
+
+    /// 阶段文案的判据是「先看 Refreshing」：jdt.ls 建索引时那句话里
+    /// 也含 `Starting`，先判 Starting 会把索引说成「启动服务」。
+    #[test]
+    fn 阶段文案先认_refreshing_再认_starting() {
+        assert_eq!(
+            stage_of(
+                "66% Starting Java Language Server - Refreshing '/bench'.",
+                "Starting"
+            ),
+            "建立索引"
+        );
+        assert_eq!(
+            stage_of("20% Starting Java Language Server", "Starting"),
+            "启动服务"
+        );
+        // ServiceReady 不值得单独成句：状态已经变 ready 了
+        assert_eq!(stage_of("ServiceReady", "ServiceReady"), "");
+        // 完全不认识的原文：给空串，让前端退回通用文案
+        assert_eq!(stage_of("Something else", "Message"), "");
+    }
 
     #[test]
     fn rel_under_ignores_case_and_separator_style() {

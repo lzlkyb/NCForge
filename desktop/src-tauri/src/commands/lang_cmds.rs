@@ -291,6 +291,18 @@ impl LspHandler for Handler {
                 }
                 if kind == "ServiceReady" {
                     cur.state = "ready".into();
+                    // 就绪之后不再有进度：留着 100% 会让状态栏一直挂个百分比
+                    cur.progress = None;
+                    cur.stage = String::new();
+                } else {
+                    // 原文带 NN% / A/B 时给出百分比，带不到就保持 None（不编）
+                    if let Some(p) = crate::lang::parse_progress(&message) {
+                        cur.progress = Some(p);
+                    }
+                    let stage = crate::lang::stage_of(&message, kind);
+                    if !stage.is_empty() {
+                        cur.stage = stage;
+                    }
                 }
                 if !message.is_empty() {
                     cur.message = message;
@@ -359,8 +371,13 @@ fn start_blocking(
 
 /// jdt.ls 工作区缓存的版式号：目录规则变了就加一，旧缓存自然不再命中、随后被淘汰。
 const DATA_LAYOUT: u32 = 1;
-/// 最多保留几个模块的索引缓存。一份大约百 MB 级，4 份够在常用的几个模块间来回切。
-const DATA_KEEP: usize = 4;
+/// 最多保留几个「工程 + 模块」的索引缓存。
+///
+/// 一份大约百 MB 级。原来是 4 份，按「同时跟两个工程」估的；实际现场是顾问手上
+/// 三个工程（开发 / 测试 / 生产各一份代码）乘两三个模块，4 份会在切回第一个工程时
+/// 把它挤掉，等于每次切回去都从头索引。8 份约 800 MB，且现在有
+/// `lang_cache_clear` 可以一键腾空间——宁可多留，也不要让「切回旧工程」变成重活。
+const DATA_KEEP: usize = 8;
 /// 缓存目录里记「最近一次使用时间」的文件（内容是毫秒时间戳）。
 const DATA_STAMP: &str = ".ncforge-used";
 
@@ -630,6 +647,10 @@ fn launch(
         state: "indexing".into(),
         module: Some(module.to_string()),
         message: "正在建立索引…".into(),
+        // 影子工程刚生成完，jdt.ls 还没发第一条 `language/status`：此时没有百分比，
+        // 由后续通知填上（`parse_progress` 认 `NN%` 与 `A/B`）
+        progress: None,
+        stage: "建立索引".into(),
         source_files: project.source_files,
         jar_count: project.jar_count,
     };

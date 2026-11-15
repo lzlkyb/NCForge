@@ -10,6 +10,24 @@ use std::sync::Arc;
 use crate::config::AppConfig;
 use crate::state::AppState;
 
+/// 冷启动打点：前端首帧画完后报一次。
+///
+/// 返回值是「进程启动 → 这一帧」的总毫秒数（`None` 表示进程起点没记上，只可能出现在
+/// 单元测试里）。不打点也不影响任何功能：前端那边 `.catch` 掉即可，别让它变成启动错误。
+#[tauri::command]
+pub fn boot_report(ms: f64) -> Option<u64> {
+    crate::boot_timing::first_frame(ms)
+}
+
+/// 启动分段打点：首屏可编辑 / 目录树 / 索引就绪 / 首批诊断，各报一次。
+///
+/// 和 `boot_report` 一样只记日志、不阻塞。分段的用处是把「启动慢」拆开看：
+/// 索引那一段动辄一两分钟，只有把首帧与索引分开，才知道该优化哪一段。
+#[tauri::command]
+pub fn boot_stage(stage: String, ms: f64) -> Option<u64> {
+    crate::boot_timing::stage(&stage, ms)
+}
+
 /// 读当前配置（启动后可能已被其它命令改过，以内存为准）。
 ///
 /// 口令密文（`svn_password_dpapi` / `db_password_dpapi`）在此出口抹成占位符：

@@ -754,4 +754,90 @@ mod tests {
         );
         shutdown_all();
     }
+
+    /// 真机：单文件编译的 p50 —— A0 五个基线指标里的「保存 → 出 class」。
+    ///
+    /// 为什么要单独一条：上面的 `persistent_worker_live` 只证明「预热比首次快」，
+    /// 两次采样各一个数，取不出 p50；而方案 §4.2 的目标写的是 **p50 < 0.4 s**。
+    /// 这里对同一个文件连编 `RUNS` 次取中位数，前 `WARMUP` 次算预热并丢弃
+    /// （第一次会拉起 JVM，把它算进去等于量的是冷启动）。
+    ///
+    /// 跑法：`node scripts/rust-gate.mjs test --lib -- --ignored 单文件编译_p50 --nocapture`
+    /// 输出行以 `PERF ` 开头，`scripts/perf-baseline.mjs` 按此前缀取数，改格式要同步改那边。
+    #[test]
+    #[ignore]
+    fn 单文件编译_p50() {
+        const WARMUP: usize = 3;
+        const RUNS: usize = 20;
+        let Some((java, ecj, bridge)) = live_env() else {
+            println!("跳过：本机没有 java / ecj / 桥 jar");
+            return;
+        };
+        let work = crate::test_support::tmp("ecj-p50");
+        let out = work.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let src = work.join("Perf.java");
+        std::fs::write(
+            &src,
+            "public class Perf { public static int one() { return 1; } }\n",
+        )
+        .unwrap();
+        let args = work.join("perf.args");
+        std::fs::write(
+            &args,
+            format!(
+                "-1.8 -g -nowarn -proc:none\n-d \"{}\"\n\"{}\"\n",
+                out.display().to_string().replace('\\', "/"),
+                src.display().to_string().replace('\\', "/")
+            ),
+        )
+        .unwrap();
+
+        let run = || {
+            let t = Instant::now();
+            let r = compile(&java, &ecj, &bridge, &args, Duration::from_secs(60), None);
+            match r {
+                Ok(Some((true, _))) => Some(t.elapsed().as_millis() as u64),
+                // 编不过就别给数字：拿一个失败耗时当基线会让人以为提速了
+                other => {
+                    println!("PERF single-file-compile failed: {other:?}");
+                    None
+                }
+            }
+        };
+
+        for _ in 0..WARMUP {
+            if run().is_none() {
+                println!("跳过：预热编译失败");
+                shutdown_all();
+                return;
+            }
+        }
+        let mut samples: Vec<u64> = Vec::with_capacity(RUNS);
+        for _ in 0..RUNS {
+            match run() {
+                Some(ms) => samples.push(ms),
+                None => {
+                    println!("跳过：正式轮次编译失败");
+                    shutdown_all();
+                    return;
+                }
+            }
+        }
+        samples.sort_unstable();
+        let n = samples.len();
+        let p50 = samples[n / 2];
+        let mean = samples.iter().sum::<u64>() / n as u64;
+        println!(
+            "PERF single-file-compile n={n} min={} p50={p50} max={} mean={mean}",
+            samples[0],
+            samples[n - 1]
+        );
+        // 只做防呆上限：0.4 s 是目标不是门槛，机器差异让测试红等于把目标变成阻塞。
+        assert!(
+            p50 < 5000,
+            "单文件编译 p50 {p50} ms，明显不合理（超时或环境异常）"
+        );
+        shutdown_all();
+    }
 }

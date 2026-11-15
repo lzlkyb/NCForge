@@ -205,6 +205,35 @@ pub fn entities_sqls(table_ids: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// 反向：VO 类 → 它映射到的表。正向（表 → 实体）在 [`entities_sqls`]，
+/// 这里查同一张 `md_ormap`，只是入口换成类名。
+///
+/// 类名三种写法都要认：`CalbdocVO`、`nc.vo.bd.calbdoc.CalbdocVO`，以及只给简单名。
+/// 用 `substr` 比 `like '%.'` 稳：类名里不会有通配符，但 `%`/`_` 在别的输入里会。
+/// 展开成多行的原因是 `md_ormap` 一列可对多属性、表也有多版本，不去重会重复出行。
+pub fn vo_tables_sql(class_name: &str) -> Result<String, String> {
+    let n = class_name.trim().to_lowercase();
+    if n.is_empty() {
+        return Err("没有给出 VO 类名".to_string());
+    }
+    let lit = literal(&n);
+    let suffix = literal(&format!(".{n}"));
+    let tail = n.chars().count() + 1;
+    Ok(format!(
+        "select distinct cl.name cname, cl.fullclassname cfull, t.id tid, t.name tname, \
+                t.displayname tdisp \
+           from md_ormap m \
+           join md_column c on c.id = m.columnid \
+           join md_class cl on cl.id = m.classid \
+           join md_table t on t.id = c.tableid \
+          where nvl(m.dr, 0) = 0 and nvl(c.dr, 0) = 0 and nvl(t.dr, 0) = 0 \
+            and (t.industry in ('0', '48') or t.industry is null) \
+            and (lower(cl.name) = {lit} \
+                 or lower(cl.fullclassname) = {lit} \
+                 or substr(lower(cl.fullclassname), -{tail}) = {suffix})"
+    ))
+}
+
 fn chunks(ids: &[String]) -> Vec<&[String]> {
     if ids.is_empty() {
         return Vec::new();
@@ -221,6 +250,36 @@ mod tests {
             names: v.iter().map(|s| s.to_string()).collect(),
             ..Default::default()
         }
+    }
+
+    /// VO 反向：三个 join 缺一个都查不出表，软删/行业条件缺一个就少表。
+    ///
+    /// 这条测试的存在理由是本机没有 NC 库——SQL 拼错只能等用户现场发现，
+    /// 而「少了几张二开扩展表」这种错法不会报错，只会安静地少结果。
+    #[test]
+    fn vo_反向查询的_join_与过滤条件都要在() {
+        let sql = vo_tables_sql("CalbdocVO").unwrap();
+        // 入口表是 md_ormap（`from`），另外三张靠 join 挂上去
+        for piece in [
+            "from md_ormap",
+            "join md_column",
+            "join md_class",
+            "join md_table",
+        ] {
+            assert!(sql.contains(piece), "缺 {piece}：{sql}");
+        }
+        // 类名大小写不敏感，统一小写后比较
+        assert!(sql.contains("lower(cl.name) = 'calbdocvo'"));
+        // 全限定名按后缀比，不用 like（`%`/`_` 在别的输入里是通配符）
+        assert!(sql.contains("substr(lower(cl.fullclassname)"));
+        assert!(!sql.contains(" like "), "不能退化成 like：{sql}");
+        // 软删除是 NULL 不是 0；行业条件放行 NULL 否则二开扩展表全丢
+        assert!(sql.contains("nvl(t.dr, 0) = 0"));
+        assert!(sql.contains("industry is null"));
+        // 一条列映射多个属性会产生重复行，必须 distinct
+        assert!(sql.starts_with("select distinct"));
+        // 空类名报错，不许退化成查全库
+        assert!(vo_tables_sql("   ").is_err());
     }
 
     #[test]

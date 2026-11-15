@@ -269,18 +269,44 @@ impl JdtlsLaunch<'_> {
     }
 }
 
+/// 导入阶段要跳过的目录。
+///
+/// 不排 `.svn` 时索引会卡在 35% 一分钟以上（NC 工作副本每层都有 `.svn`）。
+/// 另外三类也一律排掉，理由都不是「可能」而是实测过的量级：
+/// - 编译产物 `classes`/`bin`：`.classpath` 里它们是 output，本来不该进源码索引；
+/// - `hotwebs`：NC 自带的前端资源目录，动辄上万文件；
+/// - `nclogs`/`temp`/`backup`：日志、临时文件、备份，与代码无关。
+///
+/// 排除只影响「扫描哪些目录」，不影响 `.classpath` 里明确声明的 src。
+pub const IMPORT_EXCLUSIONS: &[&str] = &[
+    "**/.svn/**",
+    "**/.git/**",
+    "**/classes/**",
+    "**/bin/**",
+    "**/hotwebs/**",
+    "**/nclogs/**",
+    "**/temp/**",
+    "**/backup/**",
+];
+
 /// 发给 jdt.ls 的 `java.*` 配置（initialize 与 didChangeConfiguration 共用）。
 ///
 /// - `autobuild` 关：红线「禁止 jdt.ls 写用户文件」，也省 CPU；
 /// - `format` 开放手动/选区调用：客户端默认关闭保存时格式化，缩进参数来自当前编辑器；
-/// - `.svn` 排除：不排除时索引会卡在 35% 一分钟以上（NC 工作副本每层都有 `.svn`）。
+/// - `import.exclusions` 见 [`IMPORT_EXCLUSIONS`]；
+/// - `maven`/`gradle` 关：NC 工作副本里没有 pom.xml / build.gradle，但 jdt.ls 会为每个
+///   项目做一次构建文件探测（含往上找父目录），几百个模块加起来是一笔纯浪费。
 pub fn build_settings(runtime_home: &str) -> Value {
     json!({
         "java": {
             "configuration": { "runtimes": [{ "name": "JavaSE-1.8", "path": runtime_home, "default": true }] },
             "autobuild": { "enabled": false },
             "format": { "enabled": true },
-            "import": { "exclusions": ["**/.svn/**"] },
+            "import": {
+                "exclusions": IMPORT_EXCLUSIONS,
+                "maven": { "enabled": false },
+                "gradle": { "enabled": false }
+            },
             "errors": { "incompleteClasspath": { "severity": "ignore" } },
             "completion": { "maxResults": 50 }
         }
