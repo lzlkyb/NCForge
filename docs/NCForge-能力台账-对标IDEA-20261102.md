@@ -1,10 +1,18 @@
-# NCForge 能力台账：对标 IntelliJ IDEA
+# NCForge 能力台账：对标 IntelliJ IDEA（⚠️ 已停用，2026-11-15）
 
+> 🔴 **本文不再是「唯一入口」，不要据此排期。** 2026-11-15 逐条 grep 复核发现
+> **§2 的 3 条缺口全部已实现、§4「不做」表至少 6 条已实现**（明细见下方 §0）。
+> 原文保留作历史快照，**新结论一律看**：
+> - 代码编辑能力：[`NCForge-代码编辑能力-对标与超越方案-2026-11-15.md`](./NCForge-代码编辑能力-对标与超越方案-2026-11-15.md)
+>   + 实测落地 [`NCForge-代码编辑-6条落地-2026-11-15.md`](./NCForge-代码编辑-6条落地-2026-11-15.md)
+> - 数据库能力：[`NCForge-数据库行业差距终版台账-2026-11-10.md`](./NCForge-数据库行业差距终版台账-2026-11-10.md)
+>   + [`NCForge-数据库能力边界决策-2026-11-10.md`](./NCForge-数据库能力边界决策-2026-11-10.md)（2026-11-10 拍板，仍生效）
+>
 > 日期：2026-11-02（同日裁剪低 ROI 项）
-> 用途：**只记仍未闭合的能力缺口**，作为排期与「这件事到底做没做」的唯一入口。
+> 原用途：只记仍未闭合的能力缺口。**该定位已于 2026-11-15 废止。**
 > 历史审计（含已关闭项、技术依据与验收记录）见
 > [`NCForge-对标IDEA-能力缺口-20261101.md`](./NCForge-对标IDEA-能力缺口-20261101.md)；
-> 本文不复制它的逐条矩阵，只保留当前状态。
+> 本文不复制它的逐条矩阵，只保留当时状态。
 >
 > 维护规则：
 > 1. 每条状态必须能指到代码。写「有」就要给出文件与行；写「缺」要先 grep 证明全仓无实现。
@@ -12,6 +20,27 @@
 > 3. 新排期项必须带编号（P1-x / P2-x，对应任务清单），否则不进迭代。
 > 4. 本文与代码冲突时以代码为准，先改本文再排期。
 > 5. **进「不做」不等于永远不做**：写下触发条件，真出现诉求再从 §4 捞回来。
+
+## 0. 2026-11-15 复核：本文哪些判定已经错了
+
+复核方法就是本文 §6 那三条命令（先 grep 证明有没有）。**结论：本文已不可信，逐条如下。**
+
+| 本文原判定 | 实际现状（2026-11-15 grep 核实） | 代码证据 |
+|---|---|---|
+| §2.1 新建 Java 类文件模板「**缺**」 | **已实现** | `src-tauri/src/file_template.rs`（`lib.rs:71` 已注册）+「新建 Java 类型…」对话框 |
+| §2.1 格式化「**待实测**」、服务端「刻意关掉」 | **已开且实测有效** | `lsp.rs:304` 现为 `"format": { "enabled": true }`（`7302837`，2026-11-15 打开）；`textDocument/formatting` 实测回 **18 处 TextEdit**，`rangeFormatting` 9 处 |
+| §2.1 提取参数「**缺**」 | **已实现（受限版）** | `src/lib/refactorParameter.ts` + `refactorWorkbench`；默认窄档，设置里有宽档开关 |
+| §4 保存时自动格式化「服务端 format 已刻意关」 | **前提已不成立** | 同上，服务端已开；**默认关的理由仍成立**（NC 是 CRLF + Tab，默认开会改脏文件），但别再写「服务端关着」 |
+| §4 移动类 / 改签名 / 内联重构「**不做**」 | **已实现** | `src/lib/refactorMenu.ts:62-63`（inlineVariable / inlineMethod）、`RefactorWorkbenchHost.tsx:30`（signature / moveType / renamePackage / visibility） |
+| §4 结构化搜索替换 SSR「**不做**」 | **已实现** | `RefactorWorkbenchHost.tsx:30,59-65`：`ncforge.structuralSearch`，`$变量$` 捕获 + 替换预览 |
+| §4 Inspect Code 批量检查「**不做**」 | **已实现** | 同上：`ncforge.batchInspect`，范围可选当前文件 / 整模块，含批量整理导入 |
+| §4 Inlay Hints「0.57 无 handler，**不做**」 | **已自研实现** | `src/lib/javaParameterHints.ts:49` 真注册了 `registerInlayHintsProvider`，参数名 + 推断类型两种；**不依赖 jdt.ls 的 inlayHint handler** |
+| §4 jar / 依赖内文本搜索「**不做**」 | **已实现** | `src-tauri/src/jar_symbols.rs`、`java_comments.rs`（class 常量池 + `_src.jar` 内 `.java` 注释可搜可打开） |
+| §4 抑制警告管理「不做」 | **不做，且已证实做不到** | jdt.ls 0.57 **不下发** `@SuppressWarnings` quick fix：6 类问题逐条问 codeAction，35 个动作 **0 条**含 suppress。`SuppressWarningsProposal` 在 `org.eclipse.jdt.ui`，jdt.ls 不加载 |
+
+**仅两条「不做」经复核仍然成立**：CodeLens（客户端没声明、前端无 provider）、Profiler / UML / HTTP Client（与 NC 二开无关）。
+
+🔴 **方法论教训**：本文 §6 写了复核方法，但**没有人定期跑它**。「不做」表尤其危险——它会让后来人（包括 AI）跳过 grep 直接下结论，把已经做完的事再立项一遍。**判「缺 / 不做」之前必须当场 grep，不能引用任何台账。**
 
 ## 状态口径
 
@@ -41,9 +70,9 @@ SVN 全套（含 annotate 与已审标记）、数据库工具窗、编码/换�
 
 | 缺口 | 现状 | 证据 / 限制 | 复杂度 | 去向 |
 |---|---|---|---|---|
-| 新建 Java 类的文件模板（package / 版权头） | **缺** | 新建走空文件；无 `fileTemplate` 概念 | 1 | 未排期 |
-| 格式化实际可用性 | **待实测** | `formatOnSave` 偏好与保存链路已接（`src/lib/formatOnSave.ts:20`、`src/components/workspace/EditorPane.tsx:93`），但服务端 `java.format.enabled` 被刻意关掉（`src-tauri/src/lsp.rs:282`）；命令与保存时格式化是否真的产生改动没有验收 | 1 | 实测后决定修或删入口 |
-| 提取参数 | **缺** | 0.57 的 `java/getRefactorEdit` 没有 extract parameter；只能先提变量 | 2 | 未排期 |
+| ~~新建 Java 类的文件模板（package / 版权头）~~ | ~~缺~~ → **已实现，见 §0** | ~~新建走空文件；无 `fileTemplate` 概念~~ 现为 `src-tauri/src/file_template.rs` | 1 | 已闭合 |
+| ~~格式化实际可用性~~ | ~~待实测~~ → **已实测有效，见 §0** | ~~服务端 `java.format.enabled` 被刻意关掉（`lsp.rs:282`）~~ 现 `lsp.rs:304` = `true`，实测 18 处 TextEdit | 1 | 已闭合 |
+| ~~提取参数~~ | ~~缺~~ → **已实现（受限版），见 §0** | ~~0.57 的 `java/getRefactorEdit` 没有 extract parameter~~ 现为 `src/lib/refactorParameter.ts` | 2 | 已闭合 |
 
 ### 2.2 版本控制
 
@@ -74,18 +103,18 @@ SVN 全套（含 annotate 与已审标记）、数据库工具窗、编码/换�
 | 项 | 理由 | 触发条件 |
 |---|---|---|
 | Profiler / 覆盖率 / 依赖 UML 图 | 与 NC 二开场景无关，维护成本高 | 无 |
-| 结构化搜索替换（SSR） | 全工程正则替换已够用 | 出现跨文件结构性改写需求 |
+| ~~结构化搜索替换（SSR）~~ | ⚠️ **已实现，见 §0**（`ncforge.structuralSearch`，`$变量$` 捕获 + 替换预览） | — |
 | HTTP Client | NC 前端是 JSP/upm，不走这个路径 | 无 |
 | 源码根 / 排除目录 UI | `.classpath` 是唯一真源，UI 再改一套会漂移 | 无 |
 | 任意多 root | 工程模型是「主工程 + 依赖闭包」，任意 root 会破坏类路径真源 | 工程模型本身要改 |
-| 保存时自动格式化（默认开） | NC 代码是 CRLF + Tab；服务端 format 已刻意关（`src-tauri/src/lsp.rs:282`），默认开会大面积改脏文件 | 无 |
-| 移动类 / 改签名 / 内联重构 | 0.57 无内联处理器；移动与改签名要走文件级引用改写，与「语言服务不写用户文件」红线冲突 | jdt.ls 升级且提供安全 API |
+| 保存时自动格式化（默认开） | NC 代码是 CRLF + Tab，默认开会大面积改脏文件。⚠️ **原文「服务端 format 已刻意关」已不成立**（`lsp.rs:304` 现为 `true`，见 §0）；不做的是「默认开」，不是「格式化」 | 无 |
+| ~~移动类 / 改签名 / 内联重构~~ | ⚠️ **已实现，见 §0**（`refactorMenu.ts:62-63`、`RefactorWorkbenchHost.tsx:30`）。原理由「0.57 无内联处理器」只对服务端成立，我们自研了 | — |
 | 运行单个类 / JUnit 单测运行 | NC 二开不靠本地 runner 验证，编译 + 部署 + 服务日志是主链路 | 团队开始维护本地单测 |
-| Inspect Code 批量检查 / 自定义检查规则 / 抑制警告管理 | 编辑时诊断 + 编译问题面板已覆盖主路径；全套检查框架成本高 | 出现明确的批量巡检诉求 |
-| Inlay Hints | 0.57 无 handler，自算参数名映射收益低 | jdt.ls 升级到带 InlayHint 的版本 |
+| ~~Inspect Code 批量检查~~ / 自定义检查规则 / 抑制警告管理 | ⚠️ **批量检查已实现**（`ncforge.batchInspect`，见 §0）。**抑制警告仍不做且已证实做不到**：jdt.ls 0.57 的 35 个 codeAction 里 0 条含 suppress | 自定义规则：出现明确诉求 |
+| ~~Inlay Hints~~ | ⚠️ **已自研实现，见 §0**（`javaParameterHints.ts:49`）。原理由「0.57 无 handler」只对服务端成立，我们没走服务端 | — |
 | CodeLens | 客户端没声明、前端无 provider；NC 工作流没有对应的操作入口 | 出现具体可挂载的 CodeLens 动作 |
 | Change List / Shelve / 与剪贴板比较 | 版本控制以「补丁打包 + 评审」为中心，不是 IDEA 的变更集工作流 | 团队改用变更集式提交 |
-| jar / 依赖内文本搜索 | 类型搜索已覆盖依赖跳转，文本搜索收益低 | 出现跨 jar 文本排查需求 |
+| ~~jar / 依赖内文本搜索~~ | ⚠️ **已实现，见 §0**（`jar_symbols.rs` class 常量池 + `java_comments.rs`，`_src.jar` 内注释可搜可打开）。触发条件「出现跨 jar 文本排查需求」确已出现 | — |
 | 后缀补全 / 粘贴自动 import / 复制剪切类 / 彩虹括号 | 纯敲键便利，维护面不小，与 NC 主业价值不匹配 | 用户明确提出 |
 
 ## 5. 保留排期（非 IDEA 对标项）

@@ -1,5 +1,12 @@
-# NCForge 对标 IntelliJ IDEA：能力缺口清单
+# NCForge 对标 IntelliJ IDEA：能力缺口清单（历史审计，2026-11-01）
 
+> ⚠️ **2026-11-15 复核补注**：本文的**格式化相关判定全部已过期**——`java.format.enabled`
+> 已于 2026-11-15（`7302837`）打开，实测 `textDocument/formatting` 回 **18 处 TextEdit**；
+> **InlayHint 也已由自研 provider 补上**（`javaParameterHints.ts:49`）。
+> §6「动手前先验证的四件事」中第 1 条已有答案。涉及处已就地标注「**11-15 现已**」。
+> 代码编辑的最新真源：[`NCForge-代码编辑-6条落地-2026-11-15.md`](./NCForge-代码编辑-6条落地-2026-11-15.md)。
+> 本文保留作历史审计，**不要据此排期**。
+>
 > 日期：2026-11-01　作者：阿岩
 > 口径：**只记代码里能指到行的现状**。`docs/` 与 `CLAUDE.md` 里有几处过期描述，
 > 本文每条都重新 grep 过（例：D4 未编译归因其实已落地、工程关联前端其实已做完）。
@@ -38,7 +45,7 @@ NCForge 的强项不在"编辑体验"，而在**NC 特有链路**：类路径真
 `DocumentHighlight` / `SelectionRange` / `CodeLens`——**这几个"缺"的只是前端接线**；
 语义高亮也有——走的是当年的 draft 协议，但 0.57 同时挂了 `java.project.provideSemanticTokens`
 这个 `executeCommand`（返回标准 5 元组），已按拉取方式接上 Monaco（见 §2 D、§7 19）。
-**没有** `TypeHierarchy` / `InlayHint`：InlayHint 要靠升级 jdt.ls 或自己算；TypeHierarchy 已用自研扩展 bundle 补上——`IDelegateCommandHandler` 注册 `ncforge.typeHierarchy`，经 `initializationOptions.bundles` 加载（见 §3 P2 #18、§7 18）。
+**没有** `TypeHierarchy` / `InlayHint`：~~InlayHint 要靠升级 jdt.ls 或自己算~~ **11-15 现已「自己算」并落地**（`javaParameterHints.ts:49`）；TypeHierarchy 已用自研扩展 bundle 补上——`IDelegateCommandHandler` 注册 `ncforge.typeHierarchy`，经 `initializationOptions.bundles` 加载（见 §3 P2 #18、§7 18）。
 
 ---
 
@@ -123,11 +130,11 @@ NCForge 的强项不在"编辑体验"，而在**NC 特有链路**：类路径真
 | 实时诊断（波浪线 + 问题面板 + 上下跳） | **有** | `diagStore.ts`、`BottomPanel.tsx` |
 | 快速修复（`Alt+Enter`） | **有** | `editorActions.ts:130-134` |
 | Organize Imports（`Ctrl+Alt+O`） | **部分 → 现已** | `lib/javaActions.ts` 的 `organizeImports`（走 `source.organizeImports`，range 覆盖全文）；原「只能靠 quick fix」 |
-| 保存时动作（format on save / optimize imports on save） | **缺** | 全仓无 `formatOnSave`。注意：NC 代码是 CRLF + Tab，**格式化不能默认开**（`lsp.rs:275` 已把 jdt format 关掉） |
-| 显式格式化（`Ctrl+Alt+L`） | **待验证** | provider 已注册（`langProvidersExtra.ts:104`），但 `lsp.rs:282` `java.format.enabled:false`；服务端可能返回空，需实测 |
-| Inspect Code（批量检查） | **缺** | 只有编辑时诊断 |
+| 保存时动作（format on save / optimize imports on save） | **缺 → 现已有** | 原「全仓无 `formatOnSave`」已过期：`src/lib/formatOnSave.ts` 已落地，默认关。**11-15 现已**：服务端 format 也开了（`lsp.rs:304`）；「不能默认开」的理由仍成立（NC 是 CRLF + Tab） |
+| 显式格式化（`Ctrl+Alt+L`） | **待验证 → 11-15 实测有效** | provider 已注册（`langProvidersExtra.ts:104`）。原「`lsp.rs:282` `java.format.enabled:false`，服务端可能返回空」**已过期**：现 `lsp.rs:304` = `true`，实测回 **18 处 TextEdit**（`rangeFormatting` 9 处），服务端真在改 |
+| Inspect Code（批量检查） | **缺 → 现已有** | 原「只有编辑时诊断」已过期：`ncforge.batchInspect`（`RefactorWorkbenchHost.tsx:30`），范围可选当前文件 / 整模块，含批量整理导入 |
 | 自定义检查规则 / 严重级别配置 | **缺** | 无 |
-| 抑制警告 | **部分** | 只能走 quick fix 提供的 suppress |
+| 抑制警告 | **部分 → 11-15 证实做不到** | 原「只能走 quick fix 提供的 suppress」**是错的**：jdt.ls 0.57 **根本不下发** suppress 动作（6 类问题 35 个 codeAction，0 条含 suppress）。`SuppressWarningsProposal` 在 `org.eclipse.jdt.ui`，jdt.ls 不加载 ⇒ **不立项** |
 | 错误内联显示（Error Lens） | **缺 → 现已** | `lib/errorLens.ts` 行尾装饰（最多 300 条、每条 140 字），偏好里可关 |
 | 语义高亮 | **缺 → 现已** | `lib/semanticTokens.ts` 注册 Monaco `DocumentSemanticTokensProvider`，经 `java.project.provideSemanticTokens` 拉取（0.57 没有标准 `textDocument/semanticTokens`；draft 推送不用，见 §7 19）。方法 / 注解 / 废弃成员单独配色，其余类型退回语法色 |
 | 括号彩虹 / 缩进参考线 | **部分** | 只有主题里的 indentGuide 颜色，无彩虹括号 |
@@ -177,7 +184,7 @@ NCForge 的强项不在"编辑体验"，而在**NC 特有链路**：类路径真
 | 标签拖拽排序 | **缺 → 现已** | `TabStrip.tsx` HTML5 拖拽，拖到哪个标签前就插到它前面 |
 | 字号 / 字体 / 换行 / 缩进设置 | **缺 → 现已** | `lib/editorPrefs.ts`（localStorage，不跟配置导出走）+ `components/settings/EditorSettings.tsx`；`monacoOptionsOf` 统一映射 |
 | 小地图 / 粘性滚动 | **部分 → 现已** | 小地图默认开（大文件降级时关）；粘性滚动、小地图都可设（`editorPrefs`） |
-| 内嵌提示 Inlay Hints（参数名/类型） | **缺（服务端不支持）** | jdt.ls 0.57 无 InlayHint handler（LSP 3.17 之后才有）；自己做要算参数名映射，收益低 |
+| 内嵌提示 Inlay Hints（参数名/类型） | **缺 → 11-15 现已自研实现** | 「jdt.ls 0.57 无 InlayHint handler」仍成立，但**我们没走服务端**：`src/lib/javaParameterHints.ts:49` 自己注册 `registerInlayHintsProvider`，参数名 + 推断类型两种。原「收益低」的判断已被推翻 |
 | 代码折叠 | **部分（可补） → 现已** | `langProvidersExtra.ts` 加 `FoldingRange` provider（`lsp.rs:314` 声明 `foldingRange`），按方法/块折叠 |
 | 当前符号所有出现处高亮（`Ctrl+Shift+F7`） | **缺（可补） → 现已** | `langProvidersExtra.ts` 加 `DocumentHighlight` provider（`lsp.rs:315`），语义级高亮 |
 | 扩展选区（`Ctrl+W` 逐层选中） | **缺（可补） → 现已** | `langProvidersExtra.ts` 加 `SelectionRange` provider（`lsp.rs:316`），限 32 层防成环 |
@@ -392,7 +399,7 @@ NCForge 的强项不在"编辑体验"，而在**NC 特有链路**：类路径真
 | 移动 / 改签名 / 内联（文件级重构） | 内联在 0.57 没有处理器；移动要走文件级重命名与引用改写，与「只落编辑器、用户自己保存」的红线冲突，收益不高 |
 | 结构化搜索替换（SSR） | 全工程正则替换已够用 |
 | HTTP Client | NC 前端是 JSP/upm，不走这个路径 |
-| 保存时自动格式化 | NC 代码是 CRLF + Tab，`lsp.rs:282` 已刻意关掉 jdt format；开了会大面积改脏文件 |
+| 保存时自动格式化（**默认开**） | NC 代码是 CRLF + Tab，默认开会大面积改脏文件。⚠️ 原「`lsp.rs:282` 已刻意关掉 jdt format」**已过期**（11-15 起 `lsp.rs:304` = `true`）；不做的是「默认开」，手动格式化可用 |
 
 ---
 
@@ -404,13 +411,17 @@ NCForge 的强项不在"编辑体验"，而在**NC 特有链路**：类路径真
    incoming/outgoing）/ `FoldingRange` / `DocumentHighlight` / `SelectionRange` / `CodeLens`，
    语义高亮只有 draft 协议（另有 `provideSemanticTokens` 拉取口，已接上，见 §7 19）；
    **没有 `TypeHierarchy` 与 `InlayHint`**（类型层级已用自研扩展
-   bundle 补上，见 §7 18；InlayHint 仍缺）。别按新版 jdt.ls 的文档规划。
+   bundle 补上，见 §7 18；~~InlayHint 仍缺~~ **11-15 现已自研补上**，
+   走前端 `javaParameterHints.ts:49`，不依赖服务端 handler）。别按新版 jdt.ls 的文档规划。
+   🔴 **推论**：「服务端没有」≠「做不了」——类型层级与 InlayHint 两次都是自研解决的。
 2. **`snippetSupport` 现在是 `true`**（`lsp.rs:306`）。前端按 `insertTextFormat===2` 映射到
    Monaco 的 `InsertAsSnippet`（`langProviders.ts`）；jdt.ls 自己的模板也会一起进来，
    排序上让内置模板靠后（`sortText: "zz-<prefix>"`），敲半截时语义补全仍排前面。
-3. **格式化有三个开关要一起看**：`lsp.rs:282` `java.format.enabled:false`（服务端配置）、
+3. **格式化有三个开关要一起看**：`lsp.rs` 的 `java.format.enabled`（服务端配置）、
    `langProvidersExtra.ts:104`（前端 provider）、`editorActions.ts:59`（命令）。
-   现状很可能"命令点了没反应"，需实测后决定是修还是删。
+   ~~现状很可能"命令点了没反应"，需实测后决定是修还是删。~~
+   **11-15 现已实测：能用**。服务端配置已开（`lsp.rs:304` = `true`，`7302837`），
+   `textDocument/formatting` 回 18 处 TextEdit、`rangeFormatting` 9 处。**入口保留，不删。**
 4. **代码生成不要走 jdt.ls 的 `workspace/applyEdit`**：红线是 jdt.ls 不写用户文件
    （`lsp.rs:292` 注释）。生成结果作为文本插入编辑器，用户自己保存。
    override/implement 的 `codeAction.edit` 由前端自己 apply 到当前 model，
@@ -432,7 +443,11 @@ NCForge 的强项不在"编辑体验"，而在**NC 特有链路**：类路径真
 
 ## 6. 动手前先验证的四件事
 
-1. **格式化到底能不能用**：在 Java 文件里跑「格式化当前文件」，看有没有改动。
+> **11-15 补注**：第 1 条已验完（能用，18 处 TextEdit）；第 2 条的 suppress 部分也已验完
+> （jdt.ls 不下发，见 §2 表）。复跑命令：`cd desktop && npm run test:editor-gaps`。
+
+1. ~~**格式化到底能不能用**：在 Java 文件里跑「格式化当前文件」，看有没有改动。~~
+   **已验：能用**（2026-11-15，18 处 TextEdit）。
 2. **jdt.ls 是否返回 organizeImports / override / implement 的 code action**：
    打日志看 `textDocument/codeAction` 的返回，或在 quick fix 菜单里找。
 3. **snippet 模板开启后的插入效果**：临时把 `snippetSupport` 改 true，敲 `for` 看补全项插入结果。
