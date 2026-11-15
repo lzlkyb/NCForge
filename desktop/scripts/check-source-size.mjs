@@ -45,9 +45,15 @@ const MAX_LINES = 600;
 /**
  * 顶层 `#[cfg(test)]` / `#[cfg(all(test, unix))]`。允许行首缩进：
  * `mod xxx` 里的测试模块是缩进写的，那段同样是测试而不是生产逻辑。
- * 只看**第一个**匹配行 —— 约定是测试模块放文件末尾，中间插测试的情况没有。
+ * 只看**第一个**命中 CFG_TEST 且**修饰 `mod`** 的 —— 判据见 `testSectionAt`。
  */
 const CFG_TEST = /^\s*#\[cfg\(\s*(all\()?test[\s,)]/;
+
+/** `#[cfg(test)] mod tests {` 写在同一行（含 `pub(crate) mod`）。 */
+const CFG_TEST_MOD_INLINE = /^\s*#\[cfg\(\s*(all\()?test[\s,)]*\)\]\s*(?:pub(?:\s*\([^)]*\))?\s+)?mod\s/;
+
+/** 单独一行 `mod tests {` / `pub(crate) mod tests {`。 */
+const MOD_AT = /^\s*(?:pub(?:\s*\([^)]*\))?\s+)?mod\s/;
 
 function walk(dir, out = []) {
   let entries;
@@ -68,11 +74,30 @@ function walk(dir, out = []) {
   return out;
 }
 
-/** 生产段行数（第一个 `#[cfg(test)]` 之前）。与 `wc -l` 同一套数法。 */
+/**
+ * 测试段起点：第一个 `#[cfg(test)]` **修饰 `mod`** 的行。
+ *
+ * 不能见到 `#[cfg(test)]` 就切：`#[cfg(test)] use ...`、`#[cfg(test)] fn helper(...)`
+ * 是测试期的辅助定义，出现在生产代码中间。按旧写法一刀切，`search.rs`（真实生产段
+ * 2073 行）被算成 135 行、且永远进不了基线，整个红线对它是失效的。
+ */
+function testSectionAt(lines) {
+  for (let i = 0; i < lines.length; i += 1) {
+    if (CFG_TEST_MOD_INLINE.test(lines[i])) return i;
+    if (!CFG_TEST.test(lines[i])) continue;
+    let j = i + 1;
+    // `#[cfg(test)]` 与 `mod` 之间可能夹空行、`#![allow(...)]` 之类的属性。
+    while (j < lines.length && (lines[j].trim() === "" || /^\s*#!?\[/.test(lines[j]))) j += 1;
+    if (MOD_AT.test(lines[j] ?? "")) return i;
+  }
+  return -1;
+}
+
+/** 生产段行数（第一个测试 `mod` 之前）。与 `wc -l` 同一套数法。 */
 function prodLines(text) {
   const lines = text.split("\n");
   if (text.endsWith("\n")) lines.pop();
-  const at = lines.findIndex((l) => CFG_TEST.test(l));
+  const at = testSectionAt(lines);
   return at < 0 ? lines.length : at;
 }
 

@@ -31,7 +31,7 @@ const tmpRoot = join(srcTauri, "target", "test-tmp");
 const systemTmp = tmpdir();
 // 本工具在临时目录里用的前缀（CLAUDE.md §8.3.4）。
 const OWN_PREFIX = /^(ncf-|nc-forge|ncforge-)/i;
-// target/debug 的健康上限。涨破就说明有人把 debuginfo 或中间产物又放回来了。
+// target/debug 的健康上限。涨破多半是 incremental 缓存与旧 hash 孤儿产物堆积（CLAUDE.md §8.3.3）。
 const TARGET_BUDGET = 6 * 1024 ** 3;
 
 /** 清空临时根（只删里面的条目，根目录本身留着）。失败不致命：多半是别的进程正占着。 */
@@ -140,7 +140,7 @@ function checkSystemTmpLeak(since) {
   if (hits.length > 5) console.log(`[gate]    …其余 ${hits.length - 5} 个`);
 }
 
-/** target/debug 体积自检（CLAUDE.md §8.3.3）：涨破 6GB 基本就是 debuginfo 又开回来了。 */
+/** target/debug 体积自检（CLAUDE.md §8.3.3）：涨破 6GB 先查 incremental/ 与 deps 旧 hash 孤儿，不是 pdb。 */
 function checkTargetSize() {
   const dir = join(srcTauri, "target", "debug");
   if (!existsSync(dir)) return;
@@ -154,7 +154,7 @@ function checkTargetSize() {
   if (bytes > TARGET_BUDGET) {
     console.log(
       `[gate] ⚠️ target/debug 已 ${label}（预算 ${(TARGET_BUDGET / 1024 ** 3).toFixed(0)}GB）——` +
-        `先查 deps 里的 .pdb 占比，多半是依赖的 debuginfo 被打开了，见 CLAUDE.md §8.3.3`,
+        `先看 incremental/ 与 deps 里同名的旧 hash 孤儿（依赖的 debuginfo 早已在 profile 里关掉），见 CLAUDE.md §8.3.3`,
     );
   } else {
     console.log(`[gate] target/debug ${label}（预算 6GB 以内）`);

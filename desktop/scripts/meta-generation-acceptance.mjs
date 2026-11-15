@@ -139,7 +139,7 @@ try {
     await page.getByRole("button",{name:"全选",exact:true}).click();
     const packageInput=page.getByRole("textbox",{name:"生成包根",exact:true});await packageInput.fill("nc");await packageInput.fill("nc.vo");
     assert.equal(await commandCount("bmf_gen_preview"),1);assert.equal(await packageInput.isEnabled(),true);await update().click();
-    await page.waitForFunction(()=>!document.querySelector(".gen-workbench").getAttribute("aria-busy")?.includes("true"));
+    await page.waitForFunction(()=>!document.querySelector(".gen-workbench").getAttribute("data-busy")?.includes("true"));
     assert.equal(await commandCount("bmf_gen_preview"),2);
     const checks=await commandCount("bmf_gen_check"),directory=page.getByLabel("输出目录",{exact:true});
     await directory.fill("D:/workspace/first");await directory.fill("D:/workspace/final");
@@ -156,7 +156,7 @@ try {
     await page.evaluate(()=>window.generationAcceptance.holdWrite());await page.getByRole("button",{name:"检查并确认写入",exact:true}).click();
     const review=page.getByRole("dialog",{name:"确认写入生成产物",exact:true});await modalFit(review,"写入确认");
     await review.getByRole("button",{name:"确认写入",exact:true}).click();
-    await page.waitForFunction(()=>document.querySelector(".gen-workbench").getAttribute("aria-busy")==="true");
+    await page.waitForFunction(()=>document.querySelector(".gen-workbench").getAttribute("data-busy")==="true");
     await page.keyboard.press("Escape");assert.equal(await review.isVisible(),true);assert.equal(await review.getByRole("button",{name:"关闭写入确认",exact:true}).isDisabled(),true);
     await page.evaluate(()=>window.generationAcceptance.finishWrite());
     const outcome=page.getByRole("dialog",{name:"生成写入结果",exact:true});await outcome.waitFor();assert.ok((await outcome.textContent()).includes("模拟文件占用"));

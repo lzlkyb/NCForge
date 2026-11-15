@@ -30,9 +30,9 @@ const bootstrap=raw.replace("/node_modules/@tauri-apps/api/mocks.js","/__tauri_m
   .replace("if(cmd==='db_tx')","if(cmd==='db_tx' && args.action!=='status')window.fixtureTx=null; if(cmd==='db_tx')")
   .replace("if(cmd==='db_exec_bound')",`if(cmd==='db_slot_acquire')return {slot:'sql-1',tx:tx()};
    if(cmd==='db_cancel'){window.dbHold=false;window.dbReject?.(Error('ORA-01013: 用户请求取消操作'));return;}
-   if((cmd==='db_exec' || cmd==='db_exec_bound') && window.dbHold)return new Promise((resolve,reject)=>{window.dbReject=reject;});
-   if((cmd==='db_exec' || cmd==='db_exec_bound') && window.dbError)throw Error('ORA-00942: 表或视图不存在');
-   if(cmd==='db_exec' || cmd==='db_exec_bound')`)
+   if((cmd==='db_exec' || cmd==='db_exec_result' || cmd==='db_exec_bound') && window.dbHold)return new Promise((resolve,reject)=>{window.dbReject=reject;});
+   if((cmd==='db_exec' || cmd==='db_exec_result' || cmd==='db_exec_bound') && window.dbError)throw Error('ORA-00942: 表或视图不存在');
+   if(cmd==='db_exec' || cmd==='db_exec_result' || cmd==='db_exec_bound')`)
   .replace("kind:'rows',columns,rows:[[1,'A','甲'],[2,'B','乙'],[3,'C','丙']]","kind:'rows',columns:window.fixtureColumns || columns,rows:window.dbEmpty?[]:window.fixtureRows")
   .replace("ms:10,tx:tx()","ms:10,output:[],tx:tx()")
   .replace("const appearance=await import('/src/lib/appearance.ts');appearance.applyAppearance('glass');", "localStorage.setItem('ncforge-db-result-height','310');")
@@ -62,6 +62,7 @@ test("database visual upgrade: themes, materials, geometry, compact layouts and 
   const errors=[],measurements=[];
   const shot=name=>page.screenshot({path:fileURLToPath(new URL(name+".png",artifacts)),animations:"disabled"});
   const runQuery=async()=>{await page.locator(".dbx-editor textarea").focus();await page.keyboard.press("Control+Enter");};
+  const sqlTool=async label=>{await page.getByRole("button",{name:"更多数据库操作",exact:true}).click();await page.getByRole("menuitem",{name:label,exact:true}).click();};
   try {
     browser=await chromium.launch({headless:true,channel:"msedge"});
     for(const mode of ["sql","table"]) {
@@ -73,14 +74,14 @@ test("database visual upgrade: themes, materials, geometry, compact layouts and 
         await page.locator(".app-side").getByRole("button",{name:/^数据库/}).click();
         await page.locator("#dbx-conn-c").click();
         if(mode==="sql")await runQuery();
-        await page.locator("#dbx-cell-0-1").waitFor();
+        await page.locator(".dbx-gc[id$=\"-0-1\"]").waitFor();
         assert.equal(await page.locator(".dbx-grow").first().evaluate(el=>el.getBoundingClientRect().height),30);
         assert.equal(await page.locator(".dbx-ghead").evaluate(el=>el.getBoundingClientRect().height),44);
         assert.ok(await page.locator(".dbx-grow").count()<70,"1200 rows remain virtualized");
         const contrast=await page.evaluate(()=>{
           const rgb=color=>color.match(/[\d.]+/g).slice(0,3).map(Number);
           const luminance=color=>rgb(color).map(v=>v/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((s,v,i)=>s+v*[.2126,.7152,.0722][i],0);
-          return [".dbx-gc:not(.rn)",".dbx-context-account",".dbx-context .dbx-conn-status"].map(selector=>{const el=document.querySelector(selector);let parent=el;while(getComputedStyle(parent).backgroundColor==="rgba(0, 0, 0, 0)")parent=parent.parentElement;const fg=luminance(getComputedStyle(el).color),bg=luminance(getComputedStyle(parent).backgroundColor);return {selector,ratio:(Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05)};});
+          return [".dbx-gc:not(.rn)",".dbx-context .dbx-schema-chip",".dbx-context .dbx-conn-status"].map(selector=>{const el=document.querySelector(selector);let parent=el;while(getComputedStyle(parent).backgroundColor==="rgba(0, 0, 0, 0)")parent=parent.parentElement;const fg=luminance(getComputedStyle(el).color),bg=luminance(getComputedStyle(parent).backgroundColor);return {selector,ratio:(Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05)};});
         });
         contrast.forEach(c=>assert.ok(c.ratio>=4.5,`${theme} ${c.selector} contrast ${c.ratio}`));
         if(mode==="sql") {
@@ -93,14 +94,18 @@ test("database visual upgrade: themes, materials, geometry, compact layouts and 
           if(width===560 && await page.locator(".wb-tree").isVisible())await page.getByRole("button",{name:"关闭资源侧栏",exact:true}).click();
           if(mode==="sql")await page.waitForFunction(()=>{const body=document.querySelector(".dbx-console-main").getBoundingClientRect();return document.querySelector(".dbx-res").getBoundingClientRect().bottom<=body.bottom+1;});
           if(mode==="table" && label!=="wide") {
-            await page.getByRole("button",{name:"展开筛选",exact:true}).click();
+            await page.getByRole("button",{name:"更多筛选",exact:true}).click();
+            // Compare the same filter content at each size instead of accumulating rows.
+            await page.getByRole("button",{name:"清空条件",exact:true}).click();
             await page.getByRole("button",{name:"添加条件",exact:true}).click();
           }
           const m=await page.evaluate(()=>({width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth,grid:document.querySelector(".dbx-grid").getBoundingClientRect().height,editor:document.querySelector(".dbx-editor")?.getBoundingClientRect().height,body:document.querySelector(".dbx-console-main")?.getBoundingClientRect().toJSON(),result:document.querySelector(".dbx-res")?.getBoundingClientRect().toJSON(),vars:{theme:document.documentElement.classList.contains("dark"),material:document.documentElement.dataset.uiStyle}}));
-          measurements.push({mode,theme,material,label,...m,contrast});assert.equal(m.overflow,false,`${mode} ${theme} ${material} ${label} overflow`);assert.ok(m.grid>60,`${mode} ${label} readable grid`);
+          measurements.push({mode,theme,material,label,...m,contrast});assert.equal(m.overflow,false,`${mode} ${theme} ${material} ${label} overflow`);
+          assert.ok(m.grid>60,`${mode} ${label} readable grid`);
           if(mode==="sql"){assert.ok(m.editor>=140);assert.ok(m.result.bottom<=m.body.bottom+1);}
           else {
-            assert.ok(await page.getByRole("button",{name:"查询",exact:true}).isVisible());
+            assert.ok(await page.getByRole("button",{name:"查询整表",exact:true}).isVisible());
+            if(label==="scale150")assert.ok(await page.locator(".dbx-filter-body").evaluate(el=>el.scrollHeight>el.clientHeight),"Short-window filters scroll independently of the query action and grid");
             if(label!=="wide")await page.getByRole("button",{name:"收起筛选",exact:true}).click();
           }
           if(label==="wide" || material==="glass")await shot(`${mode}-${theme}-${material}-${label}`);
@@ -108,6 +113,8 @@ test("database visual upgrade: themes, materials, geometry, compact layouts and 
         // Density changes preserve the anchor and keep keyboard navigation aligned.
         await page.setViewportSize({width:1280,height:840});
         await page.locator(".dbx-grid").evaluate(el=>{el.scrollTop=1500;el.dispatchEvent(new Event("scroll",{bubbles:true}));});
+        // Native pixels move first; capture the anchor after the scheduled virtual window has rendered.
+        await page.waitForFunction(()=>document.querySelector('.dbx-grow')?.getAttribute('aria-rowindex')==='40');
         const anchor=await page.locator(".dbx-grow").first().getAttribute("aria-rowindex");
         await page.evaluate(()=>{document.documentElement.dataset.uiDensity="standard";window.dispatchEvent(new Event("ui-density-change"));});
         assert.equal(await page.locator(".dbx-grid").evaluate(el=>el.scrollTop),1300);
@@ -123,19 +130,20 @@ test("database visual upgrade: themes, materials, geometry, compact layouts and 
           // Use one fixture per workflow to exercise additional views and recovery.
           await page.locator(".dbx-grid").evaluate(el=>{el.scrollTop=0;el.dispatchEvent(new Event("scroll",{bubbles:true}));});
           if(mode==="sql") {
-            await page.getByRole("button",{name:"执行历史",exact:true}).click();await page.getByLabel("搜索历史").fill("TEST_TABLE");await shot("sql-history");await page.getByRole("button",{name:"关闭历史",exact:true}).click();
-            await page.getByRole("button",{name:"SQL 片段",exact:true}).click();await shot("sql-snippets");await page.getByRole("button",{name:"关闭片段",exact:true}).click();
-            await page.evaluate(()=>{window.dbHold=true;});await runQuery();await page.getByRole("button",{name:"停止",exact:true}).waitFor();await page.locator(".dbx-execution-track").waitFor();await shot("sql-waiting");await page.getByRole("button",{name:"停止",exact:true}).click();await page.getByText(/执行已停止/).first().waitFor();await page.locator(".dbx-err").filter({hasText:/ORA-01013/}).waitFor();
+            await sqlTool("执行历史");await page.getByLabel("搜索历史").fill("TEST_TABLE");await shot("sql-history");await page.getByRole("button",{name:"关闭历史",exact:true}).click();
+            await sqlTool("SQL 片段");await shot("sql-snippets");await page.getByRole("button",{name:"关闭片段",exact:true}).click();
+            await page.evaluate(()=>{window.dbHold=true;});await runQuery();const stop=page.getByRole("button",{name:"停止",exact:true});await stop.waitFor();assert.equal(await stop.isEnabled(),true,"Running query can be stopped");await page.locator('.dbx-query-status[data-state="running"]').waitFor();await page.locator(".dbx-query-clock .dbx-query-time").waitFor();await shot("sql-waiting");await stop.click();await page.getByRole("tab",{name:/语句 1.*已停止/}).click();await page.locator(".dbx-err").filter({hasText:/ORA-01013/}).waitFor();
             await page.evaluate(()=>{window.dbError=true;});await runQuery();await page.locator(".dbx-err").filter({hasText:"ORA-00942"}).waitFor();await shot("sql-error");
             await page.evaluate(()=>{window.dbError=false;window.dbEmpty=true;});await runQuery();await page.getByText("没有匹配的行",{exact:false}).waitFor();await shot("sql-empty");
-            await page.evaluate(()=>{window.dbEmpty=false;window.fixtureTx={autoCommit:false,statements:2,rows:3,since:Date.now()-120000};});await runQuery();await page.locator(".dbx-txbar").waitFor();await shot("sql-pending-transaction");await page.getByRole("button",{name:"回滚",exact:true}).click();await page.locator(".dbx-txbar").getByText("已回滚 · 3 行").waitFor();
+            await page.evaluate(()=>{window.dbEmpty=false;window.fixtureTx={autoCommit:false,statements:2,rows:3,since:Date.now()-120000};});await runQuery();await page.locator(".dbx-txbar").waitFor();await shot("sql-pending-transaction");await page.getByRole("button",{name:"回滚当前会话",exact:true}).click();await page.getByText("已回滚 · 3 行",{exact:true}).waitFor();await page.locator(".dbx-txbar").waitFor({state:"hidden"});
             await page.evaluate(()=>{window.fixtureColumns=Array.from({length:52},(_,i)=>({name:"FIELD_"+String(i).padStart(2,"0"),type:"VARCHAR2",precision:100,scale:0}));window.fixtureRows=Array.from({length:1200},(_,r)=>window.fixtureColumns.map((_,c)=>`值 ${r+1}-${c+1}`));});await runQuery();await page.locator('[role="grid"][aria-colcount="53"]').waitFor();await page.locator(".dbx-grid").evaluate(el=>{el.scrollLeft=el.scrollWidth;});await shot("sql-wide-columns");assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,"Wide columns scroll inside grid");
           } else {
             for(const sub of ["结构","索引","DDL"]) {await page.locator(".dbx-subtabs").getByRole("tab",{name:sub,exact:true}).click();await shot(`table-${sub}`);}
-            await page.locator(".dbx-subtabs").getByRole("tab",{name:"数据",exact:true}).click();await page.locator("#dbx-cell-0-1").waitFor();
-            await page.getByRole("button",{name:"结果列布局",exact:true}).click();await shot("columns-dialog");await page.keyboard.press("Escape");await page.getByRole("dialog",{name:"结果列布局"}).waitFor({state:"hidden"});
+            await page.locator(".dbx-subtabs").getByRole("tab",{name:"数据",exact:true}).click();await page.locator(".dbx-gc[id$=\"-0-1\"]").waitFor();
+            await page.getByRole("button",{name:"显示选项",exact:true}).click();await page.getByRole("menuitem",{name:/结果列布局/}).click();await shot("columns-dialog");await page.keyboard.press("Escape");await page.getByRole("dialog",{name:"结果列布局"}).waitFor({state:"hidden"});
+            await page.setViewportSize({width:560,height:540});
             if(!await page.getByRole("button",{name:"新建连接",exact:true}).isVisible()){await page.getByRole("button",{name:"工作台布局",exact:true}).click();await page.getByRole("menuitem",{name:"资源侧栏",exact:true}).click();}
-            await page.getByRole("button",{name:"新建连接",exact:true}).click();const dlg=page.getByRole("dialog",{name:"数据库连接"});await dlg.waitFor();await page.setViewportSize({width:560,height:540});await shot("connection-dialog-low");
+            await page.getByRole("button",{name:"新建连接",exact:true}).click();const dlg=page.getByRole("dialog",{name:"数据库连接"});await dlg.waitFor();await shot("connection-dialog-low");
             const surface=await dlg.evaluate(el=>{const s=getComputedStyle(el);return {background:s.backgroundColor,blur:s.backdropFilter};});assert.ok(!surface.background.startsWith("rgba("),"Glass form keeps opaque reading surface");assert.equal(surface.blur,"none");
             const footer=await dlg.locator(".ft").boundingBox();assert.ok(footer.y+footer.height<540,"Connection footer stays visible");
             for(let i=0;i<16;i++){await page.keyboard.press("Tab");assert.equal(await dlg.evaluate(el=>el.contains(document.activeElement)),true,"Dialog traps keyboard focus");}

@@ -1,5 +1,5 @@
 /** Real-browser regressions. See docs/交互动效规范与验证-2026-10-17.md for setup. */
-/* global document, getComputedStyle, innerWidth, KeyboardEvent, window */
+/* global document, getComputedStyle, innerWidth, KeyboardEvent, window, Event, requestAnimationFrame */
 import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, test } from "node:test";
 import { createRequire } from "node:module";
@@ -170,29 +170,26 @@ test("kept pages retain draft, scroll and DOM; transitions never transform the t
   assert.deepEqual(await page.locator(".draft-scroll").evaluate(node => [node.dataset.identity, node.scrollTop, getComputedStyle(node).transform]), ["preserved", 50, "none"]);
 });
 
-test("page motion crossfades snapshots without moving content; rapid switches never block controls or leave stale pages", async () => {
+test("page navigation avoids snapshots; live fades and rapid switches preserve controls and the latest page", async () => {
   const motion = await page.getByRole("button", { name: "设置页", exact: true }).evaluate(async node => {
     const start = document.startViewTransition.bind(document);
     document.startViewTransition = update => {
-      const transition = start(update);
-      window.pageMotion = transition;
-      return transition;
+      window.pageCaptures=(window.pageCaptures || 0)+1;return start(update);
     };
     node.click();
-    await window.pageMotion.ready;
+    await new Promise(requestAnimationFrame);
     return {
-      animations: document.getAnimations().filter(a => ["tab-in", "page-out"].includes(a.animationName)).map(a => ({ name: a.animationName, duration: a.effect.getTiming().duration, frames: a.effect.getKeyframes().map(f => ({ transform: f.transform, opacity: f.opacity })) })),
+      animations: document.getAnimations().filter(a => ["tab-in", "tab-fade-in"].includes(a.animationName)).map(a => ({ name: a.animationName, duration: a.effect.getTiming().duration, frames: a.effect.getKeyframes().map(f => ({ transform: f.transform, opacity: f.opacity })) })),
       transform: getComputedStyle(document.querySelector('[data-page-panel]:not([hidden])')).transform,
-      pointerEvents: getComputedStyle(document.documentElement, "::view-transition").pointerEvents,
+      captures:window.pageCaptures || 0,
     };
   });
   assert.equal(motion.transform, "none", "Actual page must not move its fixed descendants");
-  assert.equal(motion.pointerEvents, "none");
-  // 页面已采用 170ms 淡入；实际内容与转场快照都不能产生位移。
-  const entry = motion.animations.find(a => a.name === "tab-in");
+  assert.equal(motion.captures,0);
+  // This isolated Tabs preview retains its CSS fade; the production reading area has a shorter live fade.
+  const entry = motion.animations.find(a => ["tab-in","tab-fade-in"].includes(a.name));
   assert.ok(entry && entry.duration === 170 && entry.frames.some(f => f.opacity === "0.45"));
   assert.ok(entry.frames.every(f => !f.transform || f.transform === "none"));
-  assert.ok(motion.animations.some(a => a.name === "page-out" && a.duration === 100));
   await page.getByRole("button", { name: "连接页", exact: true }).click();
   await page.getByTestId("draft").waitFor({ state: "visible" });
   await page.getByTestId("draft").fill("转场中可输入");
@@ -200,11 +197,11 @@ test("page motion crossfades snapshots without moving content; rapid switches ne
     const buttons = [...document.querySelectorAll("button")];
     const click = label => buttons.find(n => n.textContent === label).click();
     for (const label of ["设置页", "连接页"]) click(label);
-    await window.pageMotion.finished;
+    await new Promise(requestAnimationFrame);
   });
   assert.equal(await page.getByTestId("draft").isVisible(), true, "The last click wins even before the first capture commits");
   assert.equal(await page.locator('[data-page-panel]:not([hidden])').count(), 1);
-  assert.equal(await page.evaluate(() => document.getAnimations().filter(a => ["tab-in", "page-out"].includes(a.animationName)).length), 0);
+  assert.equal(await page.evaluate(() => window.pageCaptures || 0),0);
 });
 
 test("older engines retain a visible entry on every visit without remounting the page", async () => {
@@ -248,11 +245,14 @@ test("reduced motion removes spatial movement and JS animation delays, including
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.getByTestId("modal-trigger").click();
   await page.emulateMedia({ reducedMotion: "reduce" });
-  // 媒体偏好切换对**正在运行**的 CSS 过渡晚一帧生效：同步读到的还是动画中间值。
-  // 等 100ms 再断言（远大于一帧、又短于未降级时的 0.2s 过渡），别把「一帧内收敛」
-  // 误判成「没降级」。反例：把全局降级规则去掉后，100ms 时过渡仍在跑，
-  // transform 仍是 matrix(...)，本断言照样失败。
-  await page.waitForTimeout(100);
+  // 等浏览器应用新媒体样式，而非在机器繁忙时用固定睡眠猜测渲染帧。
+  // 同时检查降级时长：去掉减少动效规则，即使自然动画结束也不能通过。
+  await page.waitForFunction(() => {
+    const node = document.querySelector('[role="dialog"]');
+    if (!node || !window.matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
+    const style = getComputedStyle(node);
+    return parseFloat(style.transitionDuration) <= .000001 && style.transform === "none";
+  }, null, { polling: "raf", timeout: 1000 });
   assert.equal(await modal.evaluate(node => getComputedStyle(node).transform), "none");
 });
 
@@ -272,4 +272,92 @@ test("theme cleanup survives rapid switching; light/dark/narrow previews have no
   await page.getByTestId("modal-trigger").click();
   await page.waitForTimeout(220);
   await page.screenshot({ path: path.join(artifacts, "modal.png") });
+});
+
+test("short tasks avoid spinner flashes; cancellation waits for confirmation and partial results persist", async () => {
+  await page.clock.install();
+  const scenario = page.getByTestId("motion-scenario"), start = page.getByTestId("task-start");
+  const result = page.getByTestId("task-result");
+  await scenario.selectOption("fast");
+  await start.click();
+  assert.equal(await start.isDisabled(), true);
+  assert.equal(await start.locator(".ui-button-loader").count(), 0);
+  await page.clock.runFor(100);
+  assert.equal(await result.getAttribute("data-state"), "success");
+  assert.equal(await start.locator(".ui-button-loader").count(), 0);
+  await scenario.selectOption("long");
+  await start.click();
+  const cancel = result.getByRole("button", { name: "取消", exact: true });
+  assert.equal(await cancel.isEnabled(), true);
+  await page.clock.runFor(10_100);
+  assert.match(await result.innerText(), /2 \/ 3/);
+  assert.match(await result.innerText(), /任务仍在进行/);
+  await cancel.click();
+  assert.equal(await result.getAttribute("data-state"), "cancelling");
+  await page.clock.runFor(300);
+  assert.equal(await result.getAttribute("data-state"), "cancelled");
+  await page.clock.runFor(3000);
+  assert.equal(await result.getAttribute("data-state"), "cancelled", "late completion cannot overwrite cancellation");
+  await scenario.selectOption("partial"); await start.click(); await page.clock.runFor(1000);
+  assert.match(await result.innerText(), /2 个成功，1 个失败/);
+  await scenario.selectOption("error"); await start.click(); await page.clock.runFor(1000);
+  assert.equal(await result.getByRole("alert").count(), 1);
+  assert.equal(await result.getByRole("button", { name: "重试示例" }).isEnabled(), true);
+});
+
+test("system and app reduced motion keep both common and native buttons still", async () => {
+  for (const mode of ["system", "app"]) {
+    await page.emulateMedia({ reducedMotion: mode === "system" ? "reduce" : "no-preference" });
+    await page.getByTestId("reduce-motion").setChecked(mode === "app");
+    for (const id of ["native-feedback", "task-start"]) {
+      const button = page.getByTestId(id);
+      const box = await button.boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.waitForTimeout(100);
+      assert.equal(await button.evaluate(node => getComputedStyle(node).transform), "none", `${mode}: ${id}`);
+      await page.mouse.move(0, 0); await page.mouse.up();
+    }
+  }
+  await page.getByTestId("modal-trigger").click();
+  assert.equal(await page.getByRole("dialog").evaluate(node => getComputedStyle(node).transform), "none");
+  await page.keyboard.press("Escape");
+  await page.getByRole("dialog").waitFor({ state: "detached", timeout: 1000 });
+});
+
+test("a hidden window pauses task visuals and resumes with actual elapsed time", async () => {
+  await page.clock.install();
+  await page.getByTestId("motion-scenario").selectOption("long");
+  await page.getByTestId("task-start").click();
+  await page.clock.runFor(300);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.runFor(5100);
+  const result = page.getByTestId("task-result");
+  assert.equal(await result.locator(".animate-spin").evaluate(node => getComputedStyle(node).animationPlayState), "paused");
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.runFor(20);
+  assert.match(await result.innerText(), /已用 5 秒/);
+  await page.screenshot({ path: path.join(artifacts, "task-running.png"), fullPage: true });
+});
+
+test("loading skeletons wait before animating and collapsed examples release their visuals", async () => {
+  await page.clock.install();
+  assert.equal(await page.locator(".ui-loading-state").count(), 0);
+  await page.getByTestId("native-feedback").click();
+  const loading = page.locator(".ui-loading-state");
+  await loading.waitFor();
+  assert.equal(await loading.getAttribute("data-visible"), null);
+  const skeleton = loading.locator(".skeleton").first();
+  assert.equal(await skeleton.evaluate(node => getComputedStyle(node).animationPlayState), "paused");
+  await page.clock.runFor(200);
+  assert.equal(await loading.getAttribute("data-visible"), "true");
+  assert.equal(await skeleton.evaluate(node => getComputedStyle(node).visibility), "visible");
+  await page.getByTestId("native-feedback").click();
+  await loading.waitFor({ state: "detached" });
 });

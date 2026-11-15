@@ -9,12 +9,13 @@ for(let i=1;i<=18;i++){const name='File'+String(i).padStart(2,'0')+'.java';windo
 window.codeDebug={target:'server',state:'stopped',module:'demo',dapPort:5001,jdwpPort:8000,jdwpHost:'127.0.0.1',message:'',exceptionFilters:[]};
 const codeSearch={hits:[{path:'A.java',line:6,text:'        System.out.println("A");',ranges:[{start:8,end:14}]},{path:'B.java',line:4,text:'        System.out.println("B");',ranges:[{start:8,end:14}]}],filesScanned:20,filesMatched:2,truncated:false,elapsedMs:10,scopeDirs:[],missingDirs:[],scopeFallback:false};
 const codeMock=(cmd,args)=>{
+ if(['req_state','req_note_manual','req_prune'].includes(cmd))return {reqs:[],current:null,files:[],journal:{dir:null,found:false,lastAtMs:0,more:false}};
  if(cmd==='fs_list_dir')return Object.keys(window.codeFiles).map(name=>({name,isDir:false,size:window.codeFiles[name].length}));
  if(cmd==='fs_read_file'){const name=args.path.split(/[\\/]/).at(-1);return {text:window.codeFiles[name]??'// 预览源码\n',encoding:'UTF-8',hasBom:false,eol:'LF',lossless:true,size:500,mtimeMs:window.codeMtime};}
  if(cmd==='fs_write_file'){window.codeWrites.push(args);window.codeFiles[args.path.split(/[\\/]/).at(-1)]=args.text;return ++window.codeMtime;}
  if(cmd==='fs_stat')return {isDir:false,size:500,mtimeMs:window.codeMtime};
  if(cmd==='fs_java_outline_source')return window.codeFiles[args.path.split(/[\\/]/).at(-1)]??'';
- if(cmd==='search_workspace')return codeSearch;
+ if(cmd==='search_workspace'||cmd==='search_workspace_stream')return codeSearch;
  if(cmd==='search_projects')return {projects:[{project:'验收工程',root:serviceRoot,outcome:codeSearch}],errors:[],truncated:false,elapsedMs:10};
  if(cmd==='debug_status')return {...window.codeDebug,target:args.target,state:args.target==='server'?window.codeDebug.state:'stopped'};
  if(cmd==='debug_start'){window.codeDebug.state='attached';return window.codeDebug;}

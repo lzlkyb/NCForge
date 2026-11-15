@@ -83,6 +83,7 @@ export default tseslint.config(
         FormData: "readonly",
         Blob: "readonly",
         setTimeout: "readonly",
+        clearTimeout: "readonly",
       },
     },
   },

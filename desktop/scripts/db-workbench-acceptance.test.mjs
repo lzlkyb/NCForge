@@ -60,11 +60,12 @@ test('database workflow: selection, layouts, filters, snapshots, query-only, rel
   await page.locator('#dbx-cell-0-1').waitFor();
   await page.locator('#dbx-cell-0-1').click();await page.keyboard.press('Shift+ArrowDown');await page.keyboard.press('Shift+ArrowDown');await page.keyboard.press('Shift+ArrowRight');await page.keyboard.press('Control+c');
   assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),'A\t甲\r\nB\t乙\r\nC\t丙');
-  await page.getByRole('button',{name:'结果列布局',exact:true}).click();
+  await page.getByRole('button',{name:'显示选项',exact:true}).click();
+  await page.getByRole('menuitem',{name:/结果列布局/}).click();
   const layout=page.getByRole('dialog',{name:'结果列布局'});await layout.locator('label').filter({hasText:'NAME'}).locator('input').uncheck();await layout.getByRole('button',{name:'完成',exact:true}).click();
   assert.equal(await page.locator('.dbx-ghead .dbx-gh').count(),3);
-  await page.getByRole('button',{name:'展开筛选',exact:true}).click();
-  await page.getByRole('button',{name:'添加条件',exact:true}).click();await page.getByLabel('条件 1 字段').selectOption('CODE');await page.getByLabel('条件 1 值').fill("O'Brien");await page.getByRole('button',{name:'保存常用筛选',exact:true}).click();await page.getByRole('button',{name:'查询',exact:true}).click();
+  await page.getByRole('button',{name:'更多筛选',exact:true}).click();
+  await page.getByRole('button',{name:'添加条件',exact:true}).click();await page.getByLabel('条件 1 字段').selectOption('CODE');await page.getByLabel('条件 1 值').fill("O'Brien");await page.getByRole('button',{name:'保存常用筛选',exact:true}).click();await page.getByRole('button',{name:'查询整表',exact:true}).click();
   await page.waitForFunction(()=>window.dbCalls.some(c=>c.cmd==='db_exec_bound' && c.args.params[0]==="O'Brien"));
   assert.equal(await page.evaluate(()=>window.dbCalls.filter(c=>c.cmd==='db_exec_bound').at(-1).args.sql.includes("O'Brien")),false);
   await page.getByRole('button',{name:'结果工具',exact:true}).click();await page.getByRole('menuitem',{name:'固定为对照',exact:true}).click();await page.getByRole('button',{name:'结果工具',exact:true}).click();await page.getByRole('menuitem',{name:'结果对比',exact:true}).click();await page.getByRole('dialog',{name:'查询结果对比'}).getByLabel('ID',{exact:true}).check();await page.getByText('新增 0 行 · 删除 0 行 · 变化 0 行',{exact:true}).waitFor();await page.getByRole('dialog',{name:'查询结果对比'}).getByRole('button',{name:'关闭',exact:true}).click();
@@ -89,10 +90,10 @@ test('database workflow: selection, layouts, filters, snapshots, query-only, rel
      await page.getByRole('button',{name:'关闭资源侧栏',exact:true}).click();await page.locator('.wb-tree').waitFor({state:'hidden'});
    }
    if(await page.locator('.toast').count()) await page.locator('.toast').first().waitFor({state:'hidden',timeout:10000});
-   if(await page.getByRole('button',{name:'展开筛选',exact:true}).isVisible()) await page.getByRole('button',{name:'展开筛选',exact:true}).click();
+   if(await page.getByRole('button',{name:'更多筛选',exact:true}).isVisible()) await page.getByRole('button',{name:'更多筛选',exact:true}).click();
    const m=await page.evaluate(()=>({width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth,grid:document.querySelector('.dbx-grid')?.getBoundingClientRect().height,filter:document.querySelector('.dbx-filterbar')?.getBoundingClientRect().toJSON(),context:document.querySelector('.dbx-context')?.getBoundingClientRect().toJSON()}));measurements.push({name,...m});assert.equal(m.overflow,false,name+' external overflow');assert.ok(m.grid>60,name+' readable grid');if(width===560) assert.equal(await page.locator('.wb-side-backdrop:not([hidden])').isVisible(),false,name+' document unobscured');
    const header=page.locator('.dbx-filter-header');
-   await header.getByRole('button',{name:'查询',exact:true}).waitFor({state:'visible'});
+   await header.getByRole('button',{name:'查询整表',exact:true}).waitFor({state:'visible'});
    const before=await header.boundingBox();
    await page.locator('.dbx-filter-body').evaluate(el=>{el.scrollTop=el.scrollHeight;});
    const after=await header.boundingBox();
@@ -103,9 +104,9 @@ test('database workflow: selection, layouts, filters, snapshots, query-only, rel
    assert.ok(collapsed.height < 60,name+' compact filter');
    assert.equal(await page.locator('.dbx-filter-body').isVisible(),false);
    assert.ok((await page.locator('.dbx-grid').boundingBox()).height > m.grid,name+' more result space');
-   assert.ok(await header.getByRole('button',{name:'查询',exact:true}).isVisible());
+   assert.ok(await header.getByRole('button',{name:'查询整表',exact:true}).isVisible());
    await page.screenshot({path:fileURLToPath(new URL(name+'.png',artifacts))});
-   await page.getByRole('button',{name:'展开筛选',exact:true}).click();
+   await page.getByRole('button',{name:'更多筛选',exact:true}).click();
   }
   assert.deepEqual(errors,[]);await writeFile(new URL('measurements.json',artifacts),JSON.stringify(measurements,null,2));
  }catch(error){

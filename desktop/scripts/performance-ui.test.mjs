@@ -20,7 +20,7 @@ test("production worker filtering and bounded wide-grid DOM", async () => {
     .replace("mockWindows('main');", `mockWindows('main');
       window.wideColumns=Array.from({length:80},(_,i)=>({name:'C'+i,type:'VARCHAR2',precision:30,scale:0}));
       window.wideRows=Array.from({length:3000},(_,r)=>Array.from({length:80},(_,c)=>c===0?'KEY-'+r:'R'+r+'-C'+c));`)
-    .replace("if(cmd==='db_exec_bound')", "if(cmd==='db_slot_acquire')return {slot:'1',tx:tx()}; if(cmd==='db_exec' || cmd==='db_exec_bound')")
+    .replace("if(cmd==='db_exec_bound')", "if(cmd==='db_slot_acquire')return {slot:'1',tx:tx()}; if(['db_exec','db_exec_result','db_exec_bound'].includes(cmd))")
     .replace("if(cmd==='db_caps')", "if(cmd==='db_set_schema'){window.fixtureSchema=args.schema || 'NC_TEST';return {schema:window.fixtureSchema};} if(cmd==='db_caps')")
     .replace("if(args.kind==='tables')", "if(args.kind==='schemas')return {schemas:['NC_TEST','OTHER'],current:window.fixtureSchema || 'NC_TEST',user:'NC_TEST'};if(args.kind==='tables')")
     .replace("kind:'rows',columns,rows:[[1,'A','甲'],[2,'B','乙'],[3,'C','丙']]", "kind:'rows',columns:window.wideColumns,rows:window.wideRows")
@@ -46,11 +46,11 @@ test("production worker filtering and bounded wide-grid DOM", async () => {
     } catch { res.writeHead(404); res.end(); }
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  let browser;
+  let browser, page;
   const errors = [], measurements = {};
   try {
     browser = await chromium.launch({ headless: true, channel: "msedge" });
-    const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+    page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
     page.setDefaultTimeout(20000); page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.locator(".app-side").getByRole("button", { name: /^数据库/ }).click();
@@ -60,7 +60,7 @@ test("production worker filtering and bounded wide-grid DOM", async () => {
     await page.locator(".dbx-editor .find-widget.visible").waitFor();
     await page.keyboard.press("Escape");
     await page.getByRole("textbox", { name: "SQL 查询编辑器", exact: true }).focus(); await page.keyboard.press("Control+Enter");
-    await page.locator("#dbx-cell-0-0").waitFor();
+    await page.locator('[role="gridcell"][id$="-0-0"]').waitFor();
     measurements.rows = await page.locator(".dbx-grow").count();
     measurements.headers = await page.locator(".dbx-gh").count();
     assert.ok(measurements.rows < 60); assert.ok(measurements.headers < 25);
@@ -74,11 +74,11 @@ test("production worker filtering and bounded wide-grid DOM", async () => {
     measurements.commandHeader=await page.locator('.dbx-command-header').evaluate(el=>({height:el.getBoundingClientRect().height,overflow:el.scrollWidth>el.clientWidth+1}));
     assert.equal(measurements.commandHeader.overflow,false);
     // Inspect actual packaged CSS after lazy database styles have loaded.
-    await page.locator("#dbx-cell-0-1").click();
-    await page.locator("#dbx-cell-5-6").click({modifiers:["Shift"]});
+    await page.locator('[role="gridcell"][id$="-0-1"]').click();
+    await page.locator('[role="gridcell"][id$="-5-6"]').click({modifiers:["Shift"]});
     assert.equal(await page.locator('.dbx-gc[data-cell]').count(),36);
     const inspect = () => page.evaluate(() => {
-      const interior=document.querySelector('#dbx-cell-2-3'),active=document.querySelector('#dbx-cell-5-6'),edge=document.querySelector('#dbx-cell-0-1');
+      const interior=document.querySelector('[role="gridcell"][id$="-2-3"]'),active=document.querySelector('[role="gridcell"][id$="-5-6"]'),edge=document.querySelector('[role="gridcell"][id$="-0-1"]');
       return {interiorOutline:getComputedStyle(interior).outlineStyle,interiorBorder:getComputedStyle(interior,'::after').borderTopWidth,
         activeBorder:getComputedStyle(active,'::after').borderTopWidth,edgeBorder:getComputedStyle(edge,'::after').borderTopWidth,
         fill:getComputedStyle(interior).backgroundColor};
@@ -105,11 +105,11 @@ test("production worker filtering and bounded wide-grid DOM", async () => {
     }
     await page.emulateMedia({forcedColors:'active',reducedMotion:'reduce'});await page.locator('.dbx-grid').focus();assert.equal((await inspect()).activeBorder,'2px');await page.emulateMedia({forcedColors:'none',reducedMotion:'no-preference'});
     await page.locator(".dbx-grid").evaluate(el => { el.scrollLeft = el.scrollWidth; el.dispatchEvent(new Event("scroll", { bubbles: true })); });
-    await page.locator("#dbx-cell-0-79").waitFor();
-    assert.equal(await page.locator("#dbx-cell-0-0").count(), 0);
-    await page.getByRole("button", { name: "筛选结果", exact: true }).click();
+    await page.locator('[role="gridcell"][id$="-0-79"]').waitFor();
+    assert.equal(await page.locator('[role="gridcell"][id$="-0-0"]').count(), 0);
+    await page.getByRole("button", { name: "筛选已加载行", exact: true }).click();
     const start = Date.now(); await page.getByRole("textbox", { name: "在结果中筛选", exact: true }).fill("KEY-2999");
-    await page.locator("#dbx-cell-2999-79").waitFor();
+    await page.locator('[role="gridcell"][id$="-2999-79"]').waitFor();
     measurements.workerFilterMs = Date.now() - start;
     assert.equal(await page.locator(".dbx-grow").count(), 1);
     const refilterStart=Date.now();
@@ -117,12 +117,15 @@ test("production worker filtering and bounded wide-grid DOM", async () => {
     await page.getByText("筛选后没有匹配的行", { exact: true }).waitFor();
     measurements.workerRefilterMs=Date.now()-refilterStart;
     await page.getByRole("button", { name: "清除结果筛选", exact: true }).click();
-    await page.locator("#dbx-cell-0-79").waitFor();
+    await page.locator('[role="gridcell"][id$="-0-79"]').waitFor();
     await page.getByRole("button", { name: "释放查询结果", exact: true }).click();
     assert.equal(await page.locator(".dbx-grid").count(), 0);
     assert.equal(errors.length, 0, errors.join("\n"));
     await mkdir(artifacts, { recursive: true });
     await writeFile(new URL("生产界面检查.json", artifacts), JSON.stringify({ passed: true, measurements, errors }, null, 2));
     await writeFile(new URL("选择态界面检查.json", selectionArtifacts), JSON.stringify({ passed: true, selection: measurements.selection, errors }, null, 2));
+  } catch (error) {
+    if (page) console.log(JSON.stringify({ errors, calls: await page.evaluate(() => window.dbCalls?.slice(-12)), body: (await page.locator('body').innerText()).slice(0, 3000) }));
+    throw error;
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 });

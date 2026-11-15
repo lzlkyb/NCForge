@@ -153,7 +153,20 @@ node scripts/rust-gate.mjs clippy --all-targets --no-default-features -- -D warn
 
 - 现状（2026-11-02 定）：`[profile.dev/test] debug = "line-tables-only"` + `[profile.dev/test.package."*"] debug = false`。改前 `target/debug/deps` **14.24GB，其中 93 个 `.pdb` 占 9.46GB**；改后 `target/debug` 只有 **2.35GB**、`.pdb` 0.33GB。
 - **别为了「能单步进依赖」把 `package."*"` 长期改回 `true`**：那 9GB 不只是磁盘，它更是 link.exe 峰值内存的主要来源。真要钻依赖就临时改、调完改回来。
-- 新增依赖 / 测试目标后 `target/debug` 又涨过 6GB，先查 `.pdb` 占比，别直接 `cargo clean` 糊过去。
+- 新增依赖 / 测试目标后 `target/debug` 又涨过 6GB，**别直接 `cargo clean` 糊过去**（会连依赖 rlib 一起废掉，下次全量重编）。
+- 🔴 **debuginfo 关掉之后，涨破 6GB 的元凶换人了**（2026-11-13 实测 17.18GB；`.pdb` 只占 2.36GB，且经时间戳核对**全是新产物、没有一份是 11-02 前的历史遗留**）：
+
+  | 位置 | 大小 | 成因 |
+  |---|---|---|
+  | `target/debug/incremental/` | 8.11 GB | 增量缓存（`.bin` 6.03 + `.o` 1.93），只增不减 |
+  | `deps/` 里同名旧 hash | 6.03 GB | 196 个测试目标各产一份 `exe+pdb`，cargo 不回收上一轮的 hash |
+  | `build/` 重复目录 | 0.88 GB | 同一 crate 多份 `-<hash>` 目录，只该留最新 |
+
+  清理顺序（实测 17.18GB → 2.16GB，随后 `cargo check` 重编 4 分钟通过，属预期代价）：
+  1. 整删 `target/debug/incremental`；
+  2. `deps` 下 `.exe/.pdb/.rlib/.rmeta` 按「去掉 16 位 hash 后的同 base，只留 mtime 最新一份」删；
+  3. `build` 下同一 crate 的多个 `-<hash>` 目录只留最新（旧目录约 36MB/份）。
+- 🔴 **dev 在跑时 `cargo test` 必红**：Windows 不允许替换正在运行的 `target/debug/nc-forge.exe`，cargo 以 `failed to remove file … (os error 5)` 退出。别当成代码问题——先 `Get-Process nc-forge` 与 `Win32_Process` 的 `ParentProcessId` 确认是不是有人开着 `cargo run` / `tauri dev`。
 
 #### 8.3.4 测试临时目录：不许落系统盘，不许造大文件
 
@@ -166,8 +179,10 @@ node scripts/rust-gate.mjs clippy --all-targets --no-default-features -- -D warn
 #### 8.3.5 怀疑反弹时的核对命令
 
 ```bash
-# target/debug 体积（pdb 是大头，查它）
+# target/debug 体积（先按一级目录分组看，pdb 早已不是大头）
 powershell.exe -NoProfile -Command "$p='desktop\src-tauri\target\debug'; '{0:N2} GB' -f ((Get-ChildItem $p -Recurse -File | Measure-Object Length -Sum).Sum/1GB)"
+# 谁在占：逐个子目录算（incremental / deps / build）
+powershell.exe -NoProfile -Command "$p='desktop\src-tauri\target\debug'; Get-ChildItem $p -Directory | ForEach-Object { '{0,-16} {1,7:N2} GB' -f $_.Name, ((Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum/1GB) }"
 # C 盘残留目录数（健康值是 0~个位数）
 powershell.exe -NoProfile -Command "Get-ChildItem $env:TEMP -Directory | Where-Object Name -like 'nc*' | Measure-Object"
 ```

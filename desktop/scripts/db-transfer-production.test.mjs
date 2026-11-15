@@ -46,8 +46,9 @@ test("database transfer production: themes, scopes, formats, workers, native sav
    await context.addInitScript(({theme,material})=>{localStorage.setItem("theme",theme);localStorage.setItem("ncforge.ui-style",material);},{theme,material});
    const page=await context.newPage();page.setDefaultTimeout(15000);page.on("pageerror",e=>errors.push(e.message));
    const shot=name=>page.screenshot({path:fileURLToPath(new URL(`${theme}-${material}-${name}.png`,artifacts)),animations:"disabled"});
-   await page.goto(origin,{waitUntil:"domcontentloaded"});await page.locator(".app-side").getByRole("button",{name:/^数据库/}).click();await page.locator("#dbx-conn-c").click();await page.locator("#dbx-cell-0-1").waitFor();
-   await page.locator("#dbx-cell-0-1").click();await page.keyboard.press("Control+c");assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),"0012");
+   await page.goto(origin,{waitUntil:"domcontentloaded"});await page.locator(".app-side").getByRole("button",{name:/^数据库/}).click();await page.locator("#dbx-conn-c").click();
+   const codeCell=page.locator('.dbx-grid [role="gridcell"][id$="-0-1"]');
+   await codeCell.click();await page.keyboard.press("Control+c");assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),"0012");
    await page.keyboard.press("Shift+ArrowDown");await page.keyboard.press("Shift+ArrowRight");await page.getByRole("button",{name:"复制为",exact:true}).click();await page.getByRole("menuitem",{name:"高级复制…",exact:true}).click();
    const copy=page.getByRole("dialog",{name:"高级复制",exact:true});await copy.getByLabel("输出格式",{exact:true}).selectOption("json");assert.match(await copy.locator(".dbx-transfer-summary").textContent(),/2 行 × 2 列/);await copy.getByRole("button",{name:"复制",exact:true}).click();
    await page.waitForFunction(async()=>{try{return JSON.parse(await navigator.clipboard.readText()).length===2;}catch{return false;}});

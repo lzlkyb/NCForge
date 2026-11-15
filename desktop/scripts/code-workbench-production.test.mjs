@@ -17,9 +17,10 @@ const base = (await readFile(new URL("db-workbench-acceptance.test.mjs", import.
 const mocks = await readFile(new URL("../node_modules/@tauri-apps/api/mocks.js", import.meta.url));
 const config = JSON.parse(await readFile(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
 const nonce = "code-workbench-acceptance", hashes = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => "'sha256-" + createHash("sha256").update(m[1]).digest("base64") + "'");
+const moduleFixture = codeFixture.replace("const codeMock=(cmd,args)=>{", "const codeMock=(cmd,args)=>{if(cmd==='fs_list_dir'&&args.path===serviceRoot)return [{name:'demo',isDir:true,size:0}];").replaceAll("serviceRoot+'/B.java'", "serviceRoot+'/demo/B.java'");
 const csp = config.app.security.csp.replace(/script-src ([^;]+)/, (_, value) => `script-src ${value} ${hashes.join(" ")}`).replace(/style-src ([^;]+)/, (_, value) => `style-src ${value} 'nonce-${nonce}'`);
 const bootstrap = base.replace("/node_modules/@tauri-apps/api/mocks.js", "/__mocks.js")
-  .replace("const tx=", `${serviceFixture}\n${codeFixture}\nconst tx=`)
+  .replace("const tx=", `${serviceFixture}\n${moduleFixture}\nconst tx=`)
   .replace(" window.dbCalls.push({cmd,args});", " window.dbCalls.push({cmd,args});const codeResult=codeMock(cmd,args);if(codeResult!==undefined)return codeResult;const serviceResult=serviceMock(cmd,args);if(serviceResult!==undefined)return serviceResult;")
   .replace("workspace_root:null", "workspace_root:serviceRoot")
   .replace("throw Error('DB acceptance IPC not configured: '+cmd);", "return null;")
@@ -47,37 +48,41 @@ test("code workbench production: layouts, focused groups, saved file, tree filte
       try {
         await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: "domcontentloaded" });
         const tree = page.getByRole("tree", { name: "文件树", exact: true });
+        await tree.getByText("demo", { exact: true }).click();
         await tree.getByText("A.java", { exact: true }).dblclick(); await page.locator('.wb-editor-group-slot[data-group="left"] .monaco-editor').waitFor();
-        await page.getByRole("button", { name: "过滤资源树入口", exact: true }).click(); await page.getByLabel("过滤资源树", { exact: true }).fill("B.java");
-        assert.equal(await tree.getByText("A.java", { exact: true }).count(), 0); await tree.getByText("B.java", { exact: true }).waitFor();
-        await page.getByLabel("过滤资源树", { exact: true }).press("Escape"); await tree.getByText("A.java", { exact: true }).waitFor();
+        await page.getByRole("button", { name: "过滤资源树入口", exact: true }).click(); await page.getByLabel("过滤资源树", { exact: true }).fill("demo");
+        assert.equal(await tree.getByText("A.java", { exact: true }).count(), 0); await tree.getByText("demo", { exact: true }).waitFor();
+        await page.getByLabel("过滤资源树", { exact: true }).press("Escape");
+        await tree.getByText("demo", { exact: true }).waitFor();
+        if (!await tree.getByText("B.java", { exact: true }).isVisible()) await tree.getByText("demo", { exact: true }).click();
+        await tree.getByText("A.java", { exact: true }).waitFor();
         assert.equal(await page.getByRole("button", { name: "过滤资源树入口", exact: true }).evaluate(element => document.activeElement === element), true);
         await tree.getByText("B.java", { exact: true }).dblclick();
-        await page.getByRole("button", { name: "编辑器组操作", exact: true }).click(); await page.getByRole("menuitem", { name: "在右组打开当前文件", exact: true }).click();
+        await page.getByRole("button", { name: "编辑器布局", exact: true }).click(); await page.getByRole("menuitem", { name: "在右组打开当前文件", exact: true }).click();
         const left = page.locator('.wb-editor-group-slot[data-group="left"]'), right = page.locator('.wb-editor-group-slot[data-group="right"]');
         await right.getByRole("tab", { name: "B.java", exact: true }).waitFor();
         await left.getByRole("tab", { name: "A.java", exact: true }).click(); await right.getByRole("tab", { name: "B.java", exact: true }).click();
         await right.locator(".monaco-editor").click(); await page.keyboard.press("Control+End"); await page.keyboard.type("// RIGHT_GROUP_EDIT"); await page.keyboard.press("Control+s");
         await page.waitForFunction(() => window.codeWrites.some(write => write.text.includes("RIGHT_GROUP_EDIT")));
         const write = await page.evaluate(() => window.codeWrites.at(-1)); assert.ok(write.path.endsWith("B.java")); assert.ok(!write.path.endsWith("A.java"));
-        await page.getByRole("button", { name: "工作台布局", exact: true }).click(); await page.getByRole("menuitem", { name: "排错布局", exact: true }).click();
+        await page.getByRole("button", { name: "编辑器布局", exact: true }).click(); await page.getByRole("menuitem", { name: "排错布局", exact: true }).click();
         await page.getByRole("tab", { name: "问题", exact: true }).waitFor();
         await page.getByRole("button", { name: "更多底部工具", exact: true }).click(); await page.getByRole("menuitem", { name: "待办", exact: true }).click();
         await page.getByRole("tab", { name: "待办", exact: true }).waitFor();
         await page.getByRole("button", { name: "展开阅读", exact: true }).click(); await page.getByRole("button", { name: "恢复布局", exact: true }).click();
         assert.equal(await page.locator(".monaco-editor").count(), 2, "expanding a tool preserves both editors");
-        await page.getByRole("button", { name: "工作台布局", exact: true }).click(); await page.getByRole("menuitem", { name: "编码布局", exact: true }).click();
+        await page.getByRole("button", { name: "编辑器布局", exact: true }).click(); await page.getByRole("menuitem", { name: "编码布局", exact: true }).click();
         for (const [name, width, height] of [["wide",1440,900],["normal",1366,768],["low",1024,540],["scale150",683,512],["narrow",560,700]]) {
           await page.setViewportSize({ width, height });
           const measurement = await page.locator(".wb-code-surface").evaluate(element => ({ width: innerWidth, height: innerHeight, overflow: document.documentElement.scrollWidth > innerWidth, editors: Array.from(element.querySelectorAll(".wb-editor-group-slot")).filter(group => getComputedStyle(group).display !== "none").map(group => ({ ...group.getBoundingClientRect().toJSON(), readingHeight: group.querySelector(".monaco-editor")?.getBoundingClientRect().height ?? 0 })) }));
           assert.equal(measurement.overflow, false, `${theme}/${material}/${name}`); assert.ok(measurement.editors.some(rect => rect.readingHeight >= (name === "normal" ? 380 : 300)), `${name}: actual code reading height`); measurements.push({ theme, material, name, ...measurement }); await shot(name);
         }
         await page.getByRole("button", { name: "关闭资源侧栏", exact: true }).click();
-        await page.getByRole("button", { name: "编译", exact: true }).waitFor();
+        await page.getByRole("button", { name: /编译.*模块/, exact: false }).waitFor();
         assert.equal(await page.locator(".monaco-editor").count(), 2, "closing the narrow sidebar retains group state");
         await shot("narrow-code");
         await page.setViewportSize({ width: 1440, height: 900 });
-        await page.getByRole("button", { name: "工作台布局", exact: true }).click(); await page.getByRole("menuitem", { name: "编码布局", exact: true }).click();
+        await page.getByRole("button", { name: "编辑器布局", exact: true }).click(); await page.getByRole("menuitem", { name: "编码布局", exact: true }).click();
         if (theme === "light" && material === "glass") {
           // Exercise real tab selection, model sharing and menu actions with 20 files.
           await left.getByRole("tab", { name: "A.java", exact: true }).click();
@@ -95,10 +100,10 @@ test("code workbench production: layouts, focused groups, saved file, tree filte
           await page.getByRole("menuitem", { name: "关闭其他", exact: true }).click();
           assert.equal(await left.getByRole("tab").count(), 2, "bulk close protects pinned files");
           await pinned.waitFor();
-          await page.getByRole("button", { name: "编辑器组操作", exact: true }).click(); await page.getByRole("menuitem", { name: "在右组打开当前文件", exact: true }).click();
+          await page.getByRole("button", { name: "编辑器布局", exact: true }).click(); await page.getByRole("menuitem", { name: "在右组打开当前文件", exact: true }).click();
           await right.getByRole("tab", { name: "A.java", exact: true }).click();
           await right.locator(".monaco-editor").click(); await page.keyboard.press("Control+End"); await page.keyboard.type("// SHARED_MODEL_EDIT");
-          assert.ok((await left.locator(".monaco-editor").innerText()).includes("SHARED_MODEL_EDIT"));
+          await page.waitForFunction(() => document.querySelector('.wb-editor-group-slot[data-group="left"] .monaco-editor')?.innerText.includes("SHARED_MODEL_EDIT"));
           await right.getByRole("button", { name: "关闭 A.java", exact: true }).click();
           assert.equal(await page.getByRole("dialog").count(), 0, "closing a shared view preserves dirty model");
           await left.getByRole("button", { name: "关闭 A.java", exact: true }).click();
@@ -110,16 +115,16 @@ test("code workbench production: layouts, focused groups, saved file, tree filte
           await page.waitForFunction(() => window.codeWrites.some(write => write.path.endsWith("A.java") && write.text.includes("SHARED_MODEL_EDIT")));
 
           const resize = page.getByRole("separator", { name: "调整底部面板高度", exact: true });
-          await page.getByRole("tab", { name: "编译输出", exact: true }).click(); await resize.press("ArrowUp");
+          await page.getByRole("tablist", { name: "底部面板", exact: true }).getByRole("tab", { name: "运行", exact: true }).click(); await page.getByRole("tab", { name: "编译输出", exact: true }).click(); await resize.press("ArrowUp");
           const buildHeight = await resize.getAttribute("aria-valuenow");
           await page.getByRole("tab", { name: "问题", exact: true }).click(); await resize.press("ArrowDown");
-          await page.getByRole("tab", { name: "编译输出", exact: true }).click(); assert.equal(await resize.getAttribute("aria-valuenow"), buildHeight);
+          await page.getByRole("tablist", { name: "底部面板", exact: true }).getByRole("tab", { name: "运行", exact: true }).click(); await page.getByRole("tab", { name: "编译输出", exact: true }).click(); assert.equal(await resize.getAttribute("aria-valuenow"), buildHeight);
           await page.getByRole("button", { name: "更多底部工具", exact: true }).click(); await page.getByRole("button", { name: "固定书签", exact: true }).click(); await page.keyboard.press("Escape");
           await page.getByRole("tab", { name: "书签", exact: true }).waitFor();
-          await page.getByRole("button", { name: "工作台布局", exact: true }).click(); await page.getByRole("menuitem", { name: "锁定当前布局", exact: true }).click();
-          await page.getByRole("button", { name: "编译", exact: true }).click();
+          await page.getByRole("button", { name: "编辑器布局", exact: true }).click(); await page.getByRole("menuitem", { name: "锁定当前布局", exact: true }).click();
+          await page.getByRole("button", { name: /编译 .*模块/, exact: false }).click();
           await page.getByText("编译未通过 · 1 个错误", { exact: true }).waitFor();
-          await page.getByRole("button", { name: "工作台布局", exact: true }).click();
+          await page.getByRole("button", { name: "编辑器布局", exact: true }).click();
           await page.getByRole("menuitem", { name: "编码布局", exact: true }).evaluate(element => { if (!element.classList.contains("text-primary")) throw Error("compile failure changed locked layout"); });
           await page.getByRole("menuitem", { name: "解除布局锁定", exact: true }).click();
           await page.getByRole("tab", { name: /^问题/, exact: false }).click();
@@ -127,7 +132,7 @@ test("code workbench production: layouts, focused groups, saved file, tree filte
           await page.getByRole("region", { name: "源码上下文预览" }).getByText('System.out.println("B");', { exact: true }).waitFor();
           await page.getByLabel("问题范围").selectOption("file");
           await page.getByRole("button", { name: "查看工程结果", exact: true }).click();
-          await page.getByRole("tab", { name: "编译输出", exact: true }).click(); await page.getByRole("button", { name: /问题定位/ }).click();
+          await page.getByRole("tablist", { name: "底部面板", exact: true }).getByRole("tab", { name: "运行", exact: true }).click(); await page.getByRole("tab", { name: "编译输出", exact: true }).click(); await page.getByRole("button", { name: /问题定位/ }).click();
           await page.getByRole("button", { name: /验收：方法调用错误/ }).click();
           assert.equal(await left.getByRole("tab", { name: "B.java", exact: true }).getAttribute("aria-selected"), "true");
           await page.waitForFunction(() => document.querySelector('.wb-status-host')?.textContent.includes('4:1'));
@@ -143,18 +148,16 @@ test("code workbench production: layouts, focused groups, saved file, tree filte
           assert.ok(Math.abs((await raw.evaluate(element => element.scrollTop))-rawTop)<30, "capped stream preserves reading position");
           await shot("build-raw");
 
-          await page.getByRole("button", { name: "全工程搜索", exact: true }).click(); await page.getByLabel("搜索工程文件内容").fill("System"); await page.getByLabel("搜索工程文件内容").press("Enter");
+          await page.locator(".wb-global-search").click(); await page.locator(".qp-mode").filter({ hasText: "工程搜索" }).click(); await page.getByLabel("搜索工程文件内容").fill("System"); await page.getByLabel("搜索工程文件内容").press("Enter");
           await page.getByRole("button", { name: "预览 A.java 第 6 行上下文", exact: true }).click();
           await page.getByRole("region", { name: "源码上下文预览" }).getByText('System.out.println("A");', { exact: true }).waitFor();
-          await page.getByRole("button", { name: "展开结果", exact: true }).click();
-          await page.getByRole("region", { name: "展开的搜索结果" }).waitFor();
-          await page.getByRole("button", { name: "下一结果", exact: true }).click();
-          await page.getByRole("region", { name: "源码上下文预览" }).getByText('System.out.println("B");', { exact: true }).waitFor();
-          await shot("search-expanded"); await page.getByRole("button", { name: "恢复侧栏", exact: true }).click();
-          assert.equal(await page.getByRole("region", { name: "展开的搜索结果" }).count(), 0);
+          assert.equal(await page.getByRole("button", { name: "展开结果", exact: true }).count(), 0);
+          await shot("search-palette");
           await page.getByRole("button", { name: "关闭上下文预览", exact: true }).click();
+          await page.keyboard.press("Escape");
+          await page.getByRole("dialog", { name: "快速导航", exact: true }).waitFor({ state: "hidden" });
 
-          await page.getByRole("button", { name: "工作台布局", exact: true }).click(); await page.getByRole("menuitem", { name: "调试布局", exact: true }).click();
+          await page.getByRole("button", { name: "编辑器布局", exact: true }).click(); await page.getByRole("menuitem", { name: "调试布局", exact: true }).click();
           await page.getByRole("button", { name: "附加调试器", exact: true }).click();
           await page.getByRole("button", { name: "断开", exact: true }).waitFor();
           await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event:'debug-event',payload:{target:'server',event:'stopped',body:{threadId:1,reason:'breakpoint'}} }));
