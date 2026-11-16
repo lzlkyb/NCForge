@@ -26,6 +26,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { countJava, resolveRoot } from './lib/lang-index-root.mjs';
+import { indexMs } from './lib/perf-baseline.mjs';
+
+/** 等 ServiceReady 的上限。到点就放弃这一轮，**不是**「索引花了这么久」。 */
+const READY_GUARD_MS = 300000;
 
 const desktop = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ls = process.env.NCFORGE_JDTLS_DIR ?? join(desktop, 'src-tauri/resources/jdtls');
@@ -211,11 +215,21 @@ function runOnce({ label, exclusions, dataDir }) {
       });
       const handshakeMs = Date.now() - t0;
       send({ jsonrpc: '2.0', method: 'initialized', params: {} });
-      const guard = globalThis.setTimeout(() => readyResolve(), 300000);
+      // 🔴 guard 触发 ≠ 索引完成：**绝不能把 ~300000ms 当实测耗时落盘**
+      // （违反「没数就是未测，不填 0、不沿用旧值」红线）。超时那一轮 totalMs 记 null，
+      // 并置 timedOut，让 verdict / 表格 / splitIndexRound 全部走「未测（超时）」。
+      let timedOut = false;
+      const guard = globalThis.setTimeout(() => { timedOut = true; readyResolve(); }, READY_GUARD_MS);
       await ready;
       globalThis.clearTimeout(guard);
-      const totalMs = Date.now() - t0;
-      return { label, exclusions: exclusions.length, handshakeMs, totalMs, statuses, dataBytes: dirSize(dataDir) };
+      const elapsedMs = Date.now() - t0;
+      if (timedOut) console.error(`   ⚠️ ${label} 等 ServiceReady 超过 ${READY_GUARD_MS} ms，本轮记「未测（超时）」`);
+      return {
+        label, exclusions: exclusions.length, handshakeMs,
+        totalMs: timedOut ? null : elapsedMs,
+        timedOut, elapsedMs,
+        statuses, dataBytes: dirSize(dataDir),
+      };
     } finally {
       try { await request('shutdown', null, 5000); } catch { /* 已退出 */ }
       send({ jsonrpc: '2.0', method: 'exit', params: null });
@@ -250,30 +264,37 @@ try {
 
   const freshData = join(fixture, 'data-fresh');
   const oldData = join(fixture, 'data-old');
+  // 超时轮 totalMs 是 null，直接插值会打印「null ms」，看着像测出了个数。
+  const showMs = (r) => (r?.timedOut ? `未测（超时 ${READY_GUARD_MS}ms）` : `${indexMs(r) ?? '未测'} ms`);
   console.log('—— 第 1 轮：新配置 + 空 data（首次导入）');
   report.rounds.push(await runOnce({ label: 'fresh', exclusions: NEW_EXCLUSIONS, dataDir: freshData }));
-  console.log(`   ${report.rounds.at(-1).totalMs} ms`);
+  console.log(`   ${showMs(report.rounds.at(-1))}`);
   await delay(500);
   console.log('—— 第 2 轮：新配置 + 复用上轮 data（缓存命中）');
   report.rounds.push(await runOnce({ label: 'warm', exclusions: NEW_EXCLUSIONS, dataDir: freshData }));
-  console.log(`   ${report.rounds.at(-1).totalMs} ms`);
+  console.log(`   ${showMs(report.rounds.at(-1))}`);
   if (!SKIP_OLD) {
     await delay(500);
     console.log('—— 第 3 轮：旧配置（只排 .svn）+ 空 data');
     report.rounds.push(await runOnce({ label: 'old', exclusions: OLD_EXCLUSIONS, dataDir: oldData }));
-    console.log(`   ${report.rounds.at(-1).totalMs} ms`);
+    console.log(`   ${showMs(report.rounds.at(-1))}`);
   }
 
   const by = (l) => report.rounds.find((r) => r.label === l);
   const fresh = by('fresh');
   const warm = by('warm');
   const old = by('old');
+  // 全部走 indexMs：超时轮是 null，差值也跟着 null，不许拿 300000 去减。
+  const freshMs = indexMs(fresh);
+  const warmMs = indexMs(warm);
+  const oldMs = indexMs(old);
   report.verdict = {
-    firstImportMs: fresh?.totalMs ?? null,
-    cachedImportMs: warm?.totalMs ?? null,
-    cacheSavesMs: fresh && warm ? fresh.totalMs - warm.totalMs : null,
-    oldExclusionsMs: old?.totalMs ?? null,
-    exclusionsSavesMs: fresh && old ? old.totalMs - fresh.totalMs : null,
+    firstImportMs: freshMs,
+    cachedImportMs: warmMs,
+    cacheSavesMs: freshMs !== null && warmMs !== null ? freshMs - warmMs : null,
+    oldExclusionsMs: oldMs,
+    exclusionsSavesMs: freshMs !== null && oldMs !== null ? oldMs - freshMs : null,
+    timedOutRounds: report.rounds.filter((r) => r.timedOut).map((r) => r.label),
   };
   // jdt.ls 的状态原文是 A3（状态栏百分比）的唯一依据：没在这里见过 `%` 或 `A/B`，
   // 就不该在前端凭猜显示百分比。
@@ -283,8 +304,9 @@ try {
   const out = join(base, 'lang-index-bench.json');
   writeFileSync(out, JSON.stringify(report, null, 2));
   console.log('\n=== 结论 ===');
-  console.table(report.rounds.map((r) => ({ round: r.label, 握手: r.handshakeMs, 到就绪: r.totalMs, 状态条数: r.statuses.length })));
-  console.log(`缓存复用节省 ${report.verdict.cacheSavesMs} ms；产物目录排除节省 ${report.verdict.exclusionsSavesMs ?? '未测'} ms`);
+  console.table(report.rounds.map((r) => ({ round: r.label, 握手: r.handshakeMs, 到就绪: showMs(r), 状态条数: r.statuses.length })));
+  console.log(`缓存复用节省 ${report.verdict.cacheSavesMs ?? '未测'} ms；产物目录排除节省 ${report.verdict.exclusionsSavesMs ?? '未测'} ms`);
+  if (report.verdict.timedOutRounds.length) console.log(`⚠️ 超时未测的轮次：${report.verdict.timedOutRounds.join('、')}（不计入任何耗时结论）`);
   console.log('语言状态原文样本：');
   for (const line of report.statusSamples) console.log(`  ${line}`);
   console.log(`\n结论已落盘：${out}`);

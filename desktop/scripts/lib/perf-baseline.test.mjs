@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { CHANNELS, buildRows, formatTable, parseBootLog, parseEcjPerf, parseIncrementalPerf, splitIndexRound, summarize, verdictOf } from "./perf-baseline.mjs";
+import { CHANNELS, buildRows, formatTable, indexMs, parseBootLog, parseEcjPerf, parseIncrementalPerf, splitIndexRound, summarize, verdictOf } from "./perf-baseline.mjs";
 
 test("清单：id 唯一、五指标都在、目标与方案 §4.2 一致", () => {
   const ids = CHANNELS.map((c) => c.id);
@@ -144,6 +144,40 @@ test("索引拆段：状态不足或时间戳不合理时不编数", () => {
   // 跨度大于总耗时 = 数据自相矛盾，宁可不给
   assert.deepEqual(splitIndexRound({ totalMs: 100, statuses: [{ at: 0 }, { at: 500 }] }), { total: 100, boot: null, progress: null });
   assert.deepEqual(splitIndexRound(null), { total: null, boot: null, progress: null });
+});
+
+test("索引超时：guard 到点的 ~300000ms 绝不能当实测耗时（没数就是未测）", () => {
+  // bench 侧 5min guard 触发后 resolve ready 让流程往下走，早期版本把
+  // Date.now()-t0 直接当 totalMs 落盘 ⇒ 一个「等到放弃」的时长进了 p50 与结论表。
+  const timedOut = { label: "fresh", totalMs: null, timedOut: true, elapsedMs: 300012, statuses: [{ at: 0 }, { at: 9000 }] };
+  assert.equal(indexMs(timedOut), null, "超时轮必须是 null");
+  assert.deepEqual(splitIndexRound(timedOut), { total: null, boot: null, progress: null });
+  // 兜底：万一旧 JSON 里 timedOut 与 totalMs 同时存在，也不许出数
+  assert.equal(indexMs({ totalMs: 300012, timedOut: true }), null);
+  // 正常轮不受影响；没有 timedOut 字段的旧 JSON 仍按原值读
+  assert.equal(indexMs({ totalMs: 17792 }), 17792);
+  assert.equal(indexMs({ totalMs: 17792, timedOut: false }), 17792);
+  assert.equal(indexMs(null), null);
+  assert.equal(indexMs({}), null);
+});
+
+test("索引超时：整轮超时时表里是「未测」，不是 300000", () => {
+  const rows = buildRows({
+    index: {
+      fileCount: 2000,
+      verdict: { firstImportMs: null, timedOutRounds: ["fresh"] },
+      rounds: [{ label: "fresh", totalMs: null, timedOut: true, elapsedMs: 300012, statuses: [{ at: 0 }, { at: 9000 }] }],
+    },
+  });
+  const index = rows.find((r) => r.id === "index");
+  assert.equal(index.value, null);
+  assert.equal(index.verdict, "未测");
+  assert.ok(!formatTable(rows).includes("300012"), "超时时长不许出现在结论表里");
+  assert.ok(!formatTable(rows).includes("300000"));
+  // 备注里的引导/索引分段也走 indexMs：超时轮不许拆出「引导 291012 + 索引 9000」
+  assert.ok(!/引导 \d/.test(index.note), `超时轮不该有分段数字：${index.note}`);
+  assert.match(index.note, /超时/, "超时未测要写明原因，不能只留一句通用备注");
+  assert.equal(splitIndexRound({ totalMs: null, timedOut: true, elapsedMs: 300012, statuses: [{ at: 0 }, { at: 9000 }] }).boot, null);
 });
 
 test("索引备注不许把引导差异说成缓存收益", () => {

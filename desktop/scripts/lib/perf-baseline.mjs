@@ -120,8 +120,22 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
  * 所以 `totalMs - 状态跨度` 就是引导段。拿总耗时的差当索引收益 = 把 JVM 启动
  * 的抖动记到索引账上，会得出「缓存有效」的反向结论。
  */
+/**
+ * 一轮索引的可用耗时。**超时那一轮必须是 null，不是 ~300000。**
+ *
+ * 🔴 `lang-index-bench.mjs` 的 5min guard 到点会 resolve ready 让流程往下走，
+ * 早期版本直接把 `Date.now() - t0` 当 `totalMs` 落盘 ⇒ 一个「等到放弃」的时长
+ * 被当成实测索引耗时进 p50 / 进结论表，违反「没数就是未测，不填 0」红线。
+ * 现在 bench 侧置 `timedOut` 并把 `totalMs` 记 null；这里再兜一道，
+ * 兼容旧 JSON（只有 totalMs 没有 timedOut 的仍按原值读）。
+ */
+export function indexMs(round) {
+  if (round?.timedOut) return null;
+  return num(round?.totalMs);
+}
+
 export function splitIndexRound(round) {
-  const total = num(round?.totalMs);
+  const total = indexMs(round);
   const statuses = Array.isArray(round?.statuses) ? round.statuses : [];
   if (total === null || statuses.length < 2) return { total, boot: null, progress: null };
   const span = statuses.at(-1).at - statuses[0].at;
@@ -150,11 +164,14 @@ export function buildRows(inputs = {}) {
     boot: () => (boot ? `日志里 ${boot.runs} 次启动，取最后一次` : "需真机跑一次，把 stderr 存成文件后 --boot-log=<路径>"),
     index: () => {
       if (!index) return "跑 npm run test:lang-index";
-      const fresh = splitIndexRound((index.rounds ?? []).find((r) => r.label === "fresh"));
+      const freshRound = (index.rounds ?? []).find((r) => r.label === "fresh");
+      const fresh = splitIndexRound(freshRound);
       // 只报拆分后的两段，不报「缓存节省 X ms」：那个差值主要来自 OSGi 引导，不是索引。
       const seg = fresh.boot === null ? "" : `（引导 ${fresh.boot} + 索引 ${fresh.progress}）`;
       const scope = index.mode === "root" ? `真实工程 ${index.projects?.length ?? "?"} 个 IProject` : "fixture";
-      return `${scope} · ${index.fileCount ?? "?"} 个 java${seg}；冷热差异在引导段，别当缓存收益`;
+      // 超时那一轮要写明原因：只说「未测」用户会以为是没跑，实际是跑了但等不到就绪。
+      const timeout = freshRound?.timedOut ? "；本轮等 ServiceReady 超时，未测" : "";
+      return `${scope} · ${index.fileCount ?? "?"} 个 java${seg}${timeout}；冷热差异在引导段，别当缓存收益`;
     },
     compile: () => (ecj?.ok ? `n=${ecj.n}，${ecj.min}~${ecj.max} ms` : (ecj?.reason ?? "跑 --only=compile")),
     completion: () => (gaps ? `冷 ${num(gaps.completion?.coldMs) ?? "?"} ms，n=${gaps.completion?.samples ?? 0}` : "跑 npm run test:editor-gaps"),
