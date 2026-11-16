@@ -2117,4 +2117,152 @@ import a.B;"
         crate::ecj_worker::shutdown_all();
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    /// 真机：1–5 文件增量编译的 p50 —— A0 五个基线指标里此前唯一「未测」的一项。
+    ///
+    /// 与 `单文件编译_p50` 的分工：那条只编 1 个孤立文件（保存后的快速反馈），
+    /// 这条量的是「改几个相互引用的文件、走常驻 worker」的稳态成本，对应
+    /// `compile_incremental` 的模块级增量。方案 §4.2 目标 **p50 < 1.5 s**。
+    ///
+    /// 范式同 `incremental_matches_full_live`：合成工作区只引用自己的类、不依赖
+    /// NC home，用仓库自带 ecj。但**走常驻 bridge**（打包版行为），且每轮真的改
+    /// 方法体再编——量的是增量路径，不是「重复编同一份没变的源码」。
+    ///
+    /// 跑法：`node scripts/rust-gate.mjs test --lib -- --ignored 增量编译_p50 --nocapture`
+    /// 输出行以 `PERF incremental-compile` 开头，`scripts/perf-baseline.mjs` 按此取数。
+    #[test]
+    #[ignore]
+    fn 增量编译_p50() {
+        use std::sync::atomic::AtomicBool;
+        const WARMUP: usize = 3;
+        const RUNS: usize = 20;
+        // 5 个文件：1 个被引用的基础类 + 4 个引用方，覆盖「1–5 文件」区间上限。
+        const N: usize = 5;
+
+        let java = Path::new(r"D:\ncc\1909home")
+            .join("ufjdk")
+            .join("bin")
+            .join("java.exe");
+        let res = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
+        let ecj = res.join("ecj").join("ecj-3.17.jar");
+        let bridge = res.join("ecj-bridge").join(crate::ecj_worker::BRIDGE_JAR);
+        if !java.is_file() || !ecj.is_file() {
+            println!("跳过：本机没有 java / ecj");
+            return;
+        }
+
+        let base = crate::test_support::tmp("inc-p50");
+        let root = base.join("ws");
+        let src_dir = root.join("m").join("src").join("public").join("p");
+        let out = root.join("m").join("classes");
+        let work = base.join("work");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+
+        // Base 被其余 N-1 个类引用；改 Base 的方法体（ABI 不变）触发增量。
+        let base_src = src_dir.join("Base.java");
+        let write_base = |v: i32| {
+            std::fs::write(
+                &base_src,
+                format!("package p;\npublic class Base {{ public int f(int x) {{ return x + {v}; }} }}\n"),
+            )
+            .unwrap();
+        };
+        write_base(0);
+        let mut files = vec![base_src.clone()];
+        for i in 1..N {
+            let p = src_dir.join(format!("C{i}.java"));
+            std::fs::write(
+                &p,
+                format!("package p;\npublic class C{i} {{ private final Base b = new Base(); public int g(int x) {{ return b.f(x) + {i}; }} }}\n"),
+            )
+            .unwrap();
+            files.push(p);
+        }
+
+        let index = crate::nc_index::ClassIndex::build(Vec::new());
+        let cancel = AtomicBool::new(false);
+        let home = base.join("nchome");
+        let env = CompileEnv {
+            nc_home: &home,
+            java_exe: &java,
+            ecj_jar: &ecj,
+            worker_jar: bridge.exists().then_some(bridge.as_path()),
+            project_root: &root,
+            index: &index,
+            work_dir: &work,
+            cancel: Some(&cancel),
+            overrides: &[],
+        };
+        let job = CompileJob {
+            module: "m".to_string(),
+            files: Some(files.clone()),
+            out_dir: out.clone(),
+            source_roots: None,
+            output_map: Vec::new(),
+            seed_jars: Vec::new(),
+            fast: true,
+        };
+
+        // 一轮：改 Base 方法体 → 编全部 N 个文件（增量路径，产物目录已有上一轮 class）。
+        let run = |v: i32| -> Option<u64> {
+            write_base(v);
+            let t = Instant::now();
+            match compile(&env, &job, &|_| {}) {
+                Ok(r) if r.error_count == 0 => Some(t.elapsed().as_millis() as u64),
+                other => {
+                    let detail = match other {
+                        Ok(r) => format!("{} 个错误：{:?}", r.error_count, r.problems),
+                        Err(e) => e,
+                    };
+                    println!("PERF incremental-compile failed: {detail}");
+                    None
+                }
+            }
+        };
+
+        // 首轮全量预热（拉起常驻 JVM），不计入样本。
+        if run(0).is_none() {
+            println!("跳过：预热编译失败");
+            crate::ecj_worker::shutdown_all();
+            let _ = std::fs::remove_dir_all(&base);
+            return;
+        }
+        for i in 0..WARMUP {
+            if run(i as i32 + 1).is_none() {
+                println!("跳过：预热轮次编译失败");
+                crate::ecj_worker::shutdown_all();
+                let _ = std::fs::remove_dir_all(&base);
+                return;
+            }
+        }
+        let mut samples: Vec<u64> = Vec::with_capacity(RUNS);
+        for i in 0..RUNS {
+            match run(WARMUP as i32 + i as i32 + 1) {
+                Some(ms) => samples.push(ms),
+                None => {
+                    println!("跳过：正式轮次编译失败");
+                    crate::ecj_worker::shutdown_all();
+                    let _ = std::fs::remove_dir_all(&base);
+                    return;
+                }
+            }
+        }
+        samples.sort_unstable();
+        let n = samples.len();
+        let p50 = samples[n / 2];
+        let mean = samples.iter().sum::<u64>() / n as u64;
+        println!(
+            "PERF incremental-compile n={n} files={N} min={} p50={p50} max={} mean={mean}",
+            samples[0],
+            samples[n - 1]
+        );
+        // 防呆上限：1.5 s 是目标不是门槛，机器差异让测试红等于把目标变成阻塞。
+        assert!(
+            p50 < 15000,
+            "增量编译 p50 {p50} ms，明显不合理（超时或环境异常）"
+        );
+        crate::ecj_worker::shutdown_all();
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

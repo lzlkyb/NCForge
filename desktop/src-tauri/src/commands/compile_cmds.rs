@@ -479,6 +479,11 @@ pub async fn compile_incremental(
         ctx.st
             .compile_cancel
             .store(false, std::sync::atomic::Ordering::SeqCst);
+        // 整轮增量的墙钟（含决策 / 传播 / 清单，不只是 ecj 那段）。底层
+        // `compile::compile` 的 duration_ms 只覆盖编译本身，命令层这一条才是
+        // 「保存后空闲增量到底花多久」的完整口径，供 A0 速度基线取数。
+        let started = std::time::Instant::now();
+        let module_count = modules.len();
         let mut results = Vec::with_capacity(modules.len());
         let mut files = 0usize;
         // 做过签名传播的模块：`build_one` 已把模块内引用方一起编了，不必再走一遍。
@@ -512,7 +517,13 @@ pub async fn compile_incremental(
             files += propagated.source_count;
             results.push(propagated);
         }
-        Ok(super::build_engine::merge_compile_results(results, files))
+        let merged = super::build_engine::merge_compile_results(results, files);
+        log::info!(
+            "增量编译：{module_count} 个模块 · {files} 个文件 · {} ms · {} 错误",
+            started.elapsed().as_millis(),
+            merged.error_count
+        );
+        Ok(merged)
     })
     .await
     .map_err(|e| format!("后台任务失败: {e}"))?
