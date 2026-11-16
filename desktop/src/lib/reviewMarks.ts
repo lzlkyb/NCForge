@@ -19,6 +19,20 @@ export const UNKNOWN_REVISION = -1;
 
 let lastSynced: StatusResult | undefined;
 let marks = new Set<string>();
+/**
+ * 本地「刚被改过，需重审」的黑名单，**故意只增不减**（除 `markReviewed` 成功）。
+ *
+ * 🔴 别改成「后端 reviewed 含这个 key 就清出去」（2026-11-16 审查 L21 误报，已驳回）：
+ * 后端 `svn_review::is_valid` 只比 revision + mtime_ms + size（`mark_ok` 在版本未知时
+ * 更宽，只比后两项），而 mtime 是**毫秒**精度。
+ * 监听报了改动、但改动恰好没动 mtime/size（同毫秒写回、等长替换、编辑器先写临时文件
+ * 再 rename 回来）时，后端仍判标记有效 —— 此时相信后端就等于把「可能没审过的内容」
+ * 标成已审。这一层是**比后端更保守**的兜底，方向安全，`reviewMarks.test.ts` 的
+ * 「文件被外部改动后需要重审，旧扫描不会恢复角标」钉的就是它。
+ *
+ * 用户重审完点一次标记即清（`markReviewed`），不存在死锁。
+ * key 是绝对路径小写，换工作区天然隔离，不需要额外 reset。
+ */
 const invalidated = new Set<string>();
 let scannedOutdated = new Set<string>();
 export const isReviewOutdated = (path: string) => {

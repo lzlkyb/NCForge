@@ -44,6 +44,22 @@ describe("Java语句补齐", () => {
   it("不改完整语句、未闭合字符串和行尾注释", () => {
     for (const line of ['call();', 'String name = "unterminated', 'call() // comment']) expect(completeJavaStatement(line, "\t")).toBeNull();
   });
+  // 🔴 判「行尾有没有注释」只认状态机（遍历原文、认引号与转义）。
+  // 旧实现额外拿 `trimmed.slice(code.trimEnd().length)` 做文本切片：blankLiterals
+  // 把字符串内容换成空格后 trimEnd 会把尾段整块截掉，切出来的「尾段」其实是字符串本体，
+  // 里面的 `http://` 被当成行注释 ⇒ 含 URL 的赋值行补分号失效。
+  it("字符串里的 // 与 /* 不是注释，赋值行照样补分号", () => {
+    expect(completeJavaStatement('String url = "http://nc.com/a"', "\t")).toBe('String url = "http://nc.com/a";');
+    expect(completeJavaStatement('String s = "a /* b"', "\t")).toBe('String s = "a /* b";');
+    expect(completeJavaStatement('String s = "a\\"//b"', "\t")).toBe('String s = "a\\"//b";');
+    expect(completeJavaStatement("String c = '/'", "\t")).toBe("String c = '/';");
+    expect(completeJavaStatement('log("http://x", other(', "\t")).toBe('log("http://x", other());');
+  });
+  it("真行尾注释仍然不补（块注释与转义后的引号都要认）", () => {
+    for (const line of ['call() /* note */', 'call() // tail', 'String s = "a\\"b" // tail']) {
+      expect(completeJavaStatement(line, "\t")).toBeNull();
+    }
+  });
 });
 
 describe("粘贴导入计划", () => {

@@ -108,8 +108,10 @@ export function completeJavaStatement(line: string, indentUnit: string): string 
     else if (!quote && char === "/" && /[/*]/.test(trimmed[i + 1] ?? "")) return null;
   }
   if (quote) return null;
-  // 行尾注释属于原文，不能在它后面追加分号使代码仍然缺少结束符。
-  if (trimmed !== code && /(?:\/\/|\/\*)/.test(trimmed.slice(code.trimEnd().length))) return null;
+  // 🔴 行尾注释已由上面的状态机拦掉（真注释在遍历中就 return null 了），这里**不能再补一层
+  // 文本切片判断**：`blankLiterals` 把字符串内容换成空格，`code.trimEnd()` 会把尾段整块截掉，
+  // 切出来的「尾段」其实是字符串本体 —— `String url = "http://nc.com/a"` 里的 `//`
+  // 会被当成行注释，赋值行补分号失效。状态机认引号与转义，文本切片不认，别拿后者推翻前者。
   const stack: string[] = [];
   for (const character of code) {
     if (character === "(" || character === "[") stack.push(character);

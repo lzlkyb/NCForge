@@ -108,12 +108,10 @@ pub async fn nc_vo_tables(
     // entities 传空：这一屏问的就是「这个 VO 对应什么表」，不需要再列其它候选实体
     let built = md_dict::build(&tables, &columns, &[]);
     if built.len() < table_names.len() {
-        let found: Vec<&str> = built.iter().map(|t| t.name.as_str()).collect();
-        let missing: Vec<&str> = table_names
-            .iter()
-            .map(String::as_str)
-            .filter(|n| !found.contains(n))
-            .collect();
+        // 🔴 必须走 `md_dict::missing_tables`：`table_names` 在上面已小写化，而
+        // `built[].name` 是 md_table 里的**原样大写**。自己拿两者直接比会永不相等，
+        // 只要有一张表真缺失就把**全部表**报成「查不到」，用户以为整个映射都坏了。
+        let missing = md_dict::missing_tables(&table_names, &built);
         if !missing.is_empty() {
             notes.push(format!(
                 "这些表在 md_table 里查不到（可能是临时表或已软删除）：{}",

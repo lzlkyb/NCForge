@@ -22,6 +22,11 @@ export function sqlPredicateContext(analysis: SqlAnalysis, offset: number, claus
     if (word === "CASE") cases++;
     if (word === "END" && cases) { cases--; continue; }
     if (cases) continue;
+    // 🔴 **括号一律重置 negated，这是有意设计，别改成继承 frame.negated**（2026-11-16 复核）。
+    // `NOT a.created` 直接插入复合范围会破坏 NOT 的作用域，所以要拦；
+    // 而 `NOT (a.created)` 用户已经**显式分组**，插进去的复合范围自带括号、
+    // 整体落在 NOT 里面（`NOT (a.created BETWEEN x AND y)`），语义正确，应当放行。
+    // 两处测试钉住这条语义：`sqlProviders.test.ts:417`「显式分组时可以选」、`:507`。
     if (word === "(") stack.push({ boolean: frame.boolean && i === frame.start, between: false, negated: false, start: i + 1 });
     else if (word === ")") { if (stack.length === 1) return; stack.pop(); }
     else if (frame.boolean) {

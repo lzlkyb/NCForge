@@ -1657,27 +1657,16 @@ impl Session {
              end;",
             &[],
         );
-        let t = table.to_uppercase();
+        // 🔴 `aier633.gl_docfree2` 必须拆 owner：整串丢给 get_ddl 的对象名参数永远查不到
+        // （ORA-31603）。`columns`/`pk_columns` 早就走 `split_qualified` 了，这里漏了。
+        let (owner, t) = split_qualified(table);
         if let Some(ty) = object_type_of(otype) {
             // 对象 DDL 没有「依赖索引」那一段；拿到什么给什么，失败就把驱动错误原样抛上去
-            let sql = format!("select dbms_metadata.get_ddl('{ty}', :1) from dual");
-            let text = metadata_ddl(conn, &sql, &t).map_err(sql_err)?;
+            let text = object_ddl(conn, ty, &t, owner.as_deref())?;
             return Ok(json!({ "ddl": text.trim(), "type": ty }));
         }
-        let main = metadata_ddl(
-            conn,
-            "select dbms_metadata.get_ddl('TABLE', :1) from dual",
-            &t,
-        )
-        .or_else(|_| {
-            metadata_ddl(
-                conn,
-                "select dbms_metadata.get_ddl('VIEW', :1) from dual",
-                &t,
-            )
-        })
-        .map_err(sql_err)?;
-        let idx = index_ddl(conn, &t);
+        let main = table_or_view_ddl(conn, &t, owner.as_deref()).map_err(sql_err)?;
+        let idx = index_ddl(conn, &t, owner.as_deref());
         let text = format!("{}\n\n{}", main.trim(), idx.trim());
         Ok(json!({ "ddl": text.trim() }))
     }
@@ -2555,6 +2544,53 @@ pub fn leading_keywords(sql: &str) -> String {
     s.chars().take(200).collect()
 }
 
+/// `at`（字符下标）处是不是 Oracle q-quote 起点；是就返回**闭合之后**的下标，否则返回 `at`。
+///
+/// 🔴 三条守卫缺一不可，四个扫描点（本函数两个调用方 + `db_engine::strip_literals`
+/// + Java `NcDbBridge::{toQuestionMarks,stripLiterals}`）必须共用同一套判据：
+/// 1. **前一字符不能是标识符字符**：`freq'abc'` 的 `q` 是列名尾巴，不是 q-quote 前缀。
+/// 2. **例外：NCHAR 前缀 `n`/`N` 放行**。`nq'[it's :99]'` 是合法 q-quote，
+///    不放行会把串内 `:99` 当绑定、串外 `:1` 反而漏掉（2026-11-16 探针实测）。
+/// 3. **找不到闭合符就不认**，交回普通字符串分支。未闭合本就是非法字面量，
+///    该让 Oracle 报 `ORA-01756`，不能由我们一路吃到结尾、改写成另一条语句。
+pub fn q_quote_end(b: &[char], at: usize) -> usize {
+    let n = b.len();
+    if at + 2 >= n {
+        return at;
+    }
+    if !matches!(b[at], 'q' | 'Q') || b[at + 1] != '\'' {
+        return at;
+    }
+    // 与 `db_engine::word_boundary` 同一套标识符字符集。
+    let ident = |c: char| c.is_alphanumeric() || matches!(c, '_' | '$' | '#');
+    if at > 0 && ident(b[at - 1]) {
+        let nchar = matches!(b[at - 1], 'n' | 'N') && (at < 2 || !ident(b[at - 2]));
+        if !nchar {
+            return at;
+        }
+    }
+    let open = b[at + 2];
+    if open.is_whitespace() {
+        return at;
+    }
+    let close = match open {
+        '[' => ']',
+        '{' => '}',
+        '(' => ')',
+        '<' => '>',
+        other => other,
+    };
+    // 从 open 之后找 `close` + `'`；找不到返回 at（不认）。
+    let mut i = at + 3;
+    while i + 1 < n {
+        if b[i] == close && b[i + 1] == '\'' {
+            return i + 2;
+        }
+        i += 1;
+    }
+    at
+}
+
 /// 去掉字符串常量与注释，避免注释或字面量里的关键字被误判。
 pub fn strip_literals(sql: &str) -> String {
     let mut out = String::with_capacity(sql.len());
@@ -2563,6 +2599,15 @@ pub fn strip_literals(sql: &str) -> String {
     let mut i = 0;
     while i < n {
         let c = b[i];
+        // 🔴 q-quote 内部的单引号**不是**字符串结束符。漏了这条，
+        // `q'[it's for update]'` 会被切成 `q''s for update]''` ⇒ has_for_update 命中，
+        // 只读查询被记成持锁事务；`q'[it's open :7 for …]'` 同理会污染引擎路由判定。
+        let quoted = q_quote_end(&b, i);
+        if quoted > i {
+            out.push_str("''");
+            i = quoted;
+            continue;
+        }
         if c == '\'' {
             i += 1;
             while i < n {
@@ -2796,14 +2841,22 @@ fn render_indexes(owner: &str, table: &str, list: &[IdxMeta]) -> (String, Vec<St
             fallback.push(it.name.clone());
             continue;
         }
-        let cols: Vec<String> = it.cols.iter().map(|c| format!("\"{c}\"")).collect();
+        // 🔴 标识符里的双引号必须翻倍：Oracle 允许 `"A""B"` 这种名字，直塞会提前
+        // 闭合引号 ⇒ 拼出来的 DDL 语法错误，而用户是拿这段去执行的。
+        // 与 `quote_ident` 同一套转义（那个函数带 128 长度校验、失败要报错，
+        // 这里拼的是整段 DDL、单个名字超长不该让整段消失，所以只复用转义规则）。
+        let cols: Vec<String> = it
+            .cols
+            .iter()
+            .map(|c| format!("\"{}\"", c.replace('"', "\"\"")))
+            .collect();
         sql.push_str(&format!(
             "CREATE {}INDEX \"{}\".\"{}\" ON \"{}\".\"{}\" ({}) ;\n",
             if it.unique { "UNIQUE " } else { "" },
-            owner,
-            it.name,
-            owner,
-            table,
+            owner.replace('"', "\"\""),
+            it.name.replace('"', "\"\""),
+            owner.replace('"', "\"\""),
+            table.replace('"', "\"\""),
             cols.join(", ")
         ));
     }
@@ -2823,21 +2876,36 @@ fn render_indexes(owner: &str, table: &str, list: &[IdxMeta]) -> (String, Vec<St
 /// 🔴 约束索引**必须单独查一次再做集合差**，不能写成 SQL 里的 `not exists`：
 /// `all_constraints` 是字典视图，相关子查询会让它按索引行反复展开——实测同一张表
 /// 从 136ms（两次查询）涨到 15.2 秒（`not exists`）。
-fn index_ddl(conn: &Connection, table: &str) -> String {
+fn index_ddl(conn: &Connection, table: &str, owner: Option<&str>) -> String {
+    // 带 owner 时按它精确过滤，不带才沿用 current_schema（与 `columns` 同口径）。
     const CONS: &str = "select index_name from all_constraints \
-                         where owner = sys_context('userenv','current_schema') \
+                         where owner = {schema} \
                            and table_name = :1 and constraint_type in ('P','U') \
                            and index_name is not null";
     const SQL: &str = "select i.table_owner, i.index_name, i.uniqueness, i.index_type, \
                               i.partitioned, i.compression, ic.column_name, ic.descend \
                          from all_indexes i join all_ind_columns ic \
                            on ic.index_owner = i.owner and ic.index_name = i.index_name \
-                        where i.table_owner = sys_context('userenv','current_schema') \
+                        where i.table_owner = {schema} \
                           and i.table_name = :1 and i.generated = 'N' \
                         order by i.index_name, ic.column_position";
+    let schema = if owner.is_some() {
+        ":2"
+    } else {
+        "sys_context('userenv','current_schema')"
+    };
+    let cons_sql = CONS.replace("{schema}", schema);
+    let idx_sql = SQL.replace("{schema}", schema);
     let t = table.to_uppercase();
+    // 走仓内既有的 `Box<dyn ToDbValue>` 范式（同 execBound）：拥有所有权，
+    // 不必跟 `&str` / `&String` 的临时值生命周期较劲。
+    let owned: Vec<Box<dyn ToDbValue>> = match owner {
+        Some(o) => vec![Box::new(t.clone()), Box::new(o.to_string())],
+        None => vec![Box::new(t.clone())],
+    };
+    let binds: Vec<&dyn ToDbValue> = owned.iter().map(|p| p.as_ref()).collect();
     let mut cons: HashSet<String> = HashSet::new();
-    if let Ok(cur) = conn.query(CONS, &[&t as &dyn ToDbValue]) {
+    if let Ok(cur) = conn.query(&cons_sql, &binds) {
         for row in cur.flatten() {
             let name = text_at(&row, 0);
             if !name.is_empty() {
@@ -2845,7 +2913,7 @@ fn index_ddl(conn: &Connection, table: &str) -> String {
             }
         }
     }
-    let cur = match conn.query(SQL, &[&t as &dyn ToDbValue]) {
+    let cur = match conn.query(&idx_sql, &binds) {
         Ok(c) => c,
         // 查不到元数据不等于没有索引，但也不该把整条 DDL 变成错误：主 DDL 已经拿到了
         Err(_) => return String::new(),
@@ -2914,12 +2982,65 @@ fn index_ddl(conn: &Connection, table: &str) -> String {
     sql
 }
 
+/// `dbms_metadata.get_ddl` 的对象名 / schema 参数。
+///
+/// 带 owner 时用三参重载显式指定 schema，不带就沿用连接的 current_schema。
+/// 抽成函数是为了能脱库单测「owner 有没有被拆出来」——整串当对象名传永远 ORA-31603。
+fn get_ddl_sql(kind: &str, with_schema: bool) -> String {
+    if with_schema {
+        format!("select dbms_metadata.get_ddl('{kind}', :1, :2) from dual")
+    } else {
+        format!("select dbms_metadata.get_ddl('{kind}', :1) from dual")
+    }
+}
+
+/// 表 DDL：TABLE 拿不到就试 VIEW（同名的可能是视图）。
+fn table_or_view_ddl(
+    conn: &Connection,
+    table: &str,
+    owner: Option<&str>,
+) -> Result<String, String> {
+    let call = |kind: &str| match owner {
+        Some(o) => metadata_ddl2(conn, &get_ddl_sql(kind, true), table, o),
+        None => metadata_ddl(conn, &get_ddl_sql(kind, false), table),
+    };
+    call("TABLE").or_else(|_| call("VIEW"))
+}
+
+/// 非表对象 DDL（包 / 过程 / 序列…）。
+fn object_ddl(
+    conn: &Connection,
+    kind: &str,
+    name: &str,
+    owner: Option<&str>,
+) -> Result<String, BridgeError> {
+    let text = match owner {
+        Some(o) => metadata_ddl2(conn, &get_ddl_sql(kind, true), name, o),
+        None => metadata_ddl(conn, &get_ddl_sql(kind, false), name),
+    }
+    .map_err(sql_err)?;
+    Ok(text)
+}
+
 /// 取 `dbms_metadata.get_ddl(...)` 的 CLOB 文本。错误统一成消息字符串——调用方只关心
 /// 「TABLE 不行就试 VIEW」。
 fn metadata_ddl(conn: &Connection, sql: &str, name: &str) -> Result<String, String> {
     let row = conn
         .query_row(sql, &[&name as &dyn ToDbValue])
         .map_err(|e| drv_err(e).message)?;
+    ddl_text(row)
+}
+
+/// 同上，但显式带 schema（`get_ddl(kind, name, schema)` 三参重载）。
+fn metadata_ddl2(conn: &Connection, sql: &str, name: &str, owner: &str) -> Result<String, String> {
+    let row = conn
+        .query_row(sql, &[&name as &dyn ToDbValue, &owner as &dyn ToDbValue])
+        .map_err(|e| drv_err(e).message)?;
+    ddl_text(row)
+}
+
+/// `get_ddl` 返回的可能是 VARCHAR2 也可能是 CLOB，两种都要认。
+fn ddl_text(row: Row) -> Result<String, String> {
     if let Ok(Some(s)) = row.get::<Option<String>>(0) {
         return Ok(s);
     }
@@ -3266,6 +3387,57 @@ mod tests {
         assert!(!is_ddl(&leading_keywords(sql2)));
     }
 
+    /// q-quote 内部的单引号不是字符串结束符。用例来自 2026-11-16 实测探针，
+    /// 与 Java `NcDbBridgeContractTest::qQuoteContracts` 一一对应（两个引擎必须同判）。
+    #[test]
+    fn q_quote_里的关键字不参与判类() {
+        // 撇号把旧实现切成 `q''s for update]''`，只读查询被记成持锁事务。
+        assert!(!has_for_update(
+            "select q'[it's for update]' as c from dual"
+        ));
+        assert!(!has_for_update("select q'[for update]' as c from dual"));
+        assert!(!has_for_update(
+            "select nq'[it's for update]' as c from dual"
+        ));
+        // 真 FOR UPDATE 不能被守卫写过头屏蔽掉。
+        assert!(has_for_update("select :1 from t for update"));
+        // 伪关键字开头：整段字面量剥成一个 ''，不得露出 update。
+        let sql = "select q'[it's update T set x=1]' from dual";
+        assert_eq!(strip_literals(sql), "select '' from dual");
+        assert!(is_query(&leading_keywords(sql), sql));
+        assert!(!is_write(&leading_keywords(sql)));
+    }
+
+    #[test]
+    fn q_quote_三条守卫() {
+        let chars = |s: &str| s.chars().collect::<Vec<char>>();
+        // 1 标识符尾巴上的 q 不是前缀（定界符非括号时才会暴露）。
+        let b = chars("freq'abc'");
+        assert_eq!(q_quote_end(&b, 3), 3, "freq 的 q 不是 q-quote 起点");
+        let b = chars("my_q'[x]'");
+        assert_eq!(q_quote_end(&b, 3), 3, "下划线也是标识符字符");
+        // 2 NCHAR 前缀放行；更长的标识符里含 n 不算。
+        let b = chars("nq'[it's :9]'");
+        assert!(q_quote_end(&b, 1) > 1, "nq 是合法 NCHAR q-quote");
+        let b = chars("xnq'abc'");
+        assert_eq!(q_quote_end(&b, 2), 2, "xnq 仍是标识符尾巴");
+        // 3 未闭合不认，交回普通字符串分支（旧实现一路吃到结尾）。
+        let b = chars("q'[abc");
+        assert_eq!(q_quote_end(&b, 0), 0, "未闭合不认");
+        // 合法形态：四种括号 + 自定义定界符 + 大写 Q，全部要认。
+        for lit in ["q'[a'b]'", "Q'{a'b}'", "q'<a'b>'", "q'(a'b)'", "q'!a'b!'"] {
+            let b = chars(lit);
+            assert_eq!(
+                q_quote_end(&b, 0),
+                b.len(),
+                "合法 q-quote 必须整体认掉: {lit}"
+            );
+        }
+        // 空白不能当定界符。
+        let b = chars("q' abc '");
+        assert_eq!(q_quote_end(&b, 0), 0);
+    }
+
     #[test]
     fn 类型名与_jvm_桥对齐() {
         assert_eq!(base_type("VARCHAR2(20)"), "VARCHAR2");
@@ -3437,6 +3609,59 @@ mod index_ddl_tests {
         assert!(sql.contains(
             "CREATE UNIQUE INDEX \"AIER633\".\"IDX_B\" ON \"AIER633\".\"GL_DOCFREE2\" (\"C\") ;"
         ));
+    }
+
+    /// 🔴 标识符里的双引号必须翻倍：Oracle 允许 `"A""B"` 这种名字，
+    /// 直塞会提前闭合引号 ⇒ 用户拿去执行的 DDL 语法错误。
+    #[test]
+    fn embedded_quotes_are_doubled_in_every_identifier() {
+        let list = vec![meta("IDX\"A", false, true, &["COL\"X"])];
+        let (sql, fallback) = render_indexes("OW\"N", "T\"B", &list);
+        assert!(fallback.is_empty());
+        assert!(
+            sql.contains(
+                "CREATE INDEX \"OW\"\"N\".\"IDX\"\"A\" ON \"OW\"\"N\".\"T\"\"B\" (\"COL\"\"X\") ;"
+            ),
+            "实测 {sql}"
+        );
+        // 引号总数必须是偶数（每个标识符一对 + 内部翻倍的成对）
+        assert_eq!(sql.matches('"').count() % 2, 0, "引号不成对：{sql}");
+    }
+
+    /// 普通名字一字不变（别为了转义把正常 DDL 改坏）。
+    #[test]
+    fn plain_identifiers_are_unchanged_by_escaping() {
+        let list = vec![meta("IDX_A", true, true, &["A", "B"])];
+        let (sql, _) = render_indexes("AIER633", "GL_DOCFREE2", &list);
+        assert!(sql.contains(
+            "CREATE UNIQUE INDEX \"AIER633\".\"IDX_A\" ON \"AIER633\".\"GL_DOCFREE2\" (\"A\", \"B\") ;"
+        ));
+    }
+
+    /// 🔴 `aier633.gl_docfree2` 必须拆 owner：整串当对象名传给 get_ddl 永远 ORA-31603。
+    /// `columns`/`pk_columns` 早就走 split_qualified，ddl 入口漏了。
+    #[test]
+    fn qualified_table_is_split_before_get_ddl() {
+        let (owner, t) = split_qualified("aier633.gl_docfree2");
+        assert_eq!(owner.as_deref(), Some("AIER633"));
+        assert_eq!(t, "GL_DOCFREE2");
+        // 带 owner 用三参重载，不带才沿用 current_schema
+        assert_eq!(
+            get_ddl_sql("TABLE", true),
+            "select dbms_metadata.get_ddl('TABLE', :1, :2) from dual"
+        );
+        assert_eq!(
+            get_ddl_sql("TABLE", false),
+            "select dbms_metadata.get_ddl('TABLE', :1) from dual"
+        );
+        assert_eq!(
+            get_ddl_sql("PACKAGE BODY", true),
+            "select dbms_metadata.get_ddl('PACKAGE BODY', :1, :2) from dual"
+        );
+        // 不带前缀时行为不变
+        let (none, plain) = split_qualified("gl_docfree2");
+        assert_eq!(none, None);
+        assert_eq!(plain, "GL_DOCFREE2");
     }
 
     #[test]

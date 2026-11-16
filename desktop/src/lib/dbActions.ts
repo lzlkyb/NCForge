@@ -396,7 +396,11 @@ export async function runStatements(
       toast("已取消执行，改动还在", "info");
       return outcome;
     }
-    clearEditsForTab(tabId);
+    // 🔴 **这里只拿到「同意丢弃」，还不能清计数**。后面仍有危险语句二次确认取消、
+    // operationActive / 事务 lost、beginOperation 失败、ensureConnected 失败等多条
+    // 中止路径，而登记表只存计数、改动仍在网格组件 state 里（`dbDirtyEdits`）。
+    // 提前清零 ⇒ 小圆点消失且不会自动重报（重报 effect 只认 dirtyCount 变化），
+    // 之后切/关标签不再询问，改动静默丢失。真正的清零放在结果集被替换那一刻。
   }
   // 危险语句闸门（所有执行入口共用）。
   //
@@ -514,7 +518,8 @@ export async function runStatements(
       if (current.batch) patchTab<SqlTab>(tabId, { batch: { ...current.batch, completed: i + 1 } });
       if (r.kind !== "error" && stmtKind(s.text) === "ddl") ddl = true;
       if (r.kind !== "update" || stmts.length === 1) {
-        if (kept.length === 0 && (connectionInterrupted || r.cancelled)) {
+        const restoredPrevious = kept.length === 0 && (connectionInterrupted || r.cancelled);
+        if (restoredPrevious) {
           kept.push(...previousResults.filter((result) => result.kind !== "error"));
         }
         const firstResult = kept.length === 0;
@@ -524,6 +529,9 @@ export async function runStatements(
         const view = selected === pendingId || firstResult && !selected?.startsWith(`pending:${task.id}:`) ? r.id : selected;
         const pair = sqlTabOf(tabId)?.resultPair?.map(id => id === pendingId ? r.id : id) as [string, string] | undefined;
         patchTab<SqlTab>(tabId, { results: [...kept], view, resultPair: pair });
+        // 结果集**真的被新结果替换**了，这一刻才清「未写回改动」登记（用户此前已同意丢弃）。
+        // 上面那条「首条就被取消/断连 ⇒ 把旧结果搬回来」的分支不清：旧网格还在，改动也还在。
+        if (firstResult && !restoredPrevious) clearEditsForTab(tabId);
         // Keep the script's own references bounded too, not just the store snapshot.
         const retained = sqlTabOf(tabId)?.results;
         if (retained) kept.splice(0, kept.length, ...retained);

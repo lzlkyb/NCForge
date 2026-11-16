@@ -89,11 +89,36 @@ impl BlockStore {
 
     /// 只留仍在 SVN 改动里的文件的标记。`changed` 是归一路径（小写 + 正斜杠）。
     /// 调用方必须传**完整、成功**的一次扫描结果。
-    pub fn prune(&mut self, changed: &HashSet<String>) -> usize {
+    ///
+    /// 🔴 **`root` 是本次扫描的工作区根，必须传**：这份表是 config_dir 下的**全局单文件**，
+    /// key 是绝对路径，多个工作区的标记共存其中（不像 `ReqStore` 按根分文件）。
+    /// 纯差集 `retain(changed.contains(..))` 会把**别的工程**的标记一并删光——
+    /// 切到工程 B 后 B 的任意一次成功扫描就清空 A 的审查进度。
+    /// 所以只处理属于本根的路径，根外的标记原样保留。
+    pub fn prune(&mut self, changed: &HashSet<String>, root: &str) -> usize {
+        let prefix = root_key_prefix(root);
         let before = self.marks.len();
-        self.marks.retain(|k, _| changed.contains(path_part(k)));
+        self.marks
+            .retain(|k, _| !under_root(path_part(k), &prefix) || changed.contains(path_part(k)));
         before - self.marks.len()
     }
+}
+
+/// 归一化的根前缀（小写 + 正斜杠 + 结尾斜杠）。空根返回空串。
+fn root_key_prefix(root: &str) -> String {
+    let norm = root.replace('\\', "/").to_lowercase();
+    let trimmed = norm.trim_end_matches('/');
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        format!("{trimmed}/")
+    }
+}
+
+/// 路径是否在该根之下。**空根一律判否**：拿不到根时宁可不清，也不能误删全部。
+/// 前缀带结尾斜杠，`c:/w` 不会匹配到 `c:/work/...`。
+fn under_root(path: &str, prefix: &str) -> bool {
+    !prefix.is_empty() && path.starts_with(prefix)
 }
 
 #[cfg(test)]
@@ -127,7 +152,55 @@ mod tests {
         let old: BlockStore = serde_json::from_str(r#"{"c:/w/x.java|f":{"atMs":1}}"#).unwrap();
         assert!(old.marks["c:/w/x.java|f"].range.is_none());
         let changed: HashSet<String> = ["c:/w/a.java".to_string()].into();
-        assert_eq!(back.prune(&changed), 1);
+        assert_eq!(back.prune(&changed, "C:\\w"), 1);
         assert!(back.marks.contains_key("c:/w/a.java|f1"));
+    }
+
+    /// 回归：全局单文件里混着两个工程的标记，B 的扫描不能删掉 A 的进度。
+    #[test]
+    fn 清理只作用于本工作区_别的工程标记原样保留() {
+        let mut s = BlockStore::default();
+        let keys = vec![
+            "c:/proj_a/x.java|f1".to_string(),
+            "c:/proj_a/y.java|f2".to_string(),
+            "c:/proj_b/z.java|f3".to_string(),
+        ];
+        s.set(&keys, &[], &[], true, 1);
+        // 工程 B 扫描：只有 z.java 还在改动里
+        let changed: HashSet<String> = ["c:/proj_b/z.java".to_string()].into();
+        assert_eq!(s.prune(&changed, "C:\\proj_b"), 0, "B 的扫描不该删任何东西");
+        assert_eq!(s.marks.len(), 3, "A 的两个标记必须还在");
+
+        // 回到工程 A 扫描：y.java 已提交，只清它
+        let changed_a: HashSet<String> = ["c:/proj_a/x.java".to_string()].into();
+        assert_eq!(s.prune(&changed_a, "c:/proj_a"), 1);
+        assert!(s.marks.contains_key("c:/proj_a/x.java|f1"));
+        assert!(!s.marks.contains_key("c:/proj_a/y.java|f2"));
+        assert!(
+            s.marks.contains_key("c:/proj_b/z.java|f3"),
+            "B 的标记不受影响"
+        );
+    }
+
+    /// 前缀必须带分隔符：`c:/w` 不能吃掉 `c:/work`；空根一律不清。
+    #[test]
+    fn 根前缀按分隔符匹配_空根不清理() {
+        let mut s = BlockStore::default();
+        s.set(
+            &[
+                "c:/work/a.java|f1".to_string(),
+                "c:/w/b.java|f2".to_string(),
+            ],
+            &[],
+            &[],
+            true,
+            1,
+        );
+        let changed: HashSet<String> = ["c:/w/b.java".to_string()].into();
+        assert_eq!(s.prune(&changed, "c:/w"), 0, "c:/work 不在 c:/w 之下");
+        assert_eq!(s.marks.len(), 2);
+        // 根拿不到时宁可不清，也不能把全部标记删光
+        assert_eq!(s.prune(&HashSet::new(), ""), 0);
+        assert_eq!(s.marks.len(), 2);
     }
 }

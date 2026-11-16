@@ -9,7 +9,7 @@ import { getSession, setSession } from "../../lib/workspaceSession";
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), toast: vi.fn(), text: undefined as string | undefined, modelDirty: false }));
 vi.mock("../../lib/tauri", () => ({ invoke: mocks.invoke }));
 vi.mock("../ui/toast", () => ({ toast: mocks.toast }));
-vi.mock("../../lib/editorStore", () => ({ getModel: () => undefined, getText: () => mocks.text, isModelDirty: () => mocks.modelDirty }));
+vi.mock("../../lib/editorStore", () => ({ getModel: () => undefined, getText: () => mocks.text, isModelDirty: () => mocks.modelDirty, onModelLifecycle: () => () => {} }));
 
 const PATH = "C:\\w\\newar\\modules\\ic\\A.java";
 const V1 = { id: "v1", ts: Date.now() - 60_000, size: 8, sha: "aaa" };

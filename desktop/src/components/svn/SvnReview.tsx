@@ -136,7 +136,9 @@ function SvnReviewPanel({ root, onOpenFile }: { root: string; onOpenFile: (path:
     }
     const todo = reqItems.filter(it => isMarkable(it) && !reviewed.has(keyOf(it.path)) && allBlocksDone(it.path,blocks.get(keyOf(it.path))?.blocks ?? []));
     markLock.current = true; setMarking(true);
-    void Promise.all(todo.map(it => mark(it.path,it.revision,true))).then(() => toast(`已标记 ${reqItems.length} 个文件为已审`,"success")).catch(error => toast(friendlySvnError(error),"error")).finally(() => { markLock.current = false; setMarking(false); });
+    // 计数用 todo.length：reqItems 里含已审 / 不可标记 / 块未审完的文件，上面已过滤掉，
+    // 拿 reqItems.length 报数会虚高（说「已标记 8 个」实际只标了 3 个）。
+    void Promise.all(todo.map(it => mark(it.path,it.revision,true))).then(() => toast(`已标记 ${todo.length} 个文件为已审`,"success")).catch(error => toast(friendlySvnError(error),"error")).finally(() => { markLock.current = false; setMarking(false); });
   };
   const toggleReviewed = () => {
     if (!selected || !isMarkable(selected) || locked || markLock.current) return;

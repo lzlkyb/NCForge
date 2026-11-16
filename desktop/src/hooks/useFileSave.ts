@@ -83,6 +83,11 @@ export function useFileSave(activePath: string | null) {
         task.finish("success", `文件已保存${formatResult === "failed" ? "；格式化未完成" : ""}${willCompile ? "；自动编译已排队" : ""}${getSession().tabs.find(t=>t.path===path)?.dirty ? "；后续编辑仍未保存" : ""}`);
       });
     } catch (e) {
+      // 🔴 与 try 内同一组守卫（`:58` / `:63`）：写盘期间关了标签或切了工程，这次失败
+      // 的结论就不属于当前会话。照挂上去就是一条僵尸「异地修改」/「编码写不出」横幅，
+      // 指向一个已经不存在的标签——点「覆盖保存」还会被 saveFile 的 `!tab` 静默挡掉，
+      // 用户读成「按钮坏了」。失败本身不丢：trackOperation 已记 failed，操作中心可查。
+      if (epoch !== workspaceEpoch() || root !== getSession().root || !getSession().tabs.some(t => t.path === path)) return;
       if (isConflictError(e)) setConflictPath(path);
       else if (isUnencodableError(e)) setEncodingIssue({ path, message: cleanError(e) });
       else toast(`保存失败：${cleanError(e)}`, "error");

@@ -29,7 +29,7 @@ vi.mock("./useSplitView",()=>({useSplitView:()=>({splitPath:null,setSplitPath:vi
 vi.mock("../components/ui/toast",()=>({toast:vi.fn()}));
 vi.mock("../lib/workspace",async()=>{const orig=await vi.importActual<typeof import("../lib/workspace")>("../lib/workspace");return {...orig,readFile:h.readFile,encodingMarks:async()=>[]};});
 (globalThis as unknown as {IS_REACT_ACT_ENVIRONMENT:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
-const a="C:\\w\\A.java",b="C:\\w\\B.java",content:FileContent={text:"class A {}",lossless:true,encoding:"UTF-8",hasBom:false,eol:"LF",mtimeMs:1,size:10};
+const a="C:\\w\\A.java",b="C:\\w\\B.java",c="C:\\w\\C.java",content:FileContent={text:"class A {}",lossless:true,encoding:"UTF-8",hasBom:false,eol:"LF",mtimeMs:1,size:10};
 const deferred=<T,>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(yes=>{resolve=yes;});return {promise,resolve};};
 let api:ReturnType<typeof useFileSession>,root:Root,host:HTMLDivElement;
 function Harness({ groups = false }: { groups?: boolean }){api=useFileSession();useTabSessionKeys(getSession().tabs, getSession().activePath, api);return groups ? <EditorGroupsPane root="C:\\w" tabs={getSession().tabs} session={api} reveal={api.reveal} /> : null;}
@@ -52,6 +52,22 @@ describe("文件读取并发",()=>{
     expect(getSession().activePath).toBe(uri);
     await act(async () => api.goForward());
     expect(getSession().activePath).toBe(b);
+  });
+  // 🔴 jdt 分支的后退必须带 column：openJdt 第 4 参就是它，漏传会只回到行首，
+  // 同一行多个引用时落错位置。普通分支一直传着，别在 jdt 这里例外。
+  it("库文档后退保留列号，不只回到行首", async () => {
+    const uri = "nc-library://files/D%3A%2Flib%2Fy.jar/p/B.class?archive=1";
+    act(() => setSession({ tabs: [tabMetaFromDisk(uri, content), tabMetaFromDisk(b, content)], activePath: uri }));
+    setCursor(9, 7);
+    await act(async () => api.openAt(b, 30));
+    act(() => setSession({ tabs: tabs => tabs.filter(tab => tab.path !== uri) }));
+    h.openJdtTab.mockImplementationOnce(async path => {
+      setSession({ tabs: tabs => [...tabs, tabMetaFromDisk(path, content)] });
+      return true;
+    });
+    await act(async () => api.goBack());
+    expect(getSession().activePath).toBe(uri);
+    expect(api.reveal).toMatchObject({ path: uri, line: 9, column: 7 });
   });
   it("右侧导航只在目的组打开并在右组记录来源，左侧文件保持", async () => {
     h.readFile.mockResolvedValue(content); await act(async () => api.openFile(a));
@@ -125,6 +141,28 @@ describe("文件读取并发",()=>{
   it("旧工程慢结果不落模型，即使又回到同一个目录",async()=>{
     const wait=deferred<typeof content>();h.readFile.mockReturnValue(wait.promise);let first!:Promise<boolean>;
     act(()=>{first=api.openFile(a);});await act(async()=>{invalidateWorkspaceRequests();wait.resolve(content);await first;});expect(h.openModel).not.toHaveBeenCalled();expect(getSession().tabs).toHaveLength(0);
+  });
+  // 🔴 L16：连点后退不能「吃一格」。navLook 只看游标、不动游标，两次点击会拿到同一个
+  // 目标；openAt/openJdt 又用抢号（revealSeq/openSeq）让先发的那次返回 false ⇒ 两次
+  // 都不 navCommit，用户点了两下却停在原地。deferred 标签（后台恢复的页签）走异步读盘，
+  // 是稳定复现路径。
+  it("连点两次后退：恢复中的标签慢读盘时逐格退，不吃格",async()=>{
+    h.readFile.mockResolvedValue(content);
+    // 每跳一次先把光标落在目标行：recordFileJump 会连「跳转前的光标」一起记，
+    // 光标与上一个点重合时才会去重，否则栈里多出几个原点，断言的格数就不对。
+    await act(async()=>{await api.openAt(a,10);});setCursor(10,1);
+    await act(async()=>{await api.openAt(b,20);});setCursor(20,1);
+    await act(async()=>{await api.openAt(c,30);});setCursor(30,1);
+    // 三个点都在历史里，但标签是「先有页签、后读内容」的 deferred 态
+    act(()=>setSession({tabs:tabs=>tabs.map(t=>({...t,deferred:true}))}));
+    const wait=deferred<typeof content>();h.readFile.mockReturnValue(wait.promise);
+    let jobs!:Promise<void>[];
+    act(()=>{jobs=[api.goBack(),api.goBack()];});
+    await act(async()=>{wait.resolve(content);await Promise.all(jobs);});
+    expect(getSession().activePath).toBe(a);
+    expect(api.reveal).toMatchObject({path:a,line:10});
+    await act(async()=>{api.goForward();});
+    expect(getSession().activePath).toBe(b);
   });
 });
 

@@ -37,6 +37,11 @@ function load(): Store {
  * `keep` 是「一定要保住」的路径（当前前台 / 分屏那个）。开超过 `MAX_TABS` 个标签时
  * 简单截断会把前台那个截掉，恢复后用户落在另一个文件上——所以先截，再把 keep
  * 里被截掉的顶掉末位。
+ *
+ * 🔴 **每个 keep 必须占各自的槽位**。曾经所有 keep 都写 `head[length-1]`，前台与
+ * 分屏同时超限时后写的把先写的顶掉，`activePath` 静默退回 `tabs[0]`——而且
+ * `saveTabSnapshot` 也走这里，**写盘那一刻就已经丢了，不必等重启**。
+ * 现在从末位往前找第一个「不是 keep」的位置替换，keep 之间不会互相踩。
  */
 function validPaths(v: unknown, keep: (string | null | undefined)[] = []): string[] {
   const all = Array.isArray(v)
@@ -44,8 +49,13 @@ function validPaths(v: unknown, keep: (string | null | undefined)[] = []): strin
     : [];
   if (all.length <= MAX_TABS) return all;
   const head = all.slice(0, MAX_TABS);
-  for (const want of keep) {
-    if (want && all.includes(want) && !head.includes(want)) head[head.length - 1] = want;
+  const wanted = [...new Set(keep.filter((p): p is string => !!p && all.includes(p) && !head.includes(p)))];
+  let slot = head.length - 1;
+  for (const want of wanted) {
+    while (slot >= 0 && wanted.includes(head[slot])) slot--;
+    if (slot < 0) break;
+    head[slot] = want;
+    slot--;
   }
   return [...new Set(head)];
 }

@@ -38,10 +38,34 @@ struct Work {
     after: Vec<u8>,
     mtime: Option<u64>,
     delete: bool,
+    /// 只改大小写的同目录改名（Windows 上 `A.java` → `a.java`）。
+    case_only: bool,
 }
 
 fn key(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/").to_lowercase()
+}
+
+/// 是否「同一个文件、只有大小写不同」。
+///
+/// 🔴 Windows 文件系统大小写不敏感：`A.java` 与 `a.java` 是**同一个文件**，
+/// `destination.exists()` 为真不代表目标被占用。原来 `source != destination &&
+/// destination.exists()` 直接拒绝，导致重构里的纯大小写改名在 Windows 上永远失败；
+/// `workspace::rename_entry` 早就有 `is_same_path` 特判，事务路径漏了这一层。
+///
+/// 判据与 `rename_entry` 一致：canonicalize 后相等即同一文件（顺带解掉符号链接）。
+/// 只在大小写不敏感的平台认这条，Linux 上 `A.java`/`a.java` 是两个文件，必须仍按占用拒绝。
+fn case_only_rename(source: &Path, destination: &Path) -> bool {
+    if source == destination || key(source) != key(destination) {
+        return false;
+    }
+    if !cfg!(windows) {
+        return false;
+    }
+    match (fs::canonicalize(source), fs::canonicalize(destination)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 fn resolve(root: &Path, path: &str) -> Result<PathBuf, String> {
     let resolved = crate::security::path::resolve_safe_path(
@@ -69,7 +93,27 @@ fn prepare(root: &Path, edits: Vec<FileEdit>) -> Result<Vec<Work>, String> {
     let mut bytes = 0;
     for edit in edits {
         let source = resolve(root, &edit.path)?;
-        let destination = resolve(root, edit.destination.as_deref().unwrap_or(&edit.path))?;
+        let destination = match edit.destination.as_deref() {
+            Some(want) => {
+                let checked = resolve(root, want)?;
+                // 🔴 `resolve_safe_path` 对已存在路径会 canonicalize，而 Windows 的
+                // canonicalize 返回**磁盘上的真实大小写** —— 用户要把 `A.java` 改成
+                // `a.java`，安全检查通过后名字又被还原成 `A.java`，纯大小写改名就白做了。
+                // 安全校验仍走 canonicalize 后的 checked（白名单/穿越判定不变），
+                // 只在「与源是同一文件、仅大小写不同」时把用户请求的拼写换回来。
+                if cfg!(windows) && key(&checked) == key(&source) {
+                    let requested = PathBuf::from(want);
+                    let name = requested.file_name().map(|n| n.to_owned());
+                    match (name, checked.parent()) {
+                        (Some(name), Some(parent)) => parent.join(name),
+                        _ => checked,
+                    }
+                } else {
+                    checked
+                }
+            }
+            None => resolve(root, &edit.path)?,
+        };
         if !paths.insert(key(&source)) || (!edit.delete && !targets.insert(key(&destination))) {
             return Err("重构清单包含重复文件或目标".into());
         }
@@ -94,7 +138,8 @@ fn prepare(root: &Path, edits: Vec<FileEdit>) -> Result<Vec<Work>, String> {
             }
             None
         };
-        if source != destination && destination.exists() {
+        let case_only = case_only_rename(&source, &destination);
+        if source != destination && !case_only && destination.exists() {
             return Err(format!("移动目标已存在：{}", destination.display()));
         }
         let after = workspace::encode_text_file(&edit.text, edit.encoding, edit.has_bom, edit.eol)?;
@@ -109,10 +154,15 @@ fn prepare(root: &Path, edits: Vec<FileEdit>) -> Result<Vec<Work>, String> {
             after,
             mtime: edit.expected_mtime_ms,
             delete: edit.delete,
+            case_only,
         });
     }
     for item in &work {
-        if item.source != item.destination && paths.contains(&key(&item.destination)) {
+        // 纯大小写改名的目标就是源文件自己，不算「循环移动」
+        if item.source != item.destination
+            && !item.case_only
+            && paths.contains(&key(&item.destination))
+        {
             return Err("移动目标也是本次源文件，请拆分循环移动".into());
         }
     }
@@ -139,6 +189,81 @@ fn exclusive_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// 纯大小写改名 + 内容改写：源 → 中转名 → 目标，全程不覆盖别人的文件。
+///
+/// 与 `workspace::rename_entry` 同一套中转名策略（随机名、落盘前再确认没被占用），
+/// 区别是这里还要把新内容写进去，所以中转名那一步用 `exclusive_write` 而不是 rename：
+/// 先把新内容写到中转名，再删源、再把中转名改成目标。任一步失败都把源恢复回去。
+fn case_rename(item: &Work) -> Result<(), String> {
+    let parent = item
+        .destination
+        .parent()
+        .ok_or_else(|| "无法重命名工作区根目录".to_string())?;
+    let tmp = {
+        let probe = tempfile::Builder::new()
+            .prefix(".ncforge-recase-")
+            .suffix(".tmp")
+            .tempfile_in(parent)
+            .map_err(|e| format!("重命名失败：{e}"))?;
+        let path = probe.path().to_path_buf();
+        drop(probe);
+        path
+    };
+    if fs::symlink_metadata(&tmp).is_ok() {
+        return Err("重命名失败：中转名被占用，请重试".into());
+    }
+    // 新内容先落中转名：写失败时源文件还没动，直接返回即可
+    exclusive_write(&tmp, &item.after)?;
+    if let Err(e) = fs::remove_file(&item.source) {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("移除源文件失败：{e}"));
+    }
+    if let Err(e) = fs::rename(&tmp, &item.destination) {
+        // 目标没落地：把中转名搬回源路径，绝不把用户文件留在临时名下
+        if fs::symlink_metadata(&item.source).is_err() {
+            let _ = fs::rename(&tmp, &item.source);
+        }
+        return Err(format!("重命名失败：{e}"));
+    }
+    Ok(())
+}
+
+/// 纯大小写改名的回滚：把原内容写回去，再把名字改回原来的大小写。
+///
+/// 同样要走中转名（Windows 一步改不回去）。内容先恢复，改名失败只影响名字、不丢数据，
+/// 所以两步的错误分开报，让用户知道「内容已恢复但名字没改回来」。
+fn case_rollback(item: &Work, before: &[u8]) -> Result<(), String> {
+    let parent = item
+        .source
+        .parent()
+        .ok_or_else(|| "无法重命名工作区根目录".to_string())?;
+    let tmp = {
+        let probe = tempfile::Builder::new()
+            .prefix(".ncforge-recase-back-")
+            .suffix(".tmp")
+            .tempfile_in(parent)
+            .map_err(|e| format!("回滚重命名失败：{e}"))?;
+        let path = probe.path().to_path_buf();
+        drop(probe);
+        path
+    };
+    if fs::symlink_metadata(&tmp).is_ok() {
+        return Err("回滚重命名失败：中转名被占用".into());
+    }
+    exclusive_write(&tmp, before)?;
+    if let Err(e) = fs::remove_file(&item.destination) {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("回滚移除目标失败：{e}"));
+    }
+    fs::rename(&tmp, &item.source).map_err(|e| {
+        // 内容已在中转名里，绝不能静默丢掉：把它搬回目标路径保底
+        if fs::symlink_metadata(&item.destination).is_err() {
+            let _ = fs::rename(&tmp, &item.destination);
+        }
+        format!("内容已恢复但名字没改回原大小写：{e}")
+    })
+}
+
 pub fn apply(root: &Path, edits: Vec<FileEdit>) -> Result<EditOutcome, String> {
     let work = prepare(root, edits)?;
     let mut written: Vec<usize> = Vec::new();
@@ -155,7 +280,11 @@ pub fn apply(root: &Path, edits: Vec<FileEdit>) -> Result<EditOutcome, String> {
             if item.delete {
                 continue;
             }
-            if item.source == item.destination && item.before.is_some() {
+            if item.case_only {
+                // Windows 不允许一步 rename 到「同名但大小写不同」的路径，
+                // 与 `workspace::rename_entry` 同一套：先落中转名，再改成目标名。
+                case_rename(item)?;
+            } else if item.source == item.destination && item.before.is_some() {
                 crate::atomic_file::write_atomic_checked(&item.source, &item.after, item.mtime)?;
             } else {
                 let mut missing = Vec::new();
@@ -178,7 +307,11 @@ pub fn apply(root: &Path, edits: Vec<FileEdit>) -> Result<EditOutcome, String> {
             written.push(index);
         }
         for (index, item) in work.iter().enumerate() {
-            if (item.delete || item.source != item.destination) && item.before.is_some() {
+            // case_only 已经在上一步整体改名到位，源路径就是目标路径，不能再删一次
+            if !item.case_only
+                && (item.delete || item.source != item.destination)
+                && item.before.is_some()
+            {
                 if !unchanged(item) {
                     return Err(format!(
                         "CONFLICT:移动或删除前源文件改变：{}",
@@ -210,7 +343,14 @@ pub fn apply(root: &Path, edits: Vec<FileEdit>) -> Result<EditOutcome, String> {
                 ));
                 continue;
             }
-            let restored = if item.source == item.destination {
+            // case_only 的目标与源是同一个文件（只差大小写），回滚要「写回原内容 + 改回原名」，
+            // 不能走「删掉目标」那条——那会把用户文件删没。
+            let restored = if item.case_only {
+                match &item.before {
+                    Some(before) => case_rollback(item, before),
+                    None => fs::remove_file(&item.destination).map_err(|e| e.to_string()),
+                }
+            } else if item.source == item.destination {
                 match &item.before {
                     Some(before) => {
                         let expected = fs::metadata(&item.source)
@@ -279,6 +419,63 @@ mod tests {
             eol: content.eol,
         }
     }
+    /// 🔴 Windows 上 `A.java` → `a.java` 是同一个文件，`destination.exists()` 为真
+    /// 不代表目标被占用。原来预检直接拒绝，重构里的纯大小写改名永远失败；
+    /// `workspace::rename_entry` 早有 is_same_path 特判，事务路径漏了。
+    #[cfg(windows)]
+    #[test]
+    fn case_only_rename_is_allowed_on_windows() {
+        let dir = crate::test_support::tmp("workspace-edit-recase");
+        let a = dir.join("Voucher.java");
+        let b = dir.join("voucher.java");
+        fs::write(&a, "class A {}\n").unwrap();
+        assert!(case_only_rename(&a, &b), "同一文件只差大小写必须认");
+        let result = apply(&dir, vec![edit(&a, Some(&b))]).expect("纯大小写改名不该被拒");
+        assert_eq!(result.renamed.len(), 1, "要报成改名，前端才会跟着换标签");
+        // 目录里只有一份文件，且名字是新的大小写
+        let names: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .collect();
+        assert_eq!(names, vec!["voucher.java".to_string()], "实测 {names:?}");
+        assert_eq!(
+            workspace::read_text_file(&b).unwrap().text,
+            "// 接口\nclass B {}\n"
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// 判据本身：不同文件、跨目录、完全同名都不算纯大小写改名。
+    #[test]
+    fn case_only_predicate_is_narrow() {
+        let dir = crate::test_support::tmp("workspace-edit-recase-pred");
+        let a = dir.join("A.java");
+        fs::write(&a, "x").unwrap();
+        assert!(!case_only_rename(&a, &a), "完全同名不是改名");
+        assert!(!case_only_rename(&a, &dir.join("B.java")), "不同名字不是");
+        assert!(
+            !case_only_rename(&a, &dir.join("pkg").join("a.java")),
+            "跨目录不是纯大小写改名"
+        );
+        // 目标不存在（canonicalize 失败）时不认，交给正常的移动路径
+        assert!(!case_only_rename(&a, &dir.join("missing.java")));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// 真正被占用的目标仍要拒绝——放宽的只有「同一个文件」这一种。
+    #[cfg(windows)]
+    #[test]
+    fn occupied_destination_is_still_rejected() {
+        let dir = crate::test_support::tmp("workspace-edit-recase-occupied");
+        let a = dir.join("A.java");
+        let b = dir.join("B.java");
+        fs::write(&a, "class A {}\n").unwrap();
+        fs::write(&b, "existing\n").unwrap();
+        assert!(apply(&dir, vec![edit(&a, Some(&b))]).is_err());
+        assert_eq!(fs::read_to_string(&b).unwrap(), "existing\n");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn rejects_stale_plan_before_writing_any_file() {
         let dir = crate::test_support::tmp("workspace-edit-stale");

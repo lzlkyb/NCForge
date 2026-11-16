@@ -28,7 +28,13 @@ vi.mock("./monacoSql", () => ({
   sqlAnalysisOf: () => h.analysis,
 }));
 vi.mock("./sqlTemplates", async (orig) => ({ ...(await orig<typeof import("./sqlTemplates")>()), getSqlTemplatesEnabled: () => h.enabled }));
-vi.mock("./sqlScope", () => ({ sqlScopeAt: () => h.scope }));
+// 🔴 真实 `sqlScopeAt` 返回的 Scope **自带 sources**（sqlScope.ts:155-159）。
+// 夹具以前只给 `{start,end}`、把 sources 单独挂在 analysis.scopes 上，与真实结构不一致：
+// 按 scope.sources 判「已 JOIN 过哪些表」的代码会在这种夹具下永远读到空。
+vi.mock("./sqlScope", () => ({
+  sqlScopeAt: () => h.scope,
+  sqlSourcesAt: () => (h.scope as { sources?: unknown[] } | undefined)?.sources ?? [],
+}));
 vi.mock("./sqlUsage", () => ({ sqlUsageScope: () => "scope" }));
 vi.mock("./dbResultContext", () => ({ connectionKey: () => "id" }));
 vi.mock("./sqlModels", () => ({ tabIdOfModel: () => "t1" }));
@@ -62,8 +68,24 @@ function fake(sql = "po_order") {
 }
 
 const at = (column: number) => ({ startLineNumber: 1, endLineNumber: 1, startColumn: column, endColumn: column }) as monaco.Range;
-const ask = (model: monaco.editor.ITextModel, column = 5, cancelled = false) =>
-  [...h.providers][0].provideCodeActions(model, at(column), {} as monaco.languages.CodeActionContext, { isCancellationRequested: cancelled } as monaco.CancellationToken);
+// 🔴 取**最后**注册的 provider：每次 fake() 都会新注册一个并绑定它自己的 model，
+// 而产品代码有 `model !== editor.getModel()` 守卫。取 [0] 会拿到最早那个（绑着旧 model），
+// 同一个用例里第二次 ask 起就恒返回空 —— 看着像功能坏了，其实是夹具取错了 provider。
+const ask = (model: monaco.editor.ITextModel, column = 5, cancelled = false) => {
+  const providers = [...h.providers];
+  return providers[providers.length - 1].provideCodeActions(model, at(column), {} as monaco.languages.CodeActionContext, { isCancellationRequested: cancelled } as monaco.CancellationToken);
+};
+
+/**
+ * 统一设置「光标所在 scope」与 analysis，两者 sources 必须一致。
+ * 真实 sqlScopeAt 返回的 Scope 自带 sources，夹具分两份写就会读到空。
+ */
+function inScope(sources: { declaration: number; name?: string; table?: string }[], end = 200) {
+  h.scope = { start: 0, end, sources };
+  h.analysis = { tokens: [{ kind: "identifier", text: "po_order", start: 14, end: 22 }], roles: new Map(),
+    scopes: [{ sources }], regions: [] };
+}
+const MAIN = [{ declaration: 0, table: "po_order" }];
 
 it("光标停在裸表名上时给一条联查，替换的是表名本身", async () => {
   const model = fake(), result = await ask(model);
@@ -78,16 +100,14 @@ it("光标停在裸表名上时给一条联查，替换的是表名本身", asyn
 
 // 语句内的别名、字段、CTE 都推不出「要接哪张子表」，也不是表声明：不给，免得追加到词中间。
 it("语句内非表声明的位置不给（别名、字段、CTE）", async () => {
-  h.scope = { start: 0, end: 20 };
+  h.scope = { start: 0, end: 20, sources: [] };
   expect((await ask(fake()))?.actions).toEqual([]);
 });
 
 // 🔴 这条是 2026-11-14 修的死入口：`SELECT * FROM po_order` 上的 chip 和补全列表里的
 // 动作项都能点，但 CodeAction 原先在该位置返回空 → 点下去只是弹一个空菜单。
 it("语句内的表名上只追加 JOIN，不动用户写好的 SELECT", async () => {
-  h.scope = { start: 0, end: 20 };
-  h.analysis = { tokens: [{ kind: "identifier", text: "po_order", start: 14, end: 22 }], roles: new Map(),
-    scopes: [{ sources: [{ declaration: 0, table: "po_order" }] }], regions: [] };
+  inScope(MAIN);
   const result = await ask(fake("select * from po_order"), 19);
   expect(result?.actions).toHaveLength(1);
   expect(result?.actions[0].title).toBe("追加 LEFT JOIN：采购订单明细");
@@ -100,18 +120,43 @@ it("语句内的表名上只追加 JOIN，不动用户写好的 SELECT", async (
 // 补全列表里的动作项按「光标前的词」判定；CodeAction 若只认「光标压着的词」，
 // 用户打完表名多敲一个空格就会点出空菜单。
 it("光标停在表名后的空格上也认", async () => {
-  h.scope = { start: 0, end: 20 };
-  h.analysis = { tokens: [{ kind: "identifier", text: "po_order", start: 14, end: 22 }], roles: new Map(),
-    scopes: [{ sources: [{ declaration: 0, table: "po_order" }] }], regions: [] };
+  inScope(MAIN);
   const result = await ask(fake("select * from po_order "), 24);
   expect(result?.actions.map(a => a.title)).toEqual(["追加 LEFT JOIN：采购订单明细"]);
 });
 
 it("已经 JOIN 过这张子表时不再追加第二条", async () => {
-  h.scope = { start: 0, end: 20 };
-  h.analysis = { tokens: [{ kind: "identifier", text: "po_order", start: 14, end: 22 }], roles: new Map(),
-    scopes: [{ sources: [{ declaration: 0, table: "po_order" }] }], regions: [] };
+  inScope([...MAIN, { declaration: 1, name: "po_order_b", table: "po_order_b" }]);
   expect((await ask(fake("select * from po_order left join po_order_b b on 1=1"), 19))?.actions).toEqual([]);
+});
+
+// 🔴 「已经 JOIN 过」必须按**已解析的表声明**精确相等判，不能拿全文 includes：
+// 字符串常量、注释、以及前缀包含（po_order_b vs po_order_bak）都会误判成「已 JOIN」，
+// 于是该给的追加动作消失。旧实现还判整个 model 而非当前 scope。
+it("子表名只出现在字符串/注释里时仍然给追加动作", async () => {
+  inScope(MAIN);
+  for (const sql of [
+    "select * from po_order where note = 'po_order_b'",
+    "select * from po_order -- po_order_b 待接",
+    "select * from po_order /* po_order_b */",
+  ]) {
+    const result = await ask(fake(sql), 19);
+    expect(result?.actions.map(a => a.title), sql).toEqual(["追加 LEFT JOIN：采购订单明细"]);
+  }
+});
+
+it("前缀相同的另一张表不算已 JOIN（po_order_b ≠ po_order_bak）", async () => {
+  inScope(MAIN);
+  const sql = "select * from po_order left join po_order_bak k on 1=1";
+  expect((await ask(fake(sql), 19))?.actions.map(a => a.title)).toEqual(["追加 LEFT JOIN：采购订单明细"]);
+});
+
+it("真 JOIN 过就不再追加，且按解析出的表名判（大小写与 schema 前缀都要认）", async () => {
+  for (const joined of ["po_order_b", "PO_ORDER_B", "nc65.po_order_b"]) {
+    inScope([...MAIN, { declaration: 1, name: joined, table: joined }]);
+    const sql = `select * from po_order left join ${joined} b on 1=1`;
+    expect((await ask(fake(sql), 19))?.actions, joined).toEqual([]);
+  }
 });
 
 it("主表没有单号字段时不硬凑一条要用户自己补条件的 SQL", async () => {

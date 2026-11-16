@@ -16,7 +16,18 @@ it("only expands parentheses that contain a boolean predicate, and tracks direct
     expect(at("SELECT * FROM orders a " + tail)).toBeUndefined();
   expect(at("SELECT * FROM orders a WHERE (a.|) AND a.id=1")).toMatchObject({ kind: "field", negated: false });
   expect(at("SELECT * FROM orders a WHERE NOT a.created|")).toMatchObject({ kind: "field", negated: true });
+  // 🔴 显式分组后 negated 归零是**有意设计**（2026-11-16 复核确认，别改成继承）：
+  // `NOT (a.created)` 里插入的复合范围自带括号、整体落在 NOT 内，语义正确应当放行；
+  // 不分组时插入才会破坏 NOT 作用域。另见 sqlProviders.test.ts:417 / :507。
   expect(at("SELECT * FROM orders a WHERE NOT (a.created|)")).toMatchObject({ kind: "field", negated: false });
+});
+it("显式分组重置 negated，分组内的直接 NOT 仍然算取反", () => {
+  // 多层分组同样重置（用户已经自己划好了作用域）
+  expect(at("SELECT * FROM orders a WHERE NOT ((a.created|))")).toMatchObject({ kind: "field", negated: false });
+  expect(at("SELECT * FROM orders a WHERE NOT (a.id=1 AND a.created|)")).toMatchObject({ kind: "field", negated: false });
+  expect(at("SELECT * FROM orders a WHERE (a.created|)")).toMatchObject({ kind: "field", negated: false });
+  // 分组**内部**的直接 NOT 照旧取反
+  expect(at("SELECT * FROM orders a WHERE NOT (NOT a.created|)")).toMatchObject({ kind: "field", negated: true });
 });
 it("does not extend fields in expressions, values, functions, CASE, or existing predicates", () => {
   for (const sql of ["SELECT a.| FROM orders a", "SELECT * FROM orders a WHERE a.id = a.|", "SELECT * FROM orders a WHERE a.id BETWEEN 1 AND a.|",

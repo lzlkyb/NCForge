@@ -32,7 +32,7 @@ import { sqlAssistColumns } from "./sqlAssistColumns";
 import { billQueryRelations, billQueryTemplates } from "./sqlBillTemplates";
 import { getSqlTemplatesEnabled } from "./sqlTemplates";
 import { sqlUsageScope } from "./sqlUsage";
-import { sqlScopeAt } from "./sqlScope";
+import { sqlScopeAt, sqlSourcesAt } from "./sqlScope";
 import { sqlName } from "./sqlLex";
 import { getSqlFormatPrefs } from "./sqlFormatPrefs";
 
@@ -69,12 +69,25 @@ function targetAt(model: monaco.editor.ITextModel, offset: number): BillTarget |
 const ACTION_TTL = 60_000;
 const actionCache = new Map<string, { at: number; actions: BillAction[] }>();
 
-/** 语句内追加：只给「还没有出现在这段 SQL 里」的子表，避免接上第二条同样的 JOIN。 */
+/**
+ * 语句内追加：只给「这段 SQL 里还没 JOIN 过」的子表，避免接上第二条同样的 JOIN。
+ *
+ * 🔴 判据必须是**当前 scope 已解析出的表声明**、按名字精确相等：
+ * 拿 `model.getValue().includes(spec.table)` 判会把字符串常量（`where note='po_order_b'`）、
+ * 注释、以及**前缀包含**（`po_order_b` vs `po_order_bak`）全误判成「已 JOIN」，
+ * 该给的动作凭空消失；而且它判的是整个 model，不是光标所在的那条语句。
+ */
 function appendActions(target: BillTarget, available: readonly string[], names: Readonly<Record<string, string>>,
-  meta: SqlBusinessMetadata, model: monaco.editor.ITextModel): BillAction[] {
-  const text = model.getValue().toLowerCase();
+  meta: SqlBusinessMetadata, model: monaco.editor.ITextModel, offset: number): BillAction[] {
+  // 复用真源 `sqlSourcesAt`（= sqlScopeAt(...)?.sources），别自己再取一遍 scope。
+  const sources = sqlSourcesAt(sqlAnalysisOf(model), offset);
+  // 表名可能带 schema 前缀（`nc65.po_order_b`），只比最后一段；大小写按 plainName 归一。
+  const joined = new Set(sources.map(source => {
+    const raw = source.table ?? source.name;
+    return normalized(raw.slice(raw.lastIndexOf(".") + 1));
+  }));
   return billJoinSpecs(target.table, available, meta).flatMap((spec) => {
-    if (text.includes(spec.table)) return [];
+    if (joined.has(normalized(spec.table))) return [];
     return [{ title: `追加 LEFT JOIN：${names[spec.table] || spec.table}`, sql: spec.sql,
       range: { start: target.end, end: target.end } }];
   });
@@ -130,7 +143,7 @@ export function wireSqlBillAssist(editor: monaco.editor.IStandaloneCodeEditor): 
           ?? await readSqlBusinessMetadata(connId, scopeKey, target.table, alive).catch(() => null);
         if (!alive() || !meta || meta.sharedSession) return [];
         // 追加模式的结果取决于「这段 SQL 里已经有哪些表」，不能跨编辑复用缓存。
-        if (target.mode === "append") return appendActions(target, available, names, meta, model);
+        if (target.mode === "append") return appendActions(target, available, names, meta, model, offset);
         const built = await billActions(connId, target.table, available, names, meta, alive);
         if (alive()) actionCache.set(cacheKey, { at: Date.now(), actions: built });
         if (actionCache.size > 64) actionCache.delete(actionCache.keys().next().value!);

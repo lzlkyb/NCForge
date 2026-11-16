@@ -958,13 +958,10 @@ public class NcDbBridge {
             int n = sql.length();
             while (i < n) {
                 char c = sql.charAt(i);
-                if ((c == 'q' || c == 'Q') && i + 2 < n && sql.charAt(i + 1) == '\'') {
-                    char open = sql.charAt(i + 2);
-                    char close = open == '[' ? ']' : open == '{' ? '}' : open == '(' ? ')' : open == '<' ? '>' : open;
-                    int end = sql.indexOf(String.valueOf(close) + "'", i + 3);
-                    end = end < 0 ? n : end + 2;
-                    b.append(sql, i, end);
-                    i = end;
+                int quoted = qQuoteEnd(sql, i);
+                if (quoted > i) {
+                    b.append(sql, i, quoted);
+                    i = quoted;
                 } else if (c == '\'' || c == '"') {
                     int j = i++;
                     while (i < n) {
@@ -2562,6 +2559,47 @@ public class NcDbBridge {
         return s.length() > 200 ? s.substring(0, 200) : s;
     }
 
+    /** Oracle 标识符里可以出现的字符（与 `db_engine.rs::word_boundary` 同一套判据）。 */
+    private static boolean identChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '_' || c == '$' || c == '#';
+    }
+
+    /**
+     * `at` 处是不是 Oracle 的 q-quote（`q'[...]'` / `Q'{...}'` / `q'!...!'` / `nq'[...]'`）
+     * 起点；是就返回**闭合之后**的下标，不是返回 `at`（调用方据此走普通字符串分支）。
+     *
+     * 🔴 三条守卫缺一不可，`toQuestionMarks` 与 `stripLiterals` **必须共用这一份**：
+     * 1. **前一字符不能是标识符字符**。`freq'abc'` 里的 `q` 是列名 `freq` 的尾巴，
+     *    不是 q-quote 前缀。少了这条，定界符取成 `a`、找不到 `a'` 就一路吃到结尾，
+     *    后面的 `:1` 不再转 `?` ⇒ 真库 `ORA-01008 并非所有变量都已绑定`。
+     * 2. **例外：前缀 `n`/`N` 要放行**。`nq'[it's :99]'` 是合法的 NCHAR q-quote，
+     *    整体从 `n` 起算。不放行就会把串内的 `:99` 转成 `?`、串外的 `:1` 反而不转
+     *    （2026-11-16 探针实测，比不加守卫更糟）。
+     * 3. **找不到闭合符就不认**（返回 `at`），交给普通字符串分支按 `''` 规则收尾。
+     *    以前 `end = n` 会**吞掉整条 SQL 的剩余部分**。未闭合本来就是非法字面量，
+     *    让 Oracle 报 `ORA-01756` 才是对的，不该由我们改写成语义不同的另一条语句。
+     */
+    static int qQuoteEnd(String sql, int at) {
+        int n = sql.length();
+        if (at + 2 >= n) return at;
+        char c = sql.charAt(at);
+        if (c != 'q' && c != 'Q') return at;
+        if (sql.charAt(at + 1) != '\'') return at;
+        if (at > 0 && identChar(sql.charAt(at - 1))) {
+            // NCHAR 前缀：`nq'…'` 从 n 起算，再往前一个字符仍不能是标识符字符。
+            char prev = sql.charAt(at - 1);
+            boolean nchar = (prev == 'n' || prev == 'N')
+                    && (at < 2 || !identChar(sql.charAt(at - 2)));
+            if (!nchar) return at;
+        }
+        char open = sql.charAt(at + 2);
+        // 括号类定界符配对闭合，其余字符自配对；空白不能当定界符（Oracle 也不允许）。
+        if (Character.isWhitespace(open)) return at;
+        char close = open == '[' ? ']' : open == '{' ? '}' : open == '(' ? ')' : open == '<' ? '>' : open;
+        int end = sql.indexOf(String.valueOf(close) + "'", at + 3);
+        return end < 0 ? at : end + 2;
+    }
+
     /** 去掉字符串常量与注释，避免注释或字面量里的关键字被误判。 */
     static String stripLiterals(String sql) {
         StringBuilder b = new StringBuilder(sql.length());
@@ -2569,6 +2607,16 @@ public class NcDbBridge {
         int n = sql.length();
         while (i < n) {
             char c = sql.charAt(i);
+            // 🔴 q-quote 必须在这里也认：它内部的单引号**不是**字符串结束符。
+            // 漏了这条，`q'[it's open :7 for select 1]'` 会被切成 `q''s open :7 for …]''`，
+            // 于是 cursorOutBinds 认出 [7] ⇒ 普通 SELECT 被当游标调用去 registerOutParameter；
+            // 同理 `q'[it's for update]'` 会被 FOR_UPDATE 命中，把只读查询记成持锁事务。
+            int quoted = qQuoteEnd(sql, i);
+            if (quoted > i) {
+                b.append("''");
+                i = quoted;
+                continue;
+            }
             if (c == '\'') {
                 i++;
                 while (i < n) {

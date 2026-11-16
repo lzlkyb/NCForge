@@ -96,6 +96,18 @@ pub struct Table {
     pub skipped: usize,
 }
 
+/// 块 `[off, off+len)` 是否整段落在 `bin_len` 之内。
+///
+/// 🔴 必须用 `checked_add`：块表来自磁盘上的 `pack.idx`，是**不可信输入**。
+/// release 没开 `overflow-checks`，裸 `off + len as u64` 会 wrapping ——
+/// `off = u64::MAX, len = 1` 算出 0，`0 > bin_len` 为假 ⇒ 坏块通过校验。
+fn chunk_in_range(off: u64, len: u32, bin_len: u64) -> bool {
+    match off.checked_add(u64::from(len)) {
+        Some(end) => end <= bin_len,
+        None => false,
+    }
+}
+
 /// 打开的内容包：整份文本常驻，查询只做切片与扫描。
 pub struct Pack {
     table: Table,
@@ -131,7 +143,7 @@ impl Pack {
         if table
             .chunks
             .iter()
-            .any(|c| (c.off + c.len as u64) > table.bin_len)
+            .any(|c| !chunk_in_range(c.off, c.len, table.bin_len))
         {
             return None;
         }
@@ -909,6 +921,46 @@ mod tests {
         assert!(Pack::open(&dir).is_none());
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// 🔴 块表是**不可信输入**：`off + len` 必须用 checked 加法。
+    ///
+    /// release 没开 `overflow-checks`，裸 `+` 会 wrapping：`off = u64::MAX`、`len = 1`
+    /// 算出 0，`0 > bin_len` 为假 ⇒ **坏块通过校验**。虽然 `chunk()` 的 `get(start..)`
+    /// 兜住了内存安全，但校验层这道防线不该被绕过（坏包应当整份拒绝，不是留个取不到的块）。
+    ///
+    /// dev/test 默认开 overflow-checks，裸 `+` 在这里是 **panic** 而不是 wrapping，
+    /// 所以断言写成「要么干净地返回 None，要么 panic」——两种都算没修；
+    /// 修好后必须是 `None`。release 下的 wrapping 行为另用纯判据函数钉（见下一条）。
+    #[test]
+    fn wrapping_chunk_offset_rejected() {
+        let root = crate::test_support::tmp("pack-wrap-off-root");
+        let dir = crate::test_support::tmp("pack-wrap-off");
+        write(&root, "a.txt", b"hello world");
+        build(&root, &dir, &AtomicBool::new(false)).unwrap();
+        let mut table: Table =
+            serde_json::from_slice(&fs::read(dir.join(IDX_NAME)).unwrap()).unwrap();
+        table.chunks[0].off = u64::MAX;
+        table.chunks[0].len = 1;
+        fs::write(dir.join(IDX_NAME), serde_json::to_vec(&table).unwrap()).unwrap();
+        let opened = std::panic::catch_unwind(|| Pack::open(&dir).is_some());
+        assert!(
+            matches!(opened, Ok(false)),
+            "off+len 回绕的坏块必须被拒绝（Ok(false)），实测 {:?}",
+            opened.map_err(|_| "panic")
+        );
+    }
+
+    /// 纯判据：不依赖 profile 的 overflow 设置，直接钉住「回绕不得通过」。
+    #[test]
+    fn chunk_range_check_rejects_wraparound() {
+        assert!(!chunk_in_range(u64::MAX, 1, 11), "u64::MAX+1 回绕成 0");
+        assert!(!chunk_in_range(u64::MAX - 1, 10, 11));
+        assert!(!chunk_in_range(0, u32::MAX, 11), "len 本身超范围");
+        assert!(!chunk_in_range(12, 0, 11), "off 已越界");
+        assert!(chunk_in_range(0, 11, 11), "正好铺满整包是合法的");
+        assert!(chunk_in_range(10, 1, 11));
+        assert!(chunk_in_range(0, 0, 0), "空包空块合法");
     }
 
     /// bin 被截断（模拟「新 bin + 旧 idx」的崩溃窗口）也要拒绝。

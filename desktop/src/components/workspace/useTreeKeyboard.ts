@@ -5,6 +5,7 @@ import {
   type SetStateAction,
 } from "react";
 import { treeKeyAction, treeRowId, type FlatRow, type TreeSelection } from "../../lib/treeNav";
+import { isImeComposing } from "../../lib/utils";
 
 export interface TreeKeyDeps {
   flat: FlatRow[];
@@ -79,7 +80,10 @@ export function useTreeKeyboard(deps: TreeKeyDeps) {
   }, [flat, selected, expanded, memberPaths, setSelected, scrollTo, toggleFileMembers, toggle, toggleVisibleRow, onOpen, root]);
 
   const onKeyDown = useCallback((e: ReactKeyboardEvent) => {
-    if ((e.target as HTMLElement).closest(".wb-problem-badge") || e.nativeEvent.isComposing) return;
+    // IME 必须走真源 `isImeComposing`（含 keyCode===229）：组词中的第一个按键
+    // 在部分输入法/浏览器上 isComposing 仍是 false，只判它会把拼音首字母当成
+    // speed search 字符吞进筛选框。全仓其余 12 处都用这个函数，别在这里例外。
+    if ((e.target as HTMLElement).closest(".wb-problem-badge") || isImeComposing(e.nativeEvent)) return;
     if (editing) {
       if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
       return;

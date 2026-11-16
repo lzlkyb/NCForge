@@ -77,7 +77,7 @@ const EVENT_QUEUE: usize = 4096;
 /// **可审查文本文件的内容变更是另一个例外**：AI 工具 / 别的编辑器改 `.xml`、
 /// `.sql`、`.properties`、`.js` 时，审查时间线、改动色条、已审角标都要跟着更新，
 /// 不送的话这些改动对工作台完全不可见（只有 `.java` 能进自动编译那条线）。
-pub fn worth_queueing(ev: &notify::Event) -> bool {
+pub fn worth_queueing(ev: &notify::Event, root: &Path) -> bool {
     ev.need_rescan()
         || (needs_tree_refresh(&ev.kind) && ev.paths.iter().any(|p| !is_ignored(p)))
         || (is_java_change(&ev.kind) && ev.paths.iter().any(|p| is_java_path(p)))
@@ -85,7 +85,7 @@ pub fn worth_queueing(ev: &notify::Event) -> bool {
         // 版本控制页的增量刷新要知道「哪个模块脏了」。这条比前三条宽：SVN 的
         // modified 只认 mtime/size，`touch` 一下、改个 .txt 都算——它们进不了
         // 文件树与审查时间线，但不送进来增量就会漏掉这次改动。
-        || (is_svn_watchable(&ev.kind) && ev.paths.iter().any(|p| svn_relevant(p)))
+        || (is_svn_watchable(&ev.kind) && ev.paths.iter().any(|p| svn_relevant(p, root)))
 }
 
 /// SVN 脏集关心的事件：除了「读」都算。
@@ -98,11 +98,20 @@ fn is_svn_watchable(kind: &notify::EventKind) -> bool {
 
 /// 这个路径变了，有没有可能让 `svn status` 的结论变。
 ///
-/// **元数据目录只认 `entries`**：format 10 每个目录一份 `.svn/entries`，写频率远低于
-/// 其它元数据文件，但一次写入足以说明「这个目录的纳管情况变了」（add / delete /
-/// commit / update）。不认的话，在 Eclipse 里 `svn add` 一个已存在的文件，
-/// 文件本身没被写过、脏集合又空着，增量刷新会把这次新增当成不存在。
-pub fn svn_relevant(path: &Path) -> bool {
+/// **元数据目录认 `entries` 与 `wc.db` 两种**：
+/// - format 10（1.6 及更早）每个目录一份 `.svn/entries`；
+/// - format 12+（1.7 起）整份副本只有一个 `.svn/wc.db`，`entries` 退化成占位内容
+///   （只写着 `12`），**add / delete 根本不会改它**。
+///
+/// SVNKit 升到 1.10.11 后两种副本都能操作，只认 `entries` 会让 1.7+ 副本里
+/// 「`svn add` 一个已存在的文件」完全不可见：文件本身没被写过、脏集又是空的，
+/// 增量刷新把这次新增当成不存在。
+///
+/// 🔴 **`root` 必须传**：`svn_view::is_ignored` 的契约是「只看相对路径」，
+/// 它按整段匹配 `classes`/`out`/`target`/`bin` 等目录名。把绝对路径直接喂进去，
+/// 工作区本身住在 `D:\out\newar`、`C:\dev\target\ws` 下时**每个文件都会被判忽略**，
+/// 脏集永远为空 ⇒ 首次全量之后所有增量都走缓存，改动再也不出现。
+pub fn svn_relevant(path: &Path, root: &Path) -> bool {
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         // 构建产物 / 归档：`svn_view::is_ignored` 本来就不把它们当改动。
         // 先按扩展名挡掉是性能考虑——编译一次几千个 .class 事件全走下面的
@@ -118,10 +127,17 @@ pub fn svn_relevant(path: &Path) -> bool {
                 .and_then(|n| n.to_str())
                 .is_some_and(|n| n.eq_ignore_ascii_case(want))
         };
-        return name_is(Some(path), "entries") && name_is(path.parent(), ".svn");
+        if !name_is(path.parent(), ".svn") {
+            return false;
+        }
+        // wc.db-wal / wc.db-journal 是 SQLite 的临时文件，一次事务写好几遍，
+        // 认它们等于把噪音全收进来；真正的提交落在 wc.db 本身。
+        return name_is(Some(path), "entries") || name_is(Some(path), "wc.db");
     }
-    // 构建产物目录（classes / out / target …）里的东西，改了 SVN 也不报
-    !crate::svn_view::is_ignored(&path.to_string_lossy(), false)
+    // 构建产物目录（classes / out / target …）里的东西，改了 SVN 也不报。
+    // 先剥掉工作区根：规则只该作用于工程内部的相对路径。
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    !crate::svn_view::is_ignored(&rel.to_string_lossy(), false)
 }
 
 /// 可审查文件的**内容**变更。不含增 / 删 / 改名：那类改动由文件树与「转到文件」
@@ -243,7 +259,7 @@ impl Batcher {
         }
         if is_svn_watchable(&ev.kind) {
             for p in &ev.paths {
-                if p.starts_with(root) && svn_relevant(p) && !self.svn.contains(p) {
+                if p.starts_with(root) && svn_relevant(p, root) && !self.svn.contains(p) {
                     if self.svn.len() < MAX_SVN {
                         self.svn.insert(p.clone());
                     } else {
@@ -422,10 +438,11 @@ impl WorkspaceWatcher {
         // 队列满时丢掉的事件不能当没发生：记下来，合并线程据此改成全量重读
         let lost = Arc::new(AtomicBool::new(false));
         let lost_cb = Arc::clone(&lost);
+        let filter_root = root.clone();
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             match res {
                 // 先过滤再入队：内容变更（编译写 .class）与 .svn 写入占事件的绝大多数
-                Ok(ev) if worth_queueing(&ev) => match tx.try_send(ev) {
+                Ok(ev) if worth_queueing(&ev, &filter_root) => match tx.try_send(ev) {
                     Ok(()) => {}
                     Err(mpsc::TrySendError::Full(ev)) => {
                         lost_cb.store(true, Ordering::Relaxed);
@@ -676,48 +693,66 @@ mod tests {
     #[test]
     fn 回调里先过滤再入队() {
         let src = root().join("newar").join("src");
-        assert!(worth_queueing(&ev(
-            K::Create(CreateKind::File),
-            src.join("A.java")
-        )));
+        assert!(worth_queueing(
+            &ev(K::Create(CreateKind::File), src.join("A.java")),
+            &root()
+        ));
         // 编译改 .class 内容、.svn 里的新建：都不进队列
-        assert!(!worth_queueing(&ev(
-            K::Modify(ModifyKind::Data(DataChange::Content)),
-            src.join("A.class")
-        )));
+        assert!(!worth_queueing(
+            &ev(
+                K::Modify(ModifyKind::Data(DataChange::Content)),
+                src.join("A.class")
+            ),
+            &root()
+        ));
         // 外部改 .java 内容：树不用刷新，但必须送进队列让构建引擎知道
-        assert!(worth_queueing(&ev(
-            K::Modify(ModifyKind::Data(DataChange::Content)),
-            src.join("A.java")
-        )));
+        assert!(worth_queueing(
+            &ev(
+                K::Modify(ModifyKind::Data(DataChange::Content)),
+                src.join("A.java")
+            ),
+            &root()
+        ));
         // AI 改的非 .java 文本：树不用刷新，但要进审查时间线
-        assert!(worth_queueing(&ev(
-            K::Modify(ModifyKind::Data(DataChange::Content)),
-            src.join("mapper").join("A.xml")
-        )));
-        assert!(worth_queueing(&ev(
-            K::Modify(ModifyKind::Data(DataChange::Content)),
-            src.join("init.sql")
-        )));
+        assert!(worth_queueing(
+            &ev(
+                K::Modify(ModifyKind::Data(DataChange::Content)),
+                src.join("mapper").join("A.xml")
+            ),
+            &root()
+        ));
+        assert!(worth_queueing(
+            &ev(
+                K::Modify(ModifyKind::Data(DataChange::Content)),
+                src.join("init.sql")
+            ),
+            &root()
+        ));
         // 二进制内容（编译产物 / jar 内容）不进队列
-        assert!(!worth_queueing(&ev(
-            K::Modify(ModifyKind::Data(DataChange::Content)),
-            src.join("A.class")
-        )));
+        assert!(!worth_queueing(
+            &ev(
+                K::Modify(ModifyKind::Data(DataChange::Content)),
+                src.join("A.class")
+            ),
+            &root()
+        ));
         // 属性变化（改时间戳）不算内容变更，不刷新树、不进审查时间线；
         // 但 SVN 的 modified 判据就是 mtime + size，`touch` 一下它就报 M，
         // 所以这条必须进队列——只在 Batcher 里落到 svn 通道（见下一个测试）
-        assert!(worth_queueing(&ev(
-            K::Modify(ModifyKind::Metadata(MetadataKind::WriteTime)),
-            src.join("A.xml")
-        )));
-        assert!(!worth_queueing(&ev(
-            K::Create(CreateKind::File),
-            root().join(".svn").join("tmp")
-        )));
+        assert!(worth_queueing(
+            &ev(
+                K::Modify(ModifyKind::Metadata(MetadataKind::WriteTime)),
+                src.join("A.xml")
+            ),
+            &root()
+        ));
+        assert!(!worth_queueing(
+            &ev(K::Create(CreateKind::File), root().join(".svn").join("tmp")),
+            &root()
+        ));
         // 平台说可能丢事件：必须送
         let lost = notify::Event::new(K::Other).set_flag(notify::event::Flag::Rescan);
-        assert!(worth_queueing(&lost));
+        assert!(worth_queueing(&lost, &root()));
     }
 
     /// SVN 脏集只收「可能让 `svn status` 变结论」的路径。
@@ -727,31 +762,66 @@ mod tests {
     #[test]
     fn svn_脏集只收会让状态变的东西() {
         let src = root().join("newar").join("src");
-        assert!(svn_relevant(&src.join("A.java")));
-        assert!(svn_relevant(&src.join("readme.txt")));
+        assert!(svn_relevant(&src.join("A.java"), &root()));
+        assert!(svn_relevant(&src.join("readme.txt"), &root()));
         // 构建产物与归档：svn_view 的忽略规则本来就不把它们当改动
         assert!(!svn_relevant(
-            &root().join("newar").join("classes").join("A.class")
+            &root().join("newar").join("classes").join("A.class"),
+            &root()
         ));
         assert!(!svn_relevant(
-            &root().join("newar").join("out").join("x.txt")
+            &root().join("newar").join("out").join("x.txt"),
+            &root()
         ));
-        assert!(!svn_relevant(&src.join("A.jar")));
-        // 元数据目录只认 entries：format 10 每个目录一份，它变了说明这个目录的
-        // 纳管情况变了（add / delete / commit / update）；其余元数据是高频写
+        assert!(!svn_relevant(&src.join("A.jar"), &root()));
+        // 元数据目录认 entries（format 10）与 wc.db（1.7+）：它们变了说明纳管情况
+        // 变了（add / delete / commit / update）；其余元数据是高频写
         assert!(svn_relevant(
-            &root().join("newar").join(".svn").join("entries")
+            &root().join("newar").join(".svn").join("entries"),
+            &root()
         ));
         assert!(!svn_relevant(
-            &root().join("newar").join(".svn").join("tmp")
+            &root().join("newar").join(".svn").join("tmp"),
+            &root()
         ));
         assert!(!svn_relevant(
             &root()
                 .join("newar")
                 .join(".svn")
                 .join("text-base")
-                .join("A.java.svn-base")
+                .join("A.java.svn-base"),
+            &root()
         ));
+    }
+
+    /// 回归（SVNKit 1.10.11 双格式）：1.7+ 副本的纳管变更只写 `.svn/wc.db`，
+    /// `entries` 是占位内容不会变。只认 entries 会让外部 add/delete 完全不可见。
+    #[test]
+    fn svn_元数据认_wc_db_但不认它的临时文件() {
+        let svn = root().join("newar").join(".svn");
+        assert!(
+            svn_relevant(&svn.join("wc.db"), &root()),
+            "1.7+ 副本的纳管变更"
+        );
+        // SQLite 的 WAL / journal 一次事务写好几遍，认了就是噪音
+        assert!(!svn_relevant(&svn.join("wc.db-wal"), &root()));
+        assert!(!svn_relevant(&svn.join("wc.db-journal"), &root()));
+        // 同名但不在 .svn 下的普通文件走常规判定，不受这条特例影响
+        assert!(svn_relevant(&root().join("newar").join("wc.db"), &root()));
+    }
+
+    /// 回归：忽略规则只看**相对路径**。工作区根自己叫 out / target / bin 时，
+    /// 传绝对路径会让每个文件都被判忽略 ⇒ 脏集永远空 ⇒ 改动再也不出现。
+    #[test]
+    fn svn_忽略规则不受工作区根目录名影响() {
+        for bad in ["out", "target", "classes", "bin"] {
+            let r = PathBuf::from("D:/dev").join(bad).join("newar");
+            let f = r.join("src").join("A.java");
+            assert!(svn_relevant(&f, &r), "根叫 {bad} 时源码仍要进脏集");
+            // 工程内部真正的构建产物目录照样忽略
+            assert!(!svn_relevant(&r.join("classes").join("B.java"), &r));
+            assert!(!svn_relevant(&r.join("out").join("x.txt"), &r));
+        }
     }
 
     /// `touch` 一个 .txt：SVN 会报 modified，但树、审查、编译三条通道都不该动。

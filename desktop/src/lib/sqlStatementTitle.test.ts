@@ -26,6 +26,16 @@ describe("语句标题取紧贴的注释", () => {
     expect(statementTitle("-- 分组标题\n\n\nselect 1 from dual")).toBeNull();
   });
 
+  // 「紧贴」只看注释结束到语句首字符之间那一段间隙。旧实现测的是注释之后的
+  // **全部剩余文本**，语句体内部的空行也会让它判成「不紧贴」⇒ 多行 SQL 全丢标题。
+  it("语句体内部的空行不影响标题（紧贴只看注释与语句之间的间隙）", () => {
+    expect(statementTitle("-- 物料主档\nselect a,\n\n b from t")).toBe("物料主档");
+    expect(statementTitle("-- 期初余额\nselect a\nfrom t\n\nwhere 1=1")).toBe("期初余额");
+    expect(statementTitle("/* 盘点差异 */\nselect a,\n\n b from t")).toBe("盘点差异");
+    // 语句体里有空行，但注释与语句之间**也**有空行 ⇒ 仍然不算紧贴
+    expect(statementTitle("-- 段落说明\n\nselect a,\n\n b from t")).toBeNull();
+  });
+
   it("装饰线与空注释不算标题", () => {
     expect(statementTitle("-----\nselect 1 from dual")).toBeNull();
     expect(statementTitle("-- =====\nselect 1 from dual")).toBeNull();

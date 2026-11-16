@@ -103,7 +103,15 @@ export function SettingsLayout({ sections }: { sections: SettingsSection[] }) {
     if (!element) return;
     const switchCategory = (event: WheelEvent) => {
       if (event.ctrlKey || event.metaKey || event.shiftKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
-      event.preventDefault();
+      // 🔴 侧栏自己装不下时（`.wb-settings-menu` 是 overflow:auto），**先让它滚**，
+      // 滚到边界才切分类。以前无条件 preventDefault，分类一多就永远在切分类、
+      // 侧栏自身滚不动，用户看不到下面的分类。
+      if (element.scrollHeight > element.clientHeight + 1) {
+        const atEdge = event.deltaY > 0
+          ? element.scrollTop + element.clientHeight >= element.scrollHeight - 1
+          : element.scrollTop <= 0;
+        if (!atEdge) return;
+      }
       // Precision touchpads emit small deltas; combine them into a single category step.
       const step = wheel.current;
       const delta = event.deltaY * (event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? 80 : 1);
@@ -116,7 +124,9 @@ export function SettingsLayout({ sections }: { sections: SettingsSection[] }) {
       const buttons = [...element.querySelectorAll<HTMLButtonElement>("nav button")];
       const current = buttons.findIndex(button => button.value === navigation.current.selected);
       const next = buttons[current + direction];
+      // 首/末分类之外没有目标：**不吞事件**，否则滚轮在这里彻底没反应。
       if (!next) return;
+      event.preventDefault();
       navigation.current.navigate(next.value, undefined, true);
       next.scrollIntoView?.({ block: "nearest" });
     };

@@ -204,19 +204,52 @@ pub fn hide(command: &mut Command) {
         let _ = command;
     }
 }
+/// 一批字节里「可以安全解码的完整部分」的长度，尾部残缺的多字节字符留给下一轮。
+///
+/// 🔴 为什么必须有这一步：`take(64KB).read_until` 会在**任意字节**处切断，
+/// 包括一个 UTF-8 字符中间。切出来的半截让 `from_utf8` 直接 Err ⇒
+/// `workspace::decode` 走 `Err(_)` 分支把**整块 64KB 回退 GBK**，
+/// 不是只丢一个字符，而是整段中文全变乱码。
+///
+/// 只对「以 `\n` 结尾」的批做保留：那是被 64KB 上限硬切的，后面一定还有字节。
+/// 进程收尾的最后半截没有下一轮可拼，原样交出去（与旧行为一致，不吞输出）。
+fn complete_prefix_len(bytes: &[u8]) -> usize {
+    match std::str::from_utf8(bytes) {
+        Ok(_) => bytes.len(),
+        Err(e) if e.error_len().is_none() => e.valid_up_to(),
+        // 中间就有非法字节 = 本来就是 GBK 或二进制，整块交给 decode 判编码
+        Err(_) => bytes.len(),
+    }
+}
+
 /// Reader messages are bounded; a process printing a giant line cannot consume unbounded RAM.
 fn reader(input: impl Read + Send + 'static, tx: mpsc::SyncSender<String>) {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(input);
+        // 上一轮切剩的半个字符（最多 3 字节），拼到下一轮开头再解码。
+        let mut carry: Vec<u8> = Vec::new();
         loop {
-            let mut bytes = Vec::new();
+            let mut bytes = std::mem::take(&mut carry);
             match std::io::Read::by_ref(&mut reader)
                 .take(64 * 1024)
                 .read_until(b'\n', &mut bytes)
             {
-                Ok(0) | Err(_) => break,
+                Ok(0) | Err(_) => {
+                    // 流结束：残留的半截没有下一轮可拼，原样发出去，别静默吞掉
+                    if !bytes.is_empty() {
+                        let _ = tx.send(crate::workspace::decode_lossy(&bytes));
+                    }
+                    break;
+                }
                 Ok(_) => {
-                    if tx.send(crate::workspace::decode_lossy(&bytes)).is_err() {
+                    let cut = if bytes.last() == Some(&b'\n') {
+                        bytes.len()
+                    } else {
+                        complete_prefix_len(&bytes)
+                    };
+                    carry = bytes.split_off(cut);
+                    if !bytes.is_empty() && tx.send(crate::workspace::decode_lossy(&bytes)).is_err()
+                    {
                         break;
                     }
                 }
@@ -544,6 +577,88 @@ pub fn discover_tests(root: &Path) -> Result<Vec<TestCandidate>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 收集 reader 发出的全部分片。
+    fn drain(bytes: Vec<u8>) -> String {
+        let (tx, rx) = mpsc::sync_channel::<String>(64);
+        reader(std::io::Cursor::new(bytes), tx);
+        let mut out = String::new();
+        while let Ok(part) = rx.recv() {
+            out.push_str(&part);
+        }
+        out
+    }
+
+    /// 🔴 64KB 上限切在 UTF-8 字符中间时，**整块 64KB 会被回退成 GBK**（不只丢一个字符）。
+    /// 造一条超长行：ASCII 填充到 65535 字节，第 65536 字节正好是「凭」的首字节。
+    #[test]
+    fn utf8_char_split_at_64k_boundary_is_not_decoded_as_gbk() {
+        let mut line = vec![b'a'; 64 * 1024 - 1];
+        line.extend_from_slice("凭证查询\n".as_bytes());
+        let text = drain(line);
+        assert!(
+            text.ends_with("凭证查询\n"),
+            "边界字符被切断后整块回退 GBK，实测尾部 {:?}",
+            &text[text.len().saturating_sub(24)..]
+        );
+        assert!(!text.contains('\u{FFFD}'), "不该出现替换字符");
+        assert_eq!(text.len(), 64 * 1024 - 1 + "凭证查询\n".len());
+    }
+
+    /// 四字节字符（emoji）切在第 1/2/3 字节处都要能拼回来。
+    #[test]
+    fn four_byte_char_split_at_every_offset_roundtrips() {
+        for keep in 1..4 {
+            let mut line = vec![b'x'; 64 * 1024 - keep];
+            line.extend_from_slice("🚀ok\n".as_bytes());
+            let text = drain(line);
+            assert!(text.ends_with("🚀ok\n"), "keep={keep} 时拼不回来");
+        }
+    }
+
+    /// 纯判据：只保留「尾部残缺」，中间的非法字节要原样交给 decode 判编码。
+    #[test]
+    fn complete_prefix_only_trims_incomplete_tail() {
+        let ok = "凭证".as_bytes();
+        assert_eq!(complete_prefix_len(ok), ok.len());
+        // 尾部残缺：切掉不完整的那个字符
+        assert_eq!(complete_prefix_len(&ok[..ok.len() - 1]), 3);
+        assert_eq!(complete_prefix_len(&ok[..1]), 0);
+        // 中间就有非法字节 = GBK/二进制，整块交出去让 decode 判，不许在这里截断
+        let gbk = [0xC6, 0xBE, 0xD6, 0xA4];
+        assert_eq!(complete_prefix_len(&gbk), gbk.len());
+        assert_eq!(complete_prefix_len(b""), 0);
+    }
+
+    /// GBK 输出不能被这条新逻辑改坏：整块仍交给 decode 判编码。
+    #[test]
+    fn gbk_output_still_decodes_after_chunking() {
+        let (gbk, _, _) = encoding_rs::GBK.encode("发票查询\n");
+        let mut line = vec![b'b'; 64 * 1024 - 2];
+        line.extend_from_slice(&gbk);
+        assert!(drain(line).ends_with("发票查询\n"));
+    }
+
+    /// 进程收尾的半截字符没有下一轮可拼，也要发出去，不能静默吞掉。
+    ///
+    /// 注意断言的是「字节没被丢弃」而不是解码后的字符数：单个残缺字节交给
+    /// `decode` 会按 GBK 解成替换字符，长度本就会变，这里只保证输出没被截短。
+    #[test]
+    fn trailing_partial_char_at_eof_is_still_emitted() {
+        let mut line = vec![b'c'; 64 * 1024 - 1];
+        line.extend_from_slice(&"凭".as_bytes()[..1]);
+        let text = drain(line);
+        assert!(
+            text.len() >= 64 * 1024,
+            "尾部残留字节被吞了，实测长度 {}",
+            text.len()
+        );
+        assert!(
+            text.starts_with(&"c".repeat(100)),
+            "前面的正常输出不该受影响"
+        );
+    }
+
     #[test]
     fn selected_source_keeps_secondary_and_nested_types_without_basename_matches() {
         let temp = tempfile::tempdir().unwrap();

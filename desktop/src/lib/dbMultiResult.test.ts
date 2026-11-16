@@ -111,3 +111,35 @@ it("有未写回的改动时，重跑先问一句（手顺 Ctrl+Enter 不该静�
   // 取消后计数必须留着：改动还在屏幕上，标签的小圆点不能自己消失
   expect(pendingForTab(id)).toBe(3);
 });
+
+it("同意丢弃后危险语句闸门又取消：改动没被替换，计数必须留着", async () => {
+  const id = openSqlTab("c");
+  reportEditCount(resultEditKey(id, "r1"), 3);
+  // 第一问「丢弃并执行」同意，第二问「整表改动」取消
+  mocks.ask.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  const out = await runStatements(id, [{ text: "delete from bd_material", startLine: 1 }]);
+  expect(mocks.ask).toHaveBeenCalledTimes(2);
+  expect(out.done).toBe(0);
+  expect(mocks.invoke.mock.calls.filter(([c]) => c === "db_exec_result" || c === "db_exec")).toHaveLength(0);
+  // 结果集没被替换，网格里的改动还在 ⇒ 小圆点不能消失，否则之后切/关标签不再询问
+  expect(pendingForTab(id)).toBe(3);
+});
+
+it("同意丢弃后连接建立失败：结果没换，计数必须留着", async () => {
+  const id = openSqlTab("c");
+  reportEditCount(resultEditKey(id, "r1"), 2);
+  const confirm = await import("./dbConfirm");
+  vi.mocked(confirm.ensureConnected).mockResolvedValueOnce(false);
+  const out = await runStatements(id, statements);
+  expect(out.done).toBe(0);
+  expect(pendingForTab(id)).toBe(2);
+});
+
+it("结果真被替换后才清计数", async () => {
+  const id = openSqlTab("c");
+  reportEditCount(resultEditKey(id, "r1"), 3);
+  const out = await runStatements(id, statements);
+  expect(out.done).toBe(3);
+  expect(sqlTabOf(id)!.results).toHaveLength(3);
+  expect(pendingForTab(id)).toBe(0);
+});

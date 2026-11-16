@@ -254,14 +254,16 @@ pub async fn req_prune(
     changed: Vec<String>,
 ) -> Result<ReqView, String> {
     let cfg_dir = state.config_dir.clone();
-    mutate(&state, move |s, _| {
+    mutate(&state, move |s, root| {
         if changed.is_empty() {
             return Ok(());
         }
         let keys: HashSet<String> = changed.iter().map(|p| key_of(p)).collect();
         s.prune(&keys);
         let mut blocks = BlockStore::load(&cfg_dir);
-        if blocks.prune(&keys) > 0 {
+        // 块级标记是跨工作区共存的全局表，必须带上本次扫描的根，
+        // 否则别的工程的标记会被这次差集一并删掉（见 `BlockStore::prune`）。
+        if blocks.prune(&keys, root) > 0 {
             blocks.save(&cfg_dir)?;
         }
         Ok(())

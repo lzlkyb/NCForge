@@ -76,7 +76,17 @@ pub fn list(config: &Path, root: &Path) -> Result<Vec<ShelfSummary>, String> {
         if path.extension().is_none_or(|e| e != "json") {
             continue;
         }
-        let shelf = load(&path)?;
+        // 🔴 一份坏 json 不能拖垮整个列表：原来 `load(&path)?` 会让 `list()` 直接 Err，
+        // 用户看到的是「变更副本全没了」，而实际只有一份文件损坏（掉电/半截写入）。
+        // 同仓其它 store（resource_pack / build_state）都是「损坏按空处理」，这里对齐。
+        // 坏文件**不删**：留给用户自己处置，删了就是静默丢数据。
+        let shelf = match load(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[change-shelf] 跳过损坏的副本 {}：{e}", path.display());
+                continue;
+            }
+        };
         copies.push(ShelfSummary {
             id: shelf.id,
             name: shelf.name,
@@ -304,6 +314,38 @@ mod tests {
         assert!(list(&tmp, &root).unwrap().is_empty());
         fs::remove_dir_all(&tmp).unwrap();
     }
+    /// 🔴 一份坏 json 不能拖垮 list()/create()：掉电或半截写入留下一份损坏文件时，
+    /// 原来整个列表直接 Err，用户看到「变更副本全没了」。坏文件跳过但**不删**。
+    #[test]
+    fn one_corrupt_copy_does_not_break_list_or_create() {
+        let tmp = crate::test_support::tmp("change-shelf-corrupt");
+        let root = tmp.join("project");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("A.java");
+        fs::write(&file, "class A {}\n").unwrap();
+        let good = create(&tmp, &root, "好副本", vec![edit(&file)]).unwrap();
+
+        // 往副本目录里塞一份坏 json（半截写入的样子）
+        let dir = directory(&tmp, &root).unwrap();
+        let broken = dir.join("broken.json");
+        fs::write(&broken, "{\"id\":\"broken\",\"name\":").unwrap();
+
+        let listed = list(&tmp, &root).expect("坏副本不该让列表整体失败");
+        assert_eq!(listed.len(), 1, "好副本必须还在：{listed:?}");
+        assert_eq!(listed[0].id, good.id);
+        assert!(broken.exists(), "坏文件不许被静默删除");
+
+        // create 也走 list（预算校验），同样不该被坏文件挡住
+        let second =
+            create(&tmp, &root, "第二份", vec![edit(&file)]).expect("坏副本不该让新建失败");
+        assert_ne!(second.id, good.id);
+        assert_eq!(list(&tmp, &root).unwrap().len(), 2);
+
+        // 坏文件自己读还是要报错，不能假装它存在
+        assert!(read(&tmp, &root, "broken").is_err());
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
     #[test]
     fn refuses_stale_copy_and_path_escape() {
         let tmp = crate::test_support::tmp("change-shelf-stale");

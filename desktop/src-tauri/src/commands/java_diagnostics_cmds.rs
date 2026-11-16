@@ -10,6 +10,20 @@ use std::sync::{
 use std::time::Duration;
 static DIAGNOSTIC_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+/// 各诊断动作的时间上限。
+///
+/// 🔴 `jfr-stop` **不能复用 45s**：它要把目标 JVM 里累积的整份 profile 落盘，
+/// 录制久了就是几百 MB，45s 写不完 ⇒ `execute_registered` 超时分支 `tree.kill()`
+/// 杀掉 jcmd ⇒ **`.jfr` 文件半截不可用**，而目标 JVM 里的录制**仍在继续跑**
+/// （JFR.stop 没执行完），用户既拿不到数据又白背一份开销。
+/// 其余动作只读快照、输出有界，45s 足够。
+fn diagnostic_timeout(action: &str) -> Duration {
+    match action {
+        "jfr-stop" => Duration::from_secs(180),
+        _ => Duration::from_secs(45),
+    }
+}
+
 #[tauri::command]
 pub async fn java_diagnostic(
     state: tauri::State<'_, Arc<AppState>>,
@@ -84,7 +98,7 @@ pub async fn java_diagnostic(
             &mut cmd,
             &id,
             &AtomicBool::new(false),
-            Duration::from_secs(45),
+            diagnostic_timeout(&action),
             |line| {
                 if output.len() + line.len() <= 8 * 1024 * 1024 {
                     output.push_str(line);
@@ -104,4 +118,26 @@ pub async fn java_diagnostic(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// jfr-stop 要落盘整份 profile，必须比只读快照的动作宽得多。
+    #[test]
+    fn jfr_stop_gets_a_longer_budget_than_snapshot_actions() {
+        assert_eq!(diagnostic_timeout("jfr-stop"), Duration::from_secs(180));
+        for action in ["threads", "histogram", "vm", "jfr-start"] {
+            assert_eq!(
+                diagnostic_timeout(action),
+                Duration::from_secs(45),
+                "{action} 只读快照，不该跟着放宽"
+            );
+        }
+        assert!(
+            diagnostic_timeout("jfr-stop") >= Duration::from_secs(120),
+            "几百 MB 的 profile 落盘 45s 不够，杀进程会留下半截 .jfr"
+        );
+    }
 }

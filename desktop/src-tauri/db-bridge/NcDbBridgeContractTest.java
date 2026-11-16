@@ -256,11 +256,76 @@ public class NcDbBridgeContractTest {
         call(bounded,"closeQuietly",new Class<?>[]{});
         for(QueryHandle query:limit.queries.values()) check(query.rowsClosed && query.statementClosed,"session close releases every result");
     }
+    /**
+     * q-quote 的两条守卫 + 两个扫描点必须一致。
+     *
+     * 这些用例全部来自 2026-11-16 的实测探针（不是构造的假想输入）：修复前
+     * `freq'abc'` 的 `:1` 不转 `?`（ORA-01008），`q'[it's open :7 for …]'` 被
+     * `cursorOutBinds` 认成 `[7]`（普通 SELECT 被当游标调用），`q'[it's for update]'`
+     * 被 FOR_UPDATE 命中（只读查询记成持锁事务）。
+     */
+    static void qQuoteContracts(Class<?> session,Method markers) throws Exception {
+        Method strip=Class.forName("NcDbBridge").getDeclaredMethod("stripLiterals",String.class);strip.setAccessible(true);
+        Method cursor=session.getDeclaredMethod("cursorOutBinds",String.class);cursor.setAccessible(true);
+        java.util.regex.Pattern forUpdate=java.util.regex.Pattern.compile("\\bfor\\s+update\\b");
+        // 1 前字符守卫：标识符尾巴上的 q 不是 q-quote 前缀。定界符非括号时才会暴露。
+        check("select freq'abc', ? from dual".equals(markers.invoke(null,"select freq'abc', :1 from dual")),
+                "identifier ending in q does not start a q-quote");
+        check("select freq'2024-01-01', ? from dual".equals(markers.invoke(null,"select freq'2024-01-01', :1 from dual")),
+                "date literal after an identifier keeps its binds");
+        check("select my_q'[x]', ? from dual".equals(markers.invoke(null,"select my_q'[x]', :1 from dual")),
+                "underscore is an identifier character too");
+        // 2 未闭合不吞后续：交回普通字符串分支（`''` 规则），让 Oracle 自己报 ORA-01756。
+        // 未闭合时 `'[abc, :1 from dual` 整段都是字符串内容，:1 本就在串里，不该转 ?。
+        check("select q'[abc, :1 from dual".equals(markers.invoke(null,"select q'[abc, :1 from dual")),
+                "unclosed q-quote falls back to the ordinary string rule");
+        // 关键差别：普通字符串分支遇到下一个 `'` 就收尾，**后面的绑定仍然有效**；
+        // 旧的 end=n 会一路吃到结尾，把这个 :2 一起吞掉。
+        check("select q'[abc' , ? from dual".equals(markers.invoke(null,"select q'[abc' , :2 from dual")),
+                "binds after an unclosed q-quote are still rewritten");
+        // 3 stripLiterals 必须同样认 q-quote：字面量里的关键字不得泄漏。
+        check("select '' as c from dual".equals(strip.invoke(null,"select q'[it's open :7 for select 1]' as c from dual")),
+                "q-quote body is stripped as one literal");
+        check(((int[])cursor.invoke(null,"select q'[it's open :7 for select 1]' as c from dual")).length==0,
+                "cursor syntax inside a q-quote is not an OUT bind");
+        check(!forUpdate.matcher(((String)strip.invoke(null,"select q'[it's for update]' as c from dual")).toLowerCase()).find(),
+                "for update inside a q-quote does not open a transaction");
+        check(!forUpdate.matcher(((String)strip.invoke(null,"select q'[for update]' as c from dual")).toLowerCase()).find(),
+                "for update inside a plain q-quote is still inert");
+        // 3b NCHAR 前缀 nq/NQ 是合法 q-quote：守卫不能把 n 当标识符尾巴拒掉。
+        // 拒掉的后果比不加守卫更糟——串内 :99 被转成 ?、串外 :1 反而漏掉（实测）。
+        for(String pre:new String[]{"nq","NQ"}){
+            check(("select "+pre+"'[it's :99]', ? from dual").equals(
+                    markers.invoke(null,"select "+pre+"'[it's :99]', :1 from dual")),
+                    "NCHAR q-quote keeps its body and rewrites the outer bind: "+pre);
+            check(((int[])cursor.invoke(null,"select "+pre+"'[it's open :7 for select 1]' from dual")).length==0,
+                    "cursor syntax inside an NCHAR q-quote is not an OUT bind: "+pre);
+        }
+        // `xnq'…'` 仍是标识符尾巴，不能因为含 n 就放行。
+        check("select xnq'abc', ? from dual".equals(markers.invoke(null,"select xnq'abc', :1 from dual")),
+                "n inside a longer identifier does not enable the NCHAR prefix");
+        // 4 合法用法基线：四种括号 + 自定义定界符 + 大写 Q，绑定改写一字不变。
+        String[] legal={"q'[it's :99]'","Q'{a'b :99}'","q'<it's :99>'","q'(it's :99)'","q'!it's :99!'"};
+        for(String lit:legal){
+            check(("select "+lit+", ? from dual").equals(markers.invoke(null,"select "+lit+", :1 from dual")),
+                    "legal q-quote keeps its body verbatim: "+lit);
+            // stripLiterals 只剥字面量，**不碰 `:N`**（转 ? 是 toQuestionMarks 的职责）。
+            check("select '', :1 from dual".equals(strip.invoke(null,"select "+lit+", :1 from dual")),
+                    "legal q-quote strips to one empty literal: "+lit);
+        }
+        // 5 真游标与真 FOR UPDATE 不受影响（防守卫写过头把真语句也屏蔽了）。
+        check(Arrays.equals(new int[]{1},(int[])cursor.invoke(null,"begin open :1 for select 1 from dual; end;")),
+                "real cursor OUT bind is still detected");
+        check(forUpdate.matcher(((String)strip.invoke(null,"select :1 from t for update")).toLowerCase()).find(),
+                "real FOR UPDATE is still detected");
+    }
+
     public static void main(String[] args) throws Exception {
         Class<?> c=Class.forName("NcDbBridge$Session");Constructor<?> ctor=c.getDeclaredConstructor(String.class);ctor.setAccessible(true);Object s=ctor.newInstance("contract");
         Method markers=c.getDeclaredMethod("toQuestionMarks",String.class);markers.setAccessible(true);
         check("select q'[it's :99]', \"ID:98\", ? from dual -- :97".equals(
                 markers.invoke(null,"select q'[it's :99]', \"ID:98\", :1 from dual -- :97")), "only real bind tokens are rewritten");
+        qQuoteContracts(c,markers);
         Field conn=c.getDeclaredField("conn");conn.setAccessible(true);conn.set(s,proxy(Connection.class));
         java.io.ByteArrayOutputStream reply = new java.io.ByteArrayOutputStream();
         Field out = Class.forName("NcDbBridge").getDeclaredField("out");

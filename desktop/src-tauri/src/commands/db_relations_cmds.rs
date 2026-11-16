@@ -69,16 +69,25 @@ pub async fn db_relations(
     };
     // 列名只能来自库自己：同一段 SQL 在 NC5/NC6 上叫法不同，猜错就是整块关系静默为空。
     let meta = metadata_columns(b.clone()).await;
+    // 截断说明要一路带到 notes：认不出属性列时，用户得知道「可能是行数不够」而不是「这库没有」。
+    let meta_note = match &meta {
+        Ok((_, note)) => note.clone(),
+        Err(_) => None,
+    };
+    let meta_cols: Result<Vec<(String, String)>, String> = meta.map(|(columns, _)| columns);
     let upper = table.to_uppercase();
     let fk = read(b.clone(), FOREIGN_KEYS, &upper).await;
-    let nc = match &meta {
+    let nc = match &meta_cols {
         Ok(columns) => match ormap_attribute(columns) {
             Some(attr) => read(b.clone(), &NC_REFS_TEMPLATE.replace("{attr}", attr), &upper).await,
-            None => Err("此库的 MD_ORMAP 没有可确认的属性列".into()),
+            None => Err(match &meta_note {
+                Some(note) => format!("此库的 MD_ORMAP 没有可确认的属性列（{note}）"),
+                None => "此库的 MD_ORMAP 没有可确认的属性列".into(),
+            }),
         },
         Err(error) => Err(error.clone()),
     };
-    let enums = read_enums(b.clone(), &upper, meta.as_deref().unwrap_or(&[])).await;
+    let enums = read_enums(b.clone(), &upper, meta_cols.as_deref().unwrap_or(&[])).await;
     if let Some((key, engine)) = temporary {
         let _ = call(engine, "disconnect", vec![], Duration::from_secs(10)).await;
         drop_bridge(&state, &key);
@@ -87,6 +96,11 @@ pub async fn db_relations(
     // 任何一块读不出来都置位：只把原因塞进 notes（折叠在「不可用原因」里），
     // 前端会当成「关系为空」正常渲染，用户看到的是「没有可确认的关联」。
     let mut partial = false;
+    // 元数据被截断本身就是「结果不完整」，即使后面几块都读成功也要置位。
+    if let Some(note) = meta_note {
+        notes.push(note);
+        partial = true;
+    }
     let foreign = match fk {
         Ok(v) => v,
         Err(e) => {
@@ -123,23 +137,44 @@ fn require_relation_session(temporary: bool, isolated_only: bool) -> Result<(), 
     }
     Ok(())
 }
+/// 元数据列清单一次取多少行。
+///
+/// 🔴 7 张 NC 元数据表的**全列**加起来轻易过千（`MD_COLUMN`/`MD_PROPERTY` 各几十列，
+/// 再乘上同名表在不同 schema 的副本）。原来写 800 且不读 `hasMore`：
+/// 截断后 `ormap_attribute` 认不出 `ATTRIBUTEID` ⇒ 整块业务关系静默为空，
+/// 用户看到的是「这个库没有可确认的关联」，而真因只是行数不够。
+const META_MAX_ROWS: u32 = 5000;
+
 /// 本库元数据表的 `(表名, 列名)` 全表，列名来自 `all_tab_columns`，不是猜的。
+///
+/// 第二个返回值是**截断说明**：取满了就要说出来，绝不静默降级。
 async fn metadata_columns(
     b: Arc<crate::db_engine::EngineHandle>,
-) -> Result<Vec<(String, String)>, String> {
+) -> Result<(Vec<(String, String)>, Option<String>), String> {
     let sql = format!("select table_name, column_name from all_tab_columns where owner=sys_context('userenv','current_schema') and table_name in {META_TABLES}");
     let out = call(
         b,
         "exec",
-        vec![sql, "800".into(), "60".into()],
+        vec![sql, META_MAX_ROWS.to_string(), "60".into()],
         Duration::from_secs(90),
     )
     .await?;
     let rows = out["rows"].as_array().ok_or("元数据列清单读取失败")?;
-    Ok(rows
+    let columns = rows
         .iter()
         .filter_map(|r| Some((r[0].as_str()?.to_string(), r[1].as_str()?.to_string())))
-        .collect())
+        .collect();
+    Ok((columns, meta_truncation_note(out["hasMore"].as_bool())))
+}
+
+/// 截断说明。`hasMore` 是每个结果集自己的真截断标记（见 `db_rust::page`）。
+fn meta_truncation_note(has_more: Option<bool>) -> Option<String> {
+    if has_more != Some(true) {
+        return None;
+    }
+    Some(format!(
+        "NC 元数据列清单超过 {META_MAX_ROWS} 行被截断，业务关联与枚举可能不完整"
+    ))
 }
 fn has(columns: &[(String, String)], table: &str, column: &str) -> bool {
     columns.iter().any(|(t, c)| t == table && c == column)
@@ -218,6 +253,37 @@ mod tests {
         assert!(sql.contains("sm.ATTRIBUTEID=p.id"));
         assert!(!sql.contains("{attr}"));
     }
+    /// 🔴 元数据列清单取满了必须说出来：原来写死 800 且不读 hasMore，
+    /// 截断后 `ormap_attribute` 认不出 ATTRIBUTEID ⇒ 整块业务关系静默为空。
+    #[test]
+    fn truncated_metadata_is_reported_not_silently_degraded() {
+        const {
+            assert!(
+                META_MAX_ROWS >= 5000,
+                "7 张元数据表全列轻易过千，800 行不够"
+            )
+        };
+        let note = meta_truncation_note(Some(true)).expect("截断必须给说明");
+        assert!(note.contains("截断"), "{note}");
+        assert!(
+            note.contains(&META_MAX_ROWS.to_string()),
+            "要告诉用户上限是多少"
+        );
+        // 没截断 / 字段缺席都不该无端报警
+        assert_eq!(meta_truncation_note(Some(false)), None);
+        assert_eq!(meta_truncation_note(None), None);
+    }
+
+    /// 截断 + 认不出属性列时，错误文案要带上截断线索，不能只说「这库没有」。
+    #[test]
+    fn missing_attribute_column_mentions_truncation_when_present() {
+        let columns = meta(&[("MD_ORMAP", "CLASSID")]);
+        assert_eq!(ormap_attribute(&columns), None);
+        let note = meta_truncation_note(Some(true)).unwrap();
+        let msg = format!("此库的 MD_ORMAP 没有可确认的属性列（{note}）");
+        assert!(msg.contains("截断"));
+    }
+
     #[test]
     fn completion_requires_an_isolated_session_without_changing_table_page_fallback() {
         assert!(require_relation_session(false, true).is_err());

@@ -29,6 +29,7 @@ import { trackOperation } from "../lib/operations";
 import { workspaceEpoch } from "../lib/workspaceEpoch";
 import { friendlyError } from "../lib/friendlyError";
 import { navCommit, navLook, navLookAt, type NavStep } from "../lib/navHistory";
+import { createNavQueue } from "../lib/navQueue";
 import { captureFileJumpOrigin, recordFileJump } from "../lib/navContext";
 import { emptyEditorGroups, removeGroupView, selectGroupFile } from "../lib/editorGroups";
 import { isHistoryRestoring } from "../lib/historyRestoreGuard";
@@ -58,6 +59,11 @@ export function useFileSession() {
    * 生效，于是出现「激活的是 A、该跳的行被丢弃」这种组合。
    */
   const openSeq = useRef(0);
+  /**
+   * 历史跳转的执行体（队列在 `lib/navQueue`）。用 ref 转发是因为队列在挂载时
+   * 就建好，而 `goToNav` 闭包里的 `openAt` / `openJdt` 每次渲染都是新的。
+   */
+  const goToNavRef = useRef<(step: NavStep) => Promise<boolean>>(async () => false);
 
   /**
    * 打开文件。`preview`：文件树单击的预览打开——顶替现有预览标签，不固定。
@@ -226,19 +232,29 @@ export function useFileSession() {
    */
   const goToNav = async (step: NavStep) => {
     const p = step.point;
-    const ok = p.jdt ? await openJdt(p.path, p.line, false) : await openAt(p.path, p.line, false, p.column);
+    // 🔴 jdt 分支也要传 column（openJdt 第 4 参就是它）：漏传会让反编译/jar 内类的
+    // 后退只回到行首，同一行多个引用时落错位置。普通分支一直传着，别在这里例外。
+    const ok = p.jdt ? await openJdt(p.path, p.line, false, p.column) : await openAt(p.path, p.line, false, p.column);
     if (ok) navCommit(step);
+    return ok;
   };
+  goToNavRef.current = goToNav;
 
-  const goBack = () => {
-    const step = navLook(-1);
-    if (step) void goToNav(step);
-  };
+  /**
+   * 历史跳转的唯一入口（队列见 `lib/navQueue`，L16：连点两下退两格，不吃格）。
+   *
+   * `{delta}` 是后退 / 前进，`{index}` 是历史列表的绝对下标——**必须分开**：
+   * `goToHistory(1)` 的 1 是下标不是「前进一格」，混成一个数字参数会跳错地方。
+   * 目标在**出队时**才求值，第二次拿到的才是已经落定的新游标。
+   */
+  const navGo = useRef(createNavQueue(async (req) => {
+    const step = "delta" in req ? navLook(req.delta) : navLookAt(req.index);
+    return step ? goToNavRef.current(step) : false;
+  })).current;
 
-  const goForward = () => {
-    const step = navLook(1);
-    if (step) void goToNav(step);
-  };
+  const goBack = () => navGo({ delta: -1 });
+
+  const goForward = () => navGo({ delta: 1 });
 
   const pin = (path: string) => setTabs((ts) => pinTab(ts, path));
 
@@ -268,7 +284,7 @@ export function useFileSession() {
     openJdt,
     goBack,
     goForward,
-    goToHistory: (index: number) => { const step = navLookAt(index); if (step) void goToNav(step); },
+    goToHistory: (index: number) => navGo({ index }),
     unifyEol,
     cancelClose: () => setClosingPath(null),
   };

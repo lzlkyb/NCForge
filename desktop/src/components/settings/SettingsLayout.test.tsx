@@ -66,7 +66,8 @@ describe("设置中心搜索与导航", () => {
     expect(await scroll(body, { deltaY: 120 })).toBe(false);
     expect(await scroll(menu, { deltaY: 120, ctrlKey: true })).toBe(false);
     expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
-    expect(await scroll(menu, { deltaY: 20 })).toBe(true);
+    // 还没攒够一格：不切分类，也**不吞事件**（吞了侧栏自身就滚不动）
+    expect(await scroll(menu, { deltaY: 20 })).toBe(false);
     expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
     await scroll(menu, { deltaY: 20 });
     expect(visiblePage()?.dataset.settingsSection).toBe("编辑器");
@@ -79,6 +80,50 @@ describe("设置中心搜索与导航", () => {
     expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
     expect(body.scrollTop).toBe(120);
     expect(getSideOpen()).toBe(true);
+  });
+  it("侧栏自己装不下时先让它滚，滚到边界才切分类", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false })));
+    await render();
+    const menu = container.querySelector<HTMLElement>(".wb-settings-menu")!;
+    const scroll = async (options: WheelEventInit) => {
+      const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, ...options });
+      await act(async () => menu.dispatchEvent(event));
+      return event.defaultPrevented;
+    };
+    // jsdom 不做布局，手动装出「侧栏内容超出可视高度」。
+    Object.defineProperty(menu, "scrollHeight", { configurable: true, value: 600 });
+    Object.defineProperty(menu, "clientHeight", { configurable: true, value: 200 });
+    menu.scrollTop = 0;
+    // 中间位置：不切分类，也不吞事件（吞了侧栏就永远滚不动、看不到下面的分类）
+    expect(await scroll({ deltaY: 120 })).toBe(false);
+    expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
+    // 顶边界向上：同样让原生滚动优先
+    expect(await scroll({ deltaY: -120 })).toBe(false);
+    expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
+    // 滚到底边界向下：这时才切分类
+    menu.scrollTop = 400;
+    expect(await scroll({ deltaY: 120 })).toBe(true);
+    expect(visiblePage()?.dataset.settingsSection).toBe("编辑器");
+  });
+  it("首末分类之外没有目标时不吞滚轮事件", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false })));
+    await render();
+    const menu = container.querySelector<HTMLElement>(".wb-settings-menu")!;
+    const scroll = async (options: WheelEventInit) => {
+      const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, ...options });
+      await act(async () => menu.dispatchEvent(event));
+      return event.defaultPrevented;
+    };
+    // 首个分类继续向上：没有目标，事件必须放行（否则滚轮在这里彻底没反应）
+    expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
+    expect(await scroll({ deltaY: -120 })).toBe(false);
+    expect(visiblePage()?.dataset.settingsSection).toBe("外观与常规");
+    // 走到末个分类再继续向下：同样放行
+    await scroll({ deltaY: 120 });
+    await scroll({ deltaY: 120 });
+    expect(visiblePage()?.dataset.settingsSection).toBe("关于");
+    expect(await scroll({ deltaY: 120 })).toBe(false);
+    expect(visiblePage()?.dataset.settingsSection).toBe("关于");
   });
   it("首次挂载前的旧分类请求按稳定设置 ID 定位新分类", async () => {
     requestSettingItem("外观", "font");

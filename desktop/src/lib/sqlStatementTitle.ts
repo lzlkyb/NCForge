@@ -69,8 +69,11 @@ function firstLine(text: string, block: boolean): string {
 export function statementTitle(sql: string, max = 28): string | null {
   const comment = leadingComment(sql);
   if (!comment) return null;
-  // 注释到语句之间有空行 ⇒ 那是段落说明，不是这条语句的名字
-  if (GAP_WITH_BLANK_LINE.test(sql.slice(comment.end))) return null;
+  // 注释到语句之间有空行 ⇒ 那是段落说明，不是这条语句的名字。
+  // 🔴 只看「注释结束 → 第一个非空白字符」这一段间隙：拿 slice(comment.end) 整段去测
+  // 会把**语句体内部**的空行也算进来，`select a,\n\n b from t` 这种多行 SQL 全丢标题。
+  const gap = /^[ \t\r\n]*/.exec(sql.slice(comment.end))?.[0] ?? "";
+  if (GAP_WITH_BLANK_LINE.test(gap)) return null;
   const raw = firstLine(comment.text, comment.block);
   if (!raw || DECORATION.test(raw)) return null;
   const name = raw.replace(PREFIX, "").trim();

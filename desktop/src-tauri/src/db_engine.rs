@@ -1047,11 +1047,59 @@ fn stateless_query(sql: &str) -> bool {
     })
 }
 
+/// 字节版 q-quote 判据，与 `db_rust::q_quote_end`（char 版）**规则必须一致**。
+///
+/// 这里逐字节走是为了保持本函数「只折叠 ASCII 大小写、其余字节原样拷贝」的性质。
+/// q-quote 的前缀 `q'` 与定界符都必须是 ASCII（Oracle 语法如此），遇到非 ASCII
+/// 定界符直接不认，交回普通字符串分支——不会把多字节字符切坏。
+fn q_quote_end_bytes(b: &[u8], at: usize) -> usize {
+    let n = b.len();
+    if at + 2 >= n || !matches!(b[at], b'q' | b'Q') || b[at + 1] != b'\'' {
+        return at;
+    }
+    let is_word = |c: u8| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'$' | b'#');
+    if at > 0 && is_word(b[at - 1]) {
+        // NCHAR 前缀 `nq'…'` 合法，从 n 起算；再往前仍不能是标识符字符。
+        let nchar = matches!(b[at - 1], b'n' | b'N') && (at < 2 || !is_word(b[at - 2]));
+        if !nchar {
+            return at;
+        }
+    }
+    let open = b[at + 2];
+    if !open.is_ascii() || open.is_ascii_whitespace() {
+        return at;
+    }
+    let close = match open {
+        b'[' => b']',
+        b'{' => b'}',
+        b'(' => b')',
+        b'<' => b'>',
+        other => other,
+    };
+    let mut i = at + 3;
+    while i + 1 < n {
+        if b[i] == close && b[i + 1] == b'\'' {
+            return i + 2;
+        }
+        i += 1;
+    }
+    at
+}
+
 fn strip_literals(sql: &str) -> String {
     let b = sql.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
+        // 🔴 q-quote 内部的单引号不是字符串结束符。漏了这条，`q'[it's update t …]'`
+        // 会露出 update ⇒ readonly_query 把只读 SELECT 拦下；`q'[it's open :7 for …]'`
+        // 会让 refcursor_need 把普通查询误判成游标调用、发去另一个引擎。
+        let quoted = q_quote_end_bytes(b, i);
+        if quoted > i {
+            out.push(b' ');
+            i = quoted;
+            continue;
+        }
         match b[i] {
             b'\'' => {
                 i += 1;
@@ -1615,6 +1663,25 @@ mod tests {
         // 标识符里带 open 也不算（`reopen` / `open_flag`）
         assert_eq!(refcursor_need("select reopen, open_flag from t"), None);
     }
+
+    /// q-quote 里的游标形态不算。撇号会把不认 q-quote 的实现切成
+    /// `q''s open :7 for …]''`，于是普通 SELECT 被路由去另一个引擎（2026-11-16 实测）。
+    #[test]
+    fn q_quote_里的游标形态不算() {
+        for sql in [
+            "select q'[it's open :7 for select 1]' as c from dual",
+            "select q'[open :7 for select 1]' as c from dual",
+            "select nq'[it's open :7 for select 1]' as c from dual",
+            "select Q'{it's open :7 for select 1}' as c from dual",
+        ] {
+            assert_eq!(refcursor_need(sql), None, "{sql}");
+        }
+        // 真游标不能被守卫写过头屏蔽掉。
+        assert_eq!(
+            refcursor_need("begin open :1 for select 1 from dual; end;"),
+            Some(RefcursorNeed::OutBind)
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1646,6 +1713,23 @@ mod readonly_tests {
         ] {
             assert!(readonly_query(sql), "{sql}");
         }
+    }
+    /// q-quote 里的写关键字不得触发只读闸门。撇号会把不认 q-quote 的实现切成
+    /// `q''s update t …]''`，只读 SELECT 被拦下（2026-11-16 实测）。
+    #[test]
+    fn q_quote_里的写关键字不触发只读闸门() {
+        for sql in [
+            "select q'[it's update t set x=1]' as c from dual",
+            "select q'[it's delete from t]' as c from dual",
+            "select nq'[it's begin null; end;]' as c from dual",
+            "select Q'{it's insert into t values(1)}' as c from dual",
+            "select q'<it's commit>' as c from dual",
+        ] {
+            assert!(readonly_query(sql), "{sql}");
+        }
+        // 真写语句仍然要挡（防守卫写过头）。
+        assert!(!readonly_query("update t set x=1"));
+        assert!(!readonly_query("select * from t for update"));
     }
     #[test]
     fn rejects_write_lock_plsql_and_multiple_statement_paths() {

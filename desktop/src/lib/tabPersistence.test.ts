@@ -41,6 +41,28 @@ describe("标签快照", () => {
     expect(snap.splitPath).toBeNull();
   });
 
+  it("前台与分屏同时超限时两个都要保住（不能互相顶掉末位）", () => {
+    const tabs = Array.from({ length: 25 }, (_, i) => `f${i}.java`);
+    saveTabSnapshot("C:\\w\\a", { tabs, activePath: "f23.java", splitPath: "f24.java" });
+    const snap = readTabSnapshot("C:\\w\\a")!;
+    expect(snap.tabs).toHaveLength(20);
+    expect(snap.tabs).toContain("f23.java");
+    expect(snap.tabs).toContain("f24.java");
+    expect(snap.activePath).toBe("f23.java");
+    expect(snap.splitPath).toBe("f24.java");
+  });
+
+  it("keep 已在截断范围内时不占用别人的槽位", () => {
+    const tabs = Array.from({ length: 25 }, (_, i) => `f${i}.java`);
+    saveTabSnapshot("C:\\w\\a", { tabs, activePath: "f3.java", splitPath: "f24.java" });
+    const snap = readTabSnapshot("C:\\w\\a")!;
+    expect(snap.tabs).toHaveLength(20);
+    expect(snap.tabs).toContain("f3.java");
+    expect(snap.tabs).toContain("f24.java");
+    expect(snap.activePath).toBe("f3.java");
+    expect(snap.splitPath).toBe("f24.java");
+  });
+
   it("关光标签后快照是空的，重启不再恢复", () => {
     saveTabSnapshot("C:\\w\\a", { tabs: ["a"], activePath: "a", splitPath: null });
     saveTabSnapshot("C:\\w\\a", { tabs: [], activePath: null, splitPath: null });

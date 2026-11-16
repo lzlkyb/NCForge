@@ -157,7 +157,11 @@ export function SearchResults({
         onKeyDown={event => {
           if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || (event.target as HTMLElement).closest("input,textarea,select")) return;
           if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); navigate(event.key === "ArrowDown" ? 1 : -1); }
-          else if (event.key === "Enter" && selected && event.target === event.currentTarget) { event.preventDefault(); onOpen(selected.hit); }
+          // 🔴 命中行本身是 button，而 `navigate` 只 scrollIntoView **不移焦点**：
+          // 焦点停在某条命中上按 ↑↓ 换选中后，event.target 仍是那条旧 button。
+          // 只判 `target === currentTarget` 会让 Enter 走原生 click **打开旧命中**。
+          // 这半条 `closest("[data-hit-key]")` v0.5.0 就有，别删（有回归测试钉）。
+          else if (event.key === "Enter" && selected && (event.target === event.currentTarget || (event.target as HTMLElement).closest("[data-hit-key]"))) { event.preventDefault(); onOpen(selected.hit); }
         }}
         onScroll={(e) => setSearchScrollTop(e.currentTarget.scrollTop)}
         className="min-h-0 flex-1 overflow-auto"

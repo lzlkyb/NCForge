@@ -31,6 +31,25 @@ it("continuous navigation expands folded files and uses Enter to open the select
   await press(list, "ArrowDown", true); await press(list, "Enter", true); expect(open).toHaveBeenCalledTimes(2);
   await press(list, "ArrowDown"); await press(list, "Enter"); expect(open).toHaveBeenLastCalledWith(hits[2]);
 });
+// 回归（v0.5.0 有 `|| closest("[data-hit-key]")`，后被删）：命中行本身是 button，
+// navigate 只 scrollIntoView **不移焦点**。焦点停在命中行上按 ↑↓ 换选中后再按 Enter，
+// event.target 是那个 button ⇒ 旧条件不成立 ⇒ 走原生 click **打开旧命中**。
+it("焦点停在命中行上时 Enter 打开的是键盘选中的那条，不是焦点所在的旧命中", async () => {
+  const rows = () => [...host.querySelectorAll<HTMLButtonElement>("[data-hit-key]")];
+  // 点第一条：焦点与选中都落在它上面（真实用户操作）
+  await act(async () => rows()[0].click());
+  expect(open).toHaveBeenLastCalledWith(hits[0]);
+  rows()[0].focus();
+  expect(document.activeElement).toBe(rows()[0]);
+  open.mockClear();
+  // ↓ 把选中挪到第二条，但焦点仍在第一条（navigate 不移焦点）
+  await press(rows()[0], "ArrowDown");
+  expect(rows()[1].dataset.selected).toBe("true");
+  expect(document.activeElement).toBe(rows()[0]);
+  await press(rows()[0], "Enter");
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(open).toHaveBeenLastCalledWith(hits[1]);
+});
 it("expanded results keep one DOM/list scroll and restore the sidebar without changing search options", async () => {
   const list = host.querySelector<HTMLElement>('[aria-label="搜索结果列表"]')!; list.scrollTop = 84;
   const savedOptions = form.outcomeOptions;
