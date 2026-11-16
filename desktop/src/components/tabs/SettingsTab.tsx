@@ -8,6 +8,7 @@ import { AutostartRow } from "../settings/AutostartRow";
 import { LangSettings } from "../settings/LangSettings";
 import { ResourceSettings } from "../settings/ResourceSettings";
 import { ConfigTransferSettings } from "../settings/ConfigTransferSettings";
+import { DiagnosticsSettings } from "../settings/DiagnosticsSettings";
 import { KeymapSettings } from "../settings/KeymapSettings";
 import { EditorSettings } from "../settings/EditorSettings";
 import { SqlFormatSettings } from "../settings/SqlFormatSettings";
@@ -86,6 +87,10 @@ export function SettingsTab({ onChanged }: { onChanged?: () => void }) {
       {
         label: "配置迁移", group: "维护", scope: "仅迁移支持的应用配置", description: "导出可迁移配置，导入前核对本机值与路径。",
         keywords: ["导入", "导出", "备份", "JSON", "迁移", "config"], content: <ConfigTransferSettings onChanged={onChanged} />,
+      },
+      {
+        label: "诊断日志", aliases: ["错误记录", "崩溃日志"], group: "维护", scope: "只保存在本机，不上传", description: "查看界面出错时自动记录的现场，或打开日志文件位置。",
+        keywords: ["日志", "崩溃", "报错", "排查", "堆栈", "log", "diagnostics"], content: <DiagnosticsSettings />,
       },
       {
         label: "关于与支持", aliases: ["关于"], group: "维护", description: "了解当前运行的软件，查看版本变化与项目支持。",

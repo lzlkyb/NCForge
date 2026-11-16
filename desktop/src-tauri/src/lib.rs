@@ -69,6 +69,8 @@ pub mod ecj_worker;
 pub mod eclipse_cp;
 pub mod encoding_reg;
 pub mod file_template;
+/// 前端错误落盘（UTF-8，独立于 GBK 的 NC 日志通道）。
+pub mod frontend_log;
 pub mod hotswap;
 pub mod jar_symbols;
 pub mod java_bridge;

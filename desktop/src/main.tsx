@@ -11,6 +11,8 @@ import { ToastProvider } from "./components/ui/toast";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { getStoredTheme } from "./lib/theme";
 import { reportFirstFrame } from "./lib/bootTrace";
+import { installGlobalErrorLogging } from "./lib/frontendLog";
+import { installInteractionBudget } from "./lib/interactionBudget";
 import { initializeAppearance } from "./lib/appearance";
 import { initializeUiDensity } from "./lib/uiDensity";
 import { initializeMotionPreference } from "./lib/motionPreference";
@@ -38,6 +40,11 @@ initializeAppearance();
 initializeUiDensity();
 initializeMotionPreference();
 initializeFonts();
+// 渲染之外的异常（事件回调、异步 rejection）ErrorBoundary 抓不到，必须全局兜底。
+// 装在 render 之前：启动阶段本身崩了也要留下现场。
+installGlobalErrorLogging();
+// 交互延迟采样只在 dev 构建启用：DESIGN.md §3 的预算要能被测，生产构建零成本。
+if (import.meta.env.DEV) installInteractionBudget();
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Icon } from "./ui/icon";
 import { Button } from "./ui/button";
+import { recordFrontendError } from "../lib/frontendLog";
 
 /**
  * 全局错误边界（P0-4）：捕获子组件渲染异常，显示友好占位页而非白屏。
@@ -31,6 +32,14 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[ErrorBoundary]", error, info);
+    // 🔴 只 console.error 等于没有现场：用户点一次「重新加载」就什么都没了，
+    // 事后只能靠他记得点「复制错误信息」。这里落盘（UTF-8，带组件栈），
+    // 排障时直接看 config_dir/logs/frontend.log。失败不影响本页恢复。
+    recordFrontendError(
+      "render",
+      { message: error.message, stack: [error.stack, info.componentStack].filter(Boolean).join("\n") },
+      this.props.resetKey,
+    );
   }
 
   componentDidUpdate(prev: Props) {
