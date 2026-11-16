@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyUiDensity, getStoredUiDensity, getUiDensity, initializeUiDensity, subscribeUiDensity } from "./uiDensity";
+import { applyUiDensity, getStoredUiDensity, getUiDensity, initializeUiDensity, normalizeDensity, subscribeUiDensity } from "./uiDensity";
 
 beforeEach(() => { localStorage.clear(); delete document.documentElement.dataset.uiDensity; });
 afterEach(() => { vi.restoreAllMocks(); delete document.documentElement.dataset.uiDensity; });
@@ -34,5 +34,26 @@ describe("界面密度", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("unavailable"); });
     expect(applyUiDensity("comfortable")).toBe(false);
     expect(getUiDensity()).toBe("comfortable");
+  });
+  it("三档都能存取，未知存储值回落 standard", () => {
+    for (const density of ["compact", "standard", "comfortable"] as const) {
+      expect(applyUiDensity(density)).toBe(true);
+      expect(getUiDensity()).toBe(density);
+      expect(localStorage.getItem("ncforge.ui-density")).toBe(density);
+    }
+    expect(normalizeDensity("huge")).toBe("standard");
+    expect(normalizeDensity(null)).toBe("standard");
+    localStorage.setItem("ncforge.ui-density", "huge");
+    initializeUiDensity();
+    expect(getUiDensity()).toBe("standard");
+  });
+  it("compact 与 standard 之间切换会广播一次", () => {
+    const on = vi.fn();
+    const off = subscribeUiDensity(on);
+    applyUiDensity("compact");
+    applyUiDensity("compact");
+    applyUiDensity("standard");
+    expect(on).toHaveBeenCalledTimes(2);
+    off();
   });
 });

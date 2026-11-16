@@ -1,3 +1,14 @@
+/**
+ * @deprecated 新代码请用 `./dialog` 的 `Dialog` / `DialogHeader` / `DialogTitle`。
+ *
+ * 现状（2026-11-16）：`Modal` 仍被 52 个文件导入，两代弹层并存是当前最大的
+ * 一致性债（设计契约 DESIGN.md §5）。迁移时逐处核对三件事，不要全局替换：
+ *   1) zIndex —— Dialog 的层级策略与 Modal 不同，嵌套弹层要一起改；
+ *   2) 焦点陷阱 —— 两者都在 Dialog 打开时锁焦点，但同时开着别的浮层时会抢；
+ *   3) ariaLabel —— Dialog 必须显式给，Modal 允许缺省。
+ * 约束：`scripts/check-deprecated-ui.mjs` 对 Modal 的导入数做只降不升的棘轮，
+ * 新增一处导入会让门禁变红。
+ */
 import { useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { usePresence } from "../../hooks/usePresence";

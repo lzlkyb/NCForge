@@ -1,7 +1,7 @@
 /* Both materials share geometry and elevation; classic keeps solid surfaces. */
 html[data-ui-style] {
-  --r-control: 8px; --r-chip: 6px; --r-card: 14px; --r-menu: 14px; --r-dialog: 18px;
-  --r-shell: 16px; --r-pane: 12px; --r-work: 14px; --r-inset: 10px; --material-gutter: 4px;
+  /* 圆角档位（含材质层独有的面/面板圆角）已上收到 index.css「几何档位矩阵」（单一真源）。 */
+  --material-gutter: 4px;
   --material-shell: hsl(var(--chrome)); --material-shell-light: none;
   --material-sidebar: hsl(var(--chrome)); --material-floating: hsl(var(--popover)); --material-blur: none;
   --material-resource: color-mix(in srgb, hsl(var(--foreground)) 2%, hsl(var(--card)));

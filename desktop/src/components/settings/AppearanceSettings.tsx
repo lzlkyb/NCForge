@@ -78,14 +78,14 @@ export function AppearanceSettings() {
         }
       />
       <SettingsRow
-        id="appearance-density" keywords={["密度", "舒适", "标准", "density"]}
-        valueText={density === "comfortable" ? "舒适" : "标准"}
+        id="appearance-density" keywords={["密度", "紧凑", "舒适", "标准", "density", "compact"]}
+        valueText={density === "compact" ? "紧凑" : density === "comfortable" ? "舒适" : "标准"}
         {...feedback.密度}
         label="界面密度"
-        sub="标准 保留紧凑布局；舒适 增大界面文字与常用控件"
+        sub="紧凑 压缩留白换可见行数；标准 常规；舒适 增大文字与常用控件"
         info="只调整界面阅读与操作空间，代码字号仍在编辑器设置中调整。偏好保存在本机。"
         control={<div className="flex flex-wrap items-center gap-2"><SettingsChoice label="界面密度" value={density}
-          options={[{ value: "standard", label: "标准" }, { value: "comfortable", label: "舒适" }]}
+          options={[{ value: "compact", label: "紧凑" }, { value: "standard", label: "标准" }, { value: "comfortable", label: "舒适" }]}
           onChange={(value) => {
             report(applyUiDensity(value as UiDensity), "密度");
           }} />{feedback.密度?.error && <Button variant="ghost" size="sm" onClick={() => report(applyUiDensity(density), "密度")}>重试保存</Button>}</div>}

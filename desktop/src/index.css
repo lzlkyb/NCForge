@@ -26,10 +26,7 @@
   --dur-loop: 1.15s;
   --dur-halo: 2.1s;
   --dur-sample: 250ms;
-  /* 7.5 组件间距与一致性 token：引用处一律带 fallback，缺失不会破坏既有样式 */
-  --h-control: 30px;
-  --h-icon: 28px;
-  --gap-control: 8px;
+  /* 几何令牌（--h-* / --gap-* / --r-*）统一在文末「几何档位矩阵」分区定义，此处不再重复。 */
   --disabled-opacity: .62;
   --border-strong: 205 12% 55%;
   --fs-h1: 18px;
@@ -37,7 +34,6 @@
   --fs-h2: 14px;
   --lh-h2: 1.5;
   --lh-body: 1.6;
-  --r-chip: 3px;
   /* P1-23：渐变徽章上的文字色（浅色白、深色深墨，随主题翻转） */
   --badge-on-gradient: 0 0% 100%;
 }
@@ -137,10 +133,6 @@
   --input: 205 12.50% 81.18%;
   --ring: var(--primary);
   --radius: 0.375rem;
-  --r-control: 6px;
-  --r-card: 8px;
-  --r-menu: 10px;
-  --r-dialog: 12px;
   --window-close: #c42b1c;
   --window-close-ink: #fff;
 
@@ -150,6 +142,9 @@
      --hero-text 保留——version-badge / header-badge / upgrade-welcome 在用）*/
   --hero-text: #fff;
   --version-gradient: hsl(var(--primary));
+  /* 更新进度条的双层渐变：靛→紫→蓝不是品牌色，是「正在下载」与「已完成」的区分色，
+     故作为 component 层令牌单列（--grad- 前缀，不参与明暗配对）。 */
+  --grad-progress: linear-gradient(90deg, #4f46e5, #7c3aed, #3b82f6);
   --version-shadow: none;
   --header-start: #ffffff;
   --header-end: #eef1f2;
@@ -167,6 +162,13 @@
   --chart-9: hsl(84 81% 44%);   /* lime */
   --chart-10: hsl(25 95% 53%);  /* orange */
   --chart-compare: hsl(215 20% 65%); /* 对比柱（P95）/ 中性灰 */
+
+  /* 快速选择键位标签 I/E/M/F 的分类色：语义是「这类操作」，与品牌色无关，故单列。
+     明暗成对（token-layers 会查）；深色沿用同一组，因为标签一直带白字。 */
+  --qp-kind-i: #d97706;
+  --qp-kind-e: #0d9488;
+  --qp-kind-m: #8b5cf6;
+  --qp-kind-f: #0ea5e9;
 
   /* 浅色下卡片阴影 */
   --card-primary-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 0 0 1px color-mix(in srgb, hsl(var(--primary)) 12%, transparent);
@@ -197,10 +199,82 @@
   --sh-glow-warning: 0 2px 6px rgba(245,158,11,0.25);
   --sh-ring-focus: 0 0 0 3px color-mix(in srgb, hsl(var(--primary)) 14%, transparent);
   --sh-ring-inset-primary: inset 0 0 0 1px hsl(var(--primary));
+  /* 窄屏左侧抽屉的投影（原 #0002 裸色值，2026-11-16 上收） */
+  --shadow-tree-drawer: 8px 0 24px hsl(0 0% 0% / .13);
 }
+
+/* ═══ 几何档位矩阵（单一真源）═══
+   全站圆角 / 控件高度 / 控件间距只在本分区定义，其它 CSS 一律引用。
+   两个正交维度：
+   · 外观档 html[data-ui-style]（classic / glass）→ 决定圆角档位
+   · 密度档 html[data-ui-density]（standard / comfortable，P1-2 再加 compact）→ 决定控件高度
+
+   2026-11-16 收敛原因：旧版这三类令牌同时散落在 index.css、forge-controls.css、
+   workbench-material.css，靠选择器特异性互相覆盖——html[data-ui-style](0,1,1) 赢过
+   .forge-controls(0,1,0)，导致 index.css 里 `--r-control: 6px` / `--h-control: 30px`
+   两个默认值**从未生效**，而 Tailwind 的 rounded(6px) 与 rounded-md(8px) 互相不一致。
+   现在默认值与档位值同处一室，改一档只动这里。
+   @tokens-geometry:start */
+
+/* 档位一 · 基础：无 data-ui-style 时的兜底（design-preview 等独立入口也走这里） */
+:root {
+  --r-control: 6px;
+  --r-chip: 3px;
+  --r-card: 8px;
+  --r-menu: 10px;
+  --r-dialog: 12px;
+  --h-control: 32px;
+  --h-icon: 28px;
+  --gap-control: 8px;
+  --row-h: 26px;
+}
+
+/* 档位二 · 外观：material / glass 共用一套几何（值与旧 workbench-material.css 一致，行为不变）
+   末尾四个 --r-{shell,pane,work,inset} 是材质层独有「面」圆角，语义上属于本档，故一并上收。 */
+html[data-ui-style] {
+  --r-control: 8px;
+  --r-chip: 6px;
+  --r-card: 14px;
+  --r-menu: 14px;
+  --r-dialog: 18px;
+  --r-shell: 16px;
+  --r-pane: 12px;
+  --r-work: 14px;
+  --r-inset: 10px;
+}
+
+/* 档位三 · 密度：三档按 DESIGN.md R3 表给值；--row-h 供虚拟列表接入（未接入前各列表用自有常量）。 */
+html[data-ui-density="comfortable"] {
+  --h-icon: 32px;
+  --row-h: 30px;
+}
+
+html[data-ui-density="compact"] {
+  --h-control: 26px;
+  --h-icon: 24px;
+  --gap-control: 6px;
+  --row-h: 22px;
+}
+
+/* 档位四 · 触屏：粗指针下交互目标必须 ≥ 40px（WCAG 2.5.5） */
+@media (pointer: coarse) {
+  :root {
+    --h-control: 40px;
+    --h-icon: 40px;
+  }
+  html[data-ui-density="comfortable"] {
+    --h-icon: 44px;
+  }
+}
+
+/* @tokens-geometry:end */
 
 .dark {
   color-scheme: dark;
+  --qp-kind-i: #d97706;
+  --qp-kind-e: #0d9488;
+  --qp-kind-m: #8b5cf6;
+  --qp-kind-f: #0ea5e9;
   --background: 214.29 12.73% 10.78%;
   --chrome: 210 12.90% 12.16%;
   --foreground: 210 16.67% 90.59%;
@@ -1173,7 +1247,7 @@ pre, code, .font-mono { font-variant-ligatures: none; }
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #4f46e5, #7c3aed, #3b82f6);
+  background: var(--grad-progress);
 }
 /* 确定态填充：整宽 + scaleX。后端 250ms 推一次，过渡时长必须与采样同档（250ms linear）——
    200ms 缓动配 250ms 采样会永远慢半拍，并出现橡皮筋式追赶。 */
@@ -1287,7 +1361,7 @@ pre, code, .font-mono { font-variant-ligatures: none; }
   width: 40%;
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #4f46e5, #7c3aed, #3b82f6);
+  background: var(--grad-progress);
   animation: ro-sweep 1.05s var(--ease-standard) infinite;
 }
 @keyframes ro-sweep {

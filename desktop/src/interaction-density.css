@@ -18,6 +18,18 @@ html[data-ui-density="comfortable"] .app-shell .wb-search-tool input { font-size
 html[data-ui-density="comfortable"] .app-shell :is(.wb-settings-search input,.lg-field input,.lg-field select,.lg-check) { font-size:13px; }
 html[data-ui-density="comfortable"] .app-shell :is(.settings-choice button,.srow-control input:not([type="checkbox"],[type="radio"],[type="range"]),.srow-control select) { min-height:32px; }
 html[data-ui-density="comfortable"] .app-shell .wb-settings-nav button { padding-block:9px; }
+/* compact：牺牲留白换可见行数（DESIGN.md R3）。几何令牌在 index.css 矩阵里，
+   这里只写字号与 min-height 的档位差异，选择器与 comfortable 保持一一对称。 */
+html[data-ui-density="compact"] { --dbx-fs-body:12px; --dbx-fs-meta:11px; --dbx-h-control:26px; }
+html[data-ui-density="compact"] .app-shell { font-size:13px; }
+html[data-ui-density="compact"] .app-shell :is(.wb-row,.wb-tab,.lg-list,.lg-chip,.wb-settings-nav button,.wb-db-list button) { font-size:12px; }
+html[data-ui-density="compact"] .app-shell :is(.lg-btn,.lg-field input,.lg-field select,.lg-chip,.wb-db-filter,.wb-settings-search) { min-height:26px; height:26px; }
+html[data-ui-density="compact"] .app-shell :is(.srow .t,.srow-control input,.srow-control select,.settings-choice button) { font-size:13px; }
+html[data-ui-density="compact"] .app-shell .srow .d { font-size:12px; }
+html[data-ui-density="compact"] .app-shell .wb-search-tool input { font-size:13px; }
+html[data-ui-density="compact"] .app-shell :is(.wb-settings-search input,.lg-field input,.lg-field select,.lg-check) { font-size:12px; }
+html[data-ui-density="compact"] .app-shell :is(.settings-choice button,.srow-control input:not([type="checkbox"],[type="radio"],[type="range"]),.srow-control select) { min-height:26px; }
+html[data-ui-density="compact"] .app-shell .wb-settings-nav button { padding-block:5px; }
 @container workbench-document (max-width:720px) {
   .lg-head .lg-sub { flex-basis:100%; overflow-wrap:anywhere; }
   .dbx-txbar { flex-wrap:wrap; }

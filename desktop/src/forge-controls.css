@@ -1,18 +1,13 @@
 /* Workbench surface and control tokens. Grid row geometry remains owned by the grid. */
 .forge-controls {
-  --forge-control: 32px;
-  --forge-radius: 8px;
-  --forge-tool-radius: 6px;
-  --r-control: 8px;
-  --r-chip: 6px;
-  --r-card: 12px;
-  --r-menu: 12px;
-  --r-dialog: 16px;
-  --h-control: 32px;
-  --h-icon: 28px;
-  --dbx-h-control: 32px;
-  --dbx-h-icon: 28px;
-  --forge-card-radius: 12px;
+  /* 几何令牌一律引用 index.css「几何档位矩阵」（--r-* / --h-*），本文件不再定义，
+     避免与 html[data-ui-style] 档位靠特异性互相覆盖。 */
+  --forge-control: var(--h-control);
+  --forge-radius: var(--r-control);
+  --forge-tool-radius: var(--r-chip);
+  --dbx-h-control: var(--h-control);
+  --dbx-h-icon: var(--h-icon);
+  --forge-card-radius: var(--r-card);
   --forge-edge: hsl(var(--foreground) / .15);
   --forge-hover: hsl(var(--foreground) / .065);
   --forge-press: hsl(var(--foreground) / .12);
@@ -226,21 +221,17 @@ html.forge-controls .wb-settings-body .ui-card {
   min-height: 36px;
 }
 .forge-controls .ui-button[data-size="lg"] { min-height: 36px; }
+/* 密度/触屏档的 --h-* 由 index.css 矩阵统一负责，这里只跟本文件独有的 --dbx-* 尺寸。 */
 html.forge-controls[data-ui-density="comfortable"] {
-  --h-icon: 32px;
   --dbx-h-icon: 32px;
 }
 @media (pointer: coarse) {
   html.forge-controls, html.forge-controls[data-ui-density] {
-    --h-control: 40px;
-    --forge-control: 40px;
-    --h-icon: 40px;
     --dbx-h-control: 40px;
     --dbx-h-icon: 40px;
     --dbx-h-bar: 44px;
   }
   html.forge-controls[data-ui-density="comfortable"] {
-    --h-icon: 44px;
     --dbx-h-icon: 44px;
   }
   .forge-controls :is(.settings-choice button, .ui-button, .meta-link, .dbx-btn, .lg-btn, .vc-btn, .sv-btn) {

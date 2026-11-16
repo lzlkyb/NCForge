@@ -16,7 +16,7 @@ import { useGridTyping } from "../../hooks/useGridTyping";
 import { useGridCellOpen } from "../../hooks/useGridCellOpen";
 import { useGridDensityScroll } from "../../hooks/useGridDensityScroll";
 import { shouldLoadMore } from "../../lib/gridLoadMore";
-import { getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
+import { DENSITY_HEAD_H, DENSITY_ROW_H, getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
 import { getFontRevision, subscribeFonts } from "../../lib/fonts";
 import { useScrollFrame } from "../../hooks/useScrollFrame";
 import { retainViewport } from "../../lib/scrollViewport";
@@ -69,8 +69,8 @@ export function ResultGrid({ columns, rows, order, sort, onSort, onHeaderMenu, s
 }) {
   const density = useSyncExternalStore(subscribeUiDensity, getUiDensity);
   const fontRevision = useSyncExternalStore(subscribeFonts, getFontRevision);
-  const ROW_H = density === "comfortable" ? 30 : 26;
-  const HEAD_H = density === "comfortable" ? 44 : 40;
+  const ROW_H = DENSITY_ROW_H[density];
+  const HEAD_H = DENSITY_HEAD_H[density];
   const wrap = !!wrapProp;
   const boxRef = useRef<HTMLDivElement>(null);
   const helpId = useId();

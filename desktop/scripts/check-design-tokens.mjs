@@ -22,9 +22,11 @@
  *   node scripts/check-design-tokens.mjs          # 校验（pre-push / CI）
  *   node scripts/check-design-tokens.mjs --update # 下调基线（色值变少时）
  */
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkSingleSource } from "./lib/token-geometry.mjs";
+import { checkThemePairs } from "./lib/token-layers.mjs";
+import { checkDeprecated } from "./lib/deprecated-ui.mjs";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const SRC = join(ROOT, "src");
@@ -88,6 +90,46 @@ function main() {
   );
 
   const actual = new Map();
+
+  // 几何令牌单一真源（硬约束，不参与棘轮，--update 时也照跑）
+  const geometry = checkSingleSource(
+    files.filter((f) => f.endsWith(".css")).map((f) => ({ path: rel(f), text: readFileSync(f, "utf8") })),
+    "src/index.css",
+  );
+  if (geometry.violations.length || geometry.missingCore.length) {
+    console.error("❌ 几何令牌单一真源检查未通过（--r-* / --h-* / --gap-* 只能在 index.css 的 @tokens-geometry 区间定义）：");
+    for (const v of geometry.violations) console.error(`  - ${v.path}:${v.line} ${v.token} —— ${v.reason}`);
+    if (geometry.missingCore.length) {
+      console.error(`  - 基础档（区间内第一个 :root）缺默认值：${geometry.missingCore.join("、")}`);
+    }
+    process.exit(1);
+  }
+
+  // 语义色必须明暗成对（值为 var(...) 的引用型自动跟随主题，不要求成对）
+  const pairs = checkThemePairs(readFileSync(join(SRC, "index.css"), "utf8"));
+  if (pairs.missingInDark.length || pairs.missingInLight.length) {
+    console.error("❌ 语义色没有在明暗两个主题里成对定义（var(...) 引用型除外）：");
+    for (const p of pairs.missingInDark) console.error(`  - src/index.css:${p.line} ${p.token} 只在 :root，缺 .dark`);
+    for (const p of pairs.missingInLight) console.error(`  - src/index.css:${p.line} ${p.token} 只在 .dark，缺 :root`);
+    process.exit(1);
+  }
+
+  // 旧组件导入棘轮（DESIGN.md §5）：只对已有替代品的组件生效
+  const depPath = join(ROOT, "scripts", "deprecated-ui-baseline.json");
+  const depBaseline = exists(depPath) ? JSON.parse(readFileSync(depPath, "utf8")) : {};
+  const dep = checkDeprecated(
+    files.map((f) => ({ path: rel(f), text: readFileSync(f, "utf8") })),
+    depBaseline,
+  );
+  if (dep.violations.length) {
+    console.error("❌ 旧组件导入数被抬高（新代码请用替代实现）：");
+    for (const v of dep.violations) {
+      console.error(`  - ${v.module}: 基线 ${v.allowed} → 实际 ${v.actual}，请改用 ${v.replacement}`);
+      for (const f of v.files.slice(0, 5)) console.error(`      ${f}`);
+      if (v.files.length > 5) console.error(`      …共 ${v.files.length} 个文件`);
+    }
+    process.exit(1);
+  }
   for (const file of files) {
     const { count, hits } = scan(file);
     if (count > 0) actual.set(rel(file), { count, hits });

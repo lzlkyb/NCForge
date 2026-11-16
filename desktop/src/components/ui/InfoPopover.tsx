@@ -1,3 +1,9 @@
+/**
+ * @deprecated 当前零引用（2026-11-16 核对：`grep -r 'ui/InfoPopover"'` 只命中本文件）。
+ *
+ * 没有替代品——它是个未被采用的孤儿实现。确认无用后应直接删除，
+ * 而不是留着当"以后可能用到"的储备。删除前跑一次 `npm run orphans:check` 复核。
+ */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { usePresence } from "../../hooks/usePresence";
 import { Icon } from "./icon";

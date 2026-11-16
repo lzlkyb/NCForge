@@ -1,7 +1,7 @@
 import { useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type Ref } from "react";
 import { comparisonCell, compareKindLabel, type ComparisonColumn, type ComparisonModel, type CompareTab } from "../../lib/dbCompareState";
 import { columnViewport } from "../../lib/gridViewport";
-import { getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
+import { DENSITY_ROW_H, getUiDensity, subscribeUiDensity } from "../../lib/uiDensity";
 import { copyText } from "../../lib/utils";
 import { toast } from "../ui/toast";
 import { useScrollFrame, useScrollIdle } from "../../hooks/useScrollFrame";
@@ -19,7 +19,7 @@ export function ComparisonGrid({ model, order, columns, activeCell, scrollTop=0,
   onStateChange:(patch:ComparisonViewState)=>void; onOpen:(pos:CellPos)=>void; apiRef?:Ref<ComparisonGridApi>;
 }) {
   const density=useSyncExternalStore(subscribeUiDensity,getUiDensity);
-  const rowHeight=density==="comfortable" ? 30 : 26, headHeight=density==="comfortable" ? 48 : 44;
+  const rowHeight=DENSITY_ROW_H[density], headHeight=density==="compact" ? 40 : density==="comfortable" ? 48 : 44;
   const boxRef=useRef<HTMLDivElement>(null), previousRowHeight=useRef(rowHeight);
   const liveOffset=useRef({top:scrollTop,left:scrollLeft});
   const id=useId(), helpId=`${id}-help`;
